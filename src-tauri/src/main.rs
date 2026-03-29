@@ -39,7 +39,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::meta,
             commands::invoke,
-            commands::sinvoke
+            commands::stream
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

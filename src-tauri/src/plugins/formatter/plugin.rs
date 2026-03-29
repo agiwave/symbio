@@ -1,9 +1,9 @@
 //! Formatter Plugin
 
 use crate::core::traits::Plugin;
-use crate::core::types::{PluginMeta, PluginResult, StreamChunk};
+use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use serde_json::{Value, json};
-use std::sync::Arc;
+use futures::stream;
 
 #[derive(Clone)]
 pub struct FormatterPlugin {
@@ -60,78 +60,56 @@ impl FormatterPlugin {
 
 #[async_trait::async_trait]
 impl Plugin for FormatterPlugin {
-    fn meta(&self) -> PluginMeta {
-        self.meta.clone()
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path.is_empty() {
+            Ok(self.meta.clone())
+        } else {
+            Err(PluginError::NotFound(format!("插件路径 '{}' 未找到", path)))
+        }
     }
     
-    async fn invoke(&self, input: Value) -> PluginResult<Value> {
-        let obj = input.as_object()
-            .ok_or_else(|| crate::core::types::PluginError::ValidationError("输入必须是对象".to_string()))?;
-        
-        let text = obj.get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Hello, World!");
-        
-        let format = obj.get("format")
-            .and_then(|v| v.as_str())
-            .unwrap_or("uppercase");
-        
-        let formatted = match format {
-            "uppercase" => text.to_uppercase(),
-            "lowercase" => text.to_lowercase(),
-            "reverse" => text.chars().rev().collect(),
-            "word_count" => {
-                let count = text.split_whitespace().count();
-                format!("单词数：{}", count)
-            }
-            _ => return Err(crate::core::types::PluginError::ValidationError(format!("未知的格式化类型：{}", format))),
-        };
-        
-        Ok(Value::Object(serde_json::Map::from_iter([
-            ("original".to_string(), Value::String(text.to_string())),
-            ("formatted".to_string(), Value::String(formatted)),
-            ("format_type".to_string(), Value::String(format.to_string())),
-        ])))
-    }
-    
-    async fn sinvoke(&self, input: Value) -> PluginResult<Vec<StreamChunk>> {
-        let obj = input.as_object()
-            .ok_or_else(|| crate::core::types::PluginError::ValidationError("输入必须是对象".to_string()))?;
-        
-        let text = obj.get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Hello, World!");
-        
-        let format = obj.get("format")
-            .and_then(|v| v.as_str())
-            .unwrap_or("uppercase");
-        
-        let formatted = match format {
-            "uppercase" => text.to_uppercase(),
-            "lowercase" => text.to_lowercase(),
-            "reverse" => text.chars().rev().collect(),
-            "word_count" => {
-                let count = text.split_whitespace().count();
-                format!("单词数：{}", count)
-            }
-            _ => return Err(crate::core::types::PluginError::ValidationError(format!("未知的格式化类型：{}", format))),
-        };
-        
-        let mut chunks = Vec::new();
-        let chars: Vec<char> = formatted.chars().collect();
-        
-        for (i, ch) in chars.iter().enumerate() {
-            chunks.push(StreamChunk {
-                data: Value::String(ch.to_string()),
-                done: i == chars.len() - 1,
-            });
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if !path.is_empty() {
+            return Err(PluginError::NotFound(format!("插件路径 '{}' 未找到", path)));
         }
         
-        Ok(chunks)
-    }
-    
-    fn plugin(&self, _path: &[String]) -> Option<Arc<dyn Plugin>> {
-        None
+        let obj = input.as_object()
+            .ok_or_else(|| PluginError::ValidationError("输入必须是对象".to_string()))?;
+        
+        let text = obj.get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Hello, World!");
+        
+        let format = obj.get("format")
+            .and_then(|v| v.as_str())
+            .unwrap_or("uppercase");
+        
+        let formatted = match format {
+            "uppercase" => text.to_uppercase(),
+            "lowercase" => text.to_lowercase(),
+            "reverse" => text.chars().rev().collect(),
+            "word_count" => {
+                let count = text.split_whitespace().count();
+                format!("单词数：{}", count)
+            }
+            _ => return Err(PluginError::ValidationError(format!("未知的格式化类型：{}", format))),
+        };
+        
+        // 演示流式返回：逐字符输出
+        let chars: Vec<char> = formatted.chars().collect();
+        let len = chars.len();
+        
+        let chunks: Vec<StreamChunk> = chars
+            .into_iter()
+            .enumerate()
+            .map(|(i, ch)| StreamChunk {
+                data: Value::String(ch.to_string()),
+                done: i == len - 1,
+                error: None,
+            })
+            .collect();
+        
+        Ok(InvokeStream::stream(stream::iter(chunks)))
     }
 }
 

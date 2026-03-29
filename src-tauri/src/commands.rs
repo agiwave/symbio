@@ -1,107 +1,94 @@
 //! Tauri 命令处理模块
 //!
-//! 只提供三个核心命令：
-//! - `get`: 通过路径获取插件的 PluginMeta 信息
-//! - `invoke`: 同步调用插件
-//! - `sinvoke`: 流式调用插件
+//! 提供三个核心命令：
+//! - `meta`: 获取插件元数据
+//! - `invoke`: 同步调用，返回完整结果
+//! - `stream`: 流式调用，通过事件推送每个 chunk
 
 use crate::AppState;
-use crate::core::types::{PluginMeta, StreamChunk};
+use crate::core::types::{PluginMeta, StreamChunk, InvokeStream};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use tauri::Emitter;
 
-/// 通过路径获取插件的 PluginMeta 信息
-///
-/// path 规则：
-/// - 空路径：返回 root 插件自身的元数据
-/// - ["plugin_name"]：返回指定插件的元数据
-/// - ["plugin_name", "child_name", ...]：逐级获取子插件的元数据（分形模式）
+/// 获取插件元数据
 #[tauri::command]
 pub fn meta(
     state: tauri::State<AppState>,
-    path: Vec<String>,
+    path: String,
 ) -> Result<MetaResponse, String> {
     let root = state.root.lock().map_err(|e| e.to_string())?;
-
-    // 空路径返回 root 自身元数据
-    if path.is_empty() {
-        return Ok(MetaResponse {
-            path: "root".to_string(),
-            meta: root.meta(),
-        });
-    }
-
-    // 逐级查找子插件
-    let plugin = root.plugin(&path)
-        .ok_or_else(|| format!("插件路径 '{}' 未找到", path.join("/")))?;
+    let meta = root.meta(&path).map_err(|e| e.to_string())?;
 
     Ok(MetaResponse {
-        path: path.join("/"),
-        meta: plugin.meta(),
+        path: if path.is_empty() { "root".to_string() } else { path },
+        meta,
     })
 }
 
-/// 同步调用插件
+/// 同步调用插件，返回完整结果
 ///
-/// path 规则：
-/// - 空路径：调用 root 插件的 invoke 方法
-/// - ["plugin_name"]：调用指定插件
-/// - ["plugin_name", "child_name", ...]：逐级调用子插件（分形模式）
+/// 适用场景：需要一次性获取所有结果的简单场景
 #[tauri::command]
-pub fn invoke(
-    state: tauri::State<AppState>,
-    path: Vec<String>,
-    input: Value,
-) -> Result<Value, String> {
-    let root = state.root.lock().map_err(|e| e.to_string())?;
-
-    // 空路径调用 root 自身
-    if path.is_empty() {
-        let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-        return Ok(rt.block_on(root.invoke(input))?);
-    }
-
-    // 逐级查找并调用子插件
-    let plugin = root.plugin(&path)
-        .ok_or_else(|| format!("插件路径 '{}' 未找到", path.join("/")))?;
-
-    let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-    Ok(rt.block_on(plugin.invoke(input))?)
+pub async fn invoke(
+    state: tauri::State<'_, AppState>,
+    path: String,
+    input: serde_json::Value,
+) -> Result<Vec<StreamChunk>, String> {
+    let stream: InvokeStream = {
+        let root = state.root.lock().map_err(|e| e.to_string())?;
+        root.invoke(&path, input).map_err(|e| e.to_string())?
+    };
+    
+    Ok(stream.collect().await)
 }
 
-/// 流式调用插件
+/// 流式调用插件，通过事件推送每个 chunk
 ///
-/// path 规则：
-/// - ["plugin_name"]：调用指定插件的流式接口
-/// - ["plugin_name", "child_name", ...]：逐级调用子插件的流式接口（分形模式）
+/// 适用场景：需要渐进式渲染的流式场景
 ///
-/// 注意：空路径不支持流式调用
+/// 前端使用示例：
+/// ```typescript
+/// const eventId = `stream-${Date.now()}`;
+/// listen(eventId, (event) => {
+///     const chunk = event.payload as StreamChunk;
+///     // 处理每个 chunk
+///     if (chunk.done) {
+///         // 流结束
+///     }
+/// });
+/// await invoke('stream', { path, input, eventId });
+/// ```
 #[tauri::command]
-pub fn sinvoke(
-    state: tauri::State<AppState>,
-    path: Vec<String>,
-    input: Value,
-) -> Result<Vec<StreamChunk>, String> {
-    let root = state.root.lock().map_err(|e| e.to_string())?;
-
-    // 空路径不支持流式调用
-    if path.is_empty() {
-        return Err("路径不能为空".to_string());
+pub async fn stream(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    path: String,
+    input: serde_json::Value,
+    event_id: String,
+) -> Result<(), String> {
+    let stream: InvokeStream = {
+        let root = state.root.lock().map_err(|e| e.to_string())?;
+        root.invoke(&path, input).map_err(|e| e.to_string())?
+    };
+    
+    match stream {
+        InvokeStream::Single(chunk) => {
+            app.emit(&event_id, chunk).map_err(|e| e.to_string())?;
+        }
+        InvokeStream::Stream(mut s) => {
+            use futures::StreamExt;
+            while let Some(chunk) = s.next().await {
+                app.emit(&event_id, chunk).map_err(|e| e.to_string())?;
+            }
+        }
     }
-
-    // 逐级查找并调用子插件
-    let plugin = root.plugin(&path)
-        .ok_or_else(|| format!("插件路径 '{}' 未找到", path.join("/")))?;
-
-    let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-    Ok(rt.block_on(plugin.sinvoke(input))?)
+    
+    Ok(())
 }
 
 /// Meta 命令响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetaResponse {
-    /// 插件路径
     pub path: String,
-    /// 插件元数据
     pub meta: PluginMeta,
 }

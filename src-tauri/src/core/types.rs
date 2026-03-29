@@ -1,7 +1,9 @@
 //! 核心类型定义
 
+use futures::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::pin::Pin;
 
 /// 插件元数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,4 +52,62 @@ pub struct StreamChunk {
     pub data: Value,
     #[serde(default)]
     pub done: bool,
+    /// 错误信息（流中可报告错误，不中断流）
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Boxed Stream 类型别名
+pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
+
+/// 插件调用返回类型
+/// 
+/// - `Single`: 单次返回，同步场景，零堆分配
+/// - `Stream`: 流式返回，按需拉取
+pub enum InvokeStream {
+    Single(StreamChunk),
+    Stream(BoxStream<StreamChunk>),
+}
+
+impl InvokeStream {
+    /// 创建单次返回（同步场景）
+    pub fn single(data: Value) -> Self {
+        InvokeStream::Single(StreamChunk { 
+            data, 
+            done: true,
+            error: None,
+        })
+    }
+
+    /// 创建带错误的单次返回
+    pub fn single_error(data: Value, error: String) -> Self {
+        InvokeStream::Single(StreamChunk { 
+            data, 
+            done: true,
+            error: Some(error),
+        })
+    }
+
+    /// 创建流式返回
+    pub fn stream<S>(stream: S) -> Self
+    where
+        S: Stream<Item = StreamChunk> + Send + 'static,
+    {
+        InvokeStream::Stream(Box::pin(stream))
+    }
+
+    /// 收集所有 chunk 为 Vec
+    pub async fn collect(self) -> Vec<StreamChunk> {
+        match self {
+            InvokeStream::Single(chunk) => vec![chunk],
+            InvokeStream::Stream(mut stream) => {
+                use futures::StreamExt;
+                let mut chunks = Vec::new();
+                while let Some(chunk) = stream.next().await {
+                    chunks.push(chunk);
+                }
+                chunks
+            }
+        }
+    }
 }

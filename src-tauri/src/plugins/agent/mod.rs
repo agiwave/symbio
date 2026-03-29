@@ -1,6 +1,6 @@
 //! Agent 插件模块
 //!
-//! Agent 是通用的插件容器，内置 add/list/remove 三个管理插件
+//! Agent 是通用的插件容器，内置 add/remove 两个管理插件
 
 mod add;
 mod remove;
@@ -11,7 +11,7 @@ pub use remove::RemovePlugin;
 pub use factory::AgentFactory;
 
 use crate::core::traits::Plugin;
-use crate::core::types::{PluginMeta, PluginResult};
+use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
 use crate::core::PluginFactoryRegistry;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -58,7 +58,7 @@ impl Agent {
     fn init_builtin_plugins(&mut self) {
         let registry = PluginFactoryRegistry::global();
         
-        // 注册内置管理插件：add, list, remove
+        // 注册内置管理插件：add, remove
         self.instances.insert("add".to_string(), Arc::new(AddPlugin::new()));
         self.instances.insert("remove".to_string(), Arc::new(RemovePlugin::new()));
 
@@ -66,58 +66,23 @@ impl Agent {
         for factory in registry.list() {
             let name = factory.meta().name.clone();
             if name == "agent" {
-                continue; // agent 不自动创建自己作为子插件
+                continue;
             }
             let plugin = factory.create(Some(&*self), None);
             self.instances.insert(name, plugin);
         }
     }
 
-    /// 获取所有插件名称列表
-    pub fn list_plugins(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.instances.keys().cloned().collect();
-        names.sort();
-        names
-    }
-
-    /// 添加插件（由命令层调用）
-    pub fn add_plugin(&mut self, name: &str, config: Option<Value>) -> PluginResult<()> {
-        let registry = PluginFactoryRegistry::global();
-        let factory = registry.list()
-            .into_iter()
-            .find(|f| f.meta().name == name)
-            .ok_or_else(|| crate::core::types::PluginError::NotFound(format!("工厂 '{}' 未找到", name)))?;
-        let plugin = factory.create(Some(&*self), config.as_ref());
-        self.instances.insert(name.to_string(), plugin);
-        Ok(())
-    }
-
-    /// 删除插件（由命令层调用）
-    pub fn remove_plugin(&mut self, name: &str) -> PluginResult<()> {
-        if name == "add" || name == "list" || name == "remove" {
-            return Err(crate::core::types::PluginError::ValidationError("不能删除内置管理插件".to_string()));
+    /// 解析路径，返回 (子插件名, 剩余路径)
+    fn parse_path(path: &str) -> Option<(&str, &str)> {
+        let path = path.trim_start_matches('/');
+        if path.is_empty() {
+            return None;
         }
-        self.instances.remove(name)
-            .ok_or_else(|| crate::core::types::PluginError::NotFound(format!("插件 '{}' 未找到", name)))?;
-        Ok(())
-    }
-
-    /// 获取所有插件信息（由 ListPlugin 调用）
-    pub fn get_plugins_info(&self) -> Vec<Value> {
-        self.instances.iter().map(|(name, plugin)| {
-            let meta = plugin.meta();
-            json!({
-                "name": name,
-                "description": meta.description,
-                "version": meta.version,
-                "input_schema": meta.input,
-                "output_schema": meta.output
-            })
-        }).collect()
-    }
-
-    pub fn get_plugin(&self, name: &str) -> Option<Arc<dyn Plugin>> {
-        self.instances.get(name).cloned()
+        match path.find('/') {
+            Some(idx) => Some((&path[..idx], &path[idx + 1..])),
+            None => Some((path, "")),
+        }
     }
 }
 
@@ -129,36 +94,38 @@ impl Default for Agent {
 
 #[async_trait::async_trait]
 impl Plugin for Agent {
-    fn meta(&self) -> PluginMeta {
-        self.meta.clone()
-    }
-
-    async fn invoke(&self, _input: Value) -> PluginResult<Value> {
-        Ok(Value::Object(serde_json::Map::from_iter([
-            ("plugins".to_string(), Value::Array(
-                self.instances.keys()
-                    .map(|n| Value::String(n.clone()))
-                    .collect()
-            )),
-            ("message".to_string(), Value::String("Agent 插件就绪".to_string())),
-        ])))
-    }
-
-    fn plugin(&self, path: &[String]) -> Option<Arc<dyn Plugin>> {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
         if path.is_empty() {
-            return None;
+            return Ok(self.meta.clone());
         }
+        
+        let (name, rest) = Self::parse_path(path)
+            .ok_or_else(|| PluginError::NotFound(format!("插件路径 '{}' 未找到", path)))?;
+        
+        let plugin = self.instances.get(name)
+            .ok_or_else(|| PluginError::NotFound(format!("插件 '{}' 未找到", name)))?;
+        
+        plugin.meta(rest)
+    }
 
-        let mut current: Option<Arc<dyn Plugin>> = None;
-
-        for (i, name) in path.iter().enumerate() {
-            current = if i == 0 {
-                self.instances.get(name).cloned()
-            } else {
-                current?.plugin(&path[i..])
-            };
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if path.is_empty() {
+            return Ok(InvokeStream::single(Value::Object(serde_json::Map::from_iter([
+                ("plugins".to_string(), Value::Array(
+                    self.instances.keys()
+                        .map(|n| Value::String(n.clone()))
+                        .collect()
+                )),
+                ("message".to_string(), Value::String("Agent 插件就绪".to_string())),
+            ]))));
         }
-
-        current
+        
+        let (name, rest) = Self::parse_path(path)
+            .ok_or_else(|| PluginError::NotFound(format!("插件路径 '{}' 未找到", path)))?;
+        
+        let plugin = self.instances.get(name)
+            .ok_or_else(|| PluginError::NotFound(format!("插件 '{}' 未找到", name)))?;
+        
+        plugin.invoke(rest, input)
     }
 }

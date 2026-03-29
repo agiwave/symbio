@@ -1,0 +1,400 @@
+# Symbiont 项目推进计划
+
+project:
+  name: Symbiont
+  description: 在做中学：生信分析的互动学习平台
+  version: 0.1.0
+  created: 2026-03-29
+  status: planning
+
+# 项目阶段
+phases:
+  - id: phase-1
+    name: 核心能力 (MVP)
+    goal: 验证「执行 + 记录 + 复用」的基本价值
+    duration: 8 weeks
+    status: pending
+    milestones:
+      - 用户能上传数据并识别类型
+      - 用户能执行 RNA-seq 分析流程
+      - 分析结果自动记录到文档
+      - 分析流程可保存和复用
+
+  - id: phase-2
+    name: 体验优化 + 结果验证
+    goal: 提升执行效率，增加结果验证能力
+    duration: 6 weeks
+    status: pending
+    depends_on: [phase-1]
+    milestones:
+      - 执行进度可视化
+      - 结果三层验证机制
+      - 错误自动诊断
+      - 更多分析类型支持
+
+  - id: phase-3
+    name: 学习能力增强
+    goal: 帮助用户形成自己的分析套路
+    duration: 6 weeks
+    status: pending
+    depends_on: [phase-2]
+    milestones:
+      - 学习进度追踪
+      - 知识点关联
+      - 流程个性化
+      - 个人能力图谱
+
+  - id: phase-4
+    name: 深度学习
+    goal: 长期记忆与风格学习
+    duration: 8 weeks
+    status: pending
+    depends_on: [phase-3]
+    milestones:
+      - 跨项目经验复用
+      - 用户偏好学习
+      - 隐性需求感知
+
+# 任务列表
+tasks:
+  # ===== Phase 1: 核心能力 (MVP) =====
+  
+  # 基础架构
+  - id: T001
+    title: 项目基础架构搭建
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 16
+    depends_on: []
+    tags: [architecture, infrastructure]
+    doc: tasks/T001-project-infrastructure.md
+
+  - id: T002
+    title: Markdown 编辑器集成
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 24
+    depends_on: [T001]
+    tags: [frontend, editor]
+    doc: tasks/T002-markdown-editor.md
+
+  - id: T003
+    title: 文档树管理 (Notion 风格)
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 20
+    depends_on: [T001]
+    tags: [frontend, data-structure]
+    doc: tasks/T003-document-tree.md
+
+  # 执行系统
+  - id: T004
+    title: Docker 执行环境搭建
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 16
+    depends_on: [T001]
+    tags: [backend, docker, execution]
+    doc: tasks/T004-docker-environment.md
+
+  - id: T005
+    title: 代码块执行引擎
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 24
+    depends_on: [T002, T004]
+    tags: [backend, execution]
+    doc: tasks/T005-code-execution.md
+
+  - id: T006
+    title: 结果自动捕获
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 16
+    depends_on: [T005]
+    tags: [backend, execution]
+    doc: tasks/T006-result-capture.md
+
+  # AI 交互
+  - id: T007
+    title: AI 对话接口集成
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 20
+    depends_on: [T002]
+    tags: [backend, ai, llm]
+    doc: tasks/T007-ai-dialog.md
+
+  - id: T008
+    title: AI 互动学习区 UI
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 16
+    depends_on: [T002, T007]
+    tags: [frontend, ai, ui]
+    doc: tasks/T008-ai-interaction-ui.md
+
+  # 分析流程
+  - id: T009
+    title: 数据文件识别
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 12
+    depends_on: [T001]
+    tags: [backend, data]
+    doc: tasks/T009-data-recognition.md
+
+  - id: T010
+    title: RNA-seq 分析流程模板
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 24
+    depends_on: [T005, T009]
+    tags: [analysis, template]
+    doc: tasks/T010-rnaseq-template.md
+
+  - id: T011
+    title: 流程保存与复用
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 16
+    depends_on: [T003, T010]
+    tags: [frontend, backend, workflow]
+    doc: tasks/T011-workflow-reuse.md
+
+  # UI/UX
+  - id: T012
+    title: 三栏布局 UI 实现
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 20
+    depends_on: [T001]
+    tags: [frontend, ui, layout]
+    doc: tasks/T012-three-column-layout.md
+
+  - id: T013
+    title: 导航与工作区切换
+    phase: phase-1
+    priority: P1
+    status: pending
+    assignee: null
+    estimated_hours: 12
+    depends_on: [T012]
+    tags: [frontend, ui]
+    doc: tasks/T013-navigation.md
+
+  # ===== Phase 2: 体验优化 =====
+  
+  - id: T014
+    title: 执行进度可视化
+    phase: phase-2
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 16
+    depends_on: [T005]
+    tags: [frontend, ui]
+    doc: tasks/T014-execution-progress.md
+
+  - id: T015
+    title: 结果验证机制 (三层)
+    phase: phase-2
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 24
+    depends_on: [T006]
+    tags: [backend, validation]
+    doc: tasks/T015-result-validation.md
+
+  - id: T016
+    title: 错误自动诊断
+    phase: phase-2
+    priority: P1
+    status: pending
+    assignee: null
+    estimated_hours: 20
+    depends_on: [T007, T015]
+    tags: [backend, ai]
+    doc: tasks/T016-error-diagnosis.md
+
+  - id: T017
+    title: 参数智能推荐
+    phase: phase-2
+    priority: P1
+    status: pending
+    assignee: null
+    estimated_hours: 16
+    depends_on: [T007, T010]
+    tags: [backend, ai]
+    doc: tasks/T017-parameter-recommendation.md
+
+  - id: T018
+    title: 更多分析类型支持
+    phase: phase-2
+    priority: P1
+    status: pending
+    assignee: null
+    estimated_hours: 40
+    depends_on: [T010]
+    tags: [analysis, template]
+    doc: tasks/T018-more-analysis-types.md
+
+  # ===== Phase 3: 学习能力增强 =====
+  
+  - id: T019
+    title: 学习进度追踪
+    phase: phase-3
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 20
+    depends_on: [T003, T011]
+    tags: [frontend, backend, learning]
+    doc: tasks/T019-learning-progress.md
+
+  - id: T020
+    title: 知识点关联系统
+    phase: phase-3
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 24
+    depends_on: [T007, T019]
+    tags: [backend, learning, knowledge]
+    doc: tasks/T020-knowledge-linking.md
+
+  - id: T021
+    title: 流程个性化定制
+    phase: phase-3
+    priority: P1
+    status: pending
+    assignee: null
+    estimated_hours: 20
+    depends_on: [T011]
+    tags: [frontend, workflow]
+    doc: tasks/T021-workflow-customization.md
+
+  - id: T022
+    title: 个人能力图谱
+    phase: phase-3
+    priority: P1
+    status: pending
+    assignee: null
+    estimated_hours: 16
+    depends_on: [T019]
+    tags: [frontend, learning]
+    doc: tasks/T022-skill-graph.md
+
+  # ===== Phase 4: 深度学习 =====
+  
+  - id: T023
+    title: 跨项目经验复用
+    phase: phase-4
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 24
+    depends_on: [T011, T019]
+    tags: [backend, learning]
+    doc: tasks/T023-cross-project-reuse.md
+
+  - id: T024
+    title: 用户偏好学习
+    phase: phase-4
+    priority: P1
+    status: pending
+    assignee: null
+    estimated_hours: 24
+    depends_on: [T019, T020]
+    tags: [backend, ai, learning]
+    doc: tasks/T024-user-preference-learning.md
+
+  - id: T025
+    title: 隐性需求感知
+    phase: phase-4
+    priority: P2
+    status: pending
+    assignee: null
+    estimated_hours: 32
+    depends_on: [T024]
+    tags: [backend, ai]
+    doc: tasks/T025-implicit-needs.md
+
+# 风险项
+risks:
+  - id: R001
+    title: Docker 执行环境在 Tauri 中可能存在兼容性问题
+    mitigation: 提前测试 Tauri + Docker 集成方案
+    impact: high
+    probability: medium
+
+  - id: R002
+    title: AI 响应速度可能影响用户体验
+    mitigation: 使用流式响应、预加载常见问题答案
+    impact: medium
+    probability: high
+
+  - id: R003
+    title: 生信分析流程的正确性需要专家验证
+    mitigation: 与生信专家合作，建立审核机制
+    impact: high
+    probability: medium
+
+# 关键决策
+decisions:
+  - id: D001
+    title: 编辑器选型
+    options: [Milkdown, Codemirror, TipTap]
+    decision: pending
+    deadline: 2026-04-05
+
+  - id: D002
+    title: LLM 提供商选择
+    options: [OpenAI, Claude, 本地模型]
+    decision: pending
+    deadline: 2026-04-05
+
+  - id: D003
+    title: 数据存储方案
+    options: [SQLite, IndexedDB, 文件系统]
+    decision: pending
+    deadline: 2026-04-10
+
+# 统计信息
+stats:
+  total_tasks: 25
+  completed: 0
+  in_progress: 0
+  pending: 25
+  
+  phase_1_tasks: 13
+  phase_2_tasks: 5
+  phase_3_tasks: 4
+  phase_4_tasks: 3
+  
+  total_estimated_hours: 468

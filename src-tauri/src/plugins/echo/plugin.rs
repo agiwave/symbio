@@ -1,9 +1,8 @@
 //! Echo Plugin
 
 use crate::core::traits::Plugin;
-use crate::core::types::{PluginMeta, PluginResult};
+use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
 use serde_json::{Value, json};
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct EchoPlugin {
@@ -55,13 +54,21 @@ impl EchoPlugin {
 
 #[async_trait::async_trait]
 impl Plugin for EchoPlugin {
-    fn meta(&self) -> PluginMeta {
-        self.meta.clone()
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path.is_empty() {
+            Ok(self.meta.clone())
+        } else {
+            Err(PluginError::NotFound(format!("插件路径 '{}' 未找到", path)))
+        }
     }
     
-    async fn invoke(&self, input: Value) -> PluginResult<Value> {
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if !path.is_empty() {
+            return Err(PluginError::NotFound(format!("插件路径 '{}' 未找到", path)));
+        }
+        
         let obj = input.as_object()
-            .ok_or_else(|| crate::core::types::PluginError::ValidationError("输入必须是对象".to_string()))?;
+            .ok_or_else(|| PluginError::ValidationError("输入必须是对象".to_string()))?;
         
         let message = obj.get("message")
             .and_then(|v| v.as_str())
@@ -77,14 +84,12 @@ impl Plugin for EchoPlugin {
             message.to_string()
         };
         
-        Ok(Value::Object(serde_json::Map::from_iter([
+        let result = Value::Object(serde_json::Map::from_iter([
             ("original".to_string(), Value::String(message.to_string())),
             ("echoed".to_string(), Value::String(echoed)),
-        ])))
-    }
-    
-    fn plugin(&self, _path: &[String]) -> Option<Arc<dyn Plugin>> {
-        None
+        ]));
+        
+        Ok(InvokeStream::single(result))
     }
 }
 
