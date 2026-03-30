@@ -1,6 +1,6 @@
 <template>
-  <aside class="ai-sidebar" :class="{ collapsed: !visible, 'full-width': fullWidth && visible }">
-    <div class="sidebar-header">
+  <aside class="agent-panel" :class="{ collapsed: !visible, 'full-width': fullWidth && visible }">
+    <div class="panel-header">
       <span class="title">Agent</span>
       <button class="close-btn" @click="$emit('close')" title="隐藏">×</button>
     </div>
@@ -129,7 +129,7 @@ watch(() => props.visible, (visible) => {
 </script>
 
 <style scoped>
-.ai-sidebar {
+.agent-panel {
   width: 320px;
   height: 100%;
   background: var(--color-surface);
@@ -140,20 +140,20 @@ watch(() => props.visible, (visible) => {
   transition: width 0.3s ease;
 }
 
-.ai-sidebar.collapsed {
+.agent-panel.collapsed {
   width: 0;
   overflow: hidden;
   border-left: none;
 }
 
-/* 只显示AI时，占满整个窗口 */
-.ai-sidebar.full-width {
+/* 只显示Agent时，占满整个窗口 */
+.agent-panel.full-width {
   flex: 1;
   width: 100%;
   border-left: none;
 }
 
-.sidebar-header {
+.panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
