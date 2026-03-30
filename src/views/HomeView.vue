@@ -124,9 +124,17 @@ const currentPage = ref<'workspace' | 'agent' | 'settings'>('workspace')
 /* 主内容区 */
 .content-area {
   flex: 1;
-  display: flex;
   height: 100%;
   min-width: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.content-area > * {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 </style>
