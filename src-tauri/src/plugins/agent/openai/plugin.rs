@@ -2,11 +2,11 @@
 
 use super::types::*;
 use super::token::*;
-use crate::core::traits::{Plugin, CAPABILITY_LLM};
+use crate::core::traits::{Plugin, CAPABILITY_LLM, CAPABILITY_SESSION};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
 /// OpenAI Compatible 插件
@@ -14,6 +14,8 @@ pub struct OpenAiPlugin {
     meta: PluginMeta,
     config: Arc<RwLock<OpenAiConfig>>,
     client: reqwest::Client,
+    /// 父插件引用（用于能力路由）
+    parent: Option<Weak<dyn Plugin>>,
 }
 
 impl OpenAiPlugin {
@@ -38,7 +40,20 @@ impl OpenAiPlugin {
             },
             config: Arc::new(RwLock::new(config)),
             client: reqwest::Client::new(),
+            parent: None,
         }
+    }
+
+    /// 创建带父引用的实例
+    pub fn with_parent(parent: Option<Arc<dyn Plugin>>, config: OpenAiConfig) -> Arc<dyn Plugin> {
+        let mut plugin = Self::new(config);
+        plugin.parent = parent.map(|p| Arc::downgrade(&p));
+        Arc::new(plugin)
+    }
+
+    /// 获取父插件引用
+    fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
+        self.parent.as_ref().and_then(|w| w.upgrade())
     }
 
     fn api_url(&self) -> String {
@@ -54,20 +69,66 @@ impl OpenAiPlugin {
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 message 参数".to_string()))?;
 
+        let session_id = input.get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+
         let config = self.config.read().await.clone();
         let counter = TokenCounter::for_model(&config.model);
         let context_config = ContextConfig::for_model(&config.model);
 
-        // 构建消息
+        // 通过 @session 能力路由获取聊天历史
+        let mut system_prompt = config.system_prompt.clone().unwrap_or_else(default_system_prompt);
+        let mut history_messages: Vec<NativeMessage> = Vec::new();
+
+        if let Some(parent) = self.get_parent() {
+            let session_input = json!({
+                "action": "get_context",
+                "session_id": session_id,
+                "history": true
+            });
+
+            if let Ok(stream) = parent.invoke(&format!("@{}", CAPABILITY_SESSION), session_input) {
+                if let InvokeStream::Single(chunk) = stream {
+                    if chunk.error.is_none() {
+                        // 解析 LlmContext
+                        if let Some(sys) = chunk.data.get("system_prompt").and_then(|v| v.as_str()) {
+                            system_prompt = sys.to_string();
+                        }
+                        if let Some(history) = chunk.data.get("history").and_then(|v| v.as_array()) {
+                            for msg in history {
+                                if let (Some(role), Some(content)) = (
+                                    msg.get("role").and_then(|r| r.as_str()),
+                                    msg.get("content").and_then(|c| c.as_str())
+                                ) {
+                                    history_messages.push(NativeMessage {
+                                        role: role.to_string(),
+                                        content: Some(content.to_string()),
+                                        tool_call_id: None,
+                                        tool_calls: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 构建消息：system + history + current
         let mut messages: Vec<NativeMessage> = vec![
             NativeMessage {
                 role: "system".into(),
-                content: Some(config.system_prompt.clone().unwrap_or_else(default_system_prompt)),
+                content: Some(system_prompt),
                 tool_call_id: None,
                 tool_calls: None,
             }
         ];
 
+        // 添加历史消息
+        messages.extend(history_messages);
+
+        // 添加当前消息
         messages.push(NativeMessage {
             role: "user".into(),
             content: Some(message.to_string()),

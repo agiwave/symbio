@@ -41,13 +41,13 @@ impl PluginFactory for OpenAiFactory {
         }
     }
 
-    fn create(&self, _parent: Option<Arc<dyn Plugin>>, config: Option<&serde_json::Value>) -> Arc<dyn Plugin> {
+    fn create(&self, parent: Option<Arc<dyn Plugin>>, config: Option<&serde_json::Value>) -> Arc<dyn Plugin> {
         let openai_config: OpenAiConfig = config
             .and_then(|v| normalize_config(v))
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
-        
-        Arc::new(OpenAiPlugin::new(openai_config))
+
+        OpenAiPlugin::with_parent(parent, openai_config)
     }
 }
 
