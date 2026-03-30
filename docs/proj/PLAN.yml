@@ -134,21 +134,43 @@ tasks:
     priority: P0
     status: pending
     assignee: null
-    estimated_hours: 20
+    estimated_hours: 16
     depends_on: [T002]
     tags: [backend, ai, llm]
     doc: tasks/T007-ai-dialog.md
 
   - id: T008
-    title: AI 互动学习区 UI
+    title: AI 独立栏组件
     phase: phase-1
     priority: P0
     status: pending
     assignee: null
-    estimated_hours: 16
+    estimated_hours: 12
+    depends_on: [T007]
+    tags: [frontend, ai, ui]
+    doc: tasks/T008-ai-sidebar.md
+
+  - id: T008a
+    title: 悬浮输入框组件
+    phase: phase-1
+    priority: P0
+    status: pending
+    assignee: null
+    estimated_hours: 8
     depends_on: [T002, T007]
     tags: [frontend, ai, ui]
-    doc: tasks/T008-ai-interaction-ui.md
+    doc: tasks/T008a-floating-input.md
+
+  - id: T008b
+    title: AI 提示气泡组件
+    phase: phase-1
+    priority: P1
+    status: pending
+    assignee: null
+    estimated_hours: 8
+    depends_on: [T007]
+    tags: [frontend, ai, ui]
+    doc: tasks/T008b-ai-bubble.md
 
   # 分析流程
   - id: T009
@@ -387,14 +409,14 @@ decisions:
 
 # 统计信息
 stats:
-  total_tasks: 25
+  total_tasks: 27
   completed: 6
   in_progress: 0
-  pending: 19
+  pending: 21
   
-  phase_1_tasks: 13
+  phase_1_tasks: 15
   phase_2_tasks: 5
   phase_3_tasks: 4
   phase_4_tasks: 3
   
-  total_estimated_hours: 468
+  total_estimated_hours: 480
