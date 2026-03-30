@@ -2,7 +2,7 @@
 
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
-use crate::execution::{DockerExecutor, ExecutionConfig, is_dangerous_command};
+use super::execution::{DockerExecutor, ExecutionConfig, is_dangerous_command};
 use serde_json::{Value, json};
 use std::process::Command;
 use std::time::Instant;

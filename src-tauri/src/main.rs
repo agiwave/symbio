@@ -4,7 +4,6 @@
 mod core;
 mod plugins;
 mod commands;
-mod execution;
 
 use core::{PluginFactoryRegistry, Plugin};
 use plugins::{AgentFactory, EchoFactory, CalculatorFactory, FormatterFactory, DockerFactory};
