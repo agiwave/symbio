@@ -79,14 +79,6 @@ impl InvokeStream {
         })
     }
 
-    /// 创建带错误的单次返回
-    pub fn single_error(data: Value, error: String) -> Self {
-        InvokeStream::Single(StreamChunk { 
-            data, 
-            done: true,
-            error: Some(error),
-        })
-    }
 
     /// 创建流式返回
     pub fn stream<S>(stream: S) -> Self

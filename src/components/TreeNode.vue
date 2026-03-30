@@ -1,71 +1,58 @@
 <template>
-  <div class="tree-node" :style="{ paddingLeft: `${depth * 1.5}rem` }">
-    <div 
-      class="node-content"
-      :class="{ selected }"
-      @click="handleClick"
-    >
-      <span class="node-icon">{{ isExpandable ? (expanded ? '📂' : '📁') : '📄' }}</span>
-      <span class="node-name">{{ node.name }}</span>
-      <span v-if="isExpandable" class="expand-indicator">
-        {{ expanded ? '▼' : '▶' }}
+  <div
+    class="tree-node"
+    :style="{ paddingLeft: `${level * 16 + 8}px` }"
+    :class="{ active: document.id === activeId }"
+  >
+    <div class="node-content" @click="$emit('select', document.id)">
+      <span class="expand-icon" @click.stop="toggleExpand">
+        {{ hasChildren ? (expanded ? '▼' : '▶') : '•' }}
+      </span>
+      <span class="node-title">{{ document.title }}</span>
+      <span class="node-actions">
+        <button class="action-btn" @click.stop="$emit('create-child', document.id)" title="添加子文档">
+          +
+        </button>
       </span>
     </div>
     
-    <div v-if="expanded && isExpandable" class="node-children">
-      <TreeNode 
-        v-for="child in node.children"
-        :key="child.name"
-        :node="child"
-        :path="[...path, child.name]"
-        :selected="isSelected(child.name)"
-        @select="handleChildSelect"
-        :depth="depth + 1"
+    <div v-if="expanded && hasChildren" class="children">
+      <TreeNode
+        v-for="childId in document.children"
+        :key="childId"
+        :document="documents.get(childId)!"
+        :level="level + 1"
+        :active-id="activeId"
+        @select="(id) => $emit('select', id)"
+        @create-child="(id) => $emit('create-child', id)"
       />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import type { PluginMeta } from '../types'
-
-interface PluginHierarchy {
-  name: string
-  meta: PluginMeta
-  children: PluginHierarchy[]
-}
+import { ref, computed, inject } from 'vue'
+import type { Document } from '../stores/workspace'
 
 const props = defineProps<{
-  node: PluginHierarchy
-  path: string[]
-  selected: boolean
-  depth: number
+  document: Document
+  level: number
+  activeId: string | null
 }>()
 
-const emit = defineEmits<{
-  'select': [path: string[]]
+defineEmits<{
+  select: [id: string]
+  'create-child': [id: string]
 }>()
 
-const expanded = ref(false)
+const documents = inject<Map<string, Document>>('documents')!
 
-const isExpandable = computed(() => {
-  return props.node.children && props.node.children.length > 0
-})
+const expanded = ref(true)
 
-const isSelected = (name: string) => {
-  return props.selected || props.path.includes(name)
-}
+const hasChildren = computed(() => props.document.children.length > 0)
 
-const handleClick = () => {
-  if (isExpandable.value) {
-    expanded.value = !expanded.value
-  }
-  emit('select', props.path)
-}
-
-const handleChildSelect = (path: string[]) => {
-  emit('select', path)
+function toggleExpand() {
+  expanded.value = !expanded.value
 }
 </script>
 
@@ -77,40 +64,59 @@ const handleChildSelect = (path: string[]) => {
 .node-content {
   display: flex;
   align-items: center;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
   cursor: pointer;
-  transition: background-color 0.2s;
-  margin: 0.25rem 0;
+  transition: background 0.2s;
 }
 
 .node-content:hover {
-  background-color: #f0f0f0;
+  background: #f0f0f0;
 }
 
-.node-content.selected {
-  background-color: #e3e7fc;
-  color: #667eea;
-  font-weight: 500;
+.tree-node.active > .node-content {
+  background: #e8f4fd;
+  color: var(--color-primary);
 }
 
-.node-icon {
-  margin-right: 0.5rem;
-  font-size: 1.1rem;
+.expand-icon {
+  width: 16px;
+  font-size: 10px;
+  color: var(--color-text-muted);
 }
 
-.node-name {
+.node-title {
   flex: 1;
-  font-size: 0.9rem;
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
 }
 
-.expand-indicator {
-  font-size: 0.7rem;
-  color: #999;
-  margin-left: 0.5rem;
+.node-actions {
+  opacity: 0;
+  transition: opacity 0.2s;
 }
 
-.node-children {
-  margin-top: 0.25rem;
+.node-content:hover .node-actions {
+  opacity: 1;
+}
+
+.action-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  padding: 2px 4px;
+}
+
+.action-btn:hover {
+  color: var(--color-primary);
+}
+
+.children {
+  /* 子节点容器 */
 }
 </style>
