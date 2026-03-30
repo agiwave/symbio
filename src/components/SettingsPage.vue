@@ -53,6 +53,11 @@
       <!-- AI 设置 -->
       <section v-show="activeSection === 'ai'" class="content-section">
         <h2>AI 设置</h2>
+        
+        <div v-if="saveStatus === 'success'" class="save-success">
+          配置已保存
+        </div>
+        
         <div class="setting-group">
           <div class="setting-item">
             <div class="setting-info">
@@ -61,10 +66,22 @@
             </div>
             <select v-model="settings.llmProvider">
               <option value="openai">OpenAI</option>
-              <option value="claude">Claude</option>
-              <option value="local">本地模型</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="moonshot">Moonshot (月之暗面)</option>
+              <option value="zhipu">智谱 GLM</option>
+              <option value="local">本地模型 (Ollama)</option>
+              <option value="custom">自定义</option>
             </select>
           </div>
+          
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>API Base URL</label>
+              <p class="setting-desc">API 服务地址</p>
+            </div>
+            <input v-model="settings.apiBase" type="text" placeholder="https://api.openai.com/v1" />
+          </div>
+          
           <div class="setting-item">
             <div class="setting-info">
               <label>API Key</label>
@@ -72,18 +89,44 @@
             </div>
             <input v-model="settings.apiKey" type="password" placeholder="输入 API Key" />
           </div>
-          <div class="setting-item">
+          
+          <div class="setting-item" v-if="availableModels.length > 0">
             <div class="setting-info">
               <label>模型</label>
               <p class="setting-desc">选择使用的模型版本</p>
             </div>
             <select v-model="settings.model">
-              <option value="gpt-4">GPT-4</option>
-              <option value="gpt-4-turbo">GPT-4 Turbo</option>
-              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-              <option value="claude-3-opus">Claude 3 Opus</option>
-              <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+              <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
             </select>
+          </div>
+          
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>自定义模型</label>
+              <p class="setting-desc">输入自定义模型名称（可选）</p>
+            </div>
+            <input v-model="settings.customModel" type="text" placeholder="留空则使用上方选择的模型" />
+          </div>
+          
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>Temperature</label>
+              <p class="setting-desc">控制输出随机性 (0-2)</p>
+            </div>
+            <input v-model.number="settings.temperature" type="number" min="0" max="2" step="0.1" />
+          </div>
+          
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>Max Tokens</label>
+              <p class="setting-desc">最大输出长度</p>
+            </div>
+            <input v-model.number="settings.maxTokens" type="number" min="100" max="32000" />
+          </div>
+          
+          <div class="setting-item">
+            <div class="setting-info"></div>
+            <button class="action-btn" @click="saveAiConfig">保存配置</button>
           </div>
         </div>
       </section>
@@ -177,10 +220,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import logoUrl from '../assets/logo.svg'
+import { configureProvider, getProviderConfig } from '../services/ai'
 
 const activeSection = ref('appearance')
+const saveStatus = ref<string | null>(null)
 
 const sections = [
   { id: 'appearance', icon: '🎨', label: '外观' },
@@ -194,14 +239,104 @@ const settings = reactive({
   theme: 'light',
   fontSize: 'medium',
   llmProvider: 'openai',
+  apiBase: 'https://api.openai.com/v1',
   apiKey: '',
-  model: 'gpt-4',
+  model: 'gpt-4o-mini',
+  customModel: '',
+  temperature: 0.7,
+  maxTokens: 4096,
   dockerImage: 'symbio/bioinfo:latest',
   cpuLimit: 4,
   memoryLimit: 8,
   timeout: 60,
   autoSave: true,
 })
+
+// 提供商预设
+const providerPresets: Record<string, { apiBase: string; models: string[] }> = {
+  openai: {
+    apiBase: 'https://api.openai.com/v1',
+    models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo']
+  },
+  deepseek: {
+    apiBase: 'https://api.deepseek.com/v1',
+    models: ['deepseek-chat', 'deepseek-coder']
+  },
+  moonshot: {
+    apiBase: 'https://api.moonshot.cn/v1',
+    models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k']
+  },
+  zhipu: {
+    apiBase: 'https://open.bigmodel.cn/api/paas/v4',
+    models: ['glm-4', 'glm-4-flash', 'glm-3-turbo']
+  },
+  local: {
+    apiBase: 'http://localhost:11434/v1',
+    models: ['llama3', 'qwen2', 'mistral']
+  },
+  custom: {
+    apiBase: '',
+    models: []
+  }
+}
+
+const availableModels = ref<string[]>(providerPresets.openai.models)
+
+// 切换提供商时更新 API Base 和模型列表
+watch(() => settings.llmProvider, (provider) => {
+  const preset = providerPresets[provider]
+  if (preset) {
+    settings.apiBase = preset.apiBase
+    availableModels.value = preset.models
+    if (preset.models.length > 0) {
+      settings.model = preset.models[0]
+    }
+  }
+})
+
+// 加载保存的配置
+async function loadConfig() {
+  try {
+    const config = await getProviderConfig()
+    settings.llmProvider = config.name || 'openai'
+    settings.apiBase = config.api_base
+    settings.model = config.model
+    settings.temperature = config.temperature ?? 0.7
+    settings.maxTokens = config.max_tokens ?? 4096
+    
+    // 更新模型列表
+    const preset = providerPresets[settings.llmProvider]
+    if (preset) {
+      availableModels.value = preset.models
+    }
+  } catch (err) {
+    console.error('加载配置失败:', err)
+  }
+}
+
+// 保存 AI 配置
+async function saveAiConfig() {
+  saveStatus.value = null
+  
+  try {
+    const result = await configureProvider({
+      name: settings.llmProvider,
+      api_base: settings.apiBase,
+      api_key: settings.apiKey,
+      model: settings.customModel || settings.model,
+      temperature: settings.temperature,
+      max_tokens: settings.maxTokens
+    })
+    
+    if (result.message) {
+      saveStatus.value = 'success'
+      setTimeout(() => { saveStatus.value = null }, 2000)
+    }
+  } catch (err) {
+    saveStatus.value = 'error'
+    console.error('保存配置失败:', err)
+  }
+}
 
 function exportData() {
   console.log('Export data...')
@@ -214,6 +349,10 @@ function clearData() {
     location.reload()
   }
 }
+
+onMounted(() => {
+  loadConfig()
+})
 </script>
 
 <style scoped>
@@ -295,6 +434,15 @@ function clearData() {
   background: var(--color-surface);
   border-radius: 12px;
   padding: 0.5rem;
+}
+
+.save-success {
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: #d4edda;
+  color: #155724;
+  border-radius: 8px;
+  font-size: 0.875rem;
 }
 
 .setting-item {

@@ -8,9 +8,12 @@ pub mod docker;
 pub mod work;
 pub mod setting;
 pub mod home;
+pub mod composite;
 
 pub use echo::EchoFactory;
 pub use calculator::CalculatorFactory;
 pub use formatter::FormatterFactory;
 pub use docker::DockerFactory;
 pub use home::HomeFactory;
+pub use composite::CompositeFactory;
+pub use agent::ChatFactory;

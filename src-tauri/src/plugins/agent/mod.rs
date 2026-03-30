@@ -1,13 +1,16 @@
 //! Agent 插件模块
 //!
-//! Agent 是通用的插件容器，内置 add/remove 两个管理插件
+//! Agent 是通用的插件容器，内置 add/remove/chat 三个子插件
 
 mod add;
 mod remove;
+mod chat;
 mod factory;
 
 pub use add::AddPlugin;
 pub use remove::RemovePlugin;
+pub use chat::ChatPlugin;
+pub use chat::factory::ChatFactory;
 pub use factory::AgentFactory;
 
 use crate::core::traits::Plugin;
@@ -61,11 +64,14 @@ impl Agent {
         // 注册内置管理插件：add, remove
         self.instances.insert("add".to_string(), Arc::new(AddPlugin::new()));
         self.instances.insert("remove".to_string(), Arc::new(RemovePlugin::new()));
+        
+        // 注册 chat 插件
+        self.instances.insert("chat".to_string(), Arc::new(ChatPlugin::new()));
 
         // 注册工厂插件（跳过 agent 自身，避免无限递归）
         for factory in registry.list() {
             let name = factory.meta().name.clone();
-            if name == "agent" {
+            if name == "agent" || name == "chat" {
                 continue;
             }
             let plugin = factory.create(Some(&*self), None);

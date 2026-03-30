@@ -73,13 +73,16 @@
         </div>
         
         <div class="chat-input">
+          <div v-if="configError" class="config-error">
+            {{ configError }}
+          </div>
           <textarea
             v-model="inputText"
             placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
             @keydown.enter.exact="handleKeydown"
             :disabled="isLoading"
           ></textarea>
-          <button @click="sendMessage" :disabled="!inputText.trim() || isLoading">
+          <button @click="sendMessageToAI" :disabled="!inputText.trim() || isLoading">
             发送
           </button>
         </div>
@@ -94,7 +97,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { sendMessage, getProviderConfig, type ChatMessage } from '../services/ai'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -117,6 +121,7 @@ const activeChatId = ref<string | null>(null)
 const inputText = ref('')
 const isLoading = ref(false)
 const messagesRef = ref<HTMLElement | null>(null)
+const configError = ref<string | null>(null)
 
 const activeChat = computed(() => 
   chats.value.find(c => c.id === activeChatId.value) || null
@@ -166,7 +171,7 @@ function deleteChat(id: string) {
 }
 
 // 发送消息
-async function sendMessage() {
+async function sendMessageToAI() {
   const text = inputText.value.trim()
   if (!text || isLoading.value || !activeChat.value) return
 
@@ -187,30 +192,59 @@ async function sendMessage() {
   
   inputText.value = ''
   isLoading.value = true
+  configError.value = null
 
   await nextTick()
   scrollToBottom()
 
-  // 模拟 AI 响应
-  setTimeout(() => {
+  try {
+    // 构建消息历史
+    const messages: ChatMessage[] = activeChat.value.messages.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content
+    }))
+
+    const response = await sendMessage(messages)
+    
+    if (response.error) {
+      configError.value = response.error
+      if (activeChat.value) {
+        activeChat.value.messages.push({
+          role: 'assistant',
+          content: `错误: ${response.error}`,
+          timestamp: Date.now()
+        })
+      }
+    } else if (response.content) {
+      if (activeChat.value) {
+        activeChat.value.messages.push({
+          role: 'assistant',
+          content: response.content,
+          timestamp: Date.now()
+        })
+        activeChat.value.updatedAt = Date.now()
+        activeChat.value.messageCount = activeChat.value.messages.length
+      }
+    }
+  } catch (err) {
+    configError.value = err instanceof Error ? err.message : '发送失败'
     if (activeChat.value) {
       activeChat.value.messages.push({
         role: 'assistant',
-        content: '这是一个模拟的 AI 响应。实际使用时需要接入 AI API。',
+        content: `发送失败: ${configError.value}`,
         timestamp: Date.now()
       })
-      activeChat.value.updatedAt = Date.now()
-      activeChat.value.messageCount = activeChat.value.messages.length
     }
+  } finally {
     isLoading.value = false
     scrollToBottom()
-  }, 1000)
+  }
 }
 
 function handleKeydown(e: KeyboardEvent) {
   if (!e.shiftKey) {
     e.preventDefault()
-    sendMessage()
+    sendMessageToAI()
   }
 }
 
@@ -220,8 +254,24 @@ function scrollToBottom() {
   }
 }
 
+// 检查配置
+async function checkConfig() {
+  try {
+    const config = await getProviderConfig()
+    if (!config.has_api_key) {
+      configError.value = '请先配置 API Key（在设置页面）'
+    }
+  } catch (err) {
+    configError.value = err instanceof Error ? err.message : '获取配置失败'
+  }
+}
+
 watch(activeChatId, () => {
   nextTick(scrollToBottom)
+})
+
+onMounted(() => {
+  checkConfig()
 })
 </script>
 
@@ -466,6 +516,15 @@ watch(activeChatId, () => {
   border-top: 1px solid var(--color-border);
   background: var(--color-surface);
   flex-shrink: 0;
+}
+
+.config-error {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  background: #fef3cd;
+  color: #856404;
+  border-radius: 6px;
+  font-size: 0.8rem;
 }
 
 .chat-input textarea {

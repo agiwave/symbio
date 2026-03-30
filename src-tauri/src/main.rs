@@ -6,7 +6,7 @@ mod plugins;
 mod commands;
 
 use core::{PluginFactoryRegistry, Plugin, PluginFactory};
-use plugins::{EchoFactory, CalculatorFactory, FormatterFactory, DockerFactory, HomeFactory};
+use plugins::{EchoFactory, CalculatorFactory, FormatterFactory, DockerFactory, HomeFactory, CompositeFactory};
 use std::sync::{Mutex, Arc};
 
 struct AppState {
@@ -17,17 +17,19 @@ fn main() {
     // 初始化全局工厂注册表
     PluginFactoryRegistry::init();
     let registry = PluginFactoryRegistry::global();
-    
+
     // 插件主动注册自己的工厂
     registry.register(Arc::new(EchoFactory::new()));
     registry.register(Arc::new(CalculatorFactory::new()));
     registry.register(Arc::new(FormatterFactory::new()));
     registry.register(Arc::new(DockerFactory::new()));
-    
+    // 注册 Composite 工厂（可用于创建动态组合插件）
+    registry.register(Arc::new(CompositeFactory::with_defaults()));
+
     // 使用 HomeFactory 创建 root 插件
     // Home 会自动创建 work/agent/setting 子插件实例
     let root: Arc<dyn Plugin> = HomeFactory::new().create(None, None);
-    
+
     tauri::Builder::default()
         .manage(AppState {
             root: Mutex::new(root),
