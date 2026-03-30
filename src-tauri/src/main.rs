@@ -4,6 +4,7 @@
 mod core;
 mod plugins;
 mod commands;
+mod execution;
 
 use core::{PluginFactoryRegistry, Plugin};
 use plugins::{AgentFactory, EchoFactory, CalculatorFactory, FormatterFactory};
@@ -39,7 +40,12 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::meta,
             commands::invoke,
-            commands::stream
+            commands::stream,
+            commands::docker_available,
+            commands::docker_image_exists,
+            commands::docker_build_image,
+            commands::docker_execute,
+            commands::docker_execute_script
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

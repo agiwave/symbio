@@ -86,7 +86,7 @@ tasks:
     title: 文档树管理 (Notion 风格)
     phase: phase-1
     priority: P0
-    status: pending
+    status: completed
     assignee: null
     estimated_hours: 20
     depends_on: [T001]
@@ -388,9 +388,9 @@ decisions:
 # 统计信息
 stats:
   total_tasks: 25
-  completed: 0
+  completed: 4
   in_progress: 0
-  pending: 25
+  pending: 21
   
   phase_1_tasks: 13
   phase_2_tasks: 5
