@@ -50,11 +50,8 @@
           />
         </header>
         <div class="editor-content">
-          <textarea
+          <MarkdownEditor
             v-model="activeDocument.content"
-            class="markdown-editor"
-            placeholder="开始编写..."
-            @blur="saveDocument"
           />
         </div>
         <!-- AI 互动区 -->
@@ -76,10 +73,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, provide } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWorkspaceStore, type Document } from '../stores/workspace'
 import TreeNode from '../components/TreeNode.vue'
+import MarkdownEditor from '../components/MarkdownEditor.vue'
+
+// 提供文档 Map 给 TreeNode 使用
+provide('documents', computed(() => store.documents))
 
 const router = useRouter()
 const store = useWorkspaceStore()
