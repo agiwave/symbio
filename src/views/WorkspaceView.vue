@@ -315,6 +315,7 @@ defineExpose({
 <style scoped>
 .workspace-view {
   display: flex;
+  flex: 1 1 100%;
   height: 100vh;
   background: var(--color-bg);
   position: relative;
@@ -457,10 +458,11 @@ defineExpose({
 
 /* 编辑区 */
 .editor-area {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  width: 0; /* 关键：允许 flex 收缩 */
   position: relative;
 }
 
@@ -468,6 +470,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   height: 100%;
+  width: 100%;
 }
 
 .editor-header {
@@ -509,8 +512,9 @@ defineExpose({
 }
 
 .editor-content {
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
+  width: 100%;
 }
 
 .empty-editor {
