@@ -1,5 +1,5 @@
 <template>
-  <div class="workspace-view">
+  <div class="workspace-view" :class="{ 'ai-visible': aiSidebarVisible, 'workspace-visible': workspaceVisible }">
     <!-- 左侧导航条 -->
     <nav class="nav-sidebar">
       <div class="nav-logo" @click="goHome">🌊</div>
@@ -51,7 +51,6 @@
           @move="moveDoc"
         />
       </div>
-      <!-- 底部操作栏 -->
       <div class="panel-footer">
         <button class="footer-btn" @click="clearAll" title="清空所有">
           🗑️ 清空
@@ -85,6 +84,26 @@
       <div v-else class="empty-editor">
         <p>选择或创建一个文档开始</p>
       </div>
+      
+      <!-- 右侧悬浮切换按钮 (仅在 AI 侧边栏隐藏时显示) -->
+      <div 
+        v-if="!aiSidebarVisible"
+        class="edge-toggle right"
+        @mouseenter="showRightToggle = true"
+        @mouseleave="showRightToggle = false"
+      >
+        <Transition name="fade">
+          <button 
+            v-if="showRightToggle || !aiSidebarVisible"
+            class="toggle-btn"
+            @click="toggleAISidebar"
+            title="显示 AI 助手"
+          >
+            <span class="toggle-icon">◀</span>
+            <span class="toggle-label">AI</span>
+          </button>
+        </Transition>
+      </div>
     </main>
 
     <!-- AI 独立栏 (全局，不受文档切换影响) -->
@@ -93,6 +112,7 @@
       ref="aiSidebarRef"
       @close="aiSidebarVisible = false"
       @send="handleAIMessage"
+      @toggle-workspace="workspaceVisible = !workspaceVisible"
     />
 
     <!-- 悬浮输入框 -->
@@ -131,8 +151,10 @@ import AIBubble from '../components/AIBubble.vue'
 const router = useRouter()
 const store = useWorkspaceStore()
 
-// AI 组件状态 (全局，不随文档切换重置)
+// UI 状态
 const aiSidebarVisible = ref(false)
+const workspaceVisible = ref(true)
+const showRightToggle = ref(false)
 const aiSidebarRef = ref<InstanceType<typeof AISidebar> | null>(null)
 const floatingInputVisible = ref(false)
 const floatingInputPosition = ref<{ x: number; y: number } | undefined>()
@@ -153,7 +175,6 @@ const activeDocumentId = computed(() => store.activeDocumentId)
 
 onMounted(() => {
   store.init()
-  // 全局快捷键
   document.addEventListener('keydown', handleGlobalKeydown)
 })
 
@@ -162,7 +183,6 @@ onUnmounted(() => {
 })
 
 function handleGlobalKeydown(e: KeyboardEvent) {
-  // Ctrl+K / Cmd+K 打开悬浮输入框
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault()
     openFloatingInput()
@@ -233,7 +253,6 @@ function clearAll() {
 
 // AI 相关方法
 function openFloatingInput() {
-  // 在光标位置或屏幕中央显示
   const selection = window.getSelection()
   if (selection && selection.rangeCount > 0) {
     const range = selection.getRangeAt(0)
@@ -255,10 +274,7 @@ function handleSelectionChange(text: string) {
 }
 
 async function handleAIMessage(message: string) {
-  // TODO: 调用实际的 AI API
   console.log('AI message:', message)
-  
-  // 模拟 AI 响应
   aiSidebarRef.value?.setLoading(true)
   setTimeout(() => {
     aiSidebarRef.value?.addResponse('这是一个模拟的 AI 响应。实际使用时需要接入 AI API。')
@@ -266,7 +282,6 @@ async function handleAIMessage(message: string) {
 }
 
 function handleFloatingSubmit(text: string, context?: string) {
-  // 显示 AI 侧边栏并发送消息
   aiSidebarVisible.value = true
   setTimeout(() => {
     handleAIMessage(context ? `上下文: ${context}\n\n问题: ${text}` : text)
@@ -278,7 +293,6 @@ function handleBubbleAction(actionId: string) {
   bubbleVisible.value = false
 }
 
-// 显示 AI 提示气泡的方法 (可被外部调用)
 function showBubble(
   type: 'info' | 'warning' | 'success' | 'error',
   title: string,
@@ -292,7 +306,6 @@ function showBubble(
   bubbleVisible.value = true
 }
 
-// 暴露方法给外部使用
 defineExpose({
   showBubble,
   toggleAISidebar,
@@ -304,6 +317,7 @@ defineExpose({
   display: flex;
   height: 100vh;
   background: var(--color-bg);
+  position: relative;
 }
 
 /* 导航条 */
@@ -315,6 +329,7 @@ defineExpose({
   align-items: center;
   padding: 1rem 0;
   flex-shrink: 0;
+  z-index: 10;
 }
 
 .nav-logo {
@@ -355,6 +370,12 @@ defineExpose({
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  z-index: 10;
+  transition: margin-left 0.3s ease;
+}
+
+.workspace-view:not(.workspace-visible) .panel-sidebar {
+  margin-left: calc(-1 * var(--panel-width));
 }
 
 .panel-header {
@@ -440,6 +461,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative;
 }
 
 .editor-container {
@@ -497,5 +519,64 @@ defineExpose({
   align-items: center;
   justify-content: center;
   color: var(--color-text-muted);
+}
+
+/* 右侧悬浮切换按钮 */
+.edge-toggle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+}
+
+.edge-toggle.right {
+  right: 0;
+  width: 40px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toggle-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  cursor: pointer;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+  background: #f0f0f0;
+  box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15);
+}
+
+.toggle-icon {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.toggle-label {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  writing-mode: vertical-rl;
+}
+
+/* 过渡动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

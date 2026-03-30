@@ -1,5 +1,25 @@
 <template>
   <aside class="ai-sidebar" :class="{ collapsed: !visible }">
+    <!-- 左侧悬浮切换按钮 -->
+    <div 
+      v-if="visible"
+      class="edge-toggle left"
+      @mouseenter="showLeftToggle = true"
+      @mouseleave="showLeftToggle = false"
+    >
+      <Transition name="fade">
+        <button 
+          v-if="showLeftToggle"
+          class="toggle-btn"
+          @click="$emit('toggle-workspace')"
+          title="切换工作区"
+        >
+          <span class="toggle-icon">◀</span>
+          <span class="toggle-label">工作区</span>
+        </button>
+      </Transition>
+    </div>
+    
     <div class="sidebar-header">
       <span class="title">AI 助手</span>
       <button class="close-btn" @click="$emit('close')" title="隐藏">×</button>
@@ -67,12 +87,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   send: [message: string]
+  'toggle-workspace': []
 }>()
 
 const messages = ref<Message[]>([])
 const inputText = ref('')
 const isLoading = ref(false)
 const historyRef = ref<HTMLElement | null>(null)
+const showLeftToggle = ref(false)
 
 function formatTime(timestamp: number): string {
   const date = new Date(timestamp)
@@ -83,7 +105,6 @@ async function sendMessage() {
   const text = inputText.value.trim()
   if (!text || isLoading.value) return
   
-  // 添加用户消息
   messages.value.push({
     role: 'user',
     content: text,
@@ -93,15 +114,12 @@ async function sendMessage() {
   inputText.value = ''
   isLoading.value = true
   
-  // 滚动到底部
   await nextTick()
   scrollToBottom()
   
-  // 发送事件给父组件处理
   emit('send', text)
 }
 
-// 添加 AI 响应
 function addAssistantResponse(content: string) {
   messages.value.push({
     role: 'assistant',
@@ -118,14 +136,12 @@ function scrollToBottom() {
   }
 }
 
-// 暴露方法给父组件
 defineExpose({
   addResponse: addAssistantResponse,
   setLoading: (loading: boolean) => { isLoading.value = loading },
   clearMessages: () => { messages.value = [] },
 })
 
-// 监听可见性，滚动到底部
 watch(() => props.visible, (visible) => {
   if (visible) {
     nextTick(scrollToBottom)
@@ -141,11 +157,63 @@ watch(() => props.visible, (visible) => {
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
+  position: relative;
+  flex-shrink: 0;
 }
 
 .ai-sidebar.collapsed {
   width: 0;
   overflow: hidden;
+  border-left: none;
+}
+
+/* 左侧悬浮切换按钮 */
+.edge-toggle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+}
+
+.edge-toggle.left {
+  left: 0;
+  width: 40px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateX(-100%) translateY(-50%);
+}
+
+.toggle-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  cursor: pointer;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+  background: #f0f0f0;
+  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.15);
+}
+
+.toggle-icon {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.toggle-label {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  writing-mode: vertical-rl;
 }
 
 .sidebar-header {
@@ -311,5 +379,16 @@ watch(() => props.visible, (visible) => {
 .send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 过渡动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
