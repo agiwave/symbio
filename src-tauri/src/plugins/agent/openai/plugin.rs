@@ -1,0 +1,404 @@
+//! OpenAI Compatible 插件实现
+
+use super::types::*;
+use super::token::*;
+use crate::core::traits::Plugin;
+use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
+use async_trait::async_trait;
+use serde_json::{Value, json};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// OpenAI Compatible 插件
+pub struct OpenAiPlugin {
+    meta: PluginMeta,
+    config: Arc<RwLock<OpenAiConfig>>,
+    client: reqwest::Client,
+}
+
+impl OpenAiPlugin {
+    pub fn new(config: OpenAiConfig) -> Self {
+        Self {
+            meta: PluginMeta {
+                name: "openai".to_string(),
+                description: "OpenAI 兼容 LLM API 集成".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["chat", "status", "list_models", "configure", "get_config", "compress_info"]
+                        }
+                    },
+                    "required": ["action"]
+                })),
+                output: None,
+                author: Some("Symbio Team".to_string()),
+            },
+            config: Arc::new(RwLock::new(config)),
+            client: reqwest::Client::new(),
+        }
+    }
+
+    fn api_url(&self) -> String {
+        let config = self.config.try_read();
+        match config {
+            Ok(c) => format!("{}/chat/completions", c.api_base),
+            Err(_) => "https://api.openai.com/v1/chat/completions".to_string(),
+        }
+    }
+
+    async fn handle_chat(&self, input: &Value) -> Result<StreamChunk, PluginError> {
+        let message = input.get("message")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| PluginError::ValidationError("缺少 message 参数".to_string()))?;
+
+        let config = self.config.read().await.clone();
+        let counter = TokenCounter::for_model(&config.model);
+        let context_config = ContextConfig::for_model(&config.model);
+
+        // 构建消息
+        let mut messages: Vec<NativeMessage> = vec![
+            NativeMessage {
+                role: "system".into(),
+                content: Some(config.system_prompt.clone().unwrap_or_else(default_system_prompt)),
+                tool_call_id: None,
+                tool_calls: None,
+            }
+        ];
+
+        messages.push(NativeMessage {
+            role: "user".into(),
+            content: Some(message.to_string()),
+            tool_call_id: None,
+            tool_calls: None,
+        });
+
+        // 估算 tokens 并裁剪
+        let estimated_tokens = count_total_tokens(&counter, &messages, None);
+        if estimated_tokens > context_config.available_tokens() {
+            trim_messages_to_fit(&counter, &mut messages, &context_config, None);
+        }
+
+        // 构建请求
+        let mut request = json!({
+            "model": config.model,
+            "messages": messages,
+            "temperature": config.temperature,
+            "stream": false,
+        });
+
+        if let Some(max_tokens) = config.max_tokens {
+            request["max_tokens"] = json!(max_tokens);
+        }
+
+        // 发送请求
+        let api_key = config.api_key.clone().unwrap_or_default();
+        let response = self.client
+            .post(&self.api_url())
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .timeout(std::time::Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| PluginError::InternalError(format!("请求失败: {}", e)))?;
+
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Ok(StreamChunk {
+                data: json!({}),
+                done: true,
+                error: Some(format!("API 错误: {}", error)),
+            });
+        }
+
+        let response_json: Value = response.json().await
+            .map_err(|e| PluginError::InternalError(format!("解析响应失败: {}", e)))?;
+
+        // 提取响应内容
+        let content = response_json
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("");
+
+        let usage = response_json.get("usage").map(|u| TokenUsage {
+            input_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()),
+            output_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()),
+        });
+
+        Ok(StreamChunk {
+            data: json!({
+                "success": true,
+                "content": content,
+                "usage": usage,
+                "model": config.model
+            }),
+            done: true,
+            error: None,
+        })
+    }
+
+    async fn handle_status(&self) -> Result<StreamChunk, PluginError> {
+        let config = self.config.read().await;
+        Ok(StreamChunk {
+            data: json!({
+                "success": true,
+                "status": "ready",
+                "model": config.model,
+                "api_base": config.api_base,
+                "has_api_key": config.api_key.is_some()
+            }),
+            done: true,
+            error: None,
+        })
+    }
+
+    fn handle_list_models(&self, input: &Value) -> Result<StreamChunk, PluginError> {
+        // 如果指定了特定模型，返回详细信息
+        if let Some(model_name) = input.get("model").and_then(|m| m.as_str()) {
+            let config = get_model_config(model_name);
+            return Ok(StreamChunk {
+                data: json!({
+                    "success": true,
+                    "model": {
+                        "name": config.name,
+                        "max_context_tokens": config.max_context_tokens,
+                        "encoding": match config.encoding {
+                            TokenizerEncoding::Cl100kBase => "cl100k_base",
+                            TokenizerEncoding::O200kBase => "o200k_base",
+                        },
+                        "max_output_tokens": config.max_output_tokens,
+                        "supports_vision": config.supports_vision,
+                        "supports_tools": config.supports_tools,
+                        "reserved_tokens": config.reserved_tokens()
+                    }
+                }),
+                done: true,
+                error: None,
+            });
+        }
+
+        // 返回已知模型列表
+        let known_models = vec![
+            "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo",
+            "o1", "o1-preview", "o1-mini", "o3-mini",
+            "claude-3-opus", "claude-3-sonnet", "claude-3-haiku", "claude-3-5-sonnet",
+            "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k",
+            "deepseek-chat", "deepseek-coder",
+            "qwen-turbo", "qwen-plus", "qwen-max",
+            "glm-4", "glm-4-plus",
+        ];
+
+        let models_info: Vec<Value> = known_models.iter().map(|name| {
+            let config = get_model_config(name);
+            json!({
+                "name": name,
+                "max_context_tokens": config.max_context_tokens,
+                "supports_vision": config.supports_vision,
+                "supports_tools": config.supports_tools
+            })
+        }).collect();
+
+        Ok(StreamChunk {
+            data: json!({
+                "success": true,
+                "models": models_info
+            }),
+            done: true,
+            error: None,
+        })
+    }
+
+    async fn handle_configure(&self, input: &Value) -> Result<StreamChunk, PluginError> {
+        let mut config = self.config.write().await;
+
+        if let Some(v) = input.get("api_base").and_then(|v| v.as_str()) {
+            config.api_base = v.to_string();
+        }
+        if let Some(v) = input.get("api_key").and_then(|v| v.as_str()) {
+            config.api_key = Some(v.to_string());
+        }
+        if let Some(v) = input.get("model").and_then(|v| v.as_str()) {
+            config.model = v.to_string();
+        }
+        if let Some(v) = input.get("temperature").and_then(|v| v.as_f64()) {
+            config.temperature = v as f32;
+        }
+        if let Some(v) = input.get("max_tokens").and_then(|v| v.as_u64()) {
+            config.max_tokens = Some(v as u32);
+        }
+        if let Some(v) = input.get("system_prompt").and_then(|v| v.as_str()) {
+            config.system_prompt = Some(v.to_string());
+        }
+
+        Ok(StreamChunk {
+            data: json!({
+                "success": true,
+                "message": "配置已更新"
+            }),
+            done: true,
+            error: None,
+        })
+    }
+
+    async fn handle_get_config(&self) -> Result<StreamChunk, PluginError> {
+        let config = self.config.read().await;
+        Ok(StreamChunk {
+            data: json!({
+                "success": true,
+                "config": {
+                    "api_base": config.api_base,
+                    "api_key_set": config.api_key.is_some(),
+                    "model": config.model,
+                    "temperature": config.temperature,
+                    "max_tokens": config.max_tokens,
+                    "max_context_tokens": config.max_context_tokens
+                }
+            }),
+            done: true,
+            error: None,
+        })
+    }
+
+    async fn handle_compress_info(&self, input: &Value) -> Result<StreamChunk, PluginError> {
+        let history = input.get("history")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let config = self.config.read().await;
+        let counter = TokenCounter::for_model(&config.model);
+        let context_config = ContextConfig::for_model(&config.model);
+
+        let mut total_tokens = 0;
+        for msg in &history {
+            if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
+                total_tokens += counter.count_tokens(content);
+            }
+        }
+
+        let usage_percent = (total_tokens as f64 / context_config.max_tokens as f64) * 100.0;
+        let should_compress = context_config.should_compress(total_tokens);
+
+        Ok(StreamChunk {
+            data: json!({
+                "success": true,
+                "message_count": history.len(),
+                "total_tokens": total_tokens,
+                "max_tokens": context_config.max_tokens,
+                "usage_percent": usage_percent.round() as u32,
+                "should_compress": should_compress,
+                "compression_threshold_percent": (context_config.compression_threshold * 100.0) as u32
+            }),
+            done: true,
+            error: None,
+        })
+    }
+}
+
+impl Default for OpenAiPlugin {
+    fn default() -> Self {
+        Self::new(OpenAiConfig::default())
+    }
+}
+
+#[async_trait]
+impl Plugin for OpenAiPlugin {
+    fn meta(&self, _path: &str) -> PluginResult<PluginMeta> {
+        Ok(self.meta.clone())
+    }
+
+    fn invoke(&self, _path: &str, input: Value) -> PluginResult<InvokeStream> {
+        let action = input.get("action")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| PluginError::ValidationError("缺少 action 参数".to_string()))?
+            .to_string();
+
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                match action.as_str() {
+                    "chat" => self.handle_chat(&input).await,
+                    "status" => self.handle_status().await,
+                    "list_models" => self.handle_list_models(&input),
+                    "configure" => self.handle_configure(&input).await,
+                    "get_config" => self.handle_get_config().await,
+                    "compress_info" => self.handle_compress_info(&input).await,
+                    _ => Ok(StreamChunk {
+                        data: json!({}),
+                        done: true,
+                        error: Some(format!("未知操作: {}", action)),
+                    }),
+                }
+            })
+        })?;
+
+        Ok(InvokeStream::Single(result))
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 辅助函数
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn default_system_prompt() -> String {
+    "You are a helpful AI assistant.".into()
+}
+
+fn count_message_tokens(counter: &TokenCounter, msg: &NativeMessage) -> usize {
+    let mut tokens = 4; // 基础开销
+    if let Some(ref content) = msg.content {
+        tokens += counter.count_tokens(content);
+    }
+    if let Some(ref tool_calls) = msg.tool_calls {
+        for tc in tool_calls {
+            tokens += counter.count_tokens(&tc.function.name);
+            tokens += counter.count_tokens(&tc.function.arguments);
+            tokens += 4;
+        }
+    }
+    tokens
+}
+
+fn count_total_tokens(counter: &TokenCounter, messages: &[NativeMessage], tools: Option<&Vec<NativeToolSpec>>) -> usize {
+    let mut total = 0;
+    for msg in messages {
+        total += count_message_tokens(counter, msg);
+    }
+    if let Some(tool_list) = tools {
+        for tool in tool_list {
+            total += counter.count_tokens(&tool.function.name);
+            total += counter.count_tokens(&tool.function.description);
+            total += counter.count_tokens(&tool.function.parameters.to_string());
+            total += 10;
+        }
+    }
+    total
+}
+
+fn trim_messages_to_fit(counter: &TokenCounter, messages: &mut Vec<NativeMessage>, config: &ContextConfig, tools: Option<&Vec<NativeToolSpec>>) {
+    let available_tokens = config.available_tokens();
+    
+    loop {
+        let current_tokens = count_total_tokens(counter, messages, tools);
+        if current_tokens <= available_tokens {
+            break;
+        }
+        
+        // 保留系统消息
+        let has_system = messages.first().is_some_and(|m| m.role == "system");
+        let start_index = if has_system { 1 } else { 0 };
+        
+        // 移除最旧的非系统消息
+        let removable_count = messages.len().saturating_sub(start_index).saturating_sub(1);
+        if removable_count == 0 {
+            break;
+        }
+        
+        messages.remove(start_index);
+    }
+}

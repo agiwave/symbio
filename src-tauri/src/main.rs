@@ -6,7 +6,7 @@ mod plugins;
 mod commands;
 
 use core::{PluginFactoryRegistry, Plugin, PluginFactory};
-use plugins::{EchoFactory, CalculatorFactory, FormatterFactory, DockerFactory, HomeFactory, CompositeFactory};
+use plugins::{EchoFactory, DockerFactory, HomeFactory, CompositeFactory};
 use std::sync::{Mutex, Arc};
 
 struct AppState {
@@ -20,8 +20,6 @@ fn main() {
 
     // 插件主动注册自己的工厂
     registry.register(Arc::new(EchoFactory::new()));
-    registry.register(Arc::new(CalculatorFactory::new()));
-    registry.register(Arc::new(FormatterFactory::new()));
     registry.register(Arc::new(DockerFactory::new()));
     // 注册 Composite 工厂（可用于创建动态组合插件）
     registry.register(Arc::new(CompositeFactory::with_defaults()));

@@ -1,12 +1,15 @@
 //! Agent 插件模块
 //!
-//! Agent 是通用的插件容器，内置 add/remove/chat/tools/memory 子插件
+//! Agent 是通用的插件容器，内置 add/remove/chat/tools/memory/session/telegram/openai 子插件
 
 mod add;
 mod remove;
 mod chat;
 mod tools;
 mod memory;
+mod session;
+mod telegram;
+mod openai;
 mod factory;
 
 pub use add::AddPlugin;
@@ -17,6 +20,12 @@ pub use tools::ToolsPlugin;
 pub use tools::factory::ToolsFactory;
 pub use memory::MemoryPlugin;
 pub use memory::factory::MemoryFactory;
+pub use session::SessionPlugin;
+pub use session::factory::SessionFactory;
+pub use telegram::TelegramPlugin;
+pub use telegram::factory::TelegramFactory;
+pub use openai::OpenAiPlugin;
+pub use openai::OpenAiFactory;
 pub use factory::AgentFactory;
 
 use crate::core::traits::Plugin;
@@ -79,11 +88,20 @@ impl Agent {
         
         // 注册 memory 插件
         self.instances.insert("memory".to_string(), Arc::new(MemoryPlugin::default()));
+        
+        // 注册 session 插件
+        self.instances.insert("session".to_string(), Arc::new(SessionPlugin::default()));
+        
+        // 注册 telegram 插件
+        self.instances.insert("telegram".to_string(), Arc::new(TelegramPlugin::default()));
+        
+        // 注册 openai 插件
+        self.instances.insert("openai".to_string(), Arc::new(OpenAiPlugin::default()));
 
         // 注册工厂插件（跳过 agent 自身，避免无限递归）
         for factory in registry.list() {
             let name = factory.meta().name.clone();
-            if name == "agent" || name == "chat" || name == "tools" || name == "memory" {
+            if name == "agent" || name == "chat" || name == "tools" || name == "memory" || name == "session" || name == "telegram" || name == "openai" {
                 continue;
             }
             let plugin = factory.create(Some(&*self), None);

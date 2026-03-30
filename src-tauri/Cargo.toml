@@ -27,6 +27,12 @@ reqwest-eventsource = "0.5"
 async-stream = "0.3"
 url = "2.5"
 shellexpand = "3.1"
+glob = "0.3"
+which = "6.0"
+regex = "1.10"
+urlencoding = "2.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
 
 [features]
 default = ["custom-protocol"]

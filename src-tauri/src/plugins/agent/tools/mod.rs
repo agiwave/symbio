@@ -7,8 +7,13 @@ mod plugin;
 pub mod factory;
 mod file_read;
 mod file_write;
+mod file_edit;
 mod shell;
 mod web_fetch;
+mod web_search;
+mod glob_search;
+mod content_search;
+mod http_request;
 
 pub use policy::{SecurityPolicy, AutonomyLevel, CommandRiskLevel};
 pub use plugin::ToolsPlugin;

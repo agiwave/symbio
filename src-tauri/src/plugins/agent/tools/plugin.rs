@@ -3,7 +3,17 @@
 //! 提供文件操作、Shell 命令、Web 访问等工具
 
 use super::policy::SecurityPolicy;
-use super::{file_read::FileReadTool, file_write::FileWriteTool, shell::ShellTool, web_fetch::WebFetchTool};
+use super::{
+    file_read::FileReadTool, 
+    file_write::FileWriteTool, 
+    file_edit::FileEditTool,
+    shell::ShellTool, 
+    web_fetch::WebFetchTool,
+    web_search::WebSearchTool,
+    glob_search::GlobSearchTool,
+    content_search::ContentSearchTool,
+    http_request::HttpRequestTool,
+};
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use async_trait::async_trait;
@@ -30,7 +40,12 @@ impl ToolsPlugin {
                     "properties": {
                         "tool": {
                             "type": "string",
-                            "enum": ["read_file", "write_file", "shell", "web_fetch", "list"],
+                            "enum": [
+                                "read_file", "write_file", "file_edit",
+                                "shell", "web_fetch", "web_search",
+                                "glob_search", "content_search", "http_request",
+                                "list"
+                            ],
                             "description": "工具名称"
                         },
                         "params": {
@@ -77,8 +92,13 @@ impl Plugin for ToolsPlugin {
                             "tools": [
                                 {"name": "read_file", "description": "读取文件内容"},
                                 {"name": "write_file", "description": "写入文件内容"},
+                                {"name": "file_edit", "description": "编辑文件（替换精确字符串）"},
                                 {"name": "shell", "description": "执行 Shell 命令"},
                                 {"name": "web_fetch", "description": "获取网页内容"},
+                                {"name": "web_search", "description": "Web 搜索"},
+                                {"name": "glob_search", "description": "Glob 模式文件搜索"},
+                                {"name": "content_search", "description": "文件内容搜索（正则）"},
+                                {"name": "http_request", "description": "HTTP 请求"},
                             ]
                         }),
                         done: true,
@@ -125,6 +145,23 @@ impl Plugin for ToolsPlugin {
                         }
                     }
                 }
+                "file_edit" => {
+                    let guard = security.read().await;
+                    let workspace_dir = guard.workspace_dir.clone();
+                    let tool = FileEditTool::new();
+                    match tool.execute(&params, &workspace_dir).await {
+                        Ok(result) => {
+                            yield result;
+                        }
+                        Err(e) => {
+                            yield StreamChunk {
+                                data: json!({}),
+                                done: true,
+                                error: Some(e.to_string()),
+                            };
+                        }
+                    }
+                }
                 "shell" => {
                     let guard = security.read().await;
                     let tool = ShellTool::new(Arc::new((*guard).clone()));
@@ -154,6 +191,74 @@ impl Plugin for ToolsPlugin {
                                 done: true,
                                 error: None,
                             };
+                        }
+                        Err(e) => {
+                            yield StreamChunk {
+                                data: json!({}),
+                                done: true,
+                                error: Some(e.to_string()),
+                            };
+                        }
+                    }
+                }
+                "web_search" => {
+                    let guard = security.read().await;
+                    let workspace_dir = guard.workspace_dir.clone();
+                    let tool = WebSearchTool::new();
+                    match tool.execute(&params, &workspace_dir).await {
+                        Ok(result) => {
+                            yield result;
+                        }
+                        Err(e) => {
+                            yield StreamChunk {
+                                data: json!({}),
+                                done: true,
+                                error: Some(e.to_string()),
+                            };
+                        }
+                    }
+                }
+                "glob_search" => {
+                    let guard = security.read().await;
+                    let workspace_dir = guard.workspace_dir.clone();
+                    let tool = GlobSearchTool::new();
+                    match tool.execute(&params, &workspace_dir).await {
+                        Ok(result) => {
+                            yield result;
+                        }
+                        Err(e) => {
+                            yield StreamChunk {
+                                data: json!({}),
+                                done: true,
+                                error: Some(e.to_string()),
+                            };
+                        }
+                    }
+                }
+                "content_search" => {
+                    let guard = security.read().await;
+                    let workspace_dir = guard.workspace_dir.clone();
+                    let tool = ContentSearchTool::new();
+                    match tool.execute(&params, &workspace_dir).await {
+                        Ok(result) => {
+                            yield result;
+                        }
+                        Err(e) => {
+                            yield StreamChunk {
+                                data: json!({}),
+                                done: true,
+                                error: Some(e.to_string()),
+                            };
+                        }
+                    }
+                }
+                "http_request" => {
+                    let guard = security.read().await;
+                    let workspace_dir = guard.workspace_dir.clone();
+                    let tool = HttpRequestTool::new();
+                    match tool.execute(&params, &workspace_dir).await {
+                        Ok(result) => {
+                            yield result;
                         }
                         Err(e) => {
                             yield StreamChunk {

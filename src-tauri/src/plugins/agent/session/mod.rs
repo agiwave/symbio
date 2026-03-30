@@ -1,0 +1,11 @@
+//! Session 子插件模块
+//!
+//! 提供会话历史和上下文管理
+
+pub mod plugin;
+pub mod factory;
+pub mod types;
+
+pub use plugin::SessionPlugin;
+pub use factory::SessionFactory;
+pub use types::{ChatMessage, Session, SessionContext, LlmContext, ToolCall, ToolFunction};
