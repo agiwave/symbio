@@ -69,6 +69,7 @@
               <option value="deepseek">DeepSeek</option>
               <option value="moonshot">Moonshot (月之暗面)</option>
               <option value="zhipu">智谱 GLM</option>
+              <option value="aiyuanjing">AI 远景</option>
               <option value="local">本地模型 (Ollama)</option>
               <option value="custom">自定义</option>
             </select>
@@ -269,6 +270,10 @@ const providerPresets: Record<string, { apiBase: string; models: string[] }> = {
   zhipu: {
     apiBase: 'https://open.bigmodel.cn/api/paas/v4',
     models: ['glm-4', 'glm-4-flash', 'glm-3-turbo']
+  },
+  aiyuanjing: {
+    apiBase: 'https://maas-api.ai-yuanjing.com/openapi/compatible-mode/v1',
+    models: ['glm-5', 'glm-4-plus', 'glm-4']
   },
   local: {
     apiBase: 'http://localhost:11434/v1',
