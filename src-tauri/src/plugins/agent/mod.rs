@@ -34,7 +34,7 @@ pub use factory::AgentFactory;
 use crate::plugins::docker::DockerPlugin;
 
 use crate::core::traits::{Plugin, ParentRef};
-use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
+use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use crate::core::PluginFactoryRegistry;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -185,6 +185,38 @@ impl Plugin for Agent {
         if path.is_empty() {
             return Ok(self.meta.clone());
         }
+
+        // config path
+        if path == "config" {
+            return Ok(PluginMeta {
+                name: "config".to_string(),
+                description: "Agent 配置管理（收集所有子插件配置）".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["get", "set"],
+                            "description": "get获取所有子插件配置，set分发配置到子插件"
+                        },
+                        "config": {
+                            "type": "object",
+                            "description": "配置数据（各子插件的配置）"
+                        }
+                    },
+                    "required": ["action"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "config": { "type": "object" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            });
+        }
         
         // 能力路由
         if Self::is_capability_route(path) {
@@ -225,6 +257,59 @@ impl Plugin for Agent {
                     "capabilities": capabilities,
                     "message": "Agent 插件就绪"
                 }
+            })));
+        }
+
+        // config path: 收集/分发子插件配置
+        if path == "config" {
+            let action = input.get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("get");
+
+            return Ok(InvokeStream::Single(tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    match action {
+                        "get" => {
+                            let mut configs = serde_json::Map::new();
+                            for (name, plugin) in &self.instances {
+                                if let Ok(InvokeStream::Single(chunk)) = plugin.invoke("config", json!({"action": "get"})) {
+                                    if chunk.error.is_none() && !chunk.data.is_null() {
+                                        configs.insert(name.clone(), chunk.data);
+                                    }
+                                }
+                            }
+                            StreamChunk {
+                                data: json!({ "success": true, "config": configs }),
+                                done: true,
+                                error: None,
+                            }
+                        }
+                        "set" => {
+                            if let Some(config) = input.get("config") {
+                                if let Some(obj) = config.as_object() {
+                                    for (name, plugin_config) in obj {
+                                        if let Some(plugin) = self.instances.get(name) {
+                                            let _ = plugin.invoke("config", json!({
+                                                "action": "set",
+                                                "config": plugin_config
+                                            }));
+                                        }
+                                    }
+                                }
+                            }
+                            StreamChunk {
+                                data: json!({ "success": true }),
+                                done: true,
+                                error: None,
+                            }
+                        }
+                        _ => StreamChunk {
+                            data: json!({}),
+                            done: true,
+                            error: Some(format!("未知操作: {}", action)),
+                        },
+                    }
+                })
             })));
         }
         

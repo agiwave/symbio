@@ -51,7 +51,7 @@ impl Default for CompositeMetaConfig {
 /// Composite 插件
 pub struct CompositePlugin {
     meta: PluginMeta,
-    sub_plugins: IndexMap<String, Arc<dyn Plugin>>,
+    plugins: IndexMap<String, Arc<dyn Plugin>>,
     /// 自身引用，用于传递给动态创建的子插件
     self_ref: Option<Weak<dyn Plugin>>,
 }
@@ -110,7 +110,7 @@ impl CompositePlugin {
                 output: Some(output_schema),
                 author: meta_config.author,
             },
-            sub_plugins,
+            plugins: sub_plugins,
             self_ref: None,
         }
     }
@@ -169,7 +169,7 @@ impl CompositePlugin {
                     output: Some(output_schema),
                     author: meta_config.author,
                 },
-                sub_plugins,
+                plugins: sub_plugins,
                 self_ref: Some(weak.clone() as Weak<dyn Plugin>),
             }
         })
@@ -183,25 +183,25 @@ impl CompositePlugin {
     /// 获取所有子插件名称列表
     #[allow(dead_code)]
     pub fn list_plugins(&self) -> Vec<String> {
-        self.sub_plugins.keys().cloned().collect()
+        self.plugins.keys().cloned().collect()
     }
 
     /// 添加子插件
     #[allow(dead_code)]
     pub fn add_plugin(&mut self, name: String, plugin: Arc<dyn Plugin>) {
-        self.sub_plugins.insert(name, plugin);
+        self.plugins.insert(name, plugin);
     }
 
     /// 移除子插件
     #[allow(dead_code)]
     pub fn remove_plugin(&mut self, name: &str) -> Option<Arc<dyn Plugin>> {
-        self.sub_plugins.shift_remove(name)
+        self.plugins.shift_remove(name)
     }
 
     /// 获取子插件
     #[allow(dead_code)]
     pub fn get_plugin(&self, name: &str) -> Option<Arc<dyn Plugin>> {
-        self.sub_plugins.get(name).cloned()
+        self.plugins.get(name).cloned()
     }
 
     /// 通过工厂创建子插件
@@ -233,7 +233,7 @@ impl CompositePlugin {
         let plugin_name = parts[0];
         let sub_path = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
 
-        self.sub_plugins.get(plugin_name)
+        self.plugins.get(plugin_name)
             .map(|p| (Arc::clone(p), sub_path))
             .ok_or_else(|| PluginError::NotFound(format!("子插件 '{}' 未找到", plugin_name)))
     }
@@ -242,7 +242,7 @@ impl CompositePlugin {
     fn handle_admin_action(&self, action: &str, _input: &Value) -> Result<Value, PluginError> {
         match action {
             "list" => {
-                let plugins: Vec<Value> = self.sub_plugins.iter().map(|(name, plugin)| {
+                let plugins: Vec<Value> = self.plugins.iter().map(|(name, plugin)| {
                     json!({
                         "name": name,
                         "meta": plugin.meta("").ok().map(|m| json!({
@@ -312,7 +312,7 @@ impl Plugin for CompositePlugin {
                         .cloned()
                         .unwrap_or(json!({}));
 
-                    let plugin = self.sub_plugins.get(plugin_name)
+                    let plugin = self.plugins.get(plugin_name)
                         .ok_or_else(|| PluginError::NotFound(format!("子插件 '{}' 未找到", plugin_name)))?;
 
                     return plugin.invoke("", sub_input);

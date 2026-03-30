@@ -388,7 +388,44 @@ impl Default for OpenAiPlugin {
 
 #[async_trait]
 impl Plugin for OpenAiPlugin {
-    fn meta(&self, _path: &str) -> PluginResult<PluginMeta> {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path == "config" {
+            return Ok(PluginMeta {
+                name: "config".to_string(),
+                description: "OpenAI 配置管理".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["get", "set"],
+                            "description": "get获取配置，set设置配置"
+                        },
+                        "config": {
+                            "type": "object",
+                            "properties": {
+                                "api_base": { "type": "string", "description": "API 基础 URL" },
+                                "api_key": { "type": "string", "description": "API Key" },
+                                "model": { "type": "string", "description": "模型名称" },
+                                "temperature": { "type": "number", "description": "温度参数" },
+                                "max_tokens": { "type": "integer", "description": "最大输出 tokens" },
+                                "system_prompt": { "type": "string", "description": "系统提示词" }
+                            }
+                        }
+                    },
+                    "required": ["action"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "config": { "type": "object" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            });
+        }
         Ok(self.meta.clone())
     }
 
@@ -396,7 +433,76 @@ impl Plugin for OpenAiPlugin {
         vec![CAPABILITY_LLM]
     }
 
-    fn invoke(&self, _path: &str, input: Value) -> PluginResult<InvokeStream> {
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        // 处理 config path
+        if path == "config" {
+            let action = input.get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("get");
+
+            let result = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    match action {
+                        "get" => {
+                            let config = self.config.read().await;
+                            Ok(StreamChunk {
+                                data: json!({
+                                    "api_base": config.api_base,
+                                    "api_key_set": config.api_key.is_some(),
+                                    "model": config.model,
+                                    "temperature": config.temperature,
+                                    "max_tokens": config.max_tokens,
+                                    "max_context_tokens": config.max_context_tokens
+                                }),
+                                done: true,
+                                error: None,
+                            })
+                        }
+                        "set" => {
+                            if let Some(new_config) = input.get("config") {
+                                let mut config = self.config.write().await;
+                                if let Some(v) = new_config.get("api_base").and_then(|v| v.as_str()) {
+                                    config.api_base = v.to_string();
+                                }
+                                if let Some(v) = new_config.get("api_key").and_then(|v| v.as_str()) {
+                                    config.api_key = Some(v.to_string());
+                                }
+                                if let Some(v) = new_config.get("model").and_then(|v| v.as_str()) {
+                                    config.model = v.to_string();
+                                }
+                                if let Some(v) = new_config.get("temperature").and_then(|v| v.as_f64()) {
+                                    config.temperature = v as f32;
+                                }
+                                if let Some(v) = new_config.get("max_tokens").and_then(|v| v.as_u64()) {
+                                    config.max_tokens = Some(v as u32);
+                                }
+                                if let Some(v) = new_config.get("system_prompt").and_then(|v| v.as_str()) {
+                                    config.system_prompt = Some(v.to_string());
+                                }
+                            }
+                            // 通知父插件保存配置
+                            if let Some(parent) = self.get_parent() {
+                                let _ = parent.invoke("", json!({"action": "save_config"}));
+                            }
+                            Ok(StreamChunk {
+                                data: json!({ "success": true }),
+                                done: true,
+                                error: None,
+                            })
+                        }
+                        _ => Ok(StreamChunk {
+                            data: json!({}),
+                            done: true,
+                            error: Some(format!("未知操作: {}", action)),
+                        }),
+                    }
+                })
+            })?;
+
+            return Ok(InvokeStream::Single(result));
+        }
+
+        // 原有的 action 处理
         let action = input.get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 action 参数".to_string()))?

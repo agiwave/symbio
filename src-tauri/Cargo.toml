@@ -33,6 +33,7 @@ regex = "1.10"
 urlencoding = "2.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
+serde_yaml = "0.9"
 
 [features]
 default = ["custom-protocol"]
