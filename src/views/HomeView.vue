@@ -36,13 +36,13 @@
     <!-- 主内容区 -->
     <div class="content-area">
       <!-- 工作区页面 -->
-      <WorkspacePage v-show="currentPage === 'workspace'" />
+      <WorkspacePage v-if="currentPage === 'workspace'" />
       
       <!-- AI 交互页面 -->
-      <AgentPage v-show="currentPage === 'agent'" />
+      <AgentPage v-if="currentPage === 'agent'" />
       
       <!-- 设置页面 -->
-      <SettingsPage v-show="currentPage === 'settings'" />
+      <SettingsPage v-if="currentPage === 'settings'" />
     </div>
   </div>
 </template>
@@ -127,14 +127,5 @@ const currentPage = ref<'workspace' | 'agent' | 'settings'>('workspace')
   height: 100%;
   min-width: 0;
   overflow: hidden;
-  position: relative;
-}
-
-.content-area > * {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
 }
 </style>
