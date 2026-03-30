@@ -1,6 +1,6 @@
 //! Agent 插件模块
 //!
-//! Agent 是通用的插件容器，内置 add/remove/chat/tools/memory/session/telegram/openai 子插件
+//! Agent 是通用的插件容器，内置 add/remove/chat/tools/memory/session/telegram/openai/docker 子插件
 
 mod add;
 mod remove;
@@ -27,6 +27,9 @@ pub use telegram::factory::TelegramFactory;
 pub use openai::OpenAiPlugin;
 pub use openai::OpenAiFactory;
 pub use factory::AgentFactory;
+
+// 导入 docker 插件（来自 plugins/docker）
+use crate::plugins::docker::DockerPlugin;
 
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
@@ -97,11 +100,15 @@ impl Agent {
         
         // 注册 openai 插件
         self.instances.insert("openai".to_string(), Arc::new(OpenAiPlugin::default()));
+        
+        // 注册 docker 插件
+        self.instances.insert("docker".to_string(), Arc::new(DockerPlugin::new()));
 
-        // 注册工厂插件（跳过 agent 自身，避免无限递归）
+        // 注册工厂插件（跳过 agent 自身和已注册的插件，避免无限递归）
         for factory in registry.list() {
             let name = factory.meta().name.clone();
-            if name == "agent" || name == "chat" || name == "tools" || name == "memory" || name == "session" || name == "telegram" || name == "openai" {
+            if name == "agent" || name == "chat" || name == "tools" || name == "memory" 
+                || name == "session" || name == "telegram" || name == "openai" || name == "docker" {
                 continue;
             }
             let plugin = factory.create(Some(&*self), None);

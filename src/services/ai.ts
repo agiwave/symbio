@@ -6,6 +6,9 @@
 
 import { callPlugin } from './plugin'
 
+// Chat 插件在 agent 下，路径为 agent/chat
+const CHAT_PATH = 'agent/chat'
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
@@ -39,7 +42,7 @@ export interface ConfigResponse {
  * 发送消息到 AI
  */
 export async function sendMessage(messages: ChatMessage[]): Promise<ChatResponse> {
-  return callPlugin<ChatResponse>('chat', {
+  return callPlugin<ChatResponse>(CHAT_PATH, {
     action: 'send',
     messages
   })
@@ -49,7 +52,7 @@ export async function sendMessage(messages: ChatMessage[]): Promise<ChatResponse
  * 配置 AI 提供商
  */
 export async function configureProvider(config: ProviderConfig): Promise<ConfigResponse> {
-  return callPlugin<ConfigResponse>('chat', {
+  return callPlugin<ConfigResponse>(CHAT_PATH, {
     action: 'configure',
     config
   })
@@ -59,7 +62,7 @@ export async function configureProvider(config: ProviderConfig): Promise<ConfigR
  * 获取当前配置
  */
 export async function getProviderConfig(): Promise<ConfigResponse> {
-  return callPlugin<ConfigResponse>('chat', {
+  return callPlugin<ConfigResponse>(CHAT_PATH, {
     action: 'get_config'
   })
 }
