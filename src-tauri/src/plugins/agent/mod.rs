@@ -96,7 +96,7 @@ impl Agent {
         instances.insert("memory".to_string(), Arc::new(MemoryPlugin::default()) as Arc<dyn Plugin>);
         instances.insert("session".to_string(), Arc::new(SessionPlugin::default()) as Arc<dyn Plugin>);
         instances.insert("telegram".to_string(), Arc::new(TelegramPlugin::default()) as Arc<dyn Plugin>);
-        instances.insert("openai".to_string(), Arc::new(OpenAiPlugin::default()) as Arc<dyn Plugin>);
+        instances.insert("openai".to_string(), OpenAiPlugin::with_parent(parent.clone(), Default::default()));
         instances.insert("docker".to_string(), Arc::new(DockerPlugin::new()) as Arc<dyn Plugin>);
 
         // 注册工厂插件
