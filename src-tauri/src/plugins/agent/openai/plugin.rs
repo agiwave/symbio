@@ -77,9 +77,10 @@ impl OpenAiPlugin {
         let counter = TokenCounter::for_model(&config.model);
         let context_config = ContextConfig::for_model(&config.model);
 
-        // 通过 @session 能力路由获取聊天历史
+        // 通过 @session 能力路由获取上下文（包含 system_prompt, tools, history）
         let mut system_prompt = config.system_prompt.clone().unwrap_or_else(default_system_prompt);
-        let mut history_messages: Vec<NativeMessage> = Vec::new();
+        let mut tools: Vec<NativeToolSpec> = Vec::new();
+        let mut context_messages: Vec<NativeMessage> = Vec::new();
 
         if let Some(parent) = self.get_parent() {
             let session_input = json!({
@@ -91,20 +92,31 @@ impl OpenAiPlugin {
             if let Ok(stream) = parent.invoke(&format!("@{}", CAPABILITY_SESSION), session_input) {
                 if let InvokeStream::Single(chunk) = stream {
                     if chunk.error.is_none() {
-                        // 解析 LlmContext
+                        // 解析 LlmContext：system_prompt + tools + history
                         if let Some(sys) = chunk.data.get("system_prompt").and_then(|v| v.as_str()) {
-                            system_prompt = sys.to_string();
+                            if !sys.is_empty() {
+                                system_prompt = sys.to_string();
+                            }
                         }
+                        // 解析工具定义
+                        if let Some(tools_arr) = chunk.data.get("tools").and_then(|v| v.as_array()) {
+                            for tool in tools_arr {
+                                if let Ok(spec) = serde_json::from_value(tool.clone()) {
+                                    tools.push(spec);
+                                }
+                            }
+                        }
+                        // 解析上下文消息（可能是压缩后的历史或选定的上下文片段）
                         if let Some(history) = chunk.data.get("history").and_then(|v| v.as_array()) {
                             for msg in history {
                                 if let (Some(role), Some(content)) = (
                                     msg.get("role").and_then(|r| r.as_str()),
                                     msg.get("content").and_then(|c| c.as_str())
                                 ) {
-                                    history_messages.push(NativeMessage {
+                                    context_messages.push(NativeMessage {
                                         role: role.to_string(),
                                         content: Some(content.to_string()),
-                                        tool_call_id: None,
+                                        tool_call_id: msg.get("tool_call_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                         tool_calls: None,
                                     });
                                 }
@@ -115,7 +127,7 @@ impl OpenAiPlugin {
             }
         }
 
-        // 构建消息：system + history + current
+        // 构建消息：system + context + current
         let mut messages: Vec<NativeMessage> = vec![
             NativeMessage {
                 role: "system".into(),
@@ -125,8 +137,8 @@ impl OpenAiPlugin {
             }
         ];
 
-        // 添加历史消息
-        messages.extend(history_messages);
+        // 添加上下文消息
+        messages.extend(context_messages);
 
         // 添加当前消息
         messages.push(NativeMessage {
@@ -136,10 +148,11 @@ impl OpenAiPlugin {
             tool_calls: None,
         });
 
-        // 估算 tokens 并裁剪
-        let estimated_tokens = count_total_tokens(&counter, &messages, None);
+        // 估算 tokens 并裁剪（考虑 tools 开销）
+        let tools_ref = if tools.is_empty() { None } else { Some(&tools) };
+        let estimated_tokens = count_total_tokens(&counter, &messages, tools_ref);
         if estimated_tokens > context_config.available_tokens() {
-            trim_messages_to_fit(&counter, &mut messages, &context_config, None);
+            trim_messages_to_fit(&counter, &mut messages, &context_config, tools_ref);
         }
 
         // 构建请求
@@ -152,6 +165,11 @@ impl OpenAiPlugin {
 
         if let Some(max_tokens) = config.max_tokens {
             request["max_tokens"] = json!(max_tokens);
+        }
+
+        // 添加工具定义（如果有）
+        if !tools.is_empty() {
+            request["tools"] = json!(tools);
         }
 
         // 发送请求
