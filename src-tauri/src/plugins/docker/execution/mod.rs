@@ -6,6 +6,6 @@ mod config;
 mod executor;
 mod security;
 
-pub use config::{ExecutionConfig, ExecutionResult};
+pub use config::ExecutionConfig;
 pub use executor::DockerExecutor;
-pub use security::{is_dangerous_command, sanitize_command};
+pub use security::is_dangerous_command;

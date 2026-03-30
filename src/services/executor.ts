@@ -4,7 +4,7 @@
  * 通过标准插件接口调用 Docker 执行能力
  */
 
-import { invoke } from '@tauri-apps/api/core'
+import { callPlugin } from './plugin'
 
 export interface ExecutionResult {
   success: boolean
@@ -24,26 +24,12 @@ export interface ExecutionConfig {
 }
 
 /**
- * 调用 Docker 插件
- */
-async function callDockerPlugin(action: string, params: Record<string, unknown>): Promise<unknown> {
-  const result = await invoke<unknown[]>('invoke', {
-    path: 'docker',
-    input: { action, ...params }
-  })
-  
-  // invoke 返回 StreamChunk 数组，取第一个的 data
-  if (Array.isArray(result) && result.length > 0) {
-    return result[0].data
-  }
-  return result
-}
-
-/**
  * 检查 Docker 是否可用
  */
 export async function isDockerAvailable(): Promise<boolean> {
-  const result = await callDockerPlugin('available', {}) as { success: boolean; available: boolean }
+  const result = await callPlugin<{ success: boolean; available: boolean }>('docker', {
+    action: 'available'
+  })
   return result.available
 }
 
@@ -54,7 +40,7 @@ export async function executeCommand(
   command: string,
   config?: ExecutionConfig
 ): Promise<ExecutionResult> {
-  return callDockerPlugin('execute', { command, config }) as Promise<ExecutionResult>
+  return callPlugin<ExecutionResult>('docker', { action: 'execute', command, config })
 }
 
 /**
@@ -65,16 +51,17 @@ export async function executeScript(
   language: string,
   config?: ExecutionConfig
 ): Promise<ExecutionResult> {
-  return callDockerPlugin('execute_script', { 
-    script_path: scriptPath, 
+  return callPlugin<ExecutionResult>('docker', {
+    action: 'execute_script',
+    script_path: scriptPath,
     language,
-    config 
-  }) as Promise<ExecutionResult>
+    config
+  })
 }
 
 /**
  * 执行代码块
- * 
+ *
  * 将代码作为命令执行
  */
 export async function executeCodeBlock(
@@ -84,7 +71,7 @@ export async function executeCodeBlock(
 ): Promise<ExecutionResult> {
   // 根据语言构建命令
   let command: string
-  
+
   switch (language.toLowerCase()) {
     case 'python':
     case 'python3':
@@ -102,7 +89,7 @@ export async function executeCodeBlock(
     default:
       throw new Error(`Unsupported language: ${language}`)
   }
-  
+
   return executeCommand(command, config)
 }
 

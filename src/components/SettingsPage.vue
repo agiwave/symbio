@@ -161,7 +161,7 @@
       <section v-show="activeSection === 'about'" class="content-section">
         <h2>关于</h2>
         <div class="about-info">
-          <div class="app-logo">🌊</div>
+          <img :src="logoUrl" alt="Symbio" class="app-logo" />
           <h1>Symbio</h1>
           <p class="version">版本 0.1.0</p>
           <p class="description">在做中学：生信分析的互动学习平台</p>
@@ -178,6 +178,7 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
+import logoUrl from '../assets/logo.svg'
 
 const activeSection = ref('appearance')
 
@@ -421,7 +422,9 @@ function clearData() {
 }
 
 .app-logo {
-  font-size: 4rem;
+  width: 80px;
+  height: 80px;
+  border-radius: 16px;
   margin-bottom: 1rem;
 }
 

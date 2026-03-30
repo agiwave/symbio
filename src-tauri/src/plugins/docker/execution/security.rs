@@ -44,9 +44,10 @@ pub fn is_dangerous_command(command: &str) -> bool {
 /// 命令净化
 ///
 /// 移除或转义危险字符
+#[allow(dead_code)]
 pub fn sanitize_command(command: &str) -> String {
     // 基本净化：移除危险的 shell 特殊字符组合
-    let mut sanitized = command.to_string();
+    let sanitized = command.to_string();
     
     // 移除危险的 $(...) 和 `...` 命令替换（如果包含危险内容）
     // 注意：这里是简化实现，实际生产环境需要更复杂的处理
@@ -55,6 +56,7 @@ pub fn sanitize_command(command: &str) -> String {
 }
 
 /// 检查文件路径是否安全
+#[allow(dead_code)]
 pub fn is_safe_path(path: &str) -> bool {
     // 禁止访问系统关键目录
     let forbidden_prefixes = [

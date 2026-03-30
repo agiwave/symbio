@@ -5,8 +5,8 @@ mod core;
 mod plugins;
 mod commands;
 
-use core::{PluginFactoryRegistry, Plugin};
-use plugins::{AgentFactory, EchoFactory, CalculatorFactory, FormatterFactory, DockerFactory};
+use core::{PluginFactoryRegistry, Plugin, PluginFactory};
+use plugins::{EchoFactory, CalculatorFactory, FormatterFactory, DockerFactory, HomeFactory};
 use std::sync::{Mutex, Arc};
 
 struct AppState {
@@ -23,16 +23,10 @@ fn main() {
     registry.register(Arc::new(CalculatorFactory::new()));
     registry.register(Arc::new(FormatterFactory::new()));
     registry.register(Arc::new(DockerFactory::new()));
-    registry.register(Arc::new(AgentFactory::new()));
     
-    // 使用 AgentFactory 创建 root agent
-    // Agent 会自动注册所有工厂插件作为子插件
-    let root: Arc<dyn Plugin> = registry
-        .list()
-        .into_iter()
-        .find(|f| f.meta().name == "agent")
-        .expect("AgentFactory should be registered")
-        .create(None, None);
+    // 使用 HomeFactory 创建 root 插件
+    // Home 会自动创建 work/agent/setting 子插件实例
+    let root: Arc<dyn Plugin> = HomeFactory::new().create(None, None);
     
     tauri::Builder::default()
         .manage(AppState {

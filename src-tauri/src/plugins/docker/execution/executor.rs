@@ -84,6 +84,7 @@ impl DockerExecutor {
     }
 
     /// 构建镜像
+    #[allow(dead_code)]
     pub fn build_image(&self, dockerfile_path: &str, tag: &str) -> Result<(), String> {
         let output = Command::new("docker")
             .args(["build", "-t", tag, "-f", dockerfile_path, "."])
@@ -98,6 +99,7 @@ impl DockerExecutor {
     }
 
     /// 检查镜像是否存在
+    #[allow(dead_code)]
     pub fn image_exists(&self, tag: &str) -> bool {
         Command::new("docker")
             .args(["image", "inspect", tag])
@@ -107,6 +109,7 @@ impl DockerExecutor {
     }
 
     /// 获取执行配置
+    #[allow(dead_code)]
     pub fn config(&self) -> &ExecutionConfig {
         &self.config
     }

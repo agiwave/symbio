@@ -4,5 +4,5 @@ pub mod traits;
 pub mod types;
 pub mod registry;
 
-pub use traits::Plugin;
+pub use traits::{Plugin, PluginFactory};
 pub use registry::PluginFactoryRegistry;

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 执行配置
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionConfig {
     /// CPU 核心数限制
@@ -38,6 +39,7 @@ impl Default for ExecutionConfig {
     }
 }
 
+#[allow(dead_code)]
 impl ExecutionConfig {
     /// 创建新的执行配置
     pub fn new() -> Self {
@@ -101,6 +103,7 @@ impl ExecutionConfig {
 }
 
 /// 执行结果
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
     /// 退出码
@@ -115,6 +118,7 @@ pub struct ExecutionResult {
     pub timed_out: bool,
 }
 
+#[allow(dead_code)]
 impl ExecutionResult {
     /// 创建成功结果
     pub fn success(stdout: String, duration_ms: u64) -> Self {

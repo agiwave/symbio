@@ -5,9 +5,12 @@ pub mod echo;
 pub mod calculator;
 pub mod formatter;
 pub mod docker;
+pub mod work;
+pub mod setting;
+pub mod home;
 
-pub use agent::AgentFactory;
 pub use echo::EchoFactory;
 pub use calculator::CalculatorFactory;
 pub use formatter::FormatterFactory;
 pub use docker::DockerFactory;
+pub use home::HomeFactory;

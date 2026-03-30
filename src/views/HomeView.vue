@@ -2,7 +2,9 @@
   <div class="home-view">
     <!-- 顶层导航条 (始终显示) -->
     <nav class="nav-bar">
-      <div class="nav-logo" @click="currentPage = 'workspace'">🌊</div>
+      <div class="nav-logo" @click="currentPage = 'workspace'">
+        <img :src="logoUrl" alt="Symbio" class="logo-img" />
+      </div>
       <div class="nav-items">
         <button 
           class="nav-btn" 
@@ -50,6 +52,7 @@ import { ref } from 'vue'
 import WorkspacePage from '../components/WorkspacePage.vue'
 import AgentPage from '../components/AgentPage.vue'
 import SettingsPage from '../components/SettingsPage.vue'
+import logoUrl from '../assets/logo.svg'
 
 // 当前页面
 const currentPage = ref<'workspace' | 'agent' | 'settings'>('workspace')
@@ -70,15 +73,28 @@ const currentPage = ref<'workspace' | 'agent' | 'settings'>('workspace')
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 1rem 0;
+  justify-content: center;
   flex-shrink: 0;
   z-index: 10;
+  position: relative;
 }
 
 .nav-logo {
-  font-size: 1.5rem;
   cursor: pointer;
-  margin-bottom: 2rem;
+  position: absolute;
+  top: 1rem;
+}
+
+.nav-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.logo-img {
+  width: 36px;
+  height: 36px;
+  display: block;
 }
 
 .nav-items {
