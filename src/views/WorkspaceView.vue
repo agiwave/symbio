@@ -313,13 +313,14 @@ defineExpose({
 <style scoped>
 .workspace-view {
   display: flex;
-  height: 100vh;
+  height: 100%;
+  width: 100%;
   background: var(--color-bg);
 }
 
 /* 导航条 (始终显示) */
 .nav-sidebar {
-  width: var(--sidebar-width);
+  width: var(--sidebar-width, 56px);
   background: #1a1a2e;
   display: flex;
   flex-direction: column;
@@ -363,6 +364,7 @@ defineExpose({
 .main-content {
   flex: 1;
   display: flex;
+  height: 100%;
   min-width: 0;
   overflow: hidden;
 }
@@ -370,13 +372,14 @@ defineExpose({
 /* 工作区 (文档树 + 编辑区) */
 .workspace-area {
   display: flex;
+  height: 100%;
   min-width: 0;
-  /* 默认不伸缩，由具体场景控制 */
 }
 
 /* 只显示工作区：工作区占满剩余窗口 */
 .workspace-view.workspace-only .workspace-area {
   flex: 1;
+  width: 100%;
 }
 
 /* 两者都显示：工作区占据剩余空间（扣除AI区固定宽度） */
@@ -387,11 +390,12 @@ defineExpose({
 
 /* 目录区 */
 .panel-sidebar {
-  width: var(--panel-width);
+  width: var(--panel-width, 240px);
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
+  height: 100%;
   flex-shrink: 0;
   z-index: 10;
 }
@@ -402,6 +406,7 @@ defineExpose({
   align-items: center;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .panel-header h3 {
@@ -440,6 +445,7 @@ defineExpose({
 .panel-footer {
   padding: 0.5rem 1rem;
   border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .footer-btn {
@@ -475,10 +481,11 @@ defineExpose({
 
 /* 编辑区 */
 .editor-area {
-  flex: 1 1 auto;
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  height: 100%;
 }
 
 .editor-container {
@@ -495,6 +502,7 @@ defineExpose({
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
+  flex-shrink: 0;
 }
 
 .title-input {
@@ -527,9 +535,10 @@ defineExpose({
 }
 
 .editor-content {
-  flex: 1 1 auto;
+  flex: 1;
   overflow-y: auto;
   width: 100%;
+  min-height: 0;
 }
 
 .empty-editor {

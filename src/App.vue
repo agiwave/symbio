@@ -30,6 +30,11 @@ import { RouterView } from 'vue-router'
   --header-height: 48px;
 }
 
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   background: var(--color-bg);
@@ -41,6 +46,7 @@ body {
 .app-container {
   display: flex;
   height: 100vh;
+  width: 100vw;
   overflow: hidden;
 }
 

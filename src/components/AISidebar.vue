@@ -131,12 +131,13 @@ watch(() => props.visible, (visible) => {
 <style scoped>
 .ai-sidebar {
   width: 320px;
+  height: 100%;
   background: var(--color-surface);
   border-left: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease;
   flex-shrink: 0;
+  transition: width 0.3s ease;
 }
 
 .ai-sidebar.collapsed {
@@ -148,7 +149,7 @@ watch(() => props.visible, (visible) => {
 /* 只显示AI时，占满整个窗口 */
 .ai-sidebar.full-width {
   flex: 1;
-  width: auto;
+  width: 100%;
   border-left: none;
 }
 
