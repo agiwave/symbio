@@ -1,5 +1,5 @@
 <template>
-  <aside class="ai-sidebar" :class="{ collapsed: !visible }">
+  <aside class="ai-sidebar" :class="{ collapsed: !visible, 'full-width': fullWidth && visible }">
     <div class="sidebar-header">
       <span class="title">Agent</span>
       <button class="close-btn" @click="$emit('close')" title="隐藏">×</button>
@@ -62,6 +62,7 @@ interface Message {
 
 const props = defineProps<{
   visible: boolean
+  fullWidth?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -141,6 +142,13 @@ watch(() => props.visible, (visible) => {
 .ai-sidebar.collapsed {
   width: 0;
   overflow: hidden;
+  border-left: none;
+}
+
+/* 只显示AI时，占满整个窗口 */
+.ai-sidebar.full-width {
+  flex: 1;
+  width: auto;
   border-left: none;
 }
 

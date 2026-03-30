@@ -1,5 +1,9 @@
 <template>
-  <div class="workspace-view">
+  <div class="workspace-view" :class="{
+    'workspace-only': workspaceVisible && !aiSidebarVisible,
+    'ai-only': !workspaceVisible && aiSidebarVisible,
+    'both-visible': workspaceVisible && aiSidebarVisible
+  }">
     <!-- 顶层导航条 (始终显示) -->
     <nav class="nav-sidebar">
       <div class="nav-logo" @click="goHome">🌊</div>
@@ -99,6 +103,7 @@
       <!-- AI 交互区 -->
       <AISidebar
         :visible="aiSidebarVisible"
+        :full-width="!workspaceVisible"
         ref="aiSidebarRef"
         @close="aiSidebarVisible = false"
         @send="handleAIMessage"
@@ -365,6 +370,17 @@ defineExpose({
 /* 工作区 (文档树 + 编辑区) */
 .workspace-area {
   display: flex;
+  min-width: 0;
+  /* 默认不伸缩，由具体场景控制 */
+}
+
+/* 只显示工作区：工作区占满剩余窗口 */
+.workspace-view.workspace-only .workspace-area {
+  flex: 1;
+}
+
+/* 两者都显示：工作区占据剩余空间（扣除AI区固定宽度） */
+.workspace-view.both-visible .workspace-area {
   flex: 1;
   min-width: 0;
 }
