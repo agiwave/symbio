@@ -177,9 +177,10 @@ impl Plugin for ChatPlugin {
                     }
                 }
                 "configure" => {
-                    // 配置 openai 插件
+                    // 通过 @llm 能力路由配置 openai 插件
                     if let Some(ref p) = parent {
                         if let Some(config) = input.get("config") {
+                            // 先通过能力路由找到 llm 插件，然后配置
                             let config_input = json!({
                                 "action": "configure",
                                 "api_base": config.get("api_base"),
@@ -189,7 +190,7 @@ impl Plugin for ChatPlugin {
                                 "max_tokens": config.get("max_tokens"),
                             });
                             
-                            match p.invoke("openai", config_input) {
+                            match p.invoke(&format!("@{}", CAPABILITY_LLM), config_input) {
                                 Ok(stream) => {
                                     use futures::StreamExt;
                                     let chunks = stream.collect().await;
@@ -225,22 +226,23 @@ impl Plugin for ChatPlugin {
                     }
                 }
                 "get_config" => {
-                    // 获取 openai 插件配置
+                    // 通过 @llm 能力路由获取 openai 插件配置
                     if let Some(ref p) = parent {
                         let config_input = json!({ "action": "get_config" });
                         
-                        match p.invoke("openai", config_input) {
+                        match p.invoke(&format!("@{}", CAPABILITY_LLM), config_input) {
                             Ok(stream) => {
                                 use futures::StreamExt;
                                 let chunks = stream.collect().await;
                                 if let Some(chunk) = chunks.into_iter().next() {
-                                    let data = chunk.data.clone();
+                                    // openai 返回 { success, config: { api_base, api_key_set, model, ... } }
+                                    let config_data = chunk.data.get("config").unwrap_or(&chunk.data);
                                     yield StreamChunk {
                                         data: json!({
                                             "name": "openai",
-                                            "api_base": data.get("api_base").unwrap_or(&json!("")),
-                                            "model": data.get("model").unwrap_or(&json!("")),
-                                            "has_api_key": data.get("api_key_set").unwrap_or(&json!(false)),
+                                            "api_base": config_data.get("api_base").unwrap_or(&json!("")),
+                                            "model": config_data.get("model").unwrap_or(&json!("")),
+                                            "has_api_key": config_data.get("api_key_set").unwrap_or(&json!(false)),
                                         }),
                                         done: true,
                                         error: chunk.error,
