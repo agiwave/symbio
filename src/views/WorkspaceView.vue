@@ -1,134 +1,108 @@
 <template>
-  <div class="workspace-view" :class="{ 
-    'ai-visible': aiSidebarVisible, 
-    'workspace-hidden': !workspaceVisible 
-  }">
-    <!-- 工作区 (导航 + 文档树 + 编辑区) -->
-    <div class="workspace-area" v-show="workspaceVisible">
-      <!-- 左侧导航条 -->
-      <nav class="nav-sidebar">
-        <div class="nav-logo" @click="goHome">🌊</div>
-        <div class="nav-items">
-          <button class="nav-btn" :class="{ active: true }" title="工作区">
-            📁
-          </button>
-          <button class="nav-btn" title="搜索">
-            🔍
-          </button>
-          <button 
-            class="nav-btn" 
-            :class="{ active: aiSidebarVisible }"
-            title="AI 助手" 
-            @click="toggleAISidebar"
-          >
-            💬
-          </button>
-          <button class="nav-btn" title="设置" @click="goSettings">
-            ⚙️
-          </button>
-        </div>
-      </nav>
-
-      <!-- 目录区 -->
-      <aside class="panel-sidebar">
-        <div class="panel-header">
-          <h3>文档</h3>
-          <div class="panel-actions">
-            <button class="icon-btn" @click="createNewDoc" title="新建文档">+</button>
-            <button class="icon-btn secondary" @click="exportWorkspace" title="导出">↓</button>
-          </div>
-        </div>
-        <div class="panel-content">
-          <div v-if="rootDocuments.length === 0" class="empty-state">
-            <p>暂无文档</p>
-            <button @click="createNewDoc">创建第一个文档</button>
-          </div>
-          <TreeNode
-            v-for="doc in rootDocuments"
-            :key="doc.id"
-            :document="doc"
-            :level="0"
-            :active-id="activeDocumentId"
-            :documents="documents"
-            @select="selectDocument"
-            @create-child="createChildDoc"
-            @delete="deleteDoc"
-            @move="moveDoc"
-          />
-        </div>
-        <div class="panel-footer">
-          <button class="footer-btn" @click="clearAll" title="清空所有">
-            🗑️ 清空
-          </button>
-        </div>
-      </aside>
-
-      <!-- 主编辑区 -->
-      <main class="editor-area">
-        <div v-if="activeDocument" class="editor-container">
-          <header class="editor-header">
-            <input
-              v-model="activeDocument.title"
-              class="title-input"
-              placeholder="无标题"
-              @blur="saveDocument"
-            />
-            <div class="editor-actions">
-              <button class="action-btn" @click="openFloatingInput" title="AI 助手 (Ctrl+K)">
-                🤖
-              </button>
-            </div>
-          </header>
-          <div class="editor-content">
-            <MarkdownEditor
-              v-model="activeDocument.content"
-              @selection-change="handleSelectionChange"
-            />
-          </div>
-        </div>
-        <div v-else class="empty-editor">
-          <p>选择或创建一个文档开始</p>
-        </div>
-        
-        <!-- 右侧悬浮切换按钮 (仅在 AI 侧边栏隐藏时显示) -->
-        <div 
-          v-if="!aiSidebarVisible"
-          class="edge-toggle right"
-          @mouseenter="showRightToggle = true"
-          @mouseleave="showRightToggle = false"
+  <div class="workspace-view">
+    <!-- 顶层导航条 (始终显示) -->
+    <nav class="nav-sidebar">
+      <div class="nav-logo" @click="goHome">🌊</div>
+      <div class="nav-items">
+        <button 
+          class="nav-btn" 
+          :class="{ active: workspaceVisible }"
+          title="工作区" 
+          @click="toggleWorkspace"
         >
-          <Transition name="fade">
-            <button 
-              v-if="showRightToggle"
-              class="toggle-btn"
-              @click="toggleAISidebar"
-              title="显示 AI 助手"
-            >
-              <span class="toggle-icon">◀</span>
-              <span class="toggle-label">AI</span>
+          📁
+        </button>
+        <button class="nav-btn" title="搜索">
+          🔍
+        </button>
+        <button 
+          class="nav-btn" 
+          :class="{ active: aiSidebarVisible }"
+          title="Agent" 
+          @click="toggleAISidebar"
+        >
+          💬
+        </button>
+        <button class="nav-btn" title="设置" @click="goSettings">
+          ⚙️
+        </button>
+      </div>
+    </nav>
+
+    <!-- 主内容区 -->
+    <div class="main-content">
+      <!-- 工作区 (文档树 + 编辑区) -->
+      <div class="workspace-area" v-show="workspaceVisible">
+        <!-- 目录区 -->
+        <aside class="panel-sidebar">
+          <div class="panel-header">
+            <h3>文档</h3>
+            <div class="panel-actions">
+              <button class="icon-btn" @click="createNewDoc" title="新建文档">+</button>
+              <button class="icon-btn secondary" @click="exportWorkspace" title="导出">↓</button>
+            </div>
+          </div>
+          <div class="panel-content">
+            <div v-if="rootDocuments.length === 0" class="empty-state">
+              <p>暂无文档</p>
+              <button @click="createNewDoc">创建第一个文档</button>
+            </div>
+            <TreeNode
+              v-for="doc in rootDocuments"
+              :key="doc.id"
+              :document="doc"
+              :level="0"
+              :active-id="activeDocumentId"
+              :documents="documents"
+              @select="selectDocument"
+              @create-child="createChildDoc"
+              @delete="deleteDoc"
+              @move="moveDoc"
+            />
+          </div>
+          <div class="panel-footer">
+            <button class="footer-btn" @click="clearAll" title="清空所有">
+              🗑️ 清空
             </button>
-          </Transition>
-        </div>
-      </main>
-    </div>
+          </div>
+        </aside>
 
-    <!-- AI 独立栏 (全局，不受文档切换影响) -->
-    <AISidebar
-      :visible="aiSidebarVisible"
-      ref="aiSidebarRef"
-      @close="aiSidebarVisible = false"
-      @send="handleAIMessage"
-      @toggle-workspace="toggleWorkspace"
-    />
+        <!-- 主编辑区 -->
+        <main class="editor-area">
+          <div v-if="activeDocument" class="editor-container">
+            <header class="editor-header">
+              <input
+                v-model="activeDocument.title"
+                class="title-input"
+                placeholder="无标题"
+                @blur="saveDocument"
+              />
+              <div class="editor-actions">
+                <button class="action-btn" @click="openFloatingInput" title="AI 助手 (Ctrl+K)">
+                  🤖
+                </button>
+              </div>
+            </header>
+            <div class="editor-content">
+              <MarkdownEditor
+                v-model="activeDocument.content"
+                @selection-change="handleSelectionChange"
+              />
+            </div>
+          </div>
+          <div v-else class="empty-editor">
+            <p>选择或创建一个文档开始</p>
+          </div>
+        </main>
+      </div>
 
-    <!-- 当工作区隐藏时，显示显示工作区的按钮 -->
-    <div 
-      v-if="!workspaceVisible"
-      class="show-workspace-btn"
-      @click="workspaceVisible = true"
-    >
-      <span class="toggle-icon">▶</span>
-      <span class="toggle-label">工作区</span>
+      <!-- AI 交互区 -->
+      <AISidebar
+        :visible="aiSidebarVisible"
+        ref="aiSidebarRef"
+        @close="aiSidebarVisible = false"
+        @send="handleAIMessage"
+      />
     </div>
 
     <!-- 悬浮输入框 -->
@@ -170,7 +144,6 @@ const store = useWorkspaceStore()
 // UI 状态
 const aiSidebarVisible = ref(false)
 const workspaceVisible = ref(true)
-const showRightToggle = ref(false)
 const aiSidebarRef = ref<InstanceType<typeof AISidebar> | null>(null)
 const floatingInputVisible = ref(false)
 const floatingInputPosition = ref<{ x: number; y: number } | undefined>()
@@ -213,12 +186,12 @@ function goSettings() {
   router.push('/settings')
 }
 
-function toggleAISidebar() {
-  aiSidebarVisible.value = !aiSidebarVisible.value
-}
-
 function toggleWorkspace() {
   workspaceVisible.value = !workspaceVisible.value
+}
+
+function toggleAISidebar() {
+  aiSidebarVisible.value = !aiSidebarVisible.value
 }
 
 function createNewDoc() {
@@ -335,62 +308,11 @@ defineExpose({
 <style scoped>
 .workspace-view {
   display: flex;
-  flex: 1 1 100%;
   height: 100vh;
   background: var(--color-bg);
-  position: relative;
 }
 
-/* 工作区容器 */
-.workspace-area {
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  transition: opacity 0.3s ease;
-}
-
-.workspace-view.workspace-hidden .workspace-area {
-  display: none;
-}
-
-/* 显示工作区按钮 (工作区隐藏时) */
-.show-workspace-btn {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 8px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-  cursor: pointer;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
-  transition: all 0.2s;
-  z-index: 100;
-}
-
-.show-workspace-btn:hover {
-  background: #f0f0f0;
-  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.15);
-}
-
-.show-workspace-btn .toggle-icon {
-  font-size: 10px;
-  color: var(--color-text-secondary);
-}
-
-.show-workspace-btn .toggle-label {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  writing-mode: vertical-rl;
-}
-
-/* 导航条 */
+/* 导航条 (始终显示) */
 .nav-sidebar {
   width: var(--sidebar-width);
   background: #1a1a2e;
@@ -430,6 +352,21 @@ defineExpose({
 .nav-btn.active {
   background: rgba(255, 255, 255, 0.1);
   opacity: 1;
+}
+
+/* 主内容区 */
+.main-content {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 工作区 (文档树 + 编辑区) */
+.workspace-area {
+  display: flex;
+  flex: 1;
+  min-width: 0;
 }
 
 /* 目录区 */
@@ -526,7 +463,6 @@ defineExpose({
   display: flex;
   flex-direction: column;
   min-width: 0;
-  position: relative;
 }
 
 .editor-container {
@@ -586,61 +522,6 @@ defineExpose({
   align-items: center;
   justify-content: center;
   color: var(--color-text-muted);
-}
-
-/* 右侧悬浮切换按钮 */
-.edge-toggle {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 100;
-}
-
-.edge-toggle.right {
-  right: 0;
-  width: 40px;
-  height: 100px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.toggle-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 4px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  cursor: pointer;
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
-  transition: all 0.2s;
-}
-
-.toggle-btn:hover {
-  background: #f0f0f0;
-  box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15);
-}
-
-.toggle-icon {
-  font-size: 10px;
-  color: var(--color-text-secondary);
-}
-
-.toggle-label {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  writing-mode: vertical-rl;
-}
-
-/* AI 侧边栏占满窗口 */
-.workspace-view.workspace-hidden .ai-sidebar {
-  flex: 1;
-  width: 100%;
-  border-left: none;
 }
 
 /* 过渡动画 */
