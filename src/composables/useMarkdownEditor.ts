@@ -46,7 +46,12 @@ export function extractCodeBlocks(content: string): CodeBlock[] {
  * 判断语言是否可执行
  */
 export function isExecutableLanguage(language: string): boolean {
-  const executableLanguages = ['bash', 'sh', 'shell', 'r', 'python', 'python3', 'perl', 'ruby']
+  const executableLanguages = [
+    'bash', 'sh', 'shell', 
+    'r', 'R', 
+    'python', 'python3', 'py',
+    'perl', 'ruby'
+  ]
   return executableLanguages.includes(language.toLowerCase())
 }
 

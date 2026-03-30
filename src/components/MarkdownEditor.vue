@@ -1,32 +1,54 @@
 <template>
   <div class="markdown-editor-container">
+    <!-- 工具栏 -->
+    <div class="editor-toolbar">
+      <div class="toolbar-left">
+        <button 
+          v-for="block in executableBlocks" 
+          :key="block.id"
+          class="run-block-btn"
+          @click="executeBlock(block)"
+          :disabled="isExecuting"
+        >
+          ▶ {{ block.language }} ({{ block.code.slice(0, 20) }}...)
+        </button>
+      </div>
+      <div class="toolbar-right">
+        <span v-if="executableBlocks.length === 0" class="hint">
+          添加可执行代码块 (python/r/bash)
+        </span>
+      </div>
+    </div>
+    
+    <!-- 编辑器 -->
     <div ref="editorRef" class="editor-root"></div>
     
-    <!-- 执行结果显示 -->
+    <!-- 执行结果 -->
     <div v-if="executionResult" class="execution-result">
       <div class="result-header">
         <span :class="['status', executionResult.status]">
-          {{ executionResult.status === 'success' ? '✅ 成功' : '❌ 失败' }}
+          {{ executionResult.status === 'success' ? '✓ 成功' : '✗ 失败' }}
         </span>
+        <span class="duration">{{ executionResult.duration_ms }}ms</span>
         <button class="close-btn" @click="executionResult = null">×</button>
       </div>
-      <pre class="result-output">{{ executionResult.output }}</pre>
-      <div v-if="executionResult.error" class="result-error">
-        {{ executionResult.error }}
-      </div>
+      <pre v-if="executionResult.stdout" class="result-output">{{ executionResult.stdout }}</pre>
+      <pre v-if="executionResult.stderr" class="result-error">{{ executionResult.stderr }}</pre>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { EditorView } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { 
   extractCodeBlocks, 
   createEditorExtensions, 
+  isExecutableLanguage,
   type CodeBlock 
 } from '../composables/useMarkdownEditor'
+import { executeCodeBlock, type ExecutionResult } from '../services/executor'
 
 const props = defineProps<{
   modelValue: string
@@ -40,12 +62,17 @@ const emit = defineEmits<{
 const editorRef = ref<HTMLElement | null>(null)
 const editorView = ref<EditorView | null>(null)
 const codeBlocks = ref<CodeBlock[]>([])
-const executing = ref<string | null>(null)
+const isExecuting = ref(false)
 const executionResult = ref<{
   status: 'success' | 'failed'
-  output: string
-  error?: string
+  stdout: string
+  stderr: string
+  duration_ms: number
 } | null>(null)
+
+const executableBlocks = computed(() => 
+  codeBlocks.value.filter(block => isExecutableLanguage(block.language))
+)
 
 function createEditor() {
   if (!editorRef.value) return
@@ -74,7 +101,6 @@ function createEditor() {
     parent: editorRef.value,
   })
 
-  // 初始提取代码块
   codeBlocks.value = extractCodeBlocks(props.modelValue)
 }
 
@@ -85,7 +111,32 @@ function destroyEditor() {
   }
 }
 
-// 监听外部值变化
+async function executeBlock(block: CodeBlock) {
+  if (isExecuting.value) return
+  
+  isExecuting.value = true
+  executionResult.value = null
+  
+  try {
+    const result = await executeCodeBlock(block.code, block.language)
+    executionResult.value = {
+      status: result.exit_code === 0 && !result.timed_out ? 'success' : 'failed',
+      stdout: result.stdout,
+      stderr: result.stderr,
+      duration_ms: result.duration_ms,
+    }
+  } catch (err) {
+    executionResult.value = {
+      status: 'failed',
+      stdout: '',
+      stderr: String(err),
+      duration_ms: 0,
+    }
+  } finally {
+    isExecuting.value = false
+  }
+}
+
 watch(() => props.modelValue, (newValue) => {
   if (editorView.value) {
     const currentValue = editorView.value.state.doc.toString()
@@ -118,6 +169,47 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
+.editor-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  min-height: 40px;
+}
+
+.toolbar-left {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.run-block-btn {
+  padding: 0.25rem 0.75rem;
+  border: none;
+  background: var(--color-primary);
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: opacity 0.2s;
+}
+
+.run-block-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.run-block-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
 .editor-root {
   flex: 1;
   overflow: auto;
@@ -138,30 +230,25 @@ onUnmounted(() => {
   padding: 16px;
 }
 
-.editor-root :deep(.cm-line) {
-  padding: 0 16px;
-}
-
-/* 执行结果 */
 .execution-result {
-  margin-top: 16px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
-  background: #fff;
+  margin-top: 0;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  max-height: 300px;
+  overflow: auto;
 }
 
 .result-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
   background: #f8f9fa;
   border-bottom: 1px solid var(--color-border);
 }
 
 .status {
-  font-size: 13px;
+  font-size: 0.875rem;
   font-weight: 500;
 }
 
@@ -173,7 +260,13 @@ onUnmounted(() => {
   color: #dc3545;
 }
 
+.duration {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
 .close-btn {
+  margin-left: auto;
   width: 24px;
   height: 24px;
   border: none;
@@ -183,26 +276,23 @@ onUnmounted(() => {
   color: #666;
 }
 
-.close-btn:hover {
-  color: #333;
+.result-output, .result-error {
+  padding: 0.75rem 1rem;
+  margin: 0;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .result-output {
-  padding: 12px;
-  margin: 0;
-  font-family: monospace;
-  font-size: 13px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 300px;
-  overflow: auto;
+  background: #1e1e1e;
+  color: #d4d4d4;
 }
 
 .result-error {
-  padding: 8px 12px;
-  background: #fff5f5;
-  color: #dc3545;
-  font-size: 13px;
+  background: #1e1e1e;
+  color: #f87171;
   border-top: 1px solid var(--color-border);
 }
 </style>
