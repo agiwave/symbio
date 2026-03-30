@@ -4,6 +4,7 @@ use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use super::plugin::MemoryPlugin;
 use serde_json::json;
+use std::sync::Arc;
 
 pub struct MemoryFactory;
 
@@ -39,7 +40,7 @@ impl PluginFactory for MemoryFactory {
         }
     }
 
-    fn create(&self, _parent: Option<&dyn Plugin>, _config: Option<&serde_json::Value>) -> std::sync::Arc<dyn Plugin> {
-        std::sync::Arc::new(MemoryPlugin::default())
+    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&serde_json::Value>) -> Arc<dyn Plugin> {
+        Arc::new(MemoryPlugin::default())
     }
 }

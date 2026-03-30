@@ -6,7 +6,7 @@ use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
 use crate::core::registry::PluginFactoryRegistry;
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use indexmap::IndexMap;
 
 /// 子插件配置
@@ -52,6 +52,8 @@ impl Default for CompositeMetaConfig {
 pub struct CompositePlugin {
     meta: PluginMeta,
     sub_plugins: IndexMap<String, Arc<dyn Plugin>>,
+    /// 自身引用，用于传递给动态创建的子插件
+    self_ref: Option<Weak<dyn Plugin>>,
 }
 
 impl CompositePlugin {
@@ -109,7 +111,73 @@ impl CompositePlugin {
                 author: meta_config.author,
             },
             sub_plugins,
+            self_ref: None,
         }
+    }
+
+    /// 创建 Arc 包装的 Composite 插件（支持自身引用）
+    pub fn new_arc(meta_config: CompositeMetaConfig, sub_plugins: IndexMap<String, Arc<dyn Plugin>>) -> Arc<Self> {
+        Arc::new_cyclic(|weak| {
+            let input_schema = json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "add", "remove", "invoke"],
+                        "description": "操作类型"
+                    },
+                    "plugin_name": {
+                        "type": "string",
+                        "description": "子插件名称（add/remove/invoke 时需要）"
+                    },
+                    "factory": {
+                        "type": "string",
+                        "description": "工厂名称（add 时需要）"
+                    },
+                    "config": {
+                        "type": "object",
+                        "description": "插件配置（add 时需要）"
+                    },
+                    "input": {
+                        "type": "object",
+                        "description": "调用输入（invoke 时需要）"
+                    }
+                }
+            });
+
+            let output_schema = json!({
+                "type": "object",
+                "properties": {
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "data": {
+                        "type": "object"
+                    },
+                    "error": {
+                        "type": "string"
+                    }
+                }
+            });
+
+            CompositePlugin {
+                meta: PluginMeta {
+                    name: meta_config.name,
+                    description: meta_config.description,
+                    version: meta_config.version,
+                    input: Some(input_schema),
+                    output: Some(output_schema),
+                    author: meta_config.author,
+                },
+                sub_plugins,
+                self_ref: Some(weak.clone() as Weak<dyn Plugin>),
+            }
+        })
+    }
+
+    /// 设置自身引用（在 Arc 创建后调用）
+    pub fn set_self_ref(&mut self, weak: Option<Weak<dyn Plugin>>) {
+        self.self_ref = weak;
     }
 
     /// 获取所有子插件名称列表
@@ -150,7 +218,9 @@ impl CompositePlugin {
             .find(|f| f.meta().name == factory_name)
             .ok_or_else(|| PluginError::NotFound(format!("工厂 '{}' 未找到", factory_name)))?;
         
-        Ok(factory.create(Some(self), config))
+        // 传递自身引用给子插件
+        let parent = self.self_ref.as_ref().and_then(|w| w.upgrade());
+        Ok(factory.create(parent, config))
     }
 
     /// 路由到子插件

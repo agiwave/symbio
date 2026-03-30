@@ -1,6 +1,8 @@
 //! Agent 插件模块
 //!
-//! Agent 是通用的插件容器，内置 add/remove/chat/tools/memory/session/telegram/openai/docker 子插件
+//! Agent 是通用的插件容器，支持：
+//! - 子插件管理
+//! - 能力路由 (@llm, @session 等)
 
 mod add;
 mod remove;
@@ -31,88 +33,115 @@ pub use factory::AgentFactory;
 // 导入 docker 插件（来自 plugins/docker）
 use crate::plugins::docker::DockerPlugin;
 
-use crate::core::traits::Plugin;
+use crate::core::traits::{Plugin, ParentRef};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
 use crate::core::PluginFactoryRegistry;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 pub struct Agent {
     meta: PluginMeta,
     instances: HashMap<String, Arc<dyn Plugin>>,
+    /// 自身引用，用于传递给子插件
+    self_ref: Option<Weak<dyn Plugin>>,
 }
 
 impl Agent {
-    pub fn new() -> Self {
-        let meta = PluginMeta {
-            name: "agent".to_string(),
-            description: "通用的插件容器，可以管理子插件实例".to_string(),
-            version: "0.1.0".to_string(),
-            input: None,
-            output: Some(json!({
-                "type": "object",
-                "properties": {
-                    "plugins": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "子插件列表"
-                    },
-                    "message": {
-                        "type": "string",
-                        "description": "状态消息"
-                    }
-                }
-            })),
-            author: Some("Symbio Team".to_string()),
-        };
-
-        let mut agent = Agent {
-            meta,
-            instances: HashMap::new(),
-        };
-
-        agent.init_builtin_plugins();
-        agent
+    /// 创建 Agent 实例（返回 Arc 包装）
+    /// 
+    /// 使用 Arc::new_cyclic 创建自引用
+    pub fn new_arc() -> Arc<Self> {
+        Arc::new_cyclic(|weak| {
+            Agent {
+                meta: PluginMeta {
+                    name: "agent".to_string(),
+                    description: "通用的插件容器，支持能力路由".to_string(),
+                    version: "0.1.0".to_string(),
+                    input: None,
+                    output: Some(json!({
+                        "type": "object",
+                        "properties": {
+                            "plugins": {
+                                "type": "array",
+                                "items": {"type": "string"}
+                            },
+                            "message": { "type": "string" }
+                        }
+                    })),
+                    author: Some("Symbio Team".to_string()),
+                },
+                instances: HashMap::new(),
+                self_ref: Some(weak.clone() as Weak<dyn Plugin>),
+            }
+        })
     }
 
-    fn init_builtin_plugins(&mut self) {
+    /// 初始化内置插件（消费并返回新的 Arc）
+    pub fn init_builtin_plugins(self: Arc<Self>) -> Arc<Self> {
         let registry = PluginFactoryRegistry::global();
+        let parent: Option<Arc<dyn Plugin>> = Some(Arc::clone(&self) as Arc<dyn Plugin>);
         
-        // 注册内置管理插件：add, remove
-        self.instances.insert("add".to_string(), Arc::new(AddPlugin::new()));
-        self.instances.insert("remove".to_string(), Arc::new(RemovePlugin::new()));
+        let mut instances = HashMap::new();
         
-        // 注册 chat 插件
-        self.instances.insert("chat".to_string(), Arc::new(ChatPlugin::new()));
+        // 注册内置管理插件（不需要父引用）
+        instances.insert("add".to_string(), Arc::new(AddPlugin::new()) as Arc<dyn Plugin>);
+        instances.insert("remove".to_string(), Arc::new(RemovePlugin::new()) as Arc<dyn Plugin>);
         
-        // 注册 tools 插件
-        self.instances.insert("tools".to_string(), Arc::new(ToolsPlugin::default()));
+        // 注册 chat 插件（需要父引用来调用 @llm）
+        instances.insert("chat".to_string(), ChatPlugin::with_parent(parent.clone()));
         
-        // 注册 memory 插件
-        self.instances.insert("memory".to_string(), Arc::new(MemoryPlugin::default()));
-        
-        // 注册 session 插件
-        self.instances.insert("session".to_string(), Arc::new(SessionPlugin::default()));
-        
-        // 注册 telegram 插件
-        self.instances.insert("telegram".to_string(), Arc::new(TelegramPlugin::default()));
-        
-        // 注册 openai 插件
-        self.instances.insert("openai".to_string(), Arc::new(OpenAiPlugin::default()));
-        
-        // 注册 docker 插件
-        self.instances.insert("docker".to_string(), Arc::new(DockerPlugin::new()));
+        // 其他插件
+        instances.insert("tools".to_string(), Arc::new(ToolsPlugin::default()) as Arc<dyn Plugin>);
+        instances.insert("memory".to_string(), Arc::new(MemoryPlugin::default()) as Arc<dyn Plugin>);
+        instances.insert("session".to_string(), Arc::new(SessionPlugin::default()) as Arc<dyn Plugin>);
+        instances.insert("telegram".to_string(), Arc::new(TelegramPlugin::default()) as Arc<dyn Plugin>);
+        instances.insert("openai".to_string(), Arc::new(OpenAiPlugin::default()) as Arc<dyn Plugin>);
+        instances.insert("docker".to_string(), Arc::new(DockerPlugin::new()) as Arc<dyn Plugin>);
 
-        // 注册工厂插件（跳过 agent 自身和已注册的插件，避免无限递归）
+        // 注册工厂插件
         for factory in registry.list() {
             let name = factory.meta().name.clone();
-            if name == "agent" || name == "chat" || name == "tools" || name == "memory" 
-                || name == "session" || name == "telegram" || name == "openai" || name == "docker" {
+            if instances.contains_key(&name) {
                 continue;
             }
-            let plugin = factory.create(Some(&*self), None);
-            self.instances.insert(name, plugin);
+            let plugin = factory.create(parent.clone(), None);
+            instances.insert(name, plugin);
+        }
+        
+        // 尝试解包 Arc，如果成功则修改后重新包装
+        match Arc::try_unwrap(self) {
+            Ok(mut agent) => {
+                agent.instances = instances;
+                Arc::new(agent)
+            }
+            Err(arc) => {
+                // 如果有其他引用，使用 get_mut（需要可变引用）
+                // 这种情况不应该发生在初始化阶段
+                arc
+            }
+        }
+    }
+
+    /// 兼容旧 API
+    pub fn new() -> Self {
+        Self {
+            meta: PluginMeta {
+                name: "agent".to_string(),
+                description: "通用的插件容器，支持能力路由".to_string(),
+                version: "0.1.0".to_string(),
+                input: None,
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "plugins": { "type": "array", "items": {"type": "string"} },
+                        "message": { "type": "string" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            },
+            instances: HashMap::new(),
+            self_ref: None,
         }
     }
 
@@ -126,6 +155,21 @@ impl Agent {
             Some(idx) => Some((&path[..idx], &path[idx + 1..])),
             None => Some((path, "")),
         }
+    }
+
+    /// 检查是否是能力路由（以 @ 开头）
+    fn is_capability_route(path: &str) -> bool {
+        path.starts_with('@')
+    }
+
+    /// 根据能力查找插件
+    fn find_by_capability(&self, capability: &str) -> Option<Arc<dyn Plugin>> {
+        for plugin in self.instances.values() {
+            if plugin.capabilities().iter().any(|c| *c == capability) {
+                return Some(Arc::clone(plugin));
+            }
+        }
+        None
     }
 }
 
@@ -142,6 +186,18 @@ impl Plugin for Agent {
             return Ok(self.meta.clone());
         }
         
+        // 能力路由
+        if Self::is_capability_route(path) {
+            let capability = path.trim_start_matches('@');
+            // 移除可能的后缀路径
+            let capability = capability.split('/').next().unwrap_or(capability);
+            
+            if let Some(plugin) = self.find_by_capability(capability) {
+                return plugin.meta("");
+            }
+            return Err(PluginError::NotFound(format!("能力 '{}' 未找到", capability)));
+        }
+        
         let (name, rest) = Self::parse_path(path)
             .ok_or_else(|| PluginError::NotFound(format!("插件路径 '{}' 未找到", path)))?;
         
@@ -153,16 +209,39 @@ impl Plugin for Agent {
 
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
         if path.is_empty() {
-            return Ok(InvokeStream::single(Value::Object(serde_json::Map::from_iter([
-                ("plugins".to_string(), Value::Array(
-                    self.instances.keys()
-                        .map(|n| Value::String(n.clone()))
-                        .collect()
-                )),
-                ("message".to_string(), Value::String("Agent 插件就绪".to_string())),
-            ]))));
+            let mut capabilities: Vec<Value> = Vec::new();
+            for (name, plugin) in self.instances.iter() {
+                let caps: Vec<&str> = plugin.capabilities();
+                capabilities.push(json!({
+                    "plugin": name,
+                    "capabilities": caps
+                }));
+            }
+            
+            return Ok(InvokeStream::single(json!({
+                "success": true,
+                "data": {
+                    "plugins": self.instances.keys().cloned().collect::<Vec<_>>(),
+                    "capabilities": capabilities,
+                    "message": "Agent 插件就绪"
+                }
+            })));
         }
         
+        // 能力路由：@llm, @session 等
+        if Self::is_capability_route(path) {
+            let (capability, rest) = match path.find('/') {
+                Some(idx) => (&path[1..idx], &path[idx + 1..]),
+                None => (&path[1..], ""),
+            };
+            
+            let plugin = self.find_by_capability(capability)
+                .ok_or_else(|| PluginError::NotFound(format!("能力 '{}' 未找到", capability)))?;
+            
+            return plugin.invoke(rest, input);
+        }
+        
+        // 普通路径路由
         let (name, rest) = Self::parse_path(path)
             .ok_or_else(|| PluginError::NotFound(format!("插件路径 '{}' 未找到", path)))?;
         
@@ -170,5 +249,9 @@ impl Plugin for Agent {
             .ok_or_else(|| PluginError::NotFound(format!("插件 '{}' 未找到", name)))?;
         
         plugin.invoke(rest, input)
+    }
+
+    fn capabilities(&self) -> Vec<&'static str> {
+        vec!["agent"]
     }
 }

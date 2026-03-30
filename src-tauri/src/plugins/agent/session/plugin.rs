@@ -3,7 +3,7 @@
 //! 提供会话历史和上下文管理
 
 use super::types::{ChatMessage, ContextEntry, Session, SessionContext, LlmContext};
-use crate::core::traits::Plugin;
+use crate::core::traits::{Plugin, CAPABILITY_SESSION};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -379,6 +379,10 @@ impl Default for SessionPlugin {
 impl Plugin for SessionPlugin {
     fn meta(&self, _path: &str) -> PluginResult<PluginMeta> {
         Ok(self.meta.clone())
+    }
+
+    fn capabilities(&self) -> Vec<&'static str> {
+        vec![CAPABILITY_SESSION]
     }
 
     fn invoke(&self, _path: &str, input: Value) -> PluginResult<InvokeStream> {

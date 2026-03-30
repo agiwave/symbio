@@ -5,6 +5,7 @@ use crate::core::types::PluginMeta;
 use super::plugin::OpenAiPlugin;
 use super::types::OpenAiConfig;
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 pub struct OpenAiFactory;
 
@@ -40,13 +41,13 @@ impl PluginFactory for OpenAiFactory {
         }
     }
 
-    fn create(&self, _parent: Option<&dyn Plugin>, config: Option<&serde_json::Value>) -> std::sync::Arc<dyn Plugin> {
+    fn create(&self, _parent: Option<Arc<dyn Plugin>>, config: Option<&serde_json::Value>) -> Arc<dyn Plugin> {
         let openai_config: OpenAiConfig = config
             .and_then(|v| normalize_config(v))
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
         
-        std::sync::Arc::new(OpenAiPlugin::new(openai_config))
+        Arc::new(OpenAiPlugin::new(openai_config))
     }
 }
 

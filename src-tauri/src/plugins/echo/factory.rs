@@ -28,7 +28,7 @@ impl PluginFactory for EchoFactory {
         }
     }
     
-    fn create(&self, _parent: Option<&dyn Plugin>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
         Arc::new(EchoPlugin::new())
     }
 }

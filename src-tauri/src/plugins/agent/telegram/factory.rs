@@ -5,6 +5,7 @@ use crate::core::types::PluginMeta;
 use super::plugin::TelegramPlugin;
 use super::types::TelegramConfig;
 use serde_json::json;
+use std::sync::Arc;
 
 pub struct TelegramFactory;
 
@@ -40,11 +41,11 @@ impl PluginFactory for TelegramFactory {
         }
     }
 
-    fn create(&self, _parent: Option<&dyn Plugin>, config: Option<&serde_json::Value>) -> std::sync::Arc<dyn Plugin> {
+    fn create(&self, _parent: Option<Arc<dyn Plugin>>, config: Option<&serde_json::Value>) -> Arc<dyn Plugin> {
         let telegram_config: TelegramConfig = config
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
         
-        std::sync::Arc::new(TelegramPlugin::new(telegram_config))
+        Arc::new(TelegramPlugin::new(telegram_config))
     }
 }

@@ -2,7 +2,7 @@
 
 use super::types::*;
 use super::token::*;
-use crate::core::traits::Plugin;
+use crate::core::traits::{Plugin, CAPABILITY_LLM};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -311,6 +311,10 @@ impl Default for OpenAiPlugin {
 impl Plugin for OpenAiPlugin {
     fn meta(&self, _path: &str) -> PluginResult<PluginMeta> {
         Ok(self.meta.clone())
+    }
+
+    fn capabilities(&self) -> Vec<&'static str> {
+        vec![CAPABILITY_LLM]
     }
 
     fn invoke(&self, _path: &str, input: Value) -> PluginResult<InvokeStream> {

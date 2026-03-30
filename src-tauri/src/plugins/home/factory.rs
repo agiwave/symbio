@@ -30,7 +30,7 @@ impl PluginFactory for HomeFactory {
         }
     }
 
-    fn create(&self, _parent: Option<&dyn Plugin>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
         // 使用各子插件的工厂创建实例
         let work = WorkFactory::new().create(None, None);
         let agent = AgentFactory::new().create(None, None);

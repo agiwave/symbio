@@ -1,4 +1,6 @@
 //! AI 对话插件实现
+//!
+//! 通过 @llm 能力路由调用实际的 LLM 插件
 
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
@@ -6,72 +8,90 @@ use super::types::*;
 use super::client::LlmClient;
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 use futures::stream::StreamExt;
 
 /// AI 对话插件
+/// 
+/// 职责：
+/// - 管理 API 配置
+/// - 通过 @llm 能力路由调用实际 LLM 插件
 pub struct ChatPlugin {
     meta: PluginMeta,
     client: Arc<RwLock<Option<LlmClient>>>,
     config: Arc<RwLock<ProviderConfig>>,
+    /// 父插件引用（用于能力路由）
+    parent: Option<Weak<dyn Plugin>>,
 }
 
 impl ChatPlugin {
     pub fn new() -> Self {
-        let meta = PluginMeta {
-            name: "chat".to_string(),
-            description: "AI 对话插件，支持流式响应".to_string(),
-            version: "0.1.0".to_string(),
-            input: Some(json!({
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["send", "stream", "configure", "get_config"],
-                        "description": "操作类型"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
+        Self {
+            meta: PluginMeta {
+                name: "chat".to_string(),
+                description: "AI 对话插件，支持流式响应".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["send", "stream", "configure", "get_config"],
+                            "description": "操作类型"
+                        },
+                        "messages": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "role": { "type": "string" },
+                                    "content": { "type": "string" }
+                                }
+                            },
+                            "description": "对话消息列表"
+                        },
+                        "config": {
                             "type": "object",
                             "properties": {
-                                "role": { "type": "string" },
-                                "content": { "type": "string" }
-                            }
-                        },
-                        "description": "对话消息列表"
+                                "api_base": { "type": "string" },
+                                "api_key": { "type": "string" },
+                                "model": { "type": "string" },
+                                "temperature": { "type": "number" },
+                                "max_tokens": { "type": "integer" }
+                            },
+                            "description": "AI 提供商配置"
+                        }
                     },
-                    "config": {
-                        "type": "object",
-                        "properties": {
-                            "api_base": { "type": "string" },
-                            "api_key": { "type": "string" },
-                            "model": { "type": "string" },
-                            "temperature": { "type": "number" },
-                            "max_tokens": { "type": "integer" }
-                        },
-                        "description": "AI 提供商配置"
+                    "required": ["action"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "content": { "type": "string" },
+                        "event_type": { "type": "string" },
+                        "config": { "type": "object" }
                     }
-                },
-                "required": ["action"]
-            })),
-            output: Some(json!({
-                "type": "object",
-                "properties": {
-                    "content": { "type": "string" },
-                    "event_type": { "type": "string" },
-                    "config": { "type": "object" }
-                }
-            })),
-            author: Some("Symbio Team".to_string()),
-        };
-
-        Self {
-            meta,
+                })),
+                author: Some("Symbio Team".to_string()),
+            },
             client: Arc::new(RwLock::new(None)),
             config: Arc::new(RwLock::new(ProviderConfig::default())),
+            parent: None,
         }
+    }
+
+    /// 创建带父引用的实例
+    pub fn with_parent(parent: Option<Arc<dyn Plugin>>) -> Arc<dyn Plugin> {
+        let plugin = Self::new();
+        let mut plugin = plugin;
+        plugin.parent = parent.map(|p| Arc::downgrade(&p));
+        Arc::new(plugin)
+    }
+
+    /// 获取父插件引用
+    fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
+        self.parent.as_ref().and_then(|w| w.upgrade())
     }
 }
 

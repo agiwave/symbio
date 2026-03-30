@@ -74,7 +74,7 @@ impl PluginFactory for CompositeFactory {
         }
     }
 
-    fn create(&self, _parent: Option<&dyn Plugin>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
         let mut plugins = IndexMap::new();
 
         // 通过工厂创建每个子插件
