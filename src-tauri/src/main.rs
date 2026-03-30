@@ -7,7 +7,7 @@ mod commands;
 mod execution;
 
 use core::{PluginFactoryRegistry, Plugin};
-use plugins::{AgentFactory, EchoFactory, CalculatorFactory, FormatterFactory};
+use plugins::{AgentFactory, EchoFactory, CalculatorFactory, FormatterFactory, DockerFactory};
 use std::sync::{Mutex, Arc};
 
 struct AppState {
@@ -23,9 +23,11 @@ fn main() {
     registry.register(Arc::new(EchoFactory::new()));
     registry.register(Arc::new(CalculatorFactory::new()));
     registry.register(Arc::new(FormatterFactory::new()));
+    registry.register(Arc::new(DockerFactory::new()));
     registry.register(Arc::new(AgentFactory::new()));
     
     // 使用 AgentFactory 创建 root agent
+    // Agent 会自动注册所有工厂插件作为子插件
     let root: Arc<dyn Plugin> = registry
         .list()
         .into_iter()
@@ -40,12 +42,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::meta,
             commands::invoke,
-            commands::stream,
-            commands::docker_available,
-            commands::docker_image_exists,
-            commands::docker_build_image,
-            commands::docker_execute,
-            commands::docker_execute_script
+            commands::stream
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

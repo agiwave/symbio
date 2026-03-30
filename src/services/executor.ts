@@ -1,12 +1,13 @@
 /**
- * 代码执行服务
+ * Docker 执行服务
  *
- * 提供代码块的执行能力
+ * 通过标准插件接口调用 Docker 执行能力
  */
 
 import { invoke } from '@tauri-apps/api/core'
 
 export interface ExecutionResult {
+  success: boolean
   exit_code: number
   stdout: string
   stderr: string
@@ -15,51 +16,45 @@ export interface ExecutionResult {
 }
 
 export interface ExecutionConfig {
-  cpu_limit: number
-  memory_limit: number
-  time_limit: number
-  network_disabled: boolean
-  read_only_paths: string[]
-  writable_paths: string[]
-  workdir: string
-  image: string
+  cpu_limit?: number
+  memory_limit?: number
+  time_limit?: number
+  network_disabled?: boolean
+  image?: string
+}
+
+/**
+ * 调用 Docker 插件
+ */
+async function callDockerPlugin(action: string, params: Record<string, unknown>): Promise<unknown> {
+  const result = await invoke<unknown[]>('invoke', {
+    path: 'docker',
+    input: { action, ...params }
+  })
+  
+  // invoke 返回 StreamChunk 数组，取第一个的 data
+  if (Array.isArray(result) && result.length > 0) {
+    return result[0].data
+  }
+  return result
 }
 
 /**
  * 检查 Docker 是否可用
  */
 export async function isDockerAvailable(): Promise<boolean> {
-  return invoke<boolean>('docker_available')
-}
-
-/**
- * 检查镜像是否存在
- */
-export async function isImageExists(tag: string): Promise<boolean> {
-  return invoke<boolean>('docker_image_exists', { tag })
-}
-
-/**
- * 构建执行环境镜像
- */
-export async function buildImage(dockerfilePath: string, tag: string): Promise<void> {
-  return invoke('docker_build_image', { 
-    dockerfile_path: dockerfilePath, 
-    tag 
-  })
+  const result = await callDockerPlugin('available', {}) as { success: boolean; available: boolean }
+  return result.available
 }
 
 /**
  * 执行命令
  */
 export async function executeCommand(
-  command: string, 
+  command: string,
   config?: ExecutionConfig
 ): Promise<ExecutionResult> {
-  return invoke<ExecutionResult>('docker_execute', { 
-    command, 
-    config 
-  })
+  return callDockerPlugin('execute', { command, config }) as Promise<ExecutionResult>
 }
 
 /**
@@ -70,17 +65,17 @@ export async function executeScript(
   language: string,
   config?: ExecutionConfig
 ): Promise<ExecutionResult> {
-  return invoke<ExecutionResult>('docker_execute_script', { 
+  return callDockerPlugin('execute_script', { 
     script_path: scriptPath, 
     language,
     config 
-  })
+  }) as Promise<ExecutionResult>
 }
 
 /**
  * 执行代码块
  * 
- * 将代码写入临时文件，然后执行
+ * 将代码作为命令执行
  */
 export async function executeCodeBlock(
   code: string,
@@ -93,10 +88,11 @@ export async function executeCodeBlock(
   switch (language.toLowerCase()) {
     case 'python':
     case 'python3':
-      command = `python3 -c "${code.replace(/"/g, '\\"')}"`
+    case 'py':
+      command = `python3 -c "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`
       break
     case 'r':
-      command = `Rscript -e "${code.replace(/"/g, '\\"')}"`
+      command = `Rscript -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`
       break
     case 'bash':
     case 'sh':
@@ -118,8 +114,5 @@ export const defaultExecutionConfig: ExecutionConfig = {
   memory_limit: 4096,
   time_limit: 3600,
   network_disabled: true,
-  read_only_paths: [],
-  writable_paths: ['/workspace'],
-  workdir: '/workspace',
   image: 'symbio-executor:latest',
 }

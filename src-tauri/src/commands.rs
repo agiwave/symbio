@@ -1,14 +1,14 @@
 //! Tauri 命令处理模块
 //!
-//! 提供核心命令：
+//! 提供三个核心命令：
 //! - `meta`: 获取插件元数据
 //! - `invoke`: 同步调用，返回完整结果
 //! - `stream`: 流式调用，通过事件推送每个 chunk
-//! - `docker_*`: Docker 执行环境命令
+//!
+//! 所有插件能力都通过这三个标准命令访问，遵循统一的插件架构。
 
 use crate::AppState;
 use crate::core::types::{PluginMeta, StreamChunk, InvokeStream};
-use crate::execution::{DockerExecutor, ExecutionConfig, ExecutionResult};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
@@ -93,56 +93,4 @@ pub async fn stream(
 pub struct MetaResponse {
     pub path: String,
     pub meta: PluginMeta,
-}
-
-// ===== Docker 执行命令 =====
-
-/// 检查 Docker 是否可用
-#[tauri::command]
-pub fn docker_available() -> bool {
-    DockerExecutor::with_defaults().is_docker_available()
-}
-
-/// 检查执行环境镜像是否存在
-#[tauri::command]
-pub fn docker_image_exists(tag: String) -> bool {
-    DockerExecutor::with_defaults().image_exists(&tag)
-}
-
-/// 构建执行环境镜像
-#[tauri::command]
-pub fn docker_build_image(
-    dockerfile_path: String,
-    tag: String,
-) -> Result<(), String> {
-    DockerExecutor::with_defaults().build_image(&dockerfile_path, &tag)
-}
-
-/// 执行命令
-#[tauri::command]
-pub fn docker_execute(
-    command: String,
-    config: Option<ExecutionConfig>,
-) -> Result<ExecutionResult, String> {
-    let executor = match config {
-        Some(c) => DockerExecutor::new(c),
-        None => DockerExecutor::with_defaults(),
-    };
-    
-    executor.execute(&command)
-}
-
-/// 执行脚本
-#[tauri::command]
-pub fn docker_execute_script(
-    script_path: String,
-    language: String,
-    config: Option<ExecutionConfig>,
-) -> Result<ExecutionResult, String> {
-    let executor = match config {
-        Some(c) => DockerExecutor::new(c),
-        None => DockerExecutor::with_defaults(),
-    };
-    
-    executor.execute_script(&script_path, &language)
 }
