@@ -2,6 +2,7 @@
  * Docker 执行服务
  *
  * 通过标准插件接口调用 Docker 执行能力
+ * Docker 插件在 agent 下，路径为 agent/docker
  */
 
 import { callPlugin } from './plugin'
@@ -23,11 +24,14 @@ export interface ExecutionConfig {
   image?: string
 }
 
+// Docker 插件在 agent 下，路径为 agent/docker
+const DOCKER_PATH = 'agent/docker'
+
 /**
  * 检查 Docker 是否可用
  */
 export async function isDockerAvailable(): Promise<boolean> {
-  const result = await callPlugin<{ success: boolean; available: boolean }>('docker', {
+  const result = await callPlugin<{ success: boolean; available: boolean }>(DOCKER_PATH, {
     action: 'available'
   })
   return result.available
@@ -40,7 +44,7 @@ export async function executeCommand(
   command: string,
   config?: ExecutionConfig
 ): Promise<ExecutionResult> {
-  return callPlugin<ExecutionResult>('docker', { action: 'execute', command, config })
+  return callPlugin<ExecutionResult>(DOCKER_PATH, { action: 'execute', command, config })
 }
 
 /**
@@ -51,7 +55,7 @@ export async function executeScript(
   language: string,
   config?: ExecutionConfig
 ): Promise<ExecutionResult> {
-  return callPlugin<ExecutionResult>('docker', {
+  return callPlugin<ExecutionResult>(DOCKER_PATH, {
     action: 'execute_script',
     script_path: scriptPath,
     language,

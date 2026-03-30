@@ -23,6 +23,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // 当前活动文档 ID
   const activeDocumentId = ref<string | null>(null)
 
+  // 是否已初始化
+  const initialized = ref(false)
+
   // 计算属性：当前文档
   const activeDocument = computed(() => {
     if (!activeDocumentId.value) return null
@@ -49,6 +52,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
     })
     return children
+  }
+
+  // 初始化 - 调用后端初始化并加载数据
+  async function init() {
+    if (initialized.value) return
+    
+    try {
+      // 先调用后端初始化
+      await callPlugin('work', { action: 'init' })
+      
+      // 然后加载文档列表
+      await loadDocuments()
+      
+      initialized.value = true
+    } catch (e) {
+      console.error('Failed to initialize workspace:', e)
+    }
   }
 
   // 加载文档列表
@@ -81,7 +101,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         const parent = documents.value.get(parentId)
         if (parent) {
           parent.children = parent.children || []
-          parent.children.push(result.id)
+          if (!parent.children.includes(result.id)) {
+            parent.children.push(result.id)
+          }
         }
       }
 
@@ -92,7 +114,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  // 获取文档
+  // 获取文档详情
   async function getDocument(id: string): Promise<Document | null> {
     try {
       const result = await callPlugin<Document>('work', {
@@ -142,7 +164,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         }
       }
 
-      documents.value.delete(id)
+      // 递归删除子文档
+      function removeChildren(docId: string) {
+        const d = documents.value.get(docId)
+        if (d?.children) {
+          d.children.forEach(removeChildren)
+        }
+        documents.value.delete(docId)
+      }
+      removeChildren(id)
 
       if (activeDocumentId.value === id) {
         activeDocumentId.value = null
@@ -155,35 +185,105 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  // 移动文档（暂简单实现）
+  async function moveDocument(id: string, newParentId: string | null, _newOrder: number): Promise<boolean> {
+    try {
+      const doc = documents.value.get(id)
+      if (!doc) return false
+
+      const oldParentId = doc.parentId
+
+      // 更新父文档的 children
+      if (oldParentId) {
+        const oldParent = documents.value.get(oldParentId)
+        if (oldParent?.children) {
+          oldParent.children = oldParent.children.filter((cid) => cid !== id)
+        }
+      }
+
+      if (newParentId) {
+        const newParent = documents.value.get(newParentId)
+        if (newParent) {
+          newParent.children = newParent.children || []
+          if (!newParent.children.includes(id)) {
+            newParent.children.push(id)
+          }
+        }
+      }
+
+      // 更新文档
+      await callPlugin('work', {
+        action: 'update',
+        id,
+        parentId: newParentId
+      })
+      
+      doc.parentId = newParentId
+      
+      return true
+    } catch (e) {
+      console.error('Failed to move document:', e)
+      return false
+    }
+  }
+
   // 设置活动文档
   function setActiveDocument(id: string | null) {
     activeDocumentId.value = id
+    // 加载文档详情
+    if (id) {
+      getDocument(id)
+    }
   }
 
-  // 初始化
-  async function init() {
-    await loadDocuments()
+  // 导出为 JSON
+  function exportToJSON(): string {
+    const data = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      documents: Array.from(documents.value.values()),
+    }
+    return JSON.stringify(data, null, 2)
+  }
+
+  // 清空存储
+  async function clearStorage() {
+    try {
+      // 删除所有根文档
+      const rootIds = rootDocuments.value.map(d => d.id)
+      for (const id of rootIds) {
+        await deleteDocument(id)
+      }
+      documents.value.clear()
+      activeDocumentId.value = null
+    } catch (e) {
+      console.error('Failed to clear storage:', e)
+    }
   }
 
   return {
     // State
     documents,
     activeDocumentId,
+    initialized,
 
     // Computed
     activeDocument,
     rootDocuments,
 
     // Actions
+    init,
     loadDocuments,
     createDocument,
     getDocument,
     updateDocument,
     deleteDocument,
+    moveDocument,
     setActiveDocument,
     getChildren,
 
-    // Init
-    init,
+    // Import/Export
+    exportToJSON,
+    clearStorage,
   }
 })

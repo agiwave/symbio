@@ -1,422 +1,384 @@
-# Symbiont 项目推进计划
+# Symbio 项目推进计划
 
 project:
-  name: Symbiont
+  name: Symbio
   description: 在做中学：生信分析的互动学习平台
   version: 0.1.0
   created: 2026-03-29
-  status: planning
+  updated: 2026-03-30
+  status: development
+
+# 系统架构（已固定，不可修改）
+architecture:
+  frontend:
+    framework: Vue 3 + TypeScript
+    build: Vite
+    state: Pinia
+    router: Vue Router
+  backend:
+    framework: Tauri 2.0
+    language: Rust
+  plugins:
+    root: home
+    children:
+      - work      # 工作区管理
+      - agent     # AI交互
+      - setting   # 设置管理
+  storage:
+    local: localStorage / SQLite
+
+# 功能模块
+modules:
+  - id: workspace
+    name: 工作区模块
+    description: 文档管理、Markdown编辑、代码执行
+    plugin: work
+    priority: P0
+    
+  - id: agent
+    name: 智能体模块
+    description: AI对话、智能辅助、错误诊断
+    plugin: agent
+    priority: P0
+    
+  - id: setting
+    name: 设置模块
+    description: 用户配置、偏好管理
+    plugin: setting
+    priority: P1
 
 # 项目阶段
 phases:
   - id: phase-1
     name: 核心能力 (MVP)
-    goal: 验证「执行 + 记录 + 复用」的基本价值
-    duration: 8 weeks
-    status: pending
+    goal: 验证「编辑 + 执行 + AI辅助」的基本价值
+    status: in_progress
     milestones:
-      - 用户能上传数据并识别类型
-      - 用户能执行 RNA-seq 分析流程
-      - 分析结果自动记录到文档
-      - 分析流程可保存和复用
+      - 工作区文档管理功能完善
+      - AI对话能力接入
+      - 基础设置功能可用
 
   - id: phase-2
-    name: 体验优化 + 结果验证
+    name: 体验优化
     goal: 提升执行效率，增加结果验证能力
-    duration: 6 weeks
     status: pending
     depends_on: [phase-1]
     milestones:
       - 执行进度可视化
-      - 结果三层验证机制
+      - 结果验证机制
       - 错误自动诊断
-      - 更多分析类型支持
 
   - id: phase-3
     name: 学习能力增强
     goal: 帮助用户形成自己的分析套路
-    duration: 6 weeks
     status: pending
     depends_on: [phase-2]
     milestones:
       - 学习进度追踪
-      - 知识点关联
-      - 流程个性化
+      - 流程保存复用
       - 个人能力图谱
-
-  - id: phase-4
-    name: 深度学习
-    goal: 长期记忆与风格学习
-    duration: 8 weeks
-    status: pending
-    depends_on: [phase-3]
-    milestones:
-      - 跨项目经验复用
-      - 用户偏好学习
-      - 隐性需求感知
 
 # 任务列表
 tasks:
-  # ===== Phase 1: 核心能力 (MVP) =====
+  # ===== 已完成任务 =====
   
-  # 基础架构
   - id: T001
     title: 项目基础架构搭建
-    phase: phase-1
+    module: infrastructure
     priority: P0
     status: completed
-    assignee: null
-    estimated_hours: 16
-    depends_on: []
-    tags: [architecture, infrastructure]
+    completed_at: 2026-03-29
     doc: tasks/T001-project-infrastructure.md
 
   - id: T002
     title: Markdown 编辑器集成
-    phase: phase-1
+    module: workspace
     priority: P0
     status: completed
-    assignee: null
-    estimated_hours: 24
-    depends_on: [T001]
-    tags: [frontend, editor]
+    completed_at: 2026-03-29
     doc: tasks/T002-markdown-editor.md
 
   - id: T003
     title: 文档树管理 (Notion 风格)
-    phase: phase-1
+    module: workspace
     priority: P0
     status: completed
-    assignee: null
-    estimated_hours: 20
-    depends_on: [T001]
-    tags: [frontend, data-structure]
-    doc: tasks/T003-document-tree.md
+    completed_at: 2026-03-29
 
-  # 执行系统
   - id: T004
     title: Docker 执行环境搭建
-    phase: phase-1
+    module: workspace
     priority: P0
     status: completed
-    assignee: null
-    estimated_hours: 16
-    depends_on: [T001]
-    tags: [backend, docker, execution]
+    completed_at: 2026-03-29
     doc: tasks/T004-docker-environment.md
 
-  - id: T005
-    title: 代码块执行引擎
-    phase: phase-1
-    priority: P0
-    status: completed
-    assignee: null
-    estimated_hours: 24
-    depends_on: [T002, T004]
-    tags: [backend, execution]
-    doc: tasks/T005-code-execution.md
-
-  - id: T006
-    title: 结果自动捕获
-    phase: phase-1
-    priority: P0
-    status: pending
-    assignee: null
-    estimated_hours: 16
-    depends_on: [T005]
-    tags: [backend, execution]
-    doc: tasks/T006-result-capture.md
-
-  # AI 交互
-  - id: T007
-    title: AI 对话接口集成
-    phase: phase-1
-    priority: P0
-    status: pending
-    assignee: null
-    estimated_hours: 16
-    depends_on: [T002]
-    tags: [backend, ai, llm]
-    doc: tasks/T007-ai-dialog.md
-
-  - id: T008
-    title: AI 独立栏组件
-    phase: phase-1
-    priority: P0
-    status: pending
-    assignee: null
-    estimated_hours: 12
-    depends_on: [T007]
-    tags: [frontend, ai, ui]
-    doc: tasks/T008-ai-sidebar.md
-
-  - id: T008a
-    title: 悬浮输入框组件
-    phase: phase-1
-    priority: P0
-    status: pending
-    assignee: null
-    estimated_hours: 8
-    depends_on: [T002, T007]
-    tags: [frontend, ai, ui]
-    doc: tasks/T008a-floating-input.md
-
-  - id: T008b
-    title: AI 提示气泡组件
-    phase: phase-1
-    priority: P1
-    status: pending
-    assignee: null
-    estimated_hours: 8
-    depends_on: [T007]
-    tags: [frontend, ai, ui]
-    doc: tasks/T008b-ai-bubble.md
-
-  # 分析流程
-  - id: T009
-    title: 数据文件识别
-    phase: phase-1
-    priority: P0
-    status: pending
-    assignee: null
-    estimated_hours: 12
-    depends_on: [T001]
-    tags: [backend, data]
-    doc: tasks/T009-data-recognition.md
-
-  - id: T010
-    title: RNA-seq 分析流程模板
-    phase: phase-1
-    priority: P0
-    status: pending
-    assignee: null
-    estimated_hours: 24
-    depends_on: [T005, T009]
-    tags: [analysis, template]
-    doc: tasks/T010-rnaseq-template.md
-
-  - id: T011
-    title: 流程保存与复用
-    phase: phase-1
-    priority: P0
-    status: pending
-    assignee: null
-    estimated_hours: 16
-    depends_on: [T003, T010]
-    tags: [frontend, backend, workflow]
-    doc: tasks/T011-workflow-reuse.md
-
-  # UI/UX
   - id: T012
     title: 三栏布局 UI 实现
-    phase: phase-1
+    module: workspace
     priority: P0
     status: completed
-    assignee: null
-    estimated_hours: 20
-    depends_on: [T001]
-    tags: [frontend, ui, layout]
-    doc: tasks/T012-three-column-layout.md
+    completed_at: 2026-03-29
 
   - id: T013
     title: 导航与工作区切换
-    phase: phase-1
+    module: workspace
+    priority: P0
+    status: completed
+    completed_at: 2026-03-30
+
+  - id: T026
+    title: 插件架构重构
+    module: infrastructure
+    priority: P0
+    status: completed
+    completed_at: 2026-03-30
+    description: |
+      建立 home/work/agent/setting 插件体系：
+      - home: 根插件，持有子插件实例
+      - work: 工作区管理插件
+      - agent: AI交互插件
+      - setting: 设置管理插件
+
+  # ===== 工作区模块 (Workspace) =====
+  
+  - id: W001
+    title: 文档持久化存储
+    module: workspace
+    priority: P0
+    status: pending
+    depends_on: [T026]
+    description: |
+      - 实现文档 CRUD 操作的持久化
+      - 支持 localStorage 或 SQLite 存储
+      - 文档树结构与内容分离存储
+    estimated_hours: 8
+
+  - id: W002
+    title: 文档导入导出
+    module: workspace
     priority: P1
     status: pending
-    assignee: null
+    depends_on: [W001]
+    description: |
+      - Markdown 文件导入
+      - 项目导出为 Markdown/JSON
+      - 批量导入导出
+    estimated_hours: 6
+
+  - id: W003
+    title: 代码块执行引擎
+    module: workspace
+    priority: P0
+    status: pending
+    depends_on: [T004]
+    description: |
+      - 通过 Docker 插件执行代码
+      - 支持 Python/R/Bash
+      - 结果回填到文档
+    estimated_hours: 16
+    related: T005
+
+  - id: W004
+    title: 执行结果展示
+    module: workspace
+    priority: P0
+    status: pending
+    depends_on: [W003]
+    description: |
+      - 结果查看器组件
+      - 支持文本/图表/表格
+      - 执行历史记录
     estimated_hours: 12
-    depends_on: [T012]
-    tags: [frontend, ui]
-    doc: tasks/T013-navigation.md
 
-  # ===== Phase 2: 体验优化 =====
-  
-  - id: T014
-    title: 执行进度可视化
-    phase: phase-2
-    priority: P0
+  - id: W005
+    title: RNA-seq 分析模板
+    module: workspace
+    priority: P1
     status: pending
-    assignee: null
+    depends_on: [W003]
+    description: |
+      - 预置 RNA-seq 分析流程模板
+      - 参数化配置
+      - 一键执行
     estimated_hours: 16
-    depends_on: [T005]
-    tags: [frontend, ui]
-    doc: tasks/T014-execution-progress.md
+    doc: tasks/T010-rnaseq-template.md
 
-  - id: T015
-    title: 结果验证机制 (三层)
-    phase: phase-2
-    priority: P0
-    status: pending
-    assignee: null
-    estimated_hours: 24
-    depends_on: [T006]
-    tags: [backend, validation]
-    doc: tasks/T015-result-validation.md
-
-  - id: T016
-    title: 错误自动诊断
-    phase: phase-2
-    priority: P1
-    status: pending
-    assignee: null
-    estimated_hours: 20
-    depends_on: [T007, T015]
-    tags: [backend, ai]
-    doc: tasks/T016-error-diagnosis.md
-
-  - id: T017
-    title: 参数智能推荐
-    phase: phase-2
-    priority: P1
-    status: pending
-    assignee: null
-    estimated_hours: 16
-    depends_on: [T007, T010]
-    tags: [backend, ai]
-    doc: tasks/T017-parameter-recommendation.md
-
-  - id: T018
-    title: 更多分析类型支持
-    phase: phase-2
-    priority: P1
-    status: pending
-    assignee: null
-    estimated_hours: 40
-    depends_on: [T010]
-    tags: [analysis, template]
-    doc: tasks/T018-more-analysis-types.md
-
-  # ===== Phase 3: 学习能力增强 =====
+  # ===== 智能体模块 (Agent) =====
   
-  - id: T019
-    title: 学习进度追踪
-    phase: phase-3
+  - id: A001
+    title: AI 对话接口集成
+    module: agent
     priority: P0
     status: pending
-    assignee: null
-    estimated_hours: 20
-    depends_on: [T003, T011]
-    tags: [frontend, backend, learning]
-    doc: tasks/T019-learning-progress.md
+    depends_on: [T026]
+    description: |
+      - 接入 LLM API (OpenAI/Claude)
+      - 流式响应处理
+      - 对话上下文管理
+    estimated_hours: 12
 
-  - id: T020
-    title: 知识点关联系统
-    phase: phase-3
+  - id: A002
+    title: AI 对话 UI 完善
+    module: agent
     priority: P0
     status: pending
-    assignee: null
-    estimated_hours: 24
-    depends_on: [T007, T019]
-    tags: [backend, learning, knowledge]
-    doc: tasks/T020-knowledge-linking.md
+    depends_on: [A001]
+    description: |
+      - 对话历史列表
+      - 消息渲染 (Markdown)
+      - 加载状态和错误处理
+    estimated_hours: 8
 
-  - id: T021
-    title: 流程个性化定制
-    phase: phase-3
+  - id: A003
+    title: AI 悬浮输入框
+    module: agent
     priority: P1
     status: pending
-    assignee: null
-    estimated_hours: 20
-    depends_on: [T011]
-    tags: [frontend, workflow]
-    doc: tasks/T021-workflow-customization.md
+    depends_on: [A001]
+    description: |
+      - 编辑器内悬浮输入
+      - 快捷键唤醒
+      - 上下文感知
+    estimated_hours: 8
 
-  - id: T022
-    title: 个人能力图谱
-    phase: phase-3
+  - id: A004
+    title: AI 错误诊断
+    module: agent
     priority: P1
     status: pending
-    assignee: null
-    estimated_hours: 16
-    depends_on: [T019]
-    tags: [frontend, learning]
-    doc: tasks/T022-skill-graph.md
+    depends_on: [A001, W003]
+    description: |
+      - 执行错误自动分析
+      - 修复建议生成
+      - 相关文档推荐
+    estimated_hours: 12
 
-  # ===== Phase 4: 深度学习 =====
+  - id: A005
+    title: AI 代码解释
+    module: agent
+    priority: P1
+    status: pending
+    depends_on: [A001]
+    description: |
+      - 代码块智能解释
+      - 注释生成
+      - 参数说明
+    estimated_hours: 8
+
+  # ===== 设置模块 (Setting) =====
   
-  - id: T023
-    title: 跨项目经验复用
-    phase: phase-4
-    priority: P0
-    status: pending
-    assignee: null
-    estimated_hours: 24
-    depends_on: [T011, T019]
-    tags: [backend, learning]
-    doc: tasks/T023-cross-project-reuse.md
-
-  - id: T024
-    title: 用户偏好学习
-    phase: phase-4
+  - id: S001
+    title: 设置持久化
+    module: setting
     priority: P1
     status: pending
-    assignee: null
-    estimated_hours: 24
-    depends_on: [T019, T020]
-    tags: [backend, ai, learning]
-    doc: tasks/T024-user-preference-learning.md
+    depends_on: [T026]
+    description: |
+      - 设置项定义和默认值
+      - 本地存储实现
+      - 设置变更监听
+    estimated_hours: 6
 
-  - id: T025
-    title: 隐性需求感知
-    phase: phase-4
-    priority: P2
+  - id: S002
+    title: 外观设置
+    module: setting
+    priority: P1
     status: pending
-    assignee: null
-    estimated_hours: 32
-    depends_on: [T024]
-    tags: [backend, ai]
-    doc: tasks/T025-implicit-needs.md
+    depends_on: [S001]
+    description: |
+      - 主题切换 (浅色/深色)
+      - 字体大小调整
+      - 布局自定义
+    estimated_hours: 8
+
+  - id: S003
+    title: AI 提供商配置
+    module: setting
+    priority: P0
+    status: pending
+    depends_on: [S001, A001]
+    description: |
+      - API Key 管理
+      - 提供商切换
+      - 模型选择
+    estimated_hours: 6
+
+  - id: S004
+    title: Docker 环境配置
+    module: setting
+    priority: P1
+    status: pending
+    depends_on: [S001]
+    description: |
+      - 镜像管理
+      - 资源限制配置
+      - 执行超时设置
+    estimated_hours: 6
+
+  - id: S005
+    title: 数据管理
+    module: setting
+    priority: P1
+    status: pending
+    depends_on: [S001]
+    description: |
+      - 数据导出
+      - 缓存清理
+      - 项目备份恢复
+    estimated_hours: 6
 
 # 风险项
 risks:
   - id: R001
-    title: Docker 执行环境在 Tauri 中可能存在兼容性问题
-    mitigation: 提前测试 Tauri + Docker 集成方案
-    impact: high
-    probability: medium
-
-  - id: R002
-    title: AI 响应速度可能影响用户体验
-    mitigation: 使用流式响应、预加载常见问题答案
+    title: LLM API 调用成本
+    mitigation: 支持本地模型，优化 prompt 长度
     impact: medium
     probability: high
 
-  - id: R003
-    title: 生信分析流程的正确性需要专家验证
-    mitigation: 与生信专家合作，建立审核机制
+  - id: R002
+    title: Docker 执行安全
+    mitigation: 资源限制、命令过滤、网络隔离
     impact: high
+    probability: medium
+
+  - id: R003
+    title: 跨平台兼容性
+    mitigation: 充分测试各平台，使用 Tauri 抽象层
+    impact: medium
     probability: medium
 
 # 关键决策
 decisions:
   - id: D001
     title: 编辑器选型
-    options: [Milkdown, Codemirror, TipTap]
-    decision: pending
-    deadline: 2026-04-05
+    decision: CodeMirror 6
+    made_at: 2026-03-29
+    reason: 功能强大，生态丰富，支持代码块执行
 
   - id: D002
-    title: LLM 提供商选择
-    options: [OpenAI, Claude, 本地模型]
-    decision: pending
-    deadline: 2026-04-05
+    title: 插件架构
+    decision: home/work/agent/setting 层级结构
+    made_at: 2026-03-30
+    reason: 清晰的职责划分，便于扩展和维护
 
   - id: D003
-    title: 数据存储方案
-    options: [SQLite, IndexedDB, 文件系统]
+    title: LLM 提供商
     decision: pending
-    deadline: 2026-04-10
+    options: [OpenAI, Claude, 本地模型]
+    deadline: 2026-04-05
 
 # 统计信息
 stats:
-  total_tasks: 27
-  completed: 6
+  total_tasks: 24
+  completed: 7
   in_progress: 0
-  pending: 21
+  pending: 17
   
-  phase_1_tasks: 15
-  phase_2_tasks: 5
-  phase_3_tasks: 4
-  phase_4_tasks: 3
-  
-  total_estimated_hours: 480
+  by_module:
+    infrastructure: 2
+    workspace: 9
+    agent: 6
+    setting: 5
+    
+  total_estimated_hours: 132
