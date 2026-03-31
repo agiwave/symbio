@@ -302,17 +302,23 @@ watch(() => settings.llmProvider, (provider) => {
 // 加载保存的配置
 async function loadConfig() {
   try {
-    const config = await getProviderConfig()
-    settings.llmProvider = config.name || 'openai'
-    settings.apiBase = config.api_base
-    settings.model = config.model
-    settings.temperature = config.temperature ?? 0.7
-    settings.maxTokens = config.max_tokens ?? 4096
-    
-    // 更新模型列表
-    const preset = providerPresets[settings.llmProvider]
-    if (preset) {
-      availableModels.value = preset.models
+    const result = await getProviderConfig()
+    // openai 返回 { success, config: { api_base, api_key_set, model, ... } }
+    const config = result.config
+    if (config) {
+      settings.apiBase = config.api_base || ''
+      settings.model = config.model || 'gpt-4o-mini'
+      settings.temperature = config.temperature ?? 0.7
+      settings.maxTokens = config.max_tokens ?? 4096
+      
+      // 根据 api_base 推断提供商
+      for (const [name, preset] of Object.entries(providerPresets)) {
+        if (preset.apiBase === config.api_base) {
+          settings.llmProvider = name
+          availableModels.value = preset.models
+          break
+        }
+      }
     }
   } catch (err) {
     console.error('加载配置失败:', err)
@@ -321,19 +327,27 @@ async function loadConfig() {
 
 // 保存 AI 配置
 async function saveAiConfig() {
+  console.log('[SettingsPage] saveAiConfig called')
   saveStatus.value = null
   
+  const configData = {
+    name: settings.llmProvider,
+    api_base: settings.apiBase,
+    api_key: settings.apiKey,
+    model: settings.customModel || settings.model,
+    temperature: settings.temperature,
+    max_tokens: settings.maxTokens
+  }
+  console.log('[SettingsPage] config data:', configData)
+  
   try {
-    const result = await configureProvider({
-      name: settings.llmProvider,
-      api_base: settings.apiBase,
-      api_key: settings.apiKey,
-      model: settings.customModel || settings.model,
-      temperature: settings.temperature,
-      max_tokens: settings.maxTokens
-    })
+    const result = await configureProvider(configData)
+    console.log('[SettingsPage] configureProvider result:', result)
     
-    if (result.message) {
+    if (result.error) {
+      saveStatus.value = 'error'
+      console.error('保存配置失败:', result.error)
+    } else {
       saveStatus.value = 'success'
       setTimeout(() => { saveStatus.value = null }, 2000)
     }

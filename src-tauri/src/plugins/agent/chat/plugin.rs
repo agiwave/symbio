@@ -1,6 +1,10 @@
 //! AI 对话插件实现
 //!
-//! 通过 @llm 能力路由调用实际的 LLM 插件 (openai)
+//! 职责：
+//! - 前端对话接口
+//! - 通过 @llm 能力路由调用实际的 LLM 插件 (openai)
+//!
+//! 注意：配置管理由 openai 插件负责，前端应直接调用 agent/@llm 或 agent/openai
 
 use crate::core::traits::{Plugin, CAPABILITY_LLM};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
@@ -9,10 +13,6 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Weak};
 
 /// AI 对话插件
-/// 
-/// 职责：
-/// - 前端对话接口
-/// - 通过 @llm 能力路由调用实际 LLM 插件
 pub struct ChatPlugin {
     meta: PluginMeta,
     /// 父插件引用（用于能力路由）
@@ -24,15 +24,15 @@ impl ChatPlugin {
         Self {
             meta: PluginMeta {
                 name: "chat".to_string(),
-                description: "AI 对话插件".to_string(),
+                description: "AI 对话插件 - 通过 @llm 调用 LLM".to_string(),
                 version: "0.1.0".to_string(),
                 input: Some(json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["send", "configure", "get_config"],
-                            "description": "操作类型"
+                            "enum": ["send"],
+                            "description": "发送消息"
                         },
                         "messages": {
                             "type": "array",
@@ -44,17 +44,6 @@ impl ChatPlugin {
                                 }
                             },
                             "description": "对话消息列表"
-                        },
-                        "config": {
-                            "type": "object",
-                            "properties": {
-                                "api_base": { "type": "string" },
-                                "api_key": { "type": "string" },
-                                "model": { "type": "string" },
-                                "temperature": { "type": "number" },
-                                "max_tokens": { "type": "integer" }
-                            },
-                            "description": "AI 提供商配置"
                         }
                     },
                     "required": ["action"]
@@ -176,100 +165,11 @@ impl Plugin for ChatPlugin {
                         }
                     }
                 }
-                "configure" => {
-                    // 通过 @llm 能力路由配置 openai 插件
-                    if let Some(ref p) = parent {
-                        if let Some(config) = input.get("config") {
-                            // 先通过能力路由找到 llm 插件，然后配置
-                            let config_input = json!({
-                                "action": "configure",
-                                "api_base": config.get("api_base"),
-                                "api_key": config.get("api_key"),
-                                "model": config.get("model"),
-                                "temperature": config.get("temperature"),
-                                "max_tokens": config.get("max_tokens"),
-                            });
-                            
-                            match p.invoke(&format!("@{}", CAPABILITY_LLM), config_input) {
-                                Ok(stream) => {
-                                    use futures::StreamExt;
-                                    let chunks = stream.collect().await;
-                                    if let Some(chunk) = chunks.into_iter().next() {
-                                        yield StreamChunk {
-                                            data: json!({ "message": "配置已更新" }),
-                                            done: true,
-                                            error: chunk.error,
-                                        };
-                                    }
-                                }
-                                Err(e) => {
-                                    yield StreamChunk {
-                                        data: json!({}),
-                                        done: true,
-                                        error: Some(format!("配置失败: {}", e)),
-                                    };
-                                }
-                            }
-                        } else {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some("缺少 config 参数".to_string()),
-                            };
-                        }
-                    } else {
-                        yield StreamChunk {
-                            data: json!({}),
-                            done: true,
-                            error: Some("父插件未设置".to_string()),
-                        };
-                    }
-                }
-                "get_config" => {
-                    // 通过 @llm 能力路由获取 openai 插件配置
-                    if let Some(ref p) = parent {
-                        let config_input = json!({ "action": "get_config" });
-                        
-                        match p.invoke(&format!("@{}", CAPABILITY_LLM), config_input) {
-                            Ok(stream) => {
-                                use futures::StreamExt;
-                                let chunks = stream.collect().await;
-                                if let Some(chunk) = chunks.into_iter().next() {
-                                    // openai 返回 { success, config: { api_base, api_key_set, model, ... } }
-                                    let config_data = chunk.data.get("config").unwrap_or(&chunk.data);
-                                    yield StreamChunk {
-                                        data: json!({
-                                            "name": "openai",
-                                            "api_base": config_data.get("api_base").unwrap_or(&json!("")),
-                                            "model": config_data.get("model").unwrap_or(&json!("")),
-                                            "has_api_key": config_data.get("api_key_set").unwrap_or(&json!(false)),
-                                        }),
-                                        done: true,
-                                        error: chunk.error,
-                                    };
-                                }
-                            }
-                            Err(e) => {
-                                yield StreamChunk {
-                                    data: json!({}),
-                                    done: true,
-                                    error: Some(format!("获取配置失败: {}", e)),
-                                };
-                            }
-                        }
-                    } else {
-                        yield StreamChunk {
-                            data: json!({}),
-                            done: true,
-                            error: Some("父插件未设置".to_string()),
-                        };
-                    }
-                }
                 _ => {
                     yield StreamChunk {
                         data: json!({}),
                         done: true,
-                        error: Some(format!("未知操作: {}", action)),
+                        error: Some(format!("未知操作: {}。配置请直接调用 agent/@llm 或 agent/openai", action)),
                     };
                 }
             }

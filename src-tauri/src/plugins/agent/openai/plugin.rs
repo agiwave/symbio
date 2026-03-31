@@ -294,25 +294,42 @@ impl OpenAiPlugin {
     }
 
     async fn handle_configure(&self, input: &Value) -> Result<StreamChunk, PluginError> {
-        let mut config = self.config.write().await;
+        eprintln!("[openai] handle_configure called with: {:?}", input);
+        
+        {
+            let mut config = self.config.write().await;
 
-        if let Some(v) = input.get("api_base").and_then(|v| v.as_str()) {
-            config.api_base = v.to_string();
+            if let Some(v) = input.get("api_base").and_then(|v| v.as_str()) {
+                config.api_base = v.to_string();
+            }
+            if let Some(v) = input.get("api_key").and_then(|v| v.as_str()) {
+                config.api_key = Some(v.to_string());
+            }
+            if let Some(v) = input.get("model").and_then(|v| v.as_str()) {
+                config.model = v.to_string();
+            }
+            if let Some(v) = input.get("temperature").and_then(|v| v.as_f64()) {
+                config.temperature = v as f32;
+            }
+            if let Some(v) = input.get("max_tokens").and_then(|v| v.as_u64()) {
+                config.max_tokens = Some(v as u32);
+            }
+            if let Some(v) = input.get("system_prompt").and_then(|v| v.as_str()) {
+                config.system_prompt = Some(v.to_string());
+            }
         }
-        if let Some(v) = input.get("api_key").and_then(|v| v.as_str()) {
-            config.api_key = Some(v.to_string());
-        }
-        if let Some(v) = input.get("model").and_then(|v| v.as_str()) {
-            config.model = v.to_string();
-        }
-        if let Some(v) = input.get("temperature").and_then(|v| v.as_f64()) {
-            config.temperature = v as f32;
-        }
-        if let Some(v) = input.get("max_tokens").and_then(|v| v.as_u64()) {
-            config.max_tokens = Some(v as u32);
-        }
-        if let Some(v) = input.get("system_prompt").and_then(|v| v.as_str()) {
-            config.system_prompt = Some(v.to_string());
+
+        // 保存配置到文件
+        eprintln!("[openai] calling save_config via parent...");
+        if let Some(parent) = self.get_parent() {
+            eprintln!("[openai] parent found, invoking save_config");
+            let result = parent.invoke("save_config", json!({}));
+            match result {
+                Ok(_) => eprintln!("[openai] save_config call succeeded"),
+                Err(e) => eprintln!("[openai] save_config call failed: {:?}", e),
+            }
+        } else {
+            eprintln!("[openai] ERROR: no parent!");
         }
 
         Ok(StreamChunk {
@@ -482,7 +499,7 @@ impl Plugin for OpenAiPlugin {
                             }
                             // 通知父插件保存配置
                             if let Some(parent) = self.get_parent() {
-                                let _ = parent.invoke("", json!({"action": "save_config"}));
+                                let _ = parent.invoke("save_config", json!({}));
                             }
                             Ok(StreamChunk {
                                 data: json!({ "success": true }),

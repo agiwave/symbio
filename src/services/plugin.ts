@@ -28,10 +28,14 @@ export async function callPlugin<T = unknown>(
   path: string,
   input: Record<string, unknown>
 ): Promise<T> {
+  console.log('[plugin] calling:', path, 'with input:', input)
+  
   const result = await invoke<StreamChunk[]>('invoke', {
     path,
     input
   })
+
+  console.log('[plugin] result:', result)
 
   // invoke 返回 StreamChunk 数组，取第一个
   if (Array.isArray(result) && result.length > 0) {

@@ -45,6 +45,8 @@ pub struct Agent {
     instances: HashMap<String, Arc<dyn Plugin>>,
     /// 自身引用，用于传递给子插件
     self_ref: Option<Weak<dyn Plugin>>,
+    /// 父插件引用（用于转发 save_config 等请求）
+    parent: Option<Weak<dyn Plugin>>,
 }
 
 impl Agent {
@@ -73,6 +75,7 @@ impl Agent {
                 },
                 instances: HashMap::new(),
                 self_ref: Some(weak.clone() as Weak<dyn Plugin>),
+                parent: None,
             }
         })
     }
@@ -123,7 +126,7 @@ impl Agent {
         }
     }
 
-    /// 兼容旧 API
+    /// 创建 Agent 实例
     pub fn new() -> Self {
         Self {
             meta: PluginMeta {
@@ -142,7 +145,36 @@ impl Agent {
             },
             instances: HashMap::new(),
             self_ref: None,
+            parent: None,
         }
+    }
+
+    /// 创建带父引用的 Agent 实例
+    pub fn with_parent(parent: Option<Arc<dyn Plugin>>) -> Self {
+        Self {
+            meta: PluginMeta {
+                name: "agent".to_string(),
+                description: "通用的插件容器，支持能力路由".to_string(),
+                version: "0.1.0".to_string(),
+                input: None,
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "plugins": { "type": "array", "items": {"type": "string"} },
+                        "message": { "type": "string" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            },
+            instances: HashMap::new(),
+            self_ref: None,
+            parent: parent.map(|p| Arc::downgrade(&p)),
+        }
+    }
+
+    /// 获取父插件引用
+    fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
+        self.parent.as_ref().and_then(|w| w.upgrade())
     }
 
     /// 解析路径，返回 (子插件名, 剩余路径)
@@ -240,6 +272,21 @@ impl Plugin for Agent {
     }
 
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        // 转发配置保存/加载请求到父插件（Home）
+        if path == "save_config" || path == "load_config" {
+            eprintln!("[agent] received {} request", path);
+            if let Some(parent) = self.get_parent() {
+                eprintln!("[agent] forwarding {} to parent", path);
+                return parent.invoke(path, input);
+            } else {
+                eprintln!("[agent] ERROR: no parent for {}", path);
+                return Ok(InvokeStream::single(json!({
+                    "success": false,
+                    "error": "无法保存配置：没有父插件"
+                })));
+            }
+        }
+
         if path.is_empty() {
             let mut capabilities: Vec<Value> = Vec::new();
             for (name, plugin) in self.instances.iter() {
@@ -319,10 +366,15 @@ impl Plugin for Agent {
                 Some(idx) => (&path[1..idx], &path[idx + 1..]),
                 None => (&path[1..], ""),
             };
+            eprintln!("[agent] capability route: capability='{}', rest='{}'", capability, rest);
             
             let plugin = self.find_by_capability(capability)
-                .ok_or_else(|| PluginError::NotFound(format!("能力 '{}' 未找到", capability)))?;
+                .ok_or_else(|| {
+                    eprintln!("[agent] ERROR: capability '{}' not found", capability);
+                    PluginError::NotFound(format!("能力 '{}' 未找到", capability))
+                })?;
             
+            eprintln!("[agent] found plugin for capability '{}', invoking with rest='{}'", capability, rest);
             return plugin.invoke(rest, input);
         }
         

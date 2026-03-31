@@ -257,9 +257,13 @@ function scrollToBottom() {
 // 检查配置
 async function checkConfig() {
   try {
-    const config = await getProviderConfig()
-    if (!config.has_api_key) {
+    const result = await getProviderConfig()
+    // openai 返回 { success, config: { api_key_set, ... } }
+    const hasApiKey = result.config?.api_key_set ?? false
+    if (!hasApiKey) {
       configError.value = '请先配置 API Key（在设置页面）'
+    } else {
+      configError.value = null
     }
   } catch (err) {
     configError.value = err instanceof Error ? err.message : '获取配置失败'

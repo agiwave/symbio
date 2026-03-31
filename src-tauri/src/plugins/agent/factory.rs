@@ -40,8 +40,8 @@ impl PluginFactory for AgentFactory {
         self.meta.clone()
     }
 
-    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
-        // 子 Agent 使用全局注册表，支持分形嵌套
-        Arc::new(Agent::new())
+    fn create(&self, parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+        // 创建带父引用的 Agent
+        Arc::new(Agent::with_parent(parent))
     }
 }

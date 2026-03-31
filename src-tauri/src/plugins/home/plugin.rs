@@ -86,7 +86,19 @@ impl HomePlugin {
 
     /// 保存配置到文件
     pub async fn save_config(&self) -> Result<(), PluginError> {
+        eprintln!("[home] save_config called");
+        
+        // 先收集所有子插件配置
+        let collected = self.collect_plugin_configs().await;
+        eprintln!("[home] collected configs: {:?}", collected);
+        
+        {
+            let mut cfg = self.config.write().await;
+            cfg.plugins = collected;
+        }
+
         let path = config_path();
+        eprintln!("[home] config path: {:?}", path);
 
         // 确保目录存在
         if let Some(parent) = path.parent() {
@@ -103,6 +115,7 @@ impl HomePlugin {
             .await
             .map_err(|e| PluginError::InternalError(format!("写入配置失败: {}", e)))?;
 
+        eprintln!("[home] config saved successfully");
         Ok(())
     }
 
@@ -221,6 +234,54 @@ impl Plugin for HomePlugin {
     }
 
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        eprintln!("[home] invoke called with path: '{}'", path);
+        
+        // 处理 save_config 和 load_config（子插件通过 parent 链调用）
+        if path == "save_config" {
+            eprintln!("[home] handling save_config");
+            let home_self = Arc::new(self.clone());
+            return Ok(InvokeStream::Single(tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    match home_self.save_config().await {
+                        Ok(()) => StreamChunk {
+                            data: json!({ "success": true, "message": "配置已保存" }),
+                            done: true,
+                            error: None,
+                        },
+                        Err(e) => StreamChunk {
+                            data: json!({}),
+                            done: true,
+                            error: Some(e.to_string()),
+                        },
+                    }
+                })
+            })));
+        }
+
+        if path == "load_config" {
+            let home_self = Arc::new(self.clone());
+            return Ok(InvokeStream::Single(tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    match home_self.load_config().await {
+                        Ok(()) => {
+                            let cfg = home_self.config.read().await;
+                            home_self.distribute_configs(&cfg.plugins).await;
+                            StreamChunk {
+                                data: json!({ "success": true, "config": &cfg.plugins }),
+                                done: true,
+                                error: None,
+                            }
+                        }
+                        Err(e) => StreamChunk {
+                            data: json!({}),
+                            done: true,
+                            error: Some(e.to_string()),
+                        },
+                    }
+                })
+            })));
+        }
+
         if path.is_empty() {
             // 返回 home 的基本信息
             return Ok(InvokeStream::single(json!({
