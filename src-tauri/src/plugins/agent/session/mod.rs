@@ -7,5 +7,3 @@ pub mod factory;
 pub mod types;
 
 pub use plugin::SessionPlugin;
-pub use factory::SessionFactory;
-pub use types::{ChatMessage, Session, SessionContext, LlmContext, ToolCall, ToolFunction};

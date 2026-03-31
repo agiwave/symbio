@@ -2,7 +2,7 @@
 //!
 //! 提供 Telegram Bot API 集成，支持 LLM 对话
 
-use super::types::{TelegramConfig, TelegramMessage, TelegramUpdate, TelegramIncomingMessage};
+use super::types::{TelegramConfig, TelegramMessage};
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use async_trait::async_trait;
@@ -748,7 +748,7 @@ impl Plugin for TelegramPlugin {
                     "set_chat_id" => self.handle_set_chat_id(&input).await,
                     "start_listener" => {
                         // 尝试获取 LLM 插件引用（从 input 中）
-                        let llm_plugin = input.get("llm_plugin").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let _llm_plugin = input.get("llm_plugin").and_then(|v| v.as_bool()).unwrap_or(false);
                         self.handle_start_listener(None).await
                     }
                     "stop_listener" => self.handle_stop_listener().await,

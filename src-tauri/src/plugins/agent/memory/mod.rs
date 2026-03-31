@@ -7,5 +7,3 @@ pub mod factory;
 pub mod types;
 
 pub use plugin::MemoryPlugin;
-pub use factory::MemoryFactory;
-pub use types::MemoryEntry;

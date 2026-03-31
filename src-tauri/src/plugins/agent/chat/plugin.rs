@@ -8,7 +8,6 @@
 
 use crate::core::traits::{Plugin, CAPABILITY_LLM};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
-use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::sync::{Arc, Weak};
 
@@ -116,7 +115,6 @@ impl Plugin for ChatPlugin {
                                 
                                 match p.invoke(&format!("@{}", CAPABILITY_LLM), llm_input) {
                                     Ok(stream) => {
-                                        use futures::StreamExt;
                                         let chunks = stream.collect().await;
                                         if let Some(chunk) = chunks.into_iter().next() {
                                             if let Some(error) = chunk.error {

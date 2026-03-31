@@ -17,23 +17,16 @@ mod factory;
 pub use add::AddPlugin;
 pub use remove::RemovePlugin;
 pub use chat::ChatPlugin;
-pub use chat::factory::ChatFactory;
 pub use tools::ToolsPlugin;
-pub use tools::factory::ToolsFactory;
 pub use memory::MemoryPlugin;
-pub use memory::factory::MemoryFactory;
 pub use session::SessionPlugin;
-pub use session::factory::SessionFactory;
 pub use telegram::TelegramPlugin;
-pub use telegram::factory::TelegramFactory;
 pub use openai::OpenAiPlugin;
-pub use openai::OpenAiFactory;
-pub use factory::AgentFactory;
 
 // 导入 docker 插件（来自 plugins/docker）
 use crate::plugins::docker::DockerPlugin;
 
-use crate::core::traits::{Plugin, ParentRef};
+use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use crate::core::PluginFactoryRegistry;
 use serde_json::{Value, json};

@@ -10,7 +10,6 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use futures::stream::StreamExt;
 
 const DEFAULT_MAX_MESSAGES: usize = 100;
 

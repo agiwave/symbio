@@ -7,5 +7,3 @@ pub mod factory;
 pub mod types;
 
 pub use plugin::TelegramPlugin;
-pub use factory::TelegramFactory;
-pub use types::{TelegramConfig, TelegramMessage, TelegramUpdate, TelegramIncomingMessage};

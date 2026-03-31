@@ -298,9 +298,9 @@ impl Plugin for HomePlugin {
                 .unwrap_or("get");
 
             let config = Arc::clone(&self.config);
-            let work = Arc::clone(&self.work);
-            let agent = Arc::clone(&self.agent);
-            let setting = Arc::clone(&self.setting);
+            let _work = Arc::clone(&self.work);
+            let _agent = Arc::clone(&self.agent);
+            let _setting = Arc::clone(&self.setting);
             let home_self = Arc::new(self.clone());
 
             return Ok(InvokeStream::Single(tokio::task::block_in_place(|| {

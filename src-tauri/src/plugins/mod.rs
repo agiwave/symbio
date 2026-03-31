@@ -12,4 +12,3 @@ pub use echo::EchoFactory;
 pub use docker::DockerFactory;
 pub use home::HomeFactory;
 pub use composite::CompositeFactory;
-pub use agent::ChatFactory;

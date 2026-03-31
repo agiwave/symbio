@@ -15,5 +15,4 @@ mod glob_search;
 mod content_search;
 mod http_request;
 
-pub use policy::{SecurityPolicy, AutonomyLevel, CommandRiskLevel};
 pub use plugin::ToolsPlugin;
