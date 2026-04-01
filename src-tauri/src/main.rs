@@ -23,12 +23,9 @@ fn main() {
     PluginFactoryRegistry::init();
     let registry = PluginFactoryRegistry::global();
 
-    // 先注册所有工厂
-    // 注册核心插件工厂
+    // 注册所有工厂
     registry.register(Arc::new(WorkFactory::new()));
     registry.register(Arc::new(SettingFactory::new()));
-    
-    // 注册 Agent 相关工厂
     registry.register(Arc::new(AgentFactory::new()));
     registry.register(Arc::new(ChatFactory::new()));
     registry.register(Arc::new(ToolsFactory::new()));
@@ -36,44 +33,17 @@ fn main() {
     registry.register(Arc::new(SessionFactory::new()));
     registry.register(Arc::new(TelegramFactory::new()));
     registry.register(Arc::new(OpenAiFactory::new()));
-    
-    // 注册其他工厂
     registry.register(Arc::new(EchoFactory::new()));
     registry.register(Arc::new(DockerFactory::new()));
     registry.register(Arc::new(CompositeFactory::with_defaults()));
-    
-    // 最后注册 HomeFactory（因为它会创建其他所有插件）
     registry.register(Arc::new(HomeFactory::new()));
 
-    // 使用 HomeFactory 创建 root 插件
-    // Home 会自动创建 work/agent/setting 子插件实例
+    // 创建 root 插件（HomeFactory 会自动读取配置文件并传给各子工厂）
     let root: Arc<dyn Plugin> = HomeFactory::new().create(None, None);
 
     tauri::Builder::default()
         .manage(AppState {
-            root: Mutex::new(root.clone()),
-        })
-        .setup(move |app| {
-            // 在 Tauri setup 钩子中加载配置（不阻塞主线程）
-            let root_clone = root.clone();
-            tauri::async_runtime::spawn(async move {
-                eprintln!("[main] loading config on startup...");
-                match root_clone.invoke("load_config", serde_json::json!({})) {
-                    Ok(stream) => {
-                        if let core::types::InvokeStream::Single(chunk) = stream {
-                            if chunk.error.is_some() {
-                                eprintln!("[main] load_config error: {:?}", chunk.error);
-                            } else {
-                                eprintln!("[main] config loaded successfully");
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[main] failed to load config: {:?}", e);
-                    }
-                }
-            });
-            Ok(())
+            root: Mutex::new(root),
         })
         .invoke_handler(tauri::generate_handler![
             commands::meta,

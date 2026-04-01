@@ -1,21 +1,46 @@
 //! Home 插件工厂 - 创建根插件，并组装子插件
 //!
-//! 使用 Factory 机制创建所有子插件：
-//! Home → Agent (parent=Home) → openai/session/memory/tools/chat (parent=Agent)
+//! 简洁设计：
+//! - 创建时从配置文件读取配置，传入各工厂构造函数
+//! - 用户修改时调用 save_config 保存
+//! - 不在初始化时触发任何 save_config
 
 use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use crate::core::PluginFactoryRegistry;
 use super::HomePlugin;
+use super::plugin::GlobalConfig;
 use crate::plugins::agent::Agent;
 use std::sync::{Arc, Weak};
 use serde_json::Value;
+use std::path::PathBuf;
 
 pub struct HomeFactory;
 
 impl HomeFactory {
     pub fn new() -> Self {
         HomeFactory
+    }
+    
+    /// 配置文件路径
+    fn config_path() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".symbio")
+            .join("config.yaml")
+    }
+    
+    /// 读取配置文件
+    fn load_config_file() -> GlobalConfig {
+        let path = Self::config_path();
+        if !path.exists() {
+            return GlobalConfig::default();
+        }
+        
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|content| serde_yaml::from_str(&content).ok())
+            .unwrap_or_default()
     }
 }
 
@@ -35,23 +60,30 @@ impl PluginFactory for HomeFactory {
     fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
         let registry = PluginFactoryRegistry::global();
         
-        // 使用 Factory 创建 work 和 setting（不需要父引用）
+        // 读取配置文件
+        let global_config = Self::load_config_file();
+        eprintln!("[home] loaded config from file");
+        
+        // 使用 Factory 创建 work，传入配置
+        let work_config = global_config.plugins.get("work");
         let work = registry.get("work")
-            .map(|f| f.create(None, None))
+            .map(|f| f.create(None, work_config))
             .unwrap_or_else(|| Arc::new(crate::plugins::work::WorkPlugin::new(None)));
         
+        let setting_config = global_config.plugins.get("setting");
         let setting = registry.get("setting")
-            .map(|f| f.create(None, None))
+            .map(|f| f.create(None, setting_config))
             .unwrap_or_else(|| Arc::new(crate::plugins::setting::SettingPlugin::new()));
         
         // 使用 Arc::new_cyclic 创建 HomePlugin，同时传递自引用给 Agent
         let home = Arc::new_cyclic(|home_weak| {
             let home_weak_dyn: Weak<dyn Plugin> = home_weak.clone() as Weak<dyn Plugin>;
             
-            // 使用 Factory 机制创建 Agent 及其子插件
-            let agent = create_agent_with_factory(home_weak_dyn);
+            // 创建 Agent，传入配置
+            let agent_config = global_config.plugins.get("agent");
+            let agent = create_agent_with_factory(home_weak_dyn, agent_config);
             
-            HomePlugin::new(work.clone(), agent, setting.clone())
+            HomePlugin::new_with_config(work.clone(), agent, setting.clone(), global_config.clone())
         });
         
         home as Arc<dyn Plugin>
@@ -59,7 +91,7 @@ impl PluginFactory for HomeFactory {
 }
 
 /// 使用 Factory 机制创建 Agent 及其子插件
-fn create_agent_with_factory(home_weak: Weak<dyn Plugin>) -> Arc<dyn Plugin> {
+fn create_agent_with_factory(home_weak: Weak<dyn Plugin>, agent_config: Option<&Value>) -> Arc<dyn Plugin> {
     let registry = PluginFactoryRegistry::global();
     
     // 创建 Agent
@@ -69,73 +101,53 @@ fn create_agent_with_factory(home_weak: Weak<dyn Plugin>) -> Arc<dyn Plugin> {
     // 设置父引用（指向 Home）
     agent.set_parent(home_weak);
     
-    // 注册内置管理插件（不需要父引用）
+    // 注册内置管理插件
     agent.add_instance("add".to_string(), Arc::new(crate::plugins::agent::AddPlugin::new()) as Arc<dyn Plugin>);
     agent.add_instance("remove".to_string(), Arc::new(crate::plugins::agent::RemovePlugin::new()) as Arc<dyn Plugin>);
     
-    // 创建 Chat 插件
-    eprintln!("[home] creating chat plugin...");
+    // 从配置中提取各子插件配置
+    let configs = agent_config
+        .and_then(|c| c.get("config"))
+        .and_then(|c| c.as_object());
+    
+    // 创建各子插件，传入配置
+    eprintln!("[home] creating plugins with config...");
+    
     if let Some(factory) = registry.get("chat") {
-        agent.add_instance("chat".to_string(), factory.create(Some(agent_ref.clone()), None));
-        eprintln!("[home] chat plugin created");
-    } else {
-        eprintln!("[home] ERROR: chat factory not found!");
+        let cfg = configs.and_then(|c| c.get("chat"));
+        agent.add_instance("chat".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
-    // 创建 Tools 插件
-    eprintln!("[home] creating tools plugin...");
     if let Some(factory) = registry.get("tools") {
-        agent.add_instance("tools".to_string(), factory.create(Some(agent_ref.clone()), None));
-        eprintln!("[home] tools plugin created");
-    } else {
-        eprintln!("[home] ERROR: tools factory not found!");
+        let cfg = configs.and_then(|c| c.get("tools"));
+        agent.add_instance("tools".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
-    // 创建 Memory 插件
-    eprintln!("[home] creating memory plugin...");
     if let Some(factory) = registry.get("memory") {
-        agent.add_instance("memory".to_string(), factory.create(Some(agent_ref.clone()), None));
-        eprintln!("[home] memory plugin created");
-    } else {
-        eprintln!("[home] ERROR: memory factory not found!");
+        let cfg = configs.and_then(|c| c.get("memory"));
+        agent.add_instance("memory".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
-    // 创建 Session 插件
-    eprintln!("[home] creating session plugin...");
     if let Some(factory) = registry.get("session") {
-        agent.add_instance("session".to_string(), factory.create(Some(agent_ref.clone()), None));
-        eprintln!("[home] session plugin created");
-    } else {
-        eprintln!("[home] ERROR: session factory not found!");
+        let cfg = configs.and_then(|c| c.get("session"));
+        agent.add_instance("session".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
-    // 创建 OpenAI 插件
-    eprintln!("[home] creating openai plugin...");
     if let Some(factory) = registry.get("openai") {
-        agent.add_instance("openai".to_string(), factory.create(Some(agent_ref.clone()), None));
-        eprintln!("[home] openai plugin created");
-    } else {
-        eprintln!("[home] ERROR: openai factory not found!");
+        let cfg = configs.and_then(|c| c.get("openai"));
+        agent.add_instance("openai".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
-    // 创建 Telegram 插件
-    eprintln!("[home] creating telegram plugin...");
     if let Some(factory) = registry.get("telegram") {
-        agent.add_instance("telegram".to_string(), factory.create(Some(agent_ref.clone()), None));
-        eprintln!("[home] telegram plugin created");
-    } else {
-        eprintln!("[home] ERROR: telegram factory not found!");
+        let cfg = configs.and_then(|c| c.get("telegram"));
+        agent.add_instance("telegram".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
-    // 创建 Docker 插件
-    eprintln!("[home] creating docker plugin...");
     if let Some(factory) = registry.get("docker") {
-        agent.add_instance("docker".to_string(), factory.create(Some(agent_ref.clone()), None));
-        eprintln!("[home] docker plugin created");
-    } else {
-        eprintln!("[home] ERROR: docker factory not found!");
+        let cfg = configs.and_then(|c| c.get("docker"));
+        agent.add_instance("docker".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
-    eprintln!("[home] agent creation complete");
+    eprintln!("[home] all plugins created");
     agent_ref
 }

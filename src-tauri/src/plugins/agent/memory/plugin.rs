@@ -218,6 +218,7 @@ impl Plugin for MemoryPlugin {
                                         .collect();
                                 }
                             }
+                            // 通知父插件保存配置
                             if let Some(p) = parent {
                                 let _ = p.invoke("save_config", json!({}));
                             }
