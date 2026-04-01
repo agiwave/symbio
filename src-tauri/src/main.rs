@@ -49,29 +49,31 @@ fn main() {
     // Home 会自动创建 work/agent/setting 子插件实例
     let root: Arc<dyn Plugin> = HomeFactory::new().create(None, None);
 
-    // 启动时加载配置
-    eprintln!("[main] loading config on startup...");
-    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-    rt.block_on(async {
-        match root.invoke("load_config", serde_json::json!({})) {
-            Ok(stream) => {
-                if let core::types::InvokeStream::Single(chunk) = stream {
-                    if chunk.error.is_some() {
-                        eprintln!("[main] load_config error: {:?}", chunk.error);
-                    } else {
-                        eprintln!("[main] config loaded successfully");
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[main] failed to load config: {:?}", e);
-            }
-        }
-    });
-
     tauri::Builder::default()
         .manage(AppState {
-            root: Mutex::new(root),
+            root: Mutex::new(root.clone()),
+        })
+        .setup(move |app| {
+            // 在 Tauri setup 钩子中加载配置（不阻塞主线程）
+            let root_clone = root.clone();
+            tauri::async_runtime::spawn(async move {
+                eprintln!("[main] loading config on startup...");
+                match root_clone.invoke("load_config", serde_json::json!({})) {
+                    Ok(stream) => {
+                        if let core::types::InvokeStream::Single(chunk) = stream {
+                            if chunk.error.is_some() {
+                                eprintln!("[main] load_config error: {:?}", chunk.error);
+                            } else {
+                                eprintln!("[main] config loaded successfully");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[main] failed to load config: {:?}", e);
+                    }
+                }
+            });
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::meta,
