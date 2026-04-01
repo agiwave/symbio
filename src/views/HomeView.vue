@@ -442,12 +442,17 @@ watch(currentPage, (newVal, oldVal) => {
   flex-shrink: 0;
   z-index: 10;
   position: relative;
-  padding-top: 0.5rem;
 }
 
 .nav-logo {
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
   cursor: pointer;
   padding: 0.5rem;
+  opacity: 0.6;
+  z-index: 1;
 }
 
 .logo-img {
@@ -463,7 +468,7 @@ watch(currentPage, (newVal, oldVal) => {
   justify-content: center;
   flex: 1;
   gap: 0.5rem;
-  margin-top: 1rem;
+  width: 100%;
 }
 
 .nav-btn {
