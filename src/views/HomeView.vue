@@ -86,11 +86,6 @@
           </svg>
         </div>
         
-        <!-- 工作区指示器 -->
-        <div class="workspace-indicator" @click="showWorkspaceSwitcher = true" :title="workspacePath">
-          <span class="workspace-icon">📂</span>
-        </div>
-        
         <div class="nav-items">
           <button 
             class="nav-btn" 
@@ -107,6 +102,13 @@
             @click="currentPage = 'agent'"
           >
             💬
+          </button>
+          <button 
+            class="nav-btn" 
+            title="切换工作区" 
+            @click="showWorkspaceSwitcher = true"
+          >
+            📂
           </button>
           <button 
             class="nav-btn" 
@@ -452,26 +454,6 @@ watch(currentPage, (newVal, oldVal) => {
   width: 36px;
   height: 36px;
   display: block;
-}
-
-.workspace-indicator {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 0.5rem;
-  border-radius: 8px;
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.workspace-indicator:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.workspace-icon {
-  font-size: 1.25rem;
 }
 
 .nav-items {
