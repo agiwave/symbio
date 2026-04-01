@@ -290,7 +290,8 @@ async function sendMessageToAI() {
       content: m.content
     }))
 
-    const response = await sendMessage(messages)
+    // 传递当前 session_id 给 AI
+    const response = await sendMessage(messages, activeSessionId.value || undefined)
     
     const assistantMessage: SessionMessage = {
       role: 'assistant',
@@ -308,10 +309,8 @@ async function sendMessageToAI() {
     activeSession.value.messages.push(assistantMessage)
     activeSession.value.updated_at = Math.floor(Date.now() / 1000)
     
-    // 保存到后端
-    await appendMessages(activeSessionId.value, [userMessage, assistantMessage])
-    
-    // 更新列表中的消息数
+    // 后端 openai 插件已经自动将消息保存到 session，不需要前端再保存
+    // 但需要更新列表中的消息数
     const listItem = sessions.value.find(s => s.id === activeSessionId.value)
     if (listItem) {
       listItem.message_count = activeSession.value.messages.length
@@ -350,9 +349,9 @@ async function checkConfig() {
   try {
     const result = await getProviderConfig()
     console.log('[AgentPage] getProviderConfig result:', result)
-    // openai 插件直接返回 { api_base, api_key, model, ... }
-    const config = result as unknown as { api_key?: string; api_base?: string; model?: string }
-    const hasApiKey = config.api_key && config.api_key.length > 0
+    // openai 插件返回 { success: true, config: { api_key, ... } }
+    const config = result.config as { api_key?: string; api_base?: string; model?: string } | undefined
+    const hasApiKey = config?.api_key && config.api_key.length > 0
     if (!hasApiKey) {
       configError.value = '请先配置 API Key（在设置页面）'
     } else {

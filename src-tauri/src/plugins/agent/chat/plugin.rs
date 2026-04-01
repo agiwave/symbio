@@ -94,6 +94,11 @@ impl Plugin for ChatPlugin {
         let stream = async_stream::stream! {
             match action.as_str() {
                 "send" => {
+                    // 获取 session_id
+                    let session_id = input.get("session_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("default");
+                    
                     // 获取最后一条用户消息
                     let message = input.get("messages")
                         .and_then(|msgs| msgs.as_array())
@@ -107,7 +112,8 @@ impl Plugin for ChatPlugin {
                             if let Some(ref p) = parent {
                                 let llm_input = json!({
                                     "action": "chat",
-                                    "message": msg
+                                    "message": msg,
+                                    "session_id": session_id
                                 });
                                 
                                 match p.invoke(&format!("@{}", CAPABILITY_LLM), llm_input) {

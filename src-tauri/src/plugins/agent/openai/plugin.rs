@@ -509,12 +509,22 @@ impl OpenAiPlugin {
 
     async fn handle_get_config(&self) -> Result<StreamChunk, PluginError> {
         let config = self.config.read().await;
+        // 返回实际 api_key（前端需要判断是否已配置）
+        let api_key_display = config.api_key.as_ref().map(|k| {
+            if k.len() > 8 {
+                format!("{}***{}", &k[..4], &k[k.len()-4..])
+            } else {
+                "***".to_string()
+            }
+        }).unwrap_or_default();
+        
         Ok(StreamChunk {
             data: json!({
                 "success": true,
                 "config": {
                     "api_base": config.api_base,
-                    "api_key_set": config.api_key.is_some(),
+                    "api_key": config.api_key,
+                    "api_key_display": api_key_display,
                     "model": config.model,
                     "temperature": config.temperature,
                     "max_tokens": config.max_tokens,

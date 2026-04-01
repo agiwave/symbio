@@ -17,6 +17,11 @@ export interface ChatMessage {
   content: string
 }
 
+export interface ChatRequest {
+  messages: ChatMessage[]
+  session_id?: string
+}
+
 export interface ProviderConfig {
   name?: string
   api_base: string
@@ -47,10 +52,11 @@ export interface ConfigResponse {
 /**
  * 发送消息到 AI
  */
-export async function sendMessage(messages: ChatMessage[]): Promise<ChatResponse> {
+export async function sendMessage(messages: ChatMessage[], sessionId?: string): Promise<ChatResponse> {
   return callPlugin<ChatResponse>(CHAT_PATH, {
     action: 'send',
-    messages
+    messages,
+    session_id: sessionId || 'default'
   })
 }
 
