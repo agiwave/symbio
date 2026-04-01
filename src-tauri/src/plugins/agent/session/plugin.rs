@@ -474,6 +474,58 @@ impl SessionPlugin {
             error: None,
         }
     }
+
+    async fn handle_update(&self, input: &Value) -> StreamChunk {
+        let session_id = input.get("session_id").and_then(|v| v.as_str());
+        let metadata = input.get("metadata");
+        
+        match session_id {
+            Some(sid) => {
+                let mut session = match self.get_or_create_session(sid).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return StreamChunk {
+                            data: json!({}),
+                            done: true,
+                            error: Some(e.to_string()),
+                        };
+                    }
+                };
+                
+                // 更新 metadata
+                if let Some(meta) = metadata {
+                    if let Some(obj) = meta.as_object() {
+                        if let Some(meta_obj) = session.metadata.as_object_mut() {
+                            for (k, v) in obj {
+                                meta_obj.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                }
+                
+                session.updated_at = chrono::Utc::now().timestamp();
+                
+                if let Err(e) = self.save_session(&session).await {
+                    return StreamChunk {
+                        data: json!({}),
+                        done: true,
+                        error: Some(e.to_string()),
+                    };
+                }
+                
+                StreamChunk {
+                    data: json!({ "success": true }),
+                    done: true,
+                    error: None,
+                }
+            }
+            None => StreamChunk {
+                data: json!({}),
+                done: true,
+                error: Some("缺少 session_id 参数".to_string()),
+            },
+        }
+    }
 }
 
 impl Default for SessionPlugin {
@@ -612,11 +664,12 @@ impl Plugin for SessionPlugin {
                 match action.as_str() {
                     "get" => self.handle_get(&input).await,
                     "append" => self.handle_append(&input).await,
-                    "clear" => self.handle_clear(&input).await,
+                    "clear" | "delete" => self.handle_clear(&input).await,
                     "list" => self.handle_list().await,
                     "get_context" => self.handle_get_context(&input).await,
                     "add_context" => self.handle_add_context(&input).await,
                     "clear_context" => self.handle_clear_context().await,
+                    "update" => self.handle_update(&input).await,
                     _ => StreamChunk {
                         data: json!({}),
                         done: true,

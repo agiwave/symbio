@@ -7,21 +7,24 @@
         <button class="icon-btn" @click="createNewChat" title="新对话">+</button>
       </div>
       <div class="history-content">
-        <div v-if="chats.length === 0" class="empty-state">
+        <div v-if="loadingSessions" class="loading-state">
+          加载中...
+        </div>
+        <div v-else-if="sessions.length === 0" class="empty-state">
           <p>暂无对话</p>
           <button @click="createNewChat">开始新对话</button>
         </div>
         <div
-          v-for="chat in chats"
-          :key="chat.id"
+          v-for="session in sessions"
+          :key="session.id"
           class="history-item"
-          :class="{ active: activeChatId === chat.id }"
-          @click="selectChat(chat.id)"
+          :class="{ active: activeSessionId === session.id }"
+          @click="selectSession(session.id)"
         >
-          <div class="chat-title">{{ chat.title }}</div>
+          <div class="chat-title">{{ getSessionTitle(session.id) }}</div>
           <div class="chat-meta">
-            <span class="chat-time">{{ formatTime(chat.updatedAt) }}</span>
-            <span class="chat-count">{{ chat.messageCount }} 条消息</span>
+            <span class="chat-time">{{ formatTime(session.updated_at) }}</span>
+            <span class="chat-count">{{ session.message_count }} 条消息</span>
           </div>
         </div>
       </div>
@@ -29,26 +32,27 @@
 
     <!-- 右侧：对话区 -->
     <main class="chat-area">
-      <div v-if="activeChat" class="chat-container">
+      <div v-if="activeSession" class="chat-container">
         <header class="chat-header">
           <input
-            v-model="activeChat.title"
+            v-model="sessionTitle"
             class="chat-title-input"
             placeholder="未命名对话"
+            @blur="updateSessionTitle"
           />
-          <button class="delete-btn" @click="deleteChat(activeChat.id)" title="删除对话">
+          <button class="delete-btn" @click="deleteSession(activeSessionId)" title="删除对话">
             🗑️
           </button>
         </header>
         
         <div class="chat-messages" ref="messagesRef">
-          <div v-if="activeChat.messages.length === 0" class="empty-chat">
+          <div v-if="activeSession.messages.length === 0" class="empty-chat">
             <p>开始与 AI 对话</p>
             <p class="hint">输入问题或粘贴代码进行分析</p>
           </div>
           
           <div
-            v-for="(msg, index) in activeChat.messages"
+            v-for="(msg, index) in activeSession.messages"
             :key="index"
             class="message"
             :class="msg.role"
@@ -57,7 +61,7 @@
               {{ msg.role === 'user' ? '👤' : '🤖' }}
             </div>
             <div class="message-content">
-              <div class="message-text">{{ msg.content }}</div>
+              <div class="message-text" v-html="renderMarkdown(msg.content)"></div>
               <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
             </div>
           </div>
@@ -98,96 +102,176 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { marked } from 'marked'
 import { sendMessage, getProviderConfig, type ChatMessage } from '../services/ai'
+import { 
+  listSessions, 
+  getSession, 
+  appendMessages, 
+  clearSession,
+  createSessionId,
+  type Session,
+  type SessionMessage,
+  type SessionListItem
+} from '../services/session'
 
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-  timestamp: number
-}
-
-interface Chat {
-  id: string
-  title: string
-  messages: Message[]
-  createdAt: number
-  updatedAt: number
-  messageCount: number
-}
+// 配置 marked
+marked.setOptions({
+  breaks: true,
+  gfm: true
+})
 
 // 状态
-const chats = ref<Chat[]>([])
-const activeChatId = ref<string | null>(null)
+const sessions = ref<SessionListItem[]>([])
+const activeSessionId = ref<string | null>(null)
+const activeSession = ref<Session | null>(null)
+const sessionTitles = ref<Map<string, string>>(new Map())
+const sessionTitle = ref('')
 const inputText = ref('')
 const isLoading = ref(false)
+const loadingSessions = ref(false)
 const messagesRef = ref<HTMLElement | null>(null)
 const configError = ref<string | null>(null)
 
-const activeChat = computed(() => 
-  chats.value.find(c => c.id === activeChatId.value) || null
-)
-
-// 生成 ID
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2)
+// 渲染 Markdown
+function renderMarkdown(content: string): string {
+  try {
+    return marked.parse(content) as string
+  } catch {
+    return content
+  }
 }
 
 // 格式化时间
 function formatTime(timestamp: number): string {
-  const date = new Date(timestamp)
+  const date = new Date(timestamp * 1000) // 后端返回的是秒级时间戳
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
-// 创建新对话
-function createNewChat() {
-  const chat: Chat = {
-    id: generateId(),
-    title: '新对话',
-    messages: [],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    messageCount: 0
-  }
-  chats.value.unshift(chat)
-  activeChatId.value = chat.id
+// 获取会话标题
+function getSessionTitle(sessionId: string): string {
+  return sessionTitles.value.get(sessionId) || '新对话'
 }
 
-// 选择对话
-function selectChat(id: string) {
-  activeChatId.value = id
-}
-
-// 删除对话
-function deleteChat(id: string) {
-  if (confirm('确定要删除此对话吗？')) {
-    const index = chats.value.findIndex(c => c.id === id)
-    if (index !== -1) {
-      chats.value.splice(index, 1)
-      if (activeChatId.value === id) {
-        activeChatId.value = chats.value[0]?.id || null
+// 加载会话列表
+async function loadSessions() {
+  loadingSessions.value = true
+  try {
+    sessions.value = await listSessions()
+    // 加载每个会话的标题
+    for (const s of sessions.value) {
+      if (!sessionTitles.value.has(s.id)) {
+        const session = await getSession(s.id)
+        if (session.messages.length > 0) {
+          const firstMsg = session.messages[0].content
+          const title = firstMsg.slice(0, 20) + (firstMsg.length > 20 ? '...' : '')
+          sessionTitles.value.set(s.id, title)
+        }
       }
     }
+  } catch (err) {
+    console.error('加载会话列表失败:', err)
+  } finally {
+    loadingSessions.value = false
+  }
+}
+
+// 创建新对话
+async function createNewChat() {
+  const id = createSessionId()
+  const now = Math.floor(Date.now() / 1000)
+  
+  const newSession: Session = {
+    id,
+    messages: [],
+    created_at: now,
+    updated_at: now,
+    metadata: {}
+  }
+  
+  // 添加到列表
+  sessions.value.unshift({
+    id,
+    message_count: 0,
+    updated_at: now
+  })
+  
+  sessionTitles.value.set(id, '新对话')
+  activeSessionId.value = id
+  activeSession.value = newSession
+  sessionTitle.value = '新对话'
+}
+
+// 选择会话
+async function selectSession(id: string) {
+  if (activeSessionId.value === id) return
+  
+  activeSessionId.value = id
+  
+  try {
+    activeSession.value = await getSession(id)
+    sessionTitle.value = getSessionTitle(id)
+    await nextTick()
+    scrollToBottom()
+  } catch (err) {
+    console.error('加载会话失败:', err)
+  }
+}
+
+// 删除会话
+async function deleteSession(id: string | null) {
+  if (!id) return
+  if (!confirm('确定要删除此对话吗？')) return
+  
+  try {
+    await clearSession(id)
+    const index = sessions.value.findIndex(s => s.id === id)
+    if (index !== -1) {
+      sessions.value.splice(index, 1)
+      sessionTitles.value.delete(id)
+    }
+    
+    if (activeSessionId.value === id) {
+      activeSessionId.value = sessions.value[0]?.id || null
+      if (activeSessionId.value) {
+        await selectSession(activeSessionId.value)
+      } else {
+        activeSession.value = null
+      }
+    }
+  } catch (err) {
+    console.error('删除会话失败:', err)
+  }
+}
+
+// 更新会话标题
+function updateSessionTitle() {
+  if (activeSessionId.value && sessionTitle.value) {
+    sessionTitles.value.set(activeSessionId.value, sessionTitle.value)
   }
 }
 
 // 发送消息
 async function sendMessageToAI() {
   const text = inputText.value.trim()
-  if (!text || isLoading.value || !activeChat.value) return
+  if (!text || isLoading.value || !activeSession.value || !activeSessionId.value) return
 
-  const message: Message = {
+  const now = Math.floor(Date.now() / 1000)
+  
+  const userMessage: SessionMessage = {
     role: 'user',
     content: text,
-    timestamp: Date.now()
+    timestamp: now
   }
   
-  activeChat.value.messages.push(message)
-  activeChat.value.updatedAt = Date.now()
-  activeChat.value.messageCount = activeChat.value.messages.length
+  activeSession.value.messages.push(userMessage)
+  activeSession.value.updated_at = now
   
   // 更新标题（如果是第一条消息）
-  if (activeChat.value.messages.length === 1) {
-    activeChat.value.title = text.slice(0, 20) + (text.length > 20 ? '...' : '')
+  if (activeSession.value.messages.length === 1) {
+    const title = text.slice(0, 20) + (text.length > 20 ? '...' : '')
+    sessionTitles.value.set(activeSessionId.value, title)
+    sessionTitle.value = title
   }
   
   inputText.value = ''
@@ -199,40 +283,45 @@ async function sendMessageToAI() {
 
   try {
     // 构建消息历史
-    const messages: ChatMessage[] = activeChat.value.messages.map(m => ({
+    const messages: ChatMessage[] = activeSession.value.messages.map(m => ({
       role: m.role as 'user' | 'assistant',
       content: m.content
     }))
 
     const response = await sendMessage(messages)
     
+    const assistantMessage: SessionMessage = {
+      role: 'assistant',
+      content: '',
+      timestamp: Math.floor(Date.now() / 1000)
+    }
+    
     if (response.error) {
       configError.value = response.error
-      if (activeChat.value) {
-        activeChat.value.messages.push({
-          role: 'assistant',
-          content: `错误: ${response.error}`,
-          timestamp: Date.now()
-        })
-      }
+      assistantMessage.content = `错误: ${response.error}`
     } else if (response.content) {
-      if (activeChat.value) {
-        activeChat.value.messages.push({
-          role: 'assistant',
-          content: response.content,
-          timestamp: Date.now()
-        })
-        activeChat.value.updatedAt = Date.now()
-        activeChat.value.messageCount = activeChat.value.messages.length
-      }
+      assistantMessage.content = response.content
+    }
+    
+    activeSession.value.messages.push(assistantMessage)
+    activeSession.value.updated_at = Math.floor(Date.now() / 1000)
+    
+    // 保存到后端
+    await appendMessages(activeSessionId.value, [userMessage, assistantMessage])
+    
+    // 更新列表中的消息数
+    const listItem = sessions.value.find(s => s.id === activeSessionId.value)
+    if (listItem) {
+      listItem.message_count = activeSession.value.messages.length
+      listItem.updated_at = activeSession.value.updated_at
     }
   } catch (err) {
     configError.value = err instanceof Error ? err.message : '发送失败'
-    if (activeChat.value) {
-      activeChat.value.messages.push({
+    if (activeSession.value) {
+      activeSession.value.messages.push({
         role: 'assistant',
         content: `发送失败: ${configError.value}`,
-        timestamp: Date.now()
+        timestamp: Math.floor(Date.now() / 1000)
       })
     }
   } finally {
@@ -258,8 +347,7 @@ function scrollToBottom() {
 async function checkConfig() {
   try {
     const result = await getProviderConfig()
-    // openai 返回 { success, config: { api_key_set, ... } }
-    const hasApiKey = result.config?.api_key_set ?? false
+    const hasApiKey = result.config?.api_key && result.config.api_key.length > 0
     if (!hasApiKey) {
       configError.value = '请先配置 API Key（在设置页面）'
     } else {
@@ -270,12 +358,13 @@ async function checkConfig() {
   }
 }
 
-watch(activeChatId, () => {
+watch(activeSessionId, () => {
   nextTick(scrollToBottom)
 })
 
-onMounted(() => {
-  checkConfig()
+onMounted(async () => {
+  await checkConfig()
+  await loadSessions()
 })
 </script>
 
@@ -327,6 +416,12 @@ onMounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 0.5rem;
+}
+
+.loading-state {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--color-text-muted);
 }
 
 .empty-state {
@@ -473,6 +568,7 @@ onMounted(() => {
   font-size: 0.875rem;
   line-height: 1.5;
   word-break: break-word;
+  text-align: left;
 }
 
 .message.user .message-text {
@@ -485,6 +581,69 @@ onMounted(() => {
   background: #f0f0f0;
   color: var(--color-text);
   border-bottom-left-radius: 4px;
+}
+
+/* Markdown 样式 */
+.message-text :deep(pre) {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.message-text :deep(code) {
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.8rem;
+}
+
+.message-text :deep(p) {
+  margin: 0.5rem 0;
+}
+
+.message-text :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.message-text :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.message-text :deep(ul),
+.message-text :deep(ol) {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.message-text :deep(li) {
+  margin: 0.25rem 0;
+}
+
+.message-text :deep(blockquote) {
+  border-left: 3px solid var(--color-primary);
+  margin: 0.5rem 0;
+  padding-left: 1rem;
+  color: #666;
+}
+
+.message-text :deep(a) {
+  color: var(--color-primary);
+}
+
+.message-text :deep(table) {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+
+.message-text :deep(th),
+.message-text :deep(td) {
+  border: 1px solid #ddd;
+  padding: 0.5rem;
+}
+
+.message-text :deep(th) {
+  background: #f5f5f5;
 }
 
 .message-time {
