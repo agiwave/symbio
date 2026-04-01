@@ -349,7 +349,10 @@ function scrollToBottom() {
 async function checkConfig() {
   try {
     const result = await getProviderConfig()
-    const hasApiKey = result.config?.api_key && result.config.api_key.length > 0
+    console.log('[AgentPage] getProviderConfig result:', result)
+    // openai 插件直接返回 { api_base, api_key, model, ... }
+    const config = result as unknown as { api_key?: string; api_base?: string; model?: string }
+    const hasApiKey = config.api_key && config.api_key.length > 0
     if (!hasApiKey) {
       configError.value = '请先配置 API Key（在设置页面）'
     } else {
