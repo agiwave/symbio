@@ -38,11 +38,52 @@
     </div>
     
     <!-- 主界面：工作区就绪后显示 -->
-    <template v-else>
+    <div v-else class="main-container">
       <!-- 导航条 -->
       <nav class="nav-bar">
         <div class="nav-logo" @click="currentPage = 'workspace'">
-          <span class="logo-text">Symbio</span>
+          <svg class="logo-img" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="dnaGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style="stop-color:#22d3ee"/>
+                <stop offset="100%" style="stop-color:#06b6d4"/>
+              </linearGradient>
+              <linearGradient id="dnaGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style="stop-color:#a78bfa"/>
+                <stop offset="100%" style="stop-color:#8b5cf6"/>
+              </linearGradient>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+                <feMerge>
+                  <feMergeNode in="coloredBlur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+            <g filter="url(#glow)">
+              <path d="M140 60 Q190 130 140 200 Q90 270 140 340 Q190 410 140 480" fill="none" stroke="url(#dnaGrad1)" stroke-width="24" stroke-linecap="round"/>
+              <path d="M240 60 Q190 130 240 200 Q290 270 240 340 Q190 410 240 480" fill="none" stroke="url(#dnaGrad2)" stroke-width="24" stroke-linecap="round"/>
+              <ellipse cx="190" cy="110" rx="35" ry="10" fill="#e0e7ff" opacity="0.9"/>
+              <ellipse cx="190" cy="200" rx="35" ry="10" fill="#c7d2fe" opacity="0.9"/>
+              <ellipse cx="190" cy="290" rx="35" ry="10" fill="#e0e7ff" opacity="0.9"/>
+              <ellipse cx="190" cy="380" rx="35" ry="10" fill="#c7d2fe" opacity="0.9"/>
+            </g>
+            <g transform="translate(280, 130)">
+              <circle cx="90" cy="100" r="28" fill="#fbbf24" filter="url(#glow)"/>
+              <line x1="90" y1="100" x2="20" y2="50" stroke="#fcd34d" stroke-width="4" opacity="0.8"/>
+              <line x1="90" y1="100" x2="160" y2="50" stroke="#fcd34d" stroke-width="4" opacity="0.8"/>
+              <line x1="90" y1="100" x2="20" y2="150" stroke="#fcd34d" stroke-width="4" opacity="0.8"/>
+              <line x1="90" y1="100" x2="160" y2="150" stroke="#fcd34d" stroke-width="4" opacity="0.8"/>
+              <line x1="90" y1="100" x2="90" y2="170" stroke="#fcd34d" stroke-width="4" opacity="0.8"/>
+              <line x1="90" y1="100" x2="90" y2="30" stroke="#fcd34d" stroke-width="4" opacity="0.8"/>
+              <circle cx="20" cy="50" r="14" fill="#fcd34d"/>
+              <circle cx="160" cy="50" r="14" fill="#fcd34d"/>
+              <circle cx="20" cy="150" r="14" fill="#fcd34d"/>
+              <circle cx="160" cy="150" r="14" fill="#fcd34d"/>
+              <circle cx="90" cy="30" r="14" fill="#fcd34d"/>
+              <circle cx="90" cy="170" r="14" fill="#fcd34d"/>
+            </g>
+          </svg>
         </div>
         
         <!-- 工作区指示器 -->
@@ -116,7 +157,7 @@
           </div>
         </div>
       </div>
-    </template>
+    </div>
   </div>
 </template>
 
@@ -407,11 +448,10 @@ watch(currentPage, (newVal, oldVal) => {
   padding: 0.5rem;
 }
 
-.logo-text {
-  font-size: 1.2rem;
-  font-weight: 600;
-  color: #fff;
-  letter-spacing: 0.5px;
+.logo-img {
+  width: 36px;
+  height: 36px;
+  display: block;
 }
 
 .workspace-indicator {
@@ -437,6 +477,9 @@ watch(currentPage, (newVal, oldVal) => {
 .nav-items {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
   gap: 0.5rem;
   margin-top: 1rem;
 }
@@ -457,6 +500,13 @@ watch(currentPage, (newVal, oldVal) => {
 .nav-btn.active {
   background: rgba(255, 255, 255, 0.1);
   opacity: 1;
+}
+
+/* 主容器 */
+.main-container {
+  display: flex;
+  height: 100%;
+  width: 100%;
 }
 
 /* 主内容区 */
