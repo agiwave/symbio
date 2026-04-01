@@ -40,8 +40,8 @@ impl PluginFactory for AgentFactory {
         self.meta.clone()
     }
 
-    fn create(&self, parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
-        // 创建带父引用的 Agent
-        Arc::new(Agent::with_parent(parent))
+    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+        // 创建 Agent（空实例，后续通过 add_instance 添加子插件）
+        Arc::new(Agent::new())
     }
 }

@@ -3,7 +3,7 @@
 use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use super::WorkPlugin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use serde_json::Value;
 
 pub struct WorkFactory;
@@ -27,7 +27,8 @@ impl PluginFactory for WorkFactory {
         }
     }
 
-    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
-        Arc::new(WorkPlugin::new())
+    fn create(&self, parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+        let parent_weak = parent.as_ref().map(|p| Arc::downgrade(p));
+        Arc::new(WorkPlugin::new(parent_weak))
     }
 }

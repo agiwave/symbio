@@ -21,6 +21,11 @@
 
     <!-- 右侧设置内容 -->
     <main class="settings-content">
+      <!-- 消息提示 -->
+      <div v-if="message" :class="['message', message.type]">
+        {{ message.text }}
+      </div>
+
       <!-- 外观设置 -->
       <section v-show="activeSection === 'appearance'" class="content-section">
         <h2>外观</h2>
@@ -53,18 +58,13 @@
       <!-- AI 设置 -->
       <section v-show="activeSection === 'ai'" class="content-section">
         <h2>AI 设置</h2>
-        
-        <div v-if="saveStatus === 'success'" class="save-success">
-          配置已保存
-        </div>
-        
         <div class="setting-group">
           <div class="setting-item">
             <div class="setting-info">
               <label>LLM 提供商</label>
               <p class="setting-desc">选择 AI 模型提供商</p>
             </div>
-            <select v-model="settings.llmProvider">
+            <select v-model="llmProvider" @change="onProviderChange">
               <option value="openai">OpenAI</option>
               <option value="deepseek">DeepSeek</option>
               <option value="moonshot">Moonshot (月之暗面)</option>
@@ -80,7 +80,7 @@
               <label>API Base URL</label>
               <p class="setting-desc">API 服务地址</p>
             </div>
-            <input v-model="settings.apiBase" type="text" placeholder="https://api.openai.com/v1" />
+            <input v-model="aiConfig.api_base" type="text" placeholder="https://api.openai.com/v1" />
           </div>
           
           <div class="setting-item">
@@ -88,25 +88,17 @@
               <label>API Key</label>
               <p class="setting-desc">输入您的 API 密钥</p>
             </div>
-            <input v-model="settings.apiKey" type="password" placeholder="输入 API Key" />
-          </div>
-          
-          <div class="setting-item" v-if="availableModels.length > 0">
-            <div class="setting-info">
-              <label>模型</label>
-              <p class="setting-desc">选择使用的模型版本</p>
-            </div>
-            <select v-model="settings.model">
-              <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
-            </select>
+            <input v-model="aiConfig.api_key" type="password" placeholder="输入 API Key" />
           </div>
           
           <div class="setting-item">
             <div class="setting-info">
-              <label>自定义模型</label>
-              <p class="setting-desc">输入自定义模型名称（可选）</p>
+              <label>模型</label>
+              <p class="setting-desc">选择使用的模型版本</p>
             </div>
-            <input v-model="settings.customModel" type="text" placeholder="留空则使用上方选择的模型" />
+            <select v-model="aiConfig.model">
+              <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+            </select>
           </div>
           
           <div class="setting-item">
@@ -114,7 +106,7 @@
               <label>Temperature</label>
               <p class="setting-desc">控制输出随机性 (0-2)</p>
             </div>
-            <input v-model.number="settings.temperature" type="number" min="0" max="2" step="0.1" />
+            <input v-model.number="aiConfig.temperature" type="number" min="0" max="2" step="0.1" />
           </div>
           
           <div class="setting-item">
@@ -122,81 +114,156 @@
               <label>Max Tokens</label>
               <p class="setting-desc">最大输出长度</p>
             </div>
-            <input v-model.number="settings.maxTokens" type="number" min="100" max="32000" />
+            <input v-model.number="aiConfig.max_tokens" type="number" min="100" max="128000" />
           </div>
           
           <div class="setting-item">
             <div class="setting-info"></div>
-            <button class="action-btn" @click="saveAiConfig">保存配置</button>
+            <button class="action-btn" @click="saveAiConfig" :disabled="saving">
+              {{ saving ? '保存中...' : '保存配置' }}
+            </button>
           </div>
         </div>
       </section>
 
-      <!-- 执行环境设置 -->
-      <section v-show="activeSection === 'execution'" class="content-section">
-        <h2>执行环境</h2>
+      <!-- 会话设置 -->
+      <section v-show="activeSection === 'session'" class="content-section">
+        <h2>会话设置</h2>
         <div class="setting-group">
           <div class="setting-item">
             <div class="setting-info">
-              <label>Docker 镜像</label>
-              <p class="setting-desc">代码执行使用的 Docker 镜像</p>
+              <label>最大消息数</label>
+              <p class="setting-desc">每个会话保存的最大消息数量</p>
             </div>
-            <input v-model="settings.dockerImage" placeholder="symbio/bioinfo:latest" />
+            <input v-model.number="sessionConfig.max_messages" type="number" min="10" max="1000" />
           </div>
+          
           <div class="setting-item">
             <div class="setting-info">
-              <label>CPU 限制</label>
-              <p class="setting-desc">容器可使用的最大 CPU 核心数</p>
+              <label>自动压缩</label>
+              <p class="setting-desc">当消息数超过阈值时自动压缩历史</p>
             </div>
-            <input v-model.number="settings.cpuLimit" type="number" min="1" max="16" />
-            <span class="unit">核心</span>
+            <label class="toggle">
+              <input type="checkbox" v-model="sessionConfig.auto_compress" />
+              <span class="toggle-slider"></span>
+            </label>
           </div>
+          
           <div class="setting-item">
             <div class="setting-info">
-              <label>内存限制</label>
-              <p class="setting-desc">容器可使用的最大内存</p>
+              <label>压缩阈值</label>
+              <p class="setting-desc">触发自动压缩的消息数量</p>
             </div>
-            <input v-model.number="settings.memoryLimit" type="number" min="1" max="64" />
-            <span class="unit">GB</span>
+            <input v-model.number="sessionConfig.compress_threshold" type="number" min="10" max="500" />
           </div>
+          
           <div class="setting-item">
-            <div class="setting-info">
-              <label>执行超时</label>
-              <p class="setting-desc">代码执行的最大时间</p>
-            </div>
-            <input v-model.number="settings.timeout" type="number" min="10" max="600" />
-            <span class="unit">秒</span>
+            <div class="setting-info"></div>
+            <button class="action-btn" @click="saveSessionConfig" :disabled="saving">
+              {{ saving ? '保存中...' : '保存配置' }}
+            </button>
           </div>
         </div>
       </section>
 
-      <!-- 数据管理 -->
-      <section v-show="activeSection === 'data'" class="content-section">
-        <h2>数据管理</h2>
+      <!-- 工具设置 -->
+      <section v-show="activeSection === 'tools'" class="content-section">
+        <h2>工具设置</h2>
         <div class="setting-group">
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>启用 Shell 工具</label>
+              <p class="setting-desc">允许执行 Shell 命令</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" v-model="toolsConfig.shell_enabled" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>启用文件工具</label>
+              <p class="setting-desc">允许文件读写操作</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" v-model="toolsConfig.file_enabled" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>启用 Web 工具</label>
+              <p class="setting-desc">允许网络请求</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" v-model="toolsConfig.web_enabled" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>Shell 超时（秒）</label>
+              <p class="setting-desc">Shell 命令执行超时时间</p>
+            </div>
+            <input v-model.number="toolsConfig.shell_timeout" type="number" min="1" max="3600" />
+          </div>
+          
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>Web 超时（秒）</label>
+              <p class="setting-desc">Web 请求超时时间</p>
+            </div>
+            <input v-model.number="toolsConfig.web_timeout" type="number" min="1" max="300" />
+          </div>
+          
+          <div class="setting-item">
+            <div class="setting-info"></div>
+            <button class="action-btn" @click="saveToolsConfig" :disabled="saving">
+              {{ saving ? '保存中...' : '保存配置' }}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 工作区设置 -->
+      <section v-show="activeSection === 'workspace'" class="content-section">
+        <h2>工作区设置</h2>
+        <div class="setting-group">
+          <div class="setting-item">
+            <div class="setting-info">
+              <label>工作区路径</label>
+              <p class="setting-desc">默认工作区目录</p>
+            </div>
+            <input v-model="workConfig.workspace_path" type="text" placeholder="~/projects" />
+          </div>
+          
           <div class="setting-item">
             <div class="setting-info">
               <label>自动保存</label>
               <p class="setting-desc">自动保存编辑内容</p>
             </div>
             <label class="toggle">
-              <input type="checkbox" v-model="settings.autoSave" />
+              <input type="checkbox" v-model="workConfig.auto_save" />
               <span class="toggle-slider"></span>
             </label>
           </div>
+          
           <div class="setting-item">
             <div class="setting-info">
-              <label>导出数据</label>
-              <p class="setting-desc">导出所有工作区数据</p>
+              <label>自动保存间隔（毫秒）</label>
+              <p class="setting-desc">自动保存间隔时间</p>
             </div>
-            <button class="action-btn" @click="exportData">导出</button>
+            <input v-model.number="workConfig.auto_save_interval" type="number" min="1000" max="300000" />
           </div>
-          <div class="setting-item danger">
-            <div class="setting-info">
-              <label>清除数据</label>
-              <p class="setting-desc">清除所有本地存储的数据</p>
-            </div>
-            <button class="action-btn danger" @click="clearData">清除</button>
+          
+          <div class="setting-item">
+            <div class="setting-info"></div>
+            <button class="action-btn" @click="saveWorkConfig" :disabled="saving">
+              {{ saving ? '保存中...' : '保存配置' }}
+            </button>
           </div>
         </div>
       </section>
@@ -223,45 +290,86 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch } from 'vue'
 import logoUrl from '../assets/logo.svg'
-import { configureProvider, getProviderConfig } from '../services/ai'
+import {
+  getOpenAiConfig,
+  setOpenAiConfig,
+  getSessionConfig,
+  setSessionConfig,
+  getToolsConfig,
+  setToolsConfig,
+  getWorkConfig,
+  setWorkConfig,
+  type OpenAiConfig,
+  type SessionConfig,
+  type ToolsConfig,
+  type WorkConfig,
+} from '../services/config'
 
-const activeSection = ref('appearance')
-const saveStatus = ref<string | null>(null)
+const activeSection = ref('ai')
+const saving = ref(false)
+const message = ref<{ type: string; text: string } | null>(null)
 
 const sections = [
   { id: 'appearance', icon: '🎨', label: '外观' },
   { id: 'ai', icon: '🤖', label: 'AI 设置' },
-  { id: 'execution', icon: '⚡', label: '执行环境' },
-  { id: 'data', icon: '📦', label: '数据管理' },
+  { id: 'session', icon: '💬', label: '会话设置' },
+  { id: 'tools', icon: '🔧', label: '工具设置' },
+  { id: 'workspace', icon: '📁', label: '工作区' },
   { id: 'about', icon: 'ℹ️', label: '关于' },
 ]
 
+// 外观设置（本地存储）
 const settings = reactive({
   theme: 'light',
   fontSize: 'medium',
-  llmProvider: 'openai',
-  apiBase: 'https://api.openai.com/v1',
-  apiKey: '',
+})
+
+// AI 设置
+const llmProvider = ref('openai')
+const aiConfig = reactive<Partial<OpenAiConfig> & { api_key?: string }>({
+  api_base: 'https://api.openai.com/v1',
+  api_key: '',
   model: 'gpt-4o-mini',
-  customModel: '',
   temperature: 0.7,
-  maxTokens: 4096,
-  dockerImage: 'symbio/bioinfo:latest',
-  cpuLimit: 4,
-  memoryLimit: 8,
-  timeout: 60,
-  autoSave: true,
+  max_tokens: 4096,
+})
+
+// 会话设置
+const sessionConfig = reactive<SessionConfig>({
+  storage_dir: '',
+  max_messages: 100,
+  auto_compress: true,
+  compress_threshold: 50,
+})
+
+// 工具设置
+const toolsConfig = reactive<ToolsConfig>({
+  shell_enabled: true,
+  file_enabled: true,
+  web_enabled: true,
+  allowed_paths: ['~'],
+  blocked_commands: ['rm -rf', 'sudo', 'chmod 777'],
+  shell_timeout: 60,
+  web_timeout: 30,
+})
+
+// 工作区设置
+const workConfig = reactive<WorkConfig>({
+  workspace_path: '~/projects',
+  auto_save: true,
+  auto_save_interval: 30000,
+  recent_files: [],
 })
 
 // 提供商预设
 const providerPresets: Record<string, { apiBase: string; models: string[] }> = {
   openai: {
     apiBase: 'https://api.openai.com/v1',
-    models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo']
+    models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo', 'o1', 'o1-mini', 'o3-mini']
   },
   deepseek: {
     apiBase: 'https://api.deepseek.com/v1',
-    models: ['deepseek-chat', 'deepseek-coder']
+    models: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner']
   },
   moonshot: {
     apiBase: 'https://api.moonshot.cn/v1',
@@ -269,7 +377,7 @@ const providerPresets: Record<string, { apiBase: string; models: string[] }> = {
   },
   zhipu: {
     apiBase: 'https://open.bigmodel.cn/api/paas/v4',
-    models: ['glm-4', 'glm-4-flash', 'glm-3-turbo']
+    models: ['glm-4', 'glm-4-flash', 'glm-4-plus', 'glm-3-turbo']
   },
   aiyuanjing: {
     apiBase: 'https://maas-api.ai-yuanjing.com/openapi/compatible-mode/v1',
@@ -277,7 +385,7 @@ const providerPresets: Record<string, { apiBase: string; models: string[] }> = {
   },
   local: {
     apiBase: 'http://localhost:11434/v1',
-    models: ['llama3', 'qwen2', 'mistral']
+    models: ['llama3', 'qwen2', 'mistral', 'deepseek-coder-v2']
   },
   custom: {
     apiBase: '',
@@ -287,38 +395,61 @@ const providerPresets: Record<string, { apiBase: string; models: string[] }> = {
 
 const availableModels = ref<string[]>(providerPresets.openai.models)
 
-// 切换提供商时更新 API Base 和模型列表
-watch(() => settings.llmProvider, (provider) => {
-  const preset = providerPresets[provider]
+// 切换提供商时更新配置
+function onProviderChange() {
+  const preset = providerPresets[llmProvider.value]
   if (preset) {
-    settings.apiBase = preset.apiBase
+    aiConfig.api_base = preset.apiBase
     availableModels.value = preset.models
     if (preset.models.length > 0) {
-      settings.model = preset.models[0]
+      aiConfig.model = preset.models[0]
     }
   }
-})
+}
 
-// 加载保存的配置
-async function loadConfig() {
+// 显示消息
+function showMessage(type: string, text: string) {
+  message.value = { type, text }
+  setTimeout(() => { message.value = null }, 3000)
+}
+
+// 加载所有配置
+async function loadConfigs() {
   try {
-    const result = await getProviderConfig()
-    // openai 返回 { success, config: { api_base, api_key_set, model, ... } }
-    const config = result.config
-    if (config) {
-      settings.apiBase = config.api_base || ''
-      settings.model = config.model || 'gpt-4o-mini'
-      settings.temperature = config.temperature ?? 0.7
-      settings.maxTokens = config.max_tokens ?? 4096
+    // 加载 AI 配置
+    const aiCfg = await getOpenAiConfig()
+    if (aiCfg) {
+      aiConfig.api_base = aiCfg.api_base || 'https://api.openai.com/v1'
+      aiConfig.model = aiCfg.model || 'gpt-4o-mini'
+      aiConfig.temperature = aiCfg.temperature ?? 0.7
+      aiConfig.max_tokens = aiCfg.max_tokens ?? 4096
       
       // 根据 api_base 推断提供商
       for (const [name, preset] of Object.entries(providerPresets)) {
-        if (preset.apiBase === config.api_base) {
-          settings.llmProvider = name
+        if (preset.apiBase === aiCfg.api_base) {
+          llmProvider.value = name
           availableModels.value = preset.models
           break
         }
       }
+    }
+
+    // 加载会话配置
+    const sessCfg = await getSessionConfig()
+    if (sessCfg) {
+      Object.assign(sessionConfig, sessCfg)
+    }
+
+    // 加载工具配置
+    const toolsCfg = await getToolsConfig()
+    if (toolsCfg) {
+      Object.assign(toolsConfig, toolsCfg)
+    }
+
+    // 加载工作区配置
+    const workCfg = await getWorkConfig()
+    if (workCfg) {
+      Object.assign(workConfig, workCfg)
     }
   } catch (err) {
     console.error('加载配置失败:', err)
@@ -327,50 +458,78 @@ async function loadConfig() {
 
 // 保存 AI 配置
 async function saveAiConfig() {
-  console.log('[SettingsPage] saveAiConfig called')
-  saveStatus.value = null
-  
-  const configData = {
-    name: settings.llmProvider,
-    api_base: settings.apiBase,
-    api_key: settings.apiKey,
-    model: settings.customModel || settings.model,
-    temperature: settings.temperature,
-    max_tokens: settings.maxTokens
-  }
-  console.log('[SettingsPage] config data:', configData)
-  
+  saving.value = true
   try {
-    const result = await configureProvider(configData)
-    console.log('[SettingsPage] configureProvider result:', result)
-    
-    if (result.error) {
-      saveStatus.value = 'error'
-      console.error('保存配置失败:', result.error)
-    } else {
-      saveStatus.value = 'success'
-      setTimeout(() => { saveStatus.value = null }, 2000)
-    }
+    await setOpenAiConfig({
+      api_base: aiConfig.api_base,
+      api_key: aiConfig.api_key,
+      model: aiConfig.model,
+      temperature: aiConfig.temperature,
+      max_tokens: aiConfig.max_tokens,
+    })
+    showMessage('success', 'AI 配置已保存')
   } catch (err) {
-    saveStatus.value = 'error'
-    console.error('保存配置失败:', err)
+    showMessage('error', `保存失败: ${err}`)
+  } finally {
+    saving.value = false
   }
 }
 
-function exportData() {
-  console.log('Export data...')
-  alert('数据导出功能待实现')
+// 保存会话配置
+async function saveSessionConfig() {
+  saving.value = true
+  try {
+    await setSessionConfig({
+      max_messages: sessionConfig.max_messages,
+      auto_compress: sessionConfig.auto_compress,
+      compress_threshold: sessionConfig.compress_threshold,
+    })
+    showMessage('success', '会话配置已保存')
+  } catch (err) {
+    showMessage('error', `保存失败: ${err}`)
+  } finally {
+    saving.value = false
+  }
 }
 
-function clearData() {
-  if (confirm('确定要清除所有数据吗？此操作不可撤销。')) {
-    localStorage.clear()
-    location.reload()
+// 保存工具配置
+async function saveToolsConfig() {
+  saving.value = true
+  try {
+    await setToolsConfig({
+      shell_enabled: toolsConfig.shell_enabled,
+      file_enabled: toolsConfig.file_enabled,
+      web_enabled: toolsConfig.web_enabled,
+      shell_timeout: toolsConfig.shell_timeout,
+      web_timeout: toolsConfig.web_timeout,
+    })
+    showMessage('success', '工具配置已保存')
+  } catch (err) {
+    showMessage('error', `保存失败: ${err}`)
+  } finally {
+    saving.value = false
+  }
+}
+
+// 保存工作区配置
+async function saveWorkConfig() {
+  saving.value = true
+  try {
+    await setWorkConfig({
+      workspace_path: workConfig.workspace_path,
+      auto_save: workConfig.auto_save,
+      auto_save_interval: workConfig.auto_save_interval,
+    })
+    showMessage('success', '工作区配置已保存')
+  } catch (err) {
+    showMessage('error', `保存失败: ${err}`)
+  } finally {
+    saving.value = false
   }
 }
 
 onMounted(() => {
-  loadConfig()
+  loadConfigs()
 })
 </script>
 
@@ -455,13 +614,21 @@ onMounted(() => {
   padding: 0.5rem;
 }
 
-.save-success {
+.message {
   padding: 0.75rem 1rem;
   margin-bottom: 1rem;
-  background: #d4edda;
-  color: #155724;
   border-radius: 8px;
   font-size: 0.875rem;
+}
+
+.message.success {
+  background: #d4edda;
+  color: #155724;
+}
+
+.message.error {
+  background: #f8d7da;
+  color: #721c24;
 }
 
 .setting-item {
@@ -473,11 +640,6 @@ onMounted(() => {
 
 .setting-item:hover {
   background: #fafafa;
-}
-
-.setting-item.danger {
-  border-top: 1px solid var(--color-border);
-  margin-top: 0.5rem;
 }
 
 .setting-info {
@@ -508,14 +670,8 @@ onMounted(() => {
 }
 
 .setting-item input[type="number"] {
-  width: 80px;
+  width: 100px;
   min-width: auto;
-}
-
-.unit {
-  margin-left: 0.5rem;
-  color: var(--color-text-muted);
-  font-size: 0.875rem;
 }
 
 /* Toggle 开关 */
@@ -574,12 +730,9 @@ onMounted(() => {
   font-size: 0.875rem;
 }
 
-.action-btn.danger {
-  background: #dc3545;
-}
-
-.action-btn.danger:hover {
-  background: #c82333;
+.action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* 关于页面 */

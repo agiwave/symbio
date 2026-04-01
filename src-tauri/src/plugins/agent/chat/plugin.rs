@@ -19,53 +19,50 @@ pub struct ChatPlugin {
 }
 
 impl ChatPlugin {
-    pub fn new() -> Self {
-        Self {
-            meta: PluginMeta {
-                name: "chat".to_string(),
-                description: "AI 对话插件 - 通过 @llm 调用 LLM".to_string(),
-                version: "0.1.0".to_string(),
-                input: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["send"],
-                            "description": "发送消息"
-                        },
-                        "messages": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "role": { "type": "string" },
-                                    "content": { "type": "string" }
-                                }
-                            },
-                            "description": "对话消息列表"
-                        }
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "chat".to_string(),
+            description: "AI 对话插件 - 通过 @llm 调用 LLM".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["send"],
+                        "description": "发送消息"
                     },
-                    "required": ["action"]
-                })),
-                output: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "content": { "type": "string" },
-                        "error": { "type": "string" }
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "role": { "type": "string" },
+                                "content": { "type": "string" }
+                            }
+                        },
+                        "description": "对话消息列表"
                     }
-                })),
-                author: Some("Symbio Team".to_string()),
-            },
-            parent: None,
+                },
+                "required": ["action"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "content": { "type": "string" },
+                    "error": { "type": "string" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
         }
     }
 
-    /// 创建带父引用的实例
-    pub fn with_parent(parent: Option<Arc<dyn Plugin>>) -> Arc<dyn Plugin> {
-        let plugin = Self::new();
-        let mut plugin = plugin;
-        plugin.parent = parent.map(|p| Arc::downgrade(&p));
-        Arc::new(plugin)
+    /// 主构造函数（Factory 机制使用）
+    pub fn new(parent: Option<Weak<dyn Plugin>>) -> Self {
+        Self {
+            meta: Self::create_meta(),
+            parent,
+        }
     }
 
     /// 获取父插件引用
@@ -76,7 +73,7 @@ impl ChatPlugin {
 
 impl Default for ChatPlugin {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 

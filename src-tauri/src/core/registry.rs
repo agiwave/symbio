@@ -39,6 +39,11 @@ impl PluginFactoryRegistry {
     pub fn list(&self) -> Vec<Arc<dyn PluginFactory>> {
         self.factories.read().unwrap().values().cloned().collect()
     }
+    
+    /// 根据名称获取工厂
+    pub fn get(&self, name: &str) -> Option<Arc<dyn PluginFactory>> {
+        self.factories.read().unwrap().get(name).cloned()
+    }
 }
 
 /// 全局单例

@@ -16,3 +16,4 @@ mod content_search;
 mod http_request;
 
 pub use plugin::ToolsPlugin;
+pub use factory::ToolsFactory;

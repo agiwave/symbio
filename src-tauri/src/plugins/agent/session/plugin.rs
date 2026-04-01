@@ -6,52 +6,130 @@ use super::types::{ChatMessage, ContextEntry, Session, SessionContext, LlmContex
 use crate::core::traits::{Plugin, CAPABILITY_SESSION};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-const DEFAULT_MAX_MESSAGES: usize = 100;
+/// Session 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfig {
+    /// 存储目录
+    #[serde(default = "default_storage_dir")]
+    pub storage_dir: String,
+    /// 最大消息数
+    #[serde(default = "default_max_messages")]
+    pub max_messages: usize,
+    /// 自动压缩
+    #[serde(default = "default_auto_compress")]
+    pub auto_compress: bool,
+    /// 压缩阈值（消息数）
+    #[serde(default = "default_compress_threshold")]
+    pub compress_threshold: usize,
+}
+
+fn default_storage_dir() -> String { 
+    dirs::data_local_dir()
+        .map(|p| p.join("symbio").join("sessions").to_string_lossy().to_string())
+        .unwrap_or_else(|| "~/.local/share/symbio/sessions".to_string())
+}
+fn default_max_messages() -> usize { 100 }
+fn default_auto_compress() -> bool { true }
+fn default_compress_threshold() -> usize { 50 }
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            storage_dir: default_storage_dir(),
+            max_messages: default_max_messages(),
+            auto_compress: default_auto_compress(),
+            compress_threshold: default_compress_threshold(),
+        }
+    }
+}
 
 /// Session 插件
 pub struct SessionPlugin {
     meta: PluginMeta,
+    config: Arc<RwLock<SessionConfig>>,
     storage_dir: Arc<RwLock<PathBuf>>,
+    /// 父插件引用（用于保存配置）
+    parent: Option<Weak<dyn Plugin>>,
 }
 
 impl SessionPlugin {
-    pub fn new(storage_dir: PathBuf) -> Self {
-        Self {
-            meta: PluginMeta {
-                name: "session".to_string(),
-                description: "会话历史和上下文管理".to_string(),
-                version: "0.1.0".to_string(),
-                input: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["get", "append", "clear", "list", "get_context", "add_context", "clear_context"]
-                        },
-                        "session_id": { "type": "string" },
-                        "messages": { "type": "array" },
-                        "context_path": { "type": "string" }
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "session".to_string(),
+            description: "会话历史和上下文管理".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "append", "clear", "list", "get_context", "add_context", "clear_context"]
                     },
-                    "required": ["action"]
-                })),
-                output: None,
-                author: Some("Symbio Team".to_string()),
-            },
-            storage_dir: Arc::new(RwLock::new(storage_dir)),
+                    "session_id": { "type": "string" },
+                    "messages": { "type": "array" },
+                    "context_path": { "type": "string" }
+                },
+                "required": ["action"]
+            })),
+            output: None,
+            author: Some("Symbio Team".to_string()),
         }
     }
 
-    pub fn default_dir() -> Self {
-        let dir = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("symbio")
-            .join("sessions");
-        Self::new(dir)
+    /// 主构造函数（Factory 机制使用）
+    pub fn new(parent: Option<Weak<dyn Plugin>>, config: SessionConfig) -> Self {
+        let storage_dir = PathBuf::from(&config.storage_dir);
+        Self {
+            meta: Self::create_meta(),
+            config: Arc::new(RwLock::new(config)),
+            storage_dir: Arc::new(RwLock::new(storage_dir)),
+            parent,
+        }
+    }
+
+    /// 获取父插件引用
+    fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
+        self.parent.as_ref().and_then(|w| w.upgrade())
+    }
+
+    /// 获取配置 Schema
+    fn config_schema() -> Value {
+        json!({
+            "storage_dir": {
+                "type": "string",
+                "title": "存储目录",
+                "description": "会话数据存储目录",
+                "default": default_storage_dir()
+            },
+            "max_messages": {
+                "type": "integer",
+                "title": "最大消息数",
+                "description": "每个会话保存的最大消息数量",
+                "minimum": 10,
+                "maximum": 1000,
+                "default": 100
+            },
+            "auto_compress": {
+                "type": "boolean",
+                "title": "自动压缩",
+                "description": "当消息数超过阈值时自动压缩历史",
+                "default": true
+            },
+            "compress_threshold": {
+                "type": "integer",
+                "title": "压缩阈值",
+                "description": "触发自动压缩的消息数量",
+                "minimum": 10,
+                "maximum": 500,
+                "default": 50
+            }
+        })
     }
 
     fn session_path(dir: &PathBuf, session_id: &str) -> PathBuf {
@@ -207,7 +285,8 @@ impl SessionPlugin {
                 }
                 
                 // 截断消息历史
-                while session.messages.len() > DEFAULT_MAX_MESSAGES {
+                let max_msgs = self.config.read().await.max_messages;
+                while session.messages.len() > max_msgs {
                     session.messages.remove(0);
                 }
                 
@@ -370,13 +449,44 @@ impl SessionPlugin {
 
 impl Default for SessionPlugin {
     fn default() -> Self {
-        Self::default_dir()
+        Self::new(None, SessionConfig::default())
     }
 }
 
 #[async_trait]
 impl Plugin for SessionPlugin {
-    fn meta(&self, _path: &str) -> PluginResult<PluginMeta> {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path == "config" {
+            return Ok(PluginMeta {
+                name: "config".to_string(),
+                description: "Session 配置管理".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["get", "set", "schema"],
+                            "description": "操作类型"
+                        },
+                        "config": {
+                            "type": "object",
+                            "description": "配置数据（set 操作时使用）"
+                        }
+                    },
+                    "required": ["action"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "config": { "type": "object" },
+                        "schema": { "type": "object" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            });
+        }
         Ok(self.meta.clone())
     }
 
@@ -384,7 +494,84 @@ impl Plugin for SessionPlugin {
         vec![CAPABILITY_SESSION]
     }
 
-    fn invoke(&self, _path: &str, input: Value) -> PluginResult<InvokeStream> {
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        // 处理 config path
+        if path == "config" {
+            let action = input.get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("get");
+            
+            let config = Arc::clone(&self.config);
+            let storage_dir = Arc::clone(&self.storage_dir);
+            let parent = self.get_parent();
+
+            let result = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    match action {
+                        "get" => {
+                            let cfg = config.read().await;
+                            StreamChunk {
+                                data: json!({
+                                    "storage_dir": cfg.storage_dir,
+                                    "max_messages": cfg.max_messages,
+                                    "auto_compress": cfg.auto_compress,
+                                    "compress_threshold": cfg.compress_threshold
+                                }),
+                                done: true,
+                                error: None,
+                            }
+                        }
+                        "set" => {
+                            if let Some(new_config) = input.get("config") {
+                                let mut cfg = config.write().await;
+                                if let Some(v) = new_config.get("storage_dir").and_then(|v| v.as_str()) {
+                                    cfg.storage_dir = v.to_string();
+                                    // 更新实际存储目录
+                                    let mut dir = storage_dir.write().await;
+                                    *dir = PathBuf::from(v);
+                                }
+                                if let Some(v) = new_config.get("max_messages").and_then(|v| v.as_u64()) {
+                                    cfg.max_messages = v as usize;
+                                }
+                                if let Some(v) = new_config.get("auto_compress").and_then(|v| v.as_bool()) {
+                                    cfg.auto_compress = v;
+                                }
+                                if let Some(v) = new_config.get("compress_threshold").and_then(|v| v.as_u64()) {
+                                    cfg.compress_threshold = v as usize;
+                                }
+                            }
+                            // 通知父插件保存配置
+                            if let Some(p) = parent {
+                                let _ = p.invoke("save_config", json!({}));
+                            }
+                            StreamChunk {
+                                data: json!({ "success": true }),
+                                done: true,
+                                error: None,
+                            }
+                        }
+                        "schema" => {
+                            StreamChunk {
+                                data: json!({
+                                    "success": true,
+                                    "schema": Self::config_schema()
+                                }),
+                                done: true,
+                                error: None,
+                            }
+                        }
+                        _ => StreamChunk {
+                            data: json!({}),
+                            done: true,
+                            error: Some(format!("未知操作: {}", action)),
+                        },
+                    }
+                })
+            });
+
+            return Ok(InvokeStream::Single(result));
+        }
+
         let action = input.get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 action 参数".to_string()))?

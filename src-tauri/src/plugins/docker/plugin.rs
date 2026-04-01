@@ -14,59 +14,64 @@ pub struct DockerPlugin {
 }
 
 impl DockerPlugin {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "docker".to_string(),
+            description: "Docker 代码执行环境".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["available", "execute", "execute_script"],
+                        "description": "执行动作类型"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "要执行的命令 (action=execute)"
+                    },
+                    "script_path": {
+                        "type": "string",
+                        "description": "脚本文件路径 (action=execute_script)"
+                    },
+                    "language": {
+                        "type": "string",
+                        "enum": ["python", "python3", "r", "R", "bash", "sh", "shell"],
+                        "description": "脚本语言 (action=execute_script)"
+                    },
+                    "config": {
+                        "type": "object",
+                        "properties": {
+                            "cpu_limit": { "type": "number" },
+                            "memory_limit": { "type": "number" },
+                            "time_limit": { "type": "number" },
+                            "network_disabled": { "type": "boolean" },
+                            "image": { "type": "string" }
+                        }
+                    }
+                },
+                "required": ["action"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "success": { "type": "boolean" },
+                    "exit_code": { "type": "number" },
+                    "stdout": { "type": "string" },
+                    "stderr": { "type": "string" },
+                    "duration_ms": { "type": "number" },
+                    "timed_out": { "type": "boolean" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    /// 主构造函数（Factory 机制使用）
     pub fn new() -> Self {
         DockerPlugin {
-            meta: PluginMeta {
-                name: "docker".to_string(),
-                description: "Docker 代码执行环境".to_string(),
-                version: "0.1.0".to_string(),
-                input: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["available", "execute", "execute_script"],
-                            "description": "执行动作类型"
-                        },
-                        "command": {
-                            "type": "string",
-                            "description": "要执行的命令 (action=execute)"
-                        },
-                        "script_path": {
-                            "type": "string",
-                            "description": "脚本文件路径 (action=execute_script)"
-                        },
-                        "language": {
-                            "type": "string",
-                            "enum": ["python", "python3", "r", "R", "bash", "sh", "shell"],
-                            "description": "脚本语言 (action=execute_script)"
-                        },
-                        "config": {
-                            "type": "object",
-                            "properties": {
-                                "cpu_limit": { "type": "number" },
-                                "memory_limit": { "type": "number" },
-                                "time_limit": { "type": "number" },
-                                "network_disabled": { "type": "boolean" },
-                                "image": { "type": "string" }
-                            }
-                        }
-                    },
-                    "required": ["action"]
-                })),
-                output: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "success": { "type": "boolean" },
-                        "exit_code": { "type": "number" },
-                        "stdout": { "type": "string" },
-                        "stderr": { "type": "string" },
-                        "duration_ms": { "type": "number" },
-                        "timed_out": { "type": "boolean" }
-                    }
-                })),
-                author: Some("Symbio Team".to_string()),
-            },
+            meta: Self::create_meta(),
             config: ExecutionConfig::default(),
         }
     }

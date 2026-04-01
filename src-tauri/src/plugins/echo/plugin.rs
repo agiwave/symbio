@@ -10,44 +10,49 @@ pub struct EchoPlugin {
 }
 
 impl EchoPlugin {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "echo".to_string(),
+            description: "回显输入内容，用于测试".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "要回显的消息",
+                        "default": "Hello, World!"
+                    },
+                    "uppercase": {
+                        "type": "boolean",
+                        "description": "是否转换为大写",
+                        "default": false
+                    }
+                },
+                "required": ["message"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "original": {
+                        "type": "string",
+                        "description": "原始输入"
+                    },
+                    "echoed": {
+                        "type": "string",
+                        "description": "回显输出"
+                    }
+                },
+                "required": ["original", "echoed"]
+            })),
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    /// 主构造函数（Factory 机制使用）
     pub fn new() -> Self {
         EchoPlugin {
-            meta: PluginMeta {
-                name: "echo".to_string(),
-                description: "回显输入内容，用于测试".to_string(),
-                version: "0.1.0".to_string(),
-                input: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "message": {
-                            "type": "string",
-                            "description": "要回显的消息",
-                            "default": "Hello, World!"
-                        },
-                        "uppercase": {
-                            "type": "boolean",
-                            "description": "是否转换为大写",
-                            "default": false
-                        }
-                    },
-                    "required": ["message"]
-                })),
-                output: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "original": {
-                            "type": "string",
-                            "description": "原始输入"
-                        },
-                        "echoed": {
-                            "type": "string",
-                            "description": "回显输出"
-                        }
-                    },
-                    "required": ["original", "echoed"]
-                })),
-                author: Some("Symbio Team".to_string()),
-            },
+            meta: Self::create_meta(),
         }
     }
 }

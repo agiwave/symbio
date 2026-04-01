@@ -16,158 +16,69 @@ mod factory;
 
 pub use add::AddPlugin;
 pub use remove::RemovePlugin;
-pub use chat::ChatPlugin;
-pub use tools::ToolsPlugin;
-pub use memory::MemoryPlugin;
-pub use session::SessionPlugin;
-pub use telegram::TelegramPlugin;
-pub use openai::OpenAiPlugin;
 
-// 导入 docker 插件（来自 plugins/docker）
-use crate::plugins::docker::DockerPlugin;
+// 导出子插件工厂
+pub use chat::factory::ChatFactory;
+pub use tools::factory::ToolsFactory;
+pub use memory::factory::MemoryFactory;
+pub use session::factory::SessionFactory;
+pub use telegram::factory::TelegramFactory;
+pub use openai::factory::OpenAiFactory;
+pub use factory::AgentFactory;
 
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
-use crate::core::PluginFactoryRegistry;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Weak, RwLock};
 
 pub struct Agent {
     meta: PluginMeta,
-    instances: HashMap<String, Arc<dyn Plugin>>,
-    /// 自身引用，用于传递给子插件
-    self_ref: Option<Weak<dyn Plugin>>,
+    instances: RwLock<HashMap<String, Arc<dyn Plugin>>>,
     /// 父插件引用（用于转发 save_config 等请求）
-    parent: Option<Weak<dyn Plugin>>,
+    parent: RwLock<Option<Weak<dyn Plugin>>>,
 }
 
 impl Agent {
-    /// 创建 Agent 实例（返回 Arc 包装）
-    /// 
-    /// 使用 Arc::new_cyclic 创建自引用
-    pub fn new_arc() -> Arc<Self> {
-        Arc::new_cyclic(|weak| {
-            Agent {
-                meta: PluginMeta {
-                    name: "agent".to_string(),
-                    description: "通用的插件容器，支持能力路由".to_string(),
-                    version: "0.1.0".to_string(),
-                    input: None,
-                    output: Some(json!({
-                        "type": "object",
-                        "properties": {
-                            "plugins": {
-                                "type": "array",
-                                "items": {"type": "string"}
-                            },
-                            "message": { "type": "string" }
-                        }
-                    })),
-                    author: Some("Symbio Team".to_string()),
-                },
-                instances: HashMap::new(),
-                self_ref: Some(weak.clone() as Weak<dyn Plugin>),
-                parent: None,
-            }
-        })
-    }
-
-    /// 初始化内置插件（消费并返回新的 Arc）
-    pub fn init_builtin_plugins(self: Arc<Self>) -> Arc<Self> {
-        let registry = PluginFactoryRegistry::global();
-        let parent: Option<Arc<dyn Plugin>> = Some(Arc::clone(&self) as Arc<dyn Plugin>);
-        
-        let mut instances = HashMap::new();
-        
-        // 注册内置管理插件（不需要父引用）
-        instances.insert("add".to_string(), Arc::new(AddPlugin::new()) as Arc<dyn Plugin>);
-        instances.insert("remove".to_string(), Arc::new(RemovePlugin::new()) as Arc<dyn Plugin>);
-        
-        // 注册 chat 插件（需要父引用来调用 @llm）
-        instances.insert("chat".to_string(), ChatPlugin::with_parent(parent.clone()));
-        
-        // 其他插件
-        instances.insert("tools".to_string(), Arc::new(ToolsPlugin::default()) as Arc<dyn Plugin>);
-        instances.insert("memory".to_string(), Arc::new(MemoryPlugin::default()) as Arc<dyn Plugin>);
-        instances.insert("session".to_string(), Arc::new(SessionPlugin::default()) as Arc<dyn Plugin>);
-        instances.insert("telegram".to_string(), Arc::new(TelegramPlugin::default()) as Arc<dyn Plugin>);
-        instances.insert("openai".to_string(), OpenAiPlugin::with_parent(parent.clone(), Default::default()));
-        instances.insert("docker".to_string(), Arc::new(DockerPlugin::new()) as Arc<dyn Plugin>);
-
-        // 注册工厂插件
-        for factory in registry.list() {
-            let name = factory.meta().name.clone();
-            if instances.contains_key(&name) {
-                continue;
-            }
-            let plugin = factory.create(parent.clone(), None);
-            instances.insert(name, plugin);
-        }
-        
-        // 尝试解包 Arc，如果成功则修改后重新包装
-        match Arc::try_unwrap(self) {
-            Ok(mut agent) => {
-                agent.instances = instances;
-                Arc::new(agent)
-            }
-            Err(arc) => {
-                // 如果有其他引用，使用 get_mut（需要可变引用）
-                // 这种情况不应该发生在初始化阶段
-                arc
-            }
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "agent".to_string(),
+            description: "通用的插件容器，支持能力路由".to_string(),
+            version: "0.1.0".to_string(),
+            input: None,
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "plugins": { "type": "array", "items": {"type": "string"} },
+                    "message": { "type": "string" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
         }
     }
 
-    /// 创建 Agent 实例
+    /// 主构造函数（Factory 机制使用）
     pub fn new() -> Self {
         Self {
-            meta: PluginMeta {
-                name: "agent".to_string(),
-                description: "通用的插件容器，支持能力路由".to_string(),
-                version: "0.1.0".to_string(),
-                input: None,
-                output: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "plugins": { "type": "array", "items": {"type": "string"} },
-                        "message": { "type": "string" }
-                    }
-                })),
-                author: Some("Symbio Team".to_string()),
-            },
-            instances: HashMap::new(),
-            self_ref: None,
-            parent: None,
+            meta: Self::create_meta(),
+            instances: RwLock::new(HashMap::new()),
+            parent: RwLock::new(None),
         }
     }
 
-    /// 创建带父引用的 Agent 实例
-    pub fn with_parent(parent: Option<Arc<dyn Plugin>>) -> Self {
-        Self {
-            meta: PluginMeta {
-                name: "agent".to_string(),
-                description: "通用的插件容器，支持能力路由".to_string(),
-                version: "0.1.0".to_string(),
-                input: None,
-                output: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "plugins": { "type": "array", "items": {"type": "string"} },
-                        "message": { "type": "string" }
-                    }
-                })),
-                author: Some("Symbio Team".to_string()),
-            },
-            instances: HashMap::new(),
-            self_ref: None,
-            parent: parent.map(|p| Arc::downgrade(&p)),
-        }
+    /// 添加子插件实例
+    pub fn add_instance(&self, name: String, plugin: Arc<dyn Plugin>) {
+        self.instances.write().unwrap().insert(name, plugin);
+    }
+
+    /// 设置父引用
+    pub fn set_parent(&self, parent: Weak<dyn Plugin>) {
+        *self.parent.write().unwrap() = Some(parent);
     }
 
     /// 获取父插件引用
     fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
-        self.parent.as_ref().and_then(|w| w.upgrade())
+        self.parent.read().unwrap().as_ref().and_then(|w| w.upgrade())
     }
 
     /// 解析路径，返回 (子插件名, 剩余路径)
@@ -189,7 +100,8 @@ impl Agent {
 
     /// 根据能力查找插件
     fn find_by_capability(&self, capability: &str) -> Option<Arc<dyn Plugin>> {
-        for plugin in self.instances.values() {
+        let instances = self.instances.read().unwrap();
+        for plugin in instances.values() {
             if plugin.capabilities().iter().any(|c| *c == capability) {
                 return Some(Arc::clone(plugin));
             }
@@ -258,7 +170,8 @@ impl Plugin for Agent {
         let (name, rest) = Self::parse_path(path)
             .ok_or_else(|| PluginError::NotFound(format!("插件路径 '{}' 未找到", path)))?;
         
-        let plugin = self.instances.get(name)
+        let instances = self.instances.read().unwrap();
+        let plugin = instances.get(name)
             .ok_or_else(|| PluginError::NotFound(format!("插件 '{}' 未找到", name)))?;
         
         plugin.meta(rest)
@@ -281,8 +194,9 @@ impl Plugin for Agent {
         }
 
         if path.is_empty() {
+            let instances = self.instances.read().unwrap();
             let mut capabilities: Vec<Value> = Vec::new();
-            for (name, plugin) in self.instances.iter() {
+            for (name, plugin) in instances.iter() {
                 let caps: Vec<&str> = plugin.capabilities();
                 capabilities.push(json!({
                     "plugin": name,
@@ -293,7 +207,7 @@ impl Plugin for Agent {
             return Ok(InvokeStream::single(json!({
                 "success": true,
                 "data": {
-                    "plugins": self.instances.keys().cloned().collect::<Vec<_>>(),
+                    "plugins": instances.keys().cloned().collect::<Vec<_>>(),
                     "capabilities": capabilities,
                     "message": "Agent 插件就绪"
                 }
@@ -310,8 +224,9 @@ impl Plugin for Agent {
                 tokio::runtime::Handle::current().block_on(async {
                     match action {
                         "get" => {
+                            let instances = self.instances.read().unwrap();
                             let mut configs = serde_json::Map::new();
-                            for (name, plugin) in &self.instances {
+                            for (name, plugin) in instances.iter() {
                                 if let Ok(InvokeStream::Single(chunk)) = plugin.invoke("config", json!({"action": "get"})) {
                                     if chunk.error.is_none() && !chunk.data.is_null() {
                                         configs.insert(name.clone(), chunk.data);
@@ -327,8 +242,9 @@ impl Plugin for Agent {
                         "set" => {
                             if let Some(config) = input.get("config") {
                                 if let Some(obj) = config.as_object() {
+                                    let instances = self.instances.read().unwrap();
                                     for (name, plugin_config) in obj {
-                                        if let Some(plugin) = self.instances.get(name) {
+                                        if let Some(plugin) = instances.get(name) {
                                             let _ = plugin.invoke("config", json!({
                                                 "action": "set",
                                                 "config": plugin_config
@@ -375,7 +291,8 @@ impl Plugin for Agent {
         let (name, rest) = Self::parse_path(path)
             .ok_or_else(|| PluginError::NotFound(format!("插件路径 '{}' 未找到", path)))?;
         
-        let plugin = self.instances.get(name)
+        let instances = self.instances.read().unwrap();
+        let plugin = instances.get(name)
             .ok_or_else(|| PluginError::NotFound(format!("插件 '{}' 未找到", name)))?;
         
         plugin.invoke(rest, input)

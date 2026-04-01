@@ -5,10 +5,46 @@ use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use tokio::fs;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+
+/// Work 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkConfig {
+    /// 工作区路径
+    #[serde(default = "default_workspace_path")]
+    pub workspace_path: String,
+    /// 自动保存
+    #[serde(default = "default_auto_save")]
+    pub auto_save: bool,
+    /// 自动保存间隔（毫秒）
+    #[serde(default = "default_auto_save_interval")]
+    pub auto_save_interval: u64,
+    /// 最近文件列表
+    #[serde(default)]
+    pub recent_files: Vec<String>,
+}
+
+fn default_workspace_path() -> String { 
+    dirs::home_dir()
+        .map(|p| p.join("projects").to_string_lossy().to_string())
+        .unwrap_or_else(|| "~/projects".to_string())
+}
+fn default_auto_save() -> bool { true }
+fn default_auto_save_interval() -> u64 { 30000 }
+
+impl Default for WorkConfig {
+    fn default() -> Self {
+        Self {
+            workspace_path: default_workspace_path(),
+            auto_save: default_auto_save(),
+            auto_save_interval: default_auto_save_interval(),
+            recent_files: Vec::new(),
+        }
+    }
+}
 
 /// 文档结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,13 +77,16 @@ impl DocumentStore {
 
 pub struct WorkPlugin {
     meta: PluginMeta,
+    config: Arc<Mutex<WorkConfig>>,
     store: Arc<Mutex<DocumentStore>>,
     data_path: PathBuf,
+    /// 父插件引用（用于保存配置）
+    parent: Option<Weak<dyn Plugin>>,
 }
 
 impl WorkPlugin {
-    pub fn new() -> Self {
-        let meta = PluginMeta {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
             name: "work".to_string(),
             description: "工作区管理插件".to_string(),
             version: "0.1.0".to_string(),
@@ -74,8 +113,11 @@ impl WorkPlugin {
                 }
             })),
             author: Some("Symbio Team".to_string()),
-        };
+        }
+    }
 
+    /// 主构造函数（Factory 机制使用）
+    pub fn new(parent: Option<Weak<dyn Plugin>>) -> Self {
         // 获取应用数据目录
         let data_dir = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -85,8 +127,52 @@ impl WorkPlugin {
 
         // 初始化存储
         let store = Arc::new(Mutex::new(DocumentStore::new()));
+        let config = Arc::new(Mutex::new(WorkConfig::default()));
 
-        WorkPlugin { meta, store, data_path }
+        WorkPlugin { 
+            meta: Self::create_meta(),
+            config,
+            store, 
+            data_path,
+            parent,
+        }
+    }
+
+    /// 获取父插件引用
+    fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
+        self.parent.as_ref().and_then(|w| w.upgrade())
+    }
+
+    /// 获取配置 Schema
+    fn config_schema() -> Value {
+        json!({
+            "workspace_path": {
+                "type": "string",
+                "title": "工作区路径",
+                "description": "默认工作区目录",
+                "default": default_workspace_path()
+            },
+            "auto_save": {
+                "type": "boolean",
+                "title": "自动保存",
+                "description": "自动保存编辑内容",
+                "default": true
+            },
+            "auto_save_interval": {
+                "type": "integer",
+                "title": "自动保存间隔",
+                "description": "自动保存间隔时间（毫秒）",
+                "minimum": 1000,
+                "maximum": 300000,
+                "default": 30000
+            },
+            "recent_files": {
+                "type": "array",
+                "title": "最近文件",
+                "description": "最近打开的文件列表",
+                "items": { "type": "string" }
+            }
+        })
     }
 
     /// 加载数据（保留用于将来扩展）
@@ -333,17 +419,105 @@ impl WorkPlugin {
 
 impl Default for WorkPlugin {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
 #[async_trait::async_trait]
 impl Plugin for WorkPlugin {
-    fn meta(&self, _path: &str) -> PluginResult<PluginMeta> {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path == "config" {
+            return Ok(PluginMeta {
+                name: "config".to_string(),
+                description: "Work 配置管理".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["get", "set", "schema"],
+                            "description": "操作类型"
+                        },
+                        "config": {
+                            "type": "object",
+                            "description": "配置数据（set 操作时使用）"
+                        }
+                    },
+                    "required": ["action"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "config": { "type": "object" },
+                        "schema": { "type": "object" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            });
+        }
         Ok(self.meta.clone())
     }
 
-    fn invoke(&self, _path: &str, input: Value) -> PluginResult<InvokeStream> {
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        // 处理 config path
+        if path == "config" {
+            let action = input.get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("get");
+            
+            let config = Arc::clone(&self.config);
+            let parent = self.get_parent();
+
+            let result = match action {
+                "get" => {
+                    let cfg = config.lock().unwrap();
+                    InvokeStream::single(json!({
+                        "workspace_path": cfg.workspace_path,
+                        "auto_save": cfg.auto_save,
+                        "auto_save_interval": cfg.auto_save_interval,
+                        "recent_files": cfg.recent_files
+                    }))
+                }
+                "set" => {
+                    if let Some(new_config) = input.get("config") {
+                        let mut cfg = config.lock().unwrap();
+                        if let Some(v) = new_config.get("workspace_path").and_then(|v| v.as_str()) {
+                            cfg.workspace_path = v.to_string();
+                        }
+                        if let Some(v) = new_config.get("auto_save").and_then(|v| v.as_bool()) {
+                            cfg.auto_save = v;
+                        }
+                        if let Some(v) = new_config.get("auto_save_interval").and_then(|v| v.as_u64()) {
+                            cfg.auto_save_interval = v;
+                        }
+                        if let Some(v) = new_config.get("recent_files").and_then(|v| v.as_array()) {
+                            cfg.recent_files = v.iter()
+                                .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                                .collect();
+                        }
+                    }
+                    // 通知父插件保存配置
+                    if let Some(p) = parent {
+                        let _ = p.invoke("save_config", json!({}));
+                    }
+                    InvokeStream::single(json!({ "success": true }))
+                }
+                "schema" => {
+                    InvokeStream::single(json!({
+                        "success": true,
+                        "schema": Self::config_schema()
+                    }))
+                }
+                _ => InvokeStream::single(json!({
+                    "error": format!("未知操作: {}", action)
+                })),
+            };
+
+            return Ok(result);
+        }
+
         let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("list");
 
         // 对于需要异步加载的操作，使用同步方式处理

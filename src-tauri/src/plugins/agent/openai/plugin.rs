@@ -19,36 +19,34 @@ pub struct OpenAiPlugin {
 }
 
 impl OpenAiPlugin {
-    pub fn new(config: OpenAiConfig) -> Self {
-        Self {
-            meta: PluginMeta {
-                name: "openai".to_string(),
-                description: "OpenAI 兼容 LLM API 集成".to_string(),
-                version: "0.1.0".to_string(),
-                input: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["chat", "status", "list_models", "configure", "get_config", "compress_info"]
-                        }
-                    },
-                    "required": ["action"]
-                })),
-                output: None,
-                author: Some("Symbio Team".to_string()),
-            },
-            config: Arc::new(RwLock::new(config)),
-            client: reqwest::Client::new(),
-            parent: None,
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "openai".to_string(),
+            description: "OpenAI 兼容 LLM API 集成".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["chat", "status", "list_models", "configure", "get_config", "compress_info"]
+                    }
+                },
+                "required": ["action"]
+            })),
+            output: None,
+            author: Some("Symbio Team".to_string()),
         }
     }
 
-    /// 创建带父引用的实例
-    pub fn with_parent(parent: Option<Arc<dyn Plugin>>, config: OpenAiConfig) -> Arc<dyn Plugin> {
-        let mut plugin = Self::new(config);
-        plugin.parent = parent.map(|p| Arc::downgrade(&p));
-        Arc::new(plugin)
+    /// 主构造函数（Factory 机制使用）
+    pub fn new(parent: Option<Weak<dyn Plugin>>, config: OpenAiConfig) -> Self {
+        Self {
+            meta: Self::create_meta(),
+            config: Arc::new(RwLock::new(config)),
+            client: reqwest::Client::new(),
+            parent,
+        }
     }
 
     /// 获取父插件引用
@@ -399,7 +397,7 @@ impl OpenAiPlugin {
 
 impl Default for OpenAiPlugin {
     fn default() -> Self {
-        Self::new(OpenAiConfig::default())
+        Self::new(None, OpenAiConfig::default())
     }
 }
 
@@ -476,6 +474,7 @@ impl Plugin for OpenAiPlugin {
                             })
                         }
                         "set" => {
+                            eprintln!("[openai] config set called");
                             if let Some(new_config) = input.get("config") {
                                 let mut config = self.config.write().await;
                                 if let Some(v) = new_config.get("api_base").and_then(|v| v.as_str()) {
@@ -498,8 +497,12 @@ impl Plugin for OpenAiPlugin {
                                 }
                             }
                             // 通知父插件保存配置
+                            eprintln!("[openai] checking parent...");
                             if let Some(parent) = self.get_parent() {
+                                eprintln!("[openai] calling save_config on parent");
                                 let _ = parent.invoke("save_config", json!({}));
+                            } else {
+                                eprintln!("[openai] ERROR: no parent for save_config");
                             }
                             Ok(StreamChunk {
                                 data: json!({ "success": true }),

@@ -6,7 +6,12 @@ mod plugins;
 mod commands;
 
 use core::{PluginFactoryRegistry, Plugin, PluginFactory};
-use plugins::{EchoFactory, DockerFactory, HomeFactory, CompositeFactory};
+use plugins::{
+    HomeFactory, WorkFactory, SettingFactory,
+    AgentFactory, ChatFactory, ToolsFactory, MemoryFactory, 
+    SessionFactory, TelegramFactory, OpenAiFactory,
+    EchoFactory, DockerFactory, CompositeFactory,
+};
 use std::sync::{Mutex, Arc};
 
 struct AppState {
@@ -18,11 +23,27 @@ fn main() {
     PluginFactoryRegistry::init();
     let registry = PluginFactoryRegistry::global();
 
-    // 插件主动注册自己的工厂
+    // 先注册所有工厂
+    // 注册核心插件工厂
+    registry.register(Arc::new(WorkFactory::new()));
+    registry.register(Arc::new(SettingFactory::new()));
+    
+    // 注册 Agent 相关工厂
+    registry.register(Arc::new(AgentFactory::new()));
+    registry.register(Arc::new(ChatFactory::new()));
+    registry.register(Arc::new(ToolsFactory::new()));
+    registry.register(Arc::new(MemoryFactory::new()));
+    registry.register(Arc::new(SessionFactory::new()));
+    registry.register(Arc::new(TelegramFactory::new()));
+    registry.register(Arc::new(OpenAiFactory::new()));
+    
+    // 注册其他工厂
     registry.register(Arc::new(EchoFactory::new()));
     registry.register(Arc::new(DockerFactory::new()));
-    // 注册 Composite 工厂（可用于创建动态组合插件）
     registry.register(Arc::new(CompositeFactory::with_defaults()));
+    
+    // 最后注册 HomeFactory（因为它会创建其他所有插件）
+    registry.register(Arc::new(HomeFactory::new()));
 
     // 使用 HomeFactory 创建 root 插件
     // Home 会自动创建 work/agent/setting 子插件实例

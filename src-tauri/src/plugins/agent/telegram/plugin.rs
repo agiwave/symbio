@@ -95,29 +95,34 @@ pub struct TelegramPlugin {
 }
 
 impl TelegramPlugin {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "telegram".to_string(),
+            description: "Telegram Bot API 集成".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["send", "get_updates", "configure", "get_config", "set_chat_id", "start_listener", "stop_listener", "status"]
+                    },
+                    "chat_id": { "type": "string" },
+                    "text": { "type": "string" },
+                    "parse_mode": { "type": "string" },
+                    "bot_token": { "type": "string" }
+                },
+                "required": ["action"]
+            })),
+            output: None,
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    /// 主构造函数（Factory 机制使用）
     pub fn new(config: TelegramConfig) -> Self {
         Self {
-            meta: PluginMeta {
-                name: "telegram".to_string(),
-                description: "Telegram Bot API 集成".to_string(),
-                version: "0.1.0".to_string(),
-                input: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["send", "get_updates", "configure", "get_config", "set_chat_id", "start_listener", "stop_listener", "status"]
-                        },
-                        "chat_id": { "type": "string" },
-                        "text": { "type": "string" },
-                        "parse_mode": { "type": "string" },
-                        "bot_token": { "type": "string" }
-                    },
-                    "required": ["action"]
-                })),
-                output: None,
-                author: Some("Symbio Team".to_string()),
-            },
+            meta: Self::create_meta(),
             config: Arc::new(RwLock::new(config)),
             client: reqwest::Client::new(),
             update_offset: AtomicI64::new(0),

@@ -9,35 +9,40 @@ pub struct SettingPlugin {
 }
 
 impl SettingPlugin {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "setting".to_string(),
+            description: "设置管理插件".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "get", "set", "reset"],
+                        "description": "操作类型"
+                    },
+                    "category": { "type": "string" },
+                    "key": { "type": "string" },
+                    "value": {}
+                }
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "type": "object" },
+                    "message": { "type": "string" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    /// 主构造函数（Factory 机制使用）
     pub fn new() -> Self {
         SettingPlugin {
-            meta: PluginMeta {
-                name: "setting".to_string(),
-                description: "设置管理插件".to_string(),
-                version: "0.1.0".to_string(),
-                input: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["list", "get", "set", "reset"],
-                            "description": "操作类型"
-                        },
-                        "category": { "type": "string" },
-                        "key": { "type": "string" },
-                        "value": {}
-                    }
-                })),
-                output: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "success": { "type": "boolean" },
-                        "data": { "type": "object" },
-                        "message": { "type": "string" }
-                    }
-                })),
-                author: Some("Symbio Team".to_string()),
-            },
+            meta: Self::create_meta(),
         }
     }
 }

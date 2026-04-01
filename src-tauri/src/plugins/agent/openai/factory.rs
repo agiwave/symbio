@@ -47,7 +47,8 @@ impl PluginFactory for OpenAiFactory {
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
 
-        OpenAiPlugin::with_parent(parent, openai_config)
+        let parent_weak = parent.as_ref().map(|p| Arc::downgrade(p));
+        Arc::new(OpenAiPlugin::new(parent_weak, openai_config))
     }
 }
 

@@ -6,3 +6,4 @@ pub mod types;
 pub mod client;
 
 pub use plugin::ChatPlugin;
+pub use factory::ChatFactory;
