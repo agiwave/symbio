@@ -395,16 +395,25 @@ impl SessionPlugin {
     /// 从 tools 插件获取工具列表
     async fn fetch_tools(&self) -> Vec<Value> {
         if let Some(parent) = self.get_parent() {
-            // 调用 tools 插件的 list 工具
-            match parent.invoke("tools", json!({"tool": "list"})) {
+            // 调用 tools 插件的 _list 路径获取工具列表
+            match parent.invoke("tools/_list", json!({})) {
                 Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
                     // 解析返回的工具列表
                     if let Some(tools) = chunk.data.get("tools").and_then(|t| t.as_array()) {
+                        eprintln!("[session] fetched {} tools from tools plugin", tools.len());
                         return tools.clone();
                     }
                 }
+                Ok(InvokeStream::Single(chunk)) => {
+                    eprintln!("[session] tools/_list error: {:?}", chunk.error);
+                }
+                Err(e) => {
+                    eprintln!("[session] failed to fetch tools: {:?}", e);
+                }
                 _ => {}
             }
+        } else {
+            eprintln!("[session] no parent for fetching tools");
         }
         vec![]
     }
