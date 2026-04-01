@@ -212,3 +212,24 @@ export async function getWorkConfig(): Promise<WorkConfig> {
 export async function setWorkConfig(config: Partial<WorkConfig>): Promise<{ success: boolean }> {
   return setConfig(CONFIG_PATHS.WORK, config)
 }
+
+// ============ 工作区路径接口 ============
+
+/**
+ * 获取工作区路径
+ */
+export async function getWorkspacePath(): Promise<{ workspace_path: string; expanded_path: string }> {
+  return callPlugin<{ workspace_path: string; expanded_path: string }>('work', { 
+    action: 'workspace_path' 
+  })
+}
+
+/**
+ * 设置工作区路径
+ */
+export async function setWorkspacePath(path: string): Promise<{ success: boolean; workspace_path: string }> {
+  return callPlugin<{ success: boolean; workspace_path: string }>('work', { 
+    action: 'set_workspace', 
+    path 
+  })
+}
