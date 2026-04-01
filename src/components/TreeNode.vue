@@ -30,18 +30,19 @@
     </div>
     
     <div v-if="expanded && hasChildren" class="children">
-      <TreeNode
-        v-for="childId in document.children"
-        :key="childId"
-        :document="documents.get(childId)!"
-        :level="level + 1"
-        :active-id="activeId"
-        :documents="documents"
-        @select="(id) => $emit('select', id)"
-        @create-child="(id) => $emit('create-child', id)"
-        @delete="(id) => $emit('delete', id)"
-        @move="(payload) => $emit('move', payload)"
-      />
+      <template v-for="childId in document.children" :key="childId">
+        <TreeNode
+          v-if="documents.get(childId)"
+          :document="documents.get(childId)!"
+          :level="level + 1"
+          :active-id="activeId"
+          :documents="documents"
+          @select="(id) => $emit('select', id)"
+          @create-child="(id) => $emit('create-child', id)"
+          @delete="(id) => $emit('delete', id)"
+          @move="(payload) => $emit('move', payload)"
+        />
+      </template>
     </div>
   </div>
 </template>
@@ -68,7 +69,10 @@ const expanded = ref(true)
 const isDragOver = ref(false)
 const isDragging = ref(false)
 
-const hasChildren = computed(() => props.document.children.length > 0)
+const hasChildren = computed(() => {
+  const children = props.document?.children
+  return children && children.length > 0
+})
 
 function toggleExpand() {
   expanded.value = !expanded.value
