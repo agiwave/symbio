@@ -3,6 +3,7 @@
 //! 提供文件操作、Shell 命令、Web 访问等工具
 
 use super::policy::SecurityPolicy;
+use super::aggregation_tools::AggregationTools;
 use super::{
     file_read::FileReadTool, 
     file_write::FileWriteTool, 
@@ -96,7 +97,7 @@ impl ToolsPlugin {
                             "read_file", "write_file", "file_edit",
                             "shell", "web_fetch", "web_search",
                             "glob_search", "content_search", "http_request",
-                            "list"
+                            "list", "search"
                         ],
                         "description": "工具名称"
                     },
@@ -325,27 +326,57 @@ impl Plugin for ToolsPlugin {
 
         let params = input.get("params").cloned().unwrap_or(json!({}));
         let security = Arc::clone(&self.security);
+        // 在 stream 外部捕获 parent 引用
+        let parent_ref = self.parent.clone();
 
         let stream = async_stream::stream! {
             match tool.as_str() {
                 "list" => {
-                    yield StreamChunk {
-                        data: json!({
-                            "tools": [
-                                {"name": "read_file", "description": "读取文件内容"},
-                                {"name": "write_file", "description": "写入文件内容"},
-                                {"name": "file_edit", "description": "编辑文件（替换精确字符串）"},
-                                {"name": "shell", "description": "执行 Shell 命令"},
-                                {"name": "web_fetch", "description": "获取网页内容"},
-                                {"name": "web_search", "description": "Web 搜索"},
-                                {"name": "glob_search", "description": "Glob 模式文件搜索"},
-                                {"name": "content_search", "description": "文件内容搜索（正则）"},
-                                {"name": "http_request", "description": "HTTP 请求"},
-                            ]
-                        }),
-                        done: true,
-                        error: None,
-                    };
+                    // 使用 AggregationTools 列出所有可用工具
+                    let agg = AggregationTools::new(parent_ref.clone());
+                    match agg.list_all_tools().await {
+                        Ok(result) => {
+                            yield StreamChunk {
+                                data: result,
+                                done: true,
+                                error: None,
+                            };
+                        }
+                        Err(e) => {
+                            yield StreamChunk {
+                                data: json!({}),
+                                done: true,
+                                error: Some(e.to_string()),
+                            };
+                        }
+                    }
+                }
+                "search" => {
+                    // 使用 AggregationTools 搜索工具
+                    let agg = AggregationTools::new(parent_ref.clone());
+                    let keywords: Vec<String> = params.get("keywords")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter()
+                            .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                            .collect())
+                        .unwrap_or_default();
+                    
+                    match agg.search_tools(keywords).await {
+                        Ok(result) => {
+                            yield StreamChunk {
+                                data: result,
+                                done: true,
+                                error: None,
+                            };
+                        }
+                        Err(e) => {
+                            yield StreamChunk {
+                                data: json!({}),
+                                done: true,
+                                error: Some(e.to_string()),
+                            };
+                        }
+                    }
                 }
                 "read_file" => {
                     let guard = security.read().await;

@@ -376,9 +376,12 @@ impl SessionPlugin {
         
         let session = self.get_or_create_session(session_id).await.unwrap_or_else(|_| Session::new(session_id));
         
+        // 获取工具列表
+        let tools = self.fetch_tools().await;
+        
         let llm_context = LlmContext {
             system_prompt: "You are a helpful AI assistant.".to_string(),
-            tools: vec![],
+            tools,
             history: if include_history { session.messages } else { vec![] },
         };
         
@@ -387,6 +390,23 @@ impl SessionPlugin {
             done: true,
             error: None,
         }
+    }
+
+    /// 从 tools 插件获取工具列表
+    async fn fetch_tools(&self) -> Vec<Value> {
+        if let Some(parent) = self.get_parent() {
+            // 调用 tools 插件的 list 工具
+            match parent.invoke("tools", json!({"tool": "list"})) {
+                Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
+                    // 解析返回的工具列表
+                    if let Some(tools) = chunk.data.get("tools").and_then(|t| t.as_array()) {
+                        return tools.clone();
+                    }
+                }
+                _ => {}
+            }
+        }
+        vec![]
     }
 
     async fn handle_add_context(&self, input: &Value) -> StreamChunk {

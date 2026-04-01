@@ -14,6 +14,8 @@ mod web_search;
 mod glob_search;
 mod content_search;
 mod http_request;
+mod aggregation_tools;
 
 pub use plugin::ToolsPlugin;
 pub use factory::ToolsFactory;
+pub use aggregation_tools::AggregationTools;
