@@ -209,7 +209,9 @@ async function selectSession(id: string) {
   activeSessionId.value = id
   
   try {
-    activeSession.value = await getSession(id)
+    const session = await getSession(id)
+    console.log('[AgentPage] 加载会话:', id, session)
+    activeSession.value = session
     sessionTitle.value = getSessionTitle(id)
     await nextTick()
     scrollToBottom()

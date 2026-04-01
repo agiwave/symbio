@@ -61,12 +61,20 @@ const mockResponses: Record<string, Record<string, unknown>> = {
   },
   'agent/session': {
     get: {
-      storage_dir: '',
-      max_messages: 100,
-      auto_compress: true,
-      compress_threshold: 50,
+      success: true,
+      session: {
+        id: 'mock-session',
+        messages: [],
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        metadata: {}
+      }
     },
     set: { success: true },
+    list: {
+      success: true,
+      sessions: []
+    },
   },
   'agent/memory': {
     get: {

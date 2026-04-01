@@ -46,6 +46,7 @@ export async function getSession(sessionId: string): Promise<Session> {
     action: 'get',
     session_id: sessionId
   })
+  console.log('[session] getSession result:', result)
   return result.session
 }
 
