@@ -3,7 +3,7 @@
 use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use super::WorkPlugin;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use serde_json::Value;
 
 pub struct WorkFactory;

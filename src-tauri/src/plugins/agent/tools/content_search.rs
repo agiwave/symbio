@@ -1,31 +1,73 @@
-//! 内容搜索工具 - 使用正则表达式搜索文件内容
+//! 内容搜索工具 - 使用正则表达式搜索文件内容 - 实现 Plugin trait
 
-use crate::core::types::{PluginError, StreamChunk};
-use serde_json::{Value, json};
+use crate::core::traits::Plugin;
+use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
+use async_trait::async_trait;
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::Stdio;
 
 const MAX_RESULTS: usize = 1000;
-const MAX_OUTPUT_BYTES: usize = 1_048_576; // 1 MB
+const MAX_OUTPUT_BYTES: usize = 1_048_576;
 const TIMEOUT_SECS: u64 = 30;
 
 /// 内容搜索工具
 pub struct ContentSearchTool {
+    workspace_dir: PathBuf,
     has_rg: bool,
 }
 
 impl ContentSearchTool {
-    pub fn new() -> Self {
+    pub fn new(workspace_dir: PathBuf) -> Self {
         let has_rg = which::which("rg").is_ok();
-        Self { has_rg }
+        Self { workspace_dir, has_rg }
     }
 
-    /// 执行内容搜索
-    pub async fn execute(
-        &self,
-        args: &Value,
-        workspace_dir: &PathBuf,
-    ) -> Result<StreamChunk, PluginError> {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "content_search".to_string(),
+            description: "文件内容搜索（正则表达式）。使用 ripgrep 或 grep 进行搜索。".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "正则表达式模式"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "搜索目录（默认当前目录）"
+                    },
+                    "output_mode": {
+                        "type": "string",
+                        "enum": ["content", "files_with_matches", "count"],
+                        "description": "输出模式"
+                    },
+                    "include": {
+                        "type": "string",
+                        "description": "文件过滤模式"
+                    },
+                    "case_sensitive": {
+                        "type": "boolean",
+                        "description": "是否区分大小写"
+                    }
+                },
+                "required": ["pattern"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "success": { "type": "boolean" },
+                    "output": { "type": "string" },
+                    "truncated": { "type": "boolean" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    async fn execute_inner(&self, args: &Value) -> Result<StreamChunk, PluginError> {
         let pattern = args
             .get("pattern")
             .and_then(|v| v.as_str())
@@ -57,14 +99,12 @@ impl ContentSearchTool {
             });
         }
 
-        // 构建搜索路径
         let full_search_path = if PathBuf::from(search_path).is_absolute() {
             PathBuf::from(search_path)
         } else {
-            workspace_dir.join(search_path)
+            self.workspace_dir.join(search_path)
         };
 
-        // 解析路径并验证在工作区内
         let resolved_path = match tokio::fs::canonicalize(&full_search_path).await {
             Ok(p) => p,
             Err(e) => {
@@ -76,7 +116,7 @@ impl ContentSearchTool {
             }
         };
 
-        if !resolved_path.starts_with(workspace_dir) {
+        if !resolved_path.starts_with(&self.workspace_dir) {
             return Ok(StreamChunk {
                 data: json!({}),
                 done: true,
@@ -84,7 +124,6 @@ impl ContentSearchTool {
             });
         }
 
-        // 使用 ripgrep 或 grep
         let output = if self.has_rg {
             self.search_with_rg(
                 pattern,
@@ -109,7 +148,6 @@ impl ContentSearchTool {
 
         match output {
             Ok(result) => {
-                // 截断输出
                 let truncated = result.len() > MAX_OUTPUT_BYTES;
                 let result = if truncated {
                     format!("{}...\n\n[输出已截断：超过 {} 字节]", 
@@ -165,7 +203,6 @@ impl ContentSearchTool {
                 cmd.arg("--count");
             }
             _ => {
-                // content mode
                 if context_before > 0 {
                     cmd.arg(format!("--before-context={}", context_before));
                 }
@@ -192,7 +229,6 @@ impl ContentSearchTool {
             String::from_utf8(output.stdout)
                 .map_err(|e| format!("解析输出失败: {}", e))
         } else if output.status.code() == Some(1) {
-            // ripgrep 返回 1 表示没有匹配
             Ok("未找到匹配。".to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -227,7 +263,6 @@ impl ContentSearchTool {
                 cmd.arg("-c");
             }
             _ => {
-                // content mode
                 if context_before > 0 {
                     cmd.arg(format!("-B{}", context_before));
                 }
@@ -262,8 +297,27 @@ impl ContentSearchTool {
     }
 }
 
-impl Default for ContentSearchTool {
-    fn default() -> Self {
-        Self::new()
+#[async_trait]
+impl Plugin for ContentSearchTool {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path.is_empty() {
+            Ok(Self::create_meta())
+        } else {
+            Err(PluginError::NotFound(format!("路径不存在: {}", path)))
+        }
+    }
+
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if !path.is_empty() {
+            return Err(PluginError::NotFound(format!("路径不存在: {}", path)));
+        }
+
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                self.execute_inner(&input).await
+            })
+        })?;
+
+        Ok(InvokeStream::Single(result))
     }
 }

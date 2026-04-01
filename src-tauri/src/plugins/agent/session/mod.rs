@@ -5,6 +5,3 @@
 pub mod plugin;
 pub mod factory;
 pub mod types;
-
-pub use plugin::SessionPlugin;
-pub use factory::SessionFactory;

@@ -2,7 +2,6 @@
 
 mod execution;
 mod plugin;
-mod factory;
+pub mod factory;
 
-pub use plugin::DockerPlugin;
 pub use factory::DockerFactory;

@@ -1,13 +1,16 @@
-//! 文件读取工具
+//! 文件读取工具 - 实现 Plugin trait
 
 use super::policy::SecurityPolicy;
-use crate::core::types::PluginError;
+use crate::core::traits::Plugin;
+use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
+use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
 
+/// 文件读取工具
 pub struct FileReadTool {
     security: Arc<SecurityPolicy>,
 }
@@ -17,7 +20,42 @@ impl FileReadTool {
         Self { security }
     }
 
-    pub async fn execute(&self, args: Value) -> Result<Value, PluginError> {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "read_file".to_string(),
+            description: "读取文件内容，支持行号和分页。相对路径从工作目录开始。".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "文件路径（相对路径从工作目录开始）"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "起始行号（从1开始，默认1）"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回的最大行数（默认全部）"
+                    }
+                },
+                "required": ["path"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "content": { "type": "string", "description": "文件内容（带行号）" },
+                    "path": { "type": "string", "description": "文件路径" },
+                    "total_lines": { "type": "integer", "description": "总行数" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    async fn execute_inner(&self, args: Value) -> Result<Value, PluginError> {
         let path = args.get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 path 参数".to_string()))?;
@@ -99,5 +137,42 @@ impl FileReadTool {
             "path": path,
             "total_lines": total
         }))
+    }
+}
+
+#[async_trait]
+impl Plugin for FileReadTool {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        // 这个工具没有子路径
+        if path.is_empty() {
+            Ok(Self::create_meta())
+        } else {
+            Err(PluginError::NotFound(format!("路径不存在: {}", path)))
+        }
+    }
+
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if !path.is_empty() {
+            return Err(PluginError::NotFound(format!("路径不存在: {}", path)));
+        }
+        
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                match self.execute_inner(input).await {
+                    Ok(result) => StreamChunk {
+                        data: result,
+                        done: true,
+                        error: None,
+                    },
+                    Err(e) => StreamChunk {
+                        data: json!({}),
+                        done: true,
+                        error: Some(e.to_string()),
+                    },
+                }
+            })
+        });
+
+        Ok(InvokeStream::Single(result))
     }
 }

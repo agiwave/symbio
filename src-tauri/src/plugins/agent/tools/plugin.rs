@@ -1,9 +1,9 @@
 //! Tools 插件实现
 //!
 //! 提供文件操作、Shell 命令、Web 访问等工具
+//! 每个工具都是独立的 Plugin 实例
 
 use super::policy::SecurityPolicy;
-use super::aggregation_tools::AggregationTools;
 use super::{
     file_read::FileReadTool, 
     file_write::FileWriteTool, 
@@ -16,10 +16,11 @@ use super::{
     http_request::HttpRequestTool,
 };
 use crate::core::traits::Plugin;
-use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
+use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
@@ -73,54 +74,46 @@ impl Default for ToolsConfig {
     }
 }
 
-/// Tools 插件
+/// Tools 插件 - 持有所有工具实例
 pub struct ToolsPlugin {
     meta: PluginMeta,
     config: Arc<RwLock<ToolsConfig>>,
-    security: Arc<RwLock<SecurityPolicy>>,
+    /// 子工具实例
+    tools: HashMap<String, Arc<dyn Plugin>>,
     /// 父插件引用（用于保存配置）
     parent: Option<Weak<dyn Plugin>>,
 }
 
 impl ToolsPlugin {
-    fn create_meta() -> PluginMeta {
-        PluginMeta {
-            name: "tools".to_string(),
-            description: "文件操作和 Shell 命令工具".to_string(),
-            version: "0.1.0".to_string(),
-            input: Some(json!({
-                "type": "object",
-                "properties": {
-                    "tool": {
-                        "type": "string",
-                        "enum": [
-                            "read_file", "write_file", "file_edit",
-                            "shell", "web_fetch", "web_search",
-                            "glob_search", "content_search", "http_request",
-                            "list", "search"
-                        ],
-                        "description": "工具名称"
-                    },
-                    "params": {
-                        "type": "object",
-                        "description": "工具参数"
-                    }
-                },
-                "required": ["tool"]
-            })),
-            output: None,
-            author: Some("Symbio Team".to_string()),
-        }
-    }
-
     /// 主构造函数（Factory 机制使用）
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: ToolsConfig) -> Self {
         let workspace_dir = std::env::current_dir().unwrap_or_default();
-        let security = SecurityPolicy::new(workspace_dir);
+        let security = Arc::new(SecurityPolicy::new(workspace_dir.clone()));
+        
+        // 创建所有工具实例
+        let tools: HashMap<String, Arc<dyn Plugin>> = vec![
+            ("read_file", Arc::new(FileReadTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
+            ("write_file", Arc::new(FileWriteTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
+            ("file_edit", Arc::new(FileEditTool::new(workspace_dir.clone())) as Arc<dyn Plugin>),
+            ("shell", Arc::new(ShellTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
+            ("web_fetch", Arc::new(WebFetchTool::new()) as Arc<dyn Plugin>),
+            ("web_search", Arc::new(WebSearchTool::new()) as Arc<dyn Plugin>),
+            ("glob_search", Arc::new(GlobSearchTool::new(workspace_dir.clone())) as Arc<dyn Plugin>),
+            ("content_search", Arc::new(ContentSearchTool::new(workspace_dir.clone())) as Arc<dyn Plugin>),
+            ("http_request", Arc::new(HttpRequestTool::new()) as Arc<dyn Plugin>),
+        ].into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+
         Self {
-            meta: Self::create_meta(),
+            meta: PluginMeta {
+                name: "tools".to_string(),
+                description: "文件操作和 Shell 命令工具集".to_string(),
+                version: "0.1.0".to_string(),
+                input: None,
+                output: None,
+                author: Some("Symbio Team".to_string()),
+            },
             config: Arc::new(RwLock::new(config)),
-            security: Arc::new(RwLock::new(security)),
+            tools,
             parent,
         }
     }
@@ -128,6 +121,29 @@ impl ToolsPlugin {
     /// 获取父插件引用
     fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
         self.parent.as_ref().and_then(|w| w.upgrade())
+    }
+
+    /// 获取所有工具的 OpenAI 格式定义
+    fn get_all_tools_openai_format(&self) -> Vec<Value> {
+        self.tools.iter().map(|(name, tool)| {
+            let meta = tool.meta("").unwrap_or_else(|_| PluginMeta {
+                name: name.clone(),
+                description: "".to_string(),
+                version: "0.1.0".to_string(),
+                input: None,
+                output: None,
+                author: None,
+            });
+            
+            json!({
+                "type": "function",
+                "function": {
+                    "name": format!("tools::{}", name),
+                    "description": meta.description,
+                    "parameters": meta.input.unwrap_or(json!({}))
+                }
+            })
+        }).collect()
     }
 
     /// 获取配置 Schema
@@ -194,6 +210,12 @@ impl Default for ToolsPlugin {
 #[async_trait]
 impl Plugin for ToolsPlugin {
     fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        // 空路径返回插件本身的 meta
+        if path.is_empty() {
+            return Ok(self.meta.clone());
+        }
+
+        // config path
         if path == "config" {
             return Ok(PluginMeta {
                 name: "config".to_string(),
@@ -225,11 +247,63 @@ impl Plugin for ToolsPlugin {
                 author: Some("Symbio Team".to_string()),
             });
         }
-        Ok(self.meta.clone())
+
+        // _list path - 返回所有工具列表
+        if path == "_list" {
+            return Ok(PluginMeta {
+                name: "_list".to_string(),
+                description: "列出所有可用工具".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {}
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "tools": { "type": "array" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            });
+        }
+
+        // _search path - 搜索工具
+        if path == "_search" {
+            return Ok(PluginMeta {
+                name: "_search".to_string(),
+                description: "搜索工具".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "keywords": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "搜索关键词"
+                        }
+                    }
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "tools": { "type": "array" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            });
+        }
+
+        // 子工具路径 - 路由到对应工具
+        if let Some(tool) = self.tools.get(path) {
+            return tool.meta("");
+        }
+
+        Err(PluginError::NotFound(format!("路径不存在: {}", path)))
     }
 
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
-        // 处理 config path
+        // config path
         if path == "config" {
             let action = input.get("action")
                 .and_then(|v| v.as_str())
@@ -286,7 +360,6 @@ impl Plugin for ToolsPlugin {
                                     cfg.web_timeout = v;
                                 }
                             }
-                            // 通知父插件保存配置
                             if let Some(p) = parent {
                                 let _ = p.invoke("save_config", json!({}));
                             }
@@ -318,240 +391,94 @@ impl Plugin for ToolsPlugin {
             return Ok(InvokeStream::Single(result));
         }
 
-        // 原有工具调用逻辑
-        let tool = input.get("tool")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| PluginError::ValidationError("缺少 tool 参数".to_string()))?
-            .to_string();
+        // _list path - 返回所有工具列表
+        if path == "_list" {
+            let tools = self.get_all_tools_openai_format();
+            return Ok(InvokeStream::Single(StreamChunk {
+                data: json!({ "tools": tools }),
+                done: true,
+                error: None,
+            }));
+        }
 
-        let params = input.get("params").cloned().unwrap_or(json!({}));
-        let security = Arc::clone(&self.security);
-        // 在 stream 外部捕获 parent 引用
-        let parent_ref = self.parent.clone();
+        // _search path - 搜索工具
+        if path == "_search" {
+            let keywords: Vec<String> = input.get("keywords")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter()
+                    .filter_map(|s| s.as_str().map(|s| s.to_lowercase()))
+                    .collect())
+                .unwrap_or_default();
 
-        let stream = async_stream::stream! {
-            match tool.as_str() {
-                "list" => {
-                    // 使用 AggregationTools 列出所有可用工具
-                    let agg = AggregationTools::new(parent_ref.clone());
-                    match agg.list_all_tools().await {
-                        Ok(result) => {
-                            yield StreamChunk {
-                                data: result,
-                                done: true,
-                                error: None,
-                            };
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
+            let matched: Vec<Value> = self.tools.iter()
+                .filter(|(name, tool)| {
+                    if keywords.is_empty() {
+                        return true;
                     }
-                }
-                "search" => {
-                    // 使用 AggregationTools 搜索工具
-                    let agg = AggregationTools::new(parent_ref.clone());
-                    let keywords: Vec<String> = params.get("keywords")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter()
-                            .filter_map(|s| s.as_str().map(|s| s.to_string()))
-                            .collect())
-                        .unwrap_or_default();
+                    let name_lower = name.to_lowercase();
+                    if let Ok(meta) = tool.meta("") {
+                        let desc_lower = meta.description.to_lowercase();
+                        keywords.iter().any(|kw| 
+                            name_lower.contains(kw) || desc_lower.contains(kw)
+                        )
+                    } else {
+                        keywords.iter().any(|kw| name_lower.contains(kw))
+                    }
+                })
+                .map(|(name, tool)| {
+                    let meta = tool.meta("").unwrap_or_else(|_| PluginMeta {
+                        name: name.clone(),
+                        description: "".to_string(),
+                        version: "0.1.0".to_string(),
+                        input: None,
+                        output: None,
+                        author: None,
+                    });
                     
-                    match agg.search_tools(keywords).await {
-                        Ok(result) => {
-                            yield StreamChunk {
-                                data: result,
-                                done: true,
-                                error: None,
-                            };
+                    json!({
+                        "type": "function",
+                        "function": {
+                            "name": format!("tools::{}", name),
+                            "description": meta.description,
+                            "parameters": meta.input.unwrap_or(json!({}))
                         }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                "read_file" => {
-                    let guard = security.read().await;
-                    let tool = FileReadTool::new(Arc::new((*guard).clone()));
-                    match tool.execute(params).await {
-                        Ok(result) => {
-                            yield StreamChunk {
-                                data: result,
-                                done: true,
-                                error: None,
-                            };
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                "write_file" => {
-                    let guard = security.read().await;
-                    let tool = FileWriteTool::new(Arc::new((*guard).clone()));
-                    match tool.execute(params).await {
-                        Ok(result) => {
-                            yield StreamChunk {
-                                data: result,
-                                done: true,
-                                error: None,
-                            };
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                "file_edit" => {
-                    let guard = security.read().await;
-                    let workspace_dir = guard.workspace_dir.clone();
-                    let tool = FileEditTool::new();
-                    match tool.execute(&params, &workspace_dir).await {
-                        Ok(result) => {
-                            yield result;
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                "shell" => {
-                    let guard = security.read().await;
-                    let tool = ShellTool::new(Arc::new((*guard).clone()));
-                    match tool.execute(params).await {
-                        Ok(result) => {
-                            yield StreamChunk {
-                                data: result,
-                                done: true,
-                                error: None,
-                            };
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                "web_fetch" => {
-                    let tool = WebFetchTool::new();
-                    match tool.execute(params).await {
-                        Ok(result) => {
-                            yield StreamChunk {
-                                data: result,
-                                done: true,
-                                error: None,
-                            };
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                "web_search" => {
-                    let guard = security.read().await;
-                    let workspace_dir = guard.workspace_dir.clone();
-                    let tool = WebSearchTool::new();
-                    match tool.execute(&params, &workspace_dir).await {
-                        Ok(result) => {
-                            yield result;
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                "glob_search" => {
-                    let guard = security.read().await;
-                    let workspace_dir = guard.workspace_dir.clone();
-                    let tool = GlobSearchTool::new();
-                    match tool.execute(&params, &workspace_dir).await {
-                        Ok(result) => {
-                            yield result;
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                "content_search" => {
-                    let guard = security.read().await;
-                    let workspace_dir = guard.workspace_dir.clone();
-                    let tool = ContentSearchTool::new();
-                    match tool.execute(&params, &workspace_dir).await {
-                        Ok(result) => {
-                            yield result;
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                "http_request" => {
-                    let guard = security.read().await;
-                    let workspace_dir = guard.workspace_dir.clone();
-                    let tool = HttpRequestTool::new();
-                    match tool.execute(&params, &workspace_dir).await {
-                        Ok(result) => {
-                            yield result;
-                        }
-                        Err(e) => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some(e.to_string()),
-                            };
-                        }
-                    }
-                }
-                _ => {
-                    yield StreamChunk {
-                        data: json!({}),
-                        done: true,
-                        error: Some(format!("未知工具: {}", tool)),
-                    };
-                }
-            }
-        };
+                    })
+                })
+                .collect();
 
-        Ok(InvokeStream::Stream(Box::pin(stream)))
+            return Ok(InvokeStream::Single(StreamChunk {
+                data: json!({ "tools": matched }),
+                done: true,
+                error: None,
+            }));
+        }
+
+        // 子工具路径 - 路由到对应工具
+        if let Some(tool) = self.tools.get(path) {
+            return tool.invoke("", input);
+        }
+
+        // 兼容旧的 tool/params 格式
+        if path.is_empty() {
+            let tool_name = input.get("tool")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| PluginError::ValidationError("缺少 tool 参数".to_string()))?;
+
+            let params = input.get("params").cloned().unwrap_or(json!({}));
+
+            if let Some(tool) = self.tools.get(tool_name) {
+                return tool.invoke("", params);
+            }
+
+            return Err(PluginError::NotFound(format!("工具不存在: {}", tool_name)));
+        }
+
+        Err(PluginError::NotFound(format!("路径不存在: {}", path)))
     }
+}
+
+/// 获取所有工具的 OpenAI 格式定义（用于外部调用）
+pub fn get_all_tools_openai_format() -> Vec<Value> {
+    let plugin = ToolsPlugin::default();
+    plugin.get_all_tools_openai_format()
 }

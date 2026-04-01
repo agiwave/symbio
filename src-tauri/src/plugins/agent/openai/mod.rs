@@ -6,6 +6,3 @@ mod types;
 mod token;
 mod plugin;
 pub mod factory;
-
-pub use plugin::OpenAiPlugin;
-pub use factory::OpenAiFactory;

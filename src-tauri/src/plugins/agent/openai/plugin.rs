@@ -138,6 +138,9 @@ impl OpenAiPlugin {
         // 添加上下文消息
         messages.extend(context_messages);
 
+        // 记录历史长度（用于保存新消息）
+        let history_len = messages.len();
+
         // 添加当前消息
         messages.push(NativeMessage {
             role: "user".into(),
@@ -146,73 +149,237 @@ impl OpenAiPlugin {
             tool_calls: None,
         });
 
-        // 估算 tokens 并裁剪（考虑 tools 开销）
-        let tools_ref = if tools.is_empty() { None } else { Some(&tools) };
-        let estimated_tokens = count_total_tokens(&counter, &messages, tools_ref);
-        if estimated_tokens > context_config.available_tokens() {
-            trim_messages_to_fit(&counter, &mut messages, &context_config, tools_ref);
-        }
-
-        // 构建请求
-        let mut request = json!({
-            "model": config.model,
-            "messages": messages,
-            "temperature": config.temperature,
-            "stream": false,
-        });
-
-        if let Some(max_tokens) = config.max_tokens {
-            request["max_tokens"] = json!(max_tokens);
-        }
-
-        // 添加工具定义（如果有）
-        if !tools.is_empty() {
-            request["tools"] = json!(tools);
-        }
-
-        // 发送请求
+        // 获取父插件引用用于工具调用
+        let parent = self.get_parent();
         let api_key = config.api_key.clone().unwrap_or_default();
-        let response = self.client
-            .post(&self.api_url())
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(120))
-            .send()
-            .await
-            .map_err(|e| PluginError::InternalError(format!("请求失败: {}", e)))?;
 
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Ok(StreamChunk {
-                data: json!({}),
-                done: true,
-                error: Some(format!("API 错误: {}", error)),
+        // Agent loop - 工具调用循环
+        let max_iterations = 255;
+        let mut final_content = String::new();
+        let mut final_usage: Option<TokenUsage> = None;
+
+        for iteration in 0..max_iterations {
+            // 估算 tokens 并裁剪
+            let tools_ref = if tools.is_empty() { None } else { Some(&tools) };
+            let estimated_tokens = count_total_tokens(&counter, &messages, tools_ref);
+            if estimated_tokens > context_config.available_tokens() {
+                trim_messages_to_fit(&counter, &mut messages, &context_config, tools_ref);
+            }
+
+            eprintln!("[openai] Iteration {} - messages: {}, tokens: {}", 
+                iteration + 1, messages.len(), estimated_tokens);
+
+            // 构建请求
+            let mut request = json!({
+                "model": config.model,
+                "messages": &messages,
+                "temperature": config.temperature,
+                "stream": false,
             });
+
+            if let Some(max_tokens) = config.max_tokens {
+                request["max_tokens"] = json!(max_tokens);
+            }
+
+            // 添加工具定义（如果有）
+            if !tools.is_empty() {
+                request["tools"] = json!(tools);
+                request["tool_choice"] = json!("auto");
+            }
+
+            // 发送请求
+            let response = self.client
+                .post(&self.api_url())
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .json(&request)
+                .timeout(std::time::Duration::from_secs(120))
+                .send()
+                .await
+                .map_err(|e| PluginError::InternalError(format!("请求失败: {}", e)))?;
+
+            if !response.status().is_success() {
+                let error = response.text().await.unwrap_or_default();
+                return Ok(StreamChunk {
+                    data: json!({}),
+                    done: true,
+                    error: Some(format!("API 错误: {}", error)),
+                });
+            }
+
+            let response_json: Value = response.json().await
+                .map_err(|e| PluginError::InternalError(format!("解析响应失败: {}", e)))?;
+
+            // 提取响应
+            let msg_obj = response_json
+                .get("choices")
+                .and_then(|c| c.get(0))
+                .and_then(|c| c.get("message"));
+
+            let content = msg_obj
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+
+            // 提取 tool_calls
+            let tool_calls: Vec<(String, String, Value)> = msg_obj
+                .and_then(|m| m.get("tool_calls"))
+                .and_then(|tc| tc.as_array())
+                .map(|arr| {
+                    arr.iter().filter_map(|tc| {
+                        let id = tc.get("id").and_then(|v| v.as_str())?.to_string();
+                        let name = tc.get("function")
+                            .and_then(|f| f.get("name"))
+                            .and_then(|n| n.as_str())?.to_string();
+                        let args_str = tc.get("function")
+                            .and_then(|f| f.get("arguments"))
+                            .and_then(|a| a.as_str())?;
+                        let args: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
+                        Some((id, name, args))
+                    }).collect()
+                })
+                .unwrap_or_default();
+
+            // 提取 usage
+            if let Some(u) = response_json.get("usage") {
+                final_usage = Some(TokenUsage {
+                    input_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()),
+                    output_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()),
+                });
+            }
+
+            // 构建 assistant 消息并添加到历史
+            let assistant_msg = NativeMessage {
+                role: "assistant".into(),
+                content: if content.is_empty() { None } else { Some(content.to_string()) },
+                tool_call_id: None,
+                tool_calls: if tool_calls.is_empty() { None } else {
+                    Some(tool_calls.iter().map(|(id, name, args)| {
+                        NativeToolCall {
+                            id: Some(id.clone()),
+                            kind: Some("function".into()),
+                            function: NativeFunctionCall {
+                                name: name.clone(),
+                                arguments: serde_json::to_string(args).unwrap_or_default(),
+                            },
+                        }
+                    }).collect())
+                },
+            };
+            messages.push(assistant_msg);
+
+            // 没有工具调用 - 返回最终结果
+            if tool_calls.is_empty() {
+                final_content = content.to_string();
+                break;
+            }
+
+            // 有工具调用 - 执行工具并将结果添加到消息历史
+            eprintln!("[openai] Processing {} tool calls", tool_calls.len());
+
+            for (id, name, args) in tool_calls {
+                // 解析 plugin::tool 格式
+                let (plugin, tool_name) = if let Some(pos) = name.find("::") {
+                    (&name[..pos], &name[pos+2..])
+                } else {
+                    ("tools", name.as_str())
+                };
+
+                eprintln!("[openai] Executing tool: {}::{}", plugin, tool_name);
+
+                // 通过父插件调用工具
+                let result = match &parent {
+                    Some(p) => {
+                        // 调用 tools 插件
+                        let tool_input = json!({
+                            "tool": tool_name,
+                            "params": args
+                        });
+                        
+                        match p.invoke(plugin, tool_input) {
+                            Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
+                                chunk.data.to_string()
+                            }
+                            Ok(InvokeStream::Single(chunk)) => {
+                                format!("Error: {}", chunk.error.unwrap_or_default())
+                            }
+                            Ok(InvokeStream::Stream(mut s)) => {
+                                // 收集流式响应
+                                let mut result = String::new();
+                                use futures::StreamExt;
+                                while let Some(chunk) = s.next().await {
+                                    if chunk.error.is_some() {
+                                        result = format!("Error: {}", chunk.error.unwrap_or_default());
+                                        break;
+                                    }
+                                    if let Some(text) = chunk.data.get("content").and_then(|c| c.as_str()) {
+                                        result.push_str(text);
+                                    } else if !chunk.data.is_null() {
+                                        result.push_str(&chunk.data.to_string());
+                                    }
+                                }
+                                result
+                            }
+                            Err(e) => format!("Error: {}", e),
+                        }
+                    }
+                    None => "Error: No parent plugin available".to_string(),
+                };
+
+                eprintln!("[openai] Tool result: {}", result.chars().take(100).collect::<String>());
+
+                // 添加工具结果到消息历史
+                messages.push(NativeMessage {
+                    role: "tool".into(),
+                    content: Some(result),
+                    tool_call_id: Some(id),
+                    tool_calls: None,
+                });
+            }
         }
 
-        let response_json: Value = response.json().await
-            .map_err(|e| PluginError::InternalError(format!("解析响应失败: {}", e)))?;
+        // 保存消息到 session
+        if let Some(ref p) = parent {
+            let new_messages: Vec<Value> = messages[history_len..]
+                .iter()
+                .filter_map(|m| {
+                    let role = m.role.as_str();
+                    // 跳过空的 assistant 消息
+                    if role == "assistant" && m.content.is_none() && m.tool_calls.is_none() {
+                        return None;
+                    }
+                    
+                    let mut msg = json!({
+                        "role": role,
+                        "content": m.content.clone().unwrap_or_default()
+                    });
+                    
+                    if let Some(ref tc) = m.tool_calls {
+                        msg["tool_calls"] = json!(tc);
+                    }
+                    if let Some(ref id) = m.tool_call_id {
+                        msg["tool_call_id"] = json!(id);
+                    }
+                    
+                    Some(msg)
+                })
+                .collect();
 
-        // 提取响应内容
-        let content = response_json
-            .get("choices")
-            .and_then(|c| c.get(0))
-            .and_then(|c| c.get("message"))
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_str())
-            .unwrap_or("");
-
-        let usage = response_json.get("usage").map(|u| TokenUsage {
-            input_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()),
-            output_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()),
-        });
+            if !new_messages.is_empty() {
+                let append_input = json!({
+                    "action": "append",
+                    "session_id": session_id,
+                    "messages": new_messages
+                });
+                let _ = p.invoke(&format!("@{}", CAPABILITY_SESSION), append_input);
+            }
+        }
 
         Ok(StreamChunk {
             data: json!({
                 "success": true,
-                "content": content,
-                "usage": usage,
+                "content": final_content,
+                "usage": final_usage,
                 "model": config.model
             }),
             done: true,

@@ -1,11 +1,14 @@
-//! Web 获取工具
+//! Web 获取工具 - 实现 Plugin trait
 
-use crate::core::types::PluginError;
+use crate::core::traits::Plugin;
+use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
+use async_trait::async_trait;
 use serde_json::{json, Value};
 
 const MAX_RESPONSE_SIZE: usize = 1_048_576; // 1MB
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 
+/// Web 获取工具
 pub struct WebFetchTool;
 
 impl WebFetchTool {
@@ -13,7 +16,36 @@ impl WebFetchTool {
         Self
     }
 
-    pub async fn execute(&self, args: Value) -> Result<Value, PluginError> {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "web_fetch".to_string(),
+            description: "获取网页内容。支持 HTTP/HTTPS 协议。".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "网页 URL"
+                    }
+                },
+                "required": ["url"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "success": { "type": "boolean" },
+                    "status": { "type": "integer" },
+                    "content_type": { "type": "string" },
+                    "content": { "type": "string" },
+                    "truncated": { "type": "boolean" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    async fn execute_inner(&self, args: Value) -> Result<Value, PluginError> {
         let url = args.get("url")
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 url 参数".to_string()))?;
@@ -67,5 +99,47 @@ impl WebFetchTool {
             "truncated": truncated,
             "url": url
         }))
+    }
+}
+
+#[async_trait]
+impl Plugin for WebFetchTool {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path.is_empty() {
+            Ok(Self::create_meta())
+        } else {
+            Err(PluginError::NotFound(format!("路径不存在: {}", path)))
+        }
+    }
+
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if !path.is_empty() {
+            return Err(PluginError::NotFound(format!("路径不存在: {}", path)));
+        }
+
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                match self.execute_inner(input).await {
+                    Ok(result) => StreamChunk {
+                        data: result,
+                        done: true,
+                        error: None,
+                    },
+                    Err(e) => StreamChunk {
+                        data: json!({}),
+                        done: true,
+                        error: Some(e.to_string()),
+                    },
+                }
+            })
+        });
+
+        Ok(InvokeStream::Single(result))
+    }
+}
+
+impl Default for WebFetchTool {
+    fn default() -> Self {
+        Self::new()
     }
 }

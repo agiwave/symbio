@@ -1,8 +1,9 @@
-//! HTTP 请求工具 - API 交互
+//! HTTP 请求工具 - 实现 Plugin trait
 
-use crate::core::types::{PluginError, StreamChunk};
-use serde_json::{Value, json};
-use std::path::PathBuf;
+use crate::core::traits::Plugin;
+use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
+use async_trait::async_trait;
+use serde_json::{json, Value};
 use std::time::Duration;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -24,24 +25,47 @@ impl HttpRequestTool {
         }
     }
 
-    pub fn with_domains(allowed_domains: Vec<String>) -> Self {
-        Self {
-            allowed_domains: if allowed_domains.is_empty() {
-                vec!["*".to_string()]
-            } else {
-                allowed_domains
-            },
-            max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
-            timeout_secs: DEFAULT_TIMEOUT_SECS,
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "http_request".to_string(),
+            description: "发送 HTTP 请求。支持 GET、POST、PUT、DELETE 等方法。".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "请求 URL（仅支持 HTTP/HTTPS）"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+                        "description": "HTTP 方法（默认 GET）"
+                    },
+                    "headers": {
+                        "type": "object",
+                        "description": "请求头"
+                    },
+                    "body": {
+                        "description": "请求体（字符串或 JSON 对象）"
+                    }
+                },
+                "required": ["url"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "success": { "type": "boolean" },
+                    "status": { "type": "integer" },
+                    "headers": { "type": "array" },
+                    "body": { "type": "string" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
         }
     }
 
-    /// 执行 HTTP 请求
-    pub async fn execute(
-        &self,
-        args: &Value,
-        _workspace_dir: &PathBuf,
-    ) -> Result<StreamChunk, PluginError> {
+    async fn execute_inner(&self, args: &Value) -> Result<StreamChunk, PluginError> {
         let url = args
             .get("url")
             .and_then(|v| v.as_str())
@@ -199,6 +223,31 @@ impl HttpRequestTool {
     }
 }
 
+#[async_trait]
+impl Plugin for HttpRequestTool {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path.is_empty() {
+            Ok(Self::create_meta())
+        } else {
+            Err(PluginError::NotFound(format!("路径不存在: {}", path)))
+        }
+    }
+
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if !path.is_empty() {
+            return Err(PluginError::NotFound(format!("路径不存在: {}", path)));
+        }
+
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                self.execute_inner(&input).await
+            })
+        })?;
+
+        Ok(InvokeStream::Single(result))
+    }
+}
+
 impl Default for HttpRequestTool {
     fn default() -> Self {
         Self::new()
@@ -217,7 +266,6 @@ fn extract_host(url: &str) -> Result<String, PluginError> {
 
 /// 检查是否为私有或本地主机
 fn is_private_or_local_host(host: &str) -> bool {
-    // localhost
     if host == "localhost" || host == "127.0.0.1" || host == "::1" {
         return true;
     }

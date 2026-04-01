@@ -1,9 +1,10 @@
-//! Web 搜索工具 - 搜索互联网
+//! Web 搜索工具 - 实现 Plugin trait
 
-use crate::core::types::{PluginError, StreamChunk};
+use crate::core::traits::Plugin;
+use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
+use async_trait::async_trait;
 use regex::Regex;
-use serde_json::{Value, json};
-use std::path::PathBuf;
+use serde_json::{json, Value};
 use std::time::Duration;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 15;
@@ -24,12 +25,38 @@ impl WebSearchTool {
         }
     }
 
-    /// 执行 Web 搜索
-    pub async fn execute(
-        &self,
-        args: &Value,
-        _workspace_dir: &PathBuf,
-    ) -> Result<StreamChunk, PluginError> {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "web_search".to_string(),
+            description: "搜索互联网。使用 DuckDuckGo 进行搜索。".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "搜索关键词"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "最大结果数（默认5，最大10）"
+                    }
+                },
+                "required": ["query"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "success": { "type": "boolean" },
+                    "results": { "type": "array" },
+                    "provider": { "type": "string" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    async fn execute_inner(&self, args: &Value) -> Result<StreamChunk, PluginError> {
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
@@ -101,13 +128,11 @@ impl WebSearchTool {
     }
 
     fn parse_duckduckgo_results(&self, html: &str, max_results: usize) -> Result<Vec<Value>, String> {
-        // 提取结果链接: <a class="result__a" href="...">Title</a>
         let link_regex = Regex::new(
             r#"<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>"#,
         )
         .map_err(|e| format!("编译正则表达式失败: {}", e))?;
 
-        // 提取摘要: <a class="result__snippet">...</a>
         let snippet_regex = Regex::new(r#"<a class="result__snippet[^"]*"[^>]*>([\s\S]*?)</a>"#)
             .map_err(|e| format!("编译正则表达式失败: {}", e))?;
 
@@ -134,7 +159,6 @@ impl WebSearchTool {
             let url = cap.get(1).map(|m| m.as_str()).unwrap_or("");
             let title = cap.get(2).map(|m| clean_html(m.as_str())).unwrap_or_default();
             
-            // 跳过广告和无效链接
             if url.contains("duckduckgo.com") || url.is_empty() || title.is_empty() {
                 continue;
             }
@@ -156,19 +180,41 @@ impl WebSearchTool {
     }
 }
 
+#[async_trait]
+impl Plugin for WebSearchTool {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path.is_empty() {
+            Ok(Self::create_meta())
+        } else {
+            Err(PluginError::NotFound(format!("路径不存在: {}", path)))
+        }
+    }
+
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if !path.is_empty() {
+            return Err(PluginError::NotFound(format!("路径不存在: {}", path)));
+        }
+
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                self.execute_inner(&input).await
+            })
+        })?;
+
+        Ok(InvokeStream::Single(result))
+    }
+}
+
 impl Default for WebSearchTool {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// 清理 HTML 标签
 fn clean_html(html: &str) -> String {
-    // 移除 HTML 标签
     let re = Regex::new(r"<[^>]*>").unwrap();
     let text = re.replace_all(html, "");
     
-    // 解码 HTML 实体
     let text = text
         .replace("&amp;", "&")
         .replace("&lt;", "<")
@@ -177,6 +223,5 @@ fn clean_html(html: &str) -> String {
         .replace("&#39;", "'")
         .replace("&nbsp;", " ");
     
-    // 清理空白
     text.trim().split_whitespace().collect::<Vec<_>>().join(" ")
 }

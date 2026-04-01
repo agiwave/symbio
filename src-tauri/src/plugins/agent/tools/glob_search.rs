@@ -1,25 +1,51 @@
-//! 文件搜索工具 - 使用 Glob 模式
+//! 文件搜索工具 - 使用 Glob 模式 - 实现 Plugin trait
 
-use crate::core::types::{PluginError, StreamChunk};
-use serde_json::{Value, json};
+use crate::core::traits::Plugin;
+use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
+use async_trait::async_trait;
+use serde_json::{json, Value};
 use std::path::PathBuf;
 
 const MAX_RESULTS: usize = 1000;
 
 /// Glob 搜索工具
-pub struct GlobSearchTool;
+pub struct GlobSearchTool {
+    workspace_dir: PathBuf,
+}
 
 impl GlobSearchTool {
-    pub fn new() -> Self {
-        Self
+    pub fn new(workspace_dir: PathBuf) -> Self {
+        Self { workspace_dir }
     }
 
-    /// 执行 Glob 搜索
-    pub async fn execute(
-        &self,
-        args: &Value,
-        workspace_dir: &PathBuf,
-    ) -> Result<StreamChunk, PluginError> {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "glob_search".to_string(),
+            description: "文件名模式搜索。使用 Glob 模式匹配文件名。".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob 模式，如 **/*.rs"
+                    }
+                },
+                "required": ["pattern"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "success": { "type": "boolean" },
+                    "results": { "type": "array" },
+                    "truncated": { "type": "boolean" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    async fn execute_inner(&self, args: &Value) -> Result<StreamChunk, PluginError> {
         let pattern = args
             .get("pattern")
             .and_then(|v| v.as_str())
@@ -44,7 +70,7 @@ impl GlobSearchTool {
         }
 
         // 构建完整模式
-        let full_pattern = workspace_dir.join(pattern).to_string_lossy().to_string();
+        let full_pattern = self.workspace_dir.join(pattern).to_string_lossy().to_string();
 
         let entries = match glob::glob(&full_pattern) {
             Ok(paths) => paths,
@@ -57,7 +83,7 @@ impl GlobSearchTool {
             }
         };
 
-        let workspace_canon = std::fs::canonicalize(workspace_dir)
+        let workspace_canon = std::fs::canonicalize(&self.workspace_dir)
             .map_err(|e| PluginError::InternalError(format!("无法解析工作区目录: {}", e)))?;
 
         let mut results = Vec::new();
@@ -69,23 +95,19 @@ impl GlobSearchTool {
                 Err(_) => continue,
             };
 
-            // 解析符号链接并验证仍在工作区内
             let resolved = match std::fs::canonicalize(&path) {
                 Ok(p) => p,
                 Err(_) => continue,
             };
 
-            // 检查路径是否在工作区内
             if !resolved.starts_with(&workspace_canon) {
                 continue;
             }
 
-            // 只包含文件，不包含目录
             if resolved.is_dir() {
                 continue;
             }
 
-            // 转换为相对于工作区的路径
             if let Ok(rel) = resolved.strip_prefix(&workspace_canon) {
                 results.push(rel.to_string_lossy().to_string());
             }
@@ -122,8 +144,27 @@ impl GlobSearchTool {
     }
 }
 
-impl Default for GlobSearchTool {
-    fn default() -> Self {
-        Self::new()
+#[async_trait]
+impl Plugin for GlobSearchTool {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path.is_empty() {
+            Ok(Self::create_meta())
+        } else {
+            Err(PluginError::NotFound(format!("路径不存在: {}", path)))
+        }
+    }
+
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if !path.is_empty() {
+            return Err(PluginError::NotFound(format!("路径不存在: {}", path)));
+        }
+
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                self.execute_inner(&input).await
+            })
+        })?;
+
+        Ok(InvokeStream::Single(result))
     }
 }

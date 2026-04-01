@@ -1,7 +1,9 @@
-//! Shell 命令执行工具
+//! Shell 命令执行工具 - 实现 Plugin trait
 
 use super::policy::{CommandRiskLevel, SecurityPolicy};
-use crate::core::types::PluginError;
+use crate::core::traits::Plugin;
+use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
+use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,6 +12,7 @@ const SHELL_TIMEOUT_SECS: u64 = 60;
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
 const SAFE_ENV_VARS: &[&str] = &["PATH", "HOME", "TERM", "LANG", "LC_ALL", "USER", "SHELL"];
 
+/// Shell 命令执行工具
 pub struct ShellTool {
     security: Arc<SecurityPolicy>,
 }
@@ -19,7 +22,39 @@ impl ShellTool {
         Self { security }
     }
 
-    pub async fn execute(&self, args: Value) -> Result<Value, PluginError> {
+    fn create_meta() -> PluginMeta {
+        PluginMeta {
+            name: "shell".to_string(),
+            description: "执行 Shell 命令。命令在沙箱环境中运行，有超时限制。".to_string(),
+            version: "0.1.0".to_string(),
+            input: Some(json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "要执行的 Shell 命令"
+                    },
+                    "approved": {
+                        "type": "boolean",
+                        "description": "是否已批准执行高风险命令"
+                    }
+                },
+                "required": ["command"]
+            })),
+            output: Some(json!({
+                "type": "object",
+                "properties": {
+                    "success": { "type": "boolean" },
+                    "exit_code": { "type": "integer" },
+                    "output": { "type": "string" },
+                    "risk_level": { "type": "string" }
+                }
+            })),
+            author: Some("Symbio Team".to_string()),
+        }
+    }
+
+    async fn execute_inner(&self, args: Value) -> Result<Value, PluginError> {
         let command = args.get("command")
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 command 参数".to_string()))?;
@@ -92,5 +127,41 @@ impl ShellTool {
                 format!("命令超时 ({}秒)", SHELL_TIMEOUT_SECS)
             )),
         }
+    }
+}
+
+#[async_trait]
+impl Plugin for ShellTool {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path.is_empty() {
+            Ok(Self::create_meta())
+        } else {
+            Err(PluginError::NotFound(format!("路径不存在: {}", path)))
+        }
+    }
+
+    fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        if !path.is_empty() {
+            return Err(PluginError::NotFound(format!("路径不存在: {}", path)));
+        }
+
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                match self.execute_inner(input).await {
+                    Ok(result) => StreamChunk {
+                        data: result,
+                        done: true,
+                        error: None,
+                    },
+                    Err(e) => StreamChunk {
+                        data: json!({}),
+                        done: true,
+                        error: Some(e.to_string()),
+                    },
+                }
+            })
+        });
+
+        Ok(InvokeStream::Single(result))
     }
 }

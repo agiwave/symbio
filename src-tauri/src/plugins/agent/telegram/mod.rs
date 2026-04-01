@@ -5,6 +5,3 @@
 pub mod plugin;
 pub mod factory;
 pub mod types;
-
-pub use plugin::TelegramPlugin;
-pub use factory::TelegramFactory;
