@@ -53,7 +53,7 @@
           
           <div
             v-for="(msg, index) in activeSession.messages"
-            :key="index"
+            :key="`${activeSession.id}-${index}-${msg.timestamp}`"
             class="message"
             :class="msg.role"
           >
@@ -361,8 +361,14 @@ async function checkConfig() {
 }
 
 watch(activeSessionId, () => {
+  console.log('[AgentPage] activeSessionId changed to:', activeSessionId.value)
   nextTick(scrollToBottom)
 })
+
+// 监听 activeSession 变化
+watch(activeSession, (newVal) => {
+  console.log('[AgentPage] activeSession changed:', newVal?.id, 'messages:', newVal?.messages?.length)
+}, { deep: true })
 
 onMounted(async () => {
   await checkConfig()
