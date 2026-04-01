@@ -105,36 +105,39 @@ fn create_agent_with_factory(home_weak: Weak<dyn Plugin>, agent_config: Option<&
     agent.add_instance("add".to_string(), Arc::new(crate::plugins::agent::AddPlugin::new()) as Arc<dyn Plugin>);
     agent.add_instance("remove".to_string(), Arc::new(crate::plugins::agent::RemovePlugin::new()) as Arc<dyn Plugin>);
     
-    // 从配置中提取各子插件配置
-    let configs = agent_config
-        .and_then(|c| c.get("config"))
-        .and_then(|c| c.as_object());
+    // agent_config 直接包含各子插件配置（memory, openai, session 等）
+    let configs = agent_config.and_then(|c| c.as_object());
     
     // 创建各子插件，传入配置
     eprintln!("[home] creating plugins with config...");
     
     if let Some(factory) = registry.get("chat") {
         let cfg = configs.and_then(|c| c.get("chat"));
+        eprintln!("[home] chat config: {:?}", cfg);
         agent.add_instance("chat".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
     if let Some(factory) = registry.get("tools") {
         let cfg = configs.and_then(|c| c.get("tools"));
+        eprintln!("[home] tools config: {:?}", cfg);
         agent.add_instance("tools".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
     if let Some(factory) = registry.get("memory") {
         let cfg = configs.and_then(|c| c.get("memory"));
+        eprintln!("[home] memory config: {:?}", cfg);
         agent.add_instance("memory".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
     if let Some(factory) = registry.get("session") {
         let cfg = configs.and_then(|c| c.get("session"));
+        eprintln!("[home] session config: {:?}", cfg);
         agent.add_instance("session".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
     if let Some(factory) = registry.get("openai") {
         let cfg = configs.and_then(|c| c.get("openai"));
+        eprintln!("[home] openai config: {:?}", cfg);
         agent.add_instance("openai".to_string(), factory.create(Some(agent_ref.clone()), cfg));
     }
     
