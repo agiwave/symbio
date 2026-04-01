@@ -87,19 +87,20 @@ pub struct ToolsPlugin {
 impl ToolsPlugin {
     /// 主构造函数（Factory 机制使用）
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: ToolsConfig) -> Self {
-        let workspace_dir = std::env::current_dir().unwrap_or_default();
-        let security = Arc::new(SecurityPolicy::new(workspace_dir.clone()));
+        // 默认使用当前目录，实际工作区通过 get_workspace_path() 获取
+        let default_workspace = std::env::current_dir().unwrap_or_default();
+        let security = Arc::new(SecurityPolicy::new(default_workspace.clone()));
         
         // 创建所有工具实例
         let tools: HashMap<String, Arc<dyn Plugin>> = vec![
             ("read_file", Arc::new(FileReadTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
             ("write_file", Arc::new(FileWriteTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
-            ("file_edit", Arc::new(FileEditTool::new(workspace_dir.clone())) as Arc<dyn Plugin>),
+            ("file_edit", Arc::new(FileEditTool::new(default_workspace.clone())) as Arc<dyn Plugin>),
             ("shell", Arc::new(ShellTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
             ("web_fetch", Arc::new(WebFetchTool::new()) as Arc<dyn Plugin>),
             ("web_search", Arc::new(WebSearchTool::new()) as Arc<dyn Plugin>),
-            ("glob_search", Arc::new(GlobSearchTool::new(workspace_dir.clone())) as Arc<dyn Plugin>),
-            ("content_search", Arc::new(ContentSearchTool::new(workspace_dir.clone())) as Arc<dyn Plugin>),
+            ("glob_search", Arc::new(GlobSearchTool::new(default_workspace.clone())) as Arc<dyn Plugin>),
+            ("content_search", Arc::new(ContentSearchTool::new(default_workspace.clone())) as Arc<dyn Plugin>),
             ("http_request", Arc::new(HttpRequestTool::new()) as Arc<dyn Plugin>),
         ].into_iter().map(|(k, v)| (k.to_string(), v)).collect();
 
@@ -121,6 +122,35 @@ impl ToolsPlugin {
     /// 获取父插件引用
     fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
         self.parent.as_ref().and_then(|w| w.upgrade())
+    }
+    
+    /// 获取工作区路径（通过绝对路径 /work/workspace_path 从 root 获取）
+    fn get_workspace_path(&self) -> std::path::PathBuf {
+        if let Some(parent) = self.get_parent() {
+            // 使用绝对路径 /work/workspace_path 获取工作区
+            match parent.invoke("/work/workspace_path", json!({})) {
+                Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
+                    if let Some(path) = chunk.data.get("expanded_path").and_then(|v| v.as_str()) {
+                        eprintln!("[tools] got workspace path from /work/workspace_path: {}", path);
+                        return std::path::PathBuf::from(path);
+                    }
+                    if let Some(path) = chunk.data.get("workspace_path").and_then(|v| v.as_str()) {
+                        let expanded = shellexpand::tilde(path).to_string();
+                        eprintln!("[tools] got workspace path: {} -> {}", path, expanded);
+                        return std::path::PathBuf::from(expanded);
+                    }
+                }
+                Ok(InvokeStream::Single(chunk)) => {
+                    eprintln!("[tools] failed to get workspace path: {:?}", chunk.error);
+                }
+                Err(e) => {
+                    eprintln!("[tools] error getting workspace path: {:?}", e);
+                }
+                _ => {}
+            }
+        }
+        // 回退到当前目录
+        std::env::current_dir().unwrap_or_default()
     }
 
     /// 获取所有工具的 OpenAI 格式定义
@@ -303,6 +333,16 @@ impl Plugin for ToolsPlugin {
     }
 
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        // 绝对路径（以 / 开头）：转发给父插件处理
+        if path.starts_with('/') {
+            if let Some(parent) = self.get_parent() {
+                eprintln!("[tools] forwarding absolute path '{}' to parent", path);
+                return parent.invoke(path, input);
+            } else {
+                return Err(PluginError::NotFound(format!("无法解析绝对路径 '{}'：没有父插件", path)));
+            }
+        }
+        
         // config path
         if path == "config" {
             let action = input.get("action")
@@ -390,6 +430,19 @@ impl Plugin for ToolsPlugin {
             });
 
             return Ok(InvokeStream::Single(result));
+        }
+        
+        // _workspace path - 获取当前工作区路径
+        if path == "_workspace" {
+            let workspace = self.get_workspace_path();
+            return Ok(InvokeStream::Single(StreamChunk {
+                data: json!({ 
+                    "success": true,
+                    "workspace_path": workspace.to_string_lossy().to_string()
+                }),
+                done: true,
+                error: None,
+            }));
         }
 
         // _list path - 返回所有工具列表

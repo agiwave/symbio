@@ -95,13 +95,14 @@ impl WorkPlugin {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list", "create", "get", "update", "delete", "init"],
+                        "enum": ["list", "create", "get", "update", "delete", "init", "save", "workspace_path", "get_workspace", "set_workspace"],
                         "description": "操作类型"
                     },
                     "id": { "type": "string" },
                     "title": { "type": "string" },
                     "content": { "type": "string" },
-                    "parentId": { "type": "string" }
+                    "parentId": { "type": "string" },
+                    "path": { "type": "string", "description": "工作区路径（set_workspace 时使用）" }
                 }
             })),
             output: Some(json!({
@@ -616,6 +617,35 @@ impl Plugin for WorkPlugin {
                     }
                 }
                 json!({ "success": true, "message": "保存成功" })
+            }
+            "workspace_path" | "get_workspace" => {
+                // 获取工作区路径
+                let cfg = self.config.lock().unwrap();
+                let path = shellexpand::tilde(&cfg.workspace_path).to_string();
+                json!({ 
+                    "success": true, 
+                    "workspace_path": cfg.workspace_path,
+                    "expanded_path": path
+                })
+            }
+            "set_workspace" => {
+                // 设置工作区路径
+                let new_path = input.get("path").and_then(|v| v.as_str())
+                    .or_else(|| input.get("workspace_path").and_then(|v| v.as_str()));
+                
+                if let Some(path) = new_path {
+                    let mut cfg = self.config.lock().unwrap();
+                    cfg.workspace_path = path.to_string();
+                    
+                    // 通知父插件保存配置
+                    if let Some(p) = self.get_parent() {
+                        let _ = p.invoke("save_config", json!({}));
+                    }
+                    
+                    json!({ "success": true, "workspace_path": path })
+                } else {
+                    json!({ "success": false, "error": "缺少 path 参数" })
+                }
             }
             _ => return Err(PluginError::ValidationError(format!("未知操作: {}", action))),
         };

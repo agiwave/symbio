@@ -178,6 +178,16 @@ impl Plugin for Agent {
     }
 
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        // 绝对路径（以 / 开头）：转发给父插件处理
+        if path.starts_with('/') {
+            if let Some(parent) = self.get_parent() {
+                eprintln!("[agent] forwarding absolute path '{}' to parent", path);
+                return parent.invoke(path, input);
+            } else {
+                return Err(PluginError::NotFound(format!("无法解析绝对路径 '{}'：没有父插件", path)));
+            }
+        }
+
         // 转发配置保存/加载请求到父插件（Home）
         if path == "save_config" || path == "load_config" {
             eprintln!("[agent] received {} request", path);

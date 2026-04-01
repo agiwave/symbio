@@ -159,6 +159,23 @@ impl Plugin for HomePlugin {
     }
 
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        // 处理绝对路径（以 / 开头）：去掉前导 / 后路由到子插件
+        let path = path.strip_prefix('/').unwrap_or(path);
+
+        // _root - 返回 root 插件信息（用于子插件获取 root）
+        if path == "_root" {
+            return Ok(InvokeStream::single(json!({
+                "success": true,
+                "name": "home",
+                "children": ["work", "agent", "setting"]
+            })));
+        }
+        
+        // _workspace - 快捷获取工作区路径（路由到 work/workspace_path）
+        if path == "_workspace" {
+            return self.work.invoke("workspace_path", input);
+        }
+
         // save_config - 保存配置到文件
         if path == "save_config" {
             let home_self = Arc::new(self.clone());
