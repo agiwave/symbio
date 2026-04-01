@@ -42,7 +42,7 @@
       <!-- 导航条 -->
       <nav class="nav-bar">
         <div class="nav-logo" @click="currentPage = 'workspace'">
-          <img :src="logoUrl" alt="Symbio" class="logo-img" />
+          <span class="logo-text">Symbio</span>
         </div>
         
         <!-- 工作区指示器 -->
@@ -125,7 +125,6 @@ import { ref, onMounted, watch } from 'vue'
 import WorkspacePage from '../components/WorkspacePage.vue'
 import AgentPage from '../components/AgentPage.vue'
 import SettingsPage from '../components/SettingsPage.vue'
-import logoUrl from '../assets/logo.svg'
 import { getWorkspacePath, setWorkspacePath, getWorkConfig } from '../services/config'
 import { open } from '@tauri-apps/plugin-dialog'
 
@@ -408,10 +407,11 @@ watch(currentPage, (newVal, oldVal) => {
   padding: 0.5rem;
 }
 
-.logo-img {
-  width: 36px;
-  height: 36px;
-  display: block;
+.logo-text {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.5px;
 }
 
 .workspace-indicator {
