@@ -42,6 +42,7 @@ fn main() {
     let root: Arc<dyn Plugin> = HomeFactory::new().create(None, None);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             root: Mutex::new(root),
         })

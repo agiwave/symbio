@@ -3,26 +3,20 @@
     <!-- 引导页：未选择工作区时显示 -->
     <div v-if="!workspaceReady" class="welcome-screen">
       <div class="welcome-content">
-        <img :src="logoUrl" alt="Symbio" class="welcome-logo" />
-        <h1 class="welcome-title">Symbio</h1>
-        <p class="welcome-subtitle">在做中学：生信分析的互动学习平台</p>
+        <h1 class="welcome-title">选择工作区</h1>
+        <p class="welcome-subtitle">工作区是您的项目目录，所有文件操作都在工作区内进行</p>
         
         <div class="workspace-section">
-          <h2>选择工作区</h2>
-          <p class="workspace-hint">工作区是您的项目目录，所有文件操作都在工作区内进行</p>
+          <button class="browse-btn-large" @click="browseWorkspace">
+            <span class="btn-icon">📁</span>
+            <span class="btn-text">浏览目录...</span>
+          </button>
           
-          <div class="workspace-input-group">
-            <input 
-              v-model="workspaceInput" 
-              type="text" 
-              placeholder="输入工作区路径，如 ~/projects"
-              @keyup.enter="openWorkspace"
-            />
-            <button class="browse-btn" @click="browseWorkspace" title="浏览">📂</button>
+          <div class="divider">
+            <span>或选择最近使用</span>
           </div>
           
           <div class="recent-workspaces" v-if="recentWorkspaces.length > 0">
-            <h3>最近使用</h3>
             <div 
               v-for="ws in recentWorkspaces" 
               :key="ws" 
@@ -34,9 +28,9 @@
             </div>
           </div>
           
-          <button class="open-btn" @click="openWorkspace" :disabled="!workspaceInput.trim()">
-            打开工作区
-          </button>
+          <div class="recent-workspaces empty-hint" v-else>
+            <p>暂无最近使用的工作区</p>
+          </div>
           
           <p v-if="error" class="error-msg">{{ error }}</p>
         </div>
@@ -99,31 +93,26 @@
             <span class="label">当前工作区：</span>
             <span class="path">{{ workspacePath }}</span>
           </div>
-          <div class="workspace-input-group">
-            <input 
-              v-model="newWorkspacePath" 
-              type="text" 
-              placeholder="输入新的工作区路径"
-            />
-            <button class="browse-btn" @click="browseWorkspace" title="浏览">📂</button>
-          </div>
-          <div class="modal-actions">
-            <button class="cancel-btn" @click="showWorkspaceSwitcher = false">取消</button>
-            <button class="switch-btn" @click="switchWorkspace" :disabled="!newWorkspacePath.trim()">
-              切换
-            </button>
-          </div>
-          <div class="recent-workspaces" v-if="recentWorkspaces.length > 0">
+          
+          <button class="browse-btn-modal" @click="browseWorkspaceInModal">
+            <span>📁</span> 浏览目录...
+          </button>
+          
+          <div class="recent-section" v-if="recentWorkspaces.length > 0">
             <h3>最近使用</h3>
             <div 
               v-for="ws in recentWorkspaces" 
               :key="ws" 
               class="recent-item"
-              @click="newWorkspacePath = ws"
+              @click="switchToWorkspace(ws)"
             >
               <span class="recent-icon">📁</span>
               <span class="recent-path">{{ ws }}</span>
             </div>
+          </div>
+          
+          <div class="modal-actions">
+            <button class="cancel-btn" @click="showWorkspaceSwitcher = false">取消</button>
           </div>
         </div>
       </div>
@@ -132,18 +121,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import WorkspacePage from '../components/WorkspacePage.vue'
 import AgentPage from '../components/AgentPage.vue'
 import SettingsPage from '../components/SettingsPage.vue'
 import logoUrl from '../assets/logo.svg'
 import { getWorkspacePath, setWorkspacePath, getWorkConfig } from '../services/config'
+import { open } from '@tauri-apps/plugin-dialog'
 
 // 状态
 const workspaceReady = ref(false)
 const workspacePath = ref('')
-const workspaceInput = ref('')
-const newWorkspacePath = ref('')
 const currentPage = ref<'workspace' | 'agent' | 'settings'>('workspace')
 const showWorkspaceSwitcher = ref(false)
 const recentWorkspaces = ref<string[]>([])
@@ -158,7 +146,6 @@ async function loadWorkspaceState() {
     
     // 如果有工作区，直接进入
     if (workspacePath.value) {
-      workspaceInput.value = workspacePath.value
       workspaceReady.value = true
     }
     
@@ -169,16 +156,45 @@ async function loadWorkspaceState() {
     }
   } catch (err) {
     console.error('加载工作区状态失败:', err)
-    // 使用默认路径
-    workspaceInput.value = '~/projects'
+  }
+}
+
+// 浏览工作区（引导页）
+async function browseWorkspace() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择工作区目录'
+    })
+    
+    if (selected) {
+      await openWorkspaceWithPath(selected as string)
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '选择目录失败'
+  }
+}
+
+// 浏览工作区（切换弹窗）
+async function browseWorkspaceInModal() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择工作区目录'
+    })
+    
+    if (selected) {
+      await switchToWorkspace(selected as string)
+    }
+  } catch (err) {
+    alert('选择目录失败: ' + (err instanceof Error ? err.message : err))
   }
 }
 
 // 打开工作区
-async function openWorkspace() {
-  const path = workspaceInput.value.trim()
-  if (!path) return
-  
+async function openWorkspaceWithPath(path: string) {
   error.value = ''
   
   try {
@@ -198,15 +214,11 @@ async function openWorkspace() {
 
 // 选择工作区（从最近列表）
 function selectWorkspace(path: string) {
-  workspaceInput.value = path
-  openWorkspace()
+  openWorkspaceWithPath(path)
 }
 
 // 切换工作区
-async function switchWorkspace() {
-  const path = newWorkspacePath.value.trim()
-  if (!path) return
-  
+async function switchToWorkspace(path: string) {
   try {
     const result = await setWorkspacePath(path)
     workspacePath.value = result.workspace_path
@@ -220,12 +232,6 @@ async function switchWorkspace() {
   } catch (err) {
     alert('切换工作区失败: ' + (err instanceof Error ? err.message : err))
   }
-}
-
-// 浏览工作区（TODO: 调用系统文件选择器）
-function browseWorkspace() {
-  // 目前使用简单输入，后续可集成 Tauri 文件对话框
-  alert('文件浏览器功能待实现，请直接输入路径')
 }
 
 onMounted(() => {
@@ -258,146 +264,130 @@ watch(currentPage, (newVal, oldVal) => {
 
 .welcome-content {
   text-align: center;
-  max-width: 500px;
-  padding: 2rem;
-}
-
-.welcome-logo {
-  width: 80px;
-  height: 80px;
-  border-radius: 16px;
-  margin-bottom: 1.5rem;
+  max-width: 450px;
+  width: 90%;
 }
 
 .welcome-title {
   color: #fff;
-  font-size: 2.5rem;
-  margin-bottom: 0.5rem;
+  font-size: 1.75rem;
+  margin-bottom: 0.75rem;
+  font-weight: 500;
 }
 
 .welcome-subtitle {
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 1rem;
-  margin-bottom: 3rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.9rem;
+  margin-bottom: 2rem;
 }
 
 .workspace-section {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.browse-btn-large {
+  width: 100%;
+  padding: 1rem 1.5rem;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  padding: 2rem;
-}
-
-.workspace-section h2 {
-  color: #fff;
-  font-size: 1.25rem;
-  margin-bottom: 0.5rem;
-}
-
-.workspace-hint {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 0.875rem;
-  margin-bottom: 1.5rem;
-}
-
-.workspace-input-group {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
-}
-
-.workspace-input-group input {
-  flex: 1;
-  padding: 0.75rem 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
   color: #fff;
   font-size: 1rem;
-}
-
-.workspace-input-group input::placeholder {
-  color: rgba(255, 255, 255, 0.4);
-}
-
-.browse-btn {
-  width: 44px;
-  height: 44px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  font-size: 1.25rem;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  transition: all 0.2s;
 }
 
-.browse-btn:hover {
+.browse-btn-large:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.btn-icon {
+  font-size: 1.5rem;
+}
+
+.btn-text {
+  font-weight: 500;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 1.25rem 0;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
   background: rgba(255, 255, 255, 0.2);
 }
 
-.open-btn {
-  width: 100%;
-  padding: 0.875rem;
-  background: var(--color-primary);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 1rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.open-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.open-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.error-msg {
-  color: #f87171;
-  font-size: 0.875rem;
-  margin-top: 1rem;
+.divider span {
+  padding: 0 1rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.8rem;
 }
 
 .recent-workspaces {
-  margin-top: 1.5rem;
   text-align: left;
 }
 
-.recent-workspaces h3 {
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  margin-bottom: 0.5rem;
+.recent-workspaces.empty-hint {
+  text-align: center;
+}
+
+.recent-workspaces.empty-hint p {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.85rem;
+  margin: 0;
 }
 
 .recent-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
   cursor: pointer;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.2s;
 }
 
 .recent-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.recent-item:last-child {
+  margin-bottom: 0;
 }
 
 .recent-icon {
-  font-size: 1rem;
+  font-size: 1.1rem;
+  opacity: 0.8;
 }
 
 .recent-path {
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.9rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.error-msg {
+  color: #f87171;
+  font-size: 0.85rem;
+  margin-top: 1rem;
+  text-align: center;
 }
 
 /* 导航条 */
@@ -500,7 +490,7 @@ watch(currentPage, (newVal, oldVal) => {
   background: var(--color-surface);
   border-radius: 12px;
   padding: 1.5rem;
-  max-width: 500px;
+  max-width: 450px;
   width: 90%;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
@@ -530,53 +520,33 @@ watch(currentPage, (newVal, oldVal) => {
   word-break: break-all;
 }
 
-.modal-content .workspace-input-group input {
-  background: #fff;
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-.modal-content .workspace-input-group input::placeholder {
-  color: var(--color-text-muted);
-}
-
-.modal-actions {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 1rem;
-}
-
-.cancel-btn {
-  flex: 1;
-  padding: 0.75rem;
-  border: 1px solid var(--color-border);
-  background: transparent;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.switch-btn {
-  flex: 1;
-  padding: 0.75rem;
+.browse-btn-modal {
+  width: 100%;
+  padding: 0.75rem 1rem;
   background: var(--color-primary);
   color: #fff;
   border: none;
   border-radius: 8px;
   cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
-.switch-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.browse-btn-modal:hover {
+  opacity: 0.9;
 }
 
-.modal-content .recent-workspaces {
+.recent-section {
   margin-top: 1rem;
 }
 
-.modal-content .recent-workspaces h3 {
+.recent-section h3 {
+  font-size: 0.8rem;
   color: var(--color-text-muted);
-  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
 }
 
 .modal-content .recent-item {
@@ -584,7 +554,16 @@ watch(currentPage, (newVal, oldVal) => {
   margin-bottom: 0.5rem;
 }
 
-.modal-content .recent-path {
-  color: var(--color-text);
+.modal-actions {
+  margin-top: 1rem;
+  text-align: right;
+}
+
+.cancel-btn {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
 }
 </style>
