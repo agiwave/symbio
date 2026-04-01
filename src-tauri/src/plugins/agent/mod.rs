@@ -244,7 +244,12 @@ impl Plugin for Agent {
                                 if let Some(obj) = config.as_object() {
                                     let instances = self.instances.read().unwrap();
                                     for (name, plugin_config) in obj {
+                                        // 跳过非对象字段（如 success）
+                                        if !plugin_config.is_object() {
+                                            continue;
+                                        }
                                         if let Some(plugin) = instances.get(name) {
+                                            eprintln!("[agent] distributing config to '{}': {:?}", name, plugin_config);
                                             let _ = plugin.invoke("config", json!({
                                                 "action": "set",
                                                 "config": plugin_config

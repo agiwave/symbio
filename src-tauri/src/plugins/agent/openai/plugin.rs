@@ -630,18 +630,19 @@ impl Plugin for OpenAiPlugin {
                             Ok(StreamChunk {
                                 data: json!({
                                     "api_base": config.api_base,
-                                    "api_key_set": config.api_key.is_some(),
+                                    "api_key": config.api_key,
                                     "model": config.model,
                                     "temperature": config.temperature,
                                     "max_tokens": config.max_tokens,
-                                    "max_context_tokens": config.max_context_tokens
+                                    "max_context_tokens": config.max_context_tokens,
+                                    "system_prompt": config.system_prompt
                                 }),
                                 done: true,
                                 error: None,
                             })
                         }
                         "set" => {
-                            eprintln!("[openai] config set called");
+                            eprintln!("[openai] config set called with: {:?}", input);
                             if let Some(new_config) = input.get("config") {
                                 let mut config = self.config.write().await;
                                 if let Some(v) = new_config.get("api_base").and_then(|v| v.as_str()) {
@@ -662,14 +663,14 @@ impl Plugin for OpenAiPlugin {
                                 if let Some(v) = new_config.get("system_prompt").and_then(|v| v.as_str()) {
                                     config.system_prompt = Some(v.to_string());
                                 }
+                                if let Some(v) = new_config.get("max_context_tokens").and_then(|v| v.as_u64()) {
+                                    config.max_context_tokens = v as u32;
+                                }
+                                eprintln!("[openai] config updated: api_base={}, model={}", config.api_base, config.model);
                             }
                             // 通知父插件保存配置
-                            eprintln!("[openai] checking parent...");
                             if let Some(parent) = self.get_parent() {
-                                eprintln!("[openai] calling save_config on parent");
                                 let _ = parent.invoke("save_config", json!({}));
-                            } else {
-                                eprintln!("[openai] ERROR: no parent for save_config");
                             }
                             Ok(StreamChunk {
                                 data: json!({ "success": true }),

@@ -123,24 +123,34 @@ impl HomePlugin {
     async fn collect_plugin_configs(&self) -> serde_json::Map<String, Value> {
         let mut configs = serde_json::Map::new();
 
-        // 收集 work 配置
+        // 收集 work 配置（work 直接返回配置对象，不需要提取）
         if let Ok(InvokeStream::Single(chunk)) = self.work.invoke("config", json!({"action": "get"})) {
             if chunk.error.is_none() && !chunk.data.is_null() {
                 configs.insert("work".to_string(), chunk.data);
             }
         }
 
-        // 收集 agent 配置（包含其子插件配置）
+        // 收集 agent 配置（agent 返回 { "success": true, "config": {...} }，需要提取 config）
         if let Ok(InvokeStream::Single(chunk)) = self.agent.invoke("config", json!({"action": "get"})) {
             if chunk.error.is_none() && !chunk.data.is_null() {
-                configs.insert("agent".to_string(), chunk.data);
+                // 提取内部的 config 对象
+                if let Some(agent_config) = chunk.data.get("config") {
+                    configs.insert("agent".to_string(), agent_config.clone());
+                } else {
+                    configs.insert("agent".to_string(), chunk.data);
+                }
             }
         }
 
         // 收集 setting 配置
         if let Ok(InvokeStream::Single(chunk)) = self.setting.invoke("config", json!({"action": "get"})) {
             if chunk.error.is_none() && !chunk.data.is_null() {
-                configs.insert("setting".to_string(), chunk.data);
+                // setting 可能也返回 { "success": true, "data": {...} }
+                if let Some(setting_data) = chunk.data.get("data") {
+                    configs.insert("setting".to_string(), setting_data.clone());
+                } else {
+                    configs.insert("setting".to_string(), chunk.data);
+                }
             }
         }
 
