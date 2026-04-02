@@ -1,7 +1,7 @@
 /**
  * 工作区存储
  *
- * 通过后端 work 插件管理文档
+ * 通过后端 doc 插件管理文档
  */
 
 import { defineStore } from 'pinia'
@@ -60,7 +60,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     
     try {
       // 先调用后端初始化
-      await callPlugin('work', { action: 'init' })
+      await callPlugin('doc', { action: 'init' })
       
       // 然后加载文档列表
       await loadDocuments()
@@ -74,7 +74,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // 加载文档列表
   async function loadDocuments() {
     try {
-      const result = await callPlugin<{ documents: Document[] }>('work', {
+      const result = await callPlugin<{ documents: Document[] }>('doc', {
         action: 'list'
       })
       documents.value.clear()
@@ -89,7 +89,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // 创建文档
   async function createDocument(title: string, parentId: string | null = null): Promise<Document | null> {
     try {
-      const result = await callPlugin<Document>('work', {
+      const result = await callPlugin<Document>('doc', {
         action: 'create',
         title,
         parentId
@@ -117,7 +117,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // 获取文档详情
   async function getDocument(id: string): Promise<Document | null> {
     try {
-      const result = await callPlugin<Document>('work', {
+      const result = await callPlugin<Document>('doc', {
         action: 'get',
         id
       })
@@ -132,7 +132,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // 更新文档
   async function updateDocument(id: string, updates: Partial<Document>): Promise<boolean> {
     try {
-      await callPlugin('work', {
+      await callPlugin('doc', {
         action: 'update',
         id,
         ...updates
@@ -151,7 +151,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // 删除文档
   async function deleteDocument(id: string): Promise<boolean> {
     try {
-      await callPlugin('work', {
+      await callPlugin('doc', {
         action: 'delete',
         id
       })
@@ -212,7 +212,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
 
       // 更新文档
-      await callPlugin('work', {
+      await callPlugin('doc', {
         action: 'update',
         id,
         parentId: newParentId

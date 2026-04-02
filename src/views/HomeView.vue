@@ -179,6 +179,7 @@ import ExplorerPage from '../components/ExplorerPage.vue'
 import AgentPage from '../components/AgentPage.vue'
 import SettingsPage from '../components/SettingsPage.vue'
 import { getWorkspacePath, setWorkspacePath, getWorkConfig } from '../services/config'
+import { useExplorerStore } from '../stores/explorer'
 import { open } from '@tauri-apps/plugin-dialog'
 
 // 状态
@@ -188,6 +189,7 @@ const currentPage = ref<'workspace' | 'explorer' | 'agent' | 'settings'>('worksp
 const showWorkspaceSwitcher = ref(false)
 const recentWorkspaces = ref<string[]>([])
 const error = ref('')
+const explorerStore = useExplorerStore()
 
 // 加载工作区状态
 async function loadWorkspaceState() {
@@ -208,8 +210,8 @@ async function loadWorkspaceState() {
 
     // 获取最近工作区列表
     const config = await getWorkConfig()
-    if (config.recent_files && config.recent_files.length > 0) {
-      recentWorkspaces.value = config.recent_files.slice(0, 5)
+    if (config.recent_workspaces && config.recent_workspaces.length > 0) {
+      recentWorkspaces.value = config.recent_workspaces.slice(0, 5)
     }
   } catch (err) {
     console.error('加载工作区状态失败:', err)
@@ -273,6 +275,9 @@ async function openWorkspaceWithPath(path: string) {
     console.log('[HomeView] workspaceReady set to:', workspaceReady.value)
     console.log('[HomeView] Final state:', { workspaceReady: workspaceReady.value, workspacePath: workspacePath.value })
 
+    // 重置资源浏览器，以便重新加载新工作区
+    explorerStore.reset()
+
     // 添加到最近列表
     if (!recentWorkspaces.value.includes(path)) {
       recentWorkspaces.value.unshift(path)
@@ -297,6 +302,9 @@ async function switchToWorkspace(path: string) {
     const result = await setWorkspacePath(path)
     workspacePath.value = result.workspace_path
     showWorkspaceSwitcher.value = false
+
+    // 重置资源浏览器，以便重新加载新工作区
+    explorerStore.reset()
     
     // 添加到最近列表
     if (!recentWorkspaces.value.includes(path)) {

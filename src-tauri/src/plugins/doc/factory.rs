@@ -1,26 +1,26 @@
-//! Work 插件工厂
+//! Doc 插件工厂
 
 use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
-use super::WorkPlugin;
+use super::DocPlugin;
 use std::sync::{Arc, Weak};
 use serde_json::Value;
 
-pub struct WorkFactory;
+pub struct DocFactory;
 
-impl WorkFactory {
+impl DocFactory {
     pub fn new() -> Self {
-        WorkFactory
+        DocFactory
     }
 }
 
 #[async_trait::async_trait]
-impl PluginFactory for WorkFactory {
+impl PluginFactory for DocFactory {
     fn meta(&self) -> PluginMeta {
         PluginMeta {
-            name: "work".to_string(),
-            description: "工作区路径管理插件".to_string(),
-            version: "0.2.0".to_string(),
+            name: "doc".to_string(),
+            description: "文档管理插件".to_string(),
+            version: "0.1.0".to_string(),
             input: None,
             output: None,
             author: Some("Symbio Team".to_string()),
@@ -28,7 +28,6 @@ impl PluginFactory for WorkFactory {
     }
 
     fn create(&self, parent: Option<Weak<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
-        let parent_weak = parent;
-        Arc::new(WorkPlugin::new(parent_weak))
+        Arc::new(DocPlugin::new(parent))
     }
 }

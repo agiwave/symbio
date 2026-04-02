@@ -107,19 +107,32 @@ impl ExplorerPlugin {
 
     /// 获取工作区路径
     fn get_workspace_path(&self) -> Result<PathBuf, PluginError> {
-        // 尝试从父插件获取工作区路径
+        eprintln!("[explorer] get_workspace_path: start");
+        
         let parent = self.get_parent()
-            .ok_or_else(|| PluginError::InternalError("父插件不存在，无法获取工作区路径".to_string()))?;
+            .ok_or_else(|| {
+                eprintln!("[explorer] get_workspace_path: parent not found");
+                PluginError::InternalError("父插件不存在，无法获取工作区路径".to_string())
+            })?;
 
-        // 使用绝对路径 /work/workspace_path 获取工作区
-        let result = parent.invoke("/work/workspace_path", json!({}))
-            .map_err(|e| PluginError::InternalError(format!("调用父插件失败：{}", e)))?;
+        eprintln!("[explorer] get_workspace_path: calling work/workspace_path");
+        
+        // 使用 work/workspace_path 获取工作区
+        let result = parent.invoke("work/workspace_path", json!({}))
+            .map_err(|e| {
+                eprintln!("[explorer] get_workspace_path: invoke error: {}", e);
+                PluginError::InternalError(format!("调用父插件失败：{}", e))
+            })?;
+
+        eprintln!("[explorer] get_workspace_path: invoke completed");
 
         // 解析结果
         if let InvokeStream::Single(chunk) = result {
+            eprintln!("[explorer] get_workspace_path: chunk = {:?}", chunk);
             if chunk.error.is_none() {
                 if let Some(data) = chunk.data.get("expanded_path") {
                     if let Some(path_str) = data.as_str() {
+                        eprintln!("[explorer] got expanded_path: {}", path_str);
                         let path = PathBuf::from(path_str);
                         if path.exists() {
                             return Ok(path);
@@ -131,6 +144,7 @@ impl ExplorerPlugin {
                     if let Some(path_str) = data.as_str() {
                         // 展开 ~ 为 home 目录
                         let expanded = shellexpand::tilde(path_str).to_string();
+                        eprintln!("[explorer] got workspace_path: {} -> {}", path_str, expanded);
                         let path = PathBuf::from(&expanded);
                         if path.exists() {
                             return Ok(path);
@@ -140,10 +154,12 @@ impl ExplorerPlugin {
                 }
             } else {
                 let err = chunk.error.unwrap_or_default();
+                eprintln!("[explorer] chunk error: {}", err);
                 return Err(PluginError::InternalError(format!("获取工作区路径失败：{}", err)));
             }
         }
 
+        eprintln!("[explorer] get_workspace_path: failed to parse result");
         Err(PluginError::InternalError("无法从父插件获取工作区路径，请先在首页选择工作区".to_string()))
     }
 
@@ -175,18 +191,25 @@ impl ExplorerPlugin {
 
     /// 列出目录内容
     fn list_directory(&self, path: Option<&str>, recursive: bool) -> Result<Value, PluginError> {
+        eprintln!("[explorer] list_directory: START, path={:?}, recursive={}", path, recursive);
+        
         let workspace = self.get_workspace_path()?;
+        eprintln!("[explorer] list_directory: workspace={:?}", workspace);
 
         let target_path = match path {
             Some(p) if !p.is_empty() => workspace.join(p),
             _ => workspace.clone(),
         };
 
+        eprintln!("[explorer] list_directory: target_path={:?}", target_path);
+
         if !target_path.exists() {
+            eprintln!("[explorer] list_directory: path not found");
             return Err(PluginError::NotFound(format!("路径不存在：{}", target_path.display())));
         }
 
         if !target_path.is_dir() {
+            eprintln!("[explorer] list_directory: not a directory");
             return Err(PluginError::InternalError("不是目录".to_string()));
         }
 
@@ -198,13 +221,21 @@ impl ExplorerPlugin {
         let mut items = Vec::new();
         self.collect_directory(&target_path, &workspace, recursive, show_hidden, &file_filter, &mut items)?;
 
-        Ok(json!({
+        eprintln!("[explorer] list_directory: found {} items", items.len());
+        for item in &items {
+            eprintln!("[explorer]   - {} ({})", item.name, if item.is_dir { "dir" } else { "file" });
+        }
+
+        let result = json!({
             "success": true,
             "data": {
                 "path": target_path.to_string_lossy().to_string(),
                 "items": items
             }
-        }))
+        });
+        
+        eprintln!("[explorer] list_directory: result = {:?}", result);
+        Ok(result)
     }
 
     /// 递归收集目录项

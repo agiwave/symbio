@@ -74,6 +74,11 @@ impl PluginFactory for HomeFactory {
                 .map(|f| f.create(Some(home_weak_dyn.clone()), work_config))
                 .unwrap_or_else(|| Arc::new(crate::plugins::work::WorkPlugin::new(Some(home_weak_dyn.clone()))));
 
+            let doc_config = global_config.plugins.get("doc");
+            let doc = registry.get("doc")
+                .map(|f| f.create(Some(home_weak_dyn.clone()), doc_config))
+                .unwrap_or_else(|| Arc::new(crate::plugins::doc::DocPlugin::new(Some(home_weak_dyn.clone()))));
+
             let setting_config = global_config.plugins.get("setting");
             let setting = registry.get("setting")
                 .map(|f| f.create(Some(home_weak_dyn.clone()), setting_config))
@@ -88,7 +93,7 @@ impl PluginFactory for HomeFactory {
             let agent_config = global_config.plugins.get("agent");
             let agent = create_agent_with_factory(home_weak_dyn, agent_config);
 
-            HomePlugin::new_with_config(work.clone(), agent, setting.clone(), explorer.clone(), global_config.clone())
+            HomePlugin::new_with_config(work.clone(), doc.clone(), agent, setting.clone(), explorer.clone(), global_config.clone())
         });
 
         home as Arc<dyn Plugin>

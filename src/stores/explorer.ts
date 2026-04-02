@@ -232,6 +232,17 @@ export const useExplorerStore = defineStore('explorer', () => {
     await loadDirectory(currentPath.value)
   }
 
+  // 重置状态（切换工作区时调用）
+  function reset() {
+    fileTree.value = new Map()
+    currentPath.value = ''
+    selectedPath.value = null
+    fileContent.value = null
+    initialized.value = false
+    loading.value = false
+    error.value = null
+  }
+
   return {
     // State
     fileTree,
@@ -253,6 +264,7 @@ export const useExplorerStore = defineStore('explorer', () => {
     selectItem,
     expandDirectory,
     refresh,
+    reset,
 
     // Helper
     getChildren,

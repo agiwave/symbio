@@ -419,11 +419,16 @@ watch(chatVisible, (visible) => {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 目录视图 */
 .dir-view {
   padding: 0.5rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .dir-header {
@@ -447,6 +452,8 @@ watch(chatVisible, (visible) => {
 .dir-list {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .dir-item {
@@ -494,6 +501,7 @@ watch(chatVisible, (visible) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .code-block {
@@ -507,6 +515,7 @@ watch(chatVisible, (visible) => {
   font-size: 0.875rem;
   line-height: 1.5;
   margin: 0;
+  min-height: 0;
 }
 
 .code-block code {
@@ -522,6 +531,7 @@ watch(chatVisible, (visible) => {
   justify-content: center;
   color: var(--color-text-muted);
   text-align: center;
+  min-height: 100%;
 }
 
 .empty-content .hint {

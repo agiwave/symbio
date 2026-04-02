@@ -55,9 +55,7 @@ export interface ToolsConfig {
 
 export interface WorkConfig {
   workspace_path: string
-  auto_save: boolean
-  auto_save_interval: number
-  recent_files: string[]
+  recent_workspaces: string[]
 }
 
 export interface GlobalConfig {

@@ -1,4 +1,4 @@
-//! Home 插件 - 根插件，持有 work/agent/setting 子插件实例
+//! Home 插件 - 根插件，持有 work/doc/agent/setting/explorer 子插件实例
 //!
 //! 简洁设计：
 //! - 工厂创建时传入配置，各插件初始化完成
@@ -30,6 +30,7 @@ pub struct GlobalConfig {
 pub struct HomePlugin {
     meta: PluginMeta,
     work: Arc<dyn Plugin>,
+    doc: Arc<dyn Plugin>,
     agent: Arc<dyn Plugin>,
     setting: Arc<dyn Plugin>,
     explorer: Arc<dyn Plugin>,
@@ -39,16 +40,18 @@ pub struct HomePlugin {
 impl HomePlugin {
     pub fn new(
         work: Arc<dyn Plugin>,
+        doc: Arc<dyn Plugin>,
         agent: Arc<dyn Plugin>,
         setting: Arc<dyn Plugin>,
         explorer: Arc<dyn Plugin>,
     ) -> Self {
-        Self::new_with_config(work, agent, setting, explorer, GlobalConfig::default())
+        Self::new_with_config(work, doc, agent, setting, explorer, GlobalConfig::default())
     }
 
     /// 带配置的构造函数（工厂使用）
     pub fn new_with_config(
         work: Arc<dyn Plugin>,
+        doc: Arc<dyn Plugin>,
         agent: Arc<dyn Plugin>,
         setting: Arc<dyn Plugin>,
         explorer: Arc<dyn Plugin>,
@@ -64,7 +67,7 @@ impl HomePlugin {
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "子插件路径，如 work/agent/setting/explorer"
+                            "description": "子插件路径，如 work/doc/agent/setting/explorer"
                         }
                     }
                 })),
@@ -72,6 +75,7 @@ impl HomePlugin {
                 author: Some("Symbio Team".to_string()),
             },
             work,
+            doc,
             agent,
             setting,
             explorer,
@@ -151,6 +155,7 @@ impl HomePlugin {
 
         match plugin_name {
             "work" => Ok((Arc::clone(&self.work), sub_path)),
+            "doc" => Ok((Arc::clone(&self.doc), sub_path)),
             "agent" => Ok((Arc::clone(&self.agent), sub_path)),
             "setting" => Ok((Arc::clone(&self.setting), sub_path)),
             "explorer" => Ok((Arc::clone(&self.explorer), sub_path)),
@@ -170,7 +175,7 @@ impl Plugin for HomePlugin {
     }
 
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
-        // 处理绝对路径（以 / 开头）：去掉前导 / 后路由到子插件
+        // 作为 root 插件，处理以 / 开头的绝对路径：去掉前导 / 后再路由
         let path = path.strip_prefix('/').unwrap_or(path);
 
         // _root - 返回 root 插件信息（用于子插件获取 root）
@@ -178,20 +183,13 @@ impl Plugin for HomePlugin {
             return Ok(InvokeStream::single(json!({
                 "success": true,
                 "name": "home",
-                "children": ["work", "agent", "setting"]
+                "children": ["work", "doc", "agent", "setting", "explorer"]
             })));
         }
 
         // _workspace - 快捷获取工作区路径（路由到 work/workspace_path）
         if path == "_workspace" {
             return self.work.invoke("workspace_path", input);
-        }
-
-        // 处理 /work/* 路径 - 路由到 work 插件
-        if path.starts_with("/work/") {
-            let sub_path = path.strip_prefix("/work/").unwrap_or_default();
-            eprintln!("[home] routing /work/{} to work plugin", sub_path);
-            return self.work.invoke(sub_path, input);
         }
 
         // save_config - 保存配置到文件
@@ -211,7 +209,7 @@ impl Plugin for HomePlugin {
         if path.is_empty() {
             return Ok(InvokeStream::single(json!({
                 "success": true,
-                "data": { "plugins": ["work", "agent", "setting"] }
+                "data": { "plugins": ["work", "doc", "agent", "setting", "explorer"] }
             })));
         }
 
@@ -226,6 +224,7 @@ impl Clone for HomePlugin {
         Self {
             meta: self.meta.clone(),
             work: Arc::clone(&self.work),
+            doc: Arc::clone(&self.doc),
             agent: Arc::clone(&self.agent),
             setting: Arc::clone(&self.setting),
             explorer: Arc::clone(&self.explorer),

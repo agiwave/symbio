@@ -235,28 +235,21 @@
           <div class="setting-item">
             <div class="setting-info">
               <label>工作区路径</label>
-              <p class="setting-desc">默认工作区目录</p>
+              <p class="setting-desc">当前工作区目录</p>
             </div>
             <input v-model="workConfig.workspace_path" type="text" placeholder="~/projects" />
           </div>
           
-          <div class="setting-item">
+          <div class="setting-item" v-if="workConfig.recent_workspaces?.length">
             <div class="setting-info">
-              <label>自动保存</label>
-              <p class="setting-desc">自动保存编辑内容</p>
+              <label>最近工作区</label>
+              <p class="setting-desc">最近打开的工作区</p>
             </div>
-            <label class="toggle">
-              <input type="checkbox" v-model="workConfig.auto_save" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          
-          <div class="setting-item">
-            <div class="setting-info">
-              <label>自动保存间隔（毫秒）</label>
-              <p class="setting-desc">自动保存间隔时间</p>
+            <div class="recent-list">
+              <span v-for="path in workConfig.recent_workspaces" :key="path" class="recent-item">
+                {{ path }}
+              </span>
             </div>
-            <input v-model.number="workConfig.auto_save_interval" type="number" min="1000" max="300000" />
           </div>
           
           <div class="setting-item">
@@ -356,9 +349,7 @@ const toolsConfig = reactive<ToolsConfig>({
 // 工作区设置
 const workConfig = reactive<WorkConfig>({
   workspace_path: '~/projects',
-  auto_save: true,
-  auto_save_interval: 30000,
-  recent_files: [],
+  recent_workspaces: [],
 })
 
 // 提供商预设
@@ -517,8 +508,6 @@ async function saveWorkConfig() {
   try {
     await setWorkConfig({
       workspace_path: workConfig.workspace_path,
-      auto_save: workConfig.auto_save,
-      auto_save_interval: workConfig.auto_save_interval,
     })
     showMessage('success', '工作区配置已保存')
   } catch (err) {
@@ -781,5 +770,24 @@ onMounted(() => {
 
 .link-btn:hover {
   background: #f0f0f0;
+}
+
+/* 最近工作区列表 */
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 300px;
+}
+
+.recent-item {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  padding: 0.25rem 0.5rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
