@@ -89,6 +89,13 @@
         <div class="nav-items">
           <button 
             class="nav-btn" 
+            title="切换工作区" 
+            @click="showWorkspaceSwitcher = true"
+          >
+            📂
+          </button>
+          <button 
+            class="nav-btn" 
             :class="{ active: currentPage === 'workspace' }"
             title="工作区" 
             @click="currentPage = 'workspace'"
@@ -103,13 +110,7 @@
           >
             💬
           </button>
-          <button 
-            class="nav-btn" 
-            title="切换工作区" 
-            @click="showWorkspaceSwitcher = true"
-          >
-            📂
-          </button>
+
           <button 
             class="nav-btn" 
             :class="{ active: currentPage === 'settings' }"
