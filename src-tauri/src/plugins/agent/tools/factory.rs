@@ -4,7 +4,7 @@ use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use super::plugin::{ToolsPlugin, ToolsConfig};
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 pub struct ToolsFactory;
 
@@ -76,12 +76,12 @@ impl PluginFactory for ToolsFactory {
         }
     }
 
-    fn create(&self, parent: Option<Arc<dyn Plugin>>, config: Option<&Value>) -> Arc<dyn Plugin> {
+    fn create(&self, parent: Option<Weak<dyn Plugin>>, config: Option<&Value>) -> Arc<dyn Plugin> {
         let tools_config = config
             .map(normalize_config)
             .unwrap_or_default();
         
-        let parent_weak = parent.as_ref().map(|p| Arc::downgrade(p));
+        let parent_weak = parent;
         Arc::new(ToolsPlugin::new(parent_weak, tools_config))
     }
 }

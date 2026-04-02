@@ -3,7 +3,7 @@
 use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use super::SettingPlugin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use serde_json::Value;
 
 pub struct SettingFactory;
@@ -27,7 +27,7 @@ impl PluginFactory for SettingFactory {
         }
     }
 
-    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
-        Arc::new(SettingPlugin::new())
+    fn create(&self, parent: Option<Weak<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+        Arc::new(SettingPlugin::new(parent))
     }
 }

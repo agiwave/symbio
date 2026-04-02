@@ -3,9 +3,11 @@
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
 use serde_json::{Value, json};
+use std::sync::{Arc, Weak};
 
 pub struct SettingPlugin {
     meta: PluginMeta,
+    parent: Option<Weak<dyn Plugin>>,
 }
 
 impl SettingPlugin {
@@ -40,16 +42,22 @@ impl SettingPlugin {
     }
 
     /// 主构造函数（Factory 机制使用）
-    pub fn new() -> Self {
+    pub fn new(parent: Option<Weak<dyn Plugin>>) -> Self {
         SettingPlugin {
             meta: Self::create_meta(),
+            parent,
         }
+    }
+
+    /// 获取父插件引用
+    fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
+        self.parent.as_ref().and_then(|w| w.upgrade())
     }
 }
 
 impl Default for SettingPlugin {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 

@@ -217,9 +217,9 @@ impl CompositePlugin {
         let factory = factories.iter()
             .find(|f| f.meta().name == factory_name)
             .ok_or_else(|| PluginError::NotFound(format!("工厂 '{}' 未找到", factory_name)))?;
-        
-        // 传递自身引用给子插件
-        let parent = self.self_ref.as_ref().and_then(|w| w.upgrade());
+
+        // 传递自身弱引用给子插件
+        let parent = self.self_ref.as_ref().map(|w| w.clone());
         Ok(factory.create(parent, config))
     }
 

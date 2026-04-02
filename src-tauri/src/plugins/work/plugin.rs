@@ -632,19 +632,27 @@ impl Plugin for WorkPlugin {
                 // 设置工作区路径
                 let new_path = input.get("path").and_then(|v| v.as_str())
                     .or_else(|| input.get("workspace_path").and_then(|v| v.as_str()));
-                
+
+                eprintln!("[work] set_workspace: path={:?}", new_path);
+
                 if let Some(path) = new_path {
                     let mut cfg = self.config.lock().unwrap();
                     cfg.workspace_path = path.to_string();
-                    
-                    // 通知父插件保存配置
+                    eprintln!("[work] set_workspace: saved path={}", cfg.workspace_path);
+
+                    // 通知父插件保存配置（后台执行，不阻塞）
                     if let Some(p) = self.get_parent() {
+                        eprintln!("[work] set_workspace: save_config scheduled");
+                        // 不等待 save_config 完成
                         let _ = p.invoke("save_config", json!({}));
                     }
-                    
-                    json!({ "success": true, "workspace_path": path })
+
+                    let result = json!({ "success": true, "workspace_path": path });
+                    eprintln!("[work] set_workspace: returning result");
+                    return Ok(InvokeStream::single(result));
                 } else {
-                    json!({ "success": false, "error": "缺少 path 参数" })
+                    eprintln!("[work] set_workspace: missing path parameter");
+                    return Err(PluginError::ValidationError("缺少 path 参数".to_string()));
                 }
             }
             _ => return Err(PluginError::ValidationError(format!("未知操作: {}", action))),

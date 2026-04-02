@@ -4,7 +4,7 @@ use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use super::plugin::EchoPlugin;
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 #[derive(Clone)]
 pub struct EchoFactory;
@@ -28,7 +28,7 @@ impl PluginFactory for EchoFactory {
         }
     }
     
-    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+    fn create(&self, _parent: Option<Weak<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
         Arc::new(EchoPlugin::new())
     }
 }

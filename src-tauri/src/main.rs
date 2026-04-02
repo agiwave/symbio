@@ -8,9 +8,10 @@ mod commands;
 use core::{PluginFactoryRegistry, Plugin, PluginFactory};
 use plugins::{
     HomeFactory, WorkFactory, SettingFactory,
-    AgentFactory, ChatFactory, ToolsFactory, MemoryFactory, 
+    AgentFactory, ChatFactory, ToolsFactory, MemoryFactory,
     SessionFactory, TelegramFactory, OpenAiFactory,
     EchoFactory, DockerFactory, CompositeFactory,
+    ExplorerFactory,
 };
 use std::sync::{Mutex, Arc};
 
@@ -26,6 +27,7 @@ fn main() {
     // 注册所有工厂
     registry.register(Arc::new(WorkFactory::new()));
     registry.register(Arc::new(SettingFactory::new()));
+    registry.register(Arc::new(ExplorerFactory::new()));
     registry.register(Arc::new(AgentFactory::new()));
     registry.register(Arc::new(ChatFactory::new()));
     registry.register(Arc::new(ToolsFactory::new()));

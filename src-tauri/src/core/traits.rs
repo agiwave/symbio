@@ -49,10 +49,10 @@ pub trait PluginFactory: Send + Sync {
     fn meta(&self) -> PluginMeta;
 
     /// 创建插件实例
-    /// 
-    /// parent: 父插件引用，用于插件间协作（存储为 Weak 避免循环引用）
+    ///
+    /// parent: 父插件弱引用，用于插件间协作（避免循环引用）
     /// config: 可选的配置参数
-    fn create(&self, parent: Option<Arc<dyn Plugin>>, config: Option<&Value>) -> Arc<dyn Plugin>;
+    fn create(&self, parent: Option<Weak<dyn Plugin>>, config: Option<&Value>) -> Arc<dyn Plugin>;
 }
 
 /// 插件父引用辅助结构

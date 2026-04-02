@@ -6,7 +6,7 @@ use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use super::plugin::{CompositePlugin, CompositeMetaConfig, SubPluginConfig};
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use indexmap::IndexMap;
 
 /// Composite 插件工厂配置
@@ -74,7 +74,7 @@ impl PluginFactory for CompositeFactory {
         }
     }
 
-    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+    fn create(&self, _parent: Option<Weak<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
         let mut plugins = IndexMap::new();
 
         // 通过工厂创建每个子插件

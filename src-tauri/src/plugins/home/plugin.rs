@@ -32,6 +32,7 @@ pub struct HomePlugin {
     work: Arc<dyn Plugin>,
     agent: Arc<dyn Plugin>,
     setting: Arc<dyn Plugin>,
+    explorer: Arc<dyn Plugin>,
     config: Arc<RwLock<GlobalConfig>>,
 }
 
@@ -40,15 +41,17 @@ impl HomePlugin {
         work: Arc<dyn Plugin>,
         agent: Arc<dyn Plugin>,
         setting: Arc<dyn Plugin>,
+        explorer: Arc<dyn Plugin>,
     ) -> Self {
-        Self::new_with_config(work, agent, setting, GlobalConfig::default())
+        Self::new_with_config(work, agent, setting, explorer, GlobalConfig::default())
     }
-    
+
     /// 带配置的构造函数（工厂使用）
     pub fn new_with_config(
         work: Arc<dyn Plugin>,
         agent: Arc<dyn Plugin>,
         setting: Arc<dyn Plugin>,
+        explorer: Arc<dyn Plugin>,
         config: GlobalConfig,
     ) -> Self {
         HomePlugin {
@@ -61,7 +64,7 @@ impl HomePlugin {
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "子插件路径，如 work/agent/setting"
+                            "description": "子插件路径，如 work/agent/setting/explorer"
                         }
                     }
                 })),
@@ -71,6 +74,7 @@ impl HomePlugin {
             work,
             agent,
             setting,
+            explorer,
             config: Arc::new(RwLock::new(config)),
         }
     }
@@ -131,6 +135,12 @@ impl HomePlugin {
             }
         }
 
+        if let Ok(InvokeStream::Single(chunk)) = self.explorer.invoke("config", json!({"action": "get"})) {
+            if chunk.error.is_none() && !chunk.data.is_null() {
+                configs.insert("explorer".to_string(), chunk.data);
+            }
+        }
+
         configs
     }
 
@@ -143,6 +153,7 @@ impl HomePlugin {
             "work" => Ok((Arc::clone(&self.work), sub_path)),
             "agent" => Ok((Arc::clone(&self.agent), sub_path)),
             "setting" => Ok((Arc::clone(&self.setting), sub_path)),
+            "explorer" => Ok((Arc::clone(&self.explorer), sub_path)),
             _ => Err(PluginError::NotFound(format!("未知的插件路径: {}", plugin_name))),
         }
     }
@@ -170,31 +181,31 @@ impl Plugin for HomePlugin {
                 "children": ["work", "agent", "setting"]
             })));
         }
-        
+
         // _workspace - 快捷获取工作区路径（路由到 work/workspace_path）
         if path == "_workspace" {
             return self.work.invoke("workspace_path", input);
         }
 
+        // 处理 /work/* 路径 - 路由到 work 插件
+        if path.starts_with("/work/") {
+            let sub_path = path.strip_prefix("/work/").unwrap_or_default();
+            eprintln!("[home] routing /work/{} to work plugin", sub_path);
+            return self.work.invoke(sub_path, input);
+        }
+
         // save_config - 保存配置到文件
         if path == "save_config" {
             let home_self = Arc::new(self.clone());
-            return Ok(InvokeStream::Single(tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    match home_self.save_config().await {
-                        Ok(()) => StreamChunk {
-                            data: json!({ "success": true }),
-                            done: true,
-                            error: None,
-                        },
-                        Err(e) => StreamChunk {
-                            data: json!({}),
-                            done: true,
-                            error: Some(e.to_string()),
-                        },
-                    }
-                })
-            })));
+            // 后台异步保存，不阻塞调用
+            tokio::spawn(async move {
+                let _ = home_self.save_config().await;
+            });
+            return Ok(InvokeStream::Single(StreamChunk {
+                data: json!({ "success": true }),
+                done: true,
+                error: None,
+            }));
         }
 
         if path.is_empty() {
@@ -217,6 +228,7 @@ impl Clone for HomePlugin {
             work: Arc::clone(&self.work),
             agent: Arc::clone(&self.agent),
             setting: Arc::clone(&self.setting),
+            explorer: Arc::clone(&self.explorer),
             config: Arc::clone(&self.config),
         }
     }

@@ -4,7 +4,7 @@ use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use super::plugin::ChatPlugin;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 pub struct ChatFactory;
 
@@ -40,9 +40,9 @@ impl PluginFactory for ChatFactory {
         }
     }
 
-    fn create(&self, parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+    fn create(&self, parent: Option<Weak<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
         // ChatPlugin 不需要配置，只需要父引用
-        let parent_weak = parent.as_ref().map(|p| Arc::downgrade(p));
+        let parent_weak = parent;
         Arc::new(ChatPlugin::new(parent_weak))
     }
 }

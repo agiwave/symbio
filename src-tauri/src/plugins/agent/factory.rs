@@ -4,7 +4,7 @@ use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
 use super::Agent;
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// Agent 工厂
 /// 
@@ -40,7 +40,7 @@ impl PluginFactory for AgentFactory {
         self.meta.clone()
     }
 
-    fn create(&self, _parent: Option<Arc<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
+    fn create(&self, _parent: Option<Weak<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
         // 创建 Agent（空实例，后续通过 add_instance 添加子插件）
         Arc::new(Agent::new())
     }

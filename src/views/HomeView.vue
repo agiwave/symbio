@@ -87,34 +87,41 @@
         </div>
         
         <div class="nav-items">
-          <button 
-            class="nav-btn" 
-            title="切换工作区" 
+          <button
+            class="nav-btn"
+            title="切换工作区"
             @click="showWorkspaceSwitcher = true"
           >
-            📂
+            🏠
           </button>
-          <button 
-            class="nav-btn" 
+          <button
+            class="nav-btn"
             :class="{ active: currentPage === 'workspace' }"
-            title="工作区" 
+            title="工作区"
             @click="currentPage = 'workspace'"
           >
             📄
           </button>
-          <button 
-            class="nav-btn" 
+          <button
+            class="nav-btn"
+            :class="{ active: currentPage === 'explorer' }"
+            title="资源浏览器"
+            @click="currentPage = 'explorer'"
+          >
+            📂
+          </button>
+          <button
+            class="nav-btn"
             :class="{ active: currentPage === 'agent' }"
-            title="AI 对话" 
+            title="AI 对话"
             @click="currentPage = 'agent'"
           >
             💬
           </button>
-
-          <button 
-            class="nav-btn" 
+          <button
+            class="nav-btn"
             :class="{ active: currentPage === 'settings' }"
-            title="设置" 
+            title="设置"
             @click="currentPage = 'settings'"
           >
             ⚙️
@@ -125,6 +132,7 @@
       <!-- 主内容区 -->
       <div class="content-area">
         <WorkspacePage v-if="currentPage === 'workspace'" />
+        <ExplorerPage v-else-if="currentPage === 'explorer'" />
         <AgentPage v-else-if="currentPage === 'agent'" />
         <SettingsPage v-else-if="currentPage === 'settings'" />
       </div>
@@ -167,6 +175,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import WorkspacePage from '../components/WorkspacePage.vue'
+import ExplorerPage from '../components/ExplorerPage.vue'
 import AgentPage from '../components/AgentPage.vue'
 import SettingsPage from '../components/SettingsPage.vue'
 import { getWorkspacePath, setWorkspacePath, getWorkConfig } from '../services/config'
@@ -175,7 +184,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 // 状态
 const workspaceReady = ref(false)
 const workspacePath = ref('')
-const currentPage = ref<'workspace' | 'agent' | 'settings'>('workspace')
+const currentPage = ref<'workspace' | 'explorer' | 'agent' | 'settings'>('workspace')
 const showWorkspaceSwitcher = ref(false)
 const recentWorkspaces = ref<string[]>([])
 const error = ref('')
@@ -185,13 +194,18 @@ async function loadWorkspaceState() {
   try {
     // 获取当前工作区路径
     const result = await getWorkspacePath()
-    workspacePath.value = result.workspace_path
+    const path = result.workspace_path || result.expanded_path
     
-    // 如果有工作区，直接进入
-    if (workspacePath.value) {
+    // 只有当路径有效且不是默认值时，才进入主界面
+    if (path && path !== '~/projects' && !path.endsWith('/projects')) {
+      workspacePath.value = path
       workspaceReady.value = true
+    } else {
+      // 否则显示启动页
+      workspacePath.value = ''
+      workspaceReady.value = false
     }
-    
+
     // 获取最近工作区列表
     const config = await getWorkConfig()
     if (config.recent_files && config.recent_files.length > 0) {
@@ -199,6 +213,8 @@ async function loadWorkspaceState() {
     }
   } catch (err) {
     console.error('加载工作区状态失败:', err)
+    // 出错时显示启动页
+    workspaceReady.value = false
   }
 }
 
@@ -210,9 +226,13 @@ async function browseWorkspace() {
       multiple: false,
       title: '选择工作区目录'
     })
-    
+
     if (selected) {
-      await openWorkspaceWithPath(selected as string)
+      // Tauri v2 dialog 返回 string 或 string[]
+      const path = typeof selected === 'string' ? selected : (Array.isArray(selected) ? selected[0] : null)
+      if (path) {
+        await openWorkspaceWithPath(path)
+      }
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '选择目录失败'
@@ -239,19 +259,30 @@ async function browseWorkspaceInModal() {
 // 打开工作区
 async function openWorkspaceWithPath(path: string) {
   error.value = ''
-  
+  console.log('[HomeView] openWorkspaceWithPath called with:', path)
+
   try {
+    console.log('[HomeView] Calling setWorkspacePath...')
     const result = await setWorkspacePath(path)
-    workspacePath.value = result.workspace_path
-    workspaceReady.value = true
+    console.log('[HomeView] setWorkspacePath result:', result)
     
+    workspacePath.value = result.workspace_path
+    console.log('[HomeView] workspacePath set to:', workspacePath.value)
+    
+    workspaceReady.value = true
+    console.log('[HomeView] workspaceReady set to:', workspaceReady.value)
+    console.log('[HomeView] Final state:', { workspaceReady: workspaceReady.value, workspacePath: workspacePath.value })
+
     // 添加到最近列表
     if (!recentWorkspaces.value.includes(path)) {
       recentWorkspaces.value.unshift(path)
       recentWorkspaces.value = recentWorkspaces.value.slice(0, 5)
     }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '打开工作区失败'
+    const errMsg = err instanceof Error ? err.message : String(err)
+    error.value = '打开工作区失败：' + errMsg
+    console.error('[HomeView] Error:', err)
+    console.error('[HomeView] Error message:', errMsg)
   }
 }
 

@@ -1,25 +1,25 @@
-//! Work 插件工厂
+//! Explorer 插件工厂
 
 use crate::core::traits::{Plugin, PluginFactory};
 use crate::core::types::PluginMeta;
-use super::WorkPlugin;
+use super::ExplorerPlugin;
 use std::sync::{Arc, Weak};
 use serde_json::Value;
 
-pub struct WorkFactory;
+pub struct ExplorerFactory;
 
-impl WorkFactory {
+impl ExplorerFactory {
     pub fn new() -> Self {
-        WorkFactory
+        ExplorerFactory
     }
 }
 
 #[async_trait::async_trait]
-impl PluginFactory for WorkFactory {
+impl PluginFactory for ExplorerFactory {
     fn meta(&self) -> PluginMeta {
         PluginMeta {
-            name: "work".to_string(),
-            description: "工作区管理插件".to_string(),
+            name: "explorer".to_string(),
+            description: "工作区资源浏览器".to_string(),
             version: "0.1.0".to_string(),
             input: None,
             output: None,
@@ -29,6 +29,6 @@ impl PluginFactory for WorkFactory {
 
     fn create(&self, parent: Option<Weak<dyn Plugin>>, _config: Option<&Value>) -> Arc<dyn Plugin> {
         let parent_weak = parent;
-        Arc::new(WorkPlugin::new(parent_weak))
+        Arc::new(ExplorerPlugin::new(parent_weak))
     }
 }
