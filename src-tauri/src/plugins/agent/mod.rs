@@ -283,7 +283,16 @@ impl Plugin for Agent {
                 })
             })));
         }
-        
+
+        // available_tools path: 递归收集所有子插件的可用工具
+        if path == "available_tools" {
+            let tools = self.available_tools();
+            return Ok(InvokeStream::single(json!({
+                "success": true,
+                "tools": tools
+            })));
+        }
+
         // 能力路由：@llm, @session 等
         if Self::is_capability_route(path) {
             let (capability, rest) = match path.find('/') {
@@ -315,5 +324,22 @@ impl Plugin for Agent {
 
     fn capabilities(&self) -> Vec<&'static str> {
         vec!["agent"]
+    }
+
+    fn available_tools(&self) -> Vec<PluginMeta> {
+        let instances = self.instances.read().unwrap();
+        let mut all_tools = Vec::new();
+
+        // 递归收集所有子插件的工具，并根据子插件实例名添加前缀
+        for (name, plugin) in instances.iter() {
+            let tools = plugin.available_tools();
+            for mut tool in tools {
+                // 根据子插件实例名添加前缀（如 tools/read_file, memory/store）
+                tool.name = format!("{}/{}", name, tool.name);
+                all_tools.push(tool);
+            }
+        }
+
+        all_tools
     }
 }

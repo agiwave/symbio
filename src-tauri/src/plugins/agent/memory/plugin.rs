@@ -175,13 +175,149 @@ impl Plugin for MemoryPlugin {
         Ok(self.meta.clone())
     }
 
+    fn available_tools(&self) -> Vec<PluginMeta> {
+        vec![
+            PluginMeta {
+                name: "store".to_string(),
+                description: "存储记忆（将键值对保存到记忆存储）".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "记忆的唯一标识键"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "记忆的内容"
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "记忆的分类（可选）"
+                        }
+                    },
+                    "required": ["key", "content"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "key": { "type": "string" },
+                        "message": { "type": "string" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            },
+            PluginMeta {
+                name: "recall".to_string(),
+                description: "回忆记忆（根据键名检索记忆）".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "要检索的记忆键"
+                        }
+                    },
+                    "required": ["key"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "entry": { "type": "object" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            },
+            PluginMeta {
+                name: "forget".to_string(),
+                description: "忘记记忆（删除指定的记忆）".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "要删除的记忆键"
+                        }
+                    },
+                    "required": ["key"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "key": { "type": "string" },
+                        "message": { "type": "string" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            },
+            PluginMeta {
+                name: "list".to_string(),
+                description: "列出所有记忆（显示所有已存储的记忆摘要）".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {}
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "memories": { "type": "array" },
+                        "count": { "type": "integer" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            },
+            PluginMeta {
+                name: "search".to_string(),
+                description: "搜索记忆（根据查询内容搜索记忆库）".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "搜索查询词"
+                        }
+                    },
+                    "required": ["query"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "results": { "type": "array" },
+                        "query": { "type": "string" },
+                        "count": { "type": "integer" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            },
+        ]
+    }
+
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
+        // 处理 available_tools path - 返回所有记忆工具的 meta（通用接口）
+        if path == "available_tools" {
+            let tools = self.available_tools();
+            return Ok(InvokeStream::single(json!({
+                "success": true,
+                "tools": tools
+            })));
+        }
+
         // 处理 config path
         if path == "config" {
             let action = input.get("action")
                 .and_then(|v| v.as_str())
                 .unwrap_or("get");
-            
+
             let config = Arc::clone(&self.config);
             let storage_dir = Arc::clone(&self.storage_dir);
             let parent = self.get_parent();
@@ -250,10 +386,18 @@ impl Plugin for MemoryPlugin {
             return Ok(InvokeStream::Single(result));
         }
 
-        let action = input.get("action")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| PluginError::ValidationError("缺少 action 参数".to_string()))?
-            .to_string();
+        // 工具调用路由：当 path 是工具名称时，直接执行对应工具
+        // 这样 LLM 调用 memory/store 时，path="store"，直接执行 store 操作
+        let action = if path.is_empty() {
+            // 空路径时，从 input 中获取 action（兼容旧格式）
+            input.get("action")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| PluginError::ValidationError("缺少 action 参数".to_string()))?
+                .to_string()
+        } else {
+            // 非空路径，path 就是工具名称
+            path.to_string()
+        };
 
         let storage_dir = Arc::clone(&self.storage_dir);
 
@@ -514,5 +658,41 @@ impl Plugin for MemoryPlugin {
         };
 
         Ok(InvokeStream::Stream(Box::pin(stream)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_memory_plugin_available_tools() {
+        // 创建 MemoryPlugin 实例
+        let memory_plugin = MemoryPlugin::new(None, MemoryConfig::default());
+
+        // 调用 available_tools 方法
+        let tools = memory_plugin.available_tools();
+
+        // 验证返回的工具列表不为空
+        assert!(!tools.is_empty(), "MemoryPlugin should return non-empty tools list");
+
+        // 打印所有工具名称
+        println!("MemoryPlugin available tools ({} total):", tools.len());
+        for tool in &tools {
+            println!("  - {} ({})", tool.name, tool.description);
+        }
+
+        // 验证包含预期的工具
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        
+        // 验证所有记忆工具存在（子插件返回原始名称，由父插件添加前缀）
+        assert!(tool_names.contains(&"store"), "Should have store tool");
+        assert!(tool_names.contains(&"recall"), "Should have recall tool");
+        assert!(tool_names.contains(&"forget"), "Should have forget tool");
+        assert!(tool_names.contains(&"list"), "Should have list tool");
+        assert!(tool_names.contains(&"search"), "Should have search tool");
+
+        // 验证工具数量为 5
+        assert_eq!(tools.len(), 5, "MemoryPlugin should have exactly 5 tools");
     }
 }

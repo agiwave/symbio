@@ -35,9 +35,18 @@ pub trait Plugin: Send + Sync {
     }
 
     /// 获取插件能力列表
-    /// 
+    ///
     /// 返回插件支持的能力标识数组，用于能力路由
     fn capabilities(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+
+    /// 获取可用工具列表（分形递归）
+    ///
+    /// 返回插件提供的所有可用工具的 PluginMeta。
+    /// - 容器插件（如 Agent）：递归收集所有子插件的工具
+    /// - 叶子插件（如 Tools）：返回自己提供的工具的 meta
+    fn available_tools(&self) -> Vec<PluginMeta> {
         Vec::new()
     }
 }

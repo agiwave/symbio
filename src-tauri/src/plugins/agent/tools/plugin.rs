@@ -455,6 +455,15 @@ impl Plugin for ToolsPlugin {
             }));
         }
 
+        // available_tools path - 返回所有工具的 meta（通用接口）
+        if path == "available_tools" {
+            let tools = self.available_tools();
+            return Ok(InvokeStream::single(json!({
+                "success": true,
+                "tools": tools
+            })));
+        }
+
         // _search path - 搜索工具
         if path == "_search" {
             let keywords: Vec<String> = input.get("keywords")
@@ -529,10 +538,51 @@ impl Plugin for ToolsPlugin {
 
         Err(PluginError::NotFound(format!("路径不存在: {}", path)))
     }
+
+    fn available_tools(&self) -> Vec<PluginMeta> {
+        self.tools.iter().filter_map(|(_name, tool)| {
+            // 获取工具的 meta，如果失败则跳过
+            tool.meta("").ok()
+        }).collect()
+    }
 }
 
 /// 获取所有工具的 OpenAI 格式定义（用于外部调用）
 pub fn get_all_tools_openai_format() -> Vec<Value> {
     let plugin = ToolsPlugin::default();
     plugin.get_all_tools_openai_format()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tools_plugin_available_tools() {
+        // 创建 ToolsPlugin 实例
+        let tools_plugin = ToolsPlugin::new(None, ToolsConfig::default());
+
+        // 调用 available_tools 方法
+        let tools = tools_plugin.available_tools();
+
+        // 验证返回的工具列表不为空
+        assert!(!tools.is_empty(), "ToolsPlugin should return non-empty tools list");
+
+        // 打印所有工具名称
+        println!("ToolsPlugin available tools ({} total):", tools.len());
+        for tool in &tools {
+            println!("  - {}", tool.name);
+        }
+
+        // 验证包含预期的工具
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        
+        // 验证核心工具存在（子插件返回原始名称，由父插件添加前缀）
+        assert!(tool_names.contains(&"read_file"), "Should have read_file tool");
+        assert!(tool_names.contains(&"write_file"), "Should have write_file tool");
+        assert!(tool_names.contains(&"shell"), "Should have shell tool");
+        assert!(tool_names.contains(&"web_search"), "Should have web_search tool");
+        assert!(tool_names.contains(&"glob_search"), "Should have glob_search tool");
+        assert!(tool_names.contains(&"content_search"), "Should have content_search tool");
+    }
 }

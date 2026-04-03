@@ -213,6 +213,18 @@ impl Plugin for HomePlugin {
         let (plugin, sub_path) = self.route(path)?;
         plugin.invoke(&sub_path, input)
     }
+
+    fn available_tools(&self) -> Vec<PluginMeta> {
+        let mut all_tools = Vec::new();
+
+        // 递归收集所有子插件的工具
+        for plugin in [&self.work, &self.note, &self.agent, &self.setting, &self.explorer] {
+            let tools = plugin.available_tools();
+            all_tools.extend(tools);
+        }
+
+        all_tools
+    }
 }
 
 impl Clone for HomePlugin {

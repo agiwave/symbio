@@ -278,27 +278,26 @@ impl OpenAiPlugin {
             eprintln!("[openai] Processing {} tool calls", tool_calls.len());
 
             for (id, name, args) in tool_calls {
-                // 解析 plugin::tool 格式
-                let (plugin, tool_name) = if let Some(pos) = name.find("::") {
-                    (&name[..pos], &name[pos+2..])
-                } else {
-                    ("tools", name.as_str())
-                };
+                eprintln!("[openai] Executing tool: {} with args: {}", name, args);
 
-                eprintln!("[openai] Executing tool: {}::{}", plugin, tool_name);
-
-                // 通过父插件调用工具
+                // 通过父插件调用工具，直接将工具名称作为 path
                 let result = match &parent {
                     Some(p) => {
-                        // 调用 tools 插件
-                        let tool_input = json!({
-                            "tool": tool_name,
-                            "params": args
-                        });
-                        
-                        match p.invoke(plugin, tool_input) {
+                        // 直接将工具名称作为 path 调用，由父插件的路由机制处理
+                        match p.invoke(&name, args.clone()) {
                             Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
-                                chunk.data.to_string()
+                                // 优先提取 content 字段，否则返回整个 data
+                                if let Some(content) = chunk.data.get("content").and_then(|c| c.as_str()) {
+                                    content.to_string()
+                                } else if let Some(success) = chunk.data.get("success").and_then(|s| s.as_bool()) {
+                                    if success {
+                                        chunk.data.to_string()
+                                    } else {
+                                        format!("Error: {}", chunk.data.get("error").and_then(|e| e.as_str()).unwrap_or("unknown error"))
+                                    }
+                                } else {
+                                    chunk.data.to_string()
+                                }
                             }
                             Ok(InvokeStream::Single(chunk)) => {
                                 format!("Error: {}", chunk.error.unwrap_or_default())

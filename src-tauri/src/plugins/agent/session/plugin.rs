@@ -463,20 +463,30 @@ impl SessionPlugin {
         }
     }
 
-    /// 从 tools 插件获取工具列表
+    /// 从 agent 插件获取所有可用工具列表（包括 tools、memory 等所有子插件）
     async fn fetch_tools(&self) -> Vec<Value> {
         if let Some(parent) = self.get_parent() {
-            // 调用 tools 插件的 _list 路径获取工具列表
-            match parent.invoke("tools/_list", json!({})) {
+            // 调用父插件（agent）的 available_tools 路径获取所有工具
+            match parent.invoke("available_tools", json!({})) {
                 Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
                     // 解析返回的工具列表
                     if let Some(tools) = chunk.data.get("tools").and_then(|t| t.as_array()) {
-                        eprintln!("[session] fetched {} tools from tools plugin", tools.len());
-                        return tools.clone();
+                        eprintln!("[session] fetched {} tools from parent available_tools", tools.len());
+                        // 转换为 OpenAI 格式
+                        return tools.iter().map(|tool| {
+                            json!({
+                                "type": "function",
+                                "function": {
+                                    "name": tool.get("name").and_then(|n| n.as_str()).unwrap_or(""),
+                                    "description": tool.get("description").and_then(|d| d.as_str()).unwrap_or(""),
+                                    "parameters": tool.get("input_schema").cloned().unwrap_or(json!({}))
+                                }
+                            })
+                        }).collect();
                     }
                 }
                 Ok(InvokeStream::Single(chunk)) => {
-                    eprintln!("[session] tools/_list error: {:?}", chunk.error);
+                    eprintln!("[session] available_tools error: {:?}", chunk.error);
                 }
                 Err(e) => {
                     eprintln!("[session] failed to fetch tools: {:?}", e);
