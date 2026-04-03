@@ -6,3 +6,4 @@ mod types;
 mod token;
 mod plugin;
 pub mod factory;
+pub mod stream;

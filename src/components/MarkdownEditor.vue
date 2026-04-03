@@ -375,14 +375,18 @@ function handleDragMouseDown(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
   
+  console.log('[DragMouseDown] triggered, activePos:', blockHandle.activePos)
+  
   const sourcePos = blockHandle.activePos
   if (sourcePos === undefined || sourcePos === null) {
+    console.log('[DragMouseDown] No activePos, aborting')
     return
   }
   
   isDragging.value = true
-  // 保持工具条显示，不关闭
   dragSourcePos.value = sourcePos
+  
+  console.log('[DragMouseDown] Starting drag, sourcePos:', sourcePos)
   
   // 添加全局 mouse 事件监听
   document.addEventListener('mousemove', handleDragMouseMove)
@@ -390,13 +394,19 @@ function handleDragMouseDown(e: MouseEvent) {
 }
 
 function handleDragMouseMove(e: MouseEvent) {
-  if (!isDragging.value || !editor.value || !editorRef.value) return
+  console.log('[DragMouseMove] isDragging:', isDragging.value, 'editor:', !!editor.value, 'editorRef:', !!editorRef.value)
+  
+  if (!isDragging.value || !editor.value || !editorRef.value) {
+    console.log('[DragMouseMove] Early return - invalid state')
+    return
+  }
   
   try {
     const view = editor.value.ctx.get(editorViewCtx)
     
     // 使用 ProseMirror 的 posAtCoords 获取位置
     const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
+    console.log('[DragMouseMove] posAtCoords:', posAtCoords, 'clientX:', e.clientX, 'clientY:', e.clientY)
     
     if (posAtCoords) {
       const $pos = view.state.doc.resolve(posAtCoords.pos)
@@ -414,6 +424,8 @@ function handleDragMouseMove(e: MouseEvent) {
       const blockPos = $pos.before(depth)
       const dom = view.nodeDOM(blockPos)
       
+      console.log('[DragMouseMove] blockPos:', blockPos, 'dom:', dom)
+      
       if (dom && dom instanceof HTMLElement) {
         const domRect = dom.getBoundingClientRect()
         
@@ -421,21 +433,26 @@ function handleDragMouseMove(e: MouseEvent) {
         dropIndicator.top = domRect.bottom - 2
         dropIndicator.left = domRect.left
         dropIndicator.width = domRect.width
+        
+        console.log('[DragMouseMove] dropIndicator set:', dropIndicator)
       }
     } else {
       dropIndicator.visible = false
     }
   } catch (err) {
-    // 忽略错误
+    console.error('[DragMouseMove] Error:', err)
   }
 }
 
 function handleDragMouseUp(e: MouseEvent) {
+  console.log('[DragMouseUp] triggered')
+  
   // 移除事件监听
   document.removeEventListener('mousemove', handleDragMouseMove)
   document.removeEventListener('mouseup', handleDragMouseUp)
   
   if (!isDragging.value || dragSourcePos.value === null || dragSourcePos.value === undefined || !editor.value) {
+    console.log('[DragMouseUp] Early return - invalid state')
     isDragging.value = false
     dragSourcePos.value = null
     dropIndicator.visible = false
@@ -448,6 +465,7 @@ function handleDragMouseUp(e: MouseEvent) {
     
     // 获取目标位置
     const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
+    console.log('[DragMouseUp] posAtCoords:', posAtCoords)
     
     if (!posAtCoords) {
       isDragging.value = false
@@ -467,8 +485,11 @@ function handleDragMouseUp(e: MouseEvent) {
     }
     const targetPos = $pos.before(depth)
     
+    console.log('[DragMouseUp] sourcePos:', dragSourcePos.value, 'targetPos:', targetPos)
+    
     // 不允许拖到自己的位置
     if (targetPos === dragSourcePos.value) {
+      console.log('[DragMouseUp] Same position, skipping')
       isDragging.value = false
       dragSourcePos.value = null
       dropIndicator.visible = false
@@ -478,6 +499,8 @@ function handleDragMouseUp(e: MouseEvent) {
     // 执行移动
     const sourcePos = dragSourcePos.value
     const sourceNode = state.doc.nodeAt(sourcePos)
+    
+    console.log('[DragMouseUp] sourceNode:', sourceNode?.type.name, sourceNode?.nodeSize)
     
     if (!sourceNode) {
       isDragging.value = false
@@ -492,16 +515,19 @@ function handleDragMouseUp(e: MouseEvent) {
     // 先删除源节点
     tr = tr.delete(sourcePos, sourcePos + sourceNode.nodeSize)
     
-    // 调整目标位置（如果源在目标前面，删除后位置会改变）
+    // 调整目标位置
     const adjustedTarget = sourcePos < targetPos ? targetPos - sourceNode.nodeSize : targetPos
+    
+    console.log('[DragMouseUp] adjustedTarget:', adjustedTarget)
     
     // 插入到新位置
     tr = tr.insert(adjustedTarget, sourceNode)
     
     view.dispatch(tr)
+    console.log('[DragMouseUp] Move completed')
     
   } catch (err) {
-    console.error('Drag move error:', err)
+    console.error('[DragMouseUp] Error:', err)
   }
   
   isDragging.value = false

@@ -2,6 +2,7 @@
 
 use super::types::*;
 use super::token::*;
+use super::stream::ToolCallAccumulator;
 use crate::core::traits::{Plugin, CAPABILITY_LLM, CAPABILITY_SESSION};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use async_trait::async_trait;
@@ -711,7 +712,7 @@ impl OpenAiPlugin {
 
                 // 处理流式响应
                 let mut stream_content = String::new();
-                let mut tool_calls: Vec<(String, String, String)> = Vec::new();
+                let mut tool_call_accumulator = ToolCallAccumulator::new();
                 let mut stream = response.bytes_stream();
 
                 while let Some(chunk_result) = stream.next().await {
@@ -745,28 +746,16 @@ impl OpenAiPlugin {
                                                 stream_content.push_str(content);
                                             }
 
-                                            // 提取 tool_calls
+                                            // 使用 ToolCallAccumulator 处理 tool_calls
                                             if let Some(tc_arr) = delta.get("tool_calls").and_then(|t| t.as_array()) {
                                                 for tc in tc_arr {
-                                                    if let (Some(id), Some(idx), Some(fn_obj)) = (
-                                                        tc.get("id").and_then(|v| v.as_str()),
-                                                        tc.get("index").and_then(|v| v.as_u64()),
-                                                        tc.get("function")
-                                                    ) {
-                                                        let idx = idx as usize;
-                                                        if tool_calls.len() <= idx {
-                                                            tool_calls.push((id.to_string(), String::new(), String::new()));
-                                                        }
-                                                        if let Some(name) = fn_obj.get("name").and_then(|v| v.as_str()) {
-                                                            if tool_calls[idx].1.is_empty() {
-                                                                tool_calls[idx].1 = name.to_string();
-                                                            }
-                                                        }
-                                                        if let Some(args) = fn_obj.get("arguments").and_then(|v| v.as_str()) {
-                                                            // 流式累积 arguments 字符串
-                                                            tool_calls[idx].2.push_str(args);
-                                                        }
-                                                    }
+                                                    let index = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                                                    let id = tc.get("id").and_then(|i| i.as_str());
+                                                    let func = tc.get("function");
+                                                    let name = func.and_then(|f| f.get("name")).and_then(|n| n.as_str());
+                                                    let args = func.and_then(|f| f.get("arguments")).and_then(|a| a.as_str());
+
+                                                    tool_call_accumulator.process_delta(index, id, name, args);
                                                 }
                                             }
                                         }
@@ -776,6 +765,9 @@ impl OpenAiPlugin {
                         }
                     }
                 }
+
+                // 获取完成的 tool_calls
+                let tool_calls = tool_call_accumulator.get_completed();
 
                 // 构建 assistant 消息
                 let assistant_msg = NativeMessage {
@@ -788,7 +780,7 @@ impl OpenAiPlugin {
                             kind: Some("function".into()),
                             function: NativeFunctionCall {
                                 name: name.clone(),
-                                arguments: args.clone(),
+                                arguments: serde_json::to_string(args).unwrap_or_default(),
                             },
                         }).collect())
                     },
@@ -821,17 +813,7 @@ impl OpenAiPlugin {
                 };
 
                 // 执行每个工具调用
-                for (id, name, args_str) in tool_calls {
-                    // 解析 arguments 字符串为 Value 对象
-                    let args: Value = if args_str.is_empty() {
-                        json!({})
-                    } else {
-                        serde_json::from_str(&args_str).unwrap_or_else(|e| {
-                            eprintln!("[openai] Failed to parse tool args: {}, args='{}', using empty object", e, args_str);
-                            json!({})
-                        })
-                    };
-
+                for (id, name, args) in tool_calls {
                     eprintln!("[openai] Executing tool: {} with args: {}", name, args);
 
                     // 通过父插件调用工具，直接将工具名称作为 path
