@@ -570,112 +570,205 @@ impl OpenAiPlugin {
         })
     }
 
-    /// 流式处理聊天请求
+    /// 流式处理聊天请求（支持工具调用）
     async fn handle_chat_stream(&self, input: &Value) -> PluginResult<InvokeStream> {
         let message = input.get("message")
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 message 参数".to_string()))?;
 
-        let _session_id = input.get("session_id")
+        let session_id = input.get("session_id")
             .and_then(|v| v.as_str())
-            .unwrap_or("default");
+            .unwrap_or("default")
+            .to_string();
 
         let config = self.config.read().await.clone();
-        let _parent = self.get_parent();
+        let parent = self.get_parent();
         let api_key = config.api_key.clone().unwrap_or_default();
         let api_url = self.api_url();
 
-        // 获取系统提示
-        let system_prompt = config.system_prompt.clone()
-            .unwrap_or_else(|| "You are a helpful AI assistant.".into());
+        // 通过 @session 能力路由获取上下文（包含 system_prompt, tools, history）
+        let mut system_prompt = config.system_prompt.clone().unwrap_or_else(default_system_prompt);
+        let mut tools: Vec<NativeToolSpec> = Vec::new();
+        let mut context_messages: Vec<NativeMessage> = Vec::new();
 
-        // 构建消息
-        let messages = vec![
-            json!({
-                "role": "system",
-                "content": system_prompt
-            }),
-            json!({
-                "role": "user",
-                "content": message
-            })
+        if let Some(p) = &parent {
+            let session_input = json!({
+                "action": "get_context",
+                "session_id": session_id,
+                "history": true
+            });
+
+            if let Ok(stream) = p.invoke(&format!("@{}", CAPABILITY_SESSION), session_input) {
+                if let InvokeStream::Single(chunk) = stream {
+                    if chunk.error.is_none() {
+                        if let Some(sys) = chunk.data.get("system_prompt").and_then(|v| v.as_str()) {
+                            if !sys.is_empty() {
+                                system_prompt = sys.to_string();
+                            }
+                        }
+                        if let Some(tools_arr) = chunk.data.get("tools").and_then(|v| v.as_array()) {
+                            for tool in tools_arr {
+                                if let Ok(spec) = serde_json::from_value(tool.clone()) {
+                                    tools.push(spec);
+                                }
+                            }
+                        }
+                        if let Some(history) = chunk.data.get("history").and_then(|v| v.as_array()) {
+                            for msg in history {
+                                if let (Some(role), Some(content)) = (
+                                    msg.get("role").and_then(|r| r.as_str()),
+                                    msg.get("content").and_then(|c| c.as_str())
+                                ) {
+                                    context_messages.push(NativeMessage {
+                                        role: role.to_string(),
+                                        content: Some(content.to_string()),
+                                        tool_call_id: msg.get("tool_call_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        tool_calls: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 构建消息：system + context + current
+        let mut messages: Vec<NativeMessage> = vec![
+            NativeMessage {
+                role: "system".into(),
+                content: Some(system_prompt),
+                tool_call_id: None,
+                tool_calls: None,
+            }
         ];
-
-        // 构建请求 - 使用流式 API
-        let mut request = json!({
-            "model": config.model,
-            "messages": messages,
-            "temperature": config.temperature,
-            "stream": true,  // 启用流式
+        messages.extend(context_messages);
+        let history_len = messages.len();
+        messages.push(NativeMessage {
+            role: "user".into(),
+            content: Some(message.to_string()),
+            tool_call_id: None,
+            tool_calls: None,
         });
-
-        if let Some(max_tokens) = config.max_tokens {
-            request["max_tokens"] = json!(max_tokens);
-        }
-
-        // 发送流式请求
-        let response = reqwest::Client::new()
-            .post(&api_url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(120))
-            .send()
-            .await
-            .map_err(|e| PluginError::InternalError(format!("请求失败: {}", e)))?;
-
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Ok(InvokeStream::single(json!({
-                "content": "",
-                "error": format!("API 错误: {}", error)
-            })));
-        }
 
         // 创建流式返回
         let stream = async_stream::stream! {
             use futures::StreamExt;
-            let mut full_content = String::new();
-            let mut stream = response.bytes_stream();
-            
-            while let Some(chunk_result) = stream.next().await {
-                match chunk_result {
-                    Ok(chunk_bytes) => {
-                        let chunk_text = String::from_utf8_lossy(&chunk_bytes);
-                        
-                        // 解析 SSE 格式
-                        for line in chunk_text.lines() {
-                            if line.starts_with("data: ") {
-                                let data = &line[6..];
-                                if data == "[DONE]" {
-                                    // 流结束，返回最终结果
-                                    yield StreamChunk {
-                                        data: json!({
-                                            "content": full_content,
-                                            "done": true
-                                        }),
-                                        done: true,
-                                        error: None,
-                                    };
-                                    return;
-                                }
-                                
-                                if let Ok(chunk_json) = serde_json::from_str::<Value>(data) {
-                                    if let Some(choices) = chunk_json.get("choices") {
-                                        if let Some(choice) = choices.get(0) {
-                                            if let Some(delta) = choice.get("delta") {
-                                                if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                                                    full_content.push_str(content);
-                                                    
-                                                    // 实时返回累积内容
-                                                    yield StreamChunk {
-                                                        data: json!({
-                                                            "content": full_content.clone(),
-                                                            "done": false
-                                                        }),
-                                                        done: false,
-                                                        error: None,
-                                                    };
+
+            // Agent loop - 工具调用循环
+            let max_iterations = 255;
+            let mut final_content = String::new();
+
+            for iteration in 0..max_iterations {
+                // 构建请求 - 使用流式 API
+                let mut request = json!({
+                    "model": config.model,
+                    "messages": &messages,
+                    "temperature": config.temperature,
+                    "stream": true,
+                });
+
+                if let Some(max_tokens) = config.max_tokens {
+                    request["max_tokens"] = json!(max_tokens);
+                }
+
+                // 添加工具定义（如果有）
+                if !tools.is_empty() {
+                    request["tools"] = json!(tools);
+                    request["tool_choice"] = json!("auto");
+                }
+
+                // 发送流式请求
+                let response = match reqwest::Client::new()
+                    .post(&api_url)
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .header("Content-Type", "application/json")
+                    .json(&request)
+                    .timeout(std::time::Duration::from_secs(120))
+                    .send()
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        yield StreamChunk {
+                            data: json!({}),
+                            done: true,
+                            error: Some(format!("请求失败: {}", e)),
+                        };
+                        return;
+                    }
+                };
+
+                if !response.status().is_success() {
+                    let error = response.text().await.unwrap_or_default();
+                    yield StreamChunk {
+                        data: json!({}),
+                        done: true,
+                        error: Some(format!("API 错误: {}", error)),
+                    };
+                    return;
+                }
+
+                // 处理流式响应
+                let mut stream_content = String::new();
+                let mut tool_calls: Vec<(String, String, Value)> = Vec::new();
+                let mut stream = response.bytes_stream();
+
+                while let Some(chunk_result) = stream.next().await {
+                    let chunk_bytes = match chunk_result {
+                        Ok(b) => b,
+                        Err(e) => {
+                            yield StreamChunk {
+                                data: json!({}),
+                                done: true,
+                                error: Some(format!("读取流失败: {}", e)),
+                            };
+                            return;
+                        }
+                    };
+
+                    let chunk_text = String::from_utf8_lossy(&chunk_bytes);
+
+                    for line in chunk_text.lines() {
+                        if line.starts_with("data: ") {
+                            let data = &line[6..];
+                            if data == "[DONE]" {
+                                continue;
+                            }
+
+                            if let Ok(chunk_json) = serde_json::from_str::<Value>(data) {
+                                if let Some(choices) = chunk_json.get("choices") {
+                                    if let Some(choice) = choices.get(0) {
+                                        if let Some(delta) = choice.get("delta") {
+                                            // 提取内容
+                                            if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                                                stream_content.push_str(content);
+                                            }
+
+                                            // 提取 tool_calls
+                                            if let Some(tc_arr) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+                                                for tc in tc_arr {
+                                                    if let (Some(id), Some(idx), Some(fn_obj)) = (
+                                                        tc.get("id").and_then(|v| v.as_str()),
+                                                        tc.get("index").and_then(|v| v.as_u64()),
+                                                        tc.get("function")
+                                                    ) {
+                                                        let idx = idx as usize;
+                                                        if tool_calls.len() <= idx {
+                                                            tool_calls.push((id.to_string(), String::new(), json!({})));
+                                                        }
+                                                        if let Some(name) = fn_obj.get("name").and_then(|v| v.as_str()) {
+                                                            if tool_calls[idx].1.is_empty() {
+                                                                tool_calls[idx].1 = name.to_string();
+                                                            }
+                                                        }
+                                                        if let Some(args) = fn_obj.get("arguments").and_then(|v| v.as_str()) {
+                                                            // 流式累积 arguments
+                                                            let current_args = tool_calls[idx].2.as_str().unwrap_or("").to_string();
+                                                            let new_args = format!("{}{}", current_args, args);
+                                                            tool_calls[idx].2 = json!(new_args);
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -684,16 +777,175 @@ impl OpenAiPlugin {
                             }
                         }
                     }
-                    Err(e) => {
-                        yield StreamChunk {
-                            data: json!({}),
-                            done: true,
-                            error: Some(format!("读取流失败: {}", e)),
-                        };
-                        return;
-                    }
+                }
+
+                // 构建 assistant 消息
+                let assistant_msg = NativeMessage {
+                    role: "assistant".into(),
+                    content: if stream_content.is_empty() { None } else { Some(stream_content.clone()) },
+                    tool_call_id: None,
+                    tool_calls: if tool_calls.is_empty() { None } else {
+                        Some(tool_calls.iter().map(|(id, name, args)| NativeToolCall {
+                            id: Some(id.clone()),
+                            kind: Some("function".into()),
+                            function: NativeFunctionCall {
+                                name: name.clone(),
+                                arguments: args.as_str().unwrap_or("").to_string(),
+                            },
+                        }).collect())
+                    },
+                };
+                messages.push(assistant_msg);
+
+                // 没有工具调用 - 返回最终结果
+                if tool_calls.is_empty() {
+                    final_content = stream_content;
+                    break;
+                }
+
+                // 有工具调用 - 先返回当前内容，然后执行工具
+                yield StreamChunk {
+                    data: json!({
+                        "content": stream_content,
+                        "tool_calls": tool_calls.iter().map(|(id, name, args)| {
+                            json!({
+                                "id": id,
+                                "function": {
+                                    "name": name,
+                                    "arguments": args
+                                }
+                            })
+                        }).collect::<Vec<_>>(),
+                        "done": false
+                    }),
+                    done: false,
+                    error: None,
+                };
+
+                // 执行每个工具调用
+                for (id, name, args) in tool_calls {
+                    // 解析 plugin/tool 格式
+                    let (plugin, tool_name) = if let Some(pos) = name.find('/') {
+                        (&name[..pos], &name[pos+1..])
+                    } else {
+                        ("tools", name.as_str())
+                    };
+
+                    eprintln!("[openai] Executing tool: {}/{}", plugin, tool_name);
+
+                    // 通过父插件调用工具
+                    let result = match &parent {
+                        Some(p) => {
+                            let tool_path = format!("{}/{}", plugin, tool_name);
+                            match p.invoke(&tool_path, args.clone()) {
+                                Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
+                                    if let Some(content) = chunk.data.get("content").and_then(|c| c.as_str()) {
+                                        content.to_string()
+                                    } else if let Some(success) = chunk.data.get("success").and_then(|s| s.as_bool()) {
+                                        if success {
+                                            chunk.data.to_string()
+                                        } else {
+                                            format!("Error: {}", chunk.data.get("error").and_then(|e| e.as_str()).unwrap_or("unknown error"))
+                                        }
+                                    } else {
+                                        chunk.data.to_string()
+                                    }
+                                }
+                                Ok(InvokeStream::Single(chunk)) => {
+                                    format!("Error: {}", chunk.error.unwrap_or_default())
+                                }
+                                Ok(InvokeStream::Stream(mut s)) => {
+                                    let mut result = String::new();
+                                    while let Some(chunk) = s.next().await {
+                                        if chunk.error.is_some() {
+                                            result = format!("Error: {}", chunk.error.unwrap_or_default());
+                                            break;
+                                        }
+                                        if let Some(text) = chunk.data.get("content").and_then(|c| c.as_str()) {
+                                            result.push_str(text);
+                                        } else if !chunk.data.is_null() {
+                                            result.push_str(&chunk.data.to_string());
+                                        }
+                                    }
+                                    result
+                                }
+                                Err(e) => format!("Error: {}", e),
+                            }
+                        }
+                        None => "Error: No parent plugin available".to_string(),
+                    };
+
+                    eprintln!("[openai] Tool result: {}", result.chars().take(100).collect::<String>());
+
+                    // 返回工具结果
+                    yield StreamChunk {
+                        data: json!({
+                            "tool_result": {
+                                "id": id,
+                                "name": name,
+                                "result": result
+                            },
+                            "done": false
+                        }),
+                        done: false,
+                        error: None,
+                    };
+
+                    // 添加工具结果到消息历史
+                    messages.push(NativeMessage {
+                        role: "tool".into(),
+                        content: Some(result),
+                        tool_call_id: Some(id),
+                        tool_calls: None,
+                    });
                 }
             }
+
+            // 保存消息到 session
+            if let Some(ref p) = parent {
+                let new_messages: Vec<Value> = messages[history_len..]
+                    .iter()
+                    .filter_map(|m| {
+                        let role = m.role.as_str();
+                        if role == "assistant" && m.content.is_none() && m.tool_calls.is_none() {
+                            return None;
+                        }
+
+                        let mut msg = json!({
+                            "role": role,
+                            "content": m.content.clone().unwrap_or_default()
+                        });
+
+                        if let Some(ref tc) = m.tool_calls {
+                            msg["tool_calls"] = json!(tc);
+                        }
+                        if let Some(ref id) = m.tool_call_id {
+                            msg["tool_call_id"] = json!(id);
+                        }
+
+                        Some(msg)
+                    })
+                    .collect();
+
+                if !new_messages.is_empty() {
+                    let append_input = json!({
+                        "action": "append",
+                        "session_id": session_id,
+                        "messages": new_messages
+                    });
+                    let _ = p.invoke(&format!("@{}", CAPABILITY_SESSION), append_input);
+                }
+            }
+
+            // 返回最终结果
+            yield StreamChunk {
+                data: json!({
+                    "content": final_content,
+                    "done": true
+                }),
+                done: true,
+                error: None,
+            };
         };
 
         Ok(InvokeStream::Stream(Box::pin(stream)))
