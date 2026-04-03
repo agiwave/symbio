@@ -95,66 +95,36 @@
         <h3>AI 对话</h3>
         <button class="close-btn" @click="chatVisible = false" title="隐藏">×</button>
       </div>
-      <div class="chat-history" ref="historyRef">
-        <div v-if="messages.length === 0" class="empty-chat">
-          <p>开始与 AI 对话</p>
-          <p class="hint">输入问题或粘贴代码进行分析</p>
-        </div>
-        <div
-          v-for="(msg, index) in messages"
-          :key="index"
-          class="message"
-          :class="msg.role"
-        >
-          <div class="message-avatar">
-            {{ msg.role === 'user' ? '👤' : '🤖' }}
-          </div>
-          <div class="message-content">
-            <div class="message-text">{{ msg.content }}</div>
-          </div>
-        </div>
-        <div v-if="isLoading" class="message assistant loading">
-          <div class="message-avatar">🤖</div>
-          <div class="message-content">
-            <div class="typing-indicator">
-              <span></span><span></span><span></span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="chat-input">
-        <textarea
-          v-model="inputText"
-          placeholder="输入消息... (Enter 发送)"
-          @keydown.enter.exact.prevent="sendMessage"
-          :disabled="isLoading"
-        ></textarea>
-        <button @click="sendMessage" :disabled="!inputText.trim() || isLoading">
-          发送
-        </button>
+      <div class="chat-content">
+        <AIChatPanel
+          :session-id="sessionId"
+          :messages="chatMessages"
+          :on-update-messages="updateChatMessages"
+        />
       </div>
     </aside>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useExplorerStore, type FileItem } from '../stores/explorer'
 import FileTreeNode from './FileTreeNode.vue'
-
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-}
+import AIChatPanel from './AIChatPanel.vue'
+import { createSessionId, type SessionMessage } from '../services/session'
 
 const store = useExplorerStore()
 
 // UI 状态
 const chatVisible = ref(false)
-const messages = ref<Message[]>([])
-const inputText = ref('')
-const isLoading = ref(false)
-const historyRef = ref<HTMLElement | null>(null)
+
+// AI 对话状态
+const sessionId = ref(createSessionId())
+const chatMessages = ref<SessionMessage[]>([])
+
+function updateChatMessages(messages: SessionMessage[]) {
+  chatMessages.value = messages
+}
 
 // 文件树状态
 const fileTree = computed(() => store.fileTree)
@@ -246,41 +216,6 @@ function getFileIcon(name: string): string {
   }
   return icons[ext || ''] || '📄'
 }
-
-// AI 对话
-async function sendMessage() {
-  const text = inputText.value.trim()
-  if (!text || isLoading.value) return
-
-  messages.value.push({ role: 'user', content: text })
-  inputText.value = ''
-  isLoading.value = true
-
-  await nextTick()
-  scrollToBottom()
-
-  // 模拟 AI 响应
-  setTimeout(() => {
-    messages.value.push({
-      role: 'assistant',
-      content: '这是一个模拟的 AI 响应。实际使用时需要接入 AI API。'
-    })
-    isLoading.value = false
-    scrollToBottom()
-  }, 1000)
-}
-
-function scrollToBottom() {
-  if (historyRef.value) {
-    historyRef.value.scrollTop = historyRef.value.scrollHeight
-  }
-}
-
-watch(chatVisible, (visible) => {
-  if (visible) {
-    nextTick(scrollToBottom)
-  }
-})
 </script>
 
 <style scoped>
@@ -585,111 +520,8 @@ watch(chatVisible, (visible) => {
   padding: 1rem;
 }
 
-.empty-chat {
-  text-align: center;
-  color: var(--color-text-muted);
-  padding: 2rem;
-}
-
-.empty-chat .hint {
-  font-size: 0.75rem;
-  opacity: 0.7;
-  margin-top: 0.5rem;
-}
-
-.message {
-  display: flex;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-.message.user {
-  flex-direction: row-reverse;
-}
-
-.message-avatar {
-  font-size: 1rem;
-  flex-shrink: 0;
-}
-
-.message-content {
-  max-width: 80%;
-}
-
-.message-text {
-  padding: 0.5rem 0.75rem;
-  border-radius: 12px;
-  font-size: 0.875rem;
-  line-height: 1.5;
-  word-break: break-word;
-}
-
-.message.user .message-text {
-  background: var(--color-primary);
-  color: white;
-}
-
-.message.assistant .message-text {
-  background: #f0f0f0;
-  color: var(--color-text);
-}
-
-.typing-indicator {
-  display: flex;
-  gap: 4px;
-  padding: 0.5rem;
-}
-
-.typing-indicator span {
-  width: 6px;
-  height: 6px;
-  background: var(--color-text-muted);
-  border-radius: 50%;
-  animation: bounce 1.4s infinite ease-in-out both;
-}
-
-.typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
-.typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
-
-@keyframes bounce {
-  0%, 80%, 100% { transform: scale(0); }
-  40% { transform: scale(1); }
-}
-
-.chat-input {
-  padding: 0.75rem;
-  border-top: 1px solid var(--color-border);
-}
-
-.chat-input textarea {
-  width: 100%;
-  min-height: 60px;
-  max-height: 120px;
-  padding: 0.5rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  resize: none;
-  font-size: 0.875rem;
-  outline: none;
-}
-
-.chat-input textarea:focus {
-  border-color: var(--color-primary);
-}
-
-.chat-input button {
-  width: 100%;
-  margin-top: 0.5rem;
-  padding: 0.5rem;
-  background: var(--color-primary);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.chat-input button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.chat-content {
+  flex: 1;
+  overflow: hidden;
 }
 </style>

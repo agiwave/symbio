@@ -331,6 +331,9 @@ async function initEditor() {
   
   // Watch for block updates using editor view
   const updateBlockHandle = () => {
+    // 拖拽过程中不更新 block handle 状态
+    if (isDragging.value) return
+    
     if (!editor.value || !editorRef.value) return
     
     try {
@@ -412,31 +415,33 @@ function handleMouseLeave() {
     clearTimeout(expandTimer)
     expandTimer = null
   }
-  if (showToolbar.value && !isDragging.value) {
+  // 拖拽过程中不关闭工具条
+  if (isDragging.value) return
+  if (showToolbar.value) {
     collapseTimer = setTimeout(() => {
-      showToolbar.value = false
+      if (!isDragging.value) {
+        showToolbar.value = false
+      }
     }, 300)
   }
 }
 
 // 自定义拖拽功能 - 使用 mouse 事件而非原生拖拽
 
+// 拖拽状态
+const dragTargetPos = ref<number | null>(null)
+const dragInsertBefore = ref(true) // true = 在目标块上方插入，false = 在目标块下方插入
+
 function handleDragMouseDown(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
   
-  console.log('[DragMouseDown] triggered, activePos:', blockHandle.activePos)
-  
   const sourcePos = blockHandle.activePos
-  if (sourcePos === undefined || sourcePos === null) {
-    console.log('[DragMouseDown] No activePos, aborting')
-    return
-  }
+  if (sourcePos === undefined || sourcePos === null) return
   
   isDragging.value = true
   dragSourcePos.value = sourcePos
-  
-  console.log('[DragMouseDown] Starting drag, sourcePos:', sourcePos)
+  dragTargetPos.value = null
   
   // 添加全局 mouse 事件监听
   document.addEventListener('mousemove', handleDragMouseMove)
@@ -444,145 +449,153 @@ function handleDragMouseDown(e: MouseEvent) {
 }
 
 function handleDragMouseMove(e: MouseEvent) {
-  console.log('[DragMouseMove] isDragging:', isDragging.value, 'editor:', !!editor.value, 'editorRef:', !!editorRef.value)
-  
-  if (!isDragging.value || !editor.value || !editorRef.value) {
-    console.log('[DragMouseMove] Early return - invalid state')
-    return
-  }
+  if (!isDragging.value || !editor.value || !editorRef.value) return
   
   try {
     const view = editor.value.ctx.get(editorViewCtx)
+    const editorRect = editorRef.value.getBoundingClientRect()
+    
+    // 检查鼠标是否在编辑器区域内
+    if (e.clientX < editorRect.left || e.clientX > editorRect.right ||
+        e.clientY < editorRect.top || e.clientY > editorRect.bottom) {
+      dropIndicator.visible = false
+      dragTargetPos.value = null
+      return
+    }
     
     // 使用 ProseMirror 的 posAtCoords 获取位置
     const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
-    console.log('[DragMouseMove] posAtCoords:', posAtCoords, 'clientX:', e.clientX, 'clientY:', e.clientY)
     
     if (posAtCoords) {
       const $pos = view.state.doc.resolve(posAtCoords.pos)
       
       // 找到块级位置
       let depth = $pos.depth
+      let node = $pos.node(depth)
+      
       while (depth > 0) {
-        const node = $pos.node(depth)
-        if (node.isBlock && node.isTextblock) {
-          break
-        }
+        node = $pos.node(depth)
+        if (node.isBlock) break
         depth--
       }
       
       const blockPos = $pos.before(depth)
       const dom = view.nodeDOM(blockPos)
       
-      console.log('[DragMouseMove] blockPos:', blockPos, 'dom:', dom)
-      
       if (dom && dom instanceof HTMLElement) {
         const domRect = dom.getBoundingClientRect()
         
+        // 根据鼠标在块的上半部分还是下半部分决定插入位置
+        const midY = domRect.top + domRect.height / 2
+        const insertBefore = e.clientY < midY
+        
+        dragTargetPos.value = blockPos
+        dragInsertBefore.value = insertBefore
+        
         dropIndicator.visible = true
-        dropIndicator.top = domRect.bottom - 2
         dropIndicator.left = domRect.left
         dropIndicator.width = domRect.width
         
-        console.log('[DragMouseMove] dropIndicator set:', dropIndicator)
+        // 根据 insertBefore 决定指示器位置
+        if (insertBefore) {
+          dropIndicator.top = domRect.top - 1
+        } else {
+          dropIndicator.top = domRect.bottom - 1
+        }
       }
     } else {
       dropIndicator.visible = false
+      dragTargetPos.value = null
     }
   } catch (err) {
-    console.error('[DragMouseMove] Error:', err)
+    console.error('[Drag] Move error:', err)
   }
 }
 
 function handleDragMouseUp(e: MouseEvent) {
-  console.log('[DragMouseUp] triggered')
-  
   // 移除事件监听
   document.removeEventListener('mousemove', handleDragMouseMove)
   document.removeEventListener('mouseup', handleDragMouseUp)
   
-  if (!isDragging.value || dragSourcePos.value === null || dragSourcePos.value === undefined || !editor.value) {
-    console.log('[DragMouseUp] Early return - invalid state')
+  // 重置拖拽状态
+  dropIndicator.visible = false
+  
+  if (!isDragging.value || dragSourcePos.value === null || !editor.value) {
     isDragging.value = false
     dragSourcePos.value = null
-    dropIndicator.visible = false
+    dragTargetPos.value = null
+    return
+  }
+  
+  const sourcePos = dragSourcePos.value
+  const targetPos = dragTargetPos.value
+  
+  // 没有有效目标位置
+  if (targetPos === null) {
+    isDragging.value = false
+    dragSourcePos.value = null
+    dragTargetPos.value = null
+    return
+  }
+  
+  // 不允许拖到自己的位置
+  if (targetPos === sourcePos) {
+    isDragging.value = false
+    dragSourcePos.value = null
+    dragTargetPos.value = null
     return
   }
   
   try {
     const view = editor.value.ctx.get(editorViewCtx)
     const state = view.state
-    
-    // 获取目标位置
-    const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
-    console.log('[DragMouseUp] posAtCoords:', posAtCoords)
-    
-    if (!posAtCoords) {
-      isDragging.value = false
-      dragSourcePos.value = null
-      dropIndicator.visible = false
-      return
-    }
-    
-    const $pos = state.doc.resolve(posAtCoords.pos)
-    let depth = $pos.depth
-    while (depth > 0) {
-      const node = $pos.node(depth)
-      if (node.isBlock && node.isTextblock) {
-        break
-      }
-      depth--
-    }
-    const targetPos = $pos.before(depth)
-    
-    console.log('[DragMouseUp] sourcePos:', dragSourcePos.value, 'targetPos:', targetPos)
-    
-    // 不允许拖到自己的位置
-    if (targetPos === dragSourcePos.value) {
-      console.log('[DragMouseUp] Same position, skipping')
-      isDragging.value = false
-      dragSourcePos.value = null
-      dropIndicator.visible = false
-      return
-    }
-    
-    // 执行移动
-    const sourcePos = dragSourcePos.value
     const sourceNode = state.doc.nodeAt(sourcePos)
-    
-    console.log('[DragMouseUp] sourceNode:', sourceNode?.type.name, sourceNode?.nodeSize)
     
     if (!sourceNode) {
       isDragging.value = false
       dragSourcePos.value = null
-      dropIndicator.visible = false
+      dragTargetPos.value = null
       return
     }
     
     // 创建事务
     let tr = state.tr
+    const nodeSize = sourceNode.nodeSize
     
-    // 先删除源节点
-    tr = tr.delete(sourcePos, sourcePos + sourceNode.nodeSize)
+    // 计算实际插入位置
+    let insertPos = targetPos
+    if (!dragInsertBefore.value) {
+      // 插入到目标块下方
+      const targetNode = state.doc.nodeAt(targetPos)
+      if (targetNode) {
+        insertPos = targetPos + targetNode.nodeSize
+      }
+    }
     
-    // 调整目标位置
-    const adjustedTarget = sourcePos < targetPos ? targetPos - sourceNode.nodeSize : targetPos
-    
-    console.log('[DragMouseUp] adjustedTarget:', adjustedTarget)
-    
-    // 插入到新位置
-    tr = tr.insert(adjustedTarget, sourceNode)
+    // 处理位置调整：如果源在目标之前，删除后目标位置会后移
+    if (sourcePos < insertPos) {
+      // 先删除源节点，再插入
+      tr = tr.delete(sourcePos, sourcePos + nodeSize)
+      // 删除后，插入位置需要调整
+      insertPos -= nodeSize
+      tr = tr.insert(insertPos, sourceNode)
+    } else {
+      // 源在目标之后，先插入再删除
+      tr = tr.insert(insertPos, sourceNode)
+      // 插入后，源位置需要调整
+      tr = tr.delete(sourcePos + nodeSize, sourcePos + nodeSize + nodeSize)
+    }
     
     view.dispatch(tr)
-    console.log('[DragMouseUp] Move completed')
     
   } catch (err) {
-    console.error('[DragMouseUp] Error:', err)
+    console.error('[Drag] Drop error:', err)
   }
   
+  // 重置状态
   isDragging.value = false
   dragSourcePos.value = null
-  dropIndicator.visible = false
+  dragTargetPos.value = null
 }
 
 // Block operations
