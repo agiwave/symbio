@@ -33,7 +33,8 @@
             <div v-if="showToolbar" class="handle-toolbar">
               <!-- 拖拽按钮 - 第一个 -->
               <button 
-                class="toolbar-btn drag-btn" 
+                class="toolbar-btn drag-btn"
+                :class="{ active: isDragging }"
                 title="拖拽移动"
                 @mousedown="handleDragMouseDown"
                 @click.stop.prevent
@@ -957,13 +958,17 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
 /* 拖拽按钮样式 */
 .drag-btn {
   cursor: grab;
+  transition: all 0.15s ease;
 }
 
-.drag-btn:active {
+.drag-btn:active,
+.drag-btn.active {
   cursor: grabbing;
+  background: rgba(35, 131, 226, 0.2) !important;
+  color: #2383e2;
 }
 
-.drag-btn:hover {
+.drag-btn:hover:not(.active) {
   background: rgba(55, 53, 47, 0.12) !important;
 }
 

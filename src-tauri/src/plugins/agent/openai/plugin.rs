@@ -711,7 +711,7 @@ impl OpenAiPlugin {
 
                 // 处理流式响应
                 let mut stream_content = String::new();
-                let mut tool_calls: Vec<(String, String, Value)> = Vec::new();
+                let mut tool_calls: Vec<(String, String, String)> = Vec::new();
                 let mut stream = response.bytes_stream();
 
                 while let Some(chunk_result) = stream.next().await {
@@ -755,7 +755,7 @@ impl OpenAiPlugin {
                                                     ) {
                                                         let idx = idx as usize;
                                                         if tool_calls.len() <= idx {
-                                                            tool_calls.push((id.to_string(), String::new(), json!({})));
+                                                            tool_calls.push((id.to_string(), String::new(), String::new()));
                                                         }
                                                         if let Some(name) = fn_obj.get("name").and_then(|v| v.as_str()) {
                                                             if tool_calls[idx].1.is_empty() {
@@ -763,10 +763,8 @@ impl OpenAiPlugin {
                                                             }
                                                         }
                                                         if let Some(args) = fn_obj.get("arguments").and_then(|v| v.as_str()) {
-                                                            // 流式累积 arguments
-                                                            let current_args = tool_calls[idx].2.as_str().unwrap_or("").to_string();
-                                                            let new_args = format!("{}{}", current_args, args);
-                                                            tool_calls[idx].2 = json!(new_args);
+                                                            // 流式累积 arguments 字符串
+                                                            tool_calls[idx].2.push_str(args);
                                                         }
                                                     }
                                                 }
@@ -790,7 +788,7 @@ impl OpenAiPlugin {
                             kind: Some("function".into()),
                             function: NativeFunctionCall {
                                 name: name.clone(),
-                                arguments: args.as_str().unwrap_or("").to_string(),
+                                arguments: args.clone(),
                             },
                         }).collect())
                     },
@@ -825,13 +823,13 @@ impl OpenAiPlugin {
                 // 执行每个工具调用
                 for (id, name, args_str) in tool_calls {
                     // 解析 arguments 字符串为 Value 对象
-                    let args: Value = if let Some(s) = args_str.as_str() {
-                        serde_json::from_str(s).unwrap_or_else(|e| {
-                            eprintln!("[openai] Failed to parse tool args: {}, using empty object", e);
+                    let args: Value = if args_str.is_empty() {
+                        json!({})
+                    } else {
+                        serde_json::from_str(&args_str).unwrap_or_else(|e| {
+                            eprintln!("[openai] Failed to parse tool args: {}, args='{}', using empty object", e, args_str);
                             json!({})
                         })
-                    } else {
-                        json!({})
                     };
 
                     eprintln!("[openai] Executing tool: {} with args: {}", name, args);
