@@ -169,7 +169,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, shallowRef, watch } from 'vue'
 import { Editor, rootCtx, defaultValueCtx, editorViewCtx, commandsCtx, schemaCtx } from '@milkdown/kit/core'
-import { commonmark, paragraphSchema, headingSchema, bulletListSchema, orderedListSchema, blockquoteSchema, codeBlockSchema, setBlockTypeCommand, wrapInBlockTypeCommand, addBlockTypeCommand, clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark'
+import { commonmark, paragraphSchema, headingSchema, bulletListSchema, orderedListSchema, blockquoteSchema, codeBlockSchema, setBlockTypeCommand, wrapInBlockTypeCommand, addBlockTypeCommand } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
 import { history } from '@milkdown/kit/plugin/history'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
@@ -549,13 +549,8 @@ function deleteBlock() {
 function turnInto(type: string, level?: number) {
   if (!editorCtx.value) return
   
-  const schema = editorCtx.value.get(schemaCtx)
-  
   try {
     const commands = editorCtx.value.get(commandsCtx)
-    
-    // Clear any markdown prefix first
-    commands.call(clearTextInCurrentBlockCommand.key)
     
     switch (type) {
       case 'heading': {
@@ -573,7 +568,6 @@ function turnInto(type: string, level?: number) {
       }
       case 'bullet_list': {
         const bulletList = bulletListSchema.type(editorCtx.value)
-        const listItem = schema.nodes['list_item']
         commands.call(wrapInBlockTypeCommand.key, { nodeType: bulletList })
         break
       }
