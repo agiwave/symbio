@@ -107,11 +107,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useExplorerStore, type FileItem } from '../stores/explorer'
 import FileTreeNode from './FileTreeNode.vue'
 import AIChatPanel from './AIChatPanel.vue'
-import { getSession, createSessionId, type SessionMessage } from '../services/session'
+import { createSessionId, type SessionMessage } from '../services/session'
 
 const store = useExplorerStore()
 
@@ -121,33 +121,10 @@ const chatVisible = ref(false)
 // AI 对话状态 - 使用固定的 session_id
 const EXPLORER_SESSION_ID = 'explorer-ai-session'
 const chatMessages = ref<SessionMessage[]>([])
-const chatSessionLoaded = ref(false)
-
-// 加载历史消息
-async function loadChatHistory() {
-  if (chatSessionLoaded.value) return
-  
-  try {
-    const session = await getSession(EXPLORER_SESSION_ID)
-    if (session && session.messages && session.messages.length > 0) {
-      chatMessages.value = session.messages
-    }
-  } catch (err) {
-    console.log('[ExplorerPage] No chat history found:', err)
-  }
-  chatSessionLoaded.value = true
-}
 
 function updateChatMessages(messages: SessionMessage[]) {
   chatMessages.value = messages
 }
-
-// 监听对话框打开，加载历史
-watch(chatVisible, (visible) => {
-  if (visible) {
-    loadChatHistory()
-  }
-})
 
 // 文件树状态
 const fileTree = computed(() => store.fileTree)

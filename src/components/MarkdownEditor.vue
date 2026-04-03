@@ -259,7 +259,6 @@ const aiDialogRef = ref<HTMLElement | null>(null)
 // AI 对话框位置 - 跟随选区
 const aiDialogPosition = reactive({
   top: 80,
-  left: 0,
   right: 20,
 })
 
@@ -268,120 +267,52 @@ const aiDialogStyle = computed(() => ({
   right: `${aiDialogPosition.right}px`,
 }))
 
-// 计算对话框位置，基于选区
+// 保存选区信息（用于在对话框打开后仍能引用选中的文字）
+let savedSelection: { text: string; rect: DOMRect } | null = null
+
+// 计算对话框位置，基于保存的选区信息
 function calculateDialogPosition() {
-  const selection = window.getSelection()
-  if (!selection || selection.isCollapsed) {
+  if (savedSelection && savedSelection.rect) {
+    aiDialogPosition.top = savedSelection.rect.bottom + 12
+    aiDialogPosition.right = 20
+  } else {
     aiDialogPosition.top = 80
     aiDialogPosition.right = 20
-    return
-  }
-  
-  const range = selection.getRangeAt(0)
-  const rect = range.getBoundingClientRect()
-  
-  // 对话框宽度约 380px
-  // 如果选区在右侧，对话框显示在左侧
-  const dialogWidth = 380
-  const viewportWidth = window.innerWidth
-  
-  // 判断是否有足够空间在右侧显示
-  if (rect.right + dialogWidth + 40 > viewportWidth) {
-    // 显示在左侧
-    aiDialogPosition.right = viewportWidth - rect.left + 20
-    aiDialogPosition.left = 0
-  } else {
-    // 显示在右侧
-    aiDialogPosition.right = 20
-  }
-  
-  // 垂直位置：选区下方或上方
-  const dialogHeight = 300 // 估计高度
-  const spaceBelow = window.innerHeight - rect.bottom
-  const spaceAbove = rect.top
-  
-  if (spaceBelow >= dialogHeight || spaceBelow >= spaceAbove) {
-    aiDialogPosition.top = rect.bottom + 10
-  } else {
-    aiDialogPosition.top = Math.max(20, rect.top - dialogHeight - 10)
   }
 }
 
-// 处理文字选中 - 直接打开 AI 对话框
-let selectionTimer: ReturnType<typeof setTimeout> | null = null
-
-function handleSelectionChange() {
-  const selection = window.getSelection()
-  
-  // 如果对话框已打开
-  if (showAIDialog.value) {
-    // 检查选区是否变化或消失
-    if (!selection || selection.isCollapsed) {
-      // 选区消失，关闭对话框
-      closeAIDialog()
-      return
-    }
-    
-    const text = selection.toString().trim()
-    if (text !== selectedText.value && text.length > 0) {
-      // 选区变化，更新内容
-      selectedText.value = text
-      calculateDialogPosition()
-    }
-    return
-  }
-  
-  // 对话框未打开，检查是否有新选区
-  if (!selection || selection.isCollapsed) {
-    selectedText.value = ''
-    return
-  }
-  
-  const text = selection.toString().trim()
-  if (text.length > 0) {
-    openAIForSelection(text)
-  }
-}
-
-// 为选区打开 AI 对话框
-function openAIForSelection(text: string) {
+// 打开 AI 对话框（用于选区触发）
+function openAIForSelection(text: string, rect: DOMRect) {
+  // 保存选区信息
+  savedSelection = { text, rect }
   selectedText.value = text
   calculateDialogPosition()
   
-  // 延迟打开，避免选择过程中的闪烁
-  if (selectionTimer) clearTimeout(selectionTimer)
-  selectionTimer = setTimeout(() => {
-    const currentSelection = window.getSelection()
-    if (currentSelection && !currentSelection.isCollapsed && currentSelection.toString().trim().length > 0) {
-      showAIDialog.value = true
-      // 清空历史消息，每次选择都是新对话
-      aiMessages.value = []
-      aiInput.value = ''
-      nextTick(() => aiInputRef.value?.focus())
-    }
-  }, 200)
+  // 打开对话框
+  showAIDialog.value = true
+  aiMessages.value = []
+  aiInput.value = ''
+  // 注意：不自动 focus，避免选区丢失
 }
 
-// 点击外部关闭 AI 对话框
-function handleClickOutside(e: MouseEvent) {
-  if (!showAIDialog.value) return
-  
-  const target = e.target as HTMLElement
-  const dialogEl = aiDialogRef.value
-  
-  // 如果点击在对话框内，不处理
-  if (dialogEl && dialogEl.contains(target)) {
-    return
-  }
-  
-  // 延迟检查选区状态，给 selectionchange 事件一个机会
-  setTimeout(() => {
-    const selection = window.getSelection()
-    // 只有当选区消失或为空时才关闭
-    if (!selection || selection.isCollapsed || selection.toString().trim().length === 0) {
-      closeAIDialog()
-    }
-  }, 50)
+// 关闭 AI 对话框
+function closeAIDialog() {
+  showAIDialog.value = false
+  selectedText.value = ''
+  savedSelection = null
+  aiMessages.value = []
+}
+
+// 通过工具栏按钮打开 AI（无选区）
+function openAI() {
+  showToolbar.value = false
+  savedSelection = null
+  selectedText.value = ''
+  aiMessages.value = []
+  aiDialogPosition.top = 80
+  aiDialogPosition.right = 20
+  showAIDialog.value = true
+  nextTick(() => aiInputRef.value?.focus())
 }
 
 // Initialize editor
@@ -481,9 +412,37 @@ async function initEditor() {
   editor.value.ctx.get(editorViewCtx).dom.addEventListener('click', updateBlockHandle)
   editor.value.ctx.get(editorViewCtx).dom.addEventListener('keyup', updateBlockHandle)
   
+  // 监听编辑器 mouseup 事件 - 检测文字选择并打开 AI 对话框
+  const handleEditorMouseUp = (e: MouseEvent) => {
+    // 如果对话框已打开，不处理
+    if (showAIDialog.value) return
+    
+    // 延迟检查，确保选区已经稳定
+    setTimeout(() => {
+      try {
+        const selection = window.getSelection()
+        if (selection && !selection.isCollapsed) {
+          const text = selection.toString().trim()
+          if (text.length > 0) {
+            // 获取选区的位置信息
+            const range = selection.getRangeAt(0)
+            const rect = range.getBoundingClientRect()
+            // 打开 AI 对话框
+            openAIForSelection(text, rect)
+          }
+        }
+      } catch (e) {
+        // 忽略错误
+      }
+    }, 10)
+  }
+  
+  editor.value.ctx.get(editorViewCtx).dom.addEventListener('mouseup', handleEditorMouseUp)
+  
   // Store for cleanup
   ;(editor.value as any)._pollInterval = pollInterval
   ;(editor.value as any)._updateBlockHandle = updateBlockHandle
+  ;(editor.value as any)._handleEditorMouseUp = handleEditorMouseUp
 }
 
 // Block handle interactions - 监听整个容器
@@ -839,15 +798,6 @@ function decreaseLevel() {
   showToolbar.value = false
 }
 
-function openAI() {
-  showToolbar.value = false
-  selectedText.value = ''
-  aiMessages.value = []
-  calculateDialogPosition()
-  showAIDialog.value = true
-  nextTick(() => aiInputRef.value?.focus())
-}
-
 // Update content when modelValue changes externally
 watch(() => props.modelValue, (newValue) => {
   if (editor.value && newValue !== undefined) {
@@ -855,13 +805,6 @@ watch(() => props.modelValue, (newValue) => {
     // This is a simplified approach
   }
 })
-
-// AI Dialog
-function closeAIDialog() {
-  showAIDialog.value = false
-  selectedText.value = ''
-  aiMessages.value = []
-}
 
 async function sendAIMessage() {
   if (!aiInput.value.trim() || aiLoading.value) return
@@ -925,6 +868,10 @@ async function destroyEditor() {
         view.dom.removeEventListener('click', updateFn)
         view.dom.removeEventListener('keyup', updateFn)
       }
+      const mouseUpFn = (editor.value as any)._handleEditorMouseUp
+      if (mouseUpFn) {
+        view.dom.removeEventListener('mouseup', mouseUpFn)
+      }
     } catch (e) {
       // Ignore errors during cleanup
     }
@@ -942,18 +889,13 @@ async function destroyEditor() {
 onMounted(() => {
   initEditor()
   document.addEventListener('keydown', handleKeydown)
-  document.addEventListener('selectionchange', handleSelectionChange)
-  document.addEventListener('mousedown', handleClickOutside)
 })
 
 onUnmounted(() => {
   destroyEditor()
   document.removeEventListener('keydown', handleKeydown)
-  document.removeEventListener('selectionchange', handleSelectionChange)
-  document.removeEventListener('mousedown', handleClickOutside)
   if (expandTimer) clearTimeout(expandTimer)
   if (collapseTimer) clearTimeout(collapseTimer)
-  if (selectionTimer) clearTimeout(selectionTimer)
 })
 
 defineExpose({ openAI })

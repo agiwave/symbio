@@ -60,6 +60,35 @@ export async function getSession(sessionId: string): Promise<Session> {
 }
 
 /**
+ * 分页获取会话消息
+ * @param sessionId 会话 ID
+ * @param limit 每次获取的消息数量（默认 20）
+ * @param before 获取此时间戳之前的消息（用于加载更多）
+ */
+export async function getSessionMessages(
+  sessionId: string,
+  limit: number = 20,
+  before?: number
+): Promise<{ messages: SessionMessage[]; hasMore: boolean; total: number }> {
+  const result = await callPlugin<{
+    success: boolean
+    messages: SessionMessage[]
+    has_more: boolean
+    total: number
+  }>(SESSION_PATH, {
+    action: 'get_messages',
+    session_id: sessionId,
+    limit,
+    ...(before ? { before } : {})
+  })
+  return {
+    messages: result.messages || [],
+    hasMore: result.has_more || false,
+    total: result.total || 0
+  }
+}
+
+/**
  * 追加消息到会话
  */
 export async function appendMessages(sessionId: string, messages: SessionMessage[]): Promise<{ success: boolean; message_count: number }> {

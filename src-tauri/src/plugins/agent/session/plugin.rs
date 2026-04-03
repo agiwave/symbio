@@ -331,6 +331,56 @@ impl SessionPlugin {
         }
     }
 
+    async fn handle_get_messages(&self, input: &Value) -> StreamChunk {
+        let session_id = input.get("session_id").and_then(|v| v.as_str());
+        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+        let before = input.get("before").and_then(|v| v.as_i64()); // 获取此时间戳之前的消息
+
+        match session_id {
+            Some(sid) => {
+                match self.get_or_create_session(sid).await {
+                    Ok(session) => {
+                        // 按时间戳排序（从旧到新）
+                        let mut messages: Vec<_> = session.messages.iter().cloned().collect();
+                        messages.sort_by_key(|m| m.timestamp);
+
+                        // 如果指定了 before，只获取该时间戳之前的消息
+                        let filtered: Vec<_> = if let Some(before_ts) = before {
+                            messages.into_iter().filter(|m| m.timestamp < before_ts).collect()
+                        } else {
+                            messages
+                        };
+
+                        // 获取最后 limit 条消息
+                        let start = filtered.len().saturating_sub(limit);
+                        let recent_messages: Vec<_> = filtered.into_iter().skip(start).collect();
+
+                        StreamChunk {
+                            data: json!({
+                                "success": true,
+                                "messages": recent_messages,
+                                "has_more": start > 0,
+                                "total": session.messages.len()
+                            }),
+                            done: true,
+                            error: None,
+                        }
+                    }
+                    Err(e) => StreamChunk {
+                        data: json!({}),
+                        done: true,
+                        error: Some(e.to_string()),
+                    },
+                }
+            }
+            None => StreamChunk {
+                data: json!({}),
+                done: true,
+                error: Some("缺少 session_id 参数".to_string()),
+            },
+        }
+    }
+
     async fn handle_append(&self, input: &Value) -> StreamChunk {
         let session_id = input.get("session_id").and_then(|v| v.as_str());
         let messages_val = input.get("messages").and_then(|v| v.as_array());
@@ -767,6 +817,7 @@ impl Plugin for SessionPlugin {
                 
                 match action.as_str() {
                     "get" => self_ref.handle_get(&input).await,
+                    "get_messages" => self_ref.handle_get_messages(&input).await,
                     "append" => self_ref.handle_append(&input).await,
                     "clear" | "delete" => self_ref.handle_clear(&input).await,
                     "list" => self_ref.handle_list().await,

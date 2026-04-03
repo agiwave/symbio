@@ -1,8 +1,16 @@
 <template>
   <div class="ai-chat-panel">
     <!-- 消息历史 -->
-    <div class="chat-messages" ref="messagesRef">
-      <div v-if="messages.length === 0 && !isLoading" class="empty-chat">
+    <div class="chat-messages" ref="messagesRef" @scroll="handleScroll">
+      <!-- 加载更多指示器 -->
+      <div v-if="isLoadingHistory" class="load-more-indicator">
+        <div class="typing-indicator">
+          <span></span><span></span><span></span>
+        </div>
+        <span class="load-text">加载历史消息...</span>
+      </div>
+      
+      <div v-if="messages.length === 0 && initialLoadDone" class="empty-chat">
         <p>开始与 AI 对话</p>
       </div>
 
@@ -93,11 +101,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import { sendMessageStream, type ChatMessage, type StreamChunk } from '../services/ai'
 import {
-  getSession,
+  getSessionMessages,
   createSessionId,
   type SessionMessage,
 } from '../services/session'
@@ -123,6 +131,73 @@ const messagesRef = ref<HTMLElement | null>(null)
 const configError = ref<string | null>(null)
 const streamingContent = ref('')
 const toolCalls = ref<Array<{ name: string; args: string; result?: string }>>([])
+
+// 分页加载状态
+const isLoadingHistory = ref(false)
+const hasMoreHistory = ref(true)
+const oldestTimestamp = ref<number | null>(null)
+const initialLoadDone = ref(false)
+const PAGE_SIZE = 10
+
+// 加载历史消息
+async function loadHistory(before?: number) {
+  if (isLoadingHistory.value) return
+  if (!hasMoreHistory.value && before) return
+  
+  isLoadingHistory.value = true
+  
+  try {
+    const result = await getSessionMessages(props.sessionId, PAGE_SIZE, before)
+    
+    if (result.messages.length > 0) {
+      // 将新消息添加到现有消息的前面
+      const newMessages = [...result.messages, ...props.messages]
+      props.onUpdateMessages(newMessages)
+      
+      // 更新最旧的时间戳
+      oldestTimestamp.value = result.messages[0].timestamp
+      hasMoreHistory.value = result.hasMore
+    } else {
+      hasMoreHistory.value = false
+    }
+  } catch (err) {
+    console.error('[AIChatPanel] Failed to load history:', err)
+  } finally {
+    isLoadingHistory.value = false
+    if (!before) {
+      initialLoadDone.value = true
+    }
+  }
+}
+
+// 滚动加载更多
+function handleScroll() {
+  if (!messagesRef.value) return
+  if (isLoadingHistory.value || !hasMoreHistory.value) return
+  
+  // 当滚动到顶部附近时加载更多
+  if (messagesRef.value.scrollTop < 50) {
+    const savedScrollHeight = messagesRef.value.scrollHeight
+    loadHistory(oldestTimestamp.value || undefined).then(() => {
+      // 保持滚动位置
+      nextTick(() => {
+        if (messagesRef.value) {
+          const newScrollHeight = messagesRef.value.scrollHeight
+          messagesRef.value.scrollTop = newScrollHeight - savedScrollHeight
+        }
+      })
+    })
+  }
+}
+
+// 初始加载
+onMounted(() => {
+  if (props.messages.length === 0) {
+    loadHistory()
+  } else {
+    initialLoadDone.value = true
+  }
+})
 
 // 渲染 Markdown
 function renderMarkdown(content: string): string {
@@ -288,6 +363,24 @@ watch(() => props.messages.length, () => {
   flex: 1;
   overflow-y: auto;
   padding: 1rem;
+}
+
+.load-more-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.load-more-indicator .typing-indicator {
+  padding: 0;
+}
+
+.load-text {
+  white-space: nowrap;
 }
 
 .empty-chat {
