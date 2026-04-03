@@ -35,9 +35,7 @@
               <button 
                 class="toolbar-btn drag-btn" 
                 title="拖拽移动"
-                draggable="true"
-                @dragstart="handleDragStart"
-                @dragend="handleDragEnd"
+                @mousedown="handleDragMouseDown"
                 @click.stop.prevent
               >
                 <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
@@ -370,14 +368,16 @@ function handleMouseLeave() {
   }
 }
 
-// 拖拽功能
-function handleDragStart(e: DragEvent) {
-  const sourcePos = blockHandle.activePos
-  console.log('[DragStart] activePos:', sourcePos)
+// 自定义拖拽功能 - 使用 mouse 事件而非原生拖拽
+let dragMouseHandler: ((e: MouseEvent) => void) | null = null
+let dragMouseUpHandler: ((e: MouseEvent) => void) | null = null
+
+function handleDragMouseDown(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
   
+  const sourcePos = blockHandle.activePos
   if (sourcePos === undefined || sourcePos === null) {
-    console.warn('[DragStart] No active position, aborting drag')
-    e.preventDefault()
     return
   }
   
@@ -385,29 +385,16 @@ function handleDragStart(e: DragEvent) {
   showToolbar.value = false
   dragSourcePos.value = sourcePos
   
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', String(sourcePos))
-    // 设置拖拽图像为透明
-    const img = new Image()
-    img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
-    e.dataTransfer.setDragImage(img, 0, 0)
-  }
-}
-
-function handleDragEnd(_e: DragEvent) {
-  isDragging.value = false
-  dragSourcePos.value = null
-  dropIndicator.visible = false
-}
-
-function handleDocumentDragOver(e: DragEvent) {
-  if (!isDragging.value || !editor.value || !editorRef.value) return
+  // 添加全局 mouse 事件监听
+  dragMouseHandler = handleDragMouseMove
+  dragMouseUpHandler = handleDragMouseUp
   
-  e.preventDefault()
-  if (e.dataTransfer) {
-    e.dataTransfer.dropEffect = 'move'
-  }
+  document.addEventListener('mousemove', dragMouseHandler)
+  document.addEventListener('mouseup', dragMouseUpHandler)
+}
+
+function handleDragMouseMove(e: MouseEvent) {
+  if (!isDragging.value || !editor.value || !editorRef.value) return
   
   try {
     const view = editor.value.ctx.get(editorViewCtx)
@@ -447,15 +434,23 @@ function handleDocumentDragOver(e: DragEvent) {
   }
 }
 
-function handleDocumentDrop(e: DragEvent) {
-  console.log('[Drop] isDragging:', isDragging.value, 'dragSourcePos:', dragSourcePos.value)
-  
-  if (!isDragging.value || dragSourcePos.value === null || dragSourcePos.value === undefined || !editor.value) {
-    console.log('[Drop] Early return - invalid state')
-    return
+function handleDragMouseUp(e: MouseEvent) {
+  // 移除事件监听
+  if (dragMouseHandler) {
+    document.removeEventListener('mousemove', dragMouseHandler)
+    dragMouseHandler = null
+  }
+  if (dragMouseUpHandler) {
+    document.removeEventListener('mouseup', dragMouseUpHandler)
+    dragMouseUpHandler = null
   }
   
-  e.preventDefault()
+  if (!isDragging.value || dragSourcePos.value === null || dragSourcePos.value === undefined || !editor.value) {
+    isDragging.value = false
+    dragSourcePos.value = null
+    dropIndicator.visible = false
+    return
+  }
   
   try {
     const view = editor.value.ctx.get(editorViewCtx)
@@ -463,12 +458,11 @@ function handleDocumentDrop(e: DragEvent) {
     
     // 获取目标位置
     const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
-    console.log('[Drop] posAtCoords:', posAtCoords)
     
     if (!posAtCoords) {
-      dropIndicator.visible = false
       isDragging.value = false
       dragSourcePos.value = null
+      dropIndicator.visible = false
       return
     }
     
@@ -483,14 +477,11 @@ function handleDocumentDrop(e: DragEvent) {
     }
     const targetPos = $pos.before(depth)
     
-    console.log('[Drop] sourcePos:', dragSourcePos.value, 'targetPos:', targetPos)
-    
     // 不允许拖到自己的位置
     if (targetPos === dragSourcePos.value) {
-      console.log('[Drop] Same position, skipping')
-      dropIndicator.visible = false
       isDragging.value = false
       dragSourcePos.value = null
+      dropIndicator.visible = false
       return
     }
     
@@ -498,12 +489,10 @@ function handleDocumentDrop(e: DragEvent) {
     const sourcePos = dragSourcePos.value
     const sourceNode = state.doc.nodeAt(sourcePos)
     
-    console.log('[Drop] sourceNode:', sourceNode?.type.name, sourceNode?.nodeSize)
-    
     if (!sourceNode) {
-      dropIndicator.visible = false
       isDragging.value = false
       dragSourcePos.value = null
+      dropIndicator.visible = false
       return
     }
     
@@ -516,21 +505,18 @@ function handleDocumentDrop(e: DragEvent) {
     // 调整目标位置（如果源在目标前面，删除后位置会改变）
     const adjustedTarget = sourcePos < targetPos ? targetPos - sourceNode.nodeSize : targetPos
     
-    console.log('[Drop] adjustedTarget:', adjustedTarget)
-    
     // 插入到新位置
     tr = tr.insert(adjustedTarget, sourceNode)
     
     view.dispatch(tr)
-    console.log('[Drop] Move completed')
     
   } catch (err) {
-    console.error('Drop error:', err)
+    console.error('Drag move error:', err)
   }
   
-  dropIndicator.visible = false
   isDragging.value = false
   dragSourcePos.value = null
+  dropIndicator.visible = false
 }
 
 // Block operations
@@ -773,16 +759,11 @@ async function destroyEditor() {
 onMounted(() => {
   initEditor()
   document.addEventListener('keydown', handleKeydown)
-  // 添加 document 级别的拖放监听
-  document.addEventListener('dragover', handleDocumentDragOver)
-  document.addEventListener('drop', handleDocumentDrop)
 })
 
 onUnmounted(() => {
   destroyEditor()
   document.removeEventListener('keydown', handleKeydown)
-  document.removeEventListener('dragover', handleDocumentDragOver)
-  document.removeEventListener('drop', handleDocumentDrop)
   if (expandTimer) clearTimeout(expandTimer)
   if (collapseTimer) clearTimeout(collapseTimer)
 })
