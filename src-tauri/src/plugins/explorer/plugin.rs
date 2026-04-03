@@ -182,14 +182,29 @@ impl ExplorerPlugin {
             }
         }
 
-        // 创建新的监听器
-        // 注意：FileWatcher 需要 app_handle，这里通过父插件获取
-        // 简化实现：直接创建 watcher，事件通过 Tauri 全局事件系统发出
-        eprintln!("[explorer] start_watch: {}", workspace.display());
+        // 获取全局 AppHandle
+        let app_handle = crate::get_app_handle()
+            .ok_or_else(|| PluginError::InternalError("AppHandle 未初始化".to_string()))?;
+
+        // 创建并启动 FileWatcher
+        let watcher = FileWatcher::new(app_handle);
+        let workspace_clone = workspace.clone();
+        let watcher_clone = watcher.clone();
         
-        // 实际的文件监听逻辑
-        // 由于 Tauri 事件系统需要 AppHandle，这里简化处理
-        // 前端通过 invoke 调用 start_watch 后，Explorer 插件内部管理监听
+        // 在后台线程启动监听
+        tokio::spawn(async move {
+            if let Err(e) = watcher_clone.start(workspace_clone).await {
+                eprintln!("[explorer] Failed to start watcher: {}", e);
+            }
+        });
+
+        // 保存 watcher 引用
+        {
+            let mut w = self.watcher.lock().unwrap();
+            *w = Some(watcher);
+        }
+
+        eprintln!("[explorer] start_watch: {}", workspace.display());
         
         Ok(InvokeStream::single(json!({
             "success": true,
@@ -200,10 +215,17 @@ impl ExplorerPlugin {
 
     /// 停止文件监听
     fn stop_watch(&self) -> PluginResult<InvokeStream> {
-        let mut watcher = self.watcher.lock().unwrap();
-        if let Some(w) = watcher.take() {
-            // 停止监听
-            eprintln!("[explorer] stop_watch: stopped");
+        let watcher = {
+            let mut w = self.watcher.lock().unwrap();
+            w.take()
+        };
+        
+        if let Some(w) = watcher {
+            // 在后台线程停止监听
+            tokio::spawn(async move {
+                w.stop().await;
+            });
+            eprintln!("[explorer] stop_watch: stopping");
         }
         
         Ok(InvokeStream::single(json!({

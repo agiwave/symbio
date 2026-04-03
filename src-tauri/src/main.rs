@@ -14,6 +14,16 @@ use plugins::{
     ExplorerFactory,
 };
 use std::sync::{Mutex, Arc};
+use tokio::sync::RwLock;
+use tauri::Manager;
+
+/// 全局 AppHandle（用于插件发送事件）
+static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// 获取全局 AppHandle
+pub fn get_app_handle() -> Option<tauri::AppHandle> {
+    APP_HANDLE.get().cloned()
+}
 
 struct AppState {
     root: Mutex<Arc<dyn Plugin>>,
@@ -46,6 +56,12 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // 保存全局 AppHandle
+            APP_HANDLE.set(app.handle().clone()).ok();
+            eprintln!("[main] AppHandle saved globally");
+            Ok(())
+        })
         .manage(AppState {
             root: Mutex::new(root),
         })

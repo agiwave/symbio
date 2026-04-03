@@ -195,11 +195,11 @@ onMounted(async () => {
     unlistenFile = await onFileChanged((event) => {
       console.log('[Explorer] File changed:', event.path, event.kind)
       // 如果当前打开的文件被修改，重新加载
-      if (selectedPath.value && event.path.includes(selectedPath.value)) {
-        if (selectedPath.value) {
-          store.selectItem(selectedPath.value)
-        }
+      if (selectedPath.value && event.path.endsWith(selectedPath.value)) {
+        console.log('[Explorer] Reloading current file:', selectedPath.value)
+        store.selectItem(selectedPath.value)
       }
+      // 刷新文件树
       refresh()
     })
   } catch (err) {

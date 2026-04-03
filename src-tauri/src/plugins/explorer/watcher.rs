@@ -27,6 +27,15 @@ pub struct FileWatcher {
     app_handle: tauri::AppHandle,
 }
 
+impl Clone for FileWatcher {
+    fn clone(&self) -> Self {
+        Self {
+            watcher: self.watcher.clone(),
+            app_handle: self.app_handle.clone(),
+        }
+    }
+}
+
 impl FileWatcher {
     pub fn new(app_handle: tauri::AppHandle) -> Self {
         Self {
