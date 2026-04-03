@@ -316,7 +316,7 @@ defineExpose({ openAIDialog })
 .editor-root :deep(.milkdown h1) {
   font-size: 2.25rem;
   font-weight: 700;
-  margin: 1.5rem 0 0.5rem;
+  margin: 0 0 0.5rem;
   line-height: 1.2;
   letter-spacing: -0.03em;
   color: #37352f;
@@ -325,14 +325,14 @@ defineExpose({ openAIDialog })
 .editor-root :deep(.milkdown h2) {
   font-size: 1.5rem;
   font-weight: 600;
-  margin: 1.25rem 0 0.375rem;
+  margin: 1rem 0 0.375rem;
   line-height: 1.3;
 }
 
 .editor-root :deep(.milkdown h3) {
   font-size: 1.25rem;
   font-weight: 600;
-  margin: 1rem 0 0.25rem;
+  margin: 0.75rem 0 0.25rem;
 }
 
 /* Paragraph */
