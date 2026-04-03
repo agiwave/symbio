@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 target/
+.symbio/
 
 # Build outputs
 dist/

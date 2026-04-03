@@ -1,4 +1,6 @@
 //! Note 插件 - 笔记管理（持久化存储）
+//!
+//! 存储路径: <workspace>/.symbio/note/notes.json
 
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
@@ -41,9 +43,10 @@ impl NoteStore {
 pub struct NotePlugin {
     meta: PluginMeta,
     store: Arc<Mutex<NoteStore>>,
-    data_path: PathBuf,
-    /// 父插件引用
+    /// 父插件引用（用于获取工作区路径）
     parent: Option<Weak<dyn Plugin>>,
+    /// 缓存的工作区路径
+    cached_workspace: Arc<Mutex<Option<String>>>,
 }
 
 impl NotePlugin {
@@ -80,33 +83,82 @@ impl NotePlugin {
 
     /// 主构造函数（Factory 机制使用）
     pub fn new(parent: Option<Weak<dyn Plugin>>) -> Self {
-        // 获取应用数据目录
-        let data_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("symbio");
-        
-        let data_path = data_dir.join("notes.json");
-
         // 初始化存储
         let store = Arc::new(Mutex::new(NoteStore::new()));
 
         NotePlugin { 
             meta: Self::create_meta(),
             store, 
-            data_path,
             parent,
+            cached_workspace: Arc::new(Mutex::new(None)),
         }
     }
 
     /// 获取父插件引用
-    #[allow(dead_code)]
     fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
         self.parent.as_ref().and_then(|w| w.upgrade())
     }
 
+    /// 获取工作区路径（通过父插件调用 work 插件）
+    fn get_workspace_path(&self) -> PathBuf {
+        // 尝试从缓存获取
+        {
+            let cached = self.cached_workspace.lock().unwrap();
+            if let Some(ref path) = *cached {
+                return PathBuf::from(path);
+            }
+        }
+
+        // 通过父插件获取工作区路径
+        let workspace_path = if let Some(parent) = self.get_parent() {
+            // 调用 home 的 _workspace 快捷路径，或直接调用 work
+            match parent.invoke("_workspace", json!({})) {
+                Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
+                    chunk.data.get("expanded_path")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                }
+                _ => {
+                    // 尝试直接调用 work 插件
+                    match parent.invoke("work/workspace_path", json!({})) {
+                        Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
+                            chunk.data.get("expanded_path")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                        }
+                        _ => None,
+                    }
+                }
+            }
+        } else {
+            None
+        };
+
+        // 如果获取到工作区路径，缓存并返回
+        if let Some(path) = workspace_path {
+            let mut cached = self.cached_workspace.lock().unwrap();
+            *cached = Some(path.clone());
+            return PathBuf::from(path);
+        }
+
+        // 回退到默认路径
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("projects")
+    }
+
+    /// 获取数据存储路径: <workspace>/.symbio/note/notes.json
+    fn get_data_path(&self) -> PathBuf {
+        self.get_workspace_path()
+            .join(".symbio")
+            .join("note")
+            .join("notes.json")
+    }
+
     /// 同步保存数据
     fn save_data_sync(&self) -> Result<(), PluginError> {
-        if let Some(parent) = self.data_path.parent() {
+        let data_path = self.get_data_path();
+        if let Some(parent) = data_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
 
@@ -114,7 +166,7 @@ impl NotePlugin {
         let content = serde_json::to_string_pretty(&*s)
             .map_err(|e| PluginError::InternalError(format!("序列化数据失败: {}", e)))?;
         
-        std::fs::write(&self.data_path, content)
+        std::fs::write(&data_path, content)
             .map_err(|e| PluginError::InternalError(format!("写入数据失败: {}", e)))?;
         
         Ok(())
@@ -122,8 +174,9 @@ impl NotePlugin {
 
     /// 同步加载数据
     fn load_data_sync(&self) -> Result<(), PluginError> {
-        if self.data_path.exists() {
-            let content = std::fs::read_to_string(&self.data_path)
+        let data_path = self.get_data_path();
+        if data_path.exists() {
+            let content = std::fs::read_to_string(&data_path)
                 .map_err(|e| PluginError::InternalError(format!("读取数据失败: {}", e)))?;
             
             let store: NoteStore = serde_json::from_str(&content)
@@ -397,7 +450,8 @@ impl Plugin for NotePlugin {
         let result = match action {
             "init" => {
                 // 初始化并加载数据
-                if self.data_path.exists() {
+                let data_path = self.get_data_path();
+                if data_path.exists() {
                     let _ = self.load_data_sync();
                 } else {
                     self.init_demo();

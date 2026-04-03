@@ -1,6 +1,8 @@
 //! Session 插件实现
 //!
 //! 提供会话历史和上下文管理
+//!
+//! 存储路径: <workspace>/.symbio/agent/session/
 
 use super::types::{ChatMessage, ContextEntry, Session, SessionContext, LlmContext};
 use crate::core::traits::{Plugin, CAPABILITY_SESSION};
@@ -15,7 +17,7 @@ use tokio::sync::RwLock;
 /// Session 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionConfig {
-    /// 存储目录
+    /// 存储目录 (~ 表示当前工作区)
     #[serde(default = "default_storage_dir")]
     pub storage_dir: String,
     /// 最大消息数
@@ -29,10 +31,9 @@ pub struct SessionConfig {
     pub compress_threshold: usize,
 }
 
+/// 默认存储路径: ~ 表示工作区，实际路径为 <workspace>/.symbio/agent/session
 fn default_storage_dir() -> String { 
-    dirs::data_local_dir()
-        .map(|p| p.join("symbio").join("sessions").to_string_lossy().to_string())
-        .unwrap_or_else(|| "~/.local/share/symbio/sessions".to_string())
+    "~/.symbio/agent/session".to_string()
 }
 fn default_max_messages() -> usize { 100 }
 fn default_auto_compress() -> bool { true }
@@ -54,8 +55,10 @@ pub struct SessionPlugin {
     meta: PluginMeta,
     config: Arc<RwLock<SessionConfig>>,
     storage_dir: Arc<RwLock<PathBuf>>,
-    /// 父插件引用（用于保存配置）
+    /// 父插件引用（用于获取工作区路径）
     parent: Option<Weak<dyn Plugin>>,
+    /// 缓存的工作区路径
+    cached_workspace: Arc<RwLock<Option<String>>>,
 }
 
 impl SessionPlugin {
@@ -90,6 +93,7 @@ impl SessionPlugin {
             config: Arc::new(RwLock::new(config)),
             storage_dir: Arc::new(RwLock::new(storage_dir)),
             parent,
+            cached_workspace: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -98,13 +102,73 @@ impl SessionPlugin {
         self.parent.as_ref().and_then(|w| w.upgrade())
     }
 
+    /// 获取工作区路径（通过父插件调用 work 插件）
+    async fn get_workspace_path(&self) -> PathBuf {
+        // 尝试从缓存获取
+        {
+            let cached = self.cached_workspace.read().await;
+            if let Some(ref path) = *cached {
+                return PathBuf::from(path);
+            }
+        }
+
+        // 通过父插件获取工作区路径（使用绝对路径 /_workspace，让 agent 转发到 home）
+        let workspace_path = if let Some(parent) = self.get_parent() {
+            // 使用绝对路径 /_workspace，这样 agent 会转发到 home
+            match parent.invoke("/_workspace", json!({})) {
+                Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
+                    chunk.data.get("expanded_path")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        // 如果获取到工作区路径，缓存并返回
+        if let Some(path) = workspace_path {
+            let mut cached = self.cached_workspace.write().await;
+            *cached = Some(path.clone());
+            return PathBuf::from(path);
+        }
+
+        // 回退到默认路径
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("projects")
+    }
+
+    /// 解析存储路径，将 ~ 替换为工作区路径
+    async fn resolve_storage_dir(&self) -> PathBuf {
+        let cfg = self.config.read().await;
+        let storage_dir = &cfg.storage_dir;
+        
+        if storage_dir.starts_with('~') {
+            let workspace = self.get_workspace_path().await;
+            let relative = storage_dir.strip_prefix('~').unwrap_or(storage_dir);
+            workspace.join(relative.trim_start_matches('/'))
+        } else {
+            // 展开标准的 ~ 路径（用户主目录）
+            PathBuf::from(shellexpand::tilde(storage_dir).to_string())
+        }
+    }
+
+    /// 更新存储目录
+    async fn update_storage_dir(&self) {
+        let resolved = self.resolve_storage_dir().await;
+        let mut dir = self.storage_dir.write().await;
+        *dir = resolved;
+    }
+
     /// 获取配置 Schema
     fn config_schema() -> Value {
         json!({
             "storage_dir": {
                 "type": "string",
                 "title": "存储目录",
-                "description": "会话数据存储目录",
+                "description": "会话数据存储目录（~ 表示当前工作区，实际路径: <workspace>/.symbio/agent/session）",
                 "default": default_storage_dir()
             },
             "max_messages": {
@@ -534,6 +598,18 @@ impl Default for SessionPlugin {
     }
 }
 
+impl Clone for SessionPlugin {
+    fn clone(&self) -> Self {
+        Self {
+            meta: self.meta.clone(),
+            config: Arc::clone(&self.config),
+            storage_dir: Arc::clone(&self.storage_dir),
+            parent: self.parent.clone(),
+            cached_workspace: Arc::clone(&self.cached_workspace),
+        }
+    }
+}
+
 #[async_trait]
 impl Plugin for SessionPlugin {
     fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
@@ -659,17 +735,21 @@ impl Plugin for SessionPlugin {
             .to_string();
 
         // 使用 tokio runtime 执行异步操作并返回结果
+        let self_ref = Arc::new(self.clone());
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
+                // 先更新存储目录（解析工作区路径）
+                self_ref.update_storage_dir().await;
+                
                 match action.as_str() {
-                    "get" => self.handle_get(&input).await,
-                    "append" => self.handle_append(&input).await,
-                    "clear" | "delete" => self.handle_clear(&input).await,
-                    "list" => self.handle_list().await,
-                    "get_context" => self.handle_get_context(&input).await,
-                    "add_context" => self.handle_add_context(&input).await,
-                    "clear_context" => self.handle_clear_context().await,
-                    "update" => self.handle_update(&input).await,
+                    "get" => self_ref.handle_get(&input).await,
+                    "append" => self_ref.handle_append(&input).await,
+                    "clear" | "delete" => self_ref.handle_clear(&input).await,
+                    "list" => self_ref.handle_list().await,
+                    "get_context" => self_ref.handle_get_context(&input).await,
+                    "add_context" => self_ref.handle_add_context(&input).await,
+                    "clear_context" => self_ref.handle_clear_context().await,
+                    "update" => self_ref.handle_update(&input).await,
                     _ => StreamChunk {
                         data: json!({}),
                         done: true,
