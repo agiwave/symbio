@@ -286,12 +286,15 @@ defineExpose({ openAIDialog })
   height: 100%;
   width: 100%;
   background: #fff;
+  display: flex;
+  flex-direction: column;
 }
 
 .editor-root {
-  height: 100%;
+  flex: 1;
   overflow-y: auto;
-  padding: 48px 72px;
+  padding: 16px;
+  min-height: 0;
 }
 
 /* Milkdown Editor Styles - Notion-like */
@@ -712,7 +715,7 @@ defineExpose({ openAIDialog })
 /* Responsive */
 @media (max-width: 768px) {
   .editor-root {
-    padding: 24px 16px;
+    padding: 16px 12px;
   }
 }
 </style>

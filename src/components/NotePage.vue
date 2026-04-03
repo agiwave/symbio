@@ -391,8 +391,8 @@ watch(chatVisible, (visible) => {
 
 .editor-content {
   flex: 1;
-  overflow-y: auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .empty-editor {
