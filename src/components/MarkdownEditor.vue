@@ -3,6 +3,106 @@
     <!-- 编辑器容器 -->
     <div ref="editorRef" class="editor-root"></div>
     
+    <!-- 自定义 Block Handle 容器 -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div 
+          v-if="blockHandle.visible" 
+          class="custom-block-handle"
+          :style="blockHandleStyle"
+        >
+          <div 
+            class="handle-trigger"
+            @mouseenter="handleMouseEnter"
+            @mouseleave="handleMouseLeave"
+            @click="toggleToolbar"
+            draggable="true"
+            @dragstart="handleDragStart"
+            @dragend="handleDragEnd"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <circle cx="9" cy="6" r="1.5"/>
+              <circle cx="15" cy="6" r="1.5"/>
+              <circle cx="9" cy="12" r="1.5"/>
+              <circle cx="15" cy="12" r="1.5"/>
+              <circle cx="9" cy="18" r="1.5"/>
+              <circle cx="15" cy="18" r="1.5"/>
+            </svg>
+          </div>
+          
+          <Transition name="expand">
+            <div v-if="showToolbar" class="handle-toolbar">
+              <button class="toolbar-btn" @click="addBlockBelow" title="在下方添加块">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              </button>
+              <button class="toolbar-btn" @click="deleteBlock" title="删除块">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+              </button>
+              <div class="toolbar-divider"></div>
+              <button class="toolbar-btn" @click="turnInto('heading', 1)" title="标题 1">
+                <span class="btn-text">H1</span>
+              </button>
+              <button class="toolbar-btn" @click="turnInto('heading', 2)" title="标题 2">
+                <span class="btn-text">H2</span>
+              </button>
+              <button class="toolbar-btn" @click="turnInto('heading', 3)" title="标题 3">
+                <span class="btn-text">H3</span>
+              </button>
+              <div class="toolbar-divider"></div>
+              <button class="toolbar-btn" @click="turnInto('paragraph')" title="正文">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="3" y1="6" x2="21" y2="6"/>
+                  <line x1="3" y1="12" x2="15" y2="12"/>
+                  <line x1="3" y1="18" x2="18" y2="18"/>
+                </svg>
+              </button>
+              <button class="toolbar-btn" @click="turnInto('bullet_list')" title="无序列表">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="9" y1="6" x2="20" y2="6"/>
+                  <line x1="9" y1="12" x2="20" y2="12"/>
+                  <line x1="9" y1="18" x2="20" y2="18"/>
+                  <circle cx="4" cy="6" r="1.5" fill="currentColor" stroke="none"/>
+                  <circle cx="4" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+                  <circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <button class="toolbar-btn" @click="turnInto('ordered_list')" title="有序列表">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="10" y1="6" x2="21" y2="6"/>
+                  <line x1="10" y1="12" x2="21" y2="12"/>
+                  <line x1="10" y1="18" x2="21" y2="18"/>
+                  <text x="3" y="8" font-size="8" fill="currentColor" stroke="none">1</text>
+                  <text x="3" y="14" font-size="8" fill="currentColor" stroke="none">2</text>
+                  <text x="3" y="20" font-size="8" fill="currentColor" stroke="none">3</text>
+                </svg>
+              </button>
+              <button class="toolbar-btn" @click="turnInto('blockquote')" title="引用">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z"/>
+                </svg>
+              </button>
+              <button class="toolbar-btn" @click="turnInto('code_block')" title="代码块">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="16 18 22 12 16 6"/>
+                  <polyline points="8 6 2 12 8 18"/>
+                </svg>
+              </button>
+              <div class="toolbar-divider"></div>
+              <button class="toolbar-btn ai-btn" @click="openAI" title="AI 助手">
+                <span>✨</span>
+              </button>
+            </div>
+          </Transition>
+        </div>
+      </Transition>
+    </Teleport>
+    
     <!-- AI 对话框 -->
     <Teleport to="body">
       <Transition name="dialog">
@@ -48,7 +148,7 @@
     
     <!-- 快捷键提示 -->
     <Transition name="fade">
-      <div v-if="!showAIDialog" class="shortcut-hint">
+      <div v-if="!showAIDialog && !blockHandle.visible" class="shortcut-hint">
         <kbd>/</kbd> 命令菜单 · <kbd>Ctrl</kbd><kbd>K</kbd> AI 助手
       </div>
     </Transition>
@@ -56,10 +156,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, shallowRef, watch } from 'vue'
-import { Crepe, CrepeFeature } from '@milkdown/crepe'
-import '@milkdown/crepe/theme/common/style.css'
-import '@milkdown/crepe/theme/frame.css'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, shallowRef, watch } from 'vue'
+import { Editor, rootCtx, defaultValueCtx, editorViewCtx, commandsCtx, schemaCtx } from '@milkdown/kit/core'
+import { commonmark, paragraphSchema, headingSchema, bulletListSchema, orderedListSchema, blockquoteSchema, codeBlockSchema, setBlockTypeCommand, wrapInBlockTypeCommand, addBlockTypeCommand, clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark'
+import { gfm } from '@milkdown/kit/preset/gfm'
+import { history } from '@milkdown/kit/plugin/history'
+import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+import { BlockProvider } from '@milkdown/kit/plugin/block'
 import { callPlugin } from '@/services/plugin'
 import { marked } from 'marked'
 
@@ -78,7 +181,27 @@ const messagesRef = ref<HTMLElement | null>(null)
 const aiInputRef = ref<HTMLTextAreaElement | null>(null)
 
 // Editor instance
-const crepe = shallowRef<Crepe | null>(null)
+const editor = shallowRef<Editor | null>(null)
+const editorCtx = shallowRef<any>(null)
+const blockProvider = shallowRef<BlockProvider | null>(null)
+
+// Block handle state
+const blockHandle = reactive({
+  visible: false,
+  top: 0,
+  left: 0,
+  activeNode: null as any,
+})
+
+const showToolbar = ref(false)
+const isDragging = ref(false)
+let expandTimer: ReturnType<typeof setTimeout> | null = null
+let collapseTimer: ReturnType<typeof setTimeout> | null = null
+
+const blockHandleStyle = computed(() => ({
+  top: `${blockHandle.top}px`,
+  left: `${blockHandle.left}px`,
+}))
 
 // AI dialog
 const showAIDialog = ref(false)
@@ -102,62 +225,215 @@ async function initEditor() {
 按 **/** 打开命令菜单，**Ctrl+K** 呼出 AI 助手。
 `
 
-  crepe.value = new Crepe({
-    root: editorRef.value,
-    defaultValue: defaultContent,
-    features: {
-      [CrepeFeature.BlockEdit]: true,      // Slash 命令 + Block Handle
-      [CrepeFeature.Toolbar]: true,         // 选中文本工具栏
-      [CrepeFeature.LinkTooltip]: true,     // 链接悬浮编辑
-      [CrepeFeature.ImageBlock]: true,      // 图片块支持
-      [CrepeFeature.CodeMirror]: true,      // 代码块增强
-      [CrepeFeature.Placeholder]: true,     // 占位符
-      [CrepeFeature.Cursor]: true,          // 光标样式
-      [CrepeFeature.ListItem]: true,        // 列表项图标
-      [CrepeFeature.Table]: true,           // 表格支持
-    },
-    featureConfigs: {
-      [CrepeFeature.Placeholder]: {
-        text: '输入 / 打开命令菜单...',
-        mode: 'block',
-      },
-      [CrepeFeature.Toolbar]: {
-        boldIcon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"/></svg>',
-        italicIcon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z"/></svg>',
-        strikethroughIcon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 19h4v-3h-4v3zM5 4v3h5v3h4V7h5V4H5zM3 14h18v-2H3v2z"/></svg>',
-        codeIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
-        linkIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
-      },
-    },
-  })
-  
-  // Listen for content changes
-  crepe.value.on((listener) => {
-    listener.markdownUpdated((_, markdown) => {
-      emit('update:modelValue', markdown)
+  editor.value = await Editor.make()
+    .config((ctx) => {
+      ctx.set(rootCtx, editorRef.value)
+      ctx.set(defaultValueCtx, defaultContent)
+      
+      ctx.get(listenerCtx).markdownUpdated((ctx, markdown) => {
+        emit('update:modelValue', markdown)
+        editorCtx.value = ctx
+      })
     })
+    .use(commonmark)
+    .use(gfm)
+    .use(history)
+    .use(listener)
+    .create()
+  
+  // Store context for command execution
+  editorCtx.value = editor.value.ctx
+  
+  // Create block provider for custom handle
+  const handleEl = document.createElement('div')
+  handleEl.className = 'milkdown-block-handle-placeholder'
+  
+  blockProvider.value = new BlockProvider({
+    ctx: editor.value.ctx,
+    content: handleEl,
+    shouldShow: (view) => {
+      const { selection } = view.state
+      const { $from } = selection
+      const node = $from.node($from.depth)
+      
+      // Don't show for empty documents
+      if (view.state.doc.content.size <= 2) return false
+      
+      return true
+    },
   })
   
-  await crepe.value.create()
-}
-
-// Update content when modelValue changes externally
-watch(() => props.modelValue, (newValue) => {
-  if (crepe.value && newValue !== undefined) {
-    // Only update if significantly different to avoid cursor jump
-    const currentMarkdown = crepe.value.getMarkdown()
-    if (currentMarkdown !== newValue) {
-      crepe.value.setMarkdown(newValue)
+  // Watch for block provider updates
+  const updateObserver = () => {
+    if (blockProvider.value?.active) {
+      const active = blockProvider.value.active
+      const el = active.el
+      const rect = el.getBoundingClientRect()
+      
+      blockHandle.visible = true
+      blockHandle.top = rect.top
+      blockHandle.left = rect.left - 28 // Position to the left of the block
+      blockHandle.activeNode = active
+    } else {
+      blockHandle.visible = false
+      showToolbar.value = false
     }
   }
-})
+  
+  // Poll for updates (simplified approach)
+  const pollInterval = setInterval(updateObserver, 100)
+  
+  // Store for cleanup
+  ;(editor.value as any)._pollInterval = pollInterval
+}
 
-// AI Dialog
-function openAIDialog() {
+// Block handle interactions
+function handleMouseEnter() {
+  if (collapseTimer) {
+    clearTimeout(collapseTimer)
+    collapseTimer = null
+  }
+  if (!showToolbar.value && !isDragging.value) {
+    expandTimer = setTimeout(() => {
+      showToolbar.value = true
+    }, 150)
+  }
+}
+
+function handleMouseLeave() {
+  if (expandTimer) {
+    clearTimeout(expandTimer)
+    expandTimer = null
+  }
+  if (showToolbar.value) {
+    collapseTimer = setTimeout(() => {
+      showToolbar.value = false
+    }, 200)
+  }
+}
+
+function toggleToolbar() {
+  showToolbar.value = !showToolbar.value
+}
+
+function handleDragStart(e: DragEvent) {
+  isDragging.value = true
+  showToolbar.value = false
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', '')
+  }
+}
+
+function handleDragEnd(_e: DragEvent) {
+  isDragging.value = false
+}
+
+// Block operations
+function executeCommand(commandKey: string, args?: any) {
+  if (!editorCtx.value) return
+  
+  try {
+    const commands = editorCtx.value.get(commandsCtx)
+    commands.call(commandKey, args)
+  } catch (e) {
+    console.error('Command error:', e)
+  }
+}
+
+function addBlockBelow() {
+  if (!editorCtx.value) return
+  
+  const schema = editorCtx.value.get(schemaCtx)
+  const paragraph = paragraphSchema.type(editorCtx.value)
+  
+  executeCommand(addBlockTypeCommand.key, { nodeType: paragraph })
+  showToolbar.value = false
+}
+
+function deleteBlock() {
+  if (!editorCtx.value) return
+  
+  const view = editorCtx.value.get(editorViewCtx)
+  const { state } = view
+  const { $from, $to } = state.selection
+  
+  // Delete the current block
+  const tr = state.tr.delete($from.before(), $to.after())
+  view.dispatch(tr)
+  
+  showToolbar.value = false
+}
+
+function turnInto(type: string, level?: number) {
+  if (!editorCtx.value) return
+  
+  const schema = editorCtx.value.get(schemaCtx)
+  
+  try {
+    const commands = editorCtx.value.get(commandsCtx)
+    
+    // Clear any markdown prefix first
+    commands.call(clearTextInCurrentBlockCommand.key)
+    
+    switch (type) {
+      case 'heading': {
+        const heading = headingSchema.type(editorCtx.value)
+        commands.call(setBlockTypeCommand.key, {
+          nodeType: heading,
+          attrs: { level }
+        })
+        break
+      }
+      case 'paragraph': {
+        const paragraph = paragraphSchema.type(editorCtx.value)
+        commands.call(setBlockTypeCommand.key, { nodeType: paragraph })
+        break
+      }
+      case 'bullet_list': {
+        const bulletList = bulletListSchema.type(editorCtx.value)
+        const listItem = schema.nodes['list_item']
+        commands.call(wrapInBlockTypeCommand.key, { nodeType: bulletList })
+        break
+      }
+      case 'ordered_list': {
+        const orderedList = orderedListSchema.type(editorCtx.value)
+        commands.call(wrapInBlockTypeCommand.key, { nodeType: orderedList })
+        break
+      }
+      case 'blockquote': {
+        const blockquote = blockquoteSchema.type(editorCtx.value)
+        commands.call(wrapInBlockTypeCommand.key, { nodeType: blockquote })
+        break
+      }
+      case 'code_block': {
+        const codeBlock = codeBlockSchema.type(editorCtx.value)
+        commands.call(setBlockTypeCommand.key, { nodeType: codeBlock })
+        break
+      }
+    }
+  } catch (e) {
+    console.error('Turn into error:', e)
+  }
+  
+  showToolbar.value = false
+}
+
+function openAI() {
+  showToolbar.value = false
   showAIDialog.value = true
   nextTick(() => aiInputRef.value?.focus())
 }
 
+// Update content when modelValue changes externally
+watch(() => props.modelValue, (newValue) => {
+  if (editor.value && newValue !== undefined) {
+    // Only update if significantly different to avoid cursor jump
+    // This is a simplified approach
+  }
+})
+
+// AI Dialog
 function closeAIDialog() {
   showAIDialog.value = false
 }
@@ -194,19 +470,27 @@ function renderMarkdown(content: string): string {
 function handleKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault()
-    openAIDialog()
+    showAIDialog.value = true
+    nextTick(() => aiInputRef.value?.focus())
   }
 }
 
 // Destroy editor
 async function destroyEditor() {
-  if (crepe.value) {
+  if (blockProvider.value) {
+    blockProvider.value.destroy()
+    blockProvider.value = null
+  }
+  if (editor.value) {
+    if ((editor.value as any)._pollInterval) {
+      clearInterval((editor.value as any)._pollInterval)
+    }
     try {
-      crepe.value.destroy()
+      await editor.value.destroy()
     } catch (e) {
       console.error('Destroy error:', e)
     }
-    crepe.value = null
+    editor.value = null
   }
 }
 
@@ -219,9 +503,11 @@ onMounted(() => {
 onUnmounted(() => {
   destroyEditor()
   document.removeEventListener('keydown', handleKeydown)
+  if (expandTimer) clearTimeout(expandTimer)
+  if (collapseTimer) clearTimeout(collapseTimer)
 })
 
-defineExpose({ openAIDialog })
+defineExpose({ openAI: () => { showAIDialog.value = true } })
 </script>
 
 <style scoped>
@@ -241,8 +527,8 @@ defineExpose({ openAIDialog })
   min-height: 0;
 }
 
-/* Crepe Editor Overrides - Notion-like */
-.editor-root :deep(.crepe) {
+/* Milkdown Editor Styles - Notion-like */
+.editor-root :deep(.milkdown) {
   font-family: -apple-system, BlinkMacMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
   font-size: 16px;
   line-height: 1.6;
@@ -251,13 +537,13 @@ defineExpose({ openAIDialog })
   min-height: 100%;
 }
 
-.editor-root :deep(.crepe .ProseMirror) {
+.editor-root :deep(.milkdown .ProseMirror) {
   outline: none;
   min-height: 100%;
 }
 
 /* Headings */
-.editor-root :deep(.crepe h1) {
+.editor-root :deep(.milkdown h1) {
   font-size: 2.25rem;
   font-weight: 700;
   margin: 0 0 0.5rem;
@@ -266,26 +552,26 @@ defineExpose({ openAIDialog })
   color: #37352f;
 }
 
-.editor-root :deep(.crepe h2) {
+.editor-root :deep(.milkdown h2) {
   font-size: 1.5rem;
   font-weight: 600;
   margin: 1rem 0 0.375rem;
   line-height: 1.3;
 }
 
-.editor-root :deep(.crepe h3) {
+.editor-root :deep(.milkdown h3) {
   font-size: 1.25rem;
   font-weight: 600;
   margin: 0.75rem 0 0.25rem;
 }
 
 /* Paragraph */
-.editor-root :deep(.crepe p) {
+.editor-root :deep(.milkdown p) {
   margin: 0.25rem 0;
 }
 
 /* Code */
-.editor-root :deep(.crepe code) {
+.editor-root :deep(.milkdown code) {
   background: rgba(135, 131, 120, 0.15);
   color: #eb5757;
   padding: 0.2em 0.4em;
@@ -294,7 +580,7 @@ defineExpose({ openAIDialog })
   font-size: 85%;
 }
 
-.editor-root :deep(.crepe pre) {
+.editor-root :deep(.milkdown pre) {
   background: #f7f6f3;
   border-radius: 4px;
   padding: 16px;
@@ -302,7 +588,7 @@ defineExpose({ openAIDialog })
   overflow-x: auto;
 }
 
-.editor-root :deep(.crepe pre code) {
+.editor-root :deep(.milkdown pre code) {
   background: transparent;
   color: inherit;
   padding: 0;
@@ -310,7 +596,7 @@ defineExpose({ openAIDialog })
 }
 
 /* Blockquote */
-.editor-root :deep(.crepe blockquote) {
+.editor-root :deep(.milkdown blockquote) {
   border-left: 3px solid #37352f;
   padding-left: 16px;
   margin: 8px 0;
@@ -318,186 +604,160 @@ defineExpose({ openAIDialog })
 }
 
 /* Lists */
-.editor-root :deep(.crepe ul),
-.editor-root :deep(.crepe ol) {
+.editor-root :deep(.milkdown ul),
+.editor-root :deep(.milkdown ol) {
   margin: 4px 0;
   padding-left: 24px;
 }
 
-.editor-root :deep(.crepe li) {
+.editor-root :deep(.milkdown li) {
   margin: 2px 0;
 }
 
-.editor-root :deep(.crepe li p) {
+.editor-root :deep(.milkdown li p) {
   margin: 0;
 }
 
 /* Tables */
-.editor-root :deep(.crepe table) {
+.editor-root :deep(.milkdown table) {
   border-collapse: collapse;
   width: 100%;
   margin: 8px 0;
 }
 
-.editor-root :deep(.crepe th),
-.editor-root :deep(.crepe td) {
+.editor-root :deep(.milkdown th),
+.editor-root :deep(.milkdown td) {
   border: 1px solid #e0e0e0;
   padding: 8px 12px;
   text-align: left;
 }
 
-.editor-root :deep(.crepe th) {
+.editor-root :deep(.milkdown th) {
   background: #f7f6f3;
   font-weight: 600;
 }
 
 /* Links */
-.editor-root :deep(.crepe a) {
+.editor-root :deep(.milkdown a) {
   color: #2383e2;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.editor-root :deep(.crepe a:hover) {
+.editor-root :deep(.milkdown a:hover) {
   color: #0077d4;
 }
 
 /* HR */
-.editor-root :deep(.crepe hr) {
+.editor-root :deep(.milkdown hr) {
   border: none;
   border-top: 1px solid #e0e0e0;
   margin: 16px 0;
 }
 
 /* Images */
-.editor-root :deep(.crepe img) {
+.editor-root :deep(.milkdown img) {
   max-width: 100%;
   border-radius: 4px;
   margin: 8px 0;
 }
 
 /* Selection highlight */
-.editor-root :deep(.crepe ::selection) {
+.editor-root :deep(.milkdown ::selection) {
   background: rgba(35, 131, 226, 0.28);
 }
 
-/* Block Handle - 拖拽手柄样式优化 */
-.editor-root :deep(.crepe-block-handle) {
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.editor-root :deep(.crepe-block-handle:hover),
-.editor-root :deep(.ProseMirror-selectednode + .crepe-block-handle) {
-  opacity: 1;
-}
-
-/* Slash Menu - 命令菜单样式 */
-.editor-root :deep(.crepe-slash-menu) {
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
-  border: 1px solid #e5e5e5;
-  padding: 8px 0;
-  min-width: 280px;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.editor-root :deep(.crepe-slash-menu-item) {
+/* Custom Block Handle */
+.custom-block-handle {
+  position: fixed;
+  z-index: 100;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: background 0.1s;
+  user-select: none;
 }
 
-.editor-root :deep(.crepe-slash-menu-item:hover),
-.editor-root :deep(.crepe-slash-menu-item.selected) {
-  background: #f5f5f5;
-}
-
-.editor-root :deep(.crepe-slash-menu-icon) {
-  width: 40px;
-  height: 40px;
-  border-radius: 4px;
-  background: #f7f6f3;
+.handle-trigger {
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  cursor: grab;
+  color: #9b9a97;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  background: transparent;
 }
 
-.editor-root :deep(.crepe-slash-menu-label) {
-  font-weight: 500;
-  font-size: 14px;
+.handle-trigger:hover {
+  background: rgba(55, 53, 47, 0.08);
   color: #37352f;
 }
 
-.editor-root :deep(.crepe-slash-menu-desc) {
-  font-size: 12px;
-  color: #787774;
+.handle-trigger:active {
+  cursor: grabbing;
 }
 
-/* Toolbar - 选中文本工具栏 */
-.editor-root :deep(.crepe-toolbar) {
-  background: #1f1f1f;
+.handle-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #fff;
+  border: 1px solid #e5e5e5;
   border-radius: 6px;
   padding: 4px 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-left: 4px;
 }
 
-.editor-root :deep(.crepe-toolbar-item) {
-  background: transparent;
-  border: none;
-  color: #fff;
-  padding: 6px;
-  border-radius: 4px;
-  cursor: pointer;
+.toolbar-btn {
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.1s;
-}
-
-.editor-root :deep(.crepe-toolbar-item:hover) {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.editor-root :deep(.crepe-toolbar-item.active) {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-/* Link Tooltip */
-.editor-root :deep(.crepe-link-tooltip) {
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  border: 1px solid #e5e5e5;
-  padding: 8px 12px;
-}
-
-.editor-root :deep(.crepe-link-tooltip input) {
-  border: 1px solid #e5e5e5;
+  background: transparent;
+  border: none;
   border-radius: 4px;
-  padding: 6px 10px;
-  font-size: 14px;
-  outline: none;
-  min-width: 200px;
+  cursor: pointer;
+  color: #37352f;
+  transition: all 0.1s ease;
 }
 
-.editor-root :deep(.crepe-link-tooltip input:focus) {
-  border-color: #2383e2;
+.toolbar-btn:hover {
+  background: rgba(55, 53, 47, 0.08);
 }
 
-/* Placeholder */
-.editor-root :deep(.crepe .crepe-placeholder) {
-  color: #9b9a97;
-  pointer-events: none;
-  position: absolute;
-  top: 0;
-  left: 0;
+.toolbar-btn:active {
+  background: rgba(55, 53, 47, 0.12);
+}
+
+.toolbar-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.btn-text {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: #e5e5e5;
+  margin: 0 4px;
+}
+
+.ai-btn {
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  color: #fff;
+  border-radius: 4px;
+}
+
+.ai-btn:hover {
+  opacity: 0.9;
+  transform: scale(1.05);
 }
 
 /* Shortcut Hint */
@@ -710,6 +970,17 @@ defineExpose({ openAIDialog })
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 0.15s ease;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  opacity: 0;
+  transform: translateX(-8px);
 }
 
 .dialog-enter-active,
