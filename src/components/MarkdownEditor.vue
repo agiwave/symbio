@@ -191,7 +191,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, shallowRef, watch } from 'vue'
-import { Editor, rootCtx, defaultValueCtx, editorViewCtx, commandsCtx, schemaCtx } from '@milkdown/kit/core'
+import { Editor, rootCtx, defaultValueCtx, editorViewCtx, commandsCtx, schemaCtx, parserCtx } from '@milkdown/kit/core'
 import { commonmark, paragraphSchema, headingSchema, bulletListSchema, orderedListSchema, blockquoteSchema, codeBlockSchema, setBlockTypeCommand, wrapInBlockTypeCommand, addBlockTypeCommand } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
 import { history } from '@milkdown/kit/plugin/history'
@@ -861,10 +861,28 @@ function decreaseLevel() {
 }
 
 // Update content when modelValue changes externally
-watch(() => props.modelValue, (newValue) => {
-  if (editor.value && newValue !== undefined) {
-    // Only update if significantly different to avoid cursor jump
-    // This is a simplified approach
+watch(() => props.modelValue, async (newValue, oldValue) => {
+  if (!editor.value || newValue === undefined) return
+  
+  try {
+    const view = editor.value.ctx.get(editorViewCtx)
+    const { state } = view
+    
+    // Get current markdown content
+    const parser = editor.value.ctx.get(parserCtx)
+    const currentDoc = state.doc
+    
+    // Parse new markdown content
+    const newDoc = await parser(newValue || '')
+    
+    // Only update if content is different
+    if (newDoc && !newDoc.eq(currentDoc)) {
+      view.dispatch(
+        state.tr.replaceWith(0, currentDoc.content.size, newDoc.content)
+      )
+    }
+  } catch (e) {
+    console.warn('[MarkdownEditor] Failed to update content:', e)
   }
 })
 

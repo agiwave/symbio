@@ -77,6 +77,7 @@
             <!-- Markdown 文件使用 MarkdownEditor -->
             <MarkdownEditor
               v-if="isMarkdownFile"
+              :key="selectedPath"
               :model-value="fileContent"
               class="md-editor"
             />
