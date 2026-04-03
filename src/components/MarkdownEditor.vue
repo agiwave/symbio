@@ -412,11 +412,8 @@ async function initEditor() {
   editor.value.ctx.get(editorViewCtx).dom.addEventListener('click', updateBlockHandle)
   editor.value.ctx.get(editorViewCtx).dom.addEventListener('keyup', updateBlockHandle)
   
-  // 监听编辑器 mouseup 事件 - 检测文字选择并打开 AI 对话框
+  // 监听编辑器 mouseup 事件 - 检测文字选择并打开/更新 AI 对话框
   const handleEditorMouseUp = (e: MouseEvent) => {
-    // 如果对话框已打开，不处理
-    if (showAIDialog.value) return
-    
     // 延迟检查，确保选区已经稳定
     setTimeout(() => {
       try {
@@ -427,9 +424,23 @@ async function initEditor() {
             // 获取选区的位置信息
             const range = selection.getRangeAt(0)
             const rect = range.getBoundingClientRect()
-            // 打开 AI 对话框
-            openAIForSelection(text, rect)
+            
+            // 保存选区信息
+            savedSelection = { text, rect }
+            selectedText.value = text
+            calculateDialogPosition()
+            
+            // 如果对话框未打开，打开它
+            if (!showAIDialog.value) {
+              showAIDialog.value = true
+              aiMessages.value = []
+              aiInput.value = ''
+            }
+            // 如果对话框已打开，只更新选区内容（保持消息历史）
           }
+        } else if (showAIDialog.value) {
+          // 选区消失且对话框已打开，关闭对话框
+          closeAIDialog()
         }
       } catch (e) {
         // 忽略错误
