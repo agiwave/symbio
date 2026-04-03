@@ -259,25 +259,68 @@ const aiDialogRef = ref<HTMLElement | null>(null)
 // AI 对话框位置 - 跟随选区
 const aiDialogPosition = reactive({
   top: 80,
-  right: 20,
+  left: 0,
 })
+
+// 对话框尺寸常量
+const DIALOG_WIDTH = 360
+const DIALOG_MIN_HEIGHT = 200
+const MARGIN = 12
 
 const aiDialogStyle = computed(() => ({
   top: `${aiDialogPosition.top}px`,
-  right: `${aiDialogPosition.right}px`,
+  left: `${aiDialogPosition.left}px`,
 }))
 
 // 保存选区信息（用于在对话框打开后仍能引用选中的文字）
 let savedSelection: { text: string; rect: DOMRect } | null = null
 
-// 计算对话框位置，基于保存的选区信息
+// 计算对话框位置，跟随选区并避免超出屏幕
 function calculateDialogPosition() {
   if (savedSelection && savedSelection.rect) {
-    aiDialogPosition.top = savedSelection.rect.bottom + 12
-    aiDialogPosition.right = 20
+    const rect = savedSelection.rect
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    
+    // 估算对话框高度
+    const estimatedHeight = DIALOG_MIN_HEIGHT + (selectedText.value.length > 50 ? 60 : 0)
+    
+    // 水平位置：优先显示在选区右侧
+    let left = rect.right + MARGIN
+    if (left + DIALOG_WIDTH > viewportWidth - MARGIN) {
+      // 右侧空间不够，尝试显示在左侧
+      left = rect.left - DIALOG_WIDTH - MARGIN
+      if (left < MARGIN) {
+        // 左侧也不够，显示在选区内或紧贴左侧
+        left = Math.max(MARGIN, Math.min(rect.left, viewportWidth - DIALOG_WIDTH - MARGIN))
+      }
+    }
+    
+    // 垂直位置：优先显示在选区下方
+    let top = rect.bottom + MARGIN
+    const spaceBelow = viewportHeight - rect.bottom - MARGIN
+    const spaceAbove = rect.top - MARGIN
+    
+    if (spaceBelow < estimatedHeight && spaceAbove > spaceBelow) {
+      // 下方空间不够且上方空间更大，显示在上方
+      top = rect.top - estimatedHeight - MARGIN
+      if (top < MARGIN) {
+        top = MARGIN
+      }
+    } else if (top + estimatedHeight > viewportHeight - MARGIN) {
+      // 下方空间不够，尽量显示在屏幕内
+      top = viewportHeight - estimatedHeight - MARGIN
+      if (top < MARGIN) {
+        top = MARGIN
+      }
+    }
+    
+    aiDialogPosition.top = top
+    aiDialogPosition.left = left
   } else {
+    // 默认位置：右上角
     aiDialogPosition.top = 80
-    aiDialogPosition.right = 20
+    aiDialogPosition.left = window.innerWidth - DIALOG_WIDTH - MARGIN
   }
 }
 
@@ -309,8 +352,9 @@ function openAI() {
   savedSelection = null
   selectedText.value = ''
   aiMessages.value = []
+  // 默认显示在右上角
   aiDialogPosition.top = 80
-  aiDialogPosition.right = 20
+  aiDialogPosition.left = window.innerWidth - DIALOG_WIDTH - MARGIN
   showAIDialog.value = true
   nextTick(() => aiInputRef.value?.focus())
 }

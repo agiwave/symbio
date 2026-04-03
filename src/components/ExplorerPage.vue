@@ -33,7 +33,7 @@
     </aside>
 
     <!-- 右侧：内容区 -->
-    <main class="content-area">
+    <main class="content-area" ref="contentAreaRef">
       <div v-if="selectedPath" class="content-container">
         <header class="content-header">
           <div class="path-breadcrumb">
@@ -103,20 +103,29 @@
         />
       </div>
     </aside>
+    
+    <!-- AI 选区对话框 -->
+    <AISelectionDialog :state="aiSelection" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useExplorerStore, type FileItem } from '../stores/explorer'
 import FileTreeNode from './FileTreeNode.vue'
 import AIChatPanel from './AIChatPanel.vue'
+import AISelectionDialog from './AISelectionDialog.vue'
 import { createSessionId, type SessionMessage } from '../services/session'
+import { useAISelection } from '@/composables/useAISelection'
 
 const store = useExplorerStore()
 
 // UI 状态
 const chatVisible = ref(false)
+const contentAreaRef = ref<HTMLElement | null>(null)
+
+// AI 选区交互 - 使用 composable
+const aiSelection = useAISelection({ sessionId: 'explorer-selection-ai' })
 
 // AI 对话状态 - 使用固定的 session_id
 const EXPLORER_SESSION_ID = 'explorer-ai-session'
@@ -149,7 +158,33 @@ const childrenItems = computed(() => {
 
 onMounted(() => {
   store.init()
+  // 添加键盘事件监听
+  document.addEventListener('keydown', handleKeydown)
+  // 添加选区监听
+  if (contentAreaRef.value) {
+    contentAreaRef.value.addEventListener('mouseup', handleMouseUp)
+  }
 })
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
+  if (contentAreaRef.value) {
+    contentAreaRef.value.removeEventListener('mouseup', handleMouseUp)
+  }
+})
+
+// 键盘事件处理
+function handleKeydown(e: KeyboardEvent) {
+  // Escape 关闭 AI 选区对话框
+  if (aiSelection.handleEscape(e)) return
+  // Ctrl+K 打开 AI 选区对话框
+  if (aiSelection.handleCtrlK(e)) return
+}
+
+// 选区事件处理
+function handleMouseUp(e: MouseEvent) {
+  aiSelection.handleMouseUp(e, contentAreaRef.value || undefined)
+}
 
 // 刷新
 function refresh() {
