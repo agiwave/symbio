@@ -304,9 +304,14 @@ async function initEditor() {
         const rect = dom.getBoundingClientRect()
         const editorRect = editorRef.value.getBoundingClientRect()
         
+        // 手柄放在内容块左边，但在编辑器 padding 区域内
+        // editorRect.left 是编辑器左边，padding 是 48px
+        const handleWidth = 24
+        const handleLeft = Math.max(editorRect.left, rect.left - handleWidth - 4)
+        
         blockHandle.visible = true
         blockHandle.top = rect.top
-        blockHandle.left = editorRect.left - 28
+        blockHandle.left = handleLeft
         blockHandle.activeNode = { node, pos, el: dom }
         blockHandle.activePos = pos
       } else {
@@ -431,8 +436,8 @@ function handleDragOver(e: DragEvent) {
         
         dropIndicator.visible = true
         dropIndicator.top = domRect.bottom - 2
-        dropIndicator.left = editorRect.left
-        dropIndicator.width = editorRect.width
+        dropIndicator.left = domRect.left
+        dropIndicator.width = domRect.width
       }
     }
   } catch (err) {
