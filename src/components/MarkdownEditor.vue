@@ -13,13 +13,10 @@
           @mouseenter="handleMouseEnter"
           @mouseleave="handleMouseLeave"
         >
-          <!-- 拖拽触发区域 -->
+          <!-- 未展开时的触发按钮 -->
           <div 
+            v-if="!showToolbar"
             class="handle-trigger"
-            :class="{ dragging: isDragging }"
-            draggable="true"
-            @dragstart="handleDragStart"
-            @dragend="handleDragEnd"
           >
             <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
               <circle cx="9" cy="6" r="1.5"/>
@@ -31,9 +28,28 @@
             </svg>
           </div>
           
-          <!-- 展开的操作栏 - 绝对定位 -->
+          <!-- 展开的工具条 -->
           <Transition name="expand">
             <div v-if="showToolbar" class="handle-toolbar">
+              <!-- 拖拽按钮 - 第一个 -->
+              <button 
+                class="toolbar-btn drag-btn" 
+                title="拖拽移动"
+                draggable="true"
+                @dragstart="handleDragStart"
+                @dragend="handleDragEnd"
+                @click.stop.prevent
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                  <circle cx="9" cy="5" r="1.5"/>
+                  <circle cx="15" cy="5" r="1.5"/>
+                  <circle cx="9" cy="12" r="1.5"/>
+                  <circle cx="15" cy="12" r="1.5"/>
+                  <circle cx="9" cy="19" r="1.5"/>
+                  <circle cx="15" cy="19" r="1.5"/>
+                </svg>
+              </button>
+              <div class="toolbar-divider"></div>
               <button class="toolbar-btn" @click.stop="addBlockBelow" title="添加块">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="12" y1="5" x2="12" y2="19"/>
@@ -944,7 +960,6 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: grab;
   color: #9b9a97;
   border-radius: 4px;
   transition: all 0.15s ease;
@@ -957,16 +972,7 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
   color: #37352f;
 }
 
-.handle-trigger:active,
-.handle-trigger.dragging {
-  cursor: grabbing;
-  background: rgba(55, 53, 47, 0.12);
-}
-
 .handle-toolbar {
-  position: absolute;
-  top: 0;
-  left: 28px;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -976,6 +982,19 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
   padding: 4px 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   white-space: nowrap;
+}
+
+/* 拖拽按钮样式 */
+.drag-btn {
+  cursor: grab;
+}
+
+.drag-btn:active {
+  cursor: grabbing;
+}
+
+.drag-btn:hover {
+  background: rgba(55, 53, 47, 0.12) !important;
 }
 
 /* Drop Indicator */
