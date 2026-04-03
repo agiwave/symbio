@@ -61,9 +61,9 @@
               {{ msg.role === 'user' ? '👤' : '🤖' }}
             </div>
             <div class="message-content">
-              <!-- 工具调用信息 -->
-              <div v-if="msg.role === 'assistant' && toolCalls.length > 0 && msg.content === ''" class="tool-calls">
-                <div v-for="(tool, idx) in toolCalls" :key="idx" class="tool-call">
+              <!-- 工具调用信息 - 支持实时对话和历史加载两种情况 -->
+              <div v-if="msg.role === 'assistant' && getToolCalls(msg).length > 0" class="tool-calls">
+                <div v-for="(tool, idx) in getToolCalls(msg)" :key="idx" class="tool-call">
                   <div class="tool-call-header">
                     <span class="tool-call-icon">🔧</span>
                     <span class="tool-call-name">{{ tool.name }}</span>
@@ -156,6 +156,25 @@ const configError = ref<string | null>(null)
 // 流式消息状态
 const streamingContent = ref('')
 const toolCalls = ref<Array<{ name: string; args: string; result?: string }>>([])
+
+// 获取消息的工具调用信息（支持实时和历史两种情况）
+function getToolCalls(msg: SessionMessage) {
+  // 如果是实时对话，使用 toolCalls 变量
+  if (toolCalls.value.length > 0 && msg.content === '') {
+    return toolCalls.value
+  }
+  
+  // 如果是历史消息，从消息中获取 tool_calls
+  if (msg.tool_calls && msg.tool_calls.length > 0) {
+    return msg.tool_calls.map(tc => ({
+      name: tc.function?.name || 'unknown',
+      args: tc.function?.arguments || '',
+      result: undefined // 历史消息中没有 result
+    }))
+  }
+  
+  return []
+}
 
 // 渲染 Markdown
 function renderMarkdown(content: string): string {

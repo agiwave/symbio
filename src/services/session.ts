@@ -12,6 +12,15 @@ export interface SessionMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: number
+  tool_calls?: Array<{
+    id?: string
+    type?: string
+    function?: {
+      name: string
+      arguments: string
+    }
+  }>
+  tool_call_id?: string
 }
 
 export interface Session {
