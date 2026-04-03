@@ -123,44 +123,68 @@
       ></div>
     </Teleport>
     
-    <!-- AI 对话框 -->
+    <!-- AI 悬浮对话框 -->
     <Teleport to="body">
-      <Transition name="dialog">
-        <div v-if="showAIDialog" class="ai-dialog-overlay" @click.self="closeAIDialog">
-          <div class="ai-dialog">
-            <div class="ai-dialog-header">
-              <span class="ai-header-icon">✨</span>
-              <span class="ai-dialog-title">AI 助手</span>
-              <button class="ai-dialog-close" @click="closeAIDialog">×</button>
-            </div>
-            <div class="ai-dialog-body">
-              <div class="ai-messages" ref="messagesRef">
-                <div v-for="(msg, idx) in aiMessages" :key="idx" :class="['ai-msg', msg.role]">
-                  <div class="ai-msg-content" v-html="renderMarkdown(msg.content)"></div>
-                </div>
-                <div v-if="aiLoading" class="ai-msg assistant loading">
-                  <div class="ai-msg-content">
-                    <span class="typing-dots">...</span>
-                  </div>
+      <!-- 选中文字时的快捷操作 -->
+      <Transition name="fade">
+        <div 
+          v-if="selectionMenu.visible && !showAIDialog" 
+          class="selection-menu"
+          :style="selectionMenuStyle"
+        >
+          <button class="selection-btn" @click="openAIWithSelection">
+            <span>✨</span>
+            <span>AI 助手</span>
+          </button>
+        </div>
+      </Transition>
+      
+      <!-- AI 悬浮对话框 -->
+      <Transition name="slide-up">
+        <div 
+          v-if="showAIDialog" 
+          class="ai-floating-dialog"
+          :style="aiDialogStyle"
+        >
+          <div class="ai-dialog-header">
+            <span class="ai-header-icon">✨</span>
+            <span class="ai-dialog-title">AI 助手</span>
+            <button class="ai-dialog-close" @click="closeAIDialog">×</button>
+          </div>
+          
+          <!-- 选中的文字提示 -->
+          <div v-if="selectedText" class="ai-selected-context">
+            <span class="context-label">选中的内容：</span>
+            <div class="context-text">{{ selectedText.slice(0, 100) }}{{ selectedText.length > 100 ? '...' : '' }}</div>
+          </div>
+          
+          <div class="ai-dialog-body">
+            <div class="ai-messages" ref="messagesRef">
+              <div v-for="(msg, idx) in aiMessages" :key="idx" :class="['ai-msg', msg.role]">
+                <div class="ai-msg-content" v-html="renderMarkdown(msg.content)"></div>
+              </div>
+              <div v-if="aiLoading" class="ai-msg assistant loading">
+                <div class="ai-msg-content">
+                  <span class="typing-dots">...</span>
                 </div>
               </div>
             </div>
-            <div class="ai-dialog-footer">
-              <textarea
-                v-model="aiInput"
-                placeholder="输入问题... (Enter 发送)"
-                @keydown.enter.exact.prevent="sendAIMessage"
-                @keydown.escape.exact="closeAIDialog"
-                ref="aiInputRef"
-                rows="1"
-              ></textarea>
-              <button @click="sendAIMessage" :disabled="!aiInput.trim() || aiLoading" class="ai-send-btn">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="22" y1="2" x2="11" y2="13"></line>
-                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
-              </button>
-            </div>
+          </div>
+          <div class="ai-dialog-footer">
+            <textarea
+              v-model="aiInput"
+              :placeholder="selectedText ? '针对选中内容提问...' : '输入问题... (Enter 发送)'"
+              @keydown.enter.exact.prevent="sendAIMessage"
+              @keydown.escape.exact="closeAIDialog"
+              ref="aiInputRef"
+              rows="1"
+            ></textarea>
+            <button @click="sendAIMessage" :disabled="!aiInput.trim() || aiLoading" class="ai-send-btn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
           </div>
         </div>
       </Transition>
@@ -243,6 +267,60 @@ const showAIDialog = ref(false)
 const aiInput = ref('')
 const aiMessages = ref<{ role: 'user' | 'assistant'; content: string }[]>([])
 const aiLoading = ref(false)
+const selectedText = ref('')
+
+// Selection menu for AI
+const selectionMenu = reactive({
+  visible: false,
+  top: 0,
+  left: 0,
+})
+
+const selectionMenuStyle = computed(() => ({
+  top: `${selectionMenu.top}px`,
+  left: `${selectionMenu.left}px`,
+}))
+
+const aiDialogStyle = computed(() => ({
+  top: '80px',
+  right: '20px',
+}))
+
+// 处理文字选中
+function handleSelectionChange() {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed) {
+    selectionMenu.visible = false
+    selectedText.value = ''
+    return
+  }
+  
+  const text = selection.toString().trim()
+  if (text.length > 0) {
+    selectedText.value = text
+    
+    // 获取选区的位置
+    const range = selection.getRangeAt(0)
+    const rect = range.getBoundingClientRect()
+    
+    selectionMenu.visible = true
+    selectionMenu.top = rect.top - 40
+    selectionMenu.left = rect.left + (rect.width / 2) - 50
+  } else {
+    selectionMenu.visible = false
+    selectedText.value = ''
+  }
+}
+
+function openAIWithSelection() {
+  selectionMenu.visible = false
+  showAIDialog.value = true
+  // 预填充提示
+  if (selectedText.value) {
+    aiInput.value = `关于这段内容："${selectedText.value.slice(0, 50)}${selectedText.value.length > 50 ? '...' : ''}"，请`
+  }
+  nextTick(() => aiInputRef.value?.focus())
+}
 
 // Initialize editor
 async function initEditor() {

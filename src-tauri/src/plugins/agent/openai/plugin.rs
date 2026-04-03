@@ -744,6 +744,16 @@ impl OpenAiPlugin {
                                             // 提取内容
                                             if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
                                                 stream_content.push_str(content);
+                                                
+                                                // 实时返回累积内容
+                                                yield StreamChunk {
+                                                    data: json!({
+                                                        "content": stream_content.clone(),
+                                                        "done": false
+                                                    }),
+                                                    done: false,
+                                                    error: None,
+                                                };
                                             }
 
                                             // 使用 ToolCallAccumulator 处理 tool_calls

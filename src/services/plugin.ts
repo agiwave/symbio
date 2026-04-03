@@ -46,7 +46,7 @@ export async function callPlugin<T = unknown>(
 
 /**
  * 流式调用插件（真正的流式模式）
- * 
+ *
  * 使用 Tauri 事件系统实时接收每个 chunk
  * 类似 OpenAI/MCP 的 SSE 流式传输
  */

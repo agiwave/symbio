@@ -46,7 +46,7 @@
         </header>
         
         <div class="chat-messages" ref="messagesRef">
-          <div v-if="activeSession.messages.length === 0" class="empty-chat">
+          <div v-if="activeSession.messages.length === 0 && !isLoading" class="empty-chat">
             <p>开始与 AI 对话</p>
             <p class="hint">输入问题或粘贴代码进行分析</p>
           </div>
@@ -82,11 +82,13 @@
             </div>
           </div>
 
+          <!-- 流式加载指示器 -->
           <div v-if="isLoading" class="message assistant loading">
             <div class="message-avatar">🤖</div>
             <div class="message-content">
-              <!-- 流式内容 -->
+              <!-- 显示流式内容（如果有） -->
               <div v-if="streamingContent" class="message-text" v-html="renderMarkdown(streamingContent)"></div>
+              <!-- 否则显示打字指示器 -->
               <div v-else class="typing-indicator">
                 <span></span><span></span><span></span>
               </div>
@@ -341,7 +343,7 @@ async function sendMessageToAI() {
         // 处理工具调用信息
         if (chunk.data && typeof chunk.data === 'object') {
           const data = chunk.data as Record<string, unknown>
-          
+
           // 检查是否有工具调用
           if (data.tool_calls && Array.isArray(data.tool_calls)) {
             toolCalls.value = data.tool_calls.map((tc: any) => ({
@@ -351,14 +353,9 @@ async function sendMessageToAI() {
             }))
           }
 
-          // 检查是否有内容
+          // 检查是否有内容 - 只更新 streamingContent
           if (data.content && typeof data.content === 'string') {
             streamingContent.value = data.content as string
-            
-            // 更新助手消息内容
-            if (activeSession.value && activeSession.value.messages[assistantMessageIndex]) {
-              activeSession.value.messages[assistantMessageIndex].content = streamingContent.value
-            }
           }
 
           // 检查是否有错误
@@ -367,21 +364,21 @@ async function sendMessageToAI() {
           }
         }
 
-        // 滚动到底部
-        nextTick(() => scrollToBottom())
+        // 立即滚动到底部
+        scrollToBottom()
       }
     )
 
-    // 流完成
+    // 流完成 - 将最终内容添加到消息列表
     if (response.error) {
       configError.value = response.error
       if (activeSession.value && activeSession.value.messages[assistantMessageIndex]) {
         activeSession.value.messages[assistantMessageIndex].content = `错误: ${response.error}`
       }
-    } else if (response.content) {
-      // 确保最终内容已设置
+    } else if (streamingContent.value) {
+      // 使用流式内容作为最终内容
       if (activeSession.value && activeSession.value.messages[assistantMessageIndex]) {
-        activeSession.value.messages[assistantMessageIndex].content = response.content
+        activeSession.value.messages[assistantMessageIndex].content = streamingContent.value
       }
     }
 
