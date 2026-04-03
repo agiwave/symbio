@@ -6,11 +6,15 @@
         ref="dialogRef"
         class="ai-selection-dialog"
         :style="state.dialogStyle.value"
+        :class="{ dragging: state.isDragging.value }"
       >
-        <div class="dialog-header">
+        <div 
+          class="dialog-header" 
+          @mousedown="handleDragStart"
+        >
           <span class="header-icon">✨</span>
           <span class="dialog-title">AI 助手</span>
-          <button class="dialog-close" @click="state.close">×</button>
+          <button class="dialog-close" @click.stop="state.close">×</button>
         </div>
         
         <!-- 选中的文字提示 -->
@@ -30,9 +34,13 @@
             >
               <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
             </div>
+            <!-- 流式加载指示器 -->
             <div v-if="state.loading.value" class="msg assistant loading">
               <div class="msg-content">
-                <span class="typing-dots">...</span>
+                <!-- 显示流式内容 -->
+                <div v-if="streamingContent" v-html="renderMarkdown(streamingContent)"></div>
+                <!-- 否则显示打字指示器 -->
+                <span v-else class="typing-dots">...</span>
               </div>
             </div>
           </div>
@@ -67,7 +75,7 @@
 import { ref, nextTick, watch } from 'vue'
 import { marked } from 'marked'
 import type { AISelectionReturn } from '@/composables/useAISelection'
-import { callPlugin } from '@/services/plugin'
+import { sendMessageStream, type ChatMessage } from '@/services/ai'
 
 const props = defineProps<{
   state: AISelectionReturn
@@ -76,6 +84,7 @@ const props = defineProps<{
 const messagesRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const dialogRef = ref<HTMLElement | null>(null)
+const streamingContent = ref('')
 
 // 渲染 Markdown
 function renderMarkdown(content: string): string {
@@ -84,6 +93,20 @@ function renderMarkdown(content: string): string {
   } catch {
     return content
   }
+}
+
+// 滚动到底部
+function scrollToBottom() {
+  if (messagesRef.value) {
+    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+  }
+}
+
+// 拖拽处理
+function handleDragStart(e: MouseEvent) {
+  // 如果点击的是关闭按钮，不处理拖拽
+  if ((e.target as HTMLElement).closest('.dialog-close')) return
+  props.state.startDrag(e)
 }
 
 // 发送消息
@@ -95,22 +118,50 @@ async function handleSend() {
   props.state.messages.value.push({ role: 'user', content: text })
   props.state.input.value = ''
   props.state.loading.value = true
+  streamingContent.value = ''
 
   await nextTick()
   scrollToBottom()
 
   try {
-    const response = await callPlugin<{ content: string }>('/agent/chat', {
-      action: 'send',
-      session_id: props.state.sessionId,
-      messages: props.state.messages.value.map(m => ({ role: m.role, content: m.content })),
-      selected_text: props.state.selectedText.value || undefined,
-    })
-    
-    props.state.messages.value.push({ 
-      role: 'assistant', 
-      content: response.content || '抱歉，无法处理请求。' 
-    })
+    // 构建消息历史
+    const chatMessages: ChatMessage[] = props.state.messages.value.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content
+    }))
+
+    // 流式发送消息
+    const response = await sendMessageStream(
+      chatMessages,
+      props.state.sessionId,
+      (chunk) => {
+        if (chunk.data && typeof chunk.data === 'object') {
+          const data = chunk.data as Record<string, unknown>
+          if (data.content && typeof data.content === 'string') {
+            streamingContent.value = data.content as string
+          }
+        }
+        scrollToBottom()
+      }
+    )
+
+    // 流完成 - 添加助手消息
+    if (response.error) {
+      props.state.messages.value.push({ 
+        role: 'assistant', 
+        content: `错误: ${response.error}` 
+      })
+    } else if (streamingContent.value) {
+      props.state.messages.value.push({ 
+        role: 'assistant', 
+        content: streamingContent.value 
+      })
+    } else {
+      props.state.messages.value.push({ 
+        role: 'assistant', 
+        content: '抱歉，无法处理请求。' 
+      })
+    }
   } catch (error) {
     props.state.messages.value.push({ 
       role: 'assistant', 
@@ -118,22 +169,27 @@ async function handleSend() {
     })
   } finally {
     props.state.loading.value = false
+    streamingContent.value = ''
     nextTick(() => scrollToBottom())
   }
 }
 
-// 滚动到底部
-function scrollToBottom() {
-  if (messagesRef.value) {
-    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-  }
-}
-
-// 监听可见性，更新 dialogRef
+// 监听可见性，更新 dialogRef 并自动 focus
 watch(() => props.state.visible.value, (visible) => {
   if (visible) {
     nextTick(() => {
       props.state.dialogRef.value = dialogRef.value
+      // 自动 focus 输入框
+      inputRef.value?.focus()
+    })
+  }
+})
+
+// 监听选区变化，每次选择都自动 focus
+watch(() => props.state.selectedText.value, () => {
+  if (props.state.visible.value) {
+    nextTick(() => {
+      inputRef.value?.focus()
     })
   }
 })
@@ -152,6 +208,11 @@ watch(() => props.state.visible.value, (visible) => {
   overflow: hidden;
   z-index: 2000;
   backdrop-filter: blur(12px);
+  user-select: none;
+}
+
+.ai-selection-dialog.dragging {
+  cursor: grabbing;
 }
 
 .dialog-header {
@@ -160,6 +221,11 @@ watch(() => props.state.visible.value, (visible) => {
   gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  cursor: grab;
+}
+
+.ai-selection-dialog.dragging .dialog-header {
+  cursor: grabbing;
 }
 
 .header-icon {
@@ -230,6 +296,24 @@ watch(() => props.state.visible.value, (visible) => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 滚动条样式 */
+.messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.messages::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.messages::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .msg {

@@ -149,9 +149,13 @@
               <div v-for="(msg, idx) in aiMessages" :key="idx" :class="['ai-msg', msg.role]">
                 <div class="ai-msg-content" v-html="renderMarkdown(msg.content)"></div>
               </div>
+              <!-- 流式加载指示器 -->
               <div v-if="aiLoading" class="ai-msg assistant loading">
                 <div class="ai-msg-content">
-                  <span class="typing-dots">...</span>
+                  <!-- 显示流式内容 -->
+                  <div v-if="aiStreamingContent" v-html="renderMarkdown(aiStreamingContent)"></div>
+                  <!-- 否则显示打字指示器 -->
+                  <span v-else class="typing-dots">...</span>
                 </div>
               </div>
             </div>
@@ -194,6 +198,7 @@ import { history } from '@milkdown/kit/plugin/history'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
 // BlockProvider removed - using direct editor view monitoring
 import { callPlugin } from '@/services/plugin'
+import { sendMessageStream, type ChatMessage } from '@/services/ai'
 import { marked } from 'marked'
 
 const props = defineProps<{
@@ -253,6 +258,7 @@ const showAIDialog = ref(false)
 const aiInput = ref('')
 const aiMessages = ref<{ role: 'user' | 'assistant'; content: string }[]>([])
 const aiLoading = ref(false)
+const aiStreamingContent = ref('')
 const selectedText = ref('')
 const aiDialogRef = ref<HTMLElement | null>(null)
 
@@ -480,7 +486,8 @@ async function initEditor() {
               aiMessages.value = []
               aiInput.value = ''
             }
-            // 如果对话框已打开，只更新选区内容（保持消息历史）
+            // 每次选择都自动 focus 输入框
+            nextTick(() => aiInputRef.value?.focus())
           }
         } else if (showAIDialog.value) {
           // 选区消失且对话框已打开，关闭对话框
@@ -868,17 +875,42 @@ async function sendAIMessage() {
   aiMessages.value.push({ role: 'user', content: userMessage })
   aiInput.value = ''
   aiLoading.value = true
+  aiStreamingContent.value = ''
   
   try {
-    const response = await callPlugin<{ content: string }>('/agent/chat', {
-      action: 'send',
-      messages: aiMessages.value.map(m => ({ role: m.role, content: m.content }))
-    })
-    aiMessages.value.push({ role: 'assistant', content: response.content || '抱歉，无法处理请求。' })
+    // 构建消息历史
+    const chatMessages: ChatMessage[] = aiMessages.value.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content
+    }))
+    
+    // 流式发送消息
+    const response = await sendMessageStream(
+      chatMessages,
+      'note-selection-ai',
+      (chunk) => {
+        if (chunk.data && typeof chunk.data === 'object') {
+          const data = chunk.data as Record<string, unknown>
+          if (data.content && typeof data.content === 'string') {
+            aiStreamingContent.value = data.content as string
+          }
+        }
+      }
+    )
+    
+    // 流完成 - 添加助手消息
+    if (response.error) {
+      aiMessages.value.push({ role: 'assistant', content: `错误: ${response.error}` })
+    } else if (aiStreamingContent.value) {
+      aiMessages.value.push({ role: 'assistant', content: aiStreamingContent.value })
+    } else {
+      aiMessages.value.push({ role: 'assistant', content: '抱歉，无法处理请求。' })
+    }
   } catch (error) {
     aiMessages.value.push({ role: 'assistant', content: `错误: ${error}` })
   } finally {
     aiLoading.value = false
+    aiStreamingContent.value = ''
     nextTick(() => {
       messagesRef.value?.scrollTo({ top: messagesRef.value.scrollHeight, behavior: 'smooth' })
     })

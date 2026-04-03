@@ -1,4 +1,4 @@
-import { ref, reactive, computed, nextTick, type Ref } from 'vue'
+import { ref, reactive, computed, type Ref } from 'vue'
 
 /**
  * AI 选区交互 composable
@@ -49,10 +49,50 @@ export function useAISelection(options: UseAISelectionOptions) {
   const input = ref('')
   const loading = ref(false)
   const dialogRef = ref<HTMLElement | null>(null)
+  
+  // 拖拽状态
+  const isDragging = ref(false)
+  const dragOffset = reactive({ x: 0, y: 0 })
 
   // 保存的选区信息
   let savedSelection: SelectionInfo | null = null
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  
+  // 开始拖拽
+  function startDrag(e: MouseEvent) {
+    isDragging.value = true
+    dragOffset.x = e.clientX - position.left
+    dragOffset.y = e.clientY - position.top
+    
+    document.addEventListener('mousemove', onDrag)
+    document.addEventListener('mouseup', stopDrag)
+  }
+  
+  // 拖拽中
+  function onDrag(e: MouseEvent) {
+    if (!isDragging.value) return
+    
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    
+    // 计算新位置，限制在屏幕内
+    let newLeft = e.clientX - dragOffset.x
+    let newTop = e.clientY - dragOffset.y
+    
+    // 边界限制
+    newLeft = Math.max(MARGIN, Math.min(newLeft, viewportWidth - DIALOG_WIDTH - MARGIN))
+    newTop = Math.max(MARGIN, Math.min(newTop, viewportHeight - 100))
+    
+    position.left = newLeft
+    position.top = newTop
+  }
+  
+  // 停止拖拽
+  function stopDrag() {
+    isDragging.value = false
+    document.removeEventListener('mousemove', onDrag)
+    document.removeEventListener('mouseup', stopDrag)
+  }
 
   // 计算对话框位置 - 跟随选区，避免超出屏幕
   function calculatePosition(rect: DOMRect) {
@@ -208,6 +248,7 @@ export function useAISelection(options: UseAISelectionOptions) {
     dialogStyle,
     sessionId,
     savedSelection,
+    isDragging,
 
     // 方法
     openForSelection,
@@ -217,6 +258,7 @@ export function useAISelection(options: UseAISelectionOptions) {
     handleMouseUp,
     handleEscape,
     handleCtrlK,
+    startDrag,
   }
 }
 

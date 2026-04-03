@@ -115,6 +115,7 @@ import { useExplorerStore, type FileItem } from '../stores/explorer'
 import FileTreeNode from './FileTreeNode.vue'
 import AIChatPanel from './AIChatPanel.vue'
 import AISelectionDialog from './AISelectionDialog.vue'
+import MarkdownEditor from './MarkdownEditor.vue'
 import { createSessionId, type SessionMessage } from '../services/session'
 import { useAISelection } from '@/composables/useAISelection'
 
@@ -154,6 +155,12 @@ const selectedItem = computed(() => {
 const childrenItems = computed(() => {
   if (!selectedPath.value) return []
   return store.getChildren(selectedPath.value)
+})
+
+// 判断是否是 Markdown 文件
+const isMarkdownFile = computed(() => {
+  if (!selectedPath.value) return false
+  return selectedPath.value.toLowerCase().endsWith('.md')
 })
 
 onMounted(() => {
