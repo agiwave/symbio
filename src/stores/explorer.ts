@@ -204,10 +204,10 @@ export const useExplorerStore = defineStore('explorer', () => {
   async function selectItem(path: string) {
     selectedPath.value = path
 
-    const item = fileTree.value.get(path)
+    let item = fileTree.value.get(path)
     if (!item) {
       // 尝试从后端获取
-      await getItem(path)
+      item = await getItem(path)
     }
 
     // 如果是文件，读取内容

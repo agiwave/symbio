@@ -74,7 +74,14 @@
 
           <!-- 文件：显示内容预览 -->
           <div v-else-if="fileContent" class="file-preview">
-            <pre class="code-block"><code>{{ fileContent }}</code></pre>
+            <!-- Markdown 文件使用 MarkdownEditor -->
+            <MarkdownEditor
+              v-if="isMarkdownFile"
+              :model-value="fileContent"
+              class="md-editor"
+            />
+            <!-- 其他文件使用代码块预览 -->
+            <pre v-else class="code-block"><code>{{ fileContent }}</code></pre>
           </div>
 
           <!-- 文件：未加载或不可读 -->
@@ -479,6 +486,14 @@ function getFileIcon(name: string): string {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.md-editor {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .code-block {
