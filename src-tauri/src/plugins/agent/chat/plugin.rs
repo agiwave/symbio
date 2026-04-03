@@ -98,7 +98,7 @@ impl Plugin for ChatPlugin {
                     let session_id = input.get("session_id")
                         .and_then(|v| v.as_str())
                         .unwrap_or("default");
-                    
+
                     // 获取最后一条用户消息
                     let message = input.get("messages")
                         .and_then(|msgs| msgs.as_array())
@@ -117,10 +117,19 @@ impl Plugin for ChatPlugin {
                                 });
 
                                 match p.invoke(&format!("@{}", CAPABILITY_LLM), llm_input) {
-                                    Ok(stream) => {
-                                        // 流式返回所有 chunk
-                                        let chunks = stream.collect().await;
-                                        for chunk in chunks {
+                                    Ok(llm_stream) => {
+                                        // 真正流式：实时转发每个 chunk
+                                        use futures::StreamExt;
+                                        let mut stream = match llm_stream {
+                                            InvokeStream::Single(chunk) => {
+                                                // 如果是单次返回，直接 yield
+                                                yield chunk;
+                                                return;
+                                            }
+                                            InvokeStream::Stream(s) => s,
+                                        };
+                                        
+                                        while let Some(chunk) = stream.next().await {
                                             yield chunk;
                                         }
                                     }
