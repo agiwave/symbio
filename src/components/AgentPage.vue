@@ -117,15 +117,21 @@
           <div v-if="configError" class="config-error">
             {{ configError }}
           </div>
-          <textarea
-            v-model="inputText"
-            placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-            @keydown.enter.exact="handleKeydown"
-            :disabled="isLoading"
-          ></textarea>
-          <button @click="sendMessageToAI" :disabled="!inputText.trim() || isLoading">
-            发送
-          </button>
+          <div class="input-wrapper">
+            <textarea
+              v-model="inputText"
+              placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
+              @keydown.enter.exact="handleKeydown"
+              :disabled="isLoading"
+              rows="1"
+            ></textarea>
+            <button class="send-btn" @click="sendMessageToAI" :disabled="!inputText.trim() || isLoading" title="发送">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
       
@@ -850,7 +856,7 @@ onMounted(async () => {
 }
 
 .chat-input {
-  padding: 1rem;
+  padding: 0.75rem 1rem;
   border-top: 1px solid var(--color-border);
   background: var(--color-surface);
   flex-shrink: 0;
@@ -858,44 +864,74 @@ onMounted(async () => {
 
 .config-error {
   padding: 0.5rem 0.75rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
   background: #fef3cd;
   color: #856404;
   border-radius: 6px;
   font-size: 0.8rem;
 }
 
-.chat-input textarea {
-  width: 100%;
-  min-height: 80px;
-  max-height: 160px;
-  padding: 0.75rem;
+.input-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  background: #f5f5f5;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 12px;
+  padding: 0.5rem;
+  transition: border-color 0.2s;
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--color-primary);
+  background: #fff;
+}
+
+.chat-input textarea {
+  flex: 1;
+  min-height: 24px;
+  max-height: 120px;
+  padding: 0.5rem;
+  border: none;
+  background: transparent;
   resize: none;
   font-size: 0.875rem;
   line-height: 1.5;
   outline: none;
+  font-family: inherit;
 }
 
-.chat-input textarea:focus {
-  border-color: var(--color-primary);
+.chat-input textarea:disabled {
+  opacity: 0.6;
 }
 
-.chat-input button {
-  width: 100%;
-  margin-top: 0.75rem;
-  padding: 0.75rem;
+.send-btn {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--color-primary);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
-  font-weight: 500;
+  transition: all 0.2s;
+  padding: 0;
 }
 
-.chat-input button:disabled {
-  opacity: 0.5;
+.send-btn:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: scale(1.05);
+}
+
+.send-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.send-btn:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
