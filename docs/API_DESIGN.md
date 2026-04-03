@@ -9,16 +9,16 @@ Symbio 采用**路径驱动**的插件架构，每个路径对应一个 Plugin �
 ### 1. 路径路由
 
 ```
-路径格式: /{plugin}/{sub_plugin}/{...}/{action}
+路径格式: {plugin}/{sub_plugin}/{...}/{action}
          ↓         ↓           ↓
        一级      二级        三级
 ```
 
 **示例**：
-- `/` → home 插件根
-- `/agent` → agent 插件
-- `/agent/openai` → agent 下的 openai 插件
-- `/agent/openai/config` → openai 插件的配置接口
+- `` → home 插件根
+- `agent` → agent 插件
+- `agent/openai` → agent 下的 openai 插件
+- `agent/openai/config` → openai 插件的配置接口
 
 ### 2. 请求模式
 
@@ -40,22 +40,124 @@ Symbio 采用**路径驱动**的插件架构，每个路径对应一个 Plugin �
 ```
 
 **示例**：
-- `/agent/@llm` → 路由到 openai 插件
-- `/agent/@session` → 路由到 session 插件
+- `agent/@llm` → 路由到 openai 插件
+- `agent/@session` → 路由到 session 插件
+
+### 4. 可用工具查询
+
+所有插件支持 `available_tools` 路径，返回该插件及其子插件的所有可用工具：
+
+```
+POST /invoke
+{
+  "path": "agent/available_tools",
+  "input": {}
+}
+```
+
+**响应**：
+```json
+{
+  "success": true,
+  "tools": [
+    {
+      "name": "tools/read_file",
+      "description": "读取文件内容",
+      "input_schema": {...},
+      "output_schema": {...}
+    },
+    {
+      "name": "memory/store",
+      "description": "存储记忆",
+      "input_schema": {...},
+      "output_schema": {...}
+    }
+  ]
+}
+```
 
 ## 插件层级结构
 
 ```
 home (根插件)
 ├── work (工作区插件)
+├── note (笔记插件)
+├── explorer (文件浏览器插件)
 ├── agent (智能体插件)
 │   ├── openai (LLM 插件，能力: @llm)
 │   ├── session (会话插件，能力: @session)
 │   ├── memory (记忆插件，能力: @memory)
 │   ├── tools (工具插件，能力: @tools)
 │   ├── chat (聊天插件)
-│   └── docker (Docker 插件，能力: @docker)
+│   └── telegram (Telegram 插件)
 └── setting (设置插件)
+```
+
+---
+
+## AI 对话流式 API
+
+### 设计原则
+
+1. **真正的流式传输**：使用 Tauri 事件系统实时推送每个 chunk
+2. **工具调用支持**：LLM 可以调用工具，工具结果自动返回
+3. **系统提示词**：从文件动态加载，支持项目特定配置
+4. **分页加载历史**：避免一次性加载所有历史消息
+
+### 流式对话流程
+
+```
+前端 → sendMessageStream() → streamPlugin()
+  ↓
+后端 → stream 命令 → app.emit(eventId, chunk)
+  ↓
+OpenAI 插件 → 流式 API (stream: true)
+  ↓
+解析 SSE 格式 → 实时 yield StreamChunk
+  ↓
+前端收到 chunk → 更新 UI（逐字显示）
+```
+
+### 系统提示词加载
+
+Session 插件的系统提示词从文件拼接：
+
+1. **优先加载** `<workspace>/.symbio/README.ai.md`，如果不存在则加载 `~/.symbio/README.ai.md`
+2. **如果存在** `<workspace>/README.ai.md`，也加载
+3. **将所有文件内容**用 `\n\n---\n\n` 分隔符拼接
+
+**示例文件结构**：
+```
+~/.symbio/README.ai.md          # 全局 AI 行为配置
+~/projects/myapp/.symbio/README.ai.md  # 项目特定配置
+~/projects/myapp/README.ai.md   # 项目文档
+```
+
+### 会话历史分页
+
+Session 插件支持分页获取消息：
+
+```
+POST /invoke
+{
+  "path": "agent/session",
+  "input": {
+    "action": "get_messages",
+    "session_id": "note-ai-session",
+    "limit": 10,
+    "before": 1234567890  // 可选，获取此时间戳之前的消息
+  }
+}
+```
+
+**响应**：
+```json
+{
+  "success": true,
+  "messages": [...],
+  "has_more": true,
+  "total": 150
+}
 ```
 
 ---
@@ -74,57 +176,14 @@ home (根插件)
 | 类型 | 存储位置 | 示例 |
 |------|----------|------|
 | **全局配置** | `~/.symbio/config.yaml` | API Key、模型选择、温度参数 |
-| **会话数据** | `~/.local/share/symbio/sessions/` | 对话历史、上下文 |
-| **记忆数据** | `~/.local/share/symbio/memory/` | 持久化记忆条目 |
+| **会话数据** | `<workspace>/.symbio/agent/session/` | 对话历史、上下文 |
+| **记忆数据** | `<workspace>/.symbio/agent/memory/` | 持久化记忆条目 |
 
 ---
 
 ### 统一配置接口
 
 每个需要配置的插件必须实现 `config` path：
-
-#### 获取配置 Schema
-
-```http
-POST /meta
-Content-Type: application/json
-
-{
-  "path": "config"
-}
-```
-
-**响应**：
-```json
-{
-  "name": "config",
-  "description": "OpenAI 配置管理",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "action": {
-        "type": "string",
-        "enum": ["get", "set", "schema"],
-        "description": "操作类型"
-      },
-      "config": {
-        "type": "object",
-        "description": "配置数据（set 操作时使用）"
-      }
-    },
-    "required": ["action"]
-  },
-  "output_schema": {
-    "type": "object",
-    "properties": {
-      "success": { "type": "boolean" },
-      "config": { "type": "object" },
-      "schema": { "type": "object" },
-      "error": { "type": "string" }
-    }
-  }
-}
-```
 
 #### 获取配置
 
@@ -278,34 +337,6 @@ Content-Type: application/json
 }
 ```
 
-#### 保存配置到文件
-
-```http
-POST /invoke
-Content-Type: application/json
-
-{
-  "path": "config",
-  "input": {
-    "action": "save"
-  }
-}
-```
-
-#### 从文件加载配置
-
-```http
-POST /invoke
-Content-Type: application/json
-
-{
-  "path": "config",
-  "input": {
-    "action": "load"
-  }
-}
-```
-
 ---
 
 ### 配置文件格式
@@ -320,25 +351,25 @@ plugins:
   work:
     workspace_path: "~/projects"
     auto_save: true
-    
+
   agent:
     openai:
       api_base: "https://api.openai.com/v1"
       model: "gpt-4o"
       temperature: 0.7
       max_tokens: 4096
-      
+
     session:
       max_messages: 100
       storage_dir: "~/.local/share/symbio/sessions"
-      
+
     memory:
       storage_dir: "~/.local/share/symbio/memory"
-      
+
     tools:
       shell_enabled: true
       web_enabled: true
-      
+
   setting:
     theme: "dark"
     language: "zh-CN"
@@ -351,7 +382,7 @@ plugins:
 
 ### 1. OpenAI 插件配置
 
-**路径**: `/agent/openai/config`
+**路径**: `agent/openai/config`
 
 **配置结构**：
 ```typescript
@@ -359,13 +390,13 @@ interface OpenAiConfig {
   // API 配置
   api_base: string;        // API 基础 URL
   api_key?: string;        // API 密钥（敏感）
-  
+
   // 模型配置
   model: string;           // 模型名称
   temperature: number;     // 温度 (0-2)
   max_tokens?: number;     // 最大输出 tokens
   max_context_tokens: number; // 最大上下文 tokens
-  
+
   // 行为配置
   system_prompt?: string;  // 系统提示词
   timeout?: number;        // 请求超时（秒）
@@ -386,7 +417,7 @@ interface OpenAiConfig {
 
 ### 2. Session 插件配置
 
-**路径**: `/agent/session/config`
+**路径**: `agent/session/config`
 
 **配置结构**：
 ```typescript
@@ -401,7 +432,7 @@ interface SessionConfig {
 **默认值**：
 ```json
 {
-  "storage_dir": "~/.local/share/symbio/sessions",
+  "storage_dir": "~/.symbio/agent/session",
   "max_messages": 100,
   "auto_compress": true,
   "compress_threshold": 50
@@ -412,7 +443,7 @@ interface SessionConfig {
 
 ### 3. Memory 插件配置
 
-**路径**: `/agent/memory/config`
+**路径**: `agent/memory/config`
 
 **配置结构**：
 ```typescript
@@ -426,7 +457,7 @@ interface MemoryConfig {
 **默认值**：
 ```json
 {
-  "storage_dir": "~/.local/share/symbio/memory",
+  "storage_dir": "~/.symbio/agent/memory",
   "max_entries": 1000,
   "categories": ["preference", "fact", "instruction"]
 }
@@ -436,7 +467,7 @@ interface MemoryConfig {
 
 ### 4. Tools 插件配置
 
-**路径**: `/agent/tools/config`
+**路径**: `agent/tools/config`
 
 **配置结构**：
 ```typescript
@@ -445,11 +476,11 @@ interface ToolsConfig {
   shell_enabled: boolean;
   file_enabled: boolean;
   web_enabled: boolean;
-  
+
   // 安全配置
   allowed_paths: string[];  // 允许访问的路径
   blocked_commands: string[]; // 禁止执行的命令
-  
+
   // 超时配置
   shell_timeout: number;    // Shell 超时（秒）
   web_timeout: number;      // Web 请求超时（秒）
@@ -466,48 +497,6 @@ interface ToolsConfig {
   "blocked_commands": ["rm -rf", "sudo"],
   "shell_timeout": 60,
   "web_timeout": 30
-}
-```
-
----
-
-### 5. Work 插件配置
-
-**路径**: `/work/config`
-
-**配置结构**：
-```typescript
-interface WorkConfig {
-  workspace_path: string;   // 工作区路径
-  auto_save: boolean;       // 自动保存
-  auto_save_interval: number; // 自动保存间隔（毫秒）
-  recent_files: string[];   // 最近文件列表
-}
-```
-
----
-
-### 6. Setting 插件配置
-
-**路径**: `/setting/config`
-
-**配置结构**：
-```typescript
-interface SettingConfig {
-  // 外观
-  theme: "light" | "dark" | "system";
-  language: string;
-  font_size: number;
-  sidebar_width: number;
-  
-  // 编辑器
-  tab_size: number;
-  line_numbers: boolean;
-  word_wrap: boolean;
-  
-  // 行为
-  auto_update: boolean;
-  telemetry: boolean;
 }
 ```
 
@@ -553,7 +542,7 @@ fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
         let action = input.get("action")
             .and_then(|v| v.as_str())
             .unwrap_or("get");
-            
+
         return Ok(InvokeStream::Single(tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 match action {
@@ -580,26 +569,6 @@ fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
 }
 ```
 
-### 配置 Schema 定义
-
-```rust
-fn config_schema() -> Value {
-    json!({
-        "api_base": {
-            "type": "string",
-            "title": "API Base URL",
-            "default": "https://api.openai.com/v1"
-        },
-        "api_key": {
-            "type": "string",
-            "title": "API Key",
-            "secret": true
-        },
-        // ...
-    })
-}
-```
-
 ---
 
 ## API 完整参考
@@ -608,63 +577,67 @@ fn config_schema() -> Value {
 
 | 路径 | Action | 描述 |
 |------|--------|------|
-| `/` | - | 获取插件列表 |
-| `/config` | get | 获取所有配置 |
-| `/config` | set | 设置配置（批量） |
-| `/config` | save | 保存配置到文件 |
-| `/config` | load | 从文件加载配置 |
-| `/config` | collect | 收集所有子插件配置 |
+| `` | - | 获取插件列表 |
+| `config` | get | 获取所有配置 |
+| `config` | set | 设置配置（批量） |
+| `config` | save | 保存配置到文件 |
+| `config` | load | 从文件加载配置 |
+| `config` | collect | 收集所有子插件配置 |
 
 ### Agent 插件
 
 | 路径 | Action | 描述 |
 |------|--------|------|
-| `/agent` | - | 获取子插件列表和能力 |
-| `/agent/config` | get | 获取所有子插件配置 |
-| `/agent/config` | set | 分发配置到子插件 |
-| `/agent/@llm` | * | 路由到 LLM 插件 |
-| `/agent/@session` | * | 路由到会话插件 |
+| `agent` | - | 获取子插件列表和能力 |
+| `agent/config` | get | 获取所有子插件配置 |
+| `agent/config` | set | 分发配置到子插件 |
+| `agent/available_tools` | - | 获取所有子插件的可用工具 |
+| `agent/@llm` | * | 路由到 LLM 插件 |
+| `agent/@session` | * | 路由到会话插件 |
 
 ### OpenAI 插件
 
 | 路径 | Action | 描述 |
 |------|--------|------|
-| `/agent/openai` | status | 获取状态 |
-| `/agent/openai` | list_models | 列出可用模型 |
-| `/agent/openai` | chat | 发送聊天请求 |
-| `/agent/openai/config` | get | 获取配置 |
-| `/agent/openai/config` | set | 设置配置 |
-| `/agent/openai/config` | schema | 获取配置 Schema |
+| `agent/openai` | status | 获取状态 |
+| `agent/openai` | list_models | 列出可用模型 |
+| `agent/openai` | chat | 发送聊天请求（流式） |
+| `agent/openai/config` | get | 获取配置 |
+| `agent/openai/config` | set | 设置配置 |
+| `agent/openai/config` | schema | 获取配置 Schema |
 
 ### Session 插件
 
 | 路径 | Action | 描述 |
 |------|--------|------|
-| `/agent/session` | get | 获取会话 |
-| `/agent/session` | append | 追加消息 |
-| `/agent/session` | clear | 清除会话 |
-| `/agent/session` | list | 列出所有会话 |
-| `/agent/session` | get_context | 获取 LLM 上下文 |
-| `/agent/session/config` | get/set | 配置管理 |
+| `agent/session` | get | 获取会话 |
+| `agent/session` | get_messages | 分页获取消息 |
+| `agent/session` | append | 追加消息 |
+| `agent/session` | clear | 清除会话 |
+| `agent/session` | list | 列出所有会话 |
+| `agent/session` | get_context | 获取 LLM 上下文 |
+| `agent/session/config` | get/set | 配置管理 |
 
 ### Memory 插件
 
 | 路径 | Action | 描述 |
 |------|--------|------|
-| `/agent/memory` | store | 存储记忆 |
-| `/agent/memory` | recall | 回忆记忆 |
-| `/agent/memory` | forget | 删除记忆 |
-| `/agent/memory` | list | 列出所有记忆 |
-| `/agent/memory` | search | 搜索记忆 |
-| `/agent/memory/config` | get/set | 配置管理 |
+| `agent/memory` | store | 存储记忆 |
+| `agent/memory` | recall | 回忆记忆 |
+| `agent/memory` | forget | 删除记忆 |
+| `agent/memory` | list | 列出所有记忆 |
+| `agent/memory` | search | 搜索记忆 |
+| `agent/memory/config` | get/set | 配置管理 |
+| `agent/memory/available_tools` | - | 获取记忆工具列表 |
 
 ### Tools 插件
 
 | 路径 | Action | 描述 |
 |------|--------|------|
-| `/agent/tools` | list | 列出可用工具 |
-| `/agent/tools` | execute | 执行工具 |
-| `/agent/tools/config` | get/set | 配置管理 |
+| `agent/tools` | _list | 列出可用工具 |
+| `agent/tools` | _search | 搜索工具 |
+| `agent/tools/config` | get/set | 配置管理 |
+| `agent/tools/available_tools` | - | 获取工具列表 |
 
 ---
 
@@ -704,23 +677,40 @@ fn validate_config(&self, config: &Value) -> Result<(), PluginError> {
 }
 ```
 
-### 3. 配置迁移
+### 3. 流式响应处理
 
-```yaml
-# config.yaml 包含版本号
-version: "1.0"
-
-# 升级时自动迁移
-fn migrate_config(config: &mut Value) {
-    let version = config.get("version")
-        .and_then(|v| v.as_str())
-        .unwrap_or("1.0");
+```rust
+// 使用 async_stream 实现真正的流式响应
+let stream = async_stream::stream! {
+    let mut content = String::new();
+    let mut stream = response.bytes_stream();
     
-    if version == "1.0" {
-        // 迁移逻辑
-        config["version"] = json!("1.1");
+    while let Some(chunk_result) = stream.next().await {
+        match chunk_result {
+            Ok(chunk_bytes) => {
+                // 解析 chunk 并 yield
+                if let Some(content) = parse_content(&chunk_bytes) {
+                    content.push_str(content);
+                    yield StreamChunk {
+                        data: json!({ "content": content.clone() }),
+                        done: false,
+                        error: None,
+                    };
+                }
+            }
+            Err(e) => {
+                yield StreamChunk {
+                    data: json!({}),
+                    done: true,
+                    error: Some(format!("读取流失败: {}", e)),
+                };
+                return;
+            }
+        }
     }
-}
+};
+
+Ok(InvokeStream::Stream(Box::pin(stream)))
 ```
 
 ---
@@ -731,6 +721,11 @@ fn migrate_config(config: &mut Value) {
 
 ```rust
 pub const CAPABILITY_LLM: &str = "llm";
+pub const CAPABILITY_SESSION: &str = "session";
+pub const CAPABILITY_MEMORY: &str = "memory";
+pub const CAPABILITY_TOOLS: &str = "tools";
+pub const CAPABILITY_TELEGRAM: &str = "telegram";
+pub const CAPABILITY_DOCKER: &str = "docker";
 ```
 
 ### B. 错误码
@@ -750,3 +745,5 @@ pub const CAPABILITY_LLM: &str = "llm";
 - 插件注册表: `src-tauri/src/core/registry.rs`
 - Home 插件: `src-tauri/src/plugins/home/plugin.rs`
 - Agent 插件: `src-tauri/src/plugins/agent/mod.rs`
+- Session 插件: `src-tauri/src/plugins/agent/session/plugin.rs`
+- OpenAI 插件: `src-tauri/src/plugins/agent/openai/plugin.rs`
