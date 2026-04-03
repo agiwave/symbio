@@ -75,7 +75,7 @@
       </div>
       <div class="chat-content">
         <AIChatPanel
-          :session-id="sessionId"
+          :session-id="NOTE_SESSION_ID"
           :messages="chatMessages"
           :on-update-messages="updateChatMessages"
         />
@@ -85,25 +85,48 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useNoteStore, type Note } from '../stores/note'
 import TreeNode from './TreeNode.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import AIChatPanel from './AIChatPanel.vue'
-import { createSessionId, type SessionMessage } from '../services/session'
+import { getSession, createSessionId, type SessionMessage } from '../services/session'
 
 const store = useNoteStore()
 
 // UI 状态
 const chatVisible = ref(false)
 
-// AI 对话状态
-const sessionId = ref(createSessionId())
+// AI 对话状态 - 使用固定的 session_id
+const NOTE_SESSION_ID = 'note-ai-session'
 const chatMessages = ref<SessionMessage[]>([])
+const chatSessionLoaded = ref(false)
+
+// 加载历史消息
+async function loadChatHistory() {
+  if (chatSessionLoaded.value) return
+  
+  try {
+    const session = await getSession(NOTE_SESSION_ID)
+    if (session && session.messages && session.messages.length > 0) {
+      chatMessages.value = session.messages
+    }
+  } catch (err) {
+    console.log('[NotePage] No chat history found:', err)
+  }
+  chatSessionLoaded.value = true
+}
 
 function updateChatMessages(messages: SessionMessage[]) {
   chatMessages.value = messages
 }
+
+// 监听对话框打开，加载历史
+watch(chatVisible, (visible) => {
+  if (visible) {
+    loadChatHistory()
+  }
+})
 
 // 笔记状态
 const notes = computed(() => store.notes)

@@ -104,7 +104,7 @@ import {
 
 // Props
 const props = defineProps<{
-  sessionId: string | null
+  sessionId: string
   messages: SessionMessage[]
   onUpdateMessages: (messages: SessionMessage[]) => void
   onSendComplete?: () => void
@@ -203,7 +203,7 @@ async function handleSend() {
     // 流式发送消息
     const response = await sendMessageStream(
       chatMessages,
-      props.sessionId || 'default',
+      props.sessionId,
       (chunk: StreamChunk) => {
         if (chunk.data && typeof chunk.data === 'object') {
           const data = chunk.data as Record<string, unknown>

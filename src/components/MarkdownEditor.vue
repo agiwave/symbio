@@ -324,9 +324,9 @@ function handleSelectionChange() {
     
     const text = selection.toString().trim()
     if (text !== selectedText.value && text.length > 0) {
-      // 选区变化，重新打开
-      closeAIDialog()
-      setTimeout(() => openAIForSelection(text), 50)
+      // 选区变化，更新内容
+      selectedText.value = text
+      calculateDialogPosition()
     }
     return
   }
@@ -369,10 +369,19 @@ function handleClickOutside(e: MouseEvent) {
   const target = e.target as HTMLElement
   const dialogEl = aiDialogRef.value
   
-  // 检查是否点击在对话框外部
-  if (dialogEl && !dialogEl.contains(target)) {
-    closeAIDialog()
+  // 如果点击在对话框内，不处理
+  if (dialogEl && dialogEl.contains(target)) {
+    return
   }
+  
+  // 延迟检查选区状态，给 selectionchange 事件一个机会
+  setTimeout(() => {
+    const selection = window.getSelection()
+    // 只有当选区消失或为空时才关闭
+    if (!selection || selection.isCollapsed || selection.toString().trim().length === 0) {
+      closeAIDialog()
+    }
+  }, 50)
 }
 
 // Initialize editor
