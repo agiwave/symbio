@@ -115,30 +115,13 @@ impl Plugin for ChatPlugin {
                                     "message": msg,
                                     "session_id": session_id
                                 });
-                                
+
                                 match p.invoke(&format!("@{}", CAPABILITY_LLM), llm_input) {
                                     Ok(stream) => {
+                                        // 流式返回所有 chunk
                                         let chunks = stream.collect().await;
-                                        if let Some(chunk) = chunks.into_iter().next() {
-                                            if let Some(error) = chunk.error {
-                                                yield StreamChunk {
-                                                    data: json!({}),
-                                                    done: true,
-                                                    error: Some(error),
-                                                };
-                                            } else if let Some(content) = chunk.data.get("content").and_then(|c| c.as_str()) {
-                                                yield StreamChunk {
-                                                    data: json!({ "content": content }),
-                                                    done: true,
-                                                    error: None,
-                                                };
-                                            } else {
-                                                yield StreamChunk {
-                                                    data: json!({}),
-                                                    done: true,
-                                                    error: Some("LLM 响应格式错误".to_string()),
-                                                };
-                                            }
+                                        for chunk in chunks {
+                                            yield chunk;
                                         }
                                     }
                                     Err(e) => {

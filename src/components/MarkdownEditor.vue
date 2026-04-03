@@ -10,12 +10,13 @@
           v-if="blockHandle.visible" 
           class="custom-block-handle"
           :style="blockHandleStyle"
+          @mouseenter="handleMouseEnter"
+          @mouseleave="handleMouseLeave"
         >
+          <!-- 拖拽触发区域 -->
           <div 
             class="handle-trigger"
-            @mouseenter="handleMouseEnter"
-            @mouseleave="handleMouseLeave"
-            @click="toggleToolbar"
+            :class="{ dragging: isDragging }"
             draggable="true"
             @dragstart="handleDragStart"
             @dragend="handleDragEnd"
@@ -30,39 +31,40 @@
             </svg>
           </div>
           
+          <!-- 展开的操作栏 - 绝对定位 -->
           <Transition name="expand">
             <div v-if="showToolbar" class="handle-toolbar">
-              <button class="toolbar-btn" @click="addBlockBelow" title="在下方添加块">
+              <button class="toolbar-btn" @click.stop="addBlockBelow" title="在下方添加块">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="12" y1="5" x2="12" y2="19"/>
                   <line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
               </button>
-              <button class="toolbar-btn" @click="deleteBlock" title="删除块">
+              <button class="toolbar-btn" @click.stop="deleteBlock" title="删除块">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="3 6 5 6 21 6"/>
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                 </svg>
               </button>
               <div class="toolbar-divider"></div>
-              <button class="toolbar-btn" @click="turnInto('heading', 1)" title="标题 1">
+              <button class="toolbar-btn" @click.stop="turnInto('heading', 1)" title="标题 1">
                 <span class="btn-text">H1</span>
               </button>
-              <button class="toolbar-btn" @click="turnInto('heading', 2)" title="标题 2">
+              <button class="toolbar-btn" @click.stop="turnInto('heading', 2)" title="标题 2">
                 <span class="btn-text">H2</span>
               </button>
-              <button class="toolbar-btn" @click="turnInto('heading', 3)" title="标题 3">
+              <button class="toolbar-btn" @click.stop="turnInto('heading', 3)" title="标题 3">
                 <span class="btn-text">H3</span>
               </button>
               <div class="toolbar-divider"></div>
-              <button class="toolbar-btn" @click="turnInto('paragraph')" title="正文">
+              <button class="toolbar-btn" @click.stop="turnInto('paragraph')" title="正文">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="3" y1="6" x2="21" y2="6"/>
                   <line x1="3" y1="12" x2="15" y2="12"/>
                   <line x1="3" y1="18" x2="18" y2="18"/>
                 </svg>
               </button>
-              <button class="toolbar-btn" @click="turnInto('bullet_list')" title="无序列表">
+              <button class="toolbar-btn" @click.stop="turnInto('bullet_list')" title="无序列表">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="9" y1="6" x2="20" y2="6"/>
                   <line x1="9" y1="12" x2="20" y2="12"/>
@@ -72,7 +74,7 @@
                   <circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none"/>
                 </svg>
               </button>
-              <button class="toolbar-btn" @click="turnInto('ordered_list')" title="有序列表">
+              <button class="toolbar-btn" @click.stop="turnInto('ordered_list')" title="有序列表">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="10" y1="6" x2="21" y2="6"/>
                   <line x1="10" y1="12" x2="21" y2="12"/>
@@ -82,25 +84,34 @@
                   <text x="3" y="20" font-size="8" fill="currentColor" stroke="none">3</text>
                 </svg>
               </button>
-              <button class="toolbar-btn" @click="turnInto('blockquote')" title="引用">
+              <button class="toolbar-btn" @click.stop="turnInto('blockquote')" title="引用">
                 <svg viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z"/>
                 </svg>
               </button>
-              <button class="toolbar-btn" @click="turnInto('code_block')" title="代码块">
+              <button class="toolbar-btn" @click.stop="turnInto('code_block')" title="代码块">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="16 18 22 12 16 6"/>
                   <polyline points="8 6 2 12 8 18"/>
                 </svg>
               </button>
               <div class="toolbar-divider"></div>
-              <button class="toolbar-btn ai-btn" @click="openAI" title="AI 助手">
+              <button class="toolbar-btn ai-btn" @click.stop="openAI" title="AI 助手">
                 <span>✨</span>
               </button>
             </div>
           </Transition>
         </div>
       </Transition>
+    </Teleport>
+    
+    <!-- 拖拽放置指示器 -->
+    <Teleport to="body">
+      <div 
+        v-if="dropIndicator.visible" 
+        class="drop-indicator"
+        :style="dropIndicatorStyle"
+      ></div>
     </Teleport>
     
     <!-- AI 对话框 -->
@@ -162,7 +173,7 @@ import { commonmark, paragraphSchema, headingSchema, bulletListSchema, orderedLi
 import { gfm } from '@milkdown/kit/preset/gfm'
 import { history } from '@milkdown/kit/plugin/history'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
-import { BlockProvider } from '@milkdown/kit/plugin/block'
+// BlockProvider removed - using direct editor view monitoring
 import { callPlugin } from '@/services/plugin'
 import { marked } from 'marked'
 
@@ -183,7 +194,6 @@ const aiInputRef = ref<HTMLTextAreaElement | null>(null)
 // Editor instance
 const editor = shallowRef<Editor | null>(null)
 const editorCtx = shallowRef<any>(null)
-const blockProvider = shallowRef<BlockProvider | null>(null)
 
 // Block handle state
 const blockHandle = reactive({
@@ -191,16 +201,32 @@ const blockHandle = reactive({
   top: 0,
   left: 0,
   activeNode: null as any,
+  activePos: 0,
+})
+
+// Drop indicator for drag
+const dropIndicator = reactive({
+  visible: false,
+  top: 0,
+  left: 0,
+  width: 0,
 })
 
 const showToolbar = ref(false)
 const isDragging = ref(false)
+const dragSourcePos = ref<number | null>(null)
 let expandTimer: ReturnType<typeof setTimeout> | null = null
 let collapseTimer: ReturnType<typeof setTimeout> | null = null
 
 const blockHandleStyle = computed(() => ({
   top: `${blockHandle.top}px`,
   left: `${blockHandle.left}px`,
+}))
+
+const dropIndicatorStyle = computed(() => ({
+  top: `${dropIndicator.top}px`,
+  left: `${dropIndicator.left}px`,
+  width: `${dropIndicator.width}px`,
 }))
 
 // AI dialog
@@ -244,59 +270,77 @@ async function initEditor() {
   // Store context for command execution
   editorCtx.value = editor.value.ctx
   
-  // Create block provider for custom handle
-  const handleEl = document.createElement('div')
-  handleEl.className = 'milkdown-block-handle-placeholder'
-  
-  blockProvider.value = new BlockProvider({
-    ctx: editor.value.ctx,
-    content: handleEl,
-    shouldShow: (view) => {
-      const { selection } = view.state
+  // Watch for block updates using editor view
+  const updateBlockHandle = () => {
+    if (!editor.value || !editorRef.value) return
+    
+    try {
+      const view = editor.value.ctx.get(editorViewCtx)
+      const { selection, doc } = view.state
       const { $from } = selection
-      const node = $from.node($from.depth)
       
-      // Don't show for empty documents
-      if (view.state.doc.content.size <= 2) return false
+      // Find the parent block node
+      let depth = $from.depth
+      let node = $from.node(depth)
       
-      return true
-    },
-  })
-  
-  // Watch for block provider updates
-  const updateObserver = () => {
-    if (blockProvider.value?.active) {
-      const active = blockProvider.value.active
-      const el = active.el
-      const rect = el.getBoundingClientRect()
+      // Skip text nodes, find the actual block
+      while (depth > 0 && node.isText) {
+        depth--
+        node = $from.node(depth)
+      }
       
-      blockHandle.visible = true
-      blockHandle.top = rect.top
-      blockHandle.left = rect.left - 28 // Position to the left of the block
-      blockHandle.activeNode = active
-    } else {
-      blockHandle.visible = false
-      showToolbar.value = false
+      // Check if document has content
+      if (doc.content.size <= 2) {
+        blockHandle.visible = false
+        showToolbar.value = false
+        return
+      }
+      
+      // Get the position and element
+      const pos = $from.before(depth)
+      const dom = view.nodeDOM(pos)
+      
+      if (dom && dom instanceof HTMLElement) {
+        const rect = dom.getBoundingClientRect()
+        const editorRect = editorRef.value.getBoundingClientRect()
+        
+        blockHandle.visible = true
+        blockHandle.top = rect.top
+        blockHandle.left = editorRect.left - 28
+        blockHandle.activeNode = { node, pos, el: dom }
+        blockHandle.activePos = pos
+      } else {
+        blockHandle.visible = false
+        showToolbar.value = false
+      }
+    } catch (e) {
+      // Silently ignore errors during updates
     }
   }
   
-  // Poll for updates (simplified approach)
-  const pollInterval = setInterval(updateObserver, 100)
+  // Update on selection changes
+  const pollInterval = setInterval(updateBlockHandle, 100)
+  
+  // Also update on editor events
+  editor.value.ctx.get(editorViewCtx).dom.addEventListener('click', updateBlockHandle)
+  editor.value.ctx.get(editorViewCtx).dom.addEventListener('keyup', updateBlockHandle)
   
   // Store for cleanup
   ;(editor.value as any)._pollInterval = pollInterval
+  ;(editor.value as any)._updateBlockHandle = updateBlockHandle
 }
 
-// Block handle interactions
+// Block handle interactions - 监听整个容器
 function handleMouseEnter() {
   if (collapseTimer) {
     clearTimeout(collapseTimer)
     collapseTimer = null
   }
   if (!showToolbar.value && !isDragging.value) {
+    if (expandTimer) clearTimeout(expandTimer)
     expandTimer = setTimeout(() => {
       showToolbar.value = true
-    }, 150)
+    }, 100)
   }
 }
 
@@ -305,28 +349,160 @@ function handleMouseLeave() {
     clearTimeout(expandTimer)
     expandTimer = null
   }
-  if (showToolbar.value) {
+  if (showToolbar.value && !isDragging.value) {
     collapseTimer = setTimeout(() => {
       showToolbar.value = false
-    }, 200)
+    }, 300)
   }
 }
 
-function toggleToolbar() {
-  showToolbar.value = !showToolbar.value
-}
-
+// 拖拽功能
 function handleDragStart(e: DragEvent) {
   isDragging.value = true
   showToolbar.value = false
+  dragSourcePos.value = blockHandle.activePos
+  
   if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', '')
+    e.dataTransfer.setData('text/plain', String(blockHandle.activePos))
+  }
+  
+  // 添加全局拖放监听
+  const editorDom = editor.value?.ctx.get(editorViewCtx).dom
+  if (editorDom) {
+    editorDom.addEventListener('dragover', handleDragOver)
+    editorDom.addEventListener('drop', handleDrop)
   }
 }
 
 function handleDragEnd(_e: DragEvent) {
   isDragging.value = false
+  dragSourcePos.value = null
+  dropIndicator.visible = false
+  
+  // 移除全局拖放监听
+  const editorDom = editor.value?.ctx.get(editorViewCtx).dom
+  if (editorDom) {
+    editorDom.removeEventListener('dragover', handleDragOver)
+    editorDom.removeEventListener('drop', handleDrop)
+  }
+}
+
+function handleDragOver(e: DragEvent) {
+  e.preventDefault()
+  if (!e.dataTransfer) return
+  
+  e.dataTransfer.dropEffect = 'move'
+  
+  // 计算放置位置
+  if (!editor.value || !editorRef.value) return
+  
+  try {
+    const view = editor.value.ctx.get(editorViewCtx)
+    const editorDom = view.dom
+    const rect = editorDom.getBoundingClientRect()
+    
+    // 计算鼠标在编辑器中的位置
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    
+    // 使用 ProseMirror 的 posAtCoords 获取位置
+    const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
+    
+    if (posAtCoords) {
+      const $pos = view.state.doc.resolve(posAtCoords.pos)
+      
+      // 找到块级位置
+      let depth = $pos.depth
+      while (depth > 0) {
+        const node = $pos.node(depth)
+        if (node.isBlock && node.isTextblock) {
+          break
+        }
+        depth--
+      }
+      
+      const blockPos = $pos.before(depth)
+      const dom = view.nodeDOM(blockPos)
+      
+      if (dom && dom instanceof HTMLElement) {
+        const domRect = dom.getBoundingClientRect()
+        const editorRect = editorRef.value.getBoundingClientRect()
+        
+        dropIndicator.visible = true
+        dropIndicator.top = domRect.bottom - 2
+        dropIndicator.left = editorRect.left
+        dropIndicator.width = editorRect.width
+      }
+    }
+  } catch (err) {
+    // 忽略错误
+  }
+}
+
+function handleDrop(e: DragEvent) {
+  e.preventDefault()
+  
+  if (dragSourcePos.value === null || !editor.value) return
+  
+  try {
+    const view = editor.value.ctx.get(editorViewCtx)
+    const state = view.state
+    
+    // 获取目标位置
+    const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
+    if (!posAtCoords) return
+    
+    const $pos = state.doc.resolve(posAtCoords.pos)
+    let depth = $pos.depth
+    while (depth > 0) {
+      const node = $pos.node(depth)
+      if (node.isBlock && node.isTextblock) {
+        break
+      }
+      depth--
+    }
+    const targetPos = $pos.before(depth)
+    
+    // 不允许拖到自己的位置
+    if (targetPos === dragSourcePos.value) {
+      dropIndicator.visible = false
+      return
+    }
+    
+    // 执行移动
+    const sourcePos = dragSourcePos.value
+    const sourceNode = state.doc.nodeAt(sourcePos)
+    
+    if (!sourceNode) return
+    
+    // 创建事务
+    let tr = state.tr
+    
+    // 先删除源节点
+    tr = tr.delete(sourcePos, sourcePos + sourceNode.nodeSize)
+    
+    // 调整目标位置（如果源在目标前面，删除后位置会改变）
+    const adjustedTarget = sourcePos < targetPos ? targetPos - sourceNode.nodeSize : targetPos
+    
+    // 插入到新位置
+    tr = tr.insert(adjustedTarget, sourceNode)
+    
+    view.dispatch(tr)
+    
+    // 更新选区到新位置
+    const newPos = adjustedTarget
+    view.dispatch(view.state.tr.setSelection(
+      new (view.state.selection.constructor as any)(
+        view.state.doc.resolve(newPos + 1),
+        view.state.doc.resolve(newPos + sourceNode.nodeSize - 1)
+      )
+    ))
+  } catch (err) {
+    console.error('Drop error:', err)
+  }
+  
+  dropIndicator.visible = false
 }
 
 // Block operations
@@ -477,14 +653,24 @@ function handleKeydown(e: KeyboardEvent) {
 
 // Destroy editor
 async function destroyEditor() {
-  if (blockProvider.value) {
-    blockProvider.value.destroy()
-    blockProvider.value = null
-  }
   if (editor.value) {
+    // Clear poll interval
     if ((editor.value as any)._pollInterval) {
       clearInterval((editor.value as any)._pollInterval)
     }
+    
+    // Remove event listeners
+    try {
+      const view = editor.value.ctx.get(editorViewCtx)
+      const updateFn = (editor.value as any)._updateBlockHandle
+      if (updateFn) {
+        view.dom.removeEventListener('click', updateFn)
+        view.dom.removeEventListener('keyup', updateFn)
+      }
+    } catch (e) {
+      // Ignore errors during cleanup
+    }
+    
     try {
       await editor.value.destroy()
     } catch (e) {
@@ -671,8 +857,6 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
 .custom-block-handle {
   position: fixed;
   z-index: 100;
-  display: flex;
-  align-items: center;
   user-select: none;
 }
 
@@ -689,16 +873,22 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
   background: transparent;
 }
 
-.handle-trigger:hover {
+.handle-trigger:hover,
+.custom-block-handle:hover .handle-trigger {
   background: rgba(55, 53, 47, 0.08);
   color: #37352f;
 }
 
-.handle-trigger:active {
+.handle-trigger:active,
+.handle-trigger.dragging {
   cursor: grabbing;
+  background: rgba(55, 53, 47, 0.12);
 }
 
 .handle-toolbar {
+  position: absolute;
+  top: 0;
+  left: 28px;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -707,7 +897,17 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
   border-radius: 6px;
   padding: 4px 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* Drop Indicator */
+.drop-indicator {
+  position: fixed;
+  height: 2px;
+  background: #2383e2;
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 101;
 }
 
 .toolbar-btn {

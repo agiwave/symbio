@@ -5,7 +5,7 @@
  * - 配置管理：直接调用 agent/@llm (openai 插件)
  */
 
-import { callPlugin } from './plugin'
+import { callPlugin, streamPlugin, type StreamChunk } from './plugin'
 
 // Chat 插件路径
 const CHAT_PATH = 'agent/chat'
@@ -50,7 +50,7 @@ export interface ConfigResponse {
 }
 
 /**
- * 发送消息到 AI
+ * 发送消息到 AI（同步，等待完整结果）
  */
 export async function sendMessage(messages: ChatMessage[], sessionId?: string): Promise<ChatResponse> {
   return callPlugin<ChatResponse>(CHAT_PATH, {
@@ -58,6 +58,49 @@ export async function sendMessage(messages: ChatMessage[], sessionId?: string): 
     messages,
     session_id: sessionId || 'default'
   })
+}
+
+/**
+ * 流式发送消息到 AI（实时返回中间过程）
+ * 
+ * @param messages 消息列表
+ * @param sessionId 会话 ID
+ * @param onChunk 每个 chunk 的回调
+ * @returns Promise<ChatResponse> 最终结果
+ */
+export async function sendMessageStream(
+  messages: ChatMessage[],
+  sessionId: string,
+  onChunk: (chunk: StreamChunk) => void
+): Promise<ChatResponse> {
+  let finalContent = ''
+  let finalError: string | undefined
+
+  await streamPlugin(CHAT_PATH, {
+    action: 'send',
+    messages,
+    session_id: sessionId || 'default'
+  }, (chunk) => {
+    // 调用回调
+    onChunk(chunk)
+
+    // 累积内容
+    if (chunk.data && typeof chunk.data === 'object') {
+      const data = chunk.data as Record<string, unknown>
+      if (data.content && typeof data.content === 'string') {
+        finalContent = data.content as string
+      }
+      if (data.error && typeof data.error === 'string') {
+        finalError = data.error as string
+      }
+    }
+  })
+
+  if (finalError) {
+    return { error: finalError }
+  }
+
+  return { content: finalContent || undefined }
 }
 
 /**

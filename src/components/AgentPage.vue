@@ -50,7 +50,7 @@
             <p>开始与 AI 对话</p>
             <p class="hint">输入问题或粘贴代码进行分析</p>
           </div>
-          
+
           <div
             v-for="(msg, index) in activeSession.messages"
             :key="`${activeSession.id}-${index}-${msg.timestamp}`"
@@ -61,15 +61,33 @@
               {{ msg.role === 'user' ? '👤' : '🤖' }}
             </div>
             <div class="message-content">
+              <!-- 工具调用信息 -->
+              <div v-if="msg.role === 'assistant' && toolCalls.length > 0 && msg.content === ''" class="tool-calls">
+                <div v-for="(tool, idx) in toolCalls" :key="idx" class="tool-call">
+                  <div class="tool-call-header">
+                    <span class="tool-call-icon">🔧</span>
+                    <span class="tool-call-name">{{ tool.name }}</span>
+                  </div>
+                  <div v-if="tool.args" class="tool-call-args">
+                    <pre>{{ formatJson(tool.args) }}</pre>
+                  </div>
+                  <div v-if="tool.result" class="tool-call-result">
+                    <pre>{{ tool.result }}</pre>
+                  </div>
+                </div>
+              </div>
+
               <div class="message-text" v-html="renderMarkdown(msg.content)"></div>
               <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
             </div>
           </div>
-          
+
           <div v-if="isLoading" class="message assistant loading">
             <div class="message-avatar">🤖</div>
             <div class="message-content">
-              <div class="typing-indicator">
+              <!-- 流式内容 -->
+              <div v-if="streamingContent" class="message-text" v-html="renderMarkdown(streamingContent)"></div>
+              <div v-else class="typing-indicator">
                 <span></span><span></span><span></span>
               </div>
             </div>
@@ -103,11 +121,11 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
-import { sendMessage, getProviderConfig, type ChatMessage } from '../services/ai'
-import { 
-  listSessions, 
-  getSession, 
-  appendMessages, 
+import { sendMessageStream, getProviderConfig, type ChatMessage, type StreamChunk } from '../services/ai'
+import {
+  listSessions,
+  getSession,
+  appendMessages,
   clearSession,
   createSessionId,
   type Session,
@@ -133,12 +151,25 @@ const loadingSessions = ref(false)
 const messagesRef = ref<HTMLElement | null>(null)
 const configError = ref<string | null>(null)
 
+// 流式消息状态
+const streamingContent = ref('')
+const toolCalls = ref<Array<{ name: string; args: string; result?: string }>>([])
+
 // 渲染 Markdown
 function renderMarkdown(content: string): string {
   try {
     return marked.parse(content) as string
   } catch {
     return content
+  }
+}
+
+// 格式化 JSON
+function formatJson(str: string): string {
+  try {
+    return JSON.stringify(JSON.parse(str), null, 2)
+  } catch {
+    return str
   }
 }
 
@@ -180,7 +211,7 @@ async function loadSessions() {
 async function createNewChat() {
   const id = createSessionId()
   const now = Math.floor(Date.now() / 1000)
-  
+
   const newSession: Session = {
     id,
     messages: [],
@@ -188,14 +219,14 @@ async function createNewChat() {
     updated_at: now,
     metadata: {}
   }
-  
+
   // 添加到列表
   sessions.value.unshift({
     id,
     message_count: 0,
     updated_at: now
   })
-  
+
   sessionTitles.value.set(id, '新对话')
   activeSessionId.value = id
   activeSession.value = newSession
@@ -205,9 +236,9 @@ async function createNewChat() {
 // 选择会话
 async function selectSession(id: string) {
   if (activeSessionId.value === id) return
-  
+
   activeSessionId.value = id
-  
+
   try {
     const session = await getSession(id)
     console.log('[AgentPage] 加载会话:', id, session)
@@ -224,7 +255,7 @@ async function selectSession(id: string) {
 async function deleteSession(id: string | null) {
   if (!id) return
   if (!confirm('确定要删除此对话吗？')) return
-  
+
   try {
     await clearSession(id)
     const index = sessions.value.findIndex(s => s.id === id)
@@ -232,7 +263,7 @@ async function deleteSession(id: string | null) {
       sessions.value.splice(index, 1)
       sessionTitles.value.delete(id)
     }
-    
+
     if (activeSessionId.value === id) {
       activeSessionId.value = sessions.value[0]?.id || null
       if (activeSessionId.value) {
@@ -253,32 +284,34 @@ function updateSessionTitle() {
   }
 }
 
-// 发送消息
+// 发送消息（流式）
 async function sendMessageToAI() {
   const text = inputText.value.trim()
   if (!text || isLoading.value || !activeSession.value || !activeSessionId.value) return
 
   const now = Math.floor(Date.now() / 1000)
-  
+
   const userMessage: SessionMessage = {
     role: 'user',
     content: text,
     timestamp: now
   }
-  
+
   activeSession.value.messages.push(userMessage)
   activeSession.value.updated_at = now
-  
+
   // 更新标题（如果是第一条消息）
   if (activeSession.value.messages.length === 1) {
     const title = text.slice(0, 20) + (text.length > 20 ? '...' : '')
     sessionTitles.value.set(activeSessionId.value, title)
     sessionTitle.value = title
   }
-  
+
   inputText.value = ''
   isLoading.value = true
   configError.value = null
+  streamingContent.value = ''
+  toolCalls.value = []
 
   await nextTick()
   scrollToBottom()
@@ -290,25 +323,70 @@ async function sendMessageToAI() {
       content: m.content
     }))
 
-    // 传递当前 session_id 给 AI
-    const response = await sendMessage(messages, activeSessionId.value || undefined)
-    
-    const assistantMessage: SessionMessage = {
+    // 创建临时的助手消息用于流式显示
+    const assistantMessageIndex = activeSession.value.messages.length
+    activeSession.value.messages.push({
       role: 'assistant',
       content: '',
-      timestamp: Math.floor(Date.now() / 1000)
-    }
-    
+      timestamp: now
+    })
+
+    // 流式发送消息
+    const response = await sendMessageStream(
+      messages,
+      activeSessionId.value || 'default',
+      (chunk: StreamChunk) => {
+        console.log('[AgentPage] Stream chunk:', chunk)
+
+        // 处理工具调用信息
+        if (chunk.data && typeof chunk.data === 'object') {
+          const data = chunk.data as Record<string, unknown>
+          
+          // 检查是否有工具调用
+          if (data.tool_calls && Array.isArray(data.tool_calls)) {
+            toolCalls.value = data.tool_calls.map((tc: any) => ({
+              name: tc.function?.name || tc.name || 'unknown',
+              args: tc.function?.arguments || tc.arguments || '',
+              result: tc.result
+            }))
+          }
+
+          // 检查是否有内容
+          if (data.content && typeof data.content === 'string') {
+            streamingContent.value = data.content as string
+            
+            // 更新助手消息内容
+            if (activeSession.value && activeSession.value.messages[assistantMessageIndex]) {
+              activeSession.value.messages[assistantMessageIndex].content = streamingContent.value
+            }
+          }
+
+          // 检查是否有错误
+          if (data.error && typeof data.error === 'string') {
+            configError.value = data.error as string
+          }
+        }
+
+        // 滚动到底部
+        nextTick(() => scrollToBottom())
+      }
+    )
+
+    // 流完成
     if (response.error) {
       configError.value = response.error
-      assistantMessage.content = `错误: ${response.error}`
+      if (activeSession.value && activeSession.value.messages[assistantMessageIndex]) {
+        activeSession.value.messages[assistantMessageIndex].content = `错误: ${response.error}`
+      }
     } else if (response.content) {
-      assistantMessage.content = response.content
+      // 确保最终内容已设置
+      if (activeSession.value && activeSession.value.messages[assistantMessageIndex]) {
+        activeSession.value.messages[assistantMessageIndex].content = response.content
+      }
     }
-    
-    activeSession.value.messages.push(assistantMessage)
+
     activeSession.value.updated_at = Math.floor(Date.now() / 1000)
-    
+
     // 后端 openai 插件已经自动将消息保存到 session，不需要前端再保存
     // 但需要更新列表中的消息数
     const listItem = sessions.value.find(s => s.id === activeSessionId.value)
@@ -327,6 +405,8 @@ async function sendMessageToAI() {
     }
   } finally {
     isLoading.value = false
+    streamingContent.value = ''
+    toolCalls.value = []
     scrollToBottom()
   }
 }
@@ -660,6 +740,64 @@ onMounted(async () => {
   font-size: 0.625rem;
   color: var(--color-text-muted);
   margin-top: 0.25rem;
+}
+
+/* 工具调用样式 */
+.tool-calls {
+  margin-bottom: 0.75rem;
+}
+
+.tool-call {
+  background: #f0f0f0;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.tool-call:last-child {
+  margin-bottom: 0;
+}
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tool-call-icon {
+  font-size: 1rem;
+}
+
+.tool-call-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.tool-call-args,
+.tool-call-result {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 4px;
+  padding: 0.5rem;
+  margin-top: 0.5rem;
+  overflow-x: auto;
+}
+
+.tool-call-args pre,
+.tool-call-result pre {
+  margin: 0;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-call-result {
+  background: #e8f5e9;
+  color: #2e7d32;
 }
 
 .typing-indicator {
