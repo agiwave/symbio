@@ -100,12 +100,12 @@ impl NotePlugin {
     }
 
     /// 获取工作区路径（通过父插件调用 work 插件）
-    fn get_workspace_path(&self) -> PathBuf {
+    fn get_workspace_path(&self) -> Result<PathBuf, PluginError> {
         // 尝试从缓存获取
         {
             let cached = self.cached_workspace.lock().unwrap();
             if let Some(ref path) = *cached {
-                return PathBuf::from(path);
+                return Ok(PathBuf::from(path));
             }
         }
 
@@ -117,9 +117,18 @@ impl NotePlugin {
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string())
                 }
+                Ok(InvokeStream::Single(chunk)) => {
+                    eprintln!("[note] /work/workspace_path error: {:?}", chunk.error);
+                    None
+                }
+                Err(e) => {
+                    eprintln!("[note] /work/workspace_path failed: {:?}", e);
+                    None
+                }
                 _ => None,
             }
         } else {
+            eprintln!("[note] no parent plugin available");
             None
         };
 
@@ -127,26 +136,24 @@ impl NotePlugin {
         if let Some(path) = workspace_path {
             let mut cached = self.cached_workspace.lock().unwrap();
             *cached = Some(path.clone());
-            return PathBuf::from(path);
+            return Ok(PathBuf::from(path));
         }
 
-        // 回退到默认路径
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("projects")
+        // 获取失败，返回错误
+        Err(PluginError::InternalError("无法获取工作区路径".to_string()))
     }
 
     /// 获取数据存储路径: <workspace>/.symbio/note/notes.json
-    fn get_data_path(&self) -> PathBuf {
-        self.get_workspace_path()
+    fn get_data_path(&self) -> Result<PathBuf, PluginError> {
+        Ok(self.get_workspace_path()?
             .join(".symbio")
             .join("note")
-            .join("notes.json")
+            .join("notes.json"))
     }
 
     /// 同步保存数据
     fn save_data_sync(&self) -> Result<(), PluginError> {
-        let data_path = self.get_data_path();
+        let data_path = self.get_data_path()?;
         if let Some(parent) = data_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -163,7 +170,7 @@ impl NotePlugin {
 
     /// 同步加载数据
     fn load_data_sync(&self) -> Result<(), PluginError> {
-        let data_path = self.get_data_path();
+        let data_path = self.get_data_path()?;
         if data_path.exists() {
             let content = std::fs::read_to_string(&data_path)
                 .map_err(|e| PluginError::InternalError(format!("读取数据失败: {}", e)))?;
@@ -439,21 +446,29 @@ impl Plugin for NotePlugin {
         let result = match action {
             "init" => {
                 // 初始化并加载数据
-                let data_path = self.get_data_path();
-                if data_path.exists() {
-                    let _ = self.load_data_sync();
-                } else {
-                    self.init_demo();
-                    let _ = self.save_data_sync();
+                match self.get_data_path() {
+                    Ok(data_path) => {
+                        if data_path.exists() {
+                            let _ = self.load_data_sync();
+                        } else {
+                            self.init_demo();
+                            let _ = self.save_data_sync();
+                        }
+                        json!({ "success": true, "message": "初始化完成" })
+                    }
+                    Err(e) => {
+                        json!({ "success": false, "error": format!("无法获取数据路径: {}", e) })
+                    }
                 }
-                json!({ "success": true, "message": "初始化完成" })
             }
             "list" => self.list_notes(),
             "create" => {
                 let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("新笔记");
                 let parent_id = input.get("parentId").and_then(|v| v.as_str());
                 let result = self.create_note(title, parent_id);
-                let _ = self.save_data_sync();
+                if result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    let _ = self.save_data_sync();
+                }
                 result
             }
             "get" => {
@@ -476,8 +491,10 @@ impl Plugin for NotePlugin {
                 result
             }
             "save" => {
-                let _ = self.save_data_sync();
-                json!({ "success": true, "message": "保存成功" })
+                match self.save_data_sync() {
+                    Ok(()) => json!({ "success": true, "message": "保存成功" }),
+                    Err(e) => json!({ "success": false, "error": format!("保存失败: {}", e) }),
+                }
             }
             _ => return Err(PluginError::ValidationError(format!("未知操作: {}", action))),
         };

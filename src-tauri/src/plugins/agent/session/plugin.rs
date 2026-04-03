@@ -103,12 +103,12 @@ impl SessionPlugin {
     }
 
     /// 获取工作区路径（通过父插件调用 work 插件）
-    async fn get_workspace_path(&self) -> PathBuf {
+    async fn get_workspace_path(&self) -> Result<PathBuf, PluginError> {
         // 尝试从缓存获取
         {
             let cached = self.cached_workspace.read().await;
             if let Some(ref path) = *cached {
-                return PathBuf::from(path);
+                return Ok(PathBuf::from(path));
             }
         }
 
@@ -120,9 +120,18 @@ impl SessionPlugin {
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string())
                 }
+                Ok(InvokeStream::Single(chunk)) => {
+                    eprintln!("[session] /work/workspace_path error: {:?}", chunk.error);
+                    None
+                }
+                Err(e) => {
+                    eprintln!("[session] /work/workspace_path failed: {:?}", e);
+                    None
+                }
                 _ => None,
             }
         } else {
+            eprintln!("[session] no parent plugin available");
             None
         };
 
@@ -130,35 +139,34 @@ impl SessionPlugin {
         if let Some(path) = workspace_path {
             let mut cached = self.cached_workspace.write().await;
             *cached = Some(path.clone());
-            return PathBuf::from(path);
+            return Ok(PathBuf::from(path));
         }
 
-        // 回退到默认路径
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("projects")
+        // 获取失败，返回错误
+        Err(PluginError::InternalError("无法获取工作区路径".to_string()))
     }
 
     /// 解析存储路径，将 ~ 替换为工作区路径
-    async fn resolve_storage_dir(&self) -> PathBuf {
+    async fn resolve_storage_dir(&self) -> Result<PathBuf, PluginError> {
         let cfg = self.config.read().await;
         let storage_dir = &cfg.storage_dir;
         
         if storage_dir.starts_with('~') {
-            let workspace = self.get_workspace_path().await;
+            let workspace = self.get_workspace_path().await?;
             let relative = storage_dir.strip_prefix('~').unwrap_or(storage_dir);
-            workspace.join(relative.trim_start_matches('/'))
+            Ok(workspace.join(relative.trim_start_matches('/')))
         } else {
             // 展开标准的 ~ 路径（用户主目录）
-            PathBuf::from(shellexpand::tilde(storage_dir).to_string())
+            Ok(PathBuf::from(shellexpand::tilde(storage_dir).to_string()))
         }
     }
 
     /// 更新存储目录
-    async fn update_storage_dir(&self) {
-        let resolved = self.resolve_storage_dir().await;
+    async fn update_storage_dir(&self) -> Result<(), PluginError> {
+        let resolved = self.resolve_storage_dir().await?;
         let mut dir = self.storage_dir.write().await;
         *dir = resolved;
+        Ok(())
     }
 
     /// 获取配置 Schema
@@ -738,7 +746,14 @@ impl Plugin for SessionPlugin {
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 // 先更新存储目录（解析工作区路径）
-                self_ref.update_storage_dir().await;
+                if let Err(e) = self_ref.update_storage_dir().await {
+                    eprintln!("[session] update_storage_dir error: {:?}", e);
+                    return StreamChunk {
+                        data: json!({}),
+                        done: true,
+                        error: Some(format!("无法获取工作区路径: {}", e)),
+                    };
+                }
                 
                 match action.as_str() {
                     "get" => self_ref.handle_get(&input).await,
