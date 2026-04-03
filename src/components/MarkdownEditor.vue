@@ -853,11 +853,13 @@ async function destroyEditor() {
 onMounted(() => {
   initEditor()
   document.addEventListener('keydown', handleKeydown)
+  document.addEventListener('selectionchange', handleSelectionChange)
 })
 
 onUnmounted(() => {
   destroyEditor()
   document.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener('selectionchange', handleSelectionChange)
   if (expandTimer) clearTimeout(expandTimer)
   if (collapseTimer) clearTimeout(collapseTimer)
 })
@@ -1158,56 +1160,75 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
   font-family: inherit;
 }
 
-/* AI Dialog */
-.ai-dialog-overlay {
+/* Selection Menu - 选中文字时的快捷菜单 */
+.selection-menu {
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  z-index: 1500;
+  transform: translateX(-50%);
 }
 
-.ai-dialog {
-  width: 480px;
-  max-width: 90vw;
-  max-height: 75vh;
+.selection-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+  transition: all 0.15s ease;
+}
+
+.selection-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.4);
+}
+
+/* AI Floating Dialog - 悬浮对话框 */
+.ai-floating-dialog {
+  position: fixed;
+  width: 380px;
+  max-height: 70vh;
   background: #fff;
   border-radius: 12px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  z-index: 2000;
 }
 
 .ai-dialog-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid #e5e5e5;
+  background: #fafafa;
 }
 
 .ai-header-icon {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .ai-dialog-title {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
   flex: 1;
 }
 
 .ai-dialog-close {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 20px;
+  font-size: 18px;
   color: #666;
   display: flex;
   align-items: center;
@@ -1215,29 +1236,54 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
 }
 
 .ai-dialog-close:hover {
-  background: #f0f0f0;
+  background: #e5e5e5;
+}
+
+/* Selected context - 选中的文字提示 */
+.ai-selected-context {
+  padding: 10px 16px;
+  background: #f0f7ff;
+  border-bottom: 1px solid #e0e7ef;
+}
+
+.ai-selected-context .context-label {
+  font-size: 11px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ai-selected-context .context-text {
+  font-size: 12px;
+  color: #333;
+  margin-top: 4px;
+  padding: 8px;
+  background: #fff;
+  border-radius: 4px;
+  border-left: 3px solid #2383e2;
 }
 
 .ai-dialog-body {
   flex: 1;
   overflow: hidden;
-  min-height: 200px;
+  min-height: 150px;
+  max-height: 300px;
 }
 
 .ai-messages {
   height: 100%;
   overflow-y: auto;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .ai-msg {
-  max-width: 88%;
-  padding: 10px 14px;
-  border-radius: 12px;
-  font-size: 14px;
+  max-width: 90%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -1359,19 +1405,15 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
   transform: translateX(-8px);
 }
 
-.dialog-enter-active,
-.dialog-leave-active {
+.slide-up-enter-active,
+.slide-up-leave-active {
   transition: all 0.2s ease;
 }
 
-.dialog-enter-from,
-.dialog-leave-to {
+.slide-up-enter-from,
+.slide-up-leave-to {
   opacity: 0;
-}
-
-.dialog-enter-from .ai-dialog,
-.dialog-leave-to .ai-dialog {
-  transform: translateY(16px) scale(0.98);
+  transform: translateY(20px);
 }
 
 /* Responsive */
