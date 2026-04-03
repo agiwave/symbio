@@ -17,9 +17,17 @@
           <button class="dialog-close" @click.stop="state.close">×</button>
         </div>
         
-        <!-- 选中的文字提示 -->
+        <!-- 选中的内容提示 -->
         <div v-if="state.selectedText.value" class="selected-context">
-          <span class="context-label">选中的内容：</span>
+          <div class="context-header">
+            <span class="context-label">选中的内容</span>
+            <span v-if="selectionInfo.filePath" class="file-path">
+              📄 {{ getRelativePath(selectionInfo.filePath) }}
+            </span>
+            <span v-if="selectionInfo.startLine && selectionInfo.endLine" class="line-range">
+              📍 行 {{ selectionInfo.startLine }}-{{ selectionInfo.endLine }}
+            </span>
+          </div>
           <div class="context-text">
             {{ state.selectedText.value.slice(0, 100) }}{{ state.selectedText.value.length > 100 ? '...' : '' }}
           </div>
@@ -72,19 +80,44 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch, computed } from 'vue'
 import { marked } from 'marked'
 import type { AISelectionReturn } from '@/composables/useAISelection'
 import { sendMessageStream, type ChatMessage } from '@/services/ai'
 
 const props = defineProps<{
   state: AISelectionReturn
+  // 当前文档信息（由父组件传入）
+  currentFilePath?: string
+  currentFileContent?: string
 }>()
 
 const messagesRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const dialogRef = ref<HTMLElement | null>(null)
 const streamingContent = ref('')
+
+// 获取选区信息（从 savedSelection 获取）
+const selectionInfo = computed(() => {
+  const saved = props.state.savedSelection as any
+  if (!saved) return {}
+  return {
+    filePath: saved.filePath,
+    startLine: saved.startLine,
+    endLine: saved.endLine,
+    fullContent: saved.fullContent
+  }
+})
+
+// 获取相对路径（去掉工作区前缀）
+function getRelativePath(fullPath: string): string {
+  // 简单处理：只保留最后两部分
+  const parts = fullPath.split('/')
+  if (parts.length > 2) {
+    return '.../' + parts.slice(-2).join('/')
+  }
+  return fullPath
+}
 
 // 渲染 Markdown
 function renderMarkdown(content: string): string {
@@ -114,8 +147,28 @@ async function handleSend() {
   const text = props.state.input.value.trim()
   if (!text || props.state.loading.value) return
 
+  // 构建带上下文的消息
+  let userMessage = text
+  
+  // 如果有选区信息，添加上下文
+  if (selectionInfo.value.filePath) {
+    const info = selectionInfo.value
+    const lineInfo = info.startLine && info.endLine 
+      ? ` (行 ${info.startLine}-${info.endLine})` 
+      : ''
+    
+    userMessage = `[文件: ${info.filePath}${lineInfo}]
+
+选中的内容:
+\`\`\`
+${props.state.selectedText.value}
+\`\`\`
+
+问题: ${text}`
+  }
+
   // 添加用户消息
-  props.state.messages.value.push({ role: 'user', content: text })
+  props.state.messages.value.push({ role: 'user', content: userMessage })
   props.state.input.value = ''
   props.state.loading.value = true
   streamingContent.value = ''
@@ -147,25 +200,25 @@ async function handleSend() {
 
     // 流完成 - 添加助手消息
     if (response.error) {
-      props.state.messages.value.push({ 
-        role: 'assistant', 
-        content: `错误: ${response.error}` 
+      props.state.messages.value.push({
+        role: 'assistant',
+        content: `错误: ${response.error}`
       })
     } else if (streamingContent.value) {
-      props.state.messages.value.push({ 
-        role: 'assistant', 
-        content: streamingContent.value 
+      props.state.messages.value.push({
+        role: 'assistant',
+        content: streamingContent.value
       })
     } else {
-      props.state.messages.value.push({ 
-        role: 'assistant', 
-        content: '抱歉，无法处理请求。' 
+      props.state.messages.value.push({
+        role: 'assistant',
+        content: '抱歉，无法处理请求。'
       })
     }
   } catch (error) {
-    props.state.messages.value.push({ 
-      role: 'assistant', 
-      content: `错误: ${error}` 
+    props.state.messages.value.push({
+      role: 'assistant',
+      content: `错误: ${error}`
     })
   } finally {
     props.state.loading.value = false
@@ -265,6 +318,14 @@ watch(() => props.state.selectedText.value, () => {
   background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(37, 99, 235, 0.06));
 }
 
+.context-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
 .context-label {
   font-size: 10px;
   color: #888;
@@ -272,10 +333,21 @@ watch(() => props.state.selectedText.value, () => {
   letter-spacing: 0.5px;
 }
 
+.file-path {
+  font-size: 11px;
+  color: #666;
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+
+.line-range {
+  font-size: 11px;
+  color: #666;
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+
 .context-text {
   font-size: 12px;
   color: #444;
-  margin-top: 4px;
   padding: 6px 10px;
   background: rgba(255, 255, 255, 0.8);
   border-radius: 6px;

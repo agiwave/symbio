@@ -8,6 +8,13 @@ import { ref, reactive, computed, type Ref } from 'vue'
 export interface SelectionInfo {
   text: string
   rect: DOMRect
+  // 行号信息（如果可用）
+  startLine?: number
+  endLine?: number
+  // 文件路径
+  filePath?: string
+  // 完整文件内容（用于计算行号）
+  fullContent?: string
 }
 
 export interface AISelectionState {
@@ -137,19 +144,19 @@ export function useAISelection(options: UseAISelectionOptions) {
   }
 
   // 打开对话框（用于选区触发）
-  function openForSelection(text: string, rect: DOMRect) {
-    savedSelection = { text, rect }
+  function openForSelection(text: string, rect: DOMRect, extra?: Partial<SelectionInfo>) {
+    savedSelection = { text, rect, ...extra }
     selectedText.value = text
     calculatePosition(rect)
-    
+
     visible.value = true
     messages.value = []
     input.value = ''
   }
 
   // 更新选区内容（对话框已打开时）
-  function updateSelection(text: string, rect: DOMRect) {
-    savedSelection = { text, rect }
+  function updateSelection(text: string, rect: DOMRect, extra?: Partial<SelectionInfo>) {
+    savedSelection = { text, rect, ...extra }
     selectedText.value = text
     calculatePosition(rect)
     // 保持对话框打开和消息历史
@@ -175,7 +182,7 @@ export function useAISelection(options: UseAISelectionOptions) {
   }
 
   // 处理 mouseup 事件 - 选区检测
-  function handleMouseUp(e: MouseEvent, containerEl?: HTMLElement) {
+  function handleMouseUp(e: MouseEvent, containerEl?: HTMLElement, context?: { filePath?: string; fullContent?: string }) {
     // 如果正在加载，不处理
     if (loading.value) return
 
@@ -185,19 +192,48 @@ export function useAISelection(options: UseAISelectionOptions) {
     debounceTimer = setTimeout(() => {
       try {
         const selection = window.getSelection()
-        
+
         if (selection && !selection.isCollapsed) {
           const text = selection.toString().trim()
           if (text.length > 0) {
             const range = selection.getRangeAt(0)
             const rect = range.getBoundingClientRect()
+
+            // 计算行号（如果有完整内容）
+            let startLine: number | undefined
+            let endLine: number | undefined
             
+            if (context?.fullContent && context?.filePath) {
+              const lines = context.fullContent.split('\n')
+              const selectedText = text
+              
+              // 在完整内容中查找选中内容的起始位置
+              const startIndex = context.fullContent.indexOf(selectedText)
+              if (startIndex !== -1) {
+                // 计算起始行号
+                const beforeStart = context.fullContent.substring(0, startIndex)
+                startLine = (beforeStart.match(/\n/g) || []).length + 1
+                
+                // 计算结束行号
+                const endIndex = startIndex + selectedText.length
+                const beforeEnd = context.fullContent.substring(0, endIndex)
+                endLine = (beforeEnd.match(/\n/g) || []).length + 1
+              }
+            }
+
+            const extraInfo = {
+              filePath: context?.filePath,
+              fullContent: context?.fullContent,
+              startLine,
+              endLine
+            }
+
             if (visible.value) {
               // 对话框已打开，更新选区内容
-              updateSelection(text, rect)
+              updateSelection(text, rect, extraInfo)
             } else {
               // 对话框未打开，打开它
-              openForSelection(text, rect)
+              openForSelection(text, rect, extraInfo)
             }
           }
         } else if (visible.value) {

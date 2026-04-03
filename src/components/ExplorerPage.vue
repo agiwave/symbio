@@ -236,7 +236,10 @@ function handleKeydown(e: KeyboardEvent) {
 
 // 选区事件处理
 function handleMouseUp(e: MouseEvent) {
-  aiSelection.handleMouseUp(e, contentAreaRef.value || undefined)
+  aiSelection.handleMouseUp(e, contentAreaRef.value || undefined, {
+    filePath: selectedPath.value,
+    fullContent: fileContent.value
+  })
 }
 
 // 刷新
