@@ -569,56 +569,6 @@ impl OpenAiPlugin {
             error: None,
         })
     }
-}
-
-impl Default for OpenAiPlugin {
-    fn default() -> Self {
-        Self::new(None, OpenAiConfig::default())
-    }
-}
-
-#[async_trait]
-impl Plugin for OpenAiPlugin {
-    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
-        if path == "config" {
-            return Ok(PluginMeta {
-                name: "config".to_string(),
-                description: "OpenAI 配置管理".to_string(),
-                version: "0.1.0".to_string(),
-                input: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["get", "set"],
-                            "description": "get获取配置，set设置配置"
-                        },
-                        "config": {
-                            "type": "object",
-                            "properties": {
-                                "api_base": { "type": "string", "description": "API 基础 URL" },
-                                "api_key": { "type": "string", "description": "API Key" },
-                                "model": { "type": "string", "description": "模型名称" },
-                                "temperature": { "type": "number", "description": "温度参数" },
-                                "max_tokens": { "type": "integer", "description": "最大输出 tokens" },
-                                "system_prompt": { "type": "string", "description": "系统提示词" }
-                            }
-                        }
-                    },
-                    "required": ["action"]
-                })),
-                output: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "success": { "type": "boolean" },
-                        "config": { "type": "object" }
-                    }
-                })),
-                author: Some("Symbio Team".to_string()),
-            });
-        }
-        Ok(self.meta.clone())
-    }
 
     /// 流式处理聊天请求
     async fn handle_chat_stream(&self, input: &Value) -> PluginResult<InvokeStream> {
@@ -626,12 +576,12 @@ impl Plugin for OpenAiPlugin {
             .and_then(|v| v.as_str())
             .ok_or_else(|| PluginError::ValidationError("缺少 message 参数".to_string()))?;
 
-        let session_id = input.get("session_id")
+        let _session_id = input.get("session_id")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
         let config = self.config.read().await.clone();
-        let parent = self.get_parent();
+        let _parent = self.get_parent();
         let api_key = config.api_key.clone().unwrap_or_default();
         let api_url = self.api_url();
 
@@ -748,6 +698,56 @@ impl Plugin for OpenAiPlugin {
 
         Ok(InvokeStream::Stream(Box::pin(stream)))
     }
+}
+
+impl Default for OpenAiPlugin {
+    fn default() -> Self {
+        Self::new(None, OpenAiConfig::default())
+    }
+}
+
+#[async_trait]
+impl Plugin for OpenAiPlugin {
+    fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
+        if path == "config" {
+            return Ok(PluginMeta {
+                name: "config".to_string(),
+                description: "OpenAI 配置管理".to_string(),
+                version: "0.1.0".to_string(),
+                input: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["get", "set"],
+                            "description": "get获取配置，set设置配置"
+                        },
+                        "config": {
+                            "type": "object",
+                            "properties": {
+                                "api_base": { "type": "string", "description": "API 基础 URL" },
+                                "api_key": { "type": "string", "description": "API Key" },
+                                "model": { "type": "string", "description": "模型名称" },
+                                "temperature": { "type": "number", "description": "温度参数" },
+                                "max_tokens": { "type": "integer", "description": "最大输出 tokens" },
+                                "system_prompt": { "type": "string", "description": "系统提示词" }
+                            }
+                        }
+                    },
+                    "required": ["action"]
+                })),
+                output: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "success": { "type": "boolean" },
+                        "config": { "type": "object" }
+                    }
+                })),
+                author: Some("Symbio Team".to_string()),
+            });
+        }
+        Ok(self.meta.clone())
+    }
 
     fn capabilities(&self) -> Vec<&'static str> {
         vec![CAPABILITY_LLM]
@@ -841,11 +841,11 @@ impl Plugin for OpenAiPlugin {
                         // 直接返回流式响应
                         self.handle_chat_stream(&input).await
                     }
-                    "status" => self.handle_status().await,
-                    "list_models" => self.handle_list_models(&input),
-                    "configure" => self.handle_configure(&input).await,
-                    "get_config" => self.handle_get_config().await,
-                    "compress_info" => self.handle_compress_info(&input).await,
+                    "status" => self.handle_status().await.map(InvokeStream::Single),
+                    "list_models" => self.handle_list_models(&input).map(InvokeStream::Single),
+                    "configure" => self.handle_configure(&input).await.map(InvokeStream::Single),
+                    "get_config" => self.handle_get_config().await.map(InvokeStream::Single),
+                    "compress_info" => self.handle_compress_info(&input).await.map(InvokeStream::Single),
                     _ => Ok(InvokeStream::Single(StreamChunk {
                         data: json!({}),
                         done: true,
