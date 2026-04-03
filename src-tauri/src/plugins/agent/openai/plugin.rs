@@ -277,27 +277,6 @@ impl OpenAiPlugin {
             // 有工具调用 - 执行工具并将结果添加到消息历史
             eprintln!("[openai] Processing {} tool calls", tool_calls.len());
 
-            // 先 yield 工具调用的信息
-            let tool_calls_data: Vec<Value> = tool_calls.iter().map(|(id, name, args)| {
-                json!({
-                    "id": id,
-                    "function": {
-                        "name": name,
-                        "arguments": args
-                    }
-                })
-            }).collect();
-
-            yield StreamChunk {
-                data: json!({
-                    "content": content,
-                    "tool_calls": tool_calls_data,
-                    "done": false
-                }),
-                done: false,
-                error: None,
-            };
-
             for (id, name, args) in tool_calls {
                 eprintln!("[openai] Executing tool: {} with args: {}", name, args);
 
