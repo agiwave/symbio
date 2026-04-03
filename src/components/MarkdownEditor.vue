@@ -125,10 +125,10 @@
     
     <!-- AI 悬浮对话框 -->
     <Teleport to="body">
-      <!-- AI 悬浮对话框 -->
       <Transition name="slide-up">
         <div 
           v-if="showAIDialog" 
+          ref="aiDialogRef"
           class="ai-floating-dialog"
           :style="aiDialogStyle"
         >
@@ -254,20 +254,84 @@ const aiInput = ref('')
 const aiMessages = ref<{ role: 'user' | 'assistant'; content: string }[]>([])
 const aiLoading = ref(false)
 const selectedText = ref('')
+const aiDialogRef = ref<HTMLElement | null>(null)
+
+// AI 对话框位置 - 跟随选区
+const aiDialogPosition = reactive({
+  top: 80,
+  left: 0,
+  right: 20,
+})
 
 const aiDialogStyle = computed(() => ({
-  top: '80px',
-  right: '20px',
+  top: `${aiDialogPosition.top}px`,
+  right: `${aiDialogPosition.right}px`,
 }))
+
+// 计算对话框位置，基于选区
+function calculateDialogPosition() {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed) {
+    aiDialogPosition.top = 80
+    aiDialogPosition.right = 20
+    return
+  }
+  
+  const range = selection.getRangeAt(0)
+  const rect = range.getBoundingClientRect()
+  
+  // 对话框宽度约 380px
+  // 如果选区在右侧，对话框显示在左侧
+  const dialogWidth = 380
+  const viewportWidth = window.innerWidth
+  
+  // 判断是否有足够空间在右侧显示
+  if (rect.right + dialogWidth + 40 > viewportWidth) {
+    // 显示在左侧
+    aiDialogPosition.right = viewportWidth - rect.left + 20
+    aiDialogPosition.left = 0
+  } else {
+    // 显示在右侧
+    aiDialogPosition.right = 20
+  }
+  
+  // 垂直位置：选区下方或上方
+  const dialogHeight = 300 // 估计高度
+  const spaceBelow = window.innerHeight - rect.bottom
+  const spaceAbove = rect.top
+  
+  if (spaceBelow >= dialogHeight || spaceBelow >= spaceAbove) {
+    aiDialogPosition.top = rect.bottom + 10
+  } else {
+    aiDialogPosition.top = Math.max(20, rect.top - dialogHeight - 10)
+  }
+}
 
 // 处理文字选中 - 直接打开 AI 对话框
 let selectionTimer: ReturnType<typeof setTimeout> | null = null
 
 function handleSelectionChange() {
-  // 如果对话框已经打开，不处理
-  if (showAIDialog.value) return
-  
   const selection = window.getSelection()
+  
+  // 如果对话框已打开
+  if (showAIDialog.value) {
+    // 检查选区是否变化或消失
+    if (!selection || selection.isCollapsed) {
+      // 选区消失，关闭对话框
+      closeAIDialog()
+      return
+    }
+    
+    const text = selection.toString().trim()
+    if (text !== selectedText.value && text.length > 0) {
+      // 选区变化，重新打开
+      closeAIDialog()
+      setTimeout(() => openAIForSelection(text), 50)
+    }
+    return
+  }
+  
+  // 对话框未打开，检查是否有新选区
   if (!selection || selection.isCollapsed) {
     selectedText.value = ''
     return
@@ -275,22 +339,39 @@ function handleSelectionChange() {
   
   const text = selection.toString().trim()
   if (text.length > 0) {
-    selectedText.value = text
-    
-    // 延迟一小段时间再打开对话框，避免选择过程中的闪烁
-    if (selectionTimer) clearTimeout(selectionTimer)
-    selectionTimer = setTimeout(() => {
-      // 再次检查选区是否还存在
-      const currentSelection = window.getSelection()
-      if (currentSelection && !currentSelection.isCollapsed && currentSelection.toString().trim().length > 0) {
-        showAIDialog.value = true
-        // 预填充提示
-        aiInput.value = ''
-        nextTick(() => aiInputRef.value?.focus())
-      }
-    }, 300)
-  } else {
-    selectedText.value = ''
+    openAIForSelection(text)
+  }
+}
+
+// 为选区打开 AI 对话框
+function openAIForSelection(text: string) {
+  selectedText.value = text
+  calculateDialogPosition()
+  
+  // 延迟打开，避免选择过程中的闪烁
+  if (selectionTimer) clearTimeout(selectionTimer)
+  selectionTimer = setTimeout(() => {
+    const currentSelection = window.getSelection()
+    if (currentSelection && !currentSelection.isCollapsed && currentSelection.toString().trim().length > 0) {
+      showAIDialog.value = true
+      // 清空历史消息，每次选择都是新对话
+      aiMessages.value = []
+      aiInput.value = ''
+      nextTick(() => aiInputRef.value?.focus())
+    }
+  }, 200)
+}
+
+// 点击外部关闭 AI 对话框
+function handleClickOutside(e: MouseEvent) {
+  if (!showAIDialog.value) return
+  
+  const target = e.target as HTMLElement
+  const dialogEl = aiDialogRef.value
+  
+  // 检查是否点击在对话框外部
+  if (dialogEl && !dialogEl.contains(target)) {
+    closeAIDialog()
   }
 }
 
@@ -751,6 +832,9 @@ function decreaseLevel() {
 
 function openAI() {
   showToolbar.value = false
+  selectedText.value = ''
+  aiMessages.value = []
+  calculateDialogPosition()
   showAIDialog.value = true
   nextTick(() => aiInputRef.value?.focus())
 }
@@ -766,6 +850,8 @@ watch(() => props.modelValue, (newValue) => {
 // AI Dialog
 function closeAIDialog() {
   showAIDialog.value = false
+  selectedText.value = ''
+  aiMessages.value = []
 }
 
 async function sendAIMessage() {
@@ -798,10 +884,19 @@ function renderMarkdown(content: string): string {
 
 // Keyboard shortcuts
 function handleKeydown(e: KeyboardEvent) {
+  // Escape 关闭 AI 对话框
+  if (e.key === 'Escape') {
+    if (showAIDialog.value) {
+      e.preventDefault()
+      closeAIDialog()
+    }
+    return
+  }
+  
+  // Ctrl+K 打开 AI 对话框
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault()
-    showAIDialog.value = true
-    nextTick(() => aiInputRef.value?.focus())
+    openAI()
   }
 }
 
@@ -839,18 +934,20 @@ onMounted(() => {
   initEditor()
   document.addEventListener('keydown', handleKeydown)
   document.addEventListener('selectionchange', handleSelectionChange)
+  document.addEventListener('mousedown', handleClickOutside)
 })
 
 onUnmounted(() => {
   destroyEditor()
   document.removeEventListener('keydown', handleKeydown)
   document.removeEventListener('selectionchange', handleSelectionChange)
+  document.removeEventListener('mousedown', handleClickOutside)
   if (expandTimer) clearTimeout(expandTimer)
   if (collapseTimer) clearTimeout(collapseTimer)
   if (selectionTimer) clearTimeout(selectionTimer)
 })
 
-defineExpose({ openAI: () => { showAIDialog.value = true } })
+defineExpose({ openAI })
 </script>
 
 <style scoped>
@@ -1149,98 +1246,100 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
 /* AI Floating Dialog - 悬浮对话框 */
 .ai-floating-dialog {
   position: fixed;
-  width: 380px;
-  max-height: 70vh;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  width: 360px;
+  max-height: 60vh;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   z-index: 2000;
+  backdrop-filter: blur(12px);
 }
 
 .ai-dialog-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e5e5e5;
-  background: #fafafa;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .ai-header-icon {
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .ai-dialog-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   flex: 1;
+  color: #1a1a1a;
 }
 
 .ai-dialog-close {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 18px;
-  color: #666;
+  font-size: 16px;
+  color: #999;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.15s;
 }
 
 .ai-dialog-close:hover {
-  background: #e5e5e5;
+  background: rgba(0, 0, 0, 0.08);
+  color: #333;
 }
 
 /* Selected context - 选中的文字提示 */
 .ai-selected-context {
-  padding: 10px 16px;
-  background: #f0f7ff;
-  border-bottom: 1px solid #e0e7ef;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(37, 99, 235, 0.06));
 }
 
 .ai-selected-context .context-label {
-  font-size: 11px;
-  color: #666;
+  font-size: 10px;
+  color: #888;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .ai-selected-context .context-text {
   font-size: 12px;
-  color: #333;
+  color: #444;
   margin-top: 4px;
-  padding: 8px;
-  background: #fff;
-  border-radius: 4px;
-  border-left: 3px solid #2383e2;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 6px;
+  border-left: 2px solid #7c3aed;
 }
 
 .ai-dialog-body {
   flex: 1;
   overflow: hidden;
-  min-height: 150px;
-  max-height: 300px;
+  min-height: 100px;
+  max-height: 280px;
 }
 
 .ai-messages {
   height: 100%;
   overflow-y: auto;
-  padding: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .ai-msg {
-  max-width: 90%;
+  max-width: 88%;
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: 12px;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -1296,34 +1395,36 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
 .ai-dialog-footer {
   display: flex;
   gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid #e5e5e5;
-  background: #fafafa;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .ai-dialog-footer textarea {
   flex: 1;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
   resize: none;
   outline: none;
   font-family: inherit;
   line-height: 1.4;
-  max-height: 120px;
+  max-height: 100px;
+  background: rgba(0, 0, 0, 0.02);
+  transition: all 0.15s;
 }
 
 .ai-dialog-footer textarea:focus {
   border-color: #7c3aed;
+  background: #fff;
 }
 
 .ai-send-btn {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   background: linear-gradient(135deg, #7c3aed, #2563eb);
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #fff;
   cursor: pointer;
   display: flex;
@@ -1333,7 +1434,8 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
 }
 
 .ai-send-btn:hover:not(:disabled) {
-  transform: scale(1.02);
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
 }
 
 .ai-send-btn:disabled {
@@ -1363,15 +1465,22 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
   transform: translateX(-8px);
 }
 
-.slide-up-enter-active,
-.slide-up-leave-active {
-  transition: all 0.2s ease;
+.slide-up-enter-active {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.slide-up-enter-from,
+.slide-up-leave-active {
+  transition: all 0.15s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.slide-up-enter-from {
+  opacity: 0;
+  transform: translateY(12px) scale(0.96);
+}
+
 .slide-up-leave-to {
   opacity: 0;
-  transform: translateY(20px);
+  transform: translateY(8px) scale(0.98);
 }
 
 /* Responsive */

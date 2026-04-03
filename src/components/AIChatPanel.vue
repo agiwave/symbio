@@ -76,7 +76,7 @@
       <div class="input-wrapper">
         <textarea
           v-model="inputText"
-          placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
+          placeholder="输入消息..."
           @keydown.enter.exact="handleKeydown"
           :disabled="isLoading"
           rows="1"
@@ -480,6 +480,7 @@ watch(() => props.messages.length, () => {
   border-radius: 12px;
   padding: 0.5rem;
   transition: border-color 0.2s;
+  container-type: inline-size;
 }
 
 .input-wrapper:focus-within {
@@ -503,6 +504,13 @@ watch(() => props.messages.length, () => {
 
 .chat-input textarea:disabled {
   opacity: 0.6;
+}
+
+/* 窄屏时隐藏 placeholder */
+@container (max-width: 200px) {
+  .chat-input textarea::placeholder {
+    color: transparent;
+  }
 }
 
 .send-btn {
