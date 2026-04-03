@@ -620,6 +620,135 @@ impl Plugin for OpenAiPlugin {
         Ok(self.meta.clone())
     }
 
+    /// 流式处理聊天请求
+    async fn handle_chat_stream(&self, input: &Value) -> PluginResult<InvokeStream> {
+        let message = input.get("message")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| PluginError::ValidationError("缺少 message 参数".to_string()))?;
+
+        let session_id = input.get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+
+        let config = self.config.read().await.clone();
+        let parent = self.get_parent();
+        let api_key = config.api_key.clone().unwrap_or_default();
+        let api_url = self.api_url();
+
+        // 获取系统提示
+        let system_prompt = config.system_prompt.clone()
+            .unwrap_or_else(|| "You are a helpful AI assistant.".into());
+
+        // 构建消息
+        let messages = vec![
+            json!({
+                "role": "system",
+                "content": system_prompt
+            }),
+            json!({
+                "role": "user",
+                "content": message
+            })
+        ];
+
+        // 构建请求 - 使用流式 API
+        let mut request = json!({
+            "model": config.model,
+            "messages": messages,
+            "temperature": config.temperature,
+            "stream": true,  // 启用流式
+        });
+
+        if let Some(max_tokens) = config.max_tokens {
+            request["max_tokens"] = json!(max_tokens);
+        }
+
+        // 发送流式请求
+        let response = reqwest::Client::new()
+            .post(&api_url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .timeout(std::time::Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| PluginError::InternalError(format!("请求失败: {}", e)))?;
+
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Ok(InvokeStream::single(json!({
+                "content": "",
+                "error": format!("API 错误: {}", error)
+            })));
+        }
+
+        // 创建流式返回
+        let stream = async_stream::stream! {
+            use futures::StreamExt;
+            let mut full_content = String::new();
+            let mut stream = response.bytes_stream();
+            
+            while let Some(chunk_result) = stream.next().await {
+                match chunk_result {
+                    Ok(chunk_bytes) => {
+                        let chunk_text = String::from_utf8_lossy(&chunk_bytes);
+                        
+                        // 解析 SSE 格式
+                        for line in chunk_text.lines() {
+                            if line.starts_with("data: ") {
+                                let data = &line[6..];
+                                if data == "[DONE]" {
+                                    // 流结束，返回最终结果
+                                    yield StreamChunk {
+                                        data: json!({
+                                            "content": full_content,
+                                            "done": true
+                                        }),
+                                        done: true,
+                                        error: None,
+                                    };
+                                    return;
+                                }
+                                
+                                if let Ok(chunk_json) = serde_json::from_str::<Value>(data) {
+                                    if let Some(choices) = chunk_json.get("choices") {
+                                        if let Some(choice) = choices.get(0) {
+                                            if let Some(delta) = choice.get("delta") {
+                                                if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                                                    full_content.push_str(content);
+                                                    
+                                                    // 实时返回累积内容
+                                                    yield StreamChunk {
+                                                        data: json!({
+                                                            "content": full_content.clone(),
+                                                            "done": false
+                                                        }),
+                                                        done: false,
+                                                        error: None,
+                                                    };
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        yield StreamChunk {
+                            data: json!({}),
+                            done: true,
+                            error: Some(format!("读取流失败: {}", e)),
+                        };
+                        return;
+                    }
+                }
+            }
+        };
+
+        Ok(InvokeStream::Stream(Box::pin(stream)))
+    }
+
     fn capabilities(&self) -> Vec<&'static str> {
         vec![CAPABILITY_LLM]
     }
@@ -708,22 +837,25 @@ impl Plugin for OpenAiPlugin {
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 match action.as_str() {
-                    "chat" => self.handle_chat(&input).await,
+                    "chat" => {
+                        // 直接返回流式响应
+                        self.handle_chat_stream(&input).await
+                    }
                     "status" => self.handle_status().await,
                     "list_models" => self.handle_list_models(&input),
                     "configure" => self.handle_configure(&input).await,
                     "get_config" => self.handle_get_config().await,
                     "compress_info" => self.handle_compress_info(&input).await,
-                    _ => Ok(StreamChunk {
+                    _ => Ok(InvokeStream::Single(StreamChunk {
                         data: json!({}),
                         done: true,
                         error: Some(format!("未知操作: {}", action)),
-                    }),
+                    })),
                 }
             })
-        })?;
+        });
 
-        Ok(InvokeStream::Single(result))
+        result
     }
 }
 

@@ -34,7 +34,7 @@
           <!-- 展开的操作栏 - 绝对定位 -->
           <Transition name="expand">
             <div v-if="showToolbar" class="handle-toolbar">
-              <button class="toolbar-btn" @click.stop="addBlockBelow" title="在下方添加块">
+              <button class="toolbar-btn" @click.stop="addBlockBelow" title="添加块">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="12" y1="5" x2="12" y2="19"/>
                   <line x1="5" y1="12" x2="19" y2="12"/>
@@ -47,24 +47,10 @@
                 </svg>
               </button>
               <div class="toolbar-divider"></div>
-              <button class="toolbar-btn" @click.stop="turnInto('heading', 1)" title="标题 1">
-                <span class="btn-text">H1</span>
+              <button class="toolbar-btn" @click.stop="turnInto('heading')" title="标题">
+                <span class="btn-text">H</span>
               </button>
-              <button class="toolbar-btn" @click.stop="turnInto('heading', 2)" title="标题 2">
-                <span class="btn-text">H2</span>
-              </button>
-              <button class="toolbar-btn" @click.stop="turnInto('heading', 3)" title="标题 3">
-                <span class="btn-text">H3</span>
-              </button>
-              <div class="toolbar-divider"></div>
-              <button class="toolbar-btn" @click.stop="turnInto('paragraph')" title="正文">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="3" y1="6" x2="21" y2="6"/>
-                  <line x1="3" y1="12" x2="15" y2="12"/>
-                  <line x1="3" y1="18" x2="18" y2="18"/>
-                </svg>
-              </button>
-              <button class="toolbar-btn" @click.stop="turnInto('bullet_list')" title="无序列表">
+              <button class="toolbar-btn" @click.stop="turnInto('list')" title="列表">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="9" y1="6" x2="20" y2="6"/>
                   <line x1="9" y1="12" x2="20" y2="12"/>
@@ -74,14 +60,10 @@
                   <circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none"/>
                 </svg>
               </button>
-              <button class="toolbar-btn" @click.stop="turnInto('ordered_list')" title="有序列表">
+              <button class="toolbar-btn" @click.stop="turnInto('code_block')" title="代码块">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="10" y1="6" x2="21" y2="6"/>
-                  <line x1="10" y1="12" x2="21" y2="12"/>
-                  <line x1="10" y1="18" x2="21" y2="18"/>
-                  <text x="3" y="8" font-size="8" fill="currentColor" stroke="none">1</text>
-                  <text x="3" y="14" font-size="8" fill="currentColor" stroke="none">2</text>
-                  <text x="3" y="20" font-size="8" fill="currentColor" stroke="none">3</text>
+                  <polyline points="16 18 22 12 16 6"/>
+                  <polyline points="8 6 2 12 8 18"/>
                 </svg>
               </button>
               <button class="toolbar-btn" @click.stop="turnInto('blockquote')" title="引用">
@@ -89,10 +71,22 @@
                   <path d="M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z"/>
                 </svg>
               </button>
-              <button class="toolbar-btn" @click.stop="turnInto('code_block')" title="代码块">
+              <button class="toolbar-btn" @click.stop="turnInto('paragraph')" title="正文">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="16 18 22 12 16 6"/>
-                  <polyline points="8 6 2 12 8 18"/>
+                  <line x1="3" y1="6" x2="21" y2="6"/>
+                  <line x1="3" y1="12" x2="15" y2="12"/>
+                  <line x1="3" y1="18" x2="18" y2="18"/>
+                </svg>
+              </button>
+              <div class="toolbar-divider"></div>
+              <button class="toolbar-btn" @click.stop="increaseLevel" title="提高级别">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="18 15 12 9 6 15"/>
+                </svg>
+              </button>
+              <button class="toolbar-btn" @click.stop="decreaseLevel" title="降低级别">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6 9 12 15 18 9"/>
                 </svg>
               </button>
               <div class="toolbar-divider"></div>
@@ -362,13 +356,22 @@ function handleMouseLeave() {
 
 // 拖拽功能
 function handleDragStart(e: DragEvent) {
+  const sourcePos = blockHandle.activePos
+  console.log('[DragStart] activePos:', sourcePos)
+  
+  if (sourcePos === undefined || sourcePos === null) {
+    console.warn('[DragStart] No active position, aborting drag')
+    e.preventDefault()
+    return
+  }
+  
   isDragging.value = true
   showToolbar.value = false
-  dragSourcePos.value = blockHandle.activePos
+  dragSourcePos.value = sourcePos
   
   if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', String(blockHandle.activePos))
+    e.dataTransfer.setData('text/plain', String(sourcePos))
     // 设置拖拽图像为透明
     const img = new Image()
     img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
@@ -429,7 +432,12 @@ function handleDocumentDragOver(e: DragEvent) {
 }
 
 function handleDocumentDrop(e: DragEvent) {
-  if (!isDragging.value || dragSourcePos.value === null || !editor.value) return
+  console.log('[Drop] isDragging:', isDragging.value, 'dragSourcePos:', dragSourcePos.value)
+  
+  if (!isDragging.value || dragSourcePos.value === null || dragSourcePos.value === undefined || !editor.value) {
+    console.log('[Drop] Early return - invalid state')
+    return
+  }
   
   e.preventDefault()
   
@@ -439,8 +447,12 @@ function handleDocumentDrop(e: DragEvent) {
     
     // 获取目标位置
     const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
+    console.log('[Drop] posAtCoords:', posAtCoords)
+    
     if (!posAtCoords) {
       dropIndicator.visible = false
+      isDragging.value = false
+      dragSourcePos.value = null
       return
     }
     
@@ -455,9 +467,14 @@ function handleDocumentDrop(e: DragEvent) {
     }
     const targetPos = $pos.before(depth)
     
+    console.log('[Drop] sourcePos:', dragSourcePos.value, 'targetPos:', targetPos)
+    
     // 不允许拖到自己的位置
     if (targetPos === dragSourcePos.value) {
+      console.log('[Drop] Same position, skipping')
       dropIndicator.visible = false
+      isDragging.value = false
+      dragSourcePos.value = null
       return
     }
     
@@ -465,8 +482,12 @@ function handleDocumentDrop(e: DragEvent) {
     const sourcePos = dragSourcePos.value
     const sourceNode = state.doc.nodeAt(sourcePos)
     
+    console.log('[Drop] sourceNode:', sourceNode?.type.name, sourceNode?.nodeSize)
+    
     if (!sourceNode) {
       dropIndicator.visible = false
+      isDragging.value = false
+      dragSourcePos.value = null
       return
     }
     
@@ -479,10 +500,13 @@ function handleDocumentDrop(e: DragEvent) {
     // 调整目标位置（如果源在目标前面，删除后位置会改变）
     const adjustedTarget = sourcePos < targetPos ? targetPos - sourceNode.nodeSize : targetPos
     
+    console.log('[Drop] adjustedTarget:', adjustedTarget)
+    
     // 插入到新位置
     tr = tr.insert(adjustedTarget, sourceNode)
     
     view.dispatch(tr)
+    console.log('[Drop] Move completed')
     
   } catch (err) {
     console.error('Drop error:', err)
@@ -529,14 +553,22 @@ function deleteBlock() {
   showToolbar.value = false
 }
 
-function turnInto(type: string, level?: number) {
+function turnInto(type: string) {
   if (!editorCtx.value) return
   
   try {
     const commands = editorCtx.value.get(commandsCtx)
+    const view = editorCtx.value.get(editorViewCtx)
+    const { $from } = view.state.selection
     
     switch (type) {
       case 'heading': {
+        // 获取当前标题级别，默认为 1
+        const currentNode = $from.node($from.depth)
+        let level = 1
+        if (currentNode.type.name === 'heading') {
+          level = currentNode.attrs.level || 1
+        }
         const heading = headingSchema.type(editorCtx.value)
         commands.call(setBlockTypeCommand.key, {
           nodeType: heading,
@@ -544,19 +576,15 @@ function turnInto(type: string, level?: number) {
         })
         break
       }
-      case 'paragraph': {
-        const paragraph = paragraphSchema.type(editorCtx.value)
-        commands.call(setBlockTypeCommand.key, { nodeType: paragraph })
-        break
-      }
-      case 'bullet_list': {
+      case 'list': {
+        // 切换列表类型或创建列表
         const bulletList = bulletListSchema.type(editorCtx.value)
         commands.call(wrapInBlockTypeCommand.key, { nodeType: bulletList })
         break
       }
-      case 'ordered_list': {
-        const orderedList = orderedListSchema.type(editorCtx.value)
-        commands.call(wrapInBlockTypeCommand.key, { nodeType: orderedList })
+      case 'paragraph': {
+        const paragraph = paragraphSchema.type(editorCtx.value)
+        commands.call(setBlockTypeCommand.key, { nodeType: paragraph })
         break
       }
       case 'blockquote': {
@@ -572,6 +600,69 @@ function turnInto(type: string, level?: number) {
     }
   } catch (e) {
     console.error('Turn into error:', e)
+  }
+  
+  showToolbar.value = false
+}
+
+function increaseLevel() {
+  if (!editorCtx.value) return
+  
+  try {
+    const view = editorCtx.value.get(editorViewCtx)
+    const { $from } = view.state.selection
+    const currentNode = $from.node($from.depth)
+    
+    // 标题：降低数字（提高级别，如 H2 -> H1）
+    if (currentNode.type.name === 'heading') {
+      const currentLevel = currentNode.attrs.level || 1
+      if (currentLevel > 1) {
+        const heading = headingSchema.type(editorCtx.value)
+        const commands = editorCtx.value.get(commandsCtx)
+        commands.call(setBlockTypeCommand.key, {
+          nodeType: heading,
+          attrs: { level: currentLevel - 1 }
+        })
+      }
+    }
+  } catch (e) {
+    console.error('Increase level error:', e)
+  }
+  
+  showToolbar.value = false
+}
+
+function decreaseLevel() {
+  if (!editorCtx.value) return
+  
+  try {
+    const view = editorCtx.value.get(editorViewCtx)
+    const { $from } = view.state.selection
+    const currentNode = $from.node($from.depth)
+    
+    // 标题：增加数字（降低级别，如 H1 -> H2）
+    if (currentNode.type.name === 'heading') {
+      const currentLevel = currentNode.attrs.level || 1
+      if (currentLevel < 6) {
+        const heading = headingSchema.type(editorCtx.value)
+        const commands = editorCtx.value.get(commandsCtx)
+        commands.call(setBlockTypeCommand.key, {
+          nodeType: heading,
+          attrs: { level: currentLevel + 1 }
+        })
+      }
+    }
+    // 普通段落：转为标题 6
+    else if (currentNode.type.name === 'paragraph') {
+      const heading = headingSchema.type(editorCtx.value)
+      const commands = editorCtx.value.get(commandsCtx)
+      commands.call(setBlockTypeCommand.key, {
+        nodeType: heading,
+        attrs: { level: 6 }
+      })
+    }
+  } catch (e) {
+    console.error('Decrease level error:', e)
   }
   
   showToolbar.value = false
