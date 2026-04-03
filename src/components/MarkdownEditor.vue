@@ -304,10 +304,10 @@ async function initEditor() {
         const rect = dom.getBoundingClientRect()
         const editorRect = editorRef.value.getBoundingClientRect()
         
-        // 手柄放在内容块左边，但在编辑器 padding 区域内
-        // editorRect.left 是编辑器左边，padding 是 48px
+        // 手柄始终显示在编辑器左边界，不进入文档内容区域
+        // 编辑器有 48px 的左 padding，手柄放在 padding 区域内
         const handleWidth = 24
-        const handleLeft = Math.max(editorRect.left, rect.left - handleWidth - 4)
+        const handleLeft = editorRect.left - handleWidth - 8 // 编辑器左边外侧
         
         blockHandle.visible = true
         blockHandle.top = rect.top
@@ -370,13 +370,10 @@ function handleDragStart(e: DragEvent) {
   if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', String(blockHandle.activePos))
-  }
-  
-  // 添加全局拖放监听
-  const editorDom = editor.value?.ctx.get(editorViewCtx).dom
-  if (editorDom) {
-    editorDom.addEventListener('dragover', handleDragOver)
-    editorDom.addEventListener('drop', handleDrop)
+    // 设置拖拽图像为透明
+    const img = new Image()
+    img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+    e.dataTransfer.setDragImage(img, 0, 0)
   }
 }
 
@@ -384,32 +381,18 @@ function handleDragEnd(_e: DragEvent) {
   isDragging.value = false
   dragSourcePos.value = null
   dropIndicator.visible = false
-  
-  // 移除全局拖放监听
-  const editorDom = editor.value?.ctx.get(editorViewCtx).dom
-  if (editorDom) {
-    editorDom.removeEventListener('dragover', handleDragOver)
-    editorDom.removeEventListener('drop', handleDrop)
-  }
 }
 
-function handleDragOver(e: DragEvent) {
+function handleDocumentDragOver(e: DragEvent) {
+  if (!isDragging.value || !editor.value || !editorRef.value) return
+  
   e.preventDefault()
-  if (!e.dataTransfer) return
-  
-  e.dataTransfer.dropEffect = 'move'
-  
-  // 计算放置位置
-  if (!editor.value || !editorRef.value) return
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'move'
+  }
   
   try {
     const view = editor.value.ctx.get(editorViewCtx)
-    const editorDom = view.dom
-    const rect = editorDom.getBoundingClientRect()
-    
-    // 计算鼠标在编辑器中的位置
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
     
     // 使用 ProseMirror 的 posAtCoords 获取位置
     const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
@@ -432,23 +415,24 @@ function handleDragOver(e: DragEvent) {
       
       if (dom && dom instanceof HTMLElement) {
         const domRect = dom.getBoundingClientRect()
-        const editorRect = editorRef.value.getBoundingClientRect()
         
         dropIndicator.visible = true
         dropIndicator.top = domRect.bottom - 2
         dropIndicator.left = domRect.left
         dropIndicator.width = domRect.width
       }
+    } else {
+      dropIndicator.visible = false
     }
   } catch (err) {
     // 忽略错误
   }
 }
 
-function handleDrop(e: DragEvent) {
-  e.preventDefault()
+function handleDocumentDrop(e: DragEvent) {
+  if (!isDragging.value || dragSourcePos.value === null || !editor.value) return
   
-  if (dragSourcePos.value === null || !editor.value) return
+  e.preventDefault()
   
   try {
     const view = editor.value.ctx.get(editorViewCtx)
@@ -456,7 +440,10 @@ function handleDrop(e: DragEvent) {
     
     // 获取目标位置
     const posAtCoords = view.posAtCoords({ left: e.clientX, top: e.clientY })
-    if (!posAtCoords) return
+    if (!posAtCoords) {
+      dropIndicator.visible = false
+      return
+    }
     
     const $pos = state.doc.resolve(posAtCoords.pos)
     let depth = $pos.depth
@@ -479,7 +466,10 @@ function handleDrop(e: DragEvent) {
     const sourcePos = dragSourcePos.value
     const sourceNode = state.doc.nodeAt(sourcePos)
     
-    if (!sourceNode) return
+    if (!sourceNode) {
+      dropIndicator.visible = false
+      return
+    }
     
     // 创建事务
     let tr = state.tr
@@ -495,19 +485,13 @@ function handleDrop(e: DragEvent) {
     
     view.dispatch(tr)
     
-    // 更新选区到新位置
-    const newPos = adjustedTarget
-    view.dispatch(view.state.tr.setSelection(
-      new (view.state.selection.constructor as any)(
-        view.state.doc.resolve(newPos + 1),
-        view.state.doc.resolve(newPos + sourceNode.nodeSize - 1)
-      )
-    ))
   } catch (err) {
     console.error('Drop error:', err)
   }
   
   dropIndicator.visible = false
+  isDragging.value = false
+  dragSourcePos.value = null
 }
 
 // Block operations
@@ -683,11 +667,16 @@ async function destroyEditor() {
 onMounted(() => {
   initEditor()
   document.addEventListener('keydown', handleKeydown)
+  // 添加 document 级别的拖放监听
+  document.addEventListener('dragover', handleDocumentDragOver)
+  document.addEventListener('drop', handleDocumentDrop)
 })
 
 onUnmounted(() => {
   destroyEditor()
   document.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener('dragover', handleDocumentDragOver)
+  document.removeEventListener('drop', handleDocumentDrop)
   if (expandTimer) clearTimeout(expandTimer)
   if (collapseTimer) clearTimeout(collapseTimer)
 })
