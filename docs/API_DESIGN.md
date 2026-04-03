@@ -731,11 +731,6 @@ fn migrate_config(config: &mut Value) {
 
 ```rust
 pub const CAPABILITY_LLM: &str = "llm";
-pub const CAPABILITY_SESSION: &str = "session";
-pub const CAPABILITY_MEMORY: &str = "memory";
-pub const CAPABILITY_TOOLS: &str = "tools";
-pub const CAPABILITY_DOCKER: &str = "docker";
-pub const CAPABILITY_TELEGRAM: &str = "telegram";
 ```
 
 ### B. 错误码

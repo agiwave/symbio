@@ -3,7 +3,7 @@
 use super::types::*;
 use super::token::*;
 use super::stream::ToolCallAccumulator;
-use crate::core::traits::{Plugin, CAPABILITY_LLM, CAPABILITY_SESSION};
+use crate::core::traits::{Plugin, CAPABILITY_LLM};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -88,7 +88,7 @@ impl OpenAiPlugin {
                 "history": true
             });
 
-            if let Ok(stream) = parent.invoke(&format!("@{}", CAPABILITY_SESSION), session_input) {
+            if let Ok(stream) = parent.invoke("session", session_input) {
                 if let InvokeStream::Single(chunk) = stream {
                     if chunk.error.is_none() {
                         // 解析 LlmContext：system_prompt + tools + history
@@ -371,7 +371,7 @@ impl OpenAiPlugin {
                     "session_id": session_id,
                     "messages": new_messages
                 });
-                let _ = p.invoke(&format!("@{}", CAPABILITY_SESSION), append_input);
+                let _ = p.invoke("session", append_input);
             }
         }
 
@@ -599,7 +599,7 @@ impl OpenAiPlugin {
                 "history": true
             });
 
-            if let Ok(stream) = p.invoke(&format!("@{}", CAPABILITY_SESSION), session_input) {
+            if let Ok(stream) = p.invoke("session", session_input) {
                 if let InvokeStream::Single(chunk) = stream {
                     if chunk.error.is_none() {
                         if let Some(sys) = chunk.data.get("system_prompt").and_then(|v| v.as_str()) {
@@ -926,7 +926,7 @@ impl OpenAiPlugin {
                         "session_id": session_id,
                         "messages": new_messages
                     });
-                    let _ = p.invoke(&format!("@{}", CAPABILITY_SESSION), append_input);
+                    let _ = p.invoke("session", append_input);
                 }
             }
 

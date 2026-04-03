@@ -5,7 +5,7 @@
 //! 存储路径: <workspace>/.symbio/agent/session/
 
 use super::types::{ChatMessage, ContextEntry, Session, SessionContext, LlmContext};
-use crate::core::traits::{Plugin, CAPABILITY_SESSION};
+use crate::core::traits::{Plugin};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -494,22 +494,80 @@ impl SessionPlugin {
     async fn handle_get_context(&self, input: &Value) -> StreamChunk {
         let session_id = input.get("session_id").and_then(|v| v.as_str()).unwrap_or("default");
         let include_history = input.get("history").and_then(|v| v.as_bool()).unwrap_or(true);
-        
+
         let session = self.get_or_create_session(session_id).await.unwrap_or_else(|_| Session::new(session_id));
-        
+
         // 获取工具列表
         let tools = self.fetch_tools().await;
-        
+
+        // 构建系统提示词
+        let system_prompt = self.build_system_prompt().await;
+
         let llm_context = LlmContext {
-            system_prompt: "You are a helpful AI assistant.".to_string(),
+            system_prompt,
             tools,
             history: if include_history { session.messages } else { vec![] },
         };
-        
+
         StreamChunk {
             data: json!(llm_context),
             done: true,
             error: None,
+        }
+    }
+
+    /// 构建系统提示词（从文件加载）
+    /// 
+    /// 规则：
+    /// 1. 如果存在 ~/.symbio/README.ai.md 或 <workspace>/.symbio/README.ai.md，优先工作区的
+    /// 2. 如果存在 <workspace>/README.ai.md，则也包括这个文件
+    /// 3. 将上述文件拼接作为系统提示词
+    async fn build_system_prompt(&self) -> String {
+        let mut parts = Vec::new();
+
+        // 获取工作区路径
+        let workspace = match self.get_workspace_path().await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[session] Failed to get workspace path: {}", e);
+                return "You are a helpful AI assistant.".to_string();
+            }
+        };
+
+        // 1. 加载 .symbio/README.ai.md（优先工作区的，其次全局的）
+        let workspace_symbio_readme = workspace.join(".symbio/README.ai.md");
+        let home_dir = dirs::home_dir().unwrap_or_default();
+        let global_symbio_readme = home_dir.join(".symbio/README.ai.md");
+
+        let symbio_readme_content = if workspace_symbio_readme.exists() {
+            tokio::fs::read_to_string(&workspace_symbio_readme).await.ok()
+        } else if global_symbio_readme.exists() {
+            tokio::fs::read_to_string(&global_symbio_readme).await.ok()
+        } else {
+            None
+        };
+
+        if let Some(content) = symbio_readme_content {
+            if !content.trim().is_empty() {
+                parts.push(content);
+            }
+        }
+
+        // 2. 加载工作区根目录的 README.ai.md
+        let workspace_readme = workspace.join("README.ai.md");
+        if workspace_readme.exists() {
+            if let Ok(content) = tokio::fs::read_to_string(&workspace_readme).await {
+                if !content.trim().is_empty() {
+                    parts.push(content);
+                }
+            }
+        }
+
+        // 3. 拼接所有部分
+        if parts.is_empty() {
+            "You are a helpful AI assistant.".to_string()
+        } else {
+            parts.join("\n\n---\n\n")
         }
     }
 
@@ -715,7 +773,7 @@ impl Plugin for SessionPlugin {
     }
 
     fn capabilities(&self) -> Vec<&'static str> {
-        vec![CAPABILITY_SESSION]
+        vec![]
     }
 
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {

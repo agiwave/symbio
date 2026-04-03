@@ -8,11 +8,6 @@ use std::sync::{Arc, Weak};
 /// 
 /// 用于能力路由，插件声明自己支持的能力
 pub const CAPABILITY_LLM: &str = "llm";
-pub const CAPABILITY_SESSION: &str = "session";
-pub const CAPABILITY_MEMORY: &str = "memory";
-pub const CAPABILITY_TOOLS: &str = "tools";
-pub const CAPABILITY_TELEGRAM: &str = "telegram";
-pub const CAPABILITY_DOCKER: &str = "docker";
 
 /// 插件接口定义
 /// 
