@@ -3,7 +3,7 @@
 //! 提供三个核心命令：
 //! - `meta`: 获取插件元数据
 //! - `invoke`: 同步调用，返回完整结果
-//! - `stream`: 流式调用，通过事件推送每个 chunk
+//! - `stream`: 流式调用，通过 Channel 实时推送每个 chunk
 //!
 //! 所有插件能力都通过这三个标准命令访问，遵循统一的插件架构。
 
@@ -40,25 +40,22 @@ pub async fn invoke(
         let root = state.root.lock().map_err(|e| e.to_string())?;
         root.invoke(&path, input).map_err(|e| e.to_string())?
     };
-    
+
     Ok(stream.collect().await)
 }
 
-/// 流式调用插件，通过事件推送每个 chunk
+/// 流式调用插件，通过 Channel 实时推送每个 chunk
 ///
 /// 适用场景：需要渐进式渲染的流式场景
 ///
 /// 前端使用示例：
 /// ```typescript
-/// const eventId = `stream-${Date.now()}`;
-/// listen(eventId, (event) => {
-///     const chunk = event.payload as StreamChunk;
-///     // 处理每个 chunk
-///     if (chunk.done) {
-///         // 流结束
-///     }
-/// });
-/// await invoke('stream', { path, input, eventId });
+/// import { invoke } from '@tauri-apps/api/core'
+/// 
+/// await invoke('stream', {
+///   path: 'agent/chat',
+///   input: { action: 'send', messages: [...], session_id: 'xxx' }
+/// })
 /// ```
 #[tauri::command]
 pub async fn stream(
@@ -72,7 +69,7 @@ pub async fn stream(
         let root = state.root.lock().map_err(|e| e.to_string())?;
         root.invoke(&path, input).map_err(|e| e.to_string())?
     };
-    
+
     match stream {
         InvokeStream::Single(chunk) => {
             app.emit(&event_id, chunk).map_err(|e| e.to_string())?;
@@ -84,7 +81,7 @@ pub async fn stream(
             }
         }
     }
-    
+
     Ok(())
 }
 

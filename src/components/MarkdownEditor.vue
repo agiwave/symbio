@@ -304,10 +304,9 @@ async function initEditor() {
         const rect = dom.getBoundingClientRect()
         const editorRect = editorRef.value.getBoundingClientRect()
         
-        // 手柄始终显示在编辑器左边界，不进入文档内容区域
-        // 编辑器有 48px 的左 padding，手柄放在 padding 区域内
-        const handleWidth = 24
-        const handleLeft = editorRect.left - handleWidth - 8 // 编辑器左边外侧
+        // 手柄显示在编辑器的 padding 区域内（左侧 48px padding）
+        // 固定在编辑器左边界位置，不随内容块变化
+        const handleLeft = editorRect.left + 8 // padding 区域内，留 8px 边距
         
         blockHandle.visible = true
         blockHandle.top = rect.top
