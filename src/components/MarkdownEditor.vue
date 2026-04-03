@@ -382,15 +382,12 @@ function handleDragMouseDown(e: MouseEvent) {
   }
   
   isDragging.value = true
-  showToolbar.value = false
+  // 保持工具条显示，不关闭
   dragSourcePos.value = sourcePos
   
   // 添加全局 mouse 事件监听
-  dragMouseHandler = handleDragMouseMove
-  dragMouseUpHandler = handleDragMouseUp
-  
-  document.addEventListener('mousemove', dragMouseHandler)
-  document.addEventListener('mouseup', dragMouseUpHandler)
+  document.addEventListener('mousemove', handleDragMouseMove)
+  document.addEventListener('mouseup', handleDragMouseUp)
 }
 
 function handleDragMouseMove(e: MouseEvent) {
@@ -436,14 +433,8 @@ function handleDragMouseMove(e: MouseEvent) {
 
 function handleDragMouseUp(e: MouseEvent) {
   // 移除事件监听
-  if (dragMouseHandler) {
-    document.removeEventListener('mousemove', dragMouseHandler)
-    dragMouseHandler = null
-  }
-  if (dragMouseUpHandler) {
-    document.removeEventListener('mouseup', dragMouseUpHandler)
-    dragMouseUpHandler = null
-  }
+  document.removeEventListener('mousemove', handleDragMouseMove)
+  document.removeEventListener('mouseup', handleDragMouseUp)
   
   if (!isDragging.value || dragSourcePos.value === null || dragSourcePos.value === undefined || !editor.value) {
     isDragging.value = false

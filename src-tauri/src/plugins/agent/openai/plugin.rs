@@ -823,7 +823,17 @@ impl OpenAiPlugin {
                 };
 
                 // 执行每个工具调用
-                for (id, name, args) in tool_calls {
+                for (id, name, args_str) in tool_calls {
+                    // 解析 arguments 字符串为 Value 对象
+                    let args: Value = if let Some(s) = args_str.as_str() {
+                        serde_json::from_str(s).unwrap_or_else(|e| {
+                            eprintln!("[openai] Failed to parse tool args: {}, using empty object", e);
+                            json!({})
+                        })
+                    } else {
+                        json!({})
+                    };
+
                     // 解析 plugin/tool 格式
                     let (plugin, tool_name) = if let Some(pos) = name.find('/') {
                         (&name[..pos], &name[pos+1..])
@@ -831,7 +841,7 @@ impl OpenAiPlugin {
                         ("tools", name.as_str())
                     };
 
-                    eprintln!("[openai] Executing tool: {}/{}", plugin, tool_name);
+                    eprintln!("[openai] Executing tool: {}/{} with args: {}", plugin, tool_name, args);
 
                     // 通过父插件调用工具
                     let result = match &parent {
