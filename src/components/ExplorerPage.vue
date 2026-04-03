@@ -118,7 +118,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useExplorerStore, type FileItem } from '../stores/explorer'
 import FileTreeNode from './FileTreeNode.vue'
 import AIChatPanel from './AIChatPanel.vue'
@@ -126,6 +126,7 @@ import AISelectionDialog from './AISelectionDialog.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import { createSessionId, type SessionMessage } from '../services/session'
 import { useAISelection } from '@/composables/useAISelection'
+import { onDirChanged, onFileChanged, startWatching, stopWatching, type BrowserFileChangeEvent } from '../services/watcher'
 
 const store = useExplorerStore()
 
@@ -171,7 +172,7 @@ const isMarkdownFile = computed(() => {
   return selectedPath.value.toLowerCase().endsWith('.md')
 })
 
-onMounted(() => {
+onMounted(async () => {
   store.init()
   // 添加键盘事件监听
   document.addEventListener('keydown', handleKeydown)
@@ -179,12 +180,49 @@ onMounted(() => {
   if (contentAreaRef.value) {
     contentAreaRef.value.addEventListener('mouseup', handleMouseUp)
   }
+  
+  // 启动文件监听
+  try {
+    await startWatching()
+    
+    // 监听目录变化
+    unlistenDir = await onDirChanged((event) => {
+      console.log('[Explorer] Dir changed:', event.path, event.kind)
+      refresh()
+    })
+    
+    // 监听文件变化
+    unlistenFile = await onFileChanged((event) => {
+      console.log('[Explorer] File changed:', event.path, event.kind)
+      // 如果当前打开的文件被修改，重新加载
+      if (selectedPath.value && event.path.includes(selectedPath.value)) {
+        if (selectedPath.value) {
+          store.selectItem(selectedPath.value)
+        }
+      }
+      refresh()
+    })
+  } catch (err) {
+    console.error('[Explorer] Failed to start watching:', err)
+  }
 })
 
-onUnmounted(() => {
+let unlistenFile: (() => void) | null = null
+let unlistenDir: (() => void) | null = null
+
+onUnmounted(async () => {
   document.removeEventListener('keydown', handleKeydown)
   if (contentAreaRef.value) {
     contentAreaRef.value.removeEventListener('mouseup', handleMouseUp)
+  }
+  
+  // 停止文件监听
+  unlistenFile?.()
+  unlistenDir?.()
+  try {
+    await stopWatching()
+  } catch (err) {
+    console.error('[Explorer] Failed to stop watching:', err)
   }
 })
 

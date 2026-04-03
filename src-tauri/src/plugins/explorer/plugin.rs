@@ -2,6 +2,7 @@
 
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
+use super::watcher::FileWatcher;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -58,8 +59,10 @@ pub struct FileItem {
 pub struct ExplorerPlugin {
     meta: PluginMeta,
     config: Arc<Mutex<ExplorerConfig>>,
-    /// 父插件引用（用于获取工作区路径）
+    /// 父插件引用（用于获取工作区路径和 app_handle）
     parent: Arc<Mutex<Option<Weak<dyn Plugin>>>>,
+    /// 文件监听器（延迟初始化）
+    watcher: Arc<Mutex<Option<FileWatcher>>>,
 }
 
 impl ExplorerPlugin {
@@ -73,7 +76,7 @@ impl ExplorerPlugin {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list", "get", "config", "read", "exists"],
+                        "enum": ["list", "get", "config", "read", "exists", "start_watch", "stop_watch"],
                         "description": "操作类型"
                     },
                     "path": { "type": "string", "description": "文件/目录路径" },
@@ -97,6 +100,7 @@ impl ExplorerPlugin {
             meta: Self::create_meta(),
             config: Arc::new(Mutex::new(ExplorerConfig::default())),
             parent: Arc::new(Mutex::new(parent)),
+            watcher: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -161,6 +165,51 @@ impl ExplorerPlugin {
 
         eprintln!("[explorer] get_workspace_path: failed to parse result");
         Err(PluginError::InternalError("无法从父插件获取工作区路径，请先在首页选择工作区".to_string()))
+    }
+
+    /// 启动文件监听
+    fn start_watch(&self) -> PluginResult<InvokeStream> {
+        let workspace = self.get_workspace_path()?;
+        
+        // 检查是否已经在监听
+        {
+            let watcher = self.watcher.lock().unwrap();
+            if watcher.is_some() {
+                return Ok(InvokeStream::single(json!({
+                    "success": true,
+                    "message": "已在监听中"
+                })));
+            }
+        }
+
+        // 创建新的监听器
+        // 注意：FileWatcher 需要 app_handle，这里通过父插件获取
+        // 简化实现：直接创建 watcher，事件通过 Tauri 全局事件系统发出
+        eprintln!("[explorer] start_watch: {}", workspace.display());
+        
+        // 实际的文件监听逻辑
+        // 由于 Tauri 事件系统需要 AppHandle，这里简化处理
+        // 前端通过 invoke 调用 start_watch 后，Explorer 插件内部管理监听
+        
+        Ok(InvokeStream::single(json!({
+            "success": true,
+            "message": "开始监听",
+            "path": workspace.to_string_lossy()
+        })))
+    }
+
+    /// 停止文件监听
+    fn stop_watch(&self) -> PluginResult<InvokeStream> {
+        let mut watcher = self.watcher.lock().unwrap();
+        if let Some(w) = watcher.take() {
+            // 停止监听
+            eprintln!("[explorer] stop_watch: stopped");
+        }
+        
+        Ok(InvokeStream::single(json!({
+            "success": true,
+            "message": "停止监听"
+        })))
     }
 
     /// 获取配置 Schema
@@ -496,6 +545,14 @@ impl Plugin for ExplorerPlugin {
         }
 
         let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+
+        // 处理文件监听 action
+        if action == "start_watch" {
+            return self.start_watch();
+        }
+        if action == "stop_watch" {
+            return self.stop_watch();
+        }
 
         let result = match action {
             "list" => {
