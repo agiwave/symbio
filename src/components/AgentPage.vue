@@ -56,6 +56,7 @@
             :key="`${activeSession.id}-${index}-${msg.timestamp}`"
             class="message"
             :class="msg.role"
+            v-show="msg.role !== 'tool'"
           >
             <div class="message-avatar">
               {{ msg.role === 'user' ? '👤' : '🤖' }}
@@ -86,10 +87,26 @@
           <div v-if="isLoading" class="message assistant loading">
             <div class="message-avatar">🤖</div>
             <div class="message-content">
+              <!-- 工具调用信息 -->
+              <div v-if="toolCalls.length > 0" class="tool-calls">
+                <div v-for="(tool, idx) in toolCalls" :key="idx" class="tool-call">
+                  <div class="tool-call-header">
+                    <span class="tool-call-icon">🔧</span>
+                    <span class="tool-call-name">{{ tool.name }}</span>
+                  </div>
+                  <div v-if="tool.args" class="tool-call-args">
+                    <pre>{{ formatJson(tool.args) }}</pre>
+                  </div>
+                  <div v-if="tool.result" class="tool-call-result">
+                    <pre>{{ tool.result }}</pre>
+                  </div>
+                </div>
+              </div>
+              
               <!-- 显示流式内容（如果有） -->
               <div v-if="streamingContent" class="message-text" v-html="renderMarkdown(streamingContent)"></div>
               <!-- 否则显示打字指示器 -->
-              <div v-else class="typing-indicator">
+              <div v-else-if="toolCalls.length === 0" class="typing-indicator">
                 <span></span><span></span><span></span>
               </div>
             </div>
@@ -159,11 +176,6 @@ const toolCalls = ref<Array<{ name: string; args: string; result?: string }>>([]
 
 // 获取消息的工具调用信息（支持实时和历史两种情况）
 function getToolCalls(msg: SessionMessage) {
-  // 如果是实时对话，使用 toolCalls 变量
-  if (toolCalls.value.length > 0 && msg.content === '') {
-    return toolCalls.value
-  }
-  
   // 如果是历史消息，从消息中获取 tool_calls
   if (msg.tool_calls && msg.tool_calls.length > 0) {
     return msg.tool_calls.map(tc => ({
@@ -344,13 +356,8 @@ async function sendMessageToAI() {
       content: m.content
     }))
 
-    // 创建临时的助手消息用于流式显示
-    const assistantMessageIndex = activeSession.value.messages.length
-    activeSession.value.messages.push({
-      role: 'assistant',
-      content: '',
-      timestamp: now
-    })
+    // 不创建临时消息，使用单独的流式显示区域
+    // 流式内容会显示在 isLoading 区域的 streamingContent 中
 
     // 流式发送消息
     const response = await sendMessageStream(
@@ -388,17 +395,21 @@ async function sendMessageToAI() {
       }
     )
 
-    // 流完成 - 将最终内容添加到消息列表
+    // 流完成 - 将最终内容作为新消息添加到消息列表
     if (response.error) {
       configError.value = response.error
-      if (activeSession.value && activeSession.value.messages[assistantMessageIndex]) {
-        activeSession.value.messages[assistantMessageIndex].content = `错误: ${response.error}`
-      }
+      activeSession.value.messages.push({
+        role: 'assistant',
+        content: `错误: ${response.error}`,
+        timestamp: Math.floor(Date.now() / 1000)
+      })
     } else if (streamingContent.value) {
-      // 使用流式内容作为最终内容
-      if (activeSession.value && activeSession.value.messages[assistantMessageIndex]) {
-        activeSession.value.messages[assistantMessageIndex].content = streamingContent.value
-      }
+      // 使用流式内容作为新消息
+      activeSession.value.messages.push({
+        role: 'assistant',
+        content: streamingContent.value,
+        timestamp: Math.floor(Date.now() / 1000)
+      })
     }
 
     activeSession.value.updated_at = Math.floor(Date.now() / 1000)
