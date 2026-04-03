@@ -369,8 +369,6 @@ function handleMouseLeave() {
 }
 
 // 自定义拖拽功能 - 使用 mouse 事件而非原生拖拽
-let dragMouseHandler: ((e: MouseEvent) => void) | null = null
-let dragMouseUpHandler: ((e: MouseEvent) => void) | null = null
 
 function handleDragMouseDown(e: MouseEvent) {
   e.preventDefault()

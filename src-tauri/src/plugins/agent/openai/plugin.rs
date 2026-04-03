@@ -834,20 +834,13 @@ impl OpenAiPlugin {
                         json!({})
                     };
 
-                    // 解析 plugin/tool 格式
-                    let (plugin, tool_name) = if let Some(pos) = name.find('/') {
-                        (&name[..pos], &name[pos+1..])
-                    } else {
-                        ("tools", name.as_str())
-                    };
+                    eprintln!("[openai] Executing tool: {} with args: {}", name, args);
 
-                    eprintln!("[openai] Executing tool: {}/{} with args: {}", plugin, tool_name, args);
-
-                    // 通过父插件调用工具
+                    // 通过父插件调用工具，直接将工具名称作为 path
+                    // 由父插件（agent）的路由机制处理工具名称解析
                     let result = match &parent {
                         Some(p) => {
-                            let tool_path = format!("{}/{}", plugin, tool_name);
-                            match p.invoke(&tool_path, args.clone()) {
+                            match p.invoke(&name, args.clone()) {
                                 Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
                                     if let Some(content) = chunk.data.get("content").and_then(|c| c.as_str()) {
                                         content.to_string()
