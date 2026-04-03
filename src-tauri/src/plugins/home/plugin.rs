@@ -188,11 +188,6 @@ impl Plugin for HomePlugin {
             })));
         }
 
-        // _workspace - 快捷获取工作区路径（路由到 work/workspace_path）
-        if path == "_workspace" {
-            return self.work.invoke("workspace_path", input);
-        }
-
         // save_config - 保存配置到文件
         if path == "save_config" {
             let home_self = Arc::new(self.clone());

@@ -112,10 +112,9 @@ impl SessionPlugin {
             }
         }
 
-        // 通过父插件获取工作区路径（使用绝对路径 /_workspace，让 agent 转发到 home）
+        // 通过父插件调用 /work/workspace_path 获取工作区路径
         let workspace_path = if let Some(parent) = self.get_parent() {
-            // 使用绝对路径 /_workspace，这样 agent 会转发到 home
-            match parent.invoke("/_workspace", json!({})) {
+            match parent.invoke("/work/workspace_path", json!({})) {
                 Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
                     chunk.data.get("expanded_path")
                         .and_then(|v| v.as_str())
