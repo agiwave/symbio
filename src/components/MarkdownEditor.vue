@@ -125,20 +125,6 @@
     
     <!-- AI 悬浮对话框 -->
     <Teleport to="body">
-      <!-- 选中文字时的快捷操作 -->
-      <Transition name="fade">
-        <div 
-          v-if="selectionMenu.visible && !showAIDialog" 
-          class="selection-menu"
-          :style="selectionMenuStyle"
-        >
-          <button class="selection-btn" @click="openAIWithSelection">
-            <span>✨</span>
-            <span>AI 助手</span>
-          </button>
-        </div>
-      </Transition>
-      
       <!-- AI 悬浮对话框 -->
       <Transition name="slide-up">
         <div 
@@ -269,28 +255,20 @@ const aiMessages = ref<{ role: 'user' | 'assistant'; content: string }[]>([])
 const aiLoading = ref(false)
 const selectedText = ref('')
 
-// Selection menu for AI
-const selectionMenu = reactive({
-  visible: false,
-  top: 0,
-  left: 0,
-})
-
-const selectionMenuStyle = computed(() => ({
-  top: `${selectionMenu.top}px`,
-  left: `${selectionMenu.left}px`,
-}))
-
 const aiDialogStyle = computed(() => ({
   top: '80px',
   right: '20px',
 }))
 
-// 处理文字选中
+// 处理文字选中 - 直接打开 AI 对话框
+let selectionTimer: ReturnType<typeof setTimeout> | null = null
+
 function handleSelectionChange() {
+  // 如果对话框已经打开，不处理
+  if (showAIDialog.value) return
+  
   const selection = window.getSelection()
   if (!selection || selection.isCollapsed) {
-    selectionMenu.visible = false
     selectedText.value = ''
     return
   }
@@ -299,27 +277,21 @@ function handleSelectionChange() {
   if (text.length > 0) {
     selectedText.value = text
     
-    // 获取选区的位置
-    const range = selection.getRangeAt(0)
-    const rect = range.getBoundingClientRect()
-    
-    selectionMenu.visible = true
-    selectionMenu.top = rect.top - 40
-    selectionMenu.left = rect.left + (rect.width / 2) - 50
+    // 延迟一小段时间再打开对话框，避免选择过程中的闪烁
+    if (selectionTimer) clearTimeout(selectionTimer)
+    selectionTimer = setTimeout(() => {
+      // 再次检查选区是否还存在
+      const currentSelection = window.getSelection()
+      if (currentSelection && !currentSelection.isCollapsed && currentSelection.toString().trim().length > 0) {
+        showAIDialog.value = true
+        // 预填充提示
+        aiInput.value = ''
+        nextTick(() => aiInputRef.value?.focus())
+      }
+    }, 300)
   } else {
-    selectionMenu.visible = false
     selectedText.value = ''
   }
-}
-
-function openAIWithSelection() {
-  selectionMenu.visible = false
-  showAIDialog.value = true
-  // 预填充提示
-  if (selectedText.value) {
-    aiInput.value = `关于这段内容："${selectedText.value.slice(0, 50)}${selectedText.value.length > 50 ? '...' : ''}"，请`
-  }
-  nextTick(() => aiInputRef.value?.focus())
 }
 
 // Initialize editor
@@ -862,6 +834,7 @@ onUnmounted(() => {
   document.removeEventListener('selectionchange', handleSelectionChange)
   if (expandTimer) clearTimeout(expandTimer)
   if (collapseTimer) clearTimeout(collapseTimer)
+  if (selectionTimer) clearTimeout(selectionTimer)
 })
 
 defineExpose({ openAI: () => { showAIDialog.value = true } })
@@ -1158,34 +1131,6 @@ defineExpose({ openAI: () => { showAIDialog.value = true } })
   border-radius: 4px;
   margin: 0 2px;
   font-family: inherit;
-}
-
-/* Selection Menu - 选中文字时的快捷菜单 */
-.selection-menu {
-  position: fixed;
-  z-index: 1500;
-  transform: translateX(-50%);
-}
-
-.selection-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  background: linear-gradient(135deg, #7c3aed, #2563eb);
-  color: #fff;
-  border: none;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
-  transition: all 0.15s ease;
-}
-
-.selection-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.4);
 }
 
 /* AI Floating Dialog - 悬浮对话框 */
