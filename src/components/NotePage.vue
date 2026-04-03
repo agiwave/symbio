@@ -1,33 +1,33 @@
 <template>
-  <div class="workspace-page" :class="{ 'chat-visible': chatVisible }">
-    <!-- 文档树 -->
-    <aside class="doc-tree">
-      <div class="doc-tree-header">
-        <h3>文档</h3>
-        <div class="doc-tree-actions">
-          <button class="icon-btn" @click="createNewDoc" title="新建文档">+</button>
-          <button class="icon-btn secondary" @click="exportWorkspace" title="导出">↓</button>
+  <div class="note-page" :class="{ 'chat-visible': chatVisible }">
+    <!-- 笔记树 -->
+    <aside class="note-tree">
+      <div class="note-tree-header">
+        <h3>笔记</h3>
+        <div class="note-tree-actions">
+          <button class="icon-btn" @click="createNewNote" title="新建笔记">+</button>
+          <button class="icon-btn secondary" @click="exportNotes" title="导出">↓</button>
         </div>
       </div>
-      <div class="doc-tree-content">
-        <div v-if="rootDocuments.length === 0" class="empty-state">
-          <p>暂无文档</p>
-          <button @click="createNewDoc">创建第一个文档</button>
+      <div class="note-tree-content">
+        <div v-if="rootNotes.length === 0" class="empty-state">
+          <p>暂无笔记</p>
+          <button @click="createNewNote">创建第一个笔记</button>
         </div>
         <TreeNode
-          v-for="doc in rootDocuments"
-          :key="doc.id"
-          :document="doc"
+          v-for="note in rootNotes"
+          :key="note.id"
+          :document="note"
           :level="0"
-          :active-id="activeDocumentId"
-          :documents="documents"
-          @select="selectDocument"
-          @create-child="createChildDoc"
-          @delete="deleteDoc"
-          @move="moveDoc"
+          :active-id="activeNoteId"
+          :documents="notes"
+          @select="selectNote"
+          @create-child="createChildNote"
+          @delete="deleteNote"
+          @move="moveNoteHandler"
         />
       </div>
-      <div class="doc-tree-footer">
+      <div class="note-tree-footer">
         <button class="footer-btn" @click="clearAll" title="清空所有">
           🗑️ 清空
         </button>
@@ -36,13 +36,13 @@
 
     <!-- 编辑区 -->
     <main class="editor-area">
-      <div v-if="activeDocument" class="editor-container">
+      <div v-if="activeNote" class="editor-container">
         <header class="editor-header">
           <input
-            v-model="activeDocument.title"
+            v-model="activeNote.title"
             class="title-input"
             placeholder="无标题"
-            @blur="saveDocument"
+            @blur="saveNote"
           />
           <div class="editor-actions">
             <button 
@@ -57,13 +57,13 @@
         </header>
         <div class="editor-content">
           <MarkdownEditor
-            v-model="activeDocument.content"
+            v-model="activeNote.content"
             @selection-change="handleSelectionChange"
           />
         </div>
       </div>
       <div v-else class="empty-editor">
-        <p>选择或创建一个文档开始</p>
+        <p>选择或创建一个笔记开始</p>
       </div>
     </main>
 
@@ -117,7 +117,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
-import { useWorkspaceStore } from '../stores/workspace'
+import { useNoteStore, type Note } from '../stores/note'
 import TreeNode from './TreeNode.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 
@@ -126,7 +126,7 @@ interface Message {
   content: string
 }
 
-const store = useWorkspaceStore()
+const store = useNoteStore()
 
 // UI 状态
 const chatVisible = ref(false)
@@ -135,63 +135,65 @@ const inputText = ref('')
 const isLoading = ref(false)
 const historyRef = ref<HTMLElement | null>(null)
 
-// 文档状态
-const documents = computed(() => store.documents)
-const rootDocuments = computed(() => store.rootDocuments)
-const activeDocument = computed(() => store.activeDocument)
-const activeDocumentId = computed(() => store.activeDocumentId)
+// 笔记状态
+const notes = computed(() => store.notes)
+const rootNotes = computed(() => store.rootNotes)
+const activeNote = computed(() => store.activeNote)
+const activeNoteId = computed(() => store.activeNoteId)
 
 onMounted(() => {
   store.init()
 })
 
-// 文档操作
-function createNewDoc() {
-  const doc = store.createDocument('新文档')
-  store.setActiveDocument(doc.id)
+// 笔记操作
+function createNewNote() {
+  store.createNote('新笔记').then((note) => {
+    if (note) store.setActiveNote(note.id)
+  })
 }
 
-function createChildDoc(parentId: string) {
-  const doc = store.createDocument('新子文档', parentId)
-  store.setActiveDocument(doc.id)
+function createChildNote(parentId: string) {
+  store.createNote('新子笔记', parentId).then((note) => {
+    if (note) store.setActiveNote(note.id)
+  })
 }
 
-function selectDocument(id: string) {
-  store.setActiveDocument(id)
+function selectNote(id: string) {
+  store.setActiveNote(id)
 }
 
-function deleteDoc(id: string) {
-  if (confirm('确定要删除此文档及其所有子文档吗？')) {
-    store.deleteDocument(id)
+function deleteNote(id: string) {
+  if (confirm('确定要删除此笔记及其所有子笔记吗？')) {
+    store.deleteNote(id)
   }
 }
 
-function moveDoc(payload: { id: string; targetParentId: string | null }) {
-  store.moveDocument(payload.id, payload.targetParentId, 0)
+function moveNoteHandler(payload: { id: string; targetParentId: string | null }) {
+  store.moveNote(payload.id, payload.targetParentId, 0)
 }
 
-function saveDocument() {
-  if (activeDocument.value) {
-    store.updateDocument(activeDocument.value.id, {
-      title: activeDocument.value.title,
-      content: activeDocument.value.content,
+function saveNote() {
+  if (activeNote.value) {
+    store.updateNote(activeNote.value.id, {
+      title: activeNote.value.title,
+      content: activeNote.value.content,
     })
   }
 }
 
-function exportWorkspace() {
+function exportNotes() {
   const json = store.exportToJSON()
   const blob = new Blob([json], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = 'symbio-workspace-' + Date.now() + '.json'
+  a.download = 'symbio-notes-' + Date.now() + '.json'
   a.click()
   URL.revokeObjectURL(url)
 }
 
 function clearAll() {
-  if (confirm('确定要清空所有文档吗？此操作不可撤销。')) {
+  if (confirm('确定要清空所有笔记吗？此操作不可撤销。')) {
     store.clearStorage()
   }
 }
@@ -237,14 +239,14 @@ watch(chatVisible, (visible) => {
 </script>
 
 <style scoped>
-.workspace-page {
+.note-page {
   display: flex;
   height: 100%;
   width: 100%;
 }
 
-/* 文档树 */
-.doc-tree {
+/* 笔记树 */
+.note-tree {
   width: var(--panel-width, 240px);
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
@@ -253,7 +255,7 @@ watch(chatVisible, (visible) => {
   flex-shrink: 0;
 }
 
-.doc-tree-header {
+.note-tree-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -262,13 +264,13 @@ watch(chatVisible, (visible) => {
   flex-shrink: 0;
 }
 
-.doc-tree-header h3 {
+.note-tree-header h3 {
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--color-text-secondary);
 }
 
-.doc-tree-actions {
+.note-tree-actions {
   display: flex;
   gap: 0.5rem;
 }
@@ -289,13 +291,13 @@ watch(chatVisible, (visible) => {
   background: #6c757d;
 }
 
-.doc-tree-content {
+.note-tree-content {
   flex: 1;
   overflow-y: auto;
   padding: 0.5rem;
 }
 
-.doc-tree-footer {
+.note-tree-footer {
   padding: 0.5rem 1rem;
   border-top: 1px solid var(--color-border);
   flex-shrink: 0;

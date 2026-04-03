@@ -1,4 +1,4 @@
-//! Doc 插件 - 文档管理（持久化存储）
+//! Note 插件 - 笔记管理（持久化存储）
 
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
@@ -6,13 +6,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
-use tokio::fs;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
-/// 文档结构
+/// 笔记结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Document {
+pub struct Note {
     pub id: String,
     pub title: String,
     pub content: String,
@@ -23,35 +22,35 @@ pub struct Document {
     pub updated_at: DateTime<Utc>,
 }
 
-/// 文档存储
+/// 笔记存储
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentStore {
-    pub documents: std::collections::HashMap<String, Document>,
+pub struct NoteStore {
+    pub notes: std::collections::HashMap<String, Note>,
     pub root_ids: Vec<String>,
 }
 
-impl DocumentStore {
+impl NoteStore {
     pub fn new() -> Self {
-        DocumentStore {
-            documents: std::collections::HashMap::new(),
+        NoteStore {
+            notes: std::collections::HashMap::new(),
             root_ids: Vec::new(),
         }
     }
 }
 
-pub struct DocPlugin {
+pub struct NotePlugin {
     meta: PluginMeta,
-    store: Arc<Mutex<DocumentStore>>,
+    store: Arc<Mutex<NoteStore>>,
     data_path: PathBuf,
-    /// 父插件引用（用于获取工作区路径）
+    /// 父插件引用
     parent: Option<Weak<dyn Plugin>>,
 }
 
-impl DocPlugin {
+impl NotePlugin {
     fn create_meta() -> PluginMeta {
         PluginMeta {
-            name: "doc".to_string(),
-            description: "文档管理插件".to_string(),
+            name: "note".to_string(),
+            description: "笔记管理插件".to_string(),
             version: "0.1.0".to_string(),
             input: Some(json!({
                 "type": "object",
@@ -86,12 +85,12 @@ impl DocPlugin {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("symbio");
         
-        let data_path = data_dir.join("documents.json");
+        let data_path = data_dir.join("notes.json");
 
         // 初始化存储
-        let store = Arc::new(Mutex::new(DocumentStore::new()));
+        let store = Arc::new(Mutex::new(NoteStore::new()));
 
-        DocPlugin { 
+        NotePlugin { 
             meta: Self::create_meta(),
             store, 
             data_path,
@@ -100,47 +99,12 @@ impl DocPlugin {
     }
 
     /// 获取父插件引用
+    #[allow(dead_code)]
     fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
         self.parent.as_ref().and_then(|w| w.upgrade())
     }
 
-    /// 加载数据
-    async fn load_data(&self) -> Result<(), PluginError> {
-        if self.data_path.exists() {
-            let content = fs::read_to_string(&self.data_path)
-                .await
-                .map_err(|e| PluginError::InternalError(format!("读取数据失败: {}", e)))?;
-            
-            let store: DocumentStore = serde_json::from_str(&content)
-                .map_err(|e| PluginError::InternalError(format!("解析数据失败: {}", e)))?;
-            
-            let mut s = self.store.lock().map_err(|e| PluginError::InternalError(e.to_string()))?;
-            *s = store;
-        }
-        Ok(())
-    }
-
-    /// 保存数据
-    async fn save_data(&self) -> Result<(), PluginError> {
-        // 确保目录存在
-        if let Some(parent) = self.data_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| PluginError::InternalError(format!("创建目录失败: {}", e)))?;
-        }
-
-        let s = self.store.lock().map_err(|e| PluginError::InternalError(e.to_string()))?;
-        let content = serde_json::to_string_pretty(&*s)
-            .map_err(|e| PluginError::InternalError(format!("序列化数据失败: {}", e)))?;
-        
-        fs::write(&self.data_path, content)
-            .await
-            .map_err(|e| PluginError::InternalError(format!("写入数据失败: {}", e)))?;
-        
-        Ok(())
-    }
-
-    /// 同步保存数据（用于同步上下文）
+    /// 同步保存数据
     fn save_data_sync(&self) -> Result<(), PluginError> {
         if let Some(parent) = self.data_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -162,7 +126,7 @@ impl DocPlugin {
             let content = std::fs::read_to_string(&self.data_path)
                 .map_err(|e| PluginError::InternalError(format!("读取数据失败: {}", e)))?;
             
-            let store: DocumentStore = serde_json::from_str(&content)
+            let store: NoteStore = serde_json::from_str(&content)
                 .map_err(|e| PluginError::InternalError(format!("解析数据失败: {}", e)))?;
             
             let mut s = self.store.lock().map_err(|e| PluginError::InternalError(e.to_string()))?;
@@ -171,38 +135,38 @@ impl DocPlugin {
         Ok(())
     }
 
-    /// 列出文档
-    fn list_documents(&self) -> Value {
+    /// 列出笔记
+    fn list_notes(&self) -> Value {
         let s = self.store.lock().unwrap();
-        let docs: Vec<Value> = s.root_ids.iter()
-            .filter_map(|id| s.documents.get(id))
-            .map(|doc| json!({
-                "id": doc.id,
-                "title": doc.title,
-                "parentId": doc.parent_id
+        let notes: Vec<Value> = s.root_ids.iter()
+            .filter_map(|id| s.notes.get(id))
+            .map(|note| json!({
+                "id": note.id,
+                "title": note.title,
+                "parentId": note.parent_id
             }))
             .collect();
         
         json!({
             "success": true,
-            "data": { "documents": docs }
+            "data": { "documents": notes }
         })
     }
 
-    /// 创建文档
-    fn create_document(&self, title: &str, parent_id: Option<&str>) -> Value {
+    /// 创建笔记
+    fn create_note(&self, title: &str, parent_id: Option<&str>) -> Value {
         let mut s = self.store.lock().unwrap();
         
         let now = Utc::now();
         let id = Uuid::new_v4().to_string();
         
         // 计算排序值
-        let siblings: Vec<&Document> = s.documents.values()
-            .filter(|d| d.parent_id.as_deref() == parent_id)
+        let siblings: Vec<&Note> = s.notes.values()
+            .filter(|n| n.parent_id.as_deref() == parent_id)
             .collect();
         let order = siblings.len() as i32 + 1;
 
-        let doc = Document {
+        let note = Note {
             id: id.clone(),
             title: title.to_string(),
             content: String::new(),
@@ -213,16 +177,16 @@ impl DocPlugin {
             updated_at: now,
         };
 
-        // 更新父文档的 children
+        // 更新父笔记的 children
         if let Some(pid) = parent_id {
-            if let Some(parent) = s.documents.get_mut(pid) {
+            if let Some(parent) = s.notes.get_mut(pid) {
                 parent.children.push(id.clone());
             }
         } else {
             s.root_ids.push(id.clone());
         }
 
-        s.documents.insert(id.clone(), doc);
+        s.notes.insert(id.clone(), note);
 
         json!({
             "success": true,
@@ -232,65 +196,65 @@ impl DocPlugin {
                 "parentId": parent_id,
                 "content": ""
             },
-            "message": "文档创建成功"
+            "message": "笔记创建成功"
         })
     }
 
-    /// 获取文档
-    fn get_document(&self, id: &str) -> Result<Value, PluginError> {
+    /// 获取笔记
+    fn get_note(&self, id: &str) -> Result<Value, PluginError> {
         let s = self.store.lock().unwrap();
         
-        let doc = s.documents.get(id)
-            .ok_or_else(|| PluginError::NotFound(format!("文档不存在: {}", id)))?;
+        let note = s.notes.get(id)
+            .ok_or_else(|| PluginError::NotFound(format!("笔记不存在: {}", id)))?;
 
         Ok(json!({
             "success": true,
             "data": {
-                "id": doc.id,
-                "title": doc.title,
-                "content": doc.content,
-                "parentId": doc.parent_id,
-                "children": doc.children
+                "id": note.id,
+                "title": note.title,
+                "content": note.content,
+                "parentId": note.parent_id,
+                "children": note.children
             }
         }))
     }
 
-    /// 更新文档
-    fn update_document(&self, id: &str, updates: &Value) -> Result<Value, PluginError> {
+    /// 更新笔记
+    fn update_note(&self, id: &str, updates: &Value) -> Result<Value, PluginError> {
         let mut s = self.store.lock().unwrap();
         
-        let doc = s.documents.get_mut(id)
-            .ok_or_else(|| PluginError::NotFound(format!("文档不存在: {}", id)))?;
+        let note = s.notes.get_mut(id)
+            .ok_or_else(|| PluginError::NotFound(format!("笔记不存在: {}", id)))?;
 
         if let Some(title) = updates.get("title").and_then(|v| v.as_str()) {
-            doc.title = title.to_string();
+            note.title = title.to_string();
         }
         if let Some(content) = updates.get("content").and_then(|v| v.as_str()) {
-            doc.content = content.to_string();
+            note.content = content.to_string();
         }
         
-        doc.updated_at = Utc::now();
+        note.updated_at = Utc::now();
 
         Ok(json!({
             "success": true,
             "data": { "id": id },
-            "message": "文档更新成功"
+            "message": "笔记更新成功"
         }))
     }
 
-    /// 删除文档
-    fn delete_document(&self, id: &str) -> Result<Value, PluginError> {
+    /// 删除笔记
+    fn delete_note(&self, id: &str) -> Result<Value, PluginError> {
         let mut s = self.store.lock().unwrap();
         
-        let doc = s.documents.get(id)
-            .ok_or_else(|| PluginError::NotFound(format!("文档不存在: {}", id)))?;
+        let note = s.notes.get(id)
+            .ok_or_else(|| PluginError::NotFound(format!("笔记不存在: {}", id)))?;
 
-        let parent_id = doc.parent_id.clone();
-        let children = doc.children.clone();
+        let parent_id = note.parent_id.clone();
+        let children = note.children.clone();
 
-        // 递归删除子文档
+        // 递归删除子笔记
         fn delete_children(
-            store: &mut std::collections::HashMap<String, Document>,
+            store: &mut std::collections::HashMap<String, Note>,
             children: &[String],
         ) {
             for child_id in children {
@@ -300,23 +264,23 @@ impl DocPlugin {
             }
         }
 
-        delete_children(&mut s.documents, &children);
+        delete_children(&mut s.notes, &children);
 
-        // 从父文档或根列表中移除
+        // 从父笔记或根列表中移除
         if let Some(pid) = parent_id {
-            if let Some(parent) = s.documents.get_mut(&pid) {
+            if let Some(parent) = s.notes.get_mut(&pid) {
                 parent.children.retain(|cid| cid != id);
             }
         } else {
             s.root_ids.retain(|rid| rid != id);
         }
 
-        s.documents.remove(id);
+        s.notes.remove(id);
 
         Ok(json!({
             "success": true,
             "data": { "id": id },
-            "message": "文档删除成功"
+            "message": "笔记删除成功"
         }))
     }
 
@@ -324,18 +288,18 @@ impl DocPlugin {
     fn init_demo(&self) {
         let mut s = self.store.lock().unwrap();
         
-        if !s.documents.is_empty() {
+        if !s.notes.is_empty() {
             return;
         }
 
         let now = Utc::now();
 
-        // 创建示例文档
+        // 创建示例笔记
         let root_id = Uuid::new_v4().to_string();
         let design_id = Uuid::new_v4().to_string();
         let qc_id = Uuid::new_v4().to_string();
 
-        let root = Document {
+        let root = Note {
             id: root_id.clone(),
             title: "RNA-seq 差异表达分析".to_string(),
             content: "# RNA-seq 差异表达分析\n\n这是一个完整的 RNA-seq 分析流程示例。".to_string(),
@@ -346,7 +310,7 @@ impl DocPlugin {
             updated_at: now,
         };
 
-        let design = Document {
+        let design = Note {
             id: design_id.clone(),
             title: "实验设计".to_string(),
             content: "## 实验设计\n\n描述实验组和对照组的设置。".to_string(),
@@ -357,7 +321,7 @@ impl DocPlugin {
             updated_at: now,
         };
 
-        let qc = Document {
+        let qc = Note {
             id: qc_id.clone(),
             title: "数据预处理".to_string(),
             content: "## FastQC 质控\n\n```bash\nfastqc *.fastq.gz -o qc_results\n```".to_string(),
@@ -368,26 +332,26 @@ impl DocPlugin {
             updated_at: now,
         };
 
-        s.documents.insert(root_id.clone(), root);
-        s.documents.insert(design_id, design);
-        s.documents.insert(qc_id, qc);
+        s.notes.insert(root_id.clone(), root);
+        s.notes.insert(design_id, design);
+        s.notes.insert(qc_id, qc);
         s.root_ids.push(root_id);
     }
 }
 
-impl Default for DocPlugin {
+impl Default for NotePlugin {
     fn default() -> Self {
         Self::new(None)
     }
 }
 
 #[async_trait::async_trait]
-impl Plugin for DocPlugin {
+impl Plugin for NotePlugin {
     fn meta(&self, path: &str) -> PluginResult<PluginMeta> {
         if path == "config" {
             return Ok(PluginMeta {
                 name: "config".to_string(),
-                description: "Doc 配置管理".to_string(),
+                description: "Note 配置管理".to_string(),
                 version: "0.1.0".to_string(),
                 input: Some(json!({
                     "type": "object",
@@ -441,30 +405,30 @@ impl Plugin for DocPlugin {
                 }
                 json!({ "success": true, "message": "初始化完成" })
             }
-            "list" => self.list_documents(),
+            "list" => self.list_notes(),
             "create" => {
-                let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("新文档");
+                let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("新笔记");
                 let parent_id = input.get("parentId").and_then(|v| v.as_str());
-                let result = self.create_document(title, parent_id);
+                let result = self.create_note(title, parent_id);
                 let _ = self.save_data_sync();
                 result
             }
             "get" => {
                 let id = input.get("id").and_then(|v| v.as_str())
                     .ok_or_else(|| PluginError::ValidationError("缺少 id 参数".to_string()))?;
-                self.get_document(id)?
+                self.get_note(id)?
             }
             "update" => {
                 let id = input.get("id").and_then(|v| v.as_str())
                     .ok_or_else(|| PluginError::ValidationError("缺少 id 参数".to_string()))?;
-                let result = self.update_document(id, &input)?;
+                let result = self.update_note(id, &input)?;
                 let _ = self.save_data_sync();
                 result
             }
             "delete" => {
                 let id = input.get("id").and_then(|v| v.as_str())
                     .ok_or_else(|| PluginError::ValidationError("缺少 id 参数".to_string()))?;
-                let result = self.delete_document(id)?;
+                let result = self.delete_note(id)?;
                 let _ = self.save_data_sync();
                 result
             }

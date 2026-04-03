@@ -49,13 +49,13 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { Document } from '../stores/workspace'
+import type { Note } from '../stores/note'
 
 const props = defineProps<{
-  document: Document
+  document: Note
   level: number
   activeId: string | null
-  documents: Map<string, Document>
+  documents: Map<string, Note>
 }>()
 
 const emit = defineEmits<{

@@ -96,11 +96,11 @@
           </button>
           <button
             class="nav-btn"
-            :class="{ active: currentPage === 'workspace' }"
-            title="工作区"
-            @click="currentPage = 'workspace'"
+            :class="{ active: currentPage === 'note' }"
+            title="笔记"
+            @click="currentPage = 'note'"
           >
-            📄
+            📝
           </button>
           <button
             class="nav-btn"
@@ -131,7 +131,7 @@
 
       <!-- 主内容区 -->
       <div class="content-area">
-        <WorkspacePage v-if="currentPage === 'workspace'" />
+        <NotePage v-if="currentPage === 'note'" />
         <ExplorerPage v-else-if="currentPage === 'explorer'" />
         <AgentPage v-else-if="currentPage === 'agent'" />
         <SettingsPage v-else-if="currentPage === 'settings'" />
@@ -174,7 +174,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import WorkspacePage from '../components/WorkspacePage.vue'
+import NotePage from '../components/NotePage.vue'
 import ExplorerPage from '../components/ExplorerPage.vue'
 import AgentPage from '../components/AgentPage.vue'
 import SettingsPage from '../components/SettingsPage.vue'
@@ -185,7 +185,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 // 状态
 const workspaceReady = ref(false)
 const workspacePath = ref('')
-const currentPage = ref<'workspace' | 'explorer' | 'agent' | 'settings'>('workspace')
+const currentPage = ref<'note' | 'explorer' | 'agent' | 'settings'>('note')
 const showWorkspaceSwitcher = ref(false)
 const recentWorkspaces = ref<string[]>([])
 const error = ref('')
