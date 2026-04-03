@@ -3,35 +3,6 @@
     <!-- 编辑器容器 -->
     <div ref="editorRef" class="editor-root"></div>
     
-    <!-- 选中文本悬浮工具栏 -->
-    <Teleport to="body">
-      <Transition name="fade">
-        <div v-if="showFloatingToolbar" class="floating-toolbar" :style="floatingToolbarStyle">
-          <button @click="formatText('strong')" title="粗体 (Ctrl+B)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"/></svg>
-          </button>
-          <button @click="formatText('em')" title="斜体 (Ctrl+I)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z"/></svg>
-          </button>
-          <button @click="formatText('strike')" title="删除线">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 19h4v-3h-4v3zM5 4v3h5v3h4V7h5V4H5zM3 14h18v-2H3v2z"/></svg>
-          </button>
-          <div class="toolbar-divider"></div>
-          <button @click="formatText('code')" title="行内代码">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-          </button>
-          <button @click="formatText('link')" title="链接">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          </button>
-          <div class="toolbar-divider"></div>
-          <button @click="openAIWithSelection" class="ai-button" title="AI 助手">
-            <span>✨</span>
-            <span>AI</span>
-          </button>
-        </div>
-      </Transition>
-    </Teleport>
-    
     <!-- AI 对话框 -->
     <Teleport to="body">
       <Transition name="dialog">
@@ -77,20 +48,18 @@
     
     <!-- 快捷键提示 -->
     <Transition name="fade">
-      <div v-if="!showAIDialog && !showFloatingToolbar" class="shortcut-hint">
-        <kbd>Ctrl</kbd><kbd>K</kbd> AI 助手
+      <div v-if="!showAIDialog" class="shortcut-hint">
+        <kbd>/</kbd> 命令菜单 · <kbd>Ctrl</kbd><kbd>K</kbd> AI 助手
       </div>
     </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, shallowRef } from 'vue'
-import { Editor, rootCtx, defaultValueCtx, editorViewCtx, parserCtx } from '@milkdown/kit/core'
-import { commonmark } from '@milkdown/kit/preset/commonmark'
-import { gfm } from '@milkdown/kit/preset/gfm'
-import { history } from '@milkdown/kit/plugin/history'
-import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
+import { ref, onMounted, onUnmounted, nextTick, shallowRef, watch } from 'vue'
+import { Crepe, CrepeFeature } from '@milkdown/crepe'
+import '@milkdown/crepe/theme/common/style.css'
+import '@milkdown/crepe/theme/frame.css'
 import { callPlugin } from '@/services/plugin'
 import { marked } from 'marked'
 
@@ -109,12 +78,7 @@ const messagesRef = ref<HTMLElement | null>(null)
 const aiInputRef = ref<HTMLTextAreaElement | null>(null)
 
 // Editor instance
-const editor = shallowRef<Editor | null>(null)
-
-// Floating toolbar
-const showFloatingToolbar = ref(false)
-const floatingToolbarStyle = ref({ left: '0px', top: '0px' })
-const selectedText = ref('')
+const crepe = shallowRef<Crepe | null>(null)
 
 // AI dialog
 const showAIDialog = ref(false)
@@ -135,77 +99,58 @@ async function initEditor() {
 - [链接](https://example.com)
 - 列表和引用
 
-按 **Ctrl+K** 呼出 AI 助手。
+按 **/** 打开命令菜单，**Ctrl+K** 呼出 AI 助手。
 `
 
-  editor.value = await Editor.make()
-    .config((ctx) => {
-      ctx.set(rootCtx, editorRef.value)
-      ctx.set(defaultValueCtx, defaultContent)
-      ctx.get(listenerCtx).markdownUpdated((ctx, markdown) => {
-        emit('update:modelValue', markdown)
-      })
+  crepe.value = new Crepe({
+    root: editorRef.value,
+    defaultValue: defaultContent,
+    features: {
+      [CrepeFeature.BlockEdit]: true,      // Slash 命令 + Block Handle
+      [CrepeFeature.Toolbar]: true,         // 选中文本工具栏
+      [CrepeFeature.LinkTooltip]: true,     // 链接悬浮编辑
+      [CrepeFeature.ImageBlock]: true,      // 图片块支持
+      [CrepeFeature.CodeMirror]: true,      // 代码块增强
+      [CrepeFeature.Placeholder]: true,     // 占位符
+      [CrepeFeature.Cursor]: true,          // 光标样式
+      [CrepeFeature.ListItem]: true,        // 列表项图标
+      [CrepeFeature.Table]: true,           // 表格支持
+    },
+    featureConfigs: {
+      [CrepeFeature.Placeholder]: {
+        text: '输入 / 打开命令菜单...',
+        mode: 'block',
+      },
+      [CrepeFeature.Toolbar]: {
+        boldIcon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"/></svg>',
+        italicIcon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z"/></svg>',
+        strikethroughIcon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 19h4v-3h-4v3zM5 4v3h5v3h4V7h5V4H5zM3 14h18v-2H3v2z"/></svg>',
+        codeIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+        linkIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+      },
+    },
+  })
+  
+  // Listen for content changes
+  crepe.value.on((listener) => {
+    listener.markdownUpdated((_, markdown) => {
+      emit('update:modelValue', markdown)
     })
-    .use(commonmark)
-    .use(gfm)
-    .use(history)
-    .use(listener)
-    .create()
+  })
   
-  // Setup selection listener
-  document.addEventListener('selectionchange', handleSelectionChange)
+  await crepe.value.create()
 }
 
-// Handle selection change for floating toolbar
-function handleSelectionChange() {
-  const selection = window.getSelection()
-  
-  if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-    showFloatingToolbar.value = false
-    return
+// Update content when modelValue changes externally
+watch(() => props.modelValue, (newValue) => {
+  if (crepe.value && newValue !== undefined) {
+    // Only update if significantly different to avoid cursor jump
+    const currentMarkdown = crepe.value.getMarkdown()
+    if (currentMarkdown !== newValue) {
+      crepe.value.setMarkdown(newValue)
+    }
   }
-  
-  // Check if selection is within editor
-  const editorEl = editorRef.value
-  if (!editorEl) return
-  
-  let node = selection.anchorNode
-  while (node && node !== editorEl) {
-    node = node.parentNode as Node
-  }
-  if (node !== editorEl) {
-    showFloatingToolbar.value = false
-    return
-  }
-  
-  selectedText.value = selection.toString()
-  
-  // Position toolbar
-  const range = selection.getRangeAt(0)
-  const rect = range.getBoundingClientRect()
-  
-  floatingToolbarStyle.value = {
-    left: `${Math.max(8, Math.min(rect.left + rect.width / 2 - 140, window.innerWidth - 300))}px`,
-    top: `${Math.max(8, rect.top - 44)}px`,
-  }
-  
-  showFloatingToolbar.value = true
-}
-
-// Format text
-function formatText(format: string) {
-  // Would integrate with Milkdown commands
-  showFloatingToolbar.value = false
-}
-
-// Open AI with selection
-function openAIWithSelection() {
-  if (selectedText.value) {
-    aiInput.value = selectedText.value
-  }
-  showFloatingToolbar.value = false
-  openAIDialog()
-}
+})
 
 // AI Dialog
 function openAIDialog() {
@@ -255,14 +200,13 @@ function handleKeydown(e: KeyboardEvent) {
 
 // Destroy editor
 async function destroyEditor() {
-  document.removeEventListener('selectionchange', handleSelectionChange)
-  if (editor.value) {
+  if (crepe.value) {
     try {
-      await editor.value.destroy()
+      crepe.value.destroy()
     } catch (e) {
       console.error('Destroy error:', e)
     }
-    editor.value = null
+    crepe.value = null
   }
 }
 
@@ -293,12 +237,12 @@ defineExpose({ openAIDialog })
 .editor-root {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 32px 48px;
   min-height: 0;
 }
 
-/* Milkdown Editor Styles - Notion-like */
-.editor-root :deep(.milkdown) {
+/* Crepe Editor Overrides - Notion-like */
+.editor-root :deep(.crepe) {
   font-family: -apple-system, BlinkMacMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
   font-size: 16px;
   line-height: 1.6;
@@ -307,13 +251,13 @@ defineExpose({ openAIDialog })
   min-height: 100%;
 }
 
-.editor-root :deep(.milkdown .ProseMirror) {
+.editor-root :deep(.crepe .ProseMirror) {
   outline: none;
   min-height: 100%;
 }
 
 /* Headings */
-.editor-root :deep(.milkdown h1) {
+.editor-root :deep(.crepe h1) {
   font-size: 2.25rem;
   font-weight: 700;
   margin: 0 0 0.5rem;
@@ -322,26 +266,26 @@ defineExpose({ openAIDialog })
   color: #37352f;
 }
 
-.editor-root :deep(.milkdown h2) {
+.editor-root :deep(.crepe h2) {
   font-size: 1.5rem;
   font-weight: 600;
   margin: 1rem 0 0.375rem;
   line-height: 1.3;
 }
 
-.editor-root :deep(.milkdown h3) {
+.editor-root :deep(.crepe h3) {
   font-size: 1.25rem;
   font-weight: 600;
   margin: 0.75rem 0 0.25rem;
 }
 
 /* Paragraph */
-.editor-root :deep(.milkdown p) {
+.editor-root :deep(.crepe p) {
   margin: 0.25rem 0;
 }
 
 /* Code */
-.editor-root :deep(.milkdown code) {
+.editor-root :deep(.crepe code) {
   background: rgba(135, 131, 120, 0.15);
   color: #eb5757;
   padding: 0.2em 0.4em;
@@ -350,7 +294,7 @@ defineExpose({ openAIDialog })
   font-size: 85%;
 }
 
-.editor-root :deep(.milkdown pre) {
+.editor-root :deep(.crepe pre) {
   background: #f7f6f3;
   border-radius: 4px;
   padding: 16px;
@@ -358,7 +302,7 @@ defineExpose({ openAIDialog })
   overflow-x: auto;
 }
 
-.editor-root :deep(.milkdown pre code) {
+.editor-root :deep(.crepe pre code) {
   background: transparent;
   color: inherit;
   padding: 0;
@@ -366,7 +310,7 @@ defineExpose({ openAIDialog })
 }
 
 /* Blockquote */
-.editor-root :deep(.milkdown blockquote) {
+.editor-root :deep(.crepe blockquote) {
   border-left: 3px solid #37352f;
   padding-left: 16px;
   margin: 8px 0;
@@ -374,83 +318,137 @@ defineExpose({ openAIDialog })
 }
 
 /* Lists */
-.editor-root :deep(.milkdown ul),
-.editor-root :deep(.milkdown ol) {
+.editor-root :deep(.crepe ul),
+.editor-root :deep(.crepe ol) {
   margin: 4px 0;
   padding-left: 24px;
 }
 
-.editor-root :deep(.milkdown li) {
+.editor-root :deep(.crepe li) {
   margin: 2px 0;
 }
 
-.editor-root :deep(.milkdown li p) {
+.editor-root :deep(.crepe li p) {
   margin: 0;
 }
 
 /* Tables */
-.editor-root :deep(.milkdown table) {
+.editor-root :deep(.crepe table) {
   border-collapse: collapse;
   width: 100%;
   margin: 8px 0;
 }
 
-.editor-root :deep(.milkdown th),
-.editor-root :deep(.milkdown td) {
+.editor-root :deep(.crepe th),
+.editor-root :deep(.crepe td) {
   border: 1px solid #e0e0e0;
   padding: 8px 12px;
   text-align: left;
 }
 
-.editor-root :deep(.milkdown th) {
+.editor-root :deep(.crepe th) {
   background: #f7f6f3;
   font-weight: 600;
 }
 
 /* Links */
-.editor-root :deep(.milkdown a) {
+.editor-root :deep(.crepe a) {
   color: #2383e2;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.editor-root :deep(.milkdown a:hover) {
+.editor-root :deep(.crepe a:hover) {
   color: #0077d4;
 }
 
 /* HR */
-.editor-root :deep(.milkdown hr) {
+.editor-root :deep(.crepe hr) {
   border: none;
   border-top: 1px solid #e0e0e0;
   margin: 16px 0;
 }
 
 /* Images */
-.editor-root :deep(.milkdown img) {
+.editor-root :deep(.crepe img) {
   max-width: 100%;
   border-radius: 4px;
   margin: 8px 0;
 }
 
 /* Selection highlight */
-.editor-root :deep(.milkdown ::selection) {
+.editor-root :deep(.crepe ::selection) {
   background: rgba(35, 131, 226, 0.28);
 }
 
-/* Floating Toolbar */
-.floating-toolbar {
-  position: fixed;
+/* Block Handle - 拖拽手柄样式优化 */
+.editor-root :deep(.crepe-block-handle) {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.editor-root :deep(.crepe-block-handle:hover),
+.editor-root :deep(.ProseMirror-selectednode + .crepe-block-handle) {
+  opacity: 1;
+}
+
+/* Slash Menu - 命令菜单样式 */
+.editor-root :deep(.crepe-slash-menu) {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e5e5e5;
+  padding: 8px 0;
+  min-width: 280px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.editor-root :deep(.crepe-slash-menu-item) {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 12px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.editor-root :deep(.crepe-slash-menu-item:hover),
+.editor-root :deep(.crepe-slash-menu-item.selected) {
+  background: #f5f5f5;
+}
+
+.editor-root :deep(.crepe-slash-menu-icon) {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  background: #f7f6f3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.editor-root :deep(.crepe-slash-menu-label) {
+  font-weight: 500;
+  font-size: 14px;
+  color: #37352f;
+}
+
+.editor-root :deep(.crepe-slash-menu-desc) {
+  font-size: 12px;
+  color: #787774;
+}
+
+/* Toolbar - 选中文本工具栏 */
+.editor-root :deep(.crepe-toolbar) {
   background: #1f1f1f;
   border-radius: 6px;
   padding: 4px 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  z-index: 1000;
 }
 
-.floating-toolbar button {
+.editor-root :deep(.crepe-toolbar-item) {
   background: transparent;
   border: none;
   color: #fff;
@@ -463,26 +461,43 @@ defineExpose({ openAIDialog })
   transition: background 0.1s;
 }
 
-.floating-toolbar button:hover {
+.editor-root :deep(.crepe-toolbar-item:hover) {
   background: rgba(255, 255, 255, 0.12);
 }
 
-.floating-toolbar .toolbar-divider {
-  width: 1px;
-  height: 16px;
+.editor-root :deep(.crepe-toolbar-item.active) {
   background: rgba(255, 255, 255, 0.2);
-  margin: 0 4px;
 }
 
-.floating-toolbar .ai-button {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  background: linear-gradient(135deg, #7c3aed, #2563eb);
+/* Link Tooltip */
+.editor-root :deep(.crepe-link-tooltip) {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e5e5e5;
+  padding: 8px 12px;
+}
+
+.editor-root :deep(.crepe-link-tooltip input) {
+  border: 1px solid #e5e5e5;
   border-radius: 4px;
-  font-size: 13px;
-  font-weight: 500;
+  padding: 6px 10px;
+  font-size: 14px;
+  outline: none;
+  min-width: 200px;
+}
+
+.editor-root :deep(.crepe-link-tooltip input:focus) {
+  border-color: #2383e2;
+}
+
+/* Placeholder */
+.editor-root :deep(.crepe .crepe-placeholder) {
+  color: #9b9a97;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 
 /* Shortcut Hint */
@@ -715,7 +730,7 @@ defineExpose({ openAIDialog })
 /* Responsive */
 @media (max-width: 768px) {
   .editor-root {
-    padding: 16px 12px;
+    padding: 16px;
   }
 }
 </style>
