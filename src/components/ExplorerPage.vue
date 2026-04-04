@@ -372,17 +372,16 @@ async function selectItem(path: string) {
     }
   }
 
-  // 重置编辑状态
-  hasUnsavedChanges.value = false
-  editorContent.value = ''
-  originalContent.value = ''
-
+  // 先设置 selectedPath，让 UI 切换到文件视图
+  // 但不立即清空 editorContent，等文件加载完成后再设置
+  
   await store.selectItem(path)
 
-  // 初始化编辑器内容
+  // 文件加载完成后，一次性设置编辑器内容
+  // 重置编辑状态
+  hasUnsavedChanges.value = false
   editorContent.value = store.fileContent || ''
   originalContent.value = store.fileContent || ''
-  hasUnsavedChanges.value = false
 
   // 更新全局 AI 上下文
   setAIContext({
