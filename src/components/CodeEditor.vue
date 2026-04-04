@@ -1,5 +1,5 @@
 <template>
-  <div class="code-editor">
+  <div class="code-editor" ref="containerRef">
     <textarea
       ref="textareaRef"
       v-model="content"
@@ -7,6 +7,7 @@
       :placeholder="'输入内容...'"
       @input="onInput"
       @keydown="handleKeydown"
+      @mouseup="handleMouseUp"
       spellcheck="false"
     ></textarea>
   </div>
@@ -24,9 +25,11 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   'content-change': [value: string]
   'request-save': []
+  'selection-change': [data: { text: string; startLine: number; endLine: number } | null]
 }>()
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const containerRef = ref<HTMLElement | null>(null)
 const content = ref(props.modelValue)
 
 // 监听外部值变化
@@ -62,6 +65,55 @@ function handleKeydown(e: KeyboardEvent) {
     }
   }
 }
+
+// 处理选区事件
+function handleMouseUp(e: MouseEvent) {
+  // 阻止事件冒泡，防止父组件的 handleMouseUp 干扰 textarea 选区
+  e.stopPropagation()
+  checkSelection()
+}
+
+// 检查选区并通知父组件
+function checkSelection() {
+  setTimeout(() => {
+    try {
+      const textarea = textareaRef.value
+      if (!textarea) return
+
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+
+      if (start !== end) {
+        const selectedText = textarea.value.substring(start, end)
+        
+        if (selectedText.trim().length > 0) {
+          const textBefore = textarea.value.substring(0, start)
+          const linesBefore = textBefore.split('\n').length
+          const selectedLines = selectedText.split('\n').length
+          const endLine = linesBefore + selectedLines - 1
+
+          emit('selection-change', {
+            text: selectedText.trim(),
+            startLine: linesBefore,
+            endLine: endLine
+          })
+          return
+        }
+      }
+
+      // 无选区
+      emit('selection-change', null)
+    } catch (e) {
+      // 忽略错误
+    }
+  }, 10)
+}
+
+// 暴露 textarea 元素给父组件
+defineExpose({
+  textarea: textareaRef,
+  container: containerRef
+})
 </script>
 
 <style scoped>

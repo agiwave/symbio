@@ -12,6 +12,15 @@
           class="dialog-header" 
           @mousedown="handleDragStart"
         >
+          <!-- 拖动手柄 -->
+          <div class="drag-handle" title="拖动移动">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <circle cx="3" cy="3" r="1.5" />
+              <circle cx="9" cy="3" r="1.5" />
+              <circle cx="3" cy="9" r="1.5" />
+              <circle cx="9" cy="9" r="1.5" />
+            </svg>
+          </div>
           <span class="header-icon">✨</span>
           <span class="dialog-title">AI 助手</span>
           <button class="dialog-close" @click.stop="state.close">×</button>
@@ -47,10 +56,22 @@
         </div>
         
         <div class="dialog-body">
-          <div class="messages" ref="messagesRef">
+          <div class="messages" ref="messagesRef" @scroll="handleScroll">
+            <!-- 加载更多指示器 -->
+            <div v-if="isLoadingHistory" class="load-more-indicator">
+              <div class="typing-indicator">
+                <span></span><span></span><span></span>
+              </div>
+              <span class="load-text">加载历史消息...</span>
+            </div>
+            
+            <div v-if="state.messages.value.length === 0 && initialLoadDone && !isLoadingHistory" class="empty-chat">
+              <p>开始与 AI 对话</p>
+            </div>
+            
             <div 
               v-for="(msg, idx) in state.messages.value" 
-              :key="idx" 
+              :key="`${state.sessionId}-${idx}-${msg.timestamp}`" 
               :class="['msg', msg.role]"
             >
               <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
@@ -61,7 +82,9 @@
                 <!-- 显示流式内容 -->
                 <div v-if="streamingContent" v-html="renderMarkdown(streamingContent)"></div>
                 <!-- 否则显示打字指示器 -->
-                <span v-else class="typing-dots">...</span>
+                <div v-else class="typing-indicator">
+                  <span></span><span></span><span></span>
+                </div>
               </div>
             </div>
           </div>
@@ -93,11 +116,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch, computed } from 'vue'
+import { ref, nextTick, watch, computed, onMounted } from 'vue'
 import { marked } from 'marked'
 import type { AISelectionReturn } from '@/composables/useAISelection'
 import { sendMessageStream, type ChatMessage } from '@/services/ai'
 import { useAIContext } from '@/composables/useAIContext'
+import { getSessionMessages, appendMessages, type SessionMessage } from '@/services/session'
 
 const props = defineProps<{
   state: AISelectionReturn
@@ -113,6 +137,17 @@ const messagesRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const dialogRef = ref<HTMLElement | null>(null)
 const streamingContent = ref('')
+
+// 分页加载状态
+const isLoadingHistory = ref(false)
+const hasMoreHistory = ref(true)
+const oldestTimestamp = ref<number | null>(null)
+const initialLoadDone = ref(false)
+const PAGE_SIZE = 10
+
+// 跟踪用户是否在底部
+const isUserAtBottom = ref(true)
+const SCROLL_THRESHOLD = 50
 
 // 获取选区信息（从 savedSelection 获取）
 const selectionInfo = computed(() => {
@@ -163,6 +198,68 @@ function scrollToBottom() {
   }
 }
 
+// 加载历史消息
+async function loadHistory(before?: number) {
+  if (isLoadingHistory.value) return
+  if (!hasMoreHistory.value && before) return
+
+  isLoadingHistory.value = true
+
+  try {
+    const result = await getSessionMessages(props.state.sessionId, PAGE_SIZE, before)
+
+    if (result.messages.length > 0) {
+      // 将新消息添加到现有消息的前面
+      const newMessages = [...result.messages, ...props.state.messages.value] as Array<{ role: 'user' | 'assistant'; content: string; timestamp?: number }>
+      props.state.messages.value = newMessages
+
+      // 更新最旧的时间戳
+      oldestTimestamp.value = result.messages[0].timestamp
+      hasMoreHistory.value = result.hasMore
+
+      // 如果是初始加载,滚动到底部
+      if (!before) {
+        await nextTick()
+        scrollToBottom()
+      }
+    } else {
+      hasMoreHistory.value = false
+    }
+  } catch (err) {
+    console.error('[AISelectionDialog] Failed to load history:', err)
+  } finally {
+    isLoadingHistory.value = false
+    if (!before) {
+      initialLoadDone.value = true
+    }
+  }
+}
+
+// 滚动加载更多
+function handleScroll() {
+  if (!messagesRef.value) return
+  if (isLoadingHistory.value || !hasMoreHistory.value) return
+
+  // 检查用户是否在底部附近
+  const { scrollTop, scrollHeight, clientHeight } = messagesRef.value
+  const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+  isUserAtBottom.value = distanceFromBottom < SCROLL_THRESHOLD
+
+  // 当滚动到顶部附近时加载更多
+  if (scrollTop < 50) {
+    const savedScrollHeight = messagesRef.value.scrollHeight
+    loadHistory(oldestTimestamp.value || undefined).then(() => {
+      // 保持滚动位置
+      nextTick(() => {
+        if (messagesRef.value) {
+          const newScrollHeight = messagesRef.value.scrollHeight
+          messagesRef.value.scrollTop = newScrollHeight - savedScrollHeight
+        }
+      })
+    })
+  }
+}
+
 // 拖拽处理
 function handleDragStart(e: MouseEvent) {
   // 如果点击的是关闭按钮，不处理拖拽
@@ -176,7 +273,9 @@ async function handleSend() {
   if (!text || props.state.loading.value) return
 
   // 添加用户消息（保持原始文本用于显示）
-  props.state.messages.value.push({ role: 'user', content: text })
+  const now = Math.floor(Date.now() / 1000)
+  const userMessage = { role: 'user' as const, content: text, timestamp: now }
+  props.state.messages.value.push(userMessage)
   props.state.input.value = ''
   props.state.loading.value = true
   streamingContent.value = ''
@@ -207,26 +306,43 @@ async function handleSend() {
     )
 
     // 流完成 - 添加助手消息
+    const assistantTimestamp = Math.floor(Date.now() / 1000)
+    let assistantMessage: { role: 'assistant'; content: string; timestamp: number }
+    
     if (response.error) {
-      props.state.messages.value.push({
+      assistantMessage = {
         role: 'assistant',
-        content: `错误: ${response.error}`
-      })
+        content: `错误: ${response.error}`,
+        timestamp: assistantTimestamp
+      }
     } else if (streamingContent.value) {
-      props.state.messages.value.push({
+      assistantMessage = {
         role: 'assistant',
-        content: streamingContent.value
-      })
+        content: streamingContent.value,
+        timestamp: assistantTimestamp
+      }
     } else {
-      props.state.messages.value.push({
+      assistantMessage = {
         role: 'assistant',
-        content: '抱歉，无法处理请求。'
-      })
+        content: '抱歉，无法处理请求。',
+        timestamp: assistantTimestamp
+      }
     }
+    
+    props.state.messages.value.push(assistantMessage)
+    
+    // 保存消息到 session（异步，不等待）
+    appendMessages(props.state.sessionId, [
+      userMessage as SessionMessage,
+      assistantMessage as SessionMessage
+    ]).catch(err => {
+      console.error('[AISelectionDialog] Failed to save messages:', err)
+    })
   } catch (error) {
     props.state.messages.value.push({
       role: 'assistant',
-      content: `错误: ${error}`
+      content: `错误: ${error}`,
+      timestamp: Math.floor(Date.now() / 1000)
     })
   } finally {
     props.state.loading.value = false
@@ -235,14 +351,29 @@ async function handleSend() {
   }
 }
 
-// 监听可见性，更新 dialogRef 并自动 focus
-watch(() => props.state.visible.value, (visible) => {
+// 监听可见性，更新 dialogRef 并自动 focus，加载历史消息
+watch(() => props.state.visible.value, async (visible, wasVisible) => {
   if (visible) {
+    // 从关闭到打开时，重置分页加载状态
+    if (!wasVisible) {
+      initialLoadDone.value = false
+      hasMoreHistory.value = true
+      oldestTimestamp.value = null
+      isLoadingHistory.value = false
+    }
+    
     nextTick(() => {
       props.state.dialogRef.value = dialogRef.value
       // 自动 focus 输入框
       inputRef.value?.focus()
     })
+    
+    // 加载历史消息
+    if (props.state.messages.value.length === 0) {
+      await loadHistory()
+    } else {
+      initialLoadDone.value = true
+    }
   }
 })
 
@@ -252,6 +383,22 @@ watch(() => props.state.selectedText.value, () => {
     nextTick(() => {
       inputRef.value?.focus()
     })
+  }
+})
+
+// 监听消息变化，滚动到底部
+watch(() => props.state.messages.value.length, () => {
+  nextTick(() => {
+    if (isUserAtBottom.value) {
+      scrollToBottom()
+    }
+  })
+})
+
+onMounted(() => {
+  // 如果对话框已经可见，加载历史
+  if (props.state.visible.value && props.state.messages.value.length === 0) {
+    loadHistory()
   }
 })
 </script>
@@ -287,6 +434,36 @@ watch(() => props.state.selectedText.value, () => {
 
 .ai-selection-dialog.dragging .dialog-header {
   cursor: grabbing;
+}
+
+/* 拖动手柄样式 */
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: #888;
+  cursor: grab;
+  transition: all 0.15s;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.drag-handle:hover {
+  color: #555;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.drag-handle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ai-selection-dialog.dragging .drag-handle {
+  cursor: grabbing;
+  color: #333;
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .header-icon {
@@ -456,6 +633,71 @@ watch(() => props.state.selectedText.value, () => {
 @keyframes dotPulse {
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
+}
+
+/* 加载更多指示器 */
+.load-more-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  color: #888;
+  font-size: 12px;
+}
+
+.load-text {
+  color: #888;
+}
+
+/* 打字指示器 */
+.typing-indicator {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.typing-indicator span {
+  width: 6px;
+  height: 6px;
+  background: #999;
+  border-radius: 50%;
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+/* 空聊天提示 */
+.empty-chat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+  font-size: 13px;
+  text-align: center;
+  padding: 20px;
+}
+
+.empty-chat p {
+  margin: 0;
 }
 
 .dialog-footer {

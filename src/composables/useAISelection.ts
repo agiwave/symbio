@@ -25,7 +25,7 @@ export interface AISelectionState {
     top: number
     left: number
   }
-  messages: Ref<Array<{ role: 'user' | 'assistant'; content: string }>>
+  messages: Ref<Array<{ role: 'user' | 'assistant'; content: string; timestamp?: number }>>
   input: Ref<string>
   loading: Ref<boolean>
 }
@@ -52,7 +52,7 @@ export function useAISelection(options: UseAISelectionOptions) {
     top: 80,
     left: 0,
   })
-  const messages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  const messages = ref<Array<{ role: 'user' | 'assistant'; content: string; timestamp?: number }>>([])
   const input = ref('')
   const loading = ref(false)
   const dialogRef = ref<HTMLElement | null>(null)
@@ -150,7 +150,7 @@ export function useAISelection(options: UseAISelectionOptions) {
     calculatePosition(rect)
 
     visible.value = true
-    messages.value = []
+    // 不清空 messages，让组件负责加载历史消息
     input.value = ''
 
     // 更新全局 AI 上下文
@@ -185,7 +185,7 @@ export function useAISelection(options: UseAISelectionOptions) {
     visible.value = false
     selectedText.value = ''
     savedSelection.value = null
-    messages.value = []
+    // 不清空 messages，让组件负责管理
     // 重置全局 AI 上下文
     setAIContext({
       selectedText: undefined,
@@ -198,7 +198,7 @@ export function useAISelection(options: UseAISelectionOptions) {
   function open() {
     savedSelection.value = null
     selectedText.value = ''
-    messages.value = []
+    // 不清空 messages，让组件负责加载历史消息
     // 默认显示在右上角
     position.top = 80
     position.left = window.innerWidth - DIALOG_WIDTH - MARGIN
@@ -301,6 +301,47 @@ export function useAISelection(options: UseAISelectionOptions) {
     return false
   }
 
+  // 处理 textarea 的选区检测（textarea 使用 selectionStart/selectionEnd 而非 window.getSelection）
+  function handleTextareaSelection(textarea: HTMLTextAreaElement, context?: { filePath?: string; fullContent?: string }) {
+    if (loading.value) return
+
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+
+    if (start !== end) {
+      const selectedTextContent = textarea.value.substring(start, end).trim()
+      if (selectedTextContent.length > 0) {
+        // 计算行号
+        const textBefore = textarea.value.substring(0, start)
+        const linesBefore = textBefore.split('\n').length
+        const selectedLines = selectedTextContent.split('\n').length
+        const endLine = linesBefore + selectedLines - 1
+
+        // 获取 textarea 的位置作为对话框定位参考
+        const rect = textarea.getBoundingClientRect()
+
+        const extraInfo = {
+          filePath: context?.filePath,
+          fullContent: context?.fullContent,
+          startLine: linesBefore,
+          endLine
+        }
+
+        if (visible.value) {
+          updateSelection(selectedTextContent, rect, extraInfo)
+        } else {
+          openForSelection(selectedTextContent, rect, extraInfo)
+        }
+        return
+      }
+    }
+
+    // 无选区或选区为空，关闭对话框
+    if (visible.value) {
+      close()
+    }
+  }
+
   // 对话框样式
   const dialogStyle = computed(() => ({
     top: `${position.top}px`,
@@ -327,6 +368,7 @@ export function useAISelection(options: UseAISelectionOptions) {
     close,
     open,
     handleMouseUp,
+    handleTextareaSelection,
     handleEscape,
     handleCtrlK,
     startDrag,

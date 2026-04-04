@@ -121,74 +121,9 @@
       ></div>
     </Teleport>
     
-    <!-- AI 悬浮对话框 -->
-    <Teleport to="body">
-      <Transition name="slide-up">
-        <div 
-          v-if="showAIDialog" 
-          ref="aiDialogRef"
-          class="ai-floating-dialog"
-          :style="aiDialogStyle"
-        >
-          <div class="ai-dialog-header">
-            <span class="ai-header-icon">✨</span>
-            <span class="ai-dialog-title">AI 助手</span>
-            <button class="ai-dialog-close" @click="closeAIDialog">×</button>
-          </div>
-          
-          <!-- 选中的文字提示 -->
-          <div v-if="selectedText || (selectionDisplay && selectionDisplay.startLine)" class="ai-selected-context">
-            <div class="context-header">
-              <span class="context-label">选中的内容</span>
-              <span v-if="filePath" class="file-path">
-                📄 {{ filePath.split(/[\\/]/).pop() }}
-              </span>
-              <span v-if="selectionDisplay && selectionDisplay.startLine" class="line-range">
-                📍 行 {{ selectionDisplay.startLine }}{{ selectionDisplay.endLine && selectionDisplay.endLine !== selectionDisplay.startLine ? '-' + selectionDisplay.endLine : '' }}
-              </span>
-            </div>
-            <div class="context-text">{{ selectedText.slice(0, 100) }}{{ selectedText.length > 100 ? '...' : '' }}</div>
-          </div>
-          
-          <div class="ai-dialog-body">
-            <div class="ai-messages" ref="messagesRef">
-              <div v-for="(msg, idx) in aiMessages" :key="idx" :class="['ai-msg', msg.role]">
-                <div class="ai-msg-content" v-html="renderMarkdown(msg.content)"></div>
-              </div>
-              <!-- 流式加载指示器 -->
-              <div v-if="aiLoading" class="ai-msg assistant loading">
-                <div class="ai-msg-content">
-                  <!-- 显示流式内容 -->
-                  <div v-if="aiStreamingContent" v-html="renderMarkdown(aiStreamingContent)"></div>
-                  <!-- 否则显示打字指示器 -->
-                  <span v-else class="typing-dots">...</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="ai-dialog-footer">
-            <textarea
-              v-model="aiInput"
-              :placeholder="selectedText ? '针对选中内容提问...' : '输入问题... (Enter 发送)'"
-              @keydown.enter.exact.prevent="sendAIMessage"
-              @keydown.escape.exact="closeAIDialog"
-              ref="aiInputRef"
-              rows="1"
-            ></textarea>
-            <button @click="sendAIMessage" :disabled="!aiInput.trim() || aiLoading" class="ai-send-btn">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="22" y1="2" x2="11" y2="13"></line>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-              </svg>
-            </button>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
-    
     <!-- 快捷键提示 -->
     <Transition name="fade">
-      <div v-if="!showAIDialog && !blockHandle.visible" class="shortcut-hint">
+      <div v-if="!blockHandle.visible" class="shortcut-hint">
         <kbd>/</kbd> 命令菜单 · 选中文本后自动显示 AI 助手
       </div>
     </Transition>
@@ -196,15 +131,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick, shallowRef, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
 import { Editor, rootCtx, defaultValueCtx, editorViewCtx, commandsCtx, parserCtx } from '@milkdown/kit/core'
 import { commonmark, paragraphSchema, headingSchema, bulletListSchema, blockquoteSchema, codeBlockSchema, setBlockTypeCommand, wrapInBlockTypeCommand } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
 import { history } from '@milkdown/kit/plugin/history'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
-import { useAIChat } from '@/composables/useAIChat'
 import { setAIContext } from '@/composables/useAIContext'
-import { marked } from 'marked'
 
 const props = defineProps<{
   modelValue: string
@@ -220,8 +153,6 @@ const emit = defineEmits<{
 
 // DOM refs
 const editorRef = ref<HTMLElement | null>(null)
-const messagesRef = ref<HTMLElement | null>(null)
-const aiInputRef = ref<HTMLTextAreaElement | null>(null)
 
 // Editor instance
 const editor = shallowRef<Editor | null>(null)
@@ -261,39 +192,7 @@ const dropIndicatorStyle = computed(() => ({
   width: `${dropIndicator.width}px`,
 }))
 
-// AI dialog
-const showAIDialog = ref(false)
-const selectedText = ref('')
-
-// 使用统一的 AI Chat composable
-// 使用全局 AI 上下文
-const aiChat = useAIChat({
-  sessionId: 'note-selection-ai',
-})
-
-// 为了兼容模板，导出所需属性
-const aiMessages = aiChat.messages
-const aiLoading = aiChat.loading
-const aiStreamingContent = aiChat.streamingContent
-const aiInput = ref('')  // 输入框单独管理
-
-// AI 对话框位置 - 跟随选区
-const aiDialogPosition = reactive({
-  top: 80,
-  left: 0,
-})
-
-// 对话框尺寸常量
-const DIALOG_WIDTH = 360
-const DIALOG_MIN_HEIGHT = 200
-const MARGIN = 12
-
-const aiDialogStyle = computed(() => ({
-  top: `${aiDialogPosition.top}px`,
-  left: `${aiDialogPosition.left}px`,
-}))
-
-// 保存选区信息（用于在对话框打开后仍能引用选中的文字）
+// 保存选区信息（用于更新全局 AI 上下文）
 interface SelectionInfo {
   text: string
   rect: DOMRect
@@ -301,124 +200,6 @@ interface SelectionInfo {
   endLine?: number
 }
 const savedSelection = shallowRef<SelectionInfo | null>(null)
-
-// 为模板提供类型安全的访问
-const selectionDisplay = computed(() => savedSelection.value)
-
-// 计算对话框位置，跟随选区并避免超出屏幕
-function calculateDialogPosition() {
-  const sel = savedSelection.value
-  if (sel && sel.rect) {
-    const rect = sel.rect
-    const viewportWidth = window.innerWidth
-    const viewportHeight = window.innerHeight
-    
-    // 估算对话框高度
-    const estimatedHeight = DIALOG_MIN_HEIGHT + (selectedText.value.length > 50 ? 60 : 0)
-    
-    // 水平位置：优先显示在选区右侧
-    let left = rect.right + MARGIN
-    if (left + DIALOG_WIDTH > viewportWidth - MARGIN) {
-      // 右侧空间不够，尝试显示在左侧
-      left = rect.left - DIALOG_WIDTH - MARGIN
-      if (left < MARGIN) {
-        // 左侧也不够，显示在选区内或紧贴左侧
-        left = Math.max(MARGIN, Math.min(rect.left, viewportWidth - DIALOG_WIDTH - MARGIN))
-      }
-    }
-    
-    // 垂直位置：优先显示在选区下方
-    let top = rect.bottom + MARGIN
-    const spaceBelow = viewportHeight - rect.bottom - MARGIN
-    const spaceAbove = rect.top - MARGIN
-    
-    if (spaceBelow < estimatedHeight && spaceAbove > spaceBelow) {
-      // 下方空间不够且上方空间更大，显示在上方
-      top = rect.top - estimatedHeight - MARGIN
-      if (top < MARGIN) {
-        top = MARGIN
-      }
-    } else if (top + estimatedHeight > viewportHeight - MARGIN) {
-      // 下方空间不够，尽量显示在屏幕内
-      top = viewportHeight - estimatedHeight - MARGIN
-      if (top < MARGIN) {
-        top = MARGIN
-      }
-    }
-    
-    aiDialogPosition.top = top
-    aiDialogPosition.left = left
-  } else {
-    // 默认位置：右上角
-    aiDialogPosition.top = 80
-    aiDialogPosition.left = window.innerWidth - DIALOG_WIDTH - MARGIN
-  }
-}
-
-// 关闭 AI 对话框
-function closeAIDialog() {
-  showAIDialog.value = false
-  selectedText.value = ''
-  savedSelection.value = null
-  aiChat.clearMessages()
-}
-
-// 通过工具栏按钮或快捷键打开 AI（无选区时不打开）
-function openAI() {
-  showToolbar.value = false
-
-  // 如果没有活跃选区，尝试获取当前 ProseMirror 选区
-  if (!savedSelection.value && editor.value && editor.value.ctx) {
-    try {
-      const view = editor.value.ctx.get(editorViewCtx)
-      const { state } = view
-      const { from, to } = state.selection
-
-      if (from !== to) {
-        // 有文本选区，获取信息
-        const selectedTextFromDoc = state.doc.textBetween(from, to, '\n')
-        const textBefore = state.doc.textBetween(0, from, '\n')
-
-        const linesBefore = textBefore.split('\n').length
-        const selectedLines = selectedTextFromDoc.split('\n').length
-
-        savedSelection.value = {
-          text: selectedTextFromDoc.trim(),
-          rect: { left: 0, top: 0, width: 0, height: 0 } as DOMRect,
-          startLine: linesBefore,
-          endLine: linesBefore + selectedLines - 1,
-        }
-        selectedText.value = selectedTextFromDoc.trim()
-      }
-    } catch (_e) {
-      // 忽略错误，保持原有行为
-    }
-  }
-
-  // 只有有选区时才打开对话框
-  if (!savedSelection.value || !selectedText.value) {
-    return
-  }
-
-  // 设置当前文件上下文
-  if (props.filePath) {
-    setAIContext({
-      filePath: props.filePath,
-      fileContent: props.modelValue,
-      selectedText: selectedText.value,
-      startLine: savedSelection.value?.startLine,
-      endLine: savedSelection.value?.endLine,
-    })
-  }
-
-  aiChat.clearMessages()
-  aiInput.value = ''
-  // 默认显示在右上角
-  aiDialogPosition.top = 80
-  aiDialogPosition.left = window.innerWidth - DIALOG_WIDTH - MARGIN
-  showAIDialog.value = true
-  nextTick(() => aiInputRef.value?.focus())
-}
 
 // Initialize editor
 async function initEditor() {
@@ -481,7 +262,6 @@ async function initEditor() {
               startLine: linesBefore,
               endLine: linesBefore + selectedLines - 1,
             }
-            selectedText.value = selectedTextFromDoc.trim()
           } else {
             // 无选区，只更新光标位置
             const textBefore = state.doc.textBetween(0, from, '\n')
@@ -497,7 +277,6 @@ async function initEditor() {
 
             // 清除本地选区
             savedSelection.value = null
-            selectedText.value = ''
           }
         } catch (e) {
           // 忽略错误
@@ -643,7 +422,6 @@ async function initEditor() {
 
             // 保存选区信息
             savedSelection.value = { text: selectedContent, rect, startLine, endLine }
-            selectedText.value = selectedContent
 
             // 更新全局 AI 上下文
             setAIContext({
@@ -653,20 +431,18 @@ async function initEditor() {
               startLine,
               endLine,
             })
-            calculateDialogPosition()
-
-            // 如果对话框未打开，打开它
-            if (!showAIDialog.value) {
-              showAIDialog.value = true
-              aiChat.clearMessages()
-              aiInput.value = ''
-            }
-            // 每次选择都自动 focus 输入框
-            nextTick(() => aiInputRef.value?.focus())
+            // 不再打开内部对话框，让事件冒泡到父组件处理
           }
-        } else if (showAIDialog.value) {
-          // 选区消失且对话框已打开，关闭对话框
-          closeAIDialog()
+        } else {
+          // 选区消失，清除上下文
+          savedSelection.value = null
+          setAIContext({
+            filePath: props.filePath,
+            fileContent: props.modelValue,
+            selectedText: undefined,
+            startLine: undefined,
+            endLine: undefined,
+          })
         }
       } catch (e) {
         // 忽略错误
@@ -1059,34 +835,8 @@ watch(() => props.modelValue, async (newValue, _oldValue) => {
   }
 })
 
-async function sendAIMessage() {
-  if (!aiInput.value.trim() || aiLoading.value) return
-
-  const userInput = aiInput.value.trim()
-  aiInput.value = ''
-
-  await aiChat.sendMessage(userInput)
-  nextTick(() => {
-    messagesRef.value?.scrollTo({ top: messagesRef.value.scrollHeight, behavior: 'smooth' })
-  })
-}
-
-function renderMarkdown(content: string): string {
-  return marked(content) as string
-}
-
 // Keyboard shortcuts
 function handleKeydown(e: KeyboardEvent) {
-  // Escape 关闭 AI 对话框
-  if (e.key === 'Escape') {
-    if (showAIDialog.value) {
-      e.preventDefault()
-      e.stopPropagation() // 阻止事件传播
-      closeAIDialog()
-    }
-    return
-  }
-
   // Ctrl+S 保存
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault()
@@ -1095,7 +845,7 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
 
-  // Ctrl+K 不处理,让父组件处理(避免重复打开)
+  // Ctrl+K 和 Escape 不处理,让父组件处理
 }
 
 // Destroy editor
@@ -1149,8 +899,6 @@ onUnmounted(() => {
   if (expandTimer) clearTimeout(expandTimer)
   if (collapseTimer) clearTimeout(collapseTimer)
 })
-
-defineExpose({ openAI })
 </script>
 
 <style scoped>
@@ -1444,226 +1192,6 @@ defineExpose({ openAI })
   border-radius: 4px;
   margin: 0 2px;
   font-family: inherit;
-}
-
-/* AI Floating Dialog - 悬浮对话框 */
-.ai-floating-dialog {
-  position: fixed;
-  width: 360px;
-  max-height: 60vh;
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 16px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  z-index: 2000;
-  backdrop-filter: blur(12px);
-}
-
-.ai-dialog-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.ai-header-icon {
-  font-size: 14px;
-}
-
-.ai-dialog-title {
-  font-weight: 600;
-  font-size: 13px;
-  flex: 1;
-  color: #1a1a1a;
-}
-
-.ai-dialog-close {
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 16px;
-  color: #999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-}
-
-.ai-dialog-close:hover {
-  background: rgba(0, 0, 0, 0.08);
-  color: #333;
-}
-
-/* Selected context - 选中的文字提示 */
-.ai-selected-context {
-  padding: 8px 14px;
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(37, 99, 235, 0.06));
-}
-
-.context-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 4px;
-}
-
-.ai-selected-context .context-label {
-  font-size: 10px;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.context-header .file-path {
-  font-size: 11px;
-  color: #666;
-  font-family: 'Fira Code', 'Consolas', monospace;
-}
-
-.context-header .line-range {
-  font-size: 11px;
-  color: #666;
-  font-family: 'Fira Code', 'Consolas', monospace;
-}
-
-.ai-selected-context .context-text {
-  font-size: 12px;
-  color: #444;
-  margin-top: 4px;
-  padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.8);
-  border-radius: 6px;
-  border-left: 2px solid #7c3aed;
-}
-
-.ai-dialog-body {
-  flex: 1;
-  overflow: hidden;
-  min-height: 100px;
-  max-height: 280px;
-}
-
-.ai-messages {
-  height: 100%;
-  overflow-y: auto;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ai-msg {
-  max-width: 88%;
-  padding: 8px 12px;
-  border-radius: 12px;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.ai-msg.user {
-  align-self: flex-end;
-  background: linear-gradient(135deg, #7c3aed, #2563eb);
-  color: #fff;
-  border-bottom-right-radius: 4px;
-}
-
-.ai-msg.assistant {
-  align-self: flex-start;
-  background: #f4f4f5;
-  color: #18181b;
-  border-bottom-left-radius: 4px;
-}
-
-.ai-msg.assistant.loading .ai-msg-content {
-  opacity: 0.6;
-}
-
-.ai-msg-content :deep(p) { margin: 0; }
-.ai-msg-content :deep(p+p) { margin-top: 8px; }
-.ai-msg-content :deep(code) {
-  background: rgba(0,0,0,0.1);
-  padding: 2px 5px;
-  border-radius: 3px;
-  font-size: 13px;
-}
-.ai-msg-content :deep(pre) {
-  background: #1e1e1e;
-  color: #d4d4d4;
-  padding: 10px 12px;
-  border-radius: 6px;
-  margin: 8px 0;
-  overflow-x: auto;
-}
-.ai-msg-content :deep(pre code) {
-  background: transparent;
-  padding: 0;
-}
-
-.typing-dots {
-  animation: dotPulse 1s infinite;
-}
-
-@keyframes dotPulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
-}
-
-.ai-dialog-footer {
-  display: flex;
-  gap: 8px;
-  padding: 10px 14px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.ai-dialog-footer textarea {
-  flex: 1;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-size: 13px;
-  resize: none;
-  outline: none;
-  font-family: inherit;
-  line-height: 1.4;
-  max-height: 100px;
-  background: rgba(0, 0, 0, 0.02);
-  transition: all 0.15s;
-}
-
-.ai-dialog-footer textarea:focus {
-  border-color: #7c3aed;
-  background: #fff;
-}
-
-.ai-send-btn {
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, #7c3aed, #2563eb);
-  border: none;
-  border-radius: 10px;
-  color: #fff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-}
-
-.ai-send-btn:hover:not(:disabled) {
-  transform: scale(1.05);
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
-}
-
-.ai-send-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 /* Transitions */

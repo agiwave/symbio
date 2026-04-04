@@ -103,6 +103,7 @@
               class="code-editor-wrapper"
               @content-change="onContentChange"
               @request-save="handleSave"
+              @selection-change="handleCodeEditorSelection"
             />
             <!-- 无法预览的二进制文件 -->
             <pre v-else class="code-block"><code>{{ fileContent }}</code></pre>
@@ -323,6 +324,40 @@ function handleMouseUp(e: MouseEvent) {
     filePath: selectedPath.value || undefined,
     fullContent: fileContent.value || undefined
   })
+}
+
+// CodeEditor 选区事件处理
+function handleCodeEditorSelection(data: { text: string; startLine: number; endLine: number } | null) {
+  if (data) {
+    // 获取 textarea 元素的位置用于对话框定位
+    const codeEditorEl = contentAreaRef.value?.querySelector('.code-textarea') as HTMLTextAreaElement | null
+    
+    if (aiSelection.visible.value) {
+      // 对话框已打开，更新选区
+      aiSelection.selectedText.value = data.text
+      aiSelection.savedSelection.value = {
+        text: data.text,
+        rect: codeEditorEl?.getBoundingClientRect() || { left: 0, top: 0, width: 0, height: 0 } as DOMRect,
+        startLine: data.startLine,
+        endLine: data.endLine,
+        filePath: selectedPath.value || undefined,
+        fullContent: fileContent.value || undefined,
+      }
+    } else {
+      // 打开对话框
+      aiSelection.openForSelection(data.text, codeEditorEl?.getBoundingClientRect() || { left: 0, top: 0, width: 0, height: 0 } as DOMRect, {
+        startLine: data.startLine,
+        endLine: data.endLine,
+        filePath: selectedPath.value || undefined,
+        fullContent: fileContent.value || undefined,
+      })
+    }
+  } else {
+    // 无选区，关闭对话框
+    if (aiSelection.visible.value) {
+      aiSelection.close()
+    }
+  }
 }
 
 // 拖动调整宽度
