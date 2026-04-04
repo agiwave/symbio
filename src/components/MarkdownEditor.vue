@@ -432,10 +432,67 @@ async function initEditor() {
     .config((ctx) => {
       ctx.set(rootCtx, editorRef.value)
       ctx.set(defaultValueCtx, defaultContent)
-      
+
       ctx.get(listenerCtx).markdownUpdated((ctx, markdown) => {
         emit('update:modelValue', markdown)
         editorCtx.value = ctx
+      })
+
+      // 监听光标位置变化，更新全局 AI 上下文
+      ctx.get(listenerCtx).selectionUpdated((ctx) => {
+        if (!editor.value || !props.filePath) return
+
+        try {
+          const view = ctx.get(editorViewCtx)
+          const { state } = view
+          const { from, to } = state.selection
+
+          if (from !== to) {
+            // 有文本选区
+            const selectedTextFromDoc = state.doc.textBetween(from, to, '\n')
+            const textBefore = state.doc.textBetween(0, from, '\n')
+
+            const linesBefore = textBefore.split('\n').length
+            const selectedLines = selectedTextFromDoc.split('\n').length
+
+            setAIContext({
+              filePath: props.filePath,
+              fileContent: props.modelValue,
+              selectedText: selectedTextFromDoc.trim() || undefined,
+              startLine: linesBefore,
+              endLine: linesBefore + selectedLines - 1,
+            })
+
+            // 同时更新本地 savedSelection（用于 UI 显示）
+            const range = document.getSelection()?.getRangeAt(0)
+            const rect = range?.getBoundingClientRect() || { left: 0, top: 0, width: 0, height: 0 } as DOMRect
+            savedSelection = {
+              text: selectedTextFromDoc.trim(),
+              rect,
+              startLine: linesBefore,
+              endLine: linesBefore + selectedLines - 1,
+            }
+            selectedText.value = selectedTextFromDoc.trim()
+          } else {
+            // 无选区，只更新光标位置
+            const textBefore = state.doc.textBetween(0, from, '\n')
+            const currentLine = textBefore.split('\n').length
+
+            setAIContext({
+              filePath: props.filePath,
+              fileContent: props.modelValue,
+              selectedText: undefined,
+              startLine: currentLine,
+              endLine: currentLine,
+            })
+
+            // 清除本地选区
+            savedSelection = null
+            selectedText.value = ''
+          }
+        } catch (e) {
+          // 忽略错误
+        }
       })
     })
     .use(commonmark)
