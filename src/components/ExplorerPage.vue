@@ -79,6 +79,7 @@
               v-if="isMarkdownFile"
               :key="selectedPath"
               :model-value="fileContent"
+              :file-path="selectedPath || undefined"
               class="md-editor"
             />
             <!-- 其他文件使用代码块预览 -->

@@ -143,6 +143,11 @@ impl OpenAiPlugin {
 
         // 如果有选区上下文，注入为上下文消息
         if let Some(ctx) = selection_context {
+            eprintln!("[openai] 收到选区上下文: file_path={:?}, start_line={:?}, end_line={:?}, has_file_content={}, selected_text_len={}",
+                ctx.file_path, ctx.start_line, ctx.end_line,
+                ctx.file_content.is_some(),
+                ctx.selected_text.as_ref().map(|s| s.len()).unwrap_or(0));
+
             let mut context_content = String::new();
 
             // 构建选区上下文消息

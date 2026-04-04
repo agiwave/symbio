@@ -198,11 +198,13 @@ import { history } from '@milkdown/kit/plugin/history'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
 // BlockProvider removed - using direct editor view monitoring
 import { callPlugin } from '@/services/plugin'
-import { sendMessageStream, type ChatMessage } from '@/services/ai'
+import { useAIChat, type AIChatContext } from '@/composables/useAIChat'
 import { marked } from 'marked'
 
 const props = defineProps<{
   modelValue: string
+  /** 文件路径（可选，由父组件传入） */
+  filePath?: string
 }>()
 
 const emit = defineEmits<{
@@ -255,12 +257,26 @@ const dropIndicatorStyle = computed(() => ({
 
 // AI dialog
 const showAIDialog = ref(false)
-const aiInput = ref('')
-const aiMessages = ref<{ role: 'user' | 'assistant'; content: string }[]>([])
-const aiLoading = ref(false)
-const aiStreamingContent = ref('')
 const selectedText = ref('')
 const aiDialogRef = ref<HTMLElement | null>(null)
+
+// 使用统一的 AI Chat composable
+const aiChat = useAIChat({
+  sessionId: 'note-selection-ai',
+  context: {
+    filePath: props.filePath,
+    fileContent: props.modelValue,
+    get selectedText() {
+      return savedSelection?.text
+    }
+  } as AIChatContext,
+})
+
+// 为了兼容模板，导出所需属性
+const aiMessages = aiChat.messages
+const aiLoading = aiChat.loading
+const aiStreamingContent = aiChat.streamingContent
+const aiInput = ref('')  // 输入框单独管理
 
 // AI 对话框位置 - 跟随选区
 const aiDialogPosition = reactive({
@@ -336,10 +352,10 @@ function openAIForSelection(text: string, rect: DOMRect) {
   savedSelection = { text, rect }
   selectedText.value = text
   calculateDialogPosition()
-  
+
   // 打开对话框
   showAIDialog.value = true
-  aiMessages.value = []
+  aiChat.clearMessages()
   aiInput.value = ''
   // 注意：不自动 focus，避免选区丢失
 }
@@ -349,7 +365,7 @@ function closeAIDialog() {
   showAIDialog.value = false
   selectedText.value = ''
   savedSelection = null
-  aiMessages.value = []
+  aiChat.clearMessages()
 }
 
 // 通过工具栏按钮打开 AI（无选区）
@@ -357,7 +373,7 @@ function openAI() {
   showToolbar.value = false
   savedSelection = null
   selectedText.value = ''
-  aiMessages.value = []
+  aiChat.clearMessages()
   // 默认显示在右上角
   aiDialogPosition.top = 80
   aiDialogPosition.left = window.innerWidth - DIALOG_WIDTH - MARGIN
@@ -479,11 +495,11 @@ async function initEditor() {
             savedSelection = { text, rect }
             selectedText.value = text
             calculateDialogPosition()
-            
+
             // 如果对话框未打开，打开它
             if (!showAIDialog.value) {
               showAIDialog.value = true
-              aiMessages.value = []
+              aiChat.clearMessages()
               aiInput.value = ''
             }
             // 每次选择都自动 focus 输入框
@@ -888,51 +904,14 @@ watch(() => props.modelValue, async (newValue, oldValue) => {
 
 async function sendAIMessage() {
   if (!aiInput.value.trim() || aiLoading.value) return
-  
-  const userMessage = aiInput.value.trim()
-  aiMessages.value.push({ role: 'user', content: userMessage })
+
+  const userInput = aiInput.value.trim()
   aiInput.value = ''
-  aiLoading.value = true
-  aiStreamingContent.value = ''
-  
-  try {
-    // 构建消息历史
-    const chatMessages: ChatMessage[] = aiMessages.value.map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content
-    }))
-    
-    // 流式发送消息
-    const response = await sendMessageStream(
-      chatMessages,
-      'note-selection-ai',
-      (chunk) => {
-        if (chunk.data && typeof chunk.data === 'object') {
-          const data = chunk.data as Record<string, unknown>
-          if (data.content && typeof data.content === 'string') {
-            aiStreamingContent.value = data.content as string
-          }
-        }
-      }
-    )
-    
-    // 流完成 - 添加助手消息
-    if (response.error) {
-      aiMessages.value.push({ role: 'assistant', content: `错误: ${response.error}` })
-    } else if (aiStreamingContent.value) {
-      aiMessages.value.push({ role: 'assistant', content: aiStreamingContent.value })
-    } else {
-      aiMessages.value.push({ role: 'assistant', content: '抱歉，无法处理请求。' })
-    }
-  } catch (error) {
-    aiMessages.value.push({ role: 'assistant', content: `错误: ${error}` })
-  } finally {
-    aiLoading.value = false
-    aiStreamingContent.value = ''
-    nextTick(() => {
-      messagesRef.value?.scrollTo({ top: messagesRef.value.scrollHeight, behavior: 'smooth' })
-    })
-  }
+
+  await aiChat.sendMessage(userInput)
+  nextTick(() => {
+    messagesRef.value?.scrollTo({ top: messagesRef.value.scrollHeight, behavior: 'smooth' })
+  })
 }
 
 function renderMarkdown(content: string): string {

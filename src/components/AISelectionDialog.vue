@@ -174,6 +174,16 @@ async function handleSend() {
         start_line: info.startLine,
         end_line: info.endLine
       }
+      console.log('[AISelection] 发送选区上下文:', {
+        file_path: selectionContext.file_path,
+        has_file_content: !!selectionContext.file_content,
+        file_content_length: selectionContext.file_content?.length || 0,
+        selected_text: selectionContext.selected_text,
+        start_line: selectionContext.start_line,
+        end_line: selectionContext.end_line
+      })
+    } else {
+      console.log('[AISelection] 无文件路径信息，跳过选区上下文')
     }
 
     // 流式发送消息
