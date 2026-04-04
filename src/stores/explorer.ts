@@ -51,14 +51,21 @@ export const useExplorerStore = defineStore('explorer', () => {
     triggerRef(fileTree)
   }
 
-  // 计算属性：根目录项（第一层级的所有项）
+  // 计算属性：根目录项（最小深度的所有项）
   const rootItems = computed(() => {
     const items: FileItem[] = []
 
-    // 遍历 fileTree，找出第一层级的项
+    // 找出所有项的最小深度
+    let minDepth = Infinity
     fileTree.value.forEach((item, key) => {
-      // 根目录项：key 不包含 '/' 字符
-      if (!key.includes('/')) {
+      const depth = normalizePath(key).split('/').length
+      if (depth < minDepth) minDepth = depth
+    })
+
+    // 只取最小深度的项（即根目录层级）
+    fileTree.value.forEach((item, key) => {
+      const depth = normalizePath(key).split('/').length
+      if (depth === minDepth) {
         items.push(item)
       }
     })
