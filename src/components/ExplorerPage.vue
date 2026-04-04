@@ -83,7 +83,7 @@
           </div>
 
           <!-- 文件：显示内容预览 -->
-          <div v-else-if="fileContent" class="file-preview">
+          <div v-else-if="!isFileLoading && fileContent" class="file-preview">
             <!-- Markdown 文件使用 MarkdownEditor -->
             <MarkdownEditor
               v-if="isMarkdownFile"
@@ -106,6 +106,12 @@
             />
             <!-- 无法预览的二进制文件 -->
             <pre v-else class="code-block"><code>{{ fileContent }}</code></pre>
+          </div>
+
+          <!-- 文件：加载中 -->
+          <div v-else-if="isFileLoading" class="loading-file">
+            <div class="spinner"></div>
+            <p>正在加载文件内容...</p>
           </div>
 
           <!-- 文件：未加载或不可读 -->
@@ -176,6 +182,7 @@ const editorContent = ref<string>('')
 const hasUnsavedChanges = ref(false)
 const isSaving = ref(false)
 const originalContent = ref<string>('')
+const isFileLoading = ref(false)
 
 // AI 选区交互 - 使用 composable
 const aiSelection = useAISelection({ sessionId: 'explorer-selection-ai' })
@@ -372,25 +379,35 @@ async function selectItem(path: string) {
     }
   }
 
-  // 先设置 selectedPath，让 UI 切换到文件视图
-  // 但不立即清空 editorContent，等文件加载完成后再设置
+  // 设置加载状态
+  isFileLoading.value = true
   
-  await store.selectItem(path)
-
-  // 文件加载完成后，一次性设置编辑器内容
   // 重置编辑状态
   hasUnsavedChanges.value = false
-  editorContent.value = store.fileContent || ''
-  originalContent.value = store.fileContent || ''
+  editorContent.value = ''
+  originalContent.value = ''
 
-  // 更新全局 AI 上下文
-  setAIContext({
-    filePath: path,
-    fileContent: store.fileContent || undefined,
-    selectedText: undefined,
-    startLine: undefined,
-    endLine: undefined,
-  })
+  try {
+    // 等待文件内容加载完成
+    await store.selectItem(path)
+
+    // 文件加载完成后，一次性设置编辑器内容
+    editorContent.value = store.fileContent || ''
+    originalContent.value = store.fileContent || ''
+    hasUnsavedChanges.value = false
+
+    // 更新全局 AI 上下文
+    setAIContext({
+      filePath: path,
+      fileContent: store.fileContent || undefined,
+      selectedText: undefined,
+      startLine: undefined,
+      endLine: undefined,
+    })
+  } finally {
+    // 无论成功还是失败，都清除加载状态
+    isFileLoading.value = false
+  }
 }
 
 // 内容变化
@@ -763,6 +780,29 @@ function getFileIcon(name: string): string {
   color: var(--color-text-muted);
   text-align: center;
   min-height: 100%;
+}
+
+.loading-file {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  gap: 1rem;
+}
+
+.loading-file .spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .empty-content .hint {
