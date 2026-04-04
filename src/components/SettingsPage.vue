@@ -70,6 +70,7 @@
               <option value="moonshot">Moonshot (月之暗面)</option>
               <option value="zhipu">智谱 GLM</option>
               <option value="aiyuanjing">AI 远景</option>
+              <option value="lmstudio">LM Studio</option>
               <option value="local">本地模型 (Ollama)</option>
               <option value="custom">自定义</option>
             </select>
@@ -94,11 +95,20 @@
           <div class="setting-item">
             <div class="setting-info">
               <label>模型</label>
-              <p class="setting-desc">选择使用的模型版本</p>
+              <p class="setting-desc">选择或输入使用的模型版本</p>
             </div>
-            <select v-model="aiConfig.model">
-              <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
-            </select>
+            <div class="model-input-wrapper">
+              <input 
+                v-model="aiConfig.model" 
+                type="text" 
+                :placeholder="availableModels.length > 0 ? '选择或输入模型名称' : '输入模型名称'"
+                class="model-input"
+                list="models-list"
+              />
+              <datalist id="models-list">
+                <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+              </datalist>
+            </div>
           </div>
           
           <div class="setting-item">
@@ -374,6 +384,10 @@ const providerPresets: Record<string, { apiBase: string; models: string[] }> = {
     apiBase: 'https://maas-api.ai-yuanjing.com/openapi/compatible-mode/v1',
     models: ['glm-5', 'glm-4-plus', 'glm-4']
   },
+  lmstudio: {
+    apiBase: 'http://localhost:1234/v1',
+    models: []
+  },
   local: {
     apiBase: 'http://localhost:11434/v1',
     models: ['llama3', 'qwen2', 'mistral', 'deepseek-coder-v2']
@@ -392,8 +406,12 @@ function onProviderChange() {
   if (preset) {
     aiConfig.api_base = preset.apiBase
     availableModels.value = preset.models
+    // 只有当有预设模型且当前模型不在新列表中时才设置默认值
     if (preset.models.length > 0) {
       aiConfig.model = preset.models[0]
+    } else {
+      // LM Studio 等动态模型场景，清空模型名称让用户自行输入
+      aiConfig.model = ''
     }
   }
 }
@@ -656,6 +674,33 @@ onMounted(() => {
   border-radius: 6px;
   min-width: 200px;
   font-size: 0.875rem;
+}
+
+/* 模型输入框样式 */
+.model-input-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+}
+
+.model-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.875rem;
+  box-sizing: border-box;
+}
+
+.model-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.model-input::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+  cursor: pointer;
 }
 
 .setting-item input[type="number"] {

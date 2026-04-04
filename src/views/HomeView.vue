@@ -1,25 +1,36 @@
 <template>
   <div class="home-view">
-    <!-- 引导页：未选择工作区时显示 -->
+    <!-- 引导页：每次启动时显示 -->
     <div v-if="!workspaceReady" class="welcome-screen">
       <div class="welcome-content">
         <h1 class="welcome-title">选择工作区</h1>
         <p class="welcome-subtitle">工作区是您的项目目录，所有文件操作都在工作区内进行</p>
-        
+
         <div class="workspace-section">
+          <!-- 如果有上次的工作区，显示"继续"按钮 -->
+          <button 
+            v-if="workspacePath" 
+            class="continue-btn" 
+            @click="continueLastWorkspace"
+          >
+            <span class="btn-icon">▶️</span>
+            <span class="btn-text">继续上次工作区</span>
+            <span class="btn-path">{{ workspacePath }}</span>
+          </button>
+
           <button class="browse-btn-large" @click="browseWorkspace">
             <span class="btn-icon">📁</span>
             <span class="btn-text">浏览目录...</span>
           </button>
-          
-          <div class="divider">
+
+          <div class="divider" v-if="recentWorkspaces.length > 0">
             <span>或选择最近使用</span>
           </div>
-          
+
           <div class="recent-workspaces" v-if="recentWorkspaces.length > 0">
-            <div 
-              v-for="ws in recentWorkspaces" 
-              :key="ws" 
+            <div
+              v-for="ws in recentWorkspaces"
+              :key="ws"
               class="recent-item"
               @click="selectWorkspace(ws)"
             >
@@ -27,11 +38,11 @@
               <span class="recent-path">{{ ws }}</span>
             </div>
           </div>
-          
-          <div class="recent-workspaces empty-hint" v-else>
+
+          <div class="recent-workspaces empty-hint" v-else-if="!workspacePath">
             <p>暂无最近使用的工作区</p>
           </div>
-          
+
           <p v-if="error" class="error-msg">{{ error }}</p>
         </div>
       </div>
@@ -197,22 +208,29 @@ async function loadWorkspaceState() {
     // 获取当前工作区路径
     const result = await getWorkspacePath()
     const path = result.workspace_path || result.expanded_path
-    
-    // 只有当路径有效且不是默认值时，才进入主界面
-    if (path && path !== '~/projects' && !path.endsWith('/projects')) {
-      workspacePath.value = path
-      workspaceReady.value = true
-    } else {
-      // 否则显示启动页
-      workspacePath.value = ''
-      workspaceReady.value = false
-    }
 
     // 获取最近工作区列表
     const config = await getWorkConfig()
     if (config.recent_workspaces && config.recent_workspaces.length > 0) {
       recentWorkspaces.value = config.recent_workspaces.slice(0, 5)
     }
+
+    // 每次启动都显示欢迎页面，让用户选择是否使用上次的工作区或选择新的
+    // 如果 path 存在且不是默认值，在欢迎页显示"继续上次会话"的提示
+    if (path && path !== '~/projects' && !path.endsWith('/projects')) {
+      workspacePath.value = path
+    } else {
+      workspacePath.value = ''
+    }
+    
+    // 始终从欢迎页面开始
+    workspaceReady.value = false
+    
+    console.log('[HomeView] 启动状态:', { 
+      hasWorkspace: !!workspacePath.value, 
+      workspacePath: workspacePath.value,
+      recentCount: recentWorkspaces.value.length 
+    })
   } catch (err) {
     console.error('加载工作区状态失败:', err)
     // 出错时显示启动页
@@ -238,6 +256,13 @@ async function browseWorkspace() {
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '选择目录失败'
+  }
+}
+
+// 继续上次工作区
+async function continueLastWorkspace() {
+  if (workspacePath.value) {
+    await openWorkspaceWithPath(workspacePath.value)
   }
 }
 
@@ -367,6 +392,50 @@ watch(currentPage, (newVal, oldVal) => {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 1.5rem;
+}
+
+/* 继续上次工作区按钮 */
+.continue-btn {
+  width: 100%;
+  padding: 1rem 1.5rem;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s;
+  margin-bottom: 1rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+}
+
+.continue-btn:hover {
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3);
+}
+
+.continue-btn .btn-icon {
+  font-size: 1.8rem;
+}
+
+.continue-btn .btn-text {
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.continue-btn .btn-path {
+  font-size: 0.8rem;
+  opacity: 0.85;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 0.5rem;
 }
 
 .browse-btn-large {
