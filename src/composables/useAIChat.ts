@@ -1,6 +1,6 @@
 /**
  * 统一的 AI 聊天 Composable
- * 
+ *
  * 所有文件视图（Explorer、NotePage、MarkdownEditor 等）都使用这个统一的逻辑
  * 来调用 AI 助手，确保选区上下文能正确传递到 LLM。
  */
@@ -21,15 +21,20 @@ export interface AIChatContext {
   endLine?: number
 }
 
+/** Context provider function type - called at sendMessage time to get latest context */
+export type AIChatContextProvider = () => AIChatContext | undefined
+
 export interface UseAIChatOptions {
   /** 会话 ID */
   sessionId: string
-  /** 上下文信息（可选） */
+  /** 上下文提供者函数（推荐），或者静态上下文对象 */
+  contextProvider?: AIChatContextProvider
+  /** @deprecated 使用 contextProvider 代替 */
   context?: AIChatContext
 }
 
 export function useAIChat(options: UseAIChatOptions) {
-  const { sessionId, context } = options
+  const { sessionId, contextProvider, context } = options
 
   const messages = ref<ChatMessage[]>([])
   const loading = ref(false)
@@ -37,7 +42,7 @@ export function useAIChat(options: UseAIChatOptions) {
 
   /**
    * 发送消息到 AI
-   * 
+   *
    * @param userInput 用户输入的问题
    * @param onChunk 流式 chunk 回调
    */
@@ -53,15 +58,18 @@ export function useAIChat(options: UseAIChatOptions) {
     streamingContent.value = ''
 
     try {
+      // 获取最新上下文（优先使用 contextProvider）
+      const ctx = contextProvider ? contextProvider() : context
+
       // 构建选区上下文（如果有）
       let selectionContext = undefined
-      if (context?.filePath || context?.selectedText) {
+      if (ctx?.filePath || ctx?.selectedText) {
         selectionContext = {
-          file_path: context.filePath,
-          file_content: context.fileContent,
-          selected_text: context.selectedText,
-          start_line: context.startLine,
-          end_line: context.endLine,
+          file_path: ctx.filePath,
+          file_content: ctx.fileContent,
+          selected_text: ctx.selectedText,
+          start_line: ctx.startLine,
+          end_line: ctx.endLine,
         }
         console.log('[useAIChat] 发送选区上下文:', {
           file_path: selectionContext.file_path,

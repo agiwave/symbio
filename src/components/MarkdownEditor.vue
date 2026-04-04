@@ -139,8 +139,16 @@
           </div>
           
           <!-- 选中的文字提示 -->
-          <div v-if="selectedText" class="ai-selected-context">
-            <span class="context-label">选中的内容：</span>
+          <div v-if="selectedText || savedSelection?.startLine" class="ai-selected-context">
+            <div class="context-header">
+              <span class="context-label">选中的内容</span>
+              <span v-if="filePath" class="file-path">
+                📄 {{ filePath.split(/[\\/]/).pop() }}
+              </span>
+              <span v-if="savedSelection?.startLine" class="line-range">
+                📍 行 {{ savedSelection.startLine }}{{ savedSelection.endLine && savedSelection.endLine !== savedSelection.startLine ? '-' + savedSelection.endLine : '' }}
+              </span>
+            </div>
             <div class="context-text">{{ selectedText.slice(0, 100) }}{{ selectedText.length > 100 ? '...' : '' }}</div>
           </div>
           
@@ -261,15 +269,16 @@ const selectedText = ref('')
 const aiDialogRef = ref<HTMLElement | null>(null)
 
 // 使用统一的 AI Chat composable
+// 使用 contextProvider 在发送时动态获取最新选区信息
 const aiChat = useAIChat({
   sessionId: 'note-selection-ai',
-  context: {
+  contextProvider: () => ({
     filePath: props.filePath,
     fileContent: props.modelValue,
-    get selectedText() {
-      return savedSelection?.text
-    }
-  } as AIChatContext,
+    selectedText: savedSelection?.text,
+    startLine: savedSelection?.startLine,
+    endLine: savedSelection?.endLine,
+  }),
 })
 
 // 为了兼容模板，导出所需属性
@@ -295,7 +304,7 @@ const aiDialogStyle = computed(() => ({
 }))
 
 // 保存选区信息（用于在对话框打开后仍能引用选中的文字）
-let savedSelection: { text: string; rect: DOMRect } | null = null
+let savedSelection: { text: string; rect: DOMRect; startLine?: number; endLine?: number } | null = null
 
 // 计算对话框位置，跟随选区并避免超出屏幕
 function calculateDialogPosition() {
@@ -490,10 +499,63 @@ async function initEditor() {
             // 获取选区的位置信息
             const range = selection.getRangeAt(0)
             const rect = range.getBoundingClientRect()
-            
+
+            // 尝试从 ProseMirror 状态获取精确的行号/位置
+            let startLine: number | undefined
+            let endLine: number | undefined
+            let selectedContent = text
+
+            if (editor.value && editor.value.ctx) {
+              try {
+                const view = editor.value.ctx.get(editorViewCtx)
+                const { state } = view
+                const { from, to } = state.selection
+                
+                if (from !== to) {
+                  const textBefore = state.doc.textBetween(0, from, '\n')
+                  const selectedTextFromDoc = state.doc.textBetween(from, to, '\n')
+                  
+                  // 如果从文档中获取的文本和选中的文本一致，使用文档中的
+                  if (selectedTextFromDoc.trim().length > 0) {
+                    selectedContent = selectedTextFromDoc.trim()
+                  }
+
+                  // 计算行号
+                  const linesBefore = textBefore.split('\n').length
+                  startLine = linesBefore
+                  const selectedLines = selectedContent.split('\n').length
+                  endLine = linesBefore + selectedLines - 1
+
+                  console.log('[MarkdownEditor] 从 ProseMirror 获取选区:', { 
+                    from, to, 
+                    startLine, 
+                    endLine, 
+                    contentLen: selectedContent.length 
+                  })
+                }
+              } catch (pmError) {
+                console.warn('[MarkdownEditor] 无法从 ProseMirror 获取选区:', pmError)
+              }
+            }
+
+            // 如果从 ProseMirror 获取失败，回退到字符串查找
+            if (startLine === undefined && props.modelValue) {
+              const cleanSelected = selectedContent.replace(/\s+/g, ' ').trim()
+              const cleanMarkdown = props.modelValue.replace(/\s+/g, ' ')
+              const startIndex = cleanMarkdown.indexOf(cleanSelected)
+              
+              if (startIndex !== -1) {
+                const beforeStart = props.modelValue.substring(0, startIndex)
+                startLine = (beforeStart.match(/\n/g) || []).length + 1
+                const endIndex = startIndex + selectedContent.length
+                const beforeEnd = props.modelValue.substring(0, endIndex)
+                endLine = (beforeEnd.match(/\n/g) || []).length + 1
+              }
+            }
+
             // 保存选区信息
-            savedSelection = { text, rect }
-            selectedText.value = text
+            savedSelection = { text: selectedContent, rect, startLine, endLine }
+            selectedText.value = selectedContent
             calculateDialogPosition()
 
             // 如果对话框未打开，打开它
@@ -1338,11 +1400,31 @@ defineExpose({ openAI })
   background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(37, 99, 235, 0.06));
 }
 
+.context-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
 .ai-selected-context .context-label {
   font-size: 10px;
   color: #888;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.context-header .file-path {
+  font-size: 11px;
+  color: #666;
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+
+.context-header .line-range {
+  font-size: 11px;
+  color: #666;
+  font-family: 'Fira Code', 'Consolas', monospace;
 }
 
 .ai-selected-context .context-text {
