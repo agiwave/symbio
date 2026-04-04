@@ -3817,7 +3817,7 @@ dependencies = [
 
 [[package]]
 name = "symbio"
-version = "0.1.1"
+version = "0.1.4"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -3838,6 +3838,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "thiserror 1.0.69",
+ "time",
  "tokio",
  "tokio-util",
  "tracing",

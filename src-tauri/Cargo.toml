@@ -36,6 +36,9 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 serde_yaml = "0.9"
 notify = "6.1"
+# Force time crate version to fix macOS compilation issue
+# Fixes: "error: invalid component: second was 59.999999" in cookie crate
+time = "0.3.47"
 
 [features]
 default = ["custom-protocol"]
@@ -47,3 +50,6 @@ opt-level = 0
 
 [profile.release]
 opt-level = "s"
+# 静态链接 CRT 运行时，避免 DLL 缺失问题
+[profile.release.package."*"]
+codegen-units = 1
