@@ -341,7 +341,8 @@ impl NotePlugin {
             return;
         }
 
-        let now = Utc::now();
+        // 设置为 2020 年 1 月 15 日，让示例数据看起来更久远
+        let now = "2020-01-15T10:30:00Z".parse::<DateTime<Utc>>().unwrap();
 
         // 创建示例笔记
         let root_id = Uuid::new_v4().to_string();

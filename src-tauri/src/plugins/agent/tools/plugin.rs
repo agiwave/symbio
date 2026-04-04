@@ -5,10 +5,10 @@
 
 use super::policy::SecurityPolicy;
 use super::{
-    file_read::FileReadTool, 
-    file_write::FileWriteTool, 
+    file_read::FileReadTool,
+    file_write::FileWriteTool,
     file_edit::FileEditTool,
-    shell::ShellTool, 
+    shell::ShellTool,
     web_fetch::WebFetchTool,
     web_search::WebSearchTool,
     glob_search::GlobSearchTool,
@@ -21,6 +21,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
@@ -90,7 +91,7 @@ impl ToolsPlugin {
         // 默认使用当前目录，实际工作区通过 get_workspace_path() 获取
         let default_workspace = std::env::current_dir().unwrap_or_default();
         let security = Arc::new(SecurityPolicy::new(default_workspace.clone()));
-        
+
         // 创建所有工具实例
         let tools: HashMap<String, Arc<dyn Plugin>> = vec![
             ("read_file", Arc::new(FileReadTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),

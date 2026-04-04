@@ -280,6 +280,7 @@ async function handleSend() {
       chatMessages,
       props.sessionId,
       (chunk: StreamChunk) => {
+        console.log('[AIChatPanel] Stream chunk:', chunk)
         if (chunk.data && typeof chunk.data === 'object') {
           const data = chunk.data as Record<string, unknown>
 
@@ -297,18 +298,28 @@ async function handleSend() {
             streamingContent.value = data.content as string
           }
 
-          // 检查错误
+          // 检查 data 内部错误
           if (data.error && typeof data.error === 'string') {
+            console.error('[AIChatPanel] Stream data.error:', data.error)
             configError.value = data.error as string
           }
+        }
+
+        // 检查顶层错误（chunk.error）
+        if (chunk.error && typeof chunk.error === 'string') {
+          console.error('[AIChatPanel] Chunk top-level error:', chunk.error)
+          configError.value = chunk.error
         }
 
         scrollToBottom()
       }
     )
 
+    console.log('[AIChatPanel] Stream completed, response:', response)
+
     // 流完成 - 添加助手消息
     if (response.error) {
+      console.error('[AIChatPanel] Response error:', response.error)
       configError.value = response.error
       props.onUpdateMessages([...newMessages, {
         role: 'assistant',

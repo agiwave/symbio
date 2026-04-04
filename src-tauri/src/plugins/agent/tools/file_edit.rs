@@ -5,15 +5,17 @@ use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, St
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// 文件编辑工具
 pub struct FileEditTool {
-    workspace_dir: PathBuf,
+    workspace_dir: Arc<RwLock<PathBuf>>,
 }
 
 impl FileEditTool {
     pub fn new(workspace_dir: PathBuf) -> Self {
-        Self { workspace_dir }
+        Self { workspace_dir: Arc::new(RwLock::new(workspace_dir)) }
     }
 
     fn create_meta() -> PluginMeta {
@@ -85,11 +87,13 @@ impl FileEditTool {
         }
 
         // 构建完整路径
+        let workspace_dir = self.workspace_dir.read().await;
         let full_path = if PathBuf::from(path).is_absolute() {
             PathBuf::from(path)
         } else {
-            self.workspace_dir.join(path)
+            workspace_dir.join(path)
         };
+        drop(workspace_dir);
 
         // 获取父目录并解析
         let parent = full_path.parent().ok_or_else(|| {
@@ -101,17 +105,19 @@ impl FileEditTool {
             .map_err(|e| PluginError::InternalError(format!("解析路径失败: {}", e)))?;
 
         // 检查路径是否在工作区内
-        if !resolved_parent.starts_with(&self.workspace_dir) {
+        let workspace_dir = self.workspace_dir.read().await;
+        if !resolved_parent.starts_with(&*workspace_dir) {
             return Ok(StreamChunk {
                 data: json!({}),
                 done: true,
                 error: Some(format!(
                     "路径超出工作区: {} 不在 {} 内",
                     resolved_parent.display(),
-                    self.workspace_dir.display()
+                    workspace_dir.display()
                 )),
             });
         }
+        drop(workspace_dir);
 
         // 获取文件名
         let file_name = full_path.file_name().ok_or_else(|| {

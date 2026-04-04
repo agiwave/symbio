@@ -56,13 +56,13 @@ export function useAISelection(options: UseAISelectionOptions) {
   const input = ref('')
   const loading = ref(false)
   const dialogRef = ref<HTMLElement | null>(null)
-  
+
   // 拖拽状态
   const isDragging = ref(false)
   const dragOffset = reactive({ x: 0, y: 0 })
 
-  // 保存的选区信息
-  let savedSelection: SelectionInfo | null = null
+  // 保存的选区信息（改为响应式 ref）
+  const savedSelection = ref<SelectionInfo | null>(null)
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   
   // 开始拖拽
@@ -145,7 +145,7 @@ export function useAISelection(options: UseAISelectionOptions) {
 
   // 打开对话框（用于选区触发）
   function openForSelection(text: string, rect: DOMRect, extra?: Partial<SelectionInfo>) {
-    savedSelection = { text, rect, ...extra }
+    savedSelection.value = { text, rect, ...extra }
     selectedText.value = text
     calculatePosition(rect)
 
@@ -156,7 +156,7 @@ export function useAISelection(options: UseAISelectionOptions) {
 
   // 更新选区内容（对话框已打开时）
   function updateSelection(text: string, rect: DOMRect, extra?: Partial<SelectionInfo>) {
-    savedSelection = { text, rect, ...extra }
+    savedSelection.value = { text, rect, ...extra }
     selectedText.value = text
     calculatePosition(rect)
     // 保持对话框打开和消息历史
@@ -166,13 +166,13 @@ export function useAISelection(options: UseAISelectionOptions) {
   function close() {
     visible.value = false
     selectedText.value = ''
-    savedSelection = null
+    savedSelection.value = null
     messages.value = []
   }
 
   // 通过快捷键/按钮打开（无选区）
   function open() {
-    savedSelection = null
+    savedSelection.value = null
     selectedText.value = ''
     messages.value = []
     // 默认显示在右上角

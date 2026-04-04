@@ -6,6 +6,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 const MAX_RESULTS: usize = 1000;
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
@@ -13,14 +15,14 @@ const TIMEOUT_SECS: u64 = 30;
 
 /// 内容搜索工具
 pub struct ContentSearchTool {
-    workspace_dir: PathBuf,
+    workspace_dir: Arc<RwLock<PathBuf>>,
     has_rg: bool,
 }
 
 impl ContentSearchTool {
     pub fn new(workspace_dir: PathBuf) -> Self {
         let has_rg = which::which("rg").is_ok();
-        Self { workspace_dir, has_rg }
+        Self { workspace_dir: Arc::new(RwLock::new(workspace_dir)), has_rg }
     }
 
     fn create_meta() -> PluginMeta {
@@ -102,7 +104,8 @@ impl ContentSearchTool {
         let full_search_path = if PathBuf::from(search_path).is_absolute() {
             PathBuf::from(search_path)
         } else {
-            self.workspace_dir.join(search_path)
+            let workspace_dir = self.workspace_dir.read().await;
+            workspace_dir.join(search_path)
         };
 
         let resolved_path = match tokio::fs::canonicalize(&full_search_path).await {
@@ -116,13 +119,15 @@ impl ContentSearchTool {
             }
         };
 
-        if !resolved_path.starts_with(&self.workspace_dir) {
+        let workspace_dir = self.workspace_dir.read().await;
+        if !resolved_path.starts_with(&*workspace_dir) {
             return Ok(StreamChunk {
                 data: json!({}),
                 done: true,
                 error: Some("搜索路径超出工作区范围。".to_string()),
             });
         }
+        drop(workspace_dir);
 
         let output = if self.has_rg {
             self.search_with_rg(

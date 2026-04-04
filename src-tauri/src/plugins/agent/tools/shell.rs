@@ -75,10 +75,13 @@ impl ShellTool {
         // 记录动作
         self.security.record_action();
 
+        // 获取工作区目录
+        let workspace_dir = self.security.get_workspace_dir().await;
+        
         // 构建命令
         let mut cmd = tokio::process::Command::new("sh");
         cmd.arg("-c").arg(command);
-        cmd.current_dir(&self.security.workspace_dir);
+        cmd.current_dir(&*workspace_dir);
 
         // 清理环境变量
         cmd.env_clear();

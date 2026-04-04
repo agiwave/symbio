@@ -4,8 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, Arc};
 use std::time::Instant;
+use tokio::sync::RwLock;
 
 /// Agent 自主级别
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,8 +93,8 @@ impl Clone for ActionTracker {
 pub struct SecurityPolicy {
     /// 当前自主级别
     pub autonomy: AutonomyLevel,
-    /// 工作区目录
-    pub workspace_dir: PathBuf,
+    /// 工作区目录（共享引用，支持动态更新）
+    pub workspace_dir: Arc<RwLock<PathBuf>>,
     /// 是否限制只能访问工作区
     pub workspace_only: bool,
     /// 允许执行的命令列表
@@ -116,7 +117,7 @@ impl Default for SecurityPolicy {
     fn default() -> Self {
         Self {
             autonomy: AutonomyLevel::Supervised,
-            workspace_dir: PathBuf::from("."),
+            workspace_dir: Arc::new(RwLock::new(PathBuf::from("."))),
             workspace_only: false,
             allowed_commands: vec![
                 "git".into(), "npm".into(), "cargo".into(),
@@ -140,15 +141,26 @@ impl Default for SecurityPolicy {
 impl SecurityPolicy {
     pub fn new(workspace_dir: PathBuf) -> Self {
         Self {
-            workspace_dir,
+            workspace_dir: Arc::new(RwLock::new(workspace_dir)),
             ..Self::default()
         }
+    }
+
+    /// 更新工作区目录
+    pub async fn update_workspace_dir(&self, new_dir: PathBuf) {
+        let mut dir = self.workspace_dir.write().await;
+        *dir = new_dir;
+    }
+
+    /// 获取工作区目录的只读引用
+    pub async fn get_workspace_dir(&self) -> tokio::sync::RwLockReadGuard<'_, PathBuf> {
+        self.workspace_dir.read().await
     }
 
     pub fn read_only(workspace_dir: PathBuf) -> Self {
         Self {
             autonomy: AutonomyLevel::ReadOnly,
-            workspace_dir,
+            workspace_dir: Arc::new(RwLock::new(workspace_dir)),
             ..Self::default()
         }
     }
@@ -156,13 +168,13 @@ impl SecurityPolicy {
     pub fn full_autonomy(workspace_dir: PathBuf) -> Self {
         Self {
             autonomy: AutonomyLevel::Full,
-            workspace_dir,
+            workspace_dir: Arc::new(RwLock::new(workspace_dir)),
             ..Self::default()
         }
     }
 
     /// 检查路径是否被允许
-    pub fn is_path_allowed<P: AsRef<Path>>(&self, path: P) -> bool {
+    pub async fn is_path_allowed<P: AsRef<Path>>(&self, path: P) -> bool {
         let path = path.as_ref();
         let path_str = path.to_string_lossy();
 
@@ -183,26 +195,28 @@ impl SecurityPolicy {
             return true;
         }
 
-        path.starts_with(&self.workspace_dir) ||
+        let workspace = self.workspace_dir.read().await;
+        path.starts_with(&*workspace) ||
             self.allowed_roots.iter().any(|r| path.starts_with(r))
     }
 
     /// 检查路径是否允许读取
-    pub fn is_path_allowed_for_read<P: AsRef<Path>>(&self, path: P) -> bool {
-        self.is_path_allowed(path)
+    pub async fn is_path_allowed_for_read<P: AsRef<Path>>(&self, path: P) -> bool {
+        self.is_path_allowed(path).await
     }
 
     /// 检查路径是否允许写入
-    pub fn is_path_allowed_for_write<P: AsRef<Path>>(&self, path: P) -> bool {
+    pub async fn is_path_allowed_for_write<P: AsRef<Path>>(&self, path: P) -> bool {
         let path = path.as_ref();
 
         // 检查禁止路径
-        if !self.is_path_allowed(path) {
+        if !self.is_path_allowed(path).await {
             return false;
         }
 
         // 写入只允许在工作区
-        path.starts_with(&self.workspace_dir) ||
+        let workspace = self.workspace_dir.read().await;
+        path.starts_with(&*workspace) ||
             self.allowed_roots.iter().any(|r| path.starts_with(r))
     }
 

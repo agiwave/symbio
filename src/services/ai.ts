@@ -91,8 +91,15 @@ export async function sendMessageStream(
         finalContent = data.content as string
       }
       if (data.error && typeof data.error === 'string') {
+        console.log('[ai] caught error in chunk.data:', data.error)
         finalError = data.error as string
       }
+    }
+
+    // 检查顶层错误
+    if (chunk.error && typeof chunk.error === 'string') {
+      console.log('[ai] caught error in chunk.error:', chunk.error)
+      finalError = chunk.error
     }
   })
 

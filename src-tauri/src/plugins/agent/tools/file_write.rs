@@ -64,17 +64,20 @@ impl FileWriteTool {
         }
 
         // 检查路径权限
-        if !self.security.is_path_allowed_for_write(path) {
+        if !self.security.is_path_allowed_for_write(path).await {
             return Err(PluginError::InternalError(
                 format!("路径不允许写入: {}", path)
             ));
         }
 
+        // 获取工作区目录
+        let workspace_dir = self.security.get_workspace_dir().await;
+        
         // 构建完整路径
         let full_path = if PathBuf::from(path).is_absolute() {
             PathBuf::from(path)
         } else {
-            self.security.workspace_dir.join(path)
+            workspace_dir.join(path)
         };
 
         // 确保父目录存在

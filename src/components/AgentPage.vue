@@ -390,10 +390,16 @@ async function sendMessageToAI() {
             streamingContent.value = data.content as string
           }
 
-          // 检查是否有错误
+          // 检查 data 内部错误
           if (data.error && typeof data.error === 'string') {
             configError.value = data.error as string
           }
+        }
+
+        // 检查顶层错误（chunk.error）
+        if (chunk.error && typeof chunk.error === 'string') {
+          console.error('[AgentPage] Chunk top-level error:', chunk.error)
+          configError.value = chunk.error
         }
 
         // 立即滚动到底部
@@ -401,8 +407,11 @@ async function sendMessageToAI() {
       }
     )
 
+    console.log('[AgentPage] Stream completed, response:', response)
+
     // 流完成 - 将最终内容作为新消息添加到消息列表
     if (response.error) {
+      console.error('[AgentPage] Response error:', response.error)
       configError.value = response.error
       activeSession.value.messages.push({
         role: 'assistant',

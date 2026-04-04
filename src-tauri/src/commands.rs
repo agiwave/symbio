@@ -77,7 +77,10 @@ pub async fn stream(
         InvokeStream::Stream(mut s) => {
             use futures::StreamExt;
             while let Some(chunk) = s.next().await {
-                app.emit(&event_id, chunk).map_err(|e| e.to_string())?;
+                eprintln!("[commands] emitting chunk: done={}, error={:?}", chunk.done, chunk.error);
+                if let Err(e) = app.emit(&event_id, &chunk) {
+                    eprintln!("[commands] emit error: {}", e);
+                }
             }
         }
     }

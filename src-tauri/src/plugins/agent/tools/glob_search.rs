@@ -5,17 +5,19 @@ use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, St
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 const MAX_RESULTS: usize = 1000;
 
 /// Glob 搜索工具
 pub struct GlobSearchTool {
-    workspace_dir: PathBuf,
+    workspace_dir: Arc<RwLock<PathBuf>>,
 }
 
 impl GlobSearchTool {
     pub fn new(workspace_dir: PathBuf) -> Self {
-        Self { workspace_dir }
+        Self { workspace_dir: Arc::new(RwLock::new(workspace_dir)) }
     }
 
     fn create_meta() -> PluginMeta {
@@ -70,7 +72,11 @@ impl GlobSearchTool {
         }
 
         // 构建完整模式
-        let full_pattern = self.workspace_dir.join(pattern).to_string_lossy().to_string();
+        let workspace_dir = self.workspace_dir.read().await;
+        let full_pattern = workspace_dir.join(pattern).to_string_lossy().to_string();
+        let workspace_canon = std::fs::canonicalize(&*workspace_dir)
+            .map_err(|e| PluginError::InternalError(format!("无法解析工作区目录: {}", e)))?;
+        drop(workspace_dir);
 
         let entries = match glob::glob(&full_pattern) {
             Ok(paths) => paths,
@@ -82,9 +88,6 @@ impl GlobSearchTool {
                 });
             }
         };
-
-        let workspace_canon = std::fs::canonicalize(&self.workspace_dir)
-            .map_err(|e| PluginError::InternalError(format!("无法解析工作区目录: {}", e)))?;
 
         let mut results = Vec::new();
         let mut truncated = false;

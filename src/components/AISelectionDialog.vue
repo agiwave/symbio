@@ -99,7 +99,7 @@ const streamingContent = ref('')
 
 // 获取选区信息（从 savedSelection 获取）
 const selectionInfo = computed(() => {
-  const saved = props.state.savedSelection as any
+  const saved = props.state.savedSelection.value
   if (!saved) return {}
   return {
     filePath: saved.filePath,
@@ -151,20 +151,32 @@ async function handleSend() {
   let userMessage = text
   
   // 如果有选区信息，添加上下文
-  if (selectionInfo.value.filePath) {
-    const info = selectionInfo.value
+  const info = selectionInfo.value
+  if (info.filePath) {
+    // 推断文件类型
+    const ext = info.filePath.split('.').pop()?.toLowerCase() || ''
+    const langMap: Record<string, string> = {
+      'js': 'javascript', 'ts': 'typescript', 'vue': 'vue',
+      'py': 'python', 'rs': 'rust', 'go': 'go',
+      'java': 'java', 'c': 'c', 'cpp': 'cpp', 'h': 'c',
+      'html': 'html', 'css': 'css', 'scss': 'scss',
+      'json': 'json', 'yaml': 'yaml', 'yml': 'yaml',
+      'md': 'markdown', 'txt': 'text', 'sql': 'sql',
+      'sh': 'bash', 'bash': 'bash', 'xml': 'xml'
+    }
+    const lang = langMap[ext] || ''
     const lineInfo = info.startLine && info.endLine 
       ? ` (行 ${info.startLine}-${info.endLine})` 
       : ''
     
-    userMessage = `[文件: ${info.filePath}${lineInfo}]
+    userMessage = `📄 文件: ${info.filePath}${lineInfo}
 
-选中的内容:
-\`\`\`
+💻 选中的内容:
+\`\`\`${lang}
 ${props.state.selectedText.value}
 \`\`\`
 
-问题: ${text}`
+❓ 问题: ${text}`
   }
 
   // 添加用户消息

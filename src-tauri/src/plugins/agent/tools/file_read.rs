@@ -66,17 +66,20 @@ impl FileReadTool {
         }
 
         // 检查路径权限
-        if !self.security.is_path_allowed_for_read(path) {
+        if !self.security.is_path_allowed_for_read(path).await {
             return Err(PluginError::InternalError(
                 format!("路径不允许访问: {}", path)
             ));
         }
 
+        // 获取工作区目录
+        let workspace_dir = self.security.get_workspace_dir().await;
+        
         // 构建完整路径
         let full_path = if PathBuf::from(path).is_absolute() {
             PathBuf::from(path)
         } else {
-            self.security.workspace_dir.join(path)
+            workspace_dir.join(path)
         };
 
         // 解析符号链接
@@ -84,7 +87,8 @@ impl FileReadTool {
             .map_err(|e| PluginError::InternalError(format!("无法解析路径: {}", e)))?;
 
         // 再次检查解析后的路径
-        if !self.security.is_path_allowed_for_read(&resolved) {
+        let workspace_dir = self.security.get_workspace_dir().await;
+        if !resolved.starts_with(&*workspace_dir) && !self.security.allowed_roots.iter().any(|r| resolved.starts_with(r)) {
             return Err(PluginError::InternalError("路径解析后超出允许范围".into()));
         }
 

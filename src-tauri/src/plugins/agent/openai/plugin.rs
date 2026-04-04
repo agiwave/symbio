@@ -587,12 +587,15 @@ impl OpenAiPlugin {
         let api_key = config.api_key.clone().unwrap_or_default();
         let api_url = self.api_url();
 
+        eprintln!("[openai] handle_chat_stream started: session={}, model={}", session_id, config.model);
+
         // 通过 @session 能力路由获取上下文（包含 system_prompt, tools, history）
         let mut system_prompt = config.system_prompt.clone().unwrap_or_else(default_system_prompt);
         let mut tools: Vec<NativeToolSpec> = Vec::new();
         let mut context_messages: Vec<NativeMessage> = Vec::new();
 
         if let Some(p) = &parent {
+            eprintln!("[openai] fetching context from session...");
             let session_input = json!({
                 "action": "get_context",
                 "session_id": session_id,
@@ -602,12 +605,14 @@ impl OpenAiPlugin {
             if let Ok(stream) = p.invoke("session", session_input) {
                 if let InvokeStream::Single(chunk) = stream {
                     if chunk.error.is_none() {
+                        eprintln!("[openai] context fetched successfully");
                         if let Some(sys) = chunk.data.get("system_prompt").and_then(|v| v.as_str()) {
                             if !sys.is_empty() {
                                 system_prompt = sys.to_string();
                             }
                         }
                         if let Some(tools_arr) = chunk.data.get("tools").and_then(|v| v.as_array()) {
+                            eprintln!("[openai] got {} tools from session", tools_arr.len());
                             for tool in tools_arr {
                                 if let Ok(spec) = serde_json::from_value(tool.clone()) {
                                     tools.push(spec);
@@ -629,10 +634,18 @@ impl OpenAiPlugin {
                                 }
                             }
                         }
+                    } else {
+                        eprintln!("[openai] context fetch error: {:?}", chunk.error);
                     }
                 }
+            } else {
+                eprintln!("[openai] context fetch failed");
             }
+        } else {
+            eprintln!("[openai] no parent plugin");
         }
+
+        eprintln!("[openai] building messages with {} context messages", context_messages.len());
 
         // 构建消息：system + context + current
         let mut messages: Vec<NativeMessage> = vec![
@@ -656,11 +669,14 @@ impl OpenAiPlugin {
         let stream = async_stream::stream! {
             use futures::StreamExt;
 
+            eprintln!("[openai] stream started, messages={}, tools={}", messages.len(), tools.len());
+
             // Agent loop - 工具调用循环
             let max_iterations = 255;
             let mut final_content = String::new();
 
             for iteration in 0..max_iterations {
+                eprintln!("[openai] iteration {}", iteration + 1);
                 // 构建请求 - 使用流式 API
                 let mut request = json!({
                     "model": config.model,
@@ -679,6 +695,7 @@ impl OpenAiPlugin {
                     request["tool_choice"] = json!("auto");
                 }
 
+                eprintln!("[openai] sending request to {}", api_url);
                 // 发送流式请求
                 let response = match reqwest::Client::new()
                     .post(&api_url)
@@ -689,8 +706,12 @@ impl OpenAiPlugin {
                     .send()
                     .await
                 {
-                    Ok(r) => r,
+                    Ok(r) => {
+                        eprintln!("[openai] response status: {}", r.status());
+                        r
+                    },
                     Err(e) => {
+                        eprintln!("[openai] request error: {}", e);
                         yield StreamChunk {
                             data: json!({}),
                             done: true,
@@ -702,6 +723,7 @@ impl OpenAiPlugin {
 
                 if !response.status().is_success() {
                     let error = response.text().await.unwrap_or_default();
+                    eprintln!("[openai] API error: {}", error);
                     yield StreamChunk {
                         data: json!({}),
                         done: true,
@@ -710,6 +732,7 @@ impl OpenAiPlugin {
                     return;
                 }
 
+                eprintln!("[openai] processing stream...");
                 // 处理流式响应
                 let mut stream_content = String::new();
                 let mut tool_call_accumulator = ToolCallAccumulator::new();
@@ -719,6 +742,7 @@ impl OpenAiPlugin {
                     let chunk_bytes = match chunk_result {
                         Ok(b) => b,
                         Err(e) => {
+                            eprintln!("[openai] stream read error: {}", e);
                             yield StreamChunk {
                                 data: json!({}),
                                 done: true,
@@ -729,6 +753,7 @@ impl OpenAiPlugin {
                     };
 
                     let chunk_text = String::from_utf8_lossy(&chunk_bytes);
+                    eprintln!("[openai] received chunk: {} bytes", chunk_bytes.len());
 
                     for line in chunk_text.lines() {
                         if line.starts_with("data: ") {
