@@ -30,7 +30,7 @@ impl OpenAiPlugin {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["chat", "status", "list_models", "configure", "get_config", "compress_info"]
+                        "enum": ["chat", "status", "list_models", "configure", "get_config"]
                     }
                 },
                 "required": ["action"]
@@ -540,40 +540,6 @@ impl OpenAiPlugin {
         })
     }
 
-    async fn handle_compress_info(&self, input: &Value) -> Result<StreamChunk, PluginError> {
-        let history = input.get("history")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-
-        let config = self.config.read().await;
-        let counter = TokenCounter::for_model(&config.model);
-        let context_config = ContextConfig::for_model(&config.model);
-
-        let mut total_tokens = 0;
-        for msg in &history {
-            if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
-                total_tokens += counter.count_tokens(content);
-            }
-        }
-
-        let usage_percent = (total_tokens as f64 / context_config.max_tokens as f64) * 100.0;
-        let should_compress = context_config.should_compress(total_tokens);
-
-        Ok(StreamChunk {
-            data: json!({
-                "success": true,
-                "message_count": history.len(),
-                "total_tokens": total_tokens,
-                "max_tokens": context_config.max_tokens,
-                "usage_percent": usage_percent.round() as u32,
-                "should_compress": should_compress,
-                "compression_threshold_percent": (context_config.compression_threshold * 100.0) as u32
-            }),
-            done: true,
-            error: None,
-        })
-    }
 
     /// 流式处理聊天请求（支持工具调用）
     async fn handle_chat_stream(&self, input: &Value) -> PluginResult<InvokeStream> {
@@ -1131,7 +1097,6 @@ impl Plugin for OpenAiPlugin {
                     "list_models" => self.handle_list_models(&input).map(InvokeStream::Single),
                     "configure" => self.handle_configure(&input).await.map(InvokeStream::Single),
                     "get_config" => self.handle_get_config().await.map(InvokeStream::Single),
-                    "compress_info" => self.handle_compress_info(&input).await.map(InvokeStream::Single),
                     _ => Ok(InvokeStream::Single(StreamChunk {
                         data: json!({}),
                         done: true,

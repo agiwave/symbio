@@ -52,36 +52,44 @@ export function useAIChat(options: UseAIChatOptions) {
   ) {
     if (!userInput.trim() || loading.value) return
 
+    // 获取最新上下文（优先使用 contextProvider）
+    const ctx = contextProvider ? contextProvider() : context
+
+    // 构建带上下文的用户消息
+    let finalUserInput = userInput
+    if (ctx?.filePath || ctx?.selectedText) {
+      const contextParts: string[] = []
+
+      // 添加文件信息
+      if (ctx.filePath) {
+        const lineInfo = ctx.startLine
+          ? ` (行 ${ctx.startLine}${ctx.endLine && ctx.endLine !== ctx.startLine ? '-' + ctx.endLine : ''})`
+          : ''
+        contextParts.push(`📄 文件: ${ctx.filePath}${lineInfo}`)
+      }
+
+      // 添加选中的内容
+      if (ctx.selectedText) {
+        contextParts.push(`\n**选中的内容：**\n\`\`\`\n${ctx.selectedText}\n\`\`\``)
+      }
+
+      // 添加完整文件内容（如果有）
+      if (ctx.fileContent) {
+        contextParts.push(`\n**完整文件内容：**\n\`\`\`\n${ctx.fileContent}\n\`\`\``)
+      }
+
+      if (contextParts.length > 0) {
+        finalUserInput = `[上下文信息]\n${contextParts.join('\n')}\n\n---\n\n**问题：** ${userInput}`
+      }
+    }
+
     // 添加用户消息
-    messages.value.push({ role: 'user', content: userInput })
+    messages.value.push({ role: 'user', content: finalUserInput })
     loading.value = true
     streamingContent.value = ''
 
     try {
-      // 获取最新上下文（优先使用 contextProvider）
-      const ctx = contextProvider ? contextProvider() : context
-
-      // 构建选区上下文（如果有）
-      let selectionContext = undefined
-      if (ctx?.filePath || ctx?.selectedText) {
-        selectionContext = {
-          file_path: ctx.filePath,
-          file_content: ctx.fileContent,
-          selected_text: ctx.selectedText,
-          start_line: ctx.startLine,
-          end_line: ctx.endLine,
-        }
-        console.log('[useAIChat] 发送选区上下文:', {
-          file_path: selectionContext.file_path,
-          has_file_content: !!selectionContext.file_content,
-          file_content_length: selectionContext.file_content?.length || 0,
-          selected_text_length: selectionContext.selected_text?.length || 0,
-          start_line: selectionContext.start_line,
-          end_line: selectionContext.end_line,
-        })
-      }
-
-      // 流式发送消息
+      // 流式发送消息（不传递 selectionContext，所有上下文已包含在消息内容中）
       const response = await sendMessageStream(
         messages.value,
         sessionId,
@@ -93,8 +101,7 @@ export function useAIChat(options: UseAIChatOptions) {
             }
           }
           onChunk?.(chunk)
-        },
-        selectionContext
+        }
       )
 
       // 流完成 - 添加助手消息

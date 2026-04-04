@@ -163,29 +163,6 @@ async function handleSend() {
       content: m.content
     }))
 
-    // 构建选区上下文（如果有）
-    const info = selectionInfo.value
-    let selectionContext = undefined
-    if (info.filePath) {
-      selectionContext = {
-        file_path: info.filePath,
-        file_content: info.fullContent || undefined,
-        selected_text: props.state.selectedText.value || undefined,
-        start_line: info.startLine,
-        end_line: info.endLine
-      }
-      console.log('[AISelection] 发送选区上下文:', {
-        file_path: selectionContext.file_path,
-        has_file_content: !!selectionContext.file_content,
-        file_content_length: selectionContext.file_content?.length || 0,
-        selected_text: selectionContext.selected_text,
-        start_line: selectionContext.start_line,
-        end_line: selectionContext.end_line
-      })
-    } else {
-      console.log('[AISelection] 无文件路径信息，跳过选区上下文')
-    }
-
     // 流式发送消息
     const response = await sendMessageStream(
       chatMessages,
@@ -198,8 +175,7 @@ async function handleSend() {
           }
         }
         scrollToBottom()
-      },
-      selectionContext  // 传递选区上下文
+      }
     )
 
     // 流完成 - 添加助手消息

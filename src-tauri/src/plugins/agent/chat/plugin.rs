@@ -27,11 +27,6 @@ impl ChatPlugin {
             input: Some(json!({
                 "type": "object",
                 "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["send"],
-                        "description": "发送消息"
-                    },
                     "messages": {
                         "type": "array",
                         "items": {
@@ -84,85 +79,68 @@ impl Plugin for ChatPlugin {
     }
 
     fn invoke(&self, _path: &str, input: Value) -> PluginResult<InvokeStream> {
-        let action = input.get("action")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| PluginError::ValidationError("缺少 action 参数".to_string()))?
-            .to_string();
-
         let parent = self.get_parent();
-
         let stream = async_stream::stream! {
-            match action.as_str() {
-                "send" => {
-                    // 获取 session_id
-                    let session_id = input.get("session_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("default");
+            // 获取 session_id
+            let session_id = input.get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
 
-                    // 获取最后一条用户消息
-                    let message = input.get("messages")
-                        .and_then(|msgs| msgs.as_array())
-                        .and_then(|arr| arr.last())
-                        .and_then(|msg| msg.get("content"))
-                        .and_then(|c| c.as_str());
+            // 获取最后一条用户消息
+            let message = input.get("messages")
+                .and_then(|msgs| msgs.as_array())
+                .and_then(|arr| arr.last())
+                .and_then(|msg| msg.get("content"))
+                .and_then(|c| c.as_str());
 
-                    match message {
-                        Some(msg) => {
-                            // 通过 @llm 能力路由调用 openai 插件
-                            if let Some(ref p) = parent {
-                                let llm_input = json!({
-                                    "action": "chat",
-                                    "message": msg,
-                                    "session_id": session_id
-                                });
+            match message {
+                Some(msg) => {
+                    // 通过 @llm 能力路由调用 openai 插件
+                    if let Some(ref p) = parent {
+                        let llm_input = json!({
+                            "action": "chat",
+                            "message": msg,
+                            "session_id": session_id
+                        });
 
-                                match p.invoke(&format!("@{}", CAPABILITY_LLM), llm_input) {
-                                    Ok(llm_stream) => {
-                                        // 真正流式：实时转发每个 chunk
-                                        use futures::StreamExt;
-                                        let mut stream = match llm_stream {
-                                            InvokeStream::Single(chunk) => {
-                                                // 如果是单次返回，直接 yield
-                                                yield chunk;
-                                                return;
-                                            }
-                                            InvokeStream::Stream(s) => s,
-                                        };
-                                        
-                                        while let Some(chunk) = stream.next().await {
-                                            yield chunk;
-                                        }
+                        match p.invoke(&format!("@{}", CAPABILITY_LLM), llm_input) {
+                            Ok(llm_stream) => {
+                                // 真正流式：实时转发每个 chunk
+                                use futures::StreamExt;
+                                let mut stream = match llm_stream {
+                                    InvokeStream::Single(chunk) => {
+                                        // 如果是单次返回，直接 yield
+                                        yield chunk;
+                                        return;
                                     }
-                                    Err(e) => {
-                                        yield StreamChunk {
-                                            data: json!({}),
-                                            done: true,
-                                            error: Some(format!("调用 LLM 失败: {}", e)),
-                                        };
-                                    }
+                                    InvokeStream::Stream(s) => s,
+                                };
+                                
+                                while let Some(chunk) = stream.next().await {
+                                    yield chunk;
                                 }
-                            } else {
+                            }
+                            Err(e) => {
                                 yield StreamChunk {
                                     data: json!({}),
                                     done: true,
-                                    error: Some("父插件未设置".to_string()),
+                                    error: Some(format!("调用 LLM 失败: {}", e)),
                                 };
                             }
                         }
-                        None => {
-                            yield StreamChunk {
-                                data: json!({}),
-                                done: true,
-                                error: Some("缺少消息内容".to_string()),
-                            };
-                        }
+                    } else {
+                        yield StreamChunk {
+                            data: json!({}),
+                            done: true,
+                            error: Some("父插件未设置".to_string()),
+                        };
                     }
                 }
-                _ => {
+                None => {
                     yield StreamChunk {
                         data: json!({}),
                         done: true,
-                        error: Some(format!("未知操作: {}。配置请直接调用 agent/@llm 或 agent/openai", action)),
+                        error: Some("缺少消息内容".to_string()),
                     };
                 }
             }

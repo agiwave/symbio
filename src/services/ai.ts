@@ -20,13 +20,6 @@ export interface ChatMessage {
 export interface ChatRequest {
   messages: ChatMessage[]
   session_id?: string
-  selection_context?: {
-    file_path?: string
-    file_content?: string
-    selected_text?: string
-    start_line?: number
-    end_line?: number
-  }
 }
 
 export interface ProviderConfig {
@@ -61,7 +54,6 @@ export interface ConfigResponse {
  */
 export async function sendMessage(messages: ChatMessage[], sessionId?: string): Promise<ChatResponse> {
   return callPlugin<ChatResponse>(CHAT_PATH, {
-    action: 'send',
     messages,
     session_id: sessionId || 'default'
   })
@@ -73,20 +65,12 @@ export async function sendMessage(messages: ChatMessage[], sessionId?: string): 
  * @param messages 消息列表
  * @param sessionId 会话 ID
  * @param onChunk 每个 chunk 的回调
- * @param selectionContext 选区上下文（可选）
  * @returns Promise<ChatResponse> 最终结果
  */
 export async function sendMessageStream(
   messages: ChatMessage[],
   sessionId: string,
-  onChunk: (chunk: StreamChunk) => void,
-  selectionContext?: {
-    file_path?: string
-    file_content?: string
-    selected_text?: string
-    start_line?: number
-    end_line?: number
-  }
+  onChunk: (chunk: StreamChunk) => void
 ): Promise<ChatResponse> {
   let finalContent = ''
   let finalError: string | undefined
@@ -95,11 +79,6 @@ export async function sendMessageStream(
     action: 'send',
     messages,
     session_id: sessionId || 'default'
-  }
-
-  // 添加选区上下文（如果有）
-  if (selectionContext) {
-    request.selection_context = selectionContext
   }
 
   await streamPlugin(CHAT_PATH, request, (chunk) => {

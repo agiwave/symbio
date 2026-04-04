@@ -54,7 +54,7 @@ pub async fn invoke(
 /// 
 /// await invoke('stream', {
 ///   path: 'agent/chat',
-///   input: { action: 'send', messages: [...], session_id: 'xxx' }
+///   input: { messages: [...], session_id: 'xxx' }
 /// })
 /// ```
 #[tauri::command]

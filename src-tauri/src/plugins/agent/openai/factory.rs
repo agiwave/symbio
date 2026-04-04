@@ -32,7 +32,7 @@ impl PluginFactory for OpenAiFactory {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["chat", "status", "list_models", "configure", "get_config", "compress_info"]
+                        "enum": ["chat", "status", "list_models", "configure", "get_config"]
                     }
                 }
             })),
