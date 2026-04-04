@@ -115,21 +115,25 @@ export const useExplorerStore = defineStore('explorer', () => {
     error.value = null
 
     try {
-      
+
       const result = await callPlugin<{ path: string; items: FileItem[] }>('explorer', {
         action: 'list',
         path: path || undefined,
         recursive
       })
 
-      
+
       if (!result) {
         console.warn('[explorer] empty result from backend')
         loading.value = false
         return
       }
 
-      currentPath.value = result.path || ''
+      // 注意：不要在非初始化加载时更新 currentPath
+      // currentPath 应该只在 init 时设置一次
+      if (path === '') {
+        currentPath.value = result.path || ''
+      }
 
       // 更新文件树
       if (result.items && Array.isArray(result.items)) {

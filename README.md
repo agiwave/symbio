@@ -8,7 +8,7 @@
 系统只提供三个核心 Tauri 命令：
 - **`meta`**: 通过路径获取插件的 `PluginMeta` 信息
 - **`invoke`**: 同步调用插件
-- **`sinvoke`**: 流式调用插件
+- **`stream`**: 流式调用插件
 
 ### 2. 路径寻址
 所有命令都通过路径来定位插件：
@@ -48,7 +48,7 @@ src-tauri/src/
 │   ├── echo/
 │   ├── calculator/
 │   └── formatter/
-├── commands.rs             # 三个核心命令：meta/invoke/sinvoke
+├── commands.rs             # 三个核心命令：meta/invoke/stream
 └── main.rs
 ```
 
@@ -61,7 +61,7 @@ pub trait Plugin: Send + Sync {
     fn meta(&self) -> PluginMeta;
     fn plugin(&self, path: &[String]) -> Option<Arc<dyn Plugin>>;
     async fn invoke(&self, input: Value) -> PluginResult<Value>;
-    async fn sinvoke(&self, input: Value) -> PluginResult<Vec<StreamChunk>>;
+    async fn stream(&self, input: Value) -> PluginResult<Vec<StreamChunk>>;
 }
 ```
 
@@ -97,7 +97,7 @@ const result = await invoke('invoke', {
 ### 3. 流式调用插件
 ```typescript
 // 流式调用 formatter 插件
-const chunks = await invoke('sinvoke', {
+const chunks = await invoke('stream', {
   path: ['formatter'],
   input: { text: 'Hello World' }
 })
