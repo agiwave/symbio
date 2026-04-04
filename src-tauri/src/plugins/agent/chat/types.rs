@@ -2,6 +2,26 @@
 
 use serde::{Deserialize, Serialize};
 
+/// 选区上下文信息（用于将编辑器选区传递到 LLM）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SelectionContext {
+    /// 文件路径
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    /// 完整文件内容（用于提供完整上下文）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_content: Option<String>,
+    /// 选中的文本
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_text: Option<String>,
+    /// 起始行号（1-based）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<u32>,
+    /// 结束行号（1-based）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
+}
+
 /// 对话消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {

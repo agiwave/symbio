@@ -8,6 +8,7 @@
 
 use crate::core::traits::{Plugin, CAPABILITY_LLM};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
+use crate::plugins::agent::chat::types::SelectionContext;
 use serde_json::{Value, json};
 use std::sync::{Arc, Weak};
 
@@ -99,6 +100,10 @@ impl Plugin for ChatPlugin {
                         .and_then(|v| v.as_str())
                         .unwrap_or("default");
 
+                    // 获取选区上下文（如果有）
+                    let selection_context = input.get("selection_context")
+                        .and_then(|v| serde_json::from_value::<SelectionContext>(v.clone()).ok());
+
                     // 获取最后一条用户消息
                     let message = input.get("messages")
                         .and_then(|msgs| msgs.as_array())
@@ -110,11 +115,16 @@ impl Plugin for ChatPlugin {
                         Some(msg) => {
                             // 通过 @llm 能力路由调用 openai 插件
                             if let Some(ref p) = parent {
-                                let llm_input = json!({
+                                let mut llm_input = json!({
                                     "action": "chat",
                                     "message": msg,
                                     "session_id": session_id
                                 });
+
+                                // 如果有选区上下文，添加到请求中
+                                if let Some(ctx) = selection_context {
+                                    llm_input["selection_context"] = json!(ctx);
+                                }
 
                                 match p.invoke(&format!("@{}", CAPABILITY_LLM), llm_input) {
                                     Ok(llm_stream) => {

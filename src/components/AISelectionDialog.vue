@@ -147,40 +147,8 @@ async function handleSend() {
   const text = props.state.input.value.trim()
   if (!text || props.state.loading.value) return
 
-  // 构建带上下文的消息
-  let userMessage = text
-  
-  // 如果有选区信息，添加上下文
-  const info = selectionInfo.value
-  if (info.filePath) {
-    // 推断文件类型
-    const ext = info.filePath.split('.').pop()?.toLowerCase() || ''
-    const langMap: Record<string, string> = {
-      'js': 'javascript', 'ts': 'typescript', 'vue': 'vue',
-      'py': 'python', 'rs': 'rust', 'go': 'go',
-      'java': 'java', 'c': 'c', 'cpp': 'cpp', 'h': 'c',
-      'html': 'html', 'css': 'css', 'scss': 'scss',
-      'json': 'json', 'yaml': 'yaml', 'yml': 'yaml',
-      'md': 'markdown', 'txt': 'text', 'sql': 'sql',
-      'sh': 'bash', 'bash': 'bash', 'xml': 'xml'
-    }
-    const lang = langMap[ext] || ''
-    const lineInfo = info.startLine && info.endLine 
-      ? ` (行 ${info.startLine}-${info.endLine})` 
-      : ''
-    
-    userMessage = `📄 文件: ${info.filePath}${lineInfo}
-
-💻 选中的内容:
-\`\`\`${lang}
-${props.state.selectedText.value}
-\`\`\`
-
-❓ 问题: ${text}`
-  }
-
-  // 添加用户消息
-  props.state.messages.value.push({ role: 'user', content: userMessage })
+  // 添加用户消息（保持原始文本用于显示）
+  props.state.messages.value.push({ role: 'user', content: text })
   props.state.input.value = ''
   props.state.loading.value = true
   streamingContent.value = ''
@@ -195,6 +163,19 @@ ${props.state.selectedText.value}
       content: m.content
     }))
 
+    // 构建选区上下文（如果有）
+    const info = selectionInfo.value
+    let selectionContext = undefined
+    if (info.filePath) {
+      selectionContext = {
+        file_path: info.filePath,
+        file_content: info.fullContent || undefined,
+        selected_text: props.state.selectedText.value || undefined,
+        start_line: info.startLine,
+        end_line: info.endLine
+      }
+    }
+
     // 流式发送消息
     const response = await sendMessageStream(
       chatMessages,
@@ -207,7 +188,8 @@ ${props.state.selectedText.value}
           }
         }
         scrollToBottom()
-      }
+      },
+      selectionContext  // 传递选区上下文
     )
 
     // 流完成 - 添加助手消息

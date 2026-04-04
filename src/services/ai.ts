@@ -20,6 +20,13 @@ export interface ChatMessage {
 export interface ChatRequest {
   messages: ChatMessage[]
   session_id?: string
+  selection_context?: {
+    file_path?: string
+    file_content?: string
+    selected_text?: string
+    start_line?: number
+    end_line?: number
+  }
 }
 
 export interface ProviderConfig {
@@ -62,25 +69,40 @@ export async function sendMessage(messages: ChatMessage[], sessionId?: string): 
 
 /**
  * 流式发送消息到 AI（实时返回中间过程）
- * 
+ *
  * @param messages 消息列表
  * @param sessionId 会话 ID
  * @param onChunk 每个 chunk 的回调
+ * @param selectionContext 选区上下文（可选）
  * @returns Promise<ChatResponse> 最终结果
  */
 export async function sendMessageStream(
   messages: ChatMessage[],
   sessionId: string,
-  onChunk: (chunk: StreamChunk) => void
+  onChunk: (chunk: StreamChunk) => void,
+  selectionContext?: {
+    file_path?: string
+    file_content?: string
+    selected_text?: string
+    start_line?: number
+    end_line?: number
+  }
 ): Promise<ChatResponse> {
   let finalContent = ''
   let finalError: string | undefined
 
-  await streamPlugin(CHAT_PATH, {
+  const request: Record<string, unknown> = {
     action: 'send',
     messages,
     session_id: sessionId || 'default'
-  }, (chunk) => {
+  }
+
+  // 添加选区上下文（如果有）
+  if (selectionContext) {
+    request.selection_context = selectionContext
+  }
+
+  await streamPlugin(CHAT_PATH, request, (chunk) => {
     // 调用回调
     onChunk(chunk)
 
