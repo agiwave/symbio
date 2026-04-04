@@ -128,6 +128,7 @@ import MarkdownEditor from './MarkdownEditor.vue'
 import { createSessionId, type SessionMessage } from '../services/session'
 import { useAISelection } from '@/composables/useAISelection'
 import { onDirChanged, onFileChanged, startWatching, stopWatching, type BrowserFileChangeEvent } from '../services/watcher'
+import { setAIContext } from '@/composables/useAIContext'
 
 const store = useExplorerStore()
 
@@ -251,6 +252,15 @@ function refresh() {
 // 选择项
 async function selectItem(path: string) {
   await store.selectItem(path)
+
+  // 更新全局 AI 上下文
+  setAIContext({
+    filePath: path,
+    fileContent: store.fileContent || undefined,
+    selectedText: undefined, // 清除之前的选区
+    startLine: undefined,
+    endLine: undefined,
+  })
 }
 
 // 展开目录

@@ -78,6 +78,13 @@
 
     <!-- 输入区域 -->
     <div class="chat-input">
+      <!-- 当前上下文信息 -->
+      <div v-if="context.filePath || context.selectedText" class="context-bar">
+        <span class="context-label">当前上下文</span>
+        <span v-if="context.filePath" class="file-name">📄 {{ context.filePath.split(/[\\/]/).pop() }}</span>
+        <span v-if="context.startLine" class="line-range">📍 行 {{ context.startLine }}{{ context.endLine && context.endLine !== context.startLine ? '-' + context.endLine : '' }}</span>
+        <span v-if="context.selectedText" class="selected-text">{{ context.selectedText.slice(0, 50) }}{{ context.selectedText.length > 50 ? '...' : '' }}</span>
+      </div>
       <div v-if="configError" class="config-error">
         {{ configError }}
       </div>
@@ -101,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch, onMounted } from 'vue'
+import { ref, nextTick, watch, onMounted, computed } from 'vue'
 import { marked } from 'marked'
 import { sendMessageStream, type ChatMessage, type StreamChunk } from '../services/ai'
 import {
@@ -109,6 +116,10 @@ import {
   createSessionId,
   type SessionMessage,
 } from '../services/session'
+import { useAIContext, buildContextualMessage, setAIContext } from '@/composables/useAIContext'
+
+// 使用全局 AI 上下文
+const { context } = useAIContext()
 
 // Props
 const props = defineProps<{
@@ -247,12 +258,16 @@ async function handleSend() {
   const text = inputText.value.trim()
   if (!text || isLoading.value || !props.sessionId) return
 
+  // 使用全局上下文构建消息
+  const ctx = context.value
+  const contextualContent = buildContextualMessage(text, ctx)
+
   const now = Math.floor(Date.now() / 1000)
 
-  // 添加用户消息
+  // 添加用户消息（使用带上下文的内容）
   const userMessage: SessionMessage = {
     role: 'user',
-    content: text,
+    content: contextualContent,
     timestamp: now
   }
 
@@ -564,6 +579,42 @@ watch(() => props.messages.length, () => {
   border-top: 1px solid var(--color-border);
   background: var(--color-surface);
   flex-shrink: 0;
+}
+
+.context-bar {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(37, 99, 235, 0.06));
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.context-bar .context-label {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.context-bar .file-name,
+.context-bar .line-range {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+
+.context-bar .selected-text {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .config-error {

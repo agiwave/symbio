@@ -1,4 +1,5 @@
 import { ref, reactive, computed, type Ref } from 'vue'
+import { setAIContext } from './useAIContext'
 
 /**
  * AI 选区交互 composable
@@ -152,6 +153,15 @@ export function useAISelection(options: UseAISelectionOptions) {
     visible.value = true
     messages.value = []
     input.value = ''
+
+    // 更新全局 AI 上下文
+    setAIContext({
+      filePath: extra?.filePath,
+      fileContent: extra?.fullContent,
+      selectedText: text,
+      startLine: extra?.startLine,
+      endLine: extra?.endLine,
+    })
   }
 
   // 更新选区内容（对话框已打开时）
@@ -160,6 +170,15 @@ export function useAISelection(options: UseAISelectionOptions) {
     selectedText.value = text
     calculatePosition(rect)
     // 保持对话框打开和消息历史
+
+    // 更新全局 AI 上下文
+    setAIContext({
+      filePath: extra?.filePath,
+      fileContent: extra?.fullContent,
+      selectedText: text,
+      startLine: extra?.startLine,
+      endLine: extra?.endLine,
+    })
   }
 
   // 关闭对话框
@@ -168,6 +187,12 @@ export function useAISelection(options: UseAISelectionOptions) {
     selectedText.value = ''
     savedSelection.value = null
     messages.value = []
+    // 重置全局 AI 上下文
+    setAIContext({
+      selectedText: undefined,
+      startLine: undefined,
+      endLine: undefined,
+    })
   }
 
   // 通过快捷键/按钮打开（无选区）

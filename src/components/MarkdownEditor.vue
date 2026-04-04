@@ -207,6 +207,7 @@ import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
 // BlockProvider removed - using direct editor view monitoring
 import { callPlugin } from '@/services/plugin'
 import { useAIChat, type AIChatContext } from '@/composables/useAIChat'
+import { setAIContext } from '@/composables/useAIContext'
 import { marked } from 'marked'
 
 const props = defineProps<{
@@ -269,16 +270,9 @@ const selectedText = ref('')
 const aiDialogRef = ref<HTMLElement | null>(null)
 
 // 使用统一的 AI Chat composable
-// 使用 contextProvider 在发送时动态获取最新选区信息
+// 使用全局 AI 上下文
 const aiChat = useAIChat({
   sessionId: 'note-selection-ai',
-  contextProvider: () => ({
-    filePath: props.filePath,
-    fileContent: props.modelValue,
-    selectedText: savedSelection?.text,
-    startLine: savedSelection?.startLine,
-    endLine: savedSelection?.endLine,
-  }),
 })
 
 // 为了兼容模板，导出所需属性
@@ -584,6 +578,15 @@ async function initEditor() {
             // 保存选区信息
             savedSelection = { text: selectedContent, rect, startLine, endLine }
             selectedText.value = selectedContent
+
+            // 更新全局 AI 上下文
+            setAIContext({
+              filePath: props.filePath,
+              fileContent: props.modelValue,
+              selectedText: selectedContent,
+              startLine,
+              endLine,
+            })
             calculateDialogPosition()
 
             // 如果对话框未打开，打开它
@@ -1063,6 +1066,12 @@ async function destroyEditor() {
 onMounted(() => {
   initEditor()
   document.addEventListener('keydown', handleKeydown)
+
+  // 初始化时设置全局上下文
+  setAIContext({
+    filePath: props.filePath,
+    fileContent: props.modelValue,
+  })
 })
 
 onUnmounted(() => {

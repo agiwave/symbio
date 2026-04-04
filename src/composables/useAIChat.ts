@@ -3,42 +3,28 @@
  *
  * 所有文件视图（Explorer、NotePage、MarkdownEditor 等）都使用这个统一的逻辑
  * 来调用 AI 助手，确保选区上下文能正确传递到 LLM。
+ *
+ * 自动使用全局 AI 上下文（由 useAIContext 管理）。
  */
 
-import { ref, type Ref } from 'vue'
+import { ref } from 'vue'
 import { sendMessageStream, type ChatMessage } from '@/services/ai'
-
-export interface AIChatContext {
-  /** 文件路径 */
-  filePath?: string
-  /** 完整文件内容 */
-  fileContent?: string
-  /** 用户选中的文本 */
-  selectedText?: string
-  /** 选中内容的起始行号（1-based） */
-  startLine?: number
-  /** 选中内容的结束行号（1-based） */
-  endLine?: number
-}
-
-/** Context provider function type - called at sendMessage time to get latest context */
-export type AIChatContextProvider = () => AIChatContext | undefined
+import { buildContextualMessage, useAIContext } from '@/composables/useAIContext'
 
 export interface UseAIChatOptions {
   /** 会话 ID */
   sessionId: string
-  /** 上下文提供者函数（推荐），或者静态上下文对象 */
-  contextProvider?: AIChatContextProvider
-  /** @deprecated 使用 contextProvider 代替 */
-  context?: AIChatContext
 }
 
 export function useAIChat(options: UseAIChatOptions) {
-  const { sessionId, contextProvider, context } = options
+  const { sessionId } = options
 
   const messages = ref<ChatMessage[]>([])
   const loading = ref(false)
   const streamingContent = ref('')
+
+  // 使用全局 AI 上下文
+  const { context } = useAIContext()
 
   /**
    * 发送消息到 AI
@@ -52,36 +38,9 @@ export function useAIChat(options: UseAIChatOptions) {
   ) {
     if (!userInput.trim() || loading.value) return
 
-    // 获取最新上下文（优先使用 contextProvider）
-    const ctx = contextProvider ? contextProvider() : context
-
-    // 构建带上下文的用户消息
-    let finalUserInput = userInput
-    if (ctx?.filePath || ctx?.selectedText) {
-      const contextParts: string[] = []
-
-      // 添加文件信息
-      if (ctx.filePath) {
-        const lineInfo = ctx.startLine
-          ? ` (行 ${ctx.startLine}${ctx.endLine && ctx.endLine !== ctx.startLine ? '-' + ctx.endLine : ''})`
-          : ''
-        contextParts.push(`📄 文件: ${ctx.filePath}${lineInfo}`)
-      }
-
-      // 添加选中的内容
-      if (ctx.selectedText) {
-        contextParts.push(`\n**选中的内容：**\n\`\`\`\n${ctx.selectedText}\n\`\`\``)
-      }
-
-      // 添加完整文件内容（如果有）
-      if (ctx.fileContent) {
-        contextParts.push(`\n**完整文件内容：**\n\`\`\`\n${ctx.fileContent}\n\`\`\``)
-      }
-
-      if (contextParts.length > 0) {
-        finalUserInput = `[上下文信息]\n${contextParts.join('\n')}\n\n---\n\n**问题：** ${userInput}`
-      }
-    }
+    // 使用全局上下文构建消息
+    const ctx = context.value
+    const finalUserInput = buildContextualMessage(userInput, ctx)
 
     // 添加用户消息
     messages.value.push({ role: 'user', content: finalUserInput })
