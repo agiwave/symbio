@@ -254,6 +254,24 @@ export const useExplorerStore = defineStore('explorer', () => {
     await loadDirectory(currentPath.value)
   }
 
+  // 保存文件内容
+  async function saveFile(path: string, content: string): Promise<boolean> {
+    try {
+      await callPlugin('explorer', {
+        action: 'write',
+        path,
+        content
+      })
+      // 更新缓存内容
+      fileContent.value = content
+      return true
+    } catch (e) {
+      console.error('[explorer] Failed to save file:', e)
+      error.value = e instanceof Error ? e.message : '保存失败'
+      return false
+    }
+  }
+
   // 重置状态（切换工作区时调用）
   function reset() {
     fileTree.value = new Map()
@@ -286,6 +304,7 @@ export const useExplorerStore = defineStore('explorer', () => {
     selectItem,
     expandDirectory,
     refresh,
+    saveFile,
     reset,
 
     // Helper

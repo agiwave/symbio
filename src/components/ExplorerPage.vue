@@ -41,6 +41,16 @@
           </div>
           <div class="content-actions">
             <button
+              v-if="hasUnsavedChanges"
+              class="action-btn save-btn"
+              :class="{ 'saving': isSaving }"
+              @click="handleSave"
+              :title="isSaving ? '保存中...' : '保存修改 (Ctrl+S)'"
+            >
+              {{ isSaving ? '⏳' : '💾' }}
+            </button>
+            <span v-if="hasUnsavedChanges" class="unsaved-indicator">●</span>
+            <button
               class="action-btn"
               :class="{ active: chatVisible }"
               @click="chatVisible = !chatVisible"
@@ -78,9 +88,10 @@
             <MarkdownEditor
               v-if="isMarkdownFile"
               :key="selectedPath"
-              :model-value="fileContent"
+              :model-value="editorContent"
               :file-path="selectedPath || undefined"
               class="md-editor"
+              @content-change="onContentChange"
             />
             <!-- 其他文件使用代码块预览 -->
             <pre v-else class="code-block"><code>{{ fileContent }}</code></pre>
@@ -148,6 +159,12 @@ const isResizing = ref(false)
 const startWidth = ref(0)
 const startX = ref(0)
 
+// 编辑状态
+const editorContent = ref<string>('')
+const hasUnsavedChanges = ref(false)
+const isSaving = ref(false)
+const originalContent = ref<string>('')
+
 // AI 选区交互 - 使用 composable
 const aiSelection = useAISelection({ sessionId: 'explorer-selection-ai' })
 
@@ -194,7 +211,9 @@ onMounted(async () => {
   if (contentAreaRef.value) {
     contentAreaRef.value.addEventListener('mouseup', handleMouseUp)
   }
-  
+  // 添加离开页面提醒
+  window.addEventListener('beforeunload', handleBeforeUnload)
+
   // 启动文件监听
   try {
     await startWatching()
@@ -229,6 +248,7 @@ onUnmounted(async () => {
   if (contentAreaRef.value) {
     contentAreaRef.value.removeEventListener('mouseup', handleMouseUp)
   }
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 
   // 清理拖动事件
   document.removeEventListener('mousemove', doResize)
@@ -253,6 +273,11 @@ function handleKeydown(e: KeyboardEvent) {
     filePath: selectedPath.value || undefined, 
     fileContent: fileContent.value || undefined 
   })) return
+  // Ctrl+S 保存文件
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault()
+    handleSave()
+  }
 }
 
 // 选区事件处理
@@ -293,6 +318,15 @@ function stopResize() {
   document.removeEventListener('mouseup', stopResize)
 }
 
+// 离开页面提醒
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (hasUnsavedChanges.value) {
+    e.preventDefault()
+    e.returnValue = '有未保存的修改，确定要离开吗？'
+    return '有未保存的修改，确定要离开吗？'
+  }
+}
+
 // 刷新
 function refresh() {
   store.refresh()
@@ -300,7 +334,21 @@ function refresh() {
 
 // 选择项
 async function selectItem(path: string) {
+  // 如果有未保存的修改，提示用户
+  if (hasUnsavedChanges.value) {
+    const shouldLeave = confirm('有未保存的修改，是否先保存？')
+    if (shouldLeave) {
+      await handleSave()
+    }
+    hasUnsavedChanges.value = false
+  }
+
   await store.selectItem(path)
+
+  // 初始化编辑器内容
+  editorContent.value = store.fileContent || ''
+  originalContent.value = store.fileContent || ''
+  hasUnsavedChanges.value = false
 
   // 更新全局 AI 上下文
   setAIContext({
@@ -310,6 +358,28 @@ async function selectItem(path: string) {
     startLine: undefined,
     endLine: undefined,
   })
+}
+
+// 内容变化
+function onContentChange(value: string) {
+  editorContent.value = value
+  hasUnsavedChanges.value = value !== originalContent.value
+}
+
+// 保存文件
+async function handleSave() {
+  if (!selectedPath.value || !hasUnsavedChanges.value || isSaving.value) return
+
+  isSaving.value = true
+  try {
+    const success = await store.saveFile(selectedPath.value, editorContent.value)
+    if (success) {
+      originalContent.value = editorContent.value
+      hasUnsavedChanges.value = false
+    }
+  } finally {
+    isSaving.value = false
+  }
 }
 
 // 展开目录
@@ -499,6 +569,28 @@ function getFileIcon(name: string): string {
 .action-btn:hover,
 .action-btn.active {
   background: #f0f0f0;
+}
+
+.save-btn {
+  position: relative;
+}
+
+.save-btn.saving {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.unsaved-indicator {
+  color: #f59e0b;
+  font-size: 1.2rem;
+  line-height: 1;
+  margin-right: 0.25rem;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .content-body {

@@ -216,6 +216,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  'content-change': [value: string]
+  'request-save': []
 }>()
 
 // DOM refs
@@ -449,6 +451,7 @@ async function initEditor() {
 
       ctx.get(listenerCtx).markdownUpdated((ctx, markdown) => {
         emit('update:modelValue', markdown)
+        emit('content-change', markdown)
         editorCtx.value = ctx
       })
 
