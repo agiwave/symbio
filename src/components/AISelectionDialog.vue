@@ -32,6 +32,19 @@
             {{ state.selectedText.value.slice(0, 100) }}{{ state.selectedText.value.length > 100 ? '...' : '' }}
           </div>
         </div>
+
+        <!-- 当前文件上下文（无选区时显示） -->
+        <div v-else-if="currentFileInfo.filePath" class="file-context">
+          <div class="context-header">
+            <span class="context-label">当前文件</span>
+            <span class="file-path">
+              📄 {{ getRelativePath(currentFileInfo.filePath) }}
+            </span>
+            <span v-if="currentFileInfo.startLine" class="line-range">
+              📍 行 {{ currentFileInfo.startLine }}{{ currentFileInfo.endLine && currentFileInfo.endLine !== currentFileInfo.startLine ? '-' + currentFileInfo.endLine : '' }}
+            </span>
+          </div>
+        </div>
         
         <div class="dialog-body">
           <div class="messages" ref="messagesRef">
@@ -84,6 +97,7 @@ import { ref, nextTick, watch, computed } from 'vue'
 import { marked } from 'marked'
 import type { AISelectionReturn } from '@/composables/useAISelection'
 import { sendMessageStream, type ChatMessage } from '@/services/ai'
+import { useAIContext } from '@/composables/useAIContext'
 
 const props = defineProps<{
   state: AISelectionReturn
@@ -91,6 +105,9 @@ const props = defineProps<{
   currentFilePath?: string
   currentFileContent?: string
 }>()
+
+// 使用全局 AI 上下文
+const { context } = useAIContext()
 
 const messagesRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
@@ -106,6 +123,17 @@ const selectionInfo = computed(() => {
     startLine: saved.startLine,
     endLine: saved.endLine,
     fullContent: saved.fullContent
+  }
+})
+
+// 获取当前文件信息（从全局 AI 上下文）
+const currentFileInfo = computed(() => {
+  const ctx = context.value
+  return {
+    filePath: ctx.filePath,
+    fileContent: ctx.fileContent,
+    startLine: ctx.startLine,
+    endLine: ctx.endLine,
   }
 })
 
@@ -332,6 +360,12 @@ watch(() => props.state.selectedText.value, () => {
   background: rgba(255, 255, 255, 0.8);
   border-radius: 6px;
   border-left: 2px solid #7c3aed;
+}
+
+/* 当前文件上下文样式 */
+.file-context {
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(37, 99, 235, 0.06));
 }
 
 .dialog-body {

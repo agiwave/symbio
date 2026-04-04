@@ -105,9 +105,7 @@
                 </svg>
               </button>
               <div class="toolbar-divider"></div>
-              <button class="toolbar-btn ai-btn" @click.stop="openAI" title="AI 助手">
-                <span>✨</span>
-              </button>
+              <!-- AI 按钮已移至全局统一实现 -->
             </div>
           </Transition>
         </div>
@@ -191,7 +189,7 @@
     <!-- 快捷键提示 -->
     <Transition name="fade">
       <div v-if="!showAIDialog && !blockHandle.visible" class="shortcut-hint">
-        <kbd>/</kbd> 命令菜单 · <kbd>Ctrl</kbd><kbd>K</kbd> AI 助手
+        <kbd>/</kbd> 命令菜单 · 选中文本后自动显示 AI 助手
       </div>
     </Transition>
   </div>
@@ -371,7 +369,7 @@ function closeAIDialog() {
   aiChat.clearMessages()
 }
 
-// 通过工具栏按钮或快捷键打开 AI（无选区时也带上下文）
+// 通过工具栏按钮或快捷键打开 AI（无选区时不打开）
 function openAI() {
   showToolbar.value = false
 
@@ -401,6 +399,22 @@ function openAI() {
     } catch (e) {
       // 忽略错误，保持原有行为
     }
+  }
+
+  // 只有有选区时才打开对话框
+  if (!savedSelection || !selectedText.value) {
+    return
+  }
+
+  // 设置当前文件上下文
+  if (props.filePath) {
+    setAIContext({
+      filePath: props.filePath,
+      fileContent: props.modelValue,
+      selectedText: selectedText.value,
+      startLine: savedSelection?.startLine,
+      endLine: savedSelection?.endLine,
+    })
   }
 
   aiChat.clearMessages()
@@ -1074,16 +1088,13 @@ function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     if (showAIDialog.value) {
       e.preventDefault()
+      e.stopPropagation() // 阻止事件传播
       closeAIDialog()
     }
     return
   }
-  
-  // Ctrl+K 打开 AI 对话框
-  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-    e.preventDefault()
-    openAI()
-  }
+
+  // Ctrl+K 不处理,让父组件处理(避免重复打开)
 }
 
 // Destroy editor

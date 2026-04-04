@@ -150,24 +150,34 @@ const oldestTimestamp = ref<number | null>(null)
 const initialLoadDone = ref(false)
 const PAGE_SIZE = 10
 
+// 跟踪用户是否手动滚动到顶部
+const isUserAtBottom = ref(true)
+const SCROLL_THRESHOLD = 50 // 距离底部多少像素时认为是在底部
+
 // 加载历史消息
 async function loadHistory(before?: number) {
   if (isLoadingHistory.value) return
   if (!hasMoreHistory.value && before) return
-  
+
   isLoadingHistory.value = true
-  
+
   try {
     const result = await getSessionMessages(props.sessionId, PAGE_SIZE, before)
-    
+
     if (result.messages.length > 0) {
       // 将新消息添加到现有消息的前面
       const newMessages = [...result.messages, ...props.messages]
       props.onUpdateMessages(newMessages)
-      
+
       // 更新最旧的时间戳
       oldestTimestamp.value = result.messages[0].timestamp
       hasMoreHistory.value = result.hasMore
+
+      // 如果是初始加载,滚动到底部
+      if (!before) {
+        await nextTick()
+        scrollToBottom()
+      }
     } else {
       hasMoreHistory.value = false
     }
@@ -185,9 +195,14 @@ async function loadHistory(before?: number) {
 function handleScroll() {
   if (!messagesRef.value) return
   if (isLoadingHistory.value || !hasMoreHistory.value) return
-  
+
+  // 检查用户是否在底部附近
+  const { scrollTop, scrollHeight, clientHeight } = messagesRef.value
+  const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+  isUserAtBottom.value = distanceFromBottom < SCROLL_THRESHOLD
+
   // 当滚动到顶部附近时加载更多
-  if (messagesRef.value.scrollTop < 50) {
+  if (scrollTop < 50) {
     const savedScrollHeight = messagesRef.value.scrollHeight
     loadHistory(oldestTimestamp.value || undefined).then(() => {
       // 保持滚动位置
@@ -374,7 +389,12 @@ function handleKeydown(e: KeyboardEvent) {
 
 // 监听消息变化，滚动到底部
 watch(() => props.messages.length, () => {
-  nextTick(scrollToBottom)
+  nextTick(() => {
+    // 只有当用户在底部时才自动滚动，否则不干扰用户查看历史
+    if (isUserAtBottom.value) {
+      scrollToBottom()
+    }
+  })
 })
 </script>
 

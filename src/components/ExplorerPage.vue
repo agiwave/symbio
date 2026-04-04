@@ -99,7 +99,7 @@
     </main>
 
     <!-- AI 对话侧边栏 (可拉出/隐藏) -->
-    <aside class="chat-sidebar" v-show="chatVisible">
+    <aside class="chat-sidebar" v-show="chatVisible" :style="{ width: chatWidth + 'px' }">
       <div class="chat-header">
         <h3>AI 对话</h3>
         <button class="close-btn" @click="chatVisible = false" title="隐藏">×</button>
@@ -112,6 +112,14 @@
         />
       </div>
     </aside>
+
+    <!-- 拖动手柄 -->
+    <div 
+      v-show="chatVisible" 
+      class="chat-resize-handle" 
+      :class="{ 'dragging': isResizing }"
+      @mousedown="startResize"
+    ></div>
     
     <!-- AI 选区对话框 -->
     <AISelectionDialog :state="aiSelection" />
@@ -135,6 +143,10 @@ const store = useExplorerStore()
 // UI 状态
 const chatVisible = ref(false)
 const contentAreaRef = ref<HTMLElement | null>(null)
+const chatWidth = ref(320) // 默认宽度
+const isResizing = ref(false)
+const startWidth = ref(0)
+const startX = ref(0)
 
 // AI 选区交互 - 使用 composable
 const aiSelection = useAISelection({ sessionId: 'explorer-selection-ai' })
@@ -217,7 +229,11 @@ onUnmounted(async () => {
   if (contentAreaRef.value) {
     contentAreaRef.value.removeEventListener('mouseup', handleMouseUp)
   }
-  
+
+  // 清理拖动事件
+  document.removeEventListener('mousemove', doResize)
+  document.removeEventListener('mouseup', stopResize)
+
   // 停止文件监听
   unlistenFile?.()
   unlistenDir?.()
@@ -232,8 +248,11 @@ onUnmounted(async () => {
 function handleKeydown(e: KeyboardEvent) {
   // Escape 关闭 AI 选区对话框
   if (aiSelection.handleEscape(e)) return
-  // Ctrl+K 打开 AI 选区对话框
-  if (aiSelection.handleCtrlK(e)) return
+  // Ctrl+K 打开 AI 选区对话框(带上当前文件上下文)
+  if (aiSelection.handleCtrlK(e, { 
+    filePath: selectedPath.value || undefined, 
+    fileContent: fileContent.value || undefined 
+  })) return
 }
 
 // 选区事件处理
@@ -242,6 +261,36 @@ function handleMouseUp(e: MouseEvent) {
     filePath: selectedPath.value || undefined,
     fullContent: fileContent.value || undefined
   })
+}
+
+// 拖动调整宽度
+function startResize(e: MouseEvent) {
+  e.preventDefault()
+  isResizing.value = true
+  startWidth.value = chatWidth.value
+  startX.value = e.clientX
+
+  document.addEventListener('mousemove', doResize)
+  document.addEventListener('mouseup', stopResize)
+}
+
+function doResize(e: MouseEvent) {
+  if (!isResizing.value) return
+  
+  const delta = startX.value - e.clientX
+  const newWidth = startWidth.value + delta
+  
+  // 限制最小和最大宽度
+  const minWidth = 280
+  const maxWidth = window.innerWidth * 0.6
+  
+  chatWidth.value = Math.max(minWidth, Math.min(maxWidth, newWidth))
+}
+
+function stopResize() {
+  isResizing.value = false
+  document.removeEventListener('mousemove', doResize)
+  document.removeEventListener('mouseup', stopResize)
 }
 
 // 刷新
@@ -633,5 +682,21 @@ function getFileIcon(name: string): string {
 .chat-content {
   flex: 1;
   overflow: hidden;
+}
+
+/* 拖动手柄样式 */
+.chat-resize-handle {
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1500; /* 提高层级,避免被其他元素遮挡 */
+}
+
+.chat-resize-handle:hover,
+.chat-resize-handle.dragging {
+  background: var(--color-primary);
+  opacity: 0.3;
 }
 </style>

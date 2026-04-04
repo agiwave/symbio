@@ -282,9 +282,21 @@ export function useAISelection(options: UseAISelectionOptions) {
   }
 
   // 处理 Ctrl+K 快捷键
-  function handleCtrlK(e: KeyboardEvent) {
+  function handleCtrlK(e: KeyboardEvent, context?: { filePath?: string; fileContent?: string }) {
     if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
       e.preventDefault()
+      
+      // 如果有文件上下文,先设置 AI 上下文
+      if (context?.filePath) {
+        setAIContext({
+          filePath: context.filePath,
+          fileContent: context.fileContent,
+          selectedText: undefined,
+          startLine: undefined,
+          endLine: undefined,
+        })
+      }
+      
       open()
       return true
     }
