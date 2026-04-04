@@ -253,6 +253,11 @@ onMounted(async () => {
     // 监听文件变化
     unlistenFile = await onFileChanged((event) => {
       console.log('[Explorer] File changed:', event.path, event.kind)
+      // 如果正在手动保存，跳过文件监听器重载，避免覆盖内容
+      if (store.isSavingFile) {
+        console.log('[Explorer] Skipping reload during save')
+        return
+      }
       // 如果当前打开的文件被修改，重新加载
       if (selectedPath.value && event.path.endsWith(selectedPath.value)) {
         console.log('[Explorer] Reloading current file:', selectedPath.value)

@@ -254,15 +254,20 @@ export const useExplorerStore = defineStore('explorer', () => {
     await loadDirectory(currentPath.value)
   }
 
+  // 标记是否正在保存（用于文件监听器跳过重载）
+  let isSavingFile = false
+
   // 保存文件内容
   async function saveFile(path: string, content: string): Promise<boolean> {
     try {
+      isSavingFile = true
+      
       await callPlugin('explorer', {
         action: 'write',
         path,
         content
       })
-      
+
       // 只要 callPlugin 没有抛出异常，说明保存成功
       fileContent.value = content
       return true
@@ -271,6 +276,8 @@ export const useExplorerStore = defineStore('explorer', () => {
       error.value = errMsg
       console.error('[explorer] Failed to save file:', e)
       return false
+    } finally {
+      isSavingFile = false
     }
   }
 
@@ -294,6 +301,7 @@ export const useExplorerStore = defineStore('explorer', () => {
     initialized,
     loading,
     error,
+    isSavingFile,
 
     // Computed
     rootItems,
