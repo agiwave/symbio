@@ -377,12 +377,40 @@ function closeAIDialog() {
   aiChat.clearMessages()
 }
 
-// 通过工具栏按钮打开 AI（无选区）
+// 通过工具栏按钮或快捷键打开 AI（无选区时也带上下文）
 function openAI() {
   showToolbar.value = false
-  savedSelection = null
-  selectedText.value = ''
+
+  // 如果没有活跃选区，尝试获取当前 ProseMirror 选区
+  if (!savedSelection && editor.value && editor.value.ctx) {
+    try {
+      const view = editor.value.ctx.get(editorViewCtx)
+      const { state } = view
+      const { from, to } = state.selection
+
+      if (from !== to) {
+        // 有文本选区，获取信息
+        const selectedTextFromDoc = state.doc.textBetween(from, to, '\n')
+        const textBefore = state.doc.textBetween(0, from, '\n')
+
+        const linesBefore = textBefore.split('\n').length
+        const selectedLines = selectedTextFromDoc.split('\n').length
+
+        savedSelection = {
+          text: selectedTextFromDoc.trim(),
+          rect: { left: 0, top: 0, width: 0, height: 0 } as DOMRect,
+          startLine: linesBefore,
+          endLine: linesBefore + selectedLines - 1,
+        }
+        selectedText.value = selectedTextFromDoc.trim()
+      }
+    } catch (e) {
+      // 忽略错误，保持原有行为
+    }
+  }
+
   aiChat.clearMessages()
+  aiInput.value = ''
   // 默认显示在右上角
   aiDialogPosition.top = 80
   aiDialogPosition.left = window.innerWidth - DIALOG_WIDTH - MARGIN
