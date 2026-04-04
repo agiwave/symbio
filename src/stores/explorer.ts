@@ -263,13 +263,17 @@ export const useExplorerStore = defineStore('explorer', () => {
         content
       })
       
-      if (result && result.success) {
+      console.log('[explorer] saveFile result:', result)
+      
+      // callPlugin 已经解析了 response.data，所以 result 是 write_file 返回的 data 部分
+      // 如果没有抛出错误，说明保存成功
+      if (result) {
         // 更新缓存内容
         fileContent.value = content
         return true
       } else {
-        error.value = '保存失败：响应格式错误'
-        console.error('[explorer] Invalid save response:', result)
+        error.value = '保存失败：响应为空'
+        console.error('[explorer] Empty save response')
         return false
       }
     } catch (e) {
