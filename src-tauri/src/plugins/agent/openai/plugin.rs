@@ -194,7 +194,7 @@ impl OpenAiPlugin {
                 .header("Authorization", format!("Bearer {}", api_key))
                 .header("Content-Type", "application/json")
                 .json(&request)
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_secs(config.timeout_secs))
                 .send()
                 .await
                 .map_err(|e| PluginError::InternalError(format!("请求失败: {}", e)))?;
@@ -482,6 +482,9 @@ impl OpenAiPlugin {
             if let Some(v) = input.get("system_prompt").and_then(|v| v.as_str()) {
                 config.system_prompt = Some(v.to_string());
             }
+            if let Some(v) = input.get("timeout_secs").and_then(|v| v.as_u64()) {
+                config.timeout_secs = v;
+            }
         }
 
         // 保存配置到文件
@@ -528,7 +531,8 @@ impl OpenAiPlugin {
                     "model": config.model,
                     "temperature": config.temperature,
                     "max_tokens": config.max_tokens,
-                    "max_context_tokens": config.max_context_tokens
+                    "max_context_tokens": config.max_context_tokens,
+                    "timeout_secs": config.timeout_secs
                 }
             }),
             done: true,
@@ -674,6 +678,7 @@ impl OpenAiPlugin {
             // Agent loop - 工具调用循环
             let max_iterations = 255;
             let mut final_content = String::new();
+            let mut last_stream_content = String::new();  // 保存最后一次流式内容
 
             for iteration in 0..max_iterations {
                 eprintln!("[openai] iteration {}", iteration + 1);
@@ -702,7 +707,7 @@ impl OpenAiPlugin {
                     .header("Authorization", format!("Bearer {}", api_key))
                     .header("Content-Type", "application/json")
                     .json(&request)
-                    .timeout(std::time::Duration::from_secs(120))
+                    .timeout(std::time::Duration::from_secs(config.timeout_secs))
                     .send()
                     .await
                 {
@@ -734,7 +739,11 @@ impl OpenAiPlugin {
 
                 eprintln!("[openai] processing stream...");
                 // 处理流式响应
-                let mut stream_content = String::new();
+                let mut stream_content = if last_stream_content.is_empty() { 
+                    String::new() 
+                } else { 
+                    last_stream_content.clone() 
+                };
                 let mut tool_call_accumulator = ToolCallAccumulator::new();
                 let mut stream = response.bytes_stream();
 
@@ -916,6 +925,13 @@ impl OpenAiPlugin {
                         tool_call_id: Some(id),
                         tool_calls: None,
                     });
+                }
+                
+                // 工具调用完成后，从消息历史中获取 assistant 的 content
+                if let Some(last_assistant_msg) = messages.iter().rev().find(|m| m.role == "assistant" && m.content.is_some()) {
+                    if let Some(ref content) = last_assistant_msg.content {
+                        final_content = content.clone();
+                    }
                 }
             }
 

@@ -74,7 +74,16 @@ impl WorkPlugin {
     pub fn new(parent: Option<Weak<dyn Plugin>>) -> Self {
         let config = Arc::new(Mutex::new(WorkConfig::default()));
 
-        WorkPlugin { 
+        // 初始化时尝试切换到默认工作区目录
+        let default_path = default_workspace_path();
+        let expanded = shellexpand::tilde(&default_path).to_string();
+        if let Err(e) = std::env::set_current_dir(&expanded) {
+            eprintln!("[work] 初始化切换目录失败 ({}): {}", default_path, e);
+        } else {
+            eprintln!("[work] 初始化已切换到目录: {}", expanded);
+        }
+
+        WorkPlugin {
             meta: Self::create_meta(),
             config,
             parent,
@@ -118,13 +127,21 @@ impl WorkPlugin {
     /// 设置工作区路径
     fn set_workspace(&self, path: &str) -> Value {
         let mut cfg = self.config.lock().unwrap();
-        
+
         // 更新最近工作区列表
         cfg.recent_workspaces.retain(|p| p != path);
         cfg.recent_workspaces.insert(0, path.to_string());
         cfg.recent_workspaces.truncate(10); // 保留最近 10 个
-        
+
         cfg.workspace_path = path.to_string();
+
+        // 切换当前工作目录到工作区目录
+        let expanded_path = shellexpand::tilde(path).to_string();
+        if let Err(e) = std::env::set_current_dir(&expanded_path) {
+            eprintln!("[work] 切换当前目录失败: {}", e);
+        } else {
+            eprintln!("[work] 已切换当前目录到: {}", expanded_path);
+        }
 
         // 通知父插件保存配置
         if let Some(p) = self.get_parent() {

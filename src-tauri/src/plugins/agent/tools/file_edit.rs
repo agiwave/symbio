@@ -1,21 +1,21 @@
 //! 文件编辑工具 - 实现 Plugin trait
 
+use super::policy::SecurityPolicy;
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// 文件编辑工具
 pub struct FileEditTool {
-    workspace_dir: Arc<RwLock<PathBuf>>,
+    security: Arc<SecurityPolicy>,
 }
 
 impl FileEditTool {
-    pub fn new(workspace_dir: PathBuf) -> Self {
-        Self { workspace_dir: Arc::new(RwLock::new(workspace_dir)) }
+    pub fn new(security: Arc<SecurityPolicy>) -> Self {
+        Self { security }
     }
 
     fn create_meta() -> PluginMeta {
@@ -87,7 +87,7 @@ impl FileEditTool {
         }
 
         // 构建完整路径
-        let workspace_dir = self.workspace_dir.read().await;
+        let workspace_dir = self.security.get_workspace_dir().await;
         let full_path = if PathBuf::from(path).is_absolute() {
             PathBuf::from(path)
         } else {
@@ -95,36 +95,40 @@ impl FileEditTool {
         };
         drop(workspace_dir);
 
-        // 获取父目录并解析
+        // 获取父目录
         let parent = full_path.parent().ok_or_else(|| {
             PluginError::ValidationError("无效路径：缺少父目录".to_string())
         })?;
 
-        let resolved_parent = tokio::fs::canonicalize(parent)
-            .await
-            .map_err(|e| PluginError::InternalError(format!("解析路径失败: {}", e)))?;
+        // 规范化父目录以进行验证（处理 Windows 的 \\?\ 前缀问题）
+        let normalized_parent = if parent.exists() {
+            // 如果存在，使用 canonicalize 获取规范路径
+            tokio::fs::canonicalize(parent).await
+                .map_err(|e| PluginError::InternalError(format!("解析路径失败: {}", e)))?
+        } else {
+            // 如果不存在（新文件），直接使用原始路径
+            parent.to_path_buf()
+        };
 
-        // 检查路径是否在工作区内
-        let workspace_dir = self.workspace_dir.read().await;
-        if !resolved_parent.starts_with(&*workspace_dir) {
+        // 验证解析后的路径
+        if !self.security.is_path_allowed_for_write(&normalized_parent).await {
             return Ok(StreamChunk {
                 data: json!({}),
                 done: true,
                 error: Some(format!(
-                    "路径超出工作区: {} 不在 {} 内",
-                    resolved_parent.display(),
-                    workspace_dir.display()
+                    "路径超出工作区: {}",
+                    normalized_parent.display()
                 )),
             });
         }
-        drop(workspace_dir);
 
         // 获取文件名
         let file_name = full_path.file_name().ok_or_else(|| {
             PluginError::ValidationError("无效路径：缺少文件名".to_string())
         })?;
 
-        let resolved_target = resolved_parent.join(file_name);
+        // 使用原始的 full_path 进行文件操作
+        let resolved_target = full_path.clone();
 
         // 符号链接检查
         if let Ok(meta) = tokio::fs::symlink_metadata(&resolved_target).await {

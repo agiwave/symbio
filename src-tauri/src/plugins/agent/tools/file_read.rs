@@ -86,10 +86,12 @@ impl FileReadTool {
         let resolved = tokio::fs::canonicalize(&full_path).await
             .map_err(|e| PluginError::InternalError(format!("无法解析路径: {}", e)))?;
 
-        // 再次检查解析后的路径
-        let workspace_dir = self.security.get_workspace_dir().await;
-        if !resolved.starts_with(&*workspace_dir) && !self.security.allowed_roots.iter().any(|r| resolved.starts_with(r)) {
-            return Err(PluginError::InternalError("路径解析后超出允许范围".into()));
+        // 验证解析后的路径
+        if !self.security.is_path_allowed_for_read(&resolved).await {
+            return Err(PluginError::InternalError(format!(
+                "路径解析后超出工作区范围: {}",
+                resolved.display()
+            )));
         }
 
         // 检查文件大小

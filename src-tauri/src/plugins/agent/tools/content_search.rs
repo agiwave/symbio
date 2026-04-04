@@ -1,5 +1,6 @@
 //! 内容搜索工具 - 使用正则表达式搜索文件内容 - 实现 Plugin trait
 
+use super::policy::SecurityPolicy;
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
 use async_trait::async_trait;
@@ -7,7 +8,6 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 const MAX_RESULTS: usize = 1000;
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
@@ -15,14 +15,14 @@ const TIMEOUT_SECS: u64 = 30;
 
 /// 内容搜索工具
 pub struct ContentSearchTool {
-    workspace_dir: Arc<RwLock<PathBuf>>,
+    security: Arc<SecurityPolicy>,
     has_rg: bool,
 }
 
 impl ContentSearchTool {
-    pub fn new(workspace_dir: PathBuf) -> Self {
+    pub fn new(security: Arc<SecurityPolicy>) -> Self {
         let has_rg = which::which("rg").is_ok();
-        Self { workspace_dir: Arc::new(RwLock::new(workspace_dir)), has_rg }
+        Self { security, has_rg }
     }
 
     fn create_meta() -> PluginMeta {
@@ -104,7 +104,7 @@ impl ContentSearchTool {
         let full_search_path = if PathBuf::from(search_path).is_absolute() {
             PathBuf::from(search_path)
         } else {
-            let workspace_dir = self.workspace_dir.read().await;
+            let workspace_dir = self.security.get_workspace_dir().await;
             workspace_dir.join(search_path)
         };
 
@@ -119,8 +119,9 @@ impl ContentSearchTool {
             }
         };
 
-        let workspace_dir = self.workspace_dir.read().await;
-        if !resolved_path.starts_with(&*workspace_dir) {
+        let workspace_dir = self.security.get_workspace_dir().await;
+        // 使用统一的路径验证方法
+        if !self.security.is_path_allowed_for_read(&resolved_path).await {
             return Ok(StreamChunk {
                 data: json!({}),
                 done: true,

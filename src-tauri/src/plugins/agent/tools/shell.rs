@@ -77,17 +77,32 @@ impl ShellTool {
 
         // 获取工作区目录
         let workspace_dir = self.security.get_workspace_dir().await;
-        
-        // 构建命令
-        let mut cmd = tokio::process::Command::new("sh");
-        cmd.arg("-c").arg(command);
+
+        // 构建命令 - 根据操作系统选择不同的 shell
+        #[cfg(target_os = "windows")]
+        let mut cmd = {
+            let mut c = tokio::process::Command::new("cmd");
+            c.arg("/C").arg(command);
+            c
+        };
+
+        #[cfg(not(target_os = "windows"))]
+        let mut cmd = {
+            let mut c = tokio::process::Command::new("sh");
+            c.arg("-c").arg(command);
+            c
+        };
+
         cmd.current_dir(&*workspace_dir);
 
-        // 清理环境变量
-        cmd.env_clear();
-        for var in SAFE_ENV_VARS {
-            if let Ok(val) = std::env::var(var) {
-                cmd.env(var, val);
+        // Windows 不清理环境变量（需要 PATH 等）
+        #[cfg(not(target_os = "windows"))]
+        {
+            cmd.env_clear();
+            for var in SAFE_ENV_VARS {
+                if let Ok(val) = std::env::var(var) {
+                    cmd.env(var, val);
+                }
             }
         }
 

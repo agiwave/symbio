@@ -1,23 +1,23 @@
 //! 文件搜索工具 - 使用 Glob 模式 - 实现 Plugin trait
 
+use super::policy::SecurityPolicy;
 use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 const MAX_RESULTS: usize = 1000;
 
 /// Glob 搜索工具
 pub struct GlobSearchTool {
-    workspace_dir: Arc<RwLock<PathBuf>>,
+    security: Arc<SecurityPolicy>,
 }
 
 impl GlobSearchTool {
-    pub fn new(workspace_dir: PathBuf) -> Self {
-        Self { workspace_dir: Arc::new(RwLock::new(workspace_dir)) }
+    pub fn new(security: Arc<SecurityPolicy>) -> Self {
+        Self { security }
     }
 
     fn create_meta() -> PluginMeta {
@@ -72,7 +72,7 @@ impl GlobSearchTool {
         }
 
         // 构建完整模式
-        let workspace_dir = self.workspace_dir.read().await;
+        let workspace_dir = self.security.get_workspace_dir().await;
         let full_pattern = workspace_dir.join(pattern).to_string_lossy().to_string();
         let workspace_canon = std::fs::canonicalize(&*workspace_dir)
             .map_err(|e| PluginError::InternalError(format!("无法解析工作区目录: {}", e)))?;
@@ -103,7 +103,8 @@ impl GlobSearchTool {
                 Err(_) => continue,
             };
 
-            if !resolved.starts_with(&workspace_canon) {
+            // 使用统一的路径验证方法
+            if !self.security.is_path_allowed_for_read(&resolved).await {
                 continue;
             }
 
@@ -111,6 +112,7 @@ impl GlobSearchTool {
                 continue;
             }
 
+            // 直接使用原始的带 \\?\ 前缀的路径进行 strip_prefix（两者都带前缀，可以正确匹配）
             if let Ok(rel) = resolved.strip_prefix(&workspace_canon) {
                 results.push(rel.to_string_lossy().to_string());
             }

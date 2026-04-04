@@ -85,11 +85,15 @@ pub struct OpenAiConfig {
     pub max_context_tokens: u32,
     #[serde(default = "default_reserved_tokens")]
     pub reserved_tokens: u32,
+    /// 请求超时时间（秒），默认 300 秒（5 分钟）
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
 }
 
 fn default_temperature() -> f32 { 0.7 }
 fn default_max_context_tokens() -> u32 { 128_000 }
 fn default_reserved_tokens() -> u32 { 4_096 }
+fn default_timeout_secs() -> u64 { 300 }
 
 impl Default for OpenAiConfig {
     fn default() -> Self {
@@ -102,6 +106,7 @@ impl Default for OpenAiConfig {
             system_prompt: None,
             max_context_tokens: default_max_context_tokens(),
             reserved_tokens: default_reserved_tokens(),
+            timeout_secs: default_timeout_secs(),
         }
     }
 }

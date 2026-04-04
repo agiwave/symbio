@@ -8,6 +8,41 @@ use std::sync::{Mutex, Arc};
 use std::time::Instant;
 use tokio::sync::RwLock;
 
+/// 规范化路径用于比较
+/// 在 Windows 上，canonicalize 返回带有 `\\?\` 前缀的路径，需要统一处理
+pub fn normalize_path_for_comparison(path: &Path) -> PathBuf {
+    let path_str = path.to_string_lossy();
+    // 移除 Windows UNC 路径前缀（如 \\?\）
+    if path_str.starts_with("\\\\?\\") {
+        PathBuf::from(&path_str[4..])
+    } else {
+        path.to_path_buf()
+    }
+}
+
+/// 检查路径是否以另一个路径为前缀（规范化后比较）
+fn path_starts_with_normalized(base: &Path, prefix: &Path) -> bool {
+    let normalized_base = normalize_path_for_comparison(base);
+    let normalized_prefix = normalize_path_for_comparison(prefix);
+    normalized_base.starts_with(&normalized_prefix)
+}
+
+/// 检查相对路径是否是安全的（不包含危险的 .. 遍历）
+pub fn is_safe_relative_path(path: &str) -> bool {
+    // 拒绝直接的 .. 
+    if path == ".." {
+        return false;
+    }
+    // 允许 ./xxx 和 xxx 这样的路径
+    // 拒绝 ../xxx
+    if path.starts_with("../") || path.starts_with("..\\") {
+        return false;
+    }
+    // 允许 xxx/../yyy 这样的路径，只要最终解析后是安全的
+    // 这个检查会在 execute_inner 中进行
+    true
+}
+
 /// Agent 自主级别
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -120,10 +155,18 @@ impl Default for SecurityPolicy {
             workspace_dir: Arc::new(RwLock::new(PathBuf::from("."))),
             workspace_only: false,
             allowed_commands: vec![
+                // 通用命令
                 "git".into(), "npm".into(), "cargo".into(),
+                "python3".into(), "python".into(), "R".into(), "Rscript".into(),
+                "echo".into(), "date".into(),
+                // Unix/Linux 命令
                 "ls".into(), "cat".into(), "grep".into(), "find".into(),
-                "echo".into(), "pwd".into(), "wc".into(), "head".into(), "tail".into(),
-                "date".into(), "python3".into(), "python".into(), "R".into(), "Rscript".into(),
+                "pwd".into(), "wc".into(), "head".into(), "tail".into(),
+                // Windows 命令
+                "dir".into(), "type".into(), "findstr".into(), "where".into(),
+                "cd".into(), "copy".into(), "xcopy".into(), "move".into(),
+                "del".into(), "mkdir".into(), "rmdir".into(), "cls".into(),
+                "ver".into(), "systeminfo".into(), "tasklist".into(),
             ],
             forbidden_paths: vec![
                 "/etc".into(), "/root".into(), "/usr".into(),
@@ -173,13 +216,15 @@ impl SecurityPolicy {
         }
     }
 
-    /// 检查路径是否被允许
-    pub async fn is_path_allowed<P: AsRef<Path>>(&self, path: P) -> bool {
+    /// 检查路径是否允许读取
+    /// 
+    /// 内部处理所有逻辑：相对路径安全性、禁止路径、工作区范围、canonicalize 后的绝对路径
+    pub async fn is_path_allowed_for_read<P: AsRef<Path>>(&self, path: P) -> bool {
         let path = path.as_ref();
         let path_str = path.to_string_lossy();
 
-        // 检查路径遍历
-        if path_str.contains("..") {
+        // 检查相对路径安全性（拒绝 ../ 遍历）
+        if !is_safe_relative_path(&path_str) {
             return false;
         }
 
@@ -191,33 +236,56 @@ impl SecurityPolicy {
             }
         }
 
+        // 如果不限制工作区，允许所有路径
         if !self.workspace_only {
             return true;
         }
 
-        let workspace = self.workspace_dir.read().await;
-        path.starts_with(&*workspace) ||
-            self.allowed_roots.iter().any(|r| path.starts_with(r))
-    }
+        // 相对路径允许（完整验证在工具执行时进行）
+        if !path.is_absolute() {
+            return true;
+        }
 
-    /// 检查路径是否允许读取
-    pub async fn is_path_allowed_for_read<P: AsRef<Path>>(&self, path: P) -> bool {
-        self.is_path_allowed(path).await
+        // 绝对路径：检查是否在工作区内
+        let workspace = self.workspace_dir.read().await;
+        path_starts_with_normalized(path, &*workspace) ||
+            self.allowed_roots.iter().any(|r| path_starts_with_normalized(path, r))
     }
 
     /// 检查路径是否允许写入
+    /// 
+    /// 内部处理所有逻辑：相对路径安全性、禁止路径、工作区范围、canonicalize 后的绝对路径
     pub async fn is_path_allowed_for_write<P: AsRef<Path>>(&self, path: P) -> bool {
         let path = path.as_ref();
+        let path_str = path.to_string_lossy();
 
-        // 检查禁止路径
-        if !self.is_path_allowed(path).await {
+        // 检查相对路径安全性（拒绝 ../ 遍历）
+        if !is_safe_relative_path(&path_str) {
             return false;
         }
 
-        // 写入只允许在工作区
+        // 检查禁止路径
+        for forbidden in &self.forbidden_paths {
+            let expanded = shellexpand::tilde(forbidden);
+            if path_str.starts_with(expanded.as_ref()) {
+                return false;
+            }
+        }
+
+        // 如果不限制工作区，允许所有路径
+        if !self.workspace_only {
+            return true;
+        }
+
+        // 相对路径允许（完整验证在工具执行时进行）
+        if !path.is_absolute() {
+            return true;
+        }
+
+        // 绝对路径：检查是否在工作区内
         let workspace = self.workspace_dir.read().await;
-        path.starts_with(&*workspace) ||
-            self.allowed_roots.iter().any(|r| path.starts_with(r))
+        path_starts_with_normalized(path, &*workspace) ||
+            self.allowed_roots.iter().any(|r| path_starts_with_normalized(path, r))
     }
 
     /// 检查命令是否被允许

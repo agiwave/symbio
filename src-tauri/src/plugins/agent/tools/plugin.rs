@@ -83,6 +83,8 @@ pub struct ToolsPlugin {
     tools: HashMap<String, Arc<dyn Plugin>>,
     /// 父插件引用（用于保存配置）
     parent: Option<Weak<dyn Plugin>>,
+    /// 安全策略（用于动态更新工作区路径）
+    security: Arc<SecurityPolicy>,
 }
 
 impl ToolsPlugin {
@@ -92,16 +94,16 @@ impl ToolsPlugin {
         let default_workspace = std::env::current_dir().unwrap_or_default();
         let security = Arc::new(SecurityPolicy::new(default_workspace.clone()));
 
-        // 创建所有工具实例
+        // 创建所有工具实例（都使用同一个 security 引用）
         let tools: HashMap<String, Arc<dyn Plugin>> = vec![
             ("read_file", Arc::new(FileReadTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
             ("write_file", Arc::new(FileWriteTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
-            ("file_edit", Arc::new(FileEditTool::new(default_workspace.clone())) as Arc<dyn Plugin>),
+            ("file_edit", Arc::new(FileEditTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
             ("shell", Arc::new(ShellTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
             ("web_fetch", Arc::new(WebFetchTool::new()) as Arc<dyn Plugin>),
             ("web_search", Arc::new(WebSearchTool::new()) as Arc<dyn Plugin>),
-            ("glob_search", Arc::new(GlobSearchTool::new(default_workspace.clone())) as Arc<dyn Plugin>),
-            ("content_search", Arc::new(ContentSearchTool::new(default_workspace.clone())) as Arc<dyn Plugin>),
+            ("glob_search", Arc::new(GlobSearchTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
+            ("content_search", Arc::new(ContentSearchTool::new(Arc::clone(&security))) as Arc<dyn Plugin>),
             ("http_request", Arc::new(HttpRequestTool::new()) as Arc<dyn Plugin>),
         ].into_iter().map(|(k, v)| (k.to_string(), v)).collect();
 
@@ -117,6 +119,7 @@ impl ToolsPlugin {
             config: Arc::new(RwLock::new(config)),
             tools,
             parent,
+            security,
         }
     }
 
@@ -519,7 +522,19 @@ impl Plugin for ToolsPlugin {
 
         // 子工具路径 - 路由到对应工具
         if let Some(tool) = self.tools.get(path) {
-            return tool.invoke("", input);
+            // 在执行工具调用前，更新工作区路径
+            let workspace = self.get_workspace_path();
+            let security = Arc::clone(&self.security);
+            let input_clone = input.clone();
+            
+            // 异步更新工作区路径
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    security.update_workspace_dir(workspace).await;
+                })
+            });
+            
+            return tool.invoke("", input_clone);
         }
 
         // 兼容旧的 tool/params 格式
@@ -531,7 +546,19 @@ impl Plugin for ToolsPlugin {
             let params = input.get("params").cloned().unwrap_or(json!({}));
 
             if let Some(tool) = self.tools.get(tool_name) {
-                return tool.invoke("", params);
+                // 在执行工具调用前，更新工作区路径
+                let workspace = self.get_workspace_path();
+                let security = Arc::clone(&self.security);
+                let params_clone = params.clone();
+                
+                // 异步更新工作区路径
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        security.update_workspace_dir(workspace).await;
+                    })
+                });
+                
+                return tool.invoke("", params_clone);
             }
 
             return Err(PluginError::NotFound(format!("工具不存在: {}", tool_name)));
