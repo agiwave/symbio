@@ -200,22 +200,6 @@ impl SecurityPolicy {
         self.workspace_dir.read().await
     }
 
-    pub fn read_only(workspace_dir: PathBuf) -> Self {
-        Self {
-            autonomy: AutonomyLevel::ReadOnly,
-            workspace_dir: Arc::new(RwLock::new(workspace_dir)),
-            ..Self::default()
-        }
-    }
-
-    pub fn full_autonomy(workspace_dir: PathBuf) -> Self {
-        Self {
-            autonomy: AutonomyLevel::Full,
-            workspace_dir: Arc::new(RwLock::new(workspace_dir)),
-            ..Self::default()
-        }
-    }
-
     /// 检查路径是否允许读取
     /// 
     /// 内部处理所有逻辑：相对路径安全性、禁止路径、工作区范围、canonicalize 后的绝对路径
@@ -306,11 +290,6 @@ impl SecurityPolicy {
         self.allowed_commands.iter().any(|allowed| {
             allowed == cmd_name || allowed == base_cmd
         })
-    }
-
-    /// 检查是否可以执行动作
-    pub fn can_act(&self) -> bool {
-        self.autonomy != AutonomyLevel::ReadOnly && !self.is_rate_limited()
     }
 
     /// 检查是否达到速率限制

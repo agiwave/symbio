@@ -56,7 +56,6 @@
             :key="`${activeSession.id}-${index}-${msg.timestamp}`"
             class="message"
             :class="msg.role"
-            v-show="msg.role !== 'tool'"
           >
             <div class="message-avatar">
               {{ msg.role === 'user' ? '👤' : '🤖' }}
@@ -144,13 +143,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { ref, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import { sendMessageStream, getProviderConfig, type ChatMessage, type StreamChunk } from '../services/ai'
 import {
   listSessions,
   getSession,
-  appendMessages,
   clearSession,
   createSessionId,
   type Session,

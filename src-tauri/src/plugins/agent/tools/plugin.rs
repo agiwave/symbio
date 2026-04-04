@@ -574,12 +574,6 @@ impl Plugin for ToolsPlugin {
     }
 }
 
-/// 获取所有工具的 OpenAI 格式定义（用于外部调用）
-pub fn get_all_tools_openai_format() -> Vec<Value> {
-    let plugin = ToolsPlugin::default();
-    plugin.get_all_tools_openai_format()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

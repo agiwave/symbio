@@ -72,8 +72,8 @@ pub enum InvokeStream {
 impl InvokeStream {
     /// 创建单次返回（同步场景）
     pub fn single(data: Value) -> Self {
-        InvokeStream::Single(StreamChunk { 
-            data, 
+        InvokeStream::Single(StreamChunk {
+            data,
             done: true,
             error: None,
         })

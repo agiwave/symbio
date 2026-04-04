@@ -41,7 +41,7 @@
     <div v-else class="main-container">
       <!-- 导航条 -->
       <nav class="nav-bar">
-        <div class="nav-logo" @click="currentPage = 'workspace'">
+        <div class="nav-logo" @click="showWorkspaceSwitcher = true">
           <svg class="logo-img" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="dnaGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -245,13 +245,6 @@ async function browseWorkspace() {
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '选择目录失败'
-  }
-}
-
-// 继续上次工作区
-async function continueLastWorkspace() {
-  if (workspacePath.value) {
-    await openWorkspaceWithPath(workspacePath.value)
   }
 }
 

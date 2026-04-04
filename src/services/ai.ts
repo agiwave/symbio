@@ -7,6 +7,9 @@
 
 import { callPlugin, streamPlugin, type StreamChunk } from './plugin'
 
+// 重新导出 StreamChunk 类型
+export type { StreamChunk }
+
 // Chat 插件路径
 const CHAT_PATH = 'agent/chat'
 // LLM 能力路由路径（直接操作 openai 插件）

@@ -149,16 +149,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useExplorerStore, type FileItem } from '../stores/explorer'
 import FileTreeNode from './FileTreeNode.vue'
 import AIChatPanel from './AIChatPanel.vue'
 import AISelectionDialog from './AISelectionDialog.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import CodeEditor from './CodeEditor.vue'
-import { createSessionId, type SessionMessage } from '../services/session'
+import { type SessionMessage } from '../services/session'
 import { useAISelection } from '@/composables/useAISelection'
-import { onDirChanged, onFileChanged, startWatching, stopWatching, type BrowserFileChangeEvent } from '../services/watcher'
+import { onDirChanged, onFileChanged, startWatching, stopWatching } from '../services/watcher'
 import { setAIContext } from '@/composables/useAIContext'
 
 const store = useExplorerStore()
@@ -191,7 +191,6 @@ function updateChatMessages(messages: SessionMessage[]) {
 // 文件树状态
 const fileTree = computed(() => store.fileTree)
 const rootItems = computed(() => store.rootItems)
-const currentPath = computed(() => store.currentPath)
 const selectedPath = computed(() => store.selectedPath)
 const fileContent = computed(() => store.fileContent)
 const loading = computed(() => store.loading)

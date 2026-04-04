@@ -137,14 +137,14 @@
           </div>
           
           <!-- 选中的文字提示 -->
-          <div v-if="selectedText || savedSelection?.startLine" class="ai-selected-context">
+          <div v-if="selectedText || (selectionDisplay && selectionDisplay.startLine)" class="ai-selected-context">
             <div class="context-header">
               <span class="context-label">选中的内容</span>
               <span v-if="filePath" class="file-path">
                 📄 {{ filePath.split(/[\\/]/).pop() }}
               </span>
-              <span v-if="savedSelection?.startLine" class="line-range">
-                📍 行 {{ savedSelection.startLine }}{{ savedSelection.endLine && savedSelection.endLine !== savedSelection.startLine ? '-' + savedSelection.endLine : '' }}
+              <span v-if="selectionDisplay && selectionDisplay.startLine" class="line-range">
+                📍 行 {{ selectionDisplay.startLine }}{{ selectionDisplay.endLine && selectionDisplay.endLine !== selectionDisplay.startLine ? '-' + selectionDisplay.endLine : '' }}
               </span>
             </div>
             <div class="context-text">{{ selectedText.slice(0, 100) }}{{ selectedText.length > 100 ? '...' : '' }}</div>
@@ -197,14 +197,12 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, shallowRef, watch } from 'vue'
-import { Editor, rootCtx, defaultValueCtx, editorViewCtx, commandsCtx, schemaCtx, parserCtx } from '@milkdown/kit/core'
-import { commonmark, paragraphSchema, headingSchema, bulletListSchema, orderedListSchema, blockquoteSchema, codeBlockSchema, setBlockTypeCommand, wrapInBlockTypeCommand, addBlockTypeCommand } from '@milkdown/kit/preset/commonmark'
+import { Editor, rootCtx, defaultValueCtx, editorViewCtx, commandsCtx, parserCtx } from '@milkdown/kit/core'
+import { commonmark, paragraphSchema, headingSchema, bulletListSchema, blockquoteSchema, codeBlockSchema, setBlockTypeCommand, wrapInBlockTypeCommand } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
 import { history } from '@milkdown/kit/plugin/history'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
-// BlockProvider removed - using direct editor view monitoring
-import { callPlugin } from '@/services/plugin'
-import { useAIChat, type AIChatContext } from '@/composables/useAIChat'
+import { useAIChat } from '@/composables/useAIChat'
 import { setAIContext } from '@/composables/useAIContext'
 import { marked } from 'marked'
 
@@ -221,7 +219,6 @@ const emit = defineEmits<{
 }>()
 
 // DOM refs
-const containerRef = ref<HTMLElement | null>(null)
 const editorRef = ref<HTMLElement | null>(null)
 const messagesRef = ref<HTMLElement | null>(null)
 const aiInputRef = ref<HTMLTextAreaElement | null>(null)
@@ -267,7 +264,6 @@ const dropIndicatorStyle = computed(() => ({
 // AI dialog
 const showAIDialog = ref(false)
 const selectedText = ref('')
-const aiDialogRef = ref<HTMLElement | null>(null)
 
 // 使用统一的 AI Chat composable
 // 使用全局 AI 上下文
@@ -298,12 +294,22 @@ const aiDialogStyle = computed(() => ({
 }))
 
 // 保存选区信息（用于在对话框打开后仍能引用选中的文字）
-let savedSelection: { text: string; rect: DOMRect; startLine?: number; endLine?: number } | null = null
+interface SelectionInfo {
+  text: string
+  rect: DOMRect
+  startLine?: number
+  endLine?: number
+}
+const savedSelection = shallowRef<SelectionInfo | null>(null)
+
+// 为模板提供类型安全的访问
+const selectionDisplay = computed(() => savedSelection.value)
 
 // 计算对话框位置，跟随选区并避免超出屏幕
 function calculateDialogPosition() {
-  if (savedSelection && savedSelection.rect) {
-    const rect = savedSelection.rect
+  const sel = savedSelection.value
+  if (sel && sel.rect) {
+    const rect = sel.rect
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
     
@@ -349,25 +355,11 @@ function calculateDialogPosition() {
   }
 }
 
-// 打开 AI 对话框（用于选区触发）
-function openAIForSelection(text: string, rect: DOMRect) {
-  // 保存选区信息
-  savedSelection = { text, rect }
-  selectedText.value = text
-  calculateDialogPosition()
-
-  // 打开对话框
-  showAIDialog.value = true
-  aiChat.clearMessages()
-  aiInput.value = ''
-  // 注意：不自动 focus，避免选区丢失
-}
-
 // 关闭 AI 对话框
 function closeAIDialog() {
   showAIDialog.value = false
   selectedText.value = ''
-  savedSelection = null
+  savedSelection.value = null
   aiChat.clearMessages()
 }
 
@@ -376,7 +368,7 @@ function openAI() {
   showToolbar.value = false
 
   // 如果没有活跃选区，尝试获取当前 ProseMirror 选区
-  if (!savedSelection && editor.value && editor.value.ctx) {
+  if (!savedSelection.value && editor.value && editor.value.ctx) {
     try {
       const view = editor.value.ctx.get(editorViewCtx)
       const { state } = view
@@ -390,7 +382,7 @@ function openAI() {
         const linesBefore = textBefore.split('\n').length
         const selectedLines = selectedTextFromDoc.split('\n').length
 
-        savedSelection = {
+        savedSelection.value = {
           text: selectedTextFromDoc.trim(),
           rect: { left: 0, top: 0, width: 0, height: 0 } as DOMRect,
           startLine: linesBefore,
@@ -398,13 +390,13 @@ function openAI() {
         }
         selectedText.value = selectedTextFromDoc.trim()
       }
-    } catch (e) {
+    } catch (_e) {
       // 忽略错误，保持原有行为
     }
   }
 
   // 只有有选区时才打开对话框
-  if (!savedSelection || !selectedText.value) {
+  if (!savedSelection.value || !selectedText.value) {
     return
   }
 
@@ -414,8 +406,8 @@ function openAI() {
       filePath: props.filePath,
       fileContent: props.modelValue,
       selectedText: selectedText.value,
-      startLine: savedSelection?.startLine,
-      endLine: savedSelection?.endLine,
+      startLine: savedSelection.value?.startLine,
+      endLine: savedSelection.value?.endLine,
     })
   }
 
@@ -483,7 +475,7 @@ async function initEditor() {
             // 同时更新本地 savedSelection（用于 UI 显示）
             const range = document.getSelection()?.getRangeAt(0)
             const rect = range?.getBoundingClientRect() || { left: 0, top: 0, width: 0, height: 0 } as DOMRect
-            savedSelection = {
+            savedSelection.value = {
               text: selectedTextFromDoc.trim(),
               rect,
               startLine: linesBefore,
@@ -504,7 +496,7 @@ async function initEditor() {
             })
 
             // 清除本地选区
-            savedSelection = null
+            savedSelection.value = null
             selectedText.value = ''
           }
         } catch (e) {
@@ -584,7 +576,7 @@ async function initEditor() {
   editor.value.ctx.get(editorViewCtx).dom.addEventListener('keyup', updateBlockHandle)
   
   // 监听编辑器 mouseup 事件 - 检测文字选择并打开/更新 AI 对话框
-  const handleEditorMouseUp = (e: MouseEvent) => {
+  const handleEditorMouseUp = (_e: MouseEvent) => {
     // 延迟检查，确保选区已经稳定
     setTimeout(() => {
       try {
@@ -650,7 +642,7 @@ async function initEditor() {
             }
 
             // 保存选区信息
-            savedSelection = { text: selectedContent, rect, startLine, endLine }
+            savedSelection.value = { text: selectedContent, rect, startLine, endLine }
             selectedText.value = selectedContent
 
             // 更新全局 AI 上下文
@@ -806,7 +798,7 @@ function handleDragMouseMove(e: MouseEvent) {
   }
 }
 
-function handleDragMouseUp(e: MouseEvent) {
+function handleDragMouseUp(_e: MouseEvent) {
   // 移除事件监听
   document.removeEventListener('mousemove', handleDragMouseMove)
   document.removeEventListener('mouseup', handleDragMouseUp)
@@ -907,10 +899,8 @@ function executeCommand(commandKey: string, args?: any) {
 function addBlockBelow() {
   if (!editorCtx.value) return
   
-  const schema = editorCtx.value.get(schemaCtx)
-  const paragraph = paragraphSchema.type(editorCtx.value)
-  
-  executeCommand(addBlockTypeCommand.key, { nodeType: paragraph })
+  // 使用 insert 命令添加新段落
+  executeCommand('InsertParagraph', {})
   showToolbar.value = false
 }
 
@@ -1044,7 +1034,7 @@ function decreaseLevel() {
 }
 
 // Update content when modelValue changes externally
-watch(() => props.modelValue, async (newValue, oldValue) => {
+watch(() => props.modelValue, async (newValue, _oldValue) => {
   if (!editor.value || newValue === undefined) return
   
   try {

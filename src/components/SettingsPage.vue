@@ -291,7 +291,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import logoUrl from '../assets/logo.svg'
 import {
   getOpenAiConfig,
@@ -307,6 +307,7 @@ import {
   type ToolsConfig,
   type WorkConfig,
 } from '../services/config'
+import { configureProvider, type ProviderConfig } from '../services/ai'
 
 const activeSection = ref('ai')
 const saving = ref(false)
@@ -469,13 +470,26 @@ async function loadConfigs() {
 async function saveAiConfig() {
   saving.value = true
   try {
-    await setOpenAiConfig({
+    // 使用 configureProvider 来配置 AI，这会将 api_key 传递给后端
+    const providerConfig: ProviderConfig = {
+      api_base: aiConfig.api_base || 'https://api.openai.com/v1',
+      api_key: aiConfig.api_key || '',
+      model: aiConfig.model || 'gpt-4o-mini',
+      temperature: aiConfig.temperature,
+      max_tokens: aiConfig.max_tokens,
+    }
+    await configureProvider(providerConfig)
+    
+    // 同时保存到本地配置（不包含 api_key，因为 OpenAiConfig 只有 api_key_set）
+    const configToSave: Partial<OpenAiConfig> = {
       api_base: aiConfig.api_base,
-      api_key: aiConfig.api_key,
       model: aiConfig.model,
       temperature: aiConfig.temperature,
       max_tokens: aiConfig.max_tokens,
-    })
+      api_key_set: !!aiConfig.api_key,
+    }
+    await setOpenAiConfig(configToSave)
+    
     showMessage('success', 'AI 配置已保存')
   } catch (err) {
     showMessage('error', `保存失败: ${err}`)

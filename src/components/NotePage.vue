@@ -86,11 +86,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useNoteStore, type Note } from '../stores/note'
+import { useNoteStore } from '../stores/note'
 import TreeNode from './TreeNode.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import AIChatPanel from './AIChatPanel.vue'
-import { createSessionId, type SessionMessage } from '../services/session'
+import { type SessionMessage } from '../services/session'
 
 const store = useNoteStore()
 

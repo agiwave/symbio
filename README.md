@@ -5,29 +5,44 @@
 ## 核心设计理念
 
 ### 1. 三命令接口
+
 系统只提供三个核心 Tauri 命令：
-- **`meta`**: 通过路径获取插件的 `PluginMeta` 信息
-- **`invoke`**: 同步调用插件
-- **`stream`**: 流式调用插件
+
+* **`meta`**: 通过路径获取插件的 `PluginMeta` 信息
+
+* **`invoke`**: 同步调用插件  
+
+* **`stream`**: 流式调用插件
 
 ### 2. 路径寻址
+
 所有命令都通过路径来定位插件：
-- 空路径：访问 root 插件
-- `["plugin_name"]`：访问指定插件
-- `["plugin_name", "child_name", ...]`：逐级访问子插件（分形模式）
+
+* 空路径：访问 root 插件
+
+* `["plugin_name"]`：访问指定插件
+
+* `["plugin_name", "child_name", ...]`：逐级访问子插件（分形模式）
 
 ### 3. 插件平等
-- 所有插件实现统一的 `Plugin` 接口
-- Root Agent 也是 `Arc<dyn Plugin>`，无特殊概念
+
+* 所有插件实现统一的 `Plugin` 接口
+
+* Root Agent 也是 `Arc<dyn Plugin>`，无特殊概念
 
 ### 4. 全局工厂注册表
-- `PluginFactoryRegistry` 是全局单例
-- 每个插件有自己的 `PluginFactory` 实现
-- 插件主动注册自己的工厂到全局注册表
+
+* `PluginFactoryRegistry` 是全局单例
+
+* 每个插件有自己的 `PluginFactory` 实现
+
+* 插件主动注册自己的工厂到全局注册表
 
 ### 5. 分形嵌套
-- Agent 通过 `AgentFactory` 创建，支持嵌套
-- Agent 可以包含 Agent 作为子插件
+
+* Agent 通过 `AgentFactory` 创建，支持嵌套
+
+* Agent 可以包含 Agent 作为子插件
 
 ## 目录结构
 
@@ -68,6 +83,7 @@ src-tauri/src/
 ## 核心接口
 
 ### Plugin Trait
+
 ```rust
 #[async_trait::async_trait]
 pub trait Plugin: Send + Sync {
@@ -79,6 +95,7 @@ pub trait Plugin: Send + Sync {
 ```
 
 ### PluginFactory Trait
+
 ```rust
 #[async_trait::async_trait]
 pub trait PluginFactory: Send + Sync {
@@ -90,6 +107,7 @@ pub trait PluginFactory: Send + Sync {
 ## API 使用示例
 
 ### 1. 获取插件元数据
+
 ```typescript
 // 获取 root 元数据
 const rootMeta = await invoke('meta', { path: [] })
@@ -99,6 +117,7 @@ const echoMeta = await invoke('meta', { path: ['echo'] })
 ```
 
 ### 2. 同步调用插件
+
 ```typescript
 // 调用 echo 插件
 const result = await invoke('invoke', {
@@ -108,6 +127,7 @@ const result = await invoke('invoke', {
 ```
 
 ### 3. 流式调用插件
+
 ```typescript
 // 流式调用 openai/stream 插件（示例）
 const chunks = await invoke('stream', {
@@ -199,11 +219,15 @@ npm run tauri build
 #### 快速发布新版本
 
 1. **更新版本号**（三个文件都需要同步）：
-   - `package.json`
-   - `src-tauri/tauri.conf.json`
-   - `src-tauri/Cargo.toml`
+
+   * `package.json`
+
+   * `src-tauri/tauri.conf.json`
+
+   * `src-tauri/Cargo.toml`
 
 2. **提交并打标签**：
+
 ```bash
 git add .
 git commit -m "chore: bump version to 0.2.0"
@@ -211,6 +235,12 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
+3. 或者
+
+```bash
+npx tsx scripts/release.ts patch
+```
+
 ## 许可证
 
-本项目采用 [MIT License](./LICENSE) 协议开源。
+本项目采用 [MIT License](./LICENSE) 协议开

@@ -40,7 +40,6 @@ export interface UseAISelectionOptions {
 // 对话框尺寸常量
 const DIALOG_WIDTH = 360
 const DIALOG_MIN_HEIGHT = 200
-const DIALOG_MAX_HEIGHT = 400
 const MARGIN = 12
 
 export function useAISelection(options: UseAISelectionOptions) {
@@ -207,7 +206,7 @@ export function useAISelection(options: UseAISelectionOptions) {
   }
 
   // 处理 mouseup 事件 - 选区检测
-  function handleMouseUp(e: MouseEvent, containerEl?: HTMLElement, context?: { filePath?: string; fullContent?: string }) {
+  function handleMouseUp(_e: MouseEvent, _containerEl?: HTMLElement, context?: { filePath?: string; fullContent?: string }) {
     // 如果正在加载，不处理
     if (loading.value) return
 
@@ -227,18 +226,17 @@ export function useAISelection(options: UseAISelectionOptions) {
             // 计算行号（如果有完整内容）
             let startLine: number | undefined
             let endLine: number | undefined
-            
+
             if (context?.fullContent && context?.filePath) {
-              const lines = context.fullContent.split('\n')
               const selectedText = text
-              
+
               // 在完整内容中查找选中内容的起始位置
               const startIndex = context.fullContent.indexOf(selectedText)
               if (startIndex !== -1) {
                 // 计算起始行号
                 const beforeStart = context.fullContent.substring(0, startIndex)
                 startLine = (beforeStart.match(/\n/g) || []).length + 1
-                
+
                 // 计算结束行号
                 const endIndex = startIndex + selectedText.length
                 const beforeEnd = context.fullContent.substring(0, endIndex)

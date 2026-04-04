@@ -123,7 +123,7 @@ impl FileEditTool {
         }
 
         // 获取文件名
-        let file_name = full_path.file_name().ok_or_else(|| {
+        let _file_name = full_path.file_name().ok_or_else(|| {
             PluginError::ValidationError("无效路径：缺少文件名".to_string())
         })?;
 

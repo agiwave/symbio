@@ -167,7 +167,12 @@ jobs:
             libgtk-3-dev \
             libsoup-3.0-dev \
             libwebkit2gtk-4.1-dev \
-            libjavascriptcoregtk-4.1-dev
+            libjavascriptcoregtk-4.1-dev \
+            libfuse2 \
+            desktop-file-utils \
+            libglib2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev
 
       - name: Install dependencies
         run: npm ci
@@ -175,19 +180,18 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Build Tauri app
+      - name: Build Tauri app (deb only)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --bundles appimage,deb
+          args: --bundles deb
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
           path: |
-            src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: warn
 
@@ -204,35 +208,35 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          
+
       - name: Prepare release notes
         id: release_notes
         run: |
           VERSION=${{ needs.check-version.outputs.version }}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          
+
           # 生成更新日志
           echo "## 更新内容" > RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           git log $(git describe --tags --abbrev=0 HEAD^)..HEAD --pretty=format:"- %s (%h)" >> RELEASE_NOTES.md 2>/dev/null || \
           git log -10 --pretty=format:"- %s (%h)" >> RELEASE_NOTES.md
-          
+
           echo "" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "## 下载" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "### Windows" >> RELEASE_NOTES.md
-          echo "- **x64**: Windows x64 NSIS 安装包 / MSI 安装包" >> RELEASE_NOTES.md
+          echo "- **x64**: Windows x64 NSIS 安装包" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "### macOS" >> RELEASE_NOTES.md
           echo "- **x64**: macOS Intel (x86_64) DMG" >> RELEASE_NOTES.md
           echo "- **ARM64**: macOS Apple Silicon (M1/M2) DMG" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "### Linux" >> RELEASE_NOTES.md
-          echo "- **x64**: Linux x64 AppImage / DEB 包" >> RELEASE_NOTES.md
-          
+          echo "- **x64**: Linux x64 DEB 包" >> RELEASE_NOTES.md
+
           cat RELEASE_NOTES.md
-          
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -244,7 +248,6 @@ jobs:
           files: |
             artifacts/windows-x64-binaries/*.exe
             artifacts/macos-binaries/*.dmg
-            artifacts/linux-binaries/*.AppImage
             artifacts/linux-binaries/*.deb
           fail_on_unmatched_files: false
         env:

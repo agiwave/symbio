@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::sync::{Arc, Weak};
 
 /// 插件能力标识
-/// 
+///
 /// 用于能力路由，插件声明自己支持的能力
 pub const CAPABILITY_LLM: &str = "llm";
 
@@ -57,26 +57,4 @@ pub trait PluginFactory: Send + Sync {
     /// parent: 父插件弱引用，用于插件间协作（避免循环引用）
     /// config: 可选的配置参数
     fn create(&self, parent: Option<Weak<dyn Plugin>>, config: Option<&Value>) -> Arc<dyn Plugin>;
-}
-
-/// 插件父引用辅助结构
-/// 
-/// 用于子插件存储父插件的弱引用
-pub struct ParentRef {
-    parent: Weak<dyn Plugin>,
-}
-
-impl ParentRef {
-    pub fn new(parent: &Arc<dyn Plugin>) -> Self {
-        Self {
-            parent: Arc::downgrade(parent),
-        }
-    }
-
-    /// 获取父插件引用
-    /// 
-    /// 如果父插件已销毁则返回 None
-    pub fn get(&self) -> Option<Arc<dyn Plugin>> {
-        self.parent.upgrade()
-    }
 }

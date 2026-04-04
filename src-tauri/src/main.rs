@@ -1,5 +1,7 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Allow dead code during development
+#![allow(dead_code)]
 
 mod core;
 mod plugins;
@@ -14,7 +16,6 @@ use plugins::{
     ExplorerFactory,
 };
 use std::sync::{Mutex, Arc};
-use tauri::Manager;
 
 /// 全局 AppHandle（用于插件发送事件）
 static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();

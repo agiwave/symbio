@@ -34,7 +34,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { executeCodeBlock, isExecutableLanguage } from '../services/executor'
+import { executeCodeBlock } from '../services/executor'
 
 const props = defineProps<{
   code: string
@@ -49,7 +49,11 @@ const result = ref<{
   duration_ms: number
 } | null>(null)
 
-const executable = computed(() => isExecutableLanguage(props.language))
+// 判断语言是否可执行
+const executable = computed(() => {
+  const lang = props.language.toLowerCase()
+  return ['python', 'python3', 'py', 'r', 'bash', 'sh', 'shell'].includes(lang)
+})
 
 async function executeCode() {
   if (isExecuting.value) return

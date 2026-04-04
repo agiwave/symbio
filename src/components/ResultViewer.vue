@@ -10,12 +10,12 @@
     <div v-else-if="result" class="result-content">
       <!-- 对象类型结果 -->
       <div v-if="isObject(result)" class="result-object">
-        <div 
-          v-for="(value, key) in result" 
+        <div
+          v-for="(value, key) in result"
           :key="key"
           class="result-field"
         >
-          <span class="field-key">{{ formatKey(key) }}</span>
+          <span class="field-key">{{ formatKey(String(key)) }}</span>
           <span class="field-value">{{ formatValue(value) }}</span>
         </div>
       </div>

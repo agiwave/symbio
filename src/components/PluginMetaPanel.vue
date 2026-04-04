@@ -1,8 +1,8 @@
 <template>
   <div class="plugin-meta-panel">
-    <h2 class="plugin-name">{{ meta.name }}</h2>
-    <p class="plugin-description">{{ meta.description }}</p>
-    
+    <h2 class="plugin-name">{{ meta?.name }}</h2>
+    <p class="plugin-description">{{ meta?.description }}</p>
+
     <div class="meta-tags" v-if="hasInputSchema || hasOutputSchema">
       <span v-if="hasInputSchema" class="meta-tag tag-input">
         需要输入
@@ -23,13 +23,15 @@ const props = defineProps<{
 }>()
 
 const hasInputSchema = computed(() => {
-  return props.meta?.input_schema && 
-         Object.keys(props.meta.input_schema.properties || {}).length > 0
+  return props.meta?.input &&
+         typeof props.meta.input === 'object' &&
+         Object.keys(props.meta.input.properties || {}).length > 0
 })
 
 const hasOutputSchema = computed(() => {
-  return props.meta?.output_schema && 
-         Object.keys(props.meta.output_schema.properties || {}).length > 0
+  return props.meta?.output &&
+         typeof props.meta.output === 'object' &&
+         Object.keys(props.meta.output.properties || {}).length > 0
 })
 </script>
 

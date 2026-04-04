@@ -57,7 +57,7 @@ export const useExplorerStore = defineStore('explorer', () => {
 
     // 找出所有项的最小深度
     let minDepth = Infinity
-    fileTree.value.forEach((item, key) => {
+    fileTree.value.forEach((_item, key) => {
       const depth = normalizePath(key).split('/').length
       if (depth < minDepth) minDepth = depth
     })
@@ -226,7 +226,7 @@ export const useExplorerStore = defineStore('explorer', () => {
   async function selectItem(path: string) {
     selectedPath.value = path
 
-    let item = fileTree.value.get(path)
+    let item: FileItem | undefined | null = fileTree.value.get(path)
     if (!item) {
       // 尝试从后端获取
       item = await getItem(path)

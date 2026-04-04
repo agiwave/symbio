@@ -7,7 +7,7 @@
 //! 注意：配置管理由 openai 插件负责，前端应直接调用 agent/@llm 或 agent/openai
 
 use crate::core::traits::{Plugin, CAPABILITY_LLM};
-use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
+use crate::core::types::{PluginMeta, PluginResult, InvokeStream, StreamChunk};
 use serde_json::{Value, json};
 use std::sync::{Arc, Weak};
 

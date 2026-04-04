@@ -19,7 +19,6 @@
         :key="`${sessionId}-${index}-${msg.timestamp}`"
         class="message"
         :class="msg.role"
-        v-show="msg.role !== 'tool'"
       >
         <div class="message-avatar">
           {{ msg.role === 'user' ? '👤' : '🤖' }}
@@ -108,15 +107,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch, onMounted, computed } from 'vue'
+import { ref, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import { sendMessageStream, type ChatMessage, type StreamChunk } from '../services/ai'
 import {
   getSessionMessages,
-  createSessionId,
   type SessionMessage,
 } from '../services/session'
-import { useAIContext, buildContextualMessage, setAIContext } from '@/composables/useAIContext'
+import { useAIContext, buildContextualMessage } from '@/composables/useAIContext'
 
 // 使用全局 AI 上下文
 const { context } = useAIContext()

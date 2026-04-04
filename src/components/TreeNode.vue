@@ -95,7 +95,7 @@ function onDragEnd() {
   draggedId = null
 }
 
-function onDragOver(e: DragEvent) {
+function onDragOver(_e: DragEvent) {
   if (draggedId && draggedId !== props.document.id) {
     isDragOver.value = true
   }
@@ -125,13 +125,13 @@ function onDrop(e: DragEvent) {
 // 检查是否是后代节点
 function isDescendant(parentId: string, childId: string): boolean {
   const parent = props.documents.get(parentId)
-  if (!parent) return false
-  
+  if (!parent || !parent.children) return false
+
   for (const child of parent.children) {
     if (child === childId) return true
     if (isDescendant(child, childId)) return true
   }
-  
+
   return false
 }
 </script>
