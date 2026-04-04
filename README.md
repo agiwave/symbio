@@ -39,18 +39,31 @@ src-tauri/src/
 │   ├── types.rs            # 核心类型
 │   └── registry.rs         # PluginFactoryRegistry (全局单例)
 ├── plugins/
-│   ├── agent/
-│   │   ├── mod.rs          # Agent 插件实现
+│   ├── agent/              # Agent 插件（AI 助手）
+│   │   ├── mod.rs          # Agent 主实现
 │   │   ├── factory.rs      # AgentFactory
-│   │   ├── add.rs          # 添加子插件
-│   │   ├── list.rs         # 列出子插件
-│   │   └── remove.rs       # 删除子插件
-│   ├── echo/
-│   ├── calculator/
-│   └── formatter/
+│   │   ├── add.rs          # 添加子插件命令
+│   │   ├── list.rs         # 列出子插件命令
+│   │   └── remove.rs       # 删除子插件命令
+│   │   ├── chat/           # 聊天功能子插件
+│   │   ├── memory/         # 记忆管理子插件
+│   │   ├── openai/         # OpenAI API 集成（含 stream/）
+│   │   ├── session/        # 会话管理子插件
+│   │   ├── telegram/       # Telegram 集成子插件
+│   │   └── tools/          # AI 工具集（文件操作、搜索等）
+│   ├── composite/          # 组合插件
+│   ├── docker/             # Docker 容器执行
+│   ├── echo/               # 回声测试插件
+│   ├── explorer/           # 文件系统浏览器
+│   ├── home/               # 主页功能插件
+│   ├── note/               # 笔记管理插件
+│   ├── setting/            # 设置管理插件
+│   └── work/               # 工作区管理插件
 ├── commands.rs             # 三个核心命令：meta/invoke/stream
 └── main.rs
 ```
+
+> **说明**：Agent 是一个特殊的插件，支持嵌套子插件（分形模式），包括聊天、记忆、OpenAI API、会话管理、Telegram 集成以及各种 AI 工具。
 
 ## 核心接口
 
@@ -96,9 +109,9 @@ const result = await invoke('invoke', {
 
 ### 3. 流式调用插件
 ```typescript
-// 流式调用 formatter 插件
+// 流式调用 openai/stream 插件（示例）
 const chunks = await invoke('stream', {
-  path: ['formatter'],
+  path: ['openai', 'stream'],
   input: { text: 'Hello World' }
 })
 ```
@@ -149,9 +162,11 @@ fn main() {
 
     // 插件主动注册自己的工厂
     registry.register(Arc::new(EchoFactory::new()));
-    registry.register(Arc::new(CalculatorFactory::new()));
-    registry.register(Arc::new(FormatterFactory::new()));
+    registry.register(Arc::new(CompositeFactory::new()));
+    registry.register(Arc::new(DockerFactory::new()));
+    registry.register(Arc::new(ExplorerFactory::new()));
     registry.register(Arc::new(AgentFactory::new()));
+    // ... 其他插件
 
     // 使用 AgentFactory 创建 root agent
     let root: Arc<dyn Plugin> = registry
@@ -177,6 +192,25 @@ npm run tauri dev
 npm run tauri build
 ```
 
+## 发布版本说明
+
+### 使用方式
+
+#### 快速发布新版本
+
+1. **更新版本号**（三个文件都需要同步）：
+   - `package.json`
+   - `src-tauri/tauri.conf.json`
+   - `src-tauri/Cargo.toml`
+
+2. **提交并打标签**：
+```bash
+git add .
+git commit -m "chore: bump version to 0.2.0"
+git tag v0.2.0
+git push origin v0.2.0
+```
+
 ## 许可证
 
-MIT
+本项目采用 [MIT License](./LICENSE) 协议开源。

@@ -113,9 +113,9 @@ export function buildContextualMessage(
   }
 
   // 添加完整文件内容（如果有）
-  if (ctx.fileContent) {
-    contextParts.push(`\n**完整文件内容：**\n\`\`\`\n${ctx.fileContent}\n\`\`\``)
-  }
+  // if (ctx.fileContent) {
+  //   contextParts.push(`\n**完整文件内容：**\n\`\`\`\n${ctx.fileContent}\n\`\`\``)
+  // }
 
   if (contextParts.length > 0) {
     return `[上下文信息]\n${contextParts.join('\n')}\n\n---\n\n**问题：** ${userInput}`
