@@ -8,6 +8,11 @@ import { defineStore } from 'pinia'
 import { ref, computed, shallowRef, triggerRef } from 'vue'
 import { callPlugin } from '@/services/plugin'
 
+/** 规范化路径：统一使用正斜杠，确保跨平台一致 */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/')
+}
+
 export interface FileItem {
   name: string
   path: string
@@ -71,14 +76,18 @@ export const useExplorerStore = defineStore('explorer', () => {
 
   // 获取子项列表
   function getChildren(parentPath: string): FileItem[] {
+    // 规范化路径
+    const normParent = normalizePath(parentPath)
+    const prefix = normParent ? normParent + '/' : ''
+    const parentDepth = normParent ? normParent.split('/').length : 0
+
     const children: FileItem[] = []
-    const prefix = parentPath ? parentPath + '/' : ''
-    const parentDepth = parentPath ? parentPath.split('/').length : 0
-    
+
     fileTree.value.forEach((item, key) => {
+      const normKey = normalizePath(key)
       // 检查是否是直接子项
-      if (key.startsWith(prefix) && key !== parentPath) {
-        const keyDepth = key.split('/').length
+      if (normKey.startsWith(prefix) && normKey !== normParent) {
+        const keyDepth = normKey.split('/').length
         // 只取直接子项（深度 = 父深度 + 1）
         if (keyDepth === parentDepth + 1) {
           children.push(item)
@@ -144,7 +153,8 @@ export const useExplorerStore = defineStore('explorer', () => {
             function flattenItems(items: FileItem[]): FileItem[] {
               let flat: FileItem[] = []
               for (const item of items) {
-                flat.push(item)
+                const normalized = { ...item, path: normalizePath(item.path) }
+                flat.push(normalized)
                 if (item.children) {
                   flat = flat.concat(flattenItems(item.children))
                 }
@@ -159,7 +169,8 @@ export const useExplorerStore = defineStore('explorer', () => {
           } else {
             // 非递归加载，只更新当前层级
             for (const item of result.items) {
-              map.set(item.path, item)
+              const normalized = { ...item, path: normalizePath(item.path) }
+              map.set(normalized.path, normalized)
             }
           }
         })
