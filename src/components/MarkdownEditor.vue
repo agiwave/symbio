@@ -1097,6 +1097,14 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
 
+  // Ctrl+S 保存
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault()
+    e.stopPropagation()
+    emit('request-save')
+    return
+  }
+
   // Ctrl+K 不处理,让父组件处理(避免重复打开)
 }
 

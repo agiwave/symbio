@@ -76,11 +76,12 @@ impl ExplorerPlugin {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list", "get", "config", "read", "exists", "start_watch", "stop_watch"],
+                        "enum": ["list", "get", "config", "read", "write", "exists", "start_watch", "stop_watch"],
                         "description": "操作类型"
                     },
                     "path": { "type": "string", "description": "文件/目录路径" },
-                    "recursive": { "type": "boolean", "description": "是否递归列出" }
+                    "recursive": { "type": "boolean", "description": "是否递归列出" },
+                    "content": { "type": "string", "description": "文件内容（write 操作时使用）" }
                 }
             })),
             output: Some(json!({
@@ -458,6 +459,32 @@ impl ExplorerPlugin {
         }))
     }
 
+    /// 写入文件内容
+    fn write_file(&self, path: &str, content: &str) -> Result<Value, PluginError> {
+        let workspace = self.get_workspace_path()?;
+        let target_path = workspace.join(path);
+
+        // 确保父目录存在
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| PluginError::InternalError(format!("创建目录失败：{}", e)))?;
+        }
+
+        // 写入文件
+        fs::write(&target_path, content)
+            .map_err(|e| PluginError::InternalError(format!("写入文件失败：{}", e)))?;
+
+        eprintln!("[explorer] write_file: {} ({} bytes)", target_path.display(), content.len());
+
+        Ok(json!({
+            "success": true,
+            "data": {
+                "path": path,
+                "size": content.len()
+            }
+        }))
+    }
+
     /// 检查文件/目录是否存在
     fn exists(&self, path: &str) -> Result<Value, PluginError> {
         let workspace = self.get_workspace_path()?;
@@ -591,6 +618,13 @@ impl Plugin for ExplorerPlugin {
                 let path = input.get("path").and_then(|v| v.as_str())
                     .ok_or_else(|| PluginError::ValidationError("缺少 path 参数".to_string()))?;
                 self.read_file(path)?
+            }
+            "write" => {
+                let path = input.get("path").and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ValidationError("缺少 path 参数".to_string()))?;
+                let content = input.get("content").and_then(|v| v.as_str())
+                    .ok_or_else(|| PluginError::ValidationError("缺少 content 参数".to_string()))?;
+                self.write_file(path, content)?
             }
             "exists" => {
                 let path = input.get("path").and_then(|v| v.as_str())

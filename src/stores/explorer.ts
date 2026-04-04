@@ -257,17 +257,25 @@ export const useExplorerStore = defineStore('explorer', () => {
   // 保存文件内容
   async function saveFile(path: string, content: string): Promise<boolean> {
     try {
-      await callPlugin('explorer', {
+      const result = await callPlugin<any>('explorer', {
         action: 'write',
         path,
         content
       })
-      // 更新缓存内容
-      fileContent.value = content
-      return true
+      
+      if (result && result.success) {
+        // 更新缓存内容
+        fileContent.value = content
+        return true
+      } else {
+        error.value = '保存失败：响应格式错误'
+        console.error('[explorer] Invalid save response:', result)
+        return false
+      }
     } catch (e) {
+      const errMsg = e instanceof Error ? e.message : '保存失败'
+      error.value = errMsg
       console.error('[explorer] Failed to save file:', e)
-      error.value = e instanceof Error ? e.message : '保存失败'
       return false
     }
   }

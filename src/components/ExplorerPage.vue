@@ -362,12 +362,16 @@ function refresh() {
 async function selectItem(path: string) {
   // 如果有未保存的修改，提示用户
   if (hasUnsavedChanges.value) {
-    const shouldLeave = confirm('有未保存的修改，是否先保存？')
-    if (shouldLeave) {
+    const shouldSave = confirm('当前文件有未保存的修改，是否先保存？')
+    if (shouldSave) {
       await handleSave()
     }
-    hasUnsavedChanges.value = false
   }
+
+  // 重置编辑状态
+  hasUnsavedChanges.value = false
+  editorContent.value = ''
+  originalContent.value = ''
 
   await store.selectItem(path)
 
@@ -380,7 +384,7 @@ async function selectItem(path: string) {
   setAIContext({
     filePath: path,
     fileContent: store.fileContent || undefined,
-    selectedText: undefined, // 清除之前的选区
+    selectedText: undefined,
     startLine: undefined,
     endLine: undefined,
   })
@@ -389,6 +393,7 @@ async function selectItem(path: string) {
 // 内容变化
 function onContentChange(value: string) {
   editorContent.value = value
+  // 只有当内容与原始内容不同时才标记为有未保存修改
   hasUnsavedChanges.value = value !== originalContent.value
 }
 
@@ -403,6 +408,8 @@ async function handleSave() {
       originalContent.value = editorContent.value
       hasUnsavedChanges.value = false
     }
+  } catch (err) {
+    console.error('[Explorer] Save failed:', err)
   } finally {
     isSaving.value = false
   }
