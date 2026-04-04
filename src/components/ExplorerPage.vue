@@ -92,8 +92,19 @@
               :file-path="selectedPath || undefined"
               class="md-editor"
               @content-change="onContentChange"
+              @request-save="handleSave"
             />
-            <!-- 其他文件使用代码块预览 -->
+            <!-- 其他文本文件使用通用代码编辑器 -->
+            <CodeEditor
+              v-else-if="isTextFile"
+              :key="selectedPath"
+              :model-value="editorContent"
+              :file-path="selectedPath || undefined"
+              class="code-editor-wrapper"
+              @content-change="onContentChange"
+              @request-save="handleSave"
+            />
+            <!-- 无法预览的二进制文件 -->
             <pre v-else class="code-block"><code>{{ fileContent }}</code></pre>
           </div>
 
@@ -144,6 +155,7 @@ import FileTreeNode from './FileTreeNode.vue'
 import AIChatPanel from './AIChatPanel.vue'
 import AISelectionDialog from './AISelectionDialog.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
+import CodeEditor from './CodeEditor.vue'
 import { createSessionId, type SessionMessage } from '../services/session'
 import { useAISelection } from '@/composables/useAISelection'
 import { onDirChanged, onFileChanged, startWatching, stopWatching, type BrowserFileChangeEvent } from '../services/watcher'
@@ -201,6 +213,20 @@ const childrenItems = computed(() => {
 const isMarkdownFile = computed(() => {
   if (!selectedPath.value) return false
   return selectedPath.value.toLowerCase().endsWith('.md')
+})
+
+// 判断是否是文本文件（可编辑）
+const isTextFile = computed(() => {
+  if (!selectedPath.value) return false
+  const ext = selectedPath.value.toLowerCase().split('.').pop()
+  const textExts = [
+    'txt', 'json', 'xml', 'yaml', 'yml', 'html', 'css', 'scss',
+    'js', 'ts', 'jsx', 'tsx', 'vue', 'py', 'rs', 'go', 'java',
+    'c', 'cpp', 'h', 'hpp', 'sh', 'bash', 'sql', 'graphql',
+    'toml', 'ini', 'cfg', 'conf', 'env', 'gitignore', 'dockerfile',
+    'php', 'rb', 'swift', 'kt', 'scala', 'r', 'm', 'mdx',
+  ]
+  return ext ? textExts.includes(ext) : false
 })
 
 onMounted(async () => {
@@ -271,7 +297,7 @@ function handleKeydown(e: KeyboardEvent) {
   // Ctrl+K 打开 AI 选区对话框(带上当前文件上下文)
   if (aiSelection.handleCtrlK(e, { 
     filePath: selectedPath.value || undefined, 
-    fileContent: fileContent.value || undefined 
+    fileContent: editorContent.value || undefined 
   })) return
   // Ctrl+S 保存文件
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -599,6 +625,15 @@ function getFileIcon(name: string): string {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* 代码编辑器容器 */
+.code-editor-wrapper {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 /* 目录视图 */
