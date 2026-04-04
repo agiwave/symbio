@@ -7,17 +7,6 @@
         <p class="welcome-subtitle">工作区是您的项目目录，所有文件操作都在工作区内进行</p>
 
         <div class="workspace-section">
-          <!-- 如果有上次的工作区，显示"继续"按钮 -->
-          <button 
-            v-if="workspacePath" 
-            class="continue-btn" 
-            @click="continueLastWorkspace"
-          >
-            <span class="btn-icon">▶️</span>
-            <span class="btn-text">继续上次工作区</span>
-            <span class="btn-path">{{ workspacePath }}</span>
-          </button>
-
           <button class="browse-btn-large" @click="browseWorkspace">
             <span class="btn-icon">📁</span>
             <span class="btn-text">浏览目录...</span>
