@@ -31,9 +31,9 @@
     </div>
     
     <!-- 子目录 -->
-    <div v-if="item.is_dir && isExpanded && children && children.length > 0" class="node-children">
+    <div v-if="item.is_dir && isExpanded" class="node-children">
       <FileTreeNode
-        v-for="child in children"
+        v-for="child in childItems"
         :key="child.path"
         :item="child"
         :level="level + 1"
@@ -46,8 +46,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { type FileItem } from '../stores/explorer'
+import { useExplorerStore } from '../stores/explorer'
 
 const props = defineProps<{
   item: FileItem
@@ -60,6 +61,19 @@ const emit = defineEmits<{
   (e: 'select', path: string): void
   (e: 'expand', path: string): void
 }>()
+
+const store = useExplorerStore()
+
+// 子项：优先使用 props.children，否则从 store 获取
+const childItems = computed(() => {
+  if (props.children && props.children.length > 0) {
+    return props.children
+  }
+  if (props.item.is_dir) {
+    return store.getChildren(props.item.path)
+  }
+  return []
+})
 
 const isExpanded = ref(false)
 
