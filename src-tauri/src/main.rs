@@ -14,7 +14,6 @@ use plugins::{
     ExplorerFactory,
 };
 use std::sync::{Mutex, Arc};
-use tokio::sync::RwLock;
 use tauri::Manager;
 
 /// 全局 AppHandle（用于插件发送事件）

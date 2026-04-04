@@ -5,7 +5,6 @@ use crate::core::traits::Plugin;
 use crate::core::types::{PluginMeta, PluginError, PluginResult, InvokeStream, StreamChunk};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 const MAX_RESULTS: usize = 1000;

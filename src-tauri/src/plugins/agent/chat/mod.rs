@@ -2,4 +2,3 @@
 
 pub mod plugin;
 pub mod factory;
-pub mod types;

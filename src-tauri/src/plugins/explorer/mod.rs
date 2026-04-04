@@ -6,4 +6,3 @@ mod watcher;
 
 pub use plugin::ExplorerPlugin;
 pub use factory::ExplorerFactory;
-pub use watcher::{FileWatcher, EVENT_BROWSER_DIR_CHANGED, EVENT_BROWSER_FILE_CHANGED};

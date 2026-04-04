@@ -5,7 +5,6 @@ use super::token::*;
 use super::stream::ToolCallAccumulator;
 use crate::core::traits::{Plugin, CAPABILITY_LLM};
 use crate::core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
-use crate::plugins::agent::chat::types::SelectionContext;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::sync::{Arc, Weak};
@@ -73,10 +72,6 @@ impl OpenAiPlugin {
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
-        // 获取选区上下文（如果有）
-        let selection_context = input.get("selection_context")
-            .and_then(|v| serde_json::from_value::<SelectionContext>(v.clone()).ok());
-
         let config = self.config.read().await.clone();
         let counter = TokenCounter::for_model(&config.model);
         let context_config = ContextConfig::for_model(&config.model);
@@ -140,80 +135,6 @@ impl OpenAiPlugin {
                 tool_calls: None,
             }
         ];
-
-        // 如果有选区上下文，注入为上下文消息
-        if let Some(ctx) = selection_context {
-            eprintln!("[openai] 收到选区上下文: file_path={:?}, start_line={:?}, end_line={:?}, has_file_content={}, selected_text_len={}",
-                ctx.file_path, ctx.start_line, ctx.end_line,
-                ctx.file_content.is_some(),
-                ctx.selected_text.as_ref().map(|s| s.len()).unwrap_or(0));
-
-            let mut context_content = String::new();
-
-            // 构建选区上下文消息
-            if let Some(file_path) = &ctx.file_path {
-                context_content.push_str(&format!("📄 文件: {}\n", file_path));
-            }
-
-            if let (Some(start), Some(end)) = (ctx.start_line, ctx.end_line) {
-                context_content.push_str(&format!("📍 行号: {}-{}\n\n", start, end));
-            }
-
-            // 如果有完整文件内容，使用它
-            if let Some(file_content) = &ctx.file_content {
-                if let Some(selected) = &ctx.selected_text {
-                    // 推断语言
-                    let lang = ctx.file_path.as_ref()
-                        .map(|p| {
-                            let ext = p.split('.').last().unwrap_or("");
-                            match ext {
-                                "js" => "javascript", "ts" => "typescript", "vue" => "vue",
-                                "py" => "python", "rs" => "rust", "go" => "go",
-                                "java" => "java", "c" => "c", "cpp" => "cpp",
-                                "html" => "html", "css" => "css", "scss" => "scss",
-                                "json" => "json", "yaml" => "yaml", "yml" => "yaml",
-                                "md" => "markdown", "txt" => "text", "sql" => "sql",
-                                "sh" => "bash", "xml" => "xml",
-                                _ => ""
-                            }
-                        })
-                        .unwrap_or("");
-
-                    context_content.push_str("💻 完整文件内容:\n");
-                    context_content.push_str(&format!("```{}\n{}\n```\n\n", lang, file_content));
-                    context_content.push_str("🔍 用户选中的内容:\n");
-                    context_content.push_str(&format!("```{}\n{}\n```", lang, selected));
-                }
-            } else if let Some(selected) = &ctx.selected_text {
-                // 只有选中文本
-                let lang = ctx.file_path.as_ref()
-                    .map(|p| {
-                        let ext = p.split('.').last().unwrap_or("");
-                        match ext {
-                            "js" => "javascript", "ts" => "typescript", "vue" => "vue",
-                            "py" => "python", "rs" => "rust", "go" => "go",
-                            "java" => "java", "c" => "c", "cpp" => "cpp",
-                            "html" => "html", "css" => "css", "scss" => "scss",
-                            "json" => "json", "yaml" => "yaml", "yml" => "yaml",
-                            "md" => "markdown", "txt" => "text", "sql" => "sql",
-                            "sh" => "bash", "xml" => "xml",
-                            _ => ""
-                        }
-                    })
-                    .unwrap_or("");
-
-                context_content.push_str(&format!("```{}\n{}\n```", lang, selected));
-            }
-
-            if !context_content.is_empty() {
-                messages.push(NativeMessage {
-                    role: "user".into(),
-                    content: Some(format!("[编辑器上下文]\n{}", context_content)),
-                    tool_call_id: None,
-                    tool_calls: None,
-                });
-            }
-        }
 
         // 添加上下文消息
         messages.extend(context_messages);
@@ -757,7 +678,7 @@ impl OpenAiPlugin {
             // Agent loop - 工具调用循环
             let max_iterations = 255;
             let mut final_content = String::new();
-            let mut last_stream_content = String::new();  // 保存最后一次流式内容
+            let last_stream_content = String::new();  // 保存最后一次流式内容
 
             for iteration in 0..max_iterations {
                 eprintln!("[openai] iteration {}", iteration + 1);
