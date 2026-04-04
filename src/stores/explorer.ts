@@ -257,25 +257,15 @@ export const useExplorerStore = defineStore('explorer', () => {
   // 保存文件内容
   async function saveFile(path: string, content: string): Promise<boolean> {
     try {
-      const result = await callPlugin<any>('explorer', {
+      await callPlugin('explorer', {
         action: 'write',
         path,
         content
       })
       
-      console.log('[explorer] saveFile result:', result)
-      
-      // callPlugin 已经解析了 response.data，所以 result 是 write_file 返回的 data 部分
-      // 如果没有抛出错误，说明保存成功
-      if (result) {
-        // 更新缓存内容
-        fileContent.value = content
-        return true
-      } else {
-        error.value = '保存失败：响应为空'
-        console.error('[explorer] Empty save response')
-        return false
-      }
+      // 只要 callPlugin 没有抛出异常，说明保存成功
+      fileContent.value = content
+      return true
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : '保存失败'
       error.value = errMsg
