@@ -247,8 +247,21 @@ jobs:
       - name: List downloaded artifacts
         run: |
           echo "=== Artifacts structure ==="
-          find artifacts/ -type f | head -20
+          find artifacts/ -type f
           echo "========================="
+
+      - name: Prepare release files list
+        id: get_files
+        run: |
+          # 找到所有要上传的文件
+          FILES=""
+          for f in artifacts/windows-x64-installer/*.exe artifacts/windows-x64-portable/*.zip artifacts/macos-binaries/*.dmg artifacts/linux-binaries/*.deb; do
+            if [ -f "$f" ]; then
+              FILES="$FILES $f"
+              echo "Found: $f"
+            fi
+          done
+          echo "files=$FILES" >> $GITHUB_OUTPUT
 
       - name: Prepare release notes
         id: release_notes
@@ -280,7 +293,7 @@ jobs:
           cat RELEASE_NOTES.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.check-version.outputs.version }}
           name: "Symbio v${{ needs.check-version.outputs.version }}"
