@@ -1,19 +1,18 @@
 [package]
-name = "symbio-tauri"
+name = "symbio"
 version = "0.1.5"
-description = "A Tauri application with fractal plugin system"
+description = "Symbio core plugin system - a fractal plugin architecture library"
 authors = ["Symbio Team"]
 license = "MIT"
 repository = ""
 edition = "2021"
 
-[build-dependencies]
-tauri-build = { version = "2.0", features = [] }
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "allow"
 
 [dependencies]
-symbio = { path = "../symbio" }
-tauri = { version = "2.0", features = [] }
-tauri-plugin-dialog = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
@@ -37,20 +36,3 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 serde_yaml = "0.9"
 notify = "6.1"
-# Force time crate version to fix macOS compilation issue
-# Fixes: "error: invalid component: second was 59.999999" in cookie crate
-time = "0.3.47"
-
-[features]
-default = ["custom-protocol"]
-custom-protocol = ["tauri/custom-protocol"]
-
-[profile.dev]
-incremental = false
-opt-level = 0
-
-[profile.release]
-opt-level = "s"
-# 静态链接 CRT 运行时，避免 DLL 缺失问题
-[profile.release.package."*"]
-codegen-units = 1

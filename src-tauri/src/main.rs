@@ -3,18 +3,12 @@
 // Allow dead code during development
 #![allow(dead_code)]
 
-mod core;
-mod plugins;
 mod commands;
+mod event_sender;
 
-use core::{PluginFactoryRegistry, Plugin, PluginFactory};
-use plugins::{
-    HomeFactory, WorkFactory, NoteFactory, SettingFactory,
-    AgentFactory, ChatFactory, ToolsFactory, MemoryFactory,
-    SessionFactory, TelegramFactory, OpenAiFactory,
-    EchoFactory, DockerFactory, CompositeFactory,
-    ExplorerFactory,
-};
+use symbio::{create_root_plugin, OptionalEventSender, Plugin};
+use event_sender::TauriEventSender;
+use tauri::Manager;
 use std::sync::{Mutex, Arc};
 
 /// 全局 AppHandle（用于插件发送事件）
@@ -30,40 +24,25 @@ struct AppState {
 }
 
 fn main() {
-    // 初始化全局工厂注册表
-    PluginFactoryRegistry::init();
-    let registry = PluginFactoryRegistry::global();
-
-    // 注册所有工厂
-    registry.register(Arc::new(WorkFactory::new()));
-    registry.register(Arc::new(NoteFactory::new()));
-    registry.register(Arc::new(SettingFactory::new()));
-    registry.register(Arc::new(ExplorerFactory::new()));
-    registry.register(Arc::new(AgentFactory::new()));
-    registry.register(Arc::new(ChatFactory::new()));
-    registry.register(Arc::new(ToolsFactory::new()));
-    registry.register(Arc::new(MemoryFactory::new()));
-    registry.register(Arc::new(SessionFactory::new()));
-    registry.register(Arc::new(TelegramFactory::new()));
-    registry.register(Arc::new(OpenAiFactory::new()));
-    registry.register(Arc::new(EchoFactory::new()));
-    registry.register(Arc::new(DockerFactory::new()));
-    registry.register(Arc::new(CompositeFactory::with_defaults()));
-    registry.register(Arc::new(HomeFactory::new()));
-
-    // 创建 root 插件（HomeFactory 会自动读取配置文件并传给各子工厂）
-    let root: Arc<dyn Plugin> = HomeFactory::new().create(None, None);
-
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 保存全局 AppHandle
             APP_HANDLE.set(app.handle().clone()).ok();
             eprintln!("[main] AppHandle saved globally");
+
+            // 创建 Tauri 事件发送器
+            let event_sender = TauriEventSender::new(app.handle().clone());
+            
+            // 创建 root plugin（包含所有子插件注册）
+            let root = create_root_plugin(OptionalEventSender::new(Some(Arc::new(event_sender))));
+            eprintln!("[main] Root plugin created with all plugins registered");
+
+            app.manage(AppState {
+                root: Mutex::new(root),
+            });
+
             Ok(())
-        })
-        .manage(AppState {
-            root: Mutex::new(root),
         })
         .invoke_handler(tauri::generate_handler![
             commands::meta,

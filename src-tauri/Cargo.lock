@@ -3817,7 +3817,7 @@ dependencies = [
 
 [[package]]
 name = "symbio"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -3834,6 +3834,36 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "shellexpand",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "urlencoding",
+ "uuid",
+ "which",
+]
+
+[[package]]
+name = "symbio-tauri"
+version = "0.1.5"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "chrono",
+ "dirs 5.0.1",
+ "futures",
+ "glob",
+ "indexmap 2.13.1",
+ "notify",
+ "regex",
+ "reqwest 0.12.28",
+ "reqwest-eventsource",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "shellexpand",
+ "symbio",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

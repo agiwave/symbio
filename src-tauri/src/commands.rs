@@ -8,7 +8,7 @@
 //! 所有插件能力都通过这三个标准命令访问，遵循统一的插件架构。
 
 use crate::AppState;
-use crate::core::types::{PluginMeta, StreamChunk, InvokeStream};
+use symbio::{PluginMeta, StreamChunk, InvokeStream};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 

@@ -2,6 +2,32 @@
 
 基于 Tauri (Vue 3 + Rust) 构建的插件系统应用。
 
+## 架构概述
+
+Symbio 采用清晰的分层架构，将核心插件系统与 Tauri 桌面应用完全分离：
+
+```
+┌─────────────────────────────────────────┐
+│         Tauri Application Layer         │
+│  - UI 适配 (Vue 3 + TypeScript)         │
+│  - 平台事件发送 (TauriEventSender)      │
+│  - 命令桥接 (commands.rs)               │
+└─────────────────┬───────────────────────┘
+                  │ 依赖
+┌─────────────────▼───────────────────────┐
+│      Symbio Core Library (Rust)         │
+│  - 插件架构核心 (symbio_core)           │
+│  - 所有插件实现 (plugins)               │
+│  - 统一初始化 API (create_root_plugin)  │
+└─────────────────────────────────────────┘
+```
+
+**核心优势**：
+- ✅ **平台无关**：symbio 库可被任何 Rust 项目使用
+- ✅ **极简 API**：Tauri 层只需调用一个函数
+- ✅ **依赖注入**：事件机制通过 trait 抽象，支持任意平台实现
+- ✅ **易于测试**：核心逻辑独立，可编写单元测试
+
 ## 核心设计理念
 
 ### 1. 三命令接口
@@ -46,36 +72,47 @@
 
 ## 目录结构
 
+### Symbio 核心库 (`/symbio/`)
+
 ```
-src-tauri/src/
-├── core/
-│   ├── mod.rs
-│   ├── traits.rs           # Plugin/PluginFactory Trait
-│   ├── types.rs            # 核心类型
-│   └── registry.rs         # PluginFactoryRegistry (全局单例)
-├── plugins/
-│   ├── agent/              # Agent 插件（AI 助手）
-│   │   ├── mod.rs          # Agent 主实现
-│   │   ├── factory.rs      # AgentFactory
-│   │   ├── add.rs          # 添加子插件命令
-│   │   ├── list.rs         # 列出子插件命令
-│   │   └── remove.rs       # 删除子插件命令
-│   │   ├── chat/           # 聊天功能子插件
-│   │   ├── memory/         # 记忆管理子插件
-│   │   ├── openai/         # OpenAI API 集成（含 stream/）
-│   │   ├── session/        # 会话管理子插件
-│   │   ├── telegram/       # Telegram 集成子插件
-│   │   └── tools/          # AI 工具集（文件操作、搜索等）
-│   ├── composite/          # 组合插件
-│   ├── docker/             # Docker 容器执行
-│   ├── echo/               # 回声测试插件
-│   ├── explorer/           # 文件系统浏览器
-│   ├── home/               # 主页功能插件
-│   ├── note/               # 笔记管理插件
-│   ├── setting/            # 设置管理插件
-│   └── work/               # 工作区管理插件
-├── commands.rs             # 三个核心命令：meta/invoke/stream
-└── main.rs
+symbio/
+├── Cargo.toml              # 库依赖配置
+└── src/
+    ├── lib.rs              # 库入口，导出所有公共 API
+    ├── init.rs             # 统一初始化函数
+    ├── symbio_core/        # 核心插件架构
+    │   ├── mod.rs
+    │   ├── traits.rs       # Plugin/PluginFactory Trait
+    │   ├── types.rs        # 核心类型定义
+    │   ├── registry.rs     # PluginFactoryRegistry (全局单例)
+    │   └── event.rs        # EventSender trait (平台无关事件机制)
+    └── plugins/            # 所有插件实现
+        ├── agent/          # Agent 插件（AI 助手）
+        │   ├── chat/       # 聊天功能子插件
+        │   ├── memory/     # 记忆管理子插件
+        │   ├── openai/     # OpenAI API 集成（含 stream/）
+        │   ├── session/    # 会话管理子插件
+        │   ├── telegram/   # Telegram 集成子插件
+        │   └── tools/      # AI 工具集（文件操作、搜索等）
+        ├── composite/      # 组合插件
+        ├── docker/         # Docker 容器执行
+        ├── echo/           # 回声测试插件
+        ├── explorer/       # 文件系统浏览器
+        ├── home/           # 主页功能插件
+        ├── note/           # 笔记管理插件
+        ├── setting/        # 设置管理插件
+        └── work/           # 工作区管理插件
+```
+
+### Tauri 应用层 (`/src-tauri/`)
+
+```
+src-tauri/
+├── Cargo.toml              # Tauri 应用依赖（依赖 symbio 库）
+└── src/
+    ├── main.rs             # Tauri 应用入口（极简）
+    ├── commands.rs         # Tauri 命令处理（meta/invoke/stream）
+    └── event_sender.rs     # TauriEventSender 实现
 ```
 
 > **说明**：Agent 是一个特殊的插件，支持嵌套子插件（分形模式），包括聊天、记忆、OpenAI API、会话管理、Telegram 集成以及各种 AI 工具。
@@ -174,28 +211,39 @@ impl PluginFactory for EchoFactory {
 
 ## 注册工厂
 
+Symbio 库提供统一的初始化函数，自动注册所有内置插件：
+
+```rust
+use symbio::{create_root_plugin, OptionalEventSender};
+
+// 简单场景（无事件发送器）
+let root = create_root_plugin(OptionalEventSender::new(None));
+
+// 完整场景（注入平台事件发送器）
+let event_sender = MyEventSender::new();
+let root = create_root_plugin(OptionalEventSender::new(Some(Arc::new(event_sender))));
+```
+
+### Tauri 应用中的使用示例
+
 ```rust
 fn main() {
-    // 初始化全局注册表
-    PluginFactoryRegistry::init();
-    let registry = PluginFactoryRegistry::global();
-
-    // 插件主动注册自己的工厂
-    registry.register(Arc::new(EchoFactory::new()));
-    registry.register(Arc::new(CompositeFactory::new()));
-    registry.register(Arc::new(DockerFactory::new()));
-    registry.register(Arc::new(ExplorerFactory::new()));
-    registry.register(Arc::new(AgentFactory::new()));
-    // ... 其他插件
-
-    // 使用 AgentFactory 创建 root agent
-    let root: Arc<dyn Plugin> = registry
-        .list()
-        .into_iter()
-        .find(|f| f.meta().name == "agent")
-        .expect("AgentFactory should be registered")
-        .create(None, None);
-    // ...
+    tauri::Builder::default()
+        .setup(|app| {
+            // 创建 Tauri 事件发送器
+            let event_sender = TauriEventSender::new(app.handle().clone());
+            
+            // 一行代码创建完整的插件系统
+            let root = create_root_plugin(
+                OptionalEventSender::new(Some(Arc::new(event_sender)))
+            );
+            
+            app.manage(AppState { root: Mutex::new(root) });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![meta, invoke, stream])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
 ```
 
