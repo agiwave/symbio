@@ -11,7 +11,7 @@ pub mod plugins;
 pub mod init;
 
 // 重新导出核心类型和 trait
-pub use symbio_core::{Plugin, PluginFactory, PluginFactoryRegistry};
+pub use symbio_core::{Plugin, PluginFactory, PluginFactoryRegistry, Connection, ConnectionManager};
 pub use symbio_core::types::{PluginMeta, PluginError, PluginResult, StreamChunk, InvokeStream, BoxStream};
 pub use symbio_core::traits::CAPABILITY_LLM;
 pub use symbio_core::event::{EventSender, OptionalEventSender};

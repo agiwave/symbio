@@ -36,3 +36,4 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 serde_yaml = "0.9"
 notify = "6.1"
+dashmap = "5.5"

@@ -6,7 +6,7 @@
 //! - 不在运行时加载/分发配置
 
 use crate::symbio_core::traits::Plugin;
-use crate::symbio_core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
+use crate::symbio_core::types::{Connection, PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -212,6 +212,29 @@ impl Plugin for HomePlugin {
         // 路由到子插件
         let (plugin, sub_path) = self.route(path)?;
         plugin.invoke(&sub_path, input)
+    }
+
+    async fn connect(
+        &self,
+        path: &str,
+        input: Value,
+        conn: Connection,
+    ) -> PluginResult<()> {
+        // 作为 root 插件，处理以 / 开头的绝对路径：去掉前导 / 后再路由
+        let path = path.strip_prefix('/').unwrap_or(path);
+
+        if path.is_empty() {
+            // 连接到 root 本身
+            conn.emit("connected", json!({
+                "message": "已连接到 Home 插件",
+                "children": ["work", "note", "agent", "setting", "explorer"]
+            })).map_err(|e| PluginError::InternalError(e))?;
+            return Ok(());
+        }
+
+        // 路由到子插件
+        let (plugin, sub_path) = self.route(path)?;
+        plugin.connect(&sub_path, input, conn).await
     }
 
     fn available_tools(&self) -> Vec<PluginMeta> {

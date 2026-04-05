@@ -2,11 +2,12 @@
  * 资源浏览器存储
  *
  * 通过后端 explorer 插件管理文件/目录浏览
+ * 使用 connect 机制实现实时文件变化监听
  */
 
 import { defineStore } from 'pinia'
 import { ref, computed, shallowRef, triggerRef } from 'vue'
-import { callPlugin } from '@/services/plugin'
+import { callPlugin, connectPlugin, Connection, ConnectEvent } from '@/services/plugin'
 
 /** 规范化路径：统一使用正斜杠，确保跨平台一致 */
 function normalizePath(p: string): string {
@@ -42,6 +43,10 @@ export const useExplorerStore = defineStore('explorer', () => {
 
   // 错误信息
   const error = ref<string | null>(null)
+
+  // 连接状态
+  const connection = ref<Connection | null>(null)
+  const isWatching = ref(false)
 
   // 辅助函数：更新文件树
   function updateFileTree(updater: (map: Map<string, FileItem>) => void) {
@@ -131,13 +136,12 @@ export const useExplorerStore = defineStore('explorer', () => {
     error.value = null
 
     try {
-
+      // path 应该是相对于工作区的路径，空字符串表示工作区根
       const result = await callPlugin<{ path: string; items: FileItem[] }>('explorer', {
         action: 'list',
         path: path || undefined,
         recursive
       })
-
 
       if (!result) {
         console.warn('[explorer] empty result from backend')
@@ -145,10 +149,9 @@ export const useExplorerStore = defineStore('explorer', () => {
         return
       }
 
-      // 注意：不要在非初始化加载时更新 currentPath
-      // currentPath 应该只在 init 时设置一次
+      // 更新当前路径（保持为相对路径）
       if (path === '') {
-        currentPath.value = result.path || ''
+        currentPath.value = ''
       }
 
       // 更新文件树
@@ -290,6 +293,81 @@ export const useExplorerStore = defineStore('explorer', () => {
     initialized.value = false
     loading.value = false
     error.value = null
+    stopWatching()
+  }
+
+  // 启动文件监听（使用 connect 机制）
+  async function startWatching() {
+    if (isWatching.value || connection.value) return
+
+    try {
+      const conn = await connectPlugin('explorer', { action: 'watch' }, handleConnectEvent)
+      connection.value = conn
+      isWatching.value = true
+      console.log('[explorer] Started watching via connect')
+    } catch (e) {
+      console.error('[explorer] Failed to start watching:', e)
+    }
+  }
+
+  // 停止文件监听
+  async function stopWatching() {
+    if (connection.value) {
+      try {
+        const { closeConnection } = await import('@/services/plugin')
+        await closeConnection(connection.value.connectionId)
+        connection.value.unlisten()
+        connection.value = null
+        isWatching.value = false
+        console.log('[explorer] Stopped watching')
+      } catch (e) {
+        console.error('[explorer] Failed to stop watching:', e)
+      }
+    }
+  }
+
+  // 处理连接事件
+  async function handleConnectEvent(event: ConnectEvent) {
+    switch (event.type) {
+      case 'connected':
+        break
+
+      case 'watch_started':
+        break
+
+      case 'watch_stopped':
+        isWatching.value = false
+        break
+
+      case 'browser/dir_changed':
+      case 'browser/file_changed': {
+        // 文件/目录变化，刷新当前视图
+        // 注意：后端发送的是相对于工作区的路径
+        const changedPath = (event.data as any)?.path
+        if (changedPath) {
+          // 检查是否是当前选中的文件
+          const isCurrentFile = selectedPath.value === changedPath ||
+                                normalizePath(selectedPath.value || '').endsWith(normalizePath(changedPath))
+
+          if (isCurrentFile) {
+            // 重新读取当前文件内容
+            if (selectedPath.value) {
+              await selectItem(selectedPath.value)
+            }
+          }
+
+          // 刷新文件树
+          await refresh()
+        } else {
+          await refresh()
+        }
+        break
+      }
+
+      case 'error':
+        error.value = (event.data as any)?.message || '连接错误'
+        break
+    }
   }
 
   return {
@@ -302,6 +380,8 @@ export const useExplorerStore = defineStore('explorer', () => {
     loading,
     error,
     isSavingFile,
+    isWatching,
+    connection,
 
     // Computed
     rootItems,
@@ -316,6 +396,8 @@ export const useExplorerStore = defineStore('explorer', () => {
     refresh,
     saveFile,
     reset,
+    startWatching,
+    stopWatching,
 
     // Helper
     getChildren,

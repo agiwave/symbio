@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::pin::Pin;
 
+// 重新导出 Connection
+pub use crate::symbio_core::connection::Connection;
+
 /// 插件元数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginMeta {

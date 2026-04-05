@@ -156,7 +156,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useExplorerStore, type FileItem } from '../stores/explorer'
 import FileTreeNode from './FileTreeNode.vue'
 import AIChatPanel from './AIChatPanel.vue'
@@ -165,7 +165,6 @@ import MarkdownEditor from './MarkdownEditor.vue'
 import CodeEditor from './CodeEditor.vue'
 import { type SessionMessage } from '../services/session'
 import { useAISelection } from '@/composables/useAISelection'
-import { onDirChanged, onFileChanged, startWatching, stopWatching } from '../services/watcher'
 import { setAIContext } from '@/composables/useAIContext'
 
 const store = useExplorerStore()
@@ -204,6 +203,15 @@ const fileContent = computed(() => store.fileContent)
 const loading = computed(() => store.loading)
 const error = computed(() => store.error)
 
+// 监听 store.fileContent 变化，同步到 editorContent
+watch(fileContent, (newContent) => {
+  if (newContent !== null && selectedPath.value) {
+    editorContent.value = newContent || ''
+    originalContent.value = newContent || ''
+    hasUnsavedChanges.value = false
+  }
+})
+
 // 当前选中的项
 const selectedItem = computed(() => {
   if (!selectedPath.value) return null
@@ -237,7 +245,7 @@ const isTextFile = computed(() => {
 })
 
 onMounted(async () => {
-  store.init()
+  await store.init()
   // 添加键盘事件监听
   document.addEventListener('keydown', handleKeydown)
   // 添加选区监听
@@ -247,39 +255,9 @@ onMounted(async () => {
   // 添加离开页面提醒
   window.addEventListener('beforeunload', handleBeforeUnload)
 
-  // 启动文件监听
-  try {
-    await startWatching()
-    
-    // 监听目录变化
-    unlistenDir = await onDirChanged((event) => {
-      console.log('[Explorer] Dir changed:', event.path, event.kind)
-      refresh()
-    })
-    
-    // 监听文件变化
-    unlistenFile = await onFileChanged((event) => {
-      console.log('[Explorer] File changed:', event.path, event.kind)
-      // 如果正在手动保存，跳过文件监听器重载，避免覆盖内容
-      if (store.isSavingFile) {
-        console.log('[Explorer] Skipping reload during save')
-        return
-      }
-      // 如果当前打开的文件被修改，重新加载
-      if (selectedPath.value && event.path.endsWith(selectedPath.value)) {
-        console.log('[Explorer] Reloading current file:', selectedPath.value)
-        store.selectItem(selectedPath.value)
-      }
-      // 刷新文件树
-      refresh()
-    })
-  } catch (err) {
-    console.error('[Explorer] Failed to start watching:', err)
-  }
+  // 启动文件监听（使用 connect 机制）
+  await store.startWatching()
 })
-
-let unlistenFile: (() => void) | null = null
-let unlistenDir: (() => void) | null = null
 
 onUnmounted(async () => {
   document.removeEventListener('keydown', handleKeydown)
@@ -292,14 +270,8 @@ onUnmounted(async () => {
   document.removeEventListener('mousemove', doResize)
   document.removeEventListener('mouseup', stopResize)
 
-  // 停止文件监听
-  unlistenFile?.()
-  unlistenDir?.()
-  try {
-    await stopWatching()
-  } catch (err) {
-    console.error('[Explorer] Failed to stop watching:', err)
-  }
+  // 停止文件监听（使用 connect 机制）
+  await store.stopWatching()
 })
 
 // 键盘事件处理

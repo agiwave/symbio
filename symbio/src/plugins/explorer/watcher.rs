@@ -1,8 +1,7 @@
 //! 文件监听服务
 //!
-//! 监听工作区目录变化，并通过事件发送器通知外部
+//! 监听工作区目录变化，并通过事件发送器或回调函数通知
 
-use crate::symbio_core::event::OptionalEventSender;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -10,8 +9,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Explorer 事件名称常量
-const EVENT_BROWSER_DIR_CHANGED: &str = "browser/dir_changed";
-const EVENT_BROWSER_FILE_CHANGED: &str = "browser/file_changed";
+pub const EVENT_BROWSER_DIR_CHANGED: &str = "browser/dir_changed";
+pub const EVENT_BROWSER_FILE_CHANGED: &str = "browser/file_changed";
 
 /// 文件变化事件数据
 #[derive(Debug, Clone, Serialize)]
@@ -21,32 +20,48 @@ pub struct FileChangeEvent {
     pub timestamp: u64,
 }
 
+/// 事件回调函数类型
+pub type EventCallback = Arc<dyn Fn(String, serde_json::Value) + Send + Sync>;
+
 /// 文件监听器
 pub struct FileWatcher {
     watcher: Arc<RwLock<Option<RecommendedWatcher>>>,
-    event_sender: OptionalEventSender,
+    event_callback: EventCallback,
 }
 
 impl Clone for FileWatcher {
     fn clone(&self) -> Self {
         Self {
             watcher: self.watcher.clone(),
-            event_sender: self.event_sender.clone(),
+            event_callback: self.event_callback.clone(),
         }
     }
 }
 
 impl FileWatcher {
-    pub fn new(event_sender: OptionalEventSender) -> Self {
+    /// 创建新的文件监听器（使用事件发送器，保持兼容）
+    pub fn new(event_sender: crate::symbio_core::event::OptionalEventSender) -> Self {
+        Self::new_with_callback(move |event_name, payload| {
+            if let Err(e) = event_sender.emit(&event_name, payload) {
+                eprintln!("[watcher] Failed to emit event: {}", e);
+            }
+        })
+    }
+
+    /// 创建新的文件监听器（使用回调函数）
+    pub fn new_with_callback<F>(callback: F) -> Self
+    where
+        F: Fn(String, serde_json::Value) + Send + Sync + 'static,
+    {
         Self {
             watcher: Arc::new(RwLock::new(None)),
-            event_sender,
+            event_callback: Arc::new(callback),
         }
     }
 
     /// 开始监听目录
     pub async fn start(&self, path: PathBuf) -> Result<(), String> {
-        let event_sender = self.event_sender.clone();
+        let callback = self.event_callback.clone();
         let watcher_ref = self.watcher.clone();
 
         let mut watcher = RecommendedWatcher::new(
@@ -65,15 +80,13 @@ impl FileWatcher {
                             .unwrap()
                             .as_secs();
 
-                        let payload = FileChangeEvent {
-                            path: file_path.to_string_lossy().to_string(),
-                            kind: format!("{:?}", event.kind),
-                            timestamp,
-                        };
+                        let payload = serde_json::json!({
+                            "path": file_path.to_string_lossy().to_string(),
+                            "kind": format!("{:?}", event.kind),
+                            "timestamp": timestamp,
+                        });
 
-                        if let Err(e) = event_sender.emit(event_name, payload) {
-                            eprintln!("[watcher] Failed to emit event: {}", e);
-                        }
+                        callback(event_name.to_string(), payload);
                     }
                 }
             },

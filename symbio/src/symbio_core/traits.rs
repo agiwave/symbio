@@ -1,6 +1,6 @@
 //! 插件核心 Trait
 
-use crate::symbio_core::types::{InvokeStream, PluginError, PluginMeta, PluginResult};
+use crate::symbio_core::types::{Connection, InvokeStream, PluginError, PluginMeta, PluginResult};
 use serde_json::Value;
 use std::sync::{Arc, Weak};
 
@@ -10,7 +10,7 @@ use std::sync::{Arc, Weak};
 pub const CAPABILITY_LLM: &str = "llm";
 
 /// 插件接口定义
-/// 
+///
 /// 每个插件都是一个完整的主体，通过 path 参数支持分形嵌套。
 /// - 空路径 (""): 操作插件自身
 /// - 非空路径 ("child/grandchild"): 逐级查找并操作子插件
@@ -26,6 +26,23 @@ pub trait Plugin: Send + Sync {
     /// 调用插件
     fn invoke(&self, path: &str, input: Value) -> PluginResult<InvokeStream> {
         let _ = (path, input);
+        Err(PluginError::NotImplemented)
+    }
+
+    /// 建立持久连接
+    ///
+    /// 用于双向通信场景。插件通过 `Connection` 句柄实现：
+    /// - 向客户端发送消息：`conn.send(data)`
+    /// - 接收客户端消息：`conn.on_message(handler)`
+    /// - 连接状态管理：`conn.is_closed()`, `conn.close(reason)`
+    /// - 连接级状态存储：`conn.state()`
+    async fn connect(
+        &self,
+        path: &str,
+        input: Value,
+        conn: Connection,
+    ) -> PluginResult<()> {
+        let _ = (path, input, conn);
         Err(PluginError::NotImplemented)
     }
 

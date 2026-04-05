@@ -82,3 +82,62 @@ export async function getPluginMeta(path: string) {
   return invoke<{ path: string; meta: unknown }>('meta', { path })
 }
 
+// ==================== Connect 相关 API ====================
+
+export interface Connection {
+  connectionId: string
+  unlisten: () => void
+}
+
+export interface ConnectEvent {
+  type: string
+  data: unknown
+}
+
+/**
+ * 建立持久连接
+ */
+export async function connectPlugin(
+  path: string,
+  input: Record<string, unknown>,
+  onEvent: (event: ConnectEvent) => void
+): Promise<Connection> {
+  console.log('[plugin] connectPlugin:', path, input)
+
+  // 调用 connect 命令获取 connection_id
+  const connectionId = await invoke<string>('connect', { path, input })
+
+  // 监听连接事件
+  const eventName = `connect/${connectionId}`
+  const unlisten = await listen<ConnectEvent>(eventName, (event) => {
+    console.log('[plugin] connect event:', event.payload)
+    onEvent(event.payload)
+  })
+
+  return { connectionId, unlisten }
+}
+
+/**
+ * 通过连接发送消息
+ */
+export async function sendToConnection(
+  connectionId: string,
+  message: Record<string, unknown>
+): Promise<void> {
+  await invoke('connect.send', { connectionId, message })
+}
+
+/**
+ * 关闭连接
+ */
+export async function closeConnection(connectionId: string): Promise<void> {
+  await invoke('connect.close', { connectionId })
+}
+
+/**
+ * 查询连接状态
+ */
+export async function getConnectionStatus(connectionId: string): Promise<{ alive: boolean }> {
+  return invoke('connect.status', { connectionId })
+}
+

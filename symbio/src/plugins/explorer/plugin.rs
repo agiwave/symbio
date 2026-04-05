@@ -1,7 +1,7 @@
 //! Explorer 插件 - 工作区资源浏览器（文件系统浏览）
 
 use crate::symbio_core::traits::Plugin;
-use crate::symbio_core::types::{PluginMeta, PluginResult, PluginError, InvokeStream};
+use crate::symbio_core::types::{Connection, PluginMeta, PluginResult, PluginError, InvokeStream};
 use crate::symbio_core::event::OptionalEventSender;
 use super::watcher::FileWatcher;
 use serde::{Deserialize, Serialize};
@@ -57,6 +57,7 @@ pub struct FileItem {
     pub children: Option<Vec<FileItem>>,
 }
 
+#[derive(Clone)]
 pub struct ExplorerPlugin {
     meta: PluginMeta,
     config: Arc<Mutex<ExplorerConfig>>,
@@ -66,6 +67,8 @@ pub struct ExplorerPlugin {
     watcher: Arc<Mutex<Option<FileWatcher>>>,
     /// 事件发送器（用于发送文件变化事件）
     event_sender: OptionalEventSender,
+    /// 活跃的连接（用于 connect 双向通信）
+    active_connections: Arc<Mutex<Vec<Connection>>>,
 }
 
 impl ExplorerPlugin {
@@ -106,6 +109,7 @@ impl ExplorerPlugin {
             parent: Arc::new(Mutex::new(parent)),
             watcher: Arc::new(Mutex::new(None)),
             event_sender,
+            active_connections: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -172,7 +176,74 @@ impl ExplorerPlugin {
         Err(PluginError::InternalError("无法从父插件获取工作区路径，请先在首页选择工作区".to_string()))
     }
 
-    /// 启动文件监听
+    /// 启动文件监听（通过 connect 机制）
+    fn start_watch_with_connection(&self, conn: &Connection) -> Result<(), String> {
+        let workspace = self.get_workspace_path().map_err(|e| e.to_string())?;
+
+        // 检查是否已经在监听
+        {
+            let watcher = self.watcher.lock().unwrap();
+            if watcher.is_some() {
+                conn.emit("watch_status", json!({
+                    "success": true,
+                    "message": "已在监听中"
+                })).map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        }
+
+        // 创建新的 FileWatcher，使用连接的事件发送器
+        let conn_sender = conn.clone();
+        let workspace_for_callback = workspace.clone();
+        let watcher = FileWatcher::new_with_callback(
+            move |event_name, payload| {
+                // 将绝对路径转换为相对于工作区的路径
+                let mut updated_payload = payload.clone();
+                if let Some(path_str) = payload.get("path").and_then(|v| v.as_str()) {
+                    let abs_path = std::path::Path::new(path_str);
+                    if let Ok(rel_path) = abs_path.strip_prefix(&workspace_for_callback) {
+                        updated_payload["path"] = json!(rel_path.to_string_lossy().to_string());
+                    }
+                }
+
+                // 通过连接发送事件
+                if let Err(e) = conn_sender.emit(&event_name, updated_payload) {
+                    eprintln!("[explorer] Failed to send watch event: {}", e);
+                }
+            }
+        );
+        let workspace_clone = workspace.clone();
+        let watcher_clone = watcher.clone();
+
+        // 在后台线程启动监听
+        tokio::spawn(async move {
+            if let Err(e) = watcher_clone.start(workspace_clone).await {
+                eprintln!("[explorer] Failed to start watcher: {}", e);
+            }
+        });
+
+        // 保存 watcher 引用
+        {
+            let mut w = self.watcher.lock().unwrap();
+            *w = Some(watcher);
+        }
+
+        // 保存连接到活跃列表
+        {
+            let mut connections = self.active_connections.lock().unwrap();
+            connections.push(conn.clone());
+        }
+
+        conn.emit("watch_started", json!({
+            "success": true,
+            "message": "开始监听",
+            "path": workspace.to_string_lossy()
+        })).map_err(|e| e.to_string())?;
+
+        Ok(())
+    }
+
+    /// 启动文件监听（旧方式，保持兼容）
     fn start_watch(&self) -> PluginResult<InvokeStream> {
         let workspace = self.get_workspace_path()?;
         
@@ -214,13 +285,13 @@ impl ExplorerPlugin {
         })))
     }
 
-    /// 停止文件监听
+    /// 停止文件监听（旧方式，保持兼容）
     fn stop_watch(&self) -> PluginResult<InvokeStream> {
         let watcher = {
             let mut w = self.watcher.lock().unwrap();
             w.take()
         };
-        
+
         if let Some(w) = watcher {
             // 在后台线程停止监听
             tokio::spawn(async move {
@@ -228,11 +299,35 @@ impl ExplorerPlugin {
             });
             eprintln!("[explorer] stop_watch: stopping");
         }
-        
+
         Ok(InvokeStream::single(json!({
             "success": true,
             "message": "停止监听"
         })))
+    }
+
+    /// 停止文件监听（connect 方式）
+    fn stop_watch_for_connection(&self) -> Result<(), String> {
+        let watcher = {
+            let mut w = self.watcher.lock().unwrap();
+            w.take()
+        };
+
+        if let Some(w) = watcher {
+            // 在后台线程停止监听
+            tokio::spawn(async move {
+                w.stop().await;
+            });
+            eprintln!("[explorer] stop_watch_for_connection: stopping");
+        }
+
+        // 清理已关闭的连接
+        {
+            let mut connections = self.active_connections.lock().unwrap();
+            connections.retain(|c| !c.is_closed());
+        }
+
+        Ok(())
     }
 
     /// 获取配置 Schema
@@ -635,5 +730,90 @@ impl Plugin for ExplorerPlugin {
         };
 
         Ok(InvokeStream::single(result))
+    }
+
+    async fn connect(
+        &self,
+        _path: &str,
+        input: Value,
+        conn: Connection,
+    ) -> PluginResult<()> {
+        // 处理连接请求
+        let action = input.get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("watch");
+
+        match action {
+            "watch" => {
+                // 启动文件监听并通过此连接发送事件
+                self.start_watch_with_connection(&conn).map_err(|e| PluginError::InternalError(e.to_string()))?;
+
+                // 注册消息处理器
+                let plugin = self.clone();
+                let conn_for_handler = conn.clone();
+                conn.on_message(move |message| {
+                    let plugin_clone = plugin.clone();
+                    let conn_clone = conn_for_handler.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = plugin_clone.handle_connect_message(&conn_clone, message).await {
+                            eprintln!("[explorer] connect message error: {}", e);
+                        }
+                    });
+                });
+
+                // 发送连接建立确认
+                conn.emit("connected", json!({
+                    "message": "已连接到 Explorer 插件",
+                    "watching": self.watcher.lock().unwrap().is_some()
+                })).map_err(|e| PluginError::InternalError(e))?;
+            }
+            _ => {
+                conn.emit("error", json!({
+                    "message": format!("未知操作：{}", action)
+                })).map_err(|e| PluginError::InternalError(e)).ok();
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl ExplorerPlugin {
+    /// 处理连接后的客户端消息
+    async fn handle_connect_message(&self, conn: &Connection, message: Value) -> PluginResult<()> {
+        let action = message.get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        match action {
+            "start_watch" => {
+                self.start_watch_with_connection(conn).map_err(|e| PluginError::InternalError(e.to_string()))?;
+            }
+            "stop_watch" => {
+                self.stop_watch_for_connection().map_err(|e| PluginError::InternalError(e.to_string()))?;
+                conn.emit("watch_stopped", json!({
+                    "message": "已停止监听"
+                })).map_err(|e| PluginError::InternalError(e)).ok();
+            }
+            "list" => {
+                let path = message.get("path").and_then(|v| v.as_str());
+                let recursive = message.get("recursive").and_then(|v| v.as_bool()).unwrap_or(false);
+                match self.list_directory(path, recursive) {
+                    Ok(result) => {
+                        conn.emit("list_result", result).map_err(|e| PluginError::InternalError(e)).ok();
+                    }
+                    Err(e) => {
+                        conn.emit("error", json!({ "message": e.to_string() })).map_err(|e| PluginError::InternalError(e)).ok();
+                    }
+                }
+            }
+            _ => {
+                conn.emit("error", json!({
+                    "message": format!("未知操作：{}", action)
+                })).map_err(|e| PluginError::InternalError(e)).ok();
+            }
+        }
+
+        Ok(())
     }
 }
