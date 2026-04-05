@@ -501,8 +501,9 @@ onMounted(async () => {
 <style scoped>
 .agent-page {
   display: flex;
-  height: 100%;
-  width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* 左侧历史列表 */
@@ -513,6 +514,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  min-height: 0;
 }
 
 .history-header {
@@ -609,12 +611,15 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .chat-header {
@@ -655,6 +660,7 @@ onMounted(async () => {
   flex: 1;
   overflow-y: auto;
   padding: 1rem;
+  min-height: 0;
 }
 
 .empty-chat {

@@ -547,13 +547,16 @@ onMounted(() => {
 
 .dialog-body {
   flex: 1;
-  overflow: hidden;
-  min-height: 100px;
+  min-height: 0;
   max-height: 280px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .messages {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 10px;
   display: flex;
@@ -603,6 +606,11 @@ onMounted(() => {
 
 .msg.assistant.loading .msg-content {
   opacity: 0.6;
+}
+
+.msg-content {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .msg-content :deep(p) { margin: 0; }

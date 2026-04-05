@@ -581,11 +581,14 @@ impl SessionPlugin {
                     if let Some(tools) = chunk.data.get("tools").and_then(|t| t.as_array()) {
                         eprintln!("[session] fetched {} tools from parent available_tools", tools.len());
                         // 转换为 OpenAI 格式
+                        // OpenAI 要求工具名称匹配 ^[a-zA-Z0-9_-]+$，所以将 / 替换为 __
                         return tools.iter().map(|tool| {
+                            let raw_name = tool.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                            let safe_name = raw_name.replace('/', "__");
                             json!({
                                 "type": "function",
                                 "function": {
-                                    "name": tool.get("name").and_then(|n| n.as_str()).unwrap_or(""),
+                                    "name": safe_name,
                                     "description": tool.get("description").and_then(|d| d.as_str()).unwrap_or(""),
                                     "parameters": tool.get("input_schema").cloned().unwrap_or(json!({}))
                                 }
