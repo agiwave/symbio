@@ -90,6 +90,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: tauri
+          appSrcPath: tauri
           args: --bundles nsis
 
       - name: Build Tauri app (portable ZIP)
@@ -98,6 +99,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: tauri
+          appSrcPath: tauri
           args: --bundles msi
 
       - name: Create portable ZIP
@@ -157,6 +159,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: tauri
+          appSrcPath: tauri
           args: --bundles dmg
 
       - name: Upload artifacts
@@ -220,6 +223,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: tauri
+          appSrcPath: tauri
           args: --bundles deb
 
       - name: Upload artifacts
