@@ -11,7 +11,7 @@ edition = "2021"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-symbio = { path = "../symbio" }
+symbio = { path = "../../symbio" }
 tauri = { version = "2.0", features = [] }
 tauri-plugin-dialog = "2.0"
 serde = { version = "1.0", features = ["derive"] }
