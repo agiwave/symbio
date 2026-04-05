@@ -8,6 +8,22 @@ Symbio 是一个基于分形插件架构的系统，核心设计目标：
 - **依赖注入**：通过 trait 抽象实现平台特定功能
 - **分形嵌套**：插件可以包含子插件，形成自相似结构
 
+## 项目结构
+
+```
+symbio/                           # 项目根目录
+├── symbio/                       # 核心 Rust 库（平台无关）
+├── tauri/                        # Tauri 桌面应用（前端 + Rust 后端）
+├── docs/                         # 项目文档
+│   ├── ARCHITECTURE.md           # 架构文档（本文件）
+│   └── BUILD_GUIDE.md            # 构建指南
+├── scripts/                      # 构建和发布脚本
+├── .github/                      # GitHub 配置
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
 ## 架构分层
 
 ```
@@ -339,6 +355,12 @@ pub use my_plugin::MyFactory;
 ### symbio 库
 
 ```toml
+# symbio/Cargo.toml
+[package]
+name = "symbio"
+version = "0.1.0"
+edition = "2021"
+
 [lints.rust]
 unused_imports = "warn"
 unused_variables = "warn"
@@ -348,8 +370,14 @@ dead_code = "allow"  # 开发阶段允许未使用代码
 ### Tauri 应用
 
 ```toml
+# tauri/src-tauri/Cargo.toml
+[package]
+name = "symbio-tauri"
+version = "0.1.5"
+edition = "2021"
+
 [dependencies]
-symbio = { path = "../symbio" }
+symbio = { path = "../../symbio" }
 tauri = { version = "2.0", features = [] }
 # ... 其他 Tauri 特定依赖
 ```

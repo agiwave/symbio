@@ -72,47 +72,84 @@ Symbio 采用清晰的分层架构，将核心插件系统与 Tauri 桌面应用
 
 ## 目录结构
 
+### 项目根目录
+
+```
+symbio/                           # 项目根目录
+├── symbio/                       # 核心 Rust 库（平台无关）
+├── tauri/                        # Tauri 桌面应用（前端 + Rust 后端）
+├── docs/                         # 项目文档
+├── scripts/                      # 构建和发布脚本
+├── .github/                      # GitHub 配置
+├── .symbio/                      # Symbio 配置
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
 ### Symbio 核心库 (`/symbio/`)
 
 ```
 symbio/
-├── Cargo.toml              # 库依赖配置
+├── Cargo.toml                    # 库依赖配置
 └── src/
-    ├── lib.rs              # 库入口，导出所有公共 API
-    ├── init.rs             # 统一初始化函数
-    ├── symbio_core/        # 核心插件架构
+    ├── lib.rs                    # 库入口，导出所有公共 API
+    ├── init.rs                   # 统一初始化函数
+    ├── symbio_core/              # 核心插件架构
     │   ├── mod.rs
-    │   ├── traits.rs       # Plugin/PluginFactory Trait
-    │   ├── types.rs        # 核心类型定义
-    │   ├── registry.rs     # PluginFactoryRegistry (全局单例)
-    │   └── event.rs        # EventSender trait (平台无关事件机制)
-    └── plugins/            # 所有插件实现
-        ├── agent/          # Agent 插件（AI 助手）
-        │   ├── chat/       # 聊天功能子插件
-        │   ├── memory/     # 记忆管理子插件
-        │   ├── openai/     # OpenAI API 集成（含 stream/）
-        │   ├── session/    # 会话管理子插件
-        │   ├── telegram/   # Telegram 集成子插件
-        │   └── tools/      # AI 工具集（文件操作、搜索等）
-        ├── composite/      # 组合插件
-        ├── docker/         # Docker 容器执行
-        ├── echo/           # 回声测试插件
-        ├── explorer/       # 文件系统浏览器
-        ├── home/           # 主页功能插件
-        ├── note/           # 笔记管理插件
-        ├── setting/        # 设置管理插件
-        └── work/           # 工作区管理插件
+    │   ├── traits.rs             # Plugin/PluginFactory Trait
+    │   ├── types.rs              # 核心类型定义
+    │   ├── registry.rs           # PluginFactoryRegistry (全局单例)
+    │   └── event.rs              # EventSender trait (平台无关事件机制)
+    └── plugins/                  # 所有插件实现
+        ├── agent/                # Agent 插件（AI 助手）
+        │   ├── chat/             # 聊天功能子插件
+        │   ├── memory/           # 记忆管理子插件
+        │   ├── openai/           # OpenAI API 集成（含 stream/）
+        │   ├── session/          # 会话管理子插件
+        │   ├── telegram/         # Telegram 集成子插件
+        │   └── tools/            # AI 工具集（文件操作、搜索等）
+        ├── composite/            # 组合插件
+        ├── docker/               # Docker 容器执行
+        ├── echo/                 # 回声测试插件
+        ├── explorer/             # 文件系统浏览器
+        ├── home/                 # 主页功能插件
+        ├── note/                 # 笔记管理插件
+        ├── setting/              # 设置管理插件
+        └── work/                 # 工作区管理插件
 ```
 
-### Tauri 应用层 (`/src-tauri/`)
+### Tauri 应用层 (`/tauri/`)
 
 ```
-src-tauri/
-├── Cargo.toml              # Tauri 应用依赖（依赖 symbio 库）
-└── src/
-    ├── main.rs             # Tauri 应用入口（极简）
-    ├── commands.rs         # Tauri 命令处理（meta/invoke/stream）
-    └── event_sender.rs     # TauriEventSender 实现
+tauri/
+├── Cargo.toml                    # Tauri 应用依赖（依赖 symbio 库）
+├── tauri.conf.json               # Tauri 配置
+├── package.json                  # 前端依赖
+├── vite.config.ts                # Vite 配置
+├── tsconfig.json                 # TypeScript 配置
+├── index.html                    # HTML 入口
+├── capabilities/                 # Tauri 权限配置
+├── icons/                        # 应用图标
+├── src/                          # 前端源码 (Vue 3 + TypeScript)
+│   ├── main.ts                   # 前端入口
+│   ├── App.vue                   # 根组件
+│   ├── components/               # Vue 组件
+│   ├── views/                    # 页面视图
+│   ├── stores/                   # Pinia 状态管理
+│   ├── services/                 # API 服务
+│   ├── composables/              # 组合式函数
+│   └── router/                   # 路由配置
+├── src-tauri/                    # Tauri Rust 后端
+│   ├── Cargo.toml                # Rust 依赖
+│   ├── build.rs                  # 构建脚本
+│   ├── tauri.conf.json           # Tauri 配置
+│   └── src/
+│       ├── main.rs               # Tauri 应用入口（极简）
+│       ├── commands.rs           # Tauri 命令处理（meta/invoke/stream）
+│       └── event_sender.rs       # TauriEventSender 实现
+├── public/                       # 静态资源
+└── scripts/                      # 前端构建脚本
 ```
 
 > **说明**：Agent 是一个特殊的插件，支持嵌套子插件（分形模式），包括聊天、记忆、OpenAI API、会话管理、Telegram 集成以及各种 AI 工具。
@@ -250,14 +287,20 @@ fn main() {
 ## 开发指南
 
 ```bash
-# 安装依赖
-npm install
+# 安装前端依赖
+cd tauri && npm install
 
-# 开发模式
-npm run tauri dev
+# 开发模式（在 tauri 目录下）
+cd tauri && npm run tauri dev
 
-# 构建
-npm run tauri build
+# 构建（在 tauri 目录下）
+cd tauri && npm run tauri build
+
+# 编译 symbio 库
+cd symbio && cargo build
+
+# 编译 Tauri Rust 后端（在 tauri 目录下）
+cd tauri/src-tauri && cargo build
 ```
 
 ## 发布版本说明
@@ -268,11 +311,11 @@ npm run tauri build
 
 1. **更新版本号**（三个文件都需要同步）：
 
-   * `package.json`
+   * `tauri/package.json`
 
-   * `src-tauri/tauri.conf.json`
+   * `tauri/src-tauri/tauri.conf.json`
 
-   * `src-tauri/Cargo.toml`
+   * `tauri/src-tauri/Cargo.toml`
 
 2. **提交并打标签**：
 
