@@ -107,7 +107,7 @@ jobs:
         run: |
           # 复制编译好的可执行文件到单独目录
           mkdir portable-app
-          Copy-Item "tauri/src-tauri/target/release/symbio.exe" -Destination "portable-app/"
+          Copy-Item "tauri/src-tauri/target/release/symbio-tauri.exe" -Destination "portable-app/"
           Copy-Item "tauri/src-tauri/target/release/*.dll" -Destination "portable-app/" -ErrorAction SilentlyContinue
 
           # 创建压缩包
