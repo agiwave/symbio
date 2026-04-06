@@ -1,0 +1,198 @@
+# 认知单元：与LLM分工机制
+# 类型：strategy（策略）
+# 级别：Level 3（专家独有经验）
+
+id: st_20240101_001
+type: strategy
+
+content:
+  summary: "存储差异化知识，让大模型提供通用化；通过知识分级实现高效分工"
+  body:
+    core_principle: |
+      专家系统不应该存储大模型已经知道的知识。
+      核心公式：专家AI能力 = 大模型通用能力 × 专家系统差异化因子
+    
+    knowledge_levels:
+      level_0:
+        name: "通用知识"
+        description: "公开、广泛传播、文档化的知识"
+        llm_coverage: "0.9-1.0"
+        uniqueness: "0-0.1"
+        storage: "不存储"
+        examples:
+          - "API用法"
+          - "编程语言语法"
+          - "设计模式定义"
+      
+      level_1:
+        name: "准通用知识"
+        description: "通用但有专家见解"
+        llm_coverage: "0.5-0.9"
+        uniqueness: "0.1-0.4"
+        storage: "存储专家见解和补充"
+        examples:
+          - "最佳实践的应用经验"
+          - "常见陷阱的额外发现"
+      
+      level_2:
+        name: "项目特定知识"
+        description: "仅适用于特定项目/团队"
+        llm_coverage: "0-0.5"
+        uniqueness: "0.5-1.0"
+        storage: "完整存储"
+        examples:
+          - "项目架构决策"
+          - "团队编码规范"
+          - "业务领域知识"
+      
+      level_3:
+        name: "专家独有经验"
+        description: "专家个人经历，不可复制"
+        llm_coverage: "0-0.3"
+        uniqueness: "0.7-1.0"
+        storage: "完整存储"
+        examples:
+          - "踩坑经验"
+          - "失败教训"
+          - "成功秘诀"
+      
+      level_4:
+        name: "专家风格与价值观"
+        description: "专家个性，影响所有回答"
+        llm_coverage: "0-0.4"
+        uniqueness: "0.8-1.0"
+        storage: "完整存储"
+        examples:
+          - "代码风格偏好"
+          - "判断偏好"
+          - "表达风格"
+    
+    evaluation_process:
+      step_1:
+        name: "通用性评估"
+        questions:
+          - "这个知识是否在公开文档中？"
+          - "是否被广泛传播？"
+          - "大模型是否能正确回答？"
+      
+      step_2:
+        name: "特异性评估"
+        questions:
+          - "是否只适用于特定项目/团队？"
+          - "是否来自专家个人经历？"
+          - "是否反映了专家风格/价值观？"
+      
+      step_3:
+        name: "价值评估"
+        questions:
+          - "存储价值是什么？"
+          - "能否避免重复踩坑？"
+          - "能否指导团队决策？"
+    
+    collaboration_modes:
+      mode_1:
+        name: "大模型主导"
+        condition: "Level 0 通用问题"
+        process: "大模型直接回答，仅注入专家风格"
+      
+      mode_2:
+        name: "专家系统主导"
+        condition: "Level 2-4 项目特定、专家经验"
+        process: "检索专家内容 → 大模型组织回答"
+      
+      mode_3:
+        name: "协作增强"
+        condition: "Level 1 准通用知识"
+        process: "大模型提供基础 + 专家系统补充细节"
+      
+      mode_4:
+        name: "专家修正"
+        condition: "大模型回答需要修正"
+        process: "大模型生成初稿 → 专家系统检查修正"
+    
+    storage_efficiency:
+      traditional_approach:
+        storage: "很大"
+        value_density: "低"
+        maintenance_cost: "很高"
+      
+      optimized_approach:
+        storage: "小（减少80%+）"
+        value_density: "高（提升5-10倍）"
+        maintenance_cost: "低（降低70%）"
+  
+  format: structured
+
+context:
+  triggers:
+    - "LLM分工"
+    - "知识分级"
+    - "存储策略"
+    - "通用度评估"
+  scope: "系统架构/知识管理策略"
+  constraints:
+    - "需要评估大模型覆盖度"
+    - "需要持续维护分级标准"
+  preconditions:
+    - "理解大语言模型能力边界"
+    - "理解知识管理基本原则"
+
+strength:
+  importance: 5
+  confidence: 0.9
+  mastery: 4
+  accessibility: 0.95
+  activation_level: 0
+
+source:
+  origin: reflected
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "大模型应用实践"
+    - "知识管理项目经验"
+    - "存储效率对比分析"
+  verified: true
+
+generality:
+  level: level_3
+  llm_coverage: 0.2
+  uniqueness: 0.8
+  llm_answer_quality: partial
+  storage_value: store
+  notes: |
+    大模型可能知道"知识要分级管理"的一般原则，
+    但不知道：
+    1. 这套五级分级体系
+    2. 具体的评估问题和流程
+    3. 四种协作模式
+    4. 效率对比数据
+    这是本架构的核心策略，必须存储。
+
+usage:
+  count: 30
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.9
+  recent_outcomes: []
+  decay_rate: 0.02
+
+relations:
+  - target_id: jd_20240101_001
+    type: derives_from
+    strength: 0.9
+    weight: 0.7
+    context: "分工策略体现了'存储差异化'的设计原则"
+  
+  - target_id: kn_20240101_002
+    type: applies_to
+    strength: 0.85
+    weight: 0.6
+    context: "分工策略决定了认知单元的generality字段设计"
+
+metadata:
+  domain: "系统策略"
+  component: "核心策略"
+  tags:
+    - "LLM分工"
+    - "知识分级"
+    - "存储策略"

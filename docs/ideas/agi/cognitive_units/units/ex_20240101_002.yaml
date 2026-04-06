@@ -1,0 +1,162 @@
+# 认知单元：过度抽象的失败教训
+# 类型：experience（经验）
+# 级别：Level 3（专家独有经验）
+
+id: ex_20240101_002
+type: experience
+
+content:
+  summary: "为一个简单的表单创建了复杂的抽象层，最终因维护成本过高而废弃"
+  body:
+    situation: |
+      项目需要一个表单组件，支持多种字段类型（文本、选择、日期等）。
+      预期后续会有很多类似的表单，于是决定设计一个"通用表单框架"。
+    
+    action:
+      initial_design:
+        description: "设计了一个多层抽象架构"
+        components:
+          - "FormField 基类（抽象类）"
+          - "TextField/SelectField/DateField 等子类"
+          - "FormValidator 验证器"
+          - "FormRenderer 渲染器"
+          - "FormStateManager 状态管理器"
+        time_invested: "2周"
+      
+      implementation:
+        description: "实现了完整的基础设施"
+        files_created: 15
+        lines_of_code: 2000
+      
+      first_form:
+        description: "用框架实现第一个表单"
+        time_taken: "3天"
+        complexity: "比直接写复杂3倍"
+    
+    result:
+      outcome: "失败"
+      problems:
+        - problem: "过度工程"
+          detail: "框架复杂度远超表单本身的需求"
+        
+        - problem: "学习成本高"
+          detail: "团队成员需要学习框架才能使用"
+        
+        - problem: "灵活性不足"
+          detail: "每个特殊需求都需要修改框架"
+        
+        - problem: "维护负担"
+          detail: "框架本身的bug和优化消耗大量时间"
+        
+        - problem: "ROI很低"
+          detail: "实际只做了3个表单，框架就废弃了"
+    
+    lessons_learned:
+      primary_lesson:
+        principle: "YAGNI (You Aren't Gonna Need It)"
+        description: "不要为假设的未来需求过度设计"
+        application: "至少做3个相似场景后再考虑抽象"
+      
+      secondary_lessons:
+        - lesson: "简单复制不是坏事"
+          context: "复制粘贴几份代码比维护复杂框架成本低"
+        
+        - lesson: "先痛苦再抽象"
+          context: "只有在重复劳动中感到痛苦时才抽象"
+        
+        - lesson: "抽象需要足够的样本"
+          context: "至少3个具体实例才能发现真正的共性"
+        
+        - lesson: "简单方案的生命周期更长"
+          context: "简单方案更容易理解和修改"
+    
+    better_approach:
+      step_1: "先用最简单的方式实现第一个表单"
+      step_2: "复制修改实现第二个表单，记录重复的部分"
+      step_3: "实现第三个表单，确认共性模式"
+      step_4: "如果确实有清晰的模式，再做适度抽象"
+      step_5: "抽象要保守，优先组合而非继承"
+    
+    applicability:
+      applies_when:
+        - "感觉'这个以后肯定用得上'"
+        - "想设计一个'通用框架'"
+        - "抽象层次超过2层"
+      warning_signs:
+        - "框架代码超过业务代码"
+        - "第一个使用者需要培训"
+        - "简单需求需要复杂配置"
+  
+  format: narrative
+
+context:
+  triggers:
+    - "过度抽象"
+    - "过度设计"
+    - "YAGNI"
+    - "框架设计"
+    - "抽象决策"
+  scope: "软件开发/架构设计"
+  constraints: []
+  preconditions:
+    - "有软件开发经验"
+    - "理解抽象的概念"
+
+strength:
+  importance: 4
+  confidence: 0.95
+  mastery: null
+  accessibility: 0.8
+  activation_level: 0
+
+source:
+  origin: experienced
+  created_at: "2020-06-15T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "真实项目经历"
+    - "多次类似场景验证"
+  verified: true
+
+generality:
+  level: level_3
+  llm_coverage: 0.4
+  uniqueness: 0.8
+  llm_answer_quality: partial
+  storage_value: store
+  notes: |
+    大模型知道YAGNI原则，
+    但不知道：
+    1. 这个具体的失败案例
+    2. 为什么会犯这个错误
+    3. 具体的损失和教训
+    4. 更好的做法是什么
+    这是宝贵的实践经验，必须存储。
+
+usage:
+  count: 15
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.9
+  recent_outcomes: []
+  decay_rate: 0.02
+
+relations:
+  - target_id: jd_20240101_001
+    type: example_of
+    strength: 0.85
+    weight: 0.6
+    context: "这个教训体现了'简洁优于完备'和'渐进增强'原则"
+  
+  - target_id: in_20240101_001
+    type: related_to
+    strength: 0.7
+    weight: 0.4
+    context: "过度设计是代码直觉可以发现的模式之一"
+
+metadata:
+  domain: "架构设计"
+  experience_type: "失败教训"
+  tags:
+    - "过度设计"
+    - "YAGNI"
+    - "架构教训"

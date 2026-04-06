@@ -1,0 +1,152 @@
+# 认知单元：CognitiveUnit 数据结构
+# 类型：knowledge（知识）
+# 级别：Level 2（项目特定知识 - 本项目的核心数据结构定义）
+
+id: kn_20240101_002
+type: knowledge
+
+content:
+  summary: "认知单元是存储专家知识和能力的统一数据结构，包含6个维度的完整信息"
+  body:
+    definition: |
+      认知单元（CognitiveUnit）是专家认知架构的核心数据实体，
+      将专家的知识、经验、技能等统一封装为可存储、可检索、可演化的结构。
+    
+    six_dimensions:
+      是什么:
+        field: type + content
+        description: "类型和内容，定义这是什么认知"
+      何时用:
+        field: context
+        description: "激活条件，定义在什么场景下触发"
+      有多强:
+        field: strength
+        description: "强度属性，定义重要程度和置信度"
+      从哪来:
+        field: source
+        description: "来源信息，定义知识的起源"
+      怎么用过:
+        field: usage
+        description: "使用历史，定义实践效果"
+      和什么相关:
+        field: relations
+        description: "关联关系，定义与其他单元的联系"
+    
+    field_groups:
+      basic_identity:
+        - id
+        - type
+      core_content:
+        - content.summary
+        - content.body
+        - content.format
+      activation_condition:
+        - context.triggers
+        - context.scope
+        - context.constraints
+        - context.preconditions
+      strength_attributes:
+        - strength.importance
+        - strength.confidence
+        - strength.mastery
+        - strength.accessibility
+        - strength.activation_level
+      source_info:
+        - source.origin
+        - source.created_at
+        - source.updated_at
+        - source.evidence
+        - source.verified
+      generality_assessment:
+        - generality.level
+        - generality.llm_coverage
+        - generality.uniqueness
+        - generality.llm_answer_quality
+        - generality.storage_value
+      usage_history:
+        - usage.count
+        - usage.last_used
+        - usage.effectiveness
+        - usage.recent_outcomes
+        - usage.decay_rate
+      embedded_relations:
+        - relations[].target_id
+        - relations[].type
+        - relations[].strength
+        - relations[].weight
+  
+  format: structured
+
+context:
+  triggers:
+    - "认知单元"
+    - "CognitiveUnit"
+    - "数据结构"
+    - "知识存储"
+  scope: "专家认知架构/核心组件"
+  constraints:
+    - "id格式：{type}_{timestamp}_{seq}"
+    - "type必须是七种类型之一"
+  preconditions:
+    - "理解专家认知架构基本概念"
+
+strength:
+  importance: 5
+  confidence: 0.95
+  mastery: null
+  accessibility: 0.9
+  activation_level: 0
+
+source:
+  origin: reflected
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "认知科学理论"
+    - "知识图谱设计经验"
+    - "多次迭代优化"
+  verified: true
+
+generality:
+  level: level_2
+  llm_coverage: 0.2
+  uniqueness: 0.8
+  llm_answer_quality: partial
+  storage_value: store
+  notes: |
+    这是本项目的核心数据结构定义，大模型不知道这个具体的结构设计。
+    六维度模型、字段定义、关系嵌入设计都是本架构特有的。
+    必须完整存储，否则无法理解和使用这个系统。
+
+usage:
+  count: 50
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.9
+  recent_outcomes:
+    - timestamp: "2024-04-05T00:00:00Z"
+      context: "创建新的认知单元"
+      result: "数据结构完整，字段清晰"
+      success: true
+  decay_rate: 0.02
+
+relations:
+  - target_id: kn_20240101_001
+    type: part_of
+    strength: 0.95
+    weight: 0.9
+    context: "认知单元是专家认知架构的核心组件"
+  
+  - target_id: ex_20240101_001
+    type: example_of
+    strength: 0.6
+    weight: 0.4
+    context: "通过实际案例展示认知单元的用法"
+
+metadata:
+  domain: "数据建模/知识工程"
+  version: "2.0"
+  component: "Layer 1 - 统一存储层"
+  tags:
+    - "核心概念"
+    - "数据结构"
+    - "统一模型"

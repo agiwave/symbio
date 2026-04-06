@@ -1,0 +1,106 @@
+# 认知单元：专家认知架构核心概念
+# 类型：knowledge（知识）
+# 级别：Level 1（准通用知识 - 大模型知道概念，但此文档有独特架构见解）
+
+id: kn_20240101_001
+type: knowledge
+
+content:
+  summary: "专家认知架构是将专家知识和能力数字化的统一数据模型，包含认知单元和六维度结构"
+  body:
+    definition: |
+      专家认知架构是一种将人类专家的知识、经验、技能、判断、策略、直觉和情感
+      统一建模的系统架构，旨在让AI能够像真正的专家一样辅导用户。
+    
+    core_concepts:
+      - 认知单元（CognitiveUnit）：存储知识和能力的统一数据结构
+      - 六维度模型：是什么、何时用、有多强、从哪来、怎么用过、和什么相关
+      - 四层架构：存储层、动态学习层、系统视图层、辅导应用层
+      - 七大认知系统：知识、经验、技能、判断、策略、直觉、情感
+    
+    key_innovations:
+      - 统一数据结构：不同类型认知内容使用相同字段结构
+      - 关系嵌入：关系直接存储在单元中，简化查询
+      - 通用度分级：区分通用知识和专家独有知识
+      - 与LLM分工：只存储差异化知识，避免冗余
+    
+    typical_scenarios:
+      - 专家知识沉淀与传承
+      - AI辅助教学与辅导
+      - 团队知识资产管理
+      - 个人知识备份
+  
+  format: structured
+
+context:
+  triggers:
+    - "专家系统"
+    - "认知架构"
+    - "知识数字化"
+    - "大脑建模"
+    - "AI专家"
+  scope: "人工智能/知识工程"
+  constraints: []
+  preconditions:
+    - "理解知识管理基本概念"
+    - "了解大语言模型能力"
+
+strength:
+  importance: 5
+  confidence: 0.9
+  mastery: null
+  accessibility: 0.95
+  activation_level: 0
+
+source:
+  origin: reflected
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "多个知识管理项目实践"
+    - "大模型应用经验"
+  verified: true
+
+generality:
+  level: level_1
+  llm_coverage: 0.6
+  uniqueness: 0.4
+  llm_answer_quality: good
+  storage_value: supplement
+  notes: |
+    大模型知道"知识图谱"、"专家系统"等概念，也能解释认知架构的基本思路。
+    但本文档提出的统一数据结构、六维度模型、关系嵌入设计、通用度分级等
+    是独特的架构决策，需要存储这些差异化见解。
+
+usage:
+  count: 10
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.85
+  recent_outcomes:
+    - timestamp: "2024-04-05T00:00:00Z"
+      context: "解释专家认知架构模型"
+      result: "用户理解了核心概念"
+      success: true
+  decay_rate: 0.05
+
+relations:
+  - target_id: kn_20240101_002
+    type: part_of
+    strength: 0.9
+    weight: 0.8
+    context: "认知单元是架构的核心组成部分"
+  
+  - target_id: jd_20240101_001
+    type: derives_from
+    strength: 0.7
+    weight: 0.5
+    context: "架构设计基于'存储差异化知识'的判断原则"
+
+metadata:
+  domain: "人工智能/知识工程"
+  version: "2.0"
+  author: "系统设计"
+  tags:
+    - "架构设计"
+    - "知识管理"
+    - "AI应用"

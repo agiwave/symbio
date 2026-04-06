@@ -1,0 +1,167 @@
+# 认知单元：遗忘与强化机制
+# 类型：skill（技能）
+# 级别：Level 2（项目特定知识）
+
+id: sk_20240101_002
+type: skill
+
+content:
+  summary: "基于艾宾浩斯遗忘曲线的记忆管理，通过使用反馈强化重要记忆"
+  body:
+    definition: |
+      遗忘与强化机制模拟人类记忆的动态特性：
+      - 未使用的知识会逐渐"遗忘"（可访问性降低）
+      - 使用成功的知识会被"强化"（可访问性提高）
+      - 这确保了系统能自动演化，突出最有价值的内容。
+    
+    forgetting_curve:
+      theory: "艾宾浩斯遗忘曲线"
+      description: "记忆随时间衰减，但使用可以重置"
+      formula: |
+        accessibility(t) = initial_accessibility × e^(-decay_rate × t_since_last_use)
+      
+      decay_rate_factors:
+        high_decay:
+          value: 0.3
+          condition: "低重要性、低使用频率、低成功率"
+          effect: "快速遗忘"
+        
+        medium_decay:
+          value: 0.1
+          condition: "中等重要性、偶尔使用"
+          effect: "正常遗忘"
+        
+        low_decay:
+          value: 0.02
+          condition: "高重要性、频繁使用、高成功率"
+          effect: "长期保持"
+    
+    reinforcement_mechanisms:
+      usage_reinforcement:
+        trigger: "认知单元被检索使用"
+        effect: "accessibility += 0.1（上限1.0）"
+        description: "每次使用都会强化可访问性"
+      
+      success_reinforcement:
+        trigger: "使用后获得正向反馈"
+        effect: |
+          accessibility += 0.2
+          confidence += 0.1
+          effectiveness = (effectiveness × count + 1) / (count + 1)
+        description: "成功的使用会显著强化"
+      
+      failure_weakening:
+        trigger: "使用后获得负向反馈"
+        effect: |
+          accessibility -= 0.1
+          confidence -= 0.05
+          effectiveness = (effectiveness × count) / (count + 1)
+        description: "失败的使用会弱化"
+      
+      review_reinforcement:
+        trigger: "用户主动复习/确认"
+        effect: "accessibility = 1.0, 重置遗忘"
+        description: "主动复习完全重置遗忘"
+    
+    automatic_cleanup:
+      trigger: "accessibility < 0.1 且 last_used > 1年"
+      action: "标记为'休眠'状态"
+      options:
+        - "归档存储"
+        - "提示用户是否需要复习"
+        - "降低检索优先级"
+    
+    implementation_pseudocode: |
+      def update_memory(unit, feedback):
+          # 遗忘更新
+          time_passed = now() - unit.usage.last_used
+          unit.strength.accessibility *= exp(-unit.usage.decay_rate * time_passed)
+          
+          # 使用记录
+          unit.usage.count += 1
+          unit.usage.last_used = now()
+          
+          # 反馈强化
+          if feedback == 'positive':
+              unit.strength.accessibility = min(1.0, unit.strength.accessibility + 0.2)
+              unit.usage.effectiveness = update_average(unit.usage.effectiveness, 1.0)
+          elif feedback == 'negative':
+              unit.strength.accessibility = max(0.1, unit.strength.accessibility - 0.1)
+              unit.usage.effectiveness = update_average(unit.usage.effectiveness, 0.0)
+          
+          return unit
+  
+  format: procedural
+
+context:
+  triggers:
+    - "遗忘曲线"
+    - "记忆强化"
+    - "知识管理"
+    - "记忆衰减"
+  scope: "专家认知架构/动态学习"
+  constraints:
+    - "需要记录使用历史"
+    - "需要反馈机制"
+  preconditions:
+    - "理解艾宾浩斯遗忘曲线"
+    - "理解认知单元数据结构"
+
+strength:
+  importance: 4
+  confidence: 0.85
+  mastery: 4
+  accessibility: 0.85
+  activation_level: 0
+
+source:
+  origin: learned
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "认知心理学记忆理论"
+    - "间隔重复学习法"
+    - "知识管理系统实践"
+  verified: true
+
+generality:
+  level: level_2
+  llm_coverage: 0.5
+  uniqueness: 0.5
+  llm_answer_quality: good
+  storage_value: supplement
+  notes: |
+    大模型知道遗忘曲线的一般原理，
+    但不知道：
+    1. 本系统具体的衰减率配置
+    2. 具体的强化机制设计
+    3. 与认知单元字段的映射
+    需要存储这些具体实现。
+
+usage:
+  count: 50
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.8
+  recent_outcomes: []
+  decay_rate: 0.02
+
+relations:
+  - target_id: sk_20240101_001
+    type: related_to
+    strength: 0.7
+    weight: 0.5
+    context: "遗忘强化影响激活扩散的初始激活值"
+  
+  - target_id: kn_20240101_002
+    type: depends_on
+    strength: 0.8
+    weight: 0.6
+    context: "遗忘强化更新认知单元的strength和usage字段"
+
+metadata:
+  domain: "记忆管理"
+  component: "Layer 2 - 动态学习层"
+  tags:
+    - "遗忘曲线"
+    - "记忆强化"
+    - "动态演化"

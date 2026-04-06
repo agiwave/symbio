@@ -1,0 +1,190 @@
+# 认知单元：代码问题的直觉模式
+# 类型：intuition（直觉）
+# 级别：Level 3（专家独有经验）
+
+id: in_20240101_001
+type: intuition
+
+content:
+  summary: "看到代码就能感觉到潜在问题的直觉模式，来自大量代码审查经验的积累"
+  body:
+    definition: |
+      代码直觉是资深开发者通过大量代码审查和实践积累形成的快速判断能力。
+      它不是神秘的感觉，而是模式识别的结果——大脑识别出之前见过的问题模式。
+    
+    intuition_patterns:
+      pattern_1:
+        name: "过长函数直觉"
+        trigger: "函数超过50行"
+        intuition: "这个函数可能做了太多事情"
+        typical_issues:
+          - "职责不单一"
+          - "难以测试"
+          - "难以理解和维护"
+        verification_questions:
+          - "能否拆分成更小的函数？"
+          - "这个函数的名字是否包含了'和'字？"
+        confidence: 0.85
+      
+      pattern_2:
+        name: "嵌套过深直觉"
+        trigger: "代码缩进超过3层"
+        intuition: "逻辑可能过于复杂"
+        typical_issues:
+          - "条件判断过多"
+          - "缺少提前返回"
+          - "可读性差"
+        verification_questions:
+          - "能否用guard clause减少嵌套？"
+          - "能否提取成独立函数？"
+        confidence: 0.9
+      
+      pattern_3:
+        name: "魔法数字直觉"
+        trigger: "代码中直接使用数字"
+        intuition: "这个数字的含义不清楚"
+        typical_issues:
+          - "可读性差"
+          - "难以修改"
+          - "可能重复使用相同数字"
+        verification_questions:
+          - "这个数字代表什么？"
+          - "其他地方是否使用相同的数字？"
+        confidence: 0.8
+      
+      pattern_4:
+        name: "命名不清直觉"
+        trigger: "变量名少于3个字符或缩写"
+        intuition: "这个变量的含义可能不清楚"
+        typical_issues:
+          - "代码可读性差"
+          - "团队理解成本高"
+          - "可能造成误解"
+        verification_questions:
+          - "新成员能理解这个名字吗？"
+          - "这个名字能表达意图吗？"
+        confidence: 0.85
+      
+      pattern_5:
+        name: "重复代码直觉"
+        trigger: "相似但略有不同的代码块"
+        intuition: "可能需要抽象"
+        typical_issues:
+          - "修改时容易遗漏"
+          - "违反DRY原则"
+          - "维护成本高"
+        verification_questions:
+          - "这三段代码有什么共同点？"
+          - "变化的部分能否参数化？"
+        confidence: 0.75
+      
+      pattern_6:
+        name: "过度设计直觉"
+        trigger: "简单的需求用了复杂的架构"
+        intuition: "可能过度了"
+        typical_issues:
+          - "增加不必要的复杂度"
+          - "开发成本高"
+          - "可能根本用不上"
+        verification_questions:
+          - "这个需求有多复杂？"
+          - "这个抽象真的需要吗？"
+          - "是否违反YAGNI原则？"
+        confidence: 0.7
+      
+      pattern_7:
+        name: "性能陷阱直觉"
+        trigger: "循环内有数据库查询或网络请求"
+        intuition: "可能有性能问题"
+        typical_issues:
+          - "N+1查询问题"
+          - "响应时间慢"
+          - "资源浪费"
+        verification_questions:
+          - "能否批量处理？"
+          - "能否预先加载数据？"
+          - "这个循环会执行多少次？"
+        confidence: 0.85
+    
+    how_to_develop:
+      - "大量阅读优秀代码"
+      - "定期进行代码审查"
+      - "反思和记录发现的问题模式"
+      - "学习代码异味（Code Smell）"
+      - "理解设计原则背后的原因"
+    
+    limitations:
+      - "直觉不能替代验证"
+      - "有时会产生误报"
+      - "需要结合具体场景判断"
+      - "新人可能没有这种直觉"
+  
+  format: pattern
+
+context:
+  triggers:
+    - "代码审查"
+    - "代码直觉"
+    - "代码异味"
+    - "代码质量问题"
+  scope: "软件开发/代码质量"
+  constraints:
+    - "需要结合具体项目标准"
+    - "不要过于教条"
+  preconditions:
+    - "有一定的代码阅读量"
+    - "理解代码质量原则"
+
+strength:
+  importance: 4
+  confidence: 0.8
+  mastery: 4
+  accessibility: 0.85
+  activation_level: 0
+
+source:
+  origin: experienced
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "数千次代码审查经验"
+    - "代码异味理论"
+    - "重构实践经验"
+  verified: true
+
+generality:
+  level: level_3
+  llm_coverage: 0.5
+  uniqueness: 0.5
+  llm_answer_quality: good
+  storage_value: supplement
+  notes: |
+    大模型知道代码异味和常见问题模式，
+    但不知道：
+    1. 这套具体的直觉模式列表
+    2. 每种模式的典型触发性特征
+    3. 验证问题的具体问法
+    4. 置信度评估
+    需要存储这些经验化的模式。
+
+usage:
+  count: 100
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.8
+  recent_outcomes: []
+  decay_rate: 0.01
+
+relations:
+  - target_id: jd_20240101_001
+    type: aligns_with
+    strength: 0.7
+    weight: 0.5
+    context: "直觉模式体现了'简洁优于完备'的原则"
+
+metadata:
+  domain: "代码质量"
+  component: "直觉判断"
+  tags:
+    - "代码审查"
+    - "直觉模式"
+    - "代码异味"

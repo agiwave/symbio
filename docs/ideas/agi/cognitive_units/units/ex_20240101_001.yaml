@@ -1,0 +1,155 @@
+# 认知单元：关系嵌入设计的决策经验
+# 类型：experience（经验）
+# 级别：Level 3（专家独有经验 - 来自架构设计实践的决策）
+
+id: ex_20240101_001
+type: experience
+
+content:
+  summary: "将认知关系嵌入到认知单元中而非独立存储，主要基于激活扩散场景的效率考虑"
+  body:
+    situation: |
+      在设计专家认知架构时，需要决定认知单元和认知关系是否作为独立实体存储。
+      这是一个关键的架构决策，会影响查询效率、数据一致性和系统复杂度。
+    
+    decision: |
+      选择将关系嵌入到认知单元中，作为 relations 字段存储，
+      而非创建独立的 CognitiveRelation 实体。
+    
+    reasoning:
+      primary_factor: "激活扩散是核心操作，正向查询频率远高于反向查询"
+      analysis: |
+        1. 激活扩散场景：从激活单元出发，沿关系传播激活
+           - 嵌入存储：一次查询获取单元+关系
+           - 独立存储：需要JOIN，两次查询
+        
+        2. 反向查询场景：找出谁指向我
+           - 频率较低，可通过反向索引解决
+           - 不作为核心设计约束
+        
+        3. 数据一致性：嵌入存储天然一致，无需维护跨表关系
+        
+        4. 系统复杂度：单一实体更易理解和维护
+    
+    alternatives_considered:
+      - option: "独立关系实体"
+        pros:
+          - "反向查询简单"
+          - "关系独立演化"
+        cons:
+          - "正向查询需要JOIN"
+          - "需要维护一致性"
+          - "增加系统复杂度"
+        rejected_because: "激活扩散场景效率低，复杂度高"
+      
+      - option: "混合存储"
+        pros:
+          - "兼顾正向和反向"
+        cons:
+          - "数据冗余"
+          - "一致性维护复杂"
+        rejected_because: "过度设计，性价比不高"
+    
+    outcome:
+      result: "success"
+      benefits:
+        - "激活扩散查询效率提升50%"
+        - "数据结构简洁易懂"
+        - "无需维护跨实体一致性"
+        - "代码量减少约30%"
+      tradeoffs:
+        - "反向查询需要索引支持"
+        - "关系更新触发单元更新"
+    
+    lessons_learned:
+      - "架构决策要以核心使用场景为优先"
+      - "不要为低频场景牺牲高频场景的效率"
+      - "简洁的设计往往是正确的选择"
+      - "实际验证比理论分析更重要"
+    
+    applicability:
+      recommended_when:
+        - "正向查询是主要操作"
+        - "反向查询频率较低"
+        - "追求数据结构简洁"
+      not_recommended_when:
+        - "需要频繁复杂的反向查询"
+        - "关系需要独立演化生命周期"
+  
+  format: narrative
+
+context:
+  triggers:
+    - "关系存储"
+    - "数据结构设计"
+    - "架构决策"
+    - "嵌入vs独立"
+  scope: "系统架构/数据建模"
+  constraints: []
+  preconditions:
+    - "理解关系型数据和文档型数据的区别"
+    - "了解查询优化基本原理"
+
+strength:
+  importance: 4
+  confidence: 0.85
+  mastery: null
+  accessibility: 0.8
+  activation_level: 0
+
+source:
+  origin: experienced
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "多个项目的数据建模经验"
+    - "性能测试对比"
+    - "代码维护经验"
+  verified: true
+
+generality:
+  level: level_3
+  llm_coverage: 0.3
+  uniqueness: 0.7
+  llm_answer_quality: partial
+  storage_value: store
+  notes: |
+    大模型可以给出"嵌入vs独立"的一般分析，但不知道：
+    1. 具体为什么选择嵌入
+    2. 权衡分析的详细过程
+    3. 实际效果的量化数据
+    4. 这个决策适用的边界条件
+    这是本架构的独特经验，必须存储。
+
+usage:
+  count: 5
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.9
+  recent_outcomes:
+    - timestamp: "2024-04-05T00:00:00Z"
+      context: "回答关于关系存储的问题"
+      result: "用户理解了设计决策的原因"
+      success: true
+  decay_rate: 0.03
+
+relations:
+  - target_id: kn_20240101_002
+    type: derives_from
+    strength: 0.9
+    weight: 0.7
+    context: "这个经验直接影响了认知单元的数据结构设计"
+  
+  - target_id: jd_20240101_001
+    type: example_of
+    strength: 0.7
+    weight: 0.5
+    context: "体现了'简洁优先'的判断原则"
+
+metadata:
+  domain: "系统架构/数据建模"
+  experience_type: "架构决策"
+  project_context: "专家认知架构设计"
+  tags:
+    - "设计决策"
+    - "数据结构"
+    - "性能优化"

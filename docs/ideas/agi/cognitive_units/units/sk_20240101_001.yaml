@@ -1,0 +1,152 @@
+# 认知单元：激活扩散机制
+# 类型：skill（技能）
+# 级别：Level 2（项目特定知识）
+
+id: sk_20240101_001
+type: skill
+
+content:
+  summary: "激活扩散是从激活的认知单元出发，沿关系网络传播激活的核心检索机制"
+  body:
+    definition: |
+      激活扩散（Spreading Activation）是一种模拟人类联想记忆的检索机制。
+      当某个认知单元被激活后，激活会沿着关系网络传播到相关单元，
+      从而检索出与当前情境相关的内容。
+    
+    core_algorithm:
+      step_1:
+        name: "初始激活"
+        description: "根据用户输入，激活匹配的认知单元"
+        formula: "activation_level = base_activation × context_match_score"
+      
+      step_2:
+        name: "激活传播"
+        description: "激活从高激活单元沿关系传播"
+        formula: "target_activation += source_activation × relation_weight × decay_factor"
+        parameters:
+          decay_factor: "每传播一层衰减系数，如0.8"
+          min_threshold: "最小激活阈值，低于此值不传播"
+      
+      step_3:
+        name: "迭代扩散"
+        description: "重复传播直到收敛"
+        stop_conditions:
+          - "激活值低于阈值"
+          - "达到最大迭代次数"
+          - "工作记忆已满（7±2个单元）"
+      
+      step_4:
+        name: "结果排序"
+        description: "按最终激活值排序，返回top-k结果"
+    
+    key_parameters:
+      initial_activation: 
+        value: 1.0
+        description: "初始激活单元的激活值"
+      
+      decay_factor:
+        value: 0.7
+        description: "每层传播的衰减系数"
+      
+      min_threshold:
+        value: 0.1
+        description: "最小激活阈值"
+      
+      max_iterations:
+        value: 5
+        description: "最大传播层数"
+      
+      working_memory_size:
+        value: 7
+        description: "工作记忆容量"
+    
+    implementation_example: |
+      1. 用户问"React性能优化"
+      2. 初始激活：匹配到kn_react_performance（激活值1.0）
+      3. 第一轮传播：
+         - ex_virtual_list (1.0 × 0.8 × 0.7 = 0.56)
+         - kn_react_hooks (1.0 × 0.6 × 0.7 = 0.42)
+      4. 第二轮传播：
+         - sk_profiling (0.56 × 0.7 × 0.7 = 0.27)
+         - jd_performance_first (0.56 × 0.8 × 0.7 = 0.31)
+      5. 排序返回激活值最高的7个单元
+    
+    optimization_techniques:
+      - "预计算常用路径"
+      - "缓存激活结果"
+      - "增量传播（只传播新增激活）"
+  
+  format: procedural
+
+context:
+  triggers:
+    - "激活扩散"
+    - "Spreading Activation"
+    - "联想检索"
+    - "相关内容检索"
+  scope: "专家认知架构/检索机制"
+  constraints:
+    - "需要关系网络已建立"
+    - "激活值需要动态维护"
+  preconditions:
+    - "理解图遍历算法"
+    - "理解认知单元关系"
+
+strength:
+  importance: 5
+  confidence: 0.9
+  mastery: 4
+  accessibility: 0.9
+  activation_level: 0
+
+source:
+  origin: learned
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "认知心理学激活扩散理论"
+    - "信息检索实践经验"
+    - "图算法应用"
+  verified: true
+
+generality:
+  level: level_2
+  llm_coverage: 0.4
+  uniqueness: 0.6
+  llm_answer_quality: good
+  storage_value: supplement
+  notes: |
+    大模型知道激活扩散的一般概念和算法，
+    但不知道：
+    1. 本系统中具体的参数配置
+    2. 与工作记忆的结合方式
+    3. 优化技术
+    需要存储这些差异化配置。
+
+usage:
+  count: 100
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.85
+  recent_outcomes: []
+  decay_rate: 0.01
+
+relations:
+  - target_id: kn_20240101_002
+    type: depends_on
+    strength: 0.9
+    weight: 0.8
+    context: "激活扩散需要认知单元的relations字段"
+  
+  - target_id: kn_20240101_003
+    type: part_of
+    strength: 0.8
+    weight: 0.7
+    context: "激活扩散是Layer 2动态学习层的核心机制"
+
+metadata:
+  domain: "检索算法"
+  component: "Layer 2 - 动态学习层"
+  tags:
+    - "检索"
+    - "图算法"
+    - "联想"
