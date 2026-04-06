@@ -338,6 +338,7 @@ watch(currentPage, (newVal, oldVal) => {
   display: flex;
   height: 100%;
   width: 100%;
+  min-height: 0;
   background: var(--color-bg);
 }
 
@@ -585,18 +586,22 @@ watch(currentPage, (newVal, oldVal) => {
   display: flex;
   height: 100%;
   width: 100%;
+  min-height: 0;
 }
 
 /* 主内容区 */
 .content-area {
   flex: 1;
-  height: 100%;
+  min-height: 0;
   min-width: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .content-area :deep(> *) {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   width: 100%;
 }
 

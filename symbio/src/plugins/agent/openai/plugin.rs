@@ -280,12 +280,14 @@ impl OpenAiPlugin {
 
             for (id, name, args) in tool_calls {
                 eprintln!("[openai] Executing tool: {} with args: {}", name, args);
+                // 还原 OpenAI 安全名称中的 __ 为 /（路由路径分隔符）
+                let invoke_name = name.replace("__", "/");
 
                 // 通过父插件调用工具，直接将工具名称作为 path
                 let result = match &parent {
                     Some(p) => {
                         // 直接将工具名称作为 path 调用，由父插件的路由机制处理
-                        match p.invoke(&name, args.clone()) {
+                        match p.invoke(&invoke_name, args.clone()) {
                             Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
                                 // 优先提取 content 字段，否则返回整个 data
                                 if let Some(content) = chunk.data.get("content").and_then(|c| c.as_str()) {
@@ -825,12 +827,14 @@ impl OpenAiPlugin {
                 // 执行每个工具调用
                 for (id, name, args) in tool_calls {
                     eprintln!("[openai] Executing tool: {} with args: {}", name, args);
+                    // 还原 OpenAI 安全名称中的 __ 为 /（路由路径分隔符）
+                    let invoke_name = name.replace("__", "/");
 
                     // 通过父插件调用工具，直接将工具名称作为 path
                     // 由父插件（agent）的路由机制处理工具名称解析
                     let result = match &parent {
                         Some(p) => {
-                            match p.invoke(&name, args.clone()) {
+                            match p.invoke(&invoke_name, args.clone()) {
                                 Ok(InvokeStream::Single(chunk)) if chunk.error.is_none() => {
                                     if let Some(content) = chunk.data.get("content").and_then(|c| c.as_str()) {
                                         content.to_string()
