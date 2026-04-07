@@ -130,6 +130,7 @@ jobs:
           if-no-files-found: warn
 
   # macOS 构建 - 支持多架构
+  # 注意：GitHub 正在弃用 Intel macOS runner，因此使用交叉编译
   build-macos:
     name: Build macOS (${{ matrix.arch }})
     needs: check-version
@@ -139,7 +140,7 @@ jobs:
         include:
           - arch: x86_64
             target: x86_64-apple-darwin
-            runner: macos-13-large
+            runner: macos-latest
           - arch: aarch64
             target: aarch64-apple-darwin
             runner: macos-latest
