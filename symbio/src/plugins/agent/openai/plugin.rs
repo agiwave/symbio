@@ -724,16 +724,6 @@ impl OpenAiPlugin {
                     request["tool_choice"] = json!("auto");
                 }
 
-                // 调试：打印消息格式
-                for (i, msg) in messages.iter().enumerate() {
-                    eprintln!("[openai] message[{}]: role={}, content={}, tool_call_id={:?}, tool_calls={:?}",
-                        i, msg.role, 
-                        msg.content.as_ref().map(|c| if c.len() > 50 { &c[..50] } else { c.as_str() }).unwrap_or("None"),
-                        msg.tool_call_id,
-                        msg.tool_calls.as_ref().map(|tc| tc.len())
-                    );
-                }
-
                 eprintln!("[openai] sending request to {}", api_url);
                 // 发送流式请求
                 let response = match reqwest::Client::new()

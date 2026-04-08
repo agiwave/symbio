@@ -54,6 +54,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
 
   // 处理聊天事件
   function handleChatEvent(event: ChatEvent) {
+    console.log('[useChatConnection] event received:', event.type, event)
     switch (event.type) {
       case 'connected':
         error.value = null
@@ -132,6 +133,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
 
   // 建立连接
   async function connect(sid: string) {
+    console.log('[useChatConnection] connect called, sid:', sid)
     // 关闭旧连接
     if (connection.value) {
       connection.value.close()
@@ -146,6 +148,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
 
     try {
       connection.value = await createChatConnection(sid, handleChatEvent)
+      console.log('[useChatConnection] connection created, id:', connection.value.connectionId)
     } catch (err) {
       console.error('[useChatConnection] Failed to connect:', err)
       error.value = `连接失败: ${err}`
@@ -154,6 +157,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
 
   // 发送消息
   function send(chatMessages: ChatMessage[], sid?: string) {
+    console.log('[useChatConnection] send called, sid:', sid, 'connection:', connection.value?.connectionId)
     if (!connection.value) {
       console.error('[useChatConnection] No connection')
       return
@@ -162,7 +166,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     isLoading.value = true
     streamingContent.value = ''
     toolCalls.value = []
-    connection.value.send(chatMessages, sid || sessionId)
+    const targetSid = sid || sessionId
+    console.log('[useChatConnection] sending with sessionId:', targetSid)
+    connection.value.send(chatMessages, targetSid)
   }
 
   // 中止当前请求

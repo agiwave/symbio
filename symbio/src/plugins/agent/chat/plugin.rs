@@ -283,21 +283,26 @@ impl Plugin for ChatPlugin {
                         let sid_clone = session.clone();
                         let curr_id_clone = curr_id.clone();
                         let c_clone = c.clone();
-                        
-                        tokio::spawn(async move {
+                        let c_clone_for_error = c.clone();
+                        let sid_for_monitor = session.clone();
+                        let curr_id_for_monitor = curr_id.clone();
+
+                        let handle = tokio::spawn(async move {
+                            eprintln!("[chat] Spawning LLM request for session {}", sid_clone);
                             let llm_input = json!({"action": "chat", "message": user_msg, "session_id": sid_clone.clone()});
-                            
+
                             match parent.as_ref().and_then(|p| p.invoke(&format!("@{}", CAPABILITY_LLM), llm_input).ok()) {
                                 Some(InvokeStream::Stream(mut stream)) => {
+                                    eprintln!("[chat] LLM stream received, processing");
                                     use futures::StreamExt;
                                     let mut content = String::new();
-                                    
+
                                     while let Some(chunk) = stream.next().await {
                                         // 检查是否被中止或连接关闭
                                         if curr_id_clone.load(Ordering::SeqCst) != request_id || c_clone.is_closed() {
                                             return;
                                         }
-                                        
+
                                         // 检查错误
                                         if let Some(ref err) = chunk.error {
                                             Self::complete_work(&sid_clone, request_id);
@@ -308,22 +313,22 @@ impl Plugin for ChatPlugin {
                                             }));
                                             return;
                                         }
-                                        
+
                                         if let Some(text) = chunk.data.get("content").and_then(|c| c.as_str()) {
                                             content = text.to_string();
                                             Self::update_content(&sid_clone, &content, request_id);
                                         }
-                                        
+
                                         let _ = c_clone.send(json!({
                                             "type": "chunk",
                                             "request_id": request_id,
                                             "data": chunk.data,
                                             "done": chunk.done
                                         }));
-                                        
+
                                         if chunk.done { break; }
                                     }
-                                    
+
                                     // 完成请求
                                     if curr_id_clone.load(Ordering::SeqCst) == request_id {
                                         Self::complete_work(&sid_clone, request_id);
@@ -347,6 +352,19 @@ impl Plugin for ChatPlugin {
                                     Self::complete_work(&sid_clone, request_id);
                                     let _ = c_clone.send(json!({"type": "error", "request_id": request_id, "error": "LLM 调用失败: 无父插件"}));
                                 }
+                            }
+                        });
+
+                        // spawn 一个监控任务，检测 LLM 任务是否 panic
+                        tokio::spawn(async move {
+                            if let Err(e) = handle.await {
+                                eprintln!("[chat] LLM request failed: {:?}", e);
+                                Self::complete_work(&sid_for_monitor, request_id);
+                                let _ = c_clone_for_error.send(json!({
+                                    "type": "error",
+                                    "request_id": request_id,
+                                    "error": format!("LLM 请求失败: {}", e)
+                                }));
                             }
                         });
                     }
