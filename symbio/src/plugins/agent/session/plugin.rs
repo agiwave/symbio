@@ -902,12 +902,15 @@ impl Plugin for SessionPlugin {
 fn parse_message(val: &Value, timestamp: i64) -> Option<ChatMessage> {
     let role = val.get("role")?.as_str()?.to_string();
     let content = val.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+    let tool_call_id = val.get("tool_call_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let tool_calls = val.get("tool_calls")
+        .and_then(|tc| serde_json::from_value(tc.clone()).ok());
     
     Some(ChatMessage {
         role,
         content,
         timestamp,
-        tool_calls: None,
-        tool_call_id: None,
+        tool_calls,
+        tool_call_id,
     })
 }

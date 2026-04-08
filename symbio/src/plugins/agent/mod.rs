@@ -27,7 +27,7 @@ pub use openai::factory::OpenAiFactory;
 pub use factory::AgentFactory;
 
 use crate::symbio_core::traits::Plugin;
-use crate::symbio_core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk};
+use crate::symbio_core::types::{PluginMeta, PluginResult, PluginError, InvokeStream, StreamChunk, Connection};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak, RwLock};
@@ -341,5 +341,40 @@ impl Plugin for Agent {
         }
 
         all_tools
+    }
+
+    async fn connect(
+        &self,
+        path: &str,
+        input: Value,
+        conn: Connection,
+    ) -> PluginResult<()> {
+        // 能力路由：@llm, @session 等
+        if Self::is_capability_route(path) {
+            let (capability, rest) = match path.find('/') {
+                Some(idx) => (&path[1..idx], &path[idx + 1..]),
+                None => (&path[1..], ""),
+            };
+
+            // find_by_capability 内部会获取读锁，返回的 Arc 已经 clone，锁已释放
+            let plugin = self.find_by_capability(capability)
+                .ok_or_else(|| PluginError::NotFound(format!("能力 '{}' 未找到", capability)))?;
+
+            return plugin.connect(rest, input, conn).await;
+        }
+
+        // 普通路径路由
+        let (name, rest) = Self::parse_path(path)
+            .ok_or_else(|| PluginError::NotFound(format!("插件路径 '{}' 未找到", path)))?;
+
+        // 获取插件引用后立即释放锁
+        let plugin = {
+            let instances = self.instances.read().unwrap();
+            instances.get(name)
+                .ok_or_else(|| PluginError::NotFound(format!("插件 '{}' 未找到", name)))?
+                .clone()
+        };
+
+        plugin.connect(rest, input, conn).await
     }
 }

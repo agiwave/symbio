@@ -78,6 +78,7 @@
           :session-id="NOTE_SESSION_ID"
           :messages="chatMessages"
           :on-update-messages="updateChatMessages"
+          :show-context="true"
         />
       </div>
     </aside>

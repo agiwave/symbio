@@ -107,16 +107,45 @@ impl OpenAiPlugin {
                         }
                         // 解析上下文消息（可能是压缩后的历史或选定的上下文片段）
                         if let Some(history) = chunk.data.get("history").and_then(|v| v.as_array()) {
+                            let mut last_assistant_tool_call_ids: Vec<String> = Vec::new();
+                            
                             for msg in history {
-                                if let (Some(role), Some(content)) = (
-                                    msg.get("role").and_then(|r| r.as_str()),
-                                    msg.get("content").and_then(|c| c.as_str())
-                                ) {
+                                if let Some(role) = msg.get("role").and_then(|r| r.as_str()) {
+                                    let content = msg.get("content").and_then(|c| c.as_str()).map(|s| s.to_string());
+                                    let mut tool_call_id = msg.get("tool_call_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    let tool_calls: Option<Vec<NativeToolCall>> = msg.get("tool_calls")
+                                        .and_then(|tc| serde_json::from_value(tc.clone()).ok());
+                                    
+                                    // 记录 assistant 的 tool_call ids 用于修复后续的 tool 消息
+                                    if role == "assistant" {
+                                        if let Some(ref tc) = tool_calls {
+                                            last_assistant_tool_call_ids = tc.iter()
+                                                .filter_map(|t| t.id.clone())
+                                                .collect();
+                                        }
+                                    }
+                                    
+                                    // 尝试修复不完整的 tool 消息
+                                    if role == "tool" && tool_call_id.is_none() {
+                                        // 从之前的 assistant 消息中获取第一个 tool_call_id
+                                        if let Some(id) = last_assistant_tool_call_ids.first() {
+                                            tool_call_id = Some(id.clone());
+                                            eprintln!("[openai] Repaired missing tool_call_id: {}", id);
+                                        } else {
+                                            eprintln!("[openai] Cannot repair tool message, skipping: {:?}", msg);
+                                            continue;
+                                        }
+                                        // 移除已使用的 id
+                                        if !last_assistant_tool_call_ids.is_empty() {
+                                            last_assistant_tool_call_ids.remove(0);
+                                        }
+                                    }
+                                    
                                     context_messages.push(NativeMessage {
                                         role: role.to_string(),
-                                        content: Some(content.to_string()),
-                                        tool_call_id: msg.get("tool_call_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                                        tool_calls: None,
+                                        content,
+                                        tool_call_id,
+                                        tool_calls,
                                     });
                                 }
                             }
@@ -592,16 +621,43 @@ impl OpenAiPlugin {
                             }
                         }
                         if let Some(history) = chunk.data.get("history").and_then(|v| v.as_array()) {
+                            let mut last_assistant_tool_call_ids: Vec<String> = Vec::new();
+                            
                             for msg in history {
-                                if let (Some(role), Some(content)) = (
-                                    msg.get("role").and_then(|r| r.as_str()),
-                                    msg.get("content").and_then(|c| c.as_str())
-                                ) {
+                                if let Some(role) = msg.get("role").and_then(|r| r.as_str()) {
+                                    let content = msg.get("content").and_then(|c| c.as_str()).map(|s| s.to_string());
+                                    let mut tool_call_id = msg.get("tool_call_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    let tool_calls: Option<Vec<NativeToolCall>> = msg.get("tool_calls")
+                                        .and_then(|tc| serde_json::from_value(tc.clone()).ok());
+                                    
+                                    // 记录 assistant 的 tool_call ids 用于修复后续的 tool 消息
+                                    if role == "assistant" {
+                                        if let Some(ref tc) = tool_calls {
+                                            last_assistant_tool_call_ids = tc.iter()
+                                                .filter_map(|t| t.id.clone())
+                                                .collect();
+                                        }
+                                    }
+                                    
+                                    // 尝试修复不完整的 tool 消息
+                                    if role == "tool" && tool_call_id.is_none() {
+                                        if let Some(id) = last_assistant_tool_call_ids.first() {
+                                            tool_call_id = Some(id.clone());
+                                            eprintln!("[openai] Repaired missing tool_call_id: {}", id);
+                                        } else {
+                                            eprintln!("[openai] Cannot repair tool message, skipping: {:?}", msg);
+                                            continue;
+                                        }
+                                        if !last_assistant_tool_call_ids.is_empty() {
+                                            last_assistant_tool_call_ids.remove(0);
+                                        }
+                                    }
+                                    
                                     context_messages.push(NativeMessage {
                                         role: role.to_string(),
-                                        content: Some(content.to_string()),
-                                        tool_call_id: msg.get("tool_call_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                                        tool_calls: None,
+                                        content,
+                                        tool_call_id,
+                                        tool_calls,
                                     });
                                 }
                             }
@@ -666,6 +722,16 @@ impl OpenAiPlugin {
                 if !tools.is_empty() {
                     request["tools"] = json!(tools);
                     request["tool_choice"] = json!("auto");
+                }
+
+                // 调试：打印消息格式
+                for (i, msg) in messages.iter().enumerate() {
+                    eprintln!("[openai] message[{}]: role={}, content={}, tool_call_id={:?}, tool_calls={:?}",
+                        i, msg.role, 
+                        msg.content.as_ref().map(|c| if c.len() > 50 { &c[..50] } else { c.as_str() }).unwrap_or("None"),
+                        msg.tool_call_id,
+                        msg.tool_calls.as_ref().map(|tc| tc.len())
+                    );
                 }
 
                 eprintln!("[openai] sending request to {}", api_url);

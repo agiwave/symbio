@@ -1,16 +1,8 @@
 <template>
   <div class="ai-chat-panel">
     <!-- 消息历史 -->
-    <div class="chat-messages" ref="messagesRef" @scroll="handleScroll">
-      <!-- 加载更多指示器 -->
-      <div v-if="isLoadingHistory" class="load-more-indicator">
-        <div class="typing-indicator">
-          <span></span><span></span><span></span>
-        </div>
-        <span class="load-text">加载历史消息...</span>
-      </div>
-      
-      <div v-if="messages.length === 0 && initialLoadDone" class="empty-chat">
+    <div class="chat-messages" ref="messagesRef">
+      <div v-if="messages.length === 0" class="empty-chat">
         <p>开始与 AI 对话</p>
       </div>
 
@@ -24,22 +16,6 @@
           {{ msg.role === 'user' ? '👤' : '🤖' }}
         </div>
         <div class="message-content">
-          <!-- 工具调用信息 -->
-          <div v-if="msg.role === 'assistant' && getToolCalls(msg).length > 0" class="tool-calls">
-            <div v-for="(tool, idx) in getToolCalls(msg)" :key="idx" class="tool-call">
-              <div class="tool-call-header">
-                <span class="tool-call-icon">🔧</span>
-                <span class="tool-call-name">{{ tool.name }}</span>
-              </div>
-              <div v-if="tool.args" class="tool-call-args">
-                <pre>{{ formatJson(tool.args) }}</pre>
-              </div>
-              <div v-if="tool.result" class="tool-call-result">
-                <pre>{{ tool.result }}</pre>
-              </div>
-            </div>
-          </div>
-
           <div class="message-text" v-html="renderMarkdown(msg.content)"></div>
           <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
         </div>
@@ -49,26 +25,10 @@
       <div v-if="isLoading" class="message assistant loading">
         <div class="message-avatar">🤖</div>
         <div class="message-content">
-          <!-- 工具调用信息 -->
-          <div v-if="toolCalls.length > 0" class="tool-calls">
-            <div v-for="(tool, idx) in toolCalls" :key="idx" class="tool-call">
-              <div class="tool-call-header">
-                <span class="tool-call-icon">🔧</span>
-                <span class="tool-call-name">{{ tool.name }}</span>
-              </div>
-              <div v-if="tool.args" class="tool-call-args">
-                <pre>{{ formatJson(tool.args) }}</pre>
-              </div>
-              <div v-if="tool.result" class="tool-call-result">
-                <pre>{{ tool.result }}</pre>
-              </div>
-            </div>
-          </div>
-          
-          <!-- 显示流式内容（如果有） -->
-          <div v-if="streamingContent" class="message-text" v-html="renderMarkdown(streamingContent)"></div>
+          <!-- 显示流式内容（只有字符串才渲染） -->
+          <div v-if="typeof streamingContent === 'string' && streamingContent" class="message-text" v-html="renderMarkdown(streamingContent)"></div>
           <!-- 否则显示打字指示器 -->
-          <div v-else-if="toolCalls.length === 0" class="typing-indicator">
+          <div v-else class="typing-indicator">
             <span></span><span></span><span></span>
           </div>
         </div>
@@ -78,27 +38,34 @@
     <!-- 输入区域 -->
     <div class="chat-input">
       <!-- 当前上下文信息 -->
-      <div v-if="context.filePath || context.selectedText" class="context-bar">
+      <div v-if="hasContext" class="context-bar">
         <span class="context-label">当前上下文</span>
-        <span v-if="context.filePath" class="file-name">📄 {{ context.filePath.split(/[\\/]/).pop() }}</span>
-        <span v-if="context.startLine" class="line-range">📍 行 {{ context.startLine }}{{ context.endLine && context.endLine !== context.startLine ? '-' + context.endLine : '' }}</span>
-        <span v-if="context.selectedText" class="selected-text">{{ context.selectedText.slice(0, 50) }}{{ context.selectedText.length > 50 ? '...' : '' }}</span>
-      </div>
-      <div v-if="configError" class="config-error">
-        {{ configError }}
+        <span v-if="context?.filePath" class="file-name">📄 {{ context.filePath.split(/[\\\/]/).pop() }}</span>
+        <span v-if="context?.startLine" class="line-range">📍 行 {{ context.startLine }}{{ context.endLine && context.endLine !== context.startLine ? '-' + context.endLine : '' }}</span>
+        <span v-if="context?.selectedText" class="selected-text">{{ context.selectedText.slice(0, 50) }}{{ context.selectedText.length > 50 ? '...' : '' }}</span>
       </div>
       <div class="input-wrapper">
         <textarea
           v-model="inputText"
           placeholder="输入消息..."
           @keydown.enter.exact="handleKeydown"
-          :disabled="isLoading"
           rows="1"
         ></textarea>
-        <button class="send-btn" @click="handleSend" :disabled="!inputText.trim() || isLoading" title="发送">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button
+          class="send-btn"
+          :class="{ 'stop-btn': isLoading && !inputText.trim() }"
+          @click="handleSendOrAbort()"
+          :disabled="!isLoading && !inputText.trim()"
+          :title="isLoading ? (inputText.trim() ? '发送新消息' : '停止') : '发送'"
+        >
+          <!-- 发送图标：没有加载 或 加载中有输入内容 -->
+          <svg v-if="!isLoading || inputText.trim()" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"></line>
             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+          <!-- 停止图标：加载中且没有输入内容 -->
+          <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12" rx="2"></rect>
           </svg>
         </button>
       </div>
@@ -107,17 +74,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch, onMounted } from 'vue'
+import { ref, nextTick, watch, computed } from 'vue'
 import { marked } from 'marked'
-import { sendMessageStream, type ChatMessage, type StreamChunk } from '../services/ai'
-import {
-  getSessionMessages,
-  type SessionMessage,
-} from '../services/session'
+import { useChatConnection } from '@/composables/useChatConnection'
 import { useAIContext, buildContextualMessage } from '@/composables/useAIContext'
-
-// 使用全局 AI 上下文
-const { context } = useAIContext()
+import type { ChatMessage, SessionMessage } from '@/services/ai'
 
 // Props
 const props = defineProps<{
@@ -125,103 +86,94 @@ const props = defineProps<{
   messages: SessionMessage[]
   onUpdateMessages: (messages: SessionMessage[]) => void
   onSendComplete?: () => void
+  /** 是否显示上下文信息，默认 false */
+  showContext?: boolean
 }>()
 
+// 使用全局 AI 上下文（仅在 showContext 为 true 时使用）
+const { context } = props.showContext ? useAIContext() : { context: ref(null) }
+
+// 计算是否有有效上下文
+const hasContext = computed(() => {
+  if (!props.showContext || !context.value) return false
+  return !!(context.value.filePath || context.value.selectedText)
+})
+
 // 配置 marked
-marked.setOptions({
-  breaks: true,
-  gfm: true
+marked.setOptions({ breaks: true, gfm: true })
+
+// 使用统一的聊天连接 composable
+const chat = useChatConnection({
+  sessionId: props.sessionId,
+  messages: computed(() => props.messages),
+  onUpdateMessages: props.onUpdateMessages,
+  onSendComplete: props.onSendComplete,
 })
 
-// 状态
+// 解构 chat 对象，确保 Ref 在模板中正确解包
+const { isLoading, streamingContent, toolCalls, error } = chat
+
+// 输入文本
 const inputText = ref('')
-const isLoading = ref(false)
+// 消息容器 DOM 引用
 const messagesRef = ref<HTMLElement | null>(null)
-const configError = ref<string | null>(null)
-const streamingContent = ref('')
-const toolCalls = ref<Array<{ name: string; args: string; result?: string }>>([])
 
-// 分页加载状态
-const isLoadingHistory = ref(false)
-const hasMoreHistory = ref(true)
-const oldestTimestamp = ref<number | null>(null)
-const initialLoadDone = ref(false)
-const PAGE_SIZE = 10
-
-// 跟踪用户是否手动滚动到顶部
-const isUserAtBottom = ref(true)
-const SCROLL_THRESHOLD = 50 // 距离底部多少像素时认为是在底部
-
-// 加载历史消息
-async function loadHistory(before?: number) {
-  if (isLoadingHistory.value) return
-  if (!hasMoreHistory.value && before) return
-
-  isLoadingHistory.value = true
-
-  try {
-    const result = await getSessionMessages(props.sessionId, PAGE_SIZE, before)
-
-    if (result.messages.length > 0) {
-      // 将新消息添加到现有消息的前面
-      const newMessages = [...result.messages, ...props.messages]
-      props.onUpdateMessages(newMessages)
-
-      // 更新最旧的时间戳
-      oldestTimestamp.value = result.messages[0].timestamp
-      hasMoreHistory.value = result.hasMore
-
-      // 如果是初始加载,滚动到底部
-      if (!before) {
-        await nextTick()
-        scrollToBottom()
-      }
+// 处理发送或停止
+function handleSendOrAbort() {
+  if (isLoading.value) {
+    // 正在加载
+    if (inputText.value.trim()) {
+      // 有输入内容，发送新消息（会自动中止旧请求）
+      handleSend()
     } else {
-      hasMoreHistory.value = false
+      // 没有输入内容，仅中止
+      chat.abort()
     }
-  } catch (err) {
-    console.error('[AIChatPanel] Failed to load history:', err)
-  } finally {
-    isLoadingHistory.value = false
-    if (!before) {
-      initialLoadDone.value = true
-    }
+  } else if (inputText.value.trim()) {
+    // 未加载且有内容，直接发送
+    handleSend()
   }
 }
 
-// 滚动加载更多
-function handleScroll() {
-  if (!messagesRef.value) return
-  if (isLoadingHistory.value || !hasMoreHistory.value) return
+// 发送消息
+function handleSend() {
+  const text = inputText.value.trim()
+  if (!text) return
 
-  // 检查用户是否在底部附近
-  const { scrollTop, scrollHeight, clientHeight } = messagesRef.value
-  const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-  isUserAtBottom.value = distanceFromBottom < SCROLL_THRESHOLD
+  // 如果启用上下文且有上下文信息，则构建上下文消息
+  const ctx = props.showContext ? context.value : null
+  const contextualContent = ctx ? buildContextualMessage(text, ctx) : text
 
-  // 当滚动到顶部附近时加载更多
-  if (scrollTop < 50) {
-    const savedScrollHeight = messagesRef.value.scrollHeight
-    loadHistory(oldestTimestamp.value || undefined).then(() => {
-      // 保持滚动位置
-      nextTick(() => {
-        if (messagesRef.value) {
-          const newScrollHeight = messagesRef.value.scrollHeight
-          messagesRef.value.scrollTop = newScrollHeight - savedScrollHeight
-        }
-      })
-    })
+  const now = Math.floor(Date.now() / 1000)
+
+  // 添加用户消息
+  const userMessage: SessionMessage = {
+    role: 'user',
+    content: contextualContent,
+    timestamp: now
   }
+  props.onUpdateMessages([...props.messages, userMessage])
+
+  inputText.value = ''
+  nextTick(() => scrollToBottom())
+
+  // 构建消息历史
+  const chatMessages: ChatMessage[] = [...props.messages, userMessage].map(m => ({
+    role: m.role as 'user' | 'assistant',
+    content: m.content
+  }))
+
+  // 发送消息
+  chat.send(chatMessages, props.sessionId)
 }
 
-// 初始加载
-onMounted(() => {
-  if (props.messages.length === 0) {
-    loadHistory()
-  } else {
-    initialLoadDone.value = true
+// 键盘事件
+function handleKeydown(e: KeyboardEvent) {
+  if (!e.shiftKey) {
+    e.preventDefault()
+    handleSendOrAbort()
   }
-})
+}
 
 // 渲染 Markdown
 function renderMarkdown(content: string): string {
@@ -232,31 +184,10 @@ function renderMarkdown(content: string): string {
   }
 }
 
-// 格式化 JSON
-function formatJson(str: string): string {
-  try {
-    return JSON.stringify(JSON.parse(str), null, 2)
-  } catch {
-    return str
-  }
-}
-
 // 格式化时间
 function formatTime(timestamp: number): string {
   const date = new Date(timestamp * 1000)
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-}
-
-// 获取消息的工具调用信息
-function getToolCalls(msg: SessionMessage) {
-  if (msg.tool_calls && msg.tool_calls.length > 0) {
-    return msg.tool_calls.map(tc => ({
-      name: tc.function?.name || 'unknown',
-      args: tc.function?.arguments || '',
-      result: undefined
-    }))
-  }
-  return []
 }
 
 // 滚动到底部
@@ -266,134 +197,10 @@ function scrollToBottom() {
   }
 }
 
-// 发送消息
-async function handleSend() {
-  const text = inputText.value.trim()
-  if (!text || isLoading.value || !props.sessionId) return
-
-  // 使用全局上下文构建消息
-  const ctx = context.value
-  const contextualContent = buildContextualMessage(text, ctx)
-
-  const now = Math.floor(Date.now() / 1000)
-
-  // 添加用户消息（使用带上下文的内容）
-  const userMessage: SessionMessage = {
-    role: 'user',
-    content: contextualContent,
-    timestamp: now
-  }
-
-  const newMessages = [...props.messages, userMessage]
-  props.onUpdateMessages(newMessages)
-
-  inputText.value = ''
-  isLoading.value = true
-  configError.value = null
-  streamingContent.value = ''
-  toolCalls.value = []
-
-  await nextTick()
-  scrollToBottom()
-
-  try {
-    // 构建消息历史
-    const chatMessages: ChatMessage[] = newMessages.map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content
-    }))
-
-    // 流式发送消息
-    const response = await sendMessageStream(
-      chatMessages,
-      props.sessionId,
-      (chunk: StreamChunk) => {
-        console.log('[AIChatPanel] Stream chunk:', chunk)
-        if (chunk.data && typeof chunk.data === 'object') {
-          const data = chunk.data as Record<string, unknown>
-
-          // 检查工具调用
-          if (data.tool_calls && Array.isArray(data.tool_calls)) {
-            toolCalls.value = data.tool_calls.map((tc: any) => ({
-              name: tc.function?.name || tc.name || 'unknown',
-              args: tc.function?.arguments || tc.arguments || '',
-              result: tc.result
-            }))
-          }
-
-          // 检查内容
-          if (data.content && typeof data.content === 'string') {
-            streamingContent.value = data.content as string
-          }
-
-          // 检查 data 内部错误
-          if (data.error && typeof data.error === 'string') {
-            console.error('[AIChatPanel] Stream data.error:', data.error)
-            configError.value = data.error as string
-          }
-        }
-
-        // 检查顶层错误（chunk.error）
-        if (chunk.error && typeof chunk.error === 'string') {
-          console.error('[AIChatPanel] Chunk top-level error:', chunk.error)
-          configError.value = chunk.error
-        }
-
-        scrollToBottom()
-      }
-    )
-
-    console.log('[AIChatPanel] Stream completed, response:', response)
-
-    // 流完成 - 添加助手消息
-    if (response.error) {
-      console.error('[AIChatPanel] Response error:', response.error)
-      configError.value = response.error
-      props.onUpdateMessages([...newMessages, {
-        role: 'assistant',
-        content: `错误: ${response.error}`,
-        timestamp: Math.floor(Date.now() / 1000)
-      }])
-    } else if (streamingContent.value) {
-      props.onUpdateMessages([...newMessages, {
-        role: 'assistant',
-        content: streamingContent.value,
-        timestamp: Math.floor(Date.now() / 1000)
-      }])
-    }
-
-    props.onSendComplete?.()
-  } catch (err) {
-    configError.value = err instanceof Error ? err.message : '发送失败'
-    props.onUpdateMessages([...newMessages, {
-      role: 'assistant',
-      content: `发送失败: ${configError.value}`,
-      timestamp: Math.floor(Date.now() / 1000)
-    }])
-  } finally {
-    isLoading.value = false
-    streamingContent.value = ''
-    toolCalls.value = []
-    scrollToBottom()
-  }
-}
-
-function handleKeydown(e: KeyboardEvent) {
-  if (!e.shiftKey) {
-    e.preventDefault()
-    handleSend()
-  }
-}
-
 // 监听消息变化，滚动到底部
 watch(() => props.messages.length, () => {
-  nextTick(() => {
-    // 只有当用户在底部时才自动滚动，否则不干扰用户查看历史
-    if (isUserAtBottom.value) {
-      scrollToBottom()
-    }
-  })
-})
+  nextTick(() => scrollToBottom())
+}, { flush: 'post', immediate: true })
 </script>
 
 <style scoped>
@@ -401,30 +208,15 @@ watch(() => props.messages.length, () => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 1rem;
-}
-
-.load-more-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  color: var(--color-text-muted);
-  font-size: 0.75rem;
-}
-
-.load-more-indicator .typing-indicator {
-  padding: 0;
-}
-
-.load-text {
-  white-space: nowrap;
 }
 
 .empty-chat {
@@ -510,64 +302,6 @@ watch(() => props.messages.length, () => {
   margin-bottom: 0;
 }
 
-/* 工具调用样式 */
-.tool-calls {
-  margin-bottom: 0.75rem;
-}
-
-.tool-call {
-  background: #f0f0f0;
-  border-radius: 8px;
-  padding: 0.75rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.8rem;
-}
-
-.tool-call:last-child {
-  margin-bottom: 0;
-}
-
-.tool-call-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.tool-call-icon {
-  font-size: 1rem;
-}
-
-.tool-call-name {
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.tool-call-args,
-.tool-call-result {
-  background: #1e1e1e;
-  color: #d4d4d4;
-  border-radius: 4px;
-  padding: 0.5rem;
-  margin-top: 0.5rem;
-  overflow-x: auto;
-}
-
-.tool-call-args pre,
-.tool-call-result pre {
-  margin: 0;
-  font-family: 'Fira Code', 'Consolas', monospace;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.tool-call-result {
-  background: #e8f5e9;
-  color: #2e7d32;
-}
-
 /* 打字指示器 */
 .typing-indicator {
   display: flex;
@@ -635,15 +369,6 @@ watch(() => props.messages.length, () => {
   white-space: nowrap;
 }
 
-.config-error {
-  padding: 0.5rem 0.75rem;
-  margin-bottom: 0.5rem;
-  background: #fef3cd;
-  color: #856404;
-  border-radius: 6px;
-  font-size: 0.8rem;
-}
-
 .input-wrapper {
   display: flex;
   align-items: flex-end;
@@ -653,7 +378,6 @@ watch(() => props.messages.length, () => {
   border-radius: 12px;
   padding: 0.5rem;
   transition: border-color 0.2s;
-  container-type: inline-size;
 }
 
 .input-wrapper:focus-within {
@@ -673,17 +397,6 @@ watch(() => props.messages.length, () => {
   line-height: 1.5;
   outline: none;
   font-family: inherit;
-}
-
-.chat-input textarea:disabled {
-  opacity: 0.6;
-}
-
-/* 窄屏时隐藏 placeholder */
-@container (max-width: 200px) {
-  .chat-input textarea::placeholder {
-    color: transparent;
-  }
 }
 
 .send-btn {
@@ -714,5 +427,15 @@ watch(() => props.messages.length, () => {
 .send-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* 停止按钮样式 */
+.send-btn.stop-btn {
+  background: #dc3545;
+}
+
+.send-btn.stop-btn:hover {
+  background: #c82333;
+  opacity: 1;
 }
 </style>

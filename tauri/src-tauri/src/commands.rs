@@ -123,11 +123,15 @@ pub async fn connect(
     );
     let conn_id = conn.id.clone();
 
-    // 调用 root plugin 的 connect 方法，让它自行处理路径路由
+    // 返回 connection_id 给前端，让前端先设置监听器
+    // 然后前端会调用 connect_start 来真正启动连接
+    // 为了向后兼容，我们仍然在这里 spawn 任务，但添加一个小延迟
     let conn_for_plugin = conn.clone();
     let path_clone = path.clone();
     let root_clone = root.clone();
     tokio::spawn(async move {
+        // 等待前端设置监听器（前端需要收到 connection_id 后才能设置）
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         if let Err(e) = root_clone.connect(&path_clone, input, conn_for_plugin).await {
             eprintln!("[connect] Plugin connect error: {}", e);
         }
