@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+target/
+vendor/
+.symbio/
+symbio/embedding/
+.cargo*/
+
+# Build outputs
+dist/
+src-tauri/target/
+
+# Model caches (downloaded by libraries like fastembed)
+# Note: The embedding/ directory itself is NOT ignored to allow embedding models in the project
+# Only cache subdirectories are ignored
+fastembed_cache/
+.fastembed_cache/
+**/.fastembed_cache/
+**/fastembed_cache/
+**/.cache/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local

@@ -1,0 +1,26 @@
+# rustfmt 配置
+# 与 CONTRIBUTING.md 中"Rust 规范"章节保持一致
+# 参考：https://rust-lang.github.io/rustfmt/
+#
+# 本文件作为约定基线存放，CI 会执行 `cargo fmt --check`。
+# 约定：仅强制影响美观的最小集合（行宽、换行风格、合并 use），
+# 避免一次性触发大规模重排（imports_granularity/group_imports 由
+# 团队成员 IDE 自行决定，不在仓库级强约束）。
+
+edition = "2021"
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+use_small_heuristics = "default"
+reorder_imports = true
+reorder_modules = true
+remove_nested_parens = true
+format_code_in_doc_comments = true
+normalize_comments = false
+match_block_trailing_comma = true
+trailing_comma = "Vertical"
+trailing_semicolon = true
+merge_uses = true
+# 链式调用换行风格（从子 crate 配置合并而来）
+chain_width = 60

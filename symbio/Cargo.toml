@@ -1,0 +1,70 @@
+[package]
+name = "symbio"
+version = "0.1.5"
+description = "Symbio core plugin system - a fractal plugin architecture library"
+authors = ["Symbio Team"]
+license = "MIT"
+repository = ""
+edition = "2021"
+# 最低支持 Rust 版本（与 clippy.toml 的 msrv 保持一致）
+# 主要使用 1.95.0 stable；锁定 1.91 是因为 submit_object_creator! 宏依赖
+# TypeId::of 在 const 上下文的稳定化（1.91 起 stable）
+rust-version = "1.91"
+
+[lints.rust]
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+thiserror = "1.0"
+indexmap = { version = "2.0", features = ["serde"] }
+dirs = "5.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+# 优化 1：从 chrono 迁移到更轻量的 time
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest-eventsource = "0.6"
+async-stream = "0.3"
+url = "2.5"
+shellexpand = "3.1"
+glob = "0.3"
+which = "6.0"
+regex = "1.10"
+# 跨平台内容搜索：直接调用 ripgrep 库（替代对 rg/PowerShell/grep 可执行文件的依赖），并遵循 .gitignore
+grep = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+ignore = "0.4"
+globset = "0.4"
+bstr = "1"
+urlencoding = "2.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+tokio-stream = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# 优化 2：替换已停止维护的 serde_yaml
+serde_yml = "0.0.12"
+notify = "6.1"
+dashmap = "5.5"
+inventory = "0.3"
+encoding_rs = "0.8.35"
+fastembed = "5.13.4"
+moka = { version = "0.12", features = ["future"] }
+# 优化 1 同步：rusqlite 也改为支持 time
+rusqlite = { version = "0.32", features = ["bundled", "time"] }
+tokio-rusqlite = "0.6"
+sqlite-vec = "0.1"
+
+[workspace]
+members = [
+    ".",
+]
+
+[dev-dependencies]
+tempfile = "3.8"

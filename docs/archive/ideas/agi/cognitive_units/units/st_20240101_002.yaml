@@ -1,0 +1,173 @@
+# 认知单元：工具层增强
+# 类型：strategy（策略）
+# 级别：Level 3（专家独有经验）
+
+id: st_20240101_002
+type: strategy
+
+content:
+  summary: "工具增强是认知能力的外延，让AI从知识库变为能力体，从专家顾问变为专家助手"
+  body:
+    core_insight: |
+      人类专家能力 = 内在认知能力 × 外部工具能力
+      AI专家系统 = 认知模型 × 工具集成
+      
+      工具增强的本质是"能力延伸"而非"能力替代"
+    
+    tool_categories:
+      perception_tools:
+        name: "感知增强工具"
+        purpose: "扩展感知范围，看到人眼看不到的"
+        examples:
+          - "代码静态分析（ESLint、SonarQube）"
+          - "性能分析器（Profiler）"
+          - "日志分析工具（ELK、Sentry）"
+          - "网络抓包工具（Wireshark）"
+        capability_boost: "问题诊断能力 60% → 85%"
+      
+      computation_tools:
+        name: "计算增强工具"
+        purpose: "扩展计算能力，算得更快更准"
+        examples:
+          - "基准测试工具（Benchmark.js）"
+          - "复杂度分析工具"
+          - "统计分析工具"
+        capability_boost: "决策建议能力 65% → 85%"
+      
+      execution_tools:
+        name: "执行增强工具"
+        purpose: "扩展执行能力，做人力做不到的"
+        examples:
+          - "代码执行环境（Docker沙箱）"
+          - "测试框架（Jest、PyTest）"
+          - "自动化工具（CI/CD）"
+        capability_boost: "实践执行能力 0% → 80%"
+      
+      knowledge_tools:
+        name: "知识增强工具"
+        purpose: "扩展知识获取能力"
+        examples:
+          - "搜索引擎"
+          - "API文档访问"
+          - "代码仓库访问（GitHub）"
+        capability_boost: "知识广度大幅扩展"
+      
+      creation_tools:
+        name: "创造增强工具"
+        purpose: "扩展创造能力"
+        examples:
+          - "代码生成AI（Copilot、Cursor）"
+          - "原型工具"
+          - "代码模板/脚手架"
+        capability_boost: "创新能力 20% → 45%"
+    
+    orchestration_architecture:
+      layers:
+        - name: "认知核心层"
+          components: "知识+经验+..."
+        - name: "工具协调层"
+          components: "工具选择、工具调用、结果整合、效果评估"
+        - name: "工具层"
+          components: "感知、计算、执行、知识、创造工具"
+    
+    decision_process:
+      step_1: "问题分析：类型、需要什么信息"
+      step_2: "工具选择：匹配问题类型"
+      step_3: "工具执行：调用API、获取结果"
+      step_4: "结果整合：工具结果+认知单元→综合分析"
+    
+    evolution_path:
+      v1_0:
+        version: "当前体系"
+        capability: "~55%"
+      v2_0:
+        version: "认知增强版"
+        capability: "~72%"
+      v3_0:
+        version: "工具增强版"
+        capability: "~78%"
+      v4_0:
+        version: "融合增强版"
+        capability: "~85%"
+    
+    ai_advantages:
+      - "可以瞬间掌握任何工具"
+      - "可以同时使用多个工具"
+      - "可以7×24不知疲倦"
+      - "可以精确执行，无人为错误"
+  
+  format: structured
+
+context:
+  triggers:
+    - "工具增强"
+    - "能力延伸"
+    - "工具集成"
+    - "能力扩展"
+  scope: "系统架构/能力增强"
+  constraints:
+    - "需要工具API支持"
+    - "需要安全隔离机制"
+  preconditions:
+    - "理解认知架构基础"
+    - "理解工具集成原理"
+
+strength:
+  importance: 4
+  confidence: 0.85
+  mastery: 3
+  accessibility: 0.85
+  activation_level: 0
+
+source:
+  origin: reflected
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "工具使用经验"
+    - "AI Agent实践"
+    - "能力扩展分析"
+  verified: true
+
+generality:
+  level: level_3
+  llm_coverage: 0.3
+  uniqueness: 0.7
+  llm_answer_quality: partial
+  storage_value: store
+  notes: |
+    大模型知道"工具可以增强能力"的一般概念，
+    但不知道：
+    1. 这套五类工具分类
+    2. 具体的能力提升数据
+    3. 编排架构设计
+    4. 演进路径
+    这是本架构的独特见解，必须存储。
+
+usage:
+  count: 15
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.8
+  recent_outcomes: []
+  decay_rate: 0.03
+
+relations:
+  - target_id: kn_20240101_001
+    type: extends
+    strength: 0.8
+    weight: 0.6
+    context: "工具增强扩展了认知架构的能力边界"
+  
+  - target_id: jd_20240101_001
+    type: aligns_with
+    strength: 0.7
+    weight: 0.5
+    context: "工具选择需要遵循设计原则"
+
+metadata:
+  domain: "能力扩展"
+  component: "增强策略"
+  tags:
+    - "工具集成"
+    - "能力增强"
+    - "扩展架构"

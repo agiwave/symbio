@@ -1,0 +1,169 @@
+# 认知单元：七大认知系统
+# 类型：knowledge（知识）
+# 级别：Level 2（项目特定知识）
+
+id: kn_20240101_004
+type: knowledge
+
+content:
+  summary: "专家能力可分为七个认知系统：知识、经验、技能、判断、策略、直觉、情感"
+  body:
+    overview: |
+      七大认知系统是对专家能力的分类框架，每种类型有独特的结构和处理方式，
+      通过Layer 3系统视图层进行语义处理。
+    
+    systems:
+      knowledge_system:
+        name: "知识系统"
+        type: knowledge
+        description: "概念、原理、事实、定义"
+        storage_focus: "结构化的定义和关系"
+        retrieval_pattern: "概念查询、关联查询"
+        examples:
+          - "React Hooks 的工作原理"
+          - "闭包的定义"
+          - "HTTP 协议规范"
+      
+      experience_system:
+        name: "经验系统"
+        type: experience
+        description: "案例、教训、最佳实践"
+        storage_focus: "情境-判断-行动-结果"
+        retrieval_pattern: "情境匹配、案例推理"
+        examples:
+          - "某项目的踩坑经历"
+          - "性能优化的实战经验"
+          - "技术选型的决策过程"
+      
+      skill_system:
+        name: "技能系统"
+        type: skill
+        description: "操作能力、思维方法、工具使用"
+        storage_focus: "步骤、检查点、练习方法"
+        retrieval_pattern: "任务分解、步骤指导"
+        examples:
+          - "如何进行代码审查"
+          - "性能分析方法"
+          - "调试技巧"
+      
+      judgment_system:
+        name: "判断系统"
+        type: judgment
+        description: "价值观、原则、决策规则"
+        storage_focus: "IF-THEN规则、权重偏好"
+        retrieval_pattern: "情境判断、决策支持"
+        examples:
+          - "代码质量优先于开发速度"
+          - "简单方案优于复杂方案"
+          - "可读性优先于性能（在非关键路径）"
+      
+      strategy_system:
+        name: "策略系统"
+        type: strategy
+        description: "思维策略、学习方法、问题解决框架"
+        storage_focus: "思维模板、策略模式"
+        retrieval_pattern: "问题匹配、策略推荐"
+        examples:
+          - "如何学习新技术"
+          - "如何分析复杂问题"
+          - "如何做技术调研"
+      
+      intuition_system:
+        name: "直觉系统"
+        type: intuition
+        description: "模式识别、快速判断、直觉反应"
+        storage_focus: "触发-反应模式、特征标记"
+        retrieval_pattern: "模式匹配、直觉提示"
+        examples:
+          - "看到代码就能感觉到问题"
+          - "对技术方案的本能反应"
+          - "对风险的直觉判断"
+      
+      emotion_system:
+        name: "情感系统"
+        type: emotion
+        description: "偏好、动机、应激模式"
+        storage_focus: "情感标记、偏好权重"
+        retrieval_pattern: "风格调整、偏好匹配"
+        examples:
+          - "喜欢深度工作"
+          - "不喜欢被打断"
+          - "对某些技术的偏好"
+    
+    system_interactions:
+      - "知识 + 经验 → 形成深度理解"
+      - "判断 + 直觉 → 快速决策"
+      - "技能 + 策略 → 高效执行"
+      - "情感 → 调整所有输出的风格"
+  
+  format: structured
+
+context:
+  triggers:
+    - "认知系统"
+    - "知识类型"
+    - "能力分类"
+    - "七种类型"
+  scope: "专家认知架构/能力建模"
+  constraints:
+    - "每个认知单元只能属于一种类型"
+  preconditions:
+    - "理解认知心理学基本概念"
+
+strength:
+  importance: 5
+  confidence: 0.9
+  mastery: null
+  accessibility: 0.9
+  activation_level: 0
+
+source:
+  origin: derived
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "认知心理学理论"
+    - "专家能力分析"
+    - "实际应用验证"
+  verified: true
+
+generality:
+  level: level_2
+  llm_coverage: 0.3
+  uniqueness: 0.7
+  llm_answer_quality: partial
+  storage_value: store
+  notes: |
+    大模型可能知道知识、经验、技能的一般区分，
+    但不知道这套七分类系统：
+    1. 具体的七种类型定义
+    2. 每种类型的存储重点和检索模式
+    3. 系统间的交互方式
+    这是本架构的核心分类，必须存储。
+
+usage:
+  count: 20
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.85
+  recent_outcomes: []
+  decay_rate: 0.03
+
+relations:
+  - target_id: kn_20240101_001
+    type: part_of
+    strength: 0.9
+    weight: 0.7
+    context: "七大系统是专家认知架构的能力分类"
+  
+  - target_id: kn_20240101_003
+    type: part_of
+    strength: 0.8
+    weight: 0.6
+    context: "七大系统在Layer 3系统视图层处理"
+
+metadata:
+  domain: "认知建模"
+  component: "能力分类"
+  tags:
+    - "认知系统"
+    - "能力模型"

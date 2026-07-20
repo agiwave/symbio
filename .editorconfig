@@ -1,0 +1,20 @@
+# EditorConfig: https://editorconfig.org
+# 顶级默认：使用 LF 换行，UTF-8，去除行尾空白，文件末尾留一空行
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.{rs,toml}]
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+[*.md]
+trim_trailing_whitespace = false

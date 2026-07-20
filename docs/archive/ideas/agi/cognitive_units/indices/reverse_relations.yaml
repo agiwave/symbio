@@ -1,0 +1,94 @@
+# 反向关系索引
+# 用于快速查询"谁指向我"
+# 格式：target_id -> [(source_id, relation_type), ...]
+
+reverse_index:
+  # 被多个单元引用的核心概念
+  kn_20240101_001:
+    - source_id: kn_20240101_002
+      relation_type: part_of
+    - source_id: kn_20240101_003
+      relation_type: part_of
+    - source_id: kn_20240101_004
+      relation_type: part_of
+    - source_id: st_20240101_002
+      relation_type: extends
+    - source_id: em_20240101_001
+      relation_type: styles
+  
+  # 认知单元数据结构
+  kn_20240101_002:
+    - source_id: ex_20240101_001
+      relation_type: derives_from
+    - source_id: sk_20240101_001
+      relation_type: depends_on
+    - source_id: sk_20240101_002
+      relation_type: depends_on
+    - source_id: st_20240101_001
+      relation_type: applies_to
+  
+  # 四层架构
+  kn_20240101_003:
+    - source_id: kn_20240101_002
+      relation_type: part_of
+    - source_id: sk_20240101_001
+      relation_type: part_of
+    - source_id: sk_20240101_003
+      relation_type: part_of
+  
+  # 设计原则
+  jd_20240101_001:
+    - source_id: ex_20240101_001
+      relation_type: example_of
+    - source_id: st_20240101_001
+      relation_type: derives_from
+    - source_id: st_20240101_002
+      relation_type: aligns_with
+    - source_id: in_20240101_001
+      relation_type: aligns_with
+    - source_id: sk_20240101_003
+      relation_type: follows
+    - source_id: em_20240101_001
+      relation_type: embodies
+    - source_id: ex_20240101_002
+      relation_type: example_of
+  
+  # 关系嵌入经验
+  ex_20240101_001:
+    - source_id: jd_20240101_001
+      relation_type: applies_to
+  
+  # LLM分工策略
+  st_20240101_001:
+    - source_id: jd_20240101_001
+      relation_type: derives_from
+  
+  # 代码直觉
+  in_20240101_001:
+    - source_id: ex_20240101_002
+      relation_type: related_to
+    - source_id: sk_20240101_004
+      relation_type: complements
+  
+  # 工具增强
+  st_20240101_002:
+    - source_id: sk_20240101_004
+      relation_type: uses
+
+# 热门目标（被引用最多的单元）
+popular_targets:
+  - target_id: jd_20240101_001
+    incoming_count: 7
+    description: "知识架构设计原则"
+  
+  - target_id: kn_20240101_001
+    incoming_count: 5
+    description: "专家认知架构核心概念"
+  
+  - target_id: kn_20240101_002
+    incoming_count: 4
+    description: "CognitiveUnit 数据结构"
+  
+  - target_id: kn_20240101_003
+    incoming_count: 3
+    description: "四层架构模型"

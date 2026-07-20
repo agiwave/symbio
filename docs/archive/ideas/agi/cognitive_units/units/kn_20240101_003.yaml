@@ -1,0 +1,153 @@
+# 认知单元：四层架构模型
+# 类型：knowledge（知识）
+# 级别：Level 2（项目特定知识）
+
+id: kn_20240101_003
+type: knowledge
+
+content:
+  summary: "专家认知架构采用四层设计：存储层、动态学习层、系统视图层、辅导应用层"
+  body:
+    overview: |
+      四层架构将专家认知系统从底层数据存储到上层应用进行了清晰的分层，
+      每层职责明确，层间协作实现完整的专家能力数字化。
+    
+    layers:
+      layer_1:
+        name: "统一存储层"
+        responsibility: "数据存储、检索、关系管理"
+        key_components:
+          - "CognitiveUnit（认知单元）"
+          - "关系嵌入存储"
+          - "索引机制"
+        key_abilities:
+          - "统一数据结构"
+          - "高效索引"
+      
+      layer_2:
+        name: "动态学习层"
+        responsibility: "学习、遗忘、激活、注意力"
+        key_components:
+          - "学习机制"
+          - "遗忘强化"
+          - "激活扩散"
+          - "工作记忆"
+        key_abilities:
+          - "自动演化"
+          - "记忆强化"
+          - "注意力聚焦"
+      
+      layer_3:
+        name: "系统视图层"
+        responsibility: "七大系统的语义处理"
+        key_components:
+          - "知识系统"
+          - "经验系统"
+          - "技能系统"
+          - "判断系统"
+          - "策略系统"
+          - "直觉系统"
+          - "情感系统"
+        key_abilities:
+          - "类型特化"
+          - "系统协作"
+      
+      layer_4:
+        name: "辅导应用层"
+        responsibility: "辅导流程、能力组合、场景匹配"
+        key_components:
+          - "辅导六阶段"
+          - "能力组合器"
+          - "场景匹配器"
+          - "隐性知识编码器"
+        key_abilities:
+          - "辅导策略"
+          - "隐性编码"
+    
+    layer_interactions:
+      - from: "Layer 4"
+        to: "Layer 3"
+        interaction: "请求特定类型的能力组合"
+      - from: "Layer 3"
+        to: "Layer 2"
+        interaction: "触发激活扩散，获取相关内容"
+      - from: "Layer 2"
+        to: "Layer 1"
+        interaction: "读取和更新认知单元"
+    
+    design_rationale:
+      - "分层解耦：每层独立演化，接口清晰"
+      - "职责单一：每层只做一件事"
+      - "自底向上：底层稳定，上层灵活"
+  
+  format: structured
+
+context:
+  triggers:
+    - "四层架构"
+    - "系统架构"
+    - "分层设计"
+    - "存储层"
+    - "学习层"
+    - "视图层"
+    - "应用层"
+  scope: "专家认知架构/系统设计"
+  constraints: []
+  preconditions:
+    - "理解软件分层架构基本概念"
+
+strength:
+  importance: 5
+  confidence: 0.9
+  mastery: null
+  accessibility: 0.9
+  activation_level: 0
+
+source:
+  origin: reflected
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "分层架构设计经验"
+    - "认知系统实践"
+  verified: true
+
+generality:
+  level: level_2
+  llm_coverage: 0.3
+  uniqueness: 0.7
+  llm_answer_quality: partial
+  storage_value: store
+  notes: |
+    大模型知道分层架构的一般原则，但不知道：
+    1. 这四层具体是什么
+    2. 每层的具体职责和组件
+    3. 层间交互方式
+    这是本架构的核心设计，必须完整存储。
+
+usage:
+  count: 15
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.9
+  recent_outcomes: []
+  decay_rate: 0.03
+
+relations:
+  - target_id: kn_20240101_001
+    type: part_of
+    strength: 0.9
+    weight: 0.8
+    context: "四层架构是专家认知架构的核心组成部分"
+  
+  - target_id: kn_20240101_002
+    type: part_of
+    strength: 0.8
+    weight: 0.6
+    context: "认知单元是Layer 1的核心数据结构"
+
+metadata:
+  domain: "系统架构"
+  component: "核心架构"
+  tags:
+    - "分层设计"
+    - "系统架构"

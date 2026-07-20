@@ -1,0 +1,91 @@
+# 认知单元按类型索引
+# 自动生成，用于快速检索特定类型的认知单元
+
+by_type:
+  knowledge:
+    - id: kn_20240101_001
+      summary: "专家认知架构核心概念"
+      importance: 5
+    
+    - id: kn_20240101_002
+      summary: "CognitiveUnit 数据结构"
+      importance: 5
+    
+    - id: kn_20240101_003
+      summary: "四层架构模型"
+      importance: 5
+    
+    - id: kn_20240101_004
+      summary: "七大认知系统"
+      importance: 5
+  
+  experience:
+    - id: ex_20240101_001
+      summary: "关系嵌入设计的决策经验"
+      importance: 4
+    
+    - id: ex_20240101_002
+      summary: "过度抽象的失败教训"
+      importance: 4
+  
+  skill:
+    - id: sk_20240101_001
+      summary: "激活扩散机制"
+      importance: 5
+    
+    - id: sk_20240101_002
+      summary: "遗忘与强化机制"
+      importance: 4
+    
+    - id: sk_20240101_003
+      summary: "辅导六阶段流程"
+      importance: 5
+    
+    - id: sk_20240101_004
+      summary: "性能问题诊断方法"
+      importance: 5
+  
+  judgment:
+    - id: jd_20240101_001
+      summary: "知识架构设计原则"
+      importance: 5
+  
+  strategy:
+    - id: st_20240101_001
+      summary: "与LLM分工机制"
+      importance: 5
+    
+    - id: st_20240101_002
+      summary: "工具层增强"
+      importance: 4
+  
+  intuition:
+    - id: in_20240101_001
+      summary: "代码问题的直觉模式"
+      importance: 4
+  
+  emotion:
+    - id: em_20240101_001
+      summary: "工作偏好与风格"
+      importance: 4
+
+statistics:
+  total_units: 15
+  by_type:
+    knowledge: 4
+    experience: 2
+    skill: 4
+    judgment: 1
+    strategy: 2
+    intuition: 1
+    emotion: 1
+  
+  by_generality_level:
+    level_0: 0
+    level_1: 1
+    level_2: 7
+    level_3: 5
+    level_4: 2
+  
+  avg_importance: 4.5
+  avg_confidence: 0.88

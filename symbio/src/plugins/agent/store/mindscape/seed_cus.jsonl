@@ -1,0 +1,45 @@
+// ────────── 根类型（Layer 1）──────────
+{"id":"cu","name":"cu","description":"认知单元根类型：所有认知单元的基类，定义了认知体系的最顶层抽象"}
+
+// ────────── 元定义类型（Layer 2）──────────
+{"id":"prop","name":"prop","description":"属性定义类型：描述认知单元的特征和元数据","is_a":["cu"]}
+{"id":"relation","name":"relation","description":"关系定义：表达认知单元之间的语义关联","is_a":["prop"]}
+{"id":"kind","name":"kind","description":"认知类型根：可存储检索的知识类型基类","is_a":["cu"]}
+{"id":"meta","name":"meta","description":"元认知属性命名空间：belief/conflict/reflection/learning/adaptation 等横切属性的分类标识（与 relation 平行，作为 prop 的子类型）","is_a":["prop"]}
+
+// ────────── 基础属性定义（Layer 3）──────────
+{"id":"id","name":"id","description":"唯一标识：认知单元的唯一ID，用于精确查找和引用","is_a":["prop"],"prop_value_is_a":"string"}
+{"id":"name","name":"name","description":"名称：认知单元的显示名称，用于人机交互和语义理解","is_a":["prop"],"prop_value_is_a":"string"}
+{"id":"description","name":"description","description":"描述：对认知单元内容的简要说明","is_a":["prop"],"prop_value_is_a":"string"}
+{"id":"content","name":"content","description":"内容/核心文本：认知单元的详细内容","is_a":["prop"],"prop_value_is_a":"string"}
+{"id":"confidence","name":"confidence","description":"置信度：知识可靠性评分，范围 0.0-1.0","is_a":["prop"],"prop_value_is_a":"number"}
+{"id":"priority","name":"priority","description":"候选优先级：值越小越靠前（只在同 is_a/kind 内比较）。缺省 10。0=同 kind 内最前；1-20=候选池；21+=不进入系统提示词","is_a":["prop"],"prop_value_is_a":"number"}
+
+// ────────── 核心关系定义（Layer 3）──────────
+{"id":"is_a","name":"is_a","description":"类型继承：定义当前认知单元的类型分类，支持多重继承","is_a":["relation"],"prop_value_is_a":"cu[]"}
+{"id":"has","name":"has","description":"包含关系：表达拥有或包含的关联","is_a":["relation"],"prop_value_is_a":"cu[]"}
+{"id":"part_of","name":"part_of","description":"组成关系：表达整体与部分的关联","is_a":["relation"],"prop_value_is_a":"cu[]"}
+{"id":"causes","name":"causes","description":"因果关系：表达原因与结果的关联","is_a":["relation"],"prop_value_is_a":"cu[]"}
+{"id":"depends","name":"depends","description":"依赖关系：表达当前单元对其他单元的依赖","is_a":["relation"],"prop_value_is_a":"cu[]"}
+{"id":"similar","name":"similar","description":"相似关系：表达概念间的相似性","is_a":["relation"],"prop_value_is_a":"cu[]"}
+{"id":"opposite","name":"opposite","description":"对立关系：表达概念间的对立或矛盾","is_a":["relation"],"prop_value_is_a":"cu[]"}
+{"id":"related","name":"related","description":"相关关系：泛化关联，处理不确定关系","is_a":["relation"],"prop_value_is_a":"cu[]"}
+
+// ────────── 元认知属性（meta 子类，Layer 4）──────────
+{"id":"meta_belief","name":"meta_belief","description":"信念度：对自身知识的信任程度，范围 0.0-1.0","is_a":["meta"],"prop_value_is_a":"number"}
+{"id":"meta_conflict","name":"meta_conflict","description":"冲突检测：识别知识矛盾，引用冲突的认知单元","is_a":["meta"],"prop_value_is_a":"cu[]"}
+{"id":"meta_learning","name":"meta_learning","description":"学习策略：获取新知识的方法和策略","is_a":["meta"],"prop_value_is_a":"string"}
+{"id":"meta_reflection","name":"meta_reflection","description":"反思记录：对思考过程的监控与记录","is_a":["meta"],"prop_value_is_a":"string"}
+{"id":"meta_adaptation","name":"meta_adaptation","description":"适应调整：根据反馈修正认知的机制","is_a":["meta"],"prop_value_is_a":"cu[]"}
+
+// ────────── 认知类型（kind 子类，Layer 4）──────────
+// I-033 修复：添加 display_name 字段支持中文显示名
+{"id":"fact","name":"fact","display_name":"事实","description":"事实知识：客观存在的事实性认知","is_a":["kind"]}
+{"id":"experience","name":"experience","display_name":"经验","description":"经验经历：历史积累的操作反馈与教训","is_a":["kind"]}
+{"id":"skill","name":"skill","display_name":"技能","description":"技能能力：可调用的专业能力或工具使用指南","is_a":["kind"]}
+{"id":"judgment","name":"judgment","display_name":"判断准则","description":"判断标准：决策逻辑与价值权衡准则","is_a":["kind"]}
+{"id":"strategy","name":"strategy","display_name":"策略","description":"策略方法：解决复杂问题的思维框架与工作流","is_a":["kind"]}
+{"id":"rule","name":"rule","display_name":"规则","description":"系统规则：强制执行的行为约束与安全边界","is_a":["kind"]}
+{"id":"intuition","name":"intuition","display_name":"直觉","description":"直觉能力：基于海量经验的快速模式匹配","is_a":["kind"]}
+{"id":"emotion","name":"emotion","display_name":"情感","description":"情感偏好：影响交互风格的情绪状态标记","is_a":["kind"]}
+{"id":"tag","name":"tag","display_name":"标签","description":"标签：用于分类检索的语义标记","is_a":["kind"]}

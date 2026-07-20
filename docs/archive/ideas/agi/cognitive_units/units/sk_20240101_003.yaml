@@ -1,0 +1,183 @@
+# 认知单元：辅导六阶段流程
+# 类型：skill（技能）
+# 级别：Level 2（项目特定知识）
+
+id: sk_20240101_003
+type: skill
+
+content:
+  summary: "辅导流程分为六个阶段：理解目标、评估现状、确定路径、示范指导、练习反馈、总结提升"
+  body:
+    definition: |
+      辅导六阶段是一个结构化的教学流程，确保学习者能够系统性地掌握知识或技能。
+      每个阶段有明确的目标和输出。
+    
+    stages:
+      stage_1:
+        name: "理解目标"
+        goal: "明确学习者想要达成什么"
+        actions:
+          - "询问学习者的具体目标"
+          - "了解学习者的背景和动机"
+          - "确定学习的范围和深度"
+          - "建立共同的理解基础"
+        output: "清晰的学习目标陈述"
+        example_questions:
+          - "你想学习什么？"
+          - "你希望达到什么水平？"
+          - "你目前的背景是怎样的？"
+      
+      stage_2:
+        name: "评估现状"
+        goal: "了解学习者当前的能力水平"
+        actions:
+          - "询问相关经验"
+          - "提出诊断性问题"
+          - "观察学习者解决问题的过程"
+          - "识别知识盲点和误区"
+        output: "当前能力评估报告"
+        example_questions:
+          - "你之前有相关经验吗？"
+          - "这个问题你会怎么解决？"
+          - "这里你觉得有什么困难？"
+      
+      stage_3:
+        name: "确定路径"
+        goal: "规划从现状到目标的学习路径"
+        actions:
+          - "识别需要掌握的知识点"
+          - "确定学习的顺序和优先级"
+          - "选择适合的学习方式"
+          - "预估所需时间和资源"
+        output: "学习路径计划"
+        considerations:
+          - "学习者的时间约束"
+          - "学习者的学习风格"
+          - "内容的难易程度"
+      
+      stage_4:
+        name: "示范指导"
+        goal: "展示如何完成目标任务"
+        actions:
+          - "演示完整的解决过程"
+          - "解释每一步的原因"
+          - "标注关键决策点"
+          - "分享相关的经验教训"
+        output: "示范演示记录"
+        techniques:
+          - "逐步分解"
+          - "边做边讲"
+          - "对比不同方案"
+          - "引入真实案例"
+      
+      stage_5:
+        name: "练习反馈"
+        goal: "让学习者实践并获得反馈"
+        actions:
+          - "提供练习任务"
+          - "观察学习者的执行过程"
+          - "及时给予反馈和指导"
+          - "鼓励学习者提问和反思"
+        output: "练习评估和改进建议"
+        feedback_principles:
+          - "具体而非笼统"
+          - "及时而非延迟"
+          - "建设性而非批评性"
+          - "关注过程而非仅结果"
+      
+      stage_6:
+        name: "总结提升"
+        goal: "巩固学习成果，规划下一步"
+        actions:
+          - "回顾学习的关键点"
+          - "总结学到的经验教训"
+          - "规划下一步学习方向"
+          - "提供持续学习的资源"
+        output: "学习总结和后续计划"
+        summary_template: |
+          今天我们学习了：
+          1. 核心概念：...
+          2. 关键技能：...
+          3. 常见陷阱：...
+          4. 下一步建议：...
+    
+    flexibility:
+      - "阶段可以跳过或合并"
+      - "可以多次迭代某个阶段"
+      - "根据学习者反馈调整节奏"
+      - "适应不同的学习风格"
+  
+  format: procedural
+
+context:
+  triggers:
+    - "辅导流程"
+    - "教学方法"
+    - "如何教学"
+    - "教学阶段"
+  scope: "专家认知架构/辅导应用层"
+  constraints:
+    - "需要根据学习者水平调整"
+    - "需要根据反馈灵活调整"
+  preconditions:
+    - "理解基本的教学原理"
+    - "具备相关领域的知识"
+
+strength:
+  importance: 5
+  confidence: 0.9
+  mastery: 4
+  accessibility: 0.9
+  activation_level: 0
+
+source:
+  origin: learned
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "教育心理学理论"
+    - "辅导实践经验"
+    - "教练技术方法"
+  verified: true
+
+generality:
+  level: level_2
+  llm_coverage: 0.4
+  uniqueness: 0.6
+  llm_answer_quality: good
+  storage_value: supplement
+  notes: |
+    大模型知道教学的基本原则，
+    但不知道：
+    1. 这套六阶段的具体流程
+    2. 每个阶段的具体输出
+    3. 示例问题和技术
+    需要存储这些具体的实施细节。
+
+usage:
+  count: 30
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.85
+  recent_outcomes: []
+  decay_rate: 0.02
+
+relations:
+  - target_id: kn_20240101_003
+    type: part_of
+    strength: 0.9
+    weight: 0.7
+    context: "辅导六阶段是Layer 4辅导应用层的核心组件"
+  
+  - target_id: jd_20240101_001
+    type: follows
+    strength: 0.7
+    weight: 0.5
+    context: "辅导流程遵循'渐进增强'的设计原则"
+
+metadata:
+  domain: "教学方法"
+  component: "Layer 4 - 辅导应用层"
+  tags:
+    - "辅导流程"
+    - "教学方法"
+    - "教学设计"

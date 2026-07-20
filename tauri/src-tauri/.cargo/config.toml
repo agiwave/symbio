@@ -1,0 +1,17 @@
+[build]
+# Windows 发布版本使用静态链接，避免 DLL 缺失问题
+# 开发时可以移除这些标志以加快编译速度
+# 注意：已临时禁用优化标志以修复编译器崩溃问题
+[target.'cfg(windows)']
+# rustflags = ["-C", "target-cpu=x86-64-v2", "-C", "target-feature=+crt-static"]
+rustflags = []
+
+[target.'cfg(not(windows))']
+# rustflags = ["-C", "target-cpu=x86-64-v2"]
+rustflags = []
+
+# 增加编译时的栈大小限制，防止编译器崩溃
+[env]
+CARGO_INCREMENTAL = "false"
+RUST_MIN_STACK = "16777216"
+

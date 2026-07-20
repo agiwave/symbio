@@ -1,0 +1,143 @@
+# 认知单元：知识架构设计原则
+# 类型：judgment（判断）
+# 级别：Level 4（专家风格与价值观 - 核心设计哲学）
+
+id: jd_20240101_001
+type: judgment
+
+content:
+  summary: "存储差异化知识，让大模型提供通用化；简洁优于完备；实际验证优于理论分析"
+  body:
+    core_principles:
+      - principle: "存储差异化，而非全面化"
+        description: |
+          专家系统不应该存储大模型已经知道的知识。
+          只存储大模型不知道的：项目特定、专家经验、专家风格。
+        rationale: "存储价值密度比存储量更重要"
+        application: "每个知识录入前都要评估通用度级别"
+      
+      - principle: "简洁优于完备"
+        description: |
+          当面临设计选择时，选择更简洁的方案。
+          不要为低频场景牺牲高频场景的效率。
+        rationale: "简洁的设计更容易理解、维护和正确实现"
+        application: "关系嵌入而非独立实体就是这一原则的体现"
+      
+      - principle: "实际验证优于理论分析"
+        description: |
+          设计决策应该通过实际使用来验证，而不是纯理论推导。
+          如果可能，用真实数据测试。
+        rationale: "理论分析可能遗漏实际因素"
+        application: "通过生成实际认知单元来验证数据结构设计"
+      
+      - principle: "渐进增强，而非一步到位"
+        description: |
+          先实现核心功能，再逐步增强。
+          不要试图一次性解决所有问题。
+        rationale: "过度设计导致复杂度失控"
+        application: "先实现基础存储和检索，再添加高级功能"
+    
+    trade_off_preferences:
+      efficiency_vs_completeness:
+        preference: efficiency
+        reasoning: "激活扩散是高频操作，必须高效"
+      
+      simplicity_vs_flexibility:
+        preference: simplicity
+        reasoning: "简单的设计更容易正确实现和维护"
+      
+      storage_vs_computation:
+        preference: storage
+        reasoning: "存储成本低，计算成本高，预先计算并存储"
+    
+    anti_patterns:
+      - pattern: "存储所有知识"
+        why_wrong: "冗余存储，价值密度低，维护成本高"
+        correct_approach: "只存储差异化知识"
+      
+      - pattern: "为未来需求过度设计"
+        why_wrong: "增加当前复杂度，未来需求可能变化"
+        correct_approach: "满足当前需求，保持扩展性"
+      
+      - pattern: "追求理论完美"
+        why_wrong: "实际场景往往有理论模型未考虑的因素"
+        correct_approach: "实际验证，迭代改进"
+  
+  format: rules
+
+context:
+  triggers:
+    - "设计原则"
+    - "架构决策"
+    - "怎么做选择"
+    - "权衡取舍"
+  scope: "系统设计/架构规划"
+  constraints: []
+  preconditions:
+    - "有系统设计经验"
+    - "理解权衡分析"
+
+strength:
+  importance: 5
+  confidence: 0.9
+  mastery: null
+  accessibility: 0.85
+  activation_level: 0
+
+source:
+  origin: reflected
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "多个项目的架构设计经验"
+    - "失败的教训总结"
+    - "成功的模式归纳"
+  verified: true
+
+generality:
+  level: level_4
+  llm_coverage: 0.4
+  uniqueness: 0.8
+  llm_answer_quality: partial
+  storage_value: store
+  notes: |
+    大模型可以给出一般的设计原则（如KISS、DRY等），
+    但不知道这套特定的原则组合：
+    1. 存储差异化，而非全面化（针对大模型时代的新原则）
+    2. 这个项目中具体如何权衡
+    3. 为什么这样选择
+    
+    这是本架构的核心价值观，影响所有设计决策。
+
+usage:
+  count: 20
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.85
+  recent_outcomes:
+    - timestamp: "2024-04-05T00:00:00Z"
+      context: "解释关系嵌入设计"
+      result: "用户理解了'简洁优于完备'的应用"
+      success: true
+  decay_rate: 0.02
+
+relations:
+  - target_id: kn_20240101_001
+    type: influences
+    strength: 0.9
+    weight: 0.8
+    context: "设计原则影响了整体架构"
+  
+  - target_id: ex_20240101_001
+    type: applies_to
+    strength: 0.85
+    weight: 0.6
+    context: "关系嵌入决策是设计原则的具体应用"
+
+metadata:
+  domain: "系统设计/架构"
+  judgment_type: "设计原则"
+  priority: "core"
+  tags:
+    - "价值观"
+    - "设计哲学"
+    - "决策依据"

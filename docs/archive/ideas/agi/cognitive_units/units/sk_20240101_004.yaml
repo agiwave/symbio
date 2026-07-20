@@ -1,0 +1,194 @@
+# 认知单元：性能问题诊断方法
+# 类型：skill（技能）
+# 级别：Level 2（项目特定知识）
+
+id: sk_20240101_004
+type: skill
+
+content:
+  summary: "系统化的性能问题诊断方法：测量-定位-分析-验证的闭环流程"
+  body:
+    definition: |
+      性能优化不是猜测，而是基于数据的科学过程。
+      遵循"先测量，后优化"的原则，避免盲目优化浪费时间。
+    
+    diagnostic_process:
+      phase_1:
+        name: "建立基线"
+        goal: "量化当前性能状态"
+        actions:
+          - "确定关键性能指标（KPI）"
+          - "建立可重复的测试方法"
+          - "记录当前性能数据"
+          - "定义可接受的性能目标"
+        tools:
+          - "Chrome DevTools Performance"
+          - "Lighthouse"
+          - "自定义埋点"
+          - "APM工具（Sentry、Datadog）"
+        output: "性能基线报告"
+      
+      phase_2:
+        name: "定位瓶颈"
+        goal: "找出性能问题的根本原因"
+        actions:
+          - "使用性能分析工具定位热点"
+          - "分析时间都花在哪里"
+          - "区分CPU密集和IO密集"
+          - "识别关键路径"
+        analysis_areas:
+          - area: "JavaScript执行"
+            indicators: ["Long Tasks", "脚本解析时间", "函数执行时间"]
+          
+          - area: "渲染性能"
+            indicators: ["FPS", "布局抖动", "重绘重排"]
+          
+          - area: "网络请求"
+            indicators: ["请求数量", "资源大小", "阻塞时间"]
+          
+          - area: "内存使用"
+            indicators: ["内存占用", "GC频率", "内存泄漏"]
+        
+        output: "性能瓶颈清单"
+      
+      phase_3:
+        name: "制定方案"
+        goal: "选择最优的优化策略"
+        actions:
+          - "评估每个瓶颈的影响程度"
+          - "研究可能的优化方案"
+          - "评估优化的收益和成本"
+          - "确定优化优先级"
+        decision_factors:
+          - "收益大小"
+          - "实施难度"
+          - "风险程度"
+          - "维护成本"
+        output: "优化方案计划"
+      
+      phase_4:
+        name: "实施验证"
+        goal: "验证优化效果"
+        actions:
+          - "逐一实施优化方案"
+          - "每次优化后重新测量"
+          - "对比优化前后的数据"
+          - "记录有效的优化方法"
+        verification_checklist:
+          - "性能指标是否改善？"
+          - "是否引入新问题？"
+          - "代码可维护性如何？"
+          - "是否有更好的方案？"
+        output: "优化效果报告"
+    
+    common_patterns:
+      frontend:
+        - pattern: "列表渲染卡顿"
+          causes: ["DOM节点过多", "频繁重渲染", "复杂计算"]
+          solutions: ["虚拟列表", "React.memo/useMemo", "Web Worker"]
+        
+        - pattern: "首屏加载慢"
+          causes: ["资源过大", "阻塞脚本", "串行请求"]
+          solutions: ["代码分割", "预加载", "并行请求"]
+        
+        - pattern: "交互响应慢"
+          causes: ["事件处理过重", "频繁更新", "长任务阻塞"]
+          solutions: ["防抖节流", "批量更新", "requestIdleCallback"]
+      
+      backend:
+        - pattern: "接口响应慢"
+          causes: ["慢查询", "N+1问题", "缺少索引"]
+          solutions: ["查询优化", "批量加载", "添加索引"]
+        
+        - pattern: "并发处理能力差"
+          causes: ["阻塞IO", "资源竞争", "连接池不足"]
+          solutions: ["异步处理", "加锁策略", "连接池优化"]
+    
+    anti_patterns:
+      - anti_pattern: "过早优化"
+        description: "在没有测量数据的情况下猜测优化"
+        correct_approach: "先测量，有数据再优化"
+      
+      - anti_pattern: "微优化"
+        description: "在无关紧要的地方花费大量精力"
+        correct_approach: "关注关键路径，优化主要瓶颈"
+      
+      - anti_pattern: "过度优化"
+        description: "为了微小的性能提升牺牲代码可读性"
+        correct_approach: "权衡收益与维护成本"
+  
+  format: procedural
+
+context:
+  triggers:
+    - "性能优化"
+    - "性能问题"
+    - "页面卡顿"
+    - "响应慢"
+    - "加载慢"
+  scope: "软件开发/性能优化"
+  constraints:
+    - "需要性能分析工具支持"
+    - "需要可重复的测试环境"
+  preconditions:
+    - "理解浏览器渲染原理"
+    - "了解性能分析工具"
+
+strength:
+  importance: 5
+  confidence: 0.9
+  mastery: 4
+  accessibility: 0.85
+  activation_level: 0
+
+source:
+  origin: experienced
+  created_at: "2024-01-01T00:00:00Z"
+  updated_at: "2024-04-05T00:00:00Z"
+  evidence:
+    - "多个项目的性能优化经验"
+    - "性能分析工具使用经验"
+    - "Web性能最佳实践"
+  verified: true
+
+generality:
+  level: level_2
+  llm_coverage: 0.5
+  uniqueness: 0.5
+  llm_answer_quality: good
+  storage_value: supplement
+  notes: |
+    大模型知道性能优化的一般方法，
+    但不知道：
+    1. 这套具体的四阶段流程
+    2. 常见模式和解决方案的具体对应
+    3. 反模式的具体描述
+    需要存储这些实践经验。
+
+usage:
+  count: 30
+  last_used: "2024-04-05T00:00:00Z"
+  effectiveness: 0.9
+  recent_outcomes: []
+  decay_rate: 0.02
+
+relations:
+  - target_id: in_20240101_001
+    type: complements
+    strength: 0.7
+    weight: 0.5
+    context: "性能直觉帮助快速定位，诊断方法提供系统化验证"
+  
+  - target_id: st_20240101_002
+    type: uses
+    strength: 0.8
+    weight: 0.6
+    context: "性能诊断需要使用感知工具和计算工具"
+
+metadata:
+  domain: "性能优化"
+  component: "方法论"
+  tags:
+    - "性能优化"
+    - "诊断方法"
+    - "最佳实践"
