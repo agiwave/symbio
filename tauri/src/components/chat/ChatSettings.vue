@@ -94,24 +94,19 @@
 
     <div class="divider"></div>
     
-    <!-- 执行风险等级按钮（替代原「审批模式」：风险等级 ≥ 工具风险等级即自动执行，< 则需审批） -->
-    <div class="setting-btn" @click.stop="toggleMenu('risk')" :title="'工具执行风险等级：低于该等级的工具需审批'">
+    <!-- 执行风险等级按钮（纯图标，节约空间） -->
+    <div class="setting-btn compact" @click.stop="toggleMenu('risk')" :title="'工具执行风险等级：' + currentRiskInfo.label + '（低于该等级的工具需审批）'">
       <span class="icon">{{ currentRiskInfo.icon }}</span>
-      <span class="label">{{ currentRiskInfo.label }}</span>
-      <svg class="arrow" :class="{ open: activeMenu === 'risk' }" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="6 9 12 15 18 9"></polyline>
-      </svg>
     </div>
 
-    <!-- 心跳任务按钮（定时任务图标） -->
+    <!-- 心跳任务按钮（纯图标，定时任务图标） -->
     <div
-      class="setting-btn heartbeat-btn"
+      class="setting-btn heartbeat-btn compact"
       :class="{ on: heartbeatEnabled }"
       @click.stop="emit('open-heartbeat')"
       :title="heartbeatEnabled ? '心跳任务已开启，点击配置' : '配置会话心跳（定时）任务'"
     >
       <span class="icon">⏰</span>
-      <span class="label">{{ heartbeatEnabled ? '♥ 心跳' : '心跳' }}</span>
     </div>
 
     <!-- 执行风险等级下拉菜单 -->
@@ -136,13 +131,9 @@
       </div>
     </Transition>
 
-    <!-- 运行模式按钮（auto / interactive） -->
-    <div class="setting-btn" @click.stop="toggleMenu('mode')" :title="currentModeInfo.description">
+    <!-- 运行模式按钮（auto / interactive，纯图标） -->
+    <div class="setting-btn compact" @click.stop="toggleMenu('mode')" :title="'运行模式：' + currentModeInfo.label + '（' + currentModeInfo.description + '）'">
       <span class="icon">{{ currentModeInfo.icon }}</span>
-      <span class="label">{{ currentModeInfo.label }}</span>
-      <svg class="arrow" :class="{ open: activeMenu === 'mode' }" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="6 9 12 15 18 9"></polyline>
-      </svg>
     </div>
 
     <!-- 运行模式下拉菜单 -->
@@ -489,6 +480,13 @@ onUnmounted(() => {
   color: var(--color-text-muted);
 }
 .heartbeat-btn .icon { font-size: 0.9rem; line-height: 1; }
+
+/* 纯图标按钮（风险等级 / 心跳 / 交互模式）：去掉文字与下拉箭头，进一步压缩显示区域 */
+.setting-btn.compact {
+  padding: 0.35rem 0.45rem;
+  gap: 0;
+}
+.setting-btn.compact .icon { font-size: 1rem; }
 .heartbeat-btn.on {
   color: #ef4444;
   background: rgba(239, 68, 68, 0.1);
