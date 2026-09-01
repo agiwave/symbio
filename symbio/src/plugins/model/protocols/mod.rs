@@ -127,7 +127,7 @@ pub async fn spawn_orchestrator(
         match result {
             Ok(Ok(_)) => {
                 // 正常完成
-            },
+            }
             Ok(Err(e)) => {
                 // 捕获到 Result::Err
                 let _ = error_tx
@@ -136,7 +136,7 @@ pub async fn spawn_orchestrator(
                         Some(serde_json::json!({"code": e.code()})),
                     ))
                     .await;
-            },
+            }
             Err(e) => {
                 // 捕获到 task join error（包括 panic）
                 let panic_msg = if e.is_panic() {
@@ -153,7 +153,7 @@ pub async fn spawn_orchestrator(
                         Some(serde_json::json!({"code": "INTERNAL_ERROR"})),
                     ))
                     .await;
-            },
+            }
         }
         // chat_loop 结束、backward_task 也即将被释放，此时让 keepalive 离开作用域
     });

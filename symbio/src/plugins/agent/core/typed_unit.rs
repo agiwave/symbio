@@ -246,20 +246,20 @@ impl CognitiveUnit {
                 if !vec.iter().any(|x| x.as_str() == Some(&target_s)) {
                     vec.push(Value::String(target_s));
                 }
-            },
+            }
             Some(_) => {
                 // 旧值不是数组，替换为单元素数组
                 self.data.insert(
                     name.to_string(),
                     Value::Array(vec![Value::String(target_s)]),
                 );
-            },
+            }
             None => {
                 self.data.insert(
                     name.to_string(),
                     Value::Array(vec![Value::String(target_s)]),
                 );
-            },
+            }
         }
     }
 
@@ -626,7 +626,7 @@ impl CognitiveUnit {
                             return Err(format!("is_a[{}] 必须是字符串，实际: {:?}", i, item));
                         }
                     }
-                },
+                }
                 _ => return Err(format!("is_a 必须是数组，实际: {:?}", v)),
             }
         }

@@ -96,7 +96,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                             "content": [{"type": "input_text", "text": text}]
                         }));
                     }
-                },
+                }
                 MessageRole::Assistant => {
                     // 1. 推送合并后的文本项（只包含实际输出内容，reasoning 是内部过程不回传）
                     let mut full_text = String::new();
@@ -109,7 +109,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                                         full_text.push_str(text);
                                     }
                                 }
-                            },
+                            }
                         }
                     }
 
@@ -136,7 +136,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                             }));
                         }
                     }
-                },
+                }
                 MessageRole::Tool => {
                     // 推送工具结果项
                     if let Some(ref call_id) = m.tool_call_id {
@@ -163,8 +163,8 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                             }));
                         }
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
 
@@ -227,13 +227,13 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                     if let Some(d) = json.get("delta").and_then(|v| v.as_str()) {
                         evs.push(ProtocolEvent::ContentDelta(d.to_string()));
                     }
-                },
+                }
                 // 推理增量
                 "response.reasoning_text.delta" => {
                     if let Some(d) = json.get("delta").and_then(|v| v.as_str()) {
                         evs.push(ProtocolEvent::ReasoningDelta(d.to_string()));
                     }
-                },
+                }
                 // 工具调用增量参数
                 "response.function_call_arguments.delta" => {
                     let idx = json
@@ -249,7 +249,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
                     evs.push(ProtocolEvent::ToolCallDelta(idx, id, None, args));
-                },
+                }
                 // 工具调用完成 (有些模型直接在这里返回完整参数)
                 "response.function_call_arguments.done" => {
                     let idx = json
@@ -261,7 +261,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
                     evs.push(ProtocolEvent::ToolCallDelta(idx, None, None, args));
-                },
+                }
                 // 项目添加 (用于提取工具名称和 ID)
                 "response.output_item.added" => {
                     if let Some(item) = json.get("item") {
@@ -281,7 +281,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                             evs.push(ProtocolEvent::ToolCallDelta(idx, id, name, None));
                         }
                     }
-                },
+                }
                 "error" => {
                     if let Some(err) = json
                         .get("error")
@@ -290,8 +290,8 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                     {
                         evs.push(ProtocolEvent::Error(err.to_string()));
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
         evs

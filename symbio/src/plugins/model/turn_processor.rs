@@ -69,7 +69,7 @@ impl<'a> TurnProcessor<'a> {
                     "[DIAG] TurnProcessor::send_request: PostResult::Aborted"
                 );
                 return Err(PluginError::Aborted);
-            },
+            }
             PostResult::RetryWithoutContextId => {
                 plugin_warn!(
                     "model",
@@ -77,7 +77,7 @@ impl<'a> TurnProcessor<'a> {
                 );
                 emit_abort(channel).await;
                 return Err(PluginError::RetryWithoutContextId);
-            },
+            }
             PostResult::Err(msg) => {
                 plugin_warn!(
                     "model",
@@ -85,7 +85,7 @@ impl<'a> TurnProcessor<'a> {
                     msg
                 );
                 return Err(PluginError::InternalError(msg));
-            },
+            }
             PostResult::Ok(resp) => {
                 plugin_info!(
                     "model",
@@ -93,7 +93,7 @@ impl<'a> TurnProcessor<'a> {
                     resp.status()
                 );
                 resp
-            },
+            }
         };
 
         match parse_sse_stream(
@@ -112,7 +112,7 @@ impl<'a> TurnProcessor<'a> {
                     msg
                 );
                 Err(PluginError::StreamError(msg))
-            },
+            }
             Ok(out) => {
                 plugin_info!(
                     "model",
@@ -122,7 +122,7 @@ impl<'a> TurnProcessor<'a> {
                     out.tool_accumulator.get_completed().len()
                 );
                 Ok(out)
-            },
+            }
         }
     }
 

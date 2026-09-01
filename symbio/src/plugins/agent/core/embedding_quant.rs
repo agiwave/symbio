@@ -307,7 +307,7 @@ pub fn dequantize_from_value(v: &Value) -> Option<Vec<f32>> {
         Value::Object(obj) if obj.contains_key("q8") => {
             let q = value_to_q8(v)?;
             Some(dequantize_q8(&q))
-        },
+        }
         // Legacy 格式：直接 f32 数组（**不做 Q8 转换**）
         Value::Array(arr) => {
             let vec: Vec<f32> = arr
@@ -320,7 +320,7 @@ pub fn dequantize_from_value(v: &Value) -> Option<Vec<f32>> {
             } else {
                 Some(vec)
             }
-        },
+        }
         _ => None,
     }
 }

@@ -91,6 +91,16 @@ export namespace ModelProvidersSetDefault {
   export interface Response {}
 }
 
+/** providers/test - 连接测试（无副作用，不写入/不改动已保存配置） */
+export namespace ModelProvidersTest {
+  export interface Request {
+    provider: ModelProviderConfig
+    /** 预留：对齐 set 的 skip_validation；test 路由当前忽略（测试语义即真实校验） */
+    skip_validation?: boolean
+  }
+  export interface Response {}
+}
+
 /** 将 ModelProviderConfig 转为 ModelConfig（运行期视图） */
 export function providerToModelConfig(p: ModelProviderConfig): ModelConfig {
   return {

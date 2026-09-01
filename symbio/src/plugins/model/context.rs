@@ -76,7 +76,7 @@ fn handle_signal_frame(frame: PluginFrame, abort_flag: &AtomicBool) -> bool {
         PluginFrame::Data(ref m) if m.get("type").and_then(|v| v.as_str()) == Some("abort") => {
             abort_flag.store(true, Ordering::SeqCst);
             true
-        },
+        }
         _ => false,
     }
 }
@@ -276,16 +276,16 @@ pub async fn parse_sse_stream(
                         match event {
                             ProtocolEvent::ContentDelta(ref mut c) if progress.content > 0 => {
                                 *c = safe_substring(c, progress.content);
-                            },
+                            }
                             ProtocolEvent::ReasoningDelta(ref mut r) if progress.reasoning > 0 => {
                                 *r = safe_substring(r, progress.reasoning);
-                            },
+                            }
                             ProtocolEvent::ToolCallDelta(idx, _, _, Some(ref mut a)) => {
                                 if let Some(&len) = progress.tool_args.get(&idx) {
                                     *a = safe_substring(a, len);
                                 }
-                            },
-                            _ => {},
+                            }
+                            _ => {}
                         }
                         dispatch_protocol_event(event, root_id, channel, &mut out).await?;
                     }
@@ -302,12 +302,12 @@ pub async fn parse_sse_stream(
                             let delta = safe_substring(&c, progress.content);
                             progress.content = c.len();
                             to_dispatch = Some(ProtocolEvent::ContentDelta(delta));
-                        },
+                        }
                         ProtocolEvent::ReasoningDelta(r) if r.len() > progress.reasoning => {
                             let delta = safe_substring(&r, progress.reasoning);
                             progress.reasoning = r.len();
                             to_dispatch = Some(ProtocolEvent::ReasoningDelta(delta));
-                        },
+                        }
                         ProtocolEvent::ToolCallDelta(idx, id, name, Some(args)) => {
                             let last_len = *progress.tool_args.get(&idx).unwrap_or(&0);
                             if args.len() > last_len {
@@ -316,8 +316,8 @@ pub async fn parse_sse_stream(
                                 to_dispatch =
                                     Some(ProtocolEvent::ToolCallDelta(idx, id, name, Some(delta)));
                             }
-                        },
-                        _ => {},
+                        }
+                        _ => {}
                     }
                     if let Some(ev) = to_dispatch {
                         dispatch_protocol_event(ev, root_id, channel, &mut out).await?;
@@ -363,7 +363,7 @@ async fn dispatch_protocol_event(
                 },
             )
             .await;
-        },
+        }
         ProtocolEvent::ReasoningDelta(r) => {
             // Filter out truly empty content, but preserve newlines for markdown formatting
             if r.is_empty() {
@@ -386,7 +386,7 @@ async fn dispatch_protocol_event(
                 },
             )
             .await;
-        },
+        }
         ProtocolEvent::ToolCallDelta(idx, id, name, args) => {
             let (tc_id, full_args, full_name) = out.tool_accumulator.process_delta(
                 idx,
@@ -411,7 +411,7 @@ async fn dispatch_protocol_event(
                 },
             )
             .await;
-        },
+        }
         ProtocolEvent::ResponseId(id) => out.response_id = Some(id),
         ProtocolEvent::Error(e) => return Err(e),
     }
@@ -597,7 +597,7 @@ pub fn try_parse_partial_sse_line(line: &str) -> Option<ProtocolEvent> {
                             find_name(prefix),
                             Some(unescaped),
                         ))
-                    },
+                    }
                     "content" => Some(ProtocolEvent::ContentDelta(unescaped)),
                     "reasoning" => Some(ProtocolEvent::ReasoningDelta(unescaped)),
                     _ => None,
@@ -624,7 +624,7 @@ fn unescape_partial(s: &str) -> String {
                 Some(r) => {
                     result.push('\\');
                     result.push(r);
-                },
+                }
                 None => result.push('\\'),
             }
         } else {

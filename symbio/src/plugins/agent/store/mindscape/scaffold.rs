@@ -125,8 +125,8 @@ impl MindscapeScaffold {
                         unit.set("_ext_memory_strength".to_string(), json!(86400.0_f64));
                     }
                     to_insert.push(unit); // 不存在，需要插入
-                },
-                Ok(Some(_)) => {}, // 已存在，跳过
+                }
+                Ok(Some(_)) => {} // 已存在，跳过
                 // query 错误时 log warn
                 Err(e) => {
                     crate::plugin_warn!(
@@ -135,7 +135,7 @@ impl MindscapeScaffold {
                         id, e
                     );
                     to_insert.push(unit);
-                },
+                }
             }
             let _ = id; // 抑制未使用变量警告
         }
@@ -167,7 +167,7 @@ impl MindscapeScaffold {
             Err(e) => {
                 crate::plugin_warn!("agent", "prop 完整性校验：查询失败: {}", e);
                 return;
-            },
+            }
         };
 
         // 数据驱动：从 prop CU 推导实际注册的关系名
@@ -271,14 +271,14 @@ impl Drop for MindscapeScaffold {
                         );
                     }
                 });
-            },
+            }
             Err(_) => {
                 crate::plugin_warn!(
                     "agent",
                     "[MindscapeScaffold] Drop: no tokio runtime available, \
                      skipped belief_buffer flush. For data safety, prefer explicit shutdown hookup."
                 );
-            },
+            }
         }
     }
 }

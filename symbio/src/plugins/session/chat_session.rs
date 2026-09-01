@@ -80,10 +80,10 @@ impl ChatSession for PersistentChatSession {
                 match super::compress::decompress_message(&session_dir, last_msg).await {
                     Ok(restored) => {
                         *last_msg = restored;
-                    },
+                    }
                     Err(e) => {
                         tracing::warn!("还原最后一条消息失败: {}", e);
-                    },
+                    }
                 }
             }
         }
@@ -166,7 +166,7 @@ impl ChatSession for PersistentChatSession {
                 Err(e) => {
                     tracing::warn!("压缩消息失败: {}", e);
                     chat_msg
-                },
+                }
             };
 
             session.messages.push(final_msg);

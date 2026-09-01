@@ -134,7 +134,7 @@ fn load_from_bootstrap_or_default() -> PathBuf {
         return default_homedir();
     }
     match std::fs::read_to_string(&path) {
-        Ok(content) => match serde_yml::from_str::<Bootstrap>(&content) {
+        Ok(content) => match serde_yaml_ng::from_str::<Bootstrap>(&content) {
             Ok(b) => match normalize_homedir(&b.homedir) {
                 Some(p) => {
                     info!(
@@ -143,11 +143,11 @@ fn load_from_bootstrap_or_default() -> PathBuf {
                         "HomedirRegistry: 从 bootstrap 恢复 homedir"
                     );
                     p
-                },
+                }
                 None => {
                     warn!(path = %path.display(), "bootstrap.homedir 为空，使用默认 homedir");
                     default_homedir()
-                },
+                }
             },
             Err(e) => {
                 warn!(
@@ -156,7 +156,7 @@ fn load_from_bootstrap_or_default() -> PathBuf {
                     "bootstrap 文件解析失败，使用默认 homedir"
                 );
                 default_homedir()
-            },
+            }
         },
         Err(e) => {
             warn!(
@@ -165,7 +165,7 @@ fn load_from_bootstrap_or_default() -> PathBuf {
                 "bootstrap 文件读取失败，使用默认 homedir"
             );
             default_homedir()
-        },
+        }
     }
 }
 
@@ -195,14 +195,14 @@ impl HomedirRegistry {
                     std::io::ErrorKind::InvalidInput,
                     "homedir 不能为空",
                 ));
-            },
+            }
         };
 
         // 1. 写入 bootstrap（先持久化，再改内存，保证原子性）
         let path = bootstrap_path().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "无法获取用户主目录")
         })?;
-        let content = serde_yml::to_string(&Bootstrap {
+        let content = serde_yaml_ng::to_string(&Bootstrap {
             homedir: new_homedir.to_string_lossy().to_string(),
         })
         .map_err(|e| std::io::Error::other(format!("序列化 bootstrap 失败: {e}")))?;

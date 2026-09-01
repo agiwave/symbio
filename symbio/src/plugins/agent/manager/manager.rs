@@ -77,7 +77,7 @@ impl AgentManager {
                     legacy_dir.display(),
                     new_dir.display()
                 );
-            },
+            }
             Err(e) => {
                 crate::plugin_warn!(
                     "agent",
@@ -91,7 +91,7 @@ impl AgentManager {
                 } else {
                     let _ = std::fs::remove_dir_all(&legacy_dir);
                 }
-            },
+            }
         }
     }
 

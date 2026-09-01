@@ -109,7 +109,7 @@ impl Plugin for HooksPlugin {
             "fire" => {
                 let resp = self.handle_fire(ctx).await?;
                 Ok(PluginPayload::new(&resp))
-            },
+            }
             "register" => self.handle_register(ctx).await,
             "list" => self.handle_list().await,
             _ => Err(PluginError::NotFound(format!("Unknown path: {path}"))),

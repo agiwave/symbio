@@ -134,7 +134,7 @@ async fn load_skills_from_dir(dir: &Path, budget: LoadBudget) -> Result<Vec<Skil
                     Err(e) => {
                         // 单个 SKILL.md 解析失败不阻断整体加载，但记录 warn
                         warn!(skill = %path.display(), error = %e, "SKILL.md 解析失败，跳过");
-                    },
+                    }
                 }
             }
         }
@@ -185,7 +185,7 @@ async fn parse_skill_file(path: &Path, max_body_chars: usize) -> Result<Skill, P
         body_raw
     };
 
-    let frontmatter: serde_yml::Value = serde_yml::from_str(yaml_str).map_err(|e| {
+    let frontmatter: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_str).map_err(|e| {
         PluginError::ValidationError(format!("Failed to parse YAML frontmatter: {e}"))
     })?;
 

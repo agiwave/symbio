@@ -129,7 +129,7 @@ fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) 
             Some(cm::MessageType::ToolCall) => {
                 // Tool-call args are emitted as full JSON in each frame
                 existing.content = Some(new_content.clone());
-            },
+            }
             Some(cm::MessageType::Text) | Some(cm::MessageType::Reasoning) => {
                 // SSE delta: append
                 match (&mut existing.content, new_content) {
@@ -140,20 +140,20 @@ fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) 
                             // Type mismatch (rare) — fall back to replacement
                             *existing_c = cm::MessageContent::Text(new_text.clone());
                         }
-                    },
+                    }
                     (None, cm::MessageContent::Text(new_text)) => {
                         existing.content = Some(cm::MessageContent::Text(new_text.clone()));
-                    },
+                    }
                     _ => {
                         // Parts arrays or type mismatch — replace
                         existing.content = Some(new_content.clone());
-                    },
+                    }
                 }
-            },
+            }
             _ => {
                 // Turn / unknown: full replace
                 existing.content = Some(new_content.clone());
-            },
+            }
         }
     }
 
@@ -169,10 +169,10 @@ fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) 
                 } else {
                     existing.meta = Some(new_meta.clone());
                 }
-            },
+            }
             None => {
                 existing.meta = Some(new_meta.clone());
-            },
+            }
         }
     }
 }
@@ -275,7 +275,7 @@ impl SessionPlugin {
                                 self.broadcast_error_with_idle(&state, msg.clone()).await;
                                 guard.done = true;
                                 return;
-                            },
+                            }
                             PluginFrame::Data(data) => {
                                 // 收集 Model 响应消息：StreamEvent::Update 增量合并，
                                 // 确保持久化的终态反映最后已知状态（而非首个 Streaming 帧）。
@@ -294,7 +294,7 @@ impl SessionPlugin {
                                     }
                                 }
                                 self.broadcast_frame(&state, frame).await;
-                            },
+                            }
                         }
                     }
                     {
@@ -309,7 +309,7 @@ impl SessionPlugin {
                     self.broadcast_error_with_idle(&state, msg).await;
                     return;
                 }
-            },
+            }
             Err(e) => {
                 let msg = format!("调用 Model 插件失败: {}", e);
                 crate::plugin_error!("session", "{}", &msg);
@@ -317,7 +317,7 @@ impl SessionPlugin {
                     .await;
                 self.broadcast_error_with_idle(&state, msg).await;
                 return;
-            },
+            }
         }
 
         // NOTE: Model 响应消息**不在这里再次持久化**。
@@ -531,7 +531,7 @@ impl SessionPlugin {
                             "status": "accepted",
                             "session_id": session_id
                         })));
-                    },
+                    }
                 },
                 Err(e) => {
                     let msg = format!("读取会话元数据失败: {}", e);
@@ -541,7 +541,7 @@ impl SessionPlugin {
                         "status": "accepted",
                         "session_id": session_id
                     })));
-                },
+                }
             },
         };
 
@@ -626,7 +626,7 @@ impl SessionPlugin {
                             .broadcast_error_with_idle(&state_spawn, msg)
                             .await;
                         return;
-                    },
+                    }
                 };
                 match fallback {
                     Some(id) => id,
@@ -638,7 +638,7 @@ impl SessionPlugin {
                             .broadcast_error_with_idle(&state_spawn, msg)
                             .await;
                         return;
-                    },
+                    }
                 }
             };
             let session_cfg = this_spawn.config.read().await.clone();
@@ -799,14 +799,14 @@ impl SessionPlugin {
             Err(e) => {
                 crate::plugin_error!("session", "persist_failure: open session failed: {}", e);
                 return;
-            },
+            }
         };
         let mut all = match chat_session.get_messages().await {
             Ok(m) => m,
             Err(e) => {
                 crate::plugin_error!("session", "persist_failure: get_messages failed: {}", e);
                 return;
-            },
+            }
         };
 
         let c = collected.lock().await;
@@ -826,13 +826,13 @@ impl SessionPlugin {
                         existing.status = Some(cm::MessageStatus::Failed);
                         existing.error = Some(error.to_string());
                     }
-                },
+                }
                 None => {
                     let mut new = cm.clone();
                     new.status = Some(cm::MessageStatus::Failed);
                     new.error = Some(error.to_string());
                     all.push(new);
-                },
+                }
             }
         }
         drop(c);

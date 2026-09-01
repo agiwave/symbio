@@ -57,12 +57,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { callPlugin } from '@/services/plugin'
 import {
   listModelProviders,
   setModelProvider,
   deleteModelProvider,
-  setDefaultModelProvider
+  setDefaultModelProvider,
+  testModelProvider
 } from '@/services/modelProviders'
 import { providerPresets } from '@/constants/modelProviders'
 import type { ModelProviderConfig, ModelProvidersConfig } from '@/schemas/model_providers'
@@ -161,7 +161,7 @@ async function handleSave(payload: { provider: ModelProviderConfig; skipValidati
 async function handleTest(provider: ModelProviderConfig) {
   testing.value = true
   try {
-    await callPlugin('model_providers/test', { provider, skip_validation: false })
+    await testModelProvider(provider)
     showToast('success', '连接校验通过')
   } catch (err) {
     showToast('error', `校验失败: ${err}`)

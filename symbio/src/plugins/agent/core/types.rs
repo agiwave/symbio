@@ -177,7 +177,7 @@ pub fn cu_from_json(value: Value) -> CognitiveUnit {
                 }
             }
             fallback
-        },
+        }
     }
 }
 

@@ -80,7 +80,7 @@ impl Plugin for SettingPlugin {
                     },
                 ];
                 Ok(PluginPayload::new(&setting_list::Response { categories }))
-            },
+            }
             "get" => {
                 let req: setting_get::Request = ctx.payload()?;
 
@@ -99,13 +99,13 @@ impl Plugin for SettingPlugin {
                     category: req.category.clone(),
                     settings: category_settings,
                 }))
-            },
+            }
             CONFIG_GET => {
                 let cfg = self.config.read().await;
                 // 彻底扁平化：直接返回 Value 对象，不再包装在 Response.config 中
                 let cfg_value = cfg.clone();
                 Ok(PluginPayload::new(&cfg_value))
-            },
+            }
             CONFIG_SET => {
                 let payload: serde_json::Value = ctx.payload()?;
                 {
@@ -118,7 +118,7 @@ impl Plugin for SettingPlugin {
                     p.route(save_ctx).await?;
                 }
                 Ok(PluginPayload::new(&SuccessResponse::default()))
-            },
+            }
             _ => Err(PluginError::NotFound(format!("未知路径: {path}"))),
         }
     }

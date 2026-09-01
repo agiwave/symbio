@@ -479,7 +479,7 @@ impl TelegramPlugin {
                                             .unwrap_or_default(),
                                     );
                                 }
-                            },
+                            }
                             PluginPayload::Session(mut chan) => {
                                 while let Some(frame) = chan.rx.recv().await {
                                     match frame {
@@ -501,15 +501,15 @@ impl TelegramPlugin {
                                                         .unwrap_or_default(),
                                                 );
                                             }
-                                        },
+                                        }
                                         PluginFrame::Error(e, _) => {
                                             tracing::error!("LLM Error: {}", e);
                                             break;
-                                        },
+                                        }
                                     }
                                 }
-                            },
-                            _ => {},
+                            }
+                            _ => {}
                         }
 
                         if full_text.is_empty() {
@@ -517,7 +517,7 @@ impl TelegramPlugin {
                         } else {
                             full_text
                         }
-                    },
+                    }
                     Err(e) => format!("LLM 调用失败: {e}"),
                 }
             } else {

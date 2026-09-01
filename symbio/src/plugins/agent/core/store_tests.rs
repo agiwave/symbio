@@ -42,7 +42,7 @@ fn test_filter_starts_with() {
         FilterExpr::StartsWith { key, prefix } => {
             assert_eq!(key, "id");
             assert_eq!(prefix, "test::");
-        },
+        }
         _ => panic!("expected StartsWith"),
     }
 }

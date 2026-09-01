@@ -90,7 +90,7 @@ impl ShellTool {
                 return Err(PluginError::ValidationError(
                     "Missing or empty 'command' argument".into(),
                 ))
-            },
+            }
         };
 
         let approved = args
@@ -180,7 +180,7 @@ impl ShellTool {
                     },
                 )
                 .unwrap_or_default())
-            },
+            }
             Ok(Err(e)) => Err(PluginError::InternalError(format!("命令执行失败: {e}"))),
             Err(_) => Err(PluginError::InternalError(format!(
                 "命令超时 ({SHELL_TIMEOUT_SECS}秒)"

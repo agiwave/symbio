@@ -239,7 +239,7 @@ impl Plugin for ExplorerPlugin {
             CONFIG_GET => {
                 let cfg = self.config.lock().await;
                 Ok(PluginPayload::new(&*cfg))
-            },
+            }
             CONFIG_SET => {
                 let new_cfg: ExplorerConfig = ctx.payload()?;
                 {
@@ -252,7 +252,7 @@ impl Plugin for ExplorerPlugin {
                     p.route(save_ctx).await?;
                 }
                 Ok(PluginPayload::new(&SimpleResponse::success()))
-            },
+            }
             "list" => {
                 let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
                     PluginError::ValidationError("Missing workdir in context".to_string())
@@ -268,7 +268,7 @@ impl Plugin for ExplorerPlugin {
                     .list_directory(&workspace, req.path.as_deref(), req.recursive)
                     .await?;
                 Ok(PluginPayload::new(&res))
-            },
+            }
             "read" => {
                 let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
                     PluginError::ValidationError("Missing workdir in context".to_string())
@@ -295,7 +295,7 @@ impl Plugin for ExplorerPlugin {
                             .unwrap_or(0),
                     ),
                 }))
-            },
+            }
             "write" => {
                 let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
                     PluginError::ValidationError("Missing workdir in context".to_string())
@@ -312,7 +312,7 @@ impl Plugin for ExplorerPlugin {
                     .await
                     .map_err(|e| PluginError::InternalError(e.to_string()))?;
                 Ok(PluginPayload::new(&SimpleResponse::success()))
-            },
+            }
             "watch" => {
                 let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
                     PluginError::ValidationError("Missing workdir in context".to_string())
@@ -329,7 +329,7 @@ impl Plugin for ExplorerPlugin {
                     let _ = this.start_watch_internal(my_channel.tx, workspace).await;
                 });
                 Ok(PluginPayload::Session(peer_channel))
-            },
+            }
             _ => Err(PluginError::NotFound(format!("Unknown path: {path}"))),
         }
     }

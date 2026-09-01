@@ -62,7 +62,7 @@ impl SessionPlugin {
                 Err(e) => {
                     crate::plugin_error!("session", "主动压缩消息失败: {}", e);
                     compressed_messages.push(chat_msg);
-                },
+                }
             }
         }
 
@@ -147,7 +147,7 @@ impl SessionPlugin {
                 let removed: Vec<String> = messages[i..].iter().map(|m| m.id.clone()).collect();
                 messages.drain(i..);
                 removed
-            },
+            }
             None => Vec::new(),
         };
 
@@ -227,10 +227,10 @@ impl SessionPlugin {
                     } else {
                         existing.meta = Some(new_meta.clone());
                     }
-                },
+                }
                 None => {
                     existing.meta = Some(new_meta.clone());
-                },
+                }
             }
         }
 
@@ -339,12 +339,12 @@ impl SessionPlugin {
                     drop(cfg);
                     Arc::new(PersistentChatSession::new(sid, self.config.clone(), store))
                 }
-            },
+            }
             _ => {
                 let ephemeral = EphemeralChatSession::new(&cfg);
                 drop(cfg);
                 Arc::new(ephemeral)
-            },
+            }
         };
 
         Ok(PluginPayload::Native(Arc::new(ChatSessionHandle::new(

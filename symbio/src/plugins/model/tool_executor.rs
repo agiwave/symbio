@@ -185,7 +185,7 @@ pub async fn execute_tool_async(
                     Ok(d) => d,
                     Err(_) => {
                         return ("Error: Failed to deserialize payload".into(), false, None);
-                    },
+                    }
                 };
                 plugin_debug!(
                     "model",
@@ -203,7 +203,7 @@ pub async fn execute_tool_async(
                     res.len()
                 );
                 (res, true, None)
-            },
+            }
 
             // ── 流式响应 ──────────────────────────────────────────────────────
             PluginPayload::Session(mut tool_chan) => {
@@ -225,8 +225,8 @@ pub async fn execute_tool_async(
                                 if m.get("type").and_then(|v| v.as_str()) == Some("abort") =>
                             {
                                 is_aborted.store(true, Ordering::Relaxed)
-                            },
-                            _ => {},
+                            }
+                            _ => {}
                         }
                     }
                     if is_aborted.load(Ordering::Relaxed) {
@@ -286,25 +286,25 @@ pub async fn execute_tool_async(
                                                 .unwrap_or_default(),
                                             ))
                                             .await;
-                                    },
+                                    }
                                     session_chat_response::StreamEvent::Error { error } => {
                                         plugin_error!(
                                             "model",
                                             format!("[Tool] NESTED Error: {}", error)
                                         );
                                         return (format!("Error: {error}"), false, None);
-                                    },
-                                    _ => {},
+                                    }
+                                    _ => {}
                                 }
                             } else if let Some(text) = d.get("content").and_then(|v| v.as_str()) {
                                 // Plain content frame (final result sentinel from run.rs)
                                 full = text.to_string();
                             }
-                        },
+                        }
                         PluginFrame::Error(e, _) => {
                             plugin_error!("model", format!("[Tool] STREAM Error: {}", e));
                             return (format!("Error: {e}"), false, None);
-                        },
+                        }
                     }
                 }
                 plugin_info!(
@@ -323,13 +323,13 @@ pub async fn execute_tool_async(
                 )
                 .await;
                 (full, true, captured_prompt)
-            },
+            }
             _ => ("Error: Unexpected payload type".into(), false, None),
         },
         Err(e) => {
             plugin_error!("model", format!("[Tool] ROUTE Error: {}", e));
             (format!("Error: {e}"), false, None)
-        },
+        }
     }
 }
 
@@ -400,7 +400,7 @@ pub async fn process_tool_calls_async(
             _ => {
                 plugin_error!("model", "Protocol Error: Tool call ID missing. Skipping.");
                 continue;
-            },
+            }
         };
         let name = match tc.name.as_ref() {
             Some(name) if !name.is_empty() => name.clone(),
@@ -413,7 +413,7 @@ pub async fn process_tool_calls_async(
                     )
                 );
                 continue;
-            },
+            }
         };
 
         let result_msg_id = uuid::Uuid::new_v4().to_string();

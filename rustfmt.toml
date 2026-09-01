@@ -2,8 +2,13 @@
 # 与 CONTRIBUTING.md 中"Rust 规范"章节保持一致
 # 参考：https://rust-lang.github.io/rustfmt/
 #
+# 重要：仅使用 stable rustfmt 支持的选项。nightly-only 选项（如
+# format_code_in_doc_comments / trailing_comma / trailing_semicolon /
+# merge_uses / match_block_trailing_comma）在 stable 下会被静默忽略，
+# 导致本地与 CI 格式化结果不一致，禁止加入。
+#
 # 本文件作为约定基线存放，CI 会执行 `cargo fmt --check`。
-# 约定：仅强制影响美观的最小集合（行宽、换行风格、合并 use），
+# 约定：仅强制影响美观的最小集合（行宽、换行风格），
 # 避免一次性触发大规模重排（imports_granularity/group_imports 由
 # 团队成员 IDE 自行决定，不在仓库级强约束）。
 
@@ -16,11 +21,5 @@ use_small_heuristics = "default"
 reorder_imports = true
 reorder_modules = true
 remove_nested_parens = true
-format_code_in_doc_comments = true
-normalize_comments = false
-match_block_trailing_comma = true
-trailing_comma = "Vertical"
-trailing_semicolon = true
-merge_uses = true
 # 链式调用换行风格（从子 crate 配置合并而来）
 chain_width = 60

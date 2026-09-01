@@ -38,7 +38,7 @@ pub async fn route(
         "internal/shutdown_all" => {
             plugin.manager.shutdown_all().await;
             Ok(PluginPayload::Empty)
-        },
+        }
         _ => Err(PluginError::NotFound(format!("Unknown path: {path}"))),
     }
 }

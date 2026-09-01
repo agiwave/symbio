@@ -85,13 +85,13 @@ impl ModelProtocol for AnthropicProtocol {
                             if !t.is_empty() {
                                 parts.push(json!({"type": "text", "text": t}));
                             }
-                        },
+                        }
                         MessageContent::Parts(p) => {
                             for part in p {
                                 match part {
                                     ContentPart::Text { text } => {
                                         parts.push(json!({"type": "text", "text": text}));
-                                    },
+                                    }
                                     ContentPart::ImageUrl { image_url } => {
                                         // Anthropic expects: { "type": "image", "source": { "type": "base64", "media_type": "image/jpeg", "data": "..." } }
                                         // We assume the URL is already a data URI or base64 string
@@ -124,10 +124,10 @@ impl ModelProtocol for AnthropicProtocol {
                                                 "data": base64_data
                                             }
                                         }));
-                                    },
+                                    }
                                 }
                             }
-                        },
+                        }
                     }
                 }
             }
@@ -310,7 +310,7 @@ impl ModelProtocol for AnthropicProtocol {
                             ));
                         }
                     }
-                },
+                }
                 "content_block_delta" => {
                     if let Some(delta) = json.get("delta") {
                         let idx = json["index"].as_u64().unwrap_or(0) as usize;
@@ -325,7 +325,7 @@ impl ModelProtocol for AnthropicProtocol {
                                 {
                                     evs.push(ProtocolEvent::ReasoningDelta(r.into()));
                                 }
-                            },
+                            }
                             Some("thinking_delta")
                             | Some("thought_delta")
                             | Some("reasoning_delta") => {
@@ -337,7 +337,7 @@ impl ModelProtocol for AnthropicProtocol {
                                 {
                                     evs.push(ProtocolEvent::ReasoningDelta(r.into()));
                                 }
-                            },
+                            }
                             Some("input_json_delta") => {
                                 if let Some(p) = delta["partial_json"].as_str() {
                                     evs.push(ProtocolEvent::ToolCallDelta(
@@ -347,17 +347,17 @@ impl ModelProtocol for AnthropicProtocol {
                                         Some(p.into()),
                                     ));
                                 }
-                            },
+                            }
                             _ => {
                                 warn!(
                                     delta_type = ?delta["type"],
                                     delta = %delta,
                                     "Anthropic unknown delta type"
                                 );
-                            },
+                            }
                         }
                     }
-                },
+                }
                 "error" => {
                     if let Some(m) = json
                         .get("error")
@@ -366,8 +366,8 @@ impl ModelProtocol for AnthropicProtocol {
                     {
                         evs.push(ProtocolEvent::Error(m.into()));
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
         evs
@@ -399,7 +399,8 @@ pub async fn handle_ping(
     let request = json!({
         "model": config.model,
         "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1,
+        // Anthropic 协议要求 max_tokens >= 1，部分兼容网关要求更大，统一用安全值
+        "max_tokens": 16,
     });
 
     let response = get_http_client()

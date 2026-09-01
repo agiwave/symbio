@@ -348,7 +348,7 @@ async fn query_and_return(
                     .insert("semantic".to_string(), json!(query));
             }
             OperationResult::success(result)
-        },
+        }
         Err(e) => OperationResult::error(format!("查询失败: {}", e)),
     }
 }

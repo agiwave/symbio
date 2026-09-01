@@ -218,7 +218,7 @@ impl Capability for AskUserTool {
             Ok(p) => p,
             Err(e) => {
                 return Err(crate::symbio_core::PluginError::ValidationError(e));
-            },
+            }
         };
 
         // 运行模式（auto/interactive，默认 interactive）：

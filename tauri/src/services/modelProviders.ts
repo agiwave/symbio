@@ -22,7 +22,8 @@ import {
   ModelProvidersGet,
   ModelProvidersSet,
   ModelProvidersDelete,
-  ModelProvidersSetDefault
+  ModelProvidersSetDefault,
+  ModelProvidersTest
 } from '../schemas/model_providers'
 import { logger } from '@/utils/logger'
 
@@ -79,6 +80,25 @@ export async function setDefaultModelProvider(providerId: string): Promise<void>
   await callPlugin<ModelProvidersSetDefault.Response>(
     `${MODEL_PROVIDERS_PATH}/set_default`,
     { provider_id: providerId } satisfies ModelProvidersSetDefault.Request
+  )
+}
+
+/**
+ * 测试 Model Provider 连接（无副作用——不写入注册表、不落盘）
+ *
+ * 用于"保存前测试连接"：未保存的草稿配置也可以直接测试。
+ * 失败时后端返回 `PluginError::ValidationError`（含具体校验错误）。
+ */
+export async function testModelProvider(
+  provider: ModelProviderConfig,
+  options: { skipValidation?: boolean } = {}
+): Promise<void> {
+  await callPlugin<ModelProvidersTest.Response>(
+    `${MODEL_PROVIDERS_PATH}/test`,
+    {
+      provider,
+      skip_validation: options.skipValidation ?? false
+    } satisfies ModelProvidersTest.Request
   )
 }
 

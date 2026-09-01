@@ -278,14 +278,14 @@ impl Plugin for SkillPlugin {
                 });
                 let skills = self.list_skills_with_source(workdir).await?;
                 Ok(PluginPayload::new(&skill_list::Response { skills }))
-            },
+            }
             // BUG-FR9：前端 SkillView 详情面板预览用
             "get" => {
                 let req: skill_get_schema::Request = ctx.payload()?;
                 let workdir = ctx.get(crate::symbio_core::WORKDIR).or(req.workdir);
                 let detail = self.get_skill_detail(&req.name, workdir).await?;
                 Ok(PluginPayload::new(&detail))
-            },
+            }
             "execute" => {
                 #[derive(serde::Deserialize, Clone)]
                 struct ExecuteRequest {
@@ -346,7 +346,7 @@ impl Plugin for SkillPlugin {
                     base_dir,
                     args: Some(args),
                 }))
-            },
+            }
             _ => {
                 let skills = self
                     .list_skills(ctx.get(crate::symbio_core::WORKDIR))
@@ -377,7 +377,7 @@ impl Plugin for SkillPlugin {
                     }));
                 }
                 Err(PluginError::NotFound(format!("路径不存在: {path}")))
-            },
+            }
         }
     }
 

@@ -78,11 +78,11 @@ impl AgentIndex {
             Some(w) => {
                 self.list_cache.invalidate(w).await;
                 self.flight_gate.remove(w);
-            },
+            }
             None => {
                 self.list_cache.invalidate_all();
                 self.flight_gate.clear();
-            },
+            }
         }
     }
 

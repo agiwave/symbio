@@ -92,10 +92,10 @@ pub fn from_rwlock_write_error<T>(
     match e {
         std::sync::TryLockError::Poisoned(_) => {
             PluginError::InternalError("Write lock poisoned".to_string())
-        },
+        }
         std::sync::TryLockError::WouldBlock => {
             PluginError::InternalError("Write lock would block".to_string())
-        },
+        }
     }
 }
 
@@ -106,10 +106,10 @@ pub fn from_rwlock_read_error<T>(
     match e {
         std::sync::TryLockError::Poisoned(_) => {
             PluginError::InternalError("Read lock poisoned".to_string())
-        },
+        }
         std::sync::TryLockError::WouldBlock => {
             PluginError::InternalError("Read lock would block".to_string())
-        },
+        }
     }
 }
 

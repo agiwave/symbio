@@ -101,16 +101,16 @@ pub async fn run_chat_loop(
         {
             Ok(crate::plugins::model::resume::ResumeOutcome::Continue) => {
                 // 成功：turn 循环会从 session 加载含新工具结果的历史
-            },
+            }
             Ok(crate::plugins::model::resume::ResumeOutcome::Done) => {
                 fire_stop_hook(orchestrator, &[], &ctx).await;
                 return Ok(());
-            },
+            }
             Err(e) => {
                 plugin_warn!("model", "[Resume] process_resume failed: {}", e);
                 fire_stop_hook(orchestrator, &[], &ctx).await;
                 return Err(e);
-            },
+            }
         }
     }
 
@@ -191,8 +191,8 @@ pub async fn run_chat_loop(
                         history_count
                     );
                     last_saved = context.messages.len();
-                },
-                Ok(None) => {},
+                }
+                Ok(None) => {}
                 Err(e) => {
                     plugin_info!(
                         "model",
@@ -201,7 +201,7 @@ pub async fn run_chat_loop(
                     );
                     fire_stop_hook(orchestrator, &context.messages, &ctx).await;
                     return Err(e);
-                },
+                }
             }
         }
 
@@ -264,7 +264,7 @@ pub async fn run_chat_loop(
                     .replace_messages(context.messages.clone())
                     .await;
                 continue;
-            },
+            }
             Err(PluginError::Aborted) => {
                 plugin_warn!(
                     "model",
@@ -272,7 +272,7 @@ pub async fn run_chat_loop(
                 );
                 fire_stop_hook(orchestrator, &context.messages, &ctx).await;
                 return Ok(());
-            },
+            }
             Err(e) => {
                 plugin_warn!(
                     "model",
@@ -281,7 +281,7 @@ pub async fn run_chat_loop(
                 );
                 fire_stop_hook(orchestrator, &context.messages, &ctx).await;
                 return Err(e);
-            },
+            }
             Ok(out) => out,
         };
 

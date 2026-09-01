@@ -61,7 +61,7 @@ pub enum AgentError {
 
     /// YAML 序列化/反序列化错误
     #[error("YAML error: {0}")]
-    Yaml(#[from] serde_yml::Error),
+    Yaml(#[from] serde_yaml_ng::Error),
 
     /// 资源未找到
     #[error("Not found: {0}")]
@@ -168,7 +168,7 @@ impl AgentError {
             Self::Profile(_) | Self::Storage(_) | Self::Mindscape(_) => ErrorLevel::Error,
             Self::Embedding(_) | Self::Reasoning(_) | Self::Learning(_) | Self::Planning(_) => {
                 ErrorLevel::Error
-            },
+            }
             Self::Io(_) | Self::Json(_) | Self::Yaml(_) => ErrorLevel::Error,
             Self::Unknown(_) => ErrorLevel::Error,
         }

@@ -239,7 +239,7 @@ impl Plugin for LocalPlugin {
             CONFIG_GET => {
                 let cfg = self.config.read().await;
                 Ok(PluginPayload::new(&*cfg))
-            },
+            }
             CONFIG_SET => {
                 let new_cfg: LocalConfig = ctx.payload()?;
                 {
@@ -252,7 +252,7 @@ impl Plugin for LocalPlugin {
                     let _ = p.route(save_ctx).await;
                 }
                 Ok(PluginPayload::new(&SimpleResponse::success()))
-            },
+            }
             _ => {
                 let payload = ctx.payload::<serde_json::Value>()?;
                 if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
@@ -288,7 +288,7 @@ impl Plugin for LocalPlugin {
                     return tool.execute(ctx).await;
                 }
                 Err(PluginError::NotFound(format!("路径不存在: {path}")))
-            },
+            }
         }
     }
 

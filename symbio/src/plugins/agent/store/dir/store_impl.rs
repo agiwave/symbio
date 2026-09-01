@@ -23,7 +23,7 @@ impl AgentStore for DirStorage {
                 .await
                 .map_err(|e| StoreError::Backend(e.to_string()))?;
             let parse_value: fn(&str) -> Option<Value> = match self.format {
-                StorageFormat::Yaml => |s| serde_yml::from_str(s).ok(),
+                StorageFormat::Yaml => |s| serde_yaml_ng::from_str(s).ok(),
                 StorageFormat::Json => |s| serde_json::from_str(s).ok(),
             };
             let au = parse_value(&content).and_then(|v| {

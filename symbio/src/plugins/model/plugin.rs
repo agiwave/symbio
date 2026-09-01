@@ -60,7 +60,7 @@ impl ProviderRateLimiter {
                         // 首次请求：立即放行，仅记录时间戳供后续节流
                         map.insert(provider_id.to_string(), now);
                         None
-                    },
+                    }
                     Some(&last) => {
                         let elapsed = now.saturating_duration_since(last);
                         if elapsed >= interval {
@@ -70,7 +70,7 @@ impl ProviderRateLimiter {
                         } else {
                             Some(interval - elapsed)
                         }
-                    },
+                    }
                 }
             };
             match sleep_for {
@@ -82,7 +82,7 @@ impl ProviderRateLimiter {
                         continue;
                     }
                     tokio::time::sleep(sleep).await;
-                },
+                }
             }
         }
     }
@@ -139,7 +139,7 @@ impl ModelPlugin {
             None => {
                 plugin_warn!("model", "未找到 storage_service，跳过新存储加载");
                 return;
-            },
+            }
         };
 
         let es = store.entity_store();
@@ -152,7 +152,7 @@ impl ModelPlugin {
             Err(e) => {
                 plugin_warn!("model", "list models 失败: {e}");
                 return;
-            },
+            }
         };
 
         // 1.5 兼容旧分类 `ai`：若 model 分类为空但 MODEL 分类有数据，自动迁移
@@ -214,7 +214,7 @@ impl ModelPlugin {
                             p.name = id.clone();
                         }
                         new_providers.insert(id.clone(), p);
-                    },
+                    }
                     Err(e) => plugin_warn!("model", "解析 provider {id} 失败: {e}"),
                 },
                 Err(e) => plugin_warn!("model", "读取 provider {id} 失败: {e}"),
@@ -270,7 +270,7 @@ impl ModelPlugin {
                 Err(_e) => {
                     plugin_error!("model", "序列化 provider {id} 失败");
                     continue;
-                },
+                }
             };
             if let Err(_e) = es.write_entity(category, id, manifest, &content).await {
                 plugin_error!("model", "迁移 provider {id} 失败");
@@ -365,7 +365,7 @@ impl ModelPlugin {
                 Err(_e) => {
                     plugin_error!("model", "序列化 provider {id} 失败");
                     continue;
-                },
+                }
             };
             if let Err(_e) = es.write_entity(category, id, manifest, &content).await {
                 plugin_error!("model", "写入 provider {id} 失败");
@@ -465,7 +465,7 @@ impl ModelPlugin {
                 if let Ok(value) = resp.get::<serde_json::Value>() {
                     let _ = channel.tx.send(PluginFrame::Data(value)).await;
                 }
-            },
+            }
             PluginPayload::Session(peer) => {
                 let (peer_tx, mut peer_rx) = (peer.tx, peer.rx);
                 let (my_tx, mut my_rx) = (channel.tx, channel.rx);
@@ -494,7 +494,7 @@ impl ModelPlugin {
                     _ = forward_task => {},
                     _ = backward_task => {},
                 }
-            },
+            }
             _ => {
                 let _ = channel
                     .tx
@@ -503,7 +503,7 @@ impl ModelPlugin {
                         None,
                     ))
                     .await;
-            },
+            }
         }
         Ok(())
     }
@@ -550,7 +550,7 @@ impl ModelPlugin {
                         }
                     }
                     None
-                },
+                }
                 _ => None,
             },
             Err(e) => Some(e.to_string()),
@@ -597,7 +597,7 @@ impl Plugin for ModelPlugin {
                     "_storage": "plugins/model",  // 标记数据已迁移到新存储
                 });
                 Ok(PluginPayload::new(&metadata))
-            },
+            }
             CONFIG_SET => {
                 let new_cfg: ModelProvidersConfig = ctx.payload()?;
                 {
@@ -606,7 +606,7 @@ impl Plugin for ModelPlugin {
                 }
                 self.persist_to_parent(&ctx).await?;
                 Ok(PluginPayload::new(&common::SuccessResponse::default()))
-            },
+            }
             "config/schema" => Ok(PluginPayload::new(&common::SchemaResponse {
                 schema: Self::config_schema(),
             })),
@@ -619,7 +619,7 @@ impl Plugin for ModelPlugin {
                         config: providers.clone(),
                     },
                 ))
-            },
+            }
             "providers/get" => {
                 let req: model_providers::model_providers_get::Request = ctx.payload()?;
                 let providers = self.providers.read().await;
@@ -633,7 +633,7 @@ impl Plugin for ModelPlugin {
                 Ok(PluginPayload::new(
                     &model_providers::model_providers_get::Response { provider },
                 ))
-            },
+            }
             "providers/set" => {
                 let req: model_providers::model_providers_set::Request = ctx.payload()?;
                 let mut incoming = req.provider.clone();
@@ -684,7 +684,7 @@ impl Plugin for ModelPlugin {
                 Ok(PluginPayload::new(
                     &model_providers::model_providers_set::Response { provider: incoming },
                 ))
-            },
+            }
             "providers/delete" => {
                 let req: model_providers::model_providers_delete::Request = ctx.payload()?;
                 {
@@ -710,7 +710,7 @@ impl Plugin for ModelPlugin {
                 Ok(PluginPayload::new(
                     &model_providers::model_providers_delete::Response {},
                 ))
-            },
+            }
             "providers/set_default" => {
                 let req: model_providers::model_providers_set_default::Request = ctx.payload()?;
                 {
@@ -727,7 +727,27 @@ impl Plugin for ModelPlugin {
                 Ok(PluginPayload::new(
                     &model_providers::model_providers_set_default::Response {},
                 ))
-            },
+            }
+            // 连接测试：复用 set 的验证逻辑，但**无副作用**（不写注册表、不落盘），
+            // 因此未保存的草稿 Provider 配置也可以直接测试。
+            "providers/test" => {
+                let req: model_providers::model_providers_test::Request = ctx.payload()?;
+                let parent = self.get_parent().await;
+                plugin_debug!(
+                    "model",
+                    "正在测试 Model Provider 连接: id={}, provider={}, api_protocol={}",
+                    req.provider.id,
+                    req.provider.provider,
+                    req.provider.api_protocol
+                );
+                if let Some(err) = Self::validate_provider(&req.provider, &parent).await {
+                    plugin_error!("model", format!("Provider 连接测试未通过: {err}"));
+                    return Err(PluginError::ValidationError(format!("连接测试失败: {err}")));
+                }
+                Ok(PluginPayload::new(
+                    &model_providers::model_providers_test::Response {},
+                ))
+            }
 
             "chat" => {
                 let (my_channel, peer_channel) = PluginChannel::pair(64);
@@ -739,7 +759,7 @@ impl Plugin for ModelPlugin {
                     }
                 });
                 Ok(PluginPayload::Session(peer_channel))
-            },
+            }
             "chat_sync" => Err(PluginError::NotImplemented),
             "status" => {
                 let providers = self.providers.read().await;
@@ -749,7 +769,7 @@ impl Plugin for ModelPlugin {
                     .map(|p| p.to_model_config())
                     .unwrap_or_default();
                 Ok(PluginPayload::new(&handlers::handle_status(&active)))
-            },
+            }
             _ => Err(PluginError::NotFound(format!("未知路径: {path}"))),
         }
     }

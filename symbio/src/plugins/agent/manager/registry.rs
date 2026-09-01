@@ -138,7 +138,7 @@ impl AgentRegistry {
                         e
                     );
                     continue;
-                },
+                }
             };
             Self::write_unit_to_storage(p_dir, au, config).await?;
             count += 1;
@@ -162,7 +162,7 @@ impl AgentRegistry {
         let path = p_dir.join(format!("{safe_id}.{ext}"));
 
         let content = if config.storage_format == StorageFormat::Yaml {
-            serde_yml::to_string(&au).map_err(std::io::Error::other)?
+            serde_yaml_ng::to_string(&au).map_err(std::io::Error::other)?
         } else {
             serde_json::to_string_pretty(&au).map_err(std::io::Error::other)?
         };

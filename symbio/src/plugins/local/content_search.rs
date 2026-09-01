@@ -43,7 +43,7 @@ impl ContentSearchTool {
                 return Err(PluginError::ValidationError(
                     "Missing or empty 'pattern' argument".into(),
                 ))
-            },
+            }
         };
 
         if pattern.is_empty() {
@@ -139,7 +139,7 @@ impl ContentSearchTool {
                     "truncated": truncated,
                     "backend": "ripgrep-lib"
                 }))
-            },
+            }
             Err(e) => Err(PluginError::InternalError(e)),
         }
     }

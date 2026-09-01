@@ -117,7 +117,7 @@ impl AgentCreateTool {
             Err(e) => {
                 error!(error = %e, "build_store FAILED");
                 return Err(e.into());
-            },
+            }
         };
         info!(dir = ?_agent_dir, identity_id = %identity_unit.id(), "build_store");
         match store.upsert(identity_unit).await {

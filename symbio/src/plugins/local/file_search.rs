@@ -80,7 +80,7 @@ impl FileSearchTool {
                 return Err(PluginError::ValidationError(format!(
                     "无效的 Glob 模式: {e}"
                 )))
-            },
+            }
         };
 
         let mut results = Vec::new();

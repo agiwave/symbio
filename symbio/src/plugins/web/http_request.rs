@@ -68,7 +68,7 @@ impl HttpRequestTool {
                 return Err(PluginError::ValidationError(format!(
                     "不支持的 HTTP 方法: {method}"
                 )))
-            },
+            }
         };
 
         // 添加请求头

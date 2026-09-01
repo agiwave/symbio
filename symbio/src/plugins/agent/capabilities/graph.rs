@@ -462,7 +462,7 @@ async fn fetch_all_units(
                     break;
                 }
                 offset += PAGE_SIZE;
-            },
+            }
             Err(_) => break,
         }
     }

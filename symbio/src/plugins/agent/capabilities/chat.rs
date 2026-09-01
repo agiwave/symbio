@@ -324,7 +324,7 @@ async fn stream_relay(
                             })
                             .unwrap_or_default();
                             let _ = my_side.tx.send(PluginFrame::Data(fwd)).await;
-                        },
+                        }
 
                         StreamEvent::Error { ref error } => {
                             let fwd = serde_json::to_value(StreamEvent::Error {
@@ -333,20 +333,20 @@ async fn stream_relay(
                             .unwrap_or_default();
                             let _ = my_side.tx.send(PluginFrame::Data(fwd)).await;
                             break;
-                        },
+                        }
 
                         StreamEvent::Status { ref status } if status.as_str() == "idle" => {
                             break;
-                        },
+                        }
 
-                        _ => {},
+                        _ => {}
                     }
                 }
-            },
+            }
             PluginFrame::Error(e, _) => {
                 relay_error = Some(format!("Error: {e}"));
                 break;
-            },
+            }
         }
     }
 

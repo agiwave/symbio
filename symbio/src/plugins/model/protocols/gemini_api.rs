@@ -60,13 +60,13 @@ impl ModelProtocol for GeminiProtocol {
                         if !t.is_empty() {
                             parts.push(json!({"text": t}));
                         }
-                    },
+                    }
                     MessageContent::Parts(p) => {
                         for part in p {
                             match part {
                                 ContentPart::Text { text } => {
                                     parts.push(json!({"text": text}));
-                                },
+                                }
                                 ContentPart::ImageUrl { image_url } => {
                                     // Gemini expects: { "inlineData": { "mimeType": "image/jpeg", "data": "..." } }
                                     let (media_type, base64_data) =
@@ -94,10 +94,10 @@ impl ModelProtocol for GeminiProtocol {
                                             "data": base64_data
                                         }
                                     }));
-                                },
+                                }
                             }
                         }
-                    },
+                    }
                 }
             }
             if let Some(ref tcs) = m.tool_calls {
@@ -219,7 +219,7 @@ pub async fn handle_ping(
     let api_key = config.api_key.clone().unwrap_or_default();
     let request = json!({
         "contents": [{"parts": [{"text": "ping"}]}],
-        "generationConfig": {"maxOutputTokens": 1}
+        "generationConfig": {"maxOutputTokens": 16}
     });
 
     let response = get_http_client()

@@ -66,7 +66,7 @@ pub(super) fn bucket_neighbors(code: u8) -> Vec<u8> {
 fn deserialize_cu(content: &str, format: StorageFormat) -> Option<CognitiveUnit> {
     let value: Value = match format {
         StorageFormat::Json => serde_json::from_str(content).ok()?,
-        StorageFormat::Yaml => serde_yml::from_str(content).ok()?,
+        StorageFormat::Yaml => serde_yaml_ng::from_str(content).ok()?,
     };
     if matches!(value, Value::Array(_)) {
         return None; // 不是单个 unit
@@ -282,7 +282,7 @@ impl DirStorage {
         let path = self.get_au_path(id);
 
         let content = match self.format {
-            StorageFormat::Yaml => serde_yml::to_string(au).map_err(|e| e.to_string())?,
+            StorageFormat::Yaml => serde_yaml_ng::to_string(au).map_err(|e| e.to_string())?,
             StorageFormat::Json => serde_json::to_string_pretty(au).map_err(|e| e.to_string())?,
         };
 
@@ -322,7 +322,7 @@ impl DirStorage {
             return units;
         }
 
-        if let Ok(items) = serde_yml::from_str::<Vec<CognitiveUnit>>(&content) {
+        if let Ok(items) = serde_yaml_ng::from_str::<Vec<CognitiveUnit>>(&content) {
             for au in items {
                 let id = au.id();
                 if !id.is_empty() {
@@ -332,7 +332,7 @@ impl DirStorage {
             return units;
         }
 
-        if let Ok(au) = serde_yml::from_str::<CognitiveUnit>(&content) {
+        if let Ok(au) = serde_yaml_ng::from_str::<CognitiveUnit>(&content) {
             let id = au.id();
             if !id.is_empty() {
                 units.insert(id.to_string(), au);
@@ -342,7 +342,7 @@ impl DirStorage {
 
         // v8 迁移：兼容旧数据（is_a 为字符串、含未建模字段等）
         // 先解析为 Value，再通过 cu_from_json 宽松构造
-        if let Ok(value) = serde_yml::from_str::<Value>(&content) {
+        if let Ok(value) = serde_yaml_ng::from_str::<Value>(&content) {
             match value {
                 Value::Array(arr) => {
                     for v in arr {
@@ -350,15 +350,15 @@ impl DirStorage {
                             units.insert(id.to_string(), cu_from_json(v));
                         }
                     }
-                },
+                }
                 Value::Object(_) => {
                     let unit = cu_from_json(value);
                     let id = unit.id();
                     if !id.is_empty() {
                         units.insert(id.to_string(), unit);
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
         } else if let Ok(value) = serde_json::from_str::<Value>(&content) {
             match value {
@@ -368,15 +368,15 @@ impl DirStorage {
                             units.insert(id.to_string(), cu_from_json(v));
                         }
                     }
-                },
+                }
                 Value::Object(_) => {
                     let unit = cu_from_json(value);
                     let id = unit.id();
                     if !id.is_empty() {
                         units.insert(id.to_string(), unit);
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
 
@@ -388,10 +388,10 @@ impl DirStorage {
         units: &HashMap<String, CognitiveUnit>,
     ) -> Result<(), String> {
         let content = match self.format {
-            StorageFormat::Yaml => serde_yml::to_string(&units).map_err(|e| e.to_string())?,
+            StorageFormat::Yaml => serde_yaml_ng::to_string(&units).map_err(|e| e.to_string())?,
             StorageFormat::Json => {
                 serde_json::to_string_pretty(&units).map_err(|e| e.to_string())?
-            },
+            }
         };
 
         if let Some(parent) = self.base_path.parent() {
@@ -606,7 +606,7 @@ impl DirStorage {
                     limit: page.limit,
                     scores: None,
                 })
-            },
+            }
         };
         let query_embedding = match embed_service.embed(query_text).await {
             Some(emb) => emb,
@@ -618,7 +618,7 @@ impl DirStorage {
                     limit: page.limit,
                     scores: None,
                 })
-            },
+            }
         };
         let min_score = 0.1;
 
@@ -793,7 +793,7 @@ impl DirStorage {
                                 };
                                 // v8：优先严格反序列化，失败时回退到宽松解析
                                 let parse_value: fn(&str) -> Option<Value> = match ext {
-                                    "yaml" => |s| serde_yml::from_str(s).ok(),
+                                    "yaml" => |s| serde_yaml_ng::from_str(s).ok(),
                                     _ => |s| serde_json::from_str(s).ok(),
                                 };
                                 let au = parse_value(&content).and_then(|v| {

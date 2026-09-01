@@ -108,7 +108,7 @@ impl NativeMessage {
                         text.clone()
                     };
                     serde_json::json!(final_text)
-                },
+                }
                 MessageContent::Parts(parts) => {
                     let mut converted_parts: Vec<serde_json::Value> = parts
                         .iter()
@@ -132,7 +132,7 @@ impl NativeMessage {
                     }
 
                     serde_json::json!(converted_parts)
-                },
+                }
             },
             None => {
                 if let Some(ref prompt) = self.prompt {
@@ -143,7 +143,7 @@ impl NativeMessage {
                 } else {
                     serde_json::Value::Null
                 }
-            },
+            }
         };
         obj.insert("content".to_string(), content_value);
 
@@ -264,7 +264,7 @@ impl NativeMessage {
                         serde_json::json!([{"type": "text", "text": final_text}])
                     };
                     item.insert("content".to_string(), content_part);
-                },
+                }
                 MessageContent::Parts(parts) => {
                     let mut converted_parts: Vec<serde_json::Value> = parts
                         .iter()
@@ -275,10 +275,10 @@ impl NativeMessage {
                                 } else {
                                     serde_json::json!({"type": "text", "text": text})
                                 }
-                            },
+                            }
                             ContentPart::ImageUrl { image_url } => {
                                 serde_json::json!({"type": "input_image", "image_url": image_url})
-                            },
+                            }
                         })
                         .collect();
 
@@ -293,7 +293,7 @@ impl NativeMessage {
                     }
 
                     item.insert("content".to_string(), serde_json::json!(converted_parts));
-                },
+                }
             }
         }
 

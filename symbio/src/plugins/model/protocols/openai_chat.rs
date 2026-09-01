@@ -165,7 +165,8 @@ pub async fn handle_ping(
     let request = json!({
         "model": config.model,
         "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1,
+        // 注意：部分 OpenAI 兼容网关（如 GLM）要求 max_tokens > 2，不能设为 1
+        "max_tokens": 256,
     });
 
     let response = get_http_client()

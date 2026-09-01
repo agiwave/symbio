@@ -107,7 +107,7 @@ impl SessionPlugin {
                     e
                 );
                 return;
-            },
+            }
         };
 
         for session in sessions {

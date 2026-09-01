@@ -41,10 +41,8 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Install Rust
-        # 使用 rust-toolchain.toml 锁定版本
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+        # 使用 rust-toolchain.toml 锁定版本，保证与本地开发环境一致（避免 rustfmt 版本漂移导致 fmt 失败）
+        uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Cache cargo registry
         uses: actions/cache@v3
@@ -56,7 +54,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check formatting
-        # rustfmt.toml 在 symbio/ 目录（与 Cargo.toml 同级），自动被 cargo fmt 读取
+        # rustfmt.toml 在仓库根目录，rustfmt 会从源文件目录向上查找配置
         run: cargo fmt --all -- --check
         working-directory: symbio
 
@@ -94,6 +92,8 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          # package-lock.json 位于 tauri/ 子目录，必须显式指定，否则 cache 解析失败
+          cache-dependency-path: tauri/package-lock.json
       
       - name: Check frontend dependencies
         working-directory: tauri

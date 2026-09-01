@@ -241,7 +241,7 @@ impl SecurityPolicy {
                 if self.autonomy == AutonomyLevel::Supervised && !approved {
                     return Err("高风险命令需要显式批准".into());
                 }
-            },
+            }
             RiskLevel::Medium => {
                 if self.autonomy == AutonomyLevel::Supervised
                     && self.require_approval_for_medium_risk
@@ -249,8 +249,8 @@ impl SecurityPolicy {
                 {
                     return Err("中等风险命令需要批准".into());
                 }
-            },
-            RiskLevel::Low => {},
+            }
+            RiskLevel::Low => {}
         }
         Ok(risk)
     }
@@ -283,14 +283,14 @@ impl SecurityPolicy {
         match tool_name {
             "read_file" | "web_fetch" | "web_search" | "glob_search" | "content_search" => {
                 RiskLevel::Low
-            },
+            }
             "shell" => {
                 if let Some(cmd) = args.and_then(|a| a.get("command")).and_then(|c| c.as_str()) {
                     self.command_risk_level(cmd)
                 } else {
                     RiskLevel::High
                 }
-            },
+            }
             "http_request" => RiskLevel::High,
             "write_file" | "file_edit" => RiskLevel::Medium,
             _ => RiskLevel::Medium,

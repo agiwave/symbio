@@ -113,10 +113,10 @@ fn test_serialization_roundtrip() {
 
     // → Value → 序列化
     let v = u.to_value();
-    let yaml = serde_yml::to_string(&v).unwrap();
+    let yaml = serde_yaml_ng::to_string(&v).unwrap();
 
     // 反序列化：Value → CU
-    let parsed_v: Value = serde_yml::from_str(&yaml).unwrap_or(v.clone());
+    let parsed_v: Value = serde_yaml_ng::from_str(&yaml).unwrap_or(v.clone());
     let parsed = CognitiveUnit::try_from(parsed_v).unwrap();
     assert_eq!(parsed.id(), "identity");
     assert_eq!(parsed.name(), Some("张三"));
@@ -405,7 +405,7 @@ fn test_no_properties_field_in_serialization() {
     u.set("custom_field", json!("custom_value"));
 
     let v = u.to_value();
-    let yaml = serde_yml::to_string(&v).unwrap();
+    let yaml = serde_yaml_ng::to_string(&v).unwrap();
     assert!(
         !yaml.contains("properties:"),
         "YAML 中绝不能出现 properties 块: {}",

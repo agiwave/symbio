@@ -102,7 +102,7 @@ LLM 应**显式**给【重要】或【高频需要】的记忆设 `priority ≤ 
                      示例：{items:[{id:'cu_xxx', name:'新名字'}]}"
                         .to_string(),
                 );
-            },
+            }
             None => {
                 return OperationResult::error(
                     "缺少必需参数 'items'。memory.save 必须传 items 数组格式，\
@@ -110,7 +110,7 @@ LLM 应**显式**给【重要】或【高频需要】的记忆设 `priority ≤ 
                      示例：{items:[{id:'cu_xxx', name:'新名字'}]}"
                         .to_string(),
                 );
-            },
+            }
         };
 
         let mut results = Vec::new();
@@ -163,7 +163,7 @@ async fn save_one_cu(engine: &Arc<dyn AgentStore>, item: &Value) -> Result<Value
                             "action": "deleted",
                             "message": "confidence=0 → 立即删除（不等 consolidate）",
                         }))
-                    },
+                    }
                     Err(e) => return Err(format!("软删除失败: {}", e)),
                 }
             }

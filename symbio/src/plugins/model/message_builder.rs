@@ -109,10 +109,10 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                             Some(MessageType::Reasoning) => {
                                 native.reasoning_content =
                                     child.content.as_ref().map(|c| c.to_text());
-                            },
+                            }
                             Some(MessageType::Text) => {
                                 native.content = child.content.clone();
-                            },
+                            }
                             Some(MessageType::ToolCall) => {
                                 // 请求参数直接来自 ToolCall 节点自身的 content（JSON 文本）
                                 let args_val = child
@@ -140,8 +140,8 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                     tool_native.tool_call_id = Some(child.id.clone());
                                     tool_results.push(tool_native);
                                 }
-                            },
-                            _ => {},
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -152,7 +152,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
 
                 result.push(native);
                 result.extend(tool_results);
-            },
+            }
             _ => {
                 // User / System 等根级内容节点
                 let mut native: NativeMessage = m.clone().into();
@@ -160,7 +160,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                     native.tool_call_id = m.parent_id.clone();
                 }
                 result.push(native);
-            },
+            }
         }
     }
 

@@ -94,7 +94,7 @@ impl HomePlugin {
             let path = config_path();
             if path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Ok(cfg) = serde_yml::from_str::<GlobalConfig>(&content) {
+                    if let Ok(cfg) = serde_yaml_ng::from_str::<GlobalConfig>(&content) {
                         info!(path = %path.display(), "从磁盘成功加载配置");
                         global_config = cfg;
                     }
@@ -210,7 +210,7 @@ impl HomePlugin {
             if path.exists() {
                 std::fs::read_to_string(&path)
                     .ok()
-                    .and_then(|content| serde_yml::from_str::<GlobalConfig>(&content).ok())
+                    .and_then(|content| serde_yaml_ng::from_str::<GlobalConfig>(&content).ok())
                     .unwrap_or_default()
             } else {
                 GlobalConfig::default()
@@ -477,12 +477,12 @@ impl HomePlugin {
         }
 
         let cfg = self.config.read().await;
-        let content = match serde_yml::to_string(&*cfg) {
+        let content = match serde_yaml_ng::to_string(&*cfg) {
             Ok(c) => c,
             Err(e) => {
                 plugin_error!("home", format!("序列化 YAML 失败: {}", e));
                 return Err(PluginError::InternalError(format!("序列化配置失败: {e}")));
-            },
+            }
         };
 
         // 1. 先写入临时文件
@@ -535,10 +535,10 @@ impl HomePlugin {
                     if let Ok(data) = resp.get::<serde_json::Value>() {
                         configs.insert("plugins".to_string(), data);
                     }
-                },
+                }
                 Err(e) => {
                     plugin_error!("home", format!("获取插件 'worker' 配置失败: {}", e));
-                },
+                }
             }
         }
         configs
@@ -584,7 +584,7 @@ impl Plugin for HomePlugin {
                     }
                 });
                 return Ok(PluginPayload::new(&common::SuccessResponse::default()));
-            },
+            }
             "home/reload" => {
                 let req: home_reload::Request = ctx.payload().unwrap_or_default();
                 let new_homedir = req.homedir.as_ref().map(PathBuf::from);
@@ -612,11 +612,11 @@ impl Plugin for HomePlugin {
                 }
 
                 return Ok(PluginPayload::new(&result));
-            },
+            }
             "home/get_homedir" => {
                 let info = self.get_homedir_info().await;
                 return Ok(PluginPayload::new(&info));
-            },
+            }
             "work/set_workspace" => {
                 #[derive(serde::Deserialize, Clone)]
                 struct SetWorkspaceRequest {
@@ -636,7 +636,7 @@ impl Plugin for HomePlugin {
                 });
 
                 return Ok(PluginPayload::new(&result));
-            },
+            }
             "work/get_workspace" => {
                 // 统一从 Home 的配置缓存中读取工作区路径，这是最可靠的数据源
                 let cfg = self.config.read().await;
@@ -665,8 +665,8 @@ impl Plugin for HomePlugin {
                     },
                     recent_workspaces: recents,
                 }));
-            },
-            _ => {},
+            }
+            _ => {}
         }
 
         if let Some((name, rest)) = Self::parse_path(path) {

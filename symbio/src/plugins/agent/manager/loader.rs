@@ -83,7 +83,7 @@ impl ProfileLoader {
         let yaml_path = dir.join("profile.yaml");
         if yaml_path.exists() {
             if let Ok(content) = tokio::fs::read_to_string(&yaml_path).await {
-                if let Ok(mut profile) = serde_yml::from_str::<AgentProfile>(&content) {
+                if let Ok(mut profile) = serde_yaml_ng::from_str::<AgentProfile>(&content) {
                     profile.id = agent_id;
                     profile.base_dir = dir.to_path_buf();
                     return Some(profile);

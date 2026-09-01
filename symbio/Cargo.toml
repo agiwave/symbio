@@ -48,8 +48,8 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# 优化 2：替换已停止维护的 serde_yaml
-serde_yml = "0.0.12"
+# 优化 2：替换已停止维护的 serde_yaml（serde_yml 也不维护且有漏洞，改用其维护中的 fork）
+serde_yaml_ng = "0.10"
 notify = "6.1"
 dashmap = "5.5"
 inventory = "0.3"

@@ -119,7 +119,7 @@ priority 自动设置：\n\
                      示例：{summary:'调试了借用错误', insights:[{content:'...'}]}"
                         .to_string(),
                 );
-            },
+            }
         };
 
         let mut saved_ids: Vec<String> = Vec::new();
@@ -155,7 +155,7 @@ priority 自动设置：\n\
                     // 反思日志失败不阻断主流程，记录到 errors
                     errors.push(format!("reflection_log: {e}"));
                     String::new()
-                },
+                }
             };
 
         OperationResult::success(json!({

@@ -72,7 +72,7 @@ impl ToolCallAccumulator {
                             "tool call parse error"
                         );
                         serde_json::json!({})
-                    },
+                    }
                 };
                 ToolCallInfo {
                     id: call.id.clone(),

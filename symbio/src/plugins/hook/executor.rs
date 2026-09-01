@@ -61,7 +61,7 @@ impl HookExecutor {
             HookType::Command => {
                 self.execute_command(config, event, workdir, timeout_ms)
                     .await
-            },
+            }
             HookType::Http => self.execute_http(config, event, timeout_ms).await,
         }
     }
@@ -83,7 +83,7 @@ impl HookExecutor {
                     output: HookOutput::default(),
                     error: Some("No command specified".into()),
                 };
-            },
+            }
         };
 
         let event_json = serde_json::to_string(event).unwrap_or_default();
@@ -162,7 +162,7 @@ impl HookExecutor {
                     output: hook_output,
                     error: None,
                 }
-            },
+            }
             Ok(Err(e)) => HookExecutionResult {
                 success: false,
                 output: HookOutput::default(),
@@ -190,7 +190,7 @@ impl HookExecutor {
                     output: HookOutput::default(),
                     error: Some("No URL specified".into()),
                 };
-            },
+            }
         };
 
         let client = reqwest::Client::new();
@@ -224,7 +224,7 @@ impl HookExecutor {
                     output: hook_output,
                     error: None,
                 }
-            },
+            }
             Err(e) => HookExecutionResult {
                 success: false,
                 output: HookOutput::default(),

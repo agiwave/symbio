@@ -175,7 +175,7 @@ async fn process_tool_resume_action(
                 "未找到工具调用节点: {}",
                 req.target_id
             )));
-        },
+        }
     };
 
     // 3. 定位待恢复子节点（user_prompt 或 Failed/WaitingUserAction Text）
@@ -192,7 +192,7 @@ async fn process_tool_resume_action(
                 "工具调用 {} 无可恢复的子节点",
                 req.target_id
             )));
-        },
+        }
     };
 
     // 4. 提取 tool_name / base_args
@@ -205,12 +205,12 @@ async fn process_tool_resume_action(
         ResumeAction::Reject => {
             let msg = format!("用户拒绝执行: {}", req.reason.unwrap_or_default());
             (msg, false, None)
-        },
+        }
         ResumeAction::Answer => {
             let answer_str = serde_json::to_string_pretty(&req.answer.unwrap_or(json!(null)))
                 .unwrap_or_default();
             (answer_str, true, None)
-        },
+        }
         ResumeAction::Approve => {
             let mut a = base_args.clone();
             if let Some(obj) = a.as_object_mut() {
@@ -219,7 +219,7 @@ async fn process_tool_resume_action(
             let (res, success) =
                 reexecute_tool(orchestrator, ctx, abort_flag, &tool_name, a, &req.target_id).await;
             (res, success, None)
-        },
+        }
         ResumeAction::Retry => {
             let (res, success) = reexecute_tool(
                 orchestrator,
@@ -231,7 +231,7 @@ async fn process_tool_resume_action(
             )
             .await;
             (res, success, None)
-        },
+        }
         ResumeAction::Supply => {
             let mut a = base_args.clone();
             if let (Some(obj), Some(supplied)) = (a.as_object_mut(), req.args.clone()) {
@@ -251,7 +251,7 @@ async fn process_tool_resume_action(
             )
             .await;
             (res, success, Some(a))
-        },
+        }
     };
 
     if abort_flag.load(Ordering::Relaxed) {

@@ -543,7 +543,7 @@ async fn get_metacognitive_priority(store: &dyn AgentStore, type_id: &str) -> i6
                 e
             );
             99
-        },
+        }
     }
 }
 
@@ -595,7 +595,7 @@ async fn get_all_system_units(store: &dyn AgentStore) -> HashMap<String, Cogniti
                 e
             );
             HashMap::new()
-        },
+        }
     }
 }
 

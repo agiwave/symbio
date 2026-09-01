@@ -114,7 +114,7 @@ impl PluginPayload {
                 }
                 serde_json::from_value(obj.serialize()?)
                     .map_err(|e| format!("Failed to deserialize data: {}", e))
-            },
+            }
             Self::Empty => Err("Cannot deserialize Empty payload".to_string()),
             Self::Native(_) => Err("Cannot deserialize Native payload".to_string()),
             Self::Session(_) => Err("Cannot deserialize Session payload".to_string()),

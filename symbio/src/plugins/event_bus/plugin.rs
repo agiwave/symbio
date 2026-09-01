@@ -107,7 +107,7 @@ impl Plugin for EventBusPlugin {
             "subscribe" => {
                 let req: SubscribeRequest = ctx.payload()?;
                 EventBusPlugin::handle_subscribe(ctx, req).await
-            },
+            }
             "pending/snapshot" => {
                 let req: PendingSnapshotRequest = ctx.payload()?;
                 let events = EventBus::drain_pending(&req.session_id);
@@ -116,14 +116,14 @@ impl Plugin for EventBusPlugin {
                     events,
                 };
                 Ok(PluginPayload::new(&resp))
-            },
+            }
             "ping" => {
                 let resp = SimpleResponse::success_with_message(format!(
                     "pong ({} subscribers)",
                     EventBus::subscriber_count()
                 ));
                 Ok(PluginPayload::new(&resp))
-            },
+            }
             _ => Err(PluginError::NotFound(format!(
                 "[event_bus] 未知子命令: {}",
                 path

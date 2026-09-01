@@ -79,7 +79,7 @@ impl EmbeddingService for FastEmbedService {
                 Err(e) => {
                     tracing::warn!("Failed to generate embedding: {}", e);
                     None
-                },
+                }
             }
         })
         .await
@@ -110,7 +110,7 @@ fn build_fastembed(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn EmbeddingService> {
                 e
             );
             Arc::new(NoopEmbeddingService) as Arc<dyn EmbeddingService>
-        },
+        }
     }
 }
 

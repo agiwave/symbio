@@ -355,7 +355,7 @@ pub(crate) fn extract_semantic(filter: &FilterExpr) -> (Option<String>, Option<F
                 Some(FilterExpr::And(rest))
             };
             (semantic, constraint)
-        },
+        }
         _ => (None, Some(filter.clone())),
     }
 }

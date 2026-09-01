@@ -76,7 +76,7 @@ impl SessionPlugin {
                 Err(e) => {
                     crate::plugin_warn!("session", "心跳调度器：list_sessions 失败: {}", e);
                     continue;
-                },
+                }
             };
 
             let now = now_ms();

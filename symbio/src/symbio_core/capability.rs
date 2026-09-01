@@ -119,7 +119,7 @@ impl CapabilityMeta {
         match &self.examples {
             Some(exs) if !exs.is_empty() => {
                 format!("{}\n\n示例：\n{}", self.description, exs.join("\n"))
-            },
+            }
             _ => self.description.clone(),
         }
     }

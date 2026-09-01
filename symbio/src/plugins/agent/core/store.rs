@@ -301,7 +301,7 @@ pub fn evaluate_filter(unit: &CognitiveUnit, expr: &FilterExpr) -> bool {
             // matches_str 接 &str，
             // &String 通过 deref coercion 自动转 &str，不需要 `&**` 显式解引用
             unit.relations(relation).iter().any(|s| matches_str(s))
-        },
+        }
         // Semantic 无法在内存中求值，由 store 实现自行处理
         FilterExpr::Semantic { .. } => true,
         FilterExpr::And(exprs) => exprs.iter().all(|e| evaluate_filter(unit, e)),

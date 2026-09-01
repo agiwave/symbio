@@ -106,7 +106,7 @@ impl McpPlugin {
             None => {
                 crate::plugin_warn!("mcp", "未找到 storage_service，跳过新存储加载");
                 return;
-            },
+            }
         };
 
         let es = store.entity_store();
@@ -119,7 +119,7 @@ impl McpPlugin {
             Err(_e) => {
                 crate::plugin_warn!("mcp", "list mcps 失败");
                 return;
-            },
+            }
         };
 
         // 2. 如果新存储为空，触发首启动迁移
@@ -135,7 +135,7 @@ impl McpPlugin {
                 Ok(content) => match serde_json::from_str::<McpServerConfig>(&content) {
                     Ok(s) => {
                         new_servers.insert(id.clone(), s);
-                    },
+                    }
                     Err(_e) => crate::plugin_warn!("mcp", "解析 server {id} 失败"),
                 },
                 Err(_e) => crate::plugin_warn!("mcp", "读取 server {id} 失败"),
@@ -217,7 +217,7 @@ impl McpPlugin {
                 Err(_e) => {
                     crate::plugin_error!("mcp", "序列化 server {id} 失败");
                     continue;
-                },
+                }
             };
             if let Err(_e) = es.write_entity(category, id, manifest, &content).await {
                 crate::plugin_error!("mcp", "迁移 server {id} 失败");
@@ -276,11 +276,11 @@ impl Plugin for McpPlugin {
                         ));
                         tool_manager.register(cap).await;
                     }
-                },
+                }
                 Err(e) => {
                     // 单个 server 失败不影响其它 server 的注册
                     warn!(server = name, error = %e, "MCP 工具发现失败，跳过该 server");
-                },
+                }
             }
         }
 
@@ -304,7 +304,7 @@ impl Plugin for McpPlugin {
                     "_storage": "plugins/mcps",
                 });
                 serde_json::to_value(metadata)?
-            },
+            }
             CONFIG_SET => {
                 let new_cfg: McpConfig = ctx.payload()?;
                 {
@@ -317,7 +317,7 @@ impl Plugin for McpPlugin {
                     p.route(save_ctx).await?;
                 }
                 serde_json::to_value(common::SuccessResponse::default())?
-            },
+            }
 
             // ============== 单服务器 CRUD（与 LLM Providers 对齐） ==============
             "servers/list" => {
@@ -325,7 +325,7 @@ impl Plugin for McpPlugin {
                 serde_json::to_value(mcp_servers::mcp_servers_list::Response {
                     config: cfg.clone(),
                 })?
-            },
+            }
             "servers/get" => {
                 let req: mcp_servers::mcp_servers_get::Request = ctx.payload()?;
                 let cfg = self.config.read().await;
@@ -336,7 +336,7 @@ impl Plugin for McpPlugin {
                     name: req.name,
                     server,
                 })?
-            },
+            }
             "servers/set" => {
                 use crate::symbio_core::schemas::mcp::mcp_config::McpTransportType;
                 let req: mcp_servers::mcp_servers_set::Request = ctx.payload()?;
@@ -359,7 +359,7 @@ impl Plugin for McpPlugin {
                                 "stdio transport 的 command 不能为空".to_string(),
                             ));
                         }
-                    },
+                    }
                     McpTransportType::Http | McpTransportType::Sse => {
                         if req
                             .server
@@ -372,7 +372,7 @@ impl Plugin for McpPlugin {
                                 "http/sse transport 的 url 不能为空".to_string(),
                             ));
                         }
-                    },
+                    }
                 }
 
                 let name = req.name.trim().to_string();
@@ -406,7 +406,7 @@ impl Plugin for McpPlugin {
                 serde_json::to_value(mcp_servers::mcp_servers_set::Response {
                     config: cfg.clone(),
                 })?
-            },
+            }
             "servers/delete" => {
                 let req: mcp_servers::mcp_servers_delete::Request = ctx.payload()?;
 
@@ -427,7 +427,7 @@ impl Plugin for McpPlugin {
                     let es = store.entity_store();
                     let category = crate::symbio_core::providers::categories::MCP;
                     match es.delete_entity(category, &req.name).await {
-                        Ok(()) => {},
+                        Ok(()) => {}
                         Err(crate::symbio_core::providers::EntityStoreError::NotFound {
                             ..
                         }) => {
@@ -436,13 +436,13 @@ impl Plugin for McpPlugin {
                                 "磁盘上已无 server {} 目录（可能已外部删除），仅清理内存",
                                 req.name
                             );
-                        },
+                        }
                         Err(e) => {
                             crate::plugin_error!("mcp", "删除 server {} 失败: {e}", req.name);
                             return Err(PluginError::InternalError(format!(
                                 "删除磁盘目录失败: {e}"
                             )));
-                        },
+                        }
                     }
                 }
 
@@ -460,7 +460,7 @@ impl Plugin for McpPlugin {
                 serde_json::to_value(mcp_servers::mcp_servers_delete::Response {
                     config: self.config.read().await.clone(),
                 })?
-            },
+            }
             "servers/test" => {
                 // BUG-MR20：测试 MCP server 的连接（不修改配置/缓存）
                 use mcp_servers::mcp_servers_test;
@@ -518,7 +518,7 @@ impl Plugin for McpPlugin {
                     error,
                     elapsed_ms,
                 })?
-            },
+            }
 
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         };

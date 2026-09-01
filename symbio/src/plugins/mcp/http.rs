@@ -211,7 +211,7 @@ impl super::manager::McpManager {
                 self.session_cache.remove(name).await;
                 self.call_tool_http_once(name, config, tool_name, args)
                     .await
-            },
+            }
             Err(e) => Err(e),
         }
     }

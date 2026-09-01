@@ -1,8 +1,9 @@
 [toolchain]
 # 文件位置：与 symbio/Cargo.toml 同级。
 # 在 symbio/ 下执行任何 cargo 命令时，rustup 会自动用此 channel。
-# tauri/src-tauri 是 347 行适配层，沿用系统默认 stable 即可。
-channel = "stable"
+# 锁定到具体版本：CI 与本地必须用同一版 rustfmt/clippy，否则 cargo fmt --check
+# 会因版本间格式规则漂移而失败（2026-07 的 CI 失败即此原因）。
+channel = "1.93.1"
 # 最低支持的 Rust 版本（与 symbio/Cargo.toml 的 rust-version 保持一致）
 components = ["rustfmt", "clippy"]
 profile = "minimal"

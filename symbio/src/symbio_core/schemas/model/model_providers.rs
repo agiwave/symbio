@@ -263,3 +263,26 @@ pub mod model_providers_set_default {
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
     pub struct Response {}
 }
+
+/// Test - 连接测试（无副作用：不写入注册表，不落盘）
+///
+/// 复用 `providers/set` 的验证逻辑（`validate_provider` → 按协议发起真实 API
+/// 请求并等待流式响应），区别在于**测试路由不产生任何状态变更**——
+/// 用于"保存前测试连接"场景（未保存的草稿配置也可以直接测试）。
+pub mod model_providers_test {
+    use super::ModelProviderConfig;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Request {
+        pub provider: ModelProviderConfig,
+        /// 预留：与 set 的 skip_validation 对齐；test 路由当前忽略此字段
+        /// （测试连接的语义就是发起真实校验）
+        #[serde(default)]
+        pub skip_validation: bool,
+    }
+
+    /// 测试通过时返回；失败以 `PluginError::ValidationError` 报错
+    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    pub struct Response {}
+}

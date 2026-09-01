@@ -52,7 +52,7 @@ impl FileDeleteTool {
                 None => {
                     failed.push(json!({ "path": fp, "error": "非字符串路径" }));
                     continue;
-                },
+                }
             };
 
             // 拒绝路径遍历
@@ -73,7 +73,7 @@ impl FileDeleteTool {
                 Err(e) => {
                     failed.push(json!({ "path": raw, "error": format!("无法解析路径: {e}") }));
                     continue;
-                },
+                }
             };
 
             if !self

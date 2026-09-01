@@ -118,7 +118,7 @@ impl AgentCognitionTool {
                     op_name,
                     registry.registered_ops()
                 ));
-            },
+            }
         };
 
         // 2. 统一必需参数校验

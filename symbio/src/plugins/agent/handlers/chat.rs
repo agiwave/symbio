@@ -92,7 +92,7 @@ impl ContextBuilder {
                     mindscape.record_access(&ids).await;
                 }
                 page
-            },
+            }
             Err(_) => return String::new(),
         };
         if page.items.is_empty() {

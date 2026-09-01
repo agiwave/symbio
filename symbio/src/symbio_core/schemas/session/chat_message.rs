@@ -107,14 +107,14 @@ impl MessageContent {
                 if s.len() > max_len {
                     *s = s.chars().take(max_len).collect();
                 }
-            },
+            }
             MessageContent::Parts(_) => {
                 let text = self.to_text();
                 if text.len() > max_len {
                     let truncated: String = text.chars().take(max_len).collect();
                     *self = MessageContent::Text(truncated);
                 }
-            },
+            }
         }
     }
 }

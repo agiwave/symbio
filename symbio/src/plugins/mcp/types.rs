@@ -259,7 +259,7 @@ pub fn filter_valid_tool_names(tools: Vec<McpTool>) -> (Vec<McpTool>, usize) {
             Err(e) => {
                 tracing::warn!("过滤非法 tool name: {e}");
                 invalid_count += 1;
-            },
+            }
         }
     }
     (valid, invalid_count)

@@ -103,14 +103,14 @@ fn normalize_path(p: &Path) -> PathBuf {
                 absolute = true;
                 stack.clear();
                 stack.push(comp.as_os_str().into());
-            },
-            Component::CurDir => {}, // skip "."
+            }
+            Component::CurDir => {} // skip "."
             Component::ParentDir => {
                 // 只在有"非 prefix/root"分量可弹时弹
                 if stack.len() > if absolute { 1 } else { 0 } {
                     stack.pop();
                 }
-            },
+            }
             Component::Normal(c) => stack.push(PathBuf::from(c)),
         }
     }

@@ -42,7 +42,7 @@ pub async fn compress_message(
                 .as_ref()
                 .map(|c| c.to_text())
                 .unwrap_or_default()
-        },
+        }
         None => return Ok(None),
     };
 

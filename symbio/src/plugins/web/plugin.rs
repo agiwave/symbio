@@ -78,7 +78,7 @@ impl Plugin for WebPlugin {
             CONFIG_GET => {
                 let cfg = self.config.read().await;
                 Ok(PluginPayload::new(&*cfg))
-            },
+            }
             CONFIG_SET => {
                 let new_cfg: WebConfig = ctx.payload()?;
                 {
@@ -91,13 +91,13 @@ impl Plugin for WebPlugin {
                     let _ = p.route(save_ctx).await;
                 }
                 Ok(PluginPayload::new(&SimpleResponse::success()))
-            },
+            }
             _ => {
                 if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
                     return tool.execute(ctx).await;
                 }
                 Err(PluginError::NotFound(format!("路径不存在: {path}")))
-            },
+            }
         }
     }
 

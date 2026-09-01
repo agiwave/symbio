@@ -84,7 +84,7 @@ impl McpManager {
                 // 优雅关闭后返回错误（list 失败不阻塞）
                 shutdown_child_graceful(&mut child).await;
                 return Err(e);
-            },
+            }
         };
 
         // 5) graceful shutdown
@@ -107,7 +107,7 @@ impl McpManager {
             Err(e) => {
                 shutdown_child_graceful(&mut child).await;
                 return Err(e);
-            },
+            }
         };
         shutdown_child_graceful(&mut child).await;
         Ok(TestConnectionResult {
@@ -422,7 +422,7 @@ fn drain_stderr(child: &mut tokio::process::Child) {
                         if !line.is_empty() {
                             tracing::debug!(target: "mcp_stderr", "{}", line);
                         }
-                    },
+                    }
                     Err(_) => break,
                 }
             }

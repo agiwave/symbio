@@ -49,10 +49,10 @@ pub async fn create_store(
         StoreKind::File => {
             let store = file::FileSessionStore::new(base_dir);
             Ok(Arc::new(store))
-        },
+        }
         StoreKind::Sqlite => {
             let store = sqlite::SqliteSessionStore::open(base_dir).await?;
             Ok(Arc::new(store))
-        },
+        }
     }
 }

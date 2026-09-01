@@ -14,6 +14,64 @@
 
 ---
 
+## 2026-09-01: 连接测试 ping 请求修复 + CI 三处门禁修复
+
+**一、模型连接测试报 400（`max_tokens must be greater than 2`）**
+
+- 根因：`handle_ping` 探活请求硬编码 `"max_tokens": 1`，GLM 的 OpenAI 兼容网关要求 `max_tokens > 2`。
+- 修复：三个协议（`openai_chat` / `anthropic_messages` / `gemini_api`）的 ping 请求统一调大到 16。
+
+**二、GitHub CI 持续失败（三个 job 各一处根因）**
+
+| job | 根因 | 修复 |
+|---|---|---|
+| rust-checks | CI 与本地 rustfmt 版本漂移导致 `fmt --check` 失败；rustfmt.toml 含 5 个 nightly-only 选项被 stable 静默忽略 | `rust-toolchain.toml` 锁定 `channel = "1.93.1"`；CI 改用 `actions-rust-lang/setup-rust-toolchain@v1` 读取该文件；清理 nightly-only 选项 |
+| frontend-checks | `setup-node` 的 `cache: 'npm'` 在仓库根目录找不到 lock 文件（实际在 `tauri/`） | 增加 `cache-dependency-path: tauri/package-lock.json` |
+| security-check | `cargo audit` 报 RUSTSEC-2025-0068：`serde_yml` 不维护且有 soundness 问题 | 全量替换为维护中的 fork `serde_yaml_ng`（API 兼容，9 文件 20 处） |
+
+**验证**（2026-09-01）：
+
+- `cargo fmt --all -- --check`：0 diff
+- `cargo clippy --workspace --all-targets -- -D warnings`：0 error
+- `cargo test --workspace`：355 passed / 0 failed
+- `bash scripts/grep_audit.sh`：0 errors
+- `npx vue-tsc --noEmit`：0 错误；`npm test`：18 passed
+- Cargo.lock 已确认无 `serde_yml` 残留
+
+---
+
+## 2026-09-01: Model Provider"测试连接"路由修复
+
+**Bug**：在 Model Provider 添加新模型时点击"测试连接"，报错
+`Composite: 路径 'model_providers/test' 无法识别或子插件未挂载`。
+
+**根因**：前端 `ModelProvidersView.vue` 的 `handleTest` 硬编码调用了 `model_providers/test`，
+但该路径从未存在——Model Provider 管理路由的正确前缀是 `worker/model/providers/*`
+（见 `tauri/src/services/modelProviders.ts` 的 `MODEL_PROVIDERS_PATH` 常量），
+且后端此前**没有**独立的"测试连接"路由（只有 `providers/set` 会在保存时顺带校验）。
+
+**修复（前后端联动）**：
+
+| 端 | 改动 |
+|---|---|
+| 后端 schema | `symbio_core/schemas/model/model_providers.rs` 新增 `model_providers_test` 模块（Request 含 `provider` + `skip_validation`，Response 空） |
+| 后端路由 | `plugins/model/plugin.rs` 新增 `providers/test`——复用 `validate_provider`（无副作用校验），**不写注册表、不落盘**，因此未保存的草稿配置也能直接测试；失败返回 `ValidationError("连接测试失败: {err}")` |
+| 前端 schema | `tauri/src/schemas/model_providers.ts` 新增 `ModelProvidersTest` namespace |
+| 前端 service | `tauri/src/services/modelProviders.ts` 新增 `testModelProvider()`（走 `worker/model/providers/test`） |
+| 前端视图 | `ModelProvidersView.vue` 的 `handleTest` 改用 `testModelProvider`，移除 `model_providers/test` 硬编码与不再使用的 `callPlugin` 导入 |
+
+**验证**（2026-09-01）：
+
+- `cargo test --lib`：355 passed / 0 failed
+- `cargo clippy --all-targets -- -D warnings`：0 error
+- `cargo fmt --all -- --check`：0 diff
+- `npx vue-tsc --noEmit`：0 错误
+- `npm test`（vitest）：18 passed
+
+**附带收益**：`providers/test` 作为无副作用路由，也是后续在设置表单中"实时校验"（输入即测）的稳定后端锚点。
+
+---
+
 ## 2026-09-01: 全库质量门禁回归修复 + 前端测试基建
 
 **背景**：项目级质量审计发现三处"门禁失真"：

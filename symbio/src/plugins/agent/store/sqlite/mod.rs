@@ -57,7 +57,7 @@ fn compile_filter_inner(
                 "json_extract(data, '$.{}') = ?",
                 json_path_escape(key)
             ))
-        },
+        }
         FilterExpr::Ne { key, value } => {
             if key == cu_fields::ID {
                 if let Some(s) = value.as_str() {
@@ -70,35 +70,35 @@ fn compile_filter_inner(
                 "json_extract(data, '$.{}') != ?",
                 json_path_escape(key)
             ))
-        },
+        }
         FilterExpr::Gt { key, value } => {
             params.push(rusqlite::types::Value::Real(*value));
             Some(format!(
                 "CAST(json_extract(data, '$.{}') AS REAL) > ?",
                 json_path_escape(key)
             ))
-        },
+        }
         FilterExpr::Gte { key, value } => {
             params.push(rusqlite::types::Value::Real(*value));
             Some(format!(
                 "CAST(json_extract(data, '$.{}') AS REAL) >= ?",
                 json_path_escape(key)
             ))
-        },
+        }
         FilterExpr::Lt { key, value } => {
             params.push(rusqlite::types::Value::Real(*value));
             Some(format!(
                 "CAST(json_extract(data, '$.{}') AS REAL) < ?",
                 json_path_escape(key)
             ))
-        },
+        }
         FilterExpr::Lte { key, value } => {
             params.push(rusqlite::types::Value::Real(*value));
             Some(format!(
                 "CAST(json_extract(data, '$.{}') AS REAL) <= ?",
                 json_path_escape(key)
             ))
-        },
+        }
         FilterExpr::In { key, values } => {
             if values.is_empty() {
                 return Some("0=1".to_string());
@@ -112,7 +112,7 @@ fn compile_filter_inner(
                 json_path_escape(key),
                 placeholders
             ))
-        },
+        }
         FilterExpr::Contains { key, substring } => {
             let pattern = format!("%{}%", escape_like(substring));
             params.push(rusqlite::types::Value::Text(pattern));
@@ -120,7 +120,7 @@ fn compile_filter_inner(
                 "json_extract(data, '$.{}') LIKE ?",
                 json_path_escape(key)
             ))
-        },
+        }
         FilterExpr::StartsWith { key, prefix } => {
             if key == cu_fields::ID {
                 params.push(rusqlite::types::Value::Text(format!("{}%", prefix)));
@@ -132,7 +132,7 @@ fn compile_filter_inner(
                 "json_extract(data, '$.{}') LIKE ?",
                 json_path_escape(key)
             ))
-        },
+        }
         FilterExpr::Relation {
             key: relation,
             value,
@@ -155,7 +155,7 @@ fn compile_filter_inner(
                     path
                 ))
             }
-        },
+        }
         // Semantic 无法下推到 SQL，返回 None 让上层处理
         FilterExpr::Semantic { .. } => None,
         FilterExpr::And(exprs) => {
@@ -172,7 +172,7 @@ fn compile_filter_inner(
             } else {
                 Some(format!("({})", parts.join(" AND ")))
             }
-        },
+        }
         FilterExpr::Or(exprs) => {
             let mut parts = Vec::new();
             for e in exprs {
@@ -187,14 +187,14 @@ fn compile_filter_inner(
             } else {
                 Some(format!("({})", parts.join(" OR ")))
             }
-        },
+        }
         FilterExpr::Not(inner) => {
             if let Some(p) = compile_filter_inner(inner, params) {
                 Some(format!("NOT ({})", p))
             } else {
                 Some("1=1".to_string())
             }
-        },
+        }
     }
 }
 
@@ -213,7 +213,7 @@ fn json_to_sql_value(v: &serde_json::Value) -> rusqlite::types::Value {
             } else {
                 SqlValue::Text(n.to_string())
             }
-        },
+        }
         serde_json::Value::String(s) => SqlValue::Text(s.clone()),
         _ => SqlValue::Text(serde_json::to_string(v).unwrap_or_default()),
     }
@@ -434,7 +434,7 @@ impl SqliteStorage {
                     limit: page.limit,
                     scores: None,
                 })
-            },
+            }
         };
         let query_embedding = match embed_service.embed(query_text).await {
             Some(emb) => emb,
@@ -446,7 +446,7 @@ impl SqliteStorage {
                     limit: page.limit,
                     scores: None,
                 })
-            },
+            }
         };
         let limit = page.limit.max(1);
         let candidate_pool = (limit * 4).max(32);

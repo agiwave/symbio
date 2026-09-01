@@ -203,7 +203,7 @@ impl McpManager {
             McpTransportType::Stdio => self.discover_tools_stdio(config).await,
             McpTransportType::Http | McpTransportType::Sse => {
                 self.discover_tools_http(name, config).await
-            },
+            }
         };
 
         let raw = match result {
@@ -221,7 +221,7 @@ impl McpManager {
                     return Ok(cached.tools.clone());
                 }
                 return Err(e);
-            },
+            }
         };
         // BUG-MR27：过滤掉非法 tool name（避免污染 agent 工具路由）
         let (valid, invalid_count) = super::types::filter_valid_tool_names(raw);
@@ -302,7 +302,7 @@ impl McpManager {
             McpTransportType::Stdio => self.test_connection_stdio(config).await,
             McpTransportType::Http | McpTransportType::Sse => {
                 self.test_connection_http(name, config).await
-            },
+            }
         };
         let elapsed_ms = start.elapsed().as_millis() as u64;
         match &result {
@@ -351,11 +351,11 @@ impl McpManager {
                 let lock = self.get_server_lock(name).await;
                 let _guard = lock.lock().await;
                 self.call_tool_stdio(config, tool_name, arguments).await
-            },
+            }
             McpTransportType::Http | McpTransportType::Sse => {
                 self.call_tool_http(name, config, tool_name, arguments)
                     .await
-            },
+            }
         }
     }
 }

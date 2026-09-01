@@ -143,7 +143,7 @@ impl SessionStore for SqliteSessionStore {
                 Ok(s) => sessions.push(s),
                 Err(e) => {
                     tracing::warn!("跳过无效会话记录: {e}");
-                },
+                }
             }
         }
         Ok(sessions)
