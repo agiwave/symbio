@@ -395,7 +395,7 @@ impl SqliteStorage {
         let conn = self.get_conn().await?;
         let id = unit.id().to_string();
         let emb_bytes = f32_vec_to_bytes(&emb);
-        conn.call(move |c| {
+        conn.call::<_, _, rusqlite::Error>(move |c| {
             // 先删除旧记录（rowid = units.rowid 需要关联）
             // sqlite-vec vec0 使用 rowid 关联，先按 id 查到 units.rowid
             let rowid: Option<i64> = c
@@ -407,8 +407,7 @@ impl SqliteStorage {
                 c.execute(
                     "INSERT INTO units_vec(rowid, embedding) VALUES (?, ?)",
                     rusqlite::params![rid, emb_bytes],
-                )
-                .map_err(|e| tokio_rusqlite::Error::Other(Box::new(e)))?;
+                )?;
             }
             Ok(())
         })
@@ -454,7 +453,8 @@ impl SqliteStorage {
         let emb_bytes = f32_vec_to_bytes(&query_embedding);
 
         // KNN 查询：从 units_vec 获取最近邻，JOIN units 拉取完整数据
-        let candidates: Vec<(String, f32, String)> = conn.call(move |c| {
+        let candidates: Vec<(String, f32, String)> =
+            conn.call::<_, _, rusqlite::Error>(move |c| {
             let mut stmt = c.prepare(
                 "SELECT u.id, v.distance, u.data FROM units_vec v JOIN units u ON u.rowid = v.rowid WHERE v.embedding MATCH ? ORDER BY v.distance LIMIT ?"
             )?;
@@ -519,7 +519,7 @@ impl SqliteStorage {
             let conn = Connection::open(&self.db_path).await
                 .map_err(|e| StoreError::Backend(format!("Failed to open SQLite: {}", e)))?;
 
-            conn.call(|c| {
+            conn.call::<_, _, rusqlite::Error>(|c| {
                 let sql = "CREATE TABLE IF NOT EXISTS units (
                         id TEXT PRIMARY KEY,
                         data TEXT NOT NULL,
@@ -552,15 +552,13 @@ impl SqliteStorage {
                                 COALESCE(json_extract(new.data, '$.description'), ''),
                                 COALESCE(json_extract(new.data, '$.content'), ''));
                     END;";
-                    c.execute_batch(sql)
-                        .map_err(|e| tokio_rusqlite::Error::Other(Box::new(e)))?;
+                    c.execute_batch(sql)?;
                     // sqlite-vec 虚拟表用 format! 动态生成维度
                     let vec_ddl = format!(
                         "CREATE VIRTUAL TABLE IF NOT EXISTS units_vec USING vec0(embedding float[{}])",
                         EMBED_DIM
                     );
-                    c.execute_batch(&vec_ddl)
-                        .map_err(|e| tokio_rusqlite::Error::Other(Box::new(e)))?;
+                    c.execute_batch(&vec_ddl)?;
                     Ok(())
             }).await.map_err(|e| StoreError::Backend(format!("Failed to create table: {}", e)))?;
 

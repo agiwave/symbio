@@ -14,6 +14,31 @@
 
 ---
 
+## 2026-09-01: 全量依赖升级（Rust / Node / 前端 / CI）
+
+**Rust**（保留精确版本，symbio/Cargo.toml）：thiserror 2.0.20、dirs 6、notify 8.2、fastembed 6.0.2、dashmap 6.2.1、which 8.0.6、reqwest 0.13.4、time 0.3.55、rusqlite 0.37 + tokio-rusqlite 0.7 配套锁定等。代码适配：
+
+- tokio-rusqlite 0.7 移除 `Error::Other`，`call` 闭包直接返回 `Result<R, E>`，10 处调用点改写并显式标注 `rusqlite::Error`
+- time 0.3.55 deprecated `format_description::parse`，改用 `parse_borrowed::<2>`（chat.rs / system_prompt.rs）
+- tauri/src-tauri 旧 Cargo.lock 与 rusqlite 0.37 冲突（links = "sqlite3"），重新生成
+
+**前端**（tauri/package.json）：vite 8、@vitejs/plugin-vue 6、vitest 4、pinia 4、vue-router 5、marked 18、katex 0.18、mermaid 11、milkdown 7.22、@tauri-apps/* 2.11。配置适配：
+
+- vite 8（rolldown 内核）不支持对象形式 `manualChunks`，改为函数形式（vite.config.ts）
+- vite 8 不再内置 esbuild，`minify: 'esbuild'` 改为 `'oxc'`
+- typescript 保持 5.9：TS 7（native）与 vue-tsc 3.3 不兼容（实测 ERR_PACKAGE_PATH_NOT_EXPORTED）
+
+**CI**：node 20→22（20 已 EOL）、checkout v5 / setup-node v5 / cache v4（消除 Node 20 deprecation 警告），release.yml 同步升级。
+
+**验证**（2026-09-01）：
+
+- `cargo fmt --check` / `cargo clippy -D warnings`：0 error
+- `cargo test --workspace`：355 passed
+- tauri/src-tauri `cargo check`：通过
+- `npx vue-tsc --noEmit` / `npm test`（18 passed）/ `npm run build`：通过
+
+---
+
 ## 2026-09-01: 连接测试 ping 请求修复 + CI 三处门禁修复
 
 **一、模型连接测试报 400（`max_tokens must be greater than 2`）**

@@ -41,7 +41,6 @@ impl SqliteSessionStore {
                 )",
                 [],
             )
-            .map_err(|e| tokio_rusqlite::Error::Other(Box::new(e)))
         })
         .await
         .map_err(|e| PluginError::InternalError(format!("初始化数据库表失败: {e}")))?;
@@ -64,7 +63,7 @@ impl SessionStore for SqliteSessionStore {
 
         let data_str: Option<String> = self
             .conn
-            .call(move |c| {
+            .call::<_, _, rusqlite::Error>(move |c| {
                 let mut stmt = c.prepare("SELECT data FROM sessions WHERE id = ?")?;
                 let res = stmt.query_row([id_for_query], |row| row.get(0)).ok();
                 Ok(res)
@@ -95,7 +94,6 @@ impl SessionStore for SqliteSessionStore {
                      updated_at = excluded.updated_at",
                     rusqlite::params![id, data, updated_at],
                 )
-                .map_err(|e| tokio_rusqlite::Error::Other(Box::new(e)))
             })
             .await
             .map_err(|e| PluginError::InternalError(format!("保存会话失败: {e}")))?;
@@ -106,10 +104,7 @@ impl SessionStore for SqliteSessionStore {
     async fn delete_session(&self, session_id: &str) -> Result<(), PluginError> {
         let id = session_id.to_string();
         self.conn
-            .call(move |c| {
-                c.execute("DELETE FROM sessions WHERE id = ?", [id])
-                    .map_err(|e| tokio_rusqlite::Error::Other(Box::new(e)))
-            })
+            .call(move |c| c.execute("DELETE FROM sessions WHERE id = ?", [id]))
             .await
             .map_err(|e| PluginError::InternalError(format!("删除会话失败: {e}")))?;
 
@@ -125,7 +120,7 @@ impl SessionStore for SqliteSessionStore {
     async fn list_sessions(&self) -> Result<Vec<Session>, PluginError> {
         let rows: Vec<String> = self
             .conn
-            .call(move |c| {
+            .call::<_, _, rusqlite::Error>(move |c| {
                 let mut stmt = c.prepare("SELECT data FROM sessions ORDER BY updated_at DESC")?;
                 let iter = stmt.query_map([], |row| row.get(0))?;
                 let mut results = Vec::new();

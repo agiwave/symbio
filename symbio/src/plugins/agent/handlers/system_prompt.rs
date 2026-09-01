@@ -397,8 +397,11 @@ fn compute_relevance(cu: &CognitiveUnit, query_tokens: &HashSet<String>) -> f64 
 
 fn format_time() -> String {
     let now = OffsetDateTime::now_utc();
-    let fmt = format_description::parse("[year]年[month]月[day]日 [hour]:[minute]:[second] UTC")
-        .expect("hardcoded time format must parse");
+    // time 0.3.55 起 parse 被 deprecated，parse_borrowed::<2> 为等价替代
+    let fmt = format_description::parse_borrowed::<2>(
+        "[year]年[month]月[day]日 [hour]:[minute]:[second] UTC",
+    )
+    .expect("hardcoded time format must parse");
     now.format(&fmt).unwrap_or_else(|_| "未知时间".to_string())
 }
 

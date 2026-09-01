@@ -42,14 +42,14 @@ jobs:
       matrix:
         profile: [dev, release]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Install Rust
         # 使用 rust-toolchain.toml 锁定版本，保证与本地开发环境一致（避免 rustfmt 版本漂移导致 fmt 失败）
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Cache cargo registry
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -93,12 +93,12 @@ jobs:
       github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           # package-lock.json 位于 tauri/ 子目录，必须显式指定，否则 cache 解析失败
           cache-dependency-path: tauri/package-lock.json
@@ -134,7 +134,7 @@ jobs:
   docs-validation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Check for obvious documentation issues
         run: |
@@ -156,7 +156,7 @@ jobs:
   security-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Install cargo-audit
         run: cargo install cargo-audit

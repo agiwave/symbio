@@ -190,7 +190,9 @@ fn build_temporal_context(workdir: Option<&str>) -> String {
     use time::{format_description, OffsetDateTime};
 
     let now = OffsetDateTime::now_utc();
-    let fmt = format_description::parse("[year]-[month]-[day] [hour]:[minute]").unwrap_or_default();
+    // time 0.3.55 起 parse 被 deprecated，parse_borrowed::<2> 为等价替代
+    let fmt = format_description::parse_borrowed::<2>("[year]-[month]-[day] [hour]:[minute]")
+        .unwrap_or_default();
     let time_str = now.format(&fmt).unwrap_or_else(|_| "unknown".to_string());
 
     let weekday = match now.weekday() {

@@ -19,7 +19,7 @@ impl AgentStore for SqliteStorage {
         let id = id.to_string();
 
         let data_str: Option<String> = conn
-            .call(move |c| {
+            .call::<_, _, rusqlite::Error>(move |c| {
                 let mut stmt = c.prepare("SELECT data FROM units WHERE id = ?")?;
                 let res = stmt.query_row([id], |row| row.get(0)).ok();
                 Ok(res)
@@ -43,12 +43,11 @@ impl AgentStore for SqliteStorage {
             serde_json::to_string(&unit).map_err(|e| StoreError::Backend(e.to_string()))?;
         let version = unit.version();
 
-        conn.call(move |c| {
+        conn.call::<_, _, rusqlite::Error>(move |c| {
             c.execute(
                 "INSERT INTO units (id, data, version) VALUES (?, ?, ?)",
                 rusqlite::params![id, data_str, version],
             )
-            .map_err(|e| tokio_rusqlite::Error::Other(Box::new(e)))
         })
         .await
         .map_err(|e| StoreError::Backend(e.to_string()))?;
@@ -76,7 +75,7 @@ impl AgentStore for SqliteStorage {
         let version = unit.version();
 
         let affected = conn
-            .call(move |c| {
+            .call::<_, _, rusqlite::Error>(move |c| {
                 let mut stmt = c.prepare("UPDATE units SET data = ?, version = ? WHERE id = ?")?;
                 let n = stmt.execute(rusqlite::params![data_str, version, id])?;
                 Ok(n)
@@ -111,12 +110,9 @@ impl AgentStore for SqliteStorage {
         let conn = self.get_conn().await?;
         let id_owned = id.to_string();
         let existed = self.get(id).await?.is_some();
-        conn.call(move |c| {
-            c.execute("DELETE FROM units WHERE id = ?", [id_owned])
-                .map_err(|e| tokio_rusqlite::Error::Other(Box::new(e)))
-        })
-        .await
-        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        conn.call(move |c| c.execute("DELETE FROM units WHERE id = ?", [id_owned]))
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
         // 同步删除向量索引（rowid 已随 units 行删除，vec0 会自动清理）
         Ok(existed)
     }
@@ -172,7 +168,7 @@ impl SqliteStorage {
         let count_sql = format!("SELECT COUNT(*) FROM units WHERE {}", compiled.where_clause);
         let count_params = compiled.params.clone();
         let total: usize = conn
-            .call(move |c| {
+            .call::<_, _, rusqlite::Error>(move |c| {
                 let mut stmt = c.prepare(&count_sql)?;
                 let n: i64 = stmt
                     .query_row(rusqlite::params_from_iter(count_params.iter()), |row| {
@@ -202,7 +198,7 @@ impl SqliteStorage {
         page_params.push(rusqlite::types::Value::Integer(page.offset as i64));
 
         let rows: Vec<(String, String)> = conn
-            .call(move |c| {
+            .call::<_, _, rusqlite::Error>(move |c| {
                 let mut stmt = c.prepare(&page_sql)?;
                 let iter = stmt
                     .query_map(rusqlite::params_from_iter(page_params.iter()), |row| {
@@ -251,7 +247,7 @@ impl SqliteStorage {
         // FTS5 候选集
         let mut candidates: Vec<(String, f32, String)> = match fts_query {
             Some(fts_q) => conn
-                .call(move |c| {
+                .call::<_, _, rusqlite::Error>(move |c| {
                     let mut stmt = c.prepare(
                         "SELECT u.id, bm25(units_fts) AS score, u.data
                      FROM units_fts fts
@@ -276,7 +272,7 @@ impl SqliteStorage {
                 .await
                 .map_err(|e| StoreError::Backend(format!("FTS5 search failed: {}", e)))?,
             None => conn
-                .call(move |c| {
+                .call::<_, _, rusqlite::Error>(move |c| {
                     let mut stmt =
                         c.prepare("SELECT id, data FROM units ORDER BY rowid DESC LIMIT ?1")?;
                     let rows = stmt.query_map([candidate_pool as i64], |row| {
