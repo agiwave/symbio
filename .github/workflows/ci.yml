@@ -16,6 +16,7 @@ on:
       - 'rustfmt.toml'
       - 'clippy.toml'
       - '.editorconfig'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ main, master ]
     paths:
@@ -31,6 +32,7 @@ on:
       - 'rustfmt.toml'
       - 'clippy.toml'
       - '.editorconfig'
+      - '.github/workflows/ci.yml'
 
 jobs:
   # Rust代码质量检查
