@@ -79,7 +79,11 @@ jobs:
       - name: Run project audit
         # S-002 异步锁 / S-007 CHANGELOG / I-014 硬编码等审计
         # 失败时让 PR 无法合并
-        run: bash scripts/grep_audit.sh
+        # 脚本依赖 ripgrep（rg），runner 镜像默认不带，必须先安装
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep
+          bash scripts/grep_audit.sh
         continue-on-error: false
 
   # 前端代码质量检查 (如果存在前端构建工具)
@@ -120,8 +124,10 @@ jobs:
           # 这里可以添加更具体的检查，如eslint如果可用的话
 
       - name: Validate package.json
+        # 注意：npm 没有 `pkg validate` 子命令，这里用 pkg get 验证 package.json 可解析
         run: |
-          npm pkg validate
+          npm pkg get name version
+          npm pkg get name version > /dev/null
         working-directory: tauri
 
   # 文档和配置验证
