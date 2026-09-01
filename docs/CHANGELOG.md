@@ -14,6 +14,56 @@
 
 ---
 
+## 2026-09-01: 全库质量门禁回归修复 + 前端测试基建
+
+**背景**：项目级质量审计发现三处"门禁失真"：
+1. `cargo clippy --lib` 实际存在 **12 个 warning**（文档声称 0）；
+2. `cargo fmt --check` 存在 **83 处历史偏差**（CI 的 `--check` 门禁实际从未在当前 toolchain 下通过）；
+3. 前端**零测试**（CI frontend job 仅有 vue-tsc + 空 sanity check）。
+
+**变更**：
+
+### 一、Rust 侧（业务行为零变化）
+
+| 修复 | 位置 |
+|---|---|
+| `redundant_closure` ×3 | `symbio_core/event_bus.rs`（×2）、`providers/embedding/fastembed.rs` |
+| `collapsible_else_if` | `plugins/agent/handlers/system_prompt.rs` |
+| `unnecessary_if_let`（`.flatten()`） | `plugins/local/codebase_search.rs` |
+| `manual_div_ceil` | `plugins/local/file_read.rs` |
+| `let_and_return` | `plugins/mcp/http.rs` |
+| `doc_overindented_list_items` | `plugins/model/message_builder.rs` |
+| `unnecessary_cast` | `plugins/session/heartbeat.rs` |
+| `ptr_arg`（`&mut Vec` → `&mut [T]`） | `plugins/skill/plugin.rs` |
+| `derivable_impls`（`#[derive(Default)]` + `#[default]`） | `symbio_core/schemas/mcp/mcp_config.rs` |
+| `doc_lazy_continuation` | `symbio_core/schemas/session/session_chat.rs` |
+| `field_reassign_with_default` ×4（**测试代码**，`--all-targets` 门禁） | `plugins/mcp/http/tests.rs`（Default 赋值改结构体初始化语法） |
+| 死代码清理 | `plugins/agent/core/mod.rs::query_relation_names`（零调用）；`plugins/agent/capabilities/mod.rs` 3 个 v10 预留死常量 |
+| `cargo fmt --all` | 全库 83 处历史偏差统一，fmt 门禁恢复有效 |
+
+### 二、前端测试基建（从 0 到 1）
+
+| 项 | 说明 |
+|---|---|
+| 引入 `vitest@2.1.9`（devDependency） | 与 vite 6 对齐的稳定版本 |
+| 新增 `tauri/vitest.config.ts` | `@` alias 与 vite.config 对齐；node 环境（纯逻辑层） |
+| 新增 18 个单元测试 | `src/utils/__tests__/time.spec.ts`（6）+ `message.spec.ts`（12，多模态文本提取 / 消息键稳定性） |
+| `package.json` | 新增 `test` / `test:watch` script |
+| CI（`.github/workflows/ci.yml`） | frontend-checks job 新增 `npm test` 门禁 |
+
+**验证**（2026-09-01）：
+
+- `cargo test --lib`：355 passed / 0 failed
+- `cargo clippy --lib -- -D warnings`：0 warning
+- `cargo clippy --all-targets -- -D warnings`（CI 同款，含测试代码）：0 error（另修复 `plugins/mcp/http/tests.rs` 4 处 `field_reassign_with_default`）
+- `cargo fmt --all -- --check`：0 diff
+- `npm test`：18 passed（vitest）
+- `npx vue-tsc --noEmit`：0 错误
+
+**设计决策记录**：审计中评估的"认知内核与 Agent 插件壳解耦"（CognitionService trait 化 / crate 拆分）经确认**不采纳**——认知与智能体是一一对应的共生关系，`agent` 插件的"认知中心"内聚形态是设计使然。详见 `symbio/src/plugins/agent/docs/CHANGELOG.md` 同日条目。
+
+---
+
 ## 2026-07-06: 项目级文档系统性同步 + 历史文档清理
 
 **背景**：用户两轮反馈：

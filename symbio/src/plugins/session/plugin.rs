@@ -101,7 +101,11 @@ impl SessionPlugin {
         let sessions = match self.list_sessions().await {
             Ok(s) => s,
             Err(e) => {
-                crate::plugin_warn!("session", "cleanup_crashed_sessions: list_sessions 失败: {}", e);
+                crate::plugin_warn!(
+                    "session",
+                    "cleanup_crashed_sessions: list_sessions 失败: {}",
+                    e
+                );
                 return;
             },
         };
@@ -197,13 +201,11 @@ impl SessionPlugin {
         session_id: &str,
     ) -> Result<Arc<dyn ChatSession>, PluginError> {
         let store = self.get_store().await?;
-        Ok(Arc::new(
-            super::chat_session::PersistentChatSession::new(
-                session_id.to_string(),
-                self.config.clone(),
-                store,
-            ),
-        ))
+        Ok(Arc::new(super::chat_session::PersistentChatSession::new(
+            session_id.to_string(),
+            self.config.clone(),
+            store,
+        )))
     }
 
     pub fn config_schema() -> Value {

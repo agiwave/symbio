@@ -31,8 +31,7 @@ use crate::symbio_core::ToolCall;
 /// - 响应结果 `Text`(`Tool`) → 独立的 `role=tool` native message（tool_call_id = ToolCall id）
 /// - `User` / `System` 等 → 原样输出
 pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
-    let by_id: HashMap<&str, &ChatMessage> =
-        messages.iter().map(|m| (m.id.as_str(), m)).collect();
+    let by_id: HashMap<&str, &ChatMessage> = messages.iter().map(|m| (m.id.as_str(), m)).collect();
     let mut children: HashMap<&str, Vec<&ChatMessage>> = HashMap::new();
     for m in messages {
         if let Some(pid) = m.parent_id.as_deref() {
@@ -121,8 +120,8 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                     .as_ref()
                                     .map(|c| c.to_text())
                                     .unwrap_or_default();
-                                let args: serde_json::Value =
-                                    serde_json::from_str(&args_val).unwrap_or(serde_json::json!({}));
+                                let args: serde_json::Value = serde_json::from_str(&args_val)
+                                    .unwrap_or(serde_json::json!({}));
                                 let tc = ToolCall {
                                     id: Some(child.id.clone()),
                                     kind: Some("function".to_string()),
@@ -192,7 +191,10 @@ fn find_tool_result<'a>(
         .find(|c| c.msg_type == Some(MessageType::Turn) && c.role == Some(MessageRole::Tool))
     {
         if let Some(tkids) = children.get(turn.id.as_str()) {
-            return tkids.iter().find(|c| c.msg_type == Some(MessageType::Text)).copied();
+            return tkids
+                .iter()
+                .find(|c| c.msg_type == Some(MessageType::Text))
+                .copied();
         }
     }
     // 3. 兜底：任意直接 Text(Tool)
@@ -215,7 +217,7 @@ pub fn short_id() -> String {
 ///   ├─ `Reasoning`(子)
 ///   ├─ `Text`(回复, 子)
 /// - `ToolCall`(`Assistant` 组合, 子)：自身 `content` 携带请求参数（JSON 文本）
-///        └─ `Text`(响应结果, `Tool`, 子)  ← 由 `build_tool_message` 补充
+///   └─ `Text`(响应结果, `Tool`, 子)  ← 由 `build_tool_message` 补充
 pub fn build_assistant_messages(
     id: &str,
     content: &str,
@@ -253,7 +255,7 @@ pub fn build_assistant_messages(
             });
         }
     }
-    
+
     // ── Response 文本消息（parent_id=turn_id）───────────────────────────
     // 仅在存在非空白文本内容时添加，避免产生仅含 \n\n 的空节点
     if !content.trim().is_empty() {

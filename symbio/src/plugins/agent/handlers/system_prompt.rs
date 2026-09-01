@@ -347,11 +347,9 @@ fn tokenize_for_relevance(text: &str) -> HashSet<String> {
             tokens.insert(c.to_string());
         } else if c.is_alphanumeric() {
             current.push(c);
-        } else {
-            if !current.is_empty() {
-                tokens.insert(current.to_lowercase());
-                current.clear();
-            }
+        } else if !current.is_empty() {
+            tokens.insert(current.to_lowercase());
+            current.clear();
         }
     }
     if !current.is_empty() {

@@ -15,7 +15,7 @@ const SPECIAL_TOKENS_BYTES: &[u8] = include_bytes!("special_tokens_map.json");
 ///
 /// 改进点：用 `tracing::info!` 替换之前的 `println!`，接入统一日志通道
 static GLOBAL_FAST_EMBED: LazyLock<Result<Arc<FastEmbedService>, EmbeddingError>> =
-    LazyLock::new(|| FastEmbedService::init_internal());
+    LazyLock::new(FastEmbedService::init_internal);
 
 pub(crate) struct FastEmbedService {
     /// 使用 std::sync::Mutex 以便在 spawn_blocking 中安全使用

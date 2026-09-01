@@ -101,16 +101,16 @@ pub async fn run_chat_loop(
         {
             Ok(crate::plugins::model::resume::ResumeOutcome::Continue) => {
                 // 成功：turn 循环会从 session 加载含新工具结果的历史
-            }
+            },
             Ok(crate::plugins::model::resume::ResumeOutcome::Done) => {
                 fire_stop_hook(orchestrator, &[], &ctx).await;
                 return Ok(());
-            }
+            },
             Err(e) => {
                 plugin_warn!("model", "[Resume] process_resume failed: {}", e);
                 fire_stop_hook(orchestrator, &[], &ctx).await;
                 return Err(e);
-            }
+            },
         }
     }
 
@@ -341,7 +341,11 @@ pub async fn run_chat_loop(
                     }
                 }
             }
-            if let Err(e) = context.session.update_messages(parent_updates.clone()).await {
+            if let Err(e) = context
+                .session
+                .update_messages(parent_updates.clone())
+                .await
+            {
                 plugin_warn!("model", "[Session] 父节点状态持久化失败: {}", e);
             }
         }
@@ -527,11 +531,7 @@ async fn fire_user_prompt_submit_hook(
     .await;
 }
 
-async fn emit_streaming_start(
-    channel: &mut PluginChannel,
-    root_id: &str,
-    turn: Option<usize>,
-) {
+async fn emit_streaming_start(channel: &mut PluginChannel, root_id: &str, turn: Option<usize>) {
     let meta = turn.map(|t| serde_json::json!({"turn": t}));
     let _ = channel
         .tx

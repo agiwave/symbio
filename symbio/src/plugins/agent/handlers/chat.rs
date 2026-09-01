@@ -289,7 +289,8 @@ pub async fn handle(
         drop(cfg);
 
         let result =
-            system_prompt::build(mindscape.as_ref(), &budget, user_text_for_prompt.as_deref()).await;
+            system_prompt::build(mindscape.as_ref(), &budget, user_text_for_prompt.as_deref())
+                .await;
         if !result.prompt.trim().is_empty() {
             prompt_buf.push_str(&result.prompt);
         }

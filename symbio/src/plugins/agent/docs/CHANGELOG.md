@@ -6,6 +6,31 @@
 
 ---
 
+## 2026-09-01: 质量门禁回归修复 + 死代码清理
+
+**背景**：项目级质量审计发现 `cargo clippy --lib` 实际存在 12 个 warning（README/PLAN 声称的 "0 warnings" 已失真），且 `cargo fmt --check` 存在 83 处历史偏差——CI 的 `-D warnings` / `--check` 门禁实际处于失效状态。本次为全库门禁修复在 agent 范围内的部分。
+
+**改动（仅质量修复，业务行为零变化）**：
+
+| 改动 | 位置 | 说明 |
+|---|---|---|
+| `collapsible_else_if` 修复 | `handlers/system_prompt.rs` | `else { if .. }` 折叠为 `else if`（分词逻辑，无行为变化） |
+| 删除无调用方函数 | `core/mod.rs::query_relation_names` | 全库 grep 零调用（V-052 迁移后遗留），连同 `#[allow(dead_code)]` 一并删除；`CORE_RELATION_NAMES` 保留（`scaffold.rs` 启动校验使用） |
+| 删除 v10 预留死常量 | `capabilities/mod.rs` | `MEMORY_TYPE_WORKING` / `WORKING_MEMORY_DEFAULT_TTL_SECS` / `WORKING_MEMORY_MAX_TTL_SECS` 三个 `#[allow(dead_code)]` 常量无任何使用方，删除；`DEFAULT_CONFIDENCE_THRESHOLD` 有 `save.rs` 使用，保留并去掉多余 allow |
+| fmt 统一 | `capabilities/chat.rs` 等多处 | `cargo fmt --all` 全量格式化（83 处历史偏差），恢复 fmt 门禁有效性 |
+
+**验证**（2026-09-01）：
+
+- `cargo test --lib`：355 passed / 0 failed
+- `cargo clippy --lib -- -D warnings`：0 warning
+- `cargo fmt --all -- --check`：0 diff
+
+**架构说明（设计决策记录）**：
+
+本轮审计曾评估"认知内核与 Agent 插件壳解耦（CognitionService trait 化 / crate 拆分）"方案，经确认**不采纳**：认知（Mindscape/CU）与智能体是一一对应的共生关系——没有认知的智能体没有意义，当前 `agent` 插件作为"认知中心"的内聚形态是设计使然而非耦合缺陷。能力层（capabilities）持有 `Arc<AgentPlugin>` 的现状维持不变。
+
+---
+
 ## 2026-07-06: 项目级文档系统性清理
 
 **用户反馈（两轮）**：

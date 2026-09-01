@@ -32,12 +32,11 @@ use super::message_builder::short_id;
 use super::tool_executor::execute_tool_async;
 use crate::plugin_info;
 use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction, ResumeRequest,
+    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
+    ResumeRequest,
 };
 use crate::symbio_core::schemas::session::session_chat_response::StreamEvent;
-use crate::symbio_core::{
-    ChatSession, InvokeRequest, PluginChannel, PluginError, PluginFrame,
-};
+use crate::symbio_core::{ChatSession, InvokeRequest, PluginChannel, PluginError, PluginFrame};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -166,9 +165,9 @@ async fn process_tool_resume_action(
     let mut messages = session.get_messages().await?;
 
     // 2. 定位 ToolCall 父节点
-    let tc_idx = messages.iter().position(|m| {
-        m.id == req.target_id && m.msg_type == Some(MessageType::ToolCall)
-    });
+    let tc_idx = messages
+        .iter()
+        .position(|m| m.id == req.target_id && m.msg_type == Some(MessageType::ToolCall));
     let tc_idx = match tc_idx {
         Some(i) => i,
         None => {
@@ -176,7 +175,7 @@ async fn process_tool_resume_action(
                 "未找到工具调用节点: {}",
                 req.target_id
             )));
-        }
+        },
     };
 
     // 3. 定位待恢复子节点（user_prompt 或 Failed/WaitingUserAction Text）
@@ -193,7 +192,7 @@ async fn process_tool_resume_action(
                 "工具调用 {} 无可恢复的子节点",
                 req.target_id
             )));
-        }
+        },
     };
 
     // 4. 提取 tool_name / base_args
@@ -206,24 +205,33 @@ async fn process_tool_resume_action(
         ResumeAction::Reject => {
             let msg = format!("用户拒绝执行: {}", req.reason.unwrap_or_default());
             (msg, false, None)
-        }
+        },
         ResumeAction::Answer => {
-            let answer_str =
-                serde_json::to_string_pretty(&req.answer.unwrap_or(json!(null))).unwrap_or_default();
+            let answer_str = serde_json::to_string_pretty(&req.answer.unwrap_or(json!(null)))
+                .unwrap_or_default();
             (answer_str, true, None)
-        }
+        },
         ResumeAction::Approve => {
             let mut a = base_args.clone();
             if let Some(obj) = a.as_object_mut() {
                 obj.insert("approved".into(), json!(true));
             }
-            let (res, success) = reexecute_tool(orchestrator, ctx, abort_flag, &tool_name, a, &req.target_id).await;
+            let (res, success) =
+                reexecute_tool(orchestrator, ctx, abort_flag, &tool_name, a, &req.target_id).await;
             (res, success, None)
-        }
+        },
         ResumeAction::Retry => {
-            let (res, success) = reexecute_tool(orchestrator, ctx, abort_flag, &tool_name, base_args.clone(), &req.target_id).await;
+            let (res, success) = reexecute_tool(
+                orchestrator,
+                ctx,
+                abort_flag,
+                &tool_name,
+                base_args.clone(),
+                &req.target_id,
+            )
+            .await;
             (res, success, None)
-        }
+        },
         ResumeAction::Supply => {
             let mut a = base_args.clone();
             if let (Some(obj), Some(supplied)) = (a.as_object_mut(), req.args.clone()) {
@@ -233,9 +241,17 @@ async fn process_tool_resume_action(
                     }
                 }
             }
-            let (res, success) = reexecute_tool(orchestrator, ctx, abort_flag, &tool_name, a.clone(), &req.target_id).await;
+            let (res, success) = reexecute_tool(
+                orchestrator,
+                ctx,
+                abort_flag,
+                &tool_name,
+                a.clone(),
+                &req.target_id,
+            )
+            .await;
             (res, success, Some(a))
-        }
+        },
     };
 
     if abort_flag.load(Ordering::Relaxed) {
@@ -363,9 +379,7 @@ async fn reexecute_tool(
 
     // 排空对端 rx，避免 execute_tool_async 发送的流式更新阻塞 channel.tx
     let mut drain_rx = other.rx;
-    let drain_handle = tokio::spawn(async move {
-        while drain_rx.recv().await.is_some() {}
-    });
+    let drain_handle = tokio::spawn(async move { while drain_rx.recv().await.is_some() {} });
 
     let result_msg_id = short_id();
 

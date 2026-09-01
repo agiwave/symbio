@@ -132,8 +132,7 @@ fn build_request(
         .header("Accept", "application/json, text/event-stream")
         .timeout(effective_timeout(config))
         .json(body);
-    let req = apply_custom_headers(req, config);
-    req
+    apply_custom_headers(req, config)
 }
 
 impl super::manager::McpManager {

@@ -66,16 +66,18 @@ fn tool_error_not_misidentified_as_session_expired() {
 #[test]
 fn apply_custom_headers_merges() {
     use crate::symbio_core::schemas::mcp::mcp_config::{McpServerConfig, McpTransportType};
-    let mut cfg = McpServerConfig::default();
-    cfg.transport_type = McpTransportType::Http;
-    cfg.headers = Some(
-        vec![
-            ("Authorization".to_string(), "Bearer xyz".to_string()),
-            ("X-Custom".to_string(), "v1".to_string()),
-        ]
-        .into_iter()
-        .collect(),
-    );
+    let cfg = McpServerConfig {
+        transport_type: McpTransportType::Http,
+        headers: Some(
+            vec![
+                ("Authorization".to_string(), "Bearer xyz".to_string()),
+                ("X-Custom".to_string(), "v1".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        ..Default::default()
+    };
     let client = reqwest::Client::new();
     let req = super::apply_custom_headers(client.get("http://x"), &cfg);
     // reqwest 不直接暴露 headers；这里用 build() 验证构造无 panic
@@ -89,18 +91,20 @@ fn apply_custom_headers_merges() {
 #[test]
 fn apply_custom_headers_filters_reserved() {
     use crate::symbio_core::schemas::mcp::mcp_config::{McpServerConfig, McpTransportType};
-    let mut cfg = McpServerConfig::default();
-    cfg.transport_type = McpTransportType::Http;
-    cfg.headers = Some(
-        vec![
-            ("content-type".to_string(), "evil".to_string()),
-            ("ACCEPT".to_string(), "evil".to_string()),
-            ("Mcp-Session-Id".to_string(), "evil".to_string()),
-            ("X-Real-Header".to_string(), "ok".to_string()),
-        ]
-        .into_iter()
-        .collect(),
-    );
+    let cfg = McpServerConfig {
+        transport_type: McpTransportType::Http,
+        headers: Some(
+            vec![
+                ("content-type".to_string(), "evil".to_string()),
+                ("ACCEPT".to_string(), "evil".to_string()),
+                ("Mcp-Session-Id".to_string(), "evil".to_string()),
+                ("X-Real-Header".to_string(), "ok".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        ..Default::default()
+    };
     let client = reqwest::Client::new();
     let req = super::apply_custom_headers(client.get("http://x"), &cfg);
     let built = req.build().expect("build ok");
@@ -126,8 +130,10 @@ fn effective_timeout_default() {
 #[test]
 fn effective_timeout_custom() {
     use crate::symbio_core::schemas::mcp::mcp_config::McpServerConfig;
-    let mut cfg = McpServerConfig::default();
-    cfg.timeout_secs = Some(120);
+    let cfg = McpServerConfig {
+        timeout_secs: Some(120),
+        ..Default::default()
+    };
     assert_eq!(
         super::effective_timeout(&cfg),
         std::time::Duration::from_secs(120)
@@ -138,8 +144,10 @@ fn effective_timeout_custom() {
 #[test]
 fn effective_timeout_zero_fallback() {
     use crate::symbio_core::schemas::mcp::mcp_config::McpServerConfig;
-    let mut cfg = McpServerConfig::default();
-    cfg.timeout_secs = Some(0);
+    let cfg = McpServerConfig {
+        timeout_secs: Some(0),
+        ..Default::default()
+    };
     // .max(1) 保证至少 1 秒
     assert_eq!(
         super::effective_timeout(&cfg),

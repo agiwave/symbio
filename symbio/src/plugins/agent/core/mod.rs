@@ -36,8 +36,8 @@ mod embedding_quant;
 // 否则 rustc 会报 `unused_imports` 警告。本 mod.rs 顶部不直接使用这些类型，
 // 故在文件底部用 `#[cfg(test)] mod api_surface` 块做 public API 烟测——
 // 既消除警告，又能在编译期验证公开接口可用。
-pub use config::{AgentConfig, CognitionThresholds, StorageBackendType, StorageFormat};
 pub use crate::symbio_core::providers::EmbeddingService;
+pub use config::{AgentConfig, CognitionThresholds, StorageBackendType, StorageFormat};
 pub use error::{AgentError, AgentResult};
 pub use prompt_budget::{compute_cu_score, estimate_tokens, BudgetUsage, CuScore, PromptBudget};
 pub use store::{
@@ -53,34 +53,10 @@ pub use types::{cu_from_json, now_secs, truncate_chars, unit_with_id, OperationR
 ///
 /// 这些名字来自 seed_cus.jsonl 中的 prop CU 数据声明，而非硬编码业务规则。
 /// 运行时可通过新增 prop CU 扩展更多关系。
+/// 主要消费方：`store/mindscape/scaffold.rs` 启动时的 prop 完整性校验。
 pub const CORE_RELATION_NAMES: &[&str] = &[
     "is_a", "has", "part_of", "causes", "depends", "similar", "opposite", "related",
 ];
-
-/// 从 store 查询所有关系属性名
-///
-/// 查询 `is_a` 含 `relation` 且 `prop_value_is_a` ∈ {`cu`, `cu[]`} 的 prop CU，
-/// 返回其 id 集合。这是数据驱动的关系判定——不需要额外的注册表。
-///
-/// 查询失败时降级为核心 8 种关系。
-#[allow(dead_code)]
-pub async fn query_relation_names(store: &dyn AgentStore) -> std::collections::HashSet<String> {
-    let prop_filter = FilterExpr::is_a("relation");
-    let page = PageRequest::first(500);
-    match store.query(&prop_filter, &page).await {
-        Ok(result) => result
-            .items
-            .iter()
-            .filter(|cu| cu.is_relation_prop())
-            .map(|cu| cu.id().to_string())
-            .filter(|id| !id.is_empty())
-            .collect(),
-        Err(_) => {
-            // 降级：返回核心关系名
-            CORE_RELATION_NAMES.iter().map(|s| s.to_string()).collect()
-        },
-    }
-}
 
 // ─── 公开 API 烟测：保证顶层 reexport 全部可用 ───
 //

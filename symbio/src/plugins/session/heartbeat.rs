@@ -10,8 +10,8 @@ use super::types::HeartbeatConfig;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::session_chat;
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, PATH, PluginError, PluginPayload, SESSION_ID,
-    SimpleRequest,
+    InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError, PluginPayload, SimpleRequest,
+    PATH, SESSION_ID,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -38,7 +38,7 @@ fn now_ms() -> i64 {
 fn heartbeat_phase_ms(id: &str) -> i64 {
     let mut hasher = DefaultHasher::new();
     id.hash(&mut hasher);
-    (hasher.finish() % HEARTBEAT_JITTER_SECS as u64) as i64 * 1_000
+    (hasher.finish() % HEARTBEAT_JITTER_SECS) as i64 * 1_000
 }
 
 impl SessionPlugin {
@@ -62,7 +62,11 @@ impl SessionPlugin {
         // 跳过首tick（interval 首次 tick 立即返回），避免启动瞬间集中触发
         ticker.tick().await;
 
-        crate::plugin_info!("session", "心跳调度器已启动（扫描间隔 {}s）", HEARTBEAT_TICK_SECS);
+        crate::plugin_info!(
+            "session",
+            "心跳调度器已启动（扫描间隔 {}s）",
+            HEARTBEAT_TICK_SECS
+        );
 
         loop {
             ticker.tick().await;
@@ -121,11 +125,7 @@ impl SessionPlugin {
     ///
     /// 构造一条用户消息（心跳提示词）并复用统一入口 [`SessionPlugin::handle_chat_send_oneoff`]
     /// 的发送链路。`include_history=false` 时本次发送不加载历史会话信息。
-    pub(crate) async fn trigger_heartbeat(
-        self: Arc<Self>,
-        session_id: &str,
-        hb: &HeartbeatConfig,
-    ) {
+    pub(crate) async fn trigger_heartbeat(self: Arc<Self>, session_id: &str, hb: &HeartbeatConfig) {
         let now = now_ms();
         let user_msg = cm::ChatMessage {
             id: format!("hb_{}_{}", session_id, now),
@@ -172,7 +172,11 @@ impl SessionPlugin {
         // handle_chat_send_oneoff 内部会自行置 is_working 并路由到模型插件；
         // 即便没有前端连接，事件也会经由 EventBus 静默丢失，不影响后台执行。
         if let Err(e) = self.handle_chat_send_oneoff(Arc::new(ctx)).await {
-            crate::plugin_error!("session", "心跳触发失败：handle_chat_send_oneoff 返回错误: {}", e);
+            crate::plugin_error!(
+                "session",
+                "心跳触发失败：handle_chat_send_oneoff 返回错误: {}",
+                e
+            );
         }
     }
 
@@ -185,9 +189,7 @@ impl SessionPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
-        let session_id = ctx
-            .get(SESSION_ID)
-            .unwrap_or_else(|| "default".to_string());
+        let session_id = ctx.get(SESSION_ID).unwrap_or_else(|| "default".to_string());
         if session_id.is_empty() || session_id == "default" {
             return Err(PluginError::ValidationError("session_id 不能为空".into()));
         }

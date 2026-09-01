@@ -45,7 +45,10 @@ impl WebSearchTool {
             .map(|n| (n as usize).min(MAX_RESULTS_LIMIT))
             .unwrap_or(self.max_results);
 
-        let lr: Option<String> = args.get("lr").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let lr: Option<String> = args
+            .get("lr")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         if query.trim().is_empty() {
             return Err(PluginError::ValidationError("搜索查询不能为空".to_string()));
@@ -56,7 +59,10 @@ impl WebSearchTool {
         // 优先使用 Tavily
         if let Some(ref api_key) = cfg.tavily_api_key {
             if !api_key.trim().is_empty() {
-                return match self.search_tavily(query, api_key, max_results, lr.as_deref()).await {
+                return match self
+                    .search_tavily(query, api_key, max_results, lr.as_deref())
+                    .await
+                {
                     Ok(results) => Ok(json!({
                         "success": true,
                         "results": results,
@@ -70,7 +76,10 @@ impl WebSearchTool {
         // 其次使用 Serper
         if let Some(ref api_key) = cfg.serper_api_key {
             if !api_key.trim().is_empty() {
-                return match self.search_serper(query, api_key, max_results, lr.as_deref()).await {
+                return match self
+                    .search_serper(query, api_key, max_results, lr.as_deref())
+                    .await
+                {
                     Ok(results) => Ok(json!({
                         "success": true,
                         "results": results,
@@ -82,7 +91,10 @@ impl WebSearchTool {
         }
 
         // 最后回退到 DuckDuckGo (HTML 抓取)
-        match self.search_duckduckgo(query, max_results, lr.as_deref()).await {
+        match self
+            .search_duckduckgo(query, max_results, lr.as_deref())
+            .await
+        {
             Ok(results) => Ok(json!({
                 "success": true,
                 "results": results,

@@ -2,11 +2,9 @@
 
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::{
-    codebase_search::CodebaseSearchTool, content_search::ContentSearchTool,
-    file_delete::FileDeleteTool, file_edit::FileEditTool,
-    file_read::FileReadTool,
-    file_write::FileWriteTool, file_search::FileSearchTool, ask_user::AskUserTool,
-    dir_list::DirListTool,
+    ask_user::AskUserTool, codebase_search::CodebaseSearchTool, content_search::ContentSearchTool,
+    dir_list::DirListTool, file_delete::FileDeleteTool, file_edit::FileEditTool,
+    file_read::FileReadTool, file_search::FileSearchTool, file_write::FileWriteTool,
     shell::ShellTool, todo_write::TodoWriteTool,
 };
 pub use crate::symbio_core::schemas::agent::local_config::LocalConfig;
@@ -66,7 +64,9 @@ async fn emit_confirm_prompt(
         parent_id: None,
         role: Some(MessageRole::Tool),
         msg_type: Some(MessageType::UserPrompt),
-        content: Some(MessageContent::Text(format!("需要确认：{tool_description}"))),
+        content: Some(MessageContent::Text(format!(
+            "需要确认：{tool_description}"
+        ))),
         status: Some(MessageStatus::WaitingUserAction),
         meta: Some(json!({
             "prompt": {
@@ -126,9 +126,9 @@ impl Capability for SecureToolWrapper {
         // per-session 风险等级阈值：从 ctx[RISK_LEVEL] 读出（与 agent_id/provider_id/mode 同级别）
         let threshold = risk_level_from_ctx(&ctx);
 
-        let (suggested_approval, final_risk_level) = self
-            .security
-            .check_tool_approval_needed(&tool_name, tool_risk_level, threshold);
+        let (suggested_approval, final_risk_level) =
+            self.security
+                .check_tool_approval_needed(&tool_name, tool_risk_level, threshold);
 
         let needs_approval = suggested_approval && !is_approved;
 

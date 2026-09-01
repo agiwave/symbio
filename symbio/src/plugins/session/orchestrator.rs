@@ -7,9 +7,8 @@ use crate::symbio_core::schemas::{
     session::{session_append, session_chat, session_chat_response},
 };
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginError, PluginFrame, PluginPayload, AGENT_CHAT,
-    MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
+    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginFrame,
+    PluginPayload, AGENT_CHAT, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -224,7 +223,8 @@ impl SessionPlugin {
         parent: Arc<dyn Plugin>,
         rid: u64,
     ) {
-        let collected_ai_messages = Arc::new(tokio::sync::Mutex::new(Vec::<cm::ChatMessage>::new()));
+        let collected_ai_messages =
+            Arc::new(tokio::sync::Mutex::new(Vec::<cm::ChatMessage>::new()));
 
         // 工作态守卫：保障 panic / 异常退出时 is_working 收敛 + 失败持久化。
         // 正常结束路径会在收尾前把 `done` 置 true（见块末尾）。
@@ -244,11 +244,8 @@ impl SessionPlugin {
                         inner.ai_control_tx = Some(sub_channel.tx.clone());
                     }
 
-                    while let Ok(frame_opt) = tokio::time::timeout(
-                        Duration::from_secs(1800),
-                        sub_channel.rx.recv(),
-                    )
-                    .await
+                    while let Ok(frame_opt) =
+                        tokio::time::timeout(Duration::from_secs(1800), sub_channel.rx.recv()).await
                     {
                         let frame = match frame_opt {
                             Some(f) => f,
@@ -282,13 +279,11 @@ impl SessionPlugin {
                             PluginFrame::Data(data) => {
                                 // 收集 Model 响应消息：StreamEvent::Update 增量合并，
                                 // 确保持久化的终态反映最后已知状态（而非首个 Streaming 帧）。
-                                if let Ok(session_chat_response::StreamEvent::Update {
-                                    message,
-                                }) = serde_json::from_value::<
-                                    session_chat_response::StreamEvent,
-                                >(
-                                    data.clone()
-                                ) {
+                                if let Ok(session_chat_response::StreamEvent::Update { message }) =
+                                    serde_json::from_value::<session_chat_response::StreamEvent>(
+                                        data.clone(),
+                                    )
+                                {
                                     let mut collected = collected_ai_messages.lock().await;
                                     if let Some(existing) =
                                         collected.iter_mut().find(|m| m.id == message.id)
@@ -309,13 +304,8 @@ impl SessionPlugin {
                 } else {
                     let msg = "Model 插件未返回预期的会话载荷".to_string();
                     crate::plugin_error!("session", "{}", &msg);
-                    self.persist_failure(
-                        &state,
-                        &session_id,
-                        &collected_ai_messages,
-                        &msg,
-                    )
-                    .await;
+                    self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
+                        .await;
                     self.broadcast_error_with_idle(&state, msg).await;
                     return;
                 }
@@ -323,13 +313,8 @@ impl SessionPlugin {
             Err(e) => {
                 let msg = format!("调用 Model 插件失败: {}", e);
                 crate::plugin_error!("session", "{}", &msg);
-                self.persist_failure(
-                    &state,
-                    &session_id,
-                    &collected_ai_messages,
-                    &msg,
-                )
-                .await;
+                self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
+                    .await;
                 self.broadcast_error_with_idle(&state, msg).await;
                 return;
             },
@@ -546,7 +531,7 @@ impl SessionPlugin {
                             "status": "accepted",
                             "session_id": session_id
                         })));
-                    }
+                    },
                 },
                 Err(e) => {
                     let msg = format!("读取会话元数据失败: {}", e);
@@ -556,7 +541,7 @@ impl SessionPlugin {
                         "status": "accepted",
                         "session_id": session_id
                     })));
-                }
+                },
             },
         };
 
@@ -588,7 +573,12 @@ impl SessionPlugin {
 
             let is_ping = user_msg_spawn
                 .as_ref()
-                .map(|m| m.content.as_ref().map(|c| c.to_text() == "ping").unwrap_or(false))
+                .map(|m| {
+                    m.content
+                        .as_ref()
+                        .map(|c| c.to_text() == "ping")
+                        .unwrap_or(false)
+                })
                 .unwrap_or(false);
 
             // 记录最近一次"有效活动"时间（心跳任务据此判断会话是否已空闲足够久）。
@@ -619,9 +609,7 @@ impl SessionPlugin {
 
             // agent_id 解析：优先用请求显式指定；否则回退到会话元数据绑定的 agent_id；
             // 两者都缺失则**显式报错**，绝不静默用「默认 agent」兜底。
-            let agent_id = if let Some(id) =
-                agent_id_from_req.filter(|s| !s.trim().is_empty())
-            {
+            let agent_id = if let Some(id) = agent_id_from_req.filter(|s| !s.trim().is_empty()) {
                 id
             } else {
                 let fallback = match this_spawn.get_or_create_session(&sid_spawn).await {
@@ -638,18 +626,19 @@ impl SessionPlugin {
                             .broadcast_error_with_idle(&state_spawn, msg)
                             .await;
                         return;
-                    }
+                    },
                 };
                 match fallback {
                     Some(id) => id,
                     None => {
-                        let msg = "未指定 agent_id，且会话未绑定智能体；请明确指定要对话的智能体。".to_string();
+                        let msg = "未指定 agent_id，且会话未绑定智能体；请明确指定要对话的智能体。"
+                            .to_string();
                         crate::plugin_error!("session", "{}", &msg);
                         this_spawn
                             .broadcast_error_with_idle(&state_spawn, msg)
                             .await;
                         return;
-                    }
+                    },
                 }
             };
             let session_cfg = this_spawn.config.read().await.clone();
@@ -810,14 +799,14 @@ impl SessionPlugin {
             Err(e) => {
                 crate::plugin_error!("session", "persist_failure: open session failed: {}", e);
                 return;
-            }
+            },
         };
         let mut all = match chat_session.get_messages().await {
             Ok(m) => m,
             Err(e) => {
                 crate::plugin_error!("session", "persist_failure: get_messages failed: {}", e);
                 return;
-            }
+            },
         };
 
         let c = collected.lock().await;
@@ -831,18 +820,19 @@ impl SessionPlugin {
                     // 不应把 resume 已 Completed 的消息误标 Failed。
                     if matches!(
                         existing.status,
-                        None | Some(cm::MessageStatus::Streaming) | Some(cm::MessageStatus::Pending)
+                        None | Some(cm::MessageStatus::Streaming)
+                            | Some(cm::MessageStatus::Pending)
                     ) {
                         existing.status = Some(cm::MessageStatus::Failed);
                         existing.error = Some(error.to_string());
                     }
-                }
+                },
                 None => {
                     let mut new = cm.clone();
                     new.status = Some(cm::MessageStatus::Failed);
                     new.error = Some(error.to_string());
                     all.push(new);
-                }
+                },
             }
         }
         drop(c);

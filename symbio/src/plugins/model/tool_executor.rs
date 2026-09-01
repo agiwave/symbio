@@ -259,7 +259,8 @@ pub async fn execute_tool_async(
                                         // 捕获工具广播的 user_prompt(WaitingUserAction) 节点，
                                         // 作为本轮"待用户响应"结果落库。
                                         if message.msg_type == Some(MessageType::UserPrompt)
-                                            && message.status == Some(MessageStatus::WaitingUserAction)
+                                            && message.status
+                                                == Some(MessageStatus::WaitingUserAction)
                                         {
                                             let mut node = message.clone();
                                             node.parent_id = Some(tool_call_id.to_string());
@@ -379,7 +380,9 @@ pub async fn process_tool_calls_async(
                             .as_ref()
                             .and_then(|m| m.get("failure_kind"))
                             .and_then(|v| v.as_str())
-                            .map(|k| k == "error" || k == "needs_approval" || k == "needs_interaction")
+                            .map(|k| {
+                                k == "error" || k == "needs_approval" || k == "needs_interaction"
+                            })
                             .unwrap_or(false)
                 })
                 .unwrap_or(false);

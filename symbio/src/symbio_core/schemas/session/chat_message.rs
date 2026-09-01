@@ -129,7 +129,7 @@ impl Default for MessageContent {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatMessage {
     pub id: String,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
 
@@ -141,7 +141,7 @@ pub struct ChatMessage {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    
+
     #[serde(skip_serializing)]
     pub prompt: Option<String>,
 
@@ -164,7 +164,6 @@ pub struct ChatMessage {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_id: Option<String>,
-
 }
 
 /// 会话恢复动作。

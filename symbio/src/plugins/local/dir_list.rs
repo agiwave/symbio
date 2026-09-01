@@ -27,10 +27,7 @@ impl DirListTool {
     }
 
     async fn execute_inner(&self, args: &Value, workdir: &str) -> InvokeResponse<Value> {
-        let path = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
         let ignore: Vec<String> = args
             .get("ignore")
             .and_then(|v| v.as_array())
@@ -60,9 +57,9 @@ impl DirListTool {
         };
 
         // 目标必须存在且为目录
-        let meta = tokio::fs::metadata(&target).await.map_err(|e| {
-            PluginError::ValidationError(format!("无法访问路径 '{path}': {e}"))
-        })?;
+        let meta = tokio::fs::metadata(&target)
+            .await
+            .map_err(|e| PluginError::ValidationError(format!("无法访问路径 '{path}': {e}")))?;
         if !meta.is_dir() {
             return Err(PluginError::ValidationError(format!(
                 "路径 '{path}' 不是一个目录。"

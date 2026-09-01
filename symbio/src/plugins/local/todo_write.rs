@@ -5,8 +5,8 @@
 
 use super::policy::SecurityPolicy;
 use crate::symbio_core::{
-    AGENT_ID, Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    PluginError, PluginPayload, SESSION_ID, WORKDIR,
+    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
+    PluginPayload, AGENT_ID, SESSION_ID, WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -42,10 +42,7 @@ impl TodoWriteTool {
             .get("todos")
             .and_then(|v| v.as_array())
             .ok_or_else(|| PluginError::ValidationError("缺少 'todos' 数组参数".to_string()))?;
-        let merge = args
-            .get("merge")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let merge = args.get("merge").and_then(|v| v.as_bool()).unwrap_or(false);
 
         let mut items: Vec<Value> = Vec::with_capacity(todos.len());
         for (i, t) in todos.iter().enumerate() {
@@ -89,7 +86,10 @@ impl TodoWriteTool {
             let entry = map.entry(key.to_string()).or_default();
             for it in items {
                 let id = it["id"].as_str().unwrap_or("").to_string();
-                if let Some(pos) = entry.iter().position(|e| e["id"].as_str() == Some(id.as_str())) {
+                if let Some(pos) = entry
+                    .iter()
+                    .position(|e| e["id"].as_str() == Some(id.as_str()))
+                {
                     entry[pos] = it;
                 } else {
                     entry.push(it);
@@ -112,10 +112,7 @@ impl TodoWriteTool {
             md.push_str(&format!("- [{}] ({}) {}\n", mark, pri, content));
         }
 
-        let summary = args
-            .get("summary")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("");
         let message = if summary.is_empty() {
             format!("已更新任务清单，共 {} 项。", current.len())
         } else {

@@ -43,32 +43,8 @@ use std::sync::Arc;
 
 // ─── 能力模块配置常量 ───
 
-// 推理相关常量
-
-/// 默认置信度阈值
+/// 新写入 CU 的默认置信度（save op 未显式传 confidence 时使用）
 pub(crate) const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.7;
-
-// 记忆类型
-
-/// 工作记忆类型标识
-#[allow(dead_code)]
-pub(crate) const MEMORY_TYPE_WORKING: &str = "working";
-
-// 工作记忆 TTL（v10 新增）
-
-/// 工作记忆默认 TTL（秒）
-///
-/// v10 设计：把 `save_working` 与 `save` 的语义统一通过 TTL 区分：
-/// - `save`：永久记忆（无 expires_at）
-/// - `save_working`：临时记忆（默认 24 小时，自动过期）
-#[allow(dead_code)]
-pub(crate) const WORKING_MEMORY_DEFAULT_TTL_SECS: u64 = 24 * 60 * 60;
-
-/// 工作记忆最大 TTL（秒）：7 天
-///
-/// 防止 LLM 误传极大值导致"永久工作记忆"语义不清。
-#[allow(dead_code)]
-pub(crate) const WORKING_MEMORY_MAX_TTL_SECS: u64 = 7 * 24 * 60 * 60;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Agent 能力工厂上下文——承载工厂构造所需的所有运行时数据

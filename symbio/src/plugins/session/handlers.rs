@@ -5,8 +5,8 @@ use crate::symbio_core::schemas::{
     common,
     session::{
         chat_message as cm, session_append, session_clear, session_clear_messages,
-        session_compress, session_delete_message, session_get_messages, session_list,
-        session_open, session_update, session_update_message,
+        session_compress, session_delete_message, session_get_messages, session_list, session_open,
+        session_update, session_update_message,
     },
 };
 use crate::symbio_core::{ChatSessionHandle, InvokeRequest, InvokeRequestExt, PluginPayload};
@@ -121,7 +121,9 @@ impl SessionPlugin {
         let req: session_clear_messages::Request = ctx.payload()?;
         let chat_session = self.open_chat_session(&req.session_id).await?;
         chat_session.replace_messages(Vec::new()).await?;
-        Ok(serde_json::to_value(session_clear_messages::Response { cleared: true })?)
+        Ok(serde_json::to_value(session_clear_messages::Response {
+            cleared: true,
+        })?)
     }
 
     /// 删除单条消息（连同其后续所有消息一并删除）。
@@ -145,7 +147,7 @@ impl SessionPlugin {
                 let removed: Vec<String> = messages[i..].iter().map(|m| m.id.clone()).collect();
                 messages.drain(i..);
                 removed
-            }
+            },
             None => Vec::new(),
         };
 
@@ -175,10 +177,7 @@ impl SessionPlugin {
         let mut messages = chat_session.get_messages().await?;
 
         let Some(existing) = messages.iter_mut().find(|m| m.id == patch.id) else {
-            return Err(PluginError::NotFound(format!(
-                "消息不存在: {}",
-                patch.id
-            )));
+            return Err(PluginError::NotFound(format!("消息不存在: {}", patch.id)));
         };
 
         if let Some(role) = &patch.role {
@@ -201,7 +200,11 @@ impl SessionPlugin {
         }
         if let Some(e) = &patch.error {
             existing.error = Some(e.clone());
-        } else if patch.status.as_ref().map(|s| *s != cm::MessageStatus::Failed).unwrap_or(false)
+        } else if patch
+            .status
+            .as_ref()
+            .map(|s| *s != cm::MessageStatus::Failed)
+            .unwrap_or(false)
         {
             // 状态不再是 Failed 时，顺带清掉旧的 error，避免残留误导。
             existing.error = None;
@@ -232,7 +235,9 @@ impl SessionPlugin {
         }
 
         chat_session.replace_messages(messages).await?;
-        Ok(serde_json::to_value(session_update_message::Response { updated: true })?)
+        Ok(serde_json::to_value(session_update_message::Response {
+            updated: true,
+        })?)
     }
 
     pub async fn invoke_list(&self) -> InvokeResponse<Value> {

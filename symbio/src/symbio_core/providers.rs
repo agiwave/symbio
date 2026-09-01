@@ -25,5 +25,5 @@
 mod embedding;
 mod storage;
 
-pub use embedding::{EmbeddingService, EmbeddingError};
+pub use embedding::{EmbeddingError, EmbeddingService};
 pub use storage::{categories, manifests, EntityStore, EntityStoreError, StorageService};

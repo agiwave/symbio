@@ -49,7 +49,12 @@ pub async fn prune_historical_tool_calls(
     // 同时移除被剪除 ToolCall 的直接子节点（请求 Text / 响应 Text）
     let extra: HashSet<String> = messages[..limit_idx]
         .iter()
-        .filter(|m| m.parent_id.as_ref().map(|p| to_remove.contains(p)).unwrap_or(false))
+        .filter(|m| {
+            m.parent_id
+                .as_ref()
+                .map(|p| to_remove.contains(p))
+                .unwrap_or(false)
+        })
         .map(|m| m.id.clone())
         .collect();
     to_remove.extend(extra);
@@ -139,7 +144,8 @@ pub fn apply_layered_sliding_window(
                     success_status
                 )
             } else {
-                "[System Info: Tool call input parameters skeletonized to save context.]".to_string()
+                "[System Info: Tool call input parameters skeletonized to save context.]"
+                    .to_string()
             };
             new_msg.content = Some(MessageContent::Text(label));
         }

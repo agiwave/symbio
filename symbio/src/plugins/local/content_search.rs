@@ -75,14 +75,8 @@ impl ContentSearchTool {
             .get("multiline")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let head_limit = args
-            .get("head_limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
-        let offset = args
-            .get("offset")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
+        let head_limit = args.get("head_limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         if !matches!(output_mode, "content" | "files_with_matches" | "count") {
             return Err(PluginError::ValidationError(format!(
@@ -264,10 +258,10 @@ impl ContentSearchTool {
                     } else if output_mode == "count" {
                         out.push(format!("{}:{}", fp.display(), file_matches.len()));
                     } else {
-                    out.push(format!("{}", fp.display()));
-                    out.extend(file_matches.clone());
-                }
-                match_count += file_matches.len() as u64;
+                        out.push(format!("{}", fp.display()));
+                        out.extend(file_matches.clone());
+                    }
+                    match_count += file_matches.len() as u64;
                 }
             } else {
                 // 逐行搜索：收集匹配行号与文本

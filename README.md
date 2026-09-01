@@ -115,8 +115,10 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 
 | 指标 | 现状 |
 | --- | --- |
-| 单元测试 | 全部通过（以 `cargo test --lib 2>&1 | tail` 实时输出为准） |
-| Clippy 警告 | 0（除 MSRV 1.91 const 提示，无害） |
+| 单元测试 | Rust 355 个全通过；前端 vitest 覆盖纯逻辑层（`npm test`） |
+| Clippy 警告 | 0（CI `-D warnings` 门禁） |
+| cargo fmt | 0 diff（CI `--check` 门禁） |
+| 前端类型检查 | vue-tsc 0 错误（CI 门禁） |
 | 循环依赖 | 0 |
 | 核心插件数 | 14 |
 

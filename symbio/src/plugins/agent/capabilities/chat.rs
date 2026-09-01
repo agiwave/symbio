@@ -278,10 +278,7 @@ async fn stream_relay(
                                     }
                                 } else {
                                     let mut m = serde_json::Map::new();
-                                    m.insert(
-                                        "subagent".to_string(),
-                                        serde_json::Value::Bool(true),
-                                    );
+                                    m.insert("subagent".to_string(), serde_json::Value::Bool(true));
                                     if let Some(pid) = &parent_session_id {
                                         m.insert(
                                             "parent_session_id".to_string(),
@@ -357,16 +354,16 @@ async fn stream_relay(
     if let Some(err) = relay_error {
         final_result = err;
     } else {
-    // （例如子 agent 仅产出 reasoning 而未产出文本），则退回最后一条累积到的文本，
-    // 保证 agent_run 的结果不为空（避免出现「只有请求没有结果」）。
-    if let Some(id) = text_order
-        .iter()
-        .rev()
-        .find(|id| completed_ids.contains(*id))
-        .or(text_order.last())
-    {
-        final_result = text_accumulator.get(id).cloned().unwrap_or_default();
-    }
+        // （例如子 agent 仅产出 reasoning 而未产出文本），则退回最后一条累积到的文本，
+        // 保证 agent_run 的结果不为空（避免出现「只有请求没有结果」）。
+        if let Some(id) = text_order
+            .iter()
+            .rev()
+            .find(|id| completed_ids.contains(*id))
+            .or(text_order.last())
+        {
+            final_result = text_accumulator.get(id).cloned().unwrap_or_default();
+        }
     }
 
     let _ = my_side

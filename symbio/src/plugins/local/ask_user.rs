@@ -101,7 +101,10 @@ impl AskUserTool {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let multi = q.get("multiSelect").and_then(|v| v.as_bool()).unwrap_or(false);
+        let multi = q
+            .get("multiSelect")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let options = q
             .get("options")
             .and_then(|v| v.as_array())

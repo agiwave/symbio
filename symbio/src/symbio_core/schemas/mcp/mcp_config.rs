@@ -2,21 +2,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// MCP 传输类型
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum McpTransportType {
     /// 本地进程通信（spawn 子进程 + stdin/stdout JSON-RPC）
+    #[default]
     Stdio,
     /// HTTP REST API
     Http,
     /// Server-Sent Events
     Sse,
-}
-
-impl Default for McpTransportType {
-    fn default() -> Self {
-        McpTransportType::Stdio
-    }
 }
 
 /// MCP 服务器配置（持久化层权威定义）

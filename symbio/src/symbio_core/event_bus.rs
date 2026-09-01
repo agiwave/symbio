@@ -27,7 +27,7 @@ pub const KIND_SYSTEM: &str = "system";
 ///
 /// Key 是 `connection_id`（每个前端连接一个），Value 是它的发送端。
 static SUBSCRIBERS: LazyLock<DashMap<String, mpsc::Sender<PluginFrame>>> =
-    LazyLock::new(|| DashMap::new());
+    LazyLock::new(DashMap::new);
 
 /// 按 sessionId 缓存最近的事件（用于新订阅者拉取回放，避免切回时丢中间事件）
 ///
@@ -40,8 +40,7 @@ static SUBSCRIBERS: LazyLock<DashMap<String, mpsc::Sender<PluginFrame>>> =
 /// - `publish` 时：每个事件 push 到 `pending_events[session_id]`
 /// - 超过 `PENDING_EVENTS_CAP` 时从头部弹出最旧事件
 /// - 订阅者通过 `pending/snapshot` RPC 取走并清空缓冲
-static PENDING_EVENTS: LazyLock<DashMap<String, VecDeque<Value>>> =
-    LazyLock::new(|| DashMap::new());
+static PENDING_EVENTS: LazyLock<DashMap<String, VecDeque<Value>>> = LazyLock::new(DashMap::new);
 
 /// 事件 Bus 帧载荷
 ///

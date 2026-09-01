@@ -9,8 +9,8 @@
 use super::policy::SecurityPolicy;
 use crate::symbio_core::providers::EmbeddingService;
 use crate::symbio_core::{
-    create_object, Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt,
-    InvokeResponse, PluginError, PluginPayload, SimpleRequest,
+    create_object, Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse,
+    PluginError, PluginPayload, SimpleRequest,
 };
 use async_trait::async_trait;
 use grep::regex::RegexMatcherBuilder;
@@ -159,12 +159,10 @@ async fn list_source_files(workdir: &Path) -> Vec<PathBuf> {
         }
         true
     });
-    for entry in builder.build() {
-        if let Ok(e) = entry {
-            let p = e.path();
-            if p.is_file() && is_source_file(p) {
-                files.push(p.to_path_buf());
-            }
+    for entry in builder.build().flatten() {
+        let p = entry.path();
+        if p.is_file() && is_source_file(p) {
+            files.push(p.to_path_buf());
         }
     }
     files
@@ -205,10 +203,7 @@ async fn get_index(
 }
 
 /// 读取源码、分块、嵌入，构建索引
-async fn build_index(
-    workdir: &Path,
-    embed: &Arc<dyn EmbeddingService>,
-) -> Option<CodeIndex> {
+async fn build_index(workdir: &Path, embed: &Arc<dyn EmbeddingService>) -> Option<CodeIndex> {
     let files = list_source_files(workdir).await;
     let mut chunks = Vec::new();
     for f in files {
@@ -271,14 +266,9 @@ async fn semantic_search(
         Some(e) => normalize(&e),
         None => return vec![],
     };
-    let mut scored: Vec<(f32, &Chunk)> = index
-        .chunks
-        .iter()
-        .map(|c| (dot(&q, &c.norm), c))
-        .collect();
-    scored.sort_by(|a, b| {
-        b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let mut scored: Vec<(f32, &Chunk)> =
+        index.chunks.iter().map(|c| (dot(&q, &c.norm), c)).collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     scored
         .into_iter()
         .take(limit)

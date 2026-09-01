@@ -104,6 +104,11 @@ jobs:
         working-directory: tauri
         run: npx vue-tsc --noEmit
 
+      - name: Unit tests (vitest)
+        # 纯逻辑层（utils / composables / services）单元测试门禁
+        working-directory: tauri
+        run: npm test
+
       - name: Check for obvious frontend issues
         # 简单检查：确保没有明显的语法错误
         run: |

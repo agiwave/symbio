@@ -31,7 +31,7 @@ pub struct Request {
     /// 支持场景：
     /// - `RetryTurn`：LLM 失败重试（删除 Failed Turn 及子节点，重新走 LLM 请求）
     /// - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：工具调用恢复
-    /// 为 None 且 `message` 存在时走正常 send 分支。
+    ///   为 None 且 `message` 存在时走正常 send 分支。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<ResumeRequest>,
 }

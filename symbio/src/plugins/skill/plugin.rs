@@ -19,7 +19,7 @@ pub struct SkillPlugin {
 
 impl SkillPlugin {
     /// 把 skill_dirs 里的 `{HOMEDIR}` 占位符解析为当前系统目录
-    fn resolve_skill_dirs_template(dirs: &mut Vec<String>) {
+    fn resolve_skill_dirs_template(dirs: &mut [String]) {
         let homedir = HomedirRegistry::get()
             .join("plugins")
             .join("skills")
