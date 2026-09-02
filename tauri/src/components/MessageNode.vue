@@ -74,7 +74,7 @@
       <!-- 悬停操作：用户消息可编辑；失败工具可就地重试；仅 root 级节点可删除 -->
       <span class="node-actions" @click.stop>
         <button v-if="isUser" class="node-act" title="编辑" @click.stop="emit('edit', node.id)">✎</button>
-        <button v-if="isToolCall && isFailed" class="node-act" title="重试此工具" @click.stop="emit('retry', node.id)">↻</button>
+        <button v-if="canRetry" class="node-act" title="重试此工具" @click.stop="emit('retry', node.id)">↻</button>
         <button v-if="!node.parent_id" class="node-act" title="删除" @click.stop="emit('delete', node.id)">🗑</button>
       </span>
     </div>
@@ -473,11 +473,12 @@ const defaultOpen = computed(() => {
   // 待用户响应（审批/提问）→ 始终展开（用户需看到并操作）
   if (st === 'waiting_user_action') return true
   if (role.value === 'user') return true
-  // 工具调用：单行为主；例外 = 内含待审批子节点 / 可补充参数的失败
+  // 工具调用：单行为主；例外 = 内含待审批子节点（否则审批入口被折叠隐藏）
+  // 或可恢复失败（会话因该失败暂停，需要操作入口，后端 recoverable 标记）
   if (isToolCall.value) {
     if ((props.node.children || []).some((c) => c.status === 'waiting_user_action')) return true
     const meta = props.node.meta as Record<string, any> | undefined
-    if (meta?.failure_kind) return true
+    if (meta?.recoverable) return true
     return false
   }
   // 思考：始终单行（不展开）
@@ -620,17 +621,17 @@ const errorText = computed(() => {
   )
 })
 const canRetry = computed(() => {
-  if (!isFailed.value) return false
-  // 仅工具调用自身失败可就地重试（resume retry：删除失败结果 → 原参数重执行）。
-  // 思考/正文/工具请求的失败归 Turn 级重试（组级错误条，retry_turn），
-  // 由 ModelChatPanel.handleRetry 按 msg.type 分派，叶子节点不再出示重试按钮。
-  return isToolCall.value
+  if (!isFailed.value || !isToolCall.value) return false
+  // 仅「会话因该失败而暂停」的可恢复失败才可就地重试（meta.recoverable，服务端标记）：
+  // resume 在会话忙碌时会拒绝；auto 模式下运行中的工具失败 = 信息性（错误结果已喂给
+  // LLM 继续处理），不显示重试。思考/正文/工具请求的失败归 Turn 级重试（组级错误条）。
+  const meta = props.node.meta as Record<string, any> | undefined
+  return meta?.recoverable === true
 })
-// 工具调用失败且 failure_kind='error' → 可补充参数重新执行
+// 可恢复的工具失败且 failure_kind='error' → 可补充参数重新执行
 const canSupply = computed(
   () =>
-    isToolCall.value &&
-    isFailed.value &&
+    canRetry.value &&
     (props.node.meta as Record<string, any> | undefined)?.failure_kind === 'error',
 )
 // 补充参数表单（JSON 文本框 + 提交按钮）

@@ -372,6 +372,45 @@ pub async fn run_chat_loop(
         });
 
         if needs_user_action {
+            // 给「因失败而暂停会话」的工具调用打 recoverable 标记（服务端唯一真相）。
+            // 语义分界：auto 模式下工具失败 = 信息性（错误结果已喂给 LLM 继续处理，
+            // 重试无意义）；仅当循环因该失败退出、会话停在等待恢复态时，重试/补参
+            // 才有效（resume 在会话忙碌时会拒绝）。前端只对 recoverable 的 Failed
+            // ToolCall 渲染重试/补参入口。
+            // 注意：user_prompt(WaitingUserAction) 驱动的暂停不在此列（其恢复走
+            // approve/reject/answer，且父节点状态是 WaitingUserAction 而非 Failed）。
+            let mut recover_updates: Vec<ChatMessage> = Vec::new();
+            for p in parent_updates.iter() {
+                if p.status == Some(MessageStatus::Failed)
+                    && p.meta
+                        .as_ref()
+                        .and_then(|m| m.get("failure_kind"))
+                        .and_then(|v| v.as_str())
+                        .is_some()
+                {
+                    let mut meta = p.meta.clone().unwrap_or_else(|| serde_json::json!({}));
+                    meta["recoverable"] = serde_json::json!(true);
+                    let patch = ChatMessage {
+                        id: p.id.clone(),
+                        meta: Some(meta),
+                        ..Default::default()
+                    };
+                    // 广播 + 持久化，保证刷新后标记仍在
+                    let _ = channel.tx.send(PluginFrame::Data(
+                        serde_json::to_value(session_chat_response::StreamEvent::Update {
+                            message: patch.clone(),
+                        })
+                        .unwrap_or_default(),
+                    ))
+                    .await;
+                    recover_updates.push(patch);
+                }
+            }
+            if !recover_updates.is_empty() {
+                if let Err(e) = context.session.update_messages(recover_updates).await {
+                    plugin_warn!("model", "[Session] recoverable 标记持久化失败: {}", e);
+                }
+            }
             plugin_info!(
                 "model",
                 "[DIAG] run_chat_loop: 工具待用户恢复（mode={}），退出本轮",

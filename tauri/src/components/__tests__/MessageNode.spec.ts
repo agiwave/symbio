@@ -179,13 +179,31 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     expect(w.text()).not.toContain('过程')
   })
 
-  it('工具失败 → 就地重试（发射 ToolCall id，供单工具 retry），叶子级不出重试按钮', async () => {
+  it('运行中失败（无 recoverable 标记）→ 纯信息呈现：不自动展开、无重试按钮', () => {
     const w = mountNode(
       msg({
         id: 'tc1',
         type: 'tool_call',
         status: 'failed',
         error: '工具执行失败',
+        name: 'shell',
+        content: '{}',
+        children: [],
+      }),
+    )
+    // auto 模式：错误结果已喂给 LLM 继续处理，会话仍在运行 → 重试无意义
+    expect(w.text()).not.toContain('重试')
+    expect((w.find('.node-body').element as HTMLElement).style.display).toBe('none')
+  })
+
+  it('可恢复失败（meta.recoverable）→ 就地重试（发射 ToolCall id，供单工具 retry）', async () => {
+    const w = mountNode(
+      msg({
+        id: 'tc1',
+        type: 'tool_call',
+        status: 'failed',
+        error: '工具执行失败',
+        meta: { failure_kind: 'error', recoverable: true },
         name: 'shell',
         content: '{}',
         children: [msg({ id: 'res1', type: 'text', role: 'tool', status: 'failed', content: '', error: 'boom', parent_id: 'tc1' })],
@@ -197,14 +215,14 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     expect(w.emitted('retry')?.[0]).toEqual(['tc1'])
   })
 
-  it('可补充参数的失败（failure_kind=error）→ 自动展开出补充参数表单', () => {
+  it('可补充参数的可恢复失败（failure_kind=error + recoverable）→ 自动展开出补充参数表单', () => {
     const w = mountNode(
       msg({
         id: 'tc1',
         type: 'tool_call',
         status: 'failed',
         error: '参数缺失',
-        meta: { failure_kind: 'error' },
+        meta: { failure_kind: 'error', recoverable: true },
         content: '{}',
         children: [],
       }),
