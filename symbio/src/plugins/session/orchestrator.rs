@@ -840,7 +840,27 @@ impl SessionPlugin {
         if let Err(e) = chat_session.replace_messages(all).await {
             crate::plugin_error!("session", "persist_failure: replace_messages failed: {}", e);
         }
-        // 同步 session 的 is_working 收敛由调用方负责，此处只管持久化。
-        let _ = state;
+
+        // 3. 广播失败终态（含 Turn）：此前只落库，实时画面靠前端启发式标记失败，
+        //    刷新前后可能不一致。现在以 Update 推送 Failed 终态，前端只信服务端
+        //    （Turn 失败 → 组级错误条 + retry_turn 入口；工具结果失败 → 工具行重试）。
+        //    推送发生在 Error 事件之前（调用方先 persist_failure 再 broadcast_error_with_idle），
+        //    Error 事件仅承担 transport 级兜底语义。
+        let c = collected.lock().await;
+        let to_broadcast: Vec<cm::ChatMessage> = c
+            .iter()
+            .filter(|m| m.status == Some(cm::MessageStatus::Failed))
+            .cloned()
+            .collect();
+        drop(c);
+        for m in to_broadcast {
+            self.broadcast_frame(
+                state,
+                PluginFrame::Data(json!(session_chat_response::StreamEvent::Update {
+                    message: m,
+                })),
+            )
+            .await;
+        }
     }
 }
