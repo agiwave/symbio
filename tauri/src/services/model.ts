@@ -13,7 +13,6 @@ import {
 import { logger } from '@/utils/logger'
 
 import { ChatMessage, ContentPart, MessageContent, ChatRole, ChatMessageType, MessageStatus } from '../schemas/chat_message'
-import * as ModelConfig from '../schemas/model_config'
 
 import { StreamEvent, ChatEventType } from '../schemas/chat_response'
 
@@ -90,21 +89,4 @@ export async function listModels(): Promise<string[]> {
     logger.error('model-service', 'Failed to list models:', err)
     return []
   }
-}
-
-/**
- * 获取 Model \u63d2\u4ef6配置（委托给 config.ts，返回活动 Provider 的 ModelConfig 视图）
- */
-export async function getModelConfig(): Promise<ModelConfig.ModelConfig> {
-  const { getModelConfig: get } = await import('./config')
-  return get()
-}
-
-/**
- * 更新 Model \u63d2\u4ef6配置（已弃用：请使用 services/ModelProviders.ts）
- */
-export async function updateModelConfig(_config: Partial<ModelConfig.ModelConfig>): Promise<void> {
-  throw new Error(
-    'updateModelConfig 已弃用：AI 配置请通过 services/ModelProviders.ts 的 setProvider 更新'
-  )
 }

@@ -374,12 +374,23 @@ export const useSessionsStore = defineStore('sessions', () => {
         sessionRiskLevels.value = { ...sessionRiskLevels.value, ...riskBackfill }
       }
 
-      // 合并实时 is_working：list 接口返回的是存储里的状态，与 in-memory live status 合并
+      // 合并实时 is_working：list 接口返回的是后端 ActiveSessionManager 的权威状态
       const liveStatuses = sessionStatuses.value
       list.value = items.map((it) => {
         const live = liveStatuses[it.id]
         return live ? { ...it, is_working: live.is_working } : it
       })
+
+      // 关键：把后端权威 is_working 回填到 sessionStatuses（isLoading 的唯一来源）。
+      // 否则页面重载/视图挂载后，运行中的会话在输入框显示为禁用的"发送"按钮，
+      // 用户无法点击停止（stop 按钮失效 bug）。
+      // 仅做 false→true 的升级：true→false 的收敛交给事件流的 idle/Abort/Error 事件，
+      // 避免 list 快照与实时事件竞争时误降级。
+      for (const it of items) {
+        if (it.is_working && !liveStatuses[it.id]?.is_working) {
+          putStatus(it.id, { is_working: true, activity: '处理中…' })
+        }
+      }
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
       logger.error('[sessions]', 'refreshList 失败', e)

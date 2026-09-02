@@ -39,7 +39,8 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   background: var(--color-bg);
   color: var(--color-text);
-  font-size: 14px;
+  /* 用 rem 参照 <html> 根字号（16px），使字号档位（小/中/大）能整体缩放界面文本 */
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 
@@ -67,5 +68,16 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #bbb;
+}
+
+:root[data-theme="dark"] {
+  --color-primary: #818cf8;
+  --color-primary-dark: #6366f1;
+  --color-bg: #1e1e2e;
+  --color-surface: #27273a;
+  --color-border: #3f3f5a;
+  --color-text: #e2e8f0;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
 }
 </style>

@@ -14,6 +14,11 @@
 
 ---
 
+## 2026-09-02: 停止按钮失效 + 工具命令白名单误报修复
+
+- **修复停止按钮失效**：`sessions` store 的 `refreshList` 只把后端 `session/list` 返回的权威 `is_working` 合并进 `list`（卡片圆点），未回填 `sessionStatuses`——而停止按钮的 `isLoading` 只读后者。页面重载/视图挂载后，运行中的会话按钮显示为禁用的「发送」，点击无反应。现在 `refreshList` 把后端运行态回填到 `sessionStatuses`（仅 false→true 升级；true→false 收敛仍由事件流 idle/Abort/Error 负责，避免快照竞争误降级）
+- **修复工具调用「命令不在允许列表中」误报**：`SecurityPolicy` 默认白名单补充常用命令（flutter/dart、node/npx/pnpm/yarn/bun、powershell/pwsh/cmd、pip、cp/mv/touch/ln/tar、head/diff/sed/awk/which、taskkill/ipconfig/netstat 等）；新增 `normalize_base_command` 归一化——去掉路径前缀与 `.exe/.cmd/.bat` 扩展名（`npm.cmd run build`、`python.exe` 此前均无法匹配白名单，`rm.exe` 的风险等级也会被误判为 Low）；`rm` 等高风险命令加入白名单仅消除误报文案，仍受 `block_high_risk_commands` 策略阻止（附 4 个单元测试）
+
 ## 2026-09-02: 工具失败语义收敛（recoverable 标记：信息性 vs 待恢复）
 
 - **问题**：工具失败无条件显示重试按钮并自动展开，但 auto 模式下会话仍在运行——错误结果已喂给 LLM 继续处理，重试无意义（resume 在会话忙碌时也会被后端拒绝）；`retry`/`supply` 实际只为 **interactive 模式**（失败即暂停等用户恢复）设计

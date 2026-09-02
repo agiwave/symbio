@@ -29,28 +29,51 @@
       <!-- 外观设置 -->
       <section v-show="activeSection === 'appearance'" class="content-section">
         <h2>外观</h2>
+        <p class="section-desc">主题与字体设置会立即生效并自动保存</p>
         <div class="setting-group">
           <div class="setting-item">
             <div class="setting-info">
               <label>主题</label>
               <p class="setting-desc">选择应用的主题风格</p>
             </div>
-            <select v-model="settings.theme">
-              <option value="light">浅色</option>
-              <option value="dark">深色</option>
-              <option value="auto">跟随系统</option>
-            </select>
+            <div class="segmented">
+              <button
+                v-for="opt in themeOptions"
+                :key="opt.value"
+                type="button"
+                class="seg-btn"
+                :class="{ active: appearance.theme === opt.value }"
+                @click="appearance.theme = opt.value"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
           </div>
           <div class="setting-item">
             <div class="setting-info">
               <label>字体大小</label>
-              <p class="setting-desc">调整界面字体大小</p>
+              <p class="setting-desc">调整界面文字大小</p>
             </div>
-            <select v-model="settings.fontSize">
-              <option value="small">小</option>
-              <option value="medium">中</option>
-              <option value="large">大</option>
-            </select>
+            <div class="segmented">
+              <button
+                v-for="opt in fontSizeOptions"
+                :key="opt.value"
+                type="button"
+                class="seg-btn"
+                :class="{ active: appearance.fontSize === opt.value }"
+                @click="appearance.fontSize = opt.value"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+          <div class="appearance-preview">
+            <p class="preview-title">排版预览</p>
+            <div class="preview-card">
+              <h4>明晰的标题</h4>
+              <p>这是一段用于预览字体大小与主题配色效果的示例文字，会随你在上面的选择实时变化。</p>
+              <button class="preview-chip" type="button">代码片段</button>
+            </div>
           </div>
         </div>
       </section>
@@ -219,6 +242,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { logger } from '@/utils/logger'
 import logoUrl from '../assets/logo.svg'
+import { useAppearanceStore, type ThemeMode, type FontSize } from '@/stores/appearance'
 import {
   getSessionConfig,
   setSessionConfig,
@@ -242,11 +266,20 @@ const sections = [
   { id: 'web', icon: '🌐', label: '网络工具' },
   { id: 'about', icon: 'ℹ️', label: '关于' },
 ]
-// 外观设置
-const settings = reactive({
-  theme: 'light',
-  fontSize: 'medium',
-})
+
+// 外观设置（主题 / 字体）通过 appearance store 即时应用并持久化
+const appearance = useAppearanceStore()
+
+const themeOptions: Array<{ value: ThemeMode; label: string }> = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'auto', label: '跟随系统' },
+]
+const fontSizeOptions: Array<{ value: FontSize; label: string }> = [
+  { value: 'small', label: '小' },
+  { value: 'medium', label: '中' },
+  { value: 'large', label: '大' },
+]
 
 // 会话设置
 const sessionConfig = reactive<SessionConfig>({
@@ -380,6 +413,18 @@ onMounted(() => loadConfigs())
 .toggle input:checked + .toggle-slider { background-color: var(--color-primary); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(24px); }
 .action-btn { padding: 0.5rem 1rem; background: var(--color-primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; }
+/* 分段选择控件 */
+.segmented { display: inline-flex; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 8px; padding: 2px; }
+.seg-btn { padding: 0.375rem 0.9rem; border: none; background: transparent; border-radius: 6px; color: var(--color-text-secondary); cursor: pointer; font-size: 0.875rem; transition: background 0.15s, color 0.15s; }
+.seg-btn:hover { color: var(--color-text); }
+.seg-btn.active { background: var(--color-surface); color: var(--color-primary); font-weight: 500; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+/* 外观预览卡片 */
+.appearance-preview { padding: 1rem; border-top: 1px solid var(--color-border); }
+.preview-title { font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 0.75rem; }
+.preview-card { border: 1px solid var(--color-border); border-radius: 10px; padding: 1rem 1.25rem; background: var(--color-bg); }
+.preview-card h4 { font-size: 1.125rem; margin-bottom: 0.4rem; color: var(--color-text); }
+.preview-card p { font-size: 0.875rem; color: var(--color-text-secondary); margin-bottom: 0.75rem; }
+.preview-chip { padding: 0.3rem 0.75rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-primary); font-size: 0.8rem; cursor: default; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .setting-divider { height: 1px; background: var(--color-border); margin: 1rem 0; }
 .about-info { text-align: center; padding: 3rem; }
