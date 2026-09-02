@@ -1100,22 +1100,15 @@ function highlightJsonString(s: string): string {
 }
 
 /* ── 响应流排版（现代扁平 agent 风格）──
-   助手正文（type-text:not(.user)）采用无框扁平设计：直接落在聊天背景上，
-   仅保留与节点头一致的左右内边距，靠纵向间距分组，去掉背景卡片以减少视觉装饰。
-   思考过程 / 工具调用保留极淡卡片 + 弱化描边，仅作内容分组，保持清晰不喧宾夺主。 */
-.msg.type-text:not(.user) {
-  padding: var(--card-pad-y, 0.3rem) var(--card-pad-x, 0.5rem);
-}
-.msg.type-reasoning {
-  background: var(--color-msg-card);
-  border-radius: 10px;
-  padding: var(--card-pad-y, 0.3rem) var(--card-pad-x, 0.5rem);
-}
+   非用户响应节点（正文 / 思考过程 / 工具调用）统一无框扁平：
+   直接落在聊天背景上，仅由「节点头（图标 + 名称 + 折叠箭头）」分组，
+   去掉背景卡片与外描边，消除「卡片内边距 + 条目间距」双层空白叠加造成的稀疏感。
+   代码块（.json / markdown pre）属于内容块，保留底色以保证可读性；
+   交互类卡片（user_prompt 提问 / supply 补充参数）保留淡表面以维持操作可辨识性。 */
+.msg.type-text:not(.user),
+.msg.type-reasoning,
 .msg.type-tool_call {
-  background: var(--color-msg-card);
-  border: 1px solid var(--color-msg-card-border);
-  border-radius: 10px;
-  padding: var(--card-pad-y, 0.3rem) var(--card-pad-x, 0.5rem);
+  padding: 0.12rem var(--card-pad-x, 0.5rem);
 }
 
 /* ── JSON 代码块 ── */

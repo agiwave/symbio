@@ -35,6 +35,7 @@ import { RouterView } from 'vue-router'
   --color-chat-bg: #ffffff;          /* 聊天消息区背景 */
   --color-msg-card: #f6f8fb;         /* 思考 / 工具等次级内容卡片底色（极淡） */
   --color-msg-card-border: #e8edf4;  /* 卡片描边 */
+  --msg-gap: 0.45rem;
   --color-nested-line: #e8edf4;      /* 嵌套层级引导竖线 */
   --color-chip-bg: #eef2f7;          /* 中性图标芯片底 */
   --color-chip-fg: #64748b;          /* 中性图标芯片字 */
@@ -126,6 +127,7 @@ body {
   --color-chat-bg: #181825;
   --color-msg-card: #27273a;
   --color-msg-card-border: #3f3f5a;
+  --msg-gap: 0.45rem;
   --color-nested-line: #3f3f5a;
   --color-chip-bg: #313147;
   --color-chip-fg: #94a3b8;
