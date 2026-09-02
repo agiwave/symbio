@@ -443,13 +443,11 @@ const isRootTurn = computed(() => isTurn.value && role.value !== 'tool')
 const isTurnPending = computed(
   () => isRootTurn.value && isStreaming.value && !(props.node.children || []).length,
 )
-// 直接文本回复：Turn 的直接文本子节点，正文作为 Turn 主体内联展示（不重复头部，
-// 由父 Turn 头部统一代表，折叠也随父 Turn）。
-// 不限定 role=assistant：子智能体响应 Turn(role=Tool) 的文本子节点 role 同为 Tool，
-// 但其本质仍是「该 Turn 的回复正文」，必须内联；否则会被误判为独立「响应」块，
-// 导致根级 Turn（AI 助手 + 正文）与子 agent Turn（响应块）风格不一致。
+// Turn 的直接**正文**子节点：内联展示（无头部，由 Turn 分组直接纵排承载）。
+// 仅限 text——思考节点必须保留单行行头（新设计：思考始终单行可折叠），
+// 否则流式思考会以裸 Markdown 块呈现，破坏「思考中…」动效与折叠交互。
 const isResponseText = computed(
-  () => isTextLike.value && props.parentType === 'turn',
+  () => props.parentType === 'turn' && type.value === 'text',
 )
 
 const isStreaming = computed(() => status.value === 'streaming')
