@@ -214,7 +214,7 @@ watch(modelValue, () => {
   display: flex;
   align-items: flex-end;
   gap: 0.5rem;
-  background: #f5f5f5;
+  background: var(--color-input-bg, #f5f5f5);
   border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 0.5rem;
@@ -223,7 +223,7 @@ watch(modelValue, () => {
 
 .input-wrapper:focus-within {
   border-color: var(--color-primary);
-  background: #fff;
+  background: var(--color-surface-strong, #fff);
 }
 
 textarea {

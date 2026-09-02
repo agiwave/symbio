@@ -547,8 +547,8 @@ onUnmounted(() => {
   transition: background 0.15s;
 }
 
-.option:hover { background: #f5f5f5; }
-.option.active { background: #f0f0ff; }
+.option:hover { background: var(--color-hover-bg, #f5f5f5); }
+.option.active { background: var(--color-active-bg, #eef2ff); }
 
 .option .icon { font-size: 1.25rem; flex-shrink: 0; }
 .text { flex: 1; min-width: 0; }
@@ -598,7 +598,7 @@ onUnmounted(() => {
 }
 
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal { background: white; border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 400px; }
+.modal { background: var(--color-surface-strong, #fff); border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 400px; }
 .modal h3 { margin-bottom: 1rem; }
 .form-group { margin-bottom: 1rem; }
 .form-group label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem; }
@@ -609,5 +609,5 @@ onUnmounted(() => {
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; }
 .action-btn { padding: 0.5rem 1rem; background: var(--color-primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; }
 .action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-.action-btn.secondary { background: #f0f0f0; color: var(--color-text); }
+.action-btn.secondary { background: var(--color-hover-bg, #f0f0f0); color: var(--color-text); }
 </style>

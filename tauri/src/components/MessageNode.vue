@@ -709,7 +709,7 @@ function highlightJsonString(s: string): string {
 .msg.nested {
   margin-left: var(--nest-indent, 0.7rem);
   padding-left: var(--nest-indent, 0.7rem);
-  border-left: 2px solid #e8edf4;
+  border-left: 2px solid var(--color-nested-line);
 }
 
 /* ── 根级 Turn 响应分组（透明容器）──
@@ -746,7 +746,7 @@ function highlightJsonString(s: string): string {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #6366f1;
+  background: var(--color-primary);
   animation: turn-pulse 1.2s infinite ease-in-out;
 }
 .turn-pending-dots span:nth-child(2) {
@@ -850,15 +850,15 @@ function highlightJsonString(s: string): string {
   text-decoration: underline;
 }
 .msg :deep(.markdown-body code) {
-  background: rgba(15, 23, 42, 0.06);
+  background: var(--color-msg-card);
   padding: 0.1rem 0.3rem;
   border-radius: 4px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.85em;
 }
 .msg :deep(.markdown-body pre) {
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--color-code-bg);
+  color: var(--color-code-fg);
   padding: 0.6rem 0.8rem;
   border-radius: 8px;
   overflow-x: auto;
@@ -928,24 +928,24 @@ function highlightJsonString(s: string): string {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background: #eef2f7;
-  color: #64748b;
+  background: var(--color-chip-bg);
+  color: var(--color-chip-fg);
 }
 .node-head.user .node-icon {
-  background: #dbeafe;
-  color: #2563eb;
+  background: var(--color-chip-user-bg);
+  color: var(--color-chip-user-fg);
 }
 .node-head.sub .node-icon {
-  background: #e0f2fe;
-  color: #0284c7;
+  background: var(--color-chip-sub-bg);
+  color: var(--color-chip-sub-fg);
 }
 .node-head.tool .node-icon {
-  background: #eef2ff;
-  color: #4f46e5;
+  background: var(--color-chip-tool-bg);
+  color: var(--color-chip-tool-fg);
 }
 .node-head.reasoning .node-icon {
-  background: #f3e8ff;
-  color: #7c3aed;
+  background: var(--color-chip-reasoning-bg);
+  color: var(--color-chip-reasoning-fg);
 }
 .node-title {
   font-weight: 500;
@@ -958,7 +958,7 @@ function highlightJsonString(s: string): string {
   white-space: nowrap;
 }
 .node-head.sub .node-title {
-  color: #0369a1;
+  color: var(--color-chip-sub-fg);
 }
 /* 收起态单行摘要（标题之后、状态标签之前，省略号截断） */
 .node-preview {
@@ -972,10 +972,10 @@ function highlightJsonString(s: string): string {
 }
 .node-live {
   font-size: 0.72rem;
-  color: #6366f1;
+  color: var(--color-chip-tool-fg);
 }
 .node-head.sub .node-live {
-  color: #0ea5e9;
+  color: var(--color-chip-sub-fg);
 }
 
 /* ── 悬停操作（编辑 / 删除）──
@@ -994,7 +994,7 @@ function highlightJsonString(s: string): string {
 .node-act {
   border: none;
   background: rgba(100, 116, 139, 0.1);
-  color: #64748b;
+  color: var(--color-chip-fg);
   border-radius: 4px;
   width: 18px;
   height: 18px;
@@ -1016,16 +1016,16 @@ function highlightJsonString(s: string): string {
   border-radius: 999px;
 }
 .node-tag.sub {
-  background: #e0e7ff;
-  color: #4338ca;
+  background: var(--color-tag-sub-bg);
+  color: var(--color-tag-sub-fg);
 }
 .node-tag.warn {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--color-tag-warn-bg);
+  color: var(--color-tag-warn-fg);
 }
 .node-tag.err {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--color-tag-err-bg);
+  color: var(--color-tag-err-fg);
 }
 .node-heartbeat {
   display: inline-flex;
@@ -1058,8 +1058,8 @@ function highlightJsonString(s: string): string {
 }
 .user-bubble {
   max-width: 80%;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  color: #fff;
+  background: var(--color-user-bubble);
+  color: var(--color-user-bubble-fg);
   border-radius: 14px 14px 4px 14px;
   padding: 0.6rem 0.85rem;
 }
@@ -1099,14 +1099,21 @@ function highlightJsonString(s: string): string {
   margin-bottom: 0;
 }
 
-/* ── 统一内容卡片（思考过程 / 工具调用 / 文本回复）──
-   所有响应内容节点共用同一套背景、圆角与内边距，从机制上杜绝「有的有框、有的没框」
-   导致的内容错位：背景框自带内边距，框内文字左缘统一落在同一位置，同层级天然对齐。
-   语义由头部图标 / 标题区分；用户气泡（自带蓝色背景、右对齐）除外。 */
-.msg.type-reasoning,
-.msg.type-tool_call,
+/* ── 响应流排版（现代扁平 agent 风格）──
+   助手正文（type-text:not(.user)）采用无框扁平设计：直接落在聊天背景上，
+   仅保留与节点头一致的左右内边距，靠纵向间距分组，去掉背景卡片以减少视觉装饰。
+   思考过程 / 工具调用保留极淡卡片 + 弱化描边，仅作内容分组，保持清晰不喧宾夺主。 */
 .msg.type-text:not(.user) {
-  background: #f6f8fb;
+  padding: var(--card-pad-y, 0.3rem) var(--card-pad-x, 0.5rem);
+}
+.msg.type-reasoning {
+  background: var(--color-msg-card);
+  border-radius: 10px;
+  padding: var(--card-pad-y, 0.3rem) var(--card-pad-x, 0.5rem);
+}
+.msg.type-tool_call {
+  background: var(--color-msg-card);
+  border: 1px solid var(--color-msg-card-border);
   border-radius: 10px;
   padding: var(--card-pad-y, 0.3rem) var(--card-pad-x, 0.5rem);
 }
@@ -1115,8 +1122,8 @@ function highlightJsonString(s: string): string {
 .json {
   margin: 0;
   padding: 0.5rem 0.6rem;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--color-code-bg);
+  color: var(--color-code-fg);
   border-radius: 8px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.76rem;
@@ -1127,7 +1134,7 @@ function highlightJsonString(s: string): string {
 }
 /* 工具请求参数：在深色代码块左侧加一道蓝色强调边，强化「请求」语义 */
 .json.req {
-  border-left: 3px solid #3b82f6;
+  border-left: 3px solid var(--color-user-bubble);
 }
 /* 工具调用三段式卡片：请求 / 过程 / 结果（各自独立响应流，纵向排列） */
 .tool-sections {
@@ -1164,8 +1171,8 @@ function highlightJsonString(s: string): string {
 
 /* ── 待用户响应（user_prompt 提问 / 工具确认）── */
 .user-prompt {
-  border: 1px solid #c7d2fe;
-  background: #eef2ff;
+  border: 1px solid var(--color-prompt-border);
+  background: var(--color-prompt-bg);
   border-radius: 8px;
   padding: 0.6rem 0.7rem;
   display: flex;
@@ -1183,11 +1190,11 @@ function highlightJsonString(s: string): string {
 .up-header {
   font-size: 0.78rem;
   font-weight: 600;
-  color: #4338ca;
+  color: var(--color-chip-tool-fg);
 }
 .up-qtext {
   font-size: 0.82rem;
-  color: #1e293b;
+  color: var(--color-text);
 }
 .up-options {
   display: flex;
@@ -1199,37 +1206,37 @@ function highlightJsonString(s: string): string {
   align-items: center;
   gap: 0.4rem;
   padding: 0.3rem 0.45rem;
-  border: 1px solid #dbe2f0;
+  border: 1px solid var(--color-option-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--color-option-bg);
   font-size: 0.8rem;
   cursor: pointer;
 }
 .up-option.active {
-  border-color: #6366f1;
-  background: #eef2ff;
+  border-color: var(--color-option-active-border);
+  background: var(--color-option-active-bg);
 }
 .up-opt-label {
   font-weight: 500;
-  color: #1e293b;
+  color: var(--color-text);
 }
 .up-opt-desc {
   font-size: 0.74rem;
-  color: #64748b;
+  color: var(--color-text-muted);
 }
 .up-option-other {
   gap: 0.35rem;
 }
 .up-other-input {
   flex: 1;
-  border: 1px solid #dbe2f0;
+  border: 1px solid var(--color-option-border);
   border-radius: 4px;
   padding: 0.2rem 0.4rem;
   font-size: 0.78rem;
 }
 .up-submit {
   align-self: flex-start;
-  background: #4f46e5;
+  background: var(--color-primary);
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -1254,33 +1261,33 @@ function highlightJsonString(s: string): string {
 .up-tool-name {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--color-text);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 .up-risk {
   font-size: 0.68rem;
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
-  background: #e2e8f0;
-  color: #475569;
+  background: var(--color-chip-bg);
+  color: var(--color-chip-fg);
 }
 .up-risk.high {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--color-tag-err-bg);
+  color: var(--color-tag-err-fg);
 }
 .up-risk.medium {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--color-tag-warn-bg);
+  color: var(--color-tag-warn-fg);
 }
 .up-confirm-desc {
   font-size: 0.8rem;
-  color: #334155;
+  color: var(--color-text-secondary);
 }
 .up-args {
   margin: 0;
   padding: 0.5rem 0.6rem;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--color-code-bg);
+  color: var(--color-code-fg);
   border-radius: 8px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.74rem;
@@ -1312,9 +1319,9 @@ function highlightJsonString(s: string): string {
   opacity: 0.7;
 }
 .up-reject {
-  background: #fff;
-  border-color: #fca5a5;
-  color: #b91c1c;
+  background: var(--color-option-bg);
+  border-color: var(--color-error-border);
+  color: var(--color-error-fg);
 }
 
 /* ── 错误 ── */
@@ -1322,12 +1329,12 @@ function highlightJsonString(s: string): string {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
   border-radius: 8px;
   padding: 0.45rem 0.6rem;
   font-size: 0.8rem;
-  color: #b91c1c;
+  color: var(--color-error-fg);
 }
 .err-icon {
   flex-shrink: 0;
@@ -1338,9 +1345,9 @@ function highlightJsonString(s: string): string {
 }
 .retry {
   flex-shrink: 0;
-  background: #fff;
-  border: 1px solid #fca5a5;
-  color: #b91c1c;
+  background: var(--color-option-bg);
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error-fg);
   border-radius: 6px;
   padding: 0.2rem 0.6rem;
   font-size: 0.76rem;
@@ -1353,30 +1360,30 @@ function highlightJsonString(s: string): string {
   gap: 0.4rem;
 }
 .supply {
-  background: #fff;
-  border: 1px solid #c7d2fe;
-  color: #4338ca;
+  background: var(--color-supply-bg);
+  border: 1px solid var(--color-prompt-border);
+  color: var(--color-chip-tool-fg);
   border-radius: 6px;
   padding: 0.2rem 0.6rem;
   font-size: 0.76rem;
   cursor: pointer;
 }
 .supply:hover {
-  background: #eef2ff;
+  background: var(--color-prompt-bg);
 }
 .supply-form {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  background: #f6f8fb;
-  border: 1px solid #dbe2f0;
+  background: var(--color-msg-card);
+  border: 1px solid var(--color-supply-border);
   border-radius: 8px;
   padding: 0.5rem 0.6rem;
 }
 .supply-textarea {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid #dbe2f0;
+  border: 1px solid var(--color-supply-border);
   border-radius: 6px;
   padding: 0.35rem 0.45rem;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -1386,11 +1393,11 @@ function highlightJsonString(s: string): string {
   outline: none;
 }
 .supply-textarea:focus {
-  border-color: #6366f1;
+  border-color: var(--color-primary);
 }
 .supply-submit {
   align-self: flex-start;
-  background: #4f46e5;
+  background: var(--color-primary);
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -1399,6 +1406,6 @@ function highlightJsonString(s: string): string {
   cursor: pointer;
 }
 .supply-submit:hover {
-  background: #4338ca;
+  background: var(--color-primary-dark);
 }
 </style>

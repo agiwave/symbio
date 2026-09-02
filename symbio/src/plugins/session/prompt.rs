@@ -48,7 +48,7 @@ pub fn temporal_context(workdir: Option<&str>) -> String {
     };
 
     let mut line = format!("<context>当前时间: {} {}", time_str, weekday);
-    if let Some(wd) = workdir.filter(|w| !w.is_empty()) {
+    if let Some(wd) = workdir.map(str::trim).filter(|w| !w.is_empty()) {
         line.push_str(&format!(" | 工作区: {}", wd));
     }
     line.push_str("</context>\n");

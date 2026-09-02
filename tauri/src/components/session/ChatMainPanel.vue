@@ -284,7 +284,7 @@ async function onClearHistory() {
 
 .load-error-icon {
   font-size: 2.5rem;
-  color: #f59e0b;
+  color: var(--color-banner-border);
   margin-bottom: 0.5rem;
 }
 
@@ -302,7 +302,7 @@ async function onClearHistory() {
   max-width: 480px;
   word-break: break-word;
   font-family: 'Fira Code', 'Consolas', monospace;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--color-msg-card);
   padding: 0.4rem 0.8rem;
   border-radius: 6px;
 }

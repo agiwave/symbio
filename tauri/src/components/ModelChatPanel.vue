@@ -540,7 +540,7 @@ watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'po
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  background: var(--color-background);
+  background: var(--color-chat-bg);
 }
 
 .chat-messages {
@@ -609,9 +609,9 @@ watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'po
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.85rem;
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  border-bottom: 1px solid #f59e0b;
-  color: #92400e;
+  background: var(--color-banner-bg);
+  border-bottom: 1px solid var(--color-banner-border);
+  color: var(--color-banner-fg);
   font-size: 0.82rem;
   flex-shrink: 0;
 }
@@ -629,7 +629,7 @@ watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'po
 .banner-close {
   background: transparent;
   border: none;
-  color: #92400e;
+  color: var(--color-banner-fg);
   font-size: 1.2rem;
   line-height: 1;
   cursor: pointer;
