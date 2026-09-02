@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
+      // ESM 配置（package.json "type": "module"）下无 __dirname，用 import.meta.dirname
+      '@': path.resolve(import.meta.dirname, './src')
     }
   },
   clearScreen: false,

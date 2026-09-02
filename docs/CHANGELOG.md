@@ -14,6 +14,12 @@
 
 ---
 
+## 2026-09-02: 会话请求修复（temperature 序列化精度）+ 测试/构建卫生
+
+- **修复 LLM 请求 400（temperature 参数非法）**：`ModelConfig.temperature` / `ModelProviderConfig.temperature` 由 `f32` 改为 `f64`——`f32 0.7` 经 serde_json 升位 f64 后序列化为 `0.699999988079071`，被限制 2 位小数的模型 API 拒绝；f64 round-trip 精确，默认值恒为 `0.7`
+- 修复 `time.spec.ts`「今天」用例硬编码日期随时间腐化（改用 `Date.now()` 相对构造）
+- `tauri/package.json` 声明 `"type": "module"` + `vite.config.ts` 改用 `import.meta.dirname`，消除 Vite configLoader native 模式的 ESM/CommonJS 混用警告
+
 ## 2026-09-01: 全量依赖升级（Rust / Node / 前端 / CI）
 
 **Rust**（保留精确版本，symbio/Cargo.toml）：thiserror 2.0.20、dirs 6、notify 8.2、fastembed 6.0.2、dashmap 6.2.1、which 8.0.6、reqwest 0.13.4、time 0.3.55、rusqlite 0.37 + tokio-rusqlite 0.7 配套锁定等。代码适配：

@@ -6,11 +6,12 @@ describe('formatTime', () => {
   const NOW = new Date('2026-09-01T12:00:00').getTime()
 
   it('今天的时间返回 HH:mm 格式', () => {
-    const today = new Date('2026-09-01T08:30:00').getTime() / 1000
+    // 用当前时刻构造"今天"的时间戳（硬编码日期会随时间腐化：今天是今天，明天就变昨天）
+    const today = Date.now() / 1000
     const result = formatTime(today)
     // toLocaleTimeString 输出依赖运行环境时区，只断言结构（不含日期部分）
     expect(result).not.toContain('昨天')
-    expect(result).not.toContain('周一')
+    expect(result).not.toContain('周')
   })
 
   it('昨天的时间返回"昨天"', () => {
