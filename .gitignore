@@ -5,6 +5,7 @@ vendor/
 .symbio/
 symbio/embedding/
 .cargo*/
+.zcode/
 
 # Build outputs
 dist/
