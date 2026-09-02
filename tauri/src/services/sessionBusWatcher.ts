@@ -125,63 +125,32 @@ export function startSessionBusWatcher(): void {
         }
 
         case ChatEventType.Error: {
-          // Error 事件：把错误**统一呈现在助手父节点（turn）**上；
-          // reasoning（思考）等子节点不再独立显示同一份错误，避免"根级 + 子级"重复报错。
-          // 仅当没有任何 streaming 消息（错误发生在助手消息创建之前）时，
-          // 才落一条 ephemeral 错误（id=`__bus_error__`），与下方父节点错误不重复。
+          // Error 事件：**只信服务端失败终态**。后端在广播 Error 事件前，已通过
+          // persist_failure 把失败节点（含 Turn）以 Update(status=failed, error) 推送
+          // （上方 Update 分支已写入 store），此处不再做客户端启发式标记
+          // （旧逻辑：扫描 streaming 节点分摊错误 / 清空空推理块），避免与
+          // 刚收到的服务端终态冲突或刷新前后不一致。
+          // 兜底：仅当 store 中没有任何失败消息（错误发生在任何消息创建之前，
+          // 如 transport 级失败）时，才落一条 ephemeral 错误（id=`__bus_error__`）。
           const msgs = store.getSessionMessages(sid)
-          let anyStreaming = false
-          let errorAssigned = false
-          for (const msg of msgs) {
-            if (msg.status !== 'streaming' && msg.status !== 'waiting_user_action') continue
-            anyStreaming = true
-            const isReasoningChild = msg.type === 'reasoning'
-            if (isReasoningChild) {
-              // 推理子节点：保留其文本但不以"错误"呈现；空推理块直接移除（与 Abort 一致）
-              const text = typeof msg.content === 'string'
-                ? msg.content
-                : (Array.isArray(msg.content) ? (msg.content as any[]).filter(p => p.type === 'text').map(p => (p as any).text).join('') : '')
-              if (text.trim().length === 0) {
-                const mnext = { ...store.sessionMessages }
-                const cur = { ...(mnext[sid] || {}) }
-                delete cur[msg.id]
-                mnext[sid] = cur
-                store.sessionMessages = mnext
-              } else {
-                store.patchMessage(sid, { ...msg, status: 'completed' })
-              }
-              continue
-            }
-            // 助手父节点（turn）：承载错误文本（只挂一次）
-            store.patchMessage(sid, {
-              ...msg,
-              status: 'failed',
-              error: errorAssigned ? undefined : (evt.error || 'Unknown error')
-            })
-            errorAssigned = true
-          }
-          // 仅当没有 streaming 消息承载错误时，才落/覆盖 ephemeral 错误
-          if (!anyStreaming) {
+          const hasFailed = msgs.some(
+            (m) => m.status === 'failed' && m.id !== '__bus_error__' && !(m.meta as any)?.ephemeral,
+          )
+          if (!hasFailed) {
             const errorMsgId = '__bus_error__'
-            const existing = msgs.find(m => m.id === errorMsgId)
-            const ephemeralMsg = {
+            const existing = msgs.find((m) => m.id === errorMsgId)
+            // 覆盖用 putMessage 整体替换：patchMessage 对 text 类内容是**追加**语义，
+            // 连续错误会被拼成 "firstsecond"；整体替换保证始终展示最新一条错误。
+            store.putMessage(sid, {
+              ...(existing || {}),
               id: errorMsgId,
               role: 'assistant' as const,
               content: evt.error || 'Unknown error',
               status: 'failed' as const,
-              meta: { ephemeral: true },
-              timestamp: Date.now()
-            }
-            if (existing) {
-              store.patchMessage(sid, {
-                ...existing,
-                content: evt.error || 'Unknown error',
-                status: 'failed',
-                meta: { ...(existing.meta || {}), ephemeral: true }
-              })
-            } else {
-              store.putMessage(sid, ephemeralMsg)
-            }
+              meta: { ...(existing?.meta || {}), ephemeral: true },
+              timestamp: existing?.timestamp ?? Date.now(),
+              sort_index: existing?.sort_index,
+            } as any)
           }
           store.putStatus(sid, {
             is_working: false,

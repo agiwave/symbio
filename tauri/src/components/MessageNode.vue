@@ -1,31 +1,67 @@
 <!--
-  对话消息渲染（Content / Composite 分型模型 · 统一折叠式节点）
+  对话消息渲染（Content / Composite 分型模型 · Turn 响应分组 + 统一折叠式节点）
 
-  设计要点：
-  - 所有节点（内容节点 + 组合节点）使用**完全一致**的展示与交互：
-    一个可点击折叠的「头部」（图标 + 标题 + 状态标签 + 折叠箭头）+ 一个折叠体。
-  - 层级（无限递归的分形会话流）只靠「缩进 + 左侧引导竖线」表达，不再叠加任何外框，
-    杜绝「竖线 + 外框」同时出现的视觉冲突。
-  - 折叠策略（主流习惯，参考 ChatGPT / Claude / Cursor）：
-      · 主回复 / 用户消息 → 默认展开（用户要读的正文）。
-      · 思考过程 / 工具调用 / 工具结果 等子步骤 → 默认收起为单行（标题 + 摘要预览）。
-      · 流模式 / 失败 / 待审批 → 始终展开（看实时内容与错误）。
-      · 深层级（子 agent 嵌套内部，depth ≥ 3）→ 一律收起为单行摘要，避免长对话过深。
-      · 用户手动点击头部收拢/展开后，以其选择为准（覆盖默认）。
-  - 语义对应：工具调用 = 子会话流（组合节点），其自身 content 携带请求参数（JSON）；
-      渲染时请求参数被提升为 ToolCall 的一个「前端合成子节点」（标题「请求」），与响应子节点
-      （Turn/Text, role=Tool）并列，使 ToolCall 成为与其他层级完全一致的纯组合节点。
-      流模式响应(Turn, role=Tool) ≈ 主会话中「agent 响应」，可再嵌套 ToolCall，形成无限分型。
-  - 统一显示规则（根级 / 子级一致，杜绝风格分裂）：
-      · Turn 在任意层级都渲染为「图标 + 名称」头部（根级=「AI 助手」，子级=「↳ 子智能体/智能体名」），
-        其正文（思考/文本）一律内联为该 Turn 的折叠体 —— 不随 role 不同而被拆成独立的「响应」块。
-      · 「响应」标签仅保留给直接挂在 ToolCall 下的原始工具返回（role=Tool 的纯文本/JSON 结果）。
-      · 同层级内容的左右起始位置对齐：靠「统一背景框 + 统一内边距(--card-pad-*)」；
-        层级靠「统一缩进(--nest-indent) + 左侧引导竖线(depth≥2)」表达，头部与子内容左缘齐平。
-      · 纵向间隔全由单一变量 --msg-gap 驱动（顶层 / Turn 体 / 工具子节点共用），机制化保障一致。
+  设计要点（对齐 Claude / Codex 类智能体会话流，v2 重设计）：
+  - **根级助手 Turn = 响应分组（透明容器）**，三种形态：
+      ① 等待骨架：Turn 已创建但无任何子节点且运行中 → 三点脉动 +「正在思考…」；
+      ② 子节点直排：思考/正文/工具出现后容器完全隐藏（无头部、无外框），子节点直接纵排；
+      ③ 组级错误条：Turn 失败 →「重试」入口（思考/正文/工具请求的失败都归 Turn 重试，
+         resume action=retry_turn：删除响应子树 → 重新走 LLM 请求）。
+    子会话 Turn（role=tool）不适用此形态，保留「↳ 子智能体」折叠节点，作为工具「过程」段。
+  - **统一折叠式节点**（内容节点 + 工具节点）：可点击折叠的「头部」（图标 + 标题 + 状态标签）
+    + 折叠体。折叠策略：
+      · 用户消息 / 待审批 → 默认展开；
+      · 思考 → **始终单行**（流式中 = 「思考中…」呼吸动效；完成后 = 「思考」+ 摘要预览）；
+      · 工具调用 → **始终单行**（名称 + 状态标签；失败红色标签 + 悬停 ↻ 就地重试），
+        例外：内含待审批子节点 / 可补充参数时展开；
+      · 正文（助手文本）→ 始终展开；工具结果 / 子 agent 内部文本 → 收起；
+      · 深层级（depth ≥ 3）一律收起；用户手动切换后以其选择为准。
+  - **工具调用三段式卡片**（展开后）：请求（参数 JSON）/ 过程（子会话实时流，无则整段隐藏）/
+    结果（工具返回 + 审批提问），三段各自独立响应流。
+  - **失败重试两级分派**（由 ModelChatPanel.handleRetry 按 msg.type 路由）：
+      · tool_call 失败 → resume retry（删除失败结果 → 原参数重执行工具）；
+      · 其余失败（Turn 及其叶子）→ resume retry_turn（删除响应子树 → 重新 LLM 请求）。
+  - 层级（无限递归的分形会话流）只靠「缩进 + 左侧引导竖线」表达（depth ≥ 2），
+    纵向间隔全由单一变量 --msg-gap 驱动。
+  - 失败终态只信服务端（persist_failure 广播 Failed Update），前端不做启发式标记。
 -->
 <template>
-  <div class="msg" :class="[typeClass, statusClass, isUser ? 'user' : '', depth && depth > 1 ? 'nested' : '']">
+  <!-- 根级助手 Turn：响应分组（透明容器，对齐 Claude / Codex 会话流）
+       三种形态：
+       ① 等待骨架：Turn 已创建但尚无任何子节点且运行中 → 「正在思考…」动效
+       ② 子节点直排：思考/正文/工具出现后容器完全隐藏，子节点直接纵排
+       ③ 组级错误条：Turn 失败 → 重试入口（思考/正文/工具请求的失败都归 Turn 重试） -->
+  <div v-if="isRootTurn" class="msg turn-group" :class="[statusClass]">
+    <span class="turn-actions" @click.stop>
+      <button class="node-act" title="删除" @click.stop="emit('delete', node.id)">🗑</button>
+    </span>
+    <!-- ① 等待态 -->
+    <div v-if="isTurnPending" class="turn-pending">
+      <span class="turn-pending-dots"><span /><span /><span /></span>
+      <span class="turn-pending-text">{{ agentName }} 正在思考…</span>
+    </div>
+    <!-- ② 子节点直排 + ③ 组级错误条 -->
+    <template v-else>
+      <MessageNode
+        v-for="child in node.children"
+        :key="child.id"
+        :node="child"
+        :depth="(depth ?? 0) + 1"
+        parent-type="turn"
+        @retry="emit('retry', $event)"
+        @delete="emit('delete', $event)"
+        @edit="emit('edit', $event)"
+      />
+      <div v-if="isFailed" class="error-box turn-error">
+        <span class="err-icon">⚠</span>
+        <span class="err-text">{{ errorText }}</span>
+        <button class="retry" @click="emit('retry', node.id)">重试</button>
+      </div>
+    </template>
+  </div>
+
+  <!-- 其余节点：统一折叠式节点 -->
+  <div v-else class="msg" :class="[typeClass, statusClass, isUser ? 'user' : '', depth && depth > 1 ? 'nested' : '']">
     <!-- 统一头部：所有节点一致的可点击折叠栏（直接文本回复内联，不重复头部） -->
     <div v-if="!isResponseText" class="node-head" :class="headClass" @click="toggle">
       <span class="node-icon">{{ icon }}</span>
@@ -34,10 +70,11 @@
       <!-- 收起态展示单行摘要（深层级 / 子步骤默认收起时，让用户无需展开即知内容） -->
       <span v-if="!effectiveOpen && summaryPreview" class="node-preview">{{ summaryPreview }}</span>
       <span v-if="statusTag" class="node-tag" :class="tagClass">{{ statusTag }}</span>
-      <span v-if="isStreaming" class="node-live">{{ isToolCall ? '调用中…' : '回复中…' }}</span>
-      <!-- 悬停操作：仅用户消息可编辑；仅 root 级节点可删除（删除会连带其后所有消息） -->
+      <span v-if="isStreaming && !isReasoning && !isToolCall" class="node-live">回复中…</span>
+      <!-- 悬停操作：用户消息可编辑；失败工具可就地重试；仅 root 级节点可删除 -->
       <span class="node-actions" @click.stop>
         <button v-if="isUser" class="node-act" title="编辑" @click.stop="emit('edit', node.id)">✎</button>
+        <button v-if="isToolCall && isFailed" class="node-act" title="重试此工具" @click.stop="emit('retry', node.id)">↻</button>
         <button v-if="!node.parent_id" class="node-act" title="删除" @click.stop="emit('delete', node.id)">🗑</button>
       </span>
     </div>
@@ -53,12 +90,14 @@
       <!-- 思考过程 -->
       <div v-else-if="isReasoning" class="markdown-body" v-html="rendered" />
 
-      <!-- 文本 / 工具请求 / 工具返回 -->
+      <!-- 文本 / 工具请求 / 工具返回。
+           失败呈现（要求6/7 的分派）：
+           · Turn 子节点的失败 → 由根级 Turn 组错误条统一呈现（isResponseText 不再重复报错）；
+           · 工具结果的失败 → 此处仅显示错误文本，重试入口在工具行（↻）与工具卡内。 -->
       <template v-else-if="isTextLike">
-        <div v-if="isFailed" class="error-box">
+        <div v-if="isFailed && !isResponseText" class="error-box">
           <span class="err-icon">⚠</span>
           <span class="err-text">{{ errorText }}</span>
-          <button v-if="canRetry" class="retry" @click="emit('retry', node.id)">重试</button>
         </div>
         <pre
           v-else-if="renderAsJson || isToolResult"
@@ -143,112 +182,76 @@
         </div>
       </template>
 
-      <!-- 组合节点（Turn / ToolCall）：递归渲染子节点（内部的子会话流） -->
+      <!-- 组合节点（ToolCall）：三段式卡片（请求 / 过程 / 结果），三段各自独立响应流。
+           · 请求：ToolCall 自带参数（前端合成子节点，JSON 高亮）；
+           · 过程：子会话 Turn（role=tool），仅子会话类工具存在，无则整段隐藏；
+           · 结果：工具返回文本（JSON）与 user_prompt（审批/提问）。
+           Turn 的组级呈现（等待骨架/透明分组/组级重试）见模板顶部 isRootTurn 分支。 -->
       <template v-else>
-        <!-- 待用户响应区（ask_user 提问 / 工具确认）—— 与失败重试同构的特殊失败态 -->
-        <div v-if="isUserPrompt && isWaiting" class="user-prompt">
-          <div v-if="prompt?.kind === 'confirm'" class="up-confirm">
-            <div class="up-desc">{{ prompt?.description || ('工具：' + (prompt?.tool_name || 'tool')) }}</div>
-            <div class="up-meta">
-              <span class="up-tag" :class="riskClass">{{ prompt?.risk_level }}</span>
-              <span class="up-tool">工具：{{ prompt?.tool_name }}</span>
-            </div>
-            <div class="approval-btns">
-              <button class="approve" @click="submitConfirm(true)">批准执行</button>
-              <button class="reject" @click="submitConfirm(false)">拒绝</button>
-            </div>
+        <div v-if="isToolCall" class="tool-sections">
+          <!-- 请求 -->
+          <div v-if="toolRequestNode" class="tool-section">
+            <div class="ts-label">请求</div>
+            <MessageNode
+              :node="toolRequestNode"
+              :depth="(depth ?? 0) + 1"
+              parent-type="tool_call"
+              @retry="emit('retry', $event)"
+              @delete="emit('delete', $event)"
+              @edit="emit('edit', $event)"
+            />
+          </div>
+          <!-- 过程：子会话实时流（有些工具有，有些没有） -->
+          <div v-if="processTurns.length" class="tool-section">
+            <div class="ts-label">过程</div>
+            <MessageNode
+              v-for="t in processTurns"
+              :key="t.id"
+              :node="t"
+              :depth="(depth ?? 0) + 1"
+              parent-type="tool_call"
+              @retry="emit('retry', $event)"
+              @delete="emit('delete', $event)"
+              @edit="emit('edit', $event)"
+            />
+          </div>
+          <!-- 结果：工具返回 / 审批提问 -->
+          <div v-if="resultChildren.length" class="tool-section">
+            <div class="ts-label">结果</div>
+            <MessageNode
+              v-for="r in resultChildren"
+              :key="r.id"
+              :node="r"
+              :depth="(depth ?? 0) + 1"
+              parent-type="tool_call"
+              @retry="emit('retry', $event)"
+              @delete="emit('delete', $event)"
+              @edit="emit('edit', $event)"
+            />
           </div>
 
-          <div v-else-if="prompt?.kind === 'question'" class="up-question">
-            <div v-for="q in prompt?.questions || []" :key="q.id" class="up-q">
-              <div class="up-q-head" v-if="q.header">{{ q.header }}</div>
-              <div class="up-q-text">{{ q.question }}</div>
-              <div class="up-opts">
-                <label
-                  v-for="opt in q.options"
-                  :key="opt.label"
-                  class="up-opt"
-                  :class="{ 'up-opt-sel': (selected[q.id] || []).includes(opt.label) }"
-                >
-                  <input
-                    v-if="q.multiSelect"
-                    type="checkbox"
-                    :checked="(selected[q.id] || []).includes(opt.label)"
-                    @change="onToggleOption(q.id, true, opt.label)"
-                  />
-                  <input
-                    v-else
-                    type="radio"
-                    :name="q.id"
-                    :checked="(selected[q.id] || []).includes(opt.label)"
-                    @change="onToggleOption(q.id, false, opt.label)"
-                  />
-                  <span class="up-opt-label">{{ opt.label }}</span>
-                  <span v-if="opt.description" class="up-opt-desc">{{ opt.description }}</span>
-                </label>
-              </div>
-              <!-- "Other" 自定义输入 -->
-              <input
-                v-if="(q.options || []).some(o => (o.label || '').toLowerCase() === 'other')"
-                class="up-other"
-                :placeholder="`自定义（Other）`"
-                :value="customInput[q.id] || ''"
-                @input="customInput[q.id] = ($event.target as HTMLInputElement).value"
-              />
-            </div>
-            <button class="approve up-submit" @click="submitQuestions">提交</button>
+          <!-- 工具级失败：重试此工具（不动 Turn —— 与 Turn 级重试是两个不同粒度） -->
+          <div v-if="isFailed" class="error-box">
+            <span class="err-icon">⚠</span>
+            <span class="err-text">{{ errorText }}</span>
+            <button v-if="canRetry" class="retry" @click="emit('retry', node.id)">重试</button>
           </div>
-        </div>
 
-        <!-- ToolCall：纯组合节点。请求参数作为「前端合成子节点」(请求) 与响应子节点（Turn/Text）并排，
-             全部走递归 <MessageNode>，保证「请求 / 响应」都是可折叠的子节点，结构与其他层级完全一致。 -->
-        <div v-if="isToolCall" class="tool-children">
-          <MessageNode
-            v-for="child in renderedChildren"
-            :key="child.id"
-            :node="child"
-            :depth="(depth ?? 0) + 1"
-            :parent-type="type"
-            @retry="emit('retry', $event)"
-            @delete="emit('delete', $event)"
-            @edit="emit('edit', $event)"
-          />
-        </div>
-
-        <!-- 普通 Turn：直接递归子节点 -->
-        <template v-else>
-          <MessageNode
-            v-for="child in node.children"
-            :key="child.id"
-            :node="child"
-            :depth="(depth ?? 0) + 1"
-            :parent-type="type"
-            @retry="emit('retry', $event)"
-            @delete="emit('delete', $event)"
-            @edit="emit('edit', $event)"
-          />
-        </template>
-
-        <div v-if="isFailed" class="error-box">
-          <span class="err-icon">⚠</span>
-          <span class="err-text">{{ errorText }}</span>
-          <button v-if="canRetry" class="retry" @click="emit('retry', node.id)">重试</button>
-        </div>
-
-        <!-- 失败 ToolCall 的补充参数 UI（failure_kind='error' 时显示） -->
-        <div v-if="canSupply" class="tool-actions">
-          <button class="supply" @click="showSupplyForm = !showSupplyForm">
-            {{ showSupplyForm ? '收起' : '补充参数' }}
-          </button>
-        </div>
-        <div v-if="showSupplyForm" class="supply-form">
-          <textarea
-            v-model="supplyArgsText"
-            class="supply-textarea"
-            placeholder='{"key":"value"}  (与原参数浅合并)'
-            rows="4"
-          />
-          <button class="supply-submit" @click="submitSupply">提交补充</button>
+          <!-- 失败 ToolCall 的补充参数 UI（failure_kind='error' 时显示） -->
+          <div v-if="canSupply" class="tool-actions">
+            <button class="supply" @click="showSupplyForm = !showSupplyForm">
+              {{ showSupplyForm ? '收起' : '补充参数' }}
+            </button>
+          </div>
+          <div v-if="showSupplyForm" class="supply-form">
+            <textarea
+              v-model="supplyArgsText"
+              class="supply-textarea"
+              placeholder='{"key":"value"}  (与原参数浅合并)'
+              rows="4"
+            />
+            <button class="supply-submit" @click="submitSupply">提交补充</button>
+          </div>
         </div>
       </template>
     </div>
@@ -372,13 +375,6 @@ function submitQuestions() {
   })
 }
 
-const riskClass = computed(() => {
-  const r = (prompt.value?.risk_level || '').toLowerCase()
-  if (r === 'high') return 'risk-high'
-  if (r === 'medium') return 'risk-med'
-  return 'risk-low'
-})
-
 // ── 类型判定 ───────────────────────────────────────────────
 const role = computed(() => props.node.role || 'assistant')
 const type = computed(() => props.node.type || 'text')
@@ -423,12 +419,14 @@ const toolRequestNode = computed<ChatMessage | null>(() => {
     sort_index: -1, // 始终排在响应子节点之前
   }
 })
-// ToolCall 实际渲染的子节点 = 合成「请求」节点（若有）+ 后端真实响应子节点
-const renderedChildren = computed<ChatMessage[]>(() => {
-  const kids = props.node.children || []
-  const req = toolRequestNode.value
-  return req ? [req, ...kids] : kids
-})
+// ToolCall 实际渲染的子节点分组（三段式）：
+// 请求 = 前端合成节点（toolRequestNode）；过程 = 子会话 Turn；结果 = 其余（工具返回 / user_prompt）
+const processTurns = computed<ChatMessage[]>(() =>
+  (props.node.children || []).filter((c) => c.type === 'turn'),
+)
+const resultChildren = computed<ChatMessage[]>(() =>
+  (props.node.children || []).filter((c) => c.type !== 'turn'),
+)
 // 是否为合成「请求」子节点（用于标题 / 图标 / 渲染分支的特判）
 const isToolRequest = computed(() => !!(props.node.meta as Record<string, any> | undefined)?.__toolRequest)
 // 其余（非用户 / 非 Turn / 非 ToolCall / 非 Reasoning / 非 UserPrompt）：文本 / 请求 / 返回等叶子内容节点
@@ -437,6 +435,14 @@ const isTextLike = computed(
 )
 // 子会话响应：role=Tool 的 Turn，即「某个工具内部的流模式响应」（≈主会话 agent 响应）
 const isSubSession = computed(() => isTurn.value && role.value === 'tool')
+// 根级助手 Turn：响应分组容器（等待骨架 / 透明分组 / 组级错误条）。
+// 仅根级助手回合走此形态；子会话 Turn（role=tool）保留「↳ 子智能体」折叠节点形态，
+// 作为工具「过程」段的嵌套流展示。
+const isRootTurn = computed(() => isTurn.value && role.value !== 'tool')
+// 等待态：Turn 已广播但尚无任何子节点且仍在运行 → 显示「正在思考…」骨架
+const isTurnPending = computed(
+  () => isRootTurn.value && isStreaming.value && !(props.node.children || []).length,
+)
 // 直接文本回复：Turn 的直接文本子节点，正文作为 Turn 主体内联展示（不重复头部，
 // 由父 Turn 头部统一代表，折叠也随父 Turn）。
 // 不限定 role=assistant：子智能体响应 Turn(role=Tool) 的文本子节点 role 同为 Tool，
@@ -454,27 +460,33 @@ const typeClass = computed(() => `type-${type.value}`)
 const statusClass = computed(() => `status-${status.value}`)
 
 // ── 折叠状态（统一：所有节点都可点击头部折叠）───────────────
-// 主流折叠默认态（参考 ChatGPT / Claude / Cursor）：
-//   · 主回复 / 用户消息 → 展开（用户要读的正文）
-//   · 思考过程 / 工具调用 / 工具结果 等子步骤 → 默认收起为单行
-//   · 流模式 / 失败 / 待审批 → 始终展开（看实时内容与错误）
-// 深层级（子 agent 嵌套内部，depth ≥ 3）一律收起为单行摘要，避免长对话过深。
-//   （子 agent 自身的响应回合 depth=2 已由 defaultOpen 收起；此处针对其更深的内部步骤）
-// 用户手动收拢/展开后以其选择为准（userToggled 优先）。
+// 折叠默认态（对齐行业智能体会话流）：
+//   · 用户消息 / 待审批 → 展开
+//   · 思考：**始终单行**（流式中 = 「思考中…」动效提示，完成后 = 「思考」单行摘要）
+//   · 工具调用：**始终单行**（名称 + 状态标签），除非内含待审批子节点（否则审批入口被折叠隐藏）
+//     或可补充参数（需要操作入口）
+//   · 正文（助手文本）→ 始终展开；工具结果/子 agent 内部文本 → 收起
+//   · 深层级（depth ≥ 3）一律收起为单行摘要
+//   · 用户手动点击后以其选择为准（userToggled 优先）。
 const DEEP_COLLAPSE_LEVEL = 3
 const isDeep = computed(() => (props.depth ?? 0) >= DEEP_COLLAPSE_LEVEL)
 const defaultOpen = computed(() => {
   const st = status.value
-  // 待用户响应 / 失败 → 始终展开（用户需看到并操作）
-  if (st === 'streaming' || st === 'waiting_user_action' || st === 'failed') return true
-  // 工具调用节点：若有 failure_kind meta（可重试/补充），也展开
-  const meta = props.node.meta as Record<string, any> | undefined
-  if (meta?.failure_kind && isToolCall.value) return true
+  // 待用户响应（审批/提问）→ 始终展开（用户需看到并操作）
+  if (st === 'waiting_user_action') return true
   if (role.value === 'user') return true
-  if (type.value === 'turn') return role.value !== 'tool'   // 根级助手回合展开；子 agent 响应回合收起
-  if (type.value === 'reasoning') return false
-  if (type.value === 'tool_call') return false
-  if (type.value === 'text') return role.value !== 'tool'   // 助手文本展开；工具结果收起
+  // 工具调用：单行为主；例外 = 内含待审批子节点 / 可补充参数的失败
+  if (isToolCall.value) {
+    if ((props.node.children || []).some((c) => c.status === 'waiting_user_action')) return true
+    const meta = props.node.meta as Record<string, any> | undefined
+    if (meta?.failure_kind) return true
+    return false
+  }
+  // 思考：始终单行（不展开）
+  if (isReasoning.value) return false
+  // 文本：助手正文展开；工具结果/子 agent 内部文本收起
+  if (type.value === 'text') return role.value !== 'tool'
+  if (st === 'streaming' || st === 'failed') return true
   return true
 })
 const userToggled = ref(false)
@@ -518,7 +530,8 @@ const title = computed(() => {
   if (isUser.value) return '你'
   if (isUserPrompt.value) return prompt.value?.kind === 'confirm' ? '工具确认' : '提问'
   if (isToolRequest.value) return '请求'
-  if (isReasoning.value) return '思考'
+  // 思考：流式中「思考中…」+ 头部动效；完成后「思考」单行
+  if (isReasoning.value) return isStreaming.value ? '思考中…' : '思考'
   if (isToolCall.value) return props.node.name || '工具'
   if (isTurn.value) return agentName.value
   if (isToolResult.value) return '响应'
@@ -540,6 +553,7 @@ const headClass = computed(() => ({
   sub: isSubSession.value,
   tool: isToolCall.value,
   reasoning: isReasoning.value,
+  thinking: isReasoning.value && isStreaming.value,
 }))
 
 // ── 内容渲染 ───────────────────────────────────────────────
@@ -609,10 +623,10 @@ const errorText = computed(() => {
 })
 const canRetry = computed(() => {
   if (!isFailed.value) return false
-  // 工具调用失败（带 failure_kind）→ 可重试（走 resume retry）
-  if (isToolCall.value) return true
-  // 普通文本/响应失败 → 可重试（走 resume retry_turn）
-  return role.value !== 'tool' && !isToolResult.value && !isToolRequest.value
+  // 仅工具调用自身失败可就地重试（resume retry：删除失败结果 → 原参数重执行）。
+  // 思考/正文/工具请求的失败归 Turn 级重试（组级错误条，retry_turn），
+  // 由 ModelChatPanel.handleRetry 按 msg.type 分派，叶子节点不再出示重试按钮。
+  return isToolCall.value
 })
 // 工具调用失败且 failure_kind='error' → 可补充参数重新执行
 const canSupply = computed(
@@ -697,6 +711,79 @@ function highlightJsonString(s: string): string {
   margin-left: var(--nest-indent, 0.7rem);
   padding-left: var(--nest-indent, 0.7rem);
   border-left: 2px solid #e8edf4;
+}
+
+/* ── 根级 Turn 响应分组（透明容器）──
+   容器本身无任何视觉框：子节点直排，仅作为等待骨架与组级错误条的挂载点。 */
+.msg.turn-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--msg-gap, 0.6rem);
+}
+/* 悬停删除入口：默认隐藏，悬停整组时右上角浮现 */
+.msg.turn-group .turn-actions {
+  position: absolute;
+  top: -0.2rem;
+  right: 0;
+  display: none;
+  z-index: 1;
+}
+.msg.turn-group:hover .turn-actions {
+  display: inline-flex;
+}
+/* 等待骨架：Turn 已创建但尚无子节点 → 三点脉动 + 「正在思考…」 */
+.turn-pending {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.1rem;
+}
+.turn-pending-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.turn-pending-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+  animation: turn-pulse 1.2s infinite ease-in-out;
+}
+.turn-pending-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.turn-pending-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes turn-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.turn-pending-text {
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #94a3b8);
+}
+/* 思考行流式动效：标题呼吸闪烁（单行态，不展开内容） */
+.node-head.thinking .node-title {
+  animation: think-pulse 1.4s ease-in-out infinite;
+}
+@keyframes think-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* ── Markdown 内容（v-html 注入，需用 :deep 穿透 scoped 样式）── */
@@ -1043,11 +1130,22 @@ function highlightJsonString(s: string): string {
 .json.req {
   border-left: 3px solid #3b82f6;
 }
-/* 工具调用：请求 / 响应 均为其可折叠子节点，统一竖向排列（间隔与全局一致） */
-.tool-children {
+/* 工具调用三段式卡片：请求 / 过程 / 结果（各自独立响应流，纵向排列） */
+.tool-sections {
   display: flex;
   flex-direction: column;
   gap: var(--msg-gap, 0.6rem);
+}
+.tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.ts-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted, #94a3b8);
 }
 .json-key {
   color: #7dd3fc;
