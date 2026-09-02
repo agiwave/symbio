@@ -43,7 +43,7 @@ pub struct ModelProviderConfig {
     pub api_key: Option<String>,
     pub model: String,
     #[serde(default = "default_temperature")]
-    pub temperature: f32,
+    pub temperature: f64,
     pub max_tokens: Option<u32>,
     pub system_prompt: Option<String>,
     #[serde(default = "default_max_context_tokens")]
@@ -67,7 +67,7 @@ pub struct ModelProviderConfig {
     pub enabled: bool,
 }
 
-fn default_temperature() -> f32 {
+fn default_temperature() -> f64 {
     0.7
 }
 fn default_max_context_tokens() -> u32 {
