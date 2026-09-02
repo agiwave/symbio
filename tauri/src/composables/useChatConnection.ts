@@ -48,7 +48,8 @@ export interface UseChatConnectionReturn {
   isWaitingApproval: ComputedRef<boolean>
   isConnected: ComputedRef<boolean>
   messageTree: ComputedRef<ChatMessage[]>
-  send: (message: ChatMessage, agentId: string, providerId?: string, opts?: SendOptions) => void
+  /** agentId 可选：不选择智能体的会话以"纯工具模式"运行（session 编排，agent 不参与） */
+  send: (message: ChatMessage, agentId?: string | null, providerId?: string, opts?: SendOptions) => void
   abort: () => void
   removeMessage: (messageId: string) => void
   resume: (payload: ResumePayload) => void
@@ -192,7 +193,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     return msgs.some(msg => msg.status === 'waiting_user_action')
   })
 
-  async function send(msg: ChatMessage, agentId: string, providerId?: string, opts?: SendOptions) {
+  async function send(msg: ChatMessage, agentId?: string | null, providerId?: string, opts?: SendOptions) {
     const outgoing: ChatMessage = { ...msg }
 
     // 目标会话：默认当前会话；子智能体的 user_prompt 回答需发回子会话
@@ -224,7 +225,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     try {
       await callPlugin(CHAT_SEND, {
         session_id: targetSid,
-        agent_id: agentId,
+        // 未选择智能体时显式传 null：后端回退会话 metadata.agent_id，
+        // 仍无则本次会话不挂载任何智能体工具（纯工具模式）
+        agent_id: agentId || null,
         provider_id: providerId || null,
         message: outgoing,
         mode,

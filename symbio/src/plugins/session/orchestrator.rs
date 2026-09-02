@@ -7,8 +7,9 @@ use crate::symbio_core::schemas::{
     session::{session_append, session_chat, session_chat_response},
 };
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginFrame,
-    PluginPayload, AGENT_CHAT, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
+    attach_capabilities, collect_capabilities, InvokeRequest, InvokeRequestExt, InvokeResponse,
+    Plugin, PluginError, PluginFrame, PluginPayload, take_errors, MODE, MODEL_CHAT, PROVIDER_ID,
+    RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -461,9 +462,15 @@ impl SessionPlugin {
     /// - `req.resume` 存在 → 不追加消息，`resume=Some(req)`，由 `run_chat_loop`
     ///   在 turn 循环前处理（删除旧消息 → 重新执行 → 创建新子节点）
     ///
-    /// 共享：参数解析（mode/risk_level/provider_id）、workdir/agent_id 解析、
-    /// `run_chat_loop_task`、WorkingGuard、广播。CAPABILITY_MANAGER 由 agent chat handler
-    /// 在路由链中设置，session 层不再重复 `prepare_capability_manager`。
+    /// ## 会话编排权归 session（重构要点）
+    ///
+    /// 本方法是**会话的唯一编排入口**，不再把请求转交给 agent 插件：
+    /// 1. `agent_id` **可选**——未选择智能体的会话以"纯工具模式"照常运行
+    /// 2. 自行经 `collect_capabilities` 广播 `traverse` 收集全部插件的工具
+    ///    （local / web / mcp / skill / agent… 全部同一机制，agent 仅在
+    ///    `ctx[AGENT_ID]` 存在时贡献智能体工具与人格）
+    /// 3. 组装与智能体无关的基础提示词（`AGENTS.md` 全局 / 工作区指令）
+    /// 4. 直接路由 `model/chat`
     ///
     /// 响应立刻返回，流式事件由 bus 推送。
     pub async fn handle_chat_send_oneoff(
@@ -607,46 +614,71 @@ impl SessionPlugin {
                 }
             }
 
-            // agent_id 解析：优先用请求显式指定；否则回退到会话元数据绑定的 agent_id；
-            // 两者都缺失则**显式报错**，绝不静默用「默认 agent」兜底。
+            // ── agent_id 解析（可选）──
+            // 优先级：请求显式指定 > 会话元数据绑定；两者皆缺 → 未选择智能体，
+            // 会话以"纯工具模式"运行（agent 插件不贡献任何工具，其余插件不受影响）。
             let agent_id = if let Some(id) = agent_id_from_req.filter(|s| !s.trim().is_empty()) {
-                id
+                Some(id)
             } else {
-                let fallback = match this_spawn.get_or_create_session(&sid_spawn).await {
+                match this_spawn.get_or_create_session(&sid_spawn).await {
                     Ok(s) => s
                         .metadata
                         .get("agent_id")
                         .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
+                        .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty()),
                     Err(e) => {
-                        let msg = format!("读取会话元数据失败: {}", e);
-                        crate::plugin_error!("session", "{}", &msg);
-                        this_spawn
-                            .broadcast_error_with_idle(&state_spawn, msg)
-                            .await;
-                        return;
-                    }
-                };
-                match fallback {
-                    Some(id) => id,
-                    None => {
-                        let msg = "未指定 agent_id，且会话未绑定智能体；请明确指定要对话的智能体。"
-                            .to_string();
-                        crate::plugin_error!("session", "{}", &msg);
-                        this_spawn
-                            .broadcast_error_with_idle(&state_spawn, msg)
-                            .await;
-                        return;
+                        // 元数据读取失败只影响"回退不可用"：按未选择处理并记日志，
+                        // 不阻断会话（显式携带 agent_id 的请求不受影响）。
+                        crate::plugin_warn!(
+                            "session",
+                            "读取会话元数据失败（agent_id 回退不可用）: {}",
+                            e
+                        );
+                        None
                     }
                 }
             };
             let session_cfg = this_spawn.config.read().await.clone();
 
+            // ── 会话编排核心：收集全部插件的工具（统一 traverse 机制）──
+            // local / web / mcp / skill / agent 全部在同一机制下贡献工具；
+            // agent 仅在 AGENT_ID 存在时贡献智能体工具与人格，无智能体会话照常运行。
+            let chat_ctx = ctx_spawn.fork();
+            chat_ctx.set(WORKDIR, w_clone.clone());
+            chat_ctx.set(SESSION_ID, sid_spawn.clone());
+            if let Some(aid) = &agent_id {
+                chat_ctx.set(crate::symbio_core::AGENT_ID, aid.clone());
+            }
+
+            let tool_manager = collect_capabilities(Some(&parent_spawn), &chat_ctx).await;
+
+            // 收集期硬错误（如会话绑定了不存在的智能体）→ 中止并明确报错，
+            // 绝不静默降级成"没有人格的通用助手"。
+            if let Some(first) = take_errors(&chat_ctx).await.into_iter().next() {
+                let msg = format!("[{}] {}", first.plugin, first.message);
+                crate::plugin_error!("session", "能力收集失败: {}", &msg);
+                this_spawn
+                    .broadcast_error_with_idle(&state_spawn, msg)
+                    .await;
+                return;
+            }
+
+            attach_capabilities(&chat_ctx, tool_manager);
+
+            // ── 基础提示词（与智能体无关）：AGENTS.md 全局 / 工作区指令 ──
+            // 智能体人格不在这里——由 agent_identity 工具说明承载。
+            let base_prompt = super::prompt::build_system_prompt(Some(w_clone.as_str())).await;
+            let system_prompt_opt = if base_prompt.trim().is_empty() {
+                None
+            } else {
+                Some(base_prompt)
+            };
+
             // 构造 model_chat::Request：resume 分支 vs message 分支（含 ping 特殊处理）
             let chat_input = if let Some(tr) = resume_spawn {
                 json!(model_chat::Request {
-                    system_prompt: None,
+                    system_prompt: system_prompt_opt,
                     single_message: None,
                     thinking: None,
                     stream: Some(true),
@@ -671,9 +703,17 @@ impl SessionPlugin {
                     resume: None,
                 })
             } else {
+                // 普通发送：时间 / 工作区上下文挂在用户消息的 LLM prompt 上
+                // （`prompt` 不持久化，每轮发送重新生成，模型始终知道"现在几点、在哪个工作区"）。
+                let single = user_msg_spawn.map(|mut m| {
+                    if m.role == Some(cm::MessageRole::User) {
+                        m.prompt = Some(super::prompt::temporal_context(Some(w_clone.as_str())));
+                    }
+                    m
+                });
                 json!(model_chat::Request {
-                    system_prompt: None,
-                    single_message: user_msg_spawn,
+                    system_prompt: system_prompt_opt,
+                    single_message: single,
                     thinking: None,
                     stream: Some(true),
                     max_tool_rounds: Some(session_cfg.max_tool_rounds),
@@ -685,12 +725,9 @@ impl SessionPlugin {
                 })
             };
 
-            let chat_ctx = ctx_spawn.fork();
-            chat_ctx.set(crate::symbio_core::PATH, AGENT_CHAT.to_string());
+            // 直接路由 model/chat——会话编排归 session，不再经过 agent/chat
+            chat_ctx.set(crate::symbio_core::PATH, MODEL_CHAT.to_string());
             chat_ctx.set_payload(chat_input).ok();
-            chat_ctx.set(WORKDIR, w_clone);
-            chat_ctx.set(SESSION_ID, sid_spawn.clone());
-            chat_ctx.set(crate::symbio_core::AGENT_ID, agent_id);
 
             // 调用统一的 chat_loop 任务执行器
             // run_chat_loop 内部会区分 resume（turn 前处理）与 single_message（正常 turn）

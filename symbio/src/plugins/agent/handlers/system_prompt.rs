@@ -7,20 +7,23 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use time::{format_description, OffsetDateTime};
 
-/// `build()` 返回值：组装好的提示词 + 实际预算使用情况
+/// `build_persona()` 返回值：组装好的人格文本 + 实际预算使用情况
 ///
-/// 拆分返回而非只返回 String，是为了让 chat handler 能把 usage 用于
-/// 在系统提示词末尾渲染"预算告警"段（提示 LLM 主动调用 `memory.save` 软删除）。
+/// 拆分返回而非只返回 String，是为了让调用方能拿到 usage 做诊断
+/// （预算状态段已内嵌 prompt 文本）。
 #[derive(Debug, Clone)]
 pub struct BuildResult {
-    /// 完整的系统提示词文本
+    /// 完整的人格文本
     pub prompt: String,
     /// 实际预算使用情况（用于末尾渲染预算状态段）
-    #[allow(dead_code)] // chat.rs 不读取 usage（状态已内嵌 prompt），保留供诊断/测试
+    #[allow(dead_code)] // 调用方不读取 usage（状态已内嵌 prompt），保留供诊断/测试
     pub usage: BudgetUsage,
 }
 
-/// 构建系统提示词（动态构建 + 预算感知 + 评分排序）
+/// 构建人格文本（供 `agent_identity` 工具说明嵌入）
+///
+/// **重构说明**：人格不再写入 `system_prompt`，而是嵌入 `agent_identity`
+/// 能力的 `description` 随工具定义送达 LLM（每轮请求自动可见）。
 ///
 /// **三层目标映射**：
 /// - **第 1 层 动态构建**：
@@ -36,7 +39,6 @@ pub struct BuildResult {
 ///
 /// **结构**：
 /// ```text
-/// ## 系统提示
 /// 当前时间：...
 ///
 /// ## 身份
@@ -67,7 +69,9 @@ pub struct BuildResult {
 /// **变更历史**：
 /// - v1：硬编码 budget = 3500, max_per_type = 10, char/4 估算
 /// - v2 (I-065)：重构为 PromptBudget + estimate_tokens + 多维评分 + 预算状态段
-pub async fn build(
+/// - v3（agent 降级为普通插件）：系统提示词形态（`build` + `RenderStyle`）移除，
+///   人格文本成为唯一输出形态
+pub async fn build_persona(
     store: &dyn AgentStore,
     budget: &PromptBudget,
     relevance_query: Option<&str>,
@@ -92,8 +96,10 @@ pub async fn build(
     };
 
     // ── 1. 渲染 overhead 段（身份锚定 + 时间戳） ──
+    // 人格形态：直接以时间戳开头（无"## 系统提示"总标题），
+    // 便于嵌入 agent_identity 工具说明。
     let mut prompt = String::new();
-    let header = format!("## 系统提示\n\n当前时间：{}\n\n", format_time());
+    let header = format!("当前时间：{}\n\n", format_time());
     usage.add_section("overhead", estimate_tokens(&header));
     prompt.push_str(&header);
 

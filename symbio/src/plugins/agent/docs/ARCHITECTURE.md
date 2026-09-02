@@ -10,15 +10,22 @@
 
 ## 1. 分层架构
 
+> **重构说明（agent 降级为普通插件）**：`default_tool_manager.rs` 已外迁至
+> `symbio_core::DefaultToolManager`（跨插件共享设施）。agent 插件与 local / web /
+> mcp / skill 完全同构——唯一参与会话的方式是 `traverse(TRAVERSE_AVAILABLE_TOOLS)`
+> 向会话贡献工具，是否贡献取决于 `ctx[AGENT_ID]` 是否存在。人格不再写入系统提示词，
+> 改由 `agent_identity` 能力的**工具说明**承载。
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    应用层 (handlers/)                                │
-│  chat.rs（含 ContextBuilder） | get.rs | list.rs | config.rs       │
-│  system_prompt.rs | default_tool_manager.rs                         │
+│  chat.rs（仅子智能体会话执行入口）| get.rs | list.rs | config.rs   │
+│  system_prompt.rs（仅渲染人格文本 build_persona）                   │
 ├─────────────────────────────────────────────────────────────────────┤
 │                    能力层 (capabilities/)                            │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  对话能力：AgentChatTool (agent_chat)                        │   │
+│  │  身份能力：AgentIdentityTool (agent_identity) —— 人格载体    │   │
+│  │  对话能力：AgentChatTool (agent_chat) —— 子智能体委托        │   │
 │  ├──────────────────────────────────────────────────────────────┤   │
 │  │  统一认知能力：AgentCognitionTool                            │   │
 │  │    └── ops/ 目录：5 个操作，每个自注册（submit_cognition_op!） │   │
@@ -145,31 +152,33 @@ pub async fn build_store(config: &AgentConfig, agent_dir: &Path) -> Arc<dyn Agen
 
 | 文件 | 职责 |
 |------|------|
-| `chat.rs` | 对话处理 + ContextBuilder（消息上下文构建） |
-| `system_prompt.rs` | 系统提示词构建（从 identity CU 获取身份信息） |
+| `chat.rs` | **仅**子智能体会话执行入口（`agent_run` 派生）；校验智能体存在 → 统一管线收集工具 → 转交 `model/chat` |
+| `system_prompt.rs` | 人格文本渲染（`build_persona`，从 identity CU 获取身份信息） |
 | `get.rs` | 获取 Agent 信息 |
 | `list.rs` | 列出 Agent |
 | `config.rs` | Agent 配置管理 |
 
-**系统提示词分层**（由 `handlers/chat.rs` + `system_prompt.rs` 构建）：
-```
-系统提示词 = 全局指令 + 工作区指令 + 心智认知
+**人格文本分层**（由 `system_prompt.rs::build_persona` 渲染，供 `agent_identity` 工具说明嵌入）：
 
-1. 全局指令：~/.symbio/AGENTS.md
-2. 工作区指令：{workdir}/AGENTS.md
-3. 心智认知：system_prompt::build(store)
+> 重构后人格**不再写入系统提示词**——顶层会话由 session 插件编排（session 组装
+> `AGENTS.md` 环境级指令 + 时间上下文），agent 仅通过 `agent_identity` 能力的
+> `description` 把人格随工具定义送达 LLM（每轮请求自动可见）。
+
+```
+人格文本 = build_persona(store)
    ├── 身份锚定：id="identity" 的 CU，全量注入
    ├── 行为规则：rule 类型，全量注入，按 confidence 降序
-   └── 认知索引：其余 sys 级，摘要注入
+   └── 认知索引：其余 sys 级，摘要注入（受预算截断）
 ```
 
 ### 3.4 capabilities/ 能力层
 
-#### 核心能力（3 个）
+#### 核心能力（4 个）
 
 | 工具 | 名称 | 职责 | 操作数量 | 状态 |
 |------|------|------|----------|------|
-| `AgentChatTool` | agent_chat | 与智能体对话 | — | ✅ 已实现 |
+| `AgentIdentityTool` | agent_identity | **人格载体**：身份/规则/策略/预算随工具说明送达 LLM | — | ✅ 已实现 |
+| `AgentChatTool` | agent_chat | 子智能体委托（`agent_run`） | — | ✅ 已实现 |
 | `AgentCognitionTool` | agent_cognition | **统一认知体系** | 5 个操作（memory 域） | ✅ 全部实现 |
 | `AgentCreateTool` | agent_create | 创建新的 Agent | — | ✅ 已实现 |
 
@@ -204,27 +213,29 @@ pub async fn build_store(config: &AgentConfig, agent_dir: &Path) -> Arc<dyn Agen
 
 ## 4. 数据流
 
-### 4.1 对话流
+### 4.1 对话流（子智能体会话）
+
+> 顶层会话已不经过本插件（由 session 插件编排）。本插件只在**两种**情况下参与：
+> 1. 会话选定智能体 → `traverse` 贡献智能体工具（含 `agent_identity` 人格载体）
+> 2. 一次会话内部 `agent_run` 委托另一个智能体 → 走 `handlers/chat.rs` 起子会话
 
 ```
-用户消息
+（会话选定智能体）
   │
   ▼
-handlers/chat.rs
-  │  ├── 获取工具列表（traverse → 注册 capabilities）
+plugin.rs::traverse(TRAVERSE_AVAILABLE_TOOLS)
+  │  ├── ctx[AGENT_ID] 存在 → 渲染人格（render_persona）
+  │  ├── 不存在 → 早退，不贡献任何工具
+  │  └── 注册 4 个能力（identity/chat/cognition/create）到 tool_manager
   │
-  ├── 构建系统提示词
-  │     ├── load_system_agents_md()      → ~/.symbio/AGENTS.md
-  │     ├── load_workspace_agents_md()   → {workdir}/AGENTS.md
-  │     └── system_prompt::build(store)  → 从 identity CU 获取身份信息
+（agent_run 委托子智能体）
   │
-  ├── 消息上下文构建（ContextBuilder，内置于 chat.rs）
-  │     ├── 语义检索：engine.semantic_search(user_text, limit=5)
-  │     ├── 时间上下文：当前时间 + 工作区
-  │     ├── 任务上下文：engine.query(FilterExpr::is_a("strategy")) + engine.query(FilterExpr::is_a("skill"))
-  │     └── 注入：作为 msg.prompt 前缀
-  │
-  └── 路由到 Model 服务（parent.route("model/chat")）
+  ▼
+capabilities/chat.rs::execute（AgentChatTool）
+  │  ├── 校验目标智能体存在
+  │  └── handlers/chat.rs
+  │        ├── 统一管线收集工具（collect_capabilities）
+  │        └── 转交 model/chat
 ```
 
 ### 4.2 认知存储流
@@ -270,9 +281,14 @@ AgentPlugin::get_mindscape(workdir, agent_id)
 
 ---
 
-## 6. Active Memory 机制
+## 6. Active Memory 机制（已移除）
 
-每轮用户消息到达时（`handlers/chat.rs` 中的 `ContextBuilder`）：
+> **重构变化**：每轮自动注入的 `<active_memory>` 语义记忆片段已**移除**。
+> 工作记忆不再由系统在每轮替 LLM 灌入上下文，而是由 LLM 主动调用 `agent_cognition`
+> 的 `memory.retrieve`（`filter:{"semantic":"..."}`）按需回忆——这正是"自我进化"的方向：
+> 由 LLM 自主决定何时回忆、何时固化，而非系统每轮做主。
+
+旧的自动注入语义（供参考，已废止）：
 1. 提取用户消息文本
 2. 语义检索：`engine.semantic_search(text, limit=5)`
 3. 过滤：排除 identity 单元和 rule 类型

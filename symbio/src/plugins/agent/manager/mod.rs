@@ -14,7 +14,7 @@ mod tracker;
 // 唯一对外接口——跨模块契约
 pub use manager::AgentManager;
 pub use model::AgentProfile;
-pub use path::{resolve_workspace_dir, validate_workspace_root};
+pub use path::validate_workspace_root;
 pub use registry::AgentRegistry;
 // ProfileLoader 暂不对外暴露，保留供内部使用
 // pub use loader::ProfileLoader;

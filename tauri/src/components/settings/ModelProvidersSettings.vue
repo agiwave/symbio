@@ -20,12 +20,12 @@
           <span class="status-dot" :class="statusDotClass" />
           <div class="title-block">
             <div class="title-line">
-              <h2 class="title-text">{{ form.name || form.id || '新建 Provider' }}</h2>
+              <h2 class="title-text">{{ form.name || form.model || displayLabel || '新建 Provider' }}</h2>
               <span v-if="isDefault" class="badge default">默认</span>
               <span v-if="!form.enabled" class="badge disabled">已停用</span>
             </div>
             <p class="subtitle">
-              <code class="provider-pill">{{ form.provider }}</code>
+              <code class="provider-pill">{{ displayLabel }}</code>
               <span class="dot">·</span>
               <span>{{ form.model || '未设置模型' }}</span>
             </p>
@@ -86,63 +86,50 @@
 
       <!-- 表单主体 -->
       <div class="editor-body">
-        <!-- 基本信息组 -->
+        <!-- 快速配置组：最常用字段保持可见 -->
         <div class="setting-group">
           <div class="setting-item">
             <div class="setting-info">
-              <label>ID <span class="required">*</span></label>
-              <p class="setting-desc">Provider 的唯一标识，保存后不可修改</p>
-            </div>
-            <input
-              v-model="form.id"
-              type="text"
-              placeholder="my-openai"
-              :disabled="isExisting"
-            />
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-info">
               <label>名称</label>
-              <p class="setting-desc">在 Model \u5bf9\u8bdd选项中显示的友好名</p>
+              <p class="setting-desc">未填写时自动使用模型名称（ID 自动生成，无需填写）</p>
             </div>
             <input
               v-model="form.name"
               type="text"
-              placeholder="OpenAI · GPT-4o"
+              placeholder="例如：OpenAI GPT-4o"
             />
           </div>
 
-          <div class="setting-item">
-            <div class="setting-info">
-              <label>启用</label>
-              <p class="setting-desc">禁用后该 Provider 在 Model \u5bf9\u8bdd选项中不可选</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" v-model="form.enabled" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-        </div>
-
-        <div class="setting-divider"></div>
-
-        <!-- 提供商配置组 -->
-        <div class="setting-group">
           <div class="setting-item">
             <div class="setting-info">
               <label>提供商 <span class="required">*</span></label>
               <p class="setting-desc">选择一个内置的 Model 提供商预设</p>
             </div>
             <select v-model="form.provider" @change="onFormProviderChange">
-              <option v-for="k in providerKeys" :key="k" :value="k">{{ k }}</option>
+              <option v-for="k in providerKeys" :key="k" :value="k">{{ providerLabels[k] || k }}</option>
             </select>
           </div>
 
           <div class="setting-item">
             <div class="setting-info">
+              <label>模型 <span class="required">*</span></label>
+              <p class="setting-desc">选择或输入目标模型名</p>
+            </div>
+            <input
+              v-model="form.model"
+              type="text"
+              :list="`models-${form.id || 'new'}`"
+              placeholder="gpt-4o / claude-3-5-sonnet-latest / ..."
+            />
+            <datalist :id="`models-${form.id || 'new'}`">
+              <option v-for="m in formAvailableModels" :key="m" :value="m" />
+            </datalist>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
               <label>API Base URL <span class="required">*</span></label>
-              <p class="setting-desc">兼容 OpenAI / Anthropic 风格的端点</p>
+              <p class="setting-desc">切换提供商时会自动填入对应端点</p>
             </div>
             <input
               v-model="form.api_base"
@@ -182,20 +169,27 @@
 
           <div class="setting-item">
             <div class="setting-info">
-              <label>模型 <span class="required">*</span></label>
-              <p class="setting-desc">选择或输入目标模型名</p>
+              <label>启用</label>
+              <p class="setting-desc">禁用后该 Provider 在 Model \u5bf9\u8bdd选项中不可选</p>
             </div>
-            <input
-              v-model="form.model"
-              type="text"
-              :list="`models-${form.id}`"
-              placeholder="gpt-4o / claude-3-5-sonnet-latest / ..."
-            />
-            <datalist :id="`models-${form.id}`">
-              <option v-for="m in formAvailableModels" :key="m" :value="m" />
-            </datalist>
+            <label class="toggle">
+              <input type="checkbox" v-model="form.enabled" />
+              <span class="toggle-slider"></span>
+            </label>
           </div>
+        </div>
 
+        <!-- 高级设置（默认折叠，点击展开） -->
+        <button
+          type="button"
+          class="advanced-toggle"
+          @click="showAdvanced = !showAdvanced"
+        >
+          <span class="chevron" :class="{ open: showAdvanced }">▸</span>
+          高级设置
+        </button>
+
+        <div v-show="showAdvanced" class="setting-group advanced-group">
           <div class="setting-item">
             <div class="setting-info">
               <label>API 协议</label>
@@ -207,12 +201,7 @@
               </option>
             </select>
           </div>
-        </div>
 
-        <div class="setting-divider"></div>
-
-        <!-- 推理参数组 -->
-        <div class="setting-group">
           <div class="setting-item">
             <div class="setting-info">
               <label>Temperature</label>
@@ -254,12 +243,7 @@
               placeholder="0"
             />
           </div>
-        </div>
 
-        <div class="setting-divider"></div>
-
-        <!-- 系统提示词组 -->
-        <div class="setting-group">
           <div class="setting-item column">
             <div class="setting-info">
               <label>系统提示词</label>
@@ -279,7 +263,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { providerPresets, protocolLabels } from '@/constants/modelProviders'
+import { providerPresets, providerLabels, protocolLabels } from '@/constants/modelProviders'
 import type { ModelProviderConfig } from '@/schemas/model_providers'
 
 const props = defineProps<{
@@ -315,9 +299,13 @@ const form = reactive<ModelProviderConfig>({
 const formAvailableModels = ref<string[]>([])
 const formProtocols = ref<string[]>([])
 const showApiKey = ref(false)
+const showAdvanced = ref(false)
 
 const providerKeys = computed(() => Object.keys(providerPresets))
 const isExisting = computed(() => Boolean(props.provider && props.provider.id))
+
+/** 提供商的展示名（含中文映射，未知标识回退原始 key） */
+const displayLabel = computed(() => (form.provider ? providerLabels[form.provider] || form.provider : ''))
 
 const statusDotClass = computed(() => {
   if (!form.enabled) return 'failed'
@@ -329,18 +317,24 @@ function buildPayload(): ModelProviderConfig {
   return {
     ...form,
     id: form.id.trim(),
-    name: (form.name || form.id).trim(),
+    // 名称未填写时自动取模型名称，其次取提供商展示名
+    name: (form.name?.trim() || form.model.trim() || displayLabel.value || form.provider).trim(),
     rate_limit_ms: Math.max(0, Math.floor(form.rate_limit_ms ?? 0))
   }
 }
 
-function refreshFormOptions(providerKey: string) {
+function refreshFormOptions(providerKey: string, opts: { fillModel?: boolean } = {}) {
   const preset = providerPresets[providerKey]
   if (preset) {
     if (!form.api_base) form.api_base = preset.apiBase
+    if (opts.fillModel && !form.model && preset.models.length > 0) {
+      form.model = preset.models[0]
+    }
     formAvailableModels.value = preset.models
     formProtocols.value = preset.protocols
-    if (preset.protocols.length > 0 && !form.api_protocol) form.api_protocol = preset.protocols[0]
+    if (preset.protocols.length > 0 && !preset.protocols.includes(form.api_protocol ?? '')) {
+      form.api_protocol = preset.protocols[0]
+    }
   } else {
     formAvailableModels.value = []
     formProtocols.value = ['openai_responses', 'openai_chat', 'anthropic_messages', 'gemini_api']
@@ -348,7 +342,8 @@ function refreshFormOptions(providerKey: string) {
 }
 
 function onFormProviderChange() {
-  refreshFormOptions(form.provider)
+  // 用户在"切换提供商"时自动填充模型与端点（编辑状态不覆盖已填值）
+  refreshFormOptions(form.provider, { fillModel: true })
 }
 
 watch(
@@ -549,6 +544,37 @@ watch(
   height: 1px;
   background: var(--color-border);
   margin: 0.5rem 0;
+}
+
+/* 高级设置折叠开关 */
+.advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0.15rem;
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+}
+.advanced-toggle:hover {
+  color: var(--color-primary, #4f46e5);
+  background: rgba(0, 0, 0, 0.04);
+}
+.chevron {
+  display: inline-block;
+  transition: transform 0.15s;
+  font-size: 0.75rem;
+}
+.chevron.open {
+  transform: rotate(90deg);
+}
+.advanced-group {
+  padding-left: 0.15rem;
 }
 
 /* 表单控件 */

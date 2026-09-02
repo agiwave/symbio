@@ -21,9 +21,6 @@ mod store;
 mod traits;
 mod typed_unit;
 
-// ─── 实现子模块：跨模块调用方存在 → pub(crate) ───
-pub(crate) mod default_tool_manager;
-
 // ─── 实现子模块：跨模块调用方存在（types 提供 cu_fields/CuRef/generate_short_id 给 store/typed_unit/scaffold）→ pub(crate) ───
 pub(crate) mod types;
 

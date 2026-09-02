@@ -11,6 +11,38 @@ export interface ProviderPreset {
   protocols: string[]
 }
 
+/** 供应商标识 → 中文展示名（不在映射内的回退到原始标识） */
+export const providerLabels: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic (Claude)',
+  gemini: 'Google Gemini',
+  deepseek: 'DeepSeek',
+  xai: 'xAI (Grok)',
+  groq: 'Groq',
+  siliconflow: '硅基流动 (SiliconFlow)',
+  alibaba: '阿里云百炼 (Qwen)',
+  tencent: '腾讯混元',
+  baidu: '百度千帆 (ERNIE)',
+  moonshot: '月之暗面 (Kimi)',
+  zhipu: '智谱 (GLM)',
+  aiyuanjing: '爱媛景 (GLM 兼容)',
+  lmstudio: 'LM Studio（本地）',
+  local: 'Ollama（本地）',
+  mistral: 'Mistral',
+  azure: 'Azure OpenAI',
+  openrouter: 'OpenRouter',
+  perplexity: 'Perplexity',
+  volcengine: '火山方舟 (豆包)',
+  spark: '讯飞星火',
+  minimax: 'MiniMax',
+  baichuan: '百川智能',
+  step: '阶跃星辰 (StepFun)',
+  cerebras: 'Cerebras',
+  together: 'Together AI',
+  github: 'GitHub Models',
+  custom: '自定义 (OpenAI 兼容)'
+}
+
 export const providerPresets: Record<string, ProviderPreset> = {
   openai: {
     apiBase: 'https://api.openai.com/v1',
@@ -40,6 +72,66 @@ export const providerPresets: Record<string, ProviderPreset> = {
   groq: {
     apiBase: 'https://api.groq.com/openai/v1',
     models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+    protocols: ['openai_chat']
+  },
+  mistral: {
+    apiBase: 'https://api.mistral.ai/v1',
+    models: ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest', 'open-mistral-nemo'],
+    protocols: ['openai_chat']
+  },
+  azure: {
+    apiBase: 'https://<your-resource>.openai.azure.com/openai/v1',
+    models: [],
+    protocols: ['openai_chat']
+  },
+  openrouter: {
+    apiBase: 'https://openrouter.ai/api/v1',
+    models: ['openrouter/auto', 'anthropic/claude-3.5-sonnet', 'openai/gpt-4o', 'meta-llama/llama-3.3-70b-instruct'],
+    protocols: ['openai_chat']
+  },
+  perplexity: {
+    apiBase: 'https://api.perplexity.ai',
+    models: ['sonar-pro', 'sonar', 'sonar-reasoning'],
+    protocols: ['openai_chat']
+  },
+  volcengine: {
+    apiBase: 'https://ark.cn-beijing.volces.com/api/v3',
+    models: ['doubao-seed-1-6-250615', 'doubao-1-5-pro-32k-250115', 'doubao-1-5-lite-32k-250115'],
+    protocols: ['openai_chat']
+  },
+  spark: {
+    apiBase: 'https://spark-api-open.xf-yun.com/v1',
+    models: ['4.0Ultra', 'max-32k', 'lite'],
+    protocols: ['openai_chat']
+  },
+  minimax: {
+    apiBase: 'https://api.minimax.chat/v1',
+    models: ['MiniMax-Text-01', 'abab6.5s-chat'],
+    protocols: ['openai_chat']
+  },
+  baichuan: {
+    apiBase: 'https://api.baichuan-ai.com/v1',
+    models: ['Baichuan4', 'Baichuan4-Turbo'],
+    protocols: ['openai_chat']
+  },
+  step: {
+    apiBase: 'https://api.stepfun.com/v1',
+    models: ['step-2-16k', 'step-1-8k'],
+    protocols: ['openai_chat']
+  },
+  cerebras: {
+    apiBase: 'https://api.cerebras.ai/v1',
+    models: ['llama-3.3-70b', 'llama-3.1-8b'],
+    protocols: ['openai_chat']
+  },
+  together: {
+    apiBase: 'https://api.together.xyz/v1',
+    models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V3'],
+    protocols: ['openai_chat']
+  },
+  github: {
+    apiBase: 'https://models.github.ai/inference',
+    models: ['gpt-4o', 'gpt-4o-mini'],
     protocols: ['openai_chat']
   },
   siliconflow: {

@@ -1,45 +1,44 @@
 use crate::plugins::agent::core::AgentConfig;
 use crate::plugins::agent::core::AgentStore;
+use crate::plugins::agent::core::PromptBudget;
 
-use crate::plugins::agent::manager::{resolve_workspace_dir, AgentManager, AgentRegistry};
+use crate::plugins::agent::handlers::system_prompt;
+use crate::plugins::agent::manager::{AgentManager, AgentRegistry};
 
 use crate::symbio_core::{
-    Capability, CapabilityManager, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    Plugin, PluginError, PluginMeta, PluginPayload, SimpleRequest, SymbioKey,
-    CAPABILITY_AGENT_CHAT, CAPABILITY_AGENT_COGNITION, CAPABILITY_AGENT_CREATE, PLUGIN_AGENT,
+    Capability, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
+    PluginPayload, SymbioKey, CAPABILITY_AGENT_CHAT, CAPABILITY_AGENT_COGNITION,
+    CAPABILITY_AGENT_CREATE, CAPABILITY_AGENT_IDENTITY, PLUGIN_AGENT,
 };
 use async_trait::async_trait;
 
-use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Agent 插件主结构
 ///
+/// ## 架构定位（重构后）
+///
+/// Agent 插件与 local / web / mcp / skill 等插件**完全同构**：
+/// 唯一参与会话的方式是 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 向会话贡献工具。
+/// 是否贡献取决于 `ctx[AGENT_ID]`——未选择智能体的会话里，本插件不挂载任何工具，
+/// 会话照常以"纯工具模式"运行。
+///
+/// 由此带来两个 API 上的简化：
+/// - **不再有 capability 列表缓存**：能力说明里现在嵌入了动态人格文本
+///   （身份 / 规则 / 策略 / 预算），缓存会随智能体学习而腐化；且注册动作本来就
+///   每次请求都必须重做，缓存只剩"跳过一次 list_capability"这点收益。
+/// - **不再持有 chat 编排职责**：会话编排归 session 插件
+///   （见 `plugins/session/orchestrator.rs`）。
+///
 /// 字段说明：
 /// - `manager`：直接持有 `Arc<AgentManager>` 具体类型，避免空 trait 抽象和 downcast
 /// - `parent`：父插件弱引用，用于 `parent.route()` 反向调用
 /// - `config`：可热更新的运行时配置
-/// - `capability_cache`：，按 (workdir, agent_id) 缓存 capability 列表，
-///   避免每次 chat 请求都重做 `parent.traverse` + 全量 cap 构造
 pub struct AgentPlugin {
     pub(crate) manager: Arc<AgentManager>,
     pub(crate) parent: Arc<RwLock<Option<std::sync::Weak<dyn Plugin>>>>,
     pub(crate) config: Arc<RwLock<AgentConfig>>,
-    /// Capability 列表缓存
-    ///
-    /// key 格式：`"{workdir}::{agent_id}"`，None workdir 编码为空字符串
-    /// value：当前 agent 已注册的 capability 列表
-    /// **失效策略**：写入/删除 agent 时手动 `invalidate_capability_cache`；
-    /// 配置热更新时全量清空（见 `config` 写锁 guard 释放时）。
-    /// 不做 TTL：capability 注册是写少读多的场景，TTL 反而引入复杂度。
-    ///
-    /// 缓存只缓存"该 agent 应有哪些 capability"这一**元信息**，
-    /// 每次 chat 请求都会拿到**全新的** `DefaultToolManager`，所以 `parent.traverse`
-    /// 把工具注册到新 manager 的工作必须**每次都做**，不能因为缓存命中而跳过。
-    /// 当前缓存仅在命中时跳过廉价的 `list_capability` 调用。
-    pub(crate) capability_cache: Arc<RwLock<HashMap<String, Vec<CapabilityMeta>>>>,
 }
 
 impl AgentPlugin {
@@ -62,19 +61,16 @@ impl AgentPlugin {
             manager: Arc::new(AgentManager::new()),
             parent: Arc::new(RwLock::new(parent)),
             config: Arc::new(RwLock::new(config)),
-            capability_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     pub fn metadata() -> PluginMeta {
         PluginMeta::new("agent", "智能体与心智流形")
-            .with_description("管理智能体人格与代理预设，并承载 Mindscape 心智流形数据引擎")
-            .with_version("0.5.0")
-    }
-
-    /// 缓存 key 标准化：`{workdir}::{agent_id}`，workdir=None 编码为空字符串
-    pub fn cache_key(workdir: Option<&str>, agent_id: &str) -> String {
-        format!("{}::{}", workdir.unwrap_or(""), agent_id)
+            .with_description(
+                "管理智能体人格与代理预设，并承载 Mindscape 心智流形数据引擎；\
+                 会话选定智能体时，通过 traverse 向会话附加智能体工具与人格",
+            )
+            .with_version("0.6.0")
     }
 
     pub(crate) async fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
@@ -111,120 +107,28 @@ impl AgentPlugin {
             .await
     }
 
-    pub(crate) async fn fetch_tools_with_manager(
-        &self,
-        workdir: Option<String>,
-        agent_id: &str,
-        tool_manager: Arc<dyn CapabilityManager>,
-    ) -> Vec<CapabilityMeta> {
-        // 缓存命中时也必须调用 `parent.traverse` 把工具注册到
-        // 调用方传入的 `tool_manager` 实例中。
-        //
-        // 历史 bug：原实现缓存命中后 `return cached.clone();` 直接返回，
-        // 跳过了 `parent.traverse(...)`，导致新传入的 `DefaultToolManager` 是空的；
-        // 但 `UnifiedCapabilityManager` 把"cached_capabilities"（含 agent_memory）作为
-        // 精确匹配索引 → 命中后调用 `inner_manager.invoke("agent_memory", ...)` →
-        // 空 HashMap 查表失败 → "Tool not found: agent_memory"。
-        //
-        // 正确语义：缓存只缓存"该 agent 应有哪些 capability"这一**元信息**，
-        // 但每次请求都得到一个全新的 `tool_manager`，所以注册工作必须每次都做。
-        // 缓存的价值仅在于命中时跳过 `list_capability`（廉价的小优化）。
-        let key = Self::cache_key(workdir.as_deref(), agent_id);
-
-        // 1. 缓存命中检查（仅跳过 list_capability，不跳过注册）
-        {
-            let cache = self.capability_cache.read().await;
-            if let Some(cached) = cache.get(&key) {
-                // 即便命中，也必须把工具实际注册到本次的 tool_manager
-                Self::register_capabilities_into(
-                    self.get_parent().await.as_ref(),
-                    workdir.as_deref(),
-                    agent_id,
-                    &tool_manager,
-                )
-                .await;
-                return cached.clone();
-            }
-        }
-
-        // 2. 缓存未命中：traverse + list
-        Self::register_capabilities_into(
-            self.get_parent().await.as_ref(),
-            workdir.as_deref(),
-            agent_id,
-            &tool_manager,
-        )
-        .await;
-
-        let caps = tool_manager.list_capability().await;
-
-        // 3. 写缓存
-        {
-            let mut cache = self.capability_cache.write().await;
-            cache.insert(key, caps.clone());
-        }
-
-        caps
-    }
-
-    /// 把当前 agent 的所有 capability 工厂注册到给定的 `tool_manager`。
+    /// 渲染指定智能体的人格文本（身份 / 规则 / 策略 / 预算状态）
     ///
-    /// 抽出来是为了 `fetch_tools_with_manager` 在缓存命中/未命中两条路径上
-    /// 都能复用，避免遗漏注册导致 `Tool not found: <name>`。
-    async fn register_capabilities_into(
-        parent: Option<&Arc<dyn Plugin>>,
+    /// ## 用途
+    ///
+    /// 重构后人格不再写入 `system_prompt`，而是嵌入 `agent_identity` 能力的
+    /// `description` 随工具定义送达 LLM。本方法在 `traverse`（异步）阶段调用——
+    /// 能力工厂签名是同步的，访问存储的活儿必须在工厂之外先干完。
+    ///
+    /// 预算取自 `AgentConfig.prompt_budget_tokens` / `prompt_overhead_tokens`。
+    pub(crate) async fn render_persona(
+        &self,
         workdir: Option<&str>,
         agent_id: &str,
-        tool_manager: &Arc<dyn CapabilityManager>,
-    ) {
-        let Some(parent) = parent else {
-            return;
-        };
-        let ctx = Arc::new(SimpleRequest::new(None, None));
-        ctx.set(
-            crate::symbio_core::PATH,
-            crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS.to_string(),
-        );
-        if let Some(wd) = workdir {
-            ctx.set(crate::symbio_core::WORKDIR, wd.to_string());
-        }
-        ctx.set(crate::symbio_core::AGENT_ID, agent_id.to_string());
-        ctx.set(crate::symbio_core::CAPABILITY_MANAGER, tool_manager.clone());
+    ) -> Option<String> {
+        let mindscape = self.get_mindscape(workdir, agent_id).await?;
 
-        // traverse 失败不再静默吞错
-        if let Err(e) = parent.clone().traverse("".to_string(), ctx).await {
-            crate::plugin_warn!(
-                "agent",
-                "register_capabilities_into: traverse failed for agent_id={} err={:?}",
-                agent_id,
-                e
-            );
-        }
-    }
+        let cfg = self.config.read().await;
+        let budget = PromptBudget::new(cfg.prompt_budget_tokens, cfg.prompt_overhead_tokens);
+        drop(cfg);
 
-    /// 加载 `<homedir>/AGENTS.md` 全局指令
-    ///
-    /// homedir 来自 [`crate::symbio_core::HomedirRegistry`]
-    pub(crate) async fn load_system_agents_md(&self) -> Option<String> {
-        let p = crate::symbio_core::HomedirRegistry::get().join("AGENTS.md");
-        Self::read_to_string_safe(&p).await
-    }
-
-    /// 加载 `{workdir}/AGENTS.md` 工作区指令
-    ///
-    /// 安全说明：
-    /// - workdir 在工厂创建时已被前端规范化为绝对路径
-    /// - 此处走 `path::resolve_workspace_dir` 统一校验（拒绝 `..` 逃逸）
-    pub(crate) async fn load_workspace_agents_md(&self, workdir: Option<&str>) -> Option<String> {
-        let p = resolve_workspace_dir(workdir)?.join("AGENTS.md");
-        Self::read_to_string_safe(&p).await
-    }
-
-    async fn read_to_string_safe(path: &Path) -> Option<String> {
-        if !path.exists() {
-            return None;
-        }
-        tokio::fs::read_to_string(path).await.ok()
+        let result = system_prompt::build_persona(mindscape.as_ref(), &budget, None).await;
+        Some(result.prompt)
     }
 
     /// 从请求上下文中解析 mindscape 引擎
@@ -259,7 +163,13 @@ impl AgentPlugin {
 }
 
 /// Agent 插件装载的能力清单（按 `AGENT_CAPABILITY_IDS` 使用）
+///
+/// - `agent_identity`：人格载体（身份 / 规则 / 策略 / 预算），**说明即提示词**
+/// - `agent_cognition`：认知读写（记忆存取 / 推理 / 反思 / 整理）
+/// - `agent_chat`：子智能体委托
+/// - `agent_create`：创建新智能体
 pub const AGENT_CAPABILITY_IDS: &[&str] = &[
+    CAPABILITY_AGENT_IDENTITY,
     CAPABILITY_AGENT_CHAT,
     CAPABILITY_AGENT_COGNITION,
     CAPABILITY_AGENT_CREATE,
@@ -297,6 +207,19 @@ impl Plugin for AgentPlugin {
         Self::metadata()
     }
 
+    /// 统一的能力贡献入口——与其它插件（local / web / mcp / skill）**同一机制**
+    ///
+    /// ## 触发条件
+    ///
+    /// **仅当 `ctx[AGENT_ID]` 非空时**贡献工具。会话未选择智能体时本插件完全静默，
+    /// 会话以"纯工具模式"照常运行（local / web / mcp / skill 的工具不受影响）。
+    ///
+    /// ## 失败语义
+    ///
+    /// `Composite::traverse` 会吞掉子插件的 Err，因此这里不能靠返回值让会话中止。
+    /// 智能体解析失败（绑定了不存在的 id）属于**硬错误**，通过
+    /// `chat_pipeline::report_error` 写入 ctx，由 session 编排方统一裁决并报错——
+    /// 绝不静默降级成"没有人格的通用助手"。
     async fn traverse(
         self: Arc<Self>,
         _path: String,
@@ -309,25 +232,56 @@ impl Plugin for AgentPlugin {
             ));
         }
 
+        // ── 未选择智能体 → 静默退出（会话仍可正常使用其它插件的工具）──
+        let agent_id = ctx
+            .get(crate::symbio_core::AGENT_ID)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let Some(agent_id) = agent_id else {
+            return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
+        };
+
         let workdir_opt = ctx.get(crate::symbio_core::WORKDIR);
+
+        // 智能体必须真实存在：不存在就报告硬错误，让会话中止并明确提示，
+        // 而不是"带一个空人格继续跑"（那会让模型凭空臆造身份）。
+        let Some(persona) = self.render_persona(workdir_opt.as_deref(), &agent_id).await else {
+            crate::symbio_core::report_error(
+                &ctx,
+                "agent",
+                format!(
+                    "智能体 '{}' 不存在（workdir={:?}），无法开始对话。请重新选择智能体。",
+                    agent_id, workdir_opt
+                ),
+            )
+            .await;
+            return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
+        };
+
+        let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) else {
+            return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
+        };
+
         let agents = self.manager.list_agents(workdir_opt.as_deref()).await;
 
-        if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
-            // 把构造 capability 所需的运行期依赖注入到 InvokeRequest，
-            // 各能力工厂统一通过 `AGENT_CAPABILITY_CONTEXT` 键读取
-            ctx.set_raw(
-                crate::plugins::agent::capabilities::AGENT_CAPABILITY_CONTEXT.name(),
-                Arc::new(
-                    crate::plugins::agent::capabilities::AgentCapabilityContext {
-                        plugin: self.clone(),
-                        agents,
-                    },
-                ),
-            );
+        // 把构造 capability 所需的运行期依赖注入到 InvokeRequest，
+        // 各能力工厂统一通过 `AGENT_CAPABILITY_CONTEXT` 键读取。
+        // `persona` 在此一并注入（异步阶段预渲染，能力工厂是同步的）。
+        ctx.set_raw(
+            crate::plugins::agent::capabilities::AGENT_CAPABILITY_CONTEXT.name(),
+            Arc::new(
+                crate::plugins::agent::capabilities::AgentCapabilityContext {
+                    plugin: self.clone(),
+                    agents,
+                    agent_id: Some(agent_id),
+                    persona: Some(persona),
+                },
+            ),
+        );
 
-            // 通过系统级 `submit_object_creator!` 机制发现并装配全部已注册 capability
-            register_all_capabilities(ctx.clone(), &tool_manager).await;
-        }
+        // 通过系统级 `submit_object_creator!` 机制发现并装配全部已注册 capability
+        register_all_capabilities(ctx.clone(), &tool_manager).await;
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

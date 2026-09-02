@@ -1,14 +1,14 @@
 <template>
   <div class="chat-settings">
     <!-- Agent 按钮 -->
-    <div class="setting-btn" @click.stop="toggleMenu('agent')" :title="currentAgentInfo?.description || '选择认知人格'">
+    <div class="setting-btn" @click.stop="toggleMenu('agent')" :title="currentAgentInfo?.description || '选择认知人格（可不选）'">
       <span class="icon">🎭</span>
-      <span class="label">{{ currentAgentInfo?.name || 'Loading...' }}</span>
+      <span class="label">{{ currentAgentInfo?.name || '不使用 Agent' }}</span>
       <svg class="arrow" :class="{ open: activeMenu === 'agent' }" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="6 9 12 15 18 9"></polyline>
       </svg>
     </div>
-    
+
     <!-- Agent 下拉菜单 -->
     <Transition name="dropdown">
       <div v-if="activeMenu === 'agent'" class="menu" @click.stop>
@@ -19,8 +19,23 @@
           </svg>
           <span>加载中...</span>
         </div>
-        
+
         <template v-else>
+          <!-- 不使用 Agent：纯工具模式（会话由 session 编排，agent 插件不参与） -->
+          <div
+            class="option"
+            :class="{ active: !agentId }"
+            @click.stop="selectAgent(null)"
+          >
+            <span class="icon">🚫</span>
+            <div class="text">
+              <div class="label">不使用 Agent</div>
+              <div class="desc">纯工具模式：直接与 Model 对话，可用文件/搜索等基础工具</div>
+            </div>
+            <svg v-if="!agentId" class="check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </div>
           <div
             v-for="agent in agents"
             :key="agent.id"
@@ -203,7 +218,8 @@ import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
 
 const props = defineProps<{
-  agentId: string
+  /** 当前选定的智能体 id；null/空 = 不使用 Agent（纯工具模式） */
+  agentId: string | null
   availableAgents: AgentProfile[]
   modelProviderId: string
   availableModelProviders: ModelProviderConfig[]
@@ -212,7 +228,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:agentId': [value: string]
+  'update:agentId': [value: string | null]
   'update:availableAgents': [value: AgentProfile[]]
   'update:modelProviderId': [value: string]
   'update:availableModelProviders': [value: ModelProviderConfig[]]
@@ -285,8 +301,8 @@ function selectMode(value: 'auto' | 'interactive') {
   closeAllMenus()
 }
 
-// 计算当前显示信息
-const currentAgentInfo = computed(() => agents.value.find((p: AgentProfile) => p.id === props.agentId) || agents.value[0])
+// 计算当前显示信息：未选择智能体时为 undefined（按钮显示"不使用 Agent"）
+const currentAgentInfo = computed(() => agents.value.find((p: AgentProfile) => p.id === props.agentId))
 
 // 菜单逻辑
 function toggleMenu(menu: 'agent' | 'risk' | 'model' | 'mode') {
@@ -310,7 +326,8 @@ async function selectRiskLevel(level: 'low' | 'medium' | 'high') {
   closeAllMenus()
 }
 
-function selectAgent(id: string) {
+/** 选择智能体；null = 不使用 Agent（纯工具模式，session 编排不带智能体人格） */
+function selectAgent(id: string | null) {
   emit('update:agentId', id)
   closeAllMenus()
 }

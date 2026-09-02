@@ -81,8 +81,8 @@ graph TD
 | --- | --- |
 | `home` | **根容器**。持全局配置（`~/.symbio/config.yaml`），挂载 `worker` (Composite) 等顶级实例。 |
 | `composite` | **动态容器**。按配置实例化任意子插件，是"分形"的关键——上层配置 `plugins.<name>: { plugin_provider: "..." }` 即可挂载。 |
-| `agent` | **认知中心**。管理 Agent 人格、心智流形 (Mindscape)，执行提示词注入；内部以**机制化 (v9)** 方式组织关系与展示。 |
-| `session` | **会话中心**。长连接、消息持久化、历史裁剪；是 `session/chat` 路由的入口。 |
+| `agent` | **认知中心**。管理 Agent 人格、心智流形 (Mindscape)；**与其它插件同构**——仅在会话选定智能体时经 `traverse` 向会话贡献智能体工具与人格（人格以 `agent_identity` 工具说明送达 LLM），不再独占会话编排。 |
+| `session` | **会话中心**。长连接、消息持久化、历史裁剪；是 `session/chat` 路由的入口，也是**会话编排的唯一入口**（收集全部插件工具、组装环境级提示词、直连 `model/chat`）。 |
 | `model` | **Model 引擎**。多协议适配（`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`）、流式编排、工具调用循环。 |
 | `local` | 本地工具集：`shell` / `file_read` / `file_write` / `file_edit` / `glob_search` / `content_search`。 |
 | `web` | Web 工具集：`http_request` / `web_search` / `web_fetch`。 |

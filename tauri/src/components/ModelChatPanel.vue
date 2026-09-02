@@ -130,7 +130,8 @@ const messagesRef = ref<HTMLElement | null>(null)
 const inputAreaRef = ref<any>(null)
 const inputText = ref('')
 const attachedImages = ref<ImageAttachment[]>([])
-const agentId = ref<string>('default_assistant')
+/** 当前选定的智能体 id；null = 不使用 Agent（纯工具模式，会话由 session 编排） */
+const agentId = ref<string | null>(null)
 const availableAgents = ref<any[]>([])
 const modelProviderId = ref<string>('')
 const availableModelProviders = ref<ModelProviderConfig[]>([])
@@ -159,15 +160,15 @@ function showInitError(prefix: string, err: any) {
   logger.warn('ModelChatPanel', `${prefix}: ${msg}`, err)
 }
 
-// 同步 Agent 变更至 session metadata 中
+// 同步 Agent 变更至 session metadata 中（null = 清除绑定：纯工具模式）
 // flush: 'sync' 确保 loadedFromMeta 守卫在 mount 阶段同步生效（见 loadedFromMeta 注释）
 watch(agentId, async (newVal) => {
   if (!loadedFromMeta.value) return
-  if (newVal && props.sessionId) {
+  if (props.sessionId) {
     try {
       await callPlugin('session/update', {
         session_id: props.sessionId,
-        metadata: { agent_id: newVal }
+        metadata: { agent_id: newVal || null }
       }, undefined, { session_id: props.sessionId })
     } catch (e) {
       logger.error('ModelChatPanel', 'Failed to update session agent', e)
@@ -335,25 +336,10 @@ onMounted(async () => {
     logger.warn('ModelChatPanel', 'Failed to load session config', err)
   }
 
-  // 5. 校验并自动降级选择第一个可用的智能体
-  const agentExists = availableAgents.value.some(a => a.id === agentId.value)
-  if (!agentExists && availableAgents.value.length > 0) {
-    agentId.value = availableAgents.value[0].id
-
-    // 同步更新会话元数据
-    if (props.sessionId) {
-      try {
-        await callPlugin('session/update', {
-          session_id: props.sessionId,
-          metadata: { agent_id: agentId.value }
-        }, undefined, { session_id: props.sessionId })
-      } catch (e) {
-        logger.error('ModelChatPanel', 'Failed to auto-select first agent and update session', e)
-      }
-    }
-  } else if (!agentExists && availableAgents.value.length === 0) {
-    // 列表为空时给提示
-    initError.value = '暂无可用智能体，请先创建智能体后再发起对话。'
+  // 5. 校验当前选中的智能体是否仍有效；失效则置空（回到"不使用 Agent"纯工具模式）。
+  // 不再强制自动选择第一个智能体——会话可以不选 agent 照常运行（重构核心）。
+  if (agentId.value && !availableAgents.value.some(a => a.id === agentId.value)) {
+    agentId.value = null
   }
 
   nextTick(() => scrollToBottom())
@@ -377,17 +363,6 @@ function handleSendOrAbort() {
 
 // 核心发送逻辑
 function handleSend() {
-  // 校验当前选中的智能体是否有效（缺智能体时给顶部 banner，不再用浏览器 alert）
-  const agentExists = availableAgents.value.some(a => a.id === agentId.value)
-  if (!agentExists) {
-    if (availableAgents.value.length === 0) {
-      initError.value = '暂无可用智能体，请先创建智能体后再发起对话。'
-    } else {
-      initError.value = '请选择一个有效的智能体后再发起对话。'
-    }
-    return
-  }
-
   const text = inputText.value.trim()
   const images = [...attachedImages.value]
   if (!text && images.length === 0) return

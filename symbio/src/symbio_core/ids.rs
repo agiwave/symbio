@@ -49,8 +49,10 @@ pub const PLUGIN_EVENT_BUS: &str = "event_bus";
 
 // ============ Agent 能力 id ============
 
-/// Agent 对话能力
+/// Agent 对话能力（子智能体委托）
 pub const CAPABILITY_AGENT_CHAT: &str = "agent_chat";
+/// Agent 身份能力：把智能体人格（身份/规则/策略/预算）随工具说明送达 LLM
+pub const CAPABILITY_AGENT_IDENTITY: &str = "agent_identity";
 /// Agent 统一认知能力（合并 memory/reason/learn/plan/metacognition，27 个操作）
 pub const CAPABILITY_AGENT_COGNITION: &str = "agent_cognition";
 /// Agent 创建能力

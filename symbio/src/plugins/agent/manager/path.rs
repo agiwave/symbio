@@ -27,6 +27,7 @@ use std::path::{Component, Path, PathBuf};
 ///
 /// 返回的路径示例：
 /// - `Some("/home/alice/myproj/.symbio/agents")`
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn resolve_workspace_dir(workdir: Option<&str>) -> Option<PathBuf> {
     let wd = workdir?;
 

@@ -109,13 +109,27 @@ export function flattenProviders(cfg: ModelProvidersConfig): ModelProviderConfig
   )
 }
 
-/** 生成一个不冲突的 Provider ID（用户可编辑） */
-export function suggestProviderId(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  const base = slug || 'provider'
-  return `${base}-${Math.random().toString(36).slice(2, 6)}`
+/**
+ * 依据名称/模型/提供商自动生成一个不冲突的 Provider ID（用户不可见）
+ *
+ * - 由名称等派生可读 slug；`<base>`, `<base>-2`, `<base>-3` … 递增直到不与现有 ID 冲突
+ */
+export function generateUniqueProviderId(
+  base: string,
+  existingIds: Iterable<string>
+): string {
+  const used = new Set(existingIds)
+  const slug =
+    base
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'provider'
+  let id = slug
+  let counter = 2
+  while (used.has(id)) {
+    id = `${slug}-${counter}`
+    counter++
+  }
+  return id
 }

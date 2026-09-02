@@ -62,7 +62,8 @@ import {
   setModelProvider,
   deleteModelProvider,
   setDefaultModelProvider,
-  testModelProvider
+  testModelProvider,
+  generateUniqueProviderId
 } from '@/services/modelProviders'
 import { providerPresets } from '@/constants/modelProviders'
 import type { ModelProviderConfig, ModelProvidersConfig } from '@/schemas/model_providers'
@@ -133,21 +134,22 @@ async function loadAll() {
 }
 
 async function handleSave(payload: { provider: ModelProviderConfig; skipValidation: boolean }) {
-  const p = payload.provider
+  const p = { ...payload.provider }
+  // 新建时自动生成唯一 ID（对用户不可见），无须手动填写
+  if (creating.value) {
+    p.id = generateUniqueProviderId(
+      p.name || p.model || p.provider,
+      providers.value.map((x) => x.id)
+    )
+  }
   if (!p.id) {
-    showToast('error', '请填写 Provider ID')
+    showToast('error', '无法生成 Provider ID')
     return
   }
   saving.value = true
   try {
-    if (creating.value) {
-      if (providers.value.some((x) => x.id === p.id)) {
-        showToast('error', `ID "${p.id}" 已存在，请换一个`)
-        return
-      }
-    }
     const saved = await setModelProvider(p, { skipValidation: payload.skipValidation })
-    showToast('success', `Provider ${saved.id} 已保存`)
+    showToast('success', `Provider「${saved.name || saved.id}」已保存`)
     creating.value = false
     selectedId.value = saved.id
     await loadAll()

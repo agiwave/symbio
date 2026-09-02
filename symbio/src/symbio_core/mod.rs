@@ -1,6 +1,7 @@
 //! 核心模块
 
 mod capability;
+mod chat_pipeline;
 mod chat_session;
 pub(crate) mod creator;
 mod error;
@@ -14,9 +15,14 @@ mod plugin;
 pub mod providers;
 pub mod schemas;
 mod system;
+mod tools;
 mod transport;
 mod types;
 
+pub use chat_pipeline::{
+    attach_capabilities, collect_capabilities, report_error, take_errors, CapabilityError,
+    CAPABILITY_ERRORS,
+};
 pub use chat_session::{ChatSession, ChatSessionHandle};
 pub use creator::{create_object, has_creator};
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
@@ -29,6 +35,7 @@ pub use logger::*;
 pub use paths::*;
 pub use plugin::*;
 pub use system::{decode_output, run_command, validate_params};
+pub use tools::DefaultToolManager;
 pub use transport::{PluginChannel, PluginFrame, PluginPayload};
 pub use types::{BoxStream, EventResult, SystemEvent, ToolCall};
 
