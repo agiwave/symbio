@@ -518,12 +518,20 @@ pub async fn process_tool_calls_async(
 
         // 若本轮工具产出了 user_prompt(WaitingUserAction) 节点，则用它作为 tool 结果
         // （携带 meta.prompt 与 WaitingUserAction 状态，供编排层结束本轮并等待用户输入）。
-        let tool_msg = if let Some(mut prompt) = pending_user_prompt.take() {
+        let mut tool_msg = if let Some(mut prompt) = pending_user_prompt.take() {
             prompt.id = result_msg_id.clone();
             prompt
         } else {
             build_tool_message(&id, &final_res, Some(success), Some(result_msg_id))
         };
+        // auto 模式：工具失败属"信息性"，结果仍以合法 tool 结果（Completed）留在上下文，
+        // 让 LLM 看到错误并继续；其父节点在下方也标 Completed（不暂停会话）。
+        // 若此处仍标 Failed，则会被 get_context_messages 过滤，导致"孤儿 tool 结果"
+        // （父 tool_call 被过滤、结果残留）使下一轮 LLM 请求非法（Bug 2 同类问题）。
+        // 仅对普通工具结果生效（user_prompt 走 WaitingUserAction 分支，不受此覆盖）。
+        if !success && mode == "auto" && tool_msg.msg_type != Some(MessageType::UserPrompt) {
+            tool_msg.status = Some(MessageStatus::Completed);
+        }
 
         if tool_msg.msg_type == Some(MessageType::UserPrompt) {
             // user_prompt 节点本身即是工具"结果"（待用户审批/回答）：
@@ -567,7 +575,9 @@ pub async fn process_tool_calls_async(
                 .await;
             parent_updates.push(parent_update);
         } else {
-            // 广播 action 结果（最终定格）
+            // 广播 action 结果（最终定格）。
+            // 结果状态直接使用 tool_msg.status：已在上方按模式正确设置
+            // （成功或 auto 失败 => Completed；interactive 失败 => Failed）。
             let _ = channel
                 .tx
                 .send(PluginFrame::Data(
@@ -578,11 +588,7 @@ pub async fn process_tool_calls_async(
                             role: Some(MessageRole::Tool),
                             msg_type: Some(MessageType::Text),
                             content: tool_msg.content.clone(),
-                            status: Some(if success {
-                                MessageStatus::Completed
-                            } else {
-                                MessageStatus::Failed
-                            }),
+                            status: tool_msg.status.clone(),
                             meta: Some(json!({ "success": success })),
                             ..Default::default()
                         },
@@ -591,13 +597,26 @@ pub async fn process_tool_calls_async(
                 ))
                 .await;
 
-            // 标记父节点最终状态：执行失败（含用户拒绝）时定为 Failed + 错误 +
-            // failure_kind="error" + tool_name + args（供 resume 提取重试）。
+            // 标记父节点最终状态：
+            // - 成功 => Completed；
+            // - auto 模式失败 => Completed（失败属信息性，结果合法留在上下文，不暂停会话）；
+            // - interactive 模式失败 => Failed + 错误 + failure_kind="error"
+            //   + tool_name + args（供 resume 提取重试）。
             let parent_update = if success {
                 ChatMessage {
                     id: id.clone(),
                     status: Some(MessageStatus::Completed),
                     meta: Some(json!({ "success": true })),
+                    ..Default::default()
+                }
+            } else if mode == "auto" {
+                ChatMessage {
+                    id: id.clone(),
+                    status: Some(MessageStatus::Completed),
+                    meta: Some(json!({
+                        "success": false,
+                        "failure_kind": "error",
+                    })),
                     ..Default::default()
                 }
             } else {

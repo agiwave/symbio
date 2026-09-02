@@ -848,20 +848,28 @@ impl SessionPlugin {
 
         let c = collected.lock().await;
         for cm in c.iter() {
+            // 失败任务的根级 Turn（msg_type=Turn 且 parent_id 为空）必须回滚为 Failed：
+            // 即便它已被 finalize 为 Completed（例如 turn 循环在 finalize 之后、工具阶段或
+            // 下一轮迭代才抛出 PluginFrame::Error，或 panic 发生在 finalize 之后），
+            // 也应强制标 Failed 并持久化。否则前端实时看到的「失败 + 重试」在会话重载后
+            // 变回 Completed，错误显示与重试入口消失（Bug 1：错误状态未正确持久化）。
+            // 非根消息（如 resume 已 Completed 的工具结果）仍沿用原保护逻辑，避免误标——
+            // resume 重跑工具时若自身再 panic，其 Completed 结果不应被回滚为 Failed。
+            let is_root_turn =
+                cm.msg_type == Some(cm::MessageType::Turn) && cm.parent_id.is_none();
             match all.iter_mut().find(|m| m.id == cm.id) {
                 Some(existing) => {
-                    // 仅对未完成态（None/Streaming/Pending）标 Failed，
-                    // 保留 Completed/Failed/WaitingUserAction 终态。
-                    // 重构后 resume 的 Update（含 Completed 工具结果）会进入 collected，
-                    // 若 turn 循环 panic + WorkingGuard::drop 触发本函数，
-                    // 不应把 resume 已 Completed 的消息误标 Failed。
-                    if matches!(
-                        existing.status,
-                        None | Some(cm::MessageStatus::Streaming)
-                            | Some(cm::MessageStatus::Pending)
-                    ) {
+                    if is_root_turn
+                        || matches!(
+                            existing.status,
+                            None | Some(cm::MessageStatus::Streaming)
+                                | Some(cm::MessageStatus::Pending)
+                        )
+                    {
                         existing.status = Some(cm::MessageStatus::Failed);
-                        existing.error = Some(error.to_string());
+                        if existing.error.is_none() {
+                            existing.error = Some(error.to_string());
+                        }
                     }
                 }
                 None => {
@@ -874,23 +882,25 @@ impl SessionPlugin {
         }
         drop(c);
 
-        if let Err(e) = chat_session.replace_messages(all).await {
-            crate::plugin_error!("session", "persist_failure: replace_messages failed: {}", e);
-        }
-
-        // 3. 广播失败终态（含 Turn）：此前只落库，实时画面靠前端启发式标记失败，
-        //    刷新前后可能不一致。现在以 Update 推送 Failed 终态，前端只信服务端
-        //    （Turn 失败 → 组级错误条 + retry_turn 入口；工具结果失败 → 工具行重试）。
-        //    推送发生在 Error 事件之前（调用方先 persist_failure 再 broadcast_error_with_idle），
-        //    Error 事件仅承担 transport 级兜底语义。
-        let c = collected.lock().await;
-        let to_broadcast: Vec<cm::ChatMessage> = c
+        // 3. 先基于「最终将被持久化的 `all` 镜像」收集失败终态快照，
+        //    再 replace（replace_messages 会拿走 all 所有权），最后广播快照，
+        //    保证前端实时态与存储态完全一致（服务端权威推送 Failed 终态，前端只信服务端）。
+        let failed_snapshot: Vec<cm::ChatMessage> = all
             .iter()
             .filter(|m| m.status == Some(cm::MessageStatus::Failed))
             .cloned()
             .collect();
-        drop(c);
-        for m in to_broadcast {
+
+        if let Err(e) = chat_session.replace_messages(all).await {
+            crate::plugin_error!("session", "persist_failure: replace_messages failed: {}", e);
+        }
+
+        // 广播失败终态（含 Turn）：Turn 失败 → 组级错误条 + retry_turn 入口；
+        // 工具结果失败 → 工具行重试。此前只落库、实时画面靠前端启发式标记，
+        // 刷新前后可能不一致；现改为服务端权威推送 Failed 终态，前端只信服务端。
+        // 推送发生在 Error 事件之前（调用方先 persist_failure 再 broadcast_error_with_idle），
+        // Error 事件仅承担 transport 级兜底语义。
+        for m in failed_snapshot {
             self.broadcast_frame(
                 state,
                 PluginFrame::Data(json!(session_chat_response::StreamEvent::Update {

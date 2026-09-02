@@ -486,30 +486,42 @@ impl ChatOrchestrator {
         channel: &PluginChannel,
     ) {
         if out.is_reasoning_only(tools.len()) {
-            // For reasoning-only, the reasoning text becomes the effective response text
-            let resp_id = if out.response_text_child_id.is_empty() {
-                short_id()
-            } else {
-                out.response_text_child_id.clone()
-            };
-            emit_update(
-                channel,
-                ChatMessage {
-                    id: resp_id,
-                    parent_id: Some(root_id.into()),
-                    role: Some(MessageRole::Assistant),
-                    msg_type: Some(MessageType::Text),
-                    content: Some(MessageContent::Text(out.reasoning.clone())),
-                    status: Some(MessageStatus::Completed),
-                    ..Default::default()
-                },
-            )
-            .await;
+            // reasoning-only：模型只产生了 reasoning，没有独立的文本回复。
+            //
+            // 同一段 reasoning 在落库时由 build_assistant_messages 以「Text 响应子节点」承载
+            // （effective_text 对「无文本回复」的回退语义）。因此这里**绝不能**再额外广播一个
+            // content=reasoning 的 Text 节点——否则前端会同时持有「Reasoning 子节点」与
+            // 「Text 响应子节点」两份相同内容，表现为：
+            //   · 流式期间：思考块 + 一段相同文本先后出现，看起来像"同一段文本被重复写入"；
+            //   · 历史刷新后：存储层本就重复（factor≈2），渲染出两份。
+            //
+            // 流式期间 ReasoningDelta 已经把 reasoning 累积进 reasoning_child_id 节点，
+            // 此处仅将其与根 Turn 标记 Completed 即可。仅当流式期间因故未建立 Reasoning 节点时，
+            // 才补发一个 Text 节点兜底（此时不存在 Reasoning 节点，不会造成重复）。
             if !out.reasoning_child_id.is_empty() {
                 emit_status(
                     channel,
                     out.reasoning_child_id.clone(),
                     MessageStatus::Completed,
+                )
+                .await;
+            } else {
+                let resp_id = if out.response_text_child_id.is_empty() {
+                    short_id()
+                } else {
+                    out.response_text_child_id.clone()
+                };
+                emit_update(
+                    channel,
+                    ChatMessage {
+                        id: resp_id,
+                        parent_id: Some(root_id.into()),
+                        role: Some(MessageRole::Assistant),
+                        msg_type: Some(MessageType::Text),
+                        content: Some(MessageContent::Text(out.reasoning.clone())),
+                        status: Some(MessageStatus::Completed),
+                        ..Default::default()
+                    },
                 )
                 .await;
             }
@@ -674,4 +686,86 @@ fn safe_substring(s: &str, start: usize) -> String {
         current += 1;
     }
     s[current..].to_string()
+}
+
+#[cfg(test)]
+mod turn_output_tests {
+    use super::*;
+    use crate::symbio_core::schemas::session::chat_message::MessageType;
+
+    fn out(text: &str, reasoning: &str) -> TurnOutput {
+        TurnOutput {
+            text: text.to_string(),
+            reasoning: reasoning.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn is_reasoning_only_requires_empty_text_and_no_tools() {
+        // 只有 reasoning、无正文、无工具 → reasoning-only
+        assert!(out("", "思考").is_reasoning_only(0));
+        // 空白正文同样视为「无文本回复」
+        assert!(out("  \n ", "思考").is_reasoning_only(0));
+        // 有正文 → 非 reasoning-only
+        assert!(!out("回复", "思考").is_reasoning_only(0));
+        // 有工具调用 → 非 reasoning-only（reasoning 需保留为独立子节点）
+        assert!(!out("", "思考").is_reasoning_only(1));
+        // 无 reasoning → 非 reasoning-only
+        assert!(!out("", "").is_reasoning_only(0));
+    }
+
+    #[test]
+    fn effective_text_falls_back_to_reasoning_only_when_reasoning_only() {
+        assert_eq!(out("", "思考").effective_text(0), "思考");
+        assert_eq!(out("回复", "思考").effective_text(0), "回复");
+        // 有工具时不回退，正文为空即为空
+        assert_eq!(out("", "思考").effective_text(1), "");
+    }
+
+    /// 端到端（纯内存）回归：reasoning-only 的 TurnOutput 落库消息里
+    /// 同一段 reasoning 只出现一次，且没有 Reasoning 子节点。
+    #[test]
+    fn into_messages_reasoning_only_has_no_duplicate_content() {
+        let reasoning = "让我想想这个问题的关键点。";
+        let msgs = out("", reasoning).into_messages("turn-x", 0);
+
+        assert_eq!(msgs.len(), 2, "应为 Turn + 单个 Text 子节点");
+        assert_eq!(msgs[0].msg_type, Some(MessageType::Turn));
+        assert!(
+            !msgs
+                .iter()
+                .any(|m| m.msg_type == Some(MessageType::Reasoning)),
+            "reasoning-only 不得产生 Reasoning 子节点"
+        );
+
+        let occurrences = msgs
+            .iter()
+            .filter(|m| {
+                m.content
+                    .as_ref()
+                    .map(|c| c.to_text().contains(reasoning))
+                    .unwrap_or(false)
+            })
+            .count();
+        assert_eq!(occurrences, 1, "同一段 reasoning 只能落库一份（factor=1）");
+    }
+
+    #[test]
+    fn into_messages_reasoning_with_reply_keeps_two_children() {
+        let msgs = out("这是回复", "这是思考").into_messages("turn-y", 0);
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(
+            msgs.iter()
+                .filter(|m| m.msg_type == Some(MessageType::Reasoning))
+                .count(),
+            1
+        );
+        assert_eq!(
+            msgs.iter()
+                .filter(|m| m.msg_type == Some(MessageType::Text))
+                .count(),
+            1
+        );
+    }
 }

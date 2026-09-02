@@ -265,11 +265,16 @@ export const useSessionsStore = defineStore('sessions', () => {
     const map: Record<string, ChatMessage> = {}
     let idx = 0
     let waitingApproval = false
+    let hasFailed = false
     for (const m of messages) {
       if (m.id) {
         map[m.id] = { ...m, sort_index: idx++ }
         // 还原"等待审批"状态，使会话卡片角标在重开会话时正确显示
         if (m.status === 'waiting_user_action') waitingApproval = true
+        // 还原"失败"状态（Bug 1 修复）：切换会话再切回时，若历史中存在 Failed
+        // 消息（如流模式 LLM 失败 / 手动模式工具失败的根 Turn），需让 last_failed
+        // 重新置位，保证失败终态在重载后仍然可见、可重试。
+        if (m.status === 'failed') hasFailed = true
       }
     }
     const next = { ...sessionMessages.value, [sessionId]: map }
@@ -279,7 +284,11 @@ export const useSessionsStore = defineStore('sessions', () => {
     const prevStatus = sessionStatuses.value[sessionId] ?? { is_working: false, is_waiting_approval: false, last_event_at: Date.now() }
     sessionStatuses.value = {
       ...sessionStatuses.value,
-      [sessionId]: { ...prevStatus, is_waiting_approval: waitingApproval }
+      [sessionId]: {
+        ...prevStatus,
+        is_waiting_approval: waitingApproval,
+        last_failed: prevStatus.last_failed || hasFailed
+      }
     }
   }
 
