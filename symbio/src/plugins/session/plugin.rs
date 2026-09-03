@@ -295,12 +295,16 @@ impl Plugin for SessionPlugin {
             "chat/delete_message" => self.invoke_delete_message(ctx.clone()).await?,
             "chat/update_message" => self.invoke_update_message(ctx.clone()).await?,
             "compress" => self.invoke_compress(ctx.clone()).await?,
-            "list" => self.invoke_list().await?,
             "update" => self.invoke_update(ctx.clone()).await?,
             CONFIG_GET => self.invoke_config_get().await?,
             CONFIG_SET => self.invoke_config_set(ctx.clone()).await?,
             "config/schema" => self.invoke_config_schema().await?,
             "heartbeat/trigger" => return self.handle_heartbeat_trigger_oneoff(ctx).await,
+            // ============== 统一资源协议 (resources/*，会话管理列表) ==============
+            crate::symbio_core::resources::RESOURCES_LIST => self.invoke_resources_list().await?,
+            crate::symbio_core::resources::RESOURCES_STATUS => {
+                self.invoke_resources_status(ctx.clone()).await?
+            }
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         };
 

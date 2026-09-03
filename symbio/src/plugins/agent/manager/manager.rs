@@ -138,48 +138,6 @@ impl AgentManager {
         self.index.invalidate(workdir).await;
     }
 
-    /// 删除指定 agent 的物理目录并清理索引 / 引擎缓存
-    ///
-    /// 返回：
-    /// - `Ok(true)`：找到并删除
-    /// - `Ok(false)`：agent 不存在（幂等）
-    /// - `Err(msg)`：删除失败
-    ///
-    /// **统一来源**：仅删除 `~/.symbio/plugins/agent/{id}` 下的目录，
-    /// 不再 fallback 到 `{workdir}/.symbio/agents/{id}`（已弃用 workspace 级别存储）。
-    pub async fn delete_agent(&self, _workdir: Option<&str>, id: &str) -> Result<bool, String> {
-        use tokio::fs;
-
-        // 1. 在全局索引中找到 agent 的物理路径
-        let Some(profile) = self.index.get(None, id).await else {
-            return Ok(false);
-        };
-
-        // profile.base_dir 是 index 扫描时记录的物理目录
-        // 对于全局 agent，base_dir 应该就是 global_dir/{id}
-        let agent_dir = if profile.base_dir.starts_with(&self.global_dir) {
-            profile.base_dir.clone()
-        } else {
-            // 兜底：旧数据可能不在 global_dir 下，构造预期路径
-            self.global_dir.join(id)
-        };
-
-        // 2. 清理 engine pool 中的缓存
-        self.engine_pool.evict(&agent_dir).await;
-
-        // 3. 物理删除目录
-        if agent_dir.exists() {
-            fs::remove_dir_all(&agent_dir)
-                .await
-                .map_err(|e| format!("删除目录 {agent_dir:?} 失败: {e}"))?;
-        }
-
-        // 4. 失效索引缓存
-        self.invalidate_cache_for_workdir(None).await;
-
-        Ok(true)
-    }
-
     pub async fn shutdown_all(&self) {
         self.engine_pool.shutdown_all().await;
     }

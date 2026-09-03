@@ -5,7 +5,7 @@ use crate::symbio_core::schemas::{
     common,
     session::{
         chat_message as cm, session_append, session_clear, session_clear_messages,
-        session_compress, session_delete_message, session_get_messages, session_list, session_open,
+        session_compress, session_delete_message, session_get_messages, session_open,
         session_update, session_update_message,
     },
 };
@@ -240,32 +240,6 @@ impl SessionPlugin {
         })?)
     }
 
-    pub async fn invoke_list(&self) -> InvokeResponse<Value> {
-        let sessions = self.list_sessions().await?;
-        let active = self.active_mgr.sessions.read().await;
-        let session_items = sessions
-            .iter()
-            .map(|s| {
-                let is_working = active
-                    .get(&s.id)
-                    .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
-                    .unwrap_or(false);
-                session_list::SessionListItem {
-                    id: s.id.clone(),
-                    message_count: s.messages.len(),
-                    updated_at: s.updated_at,
-                    is_working,
-                    metadata: s.metadata.clone(),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        Ok(serde_json::to_value(session_list::Response {
-            sessions: session_items,
-        })
-        .unwrap_or_default())
-    }
-
     /// 合并写入会话 metadata（workdir / title / agent_id 等）。
     pub async fn invoke_update(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
         let req: session_update::Request = ctx.payload()?;
@@ -354,5 +328,69 @@ impl SessionPlugin {
 
     pub async fn invoke_config_schema(&self) -> InvokeResponse<Value> {
         Ok(json!({ "schema": Self::config_schema() }))
+    }
+
+    /// resources/list — 会话管理列表（统一 ResourceSummary 契约，含实时工作状态）
+    pub async fn invoke_resources_list(&self) -> InvokeResponse<Value> {
+        let sessions = self.list_sessions().await?;
+        let active = self.active_mgr.sessions.read().await;
+        let items = sessions
+            .iter()
+            .map(|s| {
+                let is_working = active
+                    .get(&s.id)
+                    .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+                    .unwrap_or(false);
+                let title = s
+                    .metadata
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| s.id.clone());
+                let mut it = crate::symbio_core::resources::ResourceSummary::new(
+                    crate::symbio_core::resources::RESOURCE_SESSION,
+                    &s.id,
+                    title,
+                );
+                it.status = if is_working {
+                    "working".to_string()
+                } else {
+                    "active".to_string()
+                };
+                it.updated_at = Some(s.updated_at);
+                if let serde_json::Value::Object(ref mut m) = it.extra {
+                    let _ = m.insert("message_count".to_string(), json!(s.messages.len()));
+                    let _ = m.insert("is_working".to_string(), json!(is_working));
+                    let _ = m.insert("metadata".to_string(), s.metadata.clone());
+                }
+                it
+            })
+            .collect::<Vec<_>>();
+
+        let resp = crate::symbio_core::resources::ResourcesListResponse {
+            kind: crate::symbio_core::resources::RESOURCE_SESSION.to_string(),
+            capabilities: crate::symbio_core::resources::capabilities_for(
+                crate::symbio_core::resources::RESOURCE_SESSION,
+            ),
+            items,
+        };
+        Ok(serde_json::to_value(resp)?)
+    }
+
+    /// resources/status — 查询单个会话的实时状态
+    pub async fn invoke_resources_status(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
+        let req: crate::symbio_core::resources::ResourceStatusRequest = ctx.payload()?;
+        let active = self.active_mgr.sessions.read().await;
+        let is_working = active
+            .get(&req.id)
+            .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+            .unwrap_or(false);
+        let resp = crate::symbio_core::resources::ResourceStatusResponse {
+            kind: crate::symbio_core::resources::RESOURCE_SESSION.to_string(),
+            id: req.id,
+            status: if is_working { "working".to_string() } else { "active".to_string() },
+            status_detail: None,
+        };
+        Ok(serde_json::to_value(resp)?)
     }
 }

@@ -572,6 +572,133 @@ impl Default for ModelPlugin {
     }
 }
 
+// ==================== 统一资源协议 (resources/*) ====================
+
+impl ModelPlugin {
+    /// resources/list — 列出全部 Model Provider（统一 ResourceSummary 契约）
+    pub async fn resources_model_list(&self) -> InvokeResponse<PluginPayload> {
+        let providers = self.providers.read().await;
+        let items = providers
+            .providers
+            .values()
+            .map(|p| {
+                let mut it = crate::symbio_core::resources::ResourceSummary::new(
+                    crate::symbio_core::resources::RESOURCE_MODEL,
+                    &p.id,
+                    p.name.clone(),
+                );
+                it.status = if p.enabled {
+                    "active".to_string()
+                } else {
+                    "disabled".to_string()
+                };
+                it.description = Some(p.model.clone());
+                if let serde_json::Value::Object(ref mut m) = it.extra {
+                    let _ = m.insert("provider".to_string(), serde_json::json!(p.provider));
+                    let _ = m.insert("model".to_string(), serde_json::json!(p.model));
+                    let _ = m.insert(
+                        "api_protocol".to_string(),
+                        serde_json::json!(p.api_protocol),
+                    );
+                    let _ = m.insert("temperature".to_string(), serde_json::json!(p.temperature));
+                }
+                it
+            })
+            .collect::<Vec<_>>();
+
+        let resp = crate::symbio_core::resources::ResourcesListResponse {
+            kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
+            capabilities: crate::symbio_core::resources::capabilities_for(
+                crate::symbio_core::resources::RESOURCE_MODEL,
+            ),
+            items,
+        };
+        Ok(PluginPayload::new(&resp))
+    }
+
+    /// resources/upload — 以 JSON 表单（manifest）创建/更新 Model Provider
+    pub async fn resources_model_upload(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+    ) -> InvokeResponse<PluginPayload> {
+        let req: crate::symbio_core::resources::ResourceUploadRequest = ctx.payload()?;
+        let id = req
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| PluginError::ValidationError("Model 资源名称不能为空".to_string()))?
+            .to_string();
+        let manifest = req.manifest.ok_or_else(|| {
+            PluginError::ValidationError("Model 以 JSON 表单（manifest）上传".to_string())
+        })?;
+        let mut provider: ModelProviderConfig = serde_json::from_value(manifest)
+            .map_err(|e| PluginError::ValidationError(format!("Provider 配置无效: {e}")))?;
+        if provider.id.is_empty() {
+            provider.id = id.clone();
+        }
+        if provider.name.is_empty() {
+            provider.name = id.clone();
+        }
+        if provider.provider.is_empty() {
+            return Err(PluginError::ValidationError(
+                "Provider 的 provider 字段不能为空".to_string(),
+            ));
+        }
+
+        let existed = {
+            let mut providers = self.providers.write().await;
+            let existed = providers.providers.contains_key(&id);
+            providers.providers.insert(id.clone(), provider);
+            if providers.default_provider_id.is_none() {
+                providers.default_provider_id = Some(id.clone());
+            }
+            existed
+        };
+        let _ = self.persist_to_parent(ctx).await;
+
+        Ok(PluginPayload::new(
+            &crate::symbio_core::resources::ResourceUploadResponse {
+                kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
+                id,
+                created: !existed,
+            },
+        ))
+    }
+
+    /// resources/delete — 删除 Model Provider（内存 + 磁盘）
+    pub async fn resources_model_delete(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+    ) -> InvokeResponse<PluginPayload> {
+        let req: crate::symbio_core::resources::ResourceDeleteRequest = ctx.payload()?;
+        {
+            let mut providers = self.providers.write().await;
+            providers.providers.remove(&req.id);
+            if providers.default_provider_id.as_deref() == Some(req.id.as_str()) {
+                providers.default_provider_id = None;
+            }
+        }
+        if let Some(store) = create_object::<
+            dyn crate::symbio_core::providers::StorageService,
+        >("storage_service", ctx.clone())
+        {
+            let es = store.entity_store();
+            let category = crate::symbio_core::providers::categories::MODEL;
+            if let Err(e) = es.delete_entity(category, &req.id).await {
+                crate::plugin_warn!("model", "删除 provider 目录失败: {e}");
+            }
+        }
+        Ok(PluginPayload::new(
+            &crate::symbio_core::resources::ResourceUploadResponse {
+                kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
+                id: req.id,
+                created: false,
+            },
+        ))
+    }
+}
+
 crate::submit_object_creator!(PLUGIN_MODEL, ModelPlugin::build, dyn Plugin);
 
 #[async_trait]
@@ -770,6 +897,18 @@ impl Plugin for ModelPlugin {
                     .unwrap_or_default();
                 Ok(PluginPayload::new(&handlers::handle_status(&active)))
             }
+
+            // ============== 统一资源协议 (resources/*，independent_form 启用于 model) ==============
+            crate::symbio_core::resources::RESOURCES_LIST => {
+                self.resources_model_list().await
+            }
+            crate::symbio_core::resources::RESOURCES_UPLOAD => {
+                self.resources_model_upload(&ctx).await
+            }
+            crate::symbio_core::resources::RESOURCES_DELETE => {
+                self.resources_model_delete(&ctx).await
+            }
+
             _ => Err(PluginError::NotFound(format!("未知路径: {path}"))),
         }
     }

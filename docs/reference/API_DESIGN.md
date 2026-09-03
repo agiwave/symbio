@@ -72,16 +72,36 @@ pub enum PluginFrame {
 | --- | --- |
 | `_root` | 查询当前节点子插件拓扑 |
 | `{plugin}/config` | 统一配置管理（`get` / `set` action） |
+| `{plugin}/resources/list\|get\|upload\|delete\|status` | **统一资源管理**（五类资源，见 3.2） |
 | `session/chat` | 发起 AI 长连接会话 |
 | `session/get_messages` | 获取对话历史 |
-| `session/list` / `session/open` / `session/clear` | 会话生命周期 |
+| `session/open` / `session/update` / `session/clear` | 会话生命周期（会话内容操作） |
 | `agent/chat` | Agent 层对话入口（由 session 内部转发或外部直调） |
 | `model/chat` | 底层 Model 引擎调用 |
 | `local/shell` | 本地 shell 工具 |
 | `explorer/list` | 文件列表 |
 | `web/http_request` | Web 请求工具（`web_search` / `web_fetch` 为内部能力，经 `web/http_request` 暴露） |
-| `mcp/servers/list` / `mcp/servers/get` / `mcp/servers/set` / `mcp/servers/delete` / `mcp/servers/test` | MCP server 管理；工具通过 `traverse` 动态注册，由宿主统一分发 |
-| `skill/execute` / `skill/list` / `skill/get` | 技能执行与管理 |
+
+### 3.2 统一资源协议（resources/*，五类资源）
+
+`model` / `mcp` / `agent` / `skill` / `session` 五种资源共享同一套 `resources/*`
+操作集（契约定义于 `symbio/src/symbio_core/schemas/resources.rs`，
+zip 工具函数位于 `symbio/src/symbio_core/resources.rs`）：
+
+| 操作 | 说明 |
+| --- | --- |
+| `resources/list` | 列出全部资源，返回 `ResourcesListResponse`（能力开关 + `ResourceSummary[]`） |
+| `resources/get` | 读取单个资源详情 |
+| `resources/upload` | 创建/更新（zip 上传或 JSON manifest 表单） |
+| `resources/delete` | 删除资源 |
+| `resources/status` | 查询实时/连接状态（可选能力） |
+
+- 资源差异仅由 **`ResourceCapabilities` 能力开关**驱动（`zip_upload` / `independent_form` /
+  `realtime_status` / `mutable` / `test_connection` / `read_only`），前后端据此统一实现。
+- 统一路径在不同插件实例化：`worker/model/resources/*`、`mcp/resources/*`、
+  `skill/resources/*`、`agent/resources/*`、`worker/session/resources/*`。
+- 前端由一份 `ResourceManagerView` 实例化多类；会话聊天主界面（`SessionView`）检索的是
+  `resources/list` 统一契约，本身保留专属（会话为内存态交互面）。
 
 ## 4. 工具发现与 AI 集成
 

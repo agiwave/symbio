@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '../views/MainLayout.vue'
 import SessionView from '../views/SessionView.vue'
 import FileViewerWindow from '../views/FileViewerWindow.vue'
+import ResourceManagerView from '../views/ResourceManagerView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -11,10 +12,10 @@ const router = createRouter({
       component: MainLayout,
       children: [
         { path: '', name: 'session', component: SessionView },
-        { path: 'model-providers', name: 'model-providers', component: () => import('../views/ModelProvidersView.vue') },
-        { path: 'mcp', name: 'mcp', component: () => import('../views/McpView.vue') },
-        { path: 'skill', name: 'skill', component: () => import('../views/SkillView.vue') },
-        { path: 'agent', name: 'agent', component: () => import('../views/AgentView.vue') },
+        { path: 'model-providers', name: 'model-providers', component: ResourceManagerView, props: { resourceType: 'model' } },
+        { path: 'mcp', name: 'mcp', component: ResourceManagerView, props: { resourceType: 'mcp' } },
+        { path: 'skill', name: 'skill', component: ResourceManagerView, props: { resourceType: 'skill' } },
+        { path: 'agent', name: 'agent', component: ResourceManagerView, props: { resourceType: 'agent' } },
         { path: 'settings', name: 'settings', component: () => import('../components/SettingsPage.vue') }
       ]
     },

@@ -14,6 +14,25 @@
 
 ---
 
+## 2026-09-03: 统一资源协议落地（model/mcp/agent/skill/session 五类资源）
+
+围绕"机制统一、最小差异化"重构前端与前后端协议，一份页面实例化多类资源：
+
+- **后端统一协议**：新增 `symbio_core::schemas::resources`（`ResourceSummary` / `ResourceCapabilities` /
+  `ResourcesListResponse` / `ResourceUploadRequest` / `ResourceDeleteRequest` / `ResourceStatusRequest`）与
+  `symbio_core::resources`（`decode_zip_b64` / `parse_zip` / `strip_common_root` / `extract_zip_to_entity`）。
+  model / mcp / agent / skill / session 统一暴露 `resources/list|upload|delete|status`；zip 资源（mcp/skill/agent）
+  以文件名即目录名解压到 `~/.symbio/plugins/<category>/<id>/`。
+- **能力开关驱动差异**：`capabilities_for(kind)` 成为后端单一真相源，前端 `ResourceManagerView` 按
+  `zip_upload` / `independent_form` / `realtime_status` / `mutable` / `test_connection` / `read_only` 驱动 UI。
+- **前端统一**：新增 `services/resources.ts` 与 `schemas/resources.ts`；`ResourceManagerView` 一份页面实例化
+  model/mcp/skill/agent；删除遗留 AgentView/McpView/SkillView/ModelProvidersView 及 agents/mcpServers/skills 等
+  旧 service 与孤儿 schema。
+- **session 并入体系**：会话管理列表改用 `worker/session/resources/list` 统一契约（含 is_working/message_count/
+  metadata 扩展），前端 `listSessions` 由 `ResourceSummary` 映射；`resources/status` 提供实时工作状态轮询。
+- **清理**：删除后端孤儿 schema（session_list/skill_get/skill_list/mcp_servers）与 agent 旧 list/get/delete 路由、
+  mcp 旧 `servers/*` 路由、skill 旧 list/get 路由。
+
 ## 2026-09-02: 停止按钮失效 + 工具命令白名单误报修复
 
 - **修复停止按钮失效**：`sessions` store 的 `refreshList` 只把后端 `session/list` 返回的权威 `is_working` 合并进 `list`（卡片圆点），未回填 `sessionStatuses`——而停止按钮的 `isLoading` 只读后者。页面重载/视图挂载后，运行中的会话按钮显示为禁用的「发送」，点击无反应。现在 `refreshList` 把后端运行态回填到 `sessionStatuses`（仅 false→true 升级；true→false 收敛仍由事件流 idle/Abort/Error 负责，避免快照竞争误降级）

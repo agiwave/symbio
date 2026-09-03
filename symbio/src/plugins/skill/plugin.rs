@@ -2,8 +2,6 @@ use crate::plugins::skill::loader::{load_skills_from_dirs_with_budget, LoadBudge
 use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
 use crate::symbio_core::schemas::agent::skill::SkillResponse;
-use crate::symbio_core::schemas::agent::skill_get as skill_get_schema;
-use crate::symbio_core::schemas::agent::skill_list;
 use crate::symbio_core::{
     HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
     PluginMeta, PluginPayload, PLUGIN_SKILL, TRAVERSE_AVAILABLE_TOOLS,
@@ -70,28 +68,6 @@ impl SkillPlugin {
             .with_version("0.2.0")
     }
 
-    /// 为 API 端点（skill/list、skill/get）加载技能
-    ///
-    /// 与 LLM 工具路径不同，API 路径**不做** exe-path fallback：
-    /// - `~` 前缀路径（系统级）通过 expand_tilde 展开为绝对路径，与 workdir 无关
-    /// - 相对路径（工作区级）相对 workdir 解析
-    /// - 不从 exe 路径推算项目根目录，避免在生产环境加载非预期的 skill
-    async fn load_skills_for_api(
-        &self,
-        workdir: Option<String>,
-    ) -> Result<Vec<Skill>, PluginError> {
-        let config = self.config.read().await;
-        let workdir_path = workdir
-            .as_deref()
-            .map(Path::new)
-            .unwrap_or_else(|| Path::new("."));
-        let budget = LoadBudget {
-            max_skills: config.max_skills,
-            max_body_chars: config.max_body_chars,
-        };
-        load_skills_from_dirs_with_budget(&config.skill_dirs, workdir_path, budget).await
-    }
-
     /// 为 LLM 工具（traverse / execute）加载技能
     ///
     /// 保留 exe-path fallback：当 workdir 下找不到任何 skill 时，
@@ -137,126 +113,124 @@ impl SkillPlugin {
     async fn list_skills(&self, workdir: Option<String>) -> Result<Vec<Skill>, PluginError> {
         self.load_skills_for_tool(workdir).await
     }
-
-    /// 列出 skill 并标注来源
-    ///
-    /// 来源规则：
-    /// - 包含 `~` 或 `~/.symbio/plugins/skills` → `system`
-    /// - 以 `.qwen` `.sixth` `.qoder` 开头 → `external`
-    /// - 其它 → `workspace`
-    async fn list_skills_with_source(
-        &self,
-        workdir: Option<String>,
-    ) -> Result<Vec<crate::symbio_core::schemas::agent::skill_list::SkillInfo>, PluginError> {
-        let config = self.config.read().await;
-        let skills = self.load_skills_for_api(workdir).await?;
-
-        // 用 dir 路径反查每个 skill 的来源
-        Ok(skills
-            .into_iter()
-            .map(|s| {
-                let source = Self::classify_skill_source(&s.file_path, &config.skill_dirs);
-                crate::symbio_core::schemas::agent::skill_list::SkillInfo {
-                    name: s.name,
-                    description: s.description,
-                    file_path: s.file_path,
-                    source,
-                    argument_hint: s.argument_hint,
-                    when_to_use: s.when_to_use,
-                }
-            })
-            .collect())
-    }
-
-    /// 根据 SKILL.md 所在目录，反查它在哪个 skill_dir 下，从而判定来源
-    fn classify_skill_source(file_path: &str, skill_dirs: &[String]) -> String {
-        let file_path = file_path.replace('\\', "/");
-        let file_path_norm = file_path.trim_end_matches('/');
-
-        for dir in skill_dirs {
-            // 把 dir 展开为若干候选路径
-            // - `~/...` → `<home>/...`
-            // - `<homedir>/plugins/skills` 等绝对路径保持不变
-            // - 相对路径 `.symbio/skills` 也尝试在 home 下展开（兼容旧配置）
-            let mut candidates: Vec<String> = Vec::new();
-            if let Some(stripped) = dir.strip_prefix("~/") {
-                if let Some(home) = dirs::home_dir() {
-                    candidates.push(home.join(stripped).to_string_lossy().replace('\\', "/"));
-                }
-                candidates.push(dir.clone());
-            } else if dir.starts_with('/') || dir.contains(':') {
-                // 绝对路径（Unix 或 Windows）
-                candidates.push(dir.clone());
-            } else {
-                // 相对路径：也尝试在 home 下展开（兼容 `.symbio/skills` 这种用法）
-                if let Some(home) = dirs::home_dir() {
-                    candidates.push(home.join(dir).to_string_lossy().replace('\\', "/"));
-                }
-                candidates.push(dir.clone());
-            }
-
-            let matches = candidates.iter().any(|c| {
-                let c_norm = c.trim_end_matches('/');
-                !c_norm.is_empty()
-                    && (file_path_norm == c_norm
-                        || file_path_norm.starts_with(&format!("{c_norm}/")))
-            });
-
-            if matches {
-                let lower = dir.to_lowercase();
-                // 注意：判断"系统级"的特征是"路径以 .symbio/plugins/skills 结尾"，
-                // 不管 homedir 怎么切，特征都一致
-                if lower.starts_with("~")
-                    || lower.contains(".symbio/plugins/skills")
-                    || lower.contains(".symbio/skills")
-                {
-                    return "system".to_string();
-                }
-                if lower.contains(".qwen") || lower.contains(".sixth") || lower.contains(".qoder") {
-                    return "external".to_string();
-                }
-                return "workspace".to_string();
-            }
-        }
-        "unknown".to_string()
-    }
-
-    /// BUG-FR9：根据 name 查找 skill 详情（含 body）
-    ///
-    /// 复用 `list_skills` 的结果做 O(1) 查找，避免重复磁盘 IO。
-    /// body 已按 `max_body_chars` 截断。
-    async fn get_skill_detail(
-        &self,
-        name: &str,
-        workdir: Option<String>,
-    ) -> Result<skill_get_schema::Response, PluginError> {
-        let config = self.config.read().await;
-        let skills = self.load_skills_for_api(workdir).await?;
-        let s = skills
-            .into_iter()
-            .find(|s| s.name == name)
-            .ok_or_else(|| PluginError::NotFound(format!("Skill not found: {name}")))?;
-
-        let source = Self::classify_skill_source(&s.file_path, &config.skill_dirs);
-        let body_truncated = s.body.contains("[... body truncated");
-        let body_chars = s.body.chars().count();
-
-        Ok(skill_get_schema::Response {
-            name: s.name,
-            description: s.description,
-            file_path: s.file_path,
-            source,
-            argument_hint: s.argument_hint,
-            when_to_use: s.when_to_use,
-            body: s.body,
-            body_chars,
-            body_truncated,
-        })
-    }
 }
 
-#[cfg(test)]
-mod tests;
+// ==================== 统一资源协议 (resources/*) ====================
+
+impl SkillPlugin {
+    fn es(
+        ctx: &Arc<dyn InvokeRequest>,
+    ) -> Result<std::sync::Arc<dyn crate::symbio_core::providers::StorageService>, PluginError> {
+        crate::symbio_core::create_object::<dyn crate::symbio_core::providers::StorageService>(
+            "storage_service",
+            ctx.clone(),
+        )
+        .ok_or_else(|| PluginError::InternalError("storage_service 不可用".to_string()))
+    }
+
+    /// resources/list — 列出 entity 目录（~/.symbio/plugins/skill/<name>/）中的技能
+    pub async fn resources_skill_list(
+        ctx: &Arc<dyn InvokeRequest>,
+    ) -> Result<serde_json::Value, PluginError> {
+        let store = Self::es(ctx)?;
+        let es = store.entity_store();
+        let category = crate::symbio_core::providers::categories::SKILL;
+        let manifest = crate::symbio_core::providers::manifests::SKILL;
+
+        let ids = es
+            .list_entities(category)
+            .await
+            .map_err(|e| PluginError::InternalError(format!("列出 Skill 失败: {e}")))?;
+
+        let mut items = Vec::new();
+        for id in ids {
+            let body = es.read_entity(category, &id, manifest).await.ok();
+            let mut it = crate::symbio_core::resources::ResourceSummary::new(
+                crate::symbio_core::resources::RESOURCE_SKILL,
+                &id,
+                &id,
+            );
+            it.status = "active".to_string();
+            if let Some(text) = body {
+                let cleaned = text.trim();
+                let first_line = cleaned.lines().next().unwrap_or("").trim().trim_start_matches('#').trim();
+                if !first_line.is_empty() {
+                    it.name = first_line.to_string();
+                }
+                let mut summary = cleaned.lines().find(|l| l.trim().starts_with("**Description**") || l.trim().starts_with("Description"))
+                    .map(|l| l.trim().trim_start_matches("**Description**").trim().trim_start_matches("Description").trim().to_string())
+                    .unwrap_or_default();
+                if summary.is_empty() {
+                    summary = cleaned.chars().take(120).collect();
+                }
+                if !summary.is_empty() {
+                    it.summary = Some(summary);
+                }
+            }
+            items.push(it);
+        }
+
+        let resp = crate::symbio_core::resources::ResourcesListResponse {
+            kind: crate::symbio_core::resources::RESOURCE_SKILL.to_string(),
+            capabilities: crate::symbio_core::resources::capabilities_for(
+                crate::symbio_core::resources::RESOURCE_SKILL,
+            ),
+            items,
+        };
+        Ok(serde_json::to_value(resp)?)
+    }
+
+    /// resources/upload — 上传 zip 创建/更新 Skill（zip 根含 SKILL.md）
+    pub async fn resources_skill_upload(
+        ctx: &Arc<dyn InvokeRequest>,
+    ) -> Result<serde_json::Value, PluginError> {
+        let req: crate::symbio_core::resources::ResourceUploadRequest = ctx.payload()?;
+        let name = req
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| PluginError::ValidationError("Skill 资源名称不能为空".to_string()))?
+            .to_string();
+        let b64 = req.zip_b64.as_deref().ok_or_else(|| {
+            PluginError::ValidationError("Skill 以 zip 上传（zip_b64）".to_string())
+        })?;
+        let bytes = crate::symbio_core::resources::decode_zip_b64(b64)?;
+
+        let store = Self::es(ctx)?;
+        let es = store.entity_store();
+        let category = crate::symbio_core::providers::categories::SKILL;
+        crate::symbio_core::resources::extract_zip_to_entity(es, category, &name, &bytes).await?;
+
+        Ok(serde_json::to_value(
+            crate::symbio_core::resources::ResourceUploadResponse {
+                kind: crate::symbio_core::resources::RESOURCE_SKILL.to_string(),
+                id: name,
+                created: true,
+            },
+        )?)
+    }
+
+    /// resources/delete — 删除 Skill
+    pub async fn resources_skill_delete(
+        ctx: &Arc<dyn InvokeRequest>,
+    ) -> Result<serde_json::Value, PluginError> {
+        let req: crate::symbio_core::resources::ResourceDeleteRequest = ctx.payload()?;
+        let store = Self::es(ctx)?;
+        let es = store.entity_store();
+        let category = crate::symbio_core::providers::categories::SKILL;
+        es.delete_entity(category, &req.id)
+            .await
+            .map_err(|e| PluginError::InternalError(format!("删除 Skill 失败: {e}")))?;
+        Ok(serde_json::to_value(
+            crate::symbio_core::resources::ResourceUploadResponse {
+                kind: crate::symbio_core::resources::RESOURCE_SKILL.to_string(),
+                id: req.id,
+                created: false,
+            },
+        )?)
+    }
+}
 
 #[async_trait]
 impl Plugin for SkillPlugin {
@@ -269,23 +243,20 @@ impl Plugin for SkillPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
-            "list" => {
-                // 列出所有已加载的 skill（按来源分类标注）
-                let workdir = ctx.get(crate::symbio_core::WORKDIR).or_else(|| {
-                    ctx.payload::<skill_list::Request>()
-                        .ok()
-                        .and_then(|r| r.workdir)
-                });
-                let skills = self.list_skills_with_source(workdir).await?;
-                Ok(PluginPayload::new(&skill_list::Response { skills }))
+            // 统一资源协议：resources/list + resources/upload + resources/delete
+            crate::symbio_core::resources::RESOURCES_LIST => {
+                let data = Self::resources_skill_list(&ctx).await?;
+                Ok(PluginPayload::new(&data))
             }
-            // BUG-FR9：前端 SkillView 详情面板预览用
-            "get" => {
-                let req: skill_get_schema::Request = ctx.payload()?;
-                let workdir = ctx.get(crate::symbio_core::WORKDIR).or(req.workdir);
-                let detail = self.get_skill_detail(&req.name, workdir).await?;
-                Ok(PluginPayload::new(&detail))
+            crate::symbio_core::resources::RESOURCES_UPLOAD => {
+                let data = Self::resources_skill_upload(&ctx).await?;
+                Ok(PluginPayload::new(&data))
             }
+            crate::symbio_core::resources::RESOURCES_DELETE => {
+                let data = Self::resources_skill_delete(&ctx).await?;
+                Ok(PluginPayload::new(&data))
+            }
+
             "execute" => {
                 #[derive(serde::Deserialize, Clone)]
                 struct ExecuteRequest {

@@ -27,12 +27,14 @@ async fn test_route_unknown_path_returns_not_found() {
     assert!(matches!(result, Err(PluginError::NotFound(_))));
 }
 
+/// 旧 `list` 路径在统一资源协议重构后并入 `resources/list`，
+/// 本用例改为校验带前导斜杠的**真实当前路由**能被正确剥离并分发。
 #[tokio::test]
 async fn test_route_strips_leading_slash() {
     let plugin = make_plugin();
-    let ctx = make_ctx("/list", None);
+    let ctx = make_ctx("/resources/list", None);
     let res = plugin.route(ctx).await;
-    // 成功返回 Data / Empty / Session / 任意非错误
+    // 成功返回 Data / Empty / Session / 任意非错误；或路由内参数校验错误
     assert!(res.is_ok() || matches!(res, Err(PluginError::ValidationError(_))));
 }
 

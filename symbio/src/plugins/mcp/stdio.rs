@@ -96,6 +96,9 @@ impl McpManager {
     /// 测试 stdio MCP server 的连接（完整握手 + 一次 `tools/list`）
     ///
     /// 不修改任何缓存或配置。仅用于"用户点击测试连接"时的可用性验证。
+    ///
+    /// 连接测试能力：供统一 `resources` 连接测试复用
+    #[allow(dead_code)]
     pub async fn test_connection_stdio(
         &self,
         config: &McpServerConfig,

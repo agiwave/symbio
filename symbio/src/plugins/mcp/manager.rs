@@ -40,6 +40,7 @@ use super::types::McpTool;
 /// 包含 tool count + 协议版本 + server 元信息（来自 initialize 响应）。
 /// 用于在 UI 展示"连接成功（来自 xxx v1.2.3，10 个工具）"等丰富提示。
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TestConnectionResult {
     /// 发现的工具数量
     pub tool_count: usize,
@@ -292,6 +293,9 @@ impl McpManager {
     /// 返回 `TestConnectionResult`：
     /// - `Ok(result)` 包含 tool count、协议版本、server 名称/版本、instructions
     /// - `Err(e)` 表示失败
+    ///
+    /// 连接测试能力：供统一 `resources` 连接测试/表单复用（旧 `servers/test` 已移除，待接入）
+    #[allow(dead_code)]
     pub async fn test_connection(
         &self,
         name: &str,

@@ -8,7 +8,6 @@ pub mod session_compress;
 pub mod session_config;
 pub mod session_delete_message;
 pub mod session_get_messages;
-pub mod session_list;
 pub mod session_open;
 pub mod session_update;
 pub mod session_update_message;

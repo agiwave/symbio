@@ -56,14 +56,4 @@ impl AgentEnginePool {
             count
         );
     }
-
-    /// 从缓存中驱逐一个 engine（按 base_dir 匹配）
-    ///
-    /// 删除 agent 时调用，避免缓存里的旧 engine 持有已删除目录的文件句柄。
-    /// `Ok(true)` 表示成功驱逐，`Ok(false)` 表示缓存里没有该 key。
-    pub async fn evict(&self, base_dir: &std::path::Path) -> bool {
-        let key = path::normalize_cache_key(base_dir);
-        self.cache.invalidate(&key).await;
-        self.cache.get(&key).await.is_none()
-    }
 }

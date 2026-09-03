@@ -152,6 +152,6 @@ mod tests {
     #[test]
     fn relative_workdir_is_rejected() {
         // 相对路径不得被解析为工作区指令路径
-        assert!(Path::new("relative/dir").is_absolute() == false);
+        assert!(!Path::new("relative/dir").is_absolute());
     }
 }

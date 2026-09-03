@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod common;
+pub mod resources;
 pub mod explorer;
 pub mod mcp;
 pub mod memory;

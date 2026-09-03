@@ -160,6 +160,9 @@ impl super::manager::McpManager {
     /// - 不写 discover 缓存
     /// - 仍会建立/复用 HTTP session（与正常调用一致）
     /// - 返回 `TestConnectionResult`（含 tool count + 协议版本 + server 名称/版本/instructions）
+    ///
+    /// 连接测试能力：供统一 `resources` 连接测试复用
+    #[allow(dead_code)]
     pub async fn test_connection_http(
         &self,
         name: &str,
