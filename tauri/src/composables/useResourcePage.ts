@@ -13,7 +13,7 @@ import { computed, ref, type Component, type ComputedRef, type Ref } from 'vue'
 import { listResources } from '@/services/resources'
 import { useResourceManager } from '@/composables/useResourceManager'
 import { resolveActiveTypes, useResourceProviders } from '@/composables/useResourceProviders'
-import { getResourceEditor } from '@/registry/resourceTypes'
+import { getResourceEditor, getResourceEditorFor } from '@/registry/resourceTypes'
 import type { ProviderInfo, ResourceCapabilities, ResourceSummary } from '@/schemas/resources'
 
 export interface TypeState {
@@ -113,8 +113,9 @@ export function useResourcePage(typesParam: Ref<string | undefined>) {
     return getResourceEditor(kind)
   }
 
+  /** 选中项的专属编辑表单：项级"扩展名"（config_type）优先，回退 kind；未注册 null → 通用兜底 */
   const selectedEditor = computed(() =>
-    selected.value ? getResourceEditor(selected.value.kind) ?? null : null
+    selected.value ? getResourceEditorFor(selected.value.item) ?? null : null
   )
   /** 某 kind 的专属编辑表单（新建时用，未注册 null → 通用兜底） */
   function createEditor(kind: string | null): Component | null {

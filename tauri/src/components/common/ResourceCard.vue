@@ -21,11 +21,12 @@
     @keydown.enter="$emit('click')"
     @keydown.space.prevent="$emit('click')"
   >
-    <!-- 状态条 + 标题 -->
+    <!-- 状态条 + 类型图标 + 标题 -->
     <div class="card-header">
       <div class="status-area">
         <span :class="['status-dot', statusClass]" :title="statusTitle" />
       </div>
+      <component v-if="icon" :is="icon" class="card-icon" />
       <div class="title-row">
         <span class="title-text" :title="title">{{ title }}</span>
         <span v-if="badge" class="activity-text" :class="badgeClass">{{ badge }}</span>
@@ -48,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, type Component } from 'vue'
 
 interface Tag {
   label: string
@@ -65,6 +66,8 @@ interface ResourceCardProps {
   isActive?: boolean
   disabled?: boolean
   tags?: Tag[]
+  /** 类型图标组件（资源注册表下发，如设置分区图标） */
+  icon?: Component
 }
 
 const props = withDefaults(defineProps<ResourceCardProps>(), {
@@ -139,6 +142,12 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 .status-dot.status-warning { background: var(--warning-solid); }
 .status-dot.status-error { background: var(--danger-solid); }
 .status-dot.status-muted { background: var(--text-disabled); }
+
+/* 类型图标 */
+.card-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
 
 .title-row {
   flex: 1;

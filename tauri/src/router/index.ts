@@ -19,7 +19,8 @@ const router = createRouter({
         { path: 'mcp', redirect: () => '/resources/mcp' },
         { path: 'skill', redirect: () => '/resources/skill' },
         { path: 'agent', redirect: () => '/resources/agent' },
-        { path: 'settings', name: 'settings', component: () => import('../components/SettingsPage.vue') }
+        // 设置页：统一资源页的 setting 实例（分区清单来自后端 setting/resources/list）
+        { path: 'settings', name: 'settings', component: ResourceManagerView, props: () => ({ typesParam: 'setting' }) }
       ]
     },
     {

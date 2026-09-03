@@ -11,7 +11,9 @@ import { describe, expect, it } from 'vitest'
 import { defineComponent } from 'vue'
 import {
   getResourceEditor,
+  getResourceEditorFor,
   getResourceIcon,
+  getResourceIconFor,
   registerResourceEditor,
   registerResourceIcon,
   resourcePath,
@@ -35,6 +37,32 @@ describe('registerResourceEditor / getResourceEditor', () => {
   })
 })
 
+describe('getResourceEditorFor（项级"扩展名"分发）', () => {
+  it('setting 各分区按 config_type 进入不同 editor', () => {
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 'appearance' })).toBeTruthy()
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 'session' })).toBeTruthy()
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 'local' })).toBeTruthy()
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 'web' })).toBeTruthy()
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 'about' })).toBeTruthy()
+  })
+
+  it('config_type 未注册时回退 kind 级 editor', () => {
+    registerResourceEditor('setting', Dummy)
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 'unknown-ext' })).toBe(Dummy)
+  })
+
+  it('无 config_type 的资源走 kind 级查找', () => {
+    expect(getResourceEditorFor({ kind: 'model' })).toBeTruthy()
+    expect(getResourceEditorFor({ kind: 'mcp' })).toBeUndefined()
+  })
+
+  it('非 string 的 config_type 被忽略（后端 extra 兼容）', () => {
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 42 })).toBe(
+      getResourceEditorFor({ kind: 'setting' })
+    )
+  })
+})
+
 describe('registerResourceIcon / getResourceIcon', () => {
   it('未注册 icon 返回 undefined（走默认图标）', () => {
     expect(getResourceIcon('mcp')).toBeUndefined()
@@ -43,6 +71,18 @@ describe('registerResourceIcon / getResourceIcon', () => {
   it('可动态注册 icon', () => {
     registerResourceIcon('mcp', Dummy)
     expect(getResourceIcon('mcp')).toBe(Dummy)
+  })
+})
+
+describe('getResourceIconFor（项级图标分发）', () => {
+  it('setting 各分区有专属图标', () => {
+    for (const ext of ['appearance', 'session', 'local', 'web', 'about']) {
+      expect(getResourceIconFor({ kind: 'setting', config_type: ext })).toBeTruthy()
+    }
+  })
+
+  it('未注册图标的类型返回 undefined', () => {
+    expect(getResourceIconFor({ kind: 'model' })).toBeUndefined()
   })
 })
 

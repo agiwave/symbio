@@ -47,20 +47,23 @@
       <span v-if="enabledCount > 0" class="meta-sub">{{ enabledCount }} 可用</span>
     </template>
 
-    <!-- 混合平排列表：所有类型所有项，按 name 排序，无分组 -->
+    <!-- 混合平排列表：所有类型所有项，按 name 排序，无分组。
+         compact 模式（后端 ProviderInfo.compact_list，如设置分区）：
+         仅显示类型图标 + 标题，隐藏描述与路径标签 -->
     <template #list>
       <div class="resource-list" role="listbox" aria-label="资源列表">
         <ResourceCard
           v-for="item in items"
           :key="`${item.kind}:${item.id}`"
           :title="item.name || item.id"
-          :subtitle="item.description || item.summary"
+          :subtitle="isCompact ? undefined : (item.description || item.summary)"
           :status="cardStatus(item)"
           :status-title="item.status_detail || item.status"
+          :icon="getResourceIconFor(item)"
           :is-active="selectedId === `${item.kind}:${item.id}`"
           @click="select(`${item.kind}:${item.id}`)"
         >
-          <template #meta>
+          <template v-if="!isCompact" #meta>
             <span
               class="tag tag-muted tag-copy"
               :title="`${itemPath(item)}（点击复制）`"
@@ -207,7 +210,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { deleteResource, getResourceStatus, uploadResourceForm, uploadResourceZip } from '@/services/resources'
 import { useResourcePage } from '@/composables/useResourcePage'
-import { resourcePath } from '@/registry/resourceTypes'
+import { resourcePath, getResourceIconFor } from '@/registry/resourceTypes'
 import type { SelectedResource } from '@/composables/useResourcePage'
 import type { ResourceSummary } from '@/schemas/resources'
 import { useToast } from '@/composables/useToast'
@@ -255,6 +258,9 @@ const {
 
 // === 展示派生 ===
 const title = computed(() => (isMulti.value ? '资源' : kindLabel(activeTypes.value[0]?.kind ?? '')))
+
+/** 列表简洁模式：活动类型中任一开启 compact_list 即生效（仅图标 + 标题） */
+const isCompact = computed(() => activeTypes.value.some((p) => p.compact_list))
 
 const emptyHint = computed(() => {
   if (isMulti.value) return canCreate.value ? '点击右上角「新建」创建资源' : ''

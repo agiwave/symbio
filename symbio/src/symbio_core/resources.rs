@@ -166,9 +166,11 @@ pub struct ResourceProviderInfo {
     /// 展示标签
     pub label: &'static str,
     pub supports_upload: bool,
+    /// 列表简洁模式：仅显示类型图标 + 标题
+    pub compact_list: bool,
 }
 
-/// 全部已注册资源 provider（编译期收起当前五类，顺序即展示顺序）
+/// 全部已注册资源 provider（编译期收起当前六类，顺序即展示顺序）
 pub fn provider_registry() -> &'static [ResourceProviderInfo] {
     const REG: &[ResourceProviderInfo] = &[
         ResourceProviderInfo {
@@ -179,6 +181,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             order: 1,
             label: "Model Provider",
             supports_upload: true,
+            compact_list: false,
         },
         ResourceProviderInfo {
             kind: RESOURCE_MCP,
@@ -188,6 +191,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             order: 2,
             label: "MCP Server",
             supports_upload: true,
+            compact_list: false,
         },
         ResourceProviderInfo {
             kind: RESOURCE_AGENT,
@@ -197,6 +201,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             order: 3,
             label: "Agent",
             supports_upload: true,
+            compact_list: false,
         },
         ResourceProviderInfo {
             kind: RESOURCE_SKILL,
@@ -206,6 +211,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             order: 4,
             label: "Skill",
             supports_upload: true,
+            compact_list: false,
         },
         ResourceProviderInfo {
             kind: RESOURCE_SESSION,
@@ -215,6 +221,19 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             order: 5,
             label: "Session",
             supports_upload: false, // session 走 SessionStore，upload/delete 未实现
+            compact_list: false,
+        },
+        ResourceProviderInfo {
+            kind: RESOURCE_SETTING,
+            provider_name: RESOURCE_SETTING,
+            prefix: "setting",
+            capabilities: &ResourceCapabilities::SETTING,
+            order: 6,
+            label: "设置",
+            // 设置分区清单固定，不可在资源管理器内新建/删除；
+            // 各分区保存由前端 editor 自持通道完成（config/set / appearance store）
+            supports_upload: false,
+            compact_list: true,
         },
     ];
     REG
@@ -233,6 +252,7 @@ pub fn providers_response() -> ProvidersResponse {
                 order: p.order,
                 label: p.label.to_string(),
                 supports_upload: p.supports_upload,
+                compact_list: p.compact_list,
             })
             .collect(),
     }

@@ -65,6 +65,15 @@ impl Plugin for SettingPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
+        // 统一资源协议：resources/list（设置分区清单）；
+        // get/upload/delete/status 走 trait 默认 NotImplemented（分区不可增删，
+        // 保存由前端 editor 经各插件 config/set 自持完成）
+        if let Some(resp) =
+            crate::symbio_core::resources::dispatch(self.as_ref(), path, &ctx).await
+        {
+            return resp;
+        }
+
         match path {
             "list" => {
                 let categories = vec![
@@ -133,3 +142,44 @@ impl Plugin for SettingPlugin {
 }
 
 crate::submit_object_creator!(PLUGIN_SETTING, SettingPlugin::build, dyn Plugin);
+
+// ==================== 统一资源协议接入 ====================
+
+/// 设置分区（固定清单）。`id` 同时作为前端 editor 的"扩展名"（config_type），
+/// 前端按 `setting:<config_type>` 复合键注入专属编辑表单。
+const SETTING_SECTIONS: [(&str, &str); 5] = [
+    ("appearance", "外观"),
+    ("session", "会话设置"),
+    ("local", "本地工具"),
+    ("web", "网络工具"),
+    ("about", "关于"),
+];
+
+#[async_trait::async_trait]
+impl crate::symbio_core::resources::ResourceProvider for SettingPlugin {
+    fn kind(&self) -> &'static str {
+        crate::symbio_core::resources::RESOURCE_SETTING
+    }
+
+    /// 设置分区为固定清单（非 EntityStore 实体目录）：
+    /// 每个分区一项，extra 携带 config_type 供前端按"扩展名"分发 editor。
+    async fn list_items(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+    ) -> Result<Vec<crate::symbio_core::resources::ResourceSummary>, PluginError> {
+        Ok(SETTING_SECTIONS
+            .iter()
+            .map(|(id, name)| {
+                let mut it = crate::symbio_core::resources::ResourceSummary::new(
+                    crate::symbio_core::resources::RESOURCE_SETTING,
+                    *id,
+                    *name,
+                );
+                if let serde_json::Value::Object(ref mut m) = it.extra {
+                    let _ = m.insert("config_type".to_string(), serde_json::json!(id));
+                }
+                it
+            })
+            .collect())
+    }
+}

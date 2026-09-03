@@ -34,6 +34,8 @@ pub const RESOURCE_AGENT: &str = "agent";
 pub const RESOURCE_SKILL: &str = "skill";
 /// Session（会话）
 pub const RESOURCE_SESSION: &str = "session";
+/// Setting（设置分区）
+pub const RESOURCE_SETTING: &str = "setting";
 
 /// 与 [`crate::symbio_core::providers::storage::categories`] 一一对应的资源类型
 pub const ALL_RESOURCE_TYPES: [&str; 5] = [
@@ -128,6 +130,17 @@ impl ResourceCapabilities {
         test_connection: false,
         read_only: false,
     };
+
+    /// setting：各分区有独立表单（前端按 config_type 注入 editor），
+    /// 不可新建/删除（分区清单固定），保存由各 editor 自持通道完成
+    pub const SETTING: Self = Self {
+        zip_upload: false,
+        independent_form: true,
+        realtime_status: false,
+        mutable: false,
+        test_connection: false,
+        read_only: false,
+    };
 }
 
 /// 默认能力表：`kind -> capabilities`
@@ -138,6 +151,7 @@ pub fn capabilities_for(kind: &str) -> ResourceCapabilities {
         RESOURCE_SKILL => ResourceCapabilities::SKILL,
         RESOURCE_AGENT => ResourceCapabilities::AGENT,
         RESOURCE_SESSION => ResourceCapabilities::SESSION,
+        RESOURCE_SETTING => ResourceCapabilities::SETTING,
         _ => ResourceCapabilities {
             zip_upload: false,
             independent_form: false,
@@ -171,6 +185,9 @@ pub struct ProviderInfo {
     pub label: String,
     /// 是否支持在资源管理器内创建/删除（`category` 存在且 dispatch 实现 upload/delete）
     pub supports_upload: bool,
+    /// 列表简洁模式：仅显示类型图标 + 标题（如设置分区，无描述/路径标签）
+    #[serde(default)]
+    pub compact_list: bool,
 }
 
 /// `resources/providers` 响应

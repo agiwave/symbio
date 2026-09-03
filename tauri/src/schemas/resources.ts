@@ -48,6 +48,8 @@ export interface ProviderInfo {
   label: string
   /** 是否支持在资源管理器内创建/删除（session=false） */
   supports_upload: boolean
+  /** 列表简洁模式：仅显示类型图标 + 标题（如设置分区） */
+  compact_list?: boolean
 }
 
 /** resources/providers 响应 */
