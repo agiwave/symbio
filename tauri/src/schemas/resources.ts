@@ -50,6 +50,8 @@ export interface ProviderInfo {
   supports_upload: boolean
   /** 列表简洁模式：仅显示类型图标 + 标题（如设置分区） */
   compact_list?: boolean
+  /** 左侧主导航归属分组：'resources'（资源）/ 'settings'（设置）；缺省/空串表示不进导航 */
+  nav?: string
 }
 
 /** resources/providers 响应 */
@@ -118,3 +120,9 @@ export const RESOURCE_LABELS: Record<string, string> = {
   agent: 'Agent',
   session: 'Session',
 }
+
+// 主导航分组常量（与后端 ProviderInfo.nav 对齐，symbio_core::schemas::resources）
+/** 资源分组：model/mcp/agent/skill 等可管理类型 */
+export const NAV_RESOURCES = 'resources'
+/** 设置分组：setting（左侧"设置"入口由该 provider 动态驱动） */
+export const NAV_SETTINGS = 'settings'

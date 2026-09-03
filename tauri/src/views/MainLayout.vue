@@ -34,9 +34,9 @@
           </svg>
           <span class="nav-label">全部资源</span>
         </button>
-        <!-- 资源导航项由后端 resources/providers 注册表动态生成 -->
+        <!-- 资源导航项由后端 resources/providers 注册表（nav='resources'）动态生成 -->
         <button
-          v-for="p in navProviders"
+          v-for="p in resourceNav"
           :key="p.kind"
           class="nav-btn"
           :class="{ active: isProviderNavActive(p.kind) }"
@@ -53,20 +53,24 @@
         </button>
       </div>
 
-      <!-- 底部：设置 + 系统目录切换（Homedir Switcher） -->
+      <!-- 底部：设置入口（ProviderInfo.nav='settings' 动态生成，不再硬编码）
+            + 系统目录切换（Homedir Switcher） -->
       <div class="nav-footer">
         <button
+          v-for="p in settingsNav"
+          :key="p.kind"
           class="nav-btn"
           :class="{ active: currentPage === 'settings' }"
-          aria-label="设置"
-          title="设置"
+          :aria-label="p.label"
+          :title="p.label"
           @click="goTo('/settings')"
         >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <component :is="navIconFor(p.kind)" v-if="navIconFor(p.kind)" />
+          <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            <path d="" />
           </svg>
-          <span class="nav-label">设置</span>
+          <span class="nav-label">{{ p.label }}</span>
         </button>
         <button
           class="nav-btn"
@@ -106,7 +110,6 @@ import { startSessionBusWatcher } from '@/services/sessionBusWatcher'
 import { getHomedirInfo, type HomedirInfo } from '@/services/home'
 import { loadProviders, useResourceProviders } from '@/composables/useResourceProviders'
 import { getResourceIcon } from '@/registry/resourceTypes'
-import type { ProviderInfo } from '@/schemas/resources'
 import { logger } from '@/utils/logger'
 import FileViewerOverlay from '@/components/fileViewer/FileViewerOverlay.vue'
 import HomedirSwitcher from '@/components/common/HomedirSwitcher.vue'
@@ -118,12 +121,9 @@ const router = useRouter()
 const openHomedirSwitcher = ref(false)
 const currentHomedir = ref<HomedirInfo>({ homedir: '', bootstrap_path: '' })
 
-const { providers } = useResourceProviders()
-
-/** 左侧"资源"导航项：后端注册的可管理资源类型（supports_upload，session 走会话主入口） */
-const navProviders = computed(() =>
-  providers.value.filter((p: ProviderInfo) => p.supports_upload)
-)
+/** 左侧导航项：全部按 ProviderInfo.nav 分组——资源区（nav='resources'）与设置区
+ * （nav='settings'）均由注册表动态生成，前端不再写死"设置"入口 */
+const { resourceNav, settingsNav } = useResourceProviders()
 
 /** 当前单类型资源路径 */
 const resTypes = computed(() => (route.params.types as string) || 'all')

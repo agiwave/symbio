@@ -13,7 +13,7 @@
 import { computed, shallowRef } from 'vue'
 import { fetchProviders } from '@/services/resources'
 import type { ProviderInfo, ResourceCapabilities } from '@/schemas/resources'
-import { RESOURCE_LABELS } from '@/schemas/resources'
+import { RESOURCE_LABELS, NAV_RESOURCES, NAV_SETTINGS } from '@/schemas/resources'
 import { logger } from '@/utils/logger'
 
 const providers = shallowRef<ProviderInfo[]>([])
@@ -86,8 +86,20 @@ export function useResourceProviders() {
     return Boolean(p.supports_upload && p.capabilities?.mutable && !p.capabilities.read_only)
   }
 
+  /** 资源分组导航：ProviderInfo.nav === 'resources'（model/mcp/agent/skill 等可管理类型） */
+  const resourceNav = computed(() =>
+    sortedProviders.value.filter((p) => p.nav === NAV_RESOURCES)
+  )
+
+  /** 设置分组导航：ProviderInfo.nav === 'settings'（当前为 setting，左侧"设置"入口据此动态生成） */
+  const settingsNav = computed(() =>
+    sortedProviders.value.filter((p) => p.nav === NAV_SETTINGS)
+  )
+
   return {
     providers: sortedProviders,
+    resourceNav,
+    settingsNav,
     getProvider,
     labelOf,
     capabilitiesOf,

@@ -168,6 +168,8 @@ pub struct ResourceProviderInfo {
     pub supports_upload: bool,
     /// 列表简洁模式：仅显示类型图标 + 标题
     pub compact_list: bool,
+    /// 左侧主导航归属分组（`NAV_RESOURCES` / `NAV_SETTINGS`；空串不进导航）
+    pub nav: &'static str,
 }
 
 /// 全部已注册资源 provider（编译期收起当前六类，顺序即展示顺序）
@@ -182,6 +184,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             label: "Model Provider",
             supports_upload: true,
             compact_list: false,
+            nav: NAV_RESOURCES,
         },
         ResourceProviderInfo {
             kind: RESOURCE_MCP,
@@ -192,6 +195,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             label: "MCP Server",
             supports_upload: true,
             compact_list: false,
+            nav: NAV_RESOURCES,
         },
         ResourceProviderInfo {
             kind: RESOURCE_AGENT,
@@ -202,6 +206,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             label: "Agent",
             supports_upload: true,
             compact_list: false,
+            nav: NAV_RESOURCES,
         },
         ResourceProviderInfo {
             kind: RESOURCE_SKILL,
@@ -212,6 +217,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             label: "Skill",
             supports_upload: true,
             compact_list: false,
+            nav: NAV_RESOURCES,
         },
         ResourceProviderInfo {
             kind: RESOURCE_SESSION,
@@ -220,8 +226,11 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             capabilities: &ResourceCapabilities::SESSION,
             order: 5,
             label: "Session",
-            supports_upload: false, // session 走 SessionStore，upload/delete 未实现
+            // session 走 SessionStore，upload/delete 未实现；
+            // 不进入主导航——会话由独立的"会话"主入口承载
+            supports_upload: false,
             compact_list: false,
+            nav: "",
         },
         ResourceProviderInfo {
             kind: RESOURCE_SETTING,
@@ -231,9 +240,11 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             order: 6,
             label: "设置",
             // 设置分区清单固定，不可在资源管理器内新建/删除；
-            // 各分区保存由前端 editor 自持通道完成（config/set / appearance store）
+            // 各分区保存由前端 editor 自持通道完成（config/set / appearance store）。
+            // 导航归属 settings：左侧"设置"入口由本条目动态驱动（不再前端写死）
             supports_upload: false,
             compact_list: true,
+            nav: NAV_SETTINGS,
         },
     ];
     REG
@@ -253,6 +264,7 @@ pub fn providers_response() -> ProvidersResponse {
                 label: p.label.to_string(),
                 supports_upload: p.supports_upload,
                 compact_list: p.compact_list,
+                nav: p.nav.to_string(),
             })
             .collect(),
     }
