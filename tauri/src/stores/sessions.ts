@@ -34,7 +34,7 @@ import {
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
-import { setGlobalWorkdir, callPlugin } from '@/services/plugin'
+import { setGlobalWorkdir, getGlobalWorkdir, callPlugin } from '@/services/plugin'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/services/model'
@@ -451,11 +451,26 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   async function selectSession(id: string) {
-    if (activeId.value === id) return
     activeId.value = id
-    // 同步全局 workdir：触发后续资源浏览器 / AI 工具调用上下文
+    // 同步全局 workdir：触发后续资源浏览器 / AI 工具调用上下文。
+    // **不再提前 return**：即使 activeId 已是该会话（如刷新后 SessionView 恢复），
+    // 也要让下面的"无 workdir 兜底"有机会执行。
     const wd = activeWorkdir.value
-    if (wd) setGlobalWorkdir(wd)
+    if (wd) {
+      setGlobalWorkdir(wd)
+      return
+    }
+    // 兜底：该会话从未绑定 workdir（早期会话 / 未走会话内选择目录）时，
+    // 若存在可用上下文（当前全局 或 最近使用 目录）则自动补绑定并持久化，
+    // 避免"选择已有会话却卡在引导选择工作区"，让其直接进入聊天界面。
+    const fallback = getGlobalWorkdir() ?? lastUsedWorkdir.value
+    if (fallback) {
+      try {
+        await setActiveWorkdir(fallback)
+      } catch (e) {
+        logger.warn('[sessions]', `为会话 ${id} 兜底补绑 workdir 失败`, e)
+      }
+    }
   }
 
   async function deleteSession(id: string) {
