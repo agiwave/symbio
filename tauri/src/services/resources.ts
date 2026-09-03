@@ -11,7 +11,6 @@ import {
   type ResourceCapabilities,
   type ResourceStatusResponse,
   type ResourcesListResponse,
-  type ResourceSummary,
   type ResourceType,
   type ResourceUploadResponse,
 } from '../schemas/resources'
@@ -24,11 +23,6 @@ const RESOURCE_PATHS: Record<ResourceType, string> = {
   skill: 'skill',
   agent: 'agent',
   session: 'worker/session',
-}
-
-/** 获取某类型统一资源路径 */
-export function resourcePath(type: ResourceType): string {
-  return RESOURCE_PATHS[type]
 }
 
 function resourcesOp<T>(type: ResourceType, op: string, payload?: unknown): Promise<T> {
@@ -99,11 +93,6 @@ export async function getResourceStatus(
     logger.debug('resources-service', `getResourceStatus(${type}/${id}) failed:`, err)
     return null
   }
-}
-
-/** 由后端统一列表项普通化处理；若某类型尚未接线，则保持原输出 */
-export function toSummary(type: ResourceType, raw: ResourceSummary): ResourceSummary {
-  return raw.kind ? raw : { ...raw, kind: type }
 }
 
 /** ArrayBuffer → base64（zip 经 JSON payload 上传） */
