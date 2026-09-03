@@ -236,20 +236,23 @@ export function isManagerCreatable(p: { supports_upload?: boolean; capabilities?
 }
 
 /**
- * 混合平排列表纯函数：把所有活动类型的所有资源展平为一张列表（不分类型分组），
- * 按 name（小写）自然排序——目录式交错（一个目录混排多种后缀文件）。
+ * 混合平排列表纯函数：把所有活动类型的所有资源展平为一张列表（不分类型分组）。
+ *
+ * **排序原则：完全尊重服务器返回顺序，前端不做 name 排序。**
+ * - 类型顺序 = activeTypes 顺序（由注册表 order / 路由参数决定）；
+ * - 每类型内 = 该类型 `resources/list` 返回的原序（后端决定展示次序，如设置分区清单）。
  */
 export function buildMixedItems(
   activeTypes: readonly ProviderInfo[],
   typeStates: Record<string, TypeState>
 ): ResourceSummary[] {
-  const flat: Array<{ item: ResourceSummary; name: string }> = []
+  const flat: ResourceSummary[] = []
   for (const d of activeTypes) {
     for (const it of typeStates[d.kind]?.items ?? []) {
-      flat.push({ item: it, name: (it.name || it.id).toLowerCase() })
+      flat.push(it)
     }
   }
-  return flat.sort((a, b) => a.name.localeCompare(b.name)).map((x) => x.item)
+  return flat
 }
 
 /** 兜底只读 provider（未知类型） */

@@ -38,19 +38,36 @@ function item(kind: string, id: string, name?: string): ResourceSummary {
 
 // ============ buildMixedItems ============
 describe('buildMixedItems 混合平排', () => {
-  it('展平所有类型、按 name 自然排序（目录式交错）', () => {
+  it('展平所有类型，尊重服务器返回顺序（不做 name 排序）', () => {
     const active = [provider('model', 1, true), provider('mcp', 2, true)]
     const states = {
       model: { items: [item('model', 'b', 'Beta'), item('model', 'a', 'Alpha')], capabilities: CAP },
       mcp: { items: [item('mcp', 'm1', 'Gamma')], capabilities: CAP },
     }
     const out = buildMixedItems(active, states)
-    expect(out.map((i) => i.id)).toEqual(['a', 'b', 'm1'])
+    // 类型按 activeTypes 顺序，各类型内按服务器返回原序
+    expect(out.map((i) => i.id)).toEqual(['b', 'a', 'm1'])
     expect(out[0].kind).toBe('model')
     expect(out[2].kind).toBe('mcp')
   })
 
-  it('空类型分组被忽略，name 缺失回退 id', () => {
+  it('设置分区级：单类型时严格保序（后端清单顺序即展示顺序）', () => {
+    const active = [provider('setting', 6, false)]
+    const states = {
+      setting: {
+        items: [
+          item('setting', 'local', '本地工具'),
+          item('setting', 'appearance', '外观'),
+          item('setting', 'about', '关于'),
+        ],
+        capabilities: CAP,
+      },
+    }
+    const out = buildMixedItems(active, states)
+    expect(out.map((i) => i.id)).toEqual(['local', 'appearance', 'about'])
+  })
+
+  it('空类型分组被忽略', () => {
     const active = [provider('model', 1, true), provider('skill', 2, true)]
     const states = {
       model: { items: [item('model', 'z')], capabilities: CAP },

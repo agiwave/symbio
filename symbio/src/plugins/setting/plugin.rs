@@ -183,3 +183,32 @@ impl crate::symbio_core::resources::ResourceProvider for SettingPlugin {
             .collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbio_core::resources::ResourceProvider;
+    use crate::symbio_core::resources::RESOURCE_SETTING;
+    use crate::symbio_core::SimpleRequest;
+
+    #[tokio::test]
+    async fn list_items_returns_sections_in_declared_order() {
+        let plugin = SettingPlugin::default();
+        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let items = plugin.list_items(&ctx).await.unwrap();
+
+        // 固定清单、按声明顺序（前端据此展示，不做二次排序）
+        let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, vec!["appearance", "session", "local", "web", "about"]);
+
+        // kind 标记为 setting，名称正确
+        let first = &items[0];
+        assert_eq!(first.kind, RESOURCE_SETTING);
+        assert_eq!(first.name, "外观");
+
+        // 每项的 extra.config_type 即 editor"扩展名"（与 id 一致）
+        for it in &items {
+            assert_eq!(it.extra.get("config_type").and_then(Value::as_str), Some(it.id.as_str()));
+        }
+    }
+}

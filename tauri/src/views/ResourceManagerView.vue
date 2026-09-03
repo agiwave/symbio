@@ -106,10 +106,11 @@
         </div>
 
         <template v-else>
-          <!-- 注册的专属 editor（model） -->
+          <!-- 注册的专属 editor（model）；:key 确保切换资源/类型时重挂载，避免表单状态残留 -->
           <component
             :is="createEditor(createKind)"
             v-if="createEditor(createKind)"
+            :key="'create:' + (createKind || '')"
             :item="null"
             :capabilities="capsOf(createKind)"
             :saving="saving"
@@ -162,10 +163,11 @@
 
       <!-- ============== 选中项：编辑/详情 ============== -->
       <template v-else-if="selected">
-        <!-- 注册的专属 editor（model） -->
+        <!-- 注册的专属 editor（model/设置分区）；:key 确保切换资源/类型时重挂载 -->
         <component
           :is="selectedEditor"
           v-if="selectedEditor"
+          :key="selected.kind + ':' + selected.item.id"
           :item="selected.item"
           :capabilities="capsOf(selected.kind)"
           :saving="saving"
