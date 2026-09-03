@@ -20,10 +20,23 @@
     :title="label"
     :loading="loading"
     :has-list-content="items.length > 0"
-    :hide-default-new="!canCreate"
+    hide-default-new
     @new="onNew"
   >
     <template #header-actions>
+      <!-- 注意：本 slot 会整体替换 ResourceShell 的默认 + 按钮，须在此显式补回 -->
+      <button
+        v-if="canCreate"
+        class="icon-btn"
+        :title="`新建 ${label}`"
+        :disabled="loading"
+        @click="onNew"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
       <button class="icon-btn" title="刷新" :disabled="loading" @click="loadAll">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />

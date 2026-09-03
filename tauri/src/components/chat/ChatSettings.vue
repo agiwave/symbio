@@ -193,12 +193,6 @@
           <label>规则与偏好 (7D 设定 - 可选，每行一条)</label>
           <textarea v-model="rawAgentRules" rows="5" placeholder="例如：\n- 始终使用 TypeScript\n- 喜欢 TailwindCSS"></textarea>
         </div>
-        <div class="form-group">
-          <label class="checkbox-label">
-            <input type="checkbox" v-model="isGlobalAgent" />
-            保存为全局角色 (跨项目可用)
-          </label>
-        </div>
         <div class="modal-actions">
           <button class="action-btn secondary" @click="showCreateAgentModal = false">取消</button>
           <button class="action-btn" @click="saveNewAgent" :disabled="savingAgent">保存</button>
@@ -212,6 +206,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { AgentProfile } from '@/types'
 import { callPlugin } from '@/services/plugin'
+import { listResources } from '@/services/resources'
 import { listModelProviders } from '@/services/modelProviders'
 import type { ModelProviderConfig, ModelProvidersConfig } from '@/schemas/model_providers'
 import { useSessionsStore } from '@/stores/sessions'
@@ -251,8 +246,7 @@ const loadingProviders = ref(false)
 // Create Agent states
 const showCreateAgentModal = ref(false)
 const savingAgent = ref(false)
-const isGlobalAgent = ref(false)
-const newAgent = ref<Partial<AgentProfile>>({ id: '', name: '', description: '', context_messages: 6 })
+const newAgent = ref<Partial<AgentProfile>>({ id: '', name: '', description: '' })
 const rawAgentRules = ref('')
 
 // 执行风险等级（替代原「审批模式」）：与工具自身风险等级一致。
@@ -393,12 +387,23 @@ watch(
 async function fetchAgents() {
   loadingAgents.value = true
   try {
-    const list = await callPlugin('agent/list', {})
-    if (Array.isArray(list)) {
-      emit('update:availableAgents', list)
-    } else {
-      logger.warn('ChatSettings', 'Agent list is not an array', list)
-    }
+    // 统一资源协议 resources/list：ResourceSummary → 选择器选项（id/name/description）
+    const resp = await listResources('agent')
+    const list: AgentProfile[] = (resp.items ?? []).map((it) => ({
+      id: it.id,
+      name: it.name || it.id,
+      description: it.description || it.summary || '',
+      // 列表仅用于选择；7D 详情字段由资源管理页维护，这里填默认值满足类型
+      knowledge: [],
+      experience: [],
+      skill: [],
+      judgment: [],
+      strategy: [],
+      intuition: [],
+      emotion: [],
+      context_messages: 6,
+    }))
+    emit('update:availableAgents', list)
   } catch (e) {
     logger.error('ChatSettings', 'Failed to load agents', e)
     // 失败时不清除旧数据，避免用户看到空列表
@@ -411,33 +416,46 @@ function openCreateAgentModal() {
   closeAllMenus()
   newAgent.value = { id: '', name: '', description: '' }
   rawAgentRules.value = ''
-  isGlobalAgent.value = false
   showCreateAgentModal.value = true
 }
 
 async function saveNewAgent() {
   if (!newAgent.value.id || !newAgent.value.name) return
   savingAgent.value = true
-  
+
   const rules = rawAgentRules.value.split('\n').map(s => s.trim().replace(/^- /, '')).filter(s => s.length > 0)
-  
-  const profile = {
-    ...newAgent.value,
-    judgment: rules,
-    knowledge: [], experience: [], skill: [], strategy: [], intuition: [], emotion: []
-  }
-  
+
+  // agent/create 契约：cognition_units 至少含 id='identity' 的单元（name 必填）；
+  // 规则/偏好映射为 judgment 认知单元（与 seed_agents 数据同一约定）。
+  // 所有 agent 统一写入全局目录（is_global 已弃用，仅为 API 兼容保留）。
+  const cognitionUnits = [
+    {
+      id: 'identity',
+      is_a: ['fact'],
+      level: 'sys',
+      name: newAgent.value.name,
+      description: newAgent.value.description || '',
+    },
+    ...rules.map((r, i) => ({
+      id: `rule_${i + 1}`,
+      is_a: ['judgment'],
+      level: 'sys',
+      description: r,
+    })),
+  ]
+
   try {
-    await callPlugin('agent/save', {
-      ...profile,
-      is_global: isGlobalAgent.value
+    await callPlugin('agent/create', {
+      id: newAgent.value.id,
+      is_global: true,
+      cognition_units: cognitionUnits,
     })
     await fetchAgents()
-    selectAgent(profile.id!)
+    selectAgent(newAgent.value.id)
     showCreateAgentModal.value = false
   } catch (e) {
     logger.error('ChatSettings', 'Failed to save agent', e)
-    alert('保存失败')
+    alert(`保存失败：${e instanceof Error ? e.message : String(e)}`)
   } finally {
     savingAgent.value = false
   }

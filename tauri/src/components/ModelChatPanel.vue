@@ -104,6 +104,7 @@ import { getSessionConfig } from '@/services/config'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { listModelProviders } from '@/services/modelProviders'
+import { listResources } from '@/services/resources'
 import type { ModelProviderConfig } from '@/schemas/model_providers'
 
 import MessageNode from './MessageNode.vue'
@@ -280,17 +281,21 @@ onMounted(async () => {
   // 清掉旧的 banner
   initError.value = null
 
-  // 并行加载：agents / providers
+  // 并行加载：agents（统一资源协议 resources/list）/ providers
   const results = await Promise.allSettled([
-    callPlugin('agent/list', {}),
+    listResources('agent'),
     listModelProviders()
   ])
 
-  // 1. agents
+  // 1. agents（ResourceSummary → 智能体选项：id/name/description）
   if (results[0].status === 'fulfilled') {
-    const list = results[0].value
+    const list = results[0].value.items
     if (Array.isArray(list)) {
-      availableAgents.value = list
+      availableAgents.value = list.map((it) => ({
+        id: it.id,
+        name: it.name || it.id,
+        description: it.description || it.summary || '',
+      }))
     }
   } else {
     showInitError('加载智能体列表失败', results[0].reason)

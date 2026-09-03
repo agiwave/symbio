@@ -34,6 +34,21 @@ impl FileSessionStore {
     fn file_for(base_dir: &Path, session_id: &str) -> PathBuf {
         Self::dir_for(base_dir, session_id).join("session.json")
     }
+
+    /// 解析 session.json 内容；存在尾部残留时截取首个完整 JSON 自愈。
+    ///
+    /// 历史缺陷：旧的 `fs::write` 直写方式在并发保存交错时会留下
+    /// "短 JSON + 长旧内容残留"（trailing characters）。这里用流式反序列化
+    /// 取首个完整对象，尽量恢复旧损坏文件；完全无法解析时返回 None。
+    fn parse_session_content(content: &str) -> Option<Session> {
+        match serde_json::from_str(content) {
+            Ok(s) => Some(s),
+            Err(_) => serde_json::Deserializer::from_str(content)
+                .into_iter::<Session>()
+                .next()
+                .and_then(Result::ok),
+        }
+    }
 }
 
 #[async_trait]
@@ -44,8 +59,12 @@ impl SessionStore for FileSessionStore {
             let content = tokio::fs::read_to_string(&path)
                 .await
                 .map_err(|e| PluginError::InternalError(format!("读取会话文件失败: {e}")))?;
-            serde_json::from_str(&content)
-                .map_err(|e| PluginError::ParseError(format!("解析会话失败: {e}")))
+            match Self::parse_session_content(&content) {
+                Some(s) => Ok(s),
+                None => Err(PluginError::ParseError(
+                    "解析会话失败: 内容无法恢复".to_string(),
+                )),
+            }
         } else {
             Ok(Session::new(session_id))
         }
@@ -61,9 +80,16 @@ impl SessionStore for FileSessionStore {
         let content = serde_json::to_string_pretty(session)
             .map_err(|e| PluginError::InternalError(format!("序列化会话失败: {e}")))?;
 
-        tokio::fs::write(&path, content)
+        // 原子写：先写临时文件再 rename 覆盖。直接 fs::write（O_TRUNC + write）
+        // 在多个并发保存交错时会留下"短 JSON + 长旧内容残留"，产生 trailing
+        // characters 损坏；rename 覆盖保证磁盘上永远是某一刻的完整版本。
+        let tmp = dir.join("session.json.tmp");
+        tokio::fs::write(&tmp, &content)
             .await
-            .map_err(|e| PluginError::InternalError(format!("写入会话失败: {e}")))
+            .map_err(|e| PluginError::InternalError(format!("写入会话临时文件失败: {e}")))?;
+        tokio::fs::rename(&tmp, &path)
+            .await
+            .map_err(|e| PluginError::InternalError(format!("落盘会话文件失败: {e}")))
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), PluginError> {
@@ -100,7 +126,7 @@ impl SessionStore for FileSessionStore {
                 continue;
             }
             if let Ok(content) = tokio::fs::read_to_string(&session_file).await {
-                if let Ok(session) = serde_json::from_str::<Session>(&content) {
+                if let Some(session) = Self::parse_session_content(&content) {
                     sessions.push(session);
                 }
             }

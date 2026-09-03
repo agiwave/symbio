@@ -37,7 +37,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useSessionsStore } from '@/stores/sessions'
-import { open } from '@tauri-apps/plugin-dialog'
 import { useExplorerStore } from '@/stores/explorer'
 import { logger } from '@/utils/logger'
 import SessionCard from './SessionCard.vue'
@@ -46,31 +45,13 @@ const store = useSessionsStore()
 const explorer = useExplorerStore()
 const creating = ref(false)
 
-async function pickWorkdir(): Promise<string | null> {
-  try {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: '选择工作目录'
-    })
-    if (!selected) return null
-    return typeof selected === 'string' ? selected : Array.isArray(selected) ? selected[0] || null : null
-  } catch (e) {
-    logger.error('SessionListPanel', '选择工作目录失败', e)
-    return null
-  }
-}
-
 async function onCreate() {
   if (creating.value) return
   creating.value = true
   try {
-    let workdir = store.lastUsedWorkdir
-    if (!workdir) {
-      workdir = await pickWorkdir()
-      if (!workdir) return
-    }
-    await store.createSession(workdir)
+    // 直接创建会话（有最近 workdir 则自动沿用）；未设置 workdir 时由聊天区的
+    // EmptyWorkdirState 空态引导用户选择，不在此强制弹目录对话框打断流程。
+    await store.createSession()
     explorer.reset()
   } finally {
     creating.value = false
