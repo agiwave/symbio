@@ -17,6 +17,34 @@
 
 ***
 
+## 2026-09-04: 统一资源管理器动态 provider 注册——六类资源 + 导航/设置全部注册驱动
+
+在 `ResourceProvider` trait 收敛之后，把"哪几种资源、怎么导航、怎么展示"彻底交给注册表：
+
+- **注册表扩展为六类**：`provider_registry()` 新增 `setting`（`supports_upload=false`、
+  `compact_list=true`、`nav=settings`）。`ResourceProviderInfo` 与下发 `ProviderInfo` 新增
+  `compact_list`（列表简洁模式）与 `nav`（左侧主导航归属 `resources`/`settings`，空串不进导航）。
+
+- **左侧导航全部动态驱动**：`MainLayout` 资源区 `v-for="p in resourceNav"`、设置区
+  `v-for="p in settingsNav"`——"设置"入口由注册表动态生成，删掉手写按钮；session 不进导航
+  （走独立会话主入口）。新增 provider 只需在后端登记一条 `nav`，导航自动出现。
+
+- **设置页 = 统一资源实例**：删除 `components/SettingsPage.vue`，`/settings` 复用
+  `ResourceManagerView`（types='setting'）。5 个分区（appearance/session/local/web/about）经
+  setting 插件 `resources/list` 下发，前端按 `kind:ext` 复合键注册各自 editor（
+  `tauri/src/components/settings/`），未命中回退 kind 级 / 通用兜底——与文件系统"扩展名决定编辑器"同构。
+
+- **列表尊重服务器返回顺序**：`buildMixedItems` 删除前端 name 排序，改为按 activeTypes 顺序 +
+  各类型 `resources/list` 原序（设置分区严格按后端声明顺序展示，不再被中文名重排）。
+
+- **editor 契约清理**：5 个设置表单 `defineOptions({ inheritAttrs:false })` 阻断未消费 props
+  落根 DOM；动态 `<component>` 加 `:key` 避免切换资源/类型时表单状态残留。
+
+- **死代码清理**：删除 `schemas/resources.ts` 无引用的 `ResourceType` / `ResourceUploadRequest` /
+  `ResourceDeleteRequest` 导出（请求体统一走对象字面量）。
+
+- **验证**：cargo clippy 零告警、363 测试通过；vue-tsc 零错误、vitest 61/61、vite build 成功。
+
 ## 2026-09-03: 资源管理页体验修复——表单注册表、路由刷新、主题令牌化
 
 修复统一资源协议落地后的四个回归问题：

@@ -10,12 +10,7 @@
  */
 
 /**
- * 统一资源类型（开放 string：可被后端 provider 注册表扩展的任意 kind）。
- * 类型是否存在、能力如何，来自 ProviderInfo，而非本联合类型。
- */
-export type ResourceType = string
-
-/** 资源能力开关——决定统一页面启用哪些模块 */
+ * 资源能力开关——决定统一页面启用哪些模块 */
 export interface ResourceCapabilities {
   /** 以上传 zip 为主（文件名即资源目录名） */
   zip_upload: boolean
@@ -82,26 +77,11 @@ export interface ResourcesListResponse {
   items: ResourceSummary[]
 }
 
-/** resources/upload 请求 */
-export interface ResourceUploadRequest {
-  kind: string
-  name?: string
-  zip_b64?: string
-  manifest?: Record<string, unknown> | null
-  replace?: boolean
-}
-
 /** resources/upload 响应 */
 export interface ResourceUploadResponse {
   kind: string
   id: string
   created: boolean
-}
-
-/** resources/delete 请求 */
-export interface ResourceDeleteRequest {
-  kind: string
-  id: string
 }
 
 /** resources/status 响应 */
