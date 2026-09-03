@@ -6,9 +6,6 @@ mod resources;
 pub(crate) mod system_prompt;
 
 use crate::plugins::agent::plugin::AgentPlugin;
-use crate::symbio_core::resources::{
-    RESOURCES_DELETE, RESOURCES_LIST, RESOURCES_UPLOAD,
-};
 use crate::symbio_core::{
     InvokeRequest, InvokeResponse, PluginError, PluginPayload, CONFIG_GET, CONFIG_SET,
 };
@@ -27,13 +24,17 @@ pub async fn route(
     ctx: Arc<dyn InvokeRequest>,
     workdir_opt: Option<&str>,
 ) -> InvokeResponse<PluginPayload> {
+    // 统一资源协议：resources/list / get / upload / delete / status
+    // （AgentPlugin 的 ResourceProvider 实现见 resources.rs）
+    if let Some(resp) =
+        crate::symbio_core::resources::dispatch(plugin.as_ref(), path, &ctx).await
+    {
+        return resp;
+    }
+
     match path {
         "chat" => chat::handle(&plugin, ctx, workdir_opt).await,
         "create" => create::handle(plugin, ctx, workdir_opt).await,
-        // 统一资源协议
-        RESOURCES_LIST => resources::handle_list(&plugin, ctx, workdir_opt).await,
-        RESOURCES_UPLOAD => resources::handle_upload(ctx).await,
-        RESOURCES_DELETE => resources::handle_delete(&plugin, ctx).await,
         CONFIG_GET => config::handle_get(&plugin, ctx).await,
         CONFIG_SET => config::handle_set(&plugin, ctx).await,
         // 内部生命周期路由：用于宿主在进程退出前显式触发清理
