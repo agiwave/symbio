@@ -29,9 +29,6 @@ use crate::symbio_core::{
     Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
     PluginError, PluginMeta, PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_MCP,
 };
-use crate::symbio_core::resources::{
-    RESOURCES_DELETE, RESOURCES_LIST, RESOURCES_STATUS, RESOURCES_UPLOAD,
-};
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -207,179 +204,84 @@ impl Default for McpPlugin {
 }
 
 // ==================== 统一资源协议 (resources/*) ====================
+//
+// 公共流程（列表包装 / zip 上传 / 幂等删除 / status 事件推送）由
+// `ResourceProvider::dispatch` 承载，这里只实现 MCP 的差异化钩子。
 
-impl McpPlugin {
-    fn es(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<std::sync::Arc<dyn crate::symbio_core::providers::StorageService>, PluginError> {
-        create_object::<dyn crate::symbio_core::providers::StorageService>(
-            "storage_service",
-            ctx.clone(),
-        )
-        .ok_or_else(|| PluginError::InternalError("storage_service 不可用".to_string()))
+#[async_trait]
+impl crate::symbio_core::resources::ResourceProvider for McpPlugin {
+    fn kind(&self) -> &'static str {
+        crate::symbio_core::resources::RESOURCE_MCP
     }
 
-    /// resources/list — 列出全部 MCP Server，统一 ResourceSummary 契约
-    pub async fn resources_list(
+    fn category(&self) -> Option<&'static str> {
+        Some(crate::symbio_core::providers::categories::MCP)
+    }
+
+    fn manifest_file(&self) -> Option<&'static str> {
+        Some(crate::symbio_core::providers::manifests::SERVER)
+    }
+
+    /// 从 server.json 解析摘要：enabled → active/disabled、command/url、transport
+    async fn summarize(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        let store = self.es(ctx)?;
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::MCP;
-        let manifest = crate::symbio_core::providers::manifests::SERVER;
-
-        let ids = es
-            .list_entities(category)
-            .await
-            .map_err(|e| PluginError::InternalError(format!("列出 MCP 资源失败: {e}")))?;
-
-        let mut items = Vec::new();
-        for id in ids {
-            let content = es.read_entity(category, &id, manifest).await.ok();
-            let item = match content.and_then(|c| serde_json::from_str::<McpServerConfig>(&c).ok()) {
-                Some(server) => {
-                    let mut it = crate::symbio_core::resources::ResourceSummary::new(
-                        crate::symbio_core::resources::RESOURCE_MCP,
-                        &id,
-                        &id,
-                    );
-                    it.status = if server.enabled {
-                        "active".to_string()
-                    } else {
-                        "disabled".to_string()
-                    };
-                    it.summary = server
-                        .command
-                        .clone()
-                        .or(server.url.clone());
-                    let transport = format!("{:?}", server.transport_type).to_lowercase();
-                    if let serde_json::Value::Object(ref mut m) = it.extra {
-                        m.insert("transport".to_string(), transport.into());
-                    }
-                    it
-                }
-                None => crate::symbio_core::resources::ResourceSummary::new(
-                    crate::symbio_core::resources::RESOURCE_MCP,
-                    &id,
-                    &id,
-                ),
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+        manifest: Option<&str>,
+    ) -> crate::symbio_core::resources::ResourceSummary {
+        let mut it = crate::symbio_core::resources::ResourceSummary::new(
+            crate::symbio_core::resources::RESOURCE_MCP,
+            id,
+            id,
+        );
+        if let Some(server) = manifest.and_then(|c| serde_json::from_str::<McpServerConfig>(c).ok())
+        {
+            it.status = if server.enabled {
+                "active".to_string()
+            } else {
+                "disabled".to_string()
             };
-            items.push(item);
-        }
-
-        let resp = crate::symbio_core::resources::ResourcesListResponse {
-            kind: crate::symbio_core::resources::RESOURCE_MCP.to_string(),
-            capabilities: crate::symbio_core::resources::capabilities_for(
-                crate::symbio_core::resources::RESOURCE_MCP,
-            ),
-            items,
-        };
-        Ok(serde_json::to_value(resp)?)
-    }
-
-    /// resources/upload — 上传 zip 创建/更新 MCP Server（zip 根含 server.json）
-    pub async fn resources_upload(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        let req: crate::symbio_core::resources::ResourceUploadRequest = ctx.payload()?;
-        let name = req
-            .name
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| PluginError::ValidationError("MCP 资源名称不能为空".to_string()))?
-            .to_string();
-        let b64 = req.zip_b64.as_deref().ok_or_else(|| {
-            PluginError::ValidationError("MCP 资源以 zip 上传（zip_b64）".to_string())
-        })?;
-        let bytes = crate::symbio_core::resources::decode_zip_b64(b64)?;
-
-        let store = self.es(ctx)?;
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::MCP;
-        crate::symbio_core::resources::extract_zip_to_entity(es, category, &name, &bytes).await?;
-
-        self.reload_server_from_storage(ctx, &name).await?;
-        Ok(serde_json::to_value(
-            crate::symbio_core::resources::ResourceUploadResponse {
-                kind: crate::symbio_core::resources::RESOURCE_MCP.to_string(),
-                id: name,
-                created: true,
-            },
-        )?)
-    }
-
-    /// resources/delete — 删除 MCP Server（磁盘 + 内存 + 缓存）
-    pub async fn resources_delete(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        let req: crate::symbio_core::resources::ResourceDeleteRequest = ctx.payload()?;
-        let store = self.es(ctx)?;
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::MCP;
-
-        match es.delete_entity(category, &req.id).await {
-            Ok(()) => {}
-            Err(crate::symbio_core::providers::EntityStoreError::NotFound { .. }) => {
-                crate::plugin_warn!("mcp", "磁盘上已无 server {} 目录，仅清理内存", req.id);
-            }
-            Err(e) => {
-                return Err(PluginError::InternalError(format!("删除资源失败: {e}")));
+            it.summary = server.command.clone().or(server.url.clone());
+            let transport = format!("{:?}", server.transport_type).to_lowercase();
+            if let serde_json::Value::Object(ref mut m) = it.extra {
+                m.insert("transport".to_string(), transport.into());
             }
         }
+        it
+    }
 
+    /// 上传后把 server 从磁盘回灌到内存 config（并失效相关缓存）
+    async fn on_uploaded(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<(), PluginError> {
+        self.reload_server_from_storage(ctx, id).await
+    }
+
+    /// 删除后清理内存 config 与 manager 缓存
+    async fn on_deleted(&self, _ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
         {
             let mut cfg = self.config.write().await;
-            cfg.servers.remove(&req.id);
+            cfg.servers.remove(id);
         }
-        self.manager.forget_server(&req.id).await;
-
-        Ok(serde_json::to_value(
-            crate::symbio_core::resources::ResourceUploadResponse {
-                kind: crate::symbio_core::resources::RESOURCE_MCP.to_string(),
-                id: req.id,
-                created: false,
-            },
-        )?)
+        self.manager.forget_server(id).await;
+        Ok(())
     }
 
-    /// resources/status — 连接测试单个 MCP Server
+    /// 连接测试单个 MCP Server（stdio 握手 / http streams）
     ///
-    /// 复用 `manager.test_connection` 发起真实连接校验（stdio 握手 / http streams），
-    /// 返回统一 `ResourceStatusResponse`。不修改任何缓存或配置。
-    pub async fn resources_status(
+    /// 连接失败映射为 `Ok(status: "failed")`，由 dispatch 统一推送 resource 事件。
+    async fn test_status(
         &self,
         ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        let req: crate::symbio_core::resources::ResourceStatusRequest = ctx.payload()?;
-
-        let server = {
-            let store = self.es(ctx)?;
-            let es = store.entity_store();
-            let category = crate::symbio_core::providers::categories::MCP;
-            let manifest = crate::symbio_core::providers::manifests::SERVER;
-            let content = match es.read_entity(category, &req.id, manifest).await {
-                Ok(c) => c,
-                Err(e) => {
-                    return Err(PluginError::NotFound(format!(
-                        "未找到 MCP Server {}（读取失败: {e}）",
-                        req.id
-                    )))
-                }
-            };
-            serde_json::from_str::<McpServerConfig>(&content).map_err(|e| {
-                PluginError::InternalError(format!("解析 {} 配置失败: {e}", req.id))
-            })?
-        };
-
-        let resp = match self.manager.test_connection(&req.id, &server).await {
+        id: &str,
+    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {
+        let server = self.read_server_config(ctx, id).await?;
+        Ok(match self.manager.test_connection(id, &server).await {
             Ok(r) => crate::symbio_core::resources::ResourceStatusResponse {
                 kind: crate::symbio_core::resources::RESOURCE_MCP.to_string(),
-                id: req.id.clone(),
+                id: id.to_string(),
                 status: "connected".to_string(),
                 status_detail: Some(format!(
                     "{tools} tools · protocol {protocol}",
@@ -389,22 +291,35 @@ impl McpPlugin {
             },
             Err(e) => crate::symbio_core::resources::ResourceStatusResponse {
                 kind: crate::symbio_core::resources::RESOURCE_MCP.to_string(),
-                id: req.id.clone(),
+                id: id.to_string(),
                 status: "failed".to_string(),
                 status_detail: Some(e),
             },
+        })
+    }
+}
+
+impl McpPlugin {
+    /// 从 EntityStore 读取并解析单个 server 配置
+    async fn read_server_config(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<McpServerConfig, PluginError> {
+        let store = crate::symbio_core::resources::storage_service(ctx)?;
+        let es = store.entity_store();
+        let category = crate::symbio_core::providers::categories::MCP;
+        let manifest = crate::symbio_core::providers::manifests::SERVER;
+        let content = match es.read_entity(category, id, manifest).await {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(PluginError::NotFound(format!(
+                    "未找到 MCP Server {id}（读取失败: {e}）"
+                )))
+            }
         };
-
-        // 通过 resource 事件总线把测试结果实时推送，供资源列表/详情即时刷新状态角标
-        crate::symbio_core::event_bus::EventBus::publish_resource_status(
-            crate::symbio_core::resources::RESOURCE_MCP,
-            &req.id,
-            &resp.status,
-            resp.status_detail.clone(),
-        )
-        .await;
-
-        Ok(serde_json::to_value(resp)?)
+        serde_json::from_str::<McpServerConfig>(&content)
+            .map_err(|e| PluginError::InternalError(format!("解析 {id} 配置失败: {e}")))
     }
 
     /// 上传后把单个 server 从磁盘回灌到内存 config（并失效相关缓存）
@@ -413,17 +328,7 @@ impl McpPlugin {
         ctx: &Arc<dyn InvokeRequest>,
         name: &str,
     ) -> Result<(), PluginError> {
-        let store = self.es(ctx)?;
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::MCP;
-        let manifest = crate::symbio_core::providers::manifests::SERVER;
-
-        let content = es
-            .read_entity(category, name, manifest)
-            .await
-            .map_err(|e| PluginError::InternalError(format!("读取已上传资源失败: {e}")))?;
-        let server: McpServerConfig = serde_json::from_str(&content)
-            .map_err(|e| PluginError::InternalError(format!("解析已上传资源失败: {e}")))?;
+        let server = self.read_server_config(ctx, name).await?;
 
         {
             let mut cfg = self.config.write().await;
@@ -496,6 +401,13 @@ impl Plugin for McpPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
+        // 统一资源协议：resources/list / get / upload / delete / status
+        if let Some(resp) =
+            crate::symbio_core::resources::dispatch(self.as_ref(), path, &ctx).await
+        {
+            return resp;
+        }
+
         let data = match path {
             CONFIG_GET => {
                 // 新存储策略：实际 server 数据存放在
@@ -521,12 +433,6 @@ impl Plugin for McpPlugin {
                 }
                 serde_json::to_value(common::SuccessResponse::default())?
             }
-
-            // ============== 统一资源协议 (resources/*) ==============
-            RESOURCES_LIST => self.resources_list(&ctx).await?,
-            RESOURCES_UPLOAD => self.resources_upload(&ctx).await?,
-            RESOURCES_DELETE => self.resources_delete(&ctx).await?,
-            RESOURCES_STATUS => self.resources_status(&ctx).await?,
 
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         };
