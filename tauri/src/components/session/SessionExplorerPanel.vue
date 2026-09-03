@@ -60,7 +60,7 @@ import { computed, watch, onBeforeMount, onBeforeUnmount } from 'vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { useExplorerStore } from '@/stores/explorer'
 import { useFileViewerStore } from '@/stores/fileViewer'
-import { setGlobalWorkdir } from '@/services/plugin'
+import { setLastWorkdir } from '@/services/plugin'
 import FileTreeNode from '../FileTreeNode.vue'
 import { logger } from '@/utils/logger'
 
@@ -80,7 +80,7 @@ function getChildren(path: string) {
 
 async function onRefresh() {
   if (store.activeWorkdir) {
-    setGlobalWorkdir(store.activeWorkdir)
+    setLastWorkdir(store.activeWorkdir)
   }
   await explorer.refresh()
 }
@@ -101,7 +101,7 @@ async function reloadExplorer() {
 
   const wd = store.activeWorkdir
   if (wd) {
-    setGlobalWorkdir(wd)
+    setLastWorkdir(wd)
     explorer.reset()
     try {
       await explorer.loadDirectory('')
@@ -130,7 +130,7 @@ watch(
       explorer.reset()
       return
     }
-    setGlobalWorkdir(wd)
+    setLastWorkdir(wd)
     explorer.reset()
     try {
       await explorer.loadDirectory('')

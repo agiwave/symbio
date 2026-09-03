@@ -34,7 +34,7 @@ import {
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
-import { setGlobalWorkdir, getGlobalWorkdir, callPlugin } from '@/services/plugin'
+import { setLastWorkdir, getLastWorkdir, callPlugin } from '@/services/plugin'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/services/model'
@@ -417,9 +417,8 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function createSession(workdir?: string): Promise<string> {
     const id = createSessionId()
     const now = Math.floor(Date.now() / 1000)
-    // 兜底顺序：显式传入 > 全局工作区 > 最近使用目录；任一可用就带上，
-    // 避免新建一个无目录会话而卡在选择工作目录引导。
-    const resolvedWorkdir = workdir ?? getGlobalWorkdir() ?? lastUsedWorkdir.value ?? undefined
+    // 兜底顺序：显式传入 > 最近使用目录；lastWorkdir 仅作新建默认，可有可无。
+    const resolvedWorkdir = workdir ?? lastUsedWorkdir.value ?? getLastWorkdir() ?? undefined
 
     // 1. 立即在本地插入"未持久化"条目
     const local: SessionListItem = {
@@ -454,18 +453,15 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   async function selectSession(id: string) {
     activeId.value = id
-    // 同步全局 workdir：触发后续资源浏览器 / AI 工具调用上下文。
-    // **不再提前 return**：即使 activeId 已是该会话（如刷新后 SessionView 恢复），
-    // 也要让下面的"无 workdir 兜底"有机会执行。
+    // 同步最近使用目录（仅作新建默认）。
     const wd = activeWorkdir.value
     if (wd) {
-      setGlobalWorkdir(wd)
+      setLastWorkdir(wd)
       return
     }
-    // 兜底：该会话从未绑定 workdir（早期会话 / 未走会话内选择目录）时，
-    // 若存在可用上下文（当前全局 或 最近使用 目录）则自动补绑定并持久化，
-    // 避免"选择已有会话却卡在引导选择工作区"，让其直接进入聊天界面。
-    const fallback = getGlobalWorkdir() ?? lastUsedWorkdir.value
+    // 兜底：该会话从未绑定 workdir（早期会话）时，若存在可用上下文（最近使用目录）
+    // 则自动补绑定并持久化，避免"选择已有会话卡在引导选择工作区"。
+    const fallback = lastUsedWorkdir.value ?? getLastWorkdir()
     if (fallback) {
       try {
         await setActiveWorkdir(fallback)
@@ -507,7 +503,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       activeId.value = list.value[0]?.id ?? null
       if (activeId.value) {
         const nextWd = activeWorkdir.value
-        if (nextWd) setGlobalWorkdir(nextWd)
+        if (nextWd) setLastWorkdir(nextWd)
       }
     }
   }
@@ -535,9 +531,14 @@ export const useSessionsStore = defineStore('sessions', () => {
         metadata: { ...(cur.metadata || {}), workdir }
       }
     }
-    // 3. 同步全局 workdir
-    setGlobalWorkdir(workdir)
+    // 3. 更新最近使用目录（新建默认）
+    setLastWorkdir(workdir)
     lastUsedWorkdir.value = workdir
+  }
+
+  /** 读取指定会话的工作目录（编辑器发送/恢复时用它，而非"全局目录"） */
+  function getSessionWorkdir(id: string): string | undefined {
+    return list.value.find((s) => s.id === id)?.metadata?.workdir as string | undefined
   }
 
   async function rename(id: string, title: string) {
@@ -788,6 +789,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     selectSession,
     deleteSession,
     setActiveWorkdir,
+    getSessionWorkdir,
     rename,
     setHeartbeat,
     setWorking,

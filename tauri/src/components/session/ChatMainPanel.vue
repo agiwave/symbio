@@ -32,10 +32,6 @@
         </div>
       </template>
 
-      <template v-else-if="!store.activeWorkdir">
-        <EmptyWorkdirState />
-      </template>
-
       <template v-else-if="loadError">
         <div class="load-error">
           <p class="load-error-icon">⚠</p>
@@ -52,6 +48,12 @@
         <div class="chat-loading">
           <p>正在加载会话历史…</p>
         </div>
+      </template>
+
+      <!-- 工作目录判断：放在"会话详情已加载"之后（编辑器获得当前会话详情后再判定）。
+           会话自身是否有 workdir 以详情/metadata 为准，不再仅凭列表卡片即时弹引导。 -->
+      <template v-else-if="!store.activeWorkdir">
+        <EmptyWorkdirState />
       </template>
 
       <template v-else>

@@ -2,7 +2,6 @@ import { shallowRef, computed, type ComputedRef } from 'vue'
 import { callPlugin } from '@/services/plugin'
 import type { ChatMessage } from '@/services/model'
 import { logger } from '@/utils/logger'
-import { getGlobalWorkdir } from '@/services/plugin'
 import { useSessionsStore } from '@/stores/sessions'
 import { CHAT_SEND, CHAT_ABORT } from '@/constants/pluginPaths'
 
@@ -233,7 +232,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         mode,
         risk_level: riskLevel
       }, 15000, {
-        workdir: getGlobalWorkdir(),
+        // 用目标会话自身的 workdir（后端 orchestrator 已用 session.metadata.workdir 兜底）
+        workdir: store.getSessionWorkdir(targetSid) ?? '',
         session_id: targetSid
       })
     } catch (err: any) {
@@ -289,7 +289,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     callPlugin(CHAT_ABORT, {
       session_id: sid
     }, 5000, {
-      workdir: getGlobalWorkdir(),
+      workdir: store.getSessionWorkdir(sid) ?? '',
       session_id: sid
     }).catch(err => {
       logger.error('useChatConnection', 'Failed to abort:', err)
@@ -353,7 +353,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         },
         15000,
         {
-          workdir: getGlobalWorkdir(),
+          workdir: store.getSessionWorkdir(targetSid) ?? '',
           session_id: targetSid,
         },
       )

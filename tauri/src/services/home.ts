@@ -23,7 +23,7 @@
  * 对应后端代码：symbio/src/plugins/home/plugin.rs
  * 对应 schema：tauri/src/schemas/{home_reload,work_get_workspace,work_set_workspace}.ts
  */
-import { callPlugin, setGlobalWorkdir } from './plugin'
+import { callPlugin, setLastWorkdir } from './plugin'
 import type { Response as ReloadResponse } from '../schemas/home_reload'
 import type { Response as WorkGetWorkspaceResponse } from '../schemas/work_get_workspace'
 import type { Response as WorkSetWorkspaceResponse } from '../schemas/work_set_workspace'
@@ -99,14 +99,14 @@ export async function switchHomedir(homedir: string): Promise<ReloadResponse | n
  * 获取当前工作区路径详情
  *
  * 调用 `work/get_workspace` 路由。返回 workdir、expanded_path、recent_workspaces 等。
- * 副作用：若返回了有效路径，会自动更新全局 workdir（`setGlobalWorkdir`）。
+ * 副作用：记录为最近使用目录（`setLastWorkdir`，仅作新建会话默认）。
  */
 export async function getWorkspacePath(): Promise<WorkGetWorkspaceResponse> {
   const result = await callPlugin<WorkGetWorkspaceResponse>('work/get_workspace', {})
   if (result) {
     const path = result.workdir || result.expanded_path
     if (path && path !== '~/projects' && !path.endsWith('/projects')) {
-      setGlobalWorkdir(path)
+      setLastWorkdir(path)
     }
   }
   return result
@@ -115,10 +115,10 @@ export async function getWorkspacePath(): Promise<WorkGetWorkspaceResponse> {
 /**
  * 设置当前工作区路径
  *
- * 调用 `work/set_workspace` 路由。副作用：更新全局 workdir。
+ * 调用 `work/set_workspace` 路由。副作用：记录为最近使用目录。
  */
 export async function setWorkspacePath(path: string): Promise<WorkSetWorkspaceResponse> {
   const result = await callPlugin<WorkSetWorkspaceResponse>('work/set_workspace', { path })
-  setGlobalWorkdir(path)
+  setLastWorkdir(path)
   return result
 }

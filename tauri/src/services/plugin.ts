@@ -41,15 +41,17 @@ export type PluginPayloadWire =
 
 export interface ConnectEvent { type: string; data?: any }
 
-// Global workspace tracking
-let currentWorkdir: string | undefined;
+// 最近一次使用的工作目录（lastWorkdir）。
+// 仅用于"新建会话"时的默认工作区；不承载"全局当前目录"语义——
+// 会话自身的工作目录以会话 metadata.workdir 为准（后端 orchestrator 已据此兜底）。
+let lastWorkdir: string | undefined;
 
-export function setGlobalWorkdir(path: string) {
-  currentWorkdir = path;
+export function setLastWorkdir(path: string) {
+  lastWorkdir = path;
 }
 
-export function getGlobalWorkdir(): string | undefined {
-  return currentWorkdir;
+export function getLastWorkdir(): string | undefined {
+  return lastWorkdir;
 }
 
 /**
@@ -187,7 +189,7 @@ async function sendRouteRequest(
     [HEAD_TRACE_ID]: traceId,
   };
 
-  const workdir = request.workdir ?? currentWorkdir;
+  const workdir = request.workdir ?? lastWorkdir;
   if (workdir) {
     metadata[HEAD_WORKDIR] = workdir;
   }

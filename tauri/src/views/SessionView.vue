@@ -17,9 +17,8 @@ import SessionExplorerPanel from '@/components/session/SessionExplorerPanel.vue'
 const store = useSessionsStore()
 
 onMounted(async () => {
-  // 1. 先从后端恢复全局工作目录（用户上次选过的工作区）。
-  //    前端 getGlobalWorkdir 是内存值，这里把它从后端 `work/get_workspace` 灌回，
-  //    使无 workdir 的旧会话能自动回填、不阻塞在选择工作目录引导。
+  // 1. 先从后端恢复最近使用的工作目录（lastWorkdir）。
+  //    供无 workdir 的新会话在"新建"时作默认工作区。
   try {
     await getWorkspacePath()
   } catch (e) {

@@ -31,14 +31,16 @@ export type { SessionMetadata, SessionHeartbeatConfig } from '../schemas/session
  */
 export async function listSessions(): Promise<SessionList.SessionListItem[]> {
   const resp = await listResources('session')
+  // 后端 ResourceSummary.extra 为 #[serde(flatten)]，类型特有字段(message_count/
+  // is_working/metadata)会被平铺到 JSON 顶层，而非套在 it.extra 下；这里直接从顶层读。
   return (resp.items || []).map((it) => {
-    const extra = (it as { extra?: Record<string, unknown> }).extra ?? {}
+    const v = it as Record<string, any>
     return {
-      id: it.id,
-      message_count: Number(extra.message_count ?? 0),
-      updated_at: it.updated_at ?? 0,
-      is_working: (extra.is_working as boolean) ?? it.status === 'working',
-      metadata: (extra.metadata as Record<string, any>) ?? {}
+      id: v.id,
+      message_count: Number(v.message_count ?? 0),
+      updated_at: v.updated_at ?? 0,
+      is_working: v.is_working ?? v.status === 'working',
+      metadata: v.metadata ?? {},
     }
   })
 }
