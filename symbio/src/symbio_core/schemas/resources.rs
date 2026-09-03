@@ -242,6 +242,13 @@ pub struct ResourceUploadResponse {
     pub created: bool,
 }
 
+/// `resources/get` 请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceGetRequest {
+    pub kind: String,
+    pub id: String,
+}
+
 /// `resources/delete` 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceDeleteRequest {

@@ -116,119 +116,71 @@ impl SkillPlugin {
 }
 
 // ==================== 统一资源协议 (resources/*) ====================
+//
+// 公共流程（列表包装 / zip 上传 / 幂等删除）由 `ResourceProvider::dispatch` 承载，
+// 这里只实现 skill 的差异化钩子（SKILL.md 摘要解析）。
 
-impl SkillPlugin {
-    fn es(
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<std::sync::Arc<dyn crate::symbio_core::providers::StorageService>, PluginError> {
-        crate::symbio_core::create_object::<dyn crate::symbio_core::providers::StorageService>(
-            "storage_service",
-            ctx.clone(),
-        )
-        .ok_or_else(|| PluginError::InternalError("storage_service 不可用".to_string()))
+#[async_trait]
+impl crate::symbio_core::resources::ResourceProvider for SkillPlugin {
+    fn kind(&self) -> &'static str {
+        crate::symbio_core::resources::RESOURCE_SKILL
     }
 
-    /// resources/list — 列出 entity 目录（~/.symbio/plugins/skill/<name>/）中的技能
-    pub async fn resources_skill_list(
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        let store = Self::es(ctx)?;
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::SKILL;
-        let manifest = crate::symbio_core::providers::manifests::SKILL;
+    fn category(&self) -> Option<&'static str> {
+        Some(crate::symbio_core::providers::categories::SKILL)
+    }
 
-        let ids = es
-            .list_entities(category)
-            .await
-            .map_err(|e| PluginError::InternalError(format!("列出 Skill 失败: {e}")))?;
+    fn manifest_file(&self) -> Option<&'static str> {
+        Some(crate::symbio_core::providers::manifests::SKILL)
+    }
 
-        let mut items = Vec::new();
-        for id in ids {
-            let body = es.read_entity(category, &id, manifest).await.ok();
-            let mut it = crate::symbio_core::resources::ResourceSummary::new(
-                crate::symbio_core::resources::RESOURCE_SKILL,
-                &id,
-                &id,
-            );
-            it.status = "active".to_string();
-            if let Some(text) = body {
-                let cleaned = text.trim();
-                let first_line = cleaned.lines().next().unwrap_or("").trim().trim_start_matches('#').trim();
-                if !first_line.is_empty() {
-                    it.name = first_line.to_string();
-                }
-                let mut summary = cleaned.lines().find(|l| l.trim().starts_with("**Description**") || l.trim().starts_with("Description"))
-                    .map(|l| l.trim().trim_start_matches("**Description**").trim().trim_start_matches("Description").trim().to_string())
-                    .unwrap_or_default();
-                if summary.is_empty() {
-                    summary = cleaned.chars().take(120).collect();
-                }
-                if !summary.is_empty() {
-                    it.summary = Some(summary);
-                }
+    /// 从 SKILL.md 解析显示名（首行标题）与摘要（Description 行 / 开头 120 字）
+    async fn summarize(
+        &self,
+        _ctx: &Arc<dyn crate::symbio_core::InvokeRequest>,
+        id: &str,
+        manifest: Option<&str>,
+    ) -> crate::symbio_core::resources::ResourceSummary {
+        let mut it = crate::symbio_core::resources::ResourceSummary::new(
+            crate::symbio_core::resources::RESOURCE_SKILL,
+            id,
+            id,
+        );
+        it.status = "active".to_string();
+        if let Some(text) = manifest {
+            let cleaned = text.trim();
+            let first_line = cleaned
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_start_matches('#')
+                .trim();
+            if !first_line.is_empty() {
+                it.name = first_line.to_string();
             }
-            items.push(it);
+            let mut summary = cleaned
+                .lines()
+                .find(|l| {
+                    l.trim().starts_with("**Description**") || l.trim().starts_with("Description")
+                })
+                .map(|l| {
+                    l.trim()
+                        .trim_start_matches("**Description**")
+                        .trim()
+                        .trim_start_matches("Description")
+                        .trim()
+                        .to_string()
+                })
+                .unwrap_or_default();
+            if summary.is_empty() {
+                summary = cleaned.chars().take(120).collect();
+            }
+            if !summary.is_empty() {
+                it.summary = Some(summary);
+            }
         }
-
-        let resp = crate::symbio_core::resources::ResourcesListResponse {
-            kind: crate::symbio_core::resources::RESOURCE_SKILL.to_string(),
-            capabilities: crate::symbio_core::resources::capabilities_for(
-                crate::symbio_core::resources::RESOURCE_SKILL,
-            ),
-            items,
-        };
-        Ok(serde_json::to_value(resp)?)
-    }
-
-    /// resources/upload — 上传 zip 创建/更新 Skill（zip 根含 SKILL.md）
-    pub async fn resources_skill_upload(
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        let req: crate::symbio_core::resources::ResourceUploadRequest = ctx.payload()?;
-        let name = req
-            .name
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| PluginError::ValidationError("Skill 资源名称不能为空".to_string()))?
-            .to_string();
-        let b64 = req.zip_b64.as_deref().ok_or_else(|| {
-            PluginError::ValidationError("Skill 以 zip 上传（zip_b64）".to_string())
-        })?;
-        let bytes = crate::symbio_core::resources::decode_zip_b64(b64)?;
-
-        let store = Self::es(ctx)?;
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::SKILL;
-        crate::symbio_core::resources::extract_zip_to_entity(es, category, &name, &bytes).await?;
-
-        Ok(serde_json::to_value(
-            crate::symbio_core::resources::ResourceUploadResponse {
-                kind: crate::symbio_core::resources::RESOURCE_SKILL.to_string(),
-                id: name,
-                created: true,
-            },
-        )?)
-    }
-
-    /// resources/delete — 删除 Skill
-    pub async fn resources_skill_delete(
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<serde_json::Value, PluginError> {
-        let req: crate::symbio_core::resources::ResourceDeleteRequest = ctx.payload()?;
-        let store = Self::es(ctx)?;
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::SKILL;
-        es.delete_entity(category, &req.id)
-            .await
-            .map_err(|e| PluginError::InternalError(format!("删除 Skill 失败: {e}")))?;
-        Ok(serde_json::to_value(
-            crate::symbio_core::resources::ResourceUploadResponse {
-                kind: crate::symbio_core::resources::RESOURCE_SKILL.to_string(),
-                id: req.id,
-                created: false,
-            },
-        )?)
+        it
     }
 }
 
@@ -242,21 +194,14 @@ impl Plugin for SkillPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
-        match path {
-            // 统一资源协议：resources/list + resources/upload + resources/delete
-            crate::symbio_core::resources::RESOURCES_LIST => {
-                let data = Self::resources_skill_list(&ctx).await?;
-                Ok(PluginPayload::new(&data))
-            }
-            crate::symbio_core::resources::RESOURCES_UPLOAD => {
-                let data = Self::resources_skill_upload(&ctx).await?;
-                Ok(PluginPayload::new(&data))
-            }
-            crate::symbio_core::resources::RESOURCES_DELETE => {
-                let data = Self::resources_skill_delete(&ctx).await?;
-                Ok(PluginPayload::new(&data))
-            }
+        // 统一资源协议：resources/list / get / upload / delete / status
+        if let Some(resp) =
+            crate::symbio_core::resources::dispatch(self.as_ref(), path, &ctx).await
+        {
+            return resp;
+        }
 
+        match path {
             "execute" => {
                 #[derive(serde::Deserialize, Clone)]
                 struct ExecuteRequest {
