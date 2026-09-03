@@ -282,6 +282,14 @@ impl Plugin for SessionPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
+        // 统一资源协议：resources/list / get / upload / delete / status
+        // （SessionPlugin 的 ResourceProvider 实现见下方 impl 块）
+        if let Some(resp) =
+            crate::symbio_core::resources::dispatch(self.as_ref(), path, &ctx).await
+        {
+            return resp;
+        }
+
         // 会话存储已迁移到 ~/.symbio/plugins/session/ 全局目录，session/* 系列接口
         // 不再依赖 ctx.workdir；ctx.workdir 仅在 chat 路径和需要 Model 路由时使用。
         let data = match path {
