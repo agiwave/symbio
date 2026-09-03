@@ -353,22 +353,15 @@ pub async fn run_chat_loop(
         persist_messages(&context, last_saved, &channel).await;
 
         // 检测工具待用户恢复 → 退出本轮：
-        // - user_prompt(WaitingUserAction)：confirm/ask_user（始终退出）
-        // - interactive 模式下 Failed-with-failure_kind：工具执行失败（用户可重试/补充）
-        // auto 模式下工具失败不退出，错误结果传 LLM 继续处理。
+        // 仅当存在 UserPrompt/WaitingUserAction（confirm/ask_user）时才算需要用户输入。
+        // 普通的工具执行失败不再使会话停摆：父节点已标 Completed、错误结果作为合法
+        // tool 结果留在上下文喂回 LLM 继续处理，用户也可随时直接发新消息继续。
         let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
         let needs_user_action = tool_results.iter().any(|m| {
             m.msg_type == Some(MessageType::UserPrompt)
                 && m.status == Some(MessageStatus::WaitingUserAction)
         }) || parent_updates.iter().any(|p| {
             p.status == Some(MessageStatus::WaitingUserAction)
-                || (mode == "interactive"
-                    && p.status == Some(MessageStatus::Failed)
-                    && p.meta
-                        .as_ref()
-                        .and_then(|m| m.get("failure_kind"))
-                        .and_then(|v| v.as_str())
-                        .is_some())
         });
 
         if needs_user_action {

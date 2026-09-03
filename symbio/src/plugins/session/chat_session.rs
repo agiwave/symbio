@@ -1,6 +1,8 @@
 use super::context::{apply_layered_sliding_window, prune_historical_tool_calls};
 use super::store::SessionStore;
-use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageRole, MessageStatus};
+use crate::symbio_core::schemas::session::chat_message::{
+    ChatMessage, MessageContent, MessageRole, MessageStatus,
+};
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::{ChatSession, PluginError};
 use async_trait::async_trait;
@@ -26,6 +28,42 @@ fn sliding_window(messages: &[ChatMessage], max_turns: usize) -> Vec<ChatMessage
 
     let start_idx = user_indices[user_indices.len() - max_turns];
     messages[start_idx..].to_vec()
+}
+
+/// 返回给 LLM 前对单条消息做 content 归一兜底：
+/// - 角色为 None 的占位消息不入上下文，直接跳过（避免 role 空污染 LLM）；
+/// - current content 为合法 `Text`/`Parts` 的保留原样；
+/// - 否则（Tool 角色 content 为 None、或未来非法的 content）构造兜底文本，
+///   避免 provider 反序列化 `MessageContent` 失败（Bug 4 同类问题）。
+///
+/// 仅作用于返回的构造结果，不修改存储。
+fn normalize_message_content(msg: ChatMessage) -> Option<ChatMessage> {
+    let role = match &msg.role {
+        Some(r) => r,
+        // 占位消息（无角色）直接丢弃
+        None => return None,
+    };
+    // 仅在 Tool 角色或已携带 content 的消息上做归一，其余普通消息原样保留。
+    if *role != MessageRole::Tool && msg.content.is_none() {
+        return Some(msg);
+    }
+    let content_ok = match &msg.content {
+        Some(MessageContent::Parts(_)) | Some(MessageContent::Text(_)) => true,
+        None => false,
+    };
+    if content_ok {
+        return Some(msg);
+    }
+    let raw = msg.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
+    let text = if raw.is_empty() {
+        "(工具已执行)".to_string()
+    } else {
+        raw
+    };
+    Some(ChatMessage {
+        content: Some(MessageContent::Text(text)),
+        ..msg
+    })
 }
 
 // PersistentChatSession
@@ -104,6 +142,12 @@ impl ChatSession for PersistentChatSession {
         let messages: Vec<ChatMessage> = messages
             .into_iter()
             .filter(|m| m.status != Some(MessageStatus::Failed))
+            .collect();
+        // 对各消息做 content 归一兜底（并跳过 role 为 None 的占位消息），
+        // 防止历史坏消息导致 provider 反序列化 MessageContent 失败。
+        let messages: Vec<ChatMessage> = messages
+            .into_iter()
+            .filter_map(normalize_message_content)
             .collect();
         let turns = max_turns.unwrap_or_else(|| {
             self.config

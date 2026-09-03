@@ -524,12 +524,12 @@ pub async fn process_tool_calls_async(
         } else {
             build_tool_message(&id, &final_res, Some(success), Some(result_msg_id))
         };
-        // auto 模式：工具失败属"信息性"，结果仍以合法 tool 结果（Completed）留在上下文，
+        // 任何模式：工具失败属"信息性"，结果仍以合法 tool 结果（Completed）留在上下文，
         // 让 LLM 看到错误并继续；其父节点在下方也标 Completed（不暂停会话）。
         // 若此处仍标 Failed，则会被 get_context_messages 过滤，导致"孤儿 tool 结果"
         // （父 tool_call 被过滤、结果残留）使下一轮 LLM 请求非法（Bug 2 同类问题）。
         // 仅对普通工具结果生效（user_prompt 走 WaitingUserAction 分支，不受此覆盖）。
-        if !success && mode == "auto" && tool_msg.msg_type != Some(MessageType::UserPrompt) {
+        if !success && tool_msg.msg_type != Some(MessageType::UserPrompt) {
             tool_msg.status = Some(MessageStatus::Completed);
         }
 
@@ -576,8 +576,8 @@ pub async fn process_tool_calls_async(
             parent_updates.push(parent_update);
         } else {
             // 广播 action 结果（最终定格）。
-            // 结果状态直接使用 tool_msg.status：已在上方按模式正确设置
-            // （成功或 auto 失败 => Completed；interactive 失败 => Failed）。
+            // 结果状态直接使用 tool_msg.status：已在上方正确设置
+            // （成功或普通失败 => Completed；user_prompt 不进入本分支）。
             let _ = channel
                 .tx
                 .send(PluginFrame::Data(
@@ -598,10 +598,10 @@ pub async fn process_tool_calls_async(
                 .await;
 
             // 标记父节点最终状态：
-            // - 成功 => Completed；
-            // - auto 模式失败 => Completed（失败属信息性，结果合法留在上下文，不暂停会话）；
-            // - interactive 模式失败 => Failed + 错误 + failure_kind="error"
-            //   + tool_name + args（供 resume 提取重试）。
+            // - 成功 => Completed
+            // - 普通工具失败 => Completed（失败属信息性，错误结果作为合法 tool 结果留在
+            //   上下文，父节点不再标 Failed，不暂停会话、不触发重试/补参渲染）。
+            //   仅真正需要用户输入的 UserPrompt 场景在上方以 WaitingUserAction 处理。
             let parent_update = if success {
                 ChatMessage {
                     id: id.clone(),
@@ -609,20 +609,10 @@ pub async fn process_tool_calls_async(
                     meta: Some(json!({ "success": true })),
                     ..Default::default()
                 }
-            } else if mode == "auto" {
-                ChatMessage {
-                    id: id.clone(),
-                    status: Some(MessageStatus::Completed),
-                    meta: Some(json!({
-                        "success": false,
-                        "failure_kind": "error",
-                    })),
-                    ..Default::default()
-                }
             } else {
                 ChatMessage {
                     id: id.clone(),
-                    status: Some(MessageStatus::Failed),
+                    status: Some(MessageStatus::Completed),
                     error: Some(final_res.clone()),
                     meta: Some(json!({
                         "success": false,
