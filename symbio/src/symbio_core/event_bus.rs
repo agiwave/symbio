@@ -22,6 +22,8 @@ const PENDING_EVENTS_CAP: usize = 64;
 pub const KIND_SESSION: &str = "session";
 pub const KIND_EXPLORER: &str = "explorer";
 pub const KIND_SYSTEM: &str = "system";
+/// 资源状态实时事件（model / mcp / skill / agent / session 通用）
+pub const KIND_RESOURCE: &str = "resource";
 
 /// 事件 Bus 全局订阅者容器
 ///
@@ -174,6 +176,51 @@ impl EventBus {
             return entry.drain(..).collect();
         }
         Vec::new()
+    }
+
+    /// 发布一个资源状态变更事件（resource kind）
+    ///
+    /// 各资源插件在状态**运行时变化**（如会话 busy/idle、连接测试结果）时调用，
+    /// 前端 `subscribe({ kind: 'resource' })` 即时刷新列表/详情状态角标。
+    ///
+    /// 无 session 关联，因此**不入回放缓冲**——重连后的最新状态由
+    /// 各 `resources/list` / `resources/get` 的初始拉取兜底。
+    pub async fn publish_resource_status(
+        resource_type: &str,
+        id: &str,
+        status: &str,
+        status_detail: Option<String>,
+    ) {
+        Self::publish(
+            KIND_RESOURCE,
+            None,
+            json!({
+                "resource_type": resource_type,
+                "id": id,
+                "status": status,
+                "status_detail": status_detail,
+            }),
+        )
+        .await;
+    }
+
+    /// `publish_resource_status` 的同步版本（用于非异步回调）
+    pub fn try_publish_resource_status(
+        resource_type: &str,
+        id: &str,
+        status: &str,
+        status_detail: Option<String>,
+    ) {
+        Self::try_publish(
+            KIND_RESOURCE,
+            None,
+            json!({
+                "resource_type": resource_type,
+                "id": id,
+                "status": status,
+                "status_detail": status_detail,
+            }),
+        );
     }
 
     /// 当前订阅者数量（用于调试）

@@ -18,6 +18,7 @@ import { logger } from '@/utils/logger'
 export const KIND_SESSION = 'session'
 export const KIND_EXPLORER = 'explorer'
 export const KIND_SYSTEM = 'system'
+export const KIND_RESOURCE = 'resource'
 
 /**
  * 从后端 `event_bus` 收到的统一事件结构
@@ -261,6 +262,33 @@ export function subscribe(
       }
     }
   }
+}
+
+/**
+ * 资源实时状态事件（与后端 `publish_resource_status` 的载荷对齐）
+ */
+export interface ResourceStatusEvent {
+  resource_type: string
+  id: string
+  status: string
+  status_detail?: string | null
+}
+
+/**
+ * 订阅指定资源类型的实时状态变化（resource kind）
+ *
+ * 返回取消订阅函数。事件仅当 `resource_type` 匹配时回调，
+ * 用于资源列表/详情即时刷新状态角标（初始态由 `resources/list` 兜底）。
+ */
+export function subscribeResourceStatus(
+  resourceType: string,
+  handler: (e: ResourceStatusEvent) => void
+): () => void {
+  return subscribe({ kind: KIND_RESOURCE }, (busEvent) => {
+    const d = busEvent.data?.data as ResourceStatusEvent | undefined
+    if (!d || d.resource_type !== resourceType) return
+    handler(d)
+  })
 }
 
 // ===== 内部 =====

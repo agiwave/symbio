@@ -671,7 +671,7 @@ impl ModelPlugin {
             }
             existed
         };
-        self.persist_to_disk(&ctx).await;
+        self.persist_to_disk(ctx).await;
         let _ = self.persist_to_parent(ctx).await;
 
         Ok(PluginPayload::new(
@@ -713,6 +713,52 @@ impl ModelPlugin {
                 created: false,
             },
         ))
+    }
+
+    /// resources/status — 连接测试单个 Model Provider
+    ///
+    /// 复用 `validate_provider` 发起真实连接校验（对齐旧 `providers/test`），
+    /// 返回统一 `ResourceStatusResponse`；不修改任何注册表或配置。
+    pub async fn resources_model_status(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+    ) -> InvokeResponse<PluginPayload> {
+        let req: crate::symbio_core::resources::ResourceStatusRequest = ctx.payload()?;
+        let provider = {
+            let providers = self.providers.read().await;
+            providers.providers.get(&req.id).cloned()
+        }
+        .ok_or_else(|| PluginError::NotFound(format!("未找到 Model Provider: {}", req.id)))?;
+
+        let parent = self.get_parent().await;
+        let resp = match Self::validate_provider(&provider, &parent).await {
+            None => crate::symbio_core::resources::ResourceStatusResponse {
+                kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
+                id: req.id.clone(),
+                status: "connected".to_string(),
+                status_detail: Some(format!(
+                    "校验通过（{} / {}）",
+                    provider.provider, provider.model
+                )),
+            },
+            Some(e) => crate::symbio_core::resources::ResourceStatusResponse {
+                kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
+                id: req.id.clone(),
+                status: "failed".to_string(),
+                status_detail: Some(e),
+            },
+        };
+
+        // 通过 resource 事件总线把测试结果实时推送，供资源列表/详情即时刷新状态角标
+        crate::symbio_core::event_bus::EventBus::publish_resource_status(
+            crate::symbio_core::resources::RESOURCE_MODEL,
+            &req.id,
+            &resp.status,
+            resp.status_detail.clone(),
+        )
+        .await;
+
+        Ok(PluginPayload::new(&resp))
     }
 }
 
@@ -786,6 +832,9 @@ impl Plugin for ModelPlugin {
             }
             crate::symbio_core::resources::RESOURCES_DELETE => {
                 self.resources_model_delete(&ctx).await
+            }
+            crate::symbio_core::resources::RESOURCES_STATUS => {
+                self.resources_model_status(&ctx).await
             }
 
             _ => Err(PluginError::NotFound(format!("未知路径: {path}"))),

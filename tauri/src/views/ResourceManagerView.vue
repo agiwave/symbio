@@ -5,9 +5,9 @@
   本页用能力开关驱动差异，最大程度减少差异化代码：
   - zip_upload        ：新建走「上传 zip」，文件名即资源目录名
   - independent_form  ：新建/编辑走 JSON 表单（model / session 先启用）
-  - realtime_status   ：列表项状态轮询（session 的 working、mcp 的连接状态）
+  - realtime_status   ：列表项实时状态（初始态来自 list，运行时变化由 resource 事件推送，不做前端轮询）
   - mutable / read_only：是否允许删除 / 新建
-  - test_connection   ：预留连接测试入口
+  - test_connection   ：详情页「测试连接」按钮，走 resources/status 按需校验
 
   专项复杂的独立表单（如 model 的完整配置表单）可在 detail 组件注册表中逐步接入，
   本页默认提供通用 JSON 编辑器 + 通用详情面板，保证机制统一、可运行。
@@ -116,6 +116,11 @@
           </div>
         </template>
         <ResourceDetailPanel v-else :item="selected" />
+        <div v-if="capabilities.test_connection" class="edit-actions">
+          <button class="action-btn secondary" :disabled="testing" @click="testConnection">
+            {{ testing ? '测试中…' : '测试连接' }}
+          </button>
+        </div>
         <div v-if="capabilities.zip_upload && canDelete" class="edit-actions">
           <button class="danger-btn" :disabled="deletingId === selected.id" @click="requestDelete(selected)">
             {{ deletingId === selected.id ? '删除中…' : '删除' }}
@@ -133,6 +138,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   capabilitiesFor,
   deleteResource,
+  getResourceStatus,
   listResources,
   uploadResourceForm,
   uploadResourceZip,
@@ -147,6 +153,7 @@ import {
 import ResourceShell from '../components/common/ResourceShell.vue'
 import ResourceCard from '../components/common/ResourceCard.vue'
 import ResourceDetailPanel from '../components/resources/ResourceDetailPanel.vue'
+import { subscribeResourceStatus } from '@/services/eventBus'
 
 const props = defineProps<{ resourceType: ResourceType }>()
 
@@ -170,6 +177,7 @@ const uploadError = ref<string | null>(null)
 const manifestError = ref<string | null>(null)
 const draftName = ref('')
 const draftManifest = ref('{}')
+const testing = ref(false)
 
 // === 计算属性 ===
 const label = computed(() => RESOURCE_LABELS[props.resourceType])
@@ -336,49 +344,55 @@ async function requestDelete(item: ResourceSummary) {
   }
 }
 
-// === 实时状态轮询 ===
-let pollTimer: ReturnType<typeof setInterval> | null = null
-function startPolling() {
-  stopPolling()
-  if (!capabilities.value.realtime_status) return
-  pollTimer = setInterval(async () => {
-    try {
-      const resp = await listResources(props.resourceType)
-      if (resp.items) {
-        // 只更新状态字段，避免覆盖用户已选中的新列表
-        const byId = new Map(resp.items.map((i) => [i.id, i]))
-        items.value = items.value.map((it) => {
-          const fresh = byId.get(it.id)
-          return fresh ? { ...it, status: fresh.status, status_detail: fresh.status_detail } : it
-        })
-      }
-    } catch {
-      /* 静默：轮询失败不打断用户 */
+// === 连接测试（资源 status 按需校验，结果也会 push 到 resource 总线）===
+async function testConnection() {
+  const item = selected.value
+  if (!item) return
+  testing.value = true
+  try {
+    const resp = await getResourceStatus(props.resourceType, item.id)
+    if (!resp) {
+      showToast('error', '该后端暂不支持连接测试')
+      return
     }
-  }, 4000)
-}
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
+    item.status = resp.status
+    item.status_detail = resp.status_detail ?? undefined
+    showToast(resp.status === 'connected' ? 'success' : 'error', resp.status_detail || resp.status)
+  } catch (err) {
+    showToast('error', `测试失败: ${err}`)
+  } finally {
+    testing.value = false
   }
 }
+
+// === 实时状态订阅（走事件总线 resource 事件，而非轮询）===
+// 初始态由 loadAll 的 resources/list 携带；后续状态运行时变化由后端 push
+// `resource` 事件，这里按 id 即时刷新列表项的状态角标。
+let unsubscribeResource: (() => void) | null = null
 
 function cardStatus(item: ResourceSummary): 'active' | 'disabled' | 'warning' | 'error' | 'muted' {
   switch (item.status) {
     case 'working': return 'warning'
     case 'disabled': return 'disabled'
-    case 'error': return 'error'
-    case 'active': return 'active'
+    case 'error':
+    case 'failed': return 'error'
+    case 'active':
+    case 'connected': return 'active'
     default: return 'muted'
   }
 }
 
 onMounted(() => {
   loadAll()
-  startPolling()
+  unsubscribeResource = subscribeResourceStatus(props.resourceType, ({ id, status, status_detail }) => {
+    const it = items.value.find((x) => x.id === id)
+    if (it) {
+      it.status = status
+      it.status_detail = status_detail ?? undefined
+    }
+  })
 })
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => unsubscribeResource?.())
 </script>
 
 <style scoped>

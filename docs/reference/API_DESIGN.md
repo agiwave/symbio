@@ -103,6 +103,12 @@ zip 工具函数位于 `symbio/src/symbio_core/resources.rs`）：
 * 统一路径在不同插件实例化：`worker/model/resources/*`、`mcp/resources/*`、
   `skill/resources/*`、`agent/resources/*`、`worker/session/resources/*`。
 
+* **实时状态机制**：初始状态由 `resources/list` 携带；运行时状态变化由后端经事件总线 push `resource` kind 事件
+  （`EventBus::publish_resource_status`），前端 `subscribeResourceStatus(resourceType)` 即时刷新，**不做前端轮询**。
+
+* **五类操作集统一，后端渐进支持**：所有资源（含 session）共享同一套 `list/get/upload/delete/status` 契约，
+  每种资源的上传/下载（如 session 导出/导入）均有意义；按进度渐进实现，后端逐类补齐即可，无需改协议。
+
 * 前端由一份 `ResourceManagerView` 实例化多类；会话聊天主界面（`SessionView`）检索的是
   `resources/list` 统一契约，本身保留专属（会话为内存态交互面）。
 

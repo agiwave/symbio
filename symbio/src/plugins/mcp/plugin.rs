@@ -30,7 +30,7 @@ use crate::symbio_core::{
     PluginError, PluginMeta, PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_MCP,
 };
 use crate::symbio_core::resources::{
-    RESOURCES_DELETE, RESOURCES_LIST, RESOURCES_UPLOAD,
+    RESOURCES_DELETE, RESOURCES_LIST, RESOURCES_STATUS, RESOURCES_UPLOAD,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -347,6 +347,66 @@ impl McpPlugin {
         )?)
     }
 
+    /// resources/status — 连接测试单个 MCP Server
+    ///
+    /// 复用 `manager.test_connection` 发起真实连接校验（stdio 握手 / http streams），
+    /// 返回统一 `ResourceStatusResponse`。不修改任何缓存或配置。
+    pub async fn resources_status(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+    ) -> Result<serde_json::Value, PluginError> {
+        let req: crate::symbio_core::resources::ResourceStatusRequest = ctx.payload()?;
+
+        let server = {
+            let store = self.es(ctx)?;
+            let es = store.entity_store();
+            let category = crate::symbio_core::providers::categories::MCP;
+            let manifest = crate::symbio_core::providers::manifests::SERVER;
+            let content = match es.read_entity(category, &req.id, manifest).await {
+                Ok(c) => c,
+                Err(e) => {
+                    return Err(PluginError::NotFound(format!(
+                        "未找到 MCP Server {}（读取失败: {e}）",
+                        req.id
+                    )))
+                }
+            };
+            serde_json::from_str::<McpServerConfig>(&content).map_err(|e| {
+                PluginError::InternalError(format!("解析 {} 配置失败: {e}", req.id))
+            })?
+        };
+
+        let resp = match self.manager.test_connection(&req.id, &server).await {
+            Ok(r) => crate::symbio_core::resources::ResourceStatusResponse {
+                kind: crate::symbio_core::resources::RESOURCE_MCP.to_string(),
+                id: req.id.clone(),
+                status: "connected".to_string(),
+                status_detail: Some(format!(
+                    "{tools} tools · protocol {protocol}",
+                    tools = r.tool_count,
+                    protocol = r.protocol_version,
+                )),
+            },
+            Err(e) => crate::symbio_core::resources::ResourceStatusResponse {
+                kind: crate::symbio_core::resources::RESOURCE_MCP.to_string(),
+                id: req.id.clone(),
+                status: "failed".to_string(),
+                status_detail: Some(e),
+            },
+        };
+
+        // 通过 resource 事件总线把测试结果实时推送，供资源列表/详情即时刷新状态角标
+        crate::symbio_core::event_bus::EventBus::publish_resource_status(
+            crate::symbio_core::resources::RESOURCE_MCP,
+            &req.id,
+            &resp.status,
+            resp.status_detail.clone(),
+        )
+        .await;
+
+        Ok(serde_json::to_value(resp)?)
+    }
+
     /// 上传后把单个 server 从磁盘回灌到内存 config（并失效相关缓存）
     pub async fn reload_server_from_storage(
         &self,
@@ -466,6 +526,7 @@ impl Plugin for McpPlugin {
             RESOURCES_LIST => self.resources_list(&ctx).await?,
             RESOURCES_UPLOAD => self.resources_upload(&ctx).await?,
             RESOURCES_DELETE => self.resources_delete(&ctx).await?,
+            RESOURCES_STATUS => self.resources_status(&ctx).await?,
 
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         };
