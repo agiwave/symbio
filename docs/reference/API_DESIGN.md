@@ -15,19 +15,19 @@ Symbio 统一采用**分形路由协议 (Fractal Routing)**。
 
 所有交互均通过 `Plugin::route(ctx)` 发起，宿主侧通过 `InvokeRequest` 上下文注入参数。
 
-**`InvokeRequest` 提供的常用键**（定义于 `symbio_core::keys`）：
+**`InvokeRequest`** **提供的常用键**（定义于 `symbio_core::keys`）：
 
-| 键 | 说明 |
-| --- | --- |
-| `PATH` | 目标路径（如 `agent/chat`），容器插件按 `/` 逐级剥离 |
-| `PAYLOAD` | 交互载荷数据（`serde_json::Value`） |
-| `WORKDIR` | 当前工作区根路径 |
-| `SESSION_ID` | 会话唯一标识 |
-| `TRACE_ID` | 调用链追踪 ID |
-| `AGENT_ID` | 当前 Agent 标识（agent 插件内部使用） |
-| `CONTENT` / `KIND` / `ID` / `NAME` / `SCOPE` / `DESCRIPTION` | 通用字段 |
+| 键                                                            | 说明                                  |
+| ------------------------------------------------------------ | ----------------------------------- |
+| `PATH`                                                       | 目标路径（如 `agent/chat`），容器插件按 `/` 逐级剥离 |
+| `PAYLOAD`                                                    | 交互载荷数据（`serde_json::Value`）         |
+| `WORKDIR`                                                    | 当前工作区根路径                            |
+| `SESSION_ID`                                                 | 会话唯一标识                              |
+| `TRACE_ID`                                                   | 调用链追踪 ID                            |
+| `AGENT_ID`                                                   | 当前 Agent 标识（agent 插件内部使用）           |
+| `CONTENT` / `KIND` / `ID` / `NAME` / `SCOPE` / `DESCRIPTION` | 通用字段                                |
 
-**响应载荷 `PluginPayload`**：
+**响应载荷** **`PluginPayload`**：
 
 ```rust
 pub enum PluginPayload {
@@ -43,7 +43,7 @@ pub enum PluginPayload {
 
 ## 2. 帧协议 `PluginFrame`
 
-定义于 `symbio_core/transport.rs`，是**沿 `PluginChannel` 发送的最小消息**：
+定义于 `symbio_core/transport.rs`，是**沿** **`PluginChannel`** **发送的最小消息**：
 
 ```rust
 pub enum PluginFrame {
@@ -58,6 +58,7 @@ pub enum PluginFrame {
 辅助方法：
 
 * `into_value()` —— `Data` 帧转 `Value`，其他返回 `Value::Null`。
+
 * `try_into_event::<T>()` —— 尝试把 `Data` 帧反序列化为指定事件模型。
 
 ## 3. 数据契约 `Schemas`
@@ -68,39 +69,41 @@ pub enum PluginFrame {
 
 ### 3.1 常用路径示例
 
-| 路径 | 用途 |
-| --- | --- |
-| `_root` | 查询当前节点子插件拓扑 |
-| `{plugin}/config` | 统一配置管理（`get` / `set` action） |
-| `{plugin}/resources/list\|get\|upload\|delete\|status` | **统一资源管理**（五类资源，见 3.2） |
-| `session/chat` | 发起 AI 长连接会话 |
-| `session/get_messages` | 获取对话历史 |
-| `session/open` / `session/update` / `session/clear` | 会话生命周期（会话内容操作） |
-| `agent/chat` | Agent 层对话入口（由 session 内部转发或外部直调） |
-| `model/chat` | 底层 Model 引擎调用 |
-| `local/shell` | 本地 shell 工具 |
-| `explorer/list` | 文件列表 |
-| `web/http_request` | Web 请求工具（`web_search` / `web_fetch` 为内部能力，经 `web/http_request` 暴露） |
+| 路径                                                     | 用途                                                                 |
+| ------------------------------------------------------ | ------------------------------------------------------------------ |
+| `_root`                                                | 查询当前节点子插件拓扑                                                        |
+| `{plugin}/config`                                      | 统一配置管理（`get` / `set` action）                                       |
+| `{plugin}/resources/list\|get\|upload\|delete\|status` | **统一资源管理**（五类资源，见 3.2）                                             |
+| `session/chat`                                         | 发起 AI 长连接会话                                                        |
+| `session/get_messages`                                 | 获取对话历史                                                             |
+| `session/open` / `session/update` / `session/clear`    | 会话生命周期（会话内容操作）                                                     |
+| `agent/chat`                                           | Agent 层对话入口（由 session 内部转发或外部直调）                                   |
+| `model/chat`                                           | 底层 Model 引擎调用                                                      |
+| `local/shell`                                          | 本地 shell 工具                                                        |
+| `explorer/list`                                        | 文件列表                                                               |
+| `web/http_request`                                     | Web 请求工具（`web_search` / `web_fetch` 为内部能力，经 `web/http_request` 暴露） |
 
-### 3.2 统一资源协议（resources/*，五类资源）
+### 3.2 统一资源协议（resources/\*，五类资源）
 
 `model` / `mcp` / `agent` / `skill` / `session` 五种资源共享同一套 `resources/*`
 操作集（契约定义于 `symbio/src/symbio_core/schemas/resources.rs`，
 zip 工具函数位于 `symbio/src/symbio_core/resources.rs`）：
 
-| 操作 | 说明 |
-| --- | --- |
-| `resources/list` | 列出全部资源，返回 `ResourcesListResponse`（能力开关 + `ResourceSummary[]`） |
-| `resources/get` | 读取单个资源详情 |
-| `resources/upload` | 创建/更新（zip 上传或 JSON manifest 表单） |
-| `resources/delete` | 删除资源 |
-| `resources/status` | 查询实时/连接状态（可选能力） |
+| 操作                 | 说明                                                            |
+| ------------------ | ------------------------------------------------------------- |
+| `resources/list`   | 列出全部资源，返回 `ResourcesListResponse`（能力开关 + `ResourceSummary[]`） |
+| `resources/get`    | 读取单个资源详情                                                      |
+| `resources/upload` | 创建/更新（zip 上传或 JSON manifest 表单）                               |
+| `resources/delete` | 删除资源                                                          |
+| `resources/status` | 查询实时/连接状态（可选能力）                                               |
 
-- 资源差异仅由 **`ResourceCapabilities` 能力开关**驱动（`zip_upload` / `independent_form` /
+* 资源差异仅由 **`ResourceCapabilities`** **能力开关**驱动（`zip_upload` / `independent_form` /
   `realtime_status` / `mutable` / `test_connection` / `read_only`），前后端据此统一实现。
-- 统一路径在不同插件实例化：`worker/model/resources/*`、`mcp/resources/*`、
+
+* 统一路径在不同插件实例化：`worker/model/resources/*`、`mcp/resources/*`、
   `skill/resources/*`、`agent/resources/*`、`worker/session/resources/*`。
-- 前端由一份 `ResourceManagerView` 实例化多类；会话聊天主界面（`SessionView`）检索的是
+
+* 前端由一份 `ResourceManagerView` 实例化多类；会话聊天主界面（`SessionView`）检索的是
   `resources/list` 统一契约，本身保留专属（会话为内存态交互面）。
 
 ## 4. 工具发现与 AI 集成
@@ -108,7 +111,9 @@ zip 工具函数位于 `symbio/src/symbio_core/resources.rs`）：
 ### 4.1 `traverse` 协议
 
 * 常量 `TRAVERSE_AVAILABLE_TOOLS = "available_tools"`。
+
 * 调用 `root.traverse(TRAVERSE_AVAILABLE_TOOLS, ctx)` 即可获得全树工具清单。
+
 * 容器插件将自己的 `path` 前缀下发给子插件；
   叶子插件返回 `ToolDefinition` 列表，工具名自动带命名空间（如 `local/shell`）。
 
@@ -118,7 +123,9 @@ zip 工具函数位于 `symbio/src/symbio_core/resources.rs`）：
 ### 4.2 `traverse` / `route` 协议一致性
 
 * **同协议**：两者都接收 `Arc<dyn InvokeRequest>` 并返回 `InvokeResponse<PluginPayload>`。
+
 * **同路径**：两者都按 `PATH` 工作。
+
 * **不同点**：`traverse` 通常返回 `Data`（汇总），`route` 可返回 `Session`（流式）。
 
 ## 5. AI 会话流式规范
@@ -134,13 +141,13 @@ zip 工具函数位于 `symbio/src/symbio_core/resources.rs`）：
 
 `PluginError` 在 `symbio_core/error.rs` 定义，提供稳定的字符串错误码：
 
-| 错误码 | 说明 |
-| :--- | :--- |
-| `NOT_FOUND` | 路由路径不存在或子插件未找到 |
+| 错误码                | 说明             |
+| :----------------- | :------------- |
+| `NOT_FOUND`        | 路由路径不存在或子插件未找到 |
 | `VALIDATION_ERROR` | 输入参数格式或内容校验不通过 |
-| `INTERNAL_ERROR` | 内部执行异常 |
-| `TIMEOUT` | 请求超时 |
-| `FORBIDDEN` | 权限不足或触发安全策略 |
+| `INTERNAL_ERROR`   | 内部执行异常         |
+| `TIMEOUT`          | 请求超时           |
+| `FORBIDDEN`        | 权限不足或触发安全策略    |
 
 错误码是 ABI 的一部分，跨版本变更需谨慎。host 侧可以根据 `code` 做差异化处理（如引导设置 API Key）。
 
@@ -166,4 +173,6 @@ submit_object_creator!(PLUGIN_X, XPlugin::build, dyn Plugin);
 ## 8. 文档映射约定
 
 * **后端**：`// Corresponding Host: <path>` 注释（如旧 Tauri 前端 schema 路径）保留为可选。
+
 * **插件自包含**：业务细节文档放在 `symbio/src/plugins/<name>/docs/`，不集中在 `docs/`。
+

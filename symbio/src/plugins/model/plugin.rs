@@ -10,9 +10,7 @@ use super::handlers;
 use super::protocols::resolve_protocol_id;
 use crate::symbio_core::schemas::common;
 use crate::symbio_core::schemas::model::model_config::ModelConfig;
-use crate::symbio_core::schemas::model::model_providers::{
-    self, ModelProviderConfig, ModelProvidersConfig,
-};
+use crate::symbio_core::schemas::model::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use crate::symbio_core::{
     create_object, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel,
     PluginError, PluginFrame, PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, CONFIG_SET,
@@ -576,6 +574,10 @@ impl Default for ModelPlugin {
 
 impl ModelPlugin {
     /// resources/list — 列出全部 Model Provider（统一 ResourceSummary 契约）
+    ///
+    /// 列表项 `extra` 中展开 `config`（完整 `ModelProviderConfig`）与 `is_default`，
+    /// 使 chat 侧（`listModelProviders`）与资源管理页共用同一读取入口，无需再走
+    /// 遗留 `providers/list`。
     pub async fn resources_model_list(&self) -> InvokeResponse<PluginPayload> {
         let providers = self.providers.read().await;
         let items = providers
@@ -593,6 +595,7 @@ impl ModelPlugin {
                     "disabled".to_string()
                 };
                 it.description = Some(p.model.clone());
+                let is_default = providers.default_provider_id.as_deref() == Some(p.id.as_str());
                 if let serde_json::Value::Object(ref mut m) = it.extra {
                     let _ = m.insert("provider".to_string(), serde_json::json!(p.provider));
                     let _ = m.insert("model".to_string(), serde_json::json!(p.model));
@@ -601,6 +604,10 @@ impl ModelPlugin {
                         serde_json::json!(p.api_protocol),
                     );
                     let _ = m.insert("temperature".to_string(), serde_json::json!(p.temperature));
+                    let _ = m.insert("is_default".to_string(), serde_json::json!(is_default));
+                    if let Ok(cfg) = serde_json::to_value(p) {
+                        let _ = m.insert("config".to_string(), cfg);
+                    }
                 }
                 it
             })
@@ -646,6 +653,15 @@ impl ModelPlugin {
             ));
         }
 
+        // 对齐旧 `providers/set`：保存前校验连接 + 落盘到新存储
+        let parent = self.get_parent().await;
+        if let Some(err) = Self::validate_provider(&provider, &parent).await {
+            plugin_error!("model", format!("Provider 配置验证未通过: {}", err));
+            return Err(PluginError::ValidationError(format!(
+                "Provider 配置验证失败: {err}"
+            )));
+        }
+
         let existed = {
             let mut providers = self.providers.write().await;
             let existed = providers.providers.contains_key(&id);
@@ -655,6 +671,7 @@ impl ModelPlugin {
             }
             existed
         };
+        self.persist_to_disk(&ctx).await;
         let _ = self.persist_to_parent(ctx).await;
 
         Ok(PluginPayload::new(
@@ -737,144 +754,6 @@ impl Plugin for ModelPlugin {
             "config/schema" => Ok(PluginPayload::new(&common::SchemaResponse {
                 schema: Self::config_schema(),
             })),
-
-            // ============== 多 Provider 路由 ==============
-            "providers/list" => {
-                let providers = self.providers.read().await;
-                Ok(PluginPayload::new(
-                    &model_providers::model_providers_list::Response {
-                        config: providers.clone(),
-                    },
-                ))
-            }
-            "providers/get" => {
-                let req: model_providers::model_providers_get::Request = ctx.payload()?;
-                let providers = self.providers.read().await;
-                let provider = providers
-                    .providers
-                    .get(&req.provider_id)
-                    .cloned()
-                    .ok_or_else(|| {
-                        PluginError::NotFound(format!("未找到 Model Provider: {}", req.provider_id))
-                    })?;
-                Ok(PluginPayload::new(
-                    &model_providers::model_providers_get::Response { provider },
-                ))
-            }
-            "providers/set" => {
-                let req: model_providers::model_providers_set::Request = ctx.payload()?;
-                let mut incoming = req.provider.clone();
-                if incoming.id.is_empty() {
-                    return Err(PluginError::ValidationError(
-                        "Model Provider 的 id 不能为空".to_string(),
-                    ));
-                }
-                if incoming.name.is_empty() {
-                    incoming.name = incoming.id.clone();
-                }
-                if incoming.provider.is_empty() {
-                    return Err(PluginError::ValidationError(
-                        "Model Provider 的 provider 字段不能为空".to_string(),
-                    ));
-                }
-
-                let parent = self.get_parent().await;
-
-                if !req.skip_validation {
-                    plugin_debug!(
-                        "model",
-                        "正在验证 Model Provider 配置: id={}, provider={}",
-                        incoming.id,
-                        incoming.provider
-                    );
-                    if let Some(err) = Self::validate_provider(&incoming, &parent).await {
-                        plugin_error!("model", format!("Provider 配置验证未通过: {}", err));
-                        return Err(PluginError::ValidationError(format!(
-                            "Provider 配置验证失败: {err}"
-                        )));
-                    }
-                }
-
-                {
-                    let mut providers = self.providers.write().await;
-                    providers
-                        .providers
-                        .insert(incoming.id.clone(), incoming.clone());
-                    if providers.default_provider_id.is_none() {
-                        providers.default_provider_id = Some(incoming.id.clone());
-                    }
-                }
-
-                // 写盘到新存储（按 Provider 子目录）
-                self.persist_to_disk(&ctx).await;
-
-                Ok(PluginPayload::new(
-                    &model_providers::model_providers_set::Response { provider: incoming },
-                ))
-            }
-            "providers/delete" => {
-                let req: model_providers::model_providers_delete::Request = ctx.payload()?;
-                {
-                    let mut providers = self.providers.write().await;
-                    providers.providers.remove(&req.provider_id);
-                    if providers.default_provider_id.as_deref() == Some(req.provider_id.as_str()) {
-                        providers.default_provider_id = None;
-                    }
-                }
-
-                // 从新存储中删除
-                if let Some(store) = create_object::<
-                    dyn crate::symbio_core::providers::StorageService,
-                >("storage_service", ctx.clone())
-                {
-                    let es = store.entity_store();
-                    let category = crate::symbio_core::providers::categories::MODEL;
-                    if let Err(e) = es.delete_entity(category, &req.provider_id).await {
-                        plugin_warn!("model", "删除 provider 目录失败: {e}");
-                    }
-                }
-
-                Ok(PluginPayload::new(
-                    &model_providers::model_providers_delete::Response {},
-                ))
-            }
-            "providers/set_default" => {
-                let req: model_providers::model_providers_set_default::Request = ctx.payload()?;
-                {
-                    let mut providers = self.providers.write().await;
-                    if !providers.providers.contains_key(&req.provider_id) {
-                        return Err(PluginError::NotFound(format!(
-                            "未找到 Model Provider: {}",
-                            req.provider_id
-                        )));
-                    }
-                    providers.default_provider_id = Some(req.provider_id.clone());
-                }
-                self.persist_to_parent(&ctx).await?;
-                Ok(PluginPayload::new(
-                    &model_providers::model_providers_set_default::Response {},
-                ))
-            }
-            // 连接测试：复用 set 的验证逻辑，但**无副作用**（不写注册表、不落盘），
-            // 因此未保存的草稿 Provider 配置也可以直接测试。
-            "providers/test" => {
-                let req: model_providers::model_providers_test::Request = ctx.payload()?;
-                let parent = self.get_parent().await;
-                plugin_debug!(
-                    "model",
-                    "正在测试 Model Provider 连接: id={}, provider={}, api_protocol={}",
-                    req.provider.id,
-                    req.provider.provider,
-                    req.provider.api_protocol
-                );
-                if let Some(err) = Self::validate_provider(&req.provider, &parent).await {
-                    plugin_error!("model", format!("Provider 连接测试未通过: {err}"));
-                    return Err(PluginError::ValidationError(format!("连接测试失败: {err}")));
-                }
-                Ok(PluginPayload::new(
-                    &model_providers::model_providers_test::Response {},
-                ))
-            }
 
             "chat" => {
                 let (my_channel, peer_channel) = PluginChannel::pair(64);

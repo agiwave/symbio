@@ -30,6 +30,10 @@
   旧 service 与孤儿 schema。
 - **session 并入体系**：会话管理列表改用 `worker/session/resources/list` 统一契约（含 is_working/message_count/
   metadata 扩展），前端 `listSessions` 由 `ResourceSummary` 映射；`resources/status` 提供实时工作状态轮询。
+- **model 收尾（消除双协议）**：chat 侧 `listModelProviders` 改从统一 `resources/list`（`worker/model`）读取——
+  列表项 `extra` 展开完整 `config` 与 `is_default`，与资源管理页共用同一入口；`resources/upload` 对齐旧
+  `providers/set` 补齐保存前校验 + 落盘；删除遗留 `providers/list|get|set|delete|set_default|test` 六个路由及
+  对应前后端 CRUD schema/service（`modelProviders.ts` 仅保留映射 `listModelProviders` 与纯工具函数）。
 - **清理**：删除后端孤儿 schema（session_list/skill_get/skill_list/mcp_servers）与 agent 旧 list/get/delete 路由、
   mcp 旧 `servers/*` 路由、skill 旧 list/get 路由。
 
