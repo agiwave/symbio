@@ -576,6 +576,11 @@ impl Plugin for HomePlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
+            "resources/providers" => {
+                // 宿主级资源 provider 注册表：前端启动时拉取，动态生成左侧导航与统一资源页
+                let resp = crate::symbio_core::resources::providers_response();
+                return Ok(PluginPayload::new(&resp));
+            }
             "save_config" => {
                 let this = Arc::clone(&self);
                 tokio::spawn(async move {

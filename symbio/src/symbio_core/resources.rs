@@ -140,6 +140,104 @@ pub trait ResourceProvider: Send + Sync {
     }
 }
 
+// ==================== provider 注册表 ====================
+
+/// 资源类型（provider）注册清单 —— 宿主级单一真相源。
+///
+/// 语义上是"后端主动注册有哪些资源 provider"：新插件接入统一资源协议时，
+/// 只需实现 [`ResourceProvider`]、在插件 route 顶部接入 [`dispatch`]，并在此
+/// 登记一条 [`ResourceProviderInfo`]——前端即可自动发现该类型（生成导航、
+/// 进入统一资源页），无需改动任何前端代码。
+///
+/// `prefix` 为资源操作路径前缀（前端拼接 `${prefix}/resources/<op>`）；
+/// `supports_upload` 表示该类型在资源管理器内能否创建/删除（有无实体目录、
+/// dispatch 是否实现 upload/delete——session 为 false，因其走 SessionStore 且
+/// upload/delete 未实现）。
+#[derive(Debug, Clone, Copy)]
+pub struct ResourceProviderInfo {
+    /// 资源类型（kind）
+    pub kind: &'static str,
+    /// 提供方显示名（路径 `[provider]/[id].[kind]`）
+    pub provider_name: &'static str,
+    /// 资源操作路径前缀
+    pub prefix: &'static str,
+    pub capabilities: &'static ResourceCapabilities,
+    pub order: i32,
+    /// 展示标签
+    pub label: &'static str,
+    pub supports_upload: bool,
+}
+
+/// 全部已注册资源 provider（编译期收起当前五类，顺序即展示顺序）
+pub fn provider_registry() -> &'static [ResourceProviderInfo] {
+    const REG: &[ResourceProviderInfo] = &[
+        ResourceProviderInfo {
+            kind: RESOURCE_MODEL,
+            provider_name: RESOURCE_MODEL,
+            prefix: "worker/model",
+            capabilities: &ResourceCapabilities::MODEL,
+            order: 1,
+            label: "Model Provider",
+            supports_upload: true,
+        },
+        ResourceProviderInfo {
+            kind: RESOURCE_MCP,
+            provider_name: RESOURCE_MCP,
+            prefix: "mcp",
+            capabilities: &ResourceCapabilities::MCP,
+            order: 2,
+            label: "MCP Server",
+            supports_upload: true,
+        },
+        ResourceProviderInfo {
+            kind: RESOURCE_AGENT,
+            provider_name: RESOURCE_AGENT,
+            prefix: "agent",
+            capabilities: &ResourceCapabilities::AGENT,
+            order: 3,
+            label: "Agent",
+            supports_upload: true,
+        },
+        ResourceProviderInfo {
+            kind: RESOURCE_SKILL,
+            provider_name: RESOURCE_SKILL,
+            prefix: "skill",
+            capabilities: &ResourceCapabilities::SKILL,
+            order: 4,
+            label: "Skill",
+            supports_upload: true,
+        },
+        ResourceProviderInfo {
+            kind: RESOURCE_SESSION,
+            provider_name: RESOURCE_SESSION,
+            prefix: "worker/session",
+            capabilities: &ResourceCapabilities::SESSION,
+            order: 5,
+            label: "Session",
+            supports_upload: false, // session 走 SessionStore，upload/delete 未实现
+        },
+    ];
+    REG
+}
+
+/// 将静态注册表转换为可序列化的 [`ProvidersResponse`]
+pub fn providers_response() -> ProvidersResponse {
+    ProvidersResponse {
+        providers: provider_registry()
+            .iter()
+            .map(|p| ProviderInfo {
+                kind: p.kind.to_string(),
+                provider_name: p.provider_name.to_string(),
+                prefix: p.prefix.to_string(),
+                capabilities: *p.capabilities,
+                order: p.order,
+                label: p.label.to_string(),
+                supports_upload: p.supports_upload,
+            })
+            .collect(),
+    }
+}
+
 // ==================== 统一分发 ====================
 
 /// `resources/*` 统一分发入口。

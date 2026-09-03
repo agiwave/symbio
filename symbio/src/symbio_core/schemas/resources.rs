@@ -149,6 +149,36 @@ pub fn capabilities_for(kind: &str) -> ResourceCapabilities {
     }
 }
 
+// ==================== provider 注册信息 ====================
+
+/// 资源类型（provider）注册信息 —— 宿主级单一真相源
+///
+/// 由核心层 [`crate::symbio_core::resources::provider_registry`] 静态注册，
+/// 经宿主 `resources/providers` 端点下发，前端据此动态生成左侧导航栏与
+/// 统一资源页的类型集合（替代硬编码类型清单）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderInfo {
+    /// 资源类型（kind），如 `model` / `mcp` / `session`
+    pub kind: String,
+    /// 提供方显示名，用于路径 `[provider]/[id].[kind]`
+    pub provider_name: String,
+    /// 资源操作前缀（前端拼接 `${prefix}/resources/<op>`）
+    pub prefix: String,
+    pub capabilities: ResourceCapabilities,
+    /// 展示顺序（前端导航/类型选择排序）
+    pub order: i32,
+    /// 展示标签（如 `Model` / `Session`）
+    pub label: String,
+    /// 是否支持在资源管理器内创建/删除（`category` 存在且 dispatch 实现 upload/delete）
+    pub supports_upload: bool,
+}
+
+/// `resources/providers` 响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvidersResponse {
+    pub providers: Vec<ProviderInfo>,
+}
+
 // ==================== 统一列表项 ====================
 
 /// 统一资源概要（列表项）
