@@ -300,11 +300,6 @@ impl Plugin for SessionPlugin {
             CONFIG_SET => self.invoke_config_set(ctx.clone()).await?,
             "config/schema" => self.invoke_config_schema().await?,
             "heartbeat/trigger" => return self.handle_heartbeat_trigger_oneoff(ctx).await,
-            // ============== 统一资源协议 (resources/*，会话管理列表) ==============
-            crate::symbio_core::resources::RESOURCES_LIST => self.invoke_resources_list().await?,
-            crate::symbio_core::resources::RESOURCES_STATUS => {
-                self.invoke_resources_status(ctx.clone()).await?
-            }
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         };
 
@@ -321,6 +316,80 @@ impl Plugin for SessionPlugin {
 }
 
 crate::submit_object_creator!(PLUGIN_SESSION, SessionPlugin::build, dyn Plugin);
+
+// ==================== 统一资源协议接入 ====================
+
+#[async_trait]
+impl crate::symbio_core::resources::ResourceProvider for SessionPlugin {
+    fn kind(&self) -> &'static str {
+        crate::symbio_core::resources::RESOURCE_SESSION
+    }
+
+    /// 会话列表来自 SessionStore（非 EntityStore 实体目录），
+    /// 摘要携带实时工作状态（is_working）供前端列表即时渲染。
+    async fn list_items(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+    ) -> Result<Vec<crate::symbio_core::resources::ResourceSummary>, PluginError> {
+        let sessions = self.list_sessions().await?;
+        let active = self.active_mgr.sessions.read().await;
+        Ok(sessions
+            .iter()
+            .map(|s| {
+                let is_working = active
+                    .get(&s.id)
+                    .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+                    .unwrap_or(false);
+                let title = s
+                    .metadata
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| s.id.clone());
+                let mut it = crate::symbio_core::resources::ResourceSummary::new(
+                    crate::symbio_core::resources::RESOURCE_SESSION,
+                    &s.id,
+                    title,
+                );
+                it.status = if is_working {
+                    "working".to_string()
+                } else {
+                    "active".to_string()
+                };
+                it.updated_at = Some(s.updated_at);
+                if let serde_json::Value::Object(ref mut m) = it.extra {
+                    let _ = m.insert("message_count".to_string(), json!(s.messages.len()));
+                    let _ = m.insert("is_working".to_string(), json!(is_working));
+                    let _ = m.insert("metadata".to_string(), s.metadata.clone());
+                }
+                it
+            })
+            .collect())
+    }
+
+    /// 查询单个会话的实时工作状态
+    async fn test_status(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {
+        let active = self.active_mgr.sessions.read().await;
+        let is_working = active
+            .get(id)
+            .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+            .unwrap_or(false);
+        Ok(crate::symbio_core::resources::ResourceStatusResponse {
+            kind: crate::symbio_core::resources::RESOURCE_SESSION.to_string(),
+            id: id.to_string(),
+            status: if is_working {
+                "working".to_string()
+            } else {
+                "active".to_string()
+            },
+            status_detail: None,
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {

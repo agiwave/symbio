@@ -336,41 +336,6 @@ impl ModelPlugin {
         Ok(())
     }
 
-    /// 持久化到新存储（按 Provider 子目录）
-    ///
-    /// 实际数据落盘到 `~/.symbio/plugins/model/<id>/provider.json`，
-    /// 而非传统的 `config.yaml`。这是新存储策略的核心入口。
-    async fn persist_to_disk(&self, ctx: &Arc<dyn InvokeRequest>) {
-        let store = create_object::<dyn crate::symbio_core::providers::StorageService>(
-            "storage_service",
-            ctx.clone(),
-        );
-        let Some(store) = store else {
-            plugin_warn!("model", "未找到 storage_service，跳过新存储写入");
-            return;
-        };
-
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::MODEL;
-        let manifest = crate::symbio_core::providers::manifests::PROVIDER;
-
-        let providers = self.providers.read().await;
-
-        // 1. 写入每个 Provider
-        for (id, p) in &providers.providers {
-            let content = match serde_json::to_string_pretty(p) {
-                Ok(s) => s,
-                Err(_e) => {
-                    plugin_error!("model", "序列化 provider {id} 失败");
-                    continue;
-                }
-            };
-            if let Err(_e) = es.write_entity(category, id, manifest, &content).await {
-                plugin_error!("model", "写入 provider {id} 失败");
-            }
-        }
-    }
-
     /// 验证给定的 Model Provider 配置（不写入状态）
     async fn validate_provider(
         provider: &ModelProviderConfig,
@@ -570,17 +535,34 @@ impl Default for ModelPlugin {
     }
 }
 
-// ==================== 统一资源协议 (resources/*) ====================
+// ==================== 统一资源协议 (resources/*，independent_form 启用于 model) ====================
+//
+// 公共流程（manifest 上传 / 幂等删除 / 列表包装 / status 事件推送）由
+// `ResourceProvider::dispatch` 承载，这里只实现 model 的差异化钩子。
+// 列表项 `extra` 展开 `config`（完整 ModelProviderConfig）与 `is_default`，
+// 使 chat 侧（`listModelProviders`）与资源管理页共用同一读取入口。
 
-impl ModelPlugin {
-    /// resources/list — 列出全部 Model Provider（统一 ResourceSummary 契约）
-    ///
-    /// 列表项 `extra` 中展开 `config`（完整 `ModelProviderConfig`）与 `is_default`，
-    /// 使 chat 侧（`listModelProviders`）与资源管理页共用同一读取入口，无需再走
-    /// 遗留 `providers/list`。
-    pub async fn resources_model_list(&self) -> InvokeResponse<PluginPayload> {
+#[async_trait]
+impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
+    fn kind(&self) -> &'static str {
+        crate::symbio_core::resources::RESOURCE_MODEL
+    }
+
+    fn category(&self) -> Option<&'static str> {
+        Some(crate::symbio_core::providers::categories::MODEL)
+    }
+
+    fn manifest_file(&self) -> Option<&'static str> {
+        Some(crate::symbio_core::providers::manifests::PROVIDER)
+    }
+
+    /// 列表来自内存注册表（启动时镜像磁盘）
+    async fn list_items(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+    ) -> Result<Vec<crate::symbio_core::resources::ResourceSummary>, PluginError> {
         let providers = self.providers.read().await;
-        let items = providers
+        Ok(providers
             .providers
             .values()
             .map(|p| {
@@ -611,41 +593,25 @@ impl ModelPlugin {
                 }
                 it
             })
-            .collect::<Vec<_>>();
-
-        let resp = crate::symbio_core::resources::ResourcesListResponse {
-            kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
-            capabilities: crate::symbio_core::resources::capabilities_for(
-                crate::symbio_core::resources::RESOURCE_MODEL,
-            ),
-            items,
-        };
-        Ok(PluginPayload::new(&resp))
+            .collect::<Vec<_>>())
     }
 
-    /// resources/upload — 以 JSON 表单（manifest）创建/更新 Model Provider
-    pub async fn resources_model_upload(
+    /// 表单上传的校验/规范化：填充 id/name 缺省值 + 连接校验（对齐旧 `providers/set`）
+    ///
+    /// 返回规范化后的 manifest（实际写盘内容）。
+    async fn validate_manifest(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
-        let req: crate::symbio_core::resources::ResourceUploadRequest = ctx.payload()?;
-        let id = req
-            .name
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| PluginError::ValidationError("Model 资源名称不能为空".to_string()))?
-            .to_string();
-        let manifest = req.manifest.ok_or_else(|| {
-            PluginError::ValidationError("Model 以 JSON 表单（manifest）上传".to_string())
-        })?;
-        let mut provider: ModelProviderConfig = serde_json::from_value(manifest)
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+        manifest: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let mut provider: ModelProviderConfig = serde_json::from_value(manifest.clone())
             .map_err(|e| PluginError::ValidationError(format!("Provider 配置无效: {e}")))?;
         if provider.id.is_empty() {
-            provider.id = id.clone();
+            provider.id = id.to_string();
         }
         if provider.name.is_empty() {
-            provider.name = id.clone();
+            provider.name = id.to_string();
         }
         if provider.provider.is_empty() {
             return Err(PluginError::ValidationError(
@@ -653,7 +619,7 @@ impl ModelPlugin {
             ));
         }
 
-        // 对齐旧 `providers/set`：保存前校验连接 + 落盘到新存储
+        // 对齐旧 `providers/set`：保存前校验连接
         let parent = self.get_parent().await;
         if let Some(err) = Self::validate_provider(&provider, &parent).await {
             plugin_error!("model", format!("Provider 配置验证未通过: {}", err));
@@ -662,79 +628,74 @@ impl ModelPlugin {
             )));
         }
 
-        let existed = {
-            let mut providers = self.providers.write().await;
-            let existed = providers.providers.contains_key(&id);
-            providers.providers.insert(id.clone(), provider);
-            if providers.default_provider_id.is_none() {
-                providers.default_provider_id = Some(id.clone());
-            }
-            existed
-        };
-        self.persist_to_disk(ctx).await;
-        let _ = self.persist_to_parent(ctx).await;
+        serde_json::to_value(&provider).map_err(|e| PluginError::ParseError(e.to_string()))
+    }
 
-        Ok(PluginPayload::new(
-            &crate::symbio_core::resources::ResourceUploadResponse {
-                kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
+    /// 写盘后同步内存注册表（读回磁盘内容 + 默认 provider 兜底 + 触发父级持久化）
+    async fn on_uploaded(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<(), PluginError> {
+        let store = create_object::<dyn crate::symbio_core::providers::StorageService>(
+            "storage_service",
+            ctx.clone(),
+        )
+        .ok_or_else(|| PluginError::InternalError("storage_service 不可用".to_string()))?;
+        let es = store.entity_store();
+        let content = es
+            .read_entity(
+                crate::symbio_core::providers::categories::MODEL,
                 id,
-                created: !existed,
-            },
-        ))
-    }
+                crate::symbio_core::providers::manifests::PROVIDER,
+            )
+            .await
+            .map_err(|e| PluginError::InternalError(format!("回读 provider 失败: {e}")))?;
+        let provider: ModelProviderConfig = serde_json::from_str(&content)
+            .map_err(|e| PluginError::ParseError(format!("回读 provider 解析失败: {e}")))?;
 
-    /// resources/delete — 删除 Model Provider（内存 + 磁盘）
-    pub async fn resources_model_delete(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
-        let req: crate::symbio_core::resources::ResourceDeleteRequest = ctx.payload()?;
         {
             let mut providers = self.providers.write().await;
-            providers.providers.remove(&req.id);
-            if providers.default_provider_id.as_deref() == Some(req.id.as_str()) {
-                providers.default_provider_id = None;
+            providers.providers.insert(id.to_string(), provider);
+            if providers.default_provider_id.is_none() {
+                providers.default_provider_id = Some(id.to_string());
             }
         }
-        if let Some(store) = create_object::<
-            dyn crate::symbio_core::providers::StorageService,
-        >("storage_service", ctx.clone())
-        {
-            let es = store.entity_store();
-            let category = crate::symbio_core::providers::categories::MODEL;
-            if let Err(e) = es.delete_entity(category, &req.id).await {
-                crate::plugin_warn!("model", "删除 provider 目录失败: {e}");
-            }
-        }
-        Ok(PluginPayload::new(
-            &crate::symbio_core::resources::ResourceUploadResponse {
-                kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
-                id: req.id,
-                created: false,
-            },
-        ))
+        let _ = self.persist_to_parent(ctx).await;
+        Ok(())
     }
 
-    /// resources/status — 连接测试单个 Model Provider
-    ///
-    /// 复用 `validate_provider` 发起真实连接校验（对齐旧 `providers/test`），
-    /// 返回统一 `ResourceStatusResponse`；不修改任何注册表或配置。
-    pub async fn resources_model_status(
+    /// 删除后清理内存注册表与默认 provider 指向
+    async fn on_deleted(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
-        let req: crate::symbio_core::resources::ResourceStatusRequest = ctx.payload()?;
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<(), PluginError> {
+        let mut providers = self.providers.write().await;
+        providers.providers.remove(id);
+        if providers.default_provider_id.as_deref() == Some(id) {
+            providers.default_provider_id = None;
+        }
+        Ok(())
+    }
+
+    /// 连接测试（复用 validate_provider），失败映射 Ok(failed) 由 dispatch 统一推事件
+    async fn test_status(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {
         let provider = {
             let providers = self.providers.read().await;
-            providers.providers.get(&req.id).cloned()
+            providers.providers.get(id).cloned()
         }
-        .ok_or_else(|| PluginError::NotFound(format!("未找到 Model Provider: {}", req.id)))?;
+        .ok_or_else(|| PluginError::NotFound(format!("未找到 Model Provider: {id}")))?;
 
         let parent = self.get_parent().await;
-        let resp = match Self::validate_provider(&provider, &parent).await {
+        Ok(match Self::validate_provider(&provider, &parent).await {
             None => crate::symbio_core::resources::ResourceStatusResponse {
                 kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
-                id: req.id.clone(),
+                id: id.to_string(),
                 status: "connected".to_string(),
                 status_detail: Some(format!(
                     "校验通过（{} / {}）",
@@ -743,22 +704,11 @@ impl ModelPlugin {
             },
             Some(e) => crate::symbio_core::resources::ResourceStatusResponse {
                 kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
-                id: req.id.clone(),
+                id: id.to_string(),
                 status: "failed".to_string(),
                 status_detail: Some(e),
             },
-        };
-
-        // 通过 resource 事件总线把测试结果实时推送，供资源列表/详情即时刷新状态角标
-        crate::symbio_core::event_bus::EventBus::publish_resource_status(
-            crate::symbio_core::resources::RESOURCE_MODEL,
-            &req.id,
-            &resp.status,
-            resp.status_detail.clone(),
-        )
-        .await;
-
-        Ok(PluginPayload::new(&resp))
+        })
     }
 }
 
@@ -772,6 +722,14 @@ impl Plugin for ModelPlugin {
 
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
+
+        // 统一资源协议：resources/list / get / upload / delete / status
+        if let Some(resp) =
+            crate::symbio_core::resources::dispatch(self.as_ref(), path.as_str(), &ctx).await
+        {
+            return resp;
+        }
+
         match path.as_str() {
             CONFIG_GET => {
                 // 新存储策略：实际 provider 数据存放在
@@ -821,20 +779,6 @@ impl Plugin for ModelPlugin {
                     .map(|p| p.to_model_config())
                     .unwrap_or_default();
                 Ok(PluginPayload::new(&handlers::handle_status(&active)))
-            }
-
-            // ============== 统一资源协议 (resources/*，independent_form 启用于 model) ==============
-            crate::symbio_core::resources::RESOURCES_LIST => {
-                self.resources_model_list().await
-            }
-            crate::symbio_core::resources::RESOURCES_UPLOAD => {
-                self.resources_model_upload(&ctx).await
-            }
-            crate::symbio_core::resources::RESOURCES_DELETE => {
-                self.resources_model_delete(&ctx).await
-            }
-            crate::symbio_core::resources::RESOURCES_STATUS => {
-                self.resources_model_status(&ctx).await
             }
 
             _ => Err(PluginError::NotFound(format!("未知路径: {path}"))),
