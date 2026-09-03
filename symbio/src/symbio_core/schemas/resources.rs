@@ -160,6 +160,10 @@ pub fn capabilities_for(kind: &str) -> ResourceCapabilities {
 pub struct ResourceSummary {
     /// 资源类型标识（`model` / `mcp` / `agent` / `skill` / `session`）
     pub kind: String,
+    /// 提供方（插件）显示名，用于前端资源路径 `[provider]/[id].[kind]` 展示；
+    /// 由 dispatch 统一回填（默认与 kind 相同），插件无需关心
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     /// 显示名
     pub name: String,
     /// 唯一 id（即服务器端目录名）
@@ -188,6 +192,7 @@ impl ResourceSummary {
             kind: kind.to_string(),
             id: id.into(),
             name: name.into(),
+            provider: None,
             description: None,
             summary: None,
             updated_at: None,

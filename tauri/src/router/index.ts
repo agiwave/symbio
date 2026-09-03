@@ -12,10 +12,13 @@ const router = createRouter({
       component: MainLayout,
       children: [
         { path: '', name: 'session', component: SessionView },
-        { path: 'model-providers', name: 'model-providers', component: ResourceManagerView, props: { resourceType: 'model' } },
-        { path: 'mcp', name: 'mcp', component: ResourceManagerView, props: { resourceType: 'mcp' } },
-        { path: 'skill', name: 'skill', component: ResourceManagerView, props: { resourceType: 'skill' } },
-        { path: 'agent', name: 'agent', component: ResourceManagerView, props: { resourceType: 'agent' } },
+        // 统一资源浏览器：:types = 'all' | 逗号分隔 kind | 单 kind（缺省 all）
+        { path: 'resources/:types?', name: 'resources', component: ResourceManagerView, props: (route) => ({ typesParam: (route.params.types as string) || undefined }) },
+        // 旧专项路由 → redirect 保兼容（书签 / 深链）
+        { path: 'model-providers', redirect: () => '/resources/model' },
+        { path: 'mcp', redirect: () => '/resources/mcp' },
+        { path: 'skill', redirect: () => '/resources/skill' },
+        { path: 'agent', redirect: () => '/resources/agent' },
         { path: 'settings', name: 'settings', component: () => import('../components/SettingsPage.vue') }
       ]
     },

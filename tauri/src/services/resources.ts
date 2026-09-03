@@ -14,19 +14,11 @@ import {
   type ResourceType,
   type ResourceUploadResponse,
 } from '../schemas/resources'
+import { RESOURCE_TYPE_REGISTRY } from '@/registry/resourceTypes'
 import { logger } from '@/utils/logger'
 
-/** 各类型 → 后端插件统一路径前缀（前端传 `${prefix}/resources/<op>`） */
-const RESOURCE_PATHS: Record<ResourceType, string> = {
-  model: 'worker/model',
-  mcp: 'mcp',
-  skill: 'skill',
-  agent: 'agent',
-  session: 'worker/session',
-}
-
 function resourcesOp<T>(type: ResourceType, op: string, payload?: unknown): Promise<T> {
-  return callPlugin<T>(`${RESOURCE_PATHS[type]}/resources/${op}`, payload)
+  return callPlugin<T>(`${RESOURCE_TYPE_REGISTRY[type].prefix}/resources/${op}`, payload)
 }
 
 /** 兜底能力表 */

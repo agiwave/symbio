@@ -28,6 +28,10 @@
             <code class="provider-pill">{{ displayLabel || form.provider }}</code>
             <span class="dot">·</span>
             <span>{{ form.model || '未设置模型' }}</span>
+            <template v-if="isExisting && resourcePathLabel">
+              <span class="dot">·</span>
+              <code class="provider-pill path-pill" :title="`${resourcePathLabel}（点击复制）`" @click="copyPath">{{ resourcePathLabel }}</code>
+            </template>
           </p>
         </div>
       </div>
@@ -223,6 +227,10 @@ import { computed, reactive, ref, watch } from 'vue'
 import { providerPresets, providerLabels, protocolLabels } from '@/constants/modelProviders'
 import type { ModelProviderConfig } from '@/schemas/model_providers'
 import type { ResourceCapabilities, ResourceSummary } from '@/schemas/resources'
+import { resourcePath } from '@/registry/resourceTypes'
+import { useToast } from '@/composables/useToast'
+
+const toast = useToast()
 
 const props = withDefaults(
   defineProps<{
@@ -270,6 +278,23 @@ const showAdvanced = ref(false)
 const providerKeys = computed(() => Object.keys(providerPresets))
 const isExisting = computed(() => Boolean(props.item?.id))
 const isDefault = computed(() => Boolean(props.item && (props.item.is_default === true)))
+
+/** 资源路径唯一标识：[provider]/[id].[kind]（仅已存在项展示） */
+const resourcePathLabel = computed(() => {
+  const it = props.item
+  if (!it?.id) return ''
+  return resourcePath(it.provider || it.kind, it.id, it.kind)
+})
+
+async function copyPath() {
+  if (!resourcePathLabel.value) return
+  try {
+    await navigator.clipboard.writeText(resourcePathLabel.value)
+    toast.showToast('success', '已复制资源路径')
+  } catch {
+    toast.showToast('info', `路径：${resourcePathLabel.value}`)
+  }
+}
 
 const displayLabel = computed(() =>
   form.provider ? providerLabels[form.provider] || form.provider : ''
@@ -473,6 +498,15 @@ watch(
 }
 
 .dot { opacity: 0.5; }
+
+.path-pill {
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+.path-pill:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
 
 .badge {
   font-size: 0.65rem;

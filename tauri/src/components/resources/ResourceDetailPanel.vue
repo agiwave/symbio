@@ -22,6 +22,14 @@
       <code class="detail-code">{{ item.id }}</code>
     </div>
 
+    <div class="detail-section">
+      <label>资源路径</label>
+      <div class="path-row">
+        <code class="detail-code path-code">{{ resourcePathLabel }}</code>
+        <button class="copy-btn" title="复制路径" @click="copyPath">复制</button>
+      </div>
+    </div>
+
     <div v-if="item.updated_at" class="detail-section">
       <label>更新时间</label>
       <code class="detail-code">{{ formatTime(item.updated_at) }}</code>
@@ -42,8 +50,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ResourceSummary } from '@/schemas/resources'
+import { resourcePath } from '@/registry/resourceTypes'
+import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{ item: ResourceSummary | null }>()
+
+const toast = useToast()
 
 const STATUS_LABELS: Record<string, string> = {
   active: '可用',
@@ -60,8 +72,26 @@ const displayName = computed(() => props.item?.name || props.item?.id || '')
 const statusLabel = computed(() => STATUS_LABELS[props.item?.status || 'unknown'] || props.item?.status)
 
 const EXTRA_SKIP = new Set([
-  'kind', 'name', 'id', 'description', 'summary', 'updated_at', 'status', 'status_detail',
+  'kind', 'provider', 'name', 'id', 'description', 'summary', 'updated_at', 'status', 'status_detail',
 ])
+
+/** 资源路径唯一标识：[provider]/[id].[kind]（provider 缺省回退 kind） */
+const resourcePathLabel = computed(() => {
+  const it = props.item
+  if (!it) return ''
+  return resourcePath(it.provider || it.kind, it.id, it.kind)
+})
+
+async function copyPath() {
+  if (!resourcePathLabel.value) return
+  try {
+    await navigator.clipboard.writeText(resourcePathLabel.value)
+    toast.showToast('success', '已复制资源路径')
+  } catch {
+    // clipboard 不可用时展示路径文本供手抄
+    toast.showToast('info', `路径：${resourcePathLabel.value}`)
+  }
+}
 
 const extraEntries = computed<Array<[string, unknown]>>(() => {
   const it = props.item
@@ -151,6 +181,30 @@ function formatValue(v: unknown): string {
   word-break: break-all;
   color: var(--text-primary);
   white-space: pre-wrap;
+}
+.path-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+.path-row .path-code {
+  flex: 1;
+}
+.copy-btn {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all var(--motion-fast) var(--motion-ease);
+}
+.copy-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 .no-selection {
   flex: 1;

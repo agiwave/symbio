@@ -47,6 +47,12 @@ pub trait ResourceProvider: Send + Sync {
     /// 资源类型常量（RESOURCE_MODEL / RESOURCE_MCP / ...）
     fn kind(&self) -> &'static str;
 
+    /// 提供方（插件）显示名，用于前端资源路径 `[provider]/[id].[kind]` 展示。
+    /// 默认与 kind 相同；未来插件显示名与 kind 分叉时重写本方法即可。
+    fn provider_name(&self) -> &str {
+        self.kind()
+    }
+
     /// EntityStore 分类；None = 非实体目录存储（session 走 SessionStore）
     fn category(&self) -> Option<&'static str> {
         None
@@ -166,7 +172,8 @@ async fn dispatch_list<P: ResourceProvider + ?Sized>(
     provider: &P,
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
-    let items = provider.list_items(ctx).await?;
+    let mut items = provider.list_items(ctx).await?;
+    fill_provider(provider, &mut items);
     Ok(PluginPayload::new(&ResourcesListResponse {
         kind: provider.kind().to_string(),
         capabilities: capabilities_for(provider.kind()),
@@ -188,8 +195,18 @@ async fn dispatch_get<P: ResourceProvider + ?Sized>(
         .read_entity(category, &req.id, manifest)
         .await
         .map_err(|e| PluginError::NotFound(format!("未找到资源 {}（读取失败: {e}）", req.id)))?;
-    let item = provider.summarize(ctx, &req.id, Some(&content)).await;
+    let mut item = provider.summarize(ctx, &req.id, Some(&content)).await;
+    fill_provider(provider, std::slice::from_mut(&mut item));
     Ok(PluginPayload::new(&item))
+}
+
+/// 统一回填 provider 显示名（summary 未自带时填 `provider_name()`，插件零改动）
+fn fill_provider<P: ResourceProvider + ?Sized>(provider: &P, items: &mut [ResourceSummary]) {
+    for item in items.iter_mut() {
+        if item.provider.is_none() {
+            item.provider = Some(provider.provider_name().to_string());
+        }
+    }
 }
 
 async fn dispatch_upload<P: ResourceProvider + ?Sized>(
@@ -575,6 +592,8 @@ mod tests {
         assert_eq!(data.items.len(), 1);
         assert_eq!(data.items[0].id, "s1");
         assert_eq!(data.items[0].status, "working");
+        // dispatch 统一回填 provider（默认与 kind 相同）
+        assert_eq!(data.items[0].provider.as_deref(), Some("session"));
     }
 
     #[tokio::test]

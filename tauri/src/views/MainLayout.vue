@@ -24,10 +24,22 @@
 
         <button
           class="nav-btn"
+          :class="{ active: currentPage === 'resources' }"
+          aria-label="全部资源"
+          title="全部资源"
+          @click="goTo('/resources/all')"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          <span class="nav-label">全部资源</span>
+        </button>
+        <button
+          class="nav-btn"
           :class="{ active: currentPage === 'agent' }"
           aria-label="Agent"
           title="Agent"
-          @click="goTo('/agent')"
+          @click="goTo('/resources/agent')"
         >
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="8" r="4" />
@@ -40,7 +52,7 @@
           :class="{ active: currentPage === 'skill' }"
           aria-label="Skill"
           title="Skill"
-          @click="goTo('/skill')"
+          @click="goTo('/resources/skill')"
         >
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
@@ -52,7 +64,7 @@
           :class="{ active: currentPage === 'mcp' }"
           aria-label="MCP Server"
           title="MCP Server"
-          @click="goTo('/mcp')"
+          @click="goTo('/resources/mcp')"
         >
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -71,7 +83,7 @@
           :class="{ active: currentPage === 'model-providers' }"
           aria-label="Model Provider"
           title="Model Provider"
-          @click="goTo('/model-providers')"
+          @click="goTo('/resources/model')"
         >
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="4" y="6" width="16" height="12" rx="2" />
@@ -161,10 +173,20 @@ onMounted(async () => {
 })
 
 const currentPage = computed(() => {
-  if (route.path.startsWith('/model-providers')) return 'model-providers'
-  if (route.path.startsWith('/mcp')) return 'mcp'
-  if (route.path.startsWith('/skill')) return 'skill'
-  if (route.path.startsWith('/agent')) return 'agent'
+  if (route.path.startsWith('/resources')) {
+    // /resources/<types>：all / 逗号分隔 → 'resources'（总入口高亮）；
+    // 单类型 → 对应专项入口高亮
+    const types = (route.params.types as string) || 'all'
+    if (types === 'all' || types.includes(',')) return 'resources'
+    const map: Record<string, string> = {
+      model: 'model-providers',
+      mcp: 'mcp',
+      skill: 'skill',
+      agent: 'agent',
+      session: 'resources',
+    }
+    return map[types] ?? 'resources'
+  }
   if (route.path.startsWith('/settings')) return 'settings'
   return 'session'
 })

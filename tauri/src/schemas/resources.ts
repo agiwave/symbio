@@ -28,6 +28,8 @@ export interface ResourceCapabilities {
 /** 统一资源概要（列表项） */
 export interface ResourceSummary {
   kind: string
+  /** 提供方（插件）显示名，用于资源路径 [provider]/[id].[kind]；后端 dispatch 统一回填 */
+  provider?: string
   name: string
   id: string
   description?: string
