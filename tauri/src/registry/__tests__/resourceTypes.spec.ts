@@ -65,7 +65,13 @@ describe('getResourceEditorFor（项级"扩展名"分发）', () => {
 
 describe('registerResourceIcon / getResourceIcon', () => {
   it('未注册 icon 返回 undefined（走默认图标）', () => {
-    expect(getResourceIcon('mcp')).toBeUndefined()
+    expect(getResourceIcon('unknown-type')).toBeUndefined()
+  })
+
+  it('内置六大 kind 均注册了独立图标', () => {
+    for (const kind of ['model', 'mcp', 'agent', 'skill', 'session', 'setting']) {
+      expect(getResourceIcon(kind)).toBeTruthy()
+    }
   })
 
   it('可动态注册 icon', () => {
@@ -82,7 +88,7 @@ describe('getResourceIconFor（项级图标分发）', () => {
   })
 
   it('未注册图标的类型返回 undefined', () => {
-    expect(getResourceIconFor({ kind: 'model' })).toBeUndefined()
+    expect(getResourceIconFor({ kind: 'unknown-type' })).toBeUndefined()
   })
 })
 

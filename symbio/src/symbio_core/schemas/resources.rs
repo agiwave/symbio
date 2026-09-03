@@ -37,10 +37,10 @@ pub const RESOURCE_SESSION: &str = "session";
 /// Setting（设置分区）
 pub const RESOURCE_SETTING: &str = "setting";
 
-/// 主导航归属：资源类型（model/mcp/agent/skill 等）
-pub const NAV_RESOURCES: &str = "resources";
-/// 主导航归属：设置（setting 分区页）
-pub const NAV_SETTINGS: &str = "settings";
+/// serde 默认：布尔开关缺省为 true（如 `status_indicator`）
+pub(crate) fn default_true() -> bool {
+    true
+}
 
 /// 与 [`crate::symbio_core::providers::storage::categories`] 一一对应的资源类型
 pub const ALL_RESOURCE_TYPES: [&str; 5] = [
@@ -193,11 +193,10 @@ pub struct ProviderInfo {
     /// 列表简洁模式：仅显示类型图标 + 标题（如设置分区，无描述/路径标签）
     #[serde(default)]
     pub compact_list: bool,
-    /// 左侧主导航归属分组：`resources`（资源）/ `settings`（设置）；
-    /// 空串表示不进入主导航（如 session 走独有"会话"主入口）。
-    /// 导航项彻底由注册表驱动，前端不再写死"设置"按钮。
-    #[serde(default)]
-    pub nav: String,
+    /// 列表项是否显示运行状态图示（状态点）。无状态的列表（如设置分区）为 false，
+    /// 前端据此隐藏状态徽标——列表展示形态由后端统一掌控。
+    #[serde(default = "default_true")]
+    pub status_indicator: bool,
 }
 
 /// `resources/providers` 响应

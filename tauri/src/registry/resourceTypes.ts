@@ -160,6 +160,38 @@ registerResourceIcon(
   )
 )
 
+// ============ 主导航 kind 级图标（6 类并排时各自独立，不再共用默认文件图标） ============
+registerResourceIcon(
+  'session',
+  svgIcon(
+    '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
+  )
+)
+registerResourceIcon(
+  'model',
+  svgIcon(
+    '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'
+  )
+)
+registerResourceIcon(
+  'mcp',
+  svgIcon(
+    '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>'
+  )
+)
+registerResourceIcon(
+  'agent',
+  svgIcon(
+    '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'
+  )
+)
+registerResourceIcon(
+  'skill',
+  svgIcon(
+    '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'
+  )
+)
+
 /** 构造资源路径唯一标识：`[provider]/[id].[kind]`（如 `model/openai.model`） */
 export function resourcePath(provider: string, id: string, kind: string): string {
   return `${provider}/${id}.${kind}`

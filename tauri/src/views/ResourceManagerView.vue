@@ -60,6 +60,7 @@
           :status="cardStatus(item)"
           :status-title="item.status_detail || item.status"
           :icon="getResourceIconFor(item)"
+          :show-status="showStatusFor(item)"
           :is-active="selectedId === `${item.kind}:${item.id}`"
           @click="select(`${item.kind}:${item.id}`)"
         >
@@ -491,6 +492,11 @@ function cardStatus(item: ResourceSummary): 'active' | 'disabled' | 'warning' | 
     case 'connected': return 'active'
     default: return 'muted'
   }
+}
+
+/** 该列表项所属类型是否显示状态点（后端 ProviderInfo.status_indicator；缺省 true） */
+function showStatusFor(item: ResourceSummary): boolean {
+  return activeTypes.value.find((p) => p.kind === item.kind)?.status_indicator ?? true
 }
 
 onMounted(() => {

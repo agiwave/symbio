@@ -7,42 +7,16 @@
       </div>
 
       <div class="nav-items">
+        <!-- 主导航：全部 provider 按后端注册表 order 顺序并排渲染，不分成"资源/会话/设置"多段。
+             会话→/、设置→/settings，其余→/resources/{kind}。路由目标由 kind 决定，UI 无特殊位置。 -->
         <button
-          class="nav-btn"
-          :class="{ active: currentPage === 'session' }"
-          aria-label="会话"
-          title="会话"
-          @click="goTo('/')"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-          <span class="nav-label">会话</span>
-        </button>
-
-        <div class="nav-group-title">资源</div>
-
-        <button
-          class="nav-btn"
-          :class="{ active: isAllResourcesActive }"
-          aria-label="全部资源"
-          title="全部资源"
-          @click="goTo('/resources/all')"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          </svg>
-          <span class="nav-label">全部资源</span>
-        </button>
-        <!-- 资源导航项由后端 resources/providers 注册表（nav='resources'）动态生成 -->
-        <button
-          v-for="p in resourceNav"
+          v-for="p in providers"
           :key="p.kind"
           class="nav-btn"
-          :class="{ active: isProviderNavActive(p.kind) }"
+          :class="{ active: isNavActive(p.kind) }"
           :aria-label="p.label"
           :title="p.label"
-          @click="goTo(`/resources/${p.kind}`)"
+          @click="goTo(navTarget(p.kind))"
         >
           <component :is="navIconFor(p.kind)" v-if="navIconFor(p.kind)" />
           <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -53,25 +27,8 @@
         </button>
       </div>
 
-      <!-- 底部：设置入口（ProviderInfo.nav='settings' 动态生成，不再硬编码）
-            + 系统目录切换（Homedir Switcher） -->
+      <!-- 底部：系统目录切换（Homedir Switcher，系统工具非资源，独立于资源导航） -->
       <div class="nav-footer">
-        <button
-          v-for="p in settingsNav"
-          :key="p.kind"
-          class="nav-btn"
-          :class="{ active: currentPage === 'settings' }"
-          :aria-label="p.label"
-          :title="p.label"
-          @click="goTo('/settings')"
-        >
-          <component :is="navIconFor(p.kind)" v-if="navIconFor(p.kind)" />
-          <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="" />
-          </svg>
-          <span class="nav-label">{{ p.label }}</span>
-        </button>
         <button
           class="nav-btn"
           :title="homedirTitle"
@@ -121,23 +78,24 @@ const router = useRouter()
 const openHomedirSwitcher = ref(false)
 const currentHomedir = ref<HomedirInfo>({ homedir: '', bootstrap_path: '' })
 
-/** 左侧导航项：全部按 ProviderInfo.nav 分组——资源区（nav='resources'）与设置区
- * （nav='settings'）均由注册表动态生成，前端不再写死"设置"入口 */
-const { resourceNav, settingsNav } = useResourceProviders()
+/** 主导航项：全部已注册 provider（后端 order 顺序），不含任何特殊分组。 */
+const { providers } = useResourceProviders()
 
-/** 当前单类型资源路径 */
-const resTypes = computed(() => (route.params.types as string) || 'all')
-/** "全部资源"高亮：all 或逗号分隔（多类型混合） */
-const isAllResourcesActive = computed(
-  () => resTypes.value === 'all' || resTypes.value.includes(',')
-)
-/** 单类型资源导航项高亮：路由命中该 kind */
-function isProviderNavActive(kind: string): boolean {
-  return (
-    route.path === `/resources/${kind}` ||
-    route.path.startsWith(`/resources/${kind},`) ||
-    resTypes.value === kind
-  )
+/** 单 kind 的导航路由目标：会话/设置走其专用入口，其余进统一资源页 */
+function navTarget(kind: string): string {
+  switch (kind) {
+    case 'session':
+      return '/'
+    case 'setting':
+      return '/settings'
+    default:
+      return `/resources/${kind}`
+  }
+}
+
+/** 单 kind 导航项高亮 */
+function isNavActive(kind: string): boolean {
+  return route.path === navTarget(kind)
 }
 
 /** 类型图标：前端 icon 注册表（未注册回 null，走默认图标） */
@@ -163,12 +121,6 @@ onMounted(async () => {
   } catch (err) {
     logger.warn('MainLayout', '加载 homedir 显示失败:', err)
   }
-})
-
-const currentPage = computed(() => {
-  if (route.path.startsWith('/resources')) return 'resources'
-  if (route.path.startsWith('/settings')) return 'settings'
-  return 'session'
 })
 
 const homedirTitle = computed(() => {
@@ -255,20 +207,6 @@ async function onHomedirReloaded() {
   flex: 1;
   padding: 0.5rem 0.375rem;
   overflow-y: auto;
-}
-
-/* 窄条模式下分组标题放不下文字，退化为一条 hairline 分隔线。
-   align-self: stretch 保证在 align-items:center 的纵列里仍能横跨取到宽度。 */
-.nav-group-title {
-  height: 1px;
-  margin: 0.5rem 0.75rem;
-  padding: 0;
-  background: var(--border-default);
-  font-size: 0;
-  line-height: 0;
-  overflow: hidden;
-  flex-shrink: 0;
-  align-self: stretch;
 }
 
 .nav-footer {

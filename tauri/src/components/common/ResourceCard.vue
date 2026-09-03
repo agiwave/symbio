@@ -21,9 +21,9 @@
     @keydown.enter="$emit('click')"
     @keydown.space.prevent="$emit('click')"
   >
-    <!-- 状态条 + 类型图标 + 标题 -->
+    <!-- 状态条 + 类型图标 + 标题（状态点可由后端控制隐藏） -->
     <div class="card-header">
-      <div class="status-area">
+      <div v-if="showStatus" class="status-area">
         <span :class="['status-dot', statusClass]" :title="statusTitle" />
       </div>
       <component v-if="icon" :is="icon" class="card-icon" />
@@ -68,6 +68,8 @@ interface ResourceCardProps {
   tags?: Tag[]
   /** 类型图标组件（资源注册表下发，如设置分区图标） */
   icon?: Component
+  /** 是否显示状态点（后端 status_indicator 控制；无状态列表为 false） */
+  showStatus?: boolean
 }
 
 const props = withDefaults(defineProps<ResourceCardProps>(), {
@@ -77,6 +79,7 @@ const props = withDefaults(defineProps<ResourceCardProps>(), {
   isActive: false,
   disabled: false,
   tags: () => [],
+  showStatus: true,
 })
 
 defineEmits<{
