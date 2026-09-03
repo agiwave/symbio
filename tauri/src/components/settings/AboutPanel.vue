@@ -21,6 +21,9 @@
 import SettingsFormShell from './SettingsFormShell.vue'
 import logoUrl from '../../assets/logo.svg'
 
+// 统一资源页会透传编辑器级 props，本面板只读不消费，禁止落根 DOM。
+defineOptions({ inheritAttrs: false })
+
 defineProps<{
   /** 当前设置分区资源项（统一资源协议注入） */
   item?: { id: string; name?: string } | null

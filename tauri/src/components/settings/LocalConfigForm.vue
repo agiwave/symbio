@@ -50,6 +50,10 @@ import { getLocalConfig, setLocalConfig, type LocalConfig } from '@/services/con
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
 
+// 统一资源页会透传 capabilities/saving/testing/deleting 等编辑器级 props，
+// 本表单不消费它们，禁止落根 DOM（清 fallthrough 污染）。
+defineOptions({ inheritAttrs: false })
+
 defineProps<{
   /** 当前设置分区资源项（统一资源协议注入） */
   item?: { id: string; name?: string } | null
