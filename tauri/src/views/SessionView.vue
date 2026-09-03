@@ -9,6 +9,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useSessionsStore } from '@/stores/sessions'
+import { getWorkspacePath } from '@/services/home'
 import SessionListPanel from '@/components/session/SessionListPanel.vue'
 import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
 import SessionExplorerPanel from '@/components/session/SessionExplorerPanel.vue'
@@ -16,14 +17,26 @@ import SessionExplorerPanel from '@/components/session/SessionExplorerPanel.vue'
 const store = useSessionsStore()
 
 onMounted(async () => {
+  // 1. 先从后端恢复全局工作目录（用户上次选过的工作区）。
+  //    前端 getGlobalWorkdir 是内存值，这里把它从后端 `work/get_workspace` 灌回，
+  //    使无 workdir 的旧会话能自动回填、不阻塞在选择工作目录引导。
+  try {
+    await getWorkspacePath()
+  } catch (e) {
+    console.warn('[SessionView] 恢复全局工作区失败', e)
+  }
+
+  // 2. 加载会话列表
   await store.refreshList()
-  // 如果没有会话，自动创建一个
+
   if (store.list.length === 0) {
+    // 加载失败（error 非空）：不要误建空会话，否则会用无目录空会话反复触发选目录引导；
+    // 停在"未选择会话"，由用户手动刷新。
+    if (store.error) return
     await store.createSession()
   } else if (!store.activeId) {
     store.selectSession(store.list[0].id)
   } else {
-    // 恢复 active 会话时，触发 watcher 加载 explorer
     store.selectSession(store.activeId)
   }
 })

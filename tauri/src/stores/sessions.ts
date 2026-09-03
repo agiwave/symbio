@@ -417,7 +417,9 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function createSession(workdir?: string): Promise<string> {
     const id = createSessionId()
     const now = Math.floor(Date.now() / 1000)
-    const resolvedWorkdir = workdir ?? lastUsedWorkdir.value ?? undefined
+    // 兜底顺序：显式传入 > 全局工作区 > 最近使用目录；任一可用就带上，
+    // 避免新建一个无目录会话而卡在选择工作目录引导。
+    const resolvedWorkdir = workdir ?? getGlobalWorkdir() ?? lastUsedWorkdir.value ?? undefined
 
     // 1. 立即在本地插入"未持久化"条目
     const local: SessionListItem = {
