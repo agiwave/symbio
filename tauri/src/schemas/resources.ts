@@ -94,9 +94,10 @@ export interface ResourceStatusResponse {
 
 /** 各类型标签（前端兜底展示用；后端 ProviderInfo.label 为权威，未下发时用此表） */
 export const RESOURCE_LABELS: Record<string, string> = {
-  model: 'Model',
+  session: '会话',
+  model: '模型',
+  agent: '智能体',
+  skill: '技能',
   mcp: 'MCP',
-  skill: 'Skill',
-  agent: 'Agent',
-  session: 'Session',
+  setting: '设置',
 }

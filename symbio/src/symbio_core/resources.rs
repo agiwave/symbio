@@ -174,26 +174,29 @@ pub struct ResourceProviderInfo {
 }
 
 /// 全部已注册资源 provider（编译期收起当前六类，顺序即展示顺序）
+/// 默认顺序：会话 / 模型 / 智能体 / 技能 / MCP / 设置。
+/// 可通过配置 `symbio.provider_order` 覆盖（见 [`providers_response_with_overrides`]）。
 pub fn provider_registry() -> &'static [ResourceProviderInfo] {
     const REG: &[ResourceProviderInfo] = &[
+        ResourceProviderInfo {
+            kind: RESOURCE_SESSION,
+            provider_name: RESOURCE_SESSION,
+            prefix: "worker/session",
+            capabilities: &ResourceCapabilities::SESSION,
+            order: 1,
+            label: "会话",
+            // session 走 SessionStore，upload/delete 未实现
+            supports_upload: false,
+            compact_list: false,
+            status_indicator: true,
+        },
         ResourceProviderInfo {
             kind: RESOURCE_MODEL,
             provider_name: RESOURCE_MODEL,
             prefix: "worker/model",
             capabilities: &ResourceCapabilities::MODEL,
-            order: 1,
-            label: "Model Provider",
-            supports_upload: true,
-            compact_list: false,
-            status_indicator: true,
-        },
-        ResourceProviderInfo {
-            kind: RESOURCE_MCP,
-            provider_name: RESOURCE_MCP,
-            prefix: "mcp",
-            capabilities: &ResourceCapabilities::MCP,
             order: 2,
-            label: "MCP Server",
+            label: "模型",
             supports_upload: true,
             compact_list: false,
             status_indicator: true,
@@ -204,7 +207,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             prefix: "agent",
             capabilities: &ResourceCapabilities::AGENT,
             order: 3,
-            label: "Agent",
+            label: "智能体",
             supports_upload: true,
             compact_list: false,
             status_indicator: true,
@@ -215,20 +218,19 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             prefix: "skill",
             capabilities: &ResourceCapabilities::SKILL,
             order: 4,
-            label: "Skill",
+            label: "技能",
             supports_upload: true,
             compact_list: false,
             status_indicator: true,
         },
         ResourceProviderInfo {
-            kind: RESOURCE_SESSION,
-            provider_name: RESOURCE_SESSION,
-            prefix: "worker/session",
-            capabilities: &ResourceCapabilities::SESSION,
+            kind: RESOURCE_MCP,
+            provider_name: RESOURCE_MCP,
+            prefix: "mcp",
+            capabilities: &ResourceCapabilities::MCP,
             order: 5,
-            label: "Session",
-            // session 走 SessionStore，upload/delete 未实现
-            supports_upload: false,
+            label: "MCP",
+            supports_upload: true,
             compact_list: false,
             status_indicator: true,
         },
@@ -642,11 +644,11 @@ mod tests {
     #[test]
     fn providers_response_default_order_without_override() {
         let resp = providers_response();
-        // 无覆盖时严格等于注册表顺序（order 1..=6）
+        // 无覆盖时严格等于注册表顺序：会话/模型/智能体/技能/MCP/设置
         let kinds: Vec<&str> = resp.providers.iter().map(|p| p.kind.as_str()).collect();
         assert_eq!(kinds, vec![
-            RESOURCE_MODEL, RESOURCE_MCP, RESOURCE_AGENT, RESOURCE_SKILL,
-            RESOURCE_SESSION, RESOURCE_SETTING,
+            RESOURCE_SESSION, RESOURCE_MODEL, RESOURCE_AGENT, RESOURCE_SKILL,
+            RESOURCE_MCP, RESOURCE_SETTING,
         ]);
     }
 
