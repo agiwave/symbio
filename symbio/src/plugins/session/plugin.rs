@@ -236,12 +236,6 @@ impl SessionPlugin {
                     "description": "每次发送给 MODEL 的历史消息数量限制 (0 表示不限制)",
                     "default": 6
                 },
-                "default_agent_id": {
-                    "type": "string",
-                    "title": "默认 Agent ID",
-                    "description": "默认使用的认知人格 ID",
-                    "default": "default_assistant"
-                },
                 "max_tool_rounds": {
                     "type": "integer",
                     "title": "最大工具轮数",

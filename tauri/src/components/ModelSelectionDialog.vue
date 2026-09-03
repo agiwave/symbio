@@ -92,7 +92,6 @@ import { useChatScroll } from '@/composables/useChatScroll'
 import { useChatConnection } from '@/composables/useChatConnection'
 import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
-import { getSessionConfig } from '@/services/config'
 import { listModelProviders } from '@/services/modelProviders'
 import MessageNode from './MessageNode.vue'
 
@@ -104,7 +103,9 @@ const props = defineProps<{
 }>()
 
 // --- 状态管理 ---
-const agentId = ref<string>('default_assistant')
+// agentId：当前选定的智能体；null = 不选（纯工具模式）。不设默认人格——
+// 仅当会话 metadata 显式记录了 agent_id 时才沿用上次选择。
+const agentId = ref<string | null>(null)
 const providerId = ref<string>('')
 const sessionsStore = useSessionsStore()
 
@@ -249,24 +250,18 @@ watch(() => props.state.visible.value, async (visible, wasVisible) => {
     if (!wasVisible) {
       initialLoadDone.value = false
       
-      // Load agentId and providerId from session config or session metadata（来自 session/list 缓存）
+      // Load agentId and providerId from session metadata（来自 session/list 缓存）
       try {
-        let loadedAgent = false
         let loadedProvider = false
         const md = sessionsStore.list.find(s => s.id === props.state.sessionId)?.metadata
         if (md?.agent_id) {
           agentId.value = md.agent_id
-          loadedAgent = true
         }
         if (md?.provider_id) {
           providerId.value = md.provider_id
           loadedProvider = true
         }
 
-        const config = await getSessionConfig()
-        if (!loadedAgent && config.default_agent_id) {
-          agentId.value = config.default_agent_id
-        }
         if (!loadedProvider) {
           try {
             const cfg = await listModelProviders()

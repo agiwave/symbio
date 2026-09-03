@@ -288,7 +288,6 @@ const sessionConfig = reactive<SessionConfig>({
   auto_compress: true,
   compress_threshold: 50,
   context_messages: 6,
-  default_agent_id: 'default_assistant',
 })
 
 // 本地工具设置

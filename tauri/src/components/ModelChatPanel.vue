@@ -100,7 +100,6 @@ import { useChatScroll } from '@/composables/useChatScroll'
 import { type ChatMessage, type MessageContent, type ContentPart, type ChatRole } from '@/services/model'
 import type { ImageAttachment } from '@/types'
 import { callPlugin } from '@/services/plugin'
-import { getSessionConfig } from '@/services/config'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { listModelProviders } from '@/services/modelProviders'
@@ -303,12 +302,10 @@ onMounted(async () => {
 
   // 2. session metadata（来自 session/list 缓存）
   const sessionMeta = sessionsStore.list.find(s => s.id === props.sessionId)?.metadata
-  let loadedAgent = false
   let loadedProvider = false
   if (sessionMeta) {
     if (sessionMeta.agent_id) {
       agentId.value = sessionMeta.agent_id
-      loadedAgent = true
     }
     if (sessionMeta.provider_id) {
       modelProviderId.value = sessionMeta.provider_id
@@ -316,8 +313,7 @@ onMounted(async () => {
     }
   }
   // mount 阶段从 metadata 加载完成，放开 watcher 守卫——
-  // 后续默认值设置（default_provider_id / default_agent_id / 自动选择第一个 agent）
-  // 触发的 watcher 会正确持久化到 session.metadata。
+  // 后续默认值设置（default_provider_id）触发的 watcher 会正确持久化到 session.metadata。
   loadedFromMeta.value = true
 
   // 3. model providers
@@ -331,18 +327,9 @@ onMounted(async () => {
     showInitError('加载模型提供商失败', results[1].reason)
   }
 
-  // 4. session config（默认智能体：default_agent_id）
-  try {
-    const config = await getSessionConfig()
-    if (!loadedAgent && config.default_agent_id) {
-      agentId.value = config.default_agent_id
-    }
-  } catch (err) {
-    logger.warn('ModelChatPanel', 'Failed to load session config', err)
-  }
-
-  // 5. 校验当前选中的智能体是否仍有效；失效则置空（回到"不使用 Agent"纯工具模式）。
-  // 不再强制自动选择第一个智能体——会话可以不选 agent 照常运行（重构核心）。
+  // 4. 校验当前选中的智能体是否仍有效；失效则置空（回到"不使用 Agent"纯工具模式）。
+  // 不再强制默认选择智能体——会话默认不绑定 agent，若不选则纯工具模式照常运行；
+  // 只有会话 metadata 显式记录了 agent_id 时才会携带（重启/重进会话后沿用上次选择）。
   if (agentId.value && !availableAgents.value.some(a => a.id === agentId.value)) {
     agentId.value = null
   }

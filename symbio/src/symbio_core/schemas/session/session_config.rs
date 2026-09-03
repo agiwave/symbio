@@ -34,9 +34,6 @@ pub struct SessionConfig {
     /// 上下文会话轮数限制（0 表示不限制，每一轮以一个 User 消息开始）
     #[serde(default = "default_context_messages")]
     pub context_messages: usize,
-    /// 默认 Agent ID
-    #[serde(default = "default_agent_id")]
-    pub default_agent_id: String,
     /// 会话ID（用于标识具体会话的配置）
     #[serde(default)]
     pub session_id: Option<String>,
@@ -66,9 +63,6 @@ fn default_compress_threshold() -> usize {
 fn default_context_messages() -> usize {
     6
 }
-fn default_agent_id() -> String {
-    "default_assistant".to_string()
-}
 fn default_max_tool_rounds() -> usize {
     65535
 }
@@ -86,7 +80,6 @@ impl Default for SessionConfig {
             auto_compress: default_auto_compress(),
             compress_threshold: default_compress_threshold(),
             context_messages: default_context_messages(),
-            default_agent_id: default_agent_id(),
             session_id: None,
             store_kind: StoreKind::default(),
             max_tool_rounds: default_max_tool_rounds(),

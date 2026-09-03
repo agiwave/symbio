@@ -47,7 +47,8 @@ session:
   # 存储目录：固定为 <homedir>/plugins/session/，从 HomedirRegistry 派生，
   # 跟随系统目录 (homedir) 切换，不再作为配置项。
   store_kind: file                         # 存储后端类型: file (文件目录) 或 sqlite (SQLite 数据库)
-  default_agent_id: default_assistant      # 会话创建时的默认智能体人格 ID
+  # 注：会话默认不绑定智能体（纯工具模式）。智能体选择属于前端会话级偏好，
+  # 由 session.metadata.agent_id 按会话记录，后端不提供 default_agent。
   
   # 1. 存储级策略
   max_messages: 500              # 单会话本地保存的最大对话轮数限制 (以 User 消息计数)

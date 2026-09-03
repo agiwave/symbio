@@ -11,8 +11,6 @@ export interface SessionConfig {
   compress_threshold: number;
   /** 上下文消息数量限制（0 表示不限制） */
   context_messages: number;
-  /** 默认认知人格 ID */
-  default_agent_id: string;
   /** 会话ID（用于标识具体会话的配置） */
   session_id?: string;
 }
