@@ -16,6 +16,7 @@ use crate::symbio_core::{
 };
 use async_trait::async_trait;
 use base64::Engine;
+use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
 
@@ -250,23 +251,36 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
 }
 
 /// 将静态注册表转换为可序列化的 [`ProvidersResponse`]
+///
+/// 默认顺序直接来自注册表（`order` 字段），不应用任何覆盖。
 pub fn providers_response() -> ProvidersResponse {
-    ProvidersResponse {
-        providers: provider_registry()
-            .iter()
-            .map(|p| ProviderInfo {
-                kind: p.kind.to_string(),
-                provider_name: p.provider_name.to_string(),
-                prefix: p.prefix.to_string(),
-                capabilities: *p.capabilities,
-                order: p.order,
-                label: p.label.to_string(),
-                supports_upload: p.supports_upload,
-                compact_list: p.compact_list,
-                status_indicator: p.status_indicator,
-            })
-            .collect(),
-    }
+    providers_response_with_overrides(&HashMap::new())
+}
+
+/// 应用**服务器端顺序覆盖**后的 provider 响应。
+///
+/// `order_override` 为 `kind → order` 映射（如来自用户可配置的
+/// `symbio.provider_order`）；命中覆盖的 kind 以其覆盖值为准，
+/// 未命中的用注册表默认 `order`。据此重排数组并重写各 provider 的
+/// `order` 字段，前端无需改动（本就按下发的 order 排序）。
+pub fn providers_response_with_overrides(order_override: &HashMap<String, i32>) -> ProvidersResponse {
+    let mut providers: Vec<ProviderInfo> = provider_registry()
+        .iter()
+        .map(|p| ProviderInfo {
+            kind: p.kind.to_string(),
+            provider_name: p.provider_name.to_string(),
+            prefix: p.prefix.to_string(),
+            capabilities: *p.capabilities,
+            order: order_override.get(p.kind).copied().unwrap_or(p.order),
+            label: p.label.to_string(),
+            supports_upload: p.supports_upload,
+            compact_list: p.compact_list,
+            status_indicator: p.status_indicator,
+        })
+        .collect();
+
+    providers.sort_by_key(|p| p.order);
+    ProvidersResponse { providers }
 }
 
 // ==================== 统一分发 ====================
@@ -597,6 +611,43 @@ mod tests {
         }
         w.finish().unwrap();
         buf.into_inner()
+    }
+
+    #[test]
+    fn providers_response_applies_order_override() {
+        use std::collections::HashMap;
+
+        let mut overrides = HashMap::new();
+        // 把 setting 提到最前、model 压到最后
+        overrides.insert(RESOURCE_SETTING.to_string(), -10);
+        overrides.insert(RESOURCE_MODEL.to_string(), 100);
+
+        let resp = providers_response_with_overrides(&overrides);
+        let kinds: Vec<&str> = resp.providers.iter().map(|p| p.kind.as_str()).collect();
+
+        // 覆盖后的顺序：setting 最前、model 最后，其余保持注册表相对序
+        assert_eq!(kinds.first(), Some(&RESOURCE_SETTING));
+        assert_eq!(kinds.last(), Some(&RESOURCE_MODEL));
+        assert!(
+            resp.providers
+                .windows(2)
+                .all(|w| w[0].order <= w[1].order),
+            "order 应单调不减"
+        );
+        // 覆盖值确实写回各 provider 的 order
+        let setting = resp.providers.iter().find(|p| p.kind == RESOURCE_SETTING).unwrap();
+        assert_eq!(setting.order, -10);
+    }
+
+    #[test]
+    fn providers_response_default_order_without_override() {
+        let resp = providers_response();
+        // 无覆盖时严格等于注册表顺序（order 1..=6）
+        let kinds: Vec<&str> = resp.providers.iter().map(|p| p.kind.as_str()).collect();
+        assert_eq!(kinds, vec![
+            RESOURCE_MODEL, RESOURCE_MCP, RESOURCE_AGENT, RESOURCE_SKILL,
+            RESOURCE_SESSION, RESOURCE_SETTING,
+        ]);
     }
 
     #[test]
