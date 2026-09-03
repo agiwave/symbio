@@ -122,7 +122,7 @@ function emitNew() {
   width: 100%;
   height: 100%;
   min-height: 0;
-  background: var(--color-bg);
+  background: var(--surface-page);
   position: relative;
 }
 
@@ -133,8 +133,8 @@ function emitNew() {
   max-width: 22.5rem;
   display: flex;
   flex-direction: column;
-  background: var(--color-bg);
-  border-right: 1px solid var(--color-border);
+  background: var(--surface-panel);
+  border-right: 1px solid var(--border-default);
   overflow: hidden;
 }
 
@@ -143,14 +143,14 @@ function emitNew() {
   align-items: center;
   justify-content: space-between;
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border-default);
   flex-shrink: 0;
 }
 
 .panel-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
   margin: 0;
 }
 
@@ -169,13 +169,13 @@ function emitNew() {
   background: transparent;
   border-radius: 0.375rem;
   cursor: pointer;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
   transition: all 0.15s;
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.06);
-  color: var(--color-text);
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .icon-btn:disabled {
@@ -188,10 +188,10 @@ function emitNew() {
   align-items: center;
   gap: 0.4rem;
   font-size: 0.7rem;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid var(--color-border);
-  background: rgba(102, 126, 234, 0.04);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--accent-subtle-bg);
   flex-shrink: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -202,7 +202,7 @@ function emitNew() {
   display: inline-block;
   width: 0.4375rem;
   height: 0.4375rem;
-  background: #22c55e;
+  background: var(--success-solid);
   border-radius: 50%;
   animation: pulse 1.4s ease-in-out infinite;
   flex-shrink: 0;
@@ -219,7 +219,7 @@ function emitNew() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   font-size: 0.85rem;
   gap: 0.3rem;
   padding: 1rem;
@@ -236,7 +236,7 @@ function emitNew() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   font-size: 0.8rem;
 }
 
@@ -247,6 +247,6 @@ function emitNew() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--color-bg);
+  background: var(--surface-panel);
 }
 </style>

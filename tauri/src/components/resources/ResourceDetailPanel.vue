@@ -1,9 +1,9 @@
 <!--
-  ResourceDetailPanel — 统一资源详情（通用展示）
+  ResourceDetailPanel — 统一资源详情（通用展示兜底）
 
   展示 ResourceSummary 的公共字段 + extra 扩展字段。
-  作为泛型 ResourceManagerView 的默认详情实现；对需要复杂表单/编辑的类型，
-  泛型视图会优先渲染注册的专属 detail 组件，此处仅作通用回退。
+  作为 ResourceManagerView 的通用详情兜底；专属表单类型（如 model）
+  由视图的 FORM_COMPONENTS 注册表接管，不经过本面板。
 -->
 <template>
   <div v-if="item" class="resource-detail">
@@ -47,9 +47,11 @@ const props = defineProps<{ item: ResourceSummary | null }>()
 
 const STATUS_LABELS: Record<string, string> = {
   active: '可用',
+  connected: '已连接',
   disabled: '已停用',
   working: '工作中',
   error: '异常',
+  failed: '异常',
   unknown: '未知',
 }
 
@@ -101,50 +103,53 @@ function formatValue(v: unknown): string {
   align-items: center;
   gap: 0.75rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  border-bottom: 1px solid var(--border-default);
 }
 .detail-title {
-  font-size: 1.25rem;
-  font-weight: 600;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
   margin: 0;
-  color: var(--color-text, #1f2937);
+  color: var(--text-primary);
 }
 .detail-status {
   font-size: 0.7rem;
   padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  background: var(--color-bg-subtle, #f3f4f6);
-  color: var(--color-text-muted, #6b7280);
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
 }
-.detail-status.status-active { color: #16a34a; }
-.detail-status.status-disabled { color: #6b7280; }
-.detail-status.status-working { color: #2563eb; }
-.detail-status.status-error { color: #dc2626; }
+.detail-status.status-active,
+.detail-status.status-connected { color: var(--success-fg); }
+.detail-status.status-disabled { color: var(--text-muted); }
+.detail-status.status-working { color: var(--info-fg); }
+.detail-status.status-error,
+.detail-status.status-failed { color: var(--danger-fg); }
 .detail-description {
   font-size: 0.95rem;
-  color: var(--color-text, #1f2937);
+  color: var(--text-primary);
   margin: 0;
-  line-height: 1.5;
+  line-height: var(--line-height-normal);
   white-space: pre-wrap;
 }
-.detail-description.muted { color: var(--color-text-muted, #6b7280); }
+.detail-description.muted { color: var(--text-muted); }
 .detail-section { display: flex; flex-direction: column; gap: 0.4rem; }
 .detail-section label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--color-text-muted, #6b7280);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 .detail-code {
   display: block;
   padding: 0.5rem 0.75rem;
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 0.375rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
   font-size: 0.8rem;
-  font-family: 'Menlo', 'Monaco', monospace;
+  font-family: var(--font-mono);
   word-break: break-all;
-  color: var(--color-text, #1f2937);
+  color: var(--text-primary);
   white-space: pre-wrap;
 }
 .no-selection {
@@ -152,7 +157,7 @@ function formatValue(v: unknown): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-muted, #6b7280);
+  color: var(--text-muted);
   font-size: 0.9rem;
 }
 </style>

@@ -201,37 +201,46 @@ impl ModelPlugin {
 
         // 3. 加载新存储的内容
         let mut new_providers = std::collections::HashMap::new();
+        let mut marked_default: Option<String> = None;
         for id in &ids {
             match es.read_entity(category, id, manifest).await {
-                Ok(content) => match serde_json::from_str::<ModelProviderConfig>(&content) {
-                    Ok(mut p) => {
-                        if p.id.is_empty() {
-                            p.id = id.clone();
+                Ok(content) => {
+                    // 先解析为 Value 提取 is_default 标记，再解析为强类型配置
+                    let parsed = serde_json::from_str::<serde_json::Value>(&content)
+                        .and_then(|v| {
+                            serde_json::from_value::<ModelProviderConfig>(v.clone()).map(|p| (v, p))
+                        });
+                    match parsed {
+                        Ok((raw, mut p)) => {
+                            if p.id.is_empty() {
+                                p.id = id.clone();
+                            }
+                            if p.name.is_empty() {
+                                p.name = id.clone();
+                            }
+                            if raw.get("is_default").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                marked_default = Some(id.clone());
+                            }
+                            new_providers.insert(id.clone(), p);
                         }
-                        if p.name.is_empty() {
-                            p.name = id.clone();
-                        }
-                        new_providers.insert(id.clone(), p);
+                        Err(e) => plugin_warn!("model", "解析 provider {id} 失败: {e}"),
                     }
-                    Err(e) => plugin_warn!("model", "解析 provider {id} 失败: {e}"),
-                },
+                }
                 Err(e) => plugin_warn!("model", "读取 provider {id} 失败: {e}"),
             }
         }
 
-        // 4. 推算 default_provider_id
-        let default_id = {
-            let cfg = self.providers.read().await;
-            cfg.default_provider_id
-                .clone()
-                .or_else(|| {
-                    new_providers
-                        .values()
-                        .find(|p| p.enabled)
-                        .map(|p| p.id.clone())
-                })
-                .or_else(|| new_providers.keys().next().cloned())
-        };
+        // 4. 推算 default_provider_id（显式 is_default 标记 > 现有指向 > 首个可用）
+        let existing_default = self.providers.read().await.default_provider_id.clone();
+        let default_id = marked_default
+            .or(existing_default)
+            .or_else(|| {
+                new_providers
+                    .values()
+                    .find(|p| p.enabled)
+                    .map(|p| p.id.clone())
+            })
+            .or_else(|| new_providers.keys().next().cloned());
 
         let mut cfg = self.providers.write().await;
         cfg.providers = new_providers;
@@ -619,16 +628,27 @@ impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
             ));
         }
 
-        // 对齐旧 `providers/set`：保存前校验连接
-        let parent = self.get_parent().await;
-        if let Some(err) = Self::validate_provider(&provider, &parent).await {
-            plugin_error!("model", format!("Provider 配置验证未通过: {}", err));
-            return Err(PluginError::ValidationError(format!(
-                "Provider 配置验证失败: {err}"
-            )));
+        // 对齐旧 `providers/set`：保存前校验连接（manifest 携带 skip_validation=true 时跳过）
+        let skip_validation = manifest
+            .get("skip_validation")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !skip_validation {
+            let parent = self.get_parent().await;
+            if let Some(err) = Self::validate_provider(&provider, &parent).await {
+                plugin_error!("model", format!("Provider 配置验证未通过: {}", err));
+                return Err(PluginError::ValidationError(format!(
+                    "Provider 配置验证失败: {err}"
+                )));
+            }
         }
 
-        serde_json::to_value(&provider).map_err(|e| PluginError::ParseError(e.to_string()))
+        let mut v = serde_json::to_value(&provider).map_err(|e| PluginError::ParseError(e.to_string()))?;
+        // 保留"设为默认"标记（写盘 + on_uploaded 读取；skip_validation 不落盘）
+        if manifest.get("is_default").and_then(|b| b.as_bool()).unwrap_or(false) {
+            v["is_default"] = serde_json::json!(true);
+        }
+        Ok(v)
     }
 
     /// 写盘后同步内存注册表（读回磁盘内容 + 默认 provider 兜底 + 触发父级持久化）
@@ -651,13 +671,20 @@ impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
             )
             .await
             .map_err(|e| PluginError::InternalError(format!("回读 provider 失败: {e}")))?;
-        let provider: ModelProviderConfig = serde_json::from_str(&content)
+        let raw: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| PluginError::ParseError(format!("回读 provider 解析失败: {e}")))?;
+        // "设为默认"标记（validate_manifest 保留、随 manifest 落盘）
+        let is_default = raw
+            .get("is_default")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let provider: ModelProviderConfig = serde_json::from_value(raw)
             .map_err(|e| PluginError::ParseError(format!("回读 provider 解析失败: {e}")))?;
 
         {
             let mut providers = self.providers.write().await;
             providers.providers.insert(id.to_string(), provider);
-            if providers.default_provider_id.is_none() {
+            if is_default || providers.default_provider_id.is_none() {
                 providers.default_provider_id = Some(id.to_string());
             }
         }

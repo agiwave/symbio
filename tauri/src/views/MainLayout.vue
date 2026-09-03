@@ -115,7 +115,9 @@
       </div>
     </nav>
     <main class="main-content">
-      <RouterView />
+      <!-- :key 强制路由切换时重建组件：四个资源页共用 ResourceManagerView，
+           若复用实例则 onMounted/订阅不会重新执行，列表会残留上一个类型的数据 -->
+      <RouterView :key="route.path" />
     </main>
     <!-- 文件查看器全屏覆盖：覆盖整个 MainLayout -->
     <FileViewerOverlay />

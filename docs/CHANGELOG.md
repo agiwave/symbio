@@ -17,6 +17,35 @@
 
 ***
 
+## 2026-09-03: 资源管理页体验修复——表单注册表、路由刷新、主题令牌化
+
+修复统一资源协议落地后的四个回归问题：
+
+- **Model 表单退步修复（详情差异化机制）**：明确"列表统一、详情差异化"架构——
+  `ResourceManagerView` 新增 `FORM_COMPONENTS` 注册表按类型注入专属表单组件，未注册类型走
+  通用兜底（zip 面板 / JSON 编辑器 / 只读详情）。恢复 `constants/modelProviders.ts`，新建
+  `ModelProviderForm.vue`（恢复提供商预设、模型候选、API Key 显隐、启用开关、高级设置折叠、
+  校验连接、跳过校验保存、设为默认等全部旧表单能力，样式迁移到新设计令牌）。
+
+- **后端支持表单控制标记**：model 插件 `validate_manifest` 支持 manifest 携带
+  `skip_validation`（跳过连接校验，不落盘）与 `is_default`（设为默认，随 manifest 落盘）；
+  `on_uploaded` / `load_from_storage` 读取 `is_default` 标记（显式标记 > 现有指向 > 首个可用），
+  "设为默认"重启后不再丢失。
+
+- **页面切换列表不刷新修复**：四个资源路由共用 `ResourceManagerView`，Vue Router 复用组件
+  实例导致 `onMounted`/事件订阅不再执行、列表残留上一类型数据。`MainLayout` 的 `RouterView`
+  加 `:key="route.path"` 强制重建。
+
+- **布局重构**：zip 上传创建面板改为居中卡片式；mcp/skill/agent 详情区新增统一工具栏
+  （测试连接/删除按钮同一行右对齐），替代原先散乱堆叠的操作行。
+
+- **主题令牌化**：`ResourceManagerView` / `ResourceShell` / `ResourceDetailPanel` /
+  `ModelProviderForm` 全部样式迁移到 `--surface-* / --text-* / --border-* / --accent / 语义色`
+  设计令牌，替换硬编码色值与 `rgba(0,0,0,…)`（深色下不可见）——输入框深色下白底、
+  hover 叠加失效、状态徽标颜色不适配等深浅色主题问题一并修复。
+
+- **验证**：cargo clippy 零告警、362 测试通过；vue-tsc 零错误、vitest 35/35、vite build 成功。
+
 ## 2026-09-03: ResourceProvider trait 化——资源协议公共流程收敛核心层
 
 在统一资源协议之上再做机制收敛：`resources/*` 五操作的公共流程（列表包装、zip/manifest 上传、

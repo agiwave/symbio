@@ -1,16 +1,19 @@
 <!--
   ResourceManagerView — 统一资源管理页（一份页面，按 resourceType 实例化多个）
 
-  五种资源（model / mcp / skill / agent / session）共享同一套 resources/* 协议，
-  本页用能力开关驱动差异，最大程度减少差异化代码：
+  架构分工（列表统一、详情差异化）：
+  - 列表机制统一：五类资源共享 resources/* 协议与 ResourceSummary 契约，
+    列表加载/刷新/实时状态订阅/删除等公共流程在本页统一承载；
+  - 详情/编辑差异化：通过 FORM_COMPONENTS 注册表按类型注入专属表单组件
+    （如 model 的 ModelProviderForm），未注册类型走通用兜底
+    （zip 上传面板 / JSON 编辑器 / 只读详情面板）。
+
+  能力开关驱动差异（后端 capabilities_for 为单一真相源）：
   - zip_upload        ：新建走「上传 zip」，文件名即资源目录名
-  - independent_form  ：新建/编辑走 JSON 表单（model / session 先启用）
+  - independent_form  ：新建/编辑走表单（model 已注册专属表单；其余为通用 JSON 兜底）
   - realtime_status   ：列表项实时状态（初始态来自 list，运行时变化由 resource 事件推送，不做前端轮询）
   - mutable / read_only：是否允许删除 / 新建
   - test_connection   ：详情页「测试连接」按钮，走 resources/status 按需校验
-
-  专项复杂的独立表单（如 model 的完整配置表单）可在 detail 组件注册表中逐步接入，
-  本页默认提供通用 JSON 编辑器 + 通用详情面板，保证机制统一、可运行。
 -->
 <template>
   <ResourceShell
@@ -60,73 +63,101 @@
     </template>
 
     <template #detail>
-      <!-- zip 上传创建表单 -->
-      <div v-if="creating" class="create-panel">
-        <h3 class="create-title">新建 {{ label }}</h3>
-        <p class="create-desc">{{ createHint }}</p>
+      <!-- ============== 新建模式 ============== -->
+      <template v-if="creating">
+        <!-- 注册的专属表单（model） -->
+        <component
+          :is="formComponent"
+          v-if="formComponent"
+          :item="null"
+          :capabilities="capabilities"
+          :saving="saving"
+          :existing-ids="items.map((i) => i.id)"
+          @save="onFormSave"
+          @cancel="cancelCreate"
+        />
 
-        <template v-if="capabilities.zip_upload">
-          <input
-            ref="zipInput"
-            type="file"
-            accept=".zip,application/zip"
-            hidden
-            @change="onZipSelected"
-          />
-          <button class="action-btn" :disabled="uploading" @click="zipInput?.click()">
-            {{ uploading ? '上传中…' : '选择 ZIP 文件上传' }}
-          </button>
-          <p v-if="uploadError" class="create-error">{{ uploadError }}</p>
-        </template>
-
-        <template v-else>
-          <label class="field-label">名称（目录名）</label>
-          <input v-model="draftName" type="text" class="text-input" :placeholder="`${label} 名称`" />
-          <label class="field-label">配置（JSON）</label>
-          <textarea v-model="draftManifest" class="json-input" rows="10" spellcheck="false" />
-          <p v-if="manifestError" class="create-error">{{ manifestError }}</p>
-          <div class="create-actions">
-            <button class="action-btn" :disabled="saving" @click="onSaveManifest">
-              {{ saving ? '保存中…' : '创建' }}
+        <!-- zip 上传创建（mcp / skill / agent） -->
+        <div v-else-if="capabilities.zip_upload" class="create-panel">
+          <div class="create-card">
+            <h3 class="create-title">新建 {{ label }}</h3>
+            <p class="create-desc">{{ createHint }}</p>
+            <input
+              ref="zipInput"
+              type="file"
+              accept=".zip,application/zip"
+              hidden
+              @change="onZipSelected"
+            />
+            <button class="action-btn" :disabled="uploading" @click="zipInput?.click()">
+              {{ uploading ? '上传中…' : '选择 ZIP 文件上传' }}
             </button>
-            <button class="action-btn secondary" :disabled="saving" @click="cancelCreate">取消</button>
+            <p v-if="uploadError" class="create-error">{{ uploadError }}</p>
           </div>
-        </template>
-      </div>
+        </div>
 
-      <!-- 选中项：编辑 JSON（independent_form && !zip）或通用详情 -->
-      <div v-else-if="selected">
-        <template v-if="capabilities.independent_form && !capabilities.zip_upload">
-          <div class="edit-panel">
-            <label class="field-label">名称（目录名）</label>
-            <input v-model="draftName" type="text" class="text-input" />
-            <label class="field-label">配置（JSON）</label>
-            <textarea v-model="draftManifest" class="json-input" rows="10" spellcheck="false" />
-            <p v-if="manifestError" class="create-error">{{ manifestError }}</p>
-            <div class="create-actions">
-              <button class="action-btn" :disabled="saving" @click="onSaveManifest">
-                {{ saving ? '保存中…' : '保存' }}
-              </button>
+        <!-- 通用 JSON 表单兜底（independent_form 且未注册专属表单） -->
+        <div v-else class="create-panel">
+          <div class="create-card narrow">
+            <h3 class="create-title">新建 {{ label }}</h3>
+            <p class="create-desc">{{ createHint }}</p>
+            <div class="create-form">
+              <label class="field-label">名称（目录名）</label>
+              <input v-model="draftName" type="text" class="text-input" :placeholder="`${label} 名称`" />
+              <label class="field-label">配置（JSON）</label>
+              <textarea v-model="draftManifest" class="json-input" rows="10" spellcheck="false" />
+              <p v-if="manifestError" class="create-error">{{ manifestError }}</p>
+              <div class="create-actions">
+                <button class="action-btn" :disabled="saving" @click="onSaveManifest">
+                  {{ saving ? '保存中…' : '创建' }}
+                </button>
+                <button class="action-btn secondary" :disabled="saving" @click="cancelCreate">取消</button>
+              </div>
             </div>
           </div>
-          <div class="edit-actions" v-if="canDelete">
-            <button class="danger-btn" :disabled="deletingId === selected.id" @click="requestDelete(selected)">
+        </div>
+      </template>
+
+      <!-- ============== 选中项：编辑/详情 ============== -->
+      <template v-else-if="selected">
+        <!-- 注册的专属表单（model） -->
+        <component
+          :is="formComponent"
+          v-if="formComponent"
+          :item="selected"
+          :capabilities="capabilities"
+          :saving="saving"
+          :testing="testing"
+          :deleting="deletingId === selected.id"
+          @save="onFormSave"
+          @test="testConnection"
+          @delete="requestDelete(selected)"
+          @set-default="onSetDefault"
+        />
+
+        <!-- 通用详情 + 操作工具栏（mcp / skill / agent） -->
+        <template v-else>
+          <div v-if="capabilities.test_connection || canDelete" class="detail-toolbar">
+            <button
+              v-if="capabilities.test_connection"
+              class="action-btn secondary"
+              :disabled="testing"
+              @click="testConnection"
+            >
+              {{ testing ? '测试中…' : '测试连接' }}
+            </button>
+            <button
+              v-if="canDelete"
+              class="danger-btn"
+              :disabled="deletingId === selected.id"
+              @click="requestDelete(selected)"
+            >
               {{ deletingId === selected.id ? '删除中…' : '删除' }}
             </button>
           </div>
+          <ResourceDetailPanel :item="selected" />
         </template>
-        <ResourceDetailPanel v-else :item="selected" />
-        <div v-if="capabilities.test_connection" class="edit-actions">
-          <button class="action-btn secondary" :disabled="testing" @click="testConnection">
-            {{ testing ? '测试中…' : '测试连接' }}
-          </button>
-        </div>
-        <div v-if="capabilities.zip_upload && canDelete" class="edit-actions">
-          <button class="danger-btn" :disabled="deletingId === selected.id" @click="requestDelete(selected)">
-            {{ deletingId === selected.id ? '删除中…' : '删除' }}
-          </button>
-        </div>
-      </div>
+      </template>
 
       <ResourceDetailPanel v-else :item="null" />
     </template>
@@ -134,7 +165,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import {
   capabilitiesFor,
   deleteResource,
@@ -153,6 +184,7 @@ import {
 import ResourceShell from '../components/common/ResourceShell.vue'
 import ResourceCard from '../components/common/ResourceCard.vue'
 import ResourceDetailPanel from '../components/resources/ResourceDetailPanel.vue'
+import ModelProviderForm from '../components/resources/ModelProviderForm.vue'
 import { subscribeResourceStatus } from '@/services/eventBus'
 
 const props = defineProps<{ resourceType: ResourceType }>()
@@ -168,6 +200,13 @@ const {
   select,
   markDeleting,
 } = useResourceManager({ logTag: `ResourceManagerView:${props.resourceType}` })
+
+// === 详情/编辑表单注册表：列表机制统一，详情差异化 ===
+// 未注册类型走通用兜底（zip 面板 / JSON 编辑器 / 只读详情）
+const FORM_COMPONENTS: Partial<Record<ResourceType, Component>> = {
+  model: markRaw(ModelProviderForm),
+}
+const formComponent = computed(() => FORM_COMPONENTS[props.resourceType])
 
 // === 状态 ===
 const items = ref<ResourceSummary[]>([])
@@ -223,21 +262,19 @@ async function loadAll() {
 function onNew() {
   uploadError.value = null
   manifestError.value = null
-  if (capabilities.value.zip_upload) {
-    enterCreateMode()
-    return
+  if (!capabilities.value.zip_upload && !formComponent.value) {
+    draftName.value = ''
+    draftManifest.value = blankManifest()
   }
-  draftName.value = ''
-  draftManifest.value = blankManifest()
   enterCreateMode()
 }
 
-// 选中独立表单资源时，预填编辑 JSON
+// 通用 JSON 兜底路径：选中时预填编辑 JSON
 watch(
   () => selected.value,
   (it) => {
     if (!it) return
-    if (capabilities.value.independent_form && !capabilities.value.zip_upload) {
+    if (capabilities.value.independent_form && !capabilities.value.zip_upload && !formComponent.value) {
       draftName.value = it.name || it.id || ''
       const body: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(it)) {
@@ -293,7 +330,52 @@ async function onZipSelected(e: Event) {
   }
 }
 
-// === JSON 表单 创建/编辑 ===
+// === 专属表单保存（统一走 resources/upload manifest 通道） ===
+async function onFormSave(payload: {
+  id: string
+  manifest: Record<string, unknown>
+  skipValidation?: boolean
+}) {
+  saving.value = true
+  try {
+    const manifest = { ...payload.manifest }
+    if (payload.skipValidation) manifest.skip_validation = true
+    const resp = await uploadResourceForm(props.resourceType, payload.id, manifest)
+    showToast('success', `已保存 ${label.value}「${payload.id}」`)
+    creating.value = false
+    const list = await listResources(props.resourceType)
+    items.value = list.items || []
+    select(resp.id || payload.id)
+  } catch (err) {
+    showToast('error', `保存失败: ${err}`)
+  } finally {
+    saving.value = false
+  }
+}
+
+// === 设为默认（manifest 携带 is_default 标记，机制复用 upload 通道） ===
+async function onSetDefault() {
+  const item = selected.value
+  if (!item) return
+  const config = (item.config ?? {}) as Record<string, unknown>
+  saving.value = true
+  try {
+    await uploadResourceForm(props.resourceType, item.id, {
+      ...config,
+      is_default: true,
+      skip_validation: true,
+    })
+    showToast('success', `已将「${item.name || item.id}」设为默认`)
+    const list = await listResources(props.resourceType)
+    items.value = list.items || []
+  } catch (err) {
+    showToast('error', `设置默认失败: ${err}`)
+  } finally {
+    saving.value = false
+  }
+}
+
+// === 通用 JSON 表单 创建/编辑 ===
 async function onSaveManifest() {
   const name = draftName.value.trim()
   if (!name) {
@@ -404,76 +486,154 @@ onBeforeUnmount(() => unsubscribeResource?.())
 .meta-sub {
   opacity: 0.75;
 }
-.create-panel,
-.edit-panel {
-  padding: 1.5rem 2rem;
+
+/* ============== 新建面板（居中卡片） ============== */
+.create-panel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  overflow-y: auto;
+}
+.create-card {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 0.75rem;
-  flex: 1;
-  overflow-y: auto;
+  text-align: center;
+  max-width: 24rem;
+}
+.create-card.narrow {
+  width: 100%;
+  max-width: 30rem;
 }
 .create-title {
   margin: 0;
-  font-size: 1.15rem;
-  font-weight: 600;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
 }
 .create-desc {
   margin: 0;
-  font-size: 0.85rem;
-  color: var(--color-text-muted, #6b7280);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  line-height: var(--line-height-normal);
 }
-.field-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--color-text-muted, #6b7280);
-  text-transform: uppercase;
-}
-.text-input {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 0.375rem;
-  font-size: 0.85rem;
-}
-.json-input {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 0.375rem;
-  font-family: 'Menlo', 'Monaco', monospace;
-  font-size: 0.8rem;
-  resize: vertical;
-  line-height: 1.4;
+.create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
 }
 .create-error {
-  color: #dc2626;
+  color: var(--danger-fg);
   font-size: 0.8rem;
   margin: 0;
 }
-.create-actions,
-.edit-actions {
+.create-actions {
   display: flex;
   gap: 0.5rem;
   padding-top: 0.5rem;
 }
+
+.field-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.text-input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+.text-input:focus,
+.json-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle-bg);
+}
+.json-input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  resize: vertical;
+  line-height: 1.4;
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+
+/* ============== 通用详情工具栏 ============== */
+.detail-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  flex-shrink: 0;
+}
+
+/* ============== 按钮 ============== */
 .action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 0.375rem;
-  background: var(--accent, #667eea);
-  color: #fff;
-  font-size: 0.85rem;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-base);
   cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
 }
+.action-btn:hover:not(:disabled) { background: var(--accent-hover); }
 .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.action-btn.secondary { background: transparent; color: var(--color-text, #1f2937); border: 1px solid var(--color-border, #e5e7eb); }
+.action-btn.secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+}
+.action-btn.secondary:hover:not(:disabled) { background: var(--surface-hover); }
+
 .danger-btn {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 0.375rem;
-  background: #ef4444;
-  color: #fff;
-  font-size: 0.85rem;
+  border-radius: var(--radius-md);
+  background: var(--danger-solid);
+  color: var(--text-inverse);
+  font-size: var(--font-size-base);
   cursor: pointer;
+  white-space: nowrap;
+  transition: opacity var(--motion-fast) var(--motion-ease);
 }
 .danger-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all var(--motion-fast) var(--motion-ease);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
 </style>
