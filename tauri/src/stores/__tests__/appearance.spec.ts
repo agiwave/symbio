@@ -12,7 +12,7 @@ describe('appearance store', () => {
     localStorage.clear()
     // 重置根节点状态，避免跨用例污染
     document.documentElement.removeAttribute('data-theme')
-    document.documentElement.style.fontSize = ''
+    document.documentElement.style.removeProperty('--font-scale')
   })
 
   it('默认浅色 + 中号字体', () => {
@@ -30,12 +30,12 @@ describe('appearance store', () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)?.theme).toBe('dark')
   })
 
-  it('修改字体后会调整 <html> 根字号并持久化', async () => {
+  it('修改字体后会调整 <html> 缩放系数并持久化', async () => {
     const store = useAppearanceStore()
     store.fontSize = 'large'
     await nextTick()
 
-    expect(document.documentElement.style.fontSize).toBe('18px')
+    expect(document.documentElement.style.getPropertyValue('--font-scale')).toBe('1.125')
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)?.fontSize).toBe('large')
   })
 

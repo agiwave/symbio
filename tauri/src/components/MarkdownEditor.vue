@@ -65,7 +65,7 @@
     
     <!-- 快捷键提示 -->
     <Transition name="fade">
-      <div v-if="!blockHandle.visible" class="shortcut-hint"><kbd>/</kbd> 命令菜单 · 选中文本后自动显示 Model \u52a9\u624b</div>
+      <div v-if="!blockHandle.visible" class="shortcut-hint"><kbd>/</kbd> 命令菜单 · 选中文本后自动显示 Model 助手</div>
     </Transition>
   </div>
 </template>
@@ -284,29 +284,29 @@ onUnmounted(async () => {
 
 <style scoped>
 .notion-editor { position: relative; height: 100%; width: 100%; background: #fff; display: flex; flex-direction: column; }
-.editor-root { flex: 1; overflow-y: auto; padding: 32px 48px 32px 64px; min-height: 0; counter-reset: line; position: relative; }
-.editor-root::before { content: ''; position: absolute; left: 0; top: 32px; width: 48px; bottom: 0; background: #f7f7f5; border-right: 1px solid #e8e8e6; pointer-events: none; }
-.editor-root :deep(.milkdown) { font-family: -apple-system, BlinkMacMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 16px; line-height: 1.6; color: #37352f; outline: none; min-height: 100%; }
+.editor-root { flex: 1; overflow-y: auto; padding: 2rem 3rem 2rem 4rem; min-height: 0; counter-reset: line; position: relative; }
+.editor-root::before { content: ''; position: absolute; left: 0; top: 2rem; width: 3rem; bottom: 0; background: #f7f7f5; border-right: 1px solid #e8e8e6; pointer-events: none; }
+.editor-root :deep(.milkdown) { font-family: -apple-system, BlinkMacMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 1rem; line-height: 1.6; color: #37352f; outline: none; min-height: 100%; }
 .editor-root :deep(.ProseMirror > *) { position: relative; counter-increment: line; }
-.editor-root :deep(.ProseMirror > *)::before { content: counter(line); position: absolute; left: -56px; top: 0; width: 40px; text-align: right; font-family: 'Fira Code', monospace; font-size: 12px; color: #b0b0ab; pointer-events: none; }
+.editor-root :deep(.ProseMirror > *)::before { content: counter(line); position: absolute; left: -3.5rem; top: 0; width: 2.5rem; text-align: right; font-family: 'Fira Code', monospace; font-size: 0.75rem; color: #b0b0ab; pointer-events: none; }
 .editor-root :deep(.milkdown h1) { font-size: 2.25rem; font-weight: 700; margin: 0 0 0.5rem; }
 .editor-root :deep(.milkdown h2) { font-size: 1.5rem; font-weight: 600; margin: 1rem 0 0.375rem; }
-.editor-root :deep(.milkdown code) { background: rgba(135, 131, 120, 0.15); color: #eb5757; padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; font-size: 85%; }
-.editor-root :deep(.milkdown pre) { background: #f7f6f3; border-radius: 4px; padding: 16px; margin: 8px 0; overflow-x: auto; }
-.editor-root :deep(.milkdown blockquote) { border-left: 3px solid #37352f; padding-left: 16px; margin: 8px 0; }
+.editor-root :deep(.milkdown code) { background: rgba(135, 131, 120, 0.15); color: #eb5757; padding: 0.2em 0.4em; border-radius: 0.1875rem; font-family: monospace; font-size: 85%; }
+.editor-root :deep(.milkdown pre) { background: #f7f6f3; border-radius: 0.25rem; padding: 1rem; margin: 0.5rem 0; overflow-x: auto; }
+.editor-root :deep(.milkdown blockquote) { border-left: 0.1875rem solid #37352f; padding-left: 1rem; margin: 0.5rem 0; }
 .custom-block-handle { position: fixed; z-index: 100; user-select: none; }
-.handle-trigger { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; color: #9b9a97; border-radius: 4px; transition: all 0.15s ease; }
+.handle-trigger { width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; color: #9b9a97; border-radius: 0.25rem; transition: all 0.15s ease; }
 .handle-trigger:hover, .custom-block-handle:hover .handle-trigger { background: rgba(55, 53, 47, 0.08); color: #37352f; }
-.handle-toolbar { display: flex; align-items: center; gap: 2px; background: #fff; border: 1px solid #e5e5e5; border-radius: 6px; padding: 4px 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); white-space: nowrap; }
+.handle-toolbar { display: flex; align-items: center; gap: var(--space-05); background: #fff; border: 1px solid #e5e5e5; border-radius: 0.375rem; padding: var(--space-1) var(--space-2); box-shadow: 0 2px 8px rgba(0,0,0,0.1); white-space: nowrap; }
 .drag-btn { cursor: grab; }
 .drag-btn.active { cursor: grabbing; background: rgba(35, 131, 226, 0.2) !important; color: #2383e2; }
-.drop-indicator { position: fixed; height: 2px; background: #2383e2; border-radius: 1px; pointer-events: none; z-index: 101; }
-.toolbar-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 4px; cursor: pointer; color: #37352f; }
+.drop-indicator { position: fixed; height: 0.125rem; background: #2383e2; border-radius: 1px; pointer-events: none; z-index: 101; }
+.toolbar-btn { width: 1.75rem; height: 1.75rem; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 0.25rem; cursor: pointer; color: #37352f; }
 .toolbar-btn:hover { background: rgba(55, 53, 47, 0.08); }
-.toolbar-divider { width: 1px; height: 16px; background: #e5e5e5; margin: 0 4px; }
-.shortcut-hint { position: fixed; bottom: 16px; right: 16px; background: #1f1f1f; color: #fff; padding: 6px 12px; border-radius: 6px; font-size: 12px; z-index: 100; }
+.toolbar-divider { width: 1px; height: 1rem; background: #e5e5e5; margin: 0 0.25rem; }
+.shortcut-hint { position: fixed; bottom: 1rem; right: 1rem; background: #1f1f1f; color: #fff; padding: 0.375rem 0.75rem; border-radius: 0.375rem; font-size: 0.75rem; z-index: 100; }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 .expand-enter-active, .expand-leave-active { transition: all 0.15s ease; }
-.expand-enter-from, .expand-leave-to { opacity: 0; transform: translateX(-8px); }
+.expand-enter-from, .expand-leave-to { opacity: 0; transform: translateX(-0.5rem); }
 </style>

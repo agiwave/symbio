@@ -14,7 +14,7 @@
     </template>
 
     <template #list>
-      <div class="server-list">
+      <div class="server-list" role="listbox" aria-label="MCP Server 列表">
         <McpServerCard
           v-for="item in servers"
           :key="item.name"
@@ -88,11 +88,6 @@
           </div>
         </div>
       </Transition>
-      <Transition name="toast">
-        <div v-if="toast" :class="['toast', toast.type]" @click="toast = null">
-          {{ toast.text }}
-        </div>
-      </Transition>
     </template>
   </ResourceShell>
 
@@ -136,7 +131,6 @@ const {
   creating,
   selectedId: selectedName,
   deletingId,
-  toast,
   showToast,
   enterCreateMode,
   select,
@@ -297,44 +291,15 @@ onMounted(() => loadAll())
   padding: 0.25rem 0;
 }
 
-/* Toast */
-.toast {
-  position: absolute;
-  bottom: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 0.6rem 1rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  color: #fff;
-  background: #333;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  cursor: pointer;
-  z-index: 100;
-}
-
-.toast.success { background: #22c55e; }
-.toast.error { background: #ef4444; }
-.toast.info { background: #3b82f6; }
-
-.toast-enter-active,
-.toast-leave-active {
-  transition: all 0.2s ease;
-}
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(10px);
-}
 
 /* Test Connection Result Card */
 .test-result {
   position: absolute;
   bottom: 1.5rem;
   right: 1.5rem;
-  width: 320px;
+  width: 20rem;
   padding: 1.2rem;
-  border-radius: 8px;
+  border-radius: 0.5rem;
   background: var(--color-surface, #ffffff);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.02);
   border: 1px solid var(--color-border);
@@ -346,11 +311,11 @@ onMounted(() => loadAll())
 }
 
 .test-result.success {
-  border-left: 4px solid #22c55e;
+  border-left: 0.25rem solid #22c55e;
 }
 
 .test-result.error {
-  border-left: 4px solid #ef4444;
+  border-left: 0.25rem solid #ef4444;
 }
 
 .test-result-header {
@@ -431,7 +396,7 @@ onMounted(() => loadAll())
   color: var(--color-text-muted);
   background: rgba(0, 0, 0, 0.05);
   padding: 0.05rem 0.25rem;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   margin-left: 0.25rem;
 }
 
@@ -442,8 +407,8 @@ onMounted(() => loadAll())
   margin-top: 0.25rem;
   padding: 0.6rem;
   background: rgba(0, 0, 0, 0.02);
-  border-radius: 4px;
-  max-height: 90px;
+  border-radius: 0.25rem;
+  max-height: 5.625rem;
   overflow-y: auto;
   border: 1px solid var(--color-border-subtle, rgba(0, 0, 0, 0.04));
 }
@@ -468,7 +433,7 @@ onMounted(() => loadAll())
   font-size: 0.8rem;
   line-height: 1.45;
   word-break: break-all;
-  max-height: 120px;
+  max-height: 7.5rem;
   overflow-y: auto;
 }
 </style>

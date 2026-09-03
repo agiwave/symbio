@@ -13,7 +13,7 @@
       v-if="visible"
       class="confirm-overlay"
       @click.self="onCancel"
-      @keydown.esc="onCancel"
+      @keydown="onKeydown"
     >
       <div
         ref="dialogRef"
@@ -115,13 +115,51 @@ function onConfirm() {
   emit('confirm')
 }
 
-// 打开时自动 focus 到 dialog（便于 ESC 关闭）
+/**
+ * 焦点陷阱（focus trap）：在对话框内循环 Tab / Shift+Tab，
+ * 保证键盘用户不会被焦点"逃出"遮罩层。ESC 走 onCancel。
+ */
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    onCancel()
+    return
+  }
+  if (e.key !== 'Tab' || !dialogRef.value) return
+  const focusables = Array.from(
+    dialogRef.value.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  )
+  if (focusables.length === 0) {
+    e.preventDefault()
+    return
+  }
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  const active = document.activeElement as HTMLElement | null
+  if (e.shiftKey && (active === first || active === dialogRef.value)) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
+// 打开时自动聚焦首个可交互元素（焦点陷阱入口）
 watch(
   () => props.visible,
   async (v) => {
     if (v) {
       await nextTick()
-      dialogRef.value?.focus()
+      const first = dialogRef.value?.querySelector<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+      if (first) {
+        first.focus()
+      } else {
+        dialogRef.value?.focus()
+      }
     }
   }
 )
@@ -131,21 +169,21 @@ watch(
 .confirm-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
-  padding: 1rem;
+  z-index: var(--z-dialog);
+  padding: var(--space-4);
 }
 
 .confirm-dialog {
-  background: var(--color-bg, #fff);
-  border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 10px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-  min-width: 320px;
-  max-width: 480px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
+  min-width: 20rem;
+  max-width: 30rem;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -155,63 +193,64 @@ watch(
 .confirm-header {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 1rem 1.25rem 0.5rem;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5) var(--space-2);
 }
 
 .confirm-icon {
   font-size: 1.4rem;
-  width: 32px;
-  height: 32px;
+  width: 2rem;
+  height: 2rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.04);
+  border-radius: var(--radius-full);
+  background: var(--surface-hover);
   flex-shrink: 0;
 }
-.confirm-icon.kind-info { background: rgba(59, 130, 246, 0.12); }
-.confirm-icon.kind-warning { background: rgba(245, 158, 11, 0.15); }
-.confirm-icon.kind-danger { background: rgba(239, 68, 68, 0.12); }
+.confirm-icon.kind-info { background: var(--info-bg); }
+.confirm-icon.kind-warning { background: var(--warning-bg); }
+.confirm-icon.kind-danger { background: var(--danger-bg); }
 
 .confirm-title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--color-text, #1f2937);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
 }
 
 .confirm-message {
-  padding: 0.5rem 1.25rem 1rem;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: var(--color-text-secondary, #4b5563);
+  padding: var(--space-2) var(--space-5) var(--space-4);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
   white-space: pre-line;
 }
 
 .confirm-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  padding: 0.75rem 1.25rem 1rem;
-  border-top: 1px solid var(--color-border, #e5e7eb);
-  background: rgba(0, 0, 0, 0.02);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  border-top: 1px solid var(--border-default);
+  background: var(--surface-hover);
 }
 
 .confirm-btn {
-  padding: 0.45rem 1rem;
-  font-size: 0.85rem;
-  border: 1px solid var(--color-border, #d1d5db);
-  background: var(--color-bg, #fff);
-  color: var(--color-text, #1f2937);
-  border-radius: 6px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-base);
+  border: 1px solid var(--border-default);
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  font-weight: 500;
-  transition: all 0.15s;
-  min-width: 80px;
+  font-weight: var(--font-weight-medium);
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease);
+  min-width: 5rem;
 }
 .confirm-btn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--surface-hover);
 }
 .confirm-btn:disabled {
   opacity: 0.5;
@@ -219,21 +258,22 @@ watch(
 }
 
 .confirm-btn.primary {
-  background: var(--color-primary, #667eea);
-  border-color: var(--color-primary, #667eea);
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
 }
 .confirm-btn.primary:hover:not(:disabled) {
-  background: var(--color-primary-dark, #5568d3);
-  border-color: var(--color-primary-dark, #5568d3);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 .confirm-btn.primary.danger {
-  background: #ef4444;
-  border-color: #ef4444;
+  background: var(--danger-solid);
+  border-color: var(--danger-solid);
 }
 .confirm-btn.primary.danger:hover:not(:disabled) {
-  background: #dc2626;
-  border-color: #dc2626;
+  background: var(--danger-solid);
+  filter: brightness(0.92);
+  border-color: var(--danger-solid);
 }
 
 .confirm-fade-enter-active,

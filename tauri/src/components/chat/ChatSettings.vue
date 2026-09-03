@@ -53,11 +53,11 @@
           </svg>
         </div>
         </template>
-        <div class="divider" style="margin: 4px 0;"></div>
+        <div class="divider" style="margin: var(--space-1) 0;"></div>
         <div class="option create-btn" @click.stop="openCreateAgentModal">
           <span class="icon">➕</span>
           <div class="text">
-            <div class="label" style="color: var(--color-primary)">创建新人格</div>
+            <div class="label" style="color: var(--accent)">创建新人格</div>
             <div class="desc">定义专属认知模型</div>
           </div>
         </div>
@@ -466,116 +466,109 @@ onUnmounted(() => {
 .chat-settings {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: var(--space-1);
   position: relative;
 }
 
 .setting-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.35rem 0.6rem;
-  border-radius: 6px;
+  gap: var(--space-1);
+  padding: var(--space-2) 0.6rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.2s;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
   user-select: none;
 }
 
 .setting-btn:hover {
-  background: rgba(0, 0, 0, 0.04);
-  color: var(--color-text-secondary);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
 }
 
 .setting-btn .icon { font-size: 0.875rem; }
-.setting-btn .label { font-weight: 500; }
+.setting-btn .label { font-weight: var(--font-weight-medium); }
 
 /* 心跳任务按钮：与 Agent/Model/Mode 选项保持同一视觉规格，垂直居中对齐 */
 .heartbeat-btn {
-  gap: 0.3rem;
-  color: var(--color-text-muted);
+  gap: var(--space-1);
+  color: var(--text-muted);
 }
 .heartbeat-btn .icon { font-size: 0.9rem; line-height: 1; }
 
 /* 纯图标按钮（风险等级 / 心跳 / 交互模式）：去掉文字与下拉箭头，进一步压缩显示区域 */
 .setting-btn.compact {
-  padding: 0.35rem 0.45rem;
+  padding: var(--space-2) 0.45rem;
   gap: 0;
 }
 .setting-btn.compact .icon { font-size: 1rem; }
 .heartbeat-btn.on {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger-solid);
+  background: var(--danger-bg);
 }
 .heartbeat-btn.on:hover {
-  background: rgba(239, 68, 68, 0.16);
-  color: #ef4444;
+  background: var(--danger-bg);
+  color: var(--danger-solid);
 }
 
-.arrow { transition: transform 0.2s; opacity: 0.5; }
+.arrow { transition: transform var(--motion-base) var(--motion-ease); opacity: 0.5; }
 .arrow.open { transform: rotate(180deg); opacity: 1; }
 
 .divider {
   width: 1px;
-  height: 16px;
-  background: var(--color-border);
-  margin: 0 0.25rem;
+  height: 1rem;
+  background: var(--border-default);
+  margin: 0 var(--space-1);
 }
 
 .menu {
   position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + var(--space-2));
   left: 0;
-  min-width: 220px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
-  padding: 0.5rem;
-  z-index: 100;
-  max-height: 400px;
+  min-width: 13.75rem;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
+  padding: var(--space-2);
+  z-index: var(--z-overlay);
+  max-height: 25rem;
   overflow-y: auto;
 }
 
 .option {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem;
-  border-radius: 8px;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background-color var(--motion-fast) var(--motion-ease);
 }
 
-.option:hover { background: var(--color-hover-bg, #f5f5f5); }
-.option.active { background: var(--color-active-bg, #eef2ff); }
+.option:hover { background: var(--surface-hover); }
+.option.active { background: var(--surface-selected); }
 
 .option .icon { font-size: 1.25rem; flex-shrink: 0; }
 .text { flex: 1; min-width: 0; }
-.text .label { font-size: 0.875rem; font-weight: 500; color: var(--color-text); margin-bottom: 0.15rem; }
-.text .desc { font-size: 0.75rem; color: var(--color-text-muted); line-height: 1.3; }
+.text .label { font-size: var(--font-size-base); font-weight: var(--font-weight-medium); color: var(--text-primary); margin-bottom: var(--space-05); }
+.text .desc { font-size: var(--font-size-xs); color: var(--text-muted); line-height: var(--line-height-tight); }
 
-.check { color: var(--color-primary); flex-shrink: 0; }
+.check { color: var(--accent); flex-shrink: 0; }
 
 .dropdown-enter-active, .dropdown-leave-active { transition: all 0.2s ease; }
-.dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(8px); }
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.menu {
-  animation: slideUp 0.2s ease-out;
-}
+.dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(0.5rem); }
 
 .loading-state {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 1rem;
-  color: var(--color-text-muted);
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--text-muted);
 }
 
 .spinner {
@@ -597,17 +590,17 @@ onUnmounted(() => {
   100% { stroke-dashoffset: -100; }
 }
 
-.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal { background: var(--color-surface-strong, #fff); border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 400px; }
-.modal h3 { margin-bottom: 1rem; }
-.form-group { margin-bottom: 1rem; }
-.form-group label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem; }
-.form-group input, .form-group textarea { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.875rem; box-sizing: border-box; }
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; z-index: var(--z-dialog); }
+.modal { background: var(--surface-overlay); border-radius: var(--radius-xl); padding: var(--space-5); width: 100%; max-width: 25rem; }
+.modal h3 { margin-bottom: var(--space-4); }
+.form-group { margin-bottom: var(--space-4); }
+.form-group label { display: block; font-size: var(--font-size-base); font-weight: var(--font-weight-medium); margin-bottom: var(--space-1); }
+.form-group input, .form-group textarea { width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); font-size: var(--font-size-base); box-sizing: border-box; }
 .form-group textarea { font-family: inherit; }
-.checkbox-label { display: flex !important; align-items: center; gap: 0.5rem; cursor: pointer; }
+.checkbox-label { display: flex !important; align-items: center; gap: var(--space-2); cursor: pointer; }
 .checkbox-label input { width: auto; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; }
-.action-btn { padding: 0.5rem 1rem; background: var(--color-primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
+.action-btn { padding: var(--space-2) var(--space-4); background: var(--accent); color: var(--text-on-accent); border: none; border-radius: var(--radius-md); cursor: pointer; font-size: var(--font-size-base); }
 .action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-.action-btn.secondary { background: var(--color-hover-bg, #f0f0f0); color: var(--color-text); }
+.action-btn.secondary { background: var(--surface-hover); color: var(--text-primary); }
 </style>

@@ -39,9 +39,9 @@ onMounted(async () => {
 }
 
 .col-left {
-  flex: 0 0 260px;
-  min-width: 200px;
-  max-width: 360px;
+  flex: 0 0 16.25rem;
+  min-width: 12.5rem;
+  max-width: 22.5rem;
 }
 
 .col-middle {
@@ -50,8 +50,8 @@ onMounted(async () => {
 }
 
 .col-right {
-  flex: 0 0 280px;
-  min-width: 200px;
-  max-width: 420px;
+  flex: 0 0 17.5rem;
+  min-width: 12.5rem;
+  max-width: 26.25rem;
 }
 </style>

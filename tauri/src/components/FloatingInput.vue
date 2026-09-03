@@ -117,9 +117,9 @@ watch(() => props.visible, (visible) => {
 
 .floating-input-container {
   position: absolute;
-  width: 400px;
+  width: 25rem;
   background: var(--color-surface);
-  border-radius: 12px;
+  border-radius: 0.75rem;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   overflow: hidden;
 }
@@ -139,14 +139,14 @@ watch(() => props.visible, (visible) => {
 }
 
 .close-btn {
-  width: 24px;
-  height: 24px;
+  width: 1.5rem;
+  height: 1.5rem;
   border: none;
   background: transparent;
   color: white;
   cursor: pointer;
   font-size: 1.25rem;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   opacity: 0.8;
 }
 
@@ -173,7 +173,7 @@ watch(() => props.visible, (visible) => {
 
 .input-field {
   width: 100%;
-  min-height: 80px;
+  min-height: 5rem;
   padding: 1rem;
   border: none;
   background: transparent;
@@ -201,7 +201,7 @@ watch(() => props.visible, (visible) => {
   background: var(--color-primary);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
   font-size: 0.875rem;
   font-weight: 500;

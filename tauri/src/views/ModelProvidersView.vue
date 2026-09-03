@@ -14,7 +14,7 @@
     </template>
 
     <template #list>
-      <div class="provider-list">
+      <div class="provider-list" role="listbox" aria-label="Model Provider 列表">
         <ModelProviderCard
           v-for="p in providers"
           :key="p.id"
@@ -44,14 +44,6 @@
         @set-default="handleSetDefault"
       />
     </template>
-
-    <template #toast>
-      <Transition name="toast">
-        <div v-if="toast" :class="['toast', toast.type]" @click="toast = null">
-          {{ toast.text }}
-        </div>
-      </Transition>
-    </template>
   </ResourceShell>
 </template>
 
@@ -79,7 +71,6 @@ const {
   creating,
   selectedId,
   deletingId,
-  toast,
   showToast,
   enterCreateMode,
   select,
@@ -209,31 +200,4 @@ onMounted(() => loadAll())
   padding: 0.25rem 0;
 }
 
-/* Toast */
-.toast {
-  position: absolute;
-  bottom: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 0.55rem 1rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  cursor: pointer;
-  z-index: 100;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  color: #fff;
-  background: #22c55e;
-}
-.toast.error { background: #ef4444; }
-.toast.info { background: #4f46e5; }
-
-.toast-enter-active,
-.toast-leave-active {
-  transition: all 0.2s ease;
-}
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(10px);
-}
 </style>

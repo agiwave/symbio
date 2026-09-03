@@ -45,7 +45,7 @@
         <div class="dialog-body">
           <div class="messages" ref="messagesRef">
             <div v-if="chat.messageTree.value.length === 0 && initialLoadDone" class="empty-chat">
-              <p>开始与 Model \u5bf9\u8bdd</p>
+              <p>开始与 Model 对话</p>
             </div>
             
             <MessageNode
@@ -302,16 +302,16 @@ watch(() => props.state.selectedText.value, () => {
 <style scoped>
 .ai-selection-dialog {
   position: fixed;
-  width: 360px;
+  width: 22.5rem;
   max-height: 60vh;
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 16px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  z-index: 2000;
-  backdrop-filter: blur(12px);
+  z-index: var(--z-dialog);
   user-select: none;
 }
 
@@ -322,9 +322,9 @@ watch(() => props.state.selectedText.value, () => {
 .dialog-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
   cursor: grab;
 }
 
@@ -332,57 +332,59 @@ watch(() => props.state.selectedText.value, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  color: #888;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--text-muted);
   cursor: grab;
 }
 
 .header-icon {
-  font-size: 14px;
+  font-size: var(--font-size-base);
 }
 
 .dialog-title {
-  font-weight: 600;
-  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
   flex: 1;
-  color: #1a1a1a;
+  color: var(--text-primary);
 }
 
 .dialog-close {
-  width: 22px;
-  height: 22px;
+  width: 1.375rem;
+  height: 1.375rem;
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 16px;
-  color: #999;
+  font-size: var(--font-size-md);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
 }
+.dialog-close:hover { color: var(--text-primary); }
 
 .selected-context {
-  padding: 8px 14px;
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(37, 99, 235, 0.06));
+  padding: var(--space-2) var(--space-3);
+  background: var(--accent-subtle-bg);
 }
 
 .context-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .context-label {
-  font-size: 10px;
-  color: #888;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
   text-transform: uppercase;
 }
 
 .context-text {
-  font-size: 12px;
-  color: #444;
-  padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.8);
-  border-radius: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-card);
+  border-radius: var(--radius-md);
 }
 
 .dialog-body {
@@ -397,52 +399,60 @@ watch(() => props.state.selectedText.value, () => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px;
+  padding: var(--space-2);
 }
 
 .dialog-footer {
   display: flex;
-  gap: 8px;
-  padding: 10px 14px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .dialog-footer textarea {
   flex: 1;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-size: 13px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
   resize: none;
   outline: none;
+  color: var(--text-primary);
+  background: var(--surface-overlay);
+  font-family: inherit;
 }
+.dialog-footer textarea:focus { border-color: var(--accent); }
 
 .send-btn {
-  width: 36px;
-  height: 36px;
-  background: var(--color-primary);
+  width: 2.25rem;
+  height: 2.25rem;
+  background: var(--accent);
   border: none;
-  border-radius: 10px;
-  color: #fff;
+  border-radius: var(--radius-lg);
+  color: var(--text-on-accent);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .typing-indicator {
   display: inline-flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .typing-indicator span {
-  width: 4px;
-  height: 4px;
-  background: #999;
-  border-radius: 50%;
+  width: 0.25rem;
+  height: 0.25rem;
+  background: var(--text-muted);
+  border-radius: var(--radius-full);
 }
 
 .empty-chat {
   text-align: center;
-  color: #999;
-  padding: 20px;
+  color: var(--text-muted);
+  padding: var(--space-5);
 }
 
 .slide-up-enter-active, .slide-up-leave-active {
@@ -450,6 +460,6 @@ watch(() => props.state.selectedText.value, () => {
 }
 .slide-up-enter-from, .slide-up-leave-to {
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(0.625rem);
 }
 </style>

@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant U as 用户
+    participant SP as SettingsPage
+    participant A as appearanceStore
+    participant HTML as <html>
+    participant CSS as 浏览器 CSS 引擎
+    participant C as 任意组件
+
+    U->>SP: 切换 浅/深/跟随系统
+    SP->>A: theme.value = 'dark'
+    Note over A: watch([theme,fontSize]) 触发
+    A->>A: apply()
+    A->>HTML: setAttribute('data-theme','dark')
+    A->>HTML: style.fontSize = '14/16/18px'
+    A->>HTML: localStorage 持久化
+    HTML->>CSS: data-theme 变更 → 重新解析 :root[data-theme=dark] 变量
+    CSS-->>C: 所有 var(--*) 重算 → 组件自动重绘（无 JS 重渲染）
+    Note over C: 会话区/外壳/资源页 全站同步换肤
+
+sequenceDiagram
+    participant K as 键盘用户
+    participant Card as ClickableCard(role=option)
+    participant Parent as 列表容器(role=listbox)
+    participant Store as 对应 Pinia store
+
+    K->>Card: Tab 聚焦（:focus-visible 显示 2px 焦点环）
+    K->>Card: Enter / Space
+    Card->>Card: @keydown.enter/space → onClick()
+    Card->>Parent: emit('click')
+    Parent->>Store: selectXxx(id)
+    Store->>Store: activeId = id
+    Store-->>Card: isActive 变化
+    Card->>Card: aria-selected="true" + --surface-selected 高亮
+    Note over K,Card: 仅键盘完成 切换会话/选 Provider/选 MCP Server（D3）

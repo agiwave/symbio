@@ -10,8 +10,8 @@
  * 应用方式说明：
  * - 主题：在 `<html data-theme=...>` 上设置 `light` / `dark`，
  *   各组件通过 `:root[data-theme="dark"]` 变量（见 App.vue）切换配色。
- * - 字体：通过修改 `<html>` 的 font-size 缩放全局 `rem` 尺寸，
- *   `medium` 对应 16px（浏览器默认），与改动前的视觉保持一致。
+ * - 字体：写入 `--font-scale` 缩放系数（small=0.875 / medium=1 / large=1.125），
+ *   与 base.css 的根字号 `clamp()` 相乘，用户档位与窗口等比缩放两机制叠加生效。
  */
 
 import { defineStore } from 'pinia'
@@ -23,11 +23,11 @@ export type FontSize = 'small' | 'medium' | 'large'
 /** localStorage 存储键 */
 const STORAGE_KEY = 'symbio.appearance'
 
-/** 各字体档位对应的<html>根字号（rem 基准），medium=16px 保持既有观感不变 */
-const FONT_SIZE_MAP: Record<FontSize, number> = {
-  small: 14,
-  medium: 16,
-  large: 18,
+/** 各字体档位对应的缩放系数（相对 16px 基准），与 base.css 根字号 clamp 相乘 */
+const FONT_SCALE_MAP: Record<FontSize, number> = {
+  small: 0.875,
+  medium: 1,
+  large: 1.125,
 }
 
 interface PersistedAppearance {
@@ -58,7 +58,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
   /** 将当前配置应用到 <html> 根节点，并持久化 */
   function apply() {
     document.documentElement.setAttribute('data-theme', resolveTheme())
-    document.documentElement.style.fontSize = `${FONT_SIZE_MAP[fontSize.value]}px`
+    document.documentElement.style.setProperty('--font-scale', String(FONT_SCALE_MAP[fontSize.value]))
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ theme: theme.value, fontSize: fontSize.value })

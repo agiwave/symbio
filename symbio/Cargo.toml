@@ -68,5 +68,11 @@ members = [
     ".",
 ]
 
+# 测试构建提速：测试二进制约 89MB（含 ort/ONNX），完整调试信息使 MSVC 链接长达 20+ 分钟。
+# line-tables-only 保留堆栈回溯所需的行号表，去掉变量级调试信息，链接时间可缩短一个量级。
+# 只影响 cargo test / cargo bench；cargo check 与常规 dev 构建不受影响。
+[profile.test]
+debug = "line-tables-only"
+
 [dev-dependencies]
 tempfile = "3.27.0"

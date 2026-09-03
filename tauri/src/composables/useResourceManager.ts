@@ -14,6 +14,7 @@
 
 import { ref } from 'vue'
 import { logger } from '@/utils/logger'
+import { useToast } from '@/composables/useToast'
 
 export type ToastType = 'success' | 'error' | 'info'
 
@@ -34,18 +35,14 @@ export function useResourceManager(options: {
   const creating = ref(false)
   const selectedId = ref<string | null>(null)
   const deletingId = ref<string | null>(null)
-  const toast = ref<Toast | null>(null)
 
-  const toastDuration = options.toastDuration ?? 3000
+  const { showToast: showGlobalToast } = useToast()
 
   /**
-   * 显示一条浮动消息
+   * 显示一条浮动消息（委托给全局单例，见 composables/useToast.ts）
    */
   function showToast(type: ToastType, text: string) {
-    toast.value = { type, text }
-    setTimeout(() => {
-      if (toast.value?.text === text) toast.value = null
-    }, toastDuration)
+    showGlobalToast(type, text)
   }
 
   /**
@@ -102,7 +99,6 @@ export function useResourceManager(options: {
     creating,
     selectedId,
     deletingId,
-    toast,
 
     // 方法
     showToast,

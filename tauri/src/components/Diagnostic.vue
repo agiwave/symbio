@@ -76,7 +76,7 @@ const testMeta = async () => {
   margin: 1rem 0;
   padding: 1rem;
   background: #f5f5f5;
-  border-radius: 8px;
+  border-radius: 0.5rem;
 }
 
 .test-section h3 {
@@ -88,7 +88,7 @@ button {
   background: #667eea;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   cursor: pointer;
   margin-bottom: 1rem;
 }
@@ -100,7 +100,7 @@ button:disabled {
 pre {
   background: #fff;
   padding: 1rem;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   overflow-x: auto;
   white-space: pre-wrap;
 }

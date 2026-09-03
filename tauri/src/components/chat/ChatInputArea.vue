@@ -216,7 +216,7 @@ watch(modelValue, () => {
   gap: 0.5rem;
   background: var(--color-input-bg, #f5f5f5);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 0.75rem;
   padding: 0.5rem;
   transition: border-color 0.2s;
 }
@@ -228,8 +228,8 @@ watch(modelValue, () => {
 
 textarea {
   flex: 1;
-  min-height: 24px;
-  max-height: 120px;
+  min-height: 1.5rem;
+  max-height: 7.5rem;
   padding: 0.5rem;
   border: none;
   background: transparent;
@@ -241,14 +241,14 @@ textarea {
 }
 
 .send-btn, .attach-btn {
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 8px;
+  border-radius: 0.5rem;
   cursor: pointer;
   transition: all 0.2s;
   padding: 0;
@@ -273,9 +273,9 @@ textarea {
 
 .image-item {
   position: relative;
-  width: 80px;
-  height: 80px;
-  border-radius: 8px;
+  width: 5rem;
+  height: 5rem;
+  border-radius: 0.5rem;
   overflow: hidden;
   border: 1px solid var(--color-border);
 }
@@ -283,12 +283,12 @@ textarea {
 .image-item img { width: 100%; height: 100%; object-fit: cover; }
 .image-item .remove-image {
   position: absolute;
-  top: 4px; right: 4px;
-  width: 20px; height: 20px;
+  top: var(--space-1); right: var(--space-1);
+  width: 1.25rem; height: 1.25rem;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.6);
   color: white; border: none;
-  cursor: pointer; font-size: 14px;
+  cursor: pointer; font-size: 0.875rem;
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: opacity 0.2s;
 }

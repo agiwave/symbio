@@ -213,9 +213,9 @@ onBeforeUnmount(() => {
 }
 
 .spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid var(--color-border);
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0.1875rem solid var(--color-border);
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;

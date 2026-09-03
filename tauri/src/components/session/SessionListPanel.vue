@@ -16,7 +16,7 @@
       <span class="running-pulse" /> 运行中 {{ store.runningCount }} 个
     </div>
 
-    <div class="session-list" v-if="store.list.length">
+    <div class="session-list" role="listbox" aria-label="会话列表" v-if="store.list.length">
       <SessionCard
         v-for="s in store.list"
         :key="s.id"
@@ -125,11 +125,11 @@ async function onDelete(id: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 1.625rem;
+  height: 1.625rem;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
   color: var(--color-text-secondary);
   transition: all 0.15s;
@@ -154,8 +154,8 @@ async function onDelete(id: string) {
 
 .running-pulse {
   display: inline-block;
-  width: 7px;
-  height: 7px;
+  width: 0.4375rem;
+  height: 0.4375rem;
   background: #22c55e;
   border-radius: 50%;
   animation: pulse 1.4s ease-in-out infinite;

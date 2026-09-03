@@ -155,9 +155,9 @@ function getFileIcon(name: string): string {
 .node-content {
   display: flex;
   align-items: center;
-  padding: 4px 8px;
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   transition: background 0.15s;
   user-select: none;
 }
@@ -175,14 +175,14 @@ function getFileIcon(name: string): string {
 }
 
 .expand-icon {
-  width: 16px;
-  height: 16px;
+  width: 1rem;
+  height: 1rem;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 0.625rem;
   color: var(--color-text-muted);
-  margin-right: 2px;
+  margin-right: var(--space-05);
   flex-shrink: 0;
 }
 
@@ -199,9 +199,9 @@ function getFileIcon(name: string): string {
 }
 
 .mini-spinner {
-  width: 8px;
-  height: 8px;
-  border: 1.5px solid var(--color-border);
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 0.0938rem solid var(--color-border);
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;

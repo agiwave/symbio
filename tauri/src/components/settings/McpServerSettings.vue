@@ -206,7 +206,7 @@
                 type="number"
                 min="1"
                 placeholder="30"
-                style="max-width: 120px;"
+                style="max-width: 7.5rem;"
               />
             </div>
           </template>
@@ -566,7 +566,7 @@ watch(
   display: inline-block;
   padding: 0 0.35rem;
   background: rgba(0, 0, 0, 0.05);
-  border-radius: 3px;
+  border-radius: 0.1875rem;
   font-size: 0.65rem;
   color: var(--color-text-secondary);
   font-family: var(--font-mono, 'JetBrains Mono', Consolas, monospace);
@@ -578,7 +578,7 @@ watch(
 .badge {
   font-size: 0.65rem;
   padding: 0.1rem 0.45rem;
-  border-radius: 999px;
+  border-radius: 62.4375rem;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -596,7 +596,7 @@ watch(
 .header-actions-divider {
   display: inline-block;
   width: 1px;
-  height: 18px;
+  height: 1.125rem;
   background: var(--color-border);
   margin: 0 0.15rem;
   flex-shrink: 0;
@@ -607,11 +607,11 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 1.75rem;
+  height: 1.75rem;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
   color: var(--color-text-secondary);
   transition: all 0.15s;
@@ -641,7 +641,7 @@ watch(
   border: 1px solid var(--color-primary);
   background: var(--color-primary);
   color: #fff;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
   font-weight: 500;
   transition: all 0.15s;
@@ -685,7 +685,7 @@ watch(
 .empty-detail p {
   margin: 0;
   font-size: 0.85rem;
-  max-width: 360px;
+  max-width: 22.5rem;
 }
 
 /* ============ 表单主体 ============ */
@@ -719,7 +719,7 @@ watch(
 }
 
 .setting-info {
-  flex: 0 0 220px;
+  flex: 0 0 13.75rem;
   min-width: 0;
 }
 
@@ -751,7 +751,7 @@ watch(
   font-family: var(--font-mono, 'JetBrains Mono', Consolas, monospace);
   background: rgba(0, 0, 0, 0.05);
   padding: 0 0.25rem;
-  border-radius: 3px;
+  border-radius: 0.1875rem;
   font-size: 0.7rem;
 }
 
@@ -763,7 +763,7 @@ watch(
   min-width: 0;
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: 0.25rem;
   background: var(--color-bg);
   color: var(--color-text);
   font-size: 0.85rem;
@@ -778,7 +778,7 @@ watch(
 
 .setting-item textarea {
   resize: vertical;
-  min-height: 60px;
+  min-height: 3.75rem;
   line-height: 1.5;
 }
 
@@ -805,8 +805,8 @@ watch(
 .toggle {
   position: relative;
   display: inline-block;
-  width: 38px;
-  height: 22px;
+  width: 2.375rem;
+  height: 1.375rem;
   flex-shrink: 0;
 }
 
@@ -821,15 +821,15 @@ watch(
   cursor: pointer;
   top: 0; left: 0; right: 0; bottom: 0;
   background: #cbd5e1;
-  border-radius: 22px;
+  border-radius: 1.375rem;
   transition: 0.2s;
 }
 
 .toggle-slider::before {
   content: "";
   position: absolute;
-  height: 16px; width: 16px;
-  left: 3px; bottom: 3px;
+  height: 1rem; width: 1rem;
+  left: 0.1875rem; bottom: 0.1875rem;
   background: white;
   border-radius: 50%;
   transition: 0.2s;
@@ -840,14 +840,14 @@ watch(
 }
 
 .toggle input:checked + .toggle-slider::before {
-  transform: translateX(16px);
+  transform: translateX(1rem);
 }
 
 /* ============ 状态点 ============ */
 .status-dot {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 0.625rem;
+  height: 0.625rem;
   border-radius: 50%;
   background: #94a3b8;
 }

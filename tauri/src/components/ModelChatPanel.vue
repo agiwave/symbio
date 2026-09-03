@@ -595,7 +595,7 @@ watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'po
 
 .settings-divider {
   width: 1px;
-  height: 16px;
+  height: 1rem;
   background: var(--color-border);
   margin: 0 0.5rem;
   flex-shrink: 0;
@@ -634,7 +634,7 @@ watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'po
   line-height: 1;
   cursor: pointer;
   padding: 0 0.3rem;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   flex-shrink: 0;
 }
 
@@ -650,6 +650,6 @@ watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'po
 .banner-enter-from,
 .banner-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
+  transform: translateY(-0.5rem);
 }
 </style>

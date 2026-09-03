@@ -186,8 +186,8 @@ const dirty = computed(() => content.value !== originalContent.value)
 
 // 浮动按钮定位：固定贴在编辑器底部右下角，避开 header 与关闭按钮
 const floatingBtnStyle = computed(() => ({
-  bottom: '20px',
-  right: '20px'
+  bottom: '1.25rem',
+  right: '1.25rem'
 }))
 
 function readResponseToString(result: any): string {
@@ -462,7 +462,7 @@ onBeforeUnmount(() => {
   background: var(--color-surface);
   flex-shrink: 0;
   gap: 0.75rem;
-  min-height: 44px;
+  min-height: 2.75rem;
 }
 
 .header-left {
@@ -500,8 +500,8 @@ onBeforeUnmount(() => {
 .view-switch {
   display: flex;
   background: rgba(0, 0, 0, 0.06);
-  border-radius: 5px;
-  padding: 2px;
+  border-radius: 0.3125rem;
+  padding: var(--space-05);
 }
 
 .switch-btn {
@@ -509,7 +509,7 @@ onBeforeUnmount(() => {
   background: transparent;
   padding: 0.25rem 0.7rem;
   font-size: 0.78rem;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   cursor: pointer;
   color: var(--color-text-secondary);
   transition: all 0.12s;
@@ -546,11 +546,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 1.75rem;
+  height: 1.75rem;
   border: none;
   background: transparent;
-  border-radius: 5px;
+  border-radius: 0.3125rem;
   cursor: pointer;
   color: var(--color-text-secondary);
   transition: all 0.12s;
@@ -594,7 +594,7 @@ onBeforeUnmount(() => {
   gap: 0.35rem;
   padding: 0.4rem 0.8rem;
   border: none;
-  border-radius: 18px;
+  border-radius: 1.125rem;
   background: var(--color-primary);
   color: #fff;
   font-size: 0.8rem;
@@ -614,7 +614,7 @@ onBeforeUnmount(() => {
   font-size: 0.7rem;
   padding: 0.05rem 0.4rem;
   background: rgba(255, 255, 255, 0.22);
-  border-radius: 8px;
+  border-radius: 0.5rem;
 }
 
 .fade-pop-enter-active,
@@ -625,7 +625,7 @@ onBeforeUnmount(() => {
 .fade-pop-enter-from,
 .fade-pop-leave-to {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(0.375rem);
 }
 
 /* --- Markdown 预览样式 --- */
@@ -634,7 +634,7 @@ onBeforeUnmount(() => {
   height: 100%;
   overflow: auto;
   padding: 1.2rem 1.8rem;
-  max-width: 920px;
+  max-width: 57.5rem;
   margin: 0 auto;
   font-size: 0.95rem;
   line-height: 1.7;
@@ -665,7 +665,7 @@ onBeforeUnmount(() => {
   font-size: 0.88em;
   padding: 0.15em 0.4em;
   background: rgba(127, 127, 127, 0.12);
-  border-radius: 3px;
+  border-radius: 0.1875rem;
 }
 
 .md-content :deep(pre) {
@@ -673,7 +673,7 @@ onBeforeUnmount(() => {
   padding: 0.7em 0.9em;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border-radius: 0.3125rem;
   overflow: auto;
 }
 
@@ -692,7 +692,7 @@ onBeforeUnmount(() => {
 .md-content :deep(blockquote) {
   margin: 0.5em 0;
   padding: 0.3em 0.9em;
-  border-left: 3px solid var(--color-border);
+  border-left: 0.1875rem solid var(--color-border);
   color: var(--color-text-secondary);
 }
 
@@ -746,9 +746,9 @@ onBeforeUnmount(() => {
 .error-state { color: #ef4444; }
 
 .spinner {
-  width: 24px;
-  height: 24px;
-  border: 2.5px solid var(--color-border);
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0.1563rem solid var(--color-border);
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;

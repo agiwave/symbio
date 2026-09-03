@@ -112,7 +112,7 @@
           <div class="setting-item">
             <div class="setting-info">
               <label>上下文消息数量</label>
-              <p class="setting-desc">Model \u5bf9\u8bdd时包含的上下文消息数量（0 表示不限制，6 表示 3 轮对话）</p>
+              <p class="setting-desc">Model 对话时包含的上下文消息数量（0 表示不限制，6 表示 3 轮对话）</p>
             </div>
             <input v-model.number="sessionConfig.context_messages" type="number" min="0" max="200" />
           </div>
@@ -368,22 +368,22 @@ onMounted(() => loadConfigs())
 <style scoped>
 /* 保持原有样式不变 */
 .settings-page { display: flex; height: 100%; width: 100%; }
-.settings-nav { width: 200px; background: var(--color-surface); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; flex-shrink: 0; }
+.settings-nav { width: 12.5rem; background: var(--color-surface); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; flex-shrink: 0; }
 .nav-header { padding: 1rem; border-bottom: 1px solid var(--color-border); }
 .nav-header h3 { font-size: 0.875rem; font-weight: 600; color: var(--color-text-secondary); }
 .nav-items { padding: 0.5rem; }
-.nav-item { width: 100%; display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border: none; background: transparent; border-radius: 8px; cursor: pointer; text-align: left; transition: background 0.2s; }
+.nav-item { width: 100%; display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border: none; background: transparent; border-radius: 0.5rem; cursor: pointer; text-align: left; transition: background 0.2s; }
 .nav-item:hover { background: #f0f0f0; }
 .nav-item.active { background: #e8e8f0; }
 .nav-icon { font-size: 1rem; }
 .nav-label { font-size: 0.875rem; color: var(--color-text); }
 .settings-content { flex: 1; padding: 2rem 3rem; overflow-y: auto; }
 .content-section h2 { font-size: 1.25rem; margin-bottom: 1.5rem; }
-.setting-group { background: var(--color-surface); border-radius: 12px; padding: 0.5rem; }
-.message { padding: 0.75rem 1rem; margin-bottom: 1rem; border-radius: 8px; font-size: 0.875rem; }
+.setting-group { background: var(--color-surface); border-radius: 0.75rem; padding: 0.5rem; }
+.message { padding: 0.75rem 1rem; margin-bottom: 1rem; border-radius: 0.5rem; font-size: 0.875rem; }
 .message.success { background: #d4edda; color: #155724; }
 .message.error { background: #f8d7da; color: #721c24; }
-.setting-item { display: flex; align-items: center; padding: 1rem; border-radius: 8px; }
+.setting-item { display: flex; align-items: center; padding: 1rem; border-radius: 0.5rem; }
 .setting-item:hover { background: #fafafa; }
 .setting-info { flex: 1; }
 .setting-info label { display: block; font-weight: 500; margin-bottom: 0.25rem; }
@@ -398,68 +398,68 @@ onMounted(() => loadConfigs())
   background: #eef2ff;
   color: #4338ca;
   padding: 0.25rem 0.6rem;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.8rem;
 }
 .provider-divider { color: var(--color-text-muted); }
 .provider-model { font-size: 0.85rem; }
-.setting-item select, .setting-item input[type="text"], .setting-item input[type="password"], .setting-item input[type="number"] { padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; min-width: 200px; font-size: 0.875rem; }
-.setting-item input[type="number"] { width: 100px; min-width: auto; }
-.toggle { position: relative; display: inline-block; width: 48px; height: 24px; }
+.setting-item select, .setting-item input[type="text"], .setting-item input[type="password"], .setting-item input[type="number"] { padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 0.375rem; min-width: 12.5rem; font-size: 0.875rem; }
+.setting-item input[type="number"] { width: 6.25rem; min-width: auto; }
+.toggle { position: relative; display: inline-block; width: 3rem; height: 1.5rem; }
 .toggle input { opacity: 0; width: 0; height: 0; }
-.toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: 0.3s; border-radius: 24px; }
-.toggle-slider::before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: 0.3s; border-radius: 50%; }
+.toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: 0.3s; border-radius: 1.5rem; }
+.toggle-slider::before { position: absolute; content: ""; height: 1.125rem; width: 1.125rem; left: 0.1875rem; bottom: 0.1875rem; background-color: white; transition: 0.3s; border-radius: 50%; }
 .toggle input:checked + .toggle-slider { background-color: var(--color-primary); }
-.toggle input:checked + .toggle-slider::before { transform: translateX(24px); }
-.action-btn { padding: 0.5rem 1rem; background: var(--color-primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; }
+.toggle input:checked + .toggle-slider::before { transform: translateX(1.5rem); }
+.action-btn { padding: 0.5rem 1rem; background: var(--color-primary); color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.875rem; }
 /* 分段选择控件 */
-.segmented { display: inline-flex; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 8px; padding: 2px; }
-.seg-btn { padding: 0.375rem 0.9rem; border: none; background: transparent; border-radius: 6px; color: var(--color-text-secondary); cursor: pointer; font-size: 0.875rem; transition: background 0.15s, color 0.15s; }
+.segmented { display: inline-flex; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 0.5rem; padding: 0.125rem; }
+.seg-btn { padding: 0.375rem 0.9rem; border: none; background: transparent; border-radius: 0.375rem; color: var(--color-text-secondary); cursor: pointer; font-size: 0.875rem; transition: background 0.15s, color 0.15s; }
 .seg-btn:hover { color: var(--color-text); }
 .seg-btn.active { background: var(--color-surface); color: var(--color-primary); font-weight: 500; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
 /* 外观预览卡片 */
 .appearance-preview { padding: 1rem; border-top: 1px solid var(--color-border); }
 .preview-title { font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 0.75rem; }
-.preview-card { border: 1px solid var(--color-border); border-radius: 10px; padding: 1rem 1.25rem; background: var(--color-bg); }
+.preview-card { border: 1px solid var(--color-border); border-radius: 0.625rem; padding: 1rem 1.25rem; background: var(--color-bg); }
 .preview-card h4 { font-size: 1.125rem; margin-bottom: 0.4rem; color: var(--color-text); }
 .preview-card p { font-size: 0.875rem; color: var(--color-text-secondary); margin-bottom: 0.75rem; }
-.preview-chip { padding: 0.3rem 0.75rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-primary); font-size: 0.8rem; cursor: default; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.preview-chip { padding: 0.3rem 0.75rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.375rem; color: var(--color-primary); font-size: 0.8rem; cursor: default; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .setting-divider { height: 1px; background: var(--color-border); margin: 1rem 0; }
 .about-info { text-align: center; padding: 3rem; }
-.app-logo { width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem; }
+.app-logo { width: 5rem; height: 5rem; border-radius: 1rem; margin-bottom: 1rem; }
 .about-info h1 { font-size: 2rem; margin-bottom: 0.5rem; }
 .version { color: var(--color-text-muted); margin-bottom: 1rem; }
 .description { color: var(--color-text-secondary); margin-bottom: 2rem; }
 .links { display: flex; gap: 1rem; justify-content: center; }
-.link-btn { padding: 0.5rem 1.5rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text); text-decoration: none; transition: background 0.2s; }
+.link-btn { padding: 0.5rem 1.5rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.375rem; color: var(--color-text); text-decoration: none; transition: background 0.2s; }
 .link-btn:hover { background: #f0f0f0; }
-.recent-list { display: flex; flex-direction: column; gap: 0.25rem; max-width: 300px; }
-.recent-item { font-size: 0.75rem; color: var(--color-text-muted); padding: 0.25rem 0.5rem; background: #f5f5f5; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-list { display: flex; flex-direction: column; gap: 0.25rem; max-width: 18.75rem; }
+.recent-item { font-size: 0.75rem; color: var(--color-text-muted); padding: 0.25rem 0.5rem; background: #f5f5f5; border-radius: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .section-desc { color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 1rem; }
 .mcp-servers { display: flex; flex-direction: column; gap: 0.75rem; }
-.mcp-server-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; padding: 1rem; }
+.mcp-server-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.5rem; padding: 1rem; }
 .server-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
 .server-name { font-weight: 600; font-size: 0.95rem; }
 .server-actions { display: flex; align-items: center; gap: 0.5rem; }
 .server-info { display: flex; flex-direction: column; gap: 0.25rem; }
-.server-info code { background: #f0f0f0; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }
+.server-info code { background: #f0f0f0; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; }
 .server-info .args { color: var(--color-text-muted); font-size: 0.75rem; }
-.icon-btn { background: transparent; border: none; cursor: pointer; font-size: 0.875rem; padding: 0.25rem; border-radius: 4px; }
+.icon-btn { background: transparent; border: none; cursor: pointer; font-size: 0.875rem; padding: 0.25rem; border-radius: 0.25rem; }
 .icon-btn:hover { background: #f0f0f0; }
 .icon-btn.danger:hover { background: #fee; }
-.add-server-btn { padding: 0.75rem; border: 2px dashed var(--color-border); border-radius: 8px; background: transparent; color: var(--color-text-muted); cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
+.add-server-btn { padding: 0.75rem; border: 0.125rem dashed var(--color-border); border-radius: 0.5rem; background: transparent; color: var(--color-text-muted); cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
 .add-server-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
-.toggle.small { width: 36px; height: 18px; }
-.toggle.small .toggle-slider::before { height: 12px; width: 12px; }
-.toggle.small input:checked + .toggle-slider::before { transform: translateX(18px); }
+.toggle.small { width: 2.25rem; height: 1.125rem; }
+.toggle.small .toggle-slider::before { height: 0.75rem; width: 0.75rem; }
+.toggle.small input:checked + .toggle-slider::before { transform: translateX(1.125rem); }
 .dialog-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.dialog { background: white; border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
+.dialog { background: white; border-radius: 0.75rem; padding: 1.5rem; width: 100%; max-width: 30rem; max-height: 90vh; overflow-y: auto; }
 .dialog h3 { margin-bottom: 1rem; }
 .form-group { margin-bottom: 1rem; }
 .form-group label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem; }
-.form-group input, .form-group textarea { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.875rem; box-sizing: border-box; }
+.form-group input, .form-group textarea { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 0.375rem; font-size: 0.875rem; box-sizing: border-box; }
 .form-group textarea { font-family: monospace; }
 .checkbox-label { display: flex !important; align-items: center; gap: 0.5rem; cursor: pointer; }
 .checkbox-label input { width: auto; }

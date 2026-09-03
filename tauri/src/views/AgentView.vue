@@ -33,7 +33,7 @@
     </template>
 
     <template #list>
-      <div class="agent-list">
+      <div class="agent-list" role="listbox" aria-label="Agent 列表">
         <ResourceCard
           v-for="agent in agents"
           :key="agent.id"
@@ -89,14 +89,6 @@
         <p>← 选择一个 Agent 查看详情</p>
       </div>
     </template>
-
-    <template #toast>
-      <Transition name="toast">
-        <div v-if="toast" :class="['toast', toast.type]" @click="toast = null">
-          {{ toast.text }}
-        </div>
-      </Transition>
-    </template>
   </ResourceShell>
 </template>
 
@@ -112,7 +104,6 @@ const {
   loading,
   selectedId,
   deletingId,
-  toast,
   showToast,
   select,
   markDeleting,
@@ -219,7 +210,7 @@ onMounted(() => loadAll())
   display: block;
   padding: 0.5rem 0.75rem;
   background: rgba(0, 0, 0, 0.04);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   font-size: 0.8rem;
   font-family: 'Menlo', 'Monaco', monospace;
   word-break: break-all;
@@ -235,7 +226,7 @@ onMounted(() => loadAll())
 .btn {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   font-size: 0.85rem;
   cursor: pointer;
   transition: all 0.15s;
@@ -273,35 +264,5 @@ onMounted(() => loadAll())
   justify-content: center;
   color: var(--color-text-muted, #6b7280);
   font-size: 0.9rem;
-}
-
-/* Toast */
-.toast {
-  position: absolute;
-  bottom: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 0.6rem 1rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  color: #fff;
-  background: #333;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  cursor: pointer;
-  z-index: 100;
-}
-
-.toast.success { background: #22c55e; }
-.toast.error { background: #ef4444; }
-.toast.info { background: #3b82f6; }
-
-.toast-enter-active,
-.toast-leave-active {
-  transition: all 0.2s ease;
-}
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(10px);
 }
 </style>

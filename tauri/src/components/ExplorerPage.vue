@@ -495,7 +495,7 @@ function getFileIcon(name: string): string {
 
 /* 文件树 */
 .file-tree {
-  width: var(--panel-width, 280px);
+  width: var(--panel-width, 17.5rem);
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
   display: flex;
@@ -524,12 +524,12 @@ function getFileIcon(name: string): string {
 }
 
 .icon-btn {
-  width: 24px;
-  height: 24px;
+  width: 1.5rem;
+  height: 1.5rem;
   border: none;
   background: transparent;
   color: var(--color-text-secondary);
-  border-radius: 4px;
+  border-radius: 0.25rem;
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
@@ -594,7 +594,7 @@ function getFileIcon(name: string): string {
   font-family: 'Fira Code', 'Consolas', monospace;
   background: #f5f5f5;
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 0.25rem;
 }
 
 .content-actions {
@@ -603,11 +603,11 @@ function getFileIcon(name: string): string {
 }
 
 .action-btn {
-  width: 32px;
-  height: 32px;
+  width: 2rem;
+  height: 2rem;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
   font-size: 1rem;
   transition: background 0.2s;
@@ -653,7 +653,7 @@ function getFileIcon(name: string): string {
   flex: 1;
   min-height: 0;
   border: 1px solid var(--border-color, #e0e0e0);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   overflow: hidden;
 }
 
@@ -679,7 +679,7 @@ function getFileIcon(name: string): string {
 }
 
 .dir-size {
-  width: 80px;
+  width: 5rem;
   text-align: right;
 }
 
@@ -694,7 +694,7 @@ function getFileIcon(name: string): string {
   display: flex;
   align-items: center;
   padding: 0.5rem 0.75rem;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
   transition: background 0.2s;
   gap: 0.5rem;
@@ -710,7 +710,7 @@ function getFileIcon(name: string): string {
 
 .item-icon {
   font-size: 1rem;
-  width: 20px;
+  width: 1.25rem;
   text-align: center;
 }
 
@@ -722,7 +722,7 @@ function getFileIcon(name: string): string {
 }
 
 .item-size {
-  width: 80px;
+  width: 5rem;
   text-align: right;
   font-size: 0.75rem;
   color: var(--color-text-muted);
@@ -742,7 +742,7 @@ function getFileIcon(name: string): string {
   flex: 1;
   min-height: 0;
   border: 1px solid var(--border-color, #e0e0e0);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   overflow: hidden;
 }
 
@@ -751,7 +751,7 @@ function getFileIcon(name: string): string {
   background: #1e1e1e;
   color: #d4d4d4;
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: 0.5rem;
   overflow: auto;
   font-family: 'Fira Code', 'Consolas', monospace;
   font-size: 0.875rem;
@@ -787,9 +787,9 @@ function getFileIcon(name: string): string {
 }
 
 .loading-file .spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--color-border);
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 0.1875rem solid var(--color-border);
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -807,7 +807,7 @@ function getFileIcon(name: string): string {
 
 /* Model \u5bf9\u8bdd侧边栏 */
 .chat-sidebar {
-  width: 320px;
+  width: 20rem;
   background: var(--color-surface);
   border-left: 1px solid var(--color-border);
   display: flex;
@@ -830,14 +830,14 @@ function getFileIcon(name: string): string {
 }
 
 .close-btn {
-  width: 24px;
-  height: 24px;
+  width: 1.5rem;
+  height: 1.5rem;
   border: none;
   background: transparent;
   cursor: pointer;
   font-size: 1.25rem;
   color: var(--color-text-muted);
-  border-radius: 4px;
+  border-radius: 0.25rem;
 }
 
 .close-btn:hover {
@@ -857,7 +857,7 @@ function getFileIcon(name: string): string {
 
 /* 拖动手柄样式 */
 .chat-resize-handle {
-  width: 6px;
+  width: 0.375rem;
   cursor: col-resize;
   background: transparent;
   flex-shrink: 0;

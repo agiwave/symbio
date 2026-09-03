@@ -123,13 +123,13 @@ function onBodyClick() {
 .context-card {
   position: relative;
   margin-bottom: 0.5rem;
-  padding: 8px 12px 10px;
+  padding: var(--space-2) var(--space-3) 0.625rem;
   background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(37, 99, 235, 0.06));
   border: 1px solid rgba(124, 58, 237, 0.18);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0.375rem;
   transition: box-shadow 0.15s, border-color 0.15s;
 }
 
@@ -147,40 +147,40 @@ function onBodyClick() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 22px;
+  gap: var(--space-2);
+  min-height: 1.375rem;
 }
 
 .ctx-header-left {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   min-width: 0;
   flex: 1;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .ctx-header-right {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-05);
   flex-shrink: 0;
 }
 
-.ctx-icon { font-size: 12px; }
+.ctx-icon { font-size: 0.75rem; }
 
 .ctx-label {
-  font-size: 10px;
+  font-size: 0.625rem;
   color: #7c3aed;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.0313rem;
   font-weight: 700;
 }
 
 .ctx-sep {
   color: var(--color-text-muted);
-  margin: 0 2px;
+  margin: 0 var(--space-05);
   opacity: 0.6;
 }
 
@@ -188,29 +188,29 @@ function onBodyClick() {
 .ctx-lines {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-05);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--color-text-secondary);
 }
 
 .ctx-file-name {
-  max-width: 180px;
+  max-width: 11.25rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .ctx-session-warn {
-  font-size: 9px;
+  font-size: 0.5625rem;
   color: #b45309;
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.32);
-  border-radius: 3px;
-  padding: 1px 5px;
-  margin-right: 4px;
+  border-radius: 0.1875rem;
+  padding: 1px 0.3125rem;
+  margin-right: var(--space-1);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.0188rem;
 }
 
 /* 操作按钮 */
@@ -218,11 +218,11 @@ function onBodyClick() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 1.375rem;
+  height: 1.375rem;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   cursor: pointer;
   color: var(--color-text-muted);
   transition: all 0.12s;
@@ -236,18 +236,18 @@ function onBodyClick() {
 /* 主体：代码块 */
 .ctx-body {
   position: relative;
-  padding: 6px 10px;
+  padding: 0.375rem 0.625rem;
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(124, 58, 237, 0.1);
-  border-radius: 5px;
+  border-radius: 0.3125rem;
   cursor: text;
-  max-height: 60px;
+  max-height: 3.75rem;
   overflow: hidden;
   transition: max-height 0.2s ease;
 }
 
 .context-card.expanded .ctx-body {
-  max-height: 240px;
+  max-height: 15rem;
   overflow: auto;
 }
 
@@ -258,7 +258,7 @@ function onBodyClick() {
 .ctx-code {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   line-height: 1.5;
   color: #1f2937;
   white-space: pre;
@@ -273,7 +273,7 @@ function onBodyClick() {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 22px;
+  height: 1.375rem;
   background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.95));
   pointer-events: none;
 }
@@ -281,8 +281,8 @@ function onBodyClick() {
 .ctx-body-file {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -303,6 +303,6 @@ function onBodyClick() {
 .ctx-fade-enter-from,
 .ctx-fade-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-0.25rem);
 }
 </style>

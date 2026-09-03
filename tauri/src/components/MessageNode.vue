@@ -709,7 +709,7 @@ function highlightJsonString(s: string): string {
 .msg.nested {
   margin-left: var(--nest-indent, 0.7rem);
   padding-left: var(--nest-indent, 0.7rem);
-  border-left: 2px solid var(--color-nested-line);
+  border-left: 0.125rem solid var(--color-nested-line);
 }
 
 /* ── 根级 Turn 响应分组（透明容器）──
@@ -740,11 +740,11 @@ function highlightJsonString(s: string): string {
 }
 .turn-pending-dots {
   display: inline-flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 .turn-pending-dots span {
-  width: 6px;
-  height: 6px;
+  width: 0.375rem;
+  height: 0.375rem;
   border-radius: 50%;
   background: var(--color-primary);
   animation: turn-pulse 1.2s infinite ease-in-out;
@@ -852,7 +852,7 @@ function highlightJsonString(s: string): string {
 .msg :deep(.markdown-body code) {
   background: var(--color-msg-card);
   padding: 0.1rem 0.3rem;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.85em;
 }
@@ -860,7 +860,7 @@ function highlightJsonString(s: string): string {
   background: var(--color-code-bg);
   color: var(--color-code-fg);
   padding: 0.6rem 0.8rem;
-  border-radius: 8px;
+  border-radius: 0.5rem;
   overflow-x: auto;
   margin: 0.5rem 0;
 }
@@ -872,7 +872,7 @@ function highlightJsonString(s: string): string {
 .msg :deep(.markdown-body blockquote) {
   margin: 0.5rem 0;
   padding-left: 0.8rem;
-  border-left: 3px solid var(--color-border, #e2e8f0);
+  border-left: 0.1875rem solid var(--color-border, #e2e8f0);
   color: var(--color-text-secondary, #475569);
 }
 .msg :deep(.markdown-body table) {
@@ -889,7 +889,7 @@ function highlightJsonString(s: string): string {
 }
 .msg :deep(.markdown-body img) {
   max-width: 100%;
-  border-radius: 6px;
+  border-radius: 0.375rem;
 }
 
 /* ── 统一节点头部（所有节点一致）── */
@@ -901,7 +901,7 @@ function highlightJsonString(s: string): string {
   user-select: none;
   padding: 0.16rem 0.3rem;
   margin: 0 -0.3rem;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   font-size: 0.8rem;
   transition: background 0.12s ease;
 }
@@ -920,9 +920,9 @@ function highlightJsonString(s: string): string {
   order: 2;
 }
 .node-icon {
-  width: 18px;
-  height: 18px;
-  border-radius: 6px;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 0.375rem;
   font-size: 0.62rem;
   display: flex;
   align-items: center;
@@ -995,9 +995,9 @@ function highlightJsonString(s: string): string {
   border: none;
   background: rgba(100, 116, 139, 0.1);
   color: var(--color-chip-fg);
-  border-radius: 4px;
-  width: 18px;
-  height: 18px;
+  border-radius: 0.25rem;
+  width: 1.125rem;
+  height: 1.125rem;
   font-size: 0.7rem;
   line-height: 1;
   cursor: pointer;
@@ -1013,7 +1013,7 @@ function highlightJsonString(s: string): string {
 .node-tag {
   font-size: 0.68rem;
   padding: 0.05rem 0.4rem;
-  border-radius: 999px;
+  border-radius: 62.4375rem;
 }
 .node-tag.sub {
   background: var(--color-tag-sub-bg);
@@ -1034,7 +1034,7 @@ function highlightJsonString(s: string): string {
   font-weight: 500;
   color: #ef4444;
   background: rgba(239, 68, 68, 0.12);
-  border-radius: 4px;
+  border-radius: 0.25rem;
   padding: 0 0.35rem;
   margin-left: 0.25rem;
   flex-shrink: 0;
@@ -1060,7 +1060,7 @@ function highlightJsonString(s: string): string {
   max-width: 80%;
   background: var(--color-user-bubble);
   color: var(--color-user-bubble-fg);
-  border-radius: 14px 14px 4px 14px;
+  border-radius: 0.875rem 0.875rem 0.25rem 0.875rem;
   padding: 0.6rem 0.85rem;
 }
 /* 气泡内的 markdown 直接继承白色，避免被全局深色 .markdown-body 规则覆盖 */
@@ -1117,17 +1117,17 @@ function highlightJsonString(s: string): string {
   padding: 0.5rem 0.6rem;
   background: var(--color-code-bg);
   color: var(--color-code-fg);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.76rem;
   line-height: 1.5;
   overflow-x: auto;
-  max-height: 320px;
+  max-height: 20rem;
   white-space: pre;
 }
 /* 工具请求参数：在深色代码块左侧加一道蓝色强调边，强化「请求」语义 */
 .json.req {
-  border-left: 3px solid var(--color-user-bubble);
+  border-left: 0.1875rem solid var(--color-user-bubble);
 }
 /* 工具调用三段式卡片：请求 / 过程 / 结果（各自独立响应流，纵向排列） */
 .tool-sections {
@@ -1166,7 +1166,7 @@ function highlightJsonString(s: string): string {
 .user-prompt {
   border: 1px solid var(--color-prompt-border);
   background: var(--color-prompt-bg);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   padding: 0.6rem 0.7rem;
   display: flex;
   flex-direction: column;
@@ -1200,7 +1200,7 @@ function highlightJsonString(s: string): string {
   gap: 0.4rem;
   padding: 0.3rem 0.45rem;
   border: 1px solid var(--color-option-border);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   background: var(--color-option-bg);
   font-size: 0.8rem;
   cursor: pointer;
@@ -1223,7 +1223,7 @@ function highlightJsonString(s: string): string {
 .up-other-input {
   flex: 1;
   border: 1px solid var(--color-option-border);
-  border-radius: 4px;
+  border-radius: 0.25rem;
   padding: 0.2rem 0.4rem;
   font-size: 0.78rem;
 }
@@ -1232,7 +1232,7 @@ function highlightJsonString(s: string): string {
   background: var(--color-primary);
   color: #fff;
   border: none;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   padding: 0.35rem 0.9rem;
   font-size: 0.8rem;
   cursor: pointer;
@@ -1260,7 +1260,7 @@ function highlightJsonString(s: string): string {
 .up-risk {
   font-size: 0.68rem;
   padding: 0.05rem 0.4rem;
-  border-radius: 999px;
+  border-radius: 62.4375rem;
   background: var(--color-chip-bg);
   color: var(--color-chip-fg);
 }
@@ -1281,12 +1281,12 @@ function highlightJsonString(s: string): string {
   padding: 0.5rem 0.6rem;
   background: var(--color-code-bg);
   color: var(--color-code-fg);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.74rem;
   line-height: 1.5;
   overflow-x: auto;
-  max-height: 240px;
+  max-height: 15rem;
   white-space: pre;
 }
 .up-confirm-btns {
@@ -1297,7 +1297,7 @@ function highlightJsonString(s: string): string {
 .up-reject {
   flex: 1;
   padding: 0.35rem;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   font-size: 0.8rem;
   cursor: pointer;
   border: 1px solid transparent;
@@ -1324,7 +1324,7 @@ function highlightJsonString(s: string): string {
   gap: 0.4rem;
   background: var(--color-error-bg);
   border: 1px solid var(--color-error-border);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   padding: 0.45rem 0.6rem;
   font-size: 0.8rem;
   color: var(--color-error-fg);
@@ -1341,7 +1341,7 @@ function highlightJsonString(s: string): string {
   background: var(--color-option-bg);
   border: 1px solid var(--color-error-border);
   color: var(--color-error-fg);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   padding: 0.2rem 0.6rem;
   font-size: 0.76rem;
   cursor: pointer;
@@ -1356,7 +1356,7 @@ function highlightJsonString(s: string): string {
   background: var(--color-supply-bg);
   border: 1px solid var(--color-prompt-border);
   color: var(--color-chip-tool-fg);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   padding: 0.2rem 0.6rem;
   font-size: 0.76rem;
   cursor: pointer;
@@ -1370,14 +1370,14 @@ function highlightJsonString(s: string): string {
   gap: 0.35rem;
   background: var(--color-msg-card);
   border: 1px solid var(--color-supply-border);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   padding: 0.5rem 0.6rem;
 }
 .supply-textarea {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--color-supply-border);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   padding: 0.35rem 0.45rem;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.76rem;
@@ -1393,7 +1393,7 @@ function highlightJsonString(s: string): string {
   background: var(--color-primary);
   color: #fff;
   border: none;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   padding: 0.3rem 0.9rem;
   font-size: 0.78rem;
   cursor: pointer;

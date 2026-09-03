@@ -1,0 +1,280 @@
+/* =============================================================================
+ * Symbio 前端设计令牌（Design Tokens）
+ * -----------------------------------------------------------------------------
+ * 单一令牌来源：浅色 :root + 深色 :root[data-theme="dark"] 各一套。
+ * 现有 --color-* 作为「别名层」映射到新的语义令牌，保证：
+ *   1. 已完成的会话区改造零改动、零回退；
+ *   2. 5 个「被引用但未定义」的令牌（--color-border-subtle / --font-mono /
+ *      --color-primary-hover / --color-text-primary / --border-color）与
+ *      4 个「仅深色存在」的令牌（--color-input-bg / --color-surface-strong /
+ *      --color-hover-bg / --color-active-bg）在浅色下也得到真实值。
+ * ============================================================================= */
+
+:root {
+  /* ── 表面 surface ─────────────────────────────────────────────── */
+  --surface-page:        #f6f7f9;   /* 页面底 / 应用背景（替代 --color-bg） */
+  --surface-panel:       #ffffff;   /* 侧栏、面板、详情区（替代 --color-surface） */
+  --surface-card:        #ffffff;   /* 卡片、列表项抬高态 */
+  --surface-sunken:      #f0f2f5;   /* 输入框、代码块、凹陷区（替代 --color-input-bg） */
+  --surface-overlay:     #ffffff;   /* 对话框、菜单、Tooltip、Toast（替代 --color-surface-strong） */
+  --surface-hover:       rgba(15, 23, 42, 0.05);   /* hover 叠加（替代 rgba(0,0,0,…)） */
+  --surface-active:      rgba(15, 23, 42, 0.09);   /* pressed / active 叠加 */
+  --surface-selected:    rgba(79, 70, 229, 0.08);  /* 列表项选中底色 */
+
+  /* ── 文本 text ────────────────────────────────────────────────── */
+  --text-primary:        #181c25;   /* 正文 / 标题 */
+  --text-secondary:      #4b5563;   /* 次级说明 */
+  --text-muted:          #6b7280;   /* 元信息 / 占位（修正原 #999999 2.85:1 → 4.83:1） */
+  --text-disabled:       #9aa3b0;   /* 禁用态 */
+  --text-inverse:        #ffffff;   /* 反色表面前景 */
+  --text-on-accent:      #ffffff;   /* 主色填充上的前景 */
+
+  /* ── 描边 border ──────────────────────────────────────────────── */
+  --border-subtle:       #eceef2;   /* hairline 分隔线（补齐 --color-border-subtle） */
+  --border-default:      #dfe3ea;   /* 常规描边（替代 --color-border） */
+  --border-strong:       #c6ccd8;   /* 输入框 hover / 强调描边 */
+
+  /* ── 强调色 accent ────────────────────────────────────────────── */
+  --accent:              #4f46e5;   /* 浅色主色：#667eea → #4f46e5（白字 3.66:1 → 6.29:1） */
+  --accent-hover:        #4338ca;
+  --accent-active:       #3730a3;
+  --accent-subtle-bg:    rgba(79, 70, 229, 0.10);
+  --accent-subtle-border: rgba(79, 70, 229, 0.30);
+
+  /* ── 语义色 semantic ──────────────────────────────────────────── */
+  --success-fg:   #15803d;  --success-bg:   #ecfdf3;  --success-solid:   #16a34a;
+  --warning-fg:   #b45309;  --warning-bg:   #fffbeb;  --warning-solid:   #f59e0b;
+  --danger-fg:    #b91c1c;  --danger-bg:    #fef2f2;  --danger-solid:    #dc2626;
+  --info-fg:      #1d4ed8;  --info-bg:      #eff6ff;  --info-solid:      #3b82f6;
+
+  /* ── 圆角 radius ─────────────────────────────────────────────── */
+  --radius-xs: 0.1875rem;   /* 3px */
+  --radius-sm: 0.25rem;     /* 4px */
+  --radius-md: 0.375rem;    /* 6px 默认控件 */
+  --radius-lg: 0.5rem;      /* 8px 卡片 / 列表项 / 面板 */
+  --radius-xl: 0.75rem;     /* 12px 对话框 / 浮层 */
+  --radius-full: 999px;     /* 药丸 / 圆形，只需够大，不参与等比 */
+
+  /* ── 间距 space（4pt 基准）────────────────────────────────────── */
+  --space-0:  0;
+  --space-05: 0.125rem;  /* 2px  */
+  --space-1:  0.25rem;   /* 4px  */
+  --space-2:  0.5rem;    /* 8px  */
+  --space-3:  0.75rem;   /* 12px */
+  --space-4:  1rem;      /* 16px */
+  --space-5:  1.5rem;    /* 24px */
+  --space-6:  2rem;      /* 32px */
+
+  /* ── 字体 font ────────────────────────────────────────────────── */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+               'Microsoft YaHei', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular,
+               Menlo, Consolas, monospace;   /* 补齐未定义令牌 */
+
+  --font-size-xs:   0.6875rem;  /* 11px */
+  --font-size-sm:   0.75rem;    /* 12px */
+  --font-size-base: 0.875rem;   /* 14px 正文 */
+  --font-size-md:   1rem;       /* 16px */
+  --font-size-lg:   1.125rem;   /* 18px 小节标题 */
+  --font-size-xl:   1.25rem;    /* 20px 页面标题 */
+  --font-size-2xl:  1.5rem;     /* 24px 仅「关于」页 */
+
+  --font-weight-regular:  400;
+  --font-weight-medium:   500;
+  --font-weight-semibold: 600;
+  --font-weight-bold:     700;
+
+  --line-height-tight:   1.35;
+  --line-height-normal:  1.5;
+  --line-height-relaxed: 1.6;
+
+  /* ── 阴影 / 动效 / 焦点环 / 控件尺寸 ──────────────────────────── */
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06);          /* hover 微抬升 */
+  --shadow-2: 0 8px 24px rgba(16, 24, 40, 0.12);         /* 浮层 */
+  --motion-fast: 120ms;
+  --motion-base: 160ms;
+  --motion-slow: 240ms;
+  --motion-ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --focus-ring-width:  0.125rem;   /* 2px */
+  --focus-ring-offset: 0.125rem;   /* 2px */
+  --focus-ring-color:  var(--accent);
+  --control-height-sm: 1.5rem;     /* 24px */
+  --control-height-md: 1.75rem;    /* 28px */
+  --control-height-lg: 2rem;       /* 32px */
+  --hit-target-min:    1.5rem;     /* 24px */
+  --z-overlay: 1000;
+  --z-dialog:  1500;
+  --z-toast:   2000;
+  --z-tooltip: 2500;
+
+  /* ── 模态遮罩（取代 rgba(0,0,0,…) 硬编码，浅/深两态各一值）──────── */
+  --overlay: rgba(15, 23, 42, 0.45);
+
+  /* ── 布局尺寸（保留，防回退）─────────────────────────────────── */
+  --sidebar-width: 3.5rem;   /* 56px 图标窄条 */
+  --panel-width:   17.5rem;  /* 280px */
+  --header-height: 3rem;     /* 48px */
+
+  /* ── 会话区语义令牌（原样保留，零回退）───────────────────────── */
+  --color-chat-bg: #ffffff;
+  --color-msg-card: #f6f8fb;
+  --color-msg-card-border: #e8edf4;
+  --msg-gap: 0.45rem;
+  --color-nested-line: #e8edf4;
+  --color-chip-bg: #eef2f7;
+  --color-chip-fg: #64748b;
+  --color-chip-user-bg: #dbeafe;
+  --color-chip-user-fg: #2563eb;
+  --color-chip-sub-bg: #e0f2fe;
+  --color-chip-sub-fg: #0284c7;
+  --color-chip-tool-bg: #eef2ff;
+  --color-chip-tool-fg: #4f46e5;
+  --color-chip-reasoning-bg: #f3e8ff;
+  --color-chip-reasoning-fg: #7c3aed;
+  --color-user-bubble: #2563eb;
+  --color-user-bubble-fg: #ffffff;
+  --color-code-bg: #0f172a;
+  --color-code-fg: #e2e8f0;
+  --color-prompt-bg: #eef2ff;
+  --color-prompt-border: #c7d2fe;
+  --color-error-bg: #fef2f2;
+  --color-error-border: #fecaca;
+  --color-error-fg: #b91c1c;
+  --color-supply-bg: #ffffff;
+  --color-supply-border: #dbe2f0;
+  --color-option-bg: #ffffff;
+  --color-option-border: #dbe2f0;
+  --color-option-active-bg: #eef2ff;
+  --color-option-active-border: #6366f1;
+  --color-tag-sub-bg: #e0e7ff;
+  --color-tag-sub-fg: #4338ca;
+  --color-tag-warn-bg: #fef3c7;
+  --color-tag-warn-fg: #92400e;
+  --color-tag-err-bg: #fee2e2;
+  --color-tag-err-fg: #b91c1c;
+  --color-banner-bg: #fef3c7;
+  --color-banner-border: #f59e0b;
+  --color-banner-fg: #92400e;
+
+  /* ── 别名层：将旧 --color-* 映射到新语义令牌 ──────────────────── */
+  --color-bg:           var(--surface-page);
+  --color-surface:      var(--surface-panel);
+  --color-border:       var(--border-default);
+  --color-border-subtle: var(--border-subtle);   /* 补齐 */
+  --color-text:         var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted:   var(--text-muted);
+  --color-text-primary: var(--text-primary);     /* 补齐（原无 fallback，已破） */
+  --color-primary:      var(--accent);
+  --color-primary-dark: var(--accent-hover);
+  --color-primary-hover: var(--accent-hover);     /* 补齐 */
+  --color-input-bg:     var(--surface-sunken);    /* 补齐浅色 */
+  --color-surface-strong: var(--surface-overlay);/* 补齐浅色 */
+  --color-hover-bg:     var(--surface-hover);     /* 补齐浅色 */
+  --color-active-bg:    var(--surface-active);    /* 补齐浅色 */
+  --border-color:       var(--border-default);    /* 补齐 */
+}
+
+:root[data-theme="dark"] {
+  /* ── 表面 surface（深色）─────────────────────────────────────── */
+  --surface-page:     #16161d;
+  --surface-panel:    #1c1c25;
+  --surface-card:     #23232e;
+  --surface-sunken:   #101017;
+  --surface-overlay:  #23232e;
+  --surface-hover:    rgba(255, 255, 255, 0.06);
+  --surface-active:   rgba(255, 255, 255, 0.10);
+  --surface-selected: rgba(129, 140, 248, 0.14);
+
+  /* ── 文本 text（深色）────────────────────────────────────────── */
+  --text-primary:   #e6e8ee;
+  --text-secondary: #a2aab8;
+  --text-muted:     #7c8595;   /* 修正原 #64748b 3.45:1 → 4.54:1 */
+  --text-disabled:  #5a616f;
+  --text-inverse:   #16161d;
+  --text-on-accent: #16161d;   /* 深色主色 #818cf8 上用深色前景（白字仅 2.98:1） */
+
+  /* ── 描边 border（深色）──────────────────────────────────────── */
+  --border-subtle: #262632;
+  --border-default: #333343;
+  --border-strong:  #454558;
+
+  /* ── 强调色 accent（深色）────────────────────────────────────── */
+  --accent:          #818cf8;
+  --accent-hover:    #a5b4fc;
+  --accent-active:   #c7d2fe;
+  --accent-subtle-bg:    rgba(129, 140, 248, 0.16);
+  --accent-subtle-border: rgba(129, 140, 248, 0.40);
+
+  /* ── 语义色 semantic（深色）──────────────────────────────────── */
+  --success-fg: #6ee7a8;  --success-bg: #10281c;  --success-solid: #22c55e;
+  --warning-fg: #fcd34d;  --warning-bg: #2a2109;  --warning-solid: #f59e0b;
+  --danger-fg:  #fca5a5;  --danger-bg:  #2a1618;  --danger-solid:  #ef4444;
+  --info-fg:    #93c5fd;  --info-bg:    #0f2035;  --info-solid:    #3b82f6;
+
+  /* ── 阴影（深色不可见，用描边替代）───────────────────────────── */
+  --shadow-1: none;
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* ── 模态遮罩（深色更深）────────────────────────────────────── */
+  --overlay: rgba(0, 0, 0, 0.6);
+
+  /* ── 会话区语义令牌（深色覆盖，原样保留）─────────────────────── */
+  --color-chat-bg: #181825;
+  --color-msg-card: #27273a;
+  --color-msg-card-border: #3f3f5a;
+  --msg-gap: 0.45rem;
+  --color-nested-line: #3f3f5a;
+  --color-chip-bg: #313147;
+  --color-chip-fg: #94a3b8;
+  --color-chip-user-bg: #1e3a5f;
+  --color-chip-user-fg: #93c5fd;
+  --color-chip-sub-bg: #0c2e3e;
+  --color-chip-sub-fg: #38bdf8;
+  --color-chip-tool-bg: #232347;
+  --color-chip-tool-fg: #a5b4fc;
+  --color-chip-reasoning-bg: #2e2342;
+  --color-chip-reasoning-fg: #c4b5fd;
+  --color-user-bubble: #3b82f6;
+  --color-user-bubble-fg: #ffffff;
+  --color-code-bg: #11111b;
+  --color-code-fg: #e2e8f0;
+  --color-prompt-bg: #232347;
+  --color-prompt-border: #4f46e5;
+  --color-error-bg: #2a1f24;
+  --color-error-border: #7f1d1d;
+  --color-error-fg: #fca5a5;
+  --color-supply-bg: #21222e;
+  --color-supply-border: #3f3f5a;
+  --color-option-bg: #21222e;
+  --color-option-border: #3f3f5a;
+  --color-option-active-bg: #232347;
+  --color-option-active-border: #818cf8;
+  --color-tag-sub-bg: #232347;
+  --color-tag-sub-fg: #a5b4fc;
+  --color-tag-warn-bg: #3a2f12;
+  --color-tag-warn-fg: #fcd34d;
+  --color-tag-err-bg: #2a1f24;
+  --color-tag-err-fg: #fca5a5;
+  --color-banner-bg: #3a2f12;
+  --color-banner-border: #b45309;
+  --color-banner-fg: #fcd34d;
+
+  /* ── 别名层（深色，需重新声明以覆盖浅色别名）────────────────── */
+  --color-bg:           var(--surface-page);
+  --color-surface:      var(--surface-panel);
+  --color-border:       var(--border-default);
+  --color-border-subtle: var(--border-subtle);
+  --color-text:         var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted:   var(--text-muted);
+  --color-text-primary: var(--text-primary);
+  --color-primary:      var(--accent);
+  --color-primary-dark: var(--accent-hover);
+  --color-primary-hover: var(--accent-hover);
+  --color-input-bg:     var(--surface-sunken);
+  --color-surface-strong: var(--surface-overlay);
+  --color-hover-bg:     var(--surface-hover);
+  --color-active-bg:    var(--surface-active);
+  --border-color:       var(--border-default);
+}

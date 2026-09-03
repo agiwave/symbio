@@ -12,7 +12,14 @@
   <div
     class="resource-card"
     :class="{ active: isActive, disabled }"
+    role="option"
+    :tabindex="disabled ? -1 : 0"
+    :aria-selected="isActive"
+    :aria-disabled="disabled"
+    :aria-label="title"
     @click="$emit('click')"
+    @keydown.enter="$emit('click')"
+    @keydown.space.prevent="$emit('click')"
   >
     <!-- 状态条 + 标题 -->
     <div class="card-header">
@@ -79,24 +86,26 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 
 <style scoped>
 .resource-card {
-  margin: 0.25rem 0.5rem;
-  padding: 0.55rem 0.65rem;
-  background: var(--color-surface, #fff);
-  border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 8px;
+  margin: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
   user-select: none;
 }
 
 .resource-card:hover {
-  border-color: var(--color-primary, #667eea);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-1);
 }
 
 .resource-card.active {
-  border-color: var(--color-primary, #667eea);
-  background: rgba(102, 126, 234, 0.05);
+  border-color: var(--accent);
+  background: var(--surface-selected);
 }
 
 .resource-card.disabled {
@@ -107,8 +116,8 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 .card-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .status-area {
@@ -119,30 +128,30 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 
 .status-dot {
   display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #9ca3af;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: var(--radius-full);
+  background: var(--text-disabled);
   flex-shrink: 0;
 }
-.status-dot.status-active { background: #22c55e; }
-.status-dot.status-disabled { background: #9ca3af; }
-.status-dot.status-warning { background: #f59e0b; }
-.status-dot.status-error { background: #ef4444; }
-.status-dot.status-muted { background: #d1d5db; }
+.status-dot.status-active { background: var(--success-solid); }
+.status-dot.status-disabled { background: var(--border-strong); }
+.status-dot.status-warning { background: var(--warning-solid); }
+.status-dot.status-error { background: var(--danger-solid); }
+.status-dot.status-muted { background: var(--text-disabled); }
 
 .title-row {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .title-text {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-text, #1f2937);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -150,20 +159,20 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 }
 
 .activity-text {
-  font-size: 0.65rem;
-  color: var(--color-text-muted, #6b7280);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
-.activity-text.kind-primary { color: var(--color-primary, #667eea); }
-.activity-text.kind-success { color: #22c55e; }
-.activity-text.kind-warn { color: #f59e0b; }
-.activity-text.kind-info { color: #3b82f6; }
+.activity-text.kind-primary { color: var(--accent); }
+.activity-text.kind-success { color: var(--success-solid); }
+.activity-text.kind-warn { color: var(--warning-solid); }
+.activity-text.kind-info { color: var(--info-solid); }
 
 /* 副标题 */
 .card-preview {
-  margin: 0.2rem 0;
-  font-size: 0.75rem;
-  color: var(--color-text-muted, #6b7280);
+  margin: var(--space-1) 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -173,22 +182,22 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 .card-meta {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  margin-top: 0.3rem;
-  font-size: 0.7rem;
-  color: var(--color-text-muted, #6b7280);
+  margin-top: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
 }
 
 .tag {
   padding: 0.1rem 0.4rem;
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 4px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
   font-size: 0.65rem;
 }
-.tag-primary { background: rgba(102, 126, 234, 0.1); color: var(--color-primary, #667eea); }
-.tag-success { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
-.tag-warn    { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
-.tag-info    { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-.tag-muted   { background: rgba(0, 0, 0, 0.04); color: #6b7280; }
+.tag-primary { background: var(--accent-subtle-bg); color: var(--accent); }
+.tag-success { background: var(--success-bg); color: var(--success-fg); }
+.tag-warn    { background: var(--warning-bg); color: var(--warning-fg); }
+.tag-info    { background: var(--info-bg); color: var(--info-fg); }
+.tag-muted   { background: var(--surface-sunken); color: var(--text-muted); }
 </style>

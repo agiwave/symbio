@@ -170,7 +170,7 @@
           <div class="setting-item">
             <div class="setting-info">
               <label>启用</label>
-              <p class="setting-desc">禁用后该 Provider 在 Model \u5bf9\u8bdd选项中不可选</p>
+              <p class="setting-desc">禁用后该 Provider 在 Model 对话选项中不可选</p>
             </div>
             <label class="toggle">
               <input type="checkbox" v-model="form.enabled" />
@@ -446,7 +446,7 @@ watch(
   display: inline-block;
   padding: 0 0.35rem;
   background: rgba(0, 0, 0, 0.05);
-  border-radius: 3px;
+  border-radius: 0.1875rem;
   font-size: 0.65rem;
   color: var(--color-text-secondary);
   font-family: var(--font-mono, 'JetBrains Mono', Consolas, monospace);
@@ -458,7 +458,7 @@ watch(
 .badge {
   font-size: 0.65rem;
   padding: 0.1rem 0.45rem;
-  border-radius: 999px;
+  border-radius: 62.4375rem;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -477,7 +477,7 @@ watch(
 .header-actions-divider {
   display: inline-block;
   width: 1px;
-  height: 18px;
+  height: 1.125rem;
   background: var(--color-border);
   margin: 0 0.15rem;
   flex-shrink: 0;
@@ -559,7 +559,7 @@ watch(
   cursor: pointer;
   font-size: 0.85rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 6px;
+  border-radius: 0.375rem;
 }
 .advanced-toggle:hover {
   color: var(--color-primary, #4f46e5);
@@ -583,13 +583,13 @@ watch(
 .setting-item textarea,
 .api-key-row input {
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   padding: 0.4rem 0.55rem;
   font-size: 0.85rem;
   background: var(--color-bg, #fff);
   color: var(--color-text);
   font-family: inherit;
-  width: 280px;
+  width: 17.5rem;
   max-width: 100%;
   box-sizing: border-box;
   transition: border-color 0.12s, box-shadow 0.12s;
@@ -619,7 +619,7 @@ watch(
 
 .setting-item textarea {
   resize: vertical;
-  min-height: 60px;
+  min-height: 3.75rem;
   font-family: inherit;
 }
 
@@ -634,11 +634,11 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 1.625rem;
+  height: 1.625rem;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
   color: var(--color-text-secondary);
   transition: all 0.15s;
@@ -661,8 +661,8 @@ watch(
 .toggle {
   position: relative;
   display: inline-block;
-  width: 36px;
-  height: 20px;
+  width: 2.25rem;
+  height: 1.25rem;
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -671,22 +671,22 @@ watch(
   position: absolute;
   inset: 0;
   background: #d1d5db;
-  border-radius: 999px;
+  border-radius: 62.4375rem;
   transition: background 0.2s;
 }
 .toggle-slider::before {
   content: '';
   position: absolute;
-  width: 16px;
-  height: 16px;
-  left: 2px;
-  top: 2px;
+  width: 1rem;
+  height: 1rem;
+  left: var(--space-05);
+  top: var(--space-05);
   background: #fff;
   border-radius: 50%;
   transition: transform 0.2s;
 }
 .toggle input:checked + .toggle-slider { background: var(--color-primary, #4f46e5); }
-.toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(1rem); }
 
 /* ============ 操作按钮（header 右上角） ============ */
 .action-btn {
@@ -696,7 +696,7 @@ watch(
   background: var(--color-primary, #4f46e5);
   color: #fff;
   border: none;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   padding: 0.35rem 0.75rem;
   cursor: pointer;
   font-size: 0.8rem;
@@ -735,7 +735,7 @@ watch(
 }
 .empty-detail p { font-size: 0.8rem; margin: 0; }
 
-@media (max-width: 720px) {
+@media (max-width: 45rem) {
   .setting-item { flex-direction: column; align-items: stretch; gap: 0.4rem; }
   .setting-item input,
   .setting-item select,

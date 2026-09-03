@@ -41,7 +41,7 @@
     </template>
 
     <template #list>
-      <div class="skill-list">
+      <div class="skill-list" role="listbox" aria-label="Skill 列表">
         <ResourceCard
           v-for="skill in skills"
           :key="skill.file_path"
@@ -124,14 +124,6 @@
         <p>← 选择一个 Skill 查看详情</p>
       </div>
     </template>
-
-    <template #toast>
-      <Transition name="toast">
-        <div v-if="toast" :class="['toast', toast.type]" @click="toast = null">
-          {{ toast.text }}
-        </div>
-      </Transition>
-    </template>
   </ResourceShell>
 </template>
 
@@ -147,7 +139,6 @@ import ResourceCard from '../components/common/ResourceCard.vue'
 const {
   loading,
   selectedId: selectedName,
-  toast,
   showToast,
   select,
 } = useResourceManager({ logTag: 'SkillView' })
@@ -309,7 +300,7 @@ onMounted(() => loadAll())
 .detail-badge {
   font-size: 0.7rem;
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   background: rgba(102, 126, 234, 0.1);
   color: var(--color-primary, #667eea);
 }
@@ -348,7 +339,7 @@ onMounted(() => loadAll())
   display: block;
   padding: 0.5rem 0.75rem;
   background: rgba(0, 0, 0, 0.04);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   font-size: 0.8rem;
   font-family: 'Menlo', 'Monaco', monospace;
   word-break: break-all;
@@ -393,7 +384,7 @@ onMounted(() => loadAll())
   padding: 0.1rem 0.4rem;
   background: rgba(245, 158, 11, 0.15);
   color: #b45309;
-  border-radius: 3px;
+  border-radius: 0.1875rem;
   font-size: 0.65rem;
   font-weight: 600;
 }
@@ -403,7 +394,7 @@ onMounted(() => loadAll())
   font-size: 0.7rem;
   border: 1px solid var(--color-border, #e5e7eb);
   background: var(--color-bg, #fff);
-  border-radius: 4px;
+  border-radius: 0.25rem;
   cursor: pointer;
   color: var(--color-text, #1f2937);
 }
@@ -413,19 +404,19 @@ onMounted(() => loadAll())
   display: block;
   padding: 0.75rem 1rem;
   background: rgba(0, 0, 0, 0.04);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   font-size: 0.8rem;
   font-family: 'Menlo', 'Monaco', monospace;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--color-text, #1f2937);
-  max-height: 480px;
+  max-height: 30rem;
   overflow-y: auto;
   margin: 0;
   line-height: 1.5;
 }
 .body-preview.collapsed {
-  max-height: 200px;
+  max-height: 12.5rem;
   position: relative;
   mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
@@ -444,7 +435,7 @@ onMounted(() => loadAll())
   padding: 0.1rem 0.5rem;
   background: rgba(239, 68, 68, 0.1);
   color: #b91c1c;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   font-size: 0.7rem;
   font-weight: 600;
 }
@@ -462,35 +453,5 @@ onMounted(() => loadAll())
   justify-content: center;
   color: var(--color-text-muted, #6b7280);
   font-size: 0.9rem;
-}
-
-/* Toast */
-.toast {
-  position: absolute;
-  bottom: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 0.6rem 1rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  color: #fff;
-  background: #333;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  cursor: pointer;
-  z-index: 100;
-}
-
-.toast.success { background: #22c55e; }
-.toast.error { background: #ef4444; }
-.toast.info { background: #3b82f6; }
-
-.toast-enter-active,
-.toast-leave-active {
-  transition: all 0.2s ease;
-}
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(10px);
 }
 </style>

@@ -104,7 +104,7 @@ function copyCode() {
 .code-block-executor {
   margin: 1rem 0;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   overflow: hidden;
 }
 
@@ -122,7 +122,7 @@ function copyCode() {
   padding: 0.25rem 0.5rem;
   background: #6c757d;
   color: white;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   text-transform: uppercase;
 }
 
@@ -134,7 +134,7 @@ function copyCode() {
 .run-btn, .copy-btn {
   padding: 0.25rem 0.75rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   cursor: pointer;
   font-size: 0.75rem;
   transition: opacity 0.2s;
@@ -198,7 +198,7 @@ function copyCode() {
   padding: 0.5rem;
   background: #1e1e1e;
   color: #d4d4d4;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   font-family: 'Fira Code', 'Consolas', monospace;
   font-size: 0.75rem;
   white-space: pre-wrap;

@@ -16,7 +16,14 @@
       disabled: !provider.enabled,
       default: isDefault
     }"
+    role="option"
+    tabindex="0"
+    :aria-selected="isActive"
+    :aria-disabled="!provider.enabled"
+    :aria-label="title"
     @click="onClick"
+    @keydown.enter="onClick"
+    @keydown.space.prevent="onClick"
   >
     <!-- 状态条 + 标题 -->
     <div class="card-header">
@@ -99,19 +106,20 @@ function onClick() {
   position: relative;
   padding: 0.6rem 0.75rem 0.55rem;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
-  border-left: 2px solid transparent;
-  border-bottom: 1px solid var(--color-border-subtle, rgba(0, 0, 0, 0.04));
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease);
+  border-left: 0.125rem solid transparent;
+  border-bottom: 1px solid var(--border-subtle);
   user-select: none;
 }
 
 .provider-card:hover {
-  background: rgba(0, 0, 0, 0.03);
+  background: var(--surface-hover);
 }
 
 .provider-card.active {
-  background: rgba(34, 197, 94, 0.06);
-  border-left-color: #22c55e;
+  background: var(--surface-selected);
+  border-left-color: var(--accent);
 }
 
 .provider-card.disabled {
@@ -122,7 +130,7 @@ function onClick() {
 .card-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
   min-width: 0;
 }
 
@@ -135,44 +143,39 @@ function onClick() {
 
 .status-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #94a3b8;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-full);
+  background: var(--text-disabled);
   flex-shrink: 0;
 }
 
 .status-dot.running {
-  background: #22c55e;
-  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+  background: var(--success-solid);
   animation: pulse 1.6s ease-in-out infinite;
 }
 
-.status-dot.idle {
-  background: #94a3b8;
-}
-
-.status-dot.failed {
-  background: #ef4444;
-}
+.status-dot.idle { background: var(--text-disabled); }
+.status-dot.disabled { background: var(--border-strong); }
+.status-dot.failed { background: var(--danger-solid); }
 
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .title-row {
   display: flex;
   align-items: baseline;
-  gap: 0.4rem;
+  gap: var(--space-2);
   min-width: 0;
   flex: 1;
 }
 
 .title-text {
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--color-text);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -181,8 +184,8 @@ function onClick() {
 }
 
 .activity-text {
-  font-size: 0.7rem;
-  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -191,18 +194,18 @@ function onClick() {
 }
 
 .activity-text.failed {
-  color: #ef4444;
+  color: var(--danger-solid);
 }
 
 /* 预览行 */
 .card-preview {
-  margin-top: 0.3rem;
+  margin-top: var(--space-1);
   padding-left: 1rem;
 }
 
 .preview-text {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
   display: -webkit-box;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
@@ -215,22 +218,22 @@ function onClick() {
 .card-meta {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  margin-top: 0.35rem;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
   padding-left: 1rem;
-  font-size: 0.7rem;
-  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
   min-width: 0;
   overflow: hidden;
 }
 
 .provider-pill {
   display: inline-block;
-  padding: 0 0.35rem;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 3px;
+  padding: 0 var(--space-1);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
   font-size: 0.65rem;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
   font-family: var(--font-mono, 'JetBrains Mono', Consolas, monospace);
   white-space: nowrap;
 }

@@ -1,0 +1,70 @@
+/* =============================================================================
+ * Symbio 全局基础样式（在 tokens.css 之后引入）
+ * 仅放：响应式根字号、全局焦点环、令牌化滚动条、减少动效、表单字体继承。
+ * 组件级视觉令牌化由各 .vue 文件的 scoped <style> 负责。
+ * ============================================================================= */
+
+/* 响应式根字号：以 1280px 视口为设计基准（100vw / 80 = 16px），
+   随窗口宽度等比缩放 → 全部 rem 令牌与组件尺寸同步缩放，
+   不同分辨率/窗口宽度下结构比例一致。
+   下限 12px（约 960px 视口）防极小窗口不可读，上限 24px（1920px 视口）防超大屏失控；
+   如需完全无界等比，去掉 clamp 上下限即可。
+   再乘以用户字体档位系数 --font-scale（由 appearance store 写入：
+   small=0.875 / medium=1 / large=1.125），两机制叠加、互不覆盖。 */
+html {
+  font-size: calc(clamp(12px, 100vw / 80, 24px) * var(--font-scale, 1));
+}
+
+/* 全局焦点环：覆盖所有可聚焦元素（D1：focus-visible 覆盖率 100%） */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}
+
+/* 非键盘焦点不显示轮廓（由 :focus-visible 接管） */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 滚动条令牌化（替换 App.vue 硬编码 #ccc / #bbb） */
+::-webkit-scrollbar {
+  width: 0.5rem;   /* 8px，随根字号等比 */
+  height: 0.5rem;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* 表单控件继承字体（避免浏览器默认字体栈） */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* 减少动效（prefers-reduced-motion） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -169,8 +169,8 @@ defineExpose({
 }
 
 .line-numbers {
-  width: 48px;
-  min-width: 48px;
+  width: 3rem;
+  min-width: 3rem;
   background: #2d2d2d;
   color: #858585;
   font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;

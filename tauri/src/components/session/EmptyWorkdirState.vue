@@ -87,7 +87,7 @@ async function onUseLast() {
 }
 
 .empty-desc {
-  max-width: 360px;
+  max-width: 22.5rem;
   font-size: 0.85rem;
   color: var(--color-text-muted);
   margin-bottom: 1.5rem;
@@ -99,7 +99,7 @@ async function onUseLast() {
   background: var(--color-primary);
   color: #fff;
   border: none;
-  border-radius: 8px;
+  border-radius: 0.5rem;
   font-size: 0.9rem;
   cursor: pointer;
   margin-bottom: 0.5rem;
@@ -113,7 +113,7 @@ async function onUseLast() {
   padding: 0.5rem 1rem;
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 0.5rem;
   color: var(--color-text-secondary);
   font-size: 0.85rem;
   cursor: pointer;

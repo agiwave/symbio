@@ -17,7 +17,13 @@
       waiting: liveStatus.is_waiting_approval,
       failed: liveStatus.last_failed && !liveStatus.is_working
     }"
+    role="option"
+    tabindex="0"
+    :aria-selected="isActive"
+    :aria-label="title"
     @click="onClick"
+    @keydown.enter="onClick"
+    @keydown.space.prevent="onClick"
   >
     <!-- 状态条 + 标题 -->
     <div class="card-header">
@@ -169,9 +175,9 @@ function onDelete() { emit('delete') }
   gap: 0.25rem;
   padding: 0.6rem 0.75rem 0.55rem 0.9rem;
   cursor: pointer;
-  border-left: 2px solid transparent;
+  border-left: 0.125rem solid transparent;
   transition: background 0.12s;
-  min-height: 56px;
+  min-height: 3.5rem;
 }
 
 .session-card:hover {
@@ -210,34 +216,33 @@ function onDelete() { emit('delete') }
 
 .status-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 0.5rem;
+  height: 0.5rem;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 .status-dot.running {
-  background: #22c55e;
+  background: var(--success-solid);
   animation: pulse 1.4s ease-in-out infinite;
-  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
 }
 
 .status-dot.waiting {
-  background: #f59e0b;
+  background: var(--warning-solid);
   animation: pulse-warn 1.6s ease-in-out infinite;
 }
 
 .status-dot.failed {
-  background: #ef4444;
+  background: var(--danger-solid);
 }
 
 .status-dot.idle {
-  background: #cbd5e1;
+  background: var(--text-disabled);
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 @keyframes pulse-warn {
@@ -308,7 +313,7 @@ function onDelete() { emit('delete') }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 100px;
+  max-width: 6.25rem;
 }
 
 .card-meta .dot {
@@ -322,7 +327,7 @@ function onDelete() { emit('delete') }
   font-size: 0.66rem;
   color: #ef4444;
   background: rgba(239, 68, 68, 0.1);
-  border-radius: 4px;
+  border-radius: 0.25rem;
   padding: 0 0.3rem;
   flex-shrink: 0;
 }
@@ -334,11 +339,11 @@ function onDelete() { emit('delete') }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 1.375rem;
+  height: 1.375rem;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   cursor: pointer;
   color: var(--color-text-muted);
   opacity: 0;

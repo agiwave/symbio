@@ -106,12 +106,12 @@ async function onClick() {
   align-items: center;
   gap: 0.3rem;
   padding: 0.35rem 0.6rem;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   font-size: 0.75rem;
   color: var(--color-text-muted);
   user-select: none;
   transition: all 0.2s;
-  max-width: 240px;
+  max-width: 15rem;
   min-width: 0;
 }
 
@@ -141,7 +141,7 @@ async function onClick() {
 .change-hint {
   font-size: 0.7rem;
   padding: 0.05rem 0.3rem;
-  border-radius: 3px;
+  border-radius: 0.1875rem;
   background: rgba(0, 0, 0, 0.05);
   color: var(--color-text-secondary);
   opacity: 0.6;

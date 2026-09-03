@@ -1,0 +1,54 @@
+classDiagram
+    class Tokens {
+        <<CSS :root + :root[data-theme=dark]>>
+        +surface-* text-* border-*
+        +accent* success/warning/danger/info-*
+        +radius-* space-* font-* shadow-* motion-*
+        +focus-ring-* control-height-* z-*
+    }
+    class AliasLayer {
+        <<CSS 别名映射，保不回退>>
+        +--color-bg = var(--surface-page)
+        +--color-text-primary = var(--text-primary)
+        +--color-border-subtle = var(--border-subtle)
+        +--color-primary-hover = var(--accent-hover)
+        +--color-input-bg = var(--surface-sunken)
+        +--color-surface-strong = var(--surface-overlay)
+        +--color-hover-bg = var(--surface-hover)
+        +--color-active-bg = var(--surface-active)
+        +--border-color = var(--border-default)
+        +--font-mono 字体栈
+    }
+    class AppIcon {
+        +name: string
+        +size: 'md'|'lg'
+        +class: string
+        +registry: Record~name,svgMarkup~
+        +render() svg viewBox 0 0 24 24
+    }
+    class ClickableCard {
+        <<统一模式：4 卡片共用>>
+        +role = "option"
+        +tabindex = "0"
+        +aria-selected = isActive
+        +aria-label = title
+        +@keydown.enter / @keydown.space
+        +@click emit
+        +focus-visible 2px 焦点环
+    }
+    class Toast {
+        +type: 'success'|'warning'|'danger'|'info'
+        +message: string
+        +role = "status"
+        +aria-live = "polite"
+        +autoClose 3s
+    }
+    class useToast {
+        +show(type,msg)
+        +items: Toast[]
+    }
+    Tokens <|-- AliasLayer : 映射
+    AppIcon ..> Tokens : 消费 currentColor
+    ClickableCard ..> Tokens : 消费 surface/hover/selected
+    Toast ..> Tokens : 消费 overlay/border/语义色
+    useToast o-- Toast : 管理

@@ -129,8 +129,8 @@ function emitNew() {
 /* 左侧栏 */
 .shell-list {
   flex: 0 0 auto;
-  min-width: 220px;
-  max-width: 360px;
+  min-width: 13.75rem;
+  max-width: 22.5rem;
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
@@ -163,11 +163,11 @@ function emitNew() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 1.625rem;
+  height: 1.625rem;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
   color: var(--color-text-secondary);
   transition: all 0.15s;
@@ -200,8 +200,8 @@ function emitNew() {
 
 .running-pulse {
   display: inline-block;
-  width: 7px;
-  height: 7px;
+  width: 0.4375rem;
+  height: 0.4375rem;
   background: #22c55e;
   border-radius: 50%;
   animation: pulse 1.4s ease-in-out infinite;

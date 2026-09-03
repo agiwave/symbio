@@ -189,11 +189,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 1.5rem;
+  height: 1.5rem;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   cursor: pointer;
   color: var(--color-text-secondary);
 }
@@ -272,7 +272,7 @@ onBeforeUnmount(() => {
   padding: 0.3rem 0.7rem;
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: 0.25rem;
   cursor: pointer;
   font-size: 0.78rem;
 }

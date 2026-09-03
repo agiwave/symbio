@@ -174,7 +174,7 @@ async function onClearHistory() {
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: 2.75rem;
 }
 
 .header-left {
@@ -192,7 +192,7 @@ async function onClearHistory() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 260px;
+  max-width: 16.25rem;
 }
 
 .status-working {
@@ -209,11 +209,11 @@ async function onClearHistory() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 1.75rem;
+  height: 1.75rem;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
   color: var(--color-text-secondary);
   transition: all 0.15s;
@@ -299,12 +299,12 @@ async function onClearHistory() {
   font-size: 0.85rem;
   color: var(--color-text-muted);
   margin: 0;
-  max-width: 480px;
+  max-width: 30rem;
   word-break: break-word;
   font-family: 'Fira Code', 'Consolas', monospace;
   background: var(--color-msg-card);
   padding: 0.4rem 0.8rem;
-  border-radius: 6px;
+  border-radius: 0.375rem;
 }
 
 .load-error-actions {
@@ -315,7 +315,7 @@ async function onClearHistory() {
 
 .load-error-btn {
   padding: 0.4rem 1rem;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   font-size: 0.85rem;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
