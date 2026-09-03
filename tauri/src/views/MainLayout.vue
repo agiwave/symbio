@@ -24,7 +24,7 @@
 
         <button
           class="nav-btn"
-          :class="{ active: currentPage === 'resources' }"
+          :class="{ active: isAllResourcesActive }"
           aria-label="全部资源"
           title="全部资源"
           @click="goTo('/resources/all')"
@@ -34,66 +34,22 @@
           </svg>
           <span class="nav-label">全部资源</span>
         </button>
+        <!-- 资源导航项由后端 resources/providers 注册表动态生成 -->
         <button
+          v-for="p in navProviders"
+          :key="p.kind"
           class="nav-btn"
-          :class="{ active: currentPage === 'agent' }"
-          aria-label="Agent"
-          title="Agent"
-          @click="goTo('/resources/agent')"
+          :class="{ active: isProviderNavActive(p.kind) }"
+          :aria-label="p.label"
+          :title="p.label"
+          @click="goTo(`/resources/${p.kind}`)"
         >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="8" r="4" />
-            <path d="M6 21v-1a6 6 0 0 1 12 0v1" />
+          <component :is="navIconFor(p.kind)" v-if="navIconFor(p.kind)" />
+          <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+            <polyline points="13 2 13 9 20 9" />
           </svg>
-          <span class="nav-label">Agent</span>
-        </button>
-        <button
-          class="nav-btn"
-          :class="{ active: currentPage === 'skill' }"
-          aria-label="Skill"
-          title="Skill"
-          @click="goTo('/resources/skill')"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-          </svg>
-          <span class="nav-label">Skill</span>
-        </button>
-        <button
-          class="nav-btn"
-          :class="{ active: currentPage === 'mcp' }"
-          aria-label="MCP Server"
-          title="MCP Server"
-          @click="goTo('/resources/mcp')"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="3" width="7" height="7" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" />
-            <rect x="14" y="14" width="7" height="7" rx="1" />
-            <line x1="10" y1="6.5" x2="14" y2="6.5" />
-            <line x1="6.5" y1="10" x2="6.5" y2="14" />
-            <line x1="17.5" y1="10" x2="17.5" y2="14" />
-            <line x1="10" y1="17.5" x2="14" y2="17.5" />
-          </svg>
-          <span class="nav-label">MCP Server</span>
-        </button>
-        <button
-          class="nav-btn"
-          :class="{ active: currentPage === 'model-providers' }"
-          aria-label="Model Provider"
-          title="Model Provider"
-          @click="goTo('/resources/model')"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="4" y="6" width="16" height="12" rx="2" />
-            <circle cx="9" cy="12" r="1.5" fill="currentColor" />
-            <circle cx="15" cy="12" r="1.5" fill="currentColor" />
-            <path d="M12 3v3" />
-            <path d="M9 18v3" />
-            <path d="M15 18v3" />
-          </svg>
-          <span class="nav-label">Model Provider</span>
+          <span class="nav-label">{{ p.label }}</span>
         </button>
       </div>
 
@@ -148,6 +104,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter, RouterView } from 'vue-router'
 import { startSessionBusWatcher } from '@/services/sessionBusWatcher'
 import { getHomedirInfo, type HomedirInfo } from '@/services/home'
+import { loadProviders, useResourceProviders } from '@/composables/useResourceProviders'
+import { getResourceIcon } from '@/registry/resourceTypes'
+import type { ProviderInfo } from '@/schemas/resources'
 import { logger } from '@/utils/logger'
 import FileViewerOverlay from '@/components/fileViewer/FileViewerOverlay.vue'
 import HomedirSwitcher from '@/components/common/HomedirSwitcher.vue'
@@ -159,10 +118,44 @@ const router = useRouter()
 const openHomedirSwitcher = ref(false)
 const currentHomedir = ref<HomedirInfo>({ homedir: '', bootstrap_path: '' })
 
+const { providers } = useResourceProviders()
+
+/** 左侧"资源"导航项：后端注册的可管理资源类型（supports_upload，session 走会话主入口） */
+const navProviders = computed(() =>
+  providers.value.filter((p: ProviderInfo) => p.supports_upload)
+)
+
+/** 当前单类型资源路径 */
+const resTypes = computed(() => (route.params.types as string) || 'all')
+/** "全部资源"高亮：all 或逗号分隔（多类型混合） */
+const isAllResourcesActive = computed(
+  () => resTypes.value === 'all' || resTypes.value.includes(',')
+)
+/** 单类型资源导航项高亮：路由命中该 kind */
+function isProviderNavActive(kind: string): boolean {
+  return (
+    route.path === `/resources/${kind}` ||
+    route.path.startsWith(`/resources/${kind},`) ||
+    resTypes.value === kind
+  )
+}
+
+/** 类型图标：前端 icon 注册表（未注册回 null，走默认图标） */
+function navIconFor(kind: string) {
+  return getResourceIcon(kind) ?? null
+}
+
 onMounted(async () => {
   // 启动全局会话事件监听（一次即可，跨页面共享）
   // 这一步必须在 SessionView 挂载之前，否则首屏会错过一些事件
   startSessionBusWatcher()
+
+  // 拉取后端资源 provider 注册表（动态生成左侧导航；幂等）
+  try {
+    await loadProviders()
+  } catch (err) {
+    logger.warn('MainLayout', '加载资源 provider 注册表失败:', err)
+  }
 
   // 异步加载 homedir 显示（不阻塞首屏）
   try {
@@ -173,20 +166,7 @@ onMounted(async () => {
 })
 
 const currentPage = computed(() => {
-  if (route.path.startsWith('/resources')) {
-    // /resources/<types>：all / 逗号分隔 → 'resources'（总入口高亮）；
-    // 单类型 → 对应专项入口高亮
-    const types = (route.params.types as string) || 'all'
-    if (types === 'all' || types.includes(',')) return 'resources'
-    const map: Record<string, string> = {
-      model: 'model-providers',
-      mcp: 'mcp',
-      skill: 'skill',
-      agent: 'agent',
-      session: 'resources',
-    }
-    return map[types] ?? 'resources'
-  }
+  if (route.path.startsWith('/resources')) return 'resources'
   if (route.path.startsWith('/settings')) return 'settings'
   return 'session'
 })

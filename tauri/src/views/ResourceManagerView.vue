@@ -1,26 +1,16 @@
 <!--
-  ResourceManagerView — 统一资源管理页（一份页面，按 :types 路由参数管理一或多种资源）
+  ResourceManagerView — 统一资源管理页（一份页面，:types 路由参数决定一或多种资源）
 
   路由：/resources/:types?（types = 'all' | 'model,mcp' | 'model'，缺省 all）
-  类型注册表：src/registry/resourceTypes.ts（单一真相源：label/前缀/表单/兜底能力）
 
-  架构分工（列表统一、详情差异化）：
-  - 列表机制统一：资源共享 resources/* 协议与 ResourceSummary 契约，
-    列表加载/刷新/实时状态订阅/删除等公共流程在本页统一承载；
-    多类型时按类型分组展示，选中项以 `${kind}:${id}` 复合键标识；
-  - 详情/编辑差异化：注册表 form 字段按类型注入专属表单组件
-    （如 model 的 ModelProviderForm），未注册类型走通用兜底
-    （zip 上传面板 / JSON 编辑器 / 只读详情面板）——类似文件系统
-    "扩展名 → 编辑器"机制；
-  - 新建：多类型时先选类型（类型选择面板），单类型直接进入现有流程。
-
-  能力开关驱动差异（后端 capabilities_for 为单一真相源）：
-  - zip_upload        ：新建走「上传 zip」，文件名即资源目录名
-  - independent_form  ：新建/编辑走表单（model 已注册专属表单；其余为通用 JSON 兜底）
-  - realtime_status   ：列表项实时状态（初始态来自 list，运行时变化由 resource 事件推送，不做前端轮询）
-  - mutable / read_only：是否允许删除 / 新建
-  - test_connection   ：详情页「测试连接」按钮，走 resources/status 按需校验
+  核心逻辑在 useResourcePage（可单测）；本组件只做模板、事件绑定与 UI 副作用。
+  - 类型集合来自后端 resources/providers 注册表（ProviderInfo），非前端硬编码；
+  - 列表为**混合平排**（不分类型分组，类似目录按后缀混排文件），按 name 排序；
+  - 详情/编辑按类型注入专属 editor，未注册走通用兜底（zip 面板 / JSON 编辑器 / 只读详情）；
+  - 新建：多类型先选类型（仅列可创建 provider）；session 等 supports_upload=false 的类型
+    在资源管理器内不可创建/删除（修复"新建必失败"）。
 -->
+
 <template>
   <ResourceShell
     :title="title"
@@ -30,7 +20,7 @@
     @new="onNew"
   >
     <template #header-actions>
-      <!-- 注意：本 slot 会整体替换 ResourceShell 的默认 + 按钮，须在此显式补回 -->
+      <!-- 本 slot 整体替换 ResourceShell 默认 + 按钮，须显式补回 -->
       <button
         v-if="canCreate"
         class="icon-btn"
@@ -57,32 +47,27 @@
       <span v-if="enabledCount > 0" class="meta-sub">{{ enabledCount }} 可用</span>
     </template>
 
+    <!-- 混合平排列表：所有类型所有项，按 name 排序，无分组 -->
     <template #list>
       <div class="resource-list" role="listbox" aria-label="资源列表">
-        <template v-for="d in activeTypes" :key="d.kind">
-          <div v-if="isMulti && (typeStates[d.kind]?.items.length ?? 0) > 0" class="list-group-header">
-            <span class="tag tag-muted">{{ d.label }}</span>
-            <span class="group-count">{{ typeStates[d.kind].items.length }}</span>
-          </div>
-          <ResourceCard
-            v-for="item in typeStates[d.kind]?.items ?? []"
-            :key="`${d.kind}:${item.id}`"
-            :title="item.name || item.id"
-            :subtitle="item.description || item.summary"
-            :status="cardStatus(item)"
-            :status-title="item.status_detail || item.status"
-            :is-active="selectedId === `${d.kind}:${item.id}`"
-            @click="select(`${d.kind}:${item.id}`)"
-          >
-            <template #meta>
-              <span
-                class="tag tag-muted tag-copy"
-                :title="`${itemPath(item)}（点击复制）`"
-                @click.stop="copyItemPath(item)"
-              >{{ itemPath(item) }}</span>
-            </template>
-          </ResourceCard>
-        </template>
+        <ResourceCard
+          v-for="item in items"
+          :key="`${item.kind}:${item.id}`"
+          :title="item.name || item.id"
+          :subtitle="item.description || item.summary"
+          :status="cardStatus(item)"
+          :status-title="item.status_detail || item.status"
+          :is-active="selectedId === `${item.kind}:${item.id}`"
+          @click="select(`${item.kind}:${item.id}`)"
+        >
+          <template #meta>
+            <span
+              class="tag tag-muted tag-copy"
+              :title="`${itemPath(item)}（点击复制）`"
+              @click.stop="copyItemPath(item)"
+            >{{ itemPath(item) }}</span>
+          </template>
+        </ResourceCard>
       </div>
     </template>
 
@@ -94,20 +79,20 @@
     <template #detail>
       <!-- ============== 新建模式 ============== -->
       <template v-if="creating">
-        <!-- 多类型：先选类型（单类型 createKind 已在 onNew 中直接确定） -->
+        <!-- 多类型：先选类型（单类型 createKind 已在 onNew 确定） -->
         <div v-if="!createKind" class="create-panel">
           <div class="create-card">
             <h3 class="create-title">新建资源</h3>
             <p class="create-desc">请选择要创建的资源类型</p>
             <div class="type-choice-list">
               <button
-                v-for="d in creatableTypes"
+                v-for="d in creatableInActive"
                 :key="d.kind"
                 class="type-choice-btn"
                 type="button"
-                @click="chooseCreateKind(d.kind)"
+                @click="beginCreate(d.kind)"
               >
-                <span class="type-choice-label">{{ d.label }}</span>
+                <span class="type-choice-label">{{ kindLabel(d.kind) }}</span>
                 <span class="type-choice-hint">{{ capsOf(d.kind).zip_upload ? 'ZIP 上传' : '表单' }}</span>
               </button>
             </div>
@@ -118,10 +103,10 @@
         </div>
 
         <template v-else>
-          <!-- 注册的专属表单（model） -->
+          <!-- 注册的专属 editor（model） -->
           <component
-            :is="createFormComponent"
-            v-if="createFormComponent"
+            :is="createEditor(createKind)"
+            v-if="createEditor(createKind)"
             :item="null"
             :capabilities="capsOf(createKind)"
             :saving="saving"
@@ -149,7 +134,7 @@
             </div>
           </div>
 
-          <!-- 通用 JSON 表单兜底（independent_form 且未注册专属表单） -->
+          <!-- 通用 JSON 表单兜底（independent_form 且未注册专属 editor） -->
           <div v-else class="create-panel">
             <div class="create-card narrow">
               <h3 class="create-title">新建 {{ kindLabel(createKind) }}</h3>
@@ -174,10 +159,10 @@
 
       <!-- ============== 选中项：编辑/详情 ============== -->
       <template v-else-if="selected">
-        <!-- 注册的专属表单（model） -->
+        <!-- 注册的专属 editor（model） -->
         <component
-          :is="selectedFormComponent"
-          v-if="selectedFormComponent"
+          :is="selectedEditor"
+          v-if="selectedEditor"
           :item="selected.item"
           :capabilities="capsOf(selected.kind)"
           :saving="saving"
@@ -185,13 +170,13 @@
           :deleting="deletingId === selected.item.id"
           @save="onFormSave"
           @test="testConnection"
-          @delete="requestDelete(selected.kind, selected.item)"
+          @delete="requestDelete(selected)"
           @set-default="onSetDefault"
         />
 
         <!-- 通用详情 + 操作工具栏（mcp / skill / agent） -->
         <template v-else>
-          <div v-if="capsOf(selected.kind).test_connection || canDelete" class="detail-toolbar">
+          <div v-if="capsOf(selected.kind).test_connection || canDeleteSelected" class="detail-toolbar">
             <button
               v-if="capsOf(selected.kind).test_connection"
               class="action-btn secondary"
@@ -201,10 +186,10 @@
               {{ testing ? '测试中…' : '测试连接' }}
             </button>
             <button
-              v-if="canDelete"
+              v-if="canDeleteSelected"
               class="danger-btn"
               :disabled="deletingId === selected.item.id"
-              @click="requestDelete(selected.kind, selected.item)"
+              @click="requestDelete(selected)"
             >
               {{ deletingId === selected.item.id ? '删除中…' : '删除' }}
             </button>
@@ -220,15 +205,11 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { deleteResource, getResourceStatus, listResources, uploadResourceForm, uploadResourceZip } from '@/services/resources'
-import { useResourceManager } from '@/composables/useResourceManager'
-import {
-  RESOURCE_TYPE_REGISTRY,
-  parseTypesParam,
-  resourcePath,
-  type ResourceTypeDescriptor,
-} from '@/registry/resourceTypes'
-import type { ResourceCapabilities, ResourceSummary, ResourceType } from '@/schemas/resources'
+import { deleteResource, getResourceStatus, uploadResourceForm, uploadResourceZip } from '@/services/resources'
+import { useResourcePage } from '@/composables/useResourcePage'
+import { resourcePath } from '@/registry/resourceTypes'
+import type { SelectedResource } from '@/composables/useResourcePage'
+import type { ResourceSummary } from '@/schemas/resources'
 import { useToast } from '@/composables/useToast'
 import ResourceShell from '../components/common/ResourceShell.vue'
 import ResourceCard from '../components/common/ResourceCard.vue'
@@ -236,124 +217,55 @@ import ResourceDetailPanel from '../components/resources/ResourceDetailPanel.vue
 import { subscribeResourceStatus } from '@/services/eventBus'
 
 const props = defineProps<{ typesParam?: string }>()
+const typesParam = computed(() => props.typesParam)
 
 const toast = useToast()
 
+// === 组合式核心逻辑（可单测） ===
 const {
-  loading,
-  saving,
-  creating,
+  activeTypes,
+  isMulti,
+  typeStates,
+  items,
+  selected,
   selectedId,
+  creating,
+  saving,
+  loading,
   deletingId,
-  showToast,
-  enterCreateMode,
+  totalCount,
+  enabledCount,
+  creatableInActive,
+  canCreate,
+  canDeleteSelected,
+  kindLabel,
+  capsOf,
+  createEditor,
+  selectedEditor,
+  activeFormKind,
+  createKind,
   select,
-  markDeleting,
-} = useResourceManager({ logTag: 'ResourceManagerView' })
+  loadAll,
+  refreshKind,
+  beginCreate,
+  startTypeChoice,
+  cancelCreate,
+  showToast,
+} = useResourcePage(typesParam)
 
-// === 活动类型（注册表派生；路由 :types 变化时经 :key="route.path" 重建组件） ===
-const activeTypes = computed<ResourceTypeDescriptor[]>(() => parseTypesParam(props.typesParam))
-const isMulti = computed(() => activeTypes.value.length > 1)
-
-// === 每类独立数据：capabilities 后端下发为真相源，descriptor 兜底 ===
-interface TypeState {
-  items: ResourceSummary[]
-  capabilities: ResourceCapabilities
-}
-const typeStates = ref<Record<string, TypeState>>({})
-
-function capsOf(kind: string): ResourceCapabilities {
-  return (
-    typeStates.value[kind]?.capabilities ??
-    (RESOURCE_TYPE_REGISTRY as Record<string, ResourceTypeDescriptor | undefined>)[kind]?.capabilities ?? {
-      zip_upload: false,
-      independent_form: false,
-      realtime_status: false,
-      mutable: false,
-      test_connection: false,
-      read_only: true,
-    }
-  )
-}
-
-function kindLabel(kind: string): string {
-  return (
-    (RESOURCE_TYPE_REGISTRY as Record<string, ResourceTypeDescriptor | undefined>)[kind]?.label ?? kind
-  )
-}
-
-// === 选中项：复合键 `${kind}:${id}`（跨类型唯一） ===
-const selected = computed<{ kind: string; item: ResourceSummary } | null>(() => {
-  const key = selectedId.value
-  if (!key) return null
-  const idx = key.indexOf(':')
-  if (idx < 0) return null
-  const kind = key.slice(0, idx)
-  const id = key.slice(idx + 1)
-  const item = typeStates.value[kind]?.items.find((i) => i.id === id)
-  return item ? { kind, item } : null
-})
-
-// === 新建：多类型先选类型 ===
-const createKind = ref<ResourceType | null>(null)
-const createFormComponent = computed(() => {
-  const d = createKind.value ? RESOURCE_TYPE_REGISTRY[createKind.value] : null
-  return d?.form ?? null
-})
-const selectedFormComponent = computed(() => {
-  const kind = selected.value?.kind as ResourceType | undefined
-  return kind ? RESOURCE_TYPE_REGISTRY[kind]?.form ?? null : null
-})
-
-/** 新建中 → createKind；编辑选中项 → 选中项 kind */
-const activeFormKind = computed<string | null>(() => {
-  if (creating.value) return createKind.value
-  return selected.value?.kind ?? null
-})
-
-// === 状态 ===
-const uploading = ref(false)
-const uploadError = ref<string | null>(null)
-const manifestError = ref<string | null>(null)
-const draftName = ref('')
-const draftManifest = ref('{}')
-const testing = ref(false)
-
-// === 计算属性 ===
-const title = computed(() => (isMulti.value ? '资源' : activeTypes.value[0]?.label ?? '资源'))
-const totalCount = computed(() =>
-  Object.values(typeStates.value).reduce((n, s) => n + s.items.length, 0)
-)
-const enabledCount = computed(() =>
-  Object.values(typeStates.value).reduce(
-    (n, s) => n + s.items.filter((i) => i.status === 'active' || i.status === 'working').length,
-    0
-  )
-)
-const canCreate = computed(() =>
-  activeTypes.value.some((d) => capsOf(d.kind).mutable && !capsOf(d.kind).read_only)
-)
-const canDelete = computed(() => {
-  const sel = selected.value
-  if (!sel) return false
-  const c = capsOf(sel.kind)
-  return c.mutable && !c.read_only
-})
-/** 类型选择面板中可创建的类型（能力开关过滤，session 等只读/不可写类型排除） */
-const creatableTypes = computed(() =>
-  activeTypes.value.filter((d) => capsOf(d.kind).mutable && !capsOf(d.kind).read_only)
-)
+// === 展示派生 ===
+const title = computed(() => (isMulti.value ? '资源' : kindLabel(activeTypes.value[0]?.kind ?? '')))
 
 const emptyHint = computed(() => {
   if (isMulti.value) return canCreate.value ? '点击右上角「新建」创建资源' : ''
-  const c = activeTypes.value[0] ? capsOf(activeTypes.value[0].kind) : null
-  if (!c) return ''
+  const kind = activeTypes.value[0]?.kind
+  if (!kind) return ''
+  const c = capsOf(kind)
   if (c.zip_upload) return '点击右上角「新建」上传 ZIP（文件名即资源目录名）'
   if (c.independent_form) return '点击右上角「新建」填写表单创建'
   return ''
 })
 
-/** 资源路径唯一标识：[provider]/[id].[kind]（provider 缺省回退 kind） */
 function itemPath(item: ResourceSummary): string {
   return resourcePath(item.provider || item.kind, item.id, item.kind)
 }
@@ -368,94 +280,36 @@ async function copyItemPath(item: ResourceSummary) {
   }
 }
 
-// === 列表 ===
-async function loadAll() {
-  loading.value = true
-  try {
-    const entries = await Promise.all(
-      activeTypes.value.map(async (d) => [d.kind, await listResources(d.kind)] as const)
-    )
-    const states: Record<string, TypeState> = {}
-    for (const [kind, resp] of entries) {
-      states[kind] = {
-        items: resp.items || [],
-        capabilities: resp.capabilities || capsOf(kind),
-      }
-    }
-    typeStates.value = states
-    if (!selectedId.value && !creating.value) {
-      // 首个非空分组的首项自动选中（保持单类型页既有行为）
-      for (const d of activeTypes.value) {
-        const first = states[d.kind]?.items[0]
-        if (first) {
-          select(`${d.kind}:${first.id}`)
-          break
-        }
-      }
-    }
-  } catch (err) {
-    showToast('error', `加载失败: ${err}`)
-  } finally {
-    loading.value = false
-  }
-}
-
-/** 只刷新受影响类型（保存/删除/上传后调用，不全量重载） */
-async function refreshKind(kind: string) {
-  const list = await listResources(kind as ResourceType)
-  typeStates.value = {
-    ...typeStates.value,
-    [kind]: {
-      items: list.items || [],
-      capabilities: list.capabilities || capsOf(kind),
-    },
-  }
-}
-
 // === 新建 ===
 function onNew() {
   uploadError.value = null
   manifestError.value = null
   if (isMulti.value) {
-    // 多类型：先弹类型选择面板
-    createKind.value = null
-    enterCreateMode()
+    // 多类型：进入创建态但不绑定类型 → 渲染类型选择面板
+    startTypeChoice()
     return
   }
-  const d = activeTypes.value[0]
-  if (!d) return
-  beginCreateFor(d.kind)
+  // 单类型：直接进入该类型现有新建流程
+  const kind = activeTypes.value[0]?.kind
+  if (kind) beginCreate(kind)
 }
 
-function chooseCreateKind(kind: ResourceType) {
-  uploadError.value = null
-  manifestError.value = null
-  beginCreateFor(kind)
-}
+const zipInput = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
+const uploadError = ref<string | null>(null)
+const manifestError = ref<string | null>(null)
+const draftName = ref('')
+const draftManifest = ref('{}')
+const testing = ref(false)
 
-function beginCreateFor(kind: ResourceType) {
-  createKind.value = kind
-  const caps = capsOf(kind)
-  const hasForm = Boolean(RESOURCE_TYPE_REGISTRY[kind]?.form)
-  if (!caps.zip_upload && !hasForm) {
-    draftName.value = ''
-    draftManifest.value = blankManifest()
-  }
-  if (!creating.value) enterCreateMode()
-}
-
-function blankManifest(): string {
-  return JSON.stringify({ enabled: true }, null, 2)
-}
-
-// 通用 JSON 兜底路径：选中时预填编辑 JSON
+// 通用 JSON 兜底：选中时预填编辑 JSON
 watch(
   () => selected.value,
   (sel) => {
     if (!sel) return
     const caps = capsOf(sel.kind)
-    const form = (RESOURCE_TYPE_REGISTRY as Record<string, ResourceTypeDescriptor | undefined>)[sel.kind]?.form
-    if (caps.independent_form && !caps.zip_upload && !form) {
+    const hasEditor = Boolean(selectedEditor.value)
+    if (caps.independent_form && !caps.zip_upload && !hasEditor) {
       draftName.value = sel.item.name || sel.item.id || ''
       const body: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(sel.item)) {
@@ -470,30 +324,12 @@ watch(
   }
 )
 
-function cancelCreate() {
-  creating.value = false
-  createKind.value = null
-  const firstKey = firstItemKey()
-  if (firstKey) select(firstKey)
-}
-
-function firstItemKey(): string | null {
-  for (const d of activeTypes.value) {
-    const first = typeStates.value[d.kind]?.items[0]
-    if (first) return `${d.kind}:${first.id}`
-  }
-  return null
-}
-
-// === zip 上传 ===
-const zipInput = ref<HTMLInputElement | null>(null)
-
 async function onZipSelected(e: Event) {
   const kind = createKind.value
   if (!kind) return
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
-  input.value = '' // 允许重复选同一文件
+  input.value = ''
   if (!file) return
   const name = file.name.replace(/\.zip$/i, '')
   if (!name) {
@@ -506,8 +342,7 @@ async function onZipSelected(e: Event) {
     const buf = await file.arrayBuffer()
     const resp = await uploadResourceZip(kind, name, buf)
     showToast('success', `已上传 ${kindLabel(kind)}「${resp.id || name}」`)
-    creating.value = false
-    createKind.value = null
+    cancelCreate()
     await refreshKind(kind)
     select(`${kind}:${resp.id || name}`)
   } catch (err) {
@@ -519,7 +354,6 @@ async function onZipSelected(e: Event) {
   }
 }
 
-// === 专属表单保存（统一走 resources/upload manifest 通道） ===
 async function onFormSave(payload: {
   id: string
   manifest: Record<string, unknown>
@@ -531,10 +365,9 @@ async function onFormSave(payload: {
   try {
     const manifest = { ...payload.manifest }
     if (payload.skipValidation) manifest.skip_validation = true
-    const resp = await uploadResourceForm(kind as ResourceType, payload.id, manifest)
+    const resp = await uploadResourceForm(kind, payload.id, manifest)
     showToast('success', `已保存 ${kindLabel(kind)}「${payload.id}」`)
-    creating.value = false
-    createKind.value = null
+    cancelCreate()
     await refreshKind(kind)
     select(`${kind}:${resp.id || payload.id}`)
   } catch (err) {
@@ -544,14 +377,13 @@ async function onFormSave(payload: {
   }
 }
 
-// === 设为默认（manifest 携带 is_default 标记，机制复用 upload 通道） ===
 async function onSetDefault() {
   const sel = selected.value
   if (!sel) return
   const config = (sel.item.config ?? {}) as Record<string, unknown>
   saving.value = true
   try {
-    await uploadResourceForm(sel.kind as ResourceType, sel.item.id, {
+    await uploadResourceForm(sel.kind, sel.item.id, {
       ...config,
       is_default: true,
       skip_validation: true,
@@ -565,7 +397,6 @@ async function onSetDefault() {
   }
 }
 
-// === 通用 JSON 表单 创建/编辑 ===
 async function onSaveManifest() {
   const kind = activeFormKind.value
   if (!kind) return
@@ -586,10 +417,9 @@ async function onSaveManifest() {
   manifestError.value = null
   saving.value = true
   try {
-    const resp = await uploadResourceForm(kind as ResourceType, name, { ...parsed, id: name })
+    const resp = await uploadResourceForm(kind, name, { ...parsed, id: name })
     showToast('success', `已保存 ${kindLabel(kind)}「${name}」`)
-    creating.value = false
-    createKind.value = null
+    cancelCreate()
     await refreshKind(kind)
     select(`${kind}:${resp.id || name}`)
   } catch (err) {
@@ -600,33 +430,32 @@ async function onSaveManifest() {
   }
 }
 
-// === 删除 ===
-async function requestDelete(kind: string, item: ResourceSummary) {
-  if (!confirm(`确认删除 ${kindLabel(kind)}「${item.name || item.id}」？`)) return
-  markDeleting(item.id)
+async function requestDelete(sel: SelectedResource) {
+  if (!confirm(`确认删除 ${kindLabel(sel.kind)}「${sel.item.name || sel.item.id}」？`)) return
+  if (deletingId.value === sel.item.id) return
+  deletingId.value = sel.item.id
   try {
-    await deleteResource(kind as ResourceType, item.id)
-    showToast('success', `已删除 ${kindLabel(kind)} ${item.id}`)
-    if (typeStates.value[kind]) {
-      typeStates.value[kind].items = typeStates.value[kind].items.filter((i) => i.id !== item.id)
+    await deleteResource(sel.kind, sel.item.id)
+    showToast('success', `已删除 ${kindLabel(sel.kind)} ${sel.item.id}`)
+    if (typeStates.value[sel.kind]) {
+      typeStates.value[sel.kind].items = typeStates.value[sel.kind].items.filter((i) => i.id !== sel.item.id)
     }
-    if (selectedId.value === `${kind}:${item.id}`) {
-      select(firstItemKey() ?? '')
+    if (selectedId.value === `${sel.kind}:${sel.item.id}`) {
+      select('')
     }
   } catch (err) {
     showToast('error', `删除失败: ${err}`)
   } finally {
-    markDeleting(null)
+    deletingId.value = null
   }
 }
 
-// === 连接测试（资源 status 按需校验，结果也会 push 到 resource 总线）===
 async function testConnection() {
   const sel = selected.value
   if (!sel) return
   testing.value = true
   try {
-    const resp = await getResourceStatus(sel.kind as ResourceType, sel.item.id)
+    const resp = await getResourceStatus(sel.kind, sel.item.id)
     if (!resp) {
       showToast('error', '该后端暂不支持连接测试')
       return
@@ -641,9 +470,7 @@ async function testConnection() {
   }
 }
 
-// === 实时状态订阅（走事件总线 resource 事件，而非轮询）===
-// 初始态由 loadAll 的 resources/list 携带；后续状态运行时变化由后端 push
-// `resource` 事件，这里按 kind + id 即时刷新列表项的状态角标。
+// === 实时状态订阅（事件总线 resource 事件，非轮询） ===
 let unsubscribers: Array<() => void> = []
 
 function cardStatus(item: ResourceSummary): 'active' | 'disabled' | 'warning' | 'error' | 'muted' {
@@ -684,21 +511,6 @@ onBeforeUnmount(() => {
 }
 .meta-sub {
   opacity: 0.75;
-}
-
-/* ============== 列表分组头（多类型） ============== */
-.list-group-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem 0.25rem;
-}
-.list-group-header:first-child {
-  padding-top: 0.25rem;
-}
-.group-count {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
 }
 
 .tag-copy {

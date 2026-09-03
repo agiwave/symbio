@@ -2,12 +2,18 @@
  * 统一资源协议（前端侧类型契约）
  *
  * 与后端大面积对齐：symbio/src/symbio_core/schemas/resources.rs
- * 覆盖 model / mcp / skill / agent / session 五类资源。
+ * 覆盖 model / mcp / agent / skill / session 等资源类型。
  * 所有资源共享同一套 resources/* 操作与能力开关，前端据此驱动统一页面。
+ *
+ * 资源类型（kind）已开放为 string：类型的**存在性/能力/前缀**以后端
+ * `resources/providers` 下发的 ProviderInfo 为单一真相源，前端不再硬编码类型清单。
  */
 
-/** 统一资源类型 */
-export type ResourceType = 'model' | 'mcp' | 'skill' | 'agent' | 'session'
+/**
+ * 统一资源类型（开放 string：可被后端 provider 注册表扩展的任意 kind）。
+ * 类型是否存在、能力如何，来自 ProviderInfo，而非本联合类型。
+ */
+export type ResourceType = string
 
 /** 资源能力开关——决定统一页面启用哪些模块 */
 export interface ResourceCapabilities {
@@ -23,6 +29,30 @@ export interface ResourceCapabilities {
   test_connection: boolean
   /** 是否默认只读 */
   read_only: boolean
+}
+
+/**
+ * 资源类型（provider）注册信息 —— 前端从后端 `resources/providers` 拉取。
+ * 对应后端 symbio_core::schemas::resources::ProviderInfo。
+ */
+export interface ProviderInfo {
+  kind: string
+  /** 提供方显示名，用于路径 [provider]/[id].[kind] */
+  provider_name: string
+  /** 资源操作路径前缀（resourcesOp 拼接 `${prefix}/resources/<op>`） */
+  prefix: string
+  capabilities: ResourceCapabilities
+  /** 展示顺序（导航 / 类型选择排序） */
+  order: number
+  /** 展示标签 */
+  label: string
+  /** 是否支持在资源管理器内创建/删除（session=false） */
+  supports_upload: boolean
+}
+
+/** resources/providers 响应 */
+export interface ProvidersResponse {
+  providers: ProviderInfo[]
 }
 
 /** 统一资源概要（列表项） */
@@ -78,20 +108,11 @@ export interface ResourceStatusResponse {
   status_detail?: string
 }
 
-/** 各类型中文标签（前端展示用） */
-export const RESOURCE_LABELS: Record<ResourceType, string> = {
+/** 各类型标签（前端兜底展示用；后端 ProviderInfo.label 为权威，未下发时用此表） */
+export const RESOURCE_LABELS: Record<string, string> = {
   model: 'Model',
   mcp: 'MCP',
   skill: 'Skill',
   agent: 'Agent',
   session: 'Session',
-}
-
-/** 前端兜底能力表（联网失败/未接线时用于渲染布局，与后端 capabilities_for 保持一致） */
-export const DEFAULT_CAPABILITIES: Record<ResourceType, ResourceCapabilities> = {
-  model: { zip_upload: false, independent_form: true, realtime_status: false, mutable: true, test_connection: true, read_only: false },
-  mcp: { zip_upload: true, independent_form: false, realtime_status: true, mutable: true, test_connection: true, read_only: false },
-  skill: { zip_upload: true, independent_form: false, realtime_status: false, mutable: true, test_connection: false, read_only: false },
-  agent: { zip_upload: true, independent_form: false, realtime_status: false, mutable: true, test_connection: false, read_only: false },
-  session: { zip_upload: false, independent_form: true, realtime_status: true, mutable: true, test_connection: false, read_only: false },
 }
