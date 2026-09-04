@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Symbio mark for light backgrounds">
+  <title>Symbio</title>
+  <desc>透明底标记（浅色背景用）：靛蓝与青绿双环编织，深靛中心节点</desc>
+  <defs>
+    <linearGradient id="sym-li-indigo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="sym-li-teal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="204" cy="256" r="92" fill="none" stroke="url(#sym-li-indigo)" stroke-width="42"/>
+  <circle cx="308" cy="256" r="92" fill="none" stroke="url(#sym-li-teal)" stroke-width="42"/>
+
+  <path d="M 227.8 167.1 A 92 92 0 0 1 278.4 201.9"
+        fill="none" stroke="url(#sym-li-indigo)" stroke-width="42" stroke-linecap="round"/>
+  <path d="M 284.2 344.9 A 92 92 0 0 1 233.6 310.1"
+        fill="none" stroke="url(#sym-li-teal)" stroke-width="42" stroke-linecap="round"/>
+
+  <circle cx="256" cy="256" r="28" fill="#1e1b4b"/>
+</svg>

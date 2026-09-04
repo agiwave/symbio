@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Symbio Logo — 品牌预览</title>
+<style>
+  :root {
+    --indigo: #4f46e5;
+    --indigo-light: #818cf8;
+    --teal: #14b8a6;
+    --navy: #1e1b4b;
+    --page: #f6f7fb;
+    --card: #ffffff;
+    --text: #1e1b4b;
+    --muted: #6b7280;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--page); color: var(--text);
+    padding: 48px 32px; line-height: 1.6;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 26px; font-weight: 650; letter-spacing: -0.5px; }
+  .sub { color: var(--muted); margin: 8px 0 40px; }
+  h2 { font-size: 16px; font-weight: 650; margin: 44px 0 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+  .card {
+    background: var(--card); border-radius: 16px; padding: 28px;
+    border: 1px solid rgba(30, 27, 75, 0.08);
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
+  }
+  .card.dark { background: #181825; border-color: rgba(255,255,255,0.08); }
+  .card .label { font-size: 12px; color: var(--muted); }
+  .card.dark .label { color: rgba(255,255,255,0.55); }
+  .card img { width: 160px; height: 160px; }
+  .card.wide img { width: 320px; height: auto; }
+  .light-panel { background: #ffffff; border-radius: 12px; padding: 16px; }
+  .dark-panel { background: #181825; border-radius: 12px; padding: 16px; }
+  .sizes { display: flex; align-items: flex-end; gap: 28px; }
+  .sizes figure { text-align: center; }
+  .sizes figcaption { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .palette { display: flex; gap: 14px; flex-wrap: wrap; }
+  .swatch { width: 118px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(30,27,75,0.08); background: #fff; }
+  .swatch .chip { height: 56px; }
+  .swatch .meta { padding: 8px 10px; font-size: 11px; color: var(--muted); }
+  .swatch .meta b { display: block; font-size: 12px; color: var(--text); font-weight: 650; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Symbio 品牌标识 · 共生双环</h1>
+  <p class="sub">两枚编织交叠的圆环 —— 靛蓝代表模型与认知，青绿代表工具与行动；交叠处的白色节点，是共生发生、能力被「路径寻址」命中的地方。</p>
+
+  <h2>应用图标（主 Logo）</h2>
+  <div class="grid">
+    <div class="card">
+      <img src="logo.svg" alt="Symbio 应用图标">
+      <span class="label">logo.svg · 深色底板</span>
+    </div>
+    <div class="card wide">
+      <img src="logo-horizontal.svg" alt="Symbio 横版字标">
+      <span class="label">logo-horizontal.svg · 横版组合（文档 / 网站页头）</span>
+    </div>
+  </div>
+
+  <h2>透明底标记 · 深浅色适配</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="light-panel"><img src="logo-mark.svg" alt="浅色背景标记" style="width:120px;height:120px;display:block;margin:0 auto;"></div>
+      <span class="label">logo-mark.svg · 浅色背景用</span>
+    </div>
+    <div class="card dark">
+      <div class="dark-panel"><img src="logo-mark-dark.svg" alt="深色背景标记" style="width:120px;height:120px;display:block;margin:0 auto;"></div>
+      <span class="label">logo-mark-dark.svg · 深色背景用</span>
+    </div>
+  </div>
+
+  <h2>尺寸阶梯（含 favicon 压力测试）</h2>
+  <div class="card">
+    <div class="sizes">
+      <figure><img src="logo.svg" style="width:128px;height:128px" alt="128px"><figcaption>128 px</figcaption></figure>
+      <figure><img src="logo.svg" style="width:64px;height:64px" alt="64px"><figcaption>64 px</figcaption></figure>
+      <figure><img src="logo.svg" style="width:32px;height:32px" alt="32px"><figcaption>32 px</figcaption></figure>
+      <figure><img src="logo.svg" style="width:16px;height:16px" alt="16px"><figcaption>16 px favicon</figcaption></figure>
+    </div>
+  </div>
+
+  <h2>品牌色板（与 tauri/src/styles/tokens.css 对齐）</h2>
+  <div class="palette">
+    <div class="swatch"><div class="chip" style="background:#4f46e5"></div><div class="meta"><b>Accent 600</b>#4f46e5 · --accent</div></div>
+    <div class="swatch"><div class="chip" style="background:#818cf8"></div><div class="meta"><b>Accent 400</b>#818cf8 · 深色主题主色</div></div>
+    <div class="swatch"><div class="chip" style="background:#312e81"></div><div class="meta"><b>Icon bg</b>#312e81 → #1e1b4b</div></div>
+    <div class="swatch"><div class="chip" style="background:#14b8a6"></div><div class="meta"><b>Teal 500</b>#14b8a6 · 工具/行动</div></div>
+    <div class="swatch"><div class="chip" style="background:#2dd4bf"></div><div class="meta"><b>Teal 400</b>#2dd4bf · 深色主题辅色</div></div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 260" role="img" aria-label="Symbio horizontal lockup">
+  <title>Symbio</title>
+  <desc>横版组合：共生双环标记 + Symbio 字标（浅色背景用）</desc>
+  <defs>
+    <linearGradient id="sym-hz-indigo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="sym-hz-teal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 标记（缩放并垂直居中：画布高 260，标记占 200） -->
+  <g transform="translate(30,30) scale(0.390625)">
+    <circle cx="204" cy="256" r="92" fill="none" stroke="url(#sym-hz-indigo)" stroke-width="42"/>
+    <circle cx="308" cy="256" r="92" fill="none" stroke="url(#sym-hz-teal)" stroke-width="42"/>
+    <path d="M 227.8 167.1 A 92 92 0 0 1 278.4 201.9"
+          fill="none" stroke="url(#sym-hz-indigo)" stroke-width="42" stroke-linecap="round"/>
+    <path d="M 284.2 344.9 A 92 92 0 0 1 233.6 310.1"
+          fill="none" stroke="url(#sym-hz-teal)" stroke-width="42" stroke-linecap="round"/>
+    <circle cx="256" cy="256" r="28" fill="#1e1b4b"/>
+  </g>
+
+  <!-- 字标 -->
+  <text x="240" y="168"
+        font-family="ui-sans-serif, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+        font-size="108" font-weight="650" letter-spacing="-2" fill="#1e1b4b">Symbio</text>
+</svg>
