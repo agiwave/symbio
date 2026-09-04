@@ -214,4 +214,6 @@ function formatValue(v: unknown): string {
   color: var(--text-muted);
   font-size: 0.9rem;
 }
+
+.mono { font-family: var(--font-mono); }
 </style>

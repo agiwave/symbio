@@ -316,6 +316,13 @@ function onDelete() { emit('delete') }
   max-width: 6.25rem;
 }
 
+/* 元信息行的时间与消息数（继承 .card-meta 的字号/颜色，防挤压） */
+.card-meta .time,
+.card-meta .count {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .card-meta .dot {
   opacity: 0.4;
 }

@@ -570,6 +570,18 @@ onUnmounted(() => {
 .option:hover { background: var(--surface-hover); }
 .option.active { background: var(--surface-selected); }
 
+/* 「新建」入口：虚线框 + 居中的次级样式 */
+.option.create-btn {
+  justify-content: center;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-default);
+}
+.option.create-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-subtle-border);
+  background: var(--surface-hover);
+}
+
 .option .icon { font-size: 1.25rem; flex-shrink: 0; }
 .text { flex: 1; min-width: 0; }
 .text .label { font-size: var(--font-size-base); font-weight: var(--font-weight-medium); color: var(--text-primary); margin-bottom: var(--space-05); }
@@ -615,10 +627,9 @@ onUnmounted(() => {
 .form-group label { display: block; font-size: var(--font-size-base); font-weight: var(--font-weight-medium); margin-bottom: var(--space-1); }
 .form-group input, .form-group textarea { width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-md); font-size: var(--font-size-base); box-sizing: border-box; }
 .form-group textarea { font-family: inherit; }
-.checkbox-label { display: flex !important; align-items: center; gap: var(--space-2); cursor: pointer; }
-.checkbox-label input { width: auto; }
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
 .action-btn { padding: var(--space-2) var(--space-4); background: var(--accent); color: var(--text-on-accent); border: none; border-radius: var(--radius-md); cursor: pointer; font-size: var(--font-size-base); }
 .action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .action-btn.secondary { background: var(--surface-hover); color: var(--text-primary); }
+.empty-hint { padding: var(--space-4); text-align: center; color: var(--text-muted); font-size: var(--font-size-sm); }
 </style>

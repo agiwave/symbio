@@ -115,6 +115,12 @@ jobs:
         working-directory: tauri
         run: npx vue-tsc --noEmit
 
+      - name: Style usage audit (style-audit)
+        # 样式定义使用情况双向审计（编译检查的一部分）：
+        # - 使用的类/设计令牌必须有定义（ERROR，阻断合入）
+        # - 定义未被使用给 WARNING（加 --strict 后同样阻断）
+        run: node scripts/style-audit.mjs
+
       - name: Unit tests (vitest)
         # 纯逻辑层（utils / composables / services）单元测试门禁
         working-directory: tauri

@@ -303,6 +303,8 @@ onUnmounted(async () => {
 .drop-indicator { position: fixed; height: 0.125rem; background: var(--accent); border-radius: 1px; pointer-events: none; z-index: 101; }
 .toolbar-btn { width: 1.75rem; height: 1.75rem; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 0.25rem; cursor: pointer; color: var(--text-primary); }
 .toolbar-btn:hover { background: var(--surface-hover); }
+/* 工具栏按钮内的字符标签（H / B / I 等） */
+.btn-text { font-size: 0.8125rem; font-weight: var(--font-weight-medium); line-height: 1; }
 .toolbar-divider { width: 1px; height: 1rem; background: var(--border-default); margin: 0 0.25rem; }
 .shortcut-hint { position: fixed; bottom: 1rem; right: 1rem; background: var(--surface-overlay); color: var(--text-primary); padding: 0.375rem 0.75rem; border-radius: 0.375rem; font-size: 0.75rem; z-index: 100; border: 1px solid var(--border-default); box-shadow: var(--shadow-2); }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s ease; }

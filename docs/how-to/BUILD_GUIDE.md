@@ -10,6 +10,7 @@
      - `cargo build --release --manifest-path symbio/Cargo.toml`
      - `node scripts/grep-audit.mjs`（P16 已闭环）
      - `npx vue-tsc --noEmit`（TypeScript 类型检查）
+     - `node scripts/style-audit.mjs`（样式定义使用情况双向审计：使用未定义=ERROR，定义未使用=WARNING）
      - `cargo audit`（安全审计）
   2. 发布构建CI（`.github/workflows/release.yml`）：
      - 预检 `quality-gate` 复跑 fmt/clippy/test/audit（防止 `workflow_dispatch` 绕过 ci.yml）

@@ -527,6 +527,14 @@ onBeforeUnmount(() => {
   opacity: 0.75;
 }
 
+/* tag 系列用在 ResourceCard 的 #meta 插槽内容上（scoped 样式不穿透插槽，须本地定义） */
+.tag {
+  padding: 0.1rem 0.4rem;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+  font-size: 0.65rem;
+}
+.tag-muted { background: var(--surface-sunken); color: var(--text-muted); }
 .tag-copy {
   cursor: pointer;
   transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
@@ -534,6 +542,22 @@ onBeforeUnmount(() => {
 .tag-copy:hover {
   color: var(--text-primary);
   background: var(--surface-hover);
+}
+
+/* 运行状态脉冲点（用于 #list 插槽内容，scoped 样式不穿透插槽，须本地定义） */
+.running-pulse {
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  background: var(--success-solid);
+  border-radius: 50%;
+  animation: pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
 }
 
 /* ============== 新建面板（居中卡片） ============== */

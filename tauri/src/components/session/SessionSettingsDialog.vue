@@ -246,6 +246,11 @@ async function onTrigger() {
   overflow: hidden;
 }
 
+/* 后台任务运行中的状态强调（hb-dialog + is-working 组合） */
+.hb-dialog.is-working {
+  border: 1px solid var(--accent-subtle-border);
+}
+
 .hb-header {
   display: flex;
   align-items: center;

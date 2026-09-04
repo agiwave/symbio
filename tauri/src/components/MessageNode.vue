@@ -1062,6 +1062,12 @@ function highlightJsonString(s: string): string {
   display: flex;
   justify-content: flex-end;
 }
+/* 气泡基类：结构属性在此，配色/圆角由 user-bubble 等变体提供 */
+.bubble {
+  max-width: 80%;
+  padding: 0.6rem 0.85rem;
+  word-break: break-word;
+}
 .user-bubble {
   max-width: 80%;
   background: var(--color-user-bubble);
@@ -1270,11 +1276,12 @@ function highlightJsonString(s: string): string {
   background: var(--color-chip-bg);
   color: var(--color-chip-fg);
 }
-.up-risk.high {
+/* 风险等级由动态 :class="'risk-' + level" 生成（risk-high / risk-medium / risk-low） */
+.up-risk.risk-high {
   background: var(--color-tag-err-bg);
   color: var(--color-tag-err-fg);
 }
-.up-risk.medium {
+.up-risk.risk-medium {
   background: var(--color-tag-warn-bg);
   color: var(--color-tag-warn-fg);
 }
@@ -1341,6 +1348,10 @@ function highlightJsonString(s: string): string {
 .err-text {
   flex: 1;
   word-break: break-word;
+}
+/* 失败 Turn 的错误条（error-box + turn-error 组合）：与上下文留出间距 */
+.turn-error {
+  margin: 0.25rem 0 0.375rem;
 }
 .retry {
   flex-shrink: 0;

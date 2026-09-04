@@ -4,10 +4,7 @@
  * 单一令牌来源：浅色 :root + 深色 :root[data-theme="dark"] 各一套。
  * 现有 --color-* 作为「别名层」映射到新的语义令牌，保证：
  *   1. 已完成的会话区改造零改动、零回退；
- *   2. 5 个「被引用但未定义」的令牌（--color-border-subtle / --font-mono /
- *      --color-primary-hover / --color-text-primary / --border-color）与
- *      4 个「仅深色存在」的令牌（--color-input-bg / --color-surface-strong /
- *      --color-hover-bg / --color-active-bg）在浅色下也得到真实值。
+ *   2. 曾「被引用但未定义」的令牌（如 --font-mono）均有真实值。
  * ============================================================================= */
 
 :root {
@@ -19,11 +16,9 @@
   /* ── 表面 surface ─────────────────────────────────────────────── */
   --surface-page:        #f6f7f9;   /* 页面底 / 应用背景（替代 --color-bg） */
   --surface-panel:       #ffffff;   /* 侧栏、面板、详情区（替代 --color-surface） */
-  --surface-card:        #ffffff;   /* 卡片、列表项抬高态 */
   --surface-sunken:      #f0f2f5;   /* 输入框、代码块、凹陷区（替代 --color-input-bg） */
   --surface-overlay:     #ffffff;   /* 对话框、菜单、Tooltip、Toast（替代 --color-surface-strong） */
   --surface-hover:       rgba(15, 23, 42, 0.05);   /* hover 叠加（替代 rgba(0,0,0,…)） */
-  --surface-active:      rgba(15, 23, 42, 0.09);   /* pressed / active 叠加 */
   --surface-selected:    rgba(79, 70, 229, 0.08);  /* 列表项选中底色 */
 
   /* ── 文本 text ────────────────────────────────────────────────── */
@@ -35,14 +30,13 @@
   --text-on-accent:      #ffffff;   /* 主色填充上的前景 */
 
   /* ── 描边 border ──────────────────────────────────────────────── */
-  --border-subtle:       #eceef2;   /* hairline 分隔线（补齐 --color-border-subtle） */
+  --border-subtle:       #eceef2;   /* hairline 分隔线 */
   --border-default:      #dfe3ea;   /* 常规描边（替代 --color-border） */
   --border-strong:       #c6ccd8;   /* 输入框 hover / 强调描边 */
 
   /* ── 强调色 accent ────────────────────────────────────────────── */
   --accent:              #4f46e5;   /* 浅色主色：#667eea → #4f46e5（白字 3.66:1 → 6.29:1） */
   --accent-hover:        #4338ca;
-  --accent-active:       #3730a3;
   --accent-subtle-bg:    rgba(79, 70, 229, 0.10);
   --accent-subtle-border: rgba(79, 70, 229, 0.30);
 
@@ -61,14 +55,12 @@
   --radius-full: 999px;     /* 药丸 / 圆形，只需够大，不参与等比 */
 
   /* ── 间距 space（4pt 基准）────────────────────────────────────── */
-  --space-0:  0;
   --space-05: 0.125rem;  /* 2px  */
   --space-1:  0.25rem;   /* 4px  */
   --space-2:  0.5rem;    /* 8px  */
   --space-3:  0.75rem;   /* 12px */
   --space-4:  1rem;      /* 16px */
   --space-5:  1.5rem;    /* 24px */
-  --space-6:  2rem;      /* 32px */
 
   /* ── 字体 font ────────────────────────────────────────────────── */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
@@ -82,35 +74,26 @@
   --font-size-md:   1rem;       /* 16px */
   --font-size-lg:   1.125rem;   /* 18px 小节标题 */
   --font-size-xl:   1.25rem;    /* 20px 页面标题 */
-  --font-size-2xl:  1.5rem;     /* 24px 仅「关于」页 */
 
   --font-weight-regular:  400;
   --font-weight-medium:   500;
   --font-weight-semibold: 600;
-  --font-weight-bold:     700;
 
   --line-height-tight:   1.35;
   --line-height-normal:  1.5;
-  --line-height-relaxed: 1.6;
 
   /* ── 阴影 / 动效 / 焦点环 / 控件尺寸 ──────────────────────────── */
   --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06);          /* hover 微抬升 */
   --shadow-2: 0 8px 24px rgba(16, 24, 40, 0.12);         /* 浮层 */
   --motion-fast: 120ms;
   --motion-base: 160ms;
-  --motion-slow: 240ms;
   --motion-ease: cubic-bezier(0.2, 0, 0.2, 1);
   --focus-ring-width:  0.125rem;   /* 2px */
   --focus-ring-offset: 0.125rem;   /* 2px */
   --focus-ring-color:  var(--accent);
-  --control-height-sm: 1.5rem;     /* 24px */
-  --control-height-md: 1.75rem;    /* 28px */
-  --control-height-lg: 2rem;       /* 32px */
-  --hit-target-min:    1.5rem;     /* 24px */
   --z-overlay: 1000;
   --z-dialog:  1500;
   --z-toast:   2000;
-  --z-tooltip: 2500;
 
   /* ── 模态遮罩（取代 rgba(0,0,0,…) 硬编码，浅/深两态各一值）──────── */
   --overlay: rgba(15, 23, 42, 0.45);
@@ -118,15 +101,12 @@
   /* ── 渐隐遮罩终点（折叠区底部 fade-to-surface，须与各主题 supply 底一致）─ */
   --surface-fade: rgba(255, 255, 255, 0.95);
 
-  /* ── 布局尺寸（保留，防回退）─────────────────────────────────── */
+  /* ── 布局尺寸 ────────────────────────────────────────────────── */
   --sidebar-width: 3.5rem;   /* 56px 图标窄条 */
-  --panel-width:   17.5rem;  /* 280px */
-  --header-height: 3rem;     /* 48px */
 
   /* ── 会话区语义令牌（原样保留，零回退）───────────────────────── */
   --color-chat-bg: #ffffff;
   --color-msg-card: #f6f8fb;
-  --color-msg-card-border: #e8edf4;
   --msg-gap: 0.45rem;
   --color-nested-line: #e8edf4;
   --color-chip-bg: #eef2f7;
@@ -168,19 +148,13 @@
   --color-bg:           var(--surface-page);
   --color-surface:      var(--surface-panel);
   --color-border:       var(--border-default);
-  --color-border-subtle: var(--border-subtle);   /* 补齐 */
   --color-text:         var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-muted:   var(--text-muted);
-  --color-text-primary: var(--text-primary);     /* 补齐（原无 fallback，已破） */
   --color-primary:      var(--accent);
   --color-primary-dark: var(--accent-hover);
-  --color-primary-hover: var(--accent-hover);     /* 补齐 */
-  --color-input-bg:     var(--surface-sunken);    /* 补齐浅色 */
-  --color-surface-strong: var(--surface-overlay);/* 补齐浅色 */
-  --color-hover-bg:     var(--surface-hover);     /* 补齐浅色 */
-  --color-active-bg:    var(--surface-active);    /* 补齐浅色 */
-  --border-color:       var(--border-default);    /* 补齐 */
+  --color-input-bg:     var(--surface-sunken);
+  --color-surface-strong: var(--surface-overlay);
 }
 
 :root[data-theme="dark"] {
@@ -190,11 +164,9 @@
   /* ── 表面 surface（深色）─────────────────────────────────────── */
   --surface-page:     #16161d;
   --surface-panel:    #1c1c25;
-  --surface-card:     #23232e;
   --surface-sunken:   #101017;
   --surface-overlay:  #23232e;
   --surface-hover:    rgba(255, 255, 255, 0.06);
-  --surface-active:   rgba(255, 255, 255, 0.10);
   --surface-selected: rgba(129, 140, 248, 0.14);
 
   /* ── 文本 text（深色）────────────────────────────────────────── */
@@ -213,7 +185,6 @@
   /* ── 强调色 accent（深色）────────────────────────────────────── */
   --accent:          #818cf8;
   --accent-hover:    #a5b4fc;
-  --accent-active:   #c7d2fe;
   --accent-subtle-bg:    rgba(129, 140, 248, 0.16);
   --accent-subtle-border: rgba(129, 140, 248, 0.40);
 
@@ -236,7 +207,6 @@
   /* ── 会话区语义令牌（深色覆盖，原样保留）─────────────────────── */
   --color-chat-bg: #181825;
   --color-msg-card: #27273a;
-  --color-msg-card-border: #3f3f5a;
   --msg-gap: 0.45rem;
   --color-nested-line: #3f3f5a;
   --color-chip-bg: #313147;
@@ -278,17 +248,11 @@
   --color-bg:           var(--surface-page);
   --color-surface:      var(--surface-panel);
   --color-border:       var(--border-default);
-  --color-border-subtle: var(--border-subtle);
   --color-text:         var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-muted:   var(--text-muted);
-  --color-text-primary: var(--text-primary);
   --color-primary:      var(--accent);
   --color-primary-dark: var(--accent-hover);
-  --color-primary-hover: var(--accent-hover);
   --color-input-bg:     var(--surface-sunken);
   --color-surface-strong: var(--surface-overlay);
-  --color-hover-bg:     var(--surface-hover);
-  --color-active-bg:    var(--surface-active);
-  --border-color:       var(--border-default);
 }

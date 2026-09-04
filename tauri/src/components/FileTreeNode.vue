@@ -5,8 +5,7 @@
       :style="{ paddingLeft: (level * 12 + 8) + 'px' }"
       :class="{
         'is-dir': item.is_dir,
-        'is-selected': selectedPath === item.path,
-        'is-expanded': isExpanded
+        'is-selected': selectedPath === item.path
       }"
       @click="handleClick"
     >

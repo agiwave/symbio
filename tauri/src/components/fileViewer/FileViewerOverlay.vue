@@ -79,7 +79,7 @@
         <!-- Markdown 预览模式 -->
         <div
           v-else-if="isMarkdown && viewMode === 'preview'"
-          class="md-content markdown-body"
+          class="md-content"
           v-html="renderedMarkdown"
         />
 

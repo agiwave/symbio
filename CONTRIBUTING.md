@@ -45,6 +45,7 @@ CI 流水线位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，**�
 | 步骤 | 命令 | 失败后果 |
 |---|---|---|
 | TypeScript 类型检查 | `cd tauri && npx vue-tsc --noEmit` | 阻止合入 |
+| 样式使用审计 | `node scripts/style-audit.mjs` | 阻止合入（ERROR；`--strict` 连 WARNING 一并阻断） |
 | Rustfmt | `cd symbio && cargo fmt --check` | 阻止合入 |
 | Clippy | `cd symbio && cargo clippy --all-targets -- -D warnings` | 阻止合入 |
 | Rust 单元测试 | `cd symbio && cargo test --lib` | 阻止合入 |

@@ -79,6 +79,13 @@ async function onUseLast() {
   opacity: 0.6;
 }
 
+/* 文件夹 SVG 插图容器 */
+.folder-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .empty-title {
   font-size: 1.15rem;
   font-weight: 500;

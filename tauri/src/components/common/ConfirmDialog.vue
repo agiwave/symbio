@@ -275,6 +275,14 @@ watch(
   filter: brightness(0.92);
   border-color: var(--danger-solid);
 }
+/* 取消按钮：在基础中性样式上再降一级视觉权重 */
+.confirm-btn.cancel {
+  color: var(--text-secondary);
+  background: transparent;
+}
+.confirm-btn.cancel:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
 
 .confirm-fade-enter-active,
 .confirm-fade-leave-active {

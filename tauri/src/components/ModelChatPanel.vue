@@ -584,7 +584,6 @@ watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'po
      杜绝散落的 0.75/0.5/0.4rem 多重间距导致的「忽大忽小」。 */
   --msg-gap: 0.4rem;         /* 统一纵向间隔：顶层节点 / Turn 子元素 / 工具子元素 全部共用（紧凑） */
   --nest-indent: 0.7rem;      /* 嵌套缩进步长（仅 depth>=2 的层级使用，见 MessageNode） */
-  --card-pad-y: 0.3rem;       /* 卡片型节点（思考过程 / 工具调用）统一上下内边距 */
   --card-pad-x: 0.5rem;       /* 卡片型节点统一左右内边距 */
   gap: var(--msg-gap);
 }
@@ -710,5 +709,88 @@ watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'po
 .banner-leave-to {
   opacity: 0;
   transform: translateY(-0.5rem);
+}
+
+/* ── 编辑单条消息的浮层（edit-overlay / edit-box …）──────── */
+
+.edit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.edit-box {
+  width: min(34rem, 92vw);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.edit-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.edit-area {
+  min-height: 8rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.edit-area:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.edit-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.edit-save,
+.edit-cancel {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+}
+
+.edit-save {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.edit-save:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.edit-cancel {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.edit-cancel:hover {
+  background: var(--surface-hover);
 }
 </style>

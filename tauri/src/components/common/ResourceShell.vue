@@ -198,21 +198,6 @@ function emitNew() {
   text-overflow: ellipsis;
 }
 
-.running-pulse {
-  display: inline-block;
-  width: 0.4375rem;
-  height: 0.4375rem;
-  background: var(--success-solid);
-  border-radius: 50%;
-  animation: pulse 1.4s ease-in-out infinite;
-  flex-shrink: 0;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
-}
-
 .empty-state {
   flex: 1;
   display: flex;

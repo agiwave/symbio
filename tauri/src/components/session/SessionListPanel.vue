@@ -170,4 +170,9 @@ async function onDelete(id: string) {
   font-size: 0.75rem;
   opacity: 0.7;
 }
+
+.header-actions {
+  display: flex;
+  gap: 0.25rem;
+}
 </style>

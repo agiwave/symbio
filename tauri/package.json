@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint:styles": "node ../scripts/style-audit.mjs"
   },
   "dependencies": {
     "@milkdown/core": "^7.22.1",

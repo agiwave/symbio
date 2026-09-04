@@ -287,6 +287,14 @@ function onBodyClick() {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* 上下文条目里的 emoji 图标（📄 文件 / 📍 行号定位） */
+.ctx-file-icon,
+.ctx-lines-icon {
+  flex-shrink: 0;
+  font-size: 0.8em;
+  line-height: 1;
+}
+
 .ctx-file-large {
   max-width: 100%;
   overflow: hidden;

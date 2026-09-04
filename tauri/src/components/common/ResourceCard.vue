@@ -212,4 +212,13 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 .tag-warn    { background: var(--warning-bg); color: var(--warning-fg); }
 .tag-info    { background: var(--info-bg); color: var(--info-fg); }
 .tag-muted   { background: var(--surface-sunken); color: var(--text-muted); }
+
+.preview-text {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 </style>
