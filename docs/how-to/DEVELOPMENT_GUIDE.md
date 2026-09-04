@@ -60,7 +60,9 @@
 
 * 单元测试写在被测文件同模块底部 `#[cfg(test)] mod tests`。
 * 集成 / 行为测试写在 `symbio/tests/` 中（当前以模块内联测试为主，尚无独立 `tests/` 目录）。
-* 大规模测试脚本（如能力验证）放在仓库根 `scripts/` 下（如 `test_capabilities.ps1` / `test_capability_chain.ps1`）。
+* 大规模测试脚本（如能力验证）放在仓库根 `scripts/` 下（如 `test-capabilities.mjs` / `test-capability-chain.mjs`）。
+* **脚本一律平台无关**：用 Node.js（`.mjs`）编写，不使用 `.sh` / `.ps1` / `.bat`。
+  调用子进程时传参数数组并设 `shell: false`，避免跨平台的引号转义差异。
 
 ## 3. Agent 子系统规范
 

@@ -117,7 +117,7 @@ async function onDelete(id: string) {
 }
 
 .icon-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--surface-hover);
   color: var(--color-text);
 }
 

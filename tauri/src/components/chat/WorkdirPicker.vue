@@ -41,7 +41,7 @@ const props = defineProps<{
   sessionId: string
   /** 当前会话的 workdir（可选） */
   workdir: string | null
-  /** 当前会话的消息条数（按 sort_index 排序后的总数） */
+  /** 当前会话的消息条数（按 seq 排序后的总数） */
   messageCount: number
 }>()
 
@@ -130,7 +130,7 @@ async function onClick() {
 }
 
 .picker-btn.clickable:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--surface-hover);
   color: var(--color-text-secondary);
 }
 
@@ -142,7 +142,7 @@ async function onClick() {
   font-size: 0.7rem;
   padding: 0.05rem 0.3rem;
   border-radius: 0.1875rem;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--surface-sunken);
   color: var(--color-text-secondary);
   opacity: 0.6;
   transition: opacity 0.2s;

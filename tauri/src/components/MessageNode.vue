@@ -93,9 +93,11 @@
       <!-- 文本 / 工具请求 / 工具返回。
            失败呈现（要求6/7 的分派）：
            · Turn 子节点的失败 → 由根级 Turn 组错误条统一呈现（isResponseText 不再重复报错）；
-           · 工具结果的失败 → 此处仅显示错误文本，重试入口在工具行（↻）与工具卡内。 -->
+           · 工具结果的失败 → 此处仅显示错误文本，重试入口在工具行（↻）与工具卡内；
+           · 纯文本 / 思考节点**绝不**渲染服务端错误（服务器错误只属于根级 Turn，
+             工具调用在本地执行不会触发 API 错误，因此 text/reasoning 上不应出现 ⚠）。 -->
       <template v-else-if="isTextLike">
-        <div v-if="isFailed && !isResponseText" class="error-box">
+        <div v-if="isFailed && isToolResult && !parentFailed" class="error-box">
           <span class="err-icon">⚠</span>
           <span class="err-text">{{ errorText }}</span>
         </div>
@@ -224,6 +226,7 @@
               :node="r"
               :depth="(depth ?? 0) + 1"
               parent-type="tool_call"
+              :parent-failed="isFailed"
               @retry="emit('retry', $event)"
               @delete="emit('delete', $event)"
               @edit="emit('edit', $event)"
@@ -269,6 +272,9 @@ const props = defineProps<{
   depth?: number
   /** 父节点类型：用于识别「Turn 的直接文本回复」，避免与 Turn 头部重复的冗余标题 */
   parentType?: string
+  /** 父节点（ToolCall）是否已失败：工具结果子节点据此隐藏自身错误框，
+   *  避免与父 ToolCall 的错误框重复——错误只由"造成中止的节点"呈现一次。 */
+  parentFailed?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -416,7 +422,7 @@ const toolRequestNode = computed<ChatMessage | null>(() => {
     status: base.status === 'streaming' ? 'streaming' : 'completed',
     meta: { ...(base.meta || {}), __toolRequest: true },
     timestamp: base.timestamp,
-    sort_index: -1, // 始终排在响应子节点之前
+    seq: -1, // 始终排在响应子节点之前
   }
 })
 // ToolCall 实际渲染的子节点分组（三段式）：
@@ -1008,7 +1014,7 @@ function highlightJsonString(s: string): string {
 }
 .node-act:hover {
   background: rgba(239, 68, 68, 0.16);
-  color: #dc2626;
+  color: var(--danger-fg);
 }
 .node-tag {
   font-size: 0.68rem;
@@ -1230,7 +1236,7 @@ function highlightJsonString(s: string): string {
 .up-submit {
   align-self: flex-start;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--text-on-accent);
   border: none;
   border-radius: 0.375rem;
   padding: 0.35rem 0.9rem;
@@ -1303,8 +1309,8 @@ function highlightJsonString(s: string): string {
   border: 1px solid transparent;
 }
 .up-approve {
-  background: #16a34a;
-  color: #fff;
+  background: var(--success-solid);
+  color: var(--text-on-accent);
 }
 .up-approve:disabled,
 .up-reject:disabled {
@@ -1391,7 +1397,7 @@ function highlightJsonString(s: string): string {
 .supply-submit {
   align-self: flex-start;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--text-on-accent);
   border: none;
   border-radius: 0.375rem;
   padding: 0.3rem 0.9rem;

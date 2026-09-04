@@ -9,6 +9,21 @@
       </div>
     </Transition>
 
+    <!-- 会话级错误条（兜底：无 Failed Turn 节点、但会话整体因错误中止时展示；
+         有 Failed Turn 时错误由根级 Turn 节点承载，不在此重复显示） -->
+    <Transition name="banner">
+      <div v-if="sessionError" class="session-error-banner" role="alert">
+        <span class="banner-icon">⚠</span>
+        <span class="banner-text">{{ sessionError }}</span>
+        <button class="banner-retry" @click="handleSessionRetry">重试</button>
+        <button
+          class="banner-close"
+          @click="sessionsStore.setSessionError(props.sessionId, null)"
+          title="关闭"
+        >×</button>
+      </div>
+    </Transition>
+
     <!-- 编辑单条消息的浮层 -->
     <Transition name="banner">
       <div v-if="editing" class="edit-overlay" @click.self="editing = null">
@@ -271,11 +286,33 @@ const workdir = computed<string | null>(() => {
 
 // 在 store 加载消息后用 store 自身的 messages 数组作为权威来源，
 // 避免 ModelChatPanel 内 messageTree 与 WorkdirPicker 看到的 messageCount 不一致
-const messageCount = computed(() => {
-  return sessionsStore.getSessionMessages(props.sessionId).length
-})
+  const messageCount = computed(() => {
+    return sessionsStore.getSessionMessages(props.sessionId).length
+  })
 
-// --- 方法 ---
+  // 会话级错误状态（"错误是状态、不是节点"的兜底展示）：仅当没有任何 Failed Turn 节点、
+  // 但会话整体因错误中止（transport 级失败 / send 在首帧前失败）时非空。此时没有"造成
+  // 中止的节点"可挂重试，错误作为会话级状态展示在会话错误条，并许可重试。
+  const sessionError = computed(() => sessionsStore.getSessionError(props.sessionId))
+
+  /** 会话级错误重试：重新发送用户最后一条消息（复用其 id 避免乐观消息重复节点）。
+   *  仅用于"无 Failed Turn 节点"的兜底错误；有 Failed Turn 时错误由其节点承载、走 handleRetry。 */
+  function handleSessionRetry() {
+    const msgs = sessionsStore.getSessionMessages(props.sessionId)
+    const lastUser = [...msgs].reverse().find((m) => m.role === 'user')
+    sessionsStore.setSessionError(props.sessionId, null)
+    if (!lastUser) return
+    const retryMsg: ChatMessage = {
+      id: lastUser.id, // 复用原 user 消息 id：重发而非新建节点
+      role: 'user',
+      content: lastUser.content,
+      timestamp: Date.now(),
+      agent_id: agentId.value ?? undefined,
+    }
+    chat.send(retryMsg, agentId.value, modelProviderId.value || undefined)
+  }
+
+  // --- 方法 ---
 onMounted(async () => {
   // 清掉旧的 banner
   initError.value = null
@@ -632,6 +669,36 @@ watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'po
 
 .banner-close:hover {
   background: rgba(146, 64, 14, 0.1);
+}
+
+/* 会话级错误条（与 init-error-banner 同视觉语言，但语义不同：
+   它是"错误是状态、不是节点"的兜底展示，仅当无任何 Failed Turn 节点时出现） */
+.session-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-left: 0.1875rem solid var(--color-error-fg);
+  color: var(--color-error-fg);
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.banner-retry {
+  flex-shrink: 0;
+  background: var(--color-option-bg);
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error-fg);
+  border-radius: 0.375rem;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.banner-retry:hover {
+  background: var(--color-error-bg);
 }
 
 .banner-enter-active,

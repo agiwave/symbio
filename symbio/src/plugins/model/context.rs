@@ -135,7 +135,46 @@ pub enum PostResult {
     Ok(reqwest::Response),
     RetryWithoutContextId,
     Err(String),
+    /// 命中限流/服务端过载且重试耗尽：携带面向用户的可读提示（不应再显示原始 API JSON）。
+    RateLimited(String),
     Aborted,
+}
+
+/// 可瞬时恢复、值得退避重试的 HTTP 状态。
+fn is_retryable_status(status: u16) -> bool {
+    matches!(status, 429 | 500 | 502 | 503 | 504)
+}
+
+/// 计算退避时长：优先尊重服务端 `Retry-After`，否则指数退避（500ms 起，封顶 8s）。
+fn backoff_delay(attempt: u32, retry_after: Option<std::time::Duration>) -> std::time::Duration {
+    if let Some(d) = retry_after {
+        // 服务端给的等待时间通常已合理，仍封顶到 30s 避免极端值卡死。
+        return d.min(std::time::Duration::from_secs(30));
+    }
+    let base_ms: u64 = 500;
+    let exp = base_ms.saturating_mul(2u64.saturating_pow(attempt.saturating_sub(1)));
+    std::time::Duration::from_millis(exp.min(8000))
+}
+
+/// 解析 `Retry-After` 头（仅支持整数秒形式，HTTP 日期形式极少用，忽略）。
+fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::time::Duration> {
+    let v = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    let secs = v.trim().parse::<u64>().ok()?;
+    Some(std::time::Duration::from_secs(secs))
+}
+
+/// 退避等待期间持续响应中止信号，避免 abort 必须等满整个退避窗口。
+async fn sleep_with_abort(d: std::time::Duration, abort_flag: &AtomicBool) {
+    let step = std::time::Duration::from_millis(100);
+    let mut elapsed = std::time::Duration::ZERO;
+    while elapsed < d {
+        if abort_flag.load(Ordering::SeqCst) {
+            return;
+        }
+        let remain = d - elapsed;
+        tokio::time::sleep(remain.min(step)).await;
+        elapsed += remain.min(step);
+    }
 }
 
 pub async fn execute_post_with_abort(
@@ -151,35 +190,88 @@ pub async fn execute_post_with_abort(
         url,
         body.as_object().map(|m| m.keys().collect::<Vec<_>>())
     );
-    let result = tokio::select! {
-        res = get_http_client().post(url).headers(headers).json(body).send() => {
-            plugin_info!("model", "[DIAG] execute_post_with_abort: HTTP request future completed first");
-            res
-        },
-        _ = wait_for_abort_signal(channel, abort_flag) => {
-            plugin_warn!("model", "[DIAG] execute_post_with_abort: wait_for_abort_signal returned first -> Aborted");
+
+    // 限流/瞬时 5xx/网络抖动：有界重试 + 指数退避，避免一次瞬时错误就中断整轮对话。
+    // 重试在同一 turn 内进行（复用同一个 root_id），不会额外产生 Turn/文本节点，
+    // 因此不会造成"错误刷屏"。重试耗尽才向上返回错误，由上层停止并展示重试入口。
+    const MAX_RETRIES: u32 = 4;
+    let mut attempt: u32 = 0;
+
+    loop {
+        if abort_flag.load(Ordering::SeqCst) {
             return PostResult::Aborted;
         }
-    };
 
-    let response = match result {
-        Err(e) => return PostResult::Err(format!("网络传输失败: {e}")),
-        Ok(r) => r,
-    };
+        let result = tokio::select! {
+            res = get_http_client().post(url).headers(headers.clone()).json(body).send() => {
+                plugin_info!("model", "[DIAG] execute_post_with_abort: HTTP request future completed first");
+                res
+            },
+            _ = wait_for_abort_signal(channel, abort_flag) => {
+                plugin_warn!("model", "[DIAG] execute_post_with_abort: wait_for_abort_signal returned first -> Aborted");
+                return PostResult::Aborted;
+            }
+        };
 
-    if response.status().is_success() {
-        return PostResult::Ok(response);
+        let response = match result {
+            Err(e) => {
+                // 网络层错误（连接中断 / DNS / 超时）：可瞬时恢复，退避后重试。
+                attempt += 1;
+                if attempt <= MAX_RETRIES {
+                    let delay = backoff_delay(attempt, None);
+                    plugin_warn!(
+                        "model",
+                        "[DIAG] execute_post_with_abort: 网络错误({}), 第{}/{}次重试, 退避{:?}",
+                        e, attempt, MAX_RETRIES, delay
+                    );
+                    sleep_with_abort(delay, abort_flag).await;
+                    continue;
+                }
+                return PostResult::Err(format!("网络传输失败: {e}"));
+            }
+            Ok(r) => r,
+        };
+
+        if response.status().is_success() {
+            return PostResult::Ok(response);
+        }
+
+        // 先读重试头（response 被 text() 消费后再也拿不到 header）。
+        let retry_after = parse_retry_after(response.headers());
+
+        let status = response.status();
+        let err_text = response.text().await.unwrap_or_default();
+
+        // 处理上下文失效重试（交给上层清 response_id 后重发整轮）。
+        if status == 400 && err_text.contains("previous_response_not_found") {
+            return PostResult::RetryWithoutContextId;
+        }
+
+        if is_retryable_status(status.as_u16()) && attempt < MAX_RETRIES {
+            attempt += 1;
+            let delay = backoff_delay(attempt, retry_after);
+            plugin_warn!(
+                "model",
+                "[DIAG] execute_post_with_abort: HTTP {} 可重试, 第{}/{}次重试, 退避{:?}",
+                status, attempt, MAX_RETRIES, delay
+            );
+            sleep_with_abort(delay, abort_flag).await;
+            continue;
+        }
+
+        // 不可重试，或重试耗尽：返回面向用户的友好提示（不再回显原始 API JSON）。
+        if status.as_u16() == 429 {
+            return PostResult::RateLimited(
+                "请求过于频繁（429 限流）。请稍后重试，或切换其他模型继续。".to_string(),
+            );
+        }
+        if status.as_u16() >= 500 {
+            return PostResult::Err(format!(
+                "模型服务暂时不可用（HTTP {status}），请稍后重试。"
+            ));
+        }
+        return PostResult::Err(format!("API Error ({status}): {err_text}"));
     }
-
-    let status = response.status();
-    let err_text = response.text().await.unwrap_or_default();
-
-    // 处理上下文失效重试
-    if status == 400 && err_text.contains("previous_response_not_found") {
-        return PostResult::RetryWithoutContextId;
-    }
-
-    PostResult::Err(format!("API Error ({status}): {err_text}"))
 }
 
 // SSE 流解析与结果积累
@@ -227,6 +319,12 @@ impl TurnOutput {
             &tools,
             self.response_id,
             reasoning,
+            // 复用流式期间已经广播给前端的子节点 id：落库节点与流式节点必须是同一身份，
+            // 否则失败收尾时流式节点会被当成"未落库的半截"再补写一份（重复节点）。
+            super::message_builder::StreamChildIds {
+                text: Some(self.response_text_child_id),
+                reasoning: Some(self.reasoning_child_id),
+            },
         )
     }
 }

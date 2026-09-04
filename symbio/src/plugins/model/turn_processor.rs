@@ -86,6 +86,14 @@ impl<'a> TurnProcessor<'a> {
                 );
                 return Err(PluginError::InternalError(msg));
             }
+            PostResult::RateLimited(msg) => {
+                plugin_warn!(
+                    "model",
+                    "[DIAG] TurnProcessor::send_request: PostResult::RateLimited({})",
+                    msg
+                );
+                return Err(PluginError::RateLimited(msg));
+            }
             PostResult::Ok(resp) => {
                 plugin_info!(
                     "model",

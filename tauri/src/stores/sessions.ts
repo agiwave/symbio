@@ -89,14 +89,21 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 用 shallowRef + 手动 triggerRef 保证响应式而不深 watch
   const sessionMessages = shallowRef<Record<string, Record<string, ChatMessage>>>({})
   const sessionStatuses = shallowRef<Record<string, SessionLiveStatus>>({})
-  const sessionSortIndex = ref<Record<string, number>>({})
+  const sessionSeq = ref<Record<string, number>>({})
 
-  // 兼容旧 API：返回 messages 数组形式（按 sort_index / timestamp 排序）
+  // 会话级错误状态（"错误是状态，不是节点"原则的前端落地）：
+  // 仅用于"没有任何失败消息节点、但会话整体因错误中止"的兜底场景（如 transport 级失败、
+  // send 在首帧到达前就失败），此时没有"造成中止的节点"可挂错误，错误只能作为会话级状态存在。
+  // 与消息树中的 Failed Turn（后端权威失败终态，前端只在根级 Turn 渲染重试）互斥：
+  // 只要存在 Failed Turn，错误就由该节点承载，sessionErrors 保持 null。
+  const sessionErrors = shallowRef<Record<string, string | null>>({})
+
+  // 兼容旧 API：返回 messages 数组形式（按 seq 排序；缺失 seq 时回退 timestamp）
   function getSessionMessages(id: string): ChatMessage[] {
     const m = sessionMessages.value[id] || {}
     return Object.values(m).sort((a, b) => {
-      const sa = a.sort_index ?? a.timestamp ?? 0
-      const sb = b.sort_index ?? b.timestamp ?? 0
+      const sa = a.seq ?? a.timestamp ?? 0
+      const sb = b.seq ?? b.timestamp ?? 0
       return sa - sb
     })
   }
@@ -133,11 +140,11 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (!sessionId || !msg.id) return
     const next = { ...sessionMessages.value }
     const cur = { ...(next[sessionId] || {}) }
-    // 缺失 sort_index 时自动补一个，保证与流式 patch 的 sort_index 处于同一单调递增序列，
-    // 否则用户消息（仅靠 timestamp ≈ epoch ms）会被排到小整数 sort_index 的助手节点之后。
+    // 缺失 seq 时自动补一个单调序号，保证与流式 patch 的 seq 处于同一单调递增序列，
+    // 否则用户消息（仅靠 timestamp ≈ epoch ms）会被排到小整数 seq 的助手节点之后。
     cur[msg.id] =
-      msg.sort_index === undefined
-        ? { ...msg, sort_index: nextSortIndex(sessionId) }
+      msg.seq === undefined
+        ? { ...msg, seq: nextSeq(sessionId) }
         : msg
     next[sessionId] = cur
     sessionMessages.value = next
@@ -180,7 +187,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         status: 'streaming',
         role: 'assistant',
         timestamp: Date.now(),
-        sort_index: nextSortIndex(sessionId),
+        seq: nextSeq(sessionId),
         ...patch
       }
     } else {
@@ -212,10 +219,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     sessionMessages.value = next
   }
 
-  function nextSortIndex(sessionId: string): number {
-    const cur = sessionSortIndex.value[sessionId] ?? 0
+  function nextSeq(sessionId: string): number {
+    const cur = sessionSeq.value[sessionId] ?? 0
     const n = cur + 1
-    sessionSortIndex.value = { ...sessionSortIndex.value, [sessionId]: n }
+    sessionSeq.value = { ...sessionSeq.value, [sessionId]: n }
     return n
   }
 
@@ -250,6 +257,21 @@ export const useSessionsStore = defineStore('sessions', () => {
     sessionStatuses.value = next
   }
 
+  /** 读取会话级错误状态（无 Failed Turn 时的兜底错误；null = 无会话级错误） */
+  function getSessionError(sessionId: string): string | null {
+    return sessionErrors.value[sessionId] ?? null
+  }
+  /**
+   * 设置/清除会话级错误状态。
+   * - 仅在"没有任何失败消息节点"的兜底路径调用（见 sessionBusWatcher Error 分支 /
+   *   useChatConnection send 兜底）：把错误作为会话级状态，而非往消息树注入错误节点。
+   * - 传 null 清除（新一轮交互开始时调用方负责清除，避免旧错误残留）。
+   */
+  function setSessionError(sessionId: string, err: string | null) {
+    if (!sessionId) return
+    sessionErrors.value = { ...sessionErrors.value, [sessionId]: err ?? null }
+  }
+
   /** 清空某个 session 的实时状态（删除时调用） */
   function dropSessionState(sessionId: string) {
     const mnext = { ...sessionMessages.value }
@@ -263,12 +285,22 @@ export const useSessionsStore = defineStore('sessions', () => {
   /** 用后端拉来的历史替换 store 中的实时缓存（loadMessages 调用） */
   function hydrateFromHistory(sessionId: string, messages: ChatMessage[]) {
     const map: Record<string, ChatMessage> = {}
-    let idx = 0
+    // 以"已分配 seq 的最大值 + 1"作为兜底游标起点，保证：
+    // 1) 缺失 seq 的旧数据按后端数组顺序排在有 seq 的消息之后（不抢到前面）；
+    // 2) 后续流式消息的 seq 从 max(seq) 之后继续，绝不小于任何历史 seq，
+    //    避免"新流式消息被排到旧持久化消息之前"的顺序错乱。
+    const maxSeq = messages.reduce(
+      (mx, m) => Math.max(mx, typeof m.seq === 'number' ? m.seq : 0),
+      0,
+    )
+    let idx = maxSeq + 1
     let waitingApproval = false
     let hasFailed = false
     for (const m of messages) {
       if (m.id) {
-        map[m.id] = { ...m, sort_index: idx++ }
+        // 后端单调序号 `seq` 即权威顺序；缺失 seq 的旧数据用递增游标兜底。
+        const seq = typeof m.seq === 'number' ? m.seq : idx++
+        map[m.id] = { ...m, seq }
         // 还原"等待审批"状态，使会话卡片角标在重开会话时正确显示
         if (m.status === 'waiting_user_action') waitingApproval = true
         // 还原"失败"状态（Bug 1 修复）：切换会话再切回时，若历史中存在 Failed
@@ -279,8 +311,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
     const next = { ...sessionMessages.value, [sessionId]: map }
     sessionMessages.value = next
-    const snext = { ...sessionSortIndex.value, [sessionId]: idx }
-    sessionSortIndex.value = snext
+    // 续接游标取"已分配 seq 的最大值"，保证下一轮 nextSeq 严格递增。
+    const lastSeq = Object.values(map).reduce((mx, m) => Math.max(mx, m.seq ?? 0), 0)
+    const snext = { ...sessionSeq.value, [sessionId]: lastSeq }
+    sessionSeq.value = snext
     const prevStatus = sessionStatuses.value[sessionId] ?? { is_working: false, is_waiting_approval: false, last_event_at: Date.now() }
     sessionStatuses.value = {
       ...sessionStatuses.value,
@@ -495,9 +529,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     delete titles.value[id]
     // 清理 in-memory 状态
     dropSessionState(id)
-    const snext = { ...sessionSortIndex.value }
+    const snext = { ...sessionSeq.value }
     delete snext[id]
-    sessionSortIndex.value = snext
+    sessionSeq.value = snext
 
     if (activeId.value === id) {
       activeId.value = list.value[0]?.id ?? null
@@ -602,7 +636,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   /**
    * 加载（并缓存）会话消息到 store。
    * 总是从后端拉取最新历史，hydrate 到 `sessionMessages[id]`。
-   * 返回消息数组（按 sort_index 排序）。
+   * 返回消息数组（按 seq 排序）。
    *
    * 修复（CHAT_FLOW_ANALYSIS E-13）：失败时**抛出错误**而不是 swallow，
    * 让 ChatMainPanel 能显示错误状态 + 提供重试按钮。
@@ -724,18 +758,37 @@ export const useSessionsStore = defineStore('sessions', () => {
     const stuck = msgs.filter(
       (m) => m.status === 'streaming' || m.status === 'waiting_user_action'
     )
+    // 与后端 persist_failure 对齐（"错误是状态、且只由造成中止的根 Turn 承载"）：
+    // 仅把"根级 Turn（msg_type=turn 且 parent_id 为空）"标 Failed + error；
+    // 其余仍在进行中的子节点（text / reasoning / tool_call）定稿为 Completed、
+    // 绝不挂 error，避免把同一条错误刷到每条半截消息上（即原始 429 刷屏的根因）。
+    let rootTurnFailed = false
     for (const m of stuck) {
-      const failed: ChatMessage = {
-        ...m,
-        status: 'failed',
-        error: errorText
+      const isRootTurn = m.type === 'turn' && !m.parent_id
+      if (isRootTurn) {
+        const failed: ChatMessage = { ...m, status: 'failed', error: errorText }
+        try {
+          await apiUpdateMessage(sessionId, failed)
+        } catch (e) {
+          logger.warn('[sessions]', 'persistStuckFailure updateMessage 失败', e)
+        }
+        patchMessage(sessionId, { ...failed })
+        rootTurnFailed = true
+      } else {
+        // 进行中的子节点：定稿为 Completed（结束流式动画），不挂 error。
+        const done: ChatMessage = { ...m, status: 'completed', error: undefined }
+        try {
+          await apiUpdateMessage(sessionId, done)
+        } catch (e) {
+          logger.warn('[sessions]', 'persistStuckFailure updateMessage 失败', e)
+        }
+        patchMessage(sessionId, { ...done })
       }
-      try {
-        await apiUpdateMessage(sessionId, failed)
-      } catch (e) {
-        logger.warn('[sessions]', 'persistStuckFailure updateMessage 失败', e)
-      }
-      patchMessage(sessionId, { ...failed })
+    }
+    // 没有任何根级 Turn（例如首帧到达前就卡住、连 Turn 都还没创建）：
+    // 降级为会话级错误状态（不注入错误节点），保证仍能在 UI 上看到错误并可重试。
+    if (!rootTurnFailed) {
+      setSessionError(sessionId, errorText)
     }
     putStatus(sessionId, {
       is_working: false,
@@ -806,6 +859,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     putMessage,
     patchMessage,
     putStatus,
+    getSessionError,
+    setSessionError,
     dropSessionState,
     hydrateFromHistory,
     removeMessageById,

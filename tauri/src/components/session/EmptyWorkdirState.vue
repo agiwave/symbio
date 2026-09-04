@@ -97,7 +97,7 @@ async function onUseLast() {
 .primary-btn {
   padding: 0.6rem 1.2rem;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--text-on-accent);
   border: none;
   border-radius: 0.5rem;
   font-size: 0.9rem;
@@ -120,7 +120,7 @@ async function onUseLast() {
 }
 
 .secondary-btn:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--surface-sunken);
 }
 
 .error-text {

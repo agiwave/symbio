@@ -57,6 +57,59 @@ textarea {
   line-height: inherit;
 }
 
+/* ── 表单控件主题基线（深色可读性修复）─────────────────────────────
+ * 根因：本项目此前未声明 color-scheme，且绝大多数 input/textarea 只写了
+ * background 而未写 color，前景色落到 UA 默认 fieldtext（黑）→ 深色主题下
+ * 「黑字压深底」几乎不可见。此处统一兜底前景色，避免逐个组件补 color 的遗漏面。
+ * 注意：只兜 color / caret，不动 background —— 各组件背景已自行定义，
+ * 统一赋值会造成大面积视觉回归。组件内显式声明的 color 优先级更高，不受影响。 */
+input,
+textarea,
+select {
+  color: var(--text-primary);
+  caret-color: var(--accent);
+}
+
+/* placeholder 不得用 --text-disabled（深色下 #5a616f 对比度不足），
+   统一用 --text-muted 并保证可辨识 */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 1; /* 覆盖 UA 默认 opacity，避免二次衰减 */
+}
+
+/* 禁用态 */
+input:disabled,
+textarea:disabled,
+select:disabled {
+  color: var(--text-disabled);
+}
+
+/* 自动填充：Chrome 会用 !important 强塞浅蓝底+深字，深色下刺眼且不可读。
+   用超长 transition 拖延背景切换（标准做法），并固定前景/光标，
+   不主动覆盖背景色 —— 以免压掉各组件自定义的输入框底色。 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill {
+  -webkit-text-fill-color: var(--text-primary);
+  caret-color: var(--accent);
+  transition: background-color 99999s ease-in-out 0s;
+}
+
+/* 选区：深色下用半透明主色，避免 UA 默认蓝在深底上过曝 */
+::selection {
+  background: var(--accent-subtle-bg);
+  color: var(--text-primary);
+}
+
+/* select 的下拉列表在 Windows/WebView2 上会继承 color-scheme，
+   但显式声明前景/背景可消除残留的浅色列表 */
+select option {
+  background-color: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
 /* 减少动效（prefers-reduced-motion） */
 @media (prefers-reduced-motion: reduce) {
   *,

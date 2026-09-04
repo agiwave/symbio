@@ -164,7 +164,44 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         }
     }
 
-    result
+    // ── 请求包清洗（避免把脏消息发到 provider 触发反序列化失败）────────────
+    // 1. 收集本批所有 tool_call id（用于识别孤儿 tool 结果）。
+    let mut tool_call_ids: HashSet<String> = HashSet::new();
+    for nm in &result {
+        if let Some(calls) = &nm.tool_calls {
+            for tc in calls {
+                if let Some(id) = &tc.id {
+                    tool_call_ids.insert(id.clone());
+                }
+            }
+        }
+    }
+    let mut cleaned: Vec<NativeMessage> = Vec::with_capacity(result.len());
+    for nm in result {
+        // 2. 丢弃"无对应 tool_call 的 tool 结果"：provider 要求 tool 角色的
+        //    content 必须关联到前文某个 assistant 的 tool_calls，否则直接 400。
+        if nm.role == MessageRole::Tool {
+            if let Some(tid) = &nm.tool_call_id {
+                if !tool_call_ids.contains(tid) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
+        // 3. 丢弃"空 assistant 回合"：既无文本/推理内容、也无工具调用，
+        //    发到 provider 是无意义且可能触发校验错误的占位消息。
+        if nm.role == MessageRole::Assistant
+            && nm.content.as_ref().map(|c| c.is_empty()).unwrap_or(true)
+            && nm.reasoning_content.is_none()
+            && nm.tool_calls.is_none()
+        {
+            continue;
+        }
+        cleaned.push(nm);
+    }
+
+    cleaned
 }
 
 /// 在 ToolCall 下查找响应结果节点：
@@ -210,6 +247,31 @@ pub fn short_id() -> String {
     uuid::Uuid::new_v4().to_string()[..8].to_string()
 }
 
+/// 流式期间已经广播给前端的子节点 id。
+///
+/// **落库时必须复用这些 id**（M-001 修复）：流式层（`parse_sse_stream` 的 `emit_update`）
+/// 与存储层（`build_assistant_messages`）是同一批节点的两个视图。此前两者各自
+/// `short_id()` 生成新 id，导致同一个文本子节点在「前端流式快照」里是 id=A、
+/// 在「会话存储」里是 id=B，被上层判定为两条不同消息——于是失败收尾时 id=A 的节点
+/// 被当作"尚未落库的流式半截"补写进存储，同一个 Turn 下出现两份内容相同的文本节点。
+#[derive(Debug, Default, Clone)]
+pub struct StreamChildIds {
+    /// 回复正文子节点的流式 id（`TurnOutput::response_text_child_id`）
+    pub text: Option<String>,
+    /// 思考子节点的流式 id（`TurnOutput::reasoning_child_id`）
+    pub reasoning: Option<String>,
+}
+
+impl StreamChildIds {
+    /// 空串视为「流式期间没有产生该节点」，规范化为 None。
+    fn normalized(self) -> Self {
+        Self {
+            text: self.text.filter(|s| !s.is_empty()),
+            reasoning: self.reasoning.filter(|s| !s.is_empty()),
+        }
+    }
+}
+
 /// 构造助手消息组（基于 Turn / ToolCall 的分型层级结构）。
 ///
 /// 结构：
@@ -224,7 +286,9 @@ pub fn build_assistant_messages(
     tool_calls: &[ToolCallInfo],
     rid: Option<String>,
     reasoning: Option<String>,
+    child_ids: StreamChildIds,
 ) -> Vec<ChatMessage> {
+    let child_ids = child_ids.normalized();
     let mut msgs = Vec::new();
     let timestamp = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
 
@@ -252,7 +316,7 @@ pub fn build_assistant_messages(
     if let Some(r) = reasoning {
         if !r.trim().is_empty() && !reasoning_only {
             msgs.push(ChatMessage {
-                id: short_id(),
+                id: child_ids.reasoning.clone().unwrap_or_else(short_id),
                 parent_id: Some(id.to_string()),
                 role: Some(MessageRole::Assistant),
                 msg_type: Some(MessageType::Reasoning),
@@ -267,8 +331,19 @@ pub fn build_assistant_messages(
     // ── Response 文本消息（parent_id=turn_id）───────────────────────────
     // 仅在存在非空白文本内容时添加，避免产生仅含 \n\n 的空节点
     if !content.trim().is_empty() {
+        // reasoning-only 场景下这块内容在流式层是以 Reasoning 子节点的形式存在的
+        // （`finalize_assistant_turn` 会把 `reasoning_child_id` 定稿），因此优先复用
+        // reasoning 的流式 id，保证存储层与流式层的节点身份一致。
+        let text_child_id = if reasoning_only {
+            child_ids
+                .reasoning
+                .clone()
+                .or_else(|| child_ids.text.clone())
+        } else {
+            child_ids.text.clone()
+        };
         msgs.push(ChatMessage {
-            id: short_id(),
+            id: text_child_id.unwrap_or_else(short_id),
             parent_id: Some(id.to_string()),
             role: Some(MessageRole::Assistant),
             msg_type: Some(MessageType::Text),
@@ -374,7 +449,14 @@ mod tests {
     fn reasoning_only_writes_single_text_child_without_reasoning_node() {
         let reasoning = "我先分析一下用户的问题，然后给出结论。";
 
-        let msgs = build_assistant_messages(TURN_ID, reasoning, &[], None, Some(reasoning.into()));
+        let msgs = build_assistant_messages(
+            TURN_ID,
+            reasoning,
+            &[],
+            None,
+            Some(reasoning.into()),
+            StreamChildIds::default(),
+        );
 
         // 恰好 2 个节点：Turn(根) + 1 个 Text 子节点
         assert_eq!(msgs.len(), 2, "reasoning-only 应只落 Turn + Text 两个节点");
@@ -404,7 +486,14 @@ mod tests {
         let reasoning = "思考内容";
         let content = "\n  思考内容  \n";
 
-        let msgs = build_assistant_messages(TURN_ID, content, &[], None, Some(reasoning.into()));
+        let msgs = build_assistant_messages(
+            TURN_ID,
+            content,
+            &[],
+            None,
+            Some(reasoning.into()),
+            StreamChildIds::default(),
+        );
 
         assert_eq!(msgs.len(), 2);
         assert_eq!(count_children(&msgs, MessageType::Reasoning), 0);
@@ -420,6 +509,7 @@ mod tests {
             &[],
             Some("resp-1".into()),
             Some("思考过程".into()),
+            StreamChildIds::default(),
         );
 
         // Turn + Reasoning + Text
@@ -445,7 +535,8 @@ mod tests {
     /// 用例 C：无 reasoning 的纯文本回复 → Turn + Text
     #[test]
     fn plain_text_reply_has_no_reasoning_child() {
-        let msgs = build_assistant_messages(TURN_ID, "你好", &[], None, None);
+        let msgs =
+            build_assistant_messages(TURN_ID, "你好", &[], None, None, StreamChildIds::default());
         assert_eq!(msgs.len(), 2);
         assert_eq!(count_children(&msgs, MessageType::Reasoning), 0);
         assert_eq!(child_texts(&msgs, MessageType::Text), vec!["你好"]);
@@ -456,7 +547,14 @@ mod tests {
     #[test]
     fn reasoning_with_tool_calls_keeps_reasoning_and_skips_empty_text() {
         let tools = vec![tool_call("read_file")];
-        let msgs = build_assistant_messages(TURN_ID, "", &tools, None, Some("要先读文件".into()));
+        let msgs = build_assistant_messages(
+            TURN_ID,
+            "",
+            &tools,
+            None,
+            Some("要先读文件".into()),
+            StreamChildIds::default(),
+        );
 
         // Turn + Reasoning + ToolCall
         assert_eq!(msgs.len(), 3);
@@ -474,7 +572,14 @@ mod tests {
     #[test]
     fn reasoning_only_flattens_to_single_assistant_message() {
         let reasoning = "只有思考";
-        let msgs = build_assistant_messages(TURN_ID, reasoning, &[], None, Some(reasoning.into()));
+        let msgs = build_assistant_messages(
+            TURN_ID,
+            reasoning,
+            &[],
+            None,
+            Some(reasoning.into()),
+            StreamChildIds::default(),
+        );
 
         let natives = flatten_chat_messages(&msgs);
         assert_eq!(natives.len(), 1, "应只产生一条 assistant native message");
@@ -492,8 +597,14 @@ mod tests {
     /// 用例 F：普通 reasoning + 文本 扁平化后 content 与 reasoning_content 各归其位
     #[test]
     fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
-        let msgs =
-            build_assistant_messages(TURN_ID, "正常回复", &[], None, Some("思考过程".into()));
+        let msgs = build_assistant_messages(
+            TURN_ID,
+            "正常回复",
+            &[],
+            None,
+            Some("思考过程".into()),
+            StreamChildIds::default(),
+        );
 
         let natives = flatten_chat_messages(&msgs);
         assert_eq!(natives.len(), 1);
@@ -502,5 +613,273 @@ mod tests {
             Some("正常回复".to_string())
         );
         assert_eq!(natives[0].reasoning_content.as_deref(), Some("思考过程"));
+    }
+
+    // ── 新增回归测试：锁定本次修复的两个高危行为 ─────────────────────────
+
+    /// 落库节点必须复用流式子节点 id（M-001）。
+    ///
+    /// 若两处各自 `short_id()`，存储层的定稿节点（id=B，内容全量）与会话层累积的流式节点
+    /// （id=A，内容增量合并）会被判定为两条不同消息；失败收尾时 id=A 被当作"尚未落库的
+    /// 流式半截"补写进存储 → 同一个 Turn 下出现两份内容相同的文本节点。
+    #[test]
+    fn persisted_children_reuse_streaming_child_ids() {
+        let msgs = build_assistant_messages(
+            TURN_ID,
+            "正常回复",
+            &[],
+            None,
+            Some("思考过程".into()),
+            StreamChildIds {
+                text: Some("stream-text-id".into()),
+                reasoning: Some("stream-reason-id".into()),
+            },
+        );
+
+        let text_child = msgs
+            .iter()
+            .find(|m| m.msg_type == Some(MessageType::Text))
+            .expect("应生成 Text 子节点");
+        let reasoning_child = msgs
+            .iter()
+            .find(|m| m.msg_type == Some(MessageType::Reasoning))
+            .expect("应生成 Reasoning 子节点");
+
+        assert_eq!(text_child.id, "stream-text-id");
+        assert_eq!(reasoning_child.id, "stream-reason-id");
+    }
+
+    /// reasoning-only 场景：正文由 reasoning 承载（不生成 Reasoning 子节点），
+    /// 落库的 Text 节点应复用 reasoning 的流式 id——流式层定稿的正是该节点。
+    #[test]
+    fn reasoning_only_reuses_reasoning_stream_id() {
+        let reasoning = "只有思考";
+        let msgs = build_assistant_messages(
+            TURN_ID,
+            reasoning,
+            &[],
+            None,
+            Some(reasoning.into()),
+            StreamChildIds {
+                text: None,
+                reasoning: Some("stream-reason-id".into()),
+            },
+        );
+
+        let text_child = msgs
+            .iter()
+            .find(|m| m.msg_type == Some(MessageType::Text))
+            .expect("reasoning-only 应生成唯一 Text 子节点");
+        assert_eq!(text_child.id, "stream-reason-id");
+    }
+
+    /// 孤儿 tool 结果（parent 指向已被 get_context_messages 过滤掉的 tool_call）不得进入
+    /// LLM 请求包。复现 Bug：父 ToolCall 被过滤后，其 role=Tool 结果子节点若仍被保留，
+    /// 会携带非法 tool_call_id → provider 报 400 "messages[N]: data did not match any variant"。
+    #[test]
+    fn orphan_tool_result_is_dropped() {
+        let turn_id = "turn-orphan";
+        let dead_tc_id = "tc-already-filtered"; // 该 tool_call 已被上下文过滤，列表中不存在
+
+        let msgs = vec![
+            ChatMessage {
+                id: "u1".into(),
+                parent_id: None,
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("hello".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(1),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: turn_id.into(),
+                parent_id: None,
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Turn),
+                content: None,
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "r1".into(),
+                parent_id: Some(turn_id.into()),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("ok".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+            // 孤儿工具结果：parent_id 指向已不存在的 tool_call
+            ChatMessage {
+                id: "orphan-tool".into(),
+                parent_id: Some(dead_tc_id.into()),
+                role: Some(MessageRole::Tool),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("stale result".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(3),
+                ..Default::default()
+            },
+        ];
+
+        let natives = flatten_chat_messages(&msgs);
+        assert!(
+            natives.iter().all(|n| n.role != MessageRole::Tool),
+            "孤儿 tool 结果不得进入 LLM 请求包"
+        );
+    }
+
+    /// 反向控制：合法关联（Turn → ToolCall → Tool 结果）的 tool 结果必须保留，
+    /// 防止清洗逻辑误伤正常链路。
+    #[test]
+    fn linked_tool_result_is_retained() {
+        let turn_id = "turn-linked";
+        let tc_id = "tc-linked";
+
+        let msgs = vec![
+            ChatMessage {
+                id: "u1".into(),
+                parent_id: None,
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("read?".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(1),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: turn_id.into(),
+                parent_id: None,
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Turn),
+                content: None,
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "r1".into(),
+                parent_id: Some(turn_id.into()),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("let me read".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: tc_id.into(),
+                parent_id: Some(turn_id.into()),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::ToolCall),
+                name: Some("read_file".into()),
+                content: Some(MessageContent::Text("{}".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "res1".into(),
+                parent_id: Some(tc_id.into()),
+                role: Some(MessageRole::Tool),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("file content".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(3),
+                ..Default::default()
+            },
+        ];
+
+        let natives = flatten_chat_messages(&msgs);
+        let tool_native = natives.iter().find(|n| n.role == MessageRole::Tool);
+        assert!(tool_native.is_some(), "合法 tool 结果必须保留");
+        assert_eq!(tool_native.unwrap().tool_call_id.as_deref(), Some(tc_id));
+    }
+
+    /// 空 assistant 回合（无文本/推理/工具调用）不得进入 LLM 请求包，
+    /// 否则触发 provider 校验错误。
+    #[test]
+    fn empty_assistant_turn_is_dropped() {
+        let msgs = vec![
+            ChatMessage {
+                id: "u1".into(),
+                parent_id: None,
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("hi".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(1),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "turn-empty".into(),
+                parent_id: None,
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Turn),
+                content: None,
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+        ];
+
+        let natives = flatten_chat_messages(&msgs);
+        assert_eq!(natives.len(), 1, "空 assistant 回合不应进入 LLM 请求");
+        assert_eq!(natives[0].role, MessageRole::User);
+    }
+
+    /// `to_api_value` 对缺失 content 的消息兜底为空串而非 null：
+    /// User 与「无工具调用的 assistant」都不能发 `null` 到 provider（否则 400 反序列化失败）。
+    #[test]
+    fn to_api_value_uses_empty_string_for_missing_content() {
+        let user = NativeMessage {
+            role: MessageRole::User,
+            content: None,
+            ..Default::default()
+        };
+        assert_eq!(
+            user.to_api_value()["content"],
+            serde_json::json!(""),
+            "User 缺 content 应兜底为空串而非 null"
+        );
+
+        let assistant_no_tc = NativeMessage {
+            role: MessageRole::Assistant,
+            content: None,
+            ..Default::default()
+        };
+        assert_eq!(
+            assistant_no_tc.to_api_value()["content"],
+            serde_json::json!(""),
+            "无工具调用的 assistant 缺 content 应兜底为空串而非 null"
+        );
+    }
+
+    /// `to_api_value` 对「带工具调用的 assistant」保留 content=null（OpenAI 约定），
+    /// 不得误改为空串，否则 provider 会拒绝。
+    #[test]
+    fn to_api_value_keeps_null_for_assistant_with_tool_calls() {
+        let tool_calls = vec![ToolCall {
+            id: Some("call_1".into()),
+            kind: Some("function".into()),
+            name: "read_file".into(),
+            arguments: serde_json::json!({}),
+        }];
+        let m = NativeMessage {
+            role: MessageRole::Assistant,
+            content: None,
+            tool_calls: Some(tool_calls),
+            ..Default::default()
+        };
+        let v = m.to_api_value();
+        assert_eq!(
+            v["content"],
+            serde_json::Value::Null,
+            "带工具调用的 assistant 允许 content=null（OpenAI 约定）"
+        );
+        assert!(v.get("tool_calls").is_some(), "tool_calls 必须保留");
     }
 }

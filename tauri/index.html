@@ -5,6 +5,23 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧬</text></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Symbio - 插件系统</title>
+    <!-- 首屏主题前置：在样式生效前就把 data-theme 落到 <html>，
+         否则深色用户会先闪一帧浅色背景（且 <input> 会先按 light 的
+         color-scheme 渲染）。逻辑须与 stores/appearance.ts 保持一致。 -->
+    <script>
+      (function () {
+        try {
+          var saved = JSON.parse(localStorage.getItem('symbio.appearance') || '{}')
+          var mode = saved.theme || 'light'
+          var dark =
+            mode === 'dark' ||
+            (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light')
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

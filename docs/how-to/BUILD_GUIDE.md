@@ -8,7 +8,7 @@
      - `cargo clippy --workspace --all-targets -- -D warnings`
      - `cargo test --workspace`
      - `cargo build --release --manifest-path symbio/Cargo.toml`
-     - `bash scripts/grep_audit.sh`（P16 已闭环）
+     - `node scripts/grep-audit.mjs`（P16 已闭环）
      - `npx vue-tsc --noEmit`（TypeScript 类型检查）
      - `cargo audit`（安全审计）
   2. 发布构建CI（`.github/workflows/release.yml`）：

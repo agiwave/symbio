@@ -128,7 +128,9 @@ schemas/
 
 ### 2.6 脚本位置
 
-- 所有构建/测试脚本集中在仓库根 `scripts/`（`grep_audit.sh`、`test_capabilities.ps1` 等）。
+- 所有构建/测试脚本集中在仓库根 `scripts/`（`grep-audit.mjs`、`cargo-offline-refresh.mjs`、`test-capabilities.mjs` 等）。
+- **脚本一律平台无关**：统一用 Node.js 编写（扩展名 `.mjs`），不使用 `.sh` / `.ps1` / `.bat`，
+  以保证 Windows / macOS / Linux 上行为一致。
 - 若出现 `tests/` 目录，则**只放 Rust 集成测试**（`.rs`），不放脚本。
 
 ### 2.7 文档组织

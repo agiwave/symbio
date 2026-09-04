@@ -199,7 +199,7 @@ onBeforeUnmount(() => {
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--surface-hover);
   color: var(--color-text);
 }
 

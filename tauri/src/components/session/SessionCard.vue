@@ -181,7 +181,7 @@ function onDelete() { emit('delete') }
 }
 
 .session-card:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--surface-hover);
 }
 
 .session-card.active {

@@ -30,6 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        # 项目脚本已统一为平台无关的 Node 脚本（scripts/*.mjs），不再依赖 bash / ripgrep
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -58,7 +64,9 @@ jobs:
 
       - name: Run project audit
         # S-002 异步锁 / S-007 CHANGELOG / I-014 硬编码等审计
-        run: bash scripts/grep_audit.sh
+        # grep-audit.mjs 为纯 Node 实现，不依赖 ripgrep；
+        # 原 .sh 版在本步骤因 runner 未装 rg 而空跑并误报 CHANGELOG 错误。
+        run: node scripts/grep-audit.mjs
 
   # 检查版本一致性
   check-version:

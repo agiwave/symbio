@@ -17,8 +17,12 @@ pub trait ChatSession: Send + Sync + 'static {
 
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError>;
 
-    /// 按 id 就地更新已存在的消息（全量替换，非合并）。
+    /// 按 id 就地更新已存在的消息（**增量合并**，调用 [`ChatMessage::apply_patch`]）。
     /// 不存在的 id 静默跳过。用于工具恢复时更新 ToolCall 父节点状态。
+    ///
+    /// 注意：绝不可实现为"整条覆盖"。调用方普遍只传局部补丁（如仅 `id` + `meta`），
+    /// 整条覆盖会把 `role` / `msg_type` / `content` / `timestamp` 抹成 `None`，
+    /// 进而让下一轮请求体出现 `"content": null` 被 Provider 拒绝。
     async fn update_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError>;
 
     async fn clear(&self) -> Result<(), PluginError>;

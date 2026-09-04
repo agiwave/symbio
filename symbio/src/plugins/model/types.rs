@@ -29,6 +29,9 @@ pub struct NativeMessage {
     pub prompt: Option<String>,
     #[serde(default)]
     pub timestamp: i64,
+    /// 源自 `ChatMessage::seq` 的单调序号，仅用于保序；不参与 API 请求体序列化。
+    #[serde(skip)]
+    pub seq: Option<i64>,
     /// tool 调用的成功标志：None 视为成功；Some(false) 触发 Anthropic tool_result 的 `is_error=true`
     ///
     /// 调用方：`anthropic_messages::prepare_request` 在 tool 消息块根据此字段决定是否设置 `is_error`。
@@ -55,6 +58,7 @@ impl From<NativeMessage> for ChatMessage {
             ),
             meta: None,
             timestamp: Some(msg.timestamp),
+            seq: msg.seq,
             response_id: msg.response_id,
             prompt: msg.prompt,
             error: None,
@@ -81,6 +85,7 @@ impl From<ChatMessage> for NativeMessage {
             response_id: None,
             prompt: msg.prompt,
             timestamp: msg.timestamp.unwrap_or(0),
+            seq: msg.seq,
             success: None,
         }
     }
@@ -140,8 +145,13 @@ impl NativeMessage {
                         "type": "text",
                         "text": prompt
                     }])
-                } else {
+                } else if self.role == MessageRole::Assistant && self.tool_calls.is_some() {
+                    // 带工具调用的 assistant 消息：content 允许为 null（OpenAI 约定），
+                    // 其余情况一律兜底为空串，避免把 `null` 发到 provider 触发
+                    // "messages[N]: data did not match any variant" 反序列化失败。
                     serde_json::Value::Null
+                } else {
+                    serde_json::json!("")
                 }
             }
         };

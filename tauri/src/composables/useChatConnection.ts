@@ -155,14 +155,14 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     })
 
     rootMessages.sort((a, b) => {
-      const sa = a.sort_index ?? a.timestamp ?? 0
-      const sb = b.sort_index ?? b.timestamp ?? 0
+      const sa = a.seq ?? a.timestamp ?? 0
+      const sb = b.seq ?? b.timestamp ?? 0
       return sa - sb
     })
     Object.values(childrenMap).forEach(children => {
       children.sort((a, b) => {
-        const sa = a.sort_index ?? a.timestamp ?? 0
-        const sb = b.sort_index ?? b.timestamp ?? 0
+        const sa = a.seq ?? a.timestamp ?? 0
+        const sb = b.seq ?? b.timestamp ?? 0
         return sa - sb
       })
     })
@@ -207,8 +207,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // 立即置为 working（让 UI 立即反映 send 已经发出）；
     // 同一会话才切 working 状态，避免跨会话回答误改父会话状态。
     if (targetSid === sid) {
-      // 同时清空 last_failed：新一轮交互开始，上一次失败不再"最新"（避免重试成功后仍显示"上次失败"）。
+      // 同时清空 last_failed / 会话级错误：新一轮交互开始，上一次失败不再"最新"（避免重试成功后仍显示"上次失败"）。
       store.putStatus(sid, { is_working: true, activity: '处理中…', last_failed: false })
+      store.setSessionError(sid, null)
       store.setWorking(sid, true)
     }
 
@@ -248,33 +249,14 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       store.putStatus(sid, { is_working: false, activity: '错误', last_failed: true })
       store.setWorking(sid, false)
 
-      // 仅当没有任何 streaming/等待消息承载错误时，才落一条 ephemeral 错误；
-      // 否则助手父节点会在 bus Error 事件中带上错误，避免根级 + ephemeral 重复报错。
+      // 仅当没有任何 streaming/等待消息承载错误时，才落"会话级错误状态"（而非注入错误节点）：
+      // 否则助手根级 Turn 会在 bus Error 事件中带上错误，避免"根级节点 + 会话级"重复报错。
+      // 错误作为状态（不是消息树里的节点）展示在会话级错误条，许可重试（重新发送最后一条用户消息）。
       const hasStreaming = store.getSessionMessages(sid).some(
         m => m.status === 'streaming' || m.status === 'waiting_user_action'
       )
       if (!hasStreaming) {
-        // 写入 ephemeral 错误消息（与 sessionBusWatcher 共用 `__bus_error__` 这个固定 id，
-        // 避免同会话多次 send 失败时堆出多条错误消息）
-        const errId = '__bus_error__'
-        const existing = store.getSessionMessages(sid).find(m => m.id === errId)
-        if (existing) {
-          store.patchMessage(sid, {
-            ...existing,
-            content: errText,
-            status: 'failed',
-            meta: { ...(existing.meta || {}), ephemeral: true }
-          })
-        } else {
-          store.putMessage(sid, {
-            id: errId,
-            role: 'assistant',
-            content: errText,
-            status: 'failed',
-            meta: { ephemeral: true },
-            timestamp: Date.now()
-          })
-        }
+        store.setSessionError(sid, errText)
       }
 
       logger.error('useChatConnection', 'Failed to send', err)
@@ -325,6 +307,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // 同一会话才切 working 状态，避免跨会话工具调用误改父会话状态。
     if (targetSid === sid) {
       store.putStatus(sid, { is_working: true, activity: '处理中…', last_failed: false })
+      store.setSessionError(sid, null)
       store.setWorking(sid, true)
     }
 

@@ -163,11 +163,11 @@ function getFileIcon(name: string): string {
 }
 
 .node-content:hover {
-  background: #f0f0f0;
+  background: var(--surface-hover);
 }
 
 .node-content.is-selected {
-  background: #e8e8f0;
+  background: var(--accent-subtle-bg);
 }
 
 .node-content.is-dir {

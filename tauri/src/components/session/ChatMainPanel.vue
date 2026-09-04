@@ -222,7 +222,7 @@ async function onClearHistory() {
 }
 
 .header-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--surface-hover);
   color: var(--color-text);
 }
 
@@ -327,13 +327,13 @@ async function onClearHistory() {
 }
 
 .load-error-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--surface-sunken);
 }
 
 .load-error-btn.primary {
-  background: var(--color-primary, #667eea);
-  color: white;
-  border-color: var(--color-primary, #667eea);
+  background: var(--color-primary);
+  color: var(--text-on-accent);
+  border-color: var(--color-primary);
 }
 
 .load-error-btn.primary:hover {

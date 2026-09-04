@@ -58,12 +58,14 @@ export function startSessionBusWatcher(): void {
           if (evt.status === 'busy') {
             // 进入 busy 时审批态尚未可知，先复位（waiting_user_action 的 Update
             // 到达时会重新置位）；否则旧会话的"等待审批"角标会残留。
-            // 同时清空 last_failed：新一轮交互已开始，上一次的失败不再"最新"。
+            // 同时清空 last_failed / 会话级错误：新一轮交互已开始，上一次的失败不再"最新"。
             store.putStatus(sid, { is_working: true, activity: '处理中…', is_waiting_approval: false, last_failed: false })
+            store.setSessionError(sid, null)
             store.setWorking(sid, true)
           } else if (evt.status === 'idle') {
             // idle 表示一轮交互彻底结束（含审批已了结），复位审批角标
             store.putStatus(sid, { is_working: false, activity: undefined, is_waiting_approval: false })
+            store.setSessionError(sid, null)
             store.setWorking(sid, false)
           }
           break
@@ -130,27 +132,19 @@ export function startSessionBusWatcher(): void {
           // （上方 Update 分支已写入 store），此处不再做客户端启发式标记
           // （旧逻辑：扫描 streaming 节点分摊错误 / 清空空推理块），避免与
           // 刚收到的服务端终态冲突或刷新前后不一致。
-          // 兜底：仅当 store 中没有任何失败消息（错误发生在任何消息创建之前，
-          // 如 transport 级失败）时，才落一条 ephemeral 错误（id=`__bus_error__`）。
+          //
+          // 错误作为"状态"而非"节点"（用户约定：错误在前后端都不应是会话节点）：
+          // - 若存在 Failed 消息节点（根级 Turn 承载后端权威失败终态），错误已由该节点
+          //   承载，前端只在根级 Turn 渲染 ⚠ + 重试，无需任何额外动作；
+          // - 仅当没有任何失败消息节点（错误发生在任何消息创建之前，如 transport 级失败）
+          //   时，才把错误落到**会话级错误状态**（setSessionError）——它是一条状态，
+          //   不是消息树里的一个节点，UI 在会话级错误条里展示并许可重试。
           const msgs = store.getSessionMessages(sid)
-          const hasFailed = msgs.some(
-            (m) => m.status === 'failed' && m.id !== '__bus_error__' && !(m.meta as any)?.ephemeral,
+          const hasFailedNode = msgs.some(
+            (m) => m.status === 'failed' && !(m.meta as any)?.ephemeral,
           )
-          if (!hasFailed) {
-            const errorMsgId = '__bus_error__'
-            const existing = msgs.find((m) => m.id === errorMsgId)
-            // 覆盖用 putMessage 整体替换：patchMessage 对 text 类内容是**追加**语义，
-            // 连续错误会被拼成 "firstsecond"；整体替换保证始终展示最新一条错误。
-            store.putMessage(sid, {
-              ...(existing || {}),
-              id: errorMsgId,
-              role: 'assistant' as const,
-              content: evt.error || 'Unknown error',
-              status: 'failed' as const,
-              meta: { ...(existing?.meta || {}), ephemeral: true },
-              timestamp: existing?.timestamp ?? Date.now(),
-              sort_index: existing?.sort_index,
-            } as any)
+          if (!hasFailedNode) {
+            store.setSessionError(sid, evt.error || 'Unknown error')
           }
           store.putStatus(sid, {
             is_working: false,
@@ -163,9 +157,10 @@ export function startSessionBusWatcher(): void {
         }
 
         case ChatEventType.Connected:
-          // Connected 事件 → 标记为 working；新一轮交互开始，清空 last_failed
+          // Connected 事件 → 标记为 working；新一轮交互开始，清空 last_failed / 会话级错误
           if (evt.is_working === true) {
             store.putStatus(sid, { is_working: true, activity: '处理中…', last_failed: false })
+            store.setSessionError(sid, null)
             store.setWorking(sid, true)
           }
           break

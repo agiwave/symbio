@@ -499,7 +499,7 @@ onBeforeUnmount(() => {
 
 .view-switch {
   display: flex;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--surface-sunken);
   border-radius: 0.3125rem;
   padding: var(--space-05);
 }
@@ -516,9 +516,9 @@ onBeforeUnmount(() => {
 }
 
 .switch-btn.active {
-  background: var(--color-bg);
+  background: var(--surface-panel);
   color: var(--color-text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-1);
 }
 
 .switch-btn:hover:not(.active) {
@@ -557,7 +557,7 @@ onBeforeUnmount(() => {
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--surface-hover);
   color: var(--color-text);
 }
 
@@ -596,7 +596,7 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 1.125rem;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 0.8rem;
   font-weight: 500;
   cursor: pointer;

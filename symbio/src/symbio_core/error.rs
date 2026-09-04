@@ -15,6 +15,8 @@ pub enum PluginError {
     ValidationError(String),
     #[error("内部错误：{0}")]
     InternalError(String),
+    #[error("请求频率受限：{0}")]
+    RateLimited(String),
     #[error("解析错误：{0}")]
     ParseError(String),
     #[error("请求超时")]
@@ -39,6 +41,7 @@ impl PluginError {
             PluginError::NotImplemented => "NOT_IMPLEMENTED",
             PluginError::ValidationError(_) => "VALIDATION_ERROR",
             PluginError::InternalError(_) => "INTERNAL_ERROR",
+            PluginError::RateLimited(_) => "RATE_LIMITED",
             PluginError::ParseError(_) => "PARSE_ERROR",
             PluginError::Timeout => "TIMEOUT",
             PluginError::Forbidden(_) => "FORBIDDEN",

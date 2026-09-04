@@ -14,7 +14,7 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
     model::model_chat,
-    session::chat_message::{ChatMessage, MessageStatus, MessageType},
+    session::chat_message::{assign_seq, max_seq, ChatMessage, MessageStatus, MessageType},
     session::session_open,
     system::hook::HookEvent,
 };
@@ -493,6 +493,9 @@ impl Default for FallbackChatSession {
 impl ChatSession for FallbackChatSession {
     async fn get_messages(&self) -> Result<Vec<ChatMessage>, PluginError> {
         let messages = self.messages.lock().await;
+        let mut messages = messages.clone();
+        // 与持久化实现保持一致：按单调序号排序
+        messages.sort_by_key(|m| m.seq.unwrap_or(i64::MAX));
         Ok(messages.clone())
     }
 
@@ -506,12 +509,25 @@ impl ChatSession for FallbackChatSession {
 
     async fn append_messages(&self, messages: Vec<ChatMessage>) -> Result<usize, PluginError> {
         let mut store = self.messages.lock().await;
-        store.extend(messages);
+        let mut seq_cursor = max_seq(&store);
+        for mut m in messages {
+            if m.seq.is_none() {
+                seq_cursor += 1;
+                m.seq = Some(seq_cursor);
+            } else if let Some(s) = m.seq {
+                if s > seq_cursor {
+                    seq_cursor = s;
+                }
+            }
+            store.push(m);
+        }
         Ok(store.len())
     }
 
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
         let mut store = self.messages.lock().await;
+        let mut messages = messages;
+        assign_seq(&mut messages, max_seq(&store));
         *store = messages;
         Ok(())
     }
@@ -520,7 +536,8 @@ impl ChatSession for FallbackChatSession {
         let mut store = self.messages.lock().await;
         for patch in messages {
             if let Some(existing) = store.iter_mut().find(|m| m.id == patch.id) {
-                *existing = patch;
+                // 增量合并：patch 里为 None 的字段表示"不修改"，保留原值。
+                existing.apply_patch(&patch);
             }
         }
         Ok(())
@@ -613,12 +630,14 @@ async fn auto_compress_process(
         };
 
     let original_count = context.messages.len();
+    // 保存原始历史：压缩失败时回滚，绝不能让 `[compression_msg]` 残留在上下文里。
+    let original_messages = context.messages.clone();
     let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await;
 
     context.messages = vec![compression_msg];
 
     let root_id = short_id();
-    let summary = send_compression_request(
+    let summary = match send_compression_request(
         orchestrator,
         system_prompt,
         &context.messages,
@@ -626,7 +645,28 @@ async fn auto_compress_process(
         channel,
         abort_flag,
     )
-    .await?;
+    .await
+    {
+        Ok(s) => s,
+        // 用户中止 / 触发限流：向上透传，走既有的中止与限流提示链路。
+        Err(e @ PluginError::Aborted) | Err(e @ PluginError::RateLimited(_)) => return Err(e),
+        // 其他失败（空摘要 / 流中断 / 网关错误等）：**优雅降级**。
+        //
+        // 原始行为是 `?` 直接把错误抛给 run_chat_loop → 整个 turn 以
+        // "Compression produced empty result" 之类的错误告终，用户连正常对话都发不出去。
+        // 压缩只是上下文超限时的优化手段，失败不应阻断对话：
+        // 回滚到未压缩历史，记录警告后继续（后续真正的 LLM 请求若同样失败，
+        // 会以真实错误呈现在该轮 Turn 上）。
+        Err(e) => {
+            plugin_warn!(
+                "model",
+                "[Compress] auto compression failed ({}), falling back to uncompressed context",
+                e
+            );
+            context.messages = original_messages;
+            return Ok(None);
+        }
+    };
 
     context.messages.clear();
 
@@ -673,6 +713,7 @@ async fn send_compression_request(
         PostResult::Aborted => return Err(PluginError::Aborted),
         PostResult::RetryWithoutContextId => return Err(PluginError::RetryWithoutContextId),
         PostResult::Err(e) => return Err(PluginError::InternalError(e)),
+        PostResult::RateLimited(e) => return Err(PluginError::RateLimited(e)),
         PostResult::Ok(resp) => resp,
     };
 
@@ -693,7 +734,11 @@ async fn send_compression_request(
     let effective = out.effective_text(0).to_owned();
     if effective.is_empty() {
         return Err(PluginError::InternalError(
-            "Compression produced empty result".to_string(),
+            // 语义说明：压缩摘要请求的 SSE 流正常结束，但未产出任何文本/推理内容
+            // （常见于上游网关错误被吞掉、或模型只回了空流）。此前误用
+            // "Compression produced empty result"，与上下文压缩的语义完全对不上，
+            // 已在 auto_compress_process 中改为优雅降级，不再中断整个 turn。
+            "Compression summary request returned no content".to_string(),
         ));
     }
 

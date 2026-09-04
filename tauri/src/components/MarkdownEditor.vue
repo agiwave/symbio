@@ -283,28 +283,28 @@ onUnmounted(async () => {
 </script>
 
 <style scoped>
-.notion-editor { position: relative; height: 100%; width: 100%; background: #fff; display: flex; flex-direction: column; }
+.notion-editor { position: relative; height: 100%; width: 100%; background: var(--color-bg); display: flex; flex-direction: column; }
 .editor-root { flex: 1; overflow-y: auto; padding: 2rem 3rem 2rem 4rem; min-height: 0; counter-reset: line; position: relative; }
-.editor-root::before { content: ''; position: absolute; left: 0; top: 2rem; width: 3rem; bottom: 0; background: #f7f7f5; border-right: 1px solid #e8e8e6; pointer-events: none; }
-.editor-root :deep(.milkdown) { font-family: -apple-system, BlinkMacMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 1rem; line-height: 1.6; color: #37352f; outline: none; min-height: 100%; }
+.editor-root::before { content: ''; position: absolute; left: 0; top: 2rem; width: 3rem; bottom: 0; background: var(--surface-sunken); border-right: 1px solid var(--color-border); pointer-events: none; }
+.editor-root :deep(.milkdown) { font-family: -apple-system, BlinkMacMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 1rem; line-height: 1.6; color: var(--text-primary); outline: none; min-height: 100%; }
 .editor-root :deep(.ProseMirror > *) { position: relative; counter-increment: line; }
-.editor-root :deep(.ProseMirror > *)::before { content: counter(line); position: absolute; left: -3.5rem; top: 0; width: 2.5rem; text-align: right; font-family: 'Fira Code', monospace; font-size: 0.75rem; color: #b0b0ab; pointer-events: none; }
+.editor-root :deep(.ProseMirror > *)::before { content: counter(line); position: absolute; left: -3.5rem; top: 0; width: 2.5rem; text-align: right; font-family: 'Fira Code', monospace; font-size: 0.75rem; color: var(--text-muted); pointer-events: none; }
 .editor-root :deep(.milkdown h1) { font-size: 2.25rem; font-weight: 700; margin: 0 0 0.5rem; }
 .editor-root :deep(.milkdown h2) { font-size: 1.5rem; font-weight: 600; margin: 1rem 0 0.375rem; }
-.editor-root :deep(.milkdown code) { background: rgba(135, 131, 120, 0.15); color: #eb5757; padding: 0.2em 0.4em; border-radius: 0.1875rem; font-family: monospace; font-size: 85%; }
-.editor-root :deep(.milkdown pre) { background: #f7f6f3; border-radius: 0.25rem; padding: 1rem; margin: 0.5rem 0; overflow-x: auto; }
-.editor-root :deep(.milkdown blockquote) { border-left: 0.1875rem solid #37352f; padding-left: 1rem; margin: 0.5rem 0; }
+.editor-root :deep(.milkdown code) { background: rgba(135, 131, 120, 0.15); color: var(--danger-solid); padding: 0.2em 0.4em; border-radius: 0.1875rem; font-family: monospace; font-size: 85%; }
+.editor-root :deep(.milkdown pre) { background: var(--color-code-bg); color: var(--color-code-fg); border-radius: 0.25rem; padding: 1rem; margin: 0.5rem 0; overflow-x: auto; }
+.editor-root :deep(.milkdown blockquote) { border-left: 0.1875rem solid var(--border-strong); padding-left: 1rem; margin: 0.5rem 0; }
 .custom-block-handle { position: fixed; z-index: 100; user-select: none; }
-.handle-trigger { width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; color: #9b9a97; border-radius: 0.25rem; transition: all 0.15s ease; }
-.handle-trigger:hover, .custom-block-handle:hover .handle-trigger { background: rgba(55, 53, 47, 0.08); color: #37352f; }
-.handle-toolbar { display: flex; align-items: center; gap: var(--space-05); background: #fff; border: 1px solid #e5e5e5; border-radius: 0.375rem; padding: var(--space-1) var(--space-2); box-shadow: 0 2px 8px rgba(0,0,0,0.1); white-space: nowrap; }
+.handle-trigger { width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; color: var(--text-muted); border-radius: 0.25rem; transition: all 0.15s ease; }
+.handle-trigger:hover, .custom-block-handle:hover .handle-trigger { background: var(--surface-hover); color: var(--text-primary); }
+.handle-toolbar { display: flex; align-items: center; gap: var(--space-05); background: var(--surface-overlay); border: 1px solid var(--border-default); border-radius: 0.375rem; padding: var(--space-1) var(--space-2); box-shadow: var(--shadow-2); white-space: nowrap; }
 .drag-btn { cursor: grab; }
-.drag-btn.active { cursor: grabbing; background: rgba(35, 131, 226, 0.2) !important; color: #2383e2; }
-.drop-indicator { position: fixed; height: 0.125rem; background: #2383e2; border-radius: 1px; pointer-events: none; z-index: 101; }
-.toolbar-btn { width: 1.75rem; height: 1.75rem; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 0.25rem; cursor: pointer; color: #37352f; }
-.toolbar-btn:hover { background: rgba(55, 53, 47, 0.08); }
-.toolbar-divider { width: 1px; height: 1rem; background: #e5e5e5; margin: 0 0.25rem; }
-.shortcut-hint { position: fixed; bottom: 1rem; right: 1rem; background: #1f1f1f; color: #fff; padding: 0.375rem 0.75rem; border-radius: 0.375rem; font-size: 0.75rem; z-index: 100; }
+.drag-btn.active { cursor: grabbing; background: var(--accent-subtle-bg) !important; color: var(--accent); }
+.drop-indicator { position: fixed; height: 0.125rem; background: var(--accent); border-radius: 1px; pointer-events: none; z-index: 101; }
+.toolbar-btn { width: 1.75rem; height: 1.75rem; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 0.25rem; cursor: pointer; color: var(--text-primary); }
+.toolbar-btn:hover { background: var(--surface-hover); }
+.toolbar-divider { width: 1px; height: 1rem; background: var(--border-default); margin: 0 0.25rem; }
+.shortcut-hint { position: fixed; bottom: 1rem; right: 1rem; background: var(--surface-overlay); color: var(--text-primary); padding: 0.375rem 0.75rem; border-radius: 0.375rem; font-size: 0.75rem; z-index: 100; border: 1px solid var(--border-default); box-shadow: var(--shadow-2); }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 .expand-enter-active, .expand-leave-active { transition: all 0.15s ease; }

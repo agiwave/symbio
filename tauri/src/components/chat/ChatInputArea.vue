@@ -233,11 +233,16 @@ textarea {
   padding: 0.5rem;
   border: none;
   background: transparent;
+  color: var(--text-primary);
   resize: none;
   font-size: 0.875rem;
   line-height: 1.5;
   outline: none;
   font-family: inherit;
+}
+
+textarea::placeholder {
+  color: var(--text-muted);
 }
 
 .send-btn, .attach-btn {
@@ -254,14 +259,15 @@ textarea {
   padding: 0;
 }
 
-.send-btn { background: var(--color-primary); color: white; }
+.send-btn { background: var(--color-primary); color: var(--text-on-accent); }
 .send-btn:hover:not(:disabled) { opacity: 0.9; transform: scale(1.05); }
 .send-btn:active:not(:disabled) { transform: scale(0.95); }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.send-btn.stop-btn { background: #dc3545; }
+/* 停止态：仅换背景，前景沿用 --text-on-accent（深/浅两态均由令牌给出对比度达标值） */
+.send-btn.stop-btn { background: var(--danger-solid); }
 
 .attach-btn { background: transparent; color: var(--color-text-muted); }
-.attach-btn:hover { background: rgba(0, 0, 0, 0.05); color: var(--color-text-secondary); }
+.attach-btn:hover { background: var(--surface-hover); color: var(--color-text-secondary); }
 
 .images-preview {
   display: flex;

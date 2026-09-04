@@ -49,7 +49,7 @@ CI 流水线位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，**�
 | Clippy | `cd symbio && cargo clippy --all-targets -- -D warnings` | 阻止合入 |
 | Rust 单元测试 | `cd symbio && cargo test --lib` | 阻止合入 |
 | E2E 测试 | `cd symbio && cargo test --test verification` | 阻止合入 |
-| 项目审计 | `bash scripts/grep_audit.sh` | 阻止合入 |
+| 项目审计 | `node scripts/grep-audit.mjs` | 阻止合入 |
 
 本地预检一条命令：
 
@@ -65,7 +65,7 @@ cd symbio && cargo fmt --check && cargo clippy --all-targets -- -D warnings && c
 
 - 遵循 `rustfmt.toml` + `clippy.toml`，**不要**手动格式化后被 CI 反复退回。
 - 异步上下文请使用 `tokio::sync::Mutex` / `tokio::sync::RwLock`；`std::sync::*` 只在 `spawn_blocking` 内部使用。
-  - 审计脚本 `scripts/grep_audit.sh` 中的 **S-002 规则**专门检测此问题。
+  - 审计脚本 `scripts/grep-audit.mjs` 中的 **S-002 规则**专门检测此问题。
 - 日志：使用 `tracing`（`info!` / `warn!` / `error!` / `debug!`），**不要**用 `eprintln!` / `println!`。
   - 项目在 `tauri/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
 - 错误：实现 `thiserror` 派生 `PluginError` 变体，不要用 `String` 当错误类型。

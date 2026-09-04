@@ -316,7 +316,7 @@ REASON: 一句话理由
 | **结果正确性** | 返回结果符合预期功能（如查询返回正确数据，存储返回确认） |
 | **LLM 使用结果** | LLM 回答基于能力返回结果，包含相关信息 |
 
-> 原 6.3/6.4 的 `cargo run --release --bin cli ...` 测试示例、`./test_capabilities.ps1` / `./test_capability_chain.ps1` 脚本及 reason/learn/plan/metacognition 相关测试示例均已废弃——这些域操作尚未实现。
+> 原 6.3/6.4 的 `cargo run --release --bin cli ...` 测试示例、`./test-capabilities.mjs` / `./test-capability-chain.mjs` 脚本及 reason/learn/plan/metacognition 相关测试示例均已废弃——这些域操作尚未实现。
 
 ---
 

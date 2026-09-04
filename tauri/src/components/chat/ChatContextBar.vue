@@ -172,7 +172,7 @@ function onBodyClick() {
 
 .ctx-label {
   font-size: 0.625rem;
-  color: #7c3aed;
+  color: var(--color-chip-reasoning-fg);
   text-transform: uppercase;
   letter-spacing: 0.0313rem;
   font-weight: 700;
@@ -202,7 +202,7 @@ function onBodyClick() {
 
 .ctx-session-warn {
   font-size: 0.5625rem;
-  color: #b45309;
+  color: var(--warning-fg);
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.32);
   border-radius: 0.1875rem;
@@ -230,14 +230,14 @@ function onBodyClick() {
 
 .ctx-icon-btn:hover {
   background: rgba(124, 58, 237, 0.12);
-  color: #7c3aed;
+  color: var(--color-chip-reasoning-fg);
 }
 
 /* 主体：代码块 */
 .ctx-body {
   position: relative;
   padding: 0.375rem 0.625rem;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--color-supply-bg);
   border: 1px solid rgba(124, 58, 237, 0.1);
   border-radius: 0.3125rem;
   cursor: text;
@@ -260,7 +260,7 @@ function onBodyClick() {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.7188rem;
   line-height: 1.5;
-  color: #1f2937;
+  color: var(--text-primary);
   white-space: pre;
   word-break: normal;
   overflow-wrap: normal;
@@ -274,7 +274,7 @@ function onBodyClick() {
   right: 0;
   bottom: 0;
   height: 1.375rem;
-  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.95));
+  background: linear-gradient(to bottom, transparent, var(--surface-fade));
   pointer-events: none;
 }
 
