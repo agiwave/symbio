@@ -108,9 +108,12 @@ const PRESETS: &[PresetTuple] = &[
     ("github", "GitHub Models", "https://models.github.ai/inference",
      &["gpt-4o", "gpt-4o-mini"],
      &["openai_chat"]),
+    ("openai_compatible", "OpenAI 兼容协议", "",
+     &[],
+     &["openai_chat"]),
     ("custom", "自定义 (OpenAI 兼容)", "",
      &[],
-     &["openai_responses", "openai_chat", "anthropic_messages", "gemini_api"]),
+     &["openai_chat", "openai_responses", "anthropic_messages", "gemini_api"]),
 ];
 
 fn opt(value: &str, label: &str) -> DetailOption {

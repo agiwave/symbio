@@ -496,23 +496,29 @@ function scheduleRefresh(kind: string, delay = 800) {
 
 onMounted(() => {
   loadAll()
-  if (!isContainer) {
-    unsubscribers = activeTypes.value.flatMap((d) => [
-      subscribeEntityStatus(d.kind, ({ id, status, status_detail }) => {
-        const it = typeStates.value[d.kind]?.items.find((x) => x.id === id)
-        if (it) {
-          it.status = status
-          it.status_detail = status_detail ?? undefined
-        }
-      }),
-      // 粗粒度事件才刷新清单（status=工作状态流转、title=会话命名）；
-      // 流式 update 等细粒度事件与列表无关，忽略以免空闲期反复重拉
-      subscribe({ kind: d.kind }, (e) => {
-        const t = (e.data?.data as { type?: string } | undefined)?.type
-        if (t === 'status' || t === 'title') scheduleRefresh(d.kind)
-      }),
-    ])
-  }
+})
+
+// 实时订阅必须响应式建立：activeTypes 依赖异步加载的 providers 注册表，
+// 而会话页是首屏路由——onMounted 一次性 flatMap 时注册表几乎必然为空，
+// 订阅落成空集且永不重试（会话列表实时更新失效的根因）。改用 watch：
+// 注册表就绪 / 路由切换类型时自动重订阅，卸载时统一清理。
+watch(activeTypes, (types) => {
+  unsubscribers.forEach((fn) => fn())
+  unsubscribers = types.flatMap((d) => [
+    subscribeEntityStatus(d.kind, ({ id, status, status_detail }) => {
+      const it = typeStates.value[d.kind]?.items.find((x) => x.id === id)
+      if (it) {
+        it.status = status
+        it.status_detail = status_detail ?? undefined
+      }
+    }),
+    // 粗粒度事件才刷新清单（status=工作状态流转、title=会话命名）；
+    // 流式 update 等细粒度事件与列表无关，忽略以免空闲期反复重拉
+    subscribe({ kind: d.kind }, (e) => {
+      const t = (e.data?.data as { type?: string } | undefined)?.type
+      if (t === 'status' || t === 'title') scheduleRefresh(d.kind)
+    }),
+  ])
 })
 onBeforeUnmount(() => {
   unsubscribers.forEach((fn) => fn())
