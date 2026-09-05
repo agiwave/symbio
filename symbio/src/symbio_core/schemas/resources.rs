@@ -64,6 +64,9 @@ pub const RESOURCES_DELETE: &str = "resources/delete";
 /// resources/status — 查询资源实时/连接状态
 pub const RESOURCES_STATUS: &str = "resources/status";
 
+/// `resources/detail` —— 详情页定义下发（definition-driven detail）
+pub const RESOURCES_DETAIL: &str = "resources/detail";
+
 // ==================== 能力开关 ====================
 
 /// 资源能力开关 —— 决定该类型资源的统一页面启用哪些模块。
@@ -408,4 +411,183 @@ pub struct ResourceStatusResponse {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_detail: Option<String>,
+}
+
+// ==================== 详情页定义（definition-driven detail） ====================
+//
+// 交互不复杂的详情页由后端下发**定义**、前端通用渲染器（DetailForm）动态生成，
+// 前端零页面开发。设计基准 = 旧 Model.vue 的表单复杂度：
+// 预设联动填充 / 动态候选（datalist/select）/ 密码显隐 / 数字范围 /
+// 折叠分区 / 条件徽标与动作 / id·name 派生回落链。
+// 复杂详情（会话聊天工作区、agent bundle 概览、appearance 即时生效型、
+// about 信息展示型）仍走注册 editor，不适用本定义。
+
+/// 条件谓词（徽标/动作显隐）。`all` 存在时为 AND 组合，其余字段忽略。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct DetailCondition {
+    /// 求值键：表单字段名，或特殊键 `is_existing` / `is_default` / `cap.<name>`
+    pub key: String,
+    pub equals: Option<serde_json::Value>,
+    pub not_equals: Option<serde_json::Value>,
+    pub truthy: Option<bool>,
+    /// AND 组合（嵌套条件全真才真）
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub all: Vec<DetailCondition>,
+}
+
+/// select 选项 / 值-标签对
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct DetailOption {
+    pub value: String,
+    pub label: String,
+}
+
+/// 表单字段定义。`widget` ∈ text | password | number | select | textarea |
+/// toggle | datalist；`options`/`suggestions` 为静态候选，`*_from_preset`
+/// 为真时候选来自当前预设的 `options[key]`（如 provider 预设注入模型列表）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct DetailField {
+    /// 绑定到表单模型的字段名
+    pub key: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub required: bool,
+    pub widget: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
+    /// textarea 行数
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<DetailOption>,
+    /// datalist 静态建议
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub suggestions: Vec<String>,
+    /// 候选来自预设注入（select 选项 / datalist 建议）
+    pub options_from_preset: bool,
+    pub suggestions_from_preset: bool,
+    /// 整行布局（textarea 等宽控件）
+    pub full_width: bool,
+    /// 新建态缺省值
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+}
+
+/// 分区（可折叠；`collapsed` = 默认折叠，如「高级设置」）
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct DetailSection {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub collapsed: bool,
+    pub fields: Vec<DetailField>,
+}
+
+/// 预设项：选中后按 `set` 填充字段值（策略见 [`DetailPresetSpec::fill`]），
+/// 并把 `options`（字段名 → 候选列表）注入对应字段的动态候选。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct DetailPreset {
+    pub value: String,
+    pub label: String,
+    pub set: std::collections::BTreeMap<String, serde_json::Value>,
+    /// 总是覆盖（不参与 fill 策略，如协议校正）
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub set_always: std::collections::BTreeMap<String, serde_json::Value>,
+    pub options: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// 预设联动规格：`field` 为触发预设的 select 字段；`fill` ∈ if_empty | always
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct DetailPresetSpec {
+    pub field: String,
+    pub fill: String,
+    pub presets: Vec<DetailPreset>,
+}
+
+/// 标题区徽标（如「默认」「已停用」），按条件显隐
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct DetailBadge {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<DetailCondition>,
+    pub label: String,
+    /// default | disabled | accent
+    pub style: String,
+}
+
+/// 动作按钮。`id` ∈ save | test | delete | set-default（机制语义动作，
+/// 前端接统一通道）或自定义（预留）；`payload` 合并进 save 负载
+/// （如 `skip_validation`）；`busy_label` 为进行中文案。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct DetailAction {
+    pub id: String,
+    pub label: String,
+    /// primary | secondary | danger | icon
+    pub style: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<DetailCondition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_when: Option<DetailCondition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub busy_label: Option<String>,
+}
+
+/// 详情页定义。`binding` ∈ upload（实体资源：预填 item.config，保存走
+/// `resources/upload` manifest）| config（配置分区：经 `load_path`/
+/// `save_path` 读写，如 `local/config get|set`）。派生链均为「首个非空」：
+/// `title_from` 生成标题，`name_from` 保存时补名称，`id_from` 新建时
+/// 派生 slug id（前端去重 `-2` 递增，后端 `validate_manifest` 兜底）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct DetailDefinition {
+    pub binding: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub save_path: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub title_from: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title_fallback: Option<String>,
+    /// 副标题派生链（首个非空字段依次展示，如 provider 标签 / model）
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subtitle_from: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub name_from: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub id_from: Vec<String>,
+    pub sections: Vec<DetailSection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presets: Option<DetailPresetSpec>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub badges: Vec<DetailBadge>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<DetailAction>,
+}
+
+/// `resources/detail` 请求（`id` 为空 = 请求「新建态」定义）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DetailDefinitionRequest {
+    pub kind: String,
+    pub id: String,
+}
+
+/// `resources/detail` 响应（`definition = None` 表示无定义）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DetailDefinitionResponse {
+    pub definition: Option<DetailDefinition>,
 }

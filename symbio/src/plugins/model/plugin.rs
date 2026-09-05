@@ -565,6 +565,16 @@ impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
         Some(crate::symbio_core::providers::manifests::PROVIDER)
     }
 
+    /// 详情页定义：Model 表单由后端下发（预设联动/动态候选/折叠分区，
+    /// 设计基准即原前端 Model.vue，预设数据自 constants/modelProviders.ts 迁入）
+    async fn detail_definition(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _id: &str,
+    ) -> Option<crate::symbio_core::schemas::resources::DetailDefinition> {
+        Some(super::detail::model_detail_definition())
+    }
+
     /// 列表来自内存注册表（启动时镜像磁盘）
     async fn list_items(
         &self,

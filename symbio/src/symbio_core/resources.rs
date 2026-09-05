@@ -171,6 +171,22 @@ pub trait ResourceProvider: Send + Sync {
         Err(PluginError::NotImplemented)
     }
 
+    /// 详情页定义钩子（definition-driven detail）。
+    ///
+    /// 返回 `None` 表示该资源无定义（前端回退注册 editor / 通用面板）；
+    /// `id` 为空表示请求「新建态」定义。定义能力由 provider 决定——
+    /// 交互不复杂的详情页据此由前端通用渲染器（DetailForm）动态生成，
+    /// 前端零页面开发。设计基准 = Model.vue 表单复杂度（预设联动 /
+    /// 动态候选 / 折叠分区 / 条件动作 / 派生链），见
+    /// `schemas::resources::DetailDefinition`。
+    async fn detail_definition(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _id: &str,
+    ) -> Option<crate::symbio_core::schemas::resources::DetailDefinition> {
+        None
+    }
+
     // ==================== 容器子资源（container 语义） ====================
 
     /// 列出容器条目内部的子资源（`resources/list` 携带 `container` 时调用）。
@@ -472,6 +488,7 @@ pub async fn dispatch<P: ResourceProvider + ?Sized>(
         RESOURCES_UPLOAD => dispatch_upload(provider, ctx).await,
         RESOURCES_DELETE => dispatch_delete(provider, ctx).await,
         RESOURCES_STATUS => dispatch_status(provider, ctx).await,
+        RESOURCES_DETAIL => dispatch_detail(provider, ctx).await,
         _ => return None,
     };
     Some(resp)
@@ -675,6 +692,21 @@ async fn dispatch_status<P: ResourceProvider + ?Sized>(
     }
 
     Ok(PluginPayload::new(&resp))
+}
+
+/// `resources/detail`：详情页定义下发（definition-driven detail）。
+///
+/// `id` 为空 = 「新建态」定义；provider 未实现钩子时 `definition = None`，
+/// 前端回退注册 editor / 通用兜底面板。
+async fn dispatch_detail<P: ResourceProvider + ?Sized>(
+    provider: &P,
+    ctx: &Arc<dyn InvokeRequest>,
+) -> InvokeResponse<PluginPayload> {
+    let req: crate::symbio_core::schemas::resources::DetailDefinitionRequest = ctx.payload()?;
+    let definition = provider.detail_definition(ctx, &req.id).await;
+    Ok(PluginPayload::new(
+        &crate::symbio_core::schemas::resources::DetailDefinitionResponse { definition },
+    ))
 }
 
 /// 统一资源操作错误（转为 PluginError::Other 抛出）

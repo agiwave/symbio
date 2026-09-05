@@ -9,6 +9,9 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
+use crate::symbio_core::schemas::resources::{
+    DetailAction, DetailDefinition, DetailField, DetailSection,
+};
 use crate::symbio_core::schemas::setting::{setting_get, setting_list};
 use tracing::info;
 
@@ -155,6 +158,133 @@ const SETTING_SECTIONS: [(&str, &str); 5] = [
     ("about", "关于"),
 ];
 
+// ==================== 详情页定义（definition-driven detail） ====================
+//
+// 会话 / 本地工具 / 网络工具三个分区为「交互不复杂」的 config 绑定表单，
+// 由后端下发定义、前端通用渲染器 DetailForm 动态生成（前端零页面开发）；
+// 数据通道沿用各插件标准 config 路由（`<plugin>/config get|set`）。
+// appearance（前端 store 即时生效）、about（信息展示）不适用定义，保留注册 editor。
+
+fn detail_field_number(
+    key: &str,
+    label: &str,
+    desc: &str,
+    min: f64,
+    max: f64,
+    default: serde_json::Value,
+) -> DetailField {
+    DetailField {
+        key: key.into(),
+        label: label.into(),
+        description: Some(desc.into()),
+        widget: "number".into(),
+        min: Some(min),
+        max: Some(max),
+        step: Some(1.0),
+        default: Some(default),
+        ..Default::default()
+    }
+}
+
+fn detail_field_toggle(key: &str, label: &str, desc: &str, default: bool) -> DetailField {
+    DetailField {
+        key: key.into(),
+        label: label.into(),
+        description: Some(desc.into()),
+        widget: "toggle".into(),
+        default: Some(serde_json::json!(default)),
+        ..Default::default()
+    }
+}
+
+fn detail_field_password(key: &str, label: &str, desc: &str, placeholder: &str) -> DetailField {
+    DetailField {
+        key: key.into(),
+        label: label.into(),
+        description: Some(desc.into()),
+        widget: "password".into(),
+        placeholder: Some(placeholder.into()),
+        ..Default::default()
+    }
+}
+
+/// config 绑定定义骨架：单分区 + 单「保存配置」动作（`_desc` 预留：schema 暂无描述字段）
+fn config_definition(title: &str, _desc: &str, load: &str, save: &str, fields: Vec<DetailField>) -> DetailDefinition {
+    DetailDefinition {
+        binding: "config".into(),
+        load_path: Some(load.into()),
+        save_path: Some(save.into()),
+        title_from: vec![],
+        title_fallback: Some(title.into()),
+        subtitle_from: vec![],
+        sections: vec![DetailSection {
+            title: None,
+            collapsed: false,
+            fields,
+        }],
+        badges: vec![],
+        actions: vec![DetailAction {
+            id: "save".into(),
+            label: "保存配置".into(),
+            style: "primary".into(),
+            busy_label: Some("保存中…".into()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
+
+fn session_detail_definition() -> DetailDefinition {
+    config_definition(
+        "会话设置",
+        "控制会话存储与上下文行为",
+        "session/config get",
+        "session/config set",
+        vec![
+            detail_field_number("max_messages", "最大消息数", "每个会话保存的最大消息数量", 10.0, 1000.0, serde_json::json!(100)),
+            detail_field_toggle("auto_compress", "自动压缩", "当消息数超过阈值时自动压缩历史", true),
+            detail_field_number("compress_threshold", "压缩阈值", "触发自动压缩的消息数量", 10.0, 500.0, serde_json::json!(50)),
+            detail_field_number(
+                "context_messages",
+                "上下文消息数量",
+                "Model 对话时包含的上下文消息数量（0 表示不限制，6 表示 3 轮对话）",
+                0.0,
+                200.0,
+                serde_json::json!(6),
+            ),
+        ],
+    )
+}
+
+fn local_detail_definition() -> DetailDefinition {
+    config_definition(
+        "本地工具设置",
+        "控制本地 Shell / 文件工具的启用与超时",
+        "local/config get",
+        "local/config set",
+        vec![
+            detail_field_toggle("shell_enabled", "启用 Shell 工具", "允许执行 Shell 命令", true),
+            detail_field_toggle("file_enabled", "启用文件工具", "允许文件读写操作", true),
+            detail_field_number("shell_timeout", "Shell 超时（秒）", "Shell 命令执行超时时间", 1.0, 3600.0, serde_json::json!(60)),
+        ],
+    )
+}
+
+fn web_detail_definition() -> DetailDefinition {
+    config_definition(
+        "网络工具设置",
+        "控制 Web 工具的启用、超时与搜索服务凭据",
+        "web/config get",
+        "web/config set",
+        vec![
+            detail_field_toggle("web_enabled", "启用 Web 工具", "允许网络请求", true),
+            detail_field_number("web_timeout", "Web 超时（秒）", "Web 请求超时时间", 1.0, 300.0, serde_json::json!(300)),
+            detail_field_password("tavily_api_key", "Tavily API Key", "用于高级网页搜索（优先）", "输入 Tavily API Key"),
+            detail_field_password("serper_api_key", "Serper API Key", "用于 Google 网页搜索（备用）", "输入 Serper API Key"),
+        ],
+    )
+}
+
 #[async_trait::async_trait]
 impl crate::symbio_core::resources::ResourceProvider for SettingPlugin {
     fn kind(&self) -> &'static str {
@@ -181,6 +311,21 @@ impl crate::symbio_core::resources::ResourceProvider for SettingPlugin {
                 it
             })
             .collect())
+    }
+
+    /// 分区详情定义：session/local/web 下发表单定义（前端 DetailForm 渲染）；
+    /// appearance/about 返回 None（保留注册 editor：前端 store 即时生效 / 信息展示）。
+    async fn detail_definition(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Option<DetailDefinition> {
+        match id {
+            "session" => Some(session_detail_definition()),
+            "local" => Some(local_detail_definition()),
+            "web" => Some(web_detail_definition()),
+            _ => None,
+        }
     }
 }
 

@@ -21,6 +21,7 @@
 mod chat_loop;
 mod compression;
 mod context;
+mod detail;
 mod handlers;
 pub mod message_builder;
 mod plugin;
