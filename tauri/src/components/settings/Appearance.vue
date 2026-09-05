@@ -1,5 +1,5 @@
 <!--
-  AppearanceSettingsForm — 外观设置 editor（setting:appearance）
+  Appearance — 外观设置 editor（setting:appearance）
 
   主题 / 字体大小经 appearance store 即时生效并自动持久化，无需保存按钮。
 -->

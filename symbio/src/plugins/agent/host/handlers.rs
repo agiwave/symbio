@@ -13,9 +13,15 @@
 //!
 //! ## resources/* 语义（统一资源协议，前端资源管理页使用）
 //!
-//! `list` 走 [`crate::symbio_core::resources::dispatch`] 公共流程；
+//! 顶层语义：`list` 走 [`crate::symbio_core::resources::dispatch`] 公共流程；
 //! `get` / `upload` / `delete` 由 BundleStore 拦截实现（自带 manifest 校验与
 //! zip-slip 防护），响应形状与统一协议一致（见 host/resources.rs 模块文档）。
+//!
+//! **容器语义**（请求携带 `container` = bundle id）：bundle 内部的
+//! prompts / skills / mcps 走同一套 resources/* 协议（trait 的
+//! `*_container_item` 钩子，见 host/resources.rs），响应形状与顶层一致。
+//! `list` 的容器分支直接在 dispatch 内完成；`get` / `upload` / `delete`
+//! 因顶层语义由本模块拦截，容器语义时委托回 dispatch。
 
 use super::plugin::AgentPlugin;
 use super::store::BundleStore;
@@ -41,7 +47,7 @@ pub async fn route(
     let store = BundleStore::new(workdir.as_deref());
 
     match path {
-        // ── 统一资源协议（前端资源管理页）──
+        // ── 统一资源协议（前端资源管理页；list 容器分支在 dispatch 内）──
         "resources/list" => {
             // 公共流程：list_items（BundleStore 枚举）+ provider 回填 + 能力开关；
             // path 命中 RESOURCES_LIST，dispatch 必返回 Some
@@ -52,9 +58,46 @@ pub async fn route(
                 )),
             }
         }
-        "resources/get" => resources_get(&store, &ctx).await,
-        "resources/upload" => resources_upload(&store, &ctx).await,
-        "resources/delete" => resources_delete(&store, &ctx).await,
+        "resources/get" => {
+            let req: ResourceGetRequest = ctx.payload()?;
+            if req.container.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+                // 容器语义：委托 dispatch 容器分支（trait get_container_item）
+                match dispatch(plugin, path, &ctx).await {
+                    Some(resp) => resp,
+                    None => Err(PluginError::InternalError(
+                        "resources/get dispatch 失败".into(),
+                    )),
+                }
+            } else {
+                resources_get(&store, &ctx).await
+            }
+        }
+        "resources/upload" => {
+            let req: ResourceUploadRequest = ctx.payload()?;
+            if req.container.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+                match dispatch(plugin, path, &ctx).await {
+                    Some(resp) => resp,
+                    None => Err(PluginError::InternalError(
+                        "resources/upload dispatch 失败".into(),
+                    )),
+                }
+            } else {
+                resources_upload(&store, &ctx).await
+            }
+        }
+        "resources/delete" => {
+            let req: ResourceDeleteRequest = ctx.payload()?;
+            if req.container.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+                match dispatch(plugin, path, &ctx).await {
+                    Some(resp) => resp,
+                    None => Err(PluginError::InternalError(
+                        "resources/delete dispatch 失败".into(),
+                    )),
+                }
+            } else {
+                resources_delete(&store, &ctx).await
+            }
+        }
 
         // ── 插件自有管理路由 ──
         "bundle/list" => list(&store),
@@ -241,6 +284,7 @@ async fn resources_get(
         it.summary = Some(record.manifest.description.clone());
     }
     it.extra = serde_json::json!({
+        "config_type": "bundle",
         "version": record.manifest.version,
         "spec": record.manifest.spec,
         "requires_spec": record.manifest.requires.spec,

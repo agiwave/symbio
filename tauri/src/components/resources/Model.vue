@@ -1,8 +1,8 @@
 <!--
-  ModelProviderForm — Model 资源专属详情/编辑表单
+  Model — Model 资源专属详情/编辑表单
 
   统一资源协议下的"详情差异化"组件：
-  - 列表机制统一由 ResourceManagerView 承载，本组件只负责 model 的编辑表单；
+  - 列表机制统一由 WorkbenchView 承载，本组件只负责 model 的编辑表单；
   - 数据契约：props.item 为 null 时是"新建"模式，否则从 item.extra.config 预填；
   - 保存统一走 resources/upload（manifest 上传），不引入独立协议。
 

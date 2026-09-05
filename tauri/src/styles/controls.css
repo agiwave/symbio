@@ -1,0 +1,159 @@
+/* =============================================================================
+ * Symbio 共享控件样式（在 base.css 之后引入）
+ *
+ * 目的：收敛各组件 scoped <style> 中反复复制粘贴的通用控件按钮/输入框样式
+ * （.action-btn / .danger-btn / .icon-btn / .field-label / .text-input），
+ * 做到一次定义、处处复用。
+ *
+ * 兼容性：存量组件仍持有同名 scoped 副本（`.action-btn[data-v-x]` 特异性更高），
+ * 其视觉不受本文件影响；新组件应直接使用此处定义，不再复制粘贴。
+ * ============================================================================= */
+
+/* 主操作按钮（实心主色） */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.95rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+.action-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 次级按钮（描边） */
+.action-btn.secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+}
+.action-btn.secondary:hover:not(:disabled) { background: var(--surface-hover); }
+
+/* 危险按钮（实心红） */
+.danger-btn {
+  padding: 0.45rem 0.95rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--danger-solid);
+  color: var(--text-inverse);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.danger-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 方形图标按钮（工具栏 / header 操作） */
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all var(--motion-fast) var(--motion-ease);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.icon-btn.danger:hover:not(:disabled) {
+  color: var(--danger-fg);
+}
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 表单字段标签（大写小字） */
+.field-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* 单行文本输入 */
+.text-input {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+.text-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle-bg);
+}
+
+/* ==================== 三栏工作台侧边栏（NavRail 共用） ==================== */
+
+.nav-btn {
+  position: relative;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  flex-shrink: 0;
+  gap: 0.75rem;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+.nav-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.nav-btn.active {
+  background: var(--surface-selected);
+  color: var(--accent);
+}
+.nav-btn.back {
+  margin: 0.5rem auto 0;
+}
+
+/* 计数角标（nav-btn 右上角） */
+.nav-count {
+  position: absolute;
+  top: 0.1rem;
+  right: 0.1rem;
+  min-width: 0.9rem;
+  height: 0.9rem;
+  padding: 0 0.25rem;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 0.6rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* 窄条模式隐藏文字标签（保留 DOM，便于日后悬浮展开）；
+   可访问名称由 aria-label 提供，键盘焦点环由 base.css 的 :focus-visible 保证。 */
+.nav-label {
+  display: none;
+}

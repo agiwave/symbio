@@ -2,7 +2,7 @@
   ResourceDetailPanel — 统一资源详情（通用展示兜底）
 
   展示 ResourceSummary 的公共字段 + extra 扩展字段。
-  作为 ResourceManagerView 的通用详情兜底；专属表单类型（如 model）
+  作为 WorkbenchView 的通用详情兜底；专属表单类型（如 model）
   由视图的 FORM_COMPONENTS 注册表接管，不经过本面板。
 -->
 <template>

@@ -6,6 +6,12 @@
         <span v-if="store.isActiveWorking" class="status-working">● AI 处理中</span>
       </div>
       <div class="header-right">
+        <button class="header-btn" title="删除会话" @click="emit('delete-session')">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
+        </button>
         <button class="header-btn" title="清空历史" @click="onClearHistory">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 6h18" />
@@ -74,6 +80,8 @@ import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
 
 const store = useSessionsStore()
+
+const emit = defineEmits<{ (e: 'delete-session'): void }>()
 
 const hasActive = computed(() => !!store.activeId)
 

@@ -1,5 +1,5 @@
 <!--
-  WebConfigForm — 网络工具设置 editor（setting:web）
+  Web — 网络工具设置 editor（setting:web）
 
   数据通道：web/config get/set（editor 自持保存，不走统一资源 upload）。
 -->
@@ -79,7 +79,7 @@ onMounted(async () => {
     const cfg = await getWebConfig()
     if (cfg) Object.assign(config, cfg)
   } catch (err) {
-    logger.error('WebConfigForm', '加载网络工具配置失败', err)
+    logger.error('Web', '加载网络工具配置失败', err)
     toast.showToast('error', '加载网络工具配置失败')
   }
 })

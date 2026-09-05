@@ -369,13 +369,24 @@ impl crate::symbio_core::resources::ResourceProvider for SessionPlugin {
             .collect())
     }
 
+    /// 删除会话（统一协议 resources/delete；非 EntityStore 型 provider 重写）。
+    ///
+    /// 复用 `delete_session_internal`：先 abort 活跃任务再删除——与旧
+    /// `session/clear` 路由同语义，前端机制列表的删除按钮直接受益。
+    async fn delete_item(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<(), PluginError> {
+        self.delete_session_internal(id).await
+    }
+
     /// 查询单个会话的实时工作状态
     async fn test_status(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
         id: &str,
-    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {
-        let active = self.active_mgr.sessions.read().await;
+    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {        let active = self.active_mgr.sessions.read().await;
         let is_working = active
             .get(id)
             .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))

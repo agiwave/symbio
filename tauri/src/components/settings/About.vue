@@ -1,5 +1,5 @@
 <!--
-  AboutPanel — 关于 editor（setting:about，只读）
+  About — 关于 editor（setting:about，只读）
 -->
 <template>
   <SettingsFormShell title="关于">

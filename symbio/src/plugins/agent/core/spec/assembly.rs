@@ -256,7 +256,8 @@ fn read_config_value(path: &PathBuf, ext: &str) -> Option<Value> {
 ///
 /// 支持 `---\n...\n---\n` 与 `---\r\n...\r\n---\r\n` 两种换行；无 frontmatter
 /// 时返回空 map + 原文。正文不含 frontmatter 分隔行。
-fn split_frontmatter(content: &str) -> (Map<String, Value>, String) {
+/// 公开给 host 层复用（如 bundle 内部资源管理需要解析 priority）。
+pub fn split_frontmatter(content: &str) -> (Map<String, Value>, String) {
     let bytes = content.as_bytes();
     // 必须以 "---" 开头且其后紧跟换行
     if !(bytes.starts_with(b"---")

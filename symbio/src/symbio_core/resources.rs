@@ -119,6 +119,37 @@ pub trait ResourceProvider: Send + Sync {
         Ok(())
     }
 
+    /// 删除单个资源（磁盘/存储删除 + 由 [`dispatch_delete`] 回调 [`Self::on_deleted`]）。
+    ///
+    /// 默认实现：EntityStore 目录删除（`category()` 提供分类，磁盘已无目录时
+    /// 幂等告警）。**非实体存储型 provider（如 session 走 SessionStore）重写
+    /// 本方法**——删除能力由注册表 `capabilities.mutable` 声明，与本钩子解耦。
+    async fn delete_item(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<(), PluginError> {
+        let Some(category) = self.category() else {
+            return Err(PluginError::NotImplemented);
+        };
+        let store = storage_service(ctx)?;
+        let es = store.entity_store();
+        match es.delete_entity(category, id).await {
+            Ok(()) => {}
+            Err(EntityStoreError::NotFound { .. }) => {
+                crate::plugin_warn!(
+                    self.kind(),
+                    "磁盘上已无资源 {} 目录，仅清理内存",
+                    id
+                );
+            }
+            Err(e) => {
+                return Err(PluginError::InternalError(format!("删除资源失败: {e}")));
+            }
+        }
+        Ok(())
+    }
+
     /// 删除成功后的内存/缓存清理钩子
     async fn on_deleted(
         &self,
@@ -138,6 +169,108 @@ pub trait ResourceProvider: Send + Sync {
         _id: &str,
     ) -> Result<ResourceStatusResponse, PluginError> {
         Err(PluginError::NotImplemented)
+    }
+
+    // ==================== 容器子资源（container 语义） ====================
+
+    /// 列出容器条目内部的子资源（`resources/list` 携带 `container` 时调用）。
+    ///
+    /// `sub_kind` 为 `None` 时返回全部子类型（条目 `kind` 字段供前端分类，
+    /// 供容器页做类别计数）；`container` 为容器条目 id（如 agent bundle id）。
+    async fn list_container_items(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _sub_kind: Option<&str>,
+        _container: &str,
+    ) -> Result<Vec<ResourceSummary>, PluginError> {
+        Err(PluginError::NotImplemented)
+    }
+
+    /// 读取容器子资源详情；文件内容置于 `extra.content`。
+    async fn get_container_item(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _id: &str,
+        _container: &str,
+    ) -> Result<ResourceSummary, PluginError> {
+        Err(PluginError::NotImplemented)
+    }
+
+    /// 写入（创建/覆盖）容器子资源；`id` 为容器内相对路径。
+    async fn put_container_item(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _id: &str,
+        _content: &str,
+        _container: &str,
+    ) -> Result<ResourceUploadResponse, PluginError> {
+        Err(PluginError::NotImplemented)
+    }
+
+    /// 删除容器子资源。
+    async fn delete_container_item(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _id: &str,
+        _container: &str,
+    ) -> Result<ResourceUploadResponse, PluginError> {
+        Err(PluginError::NotImplemented)
+    }
+}
+
+// ==================== 容器子资源声明 ====================
+
+/// 容器子资源声明（编译期静态版，下发给前端时转为
+/// [`ContainerKindInfo`](crate::symbio_core::schemas::resources::ContainerKindInfo)）
+#[derive(Debug, Clone, Copy)]
+pub struct ContainerKindSpec {
+    /// 子资源类型（如 `prompt` / `skill` / `mcp`）
+    pub kind: &'static str,
+    /// 展示标签
+    pub label: &'static str,
+    /// 语义说明（前端新建/编辑表单提示文本）
+    pub description: &'static str,
+    /// 新建路径模板（`<name>` 占位符），如 `prompts/<name>.md`
+    pub path_hint: &'static str,
+    /// 新建内容模板
+    pub default_content: &'static str,
+    pub capabilities: &'static ResourceCapabilities,
+}
+
+/// agent bundle 内部托管的三类文件级子资源（布局与 OAB 装配规则严格一致，
+/// 模板中的 frontmatter priority 约定与装配缺省值对应）。
+pub static AGENT_CONTAINER_KINDS: &[ContainerKindSpec] = &[
+    ContainerKindSpec {
+        kind: "prompt",
+        label: "提示词",
+        description: "Markdown 片段，无条件追加进系统提示词；可用 YAML frontmatter 设置 priority（缺省 10，小者优先）。",
+        path_hint: "prompts/<name>.md",
+        default_content: "---\npriority: 10\n---\n\n在此撰写常驻系统提示词（人格 / 全局规则 / 工作流）…",
+        capabilities: &ResourceCapabilities::BUNDLE_FILE,
+    },
+    ContainerKindSpec {
+        kind: "skill",
+        label: "技能",
+        description: "skills/<name>/SKILL.md，正文作为提示词片段；frontmatter priority 缺省 50。",
+        path_hint: "skills/<name>/SKILL.md",
+        default_content: "---\npriority: 50\n---\n\n# 技能名称\n\n描述该技能的适用场景、输入输出与执行步骤…",
+        capabilities: &ResourceCapabilities::BUNDLE_FILE,
+    },
+    ContainerKindSpec {
+        kind: "mcp",
+        label: "MCP",
+        description: "MCP server 配置（YAML），是工具的唯一来源，原样透传给宿主 MCP 客户端。",
+        path_hint: "mcps/<name>.yaml",
+        default_content: "# MCP server 配置（YAML，原样透传给宿主 MCP 客户端）\ncommand: \"\"\nargs: []\nenv: {}",
+        capabilities: &ResourceCapabilities::BUNDLE_FILE,
+    },
+];
+
+/// 某 provider kind 的容器子资源声明（空 = 条目不是容器）。
+pub fn container_kinds_for(kind: &str) -> &'static [ContainerKindSpec] {
+    match kind {
+        RESOURCE_AGENT => AGENT_CONTAINER_KINDS,
+        _ => &[],
     }
 }
 
@@ -171,6 +304,8 @@ pub struct ResourceProviderInfo {
     pub compact_list: bool,
     /// 列表项是否显示运行状态图示（如设置分区为 false，不显示状态点）
     pub status_indicator: bool,
+    /// 容器子资源声明（空 = 条目不是容器）
+    pub container_kinds: &'static [ContainerKindSpec],
 }
 
 /// 全部已注册资源 provider（编译期收起当前六类，顺序即展示顺序）
@@ -185,10 +320,12 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             capabilities: &ResourceCapabilities::SESSION,
             order: 1,
             label: "会话",
-            // session 走 SessionStore，upload/delete 未实现
+            // session 走 SessionStore（非 EntityStore）：zip/manifest 上传不适用；
+            // 删除经重写 delete_item 钩子接入统一协议；创建走前端专属 editor 引导
             supports_upload: false,
             compact_list: false,
             status_indicator: true,
+            container_kinds: &[],
         },
         ResourceProviderInfo {
             kind: RESOURCE_MODEL,
@@ -200,6 +337,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             supports_upload: true,
             compact_list: false,
             status_indicator: true,
+            container_kinds: &[],
         },
         ResourceProviderInfo {
             kind: RESOURCE_AGENT,
@@ -211,6 +349,8 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             supports_upload: true,
             compact_list: false,
             status_indicator: true,
+            // agent 条目（OAB bundle）是容器：内部托管 prompt / skill / mcp 三类文件级子资源
+            container_kinds: AGENT_CONTAINER_KINDS,
         },
         ResourceProviderInfo {
             kind: RESOURCE_SKILL,
@@ -222,6 +362,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             supports_upload: true,
             compact_list: false,
             status_indicator: true,
+            container_kinds: &[],
         },
         ResourceProviderInfo {
             kind: RESOURCE_MCP,
@@ -233,6 +374,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             supports_upload: true,
             compact_list: false,
             status_indicator: true,
+            container_kinds: &[],
         },
         ResourceProviderInfo {
             kind: RESOURCE_SETTING,
@@ -247,6 +389,7 @@ pub fn provider_registry() -> &'static [ResourceProviderInfo] {
             supports_upload: false,
             compact_list: true,
             status_indicator: false,
+            container_kinds: &[],
         },
     ];
     REG
@@ -278,6 +421,18 @@ pub fn providers_response_with_overrides(order_override: &HashMap<String, i32>) 
             supports_upload: p.supports_upload,
             compact_list: p.compact_list,
             status_indicator: p.status_indicator,
+            container_kinds: p
+                .container_kinds
+                .iter()
+                .map(|k| ContainerKindInfo {
+                    kind: k.kind.to_string(),
+                    label: k.label.to_string(),
+                    description: Some(k.description.to_string()),
+                    path_hint: Some(k.path_hint.to_string()),
+                    default_content: Some(k.default_content.to_string()),
+                    capabilities: *k.capabilities,
+                })
+                .collect(),
         })
         .collect();
 
@@ -286,6 +441,11 @@ pub fn providers_response_with_overrides(order_override: &HashMap<String, i32>) 
 }
 
 // ==================== 统一分发 ====================
+
+/// 取非空字符串字段（`None` 或空白视为缺省）
+fn non_empty(s: &Option<String>) -> Option<&str> {
+    s.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
 
 /// `resources/*` 统一分发入口。
 ///
@@ -297,6 +457,10 @@ pub fn providers_response_with_overrides(order_override: &HashMap<String, i32>) 
 ///     return resp;
 /// }
 /// ```
+///
+/// 各操作均支持**容器语义**：请求携带 `container`（容器条目 id，如 agent bundle id）
+/// 时走容器子资源分支（[`ResourceProvider`] 的 `*_container_item` 钩子），
+/// 响应形状与顶层语义一致——前端用同一套服务函数与类型访问两层结构。
 pub async fn dispatch<P: ResourceProvider + ?Sized>(
     provider: &P,
     path: &str,
@@ -317,12 +481,40 @@ async fn dispatch_list<P: ResourceProvider + ?Sized>(
     provider: &P,
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
+    // 容器语义（payload 可缺省，容忍空请求体）
+    let req = ctx
+        .payload::<serde_json::Value>()
+        .ok()
+        .and_then(|v| serde_json::from_value::<ResourcesListRequest>(v).ok())
+        .unwrap_or_default();
+    if let Some(container) = non_empty(&req.container) {
+        let sub_kind = req.sub_kind.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let mut items = provider
+            .list_container_items(ctx, sub_kind, container)
+            .await?;
+        fill_provider(provider, &mut items);
+        let kind = sub_kind.unwrap_or(provider.kind()).to_string();
+        // 能力开关取容器声明（未知子类型回退 provider 能力）
+        let capabilities = container_kinds_for(provider.kind())
+            .iter()
+            .find(|k| k.kind == kind)
+            .map(|k| *k.capabilities)
+            .unwrap_or_else(|| capabilities_for(provider.kind()));
+        return Ok(PluginPayload::new(&ResourcesListResponse {
+            kind,
+            capabilities,
+            items,
+            container: Some(container.to_string()),
+        }));
+    }
+
     let mut items = provider.list_items(ctx).await?;
     fill_provider(provider, &mut items);
     Ok(PluginPayload::new(&ResourcesListResponse {
         kind: provider.kind().to_string(),
         capabilities: capabilities_for(provider.kind()),
         items,
+        container: None,
     }))
 }
 
@@ -331,6 +523,12 @@ async fn dispatch_get<P: ResourceProvider + ?Sized>(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: ResourceGetRequest = ctx.payload()?;
+    // 容器语义：读取容器子资源详情（内容在 extra.content）
+    if let Some(container) = non_empty(&req.container) {
+        let mut item = provider.get_container_item(ctx, &req.id, container).await?;
+        fill_provider(provider, std::slice::from_mut(&mut item));
+        return Ok(PluginPayload::new(&item));
+    }
     let (Some(category), Some(manifest)) = (provider.category(), provider.manifest_file()) else {
         return Err(PluginError::NotImplemented);
     };
@@ -359,6 +557,28 @@ async fn dispatch_upload<P: ResourceProvider + ?Sized>(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: ResourceUploadRequest = ctx.payload()?;
+    // 容器语义：manifest.content 即文件内容，name 即容器内相对路径（创建/覆盖）
+    if let Some(container) = non_empty(&req.container) {
+        let path = req
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| PluginError::ValidationError("容器子资源路径不能为空".to_string()))?;
+        let content = req
+            .manifest
+            .as_ref()
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| {
+                PluginError::ValidationError("容器子资源写入需要 manifest.content（文件文本）".to_string())
+            })?;
+        let resp = provider
+            .put_container_item(ctx, path, content, container)
+            .await?;
+        return Ok(PluginPayload::new(&resp));
+    }
+
     let id = req
         .name
         .as_deref()
@@ -418,28 +638,14 @@ async fn dispatch_delete<P: ResourceProvider + ?Sized>(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: ResourceDeleteRequest = ctx.payload()?;
-    let Some(category) = provider.category() else {
-        return Err(PluginError::NotImplemented);
-    };
-
-    // 幂等删除：磁盘已无目录时仅告警，继续内存清理
-    {
-        let store = storage_service(ctx)?;
-        let es = store.entity_store();
-        match es.delete_entity(category, &req.id).await {
-            Ok(()) => {}
-            Err(EntityStoreError::NotFound { .. }) => {
-                crate::plugin_warn!(
-                    provider.kind(),
-                    "磁盘上已无资源 {} 目录，仅清理内存",
-                    req.id
-                );
-            }
-            Err(e) => {
-                return Err(PluginError::InternalError(format!("删除资源失败: {e}")));
-            }
-        }
+    // 容器语义：删除容器子资源（幂等语义由插件钩子决定）
+    if let Some(container) = non_empty(&req.container) {
+        let resp = provider.delete_container_item(ctx, &req.id, container).await?;
+        return Ok(PluginPayload::new(&resp));
     }
+
+    // 删除统一走可覆盖钩子（EntityStore 默认实现 / 非实体存储型 provider 重写）
+    provider.delete_item(ctx, &req.id).await?;
 
     provider.on_deleted(ctx, &req.id).await?;
 
@@ -843,6 +1049,125 @@ mod tests {
         assert!(matches!(
             dispatch(&p, RESOURCES_UPLOAD, &ctx).await,
             Some(Err(PluginError::ValidationError(_)))
+        ));
+    }
+
+    // ==================== 容器语义 dispatch 单测 ====================
+
+    /// 容器 provider：实现容器四钩子（模拟 agent bundle 内部资源）
+    struct ContainerProvider;
+
+    #[async_trait]
+    impl ResourceProvider for ContainerProvider {
+        fn kind(&self) -> &'static str {
+            RESOURCE_AGENT
+        }
+
+        async fn list_container_items(
+            &self,
+            _ctx: &Arc<dyn InvokeRequest>,
+            sub_kind: Option<&str>,
+            container: &str,
+        ) -> Result<Vec<ResourceSummary>, PluginError> {
+            Ok(["prompt", "skill"]
+                .into_iter()
+                .filter(|k| sub_kind.is_none_or(|sk| *k == sk))
+                .map(|k| ResourceSummary::new(k, format!("{container}/{k}.md"), k))
+                .collect())
+        }
+
+        async fn get_container_item(
+            &self,
+            _ctx: &Arc<dyn InvokeRequest>,
+            id: &str,
+            _container: &str,
+        ) -> Result<ResourceSummary, PluginError> {
+            let mut it = ResourceSummary::new("prompt", id, id);
+            it.extra = serde_json::json!({ "content": "hello" });
+            Ok(it)
+        }
+
+        async fn put_container_item(
+            &self,
+            _ctx: &Arc<dyn InvokeRequest>,
+            id: &str,
+            _content: &str,
+            _container: &str,
+        ) -> Result<ResourceUploadResponse, PluginError> {
+            Ok(ResourceUploadResponse {
+                kind: "prompt".into(),
+                id: id.to_string(),
+                created: true,
+            })
+        }
+
+        async fn delete_container_item(
+            &self,
+            _ctx: &Arc<dyn InvokeRequest>,
+            id: &str,
+            _container: &str,
+        ) -> Result<ResourceUploadResponse, PluginError> {
+            Ok(ResourceUploadResponse {
+                kind: "prompt".into(),
+                id: id.to_string(),
+                created: false,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_container_list_get_put_delete() {
+        let p = ContainerProvider;
+
+        // list（带 container）：响应回显 container，能力取容器声明（BUNDLE_FILE 可写）
+        let ctx = ctx_with_payload(serde_json::json!({"container": "com.acme"}));
+        let resp = dispatch(&p, RESOURCES_LIST, &ctx).await.unwrap().unwrap();
+        let data = resp.get::<ResourcesListResponse>().unwrap();
+        assert_eq!(data.container.as_deref(), Some("com.acme"));
+        assert_eq!(data.kind, RESOURCE_AGENT);
+        assert!(data.capabilities.mutable && !data.capabilities.zip_upload);
+        assert_eq!(data.items.len(), 2);
+        assert_eq!(data.items[0].kind, "prompt");
+
+        // list（带 container + sub_kind）：能力取子类型声明，kind 为子类型
+        let ctx = ctx_with_payload(serde_json::json!({"container": "com.acme", "sub_kind": "prompt"}));
+        let resp = dispatch(&p, RESOURCES_LIST, &ctx).await.unwrap().unwrap();
+        let data = resp.get::<ResourcesListResponse>().unwrap();
+        assert_eq!(data.kind, "prompt");
+        assert_eq!(data.items.len(), 1);
+
+        // get（带 container）：内容在 extra.content
+        let ctx = ctx_with_payload(serde_json::json!({"kind": "agent", "id": "prompts/a.md", "container": "com.acme"}));
+        let resp = dispatch(&p, RESOURCES_GET, &ctx).await.unwrap().unwrap();
+        let item = resp.get::<ResourceSummary>().unwrap();
+        assert_eq!(item.extra.get("content").and_then(|c| c.as_str()), Some("hello"));
+        assert_eq!(item.provider.as_deref(), Some(RESOURCE_AGENT));
+
+        // put（带 container）：name 为路径，manifest.content 为内容
+        let ctx = ctx_with_payload(serde_json::json!({
+            "kind": "agent", "name": "prompts/b.md",
+            "manifest": {"content": "x"}, "container": "com.acme"
+        }));
+        let resp = dispatch(&p, RESOURCES_UPLOAD, &ctx).await.unwrap().unwrap();
+        let data = resp.get::<ResourceUploadResponse>().unwrap();
+        assert_eq!(data.id, "prompts/b.md");
+        assert!(data.created);
+
+        // delete（带 container）
+        let ctx = ctx_with_payload(serde_json::json!({"kind": "agent", "id": "prompts/a.md", "container": "com.acme"}));
+        let resp = dispatch(&p, RESOURCES_DELETE, &ctx).await.unwrap().unwrap();
+        let data = resp.get::<ResourceUploadResponse>().unwrap();
+        assert_eq!(data.id, "prompts/a.md");
+    }
+
+    #[tokio::test]
+    async fn dispatch_container_without_hook_is_not_implemented() {
+        // 顶层 provider 未实现容器钩子：带 container 的请求应报 NotImplemented（而非静默走顶层语义）
+        let p = DummyProvider { items: vec![], status: None };
+        let ctx = ctx_with_payload(serde_json::json!({"kind": "session", "id": "s1", "container": "c1"}));
+        assert!(matches!(
+            dispatch(&p, RESOURCES_GET, &ctx).await,
+            Some(Err(PluginError::NotImplemented))
         ));
     }
 }

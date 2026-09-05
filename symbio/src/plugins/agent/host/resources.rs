@@ -10,11 +10,20 @@
 //!   响应形状与统一协议保持一致（`ResourceSummary` / `ResourceUploadResponse`）。
 
 use super::plugin::AgentPlugin;
-use super::store::{BundleScope, BundleStore};
-use crate::symbio_core::resources::{ResourceProvider, ResourceSummary};
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginError};
+use super::store::{classify_resource_path, BundleScope, BundleStore};
+use crate::symbio_core::resources::{
+    ResourceProvider, ResourceSummary, ResourceUploadResponse,
+};
+use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginError, WORKDIR};
 use async_trait::async_trait;
 use std::sync::Arc;
+
+impl AgentPlugin {
+    /// 依请求上下文构造 BundleStore（每次请求独立，与 route 入口一致）
+    fn store_of(ctx: &Arc<dyn InvokeRequest>) -> BundleStore {
+        BundleStore::new(ctx.get(WORKDIR).as_deref())
+    }
+}
 
 #[async_trait]
 impl ResourceProvider for AgentPlugin {
@@ -53,7 +62,10 @@ impl ResourceProvider for AgentPlugin {
                     it.summary = Some(r.manifest.description.clone());
                 }
                 // 类型特有扩展：版本 / 规格 / provider 数 / 来源层级（前端按需展示）
+                // config_type = "bundle"：前端项级 editor 分发键（agent:bundle →
+                // Agent 内部资源管理视图；kind 级仍无 editor，zip 新建流程不受影响）
                 it.extra = serde_json::json!({
+                    "config_type": "bundle",
                     "version": r.manifest.version,
                     "spec": r.manifest.spec,
                     "requires_spec": r.manifest.requires.spec,
@@ -65,5 +77,99 @@ impl ResourceProvider for AgentPlugin {
                 it
             })
             .collect())
+    }
+
+    // ==================== 容器子资源（统一协议 container 语义） ====================
+    //
+    // bundle 条目即容器：内部 prompts / skills / mcps 经同一套 resources/* 协议
+    // 访问（payload.container = bundle id），复用 BundleStore 的沙箱化方法
+    // （路径白名单 classify_resource_path + absolutize 双重闸门）。
+
+    async fn list_container_items(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        sub_kind: Option<&str>,
+        container: &str,
+    ) -> Result<Vec<ResourceSummary>, PluginError> {
+        let store = Self::store_of(ctx);
+        let entries = store
+            .list_resources(container)
+            .map_err(PluginError::ValidationError)?;
+        Ok(entries
+            .into_iter()
+            .filter(|e| sub_kind.is_none_or(|k| e.kind == k))
+            .map(|e| {
+                let mut it = ResourceSummary::new(&e.kind, e.path.clone(), e.name.clone());
+                it.status = "active".to_string();
+                it.extra = serde_json::json!({
+                    "container": container,
+                    "priority": e.priority,
+                    "size": e.size,
+                });
+                it
+            })
+            .collect())
+    }
+
+    async fn get_container_item(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+        container: &str,
+    ) -> Result<ResourceSummary, PluginError> {
+        let store = Self::store_of(ctx);
+        let (kind, name) = classify_resource_path(id).map_err(PluginError::ValidationError)?;
+        let content = store
+            .read_resource(container, id)
+            .map_err(PluginError::ValidationError)?;
+        let mut it = ResourceSummary::new(kind, id, name);
+        it.status = "active".to_string();
+        it.extra = serde_json::json!({
+            "container": container,
+            "content": content,
+        });
+        Ok(it)
+    }
+
+    async fn put_container_item(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+        content: &str,
+        container: &str,
+    ) -> Result<ResourceUploadResponse, PluginError> {
+        let store = Self::store_of(ctx);
+        let (kind, _) = classify_resource_path(id).map_err(PluginError::ValidationError)?;
+        let existed = store
+            .list_resources(container)
+            .map_err(PluginError::ValidationError)?
+            .iter()
+            .any(|e| e.path == id);
+        store
+            .write_resource(container, id, content)
+            .map_err(PluginError::ValidationError)?;
+        Ok(ResourceUploadResponse {
+            kind: kind.to_string(),
+            id: id.to_string(),
+            created: !existed,
+        })
+    }
+
+    async fn delete_container_item(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+        container: &str,
+    ) -> Result<ResourceUploadResponse, PluginError> {
+        let store = Self::store_of(ctx);
+        let (kind, _) = classify_resource_path(id).map_err(PluginError::ValidationError)?;
+        store
+            .delete_resource(container, id)
+            .map_err(PluginError::ValidationError)?;
+        Ok(ResourceUploadResponse {
+            kind: kind.to_string(),
+            id: id.to_string(),
+            created: false,
+        })
     }
 }

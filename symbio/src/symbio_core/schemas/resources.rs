@@ -146,6 +146,17 @@ impl ResourceCapabilities {
         test_connection: false,
         read_only: false,
     };
+
+    /// 容器子资源（文件级）：可写可删，无 zip / 表单 / 实时状态 / 连接测试。
+    /// agent bundle 内部的 prompt / skill / mcp 等单文件资源取此形态。
+    pub const BUNDLE_FILE: Self = Self {
+        zip_upload: false,
+        independent_form: false,
+        realtime_status: false,
+        mutable: true,
+        test_connection: false,
+        read_only: false,
+    };
 }
 
 /// 默认能力表：`kind -> capabilities`
@@ -169,6 +180,30 @@ pub fn capabilities_for(kind: &str) -> ResourceCapabilities {
 }
 
 // ==================== provider 注册信息 ====================
+
+/// 容器子资源类型声明 —— 该 provider 的资源条目本身是「容器」，内部托管这些子类型。
+///
+/// 如 agent（OAB bundle）内部托管 prompt / skill / mcp 三类文件级资源。
+/// 前端据此生成容器资源页（如 Agent 内部资源管理页）的左侧类别导航与新建表单——
+/// 类别的存在性、顺序、标签、路径模板、新建模板均由后端控制，前端零硬编码。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerKindInfo {
+    /// 子资源类型（如 `prompt` / `skill` / `mcp`）
+    pub kind: String,
+    /// 展示标签
+    pub label: String,
+    /// 语义说明（前端新建/编辑表单的提示文本）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// 新建路径模板（`<name>` 占位符），如 `prompts/<name>.md`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_hint: Option<String>,
+    /// 新建内容模板（前端编辑器初始内容）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_content: Option<String>,
+    /// 子资源能力开关（容器页据此驱动 UI）
+    pub capabilities: ResourceCapabilities,
+}
 
 /// 资源类型（provider）注册信息 —— 宿主级单一真相源
 ///
@@ -197,6 +232,10 @@ pub struct ProviderInfo {
     /// 前端据此隐藏状态徽标——列表展示形态由后端统一掌控。
     #[serde(default = "default_true")]
     pub status_indicator: bool,
+    /// 容器声明：条目内部托管的子资源类型（空 = 条目不是容器）。
+    /// 前端容器资源页的左侧类别导航由此驱动（如 Agent 内部的 prompt/skill/mcp）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub container_kinds: Vec<ContainerKindInfo>,
 }
 
 /// `resources/providers` 响应
@@ -262,33 +301,59 @@ impl ResourceSummary {
 // ==================== 请求 / 响应 ====================
 
 /// `resources/list` 响应：能力开关 + 资源概要列表
+///
+/// 容器语义（请求携带 `container`）时，`items` 为容器条目内部的子资源
+/// （条目 `kind` 字段区分子类型），`container` 回显容器 id。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourcesListResponse {
     pub kind: String,
     pub capabilities: ResourceCapabilities,
     pub items: Vec<ResourceSummary>,
+    /// 容器作用域（容器语义时下发；顶层列表为 None）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+}
+
+/// `resources/list` 请求（可选容器作用域）
+///
+/// 不带 `container`：列出 provider 顶层资源（现有语义，向后兼容）；
+/// 带 `container`：列出容器条目内部的子资源（如某 agent bundle 的 prompts/skills/mcps）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ResourcesListRequest {
+    /// 容器条目 id（如 agent bundle id）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+    /// 子资源类型过滤（缺省返回全部子类型，条目自带 kind 供前端分类）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_kind: Option<String>,
 }
 
 /// `resources/upload` 请求
 ///
 /// 上传方式二选一：
 /// - `zip_b64`：zip 字节的 base64（mcp / skill / agent）；`name` 即目标目录名
-/// - `manifest`：JSON 表单体（model / session）
+/// - `manifest`：JSON 表单体（model / session；容器语义时取 `manifest.content`）
+///
+/// 带 `container` 时为容器语义：`name` 即容器内相对路径，`manifest.content`
+/// 即文件内容（创建/覆盖）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceUploadRequest {
     pub kind: String,
-    /// 目标资源名 / 目录名。zip 上传必填。
+    /// 目标资源名 / 目录名。zip 上传必填；容器语义下为容器内相对路径。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// zip 字节（base64）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zip_b64: Option<String>,
-    /// 表单体（JSON），供 independent_form 资源使用
+    /// 表单体（JSON），供 independent_form 资源使用；容器语义下取 `content` 字段
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manifest: Option<serde_json::Value>,
     /// 已存在时是否覆盖（默认 true）
     #[serde(default = "default_replace")]
     pub replace: bool,
+    /// 容器作用域：资源位于该容器条目内部（如 agent bundle id）。缺省 = 顶层资源
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
 }
 
 const fn default_replace() -> bool {
@@ -304,17 +369,26 @@ pub struct ResourceUploadResponse {
 }
 
 /// `resources/get` 请求
+///
+/// 带 `container` 时为容器语义：读取容器条目内部的子资源，`id` 为容器内相对路径，
+/// 内容随 `ResourceSummary.extra.content` 返回。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceGetRequest {
     pub kind: String,
     pub id: String,
+    /// 容器作用域（如 agent bundle id）。缺省 = 顶层资源
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
 }
 
-/// `resources/delete` 请求
+/// `resources/delete` 请求（带 `container` 时为容器语义，`id` 为容器内相对路径）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceDeleteRequest {
     pub kind: String,
     pub id: String,
+    /// 容器作用域。缺省 = 顶层资源
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
 }
 
 /// `resources/status` 请求

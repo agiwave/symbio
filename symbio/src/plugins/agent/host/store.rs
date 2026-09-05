@@ -67,6 +67,117 @@ pub struct ImportResult {
     pub replaced: bool,
 }
 
+/// bundle 内部资源条目（prompts / skills / mcps 的结构化清单项）。
+///
+/// `path` 是相对 bundle 目录的路径，也是统一资源协议容器语义
+/// （`resources/*` 携带 `container`）下的资源操作键 `id`；
+/// 命名与 [`assemble_bundle`] 的扫描规则严格一致（装配结果可直接复现）。
+#[derive(Debug, Clone, Serialize)]
+pub struct BundleResourceEntry {
+    /// 资源类别：`prompt` | `skill` | `mcp`
+    pub kind: String,
+    /// 条目名（prompt=文件 stem；skill=目录名；mcp=文件名或目录名，与装配 source 命名一致）
+    pub name: String,
+    /// 相对 bundle 目录的路径（如 `prompts/persona.md`）
+    pub path: String,
+    /// 提示词片段优先级（prompt 缺省 10 / skill 缺省 50；mcp 为 None）
+    pub priority: Option<i64>,
+    /// 文件字节数
+    pub size: u64,
+}
+
+/// 校验并分类 bundle 内部资源的相对路径。
+///
+/// 规则与 [`crate::plugins::agent::core::spec::assembly`] 的扫描严格对齐：
+/// - `prompts/<name>.md`（或 `.markdown`，单层，装配只扫直接子文件）
+/// - `skills/<name>/SKILL.md`（目录形态）
+/// - `mcps/<name>.{yaml,yml,json}`（文件形态）或
+///   `mcps/<name>/{config,server,mcp}.{yaml,yml,json}`（目录形态）
+///
+/// 拒绝绝对路径、`..` 段与一切不合规布局（路径沙箱第一道闸）。
+/// 返回 `(kind, name)`。
+pub fn classify_resource_path(rel: &str) -> Result<(&'static str, String), String> {
+    let rel = rel.trim().replace('\\', "/");
+    let rel = rel.trim_start_matches("./");
+    if rel.is_empty() || rel.starts_with('/') {
+        return Err(format!("非法资源路径 `{rel}`"));
+    }
+    if rel.split('/').any(|seg| seg == ".." || seg.is_empty()) {
+        return Err(format!("资源路径 `{rel}` 含非法段（`..` / 空段）"));
+    }
+    if let Some(rest) = rel.strip_prefix("prompts/") {
+        if rest.contains('/') {
+            return Err("prompt 资源必须位于 prompts/ 直接子层（prompts/<name>.md）".into());
+        }
+        let stem = rest
+            .strip_suffix(".md")
+            .or_else(|| rest.strip_suffix(".markdown"))
+            .ok_or_else(|| format!("prompt 资源必须是 Markdown（`{rest}`）"))?;
+        if stem.is_empty() {
+            return Err("prompt 资源名不能为空".into());
+        }
+        return Ok(("prompt", stem.to_string()));
+    }
+    if let Some(rest) = rel.strip_prefix("skills/") {
+        let mut parts = rest.splitn(2, '/');
+        let (Some(dir), Some(file)) = (parts.next(), parts.next()) else {
+            return Err("skill 资源必须是目录形态（skills/<name>/SKILL.md）".into());
+        };
+        if dir.is_empty() || dir.contains('/') {
+            return Err(format!("非法 skill 目录名 `{dir}`"));
+        }
+        if file != "SKILL.md" {
+            return Err(format!("skill 资源文件必须是 SKILL.md（得到 `{file}`）"));
+        }
+        return Ok(("skill", dir.to_string()));
+    }
+    if let Some(rest) = rel.strip_prefix("mcps/") {
+        if let Some((dir, file)) = rest.split_once('/') {
+            // 目录形态：mcps/<name>/{config,server,mcp}.{yaml,yml,json}
+            let base = file.rsplit('.').next().unwrap_or("");
+            if !matches!(base, "yaml" | "yml" | "json") {
+                return Err(format!("mcp 目录形态配置必须是 yaml/yml/json（`{file}`）"));
+            }
+            let stem = file
+                .rsplit_once('.')
+                .map(|(s, _)| s)
+                .unwrap_or(file);
+            if !matches!(stem, "config" | "server" | "mcp") {
+                return Err(format!(
+                    "mcp 目录形态配置文件必须是 config/server/mcp.*（`{file}`）"
+                ));
+            }
+            if dir.is_empty() {
+                return Err("mcp 目录名不能为空".into());
+            }
+            return Ok(("mcp", dir.to_string()));
+        }
+        // 文件形态：mcps/<name>.{yaml,yml,json}
+        let ext = rest.rsplit('.').next().unwrap_or("");
+        if !matches!(ext, "yaml" | "yml" | "json") {
+            return Err(format!("mcp 文件形态必须是 yaml/yml/json（`{rest}`）"));
+        }
+        // 命名与装配一致：文件形态 name = 文件全名（含扩展名）
+        return Ok(("mcp", rest.to_string()));
+    }
+    Err(format!(
+        "资源路径必须以 prompts/ skills/ mcps/ 开头（得到 `{rel}`）"
+    ))
+}
+
+/// 解析 Markdown 文件的 frontmatter priority（无 / 非数值 → None）。
+fn frontmatter_priority(content: &str) -> Option<i64> {
+    let (fm, _) = crate::plugins::agent::core::spec::assembly::split_frontmatter(content);
+    fm.get("priority").and_then(|v| v.as_i64())
+}
+
+/// 单文件的 (size, priority) 元数据（prompt / skill 共用）。
+fn file_meta(path: &Path) -> (u64, Option<i64>) {
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let priority = std::fs::read_to_string(path).ok().and_then(|c| frontmatter_priority(&c));
+    (size, priority)
+}
+
 /// Bundle Store。
 pub struct BundleStore {
     /// 工作区级根（None = 无工作区上下文）
@@ -271,6 +382,173 @@ impl BundleStore {
         Ok(record.dir.display().to_string())
     }
 
+    // ==================== bundle 内部资源（prompts / skills / mcps） ====================
+    //
+    // 单文件级读写，供宿主 UI 在 Agent 详情页内直接管理 bundle 能力来源。
+    // 安全模型：rel_path 必须先过 [`classify_resource_path`]（白名单布局 +
+    // 拒绝 `..`），再经 [`absolutize`] 逐段构建（免疫穿越），双重闸门。
+
+    /// 列出 bundle 内部资源（结构化清单，扫描规则与装配严格一致）。
+    pub fn list_resources(&self, bundle_id: &str) -> Result<Vec<BundleResourceEntry>, String> {
+        let record = self
+            .get(bundle_id)
+            .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
+        let mut out: Vec<BundleResourceEntry> = Vec::new();
+
+        // prompts/<name>.md（直接子文件）
+        if let Ok(entries) = std::fs::read_dir(record.dir.join("prompts")) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if !p.is_file() {
+                    continue;
+                }
+                let fname = e.file_name().to_string_lossy().to_string();
+                let Some(stem) = fname
+                    .strip_suffix(".md")
+                    .or_else(|| fname.strip_suffix(".markdown"))
+                else {
+                    continue; // 非 Markdown 忽略（与装配一致）
+                };
+                let (size, priority) = file_meta(&p);
+                out.push(BundleResourceEntry {
+                    kind: "prompt".into(),
+                    name: stem.to_string(),
+                    path: format!("prompts/{fname}"),
+                    priority,
+                    size,
+                });
+            }
+        }
+
+        // skills/<name>/SKILL.md
+        if let Ok(entries) = std::fs::read_dir(record.dir.join("skills")) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if !p.is_dir() {
+                    continue;
+                }
+                let name = e.file_name().to_string_lossy().to_string();
+                let skill = p.join("SKILL.md");
+                if !skill.is_file() {
+                    continue;
+                }
+                let (size, priority) = file_meta(&skill);
+                out.push(BundleResourceEntry {
+                    kind: "skill".into(),
+                    name,
+                    path: format!("skills/{}/SKILL.md", e.file_name().to_string_lossy()),
+                    priority,
+                    size,
+                });
+            }
+        }
+
+        // mcps/（文件形态 + 目录形态）
+        if let Ok(entries) = std::fs::read_dir(record.dir.join("mcps")) {
+            for e in entries.flatten() {
+                let p = e.path();
+                let name = e.file_name().to_string_lossy().to_string();
+                if p.is_file() {
+                    let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("");
+                    if !matches!(ext, "yaml" | "yml" | "json") {
+                        continue;
+                    }
+                    let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                    out.push(BundleResourceEntry {
+                        kind: "mcp".into(),
+                        name: name.clone(),
+                        path: format!("mcps/{name}"),
+                        priority: None,
+                        size,
+                    });
+                } else if p.is_dir() {
+                    let candidates = [
+                        "config.yaml", "config.yml", "server.yaml", "server.yml", "mcp.yaml",
+                        "mcp.yml", "config.json", "server.json", "mcp.json",
+                    ];
+                    let Some(cfg) = candidates.iter().map(|c| p.join(c)).find(|c| c.is_file())
+                    else {
+                        continue; // 无配置的目录形态：与装配一样记不了条目，跳过
+                    };
+                    let cfg_name = cfg.file_name().unwrap_or_default().to_string_lossy();
+                    let size = std::fs::metadata(&cfg).map(|m| m.len()).unwrap_or(0);
+                    out.push(BundleResourceEntry {
+                        kind: "mcp".into(),
+                        name,
+                        path: format!("mcps/{}/{}", e.file_name().to_string_lossy(), cfg_name),
+                        priority: None,
+                        size,
+                    });
+                }
+            }
+        }
+
+        out.sort_by(|a, b| (&a.kind, &a.path).cmp(&(&b.kind, &b.path)));
+        Ok(out)
+    }
+
+    /// 读取 bundle 内部资源文件内容。
+    pub fn read_resource(&self, bundle_id: &str, rel_path: &str) -> Result<String, String> {
+        let record = self
+            .get(bundle_id)
+            .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
+        classify_resource_path(rel_path)?;
+        let full = absolutize(&record.dir, rel_path);
+        debug_assert!(full.starts_with(&record.dir));
+        std::fs::read_to_string(&full)
+            .map_err(|e| format!("读取资源失败（{}）: {e}", full.display()))
+    }
+
+    /// 写入（创建/覆盖）bundle 内部资源文件；父目录自动创建。
+    pub fn write_resource(
+        &self,
+        bundle_id: &str,
+        rel_path: &str,
+        content: &str,
+    ) -> Result<(), String> {
+        let record = self
+            .get(bundle_id)
+            .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
+        classify_resource_path(rel_path)?;
+        let full = absolutize(&record.dir, rel_path);
+        debug_assert!(full.starts_with(&record.dir));
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建目录失败（{}）: {e}", parent.display()))?;
+        }
+        std::fs::write(&full, content)
+            .map_err(|e| format!("写入资源失败（{}）: {e}", full.display()))
+    }
+
+    /// 删除 bundle 内部资源文件；skill / mcp 目录形态下若父目录因此变空则一并清理。
+    pub fn delete_resource(&self, bundle_id: &str, rel_path: &str) -> Result<(), String> {
+        let record = self
+            .get(bundle_id)
+            .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
+        let (kind, _) = classify_resource_path(rel_path)?;
+        let full = absolutize(&record.dir, rel_path);
+        debug_assert!(full.starts_with(&record.dir));
+        if !full.is_file() {
+            return Err(format!("资源不存在（{}）", full.display()));
+        }
+        std::fs::remove_file(&full)
+            .map_err(|e| format!("删除资源失败（{}）: {e}", full.display()))?;
+        // 目录形态（skills/<name>/、mcps/<name>/）清空后顺手移除空目录
+        if kind != "prompt" {
+            if let Some(parent) = full.parent() {
+                if parent != record.dir
+                    && parent.starts_with(&record.dir)
+                    && std::fs::read_dir(parent)
+                        .map(|mut d| d.next().is_none())
+                        .unwrap_or(false)
+                {
+                    let _ = std::fs::remove_dir(parent);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// zip entry 名 → bundle 内相对路径。
     ///
     /// 支持两种打包布局：根目录直打包（`manifest.yaml`、`providers/...`）与
@@ -400,5 +678,59 @@ mod tests {
         // `..` 段被丢弃，路径仍锁定在 base 内
         assert!(p.starts_with(base));
         assert!(p.to_string_lossy().contains("etc"));
+    }
+
+    #[test]
+    fn classify_accepts_convention_layouts() {
+        assert_eq!(
+            classify_resource_path("prompts/persona.md"),
+            Ok(("prompt", "persona".into()))
+        );
+        assert_eq!(
+            classify_resource_path("prompts/a.markdown"),
+            Ok(("prompt", "a".into()))
+        );
+        assert_eq!(
+            classify_resource_path("skills/playbook/SKILL.md"),
+            Ok(("skill", "playbook".into()))
+        );
+        assert_eq!(
+            classify_resource_path("mcps/search.yaml"),
+            Ok(("mcp", "search.yaml".into()))
+        );
+        assert_eq!(
+            classify_resource_path("mcps/search/config.yaml"),
+            Ok(("mcp", "search".into()))
+        );
+        assert_eq!(
+            classify_resource_path("mcps/search/server.json"),
+            Ok(("mcp", "search".into()))
+        );
+        // 反斜杠 + ./ 前缀归一化
+        assert_eq!(
+            classify_resource_path("./prompts\\x.md"),
+            Ok(("prompt", "x".into()))
+        );
+    }
+
+    #[test]
+    fn classify_rejects_escapes_and_misfits() {
+        for bad in [
+            "manifest.yaml",
+            "providers/x.yaml",
+            "../etc/passwd",
+            "/abs/path.md",
+            "prompts/sub/deep.md",
+            "prompts/x.txt",
+            "skills/x/other.md",
+            "skills/x",
+            "mcps/x.txt",
+            "mcps/x/other.yaml",
+            "mcps/x/deep/config.yaml",
+            "prompts/",
+            "",
+        ] {
+            assert!(classify_resource_path(bad).is_err(), "should reject `{bad}`");
+        }
     }
 }

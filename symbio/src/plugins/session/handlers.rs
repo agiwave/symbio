@@ -82,9 +82,17 @@ impl SessionPlugin {
 
     pub async fn invoke_clear(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
         let req: session_clear::Request = ctx.payload()?;
+        self.delete_session_internal(&req.session_id).await?;
+        Ok(serde_json::to_value("会话已删除".to_string())?)
+    }
 
+    /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
+    ///
+    /// 两个消费方：`invoke_clear`（旧 session/clear 路由）与统一资源协议的
+    /// `ResourceProvider::delete_item`（resources/delete，前端机制列表删除）。
+    pub(crate) async fn delete_session_internal(&self, session_id: &str) -> Result<(), PluginError> {
         // 删除前先 abort 该会话的活跃任务
-        let state = self.active_mgr.get_or_create(&req.session_id).await;
+        let state = self.active_mgr.get_or_create(session_id).await;
         {
             let mut inner = state.inner.write().await;
             if let Some(tx) = inner.ai_control_tx.take() {
@@ -100,14 +108,14 @@ impl SessionPlugin {
             .sessions
             .write()
             .await
-            .remove(&req.session_id);
+            .remove(session_id);
 
         self.get_store()
             .await?
-            .delete_session(&req.session_id)
+            .delete_session(session_id)
             .await?;
 
-        Ok(serde_json::to_value("会话已删除".to_string())?)
+        Ok(())
     }
 
     /// 清空会话消息（保留 metadata / 工作目录 / 标题等）。

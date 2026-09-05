@@ -2,8 +2,8 @@
  * 运行时资源 provider store（模块级单例）
  *
  * 前端在一处拉取后端 `resources/providers` 注册表，供多处共享：MainLayout
- * 据此动态生成左侧"资源"导航，ResourceManagerView 据此得到统一资源页的类型集合。
- * 与 useToast 一样是模块级单例，无需 Pinia。
+ * 据此动态生成左侧"资源"导航（useNavRailItems），WorkbenchView 据此得到统一
+ * 资源页的类型集合与容器子类别。与 useToast 一样是模块级单例，无需 Pinia。
  *
  * 分层原则：
  * - 类型的**存在/能力/前缀/顺序/标签**来自后端 ProviderInfo（权威）
@@ -11,9 +11,12 @@
  */
 
 import { computed, shallowRef } from 'vue'
+import { useRoute } from 'vue-router'
 import { fetchProviders } from '@/services/resources'
 import type { ProviderInfo, ResourceCapabilities } from '@/schemas/resources'
 import { RESOURCE_LABELS } from '@/schemas/resources'
+import { getResourceIcon } from '@/registry/resourceTypes'
+import type { NavRailItem } from '@/components/common/NavRail.vue'
 import { logger } from '@/utils/logger'
 
 const providers = shallowRef<ProviderInfo[]>([])
@@ -127,4 +130,48 @@ export function resolveActiveTypes(
     }
   }
   return out.length ? out.sort((a, b) => a.order - b.order) : defaultTypes
+}
+
+// ============ 应用外壳导航（机制内唯一实现，MainLayout 消费） ============
+
+/**
+ * 机制内路由约定：kind → 顶层导航路由目标。
+ *
+ * 会话（session）与设置（setting）走专用入口；其余 kind 一律进统一资源页
+ * `/resources/{kind}`。新增资源类型由后端注册表自动生成导航，本函数无需改动。
+ */
+export function navTargetOf(kind: string): string {
+  switch (kind) {
+    case 'session':
+      return '/'
+    case 'setting':
+      return '/settings'
+    default:
+      return `/resources/${kind}`
+  }
+}
+
+/**
+ * 应用外壳侧边栏：providers 注册表 → NavRail 项（MainLayout 消费）。
+ * 与 WorkbenchView 的类别侧边栏同源同构——整个 App 的导航/类别都由后端
+ * 注册表驱动，图标复用 resourceTypes 注册表，前端零硬编码类型清单。
+ */
+export function useNavRailItems() {
+  const route = useRoute()
+  const { providers } = useResourceProviders()
+
+  const navItems = computed<NavRailItem[]>(() =>
+    providers.value.map((p) => ({
+      key: p.kind,
+      label: p.label,
+      icon: getResourceIcon(p.kind) ?? undefined,
+      active: route.path === navTargetOf(p.kind),
+    }))
+  )
+
+  function onNavSelect(kind: string) {
+    return navTargetOf(kind)
+  }
+
+  return { navItems, navTargetOf, onNavSelect }
 }

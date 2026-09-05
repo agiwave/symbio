@@ -1,5 +1,5 @@
 <!--
-  LocalConfigForm — 本地工具设置 editor（setting:local）
+  Local — 本地工具设置 editor（setting:local）
 
   数据通道：local/config get/set（editor 自持保存，不走统一资源 upload）。
 -->
@@ -73,7 +73,7 @@ onMounted(async () => {
     const cfg = await getLocalConfig()
     if (cfg) Object.assign(config, cfg)
   } catch (err) {
-    logger.error('LocalConfigForm', '加载本地工具配置失败', err)
+    logger.error('Local', '加载本地工具配置失败', err)
     toast.showToast('error', '加载本地工具配置失败')
   }
 })

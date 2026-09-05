@@ -1,13 +1,13 @@
 /**
- * useResourcePage / useResourceProviders 核心逻辑单测（node 环境）
+ * useWorkbenchView / useResourceProviders 核心逻辑单测（node 环境）
  *
  * 覆盖（纯函数，无 Vue 实例）：
- * - resourcePage 混合平排展平 + name 排序
+ * - buildMixedItems：混合平排展平（尊重服务器返回顺序）
  * - resolveActiveTypes：all/单类型/逗号/未知过滤/supports_upload 过滤
  * - isManagerCreatable：supports_upload 与 mutable 解耦
  */
 import { describe, expect, it } from 'vitest'
-import { buildMixedItems, isManagerCreatable } from '../useResourcePage'
+import { buildMixedItems, isManagerCreatable } from '../useWorkbenchView'
 import { resolveActiveTypes } from '../useResourceProviders'
 import type { ProviderInfo, ResourceSummary } from '@/schemas/resources'
 

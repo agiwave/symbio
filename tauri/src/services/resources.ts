@@ -11,6 +11,7 @@ import {
   type ProvidersResponse,
   type ResourceCapabilities,
   type ResourceStatusResponse,
+  type ResourceSummary,
   type ResourcesListResponse,
   type ResourceUploadResponse,
 } from '../schemas/resources'
@@ -61,14 +62,50 @@ function resourcesOp<T>(type: string, op: string, payload?: unknown): Promise<T>
   return callPlugin<T>(`${opPrefix(type)}/resources/${op}`, payload)
 }
 
-/** 列出某类型全部资源（含能力开关），失败时返回空态 + 只读兜底能力 */
-export async function listResources(type: string): Promise<ResourcesListResponse> {
+/**
+ * 列出某类型全部资源。
+ *
+ * `opts.container` 存在时为**容器语义**：列出该容器条目内部的子资源
+ * （如某 agent bundle 的 prompts/skills/mcps），items 的 kind 字段区分子类型。
+ * 失败时返回空态 + 只读兜底能力。
+ */
+export async function listResources(
+  type: string,
+  opts?: { container?: string; subKind?: string }
+): Promise<ResourcesListResponse> {
   try {
-    const resp = await resourcesOp<ResourcesListResponse>(type, 'list', {})
+    const resp = await resourcesOp<ResourcesListResponse>(type, 'list', {
+      container: opts?.container || undefined,
+      sub_kind: opts?.subKind || undefined,
+    })
     return resp ?? { kind: type, capabilities: UNKNOWN_CAPABILITIES, items: [] }
   } catch (err) {
     logger.error('resources-service', `listResources(${type}) failed:`, err)
     return { kind: type, capabilities: UNKNOWN_CAPABILITIES, items: [] }
+  }
+}
+
+/**
+ * 读取单个资源详情。
+ *
+ * `container` 存在时为容器语义：读取容器条目内部的子资源（id 为容器内相对
+ * 路径），文件内容随 `ResourceSummary.extra.content` 返回。失败返回 null。
+ */
+export async function getResource(
+  type: string,
+  id: string,
+  container?: string
+): Promise<ResourceSummary | null> {
+  try {
+    const resp = await resourcesOp<ResourceSummary>(type, 'get', {
+      kind: type,
+      id,
+      container: container || undefined,
+    })
+    return resp ?? null
+  } catch (err) {
+    logger.error('resources-service', `getResource(${type}/${id}) failed:`, err)
+    return null
   }
 }
 
@@ -103,9 +140,17 @@ export async function uploadResourceForm(
   return resp
 }
 
-/** 删除资源 */
-export async function deleteResource(type: string, id: string): Promise<void> {
-  await resourcesOp(type, 'delete', { kind: type, id })
+/** 删除资源（`container` 存在时为容器语义：id 为容器内相对路径） */
+export async function deleteResource(
+  type: string,
+  id: string,
+  container?: string
+): Promise<void> {
+  await resourcesOp(type, 'delete', {
+    kind: type,
+    id,
+    container: container || undefined,
+  })
 }
 
 /** 查询单个资源实时/连接状态（capabilities.realtime_status 为 true 时使用） */
@@ -131,4 +176,24 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
   }
   return btoa(binary)
+}
+
+/**
+ * 写入（创建/覆盖）容器子资源 —— 统一协议容器语义。
+ *
+ * `path` 为容器内相对路径（如 `prompts/persona.md`），内容经 `manifest.content`
+ * 下发；后端做路径白名单校验。响应与顶层 upload 一致（ResourceUploadResponse）。
+ */
+export async function putContainerResource(
+  type: string,
+  path: string,
+  content: string,
+  container: string
+): Promise<ResourceUploadResponse> {
+  return resourcesOp<ResourceUploadResponse>(type, 'upload', {
+    kind: type,
+    name: path,
+    manifest: { content },
+    container,
+  })
 }

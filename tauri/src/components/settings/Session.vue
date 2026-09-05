@@ -1,5 +1,5 @@
 <!--
-  SessionConfigForm — 会话设置 editor（setting:session）
+  Session — 会话设置 editor（setting:session）
 
   数据通道：session/config get/set（editor 自持保存，不走统一资源 upload）。
 -->
@@ -80,7 +80,7 @@ onMounted(async () => {
     const cfg = await getSessionConfig()
     if (cfg) Object.assign(config, cfg)
   } catch (err) {
-    logger.error('SessionConfigForm', '加载会话配置失败', err)
+    logger.error('Session', '加载会话配置失败', err)
     toast.showToast('error', '加载会话配置失败')
   }
 })

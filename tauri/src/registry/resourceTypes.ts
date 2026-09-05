@@ -24,12 +24,14 @@
  */
 
 import { defineComponent, h, markRaw, shallowReactive, type Component } from 'vue'
-import ModelProviderForm from '@/components/resources/ModelProviderForm.vue'
-import AppearanceSettingsForm from '@/components/settings/AppearanceSettingsForm.vue'
-import SessionConfigForm from '@/components/settings/SessionConfigForm.vue'
-import LocalConfigForm from '@/components/settings/LocalConfigForm.vue'
-import WebConfigForm from '@/components/settings/WebConfigForm.vue'
-import AboutPanel from '@/components/settings/AboutPanel.vue'
+import Model from '@/components/resources/Model.vue'
+import Agent from '@/components/resources/Agent.vue'
+import Appearance from '@/components/settings/Appearance.vue'
+import SessionSettings from '@/components/settings/Session.vue'
+import Local from '@/components/settings/Local.vue'
+import Web from '@/components/settings/Web.vue'
+import Session from '@/components/resources/Session.vue'
+import About from '@/components/settings/About.vue'
 
 /** 编辑器/图标查找目标：kind + 可选"扩展名"（后端 extra.config_type，unknown 兼容索引签名） */
 export interface ResourceRegistryTarget {
@@ -91,14 +93,25 @@ export function getResourceIconFor(target: ResourceRegistryTarget): Component | 
 // ============ 内置注册 ============
 
 // model 使用独立表单
-registerResourceEditor('model', markRaw(ModelProviderForm))
+registerResourceEditor('model', markRaw(Model))
+
+// Agent（OAB bundle）：**项级**注册（agent:bundle，按 item.config_type 命中）。
+// kind 级刻意不注册——否则 createEditor('agent') 会劫持 zip 上传新建流程；
+// 项级只影响"选中已有 bundle"的详情渲染（Agent.vue 内含
+// prompts/skills/mcps 内部资源管理入口）。
+registerResourceEditor('agent:bundle', markRaw(Agent))
+
+// Session（会话）：kind 级注册——详情 = 聊天工作区（ChatMainPanel + SessionExplorerPanel）；
+// capabilities.independent_form 为 true 且本注册存在 → 统一资源页「新建」按钮
+// 进入该 editor 的引导态（新建会话），列表/删除由机制承担（delete_item 钩子）。
+registerResourceEditor('session', markRaw(Session))
 
 // 设置分区：同一 kind（setting）下按 config_type 进入不同 editor
-registerResourceEditor('setting:appearance', markRaw(AppearanceSettingsForm))
-registerResourceEditor('setting:session', markRaw(SessionConfigForm))
-registerResourceEditor('setting:local', markRaw(LocalConfigForm))
-registerResourceEditor('setting:web', markRaw(WebConfigForm))
-registerResourceEditor('setting:about', markRaw(AboutPanel))
+registerResourceEditor('setting:appearance', markRaw(Appearance))
+registerResourceEditor('setting:session', markRaw(SessionSettings))
+registerResourceEditor('setting:local', markRaw(Local))
+registerResourceEditor('setting:web', markRaw(Web))
+registerResourceEditor('setting:about', markRaw(About))
 
 /** 用 SVG path 构造轻量图标组件（feather 风格线条图标） */
 function svgIcon(inner: string): Component {
@@ -157,6 +170,14 @@ registerResourceIcon(
   'setting',
   svgIcon(
     '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'
+  )
+)
+
+// 容器子类别图标（WorkbenchView container 模式的类别侧边栏复用主界面图标体系）
+registerResourceIcon(
+  'prompt',
+  svgIcon(
+    '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/>'
   )
 )
 

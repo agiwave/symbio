@@ -47,11 +47,34 @@ export interface ProviderInfo {
   compact_list?: boolean
   /** 列表项是否显示运行状态图示（如设置分区为 false，隐藏状态点）；缺省 true */
   status_indicator?: boolean
+  /** 容器声明：条目内部托管的子资源类型（空/缺省 = 条目不是容器） */
+  container_kinds?: ContainerKindInfo[]
 }
 
 /** resources/providers 响应 */
 export interface ProvidersResponse {
   providers: ProviderInfo[]
+}
+
+/**
+ * 容器子资源类型声明 —— 该 provider 的条目本身是「容器」，内部托管这些子类型。
+ *
+ * 如 agent（OAB bundle）内部托管 prompt / skill / mcp。容器资源页的左侧类别导航、
+ * 新建路径模板、新建内容模板均由此下发——后端控制，前端零硬编码。
+ */
+export interface ContainerKindInfo {
+  /** 子资源类型（如 prompt / skill / mcp） */
+  kind: string
+  /** 展示标签 */
+  label: string
+  /** 语义说明（新建/编辑表单提示文本） */
+  description?: string
+  /** 新建路径模板（<name> 占位符），如 prompts/<name>.md */
+  path_hint?: string
+  /** 新建内容模板（编辑器初始内容） */
+  default_content?: string
+  /** 子资源能力开关 */
+  capabilities: ResourceCapabilities
 }
 
 /** 统一资源概要（列表项） */
@@ -70,11 +93,13 @@ export interface ResourceSummary {
   [extra: string]: unknown
 }
 
-/** resources/list 响应 */
+/** resources/list 响应（请求携带 container 时为容器语义，container 回显容器 id） */
 export interface ResourcesListResponse {
   kind: string
   capabilities: ResourceCapabilities
   items: ResourceSummary[]
+  /** 容器作用域（容器语义时下发；顶层列表缺省） */
+  container?: string
 }
 
 /** resources/upload 响应 */

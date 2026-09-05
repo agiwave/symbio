@@ -14,10 +14,10 @@
  * - `activeId`       : 当前"详细窗口"展示的会话
  * - `sessionMessages`: 实时 messages map，key 是 sessionId，value 是 `{msgId: ChatMessage}`
  *                      写入：useChatConnection 收 bus 事件时；loadMessages 时
- *                      读取：ModelChatPanel（详细）、SessionListPanel（缩略预览）
+ *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
  *                      写入：useChatConnection 收 Status 事件时
- *                      读取：SessionListPanel（缩略卡的状态点 + 预览文本）
+ *                      读取：会话列表项状态展示（统一资源页 session 实例）
  */
 
 import { defineStore } from 'pinia'
