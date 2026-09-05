@@ -1,0 +1,28 @@
+# OAB Bundle 清单 —— 全栈开发智能体
+# 规范：docs/design/open-agent-bundle-spec.md §4
+# 能力单元无需在本清单登记：prompts/ skills/ mcps/ 目录里「存在即安装」
+# 目录名统一为复数（行业习惯）：prompts（OAB 原生提示词）/ skills（行业 SKILL）/ mcps（行业 MCP）
+spec: "oab/v1"
+id: "com.symbio.fullstack-dev"
+name: "全栈开发智能体"
+version: "1.1.0"
+description: "按 OAB 标准分发的全栈开发 agent：需求澄清→架构决策→分层实现→前后端集成→测试交付"
+authors:
+  - "symbio"
+# 接入门槛（规范 §11.2）：要求宿主支持 oab/v1 主版本
+requires:
+  spec: "^1"
+# 声明式权限（规范 §8）：能力单元可用的宿主 API 上限（参考实现仅作提示）
+permissions:
+  host_apis:
+    - "host/log"
+    - "host/info"
+  network:
+    domains: []
+  fs:
+    read:
+      - "."
+    write: []
+  limits:
+    max_tools: 32
+    max_prompt_bytes: 65536

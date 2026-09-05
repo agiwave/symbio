@@ -1,64 +1,35 @@
-//! Agent 核心接口层
+//! OAB（Open Agent Bundle）协议核心 —— 规范的 Rust 参考实现。
 //!
-//! - **接口**子模块（types/store/traits/error/config/typed_unit）→ `mod`（私有）
-//! - **实现**子模块：仅 `metrics` 因跨模块调用方存在 → `pub(crate) mod`
-//!   其余（embedding_quant）保持 `mod`（仅 core 内部使用）
+//! ## 隔离原则（宪法级约束）
 //!
-//! 关系判定由 `CognitiveUnit::is_relation_prop()` 数据驱动，
-//! 从 prop CU 的 `is_a` 含 `relation` + `prop_value_is_a` ∈ {cu, cu[]} 派生，
-//! 不需要独立的注册表模块。
+//! 本模块树（`core/`）**不得 import 任何 `symbio_core` 类型**——只允许使用
+//! serde / serde_json / std 等外部库。它是 OAB 规范（见
+//! `docs/design/open-agent-bundle-spec.md`）的自洽实现，未来可整体抽出为
+//! 独立规范库 / SDK，供任何宿主复用。
+//!
+//! ## 协议是什么
+//!
+//! OAB **不是双协议**（没有 OAB-Engine / OAB-Provider 之分）。它就是一套
+//! 「约定目录 + manifest」的**组合格式（composition format）**：
+//!
+//! - `manifest.yaml` 承载无法从目录推导的元信息（身份 / 兼容门槛 / 权限 / 配置）；
+//! - `augments/` `skills/` `mcp/` 三个约定目录承载能力单元，**存在即安装**，
+//!   无需任何 provider 配置文件。
+//!
+//! 装配（扫描约定目录、合并提示词与工具）是**宿主的责任**，协议只定义目录
+//! 约定与数据结构。`core/` 仅提供纯数据的扫描与装配逻辑（`spec::assembly`），
+//! 不规定任何传输 / 引擎 / 运行时。
+//!
+//! ## 模块结构
+//!
+//! - [`spec`]：manifest 数据结构 + 加载期校验 + 约定目录装配（协议静态 + 扫瞄部分）
 
-// ─── 接口子模块（私有——仅本 core 模块可见）───
-mod config;
-mod error;
-/// 系统提示词预算分配器（[三层目标] 第 1/2/3 层的共享基础设施）
-///
-/// - 公开 `estimate_tokens` 给 `system_prompt::build`（动态构建 + 预算分配）
-/// - 公开 `PromptBudget` / `BudgetUsage` 给系统提示词的"预算告警"段
-///   （不再通过 op 暴露给 LLM——由系统主动驱动）
-mod prompt_budget;
-mod store;
-mod traits;
-mod typed_unit;
+#![allow(dead_code)]
 
-// ─── 实现子模块：跨模块调用方存在（types 提供 cu_fields/CuRef/generate_short_id 给 store/typed_unit/scaffold）→ pub(crate) ───
-pub(crate) mod types;
+pub mod spec;
 
-// ─── 实现子模块：仅 core 内部使用 → mod ───
-mod embedding_quant;
+/// 协议版本标识（manifest.spec），固定 `"oab/v1"`
+pub const SPEC_ID: &str = "oab/v1";
 
-// ─── 公共 API 聚合 reexport ───
-//
-// 关键：所有 `pub use` 项必须在 `core` 模块内被**真实使用**至少一次，
-// 否则 rustc 会报 `unused_imports` 警告。本 mod.rs 顶部不直接使用这些类型，
-// 故在文件底部用 `#[cfg(test)] mod api_surface` 块做 public API 烟测——
-// 既消除警告，又能在编译期验证公开接口可用。
-pub use crate::symbio_core::providers::EmbeddingService;
-pub use config::{AgentConfig, CognitionThresholds, StorageBackendType, StorageFormat};
-pub use error::{AgentError, AgentResult};
-pub use prompt_budget::{compute_cu_score, estimate_tokens, BudgetUsage, CuScore, PromptBudget};
-pub use store::{
-    cosine_similarity, evaluate_filter, AgentStore, FilterExpr, PageRequest, PageResult, StoreError,
-};
-pub use traits::CognitionContext;
-pub use typed_unit::CognitiveUnit;
-#[cfg(test)]
-pub use types::new_cognitive_unit;
-pub use types::{cu_from_json, now_secs, truncate_chars, unit_with_id, OperationResult};
-
-/// 系统核心关系名（COGNITION.md §2.4 核心关系列表）
-///
-/// 这些名字来自 seed_cus.jsonl 中的 prop CU 数据声明，而非硬编码业务规则。
-/// 运行时可通过新增 prop CU 扩展更多关系。
-/// 主要消费方：`store/mindscape/scaffold.rs` 启动时的 prop 完整性校验。
-pub const CORE_RELATION_NAMES: &[&str] = &[
-    "is_a", "has", "part_of", "causes", "depends", "similar", "opposite", "related",
-];
-
-// ─── 公开 API 烟测：保证顶层 reexport 全部可用 ───
-//
-// 不通过 `#[allow(unused_imports)]` 抑制警告，而是**真实引用**每个 reexport
-// 类型一次——任何被误删/重命名的项都会让本块编译失败，从而暴露问题。
-// 测试代码已抽离到 `core/tests.rs`（独立文件，保持主文件简洁）
-#[cfg(test)]
-mod tests;
+/// spec 主版本号（`requires.spec: "^1"` 的兼容判定基准）
+pub const SPEC_MAJOR: u64 = 1;
