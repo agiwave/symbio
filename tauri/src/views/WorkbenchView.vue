@@ -65,6 +65,9 @@
             :subtitle="isCompact ? undefined : (item.description || item.summary)"
             :status="cardStatus(item)"
             :status-title="item.status_detail || item.status"
+            :badge="workingBadge(item)"
+            badge-kind="primary"
+            :tags="cardTags(item)"
             :icon="getEntityIconFor(item)"
             :show-status="showStatusFor(item)"
             :is-active="selectedId === `${item.kind}:${item.id}`"
@@ -443,6 +446,46 @@ function cardStatus(
 /** 该列表项所属类型是否显示状态点（后端 ProviderInfo.status_indicator；缺省 true） */
 function showStatusFor(item: EntitySummary): boolean {
   return activeTypes.value.find((p) => p.kind === item.kind)?.status_indicator ?? true
+}
+
+// === 列表项信息展示（全部通用路径，机制不感知具体类型） ===
+
+/** working 态徽标（任何实体：处理中提示；detail 缺省「处理中…」） */
+function workingBadge(item: EntitySummary): string | undefined {
+  return item.status === 'working' ? (item.status_detail || '处理中…') : undefined
+}
+
+/** 相对时间（秒/毫秒时间戳自适应；清单实时刷新后自然跟进） */
+function relativeTime(ts?: number): string {
+  if (!ts) return ''
+  const ms = ts < 1e12 ? ts * 1000 : ts
+  const diff = Date.now() - ms
+  if (diff < 0) return ''
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`
+  const d = new Date(ms)
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+type CardTag = { label: string; kind?: 'default' | 'primary' | 'success' | 'warn' | 'info' | 'muted' }
+
+/**
+ * 通用元信息标签：updated_at 相对时间（机制级）+ 后端 `extra.meta_tags`
+ * （后端决定的类型特有标签，如会话的工作目录名/消息数；前端原样渲染）
+ */
+function cardTags(item: EntitySummary): CardTag[] {
+  const out: CardTag[] = []
+  const t = relativeTime(item.updated_at)
+  if (t) out.push({ label: t, kind: 'muted' })
+  const extra = item.extra as { meta_tags?: unknown } | undefined
+  if (Array.isArray(extra?.meta_tags)) {
+    for (const label of extra.meta_tags) {
+      if (typeof label === 'string' && label) out.push({ label, kind: 'muted' })
+    }
+  }
+  return out
 }
 
 // === leaf：zip 文件选择 → 统一保存流 ===

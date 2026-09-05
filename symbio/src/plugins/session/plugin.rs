@@ -319,6 +319,37 @@ impl Plugin for SessionPlugin {
 
 crate::submit_object_creator!(PLUGIN_SESSION, SessionPlugin::build, dyn Plugin);
 
+// ==================== 会话列表展示辅助 ====================
+
+/// 会话列表一行摘要：最后一条含文本消息的首行（压缩空白、限长 60 字符）。
+///
+/// 与 [`crate::plugins::session::types::derive_session_title`] 同风格；
+/// 供 EntitySummary.summary（通用字段）驱动列表「实时缩略」预览。
+fn derive_session_summary(messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage]) -> Option<String> {
+    const SUMMARY_MAX_CHARS: usize = 60;
+    let text = messages
+        .iter()
+        .rev()
+        .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
+        .map(|t| t.trim().to_string())
+        .find(|t| !t.is_empty())?;
+    let first_line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let mut out = String::new();
+    let mut chars = first_line.chars();
+    for _ in 0..SUMMARY_MAX_CHARS {
+        match chars.next() {
+            Some(c) if c.is_whitespace() => {
+                if !out.ends_with(' ') {
+                    out.push(' ');
+                }
+            }
+            Some(c) => out.push(c),
+            None => return Some(out.trim_end().to_string()),
+        }
+    }
+    Some(format!("{}…", out.trim_end()))
+}
+
 // ==================== 统一实体协议接入 ====================
 
 #[async_trait]
@@ -355,10 +386,34 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
                     "active".to_string()
                 };
                 it.updated_at = Some(s.updated_at);
+                // 一行摘要（通用字段，前端 subtitle = description || summary）：
+                // 最后一条含文本消息的首行——列表即「会话实时缩略」
+                it.summary = derive_session_summary(&s.messages);
                 if let serde_json::Value::Object(ref mut m) = it.extra {
                     let _ = m.insert("message_count".to_string(), json!(s.messages.len()));
                     let _ = m.insert("is_working".to_string(), json!(is_working));
                     let _ = m.insert("metadata".to_string(), s.metadata.clone());
+                    // 通用元信息标签（前端 EntityCard tags 原样渲染）：
+                    // 工作目录名 + 消息数
+                    let mut meta_tags: Vec<String> = Vec::new();
+                    if let Some(wd) = s
+                        .metadata
+                        .get("workdir")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        let base = wd
+                            .trim_end_matches(['/', '\\'])
+                            .rsplit(['/', '\\'])
+                            .next()
+                            .unwrap_or(wd);
+                        if !base.is_empty() {
+                            meta_tags.push(base.to_string());
+                        }
+                    }
+                    meta_tags.push(format!("{} 条", s.messages.len()));
+                    let _ = m.insert("meta_tags".to_string(), json!(meta_tags));
                 }
                 it
             })
