@@ -1,4 +1,4 @@
-//! Explorer 插件 - 工作区资源浏览器（文件系统浏览）
+//! Explorer 插件 - 工作区实体浏览器（文件系统浏览）
 
 use super::watcher::FileWatcher;
 use crate::plugin_error;
@@ -56,8 +56,8 @@ impl ExplorerPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new("explorer", "资源管理器")
-            .with_description("工作区资源浏览器（文件系统浏览）")
+        PluginMeta::new("explorer", "实体管理器")
+            .with_description("工作区实体浏览器（文件系统浏览）")
             .with_version("0.1.0")
     }
 

@@ -118,7 +118,7 @@ import { callPlugin } from '@/services/plugin'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { listModelProviders } from '@/services/modelProviders'
-import { listResources } from '@/services/resources'
+import { listEntities } from '@/services/entities'
 import type { ModelProviderConfig } from '@/schemas/model_providers'
 
 import MessageNode from './MessageNode.vue'
@@ -317,13 +317,13 @@ onMounted(async () => {
   // 清掉旧的 banner
   initError.value = null
 
-  // 并行加载：agents（统一资源协议 resources/list）/ providers
+  // 并行加载：agents（统一实体协议 entities/list）/ providers
   const results = await Promise.allSettled([
-    listResources('agent'),
+    listEntities('agent'),
     listModelProviders()
   ])
 
-  // 1. agents（ResourceSummary → 智能体选项：id/name/description）
+  // 1. agents（EntitySummary → 智能体选项：id/name/description）
   if (results[0].status === 'fulfilled') {
     const list = results[0].value.items
     if (Array.isArray(list)) {

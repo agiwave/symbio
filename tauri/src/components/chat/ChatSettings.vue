@@ -206,7 +206,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { AgentProfile } from '@/types'
 import { callPlugin } from '@/services/plugin'
-import { listResources } from '@/services/resources'
+import { listEntities } from '@/services/entities'
 import { listModelProviders } from '@/services/modelProviders'
 import type { ModelProviderConfig, ModelProvidersConfig } from '@/schemas/model_providers'
 import { useSessionsStore } from '@/stores/sessions'
@@ -387,13 +387,13 @@ watch(
 async function fetchAgents() {
   loadingAgents.value = true
   try {
-    // 统一资源协议 resources/list：ResourceSummary → 选择器选项（id/name/description）
-    const resp = await listResources('agent')
+    // 统一实体协议 entities/list：EntitySummary → 选择器选项（id/name/description）
+    const resp = await listEntities('agent')
     const list: AgentProfile[] = (resp.items ?? []).map((it) => ({
       id: it.id,
       name: it.name || it.id,
       description: it.description || it.summary || '',
-      // 列表仅用于选择；7D 详情字段由资源管理页维护，这里填默认值满足类型
+      // 列表仅用于选择；7D 详情字段由实体管理页维护，这里填默认值满足类型
       knowledge: [],
       experience: [],
       skill: [],

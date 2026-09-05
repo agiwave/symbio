@@ -57,7 +57,7 @@ pub enum HookEvent {
     /// last_message 表示最后一条有效消息内容，用于外部系统了解对话状态
     Stop { last_message: String },
     /// 子代理启动事件 - 启动子代理任务时触发
-    /// 可用于追踪子任务状态、资源监控等
+    /// 可用于追踪子任务状态、实体监控等
     SubagentStart { subagent_name: String, task: String },
     /// 子代理停止事件 - 子代理任务完成时触发
     /// result 包含子代理执行结果摘要

@@ -1,64 +1,64 @@
 /**
- * useWorkbenchView —— 统一资源管理页（WorkbenchView）的唯一页面逻辑
+ * useWorkbenchView —— 统一实体管理页（WorkbenchView）的唯一页面逻辑
  *
- * 整个 App 的资源管理 = 一套机制 + 一个页面（WorkbenchView）+ 一个本组合式。
+ * 整个 App 的实体管理 = 一套机制 + 一个页面（WorkbenchView）+ 一个本组合式。
  * 页面形态由「路由参数 + 后端注册表」自动配置，前端零逐特性开发：
  *
- * - entity 模式（/resources/:types? 、 /settings）：
+ * - leaf 模式（/entities/:types? 、 /settings）：
  *     类别 = providers 注册表解析 :types 参数（resolveActiveTypes）；
- *     list = 各类别 resources/list 并行；编辑器经 kind / kind:config_type 注册表分发，
+ *     list = 各类别 entities/list 并行；编辑器经 kind / kind:config_type 注册表分发，
  *     未注册走通用兜底（zip 面板 / JSON 表单 / 只读详情）。
- * - container 模式（/container/:kind/:id/resources 、 /agent/:agentId/resources）：
+ * - container 模式（/container/:kind/:id/entities 、 /agent/:agentId/entities）：
  *     类别 = ProviderInfo.container_kinds（后端下发标签/路径模板/内容模板/能力）；
- *     list = resources/list（payload.container 单请求全量分箱）；
- *     详情/新建 = 标准文本编辑器（resources/get 的 extra.content + resources/put 写回）。
+ *     list = entities/list（payload.container 单请求全量分箱）；
+ *     详情/新建 = 标准文本编辑器（entities/get 的 extra.content + entities/put 写回）。
  *
  * 两模式唯一差异点：
  * ① 类别来源（注册表两种形态）；② list/delete 是否携带 container 字段。
  * 状态机（清单/选中/新建/删除）全部委托 useWorkbench 唯一实现；
- * 协议同一套 `${prefix}/resources/*`。
+ * 协议同一套 `${prefix}/entities/*`。
  *
  * 另导出：
  * - useContainerOverview：容器条目详情组件（如 Agent.vue）的只读概览
  *   （类别 + 计数），管理逻辑一律在 WorkbenchView 页面侧，此处不重复；
- * - detailDefinition：后端 resources/detail 下发的详情页定义（§3.2 解析链
+ * - detailDefinition：后端 entities/detail 下发的详情页定义（§3.2 解析链
  *   第二优先：注册 editor 缺席时由 DetailForm 渲染）；
  * - isManagerCreatable / buildMixedItems：纯函数（可单测）。
  */
 
 import { computed, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import {
-  deleteResource,
+  deleteEntity,
   getDetailDefinition,
-  getResource,
-  getResourceStatus,
-  listResources,
-  putContainerResource,
-  uploadResourceForm,
-  uploadResourceZip,
-} from '@/services/resources'
+  getEntity,
+  getEntityStatus,
+  listEntities,
+  putContainerEntity,
+  uploadEntityForm,
+  uploadEntityZip,
+} from '@/services/entities'
 import { useWorkbench, type WorkbenchKindState } from '@/composables/useWorkbench'
 import {
   loadProviders,
   resolveActiveTypes,
-  useResourceProviders,
-} from '@/composables/useResourceProviders'
-import { getResourceEditor, getResourceEditorFor, getResourceIcon } from '@/registry/resourceTypes'
+  useEntityProviders,
+} from '@/composables/useEntityProviders'
+import { getEntityEditor, getEntityEditorFor, getEntityIcon } from '@/registry/entityTypes'
 import type {
   ContainerKindInfo,
   DetailDefinition,
   ProviderInfo,
-  ResourceCapabilities,
-  ResourceSummary,
-} from '@/schemas/resources'
+  EntityCapabilities,
+  EntitySummary,
+} from '@/schemas/entities'
 import type { NavRailItem } from '@/components/common/NavRail.vue'
 
-/** 页面模式：实体资源页 / 容器资源页（由路由参数决定，实例内恒定） */
-export type WorkbenchPageMode = 'entity' | 'container'
+/** 页面模式：实体实体页 / 容器实体页（由路由参数决定，实例内恒定） */
+export type WorkbenchPageMode = 'leaf' | 'container'
 
 export interface WorkbenchViewOptions {
   mode: WorkbenchPageMode
-  /** entity 模式：路由 :types 参数（'all' | 逗号分隔 kind | 单 kind，缺省 all） */
+  /** leaf 模式：路由 :types 参数（'all' | 逗号分隔 kind | 单 kind，缺省 all） */
   typesParam?: Ref<string | undefined>
   /** container 模式：容器所属 provider kind（如 'agent'） */
   containerKind?: string
@@ -70,7 +70,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   const { mode, containerKind = '', containerId } = opts
   const typesParam = opts.typesParam
   const isContainer = mode === 'container'
-  const { providers, getProvider, labelOf, capabilitiesOf } = useResourceProviders()
+  const { providers, getProvider, labelOf, capabilitiesOf } = useEntityProviders()
 
   function requireContainerId(): string {
     const id = containerId?.()
@@ -79,7 +79,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   }
 
   // ============ 差异点①：类别来源（后端注册表两种形态） ============
-  /** entity：providers 注册表解析 :types 参数 */
+  /** leaf：providers 注册表解析 :types 参数 */
   const activeTypes: ComputedRef<ProviderInfo[]> = computed(() =>
     isContainer ? [] : resolveActiveTypes(providers.value, typesParam?.value)
   )
@@ -103,19 +103,19 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
             label: p.label,
             capabilities: p.capabilities,
           })),
-    listItems: isContainer ? undefined : (kind) => listResources(kind),
+    listItems: isContainer ? undefined : (kind) => listEntities(kind),
     listAll: isContainer
       ? async () => {
           const id = containerId?.()
           if (!id) return { items: [] }
-          const resp = await listResources(containerKind, { container: id })
+          const resp = await listEntities(containerKind, { container: id })
           return { items: resp.items, capabilities: resp.capabilities }
         }
       : undefined,
     deleteItem: (kind, id) =>
       isContainer
-        ? deleteResource(containerKind, id, requireContainerId())
-        : deleteResource(kind, id),
+        ? deleteEntity(containerKind, id, requireContainerId())
+        : deleteEntity(kind, id),
     autoSelect: !isContainer,
     logTag: 'WorkbenchView',
   })
@@ -170,42 +170,42 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   /** 列表简洁模式：活动类型中任一开启 compact_list 即生效（仅图标 + 标题） */
   const isCompact = computed(() => activeTypes.value.some((p) => p.compact_list))
 
-  /** 页标题：多类型 = "资源"，单类型/容器 = 类别标签 */
+  /** 页标题：多类型 = "实体"，单类型/容器 = 类别标签 */
   const title = computed(() => {
     if (isContainer) return activeKindMeta.value?.label ?? ''
-    return isMulti.value ? '资源' : kindLabel(activeTypes.value[0]?.kind ?? '')
+    return isMulti.value ? '实体' : kindLabel(activeTypes.value[0]?.kind ?? '')
   })
 
   const emptyHint = computed(() => {
     if (isContainer) return ''
-    if (isMulti.value) return canCreate.value ? '点击右上角「新建」创建资源' : ''
+    if (isMulti.value) return canCreate.value ? '点击右上角「新建」创建实体' : ''
     const kind = activeTypes.value[0]?.kind
     if (!kind) return ''
     const c = capsOf(kind)
-    if (c.zip_upload) return '点击右上角「新建」上传 ZIP（文件名即资源目录名）'
+    if (c.zip_upload) return '点击右上角「新建」上传 ZIP（文件名即实体目录名）'
     if (createEditor(kind)) return '点击右上角「新建」开始'
     if (c.independent_form) return '点击右上角「新建」填写表单创建'
     return ''
   })
 
-  /** 某 kind 的展示标签（container 用后端 container_kinds 标签，entity 用注册表标签） */
+  /** 某 kind 的展示标签（container 用后端 container_kinds 标签，leaf 用注册表标签） */
   function kindLabel(kind: string): string {
     if (isContainer) return containerKinds.value.find((k) => k.kind === kind)?.label ?? kind
     return labelOf(kind, kind)
   }
 
   /** 某 kind 的能力（未加载/未知 → 只读空态） */
-  function capsOf(kind: string): ResourceCapabilities {
+  function capsOf(kind: string): EntityCapabilities {
     return capabilitiesOf(kind)
   }
 
   /** 某 kind 的专属编辑表单（新建用；未注册 null → 通用兜底） */
   function createEditor(kind: string | null) {
-    return kind ? getResourceEditor(kind) ?? null : null
+    return kind ? getEntityEditor(kind) ?? null : null
   }
   /** 选中项的专属编辑表单：项级 config_type 优先，回退 kind；未注册 null → 通用兜底 */
   const selectedEditor = computed(() =>
-    selected.value ? getResourceEditorFor(selected.value.item) ?? null : null
+    selected.value ? getEntityEditorFor(selected.value.item) ?? null : null
   )
 
   /**
@@ -217,10 +217,10 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   function creatableByEditor(kind: string): boolean {
     if (isManagerCreatable(getProvider(kind) ?? makeReadonly(kind))) return false
     const caps = capabilitiesOf(kind)
-    return Boolean(caps.independent_form && !caps.read_only && getResourceEditor(kind))
+    return Boolean(caps.independent_form && !caps.read_only && getEntityEditor(kind))
   }
 
-  /** 当前活动类型中可创建的类型（entity 多类型新建面板用） */
+  /** 当前活动类型中可创建的类型（leaf 多类型新建面板用） */
   const creatableInActive = computed(() =>
     activeTypes.value.filter((p) => isManagerCreatable(p) || creatableByEditor(p.kind))
   )
@@ -235,7 +235,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     return Boolean(caps.mutable && !caps.read_only)
   })
 
-  /** 容器子类别的可写判定（子类别无 supports_upload 概念，写经 resources/put） */
+  /** 容器子类别的可写判定（子类别无 supports_upload 概念，写经 entities/put） */
   function mutableKind(kind: string): boolean {
     const caps = isContainer
       ? containerKinds.value.find((k) => k.kind === kind)?.capabilities
@@ -262,7 +262,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     creating.value ? createKind.value : (selected.value?.kind ?? null)
   )
 
-  /** 新建入口：容器 → 名称+内容编辑器；entity 多类型 → 类型选择面板；单类型 → 直达 */
+  /** 新建入口：容器 → 名称+内容编辑器；leaf 多类型 → 类型选择面板；单类型 → 直达 */
   function onNew() {
     uploadError.value = null
     manifestError.value = null
@@ -278,12 +278,12 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     if (kind) beginCreate(kind)
   }
 
-  /** entity：绑定某类型并进入创建态 */
+  /** leaf：绑定某类型并进入创建态 */
   function beginCreate(kind: string) {
     createKind.value = kind
     if (!creating.value) wb.enterCreate()
   }
-  /** entity：进入创建态但不绑定类型 → 渲染类型选择面板 */
+  /** leaf：进入创建态但不绑定类型 → 渲染类型选择面板 */
   function startTypeChoice() {
     createKind.value = null
     if (!creating.value) wb.enterCreate()
@@ -320,7 +320,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     { immediate: true }
   )
 
-  // ============ entity：zip 上传 / 表单 / JSON 兜底保存 ============
+  // ============ leaf：zip 上传 / 表单 / JSON 兜底保存 ============
   const zipUploading = ref(false)
   const uploadError = ref<string | null>(null)
   const manifestError = ref<string | null>(null)
@@ -339,7 +339,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     uploadError.value = null
     try {
       const buf = await file.arrayBuffer()
-      const resp = await uploadResourceZip(kind, name, buf)
+      const resp = await uploadEntityZip(kind, name, buf)
       showToast('success', `已上传 ${kindLabel(kind)}「${resp.id || name}」`)
       cancelCreate()
       await refreshKind(kind)
@@ -363,7 +363,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     try {
       const manifest = { ...payload.manifest }
       if (payload.skipValidation) manifest.skip_validation = true
-      const resp = await uploadResourceForm(kind, payload.id, manifest)
+      const resp = await uploadEntityForm(kind, payload.id, manifest)
       showToast('success', `已保存 ${kindLabel(kind)}「${payload.id}」`)
       cancelCreate()
       await refreshKind(kind)
@@ -395,7 +395,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     manifestError.value = null
     saving.value = true
     try {
-      const resp = await uploadResourceForm(kind, name, { ...parsed, id: name })
+      const resp = await uploadEntityForm(kind, name, { ...parsed, id: name })
       showToast('success', `已保存 ${kindLabel(kind)}「${name}」`)
       cancelCreate()
       await refreshKind(kind)
@@ -415,7 +415,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     const config = (sel.item.config ?? {}) as Record<string, unknown>
     saving.value = true
     try {
-      await uploadResourceForm(sel.kind, sel.item.id, {
+      await uploadEntityForm(sel.kind, sel.item.id, {
         ...config,
         is_default: true,
         skip_validation: true,
@@ -435,7 +435,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     if (!sel) return
     wb.testing.value = true
     try {
-      const resp = await getResourceStatus(sel.kind, sel.item.id)
+      const resp = await getEntityStatus(sel.kind, sel.item.id)
       if (!resp) {
         showToast('error', '该后端暂不支持连接测试')
         return
@@ -473,7 +473,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   )
 
   // ============ container：身份信息 / 类别切换 / 文本编辑 ============
-  /** 容器条目名（meta 展示；统一协议 resources/get，容器外详情） */
+  /** 容器条目名（meta 展示；统一协议 entities/get，容器外详情） */
   const containerName = ref('')
   if (isContainer) {
     watch(
@@ -481,7 +481,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
       async (id) => {
         if (!id) return
         await loadProviders()
-        const item = await getResource(containerKind, id)
+        const item = await getEntity(containerKind, id)
         containerName.value = item?.name || id
       },
       { immediate: true }
@@ -524,7 +524,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     return containerKinds.value.map((k) => ({
       key: k.kind,
       label: k.label,
-      icon: getResourceIcon(k.kind) ?? undefined,
+      icon: getEntityIcon(k.kind) ?? undefined,
       count: counts.value[k.kind] || undefined,
       active: activeKind.value === k.kind,
     }))
@@ -532,7 +532,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
 
   const kindEntries = computed(() => wb.itemsOf(activeKind.value))
 
-  // === 文本编辑（resources/get 的 extra.content + resources/put 写回） ===
+  // === 文本编辑（entities/get 的 extra.content + entities/put 写回） ===
   const selectedEntry = computed(
     () => kindEntries.value.find((e) => wb.isSelected(e.kind, e.id)) ?? null
   )
@@ -551,7 +551,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     editorError.value = ''
     loadingContent.value = true
     try {
-      const item = await getResource(containerKind, id, cid)
+      const item = await getEntity(containerKind, id, cid)
       const c = item?.content
       if (typeof c !== 'string') throw new Error('响应缺少 content（extra.content）')
       content.value = c
@@ -576,7 +576,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     saving.value = true
     editorError.value = ''
     try {
-      await putContainerResource(containerKind, entry.id, content.value, cid)
+      await putContainerEntity(containerKind, entry.id, content.value, cid)
       originalContent.value = content.value
       showToast('success', `已保存「${entry.id}」`)
       await wb.refreshKind(entry.kind)
@@ -617,8 +617,8 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
       return '名称仅允许中文 / 字母 / 数字 / 下划线 / 点 / 连字符'
     }
     const path = buildPath(name)
-    if (wb.itemsAll.value.some((e: ResourceSummary) => e.id === path)) {
-      return `已存在同名资源：${path}`
+    if (wb.itemsAll.value.some((e: EntitySummary) => e.id === path)) {
+      return `已存在同名实体：${path}`
     }
     return null
   }
@@ -642,7 +642,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     saving.value = true
     editorError.value = ''
     try {
-      await putContainerResource(containerKind, path, newContent.value, cid)
+      await putContainerEntity(containerKind, path, newContent.value, cid)
       showToast('success', `已创建「${path}」`)
       wb.cancelCreate()
       await wb.loadAll()
@@ -662,7 +662,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   }
 
   /** extra.priority 下发的优先级徽标文本（无优先级返回空串） */
-  function priorityLabel(e: ResourceSummary): string {
+  function priorityLabel(e: EntitySummary): string {
     const p = e.priority
     return typeof p === 'number' ? `优先级 ${p}` : ''
   }
@@ -722,7 +722,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     saveForm,
     saveManifest,
     saveDefault,
-    // entity 详情派生
+    // leaf 详情派生
     capsOf,
     kindLabel,
     createEditor,
@@ -753,11 +753,11 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
 /**
  * useContainerOverview —— 容器条目详情组件的**只读概览**（类别 + 计数）。
  *
- * 供 Agent.vue 等详情差异化组件消费：仅展示某容器条目内部的子资源类别与
+ * 供 Agent.vue 等详情差异化组件消费：仅展示某容器条目内部的子实体类别与
  * 数量。管理逻辑一律在 WorkbenchView 页面侧（useWorkbenchView），此处不重复。
  */
 export function useContainerOverview(kind: string, containerId: () => string | undefined) {
-  const { getProvider } = useResourceProviders()
+  const { getProvider } = useEntityProviders()
 
   const containerKinds = computed<ContainerKindInfo[]>(
     () => getProvider(kind)?.container_kinds ?? []
@@ -771,39 +771,39 @@ export function useContainerOverview(kind: string, containerId: () => string | u
     entriesError.value = ''
     try {
       if (getProvider(kind) === null) await loadProviders()
-      const resp = await listResources(kind, { container: id })
+      const resp = await listEntities(kind, { container: id })
       const out: Record<string, number> = {}
       for (const k of containerKinds.value) out[k.kind] = out[k.kind] ?? 0
       for (const it of resp.items ?? []) out[it.kind] = (out[it.kind] ?? 0) + 1
       counts.value = out
     } catch (err) {
-      entriesError.value = `资源概览加载失败: ${err}`
+      entriesError.value = `实体概览加载失败: ${err}`
     }
   }
 
   return { containerKinds, counts, entriesError, loadEntries }
 }
 
-/** 是否可在资源管理器内创建/删除（supports_upload 为"协议实现"维度，与 mutable 解耦） */
+/** 是否可在实体管理器内创建/删除（supports_upload 为"协议实现"维度，与 mutable 解耦） */
 export function isManagerCreatable(p: {
   supports_upload?: boolean
-  capabilities?: ResourceCapabilities
+  capabilities?: EntityCapabilities
 }): boolean {
   return Boolean(p.supports_upload && p.capabilities?.mutable && !p.capabilities.read_only)
 }
 
 /**
- * 混合平排列表纯函数（供单测）：把所有活动类型的所有资源展平为一张列表。
+ * 混合平排列表纯函数（供单测）：把所有活动类型的所有实体展平为一张列表。
  *
  * **排序原则：完全尊重服务器返回顺序，前端不做 name 排序。**
  * - 类型顺序 = activeTypes 顺序（由注册表 order / 路由参数决定）；
- * - 每类型内 = 该类型 `resources/list` 返回的原序（后端决定展示次序，如设置分区清单）。
+ * - 每类型内 = 该类型 `entities/list` 返回的原序（后端决定展示次序，如设置分区清单）。
  */
 export function buildMixedItems(
   activeTypes: readonly ProviderInfo[],
   typeStates: Record<string, WorkbenchKindState>
-): ResourceSummary[] {
-  const flat: ResourceSummary[] = []
+): EntitySummary[] {
+  const flat: EntitySummary[] = []
   for (const d of activeTypes) {
     for (const it of typeStates[d.kind]?.items ?? []) {
       flat.push(it)

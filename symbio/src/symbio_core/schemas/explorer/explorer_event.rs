@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// 资源管理器事件类型
+/// 实体管理器事件类型
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "event")]
 pub enum Event {
@@ -13,7 +13,7 @@ pub enum Event {
     WatcherError { message: String },
 }
 
-/// 资源管理器通知类型
+/// 实体管理器通知类型
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ExplorerEventType {

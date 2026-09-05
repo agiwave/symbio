@@ -50,7 +50,7 @@ const version = ref(0)
 /**
  * 待注入的输入文本（"AI 上下文 → 主聊天输入框"通道）
  *
- * 当外部组件（文件编辑器、资源浏览器等）想要把选区/上下文
+ * 当外部组件（文件编辑器、实体浏览器等）想要把选区/上下文
  * 发送到当前活跃会话的 AI 输入框时，调用 enqueueInputInject。
  * ModelChatPanel 会监听 pendingInputInject 并自动填充 inputText。
  *

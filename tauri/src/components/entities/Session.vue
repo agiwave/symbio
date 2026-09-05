@@ -1,8 +1,8 @@
 <!--
-  Session — 会话资源专属详情（WorkbenchView 机制下的差异化 editor，kind 级注册）
+  Session — 会话实体专属详情（WorkbenchView 机制下的差异化 editor，kind 级注册）
 
-  会话 = 统一资源机制中的 read-only+mutable 资源（resources/list 摘要含
-  is_working 实时状态；删除经重写的 delete_item 钩子走统一 resources/delete）。
+  会话 = 统一实体机制中的 read-only+mutable 实体（entities/list 摘要含
+  is_working 实时状态；删除经重写的 delete_item 钩子走统一 entities/delete）。
   本组件只承载会话的"详情差异化"：
 
   - item 非 null（选中态）：聊天工作区两栏 = ChatMainPanel + SessionExplorerPanel
@@ -34,24 +34,24 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import type { ResourceCapabilities, ResourceSummary } from '@/schemas/resources'
+import type { EntityCapabilities, EntitySummary } from '@/schemas/entities'
 import { useSessionsStore } from '@/stores/sessions'
 import { useExplorerStore } from '@/stores/explorer'
 import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
 import SessionExplorerPanel from '@/components/session/SessionExplorerPanel.vue'
 
 const props = defineProps<{
-  item: ResourceSummary | null
-  capabilities: ResourceCapabilities
+  item: EntitySummary | null
+  capabilities: EntityCapabilities
   saving?: boolean
   testing?: boolean
   deleting?: boolean
 }>()
 
 const emit = defineEmits<{
-  /** 机制约定：editor 完成资源创建后上报 id，页面刷新清单并选中之 */
+  /** 机制约定：editor 完成实体创建后上报 id，页面刷新清单并选中之 */
   (e: 'created', id: string): void
-  /** 机制约定：editor 请求删除当前选中资源（走统一 resources/delete） */
+  /** 机制约定：editor 请求删除当前选中实体（走统一 entities/delete） */
   (e: 'delete'): void
 }>()
 

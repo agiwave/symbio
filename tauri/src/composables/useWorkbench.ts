@@ -2,15 +2,15 @@
  * useWorkbench —— 「侧边栏 + 列表 + 详情」三栏工作台核心状态机（唯一实现）
  *
  * 整个 App 是一台三栏工作台：侧边栏（类别导航）+ 列表 + 详情。本项目所有
- * 资源型页面共用本核心，差异（数据源、删除语义）通过 ops 注入：
+ * 实体型页面共用本核心，差异（数据源、删除语义）通过 ops 注入：
  *
- * - 顶层资源页（useWorkbenchView entity 模式）：categories = 后端 providers 注册表，
- *   listItems = resources/list（按 kind），deleteItem = resources/delete；
- * - 容器资源页（useWorkbenchView container 模式）：categories =
- *   ProviderInfo.container_kinds，listAll = resources/list（payload.container 一次
- *   取回全类别），deleteItem = resources/delete（带 container）。
+ * - 顶层实体页（useWorkbenchView leaf 模式）：categories = 后端 providers 注册表，
+ *   listItems = entities/list（按 kind），deleteItem = entities/delete；
+ * - 容器实体页（useWorkbenchView container 模式）：categories =
+ *   ProviderInfo.container_kinds，listAll = entities/list（payload.container 一次
+ *   取回全类别），deleteItem = entities/delete（带 container）。
  *
- * 协议完全统一：两者走同一套 `${prefix}/resources/*`，容器仅多 container 字段；
+ * 协议完全统一：两者走同一套 `${prefix}/entities/*`，容器仅多 container 字段；
  * 状态机（选中复合键 `${kind}:${id}`、creating 模式、加载/删除状态、删除后刷新）
  * 在此唯一实现，页面组合式只是薄适配层。
  */
@@ -18,25 +18,25 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
-import type { ResourceCapabilities, ResourceSummary } from '@/schemas/resources'
+import type { EntityCapabilities, EntitySummary } from '@/schemas/entities'
 
 /** 工作台类别（侧边栏一项）：kind + 展示标签 + 能力（决定可建/可删/可测） */
 export interface WorkbenchCategory {
   kind: string
   label: string
-  capabilities: ResourceCapabilities
+  capabilities: EntityCapabilities
 }
 
 /** 每类别的清单状态（capabilities 后端下发为真相源） */
 export interface WorkbenchKindState {
-  items: ResourceSummary[]
-  capabilities: ResourceCapabilities
+  items: EntitySummary[]
+  capabilities: EntityCapabilities
 }
 
 /** 清单拉取结果（capabilities 缺省回退类别声明） */
 export interface WorkbenchListResult {
-  items: ResourceSummary[]
-  capabilities?: ResourceCapabilities
+  items: EntitySummary[]
+  capabilities?: EntityCapabilities
 }
 
 /** 差异注入点：页面组合式以 ops 描述「我的数据从哪来、怎么删」 */
@@ -49,7 +49,7 @@ export interface WorkbenchOps {
   listAll?: () => Promise<WorkbenchListResult>
   /** 删除条目（缺省 = 该工作台不可删） */
   deleteItem?: (kind: string, id: string) => Promise<void>
-  /** 加载后无选中时自动选中首项（顶层资源页 true；容器页 false 留空引导） */
+  /** 加载后无选中时自动选中首项（顶层实体页 true；容器页 false 留空引导） */
   autoSelect?: boolean
   logTag?: string
 }
@@ -72,7 +72,7 @@ export function useWorkbench(ops: WorkbenchOps) {
   const kindStates = ref<Record<string, WorkbenchKindState>>({})
 
   /** 选中项解析（复合键 → 类别内查找） */
-  const selected = computed<{ kind: string; item: ResourceSummary } | null>(() => {
+  const selected = computed<{ kind: string; item: EntitySummary } | null>(() => {
     const key = selectedId.value
     if (!key) return null
     const idx = key.indexOf(':')
@@ -83,9 +83,9 @@ export function useWorkbench(ops: WorkbenchOps) {
     return item ? { kind, item } : null
   })
 
-  /** 平排列表：所有类别所有项按类别顺序展平（顶层资源页用） */
-  const itemsAll = computed<ResourceSummary[]>(() => {
-    const flat: ResourceSummary[] = []
+  /** 平排列表：所有类别所有项按类别顺序展平（顶层实体页用） */
+  const itemsAll = computed<EntitySummary[]>(() => {
+    const flat: EntitySummary[] = []
     for (const c of categories.value) {
       for (const it of kindStates.value[c.kind]?.items ?? []) flat.push(it)
     }
@@ -93,7 +93,7 @@ export function useWorkbench(ops: WorkbenchOps) {
   })
 
   /** 某类别清单（容器页用；非响应式包装，视图中建议 itemsOf(kind) 计算属性） */
-  function itemsOf(kind: string): ResourceSummary[] {
+  function itemsOf(kind: string): EntitySummary[] {
     return kindStates.value[kind]?.items ?? []
   }
 
@@ -181,11 +181,11 @@ export function useWorkbench(ops: WorkbenchOps) {
       return false
     }
     if (deletingId.value === id) return false
-    if (!window.confirm(`确认删除${label ? ` ${label}` : '资源'}「${id}」？`)) return false
+    if (!window.confirm(`确认删除${label ? ` ${label}` : '实体'}「${id}」？`)) return false
     deletingId.value = id
     try {
       await ops.deleteItem(kind, id)
-      toast.showToast('success', `已删除${label ? ` ${label}` : '资源'}「${id}」`)
+      toast.showToast('success', `已删除${label ? ` ${label}` : '实体'}「${id}」`)
       await refreshKind(kind)
       if (selectedId.value === `${kind}:${id}`) selectKey(null)
       return true
@@ -258,7 +258,7 @@ function toKindState(
   }
 }
 
-function fallbackCaps(): ResourceCapabilities {
+function fallbackCaps(): EntityCapabilities {
   return {
     zip_upload: false,
     independent_form: false,

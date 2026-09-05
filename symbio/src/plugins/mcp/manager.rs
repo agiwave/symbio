@@ -69,7 +69,7 @@ struct CachedTools {
 /// per-server 并发锁：用于序列化同一 server 的 stdio 调用
 ///
 /// stdio transport 每次都 spawn 新进程，但 MCP 规范下多并发调用
-/// 同一 server 仍可能导致 server 端资源耗尽。锁可以保证公平排队。
+/// 同一 server 仍可能导致 server 端实体耗尽。锁可以保证公平排队。
 pub type McpServerLock = Arc<Mutex<()>>;
 
 /// session_id 缓存（HTTP transport）
@@ -294,7 +294,7 @@ impl McpManager {
     /// - `Ok(result)` 包含 tool count、协议版本、server 名称/版本、instructions
     /// - `Err(e)` 表示失败
     ///
-    /// 连接测试能力：供统一 `resources` 连接测试/表单复用（旧 `servers/test` 已移除，待接入）
+    /// 连接测试能力：供统一 `entities` 连接测试/表单复用（旧 `servers/test` 已移除，待接入）
     #[allow(dead_code)]
     pub async fn test_connection(
         &self,

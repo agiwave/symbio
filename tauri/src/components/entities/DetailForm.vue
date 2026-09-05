@@ -1,14 +1,14 @@
 <!--
   DetailForm — 定义驱动的通用详情渲染器（机制内置，唯一实现）
 
-  消费后端 `resources/detail` 下发的 DetailDefinition（设计基准 = Model.vue
+  消费后端 `entities/detail` 下发的 DetailDefinition（设计基准 = Model.vue
   表单复杂度：预设联动 / 动态候选 / 密码显隐 / 数字范围 / 折叠分区 /
   条件徽标动作 / id·name 派生回落链），动态生成交互不复杂的详情页——
   新增此类详情 = 后端下发定义即可，前端零页面/零 ts 开发。
 
   绑定模式（definition.binding）：
-  - upload  ：实体资源。预填 item.config；保存 emit save（机制通道
-              resources/upload manifest，后端 validate_manifest 兜底）。
+  - upload  ：实体实体。预填 item.config；保存 emit save（机制通道
+              entities/upload manifest，后端 validate_manifest 兜底）。
   - config  ：配置分区。mount 时经 load_path 拉取，保存经 save_path
               自持写回（后端 config/set 通道），内部管理 saving/toast。
 
@@ -169,17 +169,17 @@ import type {
   DetailCondition,
   DetailDefinition,
   DetailField,
-  ResourceCapabilities,
-  ResourceSummary,
-} from '@/schemas/resources'
+  EntityCapabilities,
+  EntitySummary,
+} from '@/schemas/entities'
 
 const props = withDefaults(
   defineProps<{
     /** 下发的详情页定义（本渲染器的唯一形态来源） */
     definition: DetailDefinition
-    /** 选中的资源（null = 新建模式；upload 绑定据此预填 item.config） */
-    item: ResourceSummary | null
-    capabilities: ResourceCapabilities
+    /** 选中的实体（null = 新建模式；upload 绑定据此预填 item.config） */
+    item: EntitySummary | null
+    capabilities: EntityCapabilities
     saving?: boolean
     testing?: boolean
     deleting?: boolean
@@ -190,7 +190,7 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  /** 统一保存入口：id 为资源目录名，manifest 为完整配置，extra 合并动作 payload */
+  /** 统一保存入口：id 为实体目录名，manifest 为完整配置，extra 合并动作 payload */
   save: [payload: { id: string; manifest: Record<string, unknown>; skipValidation: boolean }]
   test: []
   delete: []
@@ -219,7 +219,7 @@ function valueOf(key: string): unknown {
   if (key === 'is_existing') return isExisting.value
   if (key === 'is_default') return isDefault.value
   if (key.startsWith('cap.')) {
-    const name = key.slice(4) as keyof ResourceCapabilities
+    const name = key.slice(4) as keyof EntityCapabilities
     return props.capabilities[name]
   }
   return form[key]
@@ -356,7 +356,7 @@ function generateId(base: string): string {
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9-_]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'resource'
+      .replace(/^-+|-+$/g, '') || 'entity'
   let id = slug
   let counter = 2
   while (used.has(id)) {
@@ -370,7 +370,7 @@ function buildSave(): { id: string; manifest: Record<string, unknown> } {
   const manifest: Record<string, unknown> = { ...form }
   let id = (props.item?.id as string) ?? ''
   if (!id) {
-    id = generateId(firstNonEmpty(props.definition.id_from) || 'resource')
+    id = generateId(firstNonEmpty(props.definition.id_from) || 'entity')
   }
   manifest.id = id
   // 名称回落链：首个非空字段补 name（不覆盖用户已填的 name）

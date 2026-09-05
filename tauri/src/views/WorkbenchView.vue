@@ -1,22 +1,22 @@
 <!--
-  WorkbenchView — 统一资源管理页（全 App 唯一资源页面，机制化配置驱动）
+  WorkbenchView — 统一实体管理页（全 App 唯一实体页面，机制化配置驱动）
 
-  页面与 ts 均为复用的标准件：路由参数 + 后端注册表自动配置，新增资源类型
-  **零页面/零 ts 开发**（仅当详情需要专属编辑器时，才向 resourceTypes 注册表
+  页面与 ts 均为复用的标准件：路由参数 + 后端注册表自动配置，新增实体类型
+  **零页面/零 ts 开发**（仅当详情需要专属编辑器时，才向 entityTypes 注册表
   登记一个差异化组件——这是唯一的逐特性扩展位）。
 
   两种模式（由路由参数自动判定，逻辑在 useWorkbenchView）：
 
-  1. entity（/resources/:types? 、 /settings）：
+  1. entity（/entities/:types? 、 /settings）：
      侧边栏由 MainLayout 应用外壳承担；类别 = providers 注册表解析 :types；
      混合平排列表；详情/编辑按 kind / kind:config_type 注册表分发，
      未注册走通用兜底（zip 面板 / JSON 表单 / 只读详情）。
-  2. container（/container/:kind/:id/resources 、 /agent/:agentId/resources）：
+  2. container（/container/:kind/:id/entities 、 /agent/:agentId/entities）：
      整页推入（MainLayout 之外），自带侧边栏 = ProviderInfo.container_kinds
      （子类别导航 + 计数角标 + 返回键）；详情/新建 = 标准文本编辑器
      （路径模板 / 内容模板均后端下发）。
 
-  协议同一套 `${prefix}/resources/*`，容器语义仅多 container 字段。
+  协议同一套 `${prefix}/entities/*`，容器语义仅多 container 字段。
 -->
 <template>
   <div :class="isContainer ? 'workbench-page fullscreen' : 'workbench-page'">
@@ -57,22 +57,22 @@
       <!-- ===== 列表：entity = 混合平排（尊重服务器返回顺序）；
              container = 当前子类别条目（id 为容器内相对路径） ===== -->
       <template #list>
-        <div v-if="!isContainer" class="resource-list" role="listbox" aria-label="资源列表">
-          <ResourceCard
+        <div v-if="!isContainer" class="entity-list" role="listbox" aria-label="实体列表">
+          <EntityCard
             v-for="item in items"
             :key="`${item.kind}:${item.id}`"
             :title="item.name || item.id"
             :subtitle="isCompact ? undefined : (item.description || item.summary)"
             :status="cardStatus(item)"
             :status-title="item.status_detail || item.status"
-            :icon="getResourceIconFor(item)"
+            :icon="getEntityIconFor(item)"
             :show-status="showStatusFor(item)"
             :is-active="selectedId === `${item.kind}:${item.id}`"
             @click="select(`${item.kind}:${item.id}`)"
           />
         </div>
         <div v-else class="entry-list">
-          <ResourceCard
+          <EntityCard
             v-for="e in kindEntries"
             :key="e.id"
             :title="e.name"
@@ -88,11 +88,11 @@
 
       <template #empty>
         <template v-if="isContainer">
-          <p>暂无{{ activeKindMeta?.label ?? '资源' }}</p>
+          <p>暂无{{ activeKindMeta?.label ?? '实体' }}</p>
           <p class="hint">点击右上角「新建」添加{{ activeKindMeta?.label ?? '' }}</p>
         </template>
         <template v-else>
-          <p>{{ isMulti ? '暂无资源' : `暂无 ${title}` }}</p>
+          <p>{{ isMulti ? '暂无实体' : `暂无 ${title}` }}</p>
           <p class="hint">{{ emptyHint }}</p>
         </template>
       </template>
@@ -126,8 +126,8 @@
           <!-- 多类型：先选类型（单类型 createKind 已在 onNew 确定） -->
           <div v-if="!createKind" class="create-panel">
             <div class="create-card">
-              <h3 class="create-title">新建资源</h3>
-              <p class="create-desc">请选择要创建的资源类型</p>
+              <h3 class="create-title">新建实体</h3>
+              <p class="create-desc">请选择要创建的实体类型</p>
               <div class="type-choice-list">
                 <button
                   v-for="d in creatableInActive"
@@ -147,7 +147,7 @@
           </div>
 
           <template v-else>
-            <!-- 注册的专属 editor（model）；:key 确保切换资源/类型时重挂载，避免表单状态残留 -->
+            <!-- 注册的专属 editor（model）；:key 确保切换实体/类型时重挂载，避免表单状态残留 -->
             <component
               :is="createEditor(createKind)"
               v-if="createEditor(createKind)"
@@ -160,7 +160,7 @@
               @cancel="cancelCreate"
             />
 
-            <!-- 定义驱动的新建表单（后端 resources/detail 空态定义，如 model） -->
+            <!-- 定义驱动的新建表单（后端 entities/detail 空态定义，如 model） -->
             <DetailForm
               v-else-if="detailDefinition"
               :key="'create-def:' + (createKind || '')"
@@ -177,7 +177,7 @@
             <div v-else-if="capsOf(createKind).zip_upload" class="create-panel">
               <div class="create-card">
                 <h3 class="create-title">新建 {{ kindLabel(createKind) }}</h3>
-                <p class="create-desc">ZIP 中的内容将解压为 &lt;目录名&gt;/，文件名即资源目录名</p>
+                <p class="create-desc">ZIP 中的内容将解压为 &lt;目录名&gt;/，文件名即实体目录名</p>
                 <input
                   ref="zipInput"
                   type="file"
@@ -216,7 +216,7 @@
         </template>
 
         <!-- ============== 选中项 ============== -->
-        <!-- container：标准文本编辑器（resources/get content + resources/put 写回） -->
+        <!-- container：标准文本编辑器（entities/get content + entities/put 写回） -->
         <div v-else-if="isContainer && selectedEntry" class="entry-editor">
           <div class="editor-head">
             <div class="title-block">
@@ -268,7 +268,7 @@
             @created="onEditorCreated"
           />
 
-          <!-- 定义驱动的详情表单（后端 resources/detail 下发，如 model / 设置三分区） -->
+          <!-- 定义驱动的详情表单（后端 entities/detail 下发，如 model / 设置三分区） -->
           <DetailForm
             v-else-if="detailDefinition"
             :key="'def:' + selected.kind + ':' + selected.item.id"
@@ -304,15 +304,15 @@
                 {{ deletingId === selected.item.id ? '删除中…' : '删除' }}
               </button>
             </div>
-            <ResourceDetailPanel :item="selected.item" />
+            <EntityDetailPanel :item="selected.item" />
           </template>
         </template>
 
         <!-- ============== 未选中 ============== -->
         <div v-else-if="isContainer" class="no-selection">
-          <p>← 选择一个{{ activeKindMeta?.label ?? '资源' }}查看/编辑</p>
+          <p>← 选择一个{{ activeKindMeta?.label ?? '实体' }}查看/编辑</p>
         </div>
-        <ResourceDetailPanel v-else :item="null" />
+        <EntityDetailPanel v-else :item="null" />
       </template>
     </Workbench>
 
@@ -325,17 +325,17 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Workbench from '@/components/common/Workbench.vue'
-import ResourceCard from '@/components/common/ResourceCard.vue'
+import EntityCard from '@/components/common/EntityCard.vue'
 import Toast from '@/components/common/Toast.vue'
-import ResourceDetailPanel from '@/components/resources/ResourceDetailPanel.vue'
-import DetailForm from '@/components/resources/DetailForm.vue'
+import EntityDetailPanel from '@/components/entities/EntityDetailPanel.vue'
+import DetailForm from '@/components/entities/DetailForm.vue'
 import { useWorkbenchView } from '@/composables/useWorkbenchView'
-import { getResourceIconFor } from '@/registry/resourceTypes'
-import type { ResourceSummary } from '@/schemas/resources'
-import { subscribe, subscribeResourceStatus } from '@/services/eventBus'
+import { getEntityIconFor } from '@/registry/entityTypes'
+import type { EntitySummary } from '@/schemas/entities'
+import { subscribe, subscribeEntityStatus } from '@/services/eventBus'
 
 const props = defineProps<{
-  /** entity 模式：路由 :types 参数（'all' | 逗号分隔 kind | 单 kind） */
+  /** leaf 模式：路由 :types 参数（'all' | 逗号分隔 kind | 单 kind） */
   typesParam?: string
   /** container 模式：容器所属 provider kind（如 'agent'） */
   containerKind?: string
@@ -345,7 +345,7 @@ const props = defineProps<{
 
 const router = useRouter()
 
-const pageMode = props.containerKind ? 'container' : 'entity'
+const pageMode = props.containerKind ? 'container' : 'leaf'
 
 // === 唯一页面逻辑（useWorkbenchView，可单测） ===
 const {
@@ -420,14 +420,14 @@ const {
 /** 列表计数（has-list-content 判定：container 看当前类别，entity 看总数） */
 const listCount = computed(() => (isContainer ? kindEntries.value.length : totalCount.value))
 
-/** 返回容器条目所在的顶层资源列表页 */
+/** 返回容器条目所在的顶层实体列表页 */
 function goBack() {
-  router.push(`/resources/${props.containerKind}`)
+  router.push(`/entities/${props.containerKind}`)
 }
 
 // === entity 列表展示辅助 ===
 function cardStatus(
-  item: ResourceSummary
+  item: EntitySummary
 ): 'active' | 'working' | 'disabled' | 'warning' | 'error' | 'muted' {
   switch (item.status) {
     case 'working': return 'working'
@@ -441,11 +441,11 @@ function cardStatus(
 }
 
 /** 该列表项所属类型是否显示状态点（后端 ProviderInfo.status_indicator；缺省 true） */
-function showStatusFor(item: ResourceSummary): boolean {
+function showStatusFor(item: EntitySummary): boolean {
   return activeTypes.value.find((p) => p.kind === item.kind)?.status_indicator ?? true
 }
 
-// === entity：zip 文件选择 → 统一保存流 ===
+// === leaf：zip 文件选择 → 统一保存流 ===
 const zipInput = ref<HTMLInputElement | null>(null)
 
 function onZipSelected(e: Event) {
@@ -465,7 +465,7 @@ function removeSelectedEntry() {
   if (entry) void remove(entry.kind, entry.id)
 }
 
-// === 机制约定：专属 editor 创建资源后上报 id → 刷新清单并选中之 ===
+// === 机制约定：专属 editor 创建实体后上报 id → 刷新清单并选中之 ===
 async function onEditorCreated(id: string) {
   const kind = createKind.value ?? selected.value?.kind
   cancelCreate()
@@ -476,7 +476,7 @@ async function onEditorCreated(id: string) {
 }
 
 // === 实时订阅（entity；事件总线推送，非轮询） ===
-// ① resource 状态事件 → 即时补丁列表项状态角标（不重拉清单）；
+// ① entity 状态事件 → 即时补丁列表项状态角标（不重拉清单）；
 // ② 该 kind 的任意 bus 事件 → 防抖刷新该类清单（机制级实时能力：
 //    会话新建/删除/标题变更、模型连通状态等后端变化自动反映到列表）。
 let unsubscribers: Array<() => void> = []
@@ -498,7 +498,7 @@ onMounted(() => {
   loadAll()
   if (!isContainer) {
     unsubscribers = activeTypes.value.flatMap((d) => [
-      subscribeResourceStatus(d.kind, ({ id, status, status_detail }) => {
+      subscribeEntityStatus(d.kind, ({ id, status, status_detail }) => {
         const it = typeStates.value[d.kind]?.items.find((x) => x.id === id)
         if (it) {
           it.status = status
@@ -541,7 +541,7 @@ watch(containerIdRef, () => {
 }
 
 /* ============== 列表 ============== */
-.resource-list,
+.entity-list,
 .entry-list {
   flex: 1;
   overflow-y: auto;
@@ -559,7 +559,7 @@ watch(containerIdRef, () => {
   white-space: nowrap;
 }
 
-/* tag 系列用在 ResourceCard 的 #meta 插槽内容上（scoped 样式不穿透插槽，须本地定义） */
+/* tag 系列用在 EntityCard 的 #meta 插槽内容上（scoped 样式不穿透插槽，须本地定义） */
 .tag {
   padding: 0.1rem 0.4rem;
   background: var(--surface-sunken);

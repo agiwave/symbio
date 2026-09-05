@@ -1,5 +1,5 @@
 /**
- * useWorkbenchView / useResourceProviders 核心逻辑单测（node 环境）
+ * useWorkbenchView / useEntityProviders 核心逻辑单测（node 环境）
  *
  * 覆盖（纯函数，无 Vue 实例）：
  * - buildMixedItems：混合平排展平（尊重服务器返回顺序）
@@ -8,8 +8,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import { buildMixedItems, isManagerCreatable } from '../useWorkbenchView'
-import { resolveActiveTypes } from '../useResourceProviders'
-import type { ProviderInfo, ResourceSummary } from '@/schemas/resources'
+import { resolveActiveTypes } from '../useEntityProviders'
+import type { ProviderInfo, EntitySummary } from '@/schemas/entities'
 
 const CAP = {
   zip_upload: false,
@@ -32,8 +32,8 @@ function provider(kind: string, order: number, supports_upload: boolean): Provid
   }
 }
 
-function item(kind: string, id: string, name?: string): ResourceSummary {
-  return { kind, id, name: name ?? id, status: 'active' } as ResourceSummary
+function item(kind: string, id: string, name?: string): EntitySummary {
+  return { kind, id, name: name ?? id, status: 'active' } as EntitySummary
 }
 
 // ============ buildMixedItems ============

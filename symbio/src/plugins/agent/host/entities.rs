@@ -1,18 +1,18 @@
-//! 统一资源协议（`resources/*`）接入 —— kind = `agent`。
+//! 统一实体协议（`entities/*`）接入 —— kind = `agent`。
 //!
 //! ## 与 [`super::handlers`] 的分工
 //!
-//! - `resources/list`：走 [`crate::symbio_core::resources::dispatch`] 公共流程，
-//!   本模块 override [`ResourceProvider::list_items`] 直接枚举 [`BundleStore`]；
-//! - `resources/get` / `upload` / `delete`：dispatch 默认实现走 EntityStore
+//! - `entities/list`：走 [`crate::symbio_core::entities::dispatch`] 公共流程，
+//!   本模块 override [`EntityProvider::list_items`] 直接枚举 [`BundleStore`]；
+//! - `entities/get` / `upload` / `delete`：dispatch 默认实现走 EntityStore
 //!   （`category()` 语义），而 bundle 由 [`BundleStore`] 自管目录与 manifest
 //!   校验（zip-slip 防护 / 版本硬门槛），故由 handlers 直接拦截实现，
-//!   响应形状与统一协议保持一致（`ResourceSummary` / `ResourceUploadResponse`）。
+//!   响应形状与统一协议保持一致（`EntitySummary` / `EntityUploadResponse`）。
 
 use super::plugin::AgentPlugin;
-use super::store::{classify_resource_path, BundleScope, BundleStore};
-use crate::symbio_core::resources::{
-    ResourceProvider, ResourceSummary, ResourceUploadResponse,
+use super::store::{classify_entity_path, BundleScope, BundleStore};
+use crate::symbio_core::entities::{
+    EntityProvider, EntitySummary, EntityUploadResponse,
 };
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginError, WORKDIR};
 use async_trait::async_trait;
@@ -26,9 +26,9 @@ impl AgentPlugin {
 }
 
 #[async_trait]
-impl ResourceProvider for AgentPlugin {
+impl EntityProvider for AgentPlugin {
     fn kind(&self) -> &'static str {
-        crate::symbio_core::resources::RESOURCE_AGENT
+        crate::symbio_core::entities::ENTITY_AGENT
     }
 
     fn category(&self) -> Option<&'static str> {
@@ -40,15 +40,15 @@ impl ResourceProvider for AgentPlugin {
     async fn list_items(
         &self,
         ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<Vec<ResourceSummary>, PluginError> {
+    ) -> Result<Vec<EntitySummary>, PluginError> {
         let workdir = ctx.get(crate::symbio_core::WORKDIR);
         let store = BundleStore::new(workdir.as_deref());
         Ok(store
             .list()
             .into_iter()
             .map(|r| {
-                let mut it = ResourceSummary::new(
-                    crate::symbio_core::resources::RESOURCE_AGENT,
+                let mut it = EntitySummary::new(
+                    crate::symbio_core::entities::ENTITY_AGENT,
                     r.manifest.id.clone(),
                     if r.manifest.name.is_empty() {
                         r.manifest.id.clone()
@@ -63,7 +63,7 @@ impl ResourceProvider for AgentPlugin {
                 }
                 // 类型特有扩展：版本 / 规格 / provider 数 / 来源层级（前端按需展示）
                 // config_type = "bundle"：前端项级 editor 分发键（agent:bundle →
-                // Agent 内部资源管理视图；kind 级仍无 editor，zip 新建流程不受影响）
+                // Agent 内部实体管理视图；kind 级仍无 editor，zip 新建流程不受影响）
                 it.extra = serde_json::json!({
                     "config_type": "bundle",
                     "version": r.manifest.version,
@@ -79,27 +79,27 @@ impl ResourceProvider for AgentPlugin {
             .collect())
     }
 
-    // ==================== 容器子资源（统一协议 container 语义） ====================
+    // ==================== 容器子实体（统一协议 container 语义） ====================
     //
-    // bundle 条目即容器：内部 prompts / skills / mcps 经同一套 resources/* 协议
+    // bundle 条目即容器：内部 prompts / skills / mcps 经同一套 entities/* 协议
     // 访问（payload.container = bundle id），复用 BundleStore 的沙箱化方法
-    // （路径白名单 classify_resource_path + absolutize 双重闸门）。
+    // （路径白名单 classify_entity_path + absolutize 双重闸门）。
 
     async fn list_container_items(
         &self,
         ctx: &Arc<dyn InvokeRequest>,
         sub_kind: Option<&str>,
         container: &str,
-    ) -> Result<Vec<ResourceSummary>, PluginError> {
+    ) -> Result<Vec<EntitySummary>, PluginError> {
         let store = Self::store_of(ctx);
         let entries = store
-            .list_resources(container)
+            .list_entities(container)
             .map_err(PluginError::ValidationError)?;
         Ok(entries
             .into_iter()
             .filter(|e| sub_kind.is_none_or(|k| e.kind == k))
             .map(|e| {
-                let mut it = ResourceSummary::new(&e.kind, e.path.clone(), e.name.clone());
+                let mut it = EntitySummary::new(&e.kind, e.path.clone(), e.name.clone());
                 it.status = "active".to_string();
                 it.extra = serde_json::json!({
                     "container": container,
@@ -116,13 +116,13 @@ impl ResourceProvider for AgentPlugin {
         ctx: &Arc<dyn InvokeRequest>,
         id: &str,
         container: &str,
-    ) -> Result<ResourceSummary, PluginError> {
+    ) -> Result<EntitySummary, PluginError> {
         let store = Self::store_of(ctx);
-        let (kind, name) = classify_resource_path(id).map_err(PluginError::ValidationError)?;
+        let (kind, name) = classify_entity_path(id).map_err(PluginError::ValidationError)?;
         let content = store
-            .read_resource(container, id)
+            .read_entity(container, id)
             .map_err(PluginError::ValidationError)?;
-        let mut it = ResourceSummary::new(kind, id, name);
+        let mut it = EntitySummary::new(kind, id, name);
         it.status = "active".to_string();
         it.extra = serde_json::json!({
             "container": container,
@@ -137,18 +137,18 @@ impl ResourceProvider for AgentPlugin {
         id: &str,
         content: &str,
         container: &str,
-    ) -> Result<ResourceUploadResponse, PluginError> {
+    ) -> Result<EntityUploadResponse, PluginError> {
         let store = Self::store_of(ctx);
-        let (kind, _) = classify_resource_path(id).map_err(PluginError::ValidationError)?;
+        let (kind, _) = classify_entity_path(id).map_err(PluginError::ValidationError)?;
         let existed = store
-            .list_resources(container)
+            .list_entities(container)
             .map_err(PluginError::ValidationError)?
             .iter()
             .any(|e| e.path == id);
         store
-            .write_resource(container, id, content)
+            .write_entity(container, id, content)
             .map_err(PluginError::ValidationError)?;
-        Ok(ResourceUploadResponse {
+        Ok(EntityUploadResponse {
             kind: kind.to_string(),
             id: id.to_string(),
             created: !existed,
@@ -160,13 +160,13 @@ impl ResourceProvider for AgentPlugin {
         ctx: &Arc<dyn InvokeRequest>,
         id: &str,
         container: &str,
-    ) -> Result<ResourceUploadResponse, PluginError> {
+    ) -> Result<EntityUploadResponse, PluginError> {
         let store = Self::store_of(ctx);
-        let (kind, _) = classify_resource_path(id).map_err(PluginError::ValidationError)?;
+        let (kind, _) = classify_entity_path(id).map_err(PluginError::ValidationError)?;
         store
-            .delete_resource(container, id)
+            .delete_entity(container, id)
             .map_err(PluginError::ValidationError)?;
-        Ok(ResourceUploadResponse {
+        Ok(EntityUploadResponse {
             kind: kind.to_string(),
             id: id.to_string(),
             created: false,

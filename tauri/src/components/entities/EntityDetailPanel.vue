@@ -1,12 +1,12 @@
 <!--
-  ResourceDetailPanel — 统一资源详情（通用展示兜底）
+  EntityDetailPanel — 统一实体详情（通用展示兜底）
 
-  展示 ResourceSummary 的公共字段 + extra 扩展字段。
+  展示 EntitySummary 的公共字段 + extra 扩展字段。
   作为 WorkbenchView 的通用详情兜底；专属表单类型（如 model）
   由视图的 FORM_COMPONENTS 注册表接管，不经过本面板。
 -->
 <template>
-  <div v-if="item" class="resource-detail">
+  <div v-if="item" class="entity-detail">
     <header class="detail-header">
       <h2 class="detail-title">{{ displayName }}</h2>
       <span class="detail-status" :class="`status-${item.status}`" :title="item.status_detail">
@@ -35,15 +35,15 @@
     </template>
   </div>
   <div v-else class="no-selection">
-    <p>← 选择一个资源查看详情</p>
+    <p>← 选择一个实体查看详情</p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ResourceSummary } from '@/schemas/resources'
+import type { EntitySummary } from '@/schemas/entities'
 
-const props = defineProps<{ item: ResourceSummary | null }>()
+const props = defineProps<{ item: EntitySummary | null }>()
 
 const STATUS_LABELS: Record<string, string> = {
   active: '可用',
@@ -90,7 +90,7 @@ function formatValue(v: unknown): string {
 </script>
 
 <style scoped>
-.resource-detail {
+.entity-detail {
   flex: 1;
   padding: 1.5rem 2rem;
   overflow-y: auto;

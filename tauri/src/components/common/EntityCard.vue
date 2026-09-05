@@ -1,7 +1,7 @@
 <!--
-  ResourceCard — 通用"列表项"卡片
+  EntityCard — 通用"列表项"卡片
 
-  适用于所有 ResourceShell 的左侧列表：Model Provider / MCP Server / Skill / Agent。
+  适用于所有 EntityShell 的左侧列表：Model Provider / MCP Server / Skill / Agent。
 
   视觉风格对齐 SessionCard：
   - 状态点 + 标题行
@@ -10,7 +10,7 @@
 -->
 <template>
   <div
-    class="resource-card"
+    class="entity-card"
     :class="{ active: isActive, disabled }"
     role="option"
     :tabindex="disabled ? -1 : 0"
@@ -56,7 +56,7 @@ interface Tag {
   kind?: 'default' | 'primary' | 'success' | 'warn' | 'info' | 'muted'
 }
 
-interface ResourceCardProps {
+interface EntityCardProps {
   title: string
   subtitle?: string
   status?: 'active' | 'working' | 'disabled' | 'warning' | 'error' | 'muted'
@@ -66,13 +66,13 @@ interface ResourceCardProps {
   isActive?: boolean
   disabled?: boolean
   tags?: Tag[]
-  /** 类型图标组件（资源注册表下发，如设置分区图标） */
+  /** 类型图标组件（实体注册表下发，如设置分区图标） */
   icon?: Component
   /** 是否显示状态点（后端 status_indicator 控制；无状态列表为 false） */
   showStatus?: boolean
 }
 
-const props = withDefaults(defineProps<ResourceCardProps>(), {
+const props = withDefaults(defineProps<EntityCardProps>(), {
   status: 'active',
   statusTitle: '',
   badgeKind: 'default',
@@ -91,7 +91,7 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 </script>
 
 <style scoped>
-.resource-card {
+.entity-card {
   margin: var(--space-1) var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: var(--surface-overlay);
@@ -104,17 +104,17 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
   user-select: none;
 }
 
-.resource-card:hover {
+.entity-card:hover {
   border-color: var(--accent);
   box-shadow: var(--shadow-1);
 }
 
-.resource-card.active {
+.entity-card.active {
   border-color: var(--accent);
   background: var(--surface-selected);
 }
 
-.resource-card.disabled {
+.entity-card.disabled {
   opacity: 0.55;
 }
 

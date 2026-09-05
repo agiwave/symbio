@@ -787,7 +787,7 @@ impl SessionPlugin {
     ///
     /// 在首个用户消息落盘后调用；规则与 [`super::types::Session::display_title`]
     /// 一致（首条用户文本消息首行、限长）。持久化后发布 session 总线事件，
-    /// 驱动统一资源列表的防抖刷新（机制级实时能力）。
+    /// 驱动统一实体列表的防抖刷新（机制级实时能力）。
     pub(crate) async fn ensure_auto_title(&self, session_id: &str) {
         use crate::symbio_core::event_bus::EventBus;
 
@@ -825,14 +825,14 @@ impl SessionPlugin {
         )
         .await;
 
-        // 资源实时状态协议：把会话 busy/idle 同步推送为 resource 事件，
-        // 供未来统一资源列表/详情按 id 即时刷新状态角标（初始态由 resources/list 兜底）。
+        // 实体实时状态协议：把会话 busy/idle 同步推送为 entity 事件，
+        // 供未来统一实体列表/详情按 id 即时刷新状态角标（初始态由 entities/list 兜底）。
         use crate::symbio_core::event_bus::EventBus;
         let id = state.request_id_str();
         match status {
             "busy" => {
-                EventBus::publish_resource_status(
-                    crate::symbio_core::resources::RESOURCE_SESSION,
+                EventBus::publish_entity_status(
+                    crate::symbio_core::entities::ENTITY_SESSION,
                     &id,
                     "working",
                     Some("处理中…".to_string()),
@@ -840,8 +840,8 @@ impl SessionPlugin {
                 .await;
             }
             "idle" => {
-                EventBus::publish_resource_status(
-                    crate::symbio_core::resources::RESOURCE_SESSION,
+                EventBus::publish_entity_status(
+                    crate::symbio_core::entities::ENTITY_SESSION,
                     &id,
                     "active",
                     None,

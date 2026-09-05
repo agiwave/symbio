@@ -596,12 +596,12 @@ impl Plugin for HomePlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
-            "resources/providers" => {
-                // 宿主级资源 provider 注册表：前端启动时拉取，动态生成左侧导航与统一资源页。
+            "entities/providers" => {
+                // 宿主级实体 provider 注册表：前端启动时拉取，动态生成左侧导航与统一实体页。
                 // 顺序可由服务器端配置覆盖（symbio.provider_order: {kind: number}），
                 // unset 的 kind 走注册表默认 order——导航顺序无需改代码即可运行时调整。
                 let order_override = self.provider_order_override().await;
-                let resp = crate::symbio_core::resources::providers_response_with_overrides(
+                let resp = crate::symbio_core::entities::providers_response_with_overrides(
                     &order_override,
                 );
                 return Ok(PluginPayload::new(&resp));

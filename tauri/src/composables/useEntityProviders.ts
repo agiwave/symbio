@@ -1,21 +1,21 @@
 /**
- * 运行时资源 provider store（模块级单例）
+ * 运行时实体 provider store（模块级单例）
  *
- * 前端在一处拉取后端 `resources/providers` 注册表，供多处共享：MainLayout
- * 据此动态生成左侧"资源"导航（useNavRailItems），WorkbenchView 据此得到统一
- * 资源页的类型集合与容器子类别。与 useToast 一样是模块级单例，无需 Pinia。
+ * 前端在一处拉取后端 `entities/providers` 注册表，供多处共享：MainLayout
+ * 据此动态生成左侧"实体"导航（useNavRailItems），WorkbenchView 据此得到统一
+ * 实体页的类型集合与容器子类别。与 useToast 一样是模块级单例，无需 Pinia。
  *
  * 分层原则：
  * - 类型的**存在/能力/前缀/顺序/标签**来自后端 ProviderInfo（权威）
- * - 前端只补充 UI 映射（editor 组件、icon）——见 registry/resourceTypes.ts
+ * - 前端只补充 UI 映射（editor 组件、icon）——见 registry/entityTypes.ts
  */
 
 import { computed, shallowRef } from 'vue'
 import { useRoute } from 'vue-router'
-import { fetchProviders } from '@/services/resources'
-import type { ProviderInfo, ResourceCapabilities } from '@/schemas/resources'
-import { RESOURCE_LABELS } from '@/schemas/resources'
-import { getResourceIcon } from '@/registry/resourceTypes'
+import { fetchProviders } from '@/services/entities'
+import type { ProviderInfo, EntityCapabilities } from '@/schemas/entities'
+import { ENTITY_LABELS } from '@/schemas/entities'
+import { getEntityIcon } from '@/registry/entityTypes'
 import type { NavRailItem } from '@/components/common/NavRail.vue'
 import { logger } from '@/utils/logger'
 
@@ -46,7 +46,7 @@ export async function loadProviders(): Promise<void> {
 }
 
 /** 全部已注册 provider（按 order 排序） */
-export function useResourceProviders() {
+export function useEntityProviders() {
   const sortedProviders = computed(() =>
     [...providers.value].sort((a, b) => a.order - b.order)
   )
@@ -56,11 +56,11 @@ export function useResourceProviders() {
     return providers.value.find((p) => p.kind === kind) ?? null
   }
 
-  /** kind 展示标签（后端 label 优先，兜底 RESOURCE_LABELS，再兜底 kind） */
+  /** kind 展示标签（后端 label 优先，兜底 ENTITY_LABELS，再兜底 kind） */
   function labelOf(kind: string, fallback?: string): string {
     const p = getProvider(kind)
     if (p?.label) return p.label
-    return RESOURCE_LABELS[kind] ?? fallback ?? kind
+    return ENTITY_LABELS[kind] ?? fallback ?? kind
   }
 
   /** kind 能力（provider 不存在 / 未加载时返回只读空态） */
@@ -77,15 +77,15 @@ export function useResourceProviders() {
     )
   }
 
-  /** 可在资源管理器内创建/删除的类型（supports_upload && 可写 && 非只读） */
+  /** 可在实体管理器内创建/删除的类型（supports_upload && 可写 && 非只读） */
   const creatableProviders = computed(() =>
     sortedProviders.value.filter(
       (p) => p.supports_upload && p.capabilities.mutable && !p.capabilities.read_only
     )
   )
 
-  /** 可在资源管理器内删除的类型（供 canDelete 判断，选中项单独判定） */
-  function isDeletable(p: { supports_upload?: boolean; capabilities?: ResourceCapabilities }): boolean {
+  /** 可在实体管理器内删除的类型（供 canDelete 判断，选中项单独判定） */
+  function isDeletable(p: { supports_upload?: boolean; capabilities?: EntityCapabilities }): boolean {
     return Boolean(p.supports_upload && p.capabilities?.mutable && !p.capabilities.read_only)
   }
 
@@ -102,7 +102,7 @@ export function useResourceProviders() {
 /**
  * 解析路由 `:types` 参数 → 有序活动 ProviderInfo[]（运行时，基于已加载 provider）。
  *
- * - `undefined / '' / 'all'` → 所有 `supports_upload` 的类型（可管理的资源；session 等
+ * - `undefined / '' / 'all'` → 所有 `supports_upload` 的类型（可管理的实体；session 等
  *   不可管理类型默认不进聚合页，但可通过显式 kind 访问）
  * - 逗号分隔 → trim / 去重 / 过滤未知 kind（记 warn 后丢弃）
  * - 过滤后为空 → 回退 all
@@ -126,7 +126,7 @@ export function resolveActiveTypes(
       seen.add(kind)
       out.push(p)
     } else {
-      logger.warn('useResourceProviders', `未注册的资源类型 "${kind}"，已忽略`)
+      logger.warn('useEntityProviders', `未注册的实体类型 "${kind}"，已忽略`)
     }
   }
   return out.length ? out.sort((a, b) => a.order - b.order) : defaultTypes
@@ -137,8 +137,8 @@ export function resolveActiveTypes(
 /**
  * 机制内路由约定：kind → 顶层导航路由目标。
  *
- * 会话（session）与设置（setting）走专用入口；其余 kind 一律进统一资源页
- * `/resources/{kind}`。新增资源类型由后端注册表自动生成导航，本函数无需改动。
+ * 会话（session）与设置（setting）走专用入口；其余 kind 一律进统一实体页
+ * `/entities/{kind}`。新增实体类型由后端注册表自动生成导航，本函数无需改动。
  */
 export function navTargetOf(kind: string): string {
   switch (kind) {
@@ -147,24 +147,24 @@ export function navTargetOf(kind: string): string {
     case 'setting':
       return '/settings'
     default:
-      return `/resources/${kind}`
+      return `/entities/${kind}`
   }
 }
 
 /**
  * 应用外壳侧边栏：providers 注册表 → NavRail 项（MainLayout 消费）。
  * 与 WorkbenchView 的类别侧边栏同源同构——整个 App 的导航/类别都由后端
- * 注册表驱动，图标复用 resourceTypes 注册表，前端零硬编码类型清单。
+ * 注册表驱动，图标复用 entityTypes 注册表，前端零硬编码类型清单。
  */
 export function useNavRailItems() {
   const route = useRoute()
-  const { providers } = useResourceProviders()
+  const { providers } = useEntityProviders()
 
   const navItems = computed<NavRailItem[]>(() =>
     providers.value.map((p) => ({
       key: p.kind,
       label: p.label,
-      icon: getResourceIcon(p.kind) ?? undefined,
+      icon: getEntityIcon(p.kind) ?? undefined,
       active: route.path === navTargetOf(p.kind),
     }))
   )

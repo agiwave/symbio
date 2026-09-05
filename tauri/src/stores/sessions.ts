@@ -17,7 +17,7 @@
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
  *                      写入：useChatConnection 收 Status 事件时
- *                      读取：会话列表项状态展示（统一资源页 session 实例）
+ *                      读取：会话列表项状态展示（统一实体页 session 实例）
  */
 
 import { defineStore } from 'pinia'
@@ -379,7 +379,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (typeof wd === 'string' && wd) {
           lastUsedWorkdir.value = wd
         }
-        // 同步标题（后端 resources/list 的 name 已按 display_title 下发：
+        // 同步标题（后端 entities/list 的 name 已按 display_title 下发：
         // metadata.title 优先，否则从会话内容自动生成——前端不再自行拉消息推导）
         const t = (typeof it.metadata?.title === 'string' && it.metadata.title) || it.name
         if (t) {

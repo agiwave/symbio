@@ -1,7 +1,7 @@
 <template>
   <aside class="session-explorer-panel">
     <header class="panel-header">
-      <h3 class="panel-title">资源浏览器</h3>
+      <h3 class="panel-title">实体浏览器</h3>
       <div class="header-actions">
         <button class="icon-btn" @click="onRefresh" :disabled="!hasWorkdir" title="刷新">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
@@ -15,7 +15,7 @@
     <div class="panel-body">
       <div v-if="!hasWorkdir" class="empty-explorer">
         <p class="empty-title">未绑定工作目录</p>
-        <p class="empty-desc">选择工作目录后，资源树会显示在右侧</p>
+        <p class="empty-desc">选择工作目录后，实体树会显示在右侧</p>
       </div>
       <div v-else-if="error" class="error-state">
         <p>加载失败：{{ error }}</p>
@@ -46,7 +46,7 @@
 
 <script setup lang="ts">
 /**
- * 资源浏览器主面板（仅负责文件树）
+ * 实体浏览器主面板（仅负责文件树）
  *
  * 文件预览改为全屏覆盖层（FileViewerOverlay），由 fileViewer store 管理。
  * 本组件只负责：选文件 → viewerStore.show(path, workdir)。

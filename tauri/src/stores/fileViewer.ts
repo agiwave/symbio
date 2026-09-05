@@ -1,7 +1,7 @@
 /**
  * 文件查看器 Store
  *
- * 资源浏览器选中文件时，调用 show(path, workdir) 打开全屏覆盖层；
+ * 实体浏览器选中文件时，调用 show(path, workdir) 打开全屏覆盖层；
  * close() 关闭。
  *
  * 状态与 explorer store 解耦：explorer 只关心"哪个文件被选中"，

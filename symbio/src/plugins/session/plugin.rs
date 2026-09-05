@@ -276,10 +276,10 @@ impl Plugin for SessionPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
-        // 统一资源协议：resources/list / get / upload / delete / status
-        // （SessionPlugin 的 ResourceProvider 实现见下方 impl 块）
+        // 统一实体协议：entities/list / get / upload / delete / status
+        // （SessionPlugin 的 EntityProvider 实现见下方 impl 块）
         if let Some(resp) =
-            crate::symbio_core::resources::dispatch(self.as_ref(), path, &ctx).await
+            crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
         {
             return resp;
         }
@@ -319,12 +319,12 @@ impl Plugin for SessionPlugin {
 
 crate::submit_object_creator!(PLUGIN_SESSION, SessionPlugin::build, dyn Plugin);
 
-// ==================== 统一资源协议接入 ====================
+// ==================== 统一实体协议接入 ====================
 
 #[async_trait]
-impl crate::symbio_core::resources::ResourceProvider for SessionPlugin {
+impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
     fn kind(&self) -> &'static str {
-        crate::symbio_core::resources::RESOURCE_SESSION
+        crate::symbio_core::entities::ENTITY_SESSION
     }
 
     /// 会话列表来自 SessionStore（非 EntityStore 实体目录），
@@ -332,7 +332,7 @@ impl crate::symbio_core::resources::ResourceProvider for SessionPlugin {
     async fn list_items(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<Vec<crate::symbio_core::resources::ResourceSummary>, PluginError> {
+    ) -> Result<Vec<crate::symbio_core::entities::EntitySummary>, PluginError> {
         let sessions = self.list_sessions().await?;
         let active = self.active_mgr.sessions.read().await;
         Ok(sessions
@@ -344,8 +344,8 @@ impl crate::symbio_core::resources::ResourceProvider for SessionPlugin {
                     .unwrap_or(false);
                 // 显示名：metadata.title 优先，否则从会话内容自动生成，最后「新对话」
                 let title = s.display_title();
-                let mut it = crate::symbio_core::resources::ResourceSummary::new(
-                    crate::symbio_core::resources::RESOURCE_SESSION,
+                let mut it = crate::symbio_core::entities::EntitySummary::new(
+                    crate::symbio_core::entities::ENTITY_SESSION,
                     &s.id,
                     title,
                 );
@@ -365,7 +365,7 @@ impl crate::symbio_core::resources::ResourceProvider for SessionPlugin {
             .collect())
     }
 
-    /// 删除会话（统一协议 resources/delete；非 EntityStore 型 provider 重写）。
+    /// 删除会话（统一协议 entities/delete；非 EntityStore 型 provider 重写）。
     ///
     /// 复用 `delete_session_internal`：先 abort 活跃任务再删除——与旧
     /// `session/clear` 路由同语义，前端机制列表的删除按钮直接受益。
@@ -382,14 +382,14 @@ impl crate::symbio_core::resources::ResourceProvider for SessionPlugin {
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
         id: &str,
-    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {
+    ) -> Result<crate::symbio_core::entities::EntityStatusResponse, PluginError> {
         let active = self.active_mgr.sessions.read().await;
         let is_working = active
             .get(id)
             .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
             .unwrap_or(false);
-        Ok(crate::symbio_core::resources::ResourceStatusResponse {
-            kind: crate::symbio_core::resources::RESOURCE_SESSION.to_string(),
+        Ok(crate::symbio_core::entities::EntityStatusResponse {
+            kind: crate::symbio_core::entities::ENTITY_SESSION.to_string(),
             id: id.to_string(),
             status: if is_working {
                 "working".to_string()

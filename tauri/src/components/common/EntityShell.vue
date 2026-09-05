@@ -1,5 +1,5 @@
 <!--
-  ResourceShell — 通用"左列表 + 右详情"两栏布局
+  EntityShell — 通用"左列表 + 右详情"两栏布局
 
   适用场景：管理类页面（Model Provider、MCP Server、Skill、Agent、Channel 等）
   这些页面共享：
@@ -20,10 +20,10 @@
   - `empty`：空状态
   - `loading`：加载态
   - `detail`：右侧详情
-  - `toast`：浮动消息（不传则用 ResourceShell 内置）
+  - `toast`：浮动消息（不传则用 EntityShell 内置）
 -->
 <template>
-  <div class="resource-shell">
+  <div class="entity-shell">
     <!-- 左栏 -->
     <aside class="shell-list" :style="{ width: `${listWidth}px` }">
       <header class="panel-header">
@@ -88,7 +88,7 @@
 <script setup lang="ts">
 
 
-interface ResourceShellProps {
+interface EntityShellProps {
   title: string
   /** 左侧栏宽度（px），默认 260 */
   listWidth?: number
@@ -100,7 +100,7 @@ interface ResourceShellProps {
   loading?: boolean
 }
 
-const props = withDefaults(defineProps<ResourceShellProps>(), {
+const props = withDefaults(defineProps<EntityShellProps>(), {
   listWidth: 260,
   hideDefaultNew: false,
   hasListContent: false,
@@ -117,7 +117,7 @@ function emitNew() {
 </script>
 
 <style scoped>
-.resource-shell {
+.entity-shell {
   display: flex;
   width: 100%;
   height: 100%;

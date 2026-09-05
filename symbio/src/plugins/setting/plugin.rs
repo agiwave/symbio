@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-use crate::symbio_core::schemas::resources::{
+use crate::symbio_core::schemas::entities::{
     DetailAction, DetailDefinition, DetailField, DetailSection,
 };
 use crate::symbio_core::schemas::setting::{setting_get, setting_list};
@@ -68,11 +68,11 @@ impl Plugin for SettingPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
-        // 统一资源协议：resources/list（设置分区清单）；
+        // 统一实体协议：entities/list（设置分区清单）；
         // get/upload/delete/status 走 trait 默认 NotImplemented（分区不可增删，
         // 保存由前端 editor 经各插件 config/set 自持完成）
         if let Some(resp) =
-            crate::symbio_core::resources::dispatch(self.as_ref(), path, &ctx).await
+            crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
         {
             return resp;
         }
@@ -146,7 +146,7 @@ impl Plugin for SettingPlugin {
 
 crate::submit_object_creator!(PLUGIN_SETTING, SettingPlugin::build, dyn Plugin);
 
-// ==================== 统一资源协议接入 ====================
+// ==================== 统一实体协议接入 ====================
 
 /// 设置分区（固定清单）。`id` 同时作为前端 editor 的"扩展名"（config_type），
 /// 前端按 `setting:<config_type>` 复合键注入专属编辑表单。
@@ -286,9 +286,9 @@ fn web_detail_definition() -> DetailDefinition {
 }
 
 #[async_trait::async_trait]
-impl crate::symbio_core::resources::ResourceProvider for SettingPlugin {
+impl crate::symbio_core::entities::EntityProvider for SettingPlugin {
     fn kind(&self) -> &'static str {
-        crate::symbio_core::resources::RESOURCE_SETTING
+        crate::symbio_core::entities::ENTITY_SETTING
     }
 
     /// 设置分区为固定清单（非 EntityStore 实体目录）：
@@ -296,12 +296,12 @@ impl crate::symbio_core::resources::ResourceProvider for SettingPlugin {
     async fn list_items(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<Vec<crate::symbio_core::resources::ResourceSummary>, PluginError> {
+    ) -> Result<Vec<crate::symbio_core::entities::EntitySummary>, PluginError> {
         Ok(SETTING_SECTIONS
             .iter()
             .map(|(id, name)| {
-                let mut it = crate::symbio_core::resources::ResourceSummary::new(
-                    crate::symbio_core::resources::RESOURCE_SETTING,
+                let mut it = crate::symbio_core::entities::EntitySummary::new(
+                    crate::symbio_core::entities::ENTITY_SETTING,
                     *id,
                     *name,
                 );
@@ -332,8 +332,8 @@ impl crate::symbio_core::resources::ResourceProvider for SettingPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::resources::ResourceProvider;
-    use crate::symbio_core::resources::RESOURCE_SETTING;
+    use crate::symbio_core::entities::EntityProvider;
+    use crate::symbio_core::entities::ENTITY_SETTING;
     use crate::symbio_core::SimpleRequest;
 
     #[tokio::test]
@@ -348,7 +348,7 @@ mod tests {
 
         // kind 标记为 setting，名称正确
         let first = &items[0];
-        assert_eq!(first.kind, RESOURCE_SETTING);
+        assert_eq!(first.kind, ENTITY_SETTING);
         assert_eq!(first.name, "外观");
 
         // 每项的 extra.config_type 即 editor"扩展名"（与 id 一致）

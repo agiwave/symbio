@@ -1,14 +1,14 @@
 <!--
   Agent — Agent（OAB bundle）专属详情
 
-  统一资源协议下的"详情差异化"组件，经项级 editor 注册表分发
-  （registerResourceEditor('agent:bundle', ...)，按 item.config_type 命中；
+  统一实体协议下的"详情差异化"组件，经项级 editor 注册表分发
+  （registerEntityEditor('agent:bundle', ...)，按 item.config_type 命中；
   kind 级不注册，agent 的 zip 上传新建流程不受影响）。
 
-  职责：bundle 概览（版本/规格/来源/目录）+ 三类内部资源计数 +
-  「管理资源」入口按钮——点击后**全局路由推入**统一 WorkbenchView
-  （/container/:kind/:id/resources，与主界面同构的侧边栏+列表+详情整页），
-  资源管理逻辑全部在页面侧（useWorkbenchView 组合式），本组件只读概览
+  职责：bundle 概览（版本/规格/来源/目录）+ 三类内部实体计数 +
+  「管理实体」入口按钮——点击后**全局路由推入**统一 WorkbenchView
+  （/container/:kind/:id/entities，与主界面同构的侧边栏+列表+详情整页），
+  实体管理逻辑全部在页面侧（useWorkbenchView 组合式），本组件只读概览
   （useContainerOverview：类别 + 计数）。
 -->
 <template>
@@ -20,11 +20,11 @@
         <span class="badge scope">{{ scope === 'workspace' ? '工作区级' : '全局级' }}</span>
       </div>
       <div class="header-actions">
-        <button type="button" class="action-btn" @click="openResources">
+        <button type="button" class="action-btn" @click="openEntities">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
           </svg>
-          管理资源（提示词 / 技能 / MCP）
+          管理实体（提示词 / 技能 / MCP）
         </button>
         <button
           type="button"
@@ -64,7 +64,7 @@
       </div>
 
       <div class="detail-section">
-        <label>内部资源概览</label>
+        <label>内部实体概览</label>
         <div class="count-row">
           <button
             v-for="k in containerKinds"
@@ -72,7 +72,7 @@
             type="button"
             class="count-chip"
             :title="`管理${k.label}`"
-            @click="openResources"
+            @click="openEntities"
           >
             <span class="count-num">{{ counts[k.kind] ?? 0 }}</span>
             <span class="count-label">{{ k.label }}</span>
@@ -87,12 +87,12 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import type { ResourceCapabilities, ResourceSummary } from '@/schemas/resources'
+import type { EntityCapabilities, EntitySummary } from '@/schemas/entities'
 import { useContainerOverview } from '@/composables/useWorkbenchView'
 
 const props = defineProps<{
-  item: ResourceSummary | null
-  capabilities: ResourceCapabilities
+  item: EntitySummary | null
+  capabilities: EntityCapabilities
   saving?: boolean
   testing?: boolean
   deleting?: boolean
@@ -110,16 +110,16 @@ const scope = computed(() => (props.item?.scope as string) || 'global')
 const dir = computed(() => (props.item?.dir as string) || '')
 const bundleId = computed(() => props.item?.id || '')
 
-// === 资源概览：只读（类别 + 计数来自 useContainerOverview；管理逻辑在 WorkbenchView 页面侧） ===
+// === 实体概览：只读（类别 + 计数来自 useContainerOverview；管理逻辑在 WorkbenchView 页面侧） ===
 const { containerKinds, counts, entriesError, loadEntries } = useContainerOverview(
   'agent',
   () => bundleId.value
 )
 
-/** 全局路由推入容器资源管理页（整页替换，非详情内切换） */
-function openResources() {
+/** 全局路由推入容器实体管理页（整页替换，非详情内切换） */
+function openEntities() {
   router.push({
-    name: 'container-resources',
+    name: 'container-entities',
     params: { kind: 'agent', id: bundleId.value },
   })
 }

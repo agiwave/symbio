@@ -12,7 +12,7 @@
 //! 预设数据自原前端 `constants/modelProviders.ts` 迁入——供应商标识、
 //! 端点与候选模型由后端单一真相源下发。
 
-use crate::symbio_core::schemas::resources::{
+use crate::symbio_core::schemas::entities::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection,
 };

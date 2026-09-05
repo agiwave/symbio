@@ -9,7 +9,7 @@
     </div>
     <h2 class="empty-title">未选择工作目录</h2>
     <p class="empty-desc">
-      为当前会话绑定一个项目目录后，AI 才能在正确的上下文中回答，右栏资源浏览器才能加载。
+      为当前会话绑定一个项目目录后，AI 才能在正确的上下文中回答，右栏实体浏览器才能加载。
     </p>
     <button class="primary-btn" @click="onPick" :disabled="picking">
       {{ picking ? '选择中…' : '选择工作目录' }}
@@ -46,7 +46,7 @@ async function onPick() {
     if (!selected) return
     const path = typeof selected === 'string' ? selected : Array.isArray(selected) ? selected[0] : null
     if (!path) return
-    // 资源浏览器的重置和重载由 SessionExplorerPanel 监听 activeWorkdir 自动处理
+    // 实体浏览器的重置和重载由 SessionExplorerPanel 监听 activeWorkdir 自动处理
     await store.setActiveWorkdir(path)
   } catch (e) {
     lastError.value = e instanceof Error ? e.message : String(e)

@@ -203,15 +203,15 @@ impl Default for McpPlugin {
     }
 }
 
-// ==================== 统一资源协议 (resources/*) ====================
+// ==================== 统一实体协议 (entities/*) ====================
 //
 // 公共流程（列表包装 / zip 上传 / 幂等删除 / status 事件推送）由
-// `ResourceProvider::dispatch` 承载，这里只实现 MCP 的差异化钩子。
+// `EntityProvider::dispatch` 承载，这里只实现 MCP 的差异化钩子。
 
 #[async_trait]
-impl crate::symbio_core::resources::ResourceProvider for McpPlugin {
+impl crate::symbio_core::entities::EntityProvider for McpPlugin {
     fn kind(&self) -> &'static str {
-        crate::symbio_core::resources::RESOURCE_MCP
+        crate::symbio_core::entities::ENTITY_MCP
     }
 
     fn category(&self) -> Option<&'static str> {
@@ -228,9 +228,9 @@ impl crate::symbio_core::resources::ResourceProvider for McpPlugin {
         _ctx: &Arc<dyn InvokeRequest>,
         id: &str,
         manifest: Option<&str>,
-    ) -> crate::symbio_core::resources::ResourceSummary {
-        let mut it = crate::symbio_core::resources::ResourceSummary::new(
-            crate::symbio_core::resources::RESOURCE_MCP,
+    ) -> crate::symbio_core::entities::EntitySummary {
+        let mut it = crate::symbio_core::entities::EntitySummary::new(
+            crate::symbio_core::entities::ENTITY_MCP,
             id,
             id,
         );
@@ -271,16 +271,16 @@ impl crate::symbio_core::resources::ResourceProvider for McpPlugin {
 
     /// 连接测试单个 MCP Server（stdio 握手 / http streams）
     ///
-    /// 连接失败映射为 `Ok(status: "failed")`，由 dispatch 统一推送 resource 事件。
+    /// 连接失败映射为 `Ok(status: "failed")`，由 dispatch 统一推送 entity 事件。
     async fn test_status(
         &self,
         ctx: &Arc<dyn InvokeRequest>,
         id: &str,
-    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {
+    ) -> Result<crate::symbio_core::entities::EntityStatusResponse, PluginError> {
         let server = self.read_server_config(ctx, id).await?;
         Ok(match self.manager.test_connection(id, &server).await {
-            Ok(r) => crate::symbio_core::resources::ResourceStatusResponse {
-                kind: crate::symbio_core::resources::RESOURCE_MCP.to_string(),
+            Ok(r) => crate::symbio_core::entities::EntityStatusResponse {
+                kind: crate::symbio_core::entities::ENTITY_MCP.to_string(),
                 id: id.to_string(),
                 status: "connected".to_string(),
                 status_detail: Some(format!(
@@ -289,8 +289,8 @@ impl crate::symbio_core::resources::ResourceProvider for McpPlugin {
                     protocol = r.protocol_version,
                 )),
             },
-            Err(e) => crate::symbio_core::resources::ResourceStatusResponse {
-                kind: crate::symbio_core::resources::RESOURCE_MCP.to_string(),
+            Err(e) => crate::symbio_core::entities::EntityStatusResponse {
+                kind: crate::symbio_core::entities::ENTITY_MCP.to_string(),
                 id: id.to_string(),
                 status: "failed".to_string(),
                 status_detail: Some(e),
@@ -306,7 +306,7 @@ impl McpPlugin {
         ctx: &Arc<dyn InvokeRequest>,
         id: &str,
     ) -> Result<McpServerConfig, PluginError> {
-        let store = crate::symbio_core::resources::storage_service(ctx)?;
+        let store = crate::symbio_core::entities::storage_service(ctx)?;
         let es = store.entity_store();
         let category = crate::symbio_core::providers::categories::MCP;
         let manifest = crate::symbio_core::providers::manifests::SERVER;
@@ -401,9 +401,9 @@ impl Plugin for McpPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
-        // 统一资源协议：resources/list / get / upload / delete / status
+        // 统一实体协议：entities/list / get / upload / delete / status
         if let Some(resp) =
-            crate::symbio_core::resources::dispatch(self.as_ref(), path, &ctx).await
+            crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
         {
             return resp;
         }

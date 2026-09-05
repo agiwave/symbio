@@ -1,9 +1,9 @@
 <!--
   NavRail — 「侧边栏 + 列表 + 详情」三栏工作台的侧边栏唯一实现
 
-  窄条图标导航，全项目所有三栏页面共用（此前 MainLayout 与容器资源页各持一份
+  窄条图标导航，全项目所有三栏页面共用（此前 MainLayout 与容器实体页各持一份
   重复的 nav CSS，现收敛于此）：
-  - MainLayout：items = 后端 providers 注册表（资源类型导航）；
+  - MainLayout：items = 后端 providers 注册表（实体类型导航）；
   - WorkbenchView（container 模式）：items = 后端 container_kinds（容器子类别，带计数角标）。
 
   类别集合全部由后端注册表下发，前端只做 UI 映射（icon 由调用方传入，
@@ -57,7 +57,7 @@ export interface NavRailItem {
   /** 类别键（provider kind / 容器子类别 kind） */
   key: string
   label: string
-  /** 类别图标（resourceTypes 注册表映射；缺省回退通用文件图标） */
+  /** 类别图标（entityTypes 注册表映射；缺省回退通用文件图标） */
   icon?: Component | null
   /** 计数角标（0/undefined 不显示） */
   count?: number

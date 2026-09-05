@@ -544,17 +544,17 @@ impl Default for ModelPlugin {
     }
 }
 
-// ==================== 统一资源协议 (resources/*，independent_form 启用于 model) ====================
+// ==================== 统一实体协议 (entities/*，independent_form 启用于 model) ====================
 //
 // 公共流程（manifest 上传 / 幂等删除 / 列表包装 / status 事件推送）由
-// `ResourceProvider::dispatch` 承载，这里只实现 model 的差异化钩子。
+// `EntityProvider::dispatch` 承载，这里只实现 model 的差异化钩子。
 // 列表项 `extra` 展开 `config`（完整 ModelProviderConfig）与 `is_default`，
-// 使 chat 侧（`listModelProviders`）与资源管理页共用同一读取入口。
+// 使 chat 侧（`listModelProviders`）与实体管理页共用同一读取入口。
 
 #[async_trait]
-impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
+impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
     fn kind(&self) -> &'static str {
-        crate::symbio_core::resources::RESOURCE_MODEL
+        crate::symbio_core::entities::ENTITY_MODEL
     }
 
     fn category(&self) -> Option<&'static str> {
@@ -571,7 +571,7 @@ impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
         _id: &str,
-    ) -> Option<crate::symbio_core::schemas::resources::DetailDefinition> {
+    ) -> Option<crate::symbio_core::schemas::entities::DetailDefinition> {
         Some(super::detail::model_detail_definition())
     }
 
@@ -579,14 +579,14 @@ impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
     async fn list_items(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<Vec<crate::symbio_core::resources::ResourceSummary>, PluginError> {
+    ) -> Result<Vec<crate::symbio_core::entities::EntitySummary>, PluginError> {
         let providers = self.providers.read().await;
         Ok(providers
             .providers
             .values()
             .map(|p| {
-                let mut it = crate::symbio_core::resources::ResourceSummary::new(
-                    crate::symbio_core::resources::RESOURCE_MODEL,
+                let mut it = crate::symbio_core::entities::EntitySummary::new(
+                    crate::symbio_core::entities::ENTITY_MODEL,
                     &p.id,
                     p.name.clone(),
                 );
@@ -721,7 +721,7 @@ impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
         id: &str,
-    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {
+    ) -> Result<crate::symbio_core::entities::EntityStatusResponse, PluginError> {
         let provider = {
             let providers = self.providers.read().await;
             providers.providers.get(id).cloned()
@@ -730,8 +730,8 @@ impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
 
         let parent = self.get_parent().await;
         Ok(match Self::validate_provider(&provider, &parent).await {
-            None => crate::symbio_core::resources::ResourceStatusResponse {
-                kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
+            None => crate::symbio_core::entities::EntityStatusResponse {
+                kind: crate::symbio_core::entities::ENTITY_MODEL.to_string(),
                 id: id.to_string(),
                 status: "connected".to_string(),
                 status_detail: Some(format!(
@@ -739,8 +739,8 @@ impl crate::symbio_core::resources::ResourceProvider for ModelPlugin {
                     provider.provider, provider.model
                 )),
             },
-            Some(e) => crate::symbio_core::resources::ResourceStatusResponse {
-                kind: crate::symbio_core::resources::RESOURCE_MODEL.to_string(),
+            Some(e) => crate::symbio_core::entities::EntityStatusResponse {
+                kind: crate::symbio_core::entities::ENTITY_MODEL.to_string(),
                 id: id.to_string(),
                 status: "failed".to_string(),
                 status_detail: Some(e),
@@ -760,9 +760,9 @@ impl Plugin for ModelPlugin {
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
 
-        // 统一资源协议：resources/list / get / upload / delete / status
+        // 统一实体协议：entities/list / get / upload / delete / status
         if let Some(resp) =
-            crate::symbio_core::resources::dispatch(self.as_ref(), path.as_str(), &ctx).await
+            crate::symbio_core::entities::dispatch(self.as_ref(), path.as_str(), &ctx).await
         {
             return resp;
         }

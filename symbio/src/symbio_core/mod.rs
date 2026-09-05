@@ -13,7 +13,7 @@ mod logger;
 mod paths;
 mod plugin;
 pub mod providers;
-pub mod resources;
+pub mod entities;
 pub mod schemas;
 mod system;
 mod tools;

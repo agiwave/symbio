@@ -5,10 +5,10 @@
 //! | 模块 | 职责 |
 //! |---|---|
 //! | [`plugin`] | 插件主体：`traverse(available_tools)` → 扫描约定目录装配 → 身份工具注册 |
-//! | [`handlers`] | 管理路由：`bundle/list\|get\|upload\|export\|delete\|preview` + 统一资源协议 `resources/*` |
+//! | [`handlers`] | 管理路由：`bundle/list\|get\|upload\|export\|delete\|preview` + 统一实体协议 `entities/*` |
 //! | [`store`] | bundle 存储：系统目录 `plugins/agent/`、zip 导入（zip-slip 防护）、导出 |
 //! | [`capability`] | `agent_identity` 身份工具（提示词片段锚定） |
-//! | [`resources`] | 统一资源协议接入（kind=`agent`，前端资源页自动发现） |
+//! | [`entities`] | 统一实体协议接入（kind=`agent`，前端实体页自动发现） |
 //!
 //! ## 装配契约（三个能力来源）
 //!
@@ -29,7 +29,7 @@
 pub mod capability;
 pub mod handlers;
 pub mod plugin;
-pub mod resources;
+pub mod entities;
 pub mod store;
 
 #[cfg(test)]

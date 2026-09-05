@@ -1,6 +1,6 @@
 # Symbio 项目结构与命名规范指南
 
-> **文档类型：How-to guide / Reference（操作指南·参考）** — 目录、可见性、资源/脚本放置的权威约定。
+> **文档类型：How-to guide / Reference（操作指南·参考）** — 目录、可见性、实体/脚本放置的权威约定。
 
 本文件是 Symbio 代码库架构、目录结构与命名规范的**唯一权威约定**，适用于 Rust 后端（`symbio/` crate）、前端（`tauri/`）以及文档组织。所有新增代码与重构都应遵循本文档。
 
@@ -57,7 +57,7 @@ symbio/                      # 仓库根（monorepo 根）
 │   │   │   └── event_bus.rs # 跨插件共享设施
 │   │   ├── plugins/         # 业务插件（私有）
 │   │   └── providers/       # 通用服务实现（pub(crate)）
-│   ├── resources/           # （规划中，尚未创建）运行时资源目录
+│   ├── entities/           # （规划中，尚未创建）运行时实体目录
 │   └── Cargo.toml
 ├── tauri/                   # 前端（Vue + Tauri）
 ├── docs/                    # 项目文档（见 §2.5）
@@ -104,17 +104,17 @@ schemas/
 - 源码树最大嵌套深度建议控制在 **4 层**以内（`src/plugins/agent/...` 下已出现过 7 层，需逐步收敛）。
 - 模块级单元测试：用 `#[cfg(test)] mod tests;` 内联，或同目录 `tests.rs` 经 `mod tests;` 引入。
 
-### 2.5 资源与数据文件
+### 2.5 实体与数据文件
 
-- **模型权重等二进制资源**：目前通过 `include_bytes!` 编译进 `providers/embedding` 实现模块（[`fastembed.rs`](file:///c:/Bing/agiwave/symbio/symbio/src/providers/embedding/fastembed.rs)），保留在 `src/providers/embedding/`。
-  > 注：曾评估外置到 `resources/` 并运行时加载，但为保持离线内置语义，当前维持内置。若未来改为外置，路径解析逻辑应放在 `symbio_core::paths` 统一处理。
+- **模型权重等二进制实体**：目前通过 `include_bytes!` 编译进 `providers/embedding` 实现模块（[`fastembed.rs`](file:///c:/Bing/agiwave/symbio/symbio/src/providers/embedding/fastembed.rs)），保留在 `src/providers/embedding/`。
+  > 注：曾评估外置到 `entities/` 并运行时加载，但为保持离线内置语义，当前维持内置。若未来改为外置，路径解析逻辑应放在 `symbio_core::paths` 统一处理。
 - **种子数据**（如 `normal_agent_units.jsonl`、`seed_cus.jsonl`、`seed_agents_data.json`）：与引用它的 `.rs` 同目录放置（被 `include_str!` 引用）。`bin/seed_agents_data.json` 之前混入 `bin/`，已迁移到 `plugins/agent/manager/`。
 - **运行时加载的 prompt 文档**（如 `CREATE_AGENT_SKILL.md`）：被 `include_str!` 引用，必须与其 `.rs` 同目录，不得移动。
 
 ### 2.5.1 `bin/` 目录约束
 
 - `src/bin/` **只放 binary 入口 `.rs`**（当前仅 `seed_agents.rs` 一个二进制入口）。
-- 严禁在 `src/bin/` 下放置数据/资源文件（即使是被 `include_str!` 引用）。若 binary 需要数据，应**随引用源移动**或外置到 `resources/`。
+- 严禁在 `src/bin/` 下放置数据/实体文件（即使是被 `include_str!` 引用）。若 binary 需要数据，应**随引用源移动**或外置到 `entities/`。
 
 ### 2.5.2 `vendor/` 目录约束
 

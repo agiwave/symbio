@@ -88,8 +88,8 @@ impl SessionPlugin {
 
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
     ///
-    /// 两个消费方：`invoke_clear`（旧 session/clear 路由）与统一资源协议的
-    /// `ResourceProvider::delete_item`（resources/delete，前端机制列表删除）。
+    /// 两个消费方：`invoke_clear`（旧 session/clear 路由）与统一实体协议的
+    /// `EntityProvider::delete_item`（entities/delete，前端机制列表删除）。
     pub(crate) async fn delete_session_internal(&self, session_id: &str) -> Result<(), PluginError> {
         // 删除前先 abort 该会话的活跃任务
         let state = self.active_mgr.get_or_create(session_id).await;
@@ -277,7 +277,7 @@ impl SessionPlugin {
         session.updated_at = (OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
         self.save_session(&session).await?;
 
-        // 标题变更 → session 总线事件，驱动统一资源列表防抖刷新（机制级实时能力）
+        // 标题变更 → session 总线事件，驱动统一实体列表防抖刷新（机制级实时能力）
         if req.title.is_some() {
             use crate::symbio_core::event_bus::EventBus;
             EventBus::try_publish("session", Some(&req.session_id), json!({ "type": "title" }));

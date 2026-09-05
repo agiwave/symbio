@@ -5,16 +5,16 @@
 
   1. 应用外壳模式（MainLayout）：传 railItems + #content 插槽 ——
      侧边栏 = 后端 providers 注册表导航，工作区 = RouterView；
-  2. 资源页模式（WorkbenchView，全 App 唯一资源页面）：传 railItems
+  2. 实体页模式（WorkbenchView，全 App 唯一实体页面）：传 railItems
      （容器页）或不传（顶层页，侧边栏由 MainLayout 承担）+ list/detail 等插槽 ——
-     工作区 = 内置 ResourceShell（列表 + 详情）。
+     工作区 = 内置 EntityShell（列表 + 详情）。
 
   状态机在 useWorkbench.ts（同名配套组合式）；类别集合一律由后端注册表下发
   （providers / container_kinds），前端零硬编码。
 -->
 <template>
   <div class="workbench">
-    <!-- 第一栏：侧边栏（可选——顶层资源页的侧边栏由应用外壳承担） -->
+    <!-- 第一栏：侧边栏（可选——顶层实体页的侧边栏由应用外壳承担） -->
     <NavRail
       v-if="railItems"
       :items="railItems"
@@ -28,10 +28,10 @@
     </NavRail>
 
     <!-- 工作区（第二/三栏）：content 插槽完全接管（应用外壳模式），
-         否则内置 ResourceShell（列表 + 详情，资源页模式），插槽逐一定向转发 -->
+         否则内置 EntityShell（列表 + 详情，实体页模式），插槽逐一定向转发 -->
     <main class="workbench-content">
       <slot v-if="$slots.content" name="content" />
-      <ResourceShell
+      <EntityShell
         v-else
         :title="title ?? ''"
         :list-width="listWidth"
@@ -47,7 +47,7 @@
         <template v-if="$slots.list" #list><slot name="list" /></template>
         <template v-if="$slots.empty" #empty><slot name="empty" /></template>
         <template v-if="$slots.detail" #detail><slot name="detail" /></template>
-      </ResourceShell>
+      </EntityShell>
     </main>
   </div>
 </template>
@@ -55,7 +55,7 @@
 <script setup lang="ts">
 import NavRail from '@/components/common/NavRail.vue'
 import type { NavRailItem } from '@/components/common/NavRail.vue'
-import ResourceShell from '@/components/common/ResourceShell.vue'
+import EntityShell from '@/components/common/EntityShell.vue'
 
 withDefaults(
   defineProps<{
@@ -64,7 +64,7 @@ withDefaults(
     /** 侧边栏返回键（容器页用） */
     back?: boolean
     backTitle?: string
-    /** —— 以下透传 ResourceShell（资源页模式）—— */
+    /** —— 以下透传 EntityShell（实体页模式）—— */
     title?: string
     listWidth?: number
     hideDefaultNew?: boolean

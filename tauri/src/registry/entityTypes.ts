@@ -1,54 +1,54 @@
 /**
- * 资源类型注册表（前端纯展示层）—— editor 组件 + icon 按 kind（或 kind:ext）注册
+ * 实体类型注册表（前端纯展示层）—— editor 组件 + icon 按 kind（或 kind:ext）注册
  *
- * 分层原则（见 composables/useResourceProviders.ts）：
- * - 类型的**存在性/能力/前缀/顺序/标签**全部来自后端 `resources/providers` 下发的
+ * 分层原则（见 composables/useEntityProviders.ts）：
+ * - 类型的**存在性/能力/前缀/顺序/标签**全部来自后端 `entities/providers` 下发的
  *   ProviderInfo（是权威，前端不再硬编码类型清单）；
  * - 本模块只维护**前端 UI 专属**的映射：某 kind 的专属编辑表单（editor 组件）与
  *   SVG 图标。后端不参与下发 Vue 组件 / SVG。
  *
  * ## 注册键：kind 级 与 项级（kind:ext）
  *
- * - `registerResourceEditor(kind, 组件)`：类型级（该 kind 所有资源共用，如 model）；
- * - `registerResourceEditor('kind:ext', 组件)`：项级"扩展名"分发——同一 kind 下
- *   不同资源项按 `item.config_type`（后端 extra 字段）进入不同 editor，
+ * - `registerEntityEditor(kind, 组件)`：类型级（该 kind 所有实体共用，如 model）；
+ * - `registerEntityEditor('kind:ext', 组件)`：项级"扩展名"分发——同一 kind 下
+ *   不同实体项按 `item.config_type`（后端 extra 字段）进入不同 editor，
  *   类似文件系统"不同扩展名打开不同编辑器"（如 setting 的各设置分区）。
  *
- * ## 新增一种资源类型的两步扩展位
+ * ## 新增一种实体类型的两步扩展位
  *
- * 1. 后端：实现 ResourceProvider + 插件 route 接 dispatch + `provider_registry()`
- *    登记一条——前端即可自动发现（生成导航、进入统一资源页）；
- * 2. 前端（可选）：`registerResourceEditor(...)` 与
- *    `registerResourceIcon(...)`——未注册的走通用兜底
+ * 1. 后端：实现 EntityProvider + 插件 route 接 dispatch + `provider_registry()`
+ *    登记一条——前端即可自动发现（生成导航、进入统一实体页）；
+ * 2. 前端（可选）：`registerEntityEditor(...)` 与
+ *    `registerEntityIcon(...)`——未注册的走通用兜底
  *    （zip 面板 / JSON 编辑器 / 只读详情）。
  */
 
 import { defineComponent, h, markRaw, shallowReactive, type Component } from 'vue'
-import Agent from '@/components/resources/Agent.vue'
+import Agent from '@/components/entities/Agent.vue'
 import Appearance from '@/components/settings/Appearance.vue'
-import Session from '@/components/resources/Session.vue'
+import Session from '@/components/entities/Session.vue'
 import About from '@/components/settings/About.vue'
 
 /** 编辑器/图标查找目标：kind + 可选"扩展名"（后端 extra.config_type，unknown 兼容索引签名） */
-export interface ResourceRegistryTarget {
+export interface EntityRegistryTarget {
   kind: string
   config_type?: unknown
 }
 
 /** 提取项级扩展名（仅接受 string，其余忽略） */
-function extOf(target: ResourceRegistryTarget): string | null {
+function extOf(target: EntityRegistryTarget): string | null {
   return typeof target.config_type === 'string' && target.config_type ? target.config_type : null
 }
 
 /** 前端展示登记：某 kind（或 kind:ext）的专属编辑器，未登记走通用兜底 */
 const editors = shallowReactive<Record<string, Component>>({})
 
-export function registerResourceEditor(kind: string, component: Component): void {
+export function registerEntityEditor(kind: string, component: Component): void {
   editors[kind] = component
 }
 
 /** 类型级查找（新建模式等仅知 kind 的场景） */
-export function getResourceEditor(kind: string): Component | undefined {
+export function getEntityEditor(kind: string): Component | undefined {
   return editors[kind]
 }
 
@@ -56,7 +56,7 @@ export function getResourceEditor(kind: string): Component | undefined {
  * 项级查找：优先 `kind:ext`（扩展名决定编辑器），回退 kind。
  * ext 取 `item.config_type`（后端 extra 下发）。
  */
-export function getResourceEditorFor(target: ResourceRegistryTarget): Component | undefined {
+export function getEntityEditorFor(target: EntityRegistryTarget): Component | undefined {
   const ext = extOf(target)
   if (ext) {
     const keyed = editors[`${target.kind}:${ext}`]
@@ -68,16 +68,16 @@ export function getResourceEditorFor(target: ResourceRegistryTarget): Component 
 /** kind（或 kind:ext）→ 自定义图标组件（未注册走默认图标） */
 const icons = shallowReactive<Record<string, Component>>({})
 
-export function registerResourceIcon(kind: string, icon: Component): void {
+export function registerEntityIcon(kind: string, icon: Component): void {
   icons[kind] = icon
 }
 
-export function getResourceIcon(kind: string): Component | undefined {
+export function getEntityIcon(kind: string): Component | undefined {
   return icons[kind]
 }
 
 /** 项级图标查找：优先 `kind:ext`，回退 kind */
-export function getResourceIconFor(target: ResourceRegistryTarget): Component | undefined {
+export function getEntityIconFor(target: EntityRegistryTarget): Component | undefined {
   const ext = extOf(target)
   if (ext) {
     const keyed = icons[`${target.kind}:${ext}`]
@@ -88,31 +88,31 @@ export function getResourceIconFor(target: ResourceRegistryTarget): Component | 
 
 // ============ 内置注册 ============
 
-// model 详情/新建不再注册：由后端 `resources/detail` 下发表单定义、
+// model 详情/新建不再注册：由后端 `entities/detail` 下发表单定义、
 // DetailForm 通用渲染器动态生成（definition-driven detail）。
 
 // Agent（OAB bundle）：**项级**注册（agent:bundle，按 item.config_type 命中）。
 // kind 级刻意不注册——否则 createEditor('agent') 会劫持 zip 上传新建流程；
 // 项级只影响"选中已有 bundle"的详情渲染（Agent.vue 内含
-// prompts/skills/mcps 内部资源管理入口）。
-registerResourceEditor('agent:bundle', markRaw(Agent))
+// prompts/skills/mcps 内部实体管理入口）。
+registerEntityEditor('agent:bundle', markRaw(Agent))
 
 // Session（会话）：kind 级注册——详情 = 聊天工作区（ChatMainPanel + SessionExplorerPanel）；
-// capabilities.independent_form 为 true 且本注册存在 → 统一资源页「新建」按钮
+// capabilities.independent_form 为 true 且本注册存在 → 统一实体页「新建」按钮
 // 进入该 editor 的引导态（新建会话），列表/删除由机制承担（delete_item 钩子）。
-registerResourceEditor('session', markRaw(Session))
+registerEntityEditor('session', markRaw(Session))
 
 // 设置分区：同一 kind（setting）下按 config_type 进入不同 editor。
-// session/local/web 三分区改由后端 resources/detail 下发定义（DetailForm 渲染），
+// session/local/web 三分区改由后端 entities/detail 下发定义（DetailForm 渲染），
 // 仅保留不适用定义的两个：appearance（前端 store 即时生效）/ about（信息展示）。
-registerResourceEditor('setting:appearance', markRaw(Appearance))
-registerResourceEditor('setting:about', markRaw(About))
+registerEntityEditor('setting:appearance', markRaw(Appearance))
+registerEntityEditor('setting:about', markRaw(About))
 
 /** 用 SVG path 构造轻量图标组件（feather 风格线条图标） */
 function svgIcon(inner: string): Component {
   return markRaw(
     defineComponent({
-      name: 'ResourceSvgIcon',
+      name: 'EntitySvgIcon',
       render() {
         return h('svg', {
           viewBox: '0 0 24 24',
@@ -131,29 +131,29 @@ function svgIcon(inner: string): Component {
 }
 
 // 设置分区图标
-registerResourceIcon(
+registerEntityIcon(
   'setting:appearance',
   svgIcon(
     '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'
   )
 )
-registerResourceIcon(
+registerEntityIcon(
   'setting:session',
   svgIcon(
     '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'
   )
 )
-registerResourceIcon(
+registerEntityIcon(
   'setting:local',
   svgIcon('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>')
 )
-registerResourceIcon(
+registerEntityIcon(
   'setting:web',
   svgIcon(
     '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'
   )
 )
-registerResourceIcon(
+registerEntityIcon(
   'setting:about',
   svgIcon(
     '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>'
@@ -161,7 +161,7 @@ registerResourceIcon(
 )
 
 // 主导航分组的展示图标（左侧导航按 ProviderInfo.nav 分组渲染）
-registerResourceIcon(
+registerEntityIcon(
   'setting',
   svgIcon(
     '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'
@@ -169,7 +169,7 @@ registerResourceIcon(
 )
 
 // 容器子类别图标（WorkbenchView container 模式的类别侧边栏复用主界面图标体系）
-registerResourceIcon(
+registerEntityIcon(
   'prompt',
   svgIcon(
     '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/>'
@@ -177,31 +177,31 @@ registerResourceIcon(
 )
 
 // ============ 主导航 kind 级图标（6 类并排时各自独立，不再共用默认文件图标） ============
-registerResourceIcon(
+registerEntityIcon(
   'session',
   svgIcon(
     '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
   )
 )
-registerResourceIcon(
+registerEntityIcon(
   'model',
   svgIcon(
     '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'
   )
 )
-registerResourceIcon(
+registerEntityIcon(
   'mcp',
   svgIcon(
     '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>'
   )
 )
-registerResourceIcon(
+registerEntityIcon(
   'agent',
   svgIcon(
     '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'
   )
 )
-registerResourceIcon(
+registerEntityIcon(
   'skill',
   svgIcon(
     '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'

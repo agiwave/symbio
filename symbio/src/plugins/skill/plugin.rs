@@ -115,15 +115,15 @@ impl SkillPlugin {
     }
 }
 
-// ==================== 统一资源协议 (resources/*) ====================
+// ==================== 统一实体协议 (entities/*) ====================
 //
-// 公共流程（列表包装 / zip 上传 / 幂等删除）由 `ResourceProvider::dispatch` 承载，
+// 公共流程（列表包装 / zip 上传 / 幂等删除）由 `EntityProvider::dispatch` 承载，
 // 这里只实现 skill 的差异化钩子（SKILL.md 摘要解析）。
 
 #[async_trait]
-impl crate::symbio_core::resources::ResourceProvider for SkillPlugin {
+impl crate::symbio_core::entities::EntityProvider for SkillPlugin {
     fn kind(&self) -> &'static str {
-        crate::symbio_core::resources::RESOURCE_SKILL
+        crate::symbio_core::entities::ENTITY_SKILL
     }
 
     fn category(&self) -> Option<&'static str> {
@@ -140,9 +140,9 @@ impl crate::symbio_core::resources::ResourceProvider for SkillPlugin {
         _ctx: &Arc<dyn crate::symbio_core::InvokeRequest>,
         id: &str,
         manifest: Option<&str>,
-    ) -> crate::symbio_core::resources::ResourceSummary {
-        let mut it = crate::symbio_core::resources::ResourceSummary::new(
-            crate::symbio_core::resources::RESOURCE_SKILL,
+    ) -> crate::symbio_core::entities::EntitySummary {
+        let mut it = crate::symbio_core::entities::EntitySummary::new(
+            crate::symbio_core::entities::ENTITY_SKILL,
             id,
             id,
         );
@@ -194,9 +194,9 @@ impl Plugin for SkillPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
-        // 统一资源协议：resources/list / get / upload / delete / status
+        // 统一实体协议：entities/list / get / upload / delete / status
         if let Some(resp) =
-            crate::symbio_core::resources::dispatch(self.as_ref(), path, &ctx).await
+            crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
         {
             return resp;
         }

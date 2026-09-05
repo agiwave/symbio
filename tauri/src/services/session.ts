@@ -5,7 +5,7 @@
  */
 
 import { callPlugin } from './plugin'
-import { listResources } from './resources'
+import { listEntities } from './entities'
 import { ChatMessage as SessionMessage } from '../schemas/chat_message'
 import * as SessionGetMessages from '../schemas/session_get_messages'
 import * as SessionList from '../schemas/session_list'
@@ -24,14 +24,14 @@ export type { SessionListItem } from '../schemas/session_list'
 export type { SessionMetadata, SessionHeartbeatConfig } from '../schemas/session_meta'
 
 /**
- * 获取会话列表（统一资源协议：`worker/session/resources/list`）
+ * 获取会话列表（统一实体协议：`worker/session/entities/list`）
  *
- * 统一 `ResourceSummary` 项经映射还原为 `SessionListItem` 形状，
+ * 统一 `EntitySummary` 项经映射还原为 `SessionListItem` 形状，
  * 以便既有 `sessions` store / 对话组件保持兼容。
  */
 export async function listSessions(): Promise<SessionList.SessionListItem[]> {
-  const resp = await listResources('session')
-  // 后端 ResourceSummary.extra 为 #[serde(flatten)]，类型特有字段(message_count/
+  const resp = await listEntities('session')
+  // 后端 EntitySummary.extra 为 #[serde(flatten)]，类型特有字段(message_count/
   // is_working/metadata)会被平铺到 JSON 顶层，而非套在 it.extra 下；这里直接从顶层读。
   return (resp.items || []).map((it) => {
     const v = it as Record<string, any>

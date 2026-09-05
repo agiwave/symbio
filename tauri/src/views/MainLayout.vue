@@ -2,7 +2,7 @@
   <div class="main-layout">
     <!-- 应用外壳 = 三栏工作台（统一 Workbench 容器，应用外壳模式）：
          侧边栏 items 来自后端 providers 注册表（order 排列、不分组，
-         会话→/、设置→/settings，其余→/resources/{kind}），工作区 = RouterView。 -->
+         会话→/、设置→/settings，其余→/entities/{kind}），工作区 = RouterView。 -->
     <Workbench :rail-items="navItems" @rail-select="onNavSelect">
       <template #rail-header>
         <div class="logo-area">
@@ -11,7 +11,7 @@
         </div>
       </template>
 
-      <!-- 底部：系统目录切换（Homedir Switcher，系统工具非资源，独立于资源导航） -->
+      <!-- 底部：系统目录切换（Homedir Switcher，系统工具非实体，独立于实体导航） -->
       <template #rail-footer>
         <div class="nav-footer">
           <button
@@ -30,7 +30,7 @@
       </template>
 
       <template #content>
-        <!-- :key 强制路由切换时重建组件：各资源页共用统一 WorkbenchView，
+        <!-- :key 强制路由切换时重建组件：各实体页共用统一 WorkbenchView，
              若复用实例则 onMounted/订阅不会重新执行，列表会残留上一个类型的数据 -->
         <RouterView :key="route.path" />
       </template>
@@ -52,7 +52,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter, RouterView } from 'vue-router'
 import { startSessionBusWatcher } from '@/services/sessionBusWatcher'
 import { getHomedirInfo, type HomedirInfo } from '@/services/home'
-import { loadProviders, useNavRailItems } from '@/composables/useResourceProviders'
+import { loadProviders, useNavRailItems } from '@/composables/useEntityProviders'
 import { useSessionsStore } from '@/stores/sessions'
 import { getWorkspacePath } from '@/services/home'
 import { logger } from '@/utils/logger'
@@ -90,11 +90,11 @@ onMounted(async () => {
   }
   void useSessionsStore().refreshList()
 
-  // 拉取后端资源 provider 注册表（动态生成左侧导航；幂等）
+  // 拉取后端实体 provider 注册表（动态生成左侧导航；幂等）
   try {
     await loadProviders()
   } catch (err) {
-    logger.warn('MainLayout', '加载资源 provider 注册表失败:', err)
+    logger.warn('MainLayout', '加载实体 provider 注册表失败:', err)
   }
 
   // 异步加载 homedir 显示（不阻塞首屏）

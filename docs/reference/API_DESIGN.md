@@ -73,7 +73,7 @@ pub enum PluginFrame {
 | ------------------------------------------------------ | ------------------------------------------------------------------ |
 | `_root`                                                | 查询当前节点子插件拓扑                                                        |
 | `{plugin}/config`                                      | 统一配置管理（`get` / `set` action）                                       |
-| `{plugin}/resources/list\|get\|upload\|delete\|status` | **统一资源管理**（五类资源，见 3.2）                                             |
+| `{plugin}/entities/list\|get\|upload\|delete\|status` | **统一实体管理**（五类实体，见 3.2）                                             |
 | `session/chat`                                         | 发起 AI 长连接会话                                                        |
 | `session/get_messages`                                 | 获取对话历史                                                             |
 | `session/open` / `session/update` / `session/clear`    | 会话生命周期（会话内容操作）                                                     |
@@ -83,34 +83,34 @@ pub enum PluginFrame {
 | `explorer/list`                                        | 文件列表                                                               |
 | `web/http_request`                                     | Web 请求工具（`web_search` / `web_fetch` 为内部能力，经 `web/http_request` 暴露） |
 
-### 3.2 统一资源协议（resources/\*，五类资源）
+### 3.2 统一实体协议（entities/\*，五类实体）
 
-`model` / `mcp` / `agent` / `skill` / `session` 五种资源共享同一套 `resources/*`
+`model` / `mcp` / `agent` / `skill` / `session` 五种实体共享同一套 `entities/*`
 操作集（契约定义于 `symbio/src/symbio_core/schemas/resources.rs`，
 zip 工具函数位于 `symbio/src/symbio_core/resources.rs`）：
 
 | 操作                 | 说明                                                            |
 | ------------------ | ------------------------------------------------------------- |
-| `resources/list`   | 列出全部资源，返回 `ResourcesListResponse`（能力开关 + `ResourceSummary[]`） |
-| `resources/get`    | 读取单个资源详情                                                      |
-| `resources/upload` | 创建/更新（zip 上传或 JSON manifest 表单）                               |
-| `resources/delete` | 删除资源                                                          |
-| `resources/status` | 查询实时/连接状态（可选能力）                                               |
+| `entities/list`   | 列出全部实体，返回 `EntitiesListResponse`（能力开关 + `EntitySummary[]`） |
+| `entities/get`    | 读取单个实体详情                                                      |
+| `entities/upload` | 创建/更新（zip 上传或 JSON manifest 表单）                               |
+| `entities/delete` | 删除实体                                                          |
+| `entities/status` | 查询实时/连接状态（可选能力）                                               |
 
-* 资源差异仅由 **`ResourceCapabilities`** **能力开关**驱动（`zip_upload` / `independent_form` /
+* 实体差异仅由 **`EntityCapabilities`** **能力开关**驱动（`zip_upload` / `independent_form` /
   `realtime_status` / `mutable` / `test_connection` / `read_only`），前后端据此统一实现。
 
-* 统一路径在不同插件实例化：`worker/model/resources/*`、`mcp/resources/*`、
-  `skill/resources/*`、`agent/resources/*`、`worker/session/resources/*`。
+* 统一路径在不同插件实例化：`worker/model/entities/*`、`mcp/entities/*`、
+  `skill/entities/*`、`agent/entities/*`、`worker/session/entities/*`。
 
-* **实时状态机制**：初始状态由 `resources/list` 携带；运行时状态变化由后端经事件总线 push `resource` kind 事件
-  （`EventBus::publish_resource_status`），前端 `subscribeResourceStatus(resourceType)` 即时刷新，**不做前端轮询**。
+* **实时状态机制**：初始状态由 `entities/list` 携带；运行时状态变化由后端经事件总线 push `resource` kind 事件
+  （`EventBus::publish_entity_status`），前端 `subscribeResourceStatus(resourceType)` 即时刷新，**不做前端轮询**。
 
-* **五类操作集统一，后端渐进支持**：所有资源（含 session）共享同一套 `list/get/upload/delete/status` 契约，
-  每种资源的上传/下载（如 session 导出/导入）均有意义；按进度渐进实现，后端逐类补齐即可，无需改协议。
+* **五类操作集统一，后端渐进支持**：所有实体（含 session）共享同一套 `list/get/upload/delete/status` 契约，
+  每种实体的上传/下载（如 session 导出/导入）均有意义；按进度渐进实现，后端逐类补齐即可，无需改协议。
 
-* 前端由一份 `ResourceManagerView` 实例化多类；会话聊天主界面（`SessionView`）检索的是
-  `resources/list` 统一契约，本身保留专属（会话为内存态交互面）。
+* 前端由一份 `EntityManagerView` 实例化多类；会话聊天主界面（`SessionView`）检索的是
+  `entities/list` 统一契约，本身保留专属（会话为内存态交互面）。
 
 ## 4. 工具发现与 AI 集成
 

@@ -86,7 +86,7 @@ async function onClick() {
         ? (selected[0] as string)
         : null
     if (!path) return
-    // 资源浏览器的重置和重载由 SessionExplorerPanel 监听 activeWorkdir 自动处理
+    // 实体浏览器的重置和重载由 SessionExplorerPanel 监听 activeWorkdir 自动处理
     await store.setActiveWorkdir(path)
   } catch (e) {
     logger.error('WorkdirPicker', '选择工作目录失败', e)

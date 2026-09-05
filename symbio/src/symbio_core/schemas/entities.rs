@@ -1,86 +1,86 @@
-//! 统一资源协议（五类资源：model / mcp / agent / skill / session 的对外契约）
+//! 统一实体协议（五类实体：model / mcp / agent / skill / session 的对外契约）
 //!
 //! ## 设计原则
 //!
-//! - **机制统一、最小差异**：五类资源在服务器端都坐落于
+//! - **机制统一、最小差异**：五类实体在服务器端都坐落于
 //!   `~/.symbio/plugins/<category>/<id>/`（经 `EntityStore`），共享同一套
-//!   `resources/*` 操作集（list / get / upload / delete / status）。
-//! - **能力开关**：不同资源只在 `ResourceCapabilities` 上取值不同
+//!   `entities/*` 操作集（list / get / upload / delete / status）。
+//! - **能力开关**：不同实体只在 `EntityCapabilities` 上取值不同
 //!   （zip 上传 / 独立表单 / 实时状态 / 可写 / 连接测试），前端据此驱动 UI，
 //!   从而让"一份页面实例化五份"成为可能。
-//! - 各插件在 `resources/*` 内**复用自身已有内部逻辑**，仅统一对外响应结构。
+//! - 各插件在 `entities/*` 内**复用自身已有内部逻辑**，仅统一对外响应结构。
 //!
 //! ## 统一路径（各插件 route 分支）
 //!
 //! ```text
-//! resources/list     — 列出全部资源（含能力开关 + 概要列表）
-//! resources/get      — 读取单个资源详情
-//! resources/upload   — 创建/更新（zip 解压 或 JSON manifest 表单）
-//! resources/delete   — 删除
-//! resources/status   — 读取单个资源实时/连接状态（可选能力）
+//! entities/list     — 列出全部实体（含能力开关 + 概要列表）
+//! entities/get      — 读取单个实体详情
+//! entities/upload   — 创建/更新（zip 解压 或 JSON manifest 表单）
+//! entities/delete   — 删除
+//! entities/status   — 读取单个实体实时/连接状态（可选能力）
 //! ```
 
 use serde::{Deserialize, Serialize};
 
-// ==================== 资源类型常量 ====================
+// ==================== 实体类型常量 ====================
 
 /// Model Provider
-pub const RESOURCE_MODEL: &str = "model";
+pub const ENTITY_MODEL: &str = "model";
 /// MCP Server
-pub const RESOURCE_MCP: &str = "mcp";
+pub const ENTITY_MCP: &str = "mcp";
 /// Agent（智能体）
-pub const RESOURCE_AGENT: &str = "agent";
+pub const ENTITY_AGENT: &str = "agent";
 /// Skill（技能）
-pub const RESOURCE_SKILL: &str = "skill";
+pub const ENTITY_SKILL: &str = "skill";
 /// Session（会话）
-pub const RESOURCE_SESSION: &str = "session";
+pub const ENTITY_SESSION: &str = "session";
 /// Setting（设置分区）
-pub const RESOURCE_SETTING: &str = "setting";
+pub const ENTITY_SETTING: &str = "setting";
 
 /// serde 默认：布尔开关缺省为 true（如 `status_indicator`）
 pub(crate) fn default_true() -> bool {
     true
 }
 
-/// 与 [`crate::symbio_core::providers::storage::categories`] 一一对应的资源类型
-pub const ALL_RESOURCE_TYPES: [&str; 5] = [
-    RESOURCE_MODEL,
-    RESOURCE_MCP,
-    RESOURCE_AGENT,
-    RESOURCE_SKILL,
-    RESOURCE_SESSION,
+/// 与 [`crate::symbio_core::providers::storage::categories`] 一一对应的实体类型
+pub const ALL_ENTITY_TYPES: [&str; 5] = [
+    ENTITY_MODEL,
+    ENTITY_MCP,
+    ENTITY_AGENT,
+    ENTITY_SKILL,
+    ENTITY_SESSION,
 ];
 
 // ==================== 统一路径常量 ====================
 
-/// resources/list — 列出全部资源
-pub const RESOURCES_LIST: &str = "resources/list";
-/// resources/get — 读取单个资源详情
-pub const RESOURCES_GET: &str = "resources/get";
-/// resources/upload — 创建或更新资源
-pub const RESOURCES_UPLOAD: &str = "resources/upload";
-/// resources/delete — 删除资源
-pub const RESOURCES_DELETE: &str = "resources/delete";
-/// resources/status — 查询资源实时/连接状态
-pub const RESOURCES_STATUS: &str = "resources/status";
+/// entities/list — 列出全部实体
+pub const ENTITIES_LIST: &str = "entities/list";
+/// entities/get — 读取单个实体详情
+pub const ENTITIES_GET: &str = "entities/get";
+/// entities/upload — 创建或更新实体
+pub const ENTITIES_UPLOAD: &str = "entities/upload";
+/// entities/delete — 删除实体
+pub const ENTITIES_DELETE: &str = "entities/delete";
+/// entities/status — 查询实体实时/连接状态
+pub const ENTITIES_STATUS: &str = "entities/status";
 
-/// `resources/detail` —— 详情页定义下发（definition-driven detail）
-pub const RESOURCES_DETAIL: &str = "resources/detail";
+/// `entities/detail` —— 详情页定义下发（definition-driven detail）
+pub const ENTITIES_DETAIL: &str = "entities/detail";
 
 // ==================== 能力开关 ====================
 
-/// 资源能力开关 —— 决定该类型资源的统一页面启用哪些模块。
+/// 实体能力开关 —— 决定该类型实体的统一页面启用哪些模块。
 ///
 /// 前端可据此决定：走 zip 上传还是表单、是否需要状态轮询、能否删除等。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ResourceCapabilities {
-    /// 以上传 zip 为主（文件名即资源目录名）。`mcp` / `skill` / `agent` 为 true。
+pub struct EntityCapabilities {
+    /// 以上传 zip 为主（文件名即实体目录名）。`mcp` / `skill` / `agent` 为 true。
     pub zip_upload: bool,
     /// 是否有独立表单（`model` / `session` 先有，其余可后续扩展）。
     pub independent_form: bool,
     /// 列表项是否有实时状态（`session` 的 is_working、`mcp` 的连接状态等）。
     pub realtime_status: bool,
-    /// 是否可写（可上传新增 / 删除）。只读资源（如某些 skill）为 false。
+    /// 是否可写（可上传新增 / 删除）。只读实体（如某些 skill）为 false。
     pub mutable: bool,
     /// 是否支持"连接测试"（`model` / `mcp`）。
     pub test_connection: bool,
@@ -88,7 +88,7 @@ pub struct ResourceCapabilities {
     pub read_only: bool,
 }
 
-impl ResourceCapabilities {
+impl EntityCapabilities {
     /// model：表单为主，可测试、可写，无 zip
     pub const MODEL: Self = Self {
         zip_upload: false,
@@ -150,8 +150,8 @@ impl ResourceCapabilities {
         read_only: false,
     };
 
-    /// 容器子资源（文件级）：可写可删，无 zip / 表单 / 实时状态 / 连接测试。
-    /// agent bundle 内部的 prompt / skill / mcp 等单文件资源取此形态。
+    /// 容器子实体（文件级）：可写可删，无 zip / 表单 / 实时状态 / 连接测试。
+    /// agent bundle 内部的 prompt / skill / mcp 等单文件实体取此形态。
     pub const BUNDLE_FILE: Self = Self {
         zip_upload: false,
         independent_form: false,
@@ -163,15 +163,15 @@ impl ResourceCapabilities {
 }
 
 /// 默认能力表：`kind -> capabilities`
-pub fn capabilities_for(kind: &str) -> ResourceCapabilities {
+pub fn capabilities_for(kind: &str) -> EntityCapabilities {
     match kind {
-        RESOURCE_MODEL => ResourceCapabilities::MODEL,
-        RESOURCE_MCP => ResourceCapabilities::MCP,
-        RESOURCE_SKILL => ResourceCapabilities::SKILL,
-        RESOURCE_AGENT => ResourceCapabilities::AGENT,
-        RESOURCE_SESSION => ResourceCapabilities::SESSION,
-        RESOURCE_SETTING => ResourceCapabilities::SETTING,
-        _ => ResourceCapabilities {
+        ENTITY_MODEL => EntityCapabilities::MODEL,
+        ENTITY_MCP => EntityCapabilities::MCP,
+        ENTITY_SKILL => EntityCapabilities::SKILL,
+        ENTITY_AGENT => EntityCapabilities::AGENT,
+        ENTITY_SESSION => EntityCapabilities::SESSION,
+        ENTITY_SETTING => EntityCapabilities::SETTING,
+        _ => EntityCapabilities {
             zip_upload: false,
             independent_form: false,
             realtime_status: false,
@@ -184,14 +184,14 @@ pub fn capabilities_for(kind: &str) -> ResourceCapabilities {
 
 // ==================== provider 注册信息 ====================
 
-/// 容器子资源类型声明 —— 该 provider 的资源条目本身是「容器」，内部托管这些子类型。
+/// 容器子实体类型声明 —— 该 provider 的实体条目本身是「容器」，内部托管这些子类型。
 ///
-/// 如 agent（OAB bundle）内部托管 prompt / skill / mcp 三类文件级资源。
-/// 前端据此生成容器资源页（如 Agent 内部资源管理页）的左侧类别导航与新建表单——
+/// 如 agent（OAB bundle）内部托管 prompt / skill / mcp 三类文件级实体。
+/// 前端据此生成容器实体页（如 Agent 内部实体管理页）的左侧类别导航与新建表单——
 /// 类别的存在性、顺序、标签、路径模板、新建模板均由后端控制，前端零硬编码。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContainerKindInfo {
-    /// 子资源类型（如 `prompt` / `skill` / `mcp`）
+    /// 子实体类型（如 `prompt` / `skill` / `mcp`）
     pub kind: String,
     /// 展示标签
     pub label: String,
@@ -204,29 +204,29 @@ pub struct ContainerKindInfo {
     /// 新建内容模板（前端编辑器初始内容）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_content: Option<String>,
-    /// 子资源能力开关（容器页据此驱动 UI）
-    pub capabilities: ResourceCapabilities,
+    /// 子实体能力开关（容器页据此驱动 UI）
+    pub capabilities: EntityCapabilities,
 }
 
-/// 资源类型（provider）注册信息 —— 宿主级单一真相源
+/// 实体类型（provider）注册信息 —— 宿主级单一真相源
 ///
-/// 由核心层 [`crate::symbio_core::resources::provider_registry`] 静态注册，
-/// 经宿主 `resources/providers` 端点下发，前端据此动态生成左侧导航栏与
-/// 统一资源页的类型集合（替代硬编码类型清单）。
+/// 由核心层 [`crate::symbio_core::entities::provider_registry`] 静态注册，
+/// 经宿主 `entities/providers` 端点下发，前端据此动态生成左侧导航栏与
+/// 统一实体页的类型集合（替代硬编码类型清单）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderInfo {
-    /// 资源类型（kind），如 `model` / `mcp` / `session`
+    /// 实体类型（kind），如 `model` / `mcp` / `session`
     pub kind: String,
     /// 提供方显示名，用于路径 `[provider]/[id].[kind]`
     pub provider_name: String,
-    /// 资源操作前缀（前端拼接 `${prefix}/resources/<op>`）
+    /// 实体操作前缀（前端拼接 `${prefix}/entities/<op>`）
     pub prefix: String,
-    pub capabilities: ResourceCapabilities,
+    pub capabilities: EntityCapabilities,
     /// 展示顺序（前端导航/类型选择排序）
     pub order: i32,
     /// 展示标签（如 `Model` / `Session`）
     pub label: String,
-    /// 是否支持在资源管理器内创建/删除（`category` 存在且 dispatch 实现 upload/delete）
+    /// 是否支持在实体管理器内创建/删除（`category` 存在且 dispatch 实现 upload/delete）
     pub supports_upload: bool,
     /// 列表简洁模式：仅显示类型图标 + 标题（如设置分区，无描述/路径标签）
     #[serde(default)]
@@ -235,13 +235,13 @@ pub struct ProviderInfo {
     /// 前端据此隐藏状态徽标——列表展示形态由后端统一掌控。
     #[serde(default = "default_true")]
     pub status_indicator: bool,
-    /// 容器声明：条目内部托管的子资源类型（空 = 条目不是容器）。
-    /// 前端容器资源页的左侧类别导航由此驱动（如 Agent 内部的 prompt/skill/mcp）。
+    /// 容器声明：条目内部托管的子实体类型（空 = 条目不是容器）。
+    /// 前端容器实体页的左侧类别导航由此驱动（如 Agent 内部的 prompt/skill/mcp）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub container_kinds: Vec<ContainerKindInfo>,
 }
 
-/// `resources/providers` 响应
+/// `entities/providers` 响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvidersResponse {
     pub providers: Vec<ProviderInfo>,
@@ -249,16 +249,16 @@ pub struct ProvidersResponse {
 
 // ==================== 统一列表项 ====================
 
-/// 统一资源概要（列表项）
+/// 统一实体概要（列表项）
 ///
 /// `status` 取值建议：`active` / `disabled` / `working` / `error` / `unknown`。
 /// `extra` 展开存放类型特有字段（如 model 的 provider/model、session 的
 /// message_count 等），前端按需读取。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceSummary {
-    /// 资源类型标识（`model` / `mcp` / `agent` / `skill` / `session`）
+pub struct EntitySummary {
+    /// 实体类型标识（`model` / `mcp` / `agent` / `skill` / `session`）
     pub kind: String,
-    /// 提供方（插件）显示名，用于前端资源路径 `[provider]/[id].[kind]` 展示；
+    /// 提供方（插件）显示名，用于前端实体路径 `[provider]/[id].[kind]` 展示；
     /// 由 dispatch 统一回填（默认与 kind 相同），插件无需关心
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
@@ -284,7 +284,7 @@ pub struct ResourceSummary {
     pub extra: serde_json::Value,
 }
 
-impl ResourceSummary {
+impl EntitySummary {
     pub fn new(kind: &str, id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             kind: kind.to_string(),
@@ -303,35 +303,35 @@ impl ResourceSummary {
 
 // ==================== 请求 / 响应 ====================
 
-/// `resources/list` 响应：能力开关 + 资源概要列表
+/// `entities/list` 响应：能力开关 + 实体概要列表
 ///
-/// 容器语义（请求携带 `container`）时，`items` 为容器条目内部的子资源
+/// 容器语义（请求携带 `container`）时，`items` 为容器条目内部的子实体
 /// （条目 `kind` 字段区分子类型），`container` 回显容器 id。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourcesListResponse {
+pub struct EntitiesListResponse {
     pub kind: String,
-    pub capabilities: ResourceCapabilities,
-    pub items: Vec<ResourceSummary>,
+    pub capabilities: EntityCapabilities,
+    pub items: Vec<EntitySummary>,
     /// 容器作用域（容器语义时下发；顶层列表为 None）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
 
-/// `resources/list` 请求（可选容器作用域）
+/// `entities/list` 请求（可选容器作用域）
 ///
-/// 不带 `container`：列出 provider 顶层资源（现有语义，向后兼容）；
-/// 带 `container`：列出容器条目内部的子资源（如某 agent bundle 的 prompts/skills/mcps）。
+/// 不带 `container`：列出 provider 顶层实体（现有语义，向后兼容）；
+/// 带 `container`：列出容器条目内部的子实体（如某 agent bundle 的 prompts/skills/mcps）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ResourcesListRequest {
+pub struct EntitiesListRequest {
     /// 容器条目 id（如 agent bundle id）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
-    /// 子资源类型过滤（缺省返回全部子类型，条目自带 kind 供前端分类）
+    /// 子实体类型过滤（缺省返回全部子类型，条目自带 kind 供前端分类）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sub_kind: Option<String>,
 }
 
-/// `resources/upload` 请求
+/// `entities/upload` 请求
 ///
 /// 上传方式二选一：
 /// - `zip_b64`：zip 字节的 base64（mcp / skill / agent）；`name` 即目标目录名
@@ -340,21 +340,21 @@ pub struct ResourcesListRequest {
 /// 带 `container` 时为容器语义：`name` 即容器内相对路径，`manifest.content`
 /// 即文件内容（创建/覆盖）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceUploadRequest {
+pub struct EntityUploadRequest {
     pub kind: String,
-    /// 目标资源名 / 目录名。zip 上传必填；容器语义下为容器内相对路径。
+    /// 目标实体名 / 目录名。zip 上传必填；容器语义下为容器内相对路径。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// zip 字节（base64）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zip_b64: Option<String>,
-    /// 表单体（JSON），供 independent_form 资源使用；容器语义下取 `content` 字段
+    /// 表单体（JSON），供 independent_form 实体使用；容器语义下取 `content` 字段
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manifest: Option<serde_json::Value>,
     /// 已存在时是否覆盖（默认 true）
     #[serde(default = "default_replace")]
     pub replace: bool,
-    /// 容器作用域：资源位于该容器条目内部（如 agent bundle id）。缺省 = 顶层资源
+    /// 容器作用域：实体位于该容器条目内部（如 agent bundle id）。缺省 = 顶层实体
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
@@ -363,49 +363,49 @@ const fn default_replace() -> bool {
     true
 }
 
-/// `resources/upload` 响应
+/// `entities/upload` 响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceUploadResponse {
+pub struct EntityUploadResponse {
     pub kind: String,
     pub id: String,
     pub created: bool,
 }
 
-/// `resources/get` 请求
+/// `entities/get` 请求
 ///
-/// 带 `container` 时为容器语义：读取容器条目内部的子资源，`id` 为容器内相对路径，
-/// 内容随 `ResourceSummary.extra.content` 返回。
+/// 带 `container` 时为容器语义：读取容器条目内部的子实体，`id` 为容器内相对路径，
+/// 内容随 `EntitySummary.extra.content` 返回。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceGetRequest {
+pub struct EntityGetRequest {
     pub kind: String,
     pub id: String,
-    /// 容器作用域（如 agent bundle id）。缺省 = 顶层资源
+    /// 容器作用域（如 agent bundle id）。缺省 = 顶层实体
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
 
-/// `resources/delete` 请求（带 `container` 时为容器语义，`id` 为容器内相对路径）
+/// `entities/delete` 请求（带 `container` 时为容器语义，`id` 为容器内相对路径）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceDeleteRequest {
+pub struct EntityDeleteRequest {
     pub kind: String,
     pub id: String,
-    /// 容器作用域。缺省 = 顶层资源
+    /// 容器作用域。缺省 = 顶层实体
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
 
-/// `resources/status` 请求
+/// `entities/status` 请求
 ///
-/// 仅发起状态查询的资源标识；实现可按类型复用内部状态源。
+/// 仅发起状态查询的实体标识；实现可按类型复用内部状态源。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceStatusRequest {
+pub struct EntityStatusRequest {
     pub kind: String,
     pub id: String,
 }
 
-/// `resources/status` 响应
+/// `entities/status` 响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceStatusResponse {
+pub struct EntityStatusResponse {
     pub kind: String,
     pub id: String,
     pub status: String,
@@ -546,8 +546,8 @@ pub struct DetailAction {
     pub busy_label: Option<String>,
 }
 
-/// 详情页定义。`binding` ∈ upload（实体资源：预填 item.config，保存走
-/// `resources/upload` manifest）| config（配置分区：经 `load_path`/
+/// 详情页定义。`binding` ∈ upload（实体实体：预填 item.config，保存走
+/// `entities/upload` manifest）| config（配置分区：经 `load_path`/
 /// `save_path` 读写，如 `local/config get|set`）。派生链均为「首个非空」：
 /// `title_from` 生成标题，`name_from` 保存时补名称，`id_from` 新建时
 /// 派生 slug id（前端去重 `-2` 递增，后端 `validate_manifest` 兜底）。
@@ -579,14 +579,14 @@ pub struct DetailDefinition {
     pub actions: Vec<DetailAction>,
 }
 
-/// `resources/detail` 请求（`id` 为空 = 请求「新建态」定义）
+/// `entities/detail` 请求（`id` 为空 = 请求「新建态」定义）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DetailDefinitionRequest {
     pub kind: String,
     pub id: String,
 }
 
-/// `resources/detail` 响应（`definition = None` 表示无定义）
+/// `entities/detail` 响应（`definition = None` 表示无定义）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DetailDefinitionResponse {
     pub definition: Option<DetailDefinition>,
