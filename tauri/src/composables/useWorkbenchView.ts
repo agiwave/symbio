@@ -159,12 +159,6 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   const totalCount = computed(() =>
     Object.values(typeStates.value).reduce((n, s) => n + s.items.length, 0)
   )
-  const enabledCount = computed(() =>
-    Object.values(typeStates.value).reduce(
-      (n, s) => n + s.items.filter((i) => i.status === 'active' || i.status === 'working').length,
-      0
-    )
-  )
   const allItemsEmpty = computed(() =>
     activeTypes.value.every((d) => (typeStates.value[d.kind]?.items.length ?? 0) === 0)
   )
@@ -663,7 +657,6 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     items,
     kindEntries,
     totalCount,
-    enabledCount,
     allItemsEmpty,
     emptyHint,
     loading,

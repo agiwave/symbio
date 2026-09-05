@@ -277,6 +277,12 @@ impl SessionPlugin {
         session.updated_at = (OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
         self.save_session(&session).await?;
 
+        // 标题变更 → session 总线事件，驱动统一资源列表防抖刷新（机制级实时能力）
+        if req.title.is_some() {
+            use crate::symbio_core::event_bus::EventBus;
+            EventBus::try_publish("session", Some(&req.session_id), json!({ "type": "title" }));
+        }
+
         Ok(serde_json::to_value(session_update::Response {
             success: true,
             session: serde_json::to_value(session)?,

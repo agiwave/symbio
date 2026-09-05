@@ -342,12 +342,8 @@ impl crate::symbio_core::resources::ResourceProvider for SessionPlugin {
                     .get(&s.id)
                     .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
                     .unwrap_or(false);
-                let title = s
-                    .metadata
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| s.id.clone());
+                // 显示名：metadata.title 优先，否则从会话内容自动生成，最后「新对话」
+                let title = s.display_title();
                 let mut it = crate::symbio_core::resources::ResourceSummary::new(
                     crate::symbio_core::resources::RESOURCE_SESSION,
                     &s.id,
@@ -386,7 +382,8 @@ impl crate::symbio_core::resources::ResourceProvider for SessionPlugin {
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
         id: &str,
-    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {        let active = self.active_mgr.sessions.read().await;
+    ) -> Result<crate::symbio_core::resources::ResourceStatusResponse, PluginError> {
+        let active = self.active_mgr.sessions.read().await;
         let is_working = active
             .get(id)
             .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))

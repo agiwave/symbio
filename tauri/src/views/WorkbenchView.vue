@@ -48,16 +48,9 @@
       </template>
 
       <template #meta>
-        <!-- container：容器条目名 + 子条目计数 -->
+        <!-- container：容器条目名 -->
         <template v-if="isContainer">
           <span class="meta-container" :title="containerId">{{ containerName }}</span>
-          · 共 {{ kindEntries.length }} 项
-        </template>
-        <!-- entity：总数 + 可用数 -->
-        <template v-else-if="totalCount > 0">
-          <span class="running-pulse" />
-          共 {{ totalCount }} {{ isMulti ? '个资源' : `个${title}` }}
-          <span v-if="enabledCount > 0" class="meta-sub">{{ enabledCount }} 可用</span>
         </template>
       </template>
 
@@ -346,7 +339,6 @@ const {
   kindEntries,
   items,
   totalCount,
-  enabledCount,
   emptyHint,
   loading,
   loadAll,
@@ -427,9 +419,11 @@ async function copyItemPath(item: ResourceSummary) {
   }
 }
 
-function cardStatus(item: ResourceSummary): 'active' | 'disabled' | 'warning' | 'error' | 'muted' {
+function cardStatus(
+  item: ResourceSummary
+): 'active' | 'working' | 'disabled' | 'warning' | 'error' | 'muted' {
   switch (item.status) {
-    case 'working': return 'warning'
+    case 'working': return 'working'
     case 'disabled': return 'disabled'
     case 'error':
     case 'failed': return 'error'
@@ -504,7 +498,12 @@ onMounted(() => {
           it.status_detail = status_detail ?? undefined
         }
       }),
-      subscribe({ kind: d.kind }, () => scheduleRefresh(d.kind)),
+      // 粗粒度事件才刷新清单（status=工作状态流转、title=会话命名）；
+      // 流式 update 等细粒度事件与列表无关，忽略以免空闲期反复重拉
+      subscribe({ kind: d.kind }, (e) => {
+        const t = (e.data?.data as { type?: string } | undefined)?.type
+        if (t === 'status' || t === 'title') scheduleRefresh(d.kind)
+      }),
     ])
   }
 })

@@ -37,6 +37,8 @@ export async function listSessions(): Promise<SessionList.SessionListItem[]> {
     const v = it as Record<string, any>
     return {
       id: v.id,
+      // 后端 display_title：metadata.title 优先，否则从会话内容自动生成
+      name: v.name ?? '',
       message_count: Number(v.message_count ?? 0),
       updated_at: v.updated_at ?? 0,
       is_working: v.is_working ?? v.status === 'working',

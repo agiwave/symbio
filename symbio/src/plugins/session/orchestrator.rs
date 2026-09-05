@@ -611,6 +611,8 @@ impl SessionPlugin {
                             .await;
                         return;
                     }
+                    // 自动命名：首个用户消息落盘后，尚无标题的会话从内容生成并持久化
+                    this_spawn.ensure_auto_title(&sid_spawn).await;
                 }
             }
 
@@ -778,6 +780,39 @@ impl SessionPlugin {
         // 同时通过 EventBus 转发（供前端单连接订阅使用）
         if let PluginFrame::Data(data) = &frame {
             EventBus::try_publish("session", Some(&state.request_id_str()), data.clone());
+        }
+    }
+
+    /// 自动命名：会话尚无显式标题（metadata.title）时，从会话内容生成并持久化。
+    ///
+    /// 在首个用户消息落盘后调用；规则与 [`super::types::Session::display_title`]
+    /// 一致（首条用户文本消息首行、限长）。持久化后发布 session 总线事件，
+    /// 驱动统一资源列表的防抖刷新（机制级实时能力）。
+    pub(crate) async fn ensure_auto_title(&self, session_id: &str) {
+        use crate::symbio_core::event_bus::EventBus;
+
+        let Ok(mut session) = self.get_or_create_session(session_id).await else {
+            return;
+        };
+        let has_title = session
+            .metadata
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        if has_title {
+            return;
+        }
+        let Some(title) = super::types::derive_session_title(&session.messages) else {
+            return;
+        };
+        if let Some(obj) = session.metadata.as_object_mut() {
+            obj.insert("title".to_string(), json!(title));
+        }
+        session.updated_at = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000)
+            as i64;
+        if self.save_session(&session).await.is_ok() {
+            EventBus::try_publish("session", Some(session_id), json!({ "type": "title", "title": title }));
         }
     }
 

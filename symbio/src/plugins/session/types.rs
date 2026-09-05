@@ -25,6 +25,70 @@ impl Session {
             metadata: serde_json::json!({}),
         }
     }
+
+    /// 会话显示名：metadata.title 优先；否则从内容自动生成；再否则回落 id。
+    ///
+    /// 「从内容生成」= 第一条含文本的用户消息首行（压缩空白、限长），见
+    /// [`derive_session_title`]。列表（resources/list）与本方法共用同一规则，
+    /// 保证自动命名会话在任何入口看到的名称一致。
+    pub fn display_title(&self) -> String {
+        self.metadata
+            .get("title")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| derive_session_title(&self.messages))
+            .unwrap_or_else(|| "新对话".to_string())
+    }
+}
+
+/// 从会话消息内容自动生成会话标题（无显式命名时的兜底）。
+///
+/// 规则：第一条**含文本**的用户消息 → 首行 → 压缩连续空白 → 限长
+/// [`SESSION_TITLE_MAX_CHARS`] 字符（超长追加省略号）。找不到文本时返回 None。
+pub(crate) fn derive_session_title(messages: &[ChatMessage]) -> Option<String> {
+    const SESSION_TITLE_MAX_CHARS: usize = 24;
+    for m in messages {
+        if !matches!(m.role, Some(crate::symbio_core::schemas::session::chat_message::MessageRole::User)) {
+            continue;
+        }
+        let text = match &m.content {
+            Some(crate::symbio_core::schemas::session::chat_message::MessageContent::Text(s)) => s.clone(),
+            Some(crate::symbio_core::schemas::session::chat_message::MessageContent::Parts(parts)) => parts
+                .iter()
+                .filter_map(|p| match p {
+                    crate::symbio_core::schemas::session::chat_message::ContentPart::Text { text } => {
+                        Some(text.clone())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+            None => continue,
+        };
+        // 首行 + 压缩空白 + 限长
+        let first_line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+        let mut out = String::new();
+        let mut chars = first_line.chars();
+        for _ in 0..SESSION_TITLE_MAX_CHARS {
+            match chars.next() {
+                Some(c) if c.is_whitespace() => {
+                    if !out.ends_with(' ') {
+                        out.push(' ');
+                    }
+                }
+                Some(c) => out.push(c),
+                None => break,
+            }
+        }
+        let truncated = out.trim_end();
+        return Some(if chars.next().is_some() {
+            format!("{truncated}…")
+        } else {
+            truncated.to_string()
+        });
+    }
+    None
 }
 
 /// 会话心跳任务配置
@@ -139,5 +203,51 @@ mod tests {
         assert!(hb.enabled);
         assert_eq!(hb.interval_seconds, 300);
         assert!(hb.include_history);
+    }
+
+    fn user_msg(text: &str) -> ChatMessage {
+        use crate::symbio_core::schemas::session::chat_message as cm;
+        ChatMessage {
+            id: "m1".into(),
+            role: Some(cm::MessageRole::User),
+            content: Some(cm::MessageContent::Text(text.into())),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn derive_title_takes_first_user_line() {
+        let msgs = vec![user_msg("帮我分析一下这个报错\n第二行"), user_msg("第二条")];
+        assert_eq!(derive_session_title(&msgs).as_deref(), Some("帮我分析一下这个报错"));
+    }
+
+    #[test]
+    fn derive_title_truncates_long_text() {
+        let long = "这是一个特别特别长的用户首条消息用来验证截断逻辑是否正常工作";
+        let t = derive_session_title(&[user_msg(long)]).unwrap();
+        assert!(t.ends_with('…'));
+        assert!(t.chars().count() <= 25);
+    }
+
+    #[test]
+    fn derive_title_skips_empty_and_non_user() {
+        use crate::symbio_core::schemas::session::chat_message as cm;
+        let empty = ChatMessage {
+            id: "m0".into(),
+            role: Some(cm::MessageRole::User),
+            content: Some(cm::MessageContent::Text("   \n  ".into())),
+            ..Default::default()
+        };
+        assert_eq!(derive_session_title(&[empty]), None);
+    }
+
+    #[test]
+    fn display_title_prefers_metadata_then_content_then_default() {
+        let mut s = Session::new("sess-123");
+        assert_eq!(s.display_title(), "新对话");
+        s.messages = vec![user_msg("帮我查天气")];
+        assert_eq!(s.display_title(), "帮我查天气");
+        s.metadata = serde_json::json!({ "title": "自定义名" });
+        assert_eq!(s.display_title(), "自定义名");
     }
 }

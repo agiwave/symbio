@@ -121,8 +121,17 @@ session 是「非实体存储 + editor 引导型创建」的资源范例，展�
   前端 `capabilities.mutable && !read_only` 即出现删除按钮，走统一
   `resources/delete`；删除能力与 `supports_upload`（上传通道）解耦判定；
 - **实时列表（机制能力）**：① resource 状态事件 → 列表项状态角标即时补丁；
-  ② 该 kind 的任意 bus 事件 → 防抖（800ms）刷新该类清单。后端任何变化
-  （会话新建/删除/标题变更、运行状态）自动反映到列表，前端零轮询。
+  ② 该 kind 的**粗粒度** bus 事件（`type == "status" | "title"`）→ 防抖（800ms）
+  刷新该类清单；流式 `update` 等细粒度事件与列表无关，**不得**触发刷新。
+  会话新建/删除/标题变更、运行状态自动反映到列表，前端零轮询。
+- **working 状态（列表标准态）**：后端以 `status: "working"` 表示资源正在工作
+  （会话处理中等），`ResourceCard` 以 accent 色脉冲点渲染，标题行带「工作中」
+  badge。状态取值约定：`active / working / disabled / error / unknown`。
+- **会话显示名（display_title）**：后端 `Session::display_title` 是唯一命名来源——
+  `metadata.title` 优先，否则从首条用户文本消息自动生成（首行、压缩空白、
+  限长 24 字符），否则「新对话」。首个用户消息落盘后自动命名并持久化
+  （`ensure_auto_title`）+ 发 `title` 总线事件；重命名（session_update 带 title）
+  同样发事件。**前端不得**自行从消息推导标题（历史 N+1 实现已删除）。
 
 路由：
 

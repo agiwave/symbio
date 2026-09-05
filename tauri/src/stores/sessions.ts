@@ -379,20 +379,11 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (typeof wd === 'string' && wd) {
           lastUsedWorkdir.value = wd
         }
-        // 同步标题
-        const t = it.metadata?.title
-        if (typeof t === 'string' && t) {
+        // 同步标题（后端 resources/list 的 name 已按 display_title 下发：
+        // metadata.title 优先，否则从会话内容自动生成——前端不再自行拉消息推导）
+        const t = (typeof it.metadata?.title === 'string' && it.metadata.title) || it.name
+        if (t) {
           titles.value[it.id] = t
-        } else if (it.message_count > 0 && !titles.value[it.id]) {
-          // 缺标题时拉取首条消息作为标题
-          try {
-            const { messages } = await fetchSessionMessages(it.id)
-            if (messages.length > 0) {
-              titles.value[it.id] = extractPreview(messages[0])
-            }
-          } catch (e) {
-            logger.warn('[sessions]', '加载首条消息失败', e)
-          }
         }
       }
       // 回填会话级选择（mode / risk_level）到 store map
@@ -645,10 +636,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     const { messages: rawMsgs } = await fetchSessionMessages(id) // 错误会自然抛出（session/get_messages）
     const msgs = rawMsgs as unknown as ChatMessage[]
     hydrateFromHistory(id, msgs)
-    // 同步首条消息预览（用于标题/缩略卡）
-    if (msgs.length > 0 && !titles.value[id]) {
-      titles.value[id] = extractPreview(msgs[0])
-    }
     // 同步 list message_count / updated_at
     const idx = list.value.findIndex(s => s.id === id)
     if (idx >= 0) {
@@ -809,15 +796,6 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   // ---- helpers ----
-  function extractPreview(msg: any): string {
-    const c = msg?.content
-    if (typeof c === 'string') return c.slice(0, 20) + (c.length > 20 ? '...' : '')
-    if (Array.isArray(c)) {
-      const txt = c.filter((p: any) => p?.type === 'text').map((p: any) => p.text || '').join('')
-      return txt.slice(0, 20) + (txt.length > 20 ? '...' : '')
-    }
-    return '新对话'
-  }
 
   return {
     // state

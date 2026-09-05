@@ -59,7 +59,7 @@ interface Tag {
 interface ResourceCardProps {
   title: string
   subtitle?: string
-  status?: 'active' | 'disabled' | 'warning' | 'error' | 'muted'
+  status?: 'active' | 'working' | 'disabled' | 'warning' | 'error' | 'muted'
   statusTitle?: string
   badge?: string
   badgeKind?: 'default' | 'primary' | 'success' | 'warn' | 'info'
@@ -141,6 +141,18 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
   flex-shrink: 0;
 }
 .status-dot.status-active { background: var(--success-solid); }
+/* working：工作中（如会话处理中）——accent 色脉冲点 */
+.status-dot.status-working {
+  background: var(--accent);
+  animation: status-pulse 1.4s var(--motion-ease, ease-in-out) infinite;
+}
+@keyframes status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; opacity: 1; }
+  50% { box-shadow: 0 0 0 0.25rem var(--accent-subtle-bg, rgba(0, 0, 0, 0.15)); opacity: 0.75; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.status-working { animation: none; }
+}
 .status-dot.status-disabled { background: var(--border-strong); }
 .status-dot.status-warning { background: var(--warning-solid); }
 .status-dot.status-error { background: var(--danger-solid); }
