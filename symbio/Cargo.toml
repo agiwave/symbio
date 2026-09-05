@@ -63,8 +63,9 @@ rusqlite = { version = "0.37.0", features = ["bundled", "time"] }
 tokio-rusqlite = "0.7.0"
 sqlite-vec = "0.1.9"
 # 统一资源协议：zip 上传解压（MCP / Skill / Agent 以 zip 为主，文件名=目录名）
-zip = "2.4.1"
-# base64 编码：zip 字节经 JSON payload 传输
+# 仅启用 deflate（flate2/miniz_oxide，纯 Rust）：默认 features 会拉入 zstd/lzma 等 C 编译包
+zip = { version = "2.4.1", default-features = false, features = ["deflate"] }
+# base64 编码：zip 字节经 JSON payload 传输（agent 插件）
 base64 = "0.22.1"
 
 [workspace]
