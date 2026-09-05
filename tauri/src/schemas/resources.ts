@@ -117,6 +117,108 @@ export interface ResourceStatusResponse {
   status_detail?: string
 }
 
+// ==================== 详情页定义（definition-driven detail） ====================
+
+/** 条件谓词（徽标/动作显隐）。`all` 存在时为 AND 组合 */
+export interface DetailCondition {
+  /** 求值键：表单字段名，或特殊键 is_existing / is_default / cap.<name> */
+  key: string
+  equals?: unknown
+  not_equals?: unknown
+  truthy?: boolean
+  all?: DetailCondition[]
+}
+
+/** select 选项 */
+export interface DetailOption {
+  value: string
+  label: string
+}
+
+/** 表单字段定义。widget ∈ text|password|number|select|textarea|toggle|datalist */
+export interface DetailField {
+  key: string
+  label: string
+  description?: string
+  required?: boolean
+  widget: string
+  placeholder?: string
+  min?: number
+  max?: number
+  step?: number
+  rows?: number
+  options?: DetailOption[]
+  suggestions?: string[]
+  options_from_preset?: boolean
+  suggestions_from_preset?: boolean
+  full_width?: boolean
+  default?: unknown
+}
+
+/** 分区（可折叠） */
+export interface DetailSection {
+  title?: string
+  collapsed?: boolean
+  fields: DetailField[]
+}
+
+/** 预设项：选中后按 set 填充字段，options 注入对应字段动态候选 */
+export interface DetailPreset {
+  value: string
+  label: string
+  /** 按 fill 策略填充（if_empty/always） */
+  set?: Record<string, unknown>
+  /** 总是覆盖（如协议校正） */
+  set_always?: Record<string, unknown>
+  options?: Record<string, string[]>
+}
+
+/** 预设联动规格：field 为触发字段；fill ∈ if_empty | always */
+export interface DetailPresetSpec {
+  field: string
+  fill: string
+  presets: DetailPreset[]
+}
+
+/** 标题区徽标（如「默认」「已停用」） */
+export interface DetailBadge {
+  when?: DetailCondition
+  label: string
+  style: string
+}
+
+/** 动作按钮。id ∈ save|test|delete|set-default 或自定义 */
+export interface DetailAction {
+  id: string
+  label: string
+  style: string
+  when?: DetailCondition
+  disabled_when?: DetailCondition
+  payload?: Record<string, unknown>
+  busy_label?: string
+}
+
+/** 详情页定义。binding ∈ upload（实体资源，保存走 resources/upload）| config（配置分区，经 load/save_path 读写） */
+export interface DetailDefinition {
+  binding: string
+  load_path?: string
+  save_path?: string
+  title_from?: string[]
+  title_fallback?: string
+  subtitle_from?: string[]
+  name_from?: string[]
+  id_from?: string[]
+  sections: DetailSection[]
+  presets?: DetailPresetSpec
+  badges?: DetailBadge[]
+  actions?: DetailAction[]
+}
+
+/** resources/detail 响应（definition = null 表示无定义） */
+export interface DetailDefinitionResponse {
+  definition: DetailDefinition | null
+}
+
 /** 各类型标签（前端兜底展示用；后端 ProviderInfo.label 为权威，未下发时用此表） */
 export const RESOURCE_LABELS: Record<string, string> = {
   session: '会话',

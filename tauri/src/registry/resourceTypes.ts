@@ -24,12 +24,8 @@
  */
 
 import { defineComponent, h, markRaw, shallowReactive, type Component } from 'vue'
-import Model from '@/components/resources/Model.vue'
 import Agent from '@/components/resources/Agent.vue'
 import Appearance from '@/components/settings/Appearance.vue'
-import SessionSettings from '@/components/settings/Session.vue'
-import Local from '@/components/settings/Local.vue'
-import Web from '@/components/settings/Web.vue'
 import Session from '@/components/resources/Session.vue'
 import About from '@/components/settings/About.vue'
 
@@ -92,8 +88,8 @@ export function getResourceIconFor(target: ResourceRegistryTarget): Component | 
 
 // ============ 内置注册 ============
 
-// model 使用独立表单
-registerResourceEditor('model', markRaw(Model))
+// model 详情/新建不再注册：由后端 `resources/detail` 下发表单定义、
+// DetailForm 通用渲染器动态生成（definition-driven detail）。
 
 // Agent（OAB bundle）：**项级**注册（agent:bundle，按 item.config_type 命中）。
 // kind 级刻意不注册——否则 createEditor('agent') 会劫持 zip 上传新建流程；
@@ -106,11 +102,10 @@ registerResourceEditor('agent:bundle', markRaw(Agent))
 // 进入该 editor 的引导态（新建会话），列表/删除由机制承担（delete_item 钩子）。
 registerResourceEditor('session', markRaw(Session))
 
-// 设置分区：同一 kind（setting）下按 config_type 进入不同 editor
+// 设置分区：同一 kind（setting）下按 config_type 进入不同 editor。
+// session/local/web 三分区改由后端 resources/detail 下发定义（DetailForm 渲染），
+// 仅保留不适用定义的两个：appearance（前端 store 即时生效）/ about（信息展示）。
 registerResourceEditor('setting:appearance', markRaw(Appearance))
-registerResourceEditor('setting:session', markRaw(SessionSettings))
-registerResourceEditor('setting:local', markRaw(Local))
-registerResourceEditor('setting:web', markRaw(Web))
 registerResourceEditor('setting:about', markRaw(About))
 
 /** 用 SVG path 构造轻量图标组件（feather 风格线条图标） */
@@ -212,8 +207,3 @@ registerResourceIcon(
     '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'
   )
 )
-
-/** 构造资源路径唯一标识：`[provider]/[id].[kind]`（如 `model/openai.model`） */
-export function resourcePath(provider: string, id: string, kind: string): string {
-  return `${provider}/${id}.${kind}`
-}

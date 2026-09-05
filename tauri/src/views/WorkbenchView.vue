@@ -69,15 +69,7 @@
             :show-status="showStatusFor(item)"
             :is-active="selectedId === `${item.kind}:${item.id}`"
             @click="select(`${item.kind}:${item.id}`)"
-          >
-            <template v-if="!isCompact" #meta>
-              <span
-                class="tag tag-muted tag-copy"
-                :title="`${itemPath(item)}（点击复制）`"
-                @click.stop="copyItemPath(item)"
-              >{{ itemPath(item) }}</span>
-            </template>
-          </ResourceCard>
+          />
         </div>
         <div v-else class="entry-list">
           <ResourceCard
@@ -160,6 +152,19 @@
               :is="createEditor(createKind)"
               v-if="createEditor(createKind)"
               :key="'create:' + (createKind || '')"
+              :item="null"
+              :capabilities="capsOf(createKind)"
+              :saving="saving"
+              :existing-ids="typeStates[createKind]?.items.map((i) => i.id) ?? []"
+              @save="saveForm"
+              @cancel="cancelCreate"
+            />
+
+            <!-- 定义驱动的新建表单（后端 resources/detail 空态定义，如 model） -->
+            <DetailForm
+              v-else-if="detailDefinition"
+              :key="'create-def:' + (createKind || '')"
+              :definition="detailDefinition"
               :item="null"
               :capabilities="capsOf(createKind)"
               :saving="saving"
@@ -263,6 +268,22 @@
             @created="onEditorCreated"
           />
 
+          <!-- 定义驱动的详情表单（后端 resources/detail 下发，如 model / 设置三分区） -->
+          <DetailForm
+            v-else-if="detailDefinition"
+            :key="'def:' + selected.kind + ':' + selected.item.id"
+            :definition="detailDefinition"
+            :item="selected.item"
+            :capabilities="capsOf(selected.kind)"
+            :saving="saving"
+            :testing="testing"
+            :deleting="deletingId === selected.item.id"
+            @save="saveForm"
+            @test="testConnection"
+            @delete="removeSelected"
+            @set-default="saveDefault"
+          />
+
           <!-- 通用详情 + 操作工具栏（mcp / skill / agent 等） -->
           <template v-else>
             <div v-if="capsOf(selected.kind).test_connection || canDeleteSelected" class="detail-toolbar">
@@ -307,10 +328,10 @@ import Workbench from '@/components/common/Workbench.vue'
 import ResourceCard from '@/components/common/ResourceCard.vue'
 import Toast from '@/components/common/Toast.vue'
 import ResourceDetailPanel from '@/components/resources/ResourceDetailPanel.vue'
+import DetailForm from '@/components/resources/DetailForm.vue'
 import { useWorkbenchView } from '@/composables/useWorkbenchView'
-import { resourcePath, getResourceIconFor } from '@/registry/resourceTypes'
+import { getResourceIconFor } from '@/registry/resourceTypes'
 import type { ResourceSummary } from '@/schemas/resources'
-import { useToast } from '@/composables/useToast'
 import { subscribe, subscribeResourceStatus } from '@/services/eventBus'
 
 const props = defineProps<{
@@ -323,7 +344,6 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
-const toast = useToast()
 
 const pageMode = props.containerKind ? 'container' : 'entity'
 
@@ -371,6 +391,7 @@ const {
   kindLabel,
   createEditor,
   selectedEditor,
+  detailDefinition,
   canDeleteSelected,
   containerName,
   containerIdRef,
@@ -405,20 +426,6 @@ function goBack() {
 }
 
 // === entity 列表展示辅助 ===
-function itemPath(item: ResourceSummary): string {
-  return resourcePath(item.provider || item.kind, item.id, item.kind)
-}
-
-async function copyItemPath(item: ResourceSummary) {
-  const path = itemPath(item)
-  try {
-    await navigator.clipboard.writeText(path)
-    toast.showToast('success', '已复制资源路径')
-  } catch {
-    toast.showToast('info', `路径：${path}`)
-  }
-}
-
 function cardStatus(
   item: ResourceSummary
 ): 'active' | 'working' | 'disabled' | 'warning' | 'error' | 'muted' {
@@ -560,14 +567,6 @@ watch(containerIdRef, () => {
   font-size: 0.65rem;
 }
 .tag-muted { background: var(--surface-sunken); color: var(--text-muted); }
-.tag-copy {
-  cursor: pointer;
-  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
-}
-.tag-copy:hover {
-  color: var(--text-primary);
-  background: var(--surface-hover);
-}
 
 /* 运行状态脉冲点（#list / #meta 插槽内容） */
 .running-pulse {

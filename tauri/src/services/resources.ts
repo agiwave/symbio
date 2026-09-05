@@ -7,6 +7,8 @@
 
 import { callPlugin } from './plugin'
 import {
+  type DetailDefinition,
+  type DetailDefinitionResponse,
   type ProviderInfo,
   type ProvidersResponse,
   type ResourceCapabilities,
@@ -163,6 +165,25 @@ export async function getResourceStatus(
     return resp ?? null
   } catch (err) {
     logger.debug('resources-service', `getResourceStatus(${type}/${id}) failed:`, err)
+    return null
+  }
+}
+
+/**
+ * 获取详情页定义（definition-driven detail）。
+ *
+ * `id` 为空 = 「新建态」定义；provider 未实现定义钩子时返回 null
+ * （前端回退注册 editor / 通用兜底面板）。
+ */
+export async function getDetailDefinition(
+  type: string,
+  id = ''
+): Promise<DetailDefinition | null> {
+  try {
+    const resp = await resourcesOp<DetailDefinitionResponse>(type, 'detail', { kind: type, id })
+    return resp?.definition ?? null
+  } catch (err) {
+    logger.debug('resources-service', `getDetailDefinition(${type}/${id}) failed:`, err)
     return null
   }
 }

@@ -4,7 +4,6 @@
  * 注册表不再维护硬编码类型清单/前缀/能力，只做：
  * - editor 组件按 kind 注册
  * - icon 按 kind 注册
- * - resourcePath 构造
  * 类型的存在/能力/前缀来自后端 ProviderInfo（见 useResourceProviders）。
  */
 import { describe, expect, it } from 'vitest'
@@ -16,14 +15,17 @@ import {
   getResourceIconFor,
   registerResourceEditor,
   registerResourceIcon,
-  resourcePath,
 } from '../resourceTypes'
 
 const Dummy = defineComponent({ template: '<div />' })
 
 describe('registerResourceEditor / getResourceEditor', () => {
-  it('model 预注册专属编辑表单', () => {
-    expect(getResourceEditor('model')).toBeTruthy()
+  it('model / 设置三分区改由后端 detail 定义驱动，前端不再注册', () => {
+    // definition-driven detail：注册 editor 缺席时由 DetailForm 渲染
+    expect(getResourceEditor('model')).toBeUndefined()
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 'session' })).toBeUndefined()
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 'local' })).toBeUndefined()
+    expect(getResourceEditorFor({ kind: 'setting', config_type: 'web' })).toBeUndefined()
   })
 
   it('未注册的 kind 返回 undefined（走通用兜底）', () => {
@@ -38,11 +40,8 @@ describe('registerResourceEditor / getResourceEditor', () => {
 })
 
 describe('getResourceEditorFor（项级"扩展名"分发）', () => {
-  it('setting 各分区按 config_type 进入不同 editor', () => {
+  it('setting 各分区按 config_type 进入不同 editor（定义驱动的三分区除外）', () => {
     expect(getResourceEditorFor({ kind: 'setting', config_type: 'appearance' })).toBeTruthy()
-    expect(getResourceEditorFor({ kind: 'setting', config_type: 'session' })).toBeTruthy()
-    expect(getResourceEditorFor({ kind: 'setting', config_type: 'local' })).toBeTruthy()
-    expect(getResourceEditorFor({ kind: 'setting', config_type: 'web' })).toBeTruthy()
     expect(getResourceEditorFor({ kind: 'setting', config_type: 'about' })).toBeTruthy()
   })
 
@@ -52,7 +51,7 @@ describe('getResourceEditorFor（项级"扩展名"分发）', () => {
   })
 
   it('无 config_type 的资源走 kind 级查找', () => {
-    expect(getResourceEditorFor({ kind: 'model' })).toBeTruthy()
+    expect(getResourceEditorFor({ kind: 'session' })).toBeTruthy()
     expect(getResourceEditorFor({ kind: 'mcp' })).toBeUndefined()
   })
 
@@ -89,17 +88,5 @@ describe('getResourceIconFor（项级图标分发）', () => {
 
   it('未注册图标的类型返回 undefined', () => {
     expect(getResourceIconFor({ kind: 'unknown-type' })).toBeUndefined()
-  })
-})
-
-describe('resourcePath', () => {
-  it('构造 [provider]/[id].[kind]', () => {
-    expect(resourcePath('model', 'openai', 'model')).toBe('model/openai.model')
-    expect(resourcePath('skill', 'pdf', 'skill')).toBe('skill/pdf.skill')
-    expect(resourcePath('mcp', 'filesystem', 'mcp')).toBe('mcp/filesystem.mcp')
-  })
-
-  it('provider 与 kind 可以不同（未来插件显示名分叉场景）', () => {
-    expect(resourcePath('worker', 'openai', 'model')).toBe('worker/openai.model')
   })
 })

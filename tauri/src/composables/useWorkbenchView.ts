@@ -19,14 +19,17 @@
  * 协议同一套 `${prefix}/resources/*`。
  *
  * 另导出：
- * - useContainerOverview：容器条目详情组件（如 AgentDetailForm）的只读概览
+ * - useContainerOverview：容器条目详情组件（如 Agent.vue）的只读概览
  *   （类别 + 计数），管理逻辑一律在 WorkbenchView 页面侧，此处不重复；
+ * - detailDefinition：后端 resources/detail 下发的详情页定义（§3.2 解析链
+ *   第二优先：注册 editor 缺席时由 DetailForm 渲染）；
  * - isManagerCreatable / buildMixedItems：纯函数（可单测）。
  */
 
-import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import {
   deleteResource,
+  getDetailDefinition,
   getResource,
   getResourceStatus,
   listResources,
@@ -43,6 +46,7 @@ import {
 import { getResourceEditor, getResourceEditorFor, getResourceIcon } from '@/registry/resourceTypes'
 import type {
   ContainerKindInfo,
+  DetailDefinition,
   ProviderInfo,
   ResourceCapabilities,
   ResourceSummary,
@@ -289,6 +293,32 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     editorError.value = ''
     wb.cancelCreate()
   }
+
+  // ==================== 详情页定义（definition-driven detail） ====================
+  // 解析顺序：注册专属 editor → 本定义（DetailForm 渲染）→ 通用兜底。
+  // 新建态（id 空）与选中态共用一个请求令牌防竞态。
+  const detailDefinition = shallowRef<DetailDefinition | null>(null)
+  let detailToken = 0
+  watch(
+    () => {
+      if (isContainer) return ''
+      if (creating.value && createKind.value) return `create:${createKind.value}`
+      const sel = selected.value
+      return sel ? `sel:${sel.item.kind}:${sel.item.id}` : ''
+    },
+    async (key) => {
+      if (!key) {
+        detailDefinition.value = null
+        return
+      }
+      const [scope, kind, ...rest] = key.split(':')
+      const id = scope === 'create' ? '' : rest.join(':')
+      const token = ++detailToken
+      const def = await getDetailDefinition(kind, id)
+      if (token === detailToken) detailDefinition.value = def
+    },
+    { immediate: true }
+  )
 
   // ============ entity：zip 上传 / 表单 / JSON 兜底保存 ============
   const zipUploading = ref(false)
@@ -697,6 +727,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     kindLabel,
     createEditor,
     selectedEditor,
+    detailDefinition,
     canDeleteSelected,
     // container 文本编辑
     containerName,
