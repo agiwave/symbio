@@ -11,11 +11,19 @@
     kind 级 editor 注册 → 机制新建按钮自动可用；空列表时页面自动进入此态）。
 
   选中同步：机制选中（:key 重挂载）是唯一真相，watch item.id → store.selectSession。
-  创建/删除经 emit('created' / 'delete') 回到机制页面层，不在本组件内自持清单状态。
+  创建经 emit('created') 回到机制页面层。机制动作（删除/容器入口等）经
+  mechanism-actions prop 注入、由 ChatMainPanel 头部与自身按钮并排渲染——
+  详情页只有自定义/机制化两种形态，机制动作一律在详情页内部渲染，
+  页面不得另加外框。
 -->
 <template>
   <div v-if="item" class="session-editor">
-    <ChatMainPanel class="col-chat" @delete-session="emit('delete')" />
+    <ChatMainPanel
+      class="col-chat"
+      :mechanism-actions="mechanismActions"
+      :deleting="deleting"
+      @mech-action="onMechAction"
+    />
     <SessionExplorerPanel class="col-explorer" />
   </div>
 
@@ -34,7 +42,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import type { EntityCapabilities, EntitySummary } from '@/schemas/entities'
+import type { DetailAction, EntityCapabilities, EntitySummary } from '@/schemas/entities'
 import { useSessionsStore } from '@/stores/sessions'
 import { useExplorerStore } from '@/stores/explorer'
 import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
@@ -43,6 +51,8 @@ import SessionExplorerPanel from '@/components/session/SessionExplorerPanel.vue'
 const props = defineProps<{
   item: EntitySummary | null
   capabilities: EntityCapabilities
+  /** 机制动作注入（页面单一定义点计算：容器入口/删除等） */
+  mechanismActions?: DetailAction[]
   saving?: boolean
   testing?: boolean
   deleting?: boolean
@@ -53,11 +63,20 @@ const emit = defineEmits<{
   (e: 'created', id: string): void
   /** 机制约定：editor 请求删除当前选中实体（走统一 entities/delete） */
   (e: 'delete'): void
+  /** 机制约定：editor 请求进入容器实体管理页（payload.kind 指定容器类别） */
+  (e: 'open-container', kind: string): void
 }>()
 
 const store = useSessionsStore()
 const explorer = useExplorerStore()
 const creating = ref(false)
+
+/** 机制动作分发（ChatMainPanel 头部按钮 → 机制通道） */
+function onMechAction(a: DetailAction) {
+  if (a.id === 'delete') emit('delete')
+  else if (a.id === 'open-container')
+    emit('open-container', String((a.payload as Record<string, unknown> | undefined)?.kind ?? ''))
+}
 
 // 机制选中是唯一真相：editor 挂载/切换（:key 重挂载触发 watch）即选中该会话
 watch(

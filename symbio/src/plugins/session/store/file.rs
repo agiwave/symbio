@@ -1,7 +1,24 @@
 //! 文件系统存储后端
 //!
-//! 每个 session 对应一个子目录：`<base_dir>/<safe_id>/session.json`
+//! 顶层会话：`<base_dir>/<safe_id>/session.json`
 //! 消息压缩存档写入：`<base_dir>/<safe_id>/messages/msg_*.txt`
+//!
+//! ## 子会话嵌套存储（机制约定，见 docs/design/entity-management-mechanism.md）
+//!
+//! 会话可派生子会话：子会话不是顶层平级实体，而是存放在父会话目录内的
+//! `sessions/` 子目录——`<base_dir>/<safe(父)>/sessions/<safe(子)>/`。
+//!
+//! 归属声明与路由规则（机制级，调用方无感知）：
+//! - **归属声明**：`metadata.parent_session_id`（父会话 id）。save 时据此
+//!   路由到嵌套目录（无该元数据 = 顶层会话）；
+//! - **load / delete / session_dir**：先查顶层，未命中则扫描各会话目录的
+//!   `sessions/<id>/`（子会话可凭自身 id 直接寻址）；
+//! - **list_sessions**：只列顶层（子会话不出现在顶层清单）；
+//!   子会话清单走 `list_sub_sessions(parent)`；
+//! - **级联删除**：删除父会话 = `remove_dir_all(父目录)`，子会话随之删除。
+//!
+//! 目录名安全化沿用 `safe_id`（`/ \ :` → `_`）；子会话 id 由系统生成，
+//! 与顶层 id 同一格式约束。
 
 use super::SessionStore;
 use crate::plugins::session::types::Session;
@@ -14,6 +31,9 @@ use std::path::{Path, PathBuf};
 pub struct FileSessionStore {
     base_dir: PathBuf,
 }
+
+/// 父会话目录内存放子会话的固定子目录名
+const SUB_SESSIONS_DIR: &str = "sessions";
 
 impl FileSessionStore {
     pub fn new(base_dir: PathBuf) -> Self {
@@ -35,6 +55,19 @@ impl FileSessionStore {
         Self::dir_for(base_dir, session_id).join("session.json")
     }
 
+    /// 子会话目录：`<base_dir>/<safe(父)>/sessions/<safe(子)>/`
+    fn sub_dir_for(base_dir: &Path, parent_id: &str, session_id: &str) -> PathBuf {
+        base_dir
+            .join(Self::safe_id(parent_id))
+            .join(SUB_SESSIONS_DIR)
+            .join(Self::safe_id(session_id))
+    }
+
+    /// 归属父会话 id（metadata.parent_session_id；空/自引用视为无归属）
+    fn parent_of(session: &Session) -> Option<String> {
+        session.parent_session_id().map(str::to_string)
+    }
+
     /// 解析 session.json 内容；存在尾部残留时截取首个完整 JSON 自愈。
     ///
     /// 历史缺陷：旧的 `fs::write` 直写方式在并发保存交错时会留下
@@ -49,6 +82,42 @@ impl FileSessionStore {
                 .and_then(Result::ok),
         }
     }
+
+    /// 读取单个 session.json（存在且可解析时返回 Session）
+    fn read_session_file(path: &Path) -> Option<Session> {
+        let content = std::fs::read_to_string(path).ok()?;
+        Self::parse_session_content(&content)
+    }
+
+    /// 嵌套查找：在所有顶层会话目录的 `sessions/<safe_id>/` 中定位子会话，
+    /// 返回其目录。仅在顶层未命中时调用（miss 路径，开销可接受）。
+    fn find_nested_dir(&self, session_id: &str) -> Option<PathBuf> {
+        let entries = std::fs::read_dir(&self.base_dir).ok()?;
+        for entry in entries.flatten() {
+            let dir = entry.path().join(SUB_SESSIONS_DIR).join(Self::safe_id(session_id));
+            if dir.join("session.json").is_file() {
+                return Some(dir);
+            }
+        }
+        None
+    }
+
+    /// 列出某目录下所有 `<dir>/session.json` 会话（跳过不可解析项）
+    fn read_sessions_in(dir: &Path) -> Vec<Session> {
+        let mut sessions = Vec::new();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return sessions;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(s) = Self::read_session_file(&path.join("session.json")) {
+                    sessions.push(s);
+                }
+            }
+        }
+        sessions
+    }
 }
 
 #[async_trait]
@@ -59,19 +128,28 @@ impl SessionStore for FileSessionStore {
             let content = tokio::fs::read_to_string(&path)
                 .await
                 .map_err(|e| PluginError::InternalError(format!("读取会话文件失败: {e}")))?;
-            match Self::parse_session_content(&content) {
+            return match Self::parse_session_content(&content) {
                 Some(s) => Ok(s),
                 None => Err(PluginError::ParseError(
                     "解析会话失败: 内容无法恢复".to_string(),
                 )),
-            }
-        } else {
-            Ok(Session::new(session_id))
+            };
         }
+        // 顶层未命中：嵌套查找（子会话凭自身 id 直接寻址）
+        if let Some(dir) = self.find_nested_dir(session_id) {
+            if let Some(s) = Self::read_session_file(&dir.join("session.json")) {
+                return Ok(s);
+            }
+        }
+        Ok(Session::new(session_id))
     }
 
     async fn save_session(&self, session: &Session) -> Result<(), PluginError> {
-        let dir = Self::dir_for(&self.base_dir, &session.id);
+        // 归属路由：声明了 parent_session_id 的会话存入父目录的 sessions/ 子目录
+        let dir = match Self::parent_of(session) {
+            Some(parent) => Self::sub_dir_for(&self.base_dir, &parent, &session.id),
+            None => Self::dir_for(&self.base_dir, &session.id),
+        };
         tokio::fs::create_dir_all(&dir)
             .await
             .map_err(|e| PluginError::InternalError(format!("创建会话目录失败: {e}")))?;
@@ -96,6 +174,13 @@ impl SessionStore for FileSessionStore {
         let dir = Self::dir_for(&self.base_dir, session_id);
         if dir.exists() {
             tokio::fs::remove_dir_all(&dir)
+                .await
+                .map_err(|e| PluginError::InternalError(format!("删除会话目录失败: {e}")))?;
+            return Ok(());
+        }
+        // 顶层未命中：嵌套删除（子会话级联于父目录之外的单点删除）
+        if let Some(nested) = self.find_nested_dir(session_id) {
+            tokio::fs::remove_dir_all(&nested)
                 .await
                 .map_err(|e| PluginError::InternalError(format!("删除会话目录失败: {e}")))?;
         }
@@ -136,7 +221,29 @@ impl SessionStore for FileSessionStore {
         Ok(sessions)
     }
 
+    /// 子会话清单：`<base>/<safe(父)>/sessions/*/session.json`，updated_at 降序
+    async fn list_sub_sessions(&self, parent_id: &str) -> Result<Vec<Session>, PluginError> {
+        let nested = Self::dir_for(&self.base_dir, parent_id).join(SUB_SESSIONS_DIR);
+        if !nested.exists() {
+            return Ok(Vec::new());
+        }
+        let mut sessions = tokio::task::spawn_blocking(move || {
+            Self::read_sessions_in(&nested)
+        })
+        .await
+        .map_err(|e| PluginError::InternalError(e.to_string()))?;
+        sessions.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
+        Ok(sessions)
+    }
+
     fn session_dir(&self, session_id: &str) -> Option<PathBuf> {
-        Some(Self::dir_for(&self.base_dir, session_id))
+        let top = Self::dir_for(&self.base_dir, session_id);
+        if top.exists() {
+            return Some(top);
+        }
+        self.find_nested_dir(session_id)
     }
 }
+
+#[cfg(test)]
+mod tests;

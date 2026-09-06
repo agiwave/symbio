@@ -208,12 +208,17 @@ fn detail_field_password(key: &str, label: &str, desc: &str, placeholder: &str) 
     }
 }
 
-/// config 绑定定义骨架：单分区 + 单「保存配置」动作（`_desc` 预留：schema 暂无描述字段）
-fn config_definition(title: &str, _desc: &str, load: &str, save: &str, fields: Vec<DetailField>) -> DetailDefinition {
+/// config 绑定定义骨架：单分区 + 单「保存配置」动作（`_desc` 预留：schema 暂无描述字段）。
+///
+/// load/save 路径由插件前缀 + 协议常量（`config/get` / `config/set`）构建——
+/// 各插件的标准 config 协议路由即 `CONFIG_GET` / `CONFIG_SET`，路径拼写
+/// 单一来源，避免定义与协议脱节（历史缺陷：字面量 `"config get"` 空格写法
+/// 导致设置分区加载 404）。
+fn config_definition(title: &str, _desc: &str, prefix: &str, fields: Vec<DetailField>) -> DetailDefinition {
     DetailDefinition {
         binding: "config".into(),
-        load_path: Some(load.into()),
-        save_path: Some(save.into()),
+        load_path: Some(format!("{prefix}/{CONFIG_GET}")),
+        save_path: Some(format!("{prefix}/{CONFIG_SET}")),
         title_from: vec![],
         title_fallback: Some(title.into()),
         subtitle_from: vec![],
@@ -238,8 +243,7 @@ fn session_detail_definition() -> DetailDefinition {
     config_definition(
         "会话设置",
         "控制会话存储与上下文行为",
-        "session/config get",
-        "session/config set",
+        "session",
         vec![
             detail_field_number("max_messages", "最大消息数", "每个会话保存的最大消息数量", 10.0, 1000.0, serde_json::json!(100)),
             detail_field_toggle("auto_compress", "自动压缩", "当消息数超过阈值时自动压缩历史", true),
@@ -260,8 +264,7 @@ fn local_detail_definition() -> DetailDefinition {
     config_definition(
         "本地工具设置",
         "控制本地 Shell / 文件工具的启用与超时",
-        "local/config get",
-        "local/config set",
+        "local",
         vec![
             detail_field_toggle("shell_enabled", "启用 Shell 工具", "允许执行 Shell 命令", true),
             detail_field_toggle("file_enabled", "启用文件工具", "允许文件读写操作", true),
@@ -274,8 +277,7 @@ fn web_detail_definition() -> DetailDefinition {
     config_definition(
         "网络工具设置",
         "控制 Web 工具的启用、超时与搜索服务凭据",
-        "web/config get",
-        "web/config set",
+        "web",
         vec![
             detail_field_toggle("web_enabled", "启用 Web 工具", "允许网络请求", true),
             detail_field_number("web_timeout", "Web 超时（秒）", "Web 请求超时时间", 1.0, 300.0, serde_json::json!(300)),
@@ -354,6 +356,29 @@ mod tests {
         // 每项的 extra.config_type 即 editor"扩展名"（与 id 一致）
         for it in &items {
             assert_eq!(it.extra.get("config_type").and_then(Value::as_str), Some(it.id.as_str()));
+        }
+    }
+
+    /// 回归：config 绑定分区的 load/save 路径必须命中目标插件的标准
+    /// config 协议路由（`<prefix>/config/get|set`）。历史缺陷：定义里写了
+    /// 字面量 `"config get"`（空格），与协议常量 `CONFIG_GET = "config/get"`
+    /// 脱节，导致会话/本地工具/网络工具设置加载 404。
+    #[test]
+    fn config_binding_paths_follow_protocol_constants() {
+        for (def, prefix) in [
+            (session_detail_definition(), "session"),
+            (local_detail_definition(), "local"),
+            (web_detail_definition(), "web"),
+        ] {
+            assert_eq!(def.binding, "config");
+            assert_eq!(
+                def.load_path.as_deref(),
+                Some(&format!("{prefix}/{CONFIG_GET}")[..])
+            );
+            assert_eq!(
+                def.save_path.as_deref(),
+                Some(&format!("{prefix}/{CONFIG_SET}")[..])
+            );
         }
     }
 }

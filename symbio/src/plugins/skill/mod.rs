@@ -1,3 +1,4 @@
+mod detail;
 mod loader;
 mod plugin;
 mod skill_tool;

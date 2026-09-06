@@ -6,12 +6,13 @@
         <span v-if="store.isActiveWorking" class="status-working">● AI 处理中</span>
       </div>
       <div class="header-right">
-        <button class="header-btn" title="删除会话" @click="emit('delete-session')">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-          </svg>
-        </button>
+        <!-- 机制动作（页面注入：容器入口/删除等）与编辑器自身按钮并排，同构图标风格 -->
+        <EntityActions
+          v-if="(mechanismActions ?? []).length"
+          :actions="mechanismActions ?? []"
+          :busy="mechBusy"
+          @run="(a) => emit('mech-action', a)"
+        />
         <button class="header-btn" title="清空历史" @click="onClearHistory">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 6h18" />
@@ -78,10 +79,27 @@ import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
 import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
+import EntityActions from '@/components/entities/EntityActions.vue'
+import type { DetailAction } from '@/schemas/entities'
+
+const props = defineProps<{
+  /** 机制动作注入（页面单一定义点计算：容器入口/删除等），与自身按钮并排渲染 */
+  mechanismActions?: DetailAction[]
+  /** 删除进行中（机制删除动作的 busy 状态） */
+  deleting?: boolean
+}>()
+
+const emit = defineEmits<{
+  /** 机制动作上抛（Session editor 分发到机制通道：delete / open-container） */
+  (e: 'mech-action', action: DetailAction): void
+}>()
+
+/** 机制动作进行中标记（按索引对齐） */
+const mechBusy = computed(() =>
+  (props.mechanismActions ?? []).map((a) => a.id === 'delete' && Boolean(props.deleting))
+)
 
 const store = useSessionsStore()
-
-const emit = defineEmits<{ (e: 'delete-session'): void }>()
 
 const hasActive = computed(() => !!store.activeId)
 

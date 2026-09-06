@@ -11,10 +11,16 @@
               entities/upload manifest，后端 validate_manifest 兜底）。
   - config  ：配置分区。mount 时经 load_path 拉取，保存经 save_path
               自持写回（后端 config/set 通道），内部管理 saving/toast。
+  - info    ：只读概览。无保存，字段（static widget）取值来自
+              item.config/extra，动作仅限 open-container/delete 等
+              机制通道动作（如 agent bundle 概览）。
+
+  结构化 widget 表单模型约定（与后端 validate_manifest 两侧一致）：
+  list = 字符串数组（编辑态每行一项）；map = 键值对（编辑态每行 KEY=VALUE）。
 
   解析顺序（WorkbenchView）：注册专属 editor → 本渲染器（有定义）→ 通用兜底。
-  会话聊天工作区 / agent bundle 概览 / appearance 即时生效 / about 信息展示
-  等复杂详情不适用本渲染器，仍走注册 editor。
+  会话聊天工作区 / appearance 即时生效 / about 信息展示等复杂详情
+  不适用本渲染器，仍走注册 editor。
 -->
 <template>
   <div class="detail-form">
@@ -35,20 +41,13 @@
           </p>
         </div>
       </div>
-      <div v-if="visibleActions.length" class="header-actions">
-        <template v-for="(a, i) in visibleActions" :key="a.id + i">
-          <span v-if="a.style === 'divider'" class="header-actions-divider" />
-          <button
-            v-else
-            type="button"
-            class="action-btn"
-            :class="a.style"
-            :disabled="actionDisabled(a)"
-            @click="runAction(a)"
-          >
-            {{ actionLabel(a) }}
-          </button>
-        </template>
+      <div v-if="allActions.length" class="header-actions">
+        <EntityActions
+          :actions="allActions"
+          :busy="busyFlags"
+          :disabled="disabledFlags"
+          @run="runAction"
+        />
       </div>
     </header>
 
@@ -65,19 +64,18 @@
           {{ sec.title }}
         </button>
         <div v-show="!collapsed[si]" class="setting-group" :class="{ 'advanced-group': sec.title }">
-          <div
-            v-for="f in sec.fields"
-            :key="f.key"
-            class="setting-item"
-            :class="{ column: f.full_width || f.widget === 'textarea' }"
-          >
+          <template v-for="f in sec.fields" :key="f.key">
+            <div v-if="fieldVisible(f)" class="setting-item" :class="{ column: isFullWidth(f) }">
             <div class="setting-info">
               <label>{{ f.label }}<span v-if="f.required" class="required">*</span></label>
               <p v-if="f.description" class="setting-desc">{{ f.description }}</p>
             </div>
 
+            <!-- static（只读展示：info 绑定概览 / 只读字段；options 作值→标签映射） -->
+            <div v-if="f.widget === 'static'" class="static-value">{{ staticDisplay(f) }}</div>
+
             <!-- toggle -->
-            <label v-if="f.widget === 'toggle'" class="toggle">
+            <label v-else-if="f.widget === 'toggle'" class="toggle">
               <input type="checkbox" v-model="form[f.key]" />
               <span class="toggle-slider" />
             </label>
@@ -91,12 +89,13 @@
               <option v-for="o in fieldOptions(f)" :key="o.value" :value="o.value">{{ o.label }}</option>
             </select>
 
-            <!-- textarea -->
+            <!-- textarea / list（每行一项）/ map（每行 KEY=VALUE） -->
             <textarea
-              v-else-if="f.widget === 'textarea'"
+              v-else-if="f.widget === 'textarea' || f.widget === 'list' || f.widget === 'map'"
               v-model="form[f.key]"
               :rows="f.rows ?? 3"
-              :placeholder="f.placeholder"
+              :placeholder="structuredPlaceholder(f)"
+              spellcheck="false"
             />
 
             <!-- text / password / number / datalist -->
@@ -151,7 +150,8 @@
               type="text"
               :placeholder="f.placeholder"
             />
-          </div>
+            </div>
+          </template>
         </div>
       </template>
     </div>
@@ -163,6 +163,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { callPlugin } from '@/services/plugin'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
+import EntityActions from './EntityActions.vue'
 import type {
   DetailAction,
   DetailBadge,
@@ -180,13 +181,16 @@ const props = withDefaults(
     /** 选中的实体（null = 新建模式；upload 绑定据此预填 item.config） */
     item: EntitySummary | null
     capabilities: EntityCapabilities
+    /** 机制动作注入（页面单一定义点计算：容器入口/测试/删除，
+     *  已排除定义声明过的动作），与定义动作同排渲染于 header-actions */
+    mechanismActions?: DetailAction[]
     saving?: boolean
     testing?: boolean
     deleting?: boolean
     /** 新建模式下用于 ID 去重的现有 id 列表 */
     existingIds?: string[]
   }>(),
-  { saving: false, testing: false, deleting: false, existingIds: () => [] }
+  { mechanismActions: () => [], saving: false, testing: false, deleting: false, existingIds: () => [] }
 )
 
 const emit = defineEmits<{
@@ -195,6 +199,8 @@ const emit = defineEmits<{
   test: []
   delete: []
   'set-default': []
+  /** 机制导航动作：路由推入容器实体页（payload.kind 指定容器类别） */
+  'open-container': [kind: string]
   cancel: []
 }>()
 
@@ -212,6 +218,7 @@ const configLoaded = ref(false)
 const isExisting = computed(() => Boolean(props.item?.id))
 const isDefault = computed(() => Boolean(props.item && props.item.is_default === true))
 const isConfig = computed(() => props.definition.binding === 'config')
+const isInfo = computed(() => props.definition.binding === 'info')
 
 // ==================== 条件求值 ====================
 /** 求值键：表单字段 / is_existing / is_default / cap.<name> */
@@ -243,6 +250,86 @@ function evalCond(c: DetailCondition | null | undefined): boolean {
   if (c.not_equals !== undefined && looseEq(v, c.not_equals)) return false
   if (c.truthy !== undefined && Boolean(v) !== c.truthy) return false
   return true
+}
+
+/** 字段条件显隐（visible_when 不满足时整行不渲染） */
+function fieldVisible(f: DetailField): boolean {
+  return evalCond(f.visible_when)
+}
+
+/** 整行布局：显式 full_width 或天然宽控件 */
+function isFullWidth(f: DetailField): boolean {
+  return Boolean(f.full_width) || ['textarea', 'list', 'map'].includes(f.widget)
+}
+
+// ==================== 结构化 widget（list/map/static） ====================
+// 表单模型约定：list/map 编辑态为多行文本，保存时序列化回结构（与后端
+// validate_manifest 两侧一致）；static 只读展示，不参与保存。
+
+/** 编辑态占位：结构化 widget 给出格式提示 */
+function structuredPlaceholder(f: DetailField): string {
+  if (f.widget === 'list') return f.placeholder ?? '每行一项'
+  if (f.widget === 'map') return f.placeholder ?? '每行一项：KEY=VALUE'
+  return f.placeholder ?? ''
+}
+
+/** 编辑文本 → string[]（去空行/首尾空白） */
+function parseList(text: unknown): string[] {
+  if (!Array.isArray(text) && typeof text !== 'string') return []
+  return String(text)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+}
+
+/** 编辑文本 → 键值对（首个 = 分隔；无 = 视为空值键） */
+function parseMap(text: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (typeof text !== 'string') {
+    if (text && typeof text === 'object') {
+      for (const [k, v] of Object.entries(text as Record<string, unknown>)) out[k] = String(v)
+    }
+    return out
+  }
+  for (const line of text.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    const eq = t.indexOf('=')
+    if (eq < 0) {
+      out[t] = ''
+    } else {
+      out[t.slice(0, eq).trim()] = t.slice(eq + 1).trim()
+    }
+  }
+  return out
+}
+
+/** 值 → 编辑文本（list 逐行、map 逐行 KEY=VALUE，其余原样） */
+function toEditValue(widget: string, v: unknown): unknown {
+  if (widget === 'list') return Array.isArray(v) ? v.map(String).join('\n') : ''
+  if (widget === 'map') {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      return Object.entries(v as Record<string, unknown>)
+        .map(([k, val]) => `${k}=${val}`)
+        .join('\n')
+    }
+    return ''
+  }
+  return v ?? ''
+}
+
+/** static 只读展示：options 值→标签映射，数组/对象友好展开 */
+function staticDisplay(f: DetailField): string {
+  const v = form[f.key]
+  if (v == null || v === '') return '—'
+  const opt = (f.options ?? []).find((o) => o.value === v)
+  if (opt) return opt.label
+  if (Array.isArray(v)) return v.length ? v.join('、') : '—'
+  if (typeof v === 'object') {
+    const entries = Object.entries(v as Record<string, unknown>)
+    return entries.length ? entries.map(([k, val]) => `${k} ${val}`).join('、') : '—'
+  }
+  return String(v)
 }
 
 // ==================== 标题 / 徽标 / 动作 ====================
@@ -296,6 +383,19 @@ const visibleActions = computed<DetailAction[]>(() =>
   (props.definition.actions ?? []).filter((a) => evalCond(a.when))
 )
 
+/** 完整动作行 = 定义动作（条件求值后）+ 机制动作注入（divider 分隔）。
+ *  两段同源不同责：定义动作随定义下发，机制动作由页面单点计算注入。 */
+const allActions = computed<DetailAction[]>(() => {
+  const injected = props.mechanismActions ?? []
+  if (!injected.length) return visibleActions.value
+  if (!visibleActions.value.length) return injected
+  return [
+    ...visibleActions.value,
+    { id: 'divider', label: '', style: 'divider' },
+    ...injected,
+  ]
+})
+
 function actionBusy(a: DetailAction): boolean {
   if (a.id === 'save') return configSaving.value || props.saving
   if (a.id === 'test') return props.testing
@@ -307,16 +407,16 @@ function actionDisabled(a: DetailAction): boolean {
   return actionBusy(a) || !evalCond(a.disabled_when)
 }
 
-function actionLabel(a: DetailAction): string {
-  if (actionBusy(a) && a.busy_label) return a.busy_label
-  return a.label
-}
+/** EntityActions 按索引对齐的进行中/禁用标记 */
+const busyFlags = computed(() => allActions.value.map((a) => actionBusy(a)))
+const disabledFlags = computed(() => allActions.value.map((a) => actionDisabled(a)))
 
 function runAction(a: DetailAction) {
   switch (a.id) {
     case 'save': {
-      if (isConfig.value) {
-        void saveConfig()
+      if (isConfig.value || isInfo.value) {
+        // config/info 绑定无 save 语义（配置分区自持保存；info 只读）
+        if (isConfig.value) void saveConfig()
         return
       }
       // extra 动作 payload（如 skip_validation）合并进 manifest 并同步 emit 标志
@@ -337,6 +437,9 @@ function runAction(a: DetailAction) {
       return
     case 'set-default':
       emit('set-default')
+      return
+    case 'open-container':
+      emit('open-container', String((a.payload as Record<string, unknown> | undefined)?.kind ?? ''))
       return
     default:
       logger.warn('DetailForm', '未知动作:', a.id)
@@ -367,12 +470,22 @@ function generateId(base: string): string {
 }
 
 function buildSave(): { id: string; manifest: Record<string, unknown> } {
-  const manifest: Record<string, unknown> = { ...form }
+  const manifest: Record<string, unknown> = {}
   let id = (props.item?.id as string) ?? ''
   if (!id) {
     id = generateId(firstNonEmpty(props.definition.id_from) || 'entity')
   }
   manifest.id = id
+  // 字段序列化：list → string[]、map → 对象；static 只读、visible_when
+  // 不满足的字段均不参与保存（如 mcp 的 stdio/http 互斥字段）
+  for (const sec of props.definition.sections) {
+    for (const f of sec.fields) {
+      if (f.widget === 'static' || !fieldVisible(f)) continue
+      if (f.widget === 'list') manifest[f.key] = parseList(form[f.key])
+      else if (f.widget === 'map') manifest[f.key] = parseMap(form[f.key])
+      else manifest[f.key] = form[f.key]
+    }
+  }
   // 名称回落链：首个非空字段补 name（不覆盖用户已填的 name）
   const nameFrom = firstNonEmpty(props.definition.name_from)
   const nameKey = props.definition.name_from?.[0]
@@ -488,12 +601,15 @@ watch(
   (it) => {
     if (isConfig.value) return // config 绑定：onMounted 拉取，不随 item 重置
     initForm()
-    // 从列表项 config（后端 list_items 携带的完整配置）预填
-    const cfg = (it?.config ?? null) as Record<string, unknown> | null
+    // 预填来源：item.config（后端下发的完整配置）优先；
+    // info 绑定的 static 字段取自 item 顶层（extra flatten 下发的概览字段）
+    const cfg =
+      ((it?.config ?? null) as Record<string, unknown> | null) ??
+      (isInfo.value ? ((it ?? null) as unknown as Record<string, unknown> | null) : null)
     if (cfg && typeof cfg === 'object') {
       for (const sec of props.definition.sections) {
         for (const f of sec.fields) {
-          if (cfg[f.key] !== undefined && cfg[f.key] !== null) form[f.key] = cfg[f.key]
+          if (cfg[f.key] !== undefined && cfg[f.key] !== null) form[f.key] = toEditValue(f.widget, cfg[f.key])
         }
       }
     }
@@ -605,15 +721,6 @@ watch(
   justify-content: flex-end;
 }
 
-.header-actions-divider {
-  display: inline-block;
-  width: 1px;
-  height: 1.125rem;
-  background: var(--border-default);
-  margin: 0 0.15rem;
-  flex-shrink: 0;
-}
-
 /* ============ 表单主体 ============ */
 .form-body {
   flex: 1;
@@ -665,6 +772,21 @@ watch(
 }
 
 .required { color: var(--danger-fg); }
+
+/* static 只读展示（info 绑定概览字段） */
+.static-value {
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  word-break: break-all;
+  text-align: right;
+  max-width: 60%;
+  user-select: text;
+}
+.setting-item.column .static-value {
+  text-align: left;
+  max-width: 100%;
+}
 
 /* 分区折叠开关 */
 .advanced-toggle {
@@ -798,44 +920,6 @@ watch(
 }
 .toggle input:checked + .toggle-slider { background: var(--accent); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(1rem); }
-
-/* 操作按钮 */
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border: none;
-  border-radius: var(--radius-md);
-  padding: 0.35rem 0.75rem;
-  cursor: pointer;
-  font-size: 0.8rem;
-  white-space: nowrap;
-  transition: background var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
-}
-.action-btn:hover:not(:disabled) { background: var(--accent-hover); }
-.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.action-btn.secondary {
-  background: transparent;
-  color: var(--text-primary);
-  border: 1px solid var(--border-default);
-}
-.action-btn.secondary:hover:not(:disabled) { background: var(--surface-hover); }
-.action-btn.danger {
-  background: transparent;
-  color: var(--danger-solid);
-  border: 1px solid var(--border-default);
-}
-.action-btn.danger:hover:not(:disabled) { background: var(--danger-bg); }
-.action-btn.icon {
-  background: transparent;
-  color: var(--text-secondary);
-  border: none;
-  padding: 0.35rem;
-}
-.action-btn.icon:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-primary); }
-.action-btn.icon.danger:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger-solid); }
 
 @media (max-width: 45rem) {
   .setting-item { flex-direction: column; align-items: stretch; gap: 0.4rem; }

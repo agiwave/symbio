@@ -24,7 +24,6 @@
  */
 
 import { defineComponent, h, markRaw, shallowReactive, type Component } from 'vue'
-import Agent from '@/components/entities/Agent.vue'
 import Appearance from '@/components/settings/Appearance.vue'
 import Session from '@/components/entities/Session.vue'
 import About from '@/components/settings/About.vue'
@@ -76,6 +75,36 @@ export function getEntityIcon(kind: string): Component | undefined {
   return icons[kind]
 }
 
+// ============ 动作图标（DetailAction icon/id → SVG path，纯 UI 映射） ============
+//
+// 机制动作的图标优先渲染：语义动作 id 自带默认图标；定义可用 icon 字段
+// 指定其他图标名（如区分同为 save 的「跳过校验保存」）；无映射 → 文字按钮。
+
+const ACTION_ICONS: Record<string, string> = {
+  // 保存（软盘）
+  save:
+    '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+  // 跳过校验保存（盾牌斜杠）
+  'save-skip':
+    '<path d="M19.69 14a6.9 6.9 0 0 0 .31-2V5l-8-3-8 3v6c0 5.55 3.84 10.74 9 12 2.43-.61 4.5-2.02 5.91-4"/><line x1="1" y1="1" x2="23" y2="23"/>',
+  // 连接测试（闪电）
+  test: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  // 删除（垃圾桶）
+  delete:
+    '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  // 设为默认（星标）
+  'set-default':
+    '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  // 进入容器实体管理（外部链接）
+  'open-container':
+    '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+}
+
+/** 动作图标 SVG path（icon 名优先于动作 id；无映射返回 undefined → 文字按钮） */
+export function getActionIcon(action: { icon?: string; id: string }): string | undefined {
+  return (action.icon && ACTION_ICONS[action.icon]) || ACTION_ICONS[action.id]
+}
+
 /** 项级图标查找：优先 `kind:ext`，回退 kind */
 export function getEntityIconFor(target: EntityRegistryTarget): Component | undefined {
   const ext = extOf(target)
@@ -88,14 +117,12 @@ export function getEntityIconFor(target: EntityRegistryTarget): Component | unde
 
 // ============ 内置注册 ============
 
-// model 详情/新建不再注册：由后端 `entities/detail` 下发表单定义、
-// DetailForm 通用渲染器动态生成（definition-driven detail）。
+// model / mcp / skill 详情与新建不再注册：由后端 `entities/detail` 下发
+// 定义、DetailForm 通用渲染器动态生成（definition-driven detail）。
 
-// Agent（OAB bundle）：**项级**注册（agent:bundle，按 item.config_type 命中）。
-// kind 级刻意不注册——否则 createEditor('agent') 会劫持 zip 上传新建流程；
-// 项级只影响"选中已有 bundle"的详情渲染（Agent.vue 内含
-// prompts/skills/mcps 内部实体管理入口）。
-registerEntityEditor('agent:bundle', markRaw(Agent))
+// Agent（OAB bundle）概览也不再注册：原 agent:bundle 项级 editor（Agent.vue）
+// 已机制化——后端 `entities/detail` 下发 info 绑定定义（只读概览 + 计数），
+// 「管理实体」经 open-container 机制动作进入容器实体页。
 
 // Session（会话）：kind 级注册——详情 = 聊天工作区（ChatMainPanel + SessionExplorerPanel）；
 // capabilities.independent_form 为 true 且本注册存在 → 统一实体页「新建」按钮

@@ -3,8 +3,8 @@
 状态：现行规范
 范围：Symbio 全部「实体管理」类功能（顶层实体 + 容器子实体）
 关联：`docs/design/open-agent-bundle-spec.md`（OAB 标准）、
-`symbio/src/symbio_core/schemas/resources.rs`（协议权威定义）、
-`symbio/src/symbio_core/resources.rs`（注册表与统一分发）
+`symbio/src/symbio_core/schemas/entities.rs`（协议权威定义）、
+`symbio/src/symbio_core/entities.rs`（注册表与统一分发）
 
 > 本文件只写**规范与机制**。具体实体（会话、模型、设置分区……）如何应用
 > 机制一律属于**范例**（§6），不是机制的组成部分；实例的新增/下线/调整
@@ -77,9 +77,29 @@
 
 约束：
 
-- 容器子实体的路径合法性由**后端**校验（路径白名单，拒绝穿越），
+- **`path_hint` 为空 = 系统管理型子类别**：不可由用户创建（前端隐藏新建
+  入口），仅支持查看/删除——子实体由系统派生（如会话的子会话）。
+- **子实体详情分流**：`entities/get` 响应带 `extra.content`（文件型）→
+  标准文本编辑器；不带（系统管理型）→ 只读详情面板（无编辑语义）。
+- **容器子实体的路径合法性由**后端**校验（路径白名单，拒绝穿越），
   前端模板仅用于展示。
 - 容器列表响应的 `capabilities` 取该子类别的声明值；响应回显 `container`。
+
+**统一动作区**（页面机制，机制动作的唯一定义点与渲染约定）：
+
+- **机制动作** = `open-container`（条目所在 provider 声明 `container_kinds`
+  时注入，路由推入 `/container/:kind/:id/entities`）| `test`（能力
+  `test_connection`）| `delete`（能力 `mutable`）。页面按能力/状态计算
+  动作集，**排除当前详情定义已声明的动作**（定义动作优先，机制不重复注入）。
+- **渲染一律在详情页内部**（详情页只有自定义 / 机制化两种形态，页面不得
+  另加动作外框），经 `mechanism-actions` prop 注入：
+  - DetailForm（定义驱动）：与定义动作同排渲染于表头动作区；
+  - 自定义 editor：在自身动作区并排渲染（如会话聊天头部按钮行）；
+  - 通用只读兜底（EntityDetailPanel）：在面板头部渲染。
+- **图标优先的动作风格**：动作按 `icon` 字段（缺省按语义 id）映射为图标
+  按钮（tooltip = 动作名，进行中 = `busy_label`）；无图标映射的动作回落
+  为文字按钮。图标 SVG 映射是前端唯一持有的部分（`registry/entityTypes.ts`，
+  纯 UI 资产）。
 
 ### 2.4 状态与事件约定（机制级，与具体实体无关）
 
@@ -96,7 +116,7 @@
 | 层 | 位置 | 职责 |
 |---|---|---|
 | 注册表 store | `composables/useEntityProviders.ts` | 拉取并缓存 `entities/providers`；标签/能力查询；应用外壳导航（`useNavRailItems` + `navTargetOf`） |
-| 服务层 | `services/resources.ts` | 协议函数（`listResources / getResource / putContainerResource / deleteResource / uploadResourceZip / uploadResourceForm / getResourceStatus / getDetailDefinition`），带可选 `container` |
+| 服务层 | `services/entities.ts` | 协议函数（`listEntities / getEntity / putContainerEntity / deleteEntity / uploadEntityZip / uploadEntityForm / getEntityStatus / getDetailDefinition`），带可选 `container` |
 | 三栏容器 | `components/common/Workbench.vue` + `useWorkbench.ts` | 「侧边栏 + 列表 + 详情」容器与状态机唯一实现（应用外壳模式 / 实体页模式） |
 | **统一实体页** | `views/WorkbenchView.vue` + `composables/useWorkbenchView.ts` | **全 App 唯一实体页面**（entity / container 双模式，见 §3.1）；页面与 ts 均为标准复用件 |
 | 应用外壳 | `views/MainLayout.vue` | 纯壳：Workbench（rail 来自 `useNavRailItems`）+ RouterView + 应用级服务，不持有实体逻辑 |
@@ -111,15 +131,15 @@
 
 | | leaf 模式 | container 模式 |
 |---|---|---|
-| 路由 | `/entities/:types?`、`/settings` | `/container/:kind/:id/resources`、`/agent/:agentId/resources` |
+| 路由 | `/entities/:types?`、`/settings` | `/container/:kind/:id/entities`、`/agent/:agentId/entities` |
 | 侧边栏 | 由 MainLayout 应用外壳承担 | 自带 = `ProviderInfo.container_kinds`（子类别 + 计数 + 返回键） |
 | 类别来源 | providers 注册表解析 `:types`（`resolveActiveTypes`） | `container_kinds`（标签/路径模板/内容模板/能力后端下发） |
 | 列表 | 各类别 `entities/list` 并行，混合平排 | `entities/list`（payload.container 单请求全量，核心按 kind 分箱） |
 | 详情 | 编辑器解析链（§3.2） | 标准文本编辑器（`entities/get` extra.content + `entities/put` 写回） |
 | 新建 | 类型选择 → 解析链（§3.2）/ zip / JSON（能力驱动分流） | 名称 + 内容（路径模板 `path_hint` + 内容模板 `default_content`） |
 
-容器条目详情组件只做**只读概览**（`useContainerOverview`：类别 + 计数）；
-管理逻辑一律在 WorkbenchView 页面侧，不得在详情组件内重复。
+新建分流细则：当某 kind 既有详情定义又具备 `zip_upload` 能力时，
+新建态 = 定义表单为主 + 「或上传 ZIP」次级入口（完整目录包不丢能力）。
 
 ### 3.2 详情页生成：解析链与定义协议
 
@@ -131,27 +151,38 @@
 3. **通用兜底**（能力分流：zip 上传面板 / JSON manifest 表单 / 只读详情）。
 
 **复杂详情判定标准**（满足其一才允许注册 editor，否则必须走定义或兜底）：
-详情需要持久前端状态（如聊天工作区的会话选中）、富交互非表单形态
-（如 bundle 只读概览 + 内部实体入口）、或纯信息展示（非编辑表单）。
-除此之外的表单类详情一律由定义表达。
+详情需要持久前端状态（如聊天工作区的会话选中）、或即时生效型前端 store
+交互（如 appearance）。**只读概览型**（如 bundle 概览）由 `info` 绑定表达，
+**不算**复杂详情；除此之外的表单类详情一律由定义表达。
 
 **定义协议**（`entities/detail`）：请求 `{kind, id}`，`id` 为空 = 请求
 「新建态」定义；trait 默认 `detail_definition() -> None`（无定义 → 解析链
-下探）。定义 `DetailDefinition`（权威 schema 见 `schemas/resources.rs`）
+下探）。定义 `DetailDefinition`（权威 schema 见 `schemas/entities.rs`）
 必须能完整表达一个交互不复杂的表单详情：
 
 - **绑定** `binding`：`upload`（实体实体：预填 `item.config`，保存 emit
   save → `entities/upload` manifest）| `config`（配置分区：`load_path`/
-  `save_path` 走标准 `config get|set`，渲染器自持保存）；
+  `save_path` 走目标插件的标准 config 协议路由（`CONFIG_GET`/`CONFIG_SET`
+  = `config/get` / `config/set`，渲染器自持保存）| `info`（只读
+  概览：无保存，`static` 字段取值来自 item 顶层（extra flatten），
+  动作仅限 `open-container`/`delete` 等机制通道动作）；
 - **分区/折叠** `sections[]`：`collapsed` = 默认折叠；
 - **控件全集** `widget ∈ text | password | number | select | textarea |
-  toggle | datalist`（password 显隐、number min/max/step、textarea
-  rows/full_width、datalist 动态建议）；
+  toggle | datalist | list | map | static`（password 显隐、number
+  min/max/step、textarea rows/full_width、datalist 动态建议；`list` =
+  字符串数组（编辑态每行一项）、`map` = 键值对（编辑态每行 `KEY=VALUE`），
+  序列化约定与后端 `validate_manifest` 两侧一致；`static` 只读展示，
+  `options` 可作值→标签映射）；
+- **字段条件显隐** `visible_when: DetailCondition`（不满足时整行不渲染
+  且**不参与保存**，用于互斥字段组，如 transport 专属字段）；
 - **预设联动** `presets{field, fill, presets[]}`：选中预设后按 `fill`
   策略（`if_empty`/`always`）填充 `set`、**总是**应用 `set_always`、并把
   `options[key]` 注入对应字段的动态候选；
 - **条件徽标/动作** `DetailCondition{key, equals, not_equals, truthy, all}`
   （键 = 表单字段 / `is_existing` / `is_default` / `cap.<name>`）；
+  动作 `id` ∈ `save | test | delete | set-default | open-container`
+  （`open-container` 经 `payload.kind` 路由推入容器实体页）；`icon` 可选
+  （缺省按 id 的默认图标映射渲染图标按钮，无映射回落文字按钮）；
 - **派生回落链**：`title_from`（标题）、`subtitle_from`（副标题，select
   值自动映射选项标签）、`name_from`（保存补名）、`id_from`（新建 slug +
   `-2` 去重；后端 `validate_manifest` 为最终兜底）。
@@ -167,8 +198,8 @@
 
 - `/entities/:types?` —— 顶层统一实体页（entity）；
 - `/settings` —— 同一 WorkbenchView 的 setting 实例；
-- `/container/:kind/:id/resources` —— 通用容器实体页（container）；
-- `/agent/:agentId/resources` —— agent 兼容别名。
+- `/container/:kind/:id/entities` —— 通用容器实体页（container）；
+- `/agent/:agentId/entities` —— agent 兼容别名。
 
 ## 4. 扩展指引（新增一类可管理实体）
 
@@ -203,8 +234,8 @@
   可由定义表达的表单详情注册专属 editor 属于违规实现。
 - 前端 **不得** 硬编码实体类型清单、类别标签、路径模板、能力开关、
   预设数据；只允许注册图标与复杂详情 editor 这类纯 UI 映射。
-- 请求/响应结构变更必须先改 `symbio_core/schemas/resources.rs` 与
-  `tauri/src/schemas/resources.ts` 两侧契约，再改实现。
+- 请求/响应结构变更必须先改 `symbio_core/schemas/entities.rs` 与
+  `tauri/src/schemas/entities.ts` 两侧契约，再改实现。
 
 ## 6. 范例（实例，非机制组成部分）
 
@@ -233,12 +264,43 @@ datalist、API Key 显隐、高级设置折叠分区、条件徽标（默认/已
 ### 6.3 设置分区（setting）——config 绑定
 
 session/local/web 三分区由后端下发 config 绑定定义（`load_path`/
-`save_path` = 各插件标准 `config get|set`），DetailForm 渲染并自持保存。
-appearance（前端 store 即时生效）、about（信息展示）按 §3.2 判定标准
-保留注册 editor。
+`save_path` = 各插件标准 `config/get|set` 路由），DetailForm 渲染并自持保存。
+appearance（前端 store 即时生效）按 §3.2 判定标准保留注册 editor；
+about（纯信息展示）亦保留。
 
-### 6.4 agent（OAB bundle）——容器语义
+### 6.4 MCP / Skill——upload 绑定 + 结构化控件
+
+- **mcp**：详情/新建由后端下发定义（`server.json` 同构 manifest）。
+  传输类型 select 联动 `visible_when` 字段显隐（stdio → command/args/env；
+  http/sse → url/headers/timeout），`list`/`map` 控件承载 args/env/headers/
+  工具过滤；`validate_manifest` 做 transport 必填校验并规范化为
+  server.json；`summarize` 下发 `extra.config` 供预填。zip 上传保留
+  （新建表单次级入口）。
+- **skill**：详情/新建由后端下发定义，表单 ↔ SKILL.md（YAML frontmatter
+  + Markdown body）双向映射（`validate_manifest` 生成 / `summarize`
+  解析 `extra.config`）。BUG-SR6（名称 == 目录 id）与 BUG-SR7
+  （description ≥ 10 字符）在保存时即校验。zip 上传保留（含脚本/参考
+  文件的完整技能包）。
+
+### 6.5 agent（OAB bundle）——容器语义 + info 概览
 
 条目即容器：`container_kinds` 声明 prompt/skill/mcp 子类别（标签/路径
-模板/内容模板/能力），容器实体页与子实体管理完全由后端声明驱动；agent
-详情为项级注册的复杂详情（只读概览 + 内部实体管理入口）。
+模板/内容模板/能力），容器实体页与子实体管理完全由后端声明驱动。agent
+详情由后端下发 **info 绑定**定义（只读概览：版本/来源层级/安装目录/
+内部实体计数（list_items 下发 `count_*`））。「管理内部实体」为机制动作
+（§2.3 统一动作区），与删除同排渲染——原 agent:bundle 项级
+editor（Agent.vue）已删除；新建态无定义，保留 zip 上传流程。
+
+### 6.6 会话（session）——子会话容器语义
+
+- **存储**：子会话不是顶层平级实体，而是存放在父会话目录内
+  `<父>/sessions/<子>/`；归属由 `metadata.parent_session_id` 声明，
+  文件后端据此路由（save 路由 / load·delete 回退查找，调用方无感知）；
+  `list_sessions` 只列顶层，删除父会话级联删除子会话。
+- **容器声明**：`SESSION_CONTAINER_KINDS` 声明「子会话」子类别，
+  `path_hint` 为空 = 系统管理型（不可用户创建，仅查看/删除）；
+  provider 实现 list/get/delete 容器钩子，经统一协议
+  `entities/*` + `container` 字段访问。
+- **前端**：会话详情（聊天工作区）经机制动作「管理内部实体（子会话）」
+  push 进 `/container/session/:id/entities`；删除同为机制动作（已迁出
+  编辑器）；子会话详情 = 只读面板（无 extra.content，§2.3 分流规则）。

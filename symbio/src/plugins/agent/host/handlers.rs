@@ -58,6 +58,15 @@ pub async fn route(
                 )),
             }
         }
+        "entities/detail" => {
+            // 详情页定义（info 绑定概览 + open-container 入口）
+            match dispatch(plugin, path, &ctx).await {
+                Some(resp) => resp,
+                None => Err(PluginError::InternalError(
+                    "entities/detail dispatch 失败".into(),
+                )),
+            }
+        }
         "entities/get" => {
             let req: EntityGetRequest = ctx.payload()?;
             if req.container.as_deref().is_some_and(|s| !s.trim().is_empty()) {
@@ -108,7 +117,7 @@ pub async fn route(
         "bundle/preview" => preview(&store, &ctx).await,
         _ => Err(PluginError::NotFound(format!(
             "agent 未知路由 `{path}`（可用：bundle/list|get|upload|export|delete|preview、\
-             entities/list|get|upload|delete）"
+             entities/list|get|upload|delete|detail）"
         ))),
     }
 }

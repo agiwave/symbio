@@ -33,7 +33,7 @@
       @new="onNew"
     >
       <template #header-actions>
-        <button v-if="canCreate" class="icon-btn" :title="`新建 ${title}`" :disabled="loading" @click="onNew">
+        <button v-if="canCreateContainer" class="icon-btn" :title="`新建 ${title}`" :disabled="loading" @click="onNew">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
@@ -92,7 +92,8 @@
       <template #empty>
         <template v-if="isContainer">
           <p>暂无{{ activeKindMeta?.label ?? '实体' }}</p>
-          <p class="hint">点击右上角「新建」添加{{ activeKindMeta?.label ?? '' }}</p>
+          <p v-if="canCreateContainer" class="hint">点击右上角「新建」添加{{ activeKindMeta?.label ?? '' }}</p>
+          <p v-else class="hint">{{ activeKindMeta?.description ?? '该类别由系统管理' }}</p>
         </template>
         <template v-else>
           <p>{{ isMulti ? '暂无实体' : `暂无 ${title}` }}</p>
@@ -163,18 +164,32 @@
               @cancel="cancelCreate"
             />
 
-            <!-- 定义驱动的新建表单（后端 entities/detail 空态定义，如 model） -->
-            <DetailForm
-              v-else-if="detailDefinition"
-              :key="'create-def:' + (createKind || '')"
-              :definition="detailDefinition"
-              :item="null"
-              :capabilities="capsOf(createKind)"
-              :saving="saving"
-              :existing-ids="typeStates[createKind]?.items.map((i) => i.id) ?? []"
-              @save="saveForm"
-              @cancel="cancelCreate"
-            />
+            <!-- 定义驱动的新建表单（后端 entities/detail 空态定义，如 model）；
+                 具备 zip_upload 能力时保留次级 ZIP 入口（mcp / skill 完整目录包） -->
+            <div v-else-if="detailDefinition" :key="'create-def:' + (createKind || '')" class="create-def-wrap">
+              <DetailForm
+                :definition="detailDefinition"
+                :item="null"
+                :capabilities="capsOf(createKind)"
+                :saving="saving"
+                :existing-ids="typeStates[createKind]?.items.map((i) => i.id) ?? []"
+                @save="saveForm"
+                @cancel="cancelCreate"
+              />
+              <div v-if="capsOf(createKind).zip_upload" class="create-alt">
+                <input
+                  ref="zipInput"
+                  type="file"
+                  accept=".zip,application/zip"
+                  hidden
+                  @change="onZipSelected"
+                />
+                <button type="button" class="link-btn" :disabled="zipUploading" @click="zipInput?.click()">
+                  {{ zipUploading ? '上传中…' : '或上传 ZIP 包创建（完整目录）' }}
+                </button>
+                <p v-if="uploadError" class="create-error">{{ uploadError }}</p>
+              </div>
+            </div>
 
             <!-- zip 上传创建（mcp / skill / agent） -->
             <div v-else-if="capsOf(createKind).zip_upload" class="create-panel">
@@ -219,8 +234,9 @@
         </template>
 
         <!-- ============== 选中项 ============== -->
-        <!-- container：标准文本编辑器（entities/get content + entities/put 写回） -->
-        <div v-else-if="isContainer && selectedEntry" class="entry-editor">
+        <!-- container：content 型子实体 = 标准文本编辑器（entities/get content + entities/put 写回）；
+             非 content 型（系统管理型，如子会话）= 只读详情面板 -->
+        <div v-else-if="isContainer && selectedEntry && entryHasContent" class="entry-editor">
           <div class="editor-head">
             <div class="title-block">
               <h3 class="editor-title">{{ selectedEntry.name }}</h3>
@@ -252,15 +268,30 @@
           </div>
         </div>
 
+        <!-- container：非 content 型子实体 = 只读详情（机制动作在面板头部） -->
+        <div v-else-if="isContainer && selectedEntry" class="entry-readonly">
+          <EntityDetailPanel
+            :item="selectedEntry"
+            :mechanism-actions="entryMechActions"
+            :busy="entryBusyFlags"
+            @run="runMechanismAction"
+          />
+        </div>
+
         <!-- entity 选中 -->
         <template v-else-if="selected">
-          <!-- 注册的专属 editor（model / agent:bundle / 设置分区）；:key 确保切换时重挂载 -->
+          <!-- 机制动作经 mechanism-actions prop 注入详情页内部渲染
+               （自定义 editor 在自身动作区并排；DetailForm 在表头动作区；
+               通用兜底在面板头部）——页面不另加动作外框 -->
+
+          <!-- 注册的专属 editor（session / appearance / about）；:key 确保切换时重挂载 -->
           <component
             :is="selectedEditor"
             v-if="selectedEditor"
             :key="selected.kind + ':' + selected.item.id"
             :item="selected.item"
             :capabilities="capsOf(selected.kind)"
+            :mechanism-actions="mechanismActions"
             :saving="saving"
             :testing="testing"
             :deleting="deletingId === selected.item.id"
@@ -268,16 +299,19 @@
             @test="testConnection"
             @delete="removeSelected"
             @set-default="saveDefault"
+            @open-container="openContainerEntities"
             @created="onEditorCreated"
           />
 
-          <!-- 定义驱动的详情表单（后端 entities/detail 下发，如 model / 设置三分区） -->
+          <!-- 定义驱动的详情表单（后端 entities/detail 下发，如 model / 设置三分区）；
+               机制动作经 mechanism-actions 注入同一动作行（header-actions） -->
           <DetailForm
             v-else-if="detailDefinition"
             :key="'def:' + selected.kind + ':' + selected.item.id"
             :definition="detailDefinition"
             :item="selected.item"
             :capabilities="capsOf(selected.kind)"
+            :mechanism-actions="mechanismActions"
             :saving="saving"
             :testing="testing"
             :deleting="deletingId === selected.item.id"
@@ -285,29 +319,17 @@
             @test="testConnection"
             @delete="removeSelected"
             @set-default="saveDefault"
+            @open-container="openContainerEntities"
           />
 
-          <!-- 通用详情 + 操作工具栏（mcp / skill / agent 等） -->
+          <!-- 通用只读兜底：机制动作在面板头部渲染 -->
           <template v-else>
-            <div v-if="capsOf(selected.kind).test_connection || canDeleteSelected" class="detail-toolbar">
-              <button
-                v-if="capsOf(selected.kind).test_connection"
-                class="action-btn secondary"
-                :disabled="testing"
-                @click="testConnection"
-              >
-                {{ testing ? '测试中…' : '测试连接' }}
-              </button>
-              <button
-                v-if="canDeleteSelected"
-                class="danger-btn"
-                :disabled="deletingId === selected.item.id"
-                @click="removeSelected"
-              >
-                {{ deletingId === selected.item.id ? '删除中…' : '删除' }}
-              </button>
-            </div>
-            <EntityDetailPanel :item="selected.item" />
+            <EntityDetailPanel
+              :item="selected.item"
+              :mechanism-actions="mechanismActions"
+              :busy="mechBusyFlags"
+              @run="runMechanismAction"
+            />
           </template>
         </template>
 
@@ -333,8 +355,9 @@ import Toast from '@/components/common/Toast.vue'
 import EntityDetailPanel from '@/components/entities/EntityDetailPanel.vue'
 import DetailForm from '@/components/entities/DetailForm.vue'
 import { useWorkbenchView } from '@/composables/useWorkbenchView'
+import { useEntityProviders } from '@/composables/useEntityProviders'
 import { getEntityIconFor } from '@/registry/entityTypes'
-import type { EntitySummary } from '@/schemas/entities'
+import type { DetailAction, EntitySummary } from '@/schemas/entities'
 import { subscribe, subscribeEntityStatus } from '@/services/eventBus'
 
 const props = defineProps<{
@@ -370,7 +393,6 @@ const {
   selectedId,
   select,
   creating,
-  canCreate,
   onNew,
   createKind,
   creatableInActive,
@@ -402,6 +424,7 @@ const {
   content,
   dirty,
   loadingContent,
+  entryHasContent,
   editorError,
   selectEntry,
   reloadSelected,
@@ -427,6 +450,95 @@ const listCount = computed(() => (isContainer ? kindEntries.value.length : total
 function goBack() {
   router.push(`/entities/${props.containerKind}`)
 }
+
+/** 机制导航动作（DetailForm `open-container`）：路由推入容器实体页（整页替换） */
+function openContainerEntities(kind: string) {
+  const id = selected.value?.item.id
+  if (!kind || !id) return
+  router.push({ name: 'container-entities', params: { kind, id } })
+}
+
+// ==================== 统一机制动作（单一定义点） ====================
+// 机制动作 = 容器条目入口（open-container）/ 连接测试（test）/ 删除（delete）。
+// 全 App 唯一定义点：由页面按能力/状态计算，排除当前详情定义已声明的动作
+// （定义动作优先，机制不重复注入）。渲染一律在详情页**内部**（机制约定：
+// 详情页只有自定义/机制化两种形态，页面不另加动作外框），经
+// mechanism-actions prop 注入：
+// - DetailForm（定义驱动）：与定义动作同排渲染于表头动作区；
+// - 自定义 editor：在自身动作区并排渲染（如会话聊天头部）；
+// - 通用只读兜底（EntityDetailPanel）：在面板头部渲染。
+
+const { getProvider } = useEntityProviders()
+
+const mechanismActions = computed<DetailAction[]>(() => {
+  const sel = selected.value
+  if (!sel || creating.value) return []
+  const defActions = detailDefinition.value?.actions ?? []
+  const has = (id: string) => defActions.some((a) => a.id === id)
+  const out: DetailAction[] = []
+  const kinds = getProvider(sel.kind)?.container_kinds ?? []
+  if (kinds.length && !has('open-container')) {
+    out.push({
+      id: 'open-container',
+      label: `管理内部实体（${kinds.map((k) => k.label).join(' / ')}）`,
+      style: 'primary',
+      payload: { kind: sel.kind },
+    })
+  }
+  if (capsOf(sel.kind).test_connection && !has('test')) {
+    out.push({ id: 'test', label: '测试连接', style: 'secondary', busy_label: '测试中…' })
+  }
+  if (canDeleteSelected.value && !has('delete')) {
+    out.push({ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' })
+  }
+  return out
+})
+
+/** 机制动作进行中标记（与 mechanismActions 按索引对齐） */
+const mechBusyFlags = computed(() =>
+  mechanismActions.value.map(
+    (a) =>
+      (a.id === 'delete' && deletingId.value === selected.value?.item.id) ||
+      (a.id === 'test' && testing.value)
+  )
+)
+
+/** container 模式子实体的机制动作（只读面板头部渲染；当前仅删除） */
+const entryMechActions = computed<DetailAction[]>(() => {
+  if (!isContainer || !selectedEntry.value || creating.value) return []
+  if (!canDeleteSelected.value) return []
+  return [{ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' }]
+})
+
+const entryBusyFlags = computed(() =>
+  entryMechActions.value.map(
+    (a) => a.id === 'delete' && deletingId.value === selectedEntry.value?.id
+  )
+)
+
+/** 机制动作统一分发（与 DetailForm 的动作语义一致） */
+function runMechanismAction(a: DetailAction) {
+  switch (a.id) {
+    case 'test':
+      void testConnection()
+      return
+    case 'delete':
+      if (isContainer) removeSelectedEntry()
+      else removeSelected()
+      return
+    case 'open-container':
+      openContainerEntities(String((a.payload as Record<string, unknown> | undefined)?.kind ?? ''))
+      return
+    default:
+      // save / set-default 仅由定义声明（DetailForm 通道），机制不注入
+      console.warn('[WorkbenchView] 未知机制动作:', a.id)
+  }
+}
+
+/** 容器模式：当前子类别是否可由用户创建（path_hint 空 = 系统管理型） */
+const canCreateContainer = computed(
+  () => !isContainer || Boolean(activeKindMeta.value?.path_hint)
+)
 
 // === entity 列表展示辅助 ===
 function cardStatus(
@@ -683,6 +795,41 @@ watch(containerIdRef, () => {
   padding-top: 0.5rem;
   justify-content: center;
 }
+/* 定义驱动新建：表单占满 + ZIP 次级入口（定义与 zip_upload 能力共存时） */
+.create-def-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.create-alt {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border-subtle);
+}
+.link-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-md);
+}
+.link-btn:hover:not(:disabled) { background: var(--surface-hover); }
+.link-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 容器只读子实体（非 content 型）：只读详情面板（机制动作在面板头部） */
+.entry-readonly {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .type-choice-list {
   display: flex;
   flex-direction: column;
@@ -840,18 +987,6 @@ watch(containerIdRef, () => {
   justify-content: center;
   color: var(--text-muted);
   font-size: 0.85rem;
-}
-
-/* ============== 通用详情工具栏（entity） ============== */
-.detail-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--border-default);
-  background: var(--surface-panel);
-  flex-shrink: 0;
 }
 
 /* ============== 控件样式统一由 styles/controls.css 提供 ============== */

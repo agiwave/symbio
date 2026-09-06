@@ -222,6 +222,49 @@ impl crate::symbio_core::entities::EntityProvider for McpPlugin {
         Some(crate::symbio_core::providers::manifests::SERVER)
     }
 
+    /// 详情页定义：MCP 表单由后端下发（transport 联动显隐 / list·map 结构化
+    /// 控件 / 工具过滤折叠分区），详见 `super::detail`
+    async fn detail_definition(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _id: &str,
+    ) -> Option<crate::symbio_core::schemas::entities::DetailDefinition> {
+        Some(super::detail::mcp_detail_definition())
+    }
+
+    /// 表单上传的校验/规范化：manifest → `McpServerConfig`（即 server.json 内容）。
+    ///
+    /// 表单 manifest 与 server.json 同构（`type` = 传输类型），多余键
+    /// （`name`/`id` 等）由 serde 忽略；此处校验 transport 必填项并序列化
+    /// 回规范化 JSON。zip 上传路径（目录内 server.json 原文）不经过本钩子。
+    async fn validate_manifest(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _id: &str,
+        manifest: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let server: McpServerConfig = serde_json::from_value(manifest.clone())
+            .map_err(|e| PluginError::ValidationError(format!("MCP Server 配置无效: {e}")))?;
+        match server.transport_type {
+            crate::symbio_core::schemas::mcp::mcp_config::McpTransportType::Stdio => {
+                if server.command.as_deref().unwrap_or("").trim().is_empty() {
+                    return Err(PluginError::ValidationError(
+                        "stdio 类型必须填写 command".to_string(),
+                    ));
+                }
+            }
+            _ => {
+                if server.url.as_deref().unwrap_or("").trim().is_empty() {
+                    return Err(PluginError::ValidationError(
+                        "http / sse 类型必须填写 url".to_string(),
+                    ));
+                }
+            }
+        }
+        serde_json::to_value(&server)
+            .map_err(|e| PluginError::InternalError(format!("序列化 server.json 失败: {e}")))
+    }
+
     /// 从 server.json 解析摘要：enabled → active/disabled、command/url、transport
     async fn summarize(
         &self,
@@ -245,6 +288,10 @@ impl crate::symbio_core::entities::EntityProvider for McpPlugin {
             let transport = format!("{:?}", server.transport_type).to_lowercase();
             if let serde_json::Value::Object(ref mut m) = it.extra {
                 m.insert("transport".to_string(), transport.into());
+                // 完整配置随列表下发（extra.config flatten），DetailForm 预填用
+                if let Ok(cfg) = serde_json::to_value(&server) {
+                    let _ = m.insert("config".to_string(), cfg);
+                }
             }
         }
         it

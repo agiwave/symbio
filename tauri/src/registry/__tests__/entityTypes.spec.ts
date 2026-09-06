@@ -20,9 +20,12 @@ import {
 const Dummy = defineComponent({ template: '<div />' })
 
 describe('registerEntityEditor / getEntityEditor', () => {
-  it('model / 设置三分区改由后端 detail 定义驱动，前端不再注册', () => {
+  it('model / mcp / skill / agent:bundle / 设置三分区改由后端 detail 定义驱动，前端不再注册', () => {
     // definition-driven detail：注册 editor 缺席时由 DetailForm 渲染
     expect(getEntityEditor('model')).toBeUndefined()
+    expect(getEntityEditor('mcp')).toBeUndefined()
+    expect(getEntityEditor('skill')).toBeUndefined()
+    expect(getEntityEditorFor({ kind: 'agent', config_type: 'bundle' })).toBeUndefined()
     expect(getEntityEditorFor({ kind: 'setting', config_type: 'session' })).toBeUndefined()
     expect(getEntityEditorFor({ kind: 'setting', config_type: 'local' })).toBeUndefined()
     expect(getEntityEditorFor({ kind: 'setting', config_type: 'web' })).toBeUndefined()
@@ -30,7 +33,6 @@ describe('registerEntityEditor / getEntityEditor', () => {
 
   it('未注册的 kind 返回 undefined（走通用兜底）', () => {
     expect(getEntityEditor('unknown-type')).toBeUndefined()
-    expect(getEntityEditor('mcp')).toBeUndefined()
   })
 
   it('可动态注册新类型 editor', () => {

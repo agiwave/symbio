@@ -119,7 +119,7 @@ export interface EntityStatusResponse {
 
 // ==================== 详情页定义（definition-driven detail） ====================
 
-/** 条件谓词（徽标/动作显隐）。`all` 存在时为 AND 组合 */
+/** 条件谓词（徽标/动作显隐、字段条件显隐 visible_when）。`all` 存在时为 AND 组合 */
 export interface DetailCondition {
   /** 求值键：表单字段名，或特殊键 is_existing / is_default / cap.<name> */
   key: string
@@ -135,13 +135,21 @@ export interface DetailOption {
   label: string
 }
 
-/** 表单字段定义。widget ∈ text|password|number|select|textarea|toggle|datalist */
+/**
+ * 表单字段定义。widget ∈ text|password|number|select|textarea|toggle|datalist|list|map|static
+ * 结构化 widget 表单模型约定（渲染器与后端 validate_manifest 两侧一致）：
+ * - list：字符串数组，编辑态每行一项
+ * - map：字符串键值对，编辑态每行 KEY=VALUE
+ * - static：只读展示（info 绑定），options 可作值→标签映射
+ */
 export interface DetailField {
   key: string
   label: string
   description?: string
   required?: boolean
   widget: string
+  /** 条件显隐（不满足时整行不渲染） */
+  visible_when?: DetailCondition
   placeholder?: string
   min?: number
   max?: number
@@ -187,18 +195,23 @@ export interface DetailBadge {
   style: string
 }
 
-/** 动作按钮。id ∈ save|test|delete|set-default 或自定义 */
+/**
+ * 动作按钮。id ∈ save|test|delete|set-default|open-container（payload.kind 指定容器类别）或自定义。
+ * icon：图标名（可选）——语义动作 id 自带默认图标映射；仅当需要区分同 id 多形态
+ * （如「跳过校验保存」）或自定义动作需要图标时显式指定；未知图标名回落为文字按钮。
+ */
 export interface DetailAction {
   id: string
   label: string
   style: string
+  icon?: string
   when?: DetailCondition
   disabled_when?: DetailCondition
   payload?: Record<string, unknown>
   busy_label?: string
 }
 
-/** 详情页定义。binding ∈ upload（实体实体，保存走 entities/upload）| config（配置分区，经 load/save_path 读写） */
+/** 详情页定义。binding ∈ upload（实体实体，保存走 entities/upload）| config（配置分区，经 load/save_path 读写）| info（只读概览，字段取值来自 item.config/extra） */
 export interface DetailDefinition {
   binding: string
   load_path?: string

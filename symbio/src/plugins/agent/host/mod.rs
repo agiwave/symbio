@@ -31,6 +31,7 @@ pub mod handlers;
 pub mod plugin;
 pub mod entities;
 pub mod store;
+mod detail;
 
 #[cfg(test)]
 mod tests;

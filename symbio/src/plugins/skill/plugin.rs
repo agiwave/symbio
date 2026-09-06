@@ -134,7 +134,32 @@ impl crate::symbio_core::entities::EntityProvider for SkillPlugin {
         Some(crate::symbio_core::providers::manifests::SKILL)
     }
 
-    /// 从 SKILL.md 解析显示名（首行标题）与摘要（Description 行 / 开头 120 字）
+    /// 详情页定义：Skill 表单由后端下发（frontmatter 字段 + Markdown 正文），
+    /// 表单 manifest ↔ SKILL.md 映射见 `super::detail`
+    async fn detail_definition(
+        &self,
+        _ctx: &Arc<dyn crate::symbio_core::InvokeRequest>,
+        _id: &str,
+    ) -> Option<crate::symbio_core::schemas::entities::DetailDefinition> {
+        Some(super::detail::skill_detail_definition())
+    }
+
+    /// 表单上传的校验/规范化：manifest → SKILL.md 全文（实际写盘内容）。
+    ///
+    /// 强制 BUG-SR6（名称 == 目录 id）与 BUG-SR7（description ≥ 10 字符），
+    /// 错误在保存时即给出（而非下次加载时）。zip 上传路径不经过本钩子。
+    async fn validate_manifest(
+        &self,
+        _ctx: &Arc<dyn crate::symbio_core::InvokeRequest>,
+        id: &str,
+        manifest: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let md = super::detail::manifest_to_skill_md(id, manifest)?;
+        Ok(serde_json::Value::String(md))
+    }
+
+    /// 从 SKILL.md 解析摘要：优先 YAML frontmatter（name / description），
+    /// 无 frontmatter 时回落到旧的标题/Description 行解析
     async fn summarize(
         &self,
         _ctx: &Arc<dyn crate::symbio_core::InvokeRequest>,
@@ -147,38 +172,57 @@ impl crate::symbio_core::entities::EntityProvider for SkillPlugin {
             id,
         );
         it.status = "active".to_string();
-        if let Some(text) = manifest {
-            let cleaned = text.trim();
-            let first_line = cleaned
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .trim_start_matches('#')
-                .trim();
-            if !first_line.is_empty() {
-                it.name = first_line.to_string();
+        let Some(text) = manifest else {
+            return it;
+        };
+
+        // frontmatter 路径：名称/摘要 + 完整 config（DetailForm 预填用）
+        if let Some((yaml, _body)) = super::detail::parse_skill_md(text) {
+            if let Some(name) = yaml.get("name").and_then(|v| v.as_str()) {
+                it.name = name.to_string();
             }
-            let mut summary = cleaned
-                .lines()
-                .find(|l| {
-                    l.trim().starts_with("**Description**") || l.trim().starts_with("Description")
-                })
-                .map(|l| {
-                    l.trim()
-                        .trim_start_matches("**Description**")
-                        .trim()
-                        .trim_start_matches("Description")
-                        .trim()
-                        .to_string()
-                })
-                .unwrap_or_default();
-            if summary.is_empty() {
-                summary = cleaned.chars().take(120).collect();
+            if let Some(desc) = yaml.get("description").and_then(|v| v.as_str()) {
+                it.summary = Some(desc.to_string());
             }
-            if !summary.is_empty() {
-                it.summary = Some(summary);
+            if let Some(cfg) = super::detail::skill_md_to_config(text) {
+                if let serde_json::Value::Object(ref mut m) = it.extra {
+                    let _ = m.insert("config".to_string(), cfg);
+                }
             }
+            return it;
+        }
+
+        // 旧格式回落：首行标题 + Description 行
+        let cleaned = text.trim();
+        let first_line = cleaned
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_start_matches('#')
+            .trim();
+        if !first_line.is_empty() {
+            it.name = first_line.to_string();
+        }
+        let mut summary = cleaned
+            .lines()
+            .find(|l| {
+                l.trim().starts_with("**Description**") || l.trim().starts_with("Description")
+            })
+            .map(|l| {
+                l.trim()
+                    .trim_start_matches("**Description**")
+                    .trim()
+                    .trim_start_matches("Description")
+                    .trim()
+                    .to_string()
+            })
+            .unwrap_or_default();
+        if summary.is_empty() {
+            summary = cleaned.chars().take(120).collect();
+        }
+        if !summary.is_empty() {
+            it.summary = Some(summary);
         }
         it
     }

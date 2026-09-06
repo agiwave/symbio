@@ -1,9 +1,9 @@
 <!--
   EntityDetailPanel — 统一实体详情（通用展示兜底）
 
-  展示 EntitySummary 的公共字段 + extra 扩展字段。
-  作为 WorkbenchView 的通用详情兜底；专属表单类型（如 model）
-  由视图的 FORM_COMPONENTS 注册表接管，不经过本面板。
+  展示 EntitySummary 的公共字段 + extra 扩展字段；机制动作经
+  mechanism-actions 注入、在自身头部渲染（图标优先，同 EntityActions 约定）。
+  作为 WorkbenchView 的通用详情兜底。
 -->
 <template>
   <div v-if="item" class="entity-detail">
@@ -12,6 +12,13 @@
       <span class="detail-status" :class="`status-${item.status}`" :title="item.status_detail">
         {{ statusLabel }}
       </span>
+      <span class="spacer" />
+      <EntityActions
+        v-if="mechanismActions.length"
+        :actions="mechanismActions"
+        :busy="busy"
+        @run="(a) => $emit('run', a)"
+      />
     </header>
 
     <p v-if="item.description" class="detail-description">{{ item.description }}</p>
@@ -41,9 +48,20 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { EntitySummary } from '@/schemas/entities'
+import type { DetailAction, EntitySummary } from '@/schemas/entities'
+import EntityActions from './EntityActions.vue'
 
-const props = defineProps<{ item: EntitySummary | null }>()
+const props = defineProps<{
+  item: EntitySummary | null
+  /** 机制动作注入（页面单一定义点计算），头部渲染 */
+  mechanismActions?: DetailAction[]
+  /** 进行中标记（按索引对齐） */
+  busy?: boolean[]
+}>()
+
+defineEmits<{ (e: 'run', action: DetailAction): void }>()
+
+const mechanismActions = computed(() => props.mechanismActions ?? [])
 
 const STATUS_LABELS: Record<string, string> = {
   active: '可用',
@@ -61,6 +79,7 @@ const statusLabel = computed(() => STATUS_LABELS[props.item?.status || 'unknown'
 
 const EXTRA_SKIP = new Set([
   'kind', 'provider', 'name', 'id', 'description', 'summary', 'updated_at', 'status', 'status_detail',
+  'is_working', 'meta_tags',
 ])
 
 const extraEntries = computed<Array<[string, unknown]>>(() => {
@@ -75,11 +94,12 @@ const extraEntries = computed<Array<[string, unknown]>>(() => {
   return out
 })
 
-function formatTime(sec: number): string {
+/** 时间戳兼容：秒级（如文件 mtime）与毫秒级（如 session updated_at） */
+function formatTime(v: number): string {
   try {
-    return new Date(sec * 1000).toLocaleString()
+    return new Date(v > 1e12 ? v : v * 1000).toLocaleString()
   } catch {
-    return String(sec)
+    return String(v)
   }
 }
 
@@ -124,6 +144,7 @@ function formatValue(v: unknown): string {
 .detail-status.status-working { color: var(--info-fg); }
 .detail-status.status-error,
 .detail-status.status-failed { color: var(--danger-fg); }
+.spacer { flex: 1; }
 .detail-description {
   font-size: 0.95rem;
   color: var(--text-primary);

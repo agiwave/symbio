@@ -30,6 +30,16 @@ pub trait SessionStore: Send + Sync {
     /// 列出所有 session（按 updated_at 降序）
     async fn list_sessions(&self) -> Result<Vec<Session>, PluginError>;
 
+    /// 列出指定会话目录下的子会话（按 updated_at 降序）。
+    ///
+    /// 子会话 = 存储位置位于 `<父会话目录>/sessions/<id>/` 的会话，
+    /// 归属由 `metadata.parent_session_id` 声明（save 路由 / load·delete
+    /// 回退查找均由存储后端实现，调用方无感知）。默认空实现（如 SQLite
+    /// 后端暂不支持嵌套存储，子会话机制仅文件后端承载）。
+    async fn list_sub_sessions(&self, _parent_id: &str) -> Result<Vec<Session>, PluginError> {
+        Ok(Vec::new())
+    }
+
     /// 返回该 session 的本地目录（文件后端有效；SQLite 后端返回 None）。
     /// 用于消息压缩存档路径解析。
     fn session_dir(&self, session_id: &str) -> Option<PathBuf>;

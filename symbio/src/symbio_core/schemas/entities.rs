@@ -160,6 +160,17 @@ impl EntityCapabilities {
         test_connection: false,
         read_only: false,
     };
+
+    /// 容器子实体（系统管理型）：可删不可创建（子会话由父会话派生，
+    /// 非用户新建——对应容器声明 `path_hint` 为空）。
+    pub const SUB_SESSION: Self = Self {
+        zip_upload: false,
+        independent_form: false,
+        realtime_status: false,
+        mutable: true,
+        test_connection: false,
+        read_only: false,
+    };
 }
 
 /// 默认能力表：`kind -> capabilities`
@@ -419,8 +430,9 @@ pub struct EntityStatusResponse {
 // 前端零页面开发。设计基准 = 旧 Model.vue 的表单复杂度：
 // 预设联动填充 / 动态候选（datalist/select）/ 密码显隐 / 数字范围 /
 // 折叠分区 / 条件徽标与动作 / id·name 派生回落链。
-// 复杂详情（会话聊天工作区、agent bundle 概览、appearance 即时生效型、
-// about 信息展示型）仍走注册 editor，不适用本定义。
+// 只读概览型详情（如 agent bundle 概览）由 `info` 绑定表达；
+// 复杂详情（会话聊天工作区、appearance 即时生效型、about 信息展示型）
+// 仍走注册 editor，不适用本定义。
 
 /// 条件谓词（徽标/动作显隐）。`all` 存在时为 AND 组合，其余字段忽略。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -444,8 +456,14 @@ pub struct DetailOption {
 }
 
 /// 表单字段定义。`widget` ∈ text | password | number | select | textarea |
-/// toggle | datalist；`options`/`suggestions` 为静态候选，`*_from_preset`
-/// 为真时候选来自当前预设的 `options[key]`（如 provider 预设注入模型列表）。
+/// toggle | datalist | list | map | static；`options`/`suggestions` 为静态候选，
+/// `*_from_preset` 为真时候选来自当前预设的 `options[key]`（如 provider 预设注入模型列表）。
+///
+/// 结构化 widget 的表单模型约定（渲染器与 `validate_manifest` 两侧一致）：
+/// - `list`：字符串数组，编辑态每行一项；
+/// - `map`：字符串键值对，编辑态每行 `KEY=VALUE`；
+/// - `static`：只读展示（info 绑定），值来自 `item.config`/`extra`，
+///   `options` 可作值→标签映射。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct DetailField {
@@ -456,6 +474,9 @@ pub struct DetailField {
     pub description: Option<String>,
     pub required: bool,
     pub widget: String,
+    /// 条件显隐（不满足时整行不渲染；求值同徽标/动作条件）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible_when: Option<DetailCondition>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -526,9 +547,14 @@ pub struct DetailBadge {
     pub style: String,
 }
 
-/// 动作按钮。`id` ∈ save | test | delete | set-default（机制语义动作，
-/// 前端接统一通道）或自定义（预留）；`payload` 合并进 save 负载
+/// 动作按钮。`id` ∈ save | test | delete | set-default | open-container
+/// （机制语义动作，前端接统一通道；`open-container` 经 `payload.kind`
+/// 路由推入容器实体页）或自定义（预留）；`payload` 合并进 save 负载
 /// （如 `skip_validation`）；`busy_label` 为进行中文案。
+///
+/// `icon`：图标名（可选）。语义动作 id 自带默认图标映射（前端纯 UI 资产），
+/// 仅当同一动作需要区分形态（如同为 save 的「跳过校验保存」）或自定义
+/// 动作需要图标时才显式指定；未知图标名回落为文字按钮。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct DetailAction {
@@ -536,6 +562,9 @@ pub struct DetailAction {
     pub label: String,
     /// primary | secondary | danger | icon
     pub style: String,
+    /// 图标名（缺省 = 按 id 的默认图标映射；无映射 → 文字按钮）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<DetailCondition>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -548,7 +577,9 @@ pub struct DetailAction {
 
 /// 详情页定义。`binding` ∈ upload（实体实体：预填 item.config，保存走
 /// `entities/upload` manifest）| config（配置分区：经 `load_path`/
-/// `save_path` 读写，如 `local/config get|set`）。派生链均为「首个非空」：
+/// `save_path` 读写，如 `local/config get|set`）| info（只读概览：
+/// 无保存，字段取值来自 item.config/extra，配 `static` widget 展示）。
+/// 派生链均为「首个非空」：
 /// `title_from` 生成标题，`name_from` 保存时补名称，`id_from` 新建时
 /// 派生 slug id（前端去重 `-2` 递增，后端 `validate_manifest` 兜底）。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]

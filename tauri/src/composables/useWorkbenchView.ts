@@ -19,8 +19,6 @@
  * 协议同一套 `${prefix}/entities/*`。
  *
  * 另导出：
- * - useContainerOverview：容器条目详情组件（如 Agent.vue）的只读概览
- *   （类别 + 计数），管理逻辑一律在 WorkbenchView 页面侧，此处不重复；
  * - detailDefinition：后端 entities/detail 下发的详情页定义（§3.2 解析链
  *   第二优先：注册 editor 缺席时由 DetailForm 渲染）；
  * - isManagerCreatable / buildMixedItems：纯函数（可单测）。
@@ -297,6 +295,11 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   // ==================== 详情页定义（definition-driven detail） ====================
   // 解析顺序：注册专属 editor → 本定义（DetailForm 渲染）→ 通用兜底。
   // 新建态（id 空）与选中态共用一个请求令牌防竞态。
+  //
+  // 切换目标时**立即失效旧定义**（置 null）：否则 DetailForm 会以旧定义
+  // 重挂载并用旧 load_path 拉取错误数据源（如设置分区切换后拉到上一个
+  // 分区的 config），新定义到达仅更新 prop、不会重新加载——表现为
+  // 「除首个分区外全部空白」。定义生命周期与选中目标严格同步。
   const detailDefinition = shallowRef<DetailDefinition | null>(null)
   let detailToken = 0
   watch(
@@ -311,6 +314,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
         detailDefinition.value = null
         return
       }
+      detailDefinition.value = null
       const [scope, kind, ...rest] = key.split(':')
       const id = scope === 'create' ? '' : rest.join(':')
       const token = ++detailToken
@@ -533,12 +537,15 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   const kindEntries = computed(() => wb.itemsOf(activeKind.value))
 
   // === 文本编辑（entities/get 的 extra.content + entities/put 写回） ===
+  // 机制分流：子实体带 extra.content（文件型）→ 文本编辑器；
+  // 不带（系统管理型，如子会话）→ 只读详情面板。
   const selectedEntry = computed(
     () => kindEntries.value.find((e) => wb.isSelected(e.kind, e.id)) ?? null
   )
   const content = ref('')
   const originalContent = ref('')
   const loadingContent = ref(false)
+  const entryHasContent = ref(false)
   const editorError = ref('')
   const dirty = computed(() => content.value !== originalContent.value)
 
@@ -553,13 +560,21 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     try {
       const item = await getEntity(containerKind, id, cid)
       const c = item?.content
-      if (typeof c !== 'string') throw new Error('响应缺少 content（extra.content）')
-      content.value = c
-      originalContent.value = c
+      if (typeof c === 'string') {
+        content.value = c
+        originalContent.value = c
+        entryHasContent.value = true
+      } else {
+        // 非 content 型子实体：无编辑语义，详情走只读面板
+        content.value = ''
+        originalContent.value = ''
+        entryHasContent.value = false
+      }
     } catch (err) {
       editorError.value = `读取失败: ${err}`
       content.value = ''
       originalContent.value = ''
+      entryHasContent.value = false
     } finally {
       loadingContent.value = false
     }
@@ -736,6 +751,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     content,
     dirty,
     loadingContent,
+    entryHasContent,
     editorError,
     selectEntry,
     reloadSelected,
@@ -748,40 +764,6 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     testing: wb.testing,
     showToast,
   }
-}
-
-/**
- * useContainerOverview —— 容器条目详情组件的**只读概览**（类别 + 计数）。
- *
- * 供 Agent.vue 等详情差异化组件消费：仅展示某容器条目内部的子实体类别与
- * 数量。管理逻辑一律在 WorkbenchView 页面侧（useWorkbenchView），此处不重复。
- */
-export function useContainerOverview(kind: string, containerId: () => string | undefined) {
-  const { getProvider } = useEntityProviders()
-
-  const containerKinds = computed<ContainerKindInfo[]>(
-    () => getProvider(kind)?.container_kinds ?? []
-  )
-  const counts = ref<Record<string, number>>({})
-  const entriesError = ref('')
-
-  async function loadEntries() {
-    const id = containerId()
-    if (!id) return
-    entriesError.value = ''
-    try {
-      if (getProvider(kind) === null) await loadProviders()
-      const resp = await listEntities(kind, { container: id })
-      const out: Record<string, number> = {}
-      for (const k of containerKinds.value) out[k.kind] = out[k.kind] ?? 0
-      for (const it of resp.items ?? []) out[it.kind] = (out[it.kind] ?? 0) + 1
-      counts.value = out
-    } catch (err) {
-      entriesError.value = `实体概览加载失败: ${err}`
-    }
-  }
-
-  return { containerKinds, counts, entriesError, loadEntries }
 }
 
 /** 是否可在实体管理器内创建/删除（supports_upload 为"协议实现"维度，与 mutable 解耦） */

@@ -270,6 +270,8 @@ pub fn model_detail_definition() -> DetailDefinition {
                 id: "save".into(),
                 label: "跳过校验保存".into(),
                 style: "secondary".into(),
+                // 同为 save 的第二形态：显式指定图标区分（其余动作按 id 默认图标）
+                icon: Some("save-skip".into()),
                 payload: Some(serde_json::json!({ "skip_validation": true })),
                 ..Default::default()
             },

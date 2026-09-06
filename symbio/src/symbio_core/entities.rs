@@ -282,10 +282,26 @@ pub static AGENT_CONTAINER_KINDS: &[ContainerKindSpec] = &[
     },
 ];
 
+/// session 的容器子实体声明：条目（会话）内部托管**子会话**。
+///
+/// 子会话由父会话派生（系统管理，非用户新建）：`path_hint` 为空 = 不可
+/// 用户创建（前端据此隐藏新建入口），仅支持查看与删除；存储由文件后端
+/// 路由到父会话目录的 `sessions/` 子目录（归属声明
+/// `metadata.parent_session_id`），删除父会话级联删除子会话。
+pub static SESSION_CONTAINER_KINDS: &[ContainerKindSpec] = &[ContainerKindSpec {
+    kind: ENTITY_SESSION,
+    label: "子会话",
+    description: "由该会话派生的子会话；随父会话级联删除。",
+    path_hint: "",
+    default_content: "",
+    capabilities: &EntityCapabilities::SUB_SESSION,
+}];
+
 /// 某 provider kind 的容器子实体声明（空 = 条目不是容器）。
 pub fn container_kinds_for(kind: &str) -> &'static [ContainerKindSpec] {
     match kind {
         ENTITY_AGENT => AGENT_CONTAINER_KINDS,
+        ENTITY_SESSION => SESSION_CONTAINER_KINDS,
         _ => &[],
     }
 }
@@ -337,11 +353,13 @@ pub fn provider_registry() -> &'static [EntityProviderInfo] {
             order: 1,
             label: "会话",
             // session 走 SessionStore（非 EntityStore）：zip/manifest 上传不适用；
-            // 删除经重写 delete_item 钩子接入统一协议；创建走前端专属 editor 引导
+            // 删除经重写 delete_item 钩子接入统一协议；创建走前端专属 editor 引导。
+            // 条目是容器：内部托管子会话（SESSION_CONTAINER_KINDS，path_hint 空
+            // = 不可用户创建，仅查看/删除）
             supports_upload: false,
             compact_list: false,
             status_indicator: true,
-            container_kinds: &[],
+            container_kinds: SESSION_CONTAINER_KINDS,
         },
         EntityProviderInfo {
             kind: ENTITY_MODEL,
@@ -511,12 +529,19 @@ async fn dispatch_list<P: EntityProvider + ?Sized>(
             .await?;
         fill_provider(provider, &mut items);
         let kind = sub_kind.unwrap_or(provider.kind()).to_string();
-        // 能力开关取容器声明（未知子类型回退 provider 能力）
+        // 能力开关取容器声明：命中子类型取该子类声明；混合列表（未指定
+        // sub_kind）= 容器文件语义（BUNDLE_FILE）；未知子类型回退 provider 能力
         let capabilities = container_kinds_for(provider.kind())
             .iter()
             .find(|k| k.kind == kind)
             .map(|k| *k.capabilities)
-            .unwrap_or_else(|| capabilities_for(provider.kind()));
+            .unwrap_or_else(|| {
+                if sub_kind.is_none() {
+                    EntityCapabilities::BUNDLE_FILE
+                } else {
+                    capabilities_for(provider.kind())
+                }
+            });
         return Ok(PluginPayload::new(&EntitiesListResponse {
             kind,
             capabilities,

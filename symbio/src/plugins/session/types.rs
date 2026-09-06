@@ -40,6 +40,18 @@ impl Session {
             .or_else(|| derive_session_title(&self.messages))
             .unwrap_or_else(|| "新对话".to_string())
     }
+
+    /// 父会话 id（`metadata.parent_session_id`；空/自引用视为无归属）。
+    ///
+    /// 子会话归属的机制级声明：存储层据此路由嵌套目录（文件后端），
+    /// 统一实体协议据此判定「子会话」清单归属。
+    pub fn parent_session_id(&self) -> Option<&str> {
+        self.metadata
+            .get("parent_session_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|p| !p.is_empty() && *p != self.id)
+    }
 }
 
 /// 从会话消息内容自动生成会话标题（无显式命名时的兜底）。

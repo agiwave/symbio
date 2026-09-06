@@ -350,6 +350,54 @@ fn derive_session_summary(messages: &[crate::symbio_core::schemas::session::chat
     Some(format!("{}…", out.trim_end()))
 }
 
+/// 会话 → 统一实体摘要（顶层清单与容器子会话清单共用的单一实现）。
+///
+/// 显示名 = `display_title`（title 优先 → 内容自动生成 → 「新对话」）；
+/// 状态 = working/active；extra 携带 message_count / is_working / metadata /
+/// meta_tags（工作目录名 + 消息数）。
+fn summarize_session(s: &Session, is_working: bool) -> crate::symbio_core::entities::EntitySummary {
+    let mut it = crate::symbio_core::entities::EntitySummary::new(
+        crate::symbio_core::entities::ENTITY_SESSION,
+        &s.id,
+        s.display_title(),
+    );
+    it.status = if is_working {
+        "working".to_string()
+    } else {
+        "active".to_string()
+    };
+    it.updated_at = Some(s.updated_at);
+    // 一行摘要（通用字段，前端 subtitle = description || summary）：
+    // 最后一条含文本消息的首行——列表即「会话实时缩略」
+    it.summary = derive_session_summary(&s.messages);
+    if let serde_json::Value::Object(ref mut m) = it.extra {
+        let _ = m.insert("message_count".to_string(), json!(s.messages.len()));
+        let _ = m.insert("is_working".to_string(), json!(is_working));
+        let _ = m.insert("metadata".to_string(), s.metadata.clone());
+        // 通用元信息标签（前端 EntityCard tags 原样渲染）：工作目录名 + 消息数
+        let mut meta_tags: Vec<String> = Vec::new();
+        if let Some(wd) = s
+            .metadata
+            .get("workdir")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let base = wd
+                .trim_end_matches(['/', '\\'])
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(wd);
+            if !base.is_empty() {
+                meta_tags.push(base.to_string());
+            }
+        }
+        meta_tags.push(format!("{} 条", s.messages.len()));
+        let _ = m.insert("meta_tags".to_string(), json!(meta_tags));
+    }
+    it
+}
+
 // ==================== 统一实体协议接入 ====================
 
 #[async_trait]
@@ -373,51 +421,83 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
                     .get(&s.id)
                     .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
                     .unwrap_or(false);
-                // 显示名：metadata.title 优先，否则从会话内容自动生成，最后「新对话」
-                let title = s.display_title();
-                let mut it = crate::symbio_core::entities::EntitySummary::new(
-                    crate::symbio_core::entities::ENTITY_SESSION,
-                    &s.id,
-                    title,
-                );
-                it.status = if is_working {
-                    "working".to_string()
-                } else {
-                    "active".to_string()
-                };
-                it.updated_at = Some(s.updated_at);
-                // 一行摘要（通用字段，前端 subtitle = description || summary）：
-                // 最后一条含文本消息的首行——列表即「会话实时缩略」
-                it.summary = derive_session_summary(&s.messages);
-                if let serde_json::Value::Object(ref mut m) = it.extra {
-                    let _ = m.insert("message_count".to_string(), json!(s.messages.len()));
-                    let _ = m.insert("is_working".to_string(), json!(is_working));
-                    let _ = m.insert("metadata".to_string(), s.metadata.clone());
-                    // 通用元信息标签（前端 EntityCard tags 原样渲染）：
-                    // 工作目录名 + 消息数
-                    let mut meta_tags: Vec<String> = Vec::new();
-                    if let Some(wd) = s
-                        .metadata
-                        .get("workdir")
-                        .and_then(|v| v.as_str())
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                    {
-                        let base = wd
-                            .trim_end_matches(['/', '\\'])
-                            .rsplit(['/', '\\'])
-                            .next()
-                            .unwrap_or(wd);
-                        if !base.is_empty() {
-                            meta_tags.push(base.to_string());
-                        }
-                    }
-                    meta_tags.push(format!("{} 条", s.messages.len()));
-                    let _ = m.insert("meta_tags".to_string(), json!(meta_tags));
-                }
-                it
+                summarize_session(s, is_working)
             })
             .collect())
+    }
+
+    // ==================== 容器子实体（统一协议 container 语义） ====================
+    //
+    // 条目（会话）即容器：内部托管**子会话**（声明见 SESSION_CONTAINER_KINDS，
+    // path_hint 空 = 系统管理型，不可用户新建，仅查看/删除）。子会话的存储
+    // 归属由 `metadata.parent_session_id` 声明、文件后端路由到父会话目录的
+    // `sessions/` 子目录；清单/寻址/删除均经 SessionStore 子会话方法。
+
+    /// 列出容器（父会话）内的子会话
+    async fn list_container_items(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _sub_kind: Option<&str>,
+        container: &str,
+    ) -> Result<Vec<crate::symbio_core::entities::EntitySummary>, PluginError> {
+        let store = self.get_store().await?;
+        let sessions = store.list_sub_sessions(container).await?;
+        let active = self.active_mgr.sessions.read().await;
+        Ok(sessions
+            .iter()
+            .map(|s| {
+                let is_working = active
+                    .get(&s.id)
+                    .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+                    .unwrap_or(false);
+                summarize_session(s, is_working)
+            })
+            .collect())
+    }
+
+    /// 读取单个子会话摘要（id = 子会话 id）
+    async fn get_container_item(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+        container: &str,
+    ) -> Result<crate::symbio_core::entities::EntitySummary, PluginError> {
+        let store = self.get_store().await?;
+        let session = store.load_session(id).await?;
+        // 防呆：归属校验（顶层会话 / 不存在的 id 一律拒绝）
+        if session.parent_session_id() != Some(container) {
+            return Err(PluginError::NotFound(format!(
+                "会话 {container} 下不存在子会话 {id}"
+            )));
+        }
+        let active = self.active_mgr.sessions.read().await;
+        let is_working = active
+            .get(&session.id)
+            .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+            .unwrap_or(false);
+        Ok(summarize_session(&session, is_working))
+    }
+
+    /// 删除子会话（先 abort 活跃任务再删，与顶层 delete_item 同语义）
+    async fn delete_container_item(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+        container: &str,
+    ) -> Result<crate::symbio_core::entities::EntityUploadResponse, PluginError> {
+        let store = self.get_store().await?;
+        let session = store.load_session(id).await?;
+        if session.parent_session_id() != Some(container) {
+            return Err(PluginError::NotFound(format!(
+                "会话 {container} 下不存在子会话 {id}"
+            )));
+        }
+        self.delete_session_internal(id).await?;
+        Ok(crate::symbio_core::entities::EntityUploadResponse {
+            kind: crate::symbio_core::entities::ENTITY_SESSION.to_string(),
+            id: id.to_string(),
+            created: false,
+        })
     }
 
     /// 删除会话（统一协议 entities/delete；非 EntityStore 型 provider 重写）。
