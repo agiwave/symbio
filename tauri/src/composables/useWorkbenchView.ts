@@ -744,7 +744,6 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     select,
     // 新建（统一入口 + 分流状态）
     creating,
-    canCreate,
     creatableInActive,
     onNew,
     createKind,

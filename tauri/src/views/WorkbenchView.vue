@@ -39,7 +39,7 @@
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
-        <button class="icon-btn" title="刷新" :disabled="loading" @click="loadAll">
+        <button class="icon-btn" title="刷新" :disabled="loading" @click="onRefresh">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
             <polyline points="21 3 21 8 16 8" />
@@ -77,6 +77,7 @@
         <!-- container：树视图子类别（view = "tree"）= EntityTree 懒加载树；
              列表子类别 = EntityCard 列表。两种形态均由后端声明驱动。 -->
         <EntityTree
+          ref="entityTreeRef"
           v-else-if="isTreeView"
           :container-kind="containerKind ?? ''"
           :container-id="containerIdRef"
@@ -244,8 +245,9 @@
         </template>
 
         <!-- ============== 选中项 ============== -->
-        <!-- container：content 型子实体 = 标准文本编辑器（entities/get content + entities/put 写回）；
-             非 content 型（系统管理型，如子会话）= 只读详情面板 -->
+        <!-- container：content 型子实体 = 代码编辑器（entities/get content + entities/put 写回；
+             能力门控：mutable && !read_only 才可编辑）；非 content 型（系统管理型，如子会话）
+             = 只读详情面板 -->
         <div v-else-if="isContainer && selectedEntry && entryHasContent" class="entry-editor">
           <div class="editor-head">
             <div class="title-block">
@@ -255,13 +257,12 @@
             <code class="editor-path">{{ selectedEntry.id }}</code>
           </div>
           <div class="editor-form">
-            <textarea
-              v-model="content"
-              class="content-input"
-              rows="18"
-              spellcheck="false"
-              :disabled="loadingContent"
-              :placeholder="loadingContent ? '加载中…' : ''"
+            <CodeEditor
+              :model-value="content"
+              :file-path="selectedEntry.id"
+              :readonly="loadingContent || !canWriteEntry"
+              @update:model-value="content = $event"
+              @request-save="saveEntry"
             />
             <p class="field-hint">{{ activeKindMeta?.description ?? '' }}</p>
             <p v-if="editorError" class="editor-error">{{ editorError }}</p>
@@ -361,6 +362,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Workbench from '@/components/common/Workbench.vue'
 import EntityCard from '@/components/common/EntityCard.vue'
+import CodeEditor from '@/components/CodeEditor.vue'
 import Toast from '@/components/common/Toast.vue'
 import EntityDetailPanel from '@/components/entities/EntityDetailPanel.vue'
 import DetailForm from '@/components/entities/DetailForm.vue'
@@ -474,6 +476,13 @@ const canWriteEntry = computed(() => {
 /** 返回容器条目所在的顶层实体列表页 */
 function goBack() {
   router.push(`/entities/${props.containerKind}`)
+}
+
+/** 头部刷新：分箱数据（列表形态）+ 树视图自管数据一并刷新 */
+const entityTreeRef = ref<InstanceType<typeof EntityTree> | null>(null)
+function onRefresh() {
+  void loadAll()
+  if (isTreeView.value) entityTreeRef.value?.refresh()
 }
 
 /** 机制导航动作（DetailForm `open-container`）：路由推入容器实体页（整页替换） */

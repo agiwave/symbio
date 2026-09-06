@@ -143,12 +143,16 @@ function handleBusEvent(busEvent: BusEvent) {
 
 function scheduleReload() {
   if (reloadTimer) clearTimeout(reloadTimer)
-  reloadTimer = setTimeout(() => {
-    reloadTimer = null
-    void fetchLevel('')
-    for (const dir of loadedLevels.value) void fetchLevel(dir)
-  }, 800)
+  reloadTimer = setTimeout(refresh, 800)
 }
+
+/** 手动刷新：立即重载根层与全部已加载层级（展开状态保留） */
+function refresh() {
+  void fetchLevel('')
+  for (const dir of loadedLevels.value) void fetchLevel(dir)
+}
+
+defineExpose({ refresh })
 
 function attach() {
   busUnsubscribe?.()
