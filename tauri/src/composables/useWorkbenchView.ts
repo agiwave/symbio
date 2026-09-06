@@ -620,12 +620,15 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
 
   // === 实时刷新（§3.3）：容器 `data` 粗粒度事件 → 防抖同步选中子实体内容 ===
   // 仅在选中内容未被用户编辑时跟随（编辑中不覆盖输入）。
+  // 订阅为 kind 级（sessionId 不入过滤器——避免触发会话回放缓冲的
+  // drain 副作用），目标容器在 handler 内过滤。
   let detailReloadTimer: ReturnType<typeof setTimeout> | null = null
   const unsubDetailData = subscribe(
-    { kind: containerKind, sessionId: containerId?.() ?? null },
+    { kind: containerKind },
     (busEvent) => {
       const inner = busEvent.data?.data as { type?: string } | undefined
       if (inner?.type !== 'data') return
+      if (busEvent.data.session_id !== containerId?.()) return
       if (detailReloadTimer) clearTimeout(detailReloadTimer)
       detailReloadTimer = setTimeout(() => {
         detailReloadTimer = null

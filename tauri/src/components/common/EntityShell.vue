@@ -55,9 +55,9 @@
         </div>
       </header>
 
-      <div v-if="$slots.meta" class="list-meta">
+      <!-- <div v-if="$slots.meta" class="list-meta">
         <slot name="meta" />
-      </div>
+      </div> -->
 
       <!-- 列表内容 -->
       <slot name="list" />

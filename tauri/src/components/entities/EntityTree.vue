@@ -137,8 +137,12 @@ let reloadTimer: ReturnType<typeof setTimeout> | null = null
 
 function handleBusEvent(busEvent: BusEvent) {
   const inner = busEvent.data.data as { type?: string } | undefined
-  // 仅粗粒度「容器数据变更」事件触发重载；细粒度事件不得触发（§2.4）
-  if (inner?.type === 'data') scheduleReload()
+  // 仅粗粒度「容器数据变更」事件触发重载；细粒度事件不得触发（§2.4）。
+  // 订阅为 kind 级（sessionId 不入过滤器——避免触发会话回放缓冲的
+  // drain 副作用），目标容器在 handler 内过滤。
+  if (inner?.type !== 'data') return
+  if (busEvent.data.session_id !== props.containerId) return
+  scheduleReload()
 }
 
 function scheduleReload() {
@@ -156,10 +160,9 @@ defineExpose({ refresh })
 
 function attach() {
   busUnsubscribe?.()
-  busUnsubscribe = subscribe(
-    { kind: props.containerKind, sessionId: props.containerId },
-    handleBusEvent
-  )
+  // kind 级订阅（sessionId 不入过滤器，避免会话回放缓冲 drain 副作用），
+  // 目标容器在 handler 内过滤
+  busUnsubscribe = subscribe({ kind: props.containerKind }, handleBusEvent)
   void watchEntity(props.containerKind, {
     container: props.containerId,
     subKind: props.subKind,

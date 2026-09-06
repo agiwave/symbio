@@ -210,28 +210,47 @@ pub async fn delete_node(workdir: &str, rel: &str) -> Result<(), PluginError> {
 
 /// 工作目录监听管理器（场景级基础设施）。
 ///
-/// 监听生命周期与**前端树视图的挂载期**严格绑定（`entities/watch` /
+/// 监听生命周期与**前端树视图的挂载期**绑定（`entities/watch` /
 /// `entities/unwatch` 操作对）：每个 workdir 至多一个 [`FsWatcher`]，以
 /// 关注它的容器（会话）引用计数维持——不同会话的工作目录各自监听，共享
 /// 工作目录的多个会话共享同一监听，最后一个订阅方释放后监听停止。
 /// 文件变化时向所有关注该 workdir 的容器发布粗粒度 `data` 事件（§2.4，
 /// kind = 会话、sessionId = 容器 id），驱动前端树视图与详情编辑器按
 /// §3.3 防抖重载。机制层只约定「容器数据已变更」语义，不感知文件细节。
+///
+/// **释放采用世代守卫的延迟释放**：unwatch 经网络在途，可能在快速
+/// 「离开→返回」后晚于新一轮 watch 到达；直接释放会误杀刚重建的订阅
+/// （树失去实时更新）。释放任务延迟一个宽限期执行，且仅当 (workdir,
+/// container) 的世代号未变（期间无重新订阅）才真正释放。
 #[derive(Default)]
 pub struct WorkdirWatchManager {
     /// workdir → 持活的监听器（保持句柄以维持监听）
     watchers: DashMap<String, Arc<FsWatcher>>,
-    /// workdir → 关注它的容器 id 列表（引用计数）
-    containers: DashMap<String, Vec<String>>,
+    /// workdir → 关注它的容器 id 列表（含各自世代号）
+    containers: DashMap<String, Vec<(String, u64)>>,
+    /// (workdir, container) → 当前世代号（每次 ensure 递增）
+    generations: DashMap<String, u64>,
+}
+
+/// (workdir, container) 的世代守卫键
+fn watch_key(workdir: &str, container: &str) -> String {
+    format!("{workdir}\u{0}{container}")
 }
 
 impl WorkdirWatchManager {
-    /// 确保该 workdir 的监听已启动（幂等；container 记入关注清单）
+    /// 确保该 workdir 的监听已启动（幂等；container 记入关注清单并递增世代）
     pub fn ensure_watch(&self, workdir: &str, container: &str) {
+        let key = watch_key(workdir, container);
+        let generation = {
+            let mut g = self.generations.entry(key).or_insert(0);
+            *g += 1;
+            *g
+        };
         {
             let mut list = self.containers.entry(workdir.to_string()).or_default();
-            if !list.iter().any(|c| c == container) {
-                list.push(container.to_string());
+            match list.iter_mut().find(|(c, _)| c == container) {
+                Some(entry) => entry.1 = generation,
+                None => list.push((container.to_string(), generation)),
             }
         }
         if self.watchers.contains_key(workdir) {
@@ -303,29 +322,57 @@ impl WorkdirWatchManager {
         self.watchers.insert(workdir.to_string(), watcher);
     }
 
-    /// 释放某容器对 workdir 的订阅（树视图卸载）；最后一个订阅方释放后
-    /// 监听器随之停止（drop 释放 OS 句柄）
+    /// 释放某容器对 workdir 的订阅（树视图卸载）。
+    ///
+    /// 世代守卫 + 宽限延迟：仅当宽限期内该 (workdir, container) 没有发生
+    /// 重新订阅（世代号不变）才真正移除；最后一个订阅方移除后监听停止
+    /// （drop 释放 OS 句柄）。迟到的 unwatch 因世代号已推进而被安全忽略。
     pub fn release_watch(&self, workdir: &str, container: &str) {
-        let should_stop = match self.containers.get_mut(workdir) {
-            Some(mut list) => {
-                list.retain(|c| c != container);
-                if list.is_empty() {
-                    self.containers.remove(workdir);
-                    true
-                } else {
-                    false
+        let key = watch_key(workdir, container);
+        let Some(generation) = self.generations.get(&key).map(|g| *g) else {
+            return; // 从未订阅过
+        };
+
+        let containers = self.containers.clone();
+        let watchers = self.watchers.clone();
+        let generations = self.generations.clone();
+        let wd = workdir.to_string();
+        let container_owned = container.to_string();
+        tokio::spawn(async move {
+            tokio::time::sleep(RELEASE_GRACE).await;
+            // 世代守卫：期间发生重新订阅 → 本次释放作废
+            if generations.get(&key).map(|g| *g) != Some(generation) {
+                return;
+            }
+            let should_stop = match containers.get_mut(&wd) {
+                Some(mut list) => {
+                    list.retain(|(c, _)| *c != container_owned);
+                    let empty = list.is_empty();
+                    if empty {
+                        containers.remove(&wd);
+                    }
+                    empty
+                }
+                None => false,
+            };
+            if should_stop {
+                if let Some((_, watcher)) = watchers.remove(&wd) {
+                    crate::plugin_info!("session", "workdir watch stopped: {wd}");
+                    drop(watcher);
                 }
             }
-            None => false,
-        };
-        if should_stop {
-            if let Some((_, watcher)) = self.watchers.remove(workdir) {
-                crate::plugin_info!("session", "workdir watch stopped: {workdir}");
-                drop(watcher);
-            }
-        }
+        });
+    }
+
+    /// 测试辅助：该 workdir 是否当前持有监听器
+    #[cfg(test)]
+    pub fn is_watched(&self, workdir: &str) -> bool {
+        self.watchers.contains_key(workdir)
     }
 }
+
+/// 释放宽限期：覆盖「卸载的 unwatch 在途 + 返回页面的重新 watch」窗口
+const RELEASE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// 事件合并状态（每个 workdir 一份；回调线程与合并任务共享）
 #[derive(Default)]
@@ -354,9 +401,9 @@ const VOLATILE_DIRS: &[&str] = &[
 ];
 
 /// 向所有关注该 workdir 的容器发布粗粒度 `data` 事件（§2.4）
-fn publish_data_event(containers: &DashMap<String, Vec<String>>, workdir: &str, rel: &str) {
+fn publish_data_event(containers: &DashMap<String, Vec<(String, u64)>>, workdir: &str, rel: &str) {
     if let Some(list) = containers.get(workdir) {
-        for container in list.iter() {
+        for (container, _) in list.iter() {
             EventBus::try_publish(
                 crate::symbio_core::entities::ENTITY_SESSION,
                 Some(container),
@@ -372,6 +419,58 @@ mod tests {
     use crate::symbio_core::SimpleRequest;
     use serde_json::json;
     use tempfile::TempDir;
+
+    /// 世代守卫延迟释放：卸载的 unwatch 迟到时不得误杀重新建立的订阅；
+    /// 宽限期内无重新订阅才真正释放（tokio paused time 驱动）。
+    #[tokio::test(start_paused = true)]
+    async fn release_watch_generation_guard() {
+        let mgr = WorkdirWatchManager::default();
+        let wd = "D:/work";
+
+        // 第一次进入：订阅（世代 1）
+        mgr.ensure_watch(wd, "sess_a");
+        assert!(mgr.is_watched(wd));
+
+        // 切走 → unwatch（世代 1 的释放进入宽限期）
+        mgr.release_watch(wd, "sess_a");
+        assert!(mgr.is_watched(wd), "宽限期内监听保持");
+
+        // 快速返回 → 重新订阅（世代 2）
+        mgr.ensure_watch(wd, "sess_a");
+        assert!(mgr.is_watched(wd));
+
+        // 宽限期流逝：世代 1 的迟到释放因世代推进被忽略
+        tokio::time::advance(RELEASE_GRACE + std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert!(mgr.is_watched(wd), "迟到的 unwatch 不得误杀重新订阅");
+
+        // 再切走 → 世代 2 的释放正常生效（无重新订阅推进世代）
+        mgr.release_watch(wd, "sess_a");
+        tokio::time::advance(RELEASE_GRACE + std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert!(!mgr.is_watched(wd), "无订阅方后监听应停止");
+    }
+
+    /// 共享 workdir：多方订阅引用计数，最后一位释放后监听停止
+    #[tokio::test(start_paused = true)]
+    async fn shared_workdir_reference_counting() {
+        let mgr = WorkdirWatchManager::default();
+        let wd = "D:/shared";
+
+        mgr.ensure_watch(wd, "sess_a");
+        mgr.ensure_watch(wd, "sess_b");
+        assert!(mgr.is_watched(wd));
+
+        mgr.release_watch(wd, "sess_a");
+        tokio::time::advance(RELEASE_GRACE).await;
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert!(mgr.is_watched(wd), "仍有其他订阅方，监听保持");
+
+        mgr.release_watch(wd, "sess_b");
+        tokio::time::advance(RELEASE_GRACE).await;
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert!(!mgr.is_watched(wd), "最后一位释放后监听停止");
+    }
 
     fn ctx() -> Arc<dyn InvokeRequest> {
         Arc::new(SimpleRequest::new(None, None))
