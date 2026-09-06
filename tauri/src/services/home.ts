@@ -21,13 +21,26 @@
  * - `work/set_workspace` → `setWorkspacePath`
  *
  * 对应后端代码：symbio/src/plugins/home/plugin.rs
- * 对应 schema：tauri/src/schemas/{home_reload,work_get_workspace,work_set_workspace}.ts
+ * 对应 schema：tauri/src/schemas/home_reload.ts（work_get/set_workspace 已内联）
  */
 import { callPlugin, setLastWorkdir } from './plugin'
 import type { Response as ReloadResponse } from '../schemas/home_reload'
-import type { Response as WorkGetWorkspaceResponse } from '../schemas/work_get_workspace'
-import type { Response as WorkSetWorkspaceResponse } from '../schemas/work_set_workspace'
 import { logger } from '@/utils/logger'
+
+// 原 schemas/work_get_workspace（仅本模块使用，内联）
+export interface WorkGetWorkspaceResponse {
+  workdir: string;
+  expanded_path: string;
+  recent_workspaces: string[];
+}
+
+// 原 schemas/work_set_workspace（仅本模块使用，内联）
+export interface WorkSetWorkspaceResponse {
+  workdir: string;
+  expanded_path: string;
+  recent_workspaces: string[];
+  status: string;
+}
 
 // =====================================================================
 // 系统目录 (homedir) 管理

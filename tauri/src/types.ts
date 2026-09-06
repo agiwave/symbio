@@ -8,9 +8,25 @@ export interface SchemaProperty {
 }
 
 // Re-export from schemas for backward compatibility
-export type { RiskLevel } from './schemas/tools_policy'
 export type { MessageContent, ContentPart } from './schemas/chat_message'
-export type { AgentProfile } from './schemas/model_types'
+
+/** 工具风险等级（原 schemas/tools_policy，仅本文件使用，内联） */
+export type RiskLevel = 'low' | 'medium' | 'high'
+
+/** Frontend-only AI types: Agent models（原 schemas/model_types，仅本文件使用，内联） */
+export interface AgentProfile {
+  id: string
+  name: string
+  description: string
+  knowledge: string[]
+  experience: string[]
+  skill: string[]
+  judgment: string[]
+  strategy: string[]
+  intuition: string[]
+  emotion: string[]
+  context_messages: number
+}
 
 
 /** Image attachment (frontend-only UI type) */

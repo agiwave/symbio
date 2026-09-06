@@ -14,13 +14,33 @@ import { logger } from '@/utils/logger'
 
 import { ChatMessage, ContentPart, MessageContent, ChatRole, ChatMessageType, MessageStatus } from '../schemas/chat_message'
 
-import { StreamEvent, ChatEventType } from '../schemas/chat_response'
-
 // Chat 插件路径 (V2 整合版：chat 逻辑已并入 session，使用 constants/pluginPaths 中的统一常量)
 const MODEL_PATH = 'worker/model'
 
-export type { ChatMessage, ContentPart, MessageContent, StreamEvent, ChatMessageType, MessageStatus, ChatRole }
-export { ChatEventType }
+// ==================== Chat 事件协议（原 schemas/chat_response，仅本模块使用，内联） ====================
+
+export enum ChatEventType {
+  Update = 'update',
+  Error = 'error',
+  Connected = 'connected',
+  Disconnected = 'disconnected',
+  Status = 'status',
+  Abort = 'abort',
+  SessionResumed = 'session_resumed',
+  Delete = 'delete'
+}
+
+export type StreamEvent =
+  | { type: ChatEventType.Update; message: ChatMessage }
+  | { type: ChatEventType.Error; error: string }
+  | { type: ChatEventType.Connected; session_id: string; is_working: boolean; messages: ChatMessage[] }
+  | { type: ChatEventType.Disconnected }
+  | { type: ChatEventType.Status; status: string }
+  | { type: ChatEventType.Abort }
+  | { type: ChatEventType.SessionResumed; session_id: string; parent_session_id: string; failed: boolean; result: string | null }
+  | { type: ChatEventType.Delete; message_id: string };
+
+export type { ChatMessage, ContentPart, MessageContent, ChatMessageType, MessageStatus, ChatRole }
 
 // ==================== 类型定义 ====================
 
