@@ -129,7 +129,7 @@ impl ModelProviderConfig {
             reasoning: self.reasoning.clone(),
         }
     }
-
+}
 
 /// Model Providers 注册表（多 Provider 容器）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

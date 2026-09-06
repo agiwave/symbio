@@ -30,3 +30,34 @@ impl Default for TelegramConfig {
         }
     }
 }
+
+pub mod telegram_send {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Serialize, Deserialize, Clone)]
+    pub struct Request {
+        pub text: String,
+        pub chat_id: Option<String>,
+        pub parse_mode: Option<String>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Response {
+        pub sent: i32,
+        pub message: String,
+    }
+}
+
+pub mod telegram_status {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Response {
+        pub configured: bool,
+        pub has_chat_id: bool,
+        pub streaming_enabled: bool,
+        pub poll_enabled: bool,
+        pub listener_running: bool,
+        pub update_offset: i64,
+    }
+}

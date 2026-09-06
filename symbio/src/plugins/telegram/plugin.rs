@@ -1,11 +1,11 @@
 use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
 use crate::symbio_core::InvokeRequestExt;
+use super::schemas::{telegram_send, telegram_status};
 use crate::symbio_core::{
     schemas::{
         common,
         session::{session_chat, session_chat_response},
-        telegram::{telegram_send, telegram_status},
     },
     CapabilityMeta, InvokeRequest, InvokeResponse, Plugin, PluginError, PluginFrame, PluginMeta,
     PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_TELEGRAM, SESSION_CHAT,
