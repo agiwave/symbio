@@ -1,5 +1,9 @@
 // Corresponding Backend: symbio/src/symbio_core/schemas/model_providers.rs
-import type { ReasoningConfig } from './model_config'
+
+/** 推理配置（原 schemas/model_config，仅本文件使用，内联） */
+export interface ReasoningConfig {
+  effort: string;
+}
 
 /**
  * 单个 Model Provider 配置
