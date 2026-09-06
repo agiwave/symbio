@@ -428,18 +428,35 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
 
     // ==================== 容器子实体（统一协议 container 语义） ====================
     //
-    // 条目（会话）即容器：内部托管**子会话**（声明见 SESSION_CONTAINER_KINDS，
-    // path_hint 空 = 系统管理型，不可用户新建，仅查看/删除）。子会话的存储
-    // 归属由 `metadata.parent_session_id` 声明、文件后端路由到父会话目录的
-    // `sessions/` 子目录；清单/寻址/删除均经 SessionStore 子会话方法。
+    // 条目（会话）即容器，内部托管两类子实体（声明见 SESSION_CONTAINER_KINDS）：
+    // - 子会话（列表视图）：系统管理型，存储归属由 `metadata.parent_session_id`
+    //   声明、文件后端路由到父会话目录的 `sessions/` 子目录；
+    // - 目录树（tree 机制的场景实现）：会话工作目录的层级浏览（只读），
+    //   经 `parent` 请求参数逐层懒加载，场景实现见 `super::workdir`。
 
-    /// 列出容器（父会话）内的子会话
+    /// 列出容器（父会话）内的子实体（按 sub_kind 分流：子会话 / 目录树）
     async fn list_container_items(
         &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _sub_kind: Option<&str>,
+        ctx: &Arc<dyn InvokeRequest>,
+        sub_kind: Option<&str>,
         container: &str,
+        parent: Option<&str>,
     ) -> Result<Vec<crate::symbio_core::entities::EntitySummary>, PluginError> {
+        if sub_kind == Some(super::workdir::TREE_KIND) {
+            // tree 场景：会话工作目录的下一层节点
+            let store = self.get_store().await?;
+            let session = store.load_session(container).await?;
+            let Some(workdir) = super::workdir::workdir_of(&session) else {
+                return Ok(Vec::new());
+            };
+            return super::workdir::list_children(ctx, &workdir, parent).await;
+        }
+
+        // 子会话清单（sub_kind 为 None 时容器页做全量分箱，目录树为懒加载
+        // 不参与全量下发）
+        if sub_kind.is_some_and(|k| k != crate::symbio_core::entities::ENTITY_SESSION) {
+            return Ok(Vec::new());
+        }
         let store = self.get_store().await?;
         let sessions = store.list_sub_sessions(container).await?;
         let active = self.active_mgr.sessions.read().await;
@@ -455,7 +472,8 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
             .collect())
     }
 
-    /// 读取单个子会话摘要（id = 子会话 id）
+    /// 读取单个子实体详情：先按子会话解析（归属校验），否则按目录树节点
+    /// （文件内容置于 extra.content，只读）
     async fn get_container_item(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
@@ -463,19 +481,26 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
         container: &str,
     ) -> Result<crate::symbio_core::entities::EntitySummary, PluginError> {
         let store = self.get_store().await?;
+
+        // 1) 子会话分支：load_session 命中且归属当前容器
         let session = store.load_session(id).await?;
-        // 防呆：归属校验（顶层会话 / 不存在的 id 一律拒绝）
-        if session.parent_session_id() != Some(container) {
-            return Err(PluginError::NotFound(format!(
-                "会话 {container} 下不存在子会话 {id}"
-            )));
+        if session.id == id && session.parent_session_id() == Some(container) {
+            let active = self.active_mgr.sessions.read().await;
+            let is_working = active
+                .get(&session.id)
+                .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+                .unwrap_or(false);
+            return Ok(summarize_session(&session, is_working));
         }
-        let active = self.active_mgr.sessions.read().await;
-        let is_working = active
-            .get(&session.id)
-            .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
-            .unwrap_or(false);
-        Ok(summarize_session(&session, is_working))
+
+        // 2) 目录树节点分支（父会话无工作目录时无此场景）
+        let container_session = store.load_session(container).await?;
+        let Some(workdir) = super::workdir::workdir_of(&container_session) else {
+            return Err(PluginError::NotFound(format!(
+                "会话 {container} 下不存在子实体 {id}"
+            )));
+        };
+        super::workdir::read_node(&workdir, id).await
     }
 
     /// 删除子会话（先 abort 活跃任务再删，与顶层 delete_item 同语义）

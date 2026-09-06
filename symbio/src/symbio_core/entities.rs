@@ -193,11 +193,14 @@ pub trait EntityProvider: Send + Sync {
     ///
     /// `sub_kind` 为 `None` 时返回全部子类型（条目 `kind` 字段供前端分类，
     /// 供容器页做类别计数）；`container` 为容器条目 id（如 agent bundle id）。
+    /// `parent` 仅树视图子类别（`view = "tree"`）使用：返回该父路径的下一层
+    /// 子节点（懒加载，`None` = 根层）；列表视图子类别忽略此参数。
     async fn list_container_items(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
         _sub_kind: Option<&str>,
         _container: &str,
+        _parent: Option<&str>,
     ) -> Result<Vec<EntitySummary>, PluginError> {
         Err(PluginError::NotImplemented)
     }
@@ -246,12 +249,20 @@ pub struct ContainerKindSpec {
     pub label: &'static str,
     /// 语义说明（前端新建/编辑表单提示文本）
     pub description: &'static str,
-    /// 新建路径模板（`<name>` 占位符），如 `prompts/<name>.md`
+    /// 新建路径模板（`<name>` 占位符），如 `prompts/<name>.md`；空 = 不可用户创建
     pub path_hint: &'static str,
     /// 新建内容模板
     pub default_content: &'static str,
     pub capabilities: &'static EntityCapabilities,
+    /// 中栏展示形态：`"list"`（缺省）= 列表；`"tree"` = 树视图（懒加载，
+    /// 条目携带 parent 层级）
+    pub view: &'static str,
 }
+
+/// `view` 字段的"列表"取值（ContainerKindSpec 显式声明，下发时缺省省略）
+pub const VIEW_LIST: &str = "list";
+/// `view` 字段的"树视图"取值
+pub const VIEW_TREE: &str = "tree";
 
 /// agent bundle 内部托管的三类文件级子实体（布局与 OAB 装配规则严格一致，
 /// 模板中的 frontmatter priority 约定与装配缺省值对应）。
@@ -263,6 +274,7 @@ pub static AGENT_CONTAINER_KINDS: &[ContainerKindSpec] = &[
         path_hint: "prompts/<name>.md",
         default_content: "---\npriority: 10\n---\n\n在此撰写常驻系统提示词（人格 / 全局规则 / 工作流）…",
         capabilities: &EntityCapabilities::BUNDLE_FILE,
+        view: VIEW_LIST,
     },
     ContainerKindSpec {
         kind: "skill",
@@ -271,6 +283,7 @@ pub static AGENT_CONTAINER_KINDS: &[ContainerKindSpec] = &[
         path_hint: "skills/<name>/SKILL.md",
         default_content: "---\npriority: 50\n---\n\n# 技能名称\n\n描述该技能的适用场景、输入输出与执行步骤…",
         capabilities: &EntityCapabilities::BUNDLE_FILE,
+        view: VIEW_LIST,
     },
     ContainerKindSpec {
         kind: "mcp",
@@ -279,23 +292,42 @@ pub static AGENT_CONTAINER_KINDS: &[ContainerKindSpec] = &[
         path_hint: "mcps/<name>.yaml",
         default_content: "# MCP server 配置（YAML，原样透传给宿主 MCP 客户端）\ncommand: \"\"\nargs: []\nenv: {}",
         capabilities: &EntityCapabilities::BUNDLE_FILE,
+        view: VIEW_LIST,
     },
 ];
 
 /// session 的容器子实体声明：条目（会话）内部托管**子会话**。
 ///
-/// 子会话由父会话派生（系统管理，非用户新建）：`path_hint` 为空 = 不可
-/// 用户创建（前端据此隐藏新建入口），仅支持查看与删除；存储由文件后端
-/// 路由到父会话目录的 `sessions/` 子目录（归属声明
-/// `metadata.parent_session_id`），删除父会话级联删除子会话。
-pub static SESSION_CONTAINER_KINDS: &[ContainerKindSpec] = &[ContainerKindSpec {
-    kind: ENTITY_SESSION,
-    label: "子会话",
-    description: "由该会话派生的子会话；随父会话级联删除。",
-    path_hint: "",
-    default_content: "",
-    capabilities: &EntityCapabilities::SUB_SESSION,
-}];
+/// 会话（session）的容器子实体声明：条目（会话）内部托管两类子实体。
+///
+/// - **子会话**（tree 机制之外的列表视图）：由父会话派生（系统管理，
+///   非用户新建），`path_hint` 为空 = 不可用户创建，仅支持查看与删除；
+///   存储由文件后端路由到父会话目录的 `sessions/` 子目录（归属声明
+///   `metadata.parent_session_id`），删除父会话级联删除子会话。
+/// - **目录树**（tree 机制的一个场景实现）：会话工作目录的层级浏览，
+///   `view = "tree"` + 懒加载（`parent` 请求参数逐层下发），只读。
+///   目录树只是 tree 机制下的一个 provider 场景——机制本身只定义
+///   「层级 + 懒加载 + 选择」，不含任何文件系统语义。
+pub static SESSION_CONTAINER_KINDS: &[ContainerKindSpec] = &[
+    ContainerKindSpec {
+        kind: ENTITY_SESSION,
+        label: "子会话",
+        description: "由该会话派生的子会话；随父会话级联删除。",
+        path_hint: "",
+        default_content: "",
+        capabilities: &EntityCapabilities::SUB_SESSION,
+        view: VIEW_LIST,
+    },
+    ContainerKindSpec {
+        kind: "dir",
+        label: "目录树",
+        description: "会话工作目录的层级浏览（只读）。",
+        path_hint: "",
+        default_content: "",
+        capabilities: &EntityCapabilities::TREE_READONLY,
+        view: VIEW_TREE,
+    },
+];
 
 /// 某 provider kind 的容器子实体声明（空 = 条目不是容器）。
 pub fn container_kinds_for(kind: &str) -> &'static [ContainerKindSpec] {
@@ -465,6 +497,7 @@ pub fn providers_response_with_overrides(order_override: &HashMap<String, i32>) 
                     path_hint: Some(k.path_hint.to_string()),
                     default_content: Some(k.default_content.to_string()),
                     capabilities: *k.capabilities,
+                    view: (k.view == VIEW_TREE).then(|| VIEW_TREE.to_string()),
                 })
                 .collect(),
         })
@@ -524,8 +557,9 @@ async fn dispatch_list<P: EntityProvider + ?Sized>(
         .unwrap_or_default();
     if let Some(container) = non_empty(&req.container) {
         let sub_kind = req.sub_kind.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let parent = req.parent.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let mut items = provider
-            .list_container_items(ctx, sub_kind, container)
+            .list_container_items(ctx, sub_kind, container, parent)
             .await?;
         fill_provider(provider, &mut items);
         let kind = sub_kind.unwrap_or(provider.kind()).to_string();
@@ -1125,6 +1159,7 @@ mod tests {
             _ctx: &Arc<dyn InvokeRequest>,
             sub_kind: Option<&str>,
             container: &str,
+            _parent: Option<&str>,
         ) -> Result<Vec<EntitySummary>, PluginError> {
             Ok(["prompt", "skill"]
                 .into_iter()

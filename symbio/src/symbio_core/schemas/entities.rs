@@ -171,6 +171,18 @@ impl EntityCapabilities {
         test_connection: false,
         read_only: false,
     };
+
+    /// 树视图（只读浏览型）：tree 机制下的只读场景能力——不可创建/删除/
+    /// 写回，仅浏览与选中查看（数据由 provider 场景层定义，机制不关心
+    /// 其语义，如会话的工作目录文件树）。
+    pub const TREE_READONLY: Self = Self {
+        zip_upload: false,
+        independent_form: false,
+        realtime_status: false,
+        mutable: false,
+        test_connection: false,
+        read_only: true,
+    };
 }
 
 /// 默认能力表：`kind -> capabilities`
@@ -217,6 +229,10 @@ pub struct ContainerKindInfo {
     pub default_content: Option<String>,
     /// 子实体能力开关（容器页据此驱动 UI）
     pub capabilities: EntityCapabilities,
+    /// 中栏展示形态（缺省 = 列表）：`tree` = 树视图（条目携带 parent 层级、
+    /// 经 `parent` 请求参数懒加载，见 [`EntitiesListRequest`]）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
 }
 
 /// 实体类型（provider）注册信息 —— 宿主级单一真相源
@@ -290,6 +306,14 @@ pub struct EntitySummary {
     /// 状态补充说明（如连接失败原因、等待审批）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_detail: Option<String>,
+    /// 父节点 id（树视图专用：`view = "tree"` 的子类别条目以容器内相对路径
+    /// 为 id、父路径为 parent 构成层级；根层条目缺省。列表视图不用此字段）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// 可展开提示（树视图专用：true = 该节点可懒加载下一层；缺省按可展开
+    /// 处理，展开请求返回空则收敛为叶子。列表视图不用此字段）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expandable: Option<bool>,
     /// 类型特有扩展字段
     #[serde(flatten)]
     pub extra: serde_json::Value,
@@ -307,6 +331,8 @@ impl EntitySummary {
             updated_at: None,
             status: "active".to_string(),
             status_detail: None,
+            parent: None,
+            expandable: None,
             extra: serde_json::Value::Object(Default::default()),
         }
     }
@@ -332,6 +358,8 @@ pub struct EntitiesListResponse {
 ///
 /// 不带 `container`：列出 provider 顶层实体（现有语义，向后兼容）；
 /// 带 `container`：列出容器条目内部的子实体（如某 agent bundle 的 prompts/skills/mcps）。
+/// 树视图子类别（`view = "tree"`）带 `parent`：返回该父路径的下一层子节点
+/// （懒加载，`parent` 缺省 = 根层）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EntitiesListRequest {
     /// 容器条目 id（如 agent bundle id）
@@ -340,6 +368,9 @@ pub struct EntitiesListRequest {
     /// 子实体类型过滤（缺省返回全部子类型，条目自带 kind 供前端分类）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sub_kind: Option<String>,
+    /// 树视图父路径（容器内相对路径；缺省 = 根层；仅 `view = "tree"` 子类别使用）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 /// `entities/upload` 请求

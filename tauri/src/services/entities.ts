@@ -73,12 +73,13 @@ function entitiesOp<T>(type: string, op: string, payload?: unknown): Promise<T> 
  */
 export async function listEntities(
   type: string,
-  opts?: { container?: string; subKind?: string }
+  opts?: { container?: string; subKind?: string; parent?: string }
 ): Promise<EntitiesListResponse> {
   try {
     const resp = await entitiesOp<EntitiesListResponse>(type, 'list', {
       container: opts?.container || undefined,
       sub_kind: opts?.subKind || undefined,
+      parent: opts?.parent || undefined,
     })
     return resp ?? { kind: type, capabilities: UNKNOWN_CAPABILITIES, items: [] }
   } catch (err) {

@@ -26,7 +26,7 @@
       :title="title"
       :list-width="isContainer ? 240 : 260"
       hide-default-new
-      :has-list-content="listCount > 0"
+      :has-list-content="listCount > 0 || isTreeView"
       :loading="loading"
       @rail-select="switchKind"
       @rail-back="goBack"
@@ -74,6 +74,16 @@
             @click="select(`${item.kind}:${item.id}`)"
           />
         </div>
+        <!-- container：树视图子类别（view = "tree"）= EntityTree 懒加载树；
+             列表子类别 = EntityCard 列表。两种形态均由后端声明驱动。 -->
+        <EntityTree
+          v-else-if="isTreeView"
+          :container-kind="containerKind ?? ''"
+          :container-id="containerIdRef"
+          :sub-kind="activeKind"
+          :selected-id="selectedEntry?.id ?? null"
+          @select="selectEntry"
+        />
         <div v-else class="entry-list">
           <EntityCard
             v-for="e in kindEntries"
@@ -256,7 +266,7 @@
             <p class="field-hint">{{ activeKindMeta?.description ?? '' }}</p>
             <p v-if="editorError" class="editor-error">{{ editorError }}</p>
             <div class="editor-actions">
-              <button class="action-btn" :disabled="loadingContent || saving || !dirty" @click="saveEntry">
+              <button class="action-btn" :disabled="loadingContent || saving || !dirty || !canWriteEntry" @click="saveEntry">
                 {{ saving ? '保存中…' : '保存' }}
               </button>
               <button class="action-btn secondary" :disabled="saving" @click="reloadSelected">还原</button>
@@ -354,6 +364,7 @@ import EntityCard from '@/components/common/EntityCard.vue'
 import Toast from '@/components/common/Toast.vue'
 import EntityDetailPanel from '@/components/entities/EntityDetailPanel.vue'
 import DetailForm from '@/components/entities/DetailForm.vue'
+import EntityTree from '@/components/entities/EntityTree.vue'
 import { useWorkbenchView } from '@/composables/useWorkbenchView'
 import { useEntityProviders } from '@/composables/useEntityProviders'
 import { getEntityIconFor } from '@/registry/entityTypes'
@@ -381,6 +392,7 @@ const {
   isMulti,
   isCompact,
   activeKindMeta,
+  activeKind,
   switchKind,
   kindEntries,
   items,
@@ -445,6 +457,19 @@ const {
 
 /** 列表计数（has-list-content 判定：container 看当前类别，entity 看总数） */
 const listCount = computed(() => (isContainer ? kindEntries.value.length : totalCount.value))
+
+// ==================== 中栏结构形态（后端声明驱动） ====================
+// 列表 / 树是中栏的两种结构机制（ContainerKindInfo.view，缺省 list）；
+// 树视图组件自管懒加载，不使用 workbench 类别分箱数据。
+
+/** 当前子类别是否为树视图（isContainer 恒为布尔，页面实例内不变） */
+const isTreeView = computed(() => isContainer && activeKindMeta.value?.view === 'tree')
+
+/** 当前子类别是否可写（tree 只读场景据此禁用写回） */
+const canWriteEntry = computed(() => {
+  const caps = activeKindMeta.value?.capabilities
+  return Boolean(caps?.mutable && !caps?.read_only)
+})
 
 /** 返回容器条目所在的顶层实体列表页 */
 function goBack() {

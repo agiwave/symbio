@@ -75,6 +75,8 @@ export interface ContainerKindInfo {
   default_content?: string
   /** 子实体能力开关 */
   capabilities: EntityCapabilities
+  /** 中栏展示形态（缺省 = 列表）：'tree' = 树视图（parent 层级 + parent 参数懒加载） */
+  view?: 'list' | 'tree'
 }
 
 /** 统一实体概要（列表项） */
@@ -89,6 +91,10 @@ export interface EntitySummary {
   updated_at?: number
   status: string
   status_detail?: string
+  /** 树视图：父节点 id（容器内相对路径；根层缺省） */
+  parent?: string
+  /** 树视图：可展开提示（false = 叶子；缺省按可展开处理，展开为空则收敛） */
+  expandable?: boolean
   // 类型特有扩展字段（flatten）
   [extra: string]: unknown
 }

@@ -129,6 +129,7 @@ impl EntityProvider for AgentPlugin {
         ctx: &Arc<dyn InvokeRequest>,
         sub_kind: Option<&str>,
         container: &str,
+        _parent: Option<&str>,
     ) -> Result<Vec<EntitySummary>, PluginError> {
         let store = Self::store_of(ctx);
         let entries = store

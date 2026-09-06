@@ -71,17 +71,30 @@
 | `upload` | zip / manifest 创建 | 写子实体文件；`name` 为容器内相对路径，内容取 `manifest.content` |
 | `delete` | 删除实体（走 `delete_item` 钩子） | 删子实体文件；`id` 为容器内相对路径 |
 
-`ContainerKindInfo { kind, label, description?, path_hint?, default_content?, capabilities }`
+`ContainerKindInfo { kind, label, description?, path_hint?, default_content?, capabilities, view? }`
 逐子类别下发：标签、语义说明、**新建路径模板**（`<name>` 占位符）、
-**新建内容模板**、能力开关。前端新建表单完全由此驱动。
+**新建内容模板**、能力开关、**中栏结构形态**。前端新建表单完全由此驱动。
 
 约束：
 
 - **`path_hint` 为空 = 系统管理型子类别**：不可由用户创建（前端隐藏新建
   入口），仅支持查看/删除——子实体由系统派生（如会话的子会话）。
-- **子实体详情分流**：`entities/get` 响应带 `extra.content`（文件型）→
-  标准文本编辑器；不带（系统管理型）→ 只读详情面板（无编辑语义）。
-- **容器子实体的路径合法性由**后端**校验（路径白名单，拒绝穿越），
+- **中栏结构形态（list / tree，机制级）**：`view` 缺省 = 列表；
+  `tree` = 树视图。二者只是中栏的两种**结构机制**，不含任何场景语义：
+  - 树节点 = 统一 `EntitySummary`：`id` = 容器内相对路径、`parent` =
+    父路径（根层缺省）、`expandable` = 可展开提示；
+  - **懒加载**：树子类别经 `entities/list` 的 `parent` 请求参数逐层下发
+    （`parent` 缺省 = 根层），数据源仍是 provider 的 container 钩子
+    （`list_container_items` 的 `parent` 参数）；
+  - 通用渲染件 `EntityTree` / `EntityTreeNode`（机制内置，唯一实现）：
+    节点图标经 entity 注册表按 kind 映射（provider 场景注册），选择上抛
+    后沿用容器页既有详情流（content 分流 / 能力门控）；
+  - 文件系统目录树只是 tree 机制下的**一个场景实现**（如会话的工作目录
+    浏览，`kind = "dir"`），机制本身不感知文件语义。
+- **子实体详情分流**：`entities/get` 响应带 `extra.content`（内容型）→
+  标准文本编辑器（写回按子类别能力门控：`mutable && !read_only`）；
+  不带 → 只读详情面板。
+- 容器子实体的路径合法性由**后端**校验（路径白名单，拒绝穿越），
   前端模板仅用于展示。
 - 容器列表响应的 `capabilities` 取该子类别的声明值；响应回显 `container`。
 
@@ -122,7 +135,9 @@
 | 应用外壳 | `views/MainLayout.vue` | 纯壳：Workbench（rail 来自 `useNavRailItems`）+ RouterView + 应用级服务，不持有实体逻辑 |
 | 详情 editor 注册表 | `registry/entityTypes.ts` | 仅为**复杂详情**注册 kind 级 / 项级 editor 组件（§3.2 解析链第一优先） |
 | 通用详情渲染器 | `components/entities/DetailForm.vue` | 定义驱动的详情/新建表单唯一实现（§3.2） |
-| 图标注册表 | `registry/entityTypes.ts` | kind → SVG 图标（含容器子类别） |
+| 树视图渲染件 | `components/entities/EntityTree.vue` | 中栏 tree 形态唯一实现：层级 + 懒加载 + 选择（§2.3），不含场景语义 |
+| 动作渲染件 | `components/entities/EntityActions.vue` | 机制/定义动作统一按钮渲染（图标优先，§2.3 统一动作区） |
+| 图标注册表 | `registry/entityTypes.ts` | kind → SVG 图标（含容器子类别与树节点）+ 动作图标映射 |
 
 ### 3.1 WorkbenchView 的两种模式（同一组件、同一组合式）
 
@@ -133,9 +148,10 @@
 |---|---|---|
 | 路由 | `/entities/:types?`、`/settings` | `/container/:kind/:id/entities`、`/agent/:agentId/entities` |
 | 侧边栏 | 由 MainLayout 应用外壳承担 | 自带 = `ProviderInfo.container_kinds`（子类别 + 计数 + 返回键） |
-| 类别来源 | providers 注册表解析 `:types`（`resolveActiveTypes`） | `container_kinds`（标签/路径模板/内容模板/能力后端下发） |
+| 类别来源 | providers 注册表解析 `:types`（`resolveActiveTypes`） | `container_kinds`（标签/路径模板/内容模板/能力/结构形态后端下发） |
 | 列表 | 各类别 `entities/list` 并行，混合平排 | `entities/list`（payload.container 单请求全量，核心按 kind 分箱） |
-| 详情 | 编辑器解析链（§3.2） | 标准文本编辑器（`entities/get` extra.content + `entities/put` 写回） |
+| 中栏形态 | 列表（tree 形态按 provider 声明同形扩展） | **列表或树**（子类别 `view` 声明；tree = `EntityTree` 懒加载） |
+| 详情 | 编辑器解析链（§3.2） | content 分流：文本编辑器（能力门控写回）/ 只读面板 |
 | 新建 | 类型选择 → 解析链（§3.2）/ zip / JSON（能力驱动分流） | 名称 + 内容（路径模板 `path_hint` + 内容模板 `default_content`） |
 
 新建分流细则：当某 kind 既有详情定义又具备 `zip_upload` 能力时，
@@ -291,16 +307,18 @@ about（纯信息展示）亦保留。
 （§2.3 统一动作区），与删除同排渲染——原 agent:bundle 项级
 editor（Agent.vue）已删除；新建态无定义，保留 zip 上传流程。
 
-### 6.6 会话（session）——子会话容器语义
+### 6.6 会话（session）——子会话容器语义 + 目录树场景
 
 - **存储**：子会话不是顶层平级实体，而是存放在父会话目录内
   `<父>/sessions/<子>/`；归属由 `metadata.parent_session_id` 声明，
   文件后端据此路由（save 路由 / load·delete 回退查找，调用方无感知）；
   `list_sessions` 只列顶层，删除父会话级联删除子会话。
-- **容器声明**：`SESSION_CONTAINER_KINDS` 声明「子会话」子类别，
-  `path_hint` 为空 = 系统管理型（不可用户创建，仅查看/删除）；
-  provider 实现 list/get/delete 容器钩子，经统一协议
-  `entities/*` + `container` 字段访问。
-- **前端**：会话详情（聊天工作区）经机制动作「管理内部实体（子会话）」
-  push 进 `/container/session/:id/entities`；删除同为机制动作（已迁出
-  编辑器）；子会话详情 = 只读面板（无 extra.content，§2.3 分流规则）。
+- **容器声明**：`SESSION_CONTAINER_KINDS` 声明两个子类别——
+  「子会话」（列表视图，系统管理型，仅查看/删除）与「目录树」
+  （tree 机制的场景实现：会话工作目录的层级浏览，`view = "tree"` +
+  懒加载 + 只读）。provider 按 `sub_kind` 分流 list/get 容器钩子，
+  经统一协议 `entities/*` + `container` 字段访问。
+- **前端**：会话详情（聊天工作区）经机制动作「管理内部实体」push 进
+  `/container/session/:id/entities`，侧边栏 = 两个子类别（后端声明）；
+  目录树子类别中栏渲染 `EntityTree`（懒加载），树节点（文件）点击后
+  内容经既有 content 分流查看（只读能力门控）；删除同为机制动作。

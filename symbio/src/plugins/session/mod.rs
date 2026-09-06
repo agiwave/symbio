@@ -14,3 +14,4 @@ pub(crate) mod prompt;
 pub(crate) mod plugin;
 mod store;
 pub(crate) mod types;
+mod workdir;
