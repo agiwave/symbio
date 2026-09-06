@@ -238,6 +238,7 @@ impl WorkdirWatchManager {
             return;
         }
 
+        let coalesce = Arc::new(std::sync::Mutex::new(CoalesceState::default()));
         let containers = self.containers.clone();
         let wd = workdir.to_string();
         let watcher = Arc::new(FsWatcher::new_with_callback(move |abs_path| {
@@ -245,15 +246,51 @@ impl WorkdirWatchManager {
                 .strip_prefix(&wd)
                 .map(|p| p.to_string_lossy().replace('\\', "/"))
                 .unwrap_or_default();
-            if let Some(list) = containers.get(&wd) {
-                for container in list.iter() {
-                    EventBus::try_publish(
-                        crate::symbio_core::entities::ENTITY_SESSION,
-                        Some(container),
-                        json!({ "type": "data", "workdir": wd, "path": rel }),
-                    );
-                }
+
+            // 易变目录过滤：构建产物 / 依赖目录的事件是噪声洪流源，
+            // 逐事件丢弃（场景知识：代码工作目录的约定忽略集）
+            if rel
+                .split('/')
+                .any(|seg| VOLATILE_DIRS.contains(&seg))
+            {
+                return;
             }
+
+            // 事件合并（尾沿去抖）：notify 对一次构建/工具活动会产生成百上千
+            // 事件，逐事件发布会打满事件总线长连接、拖垮前端。每个 workdir
+            // 至多每 COALESCE_WINDOW 发布一条 `data` 事件（首个事件即调度，
+            // 窗口内的后续事件合并进去）。
+            let should_flush = {
+                let mut st = coalesce.lock().unwrap();
+                if st.scheduled {
+                    st.dirty = true;
+                    false
+                } else {
+                    st.scheduled = true;
+                    true
+                }
+            };
+            if !should_flush {
+                return;
+            }
+
+            let st = coalesce.clone();
+            let t_containers = containers.clone();
+            let t_wd = wd.clone();
+            let t_rel = rel.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(COALESCE_WINDOW).await;
+                let mut g = st.lock().unwrap();
+                g.scheduled = false;
+                let dirty = g.dirty;
+                g.dirty = false;
+                drop(g);
+                if !dirty {
+                    return; // 窗口内无后续变化，且首个事件已由调度方发布
+                }
+                publish_data_event(&t_containers, &t_wd, &t_rel);
+            });
+            publish_data_event(&containers, &wd, &rel);
         }));
 
         let w = watcher.clone();
@@ -286,6 +323,45 @@ impl WorkdirWatchManager {
                 crate::plugin_info!("session", "workdir watch stopped: {workdir}");
                 drop(watcher);
             }
+        }
+    }
+}
+
+/// 事件合并状态（每个 workdir 一份；回调线程与合并任务共享）
+#[derive(Default)]
+struct CoalesceState {
+    /// 是否已有合并任务在途（在途期间事件只置 dirty）
+    scheduled: bool,
+    /// 合并窗口内又有变化 → 尾沿再发一条
+    dirty: bool,
+}
+
+/// 合并窗口：至多每秒向总线发布一条 `data` 事件
+const COALESCE_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// 易变目录（构建产物 / 依赖 / 版本库内部）：其变化不作为工作目录数据变更下发
+const VOLATILE_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".next",
+    ".cache",
+];
+
+/// 向所有关注该 workdir 的容器发布粗粒度 `data` 事件（§2.4）
+fn publish_data_event(containers: &DashMap<String, Vec<String>>, workdir: &str, rel: &str) {
+    if let Some(list) = containers.get(workdir) {
+        for container in list.iter() {
+            EventBus::try_publish(
+                crate::symbio_core::entities::ENTITY_SESSION,
+                Some(container),
+                json!({ "type": "data", "workdir": workdir, "path": rel }),
+            );
         }
     }
 }

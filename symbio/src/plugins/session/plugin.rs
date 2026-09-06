@@ -477,6 +477,25 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
             .collect())
     }
 
+    /// 顶层实体详情（非 EntityStore 型 provider 重写）：会话摘要
+    /// （容器实体页的条目名展示依赖此钩子）
+    async fn get_item(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<crate::symbio_core::entities::EntitySummary, PluginError> {
+        let session = self.get_store().await?.load_session(id).await?;
+        if session.id != id {
+            return Err(PluginError::NotFound(format!("会话不存在: {id}")));
+        }
+        let active = self.active_mgr.sessions.read().await;
+        let is_working = active
+            .get(id)
+            .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+            .unwrap_or(false);
+        Ok(summarize_session(&session, is_working))
+    }
+
     /// 读取单个子实体详情：先按子会话解析（归属校验），否则按目录树节点
     /// （文件内容置于 extra.content；接入实时监听）
     async fn get_container_item(

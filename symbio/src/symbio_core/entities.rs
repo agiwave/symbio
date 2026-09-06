@@ -119,6 +119,19 @@ pub trait EntityProvider: Send + Sync {
         Ok(())
     }
 
+    /// 读取单个实体详情（顶层 `entities/get`；容器语义走 get_container_item）。
+    ///
+    /// 默认实现走 EntityStore（`category()` + `manifest_file()` 提供
+    /// 分类与 manifest 文件）；非实体存储型 provider（如 session 走
+    /// SessionStore）重写本方法给出自己的详情读取。
+    async fn get_item(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _id: &str,
+    ) -> Result<EntitySummary, PluginError> {
+        Err(PluginError::NotImplemented)
+    }
+
     /// 删除单个实体（磁盘/存储删除 + 由 [`dispatch_delete`] 回调 [`Self::on_deleted`]）。
     ///
     /// 默认实现：EntityStore 目录删除（`category()` 提供分类，磁盘已无目录时
@@ -627,18 +640,28 @@ async fn dispatch_get<P: EntityProvider + ?Sized>(
         fill_provider(provider, std::slice::from_mut(&mut item));
         return Ok(PluginPayload::new(&item));
     }
-    let (Some(category), Some(manifest)) = (provider.category(), provider.manifest_file()) else {
-        return Err(PluginError::NotImplemented);
-    };
-    let store = storage_service(ctx)?;
-    let es = store.entity_store();
-    let content = es
-        .read_entity(category, &req.id, manifest)
-        .await
-        .map_err(|e| PluginError::NotFound(format!("未找到实体 {}（读取失败: {e}）", req.id)))?;
-    let mut item = provider.summarize(ctx, &req.id, Some(&content)).await;
-    fill_provider(provider, std::slice::from_mut(&mut item));
-    Ok(PluginPayload::new(&item))
+    // 实体存储型 provider：走 EntityStore 读取；否则回退 provider 的
+    // 顶级 get 钩子（如 session 走 SessionStore）。
+    match (provider.category(), provider.manifest_file()) {
+        (Some(category), Some(manifest)) => {
+            let store = storage_service(ctx)?;
+            let es = store.entity_store();
+            let content = es
+                .read_entity(category, &req.id, manifest)
+                .await
+                .map_err(|e| {
+                    PluginError::NotFound(format!("未找到实体 {}（读取失败: {e}）", req.id))
+                })?;
+            let mut item = provider.summarize(ctx, &req.id, Some(&content)).await;
+            fill_provider(provider, std::slice::from_mut(&mut item));
+            Ok(PluginPayload::new(&item))
+        }
+        _ => {
+            let mut item = provider.get_item(ctx, &req.id).await?;
+            fill_provider(provider, std::slice::from_mut(&mut item));
+            Ok(PluginPayload::new(&item))
+        }
+    }
 }
 
 /// 统一回填 provider 显示名（summary 未自带时填 `provider_name()`，插件零改动）

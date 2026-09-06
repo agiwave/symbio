@@ -257,13 +257,21 @@
             <code class="editor-path">{{ selectedEntry.id }}</code>
           </div>
           <div class="editor-form">
-            <CodeEditor
-              :model-value="content"
-              :file-path="selectedEntry.id"
-              :readonly="loadingContent || !canWriteEntry"
-              @update:model-value="content = $event"
-              @request-save="saveEntry"
-            />
+            <div class="editor-code-wrap">
+              <CodeEditor
+                :model-value="content"
+                :file-path="selectedEntry.id"
+                :readonly="loadingContent || !canWriteEntry"
+                @update:model-value="content = $event"
+                @selection-change="fileSelection = $event"
+                @request-save="saveEntry"
+              />
+              <EditorAiSend
+                :file-path="selectedEntry.id"
+                :content="content"
+                :selection="fileSelection"
+              />
+            </div>
             <p class="field-hint">{{ activeKindMeta?.description ?? '' }}</p>
             <p v-if="editorError" class="editor-error">{{ editorError }}</p>
             <div class="editor-actions">
@@ -363,6 +371,7 @@ import { useRouter } from 'vue-router'
 import Workbench from '@/components/common/Workbench.vue'
 import EntityCard from '@/components/common/EntityCard.vue'
 import CodeEditor from '@/components/CodeEditor.vue'
+import EditorAiSend from '@/components/editor/EditorAiSend.vue'
 import Toast from '@/components/common/Toast.vue'
 import EntityDetailPanel from '@/components/entities/EntityDetailPanel.vue'
 import DetailForm from '@/components/entities/DetailForm.vue'
@@ -484,6 +493,9 @@ function onRefresh() {
   void loadAll()
   if (isTreeView.value) entityTreeRef.value?.refresh()
 }
+
+/** 编辑器选区 → AI（私有桥接协议，EditorAiSend 承载；有选区时浮出发送按钮） */
+const fileSelection = ref<{ text: string; startLine: number; endLine: number } | null>(null)
 
 /** 机制导航动作（DetailForm `open-container`）：路由推入容器实体页（整页替换） */
 function openContainerEntities(kind: string) {
@@ -971,6 +983,17 @@ watch(containerIdRef, () => {
   gap: 0.4rem;
   min-height: 0;
   overflow-y: auto;
+}
+/* 代码编辑器容器：相对定位承载 EditorAiSend 浮层 */
+.editor-code-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 18rem;
+  display: flex;
+}
+.editor-code-wrap :deep(.code-editor) {
+  flex: 1;
+  height: 100%;
 }
 .field-hint {
   margin: 0;

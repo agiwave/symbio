@@ -37,6 +37,7 @@ import {
 } from '@/services/entities'
 import { useWorkbench, type WorkbenchKindState } from '@/composables/useWorkbench'
 import { subscribe } from '@/services/eventBus'
+import { logger } from '@/utils/logger'
 import {
   loadProviders,
   resolveActiveTypes,
@@ -485,9 +486,14 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
       () => containerId?.(),
       async (id) => {
         if (!id) return
-        await loadProviders()
-        const item = await getEntity(containerKind, id)
-        containerName.value = item?.name || id
+        try {
+          await loadProviders()
+          const item = await getEntity(containerKind, id)
+          containerName.value = item?.name || id
+        } catch (err) {
+          logger.warn('useWorkbenchView', '容器条目名获取失败:', err)
+          containerName.value = id
+        }
       },
       { immediate: true }
     )
