@@ -11,11 +11,14 @@
 //! 路径白名单同风格）。
 
 use crate::symbio_core::entities::EntitySummary;
+use crate::symbio_core::event_bus::EventBus;
 use crate::symbio_core::{InvokeRequest, PluginError};
+use dashmap::DashMap;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::fs_watcher::FsWatcher;
 use super::types::Session;
 
 /// 子类别的统一 kind（provider 场景自定；机制层仅透传）
@@ -102,6 +105,11 @@ pub async fn list_children(
         it.description = None;
         if let serde_json::Value::Object(ref mut m) = it.extra {
             let _ = m.insert("is_dir".to_string(), json!(is_dir));
+            // 项级图标分发键（registry：dir:directory / dir:file）
+            let _ = m.insert(
+                "config_type".to_string(),
+                json!(if is_dir { "directory" } else { "file" }),
+            );
             if !is_dir {
                 let _ = m.insert("size".to_string(), json!(meta.len()));
             }
@@ -119,7 +127,7 @@ pub async fn list_children(
 }
 
 /// 读取单个树节点：目录 → 无内容概要；文件 → 内容置于 `extra.content`
-/// （只读浏览，能力声明 `TREE_READONLY`，机制不提供写回）。
+/// （写回经 entities/put 门控）。
 pub async fn read_node(workdir: &str, rel: &str) -> Result<EntitySummary, PluginError> {
     let (abs, rel_norm) = resolve_under(workdir, rel)?;
     let meta = tokio::fs::metadata(&abs)
@@ -142,6 +150,10 @@ pub async fn read_node(workdir: &str, rel: &str) -> Result<EntitySummary, Plugin
     it.expandable = Some(is_dir);
     if let serde_json::Value::Object(ref mut m) = it.extra {
         let _ = m.insert("is_dir".to_string(), json!(is_dir));
+        let _ = m.insert(
+            "config_type".to_string(),
+            json!(if is_dir { "directory" } else { "file" }),
+        );
         if !is_dir {
             let _ = m.insert("size".to_string(), json!(meta.len()));
             if meta.len() <= MAX_INLINE_READ_BYTES {
@@ -161,6 +173,122 @@ pub async fn read_node(workdir: &str, rel: &str) -> Result<EntitySummary, Plugin
 
 /// 内容内联下发上限（64 KiB）；超限文件只给概要，避免大文件撑爆列表协议
 const MAX_INLINE_READ_BYTES: u64 = 64 * 1024;
+
+/// 写入文件节点（目录树文件编辑的写回；不存在则创建，目标是目录时拒绝）
+pub async fn write_node(workdir: &str, rel: &str, content: &str) -> Result<(), PluginError> {
+    let (abs, _) = resolve_under(workdir, rel)?;
+    if abs.is_dir() {
+        return Err(PluginError::ValidationError(format!(
+            "目标是目录，不能作为文件写入: {rel}"
+        )));
+    }
+    if let Some(parent) = abs.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| PluginError::InternalError(e.to_string()))?;
+    }
+    tokio::fs::write(&abs, content)
+        .await
+        .map_err(|e| PluginError::InternalError(e.to_string()))
+}
+
+/// 删除文件节点（仅文件；目录删除不属于本场景能力）
+pub async fn delete_node(workdir: &str, rel: &str) -> Result<(), PluginError> {
+    let (abs, _) = resolve_under(workdir, rel)?;
+    let meta = tokio::fs::metadata(&abs)
+        .await
+        .map_err(|_| PluginError::NotFound(format!("路径不存在: {rel}")))?;
+    if meta.is_dir() {
+        return Err(PluginError::ValidationError(format!(
+            "仅支持删除文件，目录: {rel}"
+        )));
+    }
+    tokio::fs::remove_file(&abs)
+        .await
+        .map_err(|e| PluginError::InternalError(e.to_string()))
+}
+
+/// 工作目录监听管理器（场景级基础设施）。
+///
+/// 监听生命周期与**前端树视图的挂载期**严格绑定（`entities/watch` /
+/// `entities/unwatch` 操作对）：每个 workdir 至多一个 [`FsWatcher`]，以
+/// 关注它的容器（会话）引用计数维持——不同会话的工作目录各自监听，共享
+/// 工作目录的多个会话共享同一监听，最后一个订阅方释放后监听停止。
+/// 文件变化时向所有关注该 workdir 的容器发布粗粒度 `data` 事件（§2.4，
+/// kind = 会话、sessionId = 容器 id），驱动前端树视图与详情编辑器按
+/// §3.3 防抖重载。机制层只约定「容器数据已变更」语义，不感知文件细节。
+#[derive(Default)]
+pub struct WorkdirWatchManager {
+    /// workdir → 持活的监听器（保持句柄以维持监听）
+    watchers: DashMap<String, Arc<FsWatcher>>,
+    /// workdir → 关注它的容器 id 列表（引用计数）
+    containers: DashMap<String, Vec<String>>,
+}
+
+impl WorkdirWatchManager {
+    /// 确保该 workdir 的监听已启动（幂等；container 记入关注清单）
+    pub fn ensure_watch(&self, workdir: &str, container: &str) {
+        {
+            let mut list = self.containers.entry(workdir.to_string()).or_default();
+            if !list.iter().any(|c| c == container) {
+                list.push(container.to_string());
+            }
+        }
+        if self.watchers.contains_key(workdir) {
+            return;
+        }
+
+        let containers = self.containers.clone();
+        let wd = workdir.to_string();
+        let watcher = Arc::new(FsWatcher::new_with_callback(move |abs_path| {
+            let rel = Path::new(&abs_path)
+                .strip_prefix(&wd)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            if let Some(list) = containers.get(&wd) {
+                for container in list.iter() {
+                    EventBus::try_publish(
+                        crate::symbio_core::entities::ENTITY_SESSION,
+                        Some(container),
+                        json!({ "type": "data", "workdir": wd, "path": rel }),
+                    );
+                }
+            }
+        }));
+
+        let w = watcher.clone();
+        let root = PathBuf::from(workdir);
+        tokio::spawn(async move {
+            if let Err(e) = w.start(root).await {
+                crate::plugin_error!("session", format!("workdir watch error: {e}"));
+            }
+        });
+        self.watchers.insert(workdir.to_string(), watcher);
+    }
+
+    /// 释放某容器对 workdir 的订阅（树视图卸载）；最后一个订阅方释放后
+    /// 监听器随之停止（drop 释放 OS 句柄）
+    pub fn release_watch(&self, workdir: &str, container: &str) {
+        let should_stop = match self.containers.get_mut(workdir) {
+            Some(mut list) => {
+                list.retain(|c| c != container);
+                if list.is_empty() {
+                    self.containers.remove(workdir);
+                    true
+                } else {
+                    false
+                }
+            }
+            None => false,
+        };
+        if should_stop {
+            if let Some((_, watcher)) = self.watchers.remove(workdir) {
+                crate::plugin_info!("session", "workdir watch stopped: {workdir}");
+                drop(watcher);
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

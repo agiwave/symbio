@@ -37,6 +37,8 @@ pub struct SessionPlugin {
     /// 心跳任务运行时状态：会话 id -> 最近一次"有效活动"时间戳（毫秒）。
     /// 调度器据此判断会话是否已空闲足够久。
     pub(crate) heartbeat_state: Arc<RwLock<HashMap<String, i64>>>,
+    /// 工作目录监听管理器（目录树场景的实时数据变更通知）
+    pub(crate) workdir_watches: super::workdir::WorkdirWatchManager,
 }
 
 use super::store::{create_store, SessionStore};
@@ -50,6 +52,7 @@ impl SessionPlugin {
             active_mgr: Arc::new(super::active::ActiveSessionManager::new()),
             store: OnceCell::new(),
             heartbeat_state: Arc::new(RwLock::new(HashMap::new())),
+            workdir_watches: Default::default(),
         }
     }
 
@@ -443,12 +446,14 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
         parent: Option<&str>,
     ) -> Result<Vec<crate::symbio_core::entities::EntitySummary>, PluginError> {
         if sub_kind == Some(super::workdir::TREE_KIND) {
-            // tree 场景：会话工作目录的下一层节点
+            // tree 场景：会话工作目录的下一层节点（接入实时监听，文件变化
+            // 经粗粒度 `data` 事件驱动前端树视图与详情防抖重载）
             let store = self.get_store().await?;
             let session = store.load_session(container).await?;
             let Some(workdir) = super::workdir::workdir_of(&session) else {
                 return Ok(Vec::new());
             };
+            self.workdir_watches.ensure_watch(&workdir, container);
             return super::workdir::list_children(ctx, &workdir, parent).await;
         }
 
@@ -473,7 +478,7 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
     }
 
     /// 读取单个子实体详情：先按子会话解析（归属校验），否则按目录树节点
-    /// （文件内容置于 extra.content，只读）
+    /// （文件内容置于 extra.content；接入实时监听）
     async fn get_container_item(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
@@ -500,10 +505,80 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
                 "会话 {container} 下不存在子实体 {id}"
             )));
         };
+        self.workdir_watches.ensure_watch(&workdir, container);
         super::workdir::read_node(&workdir, id).await
     }
 
-    /// 删除子会话（先 abort 活跃任务再删，与顶层 delete_item 同语义）
+    /// 订阅容器数据变更（目录树场景 → 工作目录监听；子会话无实时语义 no-op）
+    async fn watch_container(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        sub_kind: Option<&str>,
+        container: &str,
+    ) -> Result<(), PluginError> {
+        if sub_kind != Some(super::workdir::TREE_KIND) {
+            return Ok(());
+        }
+        let store = self.get_store().await?;
+        let session = store.load_session(container).await?;
+        if let Some(workdir) = super::workdir::workdir_of(&session) {
+            self.workdir_watches.ensure_watch(&workdir, container);
+        }
+        Ok(())
+    }
+
+    /// 取消订阅（树视图卸载；引用计数归零后监听停止）
+    async fn unwatch_container(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        sub_kind: Option<&str>,
+        container: &str,
+    ) -> Result<(), PluginError> {
+        if sub_kind != Some(super::workdir::TREE_KIND) {
+            return Ok(());
+        }
+        let store = self.get_store().await?;
+        let session = store.load_session(container).await?;
+        if let Some(workdir) = super::workdir::workdir_of(&session) {
+            self.workdir_watches.release_watch(&workdir, container);
+        }
+        Ok(())
+    }
+
+    /// 写入目录树文件节点（目录树文件编辑的写回；子会话不可写）
+    async fn put_container_item(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+        content: &str,
+        container: &str,
+    ) -> Result<crate::symbio_core::entities::EntityUploadResponse, PluginError> {
+        let store = self.get_store().await?;
+
+        // 子会话分支不可写（系统管理型，仅可删除）
+        let session = store.load_session(id).await?;
+        if session.id == id && session.parent_session_id() == Some(container) {
+            return Err(PluginError::ValidationError(
+                "子会话不支持内容写回".to_string(),
+            ));
+        }
+
+        let container_session = store.load_session(container).await?;
+        let Some(workdir) = super::workdir::workdir_of(&container_session) else {
+            return Err(PluginError::NotFound(format!(
+                "会话 {container} 下不存在子实体 {id}"
+            )));
+        };
+        self.workdir_watches.ensure_watch(&workdir, container);
+        super::workdir::write_node(&workdir, id, content).await?;
+        Ok(crate::symbio_core::entities::EntityUploadResponse {
+            kind: super::workdir::TREE_KIND.to_string(),
+            id: id.to_string(),
+            created: false,
+        })
+    }
+
+    /// 删除子实体：子会话 → abort 后删除；目录树节点 → 删文件（目录拒绝）
     async fn delete_container_item(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
@@ -512,14 +587,27 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
     ) -> Result<crate::symbio_core::entities::EntityUploadResponse, PluginError> {
         let store = self.get_store().await?;
         let session = store.load_session(id).await?;
-        if session.parent_session_id() != Some(container) {
-            return Err(PluginError::NotFound(format!(
-                "会话 {container} 下不存在子会话 {id}"
-            )));
+
+        // 1) 子会话分支（先 abort 活跃任务再删，与顶层 delete_item 同语义）
+        if session.id == id && session.parent_session_id() == Some(container) {
+            self.delete_session_internal(id).await?;
+            return Ok(crate::symbio_core::entities::EntityUploadResponse {
+                kind: crate::symbio_core::entities::ENTITY_SESSION.to_string(),
+                id: id.to_string(),
+                created: false,
+            });
         }
-        self.delete_session_internal(id).await?;
+
+        // 2) 目录树文件节点分支
+        let container_session = store.load_session(container).await?;
+        let Some(workdir) = super::workdir::workdir_of(&container_session) else {
+            return Err(PluginError::NotFound(format!(
+                "会话 {container} 下不存在子实体 {id}"
+            )));
+        };
+        super::workdir::delete_node(&workdir, id).await?;
         Ok(crate::symbio_core::entities::EntityUploadResponse {
-            kind: crate::symbio_core::entities::ENTITY_SESSION.to_string(),
+            kind: super::workdir::TREE_KIND.to_string(),
             id: id.to_string(),
             created: false,
         })

@@ -200,11 +200,17 @@ registerEntityIcon(
   )
 )
 // 会话容器「目录树」子类别的树节点图标（provider 场景注册；tree 机制按
-// 节点 kind 查此表，机制本身不含文件语义）
+// 节点 kind + config_type（directory/file）项级分发，机制本身不含文件语义）
 registerEntityIcon(
-  'dir',
+  'dir:directory',
   svgIcon(
     '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'
+  )
+)
+registerEntityIcon(
+  'dir:file',
+  svgIcon(
+    '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>'
   )
 )
 

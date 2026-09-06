@@ -24,7 +24,7 @@
  * - isManagerCreatable / buildMixedItems：纯函数（可单测）。
  */
 
-import { computed, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import {
   deleteEntity,
   getDetailDefinition,
@@ -36,6 +36,7 @@ import {
   uploadEntityZip,
 } from '@/services/entities'
 import { useWorkbench, type WorkbenchKindState } from '@/composables/useWorkbench'
+import { subscribe } from '@/services/eventBus'
 import {
   loadProviders,
   resolveActiveTypes,
@@ -610,6 +611,28 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
       saving.value = false
     }
   }
+
+  // === 实时刷新（§3.3）：容器 `data` 粗粒度事件 → 防抖同步选中子实体内容 ===
+  // 仅在选中内容未被用户编辑时跟随（编辑中不覆盖输入）。
+  let detailReloadTimer: ReturnType<typeof setTimeout> | null = null
+  const unsubDetailData = subscribe(
+    { kind: containerKind, sessionId: containerId?.() ?? null },
+    (busEvent) => {
+      const inner = busEvent.data?.data as { type?: string } | undefined
+      if (inner?.type !== 'data') return
+      if (detailReloadTimer) clearTimeout(detailReloadTimer)
+      detailReloadTimer = setTimeout(() => {
+        detailReloadTimer = null
+        if (selectedEntry.value && entryHasContent.value && !dirty.value) {
+          void selectEntry(selectedEntry.value.id)
+        }
+      }, 800)
+    }
+  )
+  onBeforeUnmount(() => {
+    unsubDetailData()
+    if (detailReloadTimer) clearTimeout(detailReloadTimer)
+  })
 
   // === 新建（路径模板 / 内容模板均来自后端 container_kinds 声明） ===
   const newName = ref('')

@@ -36,7 +36,6 @@
       </template>
     </Workbench>
     <!-- 文件查看器全屏覆盖：覆盖整个 MainLayout -->
-    <FileViewerOverlay />
     <!-- 全局浮动消息浮层（仅渲染一次，状态来自 useToast 单例）-->
     <Toast />
     <!-- 系统目录切换对话框 -->
@@ -56,7 +55,6 @@ import { loadProviders, useNavRailItems } from '@/composables/useEntityProviders
 import { useSessionsStore } from '@/stores/sessions'
 import { getWorkspacePath } from '@/services/home'
 import { logger } from '@/utils/logger'
-import FileViewerOverlay from '@/components/fileViewer/FileViewerOverlay.vue'
 import HomedirSwitcher from '@/components/common/HomedirSwitcher.vue'
 import Workbench from '@/components/common/Workbench.vue'
 import Toast from '@/components/common/Toast.vue'

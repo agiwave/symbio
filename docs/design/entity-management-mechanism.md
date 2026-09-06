@@ -52,6 +52,8 @@
 <prefix>/entities/delete   → EntityUploadResponse（同形状）
 <prefix>/entities/status   → EntityStatusResponse（可选能力）
 <prefix>/entities/detail   → DetailDefinitionResponse（详情定义，见 §3.2；可选能力）
+<prefix>/entities/watch    → 订阅容器子实体数据变更（可选；树视图挂载期调用）
+<prefix>/entities/unwatch  → 取消订阅（视图卸载时调用，与 watch 配对）
 ```
 
 - 列表项一律是 `EntitySummary`：`kind / id / name / status / summary` +
@@ -120,9 +122,16 @@
   （列表摘要与状态事件同用此约定）。`working` 表示实体正在工作，
   列表以独立视觉态渲染（脉冲点 + 「工作中」角标），不得折叠为其他取值。
 - **事件分级**：`entities/status` 触发**状态事件**（列表项即时补丁）；
-  provider 发出的 bus 事件分**粗粒度**（`type == "status" | "title"`，
-  语义级变化）与**细粒度**（如流式数据帧）。机制列表只对状态事件与
-  粗粒度事件做出反应，细粒度事件**不得**触发清单刷新。
+  provider 发出的 bus 事件分**粗粒度**（`type == "status" | "title" | "data"`，
+  语义级变化；`data` = 容器子实体数据变更，载荷含场景定位信息如
+  `workdir`/`path`，机制只消费「变更已发生」语义）与**细粒度**（如流式
+  数据帧）。机制列表与树视图只对状态事件与粗粒度事件做出反应，
+  细粒度事件**不得**触发刷新。
+- **容器数据订阅**：`entities/watch` / `entities/unwatch` 操作对（载荷
+  复用 `container` + `sub_kind`）——实时视图（树）在**挂载期**订阅、
+  卸载时取消，监听生命周期与视图严格绑定；provider 默认 no-op，
+  实时场景实现引用计数（同一容器数据多方共享监听，最后一个订阅方
+  释放后停止）。
 
 ## 3. 前端机制分层
 
@@ -315,9 +324,15 @@ about（纯信息展示）亦保留。
 - **容器声明**：`SESSION_CONTAINER_KINDS` 声明两个子类别——
   「子会话」（列表视图，系统管理型，仅查看/删除）与「目录树」
   （tree 机制的场景实现：会话工作目录的层级浏览，`view = "tree"` +
-  懒加载 + 只读）。provider 按 `sub_kind` 分流 list/get 容器钩子，
-  经统一协议 `entities/*` + `container` 字段访问。
+  懒加载，文件可查看/编辑，能力 `BUNDLE_FILE` 门控写回与删除）。
+  provider 按 `sub_kind` 分流 list/get/put/delete 容器钩子，经统一协议
+  `entities/*` + `container` 字段访问。
+- **实时性**：目录树场景实现 `watch_container`/`unwatch_container`——
+  树视图挂载期订阅会话工作目录监听（引用计数；不同会话各自 workdir
+  各自监听，共享 workdir 共享监听），文件变化经粗粒度 `data` 事件
+  （kind = session、sessionId = 会话 id）驱动树视图与详情编辑器防抖重载。
 - **前端**：会话详情（聊天工作区）经机制动作「管理内部实体」push 进
   `/container/session/:id/entities`，侧边栏 = 两个子类别（后端声明）；
-  目录树子类别中栏渲染 `EntityTree`（懒加载），树节点（文件）点击后
-  内容经既有 content 分流查看（只读能力门控）；删除同为机制动作。
+  目录树子类别中栏渲染 `EntityTree`（懒加载 + 实时刷新），树节点图标按
+  `config_type`（directory/file）项级分发；树节点（文件）点击后内容经
+  既有 content 分流查看/编辑；删除同为机制动作。

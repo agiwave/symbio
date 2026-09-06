@@ -1,4 +1,4 @@
-//! Home 插件 - 根插件，持有并调度所有顶级子插件 (work, agent, setting, explorer 等)
+//! Home 插件 - 根插件，持有并调度所有顶级子插件 (work, agent, setting 等)
 //!
 //! 采用分形路由架构：
 //! - 负责全局配置的持久化
@@ -10,7 +10,7 @@
 //! Home 插件的配置文件位于 [`HomedirRegistry::get()`] / `config.yaml`，
 //! 即当前系统目录。homedir 切换通过 `home/reload` 路由热重载实现。
 
-use crate::symbio_core::schemas::{common, explorer::home_reload, work::work_get_workspace};
+use crate::symbio_core::schemas::{common, home::home_reload, work::work_get_workspace};
 use crate::symbio_core::{
     HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
     PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, PATH, PLUGIN_COMPOSITE, PLUGIN_HOME,
@@ -48,7 +48,6 @@ impl GlobalConfig {
             let defaults = [
                 "setting",
                 "event_bus",
-                "explorer",
                 "model",
                 "session",
                 "local",

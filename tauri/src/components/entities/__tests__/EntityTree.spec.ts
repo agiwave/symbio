@@ -10,9 +10,17 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
-const listEntitiesMock = vi.fn()
+const { listEntitiesMock, subscribeMock } = vi.hoisted(() => ({
+  listEntitiesMock: vi.fn(),
+  subscribeMock: vi.fn(() => () => {}),
+}))
 vi.mock('@/services/entities', () => ({
-  listEntities: (...args: unknown[]) => listEntitiesMock(...args),
+  listEntities: listEntitiesMock,
+  watchEntity: vi.fn(),
+  unwatchEntity: vi.fn(),
+}))
+vi.mock('@/services/eventBus', () => ({
+  subscribe: subscribeMock,
 }))
 
 import EntityTree from '../EntityTree.vue'

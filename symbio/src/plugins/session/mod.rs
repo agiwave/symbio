@@ -14,4 +14,5 @@ pub(crate) mod prompt;
 pub(crate) mod plugin;
 mod store;
 pub(crate) mod types;
+mod fs_watcher;
 mod workdir;

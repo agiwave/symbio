@@ -43,7 +43,6 @@ pub const PLUGIN_LOCAL: &str = "local";
 /// Hook 插件工厂
 pub const PLUGIN_HOOK: &str = "hook";
 /// Explorer 插件工厂
-pub const PLUGIN_EXPLORER: &str = "explorer";
 /// Event Bus 插件工厂（统一事件总线）
 pub const PLUGIN_EVENT_BUS: &str = "event_bus";
 

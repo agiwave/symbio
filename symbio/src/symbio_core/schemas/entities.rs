@@ -67,6 +67,12 @@ pub const ENTITIES_STATUS: &str = "entities/status";
 /// `entities/detail` —— 详情页定义下发（definition-driven detail）
 pub const ENTITIES_DETAIL: &str = "entities/detail";
 
+/// `entities/watch` —— 订阅容器子实体数据变更（树视图等实时场景：视图
+/// 挂载时订阅，卸载时经 `entities/unwatch` 取消；变更经粗粒度 `data`
+/// 事件下发，见 §2.4）
+pub const ENTITIES_WATCH: &str = "entities/watch";
+pub const ENTITIES_UNWATCH: &str = "entities/unwatch";
+
 // ==================== 能力开关 ====================
 
 /// 实体能力开关 —— 决定该类型实体的统一页面启用哪些模块。
@@ -170,18 +176,6 @@ impl EntityCapabilities {
         mutable: true,
         test_connection: false,
         read_only: false,
-    };
-
-    /// 树视图（只读浏览型）：tree 机制下的只读场景能力——不可创建/删除/
-    /// 写回，仅浏览与选中查看（数据由 provider 场景层定义，机制不关心
-    /// 其语义，如会话的工作目录文件树）。
-    pub const TREE_READONLY: Self = Self {
-        zip_upload: false,
-        independent_form: false,
-        realtime_status: false,
-        mutable: false,
-        test_connection: false,
-        read_only: true,
     };
 }
 

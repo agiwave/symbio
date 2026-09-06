@@ -232,6 +232,29 @@ pub trait EntityProvider: Send + Sync {
     ) -> Result<EntityUploadResponse, PluginError> {
         Err(PluginError::NotImplemented)
     }
+
+    /// 订阅容器子实体数据变更（树视图等实时场景；前端视图挂载时调用，
+    /// 卸载时经 unwatch_container 配对取消）。变更经粗粒度 `data` 事件下发
+    /// （kind = provider kind、sessionId = 容器 id）。默认 no-op：无实时
+    /// 能力的 provider 直接成功。
+    async fn watch_container(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _sub_kind: Option<&str>,
+        _container: &str,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    /// 取消容器子实体数据变更订阅（与 watch_container 配对；默认 no-op）。
+    async fn unwatch_container(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        _sub_kind: Option<&str>,
+        _container: &str,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
 }
 
 // ==================== 容器子实体声明 ====================
@@ -318,10 +341,10 @@ pub static SESSION_CONTAINER_KINDS: &[ContainerKindSpec] = &[
     ContainerKindSpec {
         kind: "dir",
         label: "目录树",
-        description: "会话工作目录的层级浏览（只读）。",
+        description: "会话工作目录的层级浏览（文件可查看/编辑，实时刷新）。",
         path_hint: "",
         default_content: "",
-        capabilities: &EntityCapabilities::TREE_READONLY,
+        capabilities: &EntityCapabilities::BUNDLE_FILE,
         view: VIEW_TREE,
     },
 ];
@@ -537,6 +560,8 @@ pub async fn dispatch<P: EntityProvider + ?Sized>(
         ENTITIES_DELETE => dispatch_delete(provider, ctx).await,
         ENTITIES_STATUS => dispatch_status(provider, ctx).await,
         ENTITIES_DETAIL => dispatch_detail(provider, ctx).await,
+        ENTITIES_WATCH => dispatch_watch(provider, ctx, true).await,
+        ENTITIES_UNWATCH => dispatch_watch(provider, ctx, false).await,
         _ => return None,
     };
     Some(resp)
@@ -762,6 +787,30 @@ async fn dispatch_detail<P: EntityProvider + ?Sized>(
     let definition = provider.detail_definition(ctx, &req.id).await;
     Ok(PluginPayload::new(
         &crate::symbio_core::schemas::entities::DetailDefinitionResponse { definition },
+    ))
+}
+
+/// 容器数据变更订阅/取消（watch = true 订阅，false 取消；载荷复用
+/// EntitiesListRequest 的 container + sub_kind 字段）
+async fn dispatch_watch<P: EntityProvider + ?Sized>(
+    provider: &P,
+    ctx: &Arc<dyn InvokeRequest>,
+    watch: bool,
+) -> InvokeResponse<PluginPayload> {
+    let req = ctx
+        .payload::<EntitiesListRequest>()
+        .ok()
+        .unwrap_or_default();
+    let container = non_empty(&req.container)
+        .ok_or_else(|| PluginError::ValidationError("watch 需要 container".into()))?;
+    let sub_kind = req.sub_kind.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    if watch {
+        provider.watch_container(ctx, sub_kind, container).await?;
+    } else {
+        provider.unwatch_container(ctx, sub_kind, container).await?;
+    }
+    Ok(PluginPayload::new(
+        &crate::symbio_core::schemas::common::SuccessResponse::default(),
     ))
 }
 

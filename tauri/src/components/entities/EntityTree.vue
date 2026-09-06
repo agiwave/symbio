@@ -32,8 +32,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { listEntities } from '@/services/entities'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { listEntities, unwatchEntity, watchEntity } from '@/services/entities'
+import { subscribe, type BusEvent } from '@/services/eventBus'
 import { logger } from '@/utils/logger'
 import type { EntitySummary } from '@/schemas/entities'
 import EntityTreeNode from './EntityTreeNode.vue'
@@ -127,7 +128,52 @@ function select(node: EntitySummary) {
   emit('select', node.id)
 }
 
-// 根层加载：挂载 / 目标容器或子类别变化时重置
+// === 实时刷新（§3.3）：生命周期与视图挂载期绑定 ===
+// 挂载 → `entities/watch` 订阅容器数据变更；卸载 → `entities/unwatch`
+// 释放（后端引用计数，最后一个订阅方释放后监听停止）。
+// 订阅期间收到粗粒度 `data` 事件 → 防抖重载全部已加载层级。
+let busUnsubscribe: (() => void) | null = null
+let reloadTimer: ReturnType<typeof setTimeout> | null = null
+
+function handleBusEvent(busEvent: BusEvent) {
+  const inner = busEvent.data.data as { type?: string } | undefined
+  // 仅粗粒度「容器数据变更」事件触发重载；细粒度事件不得触发（§2.4）
+  if (inner?.type === 'data') scheduleReload()
+}
+
+function scheduleReload() {
+  if (reloadTimer) clearTimeout(reloadTimer)
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null
+    void fetchLevel('')
+    for (const dir of loadedLevels.value) void fetchLevel(dir)
+  }, 800)
+}
+
+function attach() {
+  busUnsubscribe?.()
+  busUnsubscribe = subscribe(
+    { kind: props.containerKind, sessionId: props.containerId },
+    handleBusEvent
+  )
+  void watchEntity(props.containerKind, {
+    container: props.containerId,
+    subKind: props.subKind,
+  })
+}
+
+function detach() {
+  busUnsubscribe?.()
+  busUnsubscribe = null
+  if (reloadTimer) clearTimeout(reloadTimer)
+  reloadTimer = null
+  void unwatchEntity(props.containerKind, {
+    container: props.containerId,
+    subKind: props.subKind,
+  })
+}
+
+// 根层加载：清空状态后拉取根层级
 async function loadRoot() {
   nodes.value = new Map()
   expanded.value = new Set()
@@ -138,8 +184,17 @@ async function loadRoot() {
   rootLoaded.value = true
 }
 
-onMounted(loadRoot)
-watch(() => [props.containerKind, props.containerId, props.subKind], loadRoot)
+// 挂载：订阅 + 根层加载；容器/子类别变化：释放旧的、重建
+onMounted(() => {
+  attach()
+  void loadRoot()
+})
+watch(() => [props.containerKind, props.containerId, props.subKind], () => {
+  detach()
+  attach()
+  void loadRoot()
+})
+onBeforeUnmount(detach)
 </script>
 
 <style scoped>

@@ -62,7 +62,12 @@ const emit = defineEmits<{
   (e: 'select', node: EntitySummary): void
 }>()
 
-const nodeIcon = computed(() => getEntityIconFor({ kind: props.node.kind }))
+const nodeIcon = computed(() =>
+  getEntityIconFor({
+    kind: props.node.kind,
+    config_type: (props.node as { config_type?: unknown }).config_type,
+  })
+)
 
 function onClick() {
   if (props.node.expandable !== false) emit('toggle', props.node)

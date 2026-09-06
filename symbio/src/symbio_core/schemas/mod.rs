@@ -1,7 +1,7 @@
 pub mod agent;
 pub mod common;
 pub mod entities;
-pub mod explorer;
+pub mod home;
 pub mod mcp;
 pub mod memory;
 pub mod model;

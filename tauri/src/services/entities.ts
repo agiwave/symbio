@@ -189,6 +189,36 @@ export async function getDetailDefinition(
   }
 }
 
+/**
+ * 订阅/取消容器子实体数据变更 —— 统一协议 watch/unwatch 操作对。
+ *
+ * 树视图等实时场景在视图挂载时订阅、卸载时取消（生命周期与视图绑定）；
+ * 变更经粗粒度 `data` 事件下发（kind = provider kind、sessionId = 容器 id）。
+ * 两个函数均吞错（fire-and-forget：无实时能力的 provider 由后端默认 no-op，
+ * 前端失败不影响视图功能）。
+ */
+export async function watchEntity(
+  type: string,
+  opts: { container: string; subKind?: string }
+): Promise<void> {
+  try {
+    await entitiesOp(type, 'watch', { container: opts.container, sub_kind: opts.subKind || undefined })
+  } catch (err) {
+    logger.debug('entities-service', `watchEntity(${type}) failed:`, err)
+  }
+}
+
+export async function unwatchEntity(
+  type: string,
+  opts: { container: string; subKind?: string }
+): Promise<void> {
+  try {
+    await entitiesOp(type, 'unwatch', { container: opts.container, sub_kind: opts.subKind || undefined })
+  } catch (err) {
+    logger.debug('entities-service', `unwatchEntity(${type}) failed:`, err)
+  }
+}
+
 /** ArrayBuffer → base64（zip 经 JSON payload 上传） */
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
