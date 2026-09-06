@@ -12,7 +12,7 @@ use tokio::sync::RwLock;
 use crate::symbio_core::schemas::entities::{
     DetailAction, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
-use crate::symbio_core::schemas::setting::{setting_get, setting_list};
+use super::schemas::{setting_get, setting_list};
 use tracing::info;
 
 #[derive(Clone)]

@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::plugins::mcp::types::McpTool;
-use crate::symbio_core::schemas::mcp::mcp_config::{McpServerConfig, McpTransportType};
+use crate::plugins::mcp::schemas::mcp_config::{McpServerConfig, McpTransportType};
 use serde_json::json;
 
 /// TEST-M2.1：stdio transport 但缺 command 字段 → 返回错误

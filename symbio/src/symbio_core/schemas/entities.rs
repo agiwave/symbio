@@ -43,13 +43,6 @@ pub(crate) fn default_true() -> bool {
 }
 
 /// 与 [`crate::symbio_core::providers::storage::categories`] 一一对应的实体类型
-pub const ALL_ENTITY_TYPES: [&str; 5] = [
-    ENTITY_MODEL,
-    ENTITY_MCP,
-    ENTITY_AGENT,
-    ENTITY_SKILL,
-    ENTITY_SESSION,
-];
 
 // ==================== 统一路径常量 ====================
 

@@ -130,29 +130,6 @@ impl ModelProviderConfig {
         }
     }
 
-    /// 由 `ModelConfig` 构造 `ModelProviderConfig`（用于兼容旧配置升级）
-    pub fn from_model_config(id: &str, name: &str, cfg: &ModelConfig) -> Self {
-        Self {
-            id: id.to_string(),
-            name: name.to_string(),
-            provider: cfg.provider.clone(),
-            api_base: cfg.api_base.clone(),
-            api_key: cfg.api_key.clone(),
-            model: cfg.model.clone(),
-            temperature: cfg.temperature,
-            max_tokens: cfg.max_tokens,
-            system_prompt: cfg.system_prompt.clone(),
-            max_context_tokens: cfg.max_context_tokens,
-            reserved_tokens: cfg.reserved_tokens,
-            timeout_secs: cfg.timeout_secs,
-            api_protocol: cfg.api_protocol.clone(),
-            store: cfg.store,
-            reasoning: cfg.reasoning.clone(),
-            rate_limit_ms: 0,
-            enabled: true,
-        }
-    }
-}
 
 /// Model Providers 注册表（多 Provider 容器）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

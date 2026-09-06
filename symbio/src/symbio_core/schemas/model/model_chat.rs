@@ -4,12 +4,6 @@ use serde::{Deserialize, Serialize};
 
 /// 思考能力配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ThinkingConfig {
-    pub enabled: bool,
-    pub level: String,
-    pub budget_tokens: u32,
-}
-
 /// Model 推理请求 (由 Session 插件或 Agent 发起)
 ///
 /// 注意：工作区路径 (workdir) 由 PluginMessage.workdir 路由层统一传递，

@@ -23,7 +23,7 @@
 //! 通过从磁盘加载/回写保持一致。
 
 use crate::symbio_core::create_object;
-pub use crate::symbio_core::schemas::mcp::mcp_config::{McpConfig, McpServerConfig};
+pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
 use crate::symbio_core::schemas::common;
 use crate::symbio_core::{
     Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
@@ -246,7 +246,7 @@ impl crate::symbio_core::entities::EntityProvider for McpPlugin {
         let server: McpServerConfig = serde_json::from_value(manifest.clone())
             .map_err(|e| PluginError::ValidationError(format!("MCP Server 配置无效: {e}")))?;
         match server.transport_type {
-            crate::symbio_core::schemas::mcp::mcp_config::McpTransportType::Stdio => {
+            crate::plugins::mcp::schemas::mcp_config::McpTransportType::Stdio => {
                 if server.command.as_deref().unwrap_or("").trim().is_empty() {
                     return Err(PluginError::ValidationError(
                         "stdio 类型必须填写 command".to_string(),

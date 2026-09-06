@@ -26,7 +26,7 @@
 //! 仅当 server 存在 + enabled=true 时才注册到 `tool_manager`。
 //! 因此不需要在 `McpManager` 中维护"激活集合"——遍历 + 注册即激活。
 
-use crate::symbio_core::schemas::mcp::mcp_config::{McpServerConfig, McpTransportType};
+use crate::plugins::mcp::schemas::mcp_config::{McpServerConfig, McpTransportType};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

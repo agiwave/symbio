@@ -3,7 +3,7 @@
 //! 对应源文件: `capability.rs`
 
 use super::*;
-use crate::symbio_core::schemas::mcp::mcp_config::McpServerConfig;
+use crate::plugins::mcp::schemas::mcp_config::McpServerConfig;
 use crate::symbio_core::CapabilityCategory;
 use serde_json::json;
 

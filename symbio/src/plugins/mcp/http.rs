@@ -31,7 +31,7 @@ use super::types::{
     JsonRpcRequest, JsonRpcResponse, ListToolsResult, McpInitializeResponse, McpTool,
     McpToolCallResponse, RequestId, DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS,
 };
-use crate::symbio_core::schemas::mcp::mcp_config::{McpServerConfig, DEFAULT_HTTP_TIMEOUT_SECS};
+use crate::plugins::mcp::schemas::mcp_config::{McpServerConfig, DEFAULT_HTTP_TIMEOUT_SECS};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::time::Duration;

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub use crate::symbio_core::schemas::telegram::telegram_config::TelegramConfig;
+pub use super::schemas::TelegramConfig;
 
 /// Telegram 消息
 #[derive(Debug, Clone, Serialize, Deserialize)]

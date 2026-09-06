@@ -10,7 +10,8 @@
 //! Home 插件的配置文件位于 [`HomedirRegistry::get()`] / `config.yaml`，
 //! 即当前系统目录。homedir 切换通过 `home/reload` 路由热重载实现。
 
-use crate::symbio_core::schemas::{common, home::home_reload, work::work_get_workspace};
+use crate::symbio_core::schemas::common;
+use super::schemas::{home_reload, work_get_workspace};
 use crate::symbio_core::{
     HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
     PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, PATH, PLUGIN_COMPOSITE, PLUGIN_HOME,

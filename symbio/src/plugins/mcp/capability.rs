@@ -15,7 +15,7 @@
 //! - 销毁：随 `tool_manager`（通常是 `DefaultToolManager`）一起被丢弃
 //! - **不持有**任何 stdio 进程 / http 连接（按需 lazy 加载）
 
-use crate::symbio_core::schemas::mcp::mcp_config::McpServerConfig;
+use crate::plugins::mcp::schemas::mcp_config::McpServerConfig;
 use crate::symbio_core::{
     Capability, CapabilityCategory, CapabilityMeta, InvokeRequest, InvokeRequestExt,
     InvokeResponse, PluginError, PluginPayload,

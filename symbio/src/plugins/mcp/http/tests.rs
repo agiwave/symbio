@@ -65,7 +65,7 @@ fn tool_error_not_misidentified_as_session_expired() {
 /// TEST-MR28.1：apply_custom_headers 合并自定义头
 #[test]
 fn apply_custom_headers_merges() {
-    use crate::symbio_core::schemas::mcp::mcp_config::{McpServerConfig, McpTransportType};
+    use crate::plugins::mcp::schemas::mcp_config::{McpServerConfig, McpTransportType};
     let cfg = McpServerConfig {
         transport_type: McpTransportType::Http,
         headers: Some(
@@ -90,7 +90,7 @@ fn apply_custom_headers_merges() {
 /// TEST-MR28.2：保留头（content-type / accept / mcp-session-id）被过滤
 #[test]
 fn apply_custom_headers_filters_reserved() {
-    use crate::symbio_core::schemas::mcp::mcp_config::{McpServerConfig, McpTransportType};
+    use crate::plugins::mcp::schemas::mcp_config::{McpServerConfig, McpTransportType};
     let cfg = McpServerConfig {
         transport_type: McpTransportType::Http,
         headers: Some(
@@ -118,7 +118,7 @@ fn apply_custom_headers_filters_reserved() {
 /// TEST-MR31.1：effective_timeout 使用默认 30s
 #[test]
 fn effective_timeout_default() {
-    use crate::symbio_core::schemas::mcp::mcp_config::McpServerConfig;
+    use crate::plugins::mcp::schemas::mcp_config::McpServerConfig;
     let cfg = McpServerConfig::default();
     assert_eq!(
         super::effective_timeout(&cfg),
@@ -129,7 +129,7 @@ fn effective_timeout_default() {
 /// TEST-MR31.2：effective_timeout 读取 timeout_secs
 #[test]
 fn effective_timeout_custom() {
-    use crate::symbio_core::schemas::mcp::mcp_config::McpServerConfig;
+    use crate::plugins::mcp::schemas::mcp_config::McpServerConfig;
     let cfg = McpServerConfig {
         timeout_secs: Some(120),
         ..Default::default()
@@ -143,7 +143,7 @@ fn effective_timeout_custom() {
 /// TEST-MR31.3：effective_timeout 0/None fallback 到默认
 #[test]
 fn effective_timeout_zero_fallback() {
-    use crate::symbio_core::schemas::mcp::mcp_config::McpServerConfig;
+    use crate::plugins::mcp::schemas::mcp_config::McpServerConfig;
     let cfg = McpServerConfig {
         timeout_secs: Some(0),
         ..Default::default()

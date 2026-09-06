@@ -26,7 +26,7 @@ use super::types::{
     JsonRpcRequest, JsonRpcResponse, McpInitializeResponse, McpTool, McpToolCallResponse,
     RequestId, DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS,
 };
-use crate::symbio_core::schemas::mcp::mcp_config::McpServerConfig;
+use crate::plugins::mcp::schemas::mcp_config::McpServerConfig;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
