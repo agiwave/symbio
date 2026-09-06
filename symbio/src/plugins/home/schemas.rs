@@ -3,8 +3,6 @@
 //! 原 `symbio_core::schemas::home`（home_reload）与 `schemas::work`（work_get_workspace），
 //! 均仅被 HomePlugin 使用，故合并下放到本插件内部。
 
-use serde::{Deserialize, Serialize};
-
 pub mod home_reload {
     //! home/reload 路由的请求/响应 schema（对应 HomePlugin::route 的 reload 分支）
 

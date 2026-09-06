@@ -1,7 +1,5 @@
 //! 设置插件的请求/响应 schema（原 `symbio_core::schemas::setting`，仅本插件使用，故下放）
 
-use serde::{Deserialize, Serialize};
-
 pub mod setting_get {
     use serde::{Deserialize, Serialize};
 
