@@ -210,10 +210,8 @@ fn detail_field_password(key: &str, label: &str, desc: &str, placeholder: &str) 
 
 /// config 绑定定义骨架：单分区 + 单「保存配置」动作（`_desc` 预留：schema 暂无描述字段）。
 ///
-/// load/save 路径由插件前缀 + 协议常量（`config/get` / `config/set`）构建——
-/// 各插件的标准 config 协议路由即 `CONFIG_GET` / `CONFIG_SET`，路径拼写
-/// 单一来源，避免定义与协议脱节（历史缺陷：字面量 `"config get"` 空格写法
-/// 导致设置分区加载 404）。
+/// load/save 路径由插件前缀 + 协议常量（`CONFIG_GET`/`CONFIG_SET`）构建，
+/// 路径拼写单一来源，禁止手写字面量（防止与协议路由脱节）。
 fn config_definition(title: &str, _desc: &str, prefix: &str, fields: Vec<DetailField>) -> DetailDefinition {
     DetailDefinition {
         binding: "config".into(),
@@ -360,9 +358,7 @@ mod tests {
     }
 
     /// 回归：config 绑定分区的 load/save 路径必须命中目标插件的标准
-    /// config 协议路由（`<prefix>/config/get|set`）。历史缺陷：定义里写了
-    /// 字面量 `"config get"`（空格），与协议常量 `CONFIG_GET = "config/get"`
-    /// 脱节，导致会话/本地工具/网络工具设置加载 404。
+    /// config 协议路由（`<prefix>/config/get|set`）。
     #[test]
     fn config_binding_paths_follow_protocol_constants() {
         for (def, prefix) in [

@@ -510,6 +510,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   function switchKind(next: string) {
     activeKind.value = next
     wb.selectKey(null)
+    fetchedEntry.value = null
     if (wb.creating.value) wb.cancelCreate()
     editorError.value = ''
   }
@@ -539,9 +540,15 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   // === 文本编辑（entities/get 的 extra.content + entities/put 写回） ===
   // 机制分流：子实体带 extra.content（文件型）→ 文本编辑器；
   // 不带（系统管理型，如子会话）→ 只读详情面板。
-  const selectedEntry = computed(
-    () => kindEntries.value.find((e) => wb.isSelected(e.kind, e.id)) ?? null
-  )
+  // 选中子条目：类别分箱（列表形态）优先；树视图等自管懒加载数据的子类别
+  // 不进分箱，以最近一次 entities/get 读取结果兜底（选中态严格比对，无悬挂）
+  const fetchedEntry = ref<EntitySummary | null>(null)
+  const selectedEntry = computed(() => {
+    const found = kindEntries.value.find((e) => wb.isSelected(e.kind, e.id))
+    if (found) return found
+    const f = fetchedEntry.value
+    return f && wb.isSelected(f.kind, f.id) ? f : null
+  })
   const content = ref('')
   const originalContent = ref('')
   const loadingContent = ref(false)
@@ -559,6 +566,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     loadingContent.value = true
     try {
       const item = await getEntity(containerKind, id, cid)
+      if (item) fetchedEntry.value = item
       const c = item?.content
       if (typeof c === 'string') {
         content.value = c

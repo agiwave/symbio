@@ -11,8 +11,6 @@
   - 右侧详情区
   - 浮动 Toast
 
-  避免在每个 view 里重复实现（当前 ModelProvidersView / McpView 90% 重复）。
-
   Slot 设计：
   - `header-actions`：右上角按钮组（默认带 + 新建按钮）
   - `meta`：状态条（list-meta）

@@ -1,6 +1,6 @@
 //! Model 详情页定义（definition-driven detail）
 //!
-//! 设计基准 = 原前端 `Model.vue` 的表单复杂度，本定义是其完整等价表达：
+//! 完整表达 Model 表单的全部能力：
 //! - 提供商预设联动（选中后按 if_empty 填充 api_base / 首个候选模型，
 //!   **总是**校正 api_protocol 为该预设支持的首个协议）
 //! - 模型 datalist 动态候选（随预设注入）、协议 select 动态选项
@@ -8,9 +8,7 @@
 //! - 条件徽标（默认 / 已停用）与动作（校验连接 / 跳过校验保存 /
 //!   保存 / 设为默认 / 删除）
 //! - id·name 派生回落链（前端 slug 去重，后端 `validate_manifest` 兜底）
-//!
-//! 预设数据自原前端 `constants/modelProviders.ts` 迁入——供应商标识、
-//! 端点与候选模型由后端单一真相源下发。
+
 
 use crate::symbio_core::schemas::entities::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,

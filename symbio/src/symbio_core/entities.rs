@@ -174,11 +174,8 @@ pub trait EntityProvider: Send + Sync {
     /// 详情页定义钩子（definition-driven detail）。
     ///
     /// 返回 `None` 表示该实体无定义（前端回退注册 editor / 通用面板）；
-    /// `id` 为空表示请求「新建态」定义。定义能力由 provider 决定——
-    /// 交互不复杂的详情页据此由前端通用渲染器（DetailForm）动态生成，
-    /// 前端零页面开发。设计基准 = Model.vue 表单复杂度（预设联动 /
-    /// 动态候选 / 折叠分区 / 条件动作 / 派生链），见
-    /// `schemas::entities::DetailDefinition`。
+    /// `id` 为空表示请求「新建态」定义。交互不复杂的详情页据此由前端
+    /// 通用渲染器（DetailForm）动态生成，见 `schemas::entities::DetailDefinition`。
     async fn detail_definition(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,

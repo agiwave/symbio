@@ -68,11 +68,8 @@ impl FileSessionStore {
         session.parent_session_id().map(str::to_string)
     }
 
-    /// 解析 session.json 内容；存在尾部残留时截取首个完整 JSON 自愈。
-    ///
-    /// 历史缺陷：旧的 `fs::write` 直写方式在并发保存交错时会留下
-    /// "短 JSON + 长旧内容残留"（trailing characters）。这里用流式反序列化
-    /// 取首个完整对象，尽量恢复旧损坏文件；完全无法解析时返回 None。
+    /// 解析 session.json 内容；存在尾部残留时截取首个完整 JSON 自愈
+    /// （流式反序列化取首个完整对象），完全无法解析时返回 None。
     fn parse_session_content(content: &str) -> Option<Session> {
         match serde_json::from_str(content) {
             Ok(s) => Some(s),

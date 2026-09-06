@@ -117,14 +117,11 @@ export function getEntityIconFor(target: EntityRegistryTarget): Component | unde
 
 // ============ 内置注册 ============
 
-// model / mcp / skill 详情与新建不再注册：由后端 `entities/detail` 下发
-// 定义、DetailForm 通用渲染器动态生成（definition-driven detail）。
+// model / mcp / skill 详情与新建、agent bundle 概览、设置三分区均不注册：
+// 由后端 `entities/detail` 下发定义，DetailForm 通用渲染器动态生成
+// （definition-driven detail）。
 
-// Agent（OAB bundle）概览也不再注册：原 agent:bundle 项级 editor（Agent.vue）
-// 已机制化——后端 `entities/detail` 下发 info 绑定定义（只读概览 + 计数），
-// 「管理实体」经 open-container 机制动作进入容器实体页。
-
-// Session（会话）：kind 级注册——详情 = 聊天工作区（ChatMainPanel + SessionExplorerPanel）；
+// Session（会话）：kind 级注册——详情 = 聊天工作区（ChatMainPanel）；
 // capabilities.independent_form 为 true 且本注册存在 → 统一实体页「新建」按钮
 // 进入该 editor 的引导态（新建会话），列表/删除由机制承担（delete_item 钩子）。
 registerEntityEditor('session', markRaw(Session))

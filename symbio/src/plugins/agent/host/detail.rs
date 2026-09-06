@@ -1,6 +1,5 @@
 //! Agent（OAB bundle）详情页定义 —— 只读概览（`info` 绑定）
 //!
-//! 原「agent:bundle 项级 editor（Agent.vue）」的机制化等价表达：
 //! 概览字段（版本/来源层级/安装目录）+ 内部实体计数（list_items
 //! 下发的 `count_*`）+ `delete` 动作。「管理内部实体」入口由页面机制
 //! 统一渲染（provider 声明 container_kinds 的条目，详情区顶部入口条），

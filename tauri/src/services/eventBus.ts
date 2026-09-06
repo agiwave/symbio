@@ -15,9 +15,6 @@ import { connectPlugin, callPlugin, type Connection, type ConnectEvent } from '.
 import { logger } from '@/utils/logger'
 
 // 与后端 `KIND_*` 常量保持一致
-export const KIND_SESSION = 'session'
-export const KIND_EXPLORER = 'explorer'
-export const KIND_SYSTEM = 'system'
 export const KIND_ENTITY = 'entity'
 
 /**

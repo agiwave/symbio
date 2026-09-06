@@ -1,10 +1,9 @@
 /**
  * useToast — 全局浮动消息（Toast）单例
- *
- * 取代原先散落在 AgentView / McpView / ModelProvidersView / SkillView 的 4 套
- * 本地 toast 实现。全站唯一的 Toast 状态源：任意模块 import useToast() 即共享
- * 同一条浮层（Toast.vue 挂在 MainLayout 中，仅渲染一次）。
- *
+
+ * 全站唯一的 Toast 状态源：任意模块 import useToast() 即共享同一条浮层
+ * （Toast.vue 挂在 MainLayout 中，仅渲染一次）。
+ /
  * 视觉令牌化见 Toast.vue 的 scoped style（只消费 var(--*) 令牌）。
  */
 

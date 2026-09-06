@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '../views/MainLayout.vue'
-import FileViewerWindow from '../views/FileViewerWindow.vue'
 import WorkbenchView from '../views/WorkbenchView.vue'
 
 const router = createRouter({
@@ -46,12 +45,6 @@ const router = createRouter({
         containerKind: 'agent',
         containerId: route.params.agentId as string,
       })
-    },
-    {
-      // 文件查看器（独立窗口）
-      path: '/file-viewer',
-      name: 'file-viewer',
-      component: FileViewerWindow
     }
   ]
 })

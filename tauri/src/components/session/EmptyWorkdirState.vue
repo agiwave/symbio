@@ -46,7 +46,6 @@ async function onPick() {
     if (!selected) return
     const path = typeof selected === 'string' ? selected : Array.isArray(selected) ? selected[0] : null
     if (!path) return
-    // 实体浏览器的重置和重载由 SessionExplorerPanel 监听 activeWorkdir 自动处理
     await store.setActiveWorkdir(path)
   } catch (e) {
     lastError.value = e instanceof Error ? e.message : String(e)

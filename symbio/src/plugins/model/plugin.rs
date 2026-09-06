@@ -565,8 +565,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
         Some(crate::symbio_core::providers::manifests::PROVIDER)
     }
 
-    /// 详情页定义：Model 表单由后端下发（预设联动/动态候选/折叠分区，
-    /// 设计基准即原前端 Model.vue，预设数据自 constants/modelProviders.ts 迁入）
+    /// 详情页定义：Model 表单由后端下发（预设联动/动态候选/折叠分区）
     async fn detail_definition(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,

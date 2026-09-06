@@ -458,9 +458,8 @@ pub struct EntityStatusResponse {
 // ==================== 详情页定义（definition-driven detail） ====================
 //
 // 交互不复杂的详情页由后端下发**定义**、前端通用渲染器（DetailForm）动态生成，
-// 前端零页面开发。设计基准 = 旧 Model.vue 的表单复杂度：
-// 预设联动填充 / 动态候选（datalist/select）/ 密码显隐 / 数字范围 /
-// 折叠分区 / 条件徽标与动作 / id·name 派生回落链。
+// 前端零页面开发。定义能力：预设联动填充 / 动态候选（datalist/select）/
+// 密码显隐 / 数字范围 / 折叠分区 / 条件徽标与动作 / id·name 派生回落链。
 // 只读概览型详情（如 agent bundle 概览）由 `info` 绑定表达；
 // 复杂详情（会话聊天工作区、appearance 即时生效型、about 信息展示型）
 // 仍走注册 editor，不适用本定义。
