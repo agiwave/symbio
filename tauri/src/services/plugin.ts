@@ -59,7 +59,7 @@ export function getLastWorkdir(): string | undefined {
  * 封装了会话 ID、监听器生命周期及通讯方法
  */
 export class Connection {
-  private active = true;
+  protected active = true;
   private lastActivity = Date.now();
 
   constructor(
@@ -157,6 +157,98 @@ class ProtocolEnforcer {
   }
 }
 
+// ==================== 2.5 出站传输选择（由网关插件配置驱动） ====================
+
+export type TransportMode = 'native' | 'http'
+
+interface OutboundConfig {
+  protocol: TransportMode
+  endpoint: string
+  token: string
+}
+
+/**
+ * 出站配置：前端以何种协议连接后端。
+ * - native：进程内直连本机后端（默认，现状）
+ * - http：连接另一个 Symbio 实例的网关入站服务
+ * 由网关插件的 `outbound` 配置决定，应用启动时经 `initGatewayTransport()` 读取。
+ */
+let outbound: OutboundConfig = { protocol: 'native', endpoint: '', token: '' }
+let outboundReady: Promise<void> | null = null
+
+/**
+ * 应用启动时调用一次：读取网关插件的出站配置，决定前端连接方式。
+ * 自身使用 native invoke 读取，不依赖已被切换的传输，因此无「鸡生蛋」问题。
+ * 返回的 Promise 被缓存，供 `sendRouteRequest` 在首次调用前等待就绪（消除竞态）。
+ */
+export function initGatewayTransport(): Promise<void> {
+  if (!outboundReady) outboundReady = doInitGatewayTransport()
+  return outboundReady
+}
+
+async function doInitGatewayTransport(): Promise<void> {
+  try {
+    const res = await invoke<PluginMessage>('route_v2', {
+      request: { metadata: { path: 'gateway/config/get' }, payload: null },
+      clientId: `gw_boot_${Date.now()}`
+    })
+    // 后端 GatewayConfig 是扁平结构：outbound_protocol / outbound_endpoint / outbound_token
+    const cfg = (res?.payload as any)?.data ?? res?.payload
+    const protocol = cfg?.outbound_protocol
+    const endpoint = cfg?.outbound_endpoint
+    const token = cfg?.outbound_token ?? ''
+    if (protocol === 'http' && endpoint) {
+      outbound = {
+        protocol: 'http',
+        endpoint: String(endpoint).replace(/\/+$/, ''),
+        token: String(token)
+      }
+      logger.info('Transport', `出站协议已切换为 HTTP: ${outbound.endpoint}`)
+      return
+    }
+    outbound = { protocol: 'native', endpoint: '', token: '' }
+  } catch (e) {
+    logger.warn('Transport', '读取网关出站配置失败，回退 native', e)
+    outbound = { protocol: 'native', endpoint: '', token: '' }
+  }
+}
+
+export function getOutboundConfig(): OutboundConfig {
+  return outbound
+}
+
+/**
+ * 基于 WebSocket 的连接（出站协议为 http 时，`connectPlugin` 使用）。
+ * 复用 Connection 的对外接口，底层走 WebSocket 而非 Tauri IPC 事件。
+ */
+class WsConnection extends Connection {
+  constructor(public ws: WebSocket, path: string) {
+    super('ws', path, () => {}, () => {})
+  }
+  get isConnected(): boolean {
+    return this.ws.readyState === WebSocket.OPEN
+  }
+  async send(data: any): Promise<void> {
+    if (!this.active) {
+      throw new Error(`[Protocol Error] Cannot send to a disconnected session: ws (${this.path})`)
+    }
+    this.ws.send(JSON.stringify({ Data: data }))
+  }
+  async close(): Promise<void> {
+    if (!this.active) return
+    this.active = false
+    try {
+      this.ws.close()
+    } catch {
+      /* ignore */
+    }
+  }
+  markDisconnected(): void {
+    if (!this.active) return
+    this.active = false
+  }
+}
+
 // ==================== 3. 统一通讯链路 ====================
 
 export interface PluginOptions {
@@ -172,14 +264,9 @@ interface SendRouteOptions extends PluginOptions {
 }
 
 /**
- * 内部核心：发起路由请求并处理握手
+ * 构造路由请求的 metadata（native 与 http 两套传输共用，保证对称）
  */
-async function sendRouteRequest(
-  request: SendRouteOptions,
-  onFrame?: (frame: PluginFrame) => void,
-  onEof?: () => void
-): Promise<{ response: PluginMessage; connection?: Connection }> {
-
+function buildMetadata(request: SendRouteOptions): Record<string, string> {
   const sessionId = `v2_sess_${Math.random().toString(36).substring(2, 10)}`
   const traceId = `trace_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
 
@@ -204,13 +291,58 @@ async function sendRouteRequest(
     }
   }
 
+  return metadata;
+}
+
+/**
+ * 内部核心：发起路由请求并处理握手。
+ *
+ * mode 决定「出站语义」：
+ * - 'call'（默认）：一次性/同步语义。native 走 `route_v2`；http 走 `POST /api/v1/invoke`
+ *   （服务端把会话折叠到 EOF 的最后一帧，与 callPlugin 的一次性语义一致）。
+ * - 'connect'：持久会话语义。native 走 `route_v2` + 事件通道；http 走 `WS /api/v1/ws`
+ *   （首帧发送 PluginMessageWire，之后双向转发 PluginFrame）。
+ *
+ * 出站协议由 `initGatewayTransport()` 在启动期读出的网关配置决定；每次调用前
+ * await 该 Promise（已缓存），天然消除首调竞态。
+ */
+async function sendRouteRequest(
+  request: SendRouteOptions,
+  onFrame?: (frame: PluginFrame) => void,
+  onEof?: () => void,
+  mode: 'call' | 'connect' = 'call'
+): Promise<{ response: PluginMessage; connection?: Connection }> {
+  await initGatewayTransport();
+  const ob = getOutboundConfig();
+
+  // 网关自身的接口（gateway/*）始终是本机 native 调用：
+  // 出站配置若设为 http，会指向远端实例，届时读取/修改「本机网关设置」反而会落到远端，
+  // 既看不到本机配置也无法切换回 native。故强制 native，与 initGatewayTransport 启动期读取一致。
+  const target = request.path.replace(/^\/+/, '');
+  const isGatewaySelf = target === 'gateway' || target.startsWith('gateway/');
+
+  if (!isGatewaySelf && ob.protocol === 'http' && ob.endpoint) {
+    return httpTransport(request, mode, ob, onFrame, onEof);
+  }
+  return nativeTransport(request, onFrame, onEof);
+}
+
+// ==================== 原生传输（Tauri IPC，现状） ====================
+
+async function nativeTransport(
+  request: SendRouteOptions,
+  onFrame?: (frame: PluginFrame) => void,
+  onEof?: () => void
+): Promise<{ response: PluginMessage; connection?: Connection }> {
+  const metadata = buildMetadata(request);
+  const sessionId = metadata[HEAD_SESSION_ID];
   const wireRequest: PluginMessage = {
     metadata,
-    payload: request.payload
+    payload: request.payload,
   };
 
-  let currentUnlisten: UnlistenFn | undefined
-  let currentEofUnlisten: UnlistenFn | undefined
+  let currentUnlisten: UnlistenFn | undefined;
+  let currentEofUnlisten: UnlistenFn | undefined;
 
   // 1. 预监听 (消除竞态)
   currentUnlisten = await listen<any>(`route/${sessionId}`, (event) => {
@@ -220,17 +352,17 @@ async function sendRouteRequest(
     } catch (err) {
       logger.error('Protocol', `Critical Violation in ${request.path}`, err);
     }
-  })
+  });
 
   currentEofUnlisten = await listen<any>(`route/${sessionId}/eof`, () => {
-    onEof?.()
-  })
+    onEof?.();
+  });
 
   try {
     const response = await invoke<PluginMessage>('route_v2', {
       request: wireRequest,
-      clientId: sessionId
-    })
+      clientId: sessionId,
+    });
 
     const payload = response.payload as PluginPayloadWire;
 
@@ -248,27 +380,126 @@ async function sendRouteRequest(
           } catch (err) {
             logger.error('Protocol', `Critical Violation in ${request.path}`, err);
           }
-        })
+        });
         currentEofUnlisten = await listen<any>(`route/${actualId}/eof`, () => {
-          onEof?.()
-        })
+          onEof?.();
+        });
         oldUnlisten?.(); // 启动新监听后再销毁旧监听，确保数据帧不丢失
         oldEofUnlisten?.();
-        return { response, connection: new Connection(actualId, request.path, currentUnlisten, currentEofUnlisten) }
+        return { response, connection: new Connection(actualId, request.path, currentUnlisten, currentEofUnlisten) };
       }
 
-      return { response, connection: new Connection(sessionId, request.path, currentUnlisten, currentEofUnlisten) }
+      return { response, connection: new Connection(sessionId, request.path, currentUnlisten, currentEofUnlisten) };
     }
 
     // 如果是同步响应，立即清理监听器
-    currentUnlisten?.()
-    currentEofUnlisten?.()
-    return { response }
+    currentUnlisten?.();
+    currentEofUnlisten?.();
+    return { response };
   } catch (err) {
-    currentUnlisten?.()
-    currentEofUnlisten?.()
-    throw err
+    currentUnlisten?.();
+    currentEofUnlisten?.();
+    throw err;
   }
+}
+
+// ==================== HTTP 传输（连接远端 Symbio 实例的网关入站） ====================
+
+async function httpTransport(
+  request: SendRouteOptions,
+  mode: 'call' | 'connect',
+  ob: OutboundConfig,
+  onFrame?: (frame: PluginFrame) => void,
+  onEof?: () => void
+): Promise<{ response: PluginMessage; connection?: Connection }> {
+  const wireRequest: PluginMessage = {
+    metadata: buildMetadata(request),
+    payload: request.payload,
+  };
+  return mode === 'connect'
+    ? httpWsTransport(request, wireRequest, ob, onFrame, onEof)
+    : httpInvokeTransport(wireRequest, ob, onFrame, onEof);
+}
+
+/**
+ * 一次性调用：POST /api/v1/invoke（请求体 = PluginMessageWire，响应 = PluginPayloadWire）。
+ * 会话型路径由服务端折叠到 EOF 的最后一帧，与 callPlugin 的一次性语义一致。
+ */
+async function httpInvokeTransport(
+  wireRequest: PluginMessage,
+  ob: OutboundConfig,
+  _onFrame?: (frame: PluginFrame) => void,
+  _onEof?: () => void
+): Promise<{ response: PluginMessage; connection?: Connection }> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (ob.token) headers['Authorization'] = `Bearer ${ob.token}`;
+
+  const res = await fetch(`${ob.endpoint}/api/v1/invoke`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(wireRequest),
+  });
+
+  const text = await res.text().catch(() => '');
+  let parsed: any = null;
+  try { parsed = text ? JSON.parse(text) : null; } catch { /* 非 JSON 忽略 */ }
+
+  if (!res.ok || parsed?.error) {
+    throw new Error(`[Gateway HTTP] ${parsed?.error ?? `invoke 失败 ${res.status}`}`);
+  }
+
+  // 服务端返回的 PluginPayloadWire（Data / Connection）
+  const wire = parsed as PluginPayloadWire;
+  const response: PluginMessage = { metadata: {}, payload: wire };
+  return { response };
+}
+
+/**
+ * 持久会话：WS /api/v1/ws。
+ * 连接建立后客户端首帧发送 PluginMessageWire，此后该连接双向转发 PluginFrame，
+ * 与 connectPlugin 的会话语义一致。
+ */
+async function httpWsTransport(
+  request: SendRouteOptions,
+  wireRequest: PluginMessage,
+  ob: OutboundConfig,
+  onFrame?: (frame: PluginFrame) => void,
+  onEof?: () => void
+): Promise<{ response: PluginMessage; connection?: Connection }> {
+  const wsUrl = `${ob.endpoint}/api/v1/ws` + (ob.token ? `?token=${encodeURIComponent(ob.token)}` : '');
+  const ws = new WebSocket(wsUrl);
+
+  await new Promise<void>((resolve, reject) => {
+    ws.onopen = () => resolve();
+    ws.onerror = () => reject(new Error(`[Gateway WS] 无法连接到 ${ob.endpoint} (${request.path})`));
+  });
+
+  // 首帧：PluginMessageWire（与 route_v2 请求体完全一致）
+  ws.send(JSON.stringify(wireRequest));
+
+  const conn = new WsConnection(ws, request.path);
+
+  ws.onmessage = (ev) => {
+    try {
+      const frame = ProtocolEnforcer.validate(JSON.parse(ev.data as string), request.path);
+      onFrame?.(frame);
+    } catch (err) {
+      logger.error('Protocol', `WS 帧违规 in ${request.path}`, err);
+    }
+  };
+  ws.onclose = () => {
+    conn.markDisconnected();
+    onEof?.();
+  };
+  ws.onerror = () => {
+    conn.markDisconnected();
+  };
+
+  // 与 native 对称：返回 Connection 型 payload，connectPlugin 据此拿到连接对象
+  return {
+    response: { metadata: {}, payload: { type: 'Connection', data: 'ws' } as any },
+    connection: conn,
+  };
 }
 
 // ==================== 4. 统一业务 API (对外接口) ====================
@@ -377,7 +608,7 @@ export async function connectPlugin<TInput = unknown>(
   }, () => {
     conn?.markDisconnected();
     onEvent?.({ type: 'disconnected', data: { reason: 'done' } });
-  });
+  }, 'connect');
 
   if (!result.connection) throw new Error(`[Protocol Error] ${path} session failed to establish`);
   conn = result.connection;

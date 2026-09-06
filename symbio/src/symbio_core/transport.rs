@@ -170,3 +170,26 @@ impl PluginChannel {
         )
     }
 }
+
+// ==================== 线路层消息容器 ====================
+//
+// 下面两个类型**从 `tauri/src-tauri/src/commands.rs` 原样迁入**，
+// 供 Tauri IPC 与 HTTP/WebSocket 两种传输共用同一份线上格式。
+// 它们不是新协议：自 V2.7 起前端 `services/plugin.ts` 就在用这个结构。
+
+/// 传输层的统一请求结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginMessageWire {
+    pub metadata: Value,
+    pub payload: Value,
+}
+
+/// 传输层的统一响应载荷结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum PluginPayloadWire {
+    /// 立即响应数据
+    Data(Value),
+    /// 连接已建立，返回 `connection_id`
+    Connection(String),
+}

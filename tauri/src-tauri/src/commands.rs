@@ -1,29 +1,17 @@
 //! V2.7 新版分形路由指令 (影子文件 - 极致调试版)
 
 use crate::AppState;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
-use symbio::symbio_core::{PluginFrame, PluginPayload, SymbioKey};
+use symbio::symbio_core::{
+    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, SymbioKey,
+};
 use tauri::Emitter;
 use tracing::{debug, error, info, warn};
 
-/// FFI 传输层的统一消息结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginMessageWire {
-    pub metadata: Value,
-    pub payload: Value,
-}
-
-/// FFI 传输层的载荷结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data")]
-pub enum PluginPayloadWire {
-    /// 立即响应数据
-    Data(Value),
-    /// 连接已建立，返回 connection_id
-    Connection(String),
-}
+// 线路层消息容器（PluginMessageWire / PluginPayloadWire）统一定义于
+// `symbio_core::transport`，与 HTTP/WebSocket 网关入站共用同一份线上格式，
+// 壳层不再重复定义（避免双份漂移）。
 
 #[tauri::command]
 pub async fn route_v2(

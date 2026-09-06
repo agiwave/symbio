@@ -10,7 +10,7 @@ use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
 use crate::symbio_core::schemas::entities::{
-    DetailAction, DetailDefinition, DetailField, DetailSection,
+    DetailAction, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
 use crate::symbio_core::schemas::setting::{setting_get, setting_list};
 use tracing::info;
@@ -150,11 +150,12 @@ crate::submit_object_creator!(PLUGIN_SETTING, SettingPlugin::build, dyn Plugin);
 
 /// 设置分区（固定清单）。`id` 同时作为前端 editor 的"扩展名"（config_type），
 /// 前端按 `setting:<config_type>` 复合键注入专属编辑表单。
-const SETTING_SECTIONS: [(&str, &str); 5] = [
+const SETTING_SECTIONS: [(&str, &str); 6] = [
     ("appearance", "外观"),
     ("session", "会话设置"),
     ("local", "本地工具"),
     ("web", "网络工具"),
+    ("gateway", "开放接口"),
     ("about", "关于"),
 ];
 
@@ -285,6 +286,114 @@ fn web_detail_definition() -> DetailDefinition {
     )
 }
 
+fn gateway_detail_definition() -> DetailDefinition {
+    config_definition(
+        "开放接口",
+        "配置本应用如何被调用（入站）与前端连向何处（出站）",
+        "gateway",
+        vec![
+            // ---- 入站 ----
+            DetailField {
+                key: "inbound_enabled".into(),
+                label: "启用入站服务".into(),
+                description: Some(
+                    "开启后本应用通过 HTTP/WebSocket 对外提供与前端完全一致的 API，第三方或其他 Symbio 实例可据此驱动本应用"
+                        .into(),
+                ),
+                widget: "toggle".into(),
+                default: Some(serde_json::json!(false)),
+                ..Default::default()
+            },
+            DetailField {
+                key: "inbound_protocol".into(),
+                label: "入站协议".into(),
+                widget: "select".into(),
+                options: vec![
+                    DetailOption {
+                        value: "native".into(),
+                        label: "native（仅本机 Tauri IPC，不监听端口）".into(),
+                    },
+                    DetailOption {
+                        value: "http".into(),
+                        label: "http（监听端口，第三方/其他实例可访问）".into(),
+                    },
+                ],
+                default: Some(serde_json::json!("native")),
+                ..Default::default()
+            },
+            DetailField {
+                key: "inbound_bind".into(),
+                label: "监听地址".into(),
+                description: Some("127.0.0.1 仅本机；0.0.0.0 暴露给全网（需配合访问令牌）".into()),
+                widget: "text".into(),
+                default: Some(serde_json::json!("127.0.0.1")),
+                ..Default::default()
+            },
+            DetailField {
+                key: "inbound_port".into(),
+                label: "监听端口".into(),
+                widget: "number".into(),
+                min: Some(1.0),
+                max: Some(65535.0),
+                step: Some(1.0),
+                default: Some(serde_json::json!(9231)),
+                ..Default::default()
+            },
+            DetailField {
+                key: "inbound_token".into(),
+                label: "访问令牌 (API Key)".into(),
+                description: Some("Bearer Token；回环地址可留空，非回环地址必填".into()),
+                widget: "password".into(),
+                placeholder: Some("留空则不校验（仅限 127.0.0.1）".into()),
+                ..Default::default()
+            },
+            DetailField {
+                key: "inbound_readonly".into(),
+                label: "只读模式".into(),
+                description: Some("仅放行查询类路径，禁止写操作与命令执行".into()),
+                widget: "toggle".into(),
+                default: Some(serde_json::json!(false)),
+                ..Default::default()
+            },
+            // ---- 出站 ----
+            DetailField {
+                key: "outbound_protocol".into(),
+                label: "出站协议".into(),
+                description: Some("前端调用后端所用的协议；选 http 即把本应用前端指向远程实例".into()),
+                widget: "select".into(),
+                options: vec![
+                    DetailOption {
+                        value: "native".into(),
+                        label: "native（进程内直连本机后端）".into(),
+                    },
+                    DetailOption {
+                        value: "http".into(),
+                        label: "http（连接另一个 Symbio 实例）".into(),
+                    },
+                ],
+                default: Some(serde_json::json!("native")),
+                ..Default::default()
+            },
+            DetailField {
+                key: "outbound_endpoint".into(),
+                label: "远程地址".into(),
+                description: Some("http://host:port（出站协议为 http 时生效）".into()),
+                widget: "text".into(),
+                placeholder: Some("http://127.0.0.1:9231".into()),
+                default: Some(serde_json::json!("http://127.0.0.1:9231")),
+                ..Default::default()
+            },
+            DetailField {
+                key: "outbound_token".into(),
+                label: "远程访问令牌".into(),
+                widget: "password".into(),
+                placeholder: Some("远程实例设置的 API Key".into()),
+                ..Default::default()
+            },
+        ],
+    )
+}
+
 #[async_trait::async_trait]
 impl crate::symbio_core::entities::EntityProvider for SettingPlugin {
     fn kind(&self) -> &'static str {
@@ -324,6 +433,7 @@ impl crate::symbio_core::entities::EntityProvider for SettingPlugin {
             "session" => Some(session_detail_definition()),
             "local" => Some(local_detail_definition()),
             "web" => Some(web_detail_definition()),
+            "gateway" => Some(gateway_detail_definition()),
             _ => None,
         }
     }

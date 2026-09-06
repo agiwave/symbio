@@ -37,7 +37,9 @@ pub use paths::*;
 pub use plugin::*;
 pub use system::{decode_output, run_command, validate_params};
 pub use tools::DefaultToolManager;
-pub use transport::{PluginChannel, PluginFrame, PluginPayload};
+pub use transport::{
+    PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
+};
 pub use types::{BoxStream, EventResult, SystemEvent, ToolCall};
 
 // 重导出 inventory 供 submit_object_creator! 宏使用

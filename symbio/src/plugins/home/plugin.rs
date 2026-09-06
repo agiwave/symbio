@@ -57,6 +57,7 @@ impl GlobalConfig {
                 "hook",
                 "agent",
                 "skill",
+                "gateway",
             ];
             for name in &defaults {
                 obj.entry(name.to_string()).or_insert_with(|| {

@@ -34,6 +34,7 @@ pub const PLUGIN_TELEGRAM: &str = "telegram";
 pub const PLUGIN_SKILL: &str = "skill";
 /// Setting 插件工厂
 pub const PLUGIN_SETTING: &str = "setting";
+pub const PLUGIN_GATEWAY: &str = "gateway";
 /// Session 插件工厂
 pub const PLUGIN_SESSION: &str = "session";
 /// MCP 插件工厂

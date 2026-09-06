@@ -6,6 +6,7 @@ import './styles/base.css'
 import './styles/controls.css'
 import App from './App.vue'
 import { useAppearanceStore } from './stores/appearance'
+import { initGatewayTransport } from './services/plugin'
 
 const app = createApp(App)
 
@@ -16,3 +17,7 @@ app.use(router)
 useAppearanceStore().apply()
 
 app.mount('#app')
+
+// 启动期预读网关出站配置（Promise 已缓存；首次出站请求前必已完成，消除竞态）。
+// 始终走原生 invoke 读取，不受出站协议切换影响，无「鸡生蛋」问题。
+void initGatewayTransport()

@@ -16,6 +16,7 @@
 mod agent;
 mod composite;
 mod event_bus;
+mod gateway;
 mod home;
 mod hook;
 mod local;
