@@ -747,6 +747,17 @@ async fn dispatch_upload<P: EntityProvider + ?Sized>(
 
     provider.on_uploaded(ctx, &id).await?;
 
+    // 实体生命周期变更通知：前端据此即时同步清单（created 乐观插入 / updated 重拉）。
+    // 事件总线不可用不应影响上传本身的结果。上传实体均为顶层（parent_id = None）。
+    crate::symbio_core::event_bus::EventBus::publish_entity_changed(
+        provider.kind(),
+        &id,
+        if existed { "updated" } else { "created" },
+        None,
+        None,
+    )
+    .await;
+
     Ok(PluginPayload::new(&EntityUploadResponse {
         kind: provider.kind().to_string(),
         id,
@@ -769,6 +780,18 @@ async fn dispatch_delete<P: EntityProvider + ?Sized>(
     provider.delete_item(ctx, &req.id).await?;
 
     provider.on_deleted(ctx, &req.id).await?;
+
+    // 实体生命周期变更通知：前端据此即时把该项从清单中移除。
+    // 容器子实体删除（上方提前 return）暂不通知——前端容器文件树由
+    // 容器实体自身的 entities/list 刷新。此路径删除的是顶层实体（parent_id = None）。
+    crate::symbio_core::event_bus::EventBus::publish_entity_changed(
+        provider.kind(),
+        &req.id,
+        "deleted",
+        None,
+        None,
+    )
+    .await;
 
     Ok(PluginPayload::new(&EntityUploadResponse {
         kind: provider.kind().to_string(),

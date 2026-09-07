@@ -110,10 +110,29 @@ impl SessionPlugin {
             .await
             .remove(session_id);
 
-        self.get_store()
-            .await?
-            .delete_session(session_id)
-            .await?;
+        // 删除前先读归属：子会话事件的 parent_id = 父会话 id，供前端按作用域
+        // 过滤（顶层清单订阅 null 归属即可排除）。store 获取失败按顶层处理
+        // （事件照发）；load_session 未命中返回空 Session（无 parent 声明），
+        // 语义安全。
+        let store = self.get_store().await?;
+        let parent_id = store
+            .load_session(session_id)
+            .await
+            .ok()
+            .and_then(|s| s.parent_session_id().map(str::to_string));
+
+        store.delete_session(session_id).await?;
+
+        // 实体生命周期变更通知（机制级）：前端据此即时把该会话从清单移除，
+        // 无需等待全量重拉。session/clear 与 entities/delete 两条删除路径共用此处。
+        crate::symbio_core::event_bus::EventBus::publish_entity_changed(
+            crate::symbio_core::entities::ENTITY_SESSION,
+            session_id,
+            "deleted",
+            None,
+            parent_id,
+        )
+        .await;
 
         Ok(())
     }
@@ -254,6 +273,15 @@ impl SessionPlugin {
 
         let mut session = self.get_or_create_session(&req.session_id).await?;
 
+        // 新建判定：get_or_create 未命中已存会话时返回全新空会话
+        // （无消息、metadata 为空对象）。用于区分 created / updated 生命周期事件。
+        let is_new = session.messages.is_empty()
+            && session
+                .metadata
+                .as_object()
+                .map(|o| o.is_empty())
+                .unwrap_or(true);
+
         // 合并 metadata（浅合并）
         if let Some(existing_obj) = session.metadata.as_object_mut() {
             if let Some(new_obj) = req.metadata.as_object() {
@@ -282,6 +310,19 @@ impl SessionPlugin {
             use crate::symbio_core::event_bus::EventBus;
             EventBus::try_publish("session", Some(&req.session_id), json!({ "type": "title" }));
         }
+
+        // 实体生命周期变更通知（机制级）：新建 → created，其余 → updated。
+        // 前端订阅 entity kind 事件，按归属过滤后同步清单（乐观插入 / 防抖重拉）。
+        // 携带 display_title 便于前端乐观更新时直接命名；携带 parent_id 归属
+        // （子会话事件的 parent_id = 父会话 id），顶层清单订阅 null 归属即可排除。
+        crate::symbio_core::event_bus::EventBus::publish_entity_changed(
+            crate::symbio_core::entities::ENTITY_SESSION,
+            &req.session_id,
+            if is_new { "created" } else { "updated" },
+            Some(session.display_title()),
+            session.parent_session_id().map(str::to_string),
+        )
+        .await;
 
         Ok(serde_json::to_value(session_update::Response {
             success: true,

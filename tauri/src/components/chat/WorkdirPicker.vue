@@ -37,12 +37,22 @@ import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
 
 const props = defineProps<{
-  /** 当前会话 ID */
-  sessionId: string
+  /** 当前会话 ID；草稿态（新建，尚无会话）可省略 */
+  sessionId?: string
   /** 当前会话的 workdir（可选） */
   workdir: string | null
   /** 当前会话的消息条数（按 seq 排序后的总数） */
   messageCount: number
+  /**
+   * 草稿模式（新建态）：点击选择目录后仅 emit('select', path) 回传父组件草稿 refs，
+   * 不写 store（避免 setActiveWorkdir 污染 activeId 指向的旧会话）。
+   */
+  draft?: boolean
+}>()
+
+const emit = defineEmits<{
+  /** 草稿模式：用户选定目录后回传路径（父组件更新草稿 refs） */
+  select: [path: string]
 }>()
 
 const store = useSessionsStore()
@@ -86,6 +96,12 @@ async function onClick() {
         ? (selected[0] as string)
         : null
     if (!path) return
+    if (props.draft) {
+      // 草稿模式（新建态）：只回传路径，绝不调 setActiveWorkdir
+      // （其内部操作 store.activeId，草稿态下会污染旧的已选会话）
+      emit('select', path)
+      return
+    }
     await store.setActiveWorkdir(path)
   } catch (e) {
     logger.error('WorkdirPicker', '选择工作目录失败', e)

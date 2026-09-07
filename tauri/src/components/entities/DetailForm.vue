@@ -596,10 +596,17 @@ function initForm() {
   }
 }
 
+// 表单重置的身份门闩：记录上次绑定实体的 `${kind}:${id}`。事件驱动的后台
+// 清单刷新（refreshKind）会以新对象替换 item——身份未变时跳过重置，保住
+// 编辑现场；仅身份变化（切换实体 / 新建↔编辑）才走完整重置+预填。
+let lastItemKey: string | null | undefined
 watch(
   () => props.item,
   (it) => {
     if (isConfig.value) return // config 绑定：onMounted 拉取，不随 item 重置
+    const itemKey = it ? `${it.kind}:${it.id}` : null
+    if (itemKey === lastItemKey) return // 同一实体的后台刷新 → 保留输入现场
+    lastItemKey = itemKey
     initForm()
     // 预填来源：item.config（后端下发的完整配置）优先；
     // info 绑定的 static 字段取自 item 顶层（extra flatten 下发的概览字段）

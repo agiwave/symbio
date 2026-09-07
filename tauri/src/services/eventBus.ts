@@ -284,7 +284,110 @@ export function subscribeEntityStatus(
   return subscribe({ kind: KIND_ENTITY }, (busEvent) => {
     const d = busEvent.data?.data as EntityStatusEvent | undefined
     if (!d || d.entity_type !== entityType) return
+    // 过滤生命周期载荷（{change:'created'|'updated'|'deleted'}）：两者共用
+    // KIND_ENTITY 频道，status 处理器只认运行时状态事件，避免把列表项的
+    // status 抹成 undefined（lifecycle 载荷无 status 字段）
+    if ('change' in d) return
     handler(d)
+  })
+}
+
+/**
+ * 实体生命周期变更事件（与后端 `publish_entity_changed` 的载荷对齐）
+ *
+ * - `created`：实体新建 → 前端可乐观插入清单（或防抖重拉）
+ * - `updated`：实体元数据更新 → 防抖重拉清单
+ * - `deleted`：实体删除 → 前端直接从清单移除（并清理选中态）
+ */
+export interface EntityChangedEvent {
+  entity_type: string
+  id: string
+  change: 'created' | 'updated' | 'deleted'
+  /** 实体展示名（后端尽力提供；created 乐观插入时可直接用作标题） */
+  title?: string | null
+}
+
+/**
+ * 订阅指定实体类型的生命周期变更（entity kind）
+ *
+ * 返回取消订阅函数。事件仅当 `entity_type` 匹配时回调。
+ * 与 `subscribeEntityStatus`（运行时状态角标）互补：本事件驱动
+ * 清单的增/删/改同步，保证详情页操作实时反映到列表。
+ */
+export interface EntityChangedEvent {
+  entity_type: string
+  id: string
+  change: 'created' | 'updated' | 'deleted'
+  title?: string | null
+  /** 容器归属（如子会话的父会话 id）；顶层实体为 null。订阅端据此过滤作用域 */
+  parent_id?: string | null
+}
+
+/** 订阅作用域：声明只接收哪个容器归属下的实体事件 */
+export interface EntityChangedScope {
+  /** null = 仅顶层实体（顶层清单用，子会话事件不会误入）；指定 id = 仅该容器下的子实体；缺省 = 不过滤 */
+  parentId?: string | null
+}
+
+export function subscribeEntityChanged(
+  entityType: string,
+  handler: (e: EntityChangedEvent) => void,
+  scope?: EntityChangedScope
+): () => void {
+  // 作用域过滤收敛在 dispatch 一处：后端消息通道与前端本地通道共用同一判定，
+  // 保证「通道唯一、作用域在订阅端声明」的机制约定。
+  const dispatch = (e: EntityChangedEvent) => {
+    if (scope && scope.parentId !== undefined && (e.parent_id ?? null) !== scope.parentId) return
+    handler(e)
+  }
+
+  // 前端模式通道：注册进本地注册表（publishEntityChangedLocal 的投递目标）
+  let localHandlers = localEntityHandlers.get(entityType)
+  if (!localHandlers) {
+    localHandlers = new Set()
+    localEntityHandlers.set(entityType, localHandlers)
+  }
+  localHandlers.add(dispatch)
+
+  // 后端消息通道：订阅事件总线
+  const unsub = subscribe({ kind: KIND_ENTITY }, (busEvent) => {
+    const d = busEvent.data?.data as EntityChangedEvent | undefined
+    if (!d || d.entity_type !== entityType) return
+    if (d.change !== 'created' && d.change !== 'updated' && d.change !== 'deleted') return
+    dispatch(d)
+  })
+
+  return () => {
+    unsub()
+    localHandlers?.delete(dispatch)
+    if (localHandlers && localHandlers.size === 0) localEntityHandlers.delete(entityType)
+  }
+}
+
+// ===== 前端模式：页面间本地通知（与后端事件同构） =====
+//
+// 实体列表同步有两种模式，列表同步器经同一订阅入口（subscribeEntityChanged）收敛：
+// - 后端消息模式（主通道）：后端增删改实体 → publish_entity_changed → 事件总线，
+//   跨窗口一致的唯一事实源；
+// - 前端模式（乐观更新）：操作发起方已本地变更数据（如 store 内直接改 list），
+//   经 publishEntityChangedLocal 以**同构载荷**即时通知其他页面，不等事件往返；
+//   后端事件随后到达，同步器幂等处理（防抖重拉收敛到服务端真相）。
+const localEntityHandlers = new Map<string, Set<(e: EntityChangedEvent) => void>>()
+
+/** 前端模式通知：本地发布实体生命周期变更（载荷与后端 publish_entity_changed 同构） */
+export function publishEntityChangedLocal(
+  entityType: string,
+  change: EntityChangedEvent['change'],
+  id: string,
+  title?: string | null
+): void {
+  const event: EntityChangedEvent = { entity_type: entityType, id, change, title: title ?? null }
+  localEntityHandlers.get(entityType)?.forEach((h) => {
+    try {
+      h(event)
+    } catch (err) {
+      logger.error('[eventBus]', 'local entity-changed handler 执行失败', err)
+    }
   })
 }
 

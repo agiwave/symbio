@@ -121,10 +121,12 @@ export function useWorkbench(ops: WorkbenchOps) {
     selectedId.value = null
   }
 
-  /** 取消新建：恢复到首项（autoSelect 模式）或清空 */
-  function cancelCreate() {
+  /** 取消新建：恢复到首项（autoSelect 模式）或清空。
+   *  `opts.autoSelect = false` 时跳过"回填首项"——用于创建成功后的收尾清理，
+   *  避免覆盖刚通过 selectKey 选中的新实体（否则会闪回旧首项）。 */
+  function cancelCreate(opts?: { autoSelect?: boolean }) {
     creating.value = false
-    if (ops.autoSelect) {
+    if ((opts?.autoSelect ?? true) && ops.autoSelect) {
       const first = firstKey()
       if (first) selectKey(first)
     }
@@ -157,21 +159,27 @@ export function useWorkbench(ops: WorkbenchOps) {
     }
   }
 
-  /** 刷新某类别（listAll 模式下整表重拉后仅更新该类别箱） */
+  /** 刷新某类别（listAll 模式下整表重拉后仅更新该类别箱）。
+   *  条目按 id 身份保持合并：内容未变者复用旧对象引用——EntityCard :key
+   *  稳定（列表零闪烁）、selected.item 引用稳定（DetailForm 的 item watch
+   *  不被无关后台刷新触发，编辑中输入得以存活）。 */
   async function refreshKind(kind: string) {
     const caps = categories.value.find((c) => c.kind === kind)?.capabilities
     if (ops.listAll) {
       const resp = await ops.listAll()
       const next = partitionByKind(resp, categories.value)
-      kindStates.value = { ...kindStates.value, [kind]: next[kind] ?? { items: [], capabilities: caps ?? fallbackCaps() } }
+      const state = next[kind] ?? { items: [] as EntitySummary[], capabilities: caps ?? fallbackCaps() }
+      const prev = kindStates.value[kind]
+      if (prev) state.items = mergeItemsById(prev.items, state.items)
+      kindStates.value = { ...kindStates.value, [kind]: state }
       return
     }
     if (!ops.listItems) return
     const resp = await ops.listItems(kind)
-    kindStates.value = {
-      ...kindStates.value,
-      [kind]: toKindState(resp, kind, categories.value),
-    }
+    const state = toKindState(resp, kind, categories.value)
+    const prev = kindStates.value[kind]
+    if (prev) state.items = mergeItemsById(prev.items, state.items)
+    kindStates.value = { ...kindStates.value, [kind]: state }
   }
 
   // === 删除（唯一实现：确认 → deletingId → ops.deleteItem → 刷新 → 清选中） ===
@@ -258,11 +266,40 @@ function toKindState(
   }
 }
 
+/**
+ * 清单条目身份保持合并：以 id 对齐新旧条目——
+ * - 新清单存在同 id 旧条目且内容浅相等 → 复用旧对象（引用稳定）；
+ * - 内容有变 → 旧条目为底、新条目字段覆盖（未下发的字段不丢）；
+ * - 排序跟随新清单，旧独有条目自然淘汰。
+ * 目的：后台刷新不再产生全量新对象，列表渲染与详情绑定都不被惊扰。
+ */
+function mergeItemsById(prev: EntitySummary[], next: EntitySummary[]): EntitySummary[] {
+  if (prev.length === 0) return next
+  const prevById = new Map(prev.map((it) => [it.id, it]))
+  return next.map((fresh) => {
+    const old = prevById.get(fresh.id)
+    if (!old) return fresh
+    if (shallowEqualSummary(old, fresh)) return old
+    return { ...old, ...fresh }
+  })
+}
+
+/** EntitySummary 浅比较：顶层字段逐一比对（不含嵌套深比较，够用于清单同步） */
+function shallowEqualSummary(a: EntitySummary, b: EntitySummary): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const k of keys) {
+    if ((a as Record<string, unknown>)[k] !== (b as Record<string, unknown>)[k]) return false
+  }
+  return true
+}
+
 function fallbackCaps(): EntityCapabilities {
   return {
     zip_upload: false,
     independent_form: false,
     realtime_status: false,
+    // 未登记类型：刷新幂等无害，保守保留入口（与后端 capabilities_for 兜底一致）
+    refreshable: true,
     mutable: false,
     test_connection: false,
     read_only: true,

@@ -33,13 +33,13 @@
       @new="onNew"
     >
       <template #header-actions>
-        <button v-if="canCreateContainer" class="icon-btn" :title="`新建 ${title}`" :disabled="loading" @click="onNew">
+        <button v-if="showCreate" class="icon-btn" :title="`新建 ${title}`" :disabled="loading" @click="onNew">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
-        <button class="icon-btn" title="刷新" :disabled="loading" @click="onRefresh">
+        <button v-if="showRefresh" class="icon-btn" title="刷新" :disabled="loading" @click="onRefresh">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
             <polyline points="21 3 21 8 16 8" />
@@ -103,7 +103,7 @@
       <template #empty>
         <template v-if="isContainer">
           <p>暂无{{ activeKindMeta?.label ?? '实体' }}</p>
-          <p v-if="canCreateContainer" class="hint">点击右上角「新建」添加{{ activeKindMeta?.label ?? '' }}</p>
+          <p v-if="showCreate" class="hint">点击右上角「新建」添加{{ activeKindMeta?.label ?? '' }}</p>
           <p v-else class="hint">{{ activeKindMeta?.description ?? '该类别由系统管理' }}</p>
         </template>
         <template v-else>
@@ -131,7 +131,7 @@
               <button class="action-btn" :disabled="saving" @click="saveCreate">
                 {{ saving ? '保存中…' : '创建' }}
               </button>
-              <button class="action-btn secondary" :disabled="saving" @click="cancelCreate">取消</button>
+              <button class="action-btn secondary" :disabled="saving" @click="cancelCreate()">取消</button>
             </div>
           </div>
         </div>
@@ -156,13 +156,15 @@
                 </button>
               </div>
               <div class="create-actions">
-                <button class="action-btn secondary" type="button" @click="cancelCreate">取消</button>
+                <button class="action-btn secondary" type="button" @click="cancelCreate()">取消</button>
               </div>
             </div>
           </div>
 
           <template v-else>
-            <!-- 注册的专属 editor（model）；:key 确保切换实体/类型时重挂载，避免表单状态残留 -->
+            <!-- 注册的专属 editor（model）；:key 确保切换实体/类型时重挂载，避免表单状态残留。
+                 @created：专属 editor 自建实体（如 session 引导页"新建会话"）后上报 id，
+                 统一走 onEditorCreated（刷新清单 + 选中），与选中分支的绑定保持一致。 -->
             <component
               :is="createEditor(createKind)"
               v-if="createEditor(createKind)"
@@ -173,6 +175,7 @@
               :existing-ids="typeStates[createKind]?.items.map((i) => i.id) ?? []"
               @save="saveForm"
               @cancel="cancelCreate"
+              @created="onEditorCreated"
             />
 
             <!-- 定义驱动的新建表单（后端 entities/detail 空态定义，如 model）；
@@ -236,7 +239,7 @@
                     <button class="action-btn" :disabled="saving" @click="saveManifest">
                       {{ saving ? '保存中…' : '创建' }}
                     </button>
-                    <button class="action-btn secondary" :disabled="saving" @click="cancelCreate">取消</button>
+                    <button class="action-btn secondary" :disabled="saving" @click="cancelCreate()">取消</button>
                   </div>
                 </div>
               </div>
@@ -380,7 +383,7 @@ import { useWorkbenchView } from '@/composables/useWorkbenchView'
 import { useEntityProviders } from '@/composables/useEntityProviders'
 import { getEntityIconFor } from '@/registry/entityTypes'
 import type { DetailAction, EntitySummary } from '@/schemas/entities'
-import { subscribe, subscribeEntityStatus } from '@/services/eventBus'
+import { subscribeEntityChanged, subscribeEntityStatus } from '@/services/eventBus'
 
 const props = defineProps<{
   /** leaf 模式：路由 :types 参数（'all' | 逗号分隔 kind | 单 kind） */
@@ -459,6 +462,9 @@ const {
   testing,
   typeStates,
   activeTypes,
+  // 列表头动作开关 —— 全部由后端能力决定（§3.4，前端不硬编码）
+  showCreate,
+  showRefresh,
 } = useWorkbenchView({
   mode: pageMode,
   typesParam: computed(() => props.typesParam),
@@ -581,10 +587,6 @@ function runMechanismAction(a: DetailAction) {
   }
 }
 
-/** 容器模式：当前子类别是否可由用户创建（path_hint 空 = 系统管理型） */
-const canCreateContainer = computed(
-  () => !isContainer || Boolean(activeKindMeta.value?.path_hint)
-)
 
 // === entity 列表展示辅助 ===
 function cardStatus(
@@ -667,13 +669,20 @@ function removeSelectedEntry() {
 }
 
 // === 机制约定：专属 editor 创建实体后上报 id → 刷新清单并选中之 ===
+// 注意顺序与 autoSelect：先刷新清单再退出新建态，且 cancelCreate 传
+// { autoSelect: false } 跳过"回填首项"。若按默认 autoSelect，会立即选中
+// 旧清单第一项（或清空选中），随后 select(新会话) 才切到新会话——
+// 详情区会先闪旧第一项再跳新会话，且刷新窗口内瞬间回落 empty 态。
+// 刷新在前 + 跳过回填，可让选中切换时目标已在清单中，详情页一步到位。
+// 列表同步本身由实体生命周期事件通道统一处理（订阅块内的 subscribeEntityChanged），
+// 这里只负责「新建后立即选中」的交互闭环；refreshKind 是选中前的即时兜底。
 async function onEditorCreated(id: string) {
   const kind = createKind.value ?? selected.value?.kind
-  cancelCreate()
   if (kind) {
     await refreshKind(kind)
     select(`${kind}:${id}`)
   }
+  cancelCreate({ autoSelect: false })
 }
 
 // === 实时订阅（entity；事件总线推送，非轮询） ===
@@ -713,12 +722,29 @@ watch(activeTypes, (types) => {
         it.status_detail = status_detail ?? undefined
       }
     }),
-    // 粗粒度事件才刷新清单（status=工作状态流转、title=会话命名）；
-    // 流式 update 等细粒度事件与列表无关，忽略以免空闲期反复重拉
-    subscribe({ kind: d.kind }, (e) => {
-      const t = (e.data?.data as { type?: string } | undefined)?.type
-      if (t === 'status' || t === 'title') scheduleRefresh(d.kind)
-    }),
+    // （历史遗留的 subscribe({ kind }) 已删除：它按 kind 命名频道过滤，而后端
+    // 实体事件一律发布在 'entity' 频道——对实体 kind 是永不匹配的死订阅。
+    // status 流转由上方 subscribeEntityStatus 原位补丁，无需刷新清单。）
+    // 实体生命周期事件 → 列表同步（幂等：created/updated 防抖重拉收敛到
+    // 后端真相；deleted 本地即时移除 + 清理失效选中）。
+    // 载荷可能是后端消息模式（publish_entity_changed），也可能是前端模式
+    // （publishEntityChangedLocal，同构载荷），处理器对两者无感。
+    // 作用域 parentId: null = 仅顶层实体：子会话（归属父会话）事件不进顶层清单，
+    // 也不触发重拉；父会话详情的子会话清单将来按 parent_id=<父id> 订阅。
+    subscribeEntityChanged(
+      d.kind,
+      (e) => {
+        if (e.change === 'deleted') {
+          const st = typeStates.value[d.kind]
+          if (st) st.items = st.items.filter((i) => i.id !== e.id)
+          const sel = selected.value
+          if (sel && sel.kind === d.kind && sel.item.id === e.id) select(null)
+        } else {
+          scheduleRefresh(d.kind)
+        }
+      },
+      { parentId: null },
+    ),
   ])
 })
 onBeforeUnmount(() => {

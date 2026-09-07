@@ -39,7 +39,7 @@
 |---|---|
 | `kind` / `label` / `order` | 类型标识 / 展示标签 / 展示顺序（导航排序权威） |
 | `prefix` | 实体操作路径前缀（前端拼 `${prefix}/entities/<op>`） |
-| `capabilities` | 能力开关（zip 上传 / 独立表单 / 实时状态 / 可写 / 连接测试 / 只读） |
+| `capabilities` | 能力开关（zip 上传 / 独立表单 / 实时状态 / 列表可刷新 / 可写 / 连接测试 / 只读） |
 | `supports_upload` / `compact_list` / `status_indicator` | 列表页行为开关 |
 | `container_kinds` | **容器声明**（见 §2.3；空 = 条目不是容器） |
 
@@ -221,6 +221,23 @@
 - ② **粗粒度 bus 事件**（§2.4）→ 防抖（800ms）刷新该类清单；
 - 禁止轮询、禁止私有刷新通道；细粒度事件不得触发刷新。
   后端任何语义级变化（新建/删除/更名/运行状态）自动反映到列表。
+- `capabilities.refreshable == false` 的类型（如 session）清单由
+  ①② 事件通道自持同步，**不提供手动刷新**；刷新按钮仅服务于
+  「清单可能被外部修改」的类型（model/mcp/skill/agent 等）。
+
+### 3.4 列表头动作（能力驱动）
+
+列表头上方的动作按钮（新建 / 刷新）**全部由后端能力决定**，
+前端不得按 kind 硬编码其显隐：
+
+- **新建**：实体模式要求 `creatableInActive` 非空（manager 通道
+  `supports_upload && mutable`，或 editor 引导通道 `independent_form` +
+  kind 级 editor 注册）；容器模式要求当前子类别声明了 `path_hint`
+  （为空 = 系统管理型，如子会话由机制派生，无新建入口）。
+  setting（`mutable=false` 且无 kind 级 editor）两通道皆不满足 → 不显示。
+- **刷新**：实体模式要求所有活动类型均声明 `refreshable: true`
+  （任一类型清单由事件通道自持同步或固定即不显示）；容器模式看当前
+  子类别能力。树/条目清单（可浏览外部修改）保留手动刷新。
 
 路由（机制实例，非机制组成部分）：
 
@@ -238,7 +255,9 @@
    实现 `category()` + `manifest_file()` + `summarize()` 即可走默认流程）；
 2. 在插件 route 顶部接入 `crate::symbio_core::entities::dispatch`；
 3. 在 `provider_registry()` 登记一条 `EntityProviderInfo`
-   （kind / prefix / capabilities / order / label / supports_upload）；
+   （kind / prefix / capabilities / order / label / supports_upload；
+   **`capabilities.refreshable` 声明列表头是否提供手动刷新**——清单由
+   事件通道自持同步或固定不变的类型为 `false`）；
 4. （可选）条目是容器：登记 `container_kinds` 并实现四个 `*_container_item` 钩子；
 5. （可选，**详情默认路径**）重写 `detail_definition` 钩子下发
    `DetailDefinition`（§3.2），前端零页面/零 ts 开发。
@@ -261,7 +280,9 @@
 - 详情 editor 注册 **不得** 违反 §3.2 解析链与复杂详情判定标准：
   可由定义表达的表单详情注册专属 editor 属于违规实现。
 - 前端 **不得** 硬编码实体类型清单、类别标签、路径模板、能力开关、
-  预设数据；只允许注册图标与复杂详情 editor 这类纯 UI 映射。
+  列表头动作显隐（新建/刷新由 `creatableInActive`/`path_hint`/
+  `refreshable` 能力判定，见 §3.4）、预设数据；只允许注册图标与
+  复杂详情 editor 这类纯 UI 映射。
 - 请求/响应结构变更必须先改 `symbio_core/schemas/entities.rs` 与
   `tauri/src/schemas/entities.ts` 两侧契约，再改实现。
 
@@ -271,7 +292,8 @@
 
 ### 6.1 会话（session）——「非实体存储 + editor 引导型创建」
 
-- **列表** = 机制标准列表（摘要含实时 working 状态）；
+- **列表** = 机制标准列表（摘要含实时 working 状态）；清单由生命周期
+  事件通道自持同步，列表头**无刷新按钮**（`refreshable=false`，§3.4）；
 - **详情** = kind 级注册的复杂详情 editor（聊天工作区）：机制选中是唯一
   真相（`:key` 重挂载 + `watch item.id → store.selectSession`）；
 - **新建** = editor 引导通道：`independent_form` + kind 级 editor 注册 →
@@ -295,6 +317,8 @@ session/local/web 三分区由后端下发 config 绑定定义（`load_path`/
 `save_path` = 各插件标准 `config/get|set` 路由），DetailForm 渲染并自持保存。
 appearance（前端 store 即时生效）按 §3.2 判定标准保留注册 editor；
 about（纯信息展示）亦保留。
+分区清单**固定**：列表头**无新建/刷新按钮**（`mutable=false` 且
+`refreshable=false`，§3.4）。
 
 ### 6.4 MCP / Skill——upload 绑定 + 结构化控件
 

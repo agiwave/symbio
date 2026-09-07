@@ -8,8 +8,11 @@
   - item 非 null（选中态）：聊天工作区 = ChatMainPanel（工作目录的层级
     浏览不在详情页——经机制动作「管理内部实体」进入会话容器实体页，
     目录树是 tree 机制的一个场景子类别，与子会话并列）；
-  - item 为 null（机制"新建"态）：新建会话引导（capabilities.independent_form +
-    kind 级 editor 注册 → 机制新建按钮自动可用；空列表时页面自动进入此态）。
+  - item 为 null（机制"新建"态）：新建会话引导——输入区与现有会话完全一致
+    （ChatInputArea + WorkdirPicker + ChatSettings 草稿态：目录/Agent/模型/模式/
+    风险等级均可选，暂存于本地草稿 refs，发送首条消息时经 createSession(workdir, init)
+    一并写入 metadata 落库）（capabilities.independent_form + kind 级 editor 注册 →
+    机制新建按钮自动可用；空列表时页面自动进入此态）。
 
   选中同步：机制选中（:key 重挂载）是唯一真相，watch item.id → store.selectSession。
   创建经 emit('created') 回到机制页面层。机制动作（删除/容器入口等）经
@@ -31,20 +34,49 @@
     <div class="create-card">
       <h3 class="create-title">开始新会话</h3>
       <p class="create-desc">
-        将使用最近的工作目录创建新会话；尚未设置过目录时，可在创建后的聊天区引导中选择。
+        输入区与现有会话完全一致——工作目录、智能体、模型、运行模式与风险等级均可在发送前选择；发送第一条消息时才会真正创建会话（懒创建，不产生空会话）。
       </p>
-      <button class="action-btn" :disabled="creating" @click="onCreate">
-        {{ creating ? '创建中…' : '新建会话' }}
-      </button>
+      <ChatInputArea
+        ref="draftInputRef"
+        v-model="draftText"
+        v-model:attached-images="draftImages"
+        :is-loading="creating"
+        class="create-chat-input"
+        @submit="onSendFirst"
+      />
+      <div class="settings-row">
+        <WorkdirPicker
+          draft
+          :workdir="draftWorkdir"
+          :message-count="0"
+          @select="draftWorkdir = $event"
+        />
+        <div class="settings-divider" />
+        <ChatSettings
+          draft
+          v-model:agent-id="draftAgentId"
+          v-model:available-agents="draftAgents"
+          v-model:model-provider-id="draftProviderId"
+          v-model:available-model-providers="draftProviders"
+          v-model:draft-mode="draftMode"
+          v-model:draft-risk-level="draftRisk"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import type { DetailAction, EntityCapabilities, EntitySummary } from '@/schemas/entities'
+import type { AgentProfile, ImageAttachment } from '@/types'
+import type { ModelProviderConfig } from '@/schemas/model_providers'
 import { useSessionsStore } from '@/stores/sessions'
+import { getLastWorkdir } from '@/services/plugin'
 import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
+import ChatInputArea from '@/components/chat/ChatInputArea.vue'
+import ChatSettings from '@/components/chat/ChatSettings.vue'
+import WorkdirPicker from '@/components/chat/WorkdirPicker.vue'
 
 const props = defineProps<{
   item: EntitySummary | null
@@ -68,6 +100,26 @@ const emit = defineEmits<{
 const store = useSessionsStore()
 const creating = ref(false)
 
+/**
+ * 新建态（懒创建）草稿 refs：与现有会话输入区同构的本地选择，
+ * 发送首条消息时经 createSession(workdir, init) 一并写入 metadata。
+ */
+const draftInputRef = ref<{ resetHeight: () => void; textarea: HTMLTextAreaElement | null } | null>(null)
+const draftText = ref('')
+const draftImages = ref<ImageAttachment[]>([])
+const draftWorkdir = ref<string | null>(store.lastUsedWorkdir ?? getLastWorkdir() ?? null)
+const draftAgentId = ref<string | null>(null)
+const draftAgents = ref<AgentProfile[]>([])
+const draftProviderId = ref('')
+const draftProviders = ref<ModelProviderConfig[]>([])
+const draftMode = ref<'auto' | 'interactive'>('interactive')
+const draftRisk = ref<'low' | 'medium' | 'high'>('medium')
+
+// 挂载后自动聚焦输入框（新建引导，减少一次点击）
+onMounted(() => {
+  void nextTick(() => draftInputRef.value?.textarea?.focus())
+})
+
 /** 机制动作分发（ChatMainPanel 头部按钮 → 机制通道） */
 function onMechAction(a: DetailAction) {
   if (a.id === 'delete') emit('delete')
@@ -84,13 +136,41 @@ watch(
   { immediate: true }
 )
 
-async function onCreate() {
-  if (creating.value) return
+/**
+ * 新建模式（无 id）：发送首条消息时才真正创建会话（懒创建）。
+ *
+ * 机制约定（实体生命周期联动）：
+ * - 新建态不创建任何实体、列表不更新；
+ * - 发送首条消息才调 createSession 真正建会话（草稿目录与 Agent/模型/模式/风险
+ *   选择经 init 参数一并写入 metadata；列表同步交给 onEditorCreated 刷新 +
+ *   后端 created 事件通道），同时向 store 排队该首条消息（文本 + 附件）；
+ * - emit('created', id) 让 Workbench 刷新清单并立即选中新会话；
+ * - Session editor 卸载 → 新选中项的 ChatMainPanel/ModelChatPanel 挂载 →
+ *   消费排队消息（按 id 匹配）→ 发出首条消息，完成闭环。
+ */
+async function onSendFirst() {
+  const text = draftText.value.trim()
+  if ((!text && draftImages.value.length === 0) || creating.value) return
   creating.value = true
   try {
-    // 直接创建会话（有最近 workdir 则自动沿用）；未设置 workdir 时由聊天区的
-    // EmptyWorkdirState 空态引导用户选择，不在此强制弹目录对话框打断流程。
-    const id = await store.createSession()
+    // 懒创建：此刻才真正建会话；草稿选择经 init 写入本地条目 + 后端 metadata，
+    // 保证选中切换后 ModelChatPanel 同步水合、ChatSettings 回显与草稿一致。
+    const id = await store.createSession(draftWorkdir.value ?? undefined, {
+      agentId: draftAgentId.value,
+      providerId: draftProviderId.value || undefined,
+      mode: draftMode.value,
+      riskLevel: draftRisk.value
+    })
+    // 首条消息（含附件）排队给新会话的 ChatMainPanel；附件 thumbnailUrl 是
+    // object URL，所有权随载荷转移（消费端发送后 revoke），此处**不可 revoke**。
+    store.pendingFirstMessage = {
+      id,
+      text,
+      images: draftImages.value.length ? draftImages.value : undefined
+    }
+    // 清空本地草稿输入（附件不 revoke，见上）
+    draftText.value = ''
+    draftImages.value = []
     emit('created', id)
   } finally {
     creating.value = false
@@ -123,21 +203,40 @@ async function onCreate() {
 .create-card {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 0.75rem;
-  text-align: center;
-  max-width: 24rem;
+  width: min(40rem, 100%);
 }
 .create-title {
   margin: 0;
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
+  text-align: center;
 }
 .create-desc {
   margin: 0;
   font-size: var(--font-size-sm);
   color: var(--text-muted);
   line-height: var(--line-height-normal);
+  text-align: center;
+}
+
+/* 新建态输入区（与现有会话 chat-controls 同构：输入框 + 设置行） */
+.create-chat-input {
+  width: 100%;
+}
+/* 与 ModelChatPanel chat-controls 的 settings-row/settings-divider 同构复刻 */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+.settings-divider {
+  width: 1px;
+  height: 1rem;
+  background: var(--color-border);
+  margin: 0 0.5rem;
+  flex-shrink: 0;
 }
 </style>

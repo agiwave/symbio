@@ -18,6 +18,12 @@ export interface EntityCapabilities {
   independent_form: boolean
   /** 列表项是否有实时状态 */
   realtime_status: boolean
+  /**
+   * 列表头是否提供「刷新」动作。清单可能被外部修改的类型为 true；
+   * 清单由生命周期事件通道自持同步（session）或固定（setting）为 false。
+   * 前端据此决定列表头刷新按钮是否渲染（§3.4），不得自行判断。
+   */
+  refreshable: boolean
   /** 是否可写（可上传新增 / 删除） */
   mutable: boolean
   /** 是否支持连接测试 */

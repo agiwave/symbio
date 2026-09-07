@@ -114,8 +114,9 @@
       <span class="icon">{{ currentRiskInfo.icon }}</span>
     </div>
 
-    <!-- 心跳任务按钮（纯图标，定时任务图标） -->
+    <!-- 心跳任务按钮（纯图标，定时任务图标）；新建态（草稿）尚无会话，隐藏 -->
     <div
+      v-if="!draft"
       class="setting-btn heartbeat-btn compact"
       :class="{ on: heartbeatEnabled }"
       @click.stop="emit('open-heartbeat')"
@@ -220,6 +221,13 @@ const props = defineProps<{
   availableModelProviders: ModelProviderConfig[]
   /** 当前会话 id：用于读/写"运行模式"（auto / interactive，按会话记忆） */
   sessionId?: string
+  /**
+   * 新建态（草稿模式）：尚无 sessionId，mode/risk 由父组件持有（草稿 refs），
+   * 通过 update:draftMode / update:draftRiskLevel 上抛；心跳按钮隐藏（会话尚不存在）。
+   */
+  draft?: boolean
+  draftMode?: 'auto' | 'interactive'
+  draftRiskLevel?: 'low' | 'medium' | 'high'
 }>()
 
 const emit = defineEmits<{
@@ -227,6 +235,10 @@ const emit = defineEmits<{
   'update:availableAgents': [value: AgentProfile[]]
   'update:modelProviderId': [value: string]
   'update:availableModelProviders': [value: ModelProviderConfig[]]
+  /** 草稿态（新建）修改运行模式：回传给父组件的草稿 refs */
+  'update:draftMode': [value: 'auto' | 'interactive']
+  /** 草稿态（新建）修改执行风险等级：回传给父组件的草稿 refs */
+  'update:draftRiskLevel': [value: 'low' | 'medium' | 'high']
   /** 点击「心跳」按钮：打开会话设置（心跳任务配置）弹窗 */
   'open-heartbeat': []
 }>()
@@ -259,6 +271,8 @@ const riskLevels = [
 // 执行风险等级：与 agent_id/provider_id/mode 同级别——走 store（per-session 记忆 + 持久化到 metadata.risk_level）。
 // 切换会话/刷新页面后下拉框保留选中值；不再使用全局 LocalConfig（全局值仅作为旧会话的迁移源）。
 const riskLevel = computed<'low' | 'medium' | 'high'>(() => {
+  // 草稿态（新建）：由父组件的草稿 refs 提供
+  if (props.draft) return props.draftRiskLevel ?? 'medium'
   return props.sessionId ? sessionsStore.getSessionRiskLevel(props.sessionId) : 'medium'
 })
 const currentRiskInfo = computed(() => riskLevels.find(r => r.value === riskLevel.value) || riskLevels[1])
@@ -285,11 +299,16 @@ const runModes = [
   }
 ]
 const currentMode = computed<'auto' | 'interactive'>(() => {
+  // 草稿态（新建）：由父组件的草稿 refs 提供
+  if (props.draft) return props.draftMode ?? 'interactive'
   return props.sessionId ? sessionsStore.getSessionMode(props.sessionId) : 'interactive'
 })
 const currentModeInfo = computed(() => runModes.find(m => m.value === currentMode.value) || runModes[0])
 function selectMode(value: 'auto' | 'interactive') {
-  if (props.sessionId) {
+  if (props.draft) {
+    // 草稿态：回传父组件，不写 store（尚无会话）
+    emit('update:draftMode', value)
+  } else if (props.sessionId) {
     sessionsStore.setSessionMode(props.sessionId, value)
   }
   closeAllMenus()
@@ -314,7 +333,10 @@ function closeAllMenus() {
 }
 
 async function selectRiskLevel(level: 'low' | 'medium' | 'high') {
-  if (props.sessionId) {
+  if (props.draft) {
+    // 草稿态：回传父组件，不写 store（尚无会话）
+    emit('update:draftRiskLevel', level)
+  } else if (props.sessionId) {
     sessionsStore.setSessionRiskLevel(props.sessionId, level)
   }
   closeAllMenus()

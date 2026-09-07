@@ -374,6 +374,16 @@ onMounted(async () => {
   nextTick(() => scrollToBottom())
   // 启动看门狗：检测"卡在处理中但长时间无事件"的会话（目标 2 系统保障）
   startWatchdog()
+
+  // 懒创建闭环：新建会话流程中排队的首条消息（文本 + 可选图片附件；
+  // 用户在"新建详情"输入、创建完成后经机制选中切到本会话），挂载即注入并发送。
+  // 注意：图片的 thumbnailUrl 是 object URL，所有权随载荷转移，此处**不可 revoke**。
+  const pending = sessionsStore.consumePendingFirstMessage(props.sessionId)
+  if (pending) {
+    inputText.value = pending.text
+    if (pending.images?.length) attachedImages.value = pending.images
+    handleSend()
+  }
 })
 
 onBeforeUnmount(() => {

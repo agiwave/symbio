@@ -79,6 +79,11 @@ pub struct EntityCapabilities {
     pub independent_form: bool,
     /// 列表项是否有实时状态（`session` 的 is_working、`mcp` 的连接状态等）。
     pub realtime_status: bool,
+    /// 列表头部是否提供「刷新」动作。清单内容可能静默变化（外部修改、
+    /// 事件未覆盖）的类型为 true；清单由生命周期事件通道自持同步
+    /// （`session`）或固定不变（`setting`）的类型为 false——前端据此
+    /// 决定列表头是否渲染刷新按钮，不得自行判断（§3.4）。
+    pub refreshable: bool,
     /// 是否可写（可上传新增 / 删除）。只读实体（如某些 skill）为 false。
     pub mutable: bool,
     /// 是否支持"连接测试"（`model` / `mcp`）。
@@ -88,84 +93,97 @@ pub struct EntityCapabilities {
 }
 
 impl EntityCapabilities {
-    /// model：表单为主，可测试、可写，无 zip
+    /// model：表单为主，可测试、可写，无 zip；清单可能被外部修改，可刷新
     pub const MODEL: Self = Self {
         zip_upload: false,
         independent_form: true,
         realtime_status: false,
+        refreshable: true,
         mutable: true,
         test_connection: true,
         read_only: false,
     };
 
-    /// mcp：zip 为主，实时连接状态，可测试、可写
+    /// mcp：zip 为主，实时连接状态，可测试、可写；清单可能被外部修改，可刷新
     pub const MCP: Self = Self {
         zip_upload: true,
         independent_form: false,
         realtime_status: true,
+        refreshable: true,
         mutable: true,
         test_connection: true,
         read_only: false,
     };
 
-    /// skill：zip 为主，可写，无实时状态/无连接测试
+    /// skill：zip 为主，可写，无实时状态/无连接测试；清单可能被外部修改，可刷新
     pub const SKILL: Self = Self {
         zip_upload: true,
         independent_form: false,
         realtime_status: false,
+        refreshable: true,
         mutable: true,
         test_connection: false,
         read_only: false,
     };
 
-    /// agent：zip 为主，可写，无实时状态
+    /// agent：zip 为主，可写，无实时状态；清单可能被外部修改，可刷新
     pub const AGENT: Self = Self {
         zip_upload: true,
         independent_form: false,
         realtime_status: false,
+        refreshable: true,
         mutable: true,
         test_connection: false,
         read_only: false,
     };
 
-    /// session：表单为主，实时状态（is_working），可写
+    /// session：表单为主，实时状态（is_working），可写。
+    /// 清单由实体生命周期事件通道自持同步（created/updated/deleted 即时收敛），
+    /// 列表头不提供「刷新」（refreshable=false）。
     pub const SESSION: Self = Self {
         zip_upload: false,
         independent_form: true,
         realtime_status: true,
+        refreshable: false,
         mutable: true,
         test_connection: false,
         read_only: false,
     };
 
-    /// setting：各分区有独立表单（前端按 config_type 注入 editor），
-    /// 不可新建/删除（分区清单固定），保存由各 editor 自持通道完成
+    /// setting：各分区有独立表单（前端按 config_type 注入 editor）。
+    /// 分区清单固定——列表头无「新建/刷新」（refreshable=false），
+    /// 保存由各 editor 自持通道完成
     pub const SETTING: Self = Self {
         zip_upload: false,
         independent_form: true,
         realtime_status: false,
+        refreshable: false,
         mutable: false,
         test_connection: false,
         read_only: false,
     };
 
     /// 容器子实体（文件级）：可写可删，无 zip / 表单 / 实时状态 / 连接测试。
-    /// agent bundle 内部的 prompt / skill / mcp 等单文件实体取此形态。
+    /// agent bundle 内部的 prompt / skill / mcp 等单文件实体取此形态；
+    /// 清单可能被外部修改，可刷新。
     pub const BUNDLE_FILE: Self = Self {
         zip_upload: false,
         independent_form: false,
         realtime_status: false,
+        refreshable: true,
         mutable: true,
         test_connection: false,
         read_only: false,
     };
 
     /// 容器子实体（系统管理型）：可删不可创建（子会话由父会话派生，
-    /// 非用户新建——对应容器声明 `path_hint` 为空）。
+    /// 非用户新建——对应容器声明 `path_hint` 为空）；清单随会话活动变化，
+    /// 可刷新。
     pub const SUB_SESSION: Self = Self {
         zip_upload: false,
         independent_form: false,
         realtime_status: false,
+        refreshable: true,
         mutable: true,
         test_connection: false,
         read_only: false,
@@ -185,6 +203,8 @@ pub fn capabilities_for(kind: &str) -> EntityCapabilities {
             zip_upload: false,
             independent_form: false,
             realtime_status: false,
+            // 未登记类型：刷新幂等无害，保守保留入口
+            refreshable: true,
             mutable: false,
             test_connection: false,
             read_only: true,

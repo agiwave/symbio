@@ -183,8 +183,10 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     if (!kind) return ''
     const c = capsOf(kind)
     if (c.zip_upload) return '点击右上角「新建」上传 ZIP（文件名即实体目录名）'
-    if (createEditor(kind)) return '点击右上角「新建」开始'
-    if (c.independent_form) return '点击右上角「新建」填写表单创建'
+    if (creatableByEditor(kind)) return '点击右上角「新建」开始'
+    if (isManagerCreatable(getProvider(kind) ?? makeReadonly(kind))) {
+      return '点击右上角「新建」填写表单创建'
+    }
     return ''
   })
 
@@ -224,9 +226,27 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
   const creatableInActive = computed(() =>
     activeTypes.value.filter((p) => isManagerCreatable(p) || creatableByEditor(p.kind))
   )
+  /**
+   * 列表头「新建」可见性 —— 能力驱动（§3.4，前端不得硬编码）：
+   * - 容器模式：子类别声明了 path_hint（路径模板）才可创建；path_hint 空 =
+   *   系统管理型（如子会话），由机制派生，无新建入口；
+   * - 实体模式：creatableInActive 非空（manager 通道 supports_upload+mutable，
+   *   或 editor 引导通道 independent_form+kind 级 editor）。
+   *   setting（mutable=false、分区清单固定）两通道皆否 → 不显示。
+   */
   const canCreate = computed(() =>
-    isContainer ? true : creatableInActive.value.length > 0
+    isContainer ? Boolean(activeKindMeta.value?.path_hint) : creatableInActive.value.length > 0
   )
+  /**
+   * 列表头「刷新」可见性 —— 能力驱动（§3.4）：实体模式要求所有活动类型均
+   * 声明 refreshable（任一类型清单由生命周期事件通道自持同步（session）或
+   * 固定（setting）即不显示手动刷新）；容器模式看当前子类别能力（树/条目
+   * 清单保留手动刷新）。
+   */
+  const canRefresh = computed(() => {
+    if (isContainer) return activeKindMeta.value?.capabilities.refreshable ?? true
+    return activeTypes.value.length > 0 && activeTypes.value.every((p) => p.capabilities.refreshable)
+  })
   const canDeleteSelected = computed(() => {
     const sel = selected.value
     if (!sel) return false
@@ -249,7 +269,7 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
       kind,
       provider_name: kind,
       prefix: kind,
-      capabilities: { zip_upload: false, independent_form: false, realtime_status: false, mutable: false, test_connection: false, read_only: true },
+      capabilities: { zip_upload: false, independent_form: false, realtime_status: false, refreshable: true, mutable: false, test_connection: false, read_only: true },
       order: 999,
       label: kind,
       supports_upload: false,
@@ -288,10 +308,10 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     createKind.value = null
     if (!creating.value) wb.enterCreate()
   }
-  function cancelCreate() {
+  function cancelCreate(opts?: { autoSelect?: boolean }) {
     createKind.value = null
     editorError.value = ''
-    wb.cancelCreate()
+    wb.cancelCreate(opts)
   }
 
   // ==================== 详情页定义（definition-driven detail） ====================
@@ -751,9 +771,14 @@ export function useWorkbenchView(opts: WorkbenchViewOptions) {
     selected,
     selectedId,
     select,
-    // 新建（统一入口 + 分流状态）
+    // 新建（统一入口 + 分流状态）与列表头动作开关（能力驱动，§3.4）
     creating,
     creatableInActive,
+    canCreate,
+    canRefresh,
+    // 视图模板用的别名（语义：列表头按钮是否渲染）
+    showCreate: canCreate,
+    showRefresh: canRefresh,
     onNew,
     createKind,
     activeFormKind,

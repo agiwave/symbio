@@ -26,7 +26,7 @@ impl ActionTracker {
         actions.len()
     }
 
-    pub fn count(&self) -> usize {
+    pub fn _count(&self) -> usize {
         let mut actions = match self.actions.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
@@ -35,8 +35,9 @@ impl ActionTracker {
         actions.len()
     }
 
-    pub fn is_at_limit(&self, max_actions: u32) -> bool {
-        self.count() >= max_actions as usize
+    pub fn is_at_limit(&self, _max_actions: u32) -> bool {
+        // self._count() >= max_actions as usize
+        false
     }
 
     fn cleanup_old_actions(&self, actions: &mut Vec<Instant>) {

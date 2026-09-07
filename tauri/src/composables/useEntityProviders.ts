@@ -70,6 +70,8 @@ export function useEntityProviders() {
         zip_upload: false,
         independent_form: false,
         realtime_status: false,
+        // 未登记类型：刷新幂等无害，保守保留入口（与后端 capabilities_for 兜底一致）
+        refreshable: true,
         mutable: false,
         test_connection: false,
         read_only: true,

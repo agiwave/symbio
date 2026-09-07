@@ -15,6 +15,7 @@ const CAP = {
   zip_upload: false,
   independent_form: false,
   realtime_status: false,
+  refreshable: true,
   mutable: true,
   test_connection: false,
   read_only: false,
