@@ -121,7 +121,7 @@ impl<'a> TurnProcessor<'a> {
                 );
                 Err(PluginError::StreamError(msg))
             }
-            Ok(out) => {
+            Ok(mut out) => {
                 plugin_info!(
                     "model",
                     "[DIAG] TurnProcessor::send_request: parse_sse_stream Ok, text_len={}, reasoning_len={}, tool_calls={}",

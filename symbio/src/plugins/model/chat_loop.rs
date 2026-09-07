@@ -242,7 +242,7 @@ pub async fn run_chat_loop(
             result.is_ok()
         );
 
-        let out = match result {
+        let mut out = match result {
             Err(PluginError::RetryWithoutContextId) => {
                 plugin_info!(
                     "model",

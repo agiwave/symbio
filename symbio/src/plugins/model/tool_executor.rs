@@ -28,7 +28,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use super::message_builder::build_tool_message;
+use super::message_builder::{build_tool_message, short_id};
 
 // 工具结果提取
 
@@ -335,6 +335,73 @@ pub async fn execute_tool_async(
 
 // 批量工具调用处理
 
+/// 记录协议级工具调用失败（工具调用 id/name 缺失或非法）。
+///
+/// 不再简单跳过：跳过会让已落库的 ToolCall 节点没有结果子节点，
+/// 下一轮请求携带"无结果的 tool_call"触发 provider 400（Bug 2 同类问题）。
+/// 处理口径与普通工具执行失败一致（失败属信息性）：
+/// - 生成一条 `role=Tool` 的错误结果子节点（Completed + success=false），错误内容喂回 LLM；
+/// - 生成父 ToolCall 节点的失败补丁（failure_kind=error）并广播。
+///
+/// 两条消息分别加入 tool_messages / parent_updates，由调用方统一持久化。
+async fn record_protocol_failure(
+    channel: &mut PluginChannel,
+    tool_call_id: &str,
+    error_text: &str,
+    tool_messages: &mut Vec<ChatMessage>,
+    parent_updates: &mut Vec<ChatMessage>,
+) {
+    let result_msg_id = uuid::Uuid::new_v4().to_string();
+    let mut tool_msg = build_tool_message(
+        tool_call_id,
+        &format!("Error: {error_text}"),
+        Some(false),
+        Some(result_msg_id),
+    );
+    // 失败属信息性：结果以 Completed 留在上下文（Failed 会被 get_context_messages
+    // 过滤，导致"孤儿 tool 结果"使下一轮 LLM 请求非法）。
+    tool_msg.status = Some(MessageStatus::Completed);
+
+    let _ = channel
+        .tx
+        .send(PluginFrame::Data(
+            serde_json::to_value(session_chat_response::StreamEvent::Update {
+                message: tool_msg.clone(),
+            })
+            .unwrap_or_default(),
+        ))
+        .await;
+
+    let parent_update = ChatMessage {
+        id: tool_call_id.to_string(),
+        status: Some(MessageStatus::Completed),
+        error: Some(error_text.to_string()),
+        meta: Some(json!({
+            "success": false,
+            "failure_kind": "error",
+        })),
+        ..Default::default()
+    };
+    let _ = channel
+        .tx
+        .send(PluginFrame::Data(
+            serde_json::to_value(session_chat_response::StreamEvent::Update {
+                message: parent_update.clone(),
+            })
+            .unwrap_or_default(),
+        ))
+        .await;
+
+    plugin_info!(
+        "model",
+        "[Tool] Protocol failure recorded as failed tool call: {}",
+        error_text
+    );
+
+    tool_messages.push(tool_msg);
+    parent_updates.push(parent_update);
+}
+
 /// 顺序处理一批工具调用，向 channel 广播每个工具的结果，
 /// 并返回 `(tool_messages, parent_updates)`：
 /// - `tool_messages`：工具结果子节点（用于追加到对话历史）
@@ -395,23 +462,46 @@ pub async fn process_tool_calls_async(
             }
         }
 
+        // 工具调用 id 缺失/非法 → 作为工具调用失败处理（不跳过）。
+        // 正常情况下 ToolCallAccumulator 已保证 id 非空；此分支为兜底防御。
+        // 注意：兜底 id 仅用于挂载失败结果与父节点补丁（保持结构完整）。
         let id = match tc.id.as_ref() {
-            Some(id) if !id.is_empty() => id.clone(),
+            Some(id) if !id.trim().is_empty() => id.clone(),
             _ => {
-                plugin_error!("model", "Protocol Error: Tool call ID missing. Skipping.");
+                plugin_error!(
+                    "model",
+                    "Protocol Error: Tool call ID missing/invalid, recording as failed tool call"
+                );
+                record_protocol_failure(
+                    channel,
+                    &short_id(),
+                    "模型未返回有效的工具调用 ID（协议错误）",
+                    &mut tool_messages,
+                    &mut parent_updates,
+                )
+                .await;
                 continue;
             }
         };
+        // 工具名缺失/非法 → 同样作为工具调用失败处理（不跳过），
+        // 避免已落库的 ToolCall 节点没有结果子节点。
         let name = match tc.name.as_ref() {
-            Some(name) if !name.is_empty() => name.clone(),
+            Some(name) if !name.trim().is_empty() => name.clone(),
             _ => {
                 plugin_error!(
                     "model",
                     format!(
-                        "Protocol Error: Tool call name missing. Skipping ID: {}",
-                        id
+                        "Protocol Error: Tool call name missing/invalid, recording as failed tool call. ID: {id}"
                     )
                 );
+                record_protocol_failure(
+                    channel,
+                    &id,
+                    "模型未返回有效的工具名称（协议错误）",
+                    &mut tool_messages,
+                    &mut parent_updates,
+                )
+                .await;
                 continue;
             }
         };
@@ -639,4 +729,108 @@ pub async fn process_tool_calls_async(
     }
 
     (tool_messages, parent_updates)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbio_core::SimpleRequest;
+    use std::sync::atomic::AtomicBool;
+
+    fn test_ctx() -> Arc<dyn InvokeRequest> {
+        Arc::new(SimpleRequest::new(None, None))
+    }
+
+    /// 需求 2 回归：工具调用 id 缺失/非法时不得跳过，必须作为工具调用失败处理——
+    /// 生成错误结果子节点（喂回 LLM）+ 父节点失败补丁，保证已落库的 ToolCall
+    /// 节点不会成为"无结果 tool_call"（下轮请求 400）。
+    #[tokio::test]
+    async fn missing_tool_call_id_is_recorded_as_failure() {
+        let (_host, mut plugin_chan) = PluginChannel::pair(64);
+        let abort = Arc::new(AtomicBool::new(false));
+        let tcs = vec![ToolCallInfo {
+            id: None,
+            name: Some("dir_list".into()),
+            arguments: json!({ "path": "." }),
+        }];
+
+        let (msgs, updates) = process_tool_calls_async(
+            tcs,
+            &None,
+            &mut plugin_chan,
+            &abort,
+            test_ctx(),
+        )
+        .await;
+
+        assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
+        assert_eq!(msgs[0].role, Some(MessageRole::Tool));
+        assert_eq!(msgs[0].status, Some(MessageStatus::Completed));
+        assert!(
+            msgs[0]
+                .content
+                .as_ref()
+                .map(|c| c.to_text().contains("Error:"))
+                .unwrap_or(false),
+            "结果内容应携带错误信息"
+        );
+        assert!(!msgs[0].parent_id.as_deref().unwrap_or("").is_empty());
+
+        assert_eq!(updates.len(), 1, "必须生成父节点失败补丁");
+        assert_eq!(updates[0].status, Some(MessageStatus::Completed));
+        assert_eq!(
+            updates[0].meta.as_ref().and_then(|m| m.get("failure_kind")).and_then(|v| v.as_str()),
+            Some("error")
+        );
+    }
+
+    /// 空串 id 与缺失同等对待（"不合法"）。
+    #[tokio::test]
+    async fn empty_tool_call_id_is_recorded_as_failure() {
+        let (_host, mut plugin_chan) = PluginChannel::pair(64);
+        let abort = Arc::new(AtomicBool::new(false));
+        let tcs = vec![ToolCallInfo {
+            id: Some(String::new()),
+            name: Some("dir_list".into()),
+            arguments: json!({}),
+        }];
+
+        let (msgs, updates) = process_tool_calls_async(
+            tcs,
+            &None,
+            &mut plugin_chan,
+            &abort,
+            test_ctx(),
+        )
+        .await;
+
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(updates.len(), 1);
+    }
+
+    /// 工具名缺失/非法 → 同样作为失败处理（结果挂到已知 id 上，结构完整）。
+    #[tokio::test]
+    async fn missing_tool_name_is_recorded_as_failure() {
+        let (_host, mut plugin_chan) = PluginChannel::pair(64);
+        let abort = Arc::new(AtomicBool::new(false));
+        let tcs = vec![ToolCallInfo {
+            id: Some("tc-known".into()),
+            name: Some(String::new()),
+            arguments: json!({}),
+        }];
+
+        let (msgs, updates) = process_tool_calls_async(
+            tcs,
+            &None,
+            &mut plugin_chan,
+            &abort,
+            test_ctx(),
+        )
+        .await;
+
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-known"));
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].id, "tc-known");
+    }
 }

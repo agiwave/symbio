@@ -302,7 +302,7 @@ impl TurnOutput {
     }
 
     pub fn into_messages(
-        self,
+        mut self,
         root_id: &str,
         n_tools: usize,
     ) -> Vec<crate::symbio_core::schemas::session::chat_message::ChatMessage> {
