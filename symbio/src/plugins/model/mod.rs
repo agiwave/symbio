@@ -30,5 +30,6 @@ mod protocols;
 pub mod resume;
 mod tool_call;
 pub mod tool_executor;
+mod tool_result_guard;
 mod turn_processor;
 mod types;

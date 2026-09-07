@@ -29,6 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::message_builder::{build_tool_message, short_id};
+use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 
 // 工具结果提取
 
@@ -612,7 +613,20 @@ pub async fn process_tool_calls_async(
             prompt.id = result_msg_id.clone();
             prompt
         } else {
-            build_tool_message(&id, &final_res, Some(success), Some(result_msg_id))
+            // L0 守卫：超长工具结果存档 + head/tail 摘要，避免单条撑爆上下文窗口
+            // （对应"单次工具调用内容太长"的压缩诉求；物理字节上限不再是唯一防线）。
+            let guarded = guard_tool_result(&final_res, DEFAULT_TOOL_RESULT_TOKEN_CAP);
+            let mut tool_msg = build_tool_message(&id, &guarded.text, Some(success), Some(result_msg_id));
+            if guarded.truncated {
+                let mut meta = tool_msg.meta.clone().unwrap_or_else(|| json!({}));
+                meta["tool_result_truncated"] = json!(true);
+                if let Some(p) = guarded.archive_path {
+                    meta["archive_path"] = json!(p);
+                }
+                meta["origin_tokens"] = json!(guarded.original_tokens);
+                tool_msg.meta = Some(meta);
+            }
+            tool_msg
         };
         // 任何模式：工具失败属"信息性"，结果仍以合法 tool 结果（Completed）留在上下文，
         // 让 LLM 看到错误并继续；其父节点在下方也标 Completed（不暂停会话）。

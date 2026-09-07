@@ -16,6 +16,7 @@ pub mod providers;
 pub mod entities;
 pub mod schemas;
 mod system;
+mod tokenizer;
 mod tools;
 mod transport;
 mod types;
@@ -36,6 +37,10 @@ pub use logger::*;
 pub use paths::*;
 pub use plugin::*;
 pub use system::{decode_output, run_command, validate_params};
+pub use tokenizer::{
+    calibration_ratio, default_tokenizer, report_provider_usage, CalibratedTokenizer,
+    HeuristicTokenizer, Tokenizer, PER_MESSAGE_OVERHEAD,
+};
 pub use tools::DefaultToolManager;
 pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
