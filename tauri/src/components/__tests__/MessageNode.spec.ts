@@ -159,8 +159,9 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         ],
       }),
     )
+    // 请求/结果不设外层标签（内层节点头部「请求/响应」已承载语义），仅「过程」保留
     const labels = w.findAll('.ts-label').map((l) => l.text())
-    expect(labels).toEqual(['请求', '过程', '结果'])
+    expect(labels).toEqual(['过程'])
     // 子会话 Turn 以折叠节点形态嵌在「过程」段中
     expect(w.text()).toContain('sub-agent')
   })

@@ -188,12 +188,14 @@
            · 请求：ToolCall 自带参数（前端合成子节点，JSON 高亮）；
            · 过程：子会话 Turn（role=tool），仅子会话类工具存在，无则整段隐藏；
            · 结果：工具返回文本（JSON）与 user_prompt（审批/提问）。
+           请求/结果段不设外层标签——内层节点自身头部已带「📤 请求 / ↩ 响应」语义，
+           外层再加标签属于重复呈现（外层仅保留「过程」标签，子会话 Turn 头部是智能体名，
+           无等价语义可承载）。
            Turn 的组级呈现（等待骨架/透明分组/组级重试）见模板顶部 isRootTurn 分支。 -->
       <template v-else>
         <div v-if="isToolCall" class="tool-sections">
-          <!-- 请求 -->
+          <!-- 请求（内层节点头部即「请求」，不再加外层标签） -->
           <div v-if="toolRequestNode" class="tool-section">
-            <div class="ts-label">请求</div>
             <MessageNode
               :node="toolRequestNode"
               :depth="(depth ?? 0) + 1"
@@ -217,9 +219,8 @@
               @edit="emit('edit', $event)"
             />
           </div>
-          <!-- 结果：工具返回 / 审批提问 -->
+          <!-- 结果：工具返回 / 审批提问（内层节点头部即「响应」，不再加外层标签） -->
           <div v-if="resultChildren.length" class="tool-section">
-            <div class="ts-label">结果</div>
             <MessageNode
               v-for="r in resultChildren"
               :key="r.id"
