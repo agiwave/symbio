@@ -42,7 +42,7 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 
 ## 架构亮点（简述）
 
-> 详细设计见 [docs/explanation/ARCHITECTURE.md](./docs/explanation/ARCHITECTURE.md)。
+> 详细设计见 [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md)，请求全链路见 [docs/architecture/DATA_FLOW.md](./docs/architecture/DATA_FLOW.md)。
 
 - **分形路由**：用 `/` 分隔的路径定位任意能力，容器与叶子插件接口完全一致。
 - **LLM 原生**：递归收集插件树中的工具定义，深度支持 Function Calling。
@@ -52,7 +52,8 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 ```
 桌面端 / CLI  ──(route_v2)──►  Home / ── worker(Composite) ──┬─ agent / session / model
                                                             ├─ local / web / skill / mcp
-                                                            └─ telegram / explorer / setting / hook / event_bus
+                                                            └─ telegram
+HTTP/WS 客户端 ──(gateway 插件)──►  Home /        setting / hook / event_bus 直挂根下
 ```
 
 ---
@@ -71,7 +72,7 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 | `skill` | 技能 | 加载与执行技能定义 |
 | `mcp` | MCP 桥 | MCP server 注册（stdio / http）与工具调用 |
 | `telegram` | Telegram 通道 | 消息收发与人机交互 |
-| `explorer` | 文件浏览 | 文件/目录列表与读写 |
+| `gateway` | 入站网关 | HTTP/WebSocket 入站（与 route_v2 同构），外部客户端接入 |
 | `setting` | 配置 | 系统级配置读写 |
 | `hook` | 钩子 | 钩子注册与触发 |
 | `event_bus` | 事件总线 | 进程内帧广播（连接级 SSE 风格推送） |
@@ -128,11 +129,11 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 
 详细文档见 **[文档中心 (docs/README.md)](./docs/README.md)**，快速导航：
 
-- **教程**：[快速上手](./docs/tutorials/getting-started.md)
-- **愿景**：[VISION](./docs/explanation/VISION.md) · **架构**：[ARCHITECTURE](./docs/explanation/ARCHITECTURE.md) · [运作机制](./docs/reference/OPERATION_MECHANISM.md) · [API 设计](./docs/reference/API_DESIGN.md)
-- **开发**：[开发指南](./docs/how-to/DEVELOPMENT_GUIDE.md) · [编译指南](./docs/how-to/BUILD_GUIDE.md) · [插件开发指南](./docs/how-to/PLUGIN_DEVELOPMENT_GUIDE.md) · [结构规范](./docs/how-to/STRUCTURE_GUIDE.md)
-- **插件自文档**：[agent](./symbio/src/plugins/agent/README.md)（含认知体系 / 架构 / 测试）
-- **历史归档**：[设计讨论（历史）](./docs/archive/design_docs/HISTORY_AND_REVIEWS.md) · [更新日志](./docs/CHANGELOG.md)
+- **架构**：[OVERVIEW](./docs/architecture/OVERVIEW.md) · [数据流与调用链](./docs/architecture/DATA_FLOW.md) · [协议规范](./docs/architecture/PROTOCOLS.md) · [决策记录](./docs/DECISIONS.md)
+- **参考**：[路由清单](./docs/reference/ROUTES.md) · [错误码](./docs/reference/ERROR_CODES.md) · [配置参考](./docs/reference/CONFIGURATION.md)
+- **开发**：[插件开发指南](./docs/guides/PLUGIN_DEVELOPMENT.md) · [排障手册](./docs/guides/TROUBLESHOOTING.md) · [贡献指南](./CONTRIBUTING.md)
+- **现行设计**：[统一实体管理机制](./docs/design/entity-management-mechanism.md) · [OAB 规范](./docs/design/open-agent-bundle-spec.md) · [前端 PRD](./docs/design/frontend-ui-ux-prd.md)
+- **更新日志**：[CHANGELOG](./docs/CHANGELOG.md) · **历史归档**：[archive/](./docs/archive/)
 
 ---
 

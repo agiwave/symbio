@@ -3,7 +3,7 @@
 > 目标：在 App 运行期间对外提供一套纯 HTTP/WebSocket 接口，让第三方应用像前端一样访问和控制整个应用。
 > 接口服务本身作为**一个普通插件**纳入现有插件体系，配置/开启/关闭**复用现有设置页机制**，前端零改动。
 
-- 状态：设计稿 v2（待评审）
+- 状态：**已实现落地**（`gateway` 插件）。现行接口事实见 [reference/ROUTES.md](../reference/ROUTES.md)，调用链见 [architecture/DATA_FLOW.md](../architecture/DATA_FLOW.md)
 - 日期：2026-09-06
 - 上一版：`http-api-transport.md` 的 HTTP transport 方案（已由本版取代：服务从 tauri 壳层下沉为插件，SSE 改为 WebSocket 为主）
 
