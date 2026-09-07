@@ -162,24 +162,14 @@ impl ModelProtocol for AnthropicProtocol {
                 }
                 parts.push(res_obj);
             }
-            // 处理推理内容 (Reasoning / Thinking)
-            if m.role == MessageRole::Assistant {
-                if let Some(ref reasoning) = m.reasoning_content {
-                    if !reasoning.is_empty() {
-                        // 如果模型看起来是 Claude 3.7+，尝试使用 thinking 块
-                        // 注意：官方 API 要求思考块必须有 signature，
-                        // 但对于许多中转或 LMStudio，可能不需要或支持纯文本形式。
-                        // 为了最大兼容性，我们暂时使用带标签的文本块，或者如果以后有了 signature 则使用 thinking 块。
-                        parts.insert(
-                            0,
-                            json!({
-                                "type": "text",
-                                "text": format!("<thought>\n{}\n</thought>", reasoning)
-                            }),
-                        );
-                    }
-                }
-            }
+            // 推理内容（Reasoning / Thinking）不回传：
+            // 1) 我们保存的 reasoning 没有 Anthropic 官方 signature，无法构造合法的
+            //    thinking 块；以 <thought> 文本块形式回传对官方 API 是无效内容，
+            //    只会白白占用上下文窗口并干扰模型。
+            // 2) OpenAI / Gemini 协议同样不回传历史 reasoning（它是模型内部过程），
+            //    此处保持各协议行为一致。
+            // 注意：本轮请求开启 thinking 时，模型会基于消息历史重新推理，
+            // 历史思考内容并非必需输入。
 
             if parts.is_empty() {
                 continue;

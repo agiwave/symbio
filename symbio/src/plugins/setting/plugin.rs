@@ -454,7 +454,10 @@ mod tests {
 
         // 固定清单、按声明顺序（前端据此展示，不做二次排序）
         let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
-        assert_eq!(ids, vec!["appearance", "session", "local", "web", "about"]);
+        assert_eq!(
+            ids,
+            vec!["appearance", "session", "local", "web", "gateway", "about"]
+        );
 
         // kind 标记为 setting，名称正确
         let first = &items[0];
