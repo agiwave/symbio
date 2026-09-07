@@ -52,6 +52,10 @@ impl Default for GatewayConfig {
 ///
 /// 只读并非完整安全边界，而是**兜底**：即便令牌泄露到可信内网，也只能读取
 /// 而无法触发写操作与命令执行。
+///
+/// **网关自身配置不在放行范围内**：`gateway/*` 接口恒走 native（前端不经 HTTP
+/// 访问本插件），且 `gateway/config/get` 会返回 `inbound_token`，一旦放行等于
+/// 只读模式下也能把令牌读走——故显式拒绝，与 `gateway/config/set` 一致。
 pub fn is_readonly_allowed(path: &str) -> bool {
     let p = path.trim_start_matches('/');
     matches!(
@@ -114,7 +118,6 @@ mod tests {
     fn readonly_allowlist() {
         // 放行：查询类 / config/get 及其子路径
         assert!(is_readonly_allowed("config/get"));
-        assert!(is_readonly_allowed("gateway/config/get"));
         assert!(is_readonly_allowed("/config/get"));
         assert!(is_readonly_allowed("entities/list"));
         assert!(is_readonly_allowed("entities/get"));
@@ -127,8 +130,12 @@ mod tests {
         assert!(!is_readonly_allowed("config/set"));
         assert!(!is_readonly_allowed("session/chat/send"));
         assert!(!is_readonly_allowed("entities/upload"));
-        assert!(!is_readonly_allowed("gateway/config/set"));
         assert!(!is_readonly_allowed("bogus/path"));
+
+        // 拒绝：网关自身配置——`gateway/*` 恒走 native，且 config/get 含 inbound_token。
+        // 只读模式下放行等于把令牌读走，故与 config/set 同等对待（拒绝）。
+        assert!(!is_readonly_allowed("gateway/config/get"));
+        assert!(!is_readonly_allowed("gateway/config/set"));
     }
 }
 

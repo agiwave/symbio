@@ -218,6 +218,15 @@ export function getOutboundConfig(): OutboundConfig {
 }
 
 /**
+ * 重新读取网关出站配置（配置修改后调用）。
+ * 清除缓存并重新读取，使新配置立即生效。
+ */
+export function reloadGatewayTransport(): Promise<void> {
+  outboundReady = doInitGatewayTransport()
+  return outboundReady
+}
+
+/**
  * 基于 WebSocket 的连接（出站协议为 http 时，`connectPlugin` 使用）。
  * 复用 Connection 的对外接口，底层走 WebSocket 而非 Tauri IPC 事件。
  */

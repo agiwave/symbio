@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use super::super::context::get_http_client;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole, ModelConfig};
-use super::{spawn_orchestrator, ModelProtocol, ProtocolEvent};
+use super::{spawn_orchestrator, FinishReason, ModelProtocol, ProtocolEvent, Usage};
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginPayload,
     MODEL_PROTOCOL_GEMINI_API,
@@ -188,6 +188,30 @@ impl ModelProtocol for GeminiProtocol {
                             }
                         }
                     }
+                }
+
+                // 流结束原因（Gemini 叫 finishReason，顶层 candidates[0]）
+                if let Some(fr) = candidates
+                    .first()
+                    .and_then(|c| c.get("finishReason"))
+                    .and_then(|v| v.as_str())
+                {
+                    evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(fr))));
+                }
+            }
+
+            // 用量（Gemini 顶层 usageMetadata）
+            if let Some(um) = json.get("usageMetadata") {
+                let input = um
+                    .get("promptTokenCount")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
+                let output = um
+                    .get("candidatesTokenCount")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
+                if input.is_some() || output.is_some() {
+                    evs.push(ProtocolEvent::Usage(Usage { input, output }));
                 }
             }
         }

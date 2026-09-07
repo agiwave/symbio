@@ -6,8 +6,8 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use super::{
-    spawn_orchestrator, CapabilityMeta, ContentPart, MessageContent, MessageRole, ModelConfig,
-    ModelProtocol, ProtocolEvent,
+    spawn_orchestrator, CapabilityMeta, ContentPart, FinishReason, MessageContent, MessageRole,
+    ModelConfig, ModelProtocol, ProtocolEvent, Usage,
 };
 use crate::symbio_core::{
     InvokeRequest, InvokeResponse, Plugin, PluginPayload, MODEL_PROTOCOL_OPENAI_RESPONSES,
@@ -292,6 +292,22 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                     }
                 }
                 _ => {}
+            }
+
+            // 流结束原因 + 用量（Responses API 在 response.completed / response.incomplete
+            // 事件中给出，而非每帧带 finish_reason）。
+            if let Some(resp) = json.get("response") {
+                if let Some(fr) = resp.get("finish_reason").and_then(|v| v.as_str()) {
+                    evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(fr))));
+                }
+                if let Some(u) = resp.get("usage") {
+                    let input = u.get("input_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+                    let output =
+                        u.get("output_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+                    if input.is_some() || output.is_some() {
+                        evs.push(ProtocolEvent::Usage(Usage { input, output }));
+                    }
+                }
             }
         }
         evs

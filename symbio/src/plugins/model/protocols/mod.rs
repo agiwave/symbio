@@ -10,6 +10,58 @@ mod gemini_api;
 mod openai_chat;
 mod openai_responses;
 
+/// 流结束原因（由各协议的 `finish_reason` / `stop_reason` / `finishReason` 归一化）
+///
+/// ## 为什么必须有它
+///
+/// 在此之前，流结束一律被当成"正常完成"。当模型因 `max_tokens` 用尽而停在
+/// `Length` 时，系统会：
+/// 1. 把断在半句的文本当完整回复呈现；
+/// 2. 若截断发生在 `tool_calls` 的参数 JSON 中间，工具调用永远收集不完 →
+///    `tools_done` 为空 → 循环按"无工具调用"正常退出——**用户看到的就是"对话突然结束"**。
+///
+/// 有了 Finish，`chat_loop` 才能区分"自然结束"与"被长度截断"，并触发自动续写或明确报错。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum FinishReason {
+    /// 自然结束
+    #[default]
+    Stop,
+    /// 输出达到长度上限被截断（`finish_reason=length` / `stop_reason=max_tokens` / `MAX_TOKENS`）
+    Length,
+    /// 因需要调用工具而结束
+    ToolCalls,
+    /// 被内容安全策略过滤
+    ContentFilter,
+    /// 未识别的原因（保留原始字符串，便于排查兼容网关）
+    Other(String),
+}
+
+impl FinishReason {
+    /// 从 provider 的原始字符串归一化。`None` 视为自然结束。
+    pub fn from_provider(raw: Option<&str>) -> Self {
+        match raw.map(|s| s.trim()).unwrap_or("") {
+            "" | "stop" | "end_turn" | "STOP" | "stop_sequence" | "completed" => FinishReason::Stop,
+            "length" | "max_tokens" | "MAX_TOKENS" | "max_output_tokens" | "incomplete" => {
+                FinishReason::Length
+            }
+            "tool_calls" | "tool_use" | "function_call" => FinishReason::ToolCalls,
+            "content_filter" | "SAFETY" | "RECITATION" | "refusal" => FinishReason::ContentFilter,
+            other => FinishReason::Other(other.to_string()),
+        }
+    }
+
+    pub fn is_length(&self) -> bool {
+        matches!(self, FinishReason::Length)
+    }
+}
+
+/// 单次请求的用量（用于校准 token 估算；provider 不一定给，故全部可选）
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub input: Option<u32>,
+    pub output: Option<u32>,
+}
+
 /// 标准协议事件 - 用于将不同提供商的流解析为统一格式
 #[derive(Debug, Clone)]
 pub enum ProtocolEvent {
@@ -23,6 +75,10 @@ pub enum ProtocolEvent {
     ResponseId(String),
     /// 错误信息
     Error(String),
+    /// 流结束原因（一轮响应最多出现一次）
+    Finish(FinishReason),
+    /// 用量统计
+    Usage(Usage),
 }
 
 /// MODEL 协议特质 - 抽象不同模型提供商的通信细节

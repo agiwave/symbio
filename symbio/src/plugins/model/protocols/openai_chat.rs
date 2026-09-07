@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use super::super::context::get_http_client;
 use super::super::types::{CapabilityMeta, ModelConfig};
-use super::{spawn_orchestrator, ModelProtocol, ProtocolEvent};
+use super::{
+    spawn_orchestrator, FinishReason, ModelProtocol, ProtocolEvent, Usage,
+};
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginPayload,
     MODEL_PROTOCOL_OPENAI_CHAT,
@@ -130,6 +132,33 @@ impl ModelProtocol for OpenaiChatProtocol {
                         }
                     }
                 }
+            }
+            // 结束原因：`finish_reason` 为 null 的中间帧不 emit（用 as_str 过滤），
+            // 只有真正带上字符串时才产出 Finish。
+            if let Some(fr) = json
+                .get("choices")
+                .and_then(|c| c.as_array())
+                .and_then(|c| c.first())
+                .and_then(|c| c.get("finish_reason"))
+                .and_then(|v| v.as_str())
+            {
+                evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(
+                    fr,
+                ))));
+            }
+            // 用量：通常只在最后的 chunk 出现（需 stream_options.include_usage），
+            // 拿不到也没关系——估算器照样工作，只是失去校准机会。
+            if let Some(u) = json.get("usage") {
+                evs.push(ProtocolEvent::Usage(Usage {
+                    input: u
+                        .get("prompt_tokens")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as u32),
+                    output: u
+                        .get("completion_tokens")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as u32),
+                }));
             }
             if let Some(err) = json.get("error") {
                 evs.push(ProtocolEvent::Error(err.to_string()));

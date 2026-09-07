@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use super::super::context::get_http_client;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole, ModelConfig};
-use super::{spawn_orchestrator, ModelProtocol, ProtocolEvent};
+use super::{spawn_orchestrator, FinishReason, ModelProtocol, ProtocolEvent, Usage};
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginPayload,
     MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
@@ -299,6 +299,41 @@ impl ModelProtocol for AnthropicProtocol {
             }
 
             match etype.as_str() {
+                "message_start" => {
+                    // 携带 input_tokens（与 message_delta 的 output_tokens 合并为 Usage）
+                    if let Some(in_tok) = json
+                        .get("message")
+                        .and_then(|m| m.get("usage"))
+                        .and_then(|u| u.get("input_tokens"))
+                        .and_then(|v| v.as_u64())
+                    {
+                        evs.push(ProtocolEvent::Usage(Usage {
+                            input: Some(in_tok as u32),
+                            output: None,
+                        }));
+                    }
+                }
+                "message_delta" => {
+                    // 流结束原因（Anthropic 叫 stop_reason）
+                    if let Some(stop) = json
+                        .get("delta")
+                        .and_then(|d| d.get("stop_reason"))
+                        .and_then(|v| v.as_str())
+                    {
+                        evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(stop))));
+                    }
+                    // 携带 output_tokens
+                    if let Some(out_tok) = json
+                        .get("usage")
+                        .and_then(|u| u.get("output_tokens"))
+                        .and_then(|v| v.as_u64())
+                    {
+                        evs.push(ProtocolEvent::Usage(Usage {
+                            input: None,
+                            output: Some(out_tok as u32),
+                        }));
+                    }
+                }
                 "content_block_start" => {
                     if let Some(block) = json.get("content_block") {
                         if block["type"] == "tool_use" {

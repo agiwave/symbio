@@ -72,6 +72,14 @@ impl ToolCallAccumulator {
         )
     }
 
+    /// 本次响应是否出现过任何工具调用增量（无论其参数是否完整）。
+    ///
+    /// 用于区分「纯文本被 `max_tokens` 截断」与「工具调用参数 JSON 被截断」：
+    /// 前者可安全自动续写，后者参数已残破、续写无法修复，必须显式报错。
+    pub fn had_any_tool_call(&self) -> bool {
+        !self.calls.is_empty()
+    }
+
     /// Get the list of completed tool calls.
     ///
     /// 保证返回的每个 ToolCallInfo.id 均为非空：正常情况下 process_delta 已在首个增量

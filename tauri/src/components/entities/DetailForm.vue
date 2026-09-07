@@ -160,7 +160,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { callPlugin } from '@/services/plugin'
+import { callPlugin, reloadGatewayTransport } from '@/services/plugin'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
 import EntityActions from './EntityActions.vue'
@@ -523,6 +523,10 @@ async function saveConfig() {
   configSaving.value = true
   try {
     await callPlugin(savePath, { ...form })
+    // 保存 gateway 配置后，重新读取出站配置使新配置立即生效
+    if (savePath.startsWith('gateway/')) {
+      await reloadGatewayTransport()
+    }
     toast.showToast('success', '配置已保存')
   } catch (err) {
     toast.showToast('error', `保存失败: ${err}`)

@@ -9,7 +9,7 @@
 //! - `message_builder` — NativeMessage 构造与 Session 持久化
 
 use super::message_builder::short_id;
-use super::protocols::{ModelProtocol, ProtocolEvent};
+use super::protocols::{FinishReason, ModelProtocol, ProtocolEvent, Usage};
 use super::tool_call::{ToolCallAccumulator, ToolCallInfo};
 use super::types::*;
 use crate::symbio_core::schemas::{
@@ -286,6 +286,11 @@ pub struct TurnOutput {
     pub response_text_child_id: String,
     /// Short ID for the reasoning child node
     pub reasoning_child_id: String,
+    /// 流结束原因（一次响应最多一次）。用于区分「自然结束」与「max_tokens 截断」，
+    /// 是修复「对话突然结束」的根因字段。默认 Stop。
+    pub finish: FinishReason,
+    /// 用量统计（provider 不一定给，故可选）。用于校准 token 估算器。
+    pub usage: Option<Usage>,
 }
 
 impl TurnOutput {
@@ -511,6 +516,18 @@ async fn dispatch_protocol_event(
             .await;
         }
         ProtocolEvent::ResponseId(id) => out.response_id = Some(id),
+        ProtocolEvent::Finish(f) => out.finish = f,
+        ProtocolEvent::Usage(u) => {
+            // 同一响应可能多次收到 Usage（如 Anthropic 的 message_start + message_delta 分别携带
+            // input/output tokens）。按字段合并，避免后者覆盖前者丢失数据。
+            out.usage = Some(match out.usage {
+                Some(prev) => Usage {
+                    input: u.input.or(prev.input),
+                    output: u.output.or(prev.output),
+                },
+                None => u,
+            });
+        }
         ProtocolEvent::Error(e) => return Err(e),
     }
     Ok(())
