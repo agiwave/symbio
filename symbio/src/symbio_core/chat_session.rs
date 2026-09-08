@@ -7,10 +7,13 @@ use std::sync::Arc;
 pub trait ChatSession: Send + Sync + 'static {
     async fn get_messages(&self) -> Result<Vec<ChatMessage>, PluginError>;
 
+    /// 获取进入 LLM 上下文的候选消息（存储视图：过滤 + 滑动轮次窗口）。
+    ///
+    /// 注意：工具级骨架化（fade / 保留策略）**不在此处**——那是请求视图层的职责，
+    /// 由模型插件 run_chat_loop 在构建每次请求时统一执行（build_request_view）。
     async fn get_context_messages(
         &self,
         max_turns: Option<usize>,
-        tool_context_window: Option<usize>,
     ) -> Result<Vec<ChatMessage>, PluginError>;
 
     async fn append_messages(&self, messages: Vec<ChatMessage>) -> Result<usize, PluginError>;

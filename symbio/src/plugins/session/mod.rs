@@ -3,7 +3,7 @@
 mod active;
 mod chat_session;
 mod compress;
-mod context;
+pub(crate) mod context;
 mod handlers;
 mod heartbeat;
 mod orchestrator;

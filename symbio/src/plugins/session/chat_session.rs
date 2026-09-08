@@ -1,4 +1,4 @@
-use super::context::{apply_layered_sliding_window, prune_historical_tool_calls};
+use super::context::prune_historical_tool_calls;
 use super::store::SessionStore;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::chat_message::{
@@ -183,7 +183,6 @@ impl ChatSession for PersistentChatSession {
     async fn get_context_messages(
         &self,
         max_turns: Option<usize>,
-        tool_context_window: Option<usize>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
         let messages = self.get_messages().await?;
         // 过滤 Failed 消息：Failed 仅作为用户可见的失败终态（带重试按钮），
@@ -208,16 +207,9 @@ impl ChatSession for PersistentChatSession {
                 .map(|c| c.context_messages)
                 .unwrap_or(6)
         });
-        let mut result = sliding_window(&messages, turns);
-        let window = tool_context_window.unwrap_or_else(|| {
-            self.config
-                .try_read()
-                .map(|c| c.tool_context_window)
-                .unwrap_or(15)
-        });
-        if window > 0 {
-            result = apply_layered_sliding_window(&result, window);
-        }
+        let result = sliding_window(&messages, turns);
+        // 会话层只做全局轮次窗口；工具级骨架化/保留策略由模型插件 run_chat_loop
+        // 构建请求视图时统一解析（build_request_view），避免对压缩原料的提前污染。
         Ok(result)
     }
 
@@ -410,7 +402,6 @@ impl ChatSession for EphemeralChatSession {
     async fn get_context_messages(
         &self,
         max_turns: Option<usize>,
-        tool_context_window: Option<usize>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
         let messages = self.messages.read().await;
         // 过滤 Failed 消息：Failed 仅作为用户可见的失败终态（带重试按钮），
@@ -428,11 +419,8 @@ impl ChatSession for EphemeralChatSession {
             .filter_map(normalize_message_content)
             .collect();
         let turns = max_turns.unwrap_or(self.context_messages);
-        let mut result = sliding_window(&messages, turns);
-        let window = tool_context_window.unwrap_or(15);
-        if window > 0 {
-            result = apply_layered_sliding_window(&result, window);
-        }
+        let result = sliding_window(&messages, turns);
+        // 与 PersistentChatSession 保持一致：工具级骨架化上移至模型插件请求视图。
         Ok(result)
     }
 

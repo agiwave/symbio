@@ -49,6 +49,10 @@ pub struct SessionConfig {
     /// 保留完整结果的最近工具调用数量限制（滑动窗口）
     #[serde(default = "default_tool_context_window")]
     pub tool_context_window: usize,
+    /// 是否启用工具压缩：向模型暴露主动压缩工具（context_compact）并允许水位
+    /// 提醒引导模型调用（独立于自动压缩开关）
+    #[serde(default = "default_enable_compact_tool")]
+    pub enable_compact_tool: bool,
 }
 
 fn default_max_messages() -> usize {
@@ -72,6 +76,9 @@ fn default_compress_line_threshold() -> usize {
 fn default_tool_context_window() -> usize {
     15
 }
+fn default_enable_compact_tool() -> bool {
+    true
+}
 
 impl Default for SessionConfig {
     fn default() -> Self {
@@ -85,6 +92,7 @@ impl Default for SessionConfig {
             max_tool_rounds: default_max_tool_rounds(),
             compress_line_threshold: default_compress_line_threshold(),
             tool_context_window: default_tool_context_window(),
+            enable_compact_tool: default_enable_compact_tool(),
         }
     }
 }

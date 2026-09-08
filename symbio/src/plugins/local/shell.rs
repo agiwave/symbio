@@ -32,7 +32,7 @@ fn get_os_info() -> (&'static str, &'static str, &'static str, &'static str) {
         (
             "Windows",
             "cmd.exe",
-            "cmd.exe",
+            "cmd",
             "dir, type, copy, del, mkdir, rmdir, where, findstr",
         )
     }

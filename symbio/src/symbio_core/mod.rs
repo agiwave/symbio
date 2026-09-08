@@ -28,7 +28,9 @@ pub use chat_pipeline::{
 pub use chat_session::{ChatSession, ChatSessionHandle};
 pub use creator::{create_object, has_creator};
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
-pub use capability::{Capability, CapabilityCategory, CapabilityManager, CapabilityMeta};
+pub use capability::{
+    Capability, CapabilityCategory, CapabilityManager, CapabilityMeta, ToolContextRetention,
+};
 pub use error::*;
 pub use homedir::{expand_tilde_path, HomedirRegistry, DEFAULT_HOMEDIR};
 pub use ids::*;

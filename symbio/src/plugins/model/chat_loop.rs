@@ -60,9 +60,10 @@ pub async fn run_chat_loop(
     );
     plugin_info!(
         "model",
-        "[DIAG] run_chat_loop: configured_max_tool_rounds={:?} (None=无上限), auto_compress={}, msg_id_in_payload={:?}",
+        "[DIAG] run_chat_loop: configured_max_tool_rounds={:?} (None=无上限), auto_compress={}, enable_compact_tool={}, msg_id_in_payload={:?}",
         req.max_tool_rounds,
         req.auto_compress.unwrap_or(true),
+        req.enable_compact_tool.unwrap_or(true),
         req.single_message.as_ref().map(|m| m.id.clone())
     );
 
@@ -70,6 +71,7 @@ pub async fn run_chat_loop(
     // 因此默认（request 未显式给出）=「无上限」；仅在调用方**显式**设置时才作为软上限并给出提示。
     let configured_max_tool_rounds = req.max_tool_rounds;
     let auto_compress = req.auto_compress.unwrap_or(true);
+    let enable_compact_tool = req.enable_compact_tool.unwrap_or(true);
 
     let mut tool_rounds: usize = 0;
     let mut continuation_count: u32 = 0;
@@ -77,8 +79,9 @@ pub async fn run_chat_loop(
     // 主动压缩成功后重置（上下文回落后允许再次提醒）。
     let mut nudged_this_request = false;
     const MAX_CONTINUE_ROUNDS: u32 = 3;
-    // 轮次老化淡化的激活阈值与保留窗口：超过该轮次后，较早的工具结果逐步 head/tail 摘要，
-    // 始终保持最近 K 轮的原文与全部 assistant 文本/推理，最小化对思维链的破坏。
+    // 轮次老化淡化的激活阈值与保留窗口：超过该轮次后，请求视图层（build_request_view）
+    // 对较早的工具结果做 head/tail 摘要，始终保持最近 K 轮的原文与全部 assistant
+    // 文本/推理，最小化对思维链的破坏。淡化只作用于请求视图，存储保持完整历史。
     const FADE_ACTIVATE_ROUNDS: usize = 40;
     const FADE_KEEP_RECENT_TURNS: usize = 12;
 
@@ -130,17 +133,17 @@ pub async fn run_chat_loop(
     }
 
     loop {
-        // 每轮开始时从 ChatSession 获取最新上下文（滑动窗口/工具上下文窗口/压缩全部生效）
-        // 心跳任务等场景可设置 `load_history = false`：仅用本次 single_message，不加载任何历史。
+        // 每轮开始时从 ChatSession 获取最新上下文（轮次窗口生效；骨架化/淡化为请求视图层职责）。
+        // 心跳任务等场景可设置 `load_history = false`：仅用本次 single_message，
+        // 完全不加载历史，也不保留上一轮内存累积（上一轮内容随本轮重置）。
         context.messages = if req.load_history.unwrap_or(true) {
             context
                 .session
-                .get_context_messages(None, req.tool_context_window)
+                .get_context_messages(None)
                 .await
                 .unwrap_or_default()
         } else {
-            // 不加载历史：保留上一轮在本内存中累积的消息（single + 响应 + 工具结果），
-            // 但绝不从会话存储读取之前的对话历史。
+            // 心跳等无上下文场景：从空上下文开始，仅携带本轮新消息。
             Vec::new()
         };
 
@@ -248,62 +251,28 @@ pub async fn run_chat_loop(
         }
 
         // ── 水位提醒（nudge，目标四）─────────────────────────────────────
-        // 估算用量 ≥ 55% 有效上限时，注入一条一次性系统提示，引导模型在
+        // 估算用量 ≥ 55% 有效上限时，在请求视图末尾注入一条一次性系统提示
+        // （请求级、不落库，由 build_request_view 统一追加），引导模型在
         // "阶段间隙"主动调用 context_compact（比 70% 硬触发更早、时机更优）。
-        // 去重：已存在比最近快照更新的提醒时不重复注入（压缩会吞掉旧提醒，自然重置）。
-        if auto_compress && !nudged_this_request {
-            let has_standing_nudge = {
-                let last_nudge = context.messages.iter().rposition(|m| {
-                    m.meta
-                        .as_ref()
-                        .and_then(|meta| meta.get("kind"))
-                        .and_then(|v| v.as_str())
-                        == Some("context_nudge")
-                });
-                let last_snapshot = context.messages.iter().rposition(|m| {
-                    m.meta
-                        .as_ref()
-                        .map(|meta| meta.get("compacted") == Some(&serde_json::json!(true)))
-                        .unwrap_or(false)
-                });
-                match (last_nudge, last_snapshot) {
-                    (Some(n), Some(s)) => n > s,
-                    (Some(_), None) => true,
-                    (None, _) => false,
-                }
-            };
-            if !has_standing_nudge {
-                let effective_limit = (orchestrator.config.max_context_tokens
-                    - orchestrator.config.reserved_tokens)
-                    as usize;
-                let overhead =
-                    compression::estimate_request_overhead(system_prompt_for_request, &ctx).await;
-                if compression::should_emit_context_nudge(
-                    &context.messages,
-                    effective_limit,
-                    overhead,
-                ) {
-                    nudged_this_request = true;
-                    plugin_info!(
-                        "model",
-                        "[Compress] context nudge emitted (~55% of limit), suggesting context_compact"
-                    );
-                    context.messages.push(ChatMessage {
-                        id: short_id(),
-                        role: Some(MessageRole::User),
-                        msg_type: Some(MessageType::Text),
-                        content: Some(MessageContent::Text(
-                            "[system note] Context usage is approaching the limit. If you are at a \
-                             natural stage boundary, call the context_compact tool now to distill \
-                             older history and continue seamlessly; otherwise keep working and it \
-                             will be compacted automatically. Do not respond to this note directly."
-                                .to_string(),
-                        )),
-                        status: Some(MessageStatus::Completed),
-                        meta: Some(serde_json::json!({ "kind": "context_nudge" })),
-                        ..Default::default()
-                    });
-                }
+        // 门控：提醒只为引导工具调用，跟随工具开关（enable_compact_tool），
+        // 与自动压缩开关解耦（关自动压缩、开工具压缩时仍需提醒）。
+        // 去重：每次用户请求生命周期内最多注入一次（主动压缩成功后重置）；
+        // 提醒不再持久化，无需扫描历史做去重，也不会占用轮次窗口的 User 计数。
+        let mut inject_nudge = false;
+        if enable_compact_tool && !nudged_this_request {
+            let effective_limit = (orchestrator.config.max_context_tokens
+                - orchestrator.config.reserved_tokens)
+                as usize;
+            let overhead =
+                compression::estimate_request_overhead(system_prompt_for_request, &ctx).await;
+            if compression::should_emit_context_nudge(&context.messages, effective_limit, overhead)
+            {
+                nudged_this_request = true;
+                inject_nudge = true;
+                plugin_info!(
+                    "model",
+                    "[Compress] context nudge emitted (~55% of limit), suggesting context_compact"
+                );
             }
         }
 
@@ -317,11 +286,44 @@ pub async fn run_chat_loop(
         } else {
             Vec::new()
         };
-        // 主动压缩工具（目标四）：仅当压缩功能启用时暴露给模型。
+        // 主动压缩工具（目标四）：仅当工具压缩启用时暴露给模型（独立于自动压缩开关）。
         // 执行不走 CapabilityManager 分发，由下方拦截逻辑处理（需要编排器内部链路）。
-        if auto_compress {
+        if enable_compact_tool {
             tools.push(compression::context_compact_tool_meta());
         }
+
+        // 请求视图（唯一入口 build_request_view）：存储视图之上叠加三项**不落库**的
+        // 裁剪，全部只作用于本次 send_request 的请求包，不回写 context.messages——
+        // 存储保持完整历史，last_saved 锚点与 persist_messages 切片不会错位。
+        // 1) fade：轮次过多时淡化较早的工具结果（存储保留全文，视图每轮重建，天然幂等）；
+        // 2) 工具级骨架化：从 CapabilityManager 的能力声明（context_retention）动态解析
+        //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
+        //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
+        // 3) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
+        let request_view: Vec<ChatMessage> = {
+            let window = req.tool_context_window.unwrap_or(15);
+            let retention: std::collections::HashMap<String, crate::symbio_core::ToolContextRetention> =
+                tools
+                    .iter()
+                    .filter_map(|t| {
+                        t.context_retention
+                            .filter(|r| !matches!(r, crate::symbio_core::ToolContextRetention::All))
+                            .map(|r| {
+                                let short = t.name.rsplit('/').next().unwrap_or(&t.name);
+                                (short.to_string(), r)
+                            })
+                    })
+                    .collect();
+            compression::build_request_view(
+                &context.messages,
+                window,
+                &retention,
+                tool_rounds > FADE_ACTIVATE_ROUNDS,
+                FADE_KEEP_RECENT_TURNS,
+                inject_nudge,
+            )
+        };
+        let request_messages: &[ChatMessage] = request_view.as_slice();
 
         plugin_info!(
             "model",
@@ -335,7 +337,7 @@ pub async fn run_chat_loop(
                 req.system_prompt
                     .as_deref()
                     .unwrap_or("You are a helpful MODEL assistant."),
-                &context.messages,
+                request_messages,
                 &tools,
                 &root_id,
                 &mut channel,
@@ -420,13 +422,26 @@ pub async fn run_chat_loop(
             let tok = crate::symbio_core::default_tokenizer();
             // 反馈必须用原始启发式估算（count_raw）；用校准后的 count() 自反馈
             // 会让校准系数收敛到 √(真实比值)（见 CalibratedTokenizer::feedback 文档）。
-            let estimated = tok.count_raw(&out.text) + tok.count_raw(&out.reasoning);
+            // 分母必须覆盖 provider 计入 output_tokens 的全部内容：文本 + 思考 +
+            // 工具调用名 + 参数 JSON。漏掉任一部分都会系统性低估估算值 → 校准比
+            // 偏高 → 水位提前越过阈值 → 压缩被频繁触发。
+            let mut estimated = tok.count_raw(&out.text) + tok.count_raw(&out.reasoning);
+            for tc in &tools_done {
+                if let Some(name) = &tc.name {
+                    if !name.is_empty() {
+                        estimated += tok.count_raw(name);
+                    }
+                }
+                estimated += tok.count_raw(&tc.arguments.to_string());
+            }
             crate::symbio_core::report_provider_usage(estimated, u.output);
         }
 
-        context
-            .messages
-            .extend(out.into_messages(&root_id, tools_done.len()));
+        let new_msgs = out.into_messages(&root_id, tools_done.len());
+        // 工具上下文保留策略（机制化）：不再把策略 Stamp 到节点 meta 持久化，
+        // 由 run_chat_loop 在构建 LLM 请求前从 CapabilityManager 动态解析，
+        // 节点 name 即 LLM 可见工具名，与声明名直接匹配。
+        context.messages.extend(new_msgs);
 
         // 被长度截断的 Turn 打标（供前端「继续」按钮与回溯），不再静默结束（修复"对话突然结束"）。
         if finish.is_length() {
@@ -508,12 +523,12 @@ pub async fn run_chat_loop(
         let mut parent_updates: Vec<ChatMessage> = Vec::new();
 
         if !compact_calls.is_empty() {
-            // 本 Turn 首个 ToolCall 消息的下标：压缩切分的安全上界
-            let split_tool_call_idx = context
-                .messages
-                .iter()
-                .position(|m| m.msg_type == Some(MessageType::ToolCall))
-                .unwrap_or(0);
+            // 切分点必须按 parent_id 限定到当前 Turn（root_id）：全历史正向扫描
+            // 会命中会话最早的 ToolCall，切分点落在开头，旧内容几乎全部留在保留区
+            // → 压缩后水位不降 → 循环压缩（高频触发根因，见 find_turn_tool_call_split_idx）。
+            // 返回 0 时 run_context_compact 以 split==0 视为中止，安全。
+            let split_tool_call_idx =
+                compression::find_turn_tool_call_split_idx(&context.messages, &root_id);
             let first = compact_calls.first().cloned();
             if let Some(first) = first {
                 let call_id = first.id.clone().unwrap_or_default();
@@ -528,7 +543,6 @@ pub async fn run_chat_loop(
                     &mut channel,
                     &ctx,
                     &abort_flag,
-                    system_prompt_for_request,
                     split_tool_call_idx,
                     hints.as_deref(),
                 )
@@ -536,6 +550,9 @@ pub async fn run_chat_loop(
                 if ok {
                     // 压缩成功：上下文回落后允许再次水位提醒
                     nudged_this_request = false;
+                    // replace_messages 已整体重写会话存储，当前内存镜像即已落库状态；
+                    // 重置持久化锚点，避免末尾 persist_messages 用旧下标切片越界/重复落库
+                    last_saved = context.messages.len();
                     plugin_info!(
                         "model",
                         "[Compress] manual compaction done: ~{} -> ~{} tokens",
@@ -565,23 +582,44 @@ pub async fn run_chat_loop(
                     meta["before_tokens"] = serde_json::json!(before_t);
                     meta["after_tokens"] = serde_json::json!(after_t);
                 }
-                parent_updates.push(ChatMessage {
-                    id: call_id.clone(),
-                    status: Some(MessageStatus::Completed),
-                    meta: Some(meta),
-                    ..Default::default()
-                });
-                tool_results.push(super::message_builder::build_tool_message(
+                // 标准工具广播模式（与 process_tool_calls_async 一致，修复诉求1：
+                // 前端实时可见 context_compact 的结果子节点与父节点状态）：
+                // 先广播 Tool 结果子节点，再广播父 ToolCall 状态补丁。
+                let mut tool_msg = super::message_builder::build_tool_message(
                     &call_id,
                     &result_text,
                     Some(ok),
                     None,
-                ));
+                );
+                if !ok {
+                    // 失败属信息性：结果以 Completed 定格（父节点同为 Completed），
+                    // 与普通工具结果的处理保持一致，避免孤儿 Failed 节点
+                    tool_msg.status = Some(MessageStatus::Completed);
+                }
+                broadcast_message_update(&channel, tool_msg.clone()).await;
+                let parent_update = ChatMessage {
+                    id: call_id.clone(),
+                    status: Some(MessageStatus::Completed),
+                    meta: Some(meta),
+                    ..Default::default()
+                };
+                broadcast_message_update(&channel, parent_update.clone()).await;
+                parent_updates.push(parent_update);
+                tool_results.push(tool_msg);
             }
             // 同批多余的 compact 调用：直接标记跳过
             for extra in compact_calls.iter().skip(1) {
                 if let Some(cid) = &extra.id {
-                    parent_updates.push(ChatMessage {
+                    // 同批多余调用同样走标准广播模式（跳过说明属信息性结果，定格 Completed）
+                    let mut tool_msg = super::message_builder::build_tool_message(
+                        cid,
+                        "Skipped: another context_compact call in this batch was executed.",
+                        Some(false),
+                        None,
+                    );
+                    tool_msg.status = Some(MessageStatus::Completed);
+                    broadcast_message_update(&channel, tool_msg.clone()).await;
+                    let parent_update = ChatMessage {
                         id: cid.clone(),
                         status: Some(MessageStatus::Completed),
                         meta: Some(serde_json::json!({
@@ -590,13 +628,10 @@ pub async fn run_chat_loop(
                             "skipped": true
                         })),
                         ..Default::default()
-                    });
-                    tool_results.push(super::message_builder::build_tool_message(
-                        cid,
-                        "Skipped: another context_compact call in this batch was executed.",
-                        Some(false),
-                        None,
-                    ));
+                    };
+                    broadcast_message_update(&channel, parent_update.clone()).await;
+                    parent_updates.push(parent_update);
+                    tool_results.push(tool_msg);
                 }
             }
         }
@@ -702,14 +737,18 @@ pub async fn run_chat_loop(
             return Ok(());
         }
 
-        // 轮次计数 + 老化淡化：轮次过多时，对较早的工具结果做 head/tail 摘要，
-        // 始终保持最近 K 轮的原文与全部 assistant 文本/推理，最小化对思维链的破坏
-        // （用户明确要求：不要硬性上限，而是"有效压缩或淡化历时轮次"）。
+        // 轮次计数：用户明确要求不设硬性上限，超长对话的规模控制由请求视图层的
+        // fade / 骨架化（build_request_view）承担——存储保持完整历史，视图逐轮裁剪。
         tool_rounds += 1;
-        if tool_rounds > FADE_ACTIVATE_ROUNDS {
-            super::compression::fade_aged_tool_results(&mut context.messages, FADE_KEEP_RECENT_TURNS);
-        }
     }
+}
+
+async fn broadcast_message_update(channel: &PluginChannel, message: ChatMessage) {
+    let _ = channel.tx.send(PluginFrame::Data(
+        serde_json::to_value(session_chat_response::StreamEvent::Update { message })
+            .unwrap_or_default(),
+    ))
+    .await;
 }
 
 async fn persist_messages(context: &SessionContext, last_saved: usize, channel: &PluginChannel) {
@@ -792,7 +831,6 @@ impl ChatSession for FallbackChatSession {
     async fn get_context_messages(
         &self,
         _max_turns: Option<usize>,
-        _tool_context_window: Option<usize>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
         self.get_messages().await
     }
@@ -949,10 +987,13 @@ async fn auto_compress_process(
 
     context.messages = vec![compression_msg];
 
+    // 诉求3：专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离；
+    // system_prompt 参数仍用于请求开销估算）
+    let compression_prompt = compression::get_compression_prompt();
     let root_id = short_id();
     let summary = match send_compression_request(
         orchestrator,
-        system_prompt,
+        &compression_prompt,
         &context.messages,
         &root_id,
         channel,
@@ -1003,7 +1044,7 @@ async fn auto_compress_process(
         context.messages.push(retry_msg);
         let retry = send_compression_request(
             orchestrator,
-            system_prompt,
+            &compression_prompt,
             &context.messages,
             &short_id(),
             channel,
@@ -1027,11 +1068,19 @@ async fn auto_compress_process(
     }
     context.messages.clear();
 
+    // 落库前渲染为纯文本分节（诉求3：历史中不残留 XML 标签，切断格式模仿链）
+    let snapshot_display = compression::render_snapshot_for_history(&snapshot_text);
     // 快照消息：meta 记录压缩标记、压缩后估算（迟滞依据）、转存路径。
+    // post_tokens 口径 = 压缩完成后的内容水位（快照 + 保留区内容，不含请求级
+    // overhead），与 should_start_compression 迟滞比较的读取侧对齐。旧口径只算
+    // 快照、漏掉保留区，迟滞地板被低估 → 压缩后很快再次越线 → 循环压缩。
     let post_tokens = compression::estimate_message_tokens(&ChatMessage {
-        content: Some(MessageContent::Text(snapshot_text.clone())),
+        content: Some(MessageContent::Text(snapshot_display.clone())),
         ..Default::default()
-    });
+    }) + history_to_keep
+        .iter()
+        .map(compression::estimate_message_tokens)
+        .sum::<usize>();
     let mut meta = serde_json::json!({
         "compacted": true,
         "post_tokens": post_tokens,
@@ -1050,7 +1099,7 @@ async fn auto_compress_process(
         role: Some(MessageRole::Assistant),
         msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(format!(
-            "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_text}"
+            "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_display}"
         ))),
         status: Some(MessageStatus::Completed),
         meta: Some(meta),
@@ -1084,14 +1133,12 @@ fn summary_text(m: &ChatMessage) -> String {
 ///
 /// `split_tool_call_idx`：主循环传入的本 Turn 首个 ToolCall 消息下标（工具调用分派前计算）。
 /// 返回 `(是否执行了压缩, 估算压缩前 tokens, 估算压缩后 tokens)`。
-#[allow(clippy::too_many_arguments)]
 async fn run_context_compact(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
     channel: &mut PluginChannel,
     ctx: &Arc<dyn InvokeRequest>,
     abort_flag: &Arc<AtomicBool>,
-    system_prompt: &str,
     split_tool_call_idx: usize,
     hints: Option<&str>,
 ) -> (bool, usize, usize) {
@@ -1114,9 +1161,11 @@ async fn run_context_compact(
     let compression_msg = compression::build_compression_request(&history, hints);
     context.messages = vec![compression_msg];
 
+    // 诉求3：专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离）
+    let compression_prompt = compression::get_compression_prompt();
     let summary = match send_compression_request(
         orchestrator,
-        system_prompt,
+        &compression_prompt,
         &context.messages,
         &short_id(),
         channel,
@@ -1150,7 +1199,7 @@ async fn run_context_compact(
         context.messages.push(retry_msg);
         if let Ok(s) = send_compression_request(
             orchestrator,
-            system_prompt,
+            &compression_prompt,
             &context.messages,
             &short_id(),
             channel,
@@ -1176,10 +1225,18 @@ async fn run_context_compact(
     };
 
     // 新上下文 = [快照] + [当前用户指令 + 进行中 Turn 及之后]
+    // 落库前渲染为纯文本分节（诉求3：历史中不残留 XML 标签，切断格式模仿链）
+    // post_tokens 口径 = 压缩完成后的内容水位（快照 + 保留区内容，不含请求级
+    // overhead），与 should_start_compression 迟滞比较的读取侧对齐；返回值中的
+    // after_tokens 同样按此口径，压缩前后日志才反映真实收益。
+    let snapshot_display = compression::render_snapshot_for_history(&snapshot_text);
     let post_tokens = compression::estimate_message_tokens(&ChatMessage {
-        content: Some(MessageContent::Text(snapshot_text.clone())),
+        content: Some(MessageContent::Text(snapshot_display.clone())),
         ..Default::default()
-    });
+    }) + original_messages[split_tool_call_idx..]
+        .iter()
+        .map(compression::estimate_message_tokens)
+        .sum::<usize>();
     let mut meta = serde_json::json!({ "compacted": true, "post_tokens": post_tokens });
     if let Some(p) = &transcript_path {
         meta["transcript_path"] = serde_json::json!(p);
@@ -1195,7 +1252,7 @@ async fn run_context_compact(
         role: Some(MessageRole::Assistant),
         msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(format!(
-            "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_text}"
+            "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_display}"
         ))),
         status: Some(MessageStatus::Completed),
         meta: Some(meta),

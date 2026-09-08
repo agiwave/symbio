@@ -227,6 +227,12 @@ impl SessionPlugin {
                     "description": "是否在超过阈值时自动压缩历史",
                     "default": true
                 },
+                "enable_compact_tool": {
+                    "type": "boolean",
+                    "title": "工具压缩",
+                    "description": "是否向模型提供主动压缩工具（context_compact）与水位提醒；关闭后仅保留自动压缩",
+                    "default": true
+                },
                 "compress_threshold": {
                     "type": "integer",
                     "title": "压缩阈值",

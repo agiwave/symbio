@@ -66,6 +66,36 @@ impl CapabilityCategory {
     }
 }
 
+/// 工具上下文保留策略（会话机制化属性）
+///
+/// 工具在 `CapabilityMeta` 中声明"历史参数/结果在推理上下文中保留多少"，
+/// 会话压缩层按声明通用处理，不对任何具体工具名做特殊化。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolContextRetention {
+    /// 默认：完整保留，正常参与全局滑动窗口
+    #[default]
+    All,
+    /// 仅保留最近 N 次调用的完整参数/结果，更早的调用在上下文中骨架化
+    LastN(u32),
+    /// 仅保留最近一次调用的完整参数/结果，更早的调用在上下文中骨架化。
+    ///
+    /// 适用于"每次写入全量状态、旧状态对后续推理无参考价值"的工具
+    /// （如任务清单更新），可显著降低重复全量参数对上下文的占用。
+    LastOnly,
+}
+
+impl ToolContextRetention {
+    /// 每个工具应保留的完整调用次数（`All` → `u32::MAX` 表示不限制）
+    pub fn keep_count(self) -> u32 {
+        match self {
+            ToolContextRetention::All => u32::MAX,
+            ToolContextRetention::LastN(n) => n.max(1),
+            ToolContextRetention::LastOnly => 1,
+        }
+    }
+}
+
 /// 大语言模型工具定义
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CapabilityMeta {
@@ -89,6 +119,13 @@ pub struct CapabilityMeta {
     /// 使用示例列表
     #[serde(skip_serializing_if = "Option::is_none")]
     pub examples: Option<Vec<String>>,
+    /// 工具上下文保留策略（`None` = 默认 `All`，完整参与滑动窗口）
+    ///
+    /// 机制说明：工具执行层把该策略 Stamp 到 ToolCall 消息 meta
+    /// （`ctx_retention`），会话压缩层读取 meta 通用执行，会话侧
+    /// 不感知任何具体工具名。
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub context_retention: Option<ToolContextRetention>,
 }
 
 impl CapabilityMeta {
@@ -96,6 +133,17 @@ impl CapabilityMeta {
     pub fn with_category(mut self, kind: CapabilityCategory) -> Self {
         self.category = Some(kind);
         self
+    }
+
+    /// 构造带上下文保留策略的元数据
+    pub fn with_context_retention(mut self, retention: ToolContextRetention) -> Self {
+        self.context_retention = Some(retention);
+        self
+    }
+
+    /// 读取生效的上下文保留策略（未声明视为 `All`）
+    pub fn effective_context_retention(&self) -> ToolContextRetention {
+        self.context_retention.unwrap_or_default()
     }
 
     /// 渲染本地化 category 文本
@@ -158,4 +206,43 @@ pub trait CapabilityManager: Send + Sync + 'static {
     ) -> InvokeResponse<PluginPayload>;
 
     async fn has_capability(&self, name: &str) -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// serde 往返：声明字段序列化进 tools/list JSON；未声明字段不出现且旧 JSON 兼容
+    #[test]
+    fn context_retention_serde_roundtrip() {
+        let meta = CapabilityMeta {
+            name: "todo_write".into(),
+            description: "d".into(),
+            input_schema: serde_json::json!({"type": "object"}),
+            context_retention: Some(ToolContextRetention::LastOnly),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&meta).unwrap();
+        assert_eq!(v["context_retention"], serde_json::json!("last_only"));
+        let back: CapabilityMeta = serde_json::from_value(v).unwrap();
+        assert_eq!(back.context_retention, Some(ToolContextRetention::LastOnly));
+
+        // 旧 JSON（无该字段）反序列化兼容，且序列化时不输出空字段
+        let old: CapabilityMeta = serde_json::from_value(serde_json::json!({
+            "name": "x", "description": "d", "parameters": {}
+        }))
+        .unwrap();
+        assert_eq!(old.context_retention, None);
+        let ser = serde_json::to_value(&old).unwrap();
+        assert!(ser.get("context_retention").is_none());
+    }
+
+    /// keep_count：All → u32::MAX，LastN(n) → n.max(1)，LastOnly → 1
+    #[test]
+    fn keep_count_semantics() {
+        assert_eq!(ToolContextRetention::All.keep_count(), u32::MAX);
+        assert_eq!(ToolContextRetention::LastN(0).keep_count(), 1);
+        assert_eq!(ToolContextRetention::LastN(3).keep_count(), 3);
+        assert_eq!(ToolContextRetention::LastOnly.keep_count(), 1);
+    }
 }

@@ -45,6 +45,7 @@ impl Capability for BundleIdentityCapability {
         let brief: String = self.identity_text.chars().take(160).collect();
         CapabilityMeta {
             name: "agent_identity".to_string(),
+            context_retention: None,
             description: format!(
                 "[bundle:{}] 当前智能体的身份与人格（调用可取回全文）：{brief}",
                 self.bundle_id

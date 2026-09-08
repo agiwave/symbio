@@ -128,6 +128,34 @@ pub fn guard_tool_result(text: &str, budget_tokens: usize) -> GuardedResult {
     }
 }
 
+/// 请求视图级摘要：与 [`guard_tool_result`] 相同的 head/tail 摘要，但**不写存档文件**。
+///
+/// 用于请求视图层的轮次淡化（fade）：存储层始终保留全文，淡化只作用于每次请求的
+/// 视图副本，无需持久化副本；模型如需完整输出可重新运行对应工具。
+pub fn summarize_tool_result(text: &str, budget_tokens: usize) -> String {
+    let tok = default_tokenizer();
+    let n = tok.count(text);
+    if n <= budget_tokens {
+        return text.to_string();
+    }
+
+    let head_budget = ((budget_tokens as f64) * 0.6) as usize;
+    let tail_budget = budget_tokens.saturating_sub(head_budget);
+    let (head, tail) = split_head_tail(text, head_budget, tail_budget);
+
+    let omit = n.saturating_sub(budget_tokens);
+    let placeholder = format!(
+        "\n[... 已省略约 {omit} tokens 的中间内容。历史轮次结果已淡化以控制上下文长度，\
+         如需完整输出请重新运行该工具。 ...]\n"
+    );
+
+    let mut out = String::with_capacity(head.len() + tail.len() + placeholder.len());
+    out.push_str(&head);
+    out.push_str(&placeholder);
+    out.push_str(&tail);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

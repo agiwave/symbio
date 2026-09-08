@@ -16,6 +16,14 @@ use crate::symbio_core::ToolCall;
 
 // Flatten ChatMessage to NativeMessage
 
+/// LLM 请求包中保留的最近思考条数。
+///
+/// 思考链的价值随距离衰减：模型只需最近几条推理来"接上思路"，
+/// 全量回传历史思考既浪费 token，也可能诱导模型复述旧结论。
+/// 存储层 Reasoning 节点完整保留，此处只裁剪请求视图
+/// （Anthropic 协议本就不回传历史思考——缺官方签名，此裁剪对它无副作用）。
+const RETAINED_RECENT_REASONING: usize = 2;
+
 /// 将存储的细粒度 ChatMessage 树扁平化，转换为 API 所需的 NativeMessage 列表。
 ///
 /// 分型树结构（请求/响应由 MessageRole 区分，组合节点可选）：
@@ -84,6 +92,33 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         }
     }
 
+    // ── 请求视图思考裁剪（诉求2）──────────────────────────────────────
+    // 按列表序（时间序）收集携带 Reasoning 子节点的根级 Turn，
+    // 仅最近 RETAINED_RECENT_REASONING 条允许回传 reasoning_content：
+    // 完全清空思考会让模型"失忆"后重复思考；全量回传历史思考既浪费
+    // token，也可能诱导模型复述旧结论。只裁请求视图，存储层完整保留。
+    let turns_with_reasoning: Vec<&str> = messages
+        .iter()
+        .filter(|m| {
+            is_root(m)
+                && m.msg_type == Some(MessageType::Turn)
+                && children
+                    .get(m.id.as_str())
+                    .map(|kids| {
+                        kids.iter()
+                            .any(|c| c.msg_type == Some(MessageType::Reasoning))
+                    })
+                    .unwrap_or(false)
+        })
+        .map(|m| m.id.as_str())
+        .collect();
+    let retained_reasoning_turns: HashSet<&str> = turns_with_reasoning
+        .iter()
+        .rev()
+        .take(RETAINED_RECENT_REASONING)
+        .copied()
+        .collect();
+
     for m in messages {
         // 已被聚合消费（作为某 Turn 的子节点）的节点不再单独发出
         if consumed.contains(m.id.as_str()) {
@@ -107,8 +142,11 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                     for child in kids {
                         match child.msg_type {
                             Some(MessageType::Reasoning) => {
-                                native.reasoning_content =
-                                    child.content.as_ref().map(|c| c.to_text());
+                                // 仅最近 N 条思考进入请求视图（诉求2）
+                                if retained_reasoning_turns.contains(m.id.as_str()) {
+                                    native.reasoning_content =
+                                        child.content.as_ref().map(|c| c.to_text());
+                                }
                             }
                             Some(MessageType::Text) => {
                                 native.content = child.content.clone();
@@ -613,6 +651,93 @@ mod tests {
             Some("正常回复".to_string())
         );
         assert_eq!(natives[0].reasoning_content.as_deref(), Some("思考过程"));
+    }
+
+    /// 诉求2：请求视图只保留最近 RETAINED_RECENT_REASONING 条思考。
+    ///
+    /// 3 个携带 Reasoning 子节点的 Turn 依序出现时，最早 1 条的 reasoning_content
+    /// 必须被剥离（但正文保留、消息不得整条消失），最近 2 条完整回传——
+    /// 防止上下文完全没有思考时模型重复思考，同时避免全量回传浪费 token。
+    #[test]
+    fn flatten_keeps_only_recent_reasoning_in_request_view() {
+        let mk_turn = |turn_id: &str, reasoning: &str, reply: &str| -> Vec<ChatMessage> {
+            vec![
+                ChatMessage {
+                    id: turn_id.into(),
+                    parent_id: None,
+                    role: Some(MessageRole::Assistant),
+                    msg_type: Some(MessageType::Turn),
+                    content: None,
+                    status: Some(MessageStatus::Completed),
+                    timestamp: Some(1),
+                    ..Default::default()
+                },
+                ChatMessage {
+                    id: format!("{turn_id}-reason"),
+                    parent_id: Some(turn_id.into()),
+                    role: Some(MessageRole::Assistant),
+                    msg_type: Some(MessageType::Reasoning),
+                    content: Some(MessageContent::Text(reasoning.into())),
+                    status: Some(MessageStatus::Completed),
+                    timestamp: Some(1),
+                    ..Default::default()
+                },
+                ChatMessage {
+                    id: format!("{turn_id}-text"),
+                    parent_id: Some(turn_id.into()),
+                    role: Some(MessageRole::Assistant),
+                    msg_type: Some(MessageType::Text),
+                    content: Some(MessageContent::Text(reply.into())),
+                    status: Some(MessageStatus::Completed),
+                    timestamp: Some(1),
+                    ..Default::default()
+                },
+            ]
+        };
+
+        let mut msgs = vec![ChatMessage {
+            id: "u1".into(),
+            parent_id: None,
+            role: Some(MessageRole::User),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text("开始".into())),
+            status: Some(MessageStatus::Completed),
+            timestamp: Some(0),
+            ..Default::default()
+        }];
+        msgs.extend(mk_turn("turn-1", "思考一", "回复一"));
+        msgs.extend(mk_turn("turn-2", "思考二", "回复二"));
+        msgs.extend(mk_turn("turn-3", "思考三", "回复三"));
+
+        let natives = flatten_chat_messages(&msgs);
+
+        let assistant: Vec<&NativeMessage> = natives
+            .iter()
+            .filter(|n| n.role == MessageRole::Assistant)
+            .collect();
+        assert_eq!(assistant.len(), 3, "三个 Turn 都应聚合为 assistant 消息");
+
+        let by_content = |reply: &str| -> &NativeMessage {
+            assistant
+                .iter()
+                .copied()
+                .find(|n| n.content.as_ref().map(|c| c.to_text()) == Some(reply.to_string()))
+                .unwrap_or_else(|| panic!("应存在正文为 {reply} 的 assistant 消息"))
+        };
+
+        let first = by_content("回复一");
+        assert!(
+            first.reasoning_content.is_none(),
+            "最早一条思考应被裁剪出请求视图"
+        );
+        assert_eq!(
+            by_content("回复二").reasoning_content.as_deref(),
+            Some("思考二")
+        );
+        assert_eq!(
+            by_content("回复三").reasoning_content.as_deref(),
+            Some("思考三")
+        );
     }
 
     // ── 新增回归测试：锁定本次修复的两个高危行为 ─────────────────────────

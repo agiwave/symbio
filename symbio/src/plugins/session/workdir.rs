@@ -225,11 +225,16 @@ pub async fn delete_node(workdir: &str, rel: &str) -> Result<(), PluginError> {
 #[derive(Default)]
 pub struct WorkdirWatchManager {
     /// workdir → 持活的监听器（保持句柄以维持监听）
-    watchers: DashMap<String, Arc<FsWatcher>>,
+    ///
+    /// 注意：字段必须为 `Arc<DashMap>`——`release_watch` 与 FsWatcher 回调
+    /// 都会把 map 移入 `tokio::spawn` 的任务，而 `DashMap::clone()` 是
+    /// 深拷贝（克隆全部键值对），深拷贝副本上的增删不影响原 map；只有
+    /// `Arc` 克隆（引用计数）才让任务与原 map 共享同一份数据。
+    watchers: Arc<DashMap<String, Arc<FsWatcher>>>,
     /// workdir → 关注它的容器 id 列表（含各自世代号）
-    containers: DashMap<String, Vec<(String, u64)>>,
+    containers: Arc<DashMap<String, Vec<(String, u64)>>>,
     /// (workdir, container) → 当前世代号（每次 ensure 递增）
-    generations: DashMap<String, u64>,
+    generations: Arc<DashMap<String, u64>>,
 }
 
 /// (workdir, container) 的世代守卫键
@@ -344,18 +349,28 @@ impl WorkdirWatchManager {
             if generations.get(&key).map(|g| *g) != Some(generation) {
                 return;
             }
-            let should_stop = match containers.get_mut(&wd) {
-                Some(mut list) => {
+            // 移除该容器并判断是否仍有订阅方。注意：不能在持有 get_mut 的
+            // RefMut（分片写锁）时再对同一分片 remove——DashMap 不可重入，
+            // 最后一位订阅方释放时（列表变空恰好走 remove 分支）会永久死锁，
+            // 导致监听句柄与条目泄漏。先取结果、释放守卫，再执行移除。
+            let empty = containers
+                .get_mut(&wd)
+                .map(|mut list| {
                     list.retain(|(c, _)| *c != container_owned);
-                    let empty = list.is_empty();
-                    if empty {
-                        containers.remove(&wd);
-                    }
-                    empty
-                }
-                None => false,
-            };
-            if should_stop {
+                    list.is_empty()
+                })
+                .unwrap_or(false);
+            if !empty {
+                return;
+            }
+            // 释放守卫后二次确认：窄化「确认空 → 移除」窗口内并发重新订阅
+            // 造成新订阅方被误删的可能
+            let still_empty = containers
+                .get(&wd)
+                .map(|list| list.is_empty())
+                .unwrap_or(false);
+            if still_empty {
+                containers.remove(&wd);
                 if let Some((_, watcher)) = watchers.remove(&wd) {
                     crate::plugin_info!("session", "workdir watch stopped: {wd}");
                     drop(watcher);
@@ -440,15 +455,29 @@ mod tests {
         assert!(mgr.is_watched(wd));
 
         // 宽限期流逝：世代 1 的迟到释放因世代推进被忽略
-        tokio::time::advance(RELEASE_GRACE + std::time::Duration::from_secs(1)).await;
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        advance_until(&mgr, wd, true).await;
         assert!(mgr.is_watched(wd), "迟到的 unwatch 不得误杀重新订阅");
 
         // 再切走 → 世代 2 的释放正常生效（无重新订阅推进世代）
         mgr.release_watch(wd, "sess_a");
-        tokio::time::advance(RELEASE_GRACE + std::time::Duration::from_secs(1)).await;
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        advance_until(&mgr, wd, false).await;
         assert!(!mgr.is_watched(wd), "无订阅方后监听应停止");
+    }
+
+    /// 在 paused 时钟下推进时间并等待释放任务收敛到目标状态。
+    ///
+    /// 释放任务经 `tokio::spawn` + `sleep(RELEASE_GRACE)` 调度，定时器在任务
+    /// 首次被 poll 时才注册；若首次 poll 发生在时钟推进之后，deadline 会顺延
+    /// 到「当前时刻 + 宽限期」。固定 advance 一次不可靠，故循环推进并让出，
+    /// 直到目标状态出现（有界，防死循环）。
+    async fn advance_until(mgr: &WorkdirWatchManager, wd: &str, watched: bool) {
+        for _ in 0..10 {
+            tokio::time::advance(RELEASE_GRACE).await;
+            tokio::task::yield_now().await;
+            if mgr.is_watched(wd) == watched {
+                return;
+            }
+        }
     }
 
     /// 共享 workdir：多方订阅引用计数，最后一位释放后监听停止
@@ -462,13 +491,11 @@ mod tests {
         assert!(mgr.is_watched(wd));
 
         mgr.release_watch(wd, "sess_a");
-        tokio::time::advance(RELEASE_GRACE).await;
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        advance_until(&mgr, wd, true).await;
         assert!(mgr.is_watched(wd), "仍有其他订阅方，监听保持");
 
         mgr.release_watch(wd, "sess_b");
-        tokio::time::advance(RELEASE_GRACE).await;
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        advance_until(&mgr, wd, false).await;
         assert!(!mgr.is_watched(wd), "最后一位释放后监听停止");
     }
 

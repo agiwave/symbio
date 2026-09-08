@@ -163,6 +163,10 @@ impl Capability for TodoWriteTool {
             examples: Some(vec![
                 "todos=[{content:'分析架构',status:'in_progress',priority:'high'}]".to_string(),
             ]),
+            // 上下文保留策略（机制化声明）：任务清单每次全量写入，历史版本对后续
+            // 推理无参考价值 → 仅保留最近一次调用的完整参数/结果。
+            // 会话压缩层按 meta 通用执行，不对具体工具名特殊化。
+            context_retention: Some(crate::symbio_core::ToolContextRetention::LastOnly),
             ..Default::default()
         }
     }

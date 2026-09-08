@@ -687,6 +687,7 @@ impl SessionPlugin {
                     max_tool_rounds: Some(session_cfg.max_tool_rounds),
                     tool_context_window: Some(session_cfg.tool_context_window),
                     auto_compress: Some(session_cfg.auto_compress),
+                    enable_compact_tool: Some(session_cfg.enable_compact_tool),
                     provider_id: pid_clone.clone(),
                     load_history: Some(true), // resume 必须加载历史以定位目标消息
                     resume: Some(tr),
@@ -700,6 +701,7 @@ impl SessionPlugin {
                     max_tool_rounds: Some(session_cfg.max_tool_rounds),
                     tool_context_window: Some(session_cfg.tool_context_window),
                     auto_compress: Some(session_cfg.auto_compress),
+                    enable_compact_tool: Some(session_cfg.enable_compact_tool),
                     provider_id: pid_clone.clone(),
                     load_history: include_history,
                     resume: None,
@@ -721,6 +723,7 @@ impl SessionPlugin {
                     max_tool_rounds: Some(session_cfg.max_tool_rounds),
                     tool_context_window: Some(session_cfg.tool_context_window),
                     auto_compress: Some(session_cfg.auto_compress),
+                    enable_compact_tool: Some(session_cfg.enable_compact_tool),
                     provider_id: pid_clone.clone(),
                     load_history: include_history,
                     resume: None,

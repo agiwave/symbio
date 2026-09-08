@@ -43,6 +43,9 @@ pub struct Request {
     /// 是否开启自动语义压缩
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_compress: Option<bool>,
+    /// 是否启用工具压缩（context_compact 暴露给模型 + 水位提醒；独立于 auto_compress）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_compact_tool: Option<bool>,
 
     /// 指定本次会话使用的 Model Provider ID（来自 `ModelProvidersConfig.providers`）
     /// 为空时使用默认 Provider

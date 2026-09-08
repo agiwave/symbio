@@ -132,13 +132,31 @@ fn find_compress_split_point(messages: &[ChatMessage], fraction: f64) -> usize {
     last_split_point
 }
 
+/// 找到当前 Turn（root_id）首个 ToolCall 消息的下标；找不到返回 0（压缩中止）。
+///
+/// 供 run_chat_loop 计算 run_context_compact 的切分点。必须按 `parent_id`
+/// 限定到当前 Turn：全历史正向扫描会命中会话最早的 ToolCall，切分点落在
+/// 会话开头，绝大部分旧内容留在保留区，压缩后水位几乎不降，导致压缩被
+/// 高频反复触发。
+pub fn find_turn_tool_call_split_idx(messages: &[ChatMessage], root_id: &str) -> usize {
+    messages
+        .iter()
+        .position(|m| {
+            m.msg_type == Some(MessageType::ToolCall)
+                && m.parent_id.as_deref() == Some(root_id)
+        })
+        .unwrap_or(0)
+}
+
 /// 估算单条消息的 token 数。
 ///
 /// 统一使用 `CalibratedTokenizer`（启发式 × provider 用量反馈校准），
 /// **禁止**裸 `text.len()/4`：UTF-8 下中文每字 3 字节，`len()/4` 会低估约 2 倍，
 /// 导致压缩触发过晚、请求撞上 provider 的 context-length 400。
 ///
-/// 计入：正文内容 + ToolCall 节点参数（content 即 JSON 文本）+ 每消息固定结构开销。
+/// 计入：正文内容 + LLM prompt 前缀（时间/工作区上下文，`to_api_value` 会拼进
+/// 实际请求文本并由 provider 计费）+ ToolCall 节点参数（content 即 JSON 文本）
+/// + 每消息固定结构开销。
 pub fn estimate_message_tokens(m: &ChatMessage) -> usize {
     use crate::symbio_core::{default_tokenizer, Tokenizer};
 
@@ -155,6 +173,12 @@ pub fn estimate_message_tokens(m: &ChatMessage) -> usize {
     if let Some(name) = &m.name {
         if !name.is_empty() {
             total += tok.count(name);
+        }
+    }
+    // prompt 不持久化但每轮随请求发送，漏算会系统性低估水位。
+    if let Some(p) = &m.prompt {
+        if !p.is_empty() {
+            total += tok.count(p);
         }
     }
     total
@@ -213,6 +237,9 @@ pub fn should_start_compression(
     // 迟滞：若最近一次快照后已增长不足 15%，说明上一轮压缩收益被挥霍，
     // 再次压缩大概率是"快照过小"导致的循环调用，跳过并依赖确定性层消化。
     // 例外：force（主动压缩 / 用户指令）不受此限制。
+    // 口径对齐：post_tokens 记录的是内容水位（不含请求级 overhead），
+    // 这里同样用扣除 overhead 后的内容侧读数比较；若直接用含 overhead 的
+    // current，overhead 越大越容易"虚高"越过地板，迟滞保护失效。
     if let Some(last) = messages
         .iter()
         .find(|m| m.meta.as_ref().map(|meta| meta.get("compacted") == Some(&serde_json::json!(true))).unwrap_or(false))
@@ -223,8 +250,9 @@ pub fn should_start_compression(
             .and_then(|meta| meta.get("post_tokens"))
             .and_then(|v| v.as_u64())
         {
+            let content_tokens = current.saturating_sub(overhead_tokens);
             let hysteresis_floor = (post as f64 * COMPACT_HYSTERESIS_FACTOR) as usize;
-            if current < hysteresis_floor {
+            if content_tokens < hysteresis_floor {
                 return false;
             }
         }
@@ -274,11 +302,9 @@ pub fn prepare_compression(
 
     // 生成压缩指令
     let history_json = serde_json::to_string(&history_to_compress).unwrap_or_default();
-    let prompt = format!(
-        "{}\n\n## Chat History to Summarize:\n{}",
-        get_compression_prompt(),
-        history_json
-    );
+    // 诉求3：user 消息只携带数据；压缩模板由调用方经 system role 注入，
+    // 避免格式指令在对话中出现两次（system 一次 + user 一次）诱导模型模仿输出
+    let prompt = format!("## Chat History to Summarize:\n{history_json}");
 
     let compression_msg = ChatMessage {
         id: uuid::Uuid::new_v4().to_string(),
@@ -291,13 +317,13 @@ pub fn prepare_compression(
     Some((compression_msg, history_to_compress, history_to_keep))
 }
 
-/// 老化淡化：当对话轮次过多时，把较早的工具结果（`role=Tool`、`msg_type=Text`）做 head/tail 摘要，
-/// 保留最近 `keep_recent_turns` 个 user turn 起的原文，以及**全部** assistant 文本 / 推理节点
-/// （绝不改动 assistant 消息，最大限度保护思维链）。
+/// 轮次淡化（请求视图级）：当对话轮次过多时，把较早的工具结果（`role=Tool`、`msg_type=Text`）
+/// 做 head/tail 摘要，保留最近 `keep_recent_turns` 个 user turn 起的原文，以及**全部**
+/// assistant 文本 / 推理节点（绝不改动 assistant 消息，最大限度保护思维链）。
 ///
-/// 这是对用户"不要 max_tool_rounds 硬性上限、而是有效淡化历时轮次"诉求的核心落地：
-/// 上下文不会无限膨胀，但近期交互与推理全程保留。被淡化的结果会标记 `tool_result_faded`，
-/// 原始全文仍存于 `archive_path`（可用 local/file_read 取回），符合"压缩可回溯"原则。
+/// 只作用于传入的视图副本（由 [`build_request_view`] 每轮从存储重建），存储层保留全文，
+/// 因此**不写存档文件**、天然幂等（无重复存档问题）。被淡化的结果标记 `tool_result_faded`，
+/// 模型如需完整输出可重新运行对应工具。
 pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: usize) {
     use crate::symbio_core::{default_tokenizer, Tokenizer};
 
@@ -321,18 +347,70 @@ pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: u
         if m.role == Some(MessageRole::Tool) && m.msg_type == Some(MessageType::Text) {
             if let Some(MessageContent::Text(t)) = &m.content {
                 if tok.count(t) > FADE_BUDGET {
-                    let g = super::tool_result_guard::guard_tool_result(t, FADE_BUDGET);
-                    m.content = Some(MessageContent::Text(g.text));
+                    m.content = Some(MessageContent::Text(
+                        super::tool_result_guard::summarize_tool_result(t, FADE_BUDGET),
+                    ));
                     let mut meta = m.meta.clone().unwrap_or_else(|| serde_json::json!({}));
                     meta["tool_result_faded"] = serde_json::json!(true);
-                    if let Some(p) = g.archive_path {
-                        meta["archive_path"] = serde_json::json!(p);
-                    }
                     m.meta = Some(meta);
                 }
             }
         }
     }
+}
+
+/// 水位提醒文案（请求级注入，不落库）。模型不应直接回应此提示。
+const CONTEXT_NUDGE_TEXT: &str = "[system note] Context usage is approaching the limit. If you are \
+     at a natural stage boundary, call the context_compact tool now to distill older history and \
+     continue seamlessly; otherwise keep working and it will be compacted automatically. Do not \
+     respond to this note directly.";
+
+/// 构建本次 LLM 请求的视图（请求视图层唯一入口）。
+///
+/// 存储视图（`get_context_messages`）只负责过滤与轮次窗口；一切**只影响单次请求、
+/// 不落库**的裁剪都在这里按固定顺序执行：
+///
+/// 1. 轮次淡化（fade）：`fade_active`（轮次超过激活阈值）时，对较早的工具结果做
+///    head/tail 摘要（无存档，存储保留全文）；
+/// 2. 工具级骨架化：`window > 0` 且存在保留策略声明时，按分层滑窗把过期调用的
+///    参数与结果替换为占位文案（ToolCall↔Tool 配对与 parent_id 传播完整保留，
+///    不会造成大模型逻辑断联）；
+/// 3. 水位提醒（nudge）：`inject_nudge` 时在视图末尾追加一条一次性系统提示——
+///    请求级注入、不写会话存储，因此不占用轮次窗口的 User 计数，也不会在前端
+///    以用户消息的形式出现。
+///
+/// 视图每轮从存储重建，三个步骤天然幂等，不存在重复存档 / 重复注入问题。
+pub fn build_request_view(
+    messages: &[ChatMessage],
+    window: usize,
+    retention: &std::collections::HashMap<String, crate::symbio_core::ToolContextRetention>,
+    fade_active: bool,
+    fade_keep_turns: usize,
+    inject_nudge: bool,
+) -> Vec<ChatMessage> {
+    let mut view = messages.to_vec();
+    if fade_active {
+        fade_aged_tool_results(&mut view, fade_keep_turns);
+    }
+    if window > 0 && !retention.is_empty() {
+        view = crate::plugins::session::context::apply_layered_sliding_window(
+            &view,
+            window,
+            retention,
+        );
+    }
+    if inject_nudge {
+        view.push(ChatMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: Some(MessageRole::User),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text(CONTEXT_NUDGE_TEXT.to_string())),
+            status: Some(MessageStatus::Completed),
+            meta: Some(serde_json::json!({ "kind": "context_nudge" })),
+            ..Default::default()
+        });
+    }
+    view
 }
 
 /// 从模型输出中提取 `<state_snapshot>` XML 块（容错空白与转义）。
@@ -359,12 +437,37 @@ pub fn fallback_snapshot(text: &str) -> Option<String> {
         return None;
     }
     Some(format!(
-        "<state_snapshot>\n<key_knowledge>\n[降级快照：上次压缩时模型未按结构输出，以下为原始摘要，内容可能不完整]\n\n{trimmed}\n</key_knowledge>\n</state_snapshot>"
+        "<state_snapshot>\n[降级快照：上次压缩时模型未按结构输出，以下为原始摘要，内容可能不完整]\n\n{trimmed}\n</state_snapshot>"
     ))
 }
 
 /// `context_compact` 工具名（chat_loop 拦截分发用）。
 pub const CONTEXT_COMPACT_TOOL_NAME: &str = "context_compact";
+
+/// 把模型输出的 XML 快照渲染为纯文本分节（用于落库，诉求3）。
+///
+/// 快照会以 assistant 消息长期驻留上下文——若原样保留 `<state_snapshot>`/
+/// `<key_knowledge>` 等 XML 标签，模型会把历史里的这条消息当作"期望输出格式"
+/// 来模仿，在正常对话中频繁输出同类标签总结。落库前把标签替换为可读分节标记：
+/// 信息不丢，但切断"XML 标签 → 格式模仿"的泄漏链。
+/// 压缩子系统内部（提取/校验/纠正重试）仍统一使用 XML。
+pub fn render_snapshot_for_history(snapshot_text: &str) -> String {
+    snapshot_text
+        .replace("<state_snapshot>", "")
+        .replace("</state_snapshot>", "")
+        .replace("<overall_goal>", "【目标】")
+        .replace("</overall_goal>", "")
+        .replace("<key_knowledge>", "【关键知识】")
+        .replace("</key_knowledge>", "")
+        .replace("<completed_items>", "【已完成】")
+        .replace("</completed_items>", "")
+        .replace("<in_progress_items>", "【进行中】")
+        .replace("</in_progress_items>", "")
+        .replace("<open_questions>", "【待确认问题】")
+        .replace("</open_questions>", "")
+        .trim()
+        .to_string()
+}
 
 /// 构建主动压缩请求（`context_compact` 工具执行体）。
 ///
@@ -379,12 +482,9 @@ pub fn build_compression_request(history: &[ChatMessage], hints: Option<&str>) -
         }
         _ => String::new(),
     };
-    let prompt = format!(
-        "{}\n\n## Chat History to Summarize:\n{}{}",
-        get_compression_prompt(),
-        history_json,
-        hints_section
-    );
+    // 诉求3：user 消息只携带数据；压缩模板由调用方经 system role 注入，
+    // 避免格式指令在对话中出现两次（system 一次 + user 一次）诱导模仿
+    let prompt = format!("## Chat History to Summarize:\n{history_json}{hints_section}");
     ChatMessage {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(MessageRole::User),
@@ -402,6 +502,7 @@ pub fn build_compression_request(history: &[ChatMessage], hints: Option<&str>) -
 pub fn context_compact_tool_meta() -> crate::symbio_core::CapabilityMeta {
     crate::symbio_core::CapabilityMeta {
         name: CONTEXT_COMPACT_TOOL_NAME.to_string(),
+        context_retention: None,
         description: "Compact the conversation history: distill older messages into a \
             structured state snapshot and keep only recent context in the session. \
             Call this when you have just finished a major subtask, when the context is \
@@ -528,6 +629,75 @@ mod tests {
         assert!(split > 0, "配对完整时不应放弃压缩");
     }
 
+    /// 高频压缩根因回归：切分点必须按 parent_id 限定到当前 Turn。
+    /// 旧实现全历史正向扫描，对当前 Turn 的 root_id 也会命中会话最早的
+    /// ToolCall（下标 1），切分点落在会话开头，压缩后水位不降 → 反复触发。
+    #[test]
+    fn test_turn_tool_call_split_idx_scoped_to_current_turn() {
+        let old_call = ChatMessage {
+            parent_id: Some("old-root".to_string()),
+            ..tool_call_msg()
+        };
+        let cur_call = ChatMessage {
+            parent_id: Some("cur-root".to_string()),
+            ..tool_call_msg()
+        };
+        let msgs = vec![
+            user_msg("旧问题"),
+            old_call,
+            tool_result_msg(),
+            user_msg("新问题"),
+            cur_call,
+        ];
+        // 当前 Turn 的首个 ToolCall 在下标 4（旧实现会错误地返回 1）
+        assert_eq!(find_turn_tool_call_split_idx(&msgs, "cur-root"), 4);
+        assert_eq!(find_turn_tool_call_split_idx(&msgs, "old-root"), 1);
+        // 当前 Turn 无 ToolCall ⇒ 0（run_context_compact 以 split==0 视为中止）
+        assert_eq!(find_turn_tool_call_split_idx(&msgs, "no-such-turn"), 0);
+    }
+
+    /// 滞后口径回归：迟滞比较必须用扣除请求级 overhead 后的内容侧读数。
+    /// 旧实现直接比较含 overhead 的 current：overhead 越大越容易虚高越过
+    /// post_tokens×1.15 地板，迟滞保护失效 → 压缩高频触发。
+    #[test]
+    fn test_hysteresis_compares_content_tokens_excluding_overhead() {
+        let make_snapshot = || {
+            let mut m = assistant_msg("snapshot");
+            m.meta = Some(serde_json::json!({
+                "compacted": true,
+                "post_tokens": 1000
+            }));
+            m
+        };
+        let floor = (1000.0 * COMPACT_HYSTERESIS_FACTOR) as usize;
+
+        // 内容水位低于地板，但 current = 内容 + overhead 虚高越过地板：
+        // 旧口径（直接比较 current）会触发，新口径（扣除 overhead）必须拦截。
+        let msgs = vec![make_snapshot(), user_msg(&"中文字符填充".repeat(50))];
+        let content_tokens = estimate_context_tokens(&msgs, 0);
+        assert!(
+            content_tokens < floor,
+            "前提：内容水位 {content_tokens} 应低于地板 {floor}"
+        );
+        let overhead = floor - content_tokens + 10;
+        let current = content_tokens + overhead;
+        assert!(current >= floor, "前提：current 应虚高越过地板");
+        let threshold_limit = (current as f64 / 0.7 * 0.99) as usize;
+        assert!(!should_start_compression(&msgs, threshold_limit, false, overhead));
+
+        // 对照：内容真实增长越过地板后，迟滞放行（overhead 不应造成过度抑制）。
+        let grown = vec![make_snapshot(), user_msg(&"中文字符填充".repeat(400))];
+        let grown_tokens = estimate_context_tokens(&grown, 0);
+        assert!(
+            grown_tokens >= floor,
+            "前提：{grown_tokens} 应不低于地板 {floor}"
+        );
+        let grown_overhead = 500;
+        let grown_current = grown_tokens + grown_overhead;
+        let grown_limit = (grown_current as f64 / 0.7 * 0.99) as usize;
+        assert!(should_start_compression(&grown, grown_limit, false, grown_overhead));
+    }
+
     #[test]
     fn test_should_start_compression_hysteresis() {
         // 压缩后 post_tokens=1000，当前估算 1100（< 1150）⇒ 即使超 70% 阈值也跳过
@@ -565,10 +735,274 @@ mod tests {
         assert!(fallback_snapshot("  \n ").is_none());
     }
 
+    /// 诉求3：降级快照不得引入 `<key_knowledge>` 标签——
+    /// 它会持久化到历史中，诱导模型在正常对话里复述该格式。
+    #[test]
+    fn test_fallback_snapshot_has_no_key_knowledge_tag() {
+        let s = fallback_snapshot("plain summary").unwrap();
+        assert!(
+            !s.contains("<key_knowledge>"),
+            "降级快照不得包含 key_knowledge 结构标签"
+        );
+    }
+
+    /// 诉求3：压缩模板只走 system role，user 消息只携带待压缩数据
+    /// （prepare_compression / build_compression_request 均不得内嵌模板）。
+    #[test]
+    fn test_compression_request_user_message_carries_data_only() {
+        let msgs = vec![
+            user_msg(&"x".repeat(1000)),
+            assistant_msg(&"y".repeat(1000)),
+            user_msg(&"z".repeat(1000)),
+        ];
+        let (msg, _, _) = prepare_compression(&msgs).unwrap();
+        let text = msg.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
+        assert!(text.contains("Chat History to Summarize"));
+        assert!(
+            !text.contains("<state_snapshot>"),
+            "压缩模板不得随 user 消息下发"
+        );
+
+        let req = build_compression_request(&msgs, Some("keep file paths"));
+        let req_text = req
+            .content
+            .as_ref()
+            .map(|c| c.to_text())
+            .unwrap_or_default();
+        assert!(req_text.contains("keep file paths"));
+        assert!(!req_text.contains("<state_snapshot>"));
+    }
+
+    /// 诉求3：落库快照渲染后不残留 XML 标签——
+    /// 历史中的 assistant 消息不再示范 state_snapshot/key_knowledge 结构。
+    #[test]
+    fn test_render_snapshot_for_history_strips_xml_tags() {
+        let xml = extract_snapshot(
+            "<state_snapshot>\n<key_knowledge>\n- A\n- B\n</key_knowledge>\n</state_snapshot>",
+        )
+        .unwrap();
+        let rendered = render_snapshot_for_history(&xml);
+        assert!(!rendered.contains("<state_snapshot>"));
+        assert!(!rendered.contains("<key_knowledge>"));
+        assert!(rendered.contains("【关键知识】"));
+        assert!(rendered.contains("- A"));
+    }
+
     #[test]
     fn test_prepare_compression_rejects_when_no_split() {
         // 单条 User 消息（巨型单轮场景）：无切分点 ⇒ prepare_compression 返回 None
         let msgs = vec![user_msg(&"x".repeat(100_000))];
         assert!(prepare_compression(&msgs).is_none());
+    }
+
+    // ==================== build_request_view（请求视图层） ====================
+
+    /// 带显式 id 的 Assistant/ToolCall 消息（与 session/context.rs 骨架化测试同构）
+    fn view_tc(id: &str, name: &str, args: &str) -> ChatMessage {
+        ChatMessage {
+            id: id.to_string(),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::ToolCall),
+            name: Some(name.to_string()),
+            content: Some(MessageContent::Text(args.to_string())),
+            status: Some(MessageStatus::Completed),
+            ..Default::default()
+        }
+    }
+
+    /// 工具结果消息，parent_id 指向所属 ToolCall（id 形如 "{parent}-result"）
+    fn view_result(parent: &str, text: &str) -> ChatMessage {
+        ChatMessage {
+            id: format!("{parent}-result"),
+            parent_id: Some(parent.to_string()),
+            role: Some(MessageRole::Tool),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text(text.to_string())),
+            status: Some(MessageStatus::Completed),
+            ..Default::default()
+        }
+    }
+
+    /// 构建短工具名 → 保留策略映射（模拟 chat_loop 运行时从 CapabilityManager 动态解析）
+    fn view_retention(
+        entries: &[(&str, crate::symbio_core::ToolContextRetention)],
+    ) -> std::collections::HashMap<String, crate::symbio_core::ToolContextRetention> {
+        entries
+            .iter()
+            .map(|(n, r)| (n.to_string(), *r))
+            .collect()
+    }
+
+    fn view_text(m: &ChatMessage) -> String {
+        m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
+    }
+
+    /// 透传回归：无 fade、无骨架化、无 nudge 时，视图与输入逐条等价，且输入不被修改。
+    #[test]
+    fn test_build_request_view_passthrough() {
+        let msgs = vec![
+            user_msg("hello"),
+            assistant_msg("hi"),
+            view_tc("t1", "local/file_read", r#"{"path":"a.rs"}"#),
+            view_result("t1", "file content"),
+        ];
+        let retention = std::collections::HashMap::new();
+        let view = build_request_view(&msgs, 15, &retention, false, 12, false);
+
+        assert_eq!(view.len(), msgs.len());
+        for (v, m) in view.iter().zip(msgs.iter()) {
+            assert_eq!(v.id, m.id);
+            assert_eq!(v.role, m.role);
+            assert_eq!(view_text(v), view_text(m));
+        }
+        // 存储侧不受请求视图污染
+        assert!(msgs.iter().all(|m| m.meta.is_none()));
+    }
+
+    /// nudge 请求级注入：追加到视图末尾，不落库（原输入不变），meta 可识别。
+    #[test]
+    fn test_build_request_view_injects_nudge_at_tail() {
+        let msgs = vec![user_msg("u1"), assistant_msg("a1"), user_msg("u2")];
+        let retention = std::collections::HashMap::new();
+
+        let view = build_request_view(&msgs, 15, &retention, false, 12, true);
+        assert_eq!(view.len(), msgs.len() + 1);
+        let nudge = view.last().unwrap();
+        assert_eq!(nudge.role, Some(MessageRole::User));
+        assert_eq!(
+            nudge
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("kind"))
+                .and_then(|k| k.as_str()),
+            Some("context_nudge")
+        );
+        assert!(view_text(nudge).contains("context_compact"));
+
+        // 原输入不被修改：nudge 不写入会话存储
+        assert_eq!(msgs.len(), 3);
+        assert!(msgs.iter().all(|m| m.meta.is_none()));
+
+        // inject_nudge=false 时不注入
+        let plain = build_request_view(&msgs, 15, &retention, false, 12, false);
+        assert_eq!(plain.len(), msgs.len());
+    }
+
+    /// fade 激活：老化工具结果被 head/tail 摘要并标记 `tool_result_faded`，
+    /// 不写存档（无 archive_path），assistant 消息与最近轮次不受影响，存储保留全文。
+    #[test]
+    fn test_build_request_view_fades_aged_tool_results() {
+        // 3 个 user turn；fade_keep_turns=2 ⇒ 第一个 turn 的工具结果应被淡化
+        let long_text = "line\n".repeat(12_000); // 远超 2048 token
+        let msgs = vec![
+            user_msg("turn-1"),
+            view_tc("t1", "local/file_read", r#"{"path":"big.txt"}"#),
+            view_result("t1", &long_text),
+            assistant_msg("analysis"),
+            user_msg("turn-2"),
+            view_tc("t2", "local/file_read", r#"{"path":"small.txt"}"#),
+            view_result("t2", "tiny"),
+            assistant_msg("done"),
+            user_msg("turn-3"),
+        ];
+        let retention = std::collections::HashMap::new();
+        let view = build_request_view(&msgs, 0, &retention, true, 2, false);
+
+        let faded = &view[2];
+        let faded_text = view_text(faded);
+        assert!(faded_text.contains("已省略"), "老化工具结果应被摘要化");
+        assert!(faded_text.len() < long_text.len(), "摘要应显著短于原文");
+        assert_eq!(
+            faded
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("tool_result_faded"))
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(
+            faded.meta.as_ref().and_then(|m| m.get("archive_path")).is_none(),
+            "请求视图级淡化不得写存档"
+        );
+        // assistant 消息绝不被淡化
+        assert_eq!(view_text(&view[3]), "analysis");
+        // 最近轮次内的小结果保持原文、无标记
+        assert_eq!(view_text(&view[6]), "tiny");
+        assert!(view[6].meta.is_none());
+        // 存储中的原文不受影响
+        assert_eq!(view_text(&msgs[2]), long_text);
+    }
+
+    /// fade 天然幂等：视图每轮从存储重建，对同一视图重复淡化不产生二次改写。
+    #[test]
+    fn test_fade_is_idempotent() {
+        let long_text = "line\n".repeat(12_000);
+        let mut msgs = vec![user_msg("t1"), view_result("t1", &long_text), user_msg("t2")];
+        fade_aged_tool_results(&mut msgs, 1);
+        let once = view_text(&msgs[1]);
+        let once_meta = msgs[1].meta.clone();
+        fade_aged_tool_results(&mut msgs, 1);
+        assert_eq!(view_text(&msgs[1]), once);
+        assert_eq!(msgs[1].meta, once_meta);
+    }
+
+    /// 骨架化：window + 保留策略声明时，过期调用的参数与结果被占位文案替换，
+    /// 最新调用保留原文；ToolCall↔Tool 配对与 parent_id 完整保留（逻辑不断联）。
+    #[test]
+    fn test_build_request_view_skeletonizes_with_retention() {
+        let msgs = vec![
+            user_msg("u1"),
+            view_tc("t1", "local/file_read", r#"{"path":"old.txt"}"#),
+            view_result("t1", "old content"),
+            user_msg("u2"),
+            view_tc("t2", "local/file_read", r#"{"path":"new.txt"}"#),
+            view_result("t2", "new content"),
+        ];
+        // LastOnly：同工具仅保留最近一次调用（t1 应骨架化）
+        let retention = view_retention(&[(
+            "file_read",
+            crate::symbio_core::ToolContextRetention::LastOnly,
+        )]);
+        let view = build_request_view(&msgs, 15, &retention, false, 12, false);
+
+        assert!(
+            view_text(&view[1]).contains("skeletonized"),
+            "过期调用参数应骨架化"
+        );
+        assert!(
+            view_text(&view[2]).contains("skeletonized"),
+            "过期调用结果应骨架化"
+        );
+        assert_eq!(view_text(&view[4]), r#"{"path":"new.txt"}"#);
+        assert_eq!(view_text(&view[5]), "new content");
+        // 配对与 parent_id 保留
+        assert_eq!(view[2].parent_id.as_deref(), Some("t1"));
+        assert_eq!(view[5].parent_id.as_deref(), Some("t2"));
+        // 存储视图不受影响
+        assert_eq!(view_text(&msgs[1]), r#"{"path":"old.txt"}"#);
+    }
+
+    /// 顺序保证：nudge 在骨架化之后追加，始终位于视图末尾；
+    /// nudge 不占用轮次窗口计数、不参与骨架化。
+    #[test]
+    fn test_build_request_view_nudge_comes_after_skeletonization() {
+        let msgs = vec![
+            user_msg("u1"),
+            view_tc("t1", "local/file_read", r#"{"path":"old.txt"}"#),
+            view_result("t1", "old content"),
+            user_msg("u2"),
+            view_tc("t2", "local/file_read", r#"{"path":"new.txt"}"#),
+            view_result("t2", "new content"),
+        ];
+        let retention = view_retention(&[(
+            "file_read",
+            crate::symbio_core::ToolContextRetention::LastOnly,
+        )]);
+        let view = build_request_view(&msgs, 15, &retention, false, 12, true);
+
+        assert_eq!(view.len(), msgs.len() + 1);
+        // 末尾是 nudge；倒数第二条仍是保留原文的最新工具结果
+        assert!(view_text(view.last().unwrap()).contains("system note"));
+        assert_eq!(view_text(&view[view.len() - 2]), "new content");
     }
 }
