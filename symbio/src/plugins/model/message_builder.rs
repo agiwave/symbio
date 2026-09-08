@@ -6,13 +6,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::tool_call::ToolCallInfo;
 use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+    ChatMessage, MessageRole, MessageType,
 };
 
 use super::types::*;
-use crate::symbio_core::ToolCall;
 
 // Flatten ChatMessage to NativeMessage
 
@@ -278,181 +276,15 @@ fn find_tool_result<'a>(
         .copied()
 }
 
-// ChatMessage 构造
-
-/// 生成长度短的 ID（8 字符），替代完整 UUID v4
-pub fn short_id() -> String {
-    uuid::Uuid::new_v4().to_string()[..8].to_string()
-}
-
-/// 流式期间已经广播给前端的子节点 id。
-///
-/// **落库时必须复用这些 id**（M-001 修复）：流式层（`parse_sse_stream` 的 `emit_update`）
-/// 与存储层（`build_assistant_messages`）是同一批节点的两个视图。此前两者各自
-/// `short_id()` 生成新 id，导致同一个文本子节点在「前端流式快照」里是 id=A、
-/// 在「会话存储」里是 id=B，被上层判定为两条不同消息——于是失败收尾时 id=A 的节点
-/// 被当作"尚未落库的流式半截"补写进存储，同一个 Turn 下出现两份内容相同的文本节点。
-#[derive(Debug, Default, Clone)]
-pub struct StreamChildIds {
-    /// 回复正文子节点的流式 id（`TurnOutput::response_text_child_id`）
-    pub text: Option<String>,
-    /// 思考子节点的流式 id（`TurnOutput::reasoning_child_id`）
-    pub reasoning: Option<String>,
-}
-
-impl StreamChildIds {
-    /// 空串视为「流式期间没有产生该节点」，规范化为 None。
-    fn normalized(self) -> Self {
-        Self {
-            text: self.text.filter(|s| !s.is_empty()),
-            reasoning: self.reasoning.filter(|s| !s.is_empty()),
-        }
-    }
-}
-
-/// 构造助手消息组（基于 Turn / ToolCall 的分型层级结构）。
-///
-/// 结构：
-/// - `Turn`(根级, `Assistant` 组合)：与 `User` 互为兄弟
-///   ├─ `Reasoning`(子)
-///   ├─ `Text`(回复, 子)
-/// - `ToolCall`(`Assistant` 组合, 子)：自身 `content` 携带请求参数（JSON 文本）
-///   └─ `Text`(响应结果, `Tool`, 子)  ← 由 `build_tool_message` 补充
-pub fn build_assistant_messages(
-    id: &str,
-    content: &str,
-    tool_calls: &[ToolCallInfo],
-    rid: Option<String>,
-    reasoning: Option<String>,
-    child_ids: StreamChildIds,
-) -> Vec<ChatMessage> {
-    let child_ids = child_ids.normalized();
-    let mut msgs = Vec::new();
-    let timestamp = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
-
-    // ── Turn 消息（根级，与 User 互为兄弟）───────────────────────────────
-    msgs.push(ChatMessage {
-        id: id.to_string(),
-        parent_id: None,
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
-        content: None,
-        status: Some(MessageStatus::Completed),
-        timestamp: Some(timestamp),
-        ..Default::default()
-    });
-
-    // ── Reasoning 消息（parent_id=turn_id）──────────────────────────────
-    // 仅当 reasoning 与回复正文为「不同内容」（即存在独立的文本回复）时才单独生成思考子节点。
-    // reasoning-only 场景下 `reasoning` 已通过 `content`（effective_text 对「无文本回复」的回退）
-    // 承载于下方的 Text 子节点；若此处再生成 Reasoning 子节点，同一段内容会在存储层出现两份
-    // （factor=2：表现为历史会话里重复两份、流式期间"层层叠加"）。
-    let reasoning_only = reasoning
-        .as_ref()
-        .map(|r| !r.trim().is_empty() && r.trim() == content.trim())
-        .unwrap_or(false);
-    if let Some(r) = reasoning {
-        if !r.trim().is_empty() && !reasoning_only {
-            msgs.push(ChatMessage {
-                id: child_ids.reasoning.clone().unwrap_or_else(short_id),
-                parent_id: Some(id.to_string()),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Reasoning),
-                content: Some(MessageContent::Text(r)),
-                status: Some(MessageStatus::Completed),
-                timestamp: Some(timestamp),
-                ..Default::default()
-            });
-        }
-    }
-
-    // ── Response 文本消息（parent_id=turn_id）───────────────────────────
-    // 仅在存在非空白文本内容时添加，避免产生仅含 \n\n 的空节点
-    if !content.trim().is_empty() {
-        // reasoning-only 场景下这块内容在流式层是以 Reasoning 子节点的形式存在的
-        // （`finalize_assistant_turn` 会把 `reasoning_child_id` 定稿），因此优先复用
-        // reasoning 的流式 id，保证存储层与流式层的节点身份一致。
-        let text_child_id = if reasoning_only {
-            child_ids
-                .reasoning
-                .clone()
-                .or_else(|| child_ids.text.clone())
-        } else {
-            child_ids.text.clone()
-        };
-        msgs.push(ChatMessage {
-            id: text_child_id.unwrap_or_else(short_id),
-            parent_id: Some(id.to_string()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
-            content: Some(MessageContent::Text(content.into())),
-            status: Some(MessageStatus::Completed),
-            timestamp: Some(timestamp),
-            response_id: rid,
-            ..Default::default()
-        });
-    }
-
-    // ── ToolCall 消息（parent_id=turn_id，组合节点）──────────────────────
-    // ToolCall 组合节点自身携带请求参数（content = JSON 文本），不再拆分出独立的请求子节点
-    for tc in tool_calls {
-        let tc_id = tc.id.clone().unwrap_or_else(short_id);
-        msgs.push(ChatMessage {
-            id: tc_id.clone(),
-            parent_id: Some(id.to_string()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::ToolCall),
-            name: tc.name.clone(),
-            content: Some(MessageContent::Text(tc.arguments.to_string())),
-            status: Some(MessageStatus::Completed),
-            timestamp: Some(timestamp),
-            ..Default::default()
-        });
-    }
-
-    msgs
-}
-
-/// 构造工具执行结果消息（role: Tool，msg_type: Text，parent_id 指向 tool_call）。
-/// 响应结果作为 `ToolCall` 的直接 `Text`(`Tool`) 子节点（组合节点可选，故不包 Turn）。
-///
-/// **重要（修复 Bug 2）**：结果子节点的 `status` 必须与实际执行结果一致——
-/// 成功 `Completed`、失败 `Failed`。此前硬编码 `Completed`，导致失败工具的结果
-/// 子节点被持久化为 `Completed`；当下一轮 `get_context_messages` 过滤掉 `Failed`
-/// 的 `ToolCall` 父节点时，这个"孤儿"`role=Tool` 结果子节点（其 `tool_call_id`
-/// 指向已被删除的 tool_call）被保留下来，使新一轮 LLM 请求携带非法
-/// `tool_call_id` → 请求包出错（"发给大语言模型的数据包会出错"）。
-pub fn build_tool_message(
-    tool_call_id: &str,
-    content: &str,
-    // rid: Option<String>,
-    success: Option<bool>,
-    msg_id: Option<String>,
-) -> ChatMessage {
-    let success = success.unwrap_or(true);
-    ChatMessage {
-        id: msg_id.unwrap_or_else(short_id),
-        parent_id: Some(tool_call_id.into()),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::Text),
-        content: Some(MessageContent::Text(content.into())),
-        status: Some(if success {
-            MessageStatus::Completed
-        } else {
-            MessageStatus::Failed
-        }),
-        meta: Some(serde_json::json!({ "success": success })),
-        timestamp: Some(
-            (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64,
-        ),
-        // response_id: rid,
-        ..Default::default()
-    }
-}
+// ChatMessage 构造（Phase E：实现上移至 symbio_core::turn）
+// build_assistant_messages / build_tool_message / short_id / StreamChildIds
+// 仅测试消费，由 tests 模块直接引用 core（避免 lib 侧 unused import 警告）
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::symbio_core::schemas::session::chat_message::MessageStatus;
+    use crate::symbio_core::turn::{build_assistant_messages, StreamChildIds, ToolCallInfo};
 
     const TURN_ID: &str = "turn-0001";
 

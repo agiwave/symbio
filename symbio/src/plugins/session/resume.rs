@@ -27,8 +27,7 @@
 //! 已由 agent chat handler（`agent/handlers/chat.rs:302`）通过 `fetch_tools_with_manager` 设置到 ctx，
 //! `execute_tool_async` 直接复用，无需 session 层重复 `prepare_capability_manager`。
 
-use super::context::ChatOrchestrator;
-use super::message_builder::short_id;
+use super::chat_loop::ChatOrchestrator;
 use super::tool_executor::execute_tool_async;
 use crate::plugin_info;
 use crate::symbio_core::schemas::session::chat_message::{
@@ -36,6 +35,7 @@ use crate::symbio_core::schemas::session::chat_message::{
     ResumeRequest,
 };
 use crate::symbio_core::schemas::session::session_chat_response::StreamEvent;
+use crate::symbio_core::turn::short_id;
 use crate::symbio_core::{ChatSession, InvokeRequest, PluginChannel, PluginError, PluginFrame};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -139,8 +139,7 @@ async fn process_retry_turn(
             .await;
     }
 
-    plugin_info!(
-        "model",
+    plugin_info!("session",
         "[Resume] RetryTurn: deleted {} messages (turn {} and descendants), continuing chat_loop",
         deleted_messages.len(),
         req.target_id
@@ -255,7 +254,7 @@ async fn process_tool_resume_action(
     };
 
     if abort_flag.load(Ordering::Relaxed) {
-        plugin_info!("model", "[Resume] aborted during tool re-execution");
+        plugin_info!("session", "[Resume] aborted during tool re-execution");
         return Ok(ResumeOutcome::Done);
     }
 
@@ -342,15 +341,13 @@ async fn process_tool_resume_action(
 
     // 11. 成功 → Continue；失败 → Done
     if final_success {
-        plugin_info!(
-            "model",
+        plugin_info!("session",
             "[Resume] tool {} resumed successfully, continuing chat_loop",
             tool_name
         );
         Ok(ResumeOutcome::Continue)
     } else {
-        plugin_info!(
-            "model",
+        plugin_info!("session",
             "[Resume] tool {} resumed with failure, waiting for next resume",
             tool_name
         );

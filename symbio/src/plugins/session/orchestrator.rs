@@ -1,3 +1,13 @@
+//! 会话编排器：`handle_chat_message` 主链路 + 轮次收尾 + 崩溃兜底。
+//!
+//! 职责：校验请求 → 预算限流（`rate_limit`）→ 构造 `ChatOrchestrator`（模型配置 /
+//! 父插件钩子 / 协议适配器的 session 侧确定性持有）→ 交付 chat_ctx 并把后续轮次
+//! 委托给 `chat_loop`。此外承载：
+//! - `WorkingGuard`：`is_working` 工作态守卫，任何退出路径（含 panic）都收敛状态；
+//! - `merge_message_patch`：流式 Update 补丁合并（对齐前端语义）；
+//! - `finalize_assistant_turn`：Turn 收尾状态机；
+//! - `persist_failure`：失败降级持久化（作用域收窄到失败 Turn 及其后代）。
+
 use super::active::{ActiveSessionState, REQUEST_ID_COUNTER};
 use super::plugin::SessionPlugin;
 use crate::symbio_core::event_bus::EventBus;
@@ -8,7 +18,7 @@ use crate::symbio_core::schemas::{
 };
 use crate::symbio_core::{
     attach_capabilities, collect_capabilities, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    Plugin, PluginError, PluginFrame, PluginPayload, take_errors, MODE, MODEL_CHAT, PROVIDER_ID,
+    Plugin, PluginChannel, PluginError, PluginFrame, PluginPayload, take_errors, MODE, PROVIDER_ID,
     RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use serde_json::json;
@@ -211,7 +221,8 @@ impl SessionPlugin {
     ///
     /// 职责：
     /// - 构造 `WorkingGuard`（保障 panic 时 `is_working` 收敛 + 失败持久化）
-    /// - 调用 `parent.route(chat_ctx)` 启动 model 插件的 chat_loop
+    /// - Phase E-②：解析 provider（entry 回退链）→ 限流 → 进程内 spawn
+    ///   `run_chat_loop`（Error 帧包装保留；跨插件通道消失）
     /// - 接收 sub_channel 帧：Error → 持久化失败 + 广播；Data → 合并收集 + 透传广播
     /// - 正常结束：清理 `is_working` + 广播 idle
     ///
@@ -222,6 +233,7 @@ impl SessionPlugin {
         chat_ctx: Arc<dyn InvokeRequest>,
         session_id: String,
         parent: Arc<dyn Plugin>,
+        provider_id: Option<String>,
         rid: u64,
     ) {
         let collected_ai_messages =
@@ -237,87 +249,166 @@ impl SessionPlugin {
             done: false,
         };
 
-        match parent.route(chat_ctx).await {
-            Ok(payload) => {
-                if let PluginPayload::Session(mut sub_channel) = payload {
-                    {
-                        let mut inner = state.inner.write().await;
-                        inner.ai_control_tx = Some(sub_channel.tx.clone());
-                    }
-
-                    while let Ok(frame_opt) =
-                        tokio::time::timeout(Duration::from_secs(1800), sub_channel.rx.recv()).await
-                    {
-                        let frame = match frame_opt {
-                            Some(f) => f,
-                            None => break,
-                        };
-                        if !state.inner.read().await.is_working
-                            || state.request_id.load(Ordering::SeqCst) != rid
-                        {
-                            break;
-                        }
-                        match &frame {
-                            PluginFrame::Error(msg, _) => {
-                                // 透传 plugin-level Error 帧作为业务级 Error 事件。
-                                // 同时把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
-                                // 这样切回会话时能看到上次失败的终态。
-                                self.persist_failure(
-                                    &state,
-                                    &session_id,
-                                    &collected_ai_messages,
-                                    msg,
-                                )
-                                .await;
-                                // 复位 is_working + 广播 Error + 广播 idle：
-                                // 必须复位 is_working，否则后续 resume 请求会被
-                                // `handle_chat_send_oneoff` 的 session_busy 守卫静默拒绝，
-                                // 导致用户点重试无任何反应（LLM 失败重试不生效 bug 的根因）。
-                                self.broadcast_error_with_idle(&state, msg.clone()).await;
-                                guard.done = true;
-                                return;
-                            }
-                            PluginFrame::Data(data) => {
-                                // 收集 Model 响应消息：StreamEvent::Update 增量合并，
-                                // 确保持久化的终态反映最后已知状态（而非首个 Streaming 帧）。
-                                if let Ok(session_chat_response::StreamEvent::Update { message }) =
-                                    serde_json::from_value::<session_chat_response::StreamEvent>(
-                                        data.clone(),
-                                    )
-                                {
-                                    let mut collected = collected_ai_messages.lock().await;
-                                    if let Some(existing) =
-                                        collected.iter_mut().find(|m| m.id == message.id)
-                                    {
-                                        merge_message_patch(existing, &message);
-                                    } else {
-                                        collected.push(message.clone());
-                                    }
-                                }
-                                self.broadcast_frame(&state, frame).await;
-                            }
-                        }
-                    }
-                    {
-                        let mut inner = state.inner.write().await;
-                        inner.ai_control_tx = None;
-                    }
-                } else {
-                    let msg = "Model 插件未返回预期的会话载荷".to_string();
-                    crate::plugin_error!("session", "{}", &msg);
-                    self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
-                        .await;
-                    self.broadcast_error_with_idle(&state, msg).await;
-                    return;
-                }
-            }
-            Err(e) => {
-                let msg = format!("调用 Model 插件失败: {}", e);
+        // ── Phase E-②：进程内直连——解析 provider entry → 限流 → spawn run_chat_loop ──
+        // Provider 解析回退链迁移自 ModelProvidersConfig::resolve：
+        // 精确 id → is_default → 首个已注册（traverse 仅注册 enabled provider）。
+        let manager = match chat_ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
+            Some(m) => m,
+            None => {
+                let msg = "CAPABILITY_MANAGER 不可用，无法解析 Model Provider".to_string();
                 crate::plugin_error!("session", "{}", &msg);
                 self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
                     .await;
                 self.broadcast_error_with_idle(&state, msg).await;
                 return;
+            }
+        };
+        // provider_id 参数来自调用方（resolve_session_params 解析结果，与 payload 同源）
+        let entry = match provider_id.as_deref() {
+            Some(pid) => manager.get_model_provider(pid).await,
+            None => None,
+        };
+        let entry = match entry {
+            Some(e) => e,
+            None => {
+                let all = manager.list_model_providers().await;
+                match all
+                    .iter()
+                    .find(|e| e.is_default)
+                    .cloned()
+                    .or_else(|| all.first().cloned())
+                {
+                    Some(e) => e,
+                    None => {
+                        let msg =
+                            format!("未找到可用的 Model Provider（requested={provider_id:?}）");
+                        crate::plugin_error!("session", "{}", &msg);
+                        self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
+                            .await;
+                        self.broadcast_error_with_idle(&state, msg).await;
+                        return;
+                    }
+                }
+            }
+        };
+
+        // Provider 级限流（Phase sink：RATE_LIMITER 已随消费者下沉至 session；0 表示不限流）
+        super::rate_limit::RATE_LIMITER
+            .wait(&entry.provider_id, entry.rate_limit_ms)
+            .await;
+
+        // 进程内双向通道：host 侧（消费循环 + abort 控制）/ plugin 侧（run_chat_loop）。
+        // 原跨插件 `parent.route` → PluginPayload::Session 的一跳在此消失。
+        let (host_chan, plugin_chan) = PluginChannel::pair(4096);
+        let orchestrator =
+            super::chat_loop::ChatOrchestrator::new(entry.config, Some(parent), entry.provider);
+        let ctx_clone = chat_ctx.fork();
+        let error_tx = plugin_chan.tx.clone();
+
+        // keepalive：保证 `plugin_chan.rx` 在 loop 运行期间至少有一个 sender，
+        // 避免 `wait_for_abort_signal` 在真正发起请求前误判"通道关闭 → Aborted"。
+        let host_tx_keepalive = host_chan.tx.clone();
+
+        tokio::spawn(async move {
+            // 持有 keepalive 直到 chat_loop 结束
+            let _host_tx_keepalive = host_tx_keepalive;
+
+            let result = tokio::task::spawn(async move {
+                super::chat_loop::run_chat_loop(&orchestrator, ctx_clone, plugin_chan).await
+            })
+            .await;
+
+            match result {
+                Ok(Ok(_)) => {
+                    // 正常完成
+                }
+                Ok(Err(e)) => {
+                    let _ = error_tx
+                        .send(crate::symbio_core::PluginFrame::Error(
+                            e.to_string(),
+                            Some(serde_json::json!({"code": e.code()})),
+                        ))
+                        .await;
+                }
+                Err(e) => {
+                    // join error（含 panic）：对齐旧 spawn_orchestrator 的错误包装
+                    let msg = if e.is_panic() {
+                        "服务器内部发生未预期的错误".to_string()
+                    } else {
+                        format!("Chat loop task failed: {e}")
+                    };
+                    let _ = error_tx
+                        .send(crate::symbio_core::PluginFrame::Error(msg, None))
+                        .await;
+                }
+            }
+        });
+
+        // 消费循环：消费 host 侧通道（原消费 parent.route 返回的 sub_channel，
+        // 帧处理逻辑零改动）。
+        {
+            let mut sub_channel = host_chan;
+            {
+                let mut inner = state.inner.write().await;
+                inner.ai_control_tx = Some(sub_channel.tx.clone());
+            }
+
+            while let Ok(frame_opt) =
+                tokio::time::timeout(Duration::from_secs(1800), sub_channel.rx.recv()).await
+            {
+                let frame = match frame_opt {
+                    Some(f) => f,
+                    None => break,
+                };
+                if !state.inner.read().await.is_working
+                    || state.request_id.load(Ordering::SeqCst) != rid
+                {
+                    break;
+                }
+                match &frame {
+                    PluginFrame::Error(msg, _) => {
+                        // 透传 plugin-level Error 帧作为业务级 Error 事件。
+                        // 同时把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
+                        // 这样切回会话时能看到上次失败的终态。
+                        self.persist_failure(
+                            &state,
+                            &session_id,
+                            &collected_ai_messages,
+                            msg,
+                        )
+                        .await;
+                        // 复位 is_working + 广播 Error + 广播 idle：
+                        // 必须复位 is_working，否则后续 resume 请求会被
+                        // `handle_chat_send_oneoff` 的 session_busy 守卫静默拒绝，
+                        // 导致用户点重试无任何反应（LLM 失败重试不生效 bug 的根因）。
+                        self.broadcast_error_with_idle(&state, msg.clone()).await;
+                        guard.done = true;
+                        return;
+                    }
+                    PluginFrame::Data(data) => {
+                        // 收集 Model 响应消息：StreamEvent::Update 增量合并，
+                        // 确保持久化的终态反映最后已知状态（而非首个 Streaming 帧）。
+                        if let Ok(session_chat_response::StreamEvent::Update { message }) =
+                            serde_json::from_value::<session_chat_response::StreamEvent>(
+                                data.clone(),
+                            )
+                        {
+                            let mut collected = collected_ai_messages.lock().await;
+                            if let Some(existing) =
+                                collected.iter_mut().find(|m| m.id == message.id)
+                            {
+                                merge_message_patch(existing, &message);
+                            } else {
+                                collected.push(message.clone());
+                            }
+                        }
+                        self.broadcast_frame(&state, frame).await;
+                    }
+                }
+            }
+            {
+                let mut inner = state.inner.write().await;
+                inner.ai_control_tx = None;
             }
         }
 
@@ -397,7 +488,7 @@ impl SessionPlugin {
     /// 解析链（三者完全对称）：`req` 字段 > `session.metadata` > 默认值。
     /// - mode: 默认 `interactive`
     /// - risk_level: 默认 `medium`
-    /// - provider_id: 默认 `None`（Model 插件使用默认 Provider）
+    /// - provider_id: 默认 `none`（Model 插件使用默认 Provider）
     ///
     /// 解析结果同时 `set` 到 `ctx`，供下游 `chat_loop` / `continuation` 通过 `ctx.fork()` 继承。
     /// 返回 `(mode, risk_level, provider_id)` 供调用方构造 `model_chat::Request` 时使用。
@@ -653,6 +744,25 @@ impl SessionPlugin {
                 chat_ctx.set(crate::symbio_core::AGENT_ID, aid.clone());
             }
 
+            // ── 向 model/chat 交付会话引擎句柄（SESSION_HANDLE）──
+            // model 不再反向路由 session/open，直接从 ctx 读句柄；
+            // 交付失败仅记日志：model 侧回退内存 FallbackChatSession
+            // （与原路由失败路径等价，不阻断会话）。
+            if let Ok(session) = this_spawn
+                .open_session_handle(Some(sid_spawn.clone()))
+                .await
+            {
+                chat_ctx.set(
+                    crate::symbio_core::SESSION_HANDLE,
+                    std::sync::Arc::new(crate::symbio_core::ChatSessionHandle::new(session)),
+                );
+            } else {
+                crate::plugin_warn!(
+                    "session",
+                    "会话引擎句柄构造失败，chat 将回退内存会话"
+                );
+            }
+
             let tool_manager = collect_capabilities(Some(&parent_spawn), &chat_ctx).await;
 
             // 收集期硬错误（如会话绑定了不存在的智能体）→ 中止并明确报错，
@@ -730,16 +840,14 @@ impl SessionPlugin {
                 })
             };
 
-            // 直接路由 model/chat——会话编排归 session，不再经过 agent/chat
-            chat_ctx.set(crate::symbio_core::PATH, MODEL_CHAT.to_string());
+            // Phase E-②：会话编排进程内执行，chat_ctx 仅承载 payload（不再设置跨插件 PATH）
             chat_ctx.set_payload(chat_input).ok();
 
-            // 调用统一的 chat_loop 任务执行器
+            // 调用统一的 chat_loop 任务执行器（内部：entry 解析 + 限流 + spawn）
             // run_chat_loop 内部会区分 resume（turn 前处理）与 single_message（正常 turn）
-            this_spawn
-                .clone()
-                .run_chat_loop_task(state_spawn, chat_ctx, sid_spawn, parent_spawn, rid)
-                .await;
+            this_spawn.clone().run_chat_loop_task(
+                state_spawn, chat_ctx, sid_spawn, parent_spawn, pid_clone.clone(), rid,
+            ).await;
         });
 
         // 立即返回 success（事件流经 bus 推送）

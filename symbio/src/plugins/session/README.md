@@ -1,6 +1,6 @@
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与历史编排中心**。它不仅管理静态的对话历史，更作为对话流的入口，协同 Agent 插件实现了高效的“认知注入”与“历史分层剪裁”机制。
+Session 插件是 Symbio 架构中的**会话持久化与编排中心**。Phase E-② 重构后，它是**唯一的会话编排入口**：加载历史、组装系统提示词、经 CapabilityManager 汇集工具、解析 Model Provider 并在进程内驱动会话循环；Model 插件退居**无状态 LLM 网关**（provider 注册表 + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
@@ -8,30 +8,26 @@ Session 插件是 Symbio 架构中的**会话持久化与历史编排中心**。
 
 ## 一、 系统架构数据流图 (Architecture & Data Flow)
 
-下列架构图展示了一个完整的“用户请求 -> Session (加载历史) -> Agent (提示词注入) -> AI (推理执行) -> 数据库持久化”的生命周期：
+下列架构图展示了一个完整的“用户请求 -> Session (编排入口) -> 进程内会话循环 (视图组装/推理/工具) -> 数据库持久化”的生命周期：
 
 ```mermaid
 flowchart TD
     User([1. 用户发起 Chat 请求]) --> SessionChat[Session 插件 - chat 路由]
     SessionChat --> SaveUser[2. 保存/追加用户消息]
     SaveUser --> LoadHistory[3. 加载历史上下文<br>get_context_messages 轮次窗口对齐]
-    LoadHistory --> AgentChat[4. 转发至 Agent 插件 - chat 路由]
-    
-    subgraph Agent 认知注入层
-        AgentChat --> BuildPrompt[5. 构建系统提示词<br>人格/心智流形注入]
-        BuildPrompt --> InjectMsg[6. 消息级提示词注入<br>ChatMessage.prompt 填充]
-    end
-    
-    InjectMsg --> ModelChat[7. 转发至 Model 插件 - chat 路由]
-    
-    subgraph Model 编排执行层
-        ModelChat --> BuildView[8. 构建请求视图<br>build_request_view<br>淡化/骨架化/水位提醒]
-        BuildView --> LLMCall[9. 调用大模型 API 推理]
+    LoadHistory --> BuildPrompt[4. 构建系统提示词<br>prompt.rs 人格/心智流形注入]
+
+    subgraph Session 会话编排层（唯一编排入口）
+        BuildPrompt --> AggTools[5. 工具汇集<br>CAPABILITY_MANAGER 注册表]
+        AggTools --> Resolve[6. Provider entry 解析<br>精确 id → is_default → 首个注册]
+        Resolve --> Spawn[7. 进程内 spawn 会话循环<br>RATE_LIMITER 限流跟随请求方]
+        Spawn --> BuildView[8. 构建请求视图<br>build_request_view<br>淡化/骨架化/水位提醒]
+        BuildView --> LLMCall[9. protocol 推理调用<br>直连无状态 LLM 网关]
         LLMCall --> ToolAction[10. 执行工具链]
         ToolAction --> LoopCheck{11. 迭代完成?}
         LoopCheck -- No --> BuildView
     end
-    
+
     LoopCheck -- Yes --> EndTurn[12. 助理回答定格]
     EndTurn --> SaveFinal[13. 将助理与工具结果回写 Session]
     SaveFinal --> SQLite[(会话数据库 / SQLite)]
@@ -147,7 +143,7 @@ session:
     * 消息内容替换为压缩骨架：头部 `<!-- [内容已压缩] -->` 注释 + 存档路径与总行数说明 + **末尾 `compress_line_threshold` 行原文**（保留量与触发阈值同值）。
   * **特例保护**：读取历史时对**最后一条消息**自动执行 `decompress_message`：若其 `meta.archive_path` 指向的存档存在，则从存档读回完整原文还原，确保大模型和用户始终能看到最新一条消息的 100% 完整细节。
 * **Rust 实现策略**：
-  * 在 `plugins/session/compress.rs` 中检测消息文本行数：
+  * 在 `plugins/session/message_archive.rs` 中检测消息文本行数（体检备注 audit-5：原 `compress.rs` 与上下文语义压缩服务 `compression.rs` 命名易混，更名澄清）：
 
     ```rust
     // 防重入：已压缩的消息跳过；行数未超阈值跳过
@@ -197,7 +193,7 @@ session:
     messages[start_idx..].to_vec()
     ```
 
-  * **语义合并 (`plugins/model/compression.rs`)**：
+  * **语义合并 (`plugins/session/compression.rs`)**：
     * 每次大模型执行 Turn 之前，`prepare_compression`（配合 `should_start_compression` 的 Token 估计检测）会检测 Token 估计值。如果超标，它会将历史会话（保留最近 30% 活跃明细）打包发送给一个背景 LLM，并使用特殊的 System Prompt 提炼出高密度的 **`<state_snapshot>` XML 状态快照**：
 
     ```xml
@@ -223,7 +219,7 @@ session:
   * 被删除消息若关联 `.txt` 存档文件，存档文件同步物理删除，杜绝磁盘文件泄露。
   * **只保留完整的 User / Assistant 文本对话**，本地存储长期维持在极简规模。
 * **Rust 实现策略**：
-  * **物理清理 (`plugins/session/context.rs`，由 `plugins/session/chat_session.rs` 在保存消息时调用)**：
+  * **物理清理 (`plugins/session/chat_session.rs` 内的 `prune_historical_tool_calls`，保存消息时调用；体检备注 audit-5：原独立文件 `context.rs` 因唯一消费者就是 chat_session，已并入)**：
 
     ```rust
     // keep_turns = 配置的 context_messages（默认 6）：
@@ -248,7 +244,7 @@ session:
   * **第二步：工具明细骨架化 (Layered Sliding Window)**。以全局窗口 `tool_context_window`（默认 **15**）为基准，叠加每个工具的能力声明（`context_retention`：`LastOnly` / `LastN(n)`，从**当轮**工具列表实时解析，按工具短名——名称最后一个 `/` 之后的部分——匹配，`All` 不参与）；窗口之外调用的参数与结果替换为占位文案，**只骨架化、不删除，且 ToolCall↔Tool 配对与 parent_id 完整保留**，不会造成大模型逻辑断联。
   * **第三步：Token 水位提醒 (Nudge)**。当上下文 Token 估计值达到模型上下文限制的 **55%**（`CONTEXT_NUDGE_THRESHOLD`）且 `enable_compact_tool` 开启时，向视图末尾追加一条 `meta.kind = "context_nudge"` 的 User 提醒，引导大模型主动调用 `context_compact` 工具；**请求级注入、每个请求最多一次**，不落库、不占用轮次窗口的 User 计数，也不会在前端以用户消息形式出现。
 * **Rust 实现策略**：
-  * 唯一入口为 `plugins/model/compression.rs` 的 `build_request_view`，由 `plugins/model/chat_loop.rs` 主循环**每轮请求构建前**调用（骨架化实现 `apply_layered_sliding_window` 位于 `plugins/session/context.rs`，此处跨插件复用调用）：
+  * 唯一入口为 `plugins/session/compression.rs` 的 `build_request_view`，由 `plugins/session/chat_loop.rs` 主循环**每轮请求构建前**调用（骨架化实现 `apply_layered_sliding_window` 位于 `plugins/session/context_window.rs`——体检备注 audit-5：Phase C 曾归 `symbio_core`，E-② 后仅本插件消费，随 Phase sink 下沉回 session；原 `plugins/session/context.rs` 已删除，其 `prune_historical_tool_calls` 并入 `chat_session.rs`）：
 
     ```rust
     pub fn build_request_view(
@@ -264,7 +260,7 @@ session:
             fade_aged_tool_results(&mut view, fade_keep_turns);
         }
         if window > 0 && !retention.is_empty() {
-            view = crate::plugins::session::context::apply_layered_sliding_window(
+            view = super::context_window::apply_layered_sliding_window(
                 &view,
                 window,
                 retention,
@@ -294,10 +290,10 @@ session:
 | 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
 | :--- | :--- | :--- | :--- | :--- |
 | **存储级轮数裁剪** | `max_messages` | `invoke_append` 保存时 | FIFO 截断超出的最老对话轮（代码强制下限 500），同步清理关联存档 | `plugins/session/chat_session.rs` |
-| **单轮工具软上限** | `max_tool_rounds` | `run_chat_loop` | 默认 65535 无上限；显式调低时达到上限提示后正常退出（非熔断），支持续跑 | `plugins/model/chat_loop.rs` |
-| **单消息大文本脱水** | `compress_line_threshold` | `invoke_append` 保存时 | 行数超过 200 行写盘存档，骨架保留末尾同阈值行数；最后一条消息自动还原 | `plugins/session/compress.rs` |
-| **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session.rs`<br>`plugins/model/compression.rs` |
-| **存储期历史工具链物理裁剪** | `context_messages`（分水岭） | `invoke_append` 保存时 | 物理删除最近 6 轮分水岭之前的 Tool / ToolCall / Reasoning 及其子节点与存档 | `plugins/session/context.rs` |
-| **请求视图层动态剪裁** | `tool_context_window` + fade/nudge | `build_request_view` 每轮请求前 | >40 轮激活老旧工具结果淡化（保留最近 12 轮）；窗口（15）外工具明细骨架化（配对保留）；55% 水位提醒；全部不落库幂等 | `plugins/model/compression.rs`<br>`plugins/session/context.rs` |
+| **单轮工具软上限** | `max_tool_rounds` | `run_chat_loop` | 默认 65535 无上限；显式调低时达到上限提示后正常退出（非熔断），支持续跑 | `plugins/session/chat_loop.rs` |
+| **单消息大文本脱水** | `compress_line_threshold` | `invoke_append` 保存时 | 行数超过 200 行写盘存档，骨架保留末尾同阈值行数；最后一条消息自动还原 | `plugins/session/message_archive.rs` |
+| **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session.rs`<br>`plugins/session/compression.rs` |
+| **存储期历史工具链物理裁剪** | `context_messages`（分水岭） | `invoke_append` 保存时 | 物理删除最近 6 轮分水岭之前的 Tool / ToolCall / Reasoning 及其子节点与存档 | `plugins/session/chat_session.rs`（`prune_historical_tool_calls`） |
+| **请求视图层动态剪裁** | `tool_context_window` + fade/nudge | `build_request_view` 每轮请求前 | >40 轮激活老旧工具结果淡化（保留最近 12 轮）；窗口（15）外工具明细骨架化（配对保留）；55% 水位提醒；全部不落库幂等 | `plugins/session/compression.rs`<br>`plugins/session/context_window.rs` |
 
 通过这套精心设计的**六维协同策略**，Symbio 构建了"存储层（`max_messages` FIFO 裁剪 + `prune_historical_tool_calls` 物理裁剪）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求视图层（`build_request_view` 淡化/骨架化/水位提醒，不落库幂等）→ 语义压缩层（`auto_compress` 语义合并 + 大文本脱水存档）"四层递进的上下文治理链路，实现了高保真度的会话还原、高度清爽的本地数据持久化，并在大模型面前维持了极低 Token 开销与绝对安全的行为控制屏障。

@@ -7,7 +7,21 @@ pub use crate::symbio_core::schemas::model::model_config::ModelConfig;
 pub use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, ContentPart, MessageContent, MessageRole,
 };
-pub use crate::symbio_core::{CapabilityMeta, ToolCall};
+pub use crate::symbio_core::CapabilityMeta;
+
+/// 工具调用定义
+///
+/// Phase sink：原 `symbio_core::types::ToolCall`，全仓库唯一消费者为 model
+/// 插件（message_builder 构造请求包 + NativeMessage 携带），随消费者下沉至此。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ToolCall {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
 
 /// 原生消息格式（支持 tool calls 和多模态）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

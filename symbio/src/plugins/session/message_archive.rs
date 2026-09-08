@@ -6,6 +6,10 @@
 //!   2. 在消息内容中只保留最后 10 行
 //!   3. 在保留内容头部追加一段系统注释，标明完整内容的相对路径
 //! - 不足阈值的消息原样返回
+//!
+//! 体检备注（audit-5）：原文件名 `compress.rs` 与 `compression.rs`
+//! （上下文语义压缩服务）命名易混——本模块职责是单条消息的
+//! "物理脱水存档 + 还原"，与上下文语义压缩无关，故更名。
 
 use super::types::ChatMessage;
 use crate::symbio_core::schemas::session::chat_message::MessageContent;

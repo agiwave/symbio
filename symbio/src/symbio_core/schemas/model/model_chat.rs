@@ -48,7 +48,7 @@ pub struct Request {
     pub enable_compact_tool: Option<bool>,
 
     /// 指定本次会话使用的 Model Provider ID（来自 `ModelProvidersConfig.providers`）
-    /// 为空时使用默认 Provider
+    /// 由 session 编排层解析（精确 id → is_default → 首个注册），为空时同样走回退链取默认 Provider
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     /// 是否加载历史会话消息。
@@ -59,7 +59,7 @@ pub struct Request {
     pub load_history: Option<bool>,
     /// 会话恢复操作（与 `single_message` 互斥）。
     ///
-    /// 存在时由 `model/chat_loop.rs:run_chat_loop` 在 turn 循环前处理：
+    /// 存在时由 session 插件会话循环（`session/chat_loop.rs:run_chat_loop`）在 turn 循环前处理：
     /// - `RetryTurn`：删除 Failed Turn 及其所有子节点，重新走 LLM 请求
     /// - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：删除旧工具响应子节点 →
     ///   重新执行工具（approve/retry/supply）或直接生成结果（reject/answer）→

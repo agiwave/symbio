@@ -3,8 +3,9 @@
 //! 负责：
 //! - 单个活动 Model Provider 配置管理（向后兼容）
 //! - 多 Model Provider 注册表（`ModelProvidersConfig`）
-//! - 限流器：每个 Provider 独立的最小请求间隔
-//! - chat 路由：解析请求中的 `provider_id` 并按注册表选定配置发起请求
+//! - Provider 注册：traverse 时把启用的 provider 以 `ModelProviderEntry`
+//!   注册进 CAPABILITY_MANAGER（Phase E-②：chat 编排与限流已迁往
+//!   session 插件，model 降级为无状态 LLM 网关）
 
 use super::handlers;
 use super::protocols::resolve_protocol_id;
@@ -12,87 +13,20 @@ use crate::symbio_core::schemas::common;
 use crate::symbio_core::schemas::model::model_config::ModelConfig;
 use crate::symbio_core::schemas::model::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use crate::symbio_core::{
-    create_object, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel,
-    PluginError, PluginFrame, PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, CONFIG_SET,
-    PLUGIN_MODEL,
+    create_object, InvokeRequest, InvokeRequestExt, InvokeResponse, ModelProviderEntry, Plugin,
+    PluginError, PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, CONFIG_SET, PLUGIN_MODEL,
 };
-use crate::{plugin_debug, plugin_error, plugin_info, plugin_warn};
+use crate::{plugin_error, plugin_info, plugin_warn};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::sync::{Arc, Weak};
-use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, RwLock};
-
-/// 限流器：按 provider_id 记录"上次发起请求的时间"
-///
-/// 设计原则：
-/// - 进程内单例（每个 Provider 一个时间戳）
-/// - 加锁粒度：per-provider 单独互斥，避免 Provider A 的限流影响 Provider B
-#[derive(Default)]
-pub struct ProviderRateLimiter {
-    last_request: Mutex<HashMap<String, Instant>>,
-}
-
-impl ProviderRateLimiter {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// 阻塞等待直到距上次请求至少 `min_interval_ms` 毫秒
-    ///
-    /// - `min_interval_ms == 0` 时直接放行
-    /// - **首次请求立即放行**，仅记录时间戳；后续请求才按 `min_interval_ms` 节流
-    pub async fn wait(&self, provider_id: &str, min_interval_ms: u64) {
-        if min_interval_ms == 0 {
-            return;
-        }
-        let interval = Duration::from_millis(min_interval_ms);
-        loop {
-            let now = Instant::now();
-            // 计算本次需要 sleep 的时长（None = 立即放行）
-            let sleep_for: Option<Duration> = {
-                let mut map = self.last_request.lock().await;
-                match map.get(provider_id) {
-                    None => {
-                        // 首次请求：立即放行，仅记录时间戳供后续节流
-                        map.insert(provider_id.to_string(), now);
-                        None
-                    }
-                    Some(&last) => {
-                        let elapsed = now.saturating_duration_since(last);
-                        if elapsed >= interval {
-                            // 已超过最小间隔：放行并刷新时间戳
-                            map.insert(provider_id.to_string(), now);
-                            None
-                        } else {
-                            Some(interval - elapsed)
-                        }
-                    }
-                }
-            };
-            match sleep_for {
-                None => return,
-                Some(remaining) => {
-                    // 提前 5ms 唤醒避免睡过头；若剩余时间已 < 5ms 则直接重试
-                    let sleep = remaining.saturating_sub(Duration::from_millis(5));
-                    if sleep.is_zero() {
-                        continue;
-                    }
-                    tokio::time::sleep(sleep).await;
-                }
-            }
-        }
-    }
-}
+use tokio::sync::RwLock;
 
 /// Universal MODEL Agent Plugin
 #[derive(Clone)]
 pub struct ModelPlugin {
     /// 多 Model Provider 注册表
     providers: Arc<RwLock<ModelProvidersConfig>>,
-    /// Provider 维度限流器
-    rate_limiter: Arc<ProviderRateLimiter>,
     /// 父插件引用（用于能力路由）
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
 }
@@ -289,7 +223,6 @@ impl ModelPlugin {
     pub fn new(parent: Option<Weak<dyn Plugin>>, providers: ModelProvidersConfig) -> Self {
         Self {
             providers: Arc::new(RwLock::new(providers)),
-            rate_limiter: Arc::new(ProviderRateLimiter::new()),
             parent: Arc::new(RwLock::new(parent)),
         }
     }
@@ -321,12 +254,6 @@ impl ModelPlugin {
         })
     }
 
-    /// 解析请求中的 provider_id，依次回退到 default / 第一个 enabled
-    pub async fn resolve_provider(&self, provider_id: Option<&str>) -> Option<ModelProviderConfig> {
-        let cfg = self.providers.read().await;
-        cfg.resolve(provider_id).cloned()
-    }
-
     /// 获取父插件引用
     async fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
         let guard = self.parent.read().await;
@@ -346,185 +273,26 @@ impl ModelPlugin {
     }
 
     /// 验证给定的 Model Provider 配置（不写入状态）
-    async fn validate_provider(
-        provider: &ModelProviderConfig,
-        parent: &Option<Arc<dyn Plugin>>,
-    ) -> Option<String> {
+    async fn validate_provider(provider: &ModelProviderConfig) -> Option<String> {
         let cfg = provider.to_model_config();
-        Self::validate_config(&cfg, parent).await
-    }
-
-    async fn handle_chat_session(
-        &self,
-        channel: PluginChannel,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<()> {
-        let tx = channel.tx.clone();
-        if let Err(e) = self.handle_chat_session_internal(channel, ctx).await {
-            plugin_error!("model", format!("Chat session error: {}", e));
-            let _ = tx.send(e.to_frame()).await;
-            return Err(e);
-        }
-        Ok(())
-    }
-
-    async fn handle_chat_session_internal(
-        &self,
-        channel: PluginChannel,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<()> {
-        // 解析 provider_id → 选定本次会话的活动 Provider
-        //
-        // payload 是必填项（由 agent/handlers/chat.rs 构造），但为了健壮性，
-        // 在缺少 payload 时使用 Default 而不中断整个 chat 流程。
-        let req: crate::symbio_core::schemas::model::model_chat::Request = ctx
-            .payload::<crate::symbio_core::schemas::model::model_chat::Request>()
-            .unwrap_or_default();
-
-        plugin_info!(
-            "model",
-            "[DIAG] handle_chat_session_internal entered, requested provider_id={:?}",
-            req.provider_id
-        );
-
-        let provider_cfg = self
-            .resolve_provider(req.provider_id.as_deref())
-            .await
-            .ok_or_else(|| {
-                PluginError::ValidationError(
-                    "未找到可用的 Model Provider，请先在设置中配置并启用至少一个".to_string(),
-                )
-            })?;
-
-        plugin_info!(
-            "model",
-            "[DIAG] resolved provider: id={}, api_base={}, model={}, api_protocol={}, rate_limit_ms={}",
-            provider_cfg.id,
-            provider_cfg.api_base,
-            provider_cfg.model,
-            provider_cfg.api_protocol,
-            provider_cfg.rate_limit_ms
-        );
-
-        // 限流：按 provider_id 维度等待最小请求间隔
-        self.rate_limiter
-            .wait(&provider_cfg.id, provider_cfg.rate_limit_ms)
-            .await;
-
-        plugin_info!("model", "[DIAG] rate limiter passed, creating protocol");
-
-        let ai_cfg = provider_cfg.to_model_config();
-        let parent = self.get_parent().await;
-
-        let protocol = create_object::<dyn super::protocols::ModelProtocol>(
-            resolve_protocol_id(&ai_cfg.api_protocol),
-            ctx.clone(),
-        )
-        .expect("MODEL protocol creator not found");
-        plugin_info!(
-            "model",
-            "[DIAG] protocol created, calling handle_chat_stream, api_url={}",
-            protocol.get_api_url(&ai_cfg)
-        );
-        let resp = protocol.handle_chat_stream(&ai_cfg, &parent, ctx).await?;
-        plugin_info!(
-            "model",
-            "[DIAG] handle_chat_stream returned, matching payload"
-        );
-
-        match resp {
-            PluginPayload::Data(_) => {
-                if let Ok(value) = resp.get::<serde_json::Value>() {
-                    let _ = channel.tx.send(PluginFrame::Data(value)).await;
-                }
-            }
-            PluginPayload::Session(peer) => {
-                let (peer_tx, mut peer_rx) = (peer.tx, peer.rx);
-                let (my_tx, mut my_rx) = (channel.tx, channel.rx);
-
-                // Forward: peer -> my (MODEL -> Client)
-                let forward_task = tokio::spawn(async move {
-                    while let Some(frame) = peer_rx.recv().await {
-                        if my_tx.send(frame).await.is_err() {
-                            break;
-                        }
-                    }
-                });
-
-                // Backward: my -> peer (Client -> AI)
-                let backward_task = tokio::spawn(async move {
-                    while let Some(frame) = my_rx.recv().await {
-                        plugin_debug!("model", "incoming frame from client: {:?}", frame);
-                        if peer_tx.send(frame).await.is_err() {
-                            break;
-                        }
-                    }
-                });
-
-                // Wait for either task to finish or errors
-                tokio::select! {
-                    _ = forward_task => {},
-                    _ = backward_task => {},
-                }
-            }
-            _ => {
-                let _ = channel
-                    .tx
-                    .send(PluginFrame::Error(
-                        "Invalid payload type for chat session".into(),
-                        None,
-                    ))
-                    .await;
-            }
-        }
-        Ok(())
+        Self::validate_config(&cfg).await
     }
 
     /// 验证配置是否可用
-    async fn validate_config(
-        config: &ModelConfig,
-        parent: &Option<Arc<dyn Plugin>>,
-    ) -> Option<String> {
+    ///
+    /// Phase E-②：直调 `ModelProvider::ping`（最小代价请求探测 endpoint /
+    /// key / model 可用性），`Ok(())` → 配置可用；`Err(e)` → 携带失败原因。
+    /// 不再经由会话通道收帧判断。
+    async fn validate_config(config: &ModelConfig) -> Option<String> {
         let ctx = Arc::new(SimpleRequest::new(None, None));
-        let protocol = create_object::<dyn super::protocols::ModelProtocol>(
+        let protocol = create_object::<dyn super::protocols::ModelProvider>(
             resolve_protocol_id(&config.api_protocol),
-            ctx.clone(),
+            ctx,
         )
         .expect("MODEL protocol creator not found");
 
-        let validate_input = protocol.get_validation_input();
-        let _ = ctx.set_payload(validate_input);
-
-        match protocol.handle_chat_stream(config, parent, ctx).await {
-            Ok(resp) => match resp {
-                PluginPayload::Data(_) => None,
-                PluginPayload::Session(mut peer) => {
-                    while let Some(frame) = peer.rx.recv().await {
-                        match frame {
-                            PluginFrame::Data(d) => {
-                                if let Ok(event) = serde_json::from_value::<
-                                    crate::symbio_core::schemas::session::session_chat_response::StreamEvent,
-                                >(d)
-                                {
-                                    match event {
-                                        crate::symbio_core::schemas::session::session_chat_response::StreamEvent::Error { error } => {
-                                            return Some(error);
-                                        }
-                                        crate::symbio_core::schemas::session::session_chat_response::StreamEvent::Status { status }
-                                            if status == "idle" => {
-                                                return None;
-                                            }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                            PluginFrame::Error(e, _) => return Some(e),
-                        }
-                    }
-                    None
-                }
-                _ => None,
-            },
+        match protocol.ping(config).await {
+            Ok(()) => None,
             Err(e) => Some(e.to_string()),
         }
     }
@@ -643,8 +411,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         if !skip_validation {
-            let parent = self.get_parent().await;
-            if let Some(err) = Self::validate_provider(&provider, &parent).await {
+            if let Some(err) = Self::validate_provider(&provider).await {
                 plugin_error!("model", format!("Provider 配置验证未通过: {}", err));
                 return Err(PluginError::ValidationError(format!(
                     "Provider 配置验证失败: {err}"
@@ -727,8 +494,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
         }
         .ok_or_else(|| PluginError::NotFound(format!("未找到 Model Provider: {id}")))?;
 
-        let parent = self.get_parent().await;
-        Ok(match Self::validate_provider(&provider, &parent).await {
+        Ok(match Self::validate_provider(&provider).await {
             None => crate::symbio_core::entities::EntityStatusResponse {
                 kind: crate::symbio_core::entities::ENTITY_MODEL.to_string(),
                 id: id.to_string(),
@@ -795,17 +561,7 @@ impl Plugin for ModelPlugin {
                 schema: Self::config_schema(),
             })),
 
-            "chat" => {
-                let (my_channel, peer_channel) = PluginChannel::pair(64);
-                let plugin = self.clone();
-                let ctx_clone = ctx.fork();
-                tokio::spawn(async move {
-                    if let Err(e) = plugin.handle_chat_session(my_channel, ctx_clone).await {
-                        plugin_error!("model", format!("Chat session error: {}", e));
-                    }
-                });
-                Ok(PluginPayload::Session(peer_channel))
-            }
+            // Phase E-②："chat" 路由已随会话编排迁往 session 插件
             "chat_sync" => Err(PluginError::NotImplemented),
             "status" => {
                 let providers = self.providers.read().await;
@@ -824,9 +580,64 @@ impl Plugin for ModelPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
-        // Model 插件目前不直接暴露工具
+        // Phase B：AI 对话能力纳入统一注册收集机制。
+        // 与 local/web/mcp 插件注册工具完全同构：命中 TRAVERSE_AVAILABLE_TOOLS 时，
+        // 把每个启用的 provider 以 ModelProviderEntry 注册进 CAPABILITY_MANAGER，
+        // 其系统提示词一并注册（provider_id 键；默认 provider 额外注册 "default" 键）。
+        let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
+        if sub_path != crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS {
+            return Err(PluginError::NotFound(format!("未知遍历路径: {sub_path}")));
+        }
+
+        if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
+            let providers = self.providers.read().await;
+            for p in providers.providers.values() {
+                if !p.enabled {
+                    continue;
+                }
+                let protocol_id = resolve_protocol_id(&p.api_protocol);
+                match create_object::<dyn super::protocols::ModelProvider>(protocol_id, ctx.clone())
+                {
+                    Some(protocol) => {
+                        tool_manager
+                            .register_model_provider(ModelProviderEntry {
+                                provider_id: p.id.clone(),
+                                protocol_id: protocol_id.to_string(),
+                                description: format!("{} ({})", p.name, p.model),
+                                system_prompt: p.system_prompt.clone(),
+                                config: p.to_model_config(),
+                                rate_limit_ms: p.rate_limit_ms,
+                                is_default: providers.default_provider_id.as_deref()
+                                    == Some(p.id.as_str()),
+                                provider: protocol,
+                            })
+                            .await;
+                        if let Some(sp) = &p.system_prompt {
+                            tool_manager.register_system_prompt(&p.id, sp.clone()).await;
+                        }
+                    }
+                    None => {
+                        // 协议工厂不可用：软故障（不进致命错误桶），消费侧回退现状路径
+                        plugin_warn!(
+                            "model",
+                            "traverse: provider '{}' 协议工厂不可用（protocol_id={protocol_id}），跳过注册",
+                            p.id
+                        );
+                    }
+                }
+            }
+            // 默认 provider 的系统提示词注册为 "default"（消费侧兜底键）
+            if let Some(dp) = providers.resolve(providers.default_provider_id.as_deref()) {
+                if let Some(sp) = &dp.system_prompt {
+                    tool_manager
+                        .register_system_prompt("default", sp.clone())
+                        .await;
+                }
+            }
+        }
+
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

@@ -1,35 +1,19 @@
 //! Universal Model Agent Engine
 //!
-//! Supports: Any OpenAI-compatible endpoint (OpenAI, Azure, LMStudio, etc.)
-//!           Future providers: Anthropic Claude, Google Gemini, etc.
-//!
-//! Module layout:
+//! Phase E-② 定型后职责：**无状态 LLM 网关**。
 //! - `types`:           Unified type definitions (ModelConfig, NativeMessage, etc.)
-//! - `token`:           Token estimation and context management
-//! - `context`:         HTTP client singleton + ChatOrchestrator struct
-//! - `chat_loop`:       Main chat loop and turn processing orchestration
-//! - `turn_processor`:  Single turn processing (request, response, tools)
-//! - `session_context`: Session context load, history reconstruction, tool normalization
-//! - `tool_executor`:   Single tool execution, approval flow, batch tool dispatch
-//! - `resume`:          Tool call resume (approve/reject/retry/supply/answer) in chat_loop
-//! - `message_builder`: NativeMessage construction and session persistence
-//! - `approval`:        Tool invocation approval gate
+//! - `detail`:          Model 详情页定义（definition-driven detail）
 //! - `handlers`:        Non-streaming handlers (status, list_models, config)
-//! - `tool_call`:       Streaming tool-call accumulator
-//! - `plugin`:          Core ModelPlugin entry point + factory registration
+//! - `message_builder`: NativeMessage 构造与会话持久化（写 session 走存储锚点）
+//! - `protocols`:       四协议适配（SSE → 标准化事件流，`ping` 健康检查）
+//! - `plugin`:          Core ModelPlugin entry point + factory registration + provider 注册表
+//!
+//! Phase E-②：会话循环（chat_loop / turn_processor / tool_executor / resume /
+//! compression 等）已整体迁往 session 插件，model 对 session 零依赖。
 
-mod chat_loop;
-mod compression;
-mod context;
 mod detail;
 mod handlers;
 pub mod message_builder;
 mod plugin;
-mod protocol;
 mod protocols;
-pub mod resume;
-mod tool_call;
-pub mod tool_executor;
-mod tool_result_guard;
-mod turn_processor;
 mod types;

@@ -1,33 +1,35 @@
-//! MODEL 会话编排器 (ChatOrchestrator)
+//! 单轮 LLM 执行机器 —— E-① 自 `plugins/model/{context,tool_call,message_builder}.rs` 迁入
 //!
-//! 职责：HTTP 客户端单例 + ChatOrchestrator 结构体定义
+//! 职责（单轮网关基建，协议无关、插件无关，供 `ModelProvider::execute_turn`
+//! 统一实现与 model/session 双侧共同使用，详见 docs/model-session-refactor.md §8）：
+//! - HTTP 客户端单例 + 支持中止的 POST 重试机器（`execute_post_with_abort` → 五态 `PostResult`）
+//! - SSE 流解析与协议事件累积（`parse_sse_stream` → `TurnOutput`），流式子节点经
+//!   `session_chat_response::StreamEvent::Update` 帧实时下发
+//! - 工具调用增量累积（`ToolCallAccumulator`）
+//! - 消息构造家族（`short_id`/`StreamChildIds`/`build_assistant_messages`/`build_tool_message`）：
+//!   因 `TurnOutput::into_messages` 与 `ToolCallAccumulator` 直接依赖而随依赖闭包迁入
+//!   （孤儿规则要求定义与使用同处 core）
 //!
-//! 其余职责分散到：
-//! - `chat_loop`      — 主循环入口
-//! - `turn_processor` — 单轮消息处理
-//! - `tool_executor`   — 工具执行与批量分发
-//! - `message_builder` — NativeMessage 构造与 Session 持久化
-
-use super::message_builder::short_id;
-use super::protocols::{FinishReason, ModelProtocol, ProtocolEvent, Usage};
-use super::tool_call::{ToolCallAccumulator, ToolCallInfo};
-use super::types::*;
-use crate::symbio_core::schemas::{
-    session::chat_message::{ChatMessage, MessageStatus, MessageType},
-    session::{session_chat_response, session_compress},
-};
+//! 事实来源说明：model 侧原文件保留 re-export shim 维持既有符号路径
+//! （`plugins::model::{protocol, tool_call, message_builder, context}`），
+//! 本模块是唯一权威实现。
 
 use crate::plugin_info;
 use crate::plugin_warn;
-use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, Plugin, PluginChannel, PluginFrame, SESSION_COMPRESS,
+use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
+use crate::symbio_core::schemas::session::chat_message::{
+    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
+use crate::symbio_core::schemas::session::session_chat_response;
+use crate::symbio_core::{PluginChannel, PluginFrame};
 use futures::StreamExt;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
+use tracing::warn;
 
-// 全局 HTTP 客户端（单例）
+// HTTP 客户端（单例）
 
 pub fn get_http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -45,7 +47,7 @@ pub fn get_http_client() -> &'static reqwest::Client {
 // 通道辅助
 
 /// 统一发送消息更新事件到前端。
-async fn emit_update(channel: &PluginChannel, msg: ChatMessage) {
+pub async fn emit_update(channel: &PluginChannel, msg: ChatMessage) {
     let _ = channel
         .tx
         .send(PluginFrame::Data(
@@ -56,7 +58,7 @@ async fn emit_update(channel: &PluginChannel, msg: ChatMessage) {
 }
 
 /// 发送简化的状态更新（仅包含 ID 和 Status）。
-async fn emit_status(channel: &PluginChannel, id: String, status: MessageStatus) {
+pub async fn emit_status(channel: &PluginChannel, id: String, status: MessageStatus) {
     emit_update(
         channel,
         ChatMessage {
@@ -66,6 +68,16 @@ async fn emit_status(channel: &PluginChannel, id: String, status: MessageStatus)
         },
     )
     .await;
+}
+
+/// 发送中止帧（`PostResult::RetryWithoutContextId` 路径使用：通知前端停止流式渲染）。
+pub async fn emit_abort(channel: &PluginChannel) {
+    let _ = channel
+        .tx
+        .send(PluginFrame::Data(
+            serde_json::to_value(session_chat_response::StreamEvent::Abort {}).unwrap_or_default(),
+        ))
+        .await;
 }
 
 // 控制信号处理
@@ -274,7 +286,284 @@ pub async fn execute_post_with_abort(
     }
 }
 
-// SSE 流解析与结果积累
+// 工具调用增量累积
+
+#[derive(Debug, Default, Clone)]
+struct AccumulatedToolCall {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+/// Tool call information
+#[derive(Debug, Clone)]
+pub struct ToolCallInfo {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub arguments: Value,
+}
+
+/// Accumulates incremental tool call deltas.
+///
+/// LLM APIs stream tool calls incrementally. This struct handles the accumulation
+/// so plugin authors don't need to manage index-based HashMaps.
+#[derive(Debug, Default)]
+pub struct ToolCallAccumulator {
+    calls: HashMap<usize, AccumulatedToolCall>,
+}
+
+impl ToolCallAccumulator {
+    /// Process a tool call delta from the API and return (tool_call_id, accumulated_args, name).
+    pub fn process_delta(
+        &mut self,
+        index: usize,
+        id: Option<&str>,
+        name: Option<&str>,
+        args_delta: Option<&str>,
+    ) -> (String, String, Option<String>) {
+        let entry = self.calls.entry(index).or_default();
+
+        // 仅接受非空 id/name：
+        // 部分 OpenAI 兼容网关（如实测 apinex qwen-3.8-max）只在首个增量携带合法 id，
+        // 后续增量重复发送 `id:""`。若用空值覆盖，会把首个增量的合法 id 冲掉，
+        // 最终得到 Some("") → 工具调用被误判为 id 缺失而被跳过（历史 Bug）。
+        if let Some(id) = id.filter(|s| !s.trim().is_empty()) {
+            entry.id = Some(id.to_string());
+        }
+        if let Some(name) = name.filter(|s| !s.trim().is_empty()) {
+            entry.name = Some(name.to_string());
+        }
+
+        // 供应商始终未返回 id（缺失或全为空串）时，主动分配一个短 GUID 作为工具调用 id。
+        // 该 id 在首个增量即确定并写入 entry，保证流式广播、落库（build_assistant_messages）
+        // 与执行（process_tool_calls_async）三处使用同一 id。
+        if entry.id.is_none() {
+            entry.id = Some(short_id());
+        }
+
+        if let Some(delta) = args_delta {
+            entry.arguments.push_str(delta);
+        }
+
+        (
+            entry.id.clone().unwrap_or_default(),
+            entry.arguments.clone(),
+            entry.name.clone(),
+        )
+    }
+
+    /// 本次响应是否出现过任何工具调用增量（无论其参数是否完整）。
+    ///
+    /// 用于区分「纯文本被 `max_tokens` 截断」与「工具调用参数 JSON 被截断」：
+    /// 前者可安全自动续写，后者参数已残破、续写无法修复，必须显式报错。
+    pub fn had_any_tool_call(&self) -> bool {
+        !self.calls.is_empty()
+    }
+
+    /// Get the list of completed tool calls.
+    ///
+    /// 保证返回的每个 ToolCallInfo.id 均为非空：正常情况下 process_delta 已在首个增量
+    /// 确定 id，此处为幂等兜底——重复调用返回相同 id，**绝不**重新随机生成
+    /// （chat_loop 与 into_messages 会各取一次，两次结果不一致会使工具结果子节点变孤儿）。
+    pub fn get_completed(&mut self) -> Vec<ToolCallInfo> {
+        self.calls
+            .values_mut()
+            .map(|call| {
+                if call.id.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+                    call.id = Some(short_id());
+                }
+                let args: Value = match serde_json::from_str(&call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            raw_arguments = %call.arguments,
+                            "tool call parse error"
+                        );
+                        serde_json::json!({})
+                    }
+                };
+                ToolCallInfo {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    arguments: args,
+                }
+            })
+            .collect()
+    }
+}
+
+// 消息构造（ChatMessage 家族，依赖闭包随迁）
+
+/// 生成长度短的 ID（8 字符），替代完整 UUID v4
+pub fn short_id() -> String {
+    uuid::Uuid::new_v4().to_string()[..8].to_string()
+}
+
+/// 流式期间已经广播给前端的子节点 id。
+///
+/// **落库时必须复用这些 id**（M-001 修复）：流式层（`parse_sse_stream` 的 `emit_update`）
+/// 与存储层（`build_assistant_messages`）是同一批节点的两个视图。此前两者各自
+/// `short_id()` 生成新 id，导致同一个文本子节点在「前端流式快照」里是 id=A、
+/// 在「会话存储」里是 id=B，被上层判定为两条不同消息——于是失败收尾时 id=A 的节点
+/// 被当作"尚未落库的流式半截"补写进存储，同一个 Turn 下出现两份内容相同的文本节点。
+#[derive(Debug, Default, Clone)]
+pub struct StreamChildIds {
+    /// 回复正文子节点的流式 id（`TurnOutput::response_text_child_id`）
+    pub text: Option<String>,
+    /// 思考子节点的流式 id（`TurnOutput::reasoning_child_id`）
+    pub reasoning: Option<String>,
+}
+
+impl StreamChildIds {
+    /// 空串视为「流式期间没有产生该节点」，规范化为 None。
+    fn normalized(self) -> Self {
+        Self {
+            text: self.text.filter(|s| !s.is_empty()),
+            reasoning: self.reasoning.filter(|s| !s.is_empty()),
+        }
+    }
+}
+
+/// 构造助手消息组（基于 Turn / ToolCall 的分型层级结构）。
+///
+/// 结构：
+/// - `Turn`(根级, `Assistant` 组合)：与 `User` 互为兄弟
+///   ├─ `Reasoning`(子)
+///   ├─ `Text`(回复, 子)
+/// - `ToolCall`(`Assistant` 组合, 子)：自身 `content` 携带请求参数（JSON 文本）
+///   └─ `Text`(响应结果, `Tool`, 子)  ← 由 `build_tool_message` 补充
+pub fn build_assistant_messages(
+    id: &str,
+    content: &str,
+    tool_calls: &[ToolCallInfo],
+    rid: Option<String>,
+    reasoning: Option<String>,
+    child_ids: StreamChildIds,
+) -> Vec<ChatMessage> {
+    let child_ids = child_ids.normalized();
+    let mut msgs = Vec::new();
+    let timestamp = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+
+    // ── Turn 消息（根级，与 User 互为兄弟）───────────────────────────────
+    msgs.push(ChatMessage {
+        id: id.to_string(),
+        parent_id: None,
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::Turn),
+        content: None,
+        status: Some(MessageStatus::Completed),
+        timestamp: Some(timestamp),
+        ..Default::default()
+    });
+
+    // ── Reasoning 消息（parent_id=turn_id）──────────────────────────────
+    // 仅当 reasoning 与回复正文为「不同内容」（即存在独立的文本回复）时才单独生成思考子节点。
+    // reasoning-only 场景下 `reasoning` 已通过 `content`（effective_text 对「无文本回复」的回退）
+    // 承载于下方的 Text 子节点；若此处再生成 Reasoning 子节点，同一段内容会在存储层出现两份
+    // （factor=2：表现为历史会话里重复两份、流式期间"层层叠加"）。
+    let reasoning_only = reasoning
+        .as_ref()
+        .map(|r| !r.trim().is_empty() && r.trim() == content.trim())
+        .unwrap_or(false);
+    if let Some(r) = reasoning {
+        if !r.trim().is_empty() && !reasoning_only {
+            msgs.push(ChatMessage {
+                id: child_ids.reasoning.clone().unwrap_or_else(short_id),
+                parent_id: Some(id.to_string()),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Reasoning),
+                content: Some(MessageContent::Text(r)),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(timestamp),
+                ..Default::default()
+            });
+        }
+    }
+
+    // ── Response 文本消息（parent_id=turn_id）───────────────────────────
+    // 仅在存在非空白文本内容时添加，避免产生仅含 \n\n 的空节点
+    if !content.trim().is_empty() {
+        // reasoning-only 场景下这块内容在流式层是以 Reasoning 子节点的形式存在的
+        // （`finalize_assistant_turn` 会把 `reasoning_child_id` 定稿），因此优先复用
+        // reasoning 的流式 id，保证存储层与流式层的节点身份一致。
+        let text_child_id = if reasoning_only {
+            child_ids
+                .reasoning
+                .clone()
+                .or_else(|| child_ids.text.clone())
+        } else {
+            child_ids.text.clone()
+        };
+        msgs.push(ChatMessage {
+            id: text_child_id.unwrap_or_else(short_id),
+            parent_id: Some(id.to_string()),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text(content.into())),
+            status: Some(MessageStatus::Completed),
+            timestamp: Some(timestamp),
+            response_id: rid,
+            ..Default::default()
+        });
+    }
+
+    // ── ToolCall 消息（parent_id=turn_id，组合节点）──────────────────────
+    // ToolCall 组合节点自身携带请求参数（content = JSON 文本），不再拆分出独立的请求子节点
+    for tc in tool_calls {
+        let tc_id = tc.id.clone().unwrap_or_else(short_id);
+        msgs.push(ChatMessage {
+            id: tc_id.clone(),
+            parent_id: Some(id.to_string()),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::ToolCall),
+            name: tc.name.clone(),
+            content: Some(MessageContent::Text(tc.arguments.to_string())),
+            status: Some(MessageStatus::Completed),
+            timestamp: Some(timestamp),
+            ..Default::default()
+        });
+    }
+
+    msgs
+}
+
+/// 构造工具执行结果消息（role: Tool，msg_type: Text，parent_id 指向 tool_call）。
+/// 响应结果作为 `ToolCall` 的直接 `Text`(`Tool`) 子节点（组合节点可选，故不包 Turn）。
+///
+/// **重要（修复 Bug 2）**：结果子节点的 `status` 必须与实际执行结果一致——
+/// 成功 `Completed`、失败 `Failed`。此前硬编码 `Completed`，导致失败工具的结果
+/// 子节点被持久化为 `Completed`；当下一轮 `get_context_messages` 过滤掉 `Failed`
+/// 的 `ToolCall` 父节点时，这个"孤儿"`role=Tool` 结果子节点（其 `tool_call_id`
+/// 指向已被删除的 tool_call）被保留下来，使新一轮 LLM 请求携带非法
+/// `tool_call_id` → 请求包出错（"发给大语言模型的数据包会出错"）。
+pub fn build_tool_message(
+    tool_call_id: &str,
+    content: &str,
+    success: Option<bool>,
+    msg_id: Option<String>,
+) -> ChatMessage {
+    let success = success.unwrap_or(true);
+    ChatMessage {
+        id: msg_id.unwrap_or_else(short_id),
+        parent_id: Some(tool_call_id.into()),
+        role: Some(MessageRole::Tool),
+        msg_type: Some(MessageType::Text),
+        content: Some(MessageContent::Text(content.into())),
+        status: Some(if success {
+            MessageStatus::Completed
+        } else {
+            MessageStatus::Failed
+        }),
+        meta: Some(serde_json::json!({ "success": success })),
+        timestamp: Some(
+            (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64,
+        ),
+        ..Default::default()
+    }
+}
+
+// 单轮产物
 
 #[derive(Default)]
 pub struct TurnOutput {
@@ -310,7 +599,7 @@ impl TurnOutput {
         mut self,
         root_id: &str,
         n_tools: usize,
-    ) -> Vec<crate::symbio_core::schemas::session::chat_message::ChatMessage> {
+    ) -> Vec<ChatMessage> {
         let effective = self.effective_text(n_tools).to_owned();
         let reasoning = if self.reasoning.is_empty() {
             None
@@ -318,7 +607,7 @@ impl TurnOutput {
             Some(self.reasoning)
         };
         let tools = self.tool_accumulator.get_completed();
-        super::message_builder::build_assistant_messages(
+        build_assistant_messages(
             root_id,
             &effective,
             &tools,
@@ -326,7 +615,7 @@ impl TurnOutput {
             reasoning,
             // 复用流式期间已经广播给前端的子节点 id：落库节点与流式节点必须是同一身份，
             // 否则失败收尾时流式节点会被当成"未落库的半截"再补写一份（重复节点）。
-            super::message_builder::StreamChildIds {
+            StreamChildIds {
                 text: Some(self.response_text_child_id),
                 reasoning: Some(self.reasoning_child_id),
             },
@@ -334,13 +623,24 @@ impl TurnOutput {
     }
 }
 
-pub async fn parse_sse_stream(
+// SSE 流解析
+
+/// 解析 SSE 字节流为标准化事件并累积成单轮产物。
+///
+/// `protocol` 以泛型接收而非 `&dyn ModelProvider`：既允许调用方传 trait object
+/// （`Arc<dyn ModelProvider>::as_ref()`），也允许 `ModelProvider::execute_turn`
+/// 的默认实现直接传 `self`（trait 默认方法内 `Self: ?Sized`，无法 unsize 成
+/// `&dyn ModelProvider`）。协议差异只体现在 `parse_response_line` 一个钩子上。
+pub async fn parse_sse_stream<P>(
     response: reqwest::Response,
     root_id: &str,
     channel: &mut PluginChannel,
     abort_flag: &AtomicBool,
-    protocol: &dyn ModelProtocol,
-) -> Result<TurnOutput, String> {
+    protocol: &P,
+) -> Result<TurnOutput, String>
+where
+    P: ModelProvider + ?Sized,
+{
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::<u8>::new();
     let mut out = TurnOutput::default();
@@ -350,7 +650,7 @@ pub async fn parse_sse_stream(
     struct LineProgress {
         content: usize,
         reasoning: usize,
-        tool_args: std::collections::HashMap<usize, usize>,
+        tool_args: HashMap<usize, usize>,
     }
     let mut progress = LineProgress::default();
 
@@ -533,149 +833,6 @@ async fn dispatch_protocol_event(
     Ok(())
 }
 
-pub async fn compress_temporary_messages(
-    parent: &Option<Arc<dyn Plugin>>,
-    session_id: &str,
-    messages: &mut [ChatMessage],
-    ctx: Arc<dyn InvokeRequest>,
-) {
-    if messages.is_empty() {
-        return;
-    }
-
-    // “除最后一轮外”：这里简单处理，保留最后一条消息（通常是当前用户输入）不被主动压缩
-    let split_at = messages.len().saturating_sub(1);
-    if split_at == 0 {
-        return;
-    }
-
-    let to_compress = &messages[..split_at];
-
-    let compress_ctx = ctx.fork();
-    compress_ctx.set(crate::symbio_core::PATH, SESSION_COMPRESS.to_string());
-    let _ = compress_ctx.set_payload(serde_json::json!({
-        "session_id": session_id,
-        "messages": to_compress,
-    }));
-
-    if let Some(p) = parent {
-        if let Ok(resp) = p.clone().route(compress_ctx).await {
-            if let Ok(res) = resp.get::<session_compress::Response>() {
-                // 更新消息列表的前半部分
-                for (i, msg) in res.messages.into_iter().enumerate() {
-                    if i < split_at {
-                        messages[i] = msg;
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ChatOrchestrator
-
-pub struct ChatOrchestrator {
-    pub config: ModelConfig,
-    pub parent: Option<Arc<dyn Plugin>>,
-    pub protocol: Box<dyn ModelProtocol>,
-}
-
-impl ChatOrchestrator {
-    pub fn new(
-        config: ModelConfig,
-        parent: Option<Arc<dyn Plugin>>,
-        protocol: Box<dyn ModelProtocol>,
-    ) -> Self {
-        Self {
-            config,
-            parent,
-            protocol,
-        }
-    }
-
-    pub async fn finalize_assistant_turn(
-        &self,
-        root_id: &str,
-        out: &TurnOutput,
-        tools: &[ToolCallInfo],
-        channel: &PluginChannel,
-    ) {
-        if out.is_reasoning_only(tools.len()) {
-            // reasoning-only：模型只产生了 reasoning，没有独立的文本回复。
-            //
-            // 同一段 reasoning 在落库时由 build_assistant_messages 以「Text 响应子节点」承载
-            // （effective_text 对「无文本回复」的回退语义）。因此这里**绝不能**再额外广播一个
-            // content=reasoning 的 Text 节点——否则前端会同时持有「Reasoning 子节点」与
-            // 「Text 响应子节点」两份相同内容，表现为：
-            //   · 流式期间：思考块 + 一段相同文本先后出现，看起来像"同一段文本被重复写入"；
-            //   · 历史刷新后：存储层本就重复（factor≈2），渲染出两份。
-            //
-            // 流式期间 ReasoningDelta 已经把 reasoning 累积进 reasoning_child_id 节点，
-            // 此处仅将其与根 Turn 标记 Completed 即可。仅当流式期间因故未建立 Reasoning 节点时，
-            // 才补发一个 Text 节点兜底（此时不存在 Reasoning 节点，不会造成重复）。
-            if !out.reasoning_child_id.is_empty() {
-                emit_status(
-                    channel,
-                    out.reasoning_child_id.clone(),
-                    MessageStatus::Completed,
-                )
-                .await;
-            } else {
-                let resp_id = if out.response_text_child_id.is_empty() {
-                    short_id()
-                } else {
-                    out.response_text_child_id.clone()
-                };
-                emit_update(
-                    channel,
-                    ChatMessage {
-                        id: resp_id,
-                        parent_id: Some(root_id.into()),
-                        role: Some(MessageRole::Assistant),
-                        msg_type: Some(MessageType::Text),
-                        content: Some(MessageContent::Text(out.reasoning.clone())),
-                        status: Some(MessageStatus::Completed),
-                        ..Default::default()
-                    },
-                )
-                .await;
-            }
-            emit_status(channel, root_id.into(), MessageStatus::Completed).await;
-            return;
-        }
-
-        // Mark reasoning child as completed
-        if !out.reasoning.is_empty() && !out.reasoning_child_id.is_empty() {
-            emit_status(
-                channel,
-                out.reasoning_child_id.clone(),
-                MessageStatus::Completed,
-            )
-            .await;
-        }
-
-        // Mark response text child as completed (exists if there was text content)
-        if !out.text.is_empty() && !out.response_text_child_id.is_empty() {
-            emit_status(
-                channel,
-                out.response_text_child_id.clone(),
-                MessageStatus::Completed,
-            )
-            .await;
-        }
-
-        // Mark tool calls (composite) as completed
-        for tc in tools {
-            if let Some(tc_id) = &tc.id {
-                emit_status(channel, tc_id.clone(), MessageStatus::Completed).await;
-            }
-        }
-
-        // Mark the root Turn node as completed
-        emit_status(channel, root_id.into(), MessageStatus::Completed).await;
-    }
-}
-
 // 辅助解析函数（用于超长单行 SSE 增量提取）
 
 /// 尝试从尚未结束（无换行符）的 SSE 行中提取已有的增量内容。
@@ -804,9 +961,90 @@ fn safe_substring(s: &str, start: usize) -> String {
 }
 
 #[cfg(test)]
+mod tool_call_tests {
+    use super::*;
+
+    /// 回归（apinex qwen-3.8-max 网关真实行为）：
+    /// 首个增量携带合法 id，后续增量重复发送 `id:""`。
+    /// 空串不得覆盖合法 id——否则最终得到 Some("")，工具调用被误判为
+    /// id 缺失而跳过，落库的 ToolCall 节点 id 为空串且无结果子节点。
+    #[test]
+    fn empty_id_delta_does_not_overwrite_real_id() {
+        let mut acc = ToolCallAccumulator::default();
+        let (id1, _, _) =
+            acc.process_delta(0, Some("call_8f3a59f5f8e14258a427e432"), Some("get_weather"), Some(""));
+        assert_eq!(id1, "call_8f3a59f5f8e14258a427e432");
+
+        // 后续增量：id:""（该网关的真实行为）
+        let (id2, args, _) =
+            acc.process_delta(0, Some(""), None, Some("{\"city\": \"Paris\"}"));
+        assert_eq!(id2, "call_8f3a59f5f8e14258a427e432");
+        assert_eq!(args, "{\"city\": \"Paris\"}");
+
+        let done = acc.get_completed();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].id.as_deref(), Some("call_8f3a59f5f8e14258a427e432"));
+        assert_eq!(done[0].name.as_deref(), Some("get_weather"));
+    }
+
+    /// 需求 1：供应商始终未返回 id 时，必须主动分配短 GUID 作为工具调用 id。
+    /// 流式返回值与 get_completed 结果必须一致，且重复取值幂等
+    /// （chat_loop 与 into_messages 各取一次，两次结果不一致会使结果子节点变孤儿）。
+    #[test]
+    fn missing_id_gets_stable_generated_guid() {
+        let mut acc = ToolCallAccumulator::default();
+        let (stream_id, _, _) =
+            acc.process_delta(0, None, Some("dir_list"), Some("{\"path\": \".\"}"));
+        assert!(!stream_id.is_empty(), "流式期间即应有非空 id");
+        assert_ne!(stream_id, "tc-0", "不得再使用 index 占位符");
+
+        let done1 = acc.get_completed();
+        let done2 = acc.get_completed();
+        assert_eq!(done1[0].id.as_deref(), Some(stream_id.as_str()));
+        assert_eq!(
+            done2[0].id.as_deref(),
+            Some(stream_id.as_str()),
+            "重复调用 get_completed 必须返回同一 id"
+        );
+    }
+
+    /// 纯空白 id 视为"不合法"，与缺失同等对待。
+    #[test]
+    fn whitespace_id_treated_as_missing() {
+        let mut acc = ToolCallAccumulator::default();
+        let (id, _, _) = acc.process_delta(0, Some("   "), None, Some("{}"));
+        assert!(!id.trim().is_empty());
+    }
+
+    /// 空串 name 不得覆盖首个增量的合法 name（与 id 同理）。
+    #[test]
+    fn empty_name_delta_does_not_overwrite_real_name() {
+        let mut acc = ToolCallAccumulator::default();
+        acc.process_delta(0, Some("call_x"), Some("cmd.exe"), Some(""));
+        acc.process_delta(0, Some(""), Some(""), Some("{}"));
+
+        let done = acc.get_completed();
+        assert_eq!(done[0].id.as_deref(), Some("call_x"));
+        assert_eq!(done[0].name.as_deref(), Some("cmd.exe"));
+    }
+
+    /// 多个并行工具调用（不同 index）互不干扰，各自持有独立 id。
+    #[test]
+    fn parallel_tool_calls_keep_separate_ids() {
+        let mut acc = ToolCallAccumulator::default();
+        acc.process_delta(0, Some("call_a"), Some("f1"), Some("{}"));
+        acc.process_delta(1, Some("call_b"), Some("f2"), Some("{}"));
+
+        let mut done = acc.get_completed();
+        done.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(done[0].id.as_deref(), Some("call_a"));
+        assert_eq!(done[1].id.as_deref(), Some("call_b"));
+    }
+}
+
+#[cfg(test)]
 mod turn_output_tests {
     use super::*;
-    use crate::symbio_core::schemas::session::chat_message::MessageType;
 
     fn out(text: &str, reasoning: &str) -> TurnOutput {
         TurnOutput {

@@ -134,3 +134,19 @@ impl SymbioKey for CapabilityManagerKey {
     }
 }
 pub const CAPABILITY_MANAGER: CapabilityManagerKey = CapabilityManagerKey;
+
+// 会话句柄 Key（Value）：session 编排器交付给 model/chat 的会话引擎实例
+pub struct SessionHandleKey;
+impl SymbioKey for SessionHandleKey {
+    type Value = Arc<crate::symbio_core::ChatSessionHandle>;
+    fn name(&self) -> &'static str {
+        "session_handle"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "chat_session_handle".to_string()
+    }
+}
+pub const SESSION_HANDLE: SessionHandleKey = SessionHandleKey;

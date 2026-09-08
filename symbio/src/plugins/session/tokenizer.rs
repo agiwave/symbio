@@ -16,43 +16,26 @@
 //!   调用方只依赖 trait，无需改动。
 //! - **可校准**：[`CalibratedTokenizer`] 用 provider 返回的真实 `usage` 反馈
 //!   做滑动校正，把启发式的系统偏差逐步拉回 1.0（对中文场景收益最大）。
+//!
+//! ## Phase sink
+//!
+//! 自 `symbio_core/tokenizer.rs` 下沉至 session 插件——E-② 后唯一消费者
+//! （compression / chat_loop / tool_result_guard）全部位于 session 模块内，
+//! 属单一模块私有设施，不再置于 core 共享层。
 
 use std::sync::atomic::{AtomicU32, Ordering};
-
-/// 单条消息的结构开销（role / 分隔符 / 消息边界），对齐主流 BPE 的经验值
-pub const PER_MESSAGE_OVERHEAD: usize = 7;
 
 /// 采样阈值：超过该字符数时先采样再外推，避免超大输入阻塞请求
 const SAMPLE_CHARS: usize = 32_768;
 
 /// token 计数抽象
+///
+/// 体检结论（audit-4）：trait 收敛为单一方法 `count`——纯文本计量归本模块；
+/// 消息级 / 工具级聚合（结构开销、ToolCall 参数、prompt 前缀等语义）
+/// 由 compression.rs 的 estimate_* 系列负责，避免两处重复定义。
 pub trait Tokenizer: Send + Sync {
     /// 估算单段文本的 token 数
     fn count(&self, text: &str) -> usize;
-
-    /// 估算消息列表（含每条消息的结构开销）
-    fn count_messages(&self, msgs: &[crate::symbio_core::schemas::session::chat_message::ChatMessage]) -> usize {
-        let mut total = 0;
-        for m in msgs {
-            total += PER_MESSAGE_OVERHEAD;
-            if let Some(c) = &m.content {
-                total += self.count(&c.to_text());
-            }
-        }
-        total
-    }
-
-    /// 估算工具声明（function schema）的开销
-    fn count_tools(&self, tools: &[crate::symbio_core::CapabilityMeta]) -> usize {
-        let mut total = 0;
-        for t in tools {
-            total += self.count(&t.name) + self.count(&t.description) + 12;
-        if !t.input_schema.is_null() {
-            total += self.count(&t.input_schema.to_string());
-        }
-        }
-        total
-    }
 }
 
 /// 字符类别权重（每字符的 token 数，放大 1000 倍存整数避免浮点）
@@ -181,10 +164,6 @@ impl CalibratedTokenizer {
         let next = (cur as f64 * 0.7 + observed as f64 * 0.3) as u32;
         self.ratio.store(next.max(2_000), Ordering::Relaxed);
     }
-
-    pub fn ratio(&self) -> f64 {
-        self.ratio.load(Ordering::Relaxed) as f64 / 10_000.0
-    }
 }
 
 impl Tokenizer for CalibratedTokenizer {
@@ -225,11 +204,6 @@ pub fn report_provider_usage(estimated: usize, actual: Option<u32>) {
     }
 }
 
-/// 当前校准系数（actual/estimate 的滑动均值），供诊断日志展示。
-pub fn calibration_ratio() -> f64 {
-    default_tokenizer().ratio()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,27 +228,6 @@ mod tests {
         let est = default_tokenizer().count(&text);
         // 400 × 0.28 ≈ 112
         assert!((80..=200).contains(&est), "英文估算偏离预期：{est}");
-    }
-
-    #[test]
-    fn count_messages_includes_overhead() {
-        use crate::symbio_core::schemas::session::chat_message::{
-            ChatMessage, MessageContent, MessageRole,
-        };
-        let msgs = vec![
-            ChatMessage {
-                role: Some(MessageRole::User),
-                content: Some(MessageContent::Text("hi".into())),
-                ..Default::default()
-            },
-            ChatMessage {
-                role: Some(MessageRole::Assistant),
-                content: Some(MessageContent::Text("hello".into())),
-                ..Default::default()
-            },
-        ];
-        let total = default_tokenizer().count_messages(&msgs);
-        assert!(total >= 2 * PER_MESSAGE_OVERHEAD);
     }
 
     #[test]

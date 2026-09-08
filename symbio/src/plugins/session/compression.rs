@@ -7,10 +7,11 @@
 
 use std::sync::Arc;
 
+use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt};
+use crate::symbio_core::{InvokeRequest, InvokeRequestExt, SESSION_HANDLE};
 
 const COMPRESSION_TOKEN_THRESHOLD: f64 = 0.7;
 const COMPRESSION_PRESERVE_THRESHOLD: f64 = 0.3;
@@ -158,7 +159,7 @@ pub fn find_turn_tool_call_split_idx(messages: &[ChatMessage], root_id: &str) ->
 /// 实际请求文本并由 provider 计费）+ ToolCall 节点参数（content 即 JSON 文本）
 /// + 每消息固定结构开销。
 pub fn estimate_message_tokens(m: &ChatMessage) -> usize {
-    use crate::symbio_core::{default_tokenizer, Tokenizer};
+    use super::tokenizer::{default_tokenizer, Tokenizer};
 
     const PER_MESSAGE_OVERHEAD: usize = 8; // role / 框架 / 分隔符等固定开销
     let tok = default_tokenizer();
@@ -197,7 +198,8 @@ pub async fn estimate_request_overhead(
     system_prompt: &str,
     ctx: &Arc<dyn InvokeRequest>,
 ) -> usize {
-    use crate::symbio_core::{default_tokenizer, CAPABILITY_MANAGER, Tokenizer};
+    use crate::symbio_core::CAPABILITY_MANAGER;
+    use super::tokenizer::{default_tokenizer, Tokenizer};
 
     let tok = default_tokenizer();
     let mut total = tok.count(system_prompt);
@@ -325,7 +327,7 @@ pub fn prepare_compression(
 /// 因此**不写存档文件**、天然幂等（无重复存档问题）。被淡化的结果标记 `tool_result_faded`，
 /// 模型如需完整输出可重新运行对应工具。
 pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: usize) {
-    use crate::symbio_core::{default_tokenizer, Tokenizer};
+    use super::tokenizer::{default_tokenizer, Tokenizer};
 
     // 以 user 消息为边界，定位"最近 keep_recent_turns 个 user turn"的起始下标；
     // 该下标之前的消息视为"历史"，对其中的工具结果做淡化。
@@ -393,7 +395,7 @@ pub fn build_request_view(
         fade_aged_tool_results(&mut view, fade_keep_turns);
     }
     if window > 0 && !retention.is_empty() {
-        view = crate::plugins::session::context::apply_layered_sliding_window(
+        view = super::context_window::apply_layered_sliding_window(
             &view,
             window,
             retention,
@@ -523,6 +525,45 @@ pub fn context_compact_tool_meta() -> crate::symbio_core::CapabilityMeta {
         keywords: vec!["compact".to_string(), "压缩".to_string(), "上下文".to_string()],
         category: Some(crate::symbio_core::CapabilityCategory::Core),
         examples: None,
+    }
+}
+
+/// 压缩请求视图中的非最新消息（内容级骨架化）。
+///
+/// 经 session 编排交付的会话句柄（SESSION_HANDLE）路由至
+/// `ChatSession::compress_messages`（持久会话存档+骨架化；ephemeral/fallback
+/// 默认原样返回，不压缩）。
+pub async fn compress_temporary_messages(
+    ctx: &Arc<dyn InvokeRequest>,
+    messages: &mut [ChatMessage],
+) {
+    if messages.is_empty() {
+        return;
+    }
+
+    // “除最后一轮外”：这里简单处理，保留最后一条消息（通常是当前用户输入）不被主动压缩
+    let split_at = messages.len().saturating_sub(1);
+    if split_at == 0 {
+        return;
+    }
+
+    let Some(handle) = ctx.get(SESSION_HANDLE) else {
+        return;
+    };
+
+    let to_compress = messages[..split_at].to_vec();
+    match handle.0.compress_messages(to_compress).await {
+        Ok(compressed) => {
+            // 更新消息列表的前半部分
+            for (i, msg) in compressed.into_iter().enumerate() {
+                if i < split_at {
+                    messages[i] = msg;
+                }
+            }
+        }
+        Err(e) => {
+            plugin_warn!("session", "压缩消息失败，保留原文: {}", e);
+        }
     }
 }
 

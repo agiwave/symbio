@@ -10,25 +10,25 @@
 //!   （chat_loop）在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
-use super::tool_call::ToolCallInfo;
-use super::types::*;
+use crate::symbio_core::turn::{build_tool_message, short_id, ToolCallInfo};
 use crate::symbio_core::{
     schemas::{
-        session::chat_message::{MessageRole, MessageStatus, MessageType},
+        session::chat_message::{
+            ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+        },
         session::session_chat_response,
         system::hook::{HookEvent, HookOutput},
     },
     InvokeRequestExt,
 };
 use crate::symbio_core::{
-    InvokeRequest, Plugin, PluginChannel, PluginFrame, PluginPayload, HOOK_FIRE, SESSION_COMPRESS,
+    InvokeRequest, Plugin, PluginChannel, PluginFrame, PluginPayload, HOOK_FIRE, SESSION_HANDLE,
 };
 use crate::{plugin_debug, plugin_error, plugin_info, plugin_warn};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use super::message_builder::{build_tool_message, short_id};
 use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 
 // 工具结果提取
@@ -134,8 +134,7 @@ pub async fn execute_tool_async(
     result_msg_id: String,
     ctx: Arc<dyn InvokeRequest>,
 ) -> (String, bool, Option<ChatMessage>) {
-    plugin_info!(
-        "model",
+    plugin_info!("session",
         "[Tool] Execution started: {} ({})",
         tool_name,
         tool_call_id
@@ -159,12 +158,11 @@ pub async fn execute_tool_async(
 
     let route_result = if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
         if tool_manager.has_capability(tool_name).await {
-            plugin_info!("model", "[Tool] Using ToolManager for: {}", tool_name);
+            plugin_info!("session", "[Tool] Using ToolManager for: {}", tool_name);
             let _ = tool_ctx.set_payload(args.clone());
             tool_manager.invoke(tool_name, tool_ctx.clone()).await
         } else {
-            plugin_info!(
-                "model",
+            plugin_info!("session",
                 "[Tool] ToolManager does not have tool: {}, falling back to route",
                 tool_name
             );
@@ -188,8 +186,7 @@ pub async fn execute_tool_async(
                         return ("Error: Failed to deserialize payload".into(), false, None);
                     }
                 };
-                plugin_debug!(
-                    "model",
+                plugin_debug!("session",
                     "Tool immediate response for {}: {}",
                     tool_name,
                     data
@@ -197,8 +194,7 @@ pub async fn execute_tool_async(
 
                 // 直接返回结果（需要确认/询问的工具已自行产出 user_prompt 节点）
                 let res = extract_result(&data);
-                plugin_info!(
-                    "model",
+                plugin_info!("session",
                     "[Tool] FINISHED: {} (Len: {})",
                     tool_name,
                     res.len()
@@ -208,7 +204,7 @@ pub async fn execute_tool_async(
 
             // ── 流式响应 ──────────────────────────────────────────────────────
             PluginPayload::Session(mut tool_chan) => {
-                plugin_info!("model", "[Tool] STREAMING execution started: {}", tool_name);
+                plugin_info!("session", "[Tool] STREAMING execution started: {}", tool_name);
                 let mut full = String::new();
                 // 捕获工具广播的 user_prompt(WaitingUserAction) 节点，作为本轮"待用户响应"结果返回
                 let mut captured_prompt: Option<ChatMessage> = None;
@@ -289,8 +285,7 @@ pub async fn execute_tool_async(
                                             .await;
                                     }
                                     session_chat_response::StreamEvent::Error { error } => {
-                                        plugin_error!(
-                                            "model",
+                                        plugin_error!("session",
                                             format!("[Tool] NESTED Error: {}", error)
                                         );
                                         return (format!("Error: {error}"), false, None);
@@ -303,13 +298,12 @@ pub async fn execute_tool_async(
                             }
                         }
                         PluginFrame::Error(e, _) => {
-                            plugin_error!("model", format!("[Tool] STREAM Error: {}", e));
+                            plugin_error!("session", format!("[Tool] STREAM Error: {}", e));
                             return (format!("Error: {e}"), false, None);
                         }
                     }
                 }
-                plugin_info!(
-                    "model",
+                plugin_info!("session",
                     "[Tool] STREAMING finished: {} (Total Len: {})",
                     tool_name,
                     full.len()
@@ -328,7 +322,7 @@ pub async fn execute_tool_async(
             _ => ("Error: Unexpected payload type".into(), false, None),
         },
         Err(e) => {
-            plugin_error!("model", format!("[Tool] ROUTE Error: {}", e));
+            plugin_error!("session", format!("[Tool] ROUTE Error: {}", e));
             (format!("Error: {e}"), false, None)
         }
     }
@@ -393,8 +387,7 @@ async fn record_protocol_failure(
         ))
         .await;
 
-    plugin_info!(
-        "model",
+    plugin_info!("session",
         "[Tool] Protocol failure recorded as failed tool call: {}",
         error_text
     );
@@ -427,8 +420,7 @@ pub async fn process_tool_calls_async(
 
     let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
 
-    plugin_info!(
-        "model",
+    plugin_info!("session",
         "Processing batch of {} tool calls (mode={})...",
         tool_calls.len(),
         mode
@@ -455,8 +447,7 @@ pub async fn process_tool_calls_async(
                 })
                 .unwrap_or(false);
             if last_blocked {
-                plugin_info!(
-                    "model",
+                plugin_info!("session",
                     "[Tool] 交互模式下前一个工具待用户恢复，中止本批剩余工具"
                 );
                 break;
@@ -469,8 +460,7 @@ pub async fn process_tool_calls_async(
         let id = match tc.id.as_ref() {
             Some(id) if !id.trim().is_empty() => id.clone(),
             _ => {
-                plugin_error!(
-                    "model",
+                plugin_error!("session",
                     "Protocol Error: Tool call ID missing/invalid, recording as failed tool call"
                 );
                 record_protocol_failure(
@@ -489,8 +479,7 @@ pub async fn process_tool_calls_async(
         let name = match tc.name.as_ref() {
             Some(name) if !name.trim().is_empty() => name.clone(),
             _ => {
-                plugin_error!(
-                    "model",
+                plugin_error!("session",
                     format!(
                         "Protocol Error: Tool call name missing/invalid, recording as failed tool call. ID: {id}"
                     )
@@ -522,7 +511,7 @@ pub async fn process_tool_calls_async(
             let block_msg = pre_output
                 .block_reason
                 .unwrap_or_else(|| "Blocked by pre hook".to_string());
-            plugin_warn!("model", "[Tool] BLOCKED by PreToolUse hook: {}", block_msg);
+            plugin_warn!("session", "[Tool] BLOCKED by PreToolUse hook: {}", block_msg);
             let tool_msg = build_tool_message(
                 &id,
                 &format!("Blocked: {block_msg}"),
@@ -546,45 +535,36 @@ pub async fn process_tool_calls_async(
         .await;
 
         let mut final_res = res;
-        // --- 新增：大尺寸工具输出压缩 ---
-        // 如果不是文件读写工具（*file*），且输出行数超过 200 行，则主动触发内容级压缩
+        // 大尺寸工具输出压缩：若非文件读写工具（*file*），且输出行数超过 200 行，
+        // 则主动触发内容级压缩（经会话句柄路由：持久会话存档+骨架化，
+        // ephemeral/fallback 默认原样返回即不压缩）。
         if success && !name.contains("file") {
             let line_count = final_res.lines().count();
             if line_count > 200 {
-                plugin_info!(
-                    "model",
+                plugin_info!("session",
                     "[Tool] Result too large ({} lines), compressing...",
                     line_count
                 );
 
-                // 构造临时消息用于压缩逻辑
-                let temp_msg = ChatMessage {
-                    id: result_msg_id.clone(),
-                    role: Some(MessageRole::Tool),
-                    content: Some(MessageContent::Text(final_res.clone())),
-                    ..Default::default()
-                };
+                if let Some(handle) = ctx.get(SESSION_HANDLE) {
+                    // 构造临时消息用于压缩逻辑
+                    let temp_msg = ChatMessage {
+                        id: result_msg_id.clone(),
+                        role: Some(MessageRole::Tool),
+                        content: Some(MessageContent::Text(final_res.clone())),
+                        ..Default::default()
+                    };
 
-                // 调用 session/compress 服务
-                if let Some(session_id) = ctx.get(crate::symbio_core::SESSION_ID) {
-                    let compress_ctx = ctx.fork();
-                    compress_ctx.set(crate::symbio_core::PATH, SESSION_COMPRESS.to_string());
-                    let _ = compress_ctx.set_payload(json!({
-                        "session_id": session_id,
-                        "messages": vec![temp_msg],
-                    }));
-
-                    if let Some(p) = parent {
-                        if let Ok(resp) = p.clone().route(compress_ctx).await {
-                            if let Ok(mut res_data) = resp.get::<
-                                crate::symbio_core::schemas::session::session_compress::Response,
-                            >() {
-                                if let Some(c_msg) = res_data.messages.pop() {
-                                    if let Some(MessageContent::Text(text)) = c_msg.content {
-                                        final_res = text;
-                                    }
+                    match handle.0.compress_messages(vec![temp_msg]).await {
+                        Ok(mut compressed) => {
+                            if let Some(c_msg) = compressed.pop() {
+                                if let Some(MessageContent::Text(text)) = c_msg.content {
+                                    final_res = text;
                                 }
                             }
+                        }
+                        Err(e) => {
+                            plugin_warn!("session", "工具输出压缩失败，保留原文: {}", e);
                         }
                     }
                 }

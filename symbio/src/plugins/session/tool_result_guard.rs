@@ -11,7 +11,7 @@
 //! 与既有压缩层（L1/L2/L3）的边界：本层只处理**单条**结果，是"语义上限"；
 //! 物理字节上限（shell/fetch 1MB 等）是最后一道防线，二者不冲突。
 
-use crate::symbio_core::{default_tokenizer, Tokenizer};
+use super::tokenizer::{default_tokenizer, Tokenizer};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 

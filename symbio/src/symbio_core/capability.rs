@@ -1,4 +1,5 @@
-use crate::symbio_core::{InvokeRequest, InvokeResponse, PluginPayload};
+use crate::symbio_core::schemas::model::model_config::ModelConfig;
+use crate::symbio_core::{InvokeRequest, InvokeResponse, ModelProvider, PluginPayload};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -187,6 +188,38 @@ pub trait Capability: Send + Sync + 'static {
     async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload>;
 }
 
+/// 模型服务注册条目（AI 对话能力 = 与工具同一注册收集机制的"能力"）
+///
+/// Phase B：`CapabilityManager` 除工具外同时收集模型服务（协议适配器实例），
+/// 会话发起时通过同一次 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播一并收集
+/// 工具 + 模型服务 + 系统提示词。
+#[derive(Clone)]
+pub struct ModelProviderEntry {
+    /// Provider 唯一 ID（与 `ModelProviderConfig.id` 一致）
+    pub provider_id: String,
+    /// 协议工厂 ID（`MODEL_PROTOCOL_*` 常量值）
+    pub protocol_id: String,
+    /// 展示描述
+    pub description: String,
+    /// Provider 级默认系统提示词
+    pub system_prompt: Option<String>,
+    /// Provider 完整模型配置（Phase E：会话侧可凭本条目直接调用
+    /// `ModelProvider::execute_turn(&entry.config, ...)`，无需回查 model 插件内部注册表）
+    pub config: ModelConfig,
+    /// Provider 级限流间隔（毫秒；`0` 表示不限流）
+    ///
+    /// Phase E-②：限流跟随请求发起方——session 在调用 `execute_turn` 前以
+    /// `RATE_LIMITER.wait(&entry.provider_id, entry.rate_limit_ms)` 节流。
+    /// 注册时从 `ModelProviderConfig.rate_limit_ms` 携带（core 的 `ModelConfig`
+    /// 不引入该字段，保持纯模型参数语义）。
+    pub rate_limit_ms: u64,
+    /// 是否为默认 Provider（迁移自 `ModelProvidersConfig::resolve` 的
+    /// default 回退语义：session 侧解析链 = 精确 id → default → 首个已注册）
+    pub is_default: bool,
+    /// 协议适配器实例（无状态，`ModelConfig` 经调用参数传入）
+    pub provider: Arc<dyn ModelProvider>,
+}
+
 #[async_trait]
 pub trait CapabilityManager: Send + Sync + 'static {
     async fn register(&self, tool: Arc<dyn Capability>);
@@ -206,6 +239,24 @@ pub trait CapabilityManager: Send + Sync + 'static {
     ) -> InvokeResponse<PluginPayload>;
 
     async fn has_capability(&self, name: &str) -> bool;
+
+    /// 注册模型服务（AI 对话能力；同一 provider_id 重复注册时后者覆盖，与工具语义一致）
+    async fn register_model_provider(&self, entry: ModelProviderEntry);
+
+    /// 列出已注册的模型服务目录（保注册顺序）
+    async fn list_model_providers(&self) -> Vec<ModelProviderEntry>;
+
+    /// 按 provider_id 取完整注册条目（协议实例 + 配置 + 限流参数一次取齐）
+    ///
+    /// Phase E-②：由 `Option<Arc<dyn ModelProvider>>` 改为返回整个 entry，
+    /// 会话引擎凭一条目即可发起 `execute_turn`（无需二次查询配置/限流参数）。
+    async fn get_model_provider(&self, provider_id: &str) -> Option<ModelProviderEntry>;
+
+    /// 注册系统提示词（按名称保序；同名覆盖）
+    async fn register_system_prompt(&self, name: &str, prompt: String);
+
+    /// 列出已注册的系统提示词（(name, prompt)，保注册顺序）
+    async fn list_system_prompts(&self) -> Vec<(String, String)>;
 }
 
 #[cfg(test)]

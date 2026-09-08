@@ -1,13 +1,20 @@
-use super::context::prune_historical_tool_calls;
+//! 会话引擎：持久化（`PersistentChatSession`）与内存（`EphemeralChatSession`）两种实现。
+//!
+//! - 持久化实现委托 `super::store::SessionStore` 落库；内存实现面向 `_t_` 临时会话。
+//! - 滑动窗口、孤儿剔除、时间戳回填等纯函数均在本文件。
+//! - `prune_historical_tool_calls`（存储期工具链物理裁剪）由原 `context.rs`
+//!   并入——其唯一消费者就是本模块（体检备注 audit-5）。
+
 use super::store::SessionStore;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus,
+    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::{ChatSession, PluginError};
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -166,7 +173,7 @@ impl ChatSession for PersistentChatSession {
 
         if let Some(last_msg) = messages.last_mut() {
             if let Some(session_dir) = self.store.session_dir(&self.session_id) {
-                match super::compress::decompress_message(&session_dir, last_msg).await {
+                match super::message_archive::decompress_message(&session_dir, last_msg).await {
                     Ok(restored) => {
                         *last_msg = restored;
                     }
@@ -178,6 +185,52 @@ impl ChatSession for PersistentChatSession {
         }
 
         Ok(messages)
+    }
+
+    /// 压缩消息批次（ChatSession trait 覆写）：存档 + 骨架化。
+    ///
+    /// 与 session/compress 对外路由（invoke_compress）语义互为镜像：存档命名
+    /// （`messages/m{ts}.txt`，微秒时间戳）与 display path 派生完全一致，
+    /// 供会话编排处理超大工具输出 / 请求前主动压缩。
+    async fn compress_messages(
+        &self,
+        messages: Vec<ChatMessage>,
+    ) -> Result<Vec<ChatMessage>, PluginError> {
+        let Some(session_dir) = self.store.session_dir(&self.session_id) else {
+            // 无持久目录（理论不可达：持久会话必然已落盘），保守原样返回。
+            return Ok(messages);
+        };
+        let display_path = self.resolve_display_path(Some(&session_dir));
+        let line_threshold = self.config.read().await.compress_line_threshold;
+
+        let mut compressed_messages = Vec::with_capacity(messages.len());
+        for chat_msg in messages {
+            let ts = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000) as i64;
+            let archive_filename = format!("{}/m{:x}.txt", super::message_archive::MESSAGES_SUBDIR, ts);
+            let archive_display_path = display_path
+                .join(&archive_filename)
+                .to_string_lossy()
+                .replace("\\", "/");
+
+            match super::message_archive::compress_message(
+                &session_dir,
+                &chat_msg,
+                line_threshold,
+                &archive_filename,
+                &archive_display_path,
+            )
+            .await
+            {
+                Ok(Some(c)) => compressed_messages.push(c),
+                Ok(None) => compressed_messages.push(chat_msg),
+                Err(e) => {
+                    tracing::warn!("压缩消息失败: {}", e);
+                    compressed_messages.push(chat_msg);
+                }
+            }
+        }
+
+        Ok(compressed_messages)
     }
 
     async fn get_context_messages(
@@ -242,13 +295,13 @@ impl ChatSession for PersistentChatSession {
             let compressed = if let Some(ref dir) = session_dir {
                 let ts = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000) as i64;
                 let archive_filename =
-                    format!("{}/m{:x}.txt", super::compress::MESSAGES_SUBDIR, ts);
+                    format!("{}/m{:x}.txt", super::message_archive::MESSAGES_SUBDIR, ts);
                 let archive_display_path = display_path
                     .join(&archive_filename)
                     .to_string_lossy()
                     .replace("\\", "/");
 
-                super::compress::compress_message(
+                super::message_archive::compress_message(
                     dir,
                     &chat_msg,
                     line_threshold,
@@ -494,4 +547,83 @@ impl ChatSession for EphemeralChatSession {
     fn line_threshold(&self) -> usize {
         self.line_threshold
     }
+}
+
+/// 存储期历史工具链物理裁剪（原 `context.rs` 并入，体检备注 audit-5）：
+/// 自动清理历史会话的过程工具调用信息，只保留最后的文本结果。
+pub async fn prune_historical_tool_calls(
+    messages: &mut Vec<ChatMessage>,
+    session_dir: Option<&Path>,
+    keep_turns: usize,
+) {
+    let mut user_indices = Vec::new();
+    for (idx, msg) in messages.iter().enumerate() {
+        if msg.role == Some(MessageRole::User) {
+            user_indices.push(idx);
+        }
+    }
+
+    if user_indices.len() <= keep_turns {
+        return;
+    }
+
+    let limit_idx = user_indices[user_indices.len() - keep_turns];
+    let mut to_remove = HashSet::new();
+
+    for msg in &messages[..limit_idx] {
+        if msg.role == Some(MessageRole::Tool)
+            || msg.msg_type == Some(MessageType::ToolCall)
+            || msg.msg_type == Some(MessageType::Reasoning)
+        {
+            if let Some(dir) = session_dir {
+                if let Some(rel_path) = msg
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("archive_path"))
+                    .and_then(|v| v.as_str())
+                {
+                    let full_path = dir.join(rel_path);
+                    if full_path.exists() {
+                        let _ = tokio::fs::remove_file(full_path).await;
+                    }
+                }
+            }
+            to_remove.insert(msg.id.clone());
+        }
+    }
+
+    // 同时移除被剪除 ToolCall 的直接子节点（请求 Text / 响应 Text）
+    let extra: HashSet<String> = messages[..limit_idx]
+        .iter()
+        .filter(|m| {
+            m.parent_id
+                .as_ref()
+                .map(|p| to_remove.contains(p))
+                .unwrap_or(false)
+        })
+        .map(|m| m.id.clone())
+        .collect();
+    to_remove.extend(extra);
+
+    for msg in &messages[..limit_idx] {
+        if msg.role == Some(MessageRole::Assistant) {
+            let content_text = msg
+                .content
+                .as_ref()
+                .map(|c| c.to_text())
+                .unwrap_or_default();
+            let mut has_retained_children = false;
+            for child in &messages[..limit_idx] {
+                if child.parent_id.as_ref() == Some(&msg.id) && !to_remove.contains(&child.id) {
+                    has_retained_children = true;
+                    break;
+                }
+            }
+            if content_text.trim().is_empty() && !has_retained_children {
+                to_remove.insert(msg.id.clone());
+            }
+        }
+    }
+
+    messages.retain(|msg| !to_remove.contains(&msg.id));
 }

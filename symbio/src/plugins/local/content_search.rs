@@ -4,9 +4,10 @@
 //! 不再依赖 rg / PowerShell / grep 等外部可执行文件，各操作系统行为一致，并遵循 .gitignore。
 
 use super::policy::SecurityPolicy;
+use super::system::validate_params;
 use crate::symbio_core::{
-    validate_params, Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    PluginError, PluginPayload,
+    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
+    PluginPayload,
 };
 use async_trait::async_trait;
 use bstr::ByteSlice;

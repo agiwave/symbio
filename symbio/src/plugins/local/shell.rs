@@ -11,9 +11,10 @@
 //! - Unix 上进一步清空 env，只透传白名单变量，减小环境变量泄漏面。
 
 use super::policy::{RiskLevel, SecurityPolicy};
+use super::system::{decode_output, validate_params};
 use crate::symbio_core::{
-    decode_output, validate_params, Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt,
-    InvokeResponse, PluginError, PluginPayload,
+    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
+    PluginPayload,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -151,8 +152,6 @@ impl ShellTool {
 
         match result {
             Ok(Ok(output)) => {
-                // use crate::symbio_core::system::decode_output; // Removed duplicate or simplified path
-
                 let mut stdout = decode_output(&output.stdout);
                 let stderr = decode_output(&output.stderr);
 

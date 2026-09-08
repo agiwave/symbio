@@ -347,8 +347,8 @@ pub enum ResumeAction {
 
 /// 会话恢复请求（与 `session_chat::Request.message` 互斥；存在时走 resume 分支）。
 ///
-/// 由 session 插件透传到 `model_chat::Request.resume`，最终在
-/// `model/chat_loop.rs:run_chat_loop` 的 turn 循环前由 `model/resume.rs:process_resume` 处理。
+/// 由 session 编排层随请求透传，最终在 session 插件会话循环
+/// （`session/chat_loop.rs:run_chat_loop`）的 turn 循环前由 `session/resume.rs:process_resume` 处理。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ResumeRequest {
     /// 目标消息 ID（Failed Turn 或 ToolCall，稳定标识，覆盖式更新锚点）

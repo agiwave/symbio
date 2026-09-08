@@ -1,4 +1,8 @@
-//! Session 类型定义
+//! Session 数据类型：`Session` 实体 + 标题推导 + 心跳配置。
+//!
+//! 注意与 `core/schemas/session/chat_message.rs`（消息级类型）区分：本文件
+//! 描述"会话"粒度的持久化实体。`derive_session_title` 供会话创建时兜底命名，
+//! `HeartbeatConfig` 从会话 metadata 派生心跳调度参数（消费者 `heartbeat.rs`）。
 
 use serde::{Deserialize, Serialize};
 

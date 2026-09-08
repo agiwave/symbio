@@ -1,4 +1,4 @@
-//! MODEL 聊天主循环
+//! SESSION 聊天主循环（自 model 插件迁入，Phase E-②）
 //!
 //! 职责：
 //! - 主循环入口 run_chat_loop
@@ -14,25 +14,24 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
     model::model_chat,
-    session::chat_message::{
+    model::model_config::ModelConfig,    session::chat_message::{
         assign_seq, max_seq, ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
     },
-    session::session_open,
     system::hook::HookEvent,
 };
 use crate::symbio_core::{
-    ChatSession, ChatSessionHandle, InvokeRequest, InvokeRequestExt, PluginChannel, PluginError,
-    PluginFrame, PluginPayload, SESSION_OPEN,
+    ChatSession, InvokeRequest, InvokeRequestExt, ModelProvider, Plugin, PluginChannel,
+    PluginError, PluginFrame, SESSION_HANDLE,
+};
+use crate::symbio_core::turn::{
+    build_tool_message, emit_status, emit_update, execute_post_with_abort, parse_sse_stream,
+    short_id, PostResult, ToolCallInfo, TurnOutput,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::compression;
-use super::context::{compress_temporary_messages, ChatOrchestrator, PostResult};
-use super::message_builder::short_id;
-use super::protocol::execute_post_with_abort;
 use super::tool_executor::{fire_hook, process_tool_calls_async};
-use super::turn_processor::TurnProcessor;
 use crate::symbio_core::schemas::session::session_chat_response;
 
 /// MODEL 会话上下文
@@ -46,6 +45,115 @@ struct SessionContext {
     pub session: Arc<dyn ChatSession>,
 }
 
+/// 会话编排器（自 model/context.rs 迁入，Phase E-②）：
+/// 持有模型配置、父插件钩子通道与协议适配器（session 确定性持有）。
+/// 轮次收尾状态机 `finalize_assistant_turn` 随之一并迁入；
+/// turn_processor 薄委托层消亡（chat_loop 直调
+/// `protocol.execute_turn` 与 `finalize_assistant_turn`）。
+pub struct ChatOrchestrator {
+    pub config: ModelConfig,
+    pub parent: Option<Arc<dyn Plugin>>,
+    /// Phase E-②：协议适配器经 `ModelProviderEntry.provider`（`Arc<dyn ModelProvider>`）
+    /// 从 CAPABILITY_MANAGER 取得，这里持有 Arc 共享引用（原为 Box 独占）。
+    pub protocol: Arc<dyn ModelProvider>,
+}
+
+impl ChatOrchestrator {
+    pub fn new(
+        config: ModelConfig,
+        parent: Option<Arc<dyn Plugin>>,
+        protocol: Arc<dyn ModelProvider>,
+    ) -> Self {
+        Self {
+            config,
+            parent,
+            protocol,
+        }
+    }
+
+    pub async fn finalize_assistant_turn(
+        &self,
+        root_id: &str,
+        out: &TurnOutput,
+        tools: &[ToolCallInfo],
+        channel: &PluginChannel,
+    ) {
+        if out.is_reasoning_only(tools.len()) {
+            // reasoning-only：模型只产生了 reasoning，没有独立的文本回复。
+            //
+            // 同一段 reasoning 在落库时由 build_assistant_messages 以「Text 响应子节点」承载
+            // （effective_text 对「无文本回复」的回退语义）。因此这里**绝不能**再额外广播一个
+            // content=reasoning 的 Text 节点——否则前端会同时持有「Reasoning 子节点」与
+            // 「Text 响应子节点」两份相同内容，表现为：
+            //   · 流式期间：思考块 + 一段相同文本先后出现，看起来像"同一段文本被重复写入"；
+            //   · 历史刷新后：存储层本就重复（factor≈2），渲染出两份。
+            //
+            // 流式期间 ReasoningDelta 已经把 reasoning 累积进 reasoning_child_id 节点，
+            // 此处仅将其与根 Turn 标记 Completed 即可。仅当流式期间因故未建立 Reasoning 节点时，
+            // 才补发一个 Text 节点兜底（此时不存在 Reasoning 节点，不会造成重复）。
+            if !out.reasoning_child_id.is_empty() {
+                emit_status(
+                    channel,
+                    out.reasoning_child_id.clone(),
+                    MessageStatus::Completed,
+                )
+                .await;
+            } else {
+                let resp_id = if out.response_text_child_id.is_empty() {
+                    short_id()
+                } else {
+                    out.response_text_child_id.clone()
+                };
+                emit_update(
+                    channel,
+                    ChatMessage {
+                        id: resp_id,
+                        parent_id: Some(root_id.into()),
+                        role: Some(MessageRole::Assistant),
+                        msg_type: Some(MessageType::Text),
+                        content: Some(MessageContent::Text(out.reasoning.clone())),
+                        status: Some(MessageStatus::Completed),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            }
+            emit_status(channel, root_id.into(), MessageStatus::Completed).await;
+            return;
+        }
+
+        // Mark reasoning child as completed
+        if !out.reasoning.is_empty() && !out.reasoning_child_id.is_empty() {
+            emit_status(
+                channel,
+                out.reasoning_child_id.clone(),
+                MessageStatus::Completed,
+            )
+            .await;
+        }
+
+        // Mark response text child as completed (exists if there was text content)
+        if !out.text.is_empty() && !out.response_text_child_id.is_empty() {
+            emit_status(
+                channel,
+                out.response_text_child_id.clone(),
+                MessageStatus::Completed,
+            )
+            .await;
+        }
+
+        // Mark tool calls (composite) as completed
+        for tc in tools {
+            if let Some(tc_id) = &tc.id {
+                emit_status(channel, tc_id.clone(), MessageStatus::Completed).await;
+            }
+        }
+
+        // Mark the root Turn node as completed
+        emit_status(channel, root_id.into(), MessageStatus::Completed).await;
+    }
+}
+
 pub async fn run_chat_loop(
     orchestrator: &ChatOrchestrator,
     ctx: Arc<dyn InvokeRequest>,
@@ -53,13 +161,11 @@ pub async fn run_chat_loop(
 ) -> Result<(), PluginError> {
     let mut req: model_chat::Request = ctx.payload()?;
 
-    plugin_info!(
-        "model",
+    plugin_info!("session",
         ">>> NEW SESSION START (Protocol: {:?})",
         orchestrator.config.api_protocol
     );
-    plugin_info!(
-        "model",
+    plugin_info!("session",
         "[DIAG] run_chat_loop: configured_max_tool_rounds={:?} (None=无上限), auto_compress={}, enable_compact_tool={}, msg_id_in_payload={:?}",
         req.max_tool_rounds,
         req.auto_compress.unwrap_or(true),
@@ -85,7 +191,7 @@ pub async fn run_chat_loop(
     const FADE_ACTIVATE_ROUNDS: usize = 40;
     const FADE_KEEP_RECENT_TURNS: usize = 12;
 
-    let session = open_chat_session(&orchestrator.parent, &ctx).await;
+    let session = open_chat_session(&ctx).await;
     let mut single_message = req.single_message;
     let mut context = SessionContext {
         messages: Vec::new(),
@@ -93,7 +199,6 @@ pub async fn run_chat_loop(
     };
 
     let abort_flag = Arc::new(AtomicBool::new(false));
-    let turn_processor = TurnProcessor::new(orchestrator);
 
     // ── 会话恢复（resume）：在 turn 循环前处理 ──────────────────────────────
     //
@@ -107,7 +212,7 @@ pub async fn run_chat_loop(
     //   （RetryTurn 也走此路径，但因为是删除整个 Failed Turn 后重新请求，等价于普通 send）。
     // 失败/reject/answer → `Done`：退出循环，留 Failed/Completed 等下次 resume。
     if let Some(tr) = req.resume.take() {
-        match crate::plugins::model::resume::process_resume(
+        match crate::plugins::session::resume::process_resume(
             orchestrator,
             &ctx,
             &mut channel,
@@ -117,15 +222,15 @@ pub async fn run_chat_loop(
         )
         .await
         {
-            Ok(crate::plugins::model::resume::ResumeOutcome::Continue) => {
+            Ok(crate::plugins::session::resume::ResumeOutcome::Continue) => {
                 // 成功：turn 循环会从 session 加载含新工具结果的历史
             }
-            Ok(crate::plugins::model::resume::ResumeOutcome::Done) => {
+            Ok(crate::plugins::session::resume::ResumeOutcome::Done) => {
                 fire_stop_hook(orchestrator, &[], &ctx).await;
                 return Ok(());
             }
             Err(e) => {
-                plugin_warn!("model", "[Resume] process_resume failed: {}", e);
+                plugin_warn!("session", "[Resume] process_resume failed: {}", e);
                 fire_stop_hook(orchestrator, &[], &ctx).await;
                 return Err(e);
             }
@@ -169,8 +274,7 @@ pub async fn run_chat_loop(
         // 达到上限时给出明确提示再退出，而不像从前那样在 chat_loop.rs:419 静默 Ok(())。
         if let Some(max) = configured_max_tool_rounds {
             if tool_rounds >= max {
-                plugin_info!(
-                    "model",
+                plugin_info!("session",
                     "[DIAG] run_chat_loop: 达到显式设置的上限 max_tool_rounds={}", max
                 );
                 let _ = channel.tx.send(PluginFrame::Data(
@@ -190,8 +294,7 @@ pub async fn run_chat_loop(
         if abort_flag.load(Ordering::SeqCst) {
             // SYS-002: 早期 return 路径上的副作用（last_saved 尚未用作流式增量锚点，
             // 此分支里不更新，但保留 last_saved 维持语义对称）。
-            plugin_info!(
-                "model",
+            plugin_info!("session",
                 "[DIAG] run_chat_loop: abort_flag true at top of turn {}",
                 tool_rounds
             );
@@ -199,11 +302,10 @@ pub async fn run_chat_loop(
             return Ok(());
         }
 
-        plugin_info!("model", "--- TURN {} START ---", tool_rounds);
+        plugin_info!("session", "--- TURN {} START ---", tool_rounds);
 
         if check_abort(&abort_flag).await {
-            plugin_info!(
-                "model",
+            plugin_info!("session",
                 "[DIAG] run_chat_loop: check_abort returned true at turn {}",
                 tool_rounds
             );
@@ -212,10 +314,32 @@ pub async fn run_chat_loop(
         }
 
         // ── 被动语义压缩（L5：70% 触发）────────────────────────────────
-        let system_prompt_for_request = req
-            .system_prompt
-            .as_deref()
-            .unwrap_or("You are a helpful MODEL assistant.");
+        // 系统提示词解析（Phase B 统一收集机制）：
+        // 1. 请求显式指定（req.system_prompt）
+        // 2. 统一收集机制注册的系统提示词：优先 "default" 键，其次请求指定的
+        //    provider_id 键，再退首个注册项
+        // 3. 硬编码兜底（维持既有行为）
+        let system_prompt_owned = match req.system_prompt.as_deref() {
+            Some(sp) => sp.to_string(),
+            None => {
+                let collected = match ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
+                    Some(tool_manager) => tool_manager.list_system_prompts().await,
+                    None => Vec::new(),
+                };
+                collected
+                    .iter()
+                    .find(|(n, _)| n == "default")
+                    .or_else(|| {
+                        collected
+                            .iter()
+                            .find(|(n, _)| Some(n.as_str()) == req.provider_id.as_deref())
+                    })
+                    .or_else(|| collected.first())
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_else(|| "You are a helpful MODEL assistant.".to_string())
+            }
+        };
+        let system_prompt_for_request = system_prompt_owned.as_str();
         if auto_compress {
             match auto_compress_process(
                 orchestrator,
@@ -230,8 +354,7 @@ pub async fn run_chat_loop(
             .await
             {
                 Ok(Some(history_count)) => {
-                    plugin_info!(
-                        "model",
+                    plugin_info!("session",
                         "Context compressed: {} messages -> 1 message",
                         history_count
                     );
@@ -239,8 +362,7 @@ pub async fn run_chat_loop(
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    plugin_info!(
-                        "model",
+                    plugin_info!("session",
                         "[DIAG] run_chat_loop: auto_compress_process Err({})",
                         e
                     );
@@ -269,8 +391,7 @@ pub async fn run_chat_loop(
             {
                 nudged_this_request = true;
                 inject_nudge = true;
-                plugin_info!(
-                    "model",
+                plugin_info!("session",
                     "[Compress] context nudge emitted (~55% of limit), suggesting context_compact"
                 );
             }
@@ -279,7 +400,7 @@ pub async fn run_chat_loop(
         let root_id: String = short_id();
         emit_streaming_start(&mut channel, &root_id, Some(tool_rounds)).await;
 
-        apply_message_level_compression(orchestrator, &ctx, &mut context.messages).await;
+        apply_message_level_compression(&ctx, &mut context.messages).await;
 
         let mut tools = if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
             tool_manager.list_capability().await
@@ -325,15 +446,16 @@ pub async fn run_chat_loop(
         };
         let request_messages: &[ChatMessage] = request_view.as_slice();
 
-        plugin_info!(
-            "model",
-            "[DIAG] run_chat_loop: about to call turn_processor.send_request, ctx_msg_count={}, tool_count={}",
+        plugin_info!("session",
+            "[DIAG] run_chat_loop: about to call protocol.execute_turn, ctx_msg_count={}, tool_count={}",
             context.messages.len(),
             tools.len()
         );
 
-        let result = turn_processor
-            .send_request(
+        let result = orchestrator
+            .protocol
+            .execute_turn(
+                &orchestrator.config,
                 req.system_prompt
                     .as_deref()
                     .unwrap_or("You are a helpful MODEL assistant."),
@@ -345,16 +467,14 @@ pub async fn run_chat_loop(
             )
             .await;
 
-        plugin_info!(
-            "model",
-            "[DIAG] run_chat_loop: turn_processor.send_request returned, is_ok={}",
+        plugin_info!("session",
+            "[DIAG] run_chat_loop: protocol.execute_turn returned, is_ok={}",
             result.is_ok()
         );
 
         let mut out = match result {
             Err(PluginError::RetryWithoutContextId) => {
-                plugin_info!(
-                    "model",
+                plugin_info!("session",
                     "[DIAG] run_chat_loop: send_request -> RetryWithoutContextId, continuing"
                 );
                 for m in &mut context.messages {
@@ -375,16 +495,14 @@ pub async fn run_chat_loop(
                 continue;
             }
             Err(PluginError::Aborted) => {
-                plugin_warn!(
-                    "model",
+                plugin_warn!("session",
                     "[DIAG] run_chat_loop: send_request -> Aborted, returning Ok(())"
                 );
                 fire_stop_hook(orchestrator, &context.messages, &ctx).await;
                 return Ok(());
             }
             Err(e) => {
-                plugin_warn!(
-                    "model",
+                plugin_warn!("session",
                     "[DIAG] run_chat_loop: send_request -> Err({}), returning Err",
                     e
                 );
@@ -395,8 +513,7 @@ pub async fn run_chat_loop(
         };
 
         if abort_flag.load(Ordering::SeqCst) {
-            plugin_warn!(
-                "model",
+            plugin_warn!("session",
                 "[DIAG] run_chat_loop: abort_flag became true after send_request, returning Ok(())"
             );
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
@@ -412,14 +529,14 @@ pub async fn run_chat_loop(
         let rtid = out.response_text_child_id.clone();
         let rrid = out.reasoning_child_id.clone();
 
-        turn_processor
-            .finalize(&root_id, &out, &tools_done, &channel)
+        orchestrator
+            .finalize_assistant_turn(&root_id, &out, &tools_done, &channel)
             .await;
 
         // 用 provider 返回的真实用量滚动校准 token 估算（中文/代码场景收益最大；
         // 估算长期偏低会直接导致 400 而非过早压缩）。
         if let Some(u) = usage {
-            let tok = crate::symbio_core::default_tokenizer();
+            let tok = super::tokenizer::default_tokenizer();
             // 反馈必须用原始启发式估算（count_raw）；用校准后的 count() 自反馈
             // 会让校准系数收敛到 √(真实比值)（见 CalibratedTokenizer::feedback 文档）。
             // 分母必须覆盖 provider 计入 output_tokens 的全部内容：文本 + 思考 +
@@ -434,7 +551,7 @@ pub async fn run_chat_loop(
                 }
                 estimated += tok.count_raw(&tc.arguments.to_string());
             }
-            crate::symbio_core::report_provider_usage(estimated, u.output);
+            super::tokenizer::report_provider_usage(estimated, u.output);
         }
 
         let new_msgs = out.into_messages(&root_id, tools_done.len());
@@ -465,8 +582,7 @@ pub async fn run_chat_loop(
                 // 自然从断点继续。最多续写 MAX_CONTINUE_ROUNDS 次，避免失控死循环。
                 if continuation_count < MAX_CONTINUE_ROUNDS {
                     continuation_count += 1;
-                    plugin_info!(
-                        "model",
+                    plugin_info!("session",
                         "[DIAG] run_chat_loop: finish=Length，自动续写 ({}/{})",
                         continuation_count,
                         MAX_CONTINUE_ROUNDS
@@ -495,8 +611,7 @@ pub async fn run_chat_loop(
                     .unwrap_or_default(),
                 )).await;
             }
-            plugin_info!(
-                "model",
+            plugin_info!("session",
                 "[DIAG] run_chat_loop: no tool calls, finalizing turn {}, text_added={}, returning Ok(())",
                 tool_rounds,
                 context.messages.len()
@@ -553,8 +668,7 @@ pub async fn run_chat_loop(
                     // replace_messages 已整体重写会话存储，当前内存镜像即已落库状态；
                     // 重置持久化锚点，避免末尾 persist_messages 用旧下标切片越界/重复落库
                     last_saved = context.messages.len();
-                    plugin_info!(
-                        "model",
+                    plugin_info!("session",
                         "[Compress] manual compaction done: ~{} -> ~{} tokens",
                         before_t,
                         after_t
@@ -585,7 +699,7 @@ pub async fn run_chat_loop(
                 // 标准工具广播模式（与 process_tool_calls_async 一致，修复诉求1：
                 // 前端实时可见 context_compact 的结果子节点与父节点状态）：
                 // 先广播 Tool 结果子节点，再广播父 ToolCall 状态补丁。
-                let mut tool_msg = super::message_builder::build_tool_message(
+                let mut tool_msg = build_tool_message(
                     &call_id,
                     &result_text,
                     Some(ok),
@@ -611,7 +725,7 @@ pub async fn run_chat_loop(
             for extra in compact_calls.iter().skip(1) {
                 if let Some(cid) = &extra.id {
                     // 同批多余调用同样走标准广播模式（跳过说明属信息性结果，定格 Completed）
-                    let mut tool_msg = super::message_builder::build_tool_message(
+                    let mut tool_msg = build_tool_message(
                         cid,
                         "Skipped: another context_compact call in this batch was executed.",
                         Some(false),
@@ -670,7 +784,7 @@ pub async fn run_chat_loop(
                 .update_messages(parent_updates.clone())
                 .await
             {
-                plugin_warn!("model", "[Session] 父节点状态持久化失败: {}", e);
+                plugin_warn!("session", "[Session] 父节点状态持久化失败: {}", e);
             }
         }
 
@@ -725,11 +839,10 @@ pub async fn run_chat_loop(
             }
             if !recover_updates.is_empty() {
                 if let Err(e) = context.session.update_messages(recover_updates).await {
-                    plugin_warn!("model", "[Session] recoverable 标记持久化失败: {}", e);
+                    plugin_warn!("session", "[Session] recoverable 标记持久化失败: {}", e);
                 }
             }
-            plugin_info!(
-                "model",
+            plugin_info!("session",
                 "[DIAG] run_chat_loop: 工具待用户恢复（mode={}），退出本轮",
                 mode
             );
@@ -761,7 +874,7 @@ async fn persist_messages(context: &SessionContext, last_saved: usize, channel: 
         // 持久化失败：必须显式通知前端（不静默吃错误），让用户知道部分消息没落库。
         // 仍把消息留在内存中，chat_loop 不中断（让当前对话能继续）。
         let msg = format!("消息持久化失败（消息仍在内存中）: {}", e);
-        plugin_warn!("model", "[Session] {}", msg);
+        plugin_warn!("session", "[Session] {}", msg);
         let _ = channel
             .tx
             .send(PluginFrame::Data(
@@ -772,32 +885,19 @@ async fn persist_messages(context: &SessionContext, last_saved: usize, channel: 
     }
 }
 
-async fn open_chat_session(
-    parent: &Option<Arc<dyn crate::symbio_core::Plugin>>,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> Arc<dyn ChatSession> {
-    let p = match parent {
-        Some(p) => p,
-        None => return Arc::new(FallbackChatSession::default()),
-    };
-
-    let open_ctx = ctx.fork();
-    open_ctx.set(crate::symbio_core::PATH, SESSION_OPEN.to_string());
-    let _ = open_ctx.set_payload(session_open::Request {
-        session_id: ctx.get(crate::symbio_core::SESSION_ID),
-    });
-
-    let resp = match p.clone().route(open_ctx).await {
-        Ok(r) => r,
-        Err(_) => return Arc::new(FallbackChatSession::default()),
-    };
-
-    if let PluginPayload::Native(obj) = resp {
-        if let Ok(handle) = obj.downcast::<ChatSessionHandle>() {
-            return handle.0.clone();
-        }
+/// 从 ctx 读取 session 编排器交付的会话引擎句柄（SESSION_HANDLE）。
+///
+/// session 编排在路由 model/chat 前已将构造好的会话引擎实例放入 chat_ctx，
+/// model 无状态化后不再反向路由 session/open。仅句柄缺失（异常编排路径）时
+/// 回退内存 FallbackChatSession（无持久化）。
+async fn open_chat_session(ctx: &Arc<dyn InvokeRequest>) -> Arc<dyn ChatSession> {
+    if let Some(handle) = ctx.get(SESSION_HANDLE) {
+        return handle.0.clone();
     }
 
+    plugin_warn!("session",
+        "[Session] 上下文未交付 SESSION_HANDLE，回退内存会话（无持久化）"
+    );
     Arc::new(FallbackChatSession::default())
 }
 
@@ -1012,8 +1112,7 @@ async fn auto_compress_process(
         // 回滚到未压缩历史，记录警告后继续（后续真正的 LLM 请求若同样失败，
         // 会以真实错误呈现在该轮 Turn 上）。
         Err(e) => {
-            plugin_warn!(
-                "model",
+            plugin_warn!("session",
                 "[Compress] auto compression failed ({}), falling back to uncompressed context",
                 e
             );
@@ -1305,7 +1404,6 @@ async fn send_compression_request(
     channel: &mut PluginChannel,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<ChatMessage, PluginError> {
-    use super::protocol::parse_sse_stream;
     use crate::symbio_core::schemas::session::chat_message::MessageContent;
 
     emit_streaming_start(channel, root_id, None).await;
@@ -1367,13 +1465,10 @@ async fn send_compression_request(
 }
 
 async fn apply_message_level_compression(
-    orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn InvokeRequest>,
     messages: &mut [ChatMessage],
 ) {
-    if let Some(session_id) = ctx.get(crate::symbio_core::SESSION_ID) {
-        compress_temporary_messages(&orchestrator.parent, &session_id, messages, ctx.clone()).await;
-    }
+    compression::compress_temporary_messages(ctx, messages).await;
 }
 
 async fn fire_stop_hook(

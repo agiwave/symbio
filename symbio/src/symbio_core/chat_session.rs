@@ -35,6 +35,22 @@ pub trait ChatSession: Send + Sync + 'static {
     fn max_messages(&self) -> usize;
 
     fn line_threshold(&self) -> usize;
+
+    /// 压缩给定消息批次（内容级骨架化：原文存档至持久层 + 正文替换为压缩骨架）。
+    ///
+    /// 默认实现**原样返回**（不做任何压缩）：
+    /// - 无存档能力的会话做压缩即纯截断 → 原文永久丢失（decompress 还原将无源可读）；
+    /// - 对 ephemeral / fallback 会话（无持久存储）原样返回恰是现状行为：
+    ///   `_t_` 临时会话原本就无法走 session/compress 路由
+    ///   （store.session_dir 仅对已落盘会话返回 Some）。
+    /// 持久会话由 PersistentChatSession 覆写（存档批处理，与 session/compress 路由语义一致）。
+    async fn compress_messages(
+        &self,
+        messages: Vec<ChatMessage>,
+    ) -> Result<Vec<ChatMessage>, PluginError> {
+        let _ = self;
+        Ok(messages)
+    }
 }
 
 pub struct ChatSessionHandle(pub Arc<dyn ChatSession>);

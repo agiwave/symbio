@@ -8,12 +8,10 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use super::super::context::get_http_client;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole, ModelConfig};
-use super::{spawn_orchestrator, FinishReason, ModelProtocol, ProtocolEvent, Usage};
+use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginPayload,
-    MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
+    get_http_client, InvokeRequest, PluginError, MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
 };
 use tracing::warn;
 
@@ -40,7 +38,7 @@ impl Default for AnthropicProtocol {
 }
 
 #[async_trait]
-impl ModelProtocol for AnthropicProtocol {
+impl ModelProvider for AnthropicProtocol {
     fn get_api_url(&self, config: &ModelConfig) -> String {
         format!("{}/messages", config.api_base)
     }
@@ -398,64 +396,42 @@ impl ModelProtocol for AnthropicProtocol {
         evs
     }
 
-    async fn handle_chat_stream(
-        &self,
-        config: &ModelConfig,
-        parent: &Option<Arc<dyn Plugin>>,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
-        let payload = ctx.payload::<serde_json::Value>().unwrap_or_default();
-        if payload
-            .get("ping")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            return handle_ping(config, &self.get_api_url(config)).await;
+    async fn ping(&self, config: &ModelConfig) -> Result<(), PluginError> {
+        let api_key = config.api_key.clone().unwrap_or_default();
+        let request = json!({
+            "model": config.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            // Anthropic 协议要求 max_tokens >= 1，部分兼容网关要求更大，统一用安全值
+            "max_tokens": 16,
+        });
+
+        let response = get_http_client()
+            .post(self.get_api_url(config))
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(PluginError::InternalError(format!(
+                "API Error ({status}): {error_text}"
+            )));
         }
-        spawn_orchestrator(Box::new(AnthropicProtocol::new()), config, parent, ctx).await
+
+        Ok(())
     }
-}
-
-pub async fn handle_ping(
-    config: &ModelConfig,
-    api_url: &str,
-) -> Result<PluginPayload, PluginError> {
-    let api_key = config.api_key.clone().unwrap_or_default();
-    let request = json!({
-        "model": config.model,
-        "messages": [{"role": "user", "content": "ping"}],
-        // Anthropic 协议要求 max_tokens >= 1，部分兼容网关要求更大，统一用安全值
-        "max_tokens": 16,
-    });
-
-    let response = get_http_client()
-        .post(api_url)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("Content-Type", "application/json")
-        .json(&request)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response.text().await.unwrap_or_default();
-        return Err(PluginError::InternalError(format!(
-            "API Error ({status}): {error_text}"
-        )));
-    }
-
-    Ok(PluginPayload::new(
-        &crate::symbio_core::schemas::common::SuccessResponse::default(),
-    ))
 }
 
 // === 注册到通用对象创建机制 ===
 
-fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
+fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProvider> {
     Arc::new(AnthropicProtocol::new())
 }
 
-crate::submit_object_creator!(MODEL_PROTOCOL_ANTHROPIC_MESSAGES, build, dyn ModelProtocol);
+crate::submit_object_creator!(MODEL_PROTOCOL_ANTHROPIC_MESSAGES, build, dyn ModelProvider);

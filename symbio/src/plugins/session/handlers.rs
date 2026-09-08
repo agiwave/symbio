@@ -1,3 +1,9 @@
+//! SessionPlugin 的 invoke 处理方法集合（按 `schemas/session/*` 请求类型分发）。
+//!
+//! 路由层在 `plugin.rs`（`Plugin::route`），本文件只承载各 invoke 的实现体：
+//! 消息增删改查、单条消息物理脱水（`message_archive`）、会话删除/清空、
+//! metadata 合并与统一删除路径 `delete_session_internal` 等。
+
 use super::chat_session::{EphemeralChatSession, PersistentChatSession};
 use super::plugin::SessionPlugin;
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
@@ -41,13 +47,13 @@ impl SessionPlugin {
         let mut compressed_messages = Vec::new();
         for chat_msg in req.messages {
             let ts = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000) as i64;
-            let archive_filename = format!("{}/m{:x}.txt", super::compress::MESSAGES_SUBDIR, ts);
+            let archive_filename = format!("{}/m{:x}.txt", super::message_archive::MESSAGES_SUBDIR, ts);
             let archive_display_path = display_session_path
                 .join(&archive_filename)
                 .to_string_lossy()
                 .replace("\\", "/");
 
-            let compressed = super::compress::compress_message(
+            let compressed = super::message_archive::compress_message(
                 &session_dir,
                 &chat_msg,
                 cfg.compress_line_threshold,
@@ -353,11 +359,21 @@ impl SessionPlugin {
         Ok(serde_json::to_value(common::SuccessResponse::default())?)
     }
 
-    pub async fn invoke_open(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let req: session_open::Request = ctx.payload()?;
+    /// 按 session_id 构造会话引擎实例（唯一构造实现）。
+    ///
+    /// - `_t_` 前缀 → 内存 ephemeral 会话；
+    /// - 非空 id → 持久会话；
+    /// - None/空 → 内存 ephemeral 会话。
+    ///
+    /// 消费方：session/open 路由（对外 API），以及会话编排器向 chat_ctx
+    /// 交付会话句柄（SESSION_HANDLE，交付失败时 model 侧兜底内存会话）。
+    pub async fn open_session_handle(
+        &self,
+        session_id: Option<String>,
+    ) -> Result<Arc<dyn crate::symbio_core::ChatSession>, PluginError> {
         let cfg = self.config.read().await;
 
-        let session: Arc<dyn crate::symbio_core::ChatSession> = match req.session_id {
+        let session: Arc<dyn crate::symbio_core::ChatSession> = match session_id {
             Some(sid) if !sid.is_empty() => {
                 if sid.starts_with("_t_") {
                     let ephemeral = EphemeralChatSession::new(&cfg);
@@ -375,6 +391,13 @@ impl SessionPlugin {
                 Arc::new(ephemeral)
             }
         };
+
+        Ok(session)
+    }
+
+    pub async fn invoke_open(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+        let req: session_open::Request = ctx.payload()?;
+        let session = self.open_session_handle(req.session_id).await?;
 
         Ok(PluginPayload::Native(Arc::new(ChatSessionHandle::new(
             session,

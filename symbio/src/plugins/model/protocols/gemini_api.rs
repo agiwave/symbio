@@ -5,18 +5,16 @@ use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use super::super::context::get_http_client;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole, ModelConfig};
-use super::{spawn_orchestrator, FinishReason, ModelProtocol, ProtocolEvent, Usage};
+use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginPayload,
-    MODEL_PROTOCOL_GEMINI_API,
+    get_http_client, InvokeRequest, PluginError, MODEL_PROTOCOL_GEMINI_API,
 };
 
 pub struct GeminiProtocol;
 
 #[async_trait]
-impl ModelProtocol for GeminiProtocol {
+impl ModelProvider for GeminiProtocol {
     fn get_api_url(&self, config: &ModelConfig) -> String {
         format!(
             "{}/models/{}:streamGenerateContent",
@@ -218,61 +216,39 @@ impl ModelProtocol for GeminiProtocol {
         evs
     }
 
-    async fn handle_chat_stream(
-        &self,
-        config: &ModelConfig,
-        parent: &Option<Arc<dyn Plugin>>,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
-        let payload = ctx.payload::<serde_json::Value>().unwrap_or_default();
-        if payload
-            .get("ping")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            return handle_ping(config, &self.get_api_url(config)).await;
+    async fn ping(&self, config: &ModelConfig) -> Result<(), PluginError> {
+        let api_key = config.api_key.clone().unwrap_or_default();
+        let request = json!({
+            "contents": [{"parts": [{"text": "ping"}]}],
+            "generationConfig": {"maxOutputTokens": 16}
+        });
+
+        let response = get_http_client()
+            .post(self.get_api_url(config))
+            .header("x-goog-api-key", api_key)
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(PluginError::InternalError(format!(
+                "API Error ({status}): {error_text}"
+            )));
         }
-        spawn_orchestrator(Box::new(GeminiProtocol), config, parent, ctx).await
+
+        Ok(())
     }
-}
-
-pub async fn handle_ping(
-    config: &ModelConfig,
-    api_url: &str,
-) -> Result<PluginPayload, PluginError> {
-    let api_key = config.api_key.clone().unwrap_or_default();
-    let request = json!({
-        "contents": [{"parts": [{"text": "ping"}]}],
-        "generationConfig": {"maxOutputTokens": 16}
-    });
-
-    let response = get_http_client()
-        .post(api_url)
-        .header("x-goog-api-key", api_key)
-        .header("Content-Type", "application/json")
-        .json(&request)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response.text().await.unwrap_or_default();
-        return Err(PluginError::InternalError(format!(
-            "API Error ({status}): {error_text}"
-        )));
-    }
-
-    Ok(PluginPayload::new(
-        &crate::symbio_core::schemas::common::SuccessResponse::default(),
-    ))
 }
 
 // === 注册到通用对象创建机制 ===
 
-fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
+fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProvider> {
     Arc::new(GeminiProtocol)
 }
 
-crate::submit_object_creator!(MODEL_PROTOCOL_GEMINI_API, build, dyn ModelProtocol);
+crate::submit_object_creator!(MODEL_PROTOCOL_GEMINI_API, build, dyn ModelProvider);

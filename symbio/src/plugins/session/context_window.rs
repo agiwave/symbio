@@ -1,87 +1,15 @@
+//! 上下文窗口策略纯函数 —— 历史工具调用的分层滑窗骨架化。
+//!
+//! Phase sink：自 `symbio_core/context_window.rs` 下沉至 session 插件——E-② 后
+//! 该纯函数的唯一消费者是 session 请求视图构建（`compression.rs::build_request_view`），
+//! "跨插件共享"的前提（model 构建 request view）已随 Phase E-② 循环族下沉消失，
+//! 属单一模块私有设施，不再置于 core 共享层。
+
 use crate::symbio_core::ToolContextRetention;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
-
-/// 自动清理历史会话的过程工具调用信息，只保留最后的文本结果。
-pub async fn prune_historical_tool_calls(
-    messages: &mut Vec<ChatMessage>,
-    session_dir: Option<&Path>,
-    keep_turns: usize,
-) {
-    let mut user_indices = Vec::new();
-    for (idx, msg) in messages.iter().enumerate() {
-        if msg.role == Some(MessageRole::User) {
-            user_indices.push(idx);
-        }
-    }
-
-    if user_indices.len() <= keep_turns {
-        return;
-    }
-
-    let limit_idx = user_indices[user_indices.len() - keep_turns];
-    let mut to_remove = HashSet::new();
-
-    for msg in &messages[..limit_idx] {
-        if msg.role == Some(MessageRole::Tool)
-            || msg.msg_type == Some(MessageType::ToolCall)
-            || msg.msg_type == Some(MessageType::Reasoning)
-        {
-            if let Some(dir) = session_dir {
-                if let Some(rel_path) = msg
-                    .meta
-                    .as_ref()
-                    .and_then(|m| m.get("archive_path"))
-                    .and_then(|v| v.as_str())
-                {
-                    let full_path = dir.join(rel_path);
-                    if full_path.exists() {
-                        let _ = tokio::fs::remove_file(full_path).await;
-                    }
-                }
-            }
-            to_remove.insert(msg.id.clone());
-        }
-    }
-
-    // 同时移除被剪除 ToolCall 的直接子节点（请求 Text / 响应 Text）
-    let extra: HashSet<String> = messages[..limit_idx]
-        .iter()
-        .filter(|m| {
-            m.parent_id
-                .as_ref()
-                .map(|p| to_remove.contains(p))
-                .unwrap_or(false)
-        })
-        .map(|m| m.id.clone())
-        .collect();
-    to_remove.extend(extra);
-
-    for msg in &messages[..limit_idx] {
-        if msg.role == Some(MessageRole::Assistant) {
-            let content_text = msg
-                .content
-                .as_ref()
-                .map(|c| c.to_text())
-                .unwrap_or_default();
-            let mut has_retained_children = false;
-            for child in &messages[..limit_idx] {
-                if child.parent_id.as_ref() == Some(&msg.id) && !to_remove.contains(&child.id) {
-                    has_retained_children = true;
-                    break;
-                }
-            }
-            if content_text.trim().is_empty() && !has_retained_children {
-                to_remove.insert(msg.id.clone());
-            }
-        }
-    }
-
-    messages.retain(|msg| !to_remove.contains(&msg.id));
-}
 
 /// 混合滑动窗口过滤历史工具调用 (Layered Sliding Window)
 ///
@@ -92,7 +20,7 @@ pub async fn prune_historical_tool_calls(
 ///    "todo_write"）→ 声明策略映射。声明了 `LastOnly` / `LastN(n)` 的工具，其更早
 ///    的调用即使仍在全局窗口内，参数与结果同样骨架化（同工具"重复全量写入"的
 ///    历史对后续推理无参考价值）。映射由调用方在运行时按工具声明动态构建
-///    （如模型插件的 run_chat_loop 内直接用 CapabilityManager），**不持久化**、
+///    （session 会话循环内直接用 CapabilityManager），**不持久化**、
 ///    不写入任何消息 meta。
 ///
 /// ToolCall 节点的 name 是 LLM 可见全名（如 "local/todo_write"），此处匹配时
@@ -245,7 +173,7 @@ mod tests {
         }
     }
 
-    /// 构建 短工具名 → 保留策略 映射（模拟 chat_loop 运行时从 CapabilityManager 动态解析）
+    /// 构建 短工具名 → 保留策略 映射（模拟会话循环运行时从 CapabilityManager 动态解析）
     fn retention_map(entries: &[(&str, ToolContextRetention)]) -> HashMap<String, ToolContextRetention> {
         entries
             .iter()

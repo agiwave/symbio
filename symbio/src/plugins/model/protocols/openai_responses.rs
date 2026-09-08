@@ -5,19 +5,17 @@ use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use super::{
-    spawn_orchestrator, CapabilityMeta, ContentPart, FinishReason, MessageContent, MessageRole,
-    ModelConfig, ModelProtocol, ProtocolEvent, Usage,
-};
+use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole, ModelConfig};
+use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
 use crate::symbio_core::{
-    InvokeRequest, InvokeResponse, Plugin, PluginPayload, MODEL_PROTOCOL_OPENAI_RESPONSES,
+    get_http_client, InvokeRequest, PluginError, MODEL_PROTOCOL_OPENAI_RESPONSES,
 };
 use tracing::debug;
 
 pub struct OpenaiResponsesProtocol;
 
 #[async_trait]
-impl ModelProtocol for OpenaiResponsesProtocol {
+impl ModelProvider for OpenaiResponsesProtocol {
     fn get_api_url(&self, config: &ModelConfig) -> String {
         format!("{}/responses", config.api_base)
     }
@@ -313,20 +311,45 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         evs
     }
 
-    async fn handle_chat_stream(
-        &self,
-        config: &ModelConfig,
-        parent: &Option<Arc<dyn Plugin>>,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
-        spawn_orchestrator(Box::new(OpenaiResponsesProtocol), config, parent, ctx).await
+    /// 连通性验证（Phase E-②）：Responses API 的最小请求探测。
+    ///
+    /// 此前本协议缺少 ping 分支——验证只能走 `handle_chat_stream` 全量
+    /// 会话路径，与其余三协议不对称；现以独立的轻量请求补齐。
+    async fn ping(&self, config: &ModelConfig) -> Result<(), PluginError> {
+        let api_key = config.api_key.clone().unwrap_or_default();
+        let request = json!({
+            "model": config.model,
+            "input": "ping",
+            // OpenAI 限制 max_output_tokens 最小为 16
+            "max_output_tokens": 16,
+        });
+
+        let response = get_http_client()
+            .post(self.get_api_url(config))
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(PluginError::InternalError(format!(
+                "API Error ({status}): {error_text}"
+            )));
+        }
+
+        Ok(())
     }
 }
 
 // === 注册到通用对象创建机制 ===
 
-fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
+fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProvider> {
     Arc::new(OpenaiResponsesProtocol)
 }
 
-crate::submit_object_creator!(MODEL_PROTOCOL_OPENAI_RESPONSES, build, dyn ModelProtocol);
+crate::submit_object_creator!(MODEL_PROTOCOL_OPENAI_RESPONSES, build, dyn ModelProvider);
