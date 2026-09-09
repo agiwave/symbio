@@ -299,7 +299,6 @@ impl Plugin for SessionPlugin {
             "chat/clear_messages" => self.invoke_clear_messages(ctx.clone()).await?,
             "chat/delete_message" => self.invoke_delete_message(ctx.clone()).await?,
             "chat/update_message" => self.invoke_update_message(ctx.clone()).await?,
-            "compress" => self.invoke_compress(ctx.clone()).await?,
             "update" => self.invoke_update(ctx.clone()).await?,
             CONFIG_GET => self.invoke_config_get().await?,
             CONFIG_SET => self.invoke_config_set(ctx.clone()).await?,

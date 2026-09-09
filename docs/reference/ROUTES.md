@@ -101,7 +101,6 @@
 | `session/chat/delete_message` | 删除单条消息 | `Data` |
 | `session/chat/update_message` | 更新单条消息 | `Data` |
 | `session/append` | 追加消息 | `Data` |
-| `session/compress` | 压缩/裁剪历史 | `Data` |
 | `session/heartbeat/trigger` | 触发一次心跳 | `Data` |
 | `session/config/get` \| `config/set` \| `config/schema` | 会话配置读写与 Schema | `Data` |
 | `session/entities/*` | 会话作为统一实体（不可 upload，创建走前端专属 editor） | `Data` |

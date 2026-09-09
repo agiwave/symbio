@@ -26,8 +26,6 @@ pub const CONFIG_SET: &str = "config/set";
 pub const SESSION_OPEN: &str = "session/open";
 /// session/chat — 会话对话（流式）
 pub const SESSION_CHAT: &str = "session/chat";
-/// session/compress — 压缩会话历史
-pub const SESSION_COMPRESS: &str = "session/compress";
 
 // ============ Agent 插件 ============
 /// agent/chat — **子智能体会话执行入口**（仅 agent_run 能力内部调用）

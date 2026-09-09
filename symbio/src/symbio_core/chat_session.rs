@@ -41,9 +41,7 @@ pub trait ChatSession: Send + Sync + 'static {
     /// 默认实现**原样返回**（不做任何压缩）：
     /// - 无存档能力的会话做压缩即纯截断 → 原文永久丢失（decompress 还原将无源可读）；
     /// - 对 ephemeral / fallback 会话（无持久存储）原样返回恰是现状行为：
-    ///   `_t_` 临时会话原本就无法走 session/compress 路由
-    ///   （store.session_dir 仅对已落盘会话返回 Some）。
-    /// 持久会话由 PersistentChatSession 覆写（存档批处理，与 session/compress 路由语义一致）。
+    /// 持久会话由 PersistentChatSession 覆写（存档批处理，与自动压缩语义一致）。
     async fn compress_messages(
         &self,
         messages: Vec<ChatMessage>,

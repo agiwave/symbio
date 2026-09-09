@@ -1,7 +1,7 @@
 //! SessionPlugin 的 invoke 处理方法集合（按 `schemas/session/*` 请求类型分发）。
 //!
 //! 路由层在 `plugin.rs`（`Plugin::route`），本文件只承载各 invoke 的实现体：
-//! 消息增删改查、单条消息物理脱水（`message_archive`）、会话删除/清空、
+//! 消息增删改查、会话删除/清空、
 //! metadata 合并与统一删除路径 `delete_session_internal` 等。
 
 use super::chat_session::{EphemeralChatSession, PersistentChatSession};
@@ -11,8 +11,8 @@ use crate::symbio_core::schemas::{
     common,
     session::{
         chat_message as cm, session_append, session_clear, session_clear_messages,
-        session_compress, session_delete_message, session_get_messages, session_open,
-        session_update, session_update_message,
+        session_delete_message, session_get_messages, session_open, session_update,
+        session_update_message,
     },
 };
 use crate::symbio_core::{ChatSessionHandle, InvokeRequest, InvokeRequestExt, PluginPayload};
@@ -28,54 +28,6 @@ impl SessionPlugin {
         let messages = chat_session.get_messages().await?;
 
         Ok(serde_json::to_value(session_get_messages::Response { messages }).unwrap_or_default())
-    }
-
-    pub async fn invoke_compress(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
-        let req: session_compress::Request = ctx.payload()?;
-
-        let store = self.get_store().await?;
-        let session_dir = store
-            .session_dir(&req.session_id)
-            .ok_or_else(|| PluginError::InternalError("该存储后端不支持消息存档".to_string()))?;
-
-        // 压缩路径下的 display path 由 SessionPlugin::session_storage_dir() 派生，
-        // 仅作 UI 展示。
-        let cfg = self.config.read().await;
-        let display_session_path = SessionPlugin::session_storage_dir()
-            .join(req.session_id.replace(['/', '\\', ':'], "_"));
-
-        let mut compressed_messages = Vec::new();
-        for chat_msg in req.messages {
-            let ts = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000) as i64;
-            let archive_filename = format!("{}/m{:x}.txt", super::message_archive::MESSAGES_SUBDIR, ts);
-            let archive_display_path = display_session_path
-                .join(&archive_filename)
-                .to_string_lossy()
-                .replace("\\", "/");
-
-            let compressed = super::message_archive::compress_message(
-                &session_dir,
-                &chat_msg,
-                cfg.compress_line_threshold,
-                &archive_filename,
-                &archive_display_path,
-            )
-            .await;
-
-            match compressed {
-                Ok(Some(c)) => compressed_messages.push(c),
-                Ok(None) => compressed_messages.push(chat_msg),
-                Err(e) => {
-                    crate::plugin_error!("session", "主动压缩消息失败: {}", e);
-                    compressed_messages.push(chat_msg);
-                }
-            }
-        }
-
-        Ok(serde_json::to_value(session_compress::Response {
-            messages: compressed_messages,
-        })
-        .unwrap_or_default())
     }
 
     pub async fn invoke_append(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {

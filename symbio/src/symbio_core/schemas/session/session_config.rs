@@ -43,6 +43,10 @@ pub struct SessionConfig {
     /// 单条消息行数阈值（超过此值才压缩存档）
     #[serde(default = "default_compress_line_threshold")]
     pub compress_line_threshold: usize,
+    /// L1 消息压缩的"最近 N 条内容节点"保护数：最近的 Text/Reasoning 节点
+    /// 保留原文不脱水（对话末端锚点），0 表示不保护
+    #[serde(default = "default_compress_keep_recent")]
+    pub compress_keep_recent: usize,
     /// 保留完整结果的最近工具调用数量限制（滑动窗口）
     #[serde(default = "default_tool_context_window")]
     pub tool_context_window: usize,
@@ -67,6 +71,9 @@ fn default_max_tool_rounds() -> usize {
 fn default_compress_line_threshold() -> usize {
     200
 }
+fn default_compress_keep_recent() -> usize {
+    3
+}
 fn default_tool_context_window() -> usize {
     15
 }
@@ -84,6 +91,7 @@ impl Default for SessionConfig {
             store_kind: StoreKind::default(),
             max_tool_rounds: default_max_tool_rounds(),
             compress_line_threshold: default_compress_line_threshold(),
+            compress_keep_recent: default_compress_keep_recent(),
             tool_context_window: default_tool_context_window(),
             enable_compact_tool: default_enable_compact_tool(),
         }

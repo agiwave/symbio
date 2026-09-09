@@ -1,10 +1,14 @@
 //! 会话消息内容压缩模块
 //!
 //! 压缩策略（针对单条消息）：
-//! - 如果一条消息的内容行数超过阈值（默认 10 行），则：
-//!   1. 将完整内容写入会话目录下的存档文件（messages/msg_{id}_{ts}.txt）
-//!   2. 在消息内容中只保留最后 10 行
-//!   3. 在保留内容头部追加一段系统注释，标明完整内容的相对路径
+//! - ToolCall 参数节点**永久豁免**（硬约束）：ToolCall 自身 content 携带请求参数
+//!   JSON，骨架化会让模型误读"自己上次执行了参数为存档占位符的 edit"；
+//!   参数超预算的治理属请求视图层（skeletonize_toolcall），此处不碰。
+//! - 内容超阈值（行数超过阈值或单条 token 超预算）时：
+//!   1. 将完整内容写入会话目录下的存档文件
+//!   2. 保留头部 1/4 + 其余尾部的行（对齐 L0 split_head_tail 策略，
+//!      首行常含结论/路径/计划骨架，只保尾部会把它挤出模型视野）
+//!   3. 在保留内容头部追加系统注释，标明存档路径与统一取回方式
 //! - 不足阈值的消息原样返回
 //!
 //! 体检备注（audit-5）：原文件名 `compress.rs` 与 `compression.rs`
@@ -13,7 +17,7 @@
 
 use super::tokenizer::Tokenizer;
 use super::types::ChatMessage;
-use crate::symbio_core::schemas::session::chat_message::MessageContent;
+use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageType};
 use crate::symbio_core::PluginError;
 use std::path::Path;
 
@@ -60,6 +64,12 @@ pub async fn compress_message(
         return Ok(None);
     }
 
+    // 1.5 ToolCall 参数永久豁免：参数 JSON 一旦骨架化，请求视图里会呈现
+    //     "上次执行了参数为存档占位符的工具调用"，模型据此误记自身行为。
+    if msg.msg_type == Some(MessageType::ToolCall) {
+        return Ok(None);
+    }
+
     let lines: Vec<&str> = full_text.lines().collect();
 
     // 2. 触发条件：行数超阈值 **或** 单条消息 token 超预算。
@@ -85,10 +95,19 @@ pub async fn compress_message(
         .await
         .map_err(|e| PluginError::InternalError(format!("写入消息存档失败: {e}")))?;
 
-    // 保留最后 threshold 行（行数不足 threshold 时——token 触发场景——保留全部行，
-    // 再走下方字符截断兜底）
-    let keep_from = lines.len().saturating_sub(threshold);
-    let kept_lines = &lines[keep_from..];
+    // 头尾保留（与 L0 split_head_tail 同策略）：首行常含结论/路径/计划骨架，
+    // 只保尾部会把头部挤出模型视野（虽在存档，但模型不会主动取回）。
+    // 头 = 1/4 阈值（至少 1 行），尾 = 其余；行数未超阈值（token 触发）时
+    // 头 1 行 + 剩余全部行，随后走字符截断兜底。
+    let head_keep = (threshold / 4).max(1);
+    let tail_keep = threshold.saturating_sub(head_keep);
+    let (head_lines, tail_lines) = if lines.len() > threshold {
+        (&lines[..head_keep], &lines[lines.len() - tail_keep..])
+    } else {
+        (&lines[..1], &lines[1..])
+    };
+    let mut kept_lines: Vec<&str> = head_lines.to_vec();
+    kept_lines.extend_from_slice(tail_lines);
     let kept_text = kept_lines.join("\n");
 
     // 单行超长（行数 ≤ threshold 但 token 超预算）时，保留行本身也超预算：
@@ -106,11 +125,12 @@ pub async fn compress_message(
     // 取回指引（P1-2 三层统一协议）：与 L0/L3 占位符共用同一格式 ——
     // 「已存档至: <路径> + 统一取回入口 local/file_read + 分段参数 offset/limit」。
     let compressed_text = format!(
-        "{COMPRESS_PREFIX} 完整内容已存档至: {archive_display_path} (共 {total_lines} 行)（取回：local/file_read 该路径，按 offset/limit 分段读取）, 以下是最后 {kept_count} 行内容\n\
+        "{COMPRESS_PREFIX} 完整内容已存档至: {archive_display_path} (共 {total_lines} 行)（取回：local/file_read 该路径，按 offset/limit 分段读取）, 以下保留开头 {head_count} 行与结尾 {tail_count} 行内容\n\
         ---\n\
         {kept_text}",
         total_lines = lines.len(),
-        kept_count = kept_lines.len()
+        head_count = head_lines.len(),
+        tail_count = tail_lines.len()
     );
 
     let mut compressed = msg.clone();
@@ -218,15 +238,48 @@ mod tests {
             .unwrap();
         assert!(short.is_none(), "短消息不应压缩");
 
-        // 多行超阈值：仍按行压缩，格式不变
+        // 多行超阈值：仍按行压缩，头尾保留（P1-2 三层统一取回协议）
         let multi = text_msg(&(0..20).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n"));
         let compressed = compress_message(&dir, &multi, 10, "messages/m3.txt", "m3")
             .await
             .unwrap()
             .expect("多行超阈值应压缩");
         let text = compressed.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
-        assert!(text.contains("以下是最后 10 行内容"), "多行压缩格式应不变: {text}");
-        assert!(text.contains("line19"));
+        assert!(
+            text.contains("保留开头 2 行与结尾 8 行内容"),
+            "头尾保留格式: {text}"
+        );
+        assert!(text.contains("line0"), "头部应保留: {text}");
+        assert!(text.contains("line19"), "尾部应保留: {text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ToolCall 参数节点永久豁免：参数骨架化会让模型误记自身行为
+    #[tokio::test]
+    async fn toolcall_args_never_compressed() {
+        let dir = std::env::temp_dir().join(format!("symbio_msg_archive_t3_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let args = (0..20).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        let mut msg = text_msg(&args);
+        msg.msg_type = Some(MessageType::ToolCall);
+        let result = compress_message(&dir, &msg, 10, "messages/m4.txt", "m4")
+            .await
+            .unwrap();
+        assert!(result.is_none(), "ToolCall 参数应永久豁免");
+        assert!(!dir.join("messages/m4.txt").exists(), "豁免时不应写存档");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 单行 + token 未超预算：门控放行不压缩（阈值门控另一半的回归保护）
+    #[tokio::test]
+    async fn long_line_under_token_cap_not_compressed() {
+        let dir = std::env::temp_dir().join(format!("symbio_msg_archive_t4_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let one_line = format!("{{\"data\":\"{}\"}}", "y".repeat(800));
+        let result = compress_message(&dir, &text_msg(&one_line), 10, "messages/m5.txt", "m5")
+            .await
+            .unwrap();
+        assert!(result.is_none(), "token 未超预算的单行不应压缩");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

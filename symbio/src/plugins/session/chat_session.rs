@@ -18,8 +18,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-fn sliding_window(messages: &[ChatMessage], max_turns: usize) -> Vec<ChatMessage> {
-    if max_turns == 0 {
+/// 内容节点判定：正文（Text）与思考（Reasoning）——L1 批次保护的扫描对象。
+/// `msg_type: None` 视为旧数据缺省的正文，保守纳入保护。
+fn is_content_node(m: &ChatMessage) -> bool {
+    matches!(
+        m.msg_type,
+        None | Some(MessageType::Text) | Some(MessageType::Reasoning)
+    )
+}
+
+fn sliding_window(messages: &[ChatMessage], max_turns: usize) -> Vec<ChatMessage> {    if max_turns == 0 {
         return messages.to_vec();
     }
 
@@ -187,22 +195,50 @@ impl ChatSession for PersistentChatSession {
 
     /// 压缩消息批次（ChatSession trait 覆写）：存档 + 骨架化。
     ///
-    /// 与 session/compress 对外路由（invoke_compress）语义互为镜像：存档命名
-    /// （`messages/m{ts}.txt`，微秒时间戳）与 display path 派生完全一致，
-    /// 供会话编排处理超大工具输出 / 请求前主动压缩。
+    /// 批次保护语义（B1 保护）：
+    /// - 最近 `compress_keep_recent`（默认 3）条**内容节点**（Text/Reasoning）保留原文——
+    ///   对话末端锚点，保持模型对"最近在做什么/刚想了什么"的连续记忆；
+    /// - **最后一条**消息无条件原文（即使它是内容节点）——当前指令/正在生成的回复，
+    ///   与被动路径 `compress_temporary_messages` 的 `[..len-1]` 切分语义对齐；
+    /// - ToolCall 参数节点由 compress_message 内部永久豁免（参数完整性硬约束）。
     async fn compress_messages(
         &self,
         messages: Vec<ChatMessage>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
         let Some(session_dir) = self.store.session_dir(&self.session_id) else {
-            // 无持久目录（理论不可达：持久会话必然已落盘），保守原样返回。
+            // 无持久目录（理论不可达：持久会话最后一轮一定会落盘），保守原样返回。
             return Ok(messages);
         };
         let display_path = self.resolve_display_path(Some(&session_dir));
-        let line_threshold = self.config.read().await.compress_line_threshold;
+        let (line_threshold, keep_recent) = {
+            let cfg = self.config.read().await;
+            (cfg.compress_line_threshold, cfg.compress_keep_recent)
+        };
 
-        let mut compressed_messages = Vec::with_capacity(messages.len());
-        for chat_msg in messages {
+        // 保护集合：最近 keep_recent 条内容节点（Text/Reasoning）+ 最后一条消息。
+        // 从尾部反向扫描；最后一条本身是内容节点时计入 keep_recent 配额。
+        let len = messages.len();
+        let mut protected: HashSet<usize> = HashSet::new();
+        if len > 0 {
+            protected.insert(len - 1);
+            let mut kept = 0usize;
+            for (i, m) in messages.iter().enumerate().rev() {
+                if kept >= keep_recent {
+                    break;
+                }
+                if is_content_node(m) {
+                    protected.insert(i);
+                    kept += 1;
+                }
+            }
+        }
+
+        let mut compressed_messages = Vec::with_capacity(len);
+        for (idx, chat_msg) in messages.into_iter().enumerate() {
+            if protected.contains(&idx) {
+                compressed_messages.push(chat_msg);
+                continue;
+            }
             let ts = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000) as i64;
             let archive_filename = format!("{}/m{:x}.txt", super::message_archive::MESSAGES_SUBDIR, ts);
             let archive_display_path = display_path

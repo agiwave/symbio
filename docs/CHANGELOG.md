@@ -18,6 +18,18 @@
 
 ***
 
+## 2026-09-09: L1 消息压缩豁免与批次保护（ToolCall 参数永久豁免 + 最近 N 条原文保护 + 头尾保留 + 删除死代码路由）
+
+- **删除死代码路由 `session/compress`**：`invoke_compress`（handlers.rs）全仓无任何调用方（tauri 前端、examples、bin 均未引用），且与自动压缩路径保护语义不一致（无"保护最新一条"切分、无角色豁免，误用反而会压缩当前任务指令）。随路由一并删除：`SessionCompressRequest` schema（schemas/session/session_compress.rs）与 mod 声明、plugin.rs 路由分发、ROUTES.md 条目；`ChatSession::compress_messages` 默认实现的 doc 同步。压缩统一走自动路径（`compress_temporary_messages` → 批次覆写）。
+
+- **L1 批次压缩增加"最近 N 条内容节点"原文保护**：`PersistentChatSession::compress_messages` 新增 `keep_recent` 语义（`SessionConfig::compress_keep_recent`，默认 3，serde 默认兼容旧配置）——从尾部倒数最近 N 个 Text/Reasoning 内容节点跳过压缩（ToolCall/ToolResult 不占名额），且最后一条消息永不压缩（与自动压缩 `messages[..len-1]` 保护语义对齐）。自动路径 `compress_temporary_messages` 无需改动即同等受益（保护在批次覆写内部读取配置）。
+
+- **L1 单消息压缩 ToolCall 参数永久豁免**：`compress_message` 对 `msg_type == ToolCall` 直接返回 None 不压缩不写存档——工具调用参数被骨架化后，模型在请求视图里看到"自己上次执行了一个参数为存档占位符的 edit"，会误记自身行为。新增测试 `toolcall_args_never_compressed`。
+
+- **L1 保留策略从"仅尾部"改为"头尾保留"**：对齐 L0 `split_head_tail` 策略——保留头部 1/4 行 + 其余尾部行（首行常含结论/路径/计划骨架，仅留尾部会挤出关键头部），单行超长退化按字符截断行首；压缩头文案同步为「保留开头 N 行与结尾 M 行内容」。新增测试 `long_line_under_token_cap_not_compressed`，`normal_messages_unaffected` 断言同步头尾格式。
+
+- **配置新增**：`SessionConfig::compress_keep_recent: usize`（默认 3），`session/config/schema` 自动透出。
+
 ## 2026-09-09: 上下文压缩体系 P1-P2（存档迁移 + 取回协议统一 + JSON 语义摘要 + 工具输出瘦身 + 快照版本指纹）
 
 - **P1-1 L0 工具结果存档迁移至会话目录**：`guard_tool_result` 的全文存档从系统临时目录迁至 `<homedir>/plugins/session/<safe_id>/tool_archives/`（`safe_id` 将 `/\:` 替换为 `_`；session_id 缺失或目录创建失败时回退临时目录）——工具结果语义上是会话资产，历史写入临时目录会被 OS 清理造成死链。文件名改为 `tool_{毫秒}_{token数}_{内容FNV指纹}.txt`（FNV-1a 64 取高 32 位 hex），杜绝旧实现"同秒同 token 数互相覆盖"的碰撞；每次写入 best-effort 清理旧档，按修改时间保留最新 `TOOL_ARCHIVE_KEEP=20` 个文件。`guard_tool_result` 签名增加 `session_id: Option<&str>`，调用点（tool_executor）从 ctx 的 `SESSION_ID` 取值传入；新增 `archive_into_dir`（目录注入，供测试）与 `resolve_archive_dir`。新增测试 `same_milli_same_tokens_do_not_collide` / `prune_keeps_only_latest_files` / `archive_prefers_session_dir_when_session_id_given`。
