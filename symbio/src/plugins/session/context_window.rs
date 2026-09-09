@@ -79,13 +79,105 @@ fn error_digest(msg: &ChatMessage, preview: &str) -> String {
 ///
 /// 只取首个非空行（多为文件首行标题、命令输出首行、JSON 首键），预算内
 /// 截断——既给模型"读过什么"的锚点，又不让摘要本身变成新的开销。
+/// JSON 输入走 `json_digest` 语义摘要（P2-1）：裸切片 `{"count":16,"entries…`
+/// 对模型毫无信息量，应提取 count/首条目关键字段。
 fn first_line_digest(preview: &str) -> String {
     let first = preview
         .lines()
         .map(str::trim)
         .find(|l| !l.is_empty())
         .unwrap_or("");
+    if first.starts_with('{') || first.starts_with('[') {
+        if let Some(digest) = json_digest(first) {
+            return digest;
+        }
+    }
     truncate_tokens(first, SKELETON_DIGEST_TOKEN_CAP)
+}
+
+/// JSON 输出的语义摘要（P2-1）：提取对"下一步决策"最有用的关键字段。
+///
+/// 提取优先级：count/total/total_count（规模感）→ 首条目关键字段
+/// （name/path/title/id 等定位键）→ 顶层键名列表（结构感）。
+/// 摘要预算仍受 `SKELETON_DIGEST_TOKEN_CAP` 约束；解析失败返回 None
+/// （退回首行切片，不因摘要逻辑引入新故障面）。
+fn json_digest(first: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(first).ok()?;
+    let mut parts: Vec<String> = Vec::new();
+
+    // 规模字段：数组输入不占 count——`items=string/string` 已同时表达规模与元素类型，
+    // 数组走 count 只会让结构兜底分支变成死代码（测试暴露的逻辑冲突）。
+    let count = match &value {
+        serde_json::Value::Object(obj) => ["count", "total", "total_count", "size"]
+            .iter()
+            .find_map(|k| obj.get(*k).and_then(|v| v.as_u64()))
+            .map(|c| c as usize),
+        _ => None,
+    };
+    if let Some(c) = count {
+        parts.push(format!("count={c}"));
+    }
+
+    // 首条目定位字段（数组首项或对象中名为 entries/results/items 的数组首项）
+    let first_item = match &value {
+        serde_json::Value::Array(items) => items.first().cloned(),
+        serde_json::Value::Object(obj) => ["entries", "results", "items", "data", "files"]
+            .iter()
+            .find_map(|k| obj.get(*k).and_then(|v| v.as_array()))
+            .and_then(|items| items.first().cloned()),
+        _ => None,
+    };
+    if let Some(item) = first_item {
+        if let Some(obj) = item.as_object() {
+            let fields: Vec<String> = obj
+                .iter()
+                .filter(|(k, _)| {
+                    ["name", "path", "file", "title", "id", "type", "status"]
+                        .contains(&k.as_str())
+                })
+                .map(|(k, v)| match v {
+                    serde_json::Value::String(s) => format!("{k}={}", truncate_tokens(s, 24)),
+                    other => format!("{k}={other}"),
+                })
+                .collect();
+            if !fields.is_empty() {
+                parts.push(format!("first[{}]", fields.join(",")));
+            }
+        }
+    }
+
+    // 兜底结构感：顶层键名（对象）或元素类型（数组）
+    if parts.is_empty() {
+        match &value {
+            serde_json::Value::Object(obj) => {
+                let keys: Vec<&String> = obj.keys().take(8).collect();
+                if !keys.is_empty() {
+                    parts.push(format!("keys={}", keys.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(",")));
+                }
+            }
+            serde_json::Value::Array(items) => {
+                let kinds: Vec<&str> = items
+                    .iter()
+                    .take(3)
+                    .map(|v| match v {
+                        serde_json::Value::Object(_) => "object",
+                        serde_json::Value::String(_) => "string",
+                        serde_json::Value::Number(_) => "number",
+                        _ => "other",
+                    })
+                    .collect();
+                if !kinds.is_empty() {
+                    parts.push(format!("items={}", kinds.join("/")));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+    Some(truncate_tokens(&parts.join(" "), SKELETON_DIGEST_TOKEN_CAP))
 }
 
 /// 按 token 预算截断单行文本（字符预算 ≈ token 预算 × 2，CJK 友好）。
@@ -583,5 +675,42 @@ mod tests {
             "[System Info: Tool call input parameters skeletonized to save context.]",
             "无锚点参数应退回通用占位符"
         );
+    }
+
+    /// P2-1：单行 JSON 结果骨架化时应产出语义摘要（count + 首条目定位字段），
+    /// 而非 96 字符裸切片（真实会话实证：`{"count":16,"entries":[{"modified":…`
+    /// 对模型毫无信息量，迫使重跑工具）。
+    #[test]
+    fn json_result_gets_semantic_digest() {
+        let json_body = format!(
+            r#"{{"count":16,"entries":[{{"name":"main.rs","path":"src/main.rs","modified":1788948661}}],"next":[{}]}}"#,
+            vec![r#""x""#; 400].join(",")
+        );
+        let messages = vec![
+            tc_msg("j1", "local/glob", r#"{"pattern":"**/*.rs"}"#),
+            tool_result("j1", &json_body),
+        ];
+        let ret = HashMap::new();
+        let out = apply_layered_sliding_window(&messages, 0, &ret);
+        let result = out.iter().find(|m| m.parent_id.as_deref() == Some("j1")).unwrap();
+        let text = param_of(result);
+        assert!(text.contains("count=16"), "应提取规模字段: {text}");
+        assert!(text.contains("name=main.rs"), "应提取首条目定位字段: {text}");
+        assert!(!text.contains(r#""next""#), "不应残留大体积切片: {text}");
+    }
+
+    /// P2-1：无 count/条目定位字段的对象 → 键名列表兜底；数组 → 元素类型。
+    #[test]
+    fn json_digest_falls_back_to_structure() {
+        // 顶层键名兜底
+        let keys_only = r#"{"alpha":1,"beta":2,"gamma":3,"delta":4}"#;
+        let d1 = first_line_digest(keys_only);
+        assert!(d1.contains("keys=alpha,beta"), "对象应兜底键名列表: {d1}");
+        // 纯数组元素类型兜底
+        let d2 = first_line_digest(r#"["a","b","c"]"#);
+        assert!(d2.contains("items=string/string/string"), "数组应兜底元素类型: {d2}");
+        // 非 JSON / 解析失败 → 原有首行切片行为不变（回归保护）
+        let plain = "just a plain line of output";
+        assert_eq!(first_line_digest(plain), plain);
     }
 }

@@ -595,7 +595,9 @@ pub async fn process_tool_calls_async(
         } else {
             // L0 守卫：超长工具结果存档 + head/tail 摘要，避免单条撑爆上下文窗口
             // （对应"单次工具调用内容太长"的压缩诉求；物理字节上限不再是唯一防线）。
-            let guarded = guard_tool_result(&final_res, DEFAULT_TOOL_RESULT_TOKEN_CAP);
+            // 传入 session_id：存档跟随会话目录（tool_archives/），历史可取回不被 OS 清理。
+            let guard_session = ctx.get(crate::symbio_core::SESSION_ID).unwrap_or_default();
+            let guarded = guard_tool_result(&final_res, DEFAULT_TOOL_RESULT_TOKEN_CAP, Some(&guard_session));
             let mut tool_msg = build_tool_message(&id, &guarded.text, Some(success), Some(result_msg_id));
             if guarded.truncated {
                 let mut meta = tool_msg.meta.clone().unwrap_or_else(|| json!({}));

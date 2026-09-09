@@ -24,6 +24,27 @@ pub const COMPACT_HYSTERESIS_FACTOR: f64 = 1.15;
 /// 主动压缩最小收益：待压缩历史低于该 token 数时不值得一次 LLM 调用。
 pub const MIN_COMPACT_TOKENS: usize = 4000;
 
+/// 压缩协议版本（P2-3）：快照 meta 记录此版本，用于从产物侧验证协议演进是否生效。
+/// 语义：v2 = L0 会话目录存档 + 三层统一取回协议 + JSON 语义摘要 + 快照指纹。
+pub const COMPRESSION_PROTOCOL_VERSION: &str = "v2";
+
+/// 当前压缩提示词的指纹（FNV-1a 64，取高 32 位十六进制）。
+///
+/// 提示词文本变更 → 指纹变更 → 新快照 meta 可观测；用于回答
+/// "提示词强化是否生效"——对比历史快照 meta 即可确认该轮压缩用的提示词版本。
+pub fn compression_prompt_fingerprint() -> String {
+    fn fnv1a(data: &[u8]) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in data {
+            h ^= u64::from(*b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h
+    }
+    let prompt = get_compression_prompt();
+    format!("{:08x}", (fnv1a(prompt.as_bytes()) >> 32) as u32)
+}
+
 /// 获取压缩提示词
 pub fn get_compression_prompt() -> String {
     r#"You are the component that summarizes internal chat history into a given structure.

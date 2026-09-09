@@ -18,11 +18,27 @@
 
 ***
 
-## 2026-09-08: 上下文治理优化（骨架化信息保留 + 策略保留优先级修复）
+## 2026-09-09: 上下文压缩体系 P1-P2（存档迁移 + 取回协议统一 + JSON 语义摘要 + 工具输出瘦身 + 快照版本指纹）
 
-- **骨架化参数定位锚点（链路保持）**：窗口外 ToolCall 骨架化时参数占位符保留关键定位参数回声（`path`/`command`/`url`/`pattern`/`file_paths`/`query`，单条约 10 Token，新增 `anchor_of_args`）——否则"读过某文件第 N 行"这类结果摘要因缺失文件路径而无法回溯，历史逻辑链路断裂。新增测试 `skeletonized_toolcall_keeps_path_anchor`。
+- **P1-1 L0 工具结果存档迁移至会话目录**：`guard_tool_result` 的全文存档从系统临时目录迁至 `<homedir>/plugins/session/<safe_id>/tool_archives/`（`safe_id` 将 `/\:` 替换为 `_`；session_id 缺失或目录创建失败时回退临时目录）——工具结果语义上是会话资产，历史写入临时目录会被 OS 清理造成死链。文件名改为 `tool_{毫秒}_{token数}_{内容FNV指纹}.txt`（FNV-1a 64 取高 32 位 hex），杜绝旧实现"同秒同 token 数互相覆盖"的碰撞；每次写入 best-effort 清理旧档，按修改时间保留最新 `TOOL_ARCHIVE_KEEP=20` 个文件。`guard_tool_result` 签名增加 `session_id: Option<&str>`，调用点（tool_executor）从 ctx 的 `SESSION_ID` 取值传入；新增 `archive_into_dir`（目录注入，供测试）与 `resolve_archive_dir`。新增测试 `same_milli_same_tokens_do_not_collide` / `prune_keeps_only_latest_files` / `archive_prefers_session_dir_when_session_id_given`。
 
-- **单行长内容压缩失效修复（bug）**：单行大 JSON/URL/base64 原先绕过两层防线——L0 守卫 `split_head_tail` 首行永远整行保留（超预算不生效）；L1 脱水仅按行数触发（行数=1 不触发）。修复：L0 head/tail 超预算时按字符截断兜底；L1 触发条件增加"单行超长 token 超预算"（`message_archive.rs`，保留内容再按字符截断）。新增测试 `single_long_line_message_compressed` / `split_head_tail_truncates_single_line_over_budget`。
+- **P1-2 三层压缩取回协议统一**：L0 占位与 L1 压缩头统一追加取回提示「取回：local/file_read 该路径，按 offset/limit 分段读取」——此前各层只给存档路径不给取回方法，模型需自行猜测。L3 fade 按设计不写存档（`archive_path` 为 none）不变；L0（`[... ...]`）与 L1（`<!-- -->`）前缀标识保持各异，供 `decompress_message` 识别防重复压缩。
+
+- **P2-1 骨架化摘要 JSON 语义感知**：`context_window.rs` 的 `first_line_digest` 在首行以 `{`/`[` 开头时改走 `json_digest`：解析 JSON 后提取 count/total/total_count/size 等计数字段与 entries/results/items/data/files 首数组首项的关键字段（name/path/file/title/id/type/status），输出 `count=16,name=main.rs,...` 形式替代盲切片——长 JSON 结果被骨架化后仍保留行数与内容类型等语义线索。数组不占计数；数组兜底 `items=元素类型列表`、对象无计数字段兜底 `keys=键名列表`；整体仍受 `SKELETON_DIGEST_TOKEN_CAP=48` 截断。新增测试 `json_result_gets_semantic_digest`。
+
+- **P2-2 目录列举结果瘦身**：`dir_list` 的 entries 从 `{name,type,size,modified}` 精简为 `{name,type}`——size/modified 对模型定位目录结构无增益且逐条挤占 token；目录优先排序与 MAX_ENTRIES 上限不变。glob（file_search）结果本就是纯相对路径数组，无需改动。
+
+- **P2-3 快照协议版本与提示词指纹**：新增 `COMPRESSION_PROTOCOL_VERSION="v2"` 常量与 `compression_prompt_fingerprint()`（对 `get_compression_prompt()` 全文取 FNV-1a 64 高 32 位 hex）；被动压缩与主动 `run_context_compact` 两处快照 meta 注入 `protocol_version` / `prompt_fingerprint` 字段——离线审计快照时可确认由哪版协议与提示词产出，提示词后续演化不再造成快照溯源歧义。meta 增字段安全（`should_start_compression` 只读 post_tokens 做 ×1.15 迟滞）。
+
+- **测试口径**：`cargo test --lib` **246 passed / 0 failed**（本轮新增 5：guard 3 + context_window 2）；`cargo clippy --all-targets` 0 警告 0 错误。
+
+***
+
+
+
+- **骨架化参数定位锚点（链路保持）**：窗口外 ToolCall 骨架化时参数占位符保留关键定位参数回声（`path`/`command`/`url`/`pattern`/`file_paths`/`query`，单条约 10 Token，新增 `anchor_of_args`）——否则"读过某文件第 N 行"这类结果摘要因缺失文件路径而无法回溯，历史逻辑链路断裂。新增测试 `skeletonized_call_and_result_keep_anchor_param` / `skeletonized_without_anchor_falls_back_to_generic`。
+
+- **单行长内容压缩失效修复（bug）**：单行大 JSON/URL/base64 原先绕过两层防线——L0 守卫 `split_head_tail` 首行永远整行保留（超预算不生效）；L1 脱水仅按行数触发（行数=1 不触发）。修复：L0 head/tail 超预算时按字符截断兜底；L1 触发条件增加"单行超长 token 超预算"（`message_archive.rs`，保留内容再按字符截断）。新增测试 `single_long_line_message_is_token_capped` / `single_long_line_is_char_truncated`。
 
 - **策略保留优先级修复（bug）**：`context_window.rs` 的 `is_stale` 原逻辑全局窗口判定优先于工具级保留策略，导致 LastOnly 工具（todo_write）的最新调用滚出全局窗口（15 个 ToolCall）后被骨架化，模型丢失任务清单引发重写。修复后**策略保留优先于全局窗口**：声明 `LastOnly`/`LastN` 的工具其最近 N 次调用即使滚出全局窗口也完整保留；未声明策略的工具仅受全局窗口约束。新增测试 `last_only_latest_call_survives_beyond_global_window`。
 

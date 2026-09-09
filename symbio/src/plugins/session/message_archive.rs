@@ -102,9 +102,11 @@ pub async fn compress_message(
     };
 
     // 构造压缩后内容：头部以注释形式注明完整路径，尾部为保留内容。
-    // 单行 token 触发时行数描述与保留行数一致（都是 1 行），避免误导取回方
+    // 单行 token 触发时行数描述与保留行数一致（都是 1 行），避免误导取回方。
+    // 取回指引（P1-2 三层统一协议）：与 L0/L3 占位符共用同一格式 ——
+    // 「已存档至: <路径> + 统一取回入口 local/file_read + 分段参数 offset/limit」。
     let compressed_text = format!(
-        "{COMPRESS_PREFIX} 完整内容已存档至: {archive_display_path} (共 {total_lines} 行), 以下是最后 {kept_count} 行内容\n\
+        "{COMPRESS_PREFIX} 完整内容已存档至: {archive_display_path} (共 {total_lines} 行)（取回：local/file_read 该路径，按 offset/limit 分段读取）, 以下是最后 {kept_count} 行内容\n\
         ---\n\
         {kept_text}",
         total_lines = lines.len(),

@@ -109,18 +109,12 @@ impl DirListTool {
                 Err(_) => continue,
             };
             let is_dir = emeta.is_dir();
-            let size = if is_dir { 0 } else { emeta.len() };
-            let modified = emeta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+            // P2-2 瘦身：只保留 name/type。size/modified 每项 ~60 字符，
+            // 大目录（数百条目）下是纯浪费——模型几乎从不消费这两个字段；
+            // 需要时用 local/file_read 或专用命令按需获取。
             entries.push(json!({
                 "name": name,
                 "type": if is_dir { "directory" } else { "file" },
-                "size": size,
-                "modified": modified,
             }));
             if entries.len() >= MAX_ENTRIES {
                 break;
@@ -128,15 +122,9 @@ impl DirListTool {
         }
 
         // 目录在前、文件在后，各自按名称排序
-        entries.sort_by(|a, b| {
-            let ta = a["type"].as_str().unwrap_or("");
-            let tb = b["type"].as_str().unwrap_or("");
-            if ta != tb {
-                return tb.cmp(ta); // directory 优先
-            }
-            let na = a["name"].as_str().unwrap_or("");
-            let nb = b["name"].as_str().unwrap_or("");
-            na.cmp(nb)
+        entries.sort_by_key(|e| {
+            let is_file = e["type"].as_str() != Some("directory"); // false=目录优先
+            (is_file, e["name"].as_str().unwrap_or("").to_string())
         });
 
         let truncated = entries.len() >= MAX_ENTRIES;

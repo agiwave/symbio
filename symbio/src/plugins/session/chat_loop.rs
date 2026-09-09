@@ -1199,6 +1199,12 @@ async fn auto_compress_process(
         }
     }
 
+    // P2-3：快照指纹 —— 记录压缩协议版本与提示词指纹，
+    // 使"提示词强化是否生效"可从产物侧（快照 meta）验证。
+    meta["protocol_version"] = serde_json::json!(super::compression::COMPRESSION_PROTOCOL_VERSION);
+    meta["prompt_fingerprint"] =
+        serde_json::json!(super::compression::compression_prompt_fingerprint());
+
     let snapshot_message = ChatMessage {
         id: root_id.to_string(),
         // 快照作为压缩后的首条消息，必须是 user 角色（多数 provider 要求对话以 user 开头）
@@ -1354,6 +1360,11 @@ async fn run_context_compact(
             meta["compact_hints"] = serde_json::json!(h);
         }
     }
+
+    // P2-3：快照指纹（与被动压缩同一套 meta 约定）
+    meta["protocol_version"] = serde_json::json!(super::compression::COMPRESSION_PROTOCOL_VERSION);
+    meta["prompt_fingerprint"] =
+        serde_json::json!(super::compression::compression_prompt_fingerprint());
 
     let snapshot_message = ChatMessage {
         id: short_id(),
