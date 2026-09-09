@@ -58,7 +58,6 @@ session:
   
   # 4. 宏观语义压缩策略
   auto_compress: true            # 是否启用基于 Token 溢出 (70% 触发) 的大模型自我语义合并
-  compress_threshold: 50         # 触发自动压缩的消息数量阈值 (会话压缩编排使用)
   context_messages: 6            # 发送给 AI 的对话上下文滑动窗口轮数 (以 User 消息轮次对齐截取；也是存储期 prune 的保留分水岭)
   
   # 5. 工具滑动窗口策略

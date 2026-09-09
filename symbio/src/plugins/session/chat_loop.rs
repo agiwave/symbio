@@ -651,14 +651,20 @@ pub async fn run_chat_loop(
         // context_compact 不走 CapabilityManager 分发：它需要编排器内部的
         // 压缩链路（LLM 摘要 + 上下文替换 + 会话持久化）。
         // 在此拆分：压缩调用就地执行并生成合成工具结果；其余工具正常分发。
-        let (compact_calls, other_calls): (Vec<_>, Vec<_>) = tools_done
-            .into_iter()
-            .partition(|tc| {
-                tc.name
-                    .as_deref()
-                    .map(|n| n == compression::CONTEXT_COMPACT_TOOL_NAME)
-                    .unwrap_or(false)
-            });
+        // 门控：仅当工具压缩开关开启时拦截；开关关闭时工具不暴露，模型幻觉
+        // 调用则归入标准工具链，以"未知路径"错误返回（不执行内部压缩链路）。
+        let (compact_calls, other_calls): (Vec<_>, Vec<_>) = if enable_compact_tool {
+            tools_done
+                .into_iter()
+                .partition(|tc| {
+                    tc.name
+                        .as_deref()
+                        .map(|n| n == compression::CONTEXT_COMPACT_TOOL_NAME)
+                        .unwrap_or(false)
+                })
+        } else {
+            (Vec::new(), tools_done)
+        };
 
         let mut tool_results: Vec<ChatMessage> = Vec::new();
         let mut parent_updates: Vec<ChatMessage> = Vec::new();

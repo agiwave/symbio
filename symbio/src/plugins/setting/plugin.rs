@@ -245,8 +245,8 @@ fn session_detail_definition() -> DetailDefinition {
         "session",
         vec![
             detail_field_number("max_messages", "最大消息数", "每个会话保存的最大消息数量", 10.0, 1000.0, serde_json::json!(100)),
-            detail_field_toggle("auto_compress", "自动压缩", "当消息数超过阈值时自动压缩历史", true),
-            detail_field_number("compress_threshold", "压缩阈值", "触发自动压缩的消息数量", 10.0, 500.0, serde_json::json!(50)),
+            detail_field_toggle("auto_compress", "自动压缩", "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）", true),
+            detail_field_toggle("enable_compact_tool", "工具压缩", "向模型提供主动压缩工具（context_compact）与 55% 水位提醒；关闭后仅保留自动压缩兜底", false),
             detail_field_number(
                 "context_messages",
                 "上下文消息数量",

@@ -224,7 +224,7 @@ impl SessionPlugin {
                 "auto_compress": {
                     "type": "boolean",
                     "title": "自动压缩",
-                    "description": "是否在超过阈值时自动压缩历史",
+                    "description": "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）",
                     "default": true
                 },
                 "enable_compact_tool": {
@@ -232,12 +232,6 @@ impl SessionPlugin {
                     "title": "工具压缩",
                     "description": "是否向模型提供主动压缩工具（context_compact）与水位提醒；关闭后仅保留自动压缩。默认关闭，需手动开启",
                     "default": false
-                },
-                "compress_threshold": {
-                    "type": "integer",
-                    "title": "压缩阈值",
-                    "description": "触发压缩的消息数量阈值",
-                    "default": 50
                 },
                 "context_messages": {
                     "type": "integer",
