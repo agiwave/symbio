@@ -452,6 +452,21 @@ pub async fn run_chat_loop(
             tools.len()
         );
 
+        // Turn 创建后的首个 abort 检查点：覆盖"压缩阶段中止"等 send_request
+        // 之前置位的场景。压缩失败已就地降级（不冒泡），但 abort_flag 仍为
+        // true 且 abort 帧已被压缩请求消费——若不在此拦截，execute_turn 会
+        // 发起一次多余的 LLM 请求。此处 Turn 已创建（上方 emit_streaming_start），
+        // 冒泡 Err(Aborted) → 消费循环 ABORTED 分支 → persist_failure 把本轮
+        // Turn 收尾为 Failed + "用户手动中止了本次回复"（错误条 + 重试入口），
+        // 不会波及上一轮已成功的 Turn（persist_failure 按 failing_turn 子树收窄）。
+        if abort_flag.load(Ordering::SeqCst) {
+            plugin_warn!("session",
+                "[DIAG] run_chat_loop: abort_flag true before execute_turn, propagating Err(Aborted)"
+            );
+            fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+            return Err(PluginError::Aborted);
+        }
+
         let result = orchestrator
             .protocol
             .execute_turn(
@@ -495,11 +510,15 @@ pub async fn run_chat_loop(
                 continue;
             }
             Err(PluginError::Aborted) => {
+                // 用户手动中止：向上冒泡 Err(Aborted)，由消费循环识别 code=ABORTED
+                // 后走 persist_failure —— 在途 Turn 持久化为 Failed + error，前端
+                // 可渲染错误条与重试入口（docs/turn-tool-mechanisms.md 2.4）。
+                // 旧实现直接 return Ok(())：在途 Turn 不落库，刷新即消失且无重试入口。
                 plugin_warn!("session",
-                    "[DIAG] run_chat_loop: send_request -> Aborted, returning Ok(())"
+                    "[DIAG] run_chat_loop: send_request -> Aborted, propagating Err(Aborted)"
                 );
                 fire_stop_hook(orchestrator, &context.messages, &ctx).await;
-                return Ok(());
+                return Err(PluginError::Aborted);
             }
             Err(e) => {
                 plugin_warn!("session",
@@ -513,11 +532,16 @@ pub async fn run_chat_loop(
         };
 
         if abort_flag.load(Ordering::SeqCst) {
+            // 与 Err(PluginError::Aborted) 分支同理：请求结束后才置位的 abort 标志
+            // 同样向上冒泡，由消费循环统一收尾（在途 Turn → Failed + error + 可重试，
+            // 见 docs/turn-tool-mechanisms.md 2.4）。仅 send_request 之后的 abort
+            // 冒泡；turn 循环顶部的边界检查点不冒泡——上一轮已定稿落库，冒泡会把
+            // 成功的 Turn 误回滚为 Failed。
             plugin_warn!("session",
-                "[DIAG] run_chat_loop: abort_flag became true after send_request, returning Ok(())"
+                "[DIAG] run_chat_loop: abort_flag became true after send_request, propagating Err(Aborted)"
             );
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
-            return Ok(());
+            return Err(PluginError::Aborted);
         }
 
         let tools_done = out.tool_accumulator.get_completed();
@@ -803,45 +827,11 @@ pub async fn run_chat_loop(
         });
 
         if needs_user_action {
-            // 给「因失败而暂停会话」的工具调用打 recoverable 标记（服务端唯一真相）。
-            // 语义分界：auto 模式下工具失败 = 信息性（错误结果已喂给 LLM 继续处理，
-            // 重试无意义）；仅当循环因该失败退出、会话停在等待恢复态时，重试/补参
-            // 才有效（resume 在会话忙碌时会拒绝）。前端只对 recoverable 的 Failed
-            // ToolCall 渲染重试/补参入口。
-            // 注意：user_prompt(WaitingUserAction) 驱动的暂停不在此列（其恢复走
-            // approve/reject/answer，且父节点状态是 WaitingUserAction 而非 Failed）。
-            let mut recover_updates: Vec<ChatMessage> = Vec::new();
-            for p in parent_updates.iter() {
-                if p.status == Some(MessageStatus::Failed)
-                    && p.meta
-                        .as_ref()
-                        .and_then(|m| m.get("failure_kind"))
-                        .and_then(|v| v.as_str())
-                        .is_some()
-                {
-                    let mut meta = p.meta.clone().unwrap_or_else(|| serde_json::json!({}));
-                    meta["recoverable"] = serde_json::json!(true);
-                    let patch = ChatMessage {
-                        id: p.id.clone(),
-                        meta: Some(meta),
-                        ..Default::default()
-                    };
-                    // 广播 + 持久化，保证刷新后标记仍在
-                    let _ = channel.tx.send(PluginFrame::Data(
-                        serde_json::to_value(session_chat_response::StreamEvent::Update {
-                            message: patch.clone(),
-                        })
-                        .unwrap_or_default(),
-                    ))
-                    .await;
-                    recover_updates.push(patch);
-                }
-            }
-            if !recover_updates.is_empty() {
-                if let Err(e) = context.session.update_messages(recover_updates).await {
-                    plugin_warn!("session", "[Session] recoverable 标记持久化失败: {}", e);
-                }
-            }
+            // 注：信息性策略下工具失败的父 ToolCall 已标 Completed（错误结果作为
+            // 合法 tool 结果喂回 LLM，loop 不中断），不存在「Failed 父节点等待
+            // 恢复」的场景——旧版在此处给 Failed+failure_kind 父节点打 recoverable
+            // 标记的代码属不可达遗留，已删除（docs/turn-tool-mechanisms.md 1.5）。
+            // user_prompt(WaitingUserAction) 驱动的暂停走 approve/reject/answer 恢复。
             plugin_info!("session",
                 "[DIAG] run_chat_loop: 工具待用户恢复（mode={}），退出本轮",
                 mode
@@ -1102,15 +1092,20 @@ async fn auto_compress_process(
     .await
     {
         Ok(s) => s,
-        // 用户中止 / 触发限流：向上透传，走既有的中止与限流提示链路。
-        Err(e @ PluginError::Aborted) | Err(e @ PluginError::RateLimited(_)) => return Err(e),
-        // 其他失败（空摘要 / 流中断 / 网关错误等）：**优雅降级**。
+        // **任何失败都不在压缩阶段向上冒泡**（用户中止 / 限流 / 空摘要 /
+        // 流中断 / 网关错误等一律优雅降级）：
         //
-        // 原始行为是 `?` 直接把错误抛给 run_chat_loop → 整个 turn 以
-        // "Compression produced empty result" 之类的错误告终，用户连正常对话都发不出去。
-        // 压缩只是上下文超限时的优化手段，失败不应阻断对话：
-        // 回滚到未压缩历史，记录警告后继续（后续真正的 LLM 请求若同样失败，
-        // 会以真实错误呈现在该轮 Turn 上）。
+        // 压缩发生在本轮 Turn 创建之前（调用点的 emit_streaming_start 在其后）。
+        // 若在此处向上冒泡，消费循环的 Error 帧分支会调用 persist_failure，
+        // 而 collected 中最后一个根级 Turn 是上一轮已成功定稿的 Turn——
+        // 其"已落库 Completed 强制回滚 Failed"逻辑会误回滚成功 Turn。
+        //
+        // 就地回滚到未压缩历史后返回 Ok(None)，让主循环继续创建本轮
+        // Turn；真正的 LLM 请求若同样中止 / 限流 / 失败，会以标准链路
+        // （在途 Turn → persist_failure）呈现在本轮 Turn 上：
+        // - Aborted → 消费循环 ABORTED 分支 → Failed + "用户手动中止了
+        //   本次回复"（前端错误条 + 重试入口，docs/turn-tool-mechanisms.md 2.4）；
+        // - RateLimited / 其他 → 消费循环非中止分支 → Failed + 错误原因。
         Err(e) => {
             plugin_warn!("session",
                 "[Compress] auto compression failed ({}), falling back to uncompressed context",

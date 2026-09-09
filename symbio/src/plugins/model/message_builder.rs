@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageRole, MessageType,
+    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 
 use super::types::*;
@@ -36,6 +36,9 @@ const RETAINED_RECENT_REASONING: usize = 2;
 /// - `ToolCall` → 从其自身 `content` 读 args 拼入父 `assistant.tool_calls`
 /// - 响应结果 `Text`(`Tool`) → 独立的 `role=tool` native message（tool_call_id = ToolCall id）
 /// - `User` / `System` 等 → 原样输出
+/// - 失败 `Turn`（status=Failed）：半截输出照常聚合，并附加中断说明段落；
+///   无结果的 `ToolCall` 合成占位 tool 结果、失败的工具结果推导 `success=false`
+///   （"继续会话"中断可见性，详见 docs/turn-tool-mechanisms.md 2.6 节）
 pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
     let by_id: HashMap<&str, &ChatMessage> = messages.iter().map(|m| (m.id.as_str(), m)).collect();
     let mut children: HashMap<&str, Vec<&ChatMessage>> = HashMap::new();
@@ -170,11 +173,35 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                 }
 
                                 // 响应结果：ToolCall 下的 Text(Tool) 直接子节点，或 Turn(Tool) 内 Text
-                                if let Some(res) = find_tool_result(&children, child.id.as_str()) {
-                                    let mut tool_native: NativeMessage = res.clone().into();
-                                    tool_native.role = MessageRole::Tool;
-                                    tool_native.tool_call_id = Some(child.id.clone());
-                                    tool_results.push(tool_native);
+                                match find_tool_result(&children, child.id.as_str()) {
+                                    Some(res) => {
+                                        let mut tool_native: NativeMessage = res.clone().into();
+                                        tool_native.role = MessageRole::Tool;
+                                        tool_native.tool_call_id = Some(child.id.clone());
+                                        // 失败的工具结果推导 success=false：触发 Anthropic
+                                        // tool_result 的 is_error=true，工具失败信息才能被
+                                        // 模型感知（机制1；跨轮工具失败不再被过滤丢失）
+                                        if res.status == Some(MessageStatus::Failed) {
+                                            tool_native.success = Some(false);
+                                        }
+                                        tool_results.push(tool_native);
+                                    }
+                                    None => {
+                                        // ToolCall 无对应结果（执行被打断，未产生结果）：
+                                        // 合成占位 tool 结果，避免请求包出现"有 tool_call
+                                        // 无 tool_result"触发 provider 400。必须在此处
+                                        // 进入 tool_results（先于尾部孤儿剔除），否则会被
+                                        // 当作孤儿 tool 结果误删。
+                                        let tool_name = child.name.clone().unwrap_or_default();
+                                        tool_results.push(NativeMessage {
+                                            role: MessageRole::Tool,
+                                            tool_call_id: Some(child.id.clone()),
+                                            content: Some(MessageContent::Text(format!(
+                                                "[工具 {tool_name} 的执行被中断，未产生结果。]"
+                                            ))),
+                                            ..Default::default()
+                                        });
+                                    }
                                 }
                             }
                             _ => {}
@@ -185,6 +212,26 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                 // 注：本 Turn 的全部子孙 id 已在预处理遍（consumed 预扫描）中收集，
                 // 主循环开头的 `if consumed.contains(m.id) { continue; }` 会跳过它们，
                 // 因此此处无需再单独标记，避免重复代码与潜在误标记。
+
+                // **中断说明**（"继续会话"中断可见性，docs/turn-tool-mechanisms.md 2.6）：
+                // 失败 Turn 的半截输出原样聚合后，附加中断说明段落——模型在上下文中
+                // 看到"上次输出 → 中断说明 → 用户新消息"的连贯序列，避免思维链断裂
+                // （等价于用户打断了模型说话，然后继续）。
+                if m.status == Some(MessageStatus::Failed) {
+                    let note = match m.error.as_deref() {
+                        Some(err) if !err.trim().is_empty() => format!(
+                            "[本轮回复被中断（原因：{err}）。以上是中断前的部分输出，仅供参考；请结合用户接下来的消息继续。]"
+                        ),
+                        _ => "[本轮回复被中断。以上是中断前的部分输出，仅供参考；请结合用户接下来的消息继续。]"
+                            .to_string(),
+                    };
+                    native.content = Some(match native.content {
+                        Some(MessageContent::Text(text)) if !text.is_empty() => {
+                            MessageContent::Text(format!("{text}\n\n{note}"))
+                        }
+                        _ => MessageContent::Text(note),
+                    });
+                }
 
                 result.push(native);
                 result.extend(tool_results);
@@ -838,5 +885,231 @@ mod tests {
             "带工具调用的 assistant 允许 content=null（OpenAI 约定）"
         );
         assert!(v.get("tool_calls").is_some(), "tool_calls 必须保留");
+    }
+
+    // ── "继续会话"中断可见性（docs/turn-tool-mechanisms.md 2.6）──────────────
+
+    /// 失败 Turn 的半截输出必须进入 LLM 请求包，并附加中断说明：
+    /// 模型应看到「上次输出 → 中断说明 → 用户新消息」的连贯序列
+    /// （等价于用户打断了模型说话，然后继续）。
+    #[test]
+    fn failed_turn_visible_with_interrupt_note() {
+        let msgs = vec![
+            ChatMessage {
+                id: "u1".into(),
+                parent_id: None,
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("讲讲并发".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(1),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "turn-x".into(),
+                parent_id: None,
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Turn),
+                content: None,
+                status: Some(MessageStatus::Failed),
+                error: Some("用户中止".into()),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "turn-x-text".into(),
+                parent_id: Some("turn-x".into()),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("Go 的 channel 是…".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "u2".into(),
+                parent_id: None,
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("换个思路".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(3),
+                ..Default::default()
+            },
+        ];
+
+        let natives = flatten_chat_messages(&msgs);
+        assert_eq!(natives.len(), 3, "user1 + 失败 assistant + user2");
+        assert_eq!(natives[0].role, MessageRole::User);
+        assert_eq!(natives[1].role, MessageRole::Assistant);
+        assert_eq!(natives[2].role, MessageRole::User);
+
+        let text = natives[1].content.as_ref().map(|c| c.to_text()).unwrap();
+        assert!(
+            text.starts_with("Go 的 channel 是…"),
+            "半截输出必须保留在正文开头"
+        );
+        assert!(text.contains("本轮回复被中断"), "应附加中断说明");
+        assert!(text.contains("用户中止"), "中断说明应包含失败原因");
+    }
+
+    /// 中断发生在任何输出之前（失败 Turn 无子节点）：Turn 因中断说明非空而保留，
+    /// 不得被「空 assistant 回合」清洗误删——否则模型不知道上一轮发生过中断。
+    #[test]
+    fn failed_turn_without_children_survives_with_note() {
+        let msgs = vec![
+            ChatMessage {
+                id: "u1".into(),
+                parent_id: None,
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("hi".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(1),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "turn-empty".into(),
+                parent_id: None,
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Turn),
+                content: None,
+                status: Some(MessageStatus::Failed),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+        ];
+
+        let natives = flatten_chat_messages(&msgs);
+        assert_eq!(natives.len(), 2, "失败 Turn 携带中断说明，不得被清洗丢弃");
+        assert_eq!(natives[1].role, MessageRole::Assistant);
+        let text = natives[1].content.as_ref().map(|c| c.to_text()).unwrap();
+        assert!(text.contains("本轮回复被中断"));
+    }
+
+    /// 中止打断工具执行（ToolCall 已持久化、结果未产生）：flatten 合成占位
+    /// tool 结果，避免请求包出现「有 tool_call 无 tool_result」触发 provider 400。
+    #[test]
+    fn interrupted_tool_call_gets_placeholder_result() {
+        let msgs = vec![
+            ChatMessage {
+                id: "u1".into(),
+                parent_id: None,
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("跑下测试".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(1),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "turn-tc".into(),
+                parent_id: None,
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Turn),
+                content: None,
+                status: Some(MessageStatus::Failed),
+                error: Some("用户中止".into()),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "tc-x".into(),
+                parent_id: Some("turn-tc".into()),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::ToolCall),
+                name: Some("run_tests".into()),
+                content: Some(MessageContent::Text("{}".into())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(2),
+                ..Default::default()
+            },
+        ];
+
+        let natives = flatten_chat_messages(&msgs);
+        let tool = natives
+            .iter()
+            .find(|n| n.role == MessageRole::Tool)
+            .expect("无结果的 ToolCall 必须合成占位 tool 结果");
+        assert_eq!(tool.tool_call_id.as_deref(), Some("tc-x"));
+        let text = tool.content.as_ref().map(|c| c.to_text()).unwrap();
+        assert!(text.contains("run_tests"), "占位结果应指明工具名");
+        assert!(text.contains("被中断"), "占位结果应说明执行被中断");
+
+        let assistant = natives
+            .iter()
+            .find(|n| n.role == MessageRole::Assistant)
+            .expect("失败 Turn 仍应聚合为 assistant");
+        assert_eq!(
+            assistant.tool_calls.as_ref().map(|c| c.len()),
+            Some(1),
+            "tool_call 本身必须保留"
+        );
+    }
+
+    /// 失败的工具结果（status=Failed，工具执行出错）推导 success=Some(false)：
+    /// 触发 Anthropic tool_result 的 is_error=true；成功的工具结果保持 None。
+    #[test]
+    fn failed_tool_result_sets_success_false() {
+        let mk_turn_with_tool = |turn_id: &str, tc_id: &str, res_id: &str, failed: bool| {
+            vec![
+                ChatMessage {
+                    id: turn_id.into(),
+                    parent_id: None,
+                    role: Some(MessageRole::Assistant),
+                    msg_type: Some(MessageType::Turn),
+                    content: None,
+                    status: Some(MessageStatus::Completed),
+                    timestamp: Some(1),
+                    ..Default::default()
+                },
+                ChatMessage {
+                    id: tc_id.into(),
+                    parent_id: Some(turn_id.into()),
+                    role: Some(MessageRole::Assistant),
+                    msg_type: Some(MessageType::ToolCall),
+                    name: Some("read_file".into()),
+                    content: Some(MessageContent::Text("{}".into())),
+                    status: Some(MessageStatus::Completed),
+                    timestamp: Some(1),
+                    ..Default::default()
+                },
+                ChatMessage {
+                    id: res_id.into(),
+                    parent_id: Some(tc_id.into()),
+                    role: Some(MessageRole::Tool),
+                    msg_type: Some(MessageType::Text),
+                    content: Some(MessageContent::Text("result".into())),
+                    status: Some(if failed {
+                        MessageStatus::Failed
+                    } else {
+                        MessageStatus::Completed
+                    }),
+                    timestamp: Some(2),
+                    ..Default::default()
+                },
+            ]
+        };
+
+        let mut msgs = mk_turn_with_tool("turn-f", "tc-f", "res-f", true);
+        msgs.extend(mk_turn_with_tool("turn-s", "tc-s", "res-s", false));
+
+        let natives = flatten_chat_messages(&msgs);
+        let failed_tool = natives
+            .iter()
+            .find(|n| n.tool_call_id.as_deref() == Some("tc-f"))
+            .expect("失败工具结果应保留");
+        assert_eq!(failed_tool.role, MessageRole::Tool);
+        assert_eq!(
+            failed_tool.success,
+            Some(false),
+            "失败工具结果必须推导 success=false（Anthropic is_error）"
+        );
+
+        let ok_tool = natives
+            .iter()
+            .find(|n| n.tool_call_id.as_deref() == Some("tc-s"))
+            .expect("成功工具结果应保留");
+        assert_eq!(ok_tool.success, None, "成功工具结果保持 None");
     }
 }

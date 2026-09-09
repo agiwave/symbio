@@ -366,7 +366,35 @@ impl SessionPlugin {
                     break;
                 }
                 match &frame {
-                    PluginFrame::Error(msg, _) => {
+                    PluginFrame::Error(msg, meta) => {
+                        // 用户手动中止（run_chat_loop 冒泡的 Err(PluginError::Aborted)，
+                        // 错误帧携带 code=ABORTED）：在途 Turn 落库为 Failed + error，
+                        // 前端据此渲染错误条与重试入口；但不广播业务 Error 事件——
+                        // 中止不是错误，Status idle 足以收敛 UI（handle_abort 随后
+                        // 广播的 Abort 事件负责清理流式动画）。
+                        // 旧实现 run_chat_loop 对 Aborted 直接 return Ok(())，在途
+                        // Turn 既不落库也无重试入口（刷新即消失的幽灵节点）。
+                        let is_abort = meta
+                            .as_ref()
+                            .and_then(|m| m.get("code"))
+                            .and_then(|v| v.as_str())
+                            .map(|c| c == "ABORTED")
+                            .unwrap_or(false);
+                        if is_abort {
+                            // 在途 Turn 落库为 Failed + error（前端错误条 + 重试入口），
+                            // 随后 break 走循环后的统一收尾：清 ai_control_tx（让
+                            // handle_abort 的轮询立即感知、免等 3s 兜底）→ 复位
+                            // is_working → guard.done → 广播 idle。注意 break 而非
+                            // return：清理块在 while 之后，return 会跳过它。
+                            self.persist_failure(
+                                &state,
+                                &session_id,
+                                &collected_ai_messages,
+                                "用户手动中止了本次回复",
+                            )
+                            .await;
+                            break;
+                        }
                         // 透传 plugin-level Error 帧作为业务级 Error 事件。
                         // 同时把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
                         // 这样切回会话时能看到上次失败的终态。

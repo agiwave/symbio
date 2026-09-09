@@ -8,7 +8,7 @@
 use super::store::SessionStore;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+    ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::{ChatSession, PluginError};
@@ -238,14 +238,13 @@ impl ChatSession for PersistentChatSession {
         max_turns: Option<usize>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
         let messages = self.get_messages().await?;
-        // 过滤 Failed 消息：Failed 仅作为用户可见的失败终态（带重试按钮），
-        // 不进入 LLM 上下文，避免污染后续对话。
-        // 依赖 persist_failure 已将 Failed Turn 下所有半截 Streaming/Pending 子节点标记为 Failed，
-        // 因此过滤 Failed 即可整树移除失败 Turn。
-        let messages: Vec<ChatMessage> = messages
-            .into_iter()
-            .filter(|m| m.status != Some(MessageStatus::Failed))
-            .collect();
+        // **不过滤 Failed 消息**（"继续会话"中断可见性，docs/turn-tool-mechanisms.md 2.6）：
+        // 用户选择不重试、直接继续对话时，模型必须看到上一轮的中断现场——
+        // 失败 Turn 的半截输出 + 中断说明——否则思维链断裂。
+        // persist_failure 只把根 Turn 标 Failed（半截子节点定稿 Completed），
+        // 因此整树保留即可；中断说明与占位工具结果由请求视图层
+        // （flatten_chat_messages / build_request_view）按 status 动态补齐。
+        // 下方孤儿过滤退化为安全网（正常路径失败 Turn 整树保留，无孤儿产生）。
         // 剔除父节点缺失的孤儿节点（否则会带着不存在的 tool_call_id 进请求包）
         let messages: Vec<ChatMessage> = drop_orphan_messages(messages);
         // 对各消息做 content 归一兜底（并跳过 role 为 None 的占位消息），
@@ -457,13 +456,9 @@ impl ChatSession for EphemeralChatSession {
         max_turns: Option<usize>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
         let messages = self.messages.read().await;
-        // 过滤 Failed 消息：Failed 仅作为用户可见的失败终态（带重试按钮），
-        // 不进入 LLM 上下文，避免污染后续对话。
-        let messages: Vec<ChatMessage> = messages
-            .iter()
-            .filter(|m| m.status != Some(MessageStatus::Failed))
-            .cloned()
-            .collect();
+        // **不过滤 Failed 消息**（与 PersistentChatSession 一致，2.6 节）：失败 Turn
+        // 整树保留进上下文，中断说明由请求视图层补齐。
+        let messages: Vec<ChatMessage> = messages.clone();
         // 与 PersistentChatSession 保持一致：剔孤儿 + content 归一，
         // 否则 content: None 会在请求体里序列化成 null 被 Provider 拒绝。
         let messages: Vec<ChatMessage> = drop_orphan_messages(messages);
