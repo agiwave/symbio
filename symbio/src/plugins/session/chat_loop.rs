@@ -169,7 +169,7 @@ pub async fn run_chat_loop(
         "[DIAG] run_chat_loop: configured_max_tool_rounds={:?} (None=无上限), auto_compress={}, enable_compact_tool={}, msg_id_in_payload={:?}",
         req.max_tool_rounds,
         req.auto_compress.unwrap_or(true),
-        req.enable_compact_tool.unwrap_or(true),
+        req.enable_compact_tool.unwrap_or(false),
         req.single_message.as_ref().map(|m| m.id.clone())
     );
 
@@ -177,7 +177,9 @@ pub async fn run_chat_loop(
     // 因此默认（request 未显式给出）=「无上限」；仅在调用方**显式**设置时才作为软上限并给出提示。
     let configured_max_tool_rounds = req.max_tool_rounds;
     let auto_compress = req.auto_compress.unwrap_or(true);
-    let enable_compact_tool = req.enable_compact_tool.unwrap_or(true);
+    // context_compact 主动压缩机制默认关闭（与 session_config serde 默认一致），
+    // 必须在插件配置中显式开启才生效
+    let enable_compact_tool = req.enable_compact_tool.unwrap_or(false);
 
     let mut tool_rounds: usize = 0;
     let mut continuation_count: u32 = 0;
@@ -662,12 +664,12 @@ pub async fn run_chat_loop(
         let mut parent_updates: Vec<ChatMessage> = Vec::new();
 
         if !compact_calls.is_empty() {
-            // 切分点必须按 parent_id 限定到当前 Turn（root_id）：全历史正向扫描
-            // 会命中会话最早的 ToolCall，切分点落在开头，旧内容几乎全部留在保留区
-            // → 压缩后水位不降 → 循环压缩（高频触发根因，见 find_turn_tool_call_split_idx）。
+            // 切分点前移到当前用户指令：保留区 = [用户指令, Turn 及其子节点...]，
+            // Turn 子树 parent 链完整；旧版切在本 Turn 首个 ToolCall，用户指令与
+            // Turn 根被压进快照，保留区只剩 parent 悬空的 ToolCall → provider 400。
             // 返回 0 时 run_context_compact 以 split==0 视为中止，安全。
-            let split_tool_call_idx =
-                compression::find_turn_tool_call_split_idx(&context.messages, &root_id);
+            let split_user_idx =
+                compression::find_turn_user_split_idx(&context.messages, &root_id);
             let first = compact_calls.first().cloned();
             if let Some(first) = first {
                 let call_id = first.id.clone().unwrap_or_default();
@@ -682,7 +684,7 @@ pub async fn run_chat_loop(
                     &mut channel,
                     &ctx,
                     &abort_flag,
-                    split_tool_call_idx,
+                    split_user_idx,
                     hints.as_deref(),
                 )
                 .await;
@@ -1190,7 +1192,8 @@ async fn auto_compress_process(
 
     let snapshot_message = ChatMessage {
         id: root_id.to_string(),
-        role: Some(MessageRole::Assistant),
+        // 快照作为压缩后的首条消息，必须是 user 角色（多数 provider 要求对话以 user 开头）
+        role: Some(MessageRole::User),
         msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(format!(
             "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_display}"
@@ -1219,13 +1222,15 @@ fn summary_text(m: &ChatMessage) -> String {
 
 /// 主动压缩工具（context_compact）执行体——目标四的核心。
 ///
-/// 关键正确性约束：**进行中的 Turn 必须整体保留**。
+/// 关键正确性约束：**进行中的 Turn 必须从其用户指令起整体保留**。
 /// 调用时本 Turn 的 ToolCall 消息已在上下文中（请求后 extend），但其工具结果
-/// 子节点尚未产生。切分点必须 ≤ 本 Turn 首个 ToolCall 的下标，否则：
-/// - 快照把"请求工具"压进去、结果却还在保留区 → 孤儿消息被 drop_orphan_messages 剔除；
-/// - 请求包里 Tool 结果失去父节点 → provider 400。
+/// 子节点尚未产生。切分点必须落在当前用户指令（Turn 根之前）：
+/// - 保留区 = [用户指令, Turn, 子节点...]，Turn 子树 parent 链完整；
+/// - 若切在 Turn 根与 ToolCall 之间：Turn 根入快照、子 ToolCall 留保留区 →
+///   parent 悬空 → 孤儿消息被 drop_orphan_messages 剔除 → 请求包里 Tool 结果
+///   失去父节点 → provider 400。
 ///
-/// `split_tool_call_idx`：主循环传入的本 Turn 首个 ToolCall 消息下标（工具调用分派前计算）。
+/// `split_user_idx`：主循环传入的切分下标（当前用户指令，见 find_turn_user_split_idx）。
 /// 返回 `(是否执行了压缩, 估算压缩前 tokens, 估算压缩后 tokens)`。
 async fn run_context_compact(
     orchestrator: &ChatOrchestrator,
@@ -1233,15 +1238,15 @@ async fn run_context_compact(
     channel: &mut PluginChannel,
     ctx: &Arc<dyn InvokeRequest>,
     abort_flag: &Arc<AtomicBool>,
-    split_tool_call_idx: usize,
+    split_user_idx: usize,
     hints: Option<&str>,
 ) -> (bool, usize, usize) {
-    if split_tool_call_idx == 0 {
+    if split_user_idx == 0 {
         return (false, 0, 0);
     }
 
-    // 待压缩历史 = [.., split_tool_call_idx)
-    let history: Vec<ChatMessage> = context.messages[..split_tool_call_idx].to_vec();
+    // 待压缩历史 = [.., split_user_idx)，当前用户指令起的任务上下文整体留在保留区
+    let history: Vec<ChatMessage> = context.messages[..split_user_idx].to_vec();
     let before_tokens: usize = history.iter().map(compression::estimate_message_tokens).sum();
     if before_tokens < compression::MIN_COMPACT_TOKENS {
         return (false, before_tokens, before_tokens);
@@ -1327,7 +1332,7 @@ async fn run_context_compact(
     let post_tokens = compression::estimate_message_tokens(&ChatMessage {
         content: Some(MessageContent::Text(snapshot_display.clone())),
         ..Default::default()
-    }) + original_messages[split_tool_call_idx..]
+    }) + original_messages[split_user_idx..]
         .iter()
         .map(compression::estimate_message_tokens)
         .sum::<usize>();
@@ -1343,7 +1348,8 @@ async fn run_context_compact(
 
     let snapshot_message = ChatMessage {
         id: short_id(),
-        role: Some(MessageRole::Assistant),
+        // 快照作为压缩后的首条消息，必须是 user 角色（多数 provider 要求对话以 user 开头）
+        role: Some(MessageRole::User),
         msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(format!(
             "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_display}"
@@ -1355,7 +1361,7 @@ async fn run_context_compact(
 
     let mut new_messages = vec![snapshot_message];
     // 保留区：当前用户指令 + 进行中 Turn（含本批 ToolCall）及之后的一切
-    new_messages.extend_from_slice(&original_messages[split_tool_call_idx..]);
+    new_messages.extend_from_slice(&original_messages[split_user_idx..]);
     context.messages = new_messages;
 
     let _ = context

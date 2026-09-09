@@ -133,20 +133,27 @@ fn find_compress_split_point(messages: &[ChatMessage], fraction: f64) -> usize {
     last_split_point
 }
 
-/// 找到当前 Turn（root_id）首个 ToolCall 消息的下标；找不到返回 0（压缩中止）。
+/// 找到当前 Turn（root_id）的切分下标：当前用户指令（Turn 根之前最近的根级 User）。
 ///
-/// 供 run_chat_loop 计算 run_context_compact 的切分点。必须按 `parent_id`
-/// 限定到当前 Turn：全历史正向扫描会命中会话最早的 ToolCall，切分点落在
-/// 会话开头，绝大部分旧内容留在保留区，压缩后水位几乎不降，导致压缩被
-/// 高频反复触发。
-pub fn find_turn_tool_call_split_idx(messages: &[ChatMessage], root_id: &str) -> usize {
-    messages
+/// 供 run_chat_loop 计算 run_context_compact 的切分点。切分点必须覆盖完整
+/// Turn 子树的起点，保留区 = [用户指令, Turn, 子节点...]，parent 链不断裂。
+/// 历史缺陷对照：
+/// - 旧版切在本 Turn 首个 ToolCall：用户指令与 Turn 根被压进快照，保留区只剩
+///   parent 悬空的 ToolCall 子树 → 孤儿剔除 → provider 400；
+/// - 更早版本全历史正向扫描会命中会话最早的 ToolCall，切分点落在会话开头，
+///   旧内容几乎全部留在保留区，压缩后水位不降 → 高频反复触发。
+/// 回退：Turn 之前无根级 User 时切在 Turn 根下标（子树仍完整）；Turn 不存在
+/// 返回 0（run_context_compact 以 split==0 视为中止）。水位提醒 nudge 为请求级
+/// 注入不落库，向前回扫不会误命中（见 chat_loop nudge 注释）。
+pub fn find_turn_user_split_idx(messages: &[ChatMessage], root_id: &str) -> usize {
+    let turn_idx = match messages.iter().position(|m| m.id == root_id) {
+        Some(i) => i,
+        None => return 0,
+    };
+    messages[..turn_idx]
         .iter()
-        .position(|m| {
-            m.msg_type == Some(MessageType::ToolCall)
-                && m.parent_id.as_deref() == Some(root_id)
-        })
-        .unwrap_or(0)
+        .rposition(|m| m.role == Some(MessageRole::User) && m.parent_id.is_none())
+        .unwrap_or(turn_idx)
 }
 
 /// 估算单条消息的 token 数。
@@ -670,31 +677,59 @@ mod tests {
         assert!(split > 0, "配对完整时不应放弃压缩");
     }
 
-    /// 高频压缩根因回归：切分点必须按 parent_id 限定到当前 Turn。
-    /// 旧实现全历史正向扫描，对当前 Turn 的 root_id 也会命中会话最早的
-    /// ToolCall（下标 1），切分点落在会话开头，压缩后水位不降 → 反复触发。
+    fn turn_root_msg(id: &str) -> ChatMessage {
+        ChatMessage {
+            id: id.to_string(),
+            parent_id: None,
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::Turn),
+            content: Some(MessageContent::Text("turn".to_string())),
+            ..Default::default()
+        }
+    }
+
+    /// 切分点回归：必须前移到当前用户指令（保留区 = 用户指令 + 完整 Turn 子树）。
+    /// 旧实现切在本 Turn 首个 ToolCall，用户指令与 Turn 根被压进快照，保留区
+    /// 只剩 parent 悬空的 ToolCall 子树 → provider 400。
     #[test]
-    fn test_turn_tool_call_split_idx_scoped_to_current_turn() {
-        let old_call = ChatMessage {
-            parent_id: Some("old-root".to_string()),
-            ..tool_call_msg()
-        };
+    fn test_turn_split_idx_starts_at_user_instruction() {
         let cur_call = ChatMessage {
             parent_id: Some("cur-root".to_string()),
             ..tool_call_msg()
         };
+        let old_call = ChatMessage {
+            parent_id: Some("old-root".to_string()),
+            ..tool_call_msg()
+        };
         let msgs = vec![
             user_msg("旧问题"),
+            turn_root_msg("old-root"),
             old_call,
             tool_result_msg(),
             user_msg("新问题"),
+            turn_root_msg("cur-root"),
             cur_call,
+            tool_result_msg(),
         ];
-        // 当前 Turn 的首个 ToolCall 在下标 4（旧实现会错误地返回 1）
-        assert_eq!(find_turn_tool_call_split_idx(&msgs, "cur-root"), 4);
-        assert_eq!(find_turn_tool_call_split_idx(&msgs, "old-root"), 1);
-        // 当前 Turn 无 ToolCall ⇒ 0（run_context_compact 以 split==0 视为中止）
-        assert_eq!(find_turn_tool_call_split_idx(&msgs, "no-such-turn"), 0);
+        // 当前用户指令在下标 4：保留区从"新问题"起，含完整 Turn 子树
+        assert_eq!(find_turn_user_split_idx(&msgs, "cur-root"), 4);
+        // 旧 Turn：其用户指令即会话首条 ⇒ 0（run_context_compact 以 split==0 中止）
+        assert_eq!(find_turn_user_split_idx(&msgs, "old-root"), 0);
+        // Turn 不存在 ⇒ 0（中止）
+        assert_eq!(find_turn_user_split_idx(&msgs, "no-such-turn"), 0);
+    }
+
+    /// 回退与中止语义：Turn 前无根级 User ⇒ 切在 Turn 根（子树仍完整）；
+    /// 压缩后快照(User)即历史 ⇒ 切点 0 → 中止，避免把快照自身当作待压缩历史。
+    #[test]
+    fn test_turn_split_idx_fallback_and_abort() {
+        let turn = turn_root_msg("cur-root");
+        let msgs = vec![assistant_msg("开场白"), turn.clone(), tool_call_msg()];
+        assert_eq!(find_turn_user_split_idx(&msgs, "cur-root"), 1);
+
+        let snapshot = user_msg("[CONTEXT SNAPSHOT]");
+        let msgs2 = vec![snapshot, turn];
+        assert_eq!(find_turn_user_split_idx(&msgs2, "cur-root"), 0);
     }
 
     /// 滞后口径回归：迟滞比较必须用扣除请求级 overhead 后的内容侧读数。

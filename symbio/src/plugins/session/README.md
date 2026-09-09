@@ -65,7 +65,7 @@ session:
   tool_context_window: 15        # LLM 推理上下文中保留完整明细的最近工具调用数量 (超出者骨架化，配对保留不删除)
   
   # 6. 水位提醒与主动压缩
-  enable_compact_tool: true      # 是否启用 55% Token 水位提醒 (nudge) 注入与 context_compact 主动压缩工具
+  enable_compact_tool: false     # 是否启用 55% Token 水位提醒 (nudge) 注入与 context_compact 主动压缩工具 (默认关闭，须手动开启；关闭后仅保留 70% 自动压缩兜底)
 ```
 
 ---

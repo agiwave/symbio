@@ -196,3 +196,74 @@ LLM 发起 tool_call(file_read)
 | 2.6-测试 | message_builder.rs | 新增 4 测试：failed_turn_visible_with_interrupt_note / failed_turn_without_children_survives_with_note / interrupted_tool_call_gets_placeholder_result / failed_tool_result_sets_success_false |
 
 回归：cargo check 零警告；cargo test --lib 全绿（基线 227 + 新增 4 = 231）。
+
+---
+
+## 4. context_compact 主动压缩机制：三问题分析与修复
+
+> 现场证据：会话 `mtqm3mlgpyyg4cmlf6q`（GLM provider，code 1214 400 错误）。
+> 修复后语义适用于**被动压缩**（auto_compress 链路共用同一快照/消息构造代码）与**主动压缩工具**（context_compact）两条路径。
+
+### 4.1 问题 1：主动压缩后悬空 tool_call → provider 400
+
+**现象**：会话出现 parent 悬空的 ToolCall 节点（`call_8e281709` 的 parent `1bcba853` 不存在于消息列表），请求包里 Tool 结果失去父节点，GLM 返回 400。
+
+**根因链**：主动压缩切分函数 `find_turn_tool_call_split_idx` 切在**本 Turn 首个 ToolCall**的下标：
+
+- 待压缩历史 = `[.., 切分点)`，把**当前用户指令 + Turn 根节点**一起压进快照；
+- 保留区 = `[切分点..]` 只剩 ToolCall 及其结果子节点——它们的 parent（Turn 根）已进快照，parent 链断裂；
+- 快照正文被渲染为一条 Text 消息，Turn 根不复存在 → 悬空。
+
+讽刺的是，代码注释声称"保留区：当前用户指令 + 进行中 Turn（含本批 ToolCall）及之后的一切"——**实现与注释意图自相矛盾**。
+
+**修复**（切分点前移）：
+
+- 函数改名 `find_turn_tool_call_split_idx` → `find_turn_user_split_idx`，语义改为**定位当前用户指令**：先找 `id == root_id` 的 Turn 根下标，再向前回扫最近的根级 User 消息（`role=User && parent_id=None`）；
+- 保留区 = `[用户指令, Turn, 子节点...]`，Turn 子树 parent 链天然完整，任务原文不进快照（与原注释意图一致）；
+- 回退规则：Turn 之前无根级 User → 切在 Turn 根下标（子树仍完整）；Turn 不存在 → 返回 0（run_context_compact 以 `split==0` 视为中止）；
+- 安全性依据：① nudge 水位提醒为请求级注入、**不落库**（chat_loop nudge 注释），回扫不会误命中注入的 User 消息；② 压缩后快照本身是 User 角色，二次压缩时回扫命中快照 → 切点 0 → 中止，不会把快照自身当待压缩历史；③ provider 侧连续 User 消息安全（anthropic_messages 有连续同角色合并，OpenAI/GLM 协议接受）。
+
+### 4.2 问题 2：压缩后首条消息不是 user → provider 400（code 1214）
+
+**现象**：压缩后会话首条是 assistant 快照（`7d7a0efe`，post_tokens=5376），GLM 要求对话以 user 开头，返回 400 code 1214。多数 provider 有同类约束（Anthropic 首条必须 user，OpenAI 强依赖）。
+
+**根因**：两条压缩路径的快照构造均硬编码 `role: Some(MessageRole::Assistant)`：
+
+- 被动路径 chat_loop.rs（原 L1193，`id: root_id.to_string()`）；
+- 主动路径 chat_loop.rs（原 L1346，`id: short_id()`）。
+
+**修复**：两处均改为 `role: Some(MessageRole::User)`，快照内容文本不变（`[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]...`）。语义上快照是"给模型的记忆交接书"，以 user 口吻交代上下文也是协议更自然的表达。
+
+### 4.3 问题 3：远未到上下文限额即触发压缩
+
+**触发链拆解**（修复后保留此分析作为调参依据，机制本身未改）：
+
+| 环节 | 机制 | 阈值 | 说明 |
+|------|------|------|------|
+| 硬触发 | `should_start_compression` | `context_limit × 0.7` | current（含 overhead）≥ 阈值即触发 |
+| 引导触发 | `should_emit_context_nudge` → 请求级注入提醒 → 模型调用 context_compact | `context_limit × 0.55` | 提醒诱导模型"提前"压缩——这是"远未到限额就压缩"的直接来源 |
+| force 直通 | context_compact 工具调用 / `/compact` 指令 | 无 | `force=true` 跳过阈值与迟滞判断 |
+| 迟滞保护 | 距上次快照增长 < `post_tokens × 1.15` | 拦截 | 仅拦硬触发，不拦 force |
+| 最小收益 | `MIN_COMPACT_TOKENS = 4000` | 拦截 | 待压缩历史 < 4000 tok 放弃 |
+
+**水位口径误区**：现场 `before_tokens=68848` 看似远超限额，但它只是**切分点前待压缩历史的估算**，不是总水位；真实总水位 = 全部消息估算 + 请求级 overhead（system prompt + 工具定义 schema，插件场景可达数万 token）。触发时真实水位可能确实越过了 55%/70% 线，只是用户从 `before_tokens` 数字上看不出来。
+
+**修复决策**：`enable_compact_tool` 默认关闭——机制存在缺陷与调参争议时，最稳妥的是收口为显式 opt-in。默认关闭后 0.55 nudge 引导与 force 直通链路整体不生效，问题 3 随之消失；需要主动压缩的用户在插件配置显式开启，并应理解 nudge 会引导模型在 55% 水位即自行调用压缩（属预期行为）。
+
+### 4.4 修复 A：enable_compact_tool 默认关闭（5 处落点）
+
+| 落点 | 文件 | 内容 |
+|------|------|------|
+| 1 | chat_loop.rs DIAG 日志 | `req.enable_compact_tool.unwrap_or(false)` |
+| 2 | chat_loop.rs 有效值（原 L180） | 同上 + 注释说明与 session_config 默认一致 |
+| 3 | session_config.rs | `default_enable_compact_tool() -> false`（serde 默认，Default impl 同源） |
+| 4 | plugin.rs UI schema | `"default": false` + description"默认关闭，需手动开启" |
+| 5 | README.md | 配置示例 `enable_compact_tool: false` + 注释 |
+
+配套确认：orchestrator.rs 三分支均传 `Some(session_cfg.enable_compact_tool)`，serde 默认值改动直接生效于持久化/临时/新建全部会话形态。
+
+### 4.5 回归
+
+- cargo check 零警告；
+- compression 模块 21 测试全绿（含新 `test_turn_split_idx_starts_at_user_instruction` / `test_turn_split_idx_fallback_and_abort`，取代旧 `test_turn_tool_call_split_idx_scoped_to_current_turn`）；
+- 全量 `cargo test` 232 passed / 0 failed。

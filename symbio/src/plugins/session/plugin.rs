@@ -230,8 +230,8 @@ impl SessionPlugin {
                 "enable_compact_tool": {
                     "type": "boolean",
                     "title": "工具压缩",
-                    "description": "是否向模型提供主动压缩工具（context_compact）与水位提醒；关闭后仅保留自动压缩",
-                    "default": true
+                    "description": "是否向模型提供主动压缩工具（context_compact）与水位提醒；关闭后仅保留自动压缩。默认关闭，需手动开启",
+                    "default": false
                 },
                 "compress_threshold": {
                     "type": "integer",

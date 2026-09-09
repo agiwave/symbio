@@ -77,7 +77,7 @@ fn default_tool_context_window() -> usize {
     15
 }
 fn default_enable_compact_tool() -> bool {
-    true
+    false
 }
 
 impl Default for SessionConfig {
