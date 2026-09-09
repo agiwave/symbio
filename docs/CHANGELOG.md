@@ -20,6 +20,10 @@
 
 ## 2026-09-08: 上下文治理优化（骨架化信息保留 + 策略保留优先级修复）
 
+- **骨架化参数定位锚点（链路保持）**：窗口外 ToolCall 骨架化时参数占位符保留关键定位参数回声（`path`/`command`/`url`/`pattern`/`file_paths`/`query`，单条约 10 Token，新增 `anchor_of_args`）——否则"读过某文件第 N 行"这类结果摘要因缺失文件路径而无法回溯，历史逻辑链路断裂。新增测试 `skeletonized_toolcall_keeps_path_anchor`。
+
+- **单行长内容压缩失效修复（bug）**：单行大 JSON/URL/base64 原先绕过两层防线——L0 守卫 `split_head_tail` 首行永远整行保留（超预算不生效）；L1 脱水仅按行数触发（行数=1 不触发）。修复：L0 head/tail 超预算时按字符截断兜底；L1 触发条件增加"单行超长 token 超预算"（`message_archive.rs`，保留内容再按字符截断）。新增测试 `single_long_line_message_compressed` / `split_head_tail_truncates_single_line_over_budget`。
+
 - **策略保留优先级修复（bug）**：`context_window.rs` 的 `is_stale` 原逻辑全局窗口判定优先于工具级保留策略，导致 LastOnly 工具（todo_write）的最新调用滚出全局窗口（15 个 ToolCall）后被骨架化，模型丢失任务清单引发重写。修复后**策略保留优先于全局窗口**：声明 `LastOnly`/`LastN` 的工具其最近 N 次调用即使滚出全局窗口也完整保留；未声明策略的工具仅受全局窗口约束。新增测试 `last_only_latest_call_survives_beyond_global_window`。
 
 - **骨架化"整条丢弃"改为"保留一行摘要"**：新增 `SKELETON_DIGEST_TOKEN_CAP=48` 与辅助函数 `is_failed_result`（结构化优先：`meta.success` 存在即直接采信短路返回，避免"0 failed tests"文本误判）、`error_digest`（failure_kind + 工具名 + 首行原因）、`first_line_digest`、`truncate_tokens`（CJK 友好，字符预算 = token×2）。占位符：失败 → `[System Info: Tool result failed: {kind} ({tool}): {cause}. Full output skeletonized.]`；成功 → `[System Info: Tool result received successfully. Output skeletonized. Summary: {首行}]`。新增测试 `skeletonized_failure_keeps_error_digest` / `skeletonized_success_keeps_first_line_digest` / `failure_detection_prefers_structured_meta`。

@@ -32,7 +32,9 @@ pub struct GuardedResult {
 
 /// 把超长文本按预算裁剪成 head/tail 摘要。
 ///
-/// 优先按**行**截断（结构化输出友好，不会切断 JSON/表格行）；单行超长时退化为按字符。
+/// 优先按**行**截断（结构化输出友好，不会切断 JSON/表格行）；单行超预算时
+/// 退化为按字符截断（head 保留行首、tail 保留行尾）——否则首行整行放行，
+/// 压缩完全失效（真实会话实证：12k token 的单行 glob 结果只省略了 1/3）。
 fn split_head_tail(text: &str, head_budget: usize, tail_budget: usize) -> (String, String) {
     let tok = default_tokenizer();
     let lines: Vec<&str> = text.lines().collect();
@@ -43,7 +45,15 @@ fn split_head_tail(text: &str, head_budget: usize, tail_budget: usize) -> (Strin
     let mut head_line_count = 0usize;
     for &line in &lines {
         let c = tok.count(line) + tok.count("\n");
-        if used + c > head_budget && !head.is_empty() {
+        if used + c > head_budget {
+            if head.is_empty() || head_line_count == 0 {
+                // 首行（或首个待收行）超预算：按字符截断行首，而非整行放行
+                let char_cap = head_budget.saturating_mul(2);
+                let truncated: String = line.chars().take(char_cap).collect();
+                head.push_str(&truncated);
+                head.push('…');
+                head.push('\n');
+            }
             break;
         }
         used += c;
@@ -53,15 +63,22 @@ fn split_head_tail(text: &str, head_budget: usize, tail_budget: usize) -> (Strin
     }
 
     // tail：从尾部（跳过已被 head 取走的部分）往回贪心累加
-    let mut tail_lines: Vec<&str> = Vec::new();
+    let mut tail_lines: Vec<String> = Vec::new();
     let mut used_t = 0usize;
     for &line in lines[head_line_count.min(lines.len())..].iter().rev() {
         let c = tok.count(line) + tok.count("\n");
-        if used_t + c > tail_budget && !tail_lines.is_empty() {
+        if used_t + c > tail_budget {
+            if tail_lines.is_empty() {
+                // 尾行超预算：按字符保留行尾（结论/错误多在尾部）
+                let char_cap = tail_budget.saturating_mul(2);
+                let skip = line.chars().count().saturating_sub(char_cap);
+                let truncated: String = line.chars().skip(skip).collect();
+                tail_lines.push(format!("…{truncated}"));
+            }
             break;
         }
         used_t += c;
-        tail_lines.push(line);
+        tail_lines.push(line.to_string());
     }
     tail_lines.reverse();
     let tail = tail_lines.join("\n");
@@ -179,5 +196,23 @@ mod tests {
         assert!(g.text.contains("fn main()"));
         // 文本显著缩短（预算 500 token ≈ 文本远小于原文）
         assert!(g.text.len() < big.len() / 2);
+    }
+
+    /// 单行超长内容：按行截断失效（首行整行放行），应按字符截断行首
+    /// （真实会话实证：12k token 单行 glob 结果只省略 1/3，压缩近乎失效）
+    #[test]
+    fn single_long_line_is_char_truncated() {
+        let huge = format!("{{\"entries\":[\"{}\"]}}", "x".repeat(10_000));
+        let g = guard_tool_result(&huge, 300);
+        assert!(g.truncated, "单行超预算应触发截断");
+        // head 按字符截断行首，不再整行放行
+        assert!(
+            g.text.chars().count() < huge.chars().count() / 2,
+            "截断后应显著短于原文: {} vs {}",
+            g.text.chars().count(),
+            huge.chars().count()
+        );
+        assert!(g.text.starts_with("{\"entries"), "行首应保留: {}", &g.text[..40.min(g.text.len())]);
+        assert!(g.text.contains("[... 已省略"), "占位提示应存在");
     }
 }

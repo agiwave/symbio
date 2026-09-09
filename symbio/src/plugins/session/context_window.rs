@@ -99,6 +99,29 @@ fn truncate_tokens(line: &str, token_cap: usize) -> String {
     }
 }
 
+/// 骨架化 ToolCall 参数时保留的定位参数键（按优先级取首个命中项）。
+/// 模型凭锚点把历史调用与其结果对上号（"读过哪个文件/跑过什么命令"）——
+/// 否则滚出窗口后只剩"[行 585-602，共 621 行]"这类无主摘要，链路断裂
+/// （真实会话实证：模型面对结果摘要却不知对应哪个文件，只能整目录重读）。
+const ANCHOR_PARAM_KEYS: &[&str] = &[
+    "path", "file_path", "command", "url", "pattern", "query", "name",
+];
+
+/// 从参数 JSON 提取首个命中的定位参数作为锚点（截断至一行）。
+/// 非 JSON 参数或无命中键时返回 None（退回通用占位符）。
+fn anchor_of_args(args: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(args).ok()?;
+    let obj = value.as_object()?;
+    for key in ANCHOR_PARAM_KEYS {
+        if let Some(v) = obj.get(*key).and_then(|v| v.as_str()) {
+            if !v.trim().is_empty() {
+                return Some(format!("{key}={}", truncate_tokens(v, 24)));
+            }
+        }
+    }
+    None
+}
+
 /// 混合滑动窗口过滤历史工具调用 (Layered Sliding Window)
 ///
 /// 两级压缩规则（只骨架化、不删除，保持 tool_call/tool_result 配对合法）：
@@ -119,6 +142,11 @@ fn truncate_tokens(line: &str, token_cap: usize) -> String {
 /// 信息性的，错误详情决定模型换路径重试还是放弃）；成功结果保留首行摘要
 /// （给模型"读过什么"的锚点，避免被迫整文件重读）。摘要判定结构化优先
 /// （`meta.success` / `meta.failure_kind`），文本启发式兜底。
+///
+/// 骨架化占位符同时**保留定位锚点**：参数骨架化保留首个定位参数
+/// （path/command/url/pattern/query/name），结果摘要前缀配对调用的锚点——
+/// 模型凭锚点把历史调用与结果对上号，避免"读过某文件第 N 行却不知是哪个
+/// 文件"的链路断裂。
 ///
 /// ToolCall 节点的 name 是 LLM 可见全名（如 "local/todo_write"），此处匹配时
 /// 取最后一个 '/' 后的短名。
@@ -181,12 +209,23 @@ pub fn apply_layered_sliding_window(
 
         if msg.msg_type == Some(MessageType::ToolCall) {
             if is_stale(&msg.id) {
-                // ToolCall 组合节点自身 content = 请求参数 JSON → 骨架化，
-                // 并清理可能遗留的 legacy tool_calls meta。
-                new_msg.content = Some(MessageContent::Text(
-                    "[System Info: Tool call input parameters skeletonized to save context.]"
-                        .to_string(),
-                ));
+                // ToolCall 组合节点自身 content = 请求参数 JSON → 骨架化。
+                // 保留定位锚点（path/command/url 等），让历史调用可与结果对号：
+                let placeholder = msg
+                    .content
+                    .as_ref()
+                    .map(|c| c.to_text())
+                    .and_then(|args| anchor_of_args(&args))
+                    .map(|a| {
+                        format!(
+                            "[System Info: Tool call input parameters skeletonized to save context. ({a})]"
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        "[System Info: Tool call input parameters skeletonized to save context.]"
+                            .to_string()
+                    });
+                new_msg.content = Some(MessageContent::Text(placeholder));
                 if let Some(mut meta) = new_msg.meta.as_ref().and_then(|m| m.as_object()).cloned() {
                     meta.remove("tool_calls");
                     new_msg.meta = Some(serde_json::Value::Object(meta));
@@ -206,6 +245,16 @@ pub fn apply_layered_sliding_window(
                     .as_ref()
                     .map(|c| c.to_text())
                     .unwrap_or_default();
+                // 结果摘要前拼接配对 ToolCall 的锚点（path/command 等），
+                // 无主摘要（"读过某文件第 585 行"却不知是哪个文件）是链路断裂的根源
+                let anchor = msg
+                    .parent_id
+                    .as_deref()
+                    .and_then(|pid| messages.iter().find(|m| m.id == *pid))
+                    .and_then(|tc| tc.content.as_ref().map(|c| c.to_text()))
+                    .and_then(|args| anchor_of_args(&args))
+                    .map(|a| format!(" ({a})"))
+                    .unwrap_or_default();
                 let label = if msg.role == Some(MessageRole::Tool) {
                     // 失败结果保留错误摘要、成功结果保留首行摘要：
                     // 失败是信息性的（错误详情决定下一步动作），成功摘要避免
@@ -213,24 +262,26 @@ pub fn apply_layered_sliding_window(
                     if is_failed_result(msg, &preview) {
                         let detail = error_digest(msg, &preview);
                         format!(
-                            "[System Info: Tool result failed: {}. Full output skeletonized.]",
+                            "[System Info: Tool result failed{anchor}: {}. Full output skeletonized.]",
                             detail
                         )
                     } else {
                         let hint = first_line_digest(&preview);
                         if hint.is_empty() {
-                            "[System Info: Tool result received successfully. Output skeletonized.]"
-                                .to_string()
+                            format!(
+                                "[System Info: Tool result received successfully{anchor}. Output skeletonized.]"
+                            )
                         } else {
                             format!(
-                                "[System Info: Tool result received successfully. Output skeletonized. Summary: {}]",
+                                "[System Info: Tool result received successfully{anchor}. Output skeletonized. Summary: {}]",
                                 hint
                             )
                         }
                     }
                 } else {
-                    "[System Info: Tool call input parameters skeletonized to save context.]"
-                        .to_string()
+                    format!(
+                        "[System Info: Tool call input parameters skeletonized to save context.{anchor}]"
+                    )
                 };
                 new_msg.content = Some(MessageContent::Text(label));
             }
@@ -486,5 +537,51 @@ mod tests {
         let out = apply_layered_sliding_window(&messages, 0, &ret);
         let r = out.iter().find(|m| m.parent_id.as_deref() == Some("m1")).unwrap();
         assert!(param_of(r).contains("successfully"), "meta.success=true 应判定为成功");
+    }
+
+    /// 骨架化保留定位锚点：参数骨架化保留首个定位参数，
+    /// 结果摘要前缀配对调用的锚点（真实会话实证：无主摘要"[行 585-602]"
+    /// 让模型不知对应哪个文件，只能整目录重读）
+    #[test]
+    fn skeletonized_call_and_result_keep_anchor_param() {
+        let messages = vec![
+            tc_msg("a1", "local/read_file", r#"{"path":"gateway/server.rs","limit":50}"#),
+            tool_result("a1", "[行 585-602，共 621 行]"),
+        ];
+        let ret = HashMap::new();
+        let out = apply_layered_sliding_window(&messages, 0, &ret);
+
+        let call = out.iter().find(|m| m.id == "a1").unwrap();
+        let call_text = param_of(call);
+        assert!(
+            call_text.contains("(path=gateway/server.rs)"),
+            "参数骨架化应保留 path 锚点: {call_text}"
+        );
+        assert!(!call_text.contains("limit"), "锚点之外的参数不应保留: {call_text}");
+
+        let result = out.iter().find(|m| m.parent_id.as_deref() == Some("a1")).unwrap();
+        let result_text = param_of(result);
+        assert!(
+            result_text.contains("(path=gateway/server.rs)"),
+            "结果摘要应前缀配对调用的锚点: {result_text}"
+        );
+        assert!(result_text.contains("[行 585-602"), "首行摘要仍应保留: {result_text}");
+    }
+
+    /// 无定位参数的调用（如 todo_write 的 todos）退回通用占位符，不强行编造锚点
+    #[test]
+    fn skeletonized_without_anchor_falls_back_to_generic() {
+        let messages = vec![
+            tc_msg("w1", "local/todo_write", r#"{"todos":"清单 v1 很长很长"}"#),
+            tool_result("w1", "已更新"),
+        ];
+        let ret = HashMap::new();
+        let out = apply_layered_sliding_window(&messages, 0, &ret);
+        let call = out.iter().find(|m| m.id == "w1").unwrap();
+        assert_eq!(
+            param_of(call),
+            "[System Info: Tool call input parameters skeletonized to save context.]",
+            "无锚点参数应退回通用占位符"
+        );
     }
 }
