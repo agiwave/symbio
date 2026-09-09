@@ -25,6 +25,7 @@
 
 import { subscribe as busSubscribe, type BusEvent } from './eventBus'
 import { ChatEventType, type ChatEvent } from './model'
+import { playCompletionChime } from './completionChime'
 import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
 
@@ -70,9 +71,13 @@ export function startSessionBusWatcher(): void {
             store.setWorking(sid, true)
           } else if (evt.status === 'idle') {
             // idle 表示一轮交互彻底结束（含审批已了结），复位审批角标
+            // 提示音：仅"忙碌 → 结束"的真实收尾才响（应用启动/事件重放等
+            // 非工作态的 idle 不响），且 Abort/Error 已响过的同轮结束会被去重
+            const wasWorking = store.getSessionStatus(sid).is_working
             store.putStatus(sid, { is_working: false, activity: undefined, is_waiting_approval: false })
             store.setSessionError(sid, null)
             store.setWorking(sid, false)
+            if (wasWorking) playCompletionChime('completed', sid)
           }
           break
 
@@ -127,8 +132,12 @@ export function startSessionBusWatcher(): void {
               }
             }
           }
+          // 提示音：用户主动中止的收尾（wasWorking 判定同 idle 分支；
+          // 若本会话本轮已因 Error 响过铃，去重窗口会拦截）
+          const wasWorkingBeforeAbort = store.getSessionStatus(sid).is_working
           store.putStatus(sid, { is_working: false, activity: '已中止', is_waiting_approval: false })
           store.setWorking(sid, false)
+          if (wasWorkingBeforeAbort) playCompletionChime('aborted', sid)
           break
         }
 
@@ -145,6 +154,7 @@ export function startSessionBusWatcher(): void {
           // - 仅当没有任何失败消息节点（错误发生在任何消息创建之前，如 transport 级失败）
           //   时，才把错误落到**会话级错误状态**（setSessionError）——它是一条状态，
           //   不是消息树里的一个节点，UI 在会话级错误条里展示并许可重试。
+          const wasWorkingBeforeError = store.getSessionStatus(sid).is_working
           const msgs = store.getSessionMessages(sid)
           const hasFailedNode = msgs.some(
             (m) => m.status === 'failed' && !(m.meta as any)?.ephemeral,
@@ -159,6 +169,8 @@ export function startSessionBusWatcher(): void {
             is_waiting_approval: false
           })
           store.setWorking(sid, false)
+          // 提示音：异常结束（wasWorking 判定与去重同上）
+          if (wasWorkingBeforeError) playCompletionChime('failed', sid)
           break
         }
 
