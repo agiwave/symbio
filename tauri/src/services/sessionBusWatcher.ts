@@ -30,16 +30,22 @@ import { logger } from '@/utils/logger'
 
 let _unsubscribe: (() => void) | null = null
 
+// HMR 守卫：模块热更新会重置 `_unsubscribe`，导致 startSessionBusWatcher 二次订阅
+// → 同一事件被两个 handler 各处理一次（流式消息逐词叠字）。启动标记挂到 globalThis，
+// 跨模块重载保持幂等。
+const _G = globalThis as typeof globalThis & { __symSessionBusWatcherStarted?: boolean }
+
 /**
  * 启动全局会话事件监听（幂等）
  *
  * 应在应用启动时（`main.ts` 或 `App.vue.onMounted`）调用一次。
  */
 export function startSessionBusWatcher(): void {
-  if (_unsubscribe) {
+  if (_unsubscribe || _G.__symSessionBusWatcherStarted) {
     logger.warn('[session-bus-watcher]', 'already started')
     return
   }
+  _G.__symSessionBusWatcherStarted = true
 
   const store = useSessionsStore()
 
@@ -199,6 +205,7 @@ export function startSessionBusWatcher(): void {
  * 停止全局监听（一般不需要调用）
  */
 export function stopSessionBusWatcher(): void {
+  _G.__symSessionBusWatcherStarted = false
   if (_unsubscribe) {
     _unsubscribe()
     _unsubscribe = null

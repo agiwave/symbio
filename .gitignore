@@ -7,6 +7,10 @@ symbio/embedding/
 .cargo*/
 .zcode/
 .workbuddy/
+.vscode/
+.idea/
+.VSCode*/
+
 
 # Build outputs
 dist/

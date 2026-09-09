@@ -47,13 +47,39 @@ export interface BusSubscription {
   handler: (event: BusEvent) => void
 }
 
-/** 内部状态 */
-let _connection: Connection | null = null
-let _connectionPromise: Promise<Connection> | null = null
-const _subscribers = new Set<BusSubscription>()
-let _nextSubId = 1
-let _reconnectTimer: ReturnType<typeof setTimeout> | null = null
-let _reconnectDelay = 1000
+/**
+ * 内部状态（globalThis 单例）。
+ *
+ * 为什么挂到 globalThis：Vite HMR / 模块热更新会重新执行本模块，
+ * 模块级变量被重置后旧连接成为"孤儿"（后端订阅仍在、前端监听器仍在），
+ * 再次订阅时会建立第二条连接 → 同一事件送达两次（流式消息叠字的温床）。
+ * 把连接相关状态收敛到 globalThis 单例，模块重载后复用同一份状态，
+ * 保证任何场景下前端与后端的事件总线**只有一条有效连接**。
+ */
+interface EventBusState {
+  connection: Connection | null
+  connectionPromise: Promise<Connection> | null
+  subscribers: Set<BusSubscription>
+  nextSubId: number
+  reconnectTimer: ReturnType<typeof setTimeout> | null
+  reconnectDelay: number
+  /** 切换会话时的"防乱序"缓冲（语义见下方 replay buffer 注释） */
+  replayBuffer: Map<string, BusEvent[]>
+  /** 前端模式：页面间本地通知注册表 */
+  localEntityHandlers: Map<string, Set<(e: EntityChangedEvent) => void>>
+}
+
+const _G = globalThis as typeof globalThis & { __symEventBusState?: EventBusState }
+const S: EventBusState = _G.__symEventBusState ?? (_G.__symEventBusState = {
+  connection: null,
+  connectionPromise: null,
+  subscribers: new Set(),
+  nextSubId: 1,
+  reconnectTimer: null,
+  reconnectDelay: 1000,
+  replayBuffer: new Map(),
+  localEntityHandlers: new Map()
+})
 const _maxReconnectDelay = 30000
 
 /**
@@ -63,45 +89,55 @@ const _maxReconnectDelay = 30000
  * 1. **回放事件**（fetchPendingSnapshot 返回的历史）
  * 2. **实时事件**（总线连接上正在推送的新事件）
  *
- * 旧实现：先 `_subscribers.add(sub)`，再异步拉 snapshot。
+ * 旧实现：先 `S.subscribers.add(sub)`，再异步拉 snapshot。
  *   副作用：在 snapshot 拉回前的几百毫秒内，实时事件先到 handler；
  *   snapshot 中的"更早的事件"反而晚到，造成 Status / Abort 顺序错乱。
  *
  * 新实现：
  *   1. 订阅时立即拉 snapshot
- *   2. snapshot 拉回前，到达该 sessionId 的实时事件先缓存到 `_replayBuffer`
+ *   2. snapshot 拉回前，到达该 sessionId 的实时事件先缓存到 `S.replayBuffer`
  *   3. snapshot 处理完后再**有序**派发（先 snapshot，后缓存的实时事件）
- *   4. 派发完后从 `_replayBuffer` 删除该 sessionId
+ *   4. 派发完后从 `S.replayBuffer` 删除该 sessionId
  */
-const _replayBuffer: Map<string, BusEvent[]> = new Map()
 
 /**
  * 启动（幂等）事件总线连接
  */
 export async function connectEventBus(): Promise<Connection> {
-  if (_connection && _connection.isConnected) {
-    return _connection
+  if (S.connection && S.connection.isConnected) {
+    return S.connection
   }
-  if (_connectionPromise) {
-    return _connectionPromise
+  if (S.connectionPromise) {
+    return S.connectionPromise
   }
 
-  _connectionPromise = (async () => {
+  S.connectionPromise = (async () => {
+    // 单连接保证：新连接建立前先关闭旧连接（连接超时误判失活 / HMR 残留等场景）。
+    // 旧连接若不回收：前端 route/{id} 监听器与后端订阅都在 → 同一事件送达两次。
+    if (S.connection) {
+      const stale = S.connection
+      S.connection = null
+      try {
+        await stale.close()
+      } catch (e) {
+        logger.warn('[event-bus]', 'Close stale connection failed:', e)
+      }
+    }
     const conn = await connectPlugin('event_bus/subscribe', {}, handleConnectionEvent, {})
-    _connection = conn
-    _reconnectDelay = 1000
+    S.connection = conn
+    S.reconnectDelay = 1000
     logger.info('[event-bus]', 'Event bus connected', conn.connectionId)
 
     // 监听 disconnect 事件以便触发重连
     // （connectPlugin 会在 onEvent('disconnected') 时调用）
-    _connectionPromise = null
+    S.connectionPromise = null
     return conn
   })()
 
   try {
-    return await _connectionPromise
+    return await S.connectionPromise
   } catch (e) {
-    _connectionPromise = null
+    S.connectionPromise = null
     logger.error('[event-bus]', 'Failed to connect:', e)
     scheduleReconnect()
     throw e
@@ -112,27 +148,27 @@ export async function connectEventBus(): Promise<Connection> {
  * 主动断开事件总线
  */
 export async function disconnectEventBus(): Promise<void> {
-  if (_reconnectTimer) {
-    clearTimeout(_reconnectTimer)
-    _reconnectTimer = null
+  if (S.reconnectTimer) {
+    clearTimeout(S.reconnectTimer)
+    S.reconnectTimer = null
   }
-  if (_connection) {
+  if (S.connection) {
     try {
-      await _connection.close()
+      await S.connection.close()
     } catch (e) {
       logger.warn('[event-bus]', 'Disconnect error:', e)
     }
-    _connection = null
+    S.connection = null
   }
-  _connectionPromise = null
-  _subscribers.clear()
+  S.connectionPromise = null
+  S.subscribers.clear()
 }
 
 /**
  * 当前连接状态
  */
 export function isEventBusConnected(): boolean {
-  return !!(_connection && _connection.isConnected)
+  return !!(S.connection && S.connection.isConnected)
 }
 
 /**
@@ -166,7 +202,7 @@ export async function fetchPendingSnapshot(sessionId: string): Promise<BusEvent[
  * - **当 `filter.sessionId` 不为 null 时**，会自动调用 `fetchPendingSnapshot(sessionId)`
  *   拉回上次切换走时漏掉的中间事件，**不重复派发**（handler 用幂等合并即可）
  * - **切换防乱序**：在 snapshot 拉回并派发完之前，**该 sessionId 的实时事件先缓存到
- *   `_replayBuffer[sessionId]`**，等 snapshot 处理完后按"先 snapshot → 后实时"顺序派发。
+ *   `S.replayBuffer[sessionId]`**，等 snapshot 处理完后按"先 snapshot → 后实时"顺序派发。
  *   这一步保证 Status / Abort / Error 等状态类事件不会因为 race 而乱序。
  *
  * @returns 取消订阅函数
@@ -176,17 +212,17 @@ export function subscribe(
   handler: (event: BusEvent) => void
 ): () => void {
   const sub: BusSubscription = {
-    id: _nextSubId++,
+    id: S.nextSubId++,
     filter: {
       kind: filter.kind,
       sessionId: filter.sessionId ?? null
     },
     handler
   }
-  _subscribers.add(sub)
+  S.subscribers.add(sub)
 
   // 第一次订阅时自动建立总线连接（fire-and-forget；连接失败时由 scheduleReconnect 处理）
-  if (_subscribers.size === 1) {
+  if (S.subscribers.size === 1) {
     connectEventBus().catch(e => {
       logger.error('[event-bus]', 'Auto-connect on first subscribe failed:', e)
     })
@@ -199,8 +235,8 @@ export function subscribe(
     const sid = sub.filter.sessionId
     // **关键**：先在 buffer 里占个位（空数组），让 handleConnectionEvent 知道
     // 当前 sid 处于"回放中"状态，从而把实时事件先缓存起来
-    if (!_replayBuffer.has(sid)) {
-      _replayBuffer.set(sid, [])
+    if (!S.replayBuffer.has(sid)) {
+      S.replayBuffer.set(sid, [])
     }
     fetchPendingSnapshot(sid).then((events) => {
       // 1. 先按到达顺序派发 snapshot
@@ -212,9 +248,9 @@ export function subscribe(
         }
       }
       // 2. 再派发缓存的实时事件（按到达顺序）
-      const buffered = _replayBuffer.get(sid)
+      const buffered = S.replayBuffer.get(sid)
       if (buffered && buffered.length > 0) {
-        _replayBuffer.delete(sid) // 删除 key = 退出"回放中"状态
+        S.replayBuffer.delete(sid) // 删除 key = 退出"回放中"状态
         for (const evt of buffered) {
           try {
             sub.handler(evt)
@@ -223,13 +259,13 @@ export function subscribe(
           }
         }
       } else {
-        _replayBuffer.delete(sid)
+        S.replayBuffer.delete(sid)
       }
     }).catch(e => {
       // snapshot 拉取失败：直接清空 buffer 走实时事件
       logger.warn('[event-bus]', `fetchPendingSnapshot(${sid}) failed, draining buffer:`, e)
-      const buffered = _replayBuffer.get(sid)
-      _replayBuffer.delete(sid) // 删除 key = 退出"回放中"状态
+      const buffered = S.replayBuffer.get(sid)
+      S.replayBuffer.delete(sid) // 删除 key = 退出"回放中"状态
       if (buffered && buffered.length > 0) {
         for (const evt of buffered) {
           try {
@@ -243,19 +279,19 @@ export function subscribe(
   }
 
   return () => {
-    _subscribers.delete(sub)
+    S.subscribers.delete(sub)
     // 取消订阅时清掉该 sessionId 的 buffer（避免内存泄漏）
     if (sub.filter.sessionId) {
       // 仅当没有其他订阅者使用此 sid 时才清 buffer
       let stillUsed = false
-      for (const other of _subscribers) {
+      for (const other of S.subscribers) {
         if (other.filter.sessionId === sub.filter.sessionId) {
           stillUsed = true
           break
         }
       }
       if (!stillUsed) {
-        _replayBuffer.delete(sub.filter.sessionId)
+        S.replayBuffer.delete(sub.filter.sessionId)
       }
     }
   }
@@ -342,10 +378,10 @@ export function subscribeEntityChanged(
   }
 
   // 前端模式通道：注册进本地注册表（publishEntityChangedLocal 的投递目标）
-  let localHandlers = localEntityHandlers.get(entityType)
+  let localHandlers = S.localEntityHandlers.get(entityType)
   if (!localHandlers) {
     localHandlers = new Set()
-    localEntityHandlers.set(entityType, localHandlers)
+    S.localEntityHandlers.set(entityType, localHandlers)
   }
   localHandlers.add(dispatch)
 
@@ -360,7 +396,7 @@ export function subscribeEntityChanged(
   return () => {
     unsub()
     localHandlers?.delete(dispatch)
-    if (localHandlers && localHandlers.size === 0) localEntityHandlers.delete(entityType)
+    if (localHandlers && localHandlers.size === 0) S.localEntityHandlers.delete(entityType)
   }
 }
 
@@ -372,7 +408,6 @@ export function subscribeEntityChanged(
 // - 前端模式（乐观更新）：操作发起方已本地变更数据（如 store 内直接改 list），
 //   经 publishEntityChangedLocal 以**同构载荷**即时通知其他页面，不等事件往返；
 //   后端事件随后到达，同步器幂等处理（防抖重拉收敛到服务端真相）。
-const localEntityHandlers = new Map<string, Set<(e: EntityChangedEvent) => void>>()
 
 /** 前端模式通知：本地发布实体生命周期变更（载荷与后端 publish_entity_changed 同构） */
 export function publishEntityChangedLocal(
@@ -382,7 +417,7 @@ export function publishEntityChangedLocal(
   title?: string | null
 ): void {
   const event: EntityChangedEvent = { entity_type: entityType, id, change, title: title ?? null }
-  localEntityHandlers.get(entityType)?.forEach((h) => {
+  S.localEntityHandlers.get(entityType)?.forEach((h) => {
     try {
       h(event)
     } catch (err) {
@@ -401,7 +436,7 @@ function handleConnectionEvent(event: ConnectEvent): void {
     } else {
       logger.warn('[event-bus]', 'Disconnected:', event.data)
     }
-    _connection = null
+    S.connection = null
     scheduleReconnect()
     return
   }
@@ -414,7 +449,7 @@ function handleConnectionEvent(event: ConnectEvent): void {
     const { kind, session_id } = busEvent.data
     if (!kind) return
 
-    for (const sub of _subscribers) {
+    for (const sub of S.subscribers) {
       if (sub.filter.kind !== kind) continue
       // sessionId 过滤：null 接收所有；否则精确匹配
       if (sub.filter.sessionId != null && sub.filter.sessionId !== session_id) continue
@@ -425,12 +460,12 @@ function handleConnectionEvent(event: ConnectEvent): void {
         if (
           sub.filter.sessionId != null &&
           sub.filter.sessionId === session_id &&
-          _replayBuffer.has(sub.filter.sessionId)
+          S.replayBuffer.has(sub.filter.sessionId)
         ) {
-          let buf = _replayBuffer.get(sub.filter.sessionId)
+          let buf = S.replayBuffer.get(sub.filter.sessionId)
           if (!buf) {
             buf = []
-            _replayBuffer.set(sub.filter.sessionId, buf)
+            S.replayBuffer.set(sub.filter.sessionId, buf)
           }
           buf.push(busEvent)
           continue
@@ -444,12 +479,12 @@ function handleConnectionEvent(event: ConnectEvent): void {
 }
 
 function scheduleReconnect(): void {
-  if (_reconnectTimer) return
-  const delay = _reconnectDelay
+  if (S.reconnectTimer) return
+  const delay = S.reconnectDelay
   logger.info('[event-bus]', `Reconnecting in ${delay}ms...`)
-  _reconnectTimer = setTimeout(async () => {
-    _reconnectTimer = null
-    _reconnectDelay = Math.min(_reconnectDelay * 2, _maxReconnectDelay)
+  S.reconnectTimer = setTimeout(async () => {
+    S.reconnectTimer = null
+    S.reconnectDelay = Math.min(S.reconnectDelay * 2, _maxReconnectDelay)
     try {
       await connectEventBus()
     } catch {
