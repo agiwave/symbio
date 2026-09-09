@@ -1,7 +1,9 @@
 # 工具错误回传与 Turn 终态机制设计
 
+> **【归档说明】** 本文档为历史实施记录，已于重构后移入 docs/archive/implementation-logs/。
+> 机制现状（精简版）见 `symbio/src/plugins/session/docs/turn-tool-mechanisms.md`，本文不再更新。
 > 状态：已实施（修复 A / 修复 B / 修复 A 边界 / 2.6 "继续会话"中断可见性均落地）
-> 关联：`docs/model-session-refactor.md`（Model/Session 插件分工总纲）
+> 关联：`docs/archive/implementation-logs/model-session-refactor.md`（Model/Session 插件分工总纲，已归档）
 > 调查基线：commit `4876853`（audit-session 收官后）
 
 本文档回答两个机制问题：

@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn default_outbound_is_native_and_inbound_off() {
         let c = GatewayConfig::default();
-        assert_eq!(c.inbound_enabled, false);
+        assert!(!c.inbound_enabled);
         assert_eq!(c.inbound_protocol, "native");
         assert_eq!(c.inbound_port, 9231);
         assert_eq!(c.inbound_bind, "127.0.0.1");

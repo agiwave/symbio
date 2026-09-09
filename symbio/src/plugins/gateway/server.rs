@@ -564,6 +564,7 @@ async fn ws_read_text<R: AsyncRead + Unpin>(reader: &mut R) -> Option<String> {
 
 // ---- 内联 SHA1（用于 WebSocket 握手的 Sec-WebSocket-Accept，零新依赖） ----
 
+#[allow(clippy::many_single_char_names)] // SHA1 算法标准变量名 h/a/b/c/d/e，改名反而降低可读性
 fn sha1(message: &[u8]) -> [u8; 20] {
     let mut h: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
     let mut msg = message.to_vec();
@@ -575,8 +576,8 @@ fn sha1(message: &[u8]) -> [u8; 20] {
     msg.extend_from_slice(&ml.to_be_bytes());
     for chunk in msg.chunks(64) {
         let mut w = [0u32; 80];
-        for i in 0..16 {
-            w[i] = u32::from_be_bytes([
+        for (i, word) in w.iter_mut().enumerate().take(16) {
+            *word = u32::from_be_bytes([
                 chunk[4 * i],
                 chunk[4 * i + 1],
                 chunk[4 * i + 2],
@@ -587,19 +588,21 @@ fn sha1(message: &[u8]) -> [u8; 20] {
             w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
         }
         let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
-        for i in 0..80 {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
-                20..=39 => (b ^ c ^ d, 0x6ED9EBA1),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDC),
-                _ => (b ^ c ^ d, 0xCA62C1D6),
+        // SHA-1 轮常数：每 20 轮一组（0x5A827999 / 0x6ED9EBA1 / 0x8F1BBCDC / 0xCA62C1D6）
+        let round_k = |i: usize| [0x5A827999u32, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6][i / 20];
+        for (i, &wi) in w.iter().enumerate() {
+            let k = round_k(i);
+            let f = match i / 20 {
+                0 => (b & c) | ((!b) & d),
+                1 | 3 => b ^ c ^ d,
+                _ => (b & c) | (b & d) | (c & d),
             };
             let temp = a
                 .rotate_left(5)
                 .wrapping_add(f)
                 .wrapping_add(e)
                 .wrapping_add(k)
-                .wrapping_add(w[i]);
+                .wrapping_add(wi);
             e = d;
             d = c;
             c = b.rotate_left(30);

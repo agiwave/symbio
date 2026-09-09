@@ -1,30 +1,31 @@
 # Model 插件
 
-LLM 核心封装插件。负责与各主流大模型 API 通讯、流式响应编排以及工具调用的底层执行。
+无状态单轮 LLM 网关。Phase E 定型后，model 只做一件事：**接收一次调用，把消息/工具传给某个 Provider，把产出流回给调用方**——不执行工具、不维护会话、不感知编排循环。
 
-## 功能特性
+## 职责边界
 
-- **纯粹推理**：不持有会话状态，完全依赖外部（如 Session 插件）提供上下文。
-- **协议适配**：支持 OpenAI, Anthropic, Gemini 等主流协议。
-- **工具执行**：集成了审批流逻辑的工具分发器。
-- **流式编排**：统一处理文本流、思考流 (Reasoning) 和工具调用流。
+- **Provider 注册**：启动时通过 `traverse` 向 `CAPABILITY_MANAGER` 注册 `ModelProviderEntry`（provider_id → 配置的模型条目），供 session 的 `chat_loop` 按需取用。
+- **协议适配**：内置 4 个协议适配器——`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`，统一转换为内部 `model_chat::Request/Response` 事件流（文本、思考、工具调用）。
+- **单轮执行**：`execute_turn` 即单轮"发消息→收流"的完整闭环，不含重试、裁剪、压缩等编排逻辑（这些归 session，见 `session/README.md` 六大策略）。
+- **配置存取**：providers CRUD 与引擎参数（API Key、Base URL 等）的 `config get/set/schema`。
 
-## 核心接口
+## 明确不做（已迁出/从未承担）
+
+- ~~工具执行与审批流分发~~ → 工具注册由各工具插件 traverse 提供，执行由 session 的 tool_executor 编排
+- ~~通过 `session/append` 回写消息~~ → session 自己持久化，model 对 session 零依赖
+- ~~会话循环 / 上下文裁剪 / 压缩~~ → 会话引擎整体位于 session（详见 `docs/archive/implementation-logs/model-session-refactor.md` 的 Phase E 记录）
+
+## 路由
 
 | Path | 说明 |
 |------|------|
-| `chat` | **[Connection]** 接收上下文并返回推理流 |
-| `providers/list` | 列出已配置 Provider |
-| `providers/get` | 获取单个 Provider 详情 |
-| `providers/set` | 新增/更新 Provider |
-| `providers/delete` | 删除 Provider |
-| `providers/set_default` | 设置默认 Provider |
-| `status` | 查询引擎/Provider 状态 |
-| `config/get` / `config/set` / `config/schema` | 配置 API Key、Base URL 等引擎参数 |
+| `entities/*` | 统一实体协议（Provider 实体的 create/get/update/delete/query，见 `docs/design/entity-management-mechanism.md`） |
+| `config/get` / `config/set` / `config/schema` | 引擎参数配置 |
+| `status` | 引擎/Provider 状态 |
+| `chat_sync` | 同步单轮调用（当前返回 NotImplemented，预留接口） |
 
-## 协作机制
+## 关联
 
-1. **显式上下文接收**：Model 插件通过 `chat` 路由接收包含完整 `system_prompt`, `messages`, `tools` 以及编排参数的 `model_chat::Request`。
-2. **职责分离**：它不再主动向 Session 请求数据，而是作为一个"热插拔"的推理引擎工作。
-3. **结果回写**：推理完成后，通过 `session/append` 将产生的 Assistant 消息与工具执行结果持久化到存储中。
-4. **工具分发**：当模型请求工具时，Model 插件通过根插件寻找对应的具体工具实现（如 `tools/shell`）。
+- 上游消费者：`session`（chat_loop 直连）
+- 协议适配层代码：`mod.rs` / `providers/`
+- 历史改造记录：`docs/archive/implementation-logs/model-session-refactor.md`

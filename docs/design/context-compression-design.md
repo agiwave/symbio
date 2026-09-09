@@ -2,11 +2,14 @@
 
 > 目标：**保持与大模型的会话持续不中断**——上下文永不因膨胀而失败，且压缩后模型仍能无缝继续工作。
 >
-> 四个核心问题：
-> 1. 多轮会话轮次太多后，如何有效压缩或淡化？
-> 2. 单轮响应内工具调用次数太多后，如何有效压缩或淡化？
-> 3. 单轮工具调用与多轮会话之间的优先关系及取舍？
-> 4. 主动压缩机制（启用工具，由模型自己决定时机）？
+> 本文是**设计层总览**：分层机制、优先取舍、不变量。具体实现（文件位置、函数、常量定义、代码细节）见 `symbio/src/plugins/session/README.md` 六大策略——那是唯一实现事实源。
+
+## 四个核心问题
+
+1. 多轮会话轮次太多后，如何有效压缩或淡化？
+2. 单轮响应内工具调用次数太多后，如何有效压缩或淡化？
+3. 单轮工具调用与多轮会话之间的优先关系及取舍？
+4. 主动压缩机制（启用工具，由模型自己决定时机）？
 
 ---
 
@@ -27,63 +30,42 @@
 | L0 | 单条工具结果守卫 | 单条 Tool 结果 | > 8192 tok → 存档 + head/tail 摘要 | 0 |
 | L1 | 单消息行数脱水 | 单条超长消息 | > 15 行 → 存档 + 末 10 行 + 路径脚注 | 0 |
 | L2 | 轮内老化淡化（fade） | 单轮内历史工具结果 | > 40 工具轮激活，老结果压到 2k tok | 0 |
-| L3 | 窗口骨架化 | 请求组装期 | > 15 个 ToolCall 明细 → 占位符 | 0 |
+| L3 | 窗口骨架化 | 请求组装期 | > 15 个 ToolCall 明细 → 带一行摘要的占位符；声明 `context_retention` 的工具最新 N 次豁免窗口 | 0 |
 | L4 | 存储清理 | 持久层 | append 时物理删除老 ToolCall 及存档 | 0 |
 | L5 | 全局快照（被动） | 跨轮历史 | ≥ 70% 上限 → LLM 摘要替换 | 1 次调用 |
 | L6 | 主动压缩工具 | 轮内/跨轮 | 模型调用 `context_compact` | 1 次调用 |
 
 L0–L4 是确定性机制，常开；L5 是被动兜底；L6 是主动手段。
 
----
-
-## 2. 计量基础（修复项）
-
-```rust
-// compression.rs
-pub fn estimate_message_tokens(m: &ChatMessage) -> usize;
-pub fn estimate_context_tokens(messages: &[ChatMessage], overhead_tokens: usize) -> usize;
-```
-
-- 每条消息：`content.to_text()` + `name`（ToolCall 节点的参数 JSON 在 content 里）逐条 tokenizer 计数，再 + 每消息固定 8 tok 结构开销（role/框架）。
-- `overhead_tokens`：system prompt + 工具定义（name/description/schema）的估算，由调用方传入——**压缩触发判断必须计入这部分**，否则阈值虚高。
-- 有效上限 = `max_context_tokens - reserved_tokens`。
+> 各层的实现位置（文件/函数/常量）统一见 `symbio/src/plugins/session/README.md` 策略③④⑥，不在本文重复维护。
 
 ---
 
-## 3. 目标一：多轮会话膨胀 → 全局快照（L5）
+## 2. 目标一：多轮会话膨胀 → 全局快照（L5）
 
-**触发**：`estimate_context_tokens ≥ 70% × 有效上限`，且通过迟滞检查（见下）。
+**触发**：上下文估算 ≥ 70% × 有效上限，且通过迟滞检查（快照后再增长不足 15% 则跳过，防止循环压缩）。
 
-**切分**（`find_compress_split_point`）：
-- **只在 User 边界切分**（按字符量累计到 70% 处的最近 User 消息）；
-- 保留最近 30%（`COMPRESSION_PRESERVE_THRESHOLD`）为原文明细；
-- 待压缩部分 < 5%（`MIN_COMPRESSION_FRACTION`）不压缩；
-- **禁止全量压缩**：旧版"末尾是 Assistant 就压缩全部"分支已移除——它违背 30% 保留语义，且可能把进行中的 tool_calls 压成孤儿。若尾部存在未配对的 ToolCall（无结果子节点），本轮放弃压缩（返回 0）。
-
-**执行**（`auto_compress_process`）：
-1. `PreCompact` hook → 压缩前**完整历史转存** `transcript_<ts>_<n>.json`（可回溯原则，路径记入快照 meta）；
-2. 上下文临时替换为 `[压缩指令]` → `send_compression_request` 生成摘要；
-3. **快照校验**：从输出中提取 `<state_snapshot>...</state_snapshot>`；缺失则附带纠正指令重试一次；仍失败则把纯文本摘要包裹为快照（有总比无好）；
-4. 新上下文 = `[快照(Assistant, meta.compacted=true, post_tokens=N)] + 保留部分` → `replace_messages` 持久化；
-5. 失败（除 Aborted/RateLimited 外）→ 回滚原始上下文，警告后继续对话。
-
-**迟滞**：快照消息 meta 记录压缩后的估算 `post_tokens`；再次触发前若当前估算 `< post_tokens × 1.15`（再增长不足 15%），跳过——防止"压缩后仍超限 → 每轮重复摘要调用"的循环。
+**切分与执行**（实现见 session 策略④）：
+- 只在 **User 边界**切分，保留最近 30% 原文明细，待压缩部分 < 5% 不压缩；
+- 禁止全量压缩；尾部存在未配对 ToolCall 时本轮放弃；
+- 压缩前完整历史转存（可回溯）；快照缺失时重试一次，仍失败则包裹纯文本摘要；
+- 失败回滚原始上下文，对话不中断。
 
 ---
 
-## 4. 目标二：单轮工具洪峰 → 三道防线
+## 3. 目标二：单轮工具洪峰 → 三道防线
 
 单轮内工具轮次不受硬上限（用户诉求），膨胀由以下机制消化：
 
-1. **L0 守卫**（每条结果写进上下文前）：单条 > 8192 tok → 存档 + head/tail（前 60% / 后 40%，尾部多为结论/错误更关键）。这是"语义上限"，与物理 1MB 上限互补。
-2. **L2 fade**（每轮请求前）：单轮工具轮次 > 40 后激活，把"最近 12 个 user turn"之外的工具结果压到 2k tok；**绝不改动 assistant 文本/推理**（保护思维链）。
-3. **L6 主动压缩**：模型自知处于阶段间隙时调用 `context_compact`（见 §6），在轮内做语义压缩——这是对"巨型单轮"最有效的手段，因为 L5 的 User 边界切分在单轮场景下找不到切分点。
+1. **L0 守卫**：单条结果 > 8192 tok → 存档 + head/tail（尾部多为结论/错误更关键）；
+2. **L2 fade**：单轮工具轮次 > 40 后激活，把"最近 12 个 user turn"之外的工具结果压到 2k tok；**绝不改动 assistant 文本/推理**（保护思维链）；
+3. **L6 主动压缩**：模型自知处于阶段间隙时调用 `context_compact`，在轮内做语义压缩——对"巨型单轮"最有效，因为 L5 的 User 边界切分在单轮场景下找不到切分点。
 
 兜底：L3 窗口骨架化保证请求组装期无论历史多大都能发出。
 
 ---
 
-## 5. 目标三：优先关系与取舍
+## 4. 目标三：优先关系与取舍
 
 决策顺序（从便宜到昂贵、从精准到模糊）：
 
@@ -105,58 +87,24 @@ pub fn estimate_context_tokens(messages: &[ChatMessage], overhead_tokens: usize)
 
 ---
 
-## 6. 目标四：主动压缩（`context_compact` 工具）
+## 5. 目标四：主动压缩（`context_compact` 工具）
 
-**工具定义**：
+**执行语义**（实现见 session 策略⑥）：
+- 定位最后一个**真实** User 消息为锚点（跳过水位提醒）；
+- 切分点不进入**进行中的 Turn**（含本轮全部 tool_calls 整体保留，配对不破坏）；
+- 待压缩历史 < 4000 tok → 返回"无需压缩"；
+- 复用 L5 的请求/校验/回滚链路生成快照；
+- 新上下文 = 快照 + 当前用户指令 + 进行中 Turn 及之后。
 
-```json
-{
-  "name": "context_compact",
-  "description": "Compact conversation history: distill older messages into a structured
-    state snapshot and keep only recent context. Call this when you have just finished
-    a major subtask, when the context is filled with intermediate outputs you no longer
-    need, or when a system note warns that context usage is high. The session continues
-    seamlessly from the snapshot.",
-  "parameters": { "hints": "string — 关键事实/计划/约束，必须保留进快照" }
-}
-```
-
-**执行语义**（`run_context_compact`，在 chat_loop 工具执行点拦截，不进 CapabilityManager）：
-
-1. 定位锚点：最后一个**真实** User 消息（跳过 `[system note]` 水位提醒）；
-2. 切分点：`split ≤ 当前轮首个 ToolCall 所在 Turn 的起始下标`——**进行中的 Turn（含本轮全部 tool_calls）必须整体保留**，其结果在压缩后才追加，配对不破坏；
-3. 待压缩历史 < 4000 tok → 返回"无需压缩"（避免浪费一次 LLM 调用）；
-4. 复用 L5 的请求/校验/回滚链路生成快照（hints 追加进压缩提示词）；
-5. 新上下文 = `[快照] + [当前用户指令] + [进行中 Turn 及之后]` → `replace_messages`；
-6. 工具结果（`build_tool_message`）："已压缩：N 条消息 → 快照 + K 条保留（估算 A → B tokens）。请基于快照继续任务。"
-
-**水位提醒（nudge）**：每轮请求前估算用量，≥ 55% 且本轮未提醒时，注入一条 User 角色消息（meta `kind=context_nudge`）："上下文即将达到上限，如处于阶段间隙请调用 context_compact"。一次请求生命周期内最多一次；压缩成功后重置。模型由此在**自己选定的安全时机**主动压缩，而非被 70% 硬触发。
+**水位提醒（nudge）**：用量 ≥ 55% 且本轮未提醒时注入一条 User 角色系统注记（一次请求生命周期最多一次），模型在**自己选定的安全时机**主动压缩，而非被 70% 硬触发。
 
 **护栏**：每轮最多一次压缩；失败回滚并返回"压缩已跳过"；全程支持 abort。
 
 ---
 
-## 7. 常量集中表
+## 6. 维护原则
 
-| 常量 | 值 | 位置 | 说明 |
-|---|---|---|---|
-| `DEFAULT_TOOL_RESULT_TOKEN_CAP` | 8192 | tool_result_guard.rs | L0 单条预算 |
-| 压缩行数阈值 | 15 | session/compress.rs | L1 脱水阈值 |
-| `FADE_ACTIVATE_ROUNDS` / `FADE_KEEP_RECENT_TURNS` | 40 / 12 | chat_loop.rs | L2 激活/保留 |
-| ToolCall 明细窗口 | 15 | session/context.rs | L3 骨架化 |
-| `COMPRESSION_TOKEN_THRESHOLD` | 0.7 | compression.rs | L5 触发 |
-| `COMPRESSION_PRESERVE_THRESHOLD` | 0.3 | compression.rs | L5 保留比例 |
-| `MIN_COMPRESSION_FRACTION` | 0.05 | compression.rs | L5 最小压缩量 |
-| `CONTEXT_NUDGE_THRESHOLD` | 0.55 | compression.rs | L6 水位提醒 |
-| `COMPACT_HYSTERESIS_FACTOR` | 1.15 | compression.rs | 迟滞再增长系数 |
-| `MIN_COMPACT_TOKENS` | 4000 | compression.rs | L6 最小压缩量 |
-| `max_messages` | 500 | session 配置 | 存储队列上限 |
-
----
-
-## 8. 维护原则
-
-1. **单一职责**：每层只处理自己作用域内的问题，跨层行为（如 L0 与 L2 的预算差异）必须在常量表中有注释。
+1. **单一职责**：每层只处理自己作用域内的问题；跨层行为差异必须在常量表（session/README）有注释。
 2. **不变量优先**：ToolCall/Tool 配对、User 边界切分、失败回滚——任何新压缩机制必须先证明不破坏这三条。
-3. **可观测性**：每次压缩记录 `[DIAG]` 日志（触发原因、前后估算、消息数），便于线上排查"为什么压缩了/为什么没压缩"。
+3. **可观测性**：每次压缩记录 `[DIAG]` 日志（触发原因、前后估算、消息数），便于线上排查。
 4. **测试锚点**：切分点函数、快照提取、token 估算（含中文用例）、迟滞判断必须有单元测试。

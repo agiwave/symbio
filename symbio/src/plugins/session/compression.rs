@@ -34,6 +34,13 @@ First, you will think through the entire history in a private <scratchpad>. Revi
 
 After your reasoning is complete, generate the final <state_snapshot> XML object. Be incredibly dense with information. Omit any irrelevant conversational filler.
 
+Signal-to-noise rules (apply while writing the snapshot):
+- Each fact appears exactly once across ALL sections. If the same fact fits multiple sections, place it in the most relevant one and do not repeat it.
+- Record conclusions and outcomes, not process metrics. Drop line numbers, byte counts, read ranges, raw dumps, and step-by-step command transcripts; keep the final state and what it implies for future work.
+- Compress each error to ONE line: the conclusion plus its root cause. Keep errors ONLY if they still constrain future actions (an unresolved failure, a known pitfall); drop errors that were already fixed and whose fix is recorded in <completed_items>.
+- Before listing a question in <open_questions>, if it can be verified with a single cheap tool call (reading a file, running a quick command), perform that verification during this compaction and record the confirmed answer instead.
+- If a todo list exists in the conversation, reference its item IDs/titles in <in_progress_items> instead of restating full descriptions; the agent retains live access to the list.
+
 The structure MUST be as follows:
 
 <state_snapshot>
@@ -142,6 +149,7 @@ fn find_compress_split_point(messages: &[ChatMessage], fraction: f64) -> usize {
 ///   parent 悬空的 ToolCall 子树 → 孤儿剔除 → provider 400；
 /// - 更早版本全历史正向扫描会命中会话最早的 ToolCall，切分点落在会话开头，
 ///   旧内容几乎全部留在保留区，压缩后水位不降 → 高频反复触发。
+///
 /// 回退：Turn 之前无根级 User 时切在 Turn 根下标（子树仍完整）；Turn 不存在
 /// 返回 0（run_context_compact 以 split==0 视为中止）。水位提醒 nudge 为请求级
 /// 注入不落库，向前回扫不会误命中（见 chat_loop nudge 注释）。

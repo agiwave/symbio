@@ -1,0 +1,15 @@
+# Composite 插件
+
+动态容器：按配置实例化任意子插件，是"分形插件架构"的关键。
+
+## 机制
+
+- **配置驱动**：从全局配置（home 的 config.yaml）读取子插件清单，逐个经 `ObjectCreatorRegistry`（`create_object`）实例化并挂载。
+- **路由转发**：`route()` 内按 `PATH` 剥离当前层级前缀，转发给对应子插件；本地指令（如查询自身拓扑）就地处理。
+- **traverse 聚合**：`traverse()` 深度优先聚合全子树的能力贡献（工具/人格/实体），供 session、home 等消费。
+- **对称性**：容器与叶子插件实现同一 `Plugin` Trait，接口完全一致。
+
+## 关联
+
+- 架构哲学：`docs/architecture/OVERVIEW.md`
+- 注册机制：`symbio_core/creator.rs`（`submit_object_creator!`）

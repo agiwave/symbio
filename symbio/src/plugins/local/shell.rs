@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 
-const SHELL_TIMEOUT_SECS: u64 = 60;
+const SHELL_TIMEOUT_SECS: u64 = 3600;
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
 
 /// 获取当前操作系统信息

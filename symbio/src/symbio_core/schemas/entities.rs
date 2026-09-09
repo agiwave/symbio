@@ -42,9 +42,9 @@ pub(crate) fn default_true() -> bool {
     true
 }
 
-/// 与 [`crate::symbio_core::providers::storage::categories`] 一一对应的实体类型
-
 // ==================== 统一路径常量 ====================
+
+// 与 [`crate::symbio_core::providers::storage::categories`] 一一对应的实体类型
 
 /// entities/list — 列出全部实体
 pub const ENTITIES_LIST: &str = "entities/list";

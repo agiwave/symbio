@@ -61,7 +61,7 @@ session:
   context_messages: 6            # 发送给 AI 的对话上下文滑动窗口轮数 (以 User 消息轮次对齐截取；也是存储期 prune 的保留分水岭)
   
   # 5. 工具滑动窗口策略
-  tool_context_window: 15        # LLM 推理上下文中保留完整明细的最近工具调用数量 (超出者骨架化，配对保留不删除)
+  tool_context_window: 15        # LLM 推理上下文中保留完整明细的最近工具调用数量 (超出者骨架化为带一行摘要的占位符；声明 context_retention 保留策略的工具其最新调用豁免此窗口)
   
   # 6. 水位提醒与主动压缩
   enable_compact_tool: false     # 是否启用 55% Token 水位提醒 (nudge) 注入与 context_compact 主动压缩工具 (默认关闭，须手动开启；关闭后仅保留 70% 自动压缩兜底)
@@ -240,7 +240,7 @@ session:
 
 * **具体规则**（唯一入口 `build_request_view`，严格按序三步执行）：
   * **第一步：老旧工具结果淡化 (Fade)**。单轮请求的工具迭代轮数超过 `FADE_ACTIVATE_ROUNDS`（**40** 轮）后激活；最近 `FADE_KEEP_RECENT_TURNS`（**12**）轮之外的工具执行结果，在 **2048 Token 预算**内做头部/尾部摘要压缩并打上 `tool_result_faded` 标记；**绝不改动 Assistant 消息**，推理链文本始终完整。
-  * **第二步：工具明细骨架化 (Layered Sliding Window)**。以全局窗口 `tool_context_window`（默认 **15**）为基准，叠加每个工具的能力声明（`context_retention`：`LastOnly` / `LastN(n)`，从**当轮**工具列表实时解析，按工具短名——名称最后一个 `/` 之后的部分——匹配，`All` 不参与）；窗口之外调用的参数与结果替换为占位文案，**只骨架化、不删除，且 ToolCall↔Tool 配对与 parent_id 完整保留**，不会造成大模型逻辑断联。
+  * **第二步：工具明细骨架化 (Layered Sliding Window)**。全局窗口 `tool_context_window`（默认 **15**，按 ToolCall 个数计数）约束**未声明保留策略**（`All`）的工具；从**当轮**工具列表实时解析每个工具的能力声明（`context_retention`：`LastOnly` / `LastN(n)`，按工具短名——名称最后一个 `/` 之后的部分——匹配），**声明了策略的工具其最近 N 次调用即使滚出全局窗口也完整保留**（LastOnly=最新 1 次），策略保留优先于全局窗口——否则 todo 清单等"只有最新一次有意义"的工具会在长会话中丢失最新状态，引发大模型重复写入。窗口外的调用参数与结果替换为占位文案并**保留一行摘要**（失败结果：错误类型 + 工具名 + 首行原因；成功结果：首个非空行摘要，单条摘要上限 48 Token；无法提取摘要时退回纯占位文案），**只骨架化、不删除，且 ToolCall↔Tool 配对与 parent_id 完整保留**，不会造成大模型逻辑断联。
   * **第三步：Token 水位提醒 (Nudge)**。当上下文 Token 估计值达到模型上下文限制的 **55%**（`CONTEXT_NUDGE_THRESHOLD`）且 `enable_compact_tool` 开启时，向视图末尾追加一条 `meta.kind = "context_nudge"` 的 User 提醒，引导大模型主动调用 `context_compact` 工具；**请求级注入、每个请求最多一次**，不落库、不占用轮次窗口的 User 计数，也不会在前端以用户消息形式出现。
 * **Rust 实现策略**：
   * 唯一入口为 `plugins/session/compression.rs` 的 `build_request_view`，由 `plugins/session/chat_loop.rs` 主循环**每轮请求构建前**调用（骨架化实现 `apply_layered_sliding_window` 位于 `plugins/session/context_window.rs`——体检备注 audit-5：Phase C 曾归 `symbio_core`，E-② 后仅本插件消费，随 Phase sink 下沉回 session；原 `plugins/session/context.rs` 已删除，其 `prune_historical_tool_calls` 并入 `chat_session.rs`）：
@@ -293,6 +293,6 @@ session:
 | **单消息大文本脱水** | `compress_line_threshold` | `invoke_append` 保存时 | 行数超过 200 行写盘存档，骨架保留末尾同阈值行数；最后一条消息自动还原 | `plugins/session/message_archive.rs` |
 | **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session.rs`<br>`plugins/session/compression.rs` |
 | **存储期历史工具链物理裁剪** | `context_messages`（分水岭） | `invoke_append` 保存时 | 物理删除最近 6 轮分水岭之前的 Tool / ToolCall / Reasoning 及其子节点与存档 | `plugins/session/chat_session.rs`（`prune_historical_tool_calls`） |
-| **请求视图层动态剪裁** | `tool_context_window` + fade/nudge | `build_request_view` 每轮请求前 | >40 轮激活老旧工具结果淡化（保留最近 12 轮）；窗口（15）外工具明细骨架化（配对保留）；55% 水位提醒；全部不落库幂等 | `plugins/session/compression.rs`<br>`plugins/session/context_window.rs` |
+| **请求视图层动态剪裁** | `tool_context_window` + fade/nudge | `build_request_view` 每轮请求前 | >40 轮激活老旧工具结果淡化（保留最近 12 轮）；窗口（15）外工具明细骨架化为带一行摘要的占位符（配对保留），声明 `context_retention` 的工具最新 N 次豁免窗口；55% 水位提醒；全部不落库幂等 | `plugins/session/compression.rs`<br>`plugins/session/context_window.rs` |
 
 通过这套精心设计的**六维协同策略**，Symbio 构建了"存储层（`max_messages` FIFO 裁剪 + `prune_historical_tool_calls` 物理裁剪）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求视图层（`build_request_view` 淡化/骨架化/水位提醒，不落库幂等）→ 语义压缩层（`auto_compress` 语义合并 + 大文本脱水存档）"四层递进的上下文治理链路，实现了高保真度的会话还原、高度清爽的本地数据持久化，并在大模型面前维持了极低 Token 开销与绝对安全的行为控制屏障。

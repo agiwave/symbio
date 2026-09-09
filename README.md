@@ -20,7 +20,7 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 ### 你能用它做什么
 
 - **多智能体对话**：`agent/chat` 接入具备长期认知记忆的 Agent；可创建多个角色化 Agent（`project_manager` / `architect` / `coder` / `reviewer` / `tester` / `documenter` / `devops`）。
-- **统一 LLM 接入**：`model/chat` 内置 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini 四类协议适配器，支持流式与工具调用。
+- **统一 LLM 接入**：`model` 插件内置 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini 四类协议适配器（统一实体协议 `model/entities/model/*` 寻址），支持流式与工具调用；由 `session` 在会话循环中直连调用。
 - **工具与集成**：本地 shell / 文件读写、Web 请求与搜索、技能（skill）、MCP server 注册与调用、Telegram 消息通道。
 - **会话与记忆**：`session/` 负责长连接消息持久化与历史裁剪；`agent` 提供认知单元（CU）存储与记忆操作（保存 / 检索 / 图谱查询 / 反思 / 合并）。
 - **可扩展**：新能力只需实现 `Plugin` 并注册，即可挂入插件树、被 LLM 通过 `traverse("available_tools")` 自动发现。
@@ -65,8 +65,8 @@ HTTP/WS 客户端 ──(gateway 插件)──►  Home /        setting / hook 
 | `home` | 根容器 | 持工作区配置、挂载 `worker`（Composite 实例） |
 | `composite` | 动态容器 | 按配置实例化任意子插件，是"分形"的关键 |
 | `agent` | 认知中心 | 对话、认知注入、提示词组装、Agent 管理、Mindscape 认知存储 |
-| `session` | 会话中心 | 长连接、消息持久化、历史裁剪 |
-| `model` | LLM 引擎 | 多协议适配、流式编排、工具调用循环 |
+| `session` | 会话中心 | 会话编排唯一入口：工具调用循环、提示词组装、消息持久化与上下文压缩 |
+| `model` | LLM 网关 | 无状态单轮推理（`model/execute_turn`），多协议适配（OpenAI Chat / Responses / Anthropic / Gemini） |
 | `local` | 本地工具 | shell / file_read / file_write / file_edit / glob_search / content_search |
 | `web` | Web 工具 | http_request / web_search / web_fetch |
 | `skill` | 技能 | 加载与执行技能定义 |
@@ -116,7 +116,7 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 
 | 指标 | 现状 |
 | --- | --- |
-| 单元测试 | Rust 355 个全通过；前端 vitest 覆盖纯逻辑层（`npm test`） |
+| 单元测试 | Rust 236 个全通过（`cargo test --lib`，以实际运行为准）；前端 vitest 覆盖纯逻辑层（`npm test`） |
 | Clippy 警告 | 0（CI `-D warnings` 门禁） |
 | cargo fmt | 0 diff（CI `--check` 门禁） |
 | 前端类型检查 | vue-tsc 0 错误（CI 门禁） |
@@ -132,7 +132,8 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 - **架构**：[OVERVIEW](./docs/architecture/OVERVIEW.md) · [数据流与调用链](./docs/architecture/DATA_FLOW.md) · [协议规范](./docs/architecture/PROTOCOLS.md) · [决策记录](./docs/DECISIONS.md)
 - **参考**：[路由清单](./docs/reference/ROUTES.md) · [错误码](./docs/reference/ERROR_CODES.md) · [配置参考](./docs/reference/CONFIGURATION.md)
 - **开发**：[插件开发指南](./docs/guides/PLUGIN_DEVELOPMENT.md) · [排障手册](./docs/guides/TROUBLESHOOTING.md) · [贡献指南](./CONTRIBUTING.md)
-- **现行设计**：[统一实体管理机制](./docs/design/entity-management-mechanism.md) · [OAB 规范](./docs/design/open-agent-bundle-spec.md) · [前端 PRD](./docs/design/frontend-ui-ux-prd.md)
+- **现行设计**：[统一实体管理机制](./docs/design/entity-management-mechanism.md) · [上下文压缩分层总览](./docs/design/context-compression-design.md) · [OAB 规范](./docs/design/open-agent-bundle-spec.md)
+- **模块文档**：每个插件与前端各自维护 `README.md`（详见 [文档中心的模块文档地图](./docs/README.md#模块文档地图)）
 - **更新日志**：[CHANGELOG](./docs/CHANGELOG.md) · **历史归档**：[archive/](./docs/archive/)
 
 ---
@@ -146,12 +147,13 @@ symbio/
 ├── symbio/              # Rust 核心库
 │   ├── src/
 │   │   ├── symbio_core/ # 公共契约（Plugin trait / InvokeRequest / 路径常量）
-│   │   ├── plugins/     # 14 个私有 plugin 实现
+│   │   ├── plugins/     # 14 个私有 plugin 实现（各含 README.md）
 │   │   ├── init.rs      # 对象创建注册 + 根插件装配
 │   │   ├── lib.rs
 │   │   └── bin/         # seed_agents
 │   └── Cargo.toml
-├── docs/                # 架构 / 开发 / 插件文档（历史归档在 docs/archive/）
+├── tauri/docs/          # 前端文档（FRONTEND.md）
+├── docs/                # 系统级文档（跨模块；历史归档在 docs/archive/）
 ├── scripts/             # 工具脚本
 ├── .github/             # CI / Release
 ├── README.md

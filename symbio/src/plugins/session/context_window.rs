@@ -11,6 +11,94 @@ use crate::symbio_core::schemas::session::chat_message::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// 骨架化结果摘要的 token 预算（成功/失败摘要共用上限，≈ 4 行文本）。
+const SKELETON_DIGEST_TOKEN_CAP: usize = 48;
+
+/// 判断工具结果是否为失败结果。
+///
+/// 结构化优先：`meta.success == false` 或 `meta.failure_kind` 存在即为失败
+/// （tool_executor 对失败结果统一打 `success:false` + `failure_kind` 标记）；
+/// 文本启发式（"Error"/"failed"）仅作无 meta 时的兜底。
+fn is_failed_result(msg: &ChatMessage, preview: &str) -> bool {
+    if let Some(meta) = msg.meta.as_ref().and_then(|m| m.as_object()) {
+        // 结构化标记存在即直接采信、短路返回，不再回落文本启发式：
+        // 否则正文里偶然出现的 "failed"/"Error" 字样（如测试统计
+        // "0 failed tests"）会把成功结果误判为失败
+        if let Some(success) = meta.get("success").and_then(|v| v.as_bool()) {
+            return !success;
+        }
+        if meta.get("failure_kind").is_some() {
+            return true;
+        }
+    }
+    preview.contains("Error") || preview.contains("failed")
+}
+
+/// 生成失败结果的错误摘要（一行）。
+///
+/// 失败是信息性的：错误类型与一句话原因是模型决定"换路径重试还是放弃"的
+/// 关键输入，骨架化时必须保留，否则模型只能对同批文件反复盲试。
+fn error_digest(msg: &ChatMessage, preview: &str) -> String {
+    let kind = msg
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("failure_kind"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("error");
+    let tool_name = msg
+        .name
+        .clone()
+        .or_else(|| {
+            msg.meta
+                .as_ref()
+                .and_then(|m| m.get("tool_name"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+    // 错误正文里最像"原因"的一行：优先取含 Error/error 的首行，否则取首个非空行
+    let cause = preview
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .find(|l| l.contains("Error") || l.contains("error"))
+        .or_else(|| preview.lines().find(|l| !l.trim().is_empty()))
+        .unwrap_or("");
+    let prefix = if tool_name.is_empty() {
+        kind.to_string()
+    } else {
+        format!("{} ({})", kind, tool_name)
+    };
+    format!(
+        "{}: {}",
+        prefix,
+        truncate_tokens(cause, SKELETON_DIGEST_TOKEN_CAP / 2)
+    )
+}
+
+/// 生成成功结果的首行摘要（一行）。
+///
+/// 只取首个非空行（多为文件首行标题、命令输出首行、JSON 首键），预算内
+/// 截断——既给模型"读过什么"的锚点，又不让摘要本身变成新的开销。
+fn first_line_digest(preview: &str) -> String {
+    let first = preview
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    truncate_tokens(first, SKELETON_DIGEST_TOKEN_CAP)
+}
+
+/// 按 token 预算截断单行文本（字符预算 ≈ token 预算 × 2，CJK 友好）。
+fn truncate_tokens(line: &str, token_cap: usize) -> String {
+    let char_cap = token_cap.saturating_mul(2);
+    if line.chars().count() <= char_cap {
+        line.to_string()
+    } else {
+        let truncated: String = line.chars().take(char_cap).collect();
+        format!("{}…", truncated)
+    }
+}
+
 /// 混合滑动窗口过滤历史工具调用 (Layered Sliding Window)
 ///
 /// 两级压缩规则（只骨架化、不删除，保持 tool_call/tool_result 配对合法）：
@@ -22,6 +110,15 @@ use std::collections::{HashMap, HashSet};
 ///    历史对后续推理无参考价值）。映射由调用方在运行时按工具声明动态构建
 ///    （session 会话循环内直接用 CapabilityManager），**不持久化**、
 ///    不写入任何消息 meta。
+///
+/// **优先级：工具级保留策略 > 全局窗口。**声明了保留策略的工具，其"最近 N 次"
+/// 调用即使已滚出全局窗口也完整保留——全局窗口按 ToolCall 总数计数，长会话中
+/// 清单/状态类工具的最新调用必然滚出窗口，而最新状态恰是唯一有效状态。
+///
+/// 骨架化占位符**保留一行摘要**：失败结果保留错误类型与首行原因（失败是
+/// 信息性的，错误详情决定模型换路径重试还是放弃）；成功结果保留首行摘要
+/// （给模型"读过什么"的锚点，避免被迫整文件重读）。摘要判定结构化优先
+/// （`meta.success` / `meta.failure_kind`），文本启发式兜底。
 ///
 /// ToolCall 节点的 name 是 LLM 可见全名（如 "local/todo_write"），此处匹配时
 /// 取最后一个 '/' 后的短名。
@@ -53,18 +150,18 @@ pub fn apply_layered_sliding_window(
 
     let active_threshold = info.len().saturating_sub(max_active_tool_calls);
 
-    // 判定某个 ToolCall 是否"失效"（需骨架化）：
-    // - 全局失效：在全局滑动窗口之外（较新的 max_active_tool_calls 条保留）
-    // - 策略失效：该工具声明了保留策略，且此调用不在该工具的最近 N 次内
+    // 判定某个 ToolCall 是否"失效"（需骨架化）。
+    // **优先级：工具级保留策略 > 全局窗口**——声明了 LastOnly/LastN 的工具，
+    // 即使最新调用已滚出全局窗口（全局窗口只按 ToolCall 总数计数，长会话必然
+    // 发生），其"最近 N 次"仍完整保留：这类工具的最新状态是唯一有效状态，
+    // 骨架化它等于让模型丢失任务清单/最新探测结果（曾在真实会话中引发重写）。
     let is_stale = |tc_id: &str| -> bool {
         let Some((idx, name, declared)) = info.get(tc_id) else {
             return false;
         };
-        if *idx < active_threshold {
-            return true;
-        }
         let Some(ret) = declared else {
-            return false;
+            // 未声明策略的工具：仅受全局窗口约束
+            return *idx < active_threshold;
         };
         let keep = ret.keep_count() as usize;
         let Some(seq) = per_tool_seq.get(name) else {
@@ -109,16 +206,28 @@ pub fn apply_layered_sliding_window(
                     .as_ref()
                     .map(|c| c.to_text())
                     .unwrap_or_default();
-                let success_status = if preview.contains("Error") || preview.contains("failed") {
-                    "failed"
-                } else {
-                    "successfully"
-                };
                 let label = if msg.role == Some(MessageRole::Tool) {
-                    format!(
-                        "[System Info: Tool result received ({}). Output skeletonized.]",
-                        success_status
-                    )
+                    // 失败结果保留错误摘要、成功结果保留首行摘要：
+                    // 失败是信息性的（错误详情决定下一步动作），成功摘要避免
+                    // "隔轮即忘"迫使模型整文件重读。摘要远短于原文，仍净省 token。
+                    if is_failed_result(msg, &preview) {
+                        let detail = error_digest(msg, &preview);
+                        format!(
+                            "[System Info: Tool result failed: {}. Full output skeletonized.]",
+                            detail
+                        )
+                    } else {
+                        let hint = first_line_digest(&preview);
+                        if hint.is_empty() {
+                            "[System Info: Tool result received successfully. Output skeletonized.]"
+                                .to_string()
+                        } else {
+                            format!(
+                                "[System Info: Tool result received successfully. Output skeletonized. Summary: {}]",
+                                hint
+                            )
+                        }
+                    }
                 } else {
                     "[System Info: Tool call input parameters skeletonized to save context.]"
                         .to_string()
@@ -228,9 +337,12 @@ mod tests {
         let ret = retention_map(&[("search", ToolContextRetention::LastN(2))]);
         let out = apply_layered_sliding_window(&messages, 15, &ret);
 
-        assert!(param_of(&out.iter().find(|m| m.id == "a1").unwrap()).contains("skeletonized"));
-        assert_eq!(param_of(&out.iter().find(|m| m.id == "a2").unwrap()), r#"{"q":"2"}"#);
-        assert_eq!(param_of(&out.iter().find(|m| m.id == "a3").unwrap()), r#"{"q":"3"}"#);
+        let a1 = out.iter().find(|m| m.id == "a1").unwrap();
+        let a2 = out.iter().find(|m| m.id == "a2").unwrap();
+        let a3 = out.iter().find(|m| m.id == "a3").unwrap();
+        assert!(param_of(a1).contains("skeletonized"));
+        assert_eq!(param_of(a2), r#"{"q":"2"}"#);
+        assert_eq!(param_of(a3), r#"{"q":"3"}"#);
     }
 
     /// 未声明策略的工具不受影响（回归保护：默认行为与旧版一致）
@@ -244,8 +356,10 @@ mod tests {
         ];
         let ret = HashMap::new();
         let out = apply_layered_sliding_window(&messages, 15, &ret);
-        assert_eq!(param_of(&out.iter().find(|m| m.id == "x1").unwrap()), r#"{"path":"a.rs"}"#);
-        assert_eq!(param_of(&out.iter().find(|m| m.id == "x2").unwrap()), r#"{"path":"b.rs"}"#);
+        let x1 = out.iter().find(|m| m.id == "x1").unwrap();
+        let x2 = out.iter().find(|m| m.id == "x2").unwrap();
+        assert_eq!(param_of(x1), r#"{"path":"a.rs"}"#);
+        assert_eq!(param_of(x2), r#"{"path":"b.rs"}"#);
     }
 
     /// 全局窗口：超出的 ToolCall 自身参数也骨架化（压缩 tool_call 参数占比）
@@ -259,15 +373,19 @@ mod tests {
         // 全局窗口只保留最近 2 个
         let ret = HashMap::new();
         let out = apply_layered_sliding_window(&messages, 2, &ret);
-        assert!(param_of(&out.iter().find(|m| m.id == "g0").unwrap()).contains("skeletonized"));
-        assert!(param_of(&out.iter().find(|m| m.id == "g3").unwrap()).contains("skeletonized"));
-        assert!(!param_of(&out.iter().find(|m| m.id == "g4").unwrap()).contains("skeletonized"));
-        assert!(!param_of(&out.iter().find(|m| m.id == "g5").unwrap()).contains("skeletonized"));
+        let g0 = out.iter().find(|m| m.id == "g0").unwrap();
+        let g3 = out.iter().find(|m| m.id == "g3").unwrap();
+        let g4 = out.iter().find(|m| m.id == "g4").unwrap();
+        let g5 = out.iter().find(|m| m.id == "g5").unwrap();
+        assert!(param_of(g0).contains("skeletonized"));
+        assert!(param_of(g3).contains("skeletonized"));
+        assert!(!param_of(g4).contains("skeletonized"));
+        assert!(!param_of(g5).contains("skeletonized"));
         // 结果子节点同样骨架化
         let r0 = out.iter().find(|m| m.parent_id.as_deref() == Some("g0")).unwrap();
         assert!(param_of(r0).contains("skeletonized"));
         // 状态保持 Completed（不产生 Failed/孤儿，配对合法）
-        assert_eq!(out.iter().find(|m| m.id == "g0").unwrap().status, Some(MessageStatus::Completed));
+        assert_eq!(g0.status, Some(MessageStatus::Completed));
     }
 
     /// 工具级 LastOnly 优先于全局窗口（即使仍在全局窗口内也骨架化旧调用）
@@ -282,7 +400,91 @@ mod tests {
         // 全局窗口 15 足够大，但 LastOnly 仍骨架化 p1
         let ret = retention_map(&[("todo_write", ToolContextRetention::LastOnly)]);
         let out = apply_layered_sliding_window(&messages, 15, &ret);
-        assert!(param_of(&out.iter().find(|m| m.id == "p1").unwrap()).contains("skeletonized"));
-        assert_eq!(param_of(&out.iter().find(|m| m.id == "p2").unwrap()), r#"{"v":2}"#);
+        let p1 = out.iter().find(|m| m.id == "p1").unwrap();
+        let p2 = out.iter().find(|m| m.id == "p2").unwrap();
+        assert!(param_of(p1).contains("skeletonized"));
+        assert_eq!(param_of(p2), r#"{"v":2}"#);
+    }
+
+    /// 回归：声明 LastOnly 的工具，其**最新一次**调用滚出全局窗口后仍完整保留。
+    /// 旧实现全局窗口判定优先，导致长会话中任务清单/最新状态被骨架化丢失
+    /// （真实会话中发生过：模型因看不到清单而整单重写）。
+    #[test]
+    fn last_only_latest_call_survives_beyond_global_window() {
+        let mut messages = Vec::new();
+        // 20 个无策略工具调用把全局窗口（15）挤满，todo_write 最新调用被推出窗口
+        for i in 0..20 {
+            messages.push(tc_msg(&format!("f{i}"), "local/file_read", &format!(r#"{{"path":"f{i}.rs"}}"#)));
+            messages.push(tool_result(&format!("f{i}"), "content"));
+        }
+        messages.push(tc_msg("latest", "local/todo_write", r#"{"todos":"清单 v3"}"#));
+        messages.push(tool_result("latest", "已更新任务清单，共 3 项。"));
+        let ret = retention_map(&[("todo_write", ToolContextRetention::LastOnly)]);
+        let out = apply_layered_sliding_window(&messages, 15, &ret);
+
+        // 无策略工具：全局窗口语义不变（前 6 条被骨架化）
+        assert!(param_of(out.iter().find(|m| m.id == "f0").unwrap()).contains("skeletonized"));
+        // LastOnly 工具：最新调用虽在全局窗口之外（第 21 个 ToolCall），仍完整保留
+        let latest = out.iter().find(|m| m.id == "latest").unwrap();
+        assert_eq!(param_of(latest), r#"{"todos":"清单 v3"}"#, "LastOnly 最新调用不应被全局窗口骨架化");
+        let latest_result = out.iter().find(|m| m.parent_id.as_deref() == Some("latest")).unwrap();
+        assert_eq!(param_of(latest_result), "已更新任务清单，共 3 项。");
+    }
+
+    /// 骨架化占位符保留摘要：失败结果保留错误类型与首行原因
+    #[test]
+    fn skeletonized_failure_keeps_error_digest() {
+        let messages = vec![
+            tc_msg("e1", "local/read_file", r#"{"path":"agent/README.md"}"#),
+            {
+                let mut m = tool_result("e1", "读取失败：os error 2 (系统找不到指定的文件。)");
+                m.meta = Some(serde_json::json!({
+                    "success": false,
+                    "failure_kind": "not_found",
+                }));
+                m
+            },
+        ];
+        let ret = HashMap::new();
+        let out = apply_layered_sliding_window(&messages, 0, &ret);
+        let r = out.iter().find(|m| m.parent_id.as_deref() == Some("e1")).unwrap();
+        let content = param_of(r);
+        assert!(content.contains("failed"), "失败骨架化应标注 failed: {content}");
+        assert!(content.contains("not_found"), "失败骨架化应保留 failure_kind: {content}");
+        assert!(content.contains("os error 2"), "失败骨架化应保留错误原因: {content}");
+    }
+
+    /// 骨架化占位符保留摘要：成功结果保留首行摘要
+    #[test]
+    fn skeletonized_success_keeps_first_line_digest() {
+        let messages = vec![
+            tc_msg("s1", "local/read_file", r#"{"path":"session/README.md"}"#),
+            tool_result("s1", "# session 插件\n\n会话编排唯一入口……（后续 300 行）"),
+        ];
+        let ret = HashMap::new();
+        let out = apply_layered_sliding_window(&messages, 0, &ret);
+        let r = out.iter().find(|m| m.parent_id.as_deref() == Some("s1")).unwrap();
+        let content = param_of(r);
+        assert!(content.contains("successfully"), "成功骨架化应标注 successfully: {content}");
+        assert!(content.contains("# session 插件"), "成功骨架化应保留首行摘要: {content}");
+        assert!(!content.contains("后续 300 行"), "骨架化不应保留全文: {content}");
+    }
+
+    /// 骨架化摘要判定：meta.success 优先于文本启发式
+    #[test]
+    fn failure_detection_prefers_structured_meta() {
+        let messages = vec![
+            tc_msg("m1", "local/shell", r#"{"command":"dir"}"#),
+            {
+                // 文本含 "failed" 但 meta.success=true → 仍视为成功
+                let mut m = tool_result("m1", "0 failed tests, all passed");
+                m.meta = Some(serde_json::json!({ "success": true }));
+                m
+            },
+        ];
+        let ret = HashMap::new();
+        let out = apply_layered_sliding_window(&messages, 0, &ret);
+        let r = out.iter().find(|m| m.parent_id.as_deref() == Some("m1")).unwrap();
+        assert!(param_of(r).contains("successfully"), "meta.success=true 应判定为成功");
     }
 }

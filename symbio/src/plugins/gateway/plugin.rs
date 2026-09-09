@@ -201,9 +201,11 @@ mod tests {
     async fn config_set_persists_and_is_readable_back() {
         let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default()));
 
-        let mut next = GatewayConfig::default();
-        next.outbound_protocol = "http".into();
-        next.outbound_endpoint = "http://other:9231".into();
+        let next = GatewayConfig {
+            outbound_protocol: "http".into(),
+            outbound_endpoint: "http://other:9231".into(),
+            ..GatewayConfig::default()
+        };
         let set_resp = call(
             plugin.clone(),
             "config/set",

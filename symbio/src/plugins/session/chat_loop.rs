@@ -1034,6 +1034,9 @@ async fn check_abort(abort_flag: &Arc<AtomicBool>) -> bool {
     abort_flag.load(Ordering::SeqCst)
 }
 
+// 8 个参数均为流程管道的直通依赖，提取 struct 反而增加一层无谓的间接性（代码库中
+// chat_loop 主流程同样以长参数管道为惯例），故允许超参。
+#[allow(clippy::too_many_arguments)]
 async fn auto_compress_process(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,

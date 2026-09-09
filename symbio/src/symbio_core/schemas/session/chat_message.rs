@@ -234,12 +234,9 @@ impl ChatMessage {
         if patch.prompt.is_some() {
             self.prompt = patch.prompt.clone();
         }
-        match &patch.error {
-            Some(e) => {
-                // Some("") 语义为"清空错误原因"
-                self.error = if e.is_empty() { None } else { Some(e.clone()) };
-            }
-            None => {}
+        if let Some(e) = &patch.error {
+            // Some("") 语义为"清空错误原因"
+            self.error = if e.is_empty() { None } else { Some(e.clone()) };
         }
 
         if let Some(new_content) = &patch.content {

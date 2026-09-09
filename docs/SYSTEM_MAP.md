@@ -32,8 +32,8 @@
 │  │   Home (/)                                                           │  │
 │  │   └── worker (Composite) ─── 按 config.yaml 的 plugins 动态挂载      │  │
 │  │       ├── agent    ─── OAB Bundle 宿主 · 身份工具 · MCP 声明         │  │
-│  │       ├── session  ─── 会话编排 · 历史裁剪 · 工具收集 · 直连 model   │  │
-│  │       ├── model    ─── OpenAI / Anthropic / Gemini 多协议 + 工具循环 │  │
+│  │       ├── session  ─── 会话编排唯一入口 · 工具循环 · 压缩 · 直连 model   │  │
+│  │       ├── model    ─── 无状态单轮 LLM 网关 · 多协议适配 │  │
 │  │       ├── local    ─── shell / file_read|write|edit / glob / search  │  │
 │  │       ├── web      ─── http_request / web_search / web_fetch         │  │
 │  │       ├── skill    ─── SKILL.md 加载与执行                           │  │
@@ -101,6 +101,7 @@ Client (Tauri/CLI)
 | 开发新插件 | [PLUGIN_DEVELOPMENT.md](./guides/PLUGIN_DEVELOPMENT.md) |
 | 排查问题 | [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) |
 | 架构决策原因 | [DECISIONS.md](./DECISIONS.md) |
+| 某个插件/前端的职责与内部机制 | 各模块 `README.md`（见 [模块文档地图](./README.md#模块文档地图)） |
 
 ---
 

@@ -24,7 +24,7 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 
 ### 5. 机制化 (Mechanismization)
 
-在 Agent 内部，关系类型与展示行为由 **`prop` CU 驱动**（v9 / v9.1），新增关系或认知类型无需改动核心代码。
+在 Agent 内部，关系类型与展示行为由数据（CU）驱动而非硬编码，新增关系或认知类型无需改动核心代码。详见 `symbio/src/plugins/agent/README.md`。
 
 ## 核心架构层级
 
@@ -84,21 +84,21 @@ graph TD
 
 所有插件在 `plugins/` 目录下平铺存放。容器与叶子插件实现同一 `Plugin` Trait。
 
-| 插件          | 角色           | 关键能力                                                                                                              |
+| 插件          | 角色           | 关键能力（详见各插件 `plugins/<name>/README.md`）                                                              |
 | ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `home`      | **根容器**      | 持全局配置（`<homedir>/config.yaml`）；仅挂载 `worker` (Composite)，自身终结 `home/*`、`work/*`、`entities/providers`、`save_config` |
 | `composite` | **动态容器**     | 按配置实例化任意子插件，是"分形"的关键                                                                                              |
-| `agent`     | **认知中心**     | 管理 Agent 人格；会话选定智能体时经 `traverse` 贡献工具与人格，不再独占会话编排                                                                 |
-| `session`   | **会话中心**     | 长连接、消息持久化、历史裁剪；**会话编排的唯一入口**（收集工具、组装提示词、直连 `model/chat`）                                                          |
-| `model`     | **Model 引擎** | 多协议适配、流式编排、工具调用循环                                                                                                 |
+| `agent`     | **认知中心**     | 管理 Agent 人格；会话选定智能体时经 `traverse` 贡献工具与人格，不再独占会话编排 → `plugins/agent/README.md`                                     |
+| `session`   | **会话中心**     | 长连接、消息持久化、历史裁剪；**会话编排的唯一入口**（收集工具、组装提示词、直连 model 单轮网关）→ `plugins/session/README.md`（含六大压缩策略）                       |
+| `model`     | **单轮 LLM 网关** | 无状态单轮执行（`execute_turn`）；Provider 注册（`ModelProviderEntry`）、4 协议适配、配置存取；不含工具执行与会话循环 |
 | `local`     | 本地工具         | shell / file_read / file_write / file_edit / glob_search / content_search                                         |
 | `web`       | Web 工具       | http_request / web_search / web_fetch                                                                             |
-| `skill`     | 技能           | 加载与执行技能定义                                                                                                         |
-| `mcp`       | MCP 桥        | MCP server 注册（stdio / http）与工具调用                                                                                  |
-| `telegram`  | Telegram 通道  | 消息收发与人机交互                                                                                                         |
-| `gateway`   | **入站网关**     | HTTP/WebSocket 入站适配（与 route_v2 同构），外部客户端接入                                                                        |
-| `setting`   | 配置           | 系统级配置读写                                                                                                           |
-| `hook`      | 钩子           | 钩子注册与触发                                                                                                           |
+| `skill`     | 技能           | 加载与执行技能定义（含 `skill/search`）                                                                                       |
+| `mcp`       | MCP 桥        | MCP server 注册（stdio / http）与工具调用（另含统一实体 `entities/servers` 维护）                                                    |
+| `telegram`  | Telegram 通道  | 长轮询收发与“继续会话”交互（`telegram/send`）                                                                                  |
+| `gateway`   | **入站网关**     | HTTP/WS/SSE 入站适配（`/api/route`、`/api/ws`、`/api/events`，与 route_v2 同构）                                              |
+| `setting`   | 配置           | 系统级配置读写（`setting/get` / `setting/set`）                                                                            |
+| `hook`      | 钩子           | 钩子注册与触发（PreCompact 等生命周期点）                                                                                        |
 | `event_bus` | 事件总线         | 进程内帧广播（连接级 SSE 风格推送）                                                                                              |
 
 ## 核心 Trait 与路由
@@ -168,16 +168,13 @@ pub enum ModelProtocol {
 
 ## 机制化原则（Agent 子系统）
 
-Agent 插件自 v9 起贯彻**机制化 (Mechanismization)** 原则：
+Agent 插件自 v9 起贯彻**机制化 (Mechanismization)** 原则：关系判定与展示规则由数据（CU）驱动而非硬编码。机制细节（`prop` CU、`RelationPropRegistry`、`seed_cus.jsonl` 单一事实源）见 `symbio/src/plugins/agent/README.md`。
 
-- **关系机制化**：哪些属性名是"关系"由 `prop` CU 决定（`RelationPropRegistry::from_prop_cus`），不在核心代码中硬编码关系清单。
-- **展示机制化**：`kind` 类型清单、索引优先级由 `prop` CU 的 `is_a` 与 `priority` 派生。
-- **类型与展示单一事实来源**：同一份 `seed_cus.jsonl` 同时驱动 "如何解析 CU" 与 "如何展示 CU"。
+## 文档体系约定（下沉原则）
 
-## 文档映射约定
-
-- **后端**：`// Corresponding Host: <path>` 注释指向该数据结构在宿主层的对应定义
-- **文档集中**：插件不各自维护文档，全部统一在 `docs/`；复杂机制的实现细节见 `docs/design/`（如统一实体管理机制）
+- **模块文档下沉**：每个插件的职责、路由、内部机制写在插件目录内的 `README.md`（可选 `docs/` 子目录），如 `symbio/src/plugins/session/README.md`；前端同理见 `tauri/README.md` 与 `tauri/docs/`。
+- **系统级文档只留跨模块内容**：`docs/` 只保留跨模块的架构、协议、导航与设计总览，单模块细节一律引用模块文档，不在系统级重复维护。
+- **后端注释**：`// Corresponding Host: <path>` 注释指向该数据结构在宿主层的对应定义。
 
 ---
 

@@ -1,5 +1,8 @@
 # Model / Session 插件分工改造设计（文档驱动）
 
+> **【归档说明】** 本文档为历史实施日志，已于重构后移入 docs/archive/implementation-logs/。
+> Phase A-E 已全部落地；机制现状请看 `symbio/src/plugins/session/README.md` 与 `symbio/src/plugins/model/README.md`，本文不再更新。
+
 > 状态：Phase A/B/C/D 已完成（cargo check 零警告 + 全量测试通过；model 中 `plugins::session`/`SESSION_OPEN`/`SESSION_COMPRESS` 引用零命中），Phase E 待实施
 > 基线：2026-09-08 代码实测（本文件的现状描述均来自当日源码核验，非推测）
 > 约束（用户原话）：**1. 务必不要破坏当前架构；2. 项目要以文档驱动开发。**

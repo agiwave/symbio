@@ -18,7 +18,35 @@
 
 ***
 
-## 2026-09-07: 网关只读白名单收紧 + 上下文压缩方案立项
+## 2026-09-08: 上下文治理优化（骨架化信息保留 + 策略保留优先级修复）
+
+- **策略保留优先级修复（bug）**：`context_window.rs` 的 `is_stale` 原逻辑全局窗口判定优先于工具级保留策略，导致 LastOnly 工具（todo_write）的最新调用滚出全局窗口（15 个 ToolCall）后被骨架化，模型丢失任务清单引发重写。修复后**策略保留优先于全局窗口**：声明 `LastOnly`/`LastN` 的工具其最近 N 次调用即使滚出全局窗口也完整保留；未声明策略的工具仅受全局窗口约束。新增测试 `last_only_latest_call_survives_beyond_global_window`。
+
+- **骨架化"整条丢弃"改为"保留一行摘要"**：新增 `SKELETON_DIGEST_TOKEN_CAP=48` 与辅助函数 `is_failed_result`（结构化优先：`meta.success` 存在即直接采信短路返回，避免"0 failed tests"文本误判）、`error_digest`（failure_kind + 工具名 + 首行原因）、`first_line_digest`、`truncate_tokens`（CJK 友好，字符预算 = token×2）。占位符：失败 → `[System Info: Tool result failed: {kind} ({tool}): {cause}. Full output skeletonized.]`；成功 → `[System Info: Tool result received successfully. Output skeletonized. Summary: {首行}]`。新增测试 `skeletonized_failure_keeps_error_digest` / `skeletonized_success_keeps_first_line_digest` / `failure_detection_prefers_structured_meta`。
+
+- **todo_write 结果瘦身**：返回值从 `{success, count, todos(全量), markdown(全量渲染), message}` 改为 `{success, count, message}`——全量清单对当轮是重复（输入参数刚写过），历史由 LastOnly 策略保证最新一次完整保留。确认 tauri 前端无专用渲染依赖，瘦身安全。
+
+- **压缩提示词强化**：`compression.rs` `get_compression_prompt()` 追加高信噪比规则：跨区块去重（同一事实只出现一次）、只留结论丢过程度量（行数/字节数/读取范围/报错转储）、错误只留"结论+原因"一行、可低成本核实的疑问先核实再入 open_questions、有 todo 清单时 in_progress 引用不复述。
+
+- **Clippy 清零**：修复 rust 1.93 新 lint 全部 22 个警告（needless_borrow ×12 / doc_lazy_continuation ×3 / empty_line_after_doc_comments / bool_assert_comparison / field_reassign_with_default / needless_range_loop / question_mark / single_match / too_many_arguments 加 `#[allow]`），新代码零警告，`cargo clippy --all-targets` 0 警告。
+
+- **测试口径**：`cargo test --lib` 实际执行 **236 passed / 0 failed**（此前 README 的 239 为 ripgrep 统计误差，以 cargo 执行为准）。
+
+***
+
+## 2026-09-07: 文档体系重构（文档下沉原则落地）
+
+- **确立"文档下沉"原则**：单模块文档放模块目录内（`README.md` + 可选 `docs/`），系统级文档只保留跨模块核心逻辑并引用模块文档；每篇职责一句话见 [README.md](./README.md) 的"模块文档地图"。
+
+- **模块文档全覆盖**：14 个插件 `symbio/src/plugins/*/README.md` 全部就位（新增 agent / local / web / gateway / home / composite / setting / hook / event_bus / skill 十篇；重写 model——Phase E 后 model 为无状态单轮 LLM 网关 `execute_turn`，旧"工具执行/审批流分发器"描述作废）；前端新增 [tauri/README.md](../tauri/README.md) + [tauri/docs/FRONTEND.md](../tauri/docs/FRONTEND.md)。
+
+- **历史实施日志归档**：`symbio/docs/model-session-refactor.md`、`turn-tool-mechanisms.md` 原文移入 [archive/implementation-logs/](./archive/implementation-logs/)（加状态横幅）；机制现行版精简下沉为 [session/docs/turn-tool-mechanisms.md](../symbio/src/plugins/session/docs/turn-tool-mechanisms.md)；`symbio/docs/` 目录清空。
+
+- **去重**：[design/context-compression-design.md](./design/context-compression-design.md) 瘦身为 L0-L6 分层总览 + 取舍原则 + 不变量，各层阈值与实现细节归 [session/README.md](../symbio/src/plugins/session/README.md)；[OVERVIEW.md](./architecture/OVERVIEW.md) 删除 agent 模块内部细节章节，"插件不各自维护文档"的旧约定改写为下沉原则。
+
+- **口径修正**：单元测试数以实际统计为准修正为 **239**（原 README 355 / 重构日志 227 均不准）；README/SYSTEM_MAP 同步 model 与 session 职责新表述。
+
+***
 
 - **只读模式不再放行网关自身配置**：`is_readonly_allowed` 从未匹配 `gateway/config/get`
   （白名单只有精确 `config/get` 与前缀 `config/get*`），而 `config.rs` 的单测却断言它放行，

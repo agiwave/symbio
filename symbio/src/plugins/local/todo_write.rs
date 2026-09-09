@@ -100,18 +100,11 @@ impl TodoWriteTool {
         }
         let current = map.get(key).cloned().unwrap_or_default();
 
-        let mut md = String::from("## 任务清单\n\n");
-        for it in &current {
-            let mark = match it["status"].as_str() {
-                Some("completed") => "x",
-                Some("in_progress") => ">",
-                _ => " ",
-            };
-            let pri = it["priority"].as_str().unwrap_or("medium");
-            let content = it["content"].as_str().unwrap_or("");
-            md.push_str(&format!("- [{}] ({}) {}\n", mark, pri, content));
-        }
-
+        // 回显策略：**只回确认，不回全量清单**。
+        // 全量清单对当轮推理是重复（输入参数里刚写过一遍），对后续轮次则由
+        // 上下文保留策略（context_retention: LastOnly）保证最新一次调用
+        // 完整保留、更早调用骨架化——清单的"唯一有效状态"由骨架化层负责，
+        // 工具结果本身无需再背一份副本。
         let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("");
         let message = if summary.is_empty() {
             format!("已更新任务清单，共 {} 项。", current.len())
@@ -122,8 +115,6 @@ impl TodoWriteTool {
         Ok(json!({
             "success": true,
             "count": current.len(),
-            "todos": current,
-            "markdown": md,
             "message": message,
         }))
     }
