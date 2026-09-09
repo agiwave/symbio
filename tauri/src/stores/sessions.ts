@@ -47,7 +47,7 @@ export interface SessionCreateInit {
   agentId?: string | null
   /** 模型提供商；缺省 = 跟随后端默认提供商 */
   providerId?: string
-  /** 运行模式；缺省 = interactive */
+  /** 运行模式；缺省 = auto */
   mode?: 'auto' | 'interactive'
   /** 执行风险等级；缺省 = medium */
   riskLevel?: 'low' | 'medium' | 'high'

@@ -19,7 +19,7 @@ pub struct Request {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_history: Option<bool>,
     /// 会话运行模式：auto（无人值守，需交互工具返回友好错误不弹框）/ interactive（默认，会话流中渲染交互卡）。
-    /// 随每次发送携带；为空时回退会话 metadata.mode（默认 interactive）。
+    /// 随每次发送携带；为空时回退会话 metadata.mode（默认 auto
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     /// 会话执行风险等级阈值：low / medium / high（与 agent_id/provider_id/mode 同级别）。

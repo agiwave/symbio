@@ -514,7 +514,7 @@ impl SessionPlugin {
     /// 统一解析会话参数（mode / risk_level / provider_id）。
     ///
     /// 解析链（三者完全对称）：`req` 字段 > `session.metadata` > 默认值。
-    /// - mode: 默认 `interactive`
+    /// - mode: 默认 `auto`
     /// - risk_level: 默认 `medium`
     /// - provider_id: 默认 `none`（Model 插件使用默认 Provider）
     ///
@@ -540,7 +540,7 @@ impl SessionPlugin {
                     .and_then(|v| v.as_str())
                     .map(String::from)
             })
-            .unwrap_or_else(|| "interactive".to_string());
+            .unwrap_or_else(|| "auto".to_string());
         ctx.set(MODE, mode.clone());
 
         let risk_level = req

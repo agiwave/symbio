@@ -112,7 +112,7 @@ const draftAgentId = ref<string | null>(null)
 const draftAgents = ref<AgentProfile[]>([])
 const draftProviderId = ref('')
 const draftProviders = ref<ModelProviderConfig[]>([])
-const draftMode = ref<'auto' | 'interactive'>('interactive')
+const draftMode = ref<'auto' | 'interactive'>('auto')
 const draftRisk = ref<'low' | 'medium' | 'high'>('medium')
 
 // 挂载后自动聚焦输入框（新建引导，减少一次点击）
