@@ -409,6 +409,8 @@ pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: u
 /// 内容节点 = User/Assistant 的正文与思考（`msg_type` 为 Text/Reasoning/None，
 /// 与旧 `is_content_node` 判定一致）；role=Tool 不在此列（L0 守卫与
 /// [`fade_aged_tool_results`] 的辖区），System（系统提示）永不淡化。
+/// **L2 快照消息（`meta.compacted`）同样豁免**：快照本身已是 token 最小化的
+/// 压缩产物，对其再切中段等于双重压缩，且切掉的恰是模型的唯一深历史记忆。
 ///
 /// 触发条件（与旧存档压缩门控同构）：行数超 `line_threshold` **或** token 超
 /// [`MESSAGE_TOKEN_CAP`]。行数触发走按行 head/tail 切分（[`line_head_tail`]），
@@ -425,7 +427,13 @@ pub fn fade_aged_content_nodes(
     use super::tokenizer::{default_tokenizer, Tokenizer};
 
     // 内容节点判定：正文与思考（含 msg_type 缺省的历史消息）。
+    // L2 快照（meta.compacted）豁免：它已是压缩产物，再切 = 双重压缩。
     fn is_content_node(m: &ChatMessage) -> bool {
+        if m.meta.as_ref().and_then(|meta| meta.get("compacted")).and_then(|v| v.as_bool())
+            == Some(true)
+        {
+            return false;
+        }
         !matches!(m.role, Some(MessageRole::Tool) | Some(MessageRole::System))
             && matches!(
                 m.msg_type,
@@ -655,8 +663,12 @@ pub const CONTEXT_COMPACT_TOOL_NAME: &str = "context_compact";
 /// 来模仿，在正常对话中频繁输出同类标签总结。落库前把标签替换为可读分节标记：
 /// 信息不丢，但切断"XML 标签 → 格式模仿"的泄漏链。
 /// 压缩子系统内部（提取/校验/纠正重试）仍统一使用 XML。
+///
+/// 头部注入时点声明：快照是"截至某时刻"的状态切片，其【进行中】/【待确认】
+/// 分节会随后续轮次自然过期。没有时点标记，读者（模型或人）无法区分
+/// "快照说未完成"与"实际早已完成"——只能靠最新消息反推，易误判旧状态为现役。
 pub fn render_snapshot_for_history(snapshot_text: &str) -> String {
-    snapshot_text
+    let rendered = snapshot_text
         .replace("<state_snapshot>", "")
         .replace("</state_snapshot>", "")
         .replace("<overall_goal>", "【目标】")
@@ -670,7 +682,11 @@ pub fn render_snapshot_for_history(snapshot_text: &str) -> String {
         .replace("<open_questions>", "【待确认问题】")
         .replace("</open_questions>", "")
         .trim()
-        .to_string()
+        .to_string();
+    let snapshot_at = time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default();
+    format!("[快照时点：{snapshot_at}，其后消息未纳入本快照，【进行中】/【待确认问题】以最新消息为准]\n{rendered}")
 }
 
 /// 构建主动压缩请求（`context_compact` 工具执行体）。
@@ -1190,6 +1206,41 @@ mod tests {
     }
 
     /// fade 天然幂等：视图每轮从存储重建，对同一视图重复淡化不产生二次改写。
+    #[test]
+    fn test_fade_snapshot_message_is_exempt() {
+        // L2 快照（meta.compacted=true）已是压缩产物，内容淡化必须豁免：
+        // 再切中段 = 双重压缩，切掉的恰是模型唯一的深历史记忆（真实事故回归）。
+        let mut snapshot = user_msg(&"x".repeat(30_000));
+        snapshot.meta = Some(serde_json::json!({"compacted": true}));
+        let mut msgs = vec![
+            snapshot,
+            user_msg("窗口内内容节点"),
+            user_msg("末条消息"),
+        ];
+        fade_aged_content_nodes(&mut msgs, 1, 200);
+        assert_eq!(view_text(&msgs[0]), "x".repeat(30_000));
+        assert!(msgs[0]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("content_faded"))
+            .is_none());
+    }
+
+    #[test]
+    fn test_render_snapshot_for_history_prepends_timestamp() {
+        // 快照是"截至某时刻"的状态切片：【进行中】/【待确认】会随后续轮次自然
+        // 过期。头部必须自带时点声明，否则读者无法区分"快照说未完成"与
+        // "实际早已完成"（真实事故：快照称"u6/u7 编译阻塞"，实际早已全绿）。
+        let xml = extract_snapshot(
+            "<state_snapshot>\n<in_progress_items>\n- 旧任务\n</in_progress_items>\n</state_snapshot>",
+        )
+        .unwrap();
+        let rendered = render_snapshot_for_history(&xml);
+        assert!(rendered.starts_with("[快照时点："));
+        assert!(rendered.contains("以最新消息为准]"));
+        assert!(rendered.contains("【进行中】"));
+    }
+
     #[test]
     fn test_fade_is_idempotent() {
         let long_text = "line\n".repeat(12_000);
