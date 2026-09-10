@@ -55,7 +55,7 @@ pub struct ChatOrchestrator {
     pub config: ModelConfig,
     pub parent: Option<Arc<dyn Plugin>>,
     /// Phase E-②：协议适配器经 `ModelProviderEntry.provider`（`Arc<dyn ModelProvider>`）
-    /// 从 CAPABILITY_MANAGER 取得，这里持有 Arc 共享引用（原为 Box 独占）。
+    /// 从 CAPABILITY_VISITOR 取得，这里持有 Arc 共享引用（原为 Box 独占）。
     pub protocol: Arc<dyn ModelProvider>,
 }
 
@@ -202,7 +202,7 @@ pub async fn run_chat_loop(
     // 当 `req.resume` 存在时，本调用是用户的恢复操作：
     // - `RetryTurn`：LLM 失败重试，删除 Failed Turn 及其所有子节点，重新走 LLM 请求
     // - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：工具调用恢复，删除旧子节点、
-    //   重新执行工具、创建新结果子节点并持久化。CAPABILITY_MANAGER 已由 agent chat
+    //   重新执行工具、创建新结果子节点并持久化。CAPABILITY_VISITOR 已由 agent chat
     //   handler 设置，`execute_tool_async` 直接复用。
     //
     // 成功 → `Continue`：turn 循环从 session 加载含新工具结果的历史，续写 LLM
@@ -311,8 +311,8 @@ pub async fn run_chat_loop(
         let system_prompt_owned = match req.system_prompt.as_deref() {
             Some(sp) => sp.to_string(),
             None => {
-                let collected = match ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
-                    Some(tool_manager) => tool_manager.list_system_prompts().await,
+                let collected = match ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+                    Some(tool_visitor) => tool_visitor.list_system_prompts().await,
                     None => Vec::new(),
                 };
                 collected
@@ -387,14 +387,14 @@ pub async fn run_chat_loop(
         let root_id: String = short_id();
         emit_streaming_start(&mut channel, &root_id, Some(tool_rounds)).await;
 
-        let mut tools = if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER)
+        let mut tools = if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR)
         {
-            tool_manager.list_capability().await
+            tool_visitor.list_capability().await
         } else {
             Vec::new()
         };
         // 主动压缩工具（目标四）：仅当工具压缩启用时暴露给模型（独立于自动压缩开关）。
-        // 执行不走 CapabilityManager 分发，由下方拦截逻辑处理（需要编排器内部链路）。
+        // 执行不走 CapabilityVisitor 分发，由下方拦截逻辑处理（需要编排器内部链路）。
         if enable_compact_tool {
             tools.push(compression::context_compact_tool_meta());
         }
@@ -405,7 +405,7 @@ pub async fn run_chat_loop(
         // 1) 内容节点淡化：B1 保护窗口（末条 + 最近 N 个内容节点）外的超大正文/思考
         //    做 head/tail 摘要（阈值取会话配置 line_threshold / token 上限 2048）；
         // 2) fade：轮次过多时淡化较早的工具结果（存储保留全文，视图每轮重建，天然幂等）；
-        // 3) 工具级骨架化：从 CapabilityManager 的能力声明（context_retention）动态解析
+        // 3) 工具级骨架化：从 CapabilityVisitor 的能力声明（context_retention）动态解析
         //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
         //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
         // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
@@ -546,7 +546,7 @@ pub async fn run_chat_loop(
 
         let new_msgs = out.into_messages(&root_id, tools_done.len());
         // 工具上下文保留策略（机制化）：不再把策略 Stamp 到节点 meta 持久化，
-        // 由 run_chat_loop 在构建 LLM 请求前从 CapabilityManager 动态解析，
+        // 由 run_chat_loop 在构建 LLM 请求前从 CapabilityVisitor 动态解析，
         // 节点 name 即 LLM 可见工具名，与声明名直接匹配。
         context.messages.extend(new_msgs);
 
@@ -605,7 +605,7 @@ pub async fn run_chat_loop(
         }
 
         // ── 主动压缩工具拦截（目标四）─────────────────────────────────
-        // context_compact 不走 CapabilityManager 分发：它需要编排器内部的
+        // context_compact 不走 CapabilityVisitor 分发：它需要编排器内部的
         // 压缩链路（LLM 摘要 + 上下文替换 + 会话持久化）。
         // 在此拆分：压缩调用就地执行并生成合成工具结果；其余工具正常分发。
         // 门控：仅当工具压缩开关开启时拦截；开关关闭时工具不暴露，模型幻觉

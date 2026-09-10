@@ -564,7 +564,7 @@
 
 - **前端**仅做配置 UI（CRUD）
 
-- MCP 工具通过 **系统统一的** **`Capability`** **trait +** **`traverse`** **+** **`tool_manager`** **机制**集成到 agent——与 `web` 插件完全对齐
+- MCP 工具通过 **系统统一的** **`Capability`** **trait +** **`traverse`** **+** **`tool_visitor`** **机制**集成到 agent——与 `web` 插件完全对齐
 
 **变更**：
 
@@ -602,9 +602,9 @@
 
    - 对每个 server 调 `McpManager::discover_tools` 动态发现工具
 
-   - 把每个工具构造为 `McpToolCapability` 注册到 `ctx.get(CAPABILITY_MANAGER)`
+   - 把每个工具构造为 `McpToolCapability` 注册到 `ctx.get(CAPABILITY_VISITOR)`
 
-   - agent 通过 `tool_manager.invoke("mcp.<server>.<tool>", ctx)` 调用（与 `web_search` 等一致）
+   - agent 通过 `tool_visitor.invoke("mcp.<server>.<tool>", ctx)` 调用（与 `web_search` 等一致）
 
 ### 三、配置层统一 + 持久化
 
@@ -626,7 +626,7 @@
 
    - `mcp_call_tool` / `mcp_discover` / `mcp_list_tools` / `mcp_register` / `mcp_unregister`
 
-   - 这些功能通过 `Capability` trait + `tool_manager` 机制实现，不再需要单独 schema
+   - 这些功能通过 `Capability` trait + `tool_visitor` 机制实现，不再需要单独 schema
 
 2. **删除** **`McpManager`** **的过度抽象**：
 

@@ -29,7 +29,7 @@ pub use creator::{create_object, has_creator};
 pub use model_provider::{resolve_protocol_id, FinishReason, ModelProvider, ProtocolEvent, Usage};
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 pub use capability::{
-    Capability, CapabilityCategory, CapabilityManager, CapabilityMeta, ModelProviderEntry,
+    Capability, CapabilityCategory, CapabilityVisitor, CapabilityMeta, ModelProviderEntry,
     ToolContextRetention,
 };
 pub use error::*;
@@ -39,7 +39,7 @@ pub use keys::*;
 pub use logger::*;
 pub use paths::*;
 pub use plugin::*;
-pub use tools::DefaultToolManager;
+pub use tools::DefaultToolVisitor;
 pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };

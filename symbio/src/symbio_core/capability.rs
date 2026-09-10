@@ -190,7 +190,7 @@ pub trait Capability: Send + Sync + 'static {
 
 /// 模型服务注册条目（AI 对话能力 = 与工具同一注册收集机制的"能力"）
 ///
-/// Phase B：`CapabilityManager` 除工具外同时收集模型服务（协议适配器实例），
+/// Phase B：`CapabilityVisitor` 除工具外同时收集模型服务（协议适配器实例），
 /// 会话发起时通过同一次 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播一并收集
 /// 工具 + 模型服务 + 系统提示词。
 #[derive(Clone)]
@@ -221,7 +221,7 @@ pub struct ModelProviderEntry {
 }
 
 #[async_trait]
-pub trait CapabilityManager: Send + Sync + 'static {
+pub trait CapabilityVisitor: Send + Sync + 'static {
     async fn register(&self, tool: Arc<dyn Capability>);
 
     async fn register_batch(&self, tools: Vec<Arc<dyn Capability>>) {

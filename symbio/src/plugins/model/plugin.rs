@@ -4,7 +4,7 @@
 //! - 单个活动 Model Provider 配置管理（向后兼容）
 //! - 多 Model Provider 注册表（`ModelProvidersConfig`）
 //! - Provider 注册：traverse 时把启用的 provider 以 `ModelProviderEntry`
-//!   注册进 CAPABILITY_MANAGER（Phase E-②：chat 编排与限流已迁往
+//!   注册进 CAPABILITY_VISITOR（Phase E-②：chat 编排与限流已迁往
 //!   session 插件，model 降级为无状态 LLM 网关）
 
 use super::handlers;
@@ -587,14 +587,14 @@ impl Plugin for ModelPlugin {
     ) -> InvokeResponse<PluginPayload> {
         // Phase B：AI 对话能力纳入统一注册收集机制。
         // 与 local/web/mcp 插件注册工具完全同构：命中 TRAVERSE_AVAILABLE_TOOLS 时，
-        // 把每个启用的 provider 以 ModelProviderEntry 注册进 CAPABILITY_MANAGER，
+        // 把每个启用的 provider 以 ModelProviderEntry 注册进 CAPABILITY_VISITOR，
         // 其系统提示词一并注册（provider_id 键；默认 provider 额外注册 "default" 键）。
         let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         if sub_path != crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS {
             return Err(PluginError::NotFound(format!("未知遍历路径: {sub_path}")));
         }
 
-        if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
+        if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             let providers = self.providers.read().await;
             for p in providers.providers.values() {
                 if !p.enabled {
@@ -604,7 +604,7 @@ impl Plugin for ModelPlugin {
                 match create_object::<dyn super::protocols::ModelProvider>(protocol_id, ctx.clone())
                 {
                     Some(protocol) => {
-                        tool_manager
+                        tool_visitor
                             .register_model_provider(ModelProviderEntry {
                                 provider_id: p.id.clone(),
                                 protocol_id: protocol_id.to_string(),
@@ -618,7 +618,7 @@ impl Plugin for ModelPlugin {
                             })
                             .await;
                         if let Some(sp) = &p.system_prompt {
-                            tool_manager.register_system_prompt(&p.id, sp.clone()).await;
+                            tool_visitor.register_system_prompt(&p.id, sp.clone()).await;
                         }
                     }
                     None => {
@@ -634,7 +634,7 @@ impl Plugin for ModelPlugin {
             // 默认 provider 的系统提示词注册为 "default"（消费侧兜底键）
             if let Some(dp) = providers.resolve(providers.default_provider_id.as_deref()) {
                 if let Some(sp) = &dp.system_prompt {
-                    tool_manager
+                    tool_visitor
                         .register_system_prompt("default", sp.clone())
                         .await;
                 }

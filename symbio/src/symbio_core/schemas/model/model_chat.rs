@@ -65,7 +65,7 @@ pub struct Request {
     ///   重新执行工具（approve/retry/supply）或直接生成结果（reject/answer）→
     ///   创建新响应子节点 → 成功则继续 turn 循环，失败则退出等下次 resume。
     ///
-    /// CAPABILITY_MANAGER 已由 agent chat handler 设置，`execute_tool_async` 直接复用。
+    /// CAPABILITY_VISITOR 已由 agent chat handler 设置，`execute_tool_async` 直接复用。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<ResumeRequest>,
 }

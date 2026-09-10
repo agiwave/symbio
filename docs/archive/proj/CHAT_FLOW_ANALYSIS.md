@@ -37,7 +37,7 @@ ChatInputArea (用户键入 + 回车)
                                      ├─ token req_id, is_working=true
                                      └─ tokio::spawn → 调用 AGENT_CHAT
                                           └─ AgentPlugin::chat::handle
-                                               ├─ 加载工具列表（DefaultToolManager）
+                                               ├─ 加载工具列表（DefaultToolVisitor）
                                                ├─ 拼装 system_prompt（全局 + workspace + mindscape + budget）
                                                ├─ 构建临时上下文（active_memory + temporal + task_context）
                                                └─ parent.route(MODEL_CHAT)  // 转给 model 插件

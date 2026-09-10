@@ -70,7 +70,7 @@ impl AgentPlugin {
         bundle_id: &str,
         workdir: Option<String>,
         _session_id: Option<String>,
-        tool_manager: &Arc<dyn crate::symbio_core::CapabilityManager>,
+        tool_visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>,
     ) -> Result<(), PluginError> {
         // ── 1. 加载 bundle ──
         let store = BundleStore::new(workdir.as_deref());
@@ -108,7 +108,7 @@ impl AgentPlugin {
             );
         }
 
-        tool_manager.register_batch(caps).await;
+        tool_visitor.register_batch(caps).await;
         Ok(())
     }
 }
@@ -148,13 +148,13 @@ impl Plugin for AgentPlugin {
         let workdir = ctx.get(WORKDIR);
         let session_id = ctx.get(SESSION_ID);
 
-        let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) else {
+        let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) else {
             return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
         };
 
         // ── agent_run：无条件注册 ──
         let store = BundleStore::new(workdir.as_deref());
-        tool_manager
+        tool_visitor
             .register_batch(vec![super::subagent::AgentRunCapability::new(
                 workdir.clone(),
                 super::subagent::format_bundles_brief(&store.list()),
@@ -165,7 +165,7 @@ impl Plugin for AgentPlugin {
         // ── 已选择智能体 → 约定目录装配（身份工具等）──
         if let Some(bundle_id) = bundle_id {
             if let Err(e) = self
-                .attach_bundle(&ctx, &bundle_id, workdir, session_id, &tool_manager)
+                .attach_bundle(&ctx, &bundle_id, workdir, session_id, &tool_visitor)
                 .await
             {
                 // 硬错误：会话绑定了一个不合规/不存在的 bundle——必须中止并明确提示，

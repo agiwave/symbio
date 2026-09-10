@@ -157,11 +157,11 @@ pub async fn execute_tool_async(
     tool_ctx.set(crate::symbio_core::SESSION_ID, session_id);
     tool_ctx.set(crate::symbio_core::TOOL_CALL_ID, tool_call_id.to_string());
 
-    let route_result = if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
-        if tool_manager.has_capability(tool_name).await {
+    let route_result = if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+        if tool_visitor.has_capability(tool_name).await {
             plugin_info!("session", "[Tool] Using ToolManager for: {}", tool_name);
             let _ = tool_ctx.set_payload(args.clone());
-            tool_manager.invoke(tool_name, tool_ctx.clone()).await
+            tool_visitor.invoke(tool_name, tool_ctx.clone()).await
         } else {
             plugin_info!(
                 "session",

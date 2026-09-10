@@ -23,7 +23,7 @@
 //!
 //! MCP 工具是否对 agent 可见，由 `McpPlugin::traverse` 在每次 `parent.traverse`
 //! 时根据 `McpConfig.servers` 的 `enabled` 字段动态决定：
-//! 仅当 server 存在 + enabled=true 时才注册到 `tool_manager`。
+//! 仅当 server 存在 + enabled=true 时才注册到 `tool_visitor`。
 //! 因此不需要在 `McpManager` 中维护"激活集合"——遍历 + 注册即激活。
 
 use crate::plugins::mcp::schemas::mcp_config::{McpServerConfig, McpTransportType};

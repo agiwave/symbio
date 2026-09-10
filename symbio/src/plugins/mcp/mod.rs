@@ -4,7 +4,7 @@
 //!
 //! - **后端**（`symbio/src/plugins/mcp/`）：MCP **配置管理**（CRUD）+ **客户端
 //!   transport**（stdio / http，按需 lazy 加载）—— 与系统工具机制集成，
-//!   每次 `parent.traverse` 时把已启用的 MCP server 工具注册到 `tool_manager`。
+//!   每次 `parent.traverse` 时把已启用的 MCP server 工具注册到 `tool_visitor`。
 //! - **前端**（`tauri`）：**仅**负责 MCP Server 的配置管理（CRUD UI），不实现
 //!   任何 transport 客户端。
 //!

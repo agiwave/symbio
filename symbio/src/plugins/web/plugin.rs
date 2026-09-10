@@ -114,9 +114,9 @@ impl Plugin for WebPlugin {
             )));
         }
 
-        if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
+        if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             for tool in self.tool_impls.iter() {
-                tool_manager.register(tool.clone()).await;
+                tool_visitor.register(tool.clone()).await;
             }
         }
 

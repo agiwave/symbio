@@ -69,11 +69,11 @@ graph TD
 | `creator.rs`                                                              | 通用对象创建注册表（`submit_object_creator!` 宏、`create_object` / `has_creator`）                 |
 | `error.rs`                                                                | 统一 `PluginError` 与稳定错误码                                                               |
 | `types.rs`                                                                | 流/事件类型（`BoxStream` / `EventResult` / `SystemEvent` / `ToolCall` 等）                    |
-| `capability.rs`                                                           | `Capability` / `CapabilityManager` 能力系统                                               |
+| `capability.rs`                                                           | `Capability` / `CapabilityVisitor` 能力系统                                               |
 | `chat_session.rs`                                                         | `ChatSession` / `ChatSessionHandle` 会话抽象                                              |
 | `entities.rs`                                                             | 统一实体框架：`EntityProvider` trait + list/get/upload/delete/status 公共流程                    |
 | `chat_pipeline.rs`                                                        | 会话能力收集管线（`traverse(available_tools)` 统一工具贡献机制）                                        |
-| `tools.rs`                                                                | `DefaultToolManager` 默认能力管理器                                                          |
+| `tools.rs`                                                                | `DefaultToolVisitor` 默认能力管理器                                                          |
 | `schemas/`                                                                | 跨端数据结构 (Request/Response)，Rust 端定义                                                    |
 | `logger.rs`                                                               | 日志系统初始化                                                                               |
 | `keys.rs`                                                                 | 上下文键（`PATH` / `WORKDIR` / `SESSION_ID` / `TRACE_ID` …）                                |

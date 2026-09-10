@@ -10,8 +10,8 @@
 use super::plugin::AgentPlugin;
 use super::store::BundleStore;
 use crate::symbio_core::{
-    CapabilityManager, DefaultToolManager, InvokeRequest, InvokeRequestExt, Plugin, SimpleRequest,
-    AGENT_ID, CAPABILITY_MANAGER, PATH, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    CapabilityVisitor, DefaultToolVisitor, InvokeRequest, InvokeRequestExt, Plugin, SimpleRequest,
+    AGENT_ID, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -63,11 +63,11 @@ permissions:
     buf.into_inner()
 }
 
-/// 构造 traverse 所需的请求上下文（含 CAPABILITY_MANAGER）。
+/// 构造 traverse 所需的请求上下文（含 CAPABILITY_VISITOR）。
 fn ctx_with(
     workdir: Option<&str>,
     agent_id: Option<&str>,
-) -> (Arc<dyn InvokeRequest>, Arc<DefaultToolManager>) {
+) -> (Arc<dyn InvokeRequest>, Arc<DefaultToolVisitor>) {
     let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
     if let Some(w) = workdir {
         ctx.set(WORKDIR, w.to_string());
@@ -76,10 +76,10 @@ fn ctx_with(
         ctx.set(AGENT_ID, b.to_string());
     }
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-    let manager: Arc<DefaultToolManager> = Arc::new(DefaultToolManager::new());
+    let manager: Arc<DefaultToolVisitor> = Arc::new(DefaultToolVisitor::new());
     ctx.set(
-        CAPABILITY_MANAGER,
-        Arc::clone(&manager) as Arc<dyn crate::symbio_core::CapabilityManager>,
+        CAPABILITY_VISITOR,
+        Arc::clone(&manager) as Arc<dyn crate::symbio_core::CapabilityVisitor>,
     );
     (ctx, manager)
 }

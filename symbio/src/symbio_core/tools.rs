@@ -3,13 +3,13 @@
 //! ## 为什么放在 `symbio_core`
 //!
 //! 插件之间**互相不可见**（`plugins/mod.rs` 的架构约束），只能依赖 `symbio_core`。
-//! 会话编排（session 插件）需要自行构造 `CapabilityManager` 来收集各插件贡献的工具，
-//! 因此 `DefaultToolManager` 必须上浮为共享设施，而不能停留在某个插件的私有模块里。
+//! 会话编排（session 插件）需要自行构造 `CapabilityVisitor` 来收集各插件贡献的工具，
+//! 因此 `DefaultToolVisitor` 必须上浮为共享设施，而不能停留在某个插件的私有模块里。
 //!
-//! 迁移前位置：`plugins/agent/core/default_tool_manager.rs`
+//! 迁移前位置：`plugins/agent/core/default_tool_visitor.rs`
 
 use crate::symbio_core::{
-    Capability, CapabilityManager, CapabilityMeta, InvokeRequest, InvokeResponse,
+    Capability, CapabilityVisitor, CapabilityMeta, InvokeRequest, InvokeResponse,
     ModelProviderEntry, PluginError, PluginPayload,
 };
 use async_trait::async_trait;
@@ -23,13 +23,13 @@ use tokio::sync::RwLock;
 /// 除工具外，同时承载 Phase B 扩充的两组注册（与工具同一 traverse 收集机制）：
 /// - `providers`：模型服务目录（AI 对话能力）
 /// - `system_prompts`：系统提示词（按名称保序）
-pub struct DefaultToolManager {
+pub struct DefaultToolVisitor {
     tools: Arc<RwLock<HashMap<String, Arc<dyn Capability>>>>,
     providers: Arc<RwLock<IndexMap<String, ModelProviderEntry>>>,
     system_prompts: Arc<RwLock<IndexMap<String, String>>>,
 }
 
-impl DefaultToolManager {
+impl DefaultToolVisitor {
     pub fn new() -> Self {
         Self {
             tools: Arc::new(RwLock::new(HashMap::new())),
@@ -39,14 +39,14 @@ impl DefaultToolManager {
     }
 }
 
-impl Default for DefaultToolManager {
+impl Default for DefaultToolVisitor {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl CapabilityManager for DefaultToolManager {
+impl CapabilityVisitor for DefaultToolVisitor {
     async fn register(&self, tool: Arc<dyn Capability>) {
         let name = tool.name();
         let mut tools = self.tools.write().await;
@@ -164,7 +164,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_roundtrip_preserves_registration_order() {
-        let mgr = DefaultToolManager::new();
+        let mgr = DefaultToolVisitor::new();
         mgr.register_model_provider(provider_entry("p1", "第一个"))
             .await;
         mgr.register_model_provider(provider_entry("p2", "第二个"))
@@ -182,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_overwrite_keeps_single_entry() {
-        let mgr = DefaultToolManager::new();
+        let mgr = DefaultToolVisitor::new();
         mgr.register_model_provider(provider_entry("p1", "first"))
             .await;
         mgr.register_model_provider(provider_entry("p1", "second"))
@@ -195,7 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn system_prompt_overwrite_keeps_first_registration_slot() {
-        let mgr = DefaultToolManager::new();
+        let mgr = DefaultToolVisitor::new();
         mgr.register_system_prompt("default", "默认提示词".to_string())
             .await;
         mgr.register_system_prompt("p1", "P1 提示词".to_string())

@@ -1,6 +1,6 @@
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与编排中心**。Phase E-② 重构后，它是**唯一的会话编排入口**：加载历史、组装系统提示词、经 CapabilityManager 汇集工具、解析 Model Provider 并在进程内驱动会话循环；Model 插件退居**无状态 LLM 网关**（provider 注册表 + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与编排中心**。Phase E-② 重构后，它是**唯一的会话编排入口**：加载历史、组装系统提示词、经 CapabilityVisitor 汇集工具、解析 Model Provider 并在进程内驱动会话循环；Model 插件退居**无状态 LLM 网关**（provider 注册表 + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
@@ -18,7 +18,7 @@ flowchart TD
     LoadHistory --> BuildPrompt[4. 构建系统提示词<br>prompt.rs 人格/心智流形注入]
 
     subgraph Session 会话编排层（唯一编排入口）
-        BuildPrompt --> AggTools[5. 工具汇集<br>CAPABILITY_MANAGER 注册表]
+        BuildPrompt --> AggTools[5. 工具汇集<br>CAPABILITY_VISITOR 注册表]
         AggTools --> Resolve[6. Provider entry 解析<br>精确 id → is_default → 首个注册]
         Resolve --> Spawn[7. 进程内 spawn 会话循环<br>RATE_LIMITER 限流跟随请求方]
         Spawn --> BuildView[8. 构建请求视图<br>build_request_view<br>内容淡化/工具淡化/骨架化/水位提醒]

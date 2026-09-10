@@ -247,7 +247,7 @@ fn anchor_of_args(args: &str) -> Option<String> {
 ///    "todo_write"）→ 声明策略映射。声明了 `LastOnly` / `LastN(n)` 的工具，其更早
 ///    的调用即使仍在全局窗口内，参数与结果同样骨架化（同工具"重复全量写入"的
 ///    历史对后续推理无参考价值）。映射由调用方在运行时按工具声明动态构建
-///    （session 会话循环内直接用 CapabilityManager），**不持久化**、
+///    （session 会话循环内直接用 CapabilityVisitor），**不持久化**、
 ///    不写入任何消息 meta。
 ///
 /// **优先级：工具级保留策略 > 全局窗口。**声明了保留策略的工具，其"最近 N 次"
@@ -449,7 +449,7 @@ mod tests {
         }
     }
 
-    /// 构建 短工具名 → 保留策略 映射（模拟会话循环运行时从 CapabilityManager 动态解析）
+    /// 构建 短工具名 → 保留策略 映射（模拟会话循环运行时从 CapabilityVisitor 动态解析）
     fn retention_map(
         entries: &[(&str, ToolContextRetention)],
     ) -> HashMap<String, ToolContextRetention> {

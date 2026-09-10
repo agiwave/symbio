@@ -180,7 +180,7 @@ Symbio 在两条能力线上领先，应作为核心卖点而非简单对标补�
 
 Symbio 是一个 **Rust 后端 + Tauri(Svelte) 前端的多智能体认知系统**，核心特征为"插件容器 + 能力注册 + 认知单元(CU)长期记忆 + 多角色 Agent 编排"。
 
-- **插件与能力注册**：各插件经 `submit_object_creator!` 宏自注册构造器；`Composite::traverse` 向全部子插件广播 `TRAVSE_AVAILABLE_TOOLS`，各插件把 `Arc<dyn Capability>` 注册进 `DefaultToolManager`（`HashMap<name, cap>`）。插件间不可直接引用，仅经名称注册表与 `symbio_core` 共享设施交互。
+- **插件与能力注册**：各插件经 `submit_object_creator!` 宏自注册构造器；`Composite::traverse` 向全部子插件广播 `TRAVSE_AVAILABLE_TOOLS`，各插件把 `Arc<dyn Capability>` 注册进 `DefaultToolVisitor`（`HashMap<name, cap>`）。插件间不可直接引用，仅经名称注册表与 `symbio_core` 共享设施交互。
 - **Agent 插件**（核心）：`chat`(agent_run，含子代理路由) / `cognition`(agent_cognition：CU 的 save/retrieve/graph_query/reflect/consolidate) / `create_agent`(从 CU 动态造智能体)。系统提示词由 `system_prompt.rs` 按优先级(CU 类型+打分)动态拼装，受 `prompt_budget_tokens` 约束。
 - **Local 插件**（直接工具面）：`file_read/write/edit`、`content_search`(ripgrep)、`glob_search`、`shell`(cmd.exe，含审批/风险/超时) —— 本轮新增 `list_dir`、`todo_write`。工具经 `SecureToolWrapper` 做路径/风险门禁。
 - **Web / Skill / Explorer / Model / MCP / Session / Composite** 等插件各司其职；`explorer` 为文件系统浏览器(含 watcher)，`model` 封装 OpenAI/Anthropic/Gemini 协议与 fastembed 嵌入。

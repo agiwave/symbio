@@ -17,7 +17,7 @@
    - `Model` = 无状态 LLM 网关：provider 注册表、协议适配、SSE → 标准化事件流 —— **无状态**。
    - 依赖方向：`model → session` **零依赖**；`session → model` 单向依赖。
 2. **symbio_core 定义核心 `ModelProvider` 接口**：提供不同协议的大语言模型请求和解析封装（类似现有 `ModelProtocol`），使协议实现的核心契约上移到 core。
-3. **扩充 `CapabilityManager`**：除注册 `Capability` 外，还可注册 `ModelProvider` 与系统提示词 —— AI 对话能力纳入与工具完全相同的"统一注册收集机制"；会话时通过现有 traverse 机制**一次性**收集工具 + 模型服务 + 系统提示词。
+3. **扩充 `CapabilityVisitor`**：除注册 `Capability` 外，还可注册 `ModelProvider` 与系统提示词 —— AI 对话能力纳入与工具完全相同的"统一注册收集机制"；会话时通过现有 traverse 机制**一次性**收集工具 + 模型服务 + 系统提示词。
 
 ## 2. 现状核实（含对分析稿的三处修正）
 
@@ -43,9 +43,9 @@
 
 - `PluginChannel`（transport.rs）、`ChatSession`/`ChatSessionHandle`（chat_session.rs）、`ModelConfig`（schemas/model/model_config.rs）、`ModelProviderConfig`/`ModelProvidersConfig`（schemas/model/model_providers.rs）、`CapabilityMeta`/`ToolContextRetention`（capability.rs）、`MODEL_PROTOCOL_*` 常量。
 - `submit_object_creator!(id, ctor, dyn Trait)` 按 `TypeId::of::<dyn Trait>()` 注册（creator.rs:124），注册点与查询点同步换 trait 名即可，无隐藏耦合。
-- `DefaultToolManager` 是 `CapabilityManager` 的**唯一**实现（tools.rs:40）——扩充 trait 方法零破坏。
+- `DefaultToolVisitor` 是 `CapabilityVisitor` 的**唯一**实现（tools.rs:40）——扩充 trait 方法零破坏。
 - `ModelPlugin::traverse` 当前是空壳（plugin.rs:824-831，注释"Model 插件目前不直接暴露工具"）——Phase B 的天然挂载点。
-- traverse 注册样板（local/plugin.rs:295-316）：`ctx.get(PATH)` 判 `TRAVERSE_AVAILABLE_TOOLS` → `ctx.get(CAPABILITY_MANAGER)` → 逐个 register。
+- traverse 注册样板（local/plugin.rs:295-316）：`ctx.get(PATH)` 判 `TRAVERSE_AVAILABLE_TOOLS` → `ctx.get(CAPABILITY_VISITOR)` → 逐个 register。
 
 ## 3. 目标架构与边界契约
 
@@ -53,7 +53,7 @@
 symbio_core（契约层）
 ├── model_provider.rs        [新] trait ModelProvider + ProtocolEvent/FinishReason/Usage
 │                                 + resolve_protocol_id + spawn_orchestrator
-├── capability.rs            [扩] CapabilityManager 增 provider/系统提示词注册收集
+├── capability.rs            [扩] CapabilityVisitor 增 provider/系统提示词注册收集
 ├── chat_pipeline.rs         [扩] collect_capabilities 语义 = 工具+模型服务+系统提示词
 ├── context_window.rs        [新] apply_layered_sliding_window（纯函数，Phase C 迁入）
 └── keys.rs                  [扩] SESSION_HANDLE 键（Phase D）
@@ -103,7 +103,7 @@ pub trait ModelProvider: Send + Sync {
 
 **验证**：cargo check 零警告；model 模块测试全绿（协议 SSE 解析测试不改一字）。
 
-## 5. Phase B：扩充 CapabilityManager（ModelProvider + 系统提示词统一收集）
+## 5. Phase B：扩充 CapabilityVisitor（ModelProvider + 系统提示词统一收集）
 
 **core 侧**（capability.rs + tools.rs）：
 
@@ -117,7 +117,7 @@ pub struct ModelProviderEntry {
     pub provider: Arc<dyn ModelProvider>,
 }
 
-pub trait CapabilityManager: … {
+pub trait CapabilityVisitor: … {
     // …既有 5 方法不动…
     async fn register_model_provider(&self, entry: ModelProviderEntry);
     async fn list_model_providers(&self) -> Vec<ModelProviderEntry>;   // 收集目录
@@ -127,13 +127,13 @@ pub trait CapabilityManager: … {
 }
 ```
 
-- `DefaultToolManager` 增两组并行存储：`providers: RwLock<IndexMap<String, ModelProviderEntry>>`、`system_prompts: RwLock<IndexMap<String, String>>`（保留注册顺序）。
-- `collect_capabilities` 机制**零改动**（同一 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播、同一 `CAPABILITY_MANAGER` 键、同一错误桶）；仅头注释语义扩充为"工具 + 模型服务 + 系统提示词"三合一收集。
+- `DefaultToolVisitor` 增两组并行存储：`providers: RwLock<IndexMap<String, ModelProviderEntry>>`、`system_prompts: RwLock<IndexMap<String, String>>`（保留注册顺序）。
+- `collect_capabilities` 机制**零改动**（同一 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播、同一 `CAPABILITY_VISITOR` 键、同一错误桶）；仅头注释语义扩充为"工具 + 模型服务 + 系统提示词"三合一收集。
 
 **model 插件侧（贡献者）**：`ModelPlugin::traverse` 空壳填实——命中 `TRAVERSE_AVAILABLE_TOOLS` 时，遍历 `self.providers` 配置，对每个 provider 经工厂 `create_object::<dyn ModelProvider>(protocol_id)` 实例化并 `register_model_provider`；provider 配置的 `system_prompt` 一并注册；工厂失败按软故障记日志（不进致命错误桶）。
 
 **消费侧（优先取收集结果，缺失回退现状）**：
-1. **provider 解析**（plugin.rs `handle_chat_session_internal`）：先 `ctx.get(CAPABILITY_MANAGER) → get_model_provider(provider_id)`；未命中回退现有 `ModelProvidersConfig::resolve()` + `create_object` 路径——**保证任何场景行为不回退**。
+1. **provider 解析**（plugin.rs `handle_chat_session_internal`）：先 `ctx.get(CAPABILITY_VISITOR) → get_model_provider(provider_id)`；未命中回退现有 `ModelProvidersConfig::resolve()` + `create_object` 路径——**保证任何场景行为不回退**。
 2. **系统提示词**（chat_loop.rs 既有链路 `request.system_prompt` > provider config `system_prompt` 之上追加第三级）：两者皆空时取收集到的 `"default"` 系统提示词。既有两级优先级一字不动。
 
 **验证**：新增 tools.rs 单测（provider/prompt 注册往返 + 保序）；model/session 模块测试全绿。
@@ -225,13 +225,13 @@ pub struct ModelProviderEntry { ..., pub config: ModelConfig }
 **③ 限流归属（现状：rate_limiter.wait 仅在会话入口调一次，多轮循环不再限流）**
 - `ProviderRateLimiter`（model/plugin.rs:33-87，纯结构零依赖）下沉 core（rate_limit.rs）+ 全局静态 `RATE_LIMITER`（语义等价：ModelPlugin 本就是进程内单例）。
 - `ModelProviderEntry` 增 `rate_limit_ms: u64`（traverse 注册时从 model 本地 `ModelProviderConfig.rate_limit_ms` 携带；core `ModelConfig` 不加字段）。
-- `CapabilityManager::get_model_provider` 改返回 `Option<ModelProviderEntry>`（session 一次取齐 provider 实例 + config + rate_limit_ms；原 `Option<Arc<dyn ModelProvider>>` 返回形态在删除 chat 路由后无消费者，直接改签名）。
+- `CapabilityVisitor::get_model_provider` 改返回 `Option<ModelProviderEntry>`（session 一次取齐 provider 实例 + config + rate_limit_ms；原 `Option<Arc<dyn ModelProvider>>` 返回形态在删除 chat 路由后无消费者，直接改签名）。
 - session 引擎入口调 `RATE_LIMITER.wait(&entry.provider_id, entry.rate_limit_ms)`——会话级节流语义逐字节保持。
 
 **④ session 对接（session/orchestrator.rs run_chat_loop_task）**
 - 保留 pair(4096) + tokio::spawn + Error 帧包装 + 1800s 消费循环**零改动**（前端帧时序不变）；仅把 `parent.route(chat_ctx)` 替换为进程内 `tokio::spawn(chat_loop::run_chat_loop(&orchestrator, ctx, plugin_chan))`。
 - spawn 外层 match 保留 Error 帧包装语义（原 spawn_orchestrator 的 `Ok(Err(e))→Error 帧 + code` / `panic→INTERNAL_ERROR`）；host_tx_keepalive 技巧随跨插件通道消失而不再需要（进程内直调，host 端 tx 由编排器持有）。
-- provider 解析：`ctx.get(CAPABILITY_MANAGER) → get_model_provider(provider_id)`（resolve_session_params 已设 PROVIDER_ID）；未命中 → Error 帧"未找到可用的 Model Provider，请先在设置中配置并启用至少一个"（与现状 ValidationError 文案一致）。
+- provider 解析：`ctx.get(CAPABILITY_VISITOR) → get_model_provider(provider_id)`（resolve_session_params 已设 PROVIDER_ID）；未命中 → Error 帧"未找到可用的 Model Provider，请先在设置中配置并启用至少一个"（与现状 ValidationError 文案一致）。
 - `ChatOrchestrator::new(config, parent, protocol)` 由 session 编排器构造；engine ctx 载荷仍是 model_chat::Request（handle_chat_send_oneoff 已组装）。
 - SESSION_HANDLE：session 编排器已 set，session 版 `open_chat_session` 直接读 ctx，legacy 路由回退分支删除。
 
@@ -271,11 +271,11 @@ pub struct ModelProviderEntry { ..., pub config: ModelConfig }
 - [x] 现状探查与事实核验
 - [x] 本设计文档
 - [x] Phase A：core `ModelProvider` 接口（含 7 处残余改名收尾 + `pub mod model_provider` 公开，cargo check 零警告）
-- [x] Phase B：CapabilityManager 扩充 + traverse 注册 + 消费侧（provider 解析收集优先/工厂回退 + 系统提示词插入第二级 + tools.rs 3 个单测通过）
+- [x] Phase B：CapabilityVisitor 扩充 + traverse 注册 + 消费侧（provider 解析收集优先/工厂回退 + 系统提示词插入第二级 + tools.rs 3 个单测通过）
 - [x] Phase C：滑窗纯函数迁 core（model 中 `plugins::session` 文本引用零命中）
 - [x] Phase D：路由依赖消除（SESSION_HANDLE ctx 交付 + compress_messages trait 方法；model 中 `plugins::session`/`SESSION_OPEN`/`SESSION_COMPRESS` 零命中，session→model 仅剩 core `MODEL_CHAT` 常量）
 - [x] Phase E-①：core 基建（symbio_core/turn.rs 收纳 SSE 机器 + TurnOutput/ToolCallAccumulator + 消息构造家族；ModelProvider::execute_turn 统一默认实现（parse_sse_stream 泛型化 `<P: ModelProvider + ?Sized>`），turn_processor 改薄委托，行为等价；ModelProviderEntry 加 config 字段（capability/tools/plugin 三处补齐）；model 侧 protocol/tool_call/message_builder/context 四文件 re-export shim，消费方零改动；cargo check 零警告 + cargo test --lib 226 通过 0 失败）
-- [x] Phase E-②：原子切换——session 搬入循环族（orchestrator.rs run_chat_loop_task 改为进程内直连：CAPABILITY_MANAGER 解析 entry（精确 id → is_default → 首个注册，`ModelProviderEntry.is_default` 承载 resolve 回退语义）+ `RATE_LIMITER.wait` 限流跟随请求发起方 + `PluginChannel::pair(4096)` 进程内对接 + keepalive + 嵌套 spawn Error 帧包装，消费循环逻辑零改动）；model 删 loop 族 9 文件（chat_loop/compression/context/resume/tool_call/tool_executor/tool_result_guard/turn_processor/protocol 垫片）+ 删 `resolve_provider` + MODEL_CHAT 路由与 PATH 设置移除；`cargo check` 零警告 + `cargo test --lib` 228 通过 0 失败 + grep 判据 `run_chat_loop\|spawn_orchestrator` 在 src/plugins/model/ 零命中 + model 中 `plugins::session` 引用零命中
+- [x] Phase E-②：原子切换——session 搬入循环族（orchestrator.rs run_chat_loop_task 改为进程内直连：CAPABILITY_VISITOR 解析 entry（精确 id → is_default → 首个注册，`ModelProviderEntry.is_default` 承载 resolve 回退语义）+ `RATE_LIMITER.wait` 限流跟随请求发起方 + `PluginChannel::pair(4096)` 进程内对接 + keepalive + 嵌套 spawn Error 帧包装，消费循环逻辑零改动）；model 删 loop 族 9 文件（chat_loop/compression/context/resume/tool_call/tool_executor/tool_result_guard/turn_processor/protocol 垫片）+ 删 `resolve_provider` + MODEL_CHAT 路由与 PATH 设置移除；`cargo check` 零警告 + `cargo test --lib` 228 通过 0 失败 + grep 判据 `run_chat_loop\|spawn_orchestrator` 在 src/plugins/model/ 零命中 + model 中 `plugins::session` 引用零命中
 - [x] Phase E-③：文档/注释清理——`schemas/model/model_chat.rs`（provider_id 注释补充 session 侧解析回退链；resume 注释指向 `session/chat_loop.rs`）、`schemas/session/chat_message.rs`（ResumeRequest 注释同步 `session/resume.rs:process_resume` 落点）、`plugins/session/chat_session.rs`（compress_messages 消费方表述去 model 化）、`plugins/session/README.md`（架构总览与数据流图改写为"session 唯一编排入口 + 进程内直连无状态 LLM 网关"，正文与总结矩阵全部 `plugins/model/*` 路径同步为 `plugins/session/*`）；删除根目录 3 个 E-② 临时脚本（fix_e2c_plugin.ps1 / fix_e2d_orchestrator.ps1 / fix_e2d_corrupt.ps1）；`cargo check` 通过零警告。残留仅 README `<state_snapshot>` 示例 XML（虚构样例数据，非架构声明，保留）
 - [x] Phase sink：core 单消费者定义下沉（判定依据见 10.1）——session 新增私有模块 `rate_limit.rs` / `context_window.rs` / `tokenizer.rs`，local 新增私有模块 `system.rs`（均携带 Phase sink 头注释），8 处消费方引用切换（orchestrator L286 限流、compression 三处 use + 滑窗调用、chat_loop 校准 + 用量上报、tool_result_guard use、shell / content_search 的 decode_output / validate_params），core 删除 4 文件与全部注册 / re-export；下沉暴露 6 处 dead_code（core 时代靠 `pub use` 导出豁免）：`ProviderRateLimiter::new` 为纯别名删除（测试改 `default()`），`run_command` 与 tokenizer 家族 4 项（`PER_MESSAGE_OVERHEAD` / `count_messages` / `count_tools` / `ratio` / `calibration_ratio`）标 `#[allow(dead_code)]` 留待 audit-session 处置；README L247/L263 失实表述同步修正（"context.rs 保留重导出"不实，改为指向 `plugins/session/context_window.rs`）；`cargo check` 零警告 + `cargo test --lib` 228 通过 0 失败
 - [x] audit-session：session 插件内部体检（audit-1~5 全部收官，报告见 10.2）——audit-3 消灭 core/types.rs（ToolCall 下沉 model）；audit-4 删除 sink 遗留全部 5 处 `#[allow(dead_code)]` 项；audit-5 完成 compress.rs 更名 message_archive.rs、context.rs 并入 chat_session.rs、5 文件头注释、README 6 处失实修正
@@ -299,7 +299,7 @@ pub struct ModelProviderEntry { ..., pub config: ModelConfig }
 | turn 家族 | core model_provider `execute_turn` 自用 + session 消费 |
 | chat_pipeline | agent/host + session 双消费 |
 | schemas::model | core / model / session 三方共享 |
-| DefaultToolManager | chat_pipeline 内部 + agent 测试 |
+| DefaultToolVisitor | chat_pipeline 内部 + agent 测试 |
 | homedir | storage_service + plugins/home 双消费 |
 | ids / paths | 全局常量单一真相源（PLUGIN_* / SESSION_* 等被各插件广泛使用） |
 | logger | `#[macro_export]` 宏被 core 自身（chat_pipeline / entities / model_provider / turn）+ 多插件使用；init_logger 由 init.rs 调用（宏经 crate 根导出，直接路径搜索漏报，须按宏名盘点） |

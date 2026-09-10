@@ -12,8 +12,8 @@
 //! - 静态插件持有 `manager: Arc<McpManager>`（无状态 transport 路由器）
 //! - `traverse(TRAVERSE_AVAILABLE_TOOLS)` 时遍历 `McpConfig.servers`，
 //!   对每个 enabled server 调用 `manager.discover_tools` 动态发现工具，
-//!   把每个工具包装为 [`McpToolCapability`] 注册到 `ctx.get(CAPABILITY_MANAGER)`
-//! - agent 通过 `tool_manager.invoke("mcp.<server>.<tool>", ctx)` 调用
+//!   把每个工具包装为 [`McpToolCapability`] 注册到 `ctx.get(CAPABILITY_VISITOR)`
+//! - agent 通过 `tool_visitor.invoke("mcp.<server>.<tool>", ctx)` 调用
 //!
 //! ## 存储策略
 //!
@@ -404,8 +404,8 @@ impl Plugin for McpPlugin {
             )));
         }
 
-        // 仅当上游传入了 CAPABILITY_MANAGER 时才注册
-        let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) else {
+        // 仅当上游传入了 CAPABILITY_VISITOR 时才注册
+        let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) else {
             return Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()));
         };
 
@@ -425,7 +425,7 @@ impl Plugin for McpPlugin {
                             server_cfg.clone(),
                             self.manager.clone(),
                         ));
-                        tool_manager.register(cap).await;
+                        tool_visitor.register(cap).await;
                     }
                 }
                 Err(e) => {

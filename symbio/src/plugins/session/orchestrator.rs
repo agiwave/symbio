@@ -253,10 +253,10 @@ impl SessionPlugin {
         // ── Phase E-②：进程内直连——解析 provider entry → 限流 → spawn run_chat_loop ──
         // Provider 解析回退链迁移自 ModelProvidersConfig::resolve：
         // 精确 id → is_default → 首个已注册（traverse 仅注册 enabled provider）。
-        let manager = match chat_ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
+        let manager = match chat_ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             Some(m) => m,
             None => {
-                let msg = "CAPABILITY_MANAGER 不可用，无法解析 Model Provider".to_string();
+                let msg = "CAPABILITY_VISITOR 不可用，无法解析 Model Provider".to_string();
                 crate::plugin_error!("session", "{}", &msg);
                 self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
                     .await;
@@ -784,7 +784,7 @@ impl SessionPlugin {
                 crate::plugin_warn!("session", "会话引擎句柄构造失败，chat 将回退内存会话");
             }
 
-            let tool_manager = collect_capabilities(Some(&parent_spawn), &chat_ctx).await;
+            let tool_visitor = collect_capabilities(Some(&parent_spawn), &chat_ctx).await;
 
             // 收集期硬错误（如会话绑定了不存在的智能体）→ 中止并明确报错，
             // 绝不静默降级成"没有人格的通用助手"。
@@ -797,7 +797,7 @@ impl SessionPlugin {
                 return;
             }
 
-            attach_capabilities(&chat_ctx, tool_manager);
+            attach_capabilities(&chat_ctx, tool_visitor);
 
             // ── 基础提示词（与智能体无关）：AGENTS.md 全局 / 工作区指令 ──
             // 智能体人格不在这里——由 agent_identity 工具说明承载。

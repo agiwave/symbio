@@ -303,10 +303,10 @@ impl Plugin for LocalPlugin {
             )));
         }
 
-        if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
+        if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             for tool in self.tool_impls.iter() {
                 let wrapped = Arc::new(SecureToolWrapper::new(tool.clone(), self.security.clone()));
-                tool_manager.register(wrapped).await;
+                tool_visitor.register(wrapped).await;
             }
         }
 

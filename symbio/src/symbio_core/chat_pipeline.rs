@@ -32,7 +32,7 @@
 //! 管线，而插件之间不可见，故上浮为共享设施。
 
 use crate::symbio_core::{
-    CapabilityManager, DefaultToolManager, InvokeRequest, InvokeRequestExt, Plugin, SymbioKey,
+    CapabilityVisitor, DefaultToolVisitor, InvokeRequest, InvokeRequestExt, Plugin, SymbioKey,
     PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::Arc;
@@ -49,15 +49,15 @@ use tokio::sync::Mutex;
 ///
 /// ## 语义
 ///
-/// - 每次调用都返回**全新**的 `DefaultToolManager`——能力实例可能持有本次请求
+/// - 每次调用都返回**全新**的 `DefaultToolVisitor`——能力实例可能持有本次请求
 ///   相关的状态（人格摘要、智能体列表等），不能跨请求复用。
 /// - `traverse` 失败只记录日志，不中断会话：单个插件故障不应让整个会话不可用。
 /// - 父插件缺失（单插件内嵌场景）时返回空管理器，而非报错。
 pub async fn collect_capabilities(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn InvokeRequest>,
-) -> Arc<dyn CapabilityManager> {
-    let manager: Arc<dyn CapabilityManager> = Arc::new(DefaultToolManager::new());
+) -> Arc<dyn CapabilityVisitor> {
+    let manager: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
 
     let Some(parent) = parent else {
         return manager;
@@ -65,7 +65,7 @@ pub async fn collect_capabilities(
 
     let traverse_ctx = ctx.fork();
     traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-    traverse_ctx.set(crate::symbio_core::CAPABILITY_MANAGER, manager.clone());
+    traverse_ctx.set(crate::symbio_core::CAPABILITY_VISITOR, manager.clone());
     init_error_bucket(&traverse_ctx);
 
     if let Err(e) = parent
@@ -161,6 +161,6 @@ pub async fn take_errors(ctx: &Arc<dyn InvokeRequest>) -> Vec<CapabilityError> {
 ///
 /// 单独抽出的意义：让"收集"与"挂载"两件事在调用点显式成对出现，
 /// 避免漏挂导致 `Tool not found` 这类只在运行期才暴露的问题。
-pub fn attach_capabilities(ctx: &Arc<dyn InvokeRequest>, manager: Arc<dyn CapabilityManager>) {
-    ctx.set(crate::symbio_core::CAPABILITY_MANAGER, manager);
+pub fn attach_capabilities(ctx: &Arc<dyn InvokeRequest>, manager: Arc<dyn CapabilityVisitor>) {
+    ctx.set(crate::symbio_core::CAPABILITY_VISITOR, manager);
 }

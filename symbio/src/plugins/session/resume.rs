@@ -22,7 +22,7 @@
 //! 7. 持久化（`replace_messages`）
 //! 8. 成功 → `ResumeOutcome::Continue`（turn 循环续写）；失败 → `ResumeOutcome::Done`（退出等下次 resume）
 //!
-//! ## CAPABILITY_MANAGER
+//! ## CAPABILITY_VISITOR
 //!
 //! 已由 agent chat handler（`agent/handlers/chat.rs:302`）通过 `fetch_tools_with_manager` 设置到 ctx，
 //! `execute_tool_async` 直接复用，无需 session 层重复 `prepare_capability_manager`。
@@ -56,7 +56,7 @@ pub enum ResumeOutcome {
 /// - `RetryTurn`：LLM 失败重试，调用 `process_retry_turn`
 /// - 其他：工具调用恢复，调用 `process_tool_resume_action`
 ///
-/// `ctx` 应已由 agent chat handler 设置好 `CAPABILITY_MANAGER`。
+/// `ctx` 应已由 agent chat handler 设置好 `CAPABILITY_VISITOR`。
 /// `channel` 是 run_chat_loop 的主 channel，用于广播 Delete/Update 事件。
 /// `session` 用于加载/持久化会话消息。
 pub async fn process_resume(

@@ -120,11 +120,11 @@ impl SymbioKey for ConfigKey {
 }
 pub const CONFIG: ConfigKey = ConfigKey;
 
-pub struct CapabilityManagerKey;
-impl SymbioKey for CapabilityManagerKey {
-    type Value = Arc<dyn crate::symbio_core::CapabilityManager>;
+pub struct CapabilityVisitorKey;
+impl SymbioKey for CapabilityVisitorKey {
+    type Value = Arc<dyn crate::symbio_core::CapabilityVisitor>;
     fn name(&self) -> &'static str {
-        "tool_manager"
+        "tool_visitor"
     }
     fn parse(&self, _s: &str) -> Option<Self::Value> {
         None
@@ -133,7 +133,7 @@ impl SymbioKey for CapabilityManagerKey {
         "capability_manager".to_string()
     }
 }
-pub const CAPABILITY_MANAGER: CapabilityManagerKey = CapabilityManagerKey;
+pub const CAPABILITY_VISITOR: CapabilityVisitorKey = CapabilityVisitorKey;
 
 // 会话句柄 Key（Value）：session 编排器交付给 model/chat 的会话引擎实例
 pub struct SessionHandleKey;

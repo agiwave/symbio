@@ -238,13 +238,13 @@ pub fn estimate_context_tokens(messages: &[ChatMessage], overhead_tokens: usize)
 /// 估算请求级固定开销：system prompt + 全部工具定义。
 pub async fn estimate_request_overhead(system_prompt: &str, ctx: &Arc<dyn InvokeRequest>) -> usize {
     use super::tokenizer::{default_tokenizer, Tokenizer};
-    use crate::symbio_core::CAPABILITY_MANAGER;
+    use crate::symbio_core::CAPABILITY_VISITOR;
 
     let tok = default_tokenizer();
     let mut total = tok.count(system_prompt);
 
-    if let Some(tool_manager) = ctx.get(CAPABILITY_MANAGER) {
-        for cap in tool_manager.list_capability().await {
+    if let Some(tool_visitor) = ctx.get(CAPABILITY_VISITOR) {
+        for cap in tool_visitor.list_capability().await {
             let schema_json = cap.input_schema.to_string();
             total += tok.count(&format!("{} {} {}", cap.name, cap.description, schema_json));
         }
@@ -725,7 +725,7 @@ pub fn build_compression_request(history: &[ChatMessage], hints: Option<&str>) -
 
 /// `context_compact` 工具定义：暴露给模型，由模型在任务阶段间隙主动调用。
 ///
-/// 不进 CapabilityManager 分发——由 chat_loop 拦截执行（需要编排器内部的
+/// 不进 CapabilityVisitor 分发——由 chat_loop 拦截执行（需要编排器内部的
 /// 压缩链路：LLM 摘要 + 上下文替换 + 会话持久化）。
 pub fn context_compact_tool_meta() -> crate::symbio_core::CapabilityMeta {
     crate::symbio_core::CapabilityMeta {
@@ -1127,7 +1127,7 @@ mod tests {
         }
     }
 
-    /// 构建短工具名 → 保留策略映射（模拟 chat_loop 运行时从 CapabilityManager 动态解析）
+    /// 构建短工具名 → 保留策略映射（模拟 chat_loop 运行时从 CapabilityVisitor 动态解析）
     fn view_retention(
         entries: &[(&str, crate::symbio_core::ToolContextRetention)],
     ) -> std::collections::HashMap<String, crate::symbio_core::ToolContextRetention> {

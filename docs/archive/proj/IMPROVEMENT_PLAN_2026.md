@@ -110,8 +110,8 @@
 - **系统工具机制集成**（与 `plugins/web` 对齐）：
   - 每次 `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 时，`McpPlugin` 遍历 `McpConfig.servers` 中 `enabled=true` 的项
   - 对每个 server 调 `McpManager::discover_tools` 动态发现工具
-  - 把每个工具包装为 `McpToolCapability`（实现 `Capability` trait）注册到 `ctx.get(CAPABILITY_MANAGER)`
-  - agent 通过 `tool_manager.invoke("mcp.<server>.<tool>", ctx)` 调用
+  - 把每个工具包装为 `McpToolCapability`（实现 `Capability` trait）注册到 `ctx.get(CAPABILITY_VISITOR)`
+  - agent 通过 `tool_visitor.invoke("mcp.<server>.<tool>", ctx)` 调用
 
 **模块结构**（后端）：
 
@@ -138,7 +138,7 @@ symbio/src/plugins/mcp/
 2. ✅ 工具机制集成（与 web 插件一致）—— `traverse` 动态注册
 3. ✅ 配置 CRUD 与持久化（`~/.symbio/plugins/mcps/<name>/server.json`）
 4. ✅ `CapabilityCategory::Mcp` 分类
-5. ✅ 删除 5 个多余 schema（`mcp_call_tool` / `mcp_discover` / `mcp_list_tools` / `mcp_register` / `mcp_unregister`）——这些功能通过 `Capability` trait + tool_manager 实现，不需要单独的 schema
+5. ✅ 删除 5 个多余 schema（`mcp_call_tool` / `mcp_discover` / `mcp_list_tools` / `mcp_register` / `mcp_unregister`）——这些功能通过 `Capability` trait + tool_visitor 实现，不需要单独的 schema
 
 **后续方向**：
 

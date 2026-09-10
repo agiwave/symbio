@@ -2,7 +2,7 @@
 //!
 //! 每个远程 MCP 工具对应一个 `McpToolCapability` 实例；实例由
 //! `McpPlugin::traverse` 在每次 `parent.traverse` 时根据 `manager.discover_tools`
-//! 的返回值动态构造并注册到 `tool_manager`。
+//! 的返回值动态构造并注册到 `tool_visitor`。
 //!
 //! ## 命名
 //!
@@ -12,7 +12,7 @@
 //! ## 生命周期
 //!
 //! - 创建：每次 `traverse` 时构造
-//! - 销毁：随 `tool_manager`（通常是 `DefaultToolManager`）一起被丢弃
+//! - 销毁：随 `tool_visitor`（通常是 `DefaultToolVisitor`）一起被丢弃
 //! - **不持有**任何 stdio 进程 / http 连接（按需 lazy 加载）
 
 use crate::plugins::mcp::schemas::mcp_config::McpServerConfig;

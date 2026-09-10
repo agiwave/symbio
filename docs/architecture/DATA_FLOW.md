@@ -47,7 +47,7 @@ sequenceDiagram
 |---|------|---------|------|
 | 1 | 入口 | `symbio/src/plugins/session/plugin.rs` | **会话编排权归 session**（见 `chat_pipeline.rs` 头注释） |
 | 2 | 能力收集 | `symbio_core/chat_pipeline.rs` | session 调 `collect_capabilities` → `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播收工具；**agent 仅当 `ctx[AGENT_ID]` 存在时贡献**（不选 agent 的会话照常运行） |
-| 3 | 默认能力 | `symbio_core/tools.rs` | `DefaultToolManager`（从 agent 内部上浮的公共实现） |
+| 3 | 默认能力 | `symbio_core/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
 | 4 | 模型调用 | `symbio/src/plugins/model/plugin.rs` | 4 协议适配：OpenAI / Anthropic / Gemini / Ollama |
 | 5 | 工具循环 | `model` 内 tool loop | 工具实现方：`local` / `web` / `telegram` 等 |
 | 6 | 流式帧推送 | `symbio_core/event_bus.rs` + `plugins/event_bus/` | session → EventBus → 前端订阅 |

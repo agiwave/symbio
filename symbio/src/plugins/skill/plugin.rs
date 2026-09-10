@@ -352,9 +352,9 @@ impl Plugin for SkillPlugin {
                 .await?;
 
             if !skills.is_empty() {
-                if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
+                if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
                     let skill_tool = Arc::new(SkillExecuteTool::new(skills));
-                    tool_manager.register(skill_tool).await;
+                    tool_visitor.register(skill_tool).await;
                 }
             }
         }
