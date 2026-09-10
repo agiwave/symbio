@@ -105,6 +105,9 @@ mod tests {
         // 不同 provider 互不影响
         let p2_start = Instant::now();
         limiter.wait("p2", 50).await;
-        assert!(p2_start.elapsed().as_millis() < 40, "Provider B 不受 A 限流影响");
+        assert!(
+            p2_start.elapsed().as_millis() < 40,
+            "Provider B 不受 A 限流影响"
+        );
     }
 }

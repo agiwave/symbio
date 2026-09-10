@@ -27,12 +27,12 @@
 //! [`crate::plugins::agent::core`]，且 core 对本层零依赖。
 
 pub mod capability;
+mod detail;
+pub mod entities;
 pub mod handlers;
 pub mod plugin;
-pub mod entities;
 pub mod store;
 pub mod subagent;
-mod detail;
 
 #[cfg(test)]
 mod tests;

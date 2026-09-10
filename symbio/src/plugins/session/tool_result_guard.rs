@@ -16,6 +16,7 @@
 //! 与既有压缩层（L1/L2/L3）的边界：本层只处理**单条**结果，是"语义上限"；
 //! 物理字节上限（shell/fetch 1MB 等）是最后一道防线，二者不冲突。
 
+use super::text_split::{split_head_tail, HeadTailSplit};
 use super::tokenizer::{default_tokenizer, Tokenizer};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -36,62 +37,6 @@ pub struct GuardedResult {
     pub original_tokens: usize,
     /// 存档路径（若写入成功）
     pub archive_path: Option<String>,
-}
-
-/// 把超长文本按预算裁剪成 head/tail 摘要。
-///
-/// 优先按**行**截断（结构化输出友好，不会切断 JSON/表格行）；单行超预算时
-/// 退化为按字符截断（head 保留行首、tail 保留行尾）——否则首行整行放行，
-/// 压缩完全失效（真实会话实证：12k token 的单行 glob 结果只省略了 1/3）。
-fn split_head_tail(text: &str, head_budget: usize, tail_budget: usize) -> (String, String) {
-    let tok = default_tokenizer();
-    let lines: Vec<&str> = text.lines().collect();
-
-    // head：从前往后贪心累加，直到超出 head_budget
-    let mut head = String::new();
-    let mut used = 0usize;
-    let mut head_line_count = 0usize;
-    for &line in &lines {
-        let c = tok.count(line) + tok.count("\n");
-        if used + c > head_budget {
-            if head.is_empty() || head_line_count == 0 {
-                // 首行（或首个待收行）超预算：按字符截断行首，而非整行放行
-                let char_cap = head_budget.saturating_mul(2);
-                let truncated: String = line.chars().take(char_cap).collect();
-                head.push_str(&truncated);
-                head.push('…');
-                head.push('\n');
-            }
-            break;
-        }
-        used += c;
-        head.push_str(line);
-        head.push('\n');
-        head_line_count += 1;
-    }
-
-    // tail：从尾部（跳过已被 head 取走的部分）往回贪心累加
-    let mut tail_lines: Vec<String> = Vec::new();
-    let mut used_t = 0usize;
-    for &line in lines[head_line_count.min(lines.len())..].iter().rev() {
-        let c = tok.count(line) + tok.count("\n");
-        if used_t + c > tail_budget {
-            if tail_lines.is_empty() {
-                // 尾行超预算：按字符保留行尾（结论/错误多在尾部）
-                let char_cap = tail_budget.saturating_mul(2);
-                let skip = line.chars().count().saturating_sub(char_cap);
-                let truncated: String = line.chars().skip(skip).collect();
-                tail_lines.push(format!("…{truncated}"));
-            }
-            break;
-        }
-        used_t += c;
-        tail_lines.push(line.to_string());
-    }
-    tail_lines.reverse();
-    let tail = tail_lines.join("\n");
-
-    (head, tail)
 }
 
 /// L0 存档目录：会话标识可用时存入会话目录（跟随会话生命周期，可被历史取回），
@@ -140,7 +85,12 @@ fn archive_into_dir(text: &str, token_count: usize, dir: &std::path::Path) -> Op
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let file_name = format!("tool_{}_{}_{}.txt", now, token_count, content_fingerprint(text));
+    let file_name = format!(
+        "tool_{}_{}_{}.txt",
+        now,
+        token_count,
+        content_fingerprint(text)
+    );
     let path: PathBuf = dir.join(file_name);
     match std::fs::write(&path, text) {
         Ok(_) => {
@@ -177,14 +127,16 @@ fn prune_archive_dir(dir: &std::path::Path, keep: usize) {
 ///
 /// 两者唯一的差异是占位符文案（guard 附带存档取回指引，summarize 提示重跑工具），
 /// 预算切分（60%/40%）、omit 计算、三段拼接逻辑完全一致 —— 收敛于此，防止漂移。
-fn assemble_head_tail_summary(
-    text: &str,
-    budget_tokens: usize,
-    placeholder: String,
-) -> String {
+/// 切分机制本体在 `text_split::split_head_tail`（头偏 60/40 的策略在此处选择）。
+fn assemble_head_tail_summary(text: &str, budget_tokens: usize, placeholder: String) -> String {
     let head_budget = ((budget_tokens as f64) * 0.6) as usize;
     let tail_budget = budget_tokens.saturating_sub(head_budget);
-    let (head, tail) = split_head_tail(text, head_budget, tail_budget);
+    let HeadTailSplit { head, tail } = split_head_tail(
+        text,
+        head_budget,
+        tail_budget,
+        super::tokenizer::default_tokenizer(),
+    );
 
     let mut out = String::with_capacity(head.len() + tail.len() + placeholder.len());
     out.push_str(&head);
@@ -229,10 +181,7 @@ pub fn guard_tool_result(
         Some(p) => format!("完整输出已存档至: {p}{}", super::paths::RETRIEVAL_HINT),
         None => "完整输出未存档（存档目录不可写）".to_string(),
     };
-    let placeholder = format!(
-        "{} {archive_hint} ...]",
-        omit_placeholder_prefix(omit)
-    );
+    let placeholder = format!("{} {archive_hint} ...]", omit_placeholder_prefix(omit));
 
     let out = assemble_head_tail_summary(text, budget_tokens, placeholder);
 
@@ -301,7 +250,11 @@ mod tests {
         let g = guard_tool_result(&huge, 300, None);
         assert!(g.truncated, "单行超预算应触发存档截断");
         assert!(g.text.contains("local/file_read"), "占位提示应存在");
-        assert!(g.text.starts_with("{\"entries"), "行首应保留: {}", &g.text[..40.min(g.text.len())]);
+        assert!(
+            g.text.starts_with("{\"entries"),
+            "行首应保留: {}",
+            &g.text[..40.min(g.text.len())]
+        );
     }
 
     fn test_archive_dir(tag: &str) -> PathBuf {
@@ -338,9 +291,17 @@ mod tests {
             archive_into_dir(&content, 64, &dir).expect("写入");
             std::thread::sleep(std::time::Duration::from_millis(4));
         }
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 6, "6 个 ≤ keep(20) 时不应清理");
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            6,
+            "6 个 ≤ keep(20) 时不应清理"
+        );
         prune_archive_dir(&dir, 3);
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 3, "应只保留最新 3 个");
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            3,
+            "应只保留最新 3 个"
+        );
         // 最新内容（content-5）必须还在
         let newest = format!("content-5-{}", "x".repeat(64));
         assert!(
@@ -361,8 +322,17 @@ mod tests {
         let g = guard_tool_result(&"line\n".repeat(3000), 500, Some(sid));
         assert!(g.truncated);
         let p = g.archive_path.expect("会话目录可写时应产出存档路径");
-        let expected_frag = format!("plugins{}session{}{}{}tool_archives", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR, sid, std::path::MAIN_SEPARATOR);
-        assert!(p.contains(&expected_frag), "存档应位于会话 tool_archives/ 目录: {p}");
+        let expected_frag = format!(
+            "plugins{}session{}{}{}tool_archives",
+            std::path::MAIN_SEPARATOR,
+            std::path::MAIN_SEPARATOR,
+            sid,
+            std::path::MAIN_SEPARATOR
+        );
+        assert!(
+            p.contains(&expected_frag),
+            "存档应位于会话 tool_archives/ 目录: {p}"
+        );
         // 收尾：删除该测试会话的存档目录（不影响其他测试）
         let dir = crate::symbio_core::HomedirRegistry::get()
             .join("plugins")

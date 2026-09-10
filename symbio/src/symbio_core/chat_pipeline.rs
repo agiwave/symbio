@@ -68,7 +68,11 @@ pub async fn collect_capabilities(
     traverse_ctx.set(crate::symbio_core::CAPABILITY_MANAGER, manager.clone());
     init_error_bucket(&traverse_ctx);
 
-    if let Err(e) = parent.clone().traverse(String::new(), traverse_ctx.clone()).await {
+    if let Err(e) = parent
+        .clone()
+        .traverse(String::new(), traverse_ctx.clone())
+        .await
+    {
         crate::plugin_warn!(
             "core",
             "collect_capabilities: traverse 失败（工具集可能不完整）: {:?}",

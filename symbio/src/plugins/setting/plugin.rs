@@ -9,10 +9,10 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
+use super::schemas::{setting_get, setting_list};
 use crate::symbio_core::schemas::entities::{
     DetailAction, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
-use super::schemas::{setting_get, setting_list};
 use tracing::info;
 
 #[derive(Clone)]
@@ -71,8 +71,7 @@ impl Plugin for SettingPlugin {
         // 统一实体协议：entities/list（设置分区清单）；
         // get/upload/delete/status 走 trait 默认 NotImplemented（分区不可增删，
         // 保存由前端 editor 经各插件 config/set 自持完成）
-        if let Some(resp) =
-            crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
+        if let Some(resp) = crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
         {
             return resp;
         }
@@ -213,7 +212,12 @@ fn detail_field_password(key: &str, label: &str, desc: &str, placeholder: &str) 
 ///
 /// load/save 路径由插件前缀 + 协议常量（`CONFIG_GET`/`CONFIG_SET`）构建，
 /// 路径拼写单一来源，禁止手写字面量（防止与协议路由脱节）。
-fn config_definition(title: &str, _desc: &str, prefix: &str, fields: Vec<DetailField>) -> DetailDefinition {
+fn config_definition(
+    title: &str,
+    _desc: &str,
+    prefix: &str,
+    fields: Vec<DetailField>,
+) -> DetailDefinition {
     DetailDefinition {
         binding: "config".into(),
         load_path: Some(format!("{prefix}/{CONFIG_GET}")),
@@ -265,9 +269,21 @@ fn local_detail_definition() -> DetailDefinition {
         "控制本地 Shell / 文件工具的启用与超时",
         "local",
         vec![
-            detail_field_toggle("shell_enabled", "启用 Shell 工具", "允许执行 Shell 命令", true),
+            detail_field_toggle(
+                "shell_enabled",
+                "启用 Shell 工具",
+                "允许执行 Shell 命令",
+                true,
+            ),
             detail_field_toggle("file_enabled", "启用文件工具", "允许文件读写操作", true),
-            detail_field_number("shell_timeout", "Shell 超时（秒）", "Shell 命令执行超时时间", 1.0, 3600.0, serde_json::json!(60)),
+            detail_field_number(
+                "shell_timeout",
+                "Shell 超时（秒）",
+                "Shell 命令执行超时时间",
+                1.0,
+                3600.0,
+                serde_json::json!(60),
+            ),
         ],
     )
 }
@@ -279,9 +295,26 @@ fn web_detail_definition() -> DetailDefinition {
         "web",
         vec![
             detail_field_toggle("web_enabled", "启用 Web 工具", "允许网络请求", true),
-            detail_field_number("web_timeout", "Web 超时（秒）", "Web 请求超时时间", 1.0, 300.0, serde_json::json!(300)),
-            detail_field_password("tavily_api_key", "Tavily API Key", "用于高级网页搜索（优先）", "输入 Tavily API Key"),
-            detail_field_password("serper_api_key", "Serper API Key", "用于 Google 网页搜索（备用）", "输入 Serper API Key"),
+            detail_field_number(
+                "web_timeout",
+                "Web 超时（秒）",
+                "Web 请求超时时间",
+                1.0,
+                300.0,
+                serde_json::json!(300),
+            ),
+            detail_field_password(
+                "tavily_api_key",
+                "Tavily API Key",
+                "用于高级网页搜索（优先）",
+                "输入 Tavily API Key",
+            ),
+            detail_field_password(
+                "serper_api_key",
+                "Serper API Key",
+                "用于 Google 网页搜索（备用）",
+                "输入 Serper API Key",
+            ),
         ],
     )
 }
@@ -466,7 +499,10 @@ mod tests {
 
         // 每项的 extra.config_type 即 editor"扩展名"（与 id 一致）
         for it in &items {
-            assert_eq!(it.extra.get("config_type").and_then(Value::as_str), Some(it.id.as_str()));
+            assert_eq!(
+                it.extra.get("config_type").and_then(Value::as_str),
+                Some(it.id.as_str())
+            );
         }
     }
 

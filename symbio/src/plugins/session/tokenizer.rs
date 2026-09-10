@@ -116,9 +116,33 @@ fn is_cjk(ch: char) -> bool {
 }
 
 fn is_code_char(ch: char) -> bool {
-    matches!(ch,
-        '{' | '}' | '(' | ')' | '[' | ']' | '<' | '>' | ';' | '=' | '+' | '/' | '\\'
-        | '|' | '&' | '*' | '!' | '?' | '#' | '$' | '@' | '~' | '^' | '`' | '_' | '%'
+    matches!(
+        ch,
+        '{' | '}'
+            | '('
+            | ')'
+            | '['
+            | ']'
+            | '<'
+            | '>'
+            | ';'
+            | '='
+            | '+'
+            | '/'
+            | '\\'
+            | '|'
+            | '&'
+            | '*'
+            | '!'
+            | '?'
+            | '#'
+            | '$'
+            | '@'
+            | '~'
+            | '^'
+            | '`'
+            | '_'
+            | '%'
     )
 }
 
@@ -157,8 +181,8 @@ impl CalibratedTokenizer {
         if actual == 0 || estimated == 0 {
             return;
         }
-        let observed = ((actual as f64 / estimated as f64) * 10_000.0).clamp(2_000.0, 50_000.0)
-            as u32;
+        let observed =
+            ((actual as f64 / estimated as f64) * 10_000.0).clamp(2_000.0, 50_000.0) as u32;
         // alpha = 0.3 的指数滑动平均
         let cur = self.ratio.load(Ordering::Relaxed);
         let next = (cur as f64 * 0.7 + observed as f64 * 0.3) as u32;
@@ -214,10 +238,7 @@ mod tests {
         let text = "你好世界";
         let est = default_tokenizer().count(text);
         // 4 个汉字 ≈ 4 token（外加 +1 兜底）
-        assert!(
-            est >= 4,
-            "中文估算过低（{est}），疑似又退回按字节数估算"
-        );
+        assert!(est >= 4, "中文估算过低（{est}），疑似又退回按字节数估算");
         // 也不应离谱高估
         assert!(est <= 12, "中文估算过高：{est}");
     }

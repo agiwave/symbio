@@ -134,7 +134,8 @@ pub async fn execute_tool_async(
     result_msg_id: String,
     ctx: Arc<dyn InvokeRequest>,
 ) -> (String, bool, Option<ChatMessage>) {
-    plugin_info!("session",
+    plugin_info!(
+        "session",
         "[Tool] Execution started: {} ({})",
         tool_name,
         tool_call_id
@@ -162,7 +163,8 @@ pub async fn execute_tool_async(
             let _ = tool_ctx.set_payload(args.clone());
             tool_manager.invoke(tool_name, tool_ctx.clone()).await
         } else {
-            plugin_info!("session",
+            plugin_info!(
+                "session",
                 "[Tool] ToolManager does not have tool: {}, falling back to route",
                 tool_name
             );
@@ -186,7 +188,8 @@ pub async fn execute_tool_async(
                         return ("Error: Failed to deserialize payload".into(), false, None);
                     }
                 };
-                plugin_debug!("session",
+                plugin_debug!(
+                    "session",
                     "Tool immediate response for {}: {}",
                     tool_name,
                     data
@@ -194,7 +197,8 @@ pub async fn execute_tool_async(
 
                 // 直接返回结果（需要确认/询问的工具已自行产出 user_prompt 节点）
                 let res = extract_result(&data);
-                plugin_info!("session",
+                plugin_info!(
+                    "session",
                     "[Tool] FINISHED: {} (Len: {})",
                     tool_name,
                     res.len()
@@ -204,7 +208,11 @@ pub async fn execute_tool_async(
 
             // ── 流式响应 ──────────────────────────────────────────────────────
             PluginPayload::Session(mut tool_chan) => {
-                plugin_info!("session", "[Tool] STREAMING execution started: {}", tool_name);
+                plugin_info!(
+                    "session",
+                    "[Tool] STREAMING execution started: {}",
+                    tool_name
+                );
                 let mut full = String::new();
                 // 捕获工具广播的 user_prompt(WaitingUserAction) 节点，作为本轮"待用户响应"结果返回
                 let mut captured_prompt: Option<ChatMessage> = None;
@@ -292,7 +300,8 @@ pub async fn execute_tool_async(
                                             .await;
                                     }
                                     session_chat_response::StreamEvent::Error { error } => {
-                                        plugin_error!("session",
+                                        plugin_error!(
+                                            "session",
                                             format!("[Tool] NESTED Error: {}", error)
                                         );
                                         return (format!("Error: {error}"), false, None);
@@ -310,7 +319,8 @@ pub async fn execute_tool_async(
                         }
                     }
                 }
-                plugin_info!("session",
+                plugin_info!(
+                    "session",
                     "[Tool] STREAMING finished: {} (Total Len: {})",
                     tool_name,
                     full.len()
@@ -394,7 +404,8 @@ async fn record_protocol_failure(
         ))
         .await;
 
-    plugin_info!("session",
+    plugin_info!(
+        "session",
         "[Tool] Protocol failure recorded as failed tool call: {}",
         error_text
     );
@@ -427,7 +438,8 @@ pub async fn process_tool_calls_async(
 
     let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
 
-    plugin_info!("session",
+    plugin_info!(
+        "session",
         "Processing batch of {} tool calls (mode={})...",
         tool_calls.len(),
         mode
@@ -454,7 +466,8 @@ pub async fn process_tool_calls_async(
                 })
                 .unwrap_or(false);
             if last_blocked {
-                plugin_info!("session",
+                plugin_info!(
+                    "session",
                     "[Tool] 交互模式下前一个工具待用户恢复，中止本批剩余工具"
                 );
                 break;
@@ -467,7 +480,8 @@ pub async fn process_tool_calls_async(
         let id = match tc.id.as_ref() {
             Some(id) if !id.trim().is_empty() => id.clone(),
             _ => {
-                plugin_error!("session",
+                plugin_error!(
+                    "session",
                     "Protocol Error: Tool call ID missing/invalid, recording as failed tool call"
                 );
                 record_protocol_failure(
@@ -518,7 +532,11 @@ pub async fn process_tool_calls_async(
             let block_msg = pre_output
                 .block_reason
                 .unwrap_or_else(|| "Blocked by pre hook".to_string());
-            plugin_warn!("session", "[Tool] BLOCKED by PreToolUse hook: {}", block_msg);
+            plugin_warn!(
+                "session",
+                "[Tool] BLOCKED by PreToolUse hook: {}",
+                block_msg
+            );
             let tool_msg = build_tool_message(
                 &id,
                 &format!("Blocked: {block_msg}"),
@@ -548,7 +566,8 @@ pub async fn process_tool_calls_async(
         if success && !name.contains("file") {
             let line_count = final_res.lines().count();
             if line_count > 200 {
-                plugin_info!("session",
+                plugin_info!(
+                    "session",
                     "[Tool] Result too large ({} lines), compressing...",
                     line_count
                 );
@@ -604,8 +623,13 @@ pub async fn process_tool_calls_async(
             // （对应"单次工具调用内容太长"的压缩诉求；物理字节上限不再是唯一防线）。
             // 传入 session_id：存档跟随会话目录（tool_archives/），历史可取回不被 OS 清理。
             let guard_session = ctx.get(crate::symbio_core::SESSION_ID).unwrap_or_default();
-            let guarded = guard_tool_result(&final_res, DEFAULT_TOOL_RESULT_TOKEN_CAP, Some(&guard_session));
-            let mut tool_msg = build_tool_message(&id, &guarded.text, Some(success), Some(result_msg_id));
+            let guarded = guard_tool_result(
+                &final_res,
+                DEFAULT_TOOL_RESULT_TOKEN_CAP,
+                Some(&guard_session),
+            );
+            let mut tool_msg =
+                build_tool_message(&id, &guarded.text, Some(success), Some(result_msg_id));
             if guarded.truncated {
                 let mut meta = tool_msg.meta.clone().unwrap_or_else(|| json!({}));
                 meta["tool_result_truncated"] = json!(true);
@@ -757,14 +781,8 @@ mod tests {
             arguments: json!({ "path": "." }),
         }];
 
-        let (msgs, updates) = process_tool_calls_async(
-            tcs,
-            &None,
-            &mut plugin_chan,
-            &abort,
-            test_ctx(),
-        )
-        .await;
+        let (msgs, updates) =
+            process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
 
         assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
         assert_eq!(msgs[0].role, Some(MessageRole::Tool));
@@ -782,7 +800,11 @@ mod tests {
         assert_eq!(updates.len(), 1, "必须生成父节点失败补丁");
         assert_eq!(updates[0].status, Some(MessageStatus::Completed));
         assert_eq!(
-            updates[0].meta.as_ref().and_then(|m| m.get("failure_kind")).and_then(|v| v.as_str()),
+            updates[0]
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("failure_kind"))
+                .and_then(|v| v.as_str()),
             Some("error")
         );
     }
@@ -798,14 +820,8 @@ mod tests {
             arguments: json!({}),
         }];
 
-        let (msgs, updates) = process_tool_calls_async(
-            tcs,
-            &None,
-            &mut plugin_chan,
-            &abort,
-            test_ctx(),
-        )
-        .await;
+        let (msgs, updates) =
+            process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
 
         assert_eq!(msgs.len(), 1);
         assert_eq!(updates.len(), 1);
@@ -822,14 +838,8 @@ mod tests {
             arguments: json!({}),
         }];
 
-        let (msgs, updates) = process_tool_calls_async(
-            tcs,
-            &None,
-            &mut plugin_chan,
-            &abort,
-            test_ctx(),
-        )
-        .await;
+        let (msgs, updates) =
+            process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
 
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-known"));

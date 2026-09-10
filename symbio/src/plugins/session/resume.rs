@@ -139,7 +139,8 @@ async fn process_retry_turn(
             .await;
     }
 
-    plugin_info!("session",
+    plugin_info!(
+        "session",
         "[Resume] RetryTurn: deleted {} messages (turn {} and descendants), continuing chat_loop",
         deleted_messages.len(),
         req.target_id
@@ -341,13 +342,15 @@ async fn process_tool_resume_action(
 
     // 11. 成功 → Continue；失败 → Done
     if final_success {
-        plugin_info!("session",
+        plugin_info!(
+            "session",
             "[Resume] tool {} resumed successfully, continuing chat_loop",
             tool_name
         );
         Ok(ResumeOutcome::Continue)
     } else {
-        plugin_info!("session",
+        plugin_info!(
+            "session",
             "[Resume] tool {} resumed with failure, waiting for next resume",
             tool_name
         );

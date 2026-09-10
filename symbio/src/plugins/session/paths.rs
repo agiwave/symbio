@@ -84,6 +84,9 @@ mod tests {
             .iter()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .collect();
-        assert_eq!(last_two, vec!["a_b".to_string(), "tool_archives".to_string()]);
+        assert_eq!(
+            last_two,
+            vec!["a_b".to_string(), "tool_archives".to_string()]
+        );
     }
 }

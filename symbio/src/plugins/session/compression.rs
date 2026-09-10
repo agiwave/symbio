@@ -230,12 +230,9 @@ pub fn estimate_context_tokens(messages: &[ChatMessage], overhead_tokens: usize)
 }
 
 /// 估算请求级固定开销：system prompt + 全部工具定义。
-pub async fn estimate_request_overhead(
-    system_prompt: &str,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> usize {
-    use crate::symbio_core::CAPABILITY_MANAGER;
+pub async fn estimate_request_overhead(system_prompt: &str, ctx: &Arc<dyn InvokeRequest>) -> usize {
     use super::tokenizer::{default_tokenizer, Tokenizer};
+    use crate::symbio_core::CAPABILITY_MANAGER;
 
     let tok = default_tokenizer();
     let mut total = tok.count(system_prompt);
@@ -278,10 +275,12 @@ pub fn should_start_compression(
     // 口径对齐：post_tokens 记录的是内容水位（不含请求级 overhead），
     // 这里同样用扣除 overhead 后的内容侧读数比较；若直接用含 overhead 的
     // current，overhead 越大越容易"虚高"越过地板，迟滞保护失效。
-    if let Some(last) = messages
-        .iter()
-        .find(|m| m.meta.as_ref().map(|meta| meta.get("compacted") == Some(&serde_json::json!(true))).unwrap_or(false))
-    {
+    if let Some(last) = messages.iter().find(|m| {
+        m.meta
+            .as_ref()
+            .map(|meta| meta.get("compacted") == Some(&serde_json::json!(true)))
+            .unwrap_or(false)
+    }) {
         if let Some(post) = last
             .meta
             .as_ref()
@@ -301,7 +300,11 @@ pub fn should_start_compression(
 
 /// 水位提醒判断：估算用量是否达到提醒阈值（55%）。
 /// 主动压缩工具（context_compact）配合此机制，让模型在安全时机自行压缩。
-pub fn should_emit_context_nudge(messages: &[ChatMessage], context_limit: usize, overhead_tokens: usize) -> bool {
+pub fn should_emit_context_nudge(
+    messages: &[ChatMessage],
+    context_limit: usize,
+    overhead_tokens: usize,
+) -> bool {
     if messages.is_empty() {
         return false;
     }
@@ -398,7 +401,8 @@ pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: u
 }
 
 /// 水位提醒文案（请求级注入，不落库）。模型不应直接回应此提示。
-const CONTEXT_NUDGE_TEXT: &str = "[system note] Context usage is approaching the limit. If you are \
+const CONTEXT_NUDGE_TEXT: &str =
+    "[system note] Context usage is approaching the limit. If you are \
      at a natural stage boundary, call the context_compact tool now to distill older history and \
      continue seamlessly; otherwise keep working and it will be compacted automatically. Do not \
      respond to this note directly.";
@@ -431,11 +435,7 @@ pub fn build_request_view(
         fade_aged_tool_results(&mut view, fade_keep_turns);
     }
     if window > 0 && !retention.is_empty() {
-        view = super::context_window::apply_layered_sliding_window(
-            &view,
-            window,
-            retention,
-        );
+        view = super::context_window::apply_layered_sliding_window(&view, window, retention);
     }
     if inject_nudge {
         view.push(ChatMessage {
@@ -576,7 +576,9 @@ pub fn build_compression_request(history: &[ChatMessage], hints: Option<&str>) -
     let history_json = serde_json::to_string(history).unwrap_or_else(|_| "[]".to_string());
     let hints_section = match hints {
         Some(h) if !h.trim().is_empty() => {
-            format!("\n\n## Must-Preserve Hints (from the agent, MUST be kept in the snapshot):\n{h}")
+            format!(
+                "\n\n## Must-Preserve Hints (from the agent, MUST be kept in the snapshot):\n{h}"
+            )
         }
         _ => String::new(),
     };
@@ -618,7 +620,11 @@ pub fn context_compact_tool_meta() -> crate::symbio_core::CapabilityMeta {
                 }
             }
         }),
-        keywords: vec!["compact".to_string(), "压缩".to_string(), "上下文".to_string()],
+        keywords: vec![
+            "compact".to_string(),
+            "压缩".to_string(),
+            "上下文".to_string(),
+        ],
         category: Some(crate::symbio_core::CapabilityCategory::Core),
         examples: None,
     }
@@ -737,7 +743,10 @@ mod tests {
             assistant_msg(&"w".repeat(1000)),
         ];
         let split = find_compress_split_point(&msgs, 0.7);
-        assert!(split > 0 && split < msgs.len(), "不得全量压缩, split={split}");
+        assert!(
+            split > 0 && split < msgs.len(),
+            "不得全量压缩, split={split}"
+        );
         assert_eq!(msgs[split].role, Some(MessageRole::User));
     }
 
@@ -848,7 +857,12 @@ mod tests {
         let current = content_tokens + overhead;
         assert!(current >= floor, "前提：current 应虚高越过地板");
         let threshold_limit = (current as f64 / 0.7 * 0.99) as usize;
-        assert!(!should_start_compression(&msgs, threshold_limit, false, overhead));
+        assert!(!should_start_compression(
+            &msgs,
+            threshold_limit,
+            false,
+            overhead
+        ));
 
         // 对照：内容真实增长越过地板后，迟滞放行（overhead 不应造成过度抑制）。
         let grown = vec![make_snapshot(), user_msg(&"中文字符填充".repeat(400))];
@@ -860,7 +874,12 @@ mod tests {
         let grown_overhead = 500;
         let grown_current = grown_tokens + grown_overhead;
         let grown_limit = (grown_current as f64 / 0.7 * 0.99) as usize;
-        assert!(should_start_compression(&grown, grown_limit, false, grown_overhead));
+        assert!(should_start_compression(
+            &grown,
+            grown_limit,
+            false,
+            grown_overhead
+        ));
     }
 
     #[test]
@@ -874,7 +893,7 @@ mod tests {
         // 构造一条足够大的历史让 current 估算落在 (1000, 1150) 区间
         let msgs = vec![snapshot, user_msg(&"中文字符填充".repeat(50))];
         let small_limit = estimate_context_tokens(&msgs, 0); // ≈ current
-        // 阈值设为远小于 current ⇒ 无迟滞时会触发
+                                                             // 阈值设为远小于 current ⇒ 无迟滞时会触发
         let threshold_limit = (small_limit as f64 / 0.7 * 0.99) as usize;
         // current/threshold ≈ 0.7/0.99 > 1 ⇒ 超阈值，但 current < 1150 ⇒ 迟滞应拦截
         assert!(!should_start_compression(&msgs, threshold_limit, false, 0));
@@ -921,7 +940,11 @@ mod tests {
             user_msg(&"z".repeat(1000)),
         ];
         let (msg, _, _) = prepare_compression(&msgs).unwrap();
-        let text = msg.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
+        let text = msg
+            .content
+            .as_ref()
+            .map(|c| c.to_text())
+            .unwrap_or_default();
         assert!(text.contains("Chat History to Summarize"));
         assert!(
             !text.contains("<state_snapshot>"),
@@ -992,10 +1015,7 @@ mod tests {
     fn view_retention(
         entries: &[(&str, crate::symbio_core::ToolContextRetention)],
     ) -> std::collections::HashMap<String, crate::symbio_core::ToolContextRetention> {
-        entries
-            .iter()
-            .map(|(n, r)| (n.to_string(), *r))
-            .collect()
+        entries.iter().map(|(n, r)| (n.to_string(), *r)).collect()
     }
 
     fn view_text(m: &ChatMessage) -> String {
@@ -1086,7 +1106,11 @@ mod tests {
             Some(true)
         );
         assert!(
-            faded.meta.as_ref().and_then(|m| m.get("archive_path")).is_none(),
+            faded
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("archive_path"))
+                .is_none(),
             "请求视图级淡化不得写存档"
         );
         // assistant 消息绝不被淡化
@@ -1102,7 +1126,11 @@ mod tests {
     #[test]
     fn test_fade_is_idempotent() {
         let long_text = "line\n".repeat(12_000);
-        let mut msgs = vec![user_msg("t1"), view_result("t1", &long_text), user_msg("t2")];
+        let mut msgs = vec![
+            user_msg("t1"),
+            view_result("t1", &long_text),
+            user_msg("t2"),
+        ];
         fade_aged_tool_results(&mut msgs, 1);
         let once = view_text(&msgs[1]);
         let once_meta = msgs[1].meta.clone();

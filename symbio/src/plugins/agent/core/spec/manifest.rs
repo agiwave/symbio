@@ -235,6 +235,9 @@ mod tests {
         let m: BundleManifest = serde_json::from_str(json).unwrap();
         assert_eq!(m.permissions.limits.max_tools, 16);
         assert!(m.permissions.host_apis.contains(&"log".to_string()));
-        assert_eq!(m.permissions.network.domains, vec!["api.github.com".to_string()]);
+        assert_eq!(
+            m.permissions.network.domains,
+            vec!["api.github.com".to_string()]
+        );
     }
 }

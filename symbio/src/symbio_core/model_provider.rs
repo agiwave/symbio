@@ -178,18 +178,12 @@ pub trait ModelProvider: Send + Sync {
             PostResult::RateLimited(msg) => {
                 return Err(PluginError::RateLimited(msg));
             }
-            PostResult::Ok(resp) => {
-                resp
-            }
+            PostResult::Ok(resp) => resp,
         };
 
         match parse_sse_stream(response, root_id, channel, abort_flag, self).await {
-            Err(msg) => {
-                Err(PluginError::StreamError(msg))
-            }
-            Ok(out) => {
-                Ok(out)
-            }
+            Err(msg) => Err(PluginError::StreamError(msg)),
+            Ok(out) => Ok(out),
         }
     }
 }

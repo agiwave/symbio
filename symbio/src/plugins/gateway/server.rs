@@ -117,7 +117,10 @@ fn cors_headers() -> [(&'static str, &'static str); 3] {
     [
         ("Access-Control-Allow-Origin", "*"),
         ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
-        ("Access-Control-Allow-Headers", "Content-Type, Authorization"),
+        (
+            "Access-Control-Allow-Headers",
+            "Content-Type, Authorization",
+        ),
     ]
 }
 
@@ -160,7 +163,12 @@ fn query_param(path: &str, key: &str) -> Option<String> {
         .map(|(_, v)| v.to_string())
 }
 
-async fn handle_conn(mut stream: TcpStream, router: Arc<dyn Plugin>, token: String, readonly: bool) {
+async fn handle_conn(
+    mut stream: TcpStream,
+    router: Arc<dyn Plugin>,
+    token: String,
+    readonly: bool,
+) {
     let Some(req) = read_request(&mut stream).await else {
         return;
     };
@@ -183,7 +191,13 @@ async fn handle_conn(mut stream: TcpStream, router: Arc<dyn Plugin>, token: Stri
     {
         if !token.is_empty() && query_param(&req.path, "token").as_deref() != Some(token.as_str()) {
             let _ = stream
-                .write_all(&http_response(401, "Unauthorized", "", b"unauthorized", &cors_headers()))
+                .write_all(&http_response(
+                    401,
+                    "Unauthorized",
+                    "",
+                    b"unauthorized",
+                    &cors_headers(),
+                ))
                 .await;
             return;
         }
@@ -213,7 +227,13 @@ async fn handle_conn(mut stream: TcpStream, router: Arc<dyn Plugin>, token: Stri
     if req.method == "POST" && req.path.starts_with("/api/v1/invoke") {
         if !check_auth(&token, &req) {
             let _ = stream
-                .write_all(&http_response(401, "Unauthorized", "", b"unauthorized", &cors_headers()))
+                .write_all(&http_response(
+                    401,
+                    "Unauthorized",
+                    "",
+                    b"unauthorized",
+                    &cors_headers(),
+                ))
                 .await;
             return;
         }
@@ -222,7 +242,13 @@ async fn handle_conn(mut stream: TcpStream, router: Arc<dyn Plugin>, token: Stri
             Err(e) => {
                 let b = format!("{{\"error\":\"invalid request: {e}\"}}").into_bytes();
                 let _ = stream
-                    .write_all(&http_response(400, "Bad Request", "application/json", &b, &cors_headers()))
+                    .write_all(&http_response(
+                        400,
+                        "Bad Request",
+                        "application/json",
+                        &b,
+                        &cors_headers(),
+                    ))
                     .await;
                 return;
             }
@@ -231,13 +257,25 @@ async fn handle_conn(mut stream: TcpStream, router: Arc<dyn Plugin>, token: Stri
             Ok(wire) => {
                 let body = serde_json::to_vec(&wire).unwrap_or_default();
                 let _ = stream
-                    .write_all(&http_response(200, "OK", "application/json", &body, &cors_headers()))
+                    .write_all(&http_response(
+                        200,
+                        "OK",
+                        "application/json",
+                        &body,
+                        &cors_headers(),
+                    ))
                     .await;
             }
             Err(e) => {
                 let b = format!("{{\"error\":\"{e}\"}}").into_bytes();
                 let _ = stream
-                    .write_all(&http_response(400, "Bad Request", "application/json", &b, &cors_headers()))
+                    .write_all(&http_response(
+                        400,
+                        "Bad Request",
+                        "application/json",
+                        &b,
+                        &cors_headers(),
+                    ))
                     .await;
             }
         }
@@ -342,9 +380,7 @@ async fn dispatch_once(
             d.serialize().map_err(|e| e.to_string())?,
         )),
         PluginPayload::Empty => Ok(PluginPayloadWire::Data(Value::Null)),
-        PluginPayload::Native(_) => Err(
-            "该路径返回进程内原生对象，不支持跨传输调用".to_string(),
-        ),
+        PluginPayload::Native(_) => Err("该路径返回进程内原生对象，不支持跨传输调用".to_string()),
         PluginPayload::Session(mut chan) => {
             // 消费到 EOF，保留最后一帧；永不 EOF 的订阅由超时兜底
             let mut last = Value::Null;
@@ -376,10 +412,7 @@ fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn InvokeRequest> {
                     Arc::new(s.to_string()) as Arc<dyn Any + Send + Sync>,
                 );
             } else {
-                extensions.insert(
-                    k.clone(),
-                    Arc::new(v.clone()) as Arc<dyn Any + Send + Sync>,
-                );
+                extensions.insert(k.clone(), Arc::new(v.clone()) as Arc<dyn Any + Send + Sync>);
             }
         }
     }
@@ -394,7 +427,10 @@ fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn InvokeRequest> {
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 async fn ws_handshake(stream: &mut TcpStream, req: &HttpRequest) -> Result<(), String> {
-    let key = req.headers.get("sec-websocket-key").ok_or("缺少 Sec-WebSocket-Key")?;
+    let key = req
+        .headers
+        .get("sec-websocket-key")
+        .ok_or("缺少 Sec-WebSocket-Key")?;
     let concat = format!("{key}{WS_GUID}");
     let accept = base64::engine::general_purpose::STANDARD.encode(sha1(concat.as_bytes()));
     let resp = format!(
@@ -421,7 +457,11 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
     let msg: PluginMessageWire = match serde_json::from_str(&text) {
         Ok(m) => m,
         Err(e) => {
-            let _ = ws_send_text(&mut write_half, &format!("{{\"Error\":[\"invalid request: {e}\"]}}")).await;
+            let _ = ws_send_text(
+                &mut write_half,
+                &format!("{{\"Error\":[\"invalid request: {e}\"]}}"),
+            )
+            .await;
             let _ = write_half.shutdown().await;
             return;
         }
@@ -551,7 +591,10 @@ async fn ws_send_frame<W: AsyncWrite + Unpin>(
     Ok(())
 }
 
-async fn ws_send_text<W: AsyncWrite + Unpin>(writer: &mut W, text: &str) -> Result<(), std::io::Error> {
+async fn ws_send_text<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    text: &str,
+) -> Result<(), std::io::Error> {
     ws_send_frame(writer, 0x1, text.as_bytes()).await
 }
 

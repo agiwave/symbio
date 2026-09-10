@@ -22,8 +22,8 @@
 //! `McpConfig` 的内存视图（`servers: HashMap<name, McpServerConfig>`）
 //! 通过从磁盘加载/回写保持一致。
 
-use crate::symbio_core::create_object;
 pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
+use crate::symbio_core::create_object;
 use crate::symbio_core::schemas::common;
 use crate::symbio_core::{
     Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
@@ -298,11 +298,7 @@ impl crate::symbio_core::entities::EntityProvider for McpPlugin {
     }
 
     /// 上传后把 server 从磁盘回灌到内存 config（并失效相关缓存）
-    async fn on_uploaded(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-    ) -> Result<(), PluginError> {
+    async fn on_uploaded(&self, ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
         self.reload_server_from_storage(ctx, id).await
     }
 
@@ -449,8 +445,7 @@ impl Plugin for McpPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         // 统一实体协议：entities/list / get / upload / delete / status
-        if let Some(resp) =
-            crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
+        if let Some(resp) = crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
         {
             return resp;
         }

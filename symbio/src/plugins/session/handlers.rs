@@ -48,7 +48,10 @@ impl SessionPlugin {
     ///
     /// 两个消费方：`invoke_clear`（旧 session/clear 路由）与统一实体协议的
     /// `EntityProvider::delete_item`（entities/delete，前端机制列表删除）。
-    pub(crate) async fn delete_session_internal(&self, session_id: &str) -> Result<(), PluginError> {
+    pub(crate) async fn delete_session_internal(
+        &self,
+        session_id: &str,
+    ) -> Result<(), PluginError> {
         // 删除前先 abort 该会话的活跃任务
         let state = self.active_mgr.get_or_create(session_id).await;
         {
@@ -62,11 +65,7 @@ impl SessionPlugin {
             }
         }
         // 清理活跃条目
-        self.active_mgr
-            .sessions
-            .write()
-            .await
-            .remove(session_id);
+        self.active_mgr.sessions.write().await.remove(session_id);
 
         // 删除前先读归属：子会话事件的 parent_id = 父会话 id，供前端按作用域
         // 过滤（顶层清单订阅 null 归属即可排除）。store 获取失败按顶层处理

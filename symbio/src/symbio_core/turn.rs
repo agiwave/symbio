@@ -225,7 +225,10 @@ pub async fn execute_post_with_abort(
                     plugin_warn!(
                         "model",
                         "网络错误({}), 第{}/{}次重试, 退避{:?}",
-                        e, attempt, MAX_RETRIES, delay
+                        e,
+                        attempt,
+                        MAX_RETRIES,
+                        delay
                     );
                     sleep_with_abort(delay, abort_flag).await;
                     continue;
@@ -256,7 +259,10 @@ pub async fn execute_post_with_abort(
             plugin_warn!(
                 "model",
                 "HTTP {} 可重试, 第{}/{}次重试, 退避{:?}",
-                status, attempt, MAX_RETRIES, delay
+                status,
+                attempt,
+                MAX_RETRIES,
+                delay
             );
             sleep_with_abort(delay, abort_flag).await;
             continue;
@@ -269,9 +275,7 @@ pub async fn execute_post_with_abort(
             );
         }
         if status.as_u16() >= 500 {
-            return PostResult::Err(format!(
-                "模型服务暂时不可用（HTTP {status}），请稍后重试。"
-            ));
+            return PostResult::Err(format!("模型服务暂时不可用（HTTP {status}），请稍后重试。"));
         }
         return PostResult::Err(format!("API Error ({status}): {err_text}"));
     }
@@ -360,7 +364,12 @@ impl ToolCallAccumulator {
         self.calls
             .values_mut()
             .map(|call| {
-                if call.id.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+                if call
+                    .id
+                    .as_ref()
+                    .map(|s| s.trim().is_empty())
+                    .unwrap_or(true)
+                {
                     call.id = Some(short_id());
                 }
                 let args: Value = match serde_json::from_str(&call.arguments) {
@@ -586,11 +595,7 @@ impl TurnOutput {
         }
     }
 
-    pub fn into_messages(
-        mut self,
-        root_id: &str,
-        n_tools: usize,
-    ) -> Vec<ChatMessage> {
+    pub fn into_messages(mut self, root_id: &str, n_tools: usize) -> Vec<ChatMessage> {
         let effective = self.effective_text(n_tools).to_owned();
         let reasoning = if self.reasoning.is_empty() {
             None
@@ -962,13 +967,16 @@ mod tool_call_tests {
     #[test]
     fn empty_id_delta_does_not_overwrite_real_id() {
         let mut acc = ToolCallAccumulator::default();
-        let (id1, _, _) =
-            acc.process_delta(0, Some("call_8f3a59f5f8e14258a427e432"), Some("get_weather"), Some(""));
+        let (id1, _, _) = acc.process_delta(
+            0,
+            Some("call_8f3a59f5f8e14258a427e432"),
+            Some("get_weather"),
+            Some(""),
+        );
         assert_eq!(id1, "call_8f3a59f5f8e14258a427e432");
 
         // 后续增量：id:""（该网关的真实行为）
-        let (id2, args, _) =
-            acc.process_delta(0, Some(""), None, Some("{\"city\": \"Paris\"}"));
+        let (id2, args, _) = acc.process_delta(0, Some(""), None, Some("{\"city\": \"Paris\"}"));
         assert_eq!(id2, "call_8f3a59f5f8e14258a427e432");
         assert_eq!(args, "{\"city\": \"Paris\"}");
 

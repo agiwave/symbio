@@ -14,18 +14,19 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
     model::model_chat,
-    model::model_config::ModelConfig,    session::chat_message::{
+    model::model_config::ModelConfig,
+    session::chat_message::{
         assign_seq, max_seq, ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
     },
     system::hook::HookEvent,
 };
-use crate::symbio_core::{
-    ChatSession, InvokeRequest, InvokeRequestExt, ModelProvider, Plugin, PluginChannel,
-    PluginError, PluginFrame, SESSION_HANDLE,
-};
 use crate::symbio_core::turn::{
     build_tool_message, emit_status, emit_update, execute_post_with_abort, parse_sse_stream,
     short_id, PostResult, ToolCallInfo, TurnOutput,
+};
+use crate::symbio_core::{
+    ChatSession, InvokeRequest, InvokeRequestExt, ModelProvider, Plugin, PluginChannel,
+    PluginError, PluginFrame, SESSION_HANDLE,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -161,7 +162,8 @@ pub async fn run_chat_loop(
 ) -> Result<(), PluginError> {
     let mut req: model_chat::Request = ctx.payload()?;
 
-    plugin_info!("session",
+    plugin_info!(
+        "session",
         ">>> NEW SESSION START (Protocol: {:?})",
         orchestrator.config.api_protocol
     );
@@ -269,14 +271,17 @@ pub async fn run_chat_loop(
         // 达到上限时给出明确提示再退出，而不像从前那样在 chat_loop.rs:419 静默 Ok(())。
         if let Some(max) = configured_max_tool_rounds {
             if tool_rounds >= max {
-                let _ = channel.tx.send(PluginFrame::Data(
-                    serde_json::to_value(session_chat_response::StreamEvent::Error {
-                        error: format!(
-                            "已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"
-                        ),
-                    })
-                    .unwrap_or_default(),
-                )).await;
+                let _ = channel
+                    .tx
+                    .send(PluginFrame::Data(
+                        serde_json::to_value(session_chat_response::StreamEvent::Error {
+                            error: format!(
+                                "已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"
+                            ),
+                        })
+                        .unwrap_or_default(),
+                    ))
+                    .await;
                 persist_messages(&context, last_saved, &channel).await;
                 fire_stop_hook(orchestrator, &context.messages, &ctx).await;
                 return Ok(());
@@ -338,7 +343,8 @@ pub async fn run_chat_loop(
             .await
             {
                 Ok(Some(history_count)) => {
-                    plugin_info!("session",
+                    plugin_info!(
+                        "session",
                         "Context compressed: {} messages -> 1 message",
                         history_count
                     );
@@ -364,15 +370,15 @@ pub async fn run_chat_loop(
         let mut inject_nudge = false;
         if enable_compact_tool && !nudged_this_request {
             let effective_limit = (orchestrator.config.max_context_tokens
-                - orchestrator.config.reserved_tokens)
-                as usize;
+                - orchestrator.config.reserved_tokens) as usize;
             let overhead =
                 compression::estimate_request_overhead(system_prompt_for_request, &ctx).await;
             if compression::should_emit_context_nudge(&context.messages, effective_limit, overhead)
             {
                 nudged_this_request = true;
                 inject_nudge = true;
-                plugin_info!("session",
+                plugin_info!(
+                    "session",
                     "[Compress] context nudge emitted (~55% of limit), suggesting context_compact"
                 );
             }
@@ -383,7 +389,8 @@ pub async fn run_chat_loop(
 
         apply_message_level_compression(&ctx, &mut context.messages).await;
 
-        let mut tools = if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER) {
+        let mut tools = if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER)
+        {
             tool_manager.list_capability().await
         } else {
             Vec::new()
@@ -404,18 +411,20 @@ pub async fn run_chat_loop(
         // 3) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
         let request_view: Vec<ChatMessage> = {
             let window = req.tool_context_window.unwrap_or(15);
-            let retention: std::collections::HashMap<String, crate::symbio_core::ToolContextRetention> =
-                tools
-                    .iter()
-                    .filter_map(|t| {
-                        t.context_retention
-                            .filter(|r| !matches!(r, crate::symbio_core::ToolContextRetention::All))
-                            .map(|r| {
-                                let short = t.name.rsplit('/').next().unwrap_or(&t.name);
-                                (short.to_string(), r)
-                            })
-                    })
-                    .collect();
+            let retention: std::collections::HashMap<
+                String,
+                crate::symbio_core::ToolContextRetention,
+            > = tools
+                .iter()
+                .filter_map(|t| {
+                    t.context_retention
+                        .filter(|r| !matches!(r, crate::symbio_core::ToolContextRetention::All))
+                        .map(|r| {
+                            let short = t.name.rsplit('/').next().unwrap_or(&t.name);
+                            (short.to_string(), r)
+                        })
+                })
+                .collect();
             compression::build_request_view(
                 &context.messages,
                 window,
@@ -543,10 +552,7 @@ pub async fn run_chat_loop(
         if finish.is_length() {
             for m in context.messages.iter_mut() {
                 if m.id == rtid || m.id == rrid {
-                    let mut meta = m
-                        .meta
-                        .clone()
-                        .unwrap_or_else(|| serde_json::json!({}));
+                    let mut meta = m.meta.clone().unwrap_or_else(|| serde_json::json!({}));
                     meta["finish_reason"] = serde_json::json!("length");
                     m.meta = Some(meta);
                 }
@@ -561,7 +567,8 @@ pub async fn run_chat_loop(
                 // 自然从断点继续。最多续写 MAX_CONTINUE_ROUNDS 次，避免失控死循环。
                 if continuation_count < MAX_CONTINUE_ROUNDS {
                     continuation_count += 1;
-                    plugin_info!("session",
+                    plugin_info!(
+                        "session",
                         "finish=Length，自动续写 ({}/{})",
                         continuation_count,
                         MAX_CONTINUE_ROUNDS
@@ -602,14 +609,12 @@ pub async fn run_chat_loop(
         // 门控：仅当工具压缩开关开启时拦截；开关关闭时工具不暴露，模型幻觉
         // 调用则归入标准工具链，以"未知路径"错误返回（不执行内部压缩链路）。
         let (compact_calls, other_calls): (Vec<_>, Vec<_>) = if enable_compact_tool {
-            tools_done
-                .into_iter()
-                .partition(|tc| {
-                    tc.name
-                        .as_deref()
-                        .map(|n| n == compression::CONTEXT_COMPACT_TOOL_NAME)
-                        .unwrap_or(false)
-                })
+            tools_done.into_iter().partition(|tc| {
+                tc.name
+                    .as_deref()
+                    .map(|n| n == compression::CONTEXT_COMPACT_TOOL_NAME)
+                    .unwrap_or(false)
+            })
         } else {
             (Vec::new(), tools_done)
         };
@@ -622,8 +627,7 @@ pub async fn run_chat_loop(
             // Turn 子树 parent 链完整；旧版切在本 Turn 首个 ToolCall，用户指令与
             // Turn 根被压进快照，保留区只剩 parent 悬空的 ToolCall → provider 400。
             // 返回 0 时 run_context_compact 以 split==0 视为中止，安全。
-            let split_user_idx =
-                compression::find_turn_user_split_idx(&context.messages, &root_id);
+            let split_user_idx = compression::find_turn_user_split_idx(&context.messages, &root_id);
             let first = compact_calls.first().cloned();
             if let Some(first) = first {
                 let call_id = first.id.clone().unwrap_or_default();
@@ -648,7 +652,8 @@ pub async fn run_chat_loop(
                     // replace_messages 已整体重写会话存储，当前内存镜像即已落库状态；
                     // 重置持久化锚点，避免末尾 persist_messages 用旧下标切片越界/重复落库
                     last_saved = context.messages.len();
-                    plugin_info!("session",
+                    plugin_info!(
+                        "session",
                         "[Compress] manual compaction done: ~{} -> ~{} tokens",
                         before_t,
                         after_t
@@ -679,12 +684,7 @@ pub async fn run_chat_loop(
                 // 标准工具广播模式（与 process_tool_calls_async 一致，修复诉求1：
                 // 前端实时可见 context_compact 的结果子节点与父节点状态）：
                 // 先广播 Tool 结果子节点，再广播父 ToolCall 状态补丁。
-                let mut tool_msg = build_tool_message(
-                    &call_id,
-                    &result_text,
-                    Some(ok),
-                    None,
-                );
+                let mut tool_msg = build_tool_message(&call_id, &result_text, Some(ok), None);
                 if !ok {
                     // 失败属信息性：结果以 Completed 定格（父节点同为 Completed），
                     // 与普通工具结果的处理保持一致，避免孤儿 Failed 节点
@@ -778,9 +778,9 @@ pub async fn run_chat_loop(
         let needs_user_action = tool_results.iter().any(|m| {
             m.msg_type == Some(MessageType::UserPrompt)
                 && m.status == Some(MessageStatus::WaitingUserAction)
-        }) || parent_updates.iter().any(|p| {
-            p.status == Some(MessageStatus::WaitingUserAction)
-        });
+        }) || parent_updates
+            .iter()
+            .any(|p| p.status == Some(MessageStatus::WaitingUserAction));
 
         if needs_user_action {
             // 注：信息性策略下工具失败的父 ToolCall 已标 Completed（错误结果作为
@@ -788,10 +788,7 @@ pub async fn run_chat_loop(
             // 恢复」的场景——旧版在此处给 Failed+failure_kind 父节点打 recoverable
             // 标记的代码属不可达遗留，已删除（docs/turn-tool-mechanisms.md 1.5）。
             // user_prompt(WaitingUserAction) 驱动的暂停走 approve/reject/answer 恢复。
-            plugin_info!("session",
-                "工具待用户恢复（mode={}），退出本轮",
-                mode
-            );
+            plugin_info!("session", "工具待用户恢复（mode={}），退出本轮", mode);
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
             return Ok(());
         }
@@ -803,11 +800,13 @@ pub async fn run_chat_loop(
 }
 
 async fn broadcast_message_update(channel: &PluginChannel, message: ChatMessage) {
-    let _ = channel.tx.send(PluginFrame::Data(
-        serde_json::to_value(session_chat_response::StreamEvent::Update { message })
-            .unwrap_or_default(),
-    ))
-    .await;
+    let _ = channel
+        .tx
+        .send(PluginFrame::Data(
+            serde_json::to_value(session_chat_response::StreamEvent::Update { message })
+                .unwrap_or_default(),
+        ))
+        .await;
 }
 
 async fn persist_messages(context: &SessionContext, last_saved: usize, channel: &PluginChannel) {
@@ -841,7 +840,8 @@ async fn open_chat_session(ctx: &Arc<dyn InvokeRequest>) -> Arc<dyn ChatSession>
         return handle.0.clone();
     }
 
-    plugin_warn!("session",
+    plugin_warn!(
+        "session",
         "[Session] 上下文未交付 SESSION_HANDLE，回退内存会话（无持久化）"
     );
     Arc::new(FallbackChatSession::default())
@@ -1002,8 +1002,12 @@ async fn auto_compress_process(
     // 否则上下文实际占用被低估，压缩触发过晚 → 撞 provider 的 context-length 400。
     let overhead = compression::estimate_request_overhead(system_prompt, ctx).await;
 
-    if !compression::should_start_compression(&context.messages, effective_context_limit, force, overhead)
-    {
+    if !compression::should_start_compression(
+        &context.messages,
+        effective_context_limit,
+        force,
+        overhead,
+    ) {
         return Ok(None);
     }
 
@@ -1085,8 +1089,7 @@ async fn compress_with_snapshot_core(
     // 可回溯原则：压缩前把完整历史转存为 transcript，路径记入快照 meta。
     // 旧版直接 replace_messages，被压掉的历史在物理层"凭空消失"，
     // 旧存档文件成为孤儿，事后无法审计。
-    let transcript_path =
-        save_transcript_archive(&original_messages, context.session.session_id());
+    let transcript_path = save_transcript_archive(&original_messages, context.session.session_id());
 
     // ── 输入超限死锁预判（日志实证的恶性循环）──────────────────────────
     // LLM 摘要请求的请求体**就携带完整待压缩历史**——若历史本身已超 Provider
@@ -1100,25 +1103,31 @@ async fn compress_with_snapshot_core(
         v.extend(keep_messages.iter().cloned());
         v
     };
-    let overhead_tokens = compression::estimate_request_overhead(
-        &compression::get_compression_prompt(),
-        ctx,
-    )
-    .await;
-    let pending_tokens: usize = pending.iter().map(compression::estimate_message_tokens).sum();
+    let overhead_tokens =
+        compression::estimate_request_overhead(&compression::get_compression_prompt(), ctx).await;
+    let pending_tokens: usize = pending
+        .iter()
+        .map(compression::estimate_message_tokens)
+        .sum();
     let effective_limit =
         (orchestrator.config.max_context_tokens - orchestrator.config.reserved_tokens) as usize;
     if pending_tokens + overhead_tokens > effective_limit {
-        plugin_warn!("session",
+        plugin_warn!(
+            "session",
             "[Compress] {log_tag}: summary request itself exceeds input limit ({} + {} > {}), \
              applying local emergency tail compression instead of a doomed LLM call",
-            pending_tokens, overhead_tokens, effective_limit
+            pending_tokens,
+            overhead_tokens,
+            effective_limit
         );
         // 机械兜底目标：压到有效上限的一半（给后续对话留出增长空间，
         // 避免刚兜底完又立刻越线）
         let target = effective_limit / 2;
-        let (mut new_messages, removed) =
-            compression::emergency_tail_compression(&original_messages, target, transcript_path.as_deref());
+        let (mut new_messages, removed) = compression::emergency_tail_compression(
+            &original_messages,
+            target,
+            transcript_path.as_deref(),
+        );
         if removed > 0 {
             // 与 LLM 快照同款的 meta 指纹（协议版本标记 emergency 路径）
             if let Some(head) = new_messages.first_mut() {
@@ -1132,7 +1141,8 @@ async fn compress_with_snapshot_core(
                 .session
                 .replace_messages(context.messages.clone())
                 .await;
-            plugin_info!("session",
+            plugin_info!(
+                "session",
                 "[Compress] {log_tag}: emergency tail compression removed {removed} messages"
             );
             // post_tokens 按兜底后的内容水位返回（迟滞比较的读取侧口径）
@@ -1322,7 +1332,10 @@ async fn run_context_compact(
 
     // 待压缩历史 = [.., split_user_idx)，当前用户指令起的任务上下文整体留在保留区
     let history: Vec<ChatMessage> = context.messages[..split_user_idx].to_vec();
-    let before_tokens: usize = history.iter().map(compression::estimate_message_tokens).sum();
+    let before_tokens: usize = history
+        .iter()
+        .map(compression::estimate_message_tokens)
+        .sum();
     if before_tokens < compression::MIN_COMPACT_TOKENS {
         return (false, before_tokens, before_tokens);
     }
@@ -1393,9 +1406,7 @@ async fn send_compression_request(
     //   压缩请求将无视中止跑完整整轮 LLM 流（此前还曾因哑 rx 立即关闭被误判
     //   Aborted，导致每轮重试巨型压缩请求）。压缩结束后 rx 归还主通道。
     let (mute_tx, mut mute_rx) = tokio::sync::mpsc::channel::<PluginFrame>(64);
-    tokio::spawn(async move {
-        while mute_rx.recv().await.is_some() {}
-    });
+    tokio::spawn(async move { while mute_rx.recv().await.is_some() {} });
     let dummy_rx = tokio::sync::mpsc::channel::<PluginFrame>(1).1;
     // 出栈时通过 mem::replace 归还真实 rx（下方统一在请求结束后归还）
     let real_rx = std::mem::replace(&mut channel.rx, dummy_rx);

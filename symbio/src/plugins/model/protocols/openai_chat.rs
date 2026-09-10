@@ -7,9 +7,7 @@ use std::sync::Arc;
 
 use super::super::types::{CapabilityMeta, ModelConfig};
 use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
-use crate::symbio_core::{
-    get_http_client, InvokeRequest, PluginError, MODEL_PROTOCOL_OPENAI_CHAT,
-};
+use crate::symbio_core::{get_http_client, InvokeRequest, PluginError, MODEL_PROTOCOL_OPENAI_CHAT};
 
 pub struct OpenaiChatProtocol;
 
@@ -138,9 +136,7 @@ impl ModelProvider for OpenaiChatProtocol {
                 .and_then(|c| c.get("finish_reason"))
                 .and_then(|v| v.as_str())
             {
-                evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(
-                    fr,
-                ))));
+                evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(fr))));
             }
             // 用量：通常只在最后的 chunk 出现（需 stream_options.include_usage），
             // 拿不到也没关系——估算器照样工作，只是失去校准机会。

@@ -65,17 +65,24 @@ impl Session {
 pub(crate) fn derive_session_title(messages: &[ChatMessage]) -> Option<String> {
     const SESSION_TITLE_MAX_CHARS: usize = 24;
     for m in messages {
-        if !matches!(m.role, Some(crate::symbio_core::schemas::session::chat_message::MessageRole::User)) {
+        if !matches!(
+            m.role,
+            Some(crate::symbio_core::schemas::session::chat_message::MessageRole::User)
+        ) {
             continue;
         }
         let text = match &m.content {
-            Some(crate::symbio_core::schemas::session::chat_message::MessageContent::Text(s)) => s.clone(),
-            Some(crate::symbio_core::schemas::session::chat_message::MessageContent::Parts(parts)) => parts
+            Some(crate::symbio_core::schemas::session::chat_message::MessageContent::Text(s)) => {
+                s.clone()
+            }
+            Some(crate::symbio_core::schemas::session::chat_message::MessageContent::Parts(
+                parts,
+            )) => parts
                 .iter()
                 .filter_map(|p| match p {
-                    crate::symbio_core::schemas::session::chat_message::ContentPart::Text { text } => {
-                        Some(text.clone())
-                    }
+                    crate::symbio_core::schemas::session::chat_message::ContentPart::Text {
+                        text,
+                    } => Some(text.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -234,7 +241,10 @@ mod tests {
     #[test]
     fn derive_title_takes_first_user_line() {
         let msgs = vec![user_msg("帮我分析一下这个报错\n第二行"), user_msg("第二条")];
-        assert_eq!(derive_session_title(&msgs).as_deref(), Some("帮我分析一下这个报错"));
+        assert_eq!(
+            derive_session_title(&msgs).as_deref(),
+            Some("帮我分析一下这个报错")
+        );
     }
 
     #[test]

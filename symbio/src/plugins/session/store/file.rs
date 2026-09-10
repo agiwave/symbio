@@ -225,11 +225,9 @@ impl SessionStore for FileSessionStore {
         if !nested.exists() {
             return Ok(Vec::new());
         }
-        let mut sessions = tokio::task::spawn_blocking(move || {
-            Self::read_sessions_in(&nested)
-        })
-        .await
-        .map_err(|e| PluginError::InternalError(e.to_string()))?;
+        let mut sessions = tokio::task::spawn_blocking(move || Self::read_sessions_in(&nested))
+            .await
+            .map_err(|e| PluginError::InternalError(e.to_string()))?;
         sessions.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
         Ok(sessions)
     }

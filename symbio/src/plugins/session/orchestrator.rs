@@ -17,9 +17,9 @@ use crate::symbio_core::schemas::{
     session::{session_append, session_chat, session_chat_response},
 };
 use crate::symbio_core::{
-    attach_capabilities, collect_capabilities, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    Plugin, PluginChannel, PluginError, PluginFrame, PluginPayload, take_errors, MODE, PROVIDER_ID,
-    RISK_LEVEL, SESSION_ID, WORKDIR,
+    attach_capabilities, collect_capabilities, take_errors, InvokeRequest, InvokeRequestExt,
+    InvokeResponse, Plugin, PluginChannel, PluginError, PluginFrame, PluginPayload, MODE,
+    PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -399,13 +399,8 @@ impl SessionPlugin {
                         // 透传 plugin-level Error 帧作为业务级 Error 事件。
                         // 同时把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
                         // 这样切回会话时能看到上次失败的终态。
-                        self.persist_failure(
-                            &state,
-                            &session_id,
-                            &collected_ai_messages,
-                            msg,
-                        )
-                        .await;
+                        self.persist_failure(&state, &session_id, &collected_ai_messages, msg)
+                            .await;
                         // 复位 is_working + 广播 Error + 广播 idle：
                         // 必须复位 is_working，否则后续 resume 请求会被
                         // `handle_chat_send_oneoff` 的 session_busy 守卫静默拒绝，
@@ -786,10 +781,7 @@ impl SessionPlugin {
                     std::sync::Arc::new(crate::symbio_core::ChatSessionHandle::new(session)),
                 );
             } else {
-                crate::plugin_warn!(
-                    "session",
-                    "会话引擎句柄构造失败，chat 将回退内存会话"
-                );
+                crate::plugin_warn!("session", "会话引擎句柄构造失败，chat 将回退内存会话");
             }
 
             let tool_manager = collect_capabilities(Some(&parent_spawn), &chat_ctx).await;
@@ -874,9 +866,17 @@ impl SessionPlugin {
 
             // 调用统一的 chat_loop 任务执行器（内部：entry 解析 + 限流 + spawn）
             // run_chat_loop 内部会区分 resume（turn 前处理）与 single_message（正常 turn）
-            this_spawn.clone().run_chat_loop_task(
-                state_spawn, chat_ctx, sid_spawn, parent_spawn, pid_clone.clone(), rid,
-            ).await;
+            this_spawn
+                .clone()
+                .run_chat_loop_task(
+                    state_spawn,
+                    chat_ctx,
+                    sid_spawn,
+                    parent_spawn,
+                    pid_clone.clone(),
+                    rid,
+                )
+                .await;
         });
 
         // 立即返回 success（事件流经 bus 推送）
@@ -949,10 +949,14 @@ impl SessionPlugin {
         if let Some(obj) = session.metadata.as_object_mut() {
             obj.insert("title".to_string(), json!(title));
         }
-        session.updated_at = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000)
-            as i64;
+        session.updated_at =
+            (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
         if self.save_session(&session).await.is_ok() {
-            EventBus::try_publish("session", Some(session_id), json!({ "type": "title", "title": title }));
+            EventBus::try_publish(
+                "session",
+                Some(session_id),
+                json!({ "type": "title", "title": title }),
+            );
         }
     }
 
@@ -1138,7 +1142,8 @@ impl SessionPlugin {
                         }
                     } else if matches!(
                         existing.status,
-                        None | Some(cm::MessageStatus::Streaming) | Some(cm::MessageStatus::Pending)
+                        None | Some(cm::MessageStatus::Streaming)
+                            | Some(cm::MessageStatus::Pending)
                     ) {
                         // 进行中的子节点定稿为 Completed（结束前端流式动画），不挂 error。
                         existing.status = Some(cm::MessageStatus::Completed);

@@ -247,12 +247,10 @@ impl ChatMessage {
                 }
                 Some(MessageType::Text) | Some(MessageType::Reasoning) => {
                     match (&mut self.content, new_content) {
-                        (Some(existing), MessageContent::Text(new_text)) => {
-                            match existing {
-                                MessageContent::Text(buf) => buf.push_str(new_text),
-                                other => *other = MessageContent::Text(new_text.clone()),
-                            }
-                        }
+                        (Some(existing), MessageContent::Text(new_text)) => match existing {
+                            MessageContent::Text(buf) => buf.push_str(new_text),
+                            other => *other = MessageContent::Text(new_text.clone()),
+                        },
                         (None, MessageContent::Text(new_text)) => {
                             self.content = Some(MessageContent::Text(new_text.clone()));
                         }

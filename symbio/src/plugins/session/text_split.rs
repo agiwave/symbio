@@ -4,30 +4,25 @@
 //! - **机制**（本模块）：token 计量、行贪心累加、`token × 2 → 字符上限`换算、
 //!   单行超长的字符兜底截断（头保行首 / 尾保行尾）；
 //! - **策略**（各调用方）：触发条件（L0 token 预算 vs L1 行数阈值）、头尾配比
-//!   （L0 约 60/40 偏头部 vs L1 约 1/4:3/4 偏尾部）、省略号位置与占位符文案。
+//!   （L0 约 60/40 偏头部 vs L1 约 1/4:3/4 偏尾部）、占位符文案（字符兜底的
+//!   `…` 截断标记属机制契约，由 [`split_head_tail`] 统一添加）。
 //!
 //! 策略分歧是有依据的设计（L0 面对工具 dump，结论/错误常在头部自报家门；
 //! L1 面对会话消息，尾部离当前对话点更近），不得以"去重"为名强行统一；
 //! 机制收敛于此，保证策略族无法各自漂移（历史教训：message_archive 曾内联
 //! 重写一份同型逻辑，注释声称"对齐 L0 策略"实则已静默分叉）。
 
-use super::tokenizer::{default_tokenizer, Tokenizer};
+use super::tokenizer::Tokenizer;
 
 /// 字符换算系数：字符预算 ≈ token 预算 × 2（CJK 友好的粗略口径，全库统一）。
 const CHARS_PER_TOKEN: usize = 2;
 
 /// [`split_head_tail`] 的切分结果。
 pub(crate) struct HeadTailSplit {
-    /// 头部保留文本（每行自带换行；单行兜底时以 `…\n` 结尾——省略号由 L0 策略添加）。
+    /// 头部保留文本（每行自带换行；首行字符兜底时以 `…\n` 结尾）。
     pub head: String,
-    /// 尾部保留文本（行间以 `\n` 连接，无尾换行；尾行兜底时以 `…` 开头）。
+    /// 尾部保留文本（行间以 `\n` 连接，无尾换行；尾行字符兜底时以 `…` 开头）。
     pub tail: String,
-    /// 实际被省略部分的 token 估算（原始总数 − 头部实收 − 尾部实收）。
-    ///
-    /// 注意：这是机制侧的诊断口径，与占位符里展示的 omit 数字（策略侧口径
-    /// `原始 − 预算`）**含义不同**，后者由调用方自行计算（见
-    /// `tool_result_guard::assemble_head_tail_summary`），二者不可混用。
-    pub omitted_tokens: usize,
 }
 
 /// 头部字符兜底：保留**行首** `token_budget × 2` 个字符。
@@ -60,14 +55,31 @@ pub(crate) fn truncate_head_chars_if_over(text: &str, token_budget: usize) -> St
     }
 }
 
+/// 按 token 预算截断文本：未超限原样返回，超限截行首并追加省略号。
+///
+/// [`truncate_head_chars_if_over`] 的语义化别名——L3 骨架摘要等"单行/单段
+/// 摘要"场景以此命名更贴近意图。历史上 context_window 内联了同型实现
+/// （`token × 2 → 字符上限`），现收敛于此，杜绝口径漂移。
+pub(crate) fn truncate_tokens(text: &str, token_budget: usize) -> String {
+    truncate_head_chars_if_over(text, token_budget)
+}
+
 /// token 预算驱动的头尾切分（机制本体，原 L0 `tool_result_guard::split_head_tail`）。
 ///
-/// 优先按**行**贪心累加（结构化输出友好，不会切断 JSON/表格行）；单行超预算�
-/// 退化为按字符截断（头保行首 / 尾保行尾）。省略号的添加位置属调用方策略，
-/// 本函数不追加任何装饰字符。
-pub(crate) fn split_head_tail(text: &str, head_budget: usize, tail_budget: usize) -> HeadTailSplit {
-    let tok = default_tokenizer();
-    let total_tokens = tok.count(text);
+/// 优先按**行**贪心累加（结构化输出友好，不会切断 JSON/表格行）；单行超预算
+/// 退化为按字符截断（头保行首 / 尾保行尾）。字符兜底的 `…` 截断标记由本函数
+/// 统一添加（机制契约，与原 L0 行为逐字节一致）；占位符文案属调用方策略。
+///
+/// 计量器由调用方注入：生产方传 `default_tokenizer()`（与预算计算共用同一
+/// 校准口径）；本函数因此是**纯函数**——不读进程级校准状态，测试可用
+/// 确定性的 [`HeuristicTokenizer`] 复现任意切分结果（否则测试会因其他用例
+/// 的 usage 反馈漂移而 flaky，实测踩坑）。
+pub(crate) fn split_head_tail(
+    text: &str,
+    head_budget: usize,
+    tail_budget: usize,
+    tok: &dyn Tokenizer,
+) -> HeadTailSplit {
     let lines: Vec<&str> = text.lines().collect();
 
     // head：从前往后贪心累加，直到超出 head_budget
@@ -79,7 +91,10 @@ pub(crate) fn split_head_tail(text: &str, head_budget: usize, tail_budget: usize
         if used + c > head_budget {
             if head.is_empty() || head_line_count == 0 {
                 // 首行（或首个待收行）超预算：按字符兜底截行首，而非整行放行
+                //（与原 L0 一致：截断标记 `…` + 换行，保持"每行自带换行"不变量）
                 head.push_str(&truncate_head_chars(line, head_budget));
+                head.push('…');
+                head.push('\n');
             }
             break;
         }
@@ -96,8 +111,8 @@ pub(crate) fn split_head_tail(text: &str, head_budget: usize, tail_budget: usize
         let c = tok.count(line) + tok.count("\n");
         if used_t + c > tail_budget {
             if tail_lines.is_empty() {
-                // 尾行超预算：按字符兜底保行尾
-                tail_lines.push(truncate_tail_chars(line, tail_budget));
+                // 尾行超预算：按字符兜底保行尾（`…` 前缀标记截断，与原 L0 一致）
+                tail_lines.push(format!("…{}", truncate_tail_chars(line, tail_budget)));
             }
             break;
         }
@@ -109,45 +124,61 @@ pub(crate) fn split_head_tail(text: &str, head_budget: usize, tail_budget: usize
     HeadTailSplit {
         head,
         tail: tail_lines.join("\n"),
-        omitted_tokens: total_tokens.saturating_sub(used + used_t),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::tokenizer::HeuristicTokenizer;
     use super::*;
+
+    /// 测试专用：确定性计量器（不读进程级校准状态，结果可复现）。
+    fn split(text: &str, head_budget: usize, tail_budget: usize) -> HeadTailSplit {
+        split_head_tail(text, head_budget, tail_budget, &HeuristicTokenizer)
+    }
 
     /// 短文本整体放进 head：逐行带回换行，tail 为空。
     #[test]
     fn short_text_kept_whole_in_head() {
-        let s = split_head_tail("a\nb\nc", 100, 100);
+        let s = split("a\nb\nc", 100, 100);
         assert_eq!(s.head, "a\nb\nc\n");
         assert_eq!(s.tail, "");
     }
 
-    /// 单行超预算：head 以"行首截断"收尾，不会整行放行。
+    /// 单行超预算：head 以"行首截断 + `…`"收尾，不会整行放行；tail 预算充足时
+    /// 该行仍整行保留在尾部（与原 L0 行为一致——head 兜底只保证不整行放行，
+    /// 不代表该行从 tail 中消失）。
     #[test]
     fn single_long_line_head_truncated() {
         let line = "x".repeat(50);
-        let s = split_head_tail(&line, 5, 100);
+        let s = split(&line, 5, 100);
         assert_eq!(s.head, format!("{}…\n", "x".repeat(10)), "字符上限 = 5×2");
-        assert_eq!(s.tail, "");
+        assert_eq!(
+            s.tail, line,
+            "50 字符 ≈ 15 token ≤ tail 预算 100，整行进 tail"
+        );
     }
 
     /// 尾行超预算：tail 以 `…` 开头且保留行尾字符。
     #[test]
     fn tail_line_truncation_keeps_line_end() {
+        // 计量（HeuristicTokenizer）：head_line ≈ 4 token（3+换行），
+        // y 行 ≈ 15 token；head 预算 10 → 首行可入、y 行必超。
         let text = format!("head_line\n{}", "y".repeat(50));
-        let s = split_head_tail(&text, 20, 5);
+        let s = split(&text, 10, 5);
         assert_eq!(s.head, "head_line\n");
-        assert_eq!(s.tail, format!("…{}", "y".repeat(10)), "尾行保行尾 5×2 字符");
+        assert_eq!(
+            s.tail,
+            format!("…{}", "y".repeat(10)),
+            "尾行保行尾 5×2 字符"
+        );
     }
 
     /// 头尾不重叠：tail 从 head 取走的部分之后开始。
     #[test]
     fn head_and_tail_do_not_overlap() {
         let text = "l1\nl2\nl3\nl4\nl5";
-        let s = split_head_tail(text, 4, 4);
+        let s = split(text, 4, 4);
         let head_lines: Vec<&str> = s.head.lines().collect();
         let tail_lines: Vec<&str> = s.tail.lines().collect();
         assert_eq!(head_lines, vec!["l1", "l2"]);

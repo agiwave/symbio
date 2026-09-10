@@ -7,9 +7,7 @@ use std::sync::Arc;
 
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole, ModelConfig};
 use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
-use crate::symbio_core::{
-    get_http_client, InvokeRequest, PluginError, MODEL_PROTOCOL_GEMINI_API,
-};
+use crate::symbio_core::{get_http_client, InvokeRequest, PluginError, MODEL_PROTOCOL_GEMINI_API};
 
 pub struct GeminiProtocol;
 

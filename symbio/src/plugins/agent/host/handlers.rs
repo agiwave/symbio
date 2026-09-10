@@ -69,7 +69,11 @@ pub async fn route(
         }
         "entities/get" => {
             let req: EntityGetRequest = ctx.payload()?;
-            if req.container.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+            if req
+                .container
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty())
+            {
                 // 容器语义：委托 dispatch 容器分支（trait get_container_item）
                 match dispatch(plugin, path, &ctx).await {
                     Some(resp) => resp,
@@ -83,7 +87,11 @@ pub async fn route(
         }
         "entities/upload" => {
             let req: EntityUploadRequest = ctx.payload()?;
-            if req.container.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+            if req
+                .container
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty())
+            {
                 match dispatch(plugin, path, &ctx).await {
                     Some(resp) => resp,
                     None => Err(PluginError::InternalError(
@@ -96,7 +104,11 @@ pub async fn route(
         }
         "entities/delete" => {
             let req: EntityDeleteRequest = ctx.payload()?;
-            if req.container.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+            if req
+                .container
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty())
+            {
                 match dispatch(plugin, path, &ctx).await {
                     Some(resp) => resp,
                     None => Err(PluginError::InternalError(

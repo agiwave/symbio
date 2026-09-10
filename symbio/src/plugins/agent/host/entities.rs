@@ -11,9 +11,7 @@
 
 use super::plugin::AgentPlugin;
 use super::store::{classify_entity_path, BundleStore};
-use crate::symbio_core::entities::{
-    EntityProvider, EntitySummary, EntityUploadResponse,
-};
+use crate::symbio_core::entities::{EntityProvider, EntitySummary, EntityUploadResponse};
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginError, WORKDIR};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -33,7 +31,11 @@ struct ContainerCounts {
 }
 
 fn container_counts(store: &BundleStore, bundle_id: &str) -> ContainerCounts {
-    let mut counts = ContainerCounts { prompt: 0, skill: 0, mcp: 0 };
+    let mut counts = ContainerCounts {
+        prompt: 0,
+        skill: 0,
+        mcp: 0,
+    };
     if let Ok(entries) = store.list_entities(bundle_id) {
         for e in entries {
             match e.kind.as_str() {

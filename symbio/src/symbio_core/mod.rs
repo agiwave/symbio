@@ -4,17 +4,17 @@ mod capability;
 mod chat_pipeline;
 mod chat_session;
 pub(crate) mod creator;
+pub mod entities;
 mod error;
 pub mod event_bus;
 mod homedir;
 mod ids;
 mod keys;
-pub mod model_provider;
 mod logger;
+pub mod model_provider;
 mod paths;
 mod plugin;
 pub mod providers;
-pub mod entities;
 pub mod schemas;
 mod tools;
 mod transport;
@@ -25,8 +25,8 @@ pub use chat_pipeline::{
     CAPABILITY_ERRORS,
 };
 pub use chat_session::{ChatSession, ChatSessionHandle};
-pub use model_provider::{resolve_protocol_id, FinishReason, ModelProvider, ProtocolEvent, Usage};
 pub use creator::{create_object, has_creator};
+pub use model_provider::{resolve_protocol_id, FinishReason, ModelProvider, ProtocolEvent, Usage};
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 pub use capability::{
     Capability, CapabilityCategory, CapabilityManager, CapabilityMeta, ModelProviderEntry,

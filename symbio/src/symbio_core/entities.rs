@@ -137,11 +137,7 @@ pub trait EntityProvider: Send + Sync {
     /// 默认实现：EntityStore 目录删除（`category()` 提供分类，磁盘已无目录时
     /// 幂等告警）。**非实体存储型 provider（如 session 走 SessionStore）重写
     /// 本方法**——删除能力由注册表 `capabilities.mutable` 声明，与本钩子解耦。
-    async fn delete_item(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-    ) -> Result<(), PluginError> {
+    async fn delete_item(&self, ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
         let Some(category) = self.category() else {
             return Err(PluginError::NotImplemented);
         };
@@ -150,11 +146,7 @@ pub trait EntityProvider: Send + Sync {
         match es.delete_entity(category, id).await {
             Ok(()) => {}
             Err(EntityStoreError::NotFound { .. }) => {
-                crate::plugin_warn!(
-                    self.kind(),
-                    "磁盘上已无实体 {} 目录，仅清理内存",
-                    id
-                );
+                crate::plugin_warn!(self.kind(), "磁盘上已无实体 {} 目录，仅清理内存", id);
             }
             Err(e) => {
                 return Err(PluginError::InternalError(format!("删除实体失败: {e}")));
@@ -507,7 +499,9 @@ pub fn providers_response() -> ProvidersResponse {
 /// `symbio.provider_order`）；命中覆盖的 kind 以其覆盖值为准，
 /// 未命中的用注册表默认 `order`。据此重排数组并重写各 provider 的
 /// `order` 字段，前端无需改动（本就按下发的 order 排序）。
-pub fn providers_response_with_overrides(order_override: &HashMap<String, i32>) -> ProvidersResponse {
+pub fn providers_response_with_overrides(
+    order_override: &HashMap<String, i32>,
+) -> ProvidersResponse {
     let mut providers: Vec<ProviderInfo> = provider_registry()
         .iter()
         .map(|p| ProviderInfo {
@@ -591,8 +585,16 @@ async fn dispatch_list<P: EntityProvider + ?Sized>(
         .and_then(|v| serde_json::from_value::<EntitiesListRequest>(v).ok())
         .unwrap_or_default();
     if let Some(container) = non_empty(&req.container) {
-        let sub_kind = req.sub_kind.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let parent = req.parent.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let sub_kind = req
+            .sub_kind
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let parent = req
+            .parent
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let mut items = provider
             .list_container_items(ctx, sub_kind, container, parent)
             .await?;
@@ -692,7 +694,9 @@ async fn dispatch_upload<P: EntityProvider + ?Sized>(
             .and_then(|m| m.get("content"))
             .and_then(|c| c.as_str())
             .ok_or_else(|| {
-                PluginError::ValidationError("容器子实体写入需要 manifest.content（文件文本）".to_string())
+                PluginError::ValidationError(
+                    "容器子实体写入需要 manifest.content（文件文本）".to_string(),
+                )
             })?;
         let resp = provider
             .put_container_item(ctx, path, content, container)
@@ -772,7 +776,9 @@ async fn dispatch_delete<P: EntityProvider + ?Sized>(
     let req: EntityDeleteRequest = ctx.payload()?;
     // 容器语义：删除容器子实体（幂等语义由插件钩子决定）
     if let Some(container) = non_empty(&req.container) {
-        let resp = provider.delete_container_item(ctx, &req.id, container).await?;
+        let resp = provider
+            .delete_container_item(ctx, &req.id, container)
+            .await?;
         return Ok(PluginPayload::new(&resp));
     }
 
@@ -849,7 +855,11 @@ async fn dispatch_watch<P: EntityProvider + ?Sized>(
         .unwrap_or_default();
     let container = non_empty(&req.container)
         .ok_or_else(|| PluginError::ValidationError("watch 需要 container".into()))?;
-    let sub_kind = req.sub_kind.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let sub_kind = req
+        .sub_kind
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     if watch {
         provider.watch_container(ctx, sub_kind, container).await?;
     } else {
@@ -894,7 +904,9 @@ pub fn parse_zip(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, EntityError> {
         }
         // 跳过 macOS 元数据 / 隐藏文件
         if raw.contains("__MACOSX")
-            || raw.split('/').any(|seg| seg.starts_with('.') && !seg.is_empty())
+            || raw
+                .split('/')
+                .any(|seg| seg.starts_with('.') && !seg.is_empty())
         {
             continue;
         }
@@ -1020,13 +1032,15 @@ mod tests {
         assert_eq!(kinds.first(), Some(&ENTITY_SETTING));
         assert_eq!(kinds.last(), Some(&ENTITY_MODEL));
         assert!(
-            resp.providers
-                .windows(2)
-                .all(|w| w[0].order <= w[1].order),
+            resp.providers.windows(2).all(|w| w[0].order <= w[1].order),
             "order 应单调不减"
         );
         // 覆盖值确实写回各 provider 的 order
-        let setting = resp.providers.iter().find(|p| p.kind == ENTITY_SETTING).unwrap();
+        let setting = resp
+            .providers
+            .iter()
+            .find(|p| p.kind == ENTITY_SETTING)
+            .unwrap();
         assert_eq!(setting.order, -10);
     }
 
@@ -1035,10 +1049,17 @@ mod tests {
         let resp = providers_response();
         // 无覆盖时严格等于注册表顺序：会话/模型/智能体/技能/MCP/设置
         let kinds: Vec<&str> = resp.providers.iter().map(|p| p.kind.as_str()).collect();
-        assert_eq!(kinds, vec![
-            ENTITY_SESSION, ENTITY_MODEL, ENTITY_AGENT, ENTITY_SKILL,
-            ENTITY_MCP, ENTITY_SETTING,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                ENTITY_SESSION,
+                ENTITY_MODEL,
+                ENTITY_AGENT,
+                ENTITY_SKILL,
+                ENTITY_MCP,
+                ENTITY_SETTING,
+            ]
+        );
     }
 
     #[test]
@@ -1314,17 +1335,23 @@ mod tests {
         assert_eq!(data.items[0].kind, "prompt");
 
         // list（带 container + sub_kind）：能力取子类型声明，kind 为子类型
-        let ctx = ctx_with_payload(serde_json::json!({"container": "com.acme", "sub_kind": "prompt"}));
+        let ctx =
+            ctx_with_payload(serde_json::json!({"container": "com.acme", "sub_kind": "prompt"}));
         let resp = dispatch(&p, ENTITIES_LIST, &ctx).await.unwrap().unwrap();
         let data = resp.get::<EntitiesListResponse>().unwrap();
         assert_eq!(data.kind, "prompt");
         assert_eq!(data.items.len(), 1);
 
         // get（带 container）：内容在 extra.content
-        let ctx = ctx_with_payload(serde_json::json!({"kind": "agent", "id": "prompts/a.md", "container": "com.acme"}));
+        let ctx = ctx_with_payload(
+            serde_json::json!({"kind": "agent", "id": "prompts/a.md", "container": "com.acme"}),
+        );
         let resp = dispatch(&p, ENTITIES_GET, &ctx).await.unwrap().unwrap();
         let item = resp.get::<EntitySummary>().unwrap();
-        assert_eq!(item.extra.get("content").and_then(|c| c.as_str()), Some("hello"));
+        assert_eq!(
+            item.extra.get("content").and_then(|c| c.as_str()),
+            Some("hello")
+        );
         assert_eq!(item.provider.as_deref(), Some(ENTITY_AGENT));
 
         // put（带 container）：name 为路径，manifest.content 为内容
@@ -1338,7 +1365,9 @@ mod tests {
         assert!(data.created);
 
         // delete（带 container）
-        let ctx = ctx_with_payload(serde_json::json!({"kind": "agent", "id": "prompts/a.md", "container": "com.acme"}));
+        let ctx = ctx_with_payload(
+            serde_json::json!({"kind": "agent", "id": "prompts/a.md", "container": "com.acme"}),
+        );
         let resp = dispatch(&p, ENTITIES_DELETE, &ctx).await.unwrap().unwrap();
         let data = resp.get::<EntityUploadResponse>().unwrap();
         assert_eq!(data.id, "prompts/a.md");
@@ -1347,8 +1376,12 @@ mod tests {
     #[tokio::test]
     async fn dispatch_container_without_hook_is_not_implemented() {
         // 顶层 provider 未实现容器钩子：带 container 的请求应报 NotImplemented（而非静默走顶层语义）
-        let p = DummyProvider { items: vec![], status: None };
-        let ctx = ctx_with_payload(serde_json::json!({"kind": "session", "id": "s1", "container": "c1"}));
+        let p = DummyProvider {
+            items: vec![],
+            status: None,
+        };
+        let ctx =
+            ctx_with_payload(serde_json::json!({"kind": "session", "id": "s1", "container": "c1"}));
         assert!(matches!(
             dispatch(&p, ENTITIES_GET, &ctx).await,
             Some(Err(PluginError::NotImplemented))

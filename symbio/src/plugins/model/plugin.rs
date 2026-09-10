@@ -11,7 +11,9 @@ use super::handlers;
 use super::protocols::resolve_protocol_id;
 use crate::symbio_core::schemas::common;
 use crate::symbio_core::schemas::model::model_config::ModelConfig;
-use crate::symbio_core::schemas::model::model_providers::{ModelProviderConfig, ModelProvidersConfig};
+use crate::symbio_core::schemas::model::model_providers::{
+    ModelProviderConfig, ModelProvidersConfig,
+};
 use crate::symbio_core::{
     create_object, InvokeRequest, InvokeRequestExt, InvokeResponse, ModelProviderEntry, Plugin,
     PluginError, PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, CONFIG_SET, PLUGIN_MODEL,
@@ -140,8 +142,8 @@ impl ModelPlugin {
             match es.read_entity(category, id, manifest).await {
                 Ok(content) => {
                     // 先解析为 Value 提取 is_default 标记，再解析为强类型配置
-                    let parsed = serde_json::from_str::<serde_json::Value>(&content)
-                        .and_then(|v| {
+                    let parsed =
+                        serde_json::from_str::<serde_json::Value>(&content).and_then(|v| {
                             serde_json::from_value::<ModelProviderConfig>(v.clone()).map(|p| (v, p))
                         });
                     match parsed {
@@ -152,7 +154,11 @@ impl ModelPlugin {
                             if p.name.is_empty() {
                                 p.name = id.clone();
                             }
-                            if raw.get("is_default").and_then(|v| v.as_bool()).unwrap_or(false) {
+                            if raw
+                                .get("is_default")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
                                 marked_default = Some(id.clone());
                             }
                             new_providers.insert(id.clone(), p);
@@ -419,20 +425,21 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
             }
         }
 
-        let mut v = serde_json::to_value(&provider).map_err(|e| PluginError::ParseError(e.to_string()))?;
+        let mut v =
+            serde_json::to_value(&provider).map_err(|e| PluginError::ParseError(e.to_string()))?;
         // 保留"设为默认"标记（写盘 + on_uploaded 读取；skip_validation 不落盘）
-        if manifest.get("is_default").and_then(|b| b.as_bool()).unwrap_or(false) {
+        if manifest
+            .get("is_default")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false)
+        {
             v["is_default"] = serde_json::json!(true);
         }
         Ok(v)
     }
 
     /// 写盘后同步内存注册表（读回磁盘内容 + 默认 provider 兜底 + 触发父级持久化）
-    async fn on_uploaded(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-    ) -> Result<(), PluginError> {
+    async fn on_uploaded(&self, ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
         let store = create_object::<dyn crate::symbio_core::providers::StorageService>(
             "storage_service",
             ctx.clone(),
@@ -469,11 +476,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
     }
 
     /// 删除后清理内存注册表与默认 provider 指向
-    async fn on_deleted(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-    ) -> Result<(), PluginError> {
+    async fn on_deleted(&self, _ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
         let mut providers = self.providers.write().await;
         providers.providers.remove(id);
         if providers.default_provider_id.as_deref() == Some(id) {

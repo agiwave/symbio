@@ -22,8 +22,8 @@
 //! - zip-slip 防护：解压前逐 entry 校验规范化路径落在目标目录内；
 //! - 导入即校验：manifest 必须通过 [`validate_manifest`]（含版本匹配）才落盘。
 
-use crate::plugins::agent::core::spec::validate::validate_manifest;
 use crate::plugins::agent::core::spec::manifest::BundleManifest;
+use crate::plugins::agent::core::spec::validate::validate_manifest;
 use crate::plugins::agent::core::SPEC_MAJOR;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -138,10 +138,7 @@ pub fn classify_entity_path(rel: &str) -> Result<(&'static str, String), String>
             if !matches!(base, "yaml" | "yml" | "json") {
                 return Err(format!("mcp 目录形态配置必须是 yaml/yml/json（`{file}`）"));
             }
-            let stem = file
-                .rsplit_once('.')
-                .map(|(s, _)| s)
-                .unwrap_or(file);
+            let stem = file.rsplit_once('.').map(|(s, _)| s).unwrap_or(file);
             if !matches!(stem, "config" | "server" | "mcp") {
                 return Err(format!(
                     "mcp 目录形态配置文件必须是 config/server/mcp.*（`{file}`）"
@@ -174,7 +171,9 @@ fn frontmatter_priority(content: &str) -> Option<i64> {
 /// 单文件的 (size, priority) 元数据（prompt / skill 共用）。
 fn file_meta(path: &Path) -> (u64, Option<i64>) {
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    let priority = std::fs::read_to_string(path).ok().and_then(|c| frontmatter_priority(&c));
+    let priority = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|c| frontmatter_priority(&c));
     (size, priority)
 }
 
@@ -196,7 +195,9 @@ impl BundleStore {
         //   工作区层同时为测试提供隔离：测试用 tempdir 作 workdir 时不会污染真实系统目录。
         let workspace_root =
             workdir.map(|w| Path::new(w).join(".symbio").join("plugins").join("agent"));
-        let global_root = crate::symbio_core::HomedirRegistry::get().join("plugins").join("agent");
+        let global_root = crate::symbio_core::HomedirRegistry::get()
+            .join("plugins")
+            .join("agent");
         Self {
             workspace_root,
             global_root,
@@ -463,8 +464,15 @@ impl BundleStore {
                     });
                 } else if p.is_dir() {
                     let candidates = [
-                        "config.yaml", "config.yml", "server.yaml", "server.yml", "mcp.yaml",
-                        "mcp.yml", "config.json", "server.json", "mcp.json",
+                        "config.yaml",
+                        "config.yml",
+                        "server.yaml",
+                        "server.yml",
+                        "mcp.yaml",
+                        "mcp.yml",
+                        "config.json",
+                        "server.json",
+                        "mcp.json",
                     ];
                     let Some(cfg) = candidates.iter().map(|c| p.join(c)).find(|c| c.is_file())
                     else {

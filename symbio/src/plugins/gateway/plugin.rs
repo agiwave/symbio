@@ -5,8 +5,8 @@
 //!（`session/*`、`model/*`、`entities/*` …）。因此本插件**无需任何新全局注册表**。
 
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta, PluginPayload,
-    CONFIG_GET, CONFIG_SET, PATH, PLUGIN_GATEWAY,
+    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
+    PluginPayload, CONFIG_GET, CONFIG_SET, PATH, PLUGIN_GATEWAY,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -142,9 +142,7 @@ impl Plugin for GatewayPlugin {
                     "outbound_endpoint": cfg.outbound_endpoint,
                 })))
             }
-            _ => Err(PluginError::NotFound(format!(
-                "[gateway] 未知路径: {path}"
-            ))),
+            _ => Err(PluginError::NotFound(format!("[gateway] 未知路径: {path}"))),
         }
     }
 
@@ -163,7 +161,7 @@ crate::submit_object_creator!(PLUGIN_GATEWAY, GatewayPlugin::build, dyn Plugin);
 mod tests {
     use super::*;
     use crate::symbio_core::{
-        InvokeRequestExt, InvokeResponse, PATH, Plugin, PluginPayload, SimpleRequest,
+        InvokeRequestExt, InvokeResponse, Plugin, PluginPayload, SimpleRequest, PATH,
     };
     use std::sync::Arc;
 
@@ -239,4 +237,3 @@ mod tests {
         assert!(r.is_err());
     }
 }
-

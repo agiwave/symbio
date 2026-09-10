@@ -111,7 +111,11 @@ async fn bundle_import_traverse_and_identity() {
     // 注册两个能力：agent_identity（persona + skill 拼接）+ agent_run（始终注册的
     // 子智能体委托工具，不依赖"是否选择智能体"）
     let caps = manager.list_capability().await;
-    assert_eq!(caps.len(), 2, "应注册 identity + agent_run 两个能力: {caps:?}");
+    assert_eq!(
+        caps.len(),
+        2,
+        "应注册 identity + agent_run 两个能力: {caps:?}"
+    );
     let identity_meta = caps.iter().find(|c| c.name == "agent_identity").unwrap();
     assert!(
         identity_meta.description.contains("全栈开发人格"),

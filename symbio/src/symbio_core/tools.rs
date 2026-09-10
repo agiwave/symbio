@@ -156,16 +156,21 @@ mod tests {
             config: ModelConfig::default(),
             rate_limit_ms: 0,
             is_default: false,
-            provider: Arc::new(MockProvider { tag: id.to_string() }),
+            provider: Arc::new(MockProvider {
+                tag: id.to_string(),
+            }),
         }
     }
 
     #[tokio::test]
     async fn provider_roundtrip_preserves_registration_order() {
         let mgr = DefaultToolManager::new();
-        mgr.register_model_provider(provider_entry("p1", "第一个")).await;
-        mgr.register_model_provider(provider_entry("p2", "第二个")).await;
-        mgr.register_model_provider(provider_entry("p3", "第三个")).await;
+        mgr.register_model_provider(provider_entry("p1", "第一个"))
+            .await;
+        mgr.register_model_provider(provider_entry("p2", "第二个"))
+            .await;
+        mgr.register_model_provider(provider_entry("p3", "第三个"))
+            .await;
 
         let listed = mgr.list_model_providers().await;
         let ids: Vec<&str> = listed.iter().map(|e| e.provider_id.as_str()).collect();
@@ -178,8 +183,10 @@ mod tests {
     #[tokio::test]
     async fn provider_overwrite_keeps_single_entry() {
         let mgr = DefaultToolManager::new();
-        mgr.register_model_provider(provider_entry("p1", "first")).await;
-        mgr.register_model_provider(provider_entry("p1", "second")).await;
+        mgr.register_model_provider(provider_entry("p1", "first"))
+            .await;
+        mgr.register_model_provider(provider_entry("p1", "second"))
+            .await;
 
         let listed = mgr.list_model_providers().await;
         assert_eq!(listed.len(), 1);
@@ -189,10 +196,14 @@ mod tests {
     #[tokio::test]
     async fn system_prompt_overwrite_keeps_first_registration_slot() {
         let mgr = DefaultToolManager::new();
-        mgr.register_system_prompt("default", "默认提示词".to_string()).await;
-        mgr.register_system_prompt("p1", "P1 提示词".to_string()).await;
-        mgr.register_system_prompt("default", "默认提示词（覆盖）".to_string()).await;
-        mgr.register_system_prompt("p2", "P2 提示词".to_string()).await;
+        mgr.register_system_prompt("default", "默认提示词".to_string())
+            .await;
+        mgr.register_system_prompt("p1", "P1 提示词".to_string())
+            .await;
+        mgr.register_system_prompt("default", "默认提示词（覆盖）".to_string())
+            .await;
+        mgr.register_system_prompt("p2", "P2 提示词".to_string())
+            .await;
 
         let prompts = mgr.list_system_prompts().await;
         assert_eq!(

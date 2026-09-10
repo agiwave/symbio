@@ -308,7 +308,9 @@ impl ModelProvider for AnthropicProtocol {
                         .and_then(|d| d.get("stop_reason"))
                         .and_then(|v| v.as_str())
                     {
-                        evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(stop))));
+                        evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(
+                            stop,
+                        ))));
                     }
                     // 携带 output_tokens
                     if let Some(out_tok) = json

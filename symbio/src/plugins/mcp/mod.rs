@@ -26,10 +26,10 @@
 //! 通过从磁盘加载/回写保持一致。
 
 mod capability;
-mod schemas;
 mod detail;
 mod http;
 mod manager;
 mod plugin;
+mod schemas;
 mod stdio;
 pub(crate) mod types;

@@ -131,7 +131,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             keywords: Vec::new(),
             category: Some(crate::symbio_core::CapabilityCategory::Chat),
             examples: Some(vec![
-                "agent_id='<bundle-id>', prompt='分析这个项目的架构'".to_string(),
+                "agent_id='<bundle-id>', prompt='分析这个项目的架构'".to_string()
             ]),
         }
     }
@@ -487,9 +487,10 @@ async fn stream_relay_bridge(
                     }
                 }
 
-                let fwd =
-                    serde_json::to_value(StreamEvent::Update { message: message.clone() })
-                        .unwrap_or_default();
+                let fwd = serde_json::to_value(StreamEvent::Update {
+                    message: message.clone(),
+                })
+                .unwrap_or_default();
                 if send_frame(&out_chan, fwd).is_err() {
                     // 工具通道已关闭（父会话被中止/重试）：停止转播
                     break;

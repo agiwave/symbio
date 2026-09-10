@@ -1,4 +1,4 @@
 mod plugin;
-mod types;
 mod schemas;
+mod types;
 mod typing;

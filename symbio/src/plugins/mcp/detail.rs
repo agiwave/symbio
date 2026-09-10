@@ -18,7 +18,10 @@ use crate::symbio_core::schemas::entities::{
 };
 
 fn opt(value: &str, label: &str) -> DetailOption {
-    DetailOption { value: value.into(), label: label.into() }
+    DetailOption {
+        value: value.into(),
+        label: label.into(),
+    }
 }
 
 fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
@@ -31,8 +34,17 @@ fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
     }
 }
 
-fn cond(key: &str, equals: Option<serde_json::Value>, not_equals: Option<serde_json::Value>) -> DetailCondition {
-    DetailCondition { key: key.into(), equals, not_equals, ..Default::default() }
+fn cond(
+    key: &str,
+    equals: Option<serde_json::Value>,
+    not_equals: Option<serde_json::Value>,
+) -> DetailCondition {
+    DetailCondition {
+        key: key.into(),
+        equals,
+        not_equals,
+        ..Default::default()
+    }
 }
 
 /// stdio 专属字段显隐条件（type == "stdio"）
@@ -64,7 +76,12 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                     DetailField {
                         required: true,
                         placeholder: Some("例如：github（即实体目录名）".into()),
-                        ..field("name", "名称", "用于生成实体目录名（ID），不写入 server.json", "text")
+                        ..field(
+                            "name",
+                            "名称",
+                            "用于生成实体目录名（ID），不写入 server.json",
+                            "text",
+                        )
                     },
                     DetailField {
                         default: Some(serde_json::json!(true)),
@@ -77,13 +94,23 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                             opt("http", "HTTP"),
                             opt("sse", "SSE"),
                         ],
-                        ..field("type", "传输类型", "stdio 走本地子进程，http/sse 走远程端点", "select")
+                        ..field(
+                            "type",
+                            "传输类型",
+                            "stdio 走本地子进程，http/sse 走远程端点",
+                            "select",
+                        )
                     },
                     DetailField {
                         required: true,
                         visible_when: Some(when_stdio()),
                         placeholder: Some("例如：npx".into()),
-                        ..field("command", "命令", "stdio transport 启动的可执行命令", "text")
+                        ..field(
+                            "command",
+                            "命令",
+                            "stdio transport 启动的可执行命令",
+                            "text",
+                        )
                     },
                     DetailField {
                         visible_when: Some(when_stdio()),
@@ -104,13 +131,23 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                     DetailField {
                         visible_when: Some(when_remote()),
                         rows: Some(3),
-                        ..field("headers", "自定义请求头", "每行一项：Header=Value（Authorization 等鉴权头）", "map")
+                        ..field(
+                            "headers",
+                            "自定义请求头",
+                            "每行一项：Header=Value（Authorization 等鉴权头）",
+                            "map",
+                        )
                     },
                     DetailField {
                         visible_when: Some(when_remote()),
                         min: Some(1.0),
                         placeholder: Some("30".into()),
-                        ..field("timeout_secs", "请求超时（秒）", "留空使用默认 30 秒；stdio 不使用此字段", "number")
+                        ..field(
+                            "timeout_secs",
+                            "请求超时（秒）",
+                            "留空使用默认 30 秒；stdio 不使用此字段",
+                            "number",
+                        )
                     },
                 ],
             },
@@ -120,11 +157,21 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                 fields: vec![
                     DetailField {
                         rows: Some(3),
-                        ..field("include_tools", "工具白名单", "每行一个工具名；留空 = 全部工具", "list")
+                        ..field(
+                            "include_tools",
+                            "工具白名单",
+                            "每行一个工具名；留空 = 全部工具",
+                            "list",
+                        )
                     },
                     DetailField {
                         rows: Some(3),
-                        ..field("exclude_tools", "工具黑名单", "每行一个工具名；优先级高于白名单", "list")
+                        ..field(
+                            "exclude_tools",
+                            "工具黑名单",
+                            "每行一个工具名；优先级高于白名单",
+                            "list",
+                        )
                     },
                 ],
             },
@@ -140,7 +187,11 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                 id: "test".into(),
                 label: "连接测试".into(),
                 style: "secondary".into(),
-                when: Some(cond("cap.test_connection", Some(serde_json::json!(true)), None)),
+                when: Some(cond(
+                    "cap.test_connection",
+                    Some(serde_json::json!(true)),
+                    None,
+                )),
                 disabled_when: Some(cond("is_existing", Some(serde_json::json!(false)), None)),
                 busy_label: Some("连接中…".into()),
                 ..Default::default()
@@ -152,7 +203,12 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                 busy_label: Some("保存中…".into()),
                 ..Default::default()
             },
-            DetailAction { id: "divider".into(), label: String::new(), style: "divider".into(), ..Default::default() },
+            DetailAction {
+                id: "divider".into(),
+                label: String::new(),
+                style: "divider".into(),
+                ..Default::default()
+            },
             DetailAction {
                 id: "delete".into(),
                 label: "删除 Server".into(),
@@ -186,11 +242,15 @@ mod tests {
         let remote_count = def.sections[0]
             .fields
             .iter()
-            .filter(|f| f.visible_when.as_ref().is_some_and(|c| c.not_equals.is_some()))
+            .filter(|f| {
+                f.visible_when
+                    .as_ref()
+                    .is_some_and(|c| c.not_equals.is_some())
+            })
             .count();
         assert_eq!(stdio_count, 3); // command / args / env
         assert_eq!(remote_count, 3); // url / headers / timeout_secs
-        // 动作：test/save/delete 全齐
+                                     // 动作：test/save/delete 全齐
         let ids: Vec<&str> = def.actions.iter().map(|a| a.id.as_str()).collect();
         assert!(ids.contains(&"test") && ids.contains(&"save") && ids.contains(&"delete"));
     }

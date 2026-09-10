@@ -239,8 +239,7 @@ impl Plugin for SkillPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         // 统一实体协议：entities/list / get / upload / delete / status
-        if let Some(resp) =
-            crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
+        if let Some(resp) = crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
         {
             return resp;
         }

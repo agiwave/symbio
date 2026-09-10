@@ -212,12 +212,24 @@ fn scan_mcps(dir: &Path, a: &mut Assembly) {
         // 目录形态：mcps/<name>/config.yaml（或 server.yaml / mcp.yaml / .json）
         if path.is_dir() {
             let candidates = [
-                "config.yaml", "config.yml", "server.yaml", "server.yml", "mcp.yaml",
-                "mcp.yml", "config.json", "server.json", "mcp.json",
+                "config.yaml",
+                "config.yml",
+                "server.yaml",
+                "server.yml",
+                "mcp.yaml",
+                "mcp.yml",
+                "config.json",
+                "server.json",
+                "mcp.json",
             ];
             let found = candidates
                 .iter()
-                .map(|c| (path.join(c), c.rsplit('.').next().unwrap_or("yaml").to_string()))
+                .map(|c| {
+                    (
+                        path.join(c),
+                        c.rsplit('.').next().unwrap_or("yaml").to_string(),
+                    )
+                })
                 .find(|(p, _)| p.is_file());
             match found {
                 Some((p, ext)) => match read_config_value(&p, &ext) {
@@ -260,9 +272,7 @@ fn read_config_value(path: &PathBuf, ext: &str) -> Option<Value> {
 pub fn split_frontmatter(content: &str) -> (Map<String, Value>, String) {
     let bytes = content.as_bytes();
     // 必须以 "---" 开头且其后紧跟换行
-    if !(bytes.starts_with(b"---")
-        && bytes.len() >= 3
-        && (bytes[3] == b'\n' || bytes[3] == b'\r'))
+    if !(bytes.starts_with(b"---") && bytes.len() >= 3 && (bytes[3] == b'\n' || bytes[3] == b'\r'))
     {
         return (Map::new(), content.to_string());
     }

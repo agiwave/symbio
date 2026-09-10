@@ -5,11 +5,13 @@
 //! "跨插件共享"的前提（model 构建 request view）已随 Phase E-② 循环族下沉消失，
 //! 属单一模块私有设施，不再置于 core 共享层。
 
-use crate::symbio_core::ToolContextRetention;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
+use crate::symbio_core::ToolContextRetention;
 use std::collections::{HashMap, HashSet};
+
+use super::text_split::truncate_tokens;
 
 /// 骨架化结果摘要的 token 预算（成功/失败摘要共用上限，≈ 4 行文本）。
 const SKELETON_DIGEST_TOKEN_CAP: usize = 48;
@@ -75,7 +77,29 @@ fn error_digest(msg: &ChatMessage, preview: &str) -> String {
     )
 }
 
+/// 判断一行是否为"无信息量碎片"：骨架化摘要的候选行若只由闭合括号、
+/// 行号、结构标点、空白构成，取它作摘要等于没取（真实会话实证：
+/// `Summary: 150: }]` 迫使模型整文件重读）。
+///
+/// 判定口径：剥离空白、`{}[],:;.-=…` 结构字符与 ASCII 数字后无剩余字符，
+/// 即视为碎片（覆盖 `}`、`]`、`150: }]`、`---`、`====` 等形态）；
+/// 含任何字母/文字（含 CJK）的行不算碎片。
+fn is_fragment_line(line: &str) -> bool {
+    line.chars().all(|c| {
+        c.is_whitespace()
+            || c.is_ascii_digit()
+            || matches!(
+                c,
+                '{' | '}' | '[' | ']' | ',' | ':' | ';' | '.' | '-' | '=' | '…'
+            )
+    })
+}
+
 /// 生成成功结果的首行摘要（一行）。
+///
+/// 质量底线（真实会话实证驱动）：首个非空行若是碎片行（`}`、`]`、`150: }]`），
+/// 取它作摘要毫无信息量；跳过碎片行找首个**有内容**的行。全碎片/全空白时
+/// 返回空串——由调用方省略 Summary 子句（占位符仍保留 successfully 标记）。
 ///
 /// 只取首个非空行（多为文件首行标题、命令输出首行、JSON 首键），预算内
 /// 截断——既给模型"读过什么"的锚点，又不让摘要本身变成新的开销。
@@ -85,7 +109,7 @@ fn first_line_digest(preview: &str) -> String {
     let first = preview
         .lines()
         .map(str::trim)
-        .find(|l| !l.is_empty())
+        .find(|l| !l.is_empty() && !is_fragment_line(l))
         .unwrap_or("");
     if first.starts_with('{') || first.starts_with('[') {
         if let Some(digest) = json_digest(first) {
@@ -132,8 +156,7 @@ fn json_digest(first: &str) -> Option<String> {
             let fields: Vec<String> = obj
                 .iter()
                 .filter(|(k, _)| {
-                    ["name", "path", "file", "title", "id", "type", "status"]
-                        .contains(&k.as_str())
+                    ["name", "path", "file", "title", "id", "type", "status"].contains(&k.as_str())
                 })
                 .map(|(k, v)| match v {
                     serde_json::Value::String(s) => format!("{k}={}", truncate_tokens(s, 24)),
@@ -152,7 +175,13 @@ fn json_digest(first: &str) -> Option<String> {
             serde_json::Value::Object(obj) => {
                 let keys: Vec<&String> = obj.keys().take(8).collect();
                 if !keys.is_empty() {
-                    parts.push(format!("keys={}", keys.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(",")));
+                    parts.push(format!(
+                        "keys={}",
+                        keys.iter()
+                            .map(|k| k.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ));
                 }
             }
             serde_json::Value::Array(items) => {
@@ -180,23 +209,18 @@ fn json_digest(first: &str) -> Option<String> {
     Some(truncate_tokens(&parts.join(" "), SKELETON_DIGEST_TOKEN_CAP))
 }
 
-/// 按 token 预算截断单行文本（字符预算 ≈ token 预算 × 2，CJK 友好）。
-fn truncate_tokens(line: &str, token_cap: usize) -> String {
-    let char_cap = token_cap.saturating_mul(2);
-    if line.chars().count() <= char_cap {
-        line.to_string()
-    } else {
-        let truncated: String = line.chars().take(char_cap).collect();
-        format!("{}…", truncated)
-    }
-}
-
 /// 骨架化 ToolCall 参数时保留的定位参数键（按优先级取首个命中项）。
 /// 模型凭锚点把历史调用与其结果对上号（"读过哪个文件/跑过什么命令"）——
 /// 否则滚出窗口后只剩"[行 585-602，共 621 行]"这类无主摘要，链路断裂
 /// （真实会话实证：模型面对结果摘要却不知对应哪个文件，只能整目录重读）。
 const ANCHOR_PARAM_KEYS: &[&str] = &[
-    "path", "file_path", "command", "url", "pattern", "query", "name",
+    "path",
+    "file_path",
+    "command",
+    "url",
+    "pattern",
+    "query",
+    "name",
 ];
 
 /// 从参数 JSON 提取首个命中的定位参数作为锚点（截断至一行）。
@@ -426,15 +450,17 @@ mod tests {
     }
 
     /// 构建 短工具名 → 保留策略 映射（模拟会话循环运行时从 CapabilityManager 动态解析）
-    fn retention_map(entries: &[(&str, ToolContextRetention)]) -> HashMap<String, ToolContextRetention> {
-        entries
-            .iter()
-            .map(|(n, r)| (n.to_string(), *r))
-            .collect()
+    fn retention_map(
+        entries: &[(&str, ToolContextRetention)],
+    ) -> HashMap<String, ToolContextRetention> {
+        entries.iter().map(|(n, r)| (n.to_string(), *r)).collect()
     }
 
     fn param_of(msg: &ChatMessage) -> String {
-        msg.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
+        msg.content
+            .as_ref()
+            .map(|c| c.to_text())
+            .unwrap_or_default()
     }
 
     /// LastOnly：同名工具多次调用，仅最新一次参数/结果完整，旧的骨架化
@@ -458,10 +484,20 @@ mod tests {
             "旧调用参数应被骨架化: {:?}",
             tc1.content
         );
-        assert_eq!(param_of(tc2), r#"{"todos":"v2 很长很长"}"#, "最新调用参数应原样保留");
+        assert_eq!(
+            param_of(tc2),
+            r#"{"todos":"v2 很长很长"}"#,
+            "最新调用参数应原样保留"
+        );
 
-        let r1 = out.iter().find(|m| m.parent_id.as_deref() == Some("tc1")).unwrap();
-        let r2 = out.iter().find(|m| m.parent_id.as_deref() == Some("tc2")).unwrap();
+        let r1 = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("tc1"))
+            .unwrap();
+        let r2 = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("tc2"))
+            .unwrap();
         assert!(param_of(r1).contains("skeletonized"), "旧结果应被骨架化");
         assert_eq!(param_of(r2), "ok", "最新结果应原样保留");
     }
@@ -510,7 +546,11 @@ mod tests {
     fn global_window_skeletonizes_tool_call_params() {
         let mut messages = Vec::new();
         for i in 0..6 {
-            messages.push(tc_msg(&format!("g{i}"), "local/file_read", &format!(r#"{{"path":"f{i}.rs","blob":"x".repeat(50)}}"#)));
+            messages.push(tc_msg(
+                &format!("g{i}"),
+                "local/file_read",
+                &format!(r#"{{"path":"f{i}.rs","blob":"x".repeat(50)}}"#),
+            ));
             messages.push(tool_result(&format!("g{i}"), "done"));
         }
         // 全局窗口只保留最近 2 个
@@ -525,7 +565,10 @@ mod tests {
         assert!(!param_of(g4).contains("skeletonized"));
         assert!(!param_of(g5).contains("skeletonized"));
         // 结果子节点同样骨架化
-        let r0 = out.iter().find(|m| m.parent_id.as_deref() == Some("g0")).unwrap();
+        let r0 = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("g0"))
+            .unwrap();
         assert!(param_of(r0).contains("skeletonized"));
         // 状态保持 Completed（不产生 Failed/孤儿，配对合法）
         assert_eq!(g0.status, Some(MessageStatus::Completed));
@@ -557,10 +600,18 @@ mod tests {
         let mut messages = Vec::new();
         // 20 个无策略工具调用把全局窗口（15）挤满，todo_write 最新调用被推出窗口
         for i in 0..20 {
-            messages.push(tc_msg(&format!("f{i}"), "local/file_read", &format!(r#"{{"path":"f{i}.rs"}}"#)));
+            messages.push(tc_msg(
+                &format!("f{i}"),
+                "local/file_read",
+                &format!(r#"{{"path":"f{i}.rs"}}"#),
+            ));
             messages.push(tool_result(&format!("f{i}"), "content"));
         }
-        messages.push(tc_msg("latest", "local/todo_write", r#"{"todos":"清单 v3"}"#));
+        messages.push(tc_msg(
+            "latest",
+            "local/todo_write",
+            r#"{"todos":"清单 v3"}"#,
+        ));
         messages.push(tool_result("latest", "已更新任务清单，共 3 项。"));
         let ret = retention_map(&[("todo_write", ToolContextRetention::LastOnly)]);
         let out = apply_layered_sliding_window(&messages, 15, &ret);
@@ -569,8 +620,15 @@ mod tests {
         assert!(param_of(out.iter().find(|m| m.id == "f0").unwrap()).contains("skeletonized"));
         // LastOnly 工具：最新调用虽在全局窗口之外（第 21 个 ToolCall），仍完整保留
         let latest = out.iter().find(|m| m.id == "latest").unwrap();
-        assert_eq!(param_of(latest), r#"{"todos":"清单 v3"}"#, "LastOnly 最新调用不应被全局窗口骨架化");
-        let latest_result = out.iter().find(|m| m.parent_id.as_deref() == Some("latest")).unwrap();
+        assert_eq!(
+            param_of(latest),
+            r#"{"todos":"清单 v3"}"#,
+            "LastOnly 最新调用不应被全局窗口骨架化"
+        );
+        let latest_result = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("latest"))
+            .unwrap();
         assert_eq!(param_of(latest_result), "已更新任务清单，共 3 项。");
     }
 
@@ -590,11 +648,23 @@ mod tests {
         ];
         let ret = HashMap::new();
         let out = apply_layered_sliding_window(&messages, 0, &ret);
-        let r = out.iter().find(|m| m.parent_id.as_deref() == Some("e1")).unwrap();
+        let r = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("e1"))
+            .unwrap();
         let content = param_of(r);
-        assert!(content.contains("failed"), "失败骨架化应标注 failed: {content}");
-        assert!(content.contains("not_found"), "失败骨架化应保留 failure_kind: {content}");
-        assert!(content.contains("os error 2"), "失败骨架化应保留错误原因: {content}");
+        assert!(
+            content.contains("failed"),
+            "失败骨架化应标注 failed: {content}"
+        );
+        assert!(
+            content.contains("not_found"),
+            "失败骨架化应保留 failure_kind: {content}"
+        );
+        assert!(
+            content.contains("os error 2"),
+            "失败骨架化应保留错误原因: {content}"
+        );
     }
 
     /// 骨架化占位符保留摘要：成功结果保留首行摘要
@@ -606,29 +676,96 @@ mod tests {
         ];
         let ret = HashMap::new();
         let out = apply_layered_sliding_window(&messages, 0, &ret);
-        let r = out.iter().find(|m| m.parent_id.as_deref() == Some("s1")).unwrap();
+        let r = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("s1"))
+            .unwrap();
         let content = param_of(r);
-        assert!(content.contains("successfully"), "成功骨架化应标注 successfully: {content}");
-        assert!(content.contains("# session 插件"), "成功骨架化应保留首行摘要: {content}");
-        assert!(!content.contains("后续 300 行"), "骨架化不应保留全文: {content}");
+        assert!(
+            content.contains("successfully"),
+            "成功骨架化应标注 successfully: {content}"
+        );
+        assert!(
+            content.contains("# session 插件"),
+            "成功骨架化应保留首行摘要: {content}"
+        );
+        assert!(
+            !content.contains("后续 300 行"),
+            "骨架化不应保留全文: {content}"
+        );
+    }
+
+    /// 质量底线：首个非空行是碎片行（`150: }]`）时跳过取下一个有内容的行，
+    /// 而非产出 `Summary: 150: }]` 这类无信息量摘要（真实会话实证的痛点）。
+    #[test]
+    fn skeletonized_success_skips_fragment_first_line() {
+        let messages = vec![
+            tc_msg("s2", "local/grep", r#"{"pattern":"TODO"}"#),
+            tool_result(
+                "s2",
+                "150: }]\n\nsrc/main.rs:12: TODO refactor\nsrc/lib.rs:3: TODO docs",
+            ),
+        ];
+        let ret = HashMap::new();
+        let out = apply_layered_sliding_window(&messages, 0, &ret);
+        let r = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("s2"))
+            .unwrap();
+        let content = param_of(r);
+        assert!(
+            content.contains("src/main.rs:12: TODO refactor"),
+            "应跳过碎片行取首个有内容行: {content}"
+        );
+        assert!(
+            !content.contains("150: }]"),
+            "碎片行不应出现在摘要: {content}"
+        );
+    }
+
+    /// 质量底线：全碎片内容（仅闭合括号/标点）时省略 Summary 子句而非输出空摘要
+    #[test]
+    fn skeletonized_success_all_fragment_omits_summary() {
+        let messages = vec![
+            tc_msg("s3", "local/grep", r#"{"pattern":"TODO"}"#),
+            tool_result("s3", "}]"),
+        ];
+        let ret = HashMap::new();
+        let out = apply_layered_sliding_window(&messages, 0, &ret);
+        let r = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("s3"))
+            .unwrap();
+        let content = param_of(r);
+        assert!(
+            content.contains("successfully"),
+            "占位符仍应标注 successfully: {content}"
+        );
+        assert!(
+            !content.contains("Summary:"),
+            "全碎片时应省略 Summary 子句: {content}"
+        );
     }
 
     /// 骨架化摘要判定：meta.success 优先于文本启发式
     #[test]
     fn failure_detection_prefers_structured_meta() {
-        let messages = vec![
-            tc_msg("m1", "local/shell", r#"{"command":"dir"}"#),
-            {
-                // 文本含 "failed" 但 meta.success=true → 仍视为成功
-                let mut m = tool_result("m1", "0 failed tests, all passed");
-                m.meta = Some(serde_json::json!({ "success": true }));
-                m
-            },
-        ];
+        let messages = vec![tc_msg("m1", "local/shell", r#"{"command":"dir"}"#), {
+            // 文本含 "failed" 但 meta.success=true → 仍视为成功
+            let mut m = tool_result("m1", "0 failed tests, all passed");
+            m.meta = Some(serde_json::json!({ "success": true }));
+            m
+        }];
         let ret = HashMap::new();
         let out = apply_layered_sliding_window(&messages, 0, &ret);
-        let r = out.iter().find(|m| m.parent_id.as_deref() == Some("m1")).unwrap();
-        assert!(param_of(r).contains("successfully"), "meta.success=true 应判定为成功");
+        let r = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("m1"))
+            .unwrap();
+        assert!(
+            param_of(r).contains("successfully"),
+            "meta.success=true 应判定为成功"
+        );
     }
 
     /// 骨架化保留定位锚点：参数骨架化保留首个定位参数，
@@ -637,7 +774,11 @@ mod tests {
     #[test]
     fn skeletonized_call_and_result_keep_anchor_param() {
         let messages = vec![
-            tc_msg("a1", "local/read_file", r#"{"path":"gateway/server.rs","limit":50}"#),
+            tc_msg(
+                "a1",
+                "local/read_file",
+                r#"{"path":"gateway/server.rs","limit":50}"#,
+            ),
             tool_result("a1", "[行 585-602，共 621 行]"),
         ];
         let ret = HashMap::new();
@@ -649,15 +790,24 @@ mod tests {
             call_text.contains("(path=gateway/server.rs)"),
             "参数骨架化应保留 path 锚点: {call_text}"
         );
-        assert!(!call_text.contains("limit"), "锚点之外的参数不应保留: {call_text}");
+        assert!(
+            !call_text.contains("limit"),
+            "锚点之外的参数不应保留: {call_text}"
+        );
 
-        let result = out.iter().find(|m| m.parent_id.as_deref() == Some("a1")).unwrap();
+        let result = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("a1"))
+            .unwrap();
         let result_text = param_of(result);
         assert!(
             result_text.contains("(path=gateway/server.rs)"),
             "结果摘要应前缀配对调用的锚点: {result_text}"
         );
-        assert!(result_text.contains("[行 585-602"), "首行摘要仍应保留: {result_text}");
+        assert!(
+            result_text.contains("[行 585-602"),
+            "首行摘要仍应保留: {result_text}"
+        );
     }
 
     /// 无定位参数的调用（如 todo_write 的 todos）退回通用占位符，不强行编造锚点
@@ -692,10 +842,16 @@ mod tests {
         ];
         let ret = HashMap::new();
         let out = apply_layered_sliding_window(&messages, 0, &ret);
-        let result = out.iter().find(|m| m.parent_id.as_deref() == Some("j1")).unwrap();
+        let result = out
+            .iter()
+            .find(|m| m.parent_id.as_deref() == Some("j1"))
+            .unwrap();
         let text = param_of(result);
         assert!(text.contains("count=16"), "应提取规模字段: {text}");
-        assert!(text.contains("name=main.rs"), "应提取首条目定位字段: {text}");
+        assert!(
+            text.contains("name=main.rs"),
+            "应提取首条目定位字段: {text}"
+        );
         assert!(!text.contains(r#""next""#), "不应残留大体积切片: {text}");
     }
 
@@ -708,7 +864,10 @@ mod tests {
         assert!(d1.contains("keys=alpha,beta"), "对象应兜底键名列表: {d1}");
         // 纯数组元素类型兜底
         let d2 = first_line_digest(r#"["a","b","c"]"#);
-        assert!(d2.contains("items=string/string/string"), "数组应兜底元素类型: {d2}");
+        assert!(
+            d2.contains("items=string/string/string"),
+            "数组应兜底元素类型: {d2}"
+        );
         // 非 JSON / 解析失败 → 原有首行切片行为不变（回归保护）
         let plain = "just a plain line of output";
         assert_eq!(first_line_digest(plain), plain);

@@ -10,7 +10,9 @@
 //! 保存时映射为行业键 `allowedTools`/`disable-model-invocation`）。
 //! BUG-SR6 硬约束（目录名 == frontmatter name）由 `manifest_to_skill_md` 强制。
 
-use crate::symbio_core::schemas::entities::{DetailAction, DetailDefinition, DetailField, DetailSection};
+use crate::symbio_core::schemas::entities::{
+    DetailAction, DetailDefinition, DetailField, DetailSection,
+};
 
 fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
     DetailField {
@@ -41,14 +43,24 @@ pub fn skill_detail_definition() -> DetailDefinition {
                     DetailField {
                         required: true,
                         placeholder: Some("例如：pdf-extract".into()),
-                        ..field("name", "名称", "即实体目录名（ID），保存时必须与目录名一致", "text")
+                        ..field(
+                            "name",
+                            "名称",
+                            "即实体目录名（ID），保存时必须与目录名一致",
+                            "text",
+                        )
                     },
                     DetailField {
                         required: true,
                         rows: Some(3),
                         full_width: true,
                         placeholder: Some("这个 Skill 做什么、何时使用（至少 10 字符）".into()),
-                        ..field("description", "描述", "展示给用户与 LLM 的用途说明", "textarea")
+                        ..field(
+                            "description",
+                            "描述",
+                            "展示给用户与 LLM 的用途说明",
+                            "textarea",
+                        )
                     },
                 ],
             },
@@ -59,23 +71,48 @@ pub fn skill_detail_definition() -> DetailDefinition {
                     DetailField {
                         rows: Some(3),
                         full_width: true,
-                        ..field("when_to_use", "何时使用", "面向 LLM 的使用时机补充说明", "textarea")
+                        ..field(
+                            "when_to_use",
+                            "何时使用",
+                            "面向 LLM 的使用时机补充说明",
+                            "textarea",
+                        )
                     },
                     DetailField {
                         placeholder: Some("例如：<input_file>".into()),
-                        ..field("argument_hint", "参数提示", "Skill 需要参数时的占位提示；留空 = 无参调用", "text")
+                        ..field(
+                            "argument_hint",
+                            "参数提示",
+                            "Skill 需要参数时的占位提示；留空 = 无参调用",
+                            "text",
+                        )
                     },
                     DetailField {
                         rows: Some(2),
-                        ..field("allowed_tools", "允许工具", "每行一个工具名；留空 = 不限制", "list")
+                        ..field(
+                            "allowed_tools",
+                            "允许工具",
+                            "每行一个工具名；留空 = 不限制",
+                            "list",
+                        )
                     },
                     DetailField {
                         placeholder: Some("例如：claude-sonnet-4-5".into()),
-                        ..field("model", "指定模型", "执行此 Skill 时使用的模型；留空 = 跟随会话", "text")
+                        ..field(
+                            "model",
+                            "指定模型",
+                            "执行此 Skill 时使用的模型；留空 = 跟随会话",
+                            "text",
+                        )
                     },
                     DetailField {
                         default: Some(serde_json::json!(false)),
-                        ..field("disable_model_invocation", "禁止模型自主调用", "开启后仅能由用户显式触发", "toggle")
+                        ..field(
+                            "disable_model_invocation",
+                            "禁止模型自主调用",
+                            "开启后仅能由用户显式触发",
+                            "toggle",
+                        )
                     },
                 ],
             },
@@ -87,7 +124,12 @@ pub fn skill_detail_definition() -> DetailDefinition {
                     rows: Some(14),
                     full_width: true,
                     placeholder: Some("Skill 指令正文（Markdown），${var} 会被调用参数替换".into()),
-                    ..field("body", "内容（Markdown）", "SKILL.md frontmatter 之后的正文", "textarea")
+                    ..field(
+                        "body",
+                        "内容（Markdown）",
+                        "SKILL.md frontmatter 之后的正文",
+                        "textarea",
+                    )
                 }],
             },
         ],
@@ -101,7 +143,12 @@ pub fn skill_detail_definition() -> DetailDefinition {
                 busy_label: Some("保存中…".into()),
                 ..Default::default()
             },
-            DetailAction { id: "divider".into(), label: String::new(), style: "divider".into(), ..Default::default() },
+            DetailAction {
+                id: "divider".into(),
+                label: String::new(),
+                style: "divider".into(),
+                ..Default::default()
+            },
             DetailAction {
                 id: "delete".into(),
                 label: "删除 Skill".into(),
@@ -142,12 +189,17 @@ pub fn manifest_to_skill_md(
     use crate::symbio_core::PluginError;
 
     let get_str = |key: &str| -> Option<String> {
-        manifest.get(key).and_then(|v| v.as_str()).map(|s| s.trim().to_string())
+        manifest
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
     };
 
     let name = get_str("name").unwrap_or_default();
     if name.is_empty() {
-        return Err(PluginError::ValidationError("Skill 的 name 不能为空".to_string()));
+        return Err(PluginError::ValidationError(
+            "Skill 的 name 不能为空".to_string(),
+        ));
     }
     if name != id {
         return Err(PluginError::ValidationError(format!(
@@ -177,18 +229,31 @@ pub fn manifest_to_skill_md(
     let tools: Vec<String> = manifest
         .get("allowed_tools")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     if !tools.is_empty() {
         insert(
             "allowedTools",
-            serde_yaml_ng::Value::Sequence(tools.into_iter().map(serde_yaml_ng::Value::String).collect()),
+            serde_yaml_ng::Value::Sequence(
+                tools
+                    .into_iter()
+                    .map(serde_yaml_ng::Value::String)
+                    .collect(),
+            ),
         );
     }
     if let Some(v) = get_str("model").filter(|s| !s.is_empty()) {
         insert("model", serde_yaml_ng::Value::String(v));
     }
-    if manifest.get("disable_model_invocation").and_then(|v| v.as_bool()) == Some(true) {
+    if manifest
+        .get("disable_model_invocation")
+        .and_then(|v| v.as_bool())
+        == Some(true)
+    {
         insert("disable-model-invocation", serde_yaml_ng::Value::Bool(true));
     }
 
@@ -203,7 +268,9 @@ pub fn manifest_to_skill_md(
 pub fn skill_md_to_config(content: &str) -> Option<serde_json::Value> {
     let (yaml, body) = parse_skill_md(content)?;
     let get_str = |key: &str| -> Option<String> {
-        yaml.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+        yaml.get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
     };
     let mut cfg = serde_json::Map::new();
     if let Some(v) = get_str("name") {
@@ -219,13 +286,19 @@ pub fn skill_md_to_config(content: &str) -> Option<serde_json::Value> {
         cfg.insert("argument_hint".into(), serde_json::json!(v));
     }
     if let Some(v) = yaml.get("allowedTools").and_then(|v| v.as_sequence()) {
-        let tools: Vec<String> = v.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+        let tools: Vec<String> = v
+            .iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect();
         cfg.insert("allowed_tools".into(), serde_json::json!(tools));
     }
     if let Some(v) = get_str("model") {
         cfg.insert("model".into(), serde_json::json!(v));
     }
-    if let Some(v) = yaml.get("disable-model-invocation").and_then(|v| v.as_bool()) {
+    if let Some(v) = yaml
+        .get("disable-model-invocation")
+        .and_then(|v| v.as_bool())
+    {
         cfg.insert("disable_model_invocation".into(), serde_json::json!(v));
     }
     cfg.insert("body".into(), serde_json::json!(body));

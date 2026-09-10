@@ -67,9 +67,7 @@ pub async fn list_children(
     let parent_rel = parent.unwrap_or("").trim_matches('/').to_string();
     let (dir_abs, _) = resolve_under(workdir, &parent_rel)?;
     if !dir_abs.is_dir() {
-        return Err(PluginError::NotFound(format!(
-            "目录不存在: {parent_rel}"
-        )));
+        return Err(PluginError::NotFound(format!("目录不存在: {parent_rel}")));
     }
 
     let mut entries = tokio::fs::read_dir(&dir_abs)
@@ -273,10 +271,7 @@ impl WorkdirWatchManager {
 
             // 易变目录过滤：构建产物 / 依赖目录的事件是噪声洪流源，
             // 逐事件丢弃（场景知识：代码工作目录的约定忽略集）
-            if rel
-                .split('/')
-                .any(|seg| VOLATILE_DIRS.contains(&seg))
-            {
+            if rel.split('/').any(|seg| VOLATILE_DIRS.contains(&seg)) {
                 return;
             }
 
@@ -505,10 +500,18 @@ mod tests {
 
     async fn seed(dir: &Path) {
         tokio::fs::create_dir_all(dir.join("src")).await.unwrap();
-        tokio::fs::create_dir_all(dir.join(".hidden")).await.unwrap();
-        tokio::fs::write(dir.join("src/lib.rs"), "fn main() {}").await.unwrap();
-        tokio::fs::write(dir.join("README.md"), "# demo").await.unwrap();
-        tokio::fs::write(dir.join(".env"), "SECRET=1").await.unwrap();
+        tokio::fs::create_dir_all(dir.join(".hidden"))
+            .await
+            .unwrap();
+        tokio::fs::write(dir.join("src/lib.rs"), "fn main() {}")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.join("README.md"), "# demo")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.join(".env"), "SECRET=1")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -552,7 +555,10 @@ mod tests {
         seed(tmp.path()).await;
         let wd = tmp.path().to_str().unwrap();
         let node = read_node(wd, "README.md").await.unwrap();
-        assert_eq!(node.extra.get("content").and_then(|c| c.as_str()), Some("# demo"));
+        assert_eq!(
+            node.extra.get("content").and_then(|c| c.as_str()),
+            Some("# demo")
+        );
         let dir_node = read_node(wd, "src").await.unwrap();
         assert!(dir_node.extra.get("content").is_none());
         assert_eq!(dir_node.expandable, Some(true));

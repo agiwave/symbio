@@ -281,8 +281,7 @@ impl Plugin for SessionPlugin {
 
         // 统一实体协议：entities/list / get / upload / delete / status
         // （SessionPlugin 的 EntityProvider 实现见下方 impl 块）
-        if let Some(resp) =
-            crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
+        if let Some(resp) = crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
         {
             return resp;
         }
@@ -327,7 +326,9 @@ crate::submit_object_creator!(PLUGIN_SESSION, SessionPlugin::build, dyn Plugin);
 ///
 /// 与 [`crate::plugins::session::types::derive_session_title`] 同风格；
 /// 供 EntitySummary.summary（通用字段）驱动列表「实时缩略」预览。
-fn derive_session_summary(messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage]) -> Option<String> {
+fn derive_session_summary(
+    messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
+) -> Option<String> {
     const SUMMARY_MAX_CHARS: usize = 60;
     let text = messages
         .iter()

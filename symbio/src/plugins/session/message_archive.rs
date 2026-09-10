@@ -6,8 +6,9 @@
 //!   参数超预算的治理属请求视图层（skeletonize_toolcall），此处不碰。
 //! - 内容超阈值（行数超过阈值或单条 token 超预算）时：
 //!   1. 将完整内容写入会话目录下的存档文件
-//!   2. 保留头部 1/4 + 其余尾部的行（对齐 L0 split_head_tail 策略，
-//!      首行常含结论/路径/计划骨架，只保尾部会把它挤出模型视野）
+//!   2. 保留头部 1/4 + 其余尾部的行（配比依据见 text_split 模块文档：
+//!      会话消息偏尾部——尾部离当前对话点更近；首行常含结论/路径/计划
+//!      骨架，只保尾部会把它挤出模型视野）
 //!   3. 在保留内容头部追加系统注释，标明存档路径与统一取回方式
 //! - 不足阈值的消息原样返回
 //!
@@ -15,6 +16,7 @@
 //! （上下文语义压缩服务）命名易混——本模块职责是单条消息的
 //! "物理脱水存档 + 还原"，与上下文语义压缩无关，故更名。
 
+use super::text_split::truncate_head_chars_if_over;
 use super::tokenizer::Tokenizer;
 use super::types::ChatMessage;
 use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageType};
@@ -96,7 +98,8 @@ pub async fn compress_message(
         .await
         .map_err(|e| PluginError::InternalError(format!("写入消息存档失败: {e}")))?;
 
-    // 头尾保留（与 L0 split_head_tail 同策略）：首行常含结论/路径/计划骨架，
+    // 头尾保留（L1 策略层：约 1/4:3/4 偏尾部，按行数阈值配置切分；机制本体
+    // 与字符兜底收敛于 text_split 模块）。首行常含结论/路径/计划骨架，
     // 只保尾部会把头部挤出模型视野（虽在存档，但模型不会主动取回）。
     // 头 = 1/4 阈值（至少 1 行），尾 = 其余；行数未超阈值（token 触发）时
     // 头 1 行 + 剩余全部行，随后走字符截断兜底。
@@ -112,14 +115,10 @@ pub async fn compress_message(
     let kept_text = kept_lines.join("\n");
 
     // 单行超长（行数 ≤ threshold 但 token 超预算）时，保留行本身也超预算：
-    // 按字符截断行首（与 split_head_tail 的单行退化策略一致）
-    let kept_text = if tok.count(&kept_text) > MESSAGE_TOKEN_CAP {
-        let char_cap = MESSAGE_TOKEN_CAP.saturating_mul(2);
-        let truncated: String = kept_text.chars().take(char_cap).collect();
-        format!("{truncated}…")
-    } else {
-        kept_text
-    };
+    // 按字符截断行首。机制收敛于 text_split::truncate_head_chars_if_over
+    // （与 split_head_tail 单行退化同一实现）。行为微差：token 超限但字符
+    // 未超限时不再追加无省略含义的 `…`（原实现会加——没删任何字符却标省略）。
+    let kept_text = truncate_head_chars_if_over(&kept_text, MESSAGE_TOKEN_CAP);
 
     // 构造压缩后内容：头部以注释形式注明完整路径，尾部为保留内容。
     // 单行 token 触发时行数描述与保留行数一致（都是 1 行），避免误导取回方。
@@ -201,7 +200,8 @@ mod tests {
     /// （真实会话实证：12k token 的单行 glob 结果因"只有 1 行"绕过压缩）
     #[tokio::test]
     async fn single_long_line_message_is_token_capped() {
-        let dir = std::env::temp_dir().join(format!("symbio_msg_archive_t1_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("symbio_msg_archive_t1_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let huge = format!("{{\"entries\":[\"{}\"]}}", "x".repeat(20_000));
         let msg = text_msg(&huge);
@@ -211,8 +211,16 @@ mod tests {
             .unwrap()
             .expect("单行超长应触发压缩");
 
-        let text = compressed.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
-        assert!(text.starts_with(COMPRESS_PREFIX), "压缩头应存在: {}", &text[..120.min(text.len())]);
+        let text = compressed
+            .content
+            .as_ref()
+            .map(|c| c.to_text())
+            .unwrap_or_default();
+        assert!(
+            text.starts_with(COMPRESS_PREFIX),
+            "压缩头应存在: {}",
+            &text[..120.min(text.len())]
+        );
         assert!(
             text.chars().count() < huge.chars().count() / 2,
             "压缩后应显著短于原文: {} vs {}",
@@ -222,17 +230,30 @@ mod tests {
         // 存档含全文，meta 记录路径
         let archived = std::fs::read_to_string(dir.join("messages/m1.txt")).unwrap();
         assert_eq!(archived, huge);
-        assert!(compressed.meta.as_ref().unwrap().get("archive_path").is_some());
+        assert!(compressed
+            .meta
+            .as_ref()
+            .unwrap()
+            .get("archive_path")
+            .is_some());
         // 存档可完整还原
         let restored = decompress_message(&dir, &compressed).await.unwrap();
-        assert_eq!(restored.content.as_ref().map(|c| c.to_text()).unwrap_or_default(), huge);
+        assert_eq!(
+            restored
+                .content
+                .as_ref()
+                .map(|c| c.to_text())
+                .unwrap_or_default(),
+            huge
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 短消息不压缩；多行超阈值消息行为不变（回归保护）
     #[tokio::test]
     async fn normal_messages_unaffected() {
-        let dir = std::env::temp_dir().join(format!("symbio_msg_archive_t2_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("symbio_msg_archive_t2_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
 
         // 短消息：不压缩
@@ -242,12 +263,21 @@ mod tests {
         assert!(short.is_none(), "短消息不应压缩");
 
         // 多行超阈值：仍按行压缩，头尾保留（P1-2 三层统一取回协议）
-        let multi = text_msg(&(0..20).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n"));
+        let multi = text_msg(
+            &(0..20)
+                .map(|i| format!("line{i}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
         let compressed = compress_message(&dir, &multi, 10, "messages/m3.txt", "m3")
             .await
             .unwrap()
             .expect("多行超阈值应压缩");
-        let text = compressed.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
+        let text = compressed
+            .content
+            .as_ref()
+            .map(|c| c.to_text())
+            .unwrap_or_default();
         assert!(
             text.contains("保留开头 2 行与结尾 8 行内容"),
             "头尾保留格式: {text}"
@@ -260,9 +290,13 @@ mod tests {
     /// ToolCall 参数节点永久豁免：参数骨架化会让模型误记自身行为
     #[tokio::test]
     async fn toolcall_args_never_compressed() {
-        let dir = std::env::temp_dir().join(format!("symbio_msg_archive_t3_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("symbio_msg_archive_t3_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
-        let args = (0..20).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        let args = (0..20)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut msg = text_msg(&args);
         msg.msg_type = Some(MessageType::ToolCall);
         let result = compress_message(&dir, &msg, 10, "messages/m4.txt", "m4")
@@ -276,7 +310,8 @@ mod tests {
     /// 单行 + token 未超预算：门控放行不压缩（阈值门控另一半的回归保护）
     #[tokio::test]
     async fn long_line_under_token_cap_not_compressed() {
-        let dir = std::env::temp_dir().join(format!("symbio_msg_archive_t4_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("symbio_msg_archive_t4_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let one_line = format!("{{\"data\":\"{}\"}}", "y".repeat(800));
         let result = compress_message(&dir, &text_msg(&one_line), 10, "messages/m5.txt", "m5")

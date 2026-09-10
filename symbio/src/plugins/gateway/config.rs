@@ -138,4 +138,3 @@ mod tests {
         assert!(!is_readonly_allowed("gateway/config/set"));
     }
 }
-

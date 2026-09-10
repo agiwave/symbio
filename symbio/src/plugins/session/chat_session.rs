@@ -27,7 +27,8 @@ fn is_content_node(m: &ChatMessage) -> bool {
     )
 }
 
-fn sliding_window(messages: &[ChatMessage], max_turns: usize) -> Vec<ChatMessage> {    if max_turns == 0 {
+fn sliding_window(messages: &[ChatMessage], max_turns: usize) -> Vec<ChatMessage> {
+    if max_turns == 0 {
         return messages.to_vec();
     }
 
@@ -70,7 +71,11 @@ fn normalize_message_content(msg: ChatMessage) -> Option<ChatMessage> {
     if content_ok {
         return Some(msg);
     }
-    let raw = msg.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
+    let raw = msg
+        .content
+        .as_ref()
+        .map(|c| c.to_text())
+        .unwrap_or_default();
     let text = if raw.is_empty() {
         // 组合节点（Turn/ToolCall）与无内容消息统一落空串，保证 JSON 里是合法字符串
         String::new()
@@ -93,8 +98,7 @@ fn normalize_message_content(msg: ChatMessage) -> Option<ChatMessage> {
 /// 其中 tool 结果还会携带一个请求里根本不存在的 `tool_call_id`，Provider 直接报错。
 /// 因此进上下文前统一剔除（根级的 Turn / User 无 parent，天然不受影响）。
 fn drop_orphan_messages(messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
-    let ids: std::collections::HashSet<String> =
-        messages.iter().map(|m| m.id.clone()).collect();
+    let ids: std::collections::HashSet<String> = messages.iter().map(|m| m.id.clone()).collect();
     messages
         .into_iter()
         .filter(|m| match m.parent_id.as_deref() {
@@ -238,7 +242,8 @@ impl ChatSession for PersistentChatSession {
                 continue;
             }
             let ts = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000) as i64;
-            let archive_filename = format!("{}/m{:x}.txt", super::message_archive::MESSAGES_SUBDIR, ts);
+            let archive_filename =
+                format!("{}/m{:x}.txt", super::message_archive::MESSAGES_SUBDIR, ts);
             let archive_display_path = display_path
                 .join(&archive_filename)
                 .to_string_lossy()
