@@ -6,6 +6,7 @@
 //!   并入——其唯一消费者就是本模块（体检备注 audit-5）。
 
 use super::store::SessionStore;
+use crate::plugin_info;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
@@ -284,6 +285,51 @@ impl ChatSession for PersistentChatSession {
         // seq 按调用方给出的数组顺序递增分配，因此**数组顺序即权威顺序**。
         let mut messages = backfill_timestamps(messages, now);
         cm::assign_seq(&mut messages, cm::max_seq(&session.messages));
+        // 孤儿存档配对清理：replace 整体重写消息列表（L2 语义压缩 / 紧急截断 /
+        // Streaming 清理），被丢弃消息引用的 L0 `tool_archives/` 存档随之失去引用。
+        // 与 `append_messages` 的 FIFO 淘汰、`prune_historical_tool_calls` 的物理
+        // 裁剪对称，在此配对删除：仅删"旧列表引用且新列表不再引用"的存档文件，
+        // 保留（keep_recent 留下的）新列表仍引用的存档。路径不可信（来自消息
+        // meta），删除前做双重校验（拒绝 `..` + 限定 tool_archives/ 根，见下）。
+        if let Some(dir) = self.store.session_dir(&self.session_id) {
+            let archives_root = dir.join(super::paths::TOOL_ARCHIVES_SUBDIR);
+            let kept: HashSet<&str> = messages
+                .iter()
+                .filter_map(|m| m.meta.as_ref())
+                .filter_map(|m| m.get("archive_path"))
+                .filter_map(|v| v.as_str())
+                .collect();
+            for old in &session.messages {
+                let Some(rel_path) = old
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("archive_path"))
+                    .and_then(|v| v.as_str())
+                else {
+                    continue;
+                };
+                if kept.contains(rel_path) {
+                    continue;
+                }
+                // 路径来自消息 meta（不可信输入）：拒绝 `..` 组件，且拼接后必须
+                // 落在本会话 `tool_archives/` 内（`starts_with` 是词法前缀匹配，
+                // 只挡前缀不挡 `..` 逃逸，故两道校验缺一不可），防越界删除任意文件。
+                if Path::new(rel_path)
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+                {
+                    continue;
+                }
+                let full = dir.join(rel_path);
+                if full.starts_with(&archives_root) && tokio::fs::remove_file(&full).await.is_ok() {
+                    plugin_info!(
+                        "session",
+                        "replace_messages: 已清理孤儿工具存档 {}",
+                        full.display()
+                    );
+                }
+            }
+        }
         session.messages = messages;
         session.updated_at = now;
         self.save_session(&session).await
@@ -539,3 +585,6 @@ pub async fn prune_historical_tool_calls(
 
     messages.retain(|msg| !to_remove.contains(&msg.id));
 }
+
+#[cfg(test)]
+mod tests;

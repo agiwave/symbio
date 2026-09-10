@@ -429,7 +429,10 @@ pub fn fade_aged_content_nodes(
     // 内容节点判定：正文与思考（含 msg_type 缺省的历史消息）。
     // L2 快照（meta.compacted）豁免：它已是压缩产物，再切 = 双重压缩。
     fn is_content_node(m: &ChatMessage) -> bool {
-        if m.meta.as_ref().and_then(|meta| meta.get("compacted")).and_then(|v| v.as_bool())
+        if m.meta
+            .as_ref()
+            .and_then(|meta| meta.get("compacted"))
+            .and_then(|v| v.as_bool())
             == Some(true)
         {
             return false;
@@ -1212,11 +1215,7 @@ mod tests {
         // 再切中段 = 双重压缩，切掉的恰是模型唯一的深历史记忆（真实事故回归）。
         let mut snapshot = user_msg(&"x".repeat(30_000));
         snapshot.meta = Some(serde_json::json!({"compacted": true}));
-        let mut msgs = vec![
-            snapshot,
-            user_msg("窗口内内容节点"),
-            user_msg("末条消息"),
-        ];
+        let mut msgs = vec![snapshot, user_msg("窗口内内容节点"), user_msg("末条消息")];
         fade_aged_content_nodes(&mut msgs, 1, 200);
         assert_eq!(view_text(&msgs[0]), "x".repeat(30_000));
         assert!(msgs[0]
@@ -1263,7 +1262,10 @@ mod tests {
     #[test]
     fn test_fade_aged_content_nodes_line_path() {
         // 40 行 > threshold=16：触发行数路径（头尾各 4 行，中段省略 32 行）
-        let big = (0..40).map(|i| format!("line-{i}")).collect::<Vec<_>>().join("\n");
+        let big = (0..40)
+            .map(|i| format!("line-{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let msgs = vec![
             user_msg(&big),      // idx0：窗口外，应淡化
             assistant_msg(&big), // idx1：窗口外，应淡化
@@ -1279,7 +1281,11 @@ mod tests {
             assert!(t.contains("已省略 32 行中段内容"), "idx{i} 应走行数路径");
             assert!(t.len() < big.len());
             assert_eq!(
-                view[i].meta.as_ref().and_then(|m| m.get("content_faded")).and_then(|v| v.as_bool()),
+                view[i]
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("content_faded"))
+                    .and_then(|v| v.as_bool()),
                 Some(true),
                 "idx{i} 应带 content_faded 标记"
             );
@@ -1305,10 +1311,17 @@ mod tests {
         fade_aged_content_nodes(&mut view, 1, 200);
 
         let t = view_text(&view[0]);
-        assert!(t.contains("该早期内容已在请求视图中淡化"), "token 路径占位文案");
+        assert!(
+            t.contains("该早期内容已在请求视图中淡化"),
+            "token 路径占位文案"
+        );
         assert!(t.len() < huge.len());
         assert_eq!(
-            view[0].meta.as_ref().and_then(|m| m.get("content_faded")).and_then(|v| v.as_bool()),
+            view[0]
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("content_faded"))
+                .and_then(|v| v.as_bool()),
             Some(true)
         );
         // 存储原文不动
@@ -1318,7 +1331,10 @@ mod tests {
     /// 幂等：淡化后的文本（含省略标记）再次进入 fade 流程，结果逐字节不变。
     #[test]
     fn test_fade_aged_content_nodes_idempotent() {
-        let big = (0..40).map(|i| format!("line-{i}")).collect::<Vec<_>>().join("\n");
+        let big = (0..40)
+            .map(|i| format!("line-{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut msgs = vec![user_msg(&big), user_msg("tail")];
         fade_aged_content_nodes(&mut msgs, 1, 16);
         let once = view_text(&msgs[0]);

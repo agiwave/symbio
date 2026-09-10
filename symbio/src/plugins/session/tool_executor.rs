@@ -21,7 +21,9 @@ use crate::symbio_core::{
     },
     InvokeRequestExt,
 };
-use crate::symbio_core::{InvokeRequest, Plugin, PluginChannel, PluginFrame, PluginPayload, HOOK_FIRE};
+use crate::symbio_core::{
+    InvokeRequest, Plugin, PluginChannel, PluginFrame, PluginPayload, HOOK_FIRE,
+};
 use crate::{plugin_error, plugin_info, plugin_warn};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -167,7 +167,7 @@ session:
     fade_aged_content_nodes(&mut view, content_keep_recent, line_threshold);
     ```
 
-  * 旧机制（写入时物理脱水 + `.txt` 存档 + `meta.archive_path` 骨架落库）已废除：不再为每条大消息生成存档文件，深历史信息由第 4 节的 L2 语义快照承接；`meta.archive_path` 现仅由 L0 工具结果守卫写入（指向 `tool_archives/`，配对清理见 `append_messages`/`prune_historical_tool_calls`）。
+  * 旧机制（写入时物理脱水 + `.txt` 存档 + `meta.archive_path` 骨架落库）已废除：不再为每条大消息生成存档文件，深历史信息由第 4 节的 L2 语义快照承接；`meta.archive_path` 现仅由 L0 工具结果守卫写入（指向 `tool_archives/`，配对清理见 `append_messages`/`prune_historical_tool_calls`/`replace_messages`——后者在 L2 语义压缩或紧急截断整体重写消息列表时，删除"旧列表引用且新列表不再引用"的孤儿存档）。
 
 ---
 
