@@ -59,8 +59,11 @@ First, you will think through the entire history in a private <scratchpad>. Revi
 After your reasoning is complete, generate the final <state_snapshot> XML object. Be incredibly dense with information. Omit any irrelevant conversational filler.
 
 Signal-to-noise rules (apply while writing the snapshot):
+- Reconcile before output: a previous snapshot found in the history is unverified INPUT, not ground truth. When newer findings contradict an inherited item, correct or drop it; never copy old <key_knowledge> forward unchecked — an error that enters a snapshot survives every later generation.
 - Each fact appears exactly once across ALL sections. If the same fact fits multiple sections, place it in the most relevant one and do not repeat it.
 - Record conclusions and outcomes, not process metrics. Drop line numbers, byte counts, read ranges, raw dumps, and step-by-step command transcripts; keep the final state and what it implies for future work.
+- <key_knowledge> holds only facts and constraints that still bind FUTURE work. Drop test-writing trivia, closed-issue aftermath notes, and volatile numbers (test counts, file sizes); state invariants instead ("full suite + clippy clean", not a passing count).
+- <completed_items>: one line per item — the outcome and where it landed. If an item leaves a lasting constraint, that constraint belongs in <key_knowledge>; the how-it-was-done narrative stays in the transcript.
 - Compress each error to ONE line: the conclusion plus its root cause. Keep errors ONLY if they still constrain future actions (an unresolved failure, a known pitfall); drop errors that were already fixed and whose fix is recorded in <completed_items>.
 - Before listing a question in <open_questions>, if it can be verified with a single cheap tool call (reading a file, running a quick command), perform that verification during this compaction and record the confirmed answer instead.
 - If a todo list exists in the conversation, reference its item IDs/titles in <in_progress_items> instead of restating full descriptions; the agent retains live access to the list.
@@ -1013,6 +1016,33 @@ mod tests {
         assert!(
             !s.contains("<key_knowledge>"),
             "降级快照不得包含 key_knowledge 结构标签"
+        );
+    }
+
+    /// 模板回归锚点：Signal-to-noise 规则必须包含（1）旧快照对账规则——
+    /// 防错误知识跨快照遗传（真实事故：一条错误论断存活三个快照周期，与
+    /// 纠错证据并存于同一快照的两个分节）；（2）key_knowledge 卫生与
+    /// completed_items 瘦身规则——防过程性知识与易变数字常驻快照。
+    /// 注：模板文本变化会改变 compression_prompt_fingerprint，属预期
+    /// （指纹仅写入快照 meta 作溯源，无硬编码依赖）。
+    #[test]
+    fn test_compression_prompt_has_reconciliation_and_hygiene_rules() {
+        let prompt = get_compression_prompt();
+        assert!(
+            prompt.contains("unverified INPUT, not ground truth"),
+            "模板缺少旧快照对账规则（防错误跨代遗传）"
+        );
+        assert!(
+            prompt.contains("never copy old <key_knowledge> forward unchecked"),
+            "模板缺少禁止盲目继承 key_knowledge 的规则"
+        );
+        assert!(
+            prompt.contains("state invariants instead"),
+            "模板缺少 key_knowledge 卫生规则（不变量替代易变数字）"
+        );
+        assert!(
+            prompt.contains("one line per item"),
+            "模板缺少 completed_items 瘦身规则"
         );
     }
 

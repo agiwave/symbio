@@ -5,13 +5,13 @@
 
 use super::super::store::create_store;
 use super::super::store::StoreKind;
+use super::super::types::Session;
 use super::PersistentChatSession;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::ChatSession;
-use super::super::types::Session;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -48,10 +48,7 @@ async fn setup() -> (PersistentChatSession, PathBuf, tempfile::TempDir) {
     let session_id = "test_replace_cleanup".to_string();
     // 先落盘一次空会话，使 session_dir 能解析到实际目录。
     let seed = Session::new(&session_id);
-    store
-        .save_session(&seed)
-        .await
-        .expect("种子会话落盘失败");
+    store.save_session(&seed).await.expect("种子会话落盘失败");
     let dir = store
         .session_dir(&session_id)
         .expect("文件后端应返回会话目录");
