@@ -1,7 +1,7 @@
 //! 会话存储路径工具 —— 会话 ID 到文件系统目录的映射唯一权威实现。
 //!
 //! Session 插件内所有"落盘到会话目录"的组件（存储后端、L0 工具结果守卫、
-//! L1 消息存档、L3 transcript 转存）都必须经由本模块拼路径，禁止各自
+//! L3 transcript 转存）都必须经由本模块拼路径，禁止各自
 //! 重复实现 `safe_id` 或手工重建 `<homedir>/plugins/session` 前缀：
 //!
 //! - [`safe_id`]：session_id → 安全目录名（历史教训：同一替换逻辑曾在
@@ -17,14 +17,13 @@ pub const TOOL_ARCHIVES_SUBDIR: &str = "tool_archives";
 /// 会话内固定子目录名：L3 压缩前完整历史 transcript 转存。
 pub const TRANSCRIPTS_SUBDIR: &str = "transcripts";
 
-/// 会话内固定子目录名：L1 单条消息内容存档。
-pub const MESSAGES_SUBDIR: &str = "messages";
-
-/// 三层压缩占位符共用的统一取回指引（P1-2 协议）。
+/// 压缩占位符共用的统一取回指引（P1-2 协议）。
 ///
-/// L0（工具结果守卫）、L1（消息存档）、L3（transcript 转存）的占位符
-/// 都必须附带同一格式的取回说明，保证模型在任意层级遇到存档占位符时
-/// 都能用同一入口（`local/file_read` + offset/limit 分段）取回全文。
+/// L0（工具结果守卫）、L3（transcript 转存）的占位符都必须附带同一格式的
+/// 取回说明，保证模型在任意层级遇到存档占位符时都能用同一入口
+///（`local/file_read` + offset/limit 分段）取回全文。
+/// 请求视图层的淡化（内容节点/工具结果）不写存档，原文恒在会话存储中，
+/// 无需取回指引。
 pub const RETRIEVAL_HINT: &str = "（取回：local/file_read 该路径，按 offset/limit 分段读取）";
 
 /// 将 session_id 转换为安全的目录名。
@@ -43,8 +42,8 @@ pub(crate) fn session_dir(session_id: &str) -> std::path::PathBuf {
 
 /// 会话内子目录：`<homedir>/plugins/session/<safe_id>/<subdir>/`
 ///
-/// 用于 tool_archives / transcripts / messages 等固定子目录
-///（常量见本模块 [`TOOL_ARCHIVES_SUBDIR`] / [`TRANSCRIPTS_SUBDIR`] / [`MESSAGES_SUBDIR`]）。
+/// 用于 tool_archives / transcripts 等固定子目录
+///（常量见本模块 [`TOOL_ARCHIVES_SUBDIR`] / [`TRANSCRIPTS_SUBDIR`]）。
 pub(crate) fn session_subdir(session_id: &str, subdir: &str) -> std::path::PathBuf {
     session_dir(session_id).join(subdir)
 }
@@ -79,7 +78,7 @@ mod tests {
         let dir = session_subdir("a/b", TOOL_ARCHIVES_SUBDIR);
         let parts: Vec<_> = dir.components().collect();
         // 末两段应为 safe_id 段与子目录段
-        assert_eq!(parts.len() >= 2, true);
+        assert!(parts.len() >= 2);
         let last_two: Vec<String> = parts[parts.len() - 2..]
             .iter()
             .map(|c| c.as_os_str().to_string_lossy().to_string())

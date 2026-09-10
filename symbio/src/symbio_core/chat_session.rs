@@ -36,18 +36,12 @@ pub trait ChatSession: Send + Sync + 'static {
 
     fn line_threshold(&self) -> usize;
 
-    /// 压缩给定消息批次（内容级骨架化：原文存档至持久层 + 正文替换为压缩骨架）。
+    /// 内容节点淡化保护窗口：请求视图中最近 N 条内容节点（Text/Reasoning）保留原文。
     ///
-    /// 默认实现**原样返回**（不做任何压缩）：
-    /// - 无存档能力的会话做压缩即纯截断 → 原文永久丢失（decompress 还原将无源可读）；
-    /// - 对 ephemeral / fallback 会话（无持久存储）原样返回恰是现状行为：
-    /// 持久会话由 PersistentChatSession 覆写（存档批处理，与自动压缩语义一致）。
-    async fn compress_messages(
-        &self,
-        messages: Vec<ChatMessage>,
-    ) -> Result<Vec<ChatMessage>, PluginError> {
-        let _ = self;
-        Ok(messages)
+    /// 对话末端锚点——保持模型对"最近在做什么/刚想了什么"的连续记忆。
+    /// 默认 3，与压缩配置 `compress_keep_recent` 对齐；持久会话从配置读取。
+    fn compress_keep_recent(&self) -> usize {
+        3
     }
 }
 

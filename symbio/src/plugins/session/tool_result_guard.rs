@@ -13,7 +13,7 @@
 //! OS 清理造成历史提示死链；现跟随会话目录持久化。文件名 = 毫秒时间戳 + token 数 + 内容 FNV 指纹，杜绝旧实现"同秒同 token 数互相覆盖"的碰撞；目录按修改时间
 //! 保留最新 [`TOOL_ARCHIVE_KEEP`] 个文件，防止无限累积。
 //!
-//! 与既有压缩层（L1/L2/L3）的边界：本层只处理**单条**结果，是"语义上限"；
+//! 与既有压缩层（L2 自动摘要 / L3 请求视图骨架化）的边界：本层只处理**单条**结果，是"语义上限"；
 //! 物理字节上限（shell/fetch 1MB 等）是最后一道防线，二者不冲突。
 
 use super::text_split::{split_head_tail, HeadTailSplit};
@@ -176,7 +176,7 @@ pub fn guard_tool_result(
     let omit = n.saturating_sub(budget_tokens);
     // 统一取回协议（P1-2）：三层压缩占位符共用同一格式 —— 「已存档至: <路径> +
     // 统一取回入口 local/file_read + 统一分段参数 offset/limit」。
-    // 取回指引文案唯一来源：paths::RETRIEVAL_HINT（L1 消息存档同款）。
+    // 取回指引文案唯一来源：paths::RETRIEVAL_HINT。
     let archive_hint = match &archive_path {
         Some(p) => format!("完整输出已存档至: {p}{}", super::paths::RETRIEVAL_HINT),
         None => "完整输出未存档（存档目录不可写）".to_string(),
@@ -198,6 +198,16 @@ pub fn guard_tool_result(
 /// 用于请求视图层的轮次淡化（fade）：存储层始终保留全文，淡化只作用于每次请求的
 /// 视图副本，无需持久化副本；模型如需完整输出可重新运行对应工具。
 pub fn summarize_tool_result(text: &str, budget_tokens: usize) -> String {
+    summarize_head_tail(
+        text,
+        budget_tokens,
+        "历史轮次结果已淡化以控制上下文长度，如需完整输出请重新运行该工具。",
+    )
+}
+
+/// 请求视图级 head/tail 摘要（**无存档**）：token 超预算时保留头尾、中段以
+/// `omit_note` 占位。工具结果淡化与内容节点淡化共用的机制本体。
+pub(crate) fn summarize_head_tail(text: &str, budget_tokens: usize, omit_note: &str) -> String {
     let tok = default_tokenizer();
     let n = tok.count(text);
     if n <= budget_tokens {
@@ -205,11 +215,7 @@ pub fn summarize_tool_result(text: &str, budget_tokens: usize) -> String {
     }
 
     let omit = n.saturating_sub(budget_tokens);
-    let placeholder = format!(
-        "{} 历史轮次结果已淡化以控制上下文长度，\
-         如需完整输出请重新运行该工具。 ...]",
-        omit_placeholder_prefix(omit)
-    );
+    let placeholder = format!("{} {omit_note} ...]", omit_placeholder_prefix(omit));
 
     assemble_head_tail_summary(text, budget_tokens, placeholder)
 }

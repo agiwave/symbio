@@ -21,10 +21,8 @@ use crate::symbio_core::{
     },
     InvokeRequestExt,
 };
-use crate::symbio_core::{
-    InvokeRequest, Plugin, PluginChannel, PluginFrame, PluginPayload, HOOK_FIRE, SESSION_HANDLE,
-};
-use crate::{plugin_debug, plugin_error, plugin_info, plugin_warn};
+use crate::symbio_core::{InvokeRequest, Plugin, PluginChannel, PluginFrame, PluginPayload, HOOK_FIRE};
+use crate::{plugin_error, plugin_info, plugin_warn};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -188,12 +186,12 @@ pub async fn execute_tool_async(
                         return ("Error: Failed to deserialize payload".into(), false, None);
                     }
                 };
-                plugin_debug!(
-                    "session",
-                    "Tool immediate response for {}: {}",
-                    tool_name,
-                    data
-                );
+                // plugin_debug!(
+                //     "session",
+                //     "Tool immediate response for {}: {}",
+                //     tool_name,
+                //     data
+                // );
 
                 // 直接返回结果（需要确认/询问的工具已自行产出 user_prompt 节点）
                 let res = extract_result(&data);
@@ -559,43 +557,7 @@ pub async fn process_tool_calls_async(
         )
         .await;
 
-        let mut final_res = res;
-        // 大尺寸工具输出压缩：若非文件读写工具（*file*），且输出行数超过 200 行，
-        // 则主动触发内容级压缩（经会话句柄路由：持久会话存档+骨架化，
-        // ephemeral/fallback 默认原样返回即不压缩）。
-        if success && !name.contains("file") {
-            let line_count = final_res.lines().count();
-            if line_count > 200 {
-                plugin_info!(
-                    "session",
-                    "[Tool] Result too large ({} lines), compressing...",
-                    line_count
-                );
-
-                if let Some(handle) = ctx.get(SESSION_HANDLE) {
-                    // 构造临时消息用于压缩逻辑
-                    let temp_msg = ChatMessage {
-                        id: result_msg_id.clone(),
-                        role: Some(MessageRole::Tool),
-                        content: Some(MessageContent::Text(final_res.clone())),
-                        ..Default::default()
-                    };
-
-                    match handle.0.compress_messages(vec![temp_msg]).await {
-                        Ok(mut compressed) => {
-                            if let Some(c_msg) = compressed.pop() {
-                                if let Some(MessageContent::Text(text)) = c_msg.content {
-                                    final_res = text;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            plugin_warn!("session", "工具输出压缩失败，保留原文: {}", e);
-                        }
-                    }
-                }
-            }
-        }
+        let final_res = res;
 
         let tool_output = if success {
             serde_json::json!({ "content": final_res.clone() })

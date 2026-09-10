@@ -387,8 +387,6 @@ pub async fn run_chat_loop(
         let root_id: String = short_id();
         emit_streaming_start(&mut channel, &root_id, Some(tool_rounds)).await;
 
-        apply_message_level_compression(&ctx, &mut context.messages).await;
-
         let mut tools = if let Some(tool_manager) = ctx.get(crate::symbio_core::CAPABILITY_MANAGER)
         {
             tool_manager.list_capability().await
@@ -401,14 +399,16 @@ pub async fn run_chat_loop(
             tools.push(compression::context_compact_tool_meta());
         }
 
-        // 请求视图（唯一入口 build_request_view）：存储视图之上叠加三项**不落库**的
+        // 请求视图（唯一入口 build_request_view）：存储视图之上叠加四项**不落库**的
         // 裁剪，全部只作用于本次 send_request 的请求包，不回写 context.messages——
         // 存储保持完整历史，last_saved 锚点与 persist_messages 切片不会错位。
-        // 1) fade：轮次过多时淡化较早的工具结果（存储保留全文，视图每轮重建，天然幂等）；
-        // 2) 工具级骨架化：从 CapabilityManager 的能力声明（context_retention）动态解析
+        // 1) 内容节点淡化：B1 保护窗口（末条 + 最近 N 个内容节点）外的超大正文/思考
+        //    做 head/tail 摘要（阈值取会话配置 line_threshold / token 上限 2048）；
+        // 2) fade：轮次过多时淡化较早的工具结果（存储保留全文，视图每轮重建，天然幂等）；
+        // 3) 工具级骨架化：从 CapabilityManager 的能力声明（context_retention）动态解析
         //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
         //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
-        // 3) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
+        // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
         let request_view: Vec<ChatMessage> = {
             let window = req.tool_context_window.unwrap_or(15);
             let retention: std::collections::HashMap<
@@ -431,6 +431,8 @@ pub async fn run_chat_loop(
                 &retention,
                 tool_rounds > FADE_ACTIVATE_ROUNDS,
                 FADE_KEEP_RECENT_TURNS,
+                context.session.compress_keep_recent(),
+                context.session.line_threshold(),
                 inject_nudge,
             )
         };
@@ -1503,13 +1505,6 @@ async fn run_compression_llm(
         status: Some(MessageStatus::Completed),
         ..Default::default()
     })
-}
-
-async fn apply_message_level_compression(
-    ctx: &Arc<dyn InvokeRequest>,
-    messages: &mut [ChatMessage],
-) {
-    compression::compress_temporary_messages(ctx, messages).await;
 }
 
 async fn fire_stop_hook(

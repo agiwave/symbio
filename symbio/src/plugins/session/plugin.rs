@@ -247,9 +247,15 @@ impl SessionPlugin {
                 },
                 "compress_line_threshold": {
                     "type": "integer",
-                    "title": "单消息压缩阈值（行）",
-                    "description": "触发单条消息存档并截断的行数阈值",
-                    "default": 15
+                    "title": "内容节点淡化阈值（行）",
+                    "description": "请求视图中单条内容消息超过此行数（或 token 超预算）时做头尾淡化；存储恒为完整原文",
+                    "default": 200
+                },
+                "compress_keep_recent": {
+                    "type": "integer",
+                    "title": "内容节点淡化保护数",
+                    "description": "最近的 Text/Reasoning 内容节点在请求视图中豁免淡化的保护条数（B1 保护窗口），0 表示不保护",
+                    "default": 3
                 },
                 "tool_context_window": {
                     "type": "integer",

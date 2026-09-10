@@ -40,11 +40,11 @@ pub struct SessionConfig {
     /// 最大工具调用迭代轮数
     #[serde(default = "default_max_tool_rounds")]
     pub max_tool_rounds: usize,
-    /// 单条消息行数阈值（超过此值才压缩存档）
+    /// 内容节点淡化行数阈值（请求视图中超过此行数或 token 超预算时做头尾淡化；存储恒为完整原文）
     #[serde(default = "default_compress_line_threshold")]
     pub compress_line_threshold: usize,
-    /// L1 消息压缩的"最近 N 条内容节点"保护数：最近的 Text/Reasoning 节点
-    /// 保留原文不脱水（对话末端锚点），0 表示不保护
+    /// 内容节点淡化的"最近 N 条内容节点"保护数（B1 保护窗口）：最近的 Text/Reasoning
+    /// 节点在请求视图中豁免淡化（末条消息恒受保护），0 表示不保护
     #[serde(default = "default_compress_keep_recent")]
     pub compress_keep_recent: usize,
     /// 保留完整结果的最近工具调用数量限制（滑动窗口）

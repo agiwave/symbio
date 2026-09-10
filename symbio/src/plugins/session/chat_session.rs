@@ -14,18 +14,9 @@ use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::{ChatSession, PluginError};
 use async_trait::async_trait;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-/// 内容节点判定：正文（Text）与思考（Reasoning）——L1 批次保护的扫描对象。
-/// `msg_type: None` 视为旧数据缺省的正文，保守纳入保护。
-fn is_content_node(m: &ChatMessage) -> bool {
-    matches!(
-        m.msg_type,
-        None | Some(MessageType::Text) | Some(MessageType::Reasoning)
-    )
-}
 
 fn sliding_window(messages: &[ChatMessage], max_turns: usize) -> Vec<ChatMessage> {
     if max_turns == 0 {
@@ -154,14 +145,6 @@ impl PersistentChatSession {
     async fn save_session(&self, session: &super::types::Session) -> Result<(), PluginError> {
         self.store.save_session(session).await
     }
-
-    fn resolve_display_path(&self, session_dir: Option<&std::path::Path>) -> PathBuf {
-        // session 存储位置由 SessionPlugin::session_storage_dir() 派生（<homedir>/plugins/session）。
-        // 这里的 display path 仅作 UI 展示（用于压缩消息的 archive path 等）。
-        // 与实际写入路径 (session_dir) 保持一致：<homedir>/plugins/session/<safe_id>
-        let _ = session_dir;
-        super::paths::session_dir(&self.session_id)
-    }
 }
 
 #[async_trait]
@@ -179,95 +162,7 @@ impl ChatSession for PersistentChatSession {
         // 改用写入时分配的单调 seq 后，两者都被消除。
         messages.sort_by_key(|m| m.seq.unwrap_or(i64::MAX));
 
-        if let Some(last_msg) = messages.last_mut() {
-            if let Some(session_dir) = self.store.session_dir(&self.session_id) {
-                match super::message_archive::decompress_message(&session_dir, last_msg).await {
-                    Ok(restored) => {
-                        *last_msg = restored;
-                    }
-                    Err(e) => {
-                        tracing::warn!("还原最后一条消息失败: {}", e);
-                    }
-                }
-            }
-        }
-
         Ok(messages)
-    }
-
-    /// 压缩消息批次（ChatSession trait 覆写）：存档 + 骨架化。
-    ///
-    /// 批次保护语义（B1 保护）：
-    /// - 最近 `compress_keep_recent`（默认 3）条**内容节点**（Text/Reasoning）保留原文——
-    ///   对话末端锚点，保持模型对"最近在做什么/刚想了什么"的连续记忆；
-    /// - **最后一条**消息无条件原文（即使它是内容节点）——当前指令/正在生成的回复，
-    ///   与被动路径 `compress_temporary_messages` 的 `[..len-1]` 切分语义对齐；
-    /// - ToolCall 参数节点由 compress_message 内部永久豁免（参数完整性硬约束）。
-    async fn compress_messages(
-        &self,
-        messages: Vec<ChatMessage>,
-    ) -> Result<Vec<ChatMessage>, PluginError> {
-        let Some(session_dir) = self.store.session_dir(&self.session_id) else {
-            // 无持久目录（理论不可达：持久会话最后一轮一定会落盘），保守原样返回。
-            return Ok(messages);
-        };
-        let display_path = self.resolve_display_path(Some(&session_dir));
-        let (line_threshold, keep_recent) = {
-            let cfg = self.config.read().await;
-            (cfg.compress_line_threshold, cfg.compress_keep_recent)
-        };
-
-        // 保护集合：最近 keep_recent 条内容节点（Text/Reasoning）+ 最后一条消息。
-        // 从尾部反向扫描；最后一条本身是内容节点时计入 keep_recent 配额。
-        let len = messages.len();
-        let mut protected: HashSet<usize> = HashSet::new();
-        if len > 0 {
-            protected.insert(len - 1);
-            let mut kept = 0usize;
-            for (i, m) in messages.iter().enumerate().rev() {
-                if kept >= keep_recent {
-                    break;
-                }
-                if is_content_node(m) {
-                    protected.insert(i);
-                    kept += 1;
-                }
-            }
-        }
-
-        let mut compressed_messages = Vec::with_capacity(len);
-        for (idx, chat_msg) in messages.into_iter().enumerate() {
-            if protected.contains(&idx) {
-                compressed_messages.push(chat_msg);
-                continue;
-            }
-            let ts = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000) as i64;
-            let archive_filename =
-                format!("{}/m{:x}.txt", super::message_archive::MESSAGES_SUBDIR, ts);
-            let archive_display_path = display_path
-                .join(&archive_filename)
-                .to_string_lossy()
-                .replace("\\", "/");
-
-            match super::message_archive::compress_message(
-                &session_dir,
-                &chat_msg,
-                line_threshold,
-                &archive_filename,
-                &archive_display_path,
-            )
-            .await
-            {
-                Ok(Some(c)) => compressed_messages.push(c),
-                Ok(None) => compressed_messages.push(chat_msg),
-                Err(e) => {
-                    tracing::warn!("压缩消息失败: {}", e);
-                    compressed_messages.push(chat_msg);
-                }
-            }
-        }
-
-        Ok(compressed_messages)
     }
 
     async fn get_context_messages(
@@ -307,14 +202,16 @@ impl ChatSession for PersistentChatSession {
         let now = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
 
         let session_dir = self.store.session_dir(&self.session_id);
-        let display_path = self.resolve_display_path(session_dir.as_deref());
 
         let cfg = self.config.read().await;
-        let line_threshold = cfg.compress_line_threshold;
 
         // 分配单调序号：起点取当前会话已有最大 seq，保证追加的消息严格排在其后。
         let mut seq_cursor = cm::max_seq(&session.messages);
 
+        // 存储保持**完整原文**（架构原则，见 chat_loop「存储保持完整历史，视图逐轮裁剪」）：
+        // 一切压缩均发生在"发给大模型之前"——L0 工具结果守卫在工具执行生产时刻、
+        // L2 上下文摘要在 Turn 开始、内容节点淡化在请求视图组装（build_request_view）。
+        // 落库前不做任何内容改写：压缩原料不被污染，UI（reason 面板等）读到的也是全文。
         for mut chat_msg in messages {
             if chat_msg.timestamp.unwrap_or(0) == 0 {
                 chat_msg.timestamp = Some(now);
@@ -328,37 +225,7 @@ impl ChatSession for PersistentChatSession {
                 }
             }
 
-            let compressed = if let Some(ref dir) = session_dir {
-                let ts = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000) as i64;
-                let archive_filename =
-                    format!("{}/m{:x}.txt", super::message_archive::MESSAGES_SUBDIR, ts);
-                let archive_display_path = display_path
-                    .join(&archive_filename)
-                    .to_string_lossy()
-                    .replace("\\", "/");
-
-                super::message_archive::compress_message(
-                    dir,
-                    &chat_msg,
-                    line_threshold,
-                    &archive_filename,
-                    &archive_display_path,
-                )
-                .await
-            } else {
-                Ok(None)
-            };
-
-            let final_msg = match compressed {
-                Ok(Some(c)) => c,
-                Ok(None) => chat_msg,
-                Err(e) => {
-                    tracing::warn!("压缩消息失败: {}", e);
-                    chat_msg
-                }
-            };
-
-            session.messages.push(final_msg);
+            session.messages.push(chat_msg);
         }
 
         let context_messages = cfg.context_messages;
@@ -454,6 +321,13 @@ impl ChatSession for PersistentChatSession {
             .map(|c| c.compress_line_threshold)
             .unwrap_or(200)
     }
+
+    fn compress_keep_recent(&self) -> usize {
+        self.config
+            .try_read()
+            .map(|c| c.compress_keep_recent)
+            .unwrap_or(3)
+    }
 }
 
 // EphemeralChatSession
@@ -464,6 +338,7 @@ pub struct EphemeralChatSession {
     context_messages: usize,
     max_messages: usize,
     line_threshold: usize,
+    keep_recent: usize,
 }
 
 impl EphemeralChatSession {
@@ -474,6 +349,7 @@ impl EphemeralChatSession {
             context_messages: config.context_messages,
             max_messages: config.max_messages.max(500),
             line_threshold: config.compress_line_threshold,
+            keep_recent: config.compress_keep_recent,
         }
     }
 }
@@ -578,6 +454,10 @@ impl ChatSession for EphemeralChatSession {
 
     fn line_threshold(&self) -> usize {
         self.line_threshold
+    }
+
+    fn compress_keep_recent(&self) -> usize {
+        self.keep_recent
     }
 }
 
