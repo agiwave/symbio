@@ -9,6 +9,7 @@ mod handlers;
 mod heartbeat;
 mod message_archive;
 mod orchestrator;
+pub(crate) mod paths;
 pub(crate) mod prompt;
 mod rate_limit;
 mod resume;

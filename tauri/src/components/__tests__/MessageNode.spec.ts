@@ -162,8 +162,10 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     // 请求/结果不设外层标签（内层节点头部「请求/响应」已承载语义），仅「过程」保留
     const labels = w.findAll('.ts-label').map((l) => l.text())
     expect(labels).toEqual(['过程'])
-    // 子会话 Turn 以折叠节点形态嵌在「过程」段中
-    expect(w.text()).toContain('sub-agent')
+    // 子会话 Turn 与主会话 Turn 同一响应分组形态（分形复用）：
+    // 无折叠头部，其子节点（思考/正文）以缩进节点直排呈现
+    expect(w.text()).toContain('子流正文')
+    expect(w.findAll('.turn-group').length).toBe(1)
   })
 
   it('无子会话的工具：「过程」段整段隐藏（仅 请求 + 结果）', () => {

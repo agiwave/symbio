@@ -2,7 +2,7 @@
 
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::{
-    ask_user::AskUserTool, codebase_search::CodebaseSearchTool, content_search::ContentSearchTool,
+    codebase_search::CodebaseSearchTool, content_search::ContentSearchTool,
     dir_list::DirListTool, file_delete::FileDeleteTool, file_edit::FileEditTool,
     file_read::FileReadTool, file_search::FileSearchTool, file_write::FileWriteTool,
     shell::ShellTool, todo_write::TodoWriteTool,
@@ -182,7 +182,6 @@ impl LocalPlugin {
         let content_search = Arc::new(ContentSearchTool::new(Arc::clone(&security)));
         let dir_list = Arc::new(DirListTool::new(Arc::clone(&security)));
         let todo_write = Arc::new(TodoWriteTool::new(Arc::clone(&security)));
-        let ask_user = Arc::new(AskUserTool::new(Arc::clone(&security)));
         let codebase_search = Arc::new(CodebaseSearchTool::new(Arc::clone(&security)));
         let file_delete = Arc::new(FileDeleteTool::new(Arc::clone(&security)));
 
@@ -196,7 +195,6 @@ impl LocalPlugin {
             content_search,
             dir_list,
             todo_write,
-            ask_user,
             codebase_search,
         ];
 

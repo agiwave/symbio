@@ -50,8 +50,7 @@ impl SqliteSessionStore {
 
     /// 消息压缩存档目录（与文件后端保持一致的路径规范）
     fn archive_dir_for(base_dir: &Path, session_id: &str) -> PathBuf {
-        let safe_id = session_id.replace(['/', '\\', ':'], "_");
-        base_dir.join(safe_id)
+        base_dir.join(super::super::paths::safe_id(session_id))
     }
 }
 

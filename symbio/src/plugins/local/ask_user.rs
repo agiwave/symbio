@@ -1,3 +1,6 @@
+// 暂未注册（AskUserTool 功能后续成熟后再考虑启用），抑制 dead_code 警告。
+#![allow(dead_code)]
+
 //! 询问用户工具 - 实现 Capability（对应 Trae 的 AskUserQuestion）
 //!
 //! 支持单问题（question）或批量问题（questions[]，1~4 个，对齐 Trae）。

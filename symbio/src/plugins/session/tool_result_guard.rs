@@ -99,15 +99,8 @@ fn split_head_tail(text: &str, head_budget: usize, tail_budget: usize) -> (Strin
 fn resolve_archive_dir(session_id: Option<&str>) -> Option<PathBuf> {
     if let Some(sid) = session_id {
         if !sid.trim().is_empty() {
-            let safe_id: String = sid
-                .chars()
-                .map(|c| if matches!(c, '/' | '\\' | ':') { '_' } else { c })
-                .collect();
-            let dir = crate::symbio_core::HomedirRegistry::get()
-                .join("plugins")
-                .join("session")
-                .join(safe_id)
-                .join("tool_archives");
+            // 路径派生统一走 paths 模块（safe_id / 会话根目录的唯一权威实现）
+            let dir = super::paths::session_subdir(sid, super::paths::TOOL_ARCHIVES_SUBDIR);
             if std::fs::create_dir_all(&dir).is_ok() {
                 return Some(dir);
             }
@@ -180,6 +173,31 @@ fn prune_archive_dir(dir: &std::path::Path, keep: usize) {
     }
 }
 
+/// guard / summarize 共用的 head/tail 摘要拼装核心。
+///
+/// 两者唯一的差异是占位符文案（guard 附带存档取回指引，summarize 提示重跑工具），
+/// 预算切分（60%/40%）、omit 计算、三段拼接逻辑完全一致 —— 收敛于此，防止漂移。
+fn assemble_head_tail_summary(
+    text: &str,
+    budget_tokens: usize,
+    placeholder: String,
+) -> String {
+    let head_budget = ((budget_tokens as f64) * 0.6) as usize;
+    let tail_budget = budget_tokens.saturating_sub(head_budget);
+    let (head, tail) = split_head_tail(text, head_budget, tail_budget);
+
+    let mut out = String::with_capacity(head.len() + tail.len() + placeholder.len());
+    out.push_str(&head);
+    out.push_str(&placeholder);
+    out.push_str(&tail);
+    out
+}
+
+/// guard / summarize 共用的占位符前缀：omit 统计口径保持一致。
+fn omit_placeholder_prefix(omit: usize) -> String {
+    format!("\n[... 已省略约 {omit} tokens 的中间内容。")
+}
+
 /// 守卫工具结果：超过预算则存档 + head/tail 摘要，否则原样返回。
 ///
 /// `session_id`：当前会话标识。提供时存档写入会话目录
@@ -203,27 +221,20 @@ pub fn guard_tool_result(
 
     let archive_path = archive_full_text(text, n, session_id);
 
-    let head_budget = ((budget_tokens as f64) * 0.6) as usize;
-    let tail_budget = budget_tokens.saturating_sub(head_budget);
-    let (head, tail) = split_head_tail(text, head_budget, tail_budget);
-
     let omit = n.saturating_sub(budget_tokens);
     // 统一取回协议（P1-2）：三层压缩占位符共用同一格式 —— 「已存档至: <路径> +
     // 统一取回入口 local/file_read + 统一分段参数 offset/limit」。
+    // 取回指引文案唯一来源：paths::RETRIEVAL_HINT（L1 消息存档同款）。
     let archive_hint = match &archive_path {
-        Some(p) => format!(
-            "完整输出已存档至: {p}（取回：local/file_read 该路径，按 offset/limit 分段读取）"
-        ),
+        Some(p) => format!("完整输出已存档至: {p}{}", super::paths::RETRIEVAL_HINT),
         None => "完整输出未存档（存档目录不可写）".to_string(),
     };
     let placeholder = format!(
-        "\n[... 已省略约 {omit} tokens 的中间内容。{archive_hint} ...]\n"
+        "{} {archive_hint} ...]",
+        omit_placeholder_prefix(omit)
     );
 
-    let mut out = String::with_capacity(head.len() + tail.len() + placeholder.len());
-    out.push_str(&head);
-    out.push_str(&placeholder);
-    out.push_str(&tail);
+    let out = assemble_head_tail_summary(text, budget_tokens, placeholder);
 
     GuardedResult {
         text: out,
@@ -244,21 +255,14 @@ pub fn summarize_tool_result(text: &str, budget_tokens: usize) -> String {
         return text.to_string();
     }
 
-    let head_budget = ((budget_tokens as f64) * 0.6) as usize;
-    let tail_budget = budget_tokens.saturating_sub(head_budget);
-    let (head, tail) = split_head_tail(text, head_budget, tail_budget);
-
     let omit = n.saturating_sub(budget_tokens);
     let placeholder = format!(
-        "\n[... 已省略约 {omit} tokens 的中间内容。历史轮次结果已淡化以控制上下文长度，\
-         如需完整输出请重新运行该工具。 ...]\n"
+        "{} 历史轮次结果已淡化以控制上下文长度，\
+         如需完整输出请重新运行该工具。 ...]",
+        omit_placeholder_prefix(omit)
     );
 
-    let mut out = String::with_capacity(head.len() + tail.len() + placeholder.len());
-    out.push_str(&head);
-    out.push_str(&placeholder);
-    out.push_str(&tail);
-    out
+    assemble_head_tail_summary(text, budget_tokens, placeholder)
 }
 
 #[cfg(test)]

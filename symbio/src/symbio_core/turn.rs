@@ -14,7 +14,6 @@
 //! （`plugins::model::{protocol, tool_call, message_builder, context}`），
 //! 本模块是唯一权威实现。
 
-use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
 use crate::symbio_core::schemas::session::chat_message::{
@@ -106,39 +105,40 @@ fn drain_pending_signals(channel: &mut PluginChannel, abort_flag: &AtomicBool) {
 async fn wait_for_abort_signal(channel: &mut PluginChannel, abort_flag: &AtomicBool) {
     // 检查标志位
     if abort_flag.load(Ordering::SeqCst) {
-        plugin_info!(
-            "model",
-            "[DIAG] wait_for_abort_signal: abort_flag already true at entry"
-        );
         return;
     }
 
-    plugin_info!(
-        "model",
-        "[DIAG] wait_for_abort_signal: waiting for abort frames"
-    );
-    while let Some(frame) = channel.rx.recv().await {
-        plugin_info!(
-            "model",
-            "[DIAG] wait_for_abort_signal: received frame {:?}",
-            frame
-        );
-        if handle_signal_frame(frame, abort_flag) {
-            plugin_info!(
-                "model",
-                "[DIAG] wait_for_abort_signal: signal handler returned true, aborting"
-            );
-            return;
-        }
-        if abort_flag.load(Ordering::SeqCst) {
-            plugin_info!(
-                "model",
-                "[DIAG] wait_for_abort_signal: abort_flag now true, returning"
-            );
-            return;
+    // 中止感知有两条独立通道，任一触发即返回：
+    // 1. rx 收到显式 Abort 帧（消费循环转发的 transport 信号）；
+    // 2. abort_flag 被外部置位——**这是内部请求（如上下文压缩）唯一的中止感知路径**：
+    //    压缩请求挂在静默哑通道上（rx 永无帧），用户停止时 Abort 帧堆在主通道、
+    //    消费循环正 await 在压缩请求上无暇收取，只有共享的 abort_flag 会被置位。
+    //    因此这里必须轮询标志位，否则压缩请求在用户中止后仍会跑完整整轮 LLM 流。
+    let flag = abort_flag;
+    loop {
+        tokio::select! {
+            _ = async {
+                while !flag.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            } => {
+                return;
+            }
+            frame = channel.rx.recv() => match frame {
+                Some(frame) => {
+                    if handle_signal_frame(frame, abort_flag) {
+                        return;
+                    }
+                    if abort_flag.load(Ordering::SeqCst) {
+                        return;
+                    }
+                }
+                None => {
+                    return;
+                }
+            }
         }
     }
-    plugin_warn!("model", "[DIAG] wait_for_abort_signal: channel rx closed (no senders alive), returning -> PostResult::Aborted");
 }
 
 // HTTP 请求（支持自动重试）
@@ -196,13 +196,6 @@ pub async fn execute_post_with_abort(
     channel: &mut PluginChannel,
     abort_flag: &AtomicBool,
 ) -> PostResult {
-    plugin_info!(
-        "model",
-        "[DIAG] execute_post_with_abort: url={}, body_keys={:?}",
-        url,
-        body.as_object().map(|m| m.keys().collect::<Vec<_>>())
-    );
-
     // 限流/瞬时 5xx/网络抖动：有界重试 + 指数退避，避免一次瞬时错误就中断整轮对话。
     // 重试在同一 turn 内进行（复用同一个 root_id），不会额外产生 Turn/文本节点，
     // 因此不会造成"错误刷屏"。重试耗尽才向上返回错误，由上层停止并展示重试入口。
@@ -216,11 +209,9 @@ pub async fn execute_post_with_abort(
 
         let result = tokio::select! {
             res = get_http_client().post(url).headers(headers.clone()).json(body).send() => {
-                plugin_info!("model", "[DIAG] execute_post_with_abort: HTTP request future completed first");
                 res
             },
             _ = wait_for_abort_signal(channel, abort_flag) => {
-                plugin_warn!("model", "[DIAG] execute_post_with_abort: wait_for_abort_signal returned first -> Aborted");
                 return PostResult::Aborted;
             }
         };
@@ -233,7 +224,7 @@ pub async fn execute_post_with_abort(
                     let delay = backoff_delay(attempt, None);
                     plugin_warn!(
                         "model",
-                        "[DIAG] execute_post_with_abort: 网络错误({}), 第{}/{}次重试, 退避{:?}",
+                        "网络错误({}), 第{}/{}次重试, 退避{:?}",
                         e, attempt, MAX_RETRIES, delay
                     );
                     sleep_with_abort(delay, abort_flag).await;
@@ -264,7 +255,7 @@ pub async fn execute_post_with_abort(
             let delay = backoff_delay(attempt, retry_after);
             plugin_warn!(
                 "model",
-                "[DIAG] execute_post_with_abort: HTTP {} 可重试, 第{}/{}次重试, 退避{:?}",
+                "HTTP {} 可重试, 第{}/{}次重试, 退避{:?}",
                 status, attempt, MAX_RETRIES, delay
             );
             sleep_with_abort(delay, abort_flag).await;

@@ -7,7 +7,8 @@
       ② 子节点直排：思考/正文/工具出现后容器完全隐藏（无头部、无外框），子节点直接纵排；
       ③ 组级错误条：Turn 失败 →「重试」入口（思考/正文/工具请求的失败都归 Turn 重试，
          resume action=retry_turn：删除响应子树 → 重新走 LLM 请求）。
-    子会话 Turn（role=tool）不适用此形态，保留「↳ 子智能体」折叠节点，作为工具「过程」段。
+    子会话 Turn（role=tool）同样走此形态（分形复用）：工具「过程」段以与主会话
+    一致的「思考 / 正文 / 工具」缩进节点直排呈现；组级操作（删除/重试）仅归属根级助手 Turn。
   - **统一折叠式节点**（内容节点 + 工具节点）：可点击折叠的「头部」（图标 + 标题 + 状态标签）
     + 折叠体。折叠策略：
       · 用户消息 / 待审批 → 默认展开；
@@ -26,13 +27,13 @@
   - 失败终态只信服务端（persist_failure 广播 Failed Update），前端不做启发式标记。
 -->
 <template>
-  <!-- 根级助手 Turn：响应分组（透明容器，对齐 Claude / Codex 会话流）
-       三种形态：
-       ① 等待骨架：Turn 已创建但尚无任何子节点且运行中 → 「正在思考…」动效
-       ② 子节点直排：思考/正文/工具出现后容器完全隐藏，子节点直接纵排
-       ③ 组级错误条：Turn 失败 → 重试入口（思考/正文/工具请求的失败都归 Turn 重试） -->
-  <div v-if="isRootTurn" class="msg turn-group" :class="[statusClass]">
-    <span class="turn-actions" @click.stop>
+  <!-- 所有 Turn：响应分组（透明容器，对齐 Claude / Codex 会话流）
+       主会话与子会话（工具「过程」段）共用同一套分形渲染——思考/正文/工具直排、
+       等待骨架（「正在思考…」），代码复用零分叉。
+       组级操作（删除 / Turn 重试）仅归属根级助手 Turn：子会话 Turn 的节点是
+       工具「过程」段的临时广播（不落父会话存储），没有重试/删除的后端锚点。 -->
+  <div v-if="isTurnGroup" class="msg turn-group" :class="[statusClass]">
+    <span v-if="isRootAssistantTurn" class="turn-actions" @click.stop>
       <button class="node-act" title="删除" @click.stop="emit('delete', node.id)">🗑</button>
     </span>
     <!-- ① 等待态 -->
@@ -55,7 +56,8 @@
       <div v-if="isFailed" class="error-box turn-error">
         <span class="err-icon">⚠</span>
         <span class="err-text">{{ errorText }}</span>
-        <button class="retry" @click="emit('retry', node.id)">重试</button>
+        <!-- 仅根级助手 Turn 提供组级重试（resume retry_turn 需要父会话内的 Turn 锚点） -->
+        <button v-if="isRootAssistantTurn" class="retry" @click="emit('retry', node.id)">重试</button>
       </div>
     </template>
   </div>
@@ -191,7 +193,7 @@
            请求/结果段不设外层标签——内层节点自身头部已带「📤 请求 / ↩ 响应」语义，
            外层再加标签属于重复呈现（外层仅保留「过程」标签，子会话 Turn 头部是智能体名，
            无等价语义可承载）。
-           Turn 的组级呈现（等待骨架/透明分组/组级重试）见模板顶部 isRootTurn 分支。 -->
+           Turn 的组级呈现（等待骨架/透明分组/组级重试）见模板顶部 isTurnGroup 分支。 -->
       <template v-else>
         <div v-if="isToolCall" class="tool-sections">
           <!-- 请求（内层节点头部即「请求」，不再加外层标签） -->
@@ -442,13 +444,17 @@ const isTextLike = computed(
 )
 // 子会话响应：role=Tool 的 Turn，即「某个工具内部的流模式响应」（≈主会话 agent 响应）
 const isSubSession = computed(() => isTurn.value && role.value === 'tool')
-// 根级助手 Turn：响应分组容器（等待骨架 / 透明分组 / 组级错误条）。
-// 仅根级助手回合走此形态；子会话 Turn（role=tool）保留「↳ 子智能体」折叠节点形态，
-// 作为工具「过程」段的嵌套流展示。
-const isRootTurn = computed(() => isTurn.value && role.value !== 'tool')
+// Turn 分组（响应分组形态）：**所有** Turn（根级助手 + 子会话过程）共用同一套
+// 分形渲染（思考/正文/工具直排 + 等待骨架），机制复用零分叉——子会话过程内容
+// 因此以与主会话完全一致的「思考 / 正文 / 工具」缩进节点呈现在工具调用之下。
+const isTurnGroup = computed(() => isTurn.value)
+// 根级助手 Turn：唯一承载组级操作（悬停删除 / 组级 Turn 重试）的 Turn。
+// 子会话 Turn（role=tool）的节点是工具过程段的临时广播（不落父会话存储），
+// retry_turn / delete 缺少后端锚点，故不提供。
+const isRootAssistantTurn = computed(() => isTurn.value && role.value !== 'tool')
 // 等待态：Turn 已广播但尚无任何子节点且仍在运行 → 显示「正在思考…」骨架
 const isTurnPending = computed(
-  () => isRootTurn.value && isStreaming.value && !(props.node.children || []).length,
+  () => isTurnGroup.value && isStreaming.value && !(props.node.children || []).length,
 )
 // Turn 的直接**正文**子节点：内联展示（无头部，由 Turn 分组直接纵排承载）。
 // 仅限 text——思考节点必须保留单行行头（新设计：思考始终单行可折叠），

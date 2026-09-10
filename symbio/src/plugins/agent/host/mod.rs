@@ -31,6 +31,7 @@ pub mod handlers;
 pub mod plugin;
 pub mod entities;
 pub mod store;
+pub mod subagent;
 mod detail;
 
 #[cfg(test)]

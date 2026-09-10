@@ -156,9 +156,7 @@ impl PersistentChatSession {
         // 这里的 display path 仅作 UI 展示（用于压缩消息的 archive path 等）。
         // 与实际写入路径 (session_dir) 保持一致：<homedir>/plugins/session/<safe_id>
         let _ = session_dir;
-        let safe_session_id = self.session_id.replace(['/', '\\', ':'], "_");
-        let storage_dir = super::plugin::SessionPlugin::session_storage_dir();
-        storage_dir.join(safe_session_id)
+        super::paths::session_dir(&self.session_id)
     }
 }
 

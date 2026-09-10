@@ -239,6 +239,13 @@ pub async fn execute_tool_async(
                             {
                                 match event {
                                     session_chat_response::StreamEvent::Update { mut message } => {
+                                        // 子会话的委托 prompt（user 消息）不透传：
+                                        // 其内容已可见于 ToolCall 的请求参数（args.prompt），
+                                        // 且 role=user 的临时节点会在前端获得"编辑"入口
+                                        //（该 id 不在父会话存储中，操作必然失败）。
+                                        if message.role == Some(MessageRole::User) {
+                                            continue;
+                                        }
                                         // Tool execution message handling:
                                         // - Root messages (no parent_id) get their parent_id set to tool_call_id
                                         // - All other messages are passed through as-is

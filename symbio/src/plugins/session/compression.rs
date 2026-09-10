@@ -479,6 +479,66 @@ pub fn fallback_snapshot(text: &str) -> Option<String> {
     ))
 }
 
+/// 输入超限死锁的本地机械兜底（**不依赖 LLM**）。
+///
+/// 场景（日志实证）：上下文估算已超 Provider 有效输入上限时，LLM 摘要请求与
+/// 上下文**同源超限**（请求体就携带完整待压缩历史），必然 400（"Input token
+/// exceed the limit"）——每轮重发注定失败的巨型请求，压缩永远无法收敛。
+///
+/// 处理：从尾部按 token 预算机械保留最近上下文；保留起点回退到最近一条 user
+/// 消息（轮边界）——保证保留区 Turn 子树 parent 链完整、且新上下文以 user 开头
+///（多数 provider 的硬要求）。头部插入一条 user 角色的本地说明（告知模型历史
+/// 被截断及转存路径），模型可据此意识到上下文不完整。
+///
+/// 返回 `(新消息列表, 被截断条数)`；若无需截断（本就在预算内）原样返回 `(原列表, 0)`。
+pub fn emergency_tail_compression(
+    messages: &[ChatMessage],
+    target_tokens: usize,
+    transcript_hint: Option<&str>,
+) -> (Vec<ChatMessage>, usize) {
+    // 从尾部反向累计；最后一条无条件保留（当前用户指令 / 生成中回复）
+    let mut acc = 0usize;
+    let mut start = messages.len();
+    while start > 0 {
+        let t = estimate_message_tokens(&messages[start - 1]);
+        if acc + t > target_tokens && start < messages.len() {
+            break;
+        }
+        acc += t;
+        start -= 1;
+    }
+    // 保留起点回退到最近一条 user 消息（轮边界）
+    while start < messages.len() && messages[start].role != Some(MessageRole::User) {
+        start += 1;
+    }
+    if start == 0 {
+        return (messages.to_vec(), 0);
+    }
+    let mut note = format!(
+        "[CONTEXT TRUNCATED — 本地兜底压缩]\n早期 {start} 条消息因超出 Provider 输入上限被本地截断（LLM 摘要请求与上下文同源超限，无法执行）。近期上下文如下，请基于其继续任务。"
+    );
+    if let Some(p) = transcript_hint {
+        note.push_str(&format!("\n完整历史转存：{p}"));
+    }
+    let header = ChatMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        role: Some(MessageRole::User),
+        msg_type: Some(MessageType::Text),
+        content: Some(MessageContent::Text(note)),
+        status: Some(MessageStatus::Completed),
+        meta: Some(serde_json::json!({
+            "compacted": true,
+            "compaction": "emergency_tail",
+            "removed_messages": start,
+        })),
+        ..Default::default()
+    };
+    let mut out = Vec::with_capacity(messages.len() - start + 1);
+    out.push(header);
+    out.extend_from_slice(&messages[start..]);
+    (out, start)
+}
+
 /// `context_compact` 工具名（chat_loop 拦截分发用）。
 pub const CONTEXT_COMPACT_TOOL_NAME: &str = "context_compact";
 

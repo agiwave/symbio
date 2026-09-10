@@ -13,7 +13,9 @@
 //! - **版本匹配**：bundle 校验（含 `requires.spec` 硬门槛）失败 = 收集期
 //!   硬错误，会话中止并明确报错——绝不静默降级成"没有人格的通用助手"。
 //!
-//! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时本插件完全静默。
+//! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时，本插件仅静默跳过 bundle 装配，
+//! 但 **agent_run（子智能体委托）始终注册**——未指定 agent_id 时默认沿用当前
+//! 会话的智能体，两者皆空则子会话以无智能体的纯对话模式运行。
 
 use crate::plugins::agent::core::spec::assembly::{assemble_bundle, Assembly};
 use crate::plugins::agent::host::capability::BundleIdentityCapability;
@@ -28,18 +30,27 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 /// AgentBundle 插件主结构。
-pub struct AgentPlugin;
+pub struct AgentPlugin {
+    /// 插件间路由入口（composite 容器的弱引用）。
+    ///
+    /// 在 `build(ctx)` 时捕获：composite 构造子插件时注入的 ctx 已携带
+    /// `PARENT` 弱引用（见 composite 的子上下文构造）。agent_run 工具执行期
+    /// 凭它把 `session/chat/send` 等请求路由给兄弟插件——工具 ctx 经 chat
+    /// loop 一路 fork，自身并不携带路由入口。
+    router: Option<std::sync::Weak<dyn Plugin>>,
+}
 
 impl AgentPlugin {
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例（composite 配置驱动）。
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
         // 消费配置以兼容未来扩展（当前使用默认值）
         let _config = ctx.config().as_ref().and_then(|c| c.get("agent"));
-        Arc::new(Self) as Arc<dyn Plugin>
+        let router = ctx.parent();
+        Arc::new(Self { router }) as Arc<dyn Plugin>
     }
 
     pub fn new() -> Self {
-        Self
+        Self { router: None }
     }
 
     pub fn metadata() -> PluginMeta {
@@ -124,16 +135,15 @@ impl Plugin for AgentPlugin {
             return Err(PluginError::NotFound("Invalid traverse path".to_string()));
         }
 
-        // ── 会话未选择智能体 → 静默退出（会话以纯工具模式照常运行）──
-        // 会话级「智能体选择」复用既有通用机制 ctx[AGENT_ID]（orchestrator 统一解析：
-        // 请求显式 > metadata.agent_id）；本插件把它解析为 bundle 实例 id。
+        // ── 会话级「智能体选择」复用既有通用机制 ctx[AGENT_ID]（orchestrator
+        // 统一解析：请求显式 > metadata.agent_id）；本插件把它解析为 bundle 实例 id。
+        // 注意：agent_run（子智能体委托）**始终注册**，不受"是否选择智能体"影响——
+        // 它是会话基础能力：未指定 agent_id 时默认沿用当前会话的智能体，
+        // 两者皆空则子会话以无智能体的纯对话模式运行。
         let bundle_id = ctx
             .get(AGENT_ID)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        let Some(bundle_id) = bundle_id else {
-            return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
-        };
 
         let workdir = ctx.get(WORKDIR);
         let session_id = ctx.get(SESSION_ID);
@@ -142,18 +152,31 @@ impl Plugin for AgentPlugin {
             return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
         };
 
-        if let Err(e) = self
-            .attach_bundle(&ctx, &bundle_id, workdir, session_id, &tool_manager)
-            .await
-        {
-            // 硬错误：会话绑定了一个不合规/不存在的 bundle——必须中止并明确提示，
-            // 绝不静默降级（与老 agent 插件的收集期错误语义一致）。
-            report_error(
-                &ctx,
-                PLUGIN_AGENT,
-                format!("bundle `{bundle_id}` 装配失败: {e}"),
-            )
+        // ── agent_run：无条件注册 ──
+        let store = BundleStore::new(workdir.as_deref());
+        tool_manager
+            .register_batch(vec![super::subagent::AgentRunCapability::new(
+                workdir.clone(),
+                super::subagent::format_bundles_brief(&store.list()),
+                self.router.clone(),
+            ) as Arc<dyn Capability>])
             .await;
+
+        // ── 已选择智能体 → 约定目录装配（身份工具等）──
+        if let Some(bundle_id) = bundle_id {
+            if let Err(e) = self
+                .attach_bundle(&ctx, &bundle_id, workdir, session_id, &tool_manager)
+                .await
+            {
+                // 硬错误：会话绑定了一个不合规/不存在的 bundle——必须中止并明确提示，
+                // 绝不静默降级（与老 agent 插件的收集期错误语义一致）。
+                report_error(
+                    &ctx,
+                    PLUGIN_AGENT,
+                    format!("bundle `{bundle_id}` 装配失败: {e}"),
+                )
+                .await;
+            }
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

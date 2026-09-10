@@ -108,9 +108,10 @@ async fn bundle_import_traverse_and_identity() {
     let errors = crate::symbio_core::take_errors(&ctx).await;
     assert!(errors.is_empty(), "不应有收集期错误: {errors:?}");
 
-    // 只注册一个能力：agent_identity（persona + skill 拼接）
+    // 注册两个能力：agent_identity（persona + skill 拼接）+ agent_run（始终注册的
+    // 子智能体委托工具，不依赖"是否选择智能体"）
     let caps = manager.list_capability().await;
-    assert_eq!(caps.len(), 1, "应只注册 identity 一个能力: {caps:?}");
+    assert_eq!(caps.len(), 2, "应注册 identity + agent_run 两个能力: {caps:?}");
     let identity_meta = caps.iter().find(|c| c.name == "agent_identity").unwrap();
     assert!(
         identity_meta.description.contains("全栈开发人格"),
@@ -148,9 +149,15 @@ async fn version_mismatch_bundle_is_rejected_and_unbound_session_is_silent() {
     let err = store.import(&zip_bytes, false).unwrap_err();
     assert!(err.contains("拒绝导入"), "错误应含版本拒绝语义: {err}");
 
-    // 未选择智能体的会话完全静默（无错误、无能力注册）
+    // 未选择智能体的会话：bundle 装配静默跳过（无 identity），错误桶为空；
+    // agent_run 作为会话基础能力仍然注册（agent_id 可选，默认沿用当前会话智能体，
+    // 两者皆空则子会话以纯对话模式运行）。
     let plugin = Arc::new(AgentPlugin::new());
     let (ctx, manager) = ctx_with(None, None);
     plugin.traverse(String::new(), ctx.clone()).await.unwrap();
-    assert!(manager.list_capability().await.is_empty());
+    let errors = crate::symbio_core::take_errors(&ctx).await;
+    assert!(errors.is_empty(), "未绑定会话不应有收集期错误: {errors:?}");
+    let caps = manager.list_capability().await;
+    assert_eq!(caps.len(), 1, "仅注册 agent_run: {caps:?}");
+    assert_eq!(caps[0].name, "agent_run");
 }

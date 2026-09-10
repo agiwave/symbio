@@ -165,13 +165,6 @@ pub async fn run_chat_loop(
         ">>> NEW SESSION START (Protocol: {:?})",
         orchestrator.config.api_protocol
     );
-    plugin_info!("session",
-        "[DIAG] run_chat_loop: configured_max_tool_rounds={:?} (None=无上限), auto_compress={}, enable_compact_tool={}, msg_id_in_payload={:?}",
-        req.max_tool_rounds,
-        req.auto_compress.unwrap_or(true),
-        req.enable_compact_tool.unwrap_or(false),
-        req.single_message.as_ref().map(|m| m.id.clone())
-    );
 
     // 用户明确要求**不要**设置 max_tool_rounds 硬性上限（智能体会话轮次越来越多）。
     // 因此默认（request 未显式给出）=「无上限」；仅在调用方**显式**设置时才作为软上限并给出提示。
@@ -276,9 +269,6 @@ pub async fn run_chat_loop(
         // 达到上限时给出明确提示再退出，而不像从前那样在 chat_loop.rs:419 静默 Ok(())。
         if let Some(max) = configured_max_tool_rounds {
             if tool_rounds >= max {
-                plugin_info!("session",
-                    "[DIAG] run_chat_loop: 达到显式设置的上限 max_tool_rounds={}", max
-                );
                 let _ = channel.tx.send(PluginFrame::Data(
                     serde_json::to_value(session_chat_response::StreamEvent::Error {
                         error: format!(
@@ -296,10 +286,6 @@ pub async fn run_chat_loop(
         if abort_flag.load(Ordering::SeqCst) {
             // SYS-002: 早期 return 路径上的副作用（last_saved 尚未用作流式增量锚点，
             // 此分支里不更新，但保留 last_saved 维持语义对称）。
-            plugin_info!("session",
-                "[DIAG] run_chat_loop: abort_flag true at top of turn {}",
-                tool_rounds
-            );
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
             return Ok(());
         }
@@ -307,10 +293,6 @@ pub async fn run_chat_loop(
         plugin_info!("session", "--- TURN {} START ---", tool_rounds);
 
         if check_abort(&abort_flag).await {
-            plugin_info!("session",
-                "[DIAG] run_chat_loop: check_abort returned true at turn {}",
-                tool_rounds
-            );
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
             return Ok(());
         }
@@ -364,10 +346,7 @@ pub async fn run_chat_loop(
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    plugin_info!("session",
-                        "[DIAG] run_chat_loop: auto_compress_process Err({})",
-                        e
-                    );
+                    plugin_warn!("session", "auto_compress_process failed: {e}");
                     fire_stop_hook(orchestrator, &context.messages, &ctx).await;
                     return Err(e);
                 }
@@ -448,12 +427,6 @@ pub async fn run_chat_loop(
         };
         let request_messages: &[ChatMessage] = request_view.as_slice();
 
-        plugin_info!("session",
-            "[DIAG] run_chat_loop: about to call protocol.execute_turn, ctx_msg_count={}, tool_count={}",
-            context.messages.len(),
-            tools.len()
-        );
-
         // Turn 创建后的首个 abort 检查点：覆盖"压缩阶段中止"等 send_request
         // 之前置位的场景。压缩失败已就地降级（不冒泡），但 abort_flag 仍为
         // true 且 abort 帧已被压缩请求消费——若不在此拦截，execute_turn 会
@@ -462,9 +435,6 @@ pub async fn run_chat_loop(
         // Turn 收尾为 Failed + "用户手动中止了本次回复"（错误条 + 重试入口），
         // 不会波及上一轮已成功的 Turn（persist_failure 按 failing_turn 子树收窄）。
         if abort_flag.load(Ordering::SeqCst) {
-            plugin_warn!("session",
-                "[DIAG] run_chat_loop: abort_flag true before execute_turn, propagating Err(Aborted)"
-            );
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
             return Err(PluginError::Aborted);
         }
@@ -484,16 +454,8 @@ pub async fn run_chat_loop(
             )
             .await;
 
-        plugin_info!("session",
-            "[DIAG] run_chat_loop: protocol.execute_turn returned, is_ok={}",
-            result.is_ok()
-        );
-
         let mut out = match result {
             Err(PluginError::RetryWithoutContextId) => {
-                plugin_info!("session",
-                    "[DIAG] run_chat_loop: send_request -> RetryWithoutContextId, continuing"
-                );
                 for m in &mut context.messages {
                     m.response_id = None;
                 }
@@ -516,17 +478,11 @@ pub async fn run_chat_loop(
                 // 后走 persist_failure —— 在途 Turn 持久化为 Failed + error，前端
                 // 可渲染错误条与重试入口（docs/turn-tool-mechanisms.md 2.4）。
                 // 旧实现直接 return Ok(())：在途 Turn 不落库，刷新即消失且无重试入口。
-                plugin_warn!("session",
-                    "[DIAG] run_chat_loop: send_request -> Aborted, propagating Err(Aborted)"
-                );
                 fire_stop_hook(orchestrator, &context.messages, &ctx).await;
                 return Err(PluginError::Aborted);
             }
             Err(e) => {
-                plugin_warn!("session",
-                    "[DIAG] run_chat_loop: send_request -> Err({}), returning Err",
-                    e
-                );
+                plugin_warn!("session", "send_request failed: {e}");
                 fire_stop_hook(orchestrator, &context.messages, &ctx).await;
                 return Err(e);
             }
@@ -539,9 +495,6 @@ pub async fn run_chat_loop(
             // 见 docs/turn-tool-mechanisms.md 2.4）。仅 send_request 之后的 abort
             // 冒泡；turn 循环顶部的边界检查点不冒泡——上一轮已定稿落库，冒泡会把
             // 成功的 Turn 误回滚为 Failed。
-            plugin_warn!("session",
-                "[DIAG] run_chat_loop: abort_flag became true after send_request, propagating Err(Aborted)"
-            );
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
             return Err(PluginError::Aborted);
         }
@@ -609,7 +562,7 @@ pub async fn run_chat_loop(
                 if continuation_count < MAX_CONTINUE_ROUNDS {
                     continuation_count += 1;
                     plugin_info!("session",
-                        "[DIAG] run_chat_loop: finish=Length，自动续写 ({}/{})",
+                        "finish=Length，自动续写 ({}/{})",
                         continuation_count,
                         MAX_CONTINUE_ROUNDS
                     );
@@ -637,11 +590,6 @@ pub async fn run_chat_loop(
                     .unwrap_or_default(),
                 )).await;
             }
-            plugin_info!("session",
-                "[DIAG] run_chat_loop: no tool calls, finalizing turn {}, text_added={}, returning Ok(())",
-                tool_rounds,
-                context.messages.len()
-            );
             persist_messages(&context, last_saved, &channel).await;
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
             return Ok(());
@@ -841,7 +789,7 @@ pub async fn run_chat_loop(
             // 标记的代码属不可达遗留，已删除（docs/turn-tool-mechanisms.md 1.5）。
             // user_prompt(WaitingUserAction) 驱动的暂停走 approve/reject/answer 恢复。
             plugin_info!("session",
-                "[DIAG] run_chat_loop: 工具待用户恢复（mode={}），退出本轮",
+                "工具待用户恢复（mode={}），退出本轮",
                 mode
             );
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
@@ -1075,7 +1023,61 @@ async fn auto_compress_process(
         return Ok(None);
     }
 
+    // 压缩核心与主动 context_compact 工具共用（compress_with_snapshot_core）：
+    // 失败已在核心内就地回滚，这里只区分"成功/未压缩"两种结果。
     let original_count = context.messages.len();
+    let post_tokens = compress_with_snapshot_core(
+        orchestrator,
+        context,
+        channel,
+        ctx,
+        abort_flag,
+        compression_msg,
+        history_to_keep,
+        extra_hints,
+        "auto",
+    )
+    .await;
+    match post_tokens {
+        Some(_) => Ok(Some(original_count)),
+        None => Ok(None),
+    }
+}
+
+/// 快照压缩核心 —— 被动 L2 自动压缩（[`auto_compress_process`]）与主动
+/// `context_compact` 工具（[`run_context_compact`]）共用的唯一实现。
+///
+/// 旧版两处各维护一份 ~60 行近乎相同的流水线（PreCompact 钩子 → transcript
+/// 转存 → LLM 压缩请求 → 快照校验/纠正重试/降级兜底 → meta 与快照消息构造 →
+/// 保留区拼接落库），行为漂移风险高，故收敛于此。
+///
+/// 职责：
+/// 1. PreCompact 钩子 + 压缩前完整历史 transcript 转存（可回溯原则）；
+/// 2. 上下文临时替换为 `[compression_msg]`，以专用压缩提示词发起 LLM 请求；
+/// 3. 快照校验：提取 `<state_snapshot>` → 缺失则附纠正指令重试一次 →
+///    仍失败降级 `fallback_snapshot`；两次均空 → 回滚并放弃；
+/// 4. 构造快照消息（meta：compacted/post_tokens/transcript_path/compact_hints/
+///    protocol_version/prompt_fingerprint）并与保留区拼接，replace_messages 落库。
+///
+/// 失败语义：**任何失败都不向上冒泡**（回滚到调用前历史后返回 None），由调用方
+/// 决定对外呈现（auto → `Ok(None)` 继续本轮 Turn；manual → 工具结果"压缩失败已回滚"）。
+///
+/// `keep_messages`：压缩后原样保留在快照之后的消息（auto = 未压缩尾段；
+/// manual = 当前用户指令 + 进行中 Turn 及之后，保证 Turn 子树 parent 链完整，
+/// 详见 [`run_context_compact`] 文档中的切分点约束）。
+/// 成功返回 `Some(post_tokens)`（压缩后内容水位：快照 + 保留区，不含请求级 overhead）。
+#[allow(clippy::too_many_arguments)]
+async fn compress_with_snapshot_core(
+    orchestrator: &ChatOrchestrator,
+    context: &mut SessionContext,
+    channel: &mut PluginChannel,
+    ctx: &Arc<dyn InvokeRequest>,
+    abort_flag: &Arc<AtomicBool>,
+    compression_msg: ChatMessage,
+    keep_messages: Vec<ChatMessage>,
+    extra_hints: Option<&str>,
+    log_tag: &str,
+) -> Option<usize> {
     // 保存原始历史：压缩失败时回滚，绝不能让 `[compression_msg]` 残留在上下文里。
     let original_messages = context.messages.clone();
     let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await;
@@ -1086,13 +1088,72 @@ async fn auto_compress_process(
     let transcript_path =
         save_transcript_archive(&original_messages, context.session.session_id());
 
+    // ── 输入超限死锁预判（日志实证的恶性循环）──────────────────────────
+    // LLM 摘要请求的请求体**就携带完整待压缩历史**——若历史本身已超 Provider
+    // 有效输入上限，摘要请求必然 400（"Input token exceed the limit"），
+    // 且每轮自动压缩都会重发这条注定失败的巨型请求：压缩永不收敛、每轮开头
+    // 多一段漫长的无响应。预判命中时跳过 doomed 请求，直接本地机械兜底
+    // （尾部保留 + 说明头，不依赖 LLM），让上下文水位立即回落到可工作区间。
+    let pending: Vec<ChatMessage> = {
+        let mut v = Vec::with_capacity(1 + keep_messages.len());
+        v.push(compression_msg.clone());
+        v.extend(keep_messages.iter().cloned());
+        v
+    };
+    let overhead_tokens = compression::estimate_request_overhead(
+        &compression::get_compression_prompt(),
+        ctx,
+    )
+    .await;
+    let pending_tokens: usize = pending.iter().map(compression::estimate_message_tokens).sum();
+    let effective_limit =
+        (orchestrator.config.max_context_tokens - orchestrator.config.reserved_tokens) as usize;
+    if pending_tokens + overhead_tokens > effective_limit {
+        plugin_warn!("session",
+            "[Compress] {log_tag}: summary request itself exceeds input limit ({} + {} > {}), \
+             applying local emergency tail compression instead of a doomed LLM call",
+            pending_tokens, overhead_tokens, effective_limit
+        );
+        // 机械兜底目标：压到有效上限的一半（给后续对话留出增长空间，
+        // 避免刚兜底完又立刻越线）
+        let target = effective_limit / 2;
+        let (mut new_messages, removed) =
+            compression::emergency_tail_compression(&original_messages, target, transcript_path.as_deref());
+        if removed > 0 {
+            // 与 LLM 快照同款的 meta 指纹（协议版本标记 emergency 路径）
+            if let Some(head) = new_messages.first_mut() {
+                let mut meta = head.meta.clone().unwrap_or_else(|| serde_json::json!({}));
+                meta["protocol_version"] =
+                    serde_json::json!(super::compression::COMPRESSION_PROTOCOL_VERSION);
+                head.meta = Some(meta);
+            }
+            context.messages = new_messages;
+            let _ = context
+                .session
+                .replace_messages(context.messages.clone())
+                .await;
+            plugin_info!("session",
+                "[Compress] {log_tag}: emergency tail compression removed {removed} messages"
+            );
+            // post_tokens 按兜底后的内容水位返回（迟滞比较的读取侧口径）
+            let post_tokens: usize = context
+                .messages
+                .iter()
+                .map(compression::estimate_message_tokens)
+                .sum();
+            return Some(post_tokens);
+        }
+        // 兜底也无需截断（理论上不可达：能进压缩说明已越线）——回滚放弃
+        context.messages = original_messages;
+        return None;
+    }
+
     context.messages = vec![compression_msg];
 
-    // 诉求3：专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离；
-    // system_prompt 参数仍用于请求开销估算）
+    // 诉求3：专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离）
     let compression_prompt = compression::get_compression_prompt();
     let root_id = short_id();
-    let summary = match send_compression_request(
+    let mut summary = match send_compression_request(
         orchestrator,
         &compression_prompt,
         &context.messages,
@@ -1119,23 +1180,22 @@ async fn auto_compress_process(
         // - RateLimited / 其他 → 消费循环非中止分支 → Failed + 错误原因。
         Err(e) => {
             plugin_warn!("session",
-                "[Compress] auto compression failed ({}), falling back to uncompressed context",
+                "[Compress] {log_tag} compression failed ({}), falling back to uncompressed context",
                 e
             );
             context.messages = original_messages;
-            return Ok(None);
+            return None;
         }
     };
 
     // 快照校验：从输出提取 <state_snapshot>；缺失则纠正重试一次；
     // 仍失败则降级为纯文�快照（有总比无好，且标注为降级产物）。
     // 旧版只检查非空——模型输出散文/scratchpad 泄漏/截断时，残缺内容原样成为唯一记忆。
-    let mut summary = summary;
     let mut validated = compression::extract_snapshot(&summary_text(&summary));
     if validated.is_none() {
         // 重试：附纠正指令，要求严格按 XML 结构输出
         let retry_msg = ChatMessage {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: short_id(),
             role: Some(MessageRole::User),
             msg_type: Some(MessageType::Text),
             content: Some(MessageContent::Text(
@@ -1169,7 +1229,7 @@ async fn auto_compress_process(
     if snapshot_text.is_empty() {
         // 连兜底都拿不到内容（两次请求均为空流）：回滚，下一轮再试
         context.messages = original_messages;
-        return Ok(None);
+        return None;
     }
     context.messages.clear();
 
@@ -1182,7 +1242,7 @@ async fn auto_compress_process(
     let post_tokens = compression::estimate_message_tokens(&ChatMessage {
         content: Some(MessageContent::Text(snapshot_display.clone())),
         ..Default::default()
-    }) + history_to_keep
+    }) + keep_messages
         .iter()
         .map(compression::estimate_message_tokens)
         .sum::<usize>();
@@ -1219,7 +1279,7 @@ async fn auto_compress_process(
     };
 
     let mut new_messages = vec![snapshot_message];
-    new_messages.extend(history_to_keep);
+    new_messages.extend(keep_messages);
     context.messages = new_messages;
 
     let _ = context
@@ -1227,7 +1287,7 @@ async fn auto_compress_process(
         .replace_messages(context.messages.clone())
         .await;
 
-    Ok(Some(original_count))
+    Some(post_tokens)
 }
 
 /// 取消息纯文本（快照校验用）
@@ -1267,143 +1327,38 @@ async fn run_context_compact(
         return (false, before_tokens, before_tokens);
     }
 
-    let original_messages = context.messages.clone();
-    let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await;
-    let transcript_path =
-        save_transcript_archive(&original_messages, context.session.session_id());
-
+    let keep_messages: Vec<ChatMessage> = context.messages[split_user_idx..].to_vec();
     let compression_msg = compression::build_compression_request(&history, hints);
-    context.messages = vec![compression_msg];
 
-    // 诉求3：专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离）
-    let compression_prompt = compression::get_compression_prompt();
-    let summary = match send_compression_request(
+    // 压缩流水线与被动自动压缩共用同一核心（transcript 转存 → LLM 压缩请求 →
+    // 快照校验/纠正重试/降级兜底 → meta 构造 → 保留区拼接落库）；失败已在核心内
+    // 就地回滚，这里只把它翻译为工具结果的 (compressed, before, after) 三元组。
+    let post_tokens = compress_with_snapshot_core(
         orchestrator,
-        &compression_prompt,
-        &context.messages,
-        &short_id(),
+        context,
         channel,
+        ctx,
         abort_flag,
+        compression_msg,
+        keep_messages,
+        hints,
+        "manual",
     )
-    .await
-    {
-        Ok(s) => s,
-        // 中止/限流透传主流程；其他失败回滚（工具结果按"压缩失败"返回）。
-        Err(_e) => {
-            context.messages = original_messages;
-            return (false, before_tokens, before_tokens);
-        }
-    };
+    .await;
 
-    // 快照校验：提取 → 纠正重试一次 → 降级兜底（与被动压缩同一链路）。
-    let mut validated = compression::extract_snapshot(&summary_text(&summary));
-    if validated.is_none() {
-        let retry_msg = ChatMessage {
-            id: short_id(),
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
-            content: Some(MessageContent::Text(
-                "Your previous reply did not contain a valid <state_snapshot> XML block. \
-                 Reply again with ONLY the <state_snapshot> block, following the requested structure."
-                    .to_string(),
-            )),
-            status: Some(MessageStatus::Completed),
-            ..Default::default()
-        };
-        context.messages.push(retry_msg);
-        if let Ok(s) = send_compression_request(
-            orchestrator,
-            &compression_prompt,
-            &context.messages,
-            &short_id(),
-            channel,
-            abort_flag,
-        )
-        .await
-        {
-            if let Some(snapshot) = compression::extract_snapshot(&summary_text(&s)) {
-                validated = Some(snapshot);
-            }
-        }
+    match post_tokens {
+        Some(after) => (true, before_tokens, after),
+        // 未执行 / 失败：压缩放弃（历史已回滚），工具结果如实反映无收益
+        None => (false, before_tokens, before_tokens),
     }
-    let snapshot_text = match validated {
-        Some(s) => s,
-        None => match compression::fallback_snapshot(&summary_text(&summary)) {
-            Some(s) => s,
-            None => {
-                // 两次均无有效输出：回滚，压缩放弃
-                context.messages = original_messages;
-                return (false, before_tokens, before_tokens);
-            }
-        },
-    };
-
-    // 新上下文 = [快照] + [当前用户指令 + 进行中 Turn 及之后]
-    // 落库前渲染为纯文本分节（诉求3：历史中不残留 XML 标签，切断格式模仿链）
-    // post_tokens 口径 = 压缩完成后的内容水位（快照 + 保留区内容，不含请求级
-    // overhead），与 should_start_compression 迟滞比较的读取侧对齐；返回值中的
-    // after_tokens 同样按此口径，压缩前后日志才反映真实收益。
-    let snapshot_display = compression::render_snapshot_for_history(&snapshot_text);
-    let post_tokens = compression::estimate_message_tokens(&ChatMessage {
-        content: Some(MessageContent::Text(snapshot_display.clone())),
-        ..Default::default()
-    }) + original_messages[split_user_idx..]
-        .iter()
-        .map(compression::estimate_message_tokens)
-        .sum::<usize>();
-    let mut meta = serde_json::json!({ "compacted": true, "post_tokens": post_tokens });
-    if let Some(p) = &transcript_path {
-        meta["transcript_path"] = serde_json::json!(p);
-    }
-    if let Some(h) = hints {
-        if !h.trim().is_empty() {
-            meta["compact_hints"] = serde_json::json!(h);
-        }
-    }
-
-    // P2-3：快照指纹（与被动压缩同一套 meta 约定）
-    meta["protocol_version"] = serde_json::json!(super::compression::COMPRESSION_PROTOCOL_VERSION);
-    meta["prompt_fingerprint"] =
-        serde_json::json!(super::compression::compression_prompt_fingerprint());
-
-    let snapshot_message = ChatMessage {
-        id: short_id(),
-        // 快照作为压缩后的首条消息，必须是 user 角色（多数 provider 要求对话以 user 开头）
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
-        content: Some(MessageContent::Text(format!(
-            "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_display}"
-        ))),
-        status: Some(MessageStatus::Completed),
-        meta: Some(meta),
-        ..Default::default()
-    };
-
-    let mut new_messages = vec![snapshot_message];
-    // 保留区：当前用户指令 + 进行中 Turn（含本批 ToolCall）及之后的一切
-    new_messages.extend_from_slice(&original_messages[split_user_idx..]);
-    context.messages = new_messages;
-
-    let _ = context
-        .session
-        .replace_messages(context.messages.clone())
-        .await;
-
-    (true, before_tokens, post_tokens)
 }
 
 /// 压缩前把完整历史转存为 JSON transcript（best-effort）。
 /// 落在会话存储目录内（`<homedir>/plugins/session/<id>/transcripts/`，跟随会话生命周期），
 /// 而非系统临时目录（旧存档的教训：无 GC、跨会话堆积、脱离会话管理）。
+/// 路径派生统一走 paths 模块（safe_id / 会话根目录的唯一权威实现）。
 fn save_transcript_archive(messages: &[ChatMessage], session_id: &str) -> Option<String> {
-    use crate::symbio_core::HomedirRegistry;
-
-    let safe_id = session_id.replace(['/', '\\', ':'], "_");
-    let root = HomedirRegistry::get()
-        .join("plugins")
-        .join("session")
-        .join(safe_id)
-        .join("transcripts");
+    let root = super::paths::session_subdir(session_id, super::paths::TRANSCRIPTS_SUBDIR);
     std::fs::create_dir_all(&root).ok()?;
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1425,9 +1380,63 @@ async fn send_compression_request(
     channel: &mut PluginChannel,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<ChatMessage, PluginError> {
-    use crate::symbio_core::schemas::session::chat_message::MessageContent;
+    // 压缩是**内部 LLM 请求**，不是对话轮次：其流式帧（Turn 起始 / 思考 / 正文 delta）
+    // 绝不能进入对话流——否则前端会多出一个永远停在"正在思考…"的空 Turn（压缩请求
+    // 从不 finalize，快照也只落库不广播），且随每次自动压缩/主动压缩逐个累积。
+    // 长会话才会触发压缩，因此该泄漏只在长任务后复现，极易误判为渲染层问题。
+    //
+    // 通道隔离的不对称设计：
+    // - **tx（出帧）完全静默**：哑 sender + drain task，压缩 delta 一律丢弃（编译期
+    //   不可泄漏——本函数内所有 emit 都走 muted.tx）；
+    // - **rx（入帧）临时移交真实主通道**：用户停止时 Abort 帧只会进入主通道队列，
+    //   而消费循环此刻正 await 在压缩请求上——若 rx 也是哑的，Abort 永远收不到，
+    //   压缩请求将无视中止跑完整整轮 LLM 流（此前还曾因哑 rx 立即关闭被误判
+    //   Aborted，导致每轮重试巨型压缩请求）。压缩结束后 rx 归还主通道。
+    let (mute_tx, mut mute_rx) = tokio::sync::mpsc::channel::<PluginFrame>(64);
+    tokio::spawn(async move {
+        while mute_rx.recv().await.is_some() {}
+    });
+    let dummy_rx = tokio::sync::mpsc::channel::<PluginFrame>(1).1;
+    // 出栈时通过 mem::replace 归还真实 rx（下方统一在请求结束后归还）
+    let real_rx = std::mem::replace(&mut channel.rx, dummy_rx);
+    let mut muted = PluginChannel {
+        tx: mute_tx,
+        rx: real_rx,
+        cancel_token: tokio_util::sync::CancellationToken::new(),
+    };
 
-    emit_streaming_start(channel, root_id, None).await;
+    let result = run_compression_llm(
+        orchestrator,
+        system_prompt,
+        messages,
+        root_id,
+        &mut muted,
+        abort_flag,
+    )
+    .await;
+
+    // 无论成败，立即把真实 rx 归还主通道（Abort 帧的消费权交还消费循环）
+    let dummy_rx = tokio::sync::mpsc::channel::<PluginFrame>(1).1;
+    channel.rx = std::mem::replace(&mut muted.rx, dummy_rx);
+
+    result
+}
+
+/// 压缩摘要的实际 LLM 调用：出帧全部静默（muted.tx），入帧收真实主通道 Abort。
+///
+/// 注意：这里**绝不发射 Turn 帧**（不发 emit_streaming_start）。压缩是内部请求、
+/// 不是对话轮次——Turn 帧在哑通道上是纯死代码，而历史上它曾走主通道泄漏，在前端
+/// 留下永远"正在思考…"的空 Turn 骨架（每轮压缩尝试累积一个）。从源头删除调用点，
+/// 使"内部请求泄漏可见帧"这一类问题在结构上不可能再发生。
+async fn run_compression_llm(
+    orchestrator: &ChatOrchestrator,
+    system_prompt: &str,
+    messages: &[ChatMessage],
+    root_id: &str,
+    muted: &mut PluginChannel,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<ChatMessage, PluginError> {
+    use crate::symbio_core::schemas::session::chat_message::MessageContent;
 
     let turn_config = orchestrator.config.clone();
     let body = orchestrator
@@ -1438,7 +1447,7 @@ async fn send_compression_request(
         &orchestrator.protocol.get_api_url(&turn_config),
         orchestrator.protocol.get_headers(&turn_config),
         &body,
-        channel,
+        muted,
         abort_flag,
     )
     .await
@@ -1453,7 +1462,7 @@ async fn send_compression_request(
     let out = parse_sse_stream(
         response,
         root_id,
-        channel,
+        muted,
         abort_flag,
         orchestrator.protocol.as_ref(),
     )

@@ -10,7 +10,6 @@
 //! （`create_object::<dyn ModelProvider>(protocol_id, ctx)` 取得实例），
 //! 实现体保留在 model 插件的 `protocols/` 目录下。
 
-use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::model::model_config::ModelConfig;
 use crate::symbio_core::CapabilityMeta;
@@ -153,14 +152,6 @@ pub trait ModelProvider: Send + Sync {
     ) -> Result<TurnOutput, PluginError> {
         let body = self.prepare_request(config, system_prompt, messages, tools);
 
-        plugin_info!(
-            "model",
-            "[DIAG] ModelProvider::execute_turn entered, url={}, msg_count={}, tool_count={}",
-            self.get_api_url(config),
-            messages.len(),
-            tools.len()
-        );
-
         let response = match execute_post_with_abort(
             &self.get_api_url(config),
             self.get_headers(config),
@@ -171,10 +162,6 @@ pub trait ModelProvider: Send + Sync {
         .await
         {
             PostResult::Aborted => {
-                plugin_warn!(
-                    "model",
-                    "[DIAG] ModelProvider::execute_turn: PostResult::Aborted"
-                );
                 return Err(PluginError::Aborted);
             }
             PostResult::RetryWithoutContextId => {
@@ -186,48 +173,21 @@ pub trait ModelProvider: Send + Sync {
                 return Err(PluginError::RetryWithoutContextId);
             }
             PostResult::Err(msg) => {
-                plugin_warn!(
-                    "model",
-                    "[DIAG] ModelProvider::execute_turn: PostResult::Err({})",
-                    msg
-                );
                 return Err(PluginError::InternalError(msg));
             }
             PostResult::RateLimited(msg) => {
-                plugin_warn!(
-                    "model",
-                    "[DIAG] ModelProvider::execute_turn: PostResult::RateLimited({})",
-                    msg
-                );
                 return Err(PluginError::RateLimited(msg));
             }
             PostResult::Ok(resp) => {
-                plugin_info!(
-                    "model",
-                    "[DIAG] ModelProvider::execute_turn: PostResult::Ok, status={}",
-                    resp.status()
-                );
                 resp
             }
         };
 
         match parse_sse_stream(response, root_id, channel, abort_flag, self).await {
             Err(msg) => {
-                plugin_warn!(
-                    "model",
-                    "[DIAG] ModelProvider::execute_turn: parse_sse_stream Err({})",
-                    msg
-                );
                 Err(PluginError::StreamError(msg))
             }
-            Ok(mut out) => {
-                plugin_info!(
-                    "model",
-                    "[DIAG] ModelProvider::execute_turn: parse_sse_stream Ok, text_len={}, reasoning_len={}, tool_calls={}",
-                    out.text.len(),
-                    out.reasoning.len(),
-                    out.tool_accumulator.get_completed().len()
-                );
+            Ok(out) => {
                 Ok(out)
             }
         }

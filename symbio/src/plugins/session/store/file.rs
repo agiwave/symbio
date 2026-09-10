@@ -40,14 +40,12 @@ impl FileSessionStore {
         Self { base_dir }
     }
 
-    /// 将 session_id 转换为安全的目录名
-    fn safe_id(session_id: &str) -> String {
-        session_id.replace(['/', '\\', ':'], "_")
-    }
-
     /// `<base_dir>/<safe_id>/`
+    ///
+    /// safe_id 的唯一实现在 `super::super::paths::safe_id`（历史上有 4 处
+    /// 重复实现，已收敛；此处 base_dir 由外部注入，仅复用 id→目录名映射）。
     pub fn dir_for(base_dir: &Path, session_id: &str) -> PathBuf {
-        base_dir.join(Self::safe_id(session_id))
+        base_dir.join(super::super::paths::safe_id(session_id))
     }
 
     /// `<base_dir>/<safe_id>/session.json`
@@ -58,9 +56,9 @@ impl FileSessionStore {
     /// 子会话目录：`<base_dir>/<safe(父)>/sessions/<safe(子)>/`
     fn sub_dir_for(base_dir: &Path, parent_id: &str, session_id: &str) -> PathBuf {
         base_dir
-            .join(Self::safe_id(parent_id))
+            .join(super::super::paths::safe_id(parent_id))
             .join(SUB_SESSIONS_DIR)
-            .join(Self::safe_id(session_id))
+            .join(super::super::paths::safe_id(session_id))
     }
 
     /// 归属父会话 id（metadata.parent_session_id；空/自引用视为无归属）
@@ -91,7 +89,10 @@ impl FileSessionStore {
     fn find_nested_dir(&self, session_id: &str) -> Option<PathBuf> {
         let entries = std::fs::read_dir(&self.base_dir).ok()?;
         for entry in entries.flatten() {
-            let dir = entry.path().join(SUB_SESSIONS_DIR).join(Self::safe_id(session_id));
+            let dir = entry
+                .path()
+                .join(SUB_SESSIONS_DIR)
+                .join(super::super::paths::safe_id(session_id));
             if dir.join("session.json").is_file() {
                 return Some(dir);
             }
