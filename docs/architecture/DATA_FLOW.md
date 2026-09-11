@@ -61,7 +61,7 @@ sequenceDiagram
 |---|------|---------|------|
 | 1 | 监听 | `plugins/gateway/server.rs` | `POST /api/v1/invoke`（同步）、`WS /api/v1/ws`（双向）、`GET /api/v1/health` |
 | 2 | 鉴权 | `plugins/gateway/config.rs` | 非回环地址需 `inbound_token`；回环免鉴权 |
-| 3 | 同构调用 | gateway → `parent.route()`（父级为 `worker` Composite，等价于既有 `root.route`） | 载荷与 route_v2 完全同构（`PluginMessageWire`）；`gateway/*` 自身接口恒走 native，出站的 `outbound_*` 配置只影响前端分发 |
+| 3 | 同构调用 | gateway → `parent.route()`（父级为 `worker` Composite，等价于既有 `root.route`） | 载荷与 route_v2 完全同构（`PluginMessageWire`）；`gateway/*` 自身接口恒走 native |
 | 4 | 设计沿革 | [design/http-api-transport.md](../design/http-api-transport.md) | 设计稿（已实现落地） |
 
 **排障口诀**：外部调不通 → 先 `GET /api/v1/health`，再查 #2 鉴权与监听地址。

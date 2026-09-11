@@ -92,11 +92,21 @@ export async function getHomedirInfo(): Promise<HomedirInfo> {
  * 2. 调用成功后重新拉取数据（refreshData）
  *
  * @param homedir 目标 homedir（绝对路径或 `~` 前缀）
+ * @param opts.forceNative 是否强制走本机原生传输（切换系统目录时必须为 true，
+ *        否则当前出站协议若指向远端会把 reload 路由到远端而失败）
  * @returns 切换结果；失败时返回 null
  */
-export async function switchHomedir(homedir: string): Promise<ReloadResponse | null> {
+export async function switchHomedir(
+  homedir: string,
+  opts?: { forceNative?: boolean }
+): Promise<ReloadResponse | null> {
   try {
-    const resp = await callPlugin<ReloadResponse>('home/reload', { homedir })
+    const resp = await callPlugin<ReloadResponse>(
+      'home/reload',
+      { homedir },
+      undefined,
+      opts?.forceNative ? { forceNative: true } : undefined
+    )
     return resp
   } catch (err) {
     logger.error('home-service', `switchHomedir(${homedir}) failed:`, err)

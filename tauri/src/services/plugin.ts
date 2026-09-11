@@ -11,6 +11,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { logger } from '@/utils/logger'
+import {
+  loadSystemLocation,
+  setCurrentLocation,
+  setLocationError,
+} from './systemLocation'
 
 // ==================== 1. 协议定义 (与后端 transport.rs 严格对齐) ====================
 
@@ -157,7 +162,7 @@ class ProtocolEnforcer {
   }
 }
 
-// ==================== 2.5 出站传输选择（由网关插件配置驱动） ====================
+// ==================== 2.5 出站传输选择（由「系统目录」切换器 / localStorage 驱动） ====================
 
 export type TransportMode = 'native' | 'http'
 
@@ -169,16 +174,24 @@ interface OutboundConfig {
 
 /**
  * 出站配置：前端以何种协议连接后端。
- * - native：进程内直连本机后端（默认，现状）
- * - http：连接另一个 Symbio 实例的网关入站服务
- * 由网关插件的 `outbound` 配置决定，应用启动时经 `initGatewayTransport()` 读取。
+ * - native：进程内直连本机后端（默认，本地系统目录）
+ * - http：连接另一个 Symbio 实例的网关入站服务（远端系统目录）
+ *
+ * 其值由 `initGatewayTransport()` 依据前端持久化的「系统目录」(`systemLocation`) 决定；
+ * 连接目标完全由左下角「系统目录」切换器统一管理，网关插件不再持有出站配置。
+ * 远端不可达时自动回退 native，确保主页面始终可渲染。
  */
 let outbound: OutboundConfig = { protocol: 'native', endpoint: '', token: '' }
 let outboundReady: Promise<void> | null = null
 
 /**
- * 应用启动时调用一次：读取网关插件的出站配置，决定前端连接方式。
- * 自身使用 native invoke 读取，不依赖已被切换的传输，因此无「鸡生蛋」问题。
+ * 应用启动时调用一次：读取「系统目录」持久化选择，决定前端连接方式。
+ *
+ * 前端 localStorage 为权威（避免被坏配置卡死）：
+ * - 远端模式做健康探测：可达 → 出站切 HTTP；不可达 → 安全回退 native（绝不卡死主页面），
+ *   并通过 `locationError` 提示用户，便于从系统目录按钮切回。
+ * - 本地模式（含 localStorage 为空时的默认）直连本机后端。
+ *
  * 返回的 Promise 被缓存，供 `sendRouteRequest` 在首次调用前等待就绪（消除竞态）。
  */
 export function initGatewayTransport(): Promise<void> {
@@ -186,31 +199,46 @@ export function initGatewayTransport(): Promise<void> {
   return outboundReady
 }
 
-async function doInitGatewayTransport(): Promise<void> {
+/**
+ * 探测远端网关是否可达（健康检查端点不校验令牌）。
+ */
+async function pingRemote(url: string): Promise<boolean> {
   try {
-    const res = await invoke<PluginMessage>('route_v2', {
-      request: { metadata: { path: 'gateway/config/get' }, payload: null },
-      clientId: `gw_boot_${Date.now()}`
-    })
-    // 后端 GatewayConfig 是扁平结构：outbound_protocol / outbound_endpoint / outbound_token
-    const cfg = (res?.payload as any)?.data ?? res?.payload
-    const protocol = cfg?.outbound_protocol
-    const endpoint = cfg?.outbound_endpoint
-    const token = cfg?.outbound_token ?? ''
-    if (protocol === 'http' && endpoint) {
-      outbound = {
-        protocol: 'http',
-        endpoint: String(endpoint).replace(/\/+$/, ''),
-        token: String(token)
-      }
-      logger.info('Transport', `出站协议已切换为 HTTP: ${outbound.endpoint}`)
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    const res = await fetch(`${url}/api/v1/health`, { method: 'GET', signal: controller.signal })
+    clearTimeout(timer)
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+async function doInitGatewayTransport(): Promise<void> {
+  const loc = loadSystemLocation()
+
+  // 远端模式：健康探测，不可达则安全回退 native
+  if (loc.kind === 'remote' && loc.remoteUrl) {
+    const ok = await pingRemote(loc.remoteUrl)
+    if (ok) {
+      outbound = { protocol: 'http', endpoint: loc.remoteUrl, token: loc.remoteKey ?? '' }
+      setCurrentLocation(loc)
+      setLocationError(null)
+      logger.info('Transport', `系统目录=远端，出站协议已切换为 HTTP: ${outbound.endpoint}`)
       return
     }
+    // 不可达：回退 native，但保留远端配置，方便用户切回/重试
     outbound = { protocol: 'native', endpoint: '', token: '' }
-  } catch (e) {
-    logger.warn('Transport', '读取网关出站配置失败，回退 native', e)
-    outbound = { protocol: 'native', endpoint: '', token: '' }
+    setCurrentLocation(loc)
+    setLocationError(`远端地址不可达，已回退到本地连接：${loc.remoteUrl}`)
+    logger.warn('Transport', '远端地址不可达，回退 native:', loc.remoteUrl)
+    return
   }
+
+  // 本地模式（含 localStorage 为空时的默认）
+  outbound = { protocol: 'native', endpoint: '', token: '' }
+  setCurrentLocation(loc)
+  setLocationError(null)
 }
 
 export function getOutboundConfig(): OutboundConfig {
@@ -218,8 +246,8 @@ export function getOutboundConfig(): OutboundConfig {
 }
 
 /**
- * 重新读取网关出站配置（配置修改后调用）。
- * 清除缓存并重新读取，使新配置立即生效。
+ * 重新读取「系统目录」选择（切换后调用）。
+ * 清除缓存并依据最新 localStorage 重新决定出站协议，使切换立即生效。
  */
 export function reloadGatewayTransport(): Promise<void> {
   outboundReady = doInitGatewayTransport()
@@ -265,6 +293,12 @@ export interface PluginOptions {
   agent_id?: string;
   session_id?: string;
   metadata?: any;
+  /**
+   * 强制走原生 Tauri IPC 传输（native），绕过出站 http。
+   * 控制面操作（切换系统目录、读写本机网关配置等）必须命中本机后端，
+   * 不能被当前 outbound 指到远端，否则会出现「切到远端后无法切回」的死锁。
+   */
+  forceNative?: boolean;
 }
 
 interface SendRouteOptions extends PluginOptions {
@@ -312,7 +346,7 @@ function buildMetadata(request: SendRouteOptions): Record<string, string> {
  * - 'connect'：持久会话语义。native 走 `route_v2` + 事件通道；http 走 `WS /api/v1/ws`
  *   （首帧发送 PluginMessageWire，之后双向转发 PluginFrame）。
  *
- * 出站协议由 `initGatewayTransport()` 在启动期读出的网关配置决定；每次调用前
+ * 出站协议由 `initGatewayTransport()` 依据「系统目录」切换器的选择决定；每次调用前
  * await 该 Promise（已缓存），天然消除首调竞态。
  */
 async function sendRouteRequest(
@@ -330,7 +364,9 @@ async function sendRouteRequest(
   const target = request.path.replace(/^\/+/, '');
   const isGatewaySelf = target === 'gateway' || target.startsWith('gateway/');
 
-  if (!isGatewaySelf && ob.protocol === 'http' && ob.endpoint) {
+  // 控制面操作（forceNative）一律命中本机后端，避免被当前 outbound 指到远端而陷入死锁。
+  const useNative = request.forceNative || isGatewaySelf || !(ob.protocol === 'http' && ob.endpoint);
+  if (!useNative) {
     return httpTransport(request, mode, ob, onFrame, onEof);
   }
   return nativeTransport(request, onFrame, onEof);

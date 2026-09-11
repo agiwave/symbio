@@ -1,7 +1,11 @@
-//! 网关配置：入站（对外提供服务）与出站（本应用连向何处）
+//! 网关配置：仅保留「入站」（本应用对外提供服务的 HTTP/WebSocket 网关）。
 //!
-//! 字段刻意**扁平化**（`inbound_*` / `outbound_*`），以直接契合设置表单的 flat key 绑定：
-//! 表单按 key 读写 `config[key]`，`config/set` 整体替换，无需嵌套路径解析。
+//! 字段刻意**扁平化**（`inbound_*`），以直接契合设置表单的 flat key 绑定：
+//! `config/set` 整体替换，无需嵌套路径解析。
+//!
+//! **出站（前端连向何处）已不再由本插件持有**：连接目标由前端「系统目录」切换器
+//! 统一管理（localStorage 为权威），经 `initGatewayTransport` 决定 native / http 出站。
+//! 因此本配置只描述「本实例如何被调用（入站）」，不再描述「前端连向何处」。
 
 use serde::{Deserialize, Serialize};
 
@@ -22,14 +26,6 @@ pub struct GatewayConfig {
     pub inbound_token: String,
     /// 只读模式：仅放行查询类路径
     pub inbound_readonly: bool,
-
-    // ---- 出站：本应用的前端连向何处 ----
-    /// 出站协议：`native`（进程内直连本机后端）| `http`
-    pub outbound_protocol: String,
-    /// 目标地址（http 协议下为 `http://host:port`）
-    pub outbound_endpoint: String,
-    /// 访问令牌
-    pub outbound_token: String,
 }
 
 impl Default for GatewayConfig {
@@ -41,9 +37,6 @@ impl Default for GatewayConfig {
             inbound_port: 9231,
             inbound_token: String::new(),
             inbound_readonly: false,
-            outbound_protocol: "native".to_string(),
-            outbound_endpoint: "http://127.0.0.1:9231".to_string(),
-            outbound_token: String::new(),
         }
     }
 }
@@ -80,38 +73,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_outbound_is_native_and_inbound_off() {
+    fn default_inbound_off_and_native() {
         let c = GatewayConfig::default();
         assert!(!c.inbound_enabled);
         assert_eq!(c.inbound_protocol, "native");
         assert_eq!(c.inbound_port, 9231);
         assert_eq!(c.inbound_bind, "127.0.0.1");
-        assert_eq!(c.outbound_protocol, "native");
-        assert_eq!(c.outbound_endpoint, "http://127.0.0.1:9231");
-    }
-
-    /// 关键契约：前端 boot 读取 `gateway/config/get` 后按**扁平键**
-    /// `outbound_protocol` / `outbound_endpoint` / `outbound_token` 解析。
-    /// 若结构变回嵌套 `outbound: { protocol }`，前端出站 http 将永远不激活。
-    #[test]
-    fn serde_uses_flat_keys_not_nested() {
-        let c = GatewayConfig {
-            outbound_protocol: "http".into(),
-            outbound_endpoint: "http://remote:9231".into(),
-            outbound_token: "secret".into(),
-            ..GatewayConfig::default()
-        };
+        // 配置仅描述入站；不再含出站字段
         let v = serde_json::to_value(&c).unwrap();
-        assert_eq!(v["outbound_protocol"], "http");
-        assert_eq!(v["outbound_endpoint"], "http://remote:9231");
-        assert_eq!(v["outbound_token"], "secret");
-        // 绝不能是嵌套对象
-        assert!(v.get("outbound").is_none(), "配置被错误地嵌套为 outbound.*");
-
-        // 反序列化回上层结构也应保留
-        let back: GatewayConfig = serde_json::from_value(v).unwrap();
-        assert_eq!(back.outbound_protocol, "http");
-        assert_eq!(back.outbound_endpoint, "http://remote:9231");
+        assert!(v.get("outbound_protocol").is_none());
+        assert!(v.get("outbound_endpoint").is_none());
+        assert!(v.get("outbound_token").is_none());
     }
 
     #[test]

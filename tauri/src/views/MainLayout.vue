@@ -16,6 +16,7 @@
         <div class="nav-footer">
           <button
             class="nav-btn"
+            :class="{ 'nav-btn--error': locationError }"
             :title="homedirTitle"
             @click="openHomedirSwitcher = true"
             aria-label="系统目录"
@@ -25,6 +26,7 @@
               <circle cx="17" cy="13" r="2" />
             </svg>
             <span class="nav-label">系统目录</span>
+            <span v-if="locationError" class="nav-dot" />
           </button>
         </div>
       </template>
@@ -47,13 +49,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterView } from 'vue-router'
 import { startSessionBusWatcher } from '@/services/sessionBusWatcher'
-import { getHomedirInfo, type HomedirInfo } from '@/services/home'
+import { getHomedirInfo, getWorkspacePath } from '@/services/home'
 import { loadProviders, useNavRailItems } from '@/composables/useEntityProviders'
 import { useSessionsStore } from '@/stores/sessions'
-import { getWorkspacePath } from '@/services/home'
+import {
+  loadSystemLocation,
+  currentLocation,
+  locationError,
+  formatLocation,
+} from '@/services/systemLocation'
+import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
 import HomedirSwitcher from '@/components/common/HomedirSwitcher.vue'
 import Workbench from '@/components/common/Workbench.vue'
@@ -61,9 +69,9 @@ import Toast from '@/components/common/Toast.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { showToast } = useToast()
 
 const openHomedirSwitcher = ref(false)
-const currentHomedir = ref<HomedirInfo>({ homedir: '', bootstrap_path: '' })
 
 /** 主导航项：全部已注册 provider（后端 order 顺序），不含任何特殊分组。
  *  机制内唯一实现（useNavRailItems）：providers 注册表 → NavRail 项，
@@ -95,19 +103,33 @@ onMounted(async () => {
     logger.warn('MainLayout', '加载实体 provider 注册表失败:', err)
   }
 
-  // 异步加载 homedir 显示（不阻塞首屏）
-  try {
-    currentHomedir.value = await getHomedirInfo()
-  } catch (err) {
-    logger.warn('MainLayout', '加载 homedir 显示失败:', err)
+  // 本地模式下异步加载 homedir 显示（不阻塞首屏）；远端模式由系统目录状态直接展示
+  if (currentLocation.value.kind === 'local') {
+    try {
+      const info = await getHomedirInfo()
+      if (info.homedir) {
+        currentLocation.value = { ...currentLocation.value, localPath: info.homedir }
+      }
+    } catch (err) {
+      logger.warn('MainLayout', '加载 homedir 显示失败:', err)
+    }
+  }
+
+  // 启动期若远端不可达已回退本地，给出提示
+  if (locationError.value) {
+    showToast('error', locationError.value)
   }
 })
 
+// 远端不可达 / 连接异常时提示用户（便于从系统目录按钮切回/修正）
+watch(locationError, (msg) => {
+  if (msg) showToast('error', msg)
+})
+
 const homedirTitle = computed(() => {
-  if (currentHomedir.value.homedir) {
-    return `系统目录: ${currentHomedir.value.homedir}（点击切换）`
-  }
-  return '系统目录（点击切换）'
+  const loc = currentLocation.value
+  const label = loc.kind === 'remote' ? `远端 ${formatLocation(loc)}` : `本地 ${formatLocation(loc)}`
+  return locationError.value ? `${label}（连接异常，已回退本地）` : `${label}（点击切换）`
 })
 
 function goTo(path: string) {
@@ -117,12 +139,24 @@ function goTo(path: string) {
 }
 
 async function onHomedirReloaded() {
-  // 切换成功后，更新本地显示并跳转到首页让用户看到刷新效果
-  try {
-    currentHomedir.value = await getHomedirInfo()
-  } catch (err) {
-    logger.warn('MainLayout', '刷新 homedir 显示失败:', err)
+  // 切换成功后，从持久化同步当前连接目标显示
+  const loc = loadSystemLocation()
+  currentLocation.value = loc
+  if (loc.kind === 'local') {
+    try {
+      const info = await getHomedirInfo()
+      if (info.homedir) currentLocation.value = { ...loc, localPath: info.homedir }
+    } catch (err) {
+      logger.warn('MainLayout', '刷新 homedir 显示失败:', err)
+    }
   }
+  // 重新拉取导航与会话清单（远端模式下数据来自远端实例）
+  try {
+    await loadProviders()
+  } catch (err) {
+    logger.warn('MainLayout', '切换后加载 provider 失败:', err)
+  }
+  void useSessionsStore().refreshList()
   // 跳到首页（避免停留在某个"已失效"的页面）
   if (route.path !== '/') {
     router.push('/')
@@ -177,5 +211,23 @@ async function onHomedirReloaded() {
   gap: 0.25rem;
   padding: 0.5rem;
   border-top: 1px solid var(--border-default);
+}
+
+.nav-btn--error {
+  color: var(--danger-fg, #e5484d);
+}
+
+.nav-dot {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.5rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--danger-fg, #e5484d);
+}
+
+.nav-btn {
+  position: relative;
 }
 </style>

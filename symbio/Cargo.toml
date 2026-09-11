@@ -1,6 +1,6 @@
 [package]
 name = "symbio"
-version = "0.1.5"
+version = "0.1.13"
 description = "Symbio core plugin system - a fractal plugin architecture library"
 authors = ["Symbio Team"]
 license = "MIT"

@@ -292,11 +292,11 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 | 路径 | 用途 |
 |------|------|
-| `gateway/config/get` | 读取网关配置（扁平键 `inbound_*` / `outbound_*`） |
+| `gateway/config/get` | 读取网关配置（扁平键 `inbound_*`） |
 | `gateway/config/set` | 整体替换配置 → 上行 `save_config` → **内部 stop + start 重建监听** |
 | `gateway/status` | 运行状态（是否启用、协议、监听地址与端口、是否已在监听） |
 
-> `gateway/*` 自身接口**恒走 native**，不受 `outbound_protocol` 影响；前端出站分发才由 gateway 配置驱动。
+> `gateway/*` 自身接口**恒走 native**（前端不经 HTTP 访问本插件）。前端出站分发（native / http）由「系统目录」切换器管理，不再由 gateway 配置驱动。
 
 安全：非回环地址需 `inbound_token` 鉴权（回环地址免鉴权）；`inbound_readonly` 开启后仅放行只读白名单
 （`config/get`、`entities/list|get|detail|status`、`entities/providers`、`session/get_messages`、

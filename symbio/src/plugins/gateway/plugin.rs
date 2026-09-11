@@ -138,8 +138,6 @@ impl Plugin for GatewayPlugin {
                     "inbound_port": cfg.inbound_port,
                     "inbound_readonly": cfg.inbound_readonly,
                     "inbound_running": running,
-                    "outbound_protocol": cfg.outbound_protocol,
-                    "outbound_endpoint": cfg.outbound_endpoint,
                 })))
             }
             _ => Err(PluginError::NotFound(format!("[gateway] 未知路径: {path}"))),
@@ -183,15 +181,16 @@ mod tests {
     #[tokio::test]
     async fn config_get_returns_current_config() {
         let cfg = GatewayConfig {
-            outbound_protocol: "http".into(),
-            outbound_endpoint: "http://remote:9231".into(),
+            inbound_enabled: true,
+            inbound_protocol: "http".into(),
+            inbound_port: 9231,
             ..GatewayConfig::default()
         };
         let plugin = Arc::new(GatewayPlugin::new(None, cfg));
         let resp = call(plugin, "config/get", None).await.unwrap();
         let got: GatewayConfig = resp.get().unwrap();
-        assert_eq!(got.outbound_protocol, "http");
-        assert_eq!(got.outbound_endpoint, "http://remote:9231");
+        assert_eq!(got.inbound_enabled, true);
+        assert_eq!(got.inbound_protocol, "http");
         assert_eq!(got.inbound_port, 9231);
     }
 
@@ -200,8 +199,8 @@ mod tests {
         let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default()));
 
         let next = GatewayConfig {
-            outbound_protocol: "http".into(),
-            outbound_endpoint: "http://other:9231".into(),
+            inbound_enabled: true,
+            inbound_bind: "0.0.0.0".into(),
             ..GatewayConfig::default()
         };
         let set_resp = call(
@@ -217,8 +216,8 @@ mod tests {
         // 随后 config/get 应读回新值（父级为 None，不触发落盘/启服，仅内存生效）
         let got = call(plugin.clone(), "config/get", None).await.unwrap();
         let reread: GatewayConfig = got.get().unwrap();
-        assert_eq!(reread.outbound_protocol, "http");
-        assert_eq!(reread.outbound_endpoint, "http://other:9231");
+        assert_eq!(reread.inbound_enabled, true);
+        assert_eq!(reread.inbound_bind, "0.0.0.0");
     }
 
     #[tokio::test]

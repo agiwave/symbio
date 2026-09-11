@@ -322,7 +322,7 @@ fn web_detail_definition() -> DetailDefinition {
 fn gateway_detail_definition() -> DetailDefinition {
     config_definition(
         "开放接口",
-        "配置本应用如何被调用（入站）与前端连向何处（出站）",
+        "配置本应用如何被调用（入站，对外提供服务）。前端连向何处（出站）由左下角「系统目录」切换器统一管理，不在本页设置",
         "gateway",
         vec![
             // ---- 入站 ----
@@ -386,41 +386,6 @@ fn gateway_detail_definition() -> DetailDefinition {
                 description: Some("仅放行查询类路径，禁止写操作与命令执行".into()),
                 widget: "toggle".into(),
                 default: Some(serde_json::json!(false)),
-                ..Default::default()
-            },
-            // ---- 出站 ----
-            DetailField {
-                key: "outbound_protocol".into(),
-                label: "出站协议".into(),
-                description: Some("前端调用后端所用的协议；选 http 即把本应用前端指向远程实例".into()),
-                widget: "select".into(),
-                options: vec![
-                    DetailOption {
-                        value: "native".into(),
-                        label: "native（进程内直连本机后端）".into(),
-                    },
-                    DetailOption {
-                        value: "http".into(),
-                        label: "http（连接另一个 Symbio 实例）".into(),
-                    },
-                ],
-                default: Some(serde_json::json!("native")),
-                ..Default::default()
-            },
-            DetailField {
-                key: "outbound_endpoint".into(),
-                label: "远程地址".into(),
-                description: Some("http://host:port（出站协议为 http 时生效）".into()),
-                widget: "text".into(),
-                placeholder: Some("http://127.0.0.1:9231".into()),
-                default: Some(serde_json::json!("http://127.0.0.1:9231")),
-                ..Default::default()
-            },
-            DetailField {
-                key: "outbound_token".into(),
-                label: "远程访问令牌".into(),
-                widget: "password".into(),
-                placeholder: Some("远程实例设置的 API Key".into()),
                 ..Default::default()
             },
         ],
