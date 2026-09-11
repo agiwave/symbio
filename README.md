@@ -34,7 +34,7 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 | **核心（后端）** | `symbio/` | 插件路由、LLM 多协议适配、工具调用循环、会话持久化、Agent 认知体系、存储后端 |
 | **桌面端（前端）** | `tauri/` | Vue 3 组件 + Pinia 状态 + `services/`；通过 Tauri IPC 与后端通信，仅渲染 UI |
 | **适配层** | `tauri/src-tauri/` | 薄适配层，仅 **3 个 Tauri command**：`route_v2` / `route_v2_send` / `route_v2_close` |
-| **命令行** | `symbio/src/bin/seed_agents` | 批量灌入种子 Agent（幂等重建） |
+| **命令行前端** | `cli/` | 纯 Rust CLI 客户端（REPL / 单次 / 管道），进程内直连插件树，与 tauri 同源协议（详见 [cli/README.md](./cli/README.md)） |
 
 设计原则：**UI 只做配置与展示，所有逻辑都在核心库**。桌面端不实现业务规则，只是核心库的一个宿主。
 
@@ -101,6 +101,20 @@ cargo run --bin seed_agents          # 首次灌入 7 个角色
 cargo run --bin seed_agents -- --recreate   # 强制重建（先删后建）
 ```
 
+### 运行命令行前端（CLI）
+
+纯 Rust 的第二种前端形态，复用同一套插件树与协议，仅替换传输层（Tauri IPC → 进程内直连）。
+
+```bash
+cd cli
+node scripts/build-cli.mjs                                          # 构建（注入 C 工具链 + 路径归一化）
+../symbio/target/debug/symbio-cli.exe \
+  --homedir "D:\Bing\symbio\.symbio" -m "你好"                     # 非交互单条
+../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio"   # 交互 REPL
+```
+
+文档：[cli/README.md](./cli/README.md) · [架构](./cli/docs/architecture.md) · [构建](./cli/docs/building.md) · [用法](./cli/docs/usage.md)。
+
 ### 编译与测试核心库
 
 ```bash
@@ -134,6 +148,7 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 - **开发**：[插件开发指南](./docs/guides/PLUGIN_DEVELOPMENT.md) · [排障手册](./docs/guides/TROUBLESHOOTING.md) · [贡献指南](./CONTRIBUTING.md)
 - **现行设计**：[统一实体管理机制](./docs/design/entity-management-mechanism.md) · [上下文压缩分层总览](./docs/design/context-compression-design.md) · [OAB 规范](./docs/design/open-agent-bundle-spec.md)
 - **模块文档**：每个插件与前端各自维护 `README.md`（详见 [文档中心的模块文档地图](./docs/README.md#模块文档地图)）
+- **CLI 前端**：[cli/README.md](./cli/README.md) · [架构](./cli/docs/architecture.md) · [构建](./cli/docs/building.md) · [用法](./cli/docs/usage.md)
 - **更新日志**：[CHANGELOG](./docs/CHANGELOG.md) · **历史归档**：[archive/](./docs/archive/)
 
 ---
@@ -142,6 +157,7 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 
 ```
 symbio/
+├── cli/                 # 纯 Rust CLI 前端（进程内直连插件树；文档见 cli/README.md）
 ├── tauri/               # Vue 3 桌面端（约 13K 行 TS/Vue）
 │   └── src-tauri/       # 仅 3 个 Tauri command 的薄适配层
 ├── symbio/              # Rust 核心库

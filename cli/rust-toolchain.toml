@@ -1,0 +1,15 @@
+[toolchain]
+# 为什么 cli/ 需要自己的一份 rust-toolchain.toml：
+#   rustup 是按「当前工作目录向上」查找该文件的，而 cli/ 与 symbio/ 是**并列**的
+#   兄弟目录，因此 ../symbio/rust-toolchain.toml 管不到这里。缺了它就是 default
+#   channel（本机 = stable/1.98），与项目锁定的 1.93.1 不是同一个编译器。
+#
+#   后果不是"慢一点"，而是**构建直接失败**：cargo 的产物文件名哈希不含编译器版本，
+#   两个编译器会共用 target/debug/deps 下同名文件；换编译器后 cargo 会以
+#   "found crate `X` compiled by an incompatible version of rustc (E0514)" 报错，
+#   或者全量重编（本机实测 40 分钟仍未完成，且卡在 aws-lc-sys 的构建脚本上）。
+#
+#   因此这里必须与 ../symbio/rust-toolchain.toml 保持一致。
+channel = "1.93.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
