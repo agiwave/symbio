@@ -20,8 +20,7 @@ use crate::symbio_core::schemas::{
 };
 use super::model_chat;
 use crate::symbio_core::turn::{
-    build_tool_message, emit_status, emit_update, execute_post_with_abort, parse_sse_stream,
-    short_id, PostResult, ToolCallInfo, TurnOutput,
+    build_tool_message, emit_status, emit_update, short_id, ToolCallInfo, TurnOutput,
 };
 use crate::symbio_core::{
     ChatSession, InvokeRequest, InvokeRequestExt, ModelProvider, Plugin, PluginChannel,
@@ -51,8 +50,9 @@ struct SessionContext {
 /// turn_processor 薄委托层消亡（chat_loop 直调
 /// `provider.execute_turn` 与 `finalize_assistant_turn`）。
 pub struct ChatOrchestrator {
-    /// 唯一生效的模型服务（model 插件按上下文解析后经 CAPABILITY_VISITOR 注册）
-    pub provider: Arc<ModelProvider>,
+    /// 唯一生效的模型服务（model 插件按上下文解析后经 CAPABILITY_VISITOR 注册；
+    /// core 纯 trait 的 trait object——session 对协议实现零依赖）
+    pub provider: Arc<dyn ModelProvider>,
     pub parent: Option<Arc<dyn Plugin>>,
     /// 预计算的生效上下文上限（`provider.effective_context_tokens()` 结果，
     /// 构造时由调用方传入，避免异步钩子在热路径反复触发）
@@ -61,7 +61,7 @@ pub struct ChatOrchestrator {
 
 impl ChatOrchestrator {
     pub fn new(
-        provider: Arc<ModelProvider>,
+        provider: Arc<dyn ModelProvider>,
         parent: Option<Arc<dyn Plugin>>,
         context_limit: u32,
     ) -> Self {
@@ -165,7 +165,7 @@ pub async fn run_chat_loop(
     plugin_info!(
         "session",
         ">>> NEW SESSION START (Protocol: {:?})",
-        orchestrator.provider.api_protocol
+        orchestrator.provider.api_protocol()
     );
 
     // 用户明确要求**不要**设置 max_tool_rounds 硬性上限（智能体会话轮次越来越多）。
@@ -1447,35 +1447,14 @@ async fn run_compression_llm(
 ) -> Result<ChatMessage, PluginError> {
     use crate::symbio_core::schemas::session::chat_message::MessageContent;
 
-    let body = orchestrator
+    // 压缩路径与对话轮次共用同一模型契约：provider.execute_turn（tools 为空）。
+    // 出帧仍全部静默（muted.tx），入帧收真实主通道 Abort——语义与此前手动
+    // prepare_request + execute_post_with_abort + parse_sse_stream 组合一致，
+    // 但协议细节（请求构造 / 重试 / SSE 解析）收敛进 model 插件实现。
+    let out = orchestrator
         .provider
-        .prepare_request(system_prompt, messages, &[]);
-
-    let response = match execute_post_with_abort(
-        &orchestrator.provider.get_api_url(),
-        orchestrator.provider.get_headers(),
-        &body,
-        muted,
-        abort_flag,
-    )
-    .await
-    {
-        PostResult::Aborted => return Err(PluginError::Aborted),
-        PostResult::RetryWithoutContextId => return Err(PluginError::RetryWithoutContextId),
-        PostResult::Err(e) => return Err(PluginError::InternalError(e)),
-        PostResult::RateLimited(e) => return Err(PluginError::RateLimited(e)),
-        PostResult::Ok(resp) => resp,
-    };
-
-    let out = parse_sse_stream(
-        response,
-        root_id,
-        muted,
-        abort_flag,
-        orchestrator.provider.protocol.as_ref(),
-    )
-    .await
-    .map_err(PluginError::StreamError)?;
+        .execute_turn(system_prompt, messages, &[], root_id, muted, abort_flag)
+        .await?;
 
     if abort_flag.load(Ordering::SeqCst) {
         return Err(PluginError::Aborted);

@@ -59,15 +59,10 @@ pub const CAPABILITY_AGENT_COGNITION: &str = "agent_cognition";
 pub const CAPABILITY_AGENT_CREATE: &str = "agent_create";
 
 // ============ Model 协议 id ============
-
-/// Anthropic Messages 协议
-pub const MODEL_PROTOCOL_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
-/// OpenAI Chat Completions 协议
-pub const MODEL_PROTOCOL_OPENAI_CHAT: &str = "openai_chat";
-/// OpenAI Responses 协议
-pub const MODEL_PROTOCOL_OPENAI_RESPONSES: &str = "openai_responses";
-/// Gemini API 协议
-pub const MODEL_PROTOCOL_GEMINI_API: &str = "gemini_api";
+//
+// MODEL_PROTOCOL_* 常量已随 ModelProtocol trait 内化到 model 插件
+// （plugins/model/protocols/mod.rs）——协议 id 属于插件内部实现细节，
+// core 不再暴露。
 
 // ============ Agent 存储后端 id ============
 

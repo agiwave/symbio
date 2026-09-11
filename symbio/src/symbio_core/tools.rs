@@ -26,7 +26,7 @@ use tokio::sync::RwLock;
 /// - `system_prompts`：系统提示词（按名称保序）
 pub struct DefaultToolVisitor {
     tools: Arc<RwLock<HashMap<String, Arc<dyn Capability>>>>,
-    provider: Arc<RwLock<Option<Arc<ModelProvider>>>>,
+    provider: Arc<RwLock<Option<Arc<dyn ModelProvider>>>>,
     system_prompts: Arc<RwLock<IndexMap<String, String>>>,
 }
 
@@ -80,12 +80,12 @@ impl CapabilityVisitor for DefaultToolVisitor {
         tools.contains_key(name)
     }
 
-    async fn register_model_provider(&self, provider: Arc<ModelProvider>) {
+    async fn register_model_provider(&self, provider: Arc<dyn ModelProvider>) {
         let mut slot = self.provider.write().await;
         *slot = Some(provider);
     }
 
-    async fn get_model_provider(&self) -> Option<Arc<ModelProvider>> {
+    async fn get_model_provider(&self) -> Option<Arc<dyn ModelProvider>> {
         let slot = self.provider.read().await;
         slot.clone()
     }
@@ -108,62 +108,53 @@ impl CapabilityVisitor for DefaultToolVisitor {
 mod tests {
     use super::*;
     use crate::symbio_core::schemas::session::chat_message::ChatMessage;
-    use crate::symbio_core::{CapabilityMeta, ModelProtocol, ProtocolEvent};
+    use crate::symbio_core::turn::TurnOutput;
+    use crate::symbio_core::{CapabilityMeta, PluginChannel, PluginError};
     use async_trait::async_trait;
-    use serde_json::Value;
+    use std::sync::atomic::AtomicBool;
 
-    /// 最小协议桩：仅用于验证注册存储语义，不发起真实请求
-    struct MockProtocol {
+    /// 最小模型服务桩：实现纯 trait 契约，仅用于验证注册存储语义，不发起真实请求
+    struct MockProvider {
         tag: String,
     }
 
     #[async_trait]
-    impl ModelProtocol for MockProtocol {
-        fn get_api_url(&self, _provider: &ModelProvider) -> String {
-            self.tag.clone()
+    impl ModelProvider for MockProvider {
+        fn provider_id(&self) -> &str {
+            &self.tag
         }
 
-        fn get_headers(&self, _provider: &ModelProvider) -> reqwest::header::HeaderMap {
-            reqwest::header::HeaderMap::new()
+        fn api_protocol(&self) -> &str {
+            "openai_chat"
         }
 
-        fn prepare_request(
+        fn rate_limit_ms(&self) -> u64 {
+            0
+        }
+
+        fn max_context_tokens(&self) -> u32 {
+            262_144
+        }
+
+        async fn effective_context_tokens(&self) -> u32 {
+            262_144
+        }
+
+        async fn execute_turn(
             &self,
-            _provider: &ModelProvider,
             _system_prompt: &str,
             _messages: &[ChatMessage],
             _tools: &[CapabilityMeta],
-        ) -> Value {
-            serde_json::json!({})
-        }
-
-        fn parse_response_line(&self, _line: &str) -> Vec<ProtocolEvent> {
-            Vec::new()
+            _root_id: &str,
+            _channel: &mut PluginChannel,
+            _abort_flag: &Arc<AtomicBool>,
+        ) -> Result<TurnOutput, PluginError> {
+            Err(PluginError::InternalError("mock".to_string()))
         }
     }
 
-    fn provider(id: &str) -> Arc<ModelProvider> {
-        Arc::new(ModelProvider {
-            provider_id: id.to_string(),
-            protocol_id: "openai_chat".to_string(),
-            system_prompt: None,
-            rate_limit_ms: 0,
-            provider: id.to_string(),
-            api_base: String::new(),
-            api_key: None,
-            model: String::new(),
-            temperature: 0.7,
-            max_tokens: None,
-            max_context_tokens: 262_144,
-            reserved_tokens: 4_096,
-            timeout_secs: 300,
-            api_protocol: "openai_chat".to_string(),
-            store: false,
-            reasoning: None,
-            protocol: Arc::new(MockProtocol {
-                tag: id.to_string(),
-            }),
-        })
+    fn provider(id: &str) -> Arc<dyn ModelProvider> {
+        Arc::new(MockProvider { tag: id.to_string() })
     }
 
     #[tokio::test]
@@ -176,8 +167,7 @@ mod tests {
         mgr.register_model_provider(provider("p1")).await;
         let got = mgr.get_model_provider().await;
         let got = got.expect("注册后应可取回");
-        assert_eq!(got.provider_id, "p1");
-        assert_eq!(got.protocol.get_api_url(&got), "p1");
+        assert_eq!(got.provider_id(), "p1");
     }
 
     #[tokio::test]
@@ -189,7 +179,7 @@ mod tests {
         // 单槽覆盖：后注册者生效
         let got = mgr.get_model_provider().await;
         let got = got.expect("覆盖注册后仍应可取回");
-        assert_eq!(got.provider_id, "p2");
+        assert_eq!(got.provider_id(), "p2");
     }
 
     #[tokio::test]

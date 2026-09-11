@@ -6,14 +6,11 @@
 //!   每次对话可以选择其中一个使用
 //! - 配置以 `id` 为键保存在 `ModelProvidersConfig` 中，并提供 `default_provider_id` 标识默认
 //! - 本文件是 model 插件的**持久化 serde schema**（用户配置文件 JSON 字段名冻结，保持兼容）；
-//!   运行期统一契约 `ModelProvider`（`symbio_core::model_provider`）经
-//!   [`ModelProviderConfig::into_model_provider`] 构造，管理字段（id/name/enabled 等）
-//!   仅在本层存在
+//!   运行期契约为 core 的纯 `ModelProvider` trait，由 `bound_provider::BoundProvider`
+//!   绑定本配置与协议实现后实现；管理字段（id/name/enabled 等）仅在本层存在
 
-use crate::symbio_core::{ModelProvider, ModelProtocol, ReasoningConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 fn default_enabled() -> bool {
     true
@@ -27,10 +24,17 @@ fn default_provider_name() -> String {
     "Default".to_string()
 }
 
+/// 推理配置（自 core `model_provider.rs` 内化迁入——serde 形态不变，用户配置兼容）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningConfig {
+    pub effort: String,
+}
+
 /// 单个 Model Provider 配置
 ///
 /// 管理字段（`id` / `name` / `rate_limit_ms` / `enabled`）之外的全部字段
-/// 均为模型参数，与运行期 `ModelProvider` 结构体的同名字段一一对应。
+/// 均为模型参数，由协议钩子（`ModelProtocol`，收 `&ModelProviderConfig`）
+/// 与 `BoundProvider`（core `ModelProvider` trait 实现）直接读取。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelProviderConfig {
     /// Provider 唯一 ID（注册表 key）
@@ -109,41 +113,6 @@ impl Default for ModelProviderConfig {
             reasoning: None,
             rate_limit_ms: default_rate_limit_ms(),
             enabled: default_enabled(),
-        }
-    }
-}
-
-impl ModelProviderConfig {
-    /// 构造运行期统一契约 `ModelProvider`
-    ///
-    /// - `protocol_id`：经 `resolve_protocol_id` 归一化后的协议工厂 ID
-    /// - `protocol`：协议适配器实例（由工厂按 `protocol_id` 创建）
-    ///
-    /// 管理字段中仅 `id`（→ `provider_id`）、`system_prompt`、`rate_limit_ms`
-    /// 进入运行期结构；`name`/`enabled` 留在本层（选择在 resolve 阶段完成）。
-    pub fn into_model_provider(
-        self,
-        protocol_id: String,
-        protocol: Arc<dyn ModelProtocol>,
-    ) -> ModelProvider {
-        ModelProvider {
-            provider_id: self.id,
-            protocol_id,
-            system_prompt: self.system_prompt,
-            rate_limit_ms: self.rate_limit_ms,
-            provider: self.provider,
-            api_base: self.api_base,
-            api_key: self.api_key,
-            model: self.model,
-            temperature: self.temperature,
-            max_tokens: self.max_tokens,
-            max_context_tokens: self.max_context_tokens,
-            reserved_tokens: self.reserved_tokens,
-            timeout_secs: self.timeout_secs,
-            api_protocol: self.api_protocol,
-            store: self.store,
-            reasoning: self.reasoning,
-            protocol,
         }
     }
 }

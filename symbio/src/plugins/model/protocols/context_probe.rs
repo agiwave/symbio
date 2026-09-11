@@ -19,7 +19,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 use crate::symbio_core::get_http_client;
-use crate::symbio_core::ModelProvider;
+
+use super::super::model_providers::ModelProviderConfig;
 
 /// 单个探测结果：(采集时间, 上限值)。`None` 表示服务未上报。
 type ProbeEntry = (Instant, Option<u32>);
@@ -188,18 +189,18 @@ async fn probe_models_endpoint(api_base: &str, model: &str) -> Option<u32> {
 ///
 /// 供 `openai_chat` / `openai_responses` 协议的 `ModelProtocol::query_context_limit`
 /// 调用；结果按 `(api_base, model)` 缓存。
-pub(crate) async fn probe_openai_compat_context(provider: &ModelProvider) -> Option<u32> {
-    if provider.api_base.trim().is_empty() || provider.model.trim().is_empty() {
+pub(crate) async fn probe_openai_compat_context(cfg: &ModelProviderConfig) -> Option<u32> {
+    if cfg.api_base.trim().is_empty() || cfg.model.trim().is_empty() {
         return None;
     }
-    let key = format!("{}|{}", provider.api_base, provider.model);
+    let key = format!("{}|{}", cfg.api_base, cfg.model);
     cached_probe(&key, async move {
-        let root = server_root(&provider.api_base);
+        let root = server_root(&cfg.api_base);
         let (lm, ps, show, vllm) = tokio::join!(
-            probe_lmstudio(root, &provider.model),
-            probe_ollama_ps(root, &provider.model),
-            probe_ollama_show(root, &provider.model),
-            probe_models_endpoint(&provider.api_base, &provider.model),
+            probe_lmstudio(root, &cfg.model),
+            probe_ollama_ps(root, &cfg.model),
+            probe_ollama_show(root, &cfg.model),
+            probe_models_endpoint(&cfg.api_base, &cfg.model),
         );
         [lm, ps, show, vllm].into_iter().flatten().min()
     })

@@ -1,6 +1,6 @@
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与编排中心**。Phase E-② 重构后，它是**唯一的会话编排入口**：加载历史、组装系统提示词、经 CapabilityVisitor 汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（自含模型参数与协议适配）并在进程内驱动会话循环；Model 插件退居**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与编排中心**。Phase E-② 重构后，它是**唯一的会话编排入口**：加载历史、组装系统提示词、经 CapabilityVisitor 汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（core 纯 trait，`Arc<dyn ModelProvider>` 单一契约；协议适配细节内化于 model 插件）并在进程内驱动会话循环；Model 插件退居**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
@@ -22,7 +22,7 @@ flowchart TD
         AggTools --> Resolve[6. 获取生效 ModelProvider<br>get_model_provider 单次解析]
         Resolve --> Spawn[7. 进程内 spawn 会话循环<br>RATE_LIMITER 限流跟随请求方]
         Spawn --> BuildView[8. 构建请求视图<br>build_request_view<br>内容淡化/工具淡化/骨架化/水位提醒]
-        BuildView --> LLMCall[9. protocol 推理调用<br>直连无状态 LLM 网关]
+        BuildView --> LLMCall[9. ModelProvider 推理调用<br>execute_turn 直连无状态 LLM 网关]
         LLMCall --> ToolAction[10. 执行工具链]
         ToolAction --> LoopCheck{11. 迭代完成?}
         LoopCheck -- No --> BuildView

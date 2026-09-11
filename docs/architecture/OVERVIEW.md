@@ -155,16 +155,18 @@ pub trait Plugin: Send + Sync + 'static {
 
 ### 为什么 Model 支持多协议？
 
-```rust
-pub enum ModelProtocol {
-    OpenAiChat,        // POST /v1/chat/completions
-    OpenAiResponses,   // POST /v1/responses
-    AnthropicMessages, // POST /v1/messages
-    GeminiApi,         // generateContent
-}
+协议适配契约 `ModelProtocol`（钩子：get_api_url / get_headers / prepare_request / parse_response_line / ping / query_context_limit）**内化在 model 插件内部**（`plugins/model/protocols/`），内置 4 个实现：
+
+```text
+openai_chat        // POST /v1/chat/completions
+openai_responses   // POST /v1/responses
+anthropic_messages // POST /v1/messages
+gemini_api         // generateContent
 ```
 
-**理由**：供应商无关、协议演进、功能差异适配
+协议差异被钩子吸收后，model 插件以 `BoundProvider`（配置 + 协议适配器绑定）实现 core 的纯 `ModelProvider` trait（`provider_id` / `api_protocol` / `rate_limit_ms` / `max_context_tokens` / `effective_context_tokens` / `execute_turn`）注册给 session——**session 只依赖这一个模型契约**，对协议体系零感知。
+
+**理由**：供应商无关、协议演进、功能差异适配；核心契约保持 object-safe trait，协议细节可独立演进
 
 ## 机制化原则（Agent 子系统）
 

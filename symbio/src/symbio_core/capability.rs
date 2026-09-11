@@ -209,18 +209,18 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
 
     /// 注册模型服务（AI 对话能力）
     ///
-    /// 「ModelProvider 类型体系合并」后的语义：model 插件在 traverse 中按
-    /// 上下文（用户选中的模型 id > 默认 provider > 首个启用）解析出**唯一
-    /// 生效**的 `ModelProvider` 并注册于此；重复注册时后者覆盖（单槽）。
-    /// 会话发起时经同一次 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播，
-    /// 与工具、系统提示词一并收集。
-    async fn register_model_provider(&self, provider: Arc<ModelProvider>);
+    /// 纯 trait 契约后的语义：model 插件在 traverse 中按上下文（用户选中的
+    /// 模型 id > 默认 provider > 首个启用）解析出**唯一生效**的
+    /// `Arc<dyn ModelProvider>`（配置 + 协议钩子的绑定实现）并注册于此；
+    /// 重复注册时后者覆盖（单槽）。会话发起时经同一次
+    /// `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播，与工具、系统提示词一并收集。
+    async fn register_model_provider(&self, provider: Arc<dyn ModelProvider>);
 
-    /// 取当前生效的模型服务（协议实例 + 全部模型参数一次取齐）
+    /// 取当前生效的模型服务（trait object；协议适配细节内化于实现体）
     ///
     /// 会话引擎凭此实例即可直接发起 `execute_turn`（参数自含，无需回查
-    /// model 插件内部注册表）。
-    async fn get_model_provider(&self) -> Option<Arc<ModelProvider>>;
+    /// model 插件内部注册表，也无需感知任何协议抽象）。
+    async fn get_model_provider(&self) -> Option<Arc<dyn ModelProvider>>;
 
     /// 注册系统提示词（按名称保序；同名覆盖）
     async fn register_system_prompt(&self, name: &str, prompt: String);

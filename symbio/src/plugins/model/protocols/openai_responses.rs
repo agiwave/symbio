@@ -5,20 +5,23 @@ use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
-use crate::symbio_core::model_provider::{FinishReason, ModelProtocol, ProtocolEvent, Usage};
-use crate::symbio_core::{get_http_client, ModelProvider, InvokeRequest, PluginError, MODEL_PROTOCOL_OPENAI_RESPONSES};
+use super::{ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES};
+use crate::symbio_core::{
+    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
+};
 use tracing::debug;
 
 pub struct OpenaiResponsesProtocol;
 
 #[async_trait]
 impl ModelProtocol for OpenaiResponsesProtocol {
-    fn get_api_url(&self, provider: &ModelProvider) -> String {
-        format!("{}/responses", provider.api_base)
+    fn get_api_url(&self, cfg: &ModelProviderConfig) -> String {
+        format!("{}/responses", cfg.api_base)
     }
 
-    fn get_headers(&self, provider: &ModelProvider) -> HeaderMap {
+    fn get_headers(&self, cfg: &ModelProviderConfig) -> HeaderMap {
         let mut h = reqwest::header::HeaderMap::new();
         if let Ok(v) = "application/json".parse() {
             h.insert("Content-Type", v);
@@ -26,7 +29,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         if let Ok(v) = "realtime=v1".parse() {
             h.insert("OpenAI-Beta", v);
         }
-        if let Some(k) = &provider.api_key {
+        if let Some(k) = &cfg.api_key {
             if let Ok(v) = format!("Bearer {k}").parse() {
                 h.insert("Authorization", v);
             } else {
@@ -38,7 +41,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
 
     fn prepare_request(
         &self,
-        provider: &ModelProvider,
+        cfg: &ModelProviderConfig,
         system: &str,
         messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
         tools: &[CapabilityMeta],
@@ -165,18 +168,18 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         }
 
         let mut req = json!({
-            "model": provider.model,
+            "model": cfg.model,
             "input": input_items,
             "instructions": system,
-            "temperature": provider.temperature,
+            "temperature": cfg.temperature,
             "stream": true,
-            "store": provider.store,
+            "store": cfg.store,
         });
 
         if let Some(ref pid) = previous_response_id {
             req["previous_response_id"] = json!(pid);
         }
-        req["max_output_tokens"] = json!(provider.max_tokens.unwrap_or(8192));
+        req["max_output_tokens"] = json!(cfg.max_tokens.unwrap_or(8192));
         if !tools.is_empty() {
             req["tools"] = json!(tools
                 .iter()
@@ -318,17 +321,17 @@ impl ModelProtocol for OpenaiResponsesProtocol {
     ///
     /// 此前本协议缺少 ping 分支——验证只能走 `handle_chat_stream` 全量
     /// 会话路径，与其余三协议不对称；现以独立的轻量请求补齐。
-    async fn ping(&self, provider: &ModelProvider) -> Result<(), PluginError> {
-        let api_key = provider.api_key.clone().unwrap_or_default();
+    async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
+        let api_key = cfg.api_key.clone().unwrap_or_default();
         let request = json!({
-            "model": provider.model,
+            "model": cfg.model,
             "input": "ping",
             // OpenAI 限制 max_output_tokens 最小为 16
             "max_output_tokens": 16,
         });
 
         let response = get_http_client()
-            .post(self.get_api_url(provider))
+            .post(self.get_api_url(cfg))
             .header("Authorization", format!("Bearer {api_key}"))
             .header("Content-Type", "application/json")
             .json(&request)
@@ -350,8 +353,8 @@ impl ModelProtocol for OpenaiResponsesProtocol {
 
     /// 最大上下文探测：OpenAI 兼容网关（Ollama / LM Studio / vLLM 等）
     /// 的上报值，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
-    async fn query_context_limit(&self, provider: &ModelProvider) -> Option<u32> {
-        super::context_probe::probe_openai_compat_context(provider).await
+    async fn query_context_limit(&self, cfg: &ModelProviderConfig) -> Option<u32> {
+        super::context_probe::probe_openai_compat_context(cfg).await
     }
 }
 

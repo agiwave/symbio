@@ -282,7 +282,7 @@ impl SessionPlugin {
 
         // Provider 级限流（Phase sink：RATE_LIMITER 已随消费者下沉至 session；0 表示不限流）
         super::rate_limit::RATE_LIMITER
-            .wait(&provider.provider_id, provider.rate_limit_ms)
+            .wait(provider.provider_id(), provider.rate_limit_ms())
             .await;
 
         // 进程内双向通道：host 侧（消费循环 + abort 控制）/ plugin 侧（run_chat_loop）。
@@ -291,11 +291,11 @@ impl SessionPlugin {
         // 上报值与用户设置取 min）；此处仅保留降档可见日志。
         let (host_chan, plugin_chan) = PluginChannel::pair(4096);
         let context_limit = provider.effective_context_tokens().await;
-        if context_limit < provider.max_context_tokens {
+        if context_limit < provider.max_context_tokens() {
             crate::plugin_info!(
                 "session",
                 "模型服务上报最大上下文 {context_limit}，低于用户设置 {}，运行时采用较小值",
-                provider.max_context_tokens
+                provider.max_context_tokens()
             );
         }
         let orchestrator = super::chat_loop::ChatOrchestrator::new(

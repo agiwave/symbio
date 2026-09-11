@@ -18,6 +18,15 @@
 
 ***
 
+## 2026-09-11: ModelProvider 纯 trait 化（ModelProtocol 完全内化进 model 插件 + session 压缩路径走 execute_turn）
+
+- **核心 `ModelProvider` 重写为纯 object-safe trait**（`symbio_core/model_provider.rs`）：方法集 `provider_id()` / `api_protocol()` / `rate_limit_ms()` / `max_context_tokens()` / `effective_context_tokens()`（async，= min(用户设置, 服务探测)）/ `execute_turn()`（async，五态错误映射内聚于实现方）。Session 的模型契约收敛为 `Arc<dyn ModelProvider>` 单一形态；`FinishReason`/`Usage`/`ProtocolEvent` 保留 core，`TurnOutput`/`PluginChannel`/`PluginError` 等既有类型不动。
+- **`ModelProtocol` 完全内化进 model 插件**：trait（钩子 get_api_url/get_headers/prepare_request/parse_response_line/ping/query_context_limit，全部收 `&ModelProviderConfig`）、`resolve_protocol_id` 别名表、`MODEL_PROTOCOL_*` 注册常量、`ReasoningConfig`（serde 形态冻结）全部迁入 `plugins/model/`；`symbio_core` 不再导出任何协议概念，`ids.rs` 四常量删除。协议实现文件为纯机械替换（签名 `&ModelProvider` → `&ModelProviderConfig`，参数名 provider → cfg；已验证协议体仅使用 config 同名字段）。
+- **新增 `bound_provider.rs`**：`BoundProvider(cfg: ModelProviderConfig, protocol: Arc<dyn ModelProtocol>)` 实现 core trait——身份/限流/上下文参数读 cfg，`execute_turn` 五态机（Aborted/RetryWithoutContextId/Err/RateLimited/Ok→parse_sse_stream）与 `effective_context_tokens`（min(用户设置, query_context_limit 探测)）自旧 core 结构体固有方法原样迁入，语义不变。`model_providers.rs` 删除 `into_model_provider` 构造器，保留为纯持久化 schema。
+- **`parse_sse_stream` 闭包化**（`symbio_core/turn.rs`）：泛型 `<P: ModelProtocol + ?Sized>` 参数改为 `parse_line: impl Fn(&str) -> Vec<ProtocolEvent>` 行解析闭包，core 转录机器不再依赖任何协议抽象；>256 字节部分行分支（`try_parse_partial_sse_line`）与 LineProgress 去重逻辑不动。
+- **session 压缩路径收敛**：`run_compression_llm` 原手动拼装（prepare_request + execute_post_with_abort + PostResult 五态匹配 + parse_sse_stream）整体替换为单次 `provider.execute_turn(system_prompt, messages, &[], root_id, muted, abort_flag)`；`ChatOrchestrator.provider` 与 CapabilityVisitor 注册槽位改 `Arc<dyn ModelProvider>`；orchestrator 的 provider_id/rate_limit_ms/max_context_tokens 字段访问改方法调用。
+- **验收**：cargo check 零警告、cargo test --lib 286 项全绿、clippy 零错误零警告（tools.rs 测试桩同步重写为实现新 trait 的 MockProvider）。
+
 ## 2026-09-11: ModelProvider 类型体系统一（合并 Entry/Config 为单一核心定义 + 按上下文单注册 + CapabilityVisitor 简化）
 
 - **核心 `ModelProvider` 由 trait 改为具体结构体**（`symbio_core/model_provider.rs`）：自含身份（provider_id/protocol_id/system_prompt/rate_limit_ms）+ 全量模型参数（model/api_base/api_key/temperature/max_tokens/max_context_tokens/reserved_tokens/timeout_secs/api_protocol/store/reasoning，自 `ModelConfig` 迁入）+ `protocol: Arc<dyn ModelProtocol>` 协议适配器。原 `description` 字段删除（全仓无消费者）。

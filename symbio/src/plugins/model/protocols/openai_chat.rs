@@ -5,24 +5,27 @@ use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+use super::super::model_providers::ModelProviderConfig;
 use super::super::types::CapabilityMeta;
-use crate::symbio_core::model_provider::{FinishReason, ModelProtocol, ProtocolEvent, Usage};
-use crate::symbio_core::{get_http_client, ModelProvider, InvokeRequest, PluginError, MODEL_PROTOCOL_OPENAI_CHAT};
+use super::{ModelProtocol, MODEL_PROTOCOL_OPENAI_CHAT};
+use crate::symbio_core::{
+    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
+};
 
 pub struct OpenaiChatProtocol;
 
 #[async_trait]
 impl ModelProtocol for OpenaiChatProtocol {
-    fn get_api_url(&self, provider: &ModelProvider) -> String {
-        format!("{}/chat/completions", provider.api_base)
+    fn get_api_url(&self, cfg: &ModelProviderConfig) -> String {
+        format!("{}/chat/completions", cfg.api_base)
     }
 
-    fn get_headers(&self, provider: &ModelProvider) -> HeaderMap {
+    fn get_headers(&self, cfg: &ModelProviderConfig) -> HeaderMap {
         let mut h = reqwest::header::HeaderMap::new();
         if let Ok(v) = "application/json".parse() {
             h.insert("Content-Type", v);
         }
-        if let Some(k) = &provider.api_key {
+        if let Some(k) = &cfg.api_key {
             if let Ok(v) = format!("Bearer {k}").parse() {
                 h.insert("Authorization", v);
             } else {
@@ -34,7 +37,7 @@ impl ModelProtocol for OpenaiChatProtocol {
 
     fn prepare_request(
         &self,
-        provider: &ModelProvider,
+        cfg: &ModelProviderConfig,
         system: &str,
         messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
         tools: &[CapabilityMeta],
@@ -47,18 +50,18 @@ impl ModelProtocol for OpenaiChatProtocol {
         }
 
         let mut req = json!({
-            "model": provider.model,
+            "model": cfg.model,
             "messages": openai_msgs,
-            "temperature": provider.temperature,
+            "temperature": cfg.temperature,
             "stream": true,
         });
 
         // 处理 OpenAI Reasoning (o1/o3 等)
-        if let Some(ref reasoning) = provider.reasoning {
+        if let Some(ref reasoning) = cfg.reasoning {
             req["reasoning_effort"] = json!(reasoning.effort);
         }
 
-        req["max_tokens"] = json!(provider.max_tokens.unwrap_or(8192));
+        req["max_tokens"] = json!(cfg.max_tokens.unwrap_or(8192));
         if !tools.is_empty() {
             req["tools"] = json!(tools
                 .iter()
@@ -159,17 +162,17 @@ impl ModelProtocol for OpenaiChatProtocol {
         evs
     }
 
-    async fn ping(&self, provider: &ModelProvider) -> Result<(), PluginError> {
-        let api_key = provider.api_key.clone().unwrap_or_default();
+    async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
+        let api_key = cfg.api_key.clone().unwrap_or_default();
         let request = json!({
-            "model": provider.model,
+            "model": cfg.model,
             "messages": [{"role": "user", "content": "ping"}],
             // 注意：部分 OpenAI 兼容网关（如 GLM）要求 max_tokens > 2，不能设为 1
             "max_tokens": 256,
         });
 
         let response = get_http_client()
-            .post(self.get_api_url(provider))
+            .post(self.get_api_url(cfg))
             .header("Authorization", format!("Bearer {api_key}"))
             .header("Content-Type", "application/json")
             .json(&request)
@@ -191,8 +194,8 @@ impl ModelProtocol for OpenaiChatProtocol {
 
     /// 最大上下文探测：OpenAI 兼容网关（Ollama / LM Studio / vLLM 等）
     /// 的上报值，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
-    async fn query_context_limit(&self, provider: &ModelProvider) -> Option<u32> {
-        super::context_probe::probe_openai_compat_context(provider).await
+    async fn query_context_limit(&self, cfg: &ModelProviderConfig) -> Option<u32> {
+        super::context_probe::probe_openai_compat_context(cfg).await
     }
 }
 

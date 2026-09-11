@@ -1,7 +1,8 @@
 //! 单轮 LLM 执行机器 —— E-① 自 `plugins/model/{context,tool_call,message_builder}.rs` 迁入
 //!
 //! 职责（单轮网关基建，协议无关、插件无关，供 `ModelProvider::execute_turn`
-//! 统一实现与 model/session 双侧共同使用，详见 docs/model-session-refactor.md §8）：
+//! 统一实现与 model/session 双侧共同使用，详见
+//! docs/archive/implementation-logs/model-session-refactor.md §8）：
 //! - HTTP 客户端单例 + 支持中止的 POST 重试机器（`execute_post_with_abort` → 五态 `PostResult`）
 //! - SSE 流解析与协议事件累积（`parse_sse_stream` → `TurnOutput`），流式子节点经
 //!   `session_chat_response::StreamEvent::Update` 帧实时下发
@@ -15,7 +16,7 @@
 //! 本模块是唯一权威实现。
 
 use crate::plugin_warn;
-use crate::symbio_core::model_provider::{FinishReason, ModelProtocol, ProtocolEvent, Usage};
+use crate::symbio_core::model_provider::{FinishReason, ProtocolEvent, Usage};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
@@ -623,19 +624,17 @@ impl TurnOutput {
 
 /// 解析 SSE 字节流为标准化事件并累积成单轮产物。
 ///
-/// `protocol` 以泛型接收而非 `&dyn ModelProtocol`：既允许调用方传 trait object
-/// （`Arc<dyn ModelProtocol>::as_ref()`），也允许 `ModelProvider::execute_turn`
-/// 直接传 `self.protocol.as_ref()`。协议差异只体现在 `parse_response_line` 一个钩子上。
-pub async fn parse_sse_stream<P>(
+/// `parse_line` 以闭包接收（`Fn(&str) -> Vec<ProtocolEvent>`）而非协议 trait：
+/// 协议差异只体现在「一行 → 事件」的解析一个钩子上，core 无需（也不应）
+/// 感知任何协议抽象——调用方（如 model 插件的 `BoundProvider::execute_turn`）
+/// 直接传 `|line| protocol.parse_response_line(line)`。
+pub async fn parse_sse_stream(
     response: reqwest::Response,
     root_id: &str,
     channel: &mut PluginChannel,
     abort_flag: &AtomicBool,
-    protocol: &P,
-) -> Result<TurnOutput, String>
-where
-    P: ModelProtocol + ?Sized,
-{
+    parse_line: impl Fn(&str) -> Vec<ProtocolEvent>,
+) -> Result<TurnOutput, String> {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::<u8>::new();
     let mut out = TurnOutput::default();
@@ -669,7 +668,7 @@ where
                 let line_str = String::from_utf8_lossy(&line_bytes);
                 let trimmed = line_str.trim();
                 if !trimmed.is_empty() {
-                    for mut event in protocol.parse_response_line(trimmed) {
+                    for mut event in parse_line(trimmed) {
                         // 扣除已经通过增量模式发送的部分
                         match event {
                             ProtocolEvent::ContentDelta(ref mut c) if progress.content > 0 => {

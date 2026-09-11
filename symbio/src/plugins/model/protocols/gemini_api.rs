@@ -5,27 +5,30 @@ use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
-use crate::symbio_core::model_provider::{FinishReason, ModelProtocol, ProtocolEvent, Usage};
-use crate::symbio_core::{get_http_client, ModelProvider, InvokeRequest, PluginError, MODEL_PROTOCOL_GEMINI_API};
+use super::{ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
+use crate::symbio_core::{
+    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
+};
 
 pub struct GeminiProtocol;
 
 #[async_trait]
 impl ModelProtocol for GeminiProtocol {
-    fn get_api_url(&self, provider: &ModelProvider) -> String {
+    fn get_api_url(&self, cfg: &ModelProviderConfig) -> String {
         format!(
             "{}/models/{}:streamGenerateContent",
-            provider.api_base, provider.model
+            cfg.api_base, cfg.model
         )
     }
 
-    fn get_headers(&self, provider: &ModelProvider) -> HeaderMap {
+    fn get_headers(&self, cfg: &ModelProviderConfig) -> HeaderMap {
         let mut h = reqwest::header::HeaderMap::new();
         if let Ok(v) = "application/json".parse() {
             h.insert("Content-Type", v);
         }
-        if let Some(k) = &provider.api_key {
+        if let Some(k) = &cfg.api_key {
             if let Ok(v) = k.parse() {
                 h.insert("x-goog-api-key", v);
             } else {
@@ -37,7 +40,7 @@ impl ModelProtocol for GeminiProtocol {
 
     fn prepare_request(
         &self,
-        provider: &ModelProvider,
+        cfg: &ModelProviderConfig,
         system: &str,
         messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
         tools: &[CapabilityMeta],
@@ -137,8 +140,8 @@ impl ModelProtocol for GeminiProtocol {
             "contents": contents,
             "systemInstruction": {"parts": [{"text": system}]},
             "generationConfig": {
-                "temperature": provider.temperature,
-                "maxOutputTokens": provider.max_tokens.unwrap_or(8192)
+                "temperature": cfg.temperature,
+                "maxOutputTokens": cfg.max_tokens.unwrap_or(8192)
             }
         });
         if !tools.is_empty() {
@@ -214,15 +217,15 @@ impl ModelProtocol for GeminiProtocol {
         evs
     }
 
-    async fn ping(&self, provider: &ModelProvider) -> Result<(), PluginError> {
-        let api_key = provider.api_key.clone().unwrap_or_default();
+    async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
+        let api_key = cfg.api_key.clone().unwrap_or_default();
         let request = json!({
             "contents": [{"parts": [{"text": "ping"}]}],
             "generationConfig": {"maxOutputTokens": 16}
         });
 
         let response = get_http_client()
-            .post(self.get_api_url(provider))
+            .post(self.get_api_url(cfg))
             .header("x-goog-api-key", api_key)
             .header("Content-Type", "application/json")
             .json(&request)
@@ -244,10 +247,10 @@ impl ModelProtocol for GeminiProtocol {
 
     /// 最大上下文探测：Gemini ListModels（`GET {api_base}/models`）为每个模型
     /// 返回 `inputTokenLimit`，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
-    async fn query_context_limit(&self, provider: &ModelProvider) -> Option<u32> {
-        let api_base = provider.api_base.clone();
-        let model = provider.model.clone();
-        let api_key = provider.api_key.clone();
+    async fn query_context_limit(&self, cfg: &ModelProviderConfig) -> Option<u32> {
+        let api_base = cfg.api_base.clone();
+        let model = cfg.model.clone();
+        let api_key = cfg.api_key.clone();
         if api_base.trim().is_empty() || model.trim().is_empty() {
             return None;
         }

@@ -3,10 +3,12 @@
 //! 负责：
 //! - 多 Model Provider 注册表（`ModelProvidersConfig`，持久化 serde schema）
 //! - Provider 注册：traverse 时按上下文解析出唯一生效 Provider
-//!   （ctx[PROVIDER_ID] > 默认 > 首个启用），构造运行期 `ModelProvider`
-//!   注册进 CAPABILITY_VISITOR（chat 编排与限流已迁往 session 插件，
+//!   （ctx[PROVIDER_ID] > 默认 > 首个启用），绑定配置与协议实现为
+//!   `BoundProvider`（core `ModelProvider` trait 的生产实现）注册进
+//!   CAPABILITY_VISITOR（chat 编排与限流已迁往 session 插件，
 //!   model 降级为无状态 LLM 网关）
 
+use super::bound_provider::BoundProvider;
 use super::handlers;
 use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
@@ -282,16 +284,15 @@ impl ModelPlugin {
 
     /// 验证配置是否可用
     ///
-    /// 直调 `ModelProvider::ping`（最小代价请求探测 endpoint /
-    /// key / model 可用性），`Ok(())` → 配置可用；`Err(e)` → 携带失败原因。
+    /// 直调 `ModelProtocol::ping`（最小代价请求探测 endpoint / key / model
+    /// 可用性），`Ok(())` → 配置可用；`Err(e)` → 携带失败原因。
     async fn validate_config(config: &ModelProviderConfig) -> Option<String> {
         let ctx = Arc::new(SimpleRequest::new(None, None));
         let protocol_id = resolve_protocol_id(&config.api_protocol);
         let protocol = create_object::<dyn super::protocols::ModelProtocol>(protocol_id, ctx)
             .expect("MODEL protocol creator not found");
-        let provider = config.clone().into_model_provider(protocol_id.to_string(), protocol);
 
-        match provider.ping().await {
+        match protocol.ping(config).await {
             Ok(()) => None,
             Err(e) => Some(e.to_string()),
         }
@@ -695,13 +696,15 @@ impl Plugin for ModelPlugin {
                         ctx.clone(),
                     ) {
                         Some(protocol) => {
-                            let provider = Arc::new(
-                                p.into_model_provider(protocol_id.to_string(), protocol),
-                            );
-                            tool_visitor.register_model_provider(provider.clone()).await;
-                            if let Some(sp) = &provider.system_prompt {
+                            // 系统提示词双键注册（provider_id 键 + "default" 键兜底）
+                            // 在移动 p 之前读取
+                            let system_prompt = p.system_prompt.clone();
+                            let provider_id = p.id.clone();
+                            let provider = Arc::new(BoundProvider::new(p, protocol));
+                            tool_visitor.register_model_provider(provider).await;
+                            if let Some(sp) = &system_prompt {
                                 tool_visitor
-                                    .register_system_prompt(&provider.provider_id, sp.clone())
+                                    .register_system_prompt(&provider_id, sp.clone())
                                     .await;
                                 // "default" 键兜底：消费侧提示词解析链的首选键
                                 tool_visitor
