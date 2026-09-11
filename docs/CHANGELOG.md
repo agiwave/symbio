@@ -18,6 +18,17 @@
 
 ***
 
+## 2026-09-11: ModelProvider 类型体系统一（合并 Entry/Config 为单一核心定义 + 按上下文单注册 + CapabilityVisitor 简化）
+
+- **核心 `ModelProvider` 由 trait 改为具体结构体**（`symbio_core/model_provider.rs`）：自含身份（provider_id/protocol_id/system_prompt/rate_limit_ms）+ 全量模型参数（model/api_base/api_key/temperature/max_tokens/max_context_tokens/reserved_tokens/timeout_secs/api_protocol/store/reasoning，自 `ModelConfig` 迁入）+ `protocol: Arc<dyn ModelProtocol>` 协议适配器。原 `description` 字段删除（全仓无消费者）。
+- **原协议 trait 更名 `ModelProtocol`**：纯钩子集（get_api_url/get_headers/prepare_request/parse_response_line/ping/query_context_limit），全部改收 `&ModelProvider`；`execute_turn` 从 trait 移除，改为 `ModelProvider` 固有方法（prepare_request → execute_post_with_abort → parse_sse_stream），另提供固有委托方法与计算参数 `effective_context_tokens()`（= min(max_context_tokens, query_context_limit)）。
+- **删除 `symbio_core::schemas::model::model_config`**：`ModelConfig` 全部字段并入 `ModelProvider`；`ReasoningConfig` 迁入 `model_provider.rs`；`schemas/model/` 模块整体移除。默认 `max_context_tokens` 统一为 262_144（修复原 model_config 307_200 与 ModelProviderConfig 262_144 的分叉）。
+- **model 插件按上下文注册唯一生效 Provider**：traverse 从"注册全部 enabled 条目"改为"解析链 ctx[PROVIDER_ID] > default_provider_id > 首个 enabled → 仅注册该 Provider"（含其系统提示词双键注册：id 键 + "default" 键）；`model_providers.rs` 保留为持久化 serde schema（JSON 兼容），`to_model_config` 替换为 `into_model_provider(protocol_id, protocol)` 构造器。
+- **CapabilityVisitor 简化**：删除 `ModelProviderEntry` 与 `list_model_providers`；`register_model_provider(Arc<ModelProvider>)`（覆盖语义）+ `get_model_provider() -> Option<Arc<ModelProvider>>`（无 id 参数）；`DefaultToolVisitor` providers 改单槽。
+- **session 消费收敛**：`run_chat_loop_task` 解析链（get_model_provider(id) → find is_default → first listed）收敛为单次 `get_model_provider()`；`ChatOrchestrator` 改持 `ModelProvider` + 构造时预计算 context_limit，6 处消费点切换（api_protocol 日志、nudge 阈值、execute_turn、自动压缩触发、压缩溢出守卫、压缩请求）。
+- **顺手修复**（非重构引入、新工具链 lint）：gateway/plugin.rs 测试 `create_config` 与 schemas/options.rs 两处 struct/enum literal 省略字段警告、homedir.rs 文档注释 `>` 行首误读为 markdown 引用。
+- **验收**：cargo check 零警告、cargo test --lib 286 项全绿（基线 228 → 新增 58，含重写的 tools.rs 单槽覆盖测试）、clippy 零错误零警告。
+
 ## 2026-09-11: 会话心跳任务（heartbeat 工具 + CLI 守护模式 + homedir 环境变量优先级修复 + 空闲基线语义修复）
 
 - **会话心跳调度器**（`plugins/session/heartbeat.rs`）：每进程每 15s 扫描本 store 全部会话，对「已启用 + 空闲满阈值（interval + 每会话固定 jitter ≤30s）」的会话注入 `hb_<sid>_<毫秒>` 心跳消息（`meta.heartbeat=true`，提示词作为用户消息进入正常回合管线）。`is_working` 会话绝不触发（防重入）；触发即写内存锚点（防热循环）；锚点首见回退 `session.updated_at`（进程重启/多进程兜底 = 重启追赶）。

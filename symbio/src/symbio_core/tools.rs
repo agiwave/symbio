@@ -9,8 +9,8 @@
 //! 迁移前位置：`plugins/agent/core/default_tool_visitor.rs`
 
 use crate::symbio_core::{
-    Capability, CapabilityVisitor, CapabilityMeta, InvokeRequest, InvokeResponse,
-    ModelProviderEntry, PluginError, PluginPayload,
+    Capability, CapabilityVisitor, CapabilityMeta, InvokeRequest, InvokeResponse, ModelProvider,
+    PluginError, PluginPayload,
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -20,12 +20,13 @@ use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存 HashMap 实现，一次会话请求一个实例
 ///
-/// 除工具外，同时承载 Phase B 扩充的两组注册（与工具同一 traverse 收集机制）：
-/// - `providers`：模型服务目录（AI 对话能力）
+/// 除工具外，同时承载两组注册（与工具同一 traverse 收集机制）：
+/// - `provider`：当前生效的模型服务（单槽；model 插件按上下文解析出
+///   唯一生效 Provider 后注册，重复注册覆盖）
 /// - `system_prompts`：系统提示词（按名称保序）
 pub struct DefaultToolVisitor {
     tools: Arc<RwLock<HashMap<String, Arc<dyn Capability>>>>,
-    providers: Arc<RwLock<IndexMap<String, ModelProviderEntry>>>,
+    provider: Arc<RwLock<Option<Arc<ModelProvider>>>>,
     system_prompts: Arc<RwLock<IndexMap<String, String>>>,
 }
 
@@ -33,7 +34,7 @@ impl DefaultToolVisitor {
     pub fn new() -> Self {
         Self {
             tools: Arc::new(RwLock::new(HashMap::new())),
-            providers: Arc::new(RwLock::new(IndexMap::new())),
+            provider: Arc::new(RwLock::new(None)),
             system_prompts: Arc::new(RwLock::new(IndexMap::new())),
         }
     }
@@ -79,19 +80,14 @@ impl CapabilityVisitor for DefaultToolVisitor {
         tools.contains_key(name)
     }
 
-    async fn register_model_provider(&self, entry: ModelProviderEntry) {
-        let mut providers = self.providers.write().await;
-        providers.insert(entry.provider_id.clone(), entry);
+    async fn register_model_provider(&self, provider: Arc<ModelProvider>) {
+        let mut slot = self.provider.write().await;
+        *slot = Some(provider);
     }
 
-    async fn list_model_providers(&self) -> Vec<ModelProviderEntry> {
-        let providers = self.providers.read().await;
-        providers.values().cloned().collect()
-    }
-
-    async fn get_model_provider(&self, provider_id: &str) -> Option<ModelProviderEntry> {
-        let providers = self.providers.read().await;
-        providers.get(provider_id).cloned()
+    async fn get_model_provider(&self) -> Option<Arc<ModelProvider>> {
+        let slot = self.provider.read().await;
+        slot.clone()
     }
 
     async fn register_system_prompt(&self, name: &str, prompt: String) {
@@ -111,30 +107,29 @@ impl CapabilityVisitor for DefaultToolVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::schemas::model::model_config::ModelConfig;
     use crate::symbio_core::schemas::session::chat_message::ChatMessage;
-    use crate::symbio_core::{ModelProvider, ProtocolEvent};
+    use crate::symbio_core::{CapabilityMeta, ModelProtocol, ProtocolEvent};
     use async_trait::async_trait;
     use serde_json::Value;
 
     /// 最小协议桩：仅用于验证注册存储语义，不发起真实请求
-    struct MockProvider {
+    struct MockProtocol {
         tag: String,
     }
 
     #[async_trait]
-    impl ModelProvider for MockProvider {
-        fn get_api_url(&self, _config: &ModelConfig) -> String {
+    impl ModelProtocol for MockProtocol {
+        fn get_api_url(&self, _provider: &ModelProvider) -> String {
             self.tag.clone()
         }
 
-        fn get_headers(&self, _config: &ModelConfig) -> reqwest::header::HeaderMap {
+        fn get_headers(&self, _provider: &ModelProvider) -> reqwest::header::HeaderMap {
             reqwest::header::HeaderMap::new()
         }
 
         fn prepare_request(
             &self,
-            _config: &ModelConfig,
+            _provider: &ModelProvider,
             _system_prompt: &str,
             _messages: &[ChatMessage],
             _tools: &[CapabilityMeta],
@@ -147,50 +142,54 @@ mod tests {
         }
     }
 
-    fn provider_entry(id: &str, description: &str) -> ModelProviderEntry {
-        ModelProviderEntry {
+    fn provider(id: &str) -> Arc<ModelProvider> {
+        Arc::new(ModelProvider {
             provider_id: id.to_string(),
             protocol_id: "openai_chat".to_string(),
-            description: description.to_string(),
             system_prompt: None,
-            config: ModelConfig::default(),
             rate_limit_ms: 0,
-            is_default: false,
-            provider: Arc::new(MockProvider {
+            provider: id.to_string(),
+            api_base: String::new(),
+            api_key: None,
+            model: String::new(),
+            temperature: 0.7,
+            max_tokens: None,
+            max_context_tokens: 262_144,
+            reserved_tokens: 4_096,
+            timeout_secs: 300,
+            api_protocol: "openai_chat".to_string(),
+            store: false,
+            reasoning: None,
+            protocol: Arc::new(MockProtocol {
                 tag: id.to_string(),
             }),
-        }
+        })
     }
 
     #[tokio::test]
-    async fn provider_roundtrip_preserves_registration_order() {
+    async fn provider_slot_set_get_and_missing() {
         let mgr = DefaultToolVisitor::new();
-        mgr.register_model_provider(provider_entry("p1", "第一个"))
-            .await;
-        mgr.register_model_provider(provider_entry("p2", "第二个"))
-            .await;
-        mgr.register_model_provider(provider_entry("p3", "第三个"))
-            .await;
+        // 未注册 → None
+        assert!(mgr.get_model_provider().await.is_none());
 
-        let listed = mgr.list_model_providers().await;
-        let ids: Vec<&str> = listed.iter().map(|e| e.provider_id.as_str()).collect();
-        assert_eq!(ids, vec!["p1", "p2", "p3"]);
-
-        assert!(mgr.get_model_provider("p2").await.is_some());
-        assert!(mgr.get_model_provider("missing").await.is_none());
+        // 注册后可取回，身份字段一致
+        mgr.register_model_provider(provider("p1")).await;
+        let got = mgr.get_model_provider().await;
+        let got = got.expect("注册后应可取回");
+        assert_eq!(got.provider_id, "p1");
+        assert_eq!(got.protocol.get_api_url(&got), "p1");
     }
 
     #[tokio::test]
-    async fn provider_overwrite_keeps_single_entry() {
+    async fn provider_overwrite_replaces_single_slot() {
         let mgr = DefaultToolVisitor::new();
-        mgr.register_model_provider(provider_entry("p1", "first"))
-            .await;
-        mgr.register_model_provider(provider_entry("p1", "second"))
-            .await;
+        mgr.register_model_provider(provider("p1")).await;
+        mgr.register_model_provider(provider("p2")).await;
 
-        let listed = mgr.list_model_providers().await;
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].description, "second");
+        // 单槽覆盖：后注册者生效
+        let got = mgr.get_model_provider().await;
+        let got = got.expect("覆盖注册后仍应可取回");
+        assert_eq!(got.provider_id, "p2");
     }
 
     #[tokio::test]

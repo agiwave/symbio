@@ -27,12 +27,14 @@ pub use chat_pipeline::{
 };
 pub use chat_session::{ChatSession, ChatSessionHandle};
 pub use creator::{create_object, has_creator};
-pub use model_provider::{resolve_protocol_id, FinishReason, ModelProvider, ProtocolEvent, Usage};
+pub use model_provider::{
+    resolve_protocol_id, FinishReason, ModelProvider, ModelProtocol, ProtocolEvent, ReasoningConfig,
+    Usage,
+};
 pub use option::{collect_options, DefaultOptionVisitor, OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS};
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 pub use capability::{
-    Capability, CapabilityCategory, CapabilityVisitor, CapabilityMeta, ModelProviderEntry,
-    ToolContextRetention,
+    Capability, CapabilityCategory, CapabilityVisitor, CapabilityMeta, ToolContextRetention,
 };
 pub use error::*;
 pub use homedir::{expand_tilde_path, HomedirRegistry, DEFAULT_HOMEDIR};

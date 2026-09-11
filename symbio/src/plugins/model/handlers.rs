@@ -10,7 +10,10 @@ pub struct Response {
     pub has_api_key: bool,
 }
 
-pub fn handle_status(config: &ModelConfig) -> Value {
+/// 状态查询：读取 Provider 的模型参数（model/api_base/api_key）
+///
+/// 入参为持久化层 `&ModelProviderConfig`（model 插件自持 schema）。
+pub fn handle_status(config: &ModelProviderConfig) -> Value {
     serde_json::to_value(Response {
         status: "ready".to_string(),
         model: config.model.clone(),

@@ -1,22 +1,19 @@
 //! MODEL Plugin - Core implementation
 //!
 //! 负责：
-//! - 单个活动 Model Provider 配置管理（向后兼容）
-//! - 多 Model Provider 注册表（`ModelProvidersConfig`）
-//! - Provider 注册：traverse 时把启用的 provider 以 `ModelProviderEntry`
-//!   注册进 CAPABILITY_VISITOR（Phase E-②：chat 编排与限流已迁往
-//!   session 插件，model 降级为无状态 LLM 网关）
+//! - 多 Model Provider 注册表（`ModelProvidersConfig`，持久化 serde schema）
+//! - Provider 注册：traverse 时按上下文解析出唯一生效 Provider
+//!   （ctx[PROVIDER_ID] > 默认 > 首个启用），构造运行期 `ModelProvider`
+//!   注册进 CAPABILITY_VISITOR（chat 编排与限流已迁往 session 插件，
+//!   model 降级为无状态 LLM 网关）
 
 use super::handlers;
+use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
 use crate::symbio_core::schemas::common;
-use crate::symbio_core::schemas::model::model_config::ModelConfig;
-use super::model_providers::{
-    ModelProviderConfig, ModelProvidersConfig,
-};
 use crate::symbio_core::{
-    create_object, InvokeRequest, InvokeRequestExt, InvokeResponse, ModelProviderEntry, Plugin,
-    PluginError, PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, CONFIG_SET, PLUGIN_MODEL,
+    create_object, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
+    PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, CONFIG_SET, PLUGIN_MODEL,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use async_trait::async_trait;
@@ -280,24 +277,21 @@ impl ModelPlugin {
 
     /// 验证给定的 Model Provider 配置（不写入状态）
     async fn validate_provider(provider: &ModelProviderConfig) -> Option<String> {
-        let cfg = provider.to_model_config();
-        Self::validate_config(&cfg).await
+        Self::validate_config(provider).await
     }
 
     /// 验证配置是否可用
     ///
-    /// Phase E-②：直调 `ModelProvider::ping`（最小代价请求探测 endpoint /
+    /// 直调 `ModelProvider::ping`（最小代价请求探测 endpoint /
     /// key / model 可用性），`Ok(())` → 配置可用；`Err(e)` → 携带失败原因。
-    /// 不再经由会话通道收帧判断。
-    async fn validate_config(config: &ModelConfig) -> Option<String> {
+    async fn validate_config(config: &ModelProviderConfig) -> Option<String> {
         let ctx = Arc::new(SimpleRequest::new(None, None));
-        let protocol = create_object::<dyn super::protocols::ModelProvider>(
-            resolve_protocol_id(&config.api_protocol),
-            ctx,
-        )
-        .expect("MODEL protocol creator not found");
+        let protocol_id = resolve_protocol_id(&config.api_protocol);
+        let protocol = create_object::<dyn super::protocols::ModelProtocol>(protocol_id, ctx)
+            .expect("MODEL protocol creator not found");
+        let provider = config.clone().into_model_provider(protocol_id.to_string(), protocol);
 
-        match protocol.ping(config).await {
+        match provider.ping().await {
             Ok(()) => None,
             Err(e) => Some(e.to_string()),
         }
@@ -655,7 +649,6 @@ impl Plugin for ModelPlugin {
                 let active = providers
                     .resolve(providers.default_provider_id.as_deref())
                     .cloned()
-                    .map(|p| p.to_model_config())
                     .unwrap_or_default();
                 Ok(PluginPayload::new(&handlers::handle_status(&active)))
             }
@@ -669,10 +662,11 @@ impl Plugin for ModelPlugin {
         _path: String,
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
-        // Phase B：AI 对话能力纳入统一注册收集机制。
-        // 与 local/web/mcp 插件注册工具完全同构：命中 TRAVERSE_AVAILABLE_TOOLS 时，
-        // 把每个启用的 provider 以 ModelProviderEntry 注册进 CAPABILITY_VISITOR，
-        // 其系统提示词一并注册（provider_id 键；默认 provider 额外注册 "default" 键）。
+        // 模型能力纳入统一注册收集机制：与 local/web/mcp 插件注册工具同构。
+        // 命中 TRAVERSE_AVAILABLE_TOOLS 时，按上下文解析出**唯一生效** Provider
+        // （ctx[PROVIDER_ID] > default_provider_id > 首个 enabled），构造运行期
+        // `ModelProvider` 注册进 CAPABILITY_VISITOR；其系统提示词同时注册在
+        // provider_id 键与 "default" 键（消费侧两键均兜底）。
         let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         match sub_path.as_str() {
             // 选项收集（与能力收集同一广播机制的第二通道）：贡献「Model」选择项
@@ -688,47 +682,48 @@ impl Plugin for ModelPlugin {
 
         if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             let providers = self.providers.read().await;
-            for p in providers.providers.values() {
-                if !p.enabled {
-                    continue;
-                }
-                let protocol_id = resolve_protocol_id(&p.api_protocol);
-                match create_object::<dyn super::protocols::ModelProvider>(protocol_id, ctx.clone())
-                {
-                    Some(protocol) => {
-                        tool_visitor
-                            .register_model_provider(ModelProviderEntry {
-                                provider_id: p.id.clone(),
-                                protocol_id: protocol_id.to_string(),
-                                description: format!("{} ({})", p.name, p.model),
-                                system_prompt: p.system_prompt.clone(),
-                                config: p.to_model_config(),
-                                rate_limit_ms: p.rate_limit_ms,
-                                is_default: providers.default_provider_id.as_deref()
-                                    == Some(p.id.as_str()),
-                                provider: protocol,
-                            })
-                            .await;
-                        if let Some(sp) = &p.system_prompt {
-                            tool_visitor.register_system_prompt(&p.id, sp.clone()).await;
+            // 解析唯一生效 Provider：请求显式指定 > 默认 > 首个启用
+            let requested = ctx
+                .get(crate::symbio_core::PROVIDER_ID)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            match providers.resolve(requested.as_deref()).cloned() {
+                Some(p) => {
+                    let protocol_id = resolve_protocol_id(&p.api_protocol);
+                    match create_object::<dyn super::protocols::ModelProtocol>(
+                        protocol_id,
+                        ctx.clone(),
+                    ) {
+                        Some(protocol) => {
+                            let provider = Arc::new(
+                                p.into_model_provider(protocol_id.to_string(), protocol),
+                            );
+                            tool_visitor.register_model_provider(provider.clone()).await;
+                            if let Some(sp) = &provider.system_prompt {
+                                tool_visitor
+                                    .register_system_prompt(&provider.provider_id, sp.clone())
+                                    .await;
+                                // "default" 键兜底：消费侧提示词解析链的首选键
+                                tool_visitor
+                                    .register_system_prompt("default", sp.clone())
+                                    .await;
+                            }
+                        }
+                        None => {
+                            // 协议工厂不可用：软故障（不进致命错误桶），消费侧报"未找到可用的 Model Provider"
+                            plugin_warn!(
+                                "model",
+                                "traverse: provider '{}' 协议工厂不可用（protocol_id={protocol_id}），跳过注册",
+                                p.id
+                            );
                         }
                     }
-                    None => {
-                        // 协议工厂不可用：软故障（不进致命错误桶），消费侧回退现状路径
-                        plugin_warn!(
-                            "model",
-                            "traverse: provider '{}' 协议工厂不可用（protocol_id={protocol_id}），跳过注册",
-                            p.id
-                        );
-                    }
                 }
-            }
-            // 默认 provider 的系统提示词注册为 "default"（消费侧兜底键）
-            if let Some(dp) = providers.resolve(providers.default_provider_id.as_deref()) {
-                if let Some(sp) = &dp.system_prompt {
-                    tool_visitor
-                        .register_system_prompt("default", sp.clone())
-                        .await;
+                None => {
+                    plugin_warn!(
+                        "model",
+                        "traverse: 无可用 Model Provider（requested={requested:?}），跳过注册"
+                    );
                 }
             }
         }

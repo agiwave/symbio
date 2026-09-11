@@ -87,21 +87,16 @@ pub struct OptionDisplay {
 }
 
 /// 选项节点类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OptionType {
     /// 调用特定后端服务（`action.endpoint`）
+    #[default]
     Invoke,
     /// 子选项列表（级联；`children` 内联或经 `parent` 懒加载）
     Sub,
     /// 自动化表单（复用 `DetailDefinition` / `DetailForm`）
     Form,
-}
-
-impl Default for OptionType {
-    fn default() -> Self {
-        Self::Invoke
-    }
 }
 
 /// 选项动作 —— `invoke` / `form` 两类选项的执行规格。

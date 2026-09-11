@@ -189,7 +189,7 @@ mod tests {
         let plugin = Arc::new(GatewayPlugin::new(None, cfg));
         let resp = call(plugin, "config/get", None).await.unwrap();
         let got: GatewayConfig = resp.get().unwrap();
-        assert_eq!(got.inbound_enabled, true);
+        assert!(got.inbound_enabled);
         assert_eq!(got.inbound_protocol, "http");
         assert_eq!(got.inbound_port, 9231);
     }
@@ -216,7 +216,7 @@ mod tests {
         // 随后 config/get 应读回新值（父级为 None，不触发落盘/启服，仅内存生效）
         let got = call(plugin.clone(), "config/get", None).await.unwrap();
         let reread: GatewayConfig = got.get().unwrap();
-        assert_eq!(reread.inbound_enabled, true);
+        assert!(reread.inbound_enabled);
         assert_eq!(reread.inbound_bind, "0.0.0.0");
     }
 

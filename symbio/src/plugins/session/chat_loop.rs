@@ -13,7 +13,6 @@
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
-    model::model_config::ModelConfig,
     session::chat_message::{
         assign_seq, max_seq, ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
     },
@@ -47,28 +46,29 @@ struct SessionContext {
 }
 
 /// 会话编排器（自 model/context.rs 迁入，Phase E-②）：
-/// 持有模型配置、父插件钩子通道与协议适配器（session 确定性持有）。
+/// 持有唯一生效的模型服务、父插件钩子通道与预计算上下文上限（session 确定性持有）。
 /// 轮次收尾状态机 `finalize_assistant_turn` 随之一并迁入；
 /// turn_processor 薄委托层消亡（chat_loop 直调
-/// `protocol.execute_turn` 与 `finalize_assistant_turn`）。
+/// `provider.execute_turn` 与 `finalize_assistant_turn`）。
 pub struct ChatOrchestrator {
-    pub config: ModelConfig,
+    /// 唯一生效的模型服务（model 插件按上下文解析后经 CAPABILITY_VISITOR 注册）
+    pub provider: Arc<ModelProvider>,
     pub parent: Option<Arc<dyn Plugin>>,
-    /// Phase E-②：协议适配器经 `ModelProviderEntry.provider`（`Arc<dyn ModelProvider>`）
-    /// 从 CAPABILITY_VISITOR 取得，这里持有 Arc 共享引用（原为 Box 独占）。
-    pub protocol: Arc<dyn ModelProvider>,
+    /// 预计算的生效上下文上限（`provider.effective_context_tokens()` 结果，
+    /// 构造时由调用方传入，避免异步钩子在热路径反复触发）
+    pub context_limit: u32,
 }
 
 impl ChatOrchestrator {
     pub fn new(
-        config: ModelConfig,
+        provider: Arc<ModelProvider>,
         parent: Option<Arc<dyn Plugin>>,
-        protocol: Arc<dyn ModelProvider>,
+        context_limit: u32,
     ) -> Self {
         Self {
-            config,
+            provider,
             parent,
-            protocol,
+            context_limit,
         }
     }
 
@@ -165,7 +165,7 @@ pub async fn run_chat_loop(
     plugin_info!(
         "session",
         ">>> NEW SESSION START (Protocol: {:?})",
-        orchestrator.config.api_protocol
+        orchestrator.provider.api_protocol
     );
 
     // 用户明确要求**不要**设置 max_tool_rounds 硬性上限（智能体会话轮次越来越多）。
@@ -369,8 +369,7 @@ pub async fn run_chat_loop(
         // 提醒不再持久化，无需扫描历史做去重，也不会占用轮次窗口的 User 计数。
         let mut inject_nudge = false;
         if enable_compact_tool && !nudged_this_request {
-            let effective_limit = (orchestrator.config.max_context_tokens
-                - orchestrator.config.reserved_tokens) as usize;
+            let effective_limit = orchestrator.context_limit as usize;
             let overhead =
                 compression::estimate_request_overhead(system_prompt_for_request, &ctx).await;
             if compression::should_emit_context_nudge(&context.messages, effective_limit, overhead)
@@ -451,9 +450,8 @@ pub async fn run_chat_loop(
         }
 
         let result = orchestrator
-            .protocol
+            .provider
             .execute_turn(
-                &orchestrator.config,
                 req.system_prompt
                     .as_deref()
                     .unwrap_or("You are a helpful MODEL assistant."),
@@ -997,8 +995,7 @@ async fn auto_compress_process(
     force: bool,
     extra_hints: Option<&str>,
 ) -> Result<Option<usize>, PluginError> {
-    let effective_context_limit =
-        (orchestrator.config.max_context_tokens - orchestrator.config.reserved_tokens) as usize;
+    let effective_context_limit = orchestrator.context_limit as usize;
 
     // 请求级固定开销（system prompt + 工具定义）必须计入阈值判断，
     // 否则上下文实际占用被低估，压缩触发过晚 → 撞 provider 的 context-length 400。
@@ -1111,8 +1108,7 @@ async fn compress_with_snapshot_core(
         .iter()
         .map(compression::estimate_message_tokens)
         .sum();
-    let effective_limit =
-        (orchestrator.config.max_context_tokens - orchestrator.config.reserved_tokens) as usize;
+    let effective_limit = orchestrator.context_limit as usize;
     if pending_tokens + overhead_tokens > effective_limit {
         plugin_warn!(
             "session",
@@ -1451,14 +1447,13 @@ async fn run_compression_llm(
 ) -> Result<ChatMessage, PluginError> {
     use crate::symbio_core::schemas::session::chat_message::MessageContent;
 
-    let turn_config = orchestrator.config.clone();
     let body = orchestrator
-        .protocol
-        .prepare_request(&turn_config, system_prompt, messages, &[]);
+        .provider
+        .prepare_request(system_prompt, messages, &[]);
 
     let response = match execute_post_with_abort(
-        &orchestrator.protocol.get_api_url(&turn_config),
-        orchestrator.protocol.get_headers(&turn_config),
+        &orchestrator.provider.get_api_url(),
+        orchestrator.provider.get_headers(),
         &body,
         muted,
         abort_flag,
@@ -1477,7 +1472,7 @@ async fn run_compression_llm(
         root_id,
         muted,
         abort_flag,
-        orchestrator.protocol.as_ref(),
+        orchestrator.provider.protocol.as_ref(),
     )
     .await
     .map_err(PluginError::StreamError)?;

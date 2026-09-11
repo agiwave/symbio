@@ -15,7 +15,7 @@
 //! 本模块是唯一权威实现。
 
 use crate::plugin_warn;
-use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
+use crate::symbio_core::model_provider::{FinishReason, ModelProtocol, ProtocolEvent, Usage};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
@@ -623,10 +623,9 @@ impl TurnOutput {
 
 /// 解析 SSE 字节流为标准化事件并累积成单轮产物。
 ///
-/// `protocol` 以泛型接收而非 `&dyn ModelProvider`：既允许调用方传 trait object
-/// （`Arc<dyn ModelProvider>::as_ref()`），也允许 `ModelProvider::execute_turn`
-/// 的默认实现直接传 `self`（trait 默认方法内 `Self: ?Sized`，无法 unsize 成
-/// `&dyn ModelProvider`）。协议差异只体现在 `parse_response_line` 一个钩子上。
+/// `protocol` 以泛型接收而非 `&dyn ModelProtocol`：既允许调用方传 trait object
+/// （`Arc<dyn ModelProtocol>::as_ref()`），也允许 `ModelProvider::execute_turn`
+/// 直接传 `self.protocol.as_ref()`。协议差异只体现在 `parse_response_line` 一个钩子上。
 pub async fn parse_sse_stream<P>(
     response: reqwest::Response,
     root_id: &str,
@@ -635,7 +634,7 @@ pub async fn parse_sse_stream<P>(
     protocol: &P,
 ) -> Result<TurnOutput, String>
 where
-    P: ModelProvider + ?Sized,
+    P: ModelProtocol + ?Sized,
 {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::<u8>::new();

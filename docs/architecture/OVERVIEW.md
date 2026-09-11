@@ -90,7 +90,7 @@ graph TD
 | `composite` | **动态容器**     | 按配置实例化任意子插件，是"分形"的关键                                                                                              |
 | `agent`     | **认知中心**     | 管理 Agent 人格；会话选定智能体时经 `traverse` 贡献工具与人格，不再独占会话编排 → `plugins/agent/README.md`                                     |
 | `session`   | **会话中心**     | 长连接、消息持久化、历史裁剪；**会话编排的唯一入口**（收集工具、组装提示词、直连 model 单轮网关）→ `plugins/session/README.md`（含六大压缩策略）                       |
-| `model`     | **单轮 LLM 网关** | 无状态单轮执行（`execute_turn`）；Provider 注册（`ModelProviderEntry`）、4 协议适配、配置存取；不含工具执行与会话循环 |
+| `model`     | **单轮 LLM 网关** | 无状态单轮执行（`execute_turn`）；按上下文注册唯一生效 `ModelProvider`（自含参数与协议适配器）、4 协议适配、配置存取；不含工具执行与会话循环 |
 | `local`     | 本地工具         | shell / file_read / file_write / file_edit / glob_search / content_search                                         |
 | `web`       | Web 工具       | http_request / web_search / web_fetch                                                                             |
 | `skill`     | 技能           | 加载与执行技能定义（含 `skill/search`）                                                                                       |

@@ -4,7 +4,7 @@
 
 ## 职责边界
 
-- **Provider 注册**：启动时通过 `traverse` 向 `CAPABILITY_VISITOR` 注册 `ModelProviderEntry`（provider_id → 配置的模型条目），供 session 的 `chat_loop` 按需取用。
+- **Provider 注册**：启动时通过 `traverse` 向 `CAPABILITY_VISITOR` 注册**唯一生效的核心 `ModelProvider`**（自含模型参数与协议适配器）。解析链：会话上下文选定的 provider_id > 默认 Provider > 首个启用的 Provider。
 - **协议适配**：内置 4 个协议适配器——`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`，统一转换为内部 `model_chat::Request/Response` 事件流（文本、思考、工具调用）。
 - **单轮执行**：`execute_turn` 即单轮"发消息→收流"的完整闭环，不含重试、裁剪、压缩等编排逻辑（这些归 session，见 `session/README.md` 六大策略）。
 - **配置存取**：providers CRUD 与引擎参数（API Key、Base URL 等）的 `config get/set/schema`。
@@ -27,5 +27,5 @@
 ## 关联
 
 - 上游消费者：`session`（chat_loop 直连）
-- 协议适配层代码：`mod.rs` / `providers/`
+- 协议适配层代码：`protocols/`
 - 历史改造记录：`docs/archive/implementation-logs/model-session-refactor.md`

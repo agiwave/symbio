@@ -8,11 +8,9 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole, ModelConfig};
-use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
-use crate::symbio_core::{
-    get_http_client, InvokeRequest, PluginError, MODEL_PROTOCOL_ANTHROPIC_MESSAGES,
-};
+use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
+use crate::symbio_core::model_provider::{FinishReason, ModelProtocol, ProtocolEvent, Usage};
+use crate::symbio_core::{get_http_client, ModelProvider, InvokeRequest, PluginError, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
 use tracing::warn;
 
 pub struct AnthropicProtocol {
@@ -38,12 +36,12 @@ impl Default for AnthropicProtocol {
 }
 
 #[async_trait]
-impl ModelProvider for AnthropicProtocol {
-    fn get_api_url(&self, config: &ModelConfig) -> String {
-        format!("{}/messages", config.api_base)
+impl ModelProtocol for AnthropicProtocol {
+    fn get_api_url(&self, provider: &ModelProvider) -> String {
+        format!("{}/messages", provider.api_base)
     }
 
-    fn get_headers(&self, config: &ModelConfig) -> HeaderMap {
+    fn get_headers(&self, provider: &ModelProvider) -> HeaderMap {
         let mut h = reqwest::header::HeaderMap::new();
         if let Ok(v) = "application/json".parse() {
             h.insert("Content-Type", v);
@@ -51,7 +49,7 @@ impl ModelProvider for AnthropicProtocol {
         if let Ok(v) = "2023-06-01".parse() {
             h.insert("anthropic-version", v);
         }
-        if let Some(k) = &config.api_key {
+        if let Some(k) = &provider.api_key {
             if let Ok(v) = k.parse() {
                 h.insert("x-api-key", v);
             } else {
@@ -63,7 +61,7 @@ impl ModelProvider for AnthropicProtocol {
 
     fn prepare_request(
         &self,
-        config: &ModelConfig,
+        provider: &ModelProvider,
         system: &str,
         messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
         tools: &[CapabilityMeta],
@@ -220,16 +218,16 @@ impl ModelProvider for AnthropicProtocol {
         }
 
         let mut req = json!({
-            "model": config.model,
+            "model": provider.model,
             "system": system,
             "messages": anthropic_msgs,
-            "temperature": config.temperature,
+            "temperature": provider.temperature,
             "stream": true
         });
 
         // 处理 Anthropic Thinking (Claude 3.7+)
-        if config.reasoning.is_some() {
-            let budget = (config.max_tokens.unwrap_or(4096) / 2).max(1024);
+        if provider.reasoning.is_some() {
+            let budget = (provider.max_tokens.unwrap_or(4096) / 2).max(1024);
             req["thinking"] = json!({
                 "type": "enabled",
                 "budget_tokens": budget
@@ -238,12 +236,12 @@ impl ModelProvider for AnthropicProtocol {
             req["temperature"] = json!(1.0);
 
             // 确保 max_tokens 大于 budget
-            if config.max_tokens.unwrap_or(8192) <= budget {
+            if provider.max_tokens.unwrap_or(8192) <= budget {
                 req["max_tokens"] = json!(budget + 1024);
             }
         }
 
-        if let Some(m) = config.max_tokens {
+        if let Some(m) = provider.max_tokens {
             req["max_tokens"] = json!(m);
         } else if req.get("max_tokens").is_none() {
             req["max_tokens"] = json!(8192);
@@ -398,17 +396,17 @@ impl ModelProvider for AnthropicProtocol {
         evs
     }
 
-    async fn ping(&self, config: &ModelConfig) -> Result<(), PluginError> {
-        let api_key = config.api_key.clone().unwrap_or_default();
+    async fn ping(&self, provider: &ModelProvider) -> Result<(), PluginError> {
+        let api_key = provider.api_key.clone().unwrap_or_default();
         let request = json!({
-            "model": config.model,
+            "model": provider.model,
             "messages": [{"role": "user", "content": "ping"}],
             // Anthropic 协议要求 max_tokens >= 1，部分兼容网关要求更大，统一用安全值
             "max_tokens": 16,
         });
 
         let response = get_http_client()
-            .post(self.get_api_url(config))
+            .post(self.get_api_url(provider))
             .header("x-api-key", api_key)
             .header("anthropic-version", "2023-06-01")
             .header("Content-Type", "application/json")
@@ -432,8 +430,8 @@ impl ModelProvider for AnthropicProtocol {
 
 // === 注册到通用对象创建机制 ===
 
-fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProvider> {
+fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
     Arc::new(AnthropicProtocol::new())
 }
 
-crate::submit_object_creator!(MODEL_PROTOCOL_ANTHROPIC_MESSAGES, build, dyn ModelProvider);
+crate::submit_object_creator!(MODEL_PROTOCOL_ANTHROPIC_MESSAGES, build, dyn ModelProtocol);

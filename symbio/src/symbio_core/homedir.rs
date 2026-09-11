@@ -13,8 +13,8 @@
 //!    不依赖 homedir 本身。
 //!
 //! 初始 homedir 优先级：`SYMBIO_HOMEDIR` 环境变量（最高，CLI `--homedir` 注入）
-//! > bootstrap 上次选择 > 默认 `~/.symbio`。环境变量必须最高，否则显式指定的
-//! 隔离系统目录（CI/容器/E2E）会被 bootstrap 记忆静默覆盖。
+//! 优先于 bootstrap 上次选择，再优先于默认 `~/.symbio`。环境变量必须最高，
+//! 否则显式指定的隔离系统目录（CI/容器/E2E）会被 bootstrap 记忆静默覆盖。
 //!
 //! ## 设计原则
 //!

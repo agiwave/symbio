@@ -1,7 +1,7 @@
 //! Universal Model Agent Engine
 //!
 //! Phase E-② 定型后职责：**无状态 LLM 网关**。
-//! - `types`:           Unified type definitions (ModelConfig, NativeMessage, etc.)
+//! - `types`:           Unified type definitions (ModelProviderConfig, NativeMessage, etc.)
 //! - `detail`:          Model 详情页定义（definition-driven detail）
 //! - `handlers`:        Non-streaming handlers (status, list_models, config)
 //! - `message_builder`: NativeMessage 构造与会话持久化（写 session 走存储锚点）

@@ -264,63 +264,45 @@ impl SessionPlugin {
                 return;
             }
         };
-        // provider_id 参数来自调用方（resolve_session_params 解析结果，与 payload 同源）
-        let entry = match provider_id.as_deref() {
-            Some(pid) => manager.get_model_provider(pid).await,
-            None => None,
-        };
-        let entry = match entry {
-            Some(e) => e,
+        // provider_id 参数仅为错误文案保留：model 插件 traverse 已按
+        // ctx[PROVIDER_ID] > default > 首个 enabled 完成解析并注册唯一生效 Provider，
+        // session 侧直接取用，不再重复回退链。
+        let provider = match manager.get_model_provider().await {
+            Some(p) => p,
             None => {
-                let all = manager.list_model_providers().await;
-                match all
-                    .iter()
-                    .find(|e| e.is_default)
-                    .cloned()
-                    .or_else(|| all.first().cloned())
-                {
-                    Some(e) => e,
-                    None => {
-                        let msg =
-                            format!("未找到可用的 Model Provider（requested={provider_id:?}）");
-                        crate::plugin_error!("session", "{}", &msg);
-                        self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
-                            .await;
-                        self.broadcast_error_with_idle(&state, msg).await;
-                        return;
-                    }
-                }
+                let msg =
+                    format!("未找到可用的 Model Provider（requested={provider_id:?}）");
+                crate::plugin_error!("session", "{}", &msg);
+                self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
+                    .await;
+                self.broadcast_error_with_idle(&state, msg).await;
+                return;
             }
         };
 
         // Provider 级限流（Phase sink：RATE_LIMITER 已随消费者下沉至 session；0 表示不限流）
         super::rate_limit::RATE_LIMITER
-            .wait(&entry.provider_id, entry.rate_limit_ms)
+            .wait(&provider.provider_id, provider.rate_limit_ms)
             .await;
-
-        // 运行时上下文收敛：服务端能上报最大上下文时（Ollama / LM Studio / vLLM /
-        // Gemini ListModels 等，探测结果进程内缓存），对用户设置取 min——
-        // 本地模型的 num_ctx 常远小于模型训练窗口，不收敛会请求超限报错；
-        // 服务未上报（None）或上报更大值时保持用户设置不动。
-        let mut config = entry.config;
-        if let Some(limit) =
-            crate::symbio_core::ModelProvider::query_context_limit(&*entry.provider, &config).await
-        {
-            if limit < config.max_context_tokens {
-                crate::plugin_info!(
-                    "session",
-                    "模型服务上报最大上下文 {limit}，低于用户设置 {}，运行时采用较小值",
-                    config.max_context_tokens
-                );
-                config.max_context_tokens = limit;
-            }
-        }
 
         // 进程内双向通道：host 侧（消费循环 + abort 控制）/ plugin 侧（run_chat_loop）。
         // 原跨插件 `parent.route` → PluginPayload::Session 的一跳在此消失。
+        // 运行时上下文收敛在 provider.effective_context_tokens() 内部完成（服务端
+        // 上报值与用户设置取 min）；此处仅保留降档可见日志。
         let (host_chan, plugin_chan) = PluginChannel::pair(4096);
-        let orchestrator =
-            super::chat_loop::ChatOrchestrator::new(config, Some(parent), entry.provider);
+        let context_limit = provider.effective_context_tokens().await;
+        if context_limit < provider.max_context_tokens {
+            crate::plugin_info!(
+                "session",
+                "模型服务上报最大上下文 {context_limit}，低于用户设置 {}，运行时采用较小值",
+                provider.max_context_tokens
+            );
+        }
+        let orchestrator = super::chat_loop::ChatOrchestrator::new(
+            provider,
+            Some(parent),
+            context_limit,
+        );
         let ctx_clone = chat_ctx.fork();
         let error_tx = plugin_chan.tx.clone();
 

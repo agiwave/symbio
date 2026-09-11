@@ -5,24 +5,24 @@ use reqwest::header::HeaderMap;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use super::super::types::{CapabilityMeta, ModelConfig};
-use crate::symbio_core::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
-use crate::symbio_core::{get_http_client, InvokeRequest, PluginError, MODEL_PROTOCOL_OPENAI_CHAT};
+use super::super::types::CapabilityMeta;
+use crate::symbio_core::model_provider::{FinishReason, ModelProtocol, ProtocolEvent, Usage};
+use crate::symbio_core::{get_http_client, ModelProvider, InvokeRequest, PluginError, MODEL_PROTOCOL_OPENAI_CHAT};
 
 pub struct OpenaiChatProtocol;
 
 #[async_trait]
-impl ModelProvider for OpenaiChatProtocol {
-    fn get_api_url(&self, config: &ModelConfig) -> String {
-        format!("{}/chat/completions", config.api_base)
+impl ModelProtocol for OpenaiChatProtocol {
+    fn get_api_url(&self, provider: &ModelProvider) -> String {
+        format!("{}/chat/completions", provider.api_base)
     }
 
-    fn get_headers(&self, config: &ModelConfig) -> HeaderMap {
+    fn get_headers(&self, provider: &ModelProvider) -> HeaderMap {
         let mut h = reqwest::header::HeaderMap::new();
         if let Ok(v) = "application/json".parse() {
             h.insert("Content-Type", v);
         }
-        if let Some(k) = &config.api_key {
+        if let Some(k) = &provider.api_key {
             if let Ok(v) = format!("Bearer {k}").parse() {
                 h.insert("Authorization", v);
             } else {
@@ -34,7 +34,7 @@ impl ModelProvider for OpenaiChatProtocol {
 
     fn prepare_request(
         &self,
-        config: &ModelConfig,
+        provider: &ModelProvider,
         system: &str,
         messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
         tools: &[CapabilityMeta],
@@ -47,18 +47,18 @@ impl ModelProvider for OpenaiChatProtocol {
         }
 
         let mut req = json!({
-            "model": config.model,
+            "model": provider.model,
             "messages": openai_msgs,
-            "temperature": config.temperature,
+            "temperature": provider.temperature,
             "stream": true,
         });
 
         // 处理 OpenAI Reasoning (o1/o3 等)
-        if let Some(ref reasoning) = config.reasoning {
+        if let Some(ref reasoning) = provider.reasoning {
             req["reasoning_effort"] = json!(reasoning.effort);
         }
 
-        req["max_tokens"] = json!(config.max_tokens.unwrap_or(8192));
+        req["max_tokens"] = json!(provider.max_tokens.unwrap_or(8192));
         if !tools.is_empty() {
             req["tools"] = json!(tools
                 .iter()
@@ -159,17 +159,17 @@ impl ModelProvider for OpenaiChatProtocol {
         evs
     }
 
-    async fn ping(&self, config: &ModelConfig) -> Result<(), PluginError> {
-        let api_key = config.api_key.clone().unwrap_or_default();
+    async fn ping(&self, provider: &ModelProvider) -> Result<(), PluginError> {
+        let api_key = provider.api_key.clone().unwrap_or_default();
         let request = json!({
-            "model": config.model,
+            "model": provider.model,
             "messages": [{"role": "user", "content": "ping"}],
             // 注意：部分 OpenAI 兼容网关（如 GLM）要求 max_tokens > 2，不能设为 1
             "max_tokens": 256,
         });
 
         let response = get_http_client()
-            .post(self.get_api_url(config))
+            .post(self.get_api_url(provider))
             .header("Authorization", format!("Bearer {api_key}"))
             .header("Content-Type", "application/json")
             .json(&request)
@@ -191,15 +191,15 @@ impl ModelProvider for OpenaiChatProtocol {
 
     /// 最大上下文探测：OpenAI 兼容网关（Ollama / LM Studio / vLLM 等）
     /// 的上报值，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
-    async fn query_context_limit(&self, config: &ModelConfig) -> Option<u32> {
-        super::context_probe::probe_openai_compat_context(config).await
+    async fn query_context_limit(&self, provider: &ModelProvider) -> Option<u32> {
+        super::context_probe::probe_openai_compat_context(provider).await
     }
 }
 
 // === 注册到通用对象创建机制 ===
 
-fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProvider> {
+fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
     Arc::new(OpenaiChatProtocol)
 }
 
-crate::submit_object_creator!(MODEL_PROTOCOL_OPENAI_CHAT, build, dyn ModelProvider);
+crate::submit_object_creator!(MODEL_PROTOCOL_OPENAI_CHAT, build, dyn ModelProtocol);
