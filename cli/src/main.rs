@@ -18,6 +18,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use args::Command;
 use client::SymbioClient;
 use render::Renderer;
+use symbio::symbio_core::schemas::session::session_chat_response::StreamEvent;
 
 /// CLI 只做「解析 → 启动 → 发送 → 渲染」，业务全在后端插件树里。
 ///
@@ -75,7 +76,10 @@ async fn main() -> ExitCode {
         }
     };
 
-    // 判定使用方式：显式消息 > 强制 REPL > 管道输入（非终端）> 交互 REPL
+    // 判定使用方式：心跳守护 > 显式消息 > 强制 REPL > 管道输入（非终端）> 交互 REPL
+    if args.heartbeat {
+        return run_heartbeat_daemon(client, &args).await;
+    }
     if args.message.is_some() {
         return run_once(client, args.message.clone(), &args).await;
     }
@@ -86,6 +90,59 @@ async fn main() -> ExitCode {
         return run_once(client, None, &args).await;
     }
     run_repl(client, &args).await
+}
+
+/// 心跳守护模式：常驻宿主 session 插件的后台心跳调度器。
+///
+/// 心跳机制完全在后端 session 插件内闭环：配置存 `Session.metadata.heartbeat`，
+/// 调度循环随插件树构建启动（15s 扫描各会话的空闲心跳任务）。本进程只需保持
+/// 存活，调度器就会按各会话的空闲节奏自动触发心跳对话；事件总线订阅在
+/// [`SymbioClient::start`] 时已建立，这里消费渲染无人值守轮次的活动，Ctrl+C 退出。
+async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> ExitCode {
+    if !args.quiet {
+        eprintln!("Symbio CLI（心跳守护模式）");
+        eprintln!(
+            "  系统目录 {} · 工作目录 {}",
+            args.homedir.display(),
+            client.workdir
+        );
+        eprintln!(
+            "  会话 {} · Provider {}",
+            client.session_id,
+            client.provider_label()
+        );
+        eprintln!("  心跳调度器随插件树常驻运行；Ctrl+C 退出。");
+        eprintln!();
+    }
+
+    while let Some(ev) = client.next_bus_event().await {
+        if ev.kind != "session" {
+            continue;
+        }
+        let Ok(stream_ev) = serde_json::from_value::<StreamEvent>(ev.data) else {
+            continue;
+        };
+        let sid = ev.session_id.as_deref().unwrap_or("?");
+        match stream_ev {
+            StreamEvent::Status { status } if status == "working" => {
+                if !args.quiet {
+                    eprintln!("▶ [{sid}] 心跳触发，开始工作");
+                }
+            }
+            StreamEvent::Status { status } if status == "idle" => {
+                if !args.quiet {
+                    eprintln!("■ [{sid}] 本轮收敛，回到空闲");
+                }
+            }
+            StreamEvent::Error { error } => eprintln!("✖ [{sid}] {error}"),
+            _ => {}
+        }
+    }
+
+    if !args.quiet {
+        eprintln!("事件总线已关闭，守护退出。");
+    }
+    ExitCode::SUCCESS
 }
 
 /// 非交互：发送一条消息，成功则退出码 0。

@@ -12,6 +12,10 @@
 //!    下次启动时自动恢复。这样 bootstrap 文件本身在固定位置（用户主目录），
 //!    不依赖 homedir 本身。
 //!
+//! 初始 homedir 优先级：`SYMBIO_HOMEDIR` 环境变量（最高，CLI `--homedir` 注入）
+//! > bootstrap 上次选择 > 默认 `~/.symbio`。环境变量必须最高，否则显式指定的
+//! 隔离系统目录（CI/容器/E2E）会被 bootstrap 记忆静默覆盖。
+//!
 //! ## 设计原则
 //!
 //! - **零侵入**：调用方只需把 `dirs::home_dir().join(".symbio")` 改成
@@ -63,15 +67,33 @@ static INNER: OnceLock<Mutex<Inner>> = OnceLock::new();
 /// 初始化全局状态（进程内只调用一次）
 fn inner() -> &'static Mutex<Inner> {
     INNER.get_or_init(|| {
-        let p = load_from_bootstrap_or_default();
+        let p = initial_homedir();
         Mutex::new(Inner { current: p })
     })
 }
 
-/// 计算默认 homedir
+/// 计算进程首次访问 HomedirRegistry 时的初始 homedir
+///
+/// 优先级（与 CLI `SymbioClient::start` 注释声明的契约一致）：
+/// 1. `SYMBIO_HOMEDIR` 环境变量（CLI `--homedir` 注入 / CI / 容器）——**最高**。
+///    必须先于 bootstrap 检查：否则 bootstrap 存在时 `--homedir` 会被静默
+///    忽略，CLI 指定的隔离系统目录失效（会话/插件数据仍写入上次使用的
+///    homedir，传导断裂）。
+/// 2. `~/.symbio_bootstrap` 持久化的上次选择（见 [`load_from_bootstrap_or_default`]）
+/// 3. 默认 `~/.symbio`（见 [`default_homedir`]）
+fn initial_homedir() -> PathBuf {
+    if let Ok(env_p) = std::env::var("SYMBIO_HOMEDIR") {
+        if let Some(p) = normalize_homedir(&env_p) {
+            return p;
+        }
+    }
+    load_from_bootstrap_or_default()
+}
+
+/// 计算默认 homedir（bootstrap 缺失/无效时的 fallback，以及 reset_to_default 的目标）
 ///
 /// 优先级：
-/// 1. `SYMBIO_HOMEDIR` 环境变量（便于开发/CI/容器）
+/// 1. `SYMBIO_HOMEDIR` 环境变量（便于开发/CI/容器；reset 时尊重强制指定）
 /// 2. `<user_home>/.symbio`
 fn default_homedir() -> PathBuf {
     if let Ok(env_p) = std::env::var("SYMBIO_HOMEDIR") {
@@ -293,6 +315,24 @@ mod tests {
         let _g = lock_test();
         let r = HomedirRegistry::set(PathBuf::new());
         assert!(r.is_err(), "空路径应返回错误");
+    }
+
+    #[test]
+    fn test_env_var_overrides_bootstrap() {
+        // 契约：SYMBIO_HOMEDIR 是最高优先级，必须压过 bootstrap 文件。
+        // 回归测试：修复前 bootstrap 存在时 CLI --homedir 被静默忽略，
+        // 导致隔离系统目录（CI/E2E）传导断裂。
+        let _g = lock_test();
+        let original = std::env::var("SYMBIO_HOMEDIR").ok();
+        let custom = std::env::temp_dir().join("symbio_env_priority_test");
+        std::env::set_var("SYMBIO_HOMEDIR", &custom);
+        // 无论本机 bootstrap 内容为何，环境变量必须胜出
+        assert_eq!(initial_homedir(), custom);
+        // 恢复环境变量，避免污染其他测试
+        match original {
+            Some(v) => std::env::set_var("SYMBIO_HOMEDIR", v),
+            None => std::env::remove_var("SYMBIO_HOMEDIR"),
+        }
     }
 
     #[test]

@@ -26,7 +26,9 @@ const HEARTBEAT_MAX_PER_TICK: usize = 2;
 const HEARTBEAT_JITTER_SECS: u64 = 30;
 
 /// 当前毫秒时间戳（与 `Session.updated_at` 单位一致：unix 毫秒）
-fn now_ms() -> i64 {
+///
+/// `pub(crate)`：同插件的 heartbeat_tool（设置工具）写回会话时复用同一时间源。
+pub(crate) fn now_ms() -> i64 {
     (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
 }
 
@@ -41,11 +43,26 @@ fn heartbeat_phase_ms(id: &str) -> i64 {
     (hasher.finish() % HEARTBEAT_JITTER_SECS) as i64 * 1_000
 }
 
+/// 空闲基线：内存活动锚点与磁盘侧 `updated_at` 取较新者。
+///
+/// - 正常路径：回合内的消息落盘持续刷新 `updated_at`，其最终值 ≈ 活动真正结束
+///   时刻，空闲时长因此从「会话无活动之后」起算；
+/// - 异常路径：回合零写盘退出时 `updated_at` 停留在回合开始前，触发时写入的
+///   内存锚点（较新）作为下限，防止逐 tick 热循环重触发。
+fn idle_baseline(anchor: Option<i64>, updated_at: i64) -> i64 {
+    anchor.map_or(updated_at, |a| a.max(updated_at))
+}
+
 impl SessionPlugin {
     /// 记录会话最近一次"有效活动"时间。
     ///
     /// 心跳调度器据此判断会话是否已空闲足够久：仅当用户/心跳消息被处理后才更新，
     /// 因此会话在两次活动之间一旦空闲达到间隔，即触发一次心跳。
+    ///
+    /// 联动语义：调度器以 `max(此锚点, 磁盘侧 updated_at)` 为空闲基线（见
+    /// [`Self::run_heartbeat_loop`] 与 [`idle_baseline`]）——回合内的消息落盘会
+    /// 持续刷新 `updated_at`，使空闲起点自然推进到活动真正结束（而非消息接收
+    /// 时刻）；此锚点仅作为回合零写盘异常退出时的防热循环下限。
     pub(crate) async fn mark_activity(&self, session_id: &str) {
         let mut map = self.heartbeat_state.write().await;
         map.insert(session_id.to_string(), now_ms());
@@ -56,7 +73,8 @@ impl SessionPlugin {
     /// 每 [`HEARTBEAT_TICK_SECS`] 秒扫描一次：
     /// 1. 跳过未启用心跳或提示词为空的会话；
     /// 2. 正在工作的会话不启动心跳任务；
-    /// 3. 会话空闲（无有效活动）达到 `interval_seconds` 后触发一次心跳，并重置空闲计时器。
+    /// 3. 会话空闲（无有效活动）达到 `interval_seconds` 后触发一次心跳；空闲基线
+    ///    取 `max(内存活动锚点, 磁盘侧 updated_at)`，即从活动真正结束起算。
     pub(crate) async fn run_heartbeat_loop(self: Arc<Self>) {
         let mut ticker = tokio::time::interval(Duration::from_secs(HEARTBEAT_TICK_SECS));
         // 跳过首tick（interval 首次 tick 立即返回），避免启动瞬间集中触发
@@ -93,24 +111,34 @@ impl SessionPlugin {
                     continue;
                 }
 
-                // 正在工作的会话不启动心跳任务
+                // 正在工作的会话不启动心跳任务（防重入：心跳回合进行中绝不再次触发）
                 let state = self.active_mgr.get_or_create(&s.id).await;
                 if state.inner.read().await.is_working {
+                    // 空闲基线无需在此维护：updated_at 随回合内每条消息落盘持续
+                    // 刷新（含错误/panic 收敛时的失败持久化），回合最后一次写盘
+                    // ≈ 活动真正结束，下方 max(锚点, updated_at) 基线自然推进。
                     continue;
                 }
 
-                // 空闲计时起点：最近一次有效活动；首次见到该会话时回退到会话 updated_at
-                let last_activity = {
-                    let map = self.heartbeat_state.read().await;
-                    *map.get(&s.id).unwrap_or(&s.updated_at)
-                };
+                // 空闲计时起点：内存活动锚点与磁盘侧 updated_at 取较新者。
+                // - updated_at 随每条消息落盘刷新，回合最后一次写盘 ≈ 活动真正
+                //   结束，保证「间隔」从会话无活动之后起算（而非从上次触发或
+                //   消息接收时刻起算）；
+                // - 触发时写入的内存锚点作为下限：回合零写盘异常退出（如磁盘
+                //   故障导致失败持久化也失败）时，防止逐 tick 热循环重触发。
+                let last_activity = idle_baseline(
+                    self.heartbeat_state.read().await.get(&s.id).copied(),
+                    s.updated_at,
+                );
                 // 按会话 id 派生确定性抖动，使同间隔的多个会话自然错峰，
                 // 进一步缓解启动惊群（对早已超时的会话影响可忽略）。
                 let interval_ms = (hb.interval_seconds as i64) * 1_000 + heartbeat_phase_ms(&s.id);
 
                 if now - last_activity >= interval_ms {
                     self.clone().trigger_heartbeat(&s.id, &hb).await;
-                    // 重置空闲计时器：避免同一会话在后续 tick 中重复触发
+                    // 写入内存锚点作为防热循环下限：心跳回合内的消息落盘会把
+                    // updated_at 推进到回合结束，下一次触发自然在「回合结束后
+                    // 再空闲 interval」时到来；仅当回合零写盘退出时由此锚点兜底。
                     {
                         let mut map = self.heartbeat_state.write().await;
                         map.insert(s.id.clone(), now);
@@ -219,5 +247,24 @@ impl SessionPlugin {
             "session_id": session_id,
             "include_history": hb.include_history
         })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 空闲基线取较新者：正常路径 updated_at 推进到回合结束（活动真正结束），
+    /// 锚点较旧不拖慢触发；异常路径（零写盘退出）锚点较新，防止逐 tick 热循环。
+    #[test]
+    fn idle_baseline_takes_newer_of_anchor_and_updated_at() {
+        // 无内存锚点（进程重启后）：回退到磁盘侧 updated_at
+        assert_eq!(idle_baseline(None, 1_000), 1_000);
+        // 正常路径：updated_at（回合最后一次写盘）较新 → 取 updated_at
+        assert_eq!(idle_baseline(Some(2_000), 5_000), 5_000);
+        // 异常路径：锚点（触发时刻）较新 → 取锚点（防热循环下限）
+        assert_eq!(idle_baseline(Some(8_000), 5_000), 8_000);
+        // 相等时取任一即可
+        assert_eq!(idle_baseline(Some(5_000), 5_000), 5_000);
     }
 }

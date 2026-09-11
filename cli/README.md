@@ -1,7 +1,7 @@
 # symbio-cli
 
 与 [`../tauri`](../tauri) **并列**的第二种 Symbio 前端形态：纯 Rust 的命令行客户端，
-支持**交互（REPL）**与**非交互（单次 / 管道）**两种模式。
+支持**交互（REPL）**、**非交互（单次 / 管道）**与**心跳守护（`--heartbeat`）**三种形态。
 
 ## 它和 tauri 前端的唯一差别是传输层
 
@@ -30,7 +30,7 @@
 
 - [架构](./docs/architecture.md) — 进程内客户端、`event_bus` 通道选择、渲染器、模式选择、消息增量合并
 - [构建](./docs/building.md) — 为什么不能裸 `cargo build`、C 工具链注入三要素、target 缓存修复
-- [用法](./docs/usage.md) — 三种模式示例、完整参数、REPL 命令、输出通道、已知边界
+- [用法](./docs/usage.md) — 四种模式示例、完整参数、REPL 命令、输出通道、已知边界
 
 ## 快速开始
 
@@ -49,6 +49,9 @@ echo "你好" | ./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbi
 
 # 交互：stdin 不是终端时用 --repl 强制进入 REPL（也便于脚本化验证会话）
 printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe --repl
+
+# 心跳守护：驻留并为本目录所有启用心跳的会话触发空闲心跳
+./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio" --heartbeat
 ```
 
 产物：`../symbio/target/debug/symbio-cli.exe`。
@@ -63,12 +66,13 @@ printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe
 | `--mode <MODE>` | `auto`（默认）\| `interactive` |
 | `--workdir <路径>` | 会话工作目录（默认当前目录） |
 | `--homedir <路径>` | **系统目录**（默认 `<当前目录>/.symbio`） |
+| `--heartbeat` | 心跳守护模式：驻留并为本目录所有启用心跳的会话触发空闲心跳（与 `-m`/`--repl` 互斥） |
 | `--agent <ID>` | 绑定 Agent（可选） |
 | `-i, --repl` | 强制进入交互式 REPL，即使 stdin 不是终端 |
 | `-q, --quiet` | 只输出模型文本 |
 | `-v, --verbose` | 额外打印模型推理内容与诊断 |
 
-模式判定顺序：`-m`/位置参数 → `--repl` → stdin 非终端则走管道非交互 → 否则 REPL。
+模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → stdin 非终端则走管道非交互 → 否则 REPL。
 
 ### REPL 内置命令
 
@@ -87,9 +91,9 @@ subscriber（默认过滤级别 `info,symbio=debug`），把插件日志混进�
 
 ## 系统目录（homedir）
 
-默认取 `<当前目录>/.symbio`，通过 **`SYMBIO_HOMEDIR` 环境变量**注入 ——
-这是 `HomedirRegistry` 的最高优先级来源（高于 `~/.symbio_bootstrap` 与 `~/.symbio`），
-因此不会污染/依赖用户主目录下的 bootstrap 文件。
+默认取 `<当前目录>/.symbio`；`--homedir` 参数在客户端启动时注入 **`SYMBIO_HOMEDIR` 环境变量**
+（先于插件树构建）。`HomedirRegistry` 优先级链：**环境变量 > `~/.symbio_bootstrap` > 默认
+`<当前目录>/.symbio`**（环境变量最高，因此 `--homedir` 总是生效）。
 
 若该目录下没有 `config.yaml`，CLI 会提示并退回内置默认配置（通常表现为"没有可用
 Provider"）。

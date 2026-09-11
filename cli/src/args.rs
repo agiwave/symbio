@@ -52,6 +52,12 @@ pub struct Args {
     /// 是正确的，但会挡住两类场景：① 终端不支持 TTY 时仍想用 REPL；
     /// ② 用脚本喂多轮输入来自动化验证会话。给一个显式开关即可两全。
     pub repl: bool,
+    /// 心跳守护模式：常驻宿主 session 插件的后台心跳调度器。
+    ///
+    /// 心跳机制完全在后端 session 插件内闭环（配置存 `Session.metadata.heartbeat`，
+    /// 调度循环随插件树构建启动）。CLI 只需保持进程存活，调度器就会按各会话的
+    /// 空闲节奏自动触发心跳对话；本进程同时渲染事件总线上的会话活动。
+    pub heartbeat: bool,
 }
 
 const HELP: &str = "\
@@ -72,6 +78,8 @@ symbio-cli — Symbio 命令行前端（纯 Rust）
       --homedir <路径>    系统目录（默认 <当前目录>/.symbio）
       --agent <ID>        绑定 Agent（可选）
   -i, --repl              强制进入交互式 REPL（即使 stdin 不是终端）
+      --heartbeat         心跳守护模式：常驻宿主后台心跳调度器（会话空闲达到
+                          设定间隔后自动触发对话），Ctrl+C 退出
   -q, --quiet             非交互模式下只输出模型文本
   -v, --verbose           打印模型推理内容与更多诊断
   -h, --help              显示本帮助
@@ -109,6 +117,7 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Command, String>
         quiet: false,
         verbose: false,
         repl: false,
+        heartbeat: false,
     };
 
     let mut positional: Vec<String> = Vec::new();
@@ -157,6 +166,7 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Command, String>
             "-q" | "--quiet" => args.quiet = true,
             "-v" | "--verbose" => args.verbose = true,
             "-i" | "--repl" => args.repl = true,
+            "--heartbeat" => args.heartbeat = true,
             other if other.starts_with('-') && other.len() > 1 => {
                 return Err(format!("未知选项: {other}（用 --help 查看用法）"));
             }
@@ -170,6 +180,13 @@ pub fn parse<I: IntoIterator<Item = String>>(argv: I) -> Result<Command, String>
             Some(prev) => format!("{prev} {joined}"),
             None => joined,
         });
+    }
+
+    // 守护模式与一次性消息语义互斥：守护进程只宿主调度器，不代发消息。
+    if args.heartbeat && args.message.is_some() {
+        return Err(
+            "--heartbeat 守护模式不能与消息同用（守护进程只宿主调度器，不发送消息）".to_string(),
+        );
     }
 
     Ok(Command::Run(Box::new(args)))
@@ -238,10 +255,24 @@ mod tests {
     }
 
     #[test]
+    fn heartbeat_flag_is_bool_and_excludes_message() {
+        assert!(!run(&[]).heartbeat);
+        assert!(run(&["--heartbeat"]).heartbeat);
+        assert!(parse([
+            "--heartbeat".to_string(),
+            "-m".to_string(),
+            "hi".to_string()
+        ])
+        .is_err());
+    }
+
+    #[test]
     fn relative_paths_resolve_against_cwd() {
-        let a = run(&["--workdir", "sub", "--homedir", "/abs/hd"]);
+        // 绝对路径样例需带盘符才算 Windows 绝对路径（is_absolute 语义）。
+        let abs = if cfg!(windows) { r"C:\abs\hd" } else { "/abs/hd" };
+        let a = run(&["--workdir", "sub", "--homedir", abs]);
         let cwd = std::env::current_dir().unwrap();
         assert_eq!(a.workdir, cwd.join("sub"));
-        assert_eq!(a.homedir, PathBuf::from("/abs/hd"));
+        assert_eq!(a.homedir, PathBuf::from(abs));
     }
 }

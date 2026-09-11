@@ -52,10 +52,10 @@ fn gen_id(prefix: &str) -> String {
 }
 
 /// 事件总线帧（已从 PluginFrame 解包出的业务字段）。
-struct BusEvent {
-    kind: String,
-    session_id: Option<String>,
-    data: Value,
+pub struct BusEvent {
+    pub kind: String,
+    pub session_id: Option<String>,
+    pub data: Value,
 }
 
 fn parse_bus_frame(frame: PluginFrame) -> Option<BusEvent> {
@@ -308,6 +308,14 @@ impl SymbioClient {
             Some(e) => Err(e),
             None => Ok(()),
         }
+    }
+
+    /// 读取下一条事件总线事件（心跳守护模式用）。
+    ///
+    /// 心跳触发的会话与普通对话走同一套编排与事件发布，守护进程在这里
+    /// 消费并渲染即可观察到无人值守轮次。返回 `None` 表示总线连接已关闭。
+    pub async fn next_bus_event(&mut self) -> Option<BusEvent> {
+        self.events.recv().await
     }
 
     /// 查询当前 Provider（用于 REPL 的 `/provider` 状态显示）。

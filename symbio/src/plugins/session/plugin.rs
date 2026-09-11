@@ -334,8 +334,20 @@ impl Plugin for SessionPlugin {
                 visitor.register_batch(self.build_option_nodes(&ctx).await).await;
             }
         }
-        // 能力收集（available_tools）：session 自身不贡献工具——会话编排权
-        // 归本插件，工具由 local/web/mcp/skill/agent 等插件贡献。
+        // 能力收集（available_tools）：session 贡献一个内聚工具——心跳设置。
+        // 心跳机制（配置存储 / 后台调度 / 触发执行）全部在本插件内闭环，
+        // 其设置工具同样内聚于此：直接读写本插件会话存储，零跨模块路由。
+        if ctx.get(crate::symbio_core::PATH).unwrap_or_default()
+            == crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS
+        {
+            if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+                visitor
+                    .register(Arc::new(super::heartbeat_tool::HeartbeatTool::new(Arc::downgrade(
+                        &self,
+                    ))))
+                    .await;
+            }
+        }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

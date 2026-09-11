@@ -44,7 +44,17 @@ printf '用一句话说明什么是插件系统。' | ./../symbio/target/debug/s
 printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe --repl
 ```
 
-模式判定顺序：`-m`/位置参数 → `--repl` → stdin 非终端则走管道 → 否则 REPL。
+### ④ 心跳守护模式（`--heartbeat`）
+
+```bash
+./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio" --heartbeat
+```
+
+驻留进程，为本 homedir 下**所有启用了心跳的会话**按各自配置触发空闲心跳（空闲 N 秒自动注入
+心跳提示词驱动一轮工作），并把工作/空闲/错误状态渲染到 stderr。与 `-m`、`--repl` 互斥。
+机制细节见 [docs/design/heartbeat-mechanism.md](../../docs/design/heartbeat-mechanism.md)。
+
+模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → stdin 非终端则走管道 → 否则 REPL。
 
 ---
 
@@ -58,6 +68,7 @@ printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe
 | `--mode <MODE>` | `auto`（默认）\| `interactive` |
 | `--workdir <路径>` | 会话工作目录（默认当前目录） |
 | `--homedir <路径>` | **系统目录**（默认 `<当前目录>/.symbio`） |
+| `--heartbeat` | 心跳守护模式：驻留并为本目录所有启用心跳的会话触发空闲心跳（与 `-m`/`--repl` 互斥） |
 | `--agent <ID>` | 绑定 Agent（可选） |
 | `-i, --repl` | 强制进入交互式 REPL，即使 stdin 不是终端 |
 | `-q, --quiet` | 非交互模式下只输出模型文本 |
@@ -94,8 +105,9 @@ printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe
 
 ## 系统目录（homedir）与 Provider 语义
 
-- **homedir**：默认 `<当前目录>/.symbio`，通过 **`SYMBIO_HOMEDIR` 环境变量**注入（这是
-  `HomedirRegistry` 的最高优先级来源，不会污染/依赖用户主目录下的 bootstrap 文件）。该目录下没有
+- **homedir**：默认 `<当前目录>/.symbio`。`--homedir` 参数在 `SymbioClient::start()` 内注入
+  **`SYMBIO_HOMEDIR` 环境变量**（先于插件树构建）；`HomedirRegistry` 的优先级链为
+  **环境变量 > 用户主目录 bootstrap 文件 > 默认 `<当前目录>/.symbio`**。该目录下没有
   `config.yaml` 时，CLI 提示并退回内置默认配置（通常表现为「没有可用 Provider」）。
 - **provider**：CLI 默认 `usrouter-glm5-3-flash`（开箱即连一个可用模型）；`--provider default` 显式
   保留「回退到系统目录 `config.yaml` 的 `default_provider_id`」能力。

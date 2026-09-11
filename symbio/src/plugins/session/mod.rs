@@ -7,6 +7,7 @@ mod compression;
 mod context_window;
 mod handlers;
 mod heartbeat;
+mod heartbeat_tool;
 mod options;
 mod orchestrator;
 pub(crate) mod paths;

@@ -18,6 +18,15 @@
 
 ***
 
+## 2026-09-11: 会话心跳任务（heartbeat 工具 + CLI 守护模式 + homedir 环境变量优先级修复 + 空闲基线语义修复）
+
+- **会话心跳调度器**（`plugins/session/heartbeat.rs`）：每进程每 15s 扫描本 store 全部会话，对「已启用 + 空闲满阈值（interval + 每会话固定 jitter ≤30s）」的会话注入 `hb_<sid>_<毫秒>` 心跳消息（`meta.heartbeat=true`，提示词作为用户消息进入正常回合管线）。`is_working` 会话绝不触发（防重入）；触发即写内存锚点（防热循环）；锚点首见回退 `session.updated_at`（进程重启/多进程兜底 = 重启追赶）。
+- **heartbeat 设置工具**（`plugins/session/heartbeat_tool.rs`）：agent 可调用 `heartbeat` 工具对本会话 `set`（interval ≥10s / prompt / include_history，部分更新）/ `get` / `cancel`（停用保留配置）；配置持久化于 `session.json` 的 `metadata.heartbeat`，写回刷新 `updated_at`。
+- **CLI 心跳守护模式**（`cli/`：args/client/main）：`symbio-cli --heartbeat` 驻留进程，为本 homedir 下所有启用心跳的会话触发空闲心跳并渲染状态；与 `-m`/`--repl` 互斥，模式判定顺序 `--heartbeat` 优先。
+- **homedir 优先级修复**（`symbio_core/homedir.rs`）：`HomedirRegistry` 优先级改为 **`SYMBIO_HOMEDIR` 环境变量 > bootstrap 文件 > 默认 `<cwd>/.symbio`**（修复前 bootstrap 优先，`--homedir` 被静默覆盖）；新增回归测试 `test_env_var_overrides_bootstrap`。
+- **空闲基线语义修复**（`plugins/session/heartbeat.rs`）：空闲基线改为 `max(内存锚点, 磁盘 updated_at)` —— 修复前空闲时钟从「上次触发/上次消息接收」起算，回合结束后 14.1s 即重触发（违反「无活动之后满 interval」契约）；修复后空闲严格从活动结束（最后一次落盘）起算，E2E 43 次触发最小间隔 36.2s 全部合规。新增测试 `idle_baseline_prefers_latest_activity`（全套 286 项测试通过）。
+- **文档**：新增 `docs/design/heartbeat-mechanism.md`（语义契约/调度细节/工具 API/E2E 摘要）；`cli/docs/usage.md` 补守护模式、`--heartbeat` 参数与 homedir 优先级链。
+
 ## 2026-09-09: L1 消息压缩豁免与批次保护（ToolCall 参数永久豁免 + 最近 N 条原文保护 + 头尾保留 + 删除死代码路由）
 
 - **删除死代码路由 `session/compress`**：`invoke_compress`（handlers.rs）全仓无任何调用方（tauri 前端、examples、bin 均未引用），且与自动压缩路径保护语义不一致（无"保护最新一条"切分、无角色豁免，误用反而会压缩当前任务指令）。随路由一并删除：`SessionCompressRequest` schema（schemas/session/session_compress.rs）与 mod 声明、plugin.rs 路由分发、ROUTES.md 条目；`ChatSession::compress_messages` 默认实现的 doc 同步。压缩统一走自动路径（`compress_temporary_messages` → 批次覆写）。
