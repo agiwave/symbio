@@ -310,6 +310,90 @@ impl ModelPlugin {
             .with_description("Universal MODEL Agent Engine (LLM API Router)")
             .with_version("0.3.0")
     }
+
+    /// 参与 `available_options` 收集：贡献「Model」选择项。
+    ///
+    /// 形态：`sub` 节点，子项 = 每个启用的 Provider；选中即把
+    /// `metadata.provider_id` 落库（后端 `resolve_session_params` 按 metadata
+    /// 回退解析，故会话发起无需前端传参）。当前选中值由宿主注入的
+    /// `ctx[PROVIDER_ID]` 回填——本插件无需加载会话。
+    async fn contribute_options(&self, ctx: &Arc<dyn InvokeRequest>) {
+        use crate::symbio_core::schemas::options::OptionNode;
+
+        let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) else {
+            return;
+        };
+
+        // 展示顺序号段约定：30 = Model（见 session::options 模块文档）
+        const ORDER: i32 = 30;
+
+        let providers = self.providers.read().await;
+        let requested = ctx
+            .get(crate::symbio_core::PROVIDER_ID)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        // 生效 Provider：请求显式 > 默认（与后端解析链一致，供展示回填）
+        let effective = requested.clone().or_else(|| {
+            providers
+                .resolve(providers.default_provider_id.as_deref())
+                .map(|p| p.id.clone())
+        });
+
+        let mut enabled: Vec<&ModelProviderConfig> =
+            providers.providers.values().filter(|p| p.enabled).collect();
+        enabled.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let mut children: Vec<OptionNode> = Vec::with_capacity(enabled.len());
+        let mut current_label: Option<String> = None;
+        for p in &enabled {
+            if effective.as_deref() == Some(p.id.as_str()) {
+                current_label = Some(if p.name.is_empty() {
+                    p.id.clone()
+                } else {
+                    p.name.clone()
+                });
+            }
+            let model = if p.model.is_empty() {
+                "未设置模型"
+            } else {
+                p.model.as_str()
+            };
+            children.push(
+                OptionNode::session_state(
+                    format!("model_provider:{}", p.id),
+                    if p.name.is_empty() {
+                        p.id.clone()
+                    } else {
+                        p.name.clone()
+                    },
+                    "provider_id",
+                    json!(p.id),
+                )
+                .with_description(format!("{} · {}", p.provider, model)),
+            );
+        }
+
+        let node = if children.is_empty() {
+            // 无可用 Provider：仍下发节点（禁用态 + 引导文案），前端零特判
+            OptionNode::sub("model_provider", "Model", Vec::new())
+                .with_icon("model")
+                .with_order(ORDER)
+                .with_description("暂无可用 Model，请前往「设置 → 模型」添加")
+                .with_status("disabled")
+                .with_value_label("", "未配置")
+        } else {
+            let node = OptionNode::sub("model_provider", "Model", children)
+                .with_icon("model")
+                .with_order(ORDER)
+                .with_description("选择本次会话使用的 Model Provider（含默认）");
+            match current_label {
+                Some(label) => node.with_value_label(effective.unwrap_or_default(), label),
+                None => node.with_value(effective.unwrap_or_default()),
+            }
+        };
+
+        visitor.register_option(node).await;
+    }
 }
 
 impl Default for ModelPlugin {
@@ -590,8 +674,16 @@ impl Plugin for ModelPlugin {
         // 把每个启用的 provider 以 ModelProviderEntry 注册进 CAPABILITY_VISITOR，
         // 其系统提示词一并注册（provider_id 键；默认 provider 额外注册 "default" 键）。
         let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
-        if sub_path != crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS {
-            return Err(PluginError::NotFound(format!("未知遍历路径: {sub_path}")));
+        match sub_path.as_str() {
+            // 选项收集（与能力收集同一广播机制的第二通道）：贡献「Model」选择项
+            crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS => {
+                self.contribute_options(&ctx).await;
+                return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
+            }
+            crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS => {}
+            other => {
+                return Err(PluginError::NotFound(format!("未知遍历路径: {other}")));
+            }
         }
 
         if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {

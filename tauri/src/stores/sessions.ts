@@ -41,18 +41,6 @@ import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/services/model'
 import type { ImageAttachment } from '@/types'
 
-/** 新建会话（懒创建）时的草稿初始选择；缺省项不写入 metadata，交给后端默认/水合兜底 */
-export interface SessionCreateInit {
-  /** 智能体（新建态草稿选择）；null/缺省 = 不指定 */
-  agentId?: string | null
-  /** 模型提供商；缺省 = 跟随后端默认提供商 */
-  providerId?: string
-  /** 运行模式；缺省 = auto */
-  mode?: 'auto' | 'interactive'
-  /** 执行风险等级；缺省 = medium */
-  riskLevel?: 'low' | 'medium' | 'high'
-}
-
 /** 单个 session 的实时状态（用于缩略卡展示） */
 export interface SessionLiveStatus {
   /** 后端报告当前 session 正在处理（Status busy / Connected.is_working=true） */
@@ -364,26 +352,60 @@ export const useSessionsStore = defineStore('sessions', () => {
   function getSessionMode(id: string): 'auto' | 'interactive' {
     return sessionModes.value[id] || 'interactive'
   }
-  /** 设置并记忆会话运行模式（fire-and-forget 持久化到 session.metadata.mode） */
-  function setSessionMode(id: string, mode: 'auto' | 'interactive') {
-    sessionModes.value = { ...sessionModes.value, [id]: mode }
-    // fire-and-forget：ref 已同步变更（UI 立即响应），持久化失败仅警告
-    updateSession(id, { mode }).catch((e) =>
-      logger.warn('[sessions]', 'setSessionMode 持久化失败', e)
-    )
-  }
 
   /** 读取会话执行风险等级（默认 medium） */
   function getSessionRiskLevel(id: string): 'low' | 'medium' | 'high' {
     return sessionRiskLevels.value[id] || 'medium'
   }
-  /** 设置并记忆会话执行风险等级（fire-and-forget 持久化到 session.metadata.risk_level） */
-  function setSessionRiskLevel(id: string, level: 'low' | 'medium' | 'high') {
-    sessionRiskLevels.value = { ...sessionRiskLevels.value, [id]: level }
-    // fire-and-forget：ref 已同步变更（UI 立即响应），持久化失败仅警告
-    updateSession(id, { risk_level: level }).catch((e) =>
-      logger.warn('[sessions]', 'setSessionRiskLevel 持久化失败', e)
-    )
+
+  /**
+   * 从清单项回填会话级选择（mode / risk_level）到 store map。
+   *
+   * 与 agent_id/provider_id 不同，mode/risk_level 的 UI 状态在 store（不在
+   * 组件 ref），故需在清单刷新 / 元数据补丁时回填，使切换会话或改写后下拉态一致。
+   */
+  function backfillSessionMaps(items: SessionListItem[]) {
+    const modeBackfill: Record<string, 'auto' | 'interactive'> = {}
+    const riskBackfill: Record<string, 'low' | 'medium' | 'high'> = {}
+    for (const it of items) {
+      const m = it.metadata
+      if (!m) continue
+      if (m.mode === 'auto' || m.mode === 'interactive') {
+        modeBackfill[it.id] = m.mode
+      }
+      if (m.risk_level === 'low' || m.risk_level === 'medium' || m.risk_level === 'high') {
+        riskBackfill[it.id] = m.risk_level
+      }
+    }
+    if (Object.keys(modeBackfill).length > 0) {
+      sessionModes.value = { ...sessionModes.value, ...modeBackfill }
+    }
+    if (Object.keys(riskBackfill).length > 0) {
+      sessionRiskLevels.value = { ...sessionRiskLevels.value, ...riskBackfill }
+    }
+  }
+
+  /**
+   * 把一次 `session.metadata` 补丁镜射到本地（后端 `session/update` 的浅合并语义）。
+   *
+   * 供**级联选项机制**使用：选项选择统一经 `worker/session/update` 落库，
+   * 本方法让前端无需等待实体事件往返即可收敛本地视图（`activeWorkdir`、
+   * mode/risk 回退取值、最近使用目录）。它不含选项语义——只是 session/update
+   * 的本地镜像，故任何带 metadata 补丁的调用方都可复用。
+   */
+  function applySessionMetadataPatch(id: string, patch: Record<string, unknown>) {
+    const idx = list.value.findIndex((s) => s.id === id)
+    if (idx < 0) return
+    const cur = list.value[idx]
+    const metadata = { ...(cur.metadata || {}), ...patch } as SessionMetadata
+    list.value[idx] = { ...cur, metadata }
+    backfillSessionMaps([list.value[idx]])
+    // workdir 的既有副作用：最近使用目录（作为新建会话的默认目录）
+    const wd = metadata.workdir
+    if (typeof wd === 'string' && wd) {
+      setLastWorkdir(wd)
+      lastUsedWorkdir.value = wd
+    }
   }
 
   // ---- 计算属性 ----
@@ -420,27 +442,8 @@ export const useSessionsStore = defineStore('sessions', () => {
           titles.value[it.id] = t
         }
       }
-      // 回填会话级选择（mode / risk_level）到 store map
-      // 与 agent_id/provider_id 不同，mode/risk_level 的 UI 状态在 store（不在 ModelChatPanel ref），
-      // 故需在 refreshList 时从 metadata 回填，使切换会话/刷新页面后下拉框保留选中值。
-      const modeBackfill: Record<string, 'auto' | 'interactive'> = {}
-      const riskBackfill: Record<string, 'low' | 'medium' | 'high'> = {}
-      for (const it of items) {
-        const m = it.metadata
-        if (!m) continue
-        if (m.mode === 'auto' || m.mode === 'interactive') {
-          modeBackfill[it.id] = m.mode
-        }
-        if (m.risk_level === 'low' || m.risk_level === 'medium' || m.risk_level === 'high') {
-          riskBackfill[it.id] = m.risk_level
-        }
-      }
-      if (Object.keys(modeBackfill).length > 0) {
-        sessionModes.value = { ...sessionModes.value, ...modeBackfill }
-      }
-      if (Object.keys(riskBackfill).length > 0) {
-        sessionRiskLevels.value = { ...sessionRiskLevels.value, ...riskBackfill }
-      }
+      // 回填会话级选择（mode / risk_level）到 store map（机制见 backfillSessionMaps）
+      backfillSessionMaps(items)
 
       // 合并实时 is_working：list 接口返回的是后端 ActiveSessionManager 的权威状态
       const liveStatuses = sessionStatuses.value
@@ -469,30 +472,28 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   /**
    * 创建新会话。
-   * - workdir 可选；不传则取 lastUsedWorkdir
-   * - init 可选：新建态（懒创建）草稿选择（agent/provider/mode/risk），写入本地与后端 metadata，
-   *   并 seed 内存 map（sessionModes/sessionRiskLevels），保证 ModelChatPanel 同步水合与 ChatSettings 回显
-   * - 创建后立即调用 session/update 合并写 metadata
-   * - 写完之后再写入列表头部
+   *
+   * @param metadata 草稿态（新建会话前）累积的 metadata 补丁——由级联选项机制
+   *   通用缓冲产出（workdir / agent_id / provider_id / mode / risk_level / heartbeat…），
+   *   与后端 `session/update` 同一浅合并语义，故这里直接透传，前端不解释字段名。
+   *   workdir 缺省时回退最近使用目录（`lastUsedWorkdir` → `getLastWorkdir`）。
+   *
+   * 流程：本地乐观插入条目（与后端写同一份 metadata，保证挂载即水合）→
+   * 后端 `session/update` 落库 → 发布前端 created 事件（后端事件随后幂等收敛）。
    */
-  async function createSession(workdir?: string, init?: SessionCreateInit): Promise<string> {
+  async function createSession(metadata?: Record<string, unknown>): Promise<string> {
     const id = createSessionId()
     const now = Math.floor(Date.now() / 1000)
-    // 兜底顺序：显式传入 > 最近使用目录；lastWorkdir 仅作新建默认，可有可无。
-    const resolvedWorkdir = workdir ?? lastUsedWorkdir.value ?? getLastWorkdir() ?? undefined
-    // init 缺省项不写入 metadata（undefined 会被跳过），交给后端默认 / 水合兜底
-    const draftAgentId = init?.agentId || undefined
-    const draftProviderId = init?.providerId || undefined
-    const draftMode = init?.mode
-    const draftRiskLevel = init?.riskLevel
+
+    const meta = { created_via: 'ui', ...(metadata ?? {}) } as SessionMetadata
+    // 兜底顺序：草稿显式选择 > 最近使用目录；lastWorkdir 仅作新建默认。
+    if (!meta.workdir) {
+      const fallback = lastUsedWorkdir.value ?? getLastWorkdir() ?? undefined
+      if (fallback) meta.workdir = fallback
+    }
+
     // 1. 立即在本地插入"未持久化"条目（与后端 updateSession 用同一份 meta，
     //    保证 ModelChatPanel onMounted 从本地 list.metadata 同步水合时拿得到草稿选择）
-    const meta: SessionMetadata = { created_via: 'ui' }
-    if (resolvedWorkdir) meta.workdir = resolvedWorkdir
-    if (draftAgentId) meta.agent_id = draftAgentId
-    if (draftProviderId) meta.provider_id = draftProviderId
-    if (draftMode) meta.mode = draftMode
-    if (draftRiskLevel) meta.risk_level = draftRiskLevel
     const local: SessionListItem = {
       id,
       message_count: 0,
@@ -503,9 +504,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     list.value = [local, ...list.value]
     titles.value[id] = '新对话'
     activeId.value = id
-    // seed 内存 map：ChatSettings 读的是 map 而非 metadata，草稿选择必须在这里可见
-    if (draftMode) sessionModes.value[id] = draftMode
-    if (draftRiskLevel) sessionRiskLevels.value[id] = draftRiskLevel
+    // 回填会话级选择（mode / risk_level）到 store map，使选择器即时反映草稿
+    backfillSessionMaps([local])
 
     // 初始化空 messages / status
     const mnext = { ...sessionMessages.value, [id]: {} }
@@ -513,12 +513,12 @@ export const useSessionsStore = defineStore('sessions', () => {
     const snext = { ...sessionStatuses.value, [id]: { is_working: false, is_waiting_approval: false, last_event_at: Date.now() } }
     sessionStatuses.value = snext
 
-    // 2. 同步写后端 metadata（workdir / 草稿选择），让后续 list 能拿到正确信息
+    // 2. 同步写后端 metadata（草稿选择），让后续 list 能拿到正确信息
     try {
       await updateSession(id, meta)
-      if (resolvedWorkdir) lastUsedWorkdir.value = resolvedWorkdir
+      if (typeof meta.workdir === 'string' && meta.workdir) lastUsedWorkdir.value = meta.workdir
     } catch (e) {
-      logger.warn('[sessions]', 'updateSession(workdir) 失败（仅本地生效）', e)
+      logger.warn('[sessions]', 'updateSession(metadata) 失败（仅本地生效）', e)
     }
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
@@ -645,27 +645,6 @@ export const useSessionsStore = defineStore('sessions', () => {
       list.value[idx] = {
         ...cur,
         metadata: { ...(cur.metadata || {}), title }
-      }
-    }
-  }
-
-  /**
-   * 写入（合并）会话的心跳任务配置到 metadata.heartbeat。
-   * 同步写后端 + 本地 list 条目（驱动缩略卡的心跳角标）。
-   */
-  async function setHeartbeat(id: string, config: SessionMetadata['heartbeat']) {
-    try {
-      await updateSession(id, { heartbeat: config })
-    } catch (e) {
-      logger.error('[sessions]', 'setHeartbeat 失败', e)
-      throw e
-    }
-    const idx = list.value.findIndex(s => s.id === id)
-    if (idx >= 0) {
-      const cur = list.value[idx]
-      list.value[idx] = {
-        ...cur,
-        metadata: { ...(cur.metadata || {}), heartbeat: config }
       }
     }
   }
@@ -920,7 +899,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     setActiveWorkdir,
     getSessionWorkdir,
     rename,
-    setHeartbeat,
     setWorking,
     loadMessages,
     // 历史管理（删除 / 编辑 / 清空 / 卡死持久化）
@@ -940,14 +918,15 @@ export const useSessionsStore = defineStore('sessions', () => {
     dropSessionState,
     hydrateFromHistory,
     removeMessageById,
-    // 运行模式（auto / interactive）
+    // 运行模式（auto / interactive）：写入统一走级联选项机制（metadata 补丁），
+    // store 只提供读取 + 本地镜射，避免第二条写入路径。
     getSessionMode,
-    setSessionMode,
     // 新建模式（无 id 详情）懒创建：首条消息排队
     pendingFirstMessage,
     consumePendingFirstMessage,
     // 执行风险等级（low / medium / high）
     getSessionRiskLevel,
-    setSessionRiskLevel
+    // 级联选项机制：session/update 的本地镜射（metadata 浅合并）
+    applySessionMetadataPatch
   }
 })

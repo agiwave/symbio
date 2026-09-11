@@ -444,6 +444,19 @@ pub fn model_detail_definition() -> DetailDefinition {
                         )
                     },
                     DetailField {
+                        min: Some(1024.0),
+                        max: Some(10_000_000.0),
+                        step: Some(1024.0),
+                        placeholder: Some("262144".into()),
+                        default: Some(serde_json::json!(262_144)),
+                        ..field(
+                            "max_context_tokens",
+                            "最大上下文 (tokens)",
+                            "模型可用的总上下文窗口，默认 256k；运行时会话会与服务上报的上限取较小值",
+                            "number",
+                        )
+                    },
+                    DetailField {
                         min: Some(0.0),
                         step: Some(100.0),
                         placeholder: Some("0".into()),
@@ -579,10 +592,17 @@ mod tests {
     fn definition_covers_model_form_surface() {
         let def = model_detail_definition();
         assert_eq!(def.binding, "upload");
-        // 基本分区 6 字段 + 高级折叠分区 5 字段
+        // 基本分区 6 字段 + 高级折叠分区 6 字段
         assert_eq!(def.sections[0].fields.len(), 6);
         assert_eq!(def.sections[1].title.as_deref(), Some("高级设置"));
         assert!(def.sections[1].collapsed);
+        // 高级设置包含最大上下文（max_context_tokens，默认 256k）
+        let ctx_field = def.sections[1]
+            .fields
+            .iter()
+            .find(|f| f.key == "max_context_tokens")
+            .expect("max_context_tokens field should exist");
+        assert_eq!(ctx_field.default, Some(serde_json::json!(262_144)));
         // 预设联动：provider 字段触发，预设含模型候选与协议校正
         let spec = def.presets.as_ref().unwrap();
         assert_eq!(spec.field, "provider");

@@ -241,6 +241,45 @@ impl ModelProvider for GeminiProtocol {
 
         Ok(())
     }
+
+    /// 最大上下文探测：Gemini ListModels（`GET {api_base}/models`）为每个模型
+    /// 返回 `inputTokenLimit`，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
+    async fn query_context_limit(&self, config: &ModelConfig) -> Option<u32> {
+        if config.api_base.trim().is_empty() || config.model.trim().is_empty() {
+            return None;
+        }
+        let key = format!("{}|{}", config.api_base, config.model);
+        super::context_probe::cached_probe(&key, async move {
+            let url = format!("{}/models", config.api_base.trim_end_matches('/'));
+            let mut req = get_http_client()
+                .get(&url)
+                .timeout(std::time::Duration::from_secs(2));
+            if let Some(k) = &config.api_key {
+                req = req.header("x-goog-api-key", k);
+            }
+            let resp = req.send().await.ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let v: serde_json::Value = resp.json().await.ok()?;
+            // name 形如 "models/gemini-1.5-pro"（配置里的 model 通常不带前缀）
+            let target = config.model.trim_start_matches("models/");
+            v.get("models")?
+                .as_array()?
+                .iter()
+                .find(|m| {
+                    m.get("name")
+                        .and_then(|n| n.as_str())
+                        .map(|n| n.trim_start_matches("models/") == target)
+                        .unwrap_or(false)
+                })
+                .and_then(|m| m.get("inputTokenLimit"))
+                .and_then(|v| v.as_u64())
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|n| *n > 0)
+        })
+        .await
+    }
 }
 
 // === 注册到通用对象创建机制 ===

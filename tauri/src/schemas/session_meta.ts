@@ -12,11 +12,13 @@
  *  - last_message_preview: 首条消息的简短摘要（用于列表显示优化）
  *  - heartbeat: 会话心跳任务配置（空闲指定时间后自动触发提示词）
  *
- * ## 会话级四选择统一模型
+ * ## 会话参数统一模型
  *
- * agent_id / provider_id / risk_level / mode 四者级别相同，统一走：
- * `session.metadata` 持久化 + `onMounted` 加载 + watcher 保存 + `chat_send` 传输
- * + 后端 ctx 键 + 子会话继承。详见 `.trae/documents/unified-session-selections.md`。
+ * agent_id / provider_id / risk_level / mode / workdir 级别相同，统一走：
+ * `session.metadata` 持久化（写入唯一经**级联选项机制**——
+ * 会话页选项行选择 → `worker/session/update` 浅合并）
+ * + 后端各解析链按 metadata 回退取值。
+ * 前端不持有任何业务字段名，详见 `docs/design/cascading-options-mechanism.md`。
  */
 export interface SessionMetadata {
   workdir?: string;
@@ -38,7 +40,8 @@ export interface SessionMetadata {
 /**
  * 会话心跳任务配置
  *
- * 存储于 `Session.metadata.heartbeat`，由前端"会话设置"写入。
+ * 存储于 `Session.metadata.heartbeat`，由会话页「心跳任务」选项表单写入
+ * （级联选项机制，`bind = metadata.heartbeat`）。
  * 后端 `SessionPlugin` 的后台调度器会按 interval_seconds 检测空闲并触发。
  */
 export interface SessionHeartbeatConfig {

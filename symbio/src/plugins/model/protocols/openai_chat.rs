@@ -188,6 +188,12 @@ impl ModelProvider for OpenaiChatProtocol {
 
         Ok(())
     }
+
+    /// 最大上下文探测：OpenAI 兼容网关（Ollama / LM Studio / vLLM 等）
+    /// 的上报值，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
+    async fn query_context_limit(&self, config: &ModelConfig) -> Option<u32> {
+        super::context_probe::probe_openai_compat_context(config).await
+    }
 }
 
 // === 注册到通用对象创建机制 ===

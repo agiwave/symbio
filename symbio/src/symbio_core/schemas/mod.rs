@@ -2,6 +2,7 @@ pub mod agent;
 pub mod common;
 pub mod entities;
 pub mod model;
+pub mod options;
 pub mod session;
 pub mod system;
 pub mod web;

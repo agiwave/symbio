@@ -9,10 +9,10 @@
     浏览不在详情页——经机制动作「管理内部实体」进入会话容器实体页，
     目录树是 tree 机制的一个场景子类别，与子会话并列）；
   - item 为 null（机制"新建"态）：新建会话引导——输入区与现有会话完全一致
-    （ChatInputArea + WorkdirPicker + ChatSettings 草稿态：目录/Agent/模型/模式/
-    风险等级均可选，暂存于本地草稿 refs，发送首条消息时经 createSession(workdir, init)
-    一并写入 metadata 落库）（capabilities.independent_form + kind 级 editor 注册 →
-    机制新建按钮自动可用；空列表时页面自动进入此态）。
+    （ChatInputArea + ChatOptionBar 草稿态：目录/Agent/模型/模式/风险等级/心跳
+    均可选，由级联选项机制下发，暂存于机制内部的 metadata 缓冲，发送首条消息时
+    经 createSession(patch) 一并写入 metadata 落库）（capabilities.independent_form
+    + kind 级 editor 注册 → 机制新建按钮自动可用；空列表时页面自动进入此态）。
 
   选中同步：机制选中（:key 重挂载）是唯一真相，watch item.id → store.selectSession。
   创建经 emit('created') 回到机制页面层。机制动作（删除/容器入口等）经
@@ -44,24 +44,9 @@
         class="create-chat-input"
         @submit="onSendFirst"
       />
-      <div class="settings-row">
-        <WorkdirPicker
-          draft
-          :workdir="draftWorkdir"
-          :message-count="0"
-          @select="draftWorkdir = $event"
-        />
-        <div class="settings-divider" />
-        <ChatSettings
-          draft
-          v-model:agent-id="draftAgentId"
-          v-model:available-agents="draftAgents"
-          v-model:model-provider-id="draftProviderId"
-          v-model:available-model-providers="draftProviders"
-          v-model:draft-mode="draftMode"
-          v-model:draft-risk-level="draftRisk"
-        />
-      </div>
+      <!-- 草稿态选项行：与已有会话同源（级联选项机制），无会话时选择缓冲于
+           机制内部，创建会话时作为 metadata 补丁一次写入 -->
+      <ChatOptionBar ref="draftOptionsRef" />
     </div>
   </div>
 </template>
@@ -69,14 +54,11 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue'
 import type { DetailAction, EntityCapabilities, EntitySummary } from '@/schemas/entities'
-import type { AgentProfile, ImageAttachment } from '@/types'
-import type { ModelProviderConfig } from '@/schemas/model_providers'
+import type { ImageAttachment } from '@/types'
 import { useSessionsStore } from '@/stores/sessions'
-import { getLastWorkdir } from '@/services/plugin'
 import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
 import ChatInputArea from '@/components/chat/ChatInputArea.vue'
-import ChatSettings from '@/components/chat/ChatSettings.vue'
-import WorkdirPicker from '@/components/chat/WorkdirPicker.vue'
+import ChatOptionBar from '@/components/chat/ChatOptionBar.vue'
 
 const props = defineProps<{
   item: EntitySummary | null
@@ -101,19 +83,13 @@ const store = useSessionsStore()
 const creating = ref(false)
 
 /**
- * 新建态（懒创建）草稿 refs：与现有会话输入区同构的本地选择，
- * 发送首条消息时经 createSession(workdir, init) 一并写入 metadata。
+ * 新建态（懒创建）草稿：输入文本 + 选项行的 metadata 缓冲。
+ * 发送首条消息时经 createSession(metadataPatch) 一并写入 metadata 落库。
  */
 const draftInputRef = ref<{ resetHeight: () => void; textarea: HTMLTextAreaElement | null } | null>(null)
+const draftOptionsRef = ref<{ getDraftMetadata: () => Record<string, unknown> } | null>(null)
 const draftText = ref('')
 const draftImages = ref<ImageAttachment[]>([])
-const draftWorkdir = ref<string | null>(store.lastUsedWorkdir ?? getLastWorkdir() ?? null)
-const draftAgentId = ref<string | null>(null)
-const draftAgents = ref<AgentProfile[]>([])
-const draftProviderId = ref('')
-const draftProviders = ref<ModelProviderConfig[]>([])
-const draftMode = ref<'auto' | 'interactive'>('auto')
-const draftRisk = ref<'low' | 'medium' | 'high'>('medium')
 
 // 挂载后自动聚焦输入框（新建引导，减少一次点击）
 onMounted(() => {
@@ -141,9 +117,9 @@ watch(
  *
  * 机制约定（实体生命周期联动）：
  * - 新建态不创建任何实体、列表不更新；
- * - 发送首条消息才调 createSession 真正建会话（草稿目录与 Agent/模型/模式/风险
- *   选择经 init 参数一并写入 metadata；列表同步交给 onEditorCreated 刷新 +
- *   后端 created 事件通道），同时向 store 排队该首条消息（文本 + 附件）；
+ * - 发送首条消息才调 createSession 真正建会话（草稿选项行的 metadata 补丁由
+ *   级联选项机制通用缓冲产出，创建时一次性写入 metadata；workdir 缺省回退最近
+ *   使用目录由 createSession 兜底），同时向 store 排队该首条消息（文本 + 附件）；
  * - emit('created', id) 让 Workbench 刷新清单并立即选中新会话；
  * - Session editor 卸载 → 新选中项的 ChatMainPanel/ModelChatPanel 挂载 →
  *   消费排队消息（按 id 匹配）→ 发出首条消息，完成闭环。
@@ -153,14 +129,9 @@ async function onSendFirst() {
   if ((!text && draftImages.value.length === 0) || creating.value) return
   creating.value = true
   try {
-    // 懒创建：此刻才真正建会话；草稿选择经 init 写入本地条目 + 后端 metadata，
-    // 保证选中切换后 ModelChatPanel 同步水合、ChatSettings 回显与草稿一致。
-    const id = await store.createSession(draftWorkdir.value ?? undefined, {
-      agentId: draftAgentId.value,
-      providerId: draftProviderId.value || undefined,
-      mode: draftMode.value,
-      riskLevel: draftRisk.value
-    })
+    // 懒创建：此刻才真正建会话；草稿选择（机制通用 metadata 补丁）写入本地条目
+    // 与后端 metadata，保证选中切换后选项栏回显与草稿一致。
+    const id = await store.createSession(draftOptionsRef.value?.getDraftMetadata())
     // 首条消息（含附件）排队给新会话的 ChatMainPanel；附件 thumbnailUrl 是
     // object URL，所有权随载荷转移（消费端发送后 revoke），此处**不可 revoke**。
     store.pendingFirstMessage = {
@@ -221,22 +192,8 @@ async function onSendFirst() {
   text-align: center;
 }
 
-/* 新建态输入区（与现有会话 chat-controls 同构：输入框 + 设置行） */
+/* 新建态输入区（与现有会话 chat-controls 同构：输入框 + 选项行） */
 .create-chat-input {
   width: 100%;
-}
-/* 与 ModelChatPanel chat-controls 的 settings-row/settings-divider 同构复刻 */
-.settings-row {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex-wrap: wrap;
-}
-.settings-divider {
-  width: 1px;
-  height: 1rem;
-  background: var(--color-border);
-  margin: 0 0.5rem;
-  flex-shrink: 0;
 }
 </style>

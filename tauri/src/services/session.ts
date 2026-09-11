@@ -9,7 +9,6 @@ import { listEntities } from './entities'
 import { ChatMessage as SessionMessage } from '../schemas/chat_message'
 import * as SessionGetMessages from '../schemas/session_get_messages'
 import * as SessionList from '../schemas/session_list'
-import * as SessionAppend from '../schemas/session_append'
 import * as SessionClear from '../schemas/session_clear'
 import * as SessionUpdate from '../schemas/session_update'
 import * as SessionClearMessages from '../schemas/session_clear_messages'
@@ -21,7 +20,7 @@ import { SESSION_PATH } from '../constants/pluginPaths'
 export type { SessionMessage }
 
 export type { SessionListItem } from '../schemas/session_list'
-export type { SessionMetadata, SessionHeartbeatConfig } from '../schemas/session_meta'
+export type { SessionMetadata } from '../schemas/session_meta'
 
 /**
  * 获取会话列表（统一实体协议：`worker/session/entities/list`）
@@ -72,18 +71,6 @@ export async function getSessionMessages(
     hasMore: false,
     total: msgs.length
   }
-}
-
-export async function appendMessages(
-  sessionId: string,
-  messages: SessionMessage[]
-): Promise<SessionAppend.Response> {
-  return await callPlugin<SessionAppend.Response, SessionAppend.Request>(
-    `${SESSION_PATH}/append`,
-    { session_id: sessionId, messages },
-    undefined,
-    { session_id: sessionId }
-  )
 }
 
 export async function clearSession(sessionId: string): Promise<void> {
@@ -162,26 +149,5 @@ export async function updateSession(
  */
 export function createSessionId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2)
-}
-
-/**
- * 手动触发一次会话心跳任务。
- * 路由：`worker/session/heartbeat/trigger`
- * - 会话未启用心跳 / 提示词为空 → 抛错
- * - 会话正在工作中 → 返回 `{ status: "skipped" }`
- * - 正常触发 → 返回 `{ status: "triggered", session_id, include_history }`
- */
-export async function triggerHeartbeat(sessionId: string): Promise<{
-  status: 'triggered' | 'skipped'
-  session_id: string
-  include_history?: boolean
-  reason?: string
-}> {
-  return await callPlugin(
-    `${SESSION_PATH}/heartbeat/trigger`,
-    {},
-    undefined,
-    { session_id: sessionId }
-  )
 }
 

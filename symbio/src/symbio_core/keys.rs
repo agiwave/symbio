@@ -135,6 +135,23 @@ impl SymbioKey for CapabilityVisitorKey {
 }
 pub const CAPABILITY_VISITOR: CapabilityVisitorKey = CapabilityVisitorKey;
 
+/// 选项收集器 Key —— 与 [`CAPABILITY_VISITOR`] 平行的第二条收集通道
+/// （能力 = 可调用对象；选项 = 可展示的数据节点，见 `symbio_core::option`）
+pub struct OptionVisitorKey;
+impl SymbioKey for OptionVisitorKey {
+    type Value = Arc<dyn crate::symbio_core::OptionVisitor>;
+    fn name(&self) -> &'static str {
+        "option_visitor"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "option_visitor".to_string()
+    }
+}
+pub const OPTION_VISITOR: OptionVisitorKey = OptionVisitorKey;
+
 // 会话句柄 Key（Value）：session 编排器交付给 model/chat 的会话引擎实例
 pub struct SessionHandleKey;
 impl SymbioKey for SessionHandleKey {

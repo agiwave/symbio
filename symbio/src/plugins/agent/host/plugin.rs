@@ -23,8 +23,8 @@ use crate::plugins::agent::host::handlers;
 use crate::plugins::agent::host::store::{BundleRecord, BundleStore};
 use crate::symbio_core::{
     report_error, Capability, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
-    PluginMeta, PluginPayload, AGENT_ID, PATH, PLUGIN_AGENT, SESSION_ID, TRAVERSE_AVAILABLE_TOOLS,
-    WORKDIR,
+    PluginMeta, PluginPayload, AGENT_ID, PATH, PLUGIN_AGENT, SESSION_ID, TRAVERSE_AVAILABLE_OPTIONS,
+    TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -111,6 +111,81 @@ impl AgentPlugin {
         tool_visitor.register_batch(caps).await;
         Ok(())
     }
+
+    /// 参与 `available_options` 收集：贡献「智能体」选择项。
+    ///
+    /// 形态：`sub` 节点，子项 = 「不使用 Agent」 + 各可用 bundle；每个子项
+    /// 是「会话状态落库」invoke（`metadata.agent_id`），选中即持久化。
+    /// 当前选中值由宿主注入的 `ctx[AGENT_ID]` 回填——本插件无需加载会话。
+    async fn contribute_options(&self, ctx: &Arc<dyn InvokeRequest>) {
+        let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) else {
+            return;
+        };
+
+        let workdir = ctx.get(WORKDIR);
+        let current = ctx
+            .get(AGENT_ID)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        // 展示顺序号段约定：20 = 智能体（见 session::options 模块文档）
+        const ORDER: i32 = 20;
+
+        let store = BundleStore::new(workdir.as_deref());
+        let bundles = store.list();
+
+        let mut children: Vec<crate::symbio_core::schemas::options::OptionNode> =
+            Vec::with_capacity(bundles.len() + 1);
+        children.push(
+            crate::symbio_core::schemas::options::OptionNode::session_state(
+                "agent:none",
+                "不使用 Agent",
+                // 空串 = 显式解绑（后端 orchestrator 对空值按「未选择」处理，
+                // 与 metadata 缺省同语义），亦使子项 value 与父节点 value 可直接比较
+                "agent_id",
+                serde_json::json!(""),
+            )
+            .with_description("纯工具模式：直接与 Model 对话，可用文件/搜索等基础工具"),
+        );
+
+        let mut current_label: Option<String> = if current.is_none() {
+            Some("不使用 Agent".to_string())
+        } else {
+            None
+        };
+        for record in &bundles {
+            let m = &record.manifest;
+            if current.as_deref() == Some(m.id.as_str()) {
+                current_label = Some(m.name.clone());
+            }
+            children.push(
+                crate::symbio_core::schemas::options::OptionNode::session_state(
+                    format!("agent:{}", m.id),
+                    m.name.clone(),
+                    "agent_id",
+                    serde_json::json!(m.id),
+                )
+                .with_description(m.description.clone()),
+            );
+        }
+
+        let node = crate::symbio_core::schemas::options::OptionNode::sub("agent", "智能体", children)
+            .with_icon("agent")
+            .with_order(ORDER)
+            .with_description("选择认知人格（可不选）");
+
+        // 回填当前选中值（值 = agent_id；展示文本 = bundle 名 / 不使用 Agent）
+        let node = match current_label {
+            Some(label) => {
+                let value = current.clone().unwrap_or_default();
+                node.with_value_label(value, label)
+            }
+            // 选中的 bundle 已不存在（陈旧 id）：仅展示值本身，前端仍可重选
+            None => node.with_value(current.clone().unwrap_or_default()),
+        };
+
+        visitor.register_option(node).await;
+    }
 }
 
 impl Default for AgentPlugin {
@@ -131,8 +206,16 @@ impl Plugin for AgentPlugin {
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
         let sub_path = ctx.get(PATH).unwrap_or_default();
-        if sub_path != TRAVERSE_AVAILABLE_TOOLS {
-            return Err(PluginError::NotFound("Invalid traverse path".to_string()));
+        match sub_path.as_str() {
+            // 选项收集（与能力收集同一广播机制的第二通道）：贡献「智能体」选择项
+            TRAVERSE_AVAILABLE_OPTIONS => {
+                self.contribute_options(&ctx).await;
+                return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
+            }
+            TRAVERSE_AVAILABLE_TOOLS => {}
+            other => {
+                return Err(PluginError::NotFound(format!("未知遍历路径: {other}")));
+            }
         }
 
         // ── 会话级「智能体选择」复用既有通用机制 ctx[AGENT_ID]（orchestrator

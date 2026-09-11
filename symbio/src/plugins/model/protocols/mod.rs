@@ -11,6 +11,7 @@
 //! 详见 docs/model-session-refactor.md。
 
 mod anthropic_messages;
+mod context_probe;
 mod gemini_api;
 mod openai_chat;
 mod openai_responses;

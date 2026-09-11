@@ -14,6 +14,9 @@
   - info    ：只读概览。无保存，字段（static widget）取值来自
               item.config/extra，动作仅限 open-container/delete 等
               机制通道动作（如 agent bundle 概览）。
+  - option  ：级联选项机制的表单选项（自动化表单）。预填自 `optionData`
+              （由选项节点 `data` 下发），保存 emit option-save 纯字段值
+              ——由选项机制按 `action.bind` 写回后调用后端服务。
 
   结构化 widget 表单模型约定（与后端 validate_manifest 两侧一致）：
   list = 字符串数组（编辑态每行一项）；map = 键值对（编辑态每行 KEY=VALUE）。
@@ -180,6 +183,11 @@ const props = withDefaults(
     definition: DetailDefinition
     /** 选中的实体（null = 新建模式；upload 绑定据此预填 item.config） */
     item: EntitySummary | null
+    /**
+     * option 绑定：表单初始数据（字段名 → 值），由选项节点 `data` 下发。
+     * 与 item.config 同构，但来源是「选项」而非「实体」。
+     */
+    optionData?: Record<string, unknown> | null
     capabilities: EntityCapabilities
     /** 机制动作注入（页面单一定义点计算：容器入口/测试/删除，
      *  已排除定义声明过的动作），与定义动作同排渲染于 header-actions */
@@ -196,6 +204,11 @@ const props = withDefaults(
 const emit = defineEmits<{
   /** 统一保存入口：id 为实体目录名，manifest 为完整配置，extra 合并动作 payload */
   save: [payload: { id: string; manifest: Record<string, unknown>; skipValidation: boolean }]
+  /**
+   * option 绑定保存：纯字段值（已按 widget 序列化，未含 id）。
+   * 由选项机制写入 `action.bind` 指定路径后调用后端服务。
+   */
+  'option-save': [values: Record<string, unknown>]
   test: []
   delete: []
   'set-default': []
@@ -219,6 +232,8 @@ const isExisting = computed(() => Boolean(props.item?.id))
 const isDefault = computed(() => Boolean(props.item && props.item.is_default === true))
 const isConfig = computed(() => props.definition.binding === 'config')
 const isInfo = computed(() => props.definition.binding === 'info')
+/** 级联选项机制的表单选项（自动化表单）：预填自 optionData、保存回选项机制 */
+const isOption = computed(() => props.definition.binding === 'option')
 
 // ==================== 条件求值 ====================
 /** 求值键：表单字段 / is_existing / is_default / cap.<name> */
@@ -414,6 +429,11 @@ const disabledFlags = computed(() => allActions.value.map((a) => actionDisabled(
 function runAction(a: DetailAction) {
   switch (a.id) {
     case 'save': {
+      // option 绑定：保存纯字段值，交由级联选项机制按 action.bind 落库后调后端服务
+      if (isOption.value) {
+        emit('option-save', buildValues(true))
+        return
+      }
       if (isConfig.value || isInfo.value) {
         // config/info 绑定无 save 语义（配置分区自持保存；info 只读）
         if (isConfig.value) void saveConfig()
@@ -429,6 +449,9 @@ function runAction(a: DetailAction) {
       })
       return
     }
+    case 'cancel':
+      emit('cancel')
+      return
     case 'test':
       emit('test')
       return
@@ -469,23 +492,34 @@ function generateId(base: string): string {
   return id
 }
 
+/**
+ * 字段序列化（机制唯一实现）：list → string[]、map → 对象；static 只读。
+ *
+ * `ignoreVisibility = false`（upload 绑定）时，`visible_when` 不满足的字段
+ * 不参与保存（如 mcp 的 stdio/http 互斥字段）；
+ * `ignoreVisibility = true`（option 绑定）时保存全部字段——表单选项对应一份
+ * **完整配置对象**（如心跳任务：关闭开关不得丢失间隔/提示词）。
+ */
+function buildValues(ignoreVisibility = false): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const sec of props.definition.sections) {
+    for (const f of sec.fields) {
+      if (f.widget === 'static') continue
+      if (!ignoreVisibility && !fieldVisible(f)) continue
+      if (f.widget === 'list') out[f.key] = parseList(form[f.key])
+      else if (f.widget === 'map') out[f.key] = parseMap(form[f.key])
+      else out[f.key] = form[f.key]
+    }
+  }
+  return out
+}
+
 function buildSave(): { id: string; manifest: Record<string, unknown> } {
-  const manifest: Record<string, unknown> = {}
   let id = (props.item?.id as string) ?? ''
   if (!id) {
     id = generateId(firstNonEmpty(props.definition.id_from) || 'entity')
   }
-  manifest.id = id
-  // 字段序列化：list → string[]、map → 对象；static 只读、visible_when
-  // 不满足的字段均不参与保存（如 mcp 的 stdio/http 互斥字段）
-  for (const sec of props.definition.sections) {
-    for (const f of sec.fields) {
-      if (f.widget === 'static' || !fieldVisible(f)) continue
-      if (f.widget === 'list') manifest[f.key] = parseList(form[f.key])
-      else if (f.widget === 'map') manifest[f.key] = parseMap(form[f.key])
-      else manifest[f.key] = form[f.key]
-    }
-  }
+  const manifest: Record<string, unknown> = { id, ...buildValues() }
   // 名称回落链：首个非空字段补 name（不覆盖用户已填的 name）
   const nameFrom = firstNonEmpty(props.definition.name_from)
   const nameKey = props.definition.name_from?.[0]
@@ -603,20 +637,28 @@ function initForm() {
 // 表单重置的身份门闩：记录上次绑定实体的 `${kind}:${id}`。事件驱动的后台
 // 清单刷新（refreshKind）会以新对象替换 item——身份未变时跳过重置，保住
 // 编辑现场；仅身份变化（切换实体 / 新建↔编辑）才走完整重置+预填。
+// option 绑定：身份恒为 'option'，预填来源为 props.optionData。
 let lastItemKey: string | null | undefined
 watch(
-  () => props.item,
-  (it) => {
+  () => (isOption.value ? props.optionData : props.item),
+  () => {
     if (isConfig.value) return // config 绑定：onMounted 拉取，不随 item 重置
-    const itemKey = it ? `${it.kind}:${it.id}` : null
+    const it = props.item
+    const itemKey = isOption.value
+      ? 'option'
+      : it
+        ? `${it.kind}:${it.id}`
+        : null
     if (itemKey === lastItemKey) return // 同一实体的后台刷新 → 保留输入现场
     lastItemKey = itemKey
     initForm()
-    // 预填来源：item.config（后端下发的完整配置）优先；
+    // 预填来源：option → props.optionData（选项节点 data）；
+    // 其余 → item.config（后端下发的完整配置）优先，
     // info 绑定的 static 字段取自 item 顶层（extra flatten 下发的概览字段）
-    const cfg =
-      ((it?.config ?? null) as Record<string, unknown> | null) ??
-      (isInfo.value ? ((it ?? null) as unknown as Record<string, unknown> | null) : null)
+    const cfg = isOption.value
+      ? ((props.optionData ?? null) as Record<string, unknown> | null)
+      : (((it?.config ?? null) as Record<string, unknown> | null) ??
+        (isInfo.value ? ((it ?? null) as unknown as Record<string, unknown> | null) : null))
     if (cfg && typeof cfg === 'object') {
       for (const sec of props.definition.sections) {
         for (const f of sec.fields) {

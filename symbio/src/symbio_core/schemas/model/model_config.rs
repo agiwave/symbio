@@ -35,7 +35,8 @@ fn default_temperature() -> f64 {
     0.7
 }
 fn default_max_context_tokens() -> u32 {
-    128_000
+    // 默认 256k：多数主流模型上下文窗口的保守公共值
+    307_200
 }
 fn default_reserved_tokens() -> u32 {
     4_096

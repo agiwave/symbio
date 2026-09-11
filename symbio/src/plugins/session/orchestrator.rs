@@ -298,11 +298,29 @@ impl SessionPlugin {
             .wait(&entry.provider_id, entry.rate_limit_ms)
             .await;
 
+        // 运行时上下文收敛：服务端能上报最大上下文时（Ollama / LM Studio / vLLM /
+        // Gemini ListModels 等，探测结果进程内缓存），对用户设置取 min——
+        // 本地模型的 num_ctx 常远小于模型训练窗口，不收敛会请求超限报错；
+        // 服务未上报（None）或上报更大值时保持用户设置不动。
+        let mut config = entry.config;
+        if let Some(limit) =
+            crate::symbio_core::ModelProvider::query_context_limit(&*entry.provider, &config).await
+        {
+            if limit < config.max_context_tokens {
+                crate::plugin_info!(
+                    "session",
+                    "模型服务上报最大上下文 {limit}，低于用户设置 {}，运行时采用较小值",
+                    config.max_context_tokens
+                );
+                config.max_context_tokens = limit;
+            }
+        }
+
         // 进程内双向通道：host 侧（消费循环 + abort 控制）/ plugin 侧（run_chat_loop）。
         // 原跨插件 `parent.route` → PluginPayload::Session 的一跳在此消失。
         let (host_chan, plugin_chan) = PluginChannel::pair(4096);
         let orchestrator =
-            super::chat_loop::ChatOrchestrator::new(entry.config, Some(parent), entry.provider);
+            super::chat_loop::ChatOrchestrator::new(config, Some(parent), entry.provider);
         let ctx_clone = chat_ctx.fork();
         let error_tx = plugin_chan.tx.clone();
 

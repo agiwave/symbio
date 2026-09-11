@@ -19,3 +19,12 @@ export const CHAT_PATH = `${SESSION_PATH}/chat` as const
 /** 聊天子能力 */
 export const CHAT_SEND = `${CHAT_PATH}/send` as const
 export const CHAT_ABORT = `${CHAT_PATH}/abort` as const
+
+/**
+ * 级联选项机制（选项宿主 = session 插件）。
+ *
+ * 根选项列表与子层共用一个端点（`parent` 参数区分），与实体机制
+ * `entities/list` 的树懒加载同构。
+ */
+export const OPTIONS_PATH = `${SESSION_PATH}/options` as const
+export const OPTIONS_LIST = `${OPTIONS_PATH}/list` as const

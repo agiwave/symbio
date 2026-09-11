@@ -127,6 +127,20 @@ pub trait ModelProvider: Send + Sync {
         ))
     }
 
+    /// 查询模型服务上报的最大上下文 token 数（尽力而为）。
+    ///
+    /// 仅当服务端能主动提供该信息时返回 `Some(limit)`（如 Ollama `/api/show`、
+    /// LM Studio `/api/v0/models`、Gemini ListModels 的 `inputTokenLimit`）；
+    /// 云端 API 普遍不暴露此信息，默认返回 `None`（调用方仅使用用户设置）。
+    ///
+    /// 调用方（session）用它对用户设置的 `max_context_tokens` 做
+    /// `min(用户设置, 服务上报)` 收敛，避免本地模型（num_ctx 通常远小于
+    /// 模型训练窗口）因请求超限而报错。
+    async fn query_context_limit(&self, config: &ModelConfig) -> Option<u32> {
+        let _ = config;
+        None
+    }
+
     /// 解析流的一行内容（处理 SSE 协议）
     fn parse_response_line(&self, line: &str) -> Vec<ProtocolEvent>;
 

@@ -12,6 +12,7 @@
 //! 切换 homedir 后，新会话将写入新 homedir；存量数据**不会**自动迁移。
 
 use super::types::Session;
+use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
 pub use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::{
@@ -308,6 +309,9 @@ impl Plugin for SessionPlugin {
             CONFIG_GET => self.invoke_config_get().await?,
             CONFIG_SET => self.invoke_config_set(ctx.clone()).await?,
             "config/schema" => self.invoke_config_schema().await?,
+            // 级联选项机制：会话是选项宿主，根选项列表在全项目收集后一次下发
+            // （子层经 payload.parent 懒加载，与实体机制 entities/list 同构）
+            OPTIONS_LIST => return super::options::handle_list_options(self.as_ref(), ctx).await,
             "heartbeat/trigger" => return self.handle_heartbeat_trigger_oneoff(ctx).await,
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         };
@@ -318,8 +322,20 @@ impl Plugin for SessionPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
+        // 选项收集：会话作为选项宿主贡献「自有选项」（工作目录 / 风险等级 /
+        // 运行模式 / 心跳）。与其它插件同构——命中 available_options 时才注册，
+        // 经统一的 OPTION_VISITOR 收集器汇流。
+        if ctx.get(crate::symbio_core::PATH).unwrap_or_default()
+            == crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS
+        {
+            if let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) {
+                visitor.register_batch(self.build_option_nodes(&ctx).await).await;
+            }
+        }
+        // 能力收集（available_tools）：session 自身不贡献工具——会话编排权
+        // 归本插件，工具由 local/web/mcp/skill/agent 等插件贡献。
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

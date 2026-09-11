@@ -10,18 +10,6 @@ export interface UseChatConnectionOptions {
   onSendComplete?: () => void
 }
 
-export interface SendOptions {
-  /** 发往的目标会话 id（子智能体的 user_prompt 需发回子会话，而非当前会话） */
-  targetSessionId?: string
-  /** 本次发送的运行模式：auto（无人值守）/ interactive（默认，会话流内可交互）。
-   *  为空时回退 `store.getSessionMode(targetSessionId)`（再回退默认 'interactive'）。 */
-  mode?: 'auto' | 'interactive'
-  /** 本次发送的执行风险等级阈值：low / medium / high。
-   *  为空时回退 `store.getSessionRiskLevel(targetSessionId)`（再回退默认 'medium'）。
-   *  与 agent_id / provider_id / mode 同级别：随 chat_send 传输，后端 orchestrator 写入 ctx[RISK_LEVEL]。 */
-  riskLevel?: 'low' | 'medium' | 'high'
-}
-
 /** 会话恢复载荷（retry_turn/retry/approve/reject/supply/answer 统一接口） */
 export interface ResumePayload {
   /** 目标消息 ID（Failed Turn 或 ToolCall，恢复锚点）
@@ -37,9 +25,6 @@ export interface ResumePayload {
   answer?: unknown
   /** 目标会话 id（子智能体的工具调用需发回子会话） */
   targetSessionId?: string
-  /** 选定的 Model Provider ID；与 send 同级别，确保 resume 时也使用当前窗口选择的 Provider。
-   *  为空时后端从会话 metadata 回退。 */
-  providerId?: string
 }
 
 export interface UseChatConnectionReturn {
@@ -47,8 +32,9 @@ export interface UseChatConnectionReturn {
   isWaitingApproval: ComputedRef<boolean>
   isConnected: ComputedRef<boolean>
   messageTree: ComputedRef<ChatMessage[]>
-  /** agentId 可选：不选择智能体的会话以"纯工具模式"运行（session 编排，agent 不参与） */
-  send: (message: ChatMessage, agentId?: string | null, providerId?: string, opts?: SendOptions) => void
+  /** 发送一条消息。会话参数（智能体 / 模型 / 模式 / 风险等级）由后端按
+   *  `session.metadata` 解析——选择动作统一经级联选项机制落库，故此处不透传。 */
+  send: (message: ChatMessage) => void
   abort: () => void
   removeMessage: (messageId: string) => void
   resume: (payload: ResumePayload) => void
@@ -192,59 +178,44 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     return msgs.some(msg => msg.status === 'waiting_user_action')
   })
 
-  async function send(msg: ChatMessage, agentId?: string | null, providerId?: string, opts?: SendOptions) {
+  async function send(msg: ChatMessage) {
     const outgoing: ChatMessage = { ...msg }
-
-    // 目标会话：默认当前会话；子智能体的 user_prompt 回答需发回子会话
-    const targetSid = opts?.targetSessionId || options.sessionId
     const sid = options.sessionId
-    logger.info('useChatConnection', `[${sid}] Sending message${targetSid !== sid ? ` → ${targetSid}` : ''}`)
+    logger.info('useChatConnection', `[${sid}] Sending message`)
 
-    // 立即把用户消息写入目标会话 store（乐观更新，避免后端首帧覆盖不到）
+    // 立即把用户消息写入会话 store（乐观更新，避免后端首帧覆盖不到）
     if (outgoing.id) {
-      store.putMessage(targetSid, outgoing)
+      store.putMessage(sid, outgoing)
     }
     // 立即置为 working（让 UI 立即反映 send 已经发出）；
-    // 同一会话才切 working 状态，避免跨会话回答误改父会话状态。
-    if (targetSid === sid) {
-      // 同时清空 last_failed / 会话级错误：新一轮交互开始，上一次失败不再"最新"（避免重试成功后仍显示"上次失败"）。
-      store.putStatus(sid, { is_working: true, activity: '处理中…', last_failed: false })
-      store.setSessionError(sid, null)
-      store.setWorking(sid, true)
-    }
+    // 同时清空 last_failed / 会话级错误：新一轮交互开始，上一次失败不再"最新"（避免重试成功后仍显示"上次失败"）。
+    store.putStatus(sid, { is_working: true, activity: '处理中…', last_failed: false })
+    store.setSessionError(sid, null)
+    store.setWorking(sid, true)
 
-    // 运行模式：优先取本次 opts.mode，否则回退目标会话已记忆的模式（再回退 'interactive'）。
+    // 运行模式：取会话记忆值（= `session.metadata.mode` 的本地镜像，选择经选项机制落库）。
     // 后端 orchestrator.handle_chat_send_oneoff 据此把 MODE 写入 chat ctx，
     // ask_user / emit_confirm_prompt 等据此决定"产 user_prompt 节点"还是"返回友好错误"。
-    const mode = opts?.mode || store.getSessionMode(targetSid)
+    const mode = store.getSessionMode(sid)
 
-    // 执行风险等级：与 mode 同级别的回退链——opts.riskLevel > 会话记忆值 > 'medium'。
+    // 执行风险等级：与 mode 同级别的回退链——会话记忆值 > 'medium'。
     // 后端 orchestrator 据此把 RISK_LEVEL 写入 chat ctx，SecurityPolicy 三方法据此覆盖全局阈值。
-    const riskLevel = opts?.riskLevel || store.getSessionRiskLevel(targetSid)
+    const riskLevel = store.getSessionRiskLevel(sid)
 
     try {
       await callPlugin(CHAT_SEND, {
-        session_id: targetSid,
-        // 未选择智能体时显式传 null：后端回退会话 metadata.agent_id，
-        // 仍无则本次会话不挂载任何智能体工具（纯工具模式）
-        agent_id: agentId || null,
-        provider_id: providerId || null,
+        session_id: sid,
+        // 智能体 / 模型 provider 不在请求中透传：后端按 `session.metadata`
+        // （agent_id / provider_id）回退取值，选择动作统一经级联选项机制落库。
         message: outgoing,
         mode,
         risk_level: riskLevel
       }, 15000, {
-        // 用目标会话自身的 workdir（后端 orchestrator 已用 session.metadata.workdir 兜底）
-        workdir: store.getSessionWorkdir(targetSid) ?? '',
-        session_id: targetSid
+        // 用会话自身的 workdir（后端 orchestrator 已用 session.metadata.workdir 兜底）
+        workdir: store.getSessionWorkdir(sid) ?? '',
+        session_id: sid
       })
     } catch (err: any) {
-      // 仅当发往当前会话时才处理错误 UI（跨会话回答失败不影响父会话渲染）
-      if (targetSid !== sid) {
-        logger.error('useChatConnection', 'Failed to send (cross-session):', err)
-        onSendComplete?.()
-        return
-      }
-
       const errText = `Send failed: ${err.message || String(err)}`
       store.putStatus(sid, { is_working: false, activity: '错误', last_failed: true })
       store.setWorking(sid, false)
@@ -291,9 +262,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    * 前端不在此处构造新消息——后端通过 bus 广播 `Delete`（删旧节点）+ `Update`/
    * `Append`（写新节点 + 父节点状态更新）事件，由 `sessionBusWatcher` 写入 store。
    *
-   * 参数有效性：与 send 同级别——`payload.providerId` 显式传入时优先；
-   * `mode` / `risk_level` 从会话记忆取，由后端 `resolve_session_params` 写入 chat ctx，
-   * continuation chat_loop 通过 `ctx.fork()` 继承。
+   * 会话参数：智能体 / 模型 provider 由后端 `resolve_session_params` 从
+   * `session.metadata` 回退解析；`mode` / `risk_level` 从会话记忆（metadata 的本地镜像）
+   * 随请求携带，由后端写入 chat ctx，continuation chat_loop 通过 `ctx.fork()` 继承。
    */
   async function resume(payload: ResumePayload) {
     const targetSid = payload.targetSessionId || options.sessionId
@@ -322,8 +293,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
         CHAT_SEND,
         {
           session_id: targetSid,
-          agent_id: null, // resume 不传 agent_id（后端从 metadata 取）
-          provider_id: payload.providerId || null,
+          // 智能体 / 模型 provider 不在此透传：后端 resolve_session_params 按
+          // `session.metadata`（agent_id / provider_id）回退取值。
           mode,
           risk_level: riskLevel,
           resume: {
