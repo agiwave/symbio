@@ -30,8 +30,8 @@ use crate::symbio_core::schemas::entities::{
     DetailAction, DetailDefinition, DetailField, DetailSection,
 };
 use crate::symbio_core::schemas::options::{
-    OptionAction, OptionNode, OptionType, OptionsRequest, OptionsResponse, OPTION_PICK_DIRECTORY,
-    OPTION_STATUS_ACTIVE, OPTION_STATUS_DISABLED,
+    OptionAction, OptionDisplay, OptionNode, OptionType, OptionsRequest, OptionsResponse,
+    OPTION_PICK_DIRECTORY, OPTION_STATUS_ACTIVE, OPTION_STATUS_DISABLED,
 };
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, PluginPayload, SESSION_ID, WORKDIR,
@@ -121,6 +121,12 @@ pub(crate) async fn handle_list_options(
         nodes = find_node(&nodes, &parent_id)
             .map(|n| n.children.clone())
             .unwrap_or_default();
+    } else {
+        // 根层 = 会话输入区下方的选项栏：统一应用紧凑显示策略（机制级、由后端声明）。
+        // 仅「图标 + 当前值」，类别标签移入悬停提示，压缩横向空间。贡献方可在节点上
+        // 显式 `with_display(true)` 覆盖，恢复「图标 + 类别标签 + 当前值」双段渲染。
+        // 子层（级联菜单内）不应用——选择时类别标签是必要信息。
+        apply_chat_bar_display_defaults(&mut nodes);
     }
 
     // 选项宿主的统一注入：任一选项（含各插件贡献的）都在会话作用域内执行，
@@ -131,6 +137,20 @@ pub(crate) async fn handle_list_options(
     }
 
     Ok(PluginPayload::new(&OptionsResponse { nodes }))
+}
+
+/// 选项栏（会话输入区下方）统一显示策略：根选项默认仅显示「图标 + 当前值」
+/// （紧凑模式），类别标签移入悬停提示。
+///
+/// 仅当贡献方未在节点上显式声明 `display` 时回落此默认值——贡献方可用
+/// `OptionNode::with_display(true)` 覆盖，恢复「图标 + 类别标签 + 当前值」。
+/// 调用方须仅在根层（选项栏）调用，子层（级联菜单内）保持类别标签。
+fn apply_chat_bar_display_defaults(nodes: &mut [OptionNode]) {
+    for node in nodes.iter_mut() {
+        if node.display.is_none() {
+            node.display = Some(OptionDisplay { show_label: false });
+        }
+    }
 }
 
 /// 为节点树中每个选项动作注入会话作用域（`session_id`）。

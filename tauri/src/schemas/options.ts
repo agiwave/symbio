@@ -21,6 +21,16 @@ import type { DetailDefinition } from './entities'
 export type OptionType = 'invoke' | 'sub' | 'form'
 
 /**
+ * 选项栏（会话输入区下方）显示策略 —— 机制级、由后端声明，前端零写死。
+ *
+ * - `show_label`：是否在选项栏显示类别标签（label）。缺省 true（现行行为）；
+ *   false = 仅「图标 + 当前值」，类别名整体移入悬停提示。后端据此统一控制紧凑度。
+ */
+export interface OptionDisplay {
+  show_label?: boolean
+}
+
+/**
  * 选项动作 —— invoke / form 的执行规格。
  *
  * - `endpoint`：后端服务路径（`callPlugin` 调用）；
@@ -70,6 +80,8 @@ export interface OptionNode {
   data?: Record<string, unknown>
   /** sub：子选项（内联；空/缺省 = 经 parent 懒加载） */
   children?: OptionNode[]
+  /** 选项栏显示策略（机制级；由后端声明，前端据此渲染，不写死） */
+  display?: OptionDisplay
 }
 
 /** `options/list` 请求（`parent` 缺省 = 根层） */

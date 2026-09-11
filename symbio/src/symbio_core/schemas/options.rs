@@ -72,6 +72,20 @@ fn default_true() -> bool {
     true
 }
 
+/// 选项栏（会话输入区下方）显示策略 —— 机制级、由后端声明，前端零写死。
+///
+/// 仅 [`OptionDisplay::show_label`] 一个开关：是否在选项栏展示类别标签
+/// （`label`）。缺省 `true`（现行「图标 + 类别标签 + 当前值」双段渲染）；
+/// `false` = 仅「图标 + 当前值」，类别名整体移入悬停提示——用于压缩横向
+/// 空间。前端只读取此字段，不自行决定显示策略。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OptionDisplay {
+    /// 是否在选项栏显示类别标签。缺省 true。
+    #[serde(default = "default_true")]
+    pub show_label: bool,
+}
+
 /// 选项节点类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -163,6 +177,9 @@ pub struct OptionNode {
     /// sub：子选项（内联下发；空 = 懒加载，经 `parent` 请求）
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<OptionNode>,
+    /// 选项栏显示策略（机制级；后端声明，前端据此渲染，不写死）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<OptionDisplay>,
 }
 
 impl Default for OptionNode {
@@ -183,6 +200,7 @@ impl Default for OptionNode {
             form: None,
             data: None,
             children: Vec::new(),
+            display: None,
         }
     }
 }
@@ -260,6 +278,13 @@ impl OptionNode {
     /// 链式：设置说明
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
+        self
+    }
+
+    /// 链式：设置选项栏显示策略（机制级）。`show_label = false` 时仅显示
+    /// 「图标 + 当前值」，类别标签移入悬停提示（用于压缩横向空间）。
+    pub fn with_display(mut self, show_label: bool) -> Self {
+        self.display = Some(OptionDisplay { show_label });
         self
     }
 }

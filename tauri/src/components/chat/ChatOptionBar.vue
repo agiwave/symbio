@@ -23,8 +23,11 @@
       @click.stop="onNodeClick(node, $event)"
     >
       <span class="opt-icon">{{ optionIcon(node.icon) }}</span>
-      <span class="opt-label">{{ node.label }}</span>
-      <span v-if="shownValue(node)" class="opt-value">{{ shownValue(node) }}</span>
+      <template v-if="showLabel(node)">
+        <span class="opt-label">{{ node.label }}</span>
+        <span v-if="hasValue(node)" class="opt-value">{{ node.value_label || node.value }}</span>
+      </template>
+      <span v-else class="opt-text">{{ node.value_label || node.value || node.label }}</span>
       <span v-if="node.option_type !== 'invoke'" class="opt-arrow" :class="{ open: openRootId === node.id }">▾</span>
       <span v-if="node.status === 'working'" class="opt-spin" />
       <span v-else-if="node.status === 'error'" class="opt-flag">!</span>
@@ -125,10 +128,23 @@ const parentLabel = computed(() => {
   return parent?.label ?? '返回'
 })
 
-const shownValue = (node: OptionNode): string => node.value_label || node.value || ''
+/**
+ * 是否在选项栏显示类别标签（label）。机制级开关：由后端在节点 `display.show_label`
+ * 上声明（缺省 true = 现行行为）。false = 仅「图标 + 当前值」，类别名整体移入悬停提示。
+ * 前端零写死——显示策略完全由后端控制。
+ */
+const showLabel = (node: OptionNode): boolean => node.display?.show_label !== false
+
+/** 该节点是否已设置当前值（用于现行「标签 + 值胶囊」双段渲染） */
+const hasValue = (node: OptionNode): boolean => Boolean(node.value_label || node.value)
 
 function tooltip(node: OptionNode): string {
-  return [node.description, node.status_detail].filter(Boolean).join('\n') || node.label
+  const parts = [node.label]
+  const val = node.value_label || node.value
+  if (val && val !== node.label) parts.push(`当前：${val}`)
+  if (node.description) parts.push(node.description)
+  if (node.status_detail) parts.push(node.status_detail)
+  return parts.join('\n')
 }
 
 /** 路径末段（原生取值原语的通用展示格式） */
@@ -284,12 +300,12 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .option-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-2) 0.6rem;
+  gap: 0.35rem;
+  padding: 0.3rem 0.55rem;
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: var(--font-size-xs);
   cursor: pointer;
   user-select: none;
@@ -337,6 +353,15 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   background: var(--surface-sunken);
   color: var(--text-secondary);
   font-size: 0.68rem;
+}
+
+/* 仅显示「图标 + 当前值」模式（后端 display.show_label=false）下的主文本 */
+.opt-text {
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16rem;
 }
 
 .opt-arrow {
