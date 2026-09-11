@@ -9,7 +9,7 @@
 //! - 执行通过 `tokio::process::Command` 显式 spawn shell（`cmd /C` 或 `sh -c`），
 //!   没有把任何不可信片段拼到固定的 argv 里。
 //! - Unix 上进一步清空 env，只透传白名单变量，减小环境变量泄漏面。
-
+use serde::{Deserialize, Serialize};
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::system::{decode_output, validate_params};
 use crate::symbio_core::{
@@ -23,6 +23,13 @@ use std::time::Duration;
 
 const SHELL_TIMEOUT_SECS: u64 = 3600;
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Response {
+    pub exit_code: Option<i32>,
+    pub output: String,
+    pub risk_level: String,
+}
 
 /// 获取当前操作系统信息
 fn get_os_info() -> (&'static str, &'static str, &'static str, &'static str) {
@@ -168,7 +175,7 @@ impl ShellTool {
                 };
 
                 Ok(serde_json::to_value(
-                    crate::symbio_core::schemas::web::shell_execute::Response {
+                    Response {
                         exit_code: output.status.code(),
                         output: full_output,
                         risk_level: match risk {

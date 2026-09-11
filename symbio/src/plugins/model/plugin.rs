@@ -11,7 +11,7 @@ use super::handlers;
 use super::protocols::resolve_protocol_id;
 use crate::symbio_core::schemas::common;
 use crate::symbio_core::schemas::model::model_config::ModelConfig;
-use crate::symbio_core::schemas::model::model_providers::{
+use super::model_providers::{
     ModelProviderConfig, ModelProvidersConfig,
 };
 use crate::symbio_core::{

@@ -1,4 +1,4 @@
-use crate::symbio_core::schemas::system::hook::{HookEvent, HookOutput};
+use crate::symbio_core::schemas::{HookEvent, HookOutput};
 use std::process::Stdio;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};

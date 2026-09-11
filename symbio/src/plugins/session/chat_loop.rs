@@ -13,13 +13,13 @@
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
-    model::model_chat,
     model::model_config::ModelConfig,
     session::chat_message::{
         assign_seq, max_seq, ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
     },
-    system::hook::HookEvent,
+    HookEvent,
 };
+use super::model_chat;
 use crate::symbio_core::turn::{
     build_tool_message, emit_status, emit_update, execute_post_with_abort, parse_sse_stream,
     short_id, PostResult, ToolCallInfo, TurnOutput,

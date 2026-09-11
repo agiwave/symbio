@@ -7,7 +7,7 @@
 //! - 配置以 `id` 为键保存在 `ModelProvidersConfig` 中，并提供 `default_provider_id` 标识默认
 //! - 兼容老版本：单 Model 配置 (`ModelConfig`) 可视为"默认 Provider 的派生视图"
 
-use super::model_config::{ModelConfig, ReasoningConfig};
+use crate::symbio_core::schemas::model::model_config::{ModelConfig, ReasoningConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

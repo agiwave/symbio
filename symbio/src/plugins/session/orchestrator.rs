@@ -12,10 +12,10 @@ use super::active::{ActiveSessionState, REQUEST_ID_COUNTER};
 use super::plugin::SessionPlugin;
 use crate::symbio_core::event_bus::EventBus;
 use crate::symbio_core::schemas::{
-    model::model_chat,
     session::chat_message as cm,
     session::{session_append, session_chat, session_chat_response},
 };
+use super::model_chat;
 use crate::symbio_core::{
     attach_capabilities, collect_capabilities, take_errors, InvokeRequest, InvokeRequestExt,
     InvokeResponse, Plugin, PluginChannel, PluginError, PluginFrame, PluginPayload, MODE,

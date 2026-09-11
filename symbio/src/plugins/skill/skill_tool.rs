@@ -1,5 +1,5 @@
 use crate::plugins::skill::types::Skill;
-use crate::symbio_core::schemas::agent::skill::SkillResponse;
+use super::skill_response::SkillResponse;
 use crate::symbio_core::{
     Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
     PluginPayload,

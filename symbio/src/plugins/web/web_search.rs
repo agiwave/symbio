@@ -1,6 +1,6 @@
 //! Web 搜索工具 - 实现 Tool trait
 
-use crate::symbio_core::schemas::web::web_config::WebConfig;
+use super::web_config::WebConfig;
 use crate::symbio_core::{
     Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
     PluginPayload,

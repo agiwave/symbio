@@ -10,6 +10,7 @@ mod heartbeat;
 mod heartbeat_tool;
 mod options;
 mod orchestrator;
+mod model_chat;
 pub(crate) mod paths;
 pub(crate) mod prompt;
 mod rate_limit;

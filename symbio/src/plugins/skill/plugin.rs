@@ -1,7 +1,7 @@
 use crate::plugins::skill::loader::{load_skills_from_dirs_with_budget, LoadBudget};
 use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
-use crate::symbio_core::schemas::agent::skill::SkillResponse;
+use super::skill_response::SkillResponse;
 use crate::symbio_core::{
     HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
     PluginMeta, PluginPayload, PLUGIN_SKILL, TRAVERSE_AVAILABLE_TOOLS,

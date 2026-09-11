@@ -17,7 +17,7 @@ use crate::symbio_core::{
             ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
         },
         session::session_chat_response,
-        system::hook::{HookEvent, HookOutput},
+        hook::{HookEvent, HookOutput},
     },
     InvokeRequestExt,
 };

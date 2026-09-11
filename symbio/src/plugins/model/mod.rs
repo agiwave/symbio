@@ -17,3 +17,4 @@ pub mod message_builder;
 mod plugin;
 mod protocols;
 mod types;
+mod model_providers;

@@ -7,7 +7,7 @@ use super::{
     file_search::FileSearchTool, file_write::FileWriteTool, shell::ShellTool,
     todo_write::TodoWriteTool,
 };
-pub use crate::symbio_core::schemas::agent::local_config::LocalConfig;
+pub use super::local_config::LocalConfig;
 use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,

@@ -6,3 +6,4 @@ mod http_request;
 mod plugin;
 mod web_fetch;
 mod web_search;
+mod web_config;

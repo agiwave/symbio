@@ -2,7 +2,7 @@
 
 use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::WebSearchTool};
 use crate::symbio_core::schemas::common::SimpleResponse;
-pub use crate::symbio_core::schemas::web::web_config::WebConfig;
+pub use super::web_config::WebConfig;
 use crate::symbio_core::{
     Capability, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
     PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_WEB,
