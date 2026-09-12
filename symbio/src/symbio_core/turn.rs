@@ -15,7 +15,7 @@
 //! （`plugins::model::{protocol, tool_call, message_builder, context}`），
 //! 本模块是唯一权威实现。
 
-use crate::plugin_warn;
+use crate::{plugin_error, plugin_info, plugin_warn};
 use crate::symbio_core::model_provider::{FinishReason, ProtocolEvent, Usage};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
@@ -31,6 +31,13 @@ use tracing::warn;
 
 // HTTP 客户端（单例）
 
+/// SSE 流空闲超时：两次数据块之间的最大间隔。
+///
+/// 此前只有整体 1800s 超时——provider 半途挂起（连接不断、但不再发任何字节）时，
+/// 单轮请求会静默挂满 30 分钟，期间无任何日志，表现为「Turn 开始后卡死」。
+/// 180s 无任何字节即判定流已死，显式报错终止，让上层走 Failed 收尾而非无限等待。
+pub const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
 pub fn get_http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
@@ -38,6 +45,8 @@ pub fn get_http_client() -> &'static reqwest::Client {
             .pool_max_idle_per_host(10)
             .tcp_keepalive(Some(std::time::Duration::from_secs(60)))
             .connect_timeout(std::time::Duration::from_secs(10))
+            // 读空闲超时：与 STREAM_IDLE_TIMEOUT 双保险（连接层 + 应用层）。
+            .read_timeout(STREAM_IDLE_TIMEOUT)
             .timeout(std::time::Duration::from_secs(1800)) // 整体流式请求超时
             .build()
             .expect("Failed to build shared reqwest Client")
@@ -125,6 +134,11 @@ async fn wait_for_abort_signal(channel: &mut PluginChannel, abort_flag: &AtomicB
             } => {
                 return;
             }
+            // 第三条中止感知路径：通道被强制取消（消费循环超时兜底 / 会话销毁）。
+            // 缺失此分支时，POST 等待会无视 cancel_token 继续挂起。
+            _ = channel.cancel_token.cancelled() => {
+                return;
+            }
             frame = channel.rx.recv() => match frame {
                 Some(frame) => {
                     if handle_signal_frame(frame, abort_flag) {
@@ -201,6 +215,25 @@ pub async fn execute_post_with_abort(
     // 重试在同一 turn 内进行（复用同一个 root_id），不会额外产生 Turn/文本节点，
     // 因此不会造成"错误刷屏"。重试耗尽才向上返回错误，由上层停止并展示重试入口。
     const MAX_RETRIES: u32 = 4;
+    let started = std::time::Instant::now();
+    let body_len = serde_json::to_vec(body).map(|v| v.len()).unwrap_or(0);
+    let host = reqwest::Url::parse(url)
+        .ok()
+        .map(|u| {
+            format!(
+                "{}{}",
+                u.host_str().unwrap_or("?"),
+                u.path()
+            )
+        })
+        .unwrap_or_else(|| url.to_string());
+    // ① 请求发起日志：此后若卡死，可确定卡在「已发出 POST、未收到响应头」阶段。
+    plugin_info!(
+        "model",
+        "[LLM] 请求发起 POST {} (body {} bytes)",
+        host,
+        body_len
+    );
     let mut attempt: u32 = 0;
 
     loop {
@@ -239,7 +272,23 @@ pub async fn execute_post_with_abort(
             Ok(r) => r,
         };
 
+        if abort_flag.load(Ordering::SeqCst) {
+            plugin_info!(
+                "model",
+                "[LLM] 请求在等待响应阶段被中止 (耗时 {:?})",
+                started.elapsed()
+            );
+        }
+
         if response.status().is_success() {
+            // ② 响应头到达日志：此后卡死则卡在「流已建立、SSE 无数据」阶段。
+            plugin_info!(
+                "model",
+                "[LLM] 响应头到达 HTTP {} (等待 {:?}, attempt {})",
+                response.status(),
+                started.elapsed(),
+                attempt + 1
+            );
             return PostResult::Ok(response);
         }
 
@@ -271,13 +320,30 @@ pub async fn execute_post_with_abort(
 
         // 不可重试，或重试耗尽：返回面向用户的友好提示（不再回显原始 API JSON）。
         if status.as_u16() == 429 {
+            plugin_error!(
+                "model",
+                "[LLM] 请求最终失败：429 限流 (总耗时 {:?}, 重试 {} 次)",
+                started.elapsed(),
+                attempt
+            );
             return PostResult::RateLimited(
                 "请求过于频繁（429 限流）。请稍后重试，或切换其他模型继续。".to_string(),
             );
         }
         if status.as_u16() >= 500 {
+            plugin_error!(
+                "model",
+                "[LLM] 请求最终失败：HTTP {status} (总耗时 {:?}, 重试 {} 次)",
+                started.elapsed(),
+                attempt
+            );
             return PostResult::Err(format!("模型服务暂时不可用（HTTP {status}），请稍后重试。"));
         }
+        plugin_error!(
+            "model",
+            "[LLM] 请求最终失败：HTTP {status} (总耗时 {:?})",
+            started.elapsed()
+        );
         return PostResult::Err(format!("API Error ({status}): {err_text}"));
     }
 }
@@ -639,6 +705,19 @@ pub async fn parse_sse_stream(
     let mut buffer = Vec::<u8>::new();
     let mut out = TurnOutput::default();
 
+    // ── 生命周期日志与卡死防护 ──────────────────────────────────────────
+    // 让每轮 SSE 流在控制台留下完整轨迹：何时建立、首字节何时到达、首条内容
+    // 何时产出、正常/异常如何结束。若卡死，可从最后一条日志精确定位阶段：
+    //   有「请求发起」无「响应头」     → 卡在 POST 等待（网关/网络）；
+    //   有「响应头」无「首个数据块」   → 卡在 SSE 建立后无数据（provider 挂起）；
+    //   有「首个数据块」无「首条内容」 → 收到字节但协议解析无内容事件（协议异常）；
+    //   有「首条内容」后长时间静默     → 流中途挂起 → 由 STREAM_IDLE_TIMEOUT 兜底报错。
+    let started = std::time::Instant::now();
+    let mut first_chunk_at: Option<std::time::Instant> = None;
+    let mut first_content_logged = false;
+    let mut chunk_count: u64 = 0;
+    let mut total_bytes: u64 = 0;
+
     // 用于追踪当前行（正在积攒中）已经发送给前端的增量长度，防止重复发送
     #[derive(Default)]
     struct LineProgress {
@@ -648,13 +727,60 @@ pub async fn parse_sse_stream(
     }
     let mut progress = LineProgress::default();
 
-    while let Some(chunk) = stream.next().await {
+    loop {
+        // 空闲超时包裹：流若中途挂起（连接在、数据停），最多等 STREAM_IDLE_TIMEOUT
+        // 就显式报错终止，而不是静默挂到整体 1800s 超时（用户视角即「卡死」）。
+        let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
+            Ok(n) => n,
+            Err(_) => {
+                let msg = format!(
+                    "SSE 流空闲超时（{}s 内无任何数据）。模型服务可能已挂起，本轮终止以避免会话卡死（已收到 {} chunks / {} bytes，流持续 {:?}）",
+                    STREAM_IDLE_TIMEOUT.as_secs(),
+                    chunk_count,
+                    total_bytes,
+                    started.elapsed()
+                );
+                plugin_error!("model", "[LLM] {}", msg);
+                return Err(msg);
+            }
+        };
+        let Some(chunk) = next else {
+            break; // 流自然结束
+        };
+
+        if first_chunk_at.is_none() {
+            first_chunk_at = Some(std::time::Instant::now());
+            plugin_info!(
+                "model",
+                "[LLM] 首个数据块到达 (TTFB {:?})",
+                first_chunk_at.unwrap().duration_since(started)
+            );
+        }
+        chunk_count += 1;
+        total_bytes += chunk.as_ref().map(|c| c.len()).unwrap_or(0) as u64;
+
         drain_pending_signals(channel, abort_flag);
         if abort_flag.load(Ordering::SeqCst) {
+            plugin_info!(
+                "model",
+                "[LLM] 流式响应被中止 (已收 {} chunks / {} bytes, 耗时 {:?})",
+                chunk_count,
+                total_bytes,
+                started.elapsed()
+            );
             break;
         }
 
-        let chunk = chunk.map_err(|e| format!("Stream read error: {e}"))?;
+        let chunk = chunk.map_err(|e| {
+            let msg = format!(
+                "Stream read error: {e} (已收 {} chunks / {} bytes, 耗时 {:?})",
+                chunk_count,
+                total_bytes,
+                started.elapsed()
+            );
+            plugin_error!("model", "[LLM] {}", msg);
+            msg
+        })?;
         buffer.extend_from_slice(&chunk);
 
         // 循环处理缓冲区
@@ -684,7 +810,15 @@ pub async fn parse_sse_stream(
                             }
                             _ => {}
                         }
-                        dispatch_protocol_event(event, root_id, channel, &mut out).await?;
+                        dispatch_and_track(
+                            event,
+                            root_id,
+                            channel,
+                            &mut out,
+                            &mut first_content_logged,
+                            started,
+                        )
+                        .await?;
                     }
                 }
                 // 重置当前行的追踪
@@ -717,7 +851,15 @@ pub async fn parse_sse_stream(
                         _ => {}
                     }
                     if let Some(ev) = to_dispatch {
-                        dispatch_protocol_event(ev, root_id, channel, &mut out).await?;
+                        dispatch_and_track(
+                            ev,
+                            root_id,
+                            channel,
+                            &mut out,
+                            &mut first_content_logged,
+                            started,
+                        )
+                        .await?;
                     }
                 }
                 break;
@@ -726,7 +868,66 @@ pub async fn parse_sse_stream(
             }
         }
     }
+
+    // ③ 流结束日志：正常结束 / 中止 / 空流，均带统计信息。
+    // 若此处之后长时间无下文（工具执行/下一轮请求），可据此定位卡死发生在「流结束后」阶段。
+    if abort_flag.load(Ordering::SeqCst) {
+        // 中止已在上方记录，此处不重复。
+    } else if out.text.is_empty() && out.reasoning.is_empty() && !out.tool_accumulator.had_any_tool_call() {
+        plugin_warn!(
+            "model",
+            "[LLM] 流结束但未产出任何内容（空流，{} chunks / {} bytes, 耗时 {:?}, finish={:?}）——上游可能返回了错误页或空响应",
+            chunk_count,
+            total_bytes,
+            started.elapsed(),
+            out.finish
+        );
+    } else {
+        plugin_info!(
+            "model",
+            "[LLM] 流正常结束 (耗时 {:?}, {} chunks / {} bytes, 文本 {} 字符, 推理 {} 字符, 工具调用 {} 个, finish={:?})",
+            started.elapsed(),
+            chunk_count,
+            total_bytes,
+            out.text.len(),
+            out.reasoning.len(),
+            out.tool_accumulator.get_completed().len(),
+            out.finish
+        );
+    }
     Ok(out)
+}
+
+/// 单个协议事件的分发 + 首条内容日志。
+///
+/// ④「获取到第一条消息」日志：第一条文本/推理/工具调用内容事件到达时打点，
+/// 标志「模型已开始实际产出」。此后若卡死，可确定卡在「产出过程中」或「产出完成后」。
+async fn dispatch_and_track(
+    ev: ProtocolEvent,
+    root_id: &str,
+    channel: &PluginChannel,
+    out: &mut TurnOutput,
+    first_content_logged: &mut bool,
+    started: std::time::Instant,
+) -> Result<(), String> {
+    if !*first_content_logged {
+        let kind = match &ev {
+            ProtocolEvent::ContentDelta(_) => Some("文本"),
+            ProtocolEvent::ReasoningDelta(_) => Some("推理"),
+            ProtocolEvent::ToolCallDelta(..) => Some("工具调用"),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            *first_content_logged = true;
+            plugin_info!(
+                "model",
+                "[LLM] 收到第一条消息（{}内容，自请求发起 {:?}）",
+                kind,
+                started.elapsed()
+            );
+        }
+    }
+    dispatch_protocol_event(ev, root_id, channel, out).await
 }
 
 async fn dispatch_protocol_event(

@@ -1,6 +1,11 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+// vitest v4 native config loader 不支持 CommonJS 的 __dirname，
+// 统一从 import.meta.url 派生（ESM 环境下 node 与 vitest 均可用）
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /**
  * Vitest 配置 —— 前端单元测试

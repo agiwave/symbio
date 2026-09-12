@@ -295,7 +295,13 @@ pub async fn run_chat_loop(
             return Ok(());
         }
 
-        plugin_info!("session", "--- TURN {} START ---", tool_rounds);
+        plugin_info!(
+            "session",
+            "--- TURN {} START --- (msgs={}, tools={})",
+            tool_rounds,
+            context.messages.len(),
+            0
+        );
 
         if check_abort(&abort_flag).await {
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
@@ -599,6 +605,11 @@ pub async fn run_chat_loop(
             }
             persist_messages(&context, last_saved, &channel).await;
             fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+            plugin_info!(
+                "session",
+                "--- TURN END (正常收尾，无工具调用) --- finish={:?}",
+                finish
+            );
             return Ok(());
         }
 
@@ -796,6 +807,12 @@ pub async fn run_chat_loop(
         // 轮次计数：用户明确要求不设硬性上限，超长对话的规模控制由请求视图层的
         // fade / 骨架化（build_request_view）承担——存储保持完整历史，视图逐轮裁剪。
         tool_rounds += 1;
+        plugin_info!(
+            "session",
+            "--- TURN {} DONE (工具轮结束，进入下一轮) --- 工具调用 {} 个",
+            tool_rounds - 1,
+            tool_results.len()
+        );
     }
 }
 
@@ -1414,6 +1431,17 @@ async fn send_compression_request(
         cancel_token: tokio_util::sync::CancellationToken::new(),
     };
 
+    // 压缩请求窗口日志：此窗口内出帧静默、消费循环收不到任何流式帧，
+    // 若无日志，长压缩请求表现为"整段时间无任何输出"（用户视角的卡死）。
+    // 压缩走完整 LLM 流，长上下文时可能耗时数分钟，必须显式标注开始/结束。
+    let compression_started = std::time::Instant::now();
+    crate::plugin_info!(
+        "session",
+        "[Compress] 压缩 LLM 请求开始：root_id={root_id}, 历史消息数={}，约 {} 字符（此窗口内前端无流式输出属正常）",
+        messages.len(),
+        messages.iter().map(|m| m.content.as_ref().map(|c| c.to_text().len()).unwrap_or(0)).sum::<usize>()
+    );
+
     let result = run_compression_llm(
         orchestrator,
         system_prompt,
@@ -1423,6 +1451,29 @@ async fn send_compression_request(
         abort_flag,
     )
     .await;
+
+    match &result {
+        Ok(msg) => {
+            let text_len = msg
+                .content
+                .as_ref()
+                .map(|c| c.to_text().len())
+                .unwrap_or(0);
+            crate::plugin_info!(
+                "session",
+                "[Compress] 压缩 LLM 请求完成：摘要 {} 字符，耗时 {}s",
+                text_len,
+                compression_started.elapsed().as_secs()
+            );
+        }
+        Err(e) => {
+            crate::plugin_error!(
+                "session",
+                "[Compress] 压缩 LLM 请求失败（耗时 {}s）：{e}",
+                compression_started.elapsed().as_secs()
+            );
+        }
+    }
 
     // 无论成败，立即把真实 rx 归还主通道（Abort 帧的消费权交还消费循环）
     let dummy_rx = tokio::sync::mpsc::channel::<PluginFrame>(1).1;

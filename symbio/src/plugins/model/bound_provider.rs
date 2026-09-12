@@ -14,6 +14,8 @@
 //!
 //! 协议差异全部被 `ModelProtocol` 钩子吸收，本实现对所有协议通用。
 
+use crate::plugin_error;
+use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 use crate::symbio_core::turn::{
@@ -83,6 +85,17 @@ impl ModelProvider for BoundProvider {
         channel: &mut PluginChannel,
         abort_flag: &Arc<AtomicBool>,
     ) -> Result<TurnOutput, PluginError> {
+        // ①「LLM 请求发起」日志：每轮请求的起点打点，含模型、消息数、工具数。
+        // 后续所有阶段日志（受理/首包/首条内容/结束）均以本条为锚点串联成完整轨迹。
+        let turn_started = std::time::Instant::now();
+        plugin_info!(
+            "model",
+            "[LLM] 请求发起 (model={}, msgs={}, tools={}, root={})",
+            self.cfg.model,
+            messages.len(),
+            tools.len(),
+            root_id
+        );
         let body = self
             .protocol
             .prepare_request(&self.cfg, system_prompt, messages, tools);
@@ -97,23 +110,46 @@ impl ModelProvider for BoundProvider {
         .await
         {
             PostResult::Aborted => {
+                plugin_info!(
+                    "model",
+                    "[LLM] 轮次中止 (耗时 {:?})",
+                    turn_started.elapsed()
+                );
                 return Err(PluginError::Aborted);
             }
             PostResult::RetryWithoutContextId => {
                 plugin_warn!(
                     "model",
-                    "Response context lost (400). Retrying turn without response_ids..."
+                    "[LLM] Response context lost (400). Retrying turn without response_ids... (耗时 {:?})",
+                    turn_started.elapsed()
                 );
                 emit_abort(channel).await;
                 return Err(PluginError::RetryWithoutContextId);
             }
             PostResult::Err(msg) => {
+                plugin_error!(
+                    "model",
+                    "[LLM] 轮次失败：{msg} (耗时 {:?})",
+                    turn_started.elapsed()
+                );
                 return Err(PluginError::InternalError(msg));
             }
             PostResult::RateLimited(msg) => {
+                plugin_error!(
+                    "model",
+                    "[LLM] 轮次失败：限流 (耗时 {:?})",
+                    turn_started.elapsed()
+                );
                 return Err(PluginError::RateLimited(msg));
             }
-            PostResult::Ok(resp) => resp,
+            PostResult::Ok(resp) => {
+                plugin_info!(
+                    "model",
+                    "[LLM] 响应已受理，开始接收流 (耗时 {:?})",
+                    turn_started.elapsed()
+                );
+                resp
+            }
         };
 
         let protocol = Arc::clone(&self.protocol);
@@ -122,8 +158,22 @@ impl ModelProvider for BoundProvider {
         })
         .await
         {
-            Err(msg) => Err(PluginError::StreamError(msg)),
-            Ok(out) => Ok(out),
+            Err(msg) => {
+                plugin_error!(
+                    "model",
+                    "[LLM] 轮次异常结束：{msg} (总耗时 {:?})",
+                    turn_started.elapsed()
+                );
+                Err(PluginError::StreamError(msg))
+            }
+            Ok(out) => {
+                plugin_info!(
+                    "model",
+                    "[LLM] 轮次完成 (总耗时 {:?})",
+                    turn_started.elapsed()
+                );
+                Ok(out)
+            }
         }
     }
 }

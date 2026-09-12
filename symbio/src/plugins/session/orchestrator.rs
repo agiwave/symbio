@@ -16,6 +16,7 @@ use crate::symbio_core::schemas::{
     session::{session_append, session_chat, session_chat_response},
 };
 use super::model_chat;
+use crate::plugin_debug;
 use crate::symbio_core::{
     attach_capabilities, collect_capabilities, take_errors, InvokeRequest, InvokeRequestExt,
     InvokeResponse, Plugin, PluginChannel, PluginError, PluginFrame, PluginPayload, MODE,
@@ -137,34 +138,40 @@ fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) 
     }
 
     if let Some(new_content) = &patch.content {
-        match existing.msg_type {
-            Some(cm::MessageType::ToolCall) => {
-                // Tool-call args are emitted as full JSON in each frame
-                existing.content = Some(new_content.clone());
-            }
-            Some(cm::MessageType::Text) | Some(cm::MessageType::Reasoning) => {
-                // SSE delta: append
-                match (&mut existing.content, new_content) {
-                    (Some(existing_c), cm::MessageContent::Text(new_text)) => {
-                        if let cm::MessageContent::Text(buf) = existing_c {
-                            buf.push_str(new_text);
-                        } else {
-                            // Type mismatch (rare) — fall back to replacement
-                            *existing_c = cm::MessageContent::Text(new_text.clone());
+        // 工具流式帧（role=Tool，如 shell 的增量输出）与前端 sessions.ts 的
+        // 合并语义保持一致：全量替换，而非 SSE delta 追加。
+        if matches!(&patch.role, Some(cm::MessageRole::Tool)) {
+            existing.content = Some(new_content.clone());
+        } else {
+            match existing.msg_type {
+                Some(cm::MessageType::ToolCall) => {
+                    // Tool-call args are emitted as full JSON in each frame
+                    existing.content = Some(new_content.clone());
+                }
+                Some(cm::MessageType::Text) | Some(cm::MessageType::Reasoning) => {
+                    // SSE delta: append
+                    match (&mut existing.content, new_content) {
+                        (Some(existing_c), cm::MessageContent::Text(new_text)) => {
+                            if let cm::MessageContent::Text(buf) = existing_c {
+                                buf.push_str(new_text);
+                            } else {
+                                // Type mismatch (rare) — fall back to replacement
+                                *existing_c = cm::MessageContent::Text(new_text.clone());
+                            }
+                        }
+                        (None, cm::MessageContent::Text(new_text)) => {
+                            existing.content = Some(cm::MessageContent::Text(new_text.clone()));
+                        }
+                        _ => {
+                            // Parts arrays or type mismatch — replace
+                            existing.content = Some(new_content.clone());
                         }
                     }
-                    (None, cm::MessageContent::Text(new_text)) => {
-                        existing.content = Some(cm::MessageContent::Text(new_text.clone()));
-                    }
-                    _ => {
-                        // Parts arrays or type mismatch — replace
-                        existing.content = Some(new_content.clone());
-                    }
                 }
-            }
-            _ => {
-                // Turn / unknown: full replace
-                existing.content = Some(new_content.clone());
+                _ => {
+                    // Turn / unknown: full replace
+                    existing.content = Some(new_content.clone());
+                }
             }
         }
     }
@@ -237,6 +244,11 @@ impl SessionPlugin {
         provider_id: Option<String>,
         rid: u64,
     ) {
+        crate::plugin_info!(
+            "session",
+            "[Session] Turn 任务启动：session={session_id}, rid={rid}, provider={:?}",
+            provider_id
+        );
         let collected_ai_messages =
             Arc::new(tokio::sync::Mutex::new(Vec::<cm::ChatMessage>::new()));
 
@@ -321,9 +333,14 @@ impl SessionPlugin {
 
             match result {
                 Ok(Ok(_)) => {
-                    // 正常完成
+                    crate::plugin_info!("session", "[ChatLoop] run_chat_loop 正常结束");
                 }
                 Ok(Err(e)) => {
+                    crate::plugin_error!(
+                        "session",
+                        "[ChatLoop] run_chat_loop 异常退出: {e} (code={})",
+                        e.code()
+                    );
                     let _ = error_tx
                         .send(crate::symbio_core::PluginFrame::Error(
                             e.to_string(),
@@ -338,6 +355,11 @@ impl SessionPlugin {
                     } else {
                         format!("Chat loop task failed: {e}")
                     };
+                    crate::plugin_error!(
+                        "session",
+                        "[ChatLoop] 任务 join 失败（panic={}）：{msg}",
+                        e.is_panic()
+                    );
                     let _ = error_tx
                         .send(crate::symbio_core::PluginFrame::Error(msg, None))
                         .await;
@@ -354,20 +376,65 @@ impl SessionPlugin {
                 inner.ai_control_tx = Some(sub_channel.tx.clone());
             }
 
-            while let Ok(frame_opt) =
-                tokio::time::timeout(Duration::from_secs(1800), sub_channel.rx.recv()).await
-            {
+            plugin_debug!("session", "[Consume] 消费循环启动（session={session_id}, rid={rid}）");
+
+            let mut consume_frames: u64 = 0;
+            let consume_started = std::time::Instant::now();
+            loop {
+                // 1800s 无任何帧 → 判定链路挂死（LLM 流挂起且未触发空闲超时等）。
+                // 旧实现 `while let Ok(...)` 在超时后**静默退出**：无日志、在途 Turn
+                // 不落库、前端 Turn 永远停在 Streaming——这是"卡死但任务不结束"的
+                // 根因之一。现在显式收尾：日志 + persist_failure + Error 广播。
+                let frame_opt = match tokio::time::timeout(
+                    Duration::from_secs(1800),
+                    sub_channel.rx.recv(),
+                )
+                .await
+                {
+                    Ok(f) => f,
+                    Err(_) => {
+                        let msg = format!(
+                            "消费循环超时：{} 秒内未收到任何帧，疑似 LLM/工具链路挂死，已强制收尾（在途 Turn 标记为失败）",
+                            1800
+                        );
+                        crate::plugin_error!("session", "[Consume] {}", &msg);
+                        self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
+                            .await;
+                        self.broadcast_error_with_idle(&state, msg).await;
+                        guard.done = true;
+                        return;
+                    }
+                };
                 let frame = match frame_opt {
                     Some(f) => f,
-                    None => break,
+                    None => {
+                        crate::plugin_info!(
+                            "session",
+                            "[Consume] 通道关闭（chat_loop 已结束），消费循环退出：session={session_id}, 帧数={consume_frames}, 运行时长={}s",
+                            consume_started.elapsed().as_secs()
+                        );
+                        break;
+                    }
                 };
+                consume_frames += 1;
                 if !state.inner.read().await.is_working
                     || state.request_id.load(Ordering::SeqCst) != rid
                 {
+                    crate::plugin_info!(
+                        "session",
+                        "[Consume] 会话状态已复位或请求已更换（is_working/request_id 变更），消费循环退出：帧数={consume_frames}"
+                    );
                     break;
                 }
                 match &frame {
                     PluginFrame::Error(msg, meta) => {
+                        crate::plugin_error!(
+                            "session",
+                            "[Consume] 收到 Error 帧（code={:?}）：{msg}",
+                            meta.as_ref()
+                                .and_then(|m| m.get("code"))
+                                .and_then(|v| v.as_str())
+                        );
                         // 用户手动中止（run_chat_loop 冒泡的 Err(PluginError::Aborted)，
                         // 错误帧携带 code=ABORTED）：在途 Turn 落库为 Failed + error，
                         // 前端据此渲染错误条与重试入口；但不广播业务 Error 事件——
@@ -470,6 +537,12 @@ impl SessionPlugin {
                 false
             }
         };
+        crate::plugin_info!(
+            "session",
+            "[Abort] 收到中止请求：控制通道{}（{}）",
+            if abort_sent { "存在，Abort 帧已发送" } else { "已置空，走 3s 兜底强制收敛" },
+            if abort_sent { "等待 chat_loop 自行退出" } else { "is_working 将被直接复位" }
+        );
 
         if abort_sent {
             // 轮询等待 ai_control_tx 主动置空（最迟 3s 兜底，避免无限等待）

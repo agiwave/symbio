@@ -22,7 +22,7 @@ use crate::symbio_core::{
     InvokeRequestExt,
 };
 use crate::symbio_core::{
-    InvokeRequest, Plugin, PluginChannel, PluginFrame, PluginPayload, HOOK_FIRE,
+    InvokeRequest, Plugin, PluginChannel, PluginError, PluginFrame, PluginPayload, HOOK_FIRE,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use serde_json::{json, Value};
@@ -58,6 +58,20 @@ async fn emit_tool_update(
             .unwrap_or_default(),
         ))
         .await;
+}
+
+/// 工具流式接收的空闲超时（秒）：超过该时长未收到任何新帧则判定工具挂死，
+/// 返回错误结果而非无限挂起（防卡死兜底之一）。
+pub const TOOL_STREAM_IDLE_TIMEOUT_SECS: u64 = 180;
+
+/// 参数摘要：截断到 max_chars，用于日志打印（避免超长参数刷屏）。
+fn args_summary(args: &Value, max_chars: usize) -> String {
+    let s = args.to_string();
+    if s.len() <= max_chars {
+        s
+    } else {
+        format!("{}…(len={})", &s[..max_chars], s.len())
+    }
 }
 
 /// 从工具返回的 JSON 数据中提取可读的文本结果。
@@ -134,11 +148,13 @@ pub async fn execute_tool_async(
     result_msg_id: String,
     ctx: Arc<dyn InvokeRequest>,
 ) -> (String, bool, Option<ChatMessage>) {
+    let started_at = std::time::Instant::now();
     plugin_info!(
         "session",
-        "[Tool] Execution started: {} ({})",
+        "[Tool] 请求发起: {} (call_id={}) args={}",
         tool_name,
-        tool_call_id
+        tool_call_id,
+        args_summary(&args, 200)
     );
 
     let invoke_name = tool_name.replace("__", "/");
@@ -156,12 +172,24 @@ pub async fn execute_tool_async(
     tool_ctx.set(crate::symbio_core::AGENT_ID, agent_id);
     tool_ctx.set(crate::symbio_core::SESSION_ID, session_id);
     tool_ctx.set(crate::symbio_core::TOOL_CALL_ID, tool_call_id.to_string());
+    // 流式工具（如 shell）据此 id 广播增量帧：与 result_msg_id 占位节点同 id，
+    // 前端按 role=tool 全量替换合并；最终哨兵帧被捕获为工具结果。
+    tool_ctx.set(crate::symbio_core::RESULT_MSG_ID, result_msg_id.clone());
 
-    let route_result = if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+    // 工具执行硬超时：防止某个工具插件内部挂死（如子进程永不退出、管道断裂）
+    // 把整个消费循环永久卡住。非流式路径 route() 是单次 await，无任何帧可观测，
+    // 一旦挂死既无日志也无退出——必须在此兜底。
+    const TOOL_EXEC_HARD_TIMEOUT_SECS: u64 = 600; // 10 分钟
+    let route_fut: std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<crate::symbio_core::PluginPayload, PluginError>> + Send>,
+    > = if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
         if tool_visitor.has_capability(tool_name).await {
             plugin_info!("session", "[Tool] Using ToolManager for: {}", tool_name);
             let _ = tool_ctx.set_payload(args.clone());
-            tool_visitor.invoke(tool_name, tool_ctx.clone()).await
+            let visitor = tool_visitor.clone();
+            let tool_ctx2 = tool_ctx.clone();
+            let tool_name2 = tool_name.to_string();
+            Box::pin(async move { visitor.invoke(&tool_name2, tool_ctx2.clone()).await })
         } else {
             plugin_info!(
                 "session",
@@ -170,12 +198,42 @@ pub async fn execute_tool_async(
             );
             tool_ctx.set(crate::symbio_core::PATH, invoke_name.clone());
             let _ = tool_ctx.set_payload(args.clone());
-            p.clone().route(tool_ctx).await
+            let p2 = p.clone();
+            let tool_ctx2 = tool_ctx.clone();
+            Box::pin(async move { p2.route(tool_ctx2).await })
         }
     } else {
         tool_ctx.set(crate::symbio_core::PATH, invoke_name.clone());
         let _ = tool_ctx.set_payload(args.clone());
-        p.clone().route(tool_ctx).await
+        let p2 = p.clone();
+        let tool_ctx2 = tool_ctx.clone();
+        Box::pin(async move { p2.route(tool_ctx2).await })
+    };
+
+    let route_result = match tokio::time::timeout(
+        std::time::Duration::from_secs(TOOL_EXEC_HARD_TIMEOUT_SECS),
+        route_fut,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => {
+            plugin_error!(
+                "session",
+                format!(
+                    "[Tool] 执行硬超时 ({}s): {}，已中断。call_id={}",
+                    TOOL_EXEC_HARD_TIMEOUT_SECS, tool_name, tool_call_id
+                )
+            );
+            return (
+                format!(
+                    "Error: 工具 {} 执行超过 {} 秒未返回，已强制中断（疑似挂死）",
+                    tool_name, TOOL_EXEC_HARD_TIMEOUT_SECS
+                ),
+                false,
+                None,
+            );
+        }
     };
 
     match route_result {
@@ -199,8 +257,9 @@ pub async fn execute_tool_async(
                 let res = extract_result(&data);
                 plugin_info!(
                     "session",
-                    "[Tool] FINISHED: {} (Len: {})",
+                    "[Tool] 正常结束: {} (耗时 {}ms, 结果长度 {})",
                     tool_name,
+                    started_at.elapsed().as_millis(),
                     res.len()
                 );
                 (res, true, None)
@@ -216,8 +275,55 @@ pub async fn execute_tool_async(
                 let mut full = String::new();
                 // 捕获工具广播的 user_prompt(WaitingUserAction) 节点，作为本轮"待用户响应"结果返回
                 let mut captured_prompt: Option<ChatMessage> = None;
+                let mut last_frame_at = std::time::Instant::now();
+                let mut frame_count: usize = 0;
 
-                while let Some(frame) = tool_chan.rx.recv().await {
+                loop {
+                    // 空闲超时：工具流超过 TOOL_STREAM_IDLE_TIMEOUT_SECS 无任何新帧
+                    // 判定为挂死（如子进程 hang、管道断裂），显式报错退出而非无限等待。
+                    let frame = match tokio::time::timeout(
+                        std::time::Duration::from_secs(TOOL_STREAM_IDLE_TIMEOUT_SECS),
+                        tool_chan.rx.recv(),
+                    )
+                    .await
+                    {
+                        Ok(f) => f,
+                        Err(_) => {
+                            plugin_error!(
+                                "session",
+                                format!(
+                                    "[Tool] 流式执行空闲超时 ({}s 无新帧): {}，已中断。call_id={}",
+                                    TOOL_STREAM_IDLE_TIMEOUT_SECS,
+                                    tool_name,
+                                    tool_call_id
+                                )
+                            );
+                            return (
+                                format!(
+                                    "Error: 工具流式执行超过 {} 秒无输出，已强制中断（疑似挂死）",
+                                    TOOL_STREAM_IDLE_TIMEOUT_SECS
+                                ),
+                                false,
+                                None,
+                            );
+                        }
+                    };
+                    let Some(frame) = frame else {
+                        // 发送端全部关闭：工具正常结束（run.rs drop 了 tx）
+                        break;
+                    };
+                    frame_count += 1;
+                    if last_frame_at.elapsed().as_secs() >= 30 {
+                        plugin_warn!(
+                            "session",
+                            "[Tool] 流式帧间隔过长: {} 距上一帧 {}s（帧 #{}, call_id={}）",
+                            tool_name,
+                            last_frame_at.elapsed().as_secs(),
+                            frame_count,
+                            tool_call_id
+                        );
+                    }
+                    last_frame_at = std::time::Instant::now();
                     if is_aborted.load(Ordering::Relaxed) {
                         break;
                     }
@@ -302,7 +408,11 @@ pub async fn execute_tool_async(
                                     session_chat_response::StreamEvent::Error { error } => {
                                         plugin_error!(
                                             "session",
-                                            format!("[Tool] NESTED Error: {}", error)
+                                            format!(
+                                                "[Tool] NESTED Error: {} (耗时 {}ms)",
+                                                error,
+                                                started_at.elapsed().as_millis()
+                                            )
                                         );
                                         return (format!("Error: {error}"), false, None);
                                     }
@@ -314,17 +424,37 @@ pub async fn execute_tool_async(
                             }
                         }
                         PluginFrame::Error(e, _) => {
-                            plugin_error!("session", format!("[Tool] STREAM Error: {}", e));
+                            plugin_error!(
+                                "session",
+                                format!(
+                                    "[Tool] STREAM Error: {} (耗时 {}ms)",
+                                    e,
+                                    started_at.elapsed().as_millis()
+                                )
+                            );
                             return (format!("Error: {e}"), false, None);
                         }
                     }
                 }
-                plugin_info!(
-                    "session",
-                    "[Tool] STREAMING finished: {} (Total Len: {})",
-                    tool_name,
-                    full.len()
-                );
+                if is_aborted.load(Ordering::Relaxed) {
+                    plugin_warn!(
+                        "session",
+                        "[Tool] 流式执行被中止（abort）: {} (耗时 {}ms, 帧数 {}, 已累积长度 {})",
+                        tool_name,
+                        started_at.elapsed().as_millis(),
+                        frame_count,
+                        full.len()
+                    );
+                } else {
+                    plugin_info!(
+                        "session",
+                        "[Tool] 流式正常结束: {} (耗时 {}ms, 帧数 {}, 结果长度 {})",
+                        tool_name,
+                        started_at.elapsed().as_millis(),
+                        frame_count,
+                        full.len()
+                    );
+                }
                 // Mark the result message as completed (携带实际累积结果 full)
                 emit_tool_update(
                     channel,
@@ -339,7 +469,14 @@ pub async fn execute_tool_async(
             _ => ("Error: Unexpected payload type".into(), false, None),
         },
         Err(e) => {
-            plugin_error!("session", format!("[Tool] ROUTE Error: {}", e));
+            plugin_error!(
+                "session",
+                format!(
+                    "[Tool] ROUTE Error: {} (耗时 {}ms)",
+                    e,
+                    started_at.elapsed().as_millis()
+                )
+            );
             (format!("Error: {e}"), false, None)
         }
     }
