@@ -4,8 +4,8 @@
 //! - [`ModelProviderConfig`]：持久化配置 schema（serde 字段名冻结，用户配置兼容）；
 //! - [`ModelProtocol`]：插件私有的协议适配钩子实现（`Arc<dyn ModelProtocol>`）。
 //!
-//! 完整单轮行为（`execute_turn` 五态机、`effective_context_tokens` 收敛）
-//! 自旧 core `ModelProvider` 结构体的固有方法原样迁入——语义不变：
+//! 完整单轮行为（`execute_turn` 五态机、`effective_context_tokens` 收敛）由本
+//! 类型实现，`TurnOutput` → `PluginError` 的映射固定为：
 //! - `Aborted` → `PluginError::Aborted`；
 //! - `RetryWithoutContextId` → `plugin_warn!` + `emit_abort` + 同名错误；
 //! - `Err(msg)` → `PluginError::InternalError`；

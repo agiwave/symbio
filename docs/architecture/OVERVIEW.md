@@ -16,7 +16,7 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 
 ### 3. 能力路由 (Capability Routing)
 
-路径即路由。通过 `/` 分隔的字符串（如 `agent/chat`、`local/shell`）定位任何插件或具体能力。`traverse()` 与 `route()` 共享同一路径协议。
+路径即路由。通过 `/` 分隔的字符串（如 `session/chat/send`、`local/shell`）定位任何插件或具体能力。`traverse()` 与 `route()` 共享同一路径协议。
 
 ### 4. 扁平化实现 (Flattened Implementation)
 
@@ -68,17 +68,16 @@ graph TD
 | `transport.rs`                                                            | `PluginFrame` / `PluginPayload` / `PluginChannel` 传输协议                                |
 | `creator.rs`                                                              | 通用对象创建注册表（`submit_object_creator!` 宏、`create_object` / `has_creator`）                 |
 | `error.rs`                                                                | 统一 `PluginError` 与稳定错误码                                                               |
-| `types.rs`                                                                | 流/事件类型（`BoxStream` / `EventResult` / `SystemEvent` / `ToolCall` 等）                    |
+| `turn.rs`                                                                 | 单轮执行机器与流式类型（`execute_post_with_abort` / `parse_sse_stream` / `ToolCallInfo` / emit 辅助） |
 | `capability.rs`                                                           | `Capability` / `CapabilityVisitor` 能力系统                                               |
-| `chat_session.rs`                                                         | `ChatSession` / `ChatSessionHandle` 会话抽象                                              |
+| `capability_error.rs`                                                     | 能力收集期错误通道（写侧=任意 traverse 插件，读侧=session 编排方）                                     |
 | `entities.rs`                                                             | 统一实体框架：`EntityProvider` trait + list/get/upload/delete/status 公共流程                    |
-| `chat_pipeline.rs`                                                        | 会话能力收集管线（`traverse(available_tools)` 统一工具贡献机制）                                        |
 | `tools.rs`                                                                | `DefaultToolVisitor` 默认能力管理器                                                          |
 | `schemas/`                                                                | 跨端数据结构 (Request/Response)，Rust 端定义                                                    |
 | `logger.rs`                                                               | 日志系统初始化                                                                               |
 | `keys.rs`                                                                 | 上下文键（`PATH` / `WORKDIR` / `SESSION_ID` / `TRACE_ID` …）                                |
 | `ids.rs`                                                                  | 插件 id 常量（`PLUGIN_HOME` 等）与能力/路径常量                                                     |
-| `paths.rs` / `homedir.rs` / `system.rs` / `event_bus.rs` / `providers.rs` | 路径解析、主目录、系统门面、事件总线、服务 trait 等                                                         |
+| `paths.rs` / `homedir.rs` / `event_bus.rs` / `providers.rs` | 路径常量、主目录、事件总线、服务 trait 等                                                         |
 
 ### `plugins/` — 实现层
 
@@ -88,7 +87,7 @@ graph TD
 | ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `home`      | **根容器**      | 持全局配置（`<homedir>/config.yaml`）；仅挂载 `worker` (Composite)，自身终结 `home/*`、`work/*`、`entities/providers`、`save_config` |
 | `composite` | **动态容器**     | 按配置实例化任意子插件，是"分形"的关键                                                                                              |
-| `agent`     | **认知中心**     | 管理 Agent 人格；会话选定智能体时经 `traverse` 贡献工具与人格，不再独占会话编排 → `plugins/agent/README.md`                                     |
+| `agent`     | **认知中心**     | 管理 Agent 人格；会话选定智能体时经 `traverse` 贡献工具与人格 → `plugins/agent/README.md`                                     |
 | `session`   | **会话中心**     | 长连接、消息持久化、历史裁剪；**会话编排的唯一入口**（收集工具、组装提示词、直连 model 单轮网关）→ `plugins/session/README.md`（含六大压缩策略）                       |
 | `model`     | **单轮 LLM 网关** | 无状态单轮执行（`execute_turn`）；按上下文注册唯一生效 `ModelProvider`（自含参数与协议适配器）、4 协议适配、配置存取；不含工具执行与会话循环 |
 | `local`     | 本地工具         | shell / file_read / file_write / file_edit / glob_search / content_search                                         |
@@ -96,7 +95,7 @@ graph TD
 | `skill`     | 技能           | 加载与执行技能定义（含 `skill/search`）                                                                                       |
 | `mcp`       | MCP 桥        | MCP server 注册（stdio / http）与工具调用（另含统一实体 `entities/servers` 维护）                                                    |
 | `telegram`  | Telegram 通道  | 长轮询收发与“继续会话”交互（`telegram/send`）                                                                                  |
-| `gateway`   | **入站网关**     | HTTP/WS/SSE 入站适配（`/api/route`、`/api/ws`、`/api/events`，与 route_v2 同构）                                              |
+| `gateway`   | **入站网关**     | HTTP/WS 入站适配（`/api/v1/invoke`、`/api/v1/ws`、`/api/v1/health`，与 route_v2 同构）                                              |
 | `setting`   | 配置           | 系统级配置读写（`setting/get` / `setting/set`）                                                                            |
 | `hook`      | 钩子           | 钩子注册与触发（PreCompact 等生命周期点）                                                                                        |
 | `event_bus` | 事件总线         | 进程内帧广播（连接级 SSE 风格推送）                                                                                              |

@@ -3,9 +3,9 @@
 //! 字段刻意**扁平化**（`inbound_*`），以直接契合设置表单的 flat key 绑定：
 //! `config/set` 整体替换，无需嵌套路径解析。
 //!
-//! **出站（前端连向何处）已不再由本插件持有**：连接目标由前端「系统目录」切换器
+//! **出站（前端连向何处）不由本插件持有**：连接目标由前端「系统目录」切换器
 //! 统一管理（localStorage 为权威），经 `initGatewayTransport` 决定 native / http 出站。
-//! 因此本配置只描述「本实例如何被调用（入站）」，不再描述「前端连向何处」。
+//! 因此本配置只描述「本实例如何被调用（入站）」。
 
 use serde::{Deserialize, Serialize};
 
@@ -79,7 +79,7 @@ mod tests {
         assert_eq!(c.inbound_protocol, "native");
         assert_eq!(c.inbound_port, 9231);
         assert_eq!(c.inbound_bind, "127.0.0.1");
-        // 配置仅描述入站；不再含出站字段
+        // 配置仅描述入站，不含出站字段
         let v = serde_json::to_value(&c).unwrap();
         assert!(v.get("outbound_protocol").is_none());
         assert!(v.get("outbound_endpoint").is_none());

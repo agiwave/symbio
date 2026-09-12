@@ -2,12 +2,10 @@
 //!
 //! 提供跨平台的字符编码处理和参数校验逻辑。
 //!
-//! Phase sink：自 `symbio_core/system.rs` 下沉至 local 插件——唯一消费者
-//! （shell / content_search）均在本插件内，属模块私有设施，
-//! 不再置于 core 共享层。
+//! 归属规则：只被单一插件消费的设施定义在该插件内部，core 不承载单模块内部
+//! 定义——本模块的唯一消费者（shell / content_search）均在本插件内。
 //!
-//! 体检备注（audit-4）：原 `run_command` 自 core 时代起即无任何消费者，
-//! 已删除；shell.rs 的命令执行有其自身的完整实现。
+//! 命令执行不在本模块：`shell.rs` 自带完整实现，本模块只提供编码解码与参数校验。
 
 use encoding_rs::GBK;
 

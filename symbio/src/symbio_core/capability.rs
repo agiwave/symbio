@@ -4,14 +4,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
-/// 能力分类（v17：单一字段取代旧的 `category: Option<String>`）
+/// 能力分类（`CapabilityMeta.category` 的唯一分类字段）
 ///
 /// 设计原则：
 /// - `CapabilityCategory` 是**机制化的语义标签**，与具体语言无关
 /// - `CapabilityMeta.category: Option<CapabilityCategory>` 是唯一分类字段
 /// - 渲染层（`render_category`）按 `ctx.get("lang")` 选择本地化字符串
-/// - 枚举新增 variant 时，老调用方的 `Some("xxx".to_string())` 形式已不可用，
-///   必须迁移到 `Some(CapabilityCategory::Xxx)`（编译期强制）
+/// - 分类只能用本枚举的变体表达（不接受字符串字面量），编译器强制这一点
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityCategory {
@@ -109,11 +108,10 @@ pub struct CapabilityMeta {
     /// 关键词列表（用于意图识别）
     #[serde(default)]
     pub keywords: Vec<String>,
-    /// 能力分类（v17：唯一分类字段，类型为枚举）
+    /// 能力分类（唯一分类字段，类型为枚举）
     ///
     /// - `Some(枚举)`：渲染层按 `ctx.get("lang")` 选本地化文案
     /// - `None`：兜底为 `Other`（展示"其他"）
-    /// - **v17 变更**：旧 `Option<String>` 形态已废弃，编译期强制迁移
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub category: Option<CapabilityCategory>,
     /// 使用示例列表
@@ -209,7 +207,7 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
 
     /// 注册模型服务（AI 对话能力）
     ///
-    /// 纯 trait 契约后的语义：model 插件在 traverse 中按上下文（用户选中的
+    /// 语义：model 插件在 traverse 中按上下文（用户选中的
     /// 模型 id > 默认 provider > 首个启用）解析出**唯一生效**的
     /// `Arc<dyn ModelProvider>`（配置 + 协议钩子的绑定实现）并注册于此；
     /// 重复注册时后者覆盖（单槽）。会话发起时经同一次

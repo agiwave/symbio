@@ -28,6 +28,7 @@
 //! `execute_tool_async` 直接复用，无需 session 层重复 `prepare_capability_manager`。
 
 use super::chat_loop::ChatOrchestrator;
+use super::chat_session::ChatSession;
 use super::tool_executor::execute_tool_async;
 use crate::plugin_info;
 use crate::symbio_core::schemas::session::chat_message::{
@@ -36,7 +37,7 @@ use crate::symbio_core::schemas::session::chat_message::{
 };
 use crate::symbio_core::schemas::session::session_chat_response::StreamEvent;
 use crate::symbio_core::turn::short_id;
-use crate::symbio_core::{ChatSession, InvokeRequest, PluginChannel, PluginError, PluginFrame};
+use crate::symbio_core::{InvokeRequest, PluginChannel, PluginError, PluginFrame};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};

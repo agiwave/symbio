@@ -7,7 +7,7 @@
 //! 后端通过 `Session` 通道广播一个 `user_prompt` 消息节点（status = WaitingUserAction），
 //! 编排层在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通 `user` 消息
 //! （`meta.responds_to` 指向本节点）回填后，新一轮会重跑本工具并拿到答案。
-//! options 自动补充 "Other" 选项。详见 USER_INPUT_MECHANISM 设计文档。
+//! options 自动补充 "Other" 选项。
 
 use super::policy::SecurityPolicy;
 use crate::symbio_core::{

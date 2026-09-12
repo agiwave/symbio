@@ -38,7 +38,7 @@ const RETAINED_RECENT_REASONING: usize = 2;
 /// - `User` / `System` 等 → 原样输出
 /// - 失败 `Turn`（status=Failed）：半截输出照常聚合，并附加中断说明段落；
 ///   无结果的 `ToolCall` 合成占位 tool 结果、失败的工具结果推导 `success=false`
-///   （"继续会话"中断可见性，详见 docs/turn-tool-mechanisms.md 2.6 节）
+///   （"继续会话"中断可见性）
 pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
     let by_id: HashMap<&str, &ChatMessage> = messages.iter().map(|m| (m.id.as_str(), m)).collect();
     let mut children: HashMap<&str, Vec<&ChatMessage>> = HashMap::new();
@@ -60,10 +60,9 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
     // 已聚合消费的节点 id 集合：每个根级 Turn 在聚合时会把自身及全部子孙合并进
     // 一条 assistant 消息。此处仅把「子孙」id 收集进来（不含 Turn 自身），这样：
     //  - 若同一节点在列表中以「裸根」形式（parent_id 为 None 或指向缺失节点）重复出现，
-    //    会被跳过，避免 reasoning / tool_call 参数 / tool_result 在 LLM 请求中重复
-    //    （即 request.json 中 #5/#6/#7 重复于 #3/#4 的问题）；
-    //  - Turn 自身不会被误标记，保证它能被主循环正常聚合（修复此前把 Turn 自身 id
-    //    也插入 consumed 导致根级 Turn 被跳过、永不聚合的回归）。
+    //    会被跳过，避免 reasoning / tool_call 参数 / tool_result 在 LLM 请求中重复；
+    //  - Turn 自身不会被误标记，保证它能被主循环正常聚合（把 Turn 自身 id 也收进
+    //    consumed 会让根级 Turn 被跳过、永不聚合）。
     let mut consumed: HashSet<&str> = HashSet::new();
     /// 递归收集某 Turn 的全部子孙 id（不含 Turn 自身）到 `acc`
     fn collect_descendants<'a>(
@@ -93,7 +92,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         }
     }
 
-    // ── 请求视图思考裁剪（诉求2）──────────────────────────────────────
+    // ── 请求视图思考裁剪 ─────────────────────────────────────────────────
     // 按列表序（时间序）收集携带 Reasoning 子节点的根级 Turn，
     // 仅最近 RETAINED_RECENT_REASONING 条允许回传 reasoning_content：
     // 完全清空思考会让模型"失忆"后重复思考；全量回传历史思考既浪费
@@ -121,7 +120,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         .collect();
 
     for m in messages {
-        // 已被聚合消费（作为某 Turn 的子节点）的节点不再单独发出
+        // 已被聚合消费（作为某 Turn 的子节点）的节点不单独发出
         if consumed.contains(m.id.as_str()) {
             continue;
         }
@@ -143,7 +142,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                     for child in kids {
                         match child.msg_type {
                             Some(MessageType::Reasoning) => {
-                                // 仅最近 N 条思考进入请求视图（诉求2）
+                                // 仅最近 N 条思考进入请求视图
                                 if retained_reasoning_turns.contains(m.id.as_str()) {
                                     native.reasoning_content =
                                         child.content.as_ref().map(|c| c.to_text());
@@ -180,7 +179,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                         tool_native.tool_call_id = Some(child.id.clone());
                                         // 失败的工具结果推导 success=false：触发 Anthropic
                                         // tool_result 的 is_error=true，工具失败信息才能被
-                                        // 模型感知（机制1；跨轮工具失败不再被过滤丢失）
+                                        // 模型感知；跨轮工具失败必须可见，不得被过滤丢失
                                         if res.status == Some(MessageStatus::Failed) {
                                             tool_native.success = Some(false);
                                         }
@@ -213,7 +212,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                 // 主循环开头的 `if consumed.contains(m.id) { continue; }` 会跳过它们，
                 // 因此此处无需再单独标记，避免重复代码与潜在误标记。
 
-                // **中断说明**（"继续会话"中断可见性，docs/turn-tool-mechanisms.md 2.6）：
+                // **中断说明**（"继续会话"中断可见性）：
                 // 失败 Turn 的半截输出原样聚合后，附加中断说明段落——模型在上下文中
                 // 看到"上次输出 → 中断说明 → 用户新消息"的连贯序列，避免思维链断裂
                 // （等价于用户打断了模型说话，然后继续）。
@@ -323,9 +322,9 @@ fn find_tool_result<'a>(
         .copied()
 }
 
-// ChatMessage 构造（Phase E：实现上移至 symbio_core::turn）
-// build_assistant_messages / build_tool_message / short_id / StreamChildIds
-// 仅测试消费，由 tests 模块直接引用 core（避免 lib 侧 unused import 警告）
+// ChatMessage 构造（build_assistant_messages / build_tool_message / short_id /
+// StreamChildIds）实现在 symbio_core::turn：本文件仅测试消费，由 tests 模块
+// 直接引用 core（避免 lib 侧 unused import 警告）
 
 #[cfg(test)]
 mod tests {
@@ -532,7 +531,7 @@ mod tests {
         assert_eq!(natives[0].reasoning_content.as_deref(), Some("思考过程"));
     }
 
-    /// 诉求2：请求视图只保留最近 RETAINED_RECENT_REASONING 条思考。
+    /// 请求视图只保留最近 RETAINED_RECENT_REASONING 条思考。
     ///
     /// 3 个携带 Reasoning 子节点的 Turn 依序出现时，最早 1 条的 reasoning_content
     /// 必须被剥离（但正文保留、消息不得整条消失），最近 2 条完整回传——
@@ -619,9 +618,9 @@ mod tests {
         );
     }
 
-    // ── 新增回归测试：锁定本次修复的两个高危行为 ─────────────────────────
+    // ── 回归测试：锁定以下高危行为 ────────────────────────────────────────
 
-    /// 落库节点必须复用流式子节点 id（M-001）。
+    /// 落库节点必须复用流式子节点 id。
     ///
     /// 若两处各自 `short_id()`，存储层的定稿节点（id=B，内容全量）与会话层累积的流式节点
     /// （id=A，内容增量合并）会被判定为两条不同消息；失败收尾时 id=A 被当作"尚未落库的
@@ -887,7 +886,7 @@ mod tests {
         assert!(v.get("tool_calls").is_some(), "tool_calls 必须保留");
     }
 
-    // ── "继续会话"中断可见性（docs/turn-tool-mechanisms.md 2.6）──────────────
+    // ── "继续会话"中断可见性 ─────────────────────────────────────────────
 
     /// 失败 Turn 的半截输出必须进入 LLM 请求包，并附加中断说明：
     /// 模型应看到「上次输出 → 中断说明 → 用户新消息」的连贯序列

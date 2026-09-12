@@ -101,8 +101,8 @@ impl EntityProvider for AgentPlugin {
                 }
                 // 类型特有扩展：版本 / 规格 / 来源层级 / 安装目录 / 内部实体计数
                 // （前端 DetailForm info 绑定按需展示）
-                // config_type = "bundle"：项级分发键（历史上指向 agent:bundle
-                // editor，现已机制化为 DetailForm info 绑定，保留兼容）
+                // config_type = "bundle"：项级分发键，前端据此分发，必须保留；
+                // 明细展示走 DetailForm info 绑定
                 let counts = container_counts(&store, &r.manifest.id);
                 it.extra = serde_json::json!({
                     "config_type": "bundle",

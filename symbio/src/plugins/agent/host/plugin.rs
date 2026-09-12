@@ -7,7 +7,7 @@
 //!
 //! - **提示词**：`traverse(available_tools)` 时扫描 `prompts/` `skills/`，
 //!   把片段汇总为 [`BundleIdentityCapability`]（`agent_identity` 工具），
-//!   宿主据此追加/影响系统提示词（老 agent 插件同款语义，**零会话编排改动**）；
+//!   宿主据此追加/影响系统提示词（**零会话编排改动**）；
 //! - **MCP**：扫描 `mcps/` 得到 MCP server 声明，**交给宿主已有的 MCP 客户端**启动
 //!   （OAB 不重新发明工具运行时，工具唯一来源即 MCP）；
 //! - **版本匹配**：bundle 校验（含 `requires.spec` 硬门槛）失败 = 收集期
@@ -98,7 +98,7 @@ impl AgentPlugin {
             );
         }
 
-        // ── 3. 提示词片段 → agent_identity 身份工具（老 agent 同款语义）──
+        // ── 3. 提示词片段 → agent_identity 身份工具 ──
         let mut caps: Vec<Arc<dyn Capability>> = Vec::new();
         let identity_text = assembly.identity_text();
         if !identity_text.trim().is_empty() {
@@ -253,7 +253,7 @@ impl Plugin for AgentPlugin {
                 .await
             {
                 // 硬错误：会话绑定了一个不合规/不存在的 bundle——必须中止并明确提示，
-                // 绝不静默降级（与老 agent 插件的收集期错误语义一致）。
+                // 绝不静默降级为「无人格的通用助手」；装配失败一律以收集期错误上报。
                 report_error(
                     &ctx,
                     PLUGIN_AGENT,

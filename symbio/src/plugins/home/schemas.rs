@@ -1,7 +1,7 @@
 //! Home 插件的请求/响应 schema
 //!
-//! 原 `symbio_core::schemas::home`（home_reload）与 `schemas::work`（work_get_workspace），
-//! 均仅被 HomePlugin 使用，故合并下放到本插件内部。
+//! 归属规则：`home_reload` 与 `work_get_workspace` 两组契约只被 HomePlugin 消费，
+//! 故定义在本插件内部，core 不承载。
 
 pub mod home_reload {
     //! home/reload 路由的请求/响应 schema（对应 HomePlugin::route 的 reload 分支）

@@ -18,5 +18,5 @@
 
 ## 关联
 
-- 设计文档：`docs/design/http-api-transport.md`（已实现落地）
+- 设计文档：`docs/design/http-api-transport.md`
 - 数据流转：`docs/architecture/DATA_FLOW.md`

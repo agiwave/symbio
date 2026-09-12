@@ -1,6 +1,6 @@
 //! MCP (Model Context Protocol) 插件
 //!
-//! ## 职责划分（2026-07-06 重构）
+//! ## 职责划分
 //!
 //! - **后端**（`symbio/src/plugins/mcp/`）：MCP **配置管理**（CRUD）+ **客户端
 //!   transport**（stdio / http，按需 lazy 加载）—— 与系统工具机制集成，

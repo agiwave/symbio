@@ -7,7 +7,7 @@
 //! {workdir}/.symbio/plugins/agent/<bundle_id>/    工作区级（同名覆盖全局级）
 //! ```
 //!
-//! 全局级与旧版 agent 完全一致：智能体（bundle）统一存放在「系统目录」下的
+//! 全局级：智能体（bundle）统一存放在「系统目录」下的
 //! `plugins/agent/`，系统目录由 [`crate::symbio_core::HomedirRegistry`] 提供
 //! （可被「切换系统目录」改变并持久化到 bootstrap）。每个子目录即一个 bundle
 //! （含 `manifest.yaml` 与约定能力目录 prompts/ skills/ mcps/）。
@@ -188,8 +188,8 @@ pub struct BundleStore {
 impl BundleStore {
     pub fn new(workdir: Option<&str>) -> Self {
         // 两级发现：
-        // - 全局级 = 系统目录下的 `plugins/agent/<id>`（与旧版 agent 完全一致，
-        //   系统目录由 HomedirRegistry::get() 提供，可被「切换系统目录」改变并持久化到
+        // - 全局级 = 系统目录下的 `plugins/agent/<id>`（系统目录由
+        //   HomedirRegistry::get() 提供，可被「切换系统目录」改变并持久化到
         //   bootstrap）—— 这是用户安装 bundle 的主位置，必须始终被扫描；
         // - 工作区级 = `{workdir}/.symbio/plugins/agent/<id>`（同名时覆盖全局级）。
         //   工作区层同时为测试提供隔离：测试用 tempdir 作 workdir 时不会污染真实系统目录。

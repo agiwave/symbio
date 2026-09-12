@@ -1,3 +1,3 @@
-//! MCP 插件的请求/响应 schema（原 `symbio_core::schemas::mcp`，仅本插件使用，故下放）
+//! MCP 插件的请求/响应 schema（只被本插件消费，故定义在插件内部）
 
 pub mod mcp_config;

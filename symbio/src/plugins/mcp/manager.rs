@@ -151,8 +151,8 @@ pub struct McpManager {
 impl McpManager {
     pub fn new() -> Self {
         Self {
-            // BUG-MR31：不再使用 client 级硬超时——每个请求按 McpServerConfig.timeout_secs
-            // 设置超时（通过 http.rs::build_request 的 `.timeout()` 方法）。
+            // BUG-MR31：超时必须是请求级——每个请求按 McpServerConfig.timeout_secs
+            // 设置（经 http.rs::build_request 的 `.timeout()`），不设 client 级硬超时。
             // 这允许不同 server 独立配置超时（大工具调用可放宽，小查询可收紧）。
             http_client: reqwest::Client::builder()
                 .build()
@@ -294,7 +294,7 @@ impl McpManager {
     /// - `Ok(result)` 包含 tool count、协议版本、server 名称/版本、instructions
     /// - `Err(e)` 表示失败
     ///
-    /// 连接测试能力：供统一 `entities` 连接测试/表单复用（旧 `servers/test` 已移除，待接入）
+    /// 连接测试能力：供统一 `entities` 连接测试/表单复用（尚未接入，故带 dead_code 放行）
     #[allow(dead_code)]
     pub async fn test_connection(
         &self,

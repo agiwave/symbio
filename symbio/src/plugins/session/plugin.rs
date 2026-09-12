@@ -11,13 +11,14 @@
 //! Session 存储目录由 [`HomedirRegistry::get()`] 派生：`<homedir>/plugins/session`。
 //! 切换 homedir 后，新会话将写入新 homedir；存量数据**不会**自动迁移。
 
+use super::chat_session::ChatSession;
 use super::types::Session;
 use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
 pub use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::{
-    ChatSession, HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginError, PluginMeta, PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_SESSION,
+    HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
+    PluginMeta, PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_SESSION,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};

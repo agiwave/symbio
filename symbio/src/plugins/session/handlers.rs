@@ -4,7 +4,9 @@
 //! 消息增删改查、会话删除/清空、
 //! metadata 合并与统一删除路径 `delete_session_internal` 等。
 
-use super::chat_session::{EphemeralChatSession, PersistentChatSession};
+use super::chat_session::{
+    ChatSession, ChatSessionHandle, EphemeralChatSession, PersistentChatSession,
+};
 use super::plugin::SessionPlugin;
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::schemas::{
@@ -15,7 +17,7 @@ use crate::symbio_core::schemas::{
         session_update_message,
     },
 };
-use crate::symbio_core::{ChatSessionHandle, InvokeRequest, InvokeRequestExt, PluginPayload};
+use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginPayload};
 use crate::symbio_core::{InvokeResponse, PluginError};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -321,10 +323,10 @@ impl SessionPlugin {
     pub async fn open_session_handle(
         &self,
         session_id: Option<String>,
-    ) -> Result<Arc<dyn crate::symbio_core::ChatSession>, PluginError> {
+    ) -> Result<Arc<dyn ChatSession>, PluginError> {
         let cfg = self.config.read().await;
 
-        let session: Arc<dyn crate::symbio_core::ChatSession> = match session_id {
+        let session: Arc<dyn ChatSession> = match session_id {
             Some(sid) if !sid.is_empty() => {
                 if sid.starts_with("_t_") {
                     let ephemeral = EphemeralChatSession::new(&cfg);

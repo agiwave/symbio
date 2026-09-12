@@ -4,7 +4,7 @@
 //! `docs/design/open-agent-bundle-spec.md` §4。
 //!
 //! manifest 只承载**无法从约定目录推导的信息**：身份、兼容性门槛、权限上限、
-//! 实例配置。能力单元（augments / skills / mcp）由约定目录承载，manifest
+//! 实例配置。能力单元（prompts / skills / mcps）由约定目录承载，manifest
 //! 不重复登记。
 
 use serde::{Deserialize, Serialize};

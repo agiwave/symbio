@@ -10,6 +10,7 @@
 
 use super::active::{ActiveSessionState, REQUEST_ID_COUNTER};
 use super::chat_loop::StopSignal;
+use super::chat_pipeline::{attach_capabilities, collect_capabilities};
 use super::model_chat;
 use super::plugin::SessionPlugin;
 use crate::plugin_debug;
@@ -19,9 +20,8 @@ use crate::symbio_core::schemas::{
     session::{session_append, session_chat, session_chat_response},
 };
 use crate::symbio_core::{
-    attach_capabilities, collect_capabilities, take_errors, InvokeRequest, InvokeRequestExt,
-    InvokeResponse, Plugin, PluginChannel, PluginError, PluginFrame, PluginPayload, MODE,
-    PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
+    take_errors, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel,
+    PluginError, PluginFrame, PluginPayload, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -32,9 +32,8 @@ use std::time::Duration;
 ///
 /// ## 背景
 ///
-/// 旧实现里 `handle_chat_message` 的 `tokio::spawn` 任务若发生 **panic**，
-/// 该任务会被 tokio 静默终止，但 `is_working` 永远停留在 `true`，
-/// 导致前端永久显示"AI 处理中"且无法恢复（CHAT_FLOW_ANALYSIS 核心问题）。
+/// spawn 任务若发生 **panic**，该任务会被 tokio 静默终止，`is_working`
+/// 将永远停留在 `true`，导致前端永久显示"AI 处理中"且无法恢复。
 ///
 /// ## 机制
 ///
@@ -54,7 +53,7 @@ struct WorkingGuard {
     /// 注意：绝不能传 `request_id` 的字符串——那是请求序号（如 "42"），
     /// 会令 `open_chat_session` 找不到会话而提前返回，导致崩溃失败永不落库。
     session_id: String,
-    /// 本次请求的 Stop 触发器（session-mechanism-unification.md §4.4）。
+    /// 本次请求的 Stop 触发器。
     ///
     /// 正常路径下 `run_chat_loop` 的出口已显式 fire 过，此处 Drop 是 no-op；
     /// panic 路径下它是**唯一**能保证 Stop 送达的机制（chat_loop 的出口代码
@@ -262,12 +261,11 @@ impl SessionPlugin {
         self.broadcast_error_with_idle(state, err).await;
     }
 
-    /// 统一的 chat_loop 任务执行器（从 `handle_chat_message` 提取，供 continuation 复用）。
+    /// 统一的 chat_loop 任务执行器（`handle_chat_message` 与 continuation 共用）。
     ///
     /// 职责：
     /// - 构造 `WorkingGuard`（保障 panic 时 `is_working` 收敛 + 失败持久化）
-    /// - Phase E-②：解析 provider（entry 回退链）→ 限流 → 进程内 spawn
-    ///   `run_chat_loop`（Error 帧包装保留；跨插件通道消失）
+    /// - 解析 provider（entry 回退链）→ 限流 → 进程内 spawn `run_chat_loop`
     /// - 接收 sub_channel 帧：Error → 持久化失败 + 广播；Data → 合并收集 + 透传广播
     /// - 正常结束：清理 `is_working` + 广播 idle
     ///
@@ -305,8 +303,8 @@ impl SessionPlugin {
             done: false,
         };
 
-        // ── Phase E-②：进程内直连——解析 provider entry → 限流 → spawn run_chat_loop ──
-        // Provider 解析回退链迁移自 ModelProvidersConfig::resolve：
+        // ── 进程内直连：解析 provider entry → 限流 → spawn run_chat_loop ──
+        // Provider 解析回退链：
         // 精确 id → is_default → 首个已注册（traverse 仅注册 enabled provider）。
         let manager = match chat_ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             Some(m) => m,
@@ -321,14 +319,14 @@ impl SessionPlugin {
                 .await;
                 // 收尾已在本分支自行完成（persist_failure + Stop + Error 广播 + idle）：
                 // 必须置 done=true，否则 WorkingGuard::drop 会再跑一遍崩溃恢复，
-                // 导致同一失败被重复落库、前端收到两条 Error 事件（session-mechanism-unification.md §4.4）。
+                // 导致同一失败被重复落库、前端收到两条 Error 事件。
                 guard.done = true;
                 return;
             }
         };
         // provider_id 参数仅为错误文案保留：model 插件 traverse 已按
         // ctx[PROVIDER_ID] > default > 首个 enabled 完成解析并注册唯一生效 Provider，
-        // session 侧直接取用，不再重复回退链。
+        // session 侧直接取用，不重复回退链。
         let provider = match manager.get_model_provider().await {
             Some(p) => p,
             None => {
@@ -342,19 +340,18 @@ impl SessionPlugin {
                 .await;
                 // 收尾已在本分支自行完成（persist_failure + Stop + Error 广播 + idle）：
                 // 必须置 done=true，否则 WorkingGuard::drop 会再跑一遍崩溃恢复，
-                // 导致同一失败被重复落库、前端收到两条 Error 事件（session-mechanism-unification.md §4.4）。
+                // 导致同一失败被重复落库、前端收到两条 Error 事件。
                 guard.done = true;
                 return;
             }
         };
 
-        // Provider 级限流（Phase sink：RATE_LIMITER 已随消费者下沉至 session；0 表示不限流）
+        // Provider 级限流（RATE_LIMITER 归属 session 插件，0 表示不限流）
         super::rate_limit::RATE_LIMITER
             .wait(provider.provider_id(), provider.rate_limit_ms())
             .await;
 
         // 进程内双向通道：host 侧（消费循环 + abort 控制）/ plugin 侧（run_chat_loop）。
-        // 原跨插件 `parent.route` → PluginPayload::Session 的一跳在此消失。
         // 运行时上下文收敛在 provider.effective_context_tokens() 内部完成（服务端
         // 上报值与用户设置取 min）；此处仅保留降档可见日志。
         let (host_chan, plugin_chan) = PluginChannel::pair(4096);
@@ -404,8 +401,8 @@ impl SessionPlugin {
                 Err(e) => {
                     // join error（含 panic）：面向前端只回通用文案（不泄漏内部细节），
                     // 但**日志侧必须保留 panic 载荷**——`JoinError::to_string()` 含 panic
-                    // 消息与 `file:line:col`，是定位的唯一线索。此前该信息只落到 stderr
-                    // 的默认 panic hook，日志文件/结构化日志里查不到（session-mechanism-unification.md §4.5）。
+                    // 消息与 `file:line:col`，是定位的唯一线索；若只依赖 stderr 的
+                    // 默认 panic hook，日志文件/结构化日志里将查不到。
                     let detail = e.to_string();
                     let msg = if e.is_panic() {
                         crate::plugin_error!(
@@ -421,7 +418,7 @@ impl SessionPlugin {
                         format!("Chat loop task failed: {detail}")
                     };
                     // 错误码显式标注 INTERNAL_ERROR：前端可据此区分"服务端异常"
-                    // 与"业务失败"（此前传 None，落库/展示侧丢失分类信息）。
+                    // 与"业务失败"；缺省（None）会让落库/展示侧丢失分类信息。
                     let _ = error_tx
                         .send(crate::symbio_core::PluginFrame::Error(
                             msg,
@@ -923,8 +920,8 @@ impl SessionPlugin {
                 .await
             {
                 chat_ctx.set(
-                    crate::symbio_core::SESSION_HANDLE,
-                    std::sync::Arc::new(crate::symbio_core::ChatSessionHandle::new(session)),
+                    super::chat_session::SESSION_HANDLE,
+                    std::sync::Arc::new(super::chat_session::ChatSessionHandle::new(session)),
                 );
             } else {
                 crate::plugin_warn!("session", "会话引擎句柄构造失败，chat 将回退内存会话");

@@ -30,8 +30,8 @@ pub const SESSION_CHAT: &str = "session/chat";
 // ============ Agent 插件 ============
 /// agent/chat — **子智能体会话执行入口**（仅 agent_run 能力内部调用）
 ///
-/// 重构说明：顶层会话已不再经过此路径。前端会话统一走
-/// `SESSION_CHAT_SEND`（session 插件编排），agent 插件只通过
+/// 适用范围：顶层会话不经过此路径。前端会话统一走
+/// `session/chat/send`（session 插件编排），agent 插件只通过
 /// `traverse(available_tools)` 向会话贡献工具；只有当上级会话需要派生一个
 /// 子智能体会话时，才会由此路径进入 agent 插件内部执行。
 pub const AGENT_CHAT: &str = "agent/chat";

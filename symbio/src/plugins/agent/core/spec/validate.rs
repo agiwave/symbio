@@ -43,8 +43,8 @@ pub fn validate_manifest(m: &BundleManifest, host_major: u64) -> Result<(), Vec<
         errs.push("缺少 `version` 字段（semver）".into());
     }
 
-    // 说明：v2 约定优于配置——provider 由约定目录承载（prompts/ skills/ tools/
-    // mcp/，存在即安装），manifest 不再列出，因此这里没有 provider 清单校验；
+    // 说明：约定优于配置——provider 由约定目录承载（prompts/ skills/ mcps/，
+    // 存在即安装），manifest 不列出 provider 清单，因此这里没有 provider 清单校验；
     // 目录内容的问题（缺 SKILL.md、未知 native 模块等）在 activate 期以
     // diagnostic 呈现（软故障），不影响接入判定。
 

@@ -1,6 +1,6 @@
 //! Universal Model Agent Engine
 //!
-//! Phase E-② 定型后职责：**无状态 LLM 网关**。
+//! 职责：**无状态 LLM 网关**。
 //! - `types`:           Unified type definitions (ModelProviderConfig, NativeMessage, etc.)
 //! - `detail`:          Model 详情页定义（definition-driven detail）
 //! - `handlers`:        Non-streaming handlers (status, list_models, config)
@@ -12,9 +12,9 @@
 //!   `ModelProvider` trait（session 的唯一模型契约）
 //! - `plugin`:          Core ModelPlugin entry point + factory registration + provider 注册表
 //!
-//! Phase E-②：会话循环（chat_loop / turn_processor / tool_executor / resume /
-//! compression 等）已整体迁往 session 插件，model 对 session 零依赖。
-//! 协议抽象（原 core `ModelProtocol`）已内化到本插件，core 不再暴露。
+//! 边界：会话循环（chat_loop / turn_processor / tool_executor / resume /
+//! compression 等）属于 session 插件，model 对 session 零依赖；
+//! 协议抽象 `ModelProtocol` 是本插件私有契约，core 不承载协议抽象。
 
 mod bound_provider;
 mod detail;

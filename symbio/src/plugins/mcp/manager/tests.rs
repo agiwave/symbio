@@ -66,8 +66,7 @@ async fn discover_tools_cache_hit() {
         command: Some("__nonexistent__".to_string()),
         ..Default::default()
     };
-    // 第一次失败（spawn 失败）写入缓存了吗？— 错误不写缓存
-    // 改为预填充缓存
+    // 错误不写缓存，故直接预填充缓存构造命中场景
     let mut cache = mgr.tools_cache.lock().await;
     cache.insert(
         "cached_server".to_string(),

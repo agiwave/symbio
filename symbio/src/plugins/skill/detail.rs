@@ -178,7 +178,7 @@ pub fn parse_skill_md(content: &str) -> Option<(serde_yaml_ng::Value, String)> {
 
 /// 表单 manifest → SKILL.md 全文（`validate_manifest` 用）。
 ///
-/// 约束（与 loader 对齐，提前到保存时给出明确错误）：
+/// 约束（与 loader 一致，保存时即给出明确错误）：
 /// - BUG-SR6：目录名必须 == frontmatter `name`（`id` 为权威）；
 /// - BUG-SR7：description 至少 10 字符；
 /// - name / description 必填。

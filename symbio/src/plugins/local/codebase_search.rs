@@ -140,7 +140,7 @@ fn is_source_file(p: &Path) -> bool {
 }
 
 /// 列出工作区内的源码文件：用 `ignore`（尊重 .gitignore）遍历，并按扩展名白名单过滤。
-/// 不再依赖 `rg` 等外部可执行文件，跨平台行为一致。
+/// 不依赖 `rg` 等外部可执行文件，跨平台行为一致。
 async fn list_source_files(workdir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut builder = WalkBuilder::new(workdir);
@@ -148,7 +148,7 @@ async fn list_source_files(workdir: &Path) -> Vec<PathBuf> {
         .standard_filters(true) // 尊重 .gitignore / 隐藏文件 / 全局 ignore
         .parents(true)
         .require_git(false);
-    // 跳过已知的非源码大目录（与旧 `rg --files` 的 !target/!node_modules 等价）
+    // 跳过已知的非源码大目录（target / node_modules / dist / build 等）
     builder.filter_entry(|e| {
         if e.path().is_dir() {
             let name = e.file_name().to_string_lossy();

@@ -2,6 +2,7 @@
 
 mod active;
 mod chat_loop;
+mod chat_pipeline;
 mod chat_session;
 mod compression;
 mod context_window;

@@ -6,7 +6,7 @@
 | --- | --- |
 | **核心库** | `symbio/`（Rust）— 全部业务逻辑：插件路由、LLM 多协议适配、工具调用循环、会话持久化、Agent 认知体系 |
 | **桌面端** | `tauri/`（Tauri + Vue 3）— UI 渲染与 IPC 适配，后端仅暴露 3 个命令 |
-| **命令行** | `symbio/src/bin/seed_agents` — 批量灌入种子 Agent |
+| **命令行** | `cli/`（Rust）— 纯 Rust 终端前端：REPL / 单次 / 管道 / 心跳守护，进程内直连插件树 |
 
 ---
 
@@ -19,10 +19,10 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 
 ### 你能用它做什么
 
-- **多智能体对话**：`agent/chat` 接入具备长期认知记忆的 Agent；可创建多个角色化 Agent（`project_manager` / `architect` / `coder` / `reviewer` / `tester` / `documenter` / `devops`）。
-- **统一 LLM 接入**：`model` 插件内置 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini 四类协议适配器（统一实体协议 `model/entities/model/*` 寻址），支持流式与工具调用；由 `session` 在会话循环中直连调用。
+- **智能体会话**：会话可绑定一个 Agent（OAB Bundle：人格提示词 + `prompt` / `skill` / `mcp` 三类子实体），由 `session` 统一编排工具调用循环；Agent 还可经 `agent_run` 能力委托子智能体。
+- **统一 LLM 接入**：`model` 插件内置 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini 四类协议适配器（统一实体协议 `model/entities/*` 寻址），支持流式与工具调用；由 `session` 在会话循环中直连调用。
 - **工具与集成**：本地 shell / 文件读写、Web 请求与搜索、技能（skill）、MCP server 注册与调用、Telegram 消息通道。
-- **会话与记忆**：`session/` 负责长连接消息持久化与历史裁剪；`agent` 提供认知单元（CU）存储与记忆操作（保存 / 检索 / 图谱查询 / 反思 / 合并）。
+- **会话与上下文**：`session/` 负责长连接消息持久化、历史裁剪与上下文压缩。
 - **可扩展**：新能力只需实现 `Plugin` 并注册，即可挂入插件树、被 LLM 通过 `traverse("available_tools")` 自动发现。
 
 ---
@@ -46,8 +46,8 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 
 - **分形路由**：用 `/` 分隔的路径定位任意能力，容器与叶子插件接口完全一致。
 - **LLM 原生**：递归收集插件树中的工具定义，深度支持 Function Calling。
-- **机制化认知（v9）**：Agent 内部以"属性认知单元（prop CU）"驱动关系与展示机制化，新增认知类型无需改核心代码。
-- **多存储后端**：Agent 认知存储支持 DirStorage（多 YAML 文件）与 SQLite，可热切换。
+- **统一实体协议**：资源型插件（`agent` / `skill` / `mcp` / `model` / `session` / `setting`）以同一套 `entities/*` 路径对外，前端按后端下发的 provider 注册表与详情页定义动态渲染。
+- **插件互不可见**：工具、选项与人格片段统一由 `traverse` 收集进 `CapabilityVisitor`；插件之间不直接引用，只依赖 `symbio_core` 的共享契约。
 
 ```
 桌面端 / CLI  ──(route_v2)──►  Home / ── worker(Composite) ──┬─ agent / session / model
@@ -64,9 +64,9 @@ HTTP/WS 客户端 ──(gateway 插件)──►  Home /        setting / hook 
 | --- | --- | --- |
 | `home` | 根容器 | 持工作区配置、挂载 `worker`（Composite 实例） |
 | `composite` | 动态容器 | 按配置实例化任意子插件，是"分形"的关键 |
-| `agent` | 认知中心 | 对话、认知注入、提示词组装、Agent 管理、Mindscape 认知存储 |
+| `agent` | 智能体资产 | OAB Bundle 宿主：装配人格片段、声明 MCP、经 `traverse` 贡献 `agent_identity` 与 `agent_run` 能力 |
 | `session` | 会话中心 | 会话编排唯一入口：工具调用循环、提示词组装、消息持久化与上下文压缩 |
-| `model` | LLM 网关 | 无状态单轮推理（`model/execute_turn`），多协议适配（OpenAI Chat / Responses / Anthropic / Gemini） |
+| `model` | LLM 网关 | 无状态单轮推理（`ModelProvider::execute_turn`，由 session 收集后直调，不占路由），多协议适配（OpenAI Chat / Responses / Anthropic / Gemini） |
 | `local` | 本地工具 | shell / file_read / file_write / file_edit / glob_search / content_search |
 | `web` | Web 工具 | http_request / web_search / web_fetch |
 | `skill` | 技能 | 加载与执行技能定义 |
@@ -77,9 +77,9 @@ HTTP/WS 客户端 ──(gateway 插件)──►  Home /        setting / hook 
 | `hook` | 钩子 | 钩子注册与触发 |
 | `event_bus` | 事件总线 | 进程内帧广播（连接级 SSE 风格推送） |
 
-**Agent 记忆操作**（`agent/capabilities/ops/memory/`，当前落地 5 个）：`save`（保存）· `retrieve`（检索，支持结构化过滤 + 语义召回）· `graph_query`（关系图谱查询）· `reflect`（基于历史更新认知）· `consolidate`（合并整理）。`delete` 已废除，改用 `save {confidence:0}` 软删除。
+**Agent 路由**（源码：`symbio/src/plugins/agent/host/handlers.rs`）：`agent/bundle/list` · `bundle/get` · `bundle/upload` · `bundle/export` · `bundle/delete` · `bundle/preview`；实体侧为 `agent/entities/*`（Bundle 条目是容器，内部托管 `prompt` / `skill` / `mcp` 三类子实体）。
 
-**Agent 路由**（`agent/handlers/`）：`agent/list` · `agent/get` · `agent/chat`（含流式）· `agent/create` · `agent/delete`（物理目录 + 缓存清理，幂等）。
+**Agent 贡献的能力**（经 `traverse` 注册进能力收集器，不占路由）：`agent_identity`（取回当前智能体完整人格文本）· `agent_run`（委托子智能体）。
 
 ---
 
@@ -90,16 +90,12 @@ HTTP/WS 客户端 ──(gateway 插件)──►  Home /        setting / hook 
 ```bash
 cd tauri
 npm install
-npm run tauri:dev
+npm run tauri dev
 ```
 
-### 灌入种子 Agent（命令行）
+### 导入智能体（OAB Bundle）
 
-```bash
-cd symbio
-cargo run --bin seed_agents          # 首次灌入 7 个角色
-cargo run --bin seed_agents -- --recreate   # 强制重建（先删后建）
-```
+智能体以 OAB Bundle 形式经插件树导入，无独立二进制入口：上传路径为 `agent/bundle/upload`（或统一实体路径 `agent/entities/upload`，载荷支持 zip 与 JSON manifest）。示例包见 [`examples/fullstack-dev/`](./examples/fullstack-dev)，包规范见 [OAB 规范](./docs/design/open-agent-bundle-spec.md)。
 
 ### 运行命令行前端（CLI）
 
@@ -130,7 +126,7 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 
 | 指标 | 现状 |
 | --- | --- |
-| 单元测试 | Rust 241 个全通过（`cargo test --lib`，以实际运行为准）；前端 vitest 覆盖纯逻辑层（npm test） |
+| 单元测试 | Rust：`cargo test --lib` 全通过（用例数随迭代增长，文档不锁死具体数字）；前端：vitest 覆盖纯逻辑层（`npm test`） |
 | Clippy 警告 | 0（CI `-D warnings` 门禁） |
 | cargo fmt | 0 diff（CI `--check` 门禁） |
 | 前端类型检查 | vue-tsc 0 错误（CI 门禁） |
@@ -164,9 +160,9 @@ symbio/
 │   ├── src/
 │   │   ├── symbio_core/ # 公共契约（Plugin trait / InvokeRequest / 路径常量）
 │   │   ├── plugins/     # 14 个私有 plugin 实现（各含 README.md）
-│   │   ├── init.rs      # 对象创建注册 + 根插件装配
-│   │   ├── lib.rs
-│   │   └── bin/         # seed_agents
+│   │   ├── providers/   # 基础设施实现（向量嵌入、文件存储）
+│   │   ├── init.rs      # 日志初始化 + 根插件装配
+│   │   └── lib.rs
 │   └── Cargo.toml
 ├── tauri/docs/          # 前端文档（FRONTEND.md）
 ├── docs/                # 系统级文档（跨模块；历史归档在 docs/archive/）

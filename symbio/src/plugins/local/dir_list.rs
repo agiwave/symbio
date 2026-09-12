@@ -109,7 +109,7 @@ impl DirListTool {
                 Err(_) => continue,
             };
             let is_dir = emeta.is_dir();
-            // P2-2 瘦身：只保留 name/type。size/modified 每项 ~60 字符，
+            // 响应瘦身：只保留 name/type。size/modified 每项 ~60 字符，
             // 大目录（数百条目）下是纯浪费——模型几乎从不消费这两个字段；
             // 需要时用 local/file_read 或专用命令按需获取。
             entries.push(json!({

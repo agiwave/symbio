@@ -16,11 +16,10 @@
 //!
 //! - `storage`：`EntityStore` / `StorageService` 抽象 + 业务常量
 //!
-//! ## 关于 workspace
+//! ## workdir 无服务端缓存
 //!
-//! 历史上曾存在 `WorkspaceService` 抽象（用于缓存全局"活跃 workdir"）。
-//! 现已删除：workdir 始终由前端在每个请求的 ctx.WORKDIR 中显式传递，
-//! 不需要在后端再维护一份全局缓存。
+//! workdir 始终由前端在每个请求的 ctx.WORKDIR 中显式传递，
+//! 后端不维护全局"活跃 workdir"缓存，因此不设 `WorkspaceService` 抽象。
 
 mod embedding;
 mod storage;

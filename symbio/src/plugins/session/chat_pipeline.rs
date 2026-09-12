@@ -1,4 +1,4 @@
-//! 会话能力收集管线（跨插件共享设施）
+//! 会话能力收集管线（session 插件内部设施）
 //!
 //! ## 背景
 //!
@@ -26,17 +26,20 @@
 //! agent 是否贡献工具完全由 `ctx[AGENT_ID]` 决定——**不选择 agent 的会话照常运行**，
 //! 只是没有智能体相关的工具与人格。
 //!
-//! ## 为什么放在 `symbio_core`
+//! ## 为什么放在 session 插件
 //!
-//! session 插件与 agent 插件（子智能体 `agent_run` 需要起嵌套会话）都要走同一条
-//! 管线，而插件之间不可见，故上浮为共享设施。
+//! 本管线的唯一驱动方是 session 编排器：子智能体（agent 插件的 `agent_run`）需要
+//! 嵌套会话时，经统一路由 `session/chat/send` 复用本管线，而非由 agent 插件直接
+//! 调用——管线不再是跨插件共享设施，故从 `symbio_core` 下沉到 session 插件内部。
+//!
+//! 仍留在 `symbio_core` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
+//! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
 use crate::symbio_core::{
-    CapabilityVisitor, DefaultToolVisitor, InvokeRequest, InvokeRequestExt, Plugin, SymbioKey,
-    PATH, TRAVERSE_AVAILABLE_TOOLS,
+    init_error_bucket, CapabilityVisitor, DefaultToolVisitor, InvokeRequest, InvokeRequestExt,
+    Plugin, CAPABILITY_ERRORS, PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// 向所有插件广播"贡献工具"，返回装配好的能力管理器。
 ///
@@ -89,73 +92,9 @@ pub async fn collect_capabilities(
     manager
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 收集期错误通道
-// ---------------------------------------------------------------------
-// `Composite::traverse` 会吞掉子插件返回的 Err（`let _ = plugin.traverse(...)`），
-// 单插件因此**无法**靠返回值让整次能力收集失败。但有些失败是致命的、必须让会话
-// 立刻中止并明确报错——最典型的就是"会话绑定了一个不存在的智能体"。
-//
-// 解决：收集期错误写入 ctx 上的一个共享桶，由编排方（session）在收集结束后统一
-// 取用判定。这是零耦合的：桶由 symbio_core 提供，任何插件都能报，编排方统一裁决。
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// 能力收集期错误
-#[derive(Debug, Clone)]
-pub struct CapabilityError {
-    /// 报错插件名（用于日志与错误信息定位）
-    pub plugin: String,
-    /// 人类可读的错误描述（会直接展示给用户）
-    pub message: String,
-}
-
-/// 收集期错误桶在 `InvokeRequest` 中的类型安全键
-pub struct CapabilityErrorsKey;
-
-impl SymbioKey for CapabilityErrorsKey {
-    type Value = Arc<Mutex<Vec<CapabilityError>>>;
-    fn name(&self) -> &'static str {
-        "capability_errors"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "capability_errors".to_string()
-    }
-}
-
-/// 收集期错误桶键常量
-pub const CAPABILITY_ERRORS: CapabilityErrorsKey = CapabilityErrorsKey;
-
-/// 初始化错误桶（由 `collect_capabilities` 调用；重复调用无副作用）
-pub fn init_error_bucket(ctx: &Arc<dyn InvokeRequest>) {
-    if ctx.get(CAPABILITY_ERRORS).is_none() {
-        ctx.set(CAPABILITY_ERRORS, Arc::new(Mutex::new(Vec::new())));
-    }
-}
-
-/// 插件在 `traverse` 中报告一个**致命**收集错误。
-///
-/// 只用于"会话无法继续"的硬错误（如选定的智能体不存在）。
-/// 可降级的软故障（某个 MCP server 连不上）应当只记日志，不调用本函数。
-pub async fn report_error(ctx: &Arc<dyn InvokeRequest>, plugin: &str, message: impl Into<String>) {
-    init_error_bucket(ctx);
-    if let Some(bucket) = ctx.get(CAPABILITY_ERRORS) {
-        bucket.lock().await.push(CapabilityError {
-            plugin: plugin.to_string(),
-            message: message.into(),
-        });
-    }
-}
-
-/// 取出并清空所有收集期错误
-pub async fn take_errors(ctx: &Arc<dyn InvokeRequest>) -> Vec<CapabilityError> {
-    match ctx.get(CAPABILITY_ERRORS) {
-        Some(bucket) => std::mem::take(&mut *bucket.lock().await),
-        None => Vec::new(),
-    }
-}
+// 错误通道（CapabilityError / CAPABILITY_ERRORS / report_error / take_errors）
+// 见 `crate::symbio_core::capability_error`：写侧是任意参与 traverse 的插件，
+// 读侧是 session 编排方（orchestrator 在收集结束后 `take_errors` 统一裁决）。
 
 /// 把能力管理器挂到请求上下文，供 model 插件的 chat_loop / tool_executor 取用。
 ///

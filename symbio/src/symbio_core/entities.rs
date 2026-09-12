@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 /// 解析当前请求的存储服务（`~/.symbio/plugins/` 基座）
 ///
-/// 各插件 entity handler 共享的 `es()` 助手的统一替代。
+/// 各插件 entity handler 共用此函数取 `StorageService`。
 pub fn storage_service(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> Result<Arc<dyn StorageService>, PluginError> {

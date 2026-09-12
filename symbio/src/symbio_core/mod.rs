@@ -1,8 +1,7 @@
 //! 核心模块
 
 mod capability;
-mod chat_pipeline;
-mod chat_session;
+mod capability_error;
 pub(crate) mod creator;
 pub mod entities;
 mod error;
@@ -22,11 +21,9 @@ mod tools;
 mod transport;
 pub mod turn;
 
-pub use chat_pipeline::{
-    attach_capabilities, collect_capabilities, report_error, take_errors, CapabilityError,
-    CAPABILITY_ERRORS,
+pub use capability_error::{
+    init_error_bucket, report_error, take_errors, CapabilityError, CAPABILITY_ERRORS,
 };
-pub use chat_session::{ChatSession, ChatSessionHandle};
 pub use creator::{create_object, has_creator};
 pub use model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
 pub use option::{

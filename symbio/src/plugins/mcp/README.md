@@ -7,7 +7,7 @@ Model Context Protocol 工具扩展插件。
 ### 传输类型
 - **stdio**: 本地进程通信
 - **HTTP**: REST API
-- **SSE**: Server-Sent Events（已支持）
+- **SSE**: Server-Sent Events
 
 ### 接口 (Actions)
 

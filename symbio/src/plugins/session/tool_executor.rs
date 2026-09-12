@@ -156,9 +156,8 @@ pub async fn execute_tool_async(
     let started_at = std::time::Instant::now();
     plugin_info!(
         "session",
-        "[Tool] 请求发起: {} (call_id={}) args={}",
+        "[Tool] 请求发起: {} args={}",
         tool_name,
-        tool_call_id,
         args_summary(&args, 200)
     );
 

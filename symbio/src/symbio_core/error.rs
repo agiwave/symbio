@@ -36,9 +36,10 @@ pub enum PluginError {
 /// 机器可读错误码（跨插件边界的错误分类真源）
 ///
 /// 错误跨插件边界传输时只能落到 `PluginFrame::Error(String, Option<Value>)`，
-/// 分类信息由 `code` 字段承载。历史实现让消费侧回读该字段并与字面量
-/// （如 `"ABORTED"`）做字符串比较，文案/编码任一侧一改即静默失效
-/// （session-mechanism-unification.md §4.2）。本枚举把"码"收敛为单一类型：
+/// 分类信息由 `code` 字段承载，且"码"必须是单一类型化枚举：消费侧若回读该字段
+/// 并与字面量（如 `"ABORTED"`）做字符串比较，文案/编码任一侧一改即静默失效。
+///
+/// 三段链路的职责划分：
 /// - 生产侧：[`PluginError::code`] 返回 `ErrorCode`（编译器保证变体穷尽）；
 /// - 传输侧：[`PluginError::to_frame`] 写入 `code.as_str()`；
 /// - 消费侧：[`crate::symbio_core::PluginFrame::error_code`] 解析回 `ErrorCode`，
@@ -231,7 +232,7 @@ mod tests {
     use crate::symbio_core::PluginFrame;
 
     /// 每个变体的错误码经 `to_frame` → `error_code` 往返后保持一致
-    /// （session-mechanism-unification.md §4.2：分派依据必须是类型化错误码，而非文案字面量）。
+    /// （分派依据必须是类型化错误码，而非文案字面量）。
     #[test]
     fn error_code_roundtrip_through_frame() {
         let cases = [
@@ -288,7 +289,7 @@ mod tests {
         assert_eq!(PluginFrame::Data(serde_json::json!(1)).error_code(), None);
     }
 
-    /// `is_abort` 谓词与错误码保持一致（替代旧的文案判别）。
+    /// `is_abort` 谓词与错误码保持一致。
     #[test]
     fn is_abort_predicate_matches_code() {
         assert!(PluginError::Aborted.is_abort());

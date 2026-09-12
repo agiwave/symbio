@@ -7,12 +7,12 @@
 //! - **提示词**：`prompts/` + `skills/` 装配出的片段 → 汇总注册为 **一个**
 //!   [`BundleIdentityCapability`]（`agent_identity` 工具）；
 //! - **工具**：来自 `mcps/` 的 MCP server，由**宿主已有的 MCP 客户端**启动并注册，
-//!   本插件不包壳、不实现任何 OAB 专有执行器（早期草案的 `oab.echo` 已移除）。
+//!   本插件不包壳、不实现任何 OAB 专有执行器。
 //!
 //! ## 为什么人格是工具而不是系统提示词通道
 //!
 //! symbio 的会话编排（session orchestrator）只组装与智能体无关的基础提示词，
-//! 人格由「agent_identity 工具说明」承载（老 agent 插件同款语义）。bundle 的
+//! 人格由「agent_identity 工具说明」承载。bundle 的
 //! 提示词片段经装配汇总后在此注册为**一个**身份工具：模型在每轮工具列表里看到
 //! 它的描述（身份锚定），调用即取回全文。
 

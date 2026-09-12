@@ -20,7 +20,7 @@
 
 /// Home 插件工厂
 pub const PLUGIN_HOME: &str = "home";
-/// Model 插件工厂（原 AI 插件，更名以贴合行业惯例）
+/// Model 插件工厂
 pub const PLUGIN_MODEL: &str = "model";
 /// Agent 插件工厂
 pub const PLUGIN_AGENT: &str = "agent";
@@ -60,9 +60,9 @@ pub const CAPABILITY_AGENT_CREATE: &str = "agent_create";
 
 // ============ Model 协议 id ============
 //
-// MODEL_PROTOCOL_* 常量已随 ModelProtocol trait 内化到 model 插件
-// （plugins/model/protocols/mod.rs）——协议 id 属于插件内部实现细节，
-// core 不再暴露。
+// 协议 id 属于插件内部实现细节，定义在 model 插件
+// （plugins/model/protocols/mod.rs）；core 不暴露 `MODEL_PROTOCOL_*` 常量，
+// 也不定义 `ModelProtocol` trait。
 
 // ============ Agent 存储后端 id ============
 

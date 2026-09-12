@@ -10,10 +10,8 @@
 //!
 //! ## 为什么没有「声明式工具 / 内置执行器」
 //!
-//! 早期草案曾用 `module: oab.echo` 之类的声明式工具挂载，要求每个接入方都实现
-//! `oab.echo`——**把某个具体宿主的内置能力写进协议，会让协议失去通用性**：
-//! 一个 agent 包不该依赖「宿主恰好实现了某个专有执行器」。
-//! 因此 v1 收敛为：
+//! 协议不得把某个具体宿主的内置能力写进规范——**一个 agent 包不该依赖「宿主
+//! 恰好实现了某个专有执行器」**。因此 v1 的能力来源收敛为两类：
 //!
 //! - **工具**：只来自 MCP（行业标准，宿主复用已有 MCP 客户端）；
 //! - **提示词**：只来自 `prompts/`（OAB 原生）与 `skills/`（行业标准）。
@@ -73,7 +71,7 @@ impl Assembly {
     /// 按 `(priority, source)` 升序拼接全部提示词片段（段间空行）。
     ///
     /// 这段拼接文本即 bundle 对**系统提示词**的贡献，由宿主注册为
-    /// `agent_identity` 身份工具（老 agent 插件同款语义，不侵入会话编排）。
+    /// `agent_identity` 身份工具（不侵入会话编排）。
     pub fn identity_text(&self) -> String {
         let mut frags = self.fragments.clone();
         frags.sort_by(|a, b| (a.priority, &a.source).cmp(&(b.priority, &b.source)));

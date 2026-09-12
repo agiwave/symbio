@@ -6,12 +6,11 @@
 use super::super::store::create_store;
 use super::super::store::StoreKind;
 use super::super::types::Session;
-use super::PersistentChatSession;
+use super::{ChatSession, PersistentChatSession};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
-use crate::symbio_core::ChatSession;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;

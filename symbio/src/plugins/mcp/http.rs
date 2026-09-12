@@ -8,10 +8,10 @@
 //! - `Accept: application/json, text/event-stream`
 //! - `protocolVersion` 协商
 //!
-//! ## 与旧版 HTTP 的区别
+//! ## 协议形态
 //!
-//! 旧版（`http+sse`）用 `GET /tools` 列出工具、`POST /tools/{name}/call` 调用，
-//! 这不是 MCP 规范。新版用 JSON-RPC 协议：
+//! 所有请求都是单一端点上的 JSON-RPC。REST 风格端点（`GET /tools` 列工具、
+//! `POST /tools/{name}/call` 调用）不属于 MCP 规范，不予实现：
 //!
 //! ```text
 //! POST {url}                      # initialize
@@ -193,7 +193,7 @@ impl super::manager::McpManager {
 
     /// 通过 HTTP 调用工具（如果未握手则先握手）
     ///
-    /// BUG-MR22 修复：如果 server 返回 session-expired 错误，
+    /// BUG-MR22：如果 server 返回 session-expired 错误，
     /// 自动清理 session 缓存并重试一次（重新 initialize）。
     pub async fn call_tool_http(
         &self,
@@ -500,7 +500,7 @@ impl super::manager::McpManager {
         context: &str,
     ) -> Result<JsonRpcResponse, String> {
         let status = response.status();
-        // BUG-MR22 增强：404 也可能是 session 失效的迹象（某些 server 实现）
+        // BUG-MR22：404 也可能是 session 失效的迹象（某些 server 实现）
         if status.as_u16() == 404 {
             return Err(format!(
                 "{context} HTTP 404 Not Found (可能是 session 失效)"

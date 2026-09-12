@@ -113,7 +113,7 @@ impl Plugin for SettingPlugin {
             }
             CONFIG_GET => {
                 let cfg = self.config.read().await;
-                // 彻底扁平化：直接返回 Value 对象，不再包装在 Response.config 中
+                // 扁平化契约：直接返回 Value 对象，不包 Response.config
                 let cfg_value = cfg.clone();
                 Ok(PluginPayload::new(&cfg_value))
             }

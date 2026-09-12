@@ -1,19 +1,14 @@
-//! 单轮 LLM 执行机器 —— E-① 自 `plugins/model/{context,tool_call,message_builder}.rs` 迁入
+//! 单轮 LLM 执行机器
 //!
 //! 职责（单轮网关基建，协议无关、插件无关，供 `ModelProvider::execute_turn`
-//! 统一实现与 model/session 双侧共同使用，详见
-//! docs/archive/implementation-logs/model-session-refactor.md §8）：
+//! 统一实现与 model/session 双侧共同使用）：
 //! - HTTP 客户端单例 + 支持中止的 POST 重试机器（`execute_post_with_abort` → 五态 `PostResult`）
 //! - SSE 流解析与协议事件累积（`parse_sse_stream` → `TurnOutput`），流式子节点经
 //!   `session_chat_response::StreamEvent::Update` 帧实时下发
 //! - 工具调用增量累积（`ToolCallAccumulator`）
 //! - 消息构造家族（`short_id`/`StreamChildIds`/`build_assistant_messages`/`build_tool_message`）：
-//!   因 `TurnOutput::into_messages` 与 `ToolCallAccumulator` 直接依赖而随依赖闭包迁入
-//!   （孤儿规则要求定义与使用同处 core）
-//!
-//! 事实来源说明：model 侧原文件保留 re-export shim 维持既有符号路径
-//! （`plugins::model::{protocol, tool_call, message_builder, context}`），
-//! 本模块是唯一权威实现。
+//!   `TurnOutput::into_messages` 与 `ToolCallAccumulator` 直接依赖它，
+//!   孤儿规则要求定义与使用同处 core
 
 use crate::symbio_core::model_provider::{FinishReason, ProtocolEvent, Usage};
 use crate::symbio_core::schemas::session::chat_message::{
@@ -33,8 +28,8 @@ use tracing::warn;
 
 /// SSE 流空闲超时：两次数据块之间的最大间隔。
 ///
-/// 此前只有整体 1800s 超时——provider 半途挂起（连接不断、但不再发任何字节）时，
-/// 单轮请求会静默挂满 30 分钟，期间无任何日志，表现为「Turn 开始后卡死」。
+/// 整体 1800s 超时覆盖不了 provider 半途挂起（连接不断、但不发任何字节）：
+/// 此类请求会静默挂满 30 分钟，期间无任何日志，表现为「Turn 开始后卡死」。
 /// 180s 无任何字节即判定流已死，显式报错终止，让上层走 Failed 收尾而非无限等待。
 pub const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
@@ -162,7 +157,7 @@ pub enum PostResult {
     Ok(reqwest::Response),
     RetryWithoutContextId,
     Err(String),
-    /// 命中限流/服务端过载且重试耗尽：携带面向用户的可读提示（不应再显示原始 API JSON）。
+    /// 命中限流/服务端过载且重试耗尽：携带面向用户的可读提示（不回显原始 API JSON）。
     RateLimited(String),
     Aborted,
 }
@@ -312,7 +307,7 @@ pub async fn execute_post_with_abort(
             continue;
         }
 
-        // 不可重试，或重试耗尽：返回面向用户的友好提示（不再回显原始 API JSON）。
+        // 不可重试，或重试耗尽：返回面向用户的友好提示（不回显原始 API JSON）。
         if status.as_u16() == 429 {
             plugin_error!(
                 "model",
@@ -382,7 +377,7 @@ impl ToolCallAccumulator {
         // 仅接受非空 id/name：
         // 部分 OpenAI 兼容网关（如实测 apinex qwen-3.8-max）只在首个增量携带合法 id，
         // 后续增量重复发送 `id:""`。若用空值覆盖，会把首个增量的合法 id 冲掉，
-        // 最终得到 Some("") → 工具调用被误判为 id 缺失而被跳过（历史 Bug）。
+        // 最终得到 Some("") → 工具调用被误判为 id 缺失而被跳过。
         if let Some(id) = id.filter(|s| !s.trim().is_empty()) {
             entry.id = Some(id.to_string());
         }
@@ -454,20 +449,20 @@ impl ToolCallAccumulator {
     }
 }
 
-// 消息构造（ChatMessage 家族，依赖闭包随迁）
+// 消息构造（ChatMessage 家族）
 
-/// 生成长度短的 ID（8 字符），替代完整 UUID v4
+/// 生成长度短的 ID（8 字符，取 UUID v4 前缀）
 pub fn short_id() -> String {
     uuid::Uuid::new_v4().to_string()[..8].to_string()
 }
 
 /// 流式期间已经广播给前端的子节点 id。
 ///
-/// **落库时必须复用这些 id**（M-001 修复）：流式层（`parse_sse_stream` 的 `emit_update`）
-/// 与存储层（`build_assistant_messages`）是同一批节点的两个视图。此前两者各自
-/// `short_id()` 生成新 id，导致同一个文本子节点在「前端流式快照」里是 id=A、
-/// 在「会话存储」里是 id=B，被上层判定为两条不同消息——于是失败收尾时 id=A 的节点
-/// 被当作"尚未落库的流式半截"补写进存储，同一个 Turn 下出现两份内容相同的文本节点。
+/// **落库时必须复用这些 id**：流式层（`parse_sse_stream` 的 `emit_update`）
+/// 与存储层（`build_assistant_messages`）是同一批节点的两个视图。若两层各自
+/// `short_id()` 生成新 id，同一个文本子节点在「前端流式快照」里是 id=A、
+/// 在「会话存储」里是 id=B，会被上层判定为两条不同消息——于是失败收尾时
+/// id=A 的节点被当作"尚未落库的流式半截"补写进存储，同一个 Turn 下出现两份内容相同的文本节点。
 #[derive(Debug, Default, Clone)]
 pub struct StreamChildIds {
     /// 回复正文子节点的流式 id（`TurnOutput::response_text_child_id`）
@@ -570,7 +565,7 @@ pub fn build_assistant_messages(
     }
 
     // ── ToolCall 消息（parent_id=turn_id，组合节点）──────────────────────
-    // ToolCall 组合节点自身携带请求参数（content = JSON 文本），不再拆分出独立的请求子节点
+    // ToolCall 组合节点自身携带请求参数（content = JSON 文本），不设独立的请求子节点
     for tc in tool_calls {
         let tc_id = tc.id.clone().unwrap_or_else(short_id);
         msgs.push(ChatMessage {
@@ -592,11 +587,11 @@ pub fn build_assistant_messages(
 /// 构造工具执行结果消息（role: Tool，msg_type: Text，parent_id 指向 tool_call）。
 /// 响应结果作为 `ToolCall` 的直接 `Text`(`Tool`) 子节点（组合节点可选，故不包 Turn）。
 ///
-/// **重要（修复 Bug 2）**：结果子节点的 `status` 必须与实际执行结果一致——
-/// 成功 `Completed`、失败 `Failed`。此前硬编码 `Completed`，导致失败工具的结果
-/// 子节点被持久化为 `Completed`；当下一轮 `get_context_messages` 过滤掉 `Failed`
+/// **重要**：结果子节点的 `status` 必须与实际执行结果一致——
+/// 成功 `Completed`、失败 `Failed`。若失败结果被标成 `Completed`，
+/// 当下一轮 `get_context_messages` 过滤掉 `Failed`
 /// 的 `ToolCall` 父节点时，这个"孤儿"`role=Tool` 结果子节点（其 `tool_call_id`
-/// 指向已被删除的 tool_call）被保留下来，使新一轮 LLM 请求携带非法
+/// 指向已被删除的 tool_call）会被保留下来，使新一轮 LLM 请求携带非法
 /// `tool_call_id` → 请求包出错（"发给大语言模型的数据包会出错"）。
 pub fn build_tool_message(
     tool_call_id: &str,
@@ -636,8 +631,8 @@ pub struct TurnOutput {
     pub response_text_child_id: String,
     /// Short ID for the reasoning child node
     pub reasoning_child_id: String,
-    /// 流结束原因（一次响应最多一次）。用于区分「自然结束」与「max_tokens 截断」，
-    /// 是修复「对话突然结束」的根因字段。默认 Stop。
+    /// 流结束原因（一次响应最多一次）。用于区分「自然结束」与「max_tokens 截断」
+    /// （不区分即表现为「对话突然结束」）。默认 Stop。
     pub finish: FinishReason,
     /// 用量统计（provider 不一定给，故可选）。用于校准 token 估算器。
     pub usage: Option<Usage>,
@@ -991,7 +986,7 @@ async fn dispatch_protocol_event(
             );
 
             // ToolCall 组合节点：自身 content 携带累积的全量请求参数（每次 delta 幂等全量重发，
-            // 前端按 tool_call 类型全量替换，最终保证参数完整）；不再拆分独立的请求子节点
+            // 前端按 tool_call 类型全量替换，最终保证参数完整）；不设独立的请求子节点
             emit_update(
                 channel,
                 ChatMessage {
@@ -1156,7 +1151,7 @@ fn safe_substring(s: &str, start: usize) -> String {
 mod tool_call_tests {
     use super::*;
 
-    /// 回归（apinex qwen-3.8-max 网关真实行为）：
+    /// apinex qwen-3.8-max 网关的真实行为：
     /// 首个增量携带合法 id，后续增量重复发送 `id:""`。
     /// 空串不得覆盖合法 id——否则最终得到 Some("")，工具调用被误判为
     /// id 缺失而跳过，落库的 ToolCall 节点 id 为空串且无结果子节点。
@@ -1182,7 +1177,7 @@ mod tool_call_tests {
         assert_eq!(done[0].name.as_deref(), Some("get_weather"));
     }
 
-    /// 需求 1：供应商始终未返回 id 时，必须主动分配短 GUID 作为工具调用 id。
+    /// 供应商始终未返回 id 时，必须主动分配短 GUID 作为工具调用 id。
     /// 流式返回值与 get_completed 结果必须一致，且重复取值幂等
     /// （chat_loop 与 into_messages 各取一次，两次结果不一致会使结果子节点变孤儿）。
     #[test]
@@ -1271,7 +1266,7 @@ mod turn_output_tests {
         assert_eq!(out("", "思考").effective_text(1), "");
     }
 
-    /// 端到端（纯内存）回归：reasoning-only 的 TurnOutput 落库消息里
+    /// 端到端（纯内存）：reasoning-only 的 TurnOutput 落库消息里
     /// 同一段 reasoning 只出现一次，且没有 Reasoning 子节点。
     #[test]
     fn into_messages_reasoning_only_has_no_duplicate_content() {

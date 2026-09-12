@@ -1,4 +1,4 @@
-//! 设置插件的请求/响应 schema（原 `symbio_core::schemas::setting`，仅本插件使用，故下放）
+//! 设置插件的请求/响应 schema（只被本插件消费，故定义在插件内部）
 
 pub mod setting_get {
     use serde::{Deserialize, Serialize};

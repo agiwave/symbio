@@ -2,8 +2,8 @@
 //!
 //! ## 背景
 //!
-//! 历史上所有插件都硬编码 `dirs::home_dir().join(".symbio")` 作为系统目录，
-//! 这导致用户无法在不改源码的情况下切换系统目录。
+//! 系统目录不能写死在源码里：用户必须能在运行时切换 homedir，
+//! 无需改代码或重新构建。
 //!
 //! 本模块提供：
 //! 1. **运行时配置** 的系统目录 homedir（默认 `~/.symbio`，可由前端切换）
@@ -18,9 +18,9 @@
 //!
 //! ## 设计原则
 //!
-//! - **零侵入**：调用方只需把 `dirs::home_dir().join(".symbio")` 改成
-//!   `HomedirRegistry::get()` 即可获得 homedir 切换能力。
-//! - **向后兼容**：默认 homedir 仍为 `~/.symbio`，存量用户行为零变化。
+//! - **零侵入**：调用方经 `HomedirRegistry::get()` 取系统根目录，
+//!   即可获得 homedir 切换能力。
+//! - **默认可用**：不做任何配置时 homedir 为 `~/.symbio`。
 //! - **可测试**：`set()` / `reset_to_default()` 暴露给测试，验证 set/get 一致性。
 //! - **bootstrap 容错**：bootstrap 文件不存在 / 解析失败 / 路径不存在，
 //!   都回退到默认 `~/.symbio` 并打 warn 日志，不阻断应用启动。
@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tracing::{info, warn};
 
-/// 默认 homedir（向后兼容）
+/// 默认 homedir
 ///
 /// 使用 `~/.symbio` 形式，调用 [`expand_tilde_path`] 时会展开为
 /// `<user_home>/.symbio`（**绝对路径**）。
@@ -130,7 +130,7 @@ fn bootstrap_path() -> Option<PathBuf> {
 /// - `~` / `~/xxx` → 展开为 `<user_home>[/xxx]`
 /// - 已是绝对路径 → 原样返回
 /// - 相对路径（如存量 bootstrap 中存的 `.symbio`）→ 解析为 `<user_home>/<relative>`
-///   （向后兼容早期版本的 bootstrap 内容）
+///   （兼容已落盘的相对路径写法）
 fn normalize_homedir(raw: &str) -> Option<PathBuf> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -320,8 +320,8 @@ mod tests {
     #[test]
     fn test_env_var_overrides_bootstrap() {
         // 契约：SYMBIO_HOMEDIR 是最高优先级，必须压过 bootstrap 文件。
-        // 回归测试：修复前 bootstrap 存在时 CLI --homedir 被静默忽略，
-        // 导致隔离系统目录（CI/E2E）传导断裂。
+        // 若 bootstrap 压过环境变量，显式指定的隔离系统目录（CI/E2E）
+        // 会被静默覆盖，本测试防止该回归。
         let _g = lock_test();
         let original = std::env::var("SYMBIO_HOMEDIR").ok();
         let custom = std::env::temp_dir().join("symbio_env_priority_test");
@@ -350,7 +350,7 @@ mod tests {
         let abs = std::env::temp_dir().join("abs_path");
         assert_eq!(normalize_homedir(&abs.to_string_lossy()).unwrap(), abs);
 
-        // 相对路径 → 相对 home 解析（向后兼容存量 bootstrap）
+        // 相对路径 → 相对 home 解析（兼容存量 bootstrap 中的相对路径写法）
         assert_eq!(normalize_homedir(".symbio").unwrap(), home.join(".symbio"));
         assert_eq!(normalize_homedir("foo/bar").unwrap(), home.join("foo/bar"));
     }

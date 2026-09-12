@@ -1,4 +1,4 @@
-//! 插件核心 Trait (V3.0 Final - 上下文注入版)
+//! 插件核心 Trait（上下文注入版）
 
 use crate::symbio_core::SymbioKey;
 use crate::symbio_core::{InvokeResponse, PluginPayload};
@@ -220,11 +220,10 @@ pub trait Plugin: Send + Sync + 'static {
     /// 获取插件元信息
     fn meta(&self) -> PluginMeta;
 
-    /// [重构] 分形路由入口 (V3.0)
-    /// 接收一个抽象的上下文对象，按需提取参数
+    /// 分形路由入口：接收一个抽象的上下文对象，按需提取参数
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload>;
 
-    /// [重构] 分形遍历接口 (V3.0)
+    /// 分形遍历接口
     async fn traverse(
         self: Arc<Self>,
         path: String,

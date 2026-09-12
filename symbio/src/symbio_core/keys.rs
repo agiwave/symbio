@@ -1,4 +1,4 @@
-//! SymbioKey - 类型安全的键定义 (V3.0)
+//! SymbioKey - 类型安全的键定义
 
 use serde_json::Value;
 use std::sync::Arc;
@@ -88,7 +88,7 @@ impl SymbioKey for PayloadKey {
     since = "3.1.0",
     note = "请使用 ctx.payload::<T>() 或 ctx.set_payload() 代替，以保障编译期强类型安全"
 )]
-/// ⚠️ 保留为编译期占位；不再有任何运行期使用点。如需 payload 键，请走 `set_payload` / `payload()` 方法。
+/// ⚠️ 仅作编译期占位；无任何运行期使用点。如需 payload 键，请走 `set_payload` / `payload()` 方法。
 pub const PAYLOAD: PayloadKey = PayloadKey;
 
 // 父插件弱引用 Key (Option<Weak<dyn Plugin>>)
@@ -154,19 +154,3 @@ impl SymbioKey for OptionVisitorKey {
     }
 }
 pub const OPTION_VISITOR: OptionVisitorKey = OptionVisitorKey;
-
-// 会话句柄 Key（Value）：session 编排器交付给 model/chat 的会话引擎实例
-pub struct SessionHandleKey;
-impl SymbioKey for SessionHandleKey {
-    type Value = Arc<crate::symbio_core::ChatSessionHandle>;
-    fn name(&self) -> &'static str {
-        "session_handle"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "chat_session_handle".to_string()
-    }
-}
-pub const SESSION_HANDLE: SessionHandleKey = SessionHandleKey;

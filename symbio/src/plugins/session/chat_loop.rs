@@ -1,4 +1,4 @@
-//! SESSION 聊天主循环（自 model 插件迁入，Phase E-②）
+//! SESSION 聊天主循环
 //!
 //! 职责：
 //! - 主循环入口 run_chat_loop
@@ -10,6 +10,7 @@
 //! - 具体协议实现层决定如何使用这些历史（有状态协议可能只使用部分或不使用）
 //! - 请求中只包含当前要发送的单条消息（single_message）
 
+use super::chat_session::{ChatSession, SESSION_HANDLE};
 use super::model_chat;
 use crate::plugin_info;
 use crate::plugin_warn;
@@ -23,8 +24,7 @@ use crate::symbio_core::turn::{
     build_tool_message, emit_status, emit_update, short_id, ToolCallInfo, TurnOutput,
 };
 use crate::symbio_core::{
-    ChatSession, InvokeRequest, InvokeRequestExt, ModelProvider, Plugin, PluginChannel,
-    PluginError, PluginFrame, SESSION_HANDLE,
+    InvokeRequest, InvokeRequestExt, ModelProvider, Plugin, PluginChannel, PluginError, PluginFrame,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -44,7 +44,7 @@ struct SessionContext {
     pub session: Arc<dyn ChatSession>,
 }
 
-/// Stop 钩子的幂等触发器（session-mechanism-unification.md §4.4）。
+/// Stop 钩子的幂等触发器。
 ///
 /// 契约：**一个请求生命周期内，Stop 恰好触发一次**——无论该生命周期以何种方式
 /// 结束（正常完成 / 各类错误 / abort / 软上限 / 消费循环超时 / 任务 panic）。
@@ -53,13 +53,13 @@ struct SessionContext {
 /// [`ChatOrchestrator`]（供 `run_chat_loop` 各出口显式触发）。显式触发点携带
 /// 准确的"本轮最后一条消息"；[`StopSignal::drop`] 兜底仅在显式触发全部未发生时
 /// 生效（例如 chat_loop 任务 panic 被 JoinError 吞掉、消费循环 1800s 超时提前
-/// return、provider 解析失败根本没能进入 loop），从而把 Stop 从"依赖每个出口都
-/// 记得调用"升级为"由生命周期保证"。
+/// return、provider 解析失败根本没能进入 loop）。Stop 的"恰好一次"由生命周期
+/// 保证，而非依赖每个出口都记得调用。
 ///
 /// 为什么显式 + RAII 双轨而非纯 RAII：`last_message` 取自 chat_loop 的
 /// `context.messages`，其所有权随函数返回销毁，只有显式调用点能拿到准确值；
 /// RAII 只能提供"一定会触发、但 last_message 退化为空串"的下界。兜底触发时打
-/// warn 日志，使"漏调显式 fire"这类缺口在运行时可见（session-mechanism-unification.md §4.4）。
+/// warn 日志，使"漏调显式 fire"这类缺口在运行时可见。
 pub struct StopSignal {
     parent: Option<Arc<dyn Plugin>>,
     /// Stop 钩子要投递的请求上下文（`fire_hook` 内部会再 fork 一份并设置
@@ -160,11 +160,11 @@ impl Drop for StopSignal {
     }
 }
 
-/// 会话编排器（自 model/context.rs 迁入，Phase E-②）：
+/// 会话编排器：
 /// 持有唯一生效的模型服务、父插件钩子通道与预计算上下文上限（session 确定性持有）。
-/// 轮次收尾状态机 `finalize_assistant_turn` 随之一并迁入；
-/// turn_processor 薄委托层消亡（chat_loop 直调
-/// `provider.execute_turn` 与 `finalize_assistant_turn`）。
+/// 轮次收尾状态机 `finalize_assistant_turn` 亦由本类型直接承载；
+/// chat_loop 直调 `provider.execute_turn` 与 `finalize_assistant_turn`，
+/// 中间不设薄委托层。
 ///
 /// 生命周期与 [`StopSignal`] 绑定：Stop 的显式触发点在本 loop 的各出口，
 /// RAII 兜底点在 `run_chat_loop_task` 的 `WorkingGuard`。
@@ -279,18 +279,17 @@ impl ChatOrchestrator {
     }
 }
 
-/// 系统提示词的唯一真源（P0-1）。
+/// 系统提示词的唯一真源。
 ///
 /// 解析优先级：
 /// 1. 请求显式指定（`req.system_prompt`）
 /// 2. 统一收集机制注册的系统提示词：优先 `"default"` 键，其次请求指定的
 ///    `provider_id` 键，再退首个注册项
-/// 3. 硬编码兜底（维持既有行为）
+/// 3. 硬编码兜底
 ///
-/// 此前该逻辑散落在 `run_chat_loop` 循环体内，且实际发给模型的提示词另取自
-/// `req.system_prompt`，导致 visitor 注册链被完全绕过——插件经 `traverse`
-/// 注册的系统提示词从未真正送达模型。收敛到此单点后，压缩开销估算与本轮
-/// 实际请求共用同一份解析结果。
+/// 单点约束：压缩开销估算与实际请求**必须**共用同一份解析结果——
+/// 若各自取值，插件经 `traverse` 注册的系统提示词会被实际请求绕过，
+/// 从未真正送达模型。
 async fn resolve_system_prompt(
     req_system_prompt: Option<&str>,
     req_provider_id: Option<&str>,
@@ -430,7 +429,7 @@ pub async fn run_chat_loop(
         let mut last_saved = context.messages.len();
 
         // 显式软上限：仅当调用方**主动**给出 max_tool_rounds 才生效（默认 None = 无限轮次）。
-        // 达到上限时给出明确提示再退出，而不像从前那样在 chat_loop.rs:419 静默 Ok(())。
+        // 达到上限时必须给出明确提示再退出，绝不静默返回。
         if let Some(max) = configured_max_tool_rounds {
             if tool_rounds >= max {
                 let _ = channel
@@ -451,7 +450,7 @@ pub async fn run_chat_loop(
         }
 
         if abort_flag.load(Ordering::SeqCst) {
-            // SYS-002: 早期 return 路径上的副作用（last_saved 尚未用作流式增量锚点，
+            // 早期 return 路径上的副作用（last_saved 尚未用作流式增量锚点，
             // 此分支里不更新，但保留 last_saved 维持语义对称）。
             fire_stop_hook(orchestrator, &context.messages).await;
             return Ok(());
@@ -471,10 +470,9 @@ pub async fn run_chat_loop(
         }
 
         // ── 被动语义压缩（L5：70% 触发）────────────────────────────────
-        // 系统提示词：唯一真源 resolve_system_prompt（P0-1）。解析结果同时供
-        // 压缩开销估算与 execute_turn 实际请求使用——此前 execute_turn 直接取
-        // req.system_prompt，绕过了 visitor 注册链，插件经 traverse 注册的系统
-        // 提示词从未真正送达模型。
+        // 系统提示词：唯一真源 resolve_system_prompt。解析结果同时供
+        // 压缩开销估算与 execute_turn 实际请求使用，确保插件经 traverse
+        // 注册的系统提示词能真正送达模型。
         let system_prompt_owned = resolve_system_prompt(
             req.system_prompt.as_deref(),
             req.provider_id.as_deref(),
@@ -512,14 +510,14 @@ pub async fn run_chat_loop(
             }
         }
 
-        // ── 水位提醒（nudge，目标四）─────────────────────────────────────
+        // ── 水位提醒（nudge）─────────────────────────────────────────────
         // 估算用量 ≥ 55% 有效上限时，在请求视图末尾注入一条一次性系统提示
         // （请求级、不落库，由 build_request_view 统一追加），引导模型在
         // "阶段间隙"主动调用 context_compact（比 70% 硬触发更早、时机更优）。
         // 门控：提醒只为引导工具调用，跟随工具开关（enable_compact_tool），
         // 与自动压缩开关解耦（关自动压缩、开工具压缩时仍需提醒）。
         // 去重：每次用户请求生命周期内最多注入一次（主动压缩成功后重置）；
-        // 提醒不再持久化，无需扫描历史做去重，也不会占用轮次窗口的 User 计数。
+        // 提醒不落库，无需扫描历史做去重，也不占用轮次窗口的 User 计数。
         let mut inject_nudge = false;
         if enable_compact_tool && !nudged_this_request {
             let effective_limit = orchestrator.context_limit as usize;
@@ -545,7 +543,7 @@ pub async fn run_chat_loop(
         } else {
             Vec::new()
         };
-        // 主动压缩工具（目标四）：仅当工具压缩启用时暴露给模型（独立于自动压缩开关）。
+        // 主动压缩工具：仅当工具压缩启用时暴露给模型（独立于自动压缩开关）。
         // 执行不走 CapabilityVisitor 分发，由下方拦截逻辑处理（需要编排器内部链路）。
         if enable_compact_tool {
             tools.push(compression::context_compact_tool_meta());
@@ -622,7 +620,7 @@ pub async fn run_chat_loop(
                 // 清除本轮未完成的 Streaming 半截内容（来自上一轮被中断的 LLM 流），
                 // 避免下轮 get_context_messages 加载到半截消息污染 LLM 上下文。
                 // RetryWithoutContextId 表示 LLM 提供商返回的 context_id 无效（会话不存在），
-                // 此前流式产出的 Streaming 节点都是无效半截响应，应直接删除而非保留为 Failed 终态。
+                // 本轮流式产出的 Streaming 节点都是无效半截响应，应直接删除而非保留为 Failed 终态。
                 context
                     .messages
                     .retain(|m| m.status != Some(MessageStatus::Streaming));
@@ -636,8 +634,8 @@ pub async fn run_chat_loop(
             Err(PluginError::Aborted) => {
                 // 用户手动中止：向上冒泡 Err(Aborted)，由消费循环识别 code=ABORTED
                 // 后走 persist_failure —— 在途 Turn 持久化为 Failed + error，前端
-                // 可渲染错误条与重试入口（docs/turn-tool-mechanisms.md 2.4）。
-                // 旧实现直接 return Ok(())：在途 Turn 不落库，刷新即消失且无重试入口。
+                // 可渲染错误条与重试入口；若在此直接返回 Ok，在途 Turn 不落库，
+                // 刷新即消失且无重试入口。
                 fire_stop_hook(orchestrator, &context.messages).await;
                 return Err(PluginError::Aborted);
             }
@@ -651,10 +649,9 @@ pub async fn run_chat_loop(
 
         if abort_flag.load(Ordering::SeqCst) {
             // 与 Err(PluginError::Aborted) 分支同理：请求结束后才置位的 abort 标志
-            // 同样向上冒泡，由消费循环统一收尾（在途 Turn → Failed + error + 可重试，
-            // 见 docs/turn-tool-mechanisms.md 2.4）。仅 send_request 之后的 abort
-            // 冒泡；turn 循环顶部的边界检查点不冒泡——上一轮已定稿落库，冒泡会把
-            // 成功的 Turn 误回滚为 Failed。
+            // 同样向上冒泡，由消费循环统一收尾（在途 Turn → Failed + error + 可重试）。
+            // 仅 send_request 之后的 abort 冒泡；turn 循环顶部的边界检查点不冒泡——
+            // 上一轮已定稿落库，冒泡会把成功的 Turn 误回滚为 Failed。
             fire_stop_hook(orchestrator, &context.messages).await;
             return Err(PluginError::Aborted);
         }
@@ -694,12 +691,12 @@ pub async fn run_chat_loop(
         }
 
         let new_msgs = out.into_messages(&root_id, tools_done.len());
-        // 工具上下文保留策略（机制化）：不再把策略 Stamp 到节点 meta 持久化，
+        // 工具上下文保留策略：策略不 Stamp 到节点 meta 持久化，
         // 由 run_chat_loop 在构建 LLM 请求前从 CapabilityVisitor 动态解析，
         // 节点 name 即 LLM 可见工具名，与声明名直接匹配。
         context.messages.extend(new_msgs);
 
-        // 被长度截断的 Turn 打标（供前端「继续」按钮与回溯），不再静默结束（修复"对话突然结束"）。
+        // 被长度截断的 Turn 打标（供前端「继续」按钮与回溯），不得静默结束。
         if finish.is_length() {
             for m in context.messages.iter_mut() {
                 if m.id == rtid || m.id == rrid {
@@ -727,7 +724,7 @@ pub async fn run_chat_loop(
                     persist_messages(&context, last_saved, &channel).await;
                     continue;
                 }
-                // 续写次数耗尽：明确告知，不再静默结束。
+                // 续写次数耗尽：明确告知，绝不静默结束。
                 let _ = channel.tx.send(PluginFrame::Data(
                     serde_json::to_value(session_chat_response::StreamEvent::Error {
                         error: format!(
@@ -758,7 +755,7 @@ pub async fn run_chat_loop(
             return Ok(());
         }
 
-        // ── 主动压缩工具拦截（目标四）─────────────────────────────────
+        // ── 主动压缩工具拦截 ─────────────────────────────────────────────
         // context_compact 不走 CapabilityVisitor 分发：它需要编排器内部的
         // 压缩链路（LLM 摘要 + 上下文替换 + 会话持久化）。
         // 在此拆分：压缩调用就地执行并生成合成工具结果；其余工具正常分发。
@@ -780,8 +777,9 @@ pub async fn run_chat_loop(
 
         if !compact_calls.is_empty() {
             // 切分点前移到当前用户指令：保留区 = [用户指令, Turn 及其子节点...]，
-            // Turn 子树 parent 链完整；旧版切在本 Turn 首个 ToolCall，用户指令与
-            // Turn 根被压进快照，保留区只剩 parent 悬空的 ToolCall → provider 400。
+            // Turn 子树 parent 链完整。切分点绝不能落在本 Turn 首个 ToolCall——
+            // 那样用户指令与 Turn 根会被压进快照，保留区只剩 parent 悬空的
+            // ToolCall → provider 400。
             // 返回 0 时 run_context_compact 以 split==0 视为中止，安全。
             let split_user_idx = compression::find_turn_user_split_idx(&context.messages, &root_id);
             let first = compact_calls.first().cloned();
@@ -837,8 +835,8 @@ pub async fn run_chat_loop(
                     meta["before_tokens"] = serde_json::json!(before_t);
                     meta["after_tokens"] = serde_json::json!(after_t);
                 }
-                // 标准工具广播模式（与 process_tool_calls_async 一致，修复诉求1：
-                // 前端实时可见 context_compact 的结果子节点与父节点状态）：
+                // 标准工具广播模式（与 process_tool_calls_async 一致）：
+                // 前端实时可见 context_compact 的结果子节点与父节点状态——
                 // 先广播 Tool 结果子节点，再广播父 ToolCall 状态补丁。
                 let mut tool_msg = build_tool_message(&call_id, &result_text, Some(ok), None);
                 if !ok {
@@ -928,7 +926,7 @@ pub async fn run_chat_loop(
 
         // 检测工具待用户恢复 → 退出本轮：
         // 仅当存在 UserPrompt/WaitingUserAction（confirm/ask_user）时才算需要用户输入。
-        // 普通的工具执行失败不再使会话停摆：父节点已标 Completed、错误结果作为合法
+        // 普通的工具执行失败不使会话停摆：父节点已标 Completed、错误结果作为合法
         // tool 结果留在上下文喂回 LLM 继续处理，用户也可随时直接发新消息继续。
         let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
         let needs_user_action = tool_results.iter().any(|m| {
@@ -941,8 +939,7 @@ pub async fn run_chat_loop(
         if needs_user_action {
             // 注：信息性策略下工具失败的父 ToolCall 已标 Completed（错误结果作为
             // 合法 tool 结果喂回 LLM，loop 不中断），不存在「Failed 父节点等待
-            // 恢复」的场景——旧版在此处给 Failed+failure_kind 父节点打 recoverable
-            // 标记的代码属不可达遗留，已删除（docs/turn-tool-mechanisms.md 1.5）。
+            // 恢复」的场景；
             // user_prompt(WaitingUserAction) 驱动的暂停走 approve/reject/answer 恢复。
             plugin_info!("session", "工具待用户恢复（mode={}），退出本轮", mode);
             fire_stop_hook(orchestrator, &context.messages).await;
@@ -995,7 +992,7 @@ async fn persist_messages(context: &SessionContext, last_saved: usize, channel: 
 /// 从 ctx 读取 session 编排器交付的会话引擎句柄（SESSION_HANDLE）。
 ///
 /// session 编排在路由 model/chat 前已将构造好的会话引擎实例放入 chat_ctx，
-/// model 无状态化后不再反向路由 session/open。仅句柄缺失（异常编排路径）时
+/// model 侧按无状态协议工作，不反向路由 session/open。仅句柄缺失（异常编排路径）时
 /// 回退内存 FallbackChatSession（无持久化）。
 async fn open_chat_session(ctx: &Arc<dyn InvokeRequest>) -> Arc<dyn ChatSession> {
     if let Some(handle) = ctx.get(SESSION_HANDLE) {
@@ -1010,8 +1007,8 @@ async fn open_chat_session(ctx: &Arc<dyn InvokeRequest>) -> Arc<dyn ChatSession>
 }
 
 struct FallbackChatSession {
-    // 用 tokio::sync::Mutex 替代 std::sync::RwLock
-    // 原因（S-002 修复）：std::sync::RwLock 的 read/write guard 持锁时若遇到 .await
+    // 用 tokio::sync::Mutex 而非 std::sync::RwLock：
+    // std::sync::RwLock 的 read/write guard 持锁时若遇到 .await
     // 会导致 tokio worker 线程被同步阻塞；本结构虽是 fallback 路径，但 get_messages 是
     // 每次 session 切换的高频调用点。tokio::sync::Mutex 的 lock() 是异步的，不阻塞 worker。
     // 锁内操作仅是 Vec 克隆/追加/替换，无 await 边界，因此不会出现持锁跨 await 的反模式。
@@ -1079,17 +1076,8 @@ impl ChatSession for FallbackChatSession {
         Ok(())
     }
 
-    async fn clear(&self) -> Result<(), PluginError> {
-        let mut messages = self.messages.lock().await;
-        messages.clear();
-        Ok(())
-    }
-
     fn session_id(&self) -> &str {
         "ephemeral"
-    }
-    fn max_messages(&self) -> usize {
-        100
     }
     fn line_threshold(&self) -> usize {
         200
@@ -1212,9 +1200,10 @@ async fn auto_compress_process(
 /// 快照压缩核心 —— 被动 L2 自动压缩（[`auto_compress_process`]）与主动
 /// `context_compact` 工具（[`run_context_compact`]）共用的唯一实现。
 ///
-/// 旧版两处各维护一份 ~60 行近乎相同的流水线（PreCompact 钩子 → transcript
+/// 单一实现约束：被动与主动两条入口**必须**共用本函数，各自只保留调用方特有的
+/// 切分点与呈现语义。两处各维护一份流水线（PreCompact 钩子 → transcript
 /// 转存 → LLM 压缩请求 → 快照校验/纠正重试/降级兜底 → meta 与快照消息构造 →
-/// 保留区拼接落库），行为漂移风险高，故收敛于此。
+/// 保留区拼接落库）会带来行为漂移风险。
 ///
 /// 职责：
 /// 1. PreCompact 钩子 + 压缩前完整历史 transcript 转存（可回溯原则）；
@@ -1248,7 +1237,7 @@ async fn compress_with_snapshot_core(
     let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await;
 
     // 可回溯原则：压缩前把完整历史转存为 transcript，路径记入快照 meta。
-    // 旧版直接 replace_messages，被压掉的历史在物理层"凭空消失"，
+    // 若跳过此步直接 replace_messages，被压掉的历史在物理层"凭空消失"，
     // 旧存档文件成为孤儿，事后无法审计。
     let transcript_path = save_transcript_archive(&original_messages, context.session.session_id());
 
@@ -1320,7 +1309,7 @@ async fn compress_with_snapshot_core(
 
     context.messages = vec![compression_msg];
 
-    // 诉求3：专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离）
+    // 专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离）
     let compression_prompt = compression::get_compression_prompt();
     let root_id = short_id();
     let mut summary = match send_compression_request(
@@ -1346,7 +1335,7 @@ async fn compress_with_snapshot_core(
         // Turn；真正的 LLM 请求若同样中止 / 限流 / 失败，会以标准链路
         // （在途 Turn → persist_failure）呈现在本轮 Turn 上：
         // - Aborted → 消费循环 ABORTED 分支 → Failed + "用户手动中止了
-        //   本次回复"（前端错误条 + 重试入口，docs/turn-tool-mechanisms.md 2.4）；
+        //   本次回复"（前端错误条 + 重试入口）；
         // - RateLimited / 其他 → 消费循环非中止分支 → Failed + 错误原因。
         Err(e) => {
             plugin_warn!("session",
@@ -1359,8 +1348,9 @@ async fn compress_with_snapshot_core(
     };
 
     // 快照校验：从输出提取 <state_snapshot>；缺失则纠正重试一次；
-    // 仍失败则降级为纯文�快照（有总比无好，且标注为降级产物）。
-    // 旧版只检查非空——模型输出散文/scratchpad 泄漏/截断时，残缺内容原样成为唯一记忆。
+    // 仍失败则降级为纯文本快照（有总比无好，且标注为降级产物）。
+    // 只检查非空是不够的——模型输出散文/scratchpad 泄漏/截断时，
+    // 残缺内容会原样成为唯一记忆。
     let mut validated = compression::extract_snapshot(&summary_text(&summary));
     if validated.is_none() {
         // 重试：附纠正指令，要求严格按 XML 结构输出
@@ -1403,12 +1393,12 @@ async fn compress_with_snapshot_core(
     }
     context.messages.clear();
 
-    // 落库前渲染为纯文本分节（诉求3：历史中不残留 XML 标签，切断格式模仿链）
+    // 落库前渲染为纯文本分节（历史中不残留 XML 标签，切断格式模仿链）
     let snapshot_display = compression::render_snapshot_for_history(&snapshot_text);
     // 快照消息：meta 记录压缩标记、压缩后估算（迟滞依据）、转存路径。
     // post_tokens 口径 = 压缩完成后的内容水位（快照 + 保留区内容，不含请求级
-    // overhead），与 should_start_compression 迟滞比较的读取侧对齐。旧口径只算
-    // 快照、漏掉保留区，迟滞地板被低估 → 压缩后很快再次越线 → 循环压缩。
+    // overhead），与 should_start_compression 迟滞比较的读取侧对齐。若只算快照、
+    // 漏掉保留区，迟滞地板被低估 → 压缩后很快再次越线 → 循环压缩。
     let post_tokens = compression::estimate_message_tokens(&ChatMessage {
         content: Some(MessageContent::Text(snapshot_display.clone())),
         ..Default::default()
@@ -1429,7 +1419,7 @@ async fn compress_with_snapshot_core(
         }
     }
 
-    // P2-3：快照指纹 —— 记录压缩协议版本与提示词指纹，
+    // 快照指纹 —— 记录压缩协议版本与提示词指纹，
     // 使"提示词强化是否生效"可从产物侧（快照 meta）验证。
     meta["protocol_version"] = serde_json::json!(super::compression::COMPRESSION_PROTOCOL_VERSION);
     meta["prompt_fingerprint"] =
@@ -1465,7 +1455,7 @@ fn summary_text(m: &ChatMessage) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
 }
 
-/// 主动压缩工具（context_compact）执行体——目标四的核心。
+/// 主动压缩工具（context_compact）执行体。
 ///
 /// 关键正确性约束：**进行中的 Turn 必须从其用户指令起整体保留**。
 /// 调用时本 Turn 的 ToolCall 消息已在上下文中（请求后 extend），但其工具结果
@@ -1528,7 +1518,7 @@ async fn run_context_compact(
 
 /// 压缩前把完整历史转存为 JSON transcript（best-effort）。
 /// 落在会话存储目录内（`<homedir>/plugins/session/<id>/transcripts/`，跟随会话生命周期），
-/// 而非系统临时目录（旧存档的教训：无 GC、跨会话堆积、脱离会话管理）。
+/// 而非系统临时目录（临时目录无 GC、跨会话堆积、脱离会话管理）。
 /// 路径派生统一走 paths 模块（safe_id / 会话根目录的唯一权威实现）。
 fn save_transcript_archive(messages: &[ChatMessage], session_id: &str) -> Option<String> {
     let root = super::paths::session_subdir(session_id, super::paths::TRANSCRIPTS_SUBDIR);
@@ -1563,8 +1553,8 @@ async fn send_compression_request(
     //   不可泄漏——本函数内所有 emit 都走 muted.tx）；
     // - **rx（入帧）临时移交真实主通道**：用户停止时 Abort 帧只会进入主通道队列，
     //   而消费循环此刻正 await 在压缩请求上——若 rx 也是哑的，Abort 永远收不到，
-    //   压缩请求将无视中止跑完整整轮 LLM 流（此前还曾因哑 rx 立即关闭被误判
-    //   Aborted，导致每轮重试巨型压缩请求）。压缩结束后 rx 归还主通道。
+    //   压缩请求将无视中止跑完整整轮 LLM 流；哑 rx 也不能立即关闭，否则会被
+    //   误判 Aborted，导致每轮重试巨型压缩请求。压缩结束后 rx 归还主通道。
     let (mute_tx, mut mute_rx) = tokio::sync::mpsc::channel::<PluginFrame>(64);
     tokio::spawn(async move { while mute_rx.recv().await.is_some() {} });
     let dummy_rx = tokio::sync::mpsc::channel::<PluginFrame>(1).1;
@@ -1626,9 +1616,9 @@ async fn send_compression_request(
 /// 压缩摘要的实际 LLM 调用：出帧全部静默（muted.tx），入帧收真实主通道 Abort。
 ///
 /// 注意：这里**绝不发射 Turn 帧**（不发 emit_streaming_start）。压缩是内部请求、
-/// 不是对话轮次——Turn 帧在哑通道上是纯死代码，而历史上它曾走主通道泄漏，在前端
-/// 留下永远"正在思考…"的空 Turn 骨架（每轮压缩尝试累积一个）。从源头删除调用点，
-/// 使"内部请求泄漏可见帧"这一类问题在结构上不可能再发生。
+/// 不是对话轮次——Turn 帧在哑通道上是纯死代码；若误走主通道则会在前端留下永远
+/// "正在思考…"的空 Turn 骨架（每轮压缩尝试累积一个）。不设 Turn 帧调用点，
+/// 使"内部请求泄漏可见帧"这一类问题在结构上不可能发生。
 async fn run_compression_llm(
     orchestrator: &ChatOrchestrator,
     system_prompt: &str,
@@ -1640,9 +1630,8 @@ async fn run_compression_llm(
     use crate::symbio_core::schemas::session::chat_message::MessageContent;
 
     // 压缩路径与对话轮次共用同一模型契约：provider.execute_turn（tools 为空）。
-    // 出帧仍全部静默（muted.tx），入帧收真实主通道 Abort——语义与此前手动
-    // prepare_request + execute_post_with_abort + parse_sse_stream 组合一致，
-    // 但协议细节（请求构造 / 重试 / SSE 解析）收敛进 model 插件实现。
+    // 出帧仍全部静默（muted.tx），入帧收真实主通道 Abort；
+    // 协议细节（请求构造 / 重试 / SSE 解析）由 model 插件实现承担。
     let out = orchestrator
         .provider
         .execute_turn(system_prompt, messages, &[], root_id, muted, abort_flag)
@@ -1656,9 +1645,8 @@ async fn run_compression_llm(
     if effective.is_empty() {
         return Err(PluginError::InternalError(
             // 语义说明：压缩摘要请求的 SSE 流正常结束，但未产出任何文本/推理内容
-            // （常见于上游网关错误被吞掉、或模型只回了空流）。此前误用
-            // "Compression produced empty result"，与上下文压缩的语义完全对不上，
-            // 已在 auto_compress_process 中改为优雅降级，不再中断整个 turn。
+            // （常见于上游网关错误被吞掉、或模型只回了空流）。调用方
+            // auto_compress_process 对这类失败优雅降级，不中断整个 turn。
             "Compression summary request returned no content".to_string(),
         ));
     }
@@ -1745,7 +1733,7 @@ mod tests {
     }
 }
 
-/// Stop 恰好一次的契约测试（session-mechanism-unification.md §4.4）。
+/// Stop 恰好一次的契约测试。
 ///
 /// 走真实 `fire_hook` 链路（自建 recorder 插件，不 mock 内部函数），
 /// 验证显式触发 / 生命周期兜底 / 二者叠加时的幂等性。

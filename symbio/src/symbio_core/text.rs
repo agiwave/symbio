@@ -49,8 +49,8 @@ pub fn floor_char_boundary(s: &str, max_bytes: usize) -> usize {
 mod tests {
     use super::*;
 
-    /// 回归（真实事故）：中文字符跨越字节切片点时不得 panic。
-    /// 事故现场：`args_summary(&json!({...中文...}), 200)` 在 byte 200
+    /// 中文字符跨越字节切片点时不得 panic（真实事故场景）：
+    /// `args_summary(&json!({...中文...}), 200)` 在 byte 200
     /// 落在 '的'（bytes 199..202）内部 → `tokio-rt-worker` panic。
     #[test]
     fn truncate_does_not_panic_on_multibyte_boundary() {

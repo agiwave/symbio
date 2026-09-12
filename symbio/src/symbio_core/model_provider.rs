@@ -4,9 +4,9 @@
 //! 插件之间唯一的模型契约：
 //! - session 只依赖本 trait（经 `Arc<dyn ModelProvider>` 持有），对协议适配
 //!   细节零感知；
-//! - 协议适配（原 `ModelProtocol` 钩子 trait、`resolve_protocol_id`、
-//!   `MODEL_PROTOCOL_*` 注册常量、`ReasoningConfig`）已完全内化到 model
-//!   插件内部（`plugins/model/protocols/`），core 不再暴露；
+//! - 协议适配（`ModelProtocol` 钩子 trait、`resolve_protocol_id`、
+//!   `MODEL_PROTOCOL_*` 注册常量、`ReasoningConfig`）定义在 model 插件内部
+//!   （`plugins/model/protocols/`），core 不暴露这些类型；
 //! - model 插件的 `BoundProvider`（持久化配置 + 协议钩子实现的绑定）是本
 //!   trait 的生产实现：`execute_turn` 五态机、`effective_context_tokens`
 //!   收敛、ping 等完整行为均由其提供。
@@ -31,13 +31,13 @@ use crate::symbio_core::{PluginChannel, PluginError};
 ///
 /// ## 为什么必须有它
 ///
-/// 在此之前，流结束一律被当成"正常完成"。当模型因 `max_tokens` 用尽而停在
-/// `Length` 时，系统会：
-/// 1. 把断在半句的文本当完整回复呈现；
+/// 若不区分结束原因，流结束一律被当成"正常完成"。当模型因 `max_tokens` 用尽而停在
+/// `Length` 时：
+/// 1. 断在半句的文本会被当完整回复呈现；
 /// 2. 若截断发生在 `tool_calls` 的参数 JSON 中间，工具调用永远收集不完 →
 ///    `tools_done` 为空 → 循环按"无工具调用"正常退出——**用户看到的就是"对话突然结束"**。
 ///
-/// 有了 Finish，`chat_loop` 才能区分"自然结束"与"被长度截断"，并触发自动续写或明确报错。
+/// 只有拿到 `FinishReason`，`chat_loop` 才能区分"自然结束"与"被长度截断"，并触发自动续写或明确报错。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum FinishReason {
     /// 自然结束

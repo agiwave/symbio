@@ -24,7 +24,7 @@ fn default_provider_name() -> String {
     "Default".to_string()
 }
 
-/// 推理配置（自 core `model_provider.rs` 内化迁入——serde 形态不变，用户配置兼容）
+/// 推理配置（serde 形态冻结，保持用户配置兼容）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningConfig {
     pub effort: String,

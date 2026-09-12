@@ -1,9 +1,17 @@
-//! 会话引擎：持久化（`PersistentChatSession`）与内存（`EphemeralChatSession`）两种实现。
+//! 会话引擎：契约（`ChatSession`）+ 持久化（`PersistentChatSession`）与内存
+//! （`EphemeralChatSession`）两种实现。
 //!
 //! - 持久化实现委托 `super::store::SessionStore` 落库；内存实现面向 `_t_` 临时会话。
 //! - 滑动窗口、孤儿剔除、时间戳回填等纯函数均在本文件。
 //! - `prune_historical_tool_calls`（存储期工具链物理裁剪）由原 `context.rs`
 //!   并入——其唯一消费者就是本模块（体检备注 audit-5）。
+//!
+//! ## 契约为何归属 session 插件
+//!
+//! `ChatSession` / `ChatSessionHandle` / `SESSION_HANDLE` 的读写方全部在 session
+//! 插件内（编排器交付句柄 → chat_loop / resume / handlers 消费），不存在跨插件使用，
+//! 故从 `symbio_core` 下沉到本插件——核心架构只保留跨插件共享的抽象，不承载单一
+//! 模块的内部定义。
 
 use super::store::SessionStore;
 use crate::plugin_info;
@@ -12,12 +20,76 @@ use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
-use crate::symbio_core::{ChatSession, PluginError};
+use crate::symbio_core::{PluginError, SymbioKey};
 use async_trait::async_trait;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+/// 会话引擎契约：消息的读写与轮次窗口视图。
+#[async_trait]
+pub trait ChatSession: Send + Sync + 'static {
+    async fn get_messages(&self) -> Result<Vec<ChatMessage>, PluginError>;
+
+    /// 获取进入 LLM 上下文的候选消息（存储视图：过滤 + 滑动轮次窗口）。
+    ///
+    /// 注意：工具级骨架化（fade / 保留策略）**不在此处**——那是请求视图层的职责，
+    /// 由模型插件 run_chat_loop 在构建每次请求时统一执行（build_request_view）。
+    async fn get_context_messages(
+        &self,
+        max_turns: Option<usize>,
+    ) -> Result<Vec<ChatMessage>, PluginError>;
+
+    async fn append_messages(&self, messages: Vec<ChatMessage>) -> Result<usize, PluginError>;
+
+    async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError>;
+
+    /// 按 id 就地更新已存在的消息（**增量合并**，调用 [`ChatMessage::apply_patch`]）。
+    /// 不存在的 id 静默跳过。用于工具恢复时更新 ToolCall 父节点状态。
+    ///
+    /// 注意：绝不可实现为"整条覆盖"。调用方普遍只传局部补丁（如仅 `id` + `meta`），
+    /// 整条覆盖会把 `role` / `msg_type` / `content` / `timestamp` 抹成 `None`，
+    /// 进而让下一轮请求体出现 `"content": null` 被 Provider 拒绝。
+    async fn update_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError>;
+
+    fn session_id(&self) -> &str;
+
+    fn line_threshold(&self) -> usize;
+
+    /// 内容节点淡化保护窗口：请求视图中最近 N 条内容节点（Text/Reasoning）保留原文。
+    ///
+    /// 对话末端锚点——保持模型对"最近在做什么/刚想了什么"的连续记忆。
+    /// 默认 3，与压缩配置 `compress_keep_recent` 对齐；持久会话从配置读取。
+    fn compress_keep_recent(&self) -> usize {
+        3
+    }
+}
+
+/// 会话引擎句柄（`session/open` 的返回载荷、`SESSION_HANDLE` 键的值类型）。
+pub struct ChatSessionHandle(pub Arc<dyn ChatSession>);
+
+impl ChatSessionHandle {
+    pub fn new(session: Arc<dyn ChatSession>) -> Self {
+        Self(session)
+    }
+}
+
+// 会话句柄 Key（Value）：session 编排器交付给 chat_loop 的会话引擎实例
+pub struct SessionHandleKey;
+impl SymbioKey for SessionHandleKey {
+    type Value = Arc<ChatSessionHandle>;
+    fn name(&self) -> &'static str {
+        "session_handle"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "chat_session_handle".to_string()
+    }
+}
+pub const SESSION_HANDLE: SessionHandleKey = SessionHandleKey;
 
 fn sliding_window(messages: &[ChatMessage], max_turns: usize) -> Vec<ChatMessage> {
     if max_turns == 0 {
@@ -273,10 +345,6 @@ impl ChatSession for PersistentChatSession {
         Ok(count)
     }
 
-    async fn clear(&self) -> Result<(), PluginError> {
-        self.store.delete_session(&self.session_id).await
-    }
-
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
         let mut session = self.load_session().await?;
         let now = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
@@ -352,13 +420,6 @@ impl ChatSession for PersistentChatSession {
 
     fn session_id(&self) -> &str {
         &self.session_id
-    }
-
-    fn max_messages(&self) -> usize {
-        self.config
-            .try_read()
-            .map(|c| c.max_messages)
-            .unwrap_or(100)
     }
 
     fn line_threshold(&self) -> usize {
@@ -466,12 +527,6 @@ impl ChatSession for EphemeralChatSession {
         Ok(store.len())
     }
 
-    async fn clear(&self) -> Result<(), PluginError> {
-        let mut messages = self.messages.write().await;
-        messages.clear();
-        Ok(())
-    }
-
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
         let mut store = self.messages.write().await;
         let mut messages = backfill_timestamps(messages, now_millis());
@@ -492,10 +547,6 @@ impl ChatSession for EphemeralChatSession {
 
     fn session_id(&self) -> &str {
         &self.session_id
-    }
-
-    fn max_messages(&self) -> usize {
-        self.max_messages
     }
 
     fn line_threshold(&self) -> usize {

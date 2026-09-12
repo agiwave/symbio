@@ -1,6 +1,6 @@
 # 工具失败回传与 Turn 终态机制
 
-> 现状文档（机制已全部实施落地）。完整实施过程与调查记录见 `docs/archive/implementation-logs/turn-tool-mechanisms.md`。
+> 历史实施记录见 `docs/archive/implementation-logs/`。
 > 本文与 `../README.md` 的六大压缩策略互补：那里讲"上下文怎么裁"，这里讲"失败怎么传播、终态怎么定"。
 
 ## 机制一：工具失败是信息性的，不中断循环
@@ -28,5 +28,4 @@
 
 ## 关联
 
-- 请求视图三步剪裁与压缩分层：`../README.md` 策略⑥ + `docs/design/context-compression-design.md`（L0-L6 总览）
-- 历史实施记录与测试基线：`docs/archive/implementation-logs/turn-tool-mechanisms.md`
+- 请求视图剪裁与压缩分层：`../README.md` 策略⑥ + `docs/design/context-compression-design.md`（L0-L6 总览）

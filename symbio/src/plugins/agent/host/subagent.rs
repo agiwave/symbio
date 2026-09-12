@@ -401,7 +401,7 @@ async fn stream_relay_bridge(
 ) {
     // 累积 Assistant 文本（按消息 id 分桶）：最终结果取「最后一条已完成的
     // Assistant 文本」而非「最后处理到的文本」——流式乱序片段或子 agent 的
-    // 内部独白不能被误当成最终答案（老版 I-049 修复语义）。
+    // 内部独白不能被误当成最终答案。
     let mut text_accumulator: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     let mut completed_ids: HashSet<String> = HashSet::new();

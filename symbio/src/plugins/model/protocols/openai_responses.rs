@@ -120,7 +120,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                         }));
                     }
 
-                    // 2. 推送工具调用项 (移除 status 字段以提高兼容性)
+                    // 2. 推送工具调用项（不带 status 字段，兼容性更好）
                     if let Some(ref tcs) = m.tool_calls {
                         for tc in tcs {
                             input_items.push(json!({
@@ -317,10 +317,10 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         evs
     }
 
-    /// 连通性验证（Phase E-②）：Responses API 的最小请求探测。
+    /// 连通性验证：Responses API 的最小请求探测。
     ///
-    /// 此前本协议缺少 ping 分支——验证只能走 `handle_chat_stream` 全量
-    /// 会话路径，与其余三协议不对称；现以独立的轻量请求补齐。
+    /// ping 走独立的轻量请求，而非 `handle_chat_stream` 全量会话路径——
+    /// 与其余三协议保持一致。
     async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
         let api_key = cfg.api_key.clone().unwrap_or_default();
         let request = json!({

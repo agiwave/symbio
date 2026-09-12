@@ -1,7 +1,7 @@
 //! 内容搜索工具 - 使用正则表达式搜索文件内容 - 实现 Tool trait
 //!
 //! 直接调用 ripgrep 库（grep / grep-searcher / grep-regex / ignore）完成跨平台搜索，
-//! 不再依赖 rg / PowerShell / grep 等外部可执行文件，各操作系统行为一致，并遵循 .gitignore。
+//! 不依赖 rg / PowerShell / grep 等外部可执行文件，各操作系统行为一致，并遵循 .gitignore。
 
 use super::policy::SecurityPolicy;
 use super::system::validate_params;

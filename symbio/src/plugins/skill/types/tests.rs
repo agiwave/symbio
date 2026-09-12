@@ -79,7 +79,7 @@ fn substitute_variables_multi() {
         &skill.body,
         &json!({ "greeting": "Hi", "name": "Alice", "age": 30 }),
     );
-    // JSON 字符串值不再序列化为带引号，数字仍然是裸值 30
+    // 字符串值替换为裸文本（不带 JSON 引号），数字同样是裸值 30
     assert_eq!(out, "Hi, Alice! You are 30.");
 }
 

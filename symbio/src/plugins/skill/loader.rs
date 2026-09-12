@@ -36,8 +36,8 @@ impl Default for LoadBudget {
 /// 超出 `budget.max_skills` 时跳过后续；单个 body 超过 `budget.max_body_chars`
 /// 时**截断**到 `max_body_chars` 字符并 warn（避免 SKILL.md 错误导致 OOM）。
 ///
-/// 替代了早期的 `load_skills_from_dirs`（无 budget 概念）。当生产路径
-/// 确实需要无 budget 加载时，应显式传入 `LoadBudget { max_skills: usize::MAX, max_body_chars: usize::MAX }`。
+/// 需要无上限加载时，显式传入
+/// `LoadBudget { max_skills: usize::MAX, max_body_chars: usize::MAX }`。
 ///
 /// ## 名称冲突策略（BUG-SR1）
 ///

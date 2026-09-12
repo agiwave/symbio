@@ -1,6 +1,6 @@
 //! MCP (Model Context Protocol) 插件实现
 //!
-//! ## 职责划分（2026-07-06 重构）
+//! ## 职责划分
 //!
 //! - **后端**（本插件）：MCP **配置**（CRUD）+ **客户端 transport**（stdio/http）
 //! - **前端**（`tauri`）：**仅**负责 MCP Server 的配置管理（CRUD UI），

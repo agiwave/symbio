@@ -4,9 +4,7 @@
 //!
 //! 插件之间**互相不可见**（`plugins/mod.rs` 的架构约束），只能依赖 `symbio_core`。
 //! 会话编排（session 插件）需要自行构造 `CapabilityVisitor` 来收集各插件贡献的工具，
-//! 因此 `DefaultToolVisitor` 必须上浮为共享设施，而不能停留在某个插件的私有模块里。
-//!
-//! 迁移前位置：`plugins/agent/core/default_tool_visitor.rs`
+//! 因此 `DefaultToolVisitor` 必须作为共享设施定义在 core，不得放进任何插件的私有模块。
 
 use crate::symbio_core::{
     Capability, CapabilityMeta, CapabilityVisitor, InvokeRequest, InvokeResponse, ModelProvider,

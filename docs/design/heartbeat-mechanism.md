@@ -41,18 +41,18 @@ symbio-cli --heartbeat [--homedir <路径>]
 
 与 `-m`/`--repl` 互斥；进程驻留，订阅事件总线，把心跳会话的工作/空闲/错误状态渲染到 stderr。模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → 管道 → REPL。
 
-## homedir 传导（修复记录）
+## homedir 传导
 
-`--homedir` 在 `SymbioClient::start()` 内注入 `SYMBIO_HOMEDIR` 环境变量（先于插件树构建）；`HomedirRegistry` 优先级：**环境变量 > 用户主目录 bootstrap 文件 > 默认 `<当前目录>/.symbio`**。修复前 bootstrap 文件优先级高于环境变量，导致 `--homedir` 被静默覆盖（会话落盘到 bootstrap 指向的目录）。
+`--homedir` 在 `SymbioClient::start()` 内注入 `SYMBIO_HOMEDIR` 环境变量（先于插件树构建）；`HomedirRegistry` 优先级：**环境变量 > 用户主目录 bootstrap 文件 > 默认 `<当前目录>/.symbio`**。环境变量最高，因此 `--homedir` 总是生效，不会被 bootstrap 文件覆盖。
 
-## E2E 验证摘要（2026-09-11）
+## 实测节奏
 
 - **set → 落盘 → 触发**：30s 间隔实测 ≈45s 节奏（interval + 15s tick），`hb_` 消息与 `metadata.heartbeat` 落盘正确。
 - **重启追赶**：一次性（one-shot）进程退出后，心跳由同 store 的其他存活进程接管；守护进程重启后立即补触发空闲会话。
 - **跨进程 cancel**：一次性进程 cancel 后，另一进程的调度器下个 tick 即停（调度器每 tick 重读 store）。
-- **语义修复前后对比**：修复前空闲时钟从「上次触发/上次消息接收」起算，回合结束后 14.1s 即重触发（违反契约 <30s）；修复后 43 次触发最小间隔 36.2s，全部 ≥ interval。
+- **触发间隔**：30s 间隔实测最小间隔 > interval（空闲严格从活动结束起算，见语义契约 2）。
 
 ## 边界与已知约束
 
-- 多进程共享同一 store 时存在极小的同 tick 竞态窗口（A 进程刚触发、心跳消息尚未落盘时 B 进程同 tick 扫描）；max 基线修复后实际风险已大幅降低，守护模式部署仍建议 store 隔离。
+- 多进程共享同一 store 时存在极小的同 tick 竞态窗口（A 进程刚触发、心跳消息尚未落盘时 B 进程同 tick 扫描）；守护模式部署建议 store 隔离。
 - 日志中的 `~/.symbio/...` 为静态模板文本，不代表实际 homedir 解析结果。

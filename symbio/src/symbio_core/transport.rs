@@ -1,5 +1,5 @@
 // Corresponding Frontend: tauri/src/services/plugin.ts
-//! 插件双向分形路由协议 (V2.7 Unified)
+//! 插件双向分形路由协议
 //!
 //! 定义了统一的消息载荷模型 (PluginPayload) 和对称的消息容器 (PluginMessage)。
 //! 支持 JSON 数据、原生接口 (Native Interface) 和长连接会话。
@@ -41,8 +41,8 @@ impl PluginFrame {
 
     /// 读取 `Error` 帧携带的机器可读错误码。
     ///
-    /// 消费侧据此分派（中止 / 上下文丢失重试 / 普通失败），**不要**再对
-    /// `meta["code"]` 做字符串字面量比较（session-mechanism-unification.md §4.2）。
+    /// 消费侧据此分派（中止 / 上下文丢失重试 / 普通失败），**不得**对
+    /// `meta["code"]` 做字符串字面量比较。
     /// 非 `Error` 帧、无 meta、或 code 不可识别均返回 `None`。
     pub fn error_code(&self) -> Option<crate::symbio_core::ErrorCode> {
         let PluginFrame::Error(_, meta) = self else {
@@ -104,7 +104,7 @@ impl Clone for SerializeData {
     }
 }
 
-/// 统一有效载荷 (V2.7)
+/// 统一有效载荷
 #[derive(Default)]
 pub enum PluginPayload {
     /// 空载荷
@@ -195,9 +195,9 @@ impl PluginChannel {
 
 // ==================== 线路层消息容器 ====================
 //
-// 下面两个类型**从 `tauri/src-tauri/src/commands.rs` 原样迁入**，
-// 供 Tauri IPC 与 HTTP/WebSocket 两种传输共用同一份线上格式。
-// 它们不是新协议：自 V2.7 起前端 `services/plugin.ts` 就在用这个结构。
+// 下面两个类型是线路层唯一的请求/响应容器定义，供 Tauri IPC 与 HTTP/WebSocket
+// 两种传输共用同一份线上格式（不得另立结构体）；前端 `services/plugin.ts`
+// 也按这个结构收发。
 
 /// 传输层的统一请求结构
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 # Model 插件
 
-无状态单轮 LLM 网关。Phase E 定型后，model 只做一件事：**接收一次调用，把消息/工具传给某个 Provider，把产出流回给调用方**——不执行工具、不维护会话、不感知编排循环。
+无状态单轮 LLM 网关。model 只做一件事：**接收一次调用，把消息/工具传给某个 Provider，把产出流回给调用方**——不执行工具、不维护会话、不感知编排循环。
 
 ## 职责边界
 
@@ -9,11 +9,11 @@
 - **单轮执行**：`execute_turn` 即单轮"发消息→收流"的完整闭环，不含重试、裁剪、压缩等编排逻辑（这些归 session，见 `session/README.md` 六大策略）。
 - **配置存取**：providers CRUD 与引擎参数（API Key、Base URL 等）的 `config get/set/schema`。
 
-## 明确不做（已迁出/从未承担）
+## 明确不做
 
-- ~~工具执行与审批流分发~~ → 工具注册由各工具插件 traverse 提供，执行由 session 的 tool_executor 编排
-- ~~通过 `session/append` 回写消息~~ → session 自己持久化，model 对 session 零依赖
-- ~~会话循环 / 上下文裁剪 / 压缩~~ → 会话引擎整体位于 session（详见 `docs/archive/implementation-logs/model-session-refactor.md` 的 Phase E 记录）
+- 工具执行与审批流分发：工具注册由各工具插件 traverse 提供，执行由 session 的 tool_executor 编排
+- 通过 `session/append` 回写消息：session 自己持久化，model 对 session 零依赖
+- 会话循环 / 上下文裁剪 / 压缩：会话引擎整体位于 session
 
 ## 路由
 
@@ -28,4 +28,3 @@
 
 - 上游消费者：`session`（chat_loop 直连）
 - 协议适配层代码：`protocols/`
-- 历史改造记录：`docs/archive/implementation-logs/model-session-refactor.md`

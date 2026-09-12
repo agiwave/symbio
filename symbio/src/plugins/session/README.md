@@ -1,6 +1,6 @@
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与编排中心**。Phase E-② 重构后，它是**唯一的会话编排入口**：加载历史、组装系统提示词、经 CapabilityVisitor 汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（core 纯 trait，`Arc<dyn ModelProvider>` 单一契约；协议适配细节内化于 model 插件）并在进程内驱动会话循环；Model 插件退居**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是**唯一的会话编排入口**：加载历史、组装系统提示词、经 CapabilityVisitor 汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（core 纯 trait，`Arc<dyn ModelProvider>` 单一契约；协议适配细节内化于 model 插件）并在进程内驱动会话循环；Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
@@ -42,7 +42,7 @@ flowchart TD
 ```yaml
 session:
   # 存储目录：固定为 <homedir>/plugins/session/，从 HomedirRegistry 派生，
-  # 跟随系统目录 (homedir) 切换，不再作为配置项。
+  # 跟随系统目录 (homedir) 切换，不作为配置项暴露。
   store_kind: file                         # 存储后端类型: file (文件目录) 或 sqlite (SQLite 数据库)
   # 注：会话默认不绑定智能体（纯工具模式）。智能体选择属于前端会话级偏好，
   # 由 session.metadata.agent_id 按会话记录，后端不提供 default_agent。
@@ -159,15 +159,7 @@ session:
     * Token 路径（单行超长 JSON/URL/base64 绕过行数检测时）：按 2048 token 预算做头 60% / 尾 40% 切分，占位说明"该早期内容已在请求视图中淡化以控制上下文长度，完整原文保留于会话存储"。
   * 淡化仅在视图内存中生效（节点标记 `meta.content_faded`），**不写存档文件、不回写存储**；视图每轮从存储重建，天然幂等。
 * **Rust 实现策略**：
-  * 在 `plugins/session/compression.rs` 的 `fade_aged_content_nodes` 中实现，由 `build_request_view` 作为第一步调用：
-
-    ```rust
-    let mut view = messages.to_vec();
-    // ① 内容节点淡化：B1 保护窗口之外的超大节点做视图级淡化（不落盘、幂等）
-    fade_aged_content_nodes(&mut view, content_keep_recent, line_threshold);
-    ```
-
-  * 旧机制（写入时物理脱水 + `.txt` 存档 + `meta.archive_path` 骨架落库）已废除：不再为每条大消息生成存档文件，深历史信息由第 4 节的 L2 语义快照承接；`meta.archive_path` 现仅由 L0 工具结果守卫写入（指向 `tool_archives/`，配对清理见 `append_messages`/`prune_historical_tool_calls`/`replace_messages`——后者在 L2 语义压缩或紧急截断整体重写消息列表时，删除"旧列表引用且新列表不再引用"的孤儿存档）。
+  * 在 `plugins/session/compression.rs` 的 `fade_aged_content_nodes` 中实现，由 `build_request_view` 作为第一步调用（完整调用代码见第 6 节）。内容淡化不产生任何存档文件；`meta.archive_path` 只由 L0 工具结果守卫写入（指向 `tool_archives/`），深历史信息由第 4 节的 L2 语义快照承接。存档配对清理见 `append_messages`/`prune_historical_tool_calls`/`replace_messages`——后者在 L2 语义压缩或紧急截断整体重写消息列表时，删除"旧列表引用且新列表不再引用"的孤儿存档。
 
 ---
 
@@ -226,7 +218,7 @@ session:
   * 被删除消息若关联 `.txt` 存档文件，存档文件同步物理删除，杜绝磁盘文件泄露。
   * **只保留完整的 User / Assistant 文本对话**，本地存储长期维持在极简规模。
 * **Rust 实现策略**：
-  * **物理清理 (`plugins/session/chat_session.rs` 内的 `prune_historical_tool_calls`，保存消息时调用；体检备注 audit-5：原独立文件 `context.rs` 因唯一消费者就是 chat_session，已并入)**：
+  * **物理清理 (`plugins/session/chat_session.rs` 内的 `prune_historical_tool_calls`，保存消息时调用；该函数只被 session 插件消费，定义在 session 插件内)**：
 
     ```rust
     // keep_turns = 配置的 context_messages（默认 6）：
@@ -252,7 +244,7 @@ session:
   * **第三步：工具明细骨架化 (Layered Sliding Window)**。全局窗口 `tool_context_window`（默认 **15**，按 ToolCall 个数计数）约束**未声明保留策略**（`All`）的工具；从**当轮**工具列表实时解析每个工具的能力声明（`context_retention`：`LastOnly` / `LastN(n)`，按工具短名——名称最后一个 `/` 之后的部分——匹配），**声明了策略的工具其最近 N 次调用即使滚出全局窗口也完整保留**（LastOnly=最新 1 次），策略保留优先于全局窗口——否则 todo 清单等"只有最新一次有意义"的工具会在长会话中丢失最新状态，引发大模型重复写入。窗口外的调用参数与结果替换为占位文案并**保留一行摘要**（失败结果：错误类型 + 工具名 + 首行原因；成功结果：首个非空行摘要，单条摘要上限 48 Token；无法提取摘要时退回纯占位文案），**骨架化的 ToolCall 参数保留定位锚点回声**（`path`/`command`/`url`/`pattern` 等关键参数截断回显于占位符，约 10 Token/条——否则"读过某文件第 N 行"这类摘要因缺失文件路径而无法回溯），**只骨架化、不删除，且 ToolCall↔Tool 配对与 parent_id 完整保留**，不会造成大模型逻辑断联。
   * **第四步：Token 水位提醒 (Nudge)**。当上下文 Token 估计值达到模型上下文限制的 **55%**（`CONTEXT_NUDGE_THRESHOLD`）且 `enable_compact_tool` 开启时，向视图末尾追加一条 `meta.kind = "context_nudge"` 的 User 提醒，引导大模型主动调用 `context_compact` 工具；**请求级注入、每个请求最多一次**，不落库、不占用轮次窗口的 User 计数，也不会在前端以用户消息形式出现。
 * **Rust 实现策略**：
-  * 唯一入口为 `plugins/session/compression.rs` 的 `build_request_view`，由 `plugins/session/chat_loop.rs` 主循环**每轮请求构建前**调用（骨架化实现 `apply_layered_sliding_window` 位于 `plugins/session/context_window.rs`——体检备注 audit-5：Phase C 曾归 `symbio_core`，E-② 后仅本插件消费，随 Phase sink 下沉回 session；原 `plugins/session/context.rs` 已删除，其 `prune_historical_tool_calls` 并入 `chat_session.rs`）：
+  * 唯一入口为 `plugins/session/compression.rs` 的 `build_request_view`，由 `plugins/session/chat_loop.rs` 主循环**每轮请求构建前**调用（骨架化实现 `apply_layered_sliding_window` 位于 `plugins/session/context_window.rs`；归属：`context_window.rs` 与 `chat_session.rs` 均为 session 插件私有，core 不依赖它们）：
 
     ```rust
     pub fn build_request_view(

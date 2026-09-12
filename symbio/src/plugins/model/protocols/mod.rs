@@ -1,18 +1,18 @@
-//! MODEL 协议模块 —— 协议契约的插件内化实现。
+//! MODEL 协议模块 —— 协议契约（model 插件私有）。
 //!
 //! `trait ModelProtocol`（协议适配钩子）是 model 插件的**私有抽象**：
 //! 钩子签名全部收 `&ModelProviderConfig`（持久化配置 schema），由
 //! `bound_provider::BoundProvider` 绑定配置与协议后实现 core 的纯
-//! `ModelProvider` trait。core 不再暴露任何协议抽象——插件外部只见
+//! `ModelProvider` trait。core 不承载任何协议抽象——插件外部只见
 //! `dyn ModelProvider`。
 //!
 //! 本模块同时承载：
-//! - `MODEL_PROTOCOL_*` 注册常量（自 core `ids.rs` 迁入，属插件内部实现细节）
+//! - `MODEL_PROTOCOL_*` 注册常量（插件内部实现细节，不外泄）
 //! - `resolve_protocol_id`：`api_protocol` 别名 → 注册 id 的解析（含兜底）
 //! - 各协议实现（openai_chat / openai_responses / anthropic_messages / gemini_api）
 //!   与 OpenAI 兼容网关的上下文探测（context_probe）
 //!
-//! 协议的连通性验证统一为 `ModelProtocol::ping` 直调，不再经由会话通道收帧。
+//! 协议的连通性验证统一为 `ModelProtocol::ping` 直调。
 
 mod anthropic_messages;
 mod context_probe;
@@ -29,7 +29,7 @@ use serde_json::Value;
 
 use super::model_providers::ModelProviderConfig;
 
-// ============ Model 协议 id（自 core ids.rs 迁入） ============
+// ============ Model 协议 id ============
 
 /// Anthropic Messages 协议
 pub const MODEL_PROTOCOL_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
@@ -61,11 +61,11 @@ pub fn resolve_protocol_id(api_protocol: &str) -> &'static str {
     }
 }
 
-/// 协议适配钩子 —— model 插件私有契约（原 core `ModelProtocol` trait 内化）。
+/// 协议适配钩子 —— model 插件私有契约。
 ///
-/// 与旧版 core trait 的唯一差异：钩子不再收 `&ModelProvider`（配置 +
-/// 协议实例的运行期聚合体），而是直接收 `&ModelProviderConfig`（持久化
-/// 配置 schema）。协议实现只读配置字段，与绑定方式解耦。
+/// 钩子签名一律收 `&ModelProviderConfig`（持久化配置 schema），不收
+/// `&ModelProvider`（配置 + 协议实例的运行期聚合体）：协议实现只读配置字段，
+/// 与绑定方式解耦。
 #[async_trait]
 pub trait ModelProtocol: Send + Sync {
     /// 请求目标 URL（含路径）

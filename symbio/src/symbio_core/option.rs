@@ -3,7 +3,8 @@
 //! ## 与能力收集机制的关系
 //!
 //! 会话能力（工具 / 模型服务 / 系统提示词）经 `CapabilityVisitor` +
-//! `Plugin::traverse(TRAVERSE_AVAILABLE_TOOLS)` 收集（见 [`crate::symbio_core::chat_pipeline`]）。
+//! `Plugin::traverse(TRAVERSE_AVAILABLE_TOOLS)` 收集（收集管线由 session 插件持有，
+//! 见 `plugins/session/chat_pipeline.rs`）。
 //! 本模块是同一机制的**平行第二通道**：选项（会话输入区下方的可选项）
 //! 经 [`OptionVisitor`] + `Plugin::traverse(TRAVERSE_AVAILABLE_OPTIONS)` 收集。
 //!
@@ -102,7 +103,7 @@ impl OptionVisitor for DefaultOptionVisitor {
 /// 所需的上下文键——通常是**会话当前状态**（`SESSION_ID` / `AGENT_ID` /
 /// `WORKDIR` 等），贡献插件据此回填节点的 `value`（当前选中值）。
 ///
-/// 失败降级语义与 [`crate::symbio_core::collect_capabilities`] 一致：
+/// 失败降级语义与 `collect_capabilities`（`plugins/session/chat_pipeline.rs`）一致：
 /// 父插件缺失返回空收集器，单个插件 traverse 失败只记日志。
 pub async fn collect_options(
     parent: Option<&Arc<dyn Plugin>>,

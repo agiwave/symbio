@@ -77,7 +77,7 @@ impl McpManager {
         let (mut child, mut stdout, _negotiated, _server_name, _server_version, _instructions) =
             stdio_handshake(config).await?;
 
-        // 4) BUG-MR21 修复：显式调用 `tools/list`，因为很多 server 不在 initialize 响应中返回 tools
+        // 4) BUG-MR21：显式调用 `tools/list`，因为很多 server 不在 initialize 响应中返回 tools
         let tools = match stdio_tools_list(&mut child, &mut stdout, STDIO_READ_TIMEOUT).await {
             Ok(t) => t,
             Err(e) => {

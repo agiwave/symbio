@@ -17,4 +17,4 @@
 
 ## 关联
 
-- 工具收集管线：`symbio_core/chat_pipeline.rs`
+- 工具收集管线：`plugins/session/chat_pipeline.rs`

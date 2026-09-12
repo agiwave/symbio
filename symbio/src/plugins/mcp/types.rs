@@ -4,7 +4,7 @@
 //!
 //! 包含 JSON-RPC 2.0 协议消息、MCP 工具 / 错误 / 初始化响应等。
 //!
-//! ## 职责划分（2026-07-06 重构）
+//! ## 职责划分
 //!
 //! - **后端**（`symbio/src/plugins/mcp/`）：实现 MCP 客户端（stdio / http transport），
 //!   作为 agent 工具机制的延伸，**仅在 agent 实际需要某个 MCP 工具时**才按需
@@ -12,7 +12,7 @@
 //! - **前端**（`tauri`）：仅负责 MCP Server 的**配置管理**（CRUD），不实现
 //!   任何 transport 客户端。
 //!
-//! 因此 `McpServerConfig` 的权威定义在 `symbio_core/schemas/mcp_config.rs`
+//! 因此 `McpServerConfig` 的权威定义在本插件的 `schemas/mcp_config.rs`
 //! （持久化层）；本文件中的 `JsonRpcRequest` / `JsonRpcResponse` /
 //! `McpTool` / `McpToolCallResponse` 等是 JSON-RPC 协议消息，与持久化类型
 //! 通过 plugin 层转换。

@@ -1,4 +1,4 @@
-//! Telegram 插件的配置 schema（原 `symbio_core::schemas::telegram`，仅本插件使用，故下放）
+//! Telegram 插件的配置 schema（只被本插件消费，故定义在插件内部）
 
 use serde::{Deserialize, Serialize};
 

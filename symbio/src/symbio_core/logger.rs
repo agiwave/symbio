@@ -74,7 +74,7 @@ macro_rules! plugin_error {
             eprintln!("[{} ERROR] {}", $plugin, format_args!($fmt, $($arg)*));
         }
     };
-    // 支持单表达式形式 (兼容旧代码): plugin_error!("name", format!(...)) 或 plugin_error!("name", "msg")
+    // 支持单表达式形式: plugin_error!("name", format!(...)) 或 plugin_error!("name", "msg")
     ($plugin:expr, $err:expr) => {
         if $crate::symbio_core::is_logger_initialized() {
             tracing::error!(plugin = %$plugin, error = ?$err);

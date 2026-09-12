@@ -11,8 +11,8 @@ pub use crate::symbio_core::CapabilityMeta;
 
 /// 工具调用定义
 ///
-/// Phase sink：原 `symbio_core::types::ToolCall`，全仓库唯一消费者为 model
-/// 插件（message_builder 构造请求包 + NativeMessage 携带），随消费者下沉至此。
+/// 归属规则：全仓库唯一消费者是 model 插件（message_builder 构造请求包 +
+/// NativeMessage 携带），故定义在本插件内部，core 不承载。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]

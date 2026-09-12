@@ -1,6 +1,6 @@
 //! Shell 命令执行工具 - 实现 Tool trait
 //!
-//! ## 安全模型（PROJECT_SCAN_REPORT.md P16 审计要点）
+//! ## 安全模型
 //!
 //! - `command` 字段是用户/Agent 提供的**整条 shell 命令**，不是部分插值。
 //!   因此不构成"把不可信数据拼进固定命令"的注入模式。
@@ -21,8 +21,8 @@
 //!   工具最终结果（对齐 run.rs 哨兵协议）；
 //! - 中止（cancel_token）/超时（SHELL_TIMEOUT_SECS）时 kill 子进程并收尸。
 //!
-//! 非流式回退（无 RESULT_MSG_ID 的直连调用，如 MCP 网关）：保持原
-//! `cmd.output()` 等待式行为不变。
+//! 非流式回退（无 RESULT_MSG_ID 的直连调用，如 MCP 网关）：走 `cmd.output()`
+//! 等待式行为。
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::system::{decode_output, validate_params};
 use crate::symbio_core::{
@@ -581,7 +581,7 @@ mod tests {
         req.set(crate::symbio_core::WORKDIR, ".".to_string());
         req.set(crate::symbio_core::RESULT_MSG_ID, "res-1".to_string());
         req.set(crate::symbio_core::TOOL_CALL_ID, "tc-1".to_string());
-        // payload 以原生 JSON 存储（等价于 deprecated PAYLOAD 键，避免警告）
+        // payload 以原生 JSON 存储：typed PAYLOAD 键带 deprecated 标记，用 set_raw 规避告警
         req.set_raw(
             "payload",
             StdArc::new(json!({ "command": command, "approved": true })),

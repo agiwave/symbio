@@ -5,8 +5,8 @@
 //! - Provider 注册：traverse 时按上下文解析出唯一生效 Provider
 //!   （ctx[PROVIDER_ID] > 默认 > 首个启用），绑定配置与协议实现为
 //!   `BoundProvider`（core `ModelProvider` trait 的生产实现）注册进
-//!   CAPABILITY_VISITOR（chat 编排与限流已迁往 session 插件，
-//!   model 降级为无状态 LLM 网关）
+//!   CAPABILITY_VISITOR。本插件只做无状态 LLM 网关：chat 编排与限流属于
+//!   session 插件
 
 use super::bound_provider::BoundProvider;
 use super::handlers;
@@ -467,7 +467,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
             .collect::<Vec<_>>())
     }
 
-    /// 表单上传的校验/规范化：填充 id/name 缺省值 + 连接校验（对齐旧 `providers/set`）
+    /// 表单上传的校验/规范化：填充 id/name 缺省值 + 连接校验
     ///
     /// 返回规范化后的 manifest（实际写盘内容）。
     async fn validate_manifest(
@@ -490,7 +490,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
             ));
         }
 
-        // 对齐旧 `providers/set`：保存前校验连接（manifest 携带 skip_validation=true 时跳过）
+        // 保存前必须校验连接（manifest 携带 skip_validation=true 时跳过）
         let skip_validation = manifest
             .get("skip_validation")
             .and_then(|v| v.as_bool())
@@ -643,7 +643,7 @@ impl Plugin for ModelPlugin {
                 schema: Self::config_schema(),
             })),
 
-            // Phase E-②："chat" 路由已随会话编排迁往 session 插件
+            // chat 族路由属于 session 插件（会话编排），本插件不实现
             "chat_sync" => Err(PluginError::NotImplemented),
             "status" => {
                 let providers = self.providers.read().await;
