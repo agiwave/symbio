@@ -20,6 +20,7 @@
 //! 目录名安全化沿用 `safe_id`（`/ \ :` → `_`）；子会话 id 由系统生成，
 //! 与顶层 id 同一格式约束。
 
+use super::super::paths::safe_id;
 use super::SessionStore;
 use crate::plugins::session::types::Session;
 use crate::symbio_core::PluginError;
@@ -35,6 +36,12 @@ pub struct FileSessionStore {
 /// 父会话目录内存放子会话的固定子目录名
 const SUB_SESSIONS_DIR: &str = "sessions";
 
+/// 会话主文件名（一个会话目录内的唯一真源）
+const SESSION_FILE: &str = "session.json";
+
+/// 会话主文件的原子写临时文件名
+const SESSION_FILE_TMP: &str = "session.json.tmp";
+
 impl FileSessionStore {
     pub fn new(base_dir: PathBuf) -> Self {
         Self { base_dir }
@@ -42,23 +49,23 @@ impl FileSessionStore {
 
     /// `<base_dir>/<safe_id>/`
     ///
-    /// safe_id 的唯一实现在 `super::super::paths::safe_id`（历史上有 4 处
+    /// safe_id 的唯一实现在 [`super::super::paths::safe_id`]（历史上有 4 处
     /// 重复实现，已收敛；此处 base_dir 由外部注入，仅复用 id→目录名映射）。
     pub fn dir_for(base_dir: &Path, session_id: &str) -> PathBuf {
-        base_dir.join(super::super::paths::safe_id(session_id))
+        base_dir.join(safe_id(session_id))
     }
 
     /// `<base_dir>/<safe_id>/session.json`
     fn file_for(base_dir: &Path, session_id: &str) -> PathBuf {
-        Self::dir_for(base_dir, session_id).join("session.json")
+        Self::dir_for(base_dir, session_id).join(SESSION_FILE)
     }
 
     /// 子会话目录：`<base_dir>/<safe(父)>/sessions/<safe(子)>/`
     fn sub_dir_for(base_dir: &Path, parent_id: &str, session_id: &str) -> PathBuf {
         base_dir
-            .join(super::super::paths::safe_id(parent_id))
+            .join(safe_id(parent_id))
             .join(SUB_SESSIONS_DIR)
-            .join(super::super::paths::safe_id(session_id))
+            .join(safe_id(session_id))
     }
 
     /// 归属父会话 id（metadata.parent_session_id；空/自引用视为无归属）
@@ -92,8 +99,8 @@ impl FileSessionStore {
             let dir = entry
                 .path()
                 .join(SUB_SESSIONS_DIR)
-                .join(super::super::paths::safe_id(session_id));
-            if dir.join("session.json").is_file() {
+                .join(safe_id(session_id));
+            if dir.join(SESSION_FILE).is_file() {
                 return Some(dir);
             }
         }
@@ -109,7 +116,7 @@ impl FileSessionStore {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                if let Some(s) = Self::read_session_file(&path.join("session.json")) {
+                if let Some(s) = Self::read_session_file(&path.join(SESSION_FILE)) {
                     sessions.push(s);
                 }
             }
@@ -135,7 +142,7 @@ impl SessionStore for FileSessionStore {
         }
         // 顶层未命中：嵌套查找（子会话凭自身 id 直接寻址）
         if let Some(dir) = self.find_nested_dir(session_id) {
-            if let Some(s) = Self::read_session_file(&dir.join("session.json")) {
+            if let Some(s) = Self::read_session_file(&dir.join(SESSION_FILE)) {
                 return Ok(s);
             }
         }
@@ -152,14 +159,14 @@ impl SessionStore for FileSessionStore {
             .await
             .map_err(|e| PluginError::InternalError(format!("创建会话目录失败: {e}")))?;
 
-        let path = dir.join("session.json");
+        let path = dir.join(SESSION_FILE);
         let content = serde_json::to_string_pretty(session)
             .map_err(|e| PluginError::InternalError(format!("序列化会话失败: {e}")))?;
 
         // 原子写：先写临时文件再 rename 覆盖。直接 fs::write（O_TRUNC + write）
         // 在多个并发保存交错时会留下"短 JSON + 长旧内容残留"，产生 trailing
         // characters 损坏；rename 覆盖保证磁盘上永远是某一刻的完整版本。
-        let tmp = dir.join("session.json.tmp");
+        let tmp = dir.join(SESSION_FILE_TMP);
         tokio::fs::write(&tmp, &content)
             .await
             .map_err(|e| PluginError::InternalError(format!("写入会话临时文件失败: {e}")))?;
@@ -204,7 +211,7 @@ impl SessionStore for FileSessionStore {
             if !path.is_dir() {
                 continue;
             }
-            let session_file = path.join("session.json");
+            let session_file = path.join(SESSION_FILE);
             if !session_file.exists() {
                 continue;
             }
