@@ -213,64 +213,94 @@ impl SessionPlugin {
         )))
     }
 
+    /// UI 配置 schema。
+    ///
+    /// 默认值单一真源 = `SessionConfig::default()`（其字段 serde default 与该 impl 同源）：
+    /// 本函数只描述 UI 元信息（类型/标题/说明/枚举候选），默认值一律从序列化后的
+    /// 默认配置读取，杜绝历史上 schema 与 serde 双份字面量的漂移
+    /// （曾出现 `max_tool_rounds` schema=15 而 serde=65535）。
+    ///
+    /// 注：不可配置字段（如已删除的 `storage_dir` / `session_id`）不出现在本 schema 中，
+    /// 由 `test_schema_covers_all_configurable_fields` 与结构体字段集合双向锁定。
     pub fn config_schema() -> Value {
+        let defaults =
+            serde_json::to_value(SessionConfig::default()).unwrap_or_else(|_| json!({}));
+        let d = |key: &str| defaults.get(key).cloned().unwrap_or(Value::Null);
         json!({
             "type": "object",
             "properties": {
                 "max_messages": {
                     "type": "integer",
                     "title": "最大消息数",
-                    "description": "单个会话保留的最大消息数量",
-                    "default": 100
+                    "description": "存储层保留的最大用户轮次数（超出按 FIFO 淘汰；0 表示不限制）",
+                    "default": d("max_messages")
                 },
                 "auto_compress": {
                     "type": "boolean",
                     "title": "自动压缩",
                     "description": "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）",
-                    "default": true
+                    "default": d("auto_compress")
                 },
                 "enable_compact_tool": {
                     "type": "boolean",
                     "title": "工具压缩",
                     "description": "是否向模型提供主动压缩工具（context_compact）与水位提醒；关闭后仅保留自动压缩。默认关闭，需手动开启",
-                    "default": false
+                    "default": d("enable_compact_tool")
                 },
                 "context_messages": {
                     "type": "integer",
                     "title": "上下文消息数量",
                     "description": "每次发送给 MODEL 的历史消息数量限制 (0 表示不限制)",
-                    "default": 6
+                    "default": d("context_messages")
                 },
                 "max_tool_rounds": {
                     "type": "integer",
                     "title": "最大工具轮数",
-                    "description": "单轮会话中允许的最大工具调用迭代轮数",
-                    "default": 15
+                    "description": "单轮会话中允许的最大工具调用迭代轮数（软上限，达到时明确提示后退出；0 表示不限制，即默认值——产品决策：不设硬性轮次上限）",
+                    "default": d("max_tool_rounds")
                 },
                 "compress_line_threshold": {
                     "type": "integer",
                     "title": "内容节点淡化阈值（行）",
                     "description": "请求视图中单条内容消息超过此行数（或 token 超预算）时做头尾淡化；存储恒为完整原文",
-                    "default": 200
+                    "default": d("compress_line_threshold")
                 },
                 "compress_keep_recent": {
                     "type": "integer",
                     "title": "内容节点淡化保护数",
                     "description": "最近的 Text/Reasoning 内容节点在请求视图中豁免淡化的保护条数（B1 保护窗口），0 表示不保护",
-                    "default": 3
+                    "default": d("compress_keep_recent")
                 },
                 "tool_context_window": {
                     "type": "integer",
                     "title": "工具上下文窗口（轮数）",
                     "description": "保留完整结果的最近工具调用数量限制（滑动窗口）",
-                    "default": 15
+                    "default": d("tool_context_window")
+                },
+                "fade_activate_rounds": {
+                    "type": "integer",
+                    "title": "工具淡化激活轮数",
+                    "description": "单轮请求的工具迭代轮数超过此值后，请求视图把较早轮次的工具结果压成头尾摘要（存储保留全文）；0 表示每一轮都淡化",
+                    "default": d("fade_activate_rounds")
+                },
+                "fade_keep_recent_turns": {
+                    "type": "integer",
+                    "title": "工具淡化保留轮数",
+                    "description": "淡化时保持原文的最近 user turn 数，保证模型对\"最近在做什么\"的记忆不被摘要打断；0 表示全部淡化",
+                    "default": d("fade_keep_recent_turns")
+                },
+                "prune_tool_history": {
+                    "type": "boolean",
+                    "title": "写入期裁剪工具历史",
+                    "description": "落库时物理删除 context_messages 轮之前的工具调用链（Tool/ToolCall/Reasoning）及其存档；关闭后存储保留完整原文，工具链裁剪只发生在请求视图（体积换可回看性）",
+                    "default": d("prune_tool_history")
                 },
                 "store_kind": {
                     "type": "string",
                     "title": "存储后端",
-                    "description": "会话数据的存储后端类型 (file: 目录文件; sqlite: SQLite 数据库)",
-                    "enum": ["file", "sqlite"],
-                    "default": "file"
+                    "description": "会话数据的存储后端类型 (file: 目录文件; sqlite: SQLite 数据库; memory: 进程内内存，不落盘、进程退出即丢失)",
+                    "enum": ["file", "sqlite", "memory"],
+                    "default": d("store_kind")
                 }
             }
         })
@@ -725,25 +755,128 @@ mod tests {
         );
     }
 
-    /// 验证 SessionConfig 不再包含 storage_dir 字段
+    /// 验证 SessionConfig 不再包含已删除的死字段：
+    /// - `storage_dir`（存储根由 HomedirRegistry 统一决定）
+    /// - `session_id`（零消费者；id 由会话目录名决定，配置内自指冗余）
     #[test]
-    fn test_session_config_has_no_storage_dir() {
+    fn test_session_config_has_no_dead_fields() {
         let cfg = SessionConfig::default();
         let json = serde_json::to_value(&cfg).unwrap();
-        assert!(
-            json.get("storage_dir").is_none(),
-            "SessionConfig 不应再包含 storage_dir 字段, got: {json}"
-        );
+        for key in ["storage_dir", "session_id"] {
+            assert!(
+                json.get(key).is_none(),
+                "SessionConfig 不应再包含 {key} 字段, got: {json}"
+            );
+        }
     }
 
-    /// 验证从含 storage_dir 的旧配置反序列化时，字段被忽略
+    /// 验证从含旧字段的配置反序列化时，未知键被静默忽略（旧 session_config.json
+    /// 无需迁移即可继续加载）。
     #[test]
-    fn test_session_config_deserialize_ignores_storage_dir() {
+    fn test_session_config_deserialize_ignores_legacy_keys() {
         let json = serde_json::json!({
             "storage_dir": "/tmp/should_be_ignored",
+            "session_id": "stale-id-should-be-ignored",
             "max_messages": 42,
         });
         let cfg: SessionConfig = serde_json::from_value(json).unwrap();
         assert_eq!(cfg.max_messages, 42, "max_messages 应被正确反序列化");
+    }
+
+    // ==================== 配置契约一致性（复杂度审计 P0-1 / P1-①）====================
+
+    /// 核心回归网：`config_schema` 的每个 `default` 必须等于 `SessionConfig::default()`
+    /// 对应字段的值。历史上两处各自维护字面量，出现 `max_tool_rounds` schema=15 而
+    /// serde=65535 的漂移（用户看到 15 的默认值，实际行为是无限轮次）。
+    /// schema 现已改为从 `SessionConfig::default()` 派生，本测试锁定这一不变式。
+    #[test]
+    fn config_schema_defaults_match_session_config_default() {
+        let schema = SessionPlugin::config_schema();
+        let props = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("config_schema 必须有 properties 对象");
+        let defaults = serde_json::to_value(SessionConfig::default())
+            .expect("SessionConfig::default() 必须可序列化");
+
+        for (key, field) in props {
+            let declared = field
+                .get("default")
+                .unwrap_or_else(|| panic!("schema 字段 {key} 缺少 default"));
+            let actual = defaults
+                .get(key)
+                .unwrap_or_else(|| panic!("schema 声明了 SessionConfig 不存在的字段 {key}"));
+            assert_eq!(
+                declared, actual,
+                "配置契约漂移：schema[{key}].default={declared} 但 SessionConfig::default().{key}={actual}"
+            );
+        }
+    }
+
+    /// schema 不得遗漏 `SessionConfig` 的任何**可配置**字段（否则该字段在设置面板
+    /// 不可见，且上面的逐字段比对会失去覆盖）。
+    #[test]
+    fn config_schema_covers_all_session_config_fields() {
+        /// 非用户可配置字段白名单。历史上 `session_id` 在此豁免——它是全仓零消费者、
+        /// 零赋值的死字段（配置按会话目录存放，id 由目录名决定），已随复杂度审计 R8
+        /// 从 `SessionConfig` 删除，故白名单现为空。保留机制以便未来出现真正的
+        /// 身份/路由字段时使用。
+        const NON_CONFIGURABLE: &[&str] = &[];
+
+        let schema = SessionPlugin::config_schema();
+        let props = schema.get("properties").unwrap().as_object().unwrap();
+        let defaults = serde_json::to_value(SessionConfig::default()).unwrap();
+        let fields = defaults.as_object().unwrap();
+
+        for key in fields.keys() {
+            if NON_CONFIGURABLE.contains(&key.as_str()) {
+                continue;
+            }
+            assert!(
+                props.contains_key(key),
+                "SessionConfig 可配置字段 {key} 未出现在 config_schema 中"
+            );
+        }
+    }
+
+    /// `max_tool_rounds` 的契约翻译：0 → `None`（不限制），>0 → `Some(n)`（软上限）。
+    /// 修复前编排层三处无条件 `Some(...)`，使 chat_loop 的 `None` = 无限语义在主路径不可达。
+    #[test]
+    fn max_tool_rounds_zero_maps_to_unlimited() {
+        let cfg = SessionConfig {
+            max_tool_rounds: 15,
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.model_chat_max_tool_rounds(),
+            Some(15),
+            "显式 >0 的值应作为软上限下发"
+        );
+
+        let cfg = SessionConfig {
+            max_tool_rounds: 0,
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.model_chat_max_tool_rounds(),
+            None,
+            "0 必须翻译为 None（不限制），而非 Some(0)（0 轮即熔断）"
+        );
+    }
+
+    /// 默认配置的产品意图锁定：默认**不设硬性轮次上限**，以显式语义 `0`（不限制）
+    /// 表达，而非魔法数 65535（旧默认，行为等价但语义含糊）。
+    #[test]
+    fn default_max_tool_rounds_is_effectively_unlimited() {
+        let cfg = SessionConfig::default();
+        assert_eq!(
+            cfg.max_tool_rounds, 0,
+            "默认轮次上限必须是 0 = 不限制（用户明确要求不设硬上限）"
+        );
+        assert_eq!(
+            cfg.model_chat_max_tool_rounds(),
+            None,
+            "默认配置翻译到 Request 层必须是 None（无限轮次）"
+        );
     }
 }

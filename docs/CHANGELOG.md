@@ -18,6 +18,75 @@
 
 ***
 
+## 2026-09-13: Session 插件机制收敛（配置契约单一真源 + 会话/骨架化实现去重 + 存储后端补齐）
+
+对 session 插件做了一轮机制审计并据其落地（取证记录见 `docs/architecture/session-mechanism-audit.md`，
+早期复杂度审计 `session-complexity-audit.md` 已归档为历史版本）。以下为**对外可见**的行为/配置变更：
+
+- **`max_tool_rounds` 默认值 `15` → `0`（`0 = 不限制`）**：此前配置面声明"默认 15"与 README 宣称的
+  "实质无上限"互相矛盾，且 `chat_loop` 另持一份 `unwrap_or(15)` 兜底。现默认值、schema 描述、
+  请求视图三者同源，契约翻译唯一入口 `SessionConfig::model_chat_max_tool_rounds()`（`0 → None`）。
+  行为影响：未显式配置过的会话不再在第 15 轮工具调用处熔断。
+- **`max_messages` 去掉 `.max(500)` 硬下限**：设置面板中小于 500 的值此前静默失效，现按用户设定生效；
+  `0` 表示不限制（与其余窗口类配置语义一致）。
+- **`context_messages = 0` 不再越界 panic**：`prune_historical_tool_calls` 对 `keep_turns = 0` 早返回。
+- **`tool_context_window` 与 `context_messages` 解耦**：工具结果骨架化/保留窗口只由
+  `tool_context_window` 控制，不再被 `context_messages` 连带关闭（此前两者门控纠缠导致"只调一个
+  参数却同时改变两条链路"）。
+- **新增 `prune_tool_history`（默认 `true`，保持原行为）**：置 `false` 时存储严格保留完整原文，
+  工具链裁剪完全交给请求视图（不落库）。
+- **轮次淘汰不再物理删除工具归档文件**：FIFO 淘汰与存储期 prune 均只删消息节点；
+  `tool_archives/` 的磁盘生命周期唯一归 L0 守卫的 `TOOL_ARCHIVE_KEEP` 滚动策略（消除"配置说保留
+  归档、实际文件已被删"的矛盾）。
+- **`SessionConfig.session_id` 字段删除**：全仓零读取的死字段（会话身份由目录名/请求注入决定）。
+  旧 `session_config.json` 中残留的该键被 serde 静默忽略，无需迁移。
+- **fade（老旧工具结果淡化）阈值迁入配置**：`fade_activate_rounds`（默认 40）/
+  `fade_keep_recent_turns`（默认 12）取代 `chat_loop` 内的硬编码常量。
+- **`store_kind` 新增 `memory` 且 sqlite 后端纳入回归**：`store_kind` 此前"可配置但 sqlite 无测试、
+  memory 未接线"；现三种后端共享同一份 `SessionStore` 契约测试。
+- **`resume` 与 `message` 互斥**：`session/chat` 同时提供两者时显式报错，不再出现"user 消息被静默
+  落库、但请求实际走 resume 分支"的半生效状态。
+- **内部结构收敛**（无外部行为变化）：会话引擎实现 `impl ChatSession for` 由 4 降到 1
+  （`EphemeralChatSession` / `FallbackChatSession` 删除，临时与降级会话改为
+  `PersistentChatSession` + `InMemorySessionStore`）；头尾切分/截断机制唯一化到 `session::text_split`；
+  `config_schema()` 从 142 行降到 83 行且不含任何 `default` 字面量；`orchestrator.rs` 三分支重复的
+  会话派生字段收敛为 `req_base`；`workdir` 候选路径列表提取为单一常量。
+- **验收**：`cargo check --workspace` 0 error / 0 warning；`cargo clippy --lib --tests -- -D warnings`
+  零告警；`cargo test --lib` **337 passed / 0 failed**（基线 278 → 313 → 337，新增 59 个用例）。
+  关键缺陷均做了变异验证（把修复回退后对应测试确实 FAILED），非恒真断言。
+
+### 同轮收尾：两项"需用户决定"的遗留实施项（2026-09-13 授权实施）
+
+审计中明确标注"超出本次授权范围、需单独决策"的两项，经授权后已实施：
+
+- **`load_history` 序列化行为归一**（复杂度审计 §8.2-P1⑤ 原刻意保留项）：`model_chat::Request` 中
+  它是唯一**缺少** `skip_serializing_if` 的 `Option` 字段——同结构体内自相矛盾：`None` 时其他可选
+  字段消失、它却输出 `"load_history":null`。现补齐属性，使序列化**键集恒定**（`None`/`Some(true)`/
+  `Some(false)` 三态均可无损往返）。语义零变化（`None` 与 `Some(true)` 本就同为"加载历史"）；
+  该结构体为 session→model 的**纯进程内**契约，无 TS 对应文件、不落库、`cli/` 与 `tauri/src-tauri/`
+  均不引用，故无跨语言兼容风险。补 3 个 serde 契约测试，并用穷尽结构体字面量（新增字段即编译失败）
+  锁定契约；变异测试确认有拦截力。
+- **批次 D：`run_chat_loop` 拆分**（机制审计 §4-批次 D 原暂缓项）。前置条件为"watchdog 与
+  `stop_session` 竞态"，经取证确认为**真实缺陷**，先修复再拆分：
+  - **竞态修复**：消费循环的提前出口（watchdog 超时、业务 Error 帧）会跳过 `ai_control_tx = None`
+    清理，留下指向已关闭通道的**陈旧 sender**；而 `handle_abort` 恰以 `ai_control_tx.is_none()`
+    作为子任务退出判据 → abort 必然空等 3s 兜底、Abort 帧投递到死通道被静默丢弃。新增
+    `AiControlGuard`（`Drop` 守卫，与既有 `WorkingGuard` 同型）：登记时快照 request_id，注销时
+    仅当仍是本轮登记才清除——**任何出口（含 panic）都不可能跳过清理**，且不会误伤下一轮的新登记。
+    配套 3 个回归测试（Drop 注销 / disarm 不重复注销 / 陈旧守卫不误伤新登记），变异测试双向验证。
+  - **拆分**：`run_chat_loop` 640 行 → **404 行**（纯骨架：装载上下文 → 消费流 → 收尾分派），
+    提取 `close_turn`（241 行：截断续写 / 主动压缩拦截 / 工具分发 / 父节点状态落库 / 停等判定，
+    以 `TurnFlow::{NextTurn,Finish}` 回传循环决策）与 `run_context_compact`（压缩执行）。
+    **拆函数不拆行为**：搬移段与拆分前逐行比对，241 行区间仅 11 处差异，全部为机械改写
+    （借用形式 `&mut out` / `&channel`、出口 `continue`→`NextTurn`、`return Ok(())`→`Finish`），
+    三条出口路径与拆分前逐一对应；`tool_rounds` 改传 `&mut`（否则计数不推进，已在编译期暴露并修正）。
+    文档强调的不变式"终态唯一落库点在 orchestrator"未被搅浑——`finalize_assistant_turn` 调用点
+    数量与位置与拆分前一致。
+- **本轮验收**：`cargo test --lib` **343 passed / 0 failed**（337 基线 + 3 serde 契约 + 3 守卫回归）；
+  `cargo clippy --lib --tests -- -D warnings` 零告警；`cli`、`tauri/src-tauri` 两 crate `cargo check` 通过。
+
+***
+
 ## 2026-09-11: ModelProvider 纯 trait 化（ModelProtocol 完全内化进 model 插件 + session 压缩路径走 execute_turn）
 
 - **核心 `ModelProvider` 重写为纯 object-safe trait**（`symbio_core/model_provider.rs`）：方法集 `provider_id()` / `api_protocol()` / `rate_limit_ms()` / `max_context_tokens()` / `effective_context_tokens()`（async，= min(用户设置, 服务探测)）/ `execute_turn()`（async，五态错误映射内聚于实现方）。Session 的模型契约收敛为 `Arc<dyn ModelProvider>` 单一形态；`FinishReason`/`Usage`/`ProtocolEvent` 保留 core，`TurnOutput`/`PluginChannel`/`PluginError` 等既有类型不动。

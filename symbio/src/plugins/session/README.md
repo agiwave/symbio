@@ -48,10 +48,10 @@ session:
   # 由 session.metadata.agent_id 按会话记录，后端不提供 default_agent。
   
   # 1. 存储级策略
-  max_messages: 100              # 单会话本地保存的最大对话轮数限制 (以 User 消息计数；代码内强制 .max(500) 兜底，即实际生效下限为 500)
+  max_messages: 100              # 单会话本地保存的最大对话轮数限制 (以 User 消息计数；0 = 不限制，默认 100)
   
   # 2. 单轮迭代策略
-  max_tool_rounds: 65535         # 单轮对话中工具迭代轮数上限 (65535 = 实质无上限；仅当显式调低时作为软上限，达到后提示并退出，不静默熔断)
+  max_tool_rounds: 0             # 单轮对话中工具迭代轮数软上限 (0 = 不限制，默认；仅当显式调低时作为软上限，达到后提示并退出，不静默熔断)
   
   # 3. 微观内容截断策略
   compress_line_threshold: 200   # 单条内容节点（正文/思考）的行数阈值，超过该行数（或 token 超 2048）在请求视图中淡化（存储恒为完整原文）
@@ -62,7 +62,10 @@ session:
   context_messages: 6            # 发送给 AI 的对话上下文滑动窗口轮数 (以 User 消息轮次对齐截取；也是存储期 prune 的保留分水岭)
   
   # 5. 工具滑动窗口策略
-  tool_context_window: 15        # LLM 推理上下文中保留完整明细的最近工具调用数量 (超出者骨架化为带一行摘要的占位符；声明 context_retention 保留策略的工具其最新调用豁免此窗口)
+  tool_context_window: 15        # LLM 推理上下文中保留完整明细的最近工具调用数量 (超出者骨架化为带一行摘要的占位符；声明 context_retention 保留策略的工具其最新调用豁免此窗口；0 = 关闭骨架化)
+  fade_activate_rounds: 40       # 单轮工具迭代超过该轮数后，激活"老旧工具结果淡化"（请求视图层）
+  fade_keep_recent_turns: 12     # 工具淡化时保留完整结果最近轮数（窗口外的更旧结果做头尾摘要）
+  prune_tool_history: true       # 是否在落库时物理裁剪 context_messages 分水岭之前的历史工具链（Tool/ToolCall/Reasoning 及其子节点；只删节点不删归档；内存临时会话自动跳过）
   
   # 6. 水位提醒与主动压缩
   enable_compact_tool: false     # 是否启用 55% Token 水位提醒 (nudge) 注入与 context_compact 主动压缩工具 (默认关闭，须手动开启；关闭后仅保留 70% 自动压缩兜底)
@@ -78,24 +81,23 @@ session:
 
 * **具体规则**：
   * 对每个 Active Session 物理存储的历史记录实施**最大保存对话轮数限制**。
-  * `max_messages` 表示最大保存的对话轮数，每一轮以一个 `User` 消息起始，默认及安全下限为 `500` 轮。
-  * 当存储的对话轮数超出阈值时，自动从会话开头执行 FIFO 裁剪，移除最老的多余对话轮次，且在裁剪时会自动检查并物理清理对应的本地工具结果存档文件，防止磁盘文件泄露。
+  * `max_messages` 表示最大保存的对话轮数，每一轮以一个 `User` 消息起始；默认 `100`，`0` 表示不限制（历史上此处曾有 `.max(500)` 硬下限，导致设置面板中小于 500 的值静默失效，现已移除）。
+  * 当存储的对话轮数超出阈值时，自动从会话开头执行 FIFO 裁剪，移除最老的多余对话轮次。**只删消息节点、不动 `tool_archives/` 归档文件**：归档的磁盘生命周期由 `tool_result_guard` 的滚动淘汰（每会话保留最新 N 个文件）专职负责，避免 `max_messages` 成为静默删文件的破坏性操作。
   * **智能对齐**：此策略确保物理保存下来的会话，其起始消息也总是以一个完整的 `User` 消息起始，从而绝对避免了历史反序列化对齐失败的问题。
 * **Rust 实现策略**：
   * 在 `SessionPlugin::invoke_append` 中，扫描 `User` 消息索引并执行轮数对齐物理截断，确保物理存储也总是以 `User` 消息为开端：
 
     ```rust
-    let max_turns = self.config.read().await.max_messages.max(500);
+    let max_turns = cfg.max_messages; // 0 = 不限制
     let mut user_indices = Vec::new();
     for (idx, msg) in session.messages.iter().enumerate() {
         if msg.role == Some(MessageRole::User) {
             user_indices.push(idx);
         }
     }
-    if user_indices.len() > max_turns {
+    if max_turns > 0 && user_indices.len() > max_turns {
         let start_idx = user_indices[user_indices.len() - max_turns];
-        // 异步检查并物理删除 start_idx 之前老旧存档文件以防止磁盘泄露，然后执行截断：
-        session.messages.drain(0..start_idx);
+        session.messages.drain(0..start_idx); // 归档文件不在此处删除
     }
     ```
 
@@ -108,7 +110,7 @@ session:
 * **具体规则**：
   * 在用户提交单次 Prompt 后，系统在后台开启一个自主决策（Loop）链。
   * 大模型在一个循环中可以做 `推理 -> 工具调用 -> 工具结果返回 -> 再推理 -> 再工具调用` 的迭代。
-  * **默认无上限**：`max_tool_rounds` 默认 `65535`，同时请求层 `max_tool_rounds: None` 也表示无上限，正常对话不会被打断。
+  * **默认无上限**：`max_tool_rounds` 默认 `0`（`0` 即显式『不限制』，不再用 65535 这类魔法数表达同一意图），经 `SessionConfig::model_chat_max_tool_rounds()` 翻译为请求层 `max_tool_rounds: None`，正常对话不会被打断。
   * **显式软上限**：仅当调用方**主动**设置该参数（`Some(max)`）时，迭代达到上限后不再继续调用工具，而是向前端发送明确提示后正常持久化退出（非静默熔断）：
 
     > 已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。
@@ -129,7 +131,7 @@ session:
         }
     }
     ```
-  * Session 编排层（`orchestrator.rs`）默认将配置值透传为 `Some(session_cfg.max_tool_rounds)`，因此配置默认 `65535` 即为"实质无上限"。
+  * Session 编排层（`orchestrator.rs`）通过 `session_cfg.model_chat_max_tool_rounds()` 下发：配置为 `0` 时传 `None`（无限轮次），`> 0` 时传 `Some(n)`（软上限）。此前无条件 `Some(...)` 的写法会让 `0` 变成"0 轮即熔断"的错误行为，已修正。
 
 ---
 
@@ -240,7 +242,7 @@ session:
 
 * **具体规则**（唯一入口 `build_request_view`，严格按序四步执行）：
   * **第一步：超大内容节点淡化 (Content Fade)**。B1 保护窗口（最后一条消息 + 最近 `compress_keep_recent` 个内容节点）之外的超大正文/思考节点，按行数阈值 `compress_line_threshold` 或 2048 Token 预算做头尾摘要淡化（详见第 3 节）；每轮无条件执行，视图级不落库。
-  * **第二步：老旧工具结果淡化 (Tool Fade)**。单轮请求的工具迭代轮数超过 `FADE_ACTIVATE_ROUNDS`（**40** 轮）后激活；最近 `FADE_KEEP_RECENT_TURNS`（**12**）轮之外的工具执行结果，在 **2048 Token 预算**内做头部/尾部摘要压缩并打上 `tool_result_faded` 标记；**绝不改动 Assistant 消息**，推理链文本始终完整。
+  * **第二步：老旧工具结果淡化 (Tool Fade)**。单轮请求的工具迭代轮数超过 `fade_activate_rounds`（默认 **40** 轮，会话配置项）后激活；最近 `fade_keep_recent_turns`（默认 **12** 轮，会话配置项）之外的工具执行结果，在 **2048 Token 预算**内做头部/尾部摘要压缩并打上 `tool_result_faded` 标记；**绝不改动 Assistant 消息**，推理链文本始终完整。两个阈值经 `ChatSession` trait 由会话实现提供（持久会话读配置，临时会话读默认），`chat_loop` 不再持有硬编码常量（审计 R3）。
   * **第三步：工具明细骨架化 (Layered Sliding Window)**。全局窗口 `tool_context_window`（默认 **15**，按 ToolCall 个数计数）约束**未声明保留策略**（`All`）的工具；从**当轮**工具列表实时解析每个工具的能力声明（`context_retention`：`LastOnly` / `LastN(n)`，按工具短名——名称最后一个 `/` 之后的部分——匹配），**声明了策略的工具其最近 N 次调用即使滚出全局窗口也完整保留**（LastOnly=最新 1 次），策略保留优先于全局窗口——否则 todo 清单等"只有最新一次有意义"的工具会在长会话中丢失最新状态，引发大模型重复写入。窗口外的调用参数与结果替换为占位文案并**保留一行摘要**（失败结果：错误类型 + 工具名 + 首行原因；成功结果：首个非空行摘要，单条摘要上限 48 Token；无法提取摘要时退回纯占位文案），**骨架化的 ToolCall 参数保留定位锚点回声**（`path`/`command`/`url`/`pattern` 等关键参数截断回显于占位符，约 10 Token/条——否则"读过某文件第 N 行"这类摘要因缺失文件路径而无法回溯），**只骨架化、不删除，且 ToolCall↔Tool 配对与 parent_id 完整保留**，不会造成大模型逻辑断联。
   * **第四步：Token 水位提醒 (Nudge)**。当上下文 Token 估计值达到模型上下文限制的 **55%**（`CONTEXT_NUDGE_THRESHOLD`）且 `enable_compact_tool` 开启时，向视图末尾追加一条 `meta.kind = "context_nudge"` 的 User 提醒，引导大模型主动调用 `context_compact` 工具；**请求级注入、每个请求最多一次**，不落库、不占用轮次窗口的 User 计数，也不会在前端以用户消息形式出现。
 * **Rust 实现策略**：
@@ -287,7 +289,7 @@ session:
     }
     ```
 
-  * 调用点参数（`chat_loop.rs`，每轮请求前实时计算）：`window = req.tool_context_window.unwrap_or(15)`；`retention` 由 `tools.iter().filter_map(...)` 从当轮工具的能力声明动态解析（`rsplit('/')` 取短名、过滤 `All`）；`fade_active = tool_rounds > FADE_ACTIVATE_ROUNDS`；`fade_keep_turns = FADE_KEEP_RECENT_TURNS`；`inject_nudge` 由 55% 水位检测（`should_emit_context_nudge`）与请求级门控共同决定。
+  * 调用点参数（`chat_loop.rs`，每轮请求前实时计算）：`window = req.tool_context_window.unwrap_or(cfg_defaults.tool_context_window)`（`window == 0` = 关闭工具明细骨架化，与配置文档一致）；`retention` 由 `tools.iter().filter_map(...)` 从当轮工具的能力声明动态解析（`rsplit('/')` 取短名、过滤 `All`）；`fade_active = tool_rounds > fade_activate_rounds`、`fade_keep_recent_turns` 均取自会话配置（经 `ChatSession` trait，`chat_loop` 不再持有硬编码常量）；`inject_nudge` 由 55% 水位检测（`should_emit_context_nudge`）与请求级门控共同决定。
 
 ---
 
@@ -295,11 +297,11 @@ session:
 
 | 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
 | :--- | :--- | :--- | :--- | :--- |
-| **存储级轮数裁剪** | `max_messages` | `invoke_append` 保存时 | FIFO 截断超出的最老对话轮（代码强制下限 500），同步清理关联存档 | `plugins/session/chat_session.rs` |
-| **单轮工具软上限** | `max_tool_rounds` | `run_chat_loop` | 默认 65535 无上限；显式调低时达到上限提示后正常退出（非熔断），支持续跑 | `plugins/session/chat_loop.rs` |
+| **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `plugins/session/chat_session.rs` |
+| **单轮工具软上限** | `max_tool_rounds` | `run_chat_loop` | 默认 0 = 无上限；显式调低时达到上限提示后正常退出（非熔断），支持续跑 | `plugins/session/chat_loop.rs` |
 | **超大内容节点淡化** | `compress_line_threshold`<br>`compress_keep_recent` | `build_request_view` 每轮请求前 | B1 保护窗口（末条 + 最近 3 个内容节点）之外的超大正文/思考按行数（>200）或 token（>2048）头尾摘要淡化；存储恒为完整原文，不落库幂等 | `plugins/session/compression.rs` |
 | **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session.rs`<br>`plugins/session/compression.rs` |
-| **存储期历史工具链物理裁剪** | `context_messages`（分水岭） | `invoke_append` 保存时 | 物理删除最近 6 轮分水岭之前的 Tool / ToolCall / Reasoning 及其子节点与存档 | `plugins/session/chat_session.rs`（`prune_historical_tool_calls`） |
+| **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `plugins/session/chat_session.rs`（`prune_historical_tool_calls`） |
 | **请求视图层动态剪裁** | `tool_context_window` + fade/nudge | `build_request_view` 每轮请求前 | ① 内容节点淡化（每轮无条件）→ ② >40 轮激活老旧工具结果淡化（保留最近 12 轮）→ ③ 窗口（15）外工具明细骨架化为带一行摘要的占位符（配对保留，声明 `context_retention` 的工具最新 N 次豁免窗口）→ ④ 55% 水位提醒；全部不落库幂等 | `plugins/session/compression.rs`<br>`plugins/session/context_window.rs` |
 
 通过这套精心设计的**六维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + L2 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求视图层（`build_request_view` 内容淡化/工具淡化/骨架化/水位提醒，不落库幂等）→ 语义压缩层（`auto_compress` 语义合并）"四层递进的上下文治理链路（"何时落库"判据见第 3 节决策表），实现了高保真度的会话还原、高度清爽的本地数据持久化，并在大模型面前维持了极低 Token 开销与绝对安全的行为控制屏障。

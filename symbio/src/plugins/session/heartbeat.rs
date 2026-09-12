@@ -217,10 +217,15 @@ impl SessionPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
-        let session_id = ctx.get(SESSION_ID).unwrap_or_else(|| "default".to_string());
-        if session_id.is_empty() || session_id == "default" {
-            return Err(PluginError::ValidationError("session_id 不能为空".into()));
-        }
+        let body_id = ctx
+            .payload::<serde_json::Value>()
+            .ok()
+            .and_then(|v| {
+                v.get("session_id")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string())
+            });
+        let session_id = super::orchestrator::resolve_required_session_id(&ctx, body_id.as_deref())?;
 
         let session = self.get_or_create_session(&session_id).await?;
         let hb = HeartbeatConfig::from_metadata(&session.metadata);

@@ -28,6 +28,77 @@ use std::sync::atomic::Ordering;
 
 use std::sync::Arc;
 use std::time::Duration;
+
+/// 解析**必填**会话 id：头 → 请求体 → 报错。
+///
+/// 统一此前散落在 send/resume/abort/heartbeat_trigger 各入口的重复特判。三档取值：
+/// - `ctx` 头里的 `SESSION_ID`（前端 WS 帧注入，优先级最高）；
+/// - `fallback`（请求体 `req.session_id`，RPC 直连调用方）；
+/// - 空串或历史哨兵 `"default"` 一律视为缺失 → `ValidationError`。
+///
+/// **修复的行为**：abort / heartbeat_trigger 两个 one-off 入口此前不看请求体，
+/// 只靠 `unwrap_or("default")` 再自我判定为非法，使 `req.session_id` 永远不可达。
+/// `"default"` 作为非法值的理由并非"它是保留 id"，而是它曾是缺省占位符——
+/// 拿它当真实会话去 abort/触发会静默作用于不存在的会话，宁可显式报错。
+pub(crate) fn resolve_required_session_id(
+    ctx: &Arc<dyn InvokeRequest>,
+    fallback: Option<&str>,
+) -> Result<String, PluginError> {
+    let raw = ctx
+        .get(SESSION_ID)
+        .or_else(|| fallback.map(|s| s.to_string()));
+    match raw {
+        Some(id) if !id.is_empty() && id != "default" => Ok(id),
+        _ => Err(PluginError::ValidationError("session_id 不能为空".into())),
+    }
+}
+
+/// `ai_control_tx` 登记守卫：保证消费循环的**任何**出口都会清走登记的控制通道
+/// sender——正常路径显式 `disarm`，panic unwind 由 `Drop` 兜底。
+///
+/// ## 为什么需要它
+///
+/// `handle_abort` 以「`ai_control_tx` 是否为 `None`」作为 chat_loop 子任务是否
+/// 仍在运行的**唯一**判据。历史上消费循环有两处提前出口（业务 Error 帧、
+/// 1800s 消费超时）写作 `return`，直接跳过了循环之后的清理块，留下指向已关闭
+/// 通道的陈旧 sender——判据从此永久为假：abort 必然空等 3s 才走兜底复位，
+/// 且 Abort 帧投进死通道被静默丢弃（前端收不到中止确认）。
+///
+/// 登记与注销收拢进同一对象后，"新增出口忘记清理"不再能静默通过：`Drop` 保证
+/// 至少有一次清理必然发生，也不依赖后续维护者记住"新增出口必须穿过清理块"这条
+/// 隐性契约。与 [`WorkingGuard`] 同型（后者兜 `is_working`）。
+struct AiControlGuard {
+    state: Arc<ActiveSessionState>,
+    /// `false` 表示已清理，Drop 成为 no-op（正常路径走 `disarm` 同步清理，
+    /// 避免多一次 spawn 调度延迟）。
+    armed: bool,
+}
+
+impl AiControlGuard {
+    async fn disarm(&mut self) {
+        self.state.inner.write().await.ai_control_tx = None;
+        self.armed = false;
+    }
+}
+
+impl Drop for AiControlGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // Drop 中不能 await：优先 `try_write` 就地同步清理（写锁持有期极短，
+        // 几乎总能拿到）；确实取不到才退回 detached spawn（与 WorkingGuard 同型）。
+        if let Ok(mut inner) = self.state.inner.try_write() {
+            inner.ai_control_tx = None;
+            return;
+        }
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.inner.write().await.ai_control_tx = None;
+        });
+    }
+}
+
 /// 工作态守卫：保障 `is_working` 在任何退出路径（包括 panic 崩溃）下都会收敛。
 ///
 /// ## 背景
@@ -433,12 +504,20 @@ impl SessionPlugin {
 
         // 消费循环：消费 host 侧通道（原消费 parent.route 返回的 sub_channel，
         // 帧处理逻辑零改动）。
+        //
+        // 控制通道登记/注销成对出现，注销由 `AiControlGuard` 的 Drop 兜底——
+        // 因此提前 `return` 与 panic 都不会漏掉清理（历史上正是漏清理导致
+        // `handle_abort` 的"子任务是否仍在运行"判据永久为假）。
         {
             let mut sub_channel = host_chan;
-            {
+            let mut ai_control_guard = {
                 let mut inner = state.inner.write().await;
                 inner.ai_control_tx = Some(sub_channel.tx.clone());
-            }
+                AiControlGuard {
+                    state: state.clone(),
+                    armed: true,
+                }
+            };
 
             plugin_debug!(
                 "session",
@@ -469,6 +548,11 @@ impl SessionPlugin {
                             .await;
                         self.broadcast_error_with_idle(&state, msg).await;
                         guard.done = true;
+                        // 本出口已自行完成收尾，直接 return（不再走下方 idle 广播，
+                        // 避免前端收到第二条状态事件）；先显式注销控制通道登记，
+                        // 让 handle_abort 的轮询立即感知（`AiControlGuard::drop`
+                        // 只是 panic 兜底，正常路径不依赖 try_write 的成功）。
+                        ai_control_guard.disarm().await;
                         return;
                     }
                 };
@@ -512,10 +596,11 @@ impl SessionPlugin {
                         let is_abort = frame.is_abort();
                         if is_abort {
                             // 在途 Turn 落库为 Failed + error（前端错误条 + 重试入口），
-                            // 随后 break 走循环后的统一收尾：清 ai_control_tx（让
+                            // 随后 break 走循环后的统一收尾：注销 ai_control_tx（让
                             // handle_abort 的轮询立即感知、免等 3s 兜底）→ 复位
-                            // is_working → guard.done → 广播 idle。注意 break 而非
-                            // return：清理块在 while 之后，return 会跳过它。
+                            // is_working → guard.done → 广播 idle。
+                            // 中止**不是**提前收尾出口（不像 watchdog/业务 Error 那样
+                            // 自行广播过 idle），因此必须 break 到统一收尾。
                             self.persist_failure(
                                 &state,
                                 &session_id,
@@ -536,6 +621,9 @@ impl SessionPlugin {
                         // 导致用户点重试无任何反应（LLM 失败重试不生效 bug 的根因）。
                         self.broadcast_error_with_idle(&state, msg.clone()).await;
                         guard.done = true;
+                        // 同 watchdog 出口：本出口已自行完成 persist_failure + Error
+                        // 广播 + idle，直接 return；显式注销控制通道登记（Drop 仅兜底）。
+                        ai_control_guard.disarm().await;
                         return;
                     }
                     PluginFrame::Data(data) => {
@@ -559,10 +647,9 @@ impl SessionPlugin {
                     }
                 }
             }
-            {
-                let mut inner = state.inner.write().await;
-                inner.ai_control_tx = None;
-            }
+            // 正常通道关闭：chat_loop 已自行收尾，此处注销控制通道登记。
+            // 显式 `disarm` 而非等 Drop——避免多一次调度延迟；两条路径都幂等安全。
+            ai_control_guard.disarm().await;
         }
 
         // NOTE: Model 响应消息**不在这里再次持久化**。
@@ -578,7 +665,11 @@ impl SessionPlugin {
                 );
             }
         }
-        // 正常结束路径：清理 working 状态 + 广播 idle。
+        // 走到这里说明是「正常通道关闭」或「abort 后 break」两条出口之一——
+        // 两者都还没做过状态收敛，统一在此收尾。
+        // （业务 Error 帧 / 消费超时两条提前出口已在循环内自行完成
+        //  `persist_failure` + Error 广播 + idle 并直接 return，不会走到这里，
+        //  因此前端不会收到第二条 idle 状态事件。）
         {
             let mut inner = state.inner.write().await;
             if inner.is_working {
@@ -737,14 +828,8 @@ impl SessionPlugin {
     ) -> InvokeResponse<PluginPayload> {
         let req: session_chat::Request = ctx.payload()?;
 
-        // 1. 统一 session_id 解析与校验
-        let session_id = ctx
-            .get(SESSION_ID)
-            .or_else(|| req.session_id.clone())
-            .unwrap_or_else(|| "default".to_string());
-        if session_id.is_empty() || session_id == "default" {
-            return Err(PluginError::ValidationError("session_id 不能为空".into()));
-        }
+        // 1. 统一 session_id 解析与校验（头 → 请求体 → 报错，见 resolve_required_session_id）
+        let session_id = resolve_required_session_id(&ctx, req.session_id.as_deref())?;
 
         // 2. 统一参数解析（mode/risk_level/provider_id）—— send 和 resume 共用
         let (_mode, _risk_level, provider_id) =
@@ -760,9 +845,18 @@ impl SessionPlugin {
         let user_msg = req.message.clone();
 
         // 4. 分支校验 + is_working 守卫
+        // 两种情况互斥：历史上只校验"至少有一个"，两者同时提供时并不报错，而是
+        // 把 message 追加进存储、同时按 resume 分支发起请求 —— 用户消息落盘却
+        // 不作为本轮驱动输入（仅因 load_history=true 才间接可见），属静默的语义分裂。
+        // 现显式拒绝，让调用方二选一。
         if resume.is_none() && user_msg.is_none() {
             return Err(PluginError::ValidationError(
                 "必须提供 message 或 resume".into(),
+            ));
+        }
+        if resume.is_some() && user_msg.is_some() {
+            return Err(PluginError::ValidationError(
+                "message 与 resume 互斥，不能同时提供".into(),
             ));
         }
         if resume.is_some() {
@@ -913,7 +1007,8 @@ impl SessionPlugin {
 
             // ── 向 model/chat 交付会话引擎句柄（SESSION_HANDLE）──
             // model 不再反向路由 session/open，直接从 ctx 读句柄；
-            // 交付失败仅记日志：model 侧回退内存 FallbackChatSession
+            // 交付失败仅记日志：model 侧回退内存会话（`PersistentChatSession::detached`，
+            // 同一引擎逻辑 + InMemorySessionStore，审计 B1）
             // （与原路由失败路径等价，不阻断会话）。
             if let Ok(session) = this_spawn
                 .open_session_handle(Some(sid_spawn.clone()))
@@ -951,34 +1046,35 @@ impl SessionPlugin {
                 Some(base_prompt)
             };
 
-            // 构造 model_chat::Request：resume 分支 vs message 分支（含 ping 特殊处理）
+            // 构造 model_chat::Request：会话派生字段收敛为单一 base（历史上三个分支
+            // 近重复构造 10 个字段，改一处漏两处），分支只覆盖真正不同的 4 个字段。
+            let req_base = model_chat::Request {
+                system_prompt: None,
+                single_message: None,
+                stream: Some(true),
+                // 0 = 不限制 → None（chat_loop 的无限轮次语义），>0 才是显式软上限
+                max_tool_rounds: session_cfg.model_chat_max_tool_rounds(),
+                tool_context_window: Some(session_cfg.tool_context_window),
+                auto_compress: Some(session_cfg.auto_compress),
+                enable_compact_tool: Some(session_cfg.enable_compact_tool),
+                provider_id: pid_clone.clone(),
+                load_history: None,
+                resume: None,
+            };
             let chat_input = if let Some(tr) = resume_spawn {
                 json!(model_chat::Request {
                     system_prompt: system_prompt_opt,
-                    single_message: None,
-                    thinking: None,
-                    stream: Some(true),
-                    max_tool_rounds: Some(session_cfg.max_tool_rounds),
-                    tool_context_window: Some(session_cfg.tool_context_window),
-                    auto_compress: Some(session_cfg.auto_compress),
-                    enable_compact_tool: Some(session_cfg.enable_compact_tool),
-                    provider_id: pid_clone.clone(),
-                    load_history: Some(true), // resume 必须加载历史以定位目标消息
+                    // resume 必须加载历史以定位目标消息
+                    load_history: Some(true),
                     resume: Some(tr),
+                    ..req_base
                 })
             } else if is_ping {
                 json!(model_chat::Request {
                     system_prompt: Some("You are a helpful assistant.".to_string()),
                     single_message: user_msg_spawn,
-                    thinking: None,
-                    stream: Some(true),
-                    max_tool_rounds: Some(session_cfg.max_tool_rounds),
-                    tool_context_window: Some(session_cfg.tool_context_window),
-                    auto_compress: Some(session_cfg.auto_compress),
-                    enable_compact_tool: Some(session_cfg.enable_compact_tool),
-                    provider_id: pid_clone.clone(),
                     load_history: include_history,
-                    resume: None,
+                    ..req_base
                 })
             } else {
                 // 普通发送：时间 / 工作区上下文挂在用户消息的 LLM prompt 上
@@ -992,15 +1088,8 @@ impl SessionPlugin {
                 json!(model_chat::Request {
                     system_prompt: system_prompt_opt,
                     single_message: single,
-                    thinking: None,
-                    stream: Some(true),
-                    max_tool_rounds: Some(session_cfg.max_tool_rounds),
-                    tool_context_window: Some(session_cfg.tool_context_window),
-                    auto_compress: Some(session_cfg.auto_compress),
-                    enable_compact_tool: Some(session_cfg.enable_compact_tool),
-                    provider_id: pid_clone.clone(),
                     load_history: include_history,
-                    resume: None,
+                    ..req_base
                 })
             };
 
@@ -1034,12 +1123,17 @@ impl SessionPlugin {
         self: Arc<Self>,
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
-        let session_id = ctx
-            .get(crate::symbio_core::SESSION_ID)
-            .unwrap_or_else(|| "default".to_string());
-        if session_id.is_empty() || session_id == "default" {
-            return Err(PluginError::ValidationError("session_id 不能为空".into()));
-        }
+        // 会话 id：头 → 请求体（此前只看头，`unwrap_or("default")` 使其必然报错，
+        // 令 RPC 直连调用方无法通过 payload 指定会话）
+        let body_id = ctx
+            .payload::<serde_json::Value>()
+            .ok()
+            .and_then(|v| {
+                v.get("session_id")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string())
+            });
+        let session_id = resolve_required_session_id(&ctx, body_id.as_deref())?;
         let state = self.active_mgr.get_or_create(&session_id).await;
         self.handle_abort(&state).await;
         Ok(PluginPayload::new(&serde_json::json!({
@@ -1149,7 +1243,7 @@ impl SessionPlugin {
     /// ## 作用域：只有「真正在飞行中的那一个 Turn」会被降级（M-002）
     ///
     /// `collected` 是**整个 `run_chat_loop` 调用期间**累积的全部流式消息快照。
-    /// 一次调用最多可跑 `max_tool_rounds` 轮（默认 65535），因此它往往包含几十上百个
+    /// 一次调用最多可跑 `max_tool_rounds` 轮（默认 0 = 不限制），因此它往往包含几十上百个
     /// **早已成功定稿**的历史 Turn——那些轮次的工具早已执行完毕、结果也早已由
     /// Model 插件在每轮结束时落库。
     ///
@@ -1363,4 +1457,81 @@ fn subtree_of(messages: &[cm::ChatMessage], root: &str) -> std::collections::Has
         }
     }
     ids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbio_core::PluginChannel;
+
+    /// 造一个已登记 `ai_control_tx` 的会话状态（模拟消费循环入口的登记）。
+    async fn armed_state() -> Arc<ActiveSessionState> {
+        let state = Arc::new(ActiveSessionState::with_session_id("s1".into()));
+        let (host_chan, _ai_chan) = PluginChannel::pair(4);
+        state.inner.write().await.ai_control_tx = Some(host_chan.tx.clone());
+        state
+    }
+
+    async fn is_registered(state: &Arc<ActiveSessionState>) -> bool {
+        state.inner.read().await.ai_control_tx.is_some()
+    }
+
+    /// 回归（watchdog 与 `stop_session` 竞态）：消费循环**提前 return** 时，
+    /// 控制通道登记必须随之注销。
+    ///
+    /// 历史缺陷：业务 Error 帧与 1800s 消费超时两处出口写作 `return`，跳过了
+    /// 循环之后的 `ai_control_tx = None` 清理，留下指向已关闭通道的陈旧 sender。
+    /// `handle_abort` 以「登记是否为 `None`」作为子任务是否仍在运行的唯一判据，
+    /// 判据从此永久为假 → abort 必然空等 3s 兜底，且 Abort 帧投进死通道被丢弃。
+    #[tokio::test]
+    async fn early_return_still_unregisters_ai_control_tx() {
+        let state = armed_state().await;
+        assert!(is_registered(&state).await, "前置：入口已登记控制通道");
+
+        // 模拟提前出口：守卫存活期间函数直接 return（正常路径先显式 disarm）
+        async fn early_return(mut guard: AiControlGuard) {
+            guard.disarm().await;
+        }
+        early_return(AiControlGuard { state: state.clone(), armed: true }).await;
+
+        assert!(
+            !is_registered(&state).await,
+            "提前 return 后 ai_control_tx 应已注销，否则 handle_abort 会空等 3s 兜底"
+        );
+    }
+
+    /// 回归（同上，panic / 裸 return 路径）：即使出口既没 `disarm` 也没走到
+    /// 清理块，`Drop` 也必须兜住清理——这是"新增出口忘记清理"不再静默通过的保证。
+    #[tokio::test]
+    async fn guard_drop_unregisters_even_without_explicit_disarm() {
+        let state = armed_state().await;
+        {
+            let _guard = AiControlGuard { state: state.clone(), armed: true };
+            // 故意不调用 disarm：离开作用域应由 Drop 清理
+        }
+        assert!(
+            !is_registered(&state).await,
+            "Drop 兜底失效：登记会永久残留，abort 判据再次退化为假"
+        );
+    }
+
+    /// 幂等性：`disarm` 之后 Drop 不得再做二次清理——否则会误伤后续轮次
+    /// 新登记的控制通道（消费循环与 resume 复用同一 `ActiveSessionState`）。
+    #[tokio::test]
+    async fn disarmed_guard_does_not_clobber_next_turn_registration() {
+        let state = armed_state().await;
+        let mut guard = AiControlGuard { state: state.clone(), armed: true };
+        guard.disarm().await;
+
+        // 模拟下一轮：新的控制通道登记进来
+        let (host_chan, _ai_chan) = PluginChannel::pair(4);
+        state.inner.write().await.ai_control_tx = Some(host_chan.tx.clone());
+
+        drop(guard); // 已 disarm 的旧守卫离开作用域
+
+        assert!(
+            is_registered(&state).await,
+            "旧守卫的 Drop 误清了新一轮的登记：新一轮 abort 将失去中止能力"
+        );
+    }
 }

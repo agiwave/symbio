@@ -527,9 +527,9 @@ const CONTEXT_NUDGE_TEXT: &str =
 ///    全文，阈值取会话配置 line_threshold / token 上限 2048）；
 /// 2. 轮次淡化（fade）：`fade_active`（轮次超过激活阈值）时，对较早的工具结果做
 ///    head/tail 摘要（无存档，存储保留全文）；
-/// 3. 工具级骨架化：`window > 0` 且存在保留策略声明时，按分层滑窗把过期调用的
-///    参数与结果替换为占位文案（ToolCall↔Tool 配对与 parent_id 传播完整保留，
-///    不会造成大模型逻辑断联）；
+/// 3. 工具级骨架化：`window > 0` 时按分层滑窗把过期调用的参数与结果替换为占位
+///    文案（`retention` 为工具自声明的保留策略，可为空——为空时仍执行全局窗口，
+///    ToolCall↔Tool 配对与 parent_id 传播完整保留，不会造成大模型逻辑断联）；
 /// 4. 水位提醒（nudge）：`inject_nudge` 时在视图末尾追加一条一次性系统提示——
 ///    请求级注入、不写会话存储，因此不占用轮次窗口的 User 计数，也不会在前端
 ///    以用户消息的形式出现。
@@ -554,7 +554,7 @@ pub fn build_request_view(
     if fade_active {
         fade_aged_tool_results(&mut view, fade_keep_turns);
     }
-    if window > 0 && !retention.is_empty() {
+    if window > 0 {
         view = super::context_window::apply_layered_sliding_window(&view, window, retention);
     }
     if inject_nudge {
@@ -610,6 +610,12 @@ pub fn fallback_snapshot(text: &str) -> Option<String> {
 ///（多数 provider 的硬要求）。头部插入一条 user 角色的本地说明（告知模型历史
 /// 被截断及转存路径），模型可据此意识到上下文不完整。
 ///
+/// 两处护栏（截断无收益时放弃，原样返回）：
+/// - **轮边界回退不得越过数组末尾**：若起点之后根本没有 user（末条是超预算的
+///   assistant 回复 / 工具结果），继续回退会清空整段历史；
+/// - **保留区必须以 user 开头**：否则首条是父节点已被截断的孤儿 Tool 结果，
+///   进请求前会被 `drop_orphan_messages` 剔空。
+///
 /// 返回 `(新消息列表, 被截断条数)`；若无需截断（本就在预算内）原样返回 `(原列表, 0)`。
 pub fn emergency_tail_compression(
     messages: &[ChatMessage],
@@ -634,6 +640,17 @@ pub fn emergency_tail_compression(
     if start == 0 {
         return (messages.to_vec(), 0);
     }
+    // 回退越过了末尾：起点之后没有 user 轮边界，截断会丢掉全部近期上下文
+    if start >= messages.len() {
+        return (messages.to_vec(), 0);
+    }
+    // 保留区必须以 user 开头：否则首条是父节点已丢失的孤儿 Tool 结果，
+    // 进请求前会被 drop_orphan_messages 剔空，等于什么都没保留
+    if messages[start].role != Some(MessageRole::User) {
+        return (messages.to_vec(), 0);
+    }
+    // 注意：即便保留区自身仍超 target（典型：单条巨型消息），截断依然是净收益
+    // ——它把总量降到了可能的最小值，故此处不以 kept_tokens > target 作为放弃条件。
     let mut note = format!(
         "[CONTEXT TRUNCATED — 本地兜底压缩]\n早期 {start} 条消息因超出 Provider 输入上限被本地截断（LLM 摘要请求与上下文同源超限，无法执行）。近期上下文如下，请基于其继续任务。"
     );
@@ -1424,6 +1441,57 @@ mod tests {
         assert_eq!(view_text(&msgs[1]), r#"{"path":"old.txt"}"#);
     }
 
+    /// 全局窗口独立生效：`retention` 为空（工具均未自声明保留策略）时，
+    /// 仍按 `tool_context_window` 骨架化过期调用。
+    ///
+    /// 回归动机：历史上此处条件是 `window > 0 && !retention.is_empty()`，
+    /// 使全局窗口只在"至少有一个工具声明策略"时才生效——而全仓当前无任何
+    /// 工具声明，等于骨架化机制整体空转（真实长会话中工具全文原样进请求）。
+    #[test]
+    fn test_build_request_view_global_window_applies_without_retention() {
+        let msgs = vec![
+            user_msg("u1"),
+            view_tc("t1", "local/sh", r#"{"command":"ls"}"#),
+            view_result("t1", "old output"),
+            view_tc("t2", "local/read_file", r#"{"path":"b.rs"}"#),
+            view_result("t2", "new output"),
+        ];
+        let retention = std::collections::HashMap::new();
+        // window=1：仅最新一次调用（t2）在窗口内
+        let view = build_request_view(&msgs, 1, &retention, false, 12, 3, 200, false);
+
+        assert!(
+            view_text(&view[1]).contains("skeletonized"),
+            "无保留策略声明时，窗口外的调用参数仍应骨架化"
+        );
+        assert!(
+            view_text(&view[2]).contains("skeletonized"),
+            "无保留策略声明时，窗口外的调用结果仍应骨架化"
+        );
+        assert_eq!(view_text(&view[3]), r#"{"path":"b.rs"}"#);
+        assert_eq!(view_text(&view[4]), "new output");
+        assert_eq!(view[2].parent_id.as_deref(), Some("t1"));
+    }
+
+    /// window=0（显式关闭）时即使有 retention 也不骨架化。
+    #[test]
+    fn test_build_request_view_window_zero_disables_skeletonization() {
+        let msgs = vec![
+            user_msg("u1"),
+            view_tc("t1", "local/file_read", r#"{"path":"old.txt"}"#),
+            view_result("t1", "old content"),
+            view_tc("t2", "local/file_read", r#"{"path":"new.txt"}"#),
+            view_result("t2", "new content"),
+        ];
+        let retention = view_retention(&[(
+            "file_read",
+            crate::symbio_core::ToolContextRetention::LastOnly,
+        )]);
+        let view = build_request_view(&msgs, 0, &retention, false, 12, 3, 200, false);
+        assert_eq!(view_text(&view[1]), r#"{"path":"old.txt"}"#);
+        assert_eq!(view_text(&view[2]), "old content");
+    }
+
     /// 顺序保证：nudge 在骨架化之后追加，始终位于视图末尾；
     /// nudge 不占用轮次窗口计数、不参与骨架化。
     #[test]
@@ -1446,5 +1514,103 @@ mod tests {
         // 末尾是 nudge；倒数第二条仍是保留原文的最新工具结果
         assert!(view_text(view.last().unwrap()).contains("system note"));
         assert_eq!(view_text(&view[view.len() - 2]), "new content");
+    }
+
+    // ── 水位提醒 / 本地兜底压缩（chat_loop 直接调用，审计 §4.2 补测）──────────
+
+    /// 长度可预测的中文消息（CJK ≈ 1 token/字 + 8 框架开销）。
+    fn cn_msg(text: &str) -> ChatMessage {
+        user_msg(text)
+    }
+
+    #[test]
+    fn test_should_emit_context_nudge_threshold() {
+        // 阈值 55%：limit=100 → 55 token 处触发
+        let below = vec![cn_msg(&"字".repeat(40))]; // 40 + 8 = 48
+        let above = vec![cn_msg(&"字".repeat(50))]; // 50 + 8 = 58
+        assert!(!should_emit_context_nudge(&below, 100, 0));
+        assert!(should_emit_context_nudge(&above, 100, 0));
+        // overhead 计入总水位（此前只被 should_start_compression 使用）
+        assert!(should_emit_context_nudge(&below, 100, 20));
+        // 空历史永不提醒
+        assert!(!should_emit_context_nudge(&[], 100, 1000));
+    }
+
+    #[test]
+    fn test_emergency_tail_compression_keeps_turn_boundary() {
+        // 每条 ~108 token（100 中文字 + 8 开销），target=60 只容得下最后一条；
+        // 反向累计后起点回退到最近一条 user（轮边界，不切断 tool_call 配对）
+        let msgs = vec![
+            cn_msg(&"早".repeat(100)),
+            cn_msg(&"期".repeat(100)),
+            cn_msg(&"近".repeat(100)),
+        ];
+        let (out, removed) = emergency_tail_compression(&msgs, 60, None);
+        assert_eq!(removed, 2);
+        assert_eq!(out.len(), 2); // 截断说明 + 保留的最近一轮
+        let head = out[0].content.as_ref().unwrap().to_text();
+        assert!(head.contains("CONTEXT TRUNCATED"));
+        assert!(!head.contains("完整历史转存"), "无转存路径时不输出该段");
+        assert_eq!(
+            out[0]
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("compaction"))
+                .and_then(|v| v.as_str()),
+            Some("emergency_tail")
+        );
+        assert_eq!(
+            out[0]
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("removed_messages"))
+                .and_then(|v| v.as_u64()),
+            Some(removed as u64)
+        );
+        assert_eq!(out[1].content.as_ref().unwrap().to_text(), "近".repeat(100));
+    }
+
+    #[test]
+    fn test_emergency_tail_compression_noop_when_within_target() {
+        let msgs = vec![cn_msg("短"), cn_msg("也很短")];
+        let (out, removed) = emergency_tail_compression(&msgs, 100_000, Some("/tmp/t.json"));
+        assert_eq!(removed, 0);
+        assert_eq!(out.len(), msgs.len());
+    }
+
+    #[test]
+    fn test_emergency_tail_compression_carries_transcript_hint() {
+        let msgs = vec![
+            cn_msg(&"早".repeat(100)),
+            cn_msg(&"期".repeat(100)),
+            cn_msg(&"近".repeat(100)),
+        ];
+        let (out, removed) =
+            emergency_tail_compression(&msgs, 60, Some("/abs/transcript.json"));
+        assert_eq!(removed, 2);
+        let head = out[0].content.as_ref().unwrap().to_text();
+        assert!(head.contains("/abs/transcript.json"));
+        assert_eq!(out.len(), msgs.len() - removed + 1);
+    }
+
+    /// 设计约束固化：末条消息无条件保留；若回退轮边界后起点落到数组末尾
+    /// （唯一可能是末条非 user 且自身超出 target），整次兜底放弃（removed=0）。
+    /// 这是"宁可发送也不丢当前指令"的保守策略，必须有测试钉住，否则改动时
+    /// 容易被无声破坏。
+    #[test]
+    fn test_emergency_tail_compression_gives_up_when_no_turn_boundary() {
+        // 末条是 assistant（无后续 user 轮）：反向累计保留它后，起点回退时
+        // 越过它直达唯一 user（index 0）→ 回扫落到数组末尾 → 放弃截断
+        let msgs = vec![
+            cn_msg("指令"),
+            ChatMessage {
+                role: Some(MessageRole::Assistant),
+                content: Some(MessageContent::Text("答".repeat(500))),
+                ..Default::default()
+            },
+        ];
+        let (out, removed) = emergency_tail_compression(&msgs, 10, None);
+        assert_eq!(removed, 0);
+        assert_eq!(out.len(), 2);
     }
 }

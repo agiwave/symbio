@@ -4,9 +4,7 @@
 //! 消息增删改查、会话删除/清空、
 //! metadata 合并与统一删除路径 `delete_session_internal` 等。
 
-use super::chat_session::{
-    ChatSession, ChatSessionHandle, EphemeralChatSession, PersistentChatSession,
-};
+use super::chat_session::{ChatSession, ChatSessionHandle, PersistentChatSession};
 use super::plugin::SessionPlugin;
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::schemas::{
@@ -316,7 +314,10 @@ impl SessionPlugin {
     ///
     /// - `_t_` 前缀 → 内存 ephemeral 会话；
     /// - 非空 id → 持久会话；
-    /// - None/空 → 内存 ephemeral 会话。
+    /// - None/空 → 内存 ephemeral 会话（固定 id `"ephemeral"`）。
+    ///
+    /// 两类会话共用 [`PersistentChatSession`]，差异只在存储后端（审计 B1）；
+    /// ephemeral 会话的配置取当前值的快照（内存会话不随 `session/config` 变更而变）。
     ///
     /// 消费方：session/open 路由（对外 API），以及会话编排器向 chat_ctx
     /// 交付会话句柄（SESSION_HANDLE，交付失败时 model 侧兜底内存会话）。
@@ -324,25 +325,25 @@ impl SessionPlugin {
         &self,
         session_id: Option<String>,
     ) -> Result<Arc<dyn ChatSession>, PluginError> {
-        let cfg = self.config.read().await;
+        let snapshot = {
+            let cfg = self.config.read().await;
+            cfg.clone()
+        };
 
         let session: Arc<dyn ChatSession> = match session_id {
-            Some(sid) if !sid.is_empty() => {
-                if sid.starts_with("_t_") {
-                    let ephemeral = EphemeralChatSession::new(&cfg);
-                    drop(cfg);
-                    Arc::new(ephemeral)
-                } else {
-                    let store = self.get_store().await?;
-                    drop(cfg);
-                    Arc::new(PersistentChatSession::new(sid, self.config.clone(), store))
-                }
+            Some(sid) if !sid.is_empty() && !sid.starts_with("_t_") => {
+                let store = self.get_store().await?;
+                Arc::new(PersistentChatSession::new(
+                    sid,
+                    self.config.clone(),
+                    store,
+                ))
             }
-            _ => {
-                let ephemeral = EphemeralChatSession::new(&cfg);
-                drop(cfg);
-                Arc::new(ephemeral)
-            }
+            // `_t_` 前缀与空/缺省 id：内存临时会话，配置取当前值快照。
+            // 固定 id "ephemeral"（审计 B2）：随机 id 会让压缩前的 transcript
+            // 转存落到永不复现的目录名下，成为无法关联的孤儿存档。
+            Some(sid) => Arc::new(PersistentChatSession::detached(sid, snapshot)),
+            None => Arc::new(PersistentChatSession::detached("ephemeral", snapshot)),
         };
 
         Ok(session)

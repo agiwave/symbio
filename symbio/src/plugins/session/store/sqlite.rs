@@ -147,3 +147,67 @@ impl SessionStore for SqliteSessionStore {
         Some(Self::archive_dir_for(&self.base_dir, session_id))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session_with(id: &str) -> Session {
+        let mut s = Session::new(id);
+        s.updated_at = 1000;
+        s
+    }
+
+    /// SQLite 后端契约测试：与文件后端共享 `SessionStore` 语义（load 缺省新建、
+    /// save 幂等 upsert、delete 连带存档目录、list 按 updated_at 降序）。
+    #[tokio::test]
+    async fn sqlite_store_roundtrip_contract() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = SqliteSessionStore::open(tmp.path().to_path_buf())
+            .await
+            .unwrap();
+
+        // load 不存在的会话 → 新建空 Session（与文件后端一致，不报错）
+        let fresh = store.load_session("v2_sess_missing").await.unwrap();
+        assert_eq!(fresh.id, "v2_sess_missing");
+
+        // save → load 往返
+        let mut s = session_with("v2_sess_a");
+        s.metadata["k"] = serde_json::json!("v");
+        store.save_session(&s).await.unwrap();
+        let loaded = store.load_session("v2_sess_a").await.unwrap();
+        assert_eq!(loaded.id, s.id);
+        assert_eq!(loaded.metadata["k"], "v");
+
+        // 同 id 再存 → upsert 而非报错/重复
+        s.updated_at = 2000;
+        store.save_session(&s).await.unwrap();
+        assert_eq!(store.list_sessions().await.unwrap().len(), 1);
+
+        // list 按 updated_at 降序
+        store.save_session(&session_with("v2_sess_b")).await.unwrap(); // 1000
+        let listed = store.list_sessions().await.unwrap();
+        assert_eq!(listed[0].id, "v2_sess_a"); // 2000 在前
+        assert_eq!(listed[1].id, "v2_sess_b");
+
+        // delete：DB 行与压缩存档目录一并清除
+        let archive = store.session_dir("v2_sess_a").unwrap();
+        tokio::fs::create_dir_all(&archive).await.unwrap();
+        store.delete_session("v2_sess_a").await.unwrap();
+        assert!(store.load_session("v2_sess_a").await.unwrap().messages.is_empty());
+        assert!(!archive.exists());
+    }
+
+    /// 已知限制（有意为之）：子会话嵌套存储仅文件后端承载，sqlite 后端
+    /// `list_sub_sessions` 恒为空——`store_kind=sqlite` 配置项因此不承诺
+    /// 子会话清单能力。该测试锁死这一行为，防止误以为已支持。
+    #[tokio::test]
+    async fn sqlite_backend_has_no_sub_session_listing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = SqliteSessionStore::open(tmp.path().to_path_buf())
+            .await
+            .unwrap();
+        store.save_session(&session_with("v2_sess_p")).await.unwrap();
+        assert!(store.list_sub_sessions("v2_sess_p").await.unwrap().is_empty());
+    }
+}

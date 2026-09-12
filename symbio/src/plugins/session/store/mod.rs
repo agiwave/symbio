@@ -4,6 +4,10 @@
 //! 调用方只需持有 `Arc<dyn SessionStore>`，无需感知底层存储策略。
 
 mod file;
+// `pub(crate)`：会话引擎的内存临时会话构造（`PersistentChatSession::ephemeral`）
+// 直接持有本后端，不经 [`create_store`] 工厂（工厂按配置 `store_kind` 选型，
+// 而临时会话的"不持久化"是调用点语义，与用户配置无关）。
+pub(crate) mod memory;
 mod sqlite;
 
 use super::types::Session;
@@ -49,8 +53,12 @@ pub trait SessionStore: Send + Sync {
 
 /// 根据 `kind` 和基础目录创建对应的存储后端实例。
 ///
-/// - `base_dir`: 存储根目录（文件后端用目录树；SQLite 后端在此目录下创建 `sessions.db`）
+/// - `base_dir`: 存储根目录（文件后端用目录树；SQLite 后端在此目录下创建 `sessions.db`；
+///   [`StoreKind::Memory`] 忽略该参数）
 /// - `kind`: 后端类型
+///
+/// [`StoreKind::Memory`] 的存在意义：让"不落盘的临时会话"复用与持久会话**同一份**
+/// 会话引擎实现（`PersistentChatSession`），差异下沉到后端（审计 B2）。
 pub async fn create_store(
     base_dir: PathBuf,
     kind: StoreKind,
@@ -64,5 +72,7 @@ pub async fn create_store(
             let store = sqlite::SqliteSessionStore::open(base_dir).await?;
             Ok(Arc::new(store))
         }
+        // 内存后端忽略 base_dir：无目录概念（进程退出即丢失）。
+        StoreKind::Memory => Ok(Arc::new(memory::InMemorySessionStore::new())),
     }
 }
