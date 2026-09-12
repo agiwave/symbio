@@ -13,11 +13,11 @@
 use crate::symbio_core::turn::{build_tool_message, short_id, ToolCallInfo};
 use crate::symbio_core::{
     schemas::{
+        hook::{HookEvent, HookOutput},
         session::chat_message::{
             ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
         },
         session::session_chat_response,
-        hook::{HookEvent, HookOutput},
     },
     InvokeRequestExt,
 };
@@ -65,12 +65,17 @@ async fn emit_tool_update(
 pub const TOOL_STREAM_IDLE_TIMEOUT_SECS: u64 = 180;
 
 /// 参数摘要：截断到 max_chars，用于日志打印（避免超长参数刷屏）。
+///
+/// 安全截断：`max_chars` 按**字节**解释但必须落在字符边界上。
+/// 历史事故：中文参数（如 `write_file` 的正文）使 `&s[..200]` 落在
+/// 多字节字符内部 → `tokio-rt-worker` panic → 整轮 ChatLoop 异常终止。
 fn args_summary(args: &Value, max_chars: usize) -> String {
     let s = args.to_string();
     if s.len() <= max_chars {
         s
     } else {
-        format!("{}…(len={})", &s[..max_chars], s.len())
+        let end = crate::symbio_core::floor_char_boundary(&s, max_chars);
+        format!("{}…(len={})", &s[..end], s.len())
     }
 }
 
@@ -181,7 +186,10 @@ pub async fn execute_tool_async(
     // 一旦挂死既无日志也无退出——必须在此兜底。
     const TOOL_EXEC_HARD_TIMEOUT_SECS: u64 = 600; // 10 分钟
     let route_fut: std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<crate::symbio_core::PluginPayload, PluginError>> + Send>,
+        Box<
+            dyn std::future::Future<Output = Result<crate::symbio_core::PluginPayload, PluginError>>
+                + Send,
+        >,
     > = if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
         if tool_visitor.has_capability(tool_name).await {
             plugin_info!("session", "[Tool] Using ToolManager for: {}", tool_name);
@@ -293,9 +301,7 @@ pub async fn execute_tool_async(
                                 "session",
                                 format!(
                                     "[Tool] 流式执行空闲超时 ({}s 无新帧): {}，已中断。call_id={}",
-                                    TOOL_STREAM_IDLE_TIMEOUT_SECS,
-                                    tool_name,
-                                    tool_call_id
+                                    TOOL_STREAM_IDLE_TIMEOUT_SECS, tool_name, tool_call_id
                                 )
                             );
                             return (
@@ -946,5 +952,37 @@ mod tests {
         assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-known"));
         assert_eq!(updates.len(), 1);
         assert_eq!(updates[0].id, "tc-known");
+    }
+
+    /// 回归（真实事故）：中文参数摘要不得在字节边界上 panic。
+    ///
+    /// 事故现场：`write_file` 传入含中文的 `content`，`args_summary(.., 200)`
+    /// 的 `&s[..200]` 落在 `'的'`（bytes 199..202）内部 →
+    /// `tokio-rt-worker` panic → ChatLoop join 失败 → 会话异常终止。
+    #[test]
+    fn args_summary_handles_multibyte_args() {
+        use serde_json::json;
+
+        // 构造必然跨越 200 字节边界的中文参数（'的' 3 字节）
+        let payload = "参数摘要：截断到 max_chars，用于日志打印（避免超长参数刷屏）。".repeat(8);
+        let args = json!({ "path": "a.rs", "content": payload });
+
+        // 任意 max 都必须安全返回（旧实现会在部分 max 上 panic）
+        for max in [1usize, 2, 3, 199, 200, 201, 512] {
+            let s = args_summary(&args, max);
+            assert!(
+                s.chars().count() <= max + 32,
+                "max={max} 摘要过长：{} 字节",
+                s.len()
+            );
+        }
+
+        // 超长时带长度标注，便于日志排查
+        let long = args_summary(&args, 200);
+        assert!(long.ends_with(&format!("(len={})", args.to_string().len())));
+        assert!(long.contains('…'));
+
+        // 短参数原样返回
+        assert_eq!(args_summary(&json!({"a": 1}), 200), "{\"a\":1}");
     }
 }

@@ -10,6 +10,7 @@
 //! - 具体协议实现层决定如何使用这些历史（有状态协议可能只使用部分或不使用）
 //! - 请求中只包含当前要发送的单条消息（single_message）
 
+use super::model_chat;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
@@ -18,7 +19,6 @@ use crate::symbio_core::schemas::{
     },
     HookEvent,
 };
-use super::model_chat;
 use crate::symbio_core::turn::{
     build_tool_message, emit_status, emit_update, short_id, ToolCallInfo, TurnOutput,
 };
@@ -44,11 +44,130 @@ struct SessionContext {
     pub session: Arc<dyn ChatSession>,
 }
 
+/// Stop 钩子的幂等触发器（session-mechanism-unification.md §4.4）。
+///
+/// 契约：**一个请求生命周期内，Stop 恰好触发一次**——无论该生命周期以何种方式
+/// 结束（正常完成 / 各类错误 / abort / 软上限 / 消费循环超时 / 任务 panic）。
+///
+/// 实现方式：`run_chat_loop_task` 在任务最开头创建 `Arc<StopSignal>`，交给
+/// [`ChatOrchestrator`]（供 `run_chat_loop` 各出口显式触发）。显式触发点携带
+/// 准确的"本轮最后一条消息"；[`StopSignal::drop`] 兜底仅在显式触发全部未发生时
+/// 生效（例如 chat_loop 任务 panic 被 JoinError 吞掉、消费循环 1800s 超时提前
+/// return、provider 解析失败根本没能进入 loop），从而把 Stop 从"依赖每个出口都
+/// 记得调用"升级为"由生命周期保证"。
+///
+/// 为什么显式 + RAII 双轨而非纯 RAII：`last_message` 取自 chat_loop 的
+/// `context.messages`，其所有权随函数返回销毁，只有显式调用点能拿到准确值；
+/// RAII 只能提供"一定会触发、但 last_message 退化为空串"的下界。兜底触发时打
+/// warn 日志，使"漏调显式 fire"这类缺口在运行时可见（session-mechanism-unification.md §4.4）。
+pub struct StopSignal {
+    parent: Option<Arc<dyn Plugin>>,
+    /// Stop 钩子要投递的请求上下文（`fire_hook` 内部会再 fork 一份并设置
+    /// PATH=payload，故此处持有的是原始 chat 上下文）。
+    ctx: Arc<dyn InvokeRequest>,
+    fired: AtomicBool,
+}
+
+impl StopSignal {
+    pub fn new(parent: Option<Arc<dyn Plugin>>, ctx: Arc<dyn InvokeRequest>) -> Self {
+        Self {
+            parent,
+            ctx,
+            fired: AtomicBool::new(false),
+        }
+    }
+
+    /// 本请求生命周期内 Stop 是否已触发。
+    pub fn fired(&self) -> bool {
+        self.fired.load(Ordering::SeqCst)
+    }
+    /// 触发 Stop；返回 `true` 表示本次调用是真正生效的那一次。
+    /// `messages` 为当前请求视图消息（取末条作为 `last_message`）。
+    pub async fn fire(&self, messages: &[ChatMessage]) -> bool {
+        if self.fired.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        let last_message = messages
+            .last()
+            .map(|m| m.content.as_ref().map(|c| c.to_text()).unwrap_or_default())
+            .unwrap_or_default();
+        let _ = fire_hook(
+            &self.parent,
+            HookEvent::Stop {
+                last_message: last_message.to_string(),
+            },
+            self.ctx.clone(),
+        )
+        .await;
+        true
+    }
+    /// 兜底触发（同步、幂等）：显式触发点一次都没执行过时，补发一次 Stop。
+    ///
+    /// 由 `WorkingGuard::drop`（panic / 消费循环超时 / provider 解析失败）与
+    /// [`StopSignal::drop`]（最后防线）共用。Drop 语境不能 await，故投递到
+    /// detached 任务；无 tokio 运行时（进程退出路径）时跳过外发并告警，
+    /// `fired` 保持置位、不再重试。
+    pub fn fire_fallback(&self) {
+        if self.fired.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if self.parent.is_none() {
+            // 无父插件时 fire_hook 本身就是 no-op，不打噪声日志
+            return;
+        }
+        crate::plugin_warn!(
+            "session",
+            "[Stop] 显式 Stop 触发点未执行，由 StopSignal 生命周期兜底补发一次（last_message 为空）"
+        );
+        let parent = self.parent.clone();
+        let ctx = self.ctx.clone();
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn(async move {
+                    let _ = fire_hook(
+                        &parent,
+                        HookEvent::Stop {
+                            last_message: String::new(),
+                        },
+                        ctx,
+                    )
+                    .await;
+                });
+            }
+            Err(_) => {
+                // 没有运行时可承载：保持 fired 置位、不再重试。回滚标记没有意义——
+                // 本方法的全部调用点（WorkingGuard::drop / StopSignal::drop）都处在
+                // 同一条同步析构链上，下一层 Drop 同样不会有运行时，重试只会失败并
+                // 重复告警（进程退出路径本就放弃了外发）。
+                crate::plugin_warn!(
+                    "session",
+                    "[Stop] 当前无 tokio 运行时，Stop 兜底触发被跳过（进程退出路径）"
+                );
+            }
+        }
+    }
+}
+
+impl Drop for StopSignal {
+    fn drop(&mut self) {
+        // 最后防线：显式触发点一个都没走到（panic / 消费循环超时 / 提前 return）。
+        // 已触发过则直接返回——与 `fire_fallback` 的幂等判定等价，但避免在
+        // 正常路径（绝大多数请求都显式 fire 过）上多做一次原子写。
+        if self.fired() {
+            return;
+        }
+        self.fire_fallback();
+    }
+}
+
 /// 会话编排器（自 model/context.rs 迁入，Phase E-②）：
 /// 持有唯一生效的模型服务、父插件钩子通道与预计算上下文上限（session 确定性持有）。
 /// 轮次收尾状态机 `finalize_assistant_turn` 随之一并迁入；
 /// turn_processor 薄委托层消亡（chat_loop 直调
 /// `provider.execute_turn` 与 `finalize_assistant_turn`）。
+///
+/// 生命周期与 [`StopSignal`] 绑定：Stop 的显式触发点在本 loop 的各出口，
+/// RAII 兜底点在 `run_chat_loop_task` 的 `WorkingGuard`。
 pub struct ChatOrchestrator {
     /// 唯一生效的模型服务（model 插件按上下文解析后经 CAPABILITY_VISITOR 注册；
     /// core 纯 trait 的 trait object——session 对协议实现零依赖）
@@ -57,6 +176,9 @@ pub struct ChatOrchestrator {
     /// 预计算的生效上下文上限（`provider.effective_context_tokens()` 结果，
     /// 构造时由调用方传入，避免异步钩子在热路径反复触发）
     pub context_limit: u32,
+    /// 本次请求生命周期的 Stop 触发器（由 `run_chat_loop_task` 创建并共享给
+    /// `WorkingGuard` 兜底，见 [`StopSignal`]）
+    pub stop: Arc<StopSignal>,
 }
 
 impl ChatOrchestrator {
@@ -64,11 +186,13 @@ impl ChatOrchestrator {
         provider: Arc<dyn ModelProvider>,
         parent: Option<Arc<dyn Plugin>>,
         context_limit: u32,
+        stop: Arc<StopSignal>,
     ) -> Self {
         Self {
             provider,
             parent,
             context_limit,
+            stop,
         }
     }
 
@@ -155,6 +279,44 @@ impl ChatOrchestrator {
     }
 }
 
+/// 系统提示词的唯一真源（P0-1）。
+///
+/// 解析优先级：
+/// 1. 请求显式指定（`req.system_prompt`）
+/// 2. 统一收集机制注册的系统提示词：优先 `"default"` 键，其次请求指定的
+///    `provider_id` 键，再退首个注册项
+/// 3. 硬编码兜底（维持既有行为）
+///
+/// 此前该逻辑散落在 `run_chat_loop` 循环体内，且实际发给模型的提示词另取自
+/// `req.system_prompt`，导致 visitor 注册链被完全绕过——插件经 `traverse`
+/// 注册的系统提示词从未真正送达模型。收敛到此单点后，压缩开销估算与本轮
+/// 实际请求共用同一份解析结果。
+async fn resolve_system_prompt(
+    req_system_prompt: Option<&str>,
+    req_provider_id: Option<&str>,
+    ctx: &Arc<dyn InvokeRequest>,
+) -> String {
+    let fallback = || "You are a helpful MODEL assistant.".to_string();
+    if let Some(s) = req_system_prompt {
+        if !s.is_empty() {
+            return s.to_string();
+        }
+    }
+    let resolved = match ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+        Some(visitor) => {
+            let prompts = visitor.list_system_prompts().await;
+            prompts
+                .iter()
+                .find(|(k, _)| k == "default")
+                .or_else(|| req_provider_id.and_then(|pid| prompts.iter().find(|(k, _)| k == pid)))
+                .or_else(|| prompts.first())
+                .map(|(_, v)| v.clone())
+        }
+        None => None,
+    };
+    resolved.filter(|s| !s.is_empty()).unwrap_or_else(fallback)
+}
+
 pub async fn run_chat_loop(
     orchestrator: &ChatOrchestrator,
     ctx: Arc<dyn InvokeRequest>,
@@ -223,12 +385,12 @@ pub async fn run_chat_loop(
                 // 成功：turn 循环会从 session 加载含新工具结果的历史
             }
             Ok(crate::plugins::session::resume::ResumeOutcome::Done) => {
-                fire_stop_hook(orchestrator, &[], &ctx).await;
+                fire_stop_hook(orchestrator, &[]).await;
                 return Ok(());
             }
             Err(e) => {
                 plugin_warn!("session", "[Resume] process_resume failed: {}", e);
-                fire_stop_hook(orchestrator, &[], &ctx).await;
+                fire_stop_hook(orchestrator, &[]).await;
                 return Err(e);
             }
         }
@@ -283,7 +445,7 @@ pub async fn run_chat_loop(
                     ))
                     .await;
                 persist_messages(&context, last_saved, &channel).await;
-                fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+                fire_stop_hook(orchestrator, &context.messages).await;
                 return Ok(());
             }
         }
@@ -291,7 +453,7 @@ pub async fn run_chat_loop(
         if abort_flag.load(Ordering::SeqCst) {
             // SYS-002: 早期 return 路径上的副作用（last_saved 尚未用作流式增量锚点，
             // 此分支里不更新，但保留 last_saved 维持语义对称）。
-            fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+            fire_stop_hook(orchestrator, &context.messages).await;
             return Ok(());
         }
 
@@ -304,36 +466,21 @@ pub async fn run_chat_loop(
         );
 
         if check_abort(&abort_flag).await {
-            fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+            fire_stop_hook(orchestrator, &context.messages).await;
             return Ok(());
         }
 
         // ── 被动语义压缩（L5：70% 触发）────────────────────────────────
-        // 系统提示词解析（Phase B 统一收集机制）：
-        // 1. 请求显式指定（req.system_prompt）
-        // 2. 统一收集机制注册的系统提示词：优先 "default" 键，其次请求指定的
-        //    provider_id 键，再退首个注册项
-        // 3. 硬编码兜底（维持既有行为）
-        let system_prompt_owned = match req.system_prompt.as_deref() {
-            Some(sp) => sp.to_string(),
-            None => {
-                let collected = match ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-                    Some(tool_visitor) => tool_visitor.list_system_prompts().await,
-                    None => Vec::new(),
-                };
-                collected
-                    .iter()
-                    .find(|(n, _)| n == "default")
-                    .or_else(|| {
-                        collected
-                            .iter()
-                            .find(|(n, _)| Some(n.as_str()) == req.provider_id.as_deref())
-                    })
-                    .or_else(|| collected.first())
-                    .map(|(_, p)| p.clone())
-                    .unwrap_or_else(|| "You are a helpful MODEL assistant.".to_string())
-            }
-        };
+        // 系统提示词：唯一真源 resolve_system_prompt（P0-1）。解析结果同时供
+        // 压缩开销估算与 execute_turn 实际请求使用——此前 execute_turn 直接取
+        // req.system_prompt，绕过了 visitor 注册链，插件经 traverse 注册的系统
+        // 提示词从未真正送达模型。
+        let system_prompt_owned = resolve_system_prompt(
+            req.system_prompt.as_deref(),
+            req.provider_id.as_deref(),
+            &ctx,
+        )
+        .await;
         let system_prompt_for_request = system_prompt_owned.as_str();
         if auto_compress {
             match auto_compress_process(
@@ -359,7 +506,7 @@ pub async fn run_chat_loop(
                 Ok(None) => {}
                 Err(e) => {
                     plugin_warn!("session", "auto_compress_process failed: {e}");
-                    fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+                    fire_stop_hook(orchestrator, &context.messages).await;
                     return Err(e);
                 }
             }
@@ -451,16 +598,14 @@ pub async fn run_chat_loop(
         // Turn 收尾为 Failed + "用户手动中止了本次回复"（错误条 + 重试入口），
         // 不会波及上一轮已成功的 Turn（persist_failure 按 failing_turn 子树收窄）。
         if abort_flag.load(Ordering::SeqCst) {
-            fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+            fire_stop_hook(orchestrator, &context.messages).await;
             return Err(PluginError::Aborted);
         }
 
         let result = orchestrator
             .provider
             .execute_turn(
-                req.system_prompt
-                    .as_deref()
-                    .unwrap_or("You are a helpful MODEL assistant."),
+                system_prompt_for_request,
                 request_messages,
                 &tools,
                 &root_id,
@@ -493,12 +638,12 @@ pub async fn run_chat_loop(
                 // 后走 persist_failure —— 在途 Turn 持久化为 Failed + error，前端
                 // 可渲染错误条与重试入口（docs/turn-tool-mechanisms.md 2.4）。
                 // 旧实现直接 return Ok(())：在途 Turn 不落库，刷新即消失且无重试入口。
-                fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+                fire_stop_hook(orchestrator, &context.messages).await;
                 return Err(PluginError::Aborted);
             }
             Err(e) => {
                 plugin_warn!("session", "send_request failed: {e}");
-                fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+                fire_stop_hook(orchestrator, &context.messages).await;
                 return Err(e);
             }
             Ok(out) => out,
@@ -510,7 +655,7 @@ pub async fn run_chat_loop(
             // 见 docs/turn-tool-mechanisms.md 2.4）。仅 send_request 之后的 abort
             // 冒泡；turn 循环顶部的边界检查点不冒泡——上一轮已定稿落库，冒泡会把
             // 成功的 Turn 误回滚为 Failed。
-            fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+            fire_stop_hook(orchestrator, &context.messages).await;
             return Err(PluginError::Aborted);
         }
 
@@ -604,7 +749,7 @@ pub async fn run_chat_loop(
                 )).await;
             }
             persist_messages(&context, last_saved, &channel).await;
-            fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+            fire_stop_hook(orchestrator, &context.messages).await;
             plugin_info!(
                 "session",
                 "--- TURN END (正常收尾，无工具调用) --- finish={:?}",
@@ -800,7 +945,7 @@ pub async fn run_chat_loop(
             // 标记的代码属不可达遗留，已删除（docs/turn-tool-mechanisms.md 1.5）。
             // user_prompt(WaitingUserAction) 驱动的暂停走 approve/reject/answer 恢复。
             plugin_info!("session", "工具待用户恢复（mode={}），退出本轮", mode);
-            fire_stop_hook(orchestrator, &context.messages, &ctx).await;
+            fire_stop_hook(orchestrator, &context.messages).await;
             return Ok(());
         }
 
@@ -1454,11 +1599,7 @@ async fn send_compression_request(
 
     match &result {
         Ok(msg) => {
-            let text_len = msg
-                .content
-                .as_ref()
-                .map(|c| c.to_text().len())
-                .unwrap_or(0);
+            let text_len = msg.content.as_ref().map(|c| c.to_text().len()).unwrap_or(0);
             crate::plugin_info!(
                 "session",
                 "[Compress] 压缩 LLM 请求完成：摘要 {} 字符，耗时 {}s",
@@ -1532,22 +1673,256 @@ async fn run_compression_llm(
     })
 }
 
-async fn fire_stop_hook(
-    orchestrator: &ChatOrchestrator,
-    messages: &[ChatMessage],
-    ctx: &Arc<dyn InvokeRequest>,
-) {
-    let last_message = messages
-        .last()
-        .map(|m| m.content.as_ref().map(|c| c.to_text()).unwrap_or_default())
-        .unwrap_or_default();
+/// 触发 Stop 钩子（委托给 [`StopSignal`]，幂等；上下文已在信号创建时绑定）。
+///
+/// `run_chat_loop` 的**每一个**出口都应先调用本函数（软上限出口用
+/// `context.messages`，其余用入参 `messages`），以携带准确的 `last_message`。
+/// 即便全部出口都漏调，`StopSignal::drop` 也会兜底补发一次——不变式
+/// 「一个请求生命周期内 Stop 恰好一次」因此由生命周期保证，而非依赖人工记忆。
+async fn fire_stop_hook(orchestrator: &ChatOrchestrator, messages: &[ChatMessage]) {
+    orchestrator.stop.fire(messages).await;
+}
 
-    let _ = fire_hook(
-        &orchestrator.parent,
-        HookEvent::Stop {
-            last_message: last_message.to_string(),
-        },
-        ctx.clone(),
-    )
-    .await;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbio_core::{CapabilityVisitor, DefaultToolVisitor, SimpleRequest};
+
+    /// 构造带 CAPABILITY_VISITOR 的上下文；`prompts` 为 (名称, 内容) 注册表。
+    async fn ctx_prompts(prompts: &[(&str, &str)]) -> Arc<dyn InvokeRequest> {
+        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let visitor = Arc::new(DefaultToolVisitor::new());
+        for (name, text) in prompts {
+            visitor.register_system_prompt(name, text.to_string()).await;
+        }
+        ctx.set(
+            crate::symbio_core::CAPABILITY_VISITOR,
+            visitor as Arc<dyn CapabilityVisitor>,
+        );
+        ctx
+    }
+
+    #[tokio::test]
+    async fn explicit_prompt_wins() {
+        let ctx = ctx_prompts(&[("default", "from-visitor")]).await;
+        let got = resolve_system_prompt(Some("explicit"), Some("openai"), &ctx).await;
+        assert_eq!(got, "explicit");
+    }
+
+    #[tokio::test]
+    async fn empty_explicit_prompt_falls_through_to_default() {
+        let ctx = ctx_prompts(&[("openai", "from-openai"), ("default", "from-default")]).await;
+        let got = resolve_system_prompt(Some(""), Some("openai"), &ctx).await;
+        assert_eq!(got, "from-default", "default 优先于 provider_id 匹配");
+    }
+
+    #[tokio::test]
+    async fn provider_id_matches_registered_key() {
+        let ctx = ctx_prompts(&[("anthropic", "a"), ("openai", "o")]).await;
+        let got = resolve_system_prompt(None, Some("openai"), &ctx).await;
+        assert_eq!(got, "o");
+    }
+
+    #[tokio::test]
+    async fn first_registered_when_no_default_or_provider_match() {
+        let ctx = ctx_prompts(&[("anthropic", "a"), ("openai", "o")]).await;
+        let got = resolve_system_prompt(None, Some("unknown"), &ctx).await;
+        assert_eq!(got, "a", "保序取首个注册项");
+    }
+
+    #[tokio::test]
+    async fn fallback_without_visitor() {
+        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let got = resolve_system_prompt(None, None, &ctx).await;
+        assert_eq!(got, "You are a helpful MODEL assistant.");
+    }
+
+    #[tokio::test]
+    async fn empty_visitor_registry_uses_fallback() {
+        let ctx = ctx_prompts(&[]).await;
+        let got = resolve_system_prompt(None, None, &ctx).await;
+        assert_eq!(got, "You are a helpful MODEL assistant.");
+    }
+}
+
+/// Stop 恰好一次的契约测试（session-mechanism-unification.md §4.4）。
+///
+/// 走真实 `fire_hook` 链路（自建 recorder 插件，不 mock 内部函数），
+/// 验证显式触发 / 生命周期兜底 / 二者叠加时的幂等性。
+#[cfg(test)]
+mod stop_signal_tests {
+    use super::*;
+    use crate::symbio_core::{InvokeResponse, PluginMeta, PluginPayload, SimpleRequest};
+    use async_trait::async_trait;
+    use serde_json::Value;
+    use std::sync::Mutex as StdMutex;
+
+    /// 记录收到的 Hook 事件（按 `fire_hook` 的 payload 协议解析）。
+    #[derive(Default)]
+    struct HookRecorder {
+        stops: StdMutex<Vec<String>>,
+        others: StdMutex<usize>,
+    }
+
+    impl HookRecorder {
+        fn stop_count(&self) -> usize {
+            self.stops.lock().unwrap().len()
+        }
+        fn last_stop_message(&self) -> String {
+            self.stops
+                .lock()
+                .unwrap()
+                .last()
+                .cloned()
+                .unwrap_or_default()
+        }
+        fn other_count(&self) -> usize {
+            *self.others.lock().unwrap()
+        }
+    }
+
+    #[async_trait]
+    impl Plugin for HookRecorder {
+        fn meta(&self) -> PluginMeta {
+            PluginMeta {
+                id: "test-hook-recorder".into(),
+                name: "test-hook-recorder".into(),
+                description: None,
+                version: None,
+                author: None,
+            }
+        }
+
+        async fn route(
+            self: Arc<Self>,
+            ctx: Arc<dyn InvokeRequest>,
+        ) -> InvokeResponse<PluginPayload> {
+            if ctx.get(crate::symbio_core::PATH).as_deref() != Some("hook/fire") {
+                *self.others.lock().unwrap() += 1;
+                return Ok(PluginPayload::new(&Value::Null));
+            }
+            let payload: Value = ctx.payload::<Value>().ok().unwrap_or(Value::Null);
+            let event = payload.get("event");
+            if event
+                .and_then(|e: &Value| e.get("event"))
+                .and_then(|v: &Value| v.as_str())
+                == Some("Stop")
+            {
+                let msg = event
+                    .and_then(|e: &Value| e.get("data"))
+                    .and_then(|d: &Value| d.get("last_message"))
+                    .and_then(|v: &Value| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                self.stops.lock().unwrap().push(msg);
+            } else {
+                *self.others.lock().unwrap() += 1;
+            }
+            Ok(PluginPayload::new(&Value::Null))
+        }
+
+        async fn traverse(
+            self: Arc<Self>,
+            _path: String,
+            _ctx: Arc<dyn InvokeRequest>,
+        ) -> InvokeResponse<PluginPayload> {
+            Ok(PluginPayload::new(&Value::Null))
+        }
+    }
+
+    fn text_msg(id: &str, text: &str) -> ChatMessage {
+        ChatMessage {
+            id: id.to_string(),
+            content: Some(MessageContent::Text(text.to_string())),
+            ..Default::default()
+        }
+    }
+
+    fn recorder_signal() -> (Arc<StopSignal>, Arc<HookRecorder>) {
+        let recorder = Arc::new(HookRecorder::default());
+        let parent = Some(recorder.clone() as Arc<dyn Plugin>);
+        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        (Arc::new(StopSignal::new(parent, ctx)), recorder)
+    }
+
+    /// 显式触发：携带准确末条消息，且第二次调用不再外发。
+    #[tokio::test]
+    async fn explicit_fire_is_exactly_once_and_carries_last_message() {
+        let (stop, recorder) = recorder_signal();
+        assert!(!stop.fired());
+
+        let msgs = vec![text_msg("1", "user turn"), text_msg("2", "assistant turn")];
+        assert!(stop.fire(&msgs).await, "首次显式触发应生效");
+        assert!(!stop.fire(&msgs).await, "第二次显式触发应被幂等吞掉");
+        assert!(stop.fired());
+
+        assert_eq!(recorder.stop_count(), 1);
+        assert_eq!(recorder.last_stop_message(), "assistant turn");
+        assert_eq!(recorder.other_count(), 0);
+
+        drop(stop);
+        assert_eq!(recorder.stop_count(), 1, "Drop 不得重复补发");
+    }
+
+    /// 空 transcript：仍然触发一次，`last_message` 为空串。
+    #[tokio::test]
+    async fn explicit_fire_with_empty_transcript() {
+        let (stop, recorder) = recorder_signal();
+        assert!(stop.fire(&[]).await);
+        assert_eq!(recorder.stop_count(), 1);
+        assert_eq!(recorder.last_stop_message(), "");
+    }
+
+    /// 兜底触发：显式触发点未执行时补发一次（异步 detached 任务）。
+    #[tokio::test]
+    async fn fallback_fire_covers_missing_explicit_call() {
+        let (stop, recorder) = recorder_signal();
+        stop.fire_fallback();
+        // fire_fallback 投递 detached 任务，让运行时调度若干次
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(recorder.stop_count(), 1);
+        assert_eq!(recorder.last_stop_message(), "");
+
+        // 兜底之后再显式触发也不得外发
+        assert!(!stop.fire(&[text_msg("1", "late")]).await);
+        assert_eq!(recorder.stop_count(), 1);
+    }
+
+    /// 兜底幂等：多次 `fire_fallback` 只外发一次。
+    #[tokio::test]
+    async fn fallback_fire_is_idempotent() {
+        let (stop, recorder) = recorder_signal();
+        stop.fire_fallback();
+        stop.fire_fallback();
+        stop.fire_fallback();
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(recorder.stop_count(), 1);
+    }
+
+    /// 最后防线：`StopSignal` 被 Drop 时补发（模拟 chat_loop 提前 return）。
+    #[tokio::test]
+    async fn drop_emits_fallback_stop() {
+        let (stop, recorder) = recorder_signal();
+        drop(stop);
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(recorder.stop_count(), 1);
+    }
+
+    /// 无父插件（standalone 会话）：仍然置位 fired，且不产生任何外发/告警噪声。
+    #[tokio::test]
+    async fn signal_without_parent_stays_silent() {
+        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let stop = Arc::new(StopSignal::new(None, ctx));
+        assert!(stop.fire(&[text_msg("1", "x")]).await);
+        assert!(stop.fired());
+        stop.fire_fallback();
+        drop(stop);
+        tokio::task::yield_now().await;
+    }
 }

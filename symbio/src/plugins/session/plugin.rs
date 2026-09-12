@@ -331,7 +331,9 @@ impl Plugin for SessionPlugin {
             == crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS
         {
             if let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) {
-                visitor.register_batch(self.build_option_nodes(&ctx).await).await;
+                visitor
+                    .register_batch(self.build_option_nodes(&ctx).await)
+                    .await;
             }
         }
         // 能力收集（available_tools）：session 贡献一个内聚工具——心跳设置。
@@ -342,9 +344,9 @@ impl Plugin for SessionPlugin {
         {
             if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
                 visitor
-                    .register(Arc::new(super::heartbeat_tool::HeartbeatTool::new(Arc::downgrade(
-                        &self,
-                    ))))
+                    .register(Arc::new(super::heartbeat_tool::HeartbeatTool::new(
+                        Arc::downgrade(&self),
+                    )))
                     .await;
             }
         }

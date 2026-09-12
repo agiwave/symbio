@@ -23,8 +23,8 @@ use crate::plugins::agent::host::handlers;
 use crate::plugins::agent::host::store::{BundleRecord, BundleStore};
 use crate::symbio_core::{
     report_error, Capability, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
-    PluginMeta, PluginPayload, AGENT_ID, PATH, PLUGIN_AGENT, SESSION_ID, TRAVERSE_AVAILABLE_OPTIONS,
-    TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    PluginMeta, PluginPayload, AGENT_ID, PATH, PLUGIN_AGENT, SESSION_ID,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -169,10 +169,11 @@ impl AgentPlugin {
             );
         }
 
-        let node = crate::symbio_core::schemas::options::OptionNode::sub("agent", "智能体", children)
-            .with_icon("agent")
-            .with_order(ORDER)
-            .with_description("选择认知人格（可不选）");
+        let node =
+            crate::symbio_core::schemas::options::OptionNode::sub("agent", "智能体", children)
+                .with_icon("agent")
+                .with_order(ORDER)
+                .with_description("选择认知人格（可不选）");
 
         // 回填当前选中值（值 = agent_id；展示文本 = bundle 名 / 不使用 Agent）
         let node = match current_label {

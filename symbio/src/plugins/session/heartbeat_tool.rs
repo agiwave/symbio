@@ -89,9 +89,10 @@ impl Capability for HeartbeatTool {
 
     async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let args: Value = ctx.payload()?;
-        let plugin = self.plugin.upgrade().ok_or_else(|| {
-            PluginError::InternalError("心跳工具的宿主插件已被释放".to_string())
-        })?;
+        let plugin = self
+            .plugin
+            .upgrade()
+            .ok_or_else(|| PluginError::InternalError("心跳工具的宿主插件已被释放".to_string()))?;
 
         let session_id = ctx
             .get(SESSION_ID)
@@ -100,10 +101,7 @@ impl Capability for HeartbeatTool {
                 PluginError::ValidationError("心跳设置需要会话上下文（session_id）".to_string())
             })?;
 
-        let action = args
-            .get("action")
-            .and_then(|v| v.as_str())
-            .unwrap_or("get");
+        let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("get");
 
         let mut session = plugin.get_or_create_session(&session_id).await?;
         let mut hb = HeartbeatConfig::from_metadata(&session.metadata);

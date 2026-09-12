@@ -66,8 +66,11 @@ impl WebFetchTool {
             .map_err(|e| PluginError::InternalError(format!("读取响应失败: {e}")))?;
 
         // 截断内容
+        // 安全截断：必须落在字符边界上，否则含中文的响应体会让 `&body[..N]`
+        // 直接 panic（字节索引切进多字节字符内部）。
         let (content, truncated) = if body.len() > MAX_RESPONSE_SIZE {
-            (body[..MAX_RESPONSE_SIZE].to_string(), true)
+            let end = crate::symbio_core::floor_char_boundary(&body, MAX_RESPONSE_SIZE);
+            (body[..end].to_string(), true)
         } else {
             (body, false)
         };

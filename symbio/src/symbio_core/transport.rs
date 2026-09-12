@@ -38,6 +38,28 @@ impl PluginFrame {
             PluginFrame::Error(msg, _) => Err(format!("Cannot deserialize Error frame: {msg}")),
         }
     }
+
+    /// 读取 `Error` 帧携带的机器可读错误码。
+    ///
+    /// 消费侧据此分派（中止 / 上下文丢失重试 / 普通失败），**不要**再对
+    /// `meta["code"]` 做字符串字面量比较（session-mechanism-unification.md §4.2）。
+    /// 非 `Error` 帧、无 meta、或 code 不可识别均返回 `None`。
+    pub fn error_code(&self) -> Option<crate::symbio_core::ErrorCode> {
+        let PluginFrame::Error(_, meta) = self else {
+            return None;
+        };
+        let raw = meta.as_ref()?.get("code")?.as_str()?;
+        let code = crate::symbio_core::ErrorCode::from_code(raw);
+        match code {
+            crate::symbio_core::ErrorCode::Unknown => None,
+            other => Some(other),
+        }
+    }
+
+    /// 是否为"用户主动中止"的 `Error` 帧（等价于 `error_code() == Some(Aborted)`）。
+    pub fn is_abort(&self) -> bool {
+        self.error_code() == Some(crate::symbio_core::ErrorCode::Aborted)
+    }
 }
 
 type NativeSerializer = fn(&Arc<Box<dyn Any + Send + Sync + 'static>>) -> Result<Value, String>;

@@ -20,9 +20,9 @@ mod gemini_api;
 mod openai_chat;
 mod openai_responses;
 
+use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 use crate::symbio_core::{CapabilityMeta, PluginError, ProtocolEvent};
-use crate::plugin_warn;
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use serde_json::Value;

@@ -17,6 +17,7 @@ mod paths;
 mod plugin;
 pub mod providers;
 pub mod schemas;
+mod text;
 mod tools;
 mod transport;
 pub mod turn;
@@ -28,10 +29,12 @@ pub use chat_pipeline::{
 pub use chat_session::{ChatSession, ChatSessionHandle};
 pub use creator::{create_object, has_creator};
 pub use model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
-pub use option::{collect_options, DefaultOptionVisitor, OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS};
+pub use option::{
+    collect_options, DefaultOptionVisitor, OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS,
+};
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 pub use capability::{
-    Capability, CapabilityCategory, CapabilityVisitor, CapabilityMeta, ToolContextRetention,
+    Capability, CapabilityCategory, CapabilityMeta, CapabilityVisitor, ToolContextRetention,
 };
 pub use error::*;
 pub use homedir::{expand_tilde_path, HomedirRegistry, DEFAULT_HOMEDIR};
@@ -40,6 +43,7 @@ pub use keys::*;
 pub use logger::*;
 pub use paths::*;
 pub use plugin::*;
+pub use text::{floor_char_boundary, truncate_bytes};
 pub use tools::DefaultToolVisitor;
 pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,

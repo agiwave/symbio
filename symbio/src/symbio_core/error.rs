@@ -33,23 +33,102 @@ pub enum PluginError {
     CompressionFailed,
 }
 
+/// 机器可读错误码（跨插件边界的错误分类真源）
+///
+/// 错误跨插件边界传输时只能落到 `PluginFrame::Error(String, Option<Value>)`，
+/// 分类信息由 `code` 字段承载。历史实现让消费侧回读该字段并与字面量
+/// （如 `"ABORTED"`）做字符串比较，文案/编码任一侧一改即静默失效
+/// （session-mechanism-unification.md §4.2）。本枚举把"码"收敛为单一类型：
+/// - 生产侧：[`PluginError::code`] 返回 `ErrorCode`（编译器保证变体穷尽）；
+/// - 传输侧：[`PluginError::to_frame`] 写入 `code.as_str()`；
+/// - 消费侧：[`crate::symbio_core::PluginFrame::error_code`] 解析回 `ErrorCode`，
+///   分派逻辑比较枚举值而非字符串。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ErrorCode {
+    NotFound,
+    NotImplemented,
+    ValidationError,
+    InternalError,
+    RateLimited,
+    ParseError,
+    Timeout,
+    Forbidden,
+    Aborted,
+    RetryWithoutContextId,
+    StreamError,
+    CompressionFailed,
+    /// 未知/缺失的码（对端版本超前或帧未携带 code 时的兜底，不参与等值分派）
+    Unknown,
+}
+
+impl ErrorCode {
+    /// 传输线上表示（`Error` 帧 `code` 字段的字面量）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ErrorCode::NotFound => "NOT_FOUND",
+            ErrorCode::NotImplemented => "NOT_IMPLEMENTED",
+            ErrorCode::ValidationError => "VALIDATION_ERROR",
+            ErrorCode::InternalError => "INTERNAL_ERROR",
+            ErrorCode::RateLimited => "RATE_LIMITED",
+            ErrorCode::ParseError => "PARSE_ERROR",
+            ErrorCode::Timeout => "TIMEOUT",
+            ErrorCode::Forbidden => "FORBIDDEN",
+            ErrorCode::Aborted => "ABORTED",
+            ErrorCode::RetryWithoutContextId => "RETRY_WITHOUT_CONTEXT_ID",
+            ErrorCode::StreamError => "STREAM_ERROR",
+            ErrorCode::CompressionFailed => "COMPRESSION_FAILED",
+            ErrorCode::Unknown => "UNKNOWN",
+        }
+    }
+
+    /// 从线上表示解析回枚举；无法识别时返回 [`ErrorCode::Unknown`]。
+    pub fn from_code(code: &str) -> Self {
+        match code {
+            "NOT_FOUND" => ErrorCode::NotFound,
+            "NOT_IMPLEMENTED" => ErrorCode::NotImplemented,
+            "VALIDATION_ERROR" => ErrorCode::ValidationError,
+            "INTERNAL_ERROR" => ErrorCode::InternalError,
+            "RATE_LIMITED" => ErrorCode::RateLimited,
+            "PARSE_ERROR" => ErrorCode::ParseError,
+            "TIMEOUT" => ErrorCode::Timeout,
+            "FORBIDDEN" => ErrorCode::Forbidden,
+            "ABORTED" => ErrorCode::Aborted,
+            "RETRY_WITHOUT_CONTEXT_ID" => ErrorCode::RetryWithoutContextId,
+            "STREAM_ERROR" => ErrorCode::StreamError,
+            "COMPRESSION_FAILED" => ErrorCode::CompressionFailed,
+            _ => ErrorCode::Unknown,
+        }
+    }
+}
+
+impl std::fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl PluginError {
     /// 获取机器可读的错误码
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> ErrorCode {
         match self {
-            PluginError::NotFound(_) => "NOT_FOUND",
-            PluginError::NotImplemented => "NOT_IMPLEMENTED",
-            PluginError::ValidationError(_) => "VALIDATION_ERROR",
-            PluginError::InternalError(_) => "INTERNAL_ERROR",
-            PluginError::RateLimited(_) => "RATE_LIMITED",
-            PluginError::ParseError(_) => "PARSE_ERROR",
-            PluginError::Timeout => "TIMEOUT",
-            PluginError::Forbidden(_) => "FORBIDDEN",
-            PluginError::Aborted => "ABORTED",
-            PluginError::RetryWithoutContextId => "RETRY_WITHOUT_CONTEXT_ID",
-            PluginError::StreamError(_) => "STREAM_ERROR",
-            PluginError::CompressionFailed => "COMPRESSION_FAILED",
+            PluginError::NotFound(_) => ErrorCode::NotFound,
+            PluginError::NotImplemented => ErrorCode::NotImplemented,
+            PluginError::ValidationError(_) => ErrorCode::ValidationError,
+            PluginError::InternalError(_) => ErrorCode::InternalError,
+            PluginError::RateLimited(_) => ErrorCode::RateLimited,
+            PluginError::ParseError(_) => ErrorCode::ParseError,
+            PluginError::Timeout => ErrorCode::Timeout,
+            PluginError::Forbidden(_) => ErrorCode::Forbidden,
+            PluginError::Aborted => ErrorCode::Aborted,
+            PluginError::RetryWithoutContextId => ErrorCode::RetryWithoutContextId,
+            PluginError::StreamError(_) => ErrorCode::StreamError,
+            PluginError::CompressionFailed => ErrorCode::CompressionFailed,
         }
+    }
+
+    /// 是否为"用户主动中止"语义（非业务失败：不落错误事件、不冒泡给前端为 Error）。
+    pub fn is_abort(&self) -> bool {
+        matches!(self, PluginError::Aborted)
     }
 
     /// 将 PluginError 转换为通用的传输帧
@@ -57,7 +136,7 @@ impl PluginError {
         crate::symbio_core::PluginFrame::Error(
             self.to_string(),
             Some(serde_json::json!({
-                "code": self.code()
+                "code": self.code().as_str()
             })),
         )
     }
@@ -144,4 +223,76 @@ pub fn into_plugin_error(s: String) -> PluginError {
 #[inline]
 pub fn from_boxed_error(e: Box<dyn std::error::Error + Send + Sync>) -> PluginError {
     PluginError::InternalError(e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbio_core::PluginFrame;
+
+    /// 每个变体的错误码经 `to_frame` → `error_code` 往返后保持一致
+    /// （session-mechanism-unification.md §4.2：分派依据必须是类型化错误码，而非文案字面量）。
+    #[test]
+    fn error_code_roundtrip_through_frame() {
+        let cases = [
+            (PluginError::NotFound("x".into()), ErrorCode::NotFound),
+            (PluginError::NotImplemented, ErrorCode::NotImplemented),
+            (
+                PluginError::ValidationError("x".into()),
+                ErrorCode::ValidationError,
+            ),
+            (
+                PluginError::InternalError("x".into()),
+                ErrorCode::InternalError,
+            ),
+            (PluginError::RateLimited("x".into()), ErrorCode::RateLimited),
+            (PluginError::ParseError("x".into()), ErrorCode::ParseError),
+            (PluginError::Timeout, ErrorCode::Timeout),
+            (PluginError::Forbidden("x".into()), ErrorCode::Forbidden),
+            (PluginError::Aborted, ErrorCode::Aborted),
+            (
+                PluginError::RetryWithoutContextId,
+                ErrorCode::RetryWithoutContextId,
+            ),
+            (PluginError::StreamError("x".into()), ErrorCode::StreamError),
+            (PluginError::CompressionFailed, ErrorCode::CompressionFailed),
+        ];
+        for (err, want) in cases {
+            let frame = err.to_frame();
+            assert_eq!(frame.error_code(), Some(want), "往返失败：{err:?}");
+            // 生产侧 code() 与帧内 code 必须一致（单一真源）
+            assert_eq!(err.code(), want);
+        }
+    }
+
+    /// abort 分派只认错误码，不受文案影响（防止文案改动静默失效）。
+    #[test]
+    fn abort_dispatch_ignores_message_text() {
+        let frame = PluginError::Aborted.to_frame();
+        assert!(frame.is_abort());
+        // 非 abort 错误即使文案含 "abort" 字样也不应被判为中止
+        let decoy = PluginFrame::Error(
+            "用户手动中止了本次回复".into(),
+            Some(serde_json::json!({ "code": "INTERNAL_ERROR" })),
+        );
+        assert!(!decoy.is_abort());
+    }
+
+    /// 不可识别/缺失的 code 降级为 None，不误判为任何具体语义。
+    #[test]
+    fn unknown_or_missing_code_is_none() {
+        assert_eq!(ErrorCode::from_code("NO_SUCH_CODE"), ErrorCode::Unknown);
+        let frame = PluginFrame::Error("x".into(), Some(serde_json::json!({"code": "FUTURE"})));
+        assert_eq!(frame.error_code(), None);
+        assert_eq!(PluginFrame::Error("x".into(), None).error_code(), None);
+        assert_eq!(PluginFrame::Data(serde_json::json!(1)).error_code(), None);
+    }
+
+    /// `is_abort` 谓词与错误码保持一致（替代旧的文案判别）。
+    #[test]
+    fn is_abort_predicate_matches_code() {
+        assert!(PluginError::Aborted.is_abort());
+        assert!(!PluginError::Timeout.is_abort());
+        assert!(!PluginError::RetryWithoutContextId.is_abort());
+    }
 }

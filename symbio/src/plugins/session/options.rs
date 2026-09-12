@@ -241,7 +241,13 @@ impl SessionPlugin {
             None => node.with_value_label("", "未选择目录"),
         };
 
-        if has_messages && node.value.as_deref().map(|v| !v.is_empty()).unwrap_or(false) {
+        if has_messages
+            && node
+                .value
+                .as_deref()
+                .map(|v| !v.is_empty())
+                .unwrap_or(false)
+        {
             node.with_status(OPTION_STATUS_DISABLED)
                 .with_enabled(false)
                 .with_description("当前会话已有对话历史，不能更换工作目录（如需换目录请新建会话）")
@@ -525,7 +531,10 @@ mod tests {
         assert_eq!(off.option_type, OptionType::Invoke);
         assert!(!off.enabled);
         assert_eq!(off.status, OPTION_STATUS_DISABLED);
-        assert_eq!(off.action.expect("触发动作存在").endpoint, HEARTBEAT_TRIGGER_ENDPOINT);
+        assert_eq!(
+            off.action.expect("触发动作存在").endpoint,
+            HEARTBEAT_TRIGGER_ENDPOINT
+        );
 
         // 已启用且提示词非空 → 可点击
         let on = plugin.heartbeat_trigger_option(Some(json!({
@@ -541,11 +550,7 @@ mod tests {
         let inner = OptionNode::sub(
             "parent",
             "P",
-            vec![OptionNode::invoke(
-                "child",
-                "C",
-                OptionAction::default(),
-            )],
+            vec![OptionNode::invoke("child", "C", OptionAction::default())],
         );
         let nodes = vec![inner];
         assert!(find_node(&nodes, "child").is_some());
@@ -562,7 +567,12 @@ mod tests {
 
         // 父节点无 action（sub）→ 不注入；子节点的 metadata 载荷保留并补 session_id
         assert!(nodes[0].action.is_none());
-        let payload = nodes[0].children[0].action.as_ref().unwrap().payload.clone();
+        let payload = nodes[0].children[0]
+            .action
+            .as_ref()
+            .unwrap()
+            .payload
+            .clone();
         assert_eq!(payload["session_id"], json!("s1"));
         assert_eq!(payload["metadata"]["mode"], json!("auto"));
 
@@ -577,6 +587,9 @@ mod tests {
             },
         )];
         inject_session_scope(&mut fixed, "s1");
-        assert_eq!(fixed[0].action.as_ref().unwrap().payload["session_id"], json!("own"));
+        assert_eq!(
+            fixed[0].action.as_ref().unwrap().payload["session_id"],
+            json!("own")
+        );
     }
 }

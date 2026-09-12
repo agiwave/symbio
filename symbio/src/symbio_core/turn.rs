@@ -15,13 +15,13 @@
 //! （`plugins::model::{protocol, tool_call, message_builder, context}`），
 //! 本模块是唯一权威实现。
 
-use crate::{plugin_error, plugin_info, plugin_warn};
 use crate::symbio_core::model_provider::{FinishReason, ProtocolEvent, Usage};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::schemas::session::session_chat_response;
 use crate::symbio_core::{PluginChannel, PluginFrame};
+use crate::{plugin_error, plugin_info, plugin_warn};
 use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -219,13 +219,7 @@ pub async fn execute_post_with_abort(
     let body_len = serde_json::to_vec(body).map(|v| v.len()).unwrap_or(0);
     let host = reqwest::Url::parse(url)
         .ok()
-        .map(|u| {
-            format!(
-                "{}{}",
-                u.host_str().unwrap_or("?"),
-                u.path()
-            )
-        })
+        .map(|u| format!("{}{}", u.host_str().unwrap_or("?"), u.path()))
         .unwrap_or_else(|| url.to_string());
     // ① 请求发起日志：此后若卡死，可确定卡在「已发出 POST、未收到响应头」阶段。
     plugin_info!(
@@ -873,7 +867,10 @@ pub async fn parse_sse_stream(
     // 若此处之后长时间无下文（工具执行/下一轮请求），可据此定位卡死发生在「流结束后」阶段。
     if abort_flag.load(Ordering::SeqCst) {
         // 中止已在上方记录，此处不重复。
-    } else if out.text.is_empty() && out.reasoning.is_empty() && !out.tool_accumulator.had_any_tool_call() {
+    } else if out.text.is_empty()
+        && out.reasoning.is_empty()
+        && !out.tool_accumulator.had_any_tool_call()
+    {
         plugin_warn!(
             "model",
             "[LLM] 流结束但未产出任何内容（空流，{} chunks / {} bytes, 耗时 {:?}, finish={:?}）——上游可能返回了错误页或空响应",

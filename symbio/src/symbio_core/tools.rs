@@ -9,7 +9,7 @@
 //! 迁移前位置：`plugins/agent/core/default_tool_visitor.rs`
 
 use crate::symbio_core::{
-    Capability, CapabilityVisitor, CapabilityMeta, InvokeRequest, InvokeResponse, ModelProvider,
+    Capability, CapabilityMeta, CapabilityVisitor, InvokeRequest, InvokeResponse, ModelProvider,
     PluginError, PluginPayload,
 };
 use async_trait::async_trait;
@@ -154,7 +154,9 @@ mod tests {
     }
 
     fn provider(id: &str) -> Arc<dyn ModelProvider> {
-        Arc::new(MockProvider { tag: id.to_string() })
+        Arc::new(MockProvider {
+            tag: id.to_string(),
+        })
     }
 
     #[tokio::test]

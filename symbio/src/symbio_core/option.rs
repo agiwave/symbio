@@ -176,7 +176,8 @@ mod tests {
 
     #[tokio::test]
     async fn collect_without_parent_returns_empty() {
-        let ctx: Arc<dyn InvokeRequest> = Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+        let ctx: Arc<dyn InvokeRequest> =
+            Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
         let v = collect_options(None, &ctx).await;
         assert!(v.list_options().await.is_empty());
     }

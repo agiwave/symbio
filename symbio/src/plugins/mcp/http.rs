@@ -509,8 +509,11 @@ impl super::manager::McpManager {
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
             // 截断错误文本，避免泄露过多 server 信息
+            // 安全截断：错误文本常含中文（server 返回本地化消息），
+            // 裸 `&[..200]` 会 panic 在字符边界内。
             let truncated = if error_text.len() > 200 {
-                format!("{}...", &error_text[..200])
+                let end = crate::symbio_core::floor_char_boundary(&error_text, 200);
+                format!("{}...", &error_text[..end])
             } else {
                 error_text
             };

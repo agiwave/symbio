@@ -166,18 +166,24 @@ async fn parse_skill_file(path: &Path, max_body_chars: usize) -> Result<Skill, P
         .to_string();
 
     // body 预算：超过 max_body_chars 时截断 + warn
-    let body = if body_raw.len() > max_body_chars {
+    //
+    // 注意：`max_body_chars` 的语义是**字符**数（字段名与文档注释均如此），
+    // 而 `str::len()` 返回**字节**数——中文 SKILL.md 会被按 1/3 预算过度截断。
+    // 这里显式按 char 计数取字节偏移，两者对齐。
+    let body_char_count = body_raw.chars().count();
+    let body = if body_char_count > max_body_chars {
         warn!(
             skill = %path.display(),
-            chars = body_raw.len(),
+            chars = body_char_count,
             max = max_body_chars,
             "SKILL.md body 超出 max_body_chars，已截断"
         );
-        // 在 char 边界截断（按 char 而非 byte，避免切割 UTF-8 多字节字符）
-        let mut idx = max_body_chars;
-        while !body_raw.is_char_boundary(idx) && idx > 0 {
-            idx -= 1;
-        }
+        // 第 max_body_chars 个字符的字节起点即为合法截断点（天然 char 边界）
+        let idx = body_raw
+            .char_indices()
+            .nth(max_body_chars)
+            .map(|(i, _)| i)
+            .unwrap_or(body_raw.len());
         let mut truncated = body_raw[..idx].to_string();
         truncated.push_str("\n\n[... body truncated due to max_body_chars budget ...]");
         truncated

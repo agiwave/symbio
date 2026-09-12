@@ -9,14 +9,15 @@
 //! - `persist_failure`：失败降级持久化（作用域收窄到失败 Turn 及其后代）。
 
 use super::active::{ActiveSessionState, REQUEST_ID_COUNTER};
+use super::chat_loop::StopSignal;
+use super::model_chat;
 use super::plugin::SessionPlugin;
+use crate::plugin_debug;
 use crate::symbio_core::event_bus::EventBus;
 use crate::symbio_core::schemas::{
     session::chat_message as cm,
     session::{session_append, session_chat, session_chat_response},
 };
-use super::model_chat;
-use crate::plugin_debug;
 use crate::symbio_core::{
     attach_capabilities, collect_capabilities, take_errors, InvokeRequest, InvokeRequestExt,
     InvokeResponse, Plugin, PluginChannel, PluginError, PluginFrame, PluginPayload, MODE,
@@ -53,11 +54,22 @@ struct WorkingGuard {
     /// 注意：绝不能传 `request_id` 的字符串——那是请求序号（如 "42"），
     /// 会令 `open_chat_session` 找不到会话而提前返回，导致崩溃失败永不落库。
     session_id: String,
+    /// 本次请求的 Stop 触发器（session-mechanism-unification.md §4.4）。
+    ///
+    /// 正常路径下 `run_chat_loop` 的出口已显式 fire 过，此处 Drop 是 no-op；
+    /// panic 路径下它是**唯一**能保证 Stop 送达的机制（chat_loop 的出口代码
+    /// 根本不会执行）。字段声明顺序决定析构顺序：本字段必须在 `done` 之前
+    /// 落地，故放在结构体末尾即可（Drop 中显式调用，不依赖字段析构次序）。
+    stop: Arc<StopSignal>,
     done: bool,
 }
 
 impl Drop for WorkingGuard {
     fn drop(&mut self) {
+        // Stop 钩子兜底（幂等）：无论正常/panic/提前 return，本请求生命周期内
+        // 恰好触发一次。放在 `done` 早退之前——正常结束路径同样依赖它兜住
+        // "chat_loop 出口漏调"的情形。
+        self.stop.fire_fallback();
         if self.done {
             return;
         }
@@ -225,6 +237,31 @@ impl SessionPlugin {
         self.broadcast_status(state, "idle").await;
     }
 
+    /// 进入 chat_loop **之前**就失败的统一收尾（provider 解析 / 能力访问器缺失等）。
+    ///
+    /// 与正常出口一样保证 Working → Stop 严格配对：这里**显式**补发一次 Stop，
+    /// 而不是依赖 `StopSignal::drop` 兜底——兜底路径会打"显式触发点未执行"的
+    /// warn（那是为真正的漏调准备的告警），而本函数是已知的生命周期终点，
+    /// 属于正常语义，不应污染告警通道（session-mechanism-unification.md §4.4）。
+    ///
+    /// 返回 `()`；调用方随后置 `guard.done = true` 并 return。
+    async fn fail_before_loop(
+        &self,
+        state: &Arc<ActiveSessionState>,
+        session_id: &str,
+        collected: &Arc<tokio::sync::Mutex<Vec<cm::ChatMessage>>>,
+        stop: &super::chat_loop::StopSignal,
+        error: impl Into<String>,
+    ) {
+        let err = error.into();
+        crate::plugin_error!("session", "{}", &err);
+        self.persist_failure(state, session_id, collected, &err)
+            .await;
+        // 本轮无 transcript（loop 未产生任何消息）→ last_message 为空串
+        stop.fire(&[]).await;
+        self.broadcast_error_with_idle(state, err).await;
+    }
+
     /// 统一的 chat_loop 任务执行器（从 `handle_chat_message` 提取，供 continuation 复用）。
     ///
     /// 职责：
@@ -252,13 +289,19 @@ impl SessionPlugin {
         let collected_ai_messages =
             Arc::new(tokio::sync::Mutex::new(Vec::<cm::ChatMessage>::new()));
 
-        // 工作态守卫：保障 panic / 异常退出时 is_working 收敛 + 失败持久化。
+        let stop = Arc::new(super::chat_loop::StopSignal::new(
+            Some(parent.clone()),
+            chat_ctx.fork(),
+        ));
+
+        // 工作态守卫：保障 panic / 异常退出时 is_working 收敛 + 失败持久化 + Stop 兜底。
         // 正常结束路径会在收尾前把 `done` 置 true（见块末尾）。
         let mut guard = WorkingGuard {
             state: state.clone(),
             plugin: self.clone(),
             collected: collected_ai_messages.clone(),
             session_id: session_id.clone(),
+            stop: stop.clone(),
             done: false,
         };
 
@@ -268,11 +311,18 @@ impl SessionPlugin {
         let manager = match chat_ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             Some(m) => m,
             None => {
-                let msg = "CAPABILITY_VISITOR 不可用，无法解析 Model Provider".to_string();
-                crate::plugin_error!("session", "{}", &msg);
-                self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
-                    .await;
-                self.broadcast_error_with_idle(&state, msg).await;
+                self.fail_before_loop(
+                    &state,
+                    &session_id,
+                    &collected_ai_messages,
+                    &stop,
+                    "CAPABILITY_VISITOR 不可用，无法解析 Model Provider".to_string(),
+                )
+                .await;
+                // 收尾已在本分支自行完成（persist_failure + Stop + Error 广播 + idle）：
+                // 必须置 done=true，否则 WorkingGuard::drop 会再跑一遍崩溃恢复，
+                // 导致同一失败被重复落库、前端收到两条 Error 事件（session-mechanism-unification.md §4.4）。
+                guard.done = true;
                 return;
             }
         };
@@ -282,12 +332,18 @@ impl SessionPlugin {
         let provider = match manager.get_model_provider().await {
             Some(p) => p,
             None => {
-                let msg =
-                    format!("未找到可用的 Model Provider（requested={provider_id:?}）");
-                crate::plugin_error!("session", "{}", &msg);
-                self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
-                    .await;
-                self.broadcast_error_with_idle(&state, msg).await;
+                self.fail_before_loop(
+                    &state,
+                    &session_id,
+                    &collected_ai_messages,
+                    &stop,
+                    format!("未找到可用的 Model Provider（requested={provider_id:?}）"),
+                )
+                .await;
+                // 收尾已在本分支自行完成（persist_failure + Stop + Error 广播 + idle）：
+                // 必须置 done=true，否则 WorkingGuard::drop 会再跑一遍崩溃恢复，
+                // 导致同一失败被重复落库、前端收到两条 Error 事件（session-mechanism-unification.md §4.4）。
+                guard.done = true;
                 return;
             }
         };
@@ -314,6 +370,7 @@ impl SessionPlugin {
             provider,
             Some(parent),
             context_limit,
+            stop.clone(),
         );
         let ctx_clone = chat_ctx.fork();
         let error_tx = plugin_chan.tx.clone();
@@ -341,27 +398,37 @@ impl SessionPlugin {
                         "[ChatLoop] run_chat_loop 异常退出: {e} (code={})",
                         e.code()
                     );
-                    let _ = error_tx
-                        .send(crate::symbio_core::PluginFrame::Error(
-                            e.to_string(),
-                            Some(serde_json::json!({"code": e.code()})),
-                        ))
-                        .await;
+                    // 复用 PluginError::to_frame：错误码的线上表示只有一处定义
+                    let _ = error_tx.send(e.to_frame()).await;
                 }
                 Err(e) => {
-                    // join error（含 panic）：对齐旧 spawn_orchestrator 的错误包装
+                    // join error（含 panic）：面向前端只回通用文案（不泄漏内部细节），
+                    // 但**日志侧必须保留 panic 载荷**——`JoinError::to_string()` 含 panic
+                    // 消息与 `file:line:col`，是定位的唯一线索。此前该信息只落到 stderr
+                    // 的默认 panic hook，日志文件/结构化日志里查不到（session-mechanism-unification.md §4.5）。
+                    let detail = e.to_string();
                     let msg = if e.is_panic() {
+                        crate::plugin_error!(
+                            "session",
+                            "[ChatLoop] chat_loop 任务 panic，已被 join 隔离：{detail}"
+                        );
                         "服务器内部发生未预期的错误".to_string()
                     } else {
-                        format!("Chat loop task failed: {e}")
+                        crate::plugin_error!(
+                            "session",
+                            "[ChatLoop] 任务 join 失败（cancelled）：{detail}"
+                        );
+                        format!("Chat loop task failed: {detail}")
                     };
-                    crate::plugin_error!(
-                        "session",
-                        "[ChatLoop] 任务 join 失败（panic={}）：{msg}",
-                        e.is_panic()
-                    );
+                    // 错误码显式标注 INTERNAL_ERROR：前端可据此区分"服务端异常"
+                    // 与"业务失败"（此前传 None，落库/展示侧丢失分类信息）。
                     let _ = error_tx
-                        .send(crate::symbio_core::PluginFrame::Error(msg, None))
+                        .send(crate::symbio_core::PluginFrame::Error(
+                            msg,
+                            Some(serde_json::json!({
+                                "code": crate::symbio_core::ErrorCode::InternalError.as_str()
+                            })),
+                        ))
                         .await;
                 }
             }
@@ -376,7 +443,10 @@ impl SessionPlugin {
                 inner.ai_control_tx = Some(sub_channel.tx.clone());
             }
 
-            plugin_debug!("session", "[Consume] 消费循环启动（session={session_id}, rid={rid}）");
+            plugin_debug!(
+                "session",
+                "[Consume] 消费循环启动（session={session_id}, rid={rid}）"
+            );
 
             let mut consume_frames: u64 = 0;
             let consume_started = std::time::Instant::now();
@@ -427,13 +497,11 @@ impl SessionPlugin {
                     break;
                 }
                 match &frame {
-                    PluginFrame::Error(msg, meta) => {
+                    PluginFrame::Error(msg, _) => {
                         crate::plugin_error!(
                             "session",
                             "[Consume] 收到 Error 帧（code={:?}）：{msg}",
-                            meta.as_ref()
-                                .and_then(|m| m.get("code"))
-                                .and_then(|v| v.as_str())
+                            frame.error_code()
                         );
                         // 用户手动中止（run_chat_loop 冒泡的 Err(PluginError::Aborted)，
                         // 错误帧携带 code=ABORTED）：在途 Turn 落库为 Failed + error，
@@ -442,12 +510,9 @@ impl SessionPlugin {
                         // 广播的 Abort 事件负责清理流式动画）。
                         // 旧实现 run_chat_loop 对 Aborted 直接 return Ok(())，在途
                         // Turn 既不落库也无重试入口（刷新即消失的幽灵节点）。
-                        let is_abort = meta
-                            .as_ref()
-                            .and_then(|m| m.get("code"))
-                            .and_then(|v| v.as_str())
-                            .map(|c| c == "ABORTED")
-                            .unwrap_or(false);
+                        // 分派依据为类型化错误码（ErrorCode::Aborted），不再对
+                        // meta["code"] 做字符串字面量比较（session-mechanism-unification.md §4.2）。
+                        let is_abort = frame.is_abort();
                         if is_abort {
                             // 在途 Turn 落库为 Failed + error（前端错误条 + 重试入口），
                             // 随后 break 走循环后的统一收尾：清 ai_control_tx（让
@@ -540,8 +605,16 @@ impl SessionPlugin {
         crate::plugin_info!(
             "session",
             "[Abort] 收到中止请求：控制通道{}（{}）",
-            if abort_sent { "存在，Abort 帧已发送" } else { "已置空，走 3s 兜底强制收敛" },
-            if abort_sent { "等待 chat_loop 自行退出" } else { "is_working 将被直接复位" }
+            if abort_sent {
+                "存在，Abort 帧已发送"
+            } else {
+                "已置空，走 3s 兜底强制收敛"
+            },
+            if abort_sent {
+                "等待 chat_loop 自行退出"
+            } else {
+                "is_working 将被直接复位"
+            }
         );
 
         if abort_sent {

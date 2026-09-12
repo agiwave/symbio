@@ -23,7 +23,6 @@
 //!
 //! 非流式回退（无 RESULT_MSG_ID 的直连调用，如 MCP 网关）：保持原
 //! `cmd.output()` 等待式行为不变。
-use serde::{Deserialize, Serialize};
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::system::{decode_output, validate_params};
 use crate::symbio_core::{
@@ -35,6 +34,7 @@ use crate::symbio_core::{
     PluginError, PluginFrame, PluginPayload,
 };
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -109,7 +109,11 @@ impl ShellTool {
 
     /// 公共前置：参数校验 + 速率限制 + 风险等级判定 + 动作记录。
     /// 返回 `(command, risk)`。
-    fn prepare(&self, args: &Value, threshold: RiskLevel) -> Result<(String, RiskLevel), PluginError> {
+    fn prepare(
+        &self,
+        args: &Value,
+        threshold: RiskLevel,
+    ) -> Result<(String, RiskLevel), PluginError> {
         validate_params(args, &["command"]).map_err(PluginError::ValidationError)?;
 
         let command = match args.get("command").and_then(|v| v.as_str()) {
@@ -198,21 +202,23 @@ impl ShellTool {
                 let mut stdout = decode_output(&output.stdout);
                 let stderr = decode_output(&output.stderr);
 
-                // 截断输出
+                // 截断输出（必须落在字符边界：命令输出常含中文，
+                // String::truncate 直接切在多字节字符内部会 panic）
                 if stdout.len() > MAX_OUTPUT_BYTES {
-                    stdout.truncate(MAX_OUTPUT_BYTES);
+                    stdout.truncate(crate::symbio_core::floor_char_boundary(
+                        &stdout,
+                        MAX_OUTPUT_BYTES,
+                    ));
                     stdout.push_str("\n... [输出已截断]");
                 }
 
                 let full_output = compose_output(&stdout, &stderr);
 
-                Ok(serde_json::to_value(
-                    Response {
-                        exit_code: output.status.code(),
-                        output: full_output,
-                        risk_level: risk_level_str(&risk),
-                    },
-                )
+                Ok(serde_json::to_value(Response {
+                    exit_code: output.status.code(),
+                    output: full_output,
+                    risk_level: risk_level_str(&risk),
+                })
                 .unwrap_or_default())
             }
             Ok(Err(e)) => Err(PluginError::InternalError(format!("命令执行失败: {e}"))),
@@ -338,8 +344,12 @@ impl ShellTool {
         let stdout_text = stdout_acc.lock().unwrap().clone();
         let stderr_text = stderr_acc.lock().unwrap().clone();
         let mut full = compose_output(&stdout_text, &stderr_text);
+        // 最终截断：落在字符边界上，避免中文输出被硬切导致 panic
         if full.len() > MAX_OUTPUT_BYTES {
-            full.truncate(MAX_OUTPUT_BYTES);
+            full.truncate(crate::symbio_core::floor_char_boundary(
+                &full,
+                MAX_OUTPUT_BYTES,
+            ));
             full.push_str("\n... [输出已截断]");
         }
         let exit_note = match status.as_ref() {
@@ -351,9 +361,7 @@ impl ShellTool {
         };
         full.push_str(&exit_note);
 
-        let _ = tx
-            .send(PluginFrame::Data(json!({ "content": full })))
-            .await;
+        let _ = tx.send(PluginFrame::Data(json!({ "content": full }))).await;
         // 关闭发送侧 → executor 的 recv() 返回 None → 流式循环结束
         drop(tx);
         Ok(())
@@ -400,8 +408,10 @@ where
                         // （避免 cat 大文件把内存打爆；最终帧无需再截断）
                         if a.len() < MAX_OUTPUT_BYTES {
                             let remain = MAX_OUTPUT_BYTES - a.len();
-                            let take = line.len().min(remain);
-                            a.push_str(&line[..take]);
+                            let take = crate::symbio_core::floor_char_boundary(&line, remain);
+                            if take > 0 {
+                                a.push_str(&line[..take]);
+                            }
                         }
                     }
                     // 节流广播累积快照（全量内容，前端 role=tool 全量替换）
@@ -434,8 +444,7 @@ where
                             .await;
                         if sent.is_err() {
                             // 消费端已消失（executor abort / rx 提前 drop）
-                            consumer_gone
-                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                            consumer_gone.store(true, std::sync::atomic::Ordering::Relaxed);
                             break;
                         }
                     }
@@ -516,8 +525,12 @@ impl Capability for ShellTool {
         // 注意：executor 是先拿到 Session(rx) 返回值后才开始消费通道，
         // 因此执行体必须 spawn 到后台，否则输出帧超过通道容量（64）时
         // pump 阻塞在 send、execute() 不返回、executor 不消费 → 死锁。
-        let result_msg_id = ctx.get(crate::symbio_core::RESULT_MSG_ID).unwrap_or_default();
-        let tool_call_id = ctx.get(crate::symbio_core::TOOL_CALL_ID).unwrap_or_default();
+        let result_msg_id = ctx
+            .get(crate::symbio_core::RESULT_MSG_ID)
+            .unwrap_or_default();
+        let tool_call_id = ctx
+            .get(crate::symbio_core::TOOL_CALL_ID)
+            .unwrap_or_default();
         if !result_msg_id.is_empty() && !tool_call_id.is_empty() {
             let (tx_side, rx_side) = PluginChannel::pair(64);
             let cancel = rx_side.cancel_token.clone();
@@ -611,7 +624,10 @@ mod tests {
 
         let (snapshots, full) = drain_channel(&mut chan.rx).await;
         // 哨兵帧必须携带完整输出
-        assert!(full.contains("hello_stream"), "sentinel missing output: {full}");
+        assert!(
+            full.contains("hello_stream"),
+            "sentinel missing output: {full}"
+        );
         assert!(
             full.contains("[exit code: 0]"),
             "sentinel missing exit code: {full}"
@@ -675,8 +691,14 @@ mod tests {
         };
 
         let (snapshots, full) = drain_channel(&mut chan.rx).await;
-        assert!(full.contains("line1"), "sentinel must contain all lines: {full}");
-        assert!(full.contains("line4"), "sentinel must contain all lines: {full}");
+        assert!(
+            full.contains("line1"),
+            "sentinel must contain all lines: {full}"
+        );
+        assert!(
+            full.contains("line4"),
+            "sentinel must contain all lines: {full}"
+        );
         let _ = snapshots;
     }
 }

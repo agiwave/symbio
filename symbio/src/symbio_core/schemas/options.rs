@@ -212,11 +212,7 @@ impl OptionNode {
     }
 
     /// 便捷构造：`invoke` 节点
-    pub fn invoke(
-        id: impl Into<String>,
-        label: impl Into<String>,
-        action: OptionAction,
-    ) -> Self {
+    pub fn invoke(id: impl Into<String>, label: impl Into<String>, action: OptionAction) -> Self {
         Self {
             action: Some(action),
             ..Self::new(id, label, OptionType::Invoke)
