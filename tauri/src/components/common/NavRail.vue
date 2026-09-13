@@ -33,7 +33,7 @@
         class="nav-btn"
         :class="{ active: it.active }"
         :aria-label="it.label"
-        :title="it.label"
+        :title="it.description || it.label"
         @click="$emit('select', it.key)"
       >
         <component :is="it.icon" v-if="it.icon" />
@@ -54,11 +54,13 @@
 import type { Component } from 'vue'
 
 export interface NavRailItem {
-  /** 类别键（provider kind / 容器子类别 kind） */
+  /** 类别键（provider kind / 容器子类别 kind / VDFS 挂载名） */
   key: string
   label: string
   /** 类别图标（entityTypes 注册表映射；缺省回退通用文件图标） */
   icon?: Component | null
+  /** 语义说明（作 tooltip；VDFS 导航由后端下发 description） */
+  description?: string
   /** 计数角标（0/undefined 不显示） */
   count?: number
   active?: boolean

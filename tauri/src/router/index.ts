@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '../views/MainLayout.vue'
 import WorkbenchView from '../views/WorkbenchView.vue'
+import VdfsView from '../views/VdfsView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -35,6 +36,16 @@ const router = createRouter({
         containerKind: route.params.kind as string,
         containerId: route.params.id as string,
       })
+    },
+    {
+      // VDFS 通用资源页（全局页面级推入，整页替换主布局）：
+      // 左栏 = 挂载点（后端 VdfsProvider 注册）、中栏 = 当前目录、
+      // 详情按节点 ext 分发渲染器（form / session / text …）。
+      // :mount 可选 = 深链直接进入某挂载点（如 /vdfs/setting）。
+      path: '/vdfs/:mount?',
+      name: 'vdfs',
+      component: VdfsView,
+      props: true
     },
     {
       // agent 兼容别名（深链保兼容）：/agent/:agentId/entities
