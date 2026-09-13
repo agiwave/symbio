@@ -18,6 +18,8 @@ import {
   vdfsJoin,
   vdfsMountOf,
   vdfsParent,
+  mountNavVisible,
+  type VdfsMountInfo,
   type VdfsNode,
 } from '../vdfs'
 
@@ -119,6 +121,39 @@ describe('口径翻译（前端 .vdfs ↔ 线路 /）', () => {
     for (const p of ['.vdfs', '.vdfs/session', '.vdfs/setting/appearance']) {
       expect(toVdfsPath(toWirePath(p))).toBe(p)
     }
+  })
+})
+
+describe('mountNavVisible（机制层导航可见性）', () => {
+  function mount(partial: Partial<VdfsMountInfo> & { mount: string }): VdfsMountInfo {
+    return {
+      label: partial.mount,
+      order: 0,
+      access: 'lt',
+      status: 'active',
+      root: `/${partial.mount}`,
+      ...partial,
+    }
+  }
+
+  it('缺省可见：字段缺失即视为可见', () => {
+    expect(mountNavVisible(mount({ mount: 'session' }))).toBe(true)
+    expect(mountNavVisible(mount({ mount: 'session', nav_visible: true }))).toBe(true)
+  })
+
+  it('声明不可见即为 false（后端机制层决定，前端不按挂载名特判）', () => {
+    expect(mountNavVisible(mount({ mount: 'local', nav_visible: false }))).toBe(false)
+    // 空值按缺省可见处理，不在消费点抛错
+    expect(mountNavVisible(null)).toBe(true)
+  })
+
+  it('按标记过滤：隐藏项不进导航，其余原样保留', () => {
+    const mounts = [
+      mount({ mount: 'session' }),
+      mount({ mount: 'local', nav_visible: false }),
+      mount({ mount: 'setting' }),
+    ]
+    expect(mounts.filter(mountNavVisible).map((m) => m.mount)).toEqual(['session', 'setting'])
   })
 })
 

@@ -36,6 +36,7 @@ import {
   VFDS_EVENT_KIND,
   VFDS_ROOT,
   isVdfsDir,
+  mountNavVisible,
   parseVdfsValidation,
   vdfsBase,
   vdfsJoin,
@@ -75,9 +76,14 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
   /** 当前挂载点（由 cwd 首段决定；虚拟根下为空串） */
   const activeMount = computed(() => vdfsMountOf(cwd.value))
 
-  /** 左栏导航 = 挂载点（与实体页的 provider 导航同构；图标为纯 UI 映射） */
+  /**
+   * 左栏导航 = 导航可见的挂载点（图标为纯 UI 映射）。
+   *
+   * 可见性由后端机制层声明（`nav_visible`），前端只按标记过滤——不做任何
+   * 挂载名特判：隐藏的子树仍可经 `.vdfs/<挂载名>` 寻址访问。
+   */
   const railItems = computed<NavRailItem[]>(() =>
-    mounts.value.map((m) => ({
+    mounts.value.filter(mountNavVisible).map((m) => ({
       key: m.mount,
       label: m.label || m.mount,
       icon: mountIconOf(m.mount) ?? null,

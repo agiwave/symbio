@@ -16,7 +16,7 @@ import { computed, onBeforeUnmount, shallowRef } from 'vue'
 import { useRoute } from 'vue-router'
 import { fetchMounts } from '@/services/vdfs'
 import { subscribe } from '@/services/eventBus'
-import { VFDS_EVENT_KIND, type VdfsMountInfo } from '@/schemas/vdfs'
+import { VFDS_EVENT_KIND, mountNavVisible, type VdfsMountInfo } from '@/schemas/vdfs'
 import { mountIconOf } from '@/registry/vdfsTypes'
 import type { NavRailItem } from '@/components/common/NavRail.vue'
 
@@ -68,6 +68,10 @@ export async function reloadMounts(): Promise<void> {
 /**
  * 应用外壳侧边栏：`.vdfs` 虚拟根 → NavRail 项。
  *
+ * 只取**导航可见**的挂载点：可见性由后端机制层声明（`VdfsProvider::nav_visible`），
+ * 前端按标记过滤而不按挂载名硬编码排除——被隐藏的子树（如本地文件）依然可经
+ * `.vdfs/<挂载名>` 寻址访问。
+ *
  * 变更驱动：订阅 `vdfs` 事件总线，任一挂载点发生增删改即重拉清单
  * （挂载点集合变化极低频，整表重拉最简且正确）。
  */
@@ -75,7 +79,7 @@ export function useNavRailItems() {
   const route = useRoute()
 
   const navItems = computed<NavRailItem[]>(() =>
-    mounts.value.map((m) => ({
+    mounts.value.filter(mountNavVisible).map((m) => ({
       key: m.mount,
       label: m.label || m.mount,
       icon: mountIconOf(m.mount) ?? undefined,

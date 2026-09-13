@@ -144,6 +144,8 @@ export interface VdfsMountInfo {
   icon?: string
   /** 该挂载根可接受的新建类型（导航项据此出添加入口） */
   new_types?: VdfsNewType[]
+  /** 是否作为导航项出现（缺省 true；false = 子树仍可寻址，但不占导航位） */
+  nav_visible?: boolean
   [attribute: string]: unknown
 }
 
@@ -283,6 +285,16 @@ export function vdfsAccessOf(node: { access?: string } | null | undefined): Vdfs
 /** 节点是否为目录（机制判定只看访问位） */
 export function isVdfsDir(node: { access?: string } | null | undefined): boolean {
   return vdfsAccessOf(node).list
+}
+
+/**
+ * 挂载点是否作为导航项出现（缺省 `true`）。
+ *
+ * 由后端机制层声明（`VdfsProvider::nav_visible`），前端**只认标记、不按挂载名过滤**：
+ * 隐藏的子树依然可寻址、可读写，只是不占左栏导航位。新增资源无需改动前端。
+ */
+export function mountNavVisible(m: VdfsMountInfo | null | undefined): boolean {
+  return m?.nav_visible !== false
 }
 
 /** 生效的呈现扩展名：显式 ext 优先，否则由 name 推导 */

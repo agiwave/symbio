@@ -146,8 +146,11 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 - **顺序与标签的单一真相源**：挂载点的 `label` / `order` 一律取自实体注册表
   （`entities::nav_meta_of(kind)`；`EntityVdfsAdapter` 同源），自持 provider 的插件
   （session / setting）**不得硬编码 order 常量**，否则左栏顺序会与实体页不一致。
-- **已知副作用**：`local`（本地文件）也是一个 VDFS 挂载点，因此会作为左栏第 7 项出现。
-  若需隐藏，应在机制层引入「导航可见性」标记，而不是在前端按名字过滤。
+- **导航可见性（S9）**：可见性由**机制层声明**——`VdfsProvider::nav_visible()`
+  （缺省 `true`）经挂载节点属性 `nav_visible` 透传到 `VdfsMountInfo`，前端
+  `mountNavVisible()` 按标记过滤，**不做任何挂载名特判**。`local`（本地文件）
+  是 VDFS 挂载点但不是资源类别，故声明 `false`：它仍可经 `.vdfs/local` 寻址、
+  读写、被 LLM 使用，只是不占左栏导航位。
 
 ### 4.2 中栏：列表 / 树
 
@@ -257,6 +260,7 @@ pub struct VdfsNewType {
 | **S6 会话内部重建** | 会话内部结构（子会话 / 工作目录树）改由 VDFS 同名目录承载，原容器实体页可替代 | S5 的阻塞解除 |
 | **S7 容器子实体重建** | 通用适配器按 `container_kinds` 支持 `<id>/<子类别>/<条目>`；agent bundle 内部（提示词 / 技能 / MCP）上 VDFS | 容器页最后一处不可替代能力消失 |
 | **S8 会话清单上 VDFS** | 会话节点自带 `message_count` / `metadata` / `meta_tags`；`listSessions()` 改走 `vdfs/list`，`services/entities.ts` 删除 | 前端 `entities/*` 调用点归零 |
+| **S9 导航可见性** | 机制层新增 `VdfsProvider::nav_visible()`（缺省 `true`），经挂载节点属性 → `VdfsMountInfo.nav_visible` 透传；`local` 声明 `false`，前端按标记过滤 | 左栏 = 六类资源，无按名硬编码 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -331,8 +335,9 @@ pub struct VdfsNewType {
   - **`form` 渲染器补删除动作**：`VdfsFormDetail` 原先假设 `form` = 设置分区（增删无语义）；
     S4 起 `model` / `skill` / `mcp` 详情也走 `form`，故按访问位注入 `mechanismActions`
     （`w` ⇒ 可删），经 `@delete` 回页面层统一走 `vdfs/delete`（与 `VdfsSessionDetail` 同构）。
-  - **已知取舍**：`local`（本地文件）同为 VDFS 挂载点，故左栏出现第 7 项；隐藏需在机制层
-    引入「导航可见性」标记，而非前端按名过滤。`agent` 的新建暂不支持 VDFS 路径（zip 语义）。
+  - **已知取舍（第 1 条已由 S9 解决）**：`local`（本地文件）同为 VDFS 挂载点，故左栏
+    曾出现第 7 项；S9 在机制层引入 `nav_visible` 标记后隐藏，前端仍不按名过滤。
+    `agent` 的新建暂不支持 VDFS 路径（zip 语义）。
 - **S5 下线旧协议**（**已完成**）：
   - **第一步（已完成）**：旧专项路由重定向改指 VDFS 页——
     `model-providers` → `/vdfs/model`、`mcp` → `/vdfs/mcp`、`skill` → `/vdfs/skill`、
@@ -354,9 +359,9 @@ pub struct VdfsNewType {
     拉取 `entities/providers` 填充，页面下线后无人加载 → 会话清单会打到
     错误地址。改为由 `services/entities.ts` **自持幂等加载**（首个 entities
     操作前拉一次，失败可重试）。
-  - **剩余（后续阶段）**：`services/session.ts` 的 `listSessions()` 仍走
-    `entities/list`（需要 `message_count` / `metadata`，当前 VDFS 节点未
-    下发这些字段）；迁到 `vdfs/list` 后 `services/entities.ts` 可整体删除。
+  - **剩余（已由 S8 完成）**：`services/session.ts` 的 `listSessions()` 曾仍走
+    `entities/list`（需要 `message_count` / `metadata`，当时 VDFS 节点未
+    下发这些字段）；S8 已迁到 `vdfs/list` 并整体删除 `services/entities.ts`。
 
 - **S6 会话内部在 VDFS 上重建**（**已完成**）：会话保持**叶子**（点击 = 聊天
   详情，语义不变），其内部结构作为**会话同名目录**挂在其下：
@@ -410,6 +415,25 @@ pub struct VdfsNewType {
   - **前端自此不再有任何 `entities/*` 调用点**；`schemas/entities.ts` 保留
     （`DetailDefinition` 仍是 VDFS `ext = form` 的宿主方言），后端 `entities/*`
     协议与其注册表继续为 VDFS 适配器服务。
+
+- **S9 导航可见性（机制层声明）**（**已完成**）：左栏规范是「六类资源」，但
+  `local`（本地文件）同样是 VDFS 挂载点，故曾多出第 7 项。按 S4 记录的正确做法
+  ——**在机制层引入可见性标记，而不是前端按名过滤**——落地如下：
+
+  | 层 | 改动 |
+  | --- | --- |
+  | trait | `VdfsProvider::nav_visible()`，缺省 `true`（与 `label` / `order` / `icon` 同为呈现层声明） |
+  | 挂载节点 | `mount_node()` 在不可见时写入属性 `nav_visible = false`（场景数据，VDFS 只透传；缺省不序列化） |
+  | 挂载视图 | `VdfsMountInfo.nav_visible`（缺省 `true`，`true` 时不序列化）——`host.rs` 从节点属性读、`vdfs_mounts` 工具从 provider 直接读 |
+  | 声明方 | `plugins/local/vdfs.rs` 覆写 `nav_visible() -> false`：本地文件树是挂载点，但不是资源类别 |
+  | 前端 | `schemas/vdfs.ts` 新增 `mountNavVisible()`；`useNavRail` / `useVdfs` 的导航项按标记过滤 |
+
+  - **隐藏 ≠ 裁剪能力**：隐藏的子树照旧可寻址、可读写、可被 LLM 使用，
+    挂载表（`vdfs/list .vdfs`）也照旧列出它；可见性只影响**导航呈现**。
+  - **前端零名称知识**：过滤条件是标记本身，新增挂载点无需改前端，
+    也不会因改名而失效。
+  - 覆盖：`mount_node_marks_nav_visibility`（节点属性 + 挂载表仍含隐藏项）、
+    `providers_carry_nav_visibility`（整链透传）、`mountNavVisible`（前端过滤）。
 
 ---
 

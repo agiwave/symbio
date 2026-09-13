@@ -208,12 +208,26 @@ pub struct VdfsMountInfo {
     /// 该挂载根可接受的新建类型（导航项据此决定添加入口与类型选择）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub new_types: Vec<VdfsNewType>,
+    /// 是否作为**导航项**出现（缺省 `true`）。
+    ///
+    /// `false` = 该子树可寻址、可读写、LLM 可用，但不占资源导航位
+    /// （如本地文件树）。由 provider 的 `nav_visible()` 声明，使用方透传。
+    #[serde(default = "default_nav_visible", skip_serializing_if = "is_true")]
+    pub nav_visible: bool,
     #[serde(flatten)]
     pub attributes: serde_json::Map<String, Value>,
 }
 
 fn default_status() -> String {
     VFDS_STATUS_ACTIVE.to_string()
+}
+
+fn default_nav_visible() -> bool {
+    true
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 /// `vdfs/providers` 响应

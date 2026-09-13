@@ -189,6 +189,13 @@ impl VdfsProvider for LocalVdfs {
         VdfsAccess::dir(true, true)
     }
 
+    /// 本地文件树**不是资源类别**：它是 VDFS 挂载点（可寻址、可读写、LLM 可用），
+    /// 但不与 session / model / agent / skill / mcp / setting 并列占用左栏导航位
+    /// （其入口在工作目录等处，而非资源导航）。
+    fn nav_visible(&self) -> bool {
+        false
+    }
+
     async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);

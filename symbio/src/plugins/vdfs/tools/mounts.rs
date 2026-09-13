@@ -51,6 +51,7 @@ impl Capability for MountsTool {
                 status: provider.root_status().to_string(),
                 icon: provider.icon().map(str::to_string),
                 new_types: provider.root_new_types(),
+                nav_visible: provider.nav_visible(),
                 mount,
                 attributes: Default::default(),
             })

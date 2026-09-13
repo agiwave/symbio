@@ -285,6 +285,13 @@ fn mount_info(order: i32, n: VdfsNode) -> VdfsMountInfo {
         },
         icon: None,
         new_types: n.new_types.clone(),
+        // 导航可见性：来自 provider 声明，经挂载点节点的场景属性透传
+        // （缺省 true，节点未标注即视为可见）
+        nav_visible: n
+            .attributes
+            .get(VFDS_ATTR_NAV_VISIBLE)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
         attributes: n.attributes.clone(),
     }
 }
@@ -871,6 +878,43 @@ mod tests {
             "order = 在根下的位置（根已按 provider order 排序）"
         );
         assert!(rec.seen().is_empty(), "list(/) 由组合视图内部完成");
+    }
+
+    /// 导航可见性经「provider 声明 → 挂载节点属性 → 挂载视图」整链透传
+    #[tokio::test]
+    async fn providers_carry_nav_visibility() {
+        // 隐藏型 provider：除可见性外与 Rec 同构（能力不变）
+        struct Hidden;
+        #[async_trait]
+        impl VdfsProvider for Hidden {
+            fn label(&self) -> Option<&str> {
+                Some("本地文件")
+            }
+            fn nav_visible(&self) -> bool {
+                false
+            }
+        }
+
+        let hidden: DynVdfsProvider = Arc::new(Hidden);
+        let shown: DynVdfsProvider = Rec::new();
+        let root: DynVdfsProvider = Arc::new(VdfsMountTable::new(vec![
+            ("local".to_string(), hidden),
+            ("mem".to_string(), shown),
+        ]));
+
+        let resp = dispatch(&root, VFDS_PROVIDERS, &ctx_empty())
+            .await
+            .unwrap()
+            .unwrap();
+        let data = resp.get::<VdfsProvidersResponse>().unwrap();
+        assert_eq!(data.providers.len(), 2, "隐藏的子树仍是挂载点");
+        let local = data.providers.iter().find(|m| m.mount == "local").unwrap();
+        let mem = data.providers.iter().find(|m| m.mount == "mem").unwrap();
+        assert!(
+            !local.nav_visible,
+            "声明不可见的挂载点下传 nav_visible=false"
+        );
+        assert!(mem.nav_visible, "未声明者缺省可见");
     }
 
     /// 挂载根列表：全路径回填 + `ext` 推导

@@ -69,6 +69,12 @@ pub const VFDS_KIND_MOUNT: &str = "mount";
 /// 虚拟根路径
 pub const VFDS_ROOT: &str = "/";
 
+/// 挂载点节点属性键：**是否作为导航项出现**（`false` = 不占导航位）。
+///
+/// 由 [`VdfsProvider::nav_visible`] 决定，仅在该方法返回 `false` 时写入
+/// （缺省 `true` 不序列化）；消费者按「缺省可见」处理。
+pub const VFDS_ATTR_NAV_VISIBLE: &str = "nav_visible";
+
 // ==================== 呈现扩展名（约定，宿主可自行扩展） ====================
 //
 // 节点 `ext` 是宿主选择详情呈现方式的键。VDFS 只透传、不解释；
@@ -951,6 +957,20 @@ pub trait VdfsProvider: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// 是否作为**导航项**出现在使用方的资源导航（左栏）中（缺省 `true`）。
+    ///
+    /// 与 [`Self::order`] / [`Self::icon`] 同属**呈现层声明**：隐藏的子树仍然
+    /// 可被寻址、可读写、可被 LLM 使用，只是不占导航位。用于「能力存在但
+    /// 不作为主资源类别」的挂载点（如本地文件树：是 VDFS 挂载点，却不是
+    /// 与 session / model 并列的资源类别）。
+    ///
+    /// 约定：返回 `false` 时由使用方在合成挂载点节点时写入
+    /// `nav_visible = false` 属性（场景数据，VDFS 只透传）；缺省即 `true`，
+    /// 不额外序列化。消费者「缺省可见」，故新增 provider 无需关心本方法。
+    fn nav_visible(&self) -> bool {
+        true
+    }
+
     /// 列出目录的直接子节点（`l` 位）
     async fn list(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<Vec<VdfsNode>> {
         Err(VdfsError::NotImplemented)
@@ -1135,6 +1155,11 @@ impl VdfsMountTable {
         n.status = p.root_status().to_string();
         n.description = p.description().map(str::to_string);
         n.new_types = p.root_new_types();
+        if !p.nav_visible() {
+            let _ = n
+                .attributes
+                .insert(VFDS_ATTR_NAV_VISIBLE.to_string(), Value::Bool(false));
+        }
         n
     }
 
@@ -1555,6 +1580,50 @@ mod tests {
         let q: DynVdfsProvider = Arc::new(Q);
         let node = table.mount_node("other", &q);
         assert!(node.new_types.is_empty());
+    }
+
+    /// 导航可见性：缺省可见（不写属性）；声明不可见时挂载节点带 `nav_visible=false`
+    #[test]
+    fn mount_node_marks_nav_visibility() {
+        struct Hidden;
+        #[async_trait]
+        impl VdfsProvider for Hidden {
+            fn nav_visible(&self) -> bool {
+                false
+            }
+        }
+        struct Plain;
+        #[async_trait]
+        impl VdfsProvider for Plain {}
+
+        let hidden: DynVdfsProvider = Arc::new(Hidden);
+        let plain: DynVdfsProvider = Arc::new(Plain);
+        let table = VdfsMountTable::new(vec![
+            ("local".to_string(), hidden.clone()),
+            ("session".to_string(), plain.clone()),
+        ]);
+
+        let h = table.mount_node("local", &hidden);
+        assert_eq!(
+            h.attributes
+                .get(VFDS_ATTR_NAV_VISIBLE)
+                .and_then(|v| v.as_bool()),
+            Some(false),
+            "声明不可见的挂载点应带 nav_visible=false"
+        );
+        // 隐藏只影响导航呈现，不改变能力：挂载点照旧是目录、照旧可列
+        assert_eq!(h.kind, VFDS_KIND_MOUNT);
+        assert!(h.access.list);
+
+        let p = table.mount_node("session", &plain);
+        assert!(
+            p.attributes.get(VFDS_ATTR_NAV_VISIBLE).is_none(),
+            "缺省可见的挂载点不写该属性（消费者按缺省可见处理）"
+        );
+        assert!(
+            table.mount_nodes().iter().any(|n| n.name == "local"),
+            "挂载表仍列出隐藏挂载点：隐藏是呈现层决定，不是能力裁剪"
+        );
     }
 
     /// 未实现的操作返回 `NotImplemented`（使用方据此隐藏入口）
