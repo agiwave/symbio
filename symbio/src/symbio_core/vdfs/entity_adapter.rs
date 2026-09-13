@@ -30,7 +30,9 @@
 //! [`entity_delete`]: crate::symbio_core::entities::entity_delete
 
 use super::host::{from_plugin_error, host_ctx};
-use crate::symbio_core::entities::{self, EntityProvider, EntityProviderInfo, EntitySummary};
+use crate::symbio_core::entities::{
+    self, ContainerKindSpec, EntityProvider, EntityProviderInfo, EntitySummary,
+};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
     VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_CHANGE_CREATED,
@@ -41,6 +43,42 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
+
+/// 挂载点内的路径解析结果（容器子实体寻址，与会话的 S6 寻址同构）
+///
+///   ``            → 挂载根（条目清单）
+///   `<id>`         → 条目；有容器子实体时是**目录**（子类别清单）
+///   `<id>/<seg>`   → 某子类别的条目清单（`seg` = 子类别标签）
+///   `<id>/<seg>/<item>` → 单个子实体（`item` 可为相对路径，如
+///                        `skills/x/SKILL.md`——bundle 内文件的 id 含 `/`）
+enum AdapterPath<'a> {
+    Root,
+    Item(&'a str),
+    Section {
+        id: &'a str,
+        seg: &'a str,
+    },
+    SubItem {
+        id: &'a str,
+        seg: &'a str,
+        item: &'a str,
+    },
+}
+
+/// 解析挂载点内相对路径（至多切三段：条目 / 子类别 / 子实体）
+fn parse_adapter_path(path: &str) -> AdapterPath<'_> {
+    let p = path.trim_matches('/');
+    if p.is_empty() {
+        return AdapterPath::Root;
+    }
+    match p.split_once('/') {
+        None => AdapterPath::Item(p),
+        Some((id, rest)) => match rest.split_once('/') {
+            None => AdapterPath::Section { id, seg: rest },
+            Some((seg, item)) => AdapterPath::SubItem { id, seg, item },
+        },
+    }
+}
 
 /// 把 [`EntityProvider`] 适配为 VDFS 挂载点（详见模块文档）
 pub struct EntityVdfsAdapter {
@@ -136,9 +174,19 @@ impl EntityVdfsAdapter {
 
     /// 摘要 → VDFS 节点（详情渲染器由 `ext` 唯一决定）
     async fn node_of(&self, host: &Arc<dyn InvokeRequest>, item: &EntitySummary) -> VdfsNode {
+        let def = self.provider.detail_definition(host, &item.id).await;
+        // 条目**有容器子实体且无详情定义**（如 agent bundle）⇒ 视为目录：
+        // 点进去浏览内部（提示词 / 技能 / MCP），而不是展开一个没有内容的详情面板。
+        if def.is_none() && !self.container_kinds().is_empty() {
+            let mut n = VdfsNode::dir(&item.id, item.name.clone(), VdfsAccess::LIST);
+            n.kind = self.kind.to_string();
+            n.status = item.status.clone();
+            n.description = item.description.clone().or_else(|| item.summary.clone());
+            return n;
+        }
         let mut n = VdfsNode::file(&item.id, item.name.clone(), self.node_access());
         n.kind = self.kind.to_string();
-        match self.provider.detail_definition(host, &item.id).await {
+        match def {
             Some(def) => {
                 // 定义驱动表单：schema 随列表下发（前端选中即渲染，无需二次请求）
                 n.ext = Some(VFDS_EXT_FORM.to_string());
@@ -152,6 +200,45 @@ impl EntityVdfsAdapter {
         n.status = item.status.clone();
         n.description = item.description.clone().or_else(|| item.summary.clone());
         n.updated_at = item.updated_at;
+        n
+    }
+
+    /// 本类型的容器子实体声明（空 = 条目不是容器）
+    fn container_kinds(&self) -> &'static [ContainerKindSpec] {
+        entities::container_kinds_for(self.kind)
+    }
+
+    /// 路径段（子类别标签）→ 子实体声明。
+    ///
+    /// 以**标签**而非 kind 作路径段——与会话内部（S6 的「子会话」/「工作目录」）
+    /// 同一口径：路径是给人看的，kind 是实现标识。
+    fn section_of(&self, seg: &str) -> Option<&'static ContainerKindSpec> {
+        self.container_kinds().iter().find(|k| k.label == seg)
+    }
+
+    /// 子类别目录节点。可新建的类型由 `path_hint` 决定——非空即可创建，
+    /// 扩展名取自路径模板（`prompts/<name>.md` → `md`）。
+    fn section_node(&self, spec: &ContainerKindSpec) -> VdfsNode {
+        let mut n = VdfsNode::dir(spec.label, spec.label, VdfsAccess::LIST);
+        n.kind = spec.kind.to_string();
+        n.description = Some(spec.description.to_string());
+        if let Some(ext) = spec.path_hint.rsplit_once('.').map(|(_, e)| e) {
+            if !ext.is_empty() {
+                n.new_types = vec![VdfsNewType::new(ext, spec.label)
+                    .with_description(format!("新建{}（{}）", spec.label, spec.path_hint))];
+            }
+        }
+        n
+    }
+
+    /// 子实体摘要 → VDFS 节点（文件；`ext` 由文件名推导，渲染器据此分发）。
+    ///
+    /// `name` 用**相对路径**（唯一，可含 `/`），`title` 用 basename（可读）。
+    fn container_node(&self, spec: &ContainerKindSpec, it: &EntitySummary) -> VdfsNode {
+        let mut n = VdfsNode::file(it.id.clone(), it.name.clone(), VdfsAccess::READ_WRITE);
+        n.kind = spec.kind.to_string();
+        n.size = it.extra.get("size").and_then(|v| v.as_u64());
+        n.description = it.description.clone();
         n
     }
 
@@ -197,47 +284,137 @@ impl VdfsProvider for EntityVdfsAdapter {
     }
 
     async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        if !path.is_empty() {
-            return Err(VdfsError::not_found(format!(
-                "{}是叶子资源，没有子项：{path}",
-                self.label_of()
-            )));
-        }
         let host = host_ctx(ctx)?;
-        let items = self
-            .provider
-            .list_items(&host)
-            .await
-            .map_err(from_plugin_error)?;
-        let mut out = Vec::with_capacity(items.len());
-        for item in items.iter() {
-            out.push(self.node_of(&host, item).await);
+        match parse_adapter_path(path) {
+            AdapterPath::Root => {
+                let items = self
+                    .provider
+                    .list_items(&host)
+                    .await
+                    .map_err(from_plugin_error)?;
+                let mut out = Vec::with_capacity(items.len());
+                for item in items.iter() {
+                    out.push(self.node_of(&host, item).await);
+                }
+                Ok(out)
+            }
+            // 条目即容器：子类别清单（如 agent bundle 的 提示词 / 技能 / MCP）
+            AdapterPath::Item(id) => {
+                if self.container_kinds().is_empty() {
+                    return Err(VdfsError::not_found(format!(
+                        "{}是叶子资源，没有子项：{path}",
+                        self.label_of()
+                    )));
+                }
+                // 存在性校验：不存在的条目应报 NotFound 而非给出空类别清单
+                self.summary_of(&host, id).await?;
+                Ok(self
+                    .container_kinds()
+                    .iter()
+                    .map(|k| self.section_node(k))
+                    .collect())
+            }
+            AdapterPath::Section { id, seg } => {
+                let spec = self
+                    .section_of(seg)
+                    .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
+                let items = self
+                    .provider
+                    .list_container_items(&host, Some(spec.kind), id, None)
+                    .await
+                    .map_err(from_plugin_error)?;
+                Ok(items
+                    .iter()
+                    .map(|it| self.container_node(spec, it))
+                    .collect())
+            }
+            AdapterPath::SubItem { .. } => Err(VdfsError::not_found(format!(
+                "子实体是叶子节点，没有子项：{path}"
+            ))),
         }
-        Ok(out)
     }
 
     async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        if path.is_empty() {
-            // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
-            return Ok(VdfsNode::dir("", self.label_of(), self.root_access()));
-        }
         let host = host_ctx(ctx)?;
-        let item = self.summary_of(&host, &self.id_of(path)).await?;
-        Ok(self.node_of(&host, &item).await)
+        match parse_adapter_path(path) {
+            AdapterPath::Root => {
+                // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
+                Ok(VdfsNode::dir("", self.label_of(), self.root_access()))
+            }
+            AdapterPath::Item(id) => {
+                // 容器条目按**目录视图**回答：`stat` 结果被分发层用作「当前目录
+                // 节点」，其访问位决定是否给出新建入口。
+                if !self.container_kinds().is_empty() {
+                    let item = self.summary_of(&host, id).await?;
+                    let mut n = VdfsNode::dir(id, item.name.clone(), VdfsAccess::LIST);
+                    n.kind = self.kind.to_string();
+                    return Ok(n);
+                }
+                let item = self.summary_of(&host, &self.id_of(path)).await?;
+                Ok(self.node_of(&host, &item).await)
+            }
+            AdapterPath::Section { seg, .. } => self
+                .section_of(seg)
+                .map(|spec| self.section_node(spec))
+                .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}"))),
+            AdapterPath::SubItem { id, seg, item } => {
+                let spec = self
+                    .section_of(seg)
+                    .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
+                let it = self
+                    .provider
+                    .get_container_item(&host, item, id)
+                    .await
+                    .map_err(from_plugin_error)?;
+                Ok(self.container_node(spec, &it))
+            }
+        }
     }
 
     /// 读取完整配置（表单字段值对象）——与实体详情页的预填数据**同源**
     async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
         let host = host_ctx(ctx)?;
-        let item = self.summary_of(&host, &self.id_of(path)).await?;
-        let value = item
-            .extra
-            .get("config")
-            .cloned()
-            .unwrap_or_else(|| item.extra.clone());
-        let text = serde_json::to_string_pretty(&value)
-            .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
-        Ok(VdfsContent::text("", text).with_mime("application/json"))
+        match parse_adapter_path(path) {
+            // 子实体：文件内容由 provider 随摘要下发（bundle 沙箱内读取）
+            AdapterPath::SubItem { id, seg, item } => {
+                let _ = self
+                    .section_of(seg)
+                    .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
+                let it = self
+                    .provider
+                    .get_container_item(&host, item, id)
+                    .await
+                    .map_err(from_plugin_error)?;
+                let text = it
+                    .extra
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        VdfsError::invalid(format!("该子实体没有可读的文本内容：{path}"))
+                    })?
+                    .to_string();
+                Ok(VdfsContent::text("", text))
+            }
+            AdapterPath::Root | AdapterPath::Section { .. } => Err(VdfsError::invalid(format!(
+                "该路径是目录，不可读取内容：{path}"
+            ))),
+            AdapterPath::Item(_) => {
+                if !self.container_kinds().is_empty() {
+                    return Err(VdfsError::invalid(format!(
+                        "该路径是目录，不可读取内容：{path}"
+                    )));
+                }
+                let item = self.summary_of(&host, &self.id_of(path)).await?;
+                let value = item
+                    .extra
+                    .get("config")
+                    .cloned()
+                    .unwrap_or_else(|| item.extra.clone());
+                let text = serde_json::to_string_pretty(&value)
+                    .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
+                Ok(VdfsContent::text("", text).with_mime("application/json"))
+            }
+        }
     }
 
     /// 写入：`create` → 用插件声明的**最小 manifest** 落一份默认配置；
@@ -249,6 +426,50 @@ impl VdfsProvider for EntityVdfsAdapter {
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
         let host = host_ctx(ctx)?;
+        // 子实体写回（bundle 沙箱内写入）；新建时按 `path_hint` 落位
+        if let AdapterPath::SubItem { id, seg, item } = parse_adapter_path(path) {
+            let spec = self
+                .section_of(seg)
+                .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
+            let target = if content.create {
+                if spec.path_hint.is_empty() {
+                    return Err(VdfsError::Forbidden(format!(
+                        "{}不支持新建（子类别未声明路径模板）",
+                        spec.label
+                    )));
+                }
+                // 路径模板是唯一真相源：`prompts/<name>.md` + 文件名 → 实际路径
+                let stem = item.rsplit('/').next().unwrap_or(item);
+                let stem = stem.rsplit_once('.').map(|(s, _)| s).unwrap_or(stem);
+                spec.path_hint.replace("<name>", stem)
+            } else {
+                item.to_string()
+            };
+            let text = content.text.as_deref().unwrap_or("");
+            let text = if content.create && text.trim().is_empty() {
+                spec.default_content
+            } else {
+                text
+            };
+            let resp = self
+                .provider
+                .put_container_item(&host, &target, text, id)
+                .await
+                .map_err(from_plugin_error)?;
+            self.notify(
+                path,
+                if resp.created {
+                    VFDS_CHANGE_CREATED
+                } else {
+                    VFDS_CHANGE_UPDATED
+                },
+            );
+            return Ok(VdfsWriteResponse {
+                path: path.to_string(),
+                created: resp.created,
+                etag: None,
+            });
+        }
         let id = self.id_of(path);
         let text = content.text.as_deref().unwrap_or("");
         let value: serde_json::Value = if text.trim().is_empty() {
@@ -294,6 +515,18 @@ impl VdfsProvider for EntityVdfsAdapter {
             )));
         }
         let host = host_ctx(ctx)?;
+        // 子实体删除（bundle 沙箱内删除）
+        if let AdapterPath::SubItem { id, seg, item } = parse_adapter_path(path) {
+            let _ = self
+                .section_of(seg)
+                .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
+            self.provider
+                .delete_container_item(&host, item, id)
+                .await
+                .map_err(from_plugin_error)?;
+            self.notify(path, VFDS_CHANGE_DELETED);
+            return Ok(());
+        }
         let id = self.id_of(path);
         // 存在性校验：删除不存在的实体应报 NotFound 而非静默成功
         self.summary_of(&host, &id).await?;
@@ -439,5 +672,90 @@ mod tests {
         assert!(info.supports_upload, "前提：注册表声明 agent 可上传");
         assert!(!a.writable(), "但目录自管 → VDFS 侧降级为只读");
         assert!(a.root_new_types().is_empty());
+    }
+
+    /// 容器寻址解析：`<id>` / `<id>/<seg>` / `<id>/<seg>/<item>`
+    /// （bundle 内文件的 id 含 `/`，故 `item` 取剩余全部）
+    #[test]
+    fn container_path_parsing() {
+        assert!(matches!(parse_adapter_path(""), AdapterPath::Root));
+        assert!(matches!(parse_adapter_path("b1"), AdapterPath::Item("b1")));
+        assert!(matches!(
+            parse_adapter_path("b1/提示词"),
+            AdapterPath::Section {
+                id: "b1",
+                seg: "提示词"
+            }
+        ));
+        assert!(matches!(
+            parse_adapter_path("b1/技能/x/SKILL.md"),
+            AdapterPath::SubItem {
+                id: "b1",
+                seg: "技能",
+                item: "x/SKILL.md"
+            }
+        ));
+    }
+
+    /// 子类别以**标签**寻址；可新建性来自 `path_hint`（非空 ⇒ 声明新建类型，
+    /// 扩展名取自路径模板 `prompts/<name>.md` → `md`）
+    #[test]
+    fn sections_are_addressed_by_label() {
+        struct Stub;
+        #[async_trait]
+        impl EntityProvider for Stub {
+            fn kind(&self) -> &'static str {
+                ENTITY_AGENT
+            }
+        }
+        let a = EntityVdfsAdapter::new(ENTITY_AGENT, Arc::new(Stub));
+        assert_eq!(a.container_kinds().len(), 3, "agent 有三类子实体");
+        let seg = a.section_of("提示词").expect("标签命中");
+        assert_eq!(seg.kind, "prompt", "标签 → 实现 kind");
+        let node = a.section_node(seg);
+        assert!(node.is_dir());
+        assert_eq!(node.new_types.len(), 1, "path_hint 非空 ⇒ 可新建");
+        assert_eq!(node.new_types[0].ext, "md");
+        assert!(a.section_of("不存在").is_none());
+    }
+
+    /// 无容器子实体的类型（model）：子类别为空，非根路径仍是叶子语义
+    #[test]
+    fn non_container_kind_has_no_sections() {
+        struct Stub;
+        #[async_trait]
+        impl EntityProvider for Stub {
+            fn kind(&self) -> &'static str {
+                ENTITY_MODEL
+            }
+        }
+        let a = EntityVdfsAdapter::new(ENTITY_MODEL, Arc::new(Stub));
+        assert!(a.container_kinds().is_empty());
+        assert!(a.section_of("提示词").is_none());
+    }
+
+    /// 子实体节点：可读写文件，`name` = 相对路径（唯一，可含 `/`）、
+    /// `title` = basename（可读）
+    #[test]
+    fn container_node_is_editable_file() {
+        struct Stub;
+        #[async_trait]
+        impl EntityProvider for Stub {
+            fn kind(&self) -> &'static str {
+                ENTITY_AGENT
+            }
+        }
+        let spec = entities::container_kinds_for(ENTITY_AGENT)
+            .first()
+            .expect("agent 有子类别");
+        let mut it = EntitySummary::new(spec.kind, "prompts/foo.md", "foo.md");
+        it.extra = serde_json::json!({ "size": 12 });
+        let a = EntityVdfsAdapter::new(ENTITY_AGENT, Arc::new(Stub));
+        let n = a.container_node(spec, &it);
+        assert_eq!(n.name, "prompts/foo.md");
+        assert_eq!(n.title, "foo.md");
+        assert_eq!(n.access.flags(), "rw", "bundle 内文件可编辑");
+        assert_eq!(n.size, Some(12));
+        assert!(!n.is_dir());
     }
 }

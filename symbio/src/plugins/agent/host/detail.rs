@@ -63,18 +63,30 @@ pub fn agent_detail_definition() -> DetailDefinition {
         ],
         presets: None,
         badges: vec![],
-        actions: vec![DetailAction {
-            id: "delete".into(),
-            label: "删除该 Agent".into(),
-            style: "icon danger".into(),
-            disabled_when: Some(DetailCondition {
-                key: "is_existing".into(),
-                equals: Some(serde_json::json!(false)),
+        actions: vec![
+            // 「浏览内部」入口：bundle 内部（提示词 / 技能 / MCP）在 VDFS 上是
+            // 条目同名目录下的子类别（`EntityVdfsAdapter` 的容器寻址），
+            // 由页面层 `enter(节点路径)` 进入——取代原容器实体页。
+            DetailAction {
+                id: "open-container".into(),
+                label: "浏览内部".into(),
+                style: "primary".into(),
+                payload: Some(serde_json::json!({ "kind": "agent" })),
                 ..Default::default()
-            }),
-            busy_label: Some("删除中…".into()),
-            ..Default::default()
-        }],
+            },
+            DetailAction {
+                id: "delete".into(),
+                label: "删除该 Agent".into(),
+                style: "icon danger".into(),
+                disabled_when: Some(DetailCondition {
+                    key: "is_existing".into(),
+                    equals: Some(serde_json::json!(false)),
+                    ..Default::default()
+                }),
+                busy_label: Some("删除中…".into()),
+                ..Default::default()
+            },
+        ],
     }
 }
 
@@ -91,8 +103,10 @@ mod tests {
             .sections
             .iter()
             .all(|s| s.fields.iter().all(|f| f.widget == "static")));
-        // 动作仅 delete：「管理内部实体」入口由页面机制统一渲染
-        assert_eq!(def.actions.len(), 1);
-        assert_eq!(def.actions[0].id, "delete");
+        // 动作 = 浏览内部 + 删除：「浏览内部」由本定义声明（VDFS 侧经
+        // `open-container` 进入条目同名目录），取代原先由页面统一渲染的入口
+        assert_eq!(def.actions.len(), 2);
+        assert_eq!(def.actions[0].id, "open-container");
+        assert_eq!(def.actions[1].id, "delete");
     }
 }
