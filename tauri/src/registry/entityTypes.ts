@@ -187,7 +187,7 @@ registerEntityIcon(
   )
 )
 
-// 主导航分组的展示图标（左侧导航按 ProviderInfo.nav 分组渲染）
+// 设置入口的展示图标（左侧导航的挂载点来自 `vdfs/providers`）
 registerEntityIcon(
   'setting',
   svgIcon(

@@ -148,7 +148,7 @@ import { useSoundSettingsStore } from '@/stores/soundSettings'
 import { playCompletionChime } from '@/services/completionChime'
 import SettingsFormShell from './SettingsFormShell.vue'
 
-// 统一实体页会透传 capabilities/saving/testing/deleting 等编辑器级 props，
+// VDFS 的 form 渲染器会透传 capabilities/saving/testing/deleting 等编辑器级 props，
 // 本表单不消费它们，禁止落根 DOM（清 fallthrough 污染）。
 defineOptions({ inheritAttrs: false })
 

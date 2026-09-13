@@ -479,6 +479,12 @@ pub struct VdfsNewType {
     `write { create }`，只覆盖单文件最小清单；多文件包需要时在 VDFS 上重开导入入口）；
     ② 服务器下发的**导航顺序覆盖** `symbio.provider_order`（顺序现由注册表 `order` 决定）。
   - 净变化：核心 `entities.rs` 1467 → 634 行，协议契约 700 → 563 行。
+  - **前端收尾**：`schemas/entities.ts` 删除协议时代类型（`ProviderInfo` /
+    `ProvidersResponse` / `ContainerKindInfo` / `EntitiesListResponse` /
+    `EntityUploadResponse` / `EntityStatusResponse` / `DetailDefinitionResponse` /
+    `ENTITY_LABELS`），只留 VDFS `ext = form` 的宿主方言（`DetailDefinition` 及其
+    附属形状）；`DetailForm` / `Session` 等组件里指向 `entities/*` 的注释改为
+    指向 `vdfs/write` / `vdfs/delete` / `vdfs/action`。
 
 ---
 

@@ -74,9 +74,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 机制约定：editor 完成实体创建后上报 id，页面刷新清单并选中之 */
   (e: 'created', id: string): void
-  /** 机制约定：editor 请求删除当前选中实体（走统一 entities/delete） */
+  /** 机制约定：editor 请求删除当前选中实体（VDFS 下由 `vdfs/delete` 承载） */
   (e: 'delete'): void
-  /** 机制约定：editor 请求进入容器实体管理页（payload.kind 指定容器类别） */
+  /** 机制约定：editor 请求进入条目内部（VDFS 下 `enter(node.path)`；payload.kind 指定子类别） */
   (e: 'open-container', kind: string): void
 }>()
 

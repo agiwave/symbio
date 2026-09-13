@@ -1,14 +1,14 @@
 <!--
   DetailForm — 定义驱动的通用详情渲染器（机制内置，唯一实现）
 
-  消费后端 `entities/detail` 下发的 DetailDefinition（预设联动 / 动态候选 /
+  消费后端下发的 DetailDefinition（经 VDFS 节点的 `schema` 字段透传；预设联动 / 动态候选 /
   密码显隐 / 数字范围 / 折叠分区 / 条件徽标动作 / id·name 派生回落链），
   动态生成交互不复杂的详情页——新增此类详情 = 后端下发定义即可，
   前端零页面/零 ts 开发。
 
   绑定模式（definition.binding）：
-  - upload  ：实体实体。预填 item.config；保存 emit save（机制通道
-              entities/upload manifest，后端 validate_manifest 兜底）。
+  - upload  ：实体实体。预填 item.config；保存 emit save（VDFS 下由
+              `vdfs/write` 承载，后端 validate_manifest 兜底）。
   - config  ：配置分区。mount 时经 load_path 拉取，保存经 save_path
               自持写回（后端 config/set 通道），内部管理 saving/toast。
   - info    ：只读概览。无保存，字段（static widget）取值来自

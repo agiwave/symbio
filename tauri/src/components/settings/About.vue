@@ -21,7 +21,7 @@
 import SettingsFormShell from './SettingsFormShell.vue'
 import logoUrl from '../../assets/logo.svg'
 
-// 统一实体页会透传编辑器级 props，本面板只读不消费，禁止落根 DOM。
+// VDFS 的 form 渲染器会透传编辑器级 props，本面板只读不消费，禁止落根 DOM。
 defineOptions({ inheritAttrs: false })
 
 defineProps<{
