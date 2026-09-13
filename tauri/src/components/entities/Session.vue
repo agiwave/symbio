@@ -1,13 +1,14 @@
 <!--
   Session — 会话专属详情（VDFS 下由 `ext = session` 选中，VdfsSessionDetail 薄适配）
 
-  会话 = 统一实体机制中的 read-only+mutable 实体（entities/list 摘要含
-  is_working 实时状态；删除经重写的 delete_item 钩子走统一 entities/delete）。
-  本组件只承载会话的"详情差异化"：
+  会话在后端仍是 `EntityProvider`（可读写、有 delete 钩子），但前端自 S8 起
+  只经 VDFS 访问它：清单来自 `.vdfs/session` 的 `vdfs/list`（节点自带
+  message_count / metadata / meta_tags），删除经 `@delete` 由 VDFS 页面层
+  统一走 `vdfs/delete`。本组件只承载会话的"详情差异化"：
 
   - item 非 null（选中态）：聊天工作区 = ChatMainPanel（工作目录的层级
-    浏览不在详情页——经机制动作「管理内部实体」进入会话容器实体页，
-    目录树是 tree 机制的一个场景子类别，与子会话并列）；
+    浏览不在详情页——经机制动作「浏览内部」进入会话同名目录
+    `<id>/工作目录[/<rel>]`，与子会话并列，见 vdfs-frontend.md §7 S6）；
   - item 为 null（机制"新建"态）：新建会话引导——输入区与现有会话完全一致
     （ChatInputArea + ChatOptionBar 草稿态：目录/Agent/模型/模式/风险等级/心跳
     均可选，由级联选项机制下发，暂存于机制内部的 metadata 缓冲，发送首条消息时

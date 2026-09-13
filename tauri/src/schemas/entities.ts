@@ -3,10 +3,15 @@
  *
  * 与后端大面积对齐：symbio/src/symbio_core/schemas/entities.rs
  * 覆盖 model / mcp / agent / skill / session 等实体类型。
- * 所有实体共享同一套 entities/* 操作与能力开关，前端据此驱动统一页面。
+ * 所有实体共享同一套 entities/* 操作与能力开关。
  *
- * 实体类型（kind）已开放为 string：类型的**存在性/能力/前缀**以后端
- * `entities/providers` 下发的 ProviderInfo 为单一真相源，前端不再硬编码类型清单。
+ * **前端定位（S5 / S8 后）**：本文件不再是「页面协议层」——统一实体页与
+ * `services/entities.ts` 均已删除，前端不再直接调用任何 `entities/*`。
+ * 保留本文件只因为 `DetailDefinition` 是 VDFS `ext = form` 的**宿主方言**
+ * （节点 `schema` 字段透传它，VdfsFormDetail 据此渲染）；其余类型仅作后端契约留档。
+ *
+ * 实体类型（kind）开放为 string：存在性 / 能力 / 顺序以后端注册表
+ * （`entities::provider_registry`）为单一真相源，前端零硬编码类型清单。
  */
 
 /**

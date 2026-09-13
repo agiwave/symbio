@@ -311,7 +311,7 @@ export interface EntityStatusEvent {
  * 订阅指定实体类型的实时状态变化（entity kind）
  *
  * 返回取消订阅函数。事件仅当 `entity_type` 匹配时回调，
- * 用于实体列表/详情即时刷新状态角标（初始态由 `entities/list` 兜底）。
+ * 用于列表/详情即时刷新状态角标（初始态由 `vdfs/list` 兜底）。
  */
 export function subscribeEntityStatus(
   entityType: string,

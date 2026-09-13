@@ -435,7 +435,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (typeof wd === 'string' && wd) {
           lastUsedWorkdir.value = wd
         }
-        // 同步标题（后端 entities/list 的 name 已按 display_title 下发：
+        // 同步标题（后端 vdfs/list 的 title 已按 display_title 下发：
         // metadata.title 优先，否则从会话内容自动生成——前端不再自行拉消息推导）
         const t = (typeof it.metadata?.title === 'string' && it.metadata.title) || it.name
         if (t) {
