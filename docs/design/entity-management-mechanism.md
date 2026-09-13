@@ -1,16 +1,17 @@
 # 统一实体管理机制与规范
 
-状态：规范（**后端内部机制**；`entities/*` 调用协议已于 S11 下线）
+状态：规范（**后端内部机制**；`entities/*` 调用协议已于 S11 下线，S12 补齐整包导入）
 范围：Symbio 全部「实体管理」类功能（顶层实体 + 容器子实体）
 
 > **对外已只有一个协议（S11）**：`entities/*` 调用协议已下线——不再有任何插件
-> 路由它，`entities::dispatch` 与其请求/响应、zip 工具一并删除。资源访问统一
-> 经 VDFS（`.vdfs/<挂载点>/…`）。
+> 路由它，`entities::dispatch` 与其请求/响应一并删除。资源访问统一经 VDFS
+> （`.vdfs/<挂载点>/…`）。
 >
 > **本文件剩下的仍是现行机制**：`EntityProvider` trait（差异化钩子）、注册表
 > （`provider_registry` / `nav_meta_of`）、`entity_write` / `entity_delete`
-> （写盘与删除的唯一实现）、容器子实体钩子——它们由 VDFS 的 `EntityVdfsAdapter`
-> 调用，是「资源怎么存、怎么校验」的实现，与对外地址无关。
+> （写盘与删除的唯一实现）、`entity_import_zip`（S12）、容器子实体钩子——它们由
+> VDFS 的 `EntityVdfsAdapter` 调用，是「资源怎么存、怎么校验」的实现，与对外
+> 地址无关。
 >
 > **前端已收口（S5）**：`views/WorkbenchView.vue` 与其页面逻辑
 > （`useWorkbenchView` / `useWorkbench` / `useEntityProviders`）以及
@@ -44,36 +45,46 @@
   组件），存放于 `registry/entityTypes.ts`，与数据契约严格分离。
 - **协议形状统一**：无论顶层还是容器语义，请求/响应一律是同一组 schema。
 
-## 2. 协议契约（`entities/*`）
+## 2. 机制契约（**已下线对外协议** `entities/*`；内部形状仍然有效）
 
-### 2.1 注册表端点 `entities/providers`
+> 本节描述的**调用协议已于 S11 下线**：`<prefix>/entities/*` 不再有任何路由，
+> 其请求/响应结构（`EntitiesList*` / `EntityGetRequest` / `EntityUploadRequest`
+> / `EntityDeleteRequest` / `EntityStatusRequest` / `DetailDefinition*`）已从
+> `schemas/entities.rs` 删除。保留本节是为了说明**机制内部形状**的来历：
+> 列表项仍是 `EntitySummary`，写盘结果仍是 `EntityUploadResponse`，状态仍是
+> `EntityStatusResponse`——它们由 `EntityVdfsAdapter` 直接使用，只是不再经协议。
 
-返回 `ProvidersResponse { providers: ProviderInfo[] }`。每个 `ProviderInfo`：
+### 2.1 注册表 `provider_registry()`
+
+每条 `EntityProviderInfo`（宿主级单一真相源，挂载点的标签 / 顺序 / 能力由此派生）：
 
 | 字段 | 语义 |
 |---|---|
-| `kind` / `label` / `order` | 类型标识 / 展示标签 / 展示顺序（导航排序权威） |
-| `prefix` | 实体操作路径前缀（前端拼 `${prefix}/entities/<op>`） |
-| `capabilities` | 能力开关（zip 上传 / 独立表单 / 实时状态 / 列表可刷新 / 可写 / 连接测试 / 只读） |
-| `supports_upload` / `compact_list` / `status_indicator` | 列表页行为开关 |
+| `kind` / `label` / `order` | 类型标识（同时是挂载名）/ 展示标签 / 展示顺序（导航排序权威；**无配置覆盖**） |
+| `supports_upload` | 能否以「最小 manifest」新建（一次 `vdfs/write { create }`） |
+| `supports_import`（S12） | 能否**整包导入**（zip）；目录自管的类型（agent bundle）也可为 true |
 | `container_kinds` | **容器声明**（见 §2.3；空 = 条目不是容器） |
 
-### 2.2 统一操作
+> 已删除的字段：`prefix`（协议路径前缀）、`provider_name`、`capabilities`
+> （`EntityCapabilities`）、`compact_list`、`status_indicator`——前三者随协议
+> 下线，后两者是已删除的实体页的列表行为开关（S12 清理）。
 
-```
-<prefix>/entities/list     → EntitiesListResponse { kind, capabilities, items, container? }
-<prefix>/entities/get      → EntitySummary（容器语义时 extra.content 为文件内容）
-<prefix>/entities/upload   → EntityUploadResponse { kind, id, created }
-<prefix>/entities/delete   → EntityUploadResponse（同形状）
-<prefix>/entities/status   → EntityStatusResponse（可选能力）
-<prefix>/entities/detail   → DetailDefinitionResponse（详情定义，见 §3.2；可选能力）
-<prefix>/entities/watch    → 订阅容器子实体数据变更（可选；树视图挂载期调用）
-<prefix>/entities/unwatch  → 取消订阅（视图卸载时调用，与 watch 配对）
-```
+### 2.2 统一操作（现由 VDFS 承担）
+
+| 原端点 | 现在的路径 |
+|---|---|
+| `entities/list` | `vdfs/list`（`.vdfs/<kind>`）→ `EntityProvider::list_items` |
+| `entities/get` | `vdfs/read` → 摘要 `extra.config`（钩子 `get_item` 已随 S12 删除） |
+| `entities/upload`（manifest） | `vdfs/write` → `entity_write` |
+| `entities/upload`（zip） | **S12 起是「新建类型 `zip`」**：`vdfs/write`（二进制）→ `EntityProvider::import_zip` |
+| `entities/delete` | `vdfs/delete` → `entity_delete` |
+| `entities/status` | `vdfs/action { action: "test" }` → `EntityProvider::test_status` |
+| `entities/detail` | 列表节点自带 `schema`（详情定义随列表下发） |
+| `entities/watch` / `unwatch` | `vdfs/watch` / `vdfs/unwatch`（容器子实体经 `watch_container`） |
 
 - 列表项一律是 `EntitySummary`：`kind / id / name / status / summary` +
   `extra`（类型特有字段 flatten）。
-- 上传二选一：`zip_b64`（目录型实体）或 `manifest`（表单型实体）。
+- 写入二选一：`manifest`（表单型，JSON）或**整包**（zip 字节，二进制通道）。
 
 ### 2.3 容器语义（container）
 
@@ -261,27 +272,25 @@
 - `/container/:kind/:id/entities` —— 通用容器实体页（container）；
 - `/agent/:agentId/entities` —— agent 兼容别名。
 
-## 4. 扩展指引（新增一类可管理实体）
+## 4. 扩展指引（新增一类可管理资源）
 
 **后端**：
 
 1. 实现 `EntityProvider` trait（`kind`、按需重写 `list_items` /
-   `upload` / `delete` / `test_status`；若是 EntityStore 目录型实体，
+   `delete_item` / `import_zip` / `test_status`；若是 EntityStore 目录型资源，
    实现 `category()` + `manifest_file()` + `summarize()` 即可走默认流程）；
-2. 在插件 route 顶部接入 `crate::symbio_core::entities::dispatch`；
-3. 在 `provider_registry()` 登记一条 `EntityProviderInfo`
-   （kind / prefix / capabilities / order / label / supports_upload；
-   **`capabilities.refreshable` 声明列表头是否提供手动刷新**——清单由
-   事件通道自持同步或固定不变的类型为 `false`）；
+2. 在 `provider_registry()` 登记一条 `EntityProviderInfo`
+   （`kind` / `order` / `label` / `supports_upload` / `supports_import` /
+   `container_kinds`）——**插件 route 不再需要接任何分发**（`entities/*` 已下线），
+   VDFS 侧由 `EntityVdfsAdapter` 自动为它生成 `.vdfs/<kind>` 挂载点；
+3. （可选）**整包导入**：`supports_import = true` + 按需重写 `import_zip`
+   （目录自管的类型必须重写；EntityStore 型走默认的通用解包）；
 4. （可选）条目是容器：登记 `container_kinds` 并实现四个 `*_container_item` 钩子；
 5. （可选，**详情默认路径**）重写 `detail_definition` 钩子下发
    `DetailDefinition`（§3.2），前端零页面/零 ts 开发。
 
-**前端**：
-
-1. 详情默认零改动（定义驱动或通用兜底）；仅当详情满足 §3.2「复杂详情
-   判定标准」才写专属 editor 并注册；需要专属图标：登记图标。
-2. 其余（导航、列表、容器页、新建/删除、实时性）零改动。
+**前端**：**零改动**——挂载点、导航、列表、新建 / 导入 / 删除、实时性全部由
+VDFS 机制生成；仅当详情属「复杂形态」才补一个专属 editor 与图标注册。
 
 ## 5. 一致性要求
 

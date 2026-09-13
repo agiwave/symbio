@@ -62,14 +62,13 @@
 
 ### 管理路由
 
+> Bundle 的**访问 / 新建 / 删除已由 VDFS 承担**（`.vdfs/agent/…`：
+> `vdfs/list` / `vdfs/read` / `vdfs/write`（新建类型 `zip`，即整包导入）/
+> `vdfs/delete`），故 `bundle/list|get|upload|delete|preview` 已于 S12 删除。
+
 | 路径 | 用途 |
 |------|------|
-| `agent/bundle/list` | 列出所有 Agent Bundle |
-| `agent/bundle/get` | 获取单个 Bundle 详情 |
-| `agent/bundle/upload` | 上传 Bundle (zip 或 JSON) |
-| `agent/bundle/export` | 导出 Bundle |
-| `agent/bundle/delete` | 删除 Bundle |
-| `agent/bundle/preview` | 预览 Bundle 内容 |
+| `agent/bundle/export` | 导出 Bundle（打包下载；VDFS 侧尚无等价动作，暂留） |
 
 ### 身份工具
 
@@ -77,11 +76,10 @@
 |------|------|
 | `agent/agent_identity` | 返回 Agent 人格/提示词片段 |
 
-### 统一实体
+### 统一实体（**已下线**）
 
-| 路径 | 用途 |
-|------|------|
-| `agent/entities/*` | OAB Bundle 实体（list/get/upload/delete/status/detail）；条目为容器，内部托管 `prompt` / `skill` / `mcp` 三类文件级子实体 |
+`agent/entities/*` 随 S11 下线：Bundle 及其内部 `prompt` / `skill` / `mcp`
+一律经 VDFS 寻址（`.vdfs/agent/<id>/<子类别标签>/<相对路径>`）。
 
 ---
 
@@ -103,7 +101,7 @@
 | `session/append` | 追加消息 | `Data` |
 | `session/heartbeat/trigger` | 触发一次心跳 | `Data` |
 | `session/config/get` \| `config/set` \| `config/schema` | 会话配置读写与 Schema | `Data` |
-| `session/entities/*` | 会话作为统一实体（不可 upload，创建走前端专属 editor） | `Data` |
+| `session/entities/*` | **已下线**（S11）：会话作为资源走 `.vdfs/session` | — |
 
 ### 聊天流程
 
@@ -126,7 +124,7 @@
 | `model/chat` | 调用 LLM 推理 (流式) | `Session` |
 | `model/status` | 获取当前 Provider 状态 | `Data` |
 | `model/config/get` \| `config/set` \| `config/schema` | Provider 配置读写与 Schema | `Data` |
-| `model/entities/*` | 模型 Provider 作为统一实体（list/get/upload/delete/status） | `Data` |
+| `model/entities/*` | **已下线**（S11）：模型作为资源走 `.vdfs/model` | — |
 
 ### 配置结构
 
@@ -246,33 +244,36 @@ mcp_servers:
 
 ---
 
-## 通用：统一实体管理（`{plugin}/entities/*`）
+## 通用：统一实体管理（`{plugin}/entities/*`）—— **已下线**
 
-资源型插件实现统一实体协议（`symbio_core/entities.rs` 的 `EntityProvider` trait），路径约定 `<plugin>/entities/<op>`：
+> **S11 起本节不再是有效路由**：资源访问统一经 VDFS（`vdfs/*`），地址口径
+> `.vdfs/<挂载点>/…`，挂载点清单由 `vdfs/providers` 下发。见
+> [design/vdfs.md](../design/vdfs.md) 与
+> [design/vdfs-frontend.md](../design/vdfs-frontend.md)。
 
-| 路径 | 用途 |
-|------|------|
-| `{plugin}/entities/list` | 列出实体 |
-| `{plugin}/entities/get` | 读取单个实体 |
-| `{plugin}/entities/upload` | 导入/创建实体 |
-| `{plugin}/entities/delete` | 删除实体 |
-| `{plugin}/entities/status` | 实体状态（启用/禁用） |
-| `{plugin}/entities/detail` | 详情页定义下发（`DetailDefinition`；可选能力） |
-| `{plugin}/entities/watch` / `unwatch` | 订阅/取消订阅容器子实体变更（可选，树视图挂载期配对调用） |
+| 原路径 | 现在的路径 |
+|--------|-----------|
+| `{plugin}/entities/list` | `vdfs/list`（`.vdfs/<kind>`） |
+| `{plugin}/entities/get` | `vdfs/read` |
+| `{plugin}/entities/upload` | `vdfs/write`（manifest）／`vdfs/write`（二进制，新建类型 `zip` = 整包导入） |
+| `{plugin}/entities/delete` | `vdfs/delete` |
+| `{plugin}/entities/status` | `vdfs/action { action: "test" }` |
+| `{plugin}/entities/detail` | 列表节点自带 `schema` |
 
-已注册 provider（`symbio_core/entities.rs` 的 `provider_registry()`，顺序即前端导航默认顺序）：
+`EntityProvider` trait 与 `provider_registry()` 仍是**现行内部机制**（由
+`vdfs::EntityVdfsAdapter` 适配成挂载点），只是不再有对外地址：
 
-| kind | 路径前缀 | 可 upload | 容器子实体 |
-|------|----------|-----------|------------|
-| `session` 会话 | `worker/session` | 否（走 SessionStore） | 子会话 |
-| `model` 模型 | `worker/model` | 是 | — |
-| `agent` 智能体 | `agent` | 是 | `prompt` / `skill` / `mcp` |
-| `skill` 技能 | `skill` | 是 | — |
-| `mcp` MCP | `mcp` | 是 | — |
-| `setting` 设置 | `setting` | 否（分区固定） | — |
+| kind | 挂载点 | 可新建 | 可整包导入 | 容器子实体 |
+|------|--------|--------|------------|------------|
+| `session` 会话 | `.vdfs/session` | 否（走 SessionStore + 前端专属 editor） | 否 | 子会话 / 目录树 |
+| `model` 模型 | `.vdfs/model` | 是 | 否 | — |
+| `agent` 智能体 | `.vdfs/agent` | 否（bundle 只能整包导入） | 是 | `prompt` / `skill` / `mcp` |
+| `skill` 技能 | `.vdfs/skill` | 是 | 是 | — |
+| `mcp` MCP | `.vdfs/mcp` | 是 | 是 | — |
+| `setting` 设置 | `.vdfs/setting` | 否（分区固定） | 否 | — |
 
-展示顺序可由服务器端配置 `symbio.provider_order`（`{kind: order}`）覆盖，无需改代码。
-能力开关与协议约定见 [PROTOCOLS.md](../architecture/PROTOCOLS.md)「统一实体管理」，机制详解见 [design/entity-management-mechanism.md](../design/entity-management-mechanism.md)。
+导航顺序由注册表 `order` 决定（**无配置覆盖**；原 `symbio.provider_order` 已下线）。
+机制详解见 [design/entity-management-mechanism.md](../design/entity-management-mechanism.md)。
 
 ---
 

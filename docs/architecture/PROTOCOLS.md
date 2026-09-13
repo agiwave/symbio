@@ -217,38 +217,45 @@ pub enum PluginPayloadWire {
 
 ---
 
-## 统一实体管理
+## 统一实体管理（**协议已下线**）
 
-> 机制详解（`EntityProvider` trait、`dispatch` 公共流程、能力开关实现）见 [design/entity-management-mechanism.md](../design/entity-management-mechanism.md)。
+> **S11 起 `{plugin}/entities/*` 不再有任何路由**：资源访问统一经 VDFS
+> （`vdfs/providers|list|tree|stat|read|write|mkdir|delete|move|watch|action`，
+> 见 [design/vdfs.md](../design/vdfs.md)）。下表仅作历史说明。
+>
+> 机制本身（`EntityProvider` trait、注册表、写盘与删除的唯一实现）仍然是
+> 现行代码，只是**退为内部抽象**，由 `EntityVdfsAdapter` 调用——详见
+> [design/entity-management-mechanism.md](../design/entity-management-mechanism.md)。
 
-### 路径约定
+### 路径约定（历史）
 
 ```
 {plugin}/entities/list|get|upload|delete|status
 ```
 
-### 操作类型
+### 操作类型（历史 → 现由 VDFS 承担）
 
-| 操作 | 说明 |
-|------|------|
-| `entities/list` | 列出全部实体，返回 `EntitiesListResponse` |
-| `entities/get` | 读取单个实体详情 |
-| `entities/upload` | 创建/更新 (zip 上传或 JSON manifest) |
-| `entities/delete` | 删除实体 |
-| `entities/status` | 查询实时/连接状态 |
+| 原操作 | 现在的路径 |
+|--------|-----------|
+| `entities/list` | `vdfs/list`（`.vdfs/<kind>`） |
+| `entities/get` | `vdfs/read` |
+| `entities/upload`（manifest） | `vdfs/write` |
+| `entities/upload`（zip） | `vdfs/write`（二进制）= 「新建类型 `zip`」，即整包导入 |
+| `entities/delete` | `vdfs/delete` |
+| `entities/status` | `vdfs/action { action: "test" }` |
+| `entities/detail` | 列表节点自带 `schema`（详情定义随列表下发） |
+| `entities/providers` | `vdfs/providers`（宿主级挂载点清单） |
 
-> **扩展操作**（由特定插件提供，不属通用 dispatch）：`entities/detail`（agent：实体详情页定义，info 绑定概览 + open-container 入口）、`entities/providers`（home：宿主级 provider 注册表，前端启动拉取生成导航）。
+### 能力开关（**已删除**）
 
-### 能力开关
+`EntityCapabilities`（zip 上传 / 独立表单 / 实时状态 / 列表可刷新 / 可写 /
+连接测试 / 只读）已随 S12 清理删除。VDFS 之后，能力来自三处**声明**：
 
-实体差异仅由 **`EntityCapabilities`** 驱动：
-
-- `zip_upload` - 支持 zip 上传
-- `independent_form` - 支持独立表单
-- `realtime_status` - 实时状态推送
-- `mutable` - 可修改
-- `test_connection` - 支持连接测试
-- `read_only` - 只读
+- **访问位**（`r` / `w` / `l` / `t`）：节点可读 / 可写 / 可列 / 可遍历；
+- **注册表**：`supports_upload`（可最小 manifest 新建）与 `supports_import`
+  （可整包导入）；
+- **声明式动作**：详情定义 `DetailDefinition.actions` / `vdfs/action`
+  （如「测试连接」）。
 
 ---
 

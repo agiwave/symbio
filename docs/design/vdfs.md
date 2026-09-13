@@ -185,6 +185,12 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 `VdfsContent` 承载文本或二进制（互斥）：`text` 或 `b64`，由 `binary` 显式标注，
 不做猜测；`size` / `mime` / `etag`（乐观并发令牌，可选实现）。
 
+**二进制写入 = 整包导入**：目录型资源（skill / agent bundle…）以新建类型
+`ext = zip` + `source = file` 声明「内容来自本地文件」，使用方选文件后走
+`vdfs/write { create: true, b64 }`；provider 把它解释为**导入一个完整目录包**
+（语义自持，VDFS 不解释）。因此导入不额外占一个操作（详见
+[vdfs-frontend.md](vdfs-frontend.md) §5 与 §7 的 S12）。
+
 ## 4. 访问位（r / w / l / t）
 
 访问位是**机制唯一的能力依据**，线上表示为紧凑字符串（按 `r` `w` `l` `t` 顺序）：
@@ -222,6 +228,7 @@ core 不暴露**）：
 | `vdfs/move` | `{from, to}` | `VdfsMoveResponse` | 移动 / 重命名（同挂载点内） |
 | `vdfs/watch` | `{path}` | `SuccessResponse` | 订阅该子树变更 |
 | `vdfs/unwatch` | `{path}` | `SuccessResponse` | 取消订阅（与 watch 配对） |
+| `vdfs/action` | `{path, action, payload?}` | `VdfsActionResponse` | 执行**节点动作**（provider 自持动词；未实现返回 `NotImplemented`） |
 
 **每个操作都是对「根 provider」的一次方法调用**（`vdfs/providers` = `list("/")`；
 `vdfs/unwatch` = `unwatch`），访问层不含任何资源语义。唯一由访问层自身实现的是

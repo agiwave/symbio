@@ -188,6 +188,15 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 - 清单**恰好一项** → 直接进入该类型的命名；
 - 清单**为空** → 不显示添加按钮（该目录由系统管理）。
 
+**内容来源**（`source`，S12）：类型还可声明「写进去的内容从哪来」——
+
+- 缺省：先命名、后写入（内容为空或 provider 的最小合法内容）；
+- `file`：内容取自**本地文件**——使用方给文件选择器而不是命名输入，
+  目标名由文件名推导，字节走 `vdfs/write` 的二进制（`b64`）通道。
+
+于是**整包导入（zip）也是一种「新建」**：`ext = zip` + `source = file`，
+不新增协议操作（详见 §7 的 S12）。
+
 ### 5.2 域类型（后端）
 
 ```rust
@@ -201,6 +210,8 @@ pub struct VdfsNewType {
     pub description: Option<String>,
     /// 图标名（纯 UI 映射）
     pub icon: Option<String>,
+    /// 内容来源：`None` = 命名后写入；`Some("file")` = 选择本地文件
+    pub source: Option<String>,
 }
 ```
 
@@ -217,20 +228,25 @@ pub struct VdfsNewType {
 新建类型 ext 的新元素，名称 name，于当前目录 dir：
   目标地址 = vdfsJoin(dir, `${name}.${ext}`)
   vdfs/write { path: 目标地址, text: <默认内容，缺省空>, create: true }
+
+source = file 的类型（整包导入）：名称来自文件名
+  目标地址 = vdfsJoin(dir, newFileNameOf(file.name, ext))   // 主干 + 类型扩展名
+  vdfs/write { path: 目标地址, b64: <文件字节 base64>, create: true }
 ```
 
 - **创建语义由 provider 自持**：文件系统 provider 落为文件；会话 provider 落为
   会话；设置 provider 可拒绝（无 `w` 位 / 无类型声明）。
-- 前端**不**认识任何具体类型——只负责「选类型 + 填名称 + 组装地址 + 发写请求」。
+- 前端**不**认识任何具体类型——只负责「选类型 + 取内容（填名或选文件）+ 组装
+  地址 + 发写请求」。
 - 目录（无扩展名的结构节点）不属于「新建类型」，仍走 `vdfs/mkdir`。
 
 ### 5.4 前端职责
 
 | 层 | 职责 |
 |---|---|
-| `schemas/vdfs.ts` | `VdfsNewType` 类型 + `new_types` 字段 + 解析 |
-| `composables/useVdfs.ts` | 新建态机（选类型 → 填名 → 提交）+ 当前目录可新建类型（`creatableTypes`） |
-| `views/VdfsView.vue` | 添加按钮可见性 + 类型选择器 + 命名输入 + 地址预览 |
+| `schemas/vdfs.ts` | `VdfsNewType` 类型（含 `source`）+ `new_types` 字段 + `newFileNameOf` |
+| `composables/useVdfs.ts` | 新建态机（选类型 → 填名 / 选文件 → 提交）+ 当前目录可新建类型（`creatableTypes`） |
+| `views/VdfsView.vue` | 添加按钮可见性 + 类型选择器 + 命名输入 **或** 文件选择器 + 地址预览 |
 
 ---
 
@@ -263,6 +279,8 @@ pub struct VdfsNewType {
 | **S9 导航可见性** | 机制层新增 `VdfsProvider::nav_visible()`（缺省 `true`），经挂载节点属性 → `VdfsMountInfo.nav_visible` 透传；`local` 声明 `false`，前端按标记过滤 | 左栏 = 六类资源，无按名硬编码 |
 | **S10 节点动作** | 新增 `vdfs/action` 操作 + `VdfsProvider::action()`（默认 `NotImplemented`）；适配器把 `test` 接到 `EntityProvider::test_status`；前端把「测试连接」接回 | S5 后丢失的连通性自检回归 |
 | **S11 下线 `entities/*` 协议** | 6 个插件不再路由 `entities/*`，`entities::dispatch` 与其请求/响应、zip 工具一并删除；网关只读白名单改列 `vdfs/*` 读操作 | 对外只剩 VDFS 一个资源协议 |
+| **S12 整包导入** | `VdfsNewType.source`（`file`）+ `EntityProvider::import_zip` 钩子；适配器的二进制 `write` 承接导入（agent 走 `BundleStore::import`），agent 补上 `delete_item` | S5/S11 后丢失的 zip 导入回归，且**不新增协议操作** |
+| **S12 清理** | 注册表去掉 `prefix` / `provider_name` / `compact_list` / `status_indicator` 与 `EntityCapabilities`（改由 `supports_import` 表达）；删协议时代的请求/响应与 `get_item`；`agent/bundle/*` 只留 `bundle/export` | 历史冗余与被替换代码清空 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -475,9 +493,9 @@ pub struct VdfsNewType {
   - **实体机制退为内部抽象**：`EntityProvider` 仍在（它是「资源怎么存、怎么校验」的
     实现），但不再有对外地址；唯一消费者是 `EntityVdfsAdapter`。
   - **已知取舍**：随协议一并消失的两个入口，迁移前**已从 UI 不可达**（S5 下线实体页
-    后就没有调用方）——① skill / agent 的 **zip 导入**（VDFS 新建走 `new_types` +
-    `write { create }`，只覆盖单文件最小清单；多文件包需要时在 VDFS 上重开导入入口）；
-    ② 服务器下发的**导航顺序覆盖** `symbio.provider_order`（顺序现由注册表 `order` 决定）。
+    后就没有调用方）——① skill / agent 的 **zip 导入**（**已由 S12 以「新建类型
+    `zip`」的形式回归**，见下）；② 服务器下发的**导航顺序覆盖**
+    `symbio.provider_order`（顺序现由注册表 `order` 决定，不再提供配置覆盖）。
   - 净变化：核心 `entities.rs` 1467 → 634 行，协议契约 700 → 563 行。
   - **前端收尾**：`schemas/entities.ts` 删除协议时代类型（`ProviderInfo` /
     `ProvidersResponse` / `ContainerKindInfo` / `EntitiesListResponse` /
@@ -485,6 +503,36 @@ pub struct VdfsNewType {
     `ENTITY_LABELS`），只留 VDFS `ext = form` 的宿主方言（`DetailDefinition` 及其
     附属形状）；`DetailForm` / `Session` 等组件里指向 `entities/*` 的注释改为
     指向 `vdfs/write` / `vdfs/delete` / `vdfs/action`。
+
+- **S12 整包导入（zip 作为一种「新建类型」）**（**已完成**）：S5 下线实体页后
+  zip 导入就没有入口，S11 删协议时又连后端实现一起删掉。回归的做法**不新增
+  协议操作**——导入本就是「新建」，只是内容来自本地文件：
+
+  | 层 | 内容 |
+  | --- | --- |
+  | 机制 | `VdfsNewType.source`（`VFDS_NEW_SOURCE_FILE = "file"`）：类型声明「内容取自本地文件」；`VFDS_EXT_ZIP = "zip"` 作为导入类型的扩展名 |
+  | 后端 | `EntityProvider::import_zip(ctx, name, zip)` 钩子，默认实现 `entity_import_zip`（EntityStore 型通用解包，**整目录覆盖**）；agent 重写走 `BundleStore::import`（id 取自包内 manifest，同名替换） |
+  | 适配器 | `root_new_types()` 按注册表 `supports_import` 追加 zip 类型；`write` 的**二进制分支**（`b64`）承接导入，只对挂载根下的条目有效，回 provider 给的 id 并广播变更 |
+  | 前端 | `source = file` 的类型渲染**文件选择器**（而非命名输入），目标名由 `newFileNameOf(file.name, ext)` 推导；`arrayBufferToBase64` 分块编码后走既有 `writeVdfsBinary` |
+
+  - 能力来源改为注册表显式声明：新增 `supports_import`（agent / skill / mcp 为
+    true）。bundle 这类**目录自管**的类型也能导入——不必先有实体目录。
+  - 顺带补上一个静默缺口：agent **没有** `delete_item` 钩子（bundle 不是
+    EntityStore 型），VDFS 删除 bundle 会落到默认实现报 `NotImplemented`；
+    现已重写为 `BundleStore::delete`。
+  - 修掉一个历史缺陷：zip 解包先规范化再判隐藏文件，否则 `./a/b.txt` 会因首段
+    `.` 被整条丢弃（原实现顺序相反）。
+
+- **S12 清理（历史冗余与被替换代码）**（**已完成**）：新机制稳定后，把随旧协议
+  一起失去消费者的东西清掉：
+
+  | 位置 | 处理 |
+  | --- | --- |
+  | `EntityProviderInfo` | 删 `prefix` / `provider_name` / `compact_list` / `status_indicator` / `capabilities`，导入能力改由 `supports_import` 表达（agent 的 `supports_upload` 随之修正为 `false`——它本就无法「最小 manifest 新建」） |
+  | `EntityProvider` trait | 删无调用方的 `provider_name()` 与 `get_item()`（含 session 的重写） |
+  | `schemas/entities.rs` | 删 `EntityCapabilities`（能力模型已换成访问位 + 注册表 + 声明的动作）与协议时代的请求/响应（`EntitiesList*` / `EntityUploadRequest` / `EntityGetRequest` / `EntityDeleteRequest` / `EntityStatusRequest` / `DetailDefinition*`）、`ContainerKindInfo`、`EntitySummary.provider` |
+  | `agent/bundle/*` | 删已被 VDFS 取代的 `list` / `get` / `upload` / `delete` / `preview`，只留尚无等价物的 `export` |
+  | 前端 | `EntityCapabilities` 收敛为表单渲染器真正消费的两项（`mutable` / `test_connection`），并注明它由渲染器按访问位自算、后端不再下发 |
 
 ---
 
