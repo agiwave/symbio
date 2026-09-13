@@ -16,6 +16,7 @@ use super::types::Session;
 use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
 pub use crate::symbio_core::schemas::session::session_config::SessionConfig;
+use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
     PluginMeta, PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_SESSION,
@@ -41,6 +42,14 @@ pub struct SessionPlugin {
     pub(crate) heartbeat_state: Arc<RwLock<HashMap<String, i64>>>,
     /// 工作目录监听管理器（目录树场景的实时数据变更通知）
     pub(crate) workdir_watches: super::workdir::WorkdirWatchManager,
+    /// VDFS 实时：会话变更广播源。
+    ///
+    /// provider 是**变更源的持有者**：会话的任何写入 / 删除都经此广播，
+    /// [`vdfs::VdfsProvider::watch`] 的转发任务订阅它并调用 sink，
+    /// 变更因此无需轮询即可到达 VDFS 事件总线。
+    pub(crate) change_tx: tokio::sync::broadcast::Sender<vdfs::VdfsChange>,
+    /// VDFS 实时：被订阅路径 → 转发任务（`unwatch` 时取消）
+    pub(crate) watch_tasks: Arc<tokio::sync::Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 use super::store::{create_store, SessionStore};
@@ -48,6 +57,9 @@ use super::store::{create_store, SessionStore};
 impl SessionPlugin {
     /// 主构造函数（Factory 机制使用）
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: SessionConfig) -> Self {
+        // 变更广播：容量只需覆盖「一次突发写入 + 少量并发订阅者」；
+        // 无订阅者时 send 静默失败（broadcast 语义），因此不设保留位。
+        let (change_tx, _) = tokio::sync::broadcast::channel(64);
         Self {
             config: Arc::new(RwLock::new(config)),
             parent,
@@ -55,7 +67,18 @@ impl SessionPlugin {
             store: OnceCell::new(),
             heartbeat_state: Arc::new(RwLock::new(HashMap::new())),
             workdir_watches: Default::default(),
+            change_tx,
+            watch_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
+    }
+
+    /// 广播一次会话变更（VDFS 实时链路的数据源）。
+    ///
+    /// 无订阅者时静默丢弃；`path` 是 provider 子树内的相对路径（= 会话 id）。
+    pub(crate) fn notify_change(&self, id: &str, change: &str) {
+        let _ = self
+            .change_tx
+            .send(vdfs::VdfsChange::new(id.to_string(), change.to_string()));
     }
 
     pub fn metadata() -> PluginMeta {
@@ -223,8 +246,7 @@ impl SessionPlugin {
     /// 注：不可配置字段（如已删除的 `storage_dir` / `session_id`）不出现在本 schema 中，
     /// 由 `test_schema_covers_all_configurable_fields` 与结构体字段集合双向锁定。
     pub fn config_schema() -> Value {
-        let defaults =
-            serde_json::to_value(SessionConfig::default()).unwrap_or_else(|_| json!({}));
+        let defaults = serde_json::to_value(SessionConfig::default()).unwrap_or_else(|_| json!({}));
         let d = |key: &str| defaults.get(key).cloned().unwrap_or(Value::Null);
         json!({
             "type": "object",
@@ -380,6 +402,13 @@ impl Plugin for SessionPlugin {
                     )))
                     .await;
             }
+        }
+        // VDFS 挂载点：与会话工具共用同一次能力广播，把自己注册为一份 VDFS 资源。
+        // 挂载名由使用方（此处即本插件）选定——约定用插件名（`PLUGIN_SESSION`），
+        // 插件名在宿主内唯一，天然就是合格的挂载名；provider 自身不含此概念。
+        if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+            let me: vdfs::DynVdfsProvider = self.clone();
+            visitor.register_vdfs_provider(PLUGIN_SESSION, me).await;
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
@@ -735,9 +764,303 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
     }
 }
 
+// ==================== VDFS 挂载点（/session） ====================
+//
+// 会话是 VDFS 的第二个原生 provider：
+//
+// - **根 = 会话清单**：`.vdfs/session` 的目录内容即全部会话；根下可新建「会话」
+//   （`new_types`），**新建语义完全由本 provider 自持**——id 由 provider 生成、
+//   路径名作标题、经 `create` 写意图区分「新建」与「覆盖」；
+// - **节点 = 单个会话**：`ext = session` → 前端聊天工作区渲染器（同一份详情实现
+//   同时服务实体机制与 VDFS 机制）；
+// - **实时**：会话的任何变更经 [`SessionPlugin::notify_change`] 广播 → `watch`
+//   的转发任务 → VDFS 事件总线，前端列表无需轮询即可收敛。
+//
+// 读写删都转发既有会话能力（SessionStore + 会话 metadata 合并），不新造协议。
+
+/// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）。
+///
+/// 标题 / 摘要 / 状态与实体机制的列表呈现**同源**（复用 `display_title` 与
+/// [`derive_session_summary`]），保证同一会话在两条链路上的呈现一致。
+fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
+    let mut n = vdfs::VdfsNode::file(&s.id, s.display_title(), vdfs::VdfsAccess::READ_WRITE);
+    n.kind = crate::symbio_core::entities::ENTITY_SESSION.to_string();
+    n.ext = Some(vdfs::VFDS_EXT_SESSION.to_string());
+    n.status = if is_working {
+        vdfs::VFDS_STATUS_WORKING
+    } else {
+        vdfs::VFDS_STATUS_ACTIVE
+    }
+    .to_string();
+    n.updated_at = Some(s.updated_at);
+    n.description = derive_session_summary(&s.messages);
+    n
+}
+
+/// 新建会话的标题：路径名去掉扩展名（`<标题>.session` → `<标题>`）。
+///
+/// 新建时使用方给出的是**标题**而非会话 id——id 是存储细节，由 provider 生成
+/// （见 [`vdfs::VdfsProvider::write`] 的 `create` 分支），不属于使用方的知识。
+fn title_from_new_path(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    let stem = base
+        .strip_suffix(&format!(".{}", vdfs::VFDS_EXT_SESSION))
+        .unwrap_or(base)
+        .trim();
+    if stem.is_empty() {
+        "新对话".to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+/// 当前时间（Unix 毫秒）——与 `session/update` 的时间戳口径一致
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+#[async_trait]
+impl vdfs::VdfsProvider for SessionPlugin {
+    fn label(&self) -> Option<&str> {
+        Some("会话")
+    }
+
+    fn description(&self) -> Option<&str> {
+        Some("会话清单。每个会话是一份独立对话记录，可读 / 写 / 删；新建即创建一份新会话。")
+    }
+
+    fn order(&self) -> i32 {
+        10
+    }
+
+    fn icon(&self) -> Option<&str> {
+        Some("session")
+    }
+
+    /// 会话是叶子文档：可列，不参与树遍历（会话内部的子结构另有容器语义）
+    fn root_access(&self) -> vdfs::VdfsAccess {
+        vdfs::VdfsAccess::LIST
+    }
+
+    /// 根下可新建「会话」（新建语义由 provider 自持，见 `write`）
+    fn root_new_types(&self) -> Vec<vdfs::VdfsNewType> {
+        vec![vdfs::VdfsNewType::new(vdfs::VFDS_EXT_SESSION, "会话").with_description("新建会话")]
+    }
+
+    async fn list(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+    ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
+        if !path.is_empty() {
+            return Err(vdfs::VdfsError::not_found(format!(
+                "会话是叶子节点，没有子项：{path}"
+            )));
+        }
+        let sessions = self
+            .list_sessions()
+            .await
+            .map_err(vdfs::from_plugin_error)?;
+        let active = self.active_mgr.sessions.read().await;
+        Ok(sessions
+            .iter()
+            .map(|s| {
+                let is_working = active
+                    .get(&s.id)
+                    .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+                    .unwrap_or(false);
+                session_node(s, is_working)
+            })
+            .collect())
+    }
+
+    async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
+        if path.is_empty() {
+            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+            return Ok(vdfs::VdfsNode::dir("", "会话", self.root_access()));
+        }
+        let session = self.session_of(path).await?;
+        Ok(session_node(&session, self.is_working(path).await))
+    }
+
+    /// 读取会话内容（转写全文 + 元数据，JSON）——转发既有存储，不新造协议
+    async fn read(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+    ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
+        let session = self.session_of(path).await?;
+        let payload = json!({
+            "id": session.id,
+            "title": session.display_title(),
+            "metadata": session.metadata,
+            "messages": session.messages,
+            "updated_at": session.updated_at,
+        });
+        let text = serde_json::to_string_pretty(&payload)
+            .map_err(|e| vdfs::VdfsError::internal(format!("会话序列化失败：{e}")))?;
+        Ok(vdfs::VdfsContent::text("", text).with_mime("application/json"))
+    }
+
+    /// 写入：`create` → 新建会话；否则 → 合并会话 metadata（`session/update` 语义）。
+    ///
+    /// 消息（转写）**不经 VDFS 写入**——聊天流由既有 chat 协议承载；VDFS 只承担
+    /// 「资源读写」这一层，避免出现两套写路径。
+    async fn write(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+        content: &vdfs::VdfsContent,
+    ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
+        let text = content.text.as_deref().unwrap_or("");
+        let value: Value = if text.trim().is_empty() {
+            json!({})
+        } else {
+            serde_json::from_str(text)
+                .map_err(|e| vdfs::VdfsError::invalid(format!("会话写入需要合法 JSON：{e}")))?
+        };
+        let obj = value
+            .as_object()
+            .ok_or_else(|| vdfs::VdfsError::invalid("会话写入需要 JSON 对象"))?;
+
+        // 新建：id 由 provider 生成，路径名（去扩展名）作标题
+        if content.create {
+            let title = title_from_new_path(path);
+            let id = uuid::Uuid::new_v4().to_string();
+            let mut session = Session::new(&id);
+            session.metadata = json!({ "title": title, "created_via": "vdfs" });
+            session.updated_at = now_ms();
+            self.save_session(&session)
+                .await
+                .map_err(vdfs::from_plugin_error)?;
+            self.notify_change(&id, vdfs::VFDS_CHANGE_CREATED);
+            return Ok(vdfs::VdfsWriteResponse {
+                path: id,
+                created: true,
+                etag: None,
+            });
+        }
+
+        // 覆盖：只接受 metadata / title 两类字段（其余字段无写入语义，明确拒绝，
+        // 不静默丢弃使用方的意图）
+        let has_title = obj.contains_key("title");
+        let has_meta = obj.contains_key("metadata");
+        if !has_title && !has_meta {
+            return Err(vdfs::VdfsError::invalid(
+                "会话写入支持 metadata / title 字段；消息请走聊天协议",
+            ));
+        }
+        let mut session = self.session_of(path).await?;
+        if let Some(incoming) = obj.get("metadata").and_then(Value::as_object) {
+            let target = session
+                .metadata
+                .as_object_mut()
+                .ok_or_else(|| vdfs::VdfsError::invalid("会话 metadata 不是对象"))?;
+            for (k, v) in incoming {
+                target.insert(k.clone(), v.clone());
+            }
+        }
+        if let Some(title) = obj.get("title").and_then(Value::as_str) {
+            if let Some(m) = session.metadata.as_object_mut() {
+                m.insert("title".to_string(), Value::String(title.to_string()));
+            }
+        }
+        session.updated_at = now_ms();
+        self.save_session(&session)
+            .await
+            .map_err(vdfs::from_plugin_error)?;
+        self.notify_change(path, vdfs::VFDS_CHANGE_UPDATED);
+        Ok(vdfs::VdfsWriteResponse {
+            path: path.to_string(),
+            created: false,
+            etag: None,
+        })
+    }
+
+    async fn delete(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+        _recursive: bool,
+    ) -> vdfs::VdfsResult<()> {
+        if path.is_empty() {
+            return Err(vdfs::VdfsError::Forbidden("会话挂载根不可删除".to_string()));
+        }
+        // 存在性校验：删除不存在的会话应报 NotFound 而非静默成功
+        self.session_of(path).await?;
+        self.delete_session_internal(path)
+            .await
+            .map_err(vdfs::from_plugin_error)
+    }
+
+    /// 订阅：把本插件内部的变更广播转发到 sink（`unwatch` 时取消任务）。
+    ///
+    /// provider 是**变更源的持有者**，因此这里不需要轮询——写入 / 删除路径
+    /// 直接广播（见 [`SessionPlugin::notify_change`]）。
+    async fn watch(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+        sink: vdfs::VdfsChangeSink,
+    ) -> vdfs::VdfsResult<()> {
+        let mut rx = self.change_tx.subscribe();
+        let handle = tokio::spawn(async move {
+            while let Ok(change) = rx.recv().await {
+                sink(change);
+            }
+        });
+        // 同路径重复订阅：覆盖并取消旧任务（机制保证 watch/unwatch 严格配对，
+        // 此处仅作防御）
+        let old = self
+            .watch_tasks
+            .lock()
+            .await
+            .insert(path.to_string(), handle);
+        if let Some(old) = old {
+            old.abort();
+        }
+        Ok(())
+    }
+
+    async fn unwatch(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<()> {
+        let handle = self.watch_tasks.lock().await.remove(path);
+        if let Some(handle) = handle {
+            handle.abort();
+        }
+        Ok(())
+    }
+}
+
+impl SessionPlugin {
+    /// 按 id 取会话（**存在性校验**：`load_session` 对未命中会返回空会话，
+    /// 因此这里以清单为准判定存在性）
+    async fn session_of(&self, id: &str) -> vdfs::VdfsResult<Session> {
+        self.list_sessions()
+            .await
+            .map_err(vdfs::from_plugin_error)?
+            .into_iter()
+            .find(|s| s.id == id)
+            .ok_or_else(|| vdfs::VdfsError::not_found(format!("会话不存在：{id}")))
+    }
+
+    /// 单个会话的实时工作状态
+    async fn is_working(&self, id: &str) -> bool {
+        let active = self.active_mgr.sessions.read().await;
+        active
+            .get(id)
+            .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+            .unwrap_or(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    // trait 方法（list/stat/read/write/delete/watch/unwatch）需 trait 在作用域内才可解析
+    use crate::symbio_core::vdfs_provider::VdfsProvider;
 
     /// 验证 session 存储目录**只**从 HomedirRegistry 派生，不依赖 config
     #[test]
@@ -877,6 +1200,92 @@ mod tests {
             cfg.model_chat_max_tool_rounds(),
             None,
             "默认配置翻译到 Request 层必须是 None（无限轮次）"
+        );
+    }
+
+    // ==================== VDFS provider ====================
+
+    fn vctx() -> vdfs::VdfsContext {
+        vdfs::VdfsContext::empty()
+    }
+
+    /// provider 自描述：**不含挂载名**——挂载名由使用方在注册时选定
+    /// （见 `traverse` 里的 `register_vdfs_provider(PLUGIN_SESSION, ..)`）
+    #[tokio::test]
+    async fn vdfs_self_description_has_no_mount() {
+        let p = SessionPlugin::new(None, SessionConfig::default());
+        assert_eq!(p.label(), Some("会话"));
+        assert_eq!(p.icon(), Some("session"));
+        assert_eq!(p.order(), 10);
+        assert_eq!(p.root_access().flags(), "l");
+        assert!(!p.root_access().traverse, "会话是叶子，不参与树遍历");
+
+        // 根下可新建「会话」——类型清单即「新建」入口的唯一依据
+        let types = p.root_new_types();
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].ext, vdfs::VFDS_EXT_SESSION);
+        assert_eq!(types[0].title, "会话");
+    }
+
+    /// 新建标题：路径名去掉 `.session` 扩展名；空名回落「新对话」
+    #[test]
+    fn title_from_new_path_strips_session_ext() {
+        assert_eq!(title_from_new_path("我的会话.session"), "我的会话");
+        assert_eq!(title_from_new_path("dir/我的会话.session"), "我的会话");
+        assert_eq!(title_from_new_path("未命名"), "未命名");
+        assert_eq!(title_from_new_path(".session"), "新对话");
+        assert_eq!(title_from_new_path(""), "新对话");
+    }
+
+    /// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）、
+    /// kind / 状态 / 更新时间 / 摘要与实体机制同源
+    #[test]
+    fn session_node_carries_renderer_ext_and_presentation() {
+        let mut s = Session::new("abc");
+        s.updated_at = 1_700_000_000_000;
+
+        let idle = session_node(&s, false);
+        assert_eq!(idle.name, "abc");
+        assert_eq!(idle.effective_ext().as_deref(), Some("session"));
+        assert_eq!(idle.kind, crate::symbio_core::entities::ENTITY_SESSION);
+        assert_eq!(idle.status, vdfs::VFDS_STATUS_ACTIVE);
+        assert_eq!(idle.updated_at, Some(1_700_000_000_000));
+        assert_eq!(idle.access.flags(), "rw", "会话可读可写");
+        assert!(!idle.is_dir(), "会话是文档而非目录");
+
+        let busy = session_node(&s, true);
+        assert_eq!(busy.status, vdfs::VFDS_STATUS_WORKING);
+    }
+
+    /// 叶子语义：非根路径的 list 必须报错（会话内部结构不由本 provider 承载）
+    #[tokio::test]
+    async fn vdfs_list_rejects_non_root_path() {
+        let p = SessionPlugin::new(None, SessionConfig::default());
+        assert!(p.list(&vctx(), "abc").await.is_err());
+    }
+
+    /// 实时：provider 自持的变更广播经 `watch` 的转发任务到达 sink；
+    /// `unwatch` 取消任务（严格配对）
+    #[tokio::test]
+    async fn vdfs_watch_forwards_session_changes() {
+        let p = SessionPlugin::new(None, SessionConfig::default());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
+        let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
+            let _ = tx.send(c);
+        });
+
+        p.watch(&vctx(), "", sink).await.unwrap();
+        p.notify_change("abc", vdfs::VFDS_CHANGE_CREATED);
+
+        // 转发任务与本测试同 runtime：让出一次即可收到
+        let got = rx.recv().await.expect("变更应经 watch 转发到 sink");
+        assert_eq!(got.path, "abc");
+        assert_eq!(got.change, vdfs::VFDS_CHANGE_CREATED);
+
+        p.unwatch(&vctx(), "").await.unwrap();
+        assert!(
+            p.watch_tasks.lock().await.is_empty(),
+            "unwatch 必须移除任务"
         );
     }
 }

@@ -91,6 +91,9 @@ impl SessionPlugin {
         )
         .await;
 
+        // VDFS 实时链路（provider 侧变更广播 → watch 的 sink）
+        self.notify_change(session_id, crate::symbio_core::vdfs::VFDS_CHANGE_DELETED);
+
         Ok(())
     }
 
@@ -281,6 +284,17 @@ impl SessionPlugin {
         )
         .await;
 
+        // VDFS 实时链路（provider 侧变更广播 → watch 的 sink）：VDFS 会话清单
+        // 因此无需轮询即可收敛。
+        self.notify_change(
+            &req.session_id,
+            if is_new {
+                crate::symbio_core::vdfs::VFDS_CHANGE_CREATED
+            } else {
+                crate::symbio_core::vdfs::VFDS_CHANGE_UPDATED
+            },
+        );
+
         Ok(serde_json::to_value(session_update::Response {
             success: true,
             session: serde_json::to_value(session)?,
@@ -333,11 +347,7 @@ impl SessionPlugin {
         let session: Arc<dyn ChatSession> = match session_id {
             Some(sid) if !sid.is_empty() && !sid.starts_with("_t_") => {
                 let store = self.get_store().await?;
-                Arc::new(PersistentChatSession::new(
-                    sid,
-                    self.config.clone(),
-                    store,
-                ))
+                Arc::new(PersistentChatSession::new(sid, self.config.clone(), store))
             }
             // `_t_` 前缀与空/缺省 id：内存临时会话，配置取当前值快照。
             // 固定 id "ephemeral"（审计 B2）：随机 id 会让压缩前的 transcript
