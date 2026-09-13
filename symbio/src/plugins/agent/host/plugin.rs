@@ -284,7 +284,7 @@ impl Plugin for AgentPlugin {
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
-        handlers::route(&self, path, ctx).await
+        handlers::route(path, ctx).await
     }
 }
 

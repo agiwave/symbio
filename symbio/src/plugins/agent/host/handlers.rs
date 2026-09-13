@@ -1,4 +1,4 @@
-//! bundle 管理路由（agent/bundle/* 与统一实体协议 agent/entities/*）。
+//! bundle 管理路由（agent/bundle/*）。
 //!
 //! ## bundle/* 语义
 //!
@@ -11,24 +11,10 @@
 //! | `bundle/delete` | 删除已安装 bundle |
 //! | `bundle/preview` | manifest + provider 文件清单 |
 //!
-//! ## entities/* 语义（统一实体协议，前端实体管理页使用）
-//!
-//! 顶层语义：`list` 走 [`crate::symbio_core::entities::dispatch`] 公共流程；
-//! `get` / `upload` / `delete` 由 BundleStore 拦截实现（自带 manifest 校验与
-//! zip-slip 防护），响应形状与统一协议一致（见 host/entities.rs 模块文档）。
-//!
-//! **容器语义**（请求携带 `container` = bundle id）：bundle 内部的
-//! prompts / skills / mcps 走同一套 entities/* 协议（trait 的
-//! `*_container_item` 钩子，见 host/entities.rs），响应形状与顶层一致。
-//! `list` 的容器分支直接在 dispatch 内完成；`get` / `upload` / `delete`
-//! 因顶层语义由本模块拦截，容器语义时委托回 dispatch。
-
-use super::plugin::AgentPlugin;
+//! 资源（含 bundle 内部的 prompts / skills / mcps）的**访问**不再经本协议：
+//! 一律走 VDFS（`.vdfs/agent/…`），由 `EntityVdfsAdapter` 直接调 trait 的
+//! `*_container_item` 钩子；`entities/*` 协议已随 S11 下线。
 use super::store::BundleStore;
-use crate::symbio_core::entities::{
-    dispatch, EntityDeleteRequest, EntityGetRequest, EntitySummary, EntityUploadRequest,
-    EntityUploadResponse,
-};
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError, PluginPayload, WORKDIR,
 };
@@ -38,89 +24,16 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// 路由分发（`path` 已剥去 `agent/` 前缀）。
-pub async fn route(
-    plugin: &AgentPlugin,
-    path: &str,
-    ctx: Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+pub async fn route(path: &str, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
     let workdir = ctx.get(WORKDIR);
     let store = BundleStore::new(workdir.as_deref());
 
     match path {
-        // ── 统一实体协议（前端实体管理页；list 容器分支在 dispatch 内）──
-        "entities/list" => {
-            // 公共流程：list_items（BundleStore 枚举）+ provider 回填 + 能力开关；
-            // path 命中 ENTITIES_LIST，dispatch 必返回 Some
-            match dispatch(plugin, path, &ctx).await {
-                Some(resp) => resp,
-                None => Err(PluginError::InternalError(
-                    "entities/list dispatch 失败".into(),
-                )),
-            }
-        }
-        "entities/detail" => {
-            // 详情页定义（info 绑定概览 + open-container 入口）
-            match dispatch(plugin, path, &ctx).await {
-                Some(resp) => resp,
-                None => Err(PluginError::InternalError(
-                    "entities/detail dispatch 失败".into(),
-                )),
-            }
-        }
-        "entities/get" => {
-            let req: EntityGetRequest = ctx.payload()?;
-            if req
-                .container
-                .as_deref()
-                .is_some_and(|s| !s.trim().is_empty())
-            {
-                // 容器语义：委托 dispatch 容器分支（trait get_container_item）
-                match dispatch(plugin, path, &ctx).await {
-                    Some(resp) => resp,
-                    None => Err(PluginError::InternalError(
-                        "entities/get dispatch 失败".into(),
-                    )),
-                }
-            } else {
-                entities_get(&store, &ctx).await
-            }
-        }
-        "entities/upload" => {
-            let req: EntityUploadRequest = ctx.payload()?;
-            if req
-                .container
-                .as_deref()
-                .is_some_and(|s| !s.trim().is_empty())
-            {
-                match dispatch(plugin, path, &ctx).await {
-                    Some(resp) => resp,
-                    None => Err(PluginError::InternalError(
-                        "entities/upload dispatch 失败".into(),
-                    )),
-                }
-            } else {
-                entities_upload(&store, &ctx).await
-            }
-        }
-        "entities/delete" => {
-            let req: EntityDeleteRequest = ctx.payload()?;
-            if req
-                .container
-                .as_deref()
-                .is_some_and(|s| !s.trim().is_empty())
-            {
-                match dispatch(plugin, path, &ctx).await {
-                    Some(resp) => resp,
-                    None => Err(PluginError::InternalError(
-                        "entities/delete dispatch 失败".into(),
-                    )),
-                }
-            } else {
-                entities_delete(&store, &ctx).await
-            }
-        }
-
         // ── 插件自有管理路由 ──
+        //
+        // 资源访问一律经 VDFS（`.vdfs/agent/…`）；`entities/*` 协议已随 S11 下线，
+        // 本插件不再托管它的任何分支（子实体的读写由 `EntityVdfsAdapter` 直接
+        // 调 trait 钩子完成，不经协议）。
         "bundle/list" => list(&store),
         "bundle/get" => get(&store, &ctx).await,
         "bundle/upload" => upload(&store, &ctx).await,
@@ -128,8 +41,7 @@ pub async fn route(
         "bundle/delete" => delete(&store, &ctx).await,
         "bundle/preview" => preview(&store, &ctx).await,
         _ => Err(PluginError::NotFound(format!(
-            "agent 未知路由 `{path}`（可用：bundle/list|get|upload|export|delete|preview、\
-             entities/list|get|upload|delete|detail）"
+            "agent 未知路由 `{path}`（可用：bundle/list|get|upload|export|delete|preview）"
         ))),
     }
 }
@@ -277,81 +189,4 @@ fn collect_files(dir: &std::path::Path, prefix: &str, out: &mut Vec<String>) {
             out.push(rel);
         }
     }
-}
-
-// ==================== 统一实体协议实现（get / upload / delete） ====================
-
-/// `entities/get`：单 bundle 摘要（EntitySummary 形状，含 manifest 扩展字段）。
-async fn entities_get(
-    store: &BundleStore,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
-    let req: EntityGetRequest = ctx.payload()?;
-    let record = store
-        .get(&req.id)
-        .ok_or_else(|| PluginError::NotFound(format!("bundle `{}` 不存在", req.id)))?;
-    let mut it = EntitySummary::new(
-        crate::symbio_core::entities::ENTITY_AGENT,
-        record.manifest.id.clone(),
-        if record.manifest.name.is_empty() {
-            record.manifest.id.clone()
-        } else {
-            record.manifest.name.clone()
-        },
-    );
-    it.status = "active".to_string();
-    if !record.manifest.description.is_empty() {
-        it.description = Some(record.manifest.description.clone());
-        it.summary = Some(record.manifest.description.clone());
-    }
-    it.extra = serde_json::json!({
-        "config_type": "bundle",
-        "version": record.manifest.version,
-        "spec": record.manifest.spec,
-        "requires_spec": record.manifest.requires.spec,
-        "scope": record.source.as_str(),
-        "dir": record.dir.display().to_string(),
-    });
-    Ok(PluginPayload::new(&it))
-}
-
-/// `entities/upload`：zip 导入（走 BundleStore，manifest 校验 + 版本硬门槛）。
-async fn entities_upload(
-    store: &BundleStore,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
-    let req: EntityUploadRequest = ctx.payload()?;
-    let zip_b64 = req.zip_b64.as_deref().ok_or_else(|| {
-        PluginError::ValidationError("bundle 导入需要 zip_b64（zip 打包）".into())
-    })?;
-    let zip_bytes = base64::engine::general_purpose::STANDARD
-        .decode(zip_b64.trim())
-        .map_err(|e| PluginError::ValidationError(format!("zip_b64 解码失败: {e}")))?;
-    let result = store
-        .import(&zip_bytes, req.replace)
-        .map_err(PluginError::ValidationError)?;
-    Ok(PluginPayload::new(&EntityUploadResponse {
-        kind: crate::symbio_core::entities::ENTITY_AGENT.to_string(),
-        id: result.id,
-        created: !result.replaced,
-    }))
-}
-
-/// `entities/delete`：幂等删除（不存在时报 NotFound，与其它实体类型语义一致）。
-async fn entities_delete(
-    store: &BundleStore,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
-    let req: EntityDeleteRequest = ctx.payload()?;
-    if store.get(&req.id).is_none() {
-        return Err(PluginError::NotFound(format!("bundle `{}` 不存在", req.id)));
-    }
-    store
-        .delete(&req.id)
-        .map_err(PluginError::ValidationError)?;
-    Ok(PluginPayload::new(&EntityUploadResponse {
-        kind: crate::symbio_core::entities::ENTITY_AGENT.to_string(),
-        id: req.id,
-        created: false,
-    }))
 }

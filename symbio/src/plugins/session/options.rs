@@ -80,7 +80,7 @@ fn meta_str(metadata: &Value, key: &str) -> Option<String> {
 ///
 /// 根层：把会话当前状态注入收集上下文，广播全项目收集选项，返回节点列表；
 /// 子层（`parent` 非空）：在**同一份收集结果**中定位该节点并返回其子项
-/// （懒加载与实体机制 `entities/list` 的 `parent` 同构，单一通道）。
+/// （懒加载与实体机制 `list_items` 的 `parent` 同构，单一通道）。
 pub(crate) async fn handle_list_options(
     plugin: &SessionPlugin,
     ctx: Arc<dyn InvokeRequest>,

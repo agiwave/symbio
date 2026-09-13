@@ -47,7 +47,7 @@ impl SessionPlugin {
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
     ///
     /// 两个消费方：`invoke_clear`（旧 session/clear 路由）与统一实体协议的
-    /// `EntityProvider::delete_item`（entities/delete，前端机制列表删除）。
+    /// `EntityProvider::delete_item` 钩子（VDFS 删除与实体机制共用）。
     pub(crate) async fn delete_session_internal(
         &self,
         session_id: &str,
@@ -81,7 +81,7 @@ impl SessionPlugin {
         store.delete_session(session_id).await?;
 
         // 实体生命周期变更通知（机制级）：前端据此即时把该会话从清单移除，
-        // 无需等待全量重拉。session/clear 与 entities/delete 两条删除路径共用此处。
+        // 无需等待全量重拉。session/clear 与 VDFS 删除两条删除路径共用此处。
         crate::symbio_core::event_bus::EventBus::publish_entity_changed(
             crate::symbio_core::entities::ENTITY_SESSION,
             session_id,

@@ -343,13 +343,6 @@ impl Plugin for SessionPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
-        // 统一实体协议：entities/list / get / upload / delete / status
-        // （SessionPlugin 的 EntityProvider 实现见下方 impl 块）
-        if let Some(resp) = crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
-        {
-            return resp;
-        }
-
         // 会话存储已迁移到 ~/.symbio/plugins/session/ 全局目录，session/* 系列接口
         // 不再依赖 ctx.workdir；ctx.workdir 仅在 chat 路径和需要 Model 路由时使用。
         let data = match path {
@@ -367,7 +360,7 @@ impl Plugin for SessionPlugin {
             CONFIG_SET => self.invoke_config_set(ctx.clone()).await?,
             "config/schema" => self.invoke_config_schema().await?,
             // 级联选项机制：会话是选项宿主，根选项列表在全项目收集后一次下发
-            // （子层经 payload.parent 懒加载，与实体机制 entities/list 同构）
+            // （子层经 payload.parent 懒加载，与实体机制 list_items 同构）
             OPTIONS_LIST => return super::options::handle_list_options(self.as_ref(), ctx).await,
             "heartbeat/trigger" => return self.handle_heartbeat_trigger_oneoff(ctx).await,
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
@@ -740,7 +733,7 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
         })
     }
 
-    /// 删除会话（统一协议 entities/delete；非 EntityStore 型 provider 重写）。
+    /// 删除会话（实体机制 `delete_item` 钩子；非 EntityStore 型 provider 重写）。
     ///
     /// 复用 `delete_session_internal`：先 abort 活跃任务再删除——与旧
     /// `session/clear` 路由同语义，前端机制列表的删除按钮直接受益。

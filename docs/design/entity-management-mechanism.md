@@ -1,14 +1,22 @@
 # 统一实体管理机制与规范
 
-状态：现行规范（**后端机制**；前端「统一实体页」已于 S5 下线）
+状态：规范（**后端内部机制**；`entities/*` 调用协议已于 S11 下线）
 范围：Symbio 全部「实体管理」类功能（顶层实体 + 容器子实体）
 
+> **对外已只有一个协议（S11）**：`entities/*` 调用协议已下线——不再有任何插件
+> 路由它，`entities::dispatch` 与其请求/响应、zip 工具一并删除。资源访问统一
+> 经 VDFS（`.vdfs/<挂载点>/…`）。
+>
+> **本文件剩下的仍是现行机制**：`EntityProvider` trait（差异化钩子）、注册表
+> （`provider_registry` / `nav_meta_of`）、`entity_write` / `entity_delete`
+> （写盘与删除的唯一实现）、容器子实体钩子——它们由 VDFS 的 `EntityVdfsAdapter`
+> 调用，是「资源怎么存、怎么校验」的实现，与对外地址无关。
+>
 > **前端已收口（S5）**：`views/WorkbenchView.vue` 与其页面逻辑
 > （`useWorkbenchView` / `useWorkbench` / `useEntityProviders`）以及
 > `EntityTree` / `EntityDetailPanel` 均已删除，前端资源页只有 VDFS 一台
-> （见 `docs/design/vdfs-frontend.md` §7）。本文件的**协议与后端机制**
-> （`entities/*`、`EntityProvider`、注册表）仍然有效，且继续被 VDFS 的
-> `EntityVdfsAdapter` 复用；文中出现的前端页面/组件名仅作历史说明。
+> （见 `docs/design/vdfs-frontend.md` §7）。文中出现的前端页面/组件名与
+> `entities/*` 路由均作历史说明。
 关联：`docs/design/open-agent-bundle-spec.md`（OAB 标准）、
 `symbio/src/symbio_core/schemas/entities.rs`（协议权威定义）、
 `symbio/src/symbio_core/entities.rs`（注册表与统一分发）

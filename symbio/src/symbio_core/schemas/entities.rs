@@ -37,35 +37,6 @@ pub const ENTITY_SESSION: &str = "session";
 /// Setting（设置分区）
 pub const ENTITY_SETTING: &str = "setting";
 
-/// serde 默认：布尔开关缺省为 true（如 `status_indicator`）
-pub(crate) fn default_true() -> bool {
-    true
-}
-
-// ==================== 统一路径常量 ====================
-
-// 与 [`crate::symbio_core::providers::storage::categories`] 一一对应的实体类型
-
-/// entities/list — 列出全部实体
-pub const ENTITIES_LIST: &str = "entities/list";
-/// entities/get — 读取单个实体详情
-pub const ENTITIES_GET: &str = "entities/get";
-/// entities/upload — 创建或更新实体
-pub const ENTITIES_UPLOAD: &str = "entities/upload";
-/// entities/delete — 删除实体
-pub const ENTITIES_DELETE: &str = "entities/delete";
-/// entities/status — 查询实体实时/连接状态
-pub const ENTITIES_STATUS: &str = "entities/status";
-
-/// `entities/detail` —— 详情页定义下发（definition-driven detail）
-pub const ENTITIES_DETAIL: &str = "entities/detail";
-
-/// `entities/watch` —— 订阅容器子实体数据变更（树视图等实时场景：视图
-/// 挂载时订阅，卸载时经 `entities/unwatch` 取消；变更经粗粒度 `data`
-/// 事件下发，见 §2.4）
-pub const ENTITIES_WATCH: &str = "entities/watch";
-pub const ENTITIES_UNWATCH: &str = "entities/unwatch";
-
 // ==================== 能力开关 ====================
 
 /// 实体能力开关 —— 决定该类型实体的统一页面启用哪些模块。
@@ -212,75 +183,6 @@ pub fn capabilities_for(kind: &str) -> EntityCapabilities {
     }
 }
 
-// ==================== provider 注册信息 ====================
-
-/// 容器子实体类型声明 —— 该 provider 的实体条目本身是「容器」，内部托管这些子类型。
-///
-/// 如 agent（OAB bundle）内部托管 prompt / skill / mcp 三类文件级实体。
-/// 前端据此生成容器实体页（如 Agent 内部实体管理页）的左侧类别导航与新建表单——
-/// 类别的存在性、顺序、标签、路径模板、新建模板均由后端控制，前端零硬编码。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContainerKindInfo {
-    /// 子实体类型（如 `prompt` / `skill` / `mcp`）
-    pub kind: String,
-    /// 展示标签
-    pub label: String,
-    /// 语义说明（前端新建/编辑表单的提示文本）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// 新建路径模板（`<name>` 占位符），如 `prompts/<name>.md`
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path_hint: Option<String>,
-    /// 新建内容模板（前端编辑器初始内容）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_content: Option<String>,
-    /// 子实体能力开关（容器页据此驱动 UI）
-    pub capabilities: EntityCapabilities,
-    /// 中栏展示形态（缺省 = 列表）：`tree` = 树视图（条目携带 parent 层级、
-    /// 经 `parent` 请求参数懒加载，见 [`EntitiesListRequest`]）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub view: Option<String>,
-}
-
-/// 实体类型（provider）注册信息 —— 宿主级单一真相源
-///
-/// 由核心层 [`crate::symbio_core::entities::provider_registry`] 静态注册，
-/// 经宿主 `entities/providers` 端点下发，前端据此动态生成左侧导航栏与
-/// 统一实体页的类型集合（替代硬编码类型清单）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderInfo {
-    /// 实体类型（kind），如 `model` / `mcp` / `session`
-    pub kind: String,
-    /// 提供方显示名，用于路径 `[provider]/[id].[kind]`
-    pub provider_name: String,
-    /// 实体操作前缀（前端拼接 `${prefix}/entities/<op>`）
-    pub prefix: String,
-    pub capabilities: EntityCapabilities,
-    /// 展示顺序（前端导航/类型选择排序）
-    pub order: i32,
-    /// 展示标签（如 `Model` / `Session`）
-    pub label: String,
-    /// 是否支持在实体管理器内创建/删除（`category` 存在且 dispatch 实现 upload/delete）
-    pub supports_upload: bool,
-    /// 列表简洁模式：仅显示类型图标 + 标题（如设置分区，无描述/路径标签）
-    #[serde(default)]
-    pub compact_list: bool,
-    /// 列表项是否显示运行状态图示（状态点）。无状态的列表（如设置分区）为 false，
-    /// 前端据此隐藏状态徽标——列表展示形态由后端统一掌控。
-    #[serde(default = "default_true")]
-    pub status_indicator: bool,
-    /// 容器声明：条目内部托管的子实体类型（空 = 条目不是容器）。
-    /// 前端容器实体页的左侧类别导航由此驱动（如 Agent 内部的 prompt/skill/mcp）。
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub container_kinds: Vec<ContainerKindInfo>,
-}
-
-/// `entities/providers` 响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProvidersResponse {
-    pub providers: Vec<ProviderInfo>,
-}
-
 // ==================== 统一列表项 ====================
 
 /// 统一实体概要（列表项）
@@ -293,7 +195,7 @@ pub struct EntitySummary {
     /// 实体类型标识（`model` / `mcp` / `agent` / `skill` / `session`）
     pub kind: String,
     /// 提供方（插件）显示名，用于前端实体路径 `[provider]/[id].[kind]` 展示；
-    /// 由 dispatch 统一回填（默认与 kind 相同），插件无需关心
+    /// 由实体机制统一回填（默认与 kind 相同），插件无需关心
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     /// 显示名

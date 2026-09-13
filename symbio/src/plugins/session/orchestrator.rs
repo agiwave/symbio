@@ -1207,7 +1207,7 @@ impl SessionPlugin {
         .await;
 
         // 实体实时状态协议：把会话 busy/idle 同步推送为 entity 事件，
-        // 供未来统一实体列表/详情按 id 即时刷新状态角标（初始态由 entities/list 兜底）。
+        // 供列表/详情按 id 即时刷新状态角标（初始态由清单接口兜底）。
         use crate::symbio_core::event_bus::EventBus;
         let id = state.request_id_str();
         match status {

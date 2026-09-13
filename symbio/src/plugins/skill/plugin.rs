@@ -115,10 +115,11 @@ impl SkillPlugin {
     }
 }
 
-// ==================== 统一实体协议 (entities/*) ====================
+// ==================== 实体机制接入（供 VDFS 挂载点使用） ====================
 //
-// 公共流程（列表包装 / zip 上传 / 幂等删除）由 `EntityProvider::dispatch` 承载，
-// 这里只实现 skill 的差异化钩子（SKILL.md 摘要解析）。
+// 公共流程（列表包装 / 幂等删除）由 `entities::entity_write` / `entity_delete`
+// 承载，这里只实现 skill 的差异化钩子（SKILL.md 摘要解析）。
+// `entities/*` 协议已随 S11 下线，本 impl 只被 `EntityVdfsAdapter` 调用。
 
 #[async_trait]
 impl crate::symbio_core::entities::EntityProvider for SkillPlugin {
@@ -249,12 +250,6 @@ impl Plugin for SkillPlugin {
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
-
-        // 统一实体协议：entities/list / get / upload / delete / status
-        if let Some(resp) = crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
-        {
-            return resp;
-        }
 
         match path {
             "execute" => {

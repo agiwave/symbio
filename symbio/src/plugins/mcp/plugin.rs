@@ -205,8 +205,9 @@ impl Default for McpPlugin {
 
 // ==================== 统一实体协议 (entities/*) ====================
 //
-// 公共流程（列表包装 / zip 上传 / 幂等删除 / status 事件推送）由
-// `EntityProvider::dispatch` 承载，这里只实现 MCP 的差异化钩子。
+// 公共流程（列表包装 / 幂等删除）由 `entities::entity_write` / `entity_delete`
+// 承载，这里只实现 MCP 的差异化钩子；`entities/*` 协议已随 S11 下线，
+// 本 impl 只被 `EntityVdfsAdapter` 调用。
 
 #[async_trait]
 impl crate::symbio_core::entities::EntityProvider for McpPlugin {
@@ -328,7 +329,7 @@ impl crate::symbio_core::entities::EntityProvider for McpPlugin {
 
     /// 连接测试单个 MCP Server（stdio 握手 / http streams）
     ///
-    /// 连接失败映射为 `Ok(status: "failed")`，由 dispatch 统一推送 entity 事件。
+    /// 连接失败映射为 `Ok(status: "failed")`：结果由 `vdfs/action` 直接返回给调用方。
     async fn test_status(
         &self,
         ctx: &Arc<dyn InvokeRequest>,
@@ -468,12 +469,6 @@ impl Plugin for McpPlugin {
 
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
-
-        // 统一实体协议：entities/list / get / upload / delete / status
-        if let Some(resp) = crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
-        {
-            return resp;
-        }
 
         let data = match path {
             CONFIG_GET => {

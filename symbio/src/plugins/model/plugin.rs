@@ -399,10 +399,11 @@ impl Default for ModelPlugin {
 
 // ==================== 统一实体协议 (entities/*，independent_form 启用于 model) ====================
 //
-// 公共流程（manifest 上传 / 幂等删除 / 列表包装 / status 事件推送）由
-// `EntityProvider::dispatch` 承载，这里只实现 model 的差异化钩子。
+// 公共流程（manifest 写盘 / 幂等删除）由 `entities::entity_write` /
+// `entity_delete` 承载，这里只实现 model 的差异化钩子；`entities/*` 协议
+// 已随 S11 下线，本 impl 只被 `EntityVdfsAdapter` 调用。
 // 列表项 `extra` 展开 `config`（完整 ModelProviderConfig）与 `is_default`，
-// 使 chat 侧（`listModelProviders`）与实体管理页共用同一读取入口。
+// 使 chat 侧（`listModelProviders`）与 VDFS 详情共用同一读取入口。
 
 #[async_trait]
 impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
@@ -594,7 +595,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
         Ok(())
     }
 
-    /// 连接测试（复用 validate_provider），失败映射 Ok(failed) 由 dispatch 统一推事件
+    /// 连接测试（复用 validate_provider），失败映射 Ok(failed)——结果由 `vdfs/action` 返回
     async fn test_status(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
@@ -636,13 +637,6 @@ impl Plugin for ModelPlugin {
 
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
-
-        // 统一实体协议：entities/list / get / upload / delete / status
-        if let Some(resp) =
-            crate::symbio_core::entities::dispatch(self.as_ref(), path.as_str(), &ctx).await
-        {
-            return resp;
-        }
 
         match path.as_str() {
             CONFIG_GET => {

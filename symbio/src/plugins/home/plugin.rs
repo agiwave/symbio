@@ -519,26 +519,6 @@ impl HomePlugin {
         Ok(())
     }
 
-    /// 服务器端 provider 顺序覆盖表：读取配置 `symbio.provider_order`（{kind: order}）。
-    /// 命中覆盖的 kind 以其 order 为准，未配置的走注册表默认 order。
-    async fn provider_order_override(&self) -> HashMap<String, i32> {
-        let cfg = self.config.read().await;
-        let Some(po) = cfg.symbio.get("provider_order") else {
-            return HashMap::new();
-        };
-        po.as_object()
-            .map(|obj| {
-                obj.iter()
-                    .filter_map(|(k, v)| {
-                        v.as_i64()
-                            .and_then(|n| i32::try_from(n).ok())
-                            .map(|order| (k.clone(), order))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
     /// 收集所有子插件配置
     async fn collect_plugin_configs(&self) -> serde_json::Map<String, Value> {
         let mut configs = serde_json::Map::new();
@@ -598,16 +578,8 @@ impl Plugin for HomePlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
-            "entities/providers" => {
-                // 宿主级实体 provider 注册表：前端启动时拉取，动态生成左侧导航与统一实体页。
-                // 顺序可由服务器端配置覆盖（symbio.provider_order: {kind: number}），
-                // unset 的 kind 走注册表默认 order——导航顺序无需改代码即可运行时调整。
-                let order_override = self.provider_order_override().await;
-                let resp = crate::symbio_core::entities::providers_response_with_overrides(
-                    &order_override,
-                );
-                return Ok(PluginPayload::new(&resp));
-            }
+            // `entities/providers` 已随 S11 下线：资源类别清单改由
+            // `vdfs/providers`（`.vdfs` 虚拟根）下发，导航与顺序都在那里。
             "save_config" => {
                 let this = Arc::clone(&self);
                 tokio::spawn(async move {

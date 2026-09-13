@@ -262,6 +262,7 @@ pub struct VdfsNewType {
 | **S8 会话清单上 VDFS** | 会话节点自带 `message_count` / `metadata` / `meta_tags`；`listSessions()` 改走 `vdfs/list`，`services/entities.ts` 删除 | 前端 `entities/*` 调用点归零 |
 | **S9 导航可见性** | 机制层新增 `VdfsProvider::nav_visible()`（缺省 `true`），经挂载节点属性 → `VdfsMountInfo.nav_visible` 透传；`local` 声明 `false`，前端按标记过滤 | 左栏 = 六类资源，无按名硬编码 |
 | **S10 节点动作** | 新增 `vdfs/action` 操作 + `VdfsProvider::action()`（默认 `NotImplemented`）；适配器把 `test` 接到 `EntityProvider::test_status`；前端把「测试连接」接回 | S5 后丢失的连通性自检回归 |
+| **S11 下线 `entities/*` 协议** | 6 个插件不再路由 `entities/*`，`entities::dispatch` 与其请求/响应、zip 工具一并删除；网关只读白名单改列 `vdfs/*` 读操作 | 对外只剩 VDFS 一个资源协议 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -457,6 +458,27 @@ pub struct VdfsNewType {
   - 覆盖：`action_test_uses_entity_test_status`（成功 / 失败 / 未实现 / 不存在的条目 /
     非条目路径）、`action_forwards_verb_and_relative_path`（分层只转发）+ 前端
     `runVdfsAction` 三例（口径翻译、无载荷不发字段、载荷透传）。
+
+- **S11 下线 `entities/*` 调用协议**（**已完成**）：前端（S8）与 LLM 早已零调用，
+  剩下的只是**对外遗留面**——6 个插件仍把 `entities/*` 路由到
+  `entities::dispatch`。本阶段拆除：
+
+  | 位置 | 处理 |
+  | --- | --- |
+  | mcp / model / session / setting / skill | 删掉 `route()` 里的 `entities::dispatch` 分支 |
+  | agent | 删掉 `entities/list|detail|get|upload|delete` 五个分支与 `entities_*` 三个处理函数（保留 `bundle/*`） |
+  | home | 删掉 `entities/providers`（资源类别改由 `vdfs/providers` 下发）及其 `provider_order_override` |
+  | `symbio_core/entities.rs` | 删除 `dispatch` 与 7 个 `dispatch_*`、zip 工具、`providers_response*`；保留 `EntityProvider` trait + `entity_write` / `entity_delete`（适配器的唯一依赖） |
+  | `schemas/entities.rs` | 删除 `ENTITIES_*` 路径常量与协议请求/响应（保留 `DetailDefinition`、`EntitySummary`、`EntityUploadResponse` / `EntityStatusResponse`） |
+  | gateway | 只读白名单由 `entities/*` 换成 VDFS 读操作（`vdfs/providers|list|tree|stat|read|search`） |
+
+  - **实体机制退为内部抽象**：`EntityProvider` 仍在（它是「资源怎么存、怎么校验」的
+    实现），但不再有对外地址；唯一消费者是 `EntityVdfsAdapter`。
+  - **已知取舍**：随协议一并消失的两个入口，迁移前**已从 UI 不可达**（S5 下线实体页
+    后就没有调用方）——① skill / agent 的 **zip 导入**（VDFS 新建走 `new_types` +
+    `write { create }`，只覆盖单文件最小清单；多文件包需要时在 VDFS 上重开导入入口）；
+    ② 服务器下发的**导航顺序覆盖** `symbio.provider_order`（顺序现由注册表 `order` 决定）。
+  - 净变化：核心 `entities.rs` 1467 → 634 行，协议契约 700 → 563 行。
 
 ---
 

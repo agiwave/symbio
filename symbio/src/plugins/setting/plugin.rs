@@ -72,14 +72,6 @@ impl Plugin for SettingPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
-        // 统一实体协议：entities/list（设置分区清单）；
-        // get/upload/delete/status 走 trait 默认 NotImplemented（分区不可增删，
-        // 保存由前端 editor 经各插件 config/set 自持完成）
-        if let Some(resp) = crate::symbio_core::entities::dispatch(self.as_ref(), path, &ctx).await
-        {
-            return resp;
-        }
-
         match path {
             "list" => {
                 let categories = vec![

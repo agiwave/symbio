@@ -1,13 +1,15 @@
-//! 统一实体协议（`entities/*`）接入 —— kind = `agent`。
+//! 实体机制接入（`kind = agent`）—— 供 VDFS 挂载点使用。
 //!
 //! ## 与 [`super::handlers`] 的分工
 //!
-//! - `entities/list`：走 [`crate::symbio_core::entities::dispatch`] 公共流程，
-//!   本模块 override [`EntityProvider::list_items`] 直接枚举 [`BundleStore`]；
-//! - `entities/get` / `upload` / `delete`：dispatch 默认实现走 EntityStore
-//!   （`category()` 语义），而 bundle 由 [`BundleStore`] 自管目录与 manifest
-//!   校验（zip-slip 防护 / 版本硬门槛），故由 handlers 直接拦截实现，
-//!   响应形状与统一协议保持一致（`EntitySummary` / `EntityUploadResponse`）。
+//! - [`EntityProvider::list_items`]：本模块 override，直接枚举 [`BundleStore`]
+//!   （bundle 不是 EntityStore 型，不落 `~/.symbio/plugins/<category>/`）；
+//! - 写 / 删：bundle 由 [`BundleStore`] 自管目录与 manifest 校验（zip-slip
+//!   防护 / 版本硬门槛），故不复用默认的 EntityStore 写盘路径，响应形状与
+//!   实体机制保持一致（`EntitySummary` / `EntityUploadResponse`）。
+//!
+//! `entities/*` 调用协议已随 S11 下线：本模块的钩子**只**由
+//! `EntityVdfsAdapter` 调用，外部访问一律走 `.vdfs/agent/…`。
 
 use super::plugin::AgentPlugin;
 use super::store::{classify_entity_path, BundleStore};

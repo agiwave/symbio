@@ -41,10 +41,15 @@ impl Default for GatewayConfig {
     }
 }
 
-/// 只读模式放行的路径前缀白名单
+/// 只读模式放行的路径白名单
 ///
 /// 只读并非完整安全边界，而是**兜底**：即便令牌泄露到可信内网，也只能读取
 /// 而无法触发写操作与命令执行。
+///
+/// **资源一律经 VDFS**（`vdfs/<操作>`）：只读放行其**读操作**——
+/// `providers` / `list` / `tree` / `stat` / `read` / `search`；
+/// 写操作（`write` / `delete` / `mkdir` / `move` / `edit`）与节点动作
+/// （`action`）不在其列。旧的 `entities/*` 资源协议已下线（S11），不再放行。
 ///
 /// **网关自身配置不在放行范围内**：`gateway/*` 接口恒走 native（前端不经 HTTP
 /// 访问本插件），且 `gateway/config/get` 会返回 `inbound_token`，一旦放行等于
@@ -53,19 +58,17 @@ pub fn is_readonly_allowed(path: &str) -> bool {
     let p = path.trim_start_matches('/');
     matches!(
         p,
-        "entities/list"
-            | "entities/get"
-            | "entities/status"
-            | "entities/detail"
-            | "entities/providers"
+        "vdfs/providers"
+            | "vdfs/list"
+            | "vdfs/tree"
+            | "vdfs/stat"
+            | "vdfs/read"
+            | "vdfs/search"
             | "session/get_messages"
             | "config/get"
             | "home/get_homedir"
             | "work/get_workspace"
     ) || p.starts_with("config/get")
-        || p.starts_with("entities/list")
-        || p.starts_with("entities/get")
-        || p.starts_with("entities/detail")
 }
 
 #[cfg(test)]
@@ -88,20 +91,22 @@ mod tests {
 
     #[test]
     fn readonly_allowlist() {
-        // 放行：查询类 / config/get 及其子路径
+        // 放行：查询类 / config/get 及其子路径 / VDFS 读操作
         assert!(is_readonly_allowed("config/get"));
         assert!(is_readonly_allowed("/config/get"));
-        assert!(is_readonly_allowed("entities/list"));
-        assert!(is_readonly_allowed("entities/get"));
-        assert!(is_readonly_allowed("entities/detail"));
-        assert!(is_readonly_allowed("entities/providers"));
+        assert!(is_readonly_allowed("vdfs/list"));
+        assert!(is_readonly_allowed("vdfs/read"));
+        assert!(is_readonly_allowed("vdfs/providers"));
         assert!(is_readonly_allowed("home/get_homedir"));
         assert!(is_readonly_allowed("work/get_workspace"));
 
-        // 拒绝：写操作 / 命令执行 / 未知
+        // 拒绝：写操作 / 命令执行 / 未知 / 已下线的实体协议
         assert!(!is_readonly_allowed("config/set"));
         assert!(!is_readonly_allowed("session/chat/send"));
-        assert!(!is_readonly_allowed("entities/upload"));
+        assert!(!is_readonly_allowed("vdfs/write"));
+        assert!(!is_readonly_allowed("vdfs/delete"));
+        assert!(!is_readonly_allowed("vdfs/action"));
+        assert!(!is_readonly_allowed("entities/list"));
         assert!(!is_readonly_allowed("bogus/path"));
 
         // 拒绝：网关自身配置——`gateway/*` 恒走 native，且 config/get 含 inbound_token。
