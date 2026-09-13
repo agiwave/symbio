@@ -128,6 +128,7 @@ impl VdfsWriteRequest {
                 size: t.len() as u64,
                 text: Some(t.clone()),
                 etag: self.etag.clone(),
+                create: self.create,
                 ..Default::default()
             },
             (None, Some(b)) => VdfsContent {
@@ -135,11 +136,13 @@ impl VdfsWriteRequest {
                 b64: Some(b.clone()),
                 binary: true,
                 etag: self.etag.clone(),
+                create: self.create,
                 ..Default::default()
             },
             (None, None) => VdfsContent {
                 path: self.path.clone(),
                 etag: self.etag.clone(),
+                create: self.create,
                 ..Default::default()
             },
         }
@@ -333,6 +336,31 @@ mod tests {
         .to_content();
         assert!(b.binary);
         assert_eq!(b.b64.as_deref(), Some("AAEC"));
+    }
+
+    #[test]
+    fn write_request_carries_create_intent() {
+        // create 位随线路信封进入域内容体（provider 据此区分新建 / 覆盖）
+        let c = VdfsWriteRequest {
+            path: "/session/abc.session".into(),
+            text: Some(String::new()),
+            create: true,
+            ..Default::default()
+        }
+        .to_content();
+        assert!(c.create, "create 位必须透传到 VdfsContent");
+        assert_eq!(c.text.as_deref(), Some(""));
+
+        // 缺省为覆盖（create = false），且 false 不污染线上形状
+        let plain = VdfsWriteRequest {
+            path: "/a".into(),
+            text: Some("x".into()),
+            ..Default::default()
+        }
+        .to_content();
+        assert!(!plain.create);
+        let v = serde_json::to_value(&plain).unwrap();
+        assert!(v.get("create").is_none(), "false 不序列化");
     }
 
     #[test]

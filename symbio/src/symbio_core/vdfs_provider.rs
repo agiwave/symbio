@@ -504,6 +504,18 @@ pub struct VdfsContent {
     /// 内容版本（乐观并发令牌；provider 可选实现）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub etag: Option<String>,
+    /// **写意图**：允许创建缺失的节点（`vdfs/write` 的 `create` 位）。
+    ///
+    /// provider 据此区分「新建」与「覆盖」——规范 §5.3 的「新建」正是
+    /// 「对目标地址的一次 `vdfs/write`（`create: true`）」，创建语义（生成
+    /// 标识、校验归属……）由 provider 自持。读取结果恒为 `false`。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub create: bool,
+}
+
+/// serde 辅助：`false` 不序列化（保持读取结果的线上形状不变）
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl VdfsContent {
@@ -536,6 +548,12 @@ impl VdfsContent {
 
     pub fn with_etag(mut self, etag: impl Into<String>) -> Self {
         self.etag = Some(etag.into());
+        self
+    }
+
+    /// 标记为「新建」写意图（允许创建缺失节点）
+    pub fn with_create(mut self) -> Self {
+        self.create = true;
         self
     }
 
