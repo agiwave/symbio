@@ -20,15 +20,18 @@ import {
 const Dummy = defineComponent({ template: '<div />' })
 
 describe('registerEntityEditor / getEntityEditor', () => {
-  it('model / mcp / skill / agent:bundle / 设置三分区改由后端 detail 定义驱动，前端不再注册', () => {
+  it('model / mcp / skill / agent:bundle 改由后端 detail 定义驱动，前端不再注册', () => {
     // definition-driven detail：注册 editor 缺席时由 DetailForm 渲染
     expect(getEntityEditor('model')).toBeUndefined()
     expect(getEntityEditor('mcp')).toBeUndefined()
     expect(getEntityEditor('skill')).toBeUndefined()
     expect(getEntityEditorFor({ kind: 'agent', config_type: 'bundle' })).toBeUndefined()
-    expect(getEntityEditorFor({ kind: 'setting', config_type: 'session' })).toBeUndefined()
-    expect(getEntityEditorFor({ kind: 'setting', config_type: 'local' })).toBeUndefined()
-    expect(getEntityEditorFor({ kind: 'setting', config_type: 'web' })).toBeUndefined()
+  })
+
+  it('setting 已迁移到 VDFS：实体侧不再注册任何分区 editor', () => {
+    for (const ext of ['appearance', 'session', 'local', 'web', 'gateway', 'about']) {
+      expect(getEntityEditorFor({ kind: 'setting', config_type: ext })).toBeUndefined()
+    }
   })
 
   it('未注册的 kind 返回 undefined（走通用兜底）', () => {
@@ -36,20 +39,20 @@ describe('registerEntityEditor / getEntityEditor', () => {
   })
 
   it('可动态注册新类型 editor', () => {
-    registerEntityEditor('setting', Dummy)
-    expect(getEntityEditor('setting')).toBe(Dummy)
+    registerEntityEditor('demo-kind', Dummy)
+    expect(getEntityEditor('demo-kind')).toBe(Dummy)
   })
 })
 
 describe('getEntityEditorFor（项级"扩展名"分发）', () => {
-  it('setting 各分区按 config_type 进入不同 editor（定义驱动的三分区除外）', () => {
-    expect(getEntityEditorFor({ kind: 'setting', config_type: 'appearance' })).toBeTruthy()
-    expect(getEntityEditorFor({ kind: 'setting', config_type: 'about' })).toBeTruthy()
+  it('kind:ext 命中项级 editor', () => {
+    registerEntityEditor('demo:alpha', Dummy)
+    expect(getEntityEditorFor({ kind: 'demo', config_type: 'alpha' })).toBe(Dummy)
   })
 
   it('config_type 未注册时回退 kind 级 editor', () => {
-    registerEntityEditor('setting', Dummy)
-    expect(getEntityEditorFor({ kind: 'setting', config_type: 'unknown-ext' })).toBe(Dummy)
+    registerEntityEditor('demo', Dummy)
+    expect(getEntityEditorFor({ kind: 'demo', config_type: 'unknown-ext' })).toBe(Dummy)
   })
 
   it('无 config_type 的实体走 kind 级查找', () => {
@@ -58,8 +61,8 @@ describe('getEntityEditorFor（项级"扩展名"分发）', () => {
   })
 
   it('非 string 的 config_type 被忽略（后端 extra 兼容）', () => {
-    expect(getEntityEditorFor({ kind: 'setting', config_type: 42 })).toBe(
-      getEntityEditorFor({ kind: 'setting' })
+    expect(getEntityEditorFor({ kind: 'demo', config_type: 42 })).toBe(
+      getEntityEditorFor({ kind: 'demo' })
     )
   })
 })
@@ -82,8 +85,8 @@ describe('registerEntityIcon / getEntityIcon', () => {
 })
 
 describe('getEntityIconFor（项级图标分发）', () => {
-  it('setting 各分区有专属图标', () => {
-    for (const ext of ['appearance', 'session', 'local', 'web', 'about']) {
+  it('setting 各分区有专属图标（VDFS 列表项复用同一套项级图标）', () => {
+    for (const ext of ['appearance', 'session', 'local', 'web', 'gateway', 'about']) {
       expect(getEntityIconFor({ kind: 'setting', config_type: ext })).toBeTruthy()
     }
   })

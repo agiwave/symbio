@@ -16,14 +16,14 @@
     <Workbench
       :rail-items="railItems"
       :back="true"
-      back-title="返回根"
+      :back-title="backTitle"
       :title="title"
       :list-width="260"
       hide-default-new
       :has-list-content="items.length > 0"
       :loading="loading"
       @rail-select="switchMount"
-      @rail-back="goRoot"
+      @rail-back="goBack"
     >
       <template #header-actions>
         <!-- 新建（节点声明了可接受的新建类型时可见；类型由后端下发，前端不硬编码） -->
@@ -242,7 +242,7 @@ import {
   type VdfsNewType,
   type VdfsNode,
 } from '@/schemas/vdfs'
-import { getEntityIcon } from '@/registry/entityTypes'
+import { getEntityIcon, getEntityIconFor } from '@/registry/entityTypes'
 
 const props = defineProps<{
   /** 路由 `:mount`（可选）：深链直接进入某挂载点 */
@@ -295,6 +295,19 @@ watch(activeMount, (m) => {
 
 function goRoot() {
   void enter(VFDS_ROOT)
+}
+
+/**
+ * 返回：本页是**整页替换主布局**的全局页面，因此在虚拟根处「返回」应回主界面，
+ * 否则用户会被困在 VDFS 页（本页没有应用外壳的导航）。
+ */
+const backTitle = computed(() => (cwd.value === VFDS_ROOT ? '返回主界面' : '返回根'))
+function goBack() {
+  if (cwd.value === VFDS_ROOT) {
+    void router.push('/')
+    return
+  }
+  goRoot()
 }
 
 onMounted(() => {
@@ -439,10 +452,18 @@ function relativeTime(ts?: number): string {
   return `${Math.floor(diff / 86_400_000)} 天前`
 }
 
-/** 图标：挂载点用挂载点图标，其余按节点 kind（均为纯 UI 映射） */
+/**
+ * 图标：挂载点用挂载点图标；其余按「kind + 节点名」查项级图标，再回退 kind 级。
+ * 全部是纯 UI 映射（VDFS 不下发图标），与实体机制的 config_type 项级分发同构。
+ */
 function mountOrKindIcon(n: VdfsNode) {
   if (n.kind === VFDS_KIND_MOUNT) return mountIconOf(n.name) ?? undefined
-  return getEntityIcon(n.kind) ?? mountIconOf(n.kind) ?? undefined
+  return (
+    getEntityIconFor({ kind: n.kind, config_type: n.name }) ??
+    getEntityIcon(n.kind) ??
+    mountIconOf(n.kind) ??
+    undefined
+  )
 }
 
 // props.mount 仅作路由声明；实际取值走 route.params（两者同源）

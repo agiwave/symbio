@@ -24,9 +24,7 @@
  */
 
 import { defineComponent, h, markRaw, shallowReactive, type Component } from 'vue'
-import Appearance from '@/components/settings/Appearance.vue'
 import Session from '@/components/entities/Session.vue'
-import About from '@/components/settings/About.vue'
 
 /** 编辑器/图标查找目标：kind + 可选"扩展名"（后端 extra.config_type，unknown 兼容索引签名） */
 export interface EntityRegistryTarget {
@@ -126,11 +124,10 @@ export function getEntityIconFor(target: EntityRegistryTarget): Component | unde
 // 进入该 editor 的引导态（新建会话），列表/删除由机制承担（delete_item 钩子）。
 registerEntityEditor('session', markRaw(Session))
 
-// 设置分区：同一 kind（setting）下按 config_type 进入不同 editor。
-// session/local/web 三分区改由后端 entities/detail 下发定义（DetailForm 渲染），
-// 仅保留不适用定义的两个：appearance（前端 store 即时生效）/ about（信息展示）。
-registerEntityEditor('setting:appearance', markRaw(Appearance))
-registerEntityEditor('setting:about', markRaw(About))
+// 设置分区（setting）已迁移到 VDFS（/vdfs/setting）：
+// session/local/web/gateway 走 ext=form 的定义驱动表单；appearance/about 的
+// 专属面板改由 VDFS 渲染器注册表装配（registry/vdfsRenderers.ts）。
+// 此处不再注册 setting 的 editor —— 实体机制侧已退场。
 
 /** 用 SVG path 构造轻量图标组件（feather 风格线条图标） */
 function svgIcon(inner: string): Component {
@@ -175,6 +172,12 @@ registerEntityIcon(
   'setting:web',
   svgIcon(
     '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'
+  )
+)
+registerEntityIcon(
+  'setting:gateway',
+  svgIcon(
+    '<path d="M4 12h4l2-5 4 10 2-5h4"/><circle cx="12" cy="12" r="10"/>'
   )
 )
 registerEntityIcon(

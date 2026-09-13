@@ -24,13 +24,23 @@ import {
 /**
  * 详情渲染器标识（机制级的呈现形态，不含场景语义）。
  *
- * - `dir`      目录 → 中栏列表 / 树
- * - `form`     定义驱动表单（解析 node.schema）
- * - `session`  会话工作区
+ * - `dir`        目录 → 中栏列表 / 树
+ * - `form`       定义驱动表单（解析 node.schema）
+ * - `session`    会话工作区
  * - `markdown` / `json` / `text` 文本类编辑器
- * - `fallback` 通用只读兜底
+ * - `appearance` / `about` 前端状态自持的专属面板（外观设置 / 关于）
+ * - `fallback`   通用只读兜底
  */
-export type VdfsRenderer = 'dir' | 'form' | 'session' | 'markdown' | 'json' | 'text' | 'fallback'
+export type VdfsRenderer =
+  | 'dir'
+  | 'form'
+  | 'session'
+  | 'markdown'
+  | 'json'
+  | 'text'
+  | 'appearance'
+  | 'about'
+  | 'fallback'
 
 /** 扩展名 → 渲染器（**唯一的硬编码表**，纯 UI 约定） */
 const EXT_RENDERERS: Record<string, VdfsRenderer> = {
@@ -40,6 +50,9 @@ const EXT_RENDERERS: Record<string, VdfsRenderer> = {
   [VFDS_EXT_JSON]: 'json',
   [VFDS_EXT_TEXT]: 'text',
   [VFDS_EXT_DIR]: 'dir',
+  // 前端状态自持的专属面板（ext 即语义类型名，由 provider 声明）
+  appearance: 'appearance',
+  about: 'about',
   txt: 'text',
   log: 'text',
   yaml: 'text',

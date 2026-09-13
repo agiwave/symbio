@@ -41,6 +41,11 @@ describe('resolveVdfsRenderer', () => {
     expect(resolveVdfsRenderer(node({ name: 'a.log' }))).toBe('text')
   })
 
+  it('前端状态自持的专属面板按语义 ext 分发（设置分区）', () => {
+    expect(resolveVdfsRenderer(node({ name: 'appearance', ext: 'appearance' }))).toBe('appearance')
+    expect(resolveVdfsRenderer(node({ name: 'about', ext: 'about' }))).toBe('about')
+  })
+
   it('未知扩展名 / 无扩展名 → fallback（页面永不空白）', () => {
     expect(resolveVdfsRenderer(node({ name: 'a.bin' }))).toBe('fallback')
     expect(resolveVdfsRenderer(node({ name: 'noext' }))).toBe('fallback')

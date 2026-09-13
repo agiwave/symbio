@@ -2,7 +2,7 @@
   <div class="main-layout">
     <!-- 应用外壳 = 三栏工作台（统一 Workbench 容器，应用外壳模式）：
          侧边栏 items 来自后端 providers 注册表（order 排列、不分组，
-         会话→/、设置→/settings，其余→/entities/{kind}），工作区 = RouterView。 -->
+         会话→/、设置→/vdfs/setting，其余→/entities/{kind}），工作区 = RouterView。 -->
     <Workbench :rail-items="navItems" @rail-select="onNavSelect">
       <template #rail-header>
         <div class="logo-area">

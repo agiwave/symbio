@@ -139,7 +139,8 @@ export function resolveActiveTypes(
 /**
  * 机制内路由约定：kind → 顶层导航路由目标。
  *
- * 会话（session）与设置（setting）走专用入口；其余 kind 一律进统一实体页
+ * 会话（session）走首页；**设置（setting）已迁移到 VDFS**（`/vdfs/setting`，
+ * 见 docs/design/vdfs-frontend.md §7 S2）；其余 kind 一律进统一实体页
  * `/entities/{kind}`。新增实体类型由后端注册表自动生成导航，本函数无需改动。
  */
 export function navTargetOf(kind: string): string {
@@ -147,7 +148,7 @@ export function navTargetOf(kind: string): string {
     case 'session':
       return '/'
     case 'setting':
-      return '/settings'
+      return '/vdfs/setting'
     default:
       return `/entities/${kind}`
   }

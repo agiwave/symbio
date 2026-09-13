@@ -20,8 +20,9 @@ const router = createRouter({
         { path: 'mcp', redirect: () => '/entities/mcp' },
         { path: 'skill', redirect: () => '/entities/skill' },
         { path: 'agent', redirect: () => '/entities/agent' },
-        // 设置页：同一 WorkbenchView 的 setting 实例（分区清单来自后端 setting/entities/list）
-        { path: 'settings', name: 'settings', component: WorkbenchView, props: () => ({ typesParam: 'setting' }) }
+        // 设置页：已迁移到 VDFS（/vdfs/setting，见 docs/design/vdfs-frontend.md §7 S2）；
+        // 旧地址 redirect 保兼容（书签 / 深链）
+        { path: 'settings', redirect: () => '/vdfs/setting' }
       ]
     },
     {
@@ -42,6 +43,7 @@ const router = createRouter({
       // 左栏 = 挂载点（后端 VdfsProvider 注册）、中栏 = 当前目录、
       // 详情按节点 ext 分发渲染器（form / session / text …）。
       // :mount 可选 = 深链直接进入某挂载点（如 /vdfs/setting）。
+      // 设置是首个迁移到本页的模块（docs/design/vdfs-frontend.md §7 S2）。
       path: '/vdfs/:mount?',
       name: 'vdfs',
       component: VdfsView,
