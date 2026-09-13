@@ -16,33 +16,22 @@
  */
 
 /**
- * 实体能力开关——决定统一页面启用哪些模块 */
+ * 表单渲染器的能力入参（DetailForm 的 `cap.<name>` 求值来源）。
+ *
+ * 与后端不同：VDFS **不下发**能力表——它由渲染器按节点的访问位与详情定义
+ * 声明的动作**自行计算**（后端的能力开关已随 `entities/*` 协议下线）。
+ * 因此这里只保留真正被消费的两项。
+ */
 export interface EntityCapabilities {
-  /** 以上传 zip 为主（文件名即实体目录名） */
-  zip_upload: boolean
-  /** 是否有独立表单 */
-  independent_form: boolean
-  /** 列表项是否有实时状态 */
-  realtime_status: boolean
-  /**
-   * 列表头是否提供「刷新」动作。清单可能被外部修改的类型为 true；
-   * 清单由生命周期事件通道自持同步（session）或固定（setting）为 false。
-   * 前端据此决定列表头刷新按钮是否渲染（§3.4），不得自行判断。
-   */
-  refreshable: boolean
-  /** 是否可写（可上传新增 / 删除） */
+  /** 是否可写（可新增 / 删除） */
   mutable: boolean
-  /** 是否支持连接测试 */
+  /** 是否支持连接测试（`cap.test_connection` 由详情定义引用） */
   test_connection: boolean
-  /** 是否默认只读 */
-  read_only: boolean
 }
 
 /** 实体概要（VDFS 详情渲染器的输入形状之一） */
 export interface EntitySummary {
   kind: string
-  /** 提供方（插件）显示名；由后端统一回填 */
-  provider?: string
   name: string
   id: string
   description?: string

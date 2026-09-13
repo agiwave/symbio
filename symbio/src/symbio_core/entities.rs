@@ -61,12 +61,6 @@ pub trait EntityProvider: Send + Sync {
     /// 实体类型常量（ENTITY_MODEL / ENTITY_MCP / ...）
     fn kind(&self) -> &'static str;
 
-    /// 提供方（插件）显示名，用于前端实体路径 `[provider]/[id].[kind]` 展示。
-    /// 默认与 kind 相同；未来插件显示名与 kind 分叉时重写本方法即可。
-    fn provider_name(&self) -> &str {
-        self.kind()
-    }
-
     /// EntityStore 分类；None = 非实体目录存储（session 走 SessionStore）
     fn category(&self) -> Option<&'static str> {
         None
@@ -164,20 +158,7 @@ pub trait EntityProvider: Send + Sync {
         Ok(())
     }
 
-    /// 读取单个实体详情（顶层 `entities/get`；容器语义走 get_container_item）。
-    ///
-    /// 默认实现走 EntityStore（`category()` + `manifest_file()` 提供
-    /// 分类与 manifest 文件）；非实体存储型 provider（如 session 走
-    /// SessionStore）重写本方法给出自己的详情读取。
-    async fn get_item(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-    ) -> Result<EntitySummary, PluginError> {
-        Err(PluginError::NotImplemented)
-    }
-
-    /// 删除单个实体（磁盘/存储删除 + 由 [`dispatch_delete`] 回调 [`Self::on_deleted`]）。
+    /// 删除单个实体（磁盘/存储删除 + 由 [`entity_delete`] 回调 [`Self::on_deleted`]）。
     ///
     /// 默认实现：EntityStore 目录删除（`category()` 提供分类，磁盘已无目录时
     /// 幂等告警）。**非实体存储型 provider（如 session 走 SessionStore）重写
@@ -212,7 +193,7 @@ pub trait EntityProvider: Send + Sync {
     /// 连接测试/实时状态钩子（默认 NotImplemented）。
     ///
     /// 连接失败建议映射为 `Ok(status: "failed")` 而非 Err，
-    /// 以便 [`dispatch`] 统一推送 entity 事件。
+    /// 以便 VDFS 侧统一呈现（失败是**结果**，不是协议错误）。
     async fn test_status(
         &self,
         _ctx: &Arc<dyn InvokeRequest>,
@@ -323,7 +304,6 @@ pub struct ContainerKindSpec {
     pub path_hint: &'static str,
     /// 新建内容模板
     pub default_content: &'static str,
-    pub capabilities: &'static EntityCapabilities,
     /// 中栏展示形态：`"list"`（缺省）= 列表；`"tree"` = 树视图（懒加载，
     /// 条目携带 parent 层级）
     pub view: &'static str,
@@ -343,7 +323,6 @@ pub static AGENT_CONTAINER_KINDS: &[ContainerKindSpec] = &[
         description: "Markdown 片段，无条件追加进系统提示词；可用 YAML frontmatter 设置 priority（缺省 10，小者优先）。",
         path_hint: "prompts/<name>.md",
         default_content: "---\npriority: 10\n---\n\n在此撰写常驻系统提示词（人格 / 全局规则 / 工作流）…",
-        capabilities: &EntityCapabilities::BUNDLE_FILE,
         view: VIEW_LIST,
     },
     ContainerKindSpec {
@@ -352,7 +331,6 @@ pub static AGENT_CONTAINER_KINDS: &[ContainerKindSpec] = &[
         description: "skills/<name>/SKILL.md，正文作为提示词片段；frontmatter priority 缺省 50。",
         path_hint: "skills/<name>/SKILL.md",
         default_content: "---\npriority: 50\n---\n\n# 技能名称\n\n描述该技能的适用场景、输入输出与执行步骤…",
-        capabilities: &EntityCapabilities::BUNDLE_FILE,
         view: VIEW_LIST,
     },
     ContainerKindSpec {
@@ -361,7 +339,6 @@ pub static AGENT_CONTAINER_KINDS: &[ContainerKindSpec] = &[
         description: "MCP server 配置（YAML），是工具的唯一来源，原样透传给宿主 MCP 客户端。",
         path_hint: "mcps/<name>.yaml",
         default_content: "# MCP server 配置（YAML，原样透传给宿主 MCP 客户端）\ncommand: \"\"\nargs: []\nenv: {}",
-        capabilities: &EntityCapabilities::BUNDLE_FILE,
         view: VIEW_LIST,
     },
 ];
@@ -385,7 +362,6 @@ pub static SESSION_CONTAINER_KINDS: &[ContainerKindSpec] = &[
         description: "由该会话派生的子会话；随父会话级联删除。",
         path_hint: "",
         default_content: "",
-        capabilities: &EntityCapabilities::SUB_SESSION,
         view: VIEW_LIST,
     },
     ContainerKindSpec {
@@ -394,7 +370,6 @@ pub static SESSION_CONTAINER_KINDS: &[ContainerKindSpec] = &[
         description: "会话工作目录的层级浏览（文件可查看/编辑，实时刷新）。",
         path_hint: "",
         default_content: "",
-        capabilities: &EntityCapabilities::BUNDLE_FILE,
         view: VIEW_TREE,
     },
 ];
@@ -410,34 +385,29 @@ pub fn container_kinds_for(kind: &str) -> &'static [ContainerKindSpec] {
 
 // ==================== provider 注册表 ====================
 
-/// 实体类型（provider）注册清单 —— 宿主级单一真相源。
+/// 实体类型（provider）注册清单 —— 挂载点能力的**单一真相源**。
 ///
-/// 语义上是"后端主动注册有哪些实体 provider"：新插件接入统一实体协议时，
-/// 只需实现 [`EntityProvider`]、在插件 route 顶部接入 [`dispatch`]，并在此
-/// 登记一条 [`EntityProviderInfo`]——前端即可自动发现该类型（生成导航、
-/// 进入统一实体页），无需改动任何前端代码。
+/// 语义上是"后端主动注册有哪些实体 provider"：新插件只需实现 [`EntityProvider`]
+/// 并在此登记一条 [`EntityProviderInfo`]，VDFS 侧就自动多一个挂载点
+/// （`.vdfs/<kind>`）——导航标签 / 顺序 / 可新建类型 / 是否支持整包导入
+/// 全部由此派生，前端零改动（`entities/*` 协议已于 S11 下线）。
 ///
-/// `prefix` 为实体操作路径前缀（前端拼接 `${prefix}/entities/<op>`）；
-/// `supports_upload` 表示该类型在实体管理器内能否创建/删除（有无实体目录、
-/// dispatch 是否实现 upload/delete——session 为 false，因其走 SessionStore 且
-/// upload/delete 未实现）。
+/// - `supports_upload`：能否以「最小 manifest」新建（一次 `vdfs/write { create }`）；
+/// - `supports_import`：能否**整包导入**（zip）。目录自管的类型（agent bundle）
+///   同样可为 true——此时由 provider 重写 [`EntityProvider::import_zip`]，
+///   而不必先有实体目录。
+///
+/// [`EntityProvider::import_zip`]: EntityProvider::import_zip
 #[derive(Debug, Clone, Copy)]
 pub struct EntityProviderInfo {
-    /// 实体类型（kind）
+    /// 实体类型（kind，同时是挂载名）
     pub kind: &'static str,
-    /// 提供方显示名（路径 `[provider]/[id].[kind]`）
-    pub provider_name: &'static str,
-    /// 实体操作路径前缀
-    pub prefix: &'static str,
-    pub capabilities: &'static EntityCapabilities,
     pub order: i32,
     /// 展示标签
     pub label: &'static str,
     pub supports_upload: bool,
-    /// 列表简洁模式：仅显示类型图标 + 标题
-    pub compact_list: bool,
-    /// 列表项是否显示运行状态图示（如设置分区为 false，不显示状态点）
-    pub status_indicator: bool,
+    /// 是否支持整包导入（zip）
+    pub supports_import: bool,
     /// 容器子实体声明（空 = 条目不是容器）
     pub container_kinds: &'static [ContainerKindSpec],
 }
@@ -457,88 +427,67 @@ pub fn nav_meta_of(kind: &str) -> Option<(&'static str, i32)> {
 }
 
 /// 全部已注册实体 provider（编译期收起当前六类，顺序即展示顺序）
-/// 默认顺序：会话 / 模型 / 智能体 / 技能 / MCP / 设置。
-/// 可通过配置 `symbio.provider_order` 覆盖（见 [`providers_response_with_overrides`]）。
+///
+/// 顺序：会话 / 模型 / 智能体 / 技能 / MCP / 设置。顺序**只在注册表里登记**
+/// （`order` 字段）——VDFS 挂载点与左栏导航都由此派生，故无需、也不再支持
+/// 用配置项覆盖（原 `symbio.provider_order` 已随 `entities/providers` 下线）。
 pub fn provider_registry() -> &'static [EntityProviderInfo] {
     const REG: &[EntityProviderInfo] = &[
         EntityProviderInfo {
             kind: ENTITY_SESSION,
-            provider_name: ENTITY_SESSION,
-            prefix: "worker/session",
-            capabilities: &EntityCapabilities::SESSION,
             order: 1,
             label: "会话",
             // session 走 SessionStore（非 EntityStore）：zip/manifest 上传不适用；
-            // 删除经重写 delete_item 钩子接入统一协议；创建走前端专属 editor 引导。
+            // 创建走前端专属 editor 引导，删除经重写的 delete_item 钩子。
             // 条目是容器：内部托管子会话（SESSION_CONTAINER_KINDS，path_hint 空
             // = 不可用户创建，仅查看/删除）
             supports_upload: false,
-            compact_list: false,
-            status_indicator: true,
+            supports_import: false,
             container_kinds: SESSION_CONTAINER_KINDS,
         },
         EntityProviderInfo {
             kind: ENTITY_MODEL,
-            provider_name: ENTITY_MODEL,
-            prefix: "worker/model",
-            capabilities: &EntityCapabilities::MODEL,
             order: 2,
             label: "模型",
             supports_upload: true,
-            compact_list: false,
-            status_indicator: true,
+            supports_import: false,
             container_kinds: &[],
         },
         EntityProviderInfo {
             kind: ENTITY_AGENT,
-            provider_name: ENTITY_AGENT,
-            prefix: "agent",
-            capabilities: &EntityCapabilities::AGENT,
             order: 3,
             label: "智能体",
-            supports_upload: true,
-            compact_list: false,
-            status_indicator: true,
+            // agent 只能整包导入（bundle 是整目录能力包，没有「先建空壳」的形态）；
+            // 导入由 provider 重写的 import_zip 走到 BundleStore
+            supports_upload: false,
+            supports_import: true,
             // agent 条目（OAB bundle）是容器：内部托管 prompt / skill / mcp 三类文件级子实体
             container_kinds: AGENT_CONTAINER_KINDS,
         },
         EntityProviderInfo {
             kind: ENTITY_SKILL,
-            provider_name: ENTITY_SKILL,
-            prefix: "skill",
-            capabilities: &EntityCapabilities::SKILL,
             order: 4,
             label: "技能",
             supports_upload: true,
-            compact_list: false,
-            status_indicator: true,
+            supports_import: true,
             container_kinds: &[],
         },
         EntityProviderInfo {
             kind: ENTITY_MCP,
-            provider_name: ENTITY_MCP,
-            prefix: "mcp",
-            capabilities: &EntityCapabilities::MCP,
             order: 5,
             label: "MCP",
             supports_upload: true,
-            compact_list: false,
-            status_indicator: true,
+            supports_import: true,
             container_kinds: &[],
         },
         EntityProviderInfo {
             kind: ENTITY_SETTING,
-            provider_name: ENTITY_SETTING,
-            prefix: "setting",
-            capabilities: &EntityCapabilities::SETTING,
             order: 6,
             label: "设置",
-            // 设置分区清单固定，不可在实体管理器内新建/删除；
-            // 各分区保存由前端 editor 自持通道完成（config/set / appearance store）。
-            // compact_list + 无状态：列表仅显图标 + 标题，不显示状态点
+            // 设置分区清单固定，不可新建/删除；
+            // 各分区保存由前端 editor 自持通道完成（config/set / appearance store）
             supports_upload: false,
-            compact_list: true,
-            status_indicator: false,
+            supports_import: false,
             container_kinds: &[],
         },
     ];

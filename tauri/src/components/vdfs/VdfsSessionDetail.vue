@@ -51,18 +51,11 @@ const item = computed<EntitySummary>(() => ({
   updated_at: props.node.updated_at,
 }))
 
-const capabilities = computed<EntityCapabilities>(() => {
-  const access = vdfsAccessOf(props.node)
-  return {
-    zip_upload: false,
-    independent_form: true,
-    realtime_status: true,
-    refreshable: true,
-    mutable: access.write,
-    test_connection: false,
-    read_only: !access.write,
-  }
-})
+/** 访问位 → 能力（VDFS 里能力就是访问位，不存在类型特判） */
+const capabilities = computed<EntityCapabilities>(() => ({
+  mutable: vdfsAccessOf(props.node).write,
+  test_connection: false,
+}))
 
 /**
  * 机制动作注入（在 ChatMainPanel 头部与自身按钮并排渲染）。

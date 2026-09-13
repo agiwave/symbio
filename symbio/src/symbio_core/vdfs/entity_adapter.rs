@@ -133,12 +133,12 @@ impl EntityVdfsAdapter {
 
     /// 是否支持**整包导入**（zip）。
     ///
-    /// 能力由注册表声明（`capabilities.zip_upload`）——与 `supports_upload`
-    /// 同为单一真相源，避免「声明了入口但导入必然失败」。实际导入由
+    /// 能力由注册表声明（`supports_import`）——与 `supports_upload` 同为单一
+    /// 真相源，避免「声明了入口但导入必然失败」。实际导入由
     /// [`EntityProvider::import_zip`] 承接，故**目录自管的类型**（agent bundle）
     /// 也能有自己的导入实现。
     fn importable(&self) -> bool {
-        self.info().is_some_and(|i| i.capabilities.zip_upload)
+        self.info().is_some_and(|i| i.supports_import)
     }
 
     fn node_access(&self) -> VdfsAccess {
@@ -792,8 +792,11 @@ mod tests {
             .iter()
             .find(|p| p.kind == ENTITY_AGENT)
             .expect("注册表应包含 agent");
-        assert!(info.supports_upload, "前提：注册表声明 agent 可上传");
-        assert!(!a.writable(), "但目录自管 → 无「最小 manifest」可落");
+        assert!(
+            info.supports_import && !info.supports_upload,
+            "前提：agent 只能整包导入（bundle 无「最小 manifest」形态）"
+        );
+        assert!(!a.writable(), "目录自管 → 无「最小 manifest」可落");
         let types = a.root_new_types();
         assert_eq!(types.len(), 1, "目录自管 ⇒ 只有整包导入一个入口");
         assert_eq!(types[0].ext, VFDS_EXT_ZIP);

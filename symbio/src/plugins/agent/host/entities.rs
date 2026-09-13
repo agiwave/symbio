@@ -122,6 +122,16 @@ impl EntityProvider for AgentPlugin {
             .collect())
     }
 
+    /// 删除 bundle（VDFS `vdfs/delete` → `entity_delete` 走这里）。
+    ///
+    /// bundle 不是 EntityStore 型，默认的「按分类删目录」不适用，故自管删除
+    /// （原 `bundle/delete` 的落盘逻辑，随 S12 收敛到实体钩子里）。
+    async fn delete_item(&self, ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
+        let store = Self::store_of(ctx);
+        store.delete(id).map_err(PluginError::ValidationError)?;
+        Ok(())
+    }
+
     /// 整包导入：zip → [`BundleStore::import`]（id 取自包内 manifest，故忽略建议名）。
     ///
     /// 这是 bundle **唯一的创建方式**——bundle 是整目录能力包，没有「先建空壳
@@ -144,11 +154,12 @@ impl EntityProvider for AgentPlugin {
         })
     }
 
-    // ==================== 容器子实体（统一协议 container 语义） ====================
+    // ==================== 容器子实体（bundle 内部文件） ====================
     //
-    // bundle 条目即容器：内部 prompts / skills / mcps 经同一套 entities/* 协议
-    // 访问（payload.container = bundle id），复用 BundleStore 的沙箱化方法
-    // （路径白名单 classify_entity_path + absolutize 双重闸门）。
+    // bundle 条目即容器：内部 prompts / skills / mcps 由 `EntityVdfsAdapter` 以
+    // `<bundle id>/<子类别标签>/<相对路径>` 寻址后直调下面四个钩子（不经协议），
+    // 实现复用 BundleStore 的沙箱化方法（路径白名单 classify_entity_path +
+    // absolutize 双重闸门）。
 
     async fn list_container_items(
         &self,

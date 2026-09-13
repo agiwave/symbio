@@ -12,8 +12,9 @@
   - item 为 null（机制"新建"态）：新建会话引导——输入区与现有会话完全一致
     （ChatInputArea + ChatOptionBar 草稿态：目录/Agent/模型/模式/风险等级/心跳
     均可选，由级联选项机制下发，暂存于机制内部的 metadata 缓冲，发送首条消息时
-    经 createSession(patch) 一并写入 metadata 落库）（capabilities.independent_form
-    + kind 级 editor 注册 → 机制新建按钮自动可用；空列表时页面自动进入此态）。
+    经 createSession(patch) 一并写入 metadata 落库）（kind 级 editor 注册在
+    `registry/entityTypes` → 该形态由 VDFS 的 ext 分发命中；空列表时页面
+    自动进入此态）。
 
   选中同步：机制选中（:key 重挂载）是唯一真相，watch item.id → store.selectSession。
   创建经 emit('created') 回到机制页面层。机制动作（删除/容器入口等）经

@@ -139,13 +139,8 @@ const item = computed<EntitySummary>(() => ({
 
 /** 访问位 → 能力（VDFS 里能力就是访问位，不存在类型特判） */
 const capabilities = computed<EntityCapabilities>(() => ({
-  zip_upload: false,
-  independent_form: true,
-  realtime_status: false,
-  refreshable: true,
   mutable: access.value.write,
   test_connection: testable.value,
-  read_only: !access.value.write,
 }))
 
 /**

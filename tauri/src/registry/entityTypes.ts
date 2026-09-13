@@ -14,13 +14,14 @@
  *   不同实体项按 `item.config_type`（后端 extra 字段）进入不同 editor，
  *   类似文件系统"不同扩展名打开不同编辑器"（如 setting 的各设置分区）。
  *
- * ## 新增一种实体类型的两步扩展位
+ * ## 新增一种资源类型的两步扩展位
  *
- * 1. 后端：实现 EntityProvider + 插件 route 接 dispatch + `provider_registry()`
- *    登记一条——前端即可自动发现（生成导航、进入统一实体页）；
+ * 1. 后端：实现 `EntityProvider` + 在 `provider_registry()` 登记一条（或直接实现
+ *    `VdfsProvider` 并挂载）——`.vdfs/<kind>` 自动多一个挂载点，导航与能力
+ *    随之生成（`entities/*` 协议已于 S11 下线）；
  * 2. 前端（可选）：`registerEntityEditor(...)` 与
- *    `registerEntityIcon(...)`——未注册的走通用兜底
- *    （zip 面板 / JSON 编辑器 / 只读详情）。
+ *    `registerEntityIcon(...)`——未注册的走 VDFS 机制级兜底渲染器
+ *    （`registry/vdfsRenderers`：表单 / 文本 / 只读）。
  */
 
 import { defineComponent, h, markRaw, shallowReactive, type Component } from 'vue'
@@ -120,7 +121,7 @@ export function getEntityIconFor(target: EntityRegistryTarget): Component | unde
 // （definition-driven detail）。
 
 // Session（会话）：kind 级注册——详情 = 聊天工作区（ChatMainPanel）；
-// capabilities.independent_form 为 true 且本注册存在 → 统一实体页「新建」按钮
+// 本注册存在 → 该 kind 用专属 editor 渲染（VDFS 的 ext 分发之外的前端补充）
 // 进入该 editor 的引导态（新建会话），列表/删除由机制承担（delete_item 钩子）。
 registerEntityEditor('session', markRaw(Session))
 

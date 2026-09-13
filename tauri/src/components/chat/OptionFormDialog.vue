@@ -48,15 +48,10 @@ const emit = defineEmits<{
   save: [values: Record<string, unknown>]
 }>()
 
-/** 选项表单无实体语义：能力开关全关（不渲染 upload/容器等机制动作） */
+/** 选项表单无实体语义：能力全关（不渲染删除等机制动作） */
 const EMPTY_CAPABILITIES: EntityCapabilities = {
-  zip_upload: false,
-  independent_form: false,
-  realtime_status: false,
-  refreshable: false,
   mutable: false,
   test_connection: false,
-  read_only: true,
 }
 
 /**

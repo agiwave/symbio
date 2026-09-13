@@ -68,7 +68,7 @@ interface EntityCardProps {
   tags?: Tag[]
   /** 类型图标组件（实体注册表下发，如设置分区图标） */
   icon?: Component
-  /** 是否显示状态点（后端 status_indicator 控制；无状态列表为 false） */
+  /** 是否显示状态点（由节点 status 决定；无状态的类型由调用方关闭） */
   showStatus?: boolean
 }
 
