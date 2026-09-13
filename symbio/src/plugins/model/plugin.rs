@@ -517,6 +517,36 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
         Ok(v)
     }
 
+    /// VDFS 新建（`write { create }`）的最小配置：先落一份「可用的默认 Provider」，
+    /// 用户随后在详情里填 key / 调模型。默认字段取预设首项——与新建表单「选中
+    /// 第一个预设」的预填**同源**，两条链路创建出的初始配置因此一致。
+    fn new_entity_manifest(&self, id: &str, title: &str) -> Value {
+        let (provider, api_base, model, api_protocol) = super::detail::default_provider_fields();
+        let mut cfg = ModelProviderConfig {
+            id: id.to_string(),
+            name: if title.is_empty() {
+                id.to_string()
+            } else {
+                title.to_string()
+            },
+            provider: provider.to_string(),
+            api_base: api_base.to_string(),
+            model: model.to_string(),
+            ..Default::default()
+        };
+        if !api_protocol.is_empty() {
+            cfg.api_protocol = api_protocol.to_string();
+        }
+        let mut v =
+            serde_json::to_value(&cfg).unwrap_or_else(|_| json!({ "id": id, "name": title }));
+        // 新建态用户尚未填写 key / base，跳过连接校验。
+        // `validate_manifest` 消费该标记后**丢弃**（不落盘）。
+        if let serde_json::Value::Object(ref mut m) = v {
+            let _ = m.insert("skip_validation".to_string(), Value::Bool(true));
+        }
+        v
+    }
+
     /// 写盘后同步内存注册表（读回磁盘内容 + 默认 provider 兜底 + 触发父级持久化）
     async fn on_uploaded(&self, ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
         let store = create_object::<dyn crate::symbio_core::providers::StorageService>(
@@ -682,6 +712,18 @@ impl Plugin for ModelPlugin {
         }
 
         if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+            // VDFS 挂载点：把本插件的实体能力适配为一份 VDFS 资源。
+            // 新增实体类型时 VDFS 侧零改动——适配器复用 list/read/write/delete
+            // 与注册表元数据（见 `symbio_core::vdfs::EntityVdfsAdapter`）。
+            let me: Arc<dyn crate::symbio_core::entities::EntityProvider> = self.clone();
+            let vdfs_provider = Arc::new(crate::symbio_core::vdfs::EntityVdfsAdapter::new(
+                crate::symbio_core::entities::ENTITY_MODEL,
+                me,
+            ));
+            tool_visitor
+                .register_vdfs_provider(PLUGIN_MODEL, vdfs_provider)
+                .await;
+
             let providers = self.providers.read().await;
             // 解析唯一生效 Provider：请求显式指定 > 默认 > 首个启用
             let requested = ctx

@@ -265,6 +265,20 @@ impl crate::symbio_core::entities::EntityProvider for McpPlugin {
             .map_err(|e| PluginError::InternalError(format!("序列化 server.json 失败: {e}")))
     }
 
+    /// VDFS 新建（`write { create }`）的最小清单。
+    ///
+    /// 校验要求 stdio 有 `command`、http/sse 有 `url`；这里给一份 stdio 骨架，
+    /// 用户随后在详情里补命令参数，或改用其它传输类型。
+    fn new_entity_manifest(&self, id: &str, _title: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "name": id,
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y"],
+        })
+    }
+
     /// 从 server.json 解析摘要：enabled → active/disabled、command/url、transport
     async fn summarize(
         &self,
@@ -408,6 +422,17 @@ impl Plugin for McpPlugin {
         let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) else {
             return Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()));
         };
+
+        // VDFS 挂载点：把本插件的实体能力适配为一份 VDFS 资源（与实体机制
+        // 共用同一份 list/read/write/delete 实现，见 `vdfs::EntityVdfsAdapter`）
+        let me: Arc<dyn crate::symbio_core::entities::EntityProvider> = self.clone();
+        let vdfs_provider = Arc::new(crate::symbio_core::vdfs::EntityVdfsAdapter::new(
+            crate::symbio_core::entities::ENTITY_MCP,
+            me,
+        ));
+        tool_visitor
+            .register_vdfs_provider(PLUGIN_MCP, vdfs_provider)
+            .await;
 
         let cfg = self.config.read().await.clone();
 

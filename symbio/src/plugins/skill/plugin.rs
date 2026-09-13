@@ -158,6 +158,18 @@ impl crate::symbio_core::entities::EntityProvider for SkillPlugin {
         Ok(serde_json::Value::String(md))
     }
 
+    /// VDFS 新建（`write { create }`）的最小清单。
+    ///
+    /// `manifest_to_skill_md` 要求 `name` 与目录名（id）一致、`description`
+    /// 至少 10 字符，故这里给出同名的骨架描述，用户随后在详情里完善。
+    fn new_entity_manifest(&self, id: &str, _title: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "name": id,
+            "description": format!("{id}：请填写该技能的用途与使用时机（至少 10 字）"),
+        })
+    }
+
     /// 从 SKILL.md 解析摘要：优先 YAML frontmatter（name / description），
     /// 无 frontmatter 时回落到旧的标题/Description 行解析
     async fn summarize(
@@ -356,6 +368,20 @@ impl Plugin for SkillPlugin {
                     let skill_tool = Arc::new(SkillExecuteTool::new(skills));
                     tool_visitor.register(skill_tool).await;
                 }
+            }
+
+            // VDFS 挂载点：把本插件的实体能力适配为一份 VDFS 资源（与实体机制
+            // 共用同一份 list/read/write/delete 实现，见 `vdfs::EntityVdfsAdapter`）。
+            // 无条件注册——技能清单为空也是合法的挂载点。
+            if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+                let me: Arc<dyn crate::symbio_core::entities::EntityProvider> = self.clone();
+                let vdfs_provider = Arc::new(crate::symbio_core::vdfs::EntityVdfsAdapter::new(
+                    crate::symbio_core::entities::ENTITY_SKILL,
+                    me,
+                ));
+                tool_visitor
+                    .register_vdfs_provider(PLUGIN_SKILL, vdfs_provider)
+                    .await;
             }
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

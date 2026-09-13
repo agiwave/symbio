@@ -339,6 +339,24 @@ fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
     }
 }
 
+/// 新建 Provider 的默认配置字段（VDFS `write { create }` 用）。
+///
+/// 取**预设首项**——与新建表单「选中第一个预设」的预填**同源**，因此实体机制
+/// 与 VDFS 两条链路创建出的初始配置一致。返回 `(供应商, 端点, 模型, 协议)`。
+pub fn default_provider_fields() -> (&'static str, &'static str, &'static str, &'static str) {
+    let (provider, _label, base, models, protocols) =
+        PRESETS
+            .first()
+            .copied()
+            .unwrap_or(("openai", "OpenAI", "", &[], &[]));
+    (
+        provider,
+        base,
+        models.first().copied().unwrap_or(""),
+        protocols.first().copied().unwrap_or(""),
+    )
+}
+
 /// Model 详情页定义（每次构建为纯静态结构，开销可忽略）
 pub fn model_detail_definition() -> DetailDefinition {
     let provider_options: Vec<DetailOption> = PRESETS.iter().map(|t| opt(t.0, t.1)).collect();

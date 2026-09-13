@@ -825,7 +825,11 @@ fn now_ms() -> i64 {
 #[async_trait]
 impl vdfs::VdfsProvider for SessionPlugin {
     fn label(&self) -> Option<&str> {
-        Some("会话")
+        // 标签 / 顺序取自实体注册表（单一真相源），使 `.vdfs` 左栏与实体页恒等
+        Some(
+            crate::symbio_core::entities::nav_meta_of(crate::symbio_core::entities::ENTITY_SESSION)
+                .map_or("会话", |(label, _)| label),
+        )
     }
 
     fn description(&self) -> Option<&str> {
@@ -833,7 +837,8 @@ impl vdfs::VdfsProvider for SessionPlugin {
     }
 
     fn order(&self) -> i32 {
-        10
+        crate::symbio_core::entities::nav_meta_of(crate::symbio_core::entities::ENTITY_SESSION)
+            .map_or(1, |(_, order)| order)
     }
 
     fn icon(&self) -> Option<&str> {

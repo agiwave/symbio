@@ -691,7 +691,11 @@ impl SettingPlugin {
 #[async_trait::async_trait]
 impl VdfsProvider for SettingPlugin {
     fn label(&self) -> Option<&str> {
-        Some("设置")
+        // 标签 / 顺序取自实体注册表（单一真相源），使 `.vdfs` 左栏与实体页恒等
+        Some(
+            crate::symbio_core::entities::nav_meta_of(crate::symbio_core::entities::ENTITY_SETTING)
+                .map_or("设置", |(label, _)| label),
+        )
     }
 
     fn description(&self) -> Option<&str> {
@@ -699,7 +703,8 @@ impl VdfsProvider for SettingPlugin {
     }
 
     fn order(&self) -> i32 {
-        60
+        crate::symbio_core::entities::nav_meta_of(crate::symbio_core::entities::ENTITY_SETTING)
+            .map_or(6, |(_, order)| order)
     }
 
     fn icon(&self) -> Option<&str> {

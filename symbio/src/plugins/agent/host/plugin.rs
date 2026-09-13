@@ -236,6 +236,21 @@ impl Plugin for AgentPlugin {
             return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
         };
 
+        // ── VDFS 挂载点：agent 以**只读**挂载 ──
+        // bundle 由 BundleStore 自管目录（工作区级 + 全局级双层），不满足
+        // `entity_write` 的 EntityStore 前提，故适配器据 `writable()` 自动降级为
+        // 只读：列表与详情照常可用，新建仍走实体页的 zip 上传流程。
+        {
+            let me: Arc<dyn crate::symbio_core::entities::EntityProvider> = self.clone();
+            let vdfs_provider = Arc::new(crate::symbio_core::vdfs::EntityVdfsAdapter::new(
+                crate::symbio_core::entities::ENTITY_AGENT,
+                me,
+            ));
+            tool_visitor
+                .register_vdfs_provider(PLUGIN_AGENT, vdfs_provider)
+                .await;
+        }
+
         // ── agent_run：无条件注册 ──
         let store = BundleStore::new(workdir.as_deref());
         tool_visitor
