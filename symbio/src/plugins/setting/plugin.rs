@@ -497,8 +497,16 @@ impl crate::symbio_core::entities::EntityProvider for SettingPlugin {
 // provider 自己完成数据操作与**校验**——`write` 在把数据转给目标插件的
 // `config/set` 之前逐字段校验，失败返回字段级错误，目标插件永远收到合法数据。
 
-/// 分区节点：定义驱动的表单呈现（`ext = form`），呈现描述经 `schema` 透传
-/// （VDFS 不解释其内容，前端按 `ext` 选渲染器后自行解析）。
+/// 分区节点。
+///
+/// `ext` 是**详情渲染器的唯一分发键**，因此这里按分区的呈现方式声明：
+///
+/// - **定义驱动分区**（有 `schema`：session / local / web / gateway）→ `ext = form`，
+///   呈现描述经 `schema` 透传（VDFS 不解释其内容，前端按 `ext` 选通用表单渲染器）；
+/// - **前端自持分区**（无 `schema`：appearance / about）→ `ext = 分区 id`，
+///   由前端映射到各自的专属渲染器（外观设置 / 关于）。
+///
+/// 两种情形都不需要前端硬编码分区清单：前端只持有 `ext → 渲染器` 的纯 UI 映射。
 fn section_node(s: &SectionSpec) -> VdfsNode {
     let writable = s.prefix.is_some();
     let access = if writable {
@@ -506,10 +514,15 @@ fn section_node(s: &SectionSpec) -> VdfsNode {
     } else {
         VdfsAccess::READ
     };
+    let definition = section_definition(s.id);
     let mut n = VdfsNode::file(s.id, s.label, access);
     n.kind = crate::symbio_core::entities::ENTITY_SETTING.to_string();
-    n.ext = Some(vdfs::VFDS_EXT_FORM.to_string());
-    n.schema = section_definition(s.id).and_then(|def| serde_json::to_value(&def).ok());
+    n.ext = Some(if definition.is_some() {
+        vdfs::VFDS_EXT_FORM.to_string()
+    } else {
+        s.id.to_string()
+    });
+    n.schema = definition.and_then(|def| serde_json::to_value(&def).ok());
     if !writable {
         n.description = Some("该分区数据由前端状态自持，VDFS 侧只读".to_string());
     }
@@ -851,7 +864,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn vdfs_list_returns_fixed_sections_as_form_docs() {
+    async fn vdfs_list_declares_ext_by_renderer_identity() {
         let p = SettingPlugin::default();
         let items = p.list(&vctx(), "").await.unwrap();
         assert_eq!(
@@ -859,16 +872,23 @@ mod tests {
             vec!["appearance", "session", "local", "web", "gateway", "about"]
         );
 
-        let session = items.iter().find(|n| n.name == "session").unwrap();
-        // 前端据 ext 选渲染器（form）；呈现描述经 schema 透传
-        assert_eq!(session.effective_ext().as_deref(), Some("form"));
-        assert_eq!(session.access.flags(), "rw");
-        assert!(session.schema.is_some(), "可写分区应携带表单定义");
-        assert!(!session.is_dir(), "分区是文档而非目录");
+        // 定义驱动分区：ext = form（前端据 ext 选通用表单渲染器）；
+        // 呈现描述经 schema 透传
+        for id in ["session", "local", "web", "gateway"] {
+            let n = items.iter().find(|n| n.name == id).unwrap();
+            assert_eq!(n.effective_ext().as_deref(), Some("form"), "{id} 应为 form");
+            assert_eq!(n.access.flags(), "rw", "{id} 可写");
+            assert!(n.schema.is_some(), "{id} 应携带表单定义");
+            assert!(!n.is_dir(), "分区是文档而非目录");
+        }
 
-        let appearance = items.iter().find(|n| n.name == "appearance").unwrap();
-        assert_eq!(appearance.access.flags(), "r", "前端自持分区只读");
-        assert!(appearance.schema.is_none());
+        // 前端自持分区：ext = 分区 id（前端映射到专属渲染器），无 schema、只读
+        for id in ["appearance", "about"] {
+            let n = items.iter().find(|n| n.name == id).unwrap();
+            assert_eq!(n.effective_ext().as_deref(), Some(id), "{id} 以 id 为 ext");
+            assert_eq!(n.access.flags(), "r", "{id} 只读");
+            assert!(n.schema.is_none(), "{id} 无表单定义");
+        }
 
         // 叶子节点无子项
         assert!(p.list(&vctx(), "session").await.is_err());
