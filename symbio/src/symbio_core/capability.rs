@@ -38,6 +38,8 @@ pub enum CapabilityCategory {
     SystemOperation,
     /// MCP 工具：来自外部 Model Context Protocol server
     Mcp,
+    /// 资源管理：VDFS 虚拟文件系统操作（read / write / list / tree / stat）
+    Resource,
     /// 未分类：兜底
     #[default]
     Other,
@@ -60,6 +62,7 @@ impl CapabilityCategory {
             Self::Network => "网络搜索",
             Self::SystemOperation => "系统操作",
             Self::Mcp => "MCP 工具",
+            Self::Resource => "资源管理",
             Self::Other => "其他",
         }
     }
@@ -225,6 +228,60 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
 
     /// 列出已注册的系统提示词（(name, prompt)，保注册顺序）
     async fn list_system_prompts(&self) -> Vec<(String, String)>;
+
+    // ==================== VDFS provider（虚拟文件系统挂载） ====================
+
+    /// 注册一个 VDFS provider。
+    ///
+    /// `mount` 是**使用方选定的挂载名**（虚拟根 `/` 下的一级目录名，宿主机内唯一）——
+    /// 约定用插件名（`PLUGIN_*` 常量），因为插件名天然唯一。provider 自身**不知道**
+    /// 也不提供这个概念（见 `symbio_core::vdfs_provider` 模块文档）。
+    ///
+    /// 与工具 / 模型服务 / 系统提示词**共用同一次 `traverse` 广播**：插件在
+    /// `TRAVERSE_AVAILABLE_TOOLS` 分支里注册工具的同时顺带注册 provider，
+    /// 会话链路（LLM 工具调用）与前端链路因此拿到同一份集合（含同一批挂载名）。
+    ///
+    /// 默认 no-op —— 不提供资源的实现方无需关心。
+    async fn register_vdfs_provider(
+        &self,
+        _mount: &str,
+        _provider: Arc<dyn crate::symbio_core::vdfs::VdfsProvider>,
+    ) {
+    }
+
+    /// 列出已注册的 VDFS provider：`(挂载名, 实现)`，按 `order` 升序稳定排序
+    /// （语义与 [`Self::list_system_prompts`] 的 `(name, prompt)` 一致）
+    async fn list_vdfs_providers(
+        &self,
+    ) -> Vec<(String, Arc<dyn crate::symbio_core::vdfs::VdfsProvider>)> {
+        Vec::new()
+    }
+
+    /// 按挂载名查询 VDFS provider
+    async fn get_vdfs_provider(
+        &self,
+        _mount: &str,
+    ) -> Option<Arc<dyn crate::symbio_core::vdfs::VdfsProvider>> {
+        None
+    }
+
+    /// 注册 VDFS **根** provider（单槽，重复注册覆盖）。
+    ///
+    /// 虚拟根 `/` 归**组合容器**所有：`composite` 把自己的组合视图注册于此
+    /// （见 `plugins/composite/vdfs.rs`）。访问层（vdfs 插件）只取这个根再转发，
+    /// 因此**拓扑知识不在访问层**——它只认「根 + 全路径」。
+    ///
+    /// 与工具 / 模型服务 / 系统提示词**共用同一次 `traverse` 广播**：容器在自己的
+    /// `traverse` 分支里注册根，会话链路与前端链路因此拿到同一个根。
+    ///
+    /// 默认 no-op —— 不是容器的实现方无需关心。
+    async fn register_vdfs_root(&self, _provider: Arc<dyn crate::symbio_core::vdfs::VdfsProvider>) {
+    }
+
+    /// 取 VDFS 根 provider；无容器注册时为 `None`（等价于「系统里没有资源」）
+    async fn get_vdfs_root(&self) -> Option<Arc<dyn crate::symbio_core::vdfs::VdfsProvider>> {
+        None
+    }
 }
 
 #[cfg(test)]

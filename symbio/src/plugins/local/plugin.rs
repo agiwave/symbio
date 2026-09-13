@@ -3,10 +3,8 @@
 pub use super::local_config::LocalConfig;
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::{
-    codebase_search::CodebaseSearchTool, content_search::ContentSearchTool, dir_list::DirListTool,
-    file_delete::FileDeleteTool, file_edit::FileEditTool, file_read::FileReadTool,
-    file_search::FileSearchTool, file_write::FileWriteTool, shell::ShellTool,
-    todo_write::TodoWriteTool,
+    codebase_search::CodebaseSearchTool, content_search::ContentSearchTool, shell::ShellTool,
+    todo_write::TodoWriteTool, vdfs::LocalVdfs,
 };
 use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::schemas::session::chat_message::{
@@ -14,9 +12,9 @@ use crate::symbio_core::schemas::session::chat_message::{
 };
 use crate::symbio_core::schemas::session::session_chat_response;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginChannel, PluginError, PluginFrame, PluginMeta, PluginPayload, CONFIG_GET, CONFIG_SET,
-    PLUGIN_LOCAL,
+    Capability, CapabilityMeta, DynVdfsProvider, InvokeRequest, InvokeRequestExt, InvokeResponse,
+    Plugin, PluginChannel, PluginError, PluginFrame, PluginMeta, PluginPayload, CONFIG_GET,
+    CONFIG_SET, PLUGIN_LOCAL,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -155,6 +153,8 @@ pub struct LocalPlugin {
     tool_impls: Arc<Vec<Arc<dyn Capability>>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
     security: Arc<SecurityPolicy>,
+    /// 本地文件树的 VDFS provider —— 注册为 `local` 挂载点（见 [`LocalVdfs`]）
+    vdfs: Arc<LocalVdfs>,
 }
 
 impl LocalPlugin {
@@ -174,35 +174,25 @@ impl LocalPlugin {
         let security = Arc::new(SecurityPolicy::default());
         let config_lock = Arc::new(RwLock::new(config));
 
-        let file_read = Arc::new(FileReadTool::new(Arc::clone(&security)));
-        let file_write = Arc::new(FileWriteTool::new(Arc::clone(&security)));
-        let file_edit = Arc::new(FileEditTool::new(Arc::clone(&security)));
         let shell = Arc::new(ShellTool::new(Arc::clone(&security)));
-        let file_search = Arc::new(FileSearchTool::new(Arc::clone(&security)));
         let content_search = Arc::new(ContentSearchTool::new(Arc::clone(&security)));
-        let dir_list = Arc::new(DirListTool::new(Arc::clone(&security)));
         let todo_write = Arc::new(TodoWriteTool::new(Arc::clone(&security)));
         let codebase_search = Arc::new(CodebaseSearchTool::new(Arc::clone(&security)));
-        let file_delete = Arc::new(FileDeleteTool::new(Arc::clone(&security)));
 
-        let tool_impls: Vec<Arc<dyn Capability>> = vec![
-            file_read,
-            file_edit,
-            file_write,
-            file_delete,
-            shell,
-            file_search,
-            content_search,
-            dir_list,
-            todo_write,
-            codebase_search,
-        ];
+        // 同一份安全策略既守卫工具，也守卫 VDFS provider —— 两条链路规则一致
+        let vdfs = Arc::new(LocalVdfs::new(Arc::clone(&security)));
+
+        // 文件编辑类能力（read/edit/write/delete/list/search）已迁入 VDFS，
+        // 由 `vdfs` 插件以 `vdfs_*` 工具统一暴露（见 plugins/vdfs），此处不再提供原生工具。
+        let tool_impls: Vec<Arc<dyn Capability>> =
+            vec![shell, content_search, todo_write, codebase_search];
 
         Self {
             config: config_lock,
             tool_impls: Arc::new(tool_impls),
             parent: Arc::new(RwLock::new(parent)),
             security,
+            vdfs,
         }
     }
 
@@ -308,6 +298,12 @@ impl Plugin for LocalPlugin {
                 let wrapped = Arc::new(SecureToolWrapper::new(tool.clone(), self.security.clone()));
                 tool_visitor.register(wrapped).await;
             }
+
+            // 与工具共用同一次能力广播：把本地文件树注册为 `local` 挂载点。
+            // 挂载名由**使用方**（此处即本插件）选定——约定用插件名，宿主内唯一；
+            // provider 自身不含此概念（见 `symbio_core::vdfs_provider` 模块文档）。
+            let me: DynVdfsProvider = self.vdfs.clone();
+            tool_visitor.register_vdfs_provider(PLUGIN_LOCAL, me).await;
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

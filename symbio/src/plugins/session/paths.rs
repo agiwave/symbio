@@ -21,10 +21,10 @@ pub const TRANSCRIPTS_SUBDIR: &str = "transcripts";
 ///
 /// L0（工具结果守卫）、L3（transcript 转存）的占位符都必须附带同一格式的
 /// 取回说明，保证模型在任意层级遇到存档占位符时都能用同一入口
-///（`local/file_read` + offset/limit 分段）取回全文。
+///（`vdfs_read` + offset/limit 分段）取回全文。
 /// 请求视图层的淡化（内容节点/工具结果）不写存档，原文恒在会话存储中，
 /// 无需取回指引。
-pub const RETRIEVAL_HINT: &str = "（取回：local/file_read 该路径，按 offset/limit 分段读取）";
+pub const RETRIEVAL_HINT: &str = "（取回：vdfs_read 该路径，按 offset/limit 分段读取）";
 
 /// 将 session_id 转换为安全的目录名。
 ///
@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn retrieval_hint_mentions_unified_entry() {
         assert!(!RETRIEVAL_HINT.is_empty());
-        assert!(RETRIEVAL_HINT.contains("local/file_read"));
+        assert!(RETRIEVAL_HINT.contains("vdfs_read"));
         assert!(RETRIEVAL_HINT.contains("offset/limit"));
     }
 

@@ -11,7 +11,11 @@ use tokio::sync::RwLock;
 
 use super::schemas::{setting_get, setting_list};
 use crate::symbio_core::schemas::entities::{
-    DetailAction, DetailDefinition, DetailField, DetailOption, DetailSection,
+    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
+};
+use crate::symbio_core::vdfs::{
+    self, DynVdfsProvider, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsFieldError,
+    VdfsNode, VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse,
 };
 use tracing::info;
 
@@ -137,26 +141,82 @@ impl Plugin for SettingPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
+        // 与工具共用同一次能力广播，把自己注册为一份 VDFS 资源。
+        // 挂载名由**使用方**（此处即本插件）选定：约定用插件名（`PLUGIN_SETTING`），
+        // 插件名在宿主内唯一，天然就是合格的挂载名。provider 自身不含此概念。
+        // 会话链路（LLM 工具）与前端链路因此拿到同一份 (挂载名, 实现) 集合。
+        if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+            let me: DynVdfsProvider = self.clone();
+            visitor.register_vdfs_provider(PLUGIN_SETTING, me).await;
+        }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
 
 crate::submit_object_creator!(PLUGIN_SETTING, SettingPlugin::build, dyn Plugin);
 
-// ==================== 统一实体协议接入 ====================
+// ==================== 设置分区清单（单一真相源） ====================
 
-/// 设置分区（固定清单）。`id` 同时作为前端 editor 的"扩展名"（config_type），
-/// 前端按 `setting:<config_type>` 复合键注入专属编辑表单。
-const SETTING_SECTIONS: [(&str, &str); 6] = [
-    ("appearance", "外观"),
-    ("session", "会话设置"),
-    ("local", "本地工具"),
-    ("web", "网络工具"),
-    ("gateway", "开放接口"),
-    ("about", "关于"),
+/// 设置分区（固定清单）——统一实体机制与 VDFS 挂载点**共用同一份声明**。
+///
+/// `id` 同时作为前端 editor 的"扩展名"（config_type）；`prefix` 是该分区配置
+/// 读写的目标插件前缀（`None` = 数据由前端状态自持 / 纯展示，VDFS 侧只读）。
+struct SectionSpec {
+    id: &'static str,
+    label: &'static str,
+    prefix: Option<&'static str>,
+}
+
+const SETTING_SECTIONS: [SectionSpec; 6] = [
+    SectionSpec {
+        id: "appearance",
+        label: "外观",
+        prefix: None,
+    },
+    SectionSpec {
+        id: "session",
+        label: "会话设置",
+        prefix: Some("session"),
+    },
+    SectionSpec {
+        id: "local",
+        label: "本地工具",
+        prefix: Some("local"),
+    },
+    SectionSpec {
+        id: "web",
+        label: "网络工具",
+        prefix: Some("web"),
+    },
+    SectionSpec {
+        id: "gateway",
+        label: "开放接口",
+        prefix: Some("gateway"),
+    },
+    SectionSpec {
+        id: "about",
+        label: "关于",
+        prefix: None,
+    },
 ];
+
+/// 按 id 取分区声明
+fn section_of(id: &str) -> Option<&'static SectionSpec> {
+    SETTING_SECTIONS.iter().find(|s| s.id == id)
+}
+
+/// 分区详情定义（`appearance` / `about` 无定义：前端状态自持 / 纯信息展示）
+fn section_definition(id: &str) -> Option<DetailDefinition> {
+    match id {
+        "session" => Some(session_detail_definition()),
+        "local" => Some(local_detail_definition()),
+        "web" => Some(web_detail_definition()),
+        "gateway" => Some(gateway_detail_definition()),
+        _ => None,
+    }
+}
 
 // ==================== 详情页定义（definition-driven detail） ====================
 //
@@ -406,14 +466,14 @@ impl crate::symbio_core::entities::EntityProvider for SettingPlugin {
     ) -> Result<Vec<crate::symbio_core::entities::EntitySummary>, PluginError> {
         Ok(SETTING_SECTIONS
             .iter()
-            .map(|(id, name)| {
+            .map(|s| {
                 let mut it = crate::symbio_core::entities::EntitySummary::new(
                     crate::symbio_core::entities::ENTITY_SETTING,
-                    *id,
-                    *name,
+                    s.id,
+                    s.label,
                 );
                 if let serde_json::Value::Object(ref mut m) = it.extra {
-                    let _ = m.insert("config_type".to_string(), serde_json::json!(id));
+                    let _ = m.insert("config_type".to_string(), serde_json::json!(s.id));
                 }
                 it
             })
@@ -427,13 +487,293 @@ impl crate::symbio_core::entities::EntityProvider for SettingPlugin {
         _ctx: &Arc<dyn InvokeRequest>,
         id: &str,
     ) -> Option<DetailDefinition> {
-        match id {
-            "session" => Some(session_detail_definition()),
-            "local" => Some(local_detail_definition()),
-            "web" => Some(web_detail_definition()),
-            "gateway" => Some(gateway_detail_definition()),
-            _ => None,
+        section_definition(id)
+    }
+}
+
+// ==================== VDFS 挂载点（/setting） ====================
+//
+// 设置模块是 VDFS 的**首个原生 provider**，示范要点五：
+// provider 自己完成数据操作与**校验**——`write` 在把数据转给目标插件的
+// `config/set` 之前逐字段校验，失败返回字段级错误，目标插件永远收到合法数据。
+
+/// 分区节点：定义驱动的表单呈现（`ext = form`），呈现描述经 `schema` 透传
+/// （VDFS 不解释其内容，前端按 `ext` 选渲染器后自行解析）。
+fn section_node(s: &SectionSpec) -> VdfsNode {
+    let writable = s.prefix.is_some();
+    let access = if writable {
+        VdfsAccess::READ_WRITE
+    } else {
+        VdfsAccess::READ
+    };
+    let mut n = VdfsNode::file(s.id, s.label, access);
+    n.kind = crate::symbio_core::entities::ENTITY_SETTING.to_string();
+    n.ext = Some(vdfs::VFDS_EXT_FORM.to_string());
+    n.schema = section_definition(s.id).and_then(|def| serde_json::to_value(&def).ok());
+    if !writable {
+        n.description = Some("该分区数据由前端状态自持，VDFS 侧只读".to_string());
+    }
+    n
+}
+
+/// 空值判定（`null` / 空白字符串视为未填）
+fn is_blank(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => true,
+        serde_json::Value::String(s) => s.trim().is_empty(),
+        _ => false,
+    }
+}
+
+/// 条件求值（与前端 DetailForm 的 `visible_when` 语义一致）
+fn condition_holds(c: &DetailCondition, value: &serde_json::Value) -> bool {
+    let cur = value.get(&c.key);
+    if !c.all.iter().all(|x| condition_holds(x, value)) {
+        return false;
+    }
+    if let Some(eq) = &c.equals {
+        if cur != Some(eq) {
+            return false;
         }
+    }
+    if let Some(ne) = &c.not_equals {
+        if cur == Some(ne) {
+            return false;
+        }
+    }
+    if let Some(t) = c.truthy {
+        if cur.and_then(serde_json::Value::as_bool).unwrap_or(false) != t {
+            return false;
+        }
+    }
+    true
+}
+
+/// 单字段类型 / 范围校验
+fn field_error(f: &DetailField, v: &serde_json::Value) -> Option<String> {
+    match f.widget.as_str() {
+        "number" => {
+            let Some(n) = v.as_f64() else {
+                return Some("必须是数字".to_string());
+            };
+            if let Some(min) = f.min {
+                if n < min {
+                    return Some(format!("不能小于 {min}"));
+                }
+            }
+            if let Some(max) = f.max {
+                if n > max {
+                    return Some(format!("不能大于 {max}"));
+                }
+            }
+            None
+        }
+        "toggle" => (!v.is_boolean()).then(|| "必须是布尔值".to_string()),
+        "select" => {
+            let Some(s) = v.as_str() else {
+                return Some("必须是字符串".to_string());
+            };
+            if !f.options.is_empty() && !f.options.iter().any(|o| o.value == s) {
+                return Some(format!(
+                    "必须是以下之一：{}",
+                    f.options
+                        .iter()
+                        .map(|o| o.value.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" / ")
+                ));
+            }
+            None
+        }
+        "list" => (!v.is_array()).then(|| "必须是字符串数组".to_string()),
+        "map" => (!v.is_object()).then(|| "必须是键值对象".to_string()),
+        "text" | "password" | "textarea" | "datalist" => {
+            (!v.is_string()).then(|| "必须是字符串".to_string())
+        }
+        _ => None,
+    }
+}
+
+impl SettingPlugin {
+    /// 按分区定义逐字段校验提交值（字段级错误；无错则 `Ok`）
+    fn validate_section(
+        &self,
+        def: &DetailDefinition,
+        value: &serde_json::Value,
+    ) -> Result<(), VdfsValidationError> {
+        let Some(obj) = value.as_object() else {
+            return Err(VdfsValidationError::new("设置内容必须是 JSON 对象"));
+        };
+        let mut err = VdfsValidationError::new("设置校验未通过");
+
+        for section in &def.sections {
+            for f in &section.fields {
+                // 只读展示字段不参与校验
+                if f.widget == "static" {
+                    continue;
+                }
+                // 条件隐藏字段不参与校验（与前端渲染保持一致）
+                if let Some(cond) = &f.visible_when {
+                    if !condition_holds(cond, value) {
+                        continue;
+                    }
+                }
+                let Some(current) = obj.get(&f.key) else {
+                    if f.required {
+                        err.fields.push(VdfsFieldError {
+                            field: f.key.clone(),
+                            message: "必填项缺失".to_string(),
+                        });
+                    }
+                    continue;
+                };
+                if f.required && is_blank(current) {
+                    err.fields.push(VdfsFieldError {
+                        field: f.key.clone(),
+                        message: "必填项不能为空".to_string(),
+                    });
+                    continue;
+                }
+                if let Some(message) = field_error(f, current) {
+                    err.fields.push(VdfsFieldError {
+                        field: f.key.clone(),
+                        message,
+                    });
+                }
+            }
+        }
+
+        if err.has_fields() {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// 经父容器转发到目标插件的标准配置协议路由（`<prefix>/config/get|set`）
+    async fn route_config(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        prefix: &str,
+        op: &str,
+        payload: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, VdfsError> {
+        let parent = self
+            .get_parent()
+            .await
+            .ok_or_else(|| VdfsError::internal("设置插件未挂载到容器，无法访问其他插件的配置"))?;
+        let sub = ctx.fork();
+        sub.set(crate::symbio_core::PATH, format!("{prefix}/{op}"));
+        if let Some(p) = payload {
+            sub.set_payload(p)
+                .map_err(|e| VdfsError::internal(e.to_string()))?;
+        }
+        let resp = parent.route(sub).await.map_err(vdfs::from_plugin_error)?;
+        Ok(resp
+            .get::<serde_json::Value>()
+            .unwrap_or(serde_json::Value::Null))
+    }
+}
+
+#[async_trait::async_trait]
+impl VdfsProvider for SettingPlugin {
+    fn label(&self) -> Option<&str> {
+        Some("设置")
+    }
+
+    fn description(&self) -> Option<&str> {
+        Some("系统设置分区。分区清单固定，读 / 写经目标插件的标准配置协议；写入前由本模块校验。")
+    }
+
+    fn order(&self) -> i32 {
+        60
+    }
+
+    fn icon(&self) -> Option<&str> {
+        Some("settings")
+    }
+
+    /// 分区清单固定、每一项都是叶子文档：可列，但不可递归遍历
+    fn root_access(&self) -> VdfsAccess {
+        VdfsAccess::LIST
+    }
+
+    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+        if !path.is_empty() {
+            return Err(VdfsError::not_found(format!(
+                "设置分区是叶子节点，没有子项：{path}"
+            )));
+        }
+        Ok(SETTING_SECTIONS.iter().map(section_node).collect())
+    }
+
+    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
+        if path.is_empty() {
+            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+            return Ok(VdfsNode::dir("", "设置", self.root_access()));
+        }
+        section_of(path)
+            .map(section_node)
+            .ok_or_else(|| VdfsError::not_found(format!("未知设置分区：{path}")))
+    }
+
+    async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
+        let s = section_of(path)
+            .ok_or_else(|| VdfsError::not_found(format!("未知设置分区：{path}")))?;
+        let prefix = s.prefix.ok_or_else(|| {
+            VdfsError::Forbidden(format!("分区 {} 的数据由前端状态自持，VDFS 侧不可读", s.id))
+        })?;
+        let value = self
+            .route_config(
+                &vdfs::host_ctx(ctx)?,
+                prefix,
+                crate::symbio_core::CONFIG_GET,
+                None,
+            )
+            .await?;
+        let text = serde_json::to_string_pretty(&value)
+            .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
+        Ok(VdfsContent::text("", text).with_mime("application/json"))
+    }
+
+    /// 写入：**先校验，后转发**——校验失败时目标插件不会被调用。
+    async fn write(
+        &self,
+        ctx: &VdfsContext,
+        path: &str,
+        content: &VdfsContent,
+    ) -> VdfsResult<VdfsWriteResponse> {
+        let s = section_of(path)
+            .ok_or_else(|| VdfsError::not_found(format!("未知设置分区：{path}")))?;
+        let prefix = s.prefix.ok_or_else(|| {
+            VdfsError::Forbidden(format!("分区 {} 的数据由前端状态自持，VDFS 侧不可写", s.id))
+        })?;
+
+        let text = content
+            .text
+            .as_deref()
+            .ok_or_else(|| VdfsError::invalid("设置写入需要文本（JSON）内容"))?;
+        let value: serde_json::Value = serde_json::from_str(text)
+            .map_err(|e| VdfsError::invalid(format!("设置内容不是合法 JSON：{e}")))?;
+
+        if let Some(def) = section_definition(path) {
+            self.validate_section(&def, &value)
+                .map_err(VdfsError::Invalid)?;
+        }
+
+        self.route_config(
+            &vdfs::host_ctx(ctx)?,
+            prefix,
+            crate::symbio_core::CONFIG_SET,
+            Some(value),
+        )
+        .await?;
+
+        Ok(VdfsWriteResponse {
+            path: String::new(),
+            created: false,
+            etag: None,
+        })
     }
 }
 
@@ -489,6 +829,136 @@ mod tests {
                 def.save_path.as_deref(),
                 Some(&format!("{prefix}/{CONFIG_SET}")[..])
             );
+        }
+    }
+
+    // ==================== VDFS provider ====================
+
+    fn vctx() -> VdfsContext {
+        VdfsContext::empty()
+    }
+
+    /// provider 自描述：**不含挂载名**——挂载名由使用方在注册时选定
+    /// （见 `traverse` 里的 `register_vdfs_provider(PLUGIN_SETTING, ..)`）
+    #[tokio::test]
+    async fn vdfs_self_description_has_no_mount() {
+        let p = SettingPlugin::default();
+        assert_eq!(p.label(), Some("设置"));
+        assert_eq!(p.order(), 60);
+        assert_eq!(p.icon(), Some("settings"));
+        assert_eq!(p.root_access().flags(), "l");
+        assert!(!p.root_access().traverse, "分区是叶子，不参与树遍历");
+    }
+
+    #[tokio::test]
+    async fn vdfs_list_returns_fixed_sections_as_form_docs() {
+        let p = SettingPlugin::default();
+        let items = p.list(&vctx(), "").await.unwrap();
+        assert_eq!(
+            items.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+            vec!["appearance", "session", "local", "web", "gateway", "about"]
+        );
+
+        let session = items.iter().find(|n| n.name == "session").unwrap();
+        // 前端据 ext 选渲染器（form）；呈现描述经 schema 透传
+        assert_eq!(session.effective_ext().as_deref(), Some("form"));
+        assert_eq!(session.access.flags(), "rw");
+        assert!(session.schema.is_some(), "可写分区应携带表单定义");
+        assert!(!session.is_dir(), "分区是文档而非目录");
+
+        let appearance = items.iter().find(|n| n.name == "appearance").unwrap();
+        assert_eq!(appearance.access.flags(), "r", "前端自持分区只读");
+        assert!(appearance.schema.is_none());
+
+        // 叶子节点无子项
+        assert!(p.list(&vctx(), "session").await.is_err());
+        // 未知分区
+        assert!(p.stat(&vctx(), "nope").await.is_err());
+    }
+
+    #[test]
+    fn validation_catches_required_range_type_and_enum() {
+        let plugin = SettingPlugin::default();
+        let def = gateway_detail_definition();
+
+        // 越界端口
+        let err = plugin
+            .validate_section(&def, &json!({ "inbound_port": 70000 }))
+            .unwrap_err();
+        assert_eq!(err.fields[0].field, "inbound_port");
+
+        // 类型错误
+        let err = plugin
+            .validate_section(&def, &json!({ "inbound_port": "abc" }))
+            .unwrap_err();
+        assert!(err.fields[0].message.contains("必须是数字"));
+
+        // 枚举越界
+        let err = plugin
+            .validate_section(&def, &json!({ "inbound_protocol": "carrier-pigeon" }))
+            .unwrap_err();
+        assert_eq!(err.fields[0].field, "inbound_protocol");
+
+        // 合法值 + 未提交字段 → 通过
+        assert!(plugin
+            .validate_section(
+                &def,
+                &json!({ "inbound_port": 9231, "inbound_protocol": "http" })
+            )
+            .is_ok());
+
+        // 非对象载荷
+        assert!(plugin.validate_section(&def, &json!("nope")).is_err());
+    }
+
+    /// 写入：校验先于转发——坏数据在触达目标插件之前就被拦下
+    #[tokio::test]
+    async fn vdfs_write_validates_before_forwarding() {
+        let p = SettingPlugin::default();
+        let bad = VdfsContent::text("", r#"{"inbound_port":0}"#);
+        let err = p.write(&vctx(), "gateway", &bad).await.unwrap_err();
+        match err {
+            VdfsError::Invalid(v) => assert_eq!(v.fields[0].field, "inbound_port"),
+            other => panic!("应为字段级校验错误，实得 {other:?}"),
+        }
+
+        // 非 JSON 文本
+        let err = p
+            .write(&vctx(), "gateway", &VdfsContent::text("", "{oops"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, VdfsError::Invalid(_)));
+
+        // 缺少文本
+        let err = p
+            .write(&vctx(), "gateway", &VdfsContent::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, VdfsError::Invalid(_)));
+
+        // 合法数据：越过校验，随后因「未挂载到容器」而失败（证明校验未拦）
+        let ok = VdfsContent::text("", r#"{"inbound_port":9231}"#);
+        let err = p.write(&vctx(), "gateway", &ok).await.unwrap_err();
+        assert!(
+            matches!(err, VdfsError::Internal(_)),
+            "合法数据应越过校验，实得 {err:?}"
+        );
+    }
+
+    /// 前端自持分区在 VDFS 侧只读
+    #[tokio::test]
+    async fn vdfs_readonly_sections_reject_io() {
+        let p = SettingPlugin::default();
+        for path in ["appearance", "about"] {
+            assert!(matches!(
+                p.read(&vctx(), path).await.unwrap_err(),
+                VdfsError::Forbidden(_)
+            ));
+            let err = p
+                .write(&vctx(), path, &VdfsContent::text("", "{}"))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, VdfsError::Forbidden(_)));
         }
     }
 }

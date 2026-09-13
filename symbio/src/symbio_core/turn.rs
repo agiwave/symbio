@@ -1184,7 +1184,7 @@ mod tool_call_tests {
     fn missing_id_gets_stable_generated_guid() {
         let mut acc = ToolCallAccumulator::default();
         let (stream_id, _, _) =
-            acc.process_delta(0, None, Some("dir_list"), Some("{\"path\": \".\"}"));
+            acc.process_delta(0, None, Some("vdfs_list"), Some("{\"path\": \".\"}"));
         assert!(!stream_id.is_empty(), "流式期间即应有非空 id");
         assert_ne!(stream_id, "tc-0", "不得再使用 index 占位符");
 

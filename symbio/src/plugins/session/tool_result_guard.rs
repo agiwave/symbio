@@ -239,9 +239,9 @@ mod tests {
         let g = guard_tool_result(&big, 500, None);
         assert!(g.truncated);
         assert!(g.text.contains("[... 已省略"));
-        // 统一取回协议：占位符含存档路径与 local/file_read 取回入口（P1-2）
+        // 统一取回协议：占位符含存档路径与 vdfs_read 取回入口（P1-2）
         assert!(g.text.contains("完整输出已存档至: "));
-        assert!(g.text.contains("local/file_read"));
+        assert!(g.text.contains("vdfs_read"));
         // head 与 tail 应分别保留原文片段
         assert!(g.text.contains("fn main()"));
         // 文本显著缩短（预算 500 token ≈ 文本远小于原文）
@@ -255,7 +255,7 @@ mod tests {
         let huge = format!("{{\"entries\":[\"{}\"]}}", "x".repeat(10_000));
         let g = guard_tool_result(&huge, 300, None);
         assert!(g.truncated, "单行超预算应触发存档截断");
-        assert!(g.text.contains("local/file_read"), "占位提示应存在");
+        assert!(g.text.contains("vdfs_read"), "占位提示应存在");
         assert!(
             g.text.starts_with("{\"entries"),
             "行首应保留: {}",

@@ -8,7 +8,7 @@
 
 use crate::symbio_core::{
     Capability, CapabilityMeta, CapabilityVisitor, InvokeRequest, InvokeResponse, ModelProvider,
-    PluginError, PluginPayload,
+    PluginError, PluginPayload, VdfsProvider,
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -18,14 +18,18 @@ use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存 HashMap 实现，一次会话请求一个实例
 ///
-/// 除工具外，同时承载两组注册（与工具同一 traverse 收集机制）：
+/// 除工具外，同时承载四组注册（与工具同一 traverse 收集机制）：
 /// - `provider`：当前生效的模型服务（单槽；model 插件按上下文解析出
 ///   唯一生效 Provider 后注册，重复注册覆盖）
 /// - `system_prompts`：系统提示词（按名称保序）
+/// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）
+/// - `vdfs_root`：VDFS 根 provider（单槽；组合容器注册，访问层据此转发）
 pub struct DefaultToolVisitor {
     tools: Arc<RwLock<HashMap<String, Arc<dyn Capability>>>>,
     provider: Arc<RwLock<Option<Arc<dyn ModelProvider>>>>,
     system_prompts: Arc<RwLock<IndexMap<String, String>>>,
+    vdfs_providers: Arc<RwLock<IndexMap<String, Arc<dyn VdfsProvider>>>>,
+    vdfs_root: Arc<RwLock<Option<Arc<dyn VdfsProvider>>>>,
 }
 
 impl DefaultToolVisitor {
@@ -34,6 +38,8 @@ impl DefaultToolVisitor {
             tools: Arc::new(RwLock::new(HashMap::new())),
             provider: Arc::new(RwLock::new(None)),
             system_prompts: Arc::new(RwLock::new(IndexMap::new())),
+            vdfs_providers: Arc::new(RwLock::new(IndexMap::new())),
+            vdfs_root: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -99,6 +105,38 @@ impl CapabilityVisitor for DefaultToolVisitor {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
+    }
+
+    async fn register_vdfs_provider(&self, mount: &str, provider: Arc<dyn VdfsProvider>) {
+        let mut slot = self.vdfs_providers.write().await;
+        // 同挂载名覆盖（保留先注册槽位，IndexMap 语义与工具注册一致）
+        slot.insert(mount.to_string(), provider);
+    }
+
+    async fn list_vdfs_providers(&self) -> Vec<(String, Arc<dyn VdfsProvider>)> {
+        let slot = self.vdfs_providers.read().await;
+        let mut out: Vec<(String, Arc<dyn VdfsProvider>)> = slot
+            .iter()
+            .map(|(mount, p)| (mount.clone(), p.clone()))
+            .collect();
+        // 稳定排序：order 相同者保持注册顺序（IndexMap 保序）
+        out.sort_by_key(|(_, p)| p.order());
+        out
+    }
+
+    async fn get_vdfs_provider(&self, mount: &str) -> Option<Arc<dyn VdfsProvider>> {
+        let slot = self.vdfs_providers.read().await;
+        slot.get(mount).cloned()
+    }
+
+    async fn register_vdfs_root(&self, provider: Arc<dyn VdfsProvider>) {
+        let mut slot = self.vdfs_root.write().await;
+        *slot = Some(provider);
+    }
+
+    async fn get_vdfs_root(&self) -> Option<Arc<dyn VdfsProvider>> {
+        let slot = self.vdfs_root.read().await;
+        slot.clone()
     }
 }
 

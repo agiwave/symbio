@@ -5,15 +5,10 @@
 mod ask_user;
 mod codebase_search;
 mod content_search;
-mod dir_list;
-mod file_delete;
-mod file_edit;
-mod file_read;
-mod file_search;
-mod file_write;
 mod local_config;
 mod plugin;
 mod policy;
 mod shell;
 mod system;
 mod todo_write;
+mod vdfs;

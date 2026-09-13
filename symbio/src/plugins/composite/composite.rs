@@ -2,9 +2,11 @@
 //!
 //! 工厂逻辑通过 `Composite::build` 静态方法 + `submit_object_creator!` 自注册。
 
+use super::vdfs::CompositeVdfs;
 use crate::symbio_core::{
     create_object, has_creator, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginError, PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, PATH, PLUGIN_COMPOSITE,
+    PluginError, PluginMeta, PluginPayload, SimpleRequest, VdfsProvider, CAPABILITY_VISITOR,
+    CONFIG_GET, PATH, PLUGIN_COMPOSITE, TRAVERSE_AVAILABLE_TOOLS,
 };
 
 use serde_json::Value;
@@ -19,20 +21,21 @@ pub struct Composite {
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
     /// 环境变量（层层透传）
     envs: HashMap<String, String>,
+    /// VDFS 组合视图：容器是虚拟根 `/` 的拥有者（见 `vdfs` 子模块）
+    vdfs: Arc<CompositeVdfs>,
 }
 
 impl Composite {
     pub fn new(parent: Option<Weak<dyn Plugin>>) -> Self {
-        Self {
-            instances: Arc::new(RwLock::new(HashMap::new())),
-            parent: Arc::new(RwLock::new(parent)),
-            envs: HashMap::new(),
-        }
+        Self::new_with_envs(parent, HashMap::new())
     }
 
     pub fn new_with_envs(parent: Option<Weak<dyn Plugin>>, envs: HashMap<String, String>) -> Self {
+        let instances: Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
         Self {
-            instances: Arc::new(RwLock::new(HashMap::new())),
+            vdfs: Arc::new(CompositeVdfs::new(Arc::clone(&instances))),
+            instances,
             parent: Arc::new(RwLock::new(parent)),
             envs,
         }
@@ -77,6 +80,7 @@ impl Clone for Composite {
             instances: Arc::clone(&self.instances),
             parent: Arc::clone(&self.parent),
             envs: self.envs.clone(),
+            vdfs: Arc::clone(&self.vdfs),
         }
     }
 }
@@ -237,6 +241,15 @@ impl Plugin for Composite {
         _path: String,
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
+        // 容器是 VDFS 虚拟根 `/` 的拥有者：在同一次能力广播里把组合视图登记为根。
+        // 访问层（vdfs 插件）据此转发，因此不需要认识任何具体资源。
+        if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
+            if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
+                let root: Arc<dyn VdfsProvider> = self.vdfs.clone();
+                visitor.register_vdfs_root(root).await;
+            }
+        }
+
         let instances: Vec<(String, Arc<dyn Plugin>)> = {
             let guard = self.instances.read().await;
             guard

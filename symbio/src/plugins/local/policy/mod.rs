@@ -339,9 +339,8 @@ impl SecurityPolicy {
         args: Option<&serde_json::Value>,
     ) -> RiskLevel {
         match tool_name {
-            "read_file" | "web_fetch" | "web_search" | "glob_search" | "content_search" => {
-                RiskLevel::Low
-            }
+            "read_file" | "web_fetch" | "web_search" | "glob_search" | "content_search"
+            | "vdfs_read" | "vdfs_search" => RiskLevel::Low,
             "shell" => {
                 if let Some(cmd) = args.and_then(|a| a.get("command")).and_then(|c| c.as_str()) {
                     self.command_risk_level(cmd)
@@ -350,7 +349,7 @@ impl SecurityPolicy {
                 }
             }
             "http_request" => RiskLevel::High,
-            "write_file" | "file_edit" => RiskLevel::Medium,
+            "write_file" | "file_edit" | "vdfs_write" | "vdfs_edit" => RiskLevel::Medium,
             _ => RiskLevel::Medium,
         }
     }

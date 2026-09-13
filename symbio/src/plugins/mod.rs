@@ -26,4 +26,5 @@ mod session;
 mod setting;
 mod skill;
 mod telegram;
+mod vdfs;
 mod web;

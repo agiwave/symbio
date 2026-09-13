@@ -804,7 +804,7 @@ mod tests {
             id: uuid::Uuid::new_v4().to_string(),
             role: Some(MessageRole::Assistant),
             msg_type: Some(MessageType::ToolCall),
-            name: Some("local/file_read".to_string()),
+            name: Some("vdfs_read".to_string()),
             content: Some(MessageContent::Text(r#"{"path":"a.rs"}"#.to_string())),
             ..Default::default()
         }
@@ -1161,7 +1161,7 @@ mod tests {
         let msgs = vec![
             user_msg("hello"),
             assistant_msg("hi"),
-            view_tc("t1", "local/file_read", r#"{"path":"a.rs"}"#),
+            view_tc("t1", "vdfs_read", r#"{"path":"a.rs"}"#),
             view_result("t1", "file content"),
         ];
         let retention = std::collections::HashMap::new();
@@ -1214,11 +1214,11 @@ mod tests {
         let long_text = "line\n".repeat(12_000); // 远超 2048 token
         let msgs = vec![
             user_msg("turn-1"),
-            view_tc("t1", "local/file_read", r#"{"path":"big.txt"}"#),
+            view_tc("t1", "vdfs_read", r#"{"path":"big.txt"}"#),
             view_result("t1", &long_text),
             assistant_msg("analysis"),
             user_msg("turn-2"),
-            view_tc("t2", "local/file_read", r#"{"path":"small.txt"}"#),
+            view_tc("t2", "vdfs_read", r#"{"path":"small.txt"}"#),
             view_result("t2", "tiny"),
             assistant_msg("done"),
             user_msg("turn-3"),
@@ -1396,10 +1396,7 @@ mod tests {
     #[test]
     fn test_fade_aged_content_nodes_skips_tool_call() {
         let big_args = "x".repeat(20_000);
-        let mut msgs = vec![
-            view_tc("t1", "local/file_read", &big_args),
-            user_msg("tail"),
-        ];
+        let mut msgs = vec![view_tc("t1", "vdfs_read", &big_args), user_msg("tail")];
         fade_aged_content_nodes(&mut msgs, 1, 200);
         assert_eq!(view_text(&msgs[0]), big_args, "ToolCall 参数不淡化");
         assert!(msgs[0].meta.is_none());
@@ -1411,15 +1408,15 @@ mod tests {
     fn test_build_request_view_skeletonizes_with_retention() {
         let msgs = vec![
             user_msg("u1"),
-            view_tc("t1", "local/file_read", r#"{"path":"old.txt"}"#),
+            view_tc("t1", "vdfs_read", r#"{"path":"old.txt"}"#),
             view_result("t1", "old content"),
             user_msg("u2"),
-            view_tc("t2", "local/file_read", r#"{"path":"new.txt"}"#),
+            view_tc("t2", "vdfs_read", r#"{"path":"new.txt"}"#),
             view_result("t2", "new content"),
         ];
         // LastOnly：同工具仅保留最近一次调用（t1 应骨架化）
         let retention = view_retention(&[(
-            "file_read",
+            "vdfs_read",
             crate::symbio_core::ToolContextRetention::LastOnly,
         )]);
         let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false);
@@ -1453,7 +1450,7 @@ mod tests {
             user_msg("u1"),
             view_tc("t1", "local/sh", r#"{"command":"ls"}"#),
             view_result("t1", "old output"),
-            view_tc("t2", "local/read_file", r#"{"path":"b.rs"}"#),
+            view_tc("t2", "vdfs_read", r#"{"path":"b.rs"}"#),
             view_result("t2", "new output"),
         ];
         let retention = std::collections::HashMap::new();
@@ -1478,13 +1475,13 @@ mod tests {
     fn test_build_request_view_window_zero_disables_skeletonization() {
         let msgs = vec![
             user_msg("u1"),
-            view_tc("t1", "local/file_read", r#"{"path":"old.txt"}"#),
+            view_tc("t1", "vdfs_read", r#"{"path":"old.txt"}"#),
             view_result("t1", "old content"),
-            view_tc("t2", "local/file_read", r#"{"path":"new.txt"}"#),
+            view_tc("t2", "vdfs_read", r#"{"path":"new.txt"}"#),
             view_result("t2", "new content"),
         ];
         let retention = view_retention(&[(
-            "file_read",
+            "vdfs_read",
             crate::symbio_core::ToolContextRetention::LastOnly,
         )]);
         let view = build_request_view(&msgs, 0, &retention, false, 12, 3, 200, false);
@@ -1498,14 +1495,14 @@ mod tests {
     fn test_build_request_view_nudge_comes_after_skeletonization() {
         let msgs = vec![
             user_msg("u1"),
-            view_tc("t1", "local/file_read", r#"{"path":"old.txt"}"#),
+            view_tc("t1", "vdfs_read", r#"{"path":"old.txt"}"#),
             view_result("t1", "old content"),
             user_msg("u2"),
-            view_tc("t2", "local/file_read", r#"{"path":"new.txt"}"#),
+            view_tc("t2", "vdfs_read", r#"{"path":"new.txt"}"#),
             view_result("t2", "new content"),
         ];
         let retention = view_retention(&[(
-            "file_read",
+            "vdfs_read",
             crate::symbio_core::ToolContextRetention::LastOnly,
         )]);
         let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true);
@@ -1585,8 +1582,7 @@ mod tests {
             cn_msg(&"期".repeat(100)),
             cn_msg(&"近".repeat(100)),
         ];
-        let (out, removed) =
-            emergency_tail_compression(&msgs, 60, Some("/abs/transcript.json"));
+        let (out, removed) = emergency_tail_compression(&msgs, 60, Some("/abs/transcript.json"));
         assert_eq!(removed, 2);
         let head = out[0].content.as_ref().unwrap().to_text();
         assert!(head.contains("/abs/transcript.json"));

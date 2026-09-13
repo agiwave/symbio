@@ -883,7 +883,7 @@ mod tests {
         let abort = Arc::new(AtomicBool::new(false));
         let tcs = vec![ToolCallInfo {
             id: None,
-            name: Some("dir_list".into()),
+            name: Some("vdfs_list".into()),
             arguments: json!({ "path": "." }),
         }];
 
@@ -922,7 +922,7 @@ mod tests {
         let abort = Arc::new(AtomicBool::new(false));
         let tcs = vec![ToolCallInfo {
             id: Some(String::new()),
-            name: Some("dir_list".into()),
+            name: Some("vdfs_list".into()),
             arguments: json!({}),
         }];
 

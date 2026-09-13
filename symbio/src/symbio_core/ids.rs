@@ -43,6 +43,8 @@ pub const PLUGIN_MCP: &str = "mcp";
 pub const PLUGIN_LOCAL: &str = "local";
 /// Hook 插件工厂
 pub const PLUGIN_HOOK: &str = "hook";
+/// VFDS 插件工厂（虚拟文件系统宿主）
+pub const PLUGIN_VFDS: &str = "vdfs";
 /// Explorer 插件工厂
 /// Event Bus 插件工厂（统一事件总线）
 pub const PLUGIN_EVENT_BUS: &str = "event_bus";

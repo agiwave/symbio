@@ -528,9 +528,9 @@ mod tests {
     #[test]
     fn tools_without_retention_are_unaffected() {
         let messages = vec![
-            tc_msg("x1", "local/file_read", r#"{"path":"a.rs"}"#),
+            tc_msg("x1", "vdfs_read", r#"{"path":"a.rs"}"#),
             tool_result("x1", "content"),
-            tc_msg("x2", "local/file_read", r#"{"path":"b.rs"}"#),
+            tc_msg("x2", "vdfs_read", r#"{"path":"b.rs"}"#),
             tool_result("x2", "content2"),
         ];
         let ret = HashMap::new();
@@ -548,7 +548,7 @@ mod tests {
         for i in 0..6 {
             messages.push(tc_msg(
                 &format!("g{i}"),
-                "local/file_read",
+                "vdfs_read",
                 &format!(r#"{{"path":"f{i}.rs","blob":"x".repeat(50)}}"#),
             ));
             messages.push(tool_result(&format!("g{i}"), "done"));
@@ -602,7 +602,7 @@ mod tests {
         for i in 0..20 {
             messages.push(tc_msg(
                 &format!("f{i}"),
-                "local/file_read",
+                "vdfs_read",
                 &format!(r#"{{"path":"f{i}.rs"}}"#),
             ));
             messages.push(tool_result(&format!("f{i}"), "content"));
@@ -636,7 +636,7 @@ mod tests {
     #[test]
     fn skeletonized_failure_keeps_error_digest() {
         let messages = vec![
-            tc_msg("e1", "local/read_file", r#"{"path":"agent/README.md"}"#),
+            tc_msg("e1", "vdfs_read", r#"{"path":"agent/README.md"}"#),
             {
                 let mut m = tool_result("e1", "读取失败：os error 2 (系统找不到指定的文件。)");
                 m.meta = Some(serde_json::json!({
@@ -671,7 +671,7 @@ mod tests {
     #[test]
     fn skeletonized_success_keeps_first_line_digest() {
         let messages = vec![
-            tc_msg("s1", "local/read_file", r#"{"path":"session/README.md"}"#),
+            tc_msg("s1", "vdfs_read", r#"{"path":"session/README.md"}"#),
             tool_result("s1", "# session 插件\n\n会话编排唯一入口……（后续 300 行）"),
         ];
         let ret = HashMap::new();
@@ -776,7 +776,7 @@ mod tests {
         let messages = vec![
             tc_msg(
                 "a1",
-                "local/read_file",
+                "vdfs_read",
                 r#"{"path":"gateway/server.rs","limit":50}"#,
             ),
             tool_result("a1", "[行 585-602，共 621 行]"),

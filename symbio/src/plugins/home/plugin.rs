@@ -59,6 +59,7 @@ impl GlobalConfig {
                 "agent",
                 "skill",
                 "gateway",
+                "vdfs",
             ];
             for name in &defaults {
                 obj.entry(name.to_string()).or_insert_with(|| {
