@@ -41,6 +41,7 @@
 //! 3. **路径是唯一地址**：`/` = 虚拟根，`/<mount>/<rel>` = 节点；provider 只见
 //!    自己的相对路径，绝不见挂载前缀。
 
+pub mod entity_adapter;
 pub mod host;
 
 // ---- 纯接口（宿主无关，定义在 `symbio_core::vdfs_provider`）----
@@ -48,3 +49,6 @@ pub use super::vdfs_provider::*;
 
 // ---- symbio 桥 ----
 pub use host::{from_plugin_error, host_ctx, vdfs_context};
+
+// ---- 实体 → VDFS 适配器（「任何 EntityProvider 自动成为一个挂载点」）----
+pub use entity_adapter::EntityVdfsAdapter;

@@ -110,6 +110,19 @@ pub trait EntityProvider: Send + Sync {
         Ok(manifest.clone())
     }
 
+    /// VDFS `write { create }` 的**最小落盘 manifest**。
+    ///
+    /// 两条链路的「新建」语义不同，故由插件自持：
+    /// - **实体机制**：前端渲染完整表单，字段齐全后一次 `entities/upload`；
+    /// - **VDFS**：`vdfs/write { create: true }` 只带路径名，语义是「先落一份可用的
+    ///   默认配置，用户随后在详情里完善」。
+    ///
+    /// 默认实现只给 `id` / `name`（对无必填字段的插件即够）。有必填字段的插件
+    /// 覆盖本方法，给出自己的最小合法配置——**否则该类型在 VDFS 侧无法新建**。
+    fn new_entity_manifest(&self, id: &str, title: &str) -> serde_json::Value {
+        serde_json::json!({ "id": id, "name": title })
+    }
+
     /// 写盘成功后的内存同步钩子（mcp 回灌 config，model 同步注册表，agent 失效缓存）
     async fn on_uploaded(
         &self,
@@ -397,6 +410,20 @@ pub struct EntityProviderInfo {
     pub container_kinds: &'static [ContainerKindSpec],
 }
 
+/// 导航元数据（展示标签 + 顺序）—— 注册表是**单一真相源**。
+///
+/// 供不经过 [`EntityVdfsAdapter`] 的挂载点（session / setting 等自持 `VdfsProvider`
+/// 的插件）复用，使 `.vdfs` 左栏的顺序与标签和实体注册表**恒等**；注册表调整顺序
+/// 时各处导航自动跟随，无需改常量。未登记的 kind 返回 `None`。
+///
+/// [`EntityVdfsAdapter`]: crate::symbio_core::vdfs::EntityVdfsAdapter
+pub fn nav_meta_of(kind: &str) -> Option<(&'static str, i32)> {
+    provider_registry()
+        .iter()
+        .find(|p| p.kind == kind)
+        .map(|p| (p.label, p.order))
+}
+
 /// 全部已注册实体 provider（编译期收起当前六类，顺序即展示顺序）
 /// 默认顺序：会话 / 模型 / 智能体 / 技能 / MCP / 设置。
 /// 可通过配置 `symbio.provider_order` 覆盖（见 [`providers_response_with_overrides`]）。
@@ -675,6 +702,89 @@ fn fill_provider<P: EntityProvider + ?Sized>(provider: &P, items: &mut [EntitySu
     }
 }
 
+/// 写入（创建或覆盖）一个**顶层实体**——实体机制与 VDFS 共用的唯一实现。
+///
+/// 职责链：`validate_manifest` 规范化 → 写盘 → `on_uploaded` 内存同步 →
+/// 发布实体生命周期事件。
+///
+/// `entities/upload` 的 manifest 分支与 `VdfsProvider::write` 都走这里，
+/// 两条链路因此行为完全一致（同一份校验、同一份写盘、同一个事件）。
+pub async fn entity_write<P: EntityProvider + ?Sized>(
+    provider: &P,
+    ctx: &Arc<dyn InvokeRequest>,
+    id: &str,
+    manifest: &serde_json::Value,
+) -> Result<EntityUploadResponse, PluginError> {
+    let Some(category) = provider.category() else {
+        // 无实体目录的实体（如 session / agent bundle）：协议槽位，走各自通道
+        return Err(PluginError::NotImplemented);
+    };
+    let Some(manifest_file) = provider.manifest_file() else {
+        return Err(PluginError::ValidationError(
+            "该实体不支持表单上传（manifest）".to_string(),
+        ));
+    };
+
+    let store = storage_service(ctx)?;
+    let es = store.entity_store();
+    let existed = es
+        .entity_exists(category, id)
+        .await
+        .map_err(|e| PluginError::InternalError(format!("查询实体失败: {e}")))?;
+
+    let normalized = provider.validate_manifest(ctx, id, manifest).await?;
+    let content = serde_json::to_string_pretty(&normalized)?;
+    es.write_entity(category, id, manifest_file, &content)
+        .await
+        .map_err(|e| PluginError::InternalError(format!("写入实体失败: {e}")))?;
+
+    provider.on_uploaded(ctx, id).await?;
+
+    // 实体生命周期变更通知：前端据此即时同步清单（created 乐观插入 / updated 重拉）。
+    // 事件总线不可用不应影响写入本身的结果。写入实体均为顶层（parent_id = None）。
+    crate::symbio_core::event_bus::EventBus::publish_entity_changed(
+        provider.kind(),
+        id,
+        if existed { "updated" } else { "created" },
+        None,
+        None,
+    )
+    .await;
+
+    Ok(EntityUploadResponse {
+        kind: provider.kind().to_string(),
+        id: id.to_string(),
+        created: !existed,
+    })
+}
+
+/// 删除一个**顶层实体**——实体机制与 VDFS 共用的唯一实现。
+///
+/// 职责链：`delete_item` 落盘删除 → `on_deleted` 内存/缓存清理 → 发布生命周期事件。
+pub async fn entity_delete<P: EntityProvider + ?Sized>(
+    provider: &P,
+    ctx: &Arc<dyn InvokeRequest>,
+    id: &str,
+) -> Result<EntityUploadResponse, PluginError> {
+    provider.delete_item(ctx, id).await?;
+    provider.on_deleted(ctx, id).await?;
+
+    crate::symbio_core::event_bus::EventBus::publish_entity_changed(
+        provider.kind(),
+        id,
+        "deleted",
+        None,
+        None,
+    )
+    .await;
+
+    Ok(EntityUploadResponse {
+        kind: provider.kind().to_string(),
+        id: id.to_string(),
+        created: false,
+    })
+}
+
 async fn dispatch_upload<P: EntityProvider + ?Sized>(
     provider: &P,
     ctx: &Arc<dyn InvokeRequest>,
@@ -712,61 +822,45 @@ async fn dispatch_upload<P: EntityProvider + ?Sized>(
         .ok_or_else(|| PluginError::ValidationError("实体名称不能为空".to_string()))?
         .to_string();
 
-    let Some(category) = provider.category() else {
-        // 无实体目录的实体（如 session）：协议槽位，待后续导入/导出实现
-        return Err(PluginError::NotImplemented);
-    };
-
-    let existed = {
-        let store = storage_service(ctx)?;
-        let es = store.entity_store();
-        es.entity_exists(category, &id)
-            .await
-            .map_err(|e| PluginError::InternalError(format!("查询实体失败: {e}")))?
-    };
-
+    // zip 上传：整目录解包（不走 manifest 钩子）。VDFS 侧无此路径——那是
+    // 「导入」而非「写文本」，故本分支只服务实体机制。
     if let Some(b64) = req.zip_b64.as_deref() {
+        let Some(category) = provider.category() else {
+            return Err(PluginError::NotImplemented);
+        };
         let bytes = decode_zip_b64(b64)?;
         let store = storage_service(ctx)?;
         let es = store.entity_store();
-        extract_zip_to_entity(es, category, &id, &bytes).await?;
-    } else if let Some(manifest) = req.manifest.as_ref() {
-        let Some(manifest_file) = provider.manifest_file() else {
-            return Err(PluginError::ValidationError(
-                "该实体不支持表单上传（manifest）".to_string(),
-            ));
-        };
-        let normalized = provider.validate_manifest(ctx, &id, manifest).await?;
-        let content = serde_json::to_string_pretty(&normalized)?;
-        let store = storage_service(ctx)?;
-        let es = store.entity_store();
-        es.write_entity(category, &id, manifest_file, &content)
+        let existed = es
+            .entity_exists(category, &id)
             .await
-            .map_err(|e| PluginError::InternalError(format!("写入实体失败: {e}")))?;
-    } else {
+            .map_err(|e| PluginError::InternalError(format!("查询实体失败: {e}")))?;
+        extract_zip_to_entity(es, category, &id, &bytes).await?;
+        provider.on_uploaded(ctx, &id).await?;
+        crate::symbio_core::event_bus::EventBus::publish_entity_changed(
+            provider.kind(),
+            &id,
+            if existed { "updated" } else { "created" },
+            None,
+            None,
+        )
+        .await;
+        return Ok(PluginPayload::new(&EntityUploadResponse {
+            kind: provider.kind().to_string(),
+            id,
+            created: !existed,
+        }));
+    }
+
+    // manifest 上传：与 VDFS `write` 共用同一实现（`entity_write`），
+    // 保证两条链路的校验 / 写盘 / 事件完全一致
+    let Some(manifest) = req.manifest.as_ref() else {
         return Err(PluginError::ValidationError(
             "上传内容不能为空（zip_b64 或 manifest 二选一）".to_string(),
         ));
-    }
-
-    provider.on_uploaded(ctx, &id).await?;
-
-    // 实体生命周期变更通知：前端据此即时同步清单（created 乐观插入 / updated 重拉）。
-    // 事件总线不可用不应影响上传本身的结果。上传实体均为顶层（parent_id = None）。
-    crate::symbio_core::event_bus::EventBus::publish_entity_changed(
-        provider.kind(),
-        &id,
-        if existed { "updated" } else { "created" },
-        None,
-        None,
-    )
-    .await;
-
-    Ok(PluginPayload::new(&EntityUploadResponse {
-        kind: provider.kind().to_string(),
-        id,
-        created: !existed,
-    }))
+    };
+    let resp = entity_write(provider, ctx, &id, manifest).await?;
+    Ok(PluginPayload::new(&resp))
 }
 
 async fn dispatch_delete<P: EntityProvider + ?Sized>(
@@ -782,28 +876,11 @@ async fn dispatch_delete<P: EntityProvider + ?Sized>(
         return Ok(PluginPayload::new(&resp));
     }
 
-    // 删除统一走可覆盖钩子（EntityStore 默认实现 / 非实体存储型 provider 重写）
-    provider.delete_item(ctx, &req.id).await?;
-
-    provider.on_deleted(ctx, &req.id).await?;
-
-    // 实体生命周期变更通知：前端据此即时把该项从清单中移除。
-    // 容器子实体删除（上方提前 return）暂不通知——前端容器文件树由
-    // 容器实体自身的 entities/list 刷新。此路径删除的是顶层实体（parent_id = None）。
-    crate::symbio_core::event_bus::EventBus::publish_entity_changed(
-        provider.kind(),
-        &req.id,
-        "deleted",
-        None,
-        None,
-    )
-    .await;
-
-    Ok(PluginPayload::new(&EntityUploadResponse {
-        kind: provider.kind().to_string(),
-        id: req.id,
-        created: false,
-    }))
+    // 顶层实体删除：与 VDFS `delete` 共用同一实现（`entity_delete`）。
+    // 容器子实体删除（上方提前 return）暂不通知事件——前端容器文件树由
+    // 容器实体自身的 entities/list 刷新。
+    let resp = entity_delete(provider, ctx, &req.id).await?;
+    Ok(PluginPayload::new(&resp))
 }
 
 async fn dispatch_status<P: EntityProvider + ?Sized>(
