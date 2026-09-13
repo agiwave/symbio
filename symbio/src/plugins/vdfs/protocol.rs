@@ -46,6 +46,8 @@ pub const VFDS_SEARCH: &str = "vdfs/search";
 pub const VFDS_WATCH: &str = "vdfs/watch";
 /// 取消订阅（与 watch 配对）
 pub const VFDS_UNWATCH: &str = "vdfs/unwatch";
+/// 执行**节点动作**（provider 自持的动词，如「测试连接」）
+pub const VFDS_ACTION: &str = "vdfs/action";
 
 /// 全部 VDFS 操作（宿主据此判定是否为本协议请求）
 pub const VFDS_OPS: &[&str] = &[
@@ -62,6 +64,7 @@ pub const VFDS_OPS: &[&str] = &[
     VFDS_MOVE,
     VFDS_WATCH,
     VFDS_UNWATCH,
+    VFDS_ACTION,
 ];
 
 // ==================== 请求 ====================
@@ -101,6 +104,18 @@ pub struct VdfsTreeRequest {
 pub struct VdfsReadRequest {
     #[serde(default)]
     pub path: String,
+}
+
+/// 执行节点动作请求
+///
+/// `action` 是 provider 自持的动词标识（VDFS 不解释），`payload` 原样透传；
+/// 当前宿主约定的取值见 `VFDS_ACTION_TEST`。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VdfsActionRequest {
+    pub path: String,
+    pub action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<Value>,
 }
 
 /// 写入请求
@@ -320,7 +335,7 @@ mod tests {
 
     #[test]
     fn ops_are_unique_and_prefixed() {
-        assert_eq!(VFDS_OPS.len(), 13);
+        assert_eq!(VFDS_OPS.len(), 14, "新增协议操作请同步本计数与文档");
         for op in VFDS_OPS {
             assert!(op.starts_with("vdfs/"), "协议路径必须以 vdfs/ 开头：{op}");
         }

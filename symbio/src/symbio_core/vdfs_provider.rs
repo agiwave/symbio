@@ -93,6 +93,14 @@ pub const VFDS_EXT_MARKDOWN: &str = "md";
 /// 文件树（目录节点的默认呈现）
 pub const VFDS_EXT_DIR: &str = "dir";
 
+// ==================== 节点动作（约定） ====================
+
+/// 节点动作标识：**连接测试**（`vdfs/action` 的 `action` 取值之一）。
+///
+/// 动作标识由 provider 自持，VDFS 只透传、不解释（与 `ext` 同构）。此处登记的
+/// 是当前唯一的内置约定：「测试连接」——模型 / MCP 这类外部资源的连通性自检。
+pub const VFDS_ACTION_TEST: &str = "test";
+
 // ==================== 可接受的新建类型 ====================
 
 /// 目录**可接受的新建元素类型**——「新建」入口的类型清单元素。
@@ -580,6 +588,22 @@ pub struct VdfsWriteResponse {
     pub etag: Option<String>,
 }
 
+// ==================== 动作结果 ====================
+
+/// 动作结果 —— [`VdfsProvider::action`] 的返回值。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VdfsActionResult {
+    /// 被执行的动作标识（回显，便于调用方配对请求）
+    pub action: String,
+    /// 是否成功
+    pub ok: bool,
+    /// 结果说明（成功摘要 / 失败原因，可直接展示）
+    pub message: String,
+    /// 动作产出的附加数据（可选；宿主方言，VDFS 只透传）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
 // ==================== 错误 ====================
 
 /// 字段级校验错误（provider 在 `write` 中校验后返回，消费者据此逐字段高亮）
@@ -1011,6 +1035,25 @@ pub trait VdfsProvider: Send + Sync + 'static {
         Err(VdfsError::NotImplemented)
     }
 
+    /// 执行**节点动作**（如 [`VFDS_ACTION_TEST`]「测试连接」）。
+    ///
+    /// 与固定操作集（列 / 读 / 写 / 删 …）不同，动作是 **provider 自持的动词**：
+    /// VDFS 只把 `(节点路径, 动作标识, 载荷)` 透传给 provider，**不解释语义**；
+    /// 未实现的动作返回 [`VdfsError::NotImplemented`]，消费方据此不给出入口。
+    ///
+    /// 动作的**呈现**（按钮文案 / 忙态 / 图标）不属于本层：与 `ext` 一样由宿主
+    /// 方言决定（本宿主编在 `node.schema` 的详情定义里），VDFS 只负责把它送到
+    /// 该去的 provider。
+    async fn action(
+        &self,
+        _ctx: &VdfsContext,
+        _path: &str,
+        _action: &str,
+        _payload: Option<&Value>,
+    ) -> VdfsResult<VdfsActionResult> {
+        Err(VdfsError::NotImplemented)
+    }
+
     /// 订阅指定子树的数据变更；检测到变化时调用 `sink`。
     /// 默认 no-op：无实时能力的 provider 直接成功。
     async fn watch(
@@ -1297,6 +1340,17 @@ impl VdfsProvider for VdfsMountTable {
             return Err(VdfsError::Forbidden("挂载根不可移动".to_string()));
         }
         pf.move_item(ctx, &rf, &rt).await
+    }
+
+    async fn action(
+        &self,
+        ctx: &VdfsContext,
+        path: &str,
+        action: &str,
+        payload: Option<&Value>,
+    ) -> VdfsResult<VdfsActionResult> {
+        let (_, p, rel) = self.resolve(path)?;
+        p.action(ctx, &rel, action, payload).await
     }
 
     /// provider 报出的相对路径在此补成全路径，再交给上层 sink

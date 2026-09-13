@@ -238,6 +238,7 @@ pub async fn dispatch_with(
         VFDS_EDIT => edit(root, &vctx, ctx).await,
         VFDS_SEARCH => search(root, &vctx, ctx).await,
         VFDS_WATCH | VFDS_UNWATCH => watch(root, &vctx, ctx, path == VFDS_WATCH).await,
+        VFDS_ACTION => action(root, &vctx, ctx).await,
         _ => unreachable!("VFDS_OPS 与分发分支必须一一对应"),
     };
     Some(resp)
@@ -408,6 +409,26 @@ async fn mkdir(
         created: true,
         etag: None,
     }))
+}
+
+/// `vdfs/action` —— 执行 provider 自持的节点动作（如「测试连接」）。
+///
+/// 本层不认识任何动作语义：只把 `(路径, 动作标识, 载荷)` 原样转发给该挂载点。
+/// 动作是否存在、成功与否由 provider 回答（未实现 → `NotImplemented`）。
+async fn action(
+    root: &DynVdfsProvider,
+    vctx: &VdfsContext,
+    ctx: &Arc<dyn InvokeRequest>,
+) -> InvokeResponse<PluginPayload> {
+    let req: VdfsActionRequest = payload_or_default(ctx);
+    if req.action.trim().is_empty() {
+        return Err(VdfsError::invalid("动作标识不能为空").into());
+    }
+    let full = normalize_path(&req.path)?;
+    let res = root
+        .action(vctx, &full, &req.action, req.payload.as_ref())
+        .await?;
+    Ok(PluginPayload::new(&res))
 }
 
 async fn move_item(
@@ -816,6 +837,22 @@ mod tests {
             }
         }
 
+        async fn action(
+            &self,
+            _ctx: &VdfsContext,
+            path: &str,
+            action: &str,
+            _payload: Option<&Value>,
+        ) -> VdfsResult<VdfsActionResult> {
+            self.note(&format!("action:{action}"));
+            Ok(VdfsActionResult {
+                action: action.to_string(),
+                ok: true,
+                message: format!("{path} 已执行 {action}"),
+                data: None,
+            })
+        }
+
         async fn watch(
             &self,
             _ctx: &VdfsContext,
@@ -878,6 +915,22 @@ mod tests {
             "order = 在根下的位置（根已按 provider order 排序）"
         );
         assert!(rec.seen().is_empty(), "list(/) 由组合视图内部完成");
+    }
+
+    /// `vdfs/action`：动作标识与相对路径原样转发，本层不解释语义
+    #[tokio::test]
+    async fn action_forwards_verb_and_relative_path() {
+        let (root, rec) = roots();
+        let ctx = ctx_with(json!({ "path": "/mem/a.txt", "action": "ping" }));
+        let resp = dispatch(&root, VFDS_ACTION, &ctx).await.unwrap().unwrap();
+        let data = resp.get::<VdfsActionResult>().unwrap();
+        assert_eq!(data.action, "ping");
+        assert!(data.ok);
+        assert_eq!(rec.seen(), vec!["action:ping"], "provider 只收到动作标识");
+
+        // 空动作标识 → 拒绝（不打扰 provider）
+        let bad = ctx_with(json!({ "path": "/mem/a.txt", "action": "  " }));
+        assert!(dispatch(&root, VFDS_ACTION, &bad).await.unwrap().is_err());
     }
 
     /// 导航可见性经「provider 声明 → 挂载节点属性 → 挂载视图」整链透传

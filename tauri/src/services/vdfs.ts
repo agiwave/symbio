@@ -16,6 +16,7 @@
 
 import { callPlugin } from './plugin'
 import {
+  VFDS_ACTION,
   VFDS_DELETE,
   VFDS_LIST,
   VFDS_MKDIR,
@@ -30,6 +31,7 @@ import {
   VFDS_ROOT,
   toVdfsPath,
   toWirePath,
+  type VdfsActionResponse,
   type VdfsContent,
   type VdfsDeleteResponse,
   type VdfsListResponse,
@@ -172,6 +174,24 @@ export async function deleteVdfs(path: string, recursive = false): Promise<VdfsD
     recursive,
   })
   return { ...resp, path: toVdfsPath(resp?.path ?? path) }
+}
+
+/**
+ * 执行节点动作（如「测试连接」）。
+ *
+ * `action` 是 provider 自持的动词标识：本层只做地址翻译，**不解释语义**，
+ * 也不认识任何具体动作——按钮由详情定义声明、结果由 provider 回答。
+ */
+export async function runVdfsAction(
+  path: string,
+  action: string,
+  payload?: unknown
+): Promise<VdfsActionResponse> {
+  return callPlugin<VdfsActionResponse>(VFDS_ACTION, {
+    path: toWirePath(path),
+    action,
+    ...(payload === undefined ? {} : { payload }),
+  })
 }
 
 /** 新建目录 */

@@ -34,9 +34,11 @@
       :capabilities="capabilities"
       :mechanism-actions="mechanismActions"
       :saving="saving"
+      :testing="testing"
       @option-save="(v) => $emit('save', v)"
       @delete="$emit('delete')"
       @open-container="$emit('browse')"
+      @test="$emit('action', 'test')"
     />
   </div>
 </template>
@@ -50,7 +52,12 @@ import type {
   EntityCapabilities,
   EntitySummary,
 } from '@/schemas/entities'
-import { vdfsAccessOf, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
+import {
+  VFDS_ACTION_TEST,
+  vdfsAccessOf,
+  type VdfsFieldError,
+  type VdfsNode,
+} from '@/schemas/vdfs'
 
 const props = withDefaults(
   defineProps<{
@@ -60,13 +67,20 @@ const props = withDefaults(
     error?: string
     fieldErrors?: VdfsFieldError[]
     saving?: boolean
+    /** 动作执行中的忙态（由页面持有：动作的结果只有页面知道） */
+    testing?: boolean
   }>(),
-  { error: '', fieldErrors: () => [], saving: false }
+  { error: '', fieldErrors: () => [], saving: false, testing: false }
 )
 
 defineEmits<{
   (e: 'save', values: Record<string, unknown>): void
   (e: 'delete'): void
+  /**
+   * 执行**节点动作**（详情定义声明的动作，如「测试连接」）。
+   * 本组件只把动作标识上抛——执行与结果呈现归页面层（`vdfs/action`）。
+   */
+  (e: 'action', id: string): void
   /**
    * 进入节点内部（容器寻址：`<id>/<子类别>`）。由**详情定义**声明
    * （`open-container` 动作）触发——是否有内部结构是 provider 的知识，
@@ -90,13 +104,26 @@ const definition = computed<DetailDefinition>(() => {
     binding: 'option',
     load_path: undefined,
     save_path: undefined,
-    // 只读节点原先整表剥掉动作（避免渲染出无效的「保存」），但**纯导航**
-    // 动作与写无关——agent 正是只读却最需要「浏览内部」的那类资源。
+    // 只读节点原先整表剥掉动作（避免渲染出无效的「保存」/「删除」），但
+    // **与写无关**的动作必须保留：「浏览内部」是纯导航（agent 正是只读却
+    // 最需要它的那类资源），「测试连接」是只读自检，二者都不依赖写权限。
     actions: access.value.write
       ? raw.actions
-      : (raw.actions ?? []).filter((a) => a.id === 'open-container'),
+      : (raw.actions ?? []).filter(
+          (a) => a.id === 'open-container' || a.id === VFDS_ACTION_TEST
+        ),
   }
 })
+
+/**
+ * 详情定义**声明了**「测试连接」⇒ 能力位为真。
+ *
+ * 定义是后端下发（`detail_definition`），故「该资源能否自检」的知识仍在后端；
+ * 前端只把它翻译成 DetailForm 的条件键（`cap.test_connection`），不自行猜测。
+ */
+const testable = computed(() =>
+  (definition.value.actions ?? []).some((a) => a.id === VFDS_ACTION_TEST)
+)
 
 const optionData = computed<Record<string, unknown> | null>(() =>
   props.data && typeof props.data === 'object' ? (props.data as Record<string, unknown>) : null
@@ -117,7 +144,7 @@ const capabilities = computed<EntityCapabilities>(() => ({
   realtime_status: false,
   refreshable: true,
   mutable: access.value.write,
-  test_connection: false,
+  test_connection: testable.value,
   read_only: !access.value.write,
 }))
 

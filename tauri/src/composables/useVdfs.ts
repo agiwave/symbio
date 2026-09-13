@@ -27,6 +27,7 @@ import {
   mkdirVdfs,
   moveVdfs,
   readVdfs,
+  runVdfsAction,
   unwatchVdfs,
   watchVdfs,
   writeVdfs,
@@ -192,6 +193,8 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
   const loadingDetail = ref(false)
 
   const saving = ref(false)
+  /** 动作执行中（与 saving 分开：动作不写数据，别让保存态跟着转） */
+  const actionBusy = ref(false)
   /** 详情级错误（纯文本） */
   const detailError = ref('')
   /** 字段级校验错误（provider 自持校验的产物；机制不解释其含义） */
@@ -295,6 +298,35 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
   /** 文本渲染器保存入口 */
   async function saveText(): Promise<boolean> {
     return write(nodeText.value)
+  }
+
+  /**
+   * 执行**节点动作**（如「测试连接」）。
+   *
+   * 动作标识由详情定义声明、由 provider 解释，本层只负责把它送到
+   * `vdfs/action` 并把结果（成功 / 失败 + 说明）呈现出来；**前端不认识
+   * 任何具体动作**，新增动作无需改动这里。
+   */
+  async function runAction(action: string): Promise<boolean> {
+    const node = selectedNode.value
+    if (!node) return false
+    actionBusy.value = true
+    detailError.value = ''
+    try {
+      const r = await runVdfsAction(node.path, action)
+      if (r?.ok) showToast('success', r.message || '执行成功')
+      else {
+        detailError.value = r?.message || '执行失败'
+        showToast('error', detailError.value)
+      }
+      return r?.ok === true
+    } catch (err) {
+      detailError.value = captureError(err)
+      showToast('error', `执行失败：${detailError.value}`)
+      return false
+    } finally {
+      actionBusy.value = false
+    }
   }
 
   /** 删除选中节点（目录递归） */
@@ -503,12 +535,14 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     nodeBinary,
     loadingDetail,
     saving,
+    actionBusy,
     detailError,
     fieldErrors,
     clearSelection,
     // 操作
     saveFields,
     saveText,
+    runAction,
     removeSelected,
     createDir,
     createTyped,

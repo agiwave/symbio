@@ -215,8 +215,10 @@
           :error="detailError"
           :field-errors="fieldErrors"
           :saving="saving"
+          :testing="testing"
           @save="onSave"
           @delete="onDelete"
+          @action="onAction"
           @rename="startRename"
           @browse="onBrowse"
         />
@@ -284,10 +286,12 @@ const {
   formData,
   loadingDetail,
   saving,
+  actionBusy: testing,
   detailError,
   fieldErrors,
   saveFields,
   saveText,
+  runAction,
   removeSelected,
   createDir,
   createTyped,
@@ -349,6 +353,14 @@ function onSave(payload: unknown) {
 
 function onDelete() {
   void removeSelected()
+}
+
+/**
+ * 节点动作（如「测试连接」）：标识由详情定义声明、由 provider 解释，
+ * 页面只负责转发并呈现结果。
+ */
+function onAction(id: string) {
+  void runAction(id)
 }
 
 /**

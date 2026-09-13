@@ -32,6 +32,11 @@ pub fn storage_service(
 
 // ==================== EntityProvider trait ====================
 
+/// `test_status` 的结果状态：**连通**（测试通过）
+pub const ENTITY_STATUS_CONNECTED: &str = "connected";
+/// `test_status` 的结果状态：**失败**（测试未通过；原因见 `status_detail`）
+pub const ENTITY_STATUS_FAILED: &str = "failed";
+
 /// 实体提供方 trait —— 各插件实现差异化钩子，公共流程由 [`dispatch`] 承载。
 ///
 /// ## 默认实现与重写

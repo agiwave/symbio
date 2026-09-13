@@ -32,14 +32,16 @@
 use super::host::{from_plugin_error, host_ctx};
 use crate::symbio_core::entities::{
     self, ContainerKindSpec, EntityProvider, EntityProviderInfo, EntitySummary,
+    ENTITY_STATUS_CONNECTED,
 };
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_CHANGE_CREATED,
-    VFDS_CHANGE_DELETED, VFDS_CHANGE_UPDATED, VFDS_EXT_FORM,
+    VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
+    VdfsNewType, VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_TEST,
+    VFDS_CHANGE_CREATED, VFDS_CHANGE_DELETED, VFDS_CHANGE_UPDATED, VFDS_EXT_FORM,
 };
 use crate::symbio_core::InvokeRequest;
 use async_trait::async_trait;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
@@ -537,6 +539,50 @@ impl VdfsProvider for EntityVdfsAdapter {
         Ok(())
     }
 
+    /// 节点动作：把 VDFS 的「动词」接到实体机制的既有能力上。
+    ///
+    /// 当前只承接 [`VFDS_ACTION_TEST`]（测试连接）→ [`EntityProvider::test_status`]；
+    /// 其余标识一律 `NotImplemented`——动作语义归 provider，适配器不做猜测。
+    async fn action(
+        &self,
+        ctx: &VdfsContext,
+        path: &str,
+        action: &str,
+        _payload: Option<&Value>,
+    ) -> VdfsResult<VdfsActionResult> {
+        if action != VFDS_ACTION_TEST {
+            return Err(VdfsError::NotImplemented);
+        }
+        if !matches!(parse_adapter_path(path), AdapterPath::Item(_)) {
+            return Err(VdfsError::invalid(format!(
+                "「测试连接」只对{}条目可用：{path}",
+                self.label_of()
+            )));
+        }
+        let host = host_ctx(ctx)?;
+        let id = self.id_of(path);
+        // 存在性校验：测试不存在的条目应报 NotFound 而非成功
+        self.summary_of(&host, &id).await?;
+        let resp = self
+            .provider
+            .test_status(&host, &id)
+            .await
+            .map_err(from_plugin_error)?;
+        let ok = resp.status == ENTITY_STATUS_CONNECTED;
+        Ok(VdfsActionResult {
+            action: action.to_string(),
+            ok,
+            message: resp.status_detail.clone().unwrap_or_else(|| {
+                if ok {
+                    format!("{}连接正常", self.label_of())
+                } else {
+                    format!("{}连接失败", self.label_of())
+                }
+            }),
+            data: None,
+        })
+    }
+
     /// 订阅：把 provider 侧变更广播转发到 sink（`unwatch` 时取消任务）。
     /// provider 是**变更源的持有者**，因此不需要轮询。
     async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
@@ -571,7 +617,10 @@ impl VdfsProvider for EntityVdfsAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::entities::{ENTITY_AGENT, ENTITY_MODEL, ENTITY_SESSION};
+    use crate::symbio_core::entities::{
+        EntityStatusResponse, ENTITY_AGENT, ENTITY_MODEL, ENTITY_SESSION, ENTITY_STATUS_CONNECTED,
+        ENTITY_STATUS_FAILED,
+    };
 
     /// 标签 / 顺序来自注册表（单一真相源），不硬编码
     #[test]
@@ -944,5 +993,90 @@ mod tests {
                 .is_err(),
             "删除不存在的子实体应报错"
         );
+    }
+
+    /// 节点动作：`test` 接到 `EntityProvider::test_status`；其余标识 NotImplemented
+    #[tokio::test]
+    async fn action_test_uses_entity_test_status() {
+        use crate::symbio_core::{PluginError, SimpleRequest};
+
+        struct ModelStub {
+            status: &'static str,
+        }
+        #[async_trait]
+        impl EntityProvider for ModelStub {
+            fn kind(&self) -> &'static str {
+                ENTITY_MODEL
+            }
+            async fn list_items(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+            ) -> Result<Vec<EntitySummary>, PluginError> {
+                Ok(vec![EntitySummary::new(ENTITY_MODEL, "m1", "模型一")])
+            }
+            async fn test_status(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+                id: &str,
+            ) -> Result<EntityStatusResponse, PluginError> {
+                let connected = self.status == ENTITY_STATUS_CONNECTED;
+                Ok(EntityStatusResponse {
+                    kind: ENTITY_MODEL.to_string(),
+                    id: id.to_string(),
+                    status: self.status.to_string(),
+                    status_detail: Some(
+                        if connected {
+                            "校验通过（openai / gpt-4o）"
+                        } else {
+                            "密钥无效"
+                        }
+                        .to_string(),
+                    ),
+                })
+            }
+        }
+
+        let req: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let ctx = VdfsContext::new(req);
+        let adapter = |status: &'static str| {
+            EntityVdfsAdapter::new(ENTITY_MODEL, Arc::new(ModelStub { status }))
+        };
+
+        let r = adapter(ENTITY_STATUS_CONNECTED)
+            .action(&ctx, "m1", VFDS_ACTION_TEST, None)
+            .await
+            .unwrap();
+        assert_eq!(r.action, VFDS_ACTION_TEST, "回显动作标识便于配对请求");
+        assert!(r.ok);
+        assert!(
+            r.message.contains("gpt-4o"),
+            "成功时回显 provider 的明细：{}",
+            r.message
+        );
+
+        let r = adapter(ENTITY_STATUS_FAILED)
+            .action(&ctx, "m1", VFDS_ACTION_TEST, None)
+            .await
+            .unwrap();
+        assert!(!r.ok, "provider 报失败 ⇒ ok=false（不是协议错误）");
+        assert!(r.message.contains("密钥无效"));
+
+        // 未实现的动作 → NotImplemented（消费方据此不给出入口）
+        assert!(adapter(ENTITY_STATUS_CONNECTED)
+            .action(&ctx, "m1", "restart", None)
+            .await
+            .unwrap_err()
+            .is_not_implemented());
+
+        // 不存在的条目 → 报错（不静默成功）
+        assert!(adapter(ENTITY_STATUS_CONNECTED)
+            .action(&ctx, "nope", VFDS_ACTION_TEST, None)
+            .await
+            .is_err());
+        // 动作只对条目有意义：挂载根 / 子实体路径不适用
+        assert!(adapter(ENTITY_STATUS_CONNECTED)
+            .action(&ctx, "", VFDS_ACTION_TEST, None)
+            .await
+            .is_err());
     }
 }

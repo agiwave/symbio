@@ -261,6 +261,7 @@ pub struct VdfsNewType {
 | **S7 容器子实体重建** | 通用适配器按 `container_kinds` 支持 `<id>/<子类别>/<条目>`；agent bundle 内部（提示词 / 技能 / MCP）上 VDFS | 容器页最后一处不可替代能力消失 |
 | **S8 会话清单上 VDFS** | 会话节点自带 `message_count` / `metadata` / `meta_tags`；`listSessions()` 改走 `vdfs/list`，`services/entities.ts` 删除 | 前端 `entities/*` 调用点归零 |
 | **S9 导航可见性** | 机制层新增 `VdfsProvider::nav_visible()`（缺省 `true`），经挂载节点属性 → `VdfsMountInfo.nav_visible` 透传；`local` 声明 `false`，前端按标记过滤 | 左栏 = 六类资源，无按名硬编码 |
+| **S10 节点动作** | 新增 `vdfs/action` 操作 + `VdfsProvider::action()`（默认 `NotImplemented`）；适配器把 `test` 接到 `EntityProvider::test_status`；前端把「测试连接」接回 | S5 后丢失的连通性自检回归 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -434,6 +435,28 @@ pub struct VdfsNewType {
     也不会因改名而失效。
   - 覆盖：`mount_node_marks_nav_visibility`（节点属性 + 挂载表仍含隐藏项）、
     `providers_carry_nav_visibility`（整链透传）、`mountNavVisible`（前端过滤）。
+
+- **S10 节点动作（`vdfs/action`）**（**已完成**）：S5 下线实体页时丢了一项能力——
+  `model` / `mcp` 的「测试连接」仍在后端（`EntityProvider::test_status`），
+  但**前端已无入口**（`VdfsFormDetail` 只接了 `@delete`，且 `capabilities.
+  test_connection` 恒为 `false`）。本阶段把它补回 VDFS：
+
+  | 层 | 改动 |
+  | --- | --- |
+  | 协议 | `vdfs/action`（`{ path, action, payload? }`），与 12 个既有操作同表分发 |
+  | trait | `VdfsProvider::action()` 默认 `NotImplemented`；`VdfsMountTable` 只做路径转发 |
+  | 适配器 | `EntityVdfsAdapter::action()`：`test` → `EntityProvider::test_status`（`connected` ⇒ `ok`），其余标识 `NotImplemented` |
+  | 呈现 | 按钮仍由**详情定义**声明（`actions` + `cap.test_connection` 条件）；`VdfsFormDetail` 把「定义是否声明 test」翻译成能力位，不再硬编码 `false` |
+  | 执行 | `useVdfs.runAction(id)` → `vdfs/action` → toast 结果；`testing` 忙态与 `saving` 分开 |
+
+  - **动作 = provider 自持的动词**：VDFS 只透传 `(路径, 标识, 载荷)`，不解释语义；
+    「是否支持」由 provider 回答（`NotImplemented`），「长什么样」由宿主方言决定
+    ——与 `ext` 决定渲染器是同一个分层原则。
+  - 只读节点仍保留 `test` 与 `open-container` 动作：二者都不依赖写权限
+    （原先只读时只保留 `open-container`，会把只读资源的自检一并剥掉）。
+  - 覆盖：`action_test_uses_entity_test_status`（成功 / 失败 / 未实现 / 不存在的条目 /
+    非条目路径）、`action_forwards_verb_and_relative_path`（分层只转发）+ 前端
+    `runVdfsAction` 三例（口径翻译、无载荷不发字段、载荷透传）。
 
 ---
 

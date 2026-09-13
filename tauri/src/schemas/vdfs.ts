@@ -21,6 +21,8 @@ export const VFDS_MKDIR = 'vdfs/mkdir'
 export const VFDS_MOVE = 'vdfs/move'
 export const VFDS_WATCH = 'vdfs/watch'
 export const VFDS_UNWATCH = 'vdfs/unwatch'
+/** 执行节点动作（provider 自持的动词，如「测试连接」） */
+export const VFDS_ACTION = 'vdfs/action'
 
 /** 虚拟根路径（前端口径：`.vdfs`）。
  *
@@ -148,6 +150,26 @@ export interface VdfsMountInfo {
   nav_visible?: boolean
   [attribute: string]: unknown
 }
+
+/** 节点动作请求（`action` 与 `payload` 原样透传，前端不解释语义） */
+export interface VdfsActionRequest {
+  path: string
+  action: string
+  payload?: unknown
+}
+
+/** 节点动作结果 */
+export interface VdfsActionResponse {
+  /** 回显的动作标识（便于配对请求） */
+  action: string
+  ok: boolean
+  /** 结果说明（成功摘要 / 失败原因，可直接展示） */
+  message: string
+  data?: unknown
+}
+
+/** 已知动作标识：连接测试（后端 `VFDS_ACTION_TEST`） */
+export const VFDS_ACTION_TEST = 'test'
 
 export interface VdfsProvidersResponse {
   providers: VdfsMountInfo[]
