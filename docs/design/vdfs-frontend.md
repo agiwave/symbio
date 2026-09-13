@@ -62,8 +62,8 @@
 | `registry/vdfsTypes.ts` | `ext → 渲染器标识`（零组件导入） | **保留** |
 | `registry/vdfsRenderers.ts` | `标识 → 组件`（唯一装配点） | **保留** |
 | `components/vdfs/*.vue` | form / text / session / readonly 四个详情渲染器 | **保留** |
-| `views/VdfsView.vue` | 三栏装配 | **保留**（扩展） |
-| `router/index.ts` | `/vdfs/:mount?` | **保留** |
+| `views/VdfsView.vue` | 三栏装配（**嵌入主布局** / 独立整页两种形态） | **保留**（扩展） |
+| `router/index.ts` | `/vdfs/:mount?`（S3 起嵌入 `MainLayout` 子路由） | **保留** |
 
 结论：前端既有改动**方向正确、结构合理**，与目标一致的部分**整体保留**，
 G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
@@ -135,6 +135,12 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 - **渲染**：图标 + 标题为主，`description` 作 tooltip；选中态 = 当前挂载点。
 - **点击**：进入 `.vdfs/<挂载名>`（中栏显示其列表）。
 - 挂载点集合、顺序、标签**全部由后端下发**，前端零硬编码。
+- **装配形态（S3 起）**：本栏由**应用外壳**承担（`MainLayout` 的 `NavRail`），VDFS 页
+  作为工作区内容**嵌入**其中——全 App 因此只有一台三栏工作台，页面切换不替换外壳。
+  `VdfsView` 保留**独立整页**形态（自渲染本栏 + 返回键），供将来以独立窗口 / 面板复用。
+  过渡期说明：应用外壳的导航项**暂仍来自 `entities/providers` 注册表**
+  （`useNavRailItems`），因为 `model` / `agent` / `skill` / `mcp` 尚未有 VDFS provider（§7 S4）；
+  此时若切到 `.vdfs` 根会丢失这些导航项。待 S4 补齐后，左栏一并切到 `.vdfs` 根，S5 下线 `entities/*`。
 
 ### 4.2 中栏：列表 / 树
 
@@ -261,7 +267,28 @@ pub struct VdfsNewType {
   - VDFS 列表项图标复用实体机制的**项级图标**（`kind + 节点名`，与 `config_type`
     项级分发同构），设置分区图标与迁移前等价。
   - VDFS 页「返回」在虚拟根处回主界面（本页整页替换主布局，避免困住用户）。
-- **S3–S5**：待续。
+- **S3 会话迁移**（**已完成**）：
+  - **后端 `session` provider**：根 = 会话清单（`new_types = [会话]`、`root_access = l`），
+    节点 = 会话（`ext = session`、`kind = session`、`status` 反映 working、`name = 会话 id`、
+    `title = display_title()`、`description = derive_session_summary`）。`read` 返回会话
+    元数据 JSON；`write` 分两支——`create` 位 → 新建（**id 由 provider 生成**，路径名
+    去扩展名作标题，`created_via = "vdfs"`），否则 → 合并 `metadata` / `title`（其余字段
+    明确拒绝，不静默丢弃）；`delete` 转发 `delete_session_internal`。
+  - **消息（转写）不经 VDFS**：聊天流仍由既有 chat 协议承载，VDFS 只承担「资源读写」
+    这一层，避免出现两套写路径。
+  - **机制补缺**：`vdfs/write` 的 `create` 位此前**未透传到 `VdfsContent`**，provider
+    无法区分「新建 / 覆盖」；已补 `VdfsContent.create`（`#[serde(default, skip_serializing_if)]`
+    + `with_create()`）+ `protocol.rs` 三处透传 + 单测。
+  - **实时**：provider 持有 `broadcast::Sender<VdfsChange>`（变更源的持有者，**非轮询**），
+    `watch` spawn 转发任务、`unwatch` abort；变更点在 `session/update`（`invoke_update`）
+    与 `delete_session_internal`。
+  - **前端**：`VdfsView` 新增 `embedded` 装配形态（左栏由应用外壳承担，本页只出中栏 + 右栏）；
+    `/vdfs/:mount?` 移入 `MainLayout` 子路由；首页 `/` 重定向到 `/vdfs/session`；
+    `navTargetOf('session')` 由 `/` 切到 `/vdfs/session`；旧 `session` 实体页实例（`path: ''`）
+    退场。会话详情的**删除动作**经 `mechanismActions` 注入（判据 = 节点访问位 `w`）。
+  - **已知取舍**：VDFS 新建会话是「立即创建 + 命名」（VDFS 的 `write { create }` 语义），
+    与实体机制的「懒创建（发送首条消息才建）」不同；后者属聊天流优化，待 S5 后统一。
+- **S4–S5**：待续。
 
 ---
 

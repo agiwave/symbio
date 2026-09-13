@@ -10,12 +10,20 @@
   - VDFS 按**路径与访问位**组织资源，导航来自挂载点，能力来自 r/w/l/t。
   两者共用同一套 UI 原语（Workbench / NavRail / EntityShell / EntityCard /
   DetailForm / CodeEditor），因此新增资源只需实现 VdfsProvider，前端零开发。
+
+  ## 两种装配形态
+
+  - **嵌入主布局（embedded，当前唯一用法）**：本页作为应用外壳 `#content` 的内容，
+    只提供中栏（当前目录）+ 右栏（详情）；左栏（挂载点导航）由应用外壳承担。
+    全 App 因此只有一台三栏工作台，页面切换不发生外壳替换。
+  - **独立整页（standalone）**：自渲染侧边栏（挂载点 = 左栏）与返回键，
+    整页替换主布局。保留此形态以便将来以独立窗口/面板复用同一份页面逻辑。
 -->
 <template>
-  <div class="vdfs-page">
+  <div class="vdfs-page" :class="{ 'vdfs-page--embedded': embedded }">
     <Workbench
-      :rail-items="railItems"
-      :back="true"
+      :rail-items="embedded ? undefined : railItems"
+      :back="!embedded"
       :back-title="backTitle"
       :title="title"
       :list-width="260"
@@ -218,7 +226,8 @@
         </div>
       </template>
     </Workbench>
-    <Toast />
+    <!-- 嵌入主布局时应用外壳已渲染全局 Toast，本页不再重复 -->
+    <Toast v-if="!embedded" />
   </div>
 </template>
 
@@ -247,6 +256,8 @@ import { getEntityIcon, getEntityIconFor } from '@/registry/entityTypes'
 const props = defineProps<{
   /** 路由 `:mount`（可选）：深链直接进入某挂载点 */
   mount?: string
+  /** 嵌入主布局：左栏由应用外壳承担，本页只渲染中栏 + 右栏（见文件头「两种装配形态」） */
+  embedded?: boolean
 }>()
 
 const route = useRoute()
@@ -298,8 +309,9 @@ function goRoot() {
 }
 
 /**
- * 返回：本页是**整页替换主布局**的全局页面，因此在虚拟根处「返回」应回主界面，
- * 否则用户会被困在 VDFS 页（本页没有应用外壳的导航）。
+ * 返回键（仅独立整页形态可见）：本页整页替换主布局时，虚拟根处「返回」应回主界面，
+ * 否则用户会被困在 VDFS 页（该形态下本页没有应用外壳的导航）。
+ * 嵌入形态下左栏由应用外壳承担，无需返回键（`:back="!embedded"`）。
  */
 const backTitle = computed(() => (cwd.value === VFDS_ROOT ? '返回主界面' : '返回根'))
 function goBack() {
@@ -478,6 +490,11 @@ void props
   min-height: 0;
   overflow: hidden;
   background: var(--surface-page);
+}
+
+/* 嵌入主布局：高度交由应用外壳的工作区决定（不再独占视口） */
+.vdfs-page--embedded {
+  height: 100%;
 }
 
 /* ============== 面包屑 ============== */

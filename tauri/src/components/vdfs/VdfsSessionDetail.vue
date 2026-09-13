@@ -10,6 +10,7 @@
   <Session
     :item="item"
     :capabilities="capabilities"
+    :mechanism-actions="mechanismActions"
     :saving="saving"
     @created="(id) => $emit('created', id)"
     @delete="$emit('delete')"
@@ -19,7 +20,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import Session from '@/components/entities/Session.vue'
-import type { EntityCapabilities, EntitySummary } from '@/schemas/entities'
+import type { DetailAction, EntityCapabilities, EntitySummary } from '@/schemas/entities'
 import { vdfsAccessOf, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
 
 // 渲染器统一契约（详见 VdfsTextDetail 同名说明）
@@ -58,5 +59,17 @@ const capabilities = computed<EntityCapabilities>(() => {
     test_connection: false,
     read_only: !access.write,
   }
+})
+
+/**
+ * 机制动作注入（在 ChatMainPanel 头部与自身按钮并排渲染）。
+ *
+ * 能力判据是节点的访问位（`w` = 可写 ⇒ 可删），与实体机制同构：
+ * 删除请求经 `@delete` 回到页面层，由页面统一走 `vdfs/delete`
+ * （`VdfsProvider::delete` → `delete_session_internal`），本组件不直接发协议。
+ */
+const mechanismActions = computed<DetailAction[]>(() => {
+  if (!capabilities.value.mutable) return []
+  return [{ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' }]
 })
 </script>
