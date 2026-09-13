@@ -1,7 +1,7 @@
 /**
  * useVdfs —— VDFS 通用资源页的唯一页面逻辑
  *
- * 与 `useWorkbenchView`（实体机制的页面逻辑）同构，但**不含任何资源类型知识**：
+ * 不含任何资源类型知识（原实体机制的 `useWorkbenchView` 已随实体页下线）：
  * 挂载点来自后端注册、目录内容来自 `vdfs/list`、详情渲染器由节点的 `ext`
  * 决定（`registry/vdfsTypes`）。新增一种资源 = 后端实现一个 `VdfsProvider`，
  * 本文件零改动。
@@ -221,7 +221,6 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     if (r !== 'form' && r !== 'text' && r !== 'json' && r !== 'markdown') return
 
     // 读取代次令牌：连点多项时，慢响应不得覆盖新选中项的数据
-    // （与 useWorkbenchView 的 detailToken 同一约定）
     const token = ++detailToken
     loadingDetail.value = true
     try {

@@ -4,13 +4,12 @@
   整个 App 是一台三栏工作台，本组件是其页面容器，两种用法：
 
   1. 应用外壳模式（MainLayout）：传 railItems + #content 插槽 ——
-     侧边栏 = 后端 providers 注册表导航，工作区 = RouterView；
-  2. 实体页模式（WorkbenchView，全 App 唯一实体页面）：传 railItems
-     （容器页）或不传（顶层页，侧边栏由 MainLayout 承担）+ list/detail 等插槽 ——
-     工作区 = 内置 EntityShell（列表 + 详情）。
+     侧边栏 = `.vdfs` 挂载点导航，工作区 = RouterView；
+  2. 页面模式（VdfsView）：传 list/detail 等插槽（嵌入形态不传 railItems，
+     侧边栏由 MainLayout 承担）——工作区 = 内置 EntityShell（列表 + 详情）。
 
-  状态机在 useWorkbench.ts（同名配套组合式）；类别集合一律由后端注册表下发
-  （providers / container_kinds），前端零硬编码。
+  类别集合一律由后端下发（VDFS 挂载点 / 目录节点），前端零硬编码。
+  （原「统一实体页」WorkbenchView 与其状态机 useWorkbench 已于 S5 下线。）
 -->
 <template>
   <div class="workbench">

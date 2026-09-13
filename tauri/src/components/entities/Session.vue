@@ -1,5 +1,5 @@
 <!--
-  Session — 会话实体专属详情（WorkbenchView 机制下的差异化 editor，kind 级注册）
+  Session — 会话专属详情（VDFS 下由 `ext = session` 选中，VdfsSessionDetail 薄适配）
 
   会话 = 统一实体机制中的 read-only+mutable 实体（entities/list 摘要含
   is_working 实时状态；删除经重写的 delete_item 钩子走统一 entities/delete）。

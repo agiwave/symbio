@@ -1,7 +1,7 @@
 /**
  * Explorer 存储 —— 文件查看器的写回通道
  *
- * 目录树浏览已机制化（EntityTree + 会话容器实体页），本 store 仅保留
+ * 目录树浏览已机制化（VDFS 的 `<id>/工作目录[/<rel>]` 寻址），本 store 仅保留
  * 文件查看器（FileViewerOverlay）的保存通道；workdir 经 services/plugin
  * 的 lastWorkdir 侧信道随请求下发。
  */

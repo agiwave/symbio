@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '../views/MainLayout.vue'
-import WorkbenchView from '../views/WorkbenchView.vue'
 import VdfsView from '../views/VdfsView.vue'
 
 const router = createRouter({
@@ -26,9 +25,16 @@ const router = createRouter({
             embedded: true,
           }),
         },
-        // 统一实体页（全 App 唯一实体页面，机制化配置驱动）：
-        // :types = 'all' | 逗号分隔 kind | 单 kind（缺省 all）
-        { path: 'entities/:types?', name: 'entities', component: WorkbenchView, props: (route) => ({ typesParam: (route.params.types as string) || undefined }) },
+        // 旧统一实体页（S5 已下线）→ redirect 保兼容（书签 / 深链）：
+        // :types = 'all' | 逗号分隔 kind | 单 kind（缺省 all）。
+        // 单 kind 直达对应 VDFS 挂载点（挂载名与 kind 同名）；其余回落首页挂载点。
+        {
+          path: 'entities/:types?',
+          redirect: (to) => {
+            const first = String(to.params.types ?? '').split(',')[0]
+            return first && first !== 'all' ? `/vdfs/${first}` : '/vdfs/session'
+          },
+        },
         // 旧专项路由 → redirect 保兼容（书签 / 深链）。
         // S5：这些资源均已迁移到 VDFS（`/vdfs/{mount}`，挂载名与 kind 同名），
         // 故直接指向 VDFS 页，不再经过将被下线的 `/entities/*` 统一实体页。
@@ -41,29 +47,10 @@ const router = createRouter({
         { path: 'settings', redirect: () => '/vdfs/setting' }
       ]
     },
-    {
-      // 统一实体页（container 模式，全局页面级推入，整页替换主布局）：
-      // 与主界面同构的 侧边栏（ProviderInfo.container_kinds 下发的子类别）
-      // + 列表 + 详情；协议为同一套 entities/*（payload.container）。
-      // :kind = 容器所属 provider kind；:id = 容器条目 id
-      path: '/container/:kind/:id/entities',
-      name: 'container-entities',
-      component: WorkbenchView,
-      props: (route) => ({
-        containerKind: route.params.kind as string,
-        containerId: route.params.id as string,
-      })
-    },
-    {
-      // agent 兼容别名（深链保兼容）：/agent/:agentId/entities
-      path: '/agent/:agentId/entities',
-      name: 'agent-entities',
-      component: WorkbenchView,
-      props: (route) => ({
-        containerKind: 'agent',
-        containerId: route.params.agentId as string,
-      })
-    }
+    // 容器实体页（`/container/:kind/:id/entities`、`/agent/:agentId/entities`）
+    // 已随 S5 下线：容器的「管理内部实体」能力由 VDFS 的
+    // `<id>/<子类别标签>/<条目>` 寻址承担（见 docs/design/vdfs-frontend.md §7 S7），
+    // 整页推入的容器页不再是必需入口，故不再保留路由。
   ]
 })
 

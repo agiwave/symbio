@@ -6,9 +6,8 @@
  * 可接受的新建元素类型（`new_types`）。**前端零硬编码类型清单**：新增一类资源
  * = 后端注册一个 `VdfsProvider`，导航项自动出现。
  *
- * 与实体注册表（useEntityProviders）的分工：
- * - 本文件：应用外壳导航（VDFS 挂载点，S4 起）；
- * - useEntityProviders：实体页（WorkbenchView）内部实现，S5 下线实体页后移除。
+ * S5 起本文件是导航的**唯一**实现：统一实体页与其注册表
+ * （`useEntityProviders`）已随实体页一并下线，应用外壳只认 `.vdfs` 挂载点。
  *
  * 实时：订阅 `vdfs` 事件总线，任一挂载点发生变更即重拉清单（**非轮询**）。
  */
@@ -35,8 +34,8 @@ export function navTargetOf(mount: string): string {
 /**
  * `.vdfs` 虚拟根内容（挂载点清单）—— 外壳导航的**唯一来源**（模块级单例）。
  *
- * 与 `useEntityProviders` 的 providers 单例平行：S4 起外壳导航改由 `.vdfs` 驱动，
- * 实体注册表退居「实体页内部实现」，S5 下线实体页后可一并移除。
+ * S4 起外壳导航改由 `.vdfs` 驱动；S5 下线实体页后，VDFS 挂载点清单是前端
+ * 唯一的一份「资源类别」来源（实体注册表与其页面已移除）。
  */
 const mounts = shallowRef<VdfsMountInfo[]>([])
 let state: 'idle' | 'loading' | 'loaded' = 'idle'

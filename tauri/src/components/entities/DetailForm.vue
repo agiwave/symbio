@@ -21,7 +21,8 @@
   结构化 widget 表单模型约定（与后端 validate_manifest 两侧一致）：
   list = 字符串数组（编辑态每行一项）；map = 键值对（编辑态每行 KEY=VALUE）。
 
-  解析顺序（WorkbenchView）：注册专属 editor → 本渲染器（有定义）→ 通用兜底。
+  解析顺序（详情页分发）：注册专属 editor → 本渲染器（有定义）→ 通用兜底。
+  VDFS 下本渲染器由 `ext = form` 选中（VdfsFormDetail 薄适配）。
   会话聊天工作区 / appearance 即时生效 / about 信息展示等复杂详情
   不适用本渲染器，仍走注册 editor。
 -->

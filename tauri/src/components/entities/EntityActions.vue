@@ -9,7 +9,7 @@
   消费方（全部在详情页内部渲染，页面不得另加外框）：
   - DetailForm（定义驱动：定义动作 + 机制动作注入，同排）；
   - 自定义 editor（经 mechanism-actions prop 接收，渲染在自己的动作区）；
-  - EntityDetailPanel（通用只读兜底）。
+  - 通用只读兜底面板（VDFS 下为 VdfsReadonlyDetail）。
 
   busy / disabled 为与 actions 等长的标记数组（按索引对齐，允许同 id
   多动作各自具备进行中/禁用状态）。

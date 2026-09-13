@@ -4,7 +4,7 @@
  * 注册表不再维护硬编码类型清单/前缀/能力，只做：
  * - editor 组件按 kind 注册
  * - icon 按 kind 注册
- * 类型的存在/能力/前缀来自后端 ProviderInfo（见 useEntityProviders）。
+ * 资源的存在/能力/寻址来自后端（VDFS 挂载点与节点；实体页已于 S5 下线）。
  */
 import { describe, expect, it } from 'vitest'
 import { defineComponent } from 'vue'

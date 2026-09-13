@@ -3,10 +3,9 @@
 
   窄条图标导航，全项目所有三栏页面共用（此前 MainLayout 与容器实体页各持一份
   重复的 nav CSS，现收敛于此）：
-  - MainLayout：items = 后端 providers 注册表（实体类型导航）；
-  - WorkbenchView（container 模式）：items = 后端 container_kinds（容器子类别，带计数角标）。
+  - MainLayout：items = `.vdfs` 挂载点清单（资源类别导航，后端 order 排列）。
 
-  类别集合全部由后端注册表下发，前端只做 UI 映射（icon 由调用方传入，
+  类别集合全部由后端下发，前端只做 UI 映射（icon 由调用方传入，
   未传时回退通用文件图标）。头部/尾部内容经插槽注入（logo、返回键、系统工具）。
 -->
 <template>

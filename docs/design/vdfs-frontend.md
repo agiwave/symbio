@@ -141,7 +141,7 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
   `VdfsView` 保留**独立整页**形态（自渲染本栏 + 返回键），供将来以独立窗口 / 面板复用。
 - **数据来源（S4 起）**：本栏**已完全由 `.vdfs` 驱动**（`composables/useNavRail.ts`）——
   挂载点清单即导航项，`navTargetOf(mount)` 恒为 `/vdfs/{mount}`，不再依赖
-  `entities/providers` 注册表（后者退居「实体页内部实现」，S5 下线）。
+  `entities/providers` 注册表（该注册表与其页面已于 S5 一并删除）。
   变更经 `vdfs` 事件总线触发重拉（**非轮询**）。
 - **顺序与标签的单一真相源**：挂载点的 `label` / `order` 一律取自实体注册表
   （`entities::nav_meta_of(kind)`；`EntityVdfsAdapter` 同源），自持 provider 的插件
@@ -253,7 +253,7 @@ pub struct VdfsNewType {
 | **S2 设置迁移** | `setting` 已是 provider；把设置入口从 `/settings`（entities）切到 `/vdfs/setting` | 设置页走 VDFS；`entities/setting` 退场 |
 | **S3 会话迁移** | 新增 `session` provider：根 = 会话清单（`new_types = [会话]`）、节点 = 会话（`ext = session`）；read/write/delete 转发既有会话协议 | 会话页走 VDFS；聊天工作区作为 `session` 渲染器 |
 | **S4 其余迁移** | 用一个通用 `EntityVdfsAdapter` 把既有 `EntityProvider` 接成挂载点（`model` / `skill` / `mcp` 可写、`agent` 只读）；外壳左栏切到 `.vdfs` 根 | 全部资源在 `.vdfs` 下可见可管；统一实体页按类型逐个退场 |
-| **S5 下线旧协议** | 移除 `entities/*` 路由与前端实体页，导航完全由 `.vdfs` 驱动 | 一个协议、一个页面 |
+| **S5 下线旧协议** | 移除 `entities/*` 路由与前端实体页（`/entities/*` 仅留保兼容重定向），导航完全由 `.vdfs` 驱动 | 一个协议、一个页面 |
 | **S6 会话内部重建** | 会话内部结构（子会话 / 工作目录树）改由 VDFS 同名目录承载，原容器实体页可替代 | S5 的阻塞解除 |
 | **S7 容器子实体重建** | 通用适配器按 `container_kinds` 支持 `<id>/<子类别>/<条目>`；agent bundle 内部（提示词 / 技能 / MCP）上 VDFS | 容器页最后一处不可替代能力消失 |
 
@@ -332,17 +332,30 @@ pub struct VdfsNewType {
     （`w` ⇒ 可删），经 `@delete` 回页面层统一走 `vdfs/delete`（与 `VdfsSessionDetail` 同构）。
   - **已知取舍**：`local`（本地文件）同为 VDFS 挂载点，故左栏出现第 7 项；隐藏需在机制层
     引入「导航可见性」标记，而非前端按名过滤。`agent` 的新建暂不支持 VDFS 路径（zip 语义）。
-- **S5 下线旧协议**（**进行中**）：
+- **S5 下线旧协议**（**已完成**）：
   - **第一步（已完成）**：旧专项路由重定向改指 VDFS 页——
     `model-providers` → `/vdfs/model`、`mcp` → `/vdfs/mcp`、`skill` → `/vdfs/skill`、
     `agent` → `/vdfs/agent`（原先一律指向将被下线的 `/entities/{kind}`）。
     书签 / 深链从此直达 VDFS，不再经过统一实体页。
   - **阻塞已解除（S6）**：会话的「管理内部实体」能力（工作目录树 / 子会话）
     已在 VDFS 上重建，容器页不再是不可替代的入口。详见下面的 S6 记录。
-  - **待办**：移除 `/entities/:types?`（leaf 模式）与容器页
-    （`/container/:kind/:id/entities`、`/agent/:agentId/entities`），
-    并随之调整 `WorkbenchView` 的 leaf 分支（`goBack` /
-    `openContainerEntities`）与 `useWorkbenchView` 的 leaf 逻辑。
+  - **页面下线（已完成）**：移除三条旧路由与整簇页面代码——
+    - `/entities/:types?` 改为**保兼容重定向**（单 kind 直达 `/vdfs/{kind}`，
+      `all` / 多 kind 回落 `/vdfs/session`）；
+    - 容器页 `/container/:kind/:id/entities`、`/agent/:agentId/entities`
+      不再保留（能力已由 S7 的 `<id>/<子类别标签>/<条目>` 寻址承担）；
+    - 随之删除 `views/WorkbenchView.vue`、`composables/useWorkbenchView.ts`、
+      `composables/useWorkbench.ts`、`composables/useEntityProviders.ts`、
+      `components/entities/EntityTree.vue` / `EntityTreeNode.vue` /
+      `EntityDetailPanel.vue` 及其单测。**前端自此只剩一台三栏工作台**
+      （外壳 `MainLayout` + 页面 `VdfsView`）。
+  - **连带修复**：实体操作前缀（`worker/session` 等）原先由实体页挂载时
+    拉取 `entities/providers` 填充，页面下线后无人加载 → 会话清单会打到
+    错误地址。改为由 `services/entities.ts` **自持幂等加载**（首个 entities
+    操作前拉一次，失败可重试）。
+  - **剩余（后续阶段）**：`services/session.ts` 的 `listSessions()` 仍走
+    `entities/list`（需要 `message_count` / `metadata`，当前 VDFS 节点未
+    下发这些字段）；迁到 `vdfs/list` 后 `services/entities.ts` 可整体删除。
 
 - **S6 会话内部在 VDFS 上重建**（**已完成**）：会话保持**叶子**（点击 = 聊天
   详情，语义不变），其内部结构作为**会话同名目录**挂在其下：

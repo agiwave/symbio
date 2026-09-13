@@ -33,8 +33,8 @@
       </template>
 
       <template #content>
-        <!-- :key 强制路由切换时重建组件：各实体页共用统一 WorkbenchView，
-             若复用实例则 onMounted/订阅不会重新执行，列表会残留上一个类型的数据 -->
+        <!-- :key 强制路由切换时重建组件：VDFS 页若复用实例则 onMounted/订阅
+             不会重新执行，列表会残留上一个挂载点的数据 -->
         <RouterView :key="route.path" />
       </template>
     </Workbench>
@@ -85,7 +85,7 @@ function onNavSelect(mount: string) {
 
 onMounted(async () => {
   // 启动全局会话事件监听（一次即可，跨页面共享）
-  // 这一步必须在会话页（WorkbenchView session 实例）挂载之前，否则首屏会错过事件
+  // 这一步必须在会话页（VDFS session 挂载点）挂载之前，否则首屏会错过事件
   startSessionBusWatcher()
 
   // 恢复全局会话状态（原 SessionView 职责，随会话页纳入机制上移到应用外壳）：
@@ -98,7 +98,8 @@ onMounted(async () => {
   void useSessionsStore().refreshList()
 
   // 拉取 `.vdfs` 虚拟根（挂载点清单）→ 动态生成左侧导航（幂等）。
-  // 实体页（WorkbenchView）自持实体注册表的加载，外壳不再代劳。
+  // 这是资源类别的唯一来源；`entities/providers` 注册表已随实体页下线
+  // （仍在使用 `entities/*` 的服务由 services/entities.ts 自持幂等加载）。
   try {
     await loadMounts()
   } catch (err) {

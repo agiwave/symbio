@@ -1,7 +1,14 @@
 # 统一实体管理机制与规范
 
-状态：现行规范
+状态：现行规范（**后端机制**；前端「统一实体页」已于 S5 下线）
 范围：Symbio 全部「实体管理」类功能（顶层实体 + 容器子实体）
+
+> **前端已收口（S5）**：`views/WorkbenchView.vue` 与其页面逻辑
+> （`useWorkbenchView` / `useWorkbench` / `useEntityProviders`）以及
+> `EntityTree` / `EntityDetailPanel` 均已删除，前端资源页只有 VDFS 一台
+> （见 `docs/design/vdfs-frontend.md` §7）。本文件的**协议与后端机制**
+> （`entities/*`、`EntityProvider`、注册表）仍然有效，且继续被 VDFS 的
+> `EntityVdfsAdapter` 复用；文中出现的前端页面/组件名仅作历史说明。
 关联：`docs/design/open-agent-bundle-spec.md`（OAB 标准）、
 `symbio/src/symbio_core/schemas/entities.rs`（协议权威定义）、
 `symbio/src/symbio_core/entities.rs`（注册表与统一分发）

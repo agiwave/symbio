@@ -1,9 +1,9 @@
 /**
  * 实体类型注册表（前端纯展示层）—— editor 组件 + icon 按 kind（或 kind:ext）注册
  *
- * 分层原则（见 composables/useEntityProviders.ts）：
- * - 类型的**存在性/能力/前缀/顺序/标签**全部来自后端 `entities/providers` 下发的
- *   ProviderInfo（是权威，前端不再硬编码类型清单）；
+ * 分层原则：
+ * - 资源的**存在性/能力/寻址/顺序/标签**一律来自 VDFS（`.vdfs` 挂载点与节点），
+ *   前端不再硬编码类型清单（S5 起实体页与 `entities/providers` 均已下线）；
  * - 本模块只维护**前端 UI 专属**的映射：某 kind 的专属编辑表单（editor 组件）与
  *   SVG 图标。后端不参与下发 Vue 组件 / SVG。
  *
@@ -195,7 +195,7 @@ registerEntityIcon(
   )
 )
 
-// 容器子类别图标（WorkbenchView container 模式的类别侧边栏复用主界面图标体系）
+// 场景子类别图标（provider 场景自定的 kind 级图标，与主界面图标体系同构）
 registerEntityIcon(
   'prompt',
   svgIcon(

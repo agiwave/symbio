@@ -5,9 +5,9 @@
   左栏 = 挂载点（后端注册）、中栏 = 当前目录内容、右栏 = 按节点 `ext`
   解析出的详情渲染器（`registry/vdfsRenderers` 装配）。
 
-  与实体机制（WorkbenchView）的分工：
-  - 实体机制按**类型（kind）**组织资源，导航/能力来自 entities/provider_registry；
-  - VDFS 按**路径与访问位**组织资源，导航来自挂载点，能力来自 r/w/l/t。
+  S5 起本页是全 App **唯一**的资源页：原「统一实体页」（WorkbenchView，按
+  kind 组织、导航与能力来自 `entities/provider_registry`）已下线。
+  VDFS 按**路径与访问位**组织资源，导航来自挂载点，能力来自 r/w/l/t。
   两者共用同一套 UI 原语（Workbench / NavRail / EntityShell / EntityCard /
   DetailForm / CodeEditor），因此新增资源只需实现 VdfsProvider，前端零开发。
 

@@ -2,7 +2,11 @@
  * 统一实体服务 — 五类实体（model / mcp / skill / agent / session）共享同一套 entities/* 协议
  *
  * 与后端对齐：symbio/src/symbio_core/schemas/entities.rs + 各插件 entities/* 路由。
- * 能力开关驱动 UI：zip 上传 / 独立表单 / 实时状态 / 可删除 / 连接测试。
+ *
+ * **迁移状态（S5）**：统一实体页与其页面逻辑已下线，本文件不再是「页面协议层」，
+ * 只剩少数仍在使用 `entities/*` 的调用点（如会话清单 `listEntities`）。
+ * 这些调用点迁到 `vdfs/*` 后，本文件即可整体删除——在此之前，操作前缀
+ * （`worker/session` 等）由本文件**自持幂等加载** `entities/providers` 获得。
  */
 
 import { callPlugin } from './plugin'
@@ -62,7 +66,30 @@ function opPrefix(type: string): string {
   return providerPrefix[type] ?? type
 }
 
-function entitiesOp<T>(type: string, op: string, payload?: unknown): Promise<T> {
+/**
+ * 注册表加载承诺（幂等；失败可重试）。
+ *
+ * S5 下线统一实体页后，应用外壳不再代拉 `entities/providers`，但实体操作的
+ * 路径前缀仍来自注册表（`worker/session` 而非 `session`）——故由**服务层自持**
+ * 这一次加载：首个 entities 操作前幂等拉取一次，之后命中缓存。
+ * 加载失败不清缓存之外的状态，下次调用重试（注册表是后续一切操作的前置）。
+ */
+let providersPromise: Promise<void> | null = null
+function ensureProviders(): Promise<void> {
+  if (!providersPromise) {
+    providersPromise = fetchProviders().then(
+      () => undefined,
+      () => {
+        providersPromise = null // 允许重试
+      }
+    )
+  }
+  return providersPromise
+}
+
+/** 实体操作：先确保注册表（前缀）就绪，再发请求 */
+async function entitiesOp<T>(type: string, op: string, payload?: unknown): Promise<T> {
+  await ensureProviders()
   return callPlugin<T>(`${opPrefix(type)}/entities/${op}`, payload)
 }
 
