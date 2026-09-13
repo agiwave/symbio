@@ -5,7 +5,8 @@
  */
 
 import { callPlugin } from './plugin'
-import { listEntities } from './entities'
+import { listVdfs } from './vdfs'
+import { VFDS_ROOT, VFDS_STATUS_WORKING, vdfsJoin } from '@/schemas/vdfs'
 import { ChatMessage as SessionMessage } from '../schemas/chat_message'
 import * as SessionGetMessages from '../schemas/session_get_messages'
 import * as SessionList from '../schemas/session_list'
@@ -23,24 +24,26 @@ export type { SessionListItem } from '../schemas/session_list'
 export type { SessionMetadata } from '../schemas/session_meta'
 
 /**
- * 获取会话列表（统一实体协议：`worker/session/entities/list`）
+ * 获取会话列表（VDFS：`.vdfs/session` 的目录内容）
  *
- * 统一 `EntitySummary` 项经映射还原为 `SessionListItem` 形状，
- * 以便既有 `sessions` store / 对话组件保持兼容。
+ * 会话挂载点已把清单所需字段挂在节点上（`message_count` / `metadata` /
+ * `meta_tags`，VDFS 只透传场景字段），故这里把节点直接映射为
+ * `SessionListItem`，以便既有 `sessions` store / 对话组件保持兼容。
+ *
+ * 这是 `entities/list` 在前端的最后一处调用点（S8）——迁走后
+ * `services/entities.ts` 已整体删除。
  */
 export async function listSessions(): Promise<SessionList.SessionListItem[]> {
-  const resp = await listEntities('session')
-  // 后端 EntitySummary.extra 为 #[serde(flatten)]，类型特有字段(message_count/
-  // is_working/metadata)会被平铺到 JSON 顶层，而非套在 it.extra 下；这里直接从顶层读。
-  return (resp.items || []).map((it) => {
-    const v = it as Record<string, any>
+  const resp = await listVdfs(vdfsJoin(VFDS_ROOT, 'session'))
+  return (resp.items || []).map((n) => {
+    const v = n as Record<string, any>
     return {
-      id: v.id,
+      id: n.name,
       // 后端 display_title：metadata.title 优先，否则从会话内容自动生成
-      name: v.name ?? '',
+      name: n.title ?? '',
       message_count: Number(v.message_count ?? 0),
-      updated_at: v.updated_at ?? 0,
-      is_working: v.is_working ?? v.status === 'working',
+      updated_at: n.updated_at ?? 0,
+      is_working: n.status === VFDS_STATUS_WORKING,
       metadata: v.metadata ?? {},
     }
   })

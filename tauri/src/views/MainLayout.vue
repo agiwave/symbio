@@ -98,8 +98,8 @@ onMounted(async () => {
   void useSessionsStore().refreshList()
 
   // 拉取 `.vdfs` 虚拟根（挂载点清单）→ 动态生成左侧导航（幂等）。
-  // 这是资源类别的唯一来源；`entities/providers` 注册表已随实体页下线
-  // （仍在使用 `entities/*` 的服务由 services/entities.ts 自持幂等加载）。
+  // 这是资源类别的唯一来源；`entities/providers` 注册表与其前端服务层
+  // （services/entities.ts）已随实体页一并下线（S8）。
   try {
     await loadMounts()
   } catch (err) {

@@ -256,6 +256,7 @@ pub struct VdfsNewType {
 | **S5 下线旧协议** | 移除 `entities/*` 路由与前端实体页（`/entities/*` 仅留保兼容重定向），导航完全由 `.vdfs` 驱动 | 一个协议、一个页面 |
 | **S6 会话内部重建** | 会话内部结构（子会话 / 工作目录树）改由 VDFS 同名目录承载，原容器实体页可替代 | S5 的阻塞解除 |
 | **S7 容器子实体重建** | 通用适配器按 `container_kinds` 支持 `<id>/<子类别>/<条目>`；agent bundle 内部（提示词 / 技能 / MCP）上 VDFS | 容器页最后一处不可替代能力消失 |
+| **S8 会话清单上 VDFS** | 会话节点自带 `message_count` / `metadata` / `meta_tags`；`listSessions()` 改走 `vdfs/list`，`services/entities.ts` 删除 | 前端 `entities/*` 调用点归零 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -393,6 +394,22 @@ pub struct VdfsNewType {
     资源的「浏览内部」一并剥掉；现仅保留纯导航动作 `open-container`。
   - 通用规则：**条目有容器子实体且无详情定义 ⇒ 视为目录**（点进去浏览内部），
     有详情定义则仍是文档（详情优先 + 动作入口）。
+
+- **S8 会话清单上 VDFS（`entities/*` 前端归零）**（**已完成**）：最后一处仍在
+  调用 `entities/list` 的前端代码——`services/session.ts` 的 `listSessions()`
+  ——改走 `vdfs/list`（`.vdfs/session`），`services/entities.ts` 整体删除。
+
+  - **会话节点自带清单字段**：`session_node` 在 flatten 的 `attributes` 上挂
+    `message_count` / `metadata` / `meta_tags`。它们是**场景数据**，VDFS 只透传；
+    会话清单因此不必再为「拿 metadata」保留第二条链路。
+  - `meta_tags` 由新增的 `session_meta_tags()` 产出，**实体机制与 VDFS 共用**
+    （与 `display_title` / `derive_session_summary` 同口径），两条链路呈现一致。
+  - 前端映射：`id` ← `name`、`name` ← `title`、`is_working` ← `status == working`。
+  - `VdfsView.tagsOf` 新增渲染 `meta_tags`（后端声明、前端原样渲染，零类型知识），
+    会话列表恢复「工作目录名 + 消息数」标签。
+  - **前端自此不再有任何 `entities/*` 调用点**；`schemas/entities.ts` 保留
+    （`DetailDefinition` 仍是 VDFS `ext = form` 的宿主方言），后端 `entities/*`
+    协议与其注册表继续为 VDFS 适配器服务。
 
 ---
 

@@ -453,6 +453,32 @@ fn derive_session_summary(
     Some(format!("{}…", out.trim_end()))
 }
 
+/// 会话的通用元信息标签（工作目录名 + 消息数）。
+///
+/// 实体机制（`extra.meta_tags`）与 VDFS（节点 `attributes.meta_tags`）**共用同一份
+/// 实现**，保证同一会话在两条链路上的列表呈现一致；前端原样渲染，不含语义。
+fn session_meta_tags(s: &Session) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    if let Some(wd) = s
+        .metadata
+        .get("workdir")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let base = wd
+            .trim_end_matches(['/', '\\'])
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(wd);
+        if !base.is_empty() {
+            tags.push(base.to_string());
+        }
+    }
+    tags.push(format!("{} 条", s.messages.len()));
+    tags
+}
+
 /// 会话 → 统一实体摘要（顶层清单与容器子会话清单共用的单一实现）。
 ///
 /// 显示名 = `display_title`（title 优先 → 内容自动生成 → 「新对话」）；
@@ -478,25 +504,7 @@ fn summarize_session(s: &Session, is_working: bool) -> crate::symbio_core::entit
         let _ = m.insert("is_working".to_string(), json!(is_working));
         let _ = m.insert("metadata".to_string(), s.metadata.clone());
         // 通用元信息标签（前端 EntityCard tags 原样渲染）：工作目录名 + 消息数
-        let mut meta_tags: Vec<String> = Vec::new();
-        if let Some(wd) = s
-            .metadata
-            .get("workdir")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            let base = wd
-                .trim_end_matches(['/', '\\'])
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(wd);
-            if !base.is_empty() {
-                meta_tags.push(base.to_string());
-            }
-        }
-        meta_tags.push(format!("{} 条", s.messages.len()));
-        let _ = m.insert("meta_tags".to_string(), json!(meta_tags));
+        let _ = m.insert("meta_tags".to_string(), json!(session_meta_tags(s)));
     }
     it
 }
@@ -784,8 +792,13 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
 
 /// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）。
 ///
-/// 标题 / 摘要 / 状态与实体机制的列表呈现**同源**（复用 `display_title` 与
-/// [`derive_session_summary`]），保证同一会话在两条链路上的呈现一致。
+/// 标题 / 摘要 / 状态 / 元信息标签与实体机制的列表呈现**同源**（复用
+/// `display_title`、`derive_session_summary` 与 [`session_meta_tags`]），
+/// 保证同一会话在两条链路上的呈现一致。
+///
+/// 另在 `attributes` 上挂载会话清单所需字段（`message_count` / `metadata` /
+/// `meta_tags`）——它们是**场景数据**，VDFS 只透传；会话清单由此可直接用
+/// `vdfs/list` 承载（见 S8），无需再走 `entities/list`。
 fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
     let mut n = vdfs::VdfsNode::file(&s.id, s.display_title(), vdfs::VdfsAccess::READ_WRITE);
     n.kind = crate::symbio_core::entities::ENTITY_SESSION.to_string();
@@ -798,6 +811,15 @@ fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
     .to_string();
     n.updated_at = Some(s.updated_at);
     n.description = derive_session_summary(&s.messages);
+    let _ = n
+        .attributes
+        .insert("message_count".to_string(), json!(s.messages.len()));
+    let _ = n
+        .attributes
+        .insert("metadata".to_string(), s.metadata.clone());
+    let _ = n
+        .attributes
+        .insert("meta_tags".to_string(), json!(session_meta_tags(s)));
     n
 }
 
@@ -1616,6 +1638,35 @@ mod tests {
         assert!(!file.is_dir());
         assert_eq!(file.access.flags(), "rw", "工作目录文件可编辑");
         assert_eq!(file.size, Some(42));
+    }
+
+    /// 会话节点自带清单字段（S8）：`message_count` / `metadata` / `meta_tags`
+    /// 挂在 flatten 的 attributes 上，使会话清单无需再走 `entities/list`
+    #[test]
+    fn vdfs_session_node_carries_list_fields() {
+        let mut s = Session::new("abc");
+        s.updated_at = 1_700_000_000;
+        s.metadata = json!({ "workdir": "/tmp/proj/demo", "title": "T" });
+
+        let n = session_node(&s, false);
+        assert_eq!(n.attributes.get("message_count"), Some(&json!(0)));
+        assert_eq!(
+            n.attributes.get("metadata").and_then(|v| v.get("workdir")),
+            Some(&json!("/tmp/proj/demo"))
+        );
+        let tags = n
+            .attributes
+            .get("meta_tags")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tags.len(), 2, "工作目录名 + 消息数");
+        assert_eq!(tags[0], json!("demo"), "标签取工作目录 basename");
+        assert_eq!(tags[1], json!("0 条"));
+
+        // is_working 仍由 status 承载（机制口径，不另设 is_working 字段）
+        assert_eq!(n.status, vdfs::VFDS_STATUS_ACTIVE);
+        assert_eq!(session_node(&s, true).status, vdfs::VFDS_STATUS_WORKING);
     }
 
     /// 会话内容（VDFS `read`）：转写全文 + 元数据，JSON

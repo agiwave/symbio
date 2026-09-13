@@ -458,10 +458,18 @@ function badgeKindOf(n: VdfsNode): 'default' | 'primary' | 'success' | 'warn' | 
   return isVdfsDir(n) ? 'primary' : 'default'
 }
 
-/** 标签：可写标记 + 相对时间（访问位是唯一的能力判据） */
+/** 标签：可写标记（访问位是唯一能力判据）+ 后端声明的类型特有标签 + 相对时间 */
 function tagsOf(n: VdfsNode): Array<{ label: string; kind?: 'muted' | 'primary' }> {
   const out: Array<{ label: string; kind?: 'muted' | 'primary' }> = []
   if (vdfsAccessOf(n).write) out.push({ label: '可写', kind: 'primary' })
+  // `meta_tags` 是后端决定的类型特有标签（VDFS 只透传，与实体机制的
+  // extra.meta_tags 同口径），前端原样渲染、不含语义（如会话的工作目录名 / 消息数）
+  const tags = n.meta_tags
+  if (Array.isArray(tags)) {
+    for (const label of tags) {
+      if (typeof label === 'string' && label) out.push({ label, kind: 'muted' })
+    }
+  }
   const t = relativeTime(n.updated_at)
   if (t) out.push({ label: t, kind: 'muted' })
   return out
