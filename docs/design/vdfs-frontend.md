@@ -330,7 +330,20 @@ pub struct VdfsNewType {
     （`w` ⇒ 可删），经 `@delete` 回页面层统一走 `vdfs/delete`（与 `VdfsSessionDetail` 同构）。
   - **已知取舍**：`local`（本地文件）同为 VDFS 挂载点，故左栏出现第 7 项；隐藏需在机制层
     引入「导航可见性」标记，而非前端按名过滤。`agent` 的新建暂不支持 VDFS 路径（zip 语义）。
-- **S5 下线旧协议**：待续。
+- **S5 下线旧协议**（**进行中**）：
+  - **第一步（已完成）**：旧专项路由重定向改指 VDFS 页——
+    `model-providers` → `/vdfs/model`、`mcp` → `/vdfs/mcp`、`skill` → `/vdfs/skill`、
+    `agent` → `/vdfs/agent`（原先一律指向将被下线的 `/entities/{kind}`）。
+    书签 / 深链从此直达 VDFS，不再经过统一实体页。
+  - **待办与已知阻塞**：`/entities/:types?`（leaf 模式）与容器页
+    （`/container/:kind/:id/entities`、`/agent/:agentId/entities`）构成一整簇
+    `entities/*` 机制，尚未下线。**阻塞点**：会话的「管理内部实体」入口
+    （工作目录树 / 子会话，`ContainerKindInfo.view = tree`）经容器页承载，
+    而 `VdfsSessionDetail` 目前只注入 `delete` 机制动作——若直接下线容器页，
+    该入口将彻底不可达。故 S5 剩余部分需先决定：**容器/目录树能力是
+    在 VDFS 上重建（如 `session` 挂载点下引入子挂载），还是按「不适合的
+    修改可放弃」一并移除**。决定后再移除 leaf 路由与 `WorkbenchView`
+    的 leaf 分支（`goBack` / `openContainerEntities` 随之调整）。
 
 ---
 

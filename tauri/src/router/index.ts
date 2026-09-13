@@ -29,11 +29,13 @@ const router = createRouter({
         // 统一实体页（全 App 唯一实体页面，机制化配置驱动）：
         // :types = 'all' | 逗号分隔 kind | 单 kind（缺省 all）
         { path: 'entities/:types?', name: 'entities', component: WorkbenchView, props: (route) => ({ typesParam: (route.params.types as string) || undefined }) },
-        // 旧专项路由 → redirect 保兼容（书签 / 深链）
-        { path: 'model-providers', redirect: () => '/entities/model' },
-        { path: 'mcp', redirect: () => '/entities/mcp' },
-        { path: 'skill', redirect: () => '/entities/skill' },
-        { path: 'agent', redirect: () => '/entities/agent' },
+        // 旧专项路由 → redirect 保兼容（书签 / 深链）。
+        // S5：这些资源均已迁移到 VDFS（`/vdfs/{mount}`，挂载名与 kind 同名），
+        // 故直接指向 VDFS 页，不再经过将被下线的 `/entities/*` 统一实体页。
+        { path: 'model-providers', redirect: () => '/vdfs/model' },
+        { path: 'mcp', redirect: () => '/vdfs/mcp' },
+        { path: 'skill', redirect: () => '/vdfs/skill' },
+        { path: 'agent', redirect: () => '/vdfs/agent' },
         // 设置页：已迁移到 VDFS（/vdfs/setting，见 docs/design/vdfs-frontend.md §7 S2）；
         // 旧地址 redirect 保兼容（书签 / 深链）
         { path: 'settings', redirect: () => '/vdfs/setting' }
