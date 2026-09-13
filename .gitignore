@@ -6,7 +6,7 @@ vendor/
 symbio/embedding/
 .cargo*/
 .zcode/
-.workbuddy/
+.workbuddy*/
 .vscode/
 .idea/
 .VSCode*/
