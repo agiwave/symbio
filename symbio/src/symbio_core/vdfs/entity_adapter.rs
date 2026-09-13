@@ -758,4 +758,191 @@ mod tests {
         assert_eq!(n.size, Some(12));
         assert!(!n.is_dir());
     }
+
+    /// 容器链路**往返**：列类别 → 读 → 新建（按 `path_hint` 落位）→ 覆盖 → 删除
+    ///
+    /// S7 的 `<id>/<子类别标签>/<条目>` 寻址此前只覆盖到「路径解析 + 节点形状」，
+    /// 读写删的**实际落位**没有闭合验证。真实 agent 走 BundleStore（磁盘），
+    /// 测试无法依赖；但适配器的寻址与落位是纯逻辑，内存桩足以覆盖整条链路。
+    #[tokio::test]
+    async fn container_roundtrip_list_read_write_delete() {
+        use crate::symbio_core::schemas::entities::EntityUploadResponse;
+        use crate::symbio_core::{PluginError, SimpleRequest};
+
+        /// 内存 bundle：只实现四个容器钩子，其余走 `EntityProvider` 默认
+        struct BundleStub {
+            files: std::sync::Mutex<Vec<(String, String)>>,
+        }
+
+        fn basename(p: &str) -> String {
+            p.rsplit('/').next().unwrap_or(p).to_string()
+        }
+
+        #[async_trait]
+        impl EntityProvider for BundleStub {
+            fn kind(&self) -> &'static str {
+                ENTITY_AGENT
+            }
+            async fn list_container_items(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+                sub_kind: Option<&str>,
+                _container: &str,
+                _parent: Option<&str>,
+            ) -> Result<Vec<EntitySummary>, PluginError> {
+                let prefix = match sub_kind {
+                    Some("skill") => "skills/",
+                    Some("mcp") => "mcps/",
+                    _ => "prompts/",
+                };
+                Ok(self
+                    .files
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(p, _)| p.starts_with(prefix))
+                    .map(|(p, c)| {
+                        let mut it = EntitySummary::new("prompt", p.clone(), basename(p));
+                        it.extra = serde_json::json!({ "content": c });
+                        it
+                    })
+                    .collect())
+            }
+            async fn get_container_item(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+                id: &str,
+                _container: &str,
+            ) -> Result<EntitySummary, PluginError> {
+                let files = self.files.lock().unwrap();
+                let (_, c) = files
+                    .iter()
+                    .find(|(p, _)| p == id)
+                    .ok_or_else(|| PluginError::NotFound(format!("无此子实体：{id}")))?;
+                let mut it = EntitySummary::new("prompt", id.to_string(), basename(id));
+                it.extra = serde_json::json!({ "content": c });
+                Ok(it)
+            }
+            async fn put_container_item(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+                id: &str,
+                content: &str,
+                _container: &str,
+            ) -> Result<EntityUploadResponse, PluginError> {
+                let mut files = self.files.lock().unwrap();
+                let created = !files.iter().any(|(p, _)| p == id);
+                if created {
+                    files.push((id.to_string(), content.to_string()));
+                } else {
+                    for (p, c) in files.iter_mut() {
+                        if p == id {
+                            *c = content.to_string();
+                        }
+                    }
+                }
+                Ok(EntityUploadResponse {
+                    kind: "prompt".to_string(),
+                    id: id.to_string(),
+                    created,
+                })
+            }
+            async fn delete_container_item(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+                id: &str,
+                _container: &str,
+            ) -> Result<EntityUploadResponse, PluginError> {
+                let mut files = self.files.lock().unwrap();
+                let before = files.len();
+                files.retain(|(p, _)| p != id);
+                if files.len() == before {
+                    return Err(PluginError::NotFound(format!("无此子实体：{id}")));
+                }
+                Ok(EntityUploadResponse {
+                    kind: "prompt".to_string(),
+                    id: id.to_string(),
+                    created: false,
+                })
+            }
+        }
+
+        let stub = Arc::new(BundleStub {
+            files: std::sync::Mutex::new(vec![(
+                "prompts/old.md".to_string(),
+                "旧内容".to_string(),
+            )]),
+        });
+        let a = EntityVdfsAdapter::new(ENTITY_AGENT, stub.clone());
+        // 适配器把实体操作委派给 provider，需要宿主请求上下文（`host_ctx`）
+        let req: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let ctx = VdfsContext::new(req);
+
+        // ① 列：类别按标签寻址（提示词 → prompts/）
+        let items = a.list(&ctx, "b1/提示词").await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "prompts/old.md");
+
+        // ② 读
+        let c = a.read(&ctx, "b1/提示词/prompts/old.md").await.unwrap();
+        assert_eq!(c.text.as_deref(), Some("旧内容"));
+
+        // ③ 新建：`path_hint` 决定落位（「新提示.md」→ `prompts/新提示.md`），
+        //    内容为空时取 `default_content`
+        let created = a
+            .write(
+                &ctx,
+                "b1/提示词/新提示.md",
+                &VdfsContent::text("", "").with_create(),
+            )
+            .await
+            .unwrap();
+        assert!(created.created, "首次写入 = 新建");
+        assert_eq!(
+            a.list(&ctx, "b1/提示词").await.unwrap().len(),
+            2,
+            "新建后类别清单多一项"
+        );
+        let fresh = a.read(&ctx, "b1/提示词/prompts/新提示.md").await.unwrap();
+        assert!(
+            fresh
+                .text
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("---\npriority: 10"),
+            "空内容落位时取子类别的内容模板"
+        );
+
+        // ④ 覆盖：同一地址再写（不带 create）= 就地更新，不新增条目
+        let updated = a
+            .write(
+                &ctx,
+                "b1/提示词/prompts/新提示.md",
+                &VdfsContent::text("", "改后"),
+            )
+            .await
+            .unwrap();
+        assert!(!updated.created, "二次写入 = 覆盖");
+        assert_eq!(
+            a.read(&ctx, "b1/提示词/prompts/新提示.md")
+                .await
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("改后")
+        );
+        assert_eq!(a.list(&ctx, "b1/提示词").await.unwrap().len(), 2);
+
+        // ⑤ 删除：回到初始一项；重复删除报 NotFound（不静默成功）
+        a.delete(&ctx, "b1/提示词/prompts/新提示.md", false)
+            .await
+            .unwrap();
+        assert_eq!(a.list(&ctx, "b1/提示词").await.unwrap().len(), 1);
+        assert!(
+            a.delete(&ctx, "b1/提示词/prompts/新提示.md", false)
+                .await
+                .is_err(),
+            "删除不存在的子实体应报错"
+        );
+    }
 }

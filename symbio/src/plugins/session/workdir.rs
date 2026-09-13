@@ -51,13 +51,37 @@ fn resolve_under(workdir: &str, rel: &str) -> Result<(PathBuf, String), PluginEr
     }
     let abs = Path::new(workdir).join(normalized);
     // 前缀校验（路径穿越之外的第二道安全网；两侧同为规范化形式）
-    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    if !canon(&abs).starts_with(canon(Path::new(workdir))) {
+    let base = canonicalize_loose(Path::new(workdir));
+    if !canonicalize_loose(&abs).starts_with(&base) {
         return Err(PluginError::ValidationError(format!(
             "非法路径（越出工作目录）: {rel}"
         )));
     }
     Ok((abs, normalized.to_string()))
+}
+
+/// 规范化路径：目标**尚不存在**时 `canonicalize` 会失败（Windows 上它还返回
+/// `\\?\` 前缀形式），直接拿去比较会把「工作目录内新建文件」误判为越界。
+///
+/// 故逐级回退到**最近的存在祖先**做规范化，再接回剩余段：既保留对符号链接
+/// 穿越的校验，也不误伤合法的新建 / 删除路径。
+fn canonicalize_loose(p: &Path) -> PathBuf {
+    let mut anchor = p.to_path_buf();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    while anchor.canonicalize().is_err() {
+        match anchor.file_name() {
+            Some(name) => {
+                tail.push(name.to_os_string());
+                anchor.pop();
+            }
+            None => break,
+        }
+    }
+    let mut resolved = anchor.canonicalize().unwrap_or_else(|_| anchor.clone());
+    for name in tail.into_iter().rev() {
+        resolved.push(name);
+    }
+    resolved
 }
 
 /// 列出 `parent`（相对路径，`None` = 根层）的下一层节点。
@@ -630,6 +654,50 @@ mod tests {
         let dir_node = read_node(wd, "src").await.unwrap();
         assert!(dir_node.extra.get("content").is_none());
         assert_eq!(dir_node.expandable, Some(true));
+    }
+
+    /// 工作目录**往返**：写 → 列 → 读 → 删（S6 会话内部链路的真实 IO 闭合）
+    ///
+    /// VDFS 侧的 `<id>/工作目录[/<rel>]` 最终全部落到这四个函数上，而此前
+    /// 只有「列 / 读既有文件」的单点测试——写入与删除的实际落盘没有闭合验证。
+    #[tokio::test]
+    async fn workdir_roundtrip_write_list_read_delete() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path()).await;
+        let wd = tmp.path().to_str().unwrap();
+
+        // 写入（新建子目录内的文件）
+        write_node(wd, "src/new.rs", "pub fn new() {}")
+            .await
+            .unwrap();
+        let nested = list_children(wd, Some("src")).await.unwrap();
+        let ids: Vec<&str> = nested.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, vec!["src/lib.rs", "src/new.rs"], "写入后出现在清单中");
+
+        // 读回（VDFS `read` 走 `read_content`）
+        assert_eq!(
+            read_content(wd, "src/new.rs").await.unwrap(),
+            "pub fn new() {}"
+        );
+
+        // 覆盖
+        write_node(wd, "src/new.rs", "// 改后").await.unwrap();
+        assert_eq!(read_content(wd, "src/new.rs").await.unwrap(), "// 改后");
+        assert_eq!(
+            list_children(wd, Some("src")).await.unwrap().len(),
+            2,
+            "覆盖不新增"
+        );
+
+        // 删除
+        delete_node(wd, "src/new.rs").await.unwrap();
+        let nested = list_children(wd, Some("src")).await.unwrap();
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0].id, "src/lib.rs");
+
+        // 越界写入 / 读取目录内容均被拒（沙箱边界是这条链路的安全底线）
+        assert!(write_node(wd, "../escape.rs", "x").await.is_err());
+        assert!(read_content(wd, "src").await.is_err(), "目录不可当文件读");
     }
 
     #[tokio::test]
