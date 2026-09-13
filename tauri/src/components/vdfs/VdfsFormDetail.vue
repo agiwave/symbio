@@ -36,6 +36,7 @@
       :saving="saving"
       @option-save="(v) => $emit('save', v)"
       @delete="$emit('delete')"
+      @open-container="$emit('browse')"
     />
   </div>
 </template>
@@ -66,6 +67,12 @@ const props = withDefaults(
 defineEmits<{
   (e: 'save', values: Record<string, unknown>): void
   (e: 'delete'): void
+  /**
+   * 进入节点内部（容器寻址：`<id>/<子类别>`）。由**详情定义**声明
+   * （`open-container` 动作）触发——是否有内部结构是 provider 的知识，
+   * 前端只负责把动作转发给页面层 `enter(node.path)`。
+   */
+  (e: 'browse'): void
   /** 节点重命名由页面级内联栏承载；此处仅声明以对齐渲染器统一契约 */
   (e: 'rename'): void
 }>()
@@ -83,7 +90,11 @@ const definition = computed<DetailDefinition>(() => {
     binding: 'option',
     load_path: undefined,
     save_path: undefined,
-    actions: access.value.write ? raw.actions : [],
+    // 只读节点原先整表剥掉动作（避免渲染出无效的「保存」），但**纯导航**
+    // 动作与写无关——agent 正是只读却最需要「浏览内部」的那类资源。
+    actions: access.value.write
+      ? raw.actions
+      : (raw.actions ?? []).filter((a) => a.id === 'open-container'),
   }
 })
 

@@ -254,7 +254,8 @@ pub struct VdfsNewType {
 | **S3 会话迁移** | 新增 `session` provider：根 = 会话清单（`new_types = [会话]`）、节点 = 会话（`ext = session`）；read/write/delete 转发既有会话协议 | 会话页走 VDFS；聊天工作区作为 `session` 渲染器 |
 | **S4 其余迁移** | 用一个通用 `EntityVdfsAdapter` 把既有 `EntityProvider` 接成挂载点（`model` / `skill` / `mcp` 可写、`agent` 只读）；外壳左栏切到 `.vdfs` 根 | 全部资源在 `.vdfs` 下可见可管；统一实体页按类型逐个退场 |
 | **S5 下线旧协议** | 移除 `entities/*` 路由与前端实体页，导航完全由 `.vdfs` 驱动 | 一个协议、一个页面 |
-| **S6 会话内部重建** | 会话内部结构（子会话 / 工作目录树）改由 VDFS 同名目录承载，原容器实体页可替代 | S5 的阻塞解除；容器页退场 |
+| **S6 会话内部重建** | 会话内部结构（子会话 / 工作目录树）改由 VDFS 同名目录承载，原容器实体页可替代 | S5 的阻塞解除 |
+| **S7 容器子实体重建** | 通用适配器按 `container_kinds` 支持 `<id>/<子类别>/<条目>`；agent bundle 内部（提示词 / 技能 / MCP）上 VDFS | 容器页最后一处不可替代能力消失 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -363,6 +364,22 @@ pub struct VdfsNewType {
       「当前目录节点」，其访问位决定是否给出新建入口。
   - 前端：`useVdfs.creatableTypes` 的挂载点回退**仅限挂载点根**——否则每个
     子目录都会长出与其语义无关的新建入口（如工作目录里出现「新建会话」）。
+
+- **S7 容器子实体在 VDFS 上重建**（**已完成**）：把 S6 的会话内部寻址**推广到
+  通用适配器**——`EntityVdfsAdapter` 现在按 `container_kinds_for(kind)` 支持
+  `<id>/<子类别>/<条目>` 三级寻址，agent bundle 内部的提示词 / 技能 / MCP
+  由此在 VDFS 上可见可编辑（原容器页的最后一处不可替代能力）。
+
+  - 路径段用子类别**标签**（与 S6 同口径）；子实体的 `name` 是 bundle 内
+    相对路径（唯一，可含 `/`），`title` 是 basename（可读）。
+  - **新建落位由 `path_hint` 决定**（`prompts/<name>.md` + 文件名 → 实际路径，
+    缺省内容取 `default_content`）——路径模板仍是后端唯一真相源，前端零知识。
+  - 入口复用既有 `open-container` 通道：由**详情定义**声明该动作（agent 已有
+    定义），`VdfsFormDetail` 转发为 `browse`，页面层 `enter(node.path)`。
+  - 前端修正：`VdfsFormDetail` 原先按 `w` 位**整表**剥掉定义动作，会把只读
+    资源的「浏览内部」一并剥掉；现仅保留纯导航动作 `open-container`。
+  - 通用规则：**条目有容器子实体且无详情定义 ⇒ 视为目录**（点进去浏览内部），
+    有详情定义则仍是文档（详情优先 + 动作入口）。
 
 ---
 
