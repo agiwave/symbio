@@ -122,6 +122,28 @@ impl EntityProvider for AgentPlugin {
             .collect())
     }
 
+    /// 整包导入：zip → [`BundleStore::import`]（id 取自包内 manifest，故忽略建议名）。
+    ///
+    /// 这是 bundle **唯一的创建方式**——bundle 是整目录能力包，没有「先建空壳
+    /// 再填字段」的形态，因此挂载根只声明 `ext = zip` 一种新建类型。
+    /// 已存在同名 bundle 时**替换**（`replace = true`），与导入语义一致。
+    async fn import_zip(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        _name: &str,
+        zip: &[u8],
+    ) -> Result<EntityUploadResponse, PluginError> {
+        let store = Self::store_of(ctx);
+        let r = store
+            .import(zip, true)
+            .map_err(PluginError::ValidationError)?;
+        Ok(EntityUploadResponse {
+            kind: self.kind().to_string(),
+            id: r.id,
+            created: !r.replaced,
+        })
+    }
+
     // ==================== 容器子实体（统一协议 container 语义） ====================
     //
     // bundle 条目即容器：内部 prompts / skills / mcps 经同一套 entities/* 协议

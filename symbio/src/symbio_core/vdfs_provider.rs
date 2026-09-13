@@ -92,6 +92,8 @@ pub const VFDS_EXT_JSON: &str = "json";
 pub const VFDS_EXT_MARKDOWN: &str = "md";
 /// 文件树（目录节点的默认呈现）
 pub const VFDS_EXT_DIR: &str = "dir";
+/// 整包（zip）——**导入**用扩展名：内容是一整个资源目录的压缩包
+pub const VFDS_EXT_ZIP: &str = "zip";
 
 // ==================== 节点动作（约定） ====================
 
@@ -116,7 +118,17 @@ pub const VFDS_ACTION_TEST: &str = "test";
 /// 因此**新建后的详情渲染器与既有节点一致**。本结构是**纯呈现元数据**：
 /// VDFS 只透传、不解释；具体创建语义由 provider 在 [`VdfsProvider::write`] 中自持。
 ///
+/// ## 内容来源 [`VdfsNewType::source`]
+///
+/// 「新建」在机制上就是一次 [`VdfsProvider::write`]（`create: true`），因此要说清
+/// **写进去的内容从哪来**——这是创建语义的一部分，由 provider 声明：
+///
+/// - `None`（默认）：先命名、后写入（内容为空或 provider 的最小合法内容）；
+/// - [`VFDS_NEW_SOURCE_FILE`]：内容取自**本地文件**，使用方给文件选择器，
+///   字节走 [`VdfsContent::b64`] 二进制通道（如 zip 整包导入）。
+///
 /// [`VdfsProvider::write`]: VdfsProvider::write
+/// [`VdfsContent::b64`]: VdfsContent::b64
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsNewType {
     /// 新元素扩展名（决定创建后的详情渲染器）
@@ -129,6 +141,9 @@ pub struct VdfsNewType {
     /// 图标名（使用方纯 UI 映射）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// 内容来源（见结构文档）：`None` = 命名后写入；`"file"` = 选择本地文件
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 impl VdfsNewType {
@@ -139,6 +154,7 @@ impl VdfsNewType {
             title: title.into(),
             description: None,
             icon: None,
+            source: None,
         }
     }
 
@@ -151,7 +167,17 @@ impl VdfsNewType {
         self.icon = Some(icon.into());
         self
     }
+
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
+        self
+    }
 }
+
+/// 新建内容来源：**本地文件**（[`VdfsNewType::source`] 的取值之一）。
+///
+/// 声明它的类型意味着「新建 = 选一个本地文件，把它的字节写进目标地址」。
+pub const VFDS_NEW_SOURCE_FILE: &str = "file";
 
 // ==================== 访问位 ====================
 

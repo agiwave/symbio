@@ -15,6 +15,7 @@
 //! | `stat` / 节点呈现 | [`EntityProvider::summarize`] + [`EntityProvider::detail_definition`] |
 //! | `read` | 摘要 `extra.config`（完整配置，与实体详情页**同源**） |
 //! | `write` | [`entity_write`]（`entities/upload` 的 manifest 分支同一实现） |
+//! | `write`（二进制） | [`EntityProvider::import_zip`]（zip 整包导入） |
 //! | `delete` | [`entity_delete`]（`entities/delete` 同一实现） |
 //! | `watch` | provider 侧变更广播（写 / 删时触发，**非轮询**） |
 //!
@@ -28,6 +29,7 @@
 //!
 //! [`entity_write`]: crate::symbio_core::entities::entity_write
 //! [`entity_delete`]: crate::symbio_core::entities::entity_delete
+//! [`EntityProvider::import_zip`]: crate::symbio_core::entities::EntityProvider::import_zip
 
 use super::host::{from_plugin_error, host_ctx};
 use crate::symbio_core::entities::{
@@ -37,7 +39,8 @@ use crate::symbio_core::entities::{
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsNewType, VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_TEST,
-    VFDS_CHANGE_CREATED, VFDS_CHANGE_DELETED, VFDS_CHANGE_UPDATED, VFDS_EXT_FORM,
+    VFDS_CHANGE_CREATED, VFDS_CHANGE_DELETED, VFDS_CHANGE_UPDATED, VFDS_EXT_FORM, VFDS_EXT_ZIP,
+    VFDS_NEW_SOURCE_FILE,
 };
 use crate::symbio_core::InvokeRequest;
 use async_trait::async_trait;
@@ -128,6 +131,16 @@ impl EntityVdfsAdapter {
             && self.provider.manifest_file().is_some()
     }
 
+    /// 是否支持**整包导入**（zip）。
+    ///
+    /// 能力由注册表声明（`capabilities.zip_upload`）——与 `supports_upload`
+    /// 同为单一真相源，避免「声明了入口但导入必然失败」。实际导入由
+    /// [`EntityProvider::import_zip`] 承接，故**目录自管的类型**（agent bundle）
+    /// 也能有自己的导入实现。
+    fn importable(&self) -> bool {
+        self.info().is_some_and(|i| i.capabilities.zip_upload)
+    }
+
     fn node_access(&self) -> VdfsAccess {
         if self.writable() {
             VdfsAccess::READ_WRITE
@@ -142,6 +155,16 @@ impl EntityVdfsAdapter {
         base.strip_suffix(&format!(".{}", self.kind))
             .unwrap_or(base)
             .to_string()
+    }
+
+    /// 导入的**建议名**：末段再去掉 `.zip`（新建地址是 `<name>.zip`，与
+    /// `id_of` 同口径；id 的最终解释权仍在 provider）
+    fn import_name_of(&self, path: &str) -> String {
+        let base = self.id_of(path);
+        match base.strip_suffix(".zip") {
+            Some(stem) if !stem.is_empty() => stem.to_string(),
+            _ => base,
+        }
     }
 
     /// 单个实体的摘要：EntityStore 型直读主文件；其余（如 agent bundle）从清单里找
@@ -274,15 +297,27 @@ impl VdfsProvider for EntityVdfsAdapter {
     }
 
     fn root_new_types(&self) -> Vec<VdfsNewType> {
-        if !self.writable() {
-            return Vec::new();
+        let mut out = Vec::new();
+        if self.writable() {
+            out.push(
+                VdfsNewType::new(self.kind, self.label_of()).with_description(format!(
+                    "新建{}（先落一份默认配置，随后在详情里完善）",
+                    self.label_of()
+                )),
+            );
         }
-        vec![
-            VdfsNewType::new(self.kind, self.label_of()).with_description(format!(
-                "新建{}（先落一份默认配置，随后在详情里完善）",
-                self.label_of()
-            )),
-        ]
+        // 整包导入 = 一种**内容来源是本地文件**的新建（ext = zip）
+        if self.importable() {
+            out.push(
+                VdfsNewType::new(VFDS_EXT_ZIP, format!("{}包", self.label_of()))
+                    .with_description(format!(
+                        "导入{}整包（.zip）——整目录覆盖同名条目",
+                        self.label_of()
+                    ))
+                    .with_source(VFDS_NEW_SOURCE_FILE),
+            );
+        }
+        out
     }
 
     async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
@@ -419,7 +454,8 @@ impl VdfsProvider for EntityVdfsAdapter {
         }
     }
 
-    /// 写入：`create` → 用插件声明的**最小 manifest** 落一份默认配置；
+    /// 写入：**二进制** → 整包导入（zip，见 [`VFDS_NEW_SOURCE_FILE`]）；
+    /// `create` → 用插件声明的**最小 manifest** 落一份默认配置；
     /// 否则 → 以内容为完整 manifest 覆盖（走 `entities/upload` 同一实现）
     async fn write(
         &self,
@@ -428,6 +464,35 @@ impl VdfsProvider for EntityVdfsAdapter {
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
         let host = host_ctx(ctx)?;
+        // 整包导入：内容是一个 zip 包（整目录，导入即覆盖同名条目）
+        if content.binary {
+            if !matches!(parse_adapter_path(path), AdapterPath::Item(_)) {
+                return Err(VdfsError::invalid(format!(
+                    "{}整包只能导入到挂载根下：{path}",
+                    self.label_of()
+                )));
+            }
+            let b64 = content.b64.as_deref().unwrap_or_default();
+            let bytes = entities::decode_b64(b64).map_err(|e| VdfsError::invalid(e.0))?;
+            let resp = self
+                .provider
+                .import_zip(&host, &self.import_name_of(path), &bytes)
+                .await
+                .map_err(from_plugin_error)?;
+            self.notify(
+                &resp.id,
+                if resp.created {
+                    VFDS_CHANGE_CREATED
+                } else {
+                    VFDS_CHANGE_UPDATED
+                },
+            );
+            return Ok(VdfsWriteResponse {
+                path: resp.id,
+                created: resp.created,
+                etag: None,
+            });
+        }
         // 子实体写回（bundle 沙箱内写入）；新建时按 `path_hint` 落位
         if let AdapterPath::SubItem { id, seg, item } = parse_adapter_path(path) {
             let spec = self
@@ -618,8 +683,8 @@ impl VdfsProvider for EntityVdfsAdapter {
 mod tests {
     use super::*;
     use crate::symbio_core::entities::{
-        EntityStatusResponse, ENTITY_AGENT, ENTITY_MODEL, ENTITY_SESSION, ENTITY_STATUS_CONNECTED,
-        ENTITY_STATUS_FAILED,
+        EntityStatusResponse, EntityUploadResponse, ENTITY_AGENT, ENTITY_MODEL, ENTITY_SESSION,
+        ENTITY_STATUS_CONNECTED, ENTITY_STATUS_FAILED,
     };
 
     /// 标签 / 顺序来自注册表（单一真相源），不硬编码
@@ -679,7 +744,16 @@ mod tests {
         let a = EntityVdfsAdapter::new(ENTITY_MODEL, Arc::new(Stub));
         assert!(a.writable(), "model 在注册表中 supports_upload = true");
         let types = a.root_new_types();
-        assert_eq!(types.len(), 1);
+        assert_eq!(
+            types.len(),
+            1,
+            "model 无 zip 导入能力 ⇒ 不声明整包类型（{}）",
+            types
+                .iter()
+                .map(|t| t.ext.clone())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
         assert_eq!(types[0].ext, ENTITY_MODEL);
         assert!(a.root_access().write, "可写类型挂载根应含写位");
     }
@@ -702,9 +776,9 @@ mod tests {
     }
 
     /// bundle 型（注册表声明 `supports_upload = true`，但目录自管、不走 EntityStore）
-    /// 降级为只读——避免「声明了新建但落盘必失败」的不一致
+    /// 降级为只读——只保留**整包导入**这一种新建（bundle 没有「先建空壳」的形态）
     #[test]
-    fn bundle_like_kind_degrades_to_read_only() {
+    fn bundle_like_kind_only_declares_import() {
         struct Stub;
         #[async_trait]
         impl EntityProvider for Stub {
@@ -719,8 +793,16 @@ mod tests {
             .find(|p| p.kind == ENTITY_AGENT)
             .expect("注册表应包含 agent");
         assert!(info.supports_upload, "前提：注册表声明 agent 可上传");
-        assert!(!a.writable(), "但目录自管 → VDFS 侧降级为只读");
-        assert!(a.root_new_types().is_empty());
+        assert!(!a.writable(), "但目录自管 → 无「最小 manifest」可落");
+        let types = a.root_new_types();
+        assert_eq!(types.len(), 1, "目录自管 ⇒ 只有整包导入一个入口");
+        assert_eq!(types[0].ext, VFDS_EXT_ZIP);
+        assert_eq!(
+            types[0].source.as_deref(),
+            Some(VFDS_NEW_SOURCE_FILE),
+            "整包的内容来自本地文件"
+        );
+        assert!(!a.root_access().write, "只读：不可覆盖写内容、不可建目录");
     }
 
     /// 容器寻址解析：`<id>` / `<id>/<seg>` / `<id>/<seg>/<item>`
@@ -1078,5 +1160,81 @@ mod tests {
             .action(&ctx, "", VFDS_ACTION_TEST, None)
             .await
             .is_err());
+    }
+
+    /// 整包导入：**二进制写入** → `EntityProvider::import_zip`
+    #[tokio::test]
+    async fn write_binary_imports_zip() {
+        use crate::symbio_core::{PluginError, SimpleRequest};
+        use base64::Engine as _;
+        use std::sync::Mutex;
+
+        struct ImportStub {
+            calls: Mutex<Vec<(String, Vec<u8>)>>,
+        }
+        #[async_trait]
+        impl EntityProvider for ImportStub {
+            fn kind(&self) -> &'static str {
+                ENTITY_AGENT
+            }
+            async fn import_zip(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+                name: &str,
+                zip: &[u8],
+            ) -> Result<EntityUploadResponse, PluginError> {
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push((name.to_string(), zip.to_vec()));
+                Ok(EntityUploadResponse {
+                    kind: ENTITY_AGENT.to_string(),
+                    id: name.to_string(),
+                    created: true,
+                })
+            }
+        }
+
+        let req: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let ctx = VdfsContext::new(req);
+        let stub = Arc::new(ImportStub {
+            calls: Mutex::new(Vec::new()),
+        });
+        let a = EntityVdfsAdapter::new(ENTITY_AGENT, stub.clone());
+
+        // 新建地址 = `<名称>.zip`：建议名去掉扩展名，字节走 b64 二进制通道
+        let zip = b"PK\x03\x04not-a-real-zip";
+        let b64 = base64::engine::general_purpose::STANDARD.encode(zip);
+        let content = VdfsContent::binary("", b64.clone(), zip.len() as u64).with_create();
+        let r = a.write(&ctx, "demo.zip", &content).await.unwrap();
+        assert_eq!(r.path, "demo", "回 provider 给的 id（建议名只是建议）");
+        assert!(r.created);
+        // 守卫不跨 await 点：取值后立即释放（clippy::await_holding_lock）
+        let (got_name, got_bytes) = {
+            let calls = stub.calls.lock().unwrap();
+            assert_eq!(calls.len(), 1, "provider 收到恰好一次导入");
+            (calls[0].0.clone(), calls[0].1.clone())
+        };
+        assert_eq!(got_name, "demo", "`.zip` 扩展名不进入实体 id");
+        assert_eq!(got_bytes, zip.to_vec(), "字节原样送达 provider");
+
+        // 整包只对「挂载根下的条目」有意义：根 / 子实体地址不接受
+        assert!(a.write(&ctx, "", &content).await.is_err());
+        assert!(a.write(&ctx, "b1/prompt/p.md", &content).await.is_err());
+
+        // provider 不支持导入 → NotImplemented（使用方据此不给出入口）
+        struct NoImport;
+        #[async_trait]
+        impl EntityProvider for NoImport {
+            fn kind(&self) -> &'static str {
+                ENTITY_SESSION
+            }
+        }
+        let a = EntityVdfsAdapter::new(ENTITY_SESSION, Arc::new(NoImport));
+        assert!(a
+            .write(&ctx, "x.zip", &content)
+            .await
+            .unwrap_err()
+            .is_not_implemented());
     }
 }

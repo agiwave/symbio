@@ -19,9 +19,10 @@
 
 pub use crate::symbio_core::schemas::entities::*;
 
-use crate::symbio_core::providers::{EntityStoreError, StorageService};
+use crate::symbio_core::providers::{EntityStore, EntityStoreError, StorageService};
 use crate::symbio_core::{create_object, InvokeRequest, PluginError};
 use async_trait::async_trait;
+use std::io::{Cursor, Read};
 use std::sync::Arc;
 
 /// 解析当前请求的存储服务（`~/.symbio/plugins/` 基座）
@@ -133,6 +134,25 @@ pub trait EntityProvider: Send + Sync {
     /// 覆盖本方法，给出自己的最小合法配置——**否则该类型在 VDFS 侧无法新建**。
     fn new_entity_manifest(&self, id: &str, title: &str) -> serde_json::Value {
         serde_json::json!({ "id": id, "name": title })
+    }
+
+    /// 整包导入钩子：zip 字节 → 一个实体。
+    ///
+    /// VDFS 侧表现为一个「新建类型」：`ext = zip` 且 `source = file`
+    /// （见 `VFDS_NEW_SOURCE_FILE`）——使用方给出文件选择器，适配器把字节送到这里。
+    /// 因此**导入不是第二条协议**，它就是「新建」的一种内容来源。
+    ///
+    /// 默认实现走 [`entity_import_zip`]（EntityStore 型通用解包，整目录覆盖）。
+    /// 目录自管的 provider（如 agent bundle，id 取自包内 manifest）重写本方法。
+    ///
+    /// `name` 是**建议名**（来自新建地址），可忽略——id 归 provider 自持。
+    async fn import_zip(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        name: &str,
+        zip: &[u8],
+    ) -> Result<EntityUploadResponse, PluginError> {
+        entity_import_zip(self, ctx, name, zip).await
     }
 
     /// 写盘成功后的内存同步钩子（mcp 回灌 config，model 同步注册表，agent 失效缓存）
@@ -608,6 +628,189 @@ pub async fn entity_delete<P: EntityProvider + ?Sized>(
     })
 }
 
+/// 导入整包（zip）—— 实体机制与 VDFS 共用的唯一实现。
+///
+/// 与 [`entity_write`] 同构：`category` 落盘 → `on_uploaded` 内存同步 → 发布
+/// 实体生命周期事件。区别只在内容来源与粒度：
+///
+/// - 内容是一个**完整目录**（zip），不是单份 manifest；
+/// - 同一 id 再次导入即**整目录覆盖**（导入即替换，无合并语义）。
+///
+/// `name` 是建议名（来自新建地址）；目录自管的 provider 不调用本函数，
+/// 而是重写 [`EntityProvider::import_zip`]。
+pub async fn entity_import_zip<P: EntityProvider + ?Sized>(
+    provider: &P,
+    ctx: &Arc<dyn InvokeRequest>,
+    name: &str,
+    zip: &[u8],
+) -> Result<EntityUploadResponse, PluginError> {
+    let Some(category) = provider.category() else {
+        // 无实体目录的实体（如 session / agent bundle）：走各自的实现
+        return Err(PluginError::NotImplemented);
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(PluginError::ValidationError(
+            "导入名称不能为空（zip 文件名即实体目录名）".to_string(),
+        ));
+    }
+    let store = storage_service(ctx)?;
+    let es = store.entity_store();
+    let existed = es
+        .entity_exists(category, name)
+        .await
+        .map_err(|e| PluginError::InternalError(format!("查询实体失败: {e}")))?;
+
+    extract_zip_to_entity(es, category, name, zip).await?;
+
+    provider.on_uploaded(ctx, name).await?;
+
+    crate::symbio_core::event_bus::EventBus::publish_entity_changed(
+        provider.kind(),
+        name,
+        if existed { "updated" } else { "created" },
+        None,
+        None,
+    )
+    .await;
+
+    Ok(EntityUploadResponse {
+        kind: provider.kind().to_string(),
+        id: name.to_string(),
+        created: !existed,
+    })
+}
+
+// ==================== zip 整包解包（导入的内部实现） ====================
+
+/// 整包处理错误（zip 解码 / 解包 / 落盘；转为 `PluginError` 抛出）
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct EntityError(pub String);
+
+/// base64 解码（VDFS 二进制通道 `VdfsContent.b64` → 字节）
+pub fn decode_b64(s: &str) -> Result<Vec<u8>, EntityError> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+    STANDARD
+        .decode(s.trim())
+        .map_err(|e| EntityError(format!("base64 解码失败: {e}")))
+}
+
+/// 解析 zip 字节为 `(相对路径, 内容)` 列表。
+///
+/// - 跳过目录条目、`__MACOSX` 元数据、隐藏文件
+/// - 强行去掉条目前导的 `./` / `/`
+pub fn parse_zip(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, EntityError> {
+    let cursor = Cursor::new(bytes);
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| EntityError(format!("非法 zip: {e}")))?;
+
+    let mut out = Vec::new();
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| EntityError(format!("读取 zip 条目失败: {e}")))?;
+
+        let raw = file.name().replace('\\', "/");
+        if file.is_dir() {
+            continue;
+        }
+        // 先规范化再判隐藏：否则 `./a/b.txt` 的首段 `.` 会被当成隐藏文件整条丢弃
+        let rel = normalize_zip_path(&raw);
+        if rel.is_empty() {
+            continue;
+        }
+        // 跳过 macOS 元数据 / 隐藏文件
+        if rel.contains("__MACOSX")
+            || rel
+                .split('/')
+                .any(|seg| seg.starts_with('.') && !seg.is_empty())
+        {
+            continue;
+        }
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)
+            .map_err(|e| EntityError(format!("读取 zip 条目内容失败: {e}")))?;
+        out.push((rel, buf));
+    }
+    Ok(out)
+}
+
+/// 若 zip 内所有条目共享一个顶层根目录（常见打包方式），剥离该层，
+/// 使内容平铺到目标实体目录下。
+pub fn strip_common_root(entries: &mut [(String, Vec<u8>)]) {
+    if entries.is_empty() {
+        return;
+    }
+    let prefix = entries
+        .iter()
+        .filter_map(|(p, _)| p.split('/').next())
+        .filter(|seg| !seg.is_empty())
+        .min()
+        .map(|root| format!("{root}/"));
+    // 仅当每个条目都以此根目录开头时才剥离
+    if let Some(prefix) = prefix {
+        if entries.iter().all(|(p, _)| p.starts_with(&prefix)) {
+            for (p, _) in entries.iter_mut() {
+                if let Some(rest) = p.strip_prefix(&prefix) {
+                    *p = rest.to_string();
+                }
+            }
+        }
+    }
+}
+
+/// 把已解析的 zip 内容解压写入 `EntityStore` 的 `<category>/<id>/` 目录。
+///
+/// - 若目录已存在则整体删除重建（导入即覆盖整包）
+/// - 返回写入的文件数量
+pub async fn extract_zip_to_entity(
+    es: &dyn EntityStore,
+    category: &str,
+    id: &str,
+    bytes: &[u8],
+) -> Result<usize, EntityError> {
+    let mut entries = parse_zip(bytes)?;
+    strip_common_root(&mut entries);
+    if entries.is_empty() {
+        return Err(EntityError("zip 中没有任何可用的实体文件".to_string()));
+    }
+
+    let dir = es.entity_dir(category, id);
+    if dir.exists() {
+        tokio::fs::remove_dir_all(&dir)
+            .await
+            .map_err(|e| EntityError(format!("清理旧实体目录失败: {e}")))?;
+    }
+
+    for (rel, content) in &entries {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| EntityError(format!("创建目录失败: {e}")))?;
+        }
+        tokio::fs::write(&path, content)
+            .await
+            .map_err(|e| EntityError(format!("写入实体文件失败: {e}")))?;
+    }
+    Ok(entries.len())
+}
+
+/// 规范化 zip 内部相对路径文本（去掉前导 `./` 与 `/`）
+fn normalize_zip_path(p: &str) -> String {
+    p.trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_string()
+}
+
+impl From<EntityError> for PluginError {
+    fn from(e: EntityError) -> Self {
+        PluginError::InternalError(e.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -642,5 +845,103 @@ mod tests {
             assert_eq!(nav_meta_of(p.kind), Some((p.label, p.order)));
         }
         assert_eq!(nav_meta_of("nope"), None, "未登记的 kind 返回 None");
+    }
+
+    // ==================== zip 整包解包 ====================
+
+    /// 构造内存 zip（按给定顺序写入条目；`dirs` 只建目录条目）
+    fn make_zip(entries: &[(&str, Option<&[u8]>)]) -> Vec<u8> {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+        let mut buf = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let opts = SimpleFileOptions::default();
+            for (name, content) in entries {
+                match content {
+                    Some(bytes) => {
+                        w.start_file(*name, opts).unwrap();
+                        w.write_all(bytes).unwrap();
+                    }
+                    None => {
+                        w.add_directory(*name, opts).unwrap();
+                    }
+                }
+            }
+            w.finish().unwrap();
+        }
+        buf
+    }
+
+    /// 解包：跳过目录 / 隐藏文件 / `__MACOSX`，并规范化前导 `./` 与 `/`
+    #[test]
+    fn parse_zip_skips_dirs_and_metadata() {
+        let bytes = make_zip(&[
+            ("SKILL.md", Some(b"# demo")),
+            ("scripts/run.sh", Some(b"echo hi")),
+            ("scripts/", None),
+            ("__MACOSX/._SKILL.md", Some(b"junk")),
+            (".hidden", Some(b"junk")),
+            ("./nested/ok.txt", Some(b"ok")),
+        ]);
+        let out = parse_zip(&bytes).unwrap();
+        let names: Vec<&str> = out.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["SKILL.md", "scripts/run.sh", "nested/ok.txt"],
+            "目录条目与元数据不落盘：`{names:?}`"
+        );
+        assert_eq!(out[0].1, b"# demo".to_vec());
+    }
+
+    /// 单顶层目录的打包习惯：剥离该层，内容平铺到实体目录
+    #[test]
+    fn strip_common_root_flattens_single_root() {
+        let mut entries: Vec<(String, Vec<u8>)> = vec![
+            ("pkg/SKILL.md".into(), b"a".to_vec()),
+            ("pkg/scripts/s.sh".into(), b"b".to_vec()),
+        ];
+        strip_common_root(&mut entries);
+        let names: Vec<&str> = entries.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(names, vec!["SKILL.md", "scripts/s.sh"]);
+
+        // 不共享顶层目录 ⇒ 原样保留（避免误伤多根包）
+        let mut mixed: Vec<(String, Vec<u8>)> =
+            vec![("a/x.md".into(), Vec::new()), ("b/y.md".into(), Vec::new())];
+        strip_common_root(&mut mixed);
+        let names: Vec<&str> = mixed.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(names, vec!["a/x.md", "b/y.md"]);
+    }
+
+    /// 非法输入：非 base64 / 非 zip，都转为可读错误（不 panic）
+    #[test]
+    fn zip_errors_are_reported() {
+        assert!(decode_b64("!!!not-base64!!!").is_err());
+        assert!(parse_zip(b"not a zip at all").is_err());
+        // 空包（只有目录条目）⇒ 解包报「没有任何可用文件」由 `extract_zip_to_entity` 负责
+        let empty = make_zip(&[("only-dir/", None)]);
+        assert!(parse_zip(&empty).unwrap().is_empty());
+    }
+
+    /// 默认 `import_zip`：无实体目录的 provider（category = None）→ NotImplemented
+    #[tokio::test]
+    async fn import_zip_requires_entity_dir() {
+        struct BundleLike;
+        #[async_trait]
+        impl EntityProvider for BundleLike {
+            fn kind(&self) -> &'static str {
+                ENTITY_AGENT
+            }
+        }
+        let ctx: Arc<dyn InvokeRequest> =
+            Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+        let err = BundleLike
+            .import_zip(&ctx, "demo", b"whatever")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, PluginError::NotImplemented),
+            "目录自管的 provider 应自己重写 import_zip：{err:?}"
+        );
     }
 }

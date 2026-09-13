@@ -21,6 +21,7 @@
 
 import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import {
+  arrayBufferToBase64,
   deleteVdfs,
   fetchMounts,
   listVdfs,
@@ -31,6 +32,7 @@ import {
   unwatchVdfs,
   watchVdfs,
   writeVdfs,
+  writeVdfsBinary,
 } from '@/services/vdfs'
 import { subscribe } from '@/services/eventBus'
 import {
@@ -38,6 +40,7 @@ import {
   VFDS_ROOT,
   isVdfsDir,
   mountNavVisible,
+  newFileNameOf,
   parseVdfsValidation,
   vdfsBase,
   vdfsJoin,
@@ -421,6 +424,32 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     }
   }
 
+  /**
+   * 按类型从**本地文件**新建（整包导入）：内容走二进制通道。
+   *
+   * 与 `createTyped` 同构——差别只是内容来源：`source = file` 的类型（如
+   * `zip` 整包）不填名，目标名由**文件名**推导（主干 + 类型扩展名）。
+   */
+  async function createTypedFile(type: VdfsNewType, file: File): Promise<boolean> {
+    const target = vdfsJoin(cwd.value, newFileNameOf(file.name, type.ext))
+    saving.value = true
+    detailError.value = ''
+    fieldErrors.value = []
+    try {
+      const b64 = arrayBufferToBase64(await file.arrayBuffer())
+      await writeVdfsBinary(target, b64, { create: true })
+      showToast('success', `已导入「${file.name}」`)
+      await refresh()
+      return true
+    } catch (err) {
+      detailError.value = captureError(err)
+      showToast('error', `导入失败：${detailError.value}`)
+      return false
+    } finally {
+      saving.value = false
+    }
+  }
+
   /** 重命名选中节点（同挂载点内移动） */
   async function renameSelected(name: string): Promise<boolean> {
     const node = selectedNode.value
@@ -546,6 +575,7 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     removeSelected,
     createDir,
     createTyped,
+    createTypedFile,
     creatableTypes,
     canCreate,
     renameSelected,

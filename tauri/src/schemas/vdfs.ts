@@ -77,6 +77,10 @@ export interface VdfsAccess {
  * 对齐后端 `symbio_core/vdfs_provider.rs` 的 `VdfsNewType`：以扩展名 `ext` 标识，
  * 与节点 `ext` 同一命名空间，因此**新建后的详情渲染器与既有节点一致**。
  * 清单非空 → 显示添加入口；多于一项 → 先选类型再命名。
+ *
+ * `source` 说明**写进去的内容从哪来**（后端声明、前端照做）：
+ * 缺省 = 先命名后写入；`'file'` = 选一个本地文件，字节走二进制通道
+ * （典型场景：zip 整包导入）。
  */
 export interface VdfsNewType {
   /** 新元素扩展名（决定创建后的详情渲染器） */
@@ -87,7 +91,12 @@ export interface VdfsNewType {
   description?: string
   /** 图标名（纯 UI 映射） */
   icon?: string
+  /** 内容来源（后端 `VFDS_NEW_SOURCE_FILE`）：'file' = 选择本地文件 */
+  source?: string
 }
+
+/** 新建内容来源：本地文件（后端 `VFDS_NEW_SOURCE_FILE`） */
+export const VFDS_NEW_SOURCE_FILE = 'file'
 
 /**
  * 虚拟文件系统节点。
@@ -245,6 +254,23 @@ export function vdfsJoin(dir: string, name: string): string {
   const d = normalizeDir(dir)
   const n = name.replace(/^\/+|\/+$/g, '')
   return n ? `${d}/${n}` : d
+}
+
+/**
+ * 由本地文件名推导「新建名」：**保留原名主干 + 换成类型扩展名**。
+ *
+ * 服务于 `source = 'file'` 的新建类型（整包导入）：名称来自文件本身，
+ * 扩展名由类型声明（`ext`），与后端「扩展名即类型」同口径。
+ *
+ * 例：`demo.zip` + `zip` → `demo.zip`；`pkg.tar.gz` + `zip` → `pkg.tar.zip`；
+ * `README` + `zip` → `README.zip`。
+ */
+export function newFileNameOf(fileName: string, ext: string): string {
+  // 个别环境给的是带路径的名字：只取末段
+  const base = fileName.split(/[\\/]/).pop() || fileName
+  const dot = base.lastIndexOf('.')
+  const stem = dot > 0 ? base.slice(0, dot) : base
+  return ext ? `${stem}.${ext}` : stem
 }
 
 /** 父目录（挂载点根的父 = 虚拟根；虚拟根的父 = 虚拟根） */

@@ -153,6 +153,21 @@ export async function writeVdfs(
   return { ...resp, path: toVdfsPath(resp?.path ?? path) }
 }
 
+/**
+ * ArrayBuffer → base64（二进制写入通道的载荷编码）。
+ *
+ * 分块拼接：整包（zip）可能上兆，一次性 `String.fromCharCode(...bytes)` 会爆栈。
+ */
+export function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  const CHUNK = 0x8000
+  let out = ''
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    out += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(out)
+}
+
 /** 写二进制内容（base64） */
 export async function writeVdfsBinary(
   path: string,

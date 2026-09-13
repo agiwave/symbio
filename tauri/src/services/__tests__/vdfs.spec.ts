@@ -14,8 +14,8 @@ vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn() }))
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn() } }))
 
 import { callPlugin } from '@/services/plugin'
-import { VFDS_ACTION, VFDS_ROOT, vdfsJoin } from '@/schemas/vdfs'
-import { runVdfsAction } from '../vdfs'
+import { VFDS_ACTION, VFDS_ROOT, VFDS_WRITE, vdfsJoin } from '@/schemas/vdfs'
+import { arrayBufferToBase64, runVdfsAction, writeVdfsBinary } from '../vdfs'
 
 /** 最近一次插件调用（op + 载荷） */
 function lastCall(): { op: string; payload: Record<string, unknown> } {
@@ -58,6 +58,31 @@ describe('runVdfsAction（vdfs/action）', () => {
       path: '/mcp/github',
       action: 'test',
       payload: { verbose: true },
+    })
+  })
+})
+
+describe('整包导入（vdfs/write 的二进制通道）', () => {
+  it('arrayBufferToBase64 与标准 base64 一致（含分块边界）', () => {
+    const bytes = new Uint8Array(0x8000 + 5) // 跨过 32KB 分块
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251
+    expect(arrayBufferToBase64(bytes.buffer)).toBe(Buffer.from(bytes).toString('base64'))
+  })
+
+  it('writeVdfsBinary 按线路口径发送 b64（后端据 b64 判定二进制）', async () => {
+    vi.mocked(callPlugin).mockResolvedValueOnce({ path: '/skill/demo.zip', created: true })
+    const r = await writeVdfsBinary(
+      vdfsJoin(vdfsJoin(VFDS_ROOT, 'skill'), 'demo.zip'),
+      'UEsDBA==',
+      { create: true }
+    )
+
+    expect(r.created).toBe(true)
+    expect(lastCall().op).toBe(VFDS_WRITE)
+    expect(lastCall().payload).toEqual({
+      path: '/skill/demo.zip',
+      b64: 'UEsDBA==',
+      create: true,
     })
   })
 })

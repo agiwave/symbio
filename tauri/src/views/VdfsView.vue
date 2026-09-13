@@ -134,6 +134,34 @@
             </div>
           </template>
 
+          <!-- 内容来自本地文件（如 zip 整包导入）：选文件，地址由文件名推导 -->
+          <template v-else-if="createType.source === VFDS_NEW_SOURCE_FILE">
+            <h3 class="prompt-title">导入{{ createType.title || createType.ext }}</h3>
+            <input
+              type="file"
+              class="prompt-input"
+              :accept="createType.ext ? `.${createType.ext}` : undefined"
+              @change="onTypedFile"
+            />
+            <p class="prompt-hint">写入地址：<code>{{ typedFilePreview }}</code></p>
+            <p v-if="createType.description" class="prompt-hint">{{ createType.description }}</p>
+            <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
+            <div class="prompt-actions">
+              <button class="action-btn" :disabled="saving || !typedFile" @click="submitTypedFile">
+                {{ saving ? '导入中…' : '导入' }}
+              </button>
+              <button
+                v-if="creatableTypes.length > 1"
+                class="action-btn secondary"
+                :disabled="saving"
+                @click="createType = null"
+              >
+                上一步
+              </button>
+              <button class="action-btn secondary" :disabled="saving" @click="cancelTyped">取消</button>
+            </div>
+          </template>
+
           <template v-else>
             <h3 class="prompt-title">新建{{ createType.title || createType.ext }}</h3>
             <input
@@ -246,8 +274,10 @@ import { getVdfsRenderer, mountIconOf, resolveVdfsRenderer } from '@/registry/vd
 import '@/registry/vdfsRenderers'
 import {
   VFDS_KIND_MOUNT,
+  VFDS_NEW_SOURCE_FILE,
   VFDS_ROOT,
   isVdfsDir,
+  newFileNameOf,
   vdfsAccessOf,
   vdfsJoin,
   vdfsParent,
@@ -295,6 +325,7 @@ const {
   removeSelected,
   createDir,
   createTyped,
+  createTypedFile,
   creatableTypes,
   canCreate,
   renameSelected,
@@ -380,6 +411,8 @@ function onBrowse() {
 const creatingTyped = ref(false)
 const createType = ref<VdfsNewType | null>(null)
 const typedName = ref('')
+/** `source = file` 的类型：待导入的本地文件 */
+const typedFile = ref<File | null>(null)
 
 /** 新建地址预览（类型 ext 决定扩展名） */
 const typedPreview = computed(() => {
@@ -388,6 +421,28 @@ const typedPreview = computed(() => {
   const name = typedName.value.trim() || '<名称>'
   return vdfsJoin(cwd.value, t.ext ? `${name}.${t.ext}` : name)
 })
+
+/** 导入地址预览（目标名由**文件名**推导，故用户不填名） */
+const typedFilePreview = computed(() => {
+  const t = createType.value
+  if (!t) return ''
+  const f = typedFile.value
+  if (!f) return vdfsJoin(cwd.value, `<文件名>${t.ext ? `.${t.ext}` : ''}`)
+  return vdfsJoin(cwd.value, newFileNameOf(f.name, t.ext))
+})
+
+function onTypedFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  typedFile.value = input.files?.[0] ?? null
+  detailError.value = ''
+}
+
+async function submitTypedFile() {
+  const t = createType.value
+  const f = typedFile.value
+  if (!t || !f) return
+  if (await createTypedFile(t, f)) cancelTyped()
+}
 
 function startTypedNew() {
   creating.value = false
@@ -402,6 +457,7 @@ function cancelTyped() {
   creatingTyped.value = false
   createType.value = null
   typedName.value = ''
+  typedFile.value = null
 }
 async function submitTyped() {
   const t = createType.value
@@ -591,6 +647,12 @@ void props
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-subtle-bg);
+}
+/* 文件选择器（整包导入）沿用输入框的框体，但按原生控件排版 */
+.prompt-input[type='file'] {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.78rem;
 }
 .prompt-hint {
   margin: 0;
