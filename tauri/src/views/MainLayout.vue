@@ -1,8 +1,8 @@
 <template>
   <div class="main-layout">
     <!-- 应用外壳 = 三栏工作台（统一 Workbench 容器，应用外壳模式）：
-         侧边栏 items 来自后端 providers 注册表（order 排列、不分组，
-         会话→/vdfs/session、设置→/vdfs/setting，其余→/entities/{kind}），
+         侧边栏 items 来自 `.vdfs` 虚拟根（挂载点清单，后端 order 排列、不分组，
+         路由恒为 /vdfs/{mount}），
          工作区 = RouterView（VDFS 页嵌入其中，与本外壳共用同一台三栏工作台）。 -->
     <Workbench :rail-items="navItems" @rail-select="onNavSelect">
       <template #rail-header>
@@ -54,7 +54,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterView } from 'vue-router'
 import { startSessionBusWatcher } from '@/services/sessionBusWatcher'
 import { getHomedirInfo, getWorkspacePath } from '@/services/home'
-import { loadProviders, useNavRailItems } from '@/composables/useEntityProviders'
+import { loadMounts, reloadMounts, useNavRailItems } from '@/composables/useNavRail'
 import { useSessionsStore } from '@/stores/sessions'
 import {
   loadSystemLocation,
@@ -74,13 +74,13 @@ const { showToast } = useToast()
 
 const openHomedirSwitcher = ref(false)
 
-/** 主导航项：全部已注册 provider（后端 order 顺序），不含任何特殊分组。
- *  机制内唯一实现（useNavRailItems）：providers 注册表 → NavRail 项，
- *  路由约定见 navTargetOf——MainLayout 不再持有任何导航特判逻辑。 */
+/** 主导航项：`.vdfs` 虚拟根内容（挂载点清单，后端 order 顺序），不含任何特殊分组。
+ *  机制内唯一实现（useNavRailItems）：`.vdfs` 根 → NavRail 项，
+ *  路由约定见 navTargetOf（恒为 `/vdfs/{mount}`）——MainLayout 不再持有任何导航特判。 */
 const { navItems, navTargetOf } = useNavRailItems()
 
-function onNavSelect(kind: string) {
-  goTo(navTargetOf(kind))
+function onNavSelect(mount: string) {
+  goTo(navTargetOf(mount))
 }
 
 onMounted(async () => {
@@ -97,11 +97,12 @@ onMounted(async () => {
   }
   void useSessionsStore().refreshList()
 
-  // 拉取后端实体 provider 注册表（动态生成左侧导航；幂等）
+  // 拉取 `.vdfs` 虚拟根（挂载点清单）→ 动态生成左侧导航（幂等）。
+  // 实体页（WorkbenchView）自持实体注册表的加载，外壳不再代劳。
   try {
-    await loadProviders()
+    await loadMounts()
   } catch (err) {
-    logger.warn('MainLayout', '加载实体 provider 注册表失败:', err)
+    logger.warn('MainLayout', '加载 VDFS 挂载点清单失败:', err)
   }
 
   // 本地模式下异步加载 homedir 显示（不阻塞首屏）；远端模式由系统目录状态直接展示
@@ -153,9 +154,9 @@ async function onHomedirReloaded() {
   }
   // 重新拉取导航与会话清单（远端模式下数据来自远端实例）
   try {
-    await loadProviders()
+    await reloadMounts()
   } catch (err) {
-    logger.warn('MainLayout', '切换后加载 provider 失败:', err)
+    logger.warn('MainLayout', '切换后加载挂载点清单失败:', err)
   }
   void useSessionsStore().refreshList()
   // 跳到首页（避免停留在某个"已失效"的页面）

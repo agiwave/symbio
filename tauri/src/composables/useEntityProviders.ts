@@ -11,12 +11,9 @@
  */
 
 import { computed, shallowRef } from 'vue'
-import { useRoute } from 'vue-router'
 import { fetchProviders } from '@/services/entities'
 import type { ProviderInfo, EntityCapabilities } from '@/schemas/entities'
 import { ENTITY_LABELS } from '@/schemas/entities'
-import { getEntityIcon } from '@/registry/entityTypes'
-import type { NavRailItem } from '@/components/common/NavRail.vue'
 import { logger } from '@/utils/logger'
 
 const providers = shallowRef<ProviderInfo[]>([])
@@ -134,50 +131,4 @@ export function resolveActiveTypes(
   return out.length ? out.sort((a, b) => a.order - b.order) : defaultTypes
 }
 
-// ============ 应用外壳导航（机制内唯一实现，MainLayout 消费） ============
-
-/**
- * 机制内路由约定：kind → 顶层导航路由目标。
- *
- * 已迁移到 VDFS 的 kind 走 `/vdfs/{kind}`（挂载名与 kind 同名）：
- * - 会话（session）：`/vdfs/session`，同时也是首页（`/` 重定向至此），见 §7 S3；
- * - 设置（setting）：`/vdfs/setting`，见 §7 S2。
- * 其余 kind 暂进统一实体页 `/entities/{kind}`，待其 VDFS provider 落地后（§7 S4）
- * 一并切换，届时本函数退化为 `return \`/vdfs/${kind}\``。新增实体类型由后端
- * 注册表自动生成导航，本函数无需改动。
- */
-export function navTargetOf(kind: string): string {
-  switch (kind) {
-    case 'session':
-      return '/vdfs/session'
-    case 'setting':
-      return '/vdfs/setting'
-    default:
-      return `/entities/${kind}`
-  }
-}
-
-/**
- * 应用外壳侧边栏：providers 注册表 → NavRail 项（MainLayout 消费）。
- * 与 WorkbenchView 的类别侧边栏同源同构——整个 App 的导航/类别都由后端
- * 注册表驱动，图标复用 entityTypes 注册表，前端零硬编码类型清单。
- */
-export function useNavRailItems() {
-  const route = useRoute()
-  const { providers } = useEntityProviders()
-
-  const navItems = computed<NavRailItem[]>(() =>
-    providers.value.map((p) => ({
-      key: p.kind,
-      label: p.label,
-      icon: getEntityIcon(p.kind) ?? undefined,
-      active: route.path === navTargetOf(p.kind),
-    }))
-  )
-
-  function onNavSelect(kind: string) {
-    return navTargetOf(kind)
-  }
-
-  return { navItems, navTargetOf, onNavSelect }
-}
+// 应用外壳导航已迁至 `composables/useNavRail.ts`（S4 起由 `.vdfs` 驱动）。

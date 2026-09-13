@@ -32,8 +32,10 @@
       :item="item"
       :option-data="optionData"
       :capabilities="capabilities"
+      :mechanism-actions="mechanismActions"
       :saving="saving"
       @option-save="(v) => $emit('save', v)"
+      @delete="$emit('delete')"
     />
   </div>
 </template>
@@ -41,7 +43,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import DetailForm from '@/components/entities/DetailForm.vue'
-import type { DetailDefinition, EntityCapabilities, EntitySummary } from '@/schemas/entities'
+import type {
+  DetailAction,
+  DetailDefinition,
+  EntityCapabilities,
+  EntitySummary,
+} from '@/schemas/entities'
 import { vdfsAccessOf, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
 
 const props = withDefaults(
@@ -103,8 +110,20 @@ const capabilities = computed<EntityCapabilities>(() => ({
   read_only: !access.value.write,
 }))
 
-// 不注入机制动作（重命名 / 删除）：form 型节点是 provider 声明固定清单的项
-// （如设置分区），增删本身没有语义，定义自带的动作（保存配置）即为全部能力。
+/**
+ * 机制动作注入（与 VdfsSessionDetail 同构）。
+ *
+ * 能力判据是节点的访问位（`w` = 可写 ⇒ 可删）。删除请求经 `@delete` 回到页面层，
+ * 由页面统一走 `vdfs/delete`（`VdfsProvider::delete`），本组件不直接发协议。
+ *
+ * 说明：`ext = form` 在 S4 之前只由「设置分区」这类固定清单项使用（增删无语义），
+ * S4 起 model / skill / mcp 的实体详情同样落到 form（`schema` 来自
+ * `EntityProvider::detail_definition`），此时删除是有语义的，故按访问位注入。
+ */
+const mechanismActions = computed<DetailAction[]>(() => {
+  if (!access.value.write) return []
+  return [{ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' }]
+})
 </script>
 
 <style scoped>

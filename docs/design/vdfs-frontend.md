@@ -63,6 +63,7 @@
 | `registry/vdfsRenderers.ts` | `标识 → 组件`（唯一装配点） | **保留** |
 | `components/vdfs/*.vue` | form / text / session / readonly 四个详情渲染器 | **保留** |
 | `views/VdfsView.vue` | 三栏装配（**嵌入主布局** / 独立整页两种形态） | **保留**（扩展） |
+| `composables/useNavRail.ts` | 应用外壳左栏：`.vdfs` 根 → NavRail 项（S4 起） | **保留**（S4 新增） |
 | `router/index.ts` | `/vdfs/:mount?`（S3 起嵌入 `MainLayout` 子路由） | **保留** |
 
 结论：前端既有改动**方向正确、结构合理**，与目标一致的部分**整体保留**，
@@ -138,9 +139,15 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 - **装配形态（S3 起）**：本栏由**应用外壳**承担（`MainLayout` 的 `NavRail`），VDFS 页
   作为工作区内容**嵌入**其中——全 App 因此只有一台三栏工作台，页面切换不替换外壳。
   `VdfsView` 保留**独立整页**形态（自渲染本栏 + 返回键），供将来以独立窗口 / 面板复用。
-  过渡期说明：应用外壳的导航项**暂仍来自 `entities/providers` 注册表**
-  （`useNavRailItems`），因为 `model` / `agent` / `skill` / `mcp` 尚未有 VDFS provider（§7 S4）；
-  此时若切到 `.vdfs` 根会丢失这些导航项。待 S4 补齐后，左栏一并切到 `.vdfs` 根，S5 下线 `entities/*`。
+- **数据来源（S4 起）**：本栏**已完全由 `.vdfs` 驱动**（`composables/useNavRail.ts`）——
+  挂载点清单即导航项，`navTargetOf(mount)` 恒为 `/vdfs/{mount}`，不再依赖
+  `entities/providers` 注册表（后者退居「实体页内部实现」，S5 下线）。
+  变更经 `vdfs` 事件总线触发重拉（**非轮询**）。
+- **顺序与标签的单一真相源**：挂载点的 `label` / `order` 一律取自实体注册表
+  （`entities::nav_meta_of(kind)`；`EntityVdfsAdapter` 同源），自持 provider 的插件
+  （session / setting）**不得硬编码 order 常量**，否则左栏顺序会与实体页不一致。
+- **已知副作用**：`local`（本地文件）也是一个 VDFS 挂载点，因此会作为左栏第 7 项出现。
+  若需隐藏，应在机制层引入「导航可见性」标记，而不是在前端按名字过滤。
 
 ### 4.2 中栏：列表 / 树
 
@@ -245,7 +252,7 @@ pub struct VdfsNewType {
 | **S1 页面规范地基** | 地址模型 `.vdfs`（§3）+ 导航元数据（§4.1）+ 可新建类型（§5）+ 添加/类型选择器 | 前端页面机制就位；后端 `new_types` 机制就位 |
 | **S2 设置迁移** | `setting` 已是 provider；把设置入口从 `/settings`（entities）切到 `/vdfs/setting` | 设置页走 VDFS；`entities/setting` 退场 |
 | **S3 会话迁移** | 新增 `session` provider：根 = 会话清单（`new_types = [会话]`）、节点 = 会话（`ext = session`）；read/write/delete 转发既有会话协议 | 会话页走 VDFS；聊天工作区作为 `session` 渲染器 |
-| **S4 其余迁移** | 逐个新增 `model` / `agent` / `skill` / `mcp` provider，各自声明 `new_types` | 统一实体页按类型逐个退场 |
+| **S4 其余迁移** | 用一个通用 `EntityVdfsAdapter` 把既有 `EntityProvider` 接成挂载点（`model` / `skill` / `mcp` 可写、`agent` 只读）；外壳左栏切到 `.vdfs` 根 | 全部资源在 `.vdfs` 下可见可管；统一实体页按类型逐个退场 |
 | **S5 下线旧协议** | 移除 `entities/*` 路由与前端实体页，导航完全由 `.vdfs` 驱动 | 一个协议、一个页面 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
@@ -288,7 +295,42 @@ pub struct VdfsNewType {
     退场。会话详情的**删除动作**经 `mechanismActions` 注入（判据 = 节点访问位 `w`）。
   - **已知取舍**：VDFS 新建会话是「立即创建 + 命名」（VDFS 的 `write { create }` 语义），
     与实体机制的「懒创建（发送首条消息才建）」不同；后者属聊天流优化，待 S5 后统一。
-- **S4–S5**：待续。
+- **S4 其余迁移**（**已完成**）：`model` / `agent` / `skill` / `mcp` 四类不再各写一份
+  provider，而是由**一个通用适配器**统一接入。
+  - **通用适配器** `symbio_core/vdfs/entity_adapter.rs` 的 `EntityVdfsAdapter`：
+    把**任意** `EntityProvider` 接成 VDFS 挂载点。核心洞见——实体机制与 VDFS 是
+    **同一批资源的两套寻址方式**，因此复用既有能力而非重写：
+    挂载点 label / order / 可写性 / `new_types` ← `entities::provider_registry()`；
+    `list` ← `list_items`；`stat` / 节点呈现 ← `summarize` + `detail_definition`；
+    `read` ← 摘要 `extra.config`（与实体详情页预填**同源**）；
+    `write` / `delete` ← `entity_write` / `entity_delete`；`watch` ← provider 侧
+    `broadcast::Sender<VdfsChange>`。**新增一种实体类型时，VDFS 侧零改动。**
+  - **消除两条链路的逻辑分叉**：把 `entities/upload` 的 manifest 分支与 `entities/delete`
+    抽成公开的 `entities::entity_write` / `entity_delete`，实体机制与 VDFS 共用同一份
+    校验 / 写盘 / 事件发布。
+  - **节点 `ext` 选取**：`detail_definition` 有定义 → `ext = form`（前端通用表单渲染器
+    解析 `schema`）；无定义 → `ext = <kind>`（机制级只读视图）。`ext` 仍是详情渲染器的
+    唯一分发键，适配器不参与渲染决策。
+  - **新建语义由插件自持**：新增 `EntityProvider::new_entity_manifest(id, title)` 默认方法。
+    实体机制走完整表单一次上传；VDFS `write { create }` 只给路径名，故插件各给一份
+    **最小可用配置**：`model` 取预设首项 + `skip_validation`；`skill` 满足
+    `name == id` 且 description ≥ 10 字；`mcp` 给 stdio 骨架（`type` / `command` / `args`）。
+  - **可写性双重判定**：`writable()` = 注册表 `supports_upload` **且** provider 有
+    `category()` + `manifest_file()`（EntityStore 型）。bundle 型 `agent`（目录自管、
+    走 BundleStore）因此**自动降级为只读**——避免「声明了可新建但落盘必失败」。
+    `agent` 以**只读挂载**接入：列表 + 详情可用，新建仍走实体页的 zip 上传。
+  - **导航顺序单一真相源**：新增 `entities::nav_meta_of(kind)`；`session` / `setting`
+    自持 provider 的 `label` / `order` 改为从注册表读（原来硬编码 10 / 60，与注册表的
+    1…6 不一致，会让左栏顺序错乱）。
+  - **外壳左栏切到 `.vdfs` 根**：新建 `composables/useNavRail.ts`
+    （`navTargetOf` 恒为 `/vdfs/{mount}`、挂载清单模块级单例 + `loadMounts` / `reloadMounts`、
+    订阅 `vdfs` 总线重拉）；`useEntityProviders` 只保留实体注册表职责。
+  - **`form` 渲染器补删除动作**：`VdfsFormDetail` 原先假设 `form` = 设置分区（增删无语义）；
+    S4 起 `model` / `skill` / `mcp` 详情也走 `form`，故按访问位注入 `mechanismActions`
+    （`w` ⇒ 可删），经 `@delete` 回页面层统一走 `vdfs/delete`（与 `VdfsSessionDetail` 同构）。
+  - **已知取舍**：`local`（本地文件）同为 VDFS 挂载点，故左栏出现第 7 项；隐藏需在机制层
+    引入「导航可见性」标记，而非前端按名过滤。`agent` 的新建暂不支持 VDFS 路径（zip 语义）。
+- **S5 下线旧协议**：待续。
 
 ---
 
