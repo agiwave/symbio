@@ -14,6 +14,7 @@
     :saving="saving"
     @created="(id) => $emit('created', id)"
     @delete="$emit('delete')"
+    @open-container="$emit('browse')"
   />
 </template>
 
@@ -35,6 +36,8 @@ const props = defineProps<{
 defineEmits<{
   (e: 'created', id: string): void
   (e: 'delete'): void
+  /** 进入会话内部（子会话 / 工作目录树）——由页面层 `enter(节点路径)` 完成 */
+  (e: 'browse'): void
   (e: 'save', payload: unknown): void
   (e: 'rename'): void
 }>()
@@ -64,12 +67,22 @@ const capabilities = computed<EntityCapabilities>(() => {
 /**
  * 机制动作注入（在 ChatMainPanel 头部与自身按钮并排渲染）。
  *
- * 能力判据是节点的访问位（`w` = 可写 ⇒ 可删），与实体机制同构：
- * 删除请求经 `@delete` 回到页面层，由页面统一走 `vdfs/delete`
- * （`VdfsProvider::delete` → `delete_session_internal`），本组件不直接发协议。
+ * - **浏览内部**：会话内部结构（子会话 / 工作目录树）在 VDFS 上是「会话同名
+ *   目录」，由页面层 `enter(node.path)` 进入——取代原容器实体页。只读能力，
+ *   与访问位无关，恒可见。
+ * - **删除**：能力判据是节点的访问位（`w` = 可写 ⇒ 可删），与实体机制同构；
+ *   删除请求经 `@delete` 回到页面层，统一走 `vdfs/delete`
+ *   （`VdfsProvider::delete` → `delete_session_internal`）。
+ *
+ * 本组件不直接发协议——动作一律回到页面层执行。
  */
 const mechanismActions = computed<DetailAction[]>(() => {
-  if (!capabilities.value.mutable) return []
-  return [{ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' }]
+  const out: DetailAction[] = [
+    { id: 'open-container', label: '浏览内部', style: 'primary', payload: { kind: 'session' } },
+  ]
+  if (capabilities.value.mutable) {
+    out.push({ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' })
+  }
+  return out
 })
 </script>

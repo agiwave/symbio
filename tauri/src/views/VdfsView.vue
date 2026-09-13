@@ -218,6 +218,7 @@
           @save="onSave"
           @delete="onDelete"
           @rename="startRename"
+          @browse="onBrowse"
         />
 
         <div v-else-if="loadingDetail" class="vdfs-placeholder">加载中…</div>
@@ -348,6 +349,19 @@ function onSave(payload: unknown) {
 
 function onDelete() {
   void removeSelected()
+}
+
+/**
+ * 进入会话内部（子会话 / 工作目录树）。
+ *
+ * 会话节点本身仍是**叶子**（点击 = 聊天详情，语义不变）；其内部结构挂在
+ * **同名目录路径**之下（`<id>/子会话`、`[<id>/工作目录]`），故直接 `enter`
+ * 节点路径即可——取代原先「容器实体页」整页推入的做法。
+ */
+function onBrowse() {
+  const n = selectedNode.value
+  if (!n) return
+  void enter(n.path)
 }
 
 // ==================== 新建（类型化；类型由节点声明，§5） ====================

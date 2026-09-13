@@ -341,14 +341,19 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
   // 节点声明自己能新建哪些类型（`new_types`）；前端只负责「选类型 + 填名 + 组装
   // 地址 + 发写请求」，不认识任何具体类型——创建语义由 provider 自持。
 
-  /** 当前目录可接受的新建类型（挂载点根回退到挂载点清单） */
+  /**
+   * 当前目录可接受的新建类型。
+   *
+   * 节点自身声明优先；**仅挂载点根**才回退到挂载点声明——挂载点的
+   * `new_types` 描述的是「根下可建什么」，若泄漏到任意子目录，每个子目录
+   * 都会长出与其语义无关的新建入口（如会话的「新建会话」出现在工作目录里）。
+   */
   const creatableTypes = computed<VdfsNewType[]>(() => {
     const fromNode: VdfsNewType[] | undefined = cwdNode.value?.new_types
     if (fromNode && fromNode.length > 0) return fromNode
-    const fromMount: VdfsNewType[] | undefined = mounts.value.find(
-      (x) => x.mount === activeMount.value
-    )?.new_types
-    return fromMount ?? []
+    const m = mounts.value.find((x) => x.mount === activeMount.value)
+    if (!m || !m.root || cwd.value !== m.root) return []
+    return m.new_types ?? []
   })
 
   /** 是否有可新建类型（添加按钮可见性；机制只认节点声明） */

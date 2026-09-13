@@ -254,6 +254,7 @@ pub struct VdfsNewType {
 | **S3 会话迁移** | 新增 `session` provider：根 = 会话清单（`new_types = [会话]`）、节点 = 会话（`ext = session`）；read/write/delete 转发既有会话协议 | 会话页走 VDFS；聊天工作区作为 `session` 渲染器 |
 | **S4 其余迁移** | 用一个通用 `EntityVdfsAdapter` 把既有 `EntityProvider` 接成挂载点（`model` / `skill` / `mcp` 可写、`agent` 只读）；外壳左栏切到 `.vdfs` 根 | 全部资源在 `.vdfs` 下可见可管；统一实体页按类型逐个退场 |
 | **S5 下线旧协议** | 移除 `entities/*` 路由与前端实体页，导航完全由 `.vdfs` 驱动 | 一个协议、一个页面 |
+| **S6 会话内部重建** | 会话内部结构（子会话 / 工作目录树）改由 VDFS 同名目录承载，原容器实体页可替代 | S5 的阻塞解除；容器页退场 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -335,15 +336,33 @@ pub struct VdfsNewType {
     `model-providers` → `/vdfs/model`、`mcp` → `/vdfs/mcp`、`skill` → `/vdfs/skill`、
     `agent` → `/vdfs/agent`（原先一律指向将被下线的 `/entities/{kind}`）。
     书签 / 深链从此直达 VDFS，不再经过统一实体页。
-  - **待办与已知阻塞**：`/entities/:types?`（leaf 模式）与容器页
-    （`/container/:kind/:id/entities`、`/agent/:agentId/entities`）构成一整簇
-    `entities/*` 机制，尚未下线。**阻塞点**：会话的「管理内部实体」入口
-    （工作目录树 / 子会话，`ContainerKindInfo.view = tree`）经容器页承载，
-    而 `VdfsSessionDetail` 目前只注入 `delete` 机制动作——若直接下线容器页，
-    该入口将彻底不可达。故 S5 剩余部分需先决定：**容器/目录树能力是
-    在 VDFS 上重建（如 `session` 挂载点下引入子挂载），还是按「不适合的
-    修改可放弃」一并移除**。决定后再移除 leaf 路由与 `WorkbenchView`
-    的 leaf 分支（`goBack` / `openContainerEntities` 随之调整）。
+  - **阻塞已解除（S6）**：会话的「管理内部实体」能力（工作目录树 / 子会话）
+    已在 VDFS 上重建，容器页不再是不可替代的入口。详见下面的 S6 记录。
+  - **待办**：移除 `/entities/:types?`（leaf 模式）与容器页
+    （`/container/:kind/:id/entities`、`/agent/:agentId/entities`），
+    并随之调整 `WorkbenchView` 的 leaf 分支（`goBack` /
+    `openContainerEntities`）与 `useWorkbenchView` 的 leaf 逻辑。
+
+- **S6 会话内部在 VDFS 上重建**（**已完成**）：会话保持**叶子**（点击 = 聊天
+  详情，语义不变），其内部结构作为**会话同名目录**挂在其下：
+
+  | 地址 | 语义 |
+  | --- | --- |
+  | `<id>` | 会话叶子（`ext = session`，聊天详情） |
+  | `<id>/子会话[/<sub>]` | 子会话清单 / 单个子会话（查看 · 删除） |
+  | `<id>/工作目录[/<rel>]` | 工作目录树（文件可查看 / 编辑） |
+
+  - 入口：会话详情新增机制动作「浏览内部」（`VdfsSessionDetail` 注入，
+    经 `@browse` 由页面层 `enter(node.path)` 完成）。
+  - 后端：会话 `VdfsProvider` 重写 `list/stat/read/write/delete` 处理嵌套路径，
+    场景实现复用既有 `workdir` 模块（两条链路同一份校验与 IO）：
+    - 新增 `workdir::read_content`（另 `list_children` 去掉未用的 ctx 参数）；
+    - `WorkdirWatchManager` 注入 VDFS 广播源，文件变化与机制变更**合流**，
+      `.vdfs` 页面不另开监听；
+    - `stat(<id>)` 按**目录视图**回答（只给 `l`）——`stat` 结果被分发层用作
+      「当前目录节点」，其访问位决定是否给出新建入口。
+  - 前端：`useVdfs.creatableTypes` 的挂载点回退**仅限挂载点根**——否则每个
+    子目录都会长出与其语义无关的新建入口（如工作目录里出现「新建会话」）。
 
 ---
 
