@@ -60,13 +60,17 @@ impl SessionPlugin {
         // 变更广播：容量只需覆盖「一次突发写入 + 少量并发订阅者」；
         // 无订阅者时 send 静默失败（broadcast 语义），因此不设保留位。
         let (change_tx, _) = tokio::sync::broadcast::channel(64);
+        // 目录树场景同时服务 VDFS：文件变化经**同一广播源**转发给 `.vdfs`
+        // 订阅方，VDFS 侧不必另开一套监听（实时链路在机制层合流）。
+        let workdir_watches = super::workdir::WorkdirWatchManager::default();
+        workdir_watches.set_vdfs_sender(change_tx.clone());
         Self {
             config: Arc::new(RwLock::new(config)),
             parent,
             active_mgr: Arc::new(super::active::ActiveSessionManager::new()),
             store: OnceCell::new(),
             heartbeat_state: Arc::new(RwLock::new(HashMap::new())),
-            workdir_watches: Default::default(),
+            workdir_watches,
             change_tx,
             watch_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
@@ -536,7 +540,7 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
     /// 列出容器（父会话）内的子实体（按 sub_kind 分流：子会话 / 目录树）
     async fn list_container_items(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        _ctx: &Arc<dyn InvokeRequest>,
         sub_kind: Option<&str>,
         container: &str,
         parent: Option<&str>,
@@ -550,7 +554,7 @@ impl crate::symbio_core::entities::EntityProvider for SessionPlugin {
                 return Ok(Vec::new());
             };
             self.workdir_watches.ensure_watch(&workdir, container);
-            return super::workdir::list_children(ctx, &workdir, parent).await;
+            return super::workdir::list_children(&workdir, parent).await;
         }
 
         // 子会话清单（sub_kind 为 None 时容器页做全量分箱，目录树为懒加载
@@ -797,6 +801,118 @@ fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
     n
 }
 
+// ==================== VDFS：会话内部寻址 ====================
+//
+// 会话在 VDFS 上**保持叶子**（`ext = session`，点击进聊天详情，语义不变）；
+// 其内部结构（子会话 / 工作目录树）作为**会话同名目录**挂在会话之下：
+//
+//   <id>                  → 会话叶子（聊天详情）
+//   <id>/子会话[/<sub>]    → 子会话清单 / 单个子会话（查看 · 删除）
+//   <id>/工作目录[/<rel>]  → 工作目录树（文件可查看 / 编辑）
+//
+// 该寻址取代原「容器实体页」（`/container/session/<id>/entities`）——同一批
+// 能力改由 VDFS 承载，机制侧零新增概念；场景实现仍复用 `workdir` 与
+// `EntityProvider` 的容器钩子，两条链路共用同一份校验与 IO。
+
+/// 会话挂载点内的路径解析结果
+enum VdfsSessionPath<'a> {
+    /// 挂载根 = 会话清单
+    Root,
+    /// `<id>`：单个会话（叶子）
+    Session(&'a str),
+    /// `<id>/子会话`：子会话清单
+    SubSessions(&'a str),
+    /// `<id>/子会话/<sub>`：单个子会话
+    SubSession { id: &'a str, sub: &'a str },
+    /// `<id>/工作目录[/<rel>]`：工作目录树；`rel` 空 = 工作目录根
+    Workdir { id: &'a str, rel: &'a str },
+}
+
+/// 解析会话挂载点内的相对路径（首段 = 会话 id，次段 = 内部区段）。
+fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath<'_>> {
+    let p = path.trim_matches('/');
+    if p.is_empty() {
+        return Ok(VdfsSessionPath::Root);
+    }
+    let (id, rest) = match p.split_once('/') {
+        Some((id, rest)) => (id, rest),
+        None => return Ok(VdfsSessionPath::Session(p)),
+    };
+    let (seg, sub) = match rest.split_once('/') {
+        Some((seg, sub)) => (seg, Some(sub)),
+        None => (rest, None),
+    };
+    let not_found = || vdfs::VdfsError::not_found(format!("会话内部不存在该路径：{path}"));
+    match seg {
+        super::workdir::SEG_SUB_SESSIONS => match sub {
+            None => Ok(VdfsSessionPath::SubSessions(id)),
+            Some(sub) if !sub.is_empty() && !sub.contains('/') => {
+                Ok(VdfsSessionPath::SubSession { id, sub })
+            }
+            Some(_) => Err(vdfs::VdfsError::not_found(format!(
+                "子会话是叶子节点，没有更深层级：{path}"
+            ))),
+        },
+        super::workdir::SEG_WORKDIR => Ok(VdfsSessionPath::Workdir {
+            id,
+            rel: sub.unwrap_or(""),
+        }),
+        _ => Err(not_found()),
+    }
+}
+
+/// 会话内部的两个虚拟子目录（工作目录按会话是否声明 workdir 决定是否出现）
+fn internal_dirs(has_workdir: bool) -> Vec<vdfs::VdfsNode> {
+    let mut out = vec![vdfs::VdfsNode::dir(
+        super::workdir::SEG_SUB_SESSIONS,
+        super::workdir::SEG_SUB_SESSIONS,
+        vdfs::VdfsAccess::LIST,
+    )];
+    if has_workdir {
+        out.push(vdfs::VdfsNode::dir(
+            super::workdir::SEG_WORKDIR,
+            super::workdir::SEG_WORKDIR,
+            vdfs::VdfsAccess::LIST,
+        ));
+    }
+    out
+}
+
+/// 工作目录条目（`EntitySummary`）→ VDFS 节点。
+///
+/// 目录 → 只读（`l`；工作目录不提供新建，与原容器语义一致）；
+/// 文件 → 可读写（`rw`）。`ext` 不显式设置：由文件名推导（`a.md` → `md`），
+/// 渲染器据此分发。
+fn workdir_node(it: &crate::symbio_core::entities::EntitySummary) -> vdfs::VdfsNode {
+    let is_dir = it
+        .extra
+        .get("is_dir")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let name = it.name.clone();
+    if is_dir {
+        vdfs::VdfsNode::dir(name.clone(), name, vdfs::VdfsAccess::LIST)
+    } else {
+        let mut n = vdfs::VdfsNode::file(name.clone(), name, vdfs::VdfsAccess::READ_WRITE);
+        n.size = it.extra.get("size").and_then(|v| v.as_u64());
+        n
+    }
+}
+
+/// 会话内容（转写全文 + 元数据）→ VDFS 文本内容
+fn session_content(session: &super::types::Session) -> vdfs::VdfsResult<vdfs::VdfsContent> {
+    let payload = json!({
+        "id": session.id,
+        "title": session.display_title(),
+        "metadata": session.metadata,
+        "messages": session.messages,
+        "updated_at": session.updated_at,
+    });
+    let text = serde_json::to_string_pretty(&payload)
+        .map_err(|e| vdfs::VdfsError::internal(format!("会话序列化失败：{e}")))?;
+    Ok(vdfs::VdfsContent::text("", text).with_mime("application/json"))
+}
+
 /// 新建会话的标题：路径名去掉扩展名（`<标题>.session` → `<标题>`）。
 ///
 /// 新建时使用方给出的是**标题**而非会话 id——id 是存储细节，由 provider 生成
@@ -860,35 +976,90 @@ impl vdfs::VdfsProvider for SessionPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
-        if !path.is_empty() {
-            return Err(vdfs::VdfsError::not_found(format!(
-                "会话是叶子节点，没有子项：{path}"
-            )));
+        match parse_session_path(path)? {
+            VdfsSessionPath::Root => {
+                let sessions = self
+                    .list_sessions()
+                    .await
+                    .map_err(vdfs::from_plugin_error)?;
+                Ok(self.nodes_of_sessions(&sessions).await)
+            }
+            // 会话内部：两个虚拟子目录（会话存在性校验由 `session_of` 承担）
+            VdfsSessionPath::Session(id) => {
+                let session = self.session_of(id).await?;
+                Ok(internal_dirs(
+                    super::workdir::workdir_of(&session).is_some(),
+                ))
+            }
+            VdfsSessionPath::SubSessions(id) => {
+                self.session_of(id).await?;
+                let store = self.get_store().await.map_err(vdfs::from_plugin_error)?;
+                let subs = store
+                    .list_sub_sessions(id)
+                    .await
+                    .map_err(vdfs::from_plugin_error)?;
+                Ok(self.nodes_of_sessions(&subs).await)
+            }
+            VdfsSessionPath::SubSession { .. } => Err(vdfs::VdfsError::not_found(format!(
+                "子会话是叶子节点，没有子项：{path}"
+            ))),
+            VdfsSessionPath::Workdir { id, rel } => {
+                let workdir = self.workdir_of(id).await?;
+                // 目录树场景的实时监听（与实体机制同一套，按会话 id 引用计数）
+                self.workdir_watches.ensure_watch(&workdir, id);
+                let items = super::workdir::list_children(&workdir, Some(rel))
+                    .await
+                    .map_err(vdfs::from_plugin_error)?;
+                Ok(items.iter().map(workdir_node).collect())
+            }
         }
-        let sessions = self
-            .list_sessions()
-            .await
-            .map_err(vdfs::from_plugin_error)?;
-        let active = self.active_mgr.sessions.read().await;
-        Ok(sessions
-            .iter()
-            .map(|s| {
-                let is_working = active
-                    .get(&s.id)
-                    .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
-                    .unwrap_or(false);
-                session_node(s, is_working)
-            })
-            .collect())
     }
 
     async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
-        if path.is_empty() {
-            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-            return Ok(vdfs::VdfsNode::dir("", "会话", self.root_access()));
+        match parse_session_path(path)? {
+            VdfsSessionPath::Root => {
+                // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+                Ok(vdfs::VdfsNode::dir("", "会话", self.root_access()))
+            }
+            // `<id>` 有二重身份：清单里是**叶子**（`session_node`，`rw`，
+            // 点开 = 聊天详情），被当作目录访问时则是**会话内部**的目录视图。
+            // 这里按后者回答——`stat` 的结果由分发层用作「当前目录节点」，
+            // 其访问位直接决定页面是否给出新建入口；会话内部不支持
+            // 新建 / 建目录，故只声明 `l`。
+            VdfsSessionPath::Session(id) => {
+                let session = self.session_of(id).await?;
+                let mut n =
+                    vdfs::VdfsNode::dir(id, session.display_title(), vdfs::VdfsAccess::LIST);
+                n.kind = crate::symbio_core::entities::ENTITY_SESSION.to_string();
+                Ok(n)
+            }
+            VdfsSessionPath::SubSessions(id) => {
+                self.session_of(id).await?;
+                Ok(vdfs::VdfsNode::dir(
+                    super::workdir::SEG_SUB_SESSIONS,
+                    super::workdir::SEG_SUB_SESSIONS,
+                    vdfs::VdfsAccess::LIST,
+                ))
+            }
+            VdfsSessionPath::SubSession { id, sub } => {
+                let session = self.sub_session_of(id, sub).await?;
+                Ok(session_node(&session, self.is_working(sub).await))
+            }
+            VdfsSessionPath::Workdir { id, rel } => {
+                let workdir = self.workdir_of(id).await?;
+                if rel.is_empty() {
+                    return Ok(vdfs::VdfsNode::dir(
+                        super::workdir::SEG_WORKDIR,
+                        super::workdir::SEG_WORKDIR,
+                        vdfs::VdfsAccess::LIST,
+                    ));
+                }
+                let it = super::workdir::read_node(&workdir, rel)
+                    .await
+                    .map_err(vdfs::from_plugin_error)?;
+                Ok(workdir_node(&it))
+            }
         }
-        let session = self.session_of(path).await?;
-        Ok(session_node(&session, self.is_working(path).await))
     }
 
     /// 读取会话内容（转写全文 + 元数据，JSON）——转发既有存储，不新造协议
@@ -897,17 +1068,27 @@ impl vdfs::VdfsProvider for SessionPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
-        let session = self.session_of(path).await?;
-        let payload = json!({
-            "id": session.id,
-            "title": session.display_title(),
-            "metadata": session.metadata,
-            "messages": session.messages,
-            "updated_at": session.updated_at,
-        });
-        let text = serde_json::to_string_pretty(&payload)
-            .map_err(|e| vdfs::VdfsError::internal(format!("会话序列化失败：{e}")))?;
-        Ok(vdfs::VdfsContent::text("", text).with_mime("application/json"))
+        match parse_session_path(path)? {
+            VdfsSessionPath::Session(id) => {
+                let session = self.session_of(id).await?;
+                session_content(&session)
+            }
+            VdfsSessionPath::SubSession { id, sub } => {
+                let session = self.sub_session_of(id, sub).await?;
+                session_content(&session)
+            }
+            VdfsSessionPath::Workdir { id, rel } if !rel.is_empty() => {
+                let workdir = self.workdir_of(id).await?;
+                let text = super::workdir::read_content(&workdir, rel)
+                    .await
+                    .map_err(vdfs::from_plugin_error)?;
+                Ok(vdfs::VdfsContent::text("", text))
+            }
+            // 目录（挂载根 / 会话内部区段 / 工作目录子目录）无「内容」语义
+            _ => Err(vdfs::VdfsError::invalid(format!(
+                "该路径不可读取内容：{path}"
+            ))),
+        }
     }
 
     /// 写入：`create` → 新建会话；否则 → 合并会话 metadata（`session/update` 语义）。
@@ -920,6 +1101,26 @@ impl vdfs::VdfsProvider for SessionPlugin {
         path: &str,
         content: &vdfs::VdfsContent,
     ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
+        // 工作目录分支：文件写回（与实体机制同一份实现——路径越界校验 + 落盘）
+        match parse_session_path(path)? {
+            VdfsSessionPath::Workdir { id, rel } if !rel.is_empty() => {
+                let workdir = self.workdir_of(id).await?;
+                let text = content.text.as_deref().unwrap_or("");
+                super::workdir::write_node(&workdir, rel, text)
+                    .await
+                    .map_err(vdfs::from_plugin_error)?;
+                self.workdir_watches.ensure_watch(&workdir, id);
+                return Ok(vdfs::VdfsWriteResponse {
+                    path: path.to_string(),
+                    created: false,
+                    etag: None,
+                });
+            }
+            // 会话本身（`path` 即会话 id；新建时是 `<标题>.session`）
+            VdfsSessionPath::Session(_) => {}
+            _ => return Err(vdfs::VdfsError::invalid(format!("该路径不可写入：{path}"))),
+        }
+
         let text = content.text.as_deref().unwrap_or("");
         let value: Value = if text.trim().is_empty() {
             json!({})
@@ -991,14 +1192,34 @@ impl vdfs::VdfsProvider for SessionPlugin {
         path: &str,
         _recursive: bool,
     ) -> vdfs::VdfsResult<()> {
-        if path.is_empty() {
-            return Err(vdfs::VdfsError::Forbidden("会话挂载根不可删除".to_string()));
+        match parse_session_path(path)? {
+            VdfsSessionPath::Root => {
+                Err(vdfs::VdfsError::Forbidden("会话挂载根不可删除".to_string()))
+            }
+            VdfsSessionPath::Session(id) => {
+                // 存在性校验：删除不存在的会话应报 NotFound 而非静默成功
+                self.session_of(id).await?;
+                self.delete_session_internal(id)
+                    .await
+                    .map_err(vdfs::from_plugin_error)
+            }
+            // 子会话：先 abort 活跃任务再删（`delete_session_internal` 同语义）
+            VdfsSessionPath::SubSession { id, sub } => {
+                self.sub_session_of(id, sub).await?;
+                self.delete_session_internal(sub)
+                    .await
+                    .map_err(vdfs::from_plugin_error)
+            }
+            VdfsSessionPath::Workdir { id, rel } if !rel.is_empty() => {
+                let workdir = self.workdir_of(id).await?;
+                super::workdir::delete_node(&workdir, rel)
+                    .await
+                    .map_err(vdfs::from_plugin_error)
+            }
+            _ => Err(vdfs::VdfsError::Forbidden(format!(
+                "该路径不可删除：{path}"
+            ))),
         }
-        // 存在性校验：删除不存在的会话应报 NotFound 而非静默成功
-        self.session_of(path).await?;
-        self.delete_session_internal(path)
-            .await
-            .map_err(vdfs::from_plugin_error)
     }
 
     /// 订阅：把本插件内部的变更广播转发到 sink（`unwatch` 时取消任务）。
@@ -1011,6 +1232,13 @@ impl vdfs::VdfsProvider for SessionPlugin {
         path: &str,
         sink: vdfs::VdfsChangeSink,
     ) -> vdfs::VdfsResult<()> {
+        // 工作目录子树：接入文件系统监听（文件变化经**同一广播源**到达本 sink，
+        // 见 `SessionPlugin::new` 注入的 `set_vdfs_sender`）
+        if let Ok(VdfsSessionPath::Workdir { id, .. }) = parse_session_path(path) {
+            if let Ok(workdir) = self.workdir_of(id).await {
+                self.workdir_watches.ensure_watch(&workdir, id);
+            }
+        }
         let mut rx = self.change_tx.subscribe();
         let handle = tokio::spawn(async move {
             while let Ok(change) = rx.recv().await {
@@ -1031,6 +1259,12 @@ impl vdfs::VdfsProvider for SessionPlugin {
     }
 
     async fn unwatch(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<()> {
+        // 与 `watch` 严格配对：释放本会话对该工作目录的订阅（引用计数归零才停监听）
+        if let Ok(VdfsSessionPath::Workdir { id, .. }) = parse_session_path(path) {
+            if let Ok(workdir) = self.workdir_of(id).await {
+                self.workdir_watches.release_watch(&workdir, id);
+            }
+        }
         let handle = self.watch_tasks.lock().await.remove(path);
         if let Some(handle) = handle {
             handle.abort();
@@ -1059,6 +1293,44 @@ impl SessionPlugin {
             .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
             .unwrap_or(false)
     }
+
+    /// 会话清单 → VDFS 节点（携带实时工作状态）
+    async fn nodes_of_sessions(&self, sessions: &[super::types::Session]) -> Vec<vdfs::VdfsNode> {
+        let active = self.active_mgr.sessions.read().await;
+        sessions
+            .iter()
+            .map(|s| {
+                let is_working = active
+                    .get(&s.id)
+                    .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
+                    .unwrap_or(false);
+                session_node(s, is_working)
+            })
+            .collect()
+    }
+
+    /// 会话的工作目录（未声明 workdir ⇒ 该会话无目录树能力）
+    async fn workdir_of(&self, id: &str) -> vdfs::VdfsResult<String> {
+        let session = self.session_of(id).await?;
+        super::workdir::workdir_of(&session)
+            .ok_or_else(|| vdfs::VdfsError::not_found(format!("会话 {id} 没有工作目录")))
+    }
+
+    /// 取子会话（**归属校验**：必须确实挂在 `id` 之下，避免跨会话越权访问）
+    async fn sub_session_of(&self, id: &str, sub: &str) -> vdfs::VdfsResult<super::types::Session> {
+        let store = self.get_store().await.map_err(vdfs::from_plugin_error)?;
+        let session = store
+            .load_session(sub)
+            .await
+            .map_err(vdfs::from_plugin_error)?;
+        if session.id == sub && session.parent_session_id() == Some(id) {
+            Ok(session)
+        } else {
+            Err(vdfs::VdfsError::not_found(format!(
+                "会话 {id} 下不存在子会话 {sub}"
+            )))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1066,6 +1338,8 @@ mod tests {
     use super::*;
     // trait 方法（list/stat/read/write/delete/watch/unwatch）需 trait 在作用域内才可解析
     use crate::symbio_core::vdfs_provider::VdfsProvider;
+    // 目录树场景模块（本文件非测试码用 `super::workdir`；测试模块需显式引入）
+    use crate::plugins::session::workdir;
 
     /// 验证 session 存储目录**只**从 HomedirRegistry 派生，不依赖 config
     #[test]
@@ -1221,7 +1495,13 @@ mod tests {
         let p = SessionPlugin::new(None, SessionConfig::default());
         assert_eq!(p.label(), Some("会话"));
         assert_eq!(p.icon(), Some("session"));
-        assert_eq!(p.order(), 10);
+        // 顺序取自实体注册表（**单一真相源**），使 `.vdfs` 左栏与实体页恒等
+        // （S4 起不再是 provider 自定的 10）
+        assert_eq!(
+            p.order(),
+            crate::symbio_core::entities::nav_meta_of(crate::symbio_core::entities::ENTITY_SESSION)
+                .map_or(1, |(_, order)| order)
+        );
         assert_eq!(p.root_access().flags(), "l");
         assert!(!p.root_access().traverse, "会话是叶子，不参与树遍历");
 
@@ -1262,11 +1542,100 @@ mod tests {
         assert_eq!(busy.status, vdfs::VFDS_STATUS_WORKING);
     }
 
-    /// 叶子语义：非根路径的 list 必须报错（会话内部结构不由本 provider 承载）
+    /// 会话内部寻址（S6）：`<id>` / `<id>/子会话[/<sub>]` / `<id>/工作目录[/<rel>]`。
+    /// 未知区段与越界层级一律 NotFound——不给半通不通的路径留口子。
+    #[test]
+    fn vdfs_internal_path_parsing() {
+        use VdfsSessionPath::*;
+        assert!(matches!(parse_session_path("").unwrap(), Root));
+        assert!(matches!(parse_session_path("/").unwrap(), Root));
+        assert!(matches!(parse_session_path("abc").unwrap(), Session("abc")));
+        assert!(matches!(
+            parse_session_path("abc/子会话").unwrap(),
+            SubSessions("abc")
+        ));
+        assert!(matches!(
+            parse_session_path("abc/子会话/s1").unwrap(),
+            SubSession {
+                id: "abc",
+                sub: "s1"
+            }
+        ));
+        assert!(matches!(
+            parse_session_path("abc/工作目录").unwrap(),
+            Workdir { id: "abc", rel: "" }
+        ));
+        assert!(matches!(
+            parse_session_path("abc/工作目录/src/lib.rs").unwrap(),
+            Workdir {
+                id: "abc",
+                rel: "src/lib.rs"
+            }
+        ));
+        // 未知区段、子会话越界层级 → NotFound
+        assert!(parse_session_path("abc/nope").is_err());
+        assert!(parse_session_path("abc/子会话/s1/deeper").is_err());
+    }
+
+    /// 会话内部的两个虚拟子目录：工作目录按会话是否声明 workdir 决定是否出现
+    #[test]
+    fn vdfs_internal_dirs_conditional() {
+        let without = internal_dirs(false);
+        assert_eq!(without.len(), 1);
+        assert_eq!(without[0].name, workdir::SEG_SUB_SESSIONS);
+        assert!(without[0].is_dir(), "子会话是目录");
+
+        let with = internal_dirs(true);
+        assert_eq!(with.len(), 2);
+        assert_eq!(with[1].name, workdir::SEG_WORKDIR);
+        assert!(
+            with.iter().all(|n| n.is_dir() && !n.access.write),
+            "两个内部区段都是只读目录（工作目录不提供新建）"
+        );
+    }
+
+    /// 工作目录条目 → VDFS 节点：目录只读（`l`），文件可读写（`rw`）+ 字节数
+    #[test]
+    fn vdfs_workdir_node_shapes() {
+        use crate::symbio_core::entities::EntitySummary;
+
+        let mut d = EntitySummary::new(workdir::TREE_KIND, "src", "src");
+        if let Value::Object(ref mut m) = d.extra {
+            let _ = m.insert("is_dir".to_string(), json!(true));
+        }
+        let dn = workdir_node(&d);
+        assert!(dn.is_dir());
+        assert_eq!(dn.access.flags(), "l", "工作目录子目录只读");
+
+        let mut f = EntitySummary::new(workdir::TREE_KIND, "README.md", "README.md");
+        if let Value::Object(ref mut m) = f.extra {
+            let _ = m.insert("is_dir".to_string(), json!(false));
+            let _ = m.insert("size".to_string(), json!(42u64));
+        }
+        let file = workdir_node(&f);
+        assert!(!file.is_dir());
+        assert_eq!(file.access.flags(), "rw", "工作目录文件可编辑");
+        assert_eq!(file.size, Some(42));
+    }
+
+    /// 会话内容（VDFS `read`）：转写全文 + 元数据，JSON
+    #[test]
+    fn vdfs_session_content_is_json() {
+        let mut s = Session::new("abc");
+        s.updated_at = 1_700_000_000_000;
+        let c = session_content(&s).unwrap();
+        let text = c.text.as_deref().unwrap_or("");
+        let v: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(v["id"], "abc");
+        assert!(v.get("messages").is_some(), "聊天转写随内容下发");
+    }
+
+    /// 不存在的会话：list / stat 一律 NotFound（不做静默降级）
     #[tokio::test]
-    async fn vdfs_list_rejects_non_root_path() {
+    async fn vdfs_list_unknown_session_is_not_found() {
         let p = SessionPlugin::new(None, SessionConfig::default());
         assert!(p.list(&vctx(), "abc").await.is_err());
+        assert!(p.stat(&vctx(), "abc").await.is_err());
     }
 
     /// 实时：provider 自持的变更广播经 `watch` 的转发任务到达 sink；

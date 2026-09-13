@@ -385,6 +385,14 @@ mod tests {
             fn kind(&self) -> &'static str {
                 ENTITY_MODEL
             }
+            // 可写性双重判定的另一半：EntityStore 归属（分类 + 主清单文件）。
+            // 真实 provider（model / skill / mcp）均返回 Some，故桩件也如实给出。
+            fn category(&self) -> Option<&'static str> {
+                Some(crate::symbio_core::providers::categories::MODEL)
+            }
+            fn manifest_file(&self) -> Option<&'static str> {
+                Some(crate::symbio_core::providers::manifests::PROVIDER)
+            }
         }
         let a = EntityVdfsAdapter::new(ENTITY_MODEL, Arc::new(Stub));
         assert!(a.writable(), "model 在注册表中 supports_upload = true");

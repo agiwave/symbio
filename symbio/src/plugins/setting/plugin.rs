@@ -862,7 +862,13 @@ mod tests {
     async fn vdfs_self_description_has_no_mount() {
         let p = SettingPlugin::default();
         assert_eq!(p.label(), Some("设置"));
-        assert_eq!(p.order(), 60);
+        // 顺序取自实体注册表（**单一真相源**），使 `.vdfs` 左栏与实体页恒等
+        // （S4 起不再是 provider 自定的 60）
+        assert_eq!(
+            p.order(),
+            crate::symbio_core::entities::nav_meta_of(crate::symbio_core::entities::ENTITY_SETTING)
+                .map_or(6, |(_, order)| order)
+        );
         assert_eq!(p.icon(), Some("settings"));
         assert_eq!(p.root_access().flags(), "l");
         assert!(!p.root_access().traverse, "分区是叶子，不参与树遍历");

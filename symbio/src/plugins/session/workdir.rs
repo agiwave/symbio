@@ -12,7 +12,8 @@
 
 use crate::symbio_core::entities::EntitySummary;
 use crate::symbio_core::event_bus::EventBus;
-use crate::symbio_core::{InvokeRequest, PluginError};
+use crate::symbio_core::vdfs::VdfsChange;
+use crate::symbio_core::PluginError;
 use dashmap::DashMap;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,11 @@ use super::types::Session;
 
 /// 子类别的统一 kind（provider 场景自定；机制层仅透传）
 pub const TREE_KIND: &str = "dir";
+
+/// 会话内部：子会话清单的路径段（同时是展示名）
+pub const SEG_SUB_SESSIONS: &str = "子会话";
+/// 会话内部：工作目录树的路径段（同时是展示名）
+pub const SEG_WORKDIR: &str = "工作目录";
 
 /// 从会话元数据取工作目录（缺失/为空 = 该会话无 tree 数据）
 pub fn workdir_of(session: &Session) -> Option<String> {
@@ -59,8 +65,10 @@ fn resolve_under(workdir: &str, rel: &str) -> Result<(PathBuf, String), PluginEr
 /// 节点：`kind = "dir"`（场景子类别）、`id` = 相对路径、`parent` = 父路径、
 /// `expandable` = 是否目录；隐藏项（`.` 开头）不下发。排序：目录优先、
 /// 名称字典序（与前端树展示约定一致）。
+///
+/// 与 `read_node` / `write_node` / `delete_node` 同形：**不依赖请求 ctx**
+/// （同一份场景实现同时服务实体机制与 VDFS 机制）。
 pub async fn list_children(
-    _ctx: &Arc<dyn InvokeRequest>,
     workdir: &str,
     parent: Option<&str>,
 ) -> Result<Vec<EntitySummary>, PluginError> {
@@ -172,6 +180,22 @@ pub async fn read_node(workdir: &str, rel: &str) -> Result<EntitySummary, Plugin
 /// 内容内联下发上限（64 KiB）；超限文件只给概要，避免大文件撑爆列表协议
 const MAX_INLINE_READ_BYTES: u64 = 64 * 1024;
 
+/// 读取文件内容（UTF-8）。目录 / 不存在 / 不可解码均报错。
+pub async fn read_content(workdir: &str, rel: &str) -> Result<String, PluginError> {
+    let (abs, _) = resolve_under(workdir, rel)?;
+    let meta = tokio::fs::metadata(&abs)
+        .await
+        .map_err(|_| PluginError::NotFound(format!("路径不存在: {rel}")))?;
+    if meta.is_dir() {
+        return Err(PluginError::ValidationError(format!(
+            "是目录，不能读取内容: {rel}"
+        )));
+    }
+    tokio::fs::read_to_string(&abs)
+        .await
+        .map_err(|e| PluginError::InternalError(format!("读取失败（非 UTF-8 或不可读）: {e}")))
+}
+
 /// 写入文件节点（目录树文件编辑的写回；不存在则创建，目标是目录时拒绝）
 pub async fn write_node(workdir: &str, rel: &str, content: &str) -> Result<(), PluginError> {
     let (abs, _) = resolve_under(workdir, rel)?;
@@ -233,6 +257,12 @@ pub struct WorkdirWatchManager {
     containers: Arc<DashMap<String, Vec<(String, u64)>>>,
     /// (workdir, container) → 当前世代号（每次 ensure 递增）
     generations: Arc<DashMap<String, u64>>,
+    /// VDFS 变更广播（可选，由 VDFS provider 构造期注入）。
+    ///
+    /// 同一份目录树场景同时服务实体机制（粗粒度 `data` 事件）与 VDFS 机制
+    /// （`VdfsChange`）：文件变化时把容器 id 翻译成 VDFS 路径再广播，
+    /// 使 `.vdfs` 页面不必另开一套监听。
+    vdfs_tx: std::sync::Mutex<Option<tokio::sync::broadcast::Sender<VdfsChange>>>,
 }
 
 /// (workdir, container) 的世代守卫键
@@ -241,6 +271,16 @@ fn watch_key(workdir: &str, container: &str) -> String {
 }
 
 impl WorkdirWatchManager {
+    /// 注入 VDFS 变更广播源（VDFS provider 构造期调用一次）。
+    ///
+    /// 未注入时目录树事件仍只走实体机制的 `data` 事件，VDFS 侧不感知；
+    /// 注入后同一批事件额外广播为 [`VdfsChange`]，`.vdfs` 页面即可实时刷新。
+    pub fn set_vdfs_sender(&self, tx: tokio::sync::broadcast::Sender<VdfsChange>) {
+        if let Ok(mut slot) = self.vdfs_tx.lock() {
+            *slot = Some(tx);
+        }
+    }
+
     /// 确保该 workdir 的监听已启动（幂等；container 记入关注清单并递增世代）
     pub fn ensure_watch(&self, workdir: &str, container: &str) {
         let key = watch_key(workdir, container);
@@ -262,6 +302,7 @@ impl WorkdirWatchManager {
 
         let coalesce = Arc::new(std::sync::Mutex::new(CoalesceState::default()));
         let containers = self.containers.clone();
+        let vdfs = self.vdfs_tx.lock().ok().and_then(|s| s.clone());
         let wd = workdir.to_string();
         let watcher = Arc::new(FsWatcher::new_with_callback(move |abs_path| {
             let rel = Path::new(&abs_path)
@@ -295,6 +336,7 @@ impl WorkdirWatchManager {
 
             let st = coalesce.clone();
             let t_containers = containers.clone();
+            let t_vdfs = vdfs.clone();
             let t_wd = wd.clone();
             let t_rel = rel.clone();
             tokio::spawn(async move {
@@ -308,8 +350,10 @@ impl WorkdirWatchManager {
                     return; // 窗口内无后续变化，且首个事件已由调度方发布
                 }
                 publish_data_event(&t_containers, &t_wd, &t_rel);
+                publish_vdfs_change(&t_vdfs, &t_containers, &t_wd, &t_rel);
             });
             publish_data_event(&containers, &wd, &rel);
+            publish_vdfs_change(&vdfs, &containers, &wd, &rel);
         }));
 
         let w = watcher.clone();
@@ -423,10 +467,38 @@ fn publish_data_event(containers: &DashMap<String, Vec<(String, u64)>>, workdir:
     }
 }
 
+/// 把目录树事件翻译为 VDFS 变更并广播（每个关注该 workdir 的容器一条）。
+///
+/// 路径是 VDFS 口径：`<容器 id>/工作目录[/<相对路径>]`——与 VDFS provider
+/// 的路径解析严格同一套（见 `SessionPlugin` 的 `parse_session_path`）。
+/// 未注入广播源（实体机制独立使用本场景）时静默跳过。
+fn publish_vdfs_change(
+    tx: &Option<tokio::sync::broadcast::Sender<VdfsChange>>,
+    containers: &DashMap<String, Vec<(String, u64)>>,
+    workdir: &str,
+    rel: &str,
+) {
+    let Some(tx) = tx else {
+        return;
+    };
+    if let Some(list) = containers.get(workdir) {
+        for (container, _) in list.iter() {
+            let path = if rel.is_empty() {
+                format!("{container}/{SEG_WORKDIR}")
+            } else {
+                format!("{container}/{SEG_WORKDIR}/{rel}")
+            };
+            let _ = tx.send(VdfsChange::new(
+                path,
+                crate::symbio_core::vdfs::VFDS_CHANGE_UPDATED,
+            ));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::SimpleRequest;
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -494,10 +566,6 @@ mod tests {
         assert!(!mgr.is_watched(wd), "最后一位释放后监听停止");
     }
 
-    fn ctx() -> Arc<dyn InvokeRequest> {
-        Arc::new(SimpleRequest::new(None, None))
-    }
-
     async fn seed(dir: &Path) {
         tokio::fs::create_dir_all(dir.join("src")).await.unwrap();
         tokio::fs::create_dir_all(dir.join(".hidden"))
@@ -518,7 +586,7 @@ mod tests {
     async fn root_children_skip_hidden_and_sort_dirs_first() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path()).await;
-        let nodes = list_children(&ctx(), tmp.path().to_str().unwrap(), None)
+        let nodes = list_children(tmp.path().to_str().unwrap(), None)
             .await
             .unwrap();
         let ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
@@ -532,7 +600,7 @@ mod tests {
     async fn nested_level_carries_parent_pointer() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path()).await;
-        let nodes = list_children(&ctx(), tmp.path().to_str().unwrap(), Some("src"))
+        let nodes = list_children(tmp.path().to_str().unwrap(), Some("src"))
             .await
             .unwrap();
         assert_eq!(nodes.len(), 1);
@@ -545,7 +613,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path()).await;
         let wd = tmp.path().to_str().unwrap();
-        assert!(list_children(&ctx(), wd, Some("../..")).await.is_err());
+        assert!(list_children(wd, Some("../..")).await.is_err());
         assert!(read_node(wd, "../secrets").await.is_err());
     }
 
