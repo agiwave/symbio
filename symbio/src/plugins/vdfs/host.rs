@@ -1,26 +1,25 @@
-//! VDFS 访问层（vdfs 插件侧）—— 只做「根 + 全路径」的机械转发
+//! VDFS 访问层（vdfs 插件侧）—— 只做「地址 + 信封」的机械转发
 //!
 //! ## 本层职责（就这两件）
 //!
-//! 1. **前端链路**：把 `vdfs/*` 协议请求翻译成对 **VDFS 根 provider** 的调用，
-//!    结果装进线路信封（[`super::protocol`]）；
+//! 1. **前端链路**：把 `vdfs/*` 协议请求翻译成对**统一文件系统**（[`UnifiedFs`]）
+//!    的调用，结果装进线路信封（[`super::protocol`]）；
 //! 2. **LLM 链路**：同一份翻译经 [`super::tools`] 暴露为工具。
 //!
-//! ## 本层不认识挂载点（拓扑不在访问层）
-//!
-//! 虚拟根 `/` 归**组合容器**所有：容器把自己的组合视图注册为 VDFS 根
-//! （`CapabilityVisitor::register_vdfs_root`，见 `plugins/composite/vdfs.rs`）。
-//! 本层只取这个根，把**规范化后的全路径**原样交给它——
-//!
 //! ```text
-//! 前端 / LLM ──vdfs/*──▶ 本层（翻译）──▶ 根 provider（composite）
-//!                                          └─ VdfsMountTable 拆挂载名 / 回填全路径
+//! 前端 / LLM ──vdfs/*──▶ 本层（拆信封）──▶ UnifiedFs（地址分流）──▶ 虚拟层 / 物理层
 //! ```
 //!
-//! 「首段 = 挂载名、相对路径、跨挂载点守卫、事件补全路径」这些拓扑语义全部在
-//! 根之后（[`VdfsMountTable`]）；本层因此**不持有任何拓扑知识**：
-//! 根之下有多少子树、叫什么名字，本层完全不知道、也不必知道。
-//! 于是「新增资源 = 新挂载点」不需要改动本层任何一行。
+//! ## 本层不认识目录拓扑
+//!
+//! 虚拟层根归**组合容器**所有：容器把自己的组合视图注册为 VDFS 根
+//! （`CapabilityVisitor::register_vdfs_root`，见 `plugins/composite/vdfs.rs`）。
+//! 本层只取这个根、交给门面，把**规范化后的地址**原样递过去——
+//! 根之下有多少类别、叫什么，本层完全不知道、也不必知道。
+//! 于是「新增资源 = 新增一个注册」不需要改动本层任何一行。
+//!
+//! 地址规则（`.vdfs` 前缀 = 虚拟，其余 = 磁盘）也不在本层：它在 [`UnifiedFs`]，
+//! 两条链路共用同一个实例。
 //!
 //! ## 根从哪来
 //!
@@ -29,10 +28,13 @@
 //! - **前端链路**：`ctx` 无能力管理器，从父插件广播一次
 //!   `traverse(TRAVERSE_AVAILABLE_TOOLS)`，容器在广播中把根注册进新收集器。
 //!
-//! 两条链路取到的是**同一个根**。取不到（无组合容器）时降级为**空文件系统**
-//! （空 [`VdfsMountTable`]）而非报错——「系统没有资源」与「资源为空」表现一致，
-//! 前端与 LLM 都不必特判。
+//! 两条链路取到的是**同一个根**。取不到（无组合容器）时虚拟层降级为**空目录**
+//! 而非报错——「系统没有资源」与「资源为空」表现一致，前端与 LLM 都不必特判；
+//! 物理层与它无关，照常可用。
+//!
+//! [`UnifiedFs`]: super::fs::UnifiedFs
 
+use super::fs::{normalize_addr, UnifiedFs};
 use super::protocol::*;
 use crate::symbio_core::vdfs::vdfs_context;
 use crate::symbio_core::vdfs_provider::*;
@@ -40,6 +42,7 @@ use crate::symbio_core::{
     CapabilityVisitor, DefaultToolVisitor, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
     PluginPayload, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
+use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -47,33 +50,63 @@ use std::sync::Arc;
 /// （宿主前端：`subscribe({ kind: 'vdfs' })`）
 pub const VFDS_EVENT_KIND: &str = "vdfs";
 
-// ==================== 根 provider ====================
+// ==================== 统一文件系统 ====================
 
-/// 空文件系统：无容器注册根时的降级对象。
+/// 虚拟层降级用的空服务者（无容器登记时）。
 ///
-/// `/` 可列出（内容为空），其余路径一律 `NotFound`——语义与「有容器但没有资源」
-/// 完全一致，消费者无需为「没有容器」写第二条分支。
-pub fn empty_root() -> DynVdfsProvider {
-    Arc::new(VdfsMountTable::new(Vec::new()))
+/// 自身目录可列出（内容为空），其余虚拟地址一律 `NotFound`——语义与「有容器但没有
+/// 资源」完全一致，消费者无需为「没有容器」写第二条分支。
+struct EmptyVdfs;
+
+#[async_trait]
+impl VdfsProvider for EmptyVdfs {
+    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+        if path.is_empty() {
+            Ok(Vec::new())
+        } else {
+            Err(VdfsError::not_found(path))
+        }
+    }
+
+    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
+        if path.is_empty() {
+            Ok(VdfsNode::dir("", "系统", VdfsAccess::LIST_TRAVERSE))
+        } else {
+            Err(VdfsError::not_found(path))
+        }
+    }
 }
 
-/// 从能力管理器取容器注册的根；未注册时降级为空文件系统。
+/// 虚拟层降级用的空根
+pub fn empty_root() -> DynVdfsProvider {
+    Arc::new(EmptyVdfs)
+}
+
+/// 从能力管理器取容器注册的虚拟层根；未注册时降级为空根。
 ///
 /// 调用方需已确保 `visitor` 存在（LLM 链路里它是硬前提，缺失应显式报错）。
 pub async fn root_of(visitor: &Arc<dyn CapabilityVisitor>) -> DynVdfsProvider {
-    visitor.get_vdfs_root().await.unwrap_or_else(empty_root)
+    visitor
+        .get_vdfs_root()
+        .await
+        .unwrap_or_else(empty_root)
 }
 
-/// 取本次调用的 VDFS 根（前端链路入口）。
+/// 构造本次调用的统一文件系统（虚拟层 + 物理层）。
+pub async fn unified_fs(visitor: &Arc<dyn CapabilityVisitor>) -> DynVdfsProvider {
+    Arc::new(UnifiedFs::new(root_of(visitor).await))
+}
+
+/// 取本次调用的统一文件系统（前端链路入口）。
 ///
 /// `ctx` 已带能力管理器时直接复用（不重复广播）；否则从 `parent` 广播一次，
 /// 让容器把自己的组合视图注册进新的收集器。
-pub async fn resolve_root(
+pub async fn resolve_fs(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn InvokeRequest>,
 ) -> DynVdfsProvider {
     if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-        return root_of(&visitor).await;
+        return unified_fs(&visitor).await;
     }
 
     let manager: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
@@ -82,40 +115,23 @@ pub async fn resolve_root(
         sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
         sub.set(CAPABILITY_VISITOR, manager.clone());
         if let Err(e) = parent.clone().traverse(String::new(), sub).await {
-            crate::plugin_warn!("vdfs", "resolve_root: 广播失败，降级为空文件系统: {e:?}");
+            crate::plugin_warn!("vdfs", "resolve_fs: 广播失败，虚拟层降级为空: {e:?}");
         }
     }
-    root_of(&manager).await
+    unified_fs(&manager).await
 }
 
 // ==================== 变更投递 ====================
 
-/// 从全路径取首段作为挂载名（虚拟根 → 空串）
-fn mount_of(full: &str) -> String {
-    full.trim_start_matches('/')
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .to_string()
-}
-
-/// provider 报出的路径 → 总线事件。
+/// 统一文件系统报出的变更 → 总线事件。
 ///
-/// provider 只报**子树内相对路径**，根（[`VdfsMountTable`]）在转发时已把它拼成
-/// 全路径，因此本层只需从全路径里取回顾首段作为挂载名，不再做任何拼装。
+/// 门面已把事件里的路径补成对外展示地址（`.vdfs/<类别>/…`），与消费者请求时用的
+/// 坐标系一致，因此本层只是换个信封投到总线上，不再做任何路径加工。
 fn to_change_event(change: &VdfsChange) -> VdfsChangeEvent {
-    let abs = |p: &str| {
-        if p.starts_with('/') {
-            p.to_string()
-        } else {
-            format!("/{p}")
-        }
-    };
     VdfsChangeEvent {
-        mount: mount_of(&change.path),
-        path: abs(&change.path),
+        path: change.path.clone(),
         change: change.change.clone(),
-        to: change.to.as_deref().map(abs),
+        to: change.to.clone(),
     }
 }
 
@@ -145,8 +161,8 @@ fn payload_or_default<T: serde::de::DeserializeOwned + Default + Clone + Send + 
 /// 宿主 ctx → VDFS 调用级参数：把运行时状态翻译成 provider 的**约定键**。
 ///
 /// 这里是唯一的翻译点——provider 只认 [`VFDS_PARAM_WORKDIR`] 这类约定键，
-/// 不认识宿主 ctx 的键名（`WORKDIR` 等）。两条链路共用：
-/// 前端协议入口（`/[挂载点]/…` 全路径）与 LLM 工具（`local/…` 本地地址）。
+/// 不认识宿主 ctx 的键名（`WORKDIR` 等）。两条链路共用：前端协议入口与 LLM 工具
+/// 都把 workdir 送到同一个键上，物理层据此解析相对地址。
 pub fn call_params(ctx: &Arc<dyn InvokeRequest>) -> VdfsParams {
     let mut params = VdfsParams::new();
     if let Some(workdir) = ctx.get(WORKDIR) {
@@ -158,22 +174,25 @@ pub fn call_params(ctx: &Arc<dyn InvokeRequest>) -> VdfsParams {
     params
 }
 
-// ==================== 路径回填（兜底） ====================
+// ==================== 地址回填（兜底） ====================
 
-/// 子节点全路径（`base` = 父目录全路径；`base == "/"` → `/name`）
+/// 子节点地址（`base` = 父目录地址）。
+///
+/// 地址是**展示口径**的：`base` 为空即工作目录根，子节点直接是裸名字
+/// （`README.md`）；虚拟根下则是 `.vdfs/<名字>`。两条链路同一形态。
 fn child_path(base: &str, name: &str) -> String {
     let base = base.trim_end_matches('/');
     if base.is_empty() {
-        format!("/{name}")
+        name.to_string()
     } else {
         format!("{base}/{name}")
     }
 }
 
-/// 兜底回填：根 provider 未填 `path` / `ext` / `title` 时按请求路径补齐。
+/// 兜底回填：provider 未填 `path` / `ext` / `title` 时按请求地址补齐。
 ///
-/// 根（[`VdfsMountTable`]）本身已回填，这里是**协议通用兜底**——任何 provider
-/// 实现都可以只填 `name` 与 `access`，其余由访问层补全。
+/// 门面与虚拟层根本身已回填，这里是**协议通用兜底**——任何 provider 实现都可以
+/// 只填 `name` 与 `access`，其余由访问层补全。
 fn fill_paths(base: &str, nodes: &mut [VdfsNode]) {
     for n in nodes.iter_mut() {
         if n.path.is_empty() {
@@ -189,14 +208,14 @@ fn fill_paths(base: &str, nodes: &mut [VdfsNode]) {
 }
 
 /// 目录自身节点的兜底（provider 未实现 `stat` 时）
-fn dir_self(full: &str) -> VdfsNode {
-    let name = if full == VFDS_ROOT {
-        VFDS_ROOT.to_string()
+fn dir_self(addr: &str) -> VdfsNode {
+    let name = if addr.is_empty() {
+        ".".to_string()
     } else {
-        full.rsplit('/').next().unwrap_or(full).to_string()
+        addr.rsplit('/').next().unwrap_or(addr).to_string()
     };
-    let mut n = VdfsNode::dir(name.clone(), name, VdfsAccess::LIST);
-    n.path = full.to_string();
+    let mut n = VdfsNode::dir(name.clone(), name, VdfsAccess::dir(true, true));
+    n.path = addr.to_string();
     n
 }
 
@@ -204,10 +223,13 @@ fn dir_self(full: &str) -> VdfsNode {
 
 /// `vdfs/*` 统一分发入口。
 ///
+/// `fs` 是**统一文件系统**（[`resolve_fs`] / [`unified_fs`] 的产物）：本层不认识
+/// 它背后的虚拟层与物理层，只把地址原样递过去。
+///
 /// 返回 `None` 表示该 path 不是 VDFS 协议路径（调用方继续自己的 match）：
 ///
 /// ```ignore
-/// if let Some(resp) = host::dispatch_with(&root, path, &ctx, params).await {
+/// if let Some(resp) = host::dispatch_with(&fs, path, &ctx, params).await {
 ///     return resp;
 /// }
 /// ```
@@ -216,7 +238,7 @@ fn dir_self(full: &str) -> VdfsNode {
 /// 透传给 provider，provider 因此不必知道宿主 ctx 的键名约定（见 [`VFDS_PARAM_WORKDIR`]）。
 /// 不需要任何参数时传空的 [`VdfsParams`]。
 pub async fn dispatch_with(
-    root: &DynVdfsProvider,
+    fs: &DynVdfsProvider,
     path: &str,
     ctx: &Arc<dyn InvokeRequest>,
     params: VdfsParams,
@@ -226,75 +248,21 @@ pub async fn dispatch_with(
     }
     let vctx = vdfs_context(ctx).with_params(params);
     let resp = match path {
-        VFDS_PROVIDERS => providers(root, &vctx).await,
-        VFDS_LIST => list(root, &vctx, ctx).await,
-        VFDS_TREE => tree(root, &vctx, ctx).await,
-        VFDS_STAT => stat(root, &vctx, ctx).await,
-        VFDS_READ => read(root, &vctx, ctx).await,
-        VFDS_WRITE => write(root, &vctx, ctx).await,
-        VFDS_DELETE => delete(root, &vctx, ctx).await,
-        VFDS_MKDIR => mkdir(root, &vctx, ctx).await,
-        VFDS_MOVE => move_item(root, &vctx, ctx).await,
-        VFDS_EDIT => edit(root, &vctx, ctx).await,
-        VFDS_SEARCH => search(root, &vctx, ctx).await,
-        VFDS_WATCH | VFDS_UNWATCH => watch(root, &vctx, ctx, path == VFDS_WATCH).await,
-        VFDS_ACTION => action(root, &vctx, ctx).await,
+        VFDS_LIST => list(fs, &vctx, ctx).await,
+        VFDS_TREE => tree(fs, &vctx, ctx).await,
+        VFDS_STAT => stat(fs, &vctx, ctx).await,
+        VFDS_READ => read(fs, &vctx, ctx).await,
+        VFDS_WRITE => write(fs, &vctx, ctx).await,
+        VFDS_DELETE => delete(fs, &vctx, ctx).await,
+        VFDS_MKDIR => mkdir(fs, &vctx, ctx).await,
+        VFDS_MOVE => move_item(fs, &vctx, ctx).await,
+        VFDS_EDIT => edit(fs, &vctx, ctx).await,
+        VFDS_SEARCH => search(fs, &vctx, ctx).await,
+        VFDS_WATCH | VFDS_UNWATCH => watch(fs, &vctx, ctx, path == VFDS_WATCH).await,
+        VFDS_ACTION => action(fs, &vctx, ctx).await,
         _ => unreachable!("VFDS_OPS 与分发分支必须一一对应"),
     };
     Some(resp)
-}
-
-/// `vdfs/providers` —— 虚拟根 `/` 的目录内容，装成便于导航的使用方视图。
-///
-/// 根的 `list("/")` 就是挂载点清单（组合视图保证），因此本操作只是 `list("/")`
-/// 的另一种呈现，**不需要任何额外拓扑知识**：`label` / `root` 都有缺省。
-async fn providers(root: &DynVdfsProvider, vctx: &VdfsContext) -> InvokeResponse<PluginPayload> {
-    let mut nodes = root.list(vctx, VFDS_ROOT).await?;
-    fill_paths(VFDS_ROOT, &mut nodes);
-    let infos: Vec<VdfsMountInfo> = nodes
-        .into_iter()
-        .enumerate()
-        .map(|(i, n)| mount_info(i as i32, n))
-        .collect();
-    Ok(PluginPayload::new(&VdfsProvidersResponse {
-        providers: infos,
-    }))
-}
-
-/// 挂载点节点 → 使用方视图（不依赖任何 provider 专有字段）
-fn mount_info(order: i32, n: VdfsNode) -> VdfsMountInfo {
-    let mount = n.name.clone();
-    VdfsMountInfo {
-        mount: mount.clone(),
-        label: if n.title.is_empty() {
-            mount.clone()
-        } else {
-            n.title.clone()
-        },
-        description: n.description.clone(),
-        order,
-        access: n.access,
-        status: if n.status.is_empty() {
-            VFDS_STATUS_ACTIVE.to_string()
-        } else {
-            n.status.clone()
-        },
-        root: if n.path.is_empty() {
-            format!("/{mount}")
-        } else {
-            n.path.clone()
-        },
-        icon: None,
-        new_types: n.new_types.clone(),
-        // 导航可见性：来自 provider 声明，经挂载点节点的场景属性透传
-        // （缺省 true，节点未标注即视为可见）
-        nav_visible: n
-            .attributes
-            .get(VFDS_ATTR_NAV_VISIBLE)
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true),
-        attributes: n.attributes.clone(),
-    }
 }
 
 async fn list(
@@ -303,13 +271,13 @@ async fn list(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsListRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
+    let addr = normalize_addr(&req.path)?;
 
-    let mut items = root.list(vctx, &full).await?;
-    fill_paths(&full, &mut items);
+    let mut items = root.list(vctx, &addr).await?;
+    fill_paths(&addr, &mut items);
 
     // 目录自身节点：provider 未实现 stat 时按目录形态兜底
-    let node = match root.stat(vctx, &full).await {
+    let node = match root.stat(vctx, &addr).await {
         Ok(mut n) => {
             if n.title.is_empty() {
                 n.title = n.name.clone();
@@ -318,15 +286,15 @@ async fn list(
                 n.ext = derive_ext(&n.name);
             }
             if n.path.is_empty() {
-                n.path = full.clone();
+                n.path = addr.clone();
             }
             n
         }
-        Err(_) => dir_self(&full),
+        Err(_) => dir_self(&addr),
     };
 
     Ok(PluginPayload::new(&VdfsListResponse {
-        path: full,
+        path: addr,
         node,
         items,
     }))
@@ -338,8 +306,8 @@ async fn stat(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
-    let mut n = root.stat(vctx, &full).await?;
+    let addr = normalize_addr(&req.path)?;
+    let mut n = root.stat(vctx, &addr).await?;
     if n.title.is_empty() {
         n.title = n.name.clone();
     }
@@ -347,7 +315,7 @@ async fn stat(
         n.ext = derive_ext(&n.name);
     }
     if n.path.is_empty() {
-        n.path = full;
+        n.path = addr;
     }
     Ok(PluginPayload::new(&n))
 }
@@ -358,10 +326,10 @@ async fn read(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsReadRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
-    let mut c = root.read(vctx, &full).await?;
+    let addr = normalize_addr(&req.path)?;
+    let mut c = root.read(vctx, &addr).await?;
     if c.path.is_empty() {
-        c.path = full;
+        c.path = addr;
     }
     Ok(PluginPayload::new(&c))
 }
@@ -372,15 +340,15 @@ async fn write(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsWriteRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
+    let addr = normalize_addr(&req.path)?;
     // 机制级守卫：写入必须携带内容（语义级校验归 provider）
     if req.text.is_none() && req.b64.is_none() {
         return Err(VdfsError::invalid("写入需要 text 或 b64 之一作为内容").into());
     }
     let content = req.to_content();
-    let mut r = root.write(vctx, &full, &content).await?;
+    let mut r = root.write(vctx, &addr, &content).await?;
     if r.path.is_empty() {
-        r.path = full;
+        r.path = addr;
     }
     Ok(PluginPayload::new(&r))
 }
@@ -391,9 +359,9 @@ async fn delete(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
-    root.delete(vctx, &full, req.recursive).await?;
-    Ok(PluginPayload::new(&VdfsDeleteResponse { path: full }))
+    let addr = normalize_addr(&req.path)?;
+    root.delete(vctx, &addr, req.recursive).await?;
+    Ok(PluginPayload::new(&VdfsDeleteResponse { path: addr }))
 }
 
 async fn mkdir(
@@ -402,10 +370,10 @@ async fn mkdir(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
-    root.mkdir(vctx, &full).await?;
+    let addr = normalize_addr(&req.path)?;
+    root.mkdir(vctx, &addr).await?;
     Ok(PluginPayload::new(&VdfsWriteResponse {
-        path: full,
+        path: addr,
         created: true,
         etag: None,
     }))
@@ -413,8 +381,8 @@ async fn mkdir(
 
 /// `vdfs/action` —— 执行 provider 自持的节点动作（如「测试连接」）。
 ///
-/// 本层不认识任何动作语义：只把 `(路径, 动作标识, 载荷)` 原样转发给该挂载点。
-/// 动作是否存在、成功与否由 provider 回答（未实现 → `NotImplemented`）。
+/// 本层不认识任何动作语义：只把 `(地址, 动作标识, 载荷)` 原样转发过去。
+/// 动作是否存在、成功与否由对应的一层回答（未实现 → `NotImplemented`）。
 async fn action(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
@@ -424,9 +392,9 @@ async fn action(
     if req.action.trim().is_empty() {
         return Err(VdfsError::invalid("动作标识不能为空").into());
     }
-    let full = normalize_path(&req.path)?;
+    let addr = normalize_addr(&req.path)?;
     let res = root
-        .action(vctx, &full, &req.action, req.payload.as_ref())
+        .action(vctx, &addr, &req.action, req.payload.as_ref())
         .await?;
     Ok(PluginPayload::new(&res))
 }
@@ -437,9 +405,9 @@ async fn move_item(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsMoveRequest = payload_or_default(ctx);
-    let from = normalize_path(&req.from)?;
-    let to = normalize_path(&req.to)?;
-    // 跨挂载点拒绝由根（VdfsMountTable）判定——本层只传全路径
+    let from = normalize_addr(&req.from)?;
+    let to = normalize_addr(&req.to)?;
+    // 「同一半内才可移动」由门面判定——本层只传地址
     root.move_item(vctx, &from, &to).await?;
     Ok(PluginPayload::new(&VdfsMoveResponse { from, to }))
 }
@@ -546,10 +514,12 @@ pub(crate) const MAX_SEARCH_RESULTS: usize = 1000;
 
 /// 文件名 Glob 搜索 = 递归 `list` + 模式过滤的组合。
 ///
-/// 沿 [`VdfsProvider::list`] 下钻（`t` 位控制、单分支失败跳过），对每个普通文件
-/// 的地址（剥掉前导 `/` 后）做 Glob 匹配；provider 的安全规则（白名单、访问位）
-/// 经 `list` 自持生效。`base` 为搜索基目录（空 = 子树根；前端链路给 `/挂载名/…`
-/// 全路径，工具链路给子树相对路径），**结果与 `base` 同坐标系**。
+/// 沿 [`VdfsProvider::list`] 下钻（`t` 位控制、单分支失败跳过），对每个普通文件做
+/// Glob 匹配；provider 的安全规则（访问位、路径守卫）经 `list` 自持生效。
+///
+/// `base` 为搜索基地址（空 = 工作目录根）。**模式相对于 `base`**，**结果与 `base`
+/// 同坐标系**（即返回可直接再次寻址的完整地址）——两条链路、虚拟层与物理层都是
+/// 这一条规则，因此 `*.rs` 在 `.vdfs/session` 下与在 `src` 下含义一致。
 pub(crate) async fn search_via(
     provider: &DynVdfsProvider,
     vctx: &VdfsContext,
@@ -569,6 +539,7 @@ pub(crate) async fn search_via(
     let pat = glob::Pattern::new(pattern)
         .map_err(|e| VdfsError::invalid(format!("无效的 Glob 模式：{e}")))?;
 
+    let base_dir = base.trim_end_matches('/').to_string();
     let mut results: Vec<String> = Vec::new();
     let mut truncated = false;
     let mut queue: VecDeque<String> = VecDeque::new();
@@ -591,7 +562,12 @@ pub(crate) async fn search_via(
             } else {
                 format!("{parent}/{}", child.name)
             };
-            if !child.is_dir() && pat.matches(child_addr.trim_start_matches('/')) {
+            // 匹配用「相对 base 的地址」，收集用完整地址
+            let rel = child_addr
+                .strip_prefix(base_dir.as_str())
+                .map(|s| s.trim_start_matches('/'))
+                .unwrap_or(child_addr.as_str());
+            if !child.is_dir() && pat.matches(rel) {
                 results.push(child_addr.clone());
                 if results.len() >= MAX_SEARCH_RESULTS {
                     truncated = true;
@@ -616,8 +592,8 @@ async fn edit(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsEditRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
-    let r = edit_via(root, vctx, &full, &req.old_string, &req.new_string).await?;
+    let addr = normalize_addr(&req.path)?;
+    let r = edit_via(root, vctx, &addr, &req.old_string, &req.new_string).await?;
     Ok(PluginPayload::new(&r))
 }
 
@@ -627,8 +603,8 @@ async fn search(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsSearchRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
-    let r = search_via(root, vctx, &full, &req.pattern).await?;
+    let addr = normalize_addr(&req.path)?;
+    let r = search_via(root, vctx, &addr, &req.pattern).await?;
     Ok(PluginPayload::new(&r))
 }
 
@@ -639,11 +615,11 @@ async fn watch(
     subscribe: bool,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
+    let addr = normalize_addr(&req.path)?;
     if subscribe {
-        root.watch(vctx, &full, event_bus_sink()).await?;
+        root.watch(vctx, &addr, event_bus_sink()).await?;
     } else {
-        root.unwatch(vctx, &full).await?;
+        root.unwatch(vctx, &addr).await?;
     }
     Ok(PluginPayload::new(
         &crate::symbio_core::schemas::common::SuccessResponse::default(),
@@ -653,7 +629,7 @@ async fn watch(
 /// 树状遍历：访问层统一实现（递归 [`VdfsProvider::list`]）。
 ///
 /// provider 只需实现 `list`，并在目录节点的 `access` 上声明 `t` 位即可被遍历；
-/// 机制不含任何场景语义。这里**不需要挂载名**——全路径本身就是递归的地址。
+/// 机制不含任何场景语义。这里**不需要认识目录拓扑**——地址本身就是递归的地址。
 /// 深度与数量上限防爆炸，超限时 `truncated = true`。
 async fn tree(
     root: &DynVdfsProvider,
@@ -661,16 +637,16 @@ async fn tree(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsTreeRequest = payload_or_default(ctx);
-    let full = normalize_path(&req.path)?;
+    let addr = normalize_addr(&req.path)?;
     let depth_limit = req.depth.unwrap_or(3); // 0 = 不限
     let count_limit = req.limit.unwrap_or(500).max(1) as usize;
 
     let mut out: Vec<VdfsNode> = Vec::new();
     let mut truncated = false;
 
-    // 队列元素 = (目录全路径, 深度)
+    // 队列元素 = (目录地址, 深度)
     let mut queue: VecDeque<(String, u32)> = VecDeque::new();
-    queue.push_back((full.clone(), 0));
+    queue.push_back((addr.clone(), 0));
 
     while let Some((dir, depth)) = queue.pop_front() {
         let mut children = match root.list(vctx, &dir).await {
@@ -701,7 +677,7 @@ async fn tree(
     }
 
     Ok(PluginPayload::new(&VdfsTreeResponse {
-        path: full,
+        path: addr,
         nodes: out,
         truncated,
     }))
@@ -710,7 +686,8 @@ async fn tree(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::vdfs_provider::VdfsMountTable;
+    use super::super::physical::PhysicalFs;
+    use crate::symbio_core::vdfs_provider::VFDS_KIND_DIR;
     use crate::symbio_core::{PluginError, PluginMeta, SimpleRequest};
     use async_trait::async_trait;
     use serde_json::{json, Value};
@@ -829,7 +806,7 @@ mod tests {
         }
 
         async fn move_item(&self, _ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
-            // 只接受相对路径：根（VdfsMountTable）已剥掉挂载前缀
+            // 只接受相对路径：组合根已剥掉子目录前缀
             if from == "a.txt" && to == "b.txt" {
                 Ok(())
             } else {
@@ -875,180 +852,291 @@ mod tests {
     #[async_trait]
     impl VdfsProvider for Bare {}
 
-    /// 以 `rec` 为唯一挂载点的根（模拟 composite 的组合视图）
-    fn root_with(rec: &Arc<Rec>) -> DynVdfsProvider {
-        let p: DynVdfsProvider = rec.clone();
-        Arc::new(VdfsMountTable::new(vec![("mem".to_string(), p)]))
+    /// 测试用 root 级 provider：首段 = 子目录名，委派给对应 provider（模拟 composite）
+    struct TestRoot {
+        dirs: Vec<(&'static str, DynVdfsProvider)>,
     }
 
-    fn roots() -> (DynVdfsProvider, Arc<Rec>) {
+    fn split_dir(path: &str) -> Option<(&str, &str)> {
+        match path.find('/') {
+            Some(i) => Some((&path[..i], &path[i + 1..])),
+            None if path.is_empty() => None,
+            None => Some((path, "")),
+        }
+    }
+
+    impl TestRoot {
+        fn resolve(&self, path: &str) -> VdfsResult<(&DynVdfsProvider, String)> {
+            let (d, rel) = split_dir(path)
+                .ok_or_else(|| VdfsError::invalid("根目录不是可操作节点"))?;
+            let p = self
+                .dirs
+                .iter()
+                .find(|(n, _)| *n == d)
+                .map(|(_, p)| p)
+                .ok_or_else(|| {
+                    let hint = self
+                        .dirs
+                        .iter()
+                        .map(|(n, _)| *n)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    VdfsError::not_found(format!("目录不存在：{d}（现有：{hint}）"))
+                })?;
+            Ok((p, rel.to_string()))
+        }
+    }
+
+    #[async_trait]
+    impl VdfsProvider for TestRoot {
+        async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+            let Some((d, _rel)) = split_dir(path) else {
+                return Ok(self
+                    .dirs
+                    .iter()
+                    .map(|(n, p)| {
+                        let mut x =
+                            VdfsNode::dir(n.to_string(), p.label().unwrap_or(n), p.root_access());
+                        x.path = n.to_string();
+                        x
+                    })
+                    .collect());
+            };
+            let (p, rel) = self.resolve(path)?;
+            let mut items = p.list(ctx, &rel).await?;
+            for it in items.iter_mut() {
+                if it.path.is_empty() {
+                    it.path = if rel.is_empty() {
+                        format!("{d}/{}", it.name)
+                    } else {
+                        format!("{d}/{rel}/{}", it.name)
+                    };
+                }
+            }
+            Ok(items)
+        }
+
+        async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
+            let Some((d, _rel)) = split_dir(path) else {
+                return Ok(VdfsNode::dir("", "系统", VdfsAccess::LIST_TRAVERSE));
+            };
+            let (p, rel) = self.resolve(path)?;
+            if rel.is_empty() {
+                let mut n = VdfsNode::dir(d.to_string(), p.label().unwrap_or(d), p.root_access());
+                n.path = d.to_string();
+                return Ok(n);
+            }
+            let mut n = p.stat(ctx, &rel).await?;
+            n.path = path.to_string();
+            Ok(n)
+        }
+
+        async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
+            let (p, rel) = self.resolve(path)?;
+            if rel.is_empty() {
+                return Err(VdfsError::Forbidden(
+                    "目录不是可读文件；请读取其子节点".to_string(),
+                ));
+            }
+            p.read(ctx, &rel).await
+        }
+
+        async fn write(
+            &self,
+            ctx: &VdfsContext,
+            path: &str,
+            content: &VdfsContent,
+        ) -> VdfsResult<VdfsWriteResponse> {
+            let (p, rel) = self.resolve(path)?;
+            if rel.is_empty() {
+                return Err(VdfsError::Forbidden("目录不可写".to_string()));
+            }
+            p.write(ctx, &rel, content).await
+        }
+
+        async fn delete(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
+            let (p, rel) = self.resolve(path)?;
+            if rel.is_empty() {
+                return Err(VdfsError::Forbidden("目录不可删除".to_string()));
+            }
+            p.delete(ctx, &rel, recursive).await
+        }
+
+        async fn mkdir(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
+            let (p, rel) = self.resolve(path)?;
+            if rel.is_empty() {
+                return Err(VdfsError::invalid("目录已存在，无需创建"));
+            }
+            p.mkdir(ctx, &rel).await
+        }
+
+        async fn move_item(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
+            let (pf, rf) = self.resolve(from)?;
+            let (pt, rt) = self.resolve(to)?;
+            if rf.is_empty() || rt.is_empty() {
+                return Err(VdfsError::Forbidden("目录不可移动".to_string()));
+            }
+            if std::sync::Arc::ptr_eq(pf, pt) {
+                pf.move_item(ctx, &rf, &rt).await
+            } else {
+                Err(VdfsError::invalid("不支持跨目录移动"))
+            }
+        }
+
+        async fn action(
+            &self,
+            ctx: &VdfsContext,
+            path: &str,
+            action: &str,
+            payload: Option<&Value>,
+        ) -> VdfsResult<VdfsActionResult> {
+            let (p, rel) = self.resolve(path)?;
+            p.action(ctx, &rel, action, payload).await
+        }
+
+        async fn watch(
+            &self,
+            ctx: &VdfsContext,
+            path: &str,
+            sink: VdfsChangeSink,
+        ) -> VdfsResult<()> {
+            let (p, rel) = self.resolve(path)?;
+            p.watch(ctx, &rel, sink).await
+        }
+
+        async fn unwatch(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
+            let (p, rel) = self.resolve(path)?;
+            p.unwatch(ctx, &rel).await
+        }
+    }
+
+    /// 以 `rec` 为唯一子目录（mem）的虚拟层根（模拟 composite）
+    fn root_with(rec: &Arc<Rec>) -> DynVdfsProvider {
+        let p: DynVdfsProvider = rec.clone();
+        Arc::new(TestRoot {
+            dirs: vec![("mem", p)],
+        })
+    }
+
+    /// 被测的统一文件系统：虚拟层 = mem 子目录，物理层 = 磁盘
+    fn fs_roots() -> (DynVdfsProvider, Arc<Rec>) {
         let rec = Rec::new();
-        let root = root_with(&rec);
-        (root, rec)
+        (
+            Arc::new(UnifiedFs::with_physical(
+                root_with(&rec),
+                Arc::new(PhysicalFs::new()),
+            )),
+            rec,
+        )
     }
 
     #[tokio::test]
     async fn dispatch_ignores_non_vdfs_path() {
-        let (root, _) = roots();
+        let (fs, _) = fs_roots();
         let ctx = ctx_empty();
-        assert!(dispatch(&root, "chat/send", &ctx).await.is_none());
-        assert!(dispatch(&root, "", &ctx).await.is_none());
+        assert!(dispatch(&fs, "chat/send", &ctx).await.is_none());
+        assert!(dispatch(&fs, "", &ctx).await.is_none());
     }
 
-    /// `vdfs/providers` = 根的 `list("/")`，无需触达任何 provider
-    #[tokio::test]
-    async fn providers_derive_from_root_listing() {
-        let (root, rec) = roots();
-        let resp = dispatch(&root, VFDS_PROVIDERS, &ctx_empty())
-            .await
-            .unwrap()
-            .unwrap();
-        let data = resp.get::<VdfsProvidersResponse>().unwrap();
-        assert_eq!(data.providers.len(), 1);
-        let m = &data.providers[0];
-        assert_eq!(m.mount, "mem", "挂载名来自注册名");
-        assert_eq!(m.root, "/mem");
-        assert_eq!(m.label, "内存子树", "label 取自节点 title");
-        assert_eq!(m.access.flags(), "lt");
-        assert_eq!(
-            m.order, 0,
-            "order = 在根下的位置（根已按 provider order 排序）"
-        );
-        assert!(rec.seen().is_empty(), "list(/) 由组合视图内部完成");
-    }
-
-    /// `vdfs/action`：动作标识与相对路径原样转发，本层不解释语义
+    /// `vdfs/action`：动作标识与展示地址原样转发，本层不解释语义
     #[tokio::test]
     async fn action_forwards_verb_and_relative_path() {
-        let (root, rec) = roots();
-        let ctx = ctx_with(json!({ "path": "/mem/a.txt", "action": "ping" }));
-        let resp = dispatch(&root, VFDS_ACTION, &ctx).await.unwrap().unwrap();
+        let (fs, rec) = fs_roots();
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt", "action": "ping" }));
+        let resp = dispatch(&fs, VFDS_ACTION, &ctx).await.unwrap().unwrap();
         let data = resp.get::<VdfsActionResult>().unwrap();
         assert_eq!(data.action, "ping");
         assert!(data.ok);
         assert_eq!(rec.seen(), vec!["action:ping"], "provider 只收到动作标识");
 
         // 空动作标识 → 拒绝（不打扰 provider）
-        let bad = ctx_with(json!({ "path": "/mem/a.txt", "action": "  " }));
-        assert!(dispatch(&root, VFDS_ACTION, &bad).await.unwrap().is_err());
+        let bad = ctx_with(json!({ "path": ".vdfs/mem/a.txt", "action": "  " }));
+        assert!(dispatch(&fs, VFDS_ACTION, &bad).await.unwrap().is_err());
     }
 
-    /// 导航可见性经「provider 声明 → 挂载节点属性 → 挂载视图」整链透传
+    /// 类别根列表：门面把内部口径回填成 `.vdfs/...` 展示地址 + `ext` 推导
     #[tokio::test]
-    async fn providers_carry_nav_visibility() {
-        // 隐藏型 provider：除可见性外与 Rec 同构（能力不变）
-        struct Hidden;
-        #[async_trait]
-        impl VdfsProvider for Hidden {
-            fn label(&self) -> Option<&str> {
-                Some("本地文件")
-            }
-            fn nav_visible(&self) -> bool {
-                false
-            }
-        }
-
-        let hidden: DynVdfsProvider = Arc::new(Hidden);
-        let shown: DynVdfsProvider = Rec::new();
-        let root: DynVdfsProvider = Arc::new(VdfsMountTable::new(vec![
-            ("local".to_string(), hidden),
-            ("mem".to_string(), shown),
-        ]));
-
-        let resp = dispatch(&root, VFDS_PROVIDERS, &ctx_empty())
-            .await
-            .unwrap()
-            .unwrap();
-        let data = resp.get::<VdfsProvidersResponse>().unwrap();
-        assert_eq!(data.providers.len(), 2, "隐藏的子树仍是挂载点");
-        let local = data.providers.iter().find(|m| m.mount == "local").unwrap();
-        let mem = data.providers.iter().find(|m| m.mount == "mem").unwrap();
-        assert!(
-            !local.nav_visible,
-            "声明不可见的挂载点下传 nav_visible=false"
-        );
-        assert!(mem.nav_visible, "未声明者缺省可见");
-    }
-
-    /// 挂载根列表：全路径回填 + `ext` 推导
-    #[tokio::test]
-    async fn list_mount_root_fills_paths_and_ext() {
-        let (root, rec) = roots();
-        let ctx = ctx_with(json!({ "path": "/mem" }));
-        let resp = dispatch(&root, VFDS_LIST, &ctx).await.unwrap().unwrap();
+    async fn list_category_root_fills_paths_and_ext() {
+        let (fs, rec) = fs_roots();
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
+        let resp = dispatch(&fs, VFDS_LIST, &ctx).await.unwrap().unwrap();
         let data = resp.get::<VdfsListResponse>().unwrap();
         assert_eq!(rec.seen(), vec![""], "provider 收到的是相对路径 \"\"");
-        assert_eq!(data.path, "/mem");
-        assert_eq!(data.node.name, "mem", "目录自身节点 = 挂载根");
+        assert_eq!(data.path, ".vdfs/mem");
+        assert_eq!(data.node.name, "mem", "目录自身节点 = 类别根");
         assert_eq!(data.items.len(), 2);
-        assert_eq!(data.items[0].path, "/mem/a.txt");
+        assert_eq!(data.items[0].path, ".vdfs/mem/a.txt");
         assert_eq!(data.items[0].ext.as_deref(), Some("txt"));
-        assert_eq!(data.items[1].path, "/mem/sub");
+        assert_eq!(data.items[1].path, ".vdfs/mem/sub");
         assert!(data.items[1].is_dir());
         assert!(data.items[1].ext.is_none());
     }
 
-    /// 访问层不重写路径：全路径原样穿过，根负责拆分
+    /// 深层地址：门面在进出两处各做一次口径映射，provider 始终只见相对路径
     #[tokio::test]
-    async fn full_paths_pass_through_unchanged() {
-        let (root, rec) = roots();
-        let ctx = ctx_with(json!({ "path": "/mem/sub" }));
-        let resp = dispatch(&root, VFDS_LIST, &ctx).await.unwrap().unwrap();
+    async fn deep_virtual_paths_pass_through_relative() {
+        let (fs, rec) = fs_roots();
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/sub" }));
+        let resp = dispatch(&fs, VFDS_LIST, &ctx).await.unwrap().unwrap();
         let data = resp.get::<VdfsListResponse>().unwrap();
-        assert_eq!(rec.seen(), vec!["sub"], "根把 /mem/sub 拆成相对路径 sub");
+        assert_eq!(
+            rec.seen(),
+            vec!["sub"],
+            "门面把 .vdfs/mem/sub 拆成相对路径 sub"
+        );
         assert_eq!(data.items[0].name, "b.md");
-        assert_eq!(data.items[0].path, "/mem/sub/b.md");
+        assert_eq!(data.items[0].path, ".vdfs/mem/sub/b.md");
         assert_eq!(data.node.name, "sub");
     }
 
     #[tokio::test]
-    async fn list_unknown_mount_is_not_found_with_hint() {
-        let (root, _) = roots();
-        let ctx = ctx_with(json!({ "path": "/nope" }));
-        let err = dispatch(&root, VFDS_LIST, &ctx).await.unwrap().unwrap_err();
+    async fn list_unknown_dir_is_not_found_with_hint() {
+        let (fs, _) = fs_roots();
+        let ctx = ctx_with(json!({ "path": ".vdfs/nope" }));
+        let err = dispatch(&fs, VFDS_LIST, &ctx).await.unwrap().unwrap_err();
         assert!(matches!(err, PluginError::NotFound(_)));
-        assert!(err.to_string().contains("/mem"), "提示现有挂载点");
+        assert!(err.to_string().contains("mem"), "提示现有子目录");
     }
 
     /// 路径穿越在访问层被拦截，根与 provider 永远拿到安全路径
     #[tokio::test]
     async fn traversal_path_rejected() {
-        let (root, _) = roots();
-        let ctx = ctx_with(json!({ "path": "/mem/../../etc" }));
-        let err = dispatch(&root, VFDS_LIST, &ctx).await.unwrap().unwrap_err();
+        let (fs, _) = fs_roots();
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/../../etc" }));
+        let err = dispatch(&fs, VFDS_LIST, &ctx).await.unwrap().unwrap_err();
         assert!(matches!(err, PluginError::ValidationError(_)));
     }
 
     #[tokio::test]
     async fn stat_read_and_backfill() {
-        let (root, _) = roots();
+        let (fs, _) = fs_roots();
 
-        let ctx = ctx_with(json!({ "path": "/mem/a.txt" }));
-        let resp = dispatch(&root, VFDS_READ, &ctx).await.unwrap().unwrap();
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt" }));
+        let resp = dispatch(&fs, VFDS_READ, &ctx).await.unwrap().unwrap();
         let c = resp.get::<VdfsContent>().unwrap();
         assert_eq!(c.text.as_deref(), Some("hello"));
-        assert_eq!(c.path, "/mem/a.txt", "provider 未填 path，由访问层回填");
+        assert_eq!(c.path, ".vdfs/mem/a.txt", "provider 未填 path，由访问层回填");
 
-        let ctx = ctx_with(json!({ "path": "/mem/sub/b.md" }));
-        let n = dispatch(&root, VFDS_STAT, &ctx)
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/sub/b.md" }));
+        let n = dispatch(&fs, VFDS_STAT, &ctx)
             .await
             .unwrap()
             .unwrap()
             .get::<VdfsNode>()
             .unwrap();
-        assert_eq!(n.path, "/mem/sub/b.md");
+        assert_eq!(n.path, ".vdfs/mem/sub/b.md");
         assert_eq!(n.effective_ext().as_deref(), Some("md"));
         assert_eq!(n.access.flags(), "r");
 
-        // 挂载根节点由组合视图合成（provider 不知道自己的挂载名）
-        let ctx = ctx_with(json!({ "path": "/mem" }));
-        let n = dispatch(&root, VFDS_STAT, &ctx)
+        // 类别根节点由组合视图合成（provider 不知道自己的类别名）
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
+        let n = dispatch(&fs, VFDS_STAT, &ctx)
             .await
             .unwrap()
             .unwrap()
             .get::<VdfsNode>()
             .unwrap();
-        assert_eq!(n.kind, VFDS_KIND_MOUNT);
+        assert_eq!(n.kind, VFDS_KIND_DIR);
         assert_eq!(n.name, "mem");
         assert_eq!(n.title, "内存子树");
     }
@@ -1056,27 +1144,27 @@ mod tests {
     /// 机器级守卫：内容缺失即拒绝，provider 不会被调用
     #[tokio::test]
     async fn write_requires_content_and_maps_validation_fields() {
-        let (root, _) = roots();
+        let (fs, _) = fs_roots();
 
-        let ctx = ctx_with(json!({ "path": "/mem/a.txt" }));
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt" }));
         assert!(matches!(
-            dispatch(&root, VFDS_WRITE, &ctx).await.unwrap(),
+            dispatch(&fs, VFDS_WRITE, &ctx).await.unwrap(),
             Err(PluginError::ValidationError(_))
         ));
 
-        let ctx = ctx_with(json!({ "path": "/mem/a.txt", "text": "x" }));
-        let w = dispatch(&root, VFDS_WRITE, &ctx)
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt", "text": "x" }));
+        let w = dispatch(&fs, VFDS_WRITE, &ctx)
             .await
             .unwrap()
             .unwrap()
             .get::<VdfsWriteResponse>()
             .unwrap();
-        assert_eq!(w.path, "/mem/a.txt");
+        assert_eq!(w.path, ".vdfs/mem/a.txt");
         assert_eq!(w.etag.as_deref(), Some("v1"));
 
         // 字段级校验错误：载荷序列化为 JSON 置于错误文案位，可解析还原
-        let ctx = ctx_with(json!({ "path": "/mem/a.txt", "text": "bad" }));
-        let err = dispatch(&root, VFDS_WRITE, &ctx)
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt", "text": "bad" }));
+        let err = dispatch(&fs, VFDS_WRITE, &ctx)
             .await
             .unwrap()
             .unwrap_err();
@@ -1088,80 +1176,90 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_mkdir_and_mount_root_guards() {
-        let (root, _) = roots();
+    async fn delete_mkdir_and_dir_root_guards() {
+        let (fs, _) = fs_roots();
 
-        let ctx = ctx_with(json!({ "path": "/mem/sub", "recursive": true }));
-        assert!(dispatch(&root, VFDS_DELETE, &ctx).await.unwrap().is_ok());
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/sub", "recursive": true }));
+        assert!(dispatch(&fs, VFDS_DELETE, &ctx).await.unwrap().is_ok());
 
-        let ctx = ctx_with(json!({ "path": "/mem" }));
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
         assert!(matches!(
-            dispatch(&root, VFDS_DELETE, &ctx).await.unwrap(),
+            dispatch(&fs, VFDS_DELETE, &ctx).await.unwrap(),
             Err(PluginError::Forbidden(_))
         ));
 
-        let ctx = ctx_with(json!({ "path": "/mem" }));
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
         assert!(matches!(
-            dispatch(&root, VFDS_MKDIR, &ctx).await.unwrap(),
+            dispatch(&fs, VFDS_MKDIR, &ctx).await.unwrap(),
             Err(PluginError::ValidationError(_))
         ));
     }
 
     #[tokio::test]
-    async fn mount_root_is_not_readable() {
-        let (root, _) = roots();
-        let ctx = ctx_with(json!({ "path": "/mem" }));
-        let err = dispatch(&root, VFDS_READ, &ctx).await.unwrap().unwrap_err();
+    async fn dir_root_is_not_readable() {
+        let (fs, _) = fs_roots();
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
+        let err = dispatch(&fs, VFDS_READ, &ctx).await.unwrap().unwrap_err();
         assert!(matches!(err, PluginError::Forbidden(_)));
     }
 
-    /// 同挂载点内移动：全路径进、相对路径到 provider
+    /// 同类别内移动：展示地址进、相对路径到 provider
     #[tokio::test]
-    async fn same_mount_move_is_forwarded() {
-        let (root, rec) = roots();
-        let ctx = ctx_with(json!({ "from": "/mem/a.txt", "to": "/mem/b.txt" }));
-        let resp = dispatch(&root, VFDS_MOVE, &ctx).await.unwrap().unwrap();
+    async fn same_category_move_is_forwarded() {
+        let (fs, _) = fs_roots();
+        let ctx = ctx_with(json!({ "from": ".vdfs/mem/a.txt", "to": ".vdfs/mem/b.txt" }));
+        let resp = dispatch(&fs, VFDS_MOVE, &ctx).await.unwrap().unwrap();
         let m = resp.get::<VdfsMoveResponse>().unwrap();
-        assert_eq!(m.from, "/mem/a.txt");
-        assert_eq!(m.to, "/mem/b.txt");
-        assert!(
-            rec.seen().is_empty(),
-            "move 不触达 provider（Rec 未记录 move）"
-        );
+        assert_eq!(m.from, ".vdfs/mem/a.txt");
+        assert_eq!(m.to, ".vdfs/mem/b.txt");
     }
 
-    /// 跨挂载点移动由根拒绝（访问层不做拓扑判定）
+    /// 跨子目录移动由组合根拒绝（门面只拦「两半之间」，子目录间归虚拟层自持）
     #[tokio::test]
-    async fn cross_mount_move_is_rejected() {
+    async fn cross_category_move_is_rejected() {
         let rec = Rec::new();
         let a: DynVdfsProvider = rec.clone();
         let b: DynVdfsProvider = Arc::new(Bare);
-        let root: DynVdfsProvider = Arc::new(VdfsMountTable::new(vec![
-            ("mem".into(), a),
-            ("bare".into(), b),
-        ]));
-        let ctx = ctx_with(json!({ "from": "/mem/a.txt", "to": "/bare/a.txt" }));
+        let fs: DynVdfsProvider = Arc::new(UnifiedFs::with_physical(
+            Arc::new(TestRoot {
+                dirs: vec![("mem", a), ("bare", b)],
+            }),
+            Arc::new(PhysicalFs::new()),
+        ));
+        let ctx = ctx_with(json!({ "from": ".vdfs/mem/a.txt", "to": ".vdfs/bare/a.txt" }));
         assert!(matches!(
-            dispatch(&root, VFDS_MOVE, &ctx).await.unwrap(),
+            dispatch(&fs, VFDS_MOVE, &ctx).await.unwrap(),
             Err(PluginError::ValidationError(_))
         ));
     }
 
+    /// 系统资源与磁盘文件之间不可移动（门面判定，先于触达任何一层）
     #[tokio::test]
-    async fn watch_unwatch_forward_full_path() {
-        let (root, rec) = roots();
-        let ctx = ctx_with(json!({ "path": "/mem/sub" }));
-        assert!(dispatch(&root, VFDS_WATCH, &ctx).await.unwrap().is_ok());
-        assert!(dispatch(&root, VFDS_UNWATCH, &ctx).await.unwrap().is_ok());
+    async fn cross_half_move_is_rejected() {
+        let (fs, rec) = fs_roots();
+        let ctx = ctx_with(json!({ "from": ".vdfs/mem/a.txt", "to": "b.txt" }));
+        assert!(matches!(
+            dispatch(&fs, VFDS_MOVE, &ctx).await.unwrap(),
+            Err(PluginError::ValidationError(_))
+        ));
+        assert!(rec.seen().is_empty(), "判定发生在触达 provider 之前");
+    }
+
+    #[tokio::test]
+    async fn watch_unwatch_forward_relative_path() {
+        let (fs, rec) = fs_roots();
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem/sub" }));
+        assert!(dispatch(&fs, VFDS_WATCH, &ctx).await.unwrap().is_ok());
+        assert!(dispatch(&fs, VFDS_UNWATCH, &ctx).await.unwrap().is_ok());
         assert_eq!(rec.seen(), vec!["sub", "sub"], "provider 收到相对路径");
     }
 
-    /// 树遍历从根均匀展开：挂载点本身也是树的一层
+    /// 树遍历从虚拟根均匀展开：类别本身也是树的一层
     #[tokio::test]
     async fn tree_walks_uniformly_from_root() {
-        let (root, _) = roots();
-        let ctx = ctx_with(json!({ "path": "/" }));
-        let t = dispatch(&root, VFDS_TREE, &ctx)
+        let (fs, _) = fs_roots();
+        let ctx = ctx_with(json!({ "path": ".vdfs" }));
+        let t = dispatch(&fs, VFDS_TREE, &ctx)
             .await
             .unwrap()
             .unwrap()
@@ -1170,17 +1268,22 @@ mod tests {
         let paths: Vec<&str> = t.nodes.iter().map(|n| n.path.as_str()).collect();
         assert_eq!(
             paths,
-            vec!["/mem", "/mem/a.txt", "/mem/sub", "/mem/sub/b.md"]
+            vec![
+                ".vdfs/mem",
+                ".vdfs/mem/a.txt",
+                ".vdfs/mem/sub",
+                ".vdfs/mem/sub/b.md"
+            ]
         );
         assert!(!t.truncated);
     }
 
     #[tokio::test]
     async fn tree_respects_depth_and_limit() {
-        let (root, _) = roots();
+        let (fs, _) = fs_roots();
 
-        let ctx = ctx_with(json!({ "path": "/mem", "depth": 1 }));
-        let t = dispatch(&root, VFDS_TREE, &ctx)
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem", "depth": 1 }));
+        let t = dispatch(&fs, VFDS_TREE, &ctx)
             .await
             .unwrap()
             .unwrap()
@@ -1188,12 +1291,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             t.nodes.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(),
-            vec!["/mem/a.txt", "/mem/sub"],
+            vec![".vdfs/mem/a.txt", ".vdfs/mem/sub"],
             "depth=1 → 只到直接子节点"
         );
 
-        let ctx = ctx_with(json!({ "path": "/", "limit": 2 }));
-        let t = dispatch(&root, VFDS_TREE, &ctx)
+        let ctx = ctx_with(json!({ "path": ".vdfs", "limit": 2 }));
+        let t = dispatch(&fs, VFDS_TREE, &ctx)
             .await
             .unwrap()
             .unwrap()
@@ -1203,63 +1306,101 @@ mod tests {
         assert_eq!(t.nodes.len(), 2);
     }
 
-    /// 变更事件：provider 的相对路径已被根拼成全路径，访问层只取回顾首段
+    /// 物理半经统一分发读写磁盘：WORKDIR 由调用级参数透传到物理层
+    #[tokio::test]
+    async fn physical_half_reads_and_writes_disk() {
+        let dir = std::env::temp_dir().join(format!(
+            "symbio-host-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let fs: DynVdfsProvider = Arc::new(UnifiedFs::new(empty_root()));
+        let mk_ctx = |payload: Value| {
+            let c: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+            c.set(WORKDIR, dir.to_string_lossy().into_owned());
+            c.set_payload(payload).unwrap();
+            c
+        };
+
+        let wctx = mk_ctx(json!({ "path": "hello.txt", "text": "hi" }));
+        let w = dispatch_with(&fs, VFDS_WRITE, &wctx, call_params(&wctx))
+            .await
+            .unwrap()
+            .unwrap()
+            .get::<VdfsWriteResponse>()
+            .unwrap();
+        assert!(w.created);
+        assert!(dir.join("hello.txt").exists());
+
+        let rctx = mk_ctx(json!({ "path": "hello.txt" }));
+        let c = dispatch_with(&fs, VFDS_READ, &rctx, call_params(&rctx))
+            .await
+            .unwrap()
+            .unwrap()
+            .get::<VdfsContent>()
+            .unwrap();
+        assert_eq!(c.text.as_deref(), Some("hi"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 变更事件：门面已把路径补成展示地址，本层只换信封、不再加工
     #[test]
-    fn change_event_derives_mount_from_full_path() {
-        let e = to_change_event(&VdfsChange::new("/mem/sub/x.md", VFDS_CHANGE_UPDATED));
-        assert_eq!(e.mount, "mem");
-        assert_eq!(e.path, "/mem/sub/x.md");
+    fn change_event_passes_display_paths_through() {
+        let e = to_change_event(&VdfsChange::new(".vdfs/mem/sub/x.md", VFDS_CHANGE_UPDATED));
+        assert_eq!(e.path, ".vdfs/mem/sub/x.md");
         assert!(e.to.is_none());
 
-        let r = to_change_event(&VdfsChange::renamed("/mem/a.txt", "/mem/b.txt"));
+        let r = to_change_event(&VdfsChange::renamed(".vdfs/mem/a.txt", ".vdfs/mem/b.txt"));
         assert_eq!(r.change, VFDS_CHANGE_RENAMED);
-        assert_eq!(r.mount, "mem");
-        assert_eq!(r.path, "/mem/a.txt");
-        assert_eq!(r.to.as_deref(), Some("/mem/b.txt"));
+        assert_eq!(r.path, ".vdfs/mem/a.txt");
+        assert_eq!(r.to.as_deref(), Some(".vdfs/mem/b.txt"));
 
-        // 未带前导斜杠也能归一
-        let n = to_change_event(&VdfsChange::new("x.md", VFDS_CHANGE_CREATED));
-        assert_eq!(n.path, "/x.md");
+        // 物理半的地址原样保留
+        let n = to_change_event(&VdfsChange::new("README.md", VFDS_CHANGE_CREATED));
+        assert_eq!(n.path, "README.md");
     }
 
     // ==================== 根解析 ====================
 
-    /// 无能力管理器、无父插件 → 空文件系统（可列出但无内容）
+    /// 无能力管理器、无父插件 → 统一文件系统仍可用：虚拟层为空、物理层照常
     #[tokio::test]
-    async fn resolve_root_degrades_to_empty_vfs() {
-        let root = resolve_root(None, &ctx_empty()).await;
+    async fn resolve_fs_degrades_to_empty_vfs() {
+        let fs = resolve_fs(None, &ctx_empty()).await;
 
-        let resp = dispatch(&root, VFDS_PROVIDERS, &ctx_empty())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(resp
-            .get::<VdfsProvidersResponse>()
-            .unwrap()
-            .providers
-            .is_empty());
-
-        let ctx = ctx_with(json!({ "path": "/" }));
-        let data = dispatch(&root, VFDS_LIST, &ctx)
+        let ctx = ctx_with(json!({ "path": ".vdfs" }));
+        let data = dispatch(&fs, VFDS_LIST, &ctx)
             .await
             .unwrap()
             .unwrap()
             .get::<VdfsListResponse>()
             .unwrap();
-        assert_eq!(data.path, "/");
-        assert!(data.items.is_empty());
+        assert_eq!(data.path, ".vdfs");
+        assert!(data.items.is_empty(), "虚拟层降级为空目录而非报错");
 
-        // 具体路径一律 NotFound
-        let ctx = ctx_with(json!({ "path": "/mem" }));
+        // 具体虚拟地址一律 NotFound
+        let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
         assert!(matches!(
-            dispatch(&root, VFDS_LIST, &ctx).await.unwrap(),
+            dispatch(&fs, VFDS_LIST, &ctx).await.unwrap(),
             Err(PluginError::NotFound(_))
+        ));
+
+        // 物理半不受降级影响（缺 WORKDIR 是接线错误，不是 NotFound）
+        let ctx = ctx_with(json!({ "path": "" }));
+        assert!(matches!(
+            dispatch(&fs, VFDS_LIST, &ctx).await.unwrap(),
+            Err(PluginError::InternalError(_))
         ));
     }
 
     /// `ctx` 已带能力管理器 → 直接读其中的根（LLM 链路）
     #[tokio::test]
-    async fn resolve_root_prefers_visitor_slot() {
+    async fn resolve_fs_prefers_visitor_slot() {
         let rec = Rec::new();
         let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
         visitor.register_vdfs_root(root_with(&rec)).await;
@@ -1267,8 +1408,8 @@ mod tests {
         let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
         ctx.set(CAPABILITY_VISITOR, visitor);
 
-        let root = resolve_root(None, &ctx).await;
-        let data = dispatch(&root, VFDS_LIST, &ctx_with(json!({ "path": "/mem" })))
+        let fs = resolve_fs(None, &ctx).await;
+        let data = dispatch(&fs, VFDS_LIST, &ctx_with(json!({ "path": ".vdfs/mem" })))
             .await
             .unwrap()
             .unwrap()
@@ -1280,7 +1421,7 @@ mod tests {
 
     /// 无能力管理器 → 从父插件广播，容器在广播中注册根（前端链路）
     #[tokio::test]
-    async fn resolve_root_broadcasts_to_parent() {
+    async fn resolve_fs_broadcasts_to_parent() {
         struct FakeContainer;
 
         #[async_trait]
@@ -1311,10 +1452,9 @@ mod tests {
         }
 
         let parent: Arc<dyn Plugin> = Arc::new(FakeContainer);
-        let root = resolve_root(Some(&parent), &ctx_empty()).await;
+        let fs = resolve_fs(Some(&parent), &ctx_empty()).await;
 
-        let ctx = ctx_with(json!({ "path": "/" }));
-        let items = dispatch(&root, VFDS_LIST, &ctx)
+        let items = dispatch(&fs, VFDS_LIST, &ctx_with(json!({ "path": ".vdfs" })))
             .await
             .unwrap()
             .unwrap()
@@ -1323,6 +1463,6 @@ mod tests {
             .items;
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, "mem");
-        assert_eq!(items[0].path, "/mem");
+        assert_eq!(items[0].path, ".vdfs/mem");
     }
 }

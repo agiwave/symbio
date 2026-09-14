@@ -8,23 +8,25 @@
 //!   （`plugins/vdfs/protocol.rs`），**core 不暴露这些类型**——与
 //!   [`crate::symbio_core::model_provider`] 的组织方式一致。
 //!
-//! ## 挂载不属于 provider
+//! ## 组合根不属于 provider
 //!
-//! **provider 完全不知道自己被挂在哪里**。挂载是**使用方**的概念：谁用它、
-//! 谁决定它在虚拟树上的名字。因此：
+//! **provider 完全不知道自己被放在哪层目录下**。目录树的组织是**使用方**的概念：
+//! 谁用它、谁决定它在目录树上的名字。因此：
 //!
-//! - trait 上**没有** `mount()` 之类的方法——provider 不管理也不提供挂载名；
+//! - trait 上没有 `name()` 之类的方法——provider 不管理也不提供自己的目录名；
 //! - provider 的每个方法只接收**本子树内的相对路径**（`""` = 自身根），
-//!   已由使用方完成规范化与穿越校验（见 [`normalize_path`]）；
-//! - 全路径（`/<挂载名>/<rel…>`）由使用方拼接、回填。
+//!   已由使用方完成规范化与穿越校验；
+//! - 全路径（`<目录>/<rel…>`）由使用方拼接、回填。
 //!
 //! ## 依赖方向
 //!
 //! - **实现方**（如 `setting` 插件）实现本 trait，在 `traverse` 广播中经
-//!   `CapabilityVisitor::register_vdfs_provider(挂载名, provider)` 注册自身。
-//!   **注册名由使用方选定的**，约定用插件名（`PLUGIN_*` 常量）——插件名在宿主内
-//!   唯一，天然就是合格的挂载名；
-//! - **`vdfs` 插件**收集全部注册项，按 `vdfs/*` 协议分发（前端与 LLM 走同一条
+//!   `CapabilityVisitor::register_vdfs_provider(目录名, provider)` 注册自身。
+//!   **目录名由使用方选定**，约定用插件名（`PLUGIN_*` 常量）——插件名在宿主内
+//!   唯一，天然就是合格的目录名；
+//! - **`composite` 容器**是一个 root 级 provider：它的目录内容 = 实现了本接口的
+//!   子插件名（每个子插件一个子目录）；
+//! - **`vdfs` 插件**取容器注册的根，按 `vdfs/*` 协议分发（前端与 LLM 走同一条
 //!   分发链路，不存在第二套实现）；
 //! - 机制只认 [`VdfsAccess`] 的四个访问位（`r` / `w` / `l` / `t`），不做任何
 //!   按类型的特判——这是 VDFS 保持通用的根基。
@@ -38,12 +40,13 @@
 //!
 //! 数据模型速览：
 //!
-//! - 一切资源 = 虚拟树上的**节点**（[`VdfsNode`]），地址 = `/<mount>/<rel>`；
+//! - 一切资源 = 目录树上的**节点**（[`VdfsNode`]），地址 = 树内相对路径
+//!   `<目录>/<rel>`（宿主门面负责把它映射成对外展示地址，见 plugins/vdfs/fs.rs）；
 //! - 节点的能力 = 四个**访问位**（[`VdfsAccess`]：`r` 读 / `w` 写 / `l` 列 / `t` 遍历）；
 //! - 内容 = [`VdfsContent`]（文本 `text` 或二进制 `b64`，互斥）；
 //! - 呈现 = 节点的 `ext`（扩展名）→ 使用方选渲染器；渲染器所需描述经 `schema` 透传；
-//! - 变更 = [`VdfsChange`]（子树内**相对路径**、**不含挂载名**；经
-//!   [`VdfsChangeSink`] 由使用方补挂载名后投递）。
+//! - 变更 = [`VdfsChange`]（子树内**相对路径**；经 [`VdfsChangeSink`] 由使用方
+//!   补成展示地址后投递）。
 
 use async_trait::async_trait;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -63,17 +66,6 @@ pub const VFDS_STATUS_UNKNOWN: &str = "unknown";
 pub const VFDS_KIND_DIR: &str = "dir";
 /// 节点基础类型：文件
 pub const VFDS_KIND_FILE: &str = "file";
-/// 节点基础类型：挂载点
-pub const VFDS_KIND_MOUNT: &str = "mount";
-
-/// 虚拟根路径
-pub const VFDS_ROOT: &str = "/";
-
-/// 挂载点节点属性键：**是否作为导航项出现**（`false` = 不占导航位）。
-///
-/// 由 [`VdfsProvider::nav_visible`] 决定，仅在该方法返回 `false` 时写入
-/// （缺省 `true` 不序列化）；消费者按「缺省可见」处理。
-pub const VFDS_ATTR_NAV_VISIBLE: &str = "nav_visible";
 
 // ==================== 呈现扩展名（约定，宿主可自行扩展） ====================
 //
@@ -785,62 +777,6 @@ impl VdfsChange {
     }
 }
 
-// ==================== 路径 ====================
-
-/// 规范化全路径：统一前导 `/`、折叠空段、拒绝向上穿越。
-///
-/// - `""` / `"/"` / `"///"` → `"/"`
-/// - `"a/b/"` → `"/a/b"`
-/// - 含 `..` 段 → [`VdfsError::Invalid`]
-///
-/// 分发层在调用 provider 前调用一次，provider 因此**无需**再做穿越校验。
-pub fn normalize_path(raw: &str) -> VdfsResult<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(VFDS_ROOT.to_string());
-    }
-    let mut segs: Vec<&str> = Vec::new();
-    for seg in trimmed.split('/') {
-        let seg = seg.trim();
-        if seg.is_empty() || seg == "." {
-            continue;
-        }
-        if seg == ".." {
-            return Err(VdfsError::invalid(format!(
-                "VDFS 路径不允许向上穿越：{raw}"
-            )));
-        }
-        segs.push(seg);
-    }
-    if segs.is_empty() {
-        return Ok(VFDS_ROOT.to_string());
-    }
-    Ok(format!("/{}", segs.join("/")))
-}
-
-/// 拆分全路径为 `(挂载名, 相对路径)`；虚拟根返回 `None`。
-pub fn split_mount(full: &str) -> Option<(&str, String)> {
-    let p = full.trim_start_matches('/');
-    if p.is_empty() {
-        return None;
-    }
-    match p.find('/') {
-        Some(i) => Some((&p[..i], p[i + 1..].to_string())),
-        None => Some((p, String::new())),
-    }
-}
-
-/// 拼接全路径（`join_path("session", "")` → `"/session"`）
-pub fn join_path(mount: &str, rel: &str) -> String {
-    let mount = mount.trim_matches('/');
-    let rel = rel.trim_matches('/');
-    if rel.is_empty() {
-        format!("/{mount}")
-    } else {
-        format!("/{mount}/{rel}")
-    }
-}
-
 // ==================== 宿主上下文（不透明） ====================
 
 /// 调用级自定义参数的键值表（**使用方注入 → provider 取用**）。
@@ -1013,20 +949,6 @@ pub trait VdfsProvider: Send + Sync + 'static {
         Vec::new()
     }
 
-    /// 是否作为**导航项**出现在使用方的资源导航（左栏）中（缺省 `true`）。
-    ///
-    /// 与 [`Self::order`] / [`Self::icon`] 同属**呈现层声明**：隐藏的子树仍然
-    /// 可被寻址、可读写、可被 LLM 使用，只是不占导航位。用于「能力存在但
-    /// 不作为主资源类别」的挂载点（如本地文件树：是 VDFS 挂载点，却不是
-    /// 与 session / model 并列的资源类别）。
-    ///
-    /// 约定：返回 `false` 时由使用方在合成挂载点节点时写入
-    /// `nav_visible = false` 属性（场景数据，VDFS 只透传）；缺省即 `true`，
-    /// 不额外序列化。消费者「缺省可见」，故新增 provider 无需关心本方法。
-    fn nav_visible(&self) -> bool {
-        true
-    }
-
     /// 列出目录的直接子节点（`l` 位）
     async fn list(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<Vec<VdfsNode>> {
         Err(VdfsError::NotImplemented)
@@ -1106,303 +1028,9 @@ pub trait VdfsProvider: Send + Sync + 'static {
 /// 类型别名：便于使用方在容器里存放 `dyn VdfsProvider`
 pub type DynVdfsProvider = Arc<dyn VdfsProvider>;
 
-// ==================== 节点回填（机制级公共逻辑） ====================
-
-/// 回填机制级字段：`path`（全路径）、`ext`（缺省由 `name` 推导）、`title`（缺省同 name）。
-///
-/// 分发层统一调用，provider 无需重复。
-pub fn fill_node_paths(mount: &str, base_rel: &str, nodes: &mut [VdfsNode]) {
-    for n in nodes.iter_mut() {
-        let rel = if base_rel.is_empty() {
-            n.name.clone()
-        } else {
-            format!("{base_rel}/{}", n.name)
-        };
-        if n.path.is_empty() {
-            n.path = join_path(mount, &rel);
-        }
-        if n.ext.is_none() {
-            n.ext = derive_ext(&n.name);
-        }
-        if n.title.is_empty() {
-            n.title = n.name.clone();
-        }
-    }
-}
-
 /// 便捷：从节点里取回宿主方言的呈现描述
 pub fn node_schema(node: &VdfsNode) -> Option<&Value> {
     node.schema.as_ref()
-}
-
-// ==================== 容器组合视图（机制级公共逻辑） ====================
-
-/// 一串挂载：`(挂载名, 实现)`
-pub type VdfsMounts = Vec<(String, DynVdfsProvider)>;
-
-/// 把「一串挂载」组合成以虚拟根 `/` 为顶的一棵子树。
-///
-/// **通用机制**：任何容器（`composite` 等）直接复用，不必各自实现拓扑解析。
-/// 它本身就是一棵可用的 provider 子树，因此也实现 [`VdfsProvider`]——容器把
-/// 它注册为 VDFS 根，访问层（vdfs 插件）只管转发。
-///
-/// ## 挂载名从哪来
-///
-/// **容器的使用方**定名，通常就是子插件名；provider 自身不带名字
-/// （见模块文档），所以这里有名、provider 里没有名。
-///
-/// ## 本结构承担的语义无关职责
-///
-/// | 职责 | 说明 |
-/// |---|---|
-/// | 路径解析 | 首段 = 挂载名，其余 = 该 provider 的**相对路径** |
-/// | 全路径回填 | 子节点 / 内容 / 写入响应的 `path` 补成 `/挂载名/…` |
-/// | 挂载根守卫 | 挂载根不可读 / 写 / 删，也不可 mkdir / move |
-/// | 跨挂载点拒绝 | `move` 只允许在同一挂载点内 |
-/// | 事件补全 | provider 报出的相对路径补成全路径再交给上层 sink |
-///
-/// `list("/")` 返回挂载点清单、`stat("/")` 返回虚拟根节点——两者都是
-/// **组合出来的**，不需要任何 provider 参与。
-///
-/// 路径参数一律是**规范化后的全路径**（`/`、`/<挂载名>`、`/<挂载名>/…`）。
-pub struct VdfsMountTable {
-    mounts: VdfsMounts,
-}
-
-impl VdfsMountTable {
-    /// 按 `order` 升序稳定排序（同序保持传入顺序）
-    pub fn new(mut mounts: VdfsMounts) -> Self {
-        mounts.sort_by_key(|(_, p)| p.order());
-        Self { mounts }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.mounts.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.mounts.len()
-    }
-
-    /// 已挂载的 `(挂载名, 实现)`，顺序 = 对外展示顺序
-    pub fn mounts(&self) -> &[(String, DynVdfsProvider)] {
-        &self.mounts
-    }
-
-    /// 挂载名清单（报错提示用）
-    pub fn names_hint(&self) -> String {
-        if self.mounts.is_empty() {
-            return "（无）".to_string();
-        }
-        self.mounts
-            .iter()
-            .map(|(m, _)| format!("/{m}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    /// 虚拟根节点（`/`）
-    pub fn root_node(&self) -> VdfsNode {
-        let mut n = VdfsNode::dir(
-            VFDS_ROOT,
-            "虚拟文件系统",
-            VdfsAccess {
-                list: true,
-                traverse: self.mounts.iter().any(|(_, p)| p.root_access().traverse),
-                ..VdfsAccess::NONE
-            },
-        );
-        n.path = VFDS_ROOT.to_string();
-        n.kind = VFDS_KIND_MOUNT.to_string();
-        n.description = Some("统一资源与数据根；子节点为各挂载点".to_string());
-        n
-    }
-
-    /// 单个挂载点节点（`label` 缺省用挂载名代替）
-    pub fn mount_node(&self, mount: &str, p: &DynVdfsProvider) -> VdfsNode {
-        let mut n = VdfsNode::dir(
-            mount.to_string(),
-            p.label().unwrap_or(mount).to_string(),
-            p.root_access(),
-        );
-        n.path = join_path(mount, "");
-        n.kind = VFDS_KIND_MOUNT.to_string();
-        n.status = p.root_status().to_string();
-        n.description = p.description().map(str::to_string);
-        n.new_types = p.root_new_types();
-        if !p.nav_visible() {
-            let _ = n
-                .attributes
-                .insert(VFDS_ATTR_NAV_VISIBLE.to_string(), Value::Bool(false));
-        }
-        n
-    }
-
-    /// 全部挂载点节点（顺序 = 对外展示顺序）
-    pub fn mount_nodes(&self) -> Vec<VdfsNode> {
-        self.mounts
-            .iter()
-            .map(|(m, p)| self.mount_node(m, p))
-            .collect()
-    }
-
-    /// 全路径 → `(挂载名, provider, 相对路径)`；虚拟根或无匹配时按错误返回
-    pub fn resolve<'a>(&'a self, full: &str) -> VdfsResult<(&'a str, &'a DynVdfsProvider, String)> {
-        let Some((mount, rel)) = split_mount(full) else {
-            return Err(VdfsError::invalid(
-                "虚拟根不是可操作节点，请给出 /<挂载点>/... 路径",
-            ));
-        };
-        let (m, p) = self
-            .mounts
-            .iter()
-            .find(|(name, _)| name == mount)
-            .ok_or_else(|| {
-                VdfsError::not_found(format!(
-                    "挂载点不存在：/{mount}（现有：{}）",
-                    self.names_hint()
-                ))
-            })?;
-        Ok((m.as_str(), p, rel))
-    }
-}
-
-#[async_trait]
-impl VdfsProvider for VdfsMountTable {
-    fn label(&self) -> Option<&str> {
-        Some("系统")
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("组合视图：虚拟根及其下的各挂载点")
-    }
-
-    fn order(&self) -> i32 {
-        0
-    }
-
-    fn root_access(&self) -> VdfsAccess {
-        VdfsAccess {
-            list: true,
-            traverse: true,
-            ..VdfsAccess::NONE
-        }
-    }
-
-    async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        if path == VFDS_ROOT {
-            return Ok(self.mount_nodes());
-        }
-        let (mount, p, rel) = self.resolve(path)?;
-        let mut items = p.list(ctx, &rel).await?;
-        fill_node_paths(mount, &rel, &mut items);
-        Ok(items)
-    }
-
-    async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        if path == VFDS_ROOT {
-            return Ok(self.root_node());
-        }
-        let (mount, p, rel) = self.resolve(path)?;
-        if rel.is_empty() {
-            return Ok(self.mount_node(mount, p));
-        }
-        let mut n = p.stat(ctx, &rel).await?;
-        fill_node_paths(mount, "", std::slice::from_mut(&mut n));
-        n.path = path.to_string();
-        Ok(n)
-    }
-
-    async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-        let (_, p, rel) = self.resolve(path)?;
-        if rel.is_empty() {
-            return Err(VdfsError::Forbidden(
-                "挂载根不是可读文件；请读取其子节点".to_string(),
-            ));
-        }
-        let mut c = p.read(ctx, &rel).await?;
-        if c.path.is_empty() {
-            c.path = path.to_string();
-        }
-        Ok(c)
-    }
-
-    async fn write(
-        &self,
-        ctx: &VdfsContext,
-        path: &str,
-        content: &VdfsContent,
-    ) -> VdfsResult<VdfsWriteResponse> {
-        let (_, p, rel) = self.resolve(path)?;
-        if rel.is_empty() {
-            return Err(VdfsError::Forbidden("挂载根不可写".to_string()));
-        }
-        let mut r = p.write(ctx, &rel, content).await?;
-        if r.path.is_empty() {
-            r.path = path.to_string();
-        }
-        Ok(r)
-    }
-
-    async fn delete(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
-        let (_, p, rel) = self.resolve(path)?;
-        if rel.is_empty() {
-            return Err(VdfsError::Forbidden("挂载根不可删除".to_string()));
-        }
-        p.delete(ctx, &rel, recursive).await
-    }
-
-    async fn mkdir(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        let (_, p, rel) = self.resolve(path)?;
-        if rel.is_empty() {
-            return Err(VdfsError::invalid("挂载根已存在，无需创建"));
-        }
-        p.mkdir(ctx, &rel).await
-    }
-
-    async fn move_item(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
-        let (from_mount, pf, rf) = self.resolve(from)?;
-        let (to_mount, _, rt) = self.resolve(to)?;
-        if from_mount != to_mount {
-            return Err(VdfsError::invalid(format!(
-                "不支持跨挂载点移动：{from_mount} → {to_mount}"
-            )));
-        }
-        if rf.is_empty() || rt.is_empty() {
-            return Err(VdfsError::Forbidden("挂载根不可移动".to_string()));
-        }
-        pf.move_item(ctx, &rf, &rt).await
-    }
-
-    async fn action(
-        &self,
-        ctx: &VdfsContext,
-        path: &str,
-        action: &str,
-        payload: Option<&Value>,
-    ) -> VdfsResult<VdfsActionResult> {
-        let (_, p, rel) = self.resolve(path)?;
-        p.action(ctx, &rel, action, payload).await
-    }
-
-    /// provider 报出的相对路径在此补成全路径，再交给上层 sink
-    async fn watch(&self, ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
-        let (mount, p, rel) = self.resolve(path)?;
-        let mount = mount.to_string();
-        let wrapped: VdfsChangeSink = Arc::new(move |c: VdfsChange| {
-            sink(VdfsChange {
-                path: join_path(&mount, &c.path),
-                change: c.change,
-                to: c.to.as_deref().map(|t| join_path(&mount, t)),
-            });
-        });
-        p.watch(ctx, &rel, wrapped).await
-    }
-
-    async fn unwatch(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        let (_, p, rel) = self.resolve(path)?;
-        p.unwatch(ctx, &rel).await
-    }
 }
 
 #[cfg(test)]
@@ -1558,31 +1186,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_path_rules() {
-        assert_eq!(normalize_path("").unwrap(), "/");
-        assert_eq!(normalize_path("/").unwrap(), "/");
-        assert_eq!(normalize_path("///").unwrap(), "/");
-        assert_eq!(normalize_path("/a/b/").unwrap(), "/a/b");
-        assert_eq!(normalize_path("a//b").unwrap(), "/a/b");
-        assert_eq!(normalize_path("/a/./b").unwrap(), "/a/b");
-        assert!(normalize_path("/a/../b").is_err());
-        assert!(normalize_path("../x").is_err());
-    }
-
-    #[test]
-    fn split_and_join() {
-        assert_eq!(split_mount("/"), None);
-        assert_eq!(split_mount("/session"), Some(("session", String::new())));
-        assert_eq!(
-            split_mount("/session/a/b"),
-            Some(("session", "a/b".to_string()))
-        );
-        assert_eq!(join_path("session", ""), "/session");
-        assert_eq!(join_path("session", "a/b"), "/session/a/b");
-        assert_eq!(join_path("/session/", "/a/"), "/session/a");
-    }
-
-    #[test]
     fn context_downcast_and_require() {
         let ctx = VdfsContext::new(7u32);
         assert_eq!(ctx.host::<u32>(), Some(&7));
@@ -1596,120 +1199,21 @@ mod tests {
         assert!(empty.host::<u32>().is_none());
     }
 
-    #[test]
-    fn fill_node_paths_derives_path_ext_title() {
-        let mut nodes = vec![
-            VdfsNode::file("a.md", "", VdfsAccess::READ),
-            VdfsNode::dir("sub", "子目录", VdfsAccess::LIST),
-        ];
-        fill_node_paths("mem", "", &mut nodes);
-        assert_eq!(nodes[0].path, "/mem/a.md");
-        assert_eq!(nodes[0].ext.as_deref(), Some("md"));
-        assert_eq!(nodes[0].title, "a.md", "空标题回填为 name");
-        assert_eq!(nodes[1].path, "/mem/sub");
-        assert!(nodes[1].ext.is_none());
-
-        // 已有 path 不被覆盖（显式路径优先）；空 path 按 base_rel 推导
-        nodes[0].path = "/explicit/keep.md".into();
-        fill_node_paths("mem", "deep", &mut nodes);
-        assert_eq!(nodes[0].path, "/explicit/keep.md", "已有 path 不被覆盖");
-
-        let mut nested = vec![VdfsNode::file("b.txt", "B", VdfsAccess::READ)];
-        fill_node_paths("mem", "deep", &mut nested);
-        assert_eq!(
-            nested[0].path, "/mem/deep/b.txt",
-            "空 path 按 base_rel 推导"
-        );
-        assert_eq!(nested[0].ext.as_deref(), Some("txt"));
-    }
-
     /// 自描述全部有缺省：`impl VdfsProvider for P {}` 即可编译——
-    /// provider **不需要**提供任何挂载名（挂载是使用方的事）
+    /// provider **不需要**提供任何目录名（目录名是使用方的事）
     #[test]
-    fn self_description_defaults_need_no_mount() {
+    fn self_description_defaults_need_no_dir_name() {
         struct P;
         #[async_trait]
         impl VdfsProvider for P {}
 
-        assert_eq!(P.label(), None, "label 缺省为空，由使用方以挂载名代替");
+        assert_eq!(P.label(), None, "label 缺省为空，由使用方以目录名代替");
         assert_eq!(P.description(), None);
         assert_eq!(P.icon(), None);
         assert_eq!(P.order(), 100);
         assert_eq!(P.root_access(), VdfsAccess::LIST);
         assert_eq!(P.root_status(), VFDS_STATUS_ACTIVE);
         assert!(P.root_new_types().is_empty(), "缺省根下不可新建");
-    }
-
-    /// 挂载点节点携带 provider 声明的新建类型（使用方合成时回填）
-    #[test]
-    fn mount_node_carries_root_new_types() {
-        struct P;
-        #[async_trait]
-        impl VdfsProvider for P {
-            fn root_new_types(&self) -> Vec<VdfsNewType> {
-                vec![VdfsNewType::new("session", "会话")]
-            }
-        }
-
-        let p: DynVdfsProvider = Arc::new(P);
-        let table = VdfsMountTable::new(vec![("session".to_string(), p.clone())]);
-        let node = table.mount_node("session", &p);
-        assert_eq!(node.name, "session");
-        assert_eq!(node.kind, VFDS_KIND_MOUNT);
-        assert_eq!(node.new_types.len(), 1);
-        assert_eq!(node.new_types[0].ext, "session");
-
-        // 未声明新建类型的 provider：挂载点节点不带 new_types
-        struct Q;
-        #[async_trait]
-        impl VdfsProvider for Q {}
-        let q: DynVdfsProvider = Arc::new(Q);
-        let node = table.mount_node("other", &q);
-        assert!(node.new_types.is_empty());
-    }
-
-    /// 导航可见性：缺省可见（不写属性）；声明不可见时挂载节点带 `nav_visible=false`
-    #[test]
-    fn mount_node_marks_nav_visibility() {
-        struct Hidden;
-        #[async_trait]
-        impl VdfsProvider for Hidden {
-            fn nav_visible(&self) -> bool {
-                false
-            }
-        }
-        struct Plain;
-        #[async_trait]
-        impl VdfsProvider for Plain {}
-
-        let hidden: DynVdfsProvider = Arc::new(Hidden);
-        let plain: DynVdfsProvider = Arc::new(Plain);
-        let table = VdfsMountTable::new(vec![
-            ("local".to_string(), hidden.clone()),
-            ("session".to_string(), plain.clone()),
-        ]);
-
-        let h = table.mount_node("local", &hidden);
-        assert_eq!(
-            h.attributes
-                .get(VFDS_ATTR_NAV_VISIBLE)
-                .and_then(|v| v.as_bool()),
-            Some(false),
-            "声明不可见的挂载点应带 nav_visible=false"
-        );
-        // 隐藏只影响导航呈现，不改变能力：挂载点照旧是目录、照旧可列
-        assert_eq!(h.kind, VFDS_KIND_MOUNT);
-        assert!(h.access.list);
-
-        let p = table.mount_node("session", &plain);
-        assert!(
-            p.attributes.get(VFDS_ATTR_NAV_VISIBLE).is_none(),
-            "缺省可见的挂载点不写该属性（消费者按缺省可见处理）"
-        );
-        assert!(
-            table.mount_nodes().iter().any(|n| n.name == "local"),
-            "挂载表仍列出隐藏挂载点：隐藏是呈现层决定，不是能力裁剪"
-        );
     }
 
     /// 未实现的操作返回 `NotImplemented`（使用方据此隐藏入口）
@@ -1744,268 +1248,4 @@ mod tests {
         assert!(P.unwatch(&ctx, "").await.is_ok());
     }
 
-    // ==================== 容器组合视图 ====================
-
-    use std::sync::Mutex;
-
-    /// 记录型 provider：记下收到的**相对路径**，并原样回报
-    struct Recorder {
-        seen: Mutex<Vec<String>>,
-        order: i32,
-        label: Option<&'static str>,
-    }
-
-    impl Recorder {
-        fn new(label: &'static str, order: i32) -> Arc<Self> {
-            Arc::new(Self {
-                seen: Mutex::new(Vec::new()),
-                order,
-                label: Some(label),
-            })
-        }
-
-        fn seen(&self) -> Vec<String> {
-            self.seen.lock().unwrap().clone()
-        }
-    }
-
-    #[async_trait]
-    impl VdfsProvider for Recorder {
-        fn label(&self) -> Option<&str> {
-            self.label
-        }
-
-        fn order(&self) -> i32 {
-            self.order
-        }
-
-        fn root_access(&self) -> VdfsAccess {
-            VdfsAccess::LIST_TRAVERSE
-        }
-
-        async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-            self.seen.lock().unwrap().push(path.to_string());
-            Ok(vec![VdfsNode::file("a.txt", "A", VdfsAccess::READ_WRITE)])
-        }
-
-        async fn stat(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<VdfsNode> {
-            Ok(VdfsNode::file("a.txt", "A", VdfsAccess::READ_WRITE))
-        }
-
-        async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-            // 只认相对路径：全路径由组合视图回填
-            Ok(VdfsContent::text("", format!("read:{path}")))
-        }
-
-        async fn write(
-            &self,
-            _ctx: &VdfsContext,
-            path: &str,
-            _c: &VdfsContent,
-        ) -> VdfsResult<VdfsWriteResponse> {
-            Ok(VdfsWriteResponse {
-                path: String::new(),
-                created: false,
-                etag: Some(path.to_string()),
-            })
-        }
-
-        async fn delete(&self, _ctx: &VdfsContext, _p: &str, _r: bool) -> VdfsResult<()> {
-            Ok(())
-        }
-
-        async fn mkdir(&self, _ctx: &VdfsContext, _p: &str) -> VdfsResult<()> {
-            Ok(())
-        }
-
-        async fn move_item(&self, _ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
-            Err(VdfsError::Forbidden(format!("moved:{from}->{to}")))
-        }
-
-        async fn watch(
-            &self,
-            _ctx: &VdfsContext,
-            _p: &str,
-            sink: VdfsChangeSink,
-        ) -> VdfsResult<()> {
-            // 只报子树内相对路径
-            sink(VdfsChange::new("x.md", VFDS_CHANGE_UPDATED));
-            Ok(())
-        }
-    }
-
-    fn as_provider(p: Arc<Recorder>) -> DynVdfsProvider {
-        p
-    }
-
-    /// alpha(order 20) / beta(order 10) —— 传入顺序与展示顺序相反
-    fn sample_table() -> (VdfsMountTable, Arc<Recorder>, Arc<Recorder>) {
-        let a = Recorder::new("甲", 20);
-        let b = Recorder::new("乙", 10);
-        let table = VdfsMountTable::new(vec![
-            ("alpha".to_string(), as_provider(Arc::clone(&a))),
-            ("beta".to_string(), as_provider(Arc::clone(&b))),
-        ]);
-        (table, a, b)
-    }
-
-    #[test]
-    fn mount_table_root_lists_mounts_by_order() {
-        let (table, _, _) = sample_table();
-        let root = table.root_node();
-        assert_eq!(root.path, VFDS_ROOT);
-        assert_eq!(root.kind, VFDS_KIND_MOUNT);
-        assert!(root.is_dir());
-        assert_eq!(root.title, "虚拟文件系统");
-
-        let nodes = table.mount_nodes();
-        assert_eq!(
-            nodes.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
-            vec!["beta", "alpha"],
-            "按 provider 的 order 升序"
-        );
-        assert_eq!(nodes[0].path, "/beta");
-        assert_eq!(nodes[0].title, "乙", "label 作 title");
-        assert_eq!(nodes[0].kind, VFDS_KIND_MOUNT);
-    }
-
-    #[tokio::test]
-    async fn mount_table_delegates_relative_paths_and_fills_full_paths() {
-        let (table, a, _) = sample_table();
-        let ctx = VdfsContext::empty();
-
-        // 虚拟根 → 挂载点清单（无需 provider 参与）
-        let items = table.list(&ctx, VFDS_ROOT).await.unwrap();
-        assert_eq!(items.len(), 2);
-        assert!(a.seen().is_empty(), "list(/) 不应触达 provider");
-
-        // 挂载根 → provider 拿到 ""（相对路径），返回项被回填全路径
-        let items = table.list(&ctx, "/alpha").await.unwrap();
-        assert_eq!(a.seen(), vec![""]);
-        assert_eq!(items[0].path, "/alpha/a.txt");
-
-        // 子目录 → provider 拿到 "sub"
-        let _ = table.list(&ctx, "/alpha/sub").await.unwrap();
-        assert_eq!(a.seen(), vec!["", "sub"]);
-
-        // 读：provider 只见相对路径，返回内容被补全全路径
-        let c = table.read(&ctx, "/alpha/a.txt").await.unwrap();
-        assert_eq!(c.text.as_deref(), Some("read:a.txt"));
-        assert_eq!(c.path, "/alpha/a.txt", "provider 未填 path 时回填");
-
-        // 写：同上
-        let w = table
-            .write(&ctx, "/alpha/a.txt", &VdfsContent::text("", "x"))
-            .await
-            .unwrap();
-        assert_eq!(w.path, "/alpha/a.txt");
-        assert_eq!(
-            w.etag.as_deref(),
-            Some("a.txt"),
-            "provider 收到的是相对路径"
-        );
-
-        // stat 挂载根由组合视图合成，provider 不参与
-        let n = table.stat(&ctx, "/beta").await.unwrap();
-        assert_eq!(n.kind, VFDS_KIND_MOUNT);
-        assert_eq!(n.name, "beta");
-        assert_eq!(n.title, "乙");
-    }
-
-    #[tokio::test]
-    async fn mount_table_guards_mount_roots() {
-        let (table, _, _) = sample_table();
-        let ctx = VdfsContext::empty();
-
-        assert!(matches!(
-            table.read(&ctx, "/alpha").await.unwrap_err(),
-            VdfsError::Forbidden(_)
-        ));
-        assert!(matches!(
-            table
-                .write(&ctx, "/alpha", &VdfsContent::text("", "x"))
-                .await
-                .unwrap_err(),
-            VdfsError::Forbidden(_)
-        ));
-        assert!(matches!(
-            table.delete(&ctx, "/alpha", true).await.unwrap_err(),
-            VdfsError::Forbidden(_)
-        ));
-        assert!(matches!(
-            table.mkdir(&ctx, "/alpha").await.unwrap_err(),
-            VdfsError::Invalid(_)
-        ));
-        // 虚拟根本身也不可操作
-        assert!(matches!(
-            table.read(&ctx, VFDS_ROOT).await.unwrap_err(),
-            VdfsError::Invalid(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn mount_table_rejects_unknown_and_cross_mount_moves() {
-        let (table, _, _) = sample_table();
-        let ctx = VdfsContext::empty();
-
-        let err = table.list(&ctx, "/nope").await.unwrap_err();
-        assert!(matches!(err, VdfsError::NotFound(_)));
-        assert!(err.to_string().contains("/alpha"), "提示现有挂载点");
-
-        // 跨挂载点移动被拒
-        assert!(matches!(
-            table
-                .move_item(&ctx, "/alpha/a", "/beta/a")
-                .await
-                .unwrap_err(),
-            VdfsError::Invalid(_)
-        ));
-        // 同挂载点内移动：转发相对路径
-        let err = table
-            .move_item(&ctx, "/alpha/a", "/alpha/b")
-            .await
-            .unwrap_err();
-        assert!(matches!(err, VdfsError::Forbidden(_)));
-        assert!(
-            err.to_string().contains("moved:a->b"),
-            "provider 只收到相对路径"
-        );
-        // 挂载根不可移动
-        assert!(matches!(
-            table
-                .move_item(&ctx, "/alpha", "/alpha/b")
-                .await
-                .unwrap_err(),
-            VdfsError::Forbidden(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn mount_table_watch_prefixes_paths() {
-        let (table, _, _) = sample_table();
-        let ctx = VdfsContext::empty();
-        let got: Arc<Mutex<Vec<VdfsChange>>> = Arc::new(Mutex::new(Vec::new()));
-        let sink_box = Arc::clone(&got);
-        let sink: VdfsChangeSink = Arc::new(move |c| sink_box.lock().unwrap().push(c));
-
-        table.watch(&ctx, "/alpha", sink).await.unwrap();
-        let seen = got.lock().unwrap().clone();
-        assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].path, "/alpha/x.md", "相对路径被补成全路径");
-        assert_eq!(seen[0].change, VFDS_CHANGE_UPDATED);
-    }
-
-    #[tokio::test]
-    async fn empty_mount_table_is_an_empty_vfs() {
-        let table = VdfsMountTable::new(Vec::new());
-        let ctx = VdfsContext::empty();
-        assert!(table.is_empty());
-        assert_eq!(table.names_hint(), "（无）");
-        assert!(table.list(&ctx, VFDS_ROOT).await.unwrap().is_empty());
-        assert!(matches!(
-            table.list(&ctx, "/x").await.unwrap_err(),
-            VdfsError::NotFound(_)
-        ));
-        assert_eq!(table.stat(&ctx, VFDS_ROOT).await.unwrap().path, VFDS_ROOT);
-    }
 }

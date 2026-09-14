@@ -4,7 +4,7 @@ pub use super::local_config::LocalConfig;
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::{
     codebase_search::CodebaseSearchTool, content_search::ContentSearchTool, shell::ShellTool,
-    todo_write::TodoWriteTool, vdfs::LocalVdfs,
+    todo_write::TodoWriteTool,
 };
 use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::schemas::session::chat_message::{
@@ -12,9 +12,9 @@ use crate::symbio_core::schemas::session::chat_message::{
 };
 use crate::symbio_core::schemas::session::session_chat_response;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, DynVdfsProvider, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    Plugin, PluginChannel, PluginError, PluginFrame, PluginMeta, PluginPayload, CONFIG_GET,
-    CONFIG_SET, PLUGIN_LOCAL,
+    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
+    PluginChannel, PluginError, PluginFrame, PluginMeta, PluginPayload, CONFIG_GET, CONFIG_SET,
+    PLUGIN_LOCAL,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -153,8 +153,6 @@ pub struct LocalPlugin {
     tool_impls: Arc<Vec<Arc<dyn Capability>>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
     security: Arc<SecurityPolicy>,
-    /// 本地文件树的 VDFS provider —— 注册为 `local` 挂载点（见 [`LocalVdfs`]）
-    vdfs: Arc<LocalVdfs>,
 }
 
 impl LocalPlugin {
@@ -179,11 +177,9 @@ impl LocalPlugin {
         let todo_write = Arc::new(TodoWriteTool::new(Arc::clone(&security)));
         let codebase_search = Arc::new(CodebaseSearchTool::new(Arc::clone(&security)));
 
-        // 同一份安全策略既守卫工具，也守卫 VDFS provider —— 两条链路规则一致
-        let vdfs = Arc::new(LocalVdfs::new(Arc::clone(&security)));
-
-        // 文件编辑类能力（read/edit/write/delete/list/search）已迁入 VDFS，
-        // 由 `vdfs` 插件以 `vdfs_*` 工具统一暴露（见 plugins/vdfs），此处不再提供原生工具。
+        // 文件编辑类能力（read/edit/write/delete/list/search）已迁入 VDFS 的物理层
+        // （见 plugins/vdfs/physical.rs），由 `vdfs` 插件以 `vdfs_*` 工具统一暴露，
+        // 此处不再提供原生工具，也不再注册 VDFS provider。
         let tool_impls: Vec<Arc<dyn Capability>> =
             vec![shell, content_search, todo_write, codebase_search];
 
@@ -192,7 +188,6 @@ impl LocalPlugin {
             tool_impls: Arc::new(tool_impls),
             parent: Arc::new(RwLock::new(parent)),
             security,
-            vdfs,
         }
     }
 
@@ -298,12 +293,6 @@ impl Plugin for LocalPlugin {
                 let wrapped = Arc::new(SecureToolWrapper::new(tool.clone(), self.security.clone()));
                 tool_visitor.register(wrapped).await;
             }
-
-            // 与工具共用同一次能力广播：把本地文件树注册为 `local` 挂载点。
-            // 挂载名由**使用方**（此处即本插件）选定——约定用插件名，宿主内唯一；
-            // provider 自身不含此概念（见 `symbio_core::vdfs_provider` 模块文档）。
-            let me: DynVdfsProvider = self.vdfs.clone();
-            tool_visitor.register_vdfs_provider(PLUGIN_LOCAL, me).await;
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

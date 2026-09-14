@@ -1,17 +1,29 @@
 /**
- * useVdfs —— VDFS 通用资源页的唯一页面逻辑
+ * useVdfs —— 三栏工作台的唯一数据逻辑（绑定一个 vdfs 数据地址）
  *
- * 不含任何资源类型知识（原实体机制的 `useWorkbenchView` 已随实体页下线）：
- * 挂载点来自后端注册、目录内容来自 `vdfs/list`、详情渲染器由节点的 `ext`
+ * 不含任何资源类型知识：目录内容来自 `vdfs/list`、详情渲染器由节点的 `ext`
  * 决定（`registry/vdfsTypes`）。新增一种资源 = 后端实现一个 `VdfsProvider`，
  * 本文件零改动。
  *
- * ## 状态模型
+ * ## 绑定模型（控件自包含，见 VdfsWorkbench）
  *
- * - **挂载点**（`mounts`）：虚拟根 `/` 的目录内容，同时是左栏导航；
- * - **当前目录**（`cwd`）：中栏列表的来源；点目录进入、点文件选中；
+ * 宿主给一个**数据地址**（`addr`，如 `.vdfs` 或 `.vdfs/session/<id>`），本层
+ * 完成全部数据装配，**不感知浏览器路由**——数据地址与浏览器地址是两个概念：
+ *
+ * - **左栏导航** = `addr` 的内容（其子目录清单，后端 order 排列）；
+ * - **当前目录**（`cwd`）= 选中的左栏子目录（缺省第一个）；`addr` 无子目录时
+ *   落在 `addr` 自身。中栏列表 = `cwd` 内容，点文件选中、点目录钻入
+ *   （钻入由控件 emit `open`，宿主决定呈现方式，通常是 push 新地址页）；
  * - **选中节点**（`selectedNode`）：详情来源，按 `ext` 解析渲染器；
- * - **实时**：订阅总线 `vdfs` 频道，本挂载点范围内防抖刷新（非轮询）。
+ * - **选中记忆**：同一数据地址的左栏选中项会被记住（往返 push / 返回后恢复）；
+ * - **实时**：订阅总线 `vdfs` 频道，受影响的目录防抖刷新（非轮询）。
+ *
+ * ## UI 约定（S11）
+ *
+ * - **无面包屑**：路径即导航，层级靠左栏切目录 + 中栏点目录钻入 + 宿主返回键；
+ * - **无「新建目录」按钮**：新建 = 新建一种**类型**（会话 / 模型 / …）；
+ *   类型清单由当前目录节点声明（`new_types`），多类型时先选类型再命名；
+ *   目录结构节点由后端 provider 自持，前端不暴露 mkdir 入口。
  *
  * ## 校验错误的消费约定（要点五的消费端）
  *
@@ -25,9 +37,7 @@ import {
   base64ToBytes,
   deleteVdfs,
   downloadBlob,
-  fetchMounts,
   listVdfs,
-  mkdirVdfs,
   moveVdfs,
   readVdfs,
   runVdfsAction,
@@ -42,101 +52,65 @@ import {
   VFDS_ROOT,
   actionFileOf,
   isVdfsDir,
-  mountNavVisible,
   newFileNameOf,
   parseVdfsValidation,
-  vdfsBase,
   vdfsJoin,
-  vdfsMountOf,
   vdfsParent,
   type VdfsChange,
   type VdfsFieldError,
-  type VdfsMountInfo,
   type VdfsNewType,
   type VdfsNode,
 } from '@/schemas/vdfs'
-import { mountIconOf, resolveVdfsRenderer, type VdfsRenderer } from '@/registry/vdfsTypes'
+import { dirIconOf, resolveVdfsRenderer, type VdfsRenderer } from '@/registry/vdfsTypes'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
 import type { NavRailItem } from '@/components/common/NavRail.vue'
 
-/** 面包屑一项 */
-export interface VdfsCrumb {
-  label: string
-  path: string
-}
+/** 各数据地址的左栏选中记忆（模块级：往返 push / 返回后恢复原选中） */
+const selectedMemo = new Map<string, string>()
 
 export interface UseVdfsOptions {
-  /** 路由 `:mount` 参数（可选）：决定初始挂载点 */
-  mountParam?: Ref<string | undefined>
+  /** 绑定的数据地址（如 `.vdfs` 或 `.vdfs/session/<id>`）；变化 = 整体重载 */
+  addr: Ref<string>
 }
 
-export function useVdfs(opts: UseVdfsOptions = {}) {
+export function useVdfs(opts: UseVdfsOptions) {
   const { showToast } = useToast()
-  const mountParam = opts.mountParam
+  const addr = opts.addr
 
-  // ==================== 挂载点（虚拟根） ====================
-  const mounts = ref<VdfsMountInfo[]>([])
+  // ==================== 左栏导航（绑定地址的子目录清单） ====================
+  /** `addr` 的内容（其子目录 = 左栏导航项） */
+  const navDirs = ref<VdfsNode[]>([])
 
-  /** 当前目录全路径；`/` = 虚拟根（挂载点清单） */
-  const cwd = ref<string>(VFDS_ROOT)
-  /** 当前挂载点（由 cwd 首段决定；虚拟根下为空串） */
-  const activeMount = computed(() => vdfsMountOf(cwd.value))
+  /** 选中的左栏子目录名；null = `addr` 无子目录（中栏显示 `addr` 自身内容） */
+  const selectedName = ref<string | null>(null)
 
-  /**
-   * 左栏导航 = 导航可见的挂载点（图标为纯 UI 映射）。
-   *
-   * 可见性由后端机制层声明（`nav_visible`），前端只按标记过滤——不做任何
-   * 挂载名特判：隐藏的子树仍可经 `.vdfs/<挂载名>` 寻址访问。
-   */
-  const railItems = computed<NavRailItem[]>(() =>
-    mounts.value.filter(mountNavVisible).map((m) => ({
-      key: m.mount,
-      label: m.label || m.mount,
-      icon: mountIconOf(m.mount) ?? null,
-      description: m.description,
-      active: activeMount.value === m.mount,
-    }))
+  /** 当前目录全路径 = 绑定地址 + 选中的子目录 */
+  const cwd = computed(() =>
+    selectedName.value ? vdfsJoin(addr.value, selectedName.value) : addr.value
   )
 
-  /** 页标题：虚拟根 = 资源；挂载点根 = 挂载点标签；深层 = 末段名 */
-  const title = computed(() => {
-    if (cwd.value === VFDS_ROOT) return '资源'
-    const m = mounts.value.find((x) => x.mount === activeMount.value)
-    const root = m?.root || vdfsJoin(VFDS_ROOT, activeMount.value)
-    if (cwd.value === root) return m?.label || activeMount.value
-    return vdfsBase(cwd.value) || m?.label || '资源'
-  })
+  /** 左栏导航 = `addr` 的子目录（图标为纯 UI 映射），高亮 = 选中项 */
+  const navItems = computed<NavRailItem[]>(() =>
+    navDirs.value
+      .filter(isVdfsDir)
+      .map((n) => ({
+        key: n.name,
+        label: n.title || n.name,
+        icon: dirIconOf(n.name) ?? null,
+        description: n.description,
+        active: n.name === selectedName.value,
+      }))
+  )
 
-  /** 面包屑（根 → … → 当前目录）；挂载点段用挂载点标签 */
-  const breadcrumbs = computed<VdfsCrumb[]>(() => {
-    if (cwd.value === VFDS_ROOT) return []
-    const segs = cwd.value.slice(VFDS_ROOT.length + 1).split('/').filter(Boolean)
-    const out: VdfsCrumb[] = [{ label: '资源', path: VFDS_ROOT }]
-    let acc = VFDS_ROOT
-    segs.forEach((s, i) => {
-      acc = vdfsJoin(acc, s)
-      const label = i === 0 ? mounts.value.find((m) => m.mount === s)?.label || s : s
-      out.push({ label, path: acc })
-    })
-    return out
-  })
+  /** 页标题 = 当前目录节点的标题（列表加载后即为当前目录的自述） */
+  const title = computed(() => cwdNode.value?.title || cwdNode.value?.name || '资源')
 
   // ==================== 目录内容 ====================
   const items = ref<VdfsNode[]>([])
   const cwdNode = shallowRef<VdfsNode | null>(null)
   const loading = ref(false)
   const loadError = ref('')
-
-  /** 当前目录是否可写（列表头「新建目录」可见性由访问位决定，前端不硬编码） */
-  const canWriteHere = computed(() => {
-    const node = cwdNode.value
-    if (!node) {
-      const m = mounts.value.find((x) => x.mount === activeMount.value)
-      return Boolean(m?.access?.includes('w'))
-    }
-    return node.access.includes('w')
-  })
 
   /** 加载当前目录 */
   async function refresh() {
@@ -158,30 +132,42 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     }
   }
 
-  /** 进入目录（或虚拟根） */
-  async function enter(path: string) {
-    if (path === cwd.value) return
-    cwd.value = path
+  /**
+   * 重拉左栏导航并落位选中：记忆优先（仍存在时），缺省第一个子目录。
+   * 选中变化时内部已就地刷新当前目录（返回值告知调用方免重复刷）。
+   */
+  async function refreshNav(): Promise<boolean> {
+    const resp = await listVdfs(addr.value)
+    navDirs.value = resp.items
+    const names = resp.items.filter(isVdfsDir).map((n) => n.name)
+    const want = selectedMemo.get(addr.value)
+    const next = want && names.includes(want) ? want : (names[0] ?? null)
+    if (next === selectedName.value) return false
+    selectedName.value = next
+    if (next) selectedMemo.set(addr.value, next)
     clearSelection()
+    void refresh()
+    return true
+  }
+
+  /**
+   * 整体重载（绑定地址变化 / 宿主要求）：落位左栏选中 + 刷新当前目录。
+   * 选中落位变化时 refreshNav 已就地刷新，无需重复。
+   */
+  async function reload() {
+    if (await refreshNav()) return
     await refresh()
   }
 
-  /** 返回上一级 */
-  async function goUp() {
-    const parent = vdfsParent(cwd.value)
-    if (parent !== cwd.value) await enter(parent)
-  }
-
-  /** 切到某挂载点（左栏点击） */
-  async function switchMount(mount: string) {
-    const m = mounts.value.find((x) => x.mount === mount)
-    await enter(m?.root || vdfsJoin(VFDS_ROOT, mount))
-  }
-
-  /** 点列表项：目录 → 进入；文件 → 选中 */
-  async function activate(node: VdfsNode) {
-    if (isVdfsDir(node)) await enter(node.path)
-    else await select(node)
+  /** 点左栏某项 = 就地切换当前目录（不产生新页面） */
+  async function selectDir(name: string) {
+    if (name === selectedName.value) return
+    const n = navDirs.value.find((x) => x.name === name && isVdfsDir(x))
+    if (!n) return
+    selectedName.value = name
+    selectedMemo.set(addr.value, name)
+    clearSelection()
+    await refresh()
   }
 
   // ==================== 选中项与详情 ====================
@@ -363,48 +349,15 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     }
   }
 
-  /** 在当前目录下新建目录 */
-  async function createDir(name: string): Promise<boolean> {
-    const trimmed = name.trim()
-    if (!trimmed) {
-      showToast('error', '请填写目录名')
-      return false
-    }
-    saving.value = true
-    detailError.value = ''
-    try {
-      await mkdirVdfs(vdfsJoin(cwd.value, trimmed))
-      showToast('success', `已新建「${trimmed}」`)
-      await refresh()
-      return true
-    } catch (err) {
-      detailError.value = captureError(err)
-      showToast('error', `新建失败：${detailError.value}`)
-      return false
-    } finally {
-      saving.value = false
-    }
-  }
-
   // ==================== 可接受的新建类型（§5） ====================
   //
-  // 节点声明自己能新建哪些类型（`new_types`）；前端只负责「选类型 + 填名 + 组装
-  // 地址 + 发写请求」，不认识任何具体类型——创建语义由 provider 自持。
+  // 当前目录节点声明自己能新建哪些类型（`new_types`）；前端只负责「选类型 +
+  // 填名 + 组装地址 + 发写请求」，不认识任何具体类型——创建语义由 provider 自持。
+  // `.vdfs/session` 这类子目录节点由后端合成时携带其 new_types，因此无需任何
+  // 「按目录名回退」的特判。
 
-  /**
-   * 当前目录可接受的新建类型。
-   *
-   * 节点自身声明优先；**仅挂载点根**才回退到挂载点声明——挂载点的
-   * `new_types` 描述的是「根下可建什么」，若泄漏到任意子目录，每个子目录
-   * 都会长出与其语义无关的新建入口（如会话的「新建会话」出现在工作目录里）。
-   */
-  const creatableTypes = computed<VdfsNewType[]>(() => {
-    const fromNode: VdfsNewType[] | undefined = cwdNode.value?.new_types
-    if (fromNode && fromNode.length > 0) return fromNode
-    const m = mounts.value.find((x) => x.mount === activeMount.value)
-    if (!m || !m.root || cwd.value !== m.root) return []
-    return m.new_types ?? []
-  })
+  /** 当前目录可接受的新建类型 */
+  const creatableTypes = computed<VdfsNewType[]>(() => cwdNode.value?.new_types ?? [])
 
   /** 是否有可新建类型（添加按钮可见性；机制只认节点声明） */
   const canCreate = computed(() => creatableTypes.value.length > 0)
@@ -460,7 +413,7 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     }
   }
 
-  /** 重命名选中节点（同挂载点内移动） */
+  /** 重命名选中节点（同一地址空间内移动） */
   async function renameSelected(name: string): Promise<boolean> {
     const node = selectedNode.value
     const trimmed = name.trim()
@@ -484,8 +437,8 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
   }
 
   // ==================== 实时（总线 vdfs 频道，非轮询） ====================
-  // 归一化：有界 mount → 仅本挂载点范围内的变更触发刷新；
-  // 变更可能落在当前目录之外（如子目录），一律防抖重拉当前目录收敛。
+  // 变更影响当前目录（自身 / 祖先 / 子树内）才刷新；绑定地址一层的变化
+  //（左栏子目录增删）顺带重拉导航。其余变更防抖重拉当前目录收敛。
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   function scheduleRefresh(delay = 400) {
     if (refreshTimer) clearTimeout(refreshTimer)
@@ -497,15 +450,23 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     }, delay)
   }
 
-  /** 数据变更回调（挂载点过滤在 handler 内，订阅恒定一条） */
+  /** 是否影响某目录：变更路径是它自身 / 它的祖先 / 它子树内的成员 */
+  function affects(dir: string, changePath: string): boolean {
+    return changePath === dir || dir.startsWith(`${changePath}/`) || changePath.startsWith(`${dir}/`)
+  }
+
+  /** 数据变更回调（路径过滤在 handler 内，订阅恒定一条） */
   function onChange(change: VdfsChange) {
-    if (activeMount.value && change.mount !== activeMount.value) return
-    scheduleRefresh()
+    if (affects(cwd.value, change.path)) scheduleRefresh()
+    // 绑定地址一层（左栏子目录增删）→ 导航跟着变
+    if (change.path === addr.value || vdfsParent(change.path) === addr.value) {
+      void refreshNav()
+    }
   }
 
   const unsubBus = subscribe({ kind: VFDS_EVENT_KIND }, (busEvent) => {
     const change = busEvent.data?.data as VdfsChange | undefined
-    if (!change || typeof change.mount !== 'string') return
+    if (!change || typeof change.path !== 'string') return
     onChange(change)
   })
 
@@ -515,8 +476,8 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
   watch(
     cwd,
     (next, prev) => {
-      // 虚拟根不在任何 provider 身上、无实时能力；跳过 watch/unwatch，否则后端报
-      // 「虚拟根不是可操作节点」（见服务器日志 vdfs/watch / vdfs/unwatch 的 ERROR）。
+      // `.vdfs` 根不在任何 provider 身上、无实时能力；跳过 watch/unwatch，否则后端报
+      // 「目录不是可操作节点」（见服务器日志 vdfs/watch / vdfs/unwatch 的 ERROR）。
       if (prev && prev !== VFDS_ROOT && prev !== next) void unwatchVdfs(prev)
       watched = next
       if (next !== VFDS_ROOT) void watchVdfs(next)
@@ -524,52 +485,33 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     { immediate: true }
   )
 
+  // 绑定地址变化 = 换了一个数据地址：整体重载（左栏、选中、当前目录）
+  watch(addr, () => void reload(), { immediate: true })
+
   onBeforeUnmount(() => {
     unsubBus()
     if (refreshTimer) clearTimeout(refreshTimer)
     if (watched && watched !== VFDS_ROOT) void unwatchVdfs(watched)
   })
 
-  // 路由 `:mount` 变化 → 进入对应挂载点（深链/前进后退）。
-  // 首次进入由 boot() 统一落位，此处只处理后续变化。
-  if (mountParam) {
-    watch(mountParam, (m) => {
-      const target = m ? vdfsJoin(VFDS_ROOT, m) : VFDS_ROOT
-      if (target !== cwd.value) void enter(target)
-    })
-  }
-
-  /** 首次进入：拉挂载点清单 + 按路由落位 + 加载当前目录 */
-  async function boot() {
-    mounts.value = await fetchMounts()
-    const target = mountParam?.value ? vdfsJoin(VFDS_ROOT, mountParam.value) : VFDS_ROOT
-    if (target !== cwd.value) cwd.value = target
-    await refresh()
-  }
-
   return {
-    // 挂载点 / 导航
-    mounts,
-    railItems,
-    activeMount,
-    switchMount,
+    // 左栏导航
+    navItems,
+    selectDir,
+    selectedName,
     // 目录
     cwd,
     title,
-    breadcrumbs,
     cwdNode,
     items,
     loading,
     loadError,
-    canWriteHere,
     refresh,
-    enter,
-    goUp,
-    activate,
+    reload,
+    select,
     // 选中 / 详情
     selectedNode,
     selectedId,
-    select,
     renderer,
     nodeText,
     formData,
@@ -585,13 +527,10 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     saveText,
     runAction,
     removeSelected,
-    createDir,
     createTyped,
     createTypedFile,
     creatableTypes,
     canCreate,
     renameSelected,
-    // 启动
-    boot,
   }
 }

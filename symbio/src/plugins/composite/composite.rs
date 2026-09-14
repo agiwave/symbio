@@ -241,8 +241,9 @@ impl Plugin for Composite {
         _path: String,
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
-        // 容器是 VDFS 虚拟根 `/` 的拥有者：在同一次能力广播里把组合视图登记为根。
-        // 访问层（vdfs 插件）据此转发，因此不需要认识任何具体资源。
+        // 装配安排：容器把自己的 vdfs 视图登记进访问层的单槽位，使其成为
+        // `.vdfs` 的服务者。这不是「容器是根」——composite 只是恰好包含若干
+        // 子目录的 provider，能否出现在那里取决于装配，不是本模块的属性。
         if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 let root: Arc<dyn VdfsProvider> = self.vdfs.clone();

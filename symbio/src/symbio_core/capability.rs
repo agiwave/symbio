@@ -229,27 +229,27 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     /// 列出已注册的系统提示词（(name, prompt)，保注册顺序）
     async fn list_system_prompts(&self) -> Vec<(String, String)>;
 
-    // ==================== VDFS provider（虚拟文件系统挂载） ====================
+    // ==================== VDFS provider（统一文件系统） ====================
 
     /// 注册一个 VDFS provider。
     ///
-    /// `mount` 是**使用方选定的挂载名**（虚拟根 `/` 下的一级目录名，宿主机内唯一）——
+    /// `name` 是**使用方选定的目录名**（组合根下的一级目录名，宿主机内唯一）——
     /// 约定用插件名（`PLUGIN_*` 常量），因为插件名天然唯一。provider 自身**不知道**
     /// 也不提供这个概念（见 `symbio_core::vdfs_provider` 模块文档）。
     ///
     /// 与工具 / 模型服务 / 系统提示词**共用同一次 `traverse` 广播**：插件在
     /// `TRAVERSE_AVAILABLE_TOOLS` 分支里注册工具的同时顺带注册 provider，
-    /// 会话链路（LLM 工具调用）与前端链路因此拿到同一份集合（含同一批挂载名）。
+    /// 会话链路（LLM 工具调用）与前端链路因此拿到同一份集合（含同一批目录名）。
     ///
     /// 默认 no-op —— 不提供资源的实现方无需关心。
     async fn register_vdfs_provider(
         &self,
-        _mount: &str,
+        _name: &str,
         _provider: Arc<dyn crate::symbio_core::vdfs::VdfsProvider>,
     ) {
     }
 
-    /// 列出已注册的 VDFS provider：`(挂载名, 实现)`，按 `order` 升序稳定排序
+    /// 列出已注册的 VDFS provider：`(目录名, 实现)`，按 `order` 升序稳定排序
     /// （语义与 [`Self::list_system_prompts`] 的 `(name, prompt)` 一致）
     async fn list_vdfs_providers(
         &self,
@@ -257,19 +257,20 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
         Vec::new()
     }
 
-    /// 按挂载名查询 VDFS provider
+    /// 按目录名查询 VDFS provider
     async fn get_vdfs_provider(
         &self,
-        _mount: &str,
+        _name: &str,
     ) -> Option<Arc<dyn crate::symbio_core::vdfs::VdfsProvider>> {
         None
     }
 
-    /// 注册 VDFS **根** provider（单槽，重复注册覆盖）。
+    /// 登记 `.vdfs` 的服务者（单槽，重复登记覆盖）。
     ///
-    /// 虚拟根 `/` 归**组合容器**所有：`composite` 把自己的组合视图注册于此
-    /// （见 `plugins/composite/vdfs.rs`）。访问层（vdfs 插件）只取这个根再转发，
-    /// 因此**拓扑知识不在访问层**——它只认「根 + 全路径」。
+    /// `.vdfs` 这棵子树由谁服务是**装配时的安排**：任何 provider 都可以被登记，
+    /// 当前由 `composite` 登记（它恰好聚合了各子插件的子目录，见
+    /// `plugins/composite/vdfs.rs`）。访问层（vdfs 插件）只取这个登记项再转发，
+    /// 因此**拓扑知识不在访问层**——它只认「服务者 + 前缀分流」。
     ///
     /// 与工具 / 模型服务 / 系统提示词**共用同一次 `traverse` 广播**：容器在自己的
     /// `traverse` 分支里注册根，会话链路与前端链路因此拿到同一个根。

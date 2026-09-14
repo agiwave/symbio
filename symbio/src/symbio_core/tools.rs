@@ -107,26 +107,26 @@ impl CapabilityVisitor for DefaultToolVisitor {
             .collect()
     }
 
-    async fn register_vdfs_provider(&self, mount: &str, provider: Arc<dyn VdfsProvider>) {
+    async fn register_vdfs_provider(&self, name: &str, provider: Arc<dyn VdfsProvider>) {
         let mut slot = self.vdfs_providers.write().await;
-        // 同挂载名覆盖（保留先注册槽位，IndexMap 语义与工具注册一致）
-        slot.insert(mount.to_string(), provider);
+        // 同目录名覆盖（保留先注册槽位，IndexMap 语义与工具注册一致）
+        slot.insert(name.to_string(), provider);
     }
 
     async fn list_vdfs_providers(&self) -> Vec<(String, Arc<dyn VdfsProvider>)> {
         let slot = self.vdfs_providers.read().await;
         let mut out: Vec<(String, Arc<dyn VdfsProvider>)> = slot
             .iter()
-            .map(|(mount, p)| (mount.clone(), p.clone()))
+            .map(|(name, p)| (name.clone(), p.clone()))
             .collect();
         // 稳定排序：order 相同者保持注册顺序（IndexMap 保序）
         out.sort_by_key(|(_, p)| p.order());
         out
     }
 
-    async fn get_vdfs_provider(&self, mount: &str) -> Option<Arc<dyn VdfsProvider>> {
+    async fn get_vdfs_provider(&self, name: &str) -> Option<Arc<dyn VdfsProvider>> {
         let slot = self.vdfs_providers.read().await;
-        slot.get(mount).cloned()
+        slot.get(name).cloned()
     }
 
     async fn register_vdfs_root(&self, provider: Arc<dyn VdfsProvider>) {

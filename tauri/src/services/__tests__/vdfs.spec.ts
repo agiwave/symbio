@@ -3,14 +3,14 @@
  *
  * S10 新增的统一动作口：「测试连接」这类能力由 provider 自持，前端只转发标识。
  * 本单测锁定两件容易静默漂移的事：
- * 1. 地址与其它操作同一套路径运算（前端 `.vdfs` 口径 → 线路 `/` 口径）；
+ * 1. 地址与后端同一套口径（`.vdfs` 打头 = 系统资源，原样透传、零翻译）；
  * 2. 动作标识与载荷**原样**透传——前端不解释语义，也不擅自补字段。
  */
 
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn() }))
-// 日志模块依赖浏览器环境，这里只测翻译逻辑，故整体替身
+// 日志模块依赖浏览器环境，这里只测透传逻辑，故整体替身
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn() } }))
 
 import { callPlugin } from '@/services/plugin'
@@ -25,7 +25,7 @@ function lastCall(): { op: string; payload: Record<string, unknown> } {
 }
 
 describe('runVdfsAction（vdfs/action）', () => {
-  it('按线路口径发送路径，动作标识原样透传', async () => {
+  it('地址原样透传（前后端同口径），动作标识原样透传', async () => {
     vi.mocked(callPlugin).mockResolvedValueOnce({
       action: 'test',
       ok: true,
@@ -38,7 +38,7 @@ describe('runVdfsAction（vdfs/action）', () => {
     expect(r.message).toBe('校验通过')
     expect(lastCall().op).toBe(VFDS_ACTION)
     expect(lastCall().payload).toEqual({
-      path: '/model/openai-gpt4o',
+      path: '.vdfs/model/openai-gpt4o',
       action: 'test',
     })
   })
@@ -47,7 +47,7 @@ describe('runVdfsAction（vdfs/action）', () => {
     vi.mocked(callPlugin).mockResolvedValueOnce({ action: 'test', ok: false, message: '失败' })
     await runVdfsAction(vdfsJoin(vdfsJoin(VFDS_ROOT, 'mcp'), 'github'), 'test')
 
-    expect(lastCall().payload).toEqual({ path: '/mcp/github', action: 'test' })
+    expect(lastCall().payload).toEqual({ path: '.vdfs/mcp/github', action: 'test' })
   })
 
   it('有载荷时原样透传（前端不解释其内容）', async () => {
@@ -55,7 +55,7 @@ describe('runVdfsAction（vdfs/action）', () => {
     await runVdfsAction(vdfsJoin(vdfsJoin(VFDS_ROOT, 'mcp'), 'github'), 'test', { verbose: true })
 
     expect(lastCall().payload).toEqual({
-      path: '/mcp/github',
+      path: '.vdfs/mcp/github',
       action: 'test',
       payload: { verbose: true },
     })
@@ -69,8 +69,8 @@ describe('整包导入（vdfs/write 的二进制通道）', () => {
     expect(arrayBufferToBase64(bytes.buffer)).toBe(Buffer.from(bytes).toString('base64'))
   })
 
-  it('writeVdfsBinary 按线路口径发送 b64（后端据 b64 判定二进制）', async () => {
-    vi.mocked(callPlugin).mockResolvedValueOnce({ path: '/skill/demo.zip', created: true })
+  it('writeVdfsBinary 原样发送 b64（后端据 b64 判定二进制）', async () => {
+    vi.mocked(callPlugin).mockResolvedValueOnce({ path: '.vdfs/skill/demo.zip', created: true })
     const r = await writeVdfsBinary(
       vdfsJoin(vdfsJoin(VFDS_ROOT, 'skill'), 'demo.zip'),
       'UEsDBA==',
@@ -80,7 +80,7 @@ describe('整包导入（vdfs/write 的二进制通道）', () => {
     expect(r.created).toBe(true)
     expect(lastCall().op).toBe(VFDS_WRITE)
     expect(lastCall().payload).toEqual({
-      path: '/skill/demo.zip',
+      path: '.vdfs/skill/demo.zip',
       b64: 'UEsDBA==',
       create: true,
     })

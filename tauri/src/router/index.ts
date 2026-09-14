@@ -9,22 +9,14 @@ const router = createRouter({
       path: '/',
       component: MainLayout,
       children: [
-        // 首页 = VDFS 会话挂载点（会话是首个迁移到 VDFS 的资源，见
-        // docs/design/vdfs-frontend.md §7 S3）：首页即「.vdfs/session」的下一级列表
-        { path: '', redirect: () => '/vdfs/session' },
-        // VDFS 通用资源页（**嵌入主布局**）：中栏 = 当前目录、右栏 = 按节点 ext
-        // 分发的详情渲染器（form / session / text …）；左栏（挂载点导航）由应用
-        // 外壳承担，因此全 App 只有一台三栏工作台，页面切换不替换外壳。
-        // :mount 可选 = 深链直接进入某挂载点（如 /vdfs/setting、/vdfs/session）。
-        {
-          path: 'vdfs/:mount?',
-          name: 'vdfs',
-          component: VdfsView,
-          props: (route) => ({
-            mount: (route.params.mount as string) || undefined,
-            embedded: true,
-          }),
-        },
+        { path: '', redirect: () => '/vdfs' },
+        // 首页 = `.vdfs` 目录本身；`/vdfs/<dir…>` = `.vdfs/<dir…>` 地址页
+        // （push 出来的，如会话内部）。两者都是同一个 VdfsView：它把浏览器地址
+        // 换算成**数据地址**（`.vdfs` / `.vdfs/<dir…>`）绑定给唯一的三栏控件
+        // VdfsWorkbench——数据地址与浏览器地址是两个概念，路由只做承载。
+        // :dir 可选 = `.vdfs` 之下的相对路径（可多级，如 /vdfs/session/<id>/工作目录），
+        // 深链与「浏览内部」push 出来的地址页都由本路由承接。
+        { path: 'vdfs/:dir(.*)*', name: 'vdfs', component: VdfsView },
         // 旧统一实体页（S5 已下线）→ redirect 保兼容（书签 / 深链）：
         // :types = 'all' | 逗号分隔 kind | 单 kind（缺省 all）。
         // 单 kind 直达对应 VDFS 挂载点（挂载名与 kind 同名）；其余回落首页挂载点。
@@ -32,7 +24,7 @@ const router = createRouter({
           path: 'entities/:types?',
           redirect: (to) => {
             const first = String(to.params.types ?? '').split(',')[0]
-            return first && first !== 'all' ? `/vdfs/${first}` : '/vdfs/session'
+            return first && first !== 'all' ? `/vdfs/${first}` : '/vdfs'
           },
         },
         // 旧专项路由 → redirect 保兼容（书签 / 深链）。

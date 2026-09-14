@@ -72,15 +72,15 @@ impl Plugin for VdfsPlugin {
             return Err(PluginError::NotFound(format!("VFDS: 未知路径 '{path}'")));
         }
 
-        // 取容器注册的 VDFS 根：本插件只转发，不认识任何挂载点
+        // 取容器注册的统一文件系统：本插件只转发，不认识任何资源类别
         let parent = self.get_parent().await;
-        let root = host::resolve_root(parent.as_ref(), &ctx).await;
+        let fs = host::resolve_fs(parent.as_ref(), &ctx).await;
 
-        // 前端给的是**全路径**（如 `/local/README.md`），因此不做挂载点前缀；
-        // 但运行时状态（workdir）仍要透传，否则 local provider 解析不了相对路径。
+        // 前端给的是**展示地址**（如 `.vdfs/session/x` 或 `README.md`），门面按前缀
+        // 分流；运行时状态（workdir）仍要透传，物理层据此解析相对地址。
         let params = host::call_params(&ctx);
 
-        host::dispatch_with(&root, &op, &ctx, params)
+        host::dispatch_with(&fs, &op, &ctx, params)
             .await
             .unwrap_or_else(|| {
                 Err(PluginError::InternalError(format!(
@@ -138,39 +138,27 @@ mod tests {
         assert!(matches!(err, PluginError::NotFound(_)));
     }
 
-    /// 无父插件（未挂载）时 `vdfs/providers` 返回空清单而非报错——
-    /// 挂载点集合由 provider 注册决定，宿主自身不持有任何资源。
+    /// 无父插件（未挂载）时虚拟根照样可列出：资源集合由容器注册决定，
+    /// 宿主自身不持有任何资源——「没有容器」与「资源为空」表现一致。
     #[tokio::test]
-    async fn providers_without_parent_is_empty() {
-        let resp = build_plugin()
-            .route(ctx_with_path("providers"))
-            .await
+    async fn list_vdfs_root_without_parent_is_empty() {
+        let ctx = ctx_with_path("list");
+        ctx.set_payload(serde_json::json!({ "path": ".vdfs" }))
             .unwrap();
-        let data = resp
-            .get::<p::VdfsProvidersResponse>()
-            .expect("应为 providers 响应");
-        assert!(data.providers.is_empty());
+        let resp = build_plugin().route(ctx).await.unwrap();
+        let data = resp.get::<p::VdfsListResponse>().unwrap();
+        assert_eq!(data.path, ".vdfs");
+        assert!(data.items.is_empty());
     }
 
-    /// 未知挂载点 → NotFound（提示现有挂载点）
+    /// 未知子目录 → NotFound（提示现有子目录）
     #[tokio::test]
-    async fn list_unknown_mount_errors() {
+    async fn list_unknown_dir_errors() {
         let ctx = ctx_with_path("list");
-        ctx.set_payload(serde_json::json!({ "path": "/nope" }))
+        ctx.set_payload(serde_json::json!({ "path": ".vdfs/nope" }))
             .unwrap();
         let err = build_plugin().route(ctx).await.unwrap_err();
         assert!(matches!(err, PluginError::NotFound(_)));
-    }
-
-    /// 虚拟根 `/` 恒可列出（即使无挂载点）
-    #[tokio::test]
-    async fn list_root_always_ok() {
-        let ctx = ctx_with_path("list");
-        ctx.set_payload(serde_json::json!({ "path": "/" })).unwrap();
-        let resp = build_plugin().route(ctx).await.unwrap();
-        let data = resp.get::<p::VdfsListResponse>().unwrap();
-        assert_eq!(data.path, "/");
-        assert!(data.items.is_empty());
     }
 
     /// 工具集：每个 VDFS 操作恰好一个工具

@@ -6,7 +6,7 @@
 //! `{entries:[{name,type,size,modified}], truncated, count, message}` 形状。
 //!
 //! **虚拟目录 `.vdfs`**：系统资源类别统一挂接在此目录之下；对 `.vdfs` 列目录
-//! 返回当前可访问的全部类别（等价于前端 `vdfs/providers`），无需独立工具。
+//! 即返回当前可访问的全部类别，无需独立工具。
 
 use super::{tool, ToolVdfs};
 use crate::symbio_core::{

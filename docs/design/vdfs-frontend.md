@@ -28,11 +28,11 @@
 
 不变量（承 `vdfs.md` §1，前端侧重申）：
 
-1. **路径是唯一地址**：节点地址 = `.vdfs/<挂载点>/<相对路径>`（前端口径，
+1. **路径是唯一地址**：节点地址 = `.vdfs/<子目录>/<相对路径>`（前端口径，
    见 §3）。
 2. **能力只看访问位**：前端**不得**按 `kind` 判定能力，只能依据 `access`（`r/w/l/t`）。
 3. **ext 决定详情**：节点 `ext` 是前端选择详情渲染器的**唯一键**。
-4. **前端零资源知识**：前端只持有 `ext → 渲染器`、`挂载名 → 图标` 这类纯 UI
+4. **前端零资源知识**：前端只持有 `ext → 渲染器`、`子目录名 → 图标` 这类纯 UI
    映射；**不得**硬编码资源类型清单、标签、路径模板、能力开关。
 5. **实时靠订阅，禁止轮询**：列表刷新一律经事件总线 `vdfs` 频道 + `vdfs/watch`。
 
@@ -44,13 +44,13 @@
 
 | 层 | 落点 | 状态 |
 |---|---|---|
-| 纯接口 | `symbio_core/vdfs_provider.rs` | `VdfsProvider` trait + 域类型 + `VdfsMountTable` |
+| 纯接口 | `symbio_core/vdfs_provider.rs` | `VdfsProvider` trait + 域类型 |
 | 宿主桥 | `symbio_core/vdfs/host.rs` | 上下文注入 + 错误翻译 |
 | 线路信封 | `plugins/vdfs/protocol.rs` | 13 个 `vdfs/*` 操作 + 使用方形状 |
-| 访问层 | `plugins/vdfs/host.rs` | 取根 + 翻译操作 + 树遍历 + 事件投递 |
-| 拓扑 | `plugins/composite/vdfs.rs` | 逐子插件收集挂载 → 组合为根 |
-| LLM 工具 | `plugins/vdfs/tools/*` | 11 个 `vdfs_*` 工具 + `ToolVdfs` 地址翻译 |
-| 范例 provider | `plugins/setting`、`plugins/local` | 设置分区、本地文件树 |
+| 访问层 | `plugins/vdfs/fs.rs` + `host.rs` | `.vdfs`/物理分流（UnifiedFs）+ 翻译操作 + 树遍历 + 事件投递 |
+| 拓扑 | `plugins/composite/vdfs.rs` | 逐子插件收集子目录 provider → 组合成包含子目录列表的 provider |
+| LLM 工具 | `plugins/vdfs/tools/*` | `vdfs_*` 工具 + `ToolVdfs`（统一走 UnifiedFs） |
+| 物理 / 虚拟 provider | `plugins/vdfs/physical.rs`、各自持插件 | 物理磁盘（含路径守卫）、设置分区、会话等 |
 
 ### 2.2 已实现（前端，已落地）
 
@@ -58,13 +58,13 @@
 |---|---|---|
 | `schemas/vdfs.ts` | 数据契约 + 路径代数 | **保留**（扩展） |
 | `services/vdfs.ts` | 路径 → 请求的机械翻译 | **保留**（扩展） |
-| `composables/useVdfs.ts` | 页面逻辑（挂载点 / 目录 / 选中 / 详情 / 实时） | **保留**（扩展） |
+| `composables/useVdfs.ts` | 页面逻辑（目录 / 选中 / 详情 / 实时） | **保留**（扩展） |
 | `registry/vdfsTypes.ts` | `ext → 渲染器标识`（零组件导入） | **保留** |
 | `registry/vdfsRenderers.ts` | `标识 → 组件`（唯一装配点） | **保留** |
 | `components/vdfs/*.vue` | form / text / session / readonly 四个详情渲染器 | **保留** |
-| `views/VdfsView.vue` | 三栏装配（**嵌入主布局** / 独立整页两种形态） | **保留**（扩展） |
-| `composables/useNavRail.ts` | 应用外壳左栏：`.vdfs` 根 → NavRail 项（S4 起） | **保留**（S4 新增） |
-| `router/index.ts` | `/vdfs/:mount?`（S3 起嵌入 `MainLayout` 子路由） | **保留** |
+| `components/vdfs/VdfsWorkbench.vue` | **三栏工作台控件（唯一实现）**：绑定数据地址，自取左栏 / 中栏 / 详情（S15 新增） | **保留**（S15 新增） |
+| `views/VdfsView.vue` | 路由宿主：浏览器地址 ↔ 数据地址换算 + 宿主件注入（返回键 / logo / 系统目录） | **保留**（扩展） |
+| `router/index.ts` | `/vdfs/:dir(.*)*`（`MainLayout` 子路由；深链/返回键多级地址） | **保留** |
 
 结论：前端既有改动**方向正确、结构合理**，与目标一致的部分**整体保留**，
 G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
@@ -92,8 +92,8 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 前端以 **`.vdfs` 为虚拟根**，地址形如：
 
 ```
-.vdfs                          # 首页数据源：挂载点清单（资源类别）
-.vdfs/session                  # 会话挂载点的列表（下一级）
+.vdfs                          # 首页地址：子目录清单（左栏导航同源）
+.vdfs/session                  # 会话目录的列表（下一级）
 .vdfs/session/<id>             # 会话详情
 .vdfs/setting/appearance       # 设置分区
 ```
@@ -118,9 +118,9 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 
 ### 3.3 路径代数
 
-`schemas/vdfs.ts` 的路径工具（`vdfsJoin` / `vdfsParent` / `vdfsBase` /
-`vdfsMountOf`）是**全部路径运算的唯一来源**，统一以 `.vdfs` 为根。
-挂载名 = `.vdfs/` 之后的首段。
+`schemas/vdfs.ts` 的路径工具（`vdfsJoin` / `vdfsParent` / `vdfsBase`）是
+**全部路径运算的唯一来源**，统一以 `.vdfs` 为根。
+子目录名 = `.vdfs/` 之后的首段。
 
 ---
 
@@ -128,29 +128,29 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 
 沿用三栏结构（**左栏导航 / 中栏列表·树 / 右栏详情**），数据源与协议按本节调整。
 
-### 4.1 左栏：导航（挂载点清单）
+### 4.1 左栏：导航（绑定地址的子目录清单）
 
-- **数据源**：`.vdfs` 的目录内容（= `vdfs/providers`，或等价地 `vdfs/list { path: ".vdfs" }`）。
-- **每一项携带**：`name`（挂载名）、`title`（展示标题）、`icon`（纯 UI 映射）、
+- **数据源（S11 严格 vdfs 化）**：`vdfs/list('<绑定地址>')` 的目录内容——绑定
+  `.vdfs` 时由访问层**合成**（见 [vdfs.md §13.3](./vdfs.md#133-vfs-插件vdfs访问层)），
+  返回普通目录节点集合（`kind = dir`），前端只做形状映射，
+  **不消费** `vdfs/providers` 端点（该端点已随 `VdfsMountInfo` 一并删除）。
+- **每一项携带**：`name`（子目录名）、`title`（展示标题）、`icon`（纯 UI 映射）、
   `description`（语义说明）、`new_types`（可接受的新建类型，§5）。
-- **渲染**：图标 + 标题为主，`description` 作 tooltip；选中态 = 当前挂载点。
-- **点击**：进入 `.vdfs/<挂载名>`（中栏显示其列表）。
-- 挂载点集合、顺序、标签**全部由后端下发**，前端零硬编码。
-- **装配形态（S3 起）**：本栏由**应用外壳**承担（`MainLayout` 的 `NavRail`），VDFS 页
-  作为工作区内容**嵌入**其中——全 App 因此只有一台三栏工作台，页面切换不替换外壳。
-  `VdfsView` 保留**独立整页**形态（自渲染本栏 + 返回键），供将来以独立窗口 / 面板复用。
-- **数据来源（S4 起）**：本栏**已完全由 `.vdfs` 驱动**（`composables/useNavRail.ts`）——
-  挂载点清单即导航项，`navTargetOf(mount)` 恒为 `/vdfs/{mount}`，不再依赖
-  `entities/providers` 注册表（该注册表与其页面已于 S5 一并删除）。
-  变更经 `vdfs` 事件总线触发重拉（**非轮询**）。
-- **顺序与标签的单一真相源**：挂载点的 `label` / `order` 一律取自实体注册表
-  （`entities::nav_meta_of(kind)`；`EntityVdfsAdapter` 同源），自持 provider 的插件
-  （session / setting）**不得硬编码 order 常量**，否则左栏顺序会与实体页不一致。
-- **导航可见性（S9）**：可见性由**机制层声明**——`VdfsProvider::nav_visible()`
-  （缺省 `true`）经挂载节点属性 `nav_visible` 透传到 `VdfsMountInfo`，前端
-  `mountNavVisible()` 按标记过滤，**不做任何挂载名特判**。`local`（本地文件）
-  是 VDFS 挂载点但不是资源类别，故声明 `false`：它仍可经 `.vdfs/local` 寻址、
-  读写、被 LLM 使用，只是不占左栏导航位。
+- **渲染**：图标 + 标题为主，`description` 作 tooltip；高亮 = 当前选中的子目录。
+- **点击**：**就地切换**当前目录（中栏显示其列表），**不是路由跳转**。
+- 子目录集合、顺序、标签**全部由后端下发**，前端零硬编码。
+- **装配（S15 起，控件自包含）**：三栏结构封装为唯一控件
+  `components/vdfs/VdfsWorkbench.vue`——绑定一个**数据地址**（`addr`）自包含
+  渲染：左栏 = 绑定地址的子目录清单、中栏 = 选中子目录内容、右栏 = 详情。
+  **没有独立的 Nav 数据逻辑**（原 `useNavRail.ts` 已删除），`useVdfs.ts` 是
+  唯一数据层，首页与内部管理页只有绑定地址不同：
+  - 首页绑 `.vdfs`（路由 `/vdfs`），左下角注入系统目录入口；
+  - push 出来的地址页绑 `.vdfs/<dir…>`（如会话内部 `.vdfs/session/<id>`），
+    左上角注入返回键（回 **push 来源页** = 浏览器历史 back；深链直开无来源时
+    回首页）。控件的 `rail-header` / `rail-footer` 插槽即宿主件注入点。
+- **默认选中**：左栏缺省选中第一个子目录（缺省会话），首页中栏因此显示
+  会话列表而非 `.vdfs` 自身的子目录清单（与左栏零重复）；每个数据地址的
+  选中项有记忆（往返 push / 返回后恢复）。
 
 ### 4.2 中栏：列表 / 树
 
@@ -158,9 +158,13 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
   `vdfs/tree`（只下钻访问位含 `t` 的目录）。
 - **每一项**：`name` / `title` / `description` / `ext` / `access` / `status` / `new_types`。
 - **形态**：目录（`access` 含 `l`）→ 点击进入；文件 → 点击选中（右栏出详情）。
-- **列表头**：按当前节点的 `new_types` 显示**添加按钮**（§5）；可写（`access` 含 `w`）
-  时保留「新建目录」。
-- **导航**：面包屑（`.vdfs` → … → 当前目录），路径即导航。
+- **列表头（S11）**：按当前节点的 `new_types` 显示**新建按钮**（§5）。
+  **不再显示「新建目录」按钮**——「新建」就是新建一种资源；需要多种元素类型时，
+  由 `new_types` 清单一次性下发，用户在「新建」弹层里选类型（保持在右栏详情区）。
+  目录结构由 provider 内部维护，前端不暴露 mkdir 入口。
+- **导航（S11）**：**列表顶部不出现面包屑**。路径即导航：层级靠左栏就地切
+  子目录、中栏点目录钻入（push 新地址页）或左上角返回键（回 push 来源页）；
+  「浏览内部」（§4.4）是 push 进容器目录地址的页面。
 
 ### 4.3 右栏：详情（按 ext 分发）
 
@@ -173,13 +177,30 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 - **校验错误消费**：`write` 失败时按 `parseVdfsValidation` 还原字段级错误，
   逐字段高亮（`vdfs.md` §8）。
 
+### 4.4 「浏览内部」= push 页面（S11）
+
+- **触发**：详情定义声明 `open-container` 动作（如会话「浏览内部」、
+  agent 概览「管理内部实体」），点击后 **push 进容器同名目录的地址页**
+  （`/vdfs/<容器>/<id>`），由**同一个 VdfsView** 承接——全 App 只有一份三栏实现，
+  没有浮层组件（原 `VdfsContainerBrowser.vue` 已删除）。
+- **形态**：与首页完全一致（同一个控件 `VdfsWorkbench`，只是绑定的数据地址
+  不同）：左栏 = **绑定地址**（`.vdfs/<容器>/<id>`）的子目录导航、
+  中栏 = 选中子目录内容、右栏 = 按 `ext` 分发的详情渲染器。
+- **返回**：左上角返回键（宿主页在 `rail-header` 注入，非首页地址页可见），
+  点击回 **push 来源页**（浏览器历史 back，不是父目录）；深链直开（无来源）
+  时回首页。浏览器/WebView 历史同样可回退（钻入是 `router.push`）。
+- **嵌套**：详情里再遇 `open-container` → 继续 push 更深的目录地址，返回键
+  逐级回到出发点。
+- **不做**：不提供 `mkdir` / 面包屑——与 §4.2 S11 约定一致。
+
 ---
 
 ## 5. 可接受的新建类型（`new_types`）
 
 ### 5.1 语义
 
-一个**目录节点**（含挂载点根）可以声明「**本目录可接受的新建元素类型**」——
+一个**目录节点**（含 `.vdfs` 的一级子目录）可以声明「**本目录可接受的新建元素
+类型**」——
 一个类型清单，每项以**扩展名 `ext`** 标识（用户口径：「可接受的新建元素类型
 （扩展名）」）：
 
@@ -217,8 +238,7 @@ pub struct VdfsNewType {
 
 - 挂在 `VdfsNode.new_types`（目录节点；文件节点为空、不序列化）。
 - provider **根**的类型清单经 trait 方法 `root_new_types()` 声明（与
-  `root_access` / `root_status` 同构），由容器在合成**挂载点节点**时回填。
-- `VdfsMountInfo`（`vdfs/providers` 的使用方形状）同步下发 `new_types`。
+  `root_access` / `root_status` 同构），由容器在合成**子目录节点**时回填。
 
 ### 5.3 创建动作（协议不变）
 
@@ -253,7 +273,7 @@ source = file 的类型（整包导入）：名称来自文件名
 ## 6. 实时性
 
 - **列表刷新靠订阅，非轮询**：视图订阅总线 `vdfs` 频道（`kind = "vdfs"`），
-  按**挂载名**过滤、按**路径**精确刷新；订阅范围与当前目录严格绑定
+  按**路径**精确刷新；订阅范围与当前目录严格绑定
   （切目录 = 解旧订阅 + 登新订阅）。
 - **订阅地址用前端口径**（`.vdfs/session`），服务层翻译为线路 path（`/session`）。
 - 后端对无实时能力的 provider 默认 no-op，前端无需按 provider 分流。
@@ -553,6 +573,45 @@ source = file 的类型（整包导入）：名称来自文件名
   | `agent/bundle/*` | 删已被 VDFS 取代的 `list` / `get` / `upload` / `delete` / `preview`，只留尚无等价物的 `export` |
   | 前端 | `EntityCapabilities` 收敛为表单渲染器真正消费的两项（`mutable` / `test_connection`），并注明它由渲染器按访问位自算、后端不再下发 |
 
+- **S14 三栏唯一化（首页 = `.vdfs`，浏览内部 = push 页面）**（**已完成**）：
+  一个 VdfsView 对应一个 vdfs 地址；三栏结构组件全 App **只有一份**。
+
+  | 位置 | 处理 |
+  | --- | --- |
+  | 路由 | 首页 `/` 重定向改为 `/vdfs`（地址 `.vdfs` 本身，不再落到 `/vdfs/session`）；`vdfs/:mount?` 升级为 `vdfs/:dir(.*)*`（`.vdfs` 之下可多级深链） |
+  | VdfsView | 目录变化由 `router.replace` 改为 `router.push`（每个地址 = 一个可回退的页面）；「浏览内部」/ open-container 由全窗口浮层改为 **push 进容器目录地址**；删除 `containerNode` / Teleport 装配 |
+  | VdfsContainerBrowser | **整体删除**——它复制了 VdfsView 的列表 / 详情 / 新建状态机 / 图标徽标函数与几乎全部样式；push 后由同一个 VdfsView 承接，不存在第二份三栏实现 |
+  | MainLayout | NavRail 头部新增**左上角返回键**（仅非首页地址页可见）：点击回上一级目录，逐级上溯到首页；导航高亮改前缀匹配（深地址仍高亮所属子目录）；去掉 `RouterView :key`（路由变化由 VdfsView 的 dirParam watch 在实例内消化，浏览器历史因此可用） |
+  | useNavRail | `loadCategories` / `reloadCategories` 更名为 `loadNavDirs` / `reloadNavDirs`（`.vdfs` 子目录清单，无 category 概念） |
+  | 测试 | 删除 `vdfsCategoryOf`（category 概念退场）的用例 |
+
+  - **为什么删除浮层**：浮层与首页「同构」却各持一份实现（约 600 行重复），
+    每次改三栏交互都要双写。push 页面后浮层的独立 `useVdfs` 实例不再必要——
+    返回键即回到出发地址，外层状态天然保留（就是上一级目录的页面状态）。
+  - **返回键放应用外壳**：三栏的左栏属于外壳；首页（`.vdfs`）无返回键，
+    非首页地址页（push 出来）才有——与「一个 VdfsView 对应一个 vdfs 地址」
+    的模型一致。
+
+- **S15 三栏控件自包含（数据地址绑定；S14 的修正）**（**已完成**）：
+  S14 把左栏留在外壳，导致 push 出来的地址页左栏仍是 `.vdfs` 子目录
+  （而正确形态是**绑定地址**的子目录，如会话内部页显示 `<id>` 之下的
+  子会话 / 工作目录）。三栏结构遂封装为**自包含控件**，宿主只注入宿主件：
+
+  | 位置 | 处理 |
+  | --- | --- |
+  | `VdfsWorkbench.vue`（新增） | **三栏控件，唯一实现**：绑定一个**数据地址**（`addr` prop）自包含渲染——左栏 = 绑定地址的子目录导航、中栏 = 选中子目录内容、右栏 = 详情。控件不知道浏览器路由；钻入（点中栏目录 / 「浏览内部」）只 `emit('open', addr)`，呈现方式由宿主决定。`rail-header` / `rail-footer` 插槽 = 宿主件注入点 |
+  | `useVdfs.ts` | 数据层绑定 `addr`（Ref）：左栏 / 选中 / 当前目录 / 详情全部由绑定地址驱动；每个地址的左栏选中项有记忆（往返 push / 返回后恢复） |
+  | `VdfsView.vue` | 瘦身为**路由宿主**：浏览器地址 ↔ 数据地址换算（`/vdfs` ↔ `.vdfs`；`/vdfs/<dir…>` ↔ `.vdfs/<dir…>`，两个概念、一处换算）+ 宿主件注入——首页左下角系统目录入口、非首页左上角返回键（回 **push 来源页** = 浏览器历史 back，不是父目录；深链直开回首页）+ logo |
+  | `useNavRail.ts` | **整体删除**——数据层面没有特殊 Nav 概念，外壳左栏与页面左栏是同一份获取逻辑，`useVdfs` 是唯一数据层 |
+  | `MainLayout.vue` | 外壳三栏拆除：只剩 RouterView + 全局 Toast + 全局初始化（会话事件监听 / 工作区恢复）——三栏由路由页面自持 |
+  | `HomedirEntry.vue`（新增） | 系统目录入口自足化（按钮 + 切换对话框 + 连接显示），谁嵌入谁拥有 |
+
+  - **核心原则**：数据地址 ≠ 浏览器地址。控件/数据层只认数据地址
+    （`.vdfs`、`.vdfs/session/<id>`），浏览器地址只是承载（甚至可以直接
+    urlencode 数据地址）；两者在 `VdfsView` 一处换算。
+  - **首页与内部管理页零差别**：同一个控件、同一份数据逻辑，唯一区别是
+    绑定的数据地址（`.vdfs` vs `.vdfs/session/<id>` / `.vdfs/agent/<id>`）。
+
 ---
 
 ## 8. 一致性要求
@@ -561,7 +620,7 @@ source = file 的类型（整包导入）：名称来自文件名
   的路径代数，口径恒为 `.vdfs`。
 - 地址翻译**只允许**出现在 `services/vdfs.ts` 一处；页面与渲染器不得感知线路口径。
 - 前端**不得**硬编码资源类型、标签、能力或路径模板；只允许 `ext → 渲染器`、
-  `挂载名 → 图标` 这类纯 UI 映射。
+  `子目录名 → 图标` 这类纯 UI 映射。
 - 新建入口**只能**由节点声明的 `new_types` 驱动；前端不得凭 `kind` 或写死的类型表
   推断可新建性。
 - 动作入口**只能**由详情定义声明的 `actions` 驱动；前端只认**载荷形状**

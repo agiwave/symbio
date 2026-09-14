@@ -1,19 +1,21 @@
 <!--
   Workbench — 「侧边栏 + 列表 + 详情」三栏工作台容器（全项目统一命名/唯一实现）
 
-  整个 App 是一台三栏工作台，本组件是其页面容器，两种用法：
+  页面容器，只做插槽装配，自身无数据逻辑：
 
-  1. 应用外壳模式（MainLayout）：传 railItems + #content 插槽 ——
-     侧边栏 = `.vdfs` 挂载点导航，工作区 = RouterView；
-  2. 页面模式（VdfsView）：传 list/detail 等插槽（嵌入形态不传 railItems，
-     侧边栏由 MainLayout 承担）——工作区 = 内置 EntityShell（列表 + 详情）。
+  - 传 railItems → 渲染第一栏（NavRail），rail-header / rail-footer 由宿主注入
+    （返回键 / logo / 系统目录入口等宿主件）；
+  - 工作区 = 内置 EntityShell（列表 + 详情），list / detail / empty / meta /
+    header-actions 插槽逐一定向转发。
 
-  类别集合一律由后端下发（VDFS 挂载点 / 目录节点），前端零硬编码。
+  VDFS 的三栏页面 = VdfsWorkbench 控件（components/vdfs）+ useVdfs 数据逻辑
+  （绑定数据地址，自取左栏/中栏/详情）+ 本容器。类别集合一律由后端下发
+  （VDFS 目录节点），前端零硬编码。
   （原「统一实体页」WorkbenchView 与其状态机 useWorkbench 已于 S5 下线。）
 -->
 <template>
   <div class="workbench">
-    <!-- 第一栏：侧边栏（可选——顶层实体页的侧边栏由应用外壳承担） -->
+    <!-- 第一栏：侧边栏（可选——不传 railItems 即无侧边栏的两栏形态） -->
     <NavRail
       v-if="railItems"
       :items="railItems"

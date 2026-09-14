@@ -48,8 +48,8 @@ pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };
 pub use vdfs::{
-    normalize_path, DynVdfsProvider, VdfsAccess, VdfsChange, VdfsContent, VdfsError, VdfsMountTable,
-    VdfsMounts, VdfsNode, VdfsProvider, VdfsValidationError,
+    DynVdfsProvider, VdfsAccess, VdfsChange, VdfsContent, VdfsError, VdfsNode, VdfsProvider,
+    VdfsValidationError,
 };
 pub use turn::{
     build_assistant_messages, build_tool_message, emit_abort, emit_status, emit_update,

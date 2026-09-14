@@ -12,16 +12,11 @@ import {
   isVdfsDir,
   newFileNameOf,
   parseVdfsValidation,
-  toVdfsPath,
-  toWirePath,
   vdfsAccessOf,
   vdfsBase,
   vdfsExtOf,
   vdfsJoin,
-  vdfsMountOf,
   vdfsParent,
-  mountNavVisible,
-  type VdfsMountInfo,
   type VdfsNode,
 } from '../vdfs'
 
@@ -94,68 +89,6 @@ describe('路径代数（.vdfs 口径）', () => {
     expect(vdfsBase('.vdfs/setting/local')).toBe('local')
     expect(vdfsBase('.vdfs/setting/')).toBe('setting')
     expect(vdfsBase(VFDS_ROOT)).toBe(VFDS_ROOT)
-  })
-
-  it('vdfsMountOf 取首段（虚拟根为空）', () => {
-    expect(vdfsMountOf('.vdfs/setting/local')).toBe('setting')
-    expect(vdfsMountOf('.vdfs/setting')).toBe('setting')
-    expect(vdfsMountOf(VFDS_ROOT)).toBe('')
-  })
-})
-
-describe('口径翻译（前端 .vdfs ↔ 线路 /）', () => {
-  it('toWirePath：.vdfs 口径 → 线路口径', () => {
-    expect(toWirePath(VFDS_ROOT)).toBe('/')
-    expect(toWirePath('.vdfs/session')).toBe('/session')
-    expect(toWirePath('.vdfs/session/a')).toBe('/session/a')
-    expect(toWirePath('/already/wire')).toBe('/already/wire')
-  })
-
-  it('toVdfsPath：线路口径 → .vdfs 口径，且幂等', () => {
-    expect(toVdfsPath('/')).toBe(VFDS_ROOT)
-    expect(toVdfsPath('/session')).toBe('.vdfs/session')
-    expect(toVdfsPath('/session/a')).toBe('.vdfs/session/a')
-    expect(toVdfsPath('.vdfs/session')).toBe('.vdfs/session')
-    expect(toVdfsPath(toVdfsPath('/session'))).toBe('.vdfs/session')
-  })
-
-  it('往返一致', () => {
-    for (const p of ['.vdfs', '.vdfs/session', '.vdfs/setting/appearance']) {
-      expect(toVdfsPath(toWirePath(p))).toBe(p)
-    }
-  })
-})
-
-describe('mountNavVisible（机制层导航可见性）', () => {
-  function mount(partial: Partial<VdfsMountInfo> & { mount: string }): VdfsMountInfo {
-    return {
-      label: partial.mount,
-      order: 0,
-      access: 'lt',
-      status: 'active',
-      root: `/${partial.mount}`,
-      ...partial,
-    }
-  }
-
-  it('缺省可见：字段缺失即视为可见', () => {
-    expect(mountNavVisible(mount({ mount: 'session' }))).toBe(true)
-    expect(mountNavVisible(mount({ mount: 'session', nav_visible: true }))).toBe(true)
-  })
-
-  it('声明不可见即为 false（后端机制层决定，前端不按挂载名特判）', () => {
-    expect(mountNavVisible(mount({ mount: 'local', nav_visible: false }))).toBe(false)
-    // 空值按缺省可见处理，不在消费点抛错
-    expect(mountNavVisible(null)).toBe(true)
-  })
-
-  it('按标记过滤：隐藏项不进导航，其余原样保留', () => {
-    const mounts = [
-      mount({ mount: 'session' }),
-      mount({ mount: 'local', nav_visible: false }),
-      mount({ mount: 'setting' }),
-    ]
-    expect(mounts.filter(mountNavVisible).map((m) => m.mount)).toEqual(['session', 'setting'])
   })
 })
 

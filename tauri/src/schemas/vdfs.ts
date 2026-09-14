@@ -6,11 +6,9 @@
  * 规范：docs/design/vdfs.md
  *
  * 前端只消费协议形状；**资源类型、能力、标签、路径模板一律来自后端**，
- * 前端仅持有 ext → 渲染器、mount → 图标这类纯 UI 映射（见 registry/vdfsTypes.ts）。
+ * 前端仅持有 ext → 渲染器、资源类别 → 图标这类纯 UI 映射（见 registry/vdfsTypes.ts）。
  */
 
-/** 挂载点清单（虚拟根 `/` 的目录内容） */
-export const VFDS_PROVIDERS = 'vdfs/providers'
 export const VFDS_LIST = 'vdfs/list'
 export const VFDS_TREE = 'vdfs/tree'
 export const VFDS_STAT = 'vdfs/stat'
@@ -24,17 +22,14 @@ export const VFDS_UNWATCH = 'vdfs/unwatch'
 /** 执行节点动作（provider 自持的动词，如「测试连接」） */
 export const VFDS_ACTION = 'vdfs/action'
 
-/** 虚拟根路径（前端口径：`.vdfs`）。
+/** 虚拟根路径（系统资源类别统一挂接在此目录之下）。
  *
- * 线路协议仍是规范化全路径 `/…`；两者在服务层一处翻译（见 toWirePath/toVdfsPath），
- * 页面与渲染器一律只认 `.vdfs` 口径。 */
+ * 地址规则与后端 [`UnifiedFs`] 同源：`.vdfs` 打头 = 系统资源，其余 = 磁盘文件。
+ * 前端与后端共用同一套地址口径，**不存在另一套线路翻译**。 */
 export const VFDS_ROOT = '.vdfs'
 
-/** 前端地址前缀（与 LLM 侧 ToolVdfs 的 VIRTUAL_PREFIX 同源） */
+/** 前端地址前缀（与后端 `UnifiedFs::VFDS_ADDR_ROOT`、LLM 侧 ToolVdfs 同源） */
 export const VFDS_PREFIX = '.vdfs'
-
-/** 线路口径的虚拟根 */
-export const VFDS_WIRE_ROOT = '/'
 
 /** 节点状态（与实体机制同一约定） */
 export const VFDS_STATUS_ACTIVE = 'active'
@@ -46,7 +41,6 @@ export const VFDS_STATUS_UNKNOWN = 'unknown'
 /** 节点基础类型 */
 export const VFDS_KIND_DIR = 'dir'
 export const VFDS_KIND_FILE = 'file'
-export const VFDS_KIND_MOUNT = 'mount'
 
 /** 约定呈现扩展名（宿主可自行扩展） */
 export const VFDS_EXT_FORM = 'form'
@@ -105,7 +99,7 @@ export const VFDS_NEW_SOURCE_FILE = 'file'
  * 即可读（文件）。`kind` 只承载场景语义，不得用于能力判定。
  */
 export interface VdfsNode {
-  /** 全路径（含挂载点） */
+  /** 全路径（`.vdfs/…` 或工作目录相对地址，与后端展示口径一致） */
   path: string
   /** 父节点内的唯一标识（路径段） */
   name: string
@@ -141,23 +135,6 @@ export interface VdfsContent {
   size: number
   mime?: string
   etag?: string
-}
-
-/** 挂载点信息 */
-export interface VdfsMountInfo {
-  mount: string
-  label: string
-  description?: string
-  order: number
-  access: string
-  status: string
-  root: string
-  icon?: string
-  /** 该挂载根可接受的新建类型（导航项据此出添加入口） */
-  new_types?: VdfsNewType[]
-  /** 是否作为导航项出现（缺省 true；false = 子树仍可寻址，但不占导航位） */
-  nav_visible?: boolean
-  [attribute: string]: unknown
 }
 
 /** 节点动作请求（`action` 与 `payload` 原样透传，前端不解释语义） */
@@ -209,10 +186,6 @@ export const VFDS_ACTION_TEST = 'test'
 /** 已知动作标识：导出打包（后端 `VFDS_ACTION_EXPORT`） */
 export const VFDS_ACTION_EXPORT = 'export'
 
-export interface VdfsProvidersResponse {
-  providers: VdfsMountInfo[]
-}
-
 export interface VdfsListResponse {
   path: string
   node: VdfsNode
@@ -246,10 +219,9 @@ export const VFDS_CHANGE_UPDATED = 'updated'
 export const VFDS_CHANGE_DELETED = 'deleted'
 export const VFDS_CHANGE_RENAMED = 'renamed'
 
-/** 数据变更事件（总线下发的使用方形状；后端 `VdfsChangeEvent`）。
- *  后端 provider 侧只报子树内相对路径，`mount` 与全路径由分发层补齐。 */
+/** 数据变更事件（总线下发的形状；后端 `VdfsChangeEvent`）。
+ *  路径即对外展示地址（`.vdfs/…` 或工作目录相对地址），消费方直接比对。 */
 export interface VdfsChange {
-  mount: string
   path: string
   change: string
   to?: string
@@ -273,7 +245,7 @@ export interface VdfsValidationError {
 
 /** 规整目录段：空 / 根 → 根；否则去尾部斜杠 */
 function normalizeDir(dir: string): string {
-  if (!dir || dir === VFDS_ROOT || dir === VFDS_WIRE_ROOT) return VFDS_ROOT
+  if (!dir || dir === VFDS_ROOT) return VFDS_ROOT
   const trimmed = dir.replace(/\/+$/, '')
   return trimmed || VFDS_ROOT
 }
@@ -302,7 +274,7 @@ export function newFileNameOf(fileName: string, ext: string): string {
   return ext ? `${stem}.${ext}` : stem
 }
 
-/** 父目录（挂载点根的父 = 虚拟根；虚拟根的父 = 虚拟根） */
+/** 父目录（类别根的父 = 虚拟根；虚拟根的父 = 虚拟根） */
 export function vdfsParent(path: string): string {
   const p = path.replace(/\/+$/, '')
   if (!p || p === VFDS_ROOT) return VFDS_ROOT
@@ -316,36 +288,6 @@ export function vdfsBase(path: string): string {
   if (!p || p === VFDS_ROOT) return VFDS_ROOT
   const i = p.lastIndexOf('/')
   return i < 0 ? p : p.slice(i + 1)
-}
-
-/** 归属挂载点（虚拟根 → ''） */
-export function vdfsMountOf(path: string): string {
-  if (!path || path === VFDS_ROOT) return ''
-  const p = path.startsWith(`${VFDS_ROOT}/`)
-    ? path.slice(VFDS_ROOT.length + 1)
-    : path.replace(/^\/+/, '')
-  const i = p.indexOf('/')
-  return i < 0 ? p : p.slice(0, i)
-}
-
-// ==================== 口径翻译（唯一翻译点，仅服务层可用） ====================
-//
-// 前端地址 `.vdfs/…` ↔ 线路路径 `/…`。二者在**服务层一处**完成翻译；
-// 页面逻辑、渲染器、路径代数一律只认 `.vdfs` 口径（§3.2）。
-
-/** 前端地址（`.vdfs` 口径）→ 线路路径（`/` 口径） */
-export function toWirePath(path: string): string {
-  if (!path || path === VFDS_ROOT) return VFDS_WIRE_ROOT
-  if (path.startsWith(`${VFDS_PREFIX}/`)) return path.slice(VFDS_PREFIX.length)
-  // 容错：已是线路口径则原样规整
-  return path.startsWith(VFDS_WIRE_ROOT) ? path : `${VFDS_WIRE_ROOT}${path}`
-}
-
-/** 线路路径（`/` 口径）→ 前端地址（`.vdfs` 口径）；幂等 */
-export function toVdfsPath(path: string): string {
-  if (!path || path === VFDS_WIRE_ROOT) return VFDS_ROOT
-  if (path === VFDS_ROOT || path.startsWith(`${VFDS_ROOT}/`)) return path
-  return `${VFDS_PREFIX}${path.startsWith(VFDS_WIRE_ROOT) ? path : `${VFDS_WIRE_ROOT}${path}`}`
 }
 
 /** 解析访问位紧凑串（'rw' → { read, write, list: false, traverse: false }） */
@@ -362,16 +304,6 @@ export function vdfsAccessOf(node: { access?: string } | null | undefined): Vdfs
 /** 节点是否为目录（机制判定只看访问位） */
 export function isVdfsDir(node: { access?: string } | null | undefined): boolean {
   return vdfsAccessOf(node).list
-}
-
-/**
- * 挂载点是否作为导航项出现（缺省 `true`）。
- *
- * 由后端机制层声明（`VdfsProvider::nav_visible`），前端**只认标记、不按挂载名过滤**：
- * 隐藏的子树依然可寻址、可读写，只是不占左栏导航位。新增资源无需改动前端。
- */
-export function mountNavVisible(m: VdfsMountInfo | null | undefined): boolean {
-  return m?.nav_visible !== false
 }
 
 /** 生效的呈现扩展名：显式 ext 优先，否则由 name 推导 */

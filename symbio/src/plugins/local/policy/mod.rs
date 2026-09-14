@@ -191,35 +191,6 @@ impl SecurityPolicy {
                 .any(|r| path_starts_with_normalized(path, r))
     }
 
-    pub async fn is_path_allowed_for_write<P: AsRef<Path>>(
-        &self,
-        path: P,
-        workspace_dir: &Path,
-    ) -> bool {
-        let path = path.as_ref();
-        let path_str = path.to_string_lossy();
-        if !is_safe_relative_path(&path_str) {
-            return false;
-        }
-        for forbidden in &self.forbidden_paths {
-            let expanded = shellexpand::tilde(forbidden);
-            if path_str.starts_with(expanded.as_ref()) {
-                return false;
-            }
-        }
-        if !self.workspace_only {
-            return true;
-        }
-        if !path.is_absolute() {
-            return true;
-        }
-        path_starts_with_normalized(path, workspace_dir)
-            || self
-                .allowed_roots
-                .iter()
-                .any(|r| path_starts_with_normalized(path, r))
-    }
-
     pub fn is_command_allowed(&self, command: &str, threshold: RiskLevel) -> bool {
         if self.autonomy == AutonomyLevel::ReadOnly {
             return false;

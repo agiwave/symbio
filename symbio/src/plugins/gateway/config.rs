@@ -47,7 +47,7 @@ impl Default for GatewayConfig {
 /// 而无法触发写操作与命令执行。
 ///
 /// **资源一律经 VDFS**（`vdfs/<操作>`）：只读放行其**读操作**——
-/// `providers` / `list` / `tree` / `stat` / `read` / `search`；
+/// `list`（`.vdfs` 即资源类别清单）/ `tree` / `stat` / `read` / `search`；
 /// 写操作（`write` / `delete` / `mkdir` / `move` / `edit`）与节点动作
 /// （`action`）不在其列。旧的 `entities/*` 资源协议已下线（S11），不再放行。
 ///
@@ -58,8 +58,7 @@ pub fn is_readonly_allowed(path: &str) -> bool {
     let p = path.trim_start_matches('/');
     matches!(
         p,
-        "vdfs/providers"
-            | "vdfs/list"
+        "vdfs/list"
             | "vdfs/tree"
             | "vdfs/stat"
             | "vdfs/read"
@@ -96,7 +95,6 @@ mod tests {
         assert!(is_readonly_allowed("/config/get"));
         assert!(is_readonly_allowed("vdfs/list"));
         assert!(is_readonly_allowed("vdfs/read"));
-        assert!(is_readonly_allowed("vdfs/providers"));
         assert!(is_readonly_allowed("home/get_homedir"));
         assert!(is_readonly_allowed("work/get_workspace"));
 

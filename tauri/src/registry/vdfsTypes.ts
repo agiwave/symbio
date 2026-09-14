@@ -1,7 +1,7 @@
 /**
  * VDFS 前端渲染注册表 —— **纯 UI 映射**（机制允许前端持有的唯一部分）
  *
- * 规范 §7：后端下发节点的 `ext`（扩展名）与挂载点（mount），前端据此选择
+ * 规范 §7：后端下发节点的 `ext`（扩展名）与资源类别名，前端据此选择
  * 详情渲染器与图标。**不得**在此硬编码资源类型清单、标签、能力或路径模板。
  *
  * 对应后端：symbio/src/symbio_core/vdfs_provider.rs（ext 约定）
@@ -86,10 +86,10 @@ export function resolveVdfsRenderer(node: VdfsNode | null | undefined): VdfsRend
 }
 
 /**
- * 挂载点图标：复用实体图标注册表（挂载名与实体 kind 同名的场景，如
+ * `.vdfs` 子目录图标：复用实体图标注册表（子目录名与实体 kind 同名的场景，如
  * `setting` / `model` / `session` / `agent` / `skill` / `mcp`）。
  * 未命中返回 undefined（视图回退默认图标）。
  */
-export function mountIconOf(mount: string): Component | undefined {
-  return getEntityIcon(mount)
+export function dirIconOf(name: string): Component | undefined {
+  return getEntityIcon(name)
 }

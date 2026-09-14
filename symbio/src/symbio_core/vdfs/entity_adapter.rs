@@ -354,8 +354,19 @@ impl VdfsProvider for EntityVdfsAdapter {
         Some(self.kind)
     }
 
+    /// 自身根是**目录**：可列出实体清单（`list` 位）。
+    ///
+    /// 注意与 [`Self::node_access`] 区分——那是**实体条目文件**的访问位
+    /// （read / write，无 list）；根目录的清单位若缺失，合成视图（composite
+    /// 的子目录节点）会把本类型整个从目录导航里滤掉（前端「是否目录」就看
+    /// `list` 位）。条目之下的子类别（容器语义）存在时，递归遍历（`t` 位）
+    /// 才有意义。
     fn root_access(&self) -> VdfsAccess {
-        self.node_access()
+        if self.container_kinds().is_empty() {
+            VdfsAccess::LIST
+        } else {
+            VdfsAccess::LIST_TRAVERSE
+        }
     }
 
     fn root_new_types(&self) -> Vec<VdfsNewType> {
@@ -812,7 +823,10 @@ mod tests {
                 .join(",")
         );
         assert_eq!(types[0].ext, ENTITY_MODEL);
-        assert!(a.root_access().write, "可写类型挂载根应含写位");
+        // 根是**目录**：清单位必须在（合成视图据此把它认作子目录）；
+        // 写位属于条目文件（node_access），目录根本身不可写（composite 守卫）
+        assert!(a.root_access().list, "挂载根应可列出实体清单");
+        assert!(!a.root_access().write);
     }
 
     /// 只读类型（注册表 `supports_upload = false`）不声明新建类型、访问位只读
@@ -828,8 +842,10 @@ mod tests {
         let a = EntityVdfsAdapter::new(ENTITY_SESSION, Arc::new(Stub));
         assert!(!a.writable(), "session 在注册表中 supports_upload = false");
         assert!(a.root_new_types().is_empty());
-        assert!(!a.root_access().write, "只读类型挂载根不应含写位");
-        assert!(a.root_access().read);
+        assert!(a.root_access().list, "挂载根是目录，可列出实体清单");
+        assert!(!a.root_access().write, "只读类型条目不应含写位");
+        // session 在注册表里声明了容器子实体（子会话/工作目录）⇒ 根可遍历
+        assert!(a.root_access().traverse, "有容器语义的类型参与树遍历");
     }
 
     /// bundle 型（注册表声明 `supports_upload = true`，但目录自管、不走 EntityStore）
@@ -862,6 +878,7 @@ mod tests {
             Some(VFDS_NEW_SOURCE_FILE),
             "整包的内容来自本地文件"
         );
+        assert!(a.root_access().list && a.root_access().traverse, "bundle 有容器语义：可列 + 可遍历");
         assert!(!a.root_access().write, "只读：不可覆盖写内容、不可建目录");
     }
 

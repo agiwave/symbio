@@ -12,17 +12,13 @@
 //!
 //! [`VdfsProvider`]: crate::symbio_core::vdfs_provider::VdfsProvider
 
-use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsContent, VdfsNewType, VdfsNode, VFDS_STATUS_ACTIVE,
-};
+use crate::symbio_core::vdfs_provider::{VdfsContent, VdfsNode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ==================== 协议操作路径 ====================
 
-/// 挂载点清单（虚拟根 `/` 的目录内容）
-pub const VFDS_PROVIDERS: &str = "vdfs/providers";
-/// 列目录（一级）
+/// 列目录（一级；`.vdfs` 即资源类别清单）
 pub const VFDS_LIST: &str = "vdfs/list";
 /// 树状遍历（递归；节点的 `t` 位控制可遍历性）
 pub const VFDS_TREE: &str = "vdfs/tree";
@@ -51,7 +47,6 @@ pub const VFDS_ACTION: &str = "vdfs/action";
 
 /// 全部 VDFS 操作（宿主据此判定是否为本协议请求）
 pub const VFDS_OPS: &[&str] = &[
-    VFDS_PROVIDERS,
     VFDS_LIST,
     VFDS_TREE,
     VFDS_STAT,
@@ -195,68 +190,12 @@ pub struct VdfsSearchRequest {
 
 // ==================== 响应 ====================
 
-/// 一条挂载的使用方视图（`vdfs/providers` 响应元素）。
-///
-/// 这是**使用方组装**的形状：`mount` / `root` 由分发层用自己选定的挂载名填出；
-/// provider 侧没有挂载概念（见 `symbio_core::vdfs_provider` 模块文档）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VdfsMountInfo {
-    /// 挂载名（使用方选定；虚拟根 `/` 下的一级目录名，本宿主内唯一）
-    pub mount: String,
-    /// 展示标签（provider 未提供时用挂载名代替）
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub order: i32,
-    /// 该子树根的访问位
-    pub access: VdfsAccess,
-    /// 该子树根的状态
-    #[serde(default = "default_status")]
-    pub status: String,
-    /// 挂载根全路径（恒为 `/<mount>`）
-    #[serde(default)]
-    pub root: String,
-    /// 图标名（使用方纯 UI 映射）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-    /// 该挂载根可接受的新建类型（导航项据此决定添加入口与类型选择）
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub new_types: Vec<VdfsNewType>,
-    /// 是否作为**导航项**出现（缺省 `true`）。
-    ///
-    /// `false` = 该子树可寻址、可读写、LLM 可用，但不占资源导航位
-    /// （如本地文件树）。由 provider 的 `nav_visible()` 声明，使用方透传。
-    #[serde(default = "default_nav_visible", skip_serializing_if = "is_true")]
-    pub nav_visible: bool,
-    #[serde(flatten)]
-    pub attributes: serde_json::Map<String, Value>,
-}
-
-fn default_status() -> String {
-    VFDS_STATUS_ACTIVE.to_string()
-}
-
-fn default_nav_visible() -> bool {
-    true
-}
-
-fn is_true(v: &bool) -> bool {
-    *v
-}
-
-/// `vdfs/providers` 响应
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct VdfsProvidersResponse {
-    pub providers: Vec<VdfsMountInfo>,
-}
-
 /// `vdfs/list` 响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsListResponse {
     /// 被列出目录的全路径
     pub path: String,
-    /// 目录自身节点（`/` 时为虚拟根）
+    /// 目录自身节点（`.vdfs` 时为虚拟根）
     pub node: VdfsNode,
     pub items: Vec<VdfsNode>,
 }
@@ -309,18 +248,17 @@ pub struct VdfsSearchResult {
 
 // ==================== 事件 ====================
 
-/// 总线上的数据变更事件（**使用方组装**）。
+/// 总线上的数据变更事件。
 ///
-/// provider 侧的 [`VdfsChange`] 只有子树内相对路径、**没有挂载名**；分发层在
-/// 投递时补上 `mount`、把相对路径拼成全路径，形成本形状后经事件总线下发前端。
-/// 前端据此按挂载名过滤、防抖重拉（`subscribe({ kind: 'vdfs' })`）。
+/// provider 侧的 [`VdfsChange`]只有子树内相对路径；门面（[`super::fs::UnifiedFs`]）
+/// 在投递前把路径补成**对外展示地址**（`.vdfs/<类别>/…` 或工作目录相对地址），
+/// 形成本形状后经事件总线下发前端。消费者按 `path` 前缀自行分流、防抖重拉
+/// （`subscribe({ kind: 'vdfs' })`）。
 ///
 /// [`VdfsChange`]: crate::symbio_core::vdfs_provider::VdfsChange
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsChangeEvent {
-    /// 挂载名（使用方选定；约定 = 插件名）
-    pub mount: String,
-    /// 发生变更的节点全路径
+    /// 发生变更的节点全路径（对外展示口径）
     pub path: String,
     /// 变更类型（`created` / `updated` / `deleted` / `renamed`）
     pub change: String,
@@ -335,7 +273,7 @@ mod tests {
 
     #[test]
     fn ops_are_unique_and_prefixed() {
-        assert_eq!(VFDS_OPS.len(), 14, "新增协议操作请同步本计数与文档");
+        assert_eq!(VFDS_OPS.len(), 13, "新增协议操作请同步本计数与文档");
         for op in VFDS_OPS {
             assert!(op.starts_with("vdfs/"), "协议路径必须以 vdfs/ 开头：{op}");
         }
