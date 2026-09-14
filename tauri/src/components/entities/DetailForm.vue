@@ -215,6 +215,11 @@ const emit = defineEmits<{
   'set-default': []
   /** 机制导航动作：路由推入容器实体页（payload.kind 指定容器类别） */
   'open-container': [kind: string]
+  /**
+   * **未在本渲染器内实现**的动作：原样上抛动作标识（如 VDFS 节点动作
+   * `export`）。动作语义归 provider，渲染器不做拦截——新增动作无需改动这里。
+   */
+  action: [id: string]
   cancel: []
 }>()
 
@@ -414,9 +419,10 @@ const allActions = computed<DetailAction[]>(() => {
 
 function actionBusy(a: DetailAction): boolean {
   if (a.id === 'save') return configSaving.value || props.saving
-  if (a.id === 'test') return props.testing
   if (a.id === 'delete') return props.deleting
-  return false
+  // 其余动作（内置 `test`，以及 provider 自持的 VDFS 动作如 `export`）共用
+  // 页面层的单一动作忙态——同一时刻只可能有一个动作在执行
+  return props.testing
 }
 
 function actionDisabled(a: DetailAction): boolean {
@@ -466,7 +472,8 @@ function runAction(a: DetailAction) {
       emit('open-container', String((a.payload as Record<string, unknown> | undefined)?.kind ?? ''))
       return
     default:
-      logger.warn('DetailForm', '未知动作:', a.id)
+      // 未内置的动作：原样上抛（VDFS 节点动作走这里，如 `export`）
+      emit('action', a.id)
   }
 }
 

@@ -143,6 +143,20 @@ pub fn skill_detail_definition() -> DetailDefinition {
                 busy_label: Some("保存中…".into()),
                 ..Default::default()
             },
+            // 「导出」：VDFS 节点动作 `export`（vdfs/action）→ provider 的
+            // `export_zip`；与「新建类型 zip」的导入互为逆向
+            DetailAction {
+                id: crate::symbio_core::vdfs_provider::VFDS_ACTION_EXPORT.into(),
+                label: "导出整包".into(),
+                style: "secondary".into(),
+                disabled_when: Some(crate::symbio_core::schemas::entities::DetailCondition {
+                    key: "is_existing".into(),
+                    equals: Some(serde_json::json!(false)),
+                    ..Default::default()
+                }),
+                busy_label: Some("打包中…".into()),
+                ..Default::default()
+            },
             DetailAction {
                 id: "divider".into(),
                 label: String::new(),

@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   VFDS_ROOT,
+  actionFileOf,
   isVdfsDir,
   newFileNameOf,
   parseVdfsValidation,
@@ -171,6 +172,26 @@ describe('newFileNameOf（整包导入的目标名）', () => {
   it('隐藏文件（.gitignore）不作主干切割，路径只取末段', () => {
     expect(newFileNameOf('.gitignore', 'zip')).toBe('.gitignore.zip')
     expect(newFileNameOf('C:\\tmp\\dir\\demo.zip', 'zip')).toBe('demo.zip')
+  })
+})
+
+describe('actionFileOf（动作结果里的文件载荷）', () => {
+  it('认形状不认动作：有 filename + b64 就下载', () => {
+    expect(actionFileOf({ id: 'b1', filename: 'b1.zip', b64: 'UEsDBA==' })).toEqual({
+      filename: 'b1.zip',
+      b64: 'UEsDBA==',
+    })
+  })
+
+  it('非对象 / 缺字段 / 空串一律不算文件载荷', () => {
+    expect(actionFileOf(null)).toBeNull()
+    expect(actionFileOf(undefined)).toBeNull()
+    expect(actionFileOf('b1.zip')).toBeNull()
+    expect(actionFileOf({ filename: 'b1.zip' })).toBeNull()
+    expect(actionFileOf({ b64: 'UEsDBA==' })).toBeNull()
+    expect(actionFileOf({ filename: '', b64: '' })).toBeNull()
+    // 「测试连接」这类只回 status 的动作：没有文件载荷
+    expect(actionFileOf({ status: 'connected' })).toBeNull()
   })
 })
 

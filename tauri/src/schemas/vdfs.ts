@@ -177,8 +177,37 @@ export interface VdfsActionResponse {
   data?: unknown
 }
 
+/**
+ * 动作结果带回的**文件载荷**（`VdfsActionResponse.data` 的宿主方言形状之一）。
+ *
+ * 与 `VdfsContent.b64` 同构：只要结果里同时有 `filename` 与 `b64`，
+ * 前端就把它当文件下载——**不必认识「导出」这个动作**，新增带回文件的
+ * 动作无需改动前端。
+ */
+export interface VdfsActionFile {
+  /** 建议文件名 */
+  filename: string
+  /** 文件字节（base64） */
+  b64: string
+}
+
+/**
+ * 读取动作结果里的文件载荷（没有则 `null`）。
+ *
+ * 这是**形状判定**而非动作判定：任何动作只要按此形状回传数据，都能被下载。
+ */
+export function actionFileOf(data: unknown): VdfsActionFile | null {
+  if (!data || typeof data !== 'object') return null
+  const d = data as Record<string, unknown>
+  if (typeof d.filename !== 'string' || typeof d.b64 !== 'string') return null
+  if (!d.filename || !d.b64) return null
+  return { filename: d.filename, b64: d.b64 }
+}
+
 /** 已知动作标识：连接测试（后端 `VFDS_ACTION_TEST`） */
 export const VFDS_ACTION_TEST = 'test'
+/** 已知动作标识：导出打包（后端 `VFDS_ACTION_EXPORT`） */
+export const VFDS_ACTION_EXPORT = 'export'
 
 export interface VdfsProvidersResponse {
   providers: VdfsMountInfo[]

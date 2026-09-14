@@ -17,6 +17,7 @@
 //! | `write` | [`entity_write`]（`entities/upload` 的 manifest 分支同一实现） |
 //! | `write`（二进制） | [`EntityProvider::import_zip`]（zip 整包导入） |
 //! | `delete` | [`entity_delete`]（`entities/delete` 同一实现） |
+//! | `action` | [`VFDS_ACTION_TEST`] → `test_status`；[`VFDS_ACTION_EXPORT`] → `export_zip` |
 //! | `watch` | provider 侧变更广播（写 / 删时触发，**非轮询**） |
 //!
 //! 因此新增一种实体类型时，VDFS 侧**零改动**——它自动获得一个挂载点。
@@ -38,9 +39,9 @@ use crate::symbio_core::entities::{
 };
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
-    VdfsNewType, VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_TEST,
-    VFDS_CHANGE_CREATED, VFDS_CHANGE_DELETED, VFDS_CHANGE_UPDATED, VFDS_EXT_FORM, VFDS_EXT_ZIP,
-    VFDS_NEW_SOURCE_FILE,
+    VdfsNewType, VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT,
+    VFDS_ACTION_TEST, VFDS_CHANGE_CREATED, VFDS_CHANGE_DELETED, VFDS_CHANGE_UPDATED, VFDS_EXT_FORM,
+    VFDS_EXT_ZIP, VFDS_NEW_SOURCE_FILE,
 };
 use crate::symbio_core::InvokeRequest;
 use async_trait::async_trait;
@@ -271,6 +272,67 @@ impl EntityVdfsAdapter {
     fn notify(&self, path: &str, change: &str) {
         // 无订阅者时 send 返回 Err，属正常（不是错误路径）
         drop(self.changes.send(VdfsChange::new(path, change)));
+    }
+
+    /// 节点动作「测试连接」：只对条目可用，结果回显状态说明。
+    async fn action_test(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsActionResult> {
+        if !matches!(parse_adapter_path(path), AdapterPath::Item(_)) {
+            return Err(VdfsError::invalid(format!(
+                "「测试连接」只对{}条目可用：{path}",
+                self.label_of()
+            )));
+        }
+        let host = host_ctx(ctx)?;
+        let id = self.id_of(path);
+        // 存在性校验：测试不存在的条目应报 NotFound 而非成功
+        self.summary_of(&host, &id).await?;
+        let resp = self
+            .provider
+            .test_status(&host, &id)
+            .await
+            .map_err(from_plugin_error)?;
+        let ok = resp.status == ENTITY_STATUS_CONNECTED;
+        Ok(VdfsActionResult {
+            action: VFDS_ACTION_TEST.to_string(),
+            ok,
+            message: resp.status_detail.clone().unwrap_or_else(|| {
+                if ok {
+                    format!("{}连接正常", self.label_of())
+                } else {
+                    format!("{}连接失败", self.label_of())
+                }
+            }),
+            data: None,
+        })
+    }
+
+    /// 节点动作「导出」：只对条目可用，zip 随 `data` 回传（宿主方言见
+    /// `EntityExport`）。不支持导出的 provider 返回 `NotImplemented`——
+    /// 能力由 provider 自陈（与 `new_types` 同理）。
+    async fn action_export(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsActionResult> {
+        if !matches!(parse_adapter_path(path), AdapterPath::Item(_)) {
+            return Err(VdfsError::invalid(format!(
+                "「导出」只对{}条目可用：{path}",
+                self.label_of()
+            )));
+        }
+        let host = host_ctx(ctx)?;
+        let id = self.id_of(path);
+        // 存在性校验：导出不存在的条目应报 NotFound 而非返回空包
+        self.summary_of(&host, &id).await?;
+        let export = self
+            .provider
+            .export_zip(&host, &id)
+            .await
+            .map_err(from_plugin_error)?;
+        let data = serde_json::to_value(&export)
+            .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
+        Ok(VdfsActionResult {
+            action: VFDS_ACTION_EXPORT.to_string(),
+            ok: true,
+            message: format!("已打包「{}」", export.filename),
+            data: Some(data),
+        })
     }
 }
 
@@ -606,7 +668,11 @@ impl VdfsProvider for EntityVdfsAdapter {
 
     /// 节点动作：把 VDFS 的「动词」接到实体机制的既有能力上。
     ///
-    /// 当前只承接 [`VFDS_ACTION_TEST`]（测试连接）→ [`EntityProvider::test_status`]；
+    /// 承接两个内置动作：
+    /// - [`VFDS_ACTION_TEST`]（测试连接）→ [`EntityProvider::test_status`]；
+    /// - [`VFDS_ACTION_EXPORT`]（导出）→ [`EntityProvider::export_zip`]，zip 随
+    ///   [`VdfsActionResult::data`] 回传（与二进制写入的导入互为逆向）。
+    ///
     /// 其余标识一律 `NotImplemented`——动作语义归 provider，适配器不做猜测。
     async fn action(
         &self,
@@ -615,37 +681,11 @@ impl VdfsProvider for EntityVdfsAdapter {
         action: &str,
         _payload: Option<&Value>,
     ) -> VdfsResult<VdfsActionResult> {
-        if action != VFDS_ACTION_TEST {
-            return Err(VdfsError::NotImplemented);
+        match action {
+            VFDS_ACTION_TEST => self.action_test(ctx, path).await,
+            VFDS_ACTION_EXPORT => self.action_export(ctx, path).await,
+            _ => Err(VdfsError::NotImplemented),
         }
-        if !matches!(parse_adapter_path(path), AdapterPath::Item(_)) {
-            return Err(VdfsError::invalid(format!(
-                "「测试连接」只对{}条目可用：{path}",
-                self.label_of()
-            )));
-        }
-        let host = host_ctx(ctx)?;
-        let id = self.id_of(path);
-        // 存在性校验：测试不存在的条目应报 NotFound 而非成功
-        self.summary_of(&host, &id).await?;
-        let resp = self
-            .provider
-            .test_status(&host, &id)
-            .await
-            .map_err(from_plugin_error)?;
-        let ok = resp.status == ENTITY_STATUS_CONNECTED;
-        Ok(VdfsActionResult {
-            action: action.to_string(),
-            ok,
-            message: resp.status_detail.clone().unwrap_or_else(|| {
-                if ok {
-                    format!("{}连接正常", self.label_of())
-                } else {
-                    format!("{}连接失败", self.label_of())
-                }
-            }),
-            data: None,
-        })
     }
 
     /// 订阅：把 provider 侧变更广播转发到 sink（`unwatch` 时取消任务）。
@@ -686,6 +726,7 @@ mod tests {
         EntityStatusResponse, EntityUploadResponse, ENTITY_AGENT, ENTITY_MODEL, ENTITY_SESSION,
         ENTITY_STATUS_CONNECTED, ENTITY_STATUS_FAILED,
     };
+    use crate::symbio_core::schemas::entities::EntityExport;
 
     /// 标签 / 顺序来自注册表（单一真相源），不硬编码
     #[test]
@@ -1161,6 +1202,90 @@ mod tests {
         // 动作只对条目有意义：挂载根 / 子实体路径不适用
         assert!(adapter(ENTITY_STATUS_CONNECTED)
             .action(&ctx, "", VFDS_ACTION_TEST, None)
+            .await
+            .is_err());
+    }
+
+    /// 节点动作 `export`：整包导出走 `EntityProvider::export_zip`，
+    /// zip 随 `data` 回传（与二进制写入的导入互为逆向）
+    #[tokio::test]
+    async fn action_export_returns_zip_payload() {
+        use crate::symbio_core::{PluginError, SimpleRequest};
+        use std::sync::Mutex;
+
+        struct ExportStub {
+            /// 是否支持导出（`None` ⇒ 回复 NotImplemented）
+            zip: Option<Vec<u8>>,
+            calls: Mutex<Vec<String>>,
+        }
+        #[async_trait]
+        impl EntityProvider for ExportStub {
+            fn kind(&self) -> &'static str {
+                ENTITY_AGENT
+            }
+            async fn list_items(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+            ) -> Result<Vec<EntitySummary>, PluginError> {
+                Ok(vec![EntitySummary::new(ENTITY_AGENT, "b1", "包一")])
+            }
+            async fn export_zip(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+                id: &str,
+            ) -> Result<EntityExport, PluginError> {
+                self.calls.lock().unwrap().push(id.to_string());
+                let Some(zip) = &self.zip else {
+                    return Err(PluginError::NotImplemented);
+                };
+                Ok(EntityExport {
+                    id: id.to_string(),
+                    filename: format!("{id}.zip"),
+                    b64: entities::encode_b64(zip),
+                })
+            }
+        }
+
+        let req: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let ctx = VdfsContext::new(req);
+        let adapter = |zip: Option<Vec<u8>>| {
+            EntityVdfsAdapter::new(
+                ENTITY_AGENT,
+                Arc::new(ExportStub {
+                    zip,
+                    calls: Mutex::new(Vec::new()),
+                }),
+            )
+        };
+
+        let a = adapter(Some(vec![0x50, 0x4b, 0x03, 0x04]));
+        let r = a
+            .action(&ctx, "b1", VFDS_ACTION_EXPORT, None)
+            .await
+            .unwrap();
+        assert_eq!(r.action, VFDS_ACTION_EXPORT);
+        assert!(r.ok);
+        let data = r.data.expect("导出结果必须带回文件载荷");
+        assert_eq!(data["filename"], serde_json::json!("b1.zip"));
+        assert_eq!(
+            data["b64"],
+            serde_json::json!(entities::encode_b64(&[0x50, 0x4b, 0x03, 0x04])),
+            "zip 字节原样回传（base64）"
+        );
+        // 不支持导出的 provider → NotImplemented（消费方据此不给入口）
+        let a = adapter(None);
+        assert!(a
+            .action(&ctx, "b1", VFDS_ACTION_EXPORT, None)
+            .await
+            .unwrap_err()
+            .is_not_implemented());
+
+        // 导出只对条目有意义：挂载根不适用
+        let a = adapter(Some(vec![]));
+        assert!(a.action(&ctx, "", VFDS_ACTION_EXPORT, None).await.is_err());
+        // 不存在的条目 → 报错（不返回空包）
+        assert!(a
+            .action(&ctx, "nope", VFDS_ACTION_EXPORT, None)
             .await
             .is_err());
     }

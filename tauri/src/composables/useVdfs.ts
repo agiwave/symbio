@@ -22,7 +22,9 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import {
   arrayBufferToBase64,
+  base64ToBytes,
   deleteVdfs,
+  downloadBlob,
   fetchMounts,
   listVdfs,
   mkdirVdfs,
@@ -38,6 +40,7 @@ import { subscribe } from '@/services/eventBus'
 import {
   VFDS_EVENT_KIND,
   VFDS_ROOT,
+  actionFileOf,
   isVdfsDir,
   mountNavVisible,
   newFileNameOf,
@@ -304,11 +307,15 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
   }
 
   /**
-   * 执行**节点动作**（如「测试连接」）。
+   * 执行**节点动作**（如「测试连接」「导出」）。
    *
    * 动作标识由详情定义声明、由 provider 解释，本层只负责把它送到
    * `vdfs/action` 并把结果（成功 / 失败 + 说明）呈现出来；**前端不认识
    * 任何具体动作**，新增动作无需改动这里。
+   *
+   * 唯一例外是**文件载荷**：结果里带 `filename` + `b64` 就下载它（见
+   * `actionFileOf`）。这是形状判定而非动作判定——「导出」只是当前唯一
+   * 按此形状回传数据的动作。
    */
   async function runAction(action: string): Promise<boolean> {
     const node = selectedNode.value
@@ -317,8 +324,11 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
     detailError.value = ''
     try {
       const r = await runVdfsAction(node.path, action)
-      if (r?.ok) showToast('success', r.message || '执行成功')
-      else {
+      if (r?.ok) {
+        showToast('success', r.message || '执行成功')
+        const file = actionFileOf(r.data)
+        if (file) downloadBlob(file.filename, base64ToBytes(file.b64))
+      } else {
         detailError.value = r?.message || '执行失败'
         showToast('error', detailError.value)
       }

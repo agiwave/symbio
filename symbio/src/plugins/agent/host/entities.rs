@@ -13,7 +13,9 @@
 
 use super::plugin::AgentPlugin;
 use super::store::{classify_entity_path, BundleStore};
-use crate::symbio_core::entities::{EntityProvider, EntitySummary, EntityUploadResponse};
+use crate::symbio_core::entities::{
+    EntityExport, EntityProvider, EntitySummary, EntityUploadResponse,
+};
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginError, WORKDIR};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -151,6 +153,25 @@ impl EntityProvider for AgentPlugin {
             kind: self.kind().to_string(),
             id: r.id,
             created: !r.replaced,
+        })
+    }
+
+    /// 整包导出：bundle → zip（VDFS 节点动作 `export` 走这里）。
+    ///
+    /// bundle 目录由 [`BundleStore`] 自管（工作区级 / 全局级双层），默认的
+    /// EntityStore 打包路径不适用，故直接委托 [`BundleStore::export`]——
+    /// 与 [`Self::import_zip`] 互为逆向。
+    async fn export_zip(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<EntityExport, PluginError> {
+        let store = Self::store_of(ctx);
+        let bytes = store.export(id).map_err(PluginError::ValidationError)?;
+        Ok(EntityExport {
+            id: id.to_string(),
+            filename: format!("{id}.zip"),
+            b64: crate::symbio_core::entities::encode_b64(&bytes),
         })
     }
 

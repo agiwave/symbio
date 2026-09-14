@@ -100,8 +100,14 @@ pub const VFDS_EXT_ZIP: &str = "zip";
 /// 节点动作标识：**连接测试**（`vdfs/action` 的 `action` 取值之一）。
 ///
 /// 动作标识由 provider 自持，VDFS 只透传、不解释（与 `ext` 同构）。此处登记的
-/// 是当前唯一的内置约定：「测试连接」——模型 / MCP 这类外部资源的连通性自检。
+/// 是当前的内置约定：
+///
+/// - [`VFDS_ACTION_TEST`]「测试连接」——模型 / MCP 这类外部资源的连通性自检；
+/// - [`VFDS_ACTION_EXPORT`]「导出」——把整目录资源打包成一个 zip（结果随
+///   [`VdfsActionResult::data`] 返回，与导入的二进制写入互为逆向）。
 pub const VFDS_ACTION_TEST: &str = "test";
+/// 节点动作标识：**导出**（打包下载；与「新建类型 `zip`」的导入互为逆向）
+pub const VFDS_ACTION_EXPORT: &str = "export";
 
 // ==================== 可接受的新建类型 ====================
 

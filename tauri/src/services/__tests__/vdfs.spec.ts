@@ -15,7 +15,7 @@ vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn() } }))
 
 import { callPlugin } from '@/services/plugin'
 import { VFDS_ACTION, VFDS_ROOT, VFDS_WRITE, vdfsJoin } from '@/schemas/vdfs'
-import { arrayBufferToBase64, runVdfsAction, writeVdfsBinary } from '../vdfs'
+import { arrayBufferToBase64, base64ToBytes, runVdfsAction, writeVdfsBinary } from '../vdfs'
 
 /** 最近一次插件调用（op + 载荷） */
 function lastCall(): { op: string; payload: Record<string, unknown> } {
@@ -84,5 +84,12 @@ describe('整包导入（vdfs/write 的二进制通道）', () => {
       b64: 'UEsDBA==',
       create: true,
     })
+  })
+
+  it('base64ToBytes 与 arrayBufferToBase64 互逆（导出落地的字节必须原样）', () => {
+    const bytes = new Uint8Array(0x8000 + 5)
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251
+    const b64 = arrayBufferToBase64(bytes.buffer)
+    expect(Array.from(base64ToBytes(b64))).toEqual(Array.from(bytes))
   })
 })

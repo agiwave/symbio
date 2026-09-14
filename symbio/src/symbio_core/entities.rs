@@ -130,6 +130,19 @@ pub trait EntityProvider: Send + Sync {
         serde_json::json!({ "id": id, "name": title })
     }
 
+    /// 整包导出钩子：一个实体 → zip 字节（base64）。
+    ///
+    /// VDFS 侧表现为节点动作 `export`（`VFDS_ACTION_EXPORT`），与「新建类型
+    /// `zip`」的导入互为逆向。默认实现走 [`entity_export_zip`]（EntityStore 型
+    /// 打包整个实体目录）；目录自管的 provider（agent bundle）重写本方法。
+    async fn export_zip(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> Result<EntityExport, PluginError> {
+        entity_export_zip(self, ctx, id).await
+    }
+
     /// 整包导入钩子：zip 字节 → 一个实体。
     ///
     /// VDFS 侧表现为一个「新建类型」：`ext = zip` 且 `source = file`
@@ -630,6 +643,36 @@ pub async fn entity_import_zip<P: EntityProvider + ?Sized>(
     })
 }
 
+/// 导出整包 —— 实体机制与 VDFS 共用的唯一实现（与导入互为逆向）。
+///
+/// 把 `EntityStore` 的 `<category>/<id>/` 整个目录打包成 zip（包内顶层目录
+/// 名为 id，与导入端的 `strip_common_root` 恰好配对，可原样导回）。
+pub async fn entity_export_zip<P: EntityProvider + ?Sized>(
+    provider: &P,
+    ctx: &Arc<dyn InvokeRequest>,
+    id: &str,
+) -> Result<EntityExport, PluginError> {
+    let Some(category) = provider.category() else {
+        // 无实体目录的实体（如 session / agent bundle）：走各自的实现
+        return Err(PluginError::NotImplemented);
+    };
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(PluginError::ValidationError("导出目标不能为空".to_string()));
+    }
+    let store = storage_service(ctx)?;
+    let dir = store.entity_store().entity_dir(category, id);
+    if !dir.exists() {
+        return Err(PluginError::NotFound(format!("未找到实体「{id}」")));
+    }
+    let bytes = zip_dir(&dir, id)?;
+    Ok(EntityExport {
+        id: id.to_string(),
+        filename: format!("{id}.zip"),
+        b64: encode_b64(&bytes),
+    })
+}
+
 // ==================== zip 整包解包（导入的内部实现） ====================
 
 /// 整包处理错误（zip 解码 / 解包 / 落盘；转为 `PluginError` 抛出）
@@ -644,6 +687,65 @@ pub fn decode_b64(s: &str) -> Result<Vec<u8>, EntityError> {
     STANDARD
         .decode(s.trim())
         .map_err(|e| EntityError(format!("base64 解码失败: {e}")))
+}
+
+/// base64 编码（字节 → VDFS 二进制通道的载荷）
+pub fn encode_b64(bytes: &[u8]) -> String {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+    STANDARD.encode(bytes)
+}
+
+/// 把目录递归打包成 zip 字节（包内顶层目录名 = `root`）。
+///
+/// 与 [`extract_zip_to_entity`] 的 `strip_common_root` 配对：导出的包可直接导回。
+pub fn zip_dir(dir: &std::path::Path, root: &str) -> Result<Vec<u8>, EntityError> {
+    use zip::write::SimpleFileOptions;
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut w = zip::ZipWriter::new(&mut buf);
+        let opts = SimpleFileOptions::default();
+        add_dir_to_zip(&mut w, dir, root, opts)?;
+        w.finish()
+            .map_err(|e| EntityError(format!("zip 生成失败: {e}")))?;
+    }
+    Ok(buf.into_inner())
+}
+
+/// 递归写目录（`arcname` 前缀形成单顶层目录布局）
+fn add_dir_to_zip<W: std::io::Write + std::io::Seek>(
+    w: &mut zip::ZipWriter<W>,
+    dir: &std::path::Path,
+    prefix: &str,
+    opts: zip::write::SimpleFileOptions,
+) -> Result<(), EntityError> {
+    use std::io::Write as _;
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| EntityError(format!("读取目录失败: {e}")))?
+        .flatten()
+        .collect::<Vec<_>>();
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        // 跳过隐藏文件（与导入端同一口径）
+        if name.starts_with('.') {
+            continue;
+        }
+        let arc = format!("{prefix}/{name}");
+        if path.is_dir() {
+            w.add_directory(&arc, opts)
+                .map_err(|e| EntityError(format!("zip 写目录失败: {e}")))?;
+            add_dir_to_zip(w, &path, &arc, opts)?;
+        } else {
+            w.start_file(&arc, opts)
+                .map_err(|e| EntityError(format!("zip 写文件失败: {e}")))?;
+            let bytes =
+                std::fs::read(&path).map_err(|e| EntityError(format!("读取文件失败: {e}")))?;
+            w.write_all(&bytes)
+                .map_err(|e| EntityError(format!("zip 写内容失败: {e}")))?;
+        }
+    }
+    Ok(())
 }
 
 /// 解析 zip 字节为 `(相对路径, 内容)` 列表。
@@ -870,6 +972,55 @@ mod tests {
         // 空包（只有目录条目）⇒ 解包报「没有任何可用文件」由 `extract_zip_to_entity` 负责
         let empty = make_zip(&[("only-dir/", None)]);
         assert!(parse_zip(&empty).unwrap().is_empty());
+    }
+
+    /// 打包：单顶层目录 = 实体 id，跳过隐藏文件——与导入端的
+    /// `parse_zip` + `strip_common_root` 恰好配对（导出包可原样导回）
+    #[test]
+    fn zip_dir_roundtrips_with_import() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("demo");
+        std::fs::create_dir_all(dir.join("scripts")).unwrap();
+        std::fs::write(dir.join("SKILL.md"), b"# demo").unwrap();
+        std::fs::write(dir.join("scripts").join("run.sh"), b"echo hi").unwrap();
+        // 隐藏文件不进包（与导入端同一口径）
+        std::fs::write(dir.join(".DS_Store"), b"junk").unwrap();
+
+        let bytes = zip_dir(&dir, "demo").unwrap();
+        let mut entries = parse_zip(&bytes).unwrap();
+        strip_common_root(&mut entries);
+        let mut names: Vec<&str> = entries.iter().map(|(p, _)| p.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            vec!["SKILL.md", "scripts/run.sh"],
+            "导出 → 导入可原样往返：`{names:?}`"
+        );
+        let body = entries
+            .iter()
+            .find(|(p, _)| p == "SKILL.md")
+            .map(|(_, b)| b.clone())
+            .unwrap_or_default();
+        assert_eq!(body, b"# demo".to_vec());
+    }
+
+    /// 默认 `export_zip`：无实体目录的 provider（category = None）→ NotImplemented
+    #[tokio::test]
+    async fn export_zip_requires_entity_dir() {
+        struct BundleLike;
+        #[async_trait]
+        impl EntityProvider for BundleLike {
+            fn kind(&self) -> &'static str {
+                ENTITY_AGENT
+            }
+        }
+        let ctx: Arc<dyn InvokeRequest> =
+            Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+        let err = BundleLike.export_zip(&ctx, "demo").await.unwrap_err();
+        assert!(
+            matches!(err, PluginError::NotImplemented),
+            "目录自管的 provider 应自己重写 export_zip：{err:?}"
+        );
     }
 
     /// 默认 `import_zip`：无实体目录的 provider（category = None）→ NotImplemented

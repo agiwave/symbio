@@ -168,6 +168,30 @@ export function arrayBufferToBase64(buf: ArrayBuffer): string {
   return btoa(out)
 }
 
+/** base64 → 字节（与 `arrayBufferToBase64` 互逆；动作带回的文件载荷用它落地） */
+export function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64.trim())
+  const out = new Uint8Array(new ArrayBuffer(bin.length))
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+/**
+ * 触发一次文件下载（动作结果带回的文件落地）。
+ *
+ * 只用标准 DOM API：Tauri webview 与浏览器行为一致。文件**内容**由 provider
+ * 产出（如「导出」打包的 zip），本层只负责把字节交给用户。
+ */
+export function downloadBlob(filename: string, data: BlobPart, mime = 'application/zip'): void {
+  const url = URL.createObjectURL(new Blob([data], { type: mime }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  // 立即 revoke 会让部分 webview 下载落空，下一轮事件循环再释放
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 /** 写二进制内容（base64） */
 export async function writeVdfsBinary(
   path: string,

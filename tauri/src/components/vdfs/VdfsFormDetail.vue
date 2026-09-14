@@ -39,6 +39,7 @@
       @delete="$emit('delete')"
       @open-container="$emit('browse')"
       @test="$emit('action', 'test')"
+      @action="(id) => $emit('action', id)"
     />
   </div>
 </template>
@@ -53,6 +54,7 @@ import type {
   EntitySummary,
 } from '@/schemas/entities'
 import {
+  VFDS_ACTION_EXPORT,
   VFDS_ACTION_TEST,
   vdfsAccessOf,
   type VdfsFieldError,
@@ -106,11 +108,13 @@ const definition = computed<DetailDefinition>(() => {
     save_path: undefined,
     // 只读节点原先整表剥掉动作（避免渲染出无效的「保存」/「删除」），但
     // **与写无关**的动作必须保留：「浏览内部」是纯导航（agent 正是只读却
-    // 最需要它的那类资源），「测试连接」是只读自检，二者都不依赖写权限。
+    // 最需要它的那类资源），「测试连接」是只读自检，「导出」是只读打包，
+    // 三者都不依赖写权限。
     actions: access.value.write
       ? raw.actions
       : (raw.actions ?? []).filter(
-          (a) => a.id === 'open-container' || a.id === VFDS_ACTION_TEST
+          (a) =>
+            a.id === 'open-container' || a.id === VFDS_ACTION_TEST || a.id === VFDS_ACTION_EXPORT
         ),
   }
 })

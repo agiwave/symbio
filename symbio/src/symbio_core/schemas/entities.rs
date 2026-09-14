@@ -100,6 +100,23 @@ pub struct EntityUploadResponse {
     pub created: bool,
 }
 
+/// 整包导出结果（VDFS 动作 `export` 的 `data` 载荷）
+///
+/// 与「新建类型 `zip`」的导入互为逆向：导入把 zip 字节展开成实体目录，
+/// 导出把实体目录打包成 zip 字节（base64，走 VDFS 的二进制通道）。
+///
+/// 字段名与 [`VdfsContent::b64`] 同构——前端据此把它当**文件载荷**处理
+/// （有 `filename` + `b64` 就下载），不认识「导出」这个动作本身。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityExport {
+    /// 被导出的实体 id
+    pub id: String,
+    /// 建议文件名（`<id>.zip`）
+    pub filename: String,
+    /// 打包字节（base64）
+    pub b64: String,
+}
+
 /// `entities/status` 响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityStatusResponse {

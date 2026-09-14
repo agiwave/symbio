@@ -19,7 +19,6 @@
 
 use crate::plugins::agent::core::spec::assembly::{assemble_bundle, Assembly};
 use crate::plugins::agent::host::capability::BundleIdentityCapability;
-use crate::plugins::agent::host::handlers;
 use crate::plugins::agent::host::store::{BundleRecord, BundleStore};
 use crate::symbio_core::{
     report_error, Capability, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
@@ -281,10 +280,16 @@ impl Plugin for AgentPlugin {
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 
+    /// 路由入口：**无自有协议**。
+    ///
+    /// bundle 的浏览 / 导入 / 删除 / 导出全部由 VDFS 承接（`.vdfs/agent/…`）：
+    /// `vdfs/list` / `vdfs/write`（二进制 = 导入）/ `vdfs/delete` / 节点动作
+    /// `export`。因此这里不再有任何路由——插件只对宿主暴露装配能力。
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
-        let path = path.strip_prefix('/').unwrap_or(&path);
-        handlers::route(path, ctx).await
+        Err(PluginError::NotFound(format!(
+            "agent 无自有协议路由 `{path}`：bundle 一律经 VDFS 访问（.vdfs/agent/…）"
+        )))
     }
 }
 

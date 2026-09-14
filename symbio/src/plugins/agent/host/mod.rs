@@ -5,10 +5,13 @@
 //! | 模块 | 职责 |
 //! |---|---|
 //! | [`plugin`] | 插件主体：`traverse(available_tools)` → 扫描约定目录装配 → 身份工具注册 |
-//! | [`handlers`] | 管理路由：`bundle/list\|get\|upload\|export\|delete\|preview` + 统一实体协议 `entities/*` |
 //! | [`store`] | bundle 存储：系统目录 `plugins/agent/`、zip 导入（zip-slip 防护）、导出 |
 //! | [`capability`] | `agent_identity` 身份工具（提示词片段锚定） |
-//! | [`entities`] | 统一实体协议接入（kind=`agent`，前端实体页自动发现） |
+//! | [`entities`] | VDFS 挂载点适配（kind=`agent`，`.vdfs/agent/…` 自动发现） |
+//!
+//! **本层没有任何自有协议路由**：bundle 的浏览 / 导入 / 删除 / 导出分别由
+//! `vdfs/list`、`vdfs/write`（二进制）、`vdfs/delete`、节点动作 `export` 承担，
+//! 原 `bundle/*` 与 `entities/*` 协议均已下线。
 //!
 //! ## 装配契约（三个能力来源）
 //!
@@ -29,7 +32,6 @@
 pub mod capability;
 mod detail;
 pub mod entities;
-pub mod handlers;
 pub mod plugin;
 pub mod store;
 pub mod subagent;
