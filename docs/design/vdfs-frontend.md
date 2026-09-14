@@ -281,6 +281,7 @@ source = file 的类型（整包导入）：名称来自文件名
 | **S11 下线 `entities/*` 协议** | 6 个插件不再路由 `entities/*`，`entities::dispatch` 与其请求/响应、zip 工具一并删除；网关只读白名单改列 `vdfs/*` 读操作 | 对外只剩 VDFS 一个资源协议 |
 | **S12 整包导入** | `VdfsNewType.source`（`file`）+ `EntityProvider::import_zip` 钩子；适配器的二进制 `write` 承接导入（agent 走 `BundleStore::import`），agent 补上 `delete_item` | S5/S11 后丢失的 zip 导入回归，且**不新增协议操作** |
 | **S12 清理** | 注册表去掉 `prefix` / `provider_name` / `compact_list` / `status_indicator` 与 `EntityCapabilities`（改由 `supports_import` 表达）；删协议时代的请求/响应与 `get_item`；`agent/bundle/*` 只留 `bundle/export` | 历史冗余与被替换代码清空 |
+| **S13 整包导出** | `VFDS_ACTION_EXPORT` 节点动作 + `EntityProvider::export_zip` 钩子（默认 `zip_dir`、agent 走 `BundleStore::export`）；结果按「文件载荷」（`filename` + `b64`）回传；`agent/bundle/*` 整个下线 | 导入/导出在 VDFS 内闭环；`agent` 插件零自有路由 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -523,6 +524,24 @@ source = file 的类型（整包导入）：名称来自文件名
   - 修掉一个历史缺陷：zip 解包先规范化再判隐藏文件，否则 `./a/b.txt` 会因首段
     `.` 被整条丢弃（原实现顺序相反）。
 
+- **S13 整包导出（导入的逆动作）**（**已完成**）：导入回归后，导出是唯一还没
+  有 VDFS 等价物的动作（`agent/bundle/export` 因它暂留）。它与导入**共用同一
+  个「整包往返」语义**，因此也不新增协议操作——做一个节点动作即可：
+
+  | 层 | 内容 |
+  | --- | --- |
+  | 机制 | `VFDS_ACTION_EXPORT = "export"`：与 `test` 同为 `vdfs/action` 的动词取值 |
+  | 后端 | `EntityProvider::export_zip(ctx, id)` 钩子，默认实现 `entity_export_zip`（`zip_dir` 打包整个实体目录，包内顶层目录 = id，与导入端 `strip_common_root` 配对）；agent 重写走 `BundleStore::export` |
+  | 结果形状 | `EntityExport { id, filename, b64 }`——字段名与 `VdfsContent.b64` 同构，作为**文件载荷**随 `VdfsActionResult.data` 回传 |
+  | 适配器 | `action()` 按标识分派 `action_test` / `action_export`；导出只对条目有效，先做存在性校验，不支持时透传 `NotImplemented` |
+  | 声明 | agent / skill / mcp 的 `detail_definition` 各自声明 `export` 动作（`supports_import` 为真的三类） |
+  | 前端 | `actionFileOf(data)` 按**形状**判定（`filename` + `b64`）而非按动作名——命中即 `downloadBlob`；`DetailForm` 未识别的动作原样 emit `action`，故新增动作前端零改动 |
+
+  - 至此 `agent` 插件**不再有任何自有协议路由**：`route()` 直接返回 `NotFound`
+    并指引到 `.vdfs/agent/…`，`host/handlers.rs` 整个删除。
+  - 前端「动作忙态」统一：`DetailForm` 中除 `save` / `delete` 外的动作共用页面
+    层的单一忙态标记（同一时刻只可能有一个动作在执行）。
+
 - **S12 清理（历史冗余与被替换代码）**（**已完成**）：新机制稳定后，把随旧协议
   一起失去消费者的东西清掉：
 
@@ -545,5 +564,7 @@ source = file 的类型（整包导入）：名称来自文件名
   `挂载名 → 图标` 这类纯 UI 映射。
 - 新建入口**只能**由节点声明的 `new_types` 驱动；前端不得凭 `kind` 或写死的类型表
   推断可新建性。
+- 动作入口**只能**由详情定义声明的 `actions` 驱动；前端只认**载荷形状**
+  （如文件载荷 `filename` + `b64`），不认具体动作标识。
 - 机制条款（trait、访问位、协议操作、分层）一律以 `vdfs.md` 为准，本文件不得
   与之冲突。

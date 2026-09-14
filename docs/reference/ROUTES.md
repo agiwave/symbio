@@ -60,21 +60,20 @@
 
 ## Agent 插件
 
-### 管理路由
+### 管理路由（**全部下线**）
 
-> Bundle 的**访问 / 新建 / 删除已由 VDFS 承担**（`.vdfs/agent/…`：
+> Bundle 的**访问 / 新建 / 删除 / 导出已全部由 VDFS 承担**（`.vdfs/agent/…`）：
 > `vdfs/list` / `vdfs/read` / `vdfs/write`（新建类型 `zip`，即整包导入）/
-> `vdfs/delete`），故 `bundle/list|get|upload|delete|preview` 已于 S12 删除。
+> `vdfs/delete` / 节点动作 `export`（`vdfs/action`）。
+> 故 `bundle/list|get|upload|delete|preview` 已于 S12 删除、`bundle/export`
+> 于 S13 删除——**agent 插件不再有任何自有协议路由**，`route()` 直接返回
+> `NotFound` 并指引到 VDFS。
 
-| 路径 | 用途 |
+### 身份能力（**不是路由**）
+
+| 能力名 | 用途 |
 |------|------|
-| `agent/bundle/export` | 导出 Bundle（打包下载；VDFS 侧尚无等价动作，暂留） |
-
-### 身份工具
-
-| 路径 | 用途 |
-|------|------|
-| `agent/agent_identity` | 返回 Agent 人格/提示词片段 |
+| `agent_identity` | 返回 Agent 人格/提示词片段（由能力管理器 `invoke` 调用，不经 `route`） |
 
 ### 统一实体（**已下线**）
 
@@ -259,6 +258,7 @@ mcp_servers:
 | `{plugin}/entities/delete` | `vdfs/delete` |
 | `{plugin}/entities/status` | `vdfs/action { action: "test" }` |
 | `{plugin}/entities/detail` | 列表节点自带 `schema` |
+| `agent/bundle/export` | `vdfs/action { action: "export" }`（S13） |
 
 `EntityProvider` trait 与 `provider_registry()` 仍是**现行内部机制**（由
 `vdfs::EntityVdfsAdapter` 适配成挂载点），只是不再有对外地址：

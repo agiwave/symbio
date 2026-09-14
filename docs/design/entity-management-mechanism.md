@@ -1,6 +1,6 @@
 # 统一实体管理机制与规范
 
-状态：规范（**后端内部机制**；`entities/*` 调用协议已于 S11 下线，S12 补齐整包导入）
+状态：规范（**后端内部机制**；`entities/*` 调用协议已于 S11 下线，S12/S13 补齐整包导入与导出）
 范围：Symbio 全部「实体管理」类功能（顶层实体 + 容器子实体）
 
 > **对外已只有一个协议（S11）**：`entities/*` 调用协议已下线——不再有任何插件
@@ -9,7 +9,7 @@
 >
 > **本文件剩下的仍是现行机制**：`EntityProvider` trait（差异化钩子）、注册表
 > （`provider_registry` / `nav_meta_of`）、`entity_write` / `entity_delete`
-> （写盘与删除的唯一实现）、`entity_import_zip`（S12）、容器子实体钩子——它们由
+> （写盘与删除的唯一实现）、`entity_import_zip` / `entity_export_zip`（S12/S13）、容器子实体钩子——它们由
 > VDFS 的 `EntityVdfsAdapter` 调用，是「资源怎么存、怎么校验」的实现，与对外
 > 地址无关。
 >
@@ -79,6 +79,7 @@
 | `entities/upload`（zip） | **S12 起是「新建类型 `zip`」**：`vdfs/write`（二进制）→ `EntityProvider::import_zip` |
 | `entities/delete` | `vdfs/delete` → `entity_delete` |
 | `entities/status` | `vdfs/action { action: "test" }` → `EntityProvider::test_status` |
+| `agent/bundle/export` | `vdfs/action { action: "export" }`（S13）→ `EntityProvider::export_zip` |
 | `entities/detail` | 列表节点自带 `schema`（详情定义随列表下发） |
 | `entities/watch` / `unwatch` | `vdfs/watch` / `vdfs/unwatch`（容器子实体经 `watch_container`） |
 
@@ -283,8 +284,9 @@
    （`kind` / `order` / `label` / `supports_upload` / `supports_import` /
    `container_kinds`）——**插件 route 不再需要接任何分发**（`entities/*` 已下线），
    VDFS 侧由 `EntityVdfsAdapter` 自动为它生成 `.vdfs/<kind>` 挂载点；
-3. （可选）**整包导入**：`supports_import = true` + 按需重写 `import_zip`
-   （目录自管的类型必须重写；EntityStore 型走默认的通用解包）；
+3. （可选）**整包导入 / 导出**：`supports_import = true` + 按需重写
+   `import_zip` / `export_zip`（目录自管的类型必须重写；EntityStore 型走默认的
+   通用解包 / 打包，二者互为逆向），并在 `detail_definition` 里声明 `export` 动作；
 4. （可选）条目是容器：登记 `container_kinds` 并实现四个 `*_container_item` 钩子；
 5. （可选，**详情默认路径**）重写 `detail_definition` 钩子下发
    `DetailDefinition`（§3.2），前端零页面/零 ts 开发。

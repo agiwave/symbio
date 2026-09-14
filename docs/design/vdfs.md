@@ -191,6 +191,12 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 （语义自持，VDFS 不解释）。因此导入不额外占一个操作（详见
 [vdfs-frontend.md](vdfs-frontend.md) §5 与 §7 的 S12）。
 
+**导出是导入的逆动作**：它不新增第二个操作，而是一个**节点动作**——
+`vdfs/action { action: "export" }`，zip 随 `VdfsActionResult.data` 回传
+（载荷 `{id, filename, b64}`，与 `VdfsContent.b64` 同构）。provider 不支持
+时返回 `NotImplemented`，使用方据此不给出入口；支持与否由 provider 自陈，
+与「新建类型」同理（详见 [vdfs-frontend.md](vdfs-frontend.md) §7 的 S13）。
+
 ## 4. 访问位（r / w / l / t）
 
 访问位是**机制唯一的能力依据**，线上表示为紧凑字符串（按 `r` `w` `l` `t` 顺序）：
