@@ -1,0 +1,9 @@
+# ── 行尾统一 ─────────────────────────────────────────────────────────────
+# 仓库约定为 LF（见 `rustfmt.toml` 的 `newline_style = "Unix"`），且 CI 以
+# `cargo fmt --all -- --check` 作为门禁：rustfmt 遇到 CRLF 会**逐文件**报
+# "Incorrect newline style" 并以非零码退出，使 fmt 门禁形同失效。
+#
+# 历史提交中 `.rs` 混有 CRLF（其余 `.ts` / `.vue` / `.md` 均已为 LF），
+# 导致同一份代码在 Windows（autocrlf 开）与 CI（Linux）上结论不一致。
+# 此处显式锁定 `.rs` 的检出与入库行尾，避免再次漂移。
+*.rs text eol=lf

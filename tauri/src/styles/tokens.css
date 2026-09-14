@@ -42,8 +42,11 @@
 
   /* ── 语义色 semantic ──────────────────────────────────────────── */
   --success-fg:   #15803d;  --success-bg:   #ecfdf3;  --success-solid:   #16a34a;
+  --success-subtle-bg:  rgba(22, 163, 74, 0.10);
   --warning-fg:   #b45309;  --warning-bg:   #fffbeb;  --warning-solid:   #f59e0b;
   --danger-fg:    #b91c1c;  --danger-bg:    #fef2f2;  --danger-solid:    #dc2626;
+  --danger-subtle-bg:   rgba(220, 38, 38, 0.08);
+  --danger-border:      rgba(220, 38, 38, 0.30);
   --info-fg:      #1d4ed8;  --info-bg:      #eff6ff;  --info-solid:      #3b82f6;
 
   /* ── 圆角 radius ─────────────────────────────────────────────── */
@@ -190,8 +193,11 @@
 
   /* ── 语义色 semantic（深色）──────────────────────────────────── */
   --success-fg: #6ee7a8;  --success-bg: #10281c;  --success-solid: #22c55e;
+  --success-subtle-bg: rgba(34, 197, 94, 0.16);
   --warning-fg: #fcd34d;  --warning-bg: #2a2109;  --warning-solid: #f59e0b;
   --danger-fg:  #fca5a5;  --danger-bg:  #2a1618;  --danger-solid:  #ef4444;
+  --danger-subtle-bg: rgba(239, 68, 68, 0.16);
+  --danger-border:    rgba(239, 68, 68, 0.40);
   --info-fg:    #93c5fd;  --info-bg:    #0f2035;  --info-solid:    #3b82f6;
 
   /* ── 阴影（深色不可见，用描边替代）───────────────────────────── */

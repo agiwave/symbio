@@ -609,7 +609,10 @@ mod tests {
     async fn missing_workdir_param_is_internal_error() {
         let fs = PhysicalFs::new();
         let err = fs.list(&VdfsContext::empty(), "").await.unwrap_err();
-        assert!(matches!(err, VdfsError::Internal(_)), "接线错误不是用户错误");
+        assert!(
+            matches!(err, VdfsError::Internal(_)),
+            "接线错误不是用户错误"
+        );
     }
 
     /// 黑名单前缀命中即拒（读与写同规则）

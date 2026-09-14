@@ -175,12 +175,17 @@ function extractBindingClasses(expr, usages, prefixes) {
     return;
   }
   // 对象键（引号 / 非引号 / 简写 { expanded }）
-  for (const s of expr.matchAll(/([{,]\s*)'([^']+)'\s*:|([{,]\s*)"([^"]+)"\s*:/g)) {
+  //
+  // 注意：模板字面量的插值 `${...}` 不是对象字面量，必须先剔除——否则
+  // `` `role-${roleKey}` `` 会被"简写对象键"规则误判成使用了类名 `roleKey`
+  // （`{roleKey}` 与 `${roleKey}` 文本上只差一个 `$`）。
+  const noInterp = expr.replace(/\$\{[^{}]*\}/g, ' ');
+  for (const s of noInterp.matchAll(/([{,]\s*)'([^']+)'\s*:|([{,]\s*)"([^"]+)"\s*:/g)) {
     const key = s[2] ?? s[4];
     if (key) key.split(/\s+/).forEach(add);
   }
-  for (const s of expr.matchAll(/([{,]\s*)([a-zA-Z_][\w-]*)\s*:/g)) add(s[2]);
-  for (const s of expr.matchAll(/([{,]\s*)([a-zA-Z_][\w-]*)\s*(?=[},])/g)) add(s[2]);
+  for (const s of noInterp.matchAll(/([{,]\s*)([a-zA-Z_][\w-]*)\s*:/g)) add(s[2]);
+  for (const s of noInterp.matchAll(/([{,]\s*)([a-zA-Z_][\w-]*)\s*(?=[},])/g)) add(s[2]);
   // 三元分支值
   for (const s of expr.matchAll(/[?:]\s*'([^']*)'|\?\s*"([^"]*)"/g)) {
     const lit = s[1] ?? s[2];

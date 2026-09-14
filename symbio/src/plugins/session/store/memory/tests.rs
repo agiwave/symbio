@@ -42,7 +42,12 @@ async fn memory_store_roundtrip_contract() {
 
     // delete 后 load 回到"空 Session"语义
     store.delete_session("mem_a").await.unwrap();
-    assert!(store.load_session("mem_a").await.unwrap().messages.is_empty());
+    assert!(store
+        .load_session("mem_a")
+        .await
+        .unwrap()
+        .messages
+        .is_empty());
     assert_eq!(store.list_sessions().await.unwrap().len(), 1);
 }
 

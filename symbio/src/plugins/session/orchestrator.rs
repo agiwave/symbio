@@ -1187,14 +1187,11 @@ impl SessionPlugin {
     ) -> InvokeResponse<PluginPayload> {
         // 会话 id：头 → 请求体（此前只看头，`unwrap_or("default")` 使其必然报错，
         // 令 RPC 直连调用方无法通过 payload 指定会话）
-        let body_id = ctx
-            .payload::<serde_json::Value>()
-            .ok()
-            .and_then(|v| {
-                v.get("session_id")
-                    .and_then(|s| s.as_str())
-                    .map(|s| s.to_string())
-            });
+        let body_id = ctx.payload::<serde_json::Value>().ok().and_then(|v| {
+            v.get("session_id")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string())
+        });
         let session_id = resolve_required_session_id(&ctx, body_id.as_deref())?;
         let state = self.active_mgr.get_or_create(&session_id).await;
         self.handle_abort(&state).await;
@@ -1569,7 +1566,11 @@ mod tests {
         async fn early_return(mut guard: AiControlGuard) {
             guard.disarm().await;
         }
-        early_return(AiControlGuard { state: state.clone(), armed: true }).await;
+        early_return(AiControlGuard {
+            state: state.clone(),
+            armed: true,
+        })
+        .await;
 
         assert!(
             !is_registered(&state).await,
@@ -1583,7 +1584,10 @@ mod tests {
     async fn guard_drop_unregisters_even_without_explicit_disarm() {
         let state = armed_state().await;
         {
-            let _guard = AiControlGuard { state: state.clone(), armed: true };
+            let _guard = AiControlGuard {
+                state: state.clone(),
+                armed: true,
+            };
             // 故意不调用 disarm：离开作用域应由 Drop 清理
         }
         assert!(
@@ -1597,7 +1601,10 @@ mod tests {
     #[tokio::test]
     async fn disarmed_guard_does_not_clobber_next_turn_registration() {
         let state = armed_state().await;
-        let mut guard = AiControlGuard { state: state.clone(), armed: true };
+        let mut guard = AiControlGuard {
+            state: state.clone(),
+            armed: true,
+        };
         guard.disarm().await;
 
         // 模拟下一轮：新的控制通道登记进来

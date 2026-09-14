@@ -269,7 +269,11 @@ mod tests {
     #[test]
     fn relative_paths_resolve_against_cwd() {
         // 绝对路径样例需带盘符才算 Windows 绝对路径（is_absolute 语义）。
-        let abs = if cfg!(windows) { r"C:\abs\hd" } else { "/abs/hd" };
+        let abs = if cfg!(windows) {
+            r"C:\abs\hd"
+        } else {
+            "/abs/hd"
+        };
         let a = run(&["--workdir", "sub", "--homedir", abs]);
         let cwd = std::env::current_dir().unwrap();
         assert_eq!(a.workdir, cwd.join("sub"));

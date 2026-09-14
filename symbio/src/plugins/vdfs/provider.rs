@@ -140,9 +140,7 @@ impl ToolVdfs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::{
-        DefaultToolVisitor, InvokeRequestExt, SimpleRequest, WORKDIR,
-    };
+    use crate::symbio_core::{DefaultToolVisitor, InvokeRequestExt, SimpleRequest, WORKDIR};
     use async_trait::async_trait;
     use std::sync::Mutex;
 
@@ -226,9 +224,7 @@ mod tests {
     async fn virtual_address_is_routed_to_root() {
         let rec = Rec::new();
         let vdfs = tool_with_root(rec.clone()).await;
-        vdfs.read(&ctx(), ".vdfs/setting/appearance")
-            .await
-            .unwrap();
+        vdfs.read(&ctx(), ".vdfs/setting/appearance").await.unwrap();
         assert_eq!(rec.seen(), vec!["setting/appearance"]);
     }
 
@@ -360,11 +356,7 @@ mod tests {
         let rec = Rec::new();
         let vdfs = tool_with_root(rec.clone()).await;
         let r = vdfs.search(&ctx(), ".vdfs/x", "*.txt").await.unwrap();
-        assert_eq!(
-            r.results,
-            vec![".vdfs/x/a.txt"],
-            "结果与请求地址同坐标系"
-        );
+        assert_eq!(r.results, vec![".vdfs/x/a.txt"], "结果与请求地址同坐标系");
         assert!(!r.truncated);
         assert_eq!(rec.seen(), vec!["x"], "搜索走虚拟层的 list");
     }

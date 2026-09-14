@@ -228,9 +228,7 @@ impl VdfsProvider for UnifiedFs {
     /// 同一半内可移动；虚拟 ↔ 物理之间不允许（两者不是同一个存储）
     async fn move_item(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
         match (route(from)?, route(to)?) {
-            (Half::Virtual(f), Half::Virtual(t)) => {
-                self.virtual_root.move_item(ctx, &f, &t).await
-            }
+            (Half::Virtual(f), Half::Virtual(t)) => self.virtual_root.move_item(ctx, &f, &t).await,
             (Half::Physical(f), Half::Physical(t)) => self.physical.move_item(ctx, &f, &t).await,
             _ => Err(VdfsError::invalid(format!(
                 "不允许在系统资源与磁盘文件之间移动：{from} → {to}"
@@ -353,11 +351,7 @@ mod tests {
 
     fn fs() -> (UnifiedFs, Arc<V>, Arc<P>) {
         let (v, p) = (V::new(), P::new());
-        (
-            UnifiedFs::with_physical(v.clone(), p.clone()),
-            v,
-            p,
-        )
+        (UnifiedFs::with_physical(v.clone(), p.clone()), v, p)
     }
 
     // ==================== 地址代数 ====================
@@ -377,10 +371,7 @@ mod tests {
     #[test]
     fn traversal_is_rejected() {
         for bad in ["../x", "a/../b", ".vdfs/../../etc"] {
-            assert!(
-                normalize_addr(bad).is_err(),
-                "应拒绝向上穿越：{bad}"
-            );
+            assert!(normalize_addr(bad).is_err(), "应拒绝向上穿越：{bad}");
         }
     }
 
@@ -424,7 +415,10 @@ mod tests {
     #[tokio::test]
     async fn deep_virtual_address_keeps_dir_prefix() {
         let (f, v, _p) = fs();
-        let c = f.read(&VdfsContext::empty(), ".vdfs/session/abc").await.unwrap();
+        let c = f
+            .read(&VdfsContext::empty(), ".vdfs/session/abc")
+            .await
+            .unwrap();
         assert_eq!(v.seen(), vec!["session/abc"]);
         assert_eq!(c.path, ".vdfs/session/abc");
     }
@@ -501,8 +495,9 @@ mod tests {
             }
         }
         let f = UnifiedFs::with_physical(Arc::new(W) as DynVdfsProvider, P::new());
-        let got: Arc<std::sync::Mutex<Vec<(String, String, Option<String>)>>> =
-            Arc::new(std::sync::Mutex::new(Vec::new()));
+        // 捕获到的变更三元组（path / change / to）
+        type Captured = Arc<std::sync::Mutex<Vec<(String, String, Option<String>)>>>;
+        let got: Captured = Arc::new(std::sync::Mutex::new(Vec::new()));
         let out = got.clone();
         f.watch(
             &VdfsContext::empty(),

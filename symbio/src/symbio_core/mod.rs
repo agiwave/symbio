@@ -47,15 +47,15 @@ pub use tools::DefaultToolVisitor;
 pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };
-pub use vdfs::{
-    DynVdfsProvider, VdfsAccess, VdfsChange, VdfsContent, VdfsError, VdfsNode, VdfsProvider,
-    VdfsValidationError,
-};
 pub use turn::{
     build_assistant_messages, build_tool_message, emit_abort, emit_status, emit_update,
     execute_post_with_abort, get_http_client, parse_sse_stream, short_id,
     try_parse_partial_sse_line, PostResult, StreamChildIds, ToolCallAccumulator, ToolCallInfo,
     TurnOutput,
+};
+pub use vdfs::{
+    DynVdfsProvider, VdfsAccess, VdfsChange, VdfsContent, VdfsError, VdfsNode, VdfsProvider,
+    VdfsValidationError,
 };
 
 // 重导出 inventory 供 submit_object_creator! 宏使用

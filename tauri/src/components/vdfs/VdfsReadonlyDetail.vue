@@ -30,7 +30,7 @@
       <div v-if="node.updated_at" class="meta-row"><dt>更新时间</dt><dd>{{ updatedText }}</dd></div>
     </dl>
 
-    <div v-if="attributes.length" class="attrs">
+    <div v-if="attributes.length">
       <p class="attrs-title">扩展字段</p>
       <dl class="meta">
         <div v-for="a in attributes" :key="a.key" class="meta-row">

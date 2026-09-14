@@ -105,11 +105,7 @@ async fn test_replace_messages_never_deletes_archives() {
         "失去引用的存档不得由写入路径删除（交 L0 滚动回收）: {}",
         orphan.display()
     );
-    assert!(
-        kept.exists(),
-        "仍被引用的存档必须保留: {}",
-        kept.display()
-    );
+    assert!(kept.exists(), "仍被引用的存档必须保留: {}", kept.display());
     let stored = session.get_messages().await.expect("读取存储消息失败");
     assert_eq!(stored.len(), 2, "消息列表应被整体重写");
     assert!(
@@ -211,11 +207,7 @@ async fn setup_with_config(
     let dir = store
         .session_dir(&session_id)
         .expect("文件后端应返回会话目录");
-    let session = PersistentChatSession::new(
-        session_id,
-        Arc::new(RwLock::new(config)),
-        store,
-    );
+    let session = PersistentChatSession::new(session_id, Arc::new(RwLock::new(config)), store);
     (session, dir, tmp)
 }
 
@@ -311,10 +303,7 @@ async fn prune_drops_nodes_but_never_deletes_archive_files() {
     let mut msgs = tool_round("u1", "t1", "r1");
     msgs[2].meta = Some(serde_json::json!({ "archive_path": archive.to_str().unwrap() }));
     msgs.extend(tool_round("u2", "t2", "r2"));
-    session
-        .append_messages(msgs)
-        .await
-        .expect("初始落库失败");
+    session.append_messages(msgs).await.expect("初始落库失败");
 
     let stored = session.get_messages().await.expect("读取存储消息失败");
     assert!(
@@ -423,10 +412,7 @@ async fn max_messages_below_legacy_store_floor_is_honored() {
         "max_messages=2 应裁剪存储轮次，实际保留 {} 条",
         ctx.len()
     );
-    assert!(
-        ctx.iter().any(|m| m.id == "u5"),
-        "最近一轮用户消息必须保留"
-    );
+    assert!(ctx.iter().any(|m| m.id == "u5"), "最近一轮用户消息必须保留");
 }
 
 /// `max_messages = 0`：不限制，全部保留。

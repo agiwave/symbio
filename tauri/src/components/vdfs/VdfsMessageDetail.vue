@@ -148,10 +148,10 @@ const meta = computed(() => {
   color: var(--accent);
 }
 .role-user {
-  background: var(--success-subtle-bg, var(--accent-subtle-bg));
+  background: var(--success-subtle-bg);
 }
 .role-tool {
-  background: var(--bg-subtle, var(--accent-subtle-bg));
+  background: var(--surface-sunken);
   color: var(--text-secondary);
 }
 .type,

@@ -104,7 +104,11 @@ mod tests {
         let empty = serde_json::to_value(Request::default()).unwrap();
         let full = serde_json::to_value(fully_populated()).unwrap();
 
-        assert_eq!(sorted_keys(&empty), sorted_keys(&full), "键集合必须与取值无关");
+        assert_eq!(
+            sorted_keys(&empty),
+            sorted_keys(&full),
+            "键集合必须与取值无关"
+        );
         // 且 None 字段以显式 null 存在（而非缺键）
         assert_eq!(empty["load_history"], serde_json::Value::Null);
     }
@@ -114,13 +118,20 @@ mod tests {
     #[test]
     fn absent_fields_deserialize_as_none_not_zero() {
         let r: Request = serde_json::from_str("{}").unwrap();
-        assert_eq!(r.auto_compress, None, "缺键必须是 None（chat_loop 据此取默认 true）");
-        assert_eq!(r.max_tool_rounds, None, "缺键必须是 None（0 会被解释成 0 轮熔断）");
+        assert_eq!(
+            r.auto_compress, None,
+            "缺键必须是 None（chat_loop 据此取默认 true）"
+        );
+        assert_eq!(
+            r.max_tool_rounds, None,
+            "缺键必须是 None（0 会被解释成 0 轮熔断）"
+        );
         assert_eq!(r.load_history, None, "缺键必须是 None（默认加载历史）");
 
-        let r2: Request =
-            serde_json::from_str(r#"{"auto_compress":null,"max_tool_rounds":null,"load_history":null}"#)
-                .unwrap();
+        let r2: Request = serde_json::from_str(
+            r#"{"auto_compress":null,"max_tool_rounds":null,"load_history":null}"#,
+        )
+        .unwrap();
         // `null` 与缺键等价（Request 未派生 PartialEq，逐字段比对）
         assert_eq!(r2.auto_compress, r.auto_compress);
         assert_eq!(r2.max_tool_rounds, r.max_tool_rounds);

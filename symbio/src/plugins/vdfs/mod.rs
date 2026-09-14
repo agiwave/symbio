@@ -38,6 +38,6 @@ mod fs;
 mod host;
 mod physical;
 mod plugin;
-mod provider;
 mod protocol;
+mod provider;
 mod tools;

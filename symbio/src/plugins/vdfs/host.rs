@@ -86,10 +86,7 @@ pub fn empty_root() -> DynVdfsProvider {
 ///
 /// 调用方需已确保 `visitor` 存在（LLM 链路里它是硬前提，缺失应显式报错）。
 pub async fn root_of(visitor: &Arc<dyn CapabilityVisitor>) -> DynVdfsProvider {
-    visitor
-        .get_vdfs_root()
-        .await
-        .unwrap_or_else(empty_root)
+    visitor.get_vdfs_root().await.unwrap_or_else(empty_root)
 }
 
 /// 构造本次调用的统一文件系统（虚拟层 + 物理层）。
@@ -691,8 +688,8 @@ async fn tree(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::physical::PhysicalFs;
+    use super::*;
     use crate::symbio_core::vdfs_provider::VFDS_KIND_DIR;
     use crate::symbio_core::{PluginError, PluginMeta, SimpleRequest};
     use async_trait::async_trait;
@@ -873,8 +870,8 @@ mod tests {
 
     impl TestRoot {
         fn resolve(&self, path: &str) -> VdfsResult<(&DynVdfsProvider, String)> {
-            let (d, rel) = split_dir(path)
-                .ok_or_else(|| VdfsError::invalid("根目录不是可操作节点"))?;
+            let (d, rel) =
+                split_dir(path).ok_or_else(|| VdfsError::invalid("根目录不是可操作节点"))?;
             let p = self
                 .dirs
                 .iter()
@@ -1121,7 +1118,10 @@ mod tests {
         let resp = dispatch(&fs, VFDS_READ, &ctx).await.unwrap().unwrap();
         let c = resp.get::<VdfsContent>().unwrap();
         assert_eq!(c.text.as_deref(), Some("hello"));
-        assert_eq!(c.path, ".vdfs/mem/a.txt", "provider 未填 path，由访问层回填");
+        assert_eq!(
+            c.path, ".vdfs/mem/a.txt",
+            "provider 未填 path，由访问层回填"
+        );
 
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/sub/b.md" }));
         let n = dispatch(&fs, VFDS_STAT, &ctx)
@@ -1170,10 +1170,7 @@ mod tests {
 
         // 字段级校验错误：载荷序列化为 JSON 置于错误文案位，可解析还原
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt", "text": "bad" }));
-        let err = dispatch(&fs, VFDS_WRITE, &ctx)
-            .await
-            .unwrap()
-            .unwrap_err();
+        let err = dispatch(&fs, VFDS_WRITE, &ctx).await.unwrap().unwrap_err();
         let PluginError::ValidationError(text) = err else {
             panic!("应为校验错误");
         };

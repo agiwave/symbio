@@ -429,8 +429,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
         id: &str,
         manifest: Option<&str>,
     ) -> crate::symbio_core::entities::EntitySummary {
-        let Some(raw) =
-            manifest.and_then(|c| serde_json::from_str::<ModelProviderConfig>(c).ok())
+        let Some(raw) = manifest.and_then(|c| serde_json::from_str::<ModelProviderConfig>(c).ok())
         else {
             return crate::symbio_core::entities::EntitySummary::new(
                 crate::symbio_core::entities::ENTITY_MODEL,
@@ -665,14 +664,23 @@ mod tests {
             ..Default::default()
         };
         let extra = model_summary_extra(&cfg, true);
-        assert_eq!(extra.get("provider").and_then(|v| v.as_str()), Some("openai"));
+        assert_eq!(
+            extra.get("provider").and_then(|v| v.as_str()),
+            Some("openai")
+        );
         assert_eq!(extra.get("model").and_then(|v| v.as_str()), Some("gpt-4o"));
-        assert_eq!(extra.get("is_default").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            extra.get("is_default").and_then(|v| v.as_bool()),
+            Some(true)
+        );
         // 关键断言：完整 config 必须随摘要下发，详情读才能拿到字段值
         let config = extra.get("config").expect("extra.config 必须存在");
         assert_eq!(config.get("id").and_then(|v| v.as_str()), Some("openai-1"));
         assert_eq!(config.get("model").and_then(|v| v.as_str()), Some("gpt-4o"));
-        assert_eq!(config.get("provider").and_then(|v| v.as_str()), Some("openai"));
+        assert_eq!(
+            config.get("provider").and_then(|v| v.as_str()),
+            Some("openai")
+        );
     }
 
     #[test]
@@ -687,7 +695,10 @@ mod tests {
         let extra = model_summary_extra(&cfg, false);
         let full = serde_json::to_value(&cfg).unwrap();
         assert_eq!(extra.get("config"), Some(&full));
-        assert_eq!(extra.get("is_default").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            extra.get("is_default").and_then(|v| v.as_bool()),
+            Some(false)
+        );
     }
 }
 

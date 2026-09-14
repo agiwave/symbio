@@ -29,16 +29,16 @@
 //! 广播中构造 [`ToolVdfs::new(visitor)`] 并把工具注册进同一个 visitor。执行时
 //! visitor 里已注册好全部挂载 provider（容器同时注册的组合根供前端链路使用）。
 
-pub mod list;
-pub mod tree;
-pub mod stat;
-pub mod read;
-pub mod edit;
-pub mod search;
-pub mod write;
 pub mod delete;
+pub mod edit;
+pub mod list;
 pub mod mkdir;
 pub mod r#move;
+pub mod read;
+pub mod search;
+pub mod stat;
+pub mod tree;
+pub mod write;
 
 use crate::symbio_core::{
     Capability, CapabilityCategory, CapabilityMeta, InvokeRequest, InvokeRequestExt,
@@ -147,8 +147,10 @@ mod tests {
     /// 每个工具名与操作一一对应（工具集完整性）
     #[test]
     fn tools_cover_all_ops() {
-        let names: Vec<String> =
-            vdfs_tools(empty_provider()).iter().map(|t| t.name()).collect();
+        let names: Vec<String> = vdfs_tools(empty_provider())
+            .iter()
+            .map(|t| t.name())
+            .collect();
         assert_eq!(
             names,
             vec![

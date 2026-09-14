@@ -15,9 +15,7 @@ use super::model_chat;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
-    session::chat_message::{
-        ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
-    },
+    session::chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
     HookEvent,
 };
 use crate::symbio_core::turn::{
@@ -348,7 +346,9 @@ pub async fn run_chat_loop(
     let cfg_defaults = SessionConfig::default();
     let auto_compress = req.auto_compress.unwrap_or(cfg_defaults.auto_compress);
     // context_compact 主动压缩机制默认关闭，必须在插件配置中显式开启才生效
-    let enable_compact_tool = req.enable_compact_tool.unwrap_or(cfg_defaults.enable_compact_tool);
+    let enable_compact_tool = req
+        .enable_compact_tool
+        .unwrap_or(cfg_defaults.enable_compact_tool);
 
     let mut tool_rounds: usize = 0;
     let mut continuation_count: u32 = 0;
@@ -575,7 +575,9 @@ pub async fn run_chat_loop(
         //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
         // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
         let request_view: Vec<ChatMessage> = {
-            let window = req.tool_context_window.unwrap_or(cfg_defaults.tool_context_window);
+            let window = req
+                .tool_context_window
+                .unwrap_or(cfg_defaults.tool_context_window);
             let retention: std::collections::HashMap<
                 String,
                 crate::symbio_core::ToolContextRetention,

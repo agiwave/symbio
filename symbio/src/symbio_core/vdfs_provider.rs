@@ -1465,5 +1465,4 @@ mod tests {
         assert!(P.watch(&ctx, "", Arc::new(|_| {})).await.is_ok());
         assert!(P.unwatch(&ctx, "").await.is_ok());
     }
-
 }

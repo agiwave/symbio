@@ -521,7 +521,8 @@ impl VdfsProvider for EntityVdfsAdapter {
                 // 读取，否则详情页会因读不到数据而报错。仅无详情定义的容器（session）
                 // 才按目录拒绝。
                 if !self.container_kinds().is_empty()
-                    && self.provider
+                    && self
+                        .provider
                         .detail_definition(&host, &self.id_of(path))
                         .await
                         .is_none()
@@ -878,7 +879,10 @@ mod tests {
             Some(VFDS_NEW_SOURCE_FILE),
             "整包的内容来自本地文件"
         );
-        assert!(a.root_access().list && a.root_access().traverse, "bundle 有容器语义：可列 + 可遍历");
+        assert!(
+            a.root_access().list && a.root_access().traverse,
+            "bundle 有容器语义：可列 + 可遍历"
+        );
         assert!(!a.root_access().write, "只读：不可覆盖写内容、不可建目录");
     }
 

@@ -43,7 +43,7 @@
       >
         <button v-if="stack.length > 1" type="button" class="menu-back" @click="popStack">
           <span class="back-arrow">←</span>
-          <span class="back-label">{{ parentLabel }}</span>
+          <span>{{ parentLabel }}</span>
         </button>
         <div v-if="menuLoading" class="menu-hint">加载中…</div>
         <div v-else-if="!menuChildren.length" class="menu-hint">暂无可选项</div>

@@ -184,9 +184,9 @@ const mechanismActions = computed<DetailAction[]>(() => {
   flex-shrink: 0;
   margin: 0.5rem 1rem 0;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--danger-border, var(--border-default));
+  border: 1px solid var(--danger-border);
   border-radius: var(--radius-md);
-  background: var(--danger-subtle-bg, var(--surface-sunken));
+  background: var(--danger-subtle-bg);
 }
 .banner-msg {
   margin: 0;

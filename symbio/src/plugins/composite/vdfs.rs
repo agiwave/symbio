@@ -210,10 +210,7 @@ impl VdfsProvider for CompositeVdfs {
         let dirs = self.children_of(ctx).await?;
         match split_first(path) {
             // 自身目录：子目录清单（合成，无需子 provider 参与）
-            None => Ok(dirs
-                .iter()
-                .map(|(d, p)| Self::dir_node(d, p))
-                .collect()),
+            None => Ok(dirs.iter().map(|(d, p)| Self::dir_node(d, p)).collect()),
             Some(_) => {
                 let (dir, p, rel) = Self::resolve(&dirs, path)?;
                 let mut items = p.list(ctx, &rel).await?;
@@ -474,10 +471,7 @@ mod tests {
         let dirs = vdfs.children_of(&ctx).await.unwrap();
 
         for (dir, label) in [("alpha", "甲"), ("beta", "乙")] {
-            let (name, p) = dirs
-                .iter()
-                .find(|(n, _)| n == dir)
-                .expect("该子目录应存在");
+            let (name, p) = dirs.iter().find(|(n, _)| n == dir).expect("该子目录应存在");
             assert_eq!(name, dir);
             assert_eq!(p.label(), Some(label), "provider 与目录名一一对应");
         }
@@ -572,9 +566,7 @@ mod tests {
         assert!(err.to_string().contains("alpha"), "提示现有目录");
 
         assert!(matches!(
-            vdfs.move_item(&ctx, "alpha/a", "beta/a")
-                .await
-                .unwrap_err(),
+            vdfs.move_item(&ctx, "alpha/a", "beta/a").await.unwrap_err(),
             VdfsError::Invalid(_)
         ));
     }

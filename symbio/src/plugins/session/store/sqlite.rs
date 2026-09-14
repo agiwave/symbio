@@ -185,7 +185,10 @@ mod tests {
         assert_eq!(store.list_sessions().await.unwrap().len(), 1);
 
         // list 按 updated_at 降序
-        store.save_session(&session_with("v2_sess_b")).await.unwrap(); // 1000
+        store
+            .save_session(&session_with("v2_sess_b"))
+            .await
+            .unwrap(); // 1000
         let listed = store.list_sessions().await.unwrap();
         assert_eq!(listed[0].id, "v2_sess_a"); // 2000 在前
         assert_eq!(listed[1].id, "v2_sess_b");
@@ -194,7 +197,12 @@ mod tests {
         let archive = store.session_dir("v2_sess_a").unwrap();
         tokio::fs::create_dir_all(&archive).await.unwrap();
         store.delete_session("v2_sess_a").await.unwrap();
-        assert!(store.load_session("v2_sess_a").await.unwrap().messages.is_empty());
+        assert!(store
+            .load_session("v2_sess_a")
+            .await
+            .unwrap()
+            .messages
+            .is_empty());
         assert!(!archive.exists());
     }
 
@@ -207,7 +215,14 @@ mod tests {
         let store = SqliteSessionStore::open(tmp.path().to_path_buf())
             .await
             .unwrap();
-        store.save_session(&session_with("v2_sess_p")).await.unwrap();
-        assert!(store.list_sub_sessions("v2_sess_p").await.unwrap().is_empty());
+        store
+            .save_session(&session_with("v2_sess_p"))
+            .await
+            .unwrap();
+        assert!(store
+            .list_sub_sessions("v2_sess_p")
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

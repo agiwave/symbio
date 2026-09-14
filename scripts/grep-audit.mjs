@@ -190,16 +190,24 @@ console.log()
 // ── S-007: CHANGELOG 维护检查 ──────────────────────────────────────────
 console.log('--- S-007: CHANGELOG 维护检查 ---')
 
-const changelog = path.join(scopeAbs, 'docs', 'CHANGELOG.md')
+// 约定（见 CONTRIBUTING.md「提交规范」）：对外可见的变更统一记入**仓库级**
+// `docs/CHANGELOG.md`。agent 插件自身的 `docs/` 树（含其插件级 CHANGELOG）
+// 已在 OAB 简化时并入 `docs/design/open-agent-bundle-spec.md`，不再单独维护。
+// 因此：scope 下若仍有插件级 CHANGELOG 则优先检查它，否则回退到仓库级。
+// 标题格式按实际约定放宽为 `## vNN` 或 `## YYYY-MM-DD`。
+const scopedChangelog = path.join(scopeAbs, 'docs', 'CHANGELOG.md')
+const changelog = fs.existsSync(scopedChangelog)
+  ? scopedChangelog
+  : path.join(repoRoot, 'docs', 'CHANGELOG.md')
 if (!fs.existsSync(changelog)) {
   err(`${disp(changelog)} 不存在`)
 } else {
   const head = fs
     .readFileSync(changelog, 'utf8')
     .split(/\r?\n/)
-    .find((l) => /^## v\d+/.test(l))
-  if (!head) err(`${disp(changelog)} 无 ## vNN 版本标题`)
-  else ok(`CHANGELOG 最新版本标题：${head}`)
+    .find((l) => /^## (v\d+|\d{4}-\d{2}-\d{2})/.test(l))
+  if (!head) err(`${disp(changelog)} 无版本/日期标题（## vNN 或 ## YYYY-MM-DD）`)
+  else ok(`CHANGELOG 最新标题：${head}`)
 }
 console.log()
 
