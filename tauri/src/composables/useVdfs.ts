@@ -515,9 +515,11 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
   watch(
     cwd,
     (next, prev) => {
-      if (prev && prev !== next) void unwatchVdfs(prev)
+      // 虚拟根不在任何 provider 身上、无实时能力；跳过 watch/unwatch，否则后端报
+      // 「虚拟根不是可操作节点」（见服务器日志 vdfs/watch / vdfs/unwatch 的 ERROR）。
+      if (prev && prev !== VFDS_ROOT && prev !== next) void unwatchVdfs(prev)
       watched = next
-      void watchVdfs(next)
+      if (next !== VFDS_ROOT) void watchVdfs(next)
     },
     { immediate: true }
   )
@@ -525,7 +527,7 @@ export function useVdfs(opts: UseVdfsOptions = {}) {
   onBeforeUnmount(() => {
     unsubBus()
     if (refreshTimer) clearTimeout(refreshTimer)
-    if (watched) void unwatchVdfs(watched)
+    if (watched && watched !== VFDS_ROOT) void unwatchVdfs(watched)
   })
 
   // 路由 `:mount` 变化 → 进入对应挂载点（深链/前进后退）。

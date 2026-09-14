@@ -18,7 +18,7 @@ use crate::symbio_core::{
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
@@ -377,6 +377,25 @@ impl Default for ModelPlugin {
 // 列表项 `extra` 展开 `config`（完整 ModelProviderConfig）与 `is_default`，
 // 使 chat 侧（`listModelProviders`）与 VDFS 详情共用同一读取入口。
 
+/// 单个 Provider 的摘要 `extra`。
+///
+/// 详情页 `read`（经 `summarize`）与列表 `list_items`（经 `provider.list_items`）
+/// 必须产出同一份 `extra`——尤其是完整 `config`——否则详情读不到配置、
+/// 表单回退成「新建 Provider」空表单（VDFS 迁移后暴露：详情读经由
+/// `summary_of → summarize`，而 model 此前只在 `list_items` 里填了 config）。
+fn model_summary_extra(p: &ModelProviderConfig, is_default: bool) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert("provider".to_string(), json!(p.provider));
+    m.insert("model".to_string(), json!(p.model));
+    m.insert("api_protocol".to_string(), json!(p.api_protocol));
+    m.insert("temperature".to_string(), json!(p.temperature));
+    m.insert("is_default".to_string(), json!(is_default));
+    if let Ok(Value::Object(o)) = serde_json::to_value(p) {
+        m.insert("config".to_string(), Value::Object(o));
+    }
+    m
+}
+
 #[async_trait]
 impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
     fn kind(&self) -> &'static str {
@@ -398,6 +417,46 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
         _id: &str,
     ) -> Option<crate::symbio_core::schemas::entities::DetailDefinition> {
         Some(super::detail::model_detail_definition())
+    }
+
+    /// 单项摘要（`summary_of` 用它产出节点；详情 `read` 也经它取 `extra.config`）。
+    ///
+    /// **必须重写**：默认 `summarize` 不读 `manifest`，会丢掉 `config`，导致详情页
+    /// `read` 拿到空 `extra`、表单回退成「新建 Provider」空表单。
+    async fn summarize(
+        &self,
+        _ctx: &Arc<dyn InvokeRequest>,
+        id: &str,
+        manifest: Option<&str>,
+    ) -> crate::symbio_core::entities::EntitySummary {
+        let Some(raw) =
+            manifest.and_then(|c| serde_json::from_str::<ModelProviderConfig>(c).ok())
+        else {
+            return crate::symbio_core::entities::EntitySummary::new(
+                crate::symbio_core::entities::ENTITY_MODEL,
+                id,
+                id,
+            );
+        };
+        let mut it = crate::symbio_core::entities::EntitySummary::new(
+            crate::symbio_core::entities::ENTITY_MODEL,
+            &raw.id,
+            raw.name.clone(),
+        );
+        it.status = if raw.enabled {
+            "active".to_string()
+        } else {
+            "disabled".to_string()
+        };
+        it.description = Some(raw.model.clone());
+        let is_default = {
+            let providers = self.providers.read().await;
+            providers.default_provider_id.as_deref() == Some(raw.id.as_str())
+        };
+        if let serde_json::Value::Object(ref mut m) = it.extra {
+            m.extend(model_summary_extra(&raw, is_default));
+        }
+        it
     }
 
     /// 列表来自内存注册表（启动时镜像磁盘）
@@ -423,17 +482,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
                 it.description = Some(p.model.clone());
                 let is_default = providers.default_provider_id.as_deref() == Some(p.id.as_str());
                 if let serde_json::Value::Object(ref mut m) = it.extra {
-                    let _ = m.insert("provider".to_string(), serde_json::json!(p.provider));
-                    let _ = m.insert("model".to_string(), serde_json::json!(p.model));
-                    let _ = m.insert(
-                        "api_protocol".to_string(),
-                        serde_json::json!(p.api_protocol),
-                    );
-                    let _ = m.insert("temperature".to_string(), serde_json::json!(p.temperature));
-                    let _ = m.insert("is_default".to_string(), serde_json::json!(is_default));
-                    if let Ok(cfg) = serde_json::to_value(p) {
-                        let _ = m.insert("config".to_string(), cfg);
-                    }
+                    m.extend(model_summary_extra(p, is_default));
                 }
                 it
             })
@@ -596,6 +645,49 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
                 status_detail: Some(e),
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 回归：详情 `read` 经 `summarize` 必须产出 `extra.config`（完整配置）。
+    /// 否则详情表单拿不到字段值、标题回退成「新建 Provider」空表单。
+    #[test]
+    fn summary_extra_carries_full_config() {
+        let cfg = ModelProviderConfig {
+            id: "openai-1".into(),
+            name: "我的 OpenAI".into(),
+            provider: "openai".into(),
+            api_base: "https://api.openai.com/v1".into(),
+            model: "gpt-4o".into(),
+            ..Default::default()
+        };
+        let extra = model_summary_extra(&cfg, true);
+        assert_eq!(extra.get("provider").and_then(|v| v.as_str()), Some("openai"));
+        assert_eq!(extra.get("model").and_then(|v| v.as_str()), Some("gpt-4o"));
+        assert_eq!(extra.get("is_default").and_then(|v| v.as_bool()), Some(true));
+        // 关键断言：完整 config 必须随摘要下发，详情读才能拿到字段值
+        let config = extra.get("config").expect("extra.config 必须存在");
+        assert_eq!(config.get("id").and_then(|v| v.as_str()), Some("openai-1"));
+        assert_eq!(config.get("model").and_then(|v| v.as_str()), Some("gpt-4o"));
+        assert_eq!(config.get("provider").and_then(|v| v.as_str()), Some("openai"));
+    }
+
+    #[test]
+    fn summary_extra_config_matches_serialized_model() {
+        let cfg = ModelProviderConfig {
+            id: "x".into(),
+            name: "X".into(),
+            provider: "anthropic".into(),
+            model: "claude".into(),
+            ..Default::default()
+        };
+        let extra = model_summary_extra(&cfg, false);
+        let full = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(extra.get("config"), Some(&full));
+        assert_eq!(extra.get("is_default").and_then(|v| v.as_bool()), Some(false));
     }
 }
 
