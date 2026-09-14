@@ -2,8 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use super::model_providers::ModelProviderConfig;
-
 pub use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, ContentPart, MessageContent, MessageRole,
 };

@@ -9,7 +9,6 @@
 //!   session 插件
 
 use super::bound_provider::BoundProvider;
-use super::handlers;
 use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
 use crate::symbio_core::schemas::common;
@@ -230,33 +229,6 @@ impl ModelPlugin {
             providers: Arc::new(RwLock::new(providers)),
             parent: Arc::new(RwLock::new(parent)),
         }
-    }
-
-    pub fn config_schema() -> Value {
-        json!({
-            "type": "object",
-            "required": ["provider", "model"],
-            "properties": {
-                "provider": {
-                    "type": "string",
-                    "title": "LLM 提供商",
-                    "description": "供应商标识 (如 openMODEL, anthropic, lmstudio, ollama 等)",
-                    "examples": ["openai", "anthropic", "lmstudio", "ollama"]
-                },
-                "api_base": { "type": "string", "title": "API 基础路径", "description": "API 基础路径" },
-                "api_key": { "type": "string", "title": "API 密钥", "description": "API 密钥", "sensitive": true },
-                "model": { "type": "string", "title": "模型名称", "description": "默认模型名称" },
-                "api_protocol": {
-                    "type": "string",
-                    "title": "协议类型",
-                    "description": "使用的 API 协议",
-                    "default": "openai_responses"
-                },
-                "temperature": { "type": "number", "title": "温度", "minimum": 0, "maximum": 2, "default": 0.7 },
-                "max_tokens": { "type": "integer", "title": "最大 Token", "minimum": 1, "default": 8192 },
-                "system_prompt": { "type": "string", "title": "系统提示词", "description": "全局系统提示词" }
-            }
-        })
     }
 
     /// 获取父插件引用
@@ -663,21 +635,10 @@ impl Plugin for ModelPlugin {
                 self.persist_to_parent(&ctx).await?;
                 Ok(PluginPayload::new(&common::SuccessResponse::default()))
             }
-            "config/schema" => Ok(PluginPayload::new(&common::SchemaResponse {
-                schema: Self::config_schema(),
-            })),
-
-            // chat 族路由属于 session 插件（会话编排），本插件不实现
-            "chat_sync" => Err(PluginError::NotImplemented),
-            "status" => {
-                let providers = self.providers.read().await;
-                let active = providers
-                    .resolve(providers.default_provider_id.as_deref())
-                    .cloned()
-                    .unwrap_or_default();
-                Ok(PluginPayload::new(&handlers::handle_status(&active)))
-            }
-
+            // `config/schema` / `status` / `chat_sync` 已下线：
+            // - 字段定义改由 `detail_definition`（随 VDFS 节点 `schema` 下发）；
+            // - 连通性自检改由节点动作 `vdfs/action { action: "test" }`；
+            // - `chat_sync` 本就是 NotImplemented 占位，chat 族归 session 插件。
             _ => Err(PluginError::NotFound(format!("未知路径: {path}"))),
         }
     }

@@ -367,8 +367,4 @@ impl SessionPlugin {
             session,
         ))))
     }
-
-    pub async fn invoke_config_schema(&self) -> InvokeResponse<Value> {
-        Ok(json!({ "schema": Self::config_schema() }))
-    }
 }

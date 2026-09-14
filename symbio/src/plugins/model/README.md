@@ -20,7 +20,7 @@
 | Path | 说明 |
 |------|------|
 | `entities/*` | 统一实体协议（Provider 实体的 create/get/update/delete/query，见 `docs/design/entity-management-mechanism.md`） |
-| `config/get` / `config/set` / `config/schema` | 引擎参数配置 |
+| `config/get` / `config/set` | 引擎参数配置（字段定义随 `.vdfs/model` 节点 `schema` 下发） |
 | `status` | 引擎/Provider 状态 |
 | `chat_sync` | 同步单轮调用（当前返回 NotImplemented，预留接口） |
 

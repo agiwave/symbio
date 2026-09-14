@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-use super::schemas::{setting_get, setting_list};
 use crate::symbio_core::schemas::entities::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
@@ -17,7 +16,6 @@ use crate::symbio_core::vdfs::{
     self, DynVdfsProvider, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsFieldError,
     VdfsNode, VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse,
 };
-use tracing::info;
 
 #[derive(Clone)]
 pub struct SettingPlugin {
@@ -72,41 +70,10 @@ impl Plugin for SettingPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
+        // `setting/list` / `setting/get` 已随 VDFS 下线：分区清单与取值分别由
+        // `.vdfs/setting` 的 `vdfs/list` / `vdfs/read` 承担（旧的 list 还硬编码
+        // 着「常规设置 / Model 设置」两个历史分类，与现行六分区早已不符）。
         match path {
-            "list" => {
-                let categories = vec![
-                    setting_list::SettingCategory {
-                        id: "general".to_string(),
-                        name: "常规设置".to_string(),
-                        icon: "settings".to_string(),
-                    },
-                    setting_list::SettingCategory {
-                        id: "model".to_string(),
-                        name: "Model 设置".to_string(),
-                        icon: "smart_toy".to_string(),
-                    },
-                ];
-                Ok(PluginPayload::new(&setting_list::Response { categories }))
-            }
-            "get" => {
-                let req: setting_get::Request = ctx.payload()?;
-
-                let cfg = self.config.read().await;
-                // 尝试从配置中按分类提取，如果没有该分类，则返回空对象
-                let category_settings =
-                    cfg.get(&req.category).cloned().unwrap_or_else(|| json!({}));
-
-                info!(
-                    category = %req.category,
-                    keys = ?category_settings.as_object().map(|o| o.keys().collect::<Vec<_>>()),
-                    "获取分类设置"
-                );
-
-                Ok(PluginPayload::new(&setting_get::Response {
-                    category: req.category.clone(),
-                    settings: category_settings,
-                }))
-            }
             CONFIG_GET => {
                 let cfg = self.config.read().await;
                 // 扁平化契约：直接返回 Value 对象，不包 Response.config

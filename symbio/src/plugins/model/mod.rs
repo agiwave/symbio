@@ -18,7 +18,6 @@
 
 mod bound_provider;
 mod detail;
-mod handlers;
 pub mod message_builder;
 mod model_providers;
 mod plugin;
