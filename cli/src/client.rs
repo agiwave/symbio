@@ -297,9 +297,7 @@ impl SymbioClient {
                     r.on_abort();
                     break;
                 }
-                StreamEvent::Connected { .. }
-                | StreamEvent::Disconnected
-                | StreamEvent::SessionResumed { .. } => {}
+                StreamEvent::Connected { .. } | StreamEvent::Disconnected => {}
             }
         }
 

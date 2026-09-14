@@ -94,12 +94,3 @@ export interface OptionsRequest {
 export interface OptionsResponse {
   nodes: OptionNode[]
 }
-
-/** 状态取值（与实体机制 §2.4 同一语义） */
-export const OPTION_STATUS = {
-  active: 'active',
-  working: 'working',
-  disabled: 'disabled',
-  error: 'error',
-  unknown: 'unknown',
-} as const

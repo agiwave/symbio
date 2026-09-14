@@ -28,23 +28,14 @@ export const VFDS_ACTION = 'vdfs/action'
  * 前端与后端共用同一套地址口径，**不存在另一套线路翻译**。 */
 export const VFDS_ROOT = '.vdfs'
 
-/** 前端地址前缀（与后端 `UnifiedFs::VFDS_ADDR_ROOT`、LLM 侧 ToolVdfs 同源） */
-export const VFDS_PREFIX = '.vdfs'
-
 /** 节点状态（与实体机制同一约定） */
-export const VFDS_STATUS_ACTIVE = 'active'
 export const VFDS_STATUS_WORKING = 'working'
-export const VFDS_STATUS_DISABLED = 'disabled'
-export const VFDS_STATUS_ERROR = 'error'
-export const VFDS_STATUS_UNKNOWN = 'unknown'
-
-/** 节点基础类型 */
-export const VFDS_KIND_DIR = 'dir'
-export const VFDS_KIND_FILE = 'file'
 
 /** 约定呈现扩展名（宿主可自行扩展） */
 export const VFDS_EXT_FORM = 'form'
 export const VFDS_EXT_SESSION = 'session'
+/** 单条对话消息（**列表项**：正文在内容里，结构在 `attributes` 里） */
+export const VFDS_EXT_MESSAGE = 'message'
 export const VFDS_EXT_TEXT = 'text'
 export const VFDS_EXT_JSON = 'json'
 export const VFDS_EXT_MARKDOWN = 'md'
@@ -137,13 +128,6 @@ export interface VdfsContent {
   etag?: string
 }
 
-/** 节点动作请求（`action` 与 `payload` 原样透传，前端不解释语义） */
-export interface VdfsActionRequest {
-  path: string
-  action: string
-  payload?: unknown
-}
-
 /** 节点动作结果 */
 export interface VdfsActionResponse {
   /** 回显的动作标识（便于配对请求） */
@@ -213,18 +197,41 @@ export interface VdfsMoveResponse {
   to: string
 }
 
-/** 变更类型 */
+/** 变更类型
+ *
+ *  后端还会发 `renamed`——前端不区分它（无专用常量），按通用变更走重拉即可。 */
 export const VFDS_CHANGE_CREATED = 'created'
 export const VFDS_CHANGE_UPDATED = 'updated'
 export const VFDS_CHANGE_DELETED = 'deleted'
-export const VFDS_CHANGE_RENAMED = 'renamed'
+/** **追加型**变更：节点内容尾部新增了一段（携带 `delta`）。
+ *  与 `updated` 的区别是增量的——消费者直接拼接，无需重读整个节点。
+ *  列表型数据的流式输出（如会话转写里一条正在生成的消息）走这一种。 */
+export const VFDS_CHANGE_APPENDED = 'appended'
 
 /** 数据变更事件（总线下发的形状；后端 `VdfsChangeEvent`）。
- *  路径即对外展示地址（`.vdfs/…` 或工作目录相对地址），消费方直接比对。 */
+ *  路径即对外展示地址（`.vdfs/…` 或工作目录相对地址），消费方直接比对。
+ *
+ *  ## 载荷按变更类型可选（不是装饰）
+ *
+ *  事件只说「哪里、怎么变」；「变成了什么」按类型附在下面两个字段上：
+ *
+ *  | 变更 | 载荷 | 消费者动作 | 额外往返 |
+ *  |---|---|---|---|
+ *  | `appended` | `delta` | 尾部拼接 | **0**（热路径，逐帧） |
+ *  | `created` / `updated` | `node`（+ `content`） | 就地插入 / 替换 | **0** |
+ *  | 未带载荷 | — | 回退 `stat` + `read` | 1–2 |
+ *
+ *  `delta`（多了什么）与 `content`（现在是什么）语义互斥，不会同时出现。 */
 export interface VdfsChange {
   path: string
   change: string
   to?: string
+  /** 追加型变更（`VFDS_CHANGE_APPENDED`）携带的**增量文本**；其余变更为 undefined */
+  delta?: string
+  /** **节点视图**（`created` / `updated` 可携带）：变更后该节点的元数据 */
+  node?: VdfsNode
+  /** **内容快照**（`created` / `updated` 可携带）：变更后该节点的正文 */
+  content?: string
 }
 
 /** 字段级校验错误（provider 自持校验的产物） */
@@ -304,6 +311,58 @@ export function vdfsAccessOf(node: { access?: string } | null | undefined): Vdfs
 /** 节点是否为目录（机制判定只看访问位） */
 export function isVdfsDir(node: { access?: string } | null | undefined): boolean {
   return vdfsAccessOf(node).list
+}
+
+// ==================== 会话转写地址（地址代数的会话特例） ====================
+//
+// 会话在 VDFS 上是「叶子 + 内部区段」：
+//
+//   .vdfs/session/<sid>             会话叶子（ext = session，点开即聊天工作区）
+//   .vdfs/session/<sid>/消息        转写列表（`l`）—— 会话的**本体**
+//   .vdfs/session/<sid>/消息/<mid>  单条消息（ext = message，`r`）
+//
+// 与后端 `plugins/session/plugin.rs` 的 `SEG_MESSAGES` / `message_path` 同源：
+// **地址的「拼」与「解」必须成对**，两边各只有一份实现，改地址方案时漏改一边
+// 会被两侧的单测挡住。
+
+/** 转写列表的路径段（后端 `session::SEG_MESSAGES`；同时是展示名） */
+export const VFDS_SEG_MESSAGES = '消息'
+
+/** 会话清单的挂载名（`.vdfs/session`） */
+export const VFDS_SESSION_DIR = 'session'
+
+/** 单个会话的地址：`.vdfs/session/<id>`（叶子） */
+export function vdfsSessionAddr(sessionId: string): string {
+  return vdfsJoin(vdfsJoin(VFDS_ROOT, VFDS_SESSION_DIR), sessionId)
+}
+
+/** 会话转写列表的地址：`.vdfs/session/<id>/消息` */
+export function vdfsMessagesAddr(sessionId: string): string {
+  return vdfsJoin(vdfsSessionAddr(sessionId), VFDS_SEG_MESSAGES)
+}
+
+/** 单条消息的地址：`.vdfs/session/<id>/消息/<mid>` */
+export function vdfsMessageAddr(sessionId: string, messageId: string): string {
+  return vdfsJoin(vdfsMessagesAddr(sessionId), messageId)
+}
+
+/**
+ * 反向解析：从一条变更路径取出会话 id 与（可选的）消息 id。
+ *
+ * 不是转写路径（含 `.vdfs/session` 清单本身、会话叶子、子会话 / 工作目录区段）
+ * 一律返回 `null`——调用方据此跳过，无需自己切字符串。
+ */
+export function parseTranscriptPath(
+  path: string,
+): { sessionId: string; messageId?: string } | null {
+  const prefix = `${VFDS_ROOT}/${VFDS_SESSION_DIR}/`
+  if (!path.startsWith(prefix)) return null
+  const segs = path.slice(prefix.length).split('/')
+  const sessionId = segs[0]
+  if (!sessionId || segs[1] !== VFDS_SEG_MESSAGES) return null
+  if (segs.length === 2) return { sessionId }
+  if (segs.length === 3 && segs[2]) return { sessionId, messageId: segs[2] }
+  return null
 }
 
 /** 生效的呈现扩展名：显式 ext 优先，否则由 name 推导 */

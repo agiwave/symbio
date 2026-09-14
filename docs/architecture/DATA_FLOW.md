@@ -66,15 +66,15 @@ sequenceDiagram
 
 **排障口诀**：外部调不通 → 先 `GET /api/v1/health`，再查 #2 鉴权与监听地址。
 
-## 通用：资源访问链路（`vdfs/*`，`.vdfs/<挂载点>/…`）
+## 通用：资源访问链路（`vdfs/*`，`.vdfs/<子目录>/…`）
 
 > `{plugin}/entities/*` 已于 S11 下线（协议），实体机制退为**内部抽象**：
-> 由 `vdfs::EntityVdfsAdapter` 把 `EntityProvider` 适配成 VDFS 挂载点。
+> 由 `vdfs::EntityVdfsAdapter` 把 `EntityProvider` 适配成 VDFS 子目录。
 
 | # | 环节 | 代码位置 | 说明 |
 |---|------|---------|------|
-| 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 14 个操作：providers / list / tree / stat / read / write / mkdir / delete / move / watch / unwatch / action … |
-| 2 | 挂载点来源 | `provider_registry()`（经 `EntityVdfsAdapter`）与各插件自持的 `VdfsProvider` | 挂载名即 kind；能力来自访问位 + `supports_upload` / `supports_import` |
+| 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 13 个操作：list / tree / stat / read / write / mkdir / delete / move / edit / search / watch / unwatch / action |
+| 2 | 子目录来源 | 各插件自持的 `VdfsProvider`（经 `EntityVdfsAdapter` 适配的实体，或原生 provider） | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
 | 3 | 机制详解 | [design/vdfs.md](../design/vdfs.md)、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范；内部实体机制见 [design/entity-management-mechanism.md](../design/entity-management-mechanism.md) |
 
 ## 全链路追踪

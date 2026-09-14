@@ -22,6 +22,7 @@
 import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
 import { startSessionBusWatcher } from '@/services/sessionBusWatcher'
+import { startTranscriptSync } from '@/services/vdfsTranscriptSync'
 import { getWorkspacePath } from '@/services/home'
 import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
@@ -31,6 +32,13 @@ onMounted(async () => {
   // 启动全局会话事件监听（一次即可，跨页面共享）
   // 这一步必须在会话页（VDFS session 子目录）挂载之前，否则首屏会错过事件
   startSessionBusWatcher()
+
+  // 启动转写同步（VDFS 变更 → 会话消息 store）
+  //
+  // 消息本体走 `kind = "vdfs"`，会话级事件（状态 / 标题 / 错误 / 中止）仍走
+  // `startSessionBusWatcher`——两者**各管一段，互不重叠**：若消息同时被两个
+  // 通道写入，流式文本会被追加两次（叠字）。
+  startTranscriptSync()
 
   // 恢复全局会话状态：lastWorkdir 供新建会话作默认工作区；
   // sessions store 清单供聊天组件查元数据

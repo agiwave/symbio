@@ -132,6 +132,9 @@ fn to_change_event(change: &VdfsChange) -> VdfsChangeEvent {
         path: change.path.clone(),
         change: change.change.clone(),
         to: change.to.clone(),
+        delta: change.delta.clone(),
+        node: change.node.clone(),
+        content: change.content.clone(),
     }
 }
 
@@ -270,7 +273,7 @@ async fn list(
     vctx: &VdfsContext,
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
-    let req: VdfsListRequest = payload_or_default(ctx);
+    let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
 
     let mut items = root.list(vctx, &addr).await?;
@@ -325,7 +328,7 @@ async fn read(
     vctx: &VdfsContext,
     ctx: &Arc<dyn InvokeRequest>,
 ) -> InvokeResponse<PluginPayload> {
-    let req: VdfsReadRequest = payload_or_default(ctx);
+    let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     let mut c = root.read(vctx, &addr).await?;
     if c.path.is_empty() {
@@ -531,7 +534,10 @@ pub(crate) async fn search_via(
             "不允许使用绝对路径。请使用相对 Glob 模式。",
         ));
     }
-    if pattern.contains("../") || pattern.contains("..\\") || pattern == ".." {
+    // 与物理层、shell 策略共用同一条规则（按段判定，与分隔符无关）：
+    // 原先的 `contains("../") || contains("..\\") || == ".."` 会放过 `a/..`
+    // 这种 `..` 收尾的写法——三处各写一份，就必然三处各漏一处。
+    if has_parent_segment(pattern) {
         return Err(VdfsError::invalid(
             "不允许在 Glob 模式中使用路径遍历 ('..')。",
         ));
@@ -1364,6 +1370,27 @@ mod tests {
         // 物理半的地址原样保留
         let n = to_change_event(&VdfsChange::new("README.md", VFDS_CHANGE_CREATED));
         assert_eq!(n.path, "README.md");
+    }
+
+    /// 变更载荷（节点视图 / 内容快照 / 增量）原样过信封——本层不解释也不裁剪
+    #[test]
+    fn change_event_passes_payload_through() {
+        use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsNode};
+
+        let node =
+            VdfsNode::file("m1", "助手", VdfsAccess::READ).with_path(".vdfs/session/abc/消息/m1");
+        let e = to_change_event(
+            &VdfsChange::new(".vdfs/session/abc/消息/m1", VFDS_CHANGE_UPDATED)
+                .with_node(node)
+                .with_content("正文"),
+        );
+        assert_eq!(e.node.as_ref().map(|n| n.name.as_str()), Some("m1"));
+        assert_eq!(e.content.as_deref(), Some("正文"));
+        assert!(e.delta.is_none(), "全量与增量是两个字段，不同时出现");
+
+        let a = to_change_event(&VdfsChange::appended(".vdfs/session/abc/消息/m1", "增量"));
+        assert_eq!(a.delta.as_deref(), Some("增量"));
+        assert!(a.node.is_none() && a.content.is_none());
     }
 
     // ==================== 根解析 ====================

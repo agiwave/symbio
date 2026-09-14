@@ -127,9 +127,17 @@ impl UnifiedFs {
         }
     }
 
+    /// 树内口径 → 展示口径（`session/x` → `.vdfs/session/x`）。
+    ///
+    /// **只改非空 `path`**：空 `path` 是「provider 未填」的信号，由访问层
+    /// （`host::fill_paths`）按请求地址回填成 `<父地址>/<子名>`；若在这里把它
+    /// 补成 `.vdfs`，信号即被破坏，子节点会被错认成根。本函数与 `stat` /
+    /// `read` / `write` 三处的回填口径因此完全一致：**只翻译已填的，不代填。**
     fn retag(&self, nodes: &mut [VdfsNode]) {
         for n in nodes.iter_mut() {
-            n.path = to_display(&n.path);
+            if !n.path.is_empty() {
+                n.path = to_display(&n.path);
+            }
         }
     }
 }
@@ -246,16 +254,13 @@ impl VdfsProvider for UnifiedFs {
     /// 只有虚拟层的资源会自发变更；物理层的订阅按 no-op 处理（trait 缺省）。
     ///
     /// 事件里的路径补成对外展示地址，消费者拿到的坐标系与请求时一致。
+    /// 用 [`VdfsChange::map_paths`] 一次覆盖全部路径（含 `node` 载荷内的路径），
+    /// 不逐字段重建——新增字段时不会漏转发。
     async fn watch(&self, ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
         match route(path)? {
             Half::Virtual(v) => {
-                let wrapped: VdfsChangeSink = Arc::new(move |c: VdfsChange| {
-                    sink(VdfsChange {
-                        path: to_display(&c.path),
-                        change: c.change,
-                        to: c.to.as_deref().map(to_display),
-                    })
-                });
+                let wrapped: VdfsChangeSink =
+                    Arc::new(move |c: VdfsChange| sink(c.map_paths(to_display)));
                 self.virtual_root.watch(ctx, &v, wrapped).await
             }
             Half::Physical(p) => self.physical.watch(ctx, &p, sink).await,

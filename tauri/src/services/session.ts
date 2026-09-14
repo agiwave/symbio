@@ -8,7 +8,6 @@ import { callPlugin } from './plugin'
 import { listVdfs } from './vdfs'
 import { VFDS_ROOT, VFDS_STATUS_WORKING, vdfsJoin } from '@/schemas/vdfs'
 import { ChatMessage as SessionMessage } from '../schemas/chat_message'
-import * as SessionGetMessages from '../schemas/session_get_messages'
 import * as SessionList from '../schemas/session_list'
 import * as SessionClear from '../schemas/session_clear'
 import * as SessionUpdate from '../schemas/session_update'
@@ -47,33 +46,6 @@ export async function listSessions(): Promise<SessionList.SessionListItem[]> {
       metadata: v.metadata ?? {},
     }
   })
-}
-
-/**
- * 分页获取会话消息
- */
-export async function getSessionMessages(
-  sessionId: string,
-  limit: number = 20,
-  before?: number
-): Promise<{ messages: SessionMessage[]; hasMore: boolean; total: number }> {
-  // 注：当前后端 schema 仅返回 messages；保留 hasMore/total 用于向前兼容
-  const result = await callPlugin<SessionGetMessages.Response>(
-    `${SESSION_PATH}/get_messages`,
-    {
-      session_id: sessionId,
-      limit,
-      ...(before ? { before } : {})
-    },
-    undefined,
-    { session_id: sessionId }
-  )
-  const msgs = result.messages || []
-  return {
-    messages: msgs,
-    hasMore: false,
-    total: msgs.length
-  }
 }
 
 export async function clearSession(sessionId: string): Promise<void> {

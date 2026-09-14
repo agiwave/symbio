@@ -72,9 +72,13 @@
       </template>
 
       <template #empty>
-        <p>{{ selectedName ? '此目录为空' : '暂无子目录' }}</p>
-        <p v-if="canCreate" class="hint">点击右上角「新建」添加</p>
-        <p v-else class="hint">该目录由系统管理</p>
+        <!-- 列表加载失败与「目录为空」是两件事：前者必须说出来，否则会被读成「没有数据」 -->
+        <p v-if="loadError" class="prompt-error">{{ loadError }}</p>
+        <template v-else>
+          <p>{{ selectedName ? '此目录为空' : '暂无子目录' }}</p>
+          <p v-if="canCreate" class="hint">点击右上角「新建」添加</p>
+          <p v-else class="hint">该目录由系统管理</p>
+        </template>
       </template>
 
       <template #detail>
@@ -245,6 +249,7 @@ const {
   title,
   items,
   loading,
+  loadError,
   refresh,
   select,
   selectedNode,
@@ -297,11 +302,11 @@ const rendererComp = computed(() => {
   return getVdfsRenderer(resolveVdfsRenderer(selectedNode.value)) ?? null
 })
 
-/** 渲染器数据：form → 字段值对象；文本类 → 文本；其余 → 不传 */
+/** 渲染器数据：form → 字段值对象；文本类（含 message 的正文）→ 文本；其余 → 不传 */
 const rendererData = computed<unknown>(() => {
   const r = renderer.value
   if (r === 'form') return formData.value
-  if (r === 'text' || r === 'json' || r === 'markdown') return nodeText.value
+  if (r === 'text' || r === 'json' || r === 'markdown' || r === 'message') return nodeText.value
   return null
 })
 

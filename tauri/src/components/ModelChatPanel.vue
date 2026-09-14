@@ -54,13 +54,6 @@
 
     <!-- 输入控制区域 -->
     <div class="chat-controls">
-      <!-- 上下文预览栏 -->
-      <ChatContextBar
-        :context="context"
-        :visible="hasContext"
-        :session-id="sessionId"
-      />
-
       <!-- 输入区域 -->
       <ChatInputArea
         ref="inputAreaRef"
@@ -80,7 +73,6 @@
 <script setup lang="ts">
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, provide } from 'vue'
 import { useChatConnection, type ResumePayload } from '@/composables/useChatConnection'
-import { useModelContext, buildContextualMessage, resetModelContext } from '@/composables/useModelContext'
 import { useChatScroll } from '@/composables/useChatScroll'
 import { type ChatMessage, type MessageContent, type ContentPart, type ChatRole } from '@/services/model'
 import type { ImageAttachment } from '@/types'
@@ -88,21 +80,16 @@ import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 
 import MessageNode from './MessageNode.vue'
-import ChatContextBar from './chat/ChatContextBar.vue'
 import ChatInputArea from './chat/ChatInputArea.vue'
 import ChatOptionBar from './chat/ChatOptionBar.vue'
 
 // Props（多会话缩略窗口架构下，ModelChatPanel 只接收 sessionId）
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   sessionId: string
   onSendComplete?: () => void
-  /** 是否把 Model 上下文（文件 / 选区）拼到消息里并显示 ChatContextBar。默认 true */
-  showContext?: boolean
   /** 内部 useChatConnection 的 isLoading 变化回调（用于跨组件状态同步） */
   onLoadingChange?: (loading: boolean) => void
-}>(), {
-  showContext: true
-})
+}>()
 
 // --- 状态管理 ---
 const messagesRef = ref<HTMLElement | null>(null)
@@ -113,7 +100,6 @@ const attachedImages = ref<ImageAttachment[]>([])
 const editing = ref<{ id: string; content: string; isJson: boolean } | null>(null)
 
 // --- Composables ---
-const { context, pendingInputInject } = useModelContext()
 const { scrollToBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
 
 const chat = useChatConnection({
@@ -139,42 +125,6 @@ const messageTree = chat.messageTree
 const sessionsStore = useSessionsStore()
 
 // --- 计算属性 ---
-const hasContext = computed(() => {
-  if (!context.value) return false
-  return !!(context.value.filePath || context.value.selectedText)
-})
-
-// 监听"输入注入"请求：把外部组件（文件编辑器等）发来的文本
-// 写入当前会话的 inputText，并聚焦输入框。
-watch(
-  () => pendingInputInject.value,
-  (req) => {
-    if (!req) return
-    if (req.sessionId !== props.sessionId) return
-
-    // 已有内容时换行拼接，避免覆盖用户正在输入的内容
-    const cur = inputText.value ?? ''
-    const sep = cur.trim().length > 0 ? '\n\n' : ''
-    inputText.value = cur + sep + req.text
-
-    // 清空 inject 槽位
-    pendingInputInject.value = null
-
-    // 聚焦 + 光标定位
-    nextTick(() => {
-      const ta: HTMLTextAreaElement | undefined = inputAreaRef.value?.textarea?.value
-        ?? inputAreaRef.value?.textarea
-      if (!ta) return
-      ta.focus()
-      // focusEnd=false → 把光标放在文本开头，让用户先看到上下文
-      const pos = req.focusEnd ? ta.value.length : 0
-      try {
-        ta.setSelectionRange(pos, pos)
-      } catch (_) { /* 某些环境下不支持 */ }
-    })
-  }
-)
-
   // 会话级错误状态（"错误是状态、不是节点"的兜底展示）：仅当没有任何 Failed Turn 节点、
   // 但会话整体因错误中止（transport 级失败 / send 在首帧前失败）时非空。此时没有"造成
   // 中止的节点"可挂重试，错误作为会话级状态展示在会话错误条，并许可重试。
@@ -233,23 +183,18 @@ function handleSend() {
   const images = [...attachedImages.value]
   if (!text && images.length === 0) return
 
-  const ctx = context.value
-  const contextualContent = ctx && (ctx.filePath || ctx.selectedText)
-    ? buildContextualMessage(text, ctx)
-    : text
-
   // 构建消息内容
   let content: MessageContent
   if (images.length > 0) {
     const parts: ContentPart[] = []
-    if (contextualContent) parts.push({ type: 'text', text: contextualContent })
+    if (text) parts.push({ type: 'text', text })
     images.forEach(img => parts.push({
       type: 'image_url',
       image_url: { url: `data:${img.mimeType};base64,${img.base64}` }
     }))
     content = parts
   } else {
-    content = contextualContent
+    content = text
   }
 
   const userMessage = {
@@ -264,12 +209,6 @@ function handleSend() {
   attachedImages.value.forEach(img => img.thumbnailUrl && URL.revokeObjectURL(img.thumbnailUrl))
   attachedImages.value = []
   inputAreaRef.value?.resetHeight()
-
-  // 消息已发送并附带上下文后，清空 Model 上下文，
-  // ChatContextBar 卡片会随之隐藏（避免下一次输入还误带旧选区）
-  if (ctx && (ctx.filePath || ctx.selectedText)) {
-    resetModelContext()
-  }
 
   nextTick(() => scrollToBottom())
 

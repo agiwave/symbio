@@ -248,8 +248,8 @@ mcp_servers:
 ## 通用：统一实体管理（`{plugin}/entities/*`）—— **已下线**
 
 > **S11 起本节不再是有效路由**：资源访问统一经 VDFS（`vdfs/*`），地址口径
-> `.vdfs/<挂载点>/…`，挂载点清单由 `vdfs/providers` 下发。见
-> [design/vdfs.md](../design/vdfs.md) 与
+> `.vdfs/<子目录>/…`；子目录清单就是 `.vdfs` 自身的 `vdfs/list`，没有独立的
+> 清单端点。见 [design/vdfs.md](../design/vdfs.md) 与
 > [design/vdfs-frontend.md](../design/vdfs-frontend.md)。
 
 | 原路径 | 现在的路径 |
@@ -263,9 +263,9 @@ mcp_servers:
 | `agent/bundle/export` | `vdfs/action { action: "export" }`（S13） |
 
 `EntityProvider` trait 与 `provider_registry()` 仍是**现行内部机制**（由
-`vdfs::EntityVdfsAdapter` 适配成挂载点），只是不再有对外地址：
+`vdfs::EntityVdfsAdapter` 适配成 `.vdfs` 子目录），只是不再有对外地址：
 
-| kind | 挂载点 | 可新建 | 可整包导入 | 容器子实体 |
+| kind | 地址 | 可新建 | 可整包导入 | 容器子实体 |
 |------|--------|--------|------------|------------|
 | `session` 会话 | `.vdfs/session` | 否（走 SessionStore + 前端专属 editor） | 否 | 子会话 / 目录树 |
 | `model` 模型 | `.vdfs/model` | 是 | 否 | — |

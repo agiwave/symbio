@@ -103,18 +103,21 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 
 ### 3.2 与线路协议的关系（关键）
 
-**线路协议不变**：`vdfs/*` 的 `path` 仍是**规范化全路径** `/…`（`vdfs.md` §3.1、
-不变量 3）。`.vdfs` 是**前端 / LLM 的地址口径**，二者在**服务层一处**完成翻译：
+**地址口径前后端同源**：`vdfs/*` 的 `path` 就是**展示地址**本身——
+`.vdfs/...` 打头的是虚拟层，其余是物理层（`vdfs.md` §3.1、不变量 3）。
+判别规则只有一条，且唯一实现在后端门面 `plugins/vdfs/fs.rs::UnifiedFs`：
 
-```
-前端地址  .vdfs/session/abc   ──toWirePath──▶   /session/abc   （线路 path）
-线路返回  /session/abc        ──toVdfsPath──▶   .vdfs/session/abc（前端节点 path）
+```text
+前端 / LLM 地址    .vdfs/session/abc   ──原样上线──▶  线路 path = ".vdfs/session/abc"
+线路返回节点 path  ".vdfs/session/abc"  ──原样使用──▶  前端直接寻址 / 比对
 ```
 
-- 翻译点**唯一**：`services/vdfs.ts`（请求出站前 `toWirePath`；响应入站后
-  `toVdfsPath` 递归改写 `path` / `root` / `to` 等字段）。
-- 页面逻辑、渲染器、路径代数**一律只认 `.vdfs` 口径**，不认识 `/` 口径。
-- 后端机制**零改动**——`.vdfs` 不进机制、不进 provider、不进协议。
+- **前端服务层不做任何地址翻译**：`services/vdfs.ts` 只封装调用，
+  没有 `toWirePath` / `toVdfsPath`（后端 `normalize_addr` 也已不强加前导 `/`，
+  `.vdfs` 与工作目录相对地址、绝对路径三者形态各异，统一成段序列即可）。
+- 页面逻辑、渲染器、路径代数**只认 `.vdfs` 口径**。
+- **口径翻译唯一在后端一处**：`.vdfs/session/x` ↔ 树内 `session/x`
+  （`UnifiedFs` 进出两处各一次）。provider 永远只见自己子树内的相对路径。
 
 ### 3.3 路径代数
 
@@ -296,7 +299,7 @@ source = file 的类型（整包导入）：名称来自文件名
 | **S6 会话内部重建** | 会话内部结构（子会话 / 工作目录树）改由 VDFS 同名目录承载，原容器实体页可替代 | S5 的阻塞解除 |
 | **S7 容器子实体重建** | 通用适配器按 `container_kinds` 支持 `<id>/<子类别>/<条目>`；agent bundle 内部（提示词 / 技能 / MCP）上 VDFS | 容器页最后一处不可替代能力消失 |
 | **S8 会话清单上 VDFS** | 会话节点自带 `message_count` / `metadata` / `meta_tags`；`listSessions()` 改走 `vdfs/list`，`services/entities.ts` 删除 | 前端 `entities/*` 调用点归零 |
-| **S9 导航可见性** | 机制层新增 `VdfsProvider::nav_visible()`（缺省 `true`），经挂载节点属性 → `VdfsMountInfo.nav_visible` 透传；`local` 声明 `false`，前端按标记过滤 | 左栏 = 六类资源，无按名硬编码 |
+| **S9 导航可见性** | ~~机制层新增 `VdfsProvider::nav_visible()`~~ **已整体撤销**：物理层从 `plugins/local` 迁入 `plugins/vdfs`，本地文件不再是子目录，左栏自然回到「六类资源」，无需可见性标记 | 左栏 = 六类资源，无按名硬编码（**结果达成，机制未引入**） |
 | **S10 节点动作** | 新增 `vdfs/action` 操作 + `VdfsProvider::action()`（默认 `NotImplemented`）；适配器把 `test` 接到 `EntityProvider::test_status`；前端把「测试连接」接回 | S5 后丢失的连通性自检回归 |
 | **S11 下线 `entities/*` 协议** | 6 个插件不再路由 `entities/*`，`entities::dispatch` 与其请求/响应、zip 工具一并删除；网关只读白名单改列 `vdfs/*` 读操作 | 对外只剩 VDFS 一个资源协议 |
 | **S12 整包导入** | `VdfsNewType.source`（`file`）+ `EntityProvider::import_zip` 钩子；适配器的二进制 `write` 承接导入（agent 走 `BundleStore::import`），agent 补上 `delete_item` | S5/S11 后丢失的 zip 导入回归，且**不新增协议操作** |
@@ -346,9 +349,9 @@ source = file 的类型（整包导入）：名称来自文件名
 - **S4 其余迁移**（**已完成**）：`model` / `agent` / `skill` / `mcp` 四类不再各写一份
   provider，而是由**一个通用适配器**统一接入。
   - **通用适配器** `symbio_core/vdfs/entity_adapter.rs` 的 `EntityVdfsAdapter`：
-    把**任意** `EntityProvider` 接成 VDFS 挂载点。核心洞见——实体机制与 VDFS 是
+    把**任意** `EntityProvider` 接成 VDFS 子目录。核心洞见——实体机制与 VDFS 是
     **同一批资源的两套寻址方式**，因此复用既有能力而非重写：
-    挂载点 label / order / 可写性 / `new_types` ← `entities::provider_registry()`；
+    子目录 label / order / 可写性 / `new_types` ← `entities::provider_registry()`；
     `list` ← `list_items`；`stat` / 节点呈现 ← `summarize` + `detail_definition`；
     `read` ← 摘要 `extra.config`（与实体详情页预填**同源**）；
     `write` / `delete` ← `entity_write` / `entity_delete`；`watch` ← provider 侧
@@ -376,8 +379,9 @@ source = file 的类型（整包导入）：名称来自文件名
   - **`form` 渲染器补删除动作**：`VdfsFormDetail` 原先假设 `form` = 设置分区（增删无语义）；
     S4 起 `model` / `skill` / `mcp` 详情也走 `form`，故按访问位注入 `mechanismActions`
     （`w` ⇒ 可删），经 `@delete` 回页面层统一走 `vdfs/delete`（与 `VdfsSessionDetail` 同构）。
-  - **已知取舍（第 1 条已由 S9 解决）**：`local`（本地文件）同为 VDFS 挂载点，故左栏
-    曾出现第 7 项；S9 在机制层引入 `nav_visible` 标记后隐藏，前端仍不按名过滤。
+  - **已知取舍**：`local`（本地文件）当时同为 VDFS 子目录，故左栏曾出现第 7 项；
+    该问题的最终解法不是可见性标记，而是把物理层从 `plugins/local` 迁入
+    `plugins/vdfs`（见 `plugins/vdfs/physical.rs` 模块文档与 §7.1 的 S9 记录）。
     `agent` 的新建暂不支持 VDFS 路径（zip 语义）。
 - **S5 下线旧协议**（**已完成**）：
   - **第一步（已完成）**：旧专项路由重定向改指 VDFS 页——
@@ -422,7 +426,7 @@ source = file 的类型（整包导入）：名称来自文件名
       `.vdfs` 页面不另开监听；
     - `stat(<id>)` 按**目录视图**回答（只给 `l`）——`stat` 结果被分发层用作
       「当前目录节点」，其访问位决定是否给出新建入口。
-  - 前端：`useVdfs.creatableTypes` 的挂载点回退**仅限挂载点根**——否则每个
+  - 前端：`useVdfs.creatableTypes` 的子目录回退**仅限会话根**——否则每个
     子目录都会长出与其语义无关的新建入口（如工作目录里出现「新建会话」）。
 
 - **S7 容器子实体在 VDFS 上重建**（**已完成**）：把 S6 的会话内部寻址**推广到
@@ -457,24 +461,19 @@ source = file 的类型（整包导入）：名称来自文件名
     （`DetailDefinition` 仍是 VDFS `ext = form` 的宿主方言），后端 `entities/*`
     协议与其注册表继续为 VDFS 适配器服务。
 
-- **S9 导航可见性（机制层声明）**（**已完成**）：左栏规范是「六类资源」，但
-  `local`（本地文件）同样是 VDFS 挂载点，故曾多出第 7 项。按 S4 记录的正确做法
-  ——**在机制层引入可见性标记，而不是前端按名过滤**——落地如下：
+- **S9 导航可见性**（**已落地，但机制已整体撤销**）：左栏规范是「六类资源」，
+  而 `local`（本地文件）当时是第 7 个子目录。S9 的做法是在机制层引入
+  `VdfsProvider::nav_visible()` + 节点属性 + `VdfsMountInfo.nav_visible`
+  + 前端过滤，把 `local` 藏起来。
 
-  | 层 | 改动 |
-  | --- | --- |
-  | trait | `VdfsProvider::nav_visible()`，缺省 `true`（与 `label` / `order` / `icon` 同为呈现层声明） |
-  | 挂载节点 | `mount_node()` 在不可见时写入属性 `nav_visible = false`（场景数据，VDFS 只透传；缺省不序列化） |
-  | 挂载视图 | `VdfsMountInfo.nav_visible`（缺省 `true`，`true` 时不序列化）——`host.rs` 从节点属性读、`.vdfs` 合成挂载点节点时同样读该属性（工具链路 `vdfs_list('.vdfs')` 直接看到过滤后的结果） |
-  | 声明方 | `plugins/local/vdfs.rs` 覆写 `nav_visible() -> false`：本地文件树是挂载点，但不是资源类别 |
-  | 前端 | `schemas/vdfs.ts` 新增 `mountNavVisible()`；`useNavRail` / `useVdfs` 的导航项按标记过滤 |
+  **该整套机制随后被删除**：物理文件层从 `plugins/local` 迁入 `plugins/vdfs`
+  （见 `plugins/vdfs/physical.rs` 的模块文档），它不再是子目录、不参与 `.vdfs`
+  的目录合成，左栏自然只剩六类资源。于是 `nav_visible`、`mount_node()`、
+  `VdfsMountInfo`、`vdfs/providers` 端点、`plugins/local/vdfs.rs`
+  与前端 `mountNavVisible()` 一并退场——**问题消失了，而不是被标记掩盖**。
 
-  - **隐藏 ≠ 裁剪能力**：隐藏的子树照旧可寻址、可读写、可被 LLM 使用，
-    挂载表（`vdfs/list .vdfs`）也照旧列出它；可见性只影响**导航呈现**。
-  - **前端零名称知识**：过滤条件是标记本身，新增挂载点无需改前端，
-    也不会因改名而失效。
-  - 覆盖：`mount_node_marks_nav_visibility`（节点属性 + 挂载表仍含隐藏项）、
-    `providers_carry_nav_visibility`（整链透传）、`mountNavVisible`（前端过滤）。
+  这是一次「先加机制、再发现机制不必存在」的记录：正确结论是
+  **一个东西不该出现在左栏，就不该是子目录**，而不是给它打一个隐藏标记。
 
 - **S10 节点动作（`vdfs/action`）**（**已完成**）：S5 下线实体页时丢了一项能力——
   `model` / `mcp` 的「测试连接」仍在后端（`EntityProvider::test_status`），
@@ -506,10 +505,10 @@ source = file 的类型（整包导入）：名称来自文件名
   | --- | --- |
   | mcp / model / session / setting / skill | 删掉 `route()` 里的 `entities::dispatch` 分支 |
   | agent | 删掉 `entities/list|detail|get|upload|delete` 五个分支与 `entities_*` 三个处理函数（保留 `bundle/*`） |
-  | home | 删掉 `entities/providers`（资源类别改由 `vdfs/providers` 下发）及其 `provider_order_override` |
+  | home | 删掉 `entities/providers`（资源类别改由 `.vdfs` 目录合成下发）及其 `provider_order_override` |
   | `symbio_core/entities.rs` | 删除 `dispatch` 与 7 个 `dispatch_*`、zip 工具、`providers_response*`；保留 `EntityProvider` trait + `entity_write` / `entity_delete`（适配器的唯一依赖） |
   | `schemas/entities.rs` | 删除 `ENTITIES_*` 路径常量与协议请求/响应（保留 `DetailDefinition`、`EntitySummary`、`EntityUploadResponse` / `EntityStatusResponse`） |
-  | gateway | 只读白名单由 `entities/*` 换成 VDFS 读操作（`vdfs/providers|list|tree|stat|read|search`） |
+  | gateway | 只读白名单由 `entities/*` 换成 VDFS 读操作（`vdfs/list|tree|stat|read|search`） |
 
   - **实体机制退为内部抽象**：`EntityProvider` 仍在（它是「资源怎么存、怎么校验」的
     实现），但不再有对外地址；唯一消费者是 `EntityVdfsAdapter`。

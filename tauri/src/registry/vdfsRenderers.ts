@@ -15,6 +15,7 @@ import VdfsFormDetail from '@/components/vdfs/VdfsFormDetail.vue'
 import VdfsTextDetail from '@/components/vdfs/VdfsTextDetail.vue'
 import VdfsReadonlyDetail from '@/components/vdfs/VdfsReadonlyDetail.vue'
 import VdfsSessionDetail from '@/components/vdfs/VdfsSessionDetail.vue'
+import VdfsMessageDetail from '@/components/vdfs/VdfsMessageDetail.vue'
 import Appearance from '@/components/settings/Appearance.vue'
 import About from '@/components/settings/About.vue'
 import { registerVdfsRenderer } from './vdfsTypes'
@@ -22,6 +23,8 @@ import { registerVdfsRenderer } from './vdfsTypes'
 // 机制级呈现形态（与场景无关）
 registerVdfsRenderer('form', markRaw(VdfsFormDetail))
 registerVdfsRenderer('session', markRaw(VdfsSessionDetail))
+// 转写列表项的只读视图（正文 + 结构分工，见组件头注释）
+registerVdfsRenderer('message', markRaw(VdfsMessageDetail))
 registerVdfsRenderer('markdown', markRaw(VdfsTextDetail))
 registerVdfsRenderer('json', markRaw(VdfsTextDetail))
 registerVdfsRenderer('text', markRaw(VdfsTextDetail))

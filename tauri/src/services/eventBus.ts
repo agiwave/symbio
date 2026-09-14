@@ -341,6 +341,8 @@ export interface EntityChangedEvent {
   change: 'created' | 'updated' | 'deleted'
   /** 实体展示名（后端尽力提供；created 乐观插入时可直接用作标题） */
   title?: string | null
+  /** 容器归属（如子会话的父会话 id）；顶层实体为 null。订阅端据此过滤作用域 */
+  parent_id?: string | null
 }
 
 /**
@@ -350,14 +352,6 @@ export interface EntityChangedEvent {
  * 与 `subscribeEntityStatus`（运行时状态角标）互补：本事件驱动
  * 清单的增/删/改同步，保证详情页操作实时反映到列表。
  */
-export interface EntityChangedEvent {
-  entity_type: string
-  id: string
-  change: 'created' | 'updated' | 'deleted'
-  title?: string | null
-  /** 容器归属（如子会话的父会话 id）；顶层实体为 null。订阅端据此过滤作用域 */
-  parent_id?: string | null
-}
 
 /** 订阅作用域：声明只接收哪个容器归属下的实体事件 */
 export interface EntityChangedScope {

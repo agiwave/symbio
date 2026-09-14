@@ -58,18 +58,15 @@ impl Plugin for VdfsPlugin {
     }
 
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let path = ctx.get(PATH).unwrap_or_default();
-        let path = path.strip_prefix('/').unwrap_or(&path).to_string();
-
-        // 调用方寻址为 `vdfs/<op>`，composite 已剥掉 `vdfs/` 前缀 → 此处补回，
-        // 使协议路径常量（VFDS_OPS）与实现共享同一定义。
-        let op = if path.starts_with("vdfs/") {
-            path.clone()
-        } else {
-            format!("vdfs/{path}")
-        };
+        // 调用方可能给协议全名（`vdfs/list`），也可能给短名（`list`——容器已剥掉
+        // `vdfs/` 前缀）。两种都归一成协议全名，使 `VFDS_OPS` 与实现共享同一定义。
+        let raw = ctx.get(PATH).unwrap_or_default();
+        let op = format!(
+            "vdfs/{}",
+            raw.trim_start_matches('/').trim_start_matches("vdfs/")
+        );
         if !p::VFDS_OPS.contains(&op.as_str()) {
-            return Err(PluginError::NotFound(format!("VFDS: 未知路径 '{path}'")));
+            return Err(PluginError::NotFound(format!("VFDS: 未知路径 '{raw}'")));
         }
 
         // 取容器注册的统一文件系统：本插件只转发，不认识任何资源类别

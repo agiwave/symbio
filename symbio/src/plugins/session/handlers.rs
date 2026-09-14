@@ -108,6 +108,8 @@ impl SessionPlugin {
         let req: session_clear_messages::Request = ctx.payload()?;
         let chat_session = self.open_chat_session(&req.session_id).await?;
         chat_session.replace_messages(Vec::new()).await?;
+        // VDFS 视图同步（前端已在本地收敛，故只发变更、不发前端帧）
+        self.emit_transcript_cleared(&req.session_id);
         Ok(serde_json::to_value(session_clear_messages::Response {
             cleared: true,
         })?)
@@ -139,6 +141,10 @@ impl SessionPlugin {
         };
 
         chat_session.replace_messages(messages).await?;
+        // VDFS 视图同步：逐条发 `deleted`（与前端本地移除的 id 列表严格一致）
+        for id in &deleted_ids {
+            self.emit_message_deleted(&req.session_id, id);
+        }
         Ok(serde_json::to_value(session_delete_message::Response {
             deleted: deleted_ids.len(),
             deleted_ids,
@@ -221,7 +227,10 @@ impl SessionPlugin {
             }
         }
 
+        let updated = existing.clone();
         chat_session.replace_messages(messages).await?;
+        // VDFS 视图同步：把合并后的**完整消息**作为载荷发出（消费者零回读）
+        self.emit_message_updated(&req.session_id, &updated);
         Ok(serde_json::to_value(session_update_message::Response {
             updated: true,
         })?)
@@ -264,12 +273,6 @@ impl SessionPlugin {
 
         session.updated_at = (OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
         self.save_session(&session).await?;
-
-        // 标题变更 → session 总线事件，驱动统一实体列表防抖刷新（机制级实时能力）
-        if req.title.is_some() {
-            use crate::symbio_core::event_bus::EventBus;
-            EventBus::try_publish("session", Some(&req.session_id), json!({ "type": "title" }));
-        }
 
         // 实体生命周期变更通知（机制级）：新建 → created，其余 → updated。
         // 前端订阅 entity kind 事件，按归属过滤后同步清单（乐观插入 / 防抖重拉）。

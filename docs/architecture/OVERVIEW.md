@@ -96,7 +96,7 @@ graph TD
 | `mcp`       | MCP 桥        | MCP server 注册（stdio / http）与工具调用（另含统一实体 `entities/servers` 维护）                                                    |
 | `telegram`  | Telegram 通道  | 长轮询收发与“继续会话”交互（`telegram/send`）                                                                                  |
 | `gateway`   | **入站网关**     | HTTP/WS 入站适配（`/api/v1/invoke`、`/api/v1/ws`、`/api/v1/health`，与 route_v2 同构）                                              |
-| `setting`   | 配置           | 系统级配置读写 + `.vdfs/setting` 挂载点（`config/get` / `config/set`）                                                     |
+| `setting`   | 配置           | 系统级配置读写 + `.vdfs/setting` 子目录（`config/get` / `config/set`）                                                     |
 | `hook`      | 钩子           | 钩子注册与触发（PreCompact 等生命周期点）                                                                                        |
 | `event_bus` | 事件总线         | 进程内帧广播（连接级 SSE 风格推送）                                                                                              |
 

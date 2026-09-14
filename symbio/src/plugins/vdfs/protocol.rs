@@ -64,7 +64,13 @@ pub const VFDS_OPS: &[&str] = &[
 
 // ==================== 请求 ====================
 
-/// 仅带路径的请求（stat / read / delete / mkdir / watch / unwatch）
+/// 只带一个地址的请求——`list` / `stat` / `read` / `delete` / `mkdir` /
+/// `watch` / `unwatch` 共用。
+///
+/// 七种操作的入参形状**本就相同**（一个地址），因此只有一个信封类型；
+/// `recursive` 是 `delete` 的附加位，对其余操作无意义（缺省 `false`，
+/// 线上不出现）。不为形状相同的操作各造一个类型——那只会让「同一件事」
+/// 在类型层面看起来像七件事。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsPathRequest {
     #[serde(default)]
@@ -72,13 +78,6 @@ pub struct VdfsPathRequest {
     /// 删除目录时是否递归
     #[serde(default)]
     pub recursive: bool,
-}
-
-/// 列目录请求（`path` 缺省 = 虚拟根）
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct VdfsListRequest {
-    #[serde(default)]
-    pub path: String,
 }
 
 /// 树状遍历请求
@@ -92,13 +91,6 @@ pub struct VdfsTreeRequest {
     /// 最多返回节点数（缺省 500）
     #[serde(default)]
     pub limit: Option<u32>,
-}
-
-/// 读取内容请求
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct VdfsReadRequest {
-    #[serde(default)]
-    pub path: String,
 }
 
 /// 执行节点动作请求
@@ -260,11 +252,27 @@ pub struct VdfsSearchResult {
 pub struct VdfsChangeEvent {
     /// 发生变更的节点全路径（对外展示口径）
     pub path: String,
-    /// 变更类型（`created` / `updated` / `deleted` / `renamed`）
+    /// 变更类型（`created` / `updated` / `deleted` / `renamed` / `appended`）
     pub change: String,
     /// 重命名时的目标全路径
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
+    /// **追加型变更**（`appended`）携带的增量文本；其余变更为 `None`。
+    ///
+    /// 「追加」是列表项内容尾部新增一段——消费者据此增量应用，无需重读整个节点。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta: Option<String>,
+    /// **节点视图**（`created` / `updated` 可携带）：变更后该节点的元数据。
+    ///
+    /// 消费者据此免掉一次 `stat`；`None` = provider 未附带，消费者自行回读。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<VdfsNode>,
+    /// **内容快照**（`created` / `updated` 可携带）：变更后该节点的正文。
+    ///
+    /// 与 `delta` 的区别是**全量 vs 增量**，两者不会同时出现；
+    /// `None` = provider 未附带，消费者自行 `read`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }
 
 #[cfg(test)]

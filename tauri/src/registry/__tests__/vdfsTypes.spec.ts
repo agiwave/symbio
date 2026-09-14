@@ -41,6 +41,15 @@ describe('resolveVdfsRenderer', () => {
     expect(resolveVdfsRenderer(node({ name: 'a.log' }))).toBe('text')
   })
 
+  it('消息是列表项：ext = message → 专用只读渲染器（不是通用文本编辑器）', () => {
+    // 转写列表项的结构在 attributes 里（role / type / status / error），
+    // 通用文本渲染器看不见它们，因此必须有自己的渲染器。
+    // 同时它是**文本缓冲**（正文即内容），追加型变更可就地拼接。
+    expect(resolveVdfsRenderer(node({ name: 'm1', ext: 'message' }))).toBe('message')
+    // 未声明 ext 时按文件名推导——消息节点恒显式声明 ext，故这里回退 fallback
+    expect(resolveVdfsRenderer(node({ name: 'm1' }))).toBe('fallback')
+  })
+
   it('前端状态自持的专属面板按语义 ext 分发（设置分区）', () => {
     expect(resolveVdfsRenderer(node({ name: 'appearance', ext: 'appearance' }))).toBe('appearance')
     expect(resolveVdfsRenderer(node({ name: 'about', ext: 'about' }))).toBe('about')

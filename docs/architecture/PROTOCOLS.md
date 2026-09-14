@@ -220,7 +220,7 @@ pub enum PluginPayloadWire {
 ## 统一实体管理（**协议已下线**）
 
 > **S11 起 `{plugin}/entities/*` 不再有任何路由**：资源访问统一经 VDFS
-> （`vdfs/providers|list|tree|stat|read|write|mkdir|delete|move|watch|action`，
+> （`vdfs/list|tree|stat|read|write|mkdir|delete|move|edit|search|watch|unwatch|action`，
 > 见 [design/vdfs.md](../design/vdfs.md)）。下表仅作历史说明。
 >
 > 机制本身（`EntityProvider` trait、注册表、写盘与删除的唯一实现）仍然是
@@ -244,7 +244,7 @@ pub enum PluginPayloadWire {
 | `entities/delete` | `vdfs/delete` |
 | `entities/status` | `vdfs/action { action: "test" }` |
 | `entities/detail` | 列表节点自带 `schema`（详情定义随列表下发） |
-| `entities/providers` | `vdfs/providers`（宿主级挂载点清单） |
+| `entities/providers` | 无对应物——VDFS 没有「根级 provider 清单」这一概念；`.vdfs` 本身就是清单 |
 
 ### 能力开关（**已删除**）
 

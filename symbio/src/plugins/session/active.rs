@@ -1,8 +1,9 @@
+use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::PluginFrame;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 /// 全局请求 ID 生成器
 pub static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -24,6 +25,22 @@ pub struct ActiveSessionState {
     /// 会话 ID 字符串（用于 EventBus 标签）
     pub session_id: String,
     pub inner: RwLock<ActiveSessionStateInner>,
+    /// 本轮**在途**（尚未落库）的消息缓冲。
+    ///
+    /// ## 一份数据，两个视图
+    ///
+    /// 这与消费循环里收集流式补丁的那个缓冲是**同一个 `Arc`**（见
+    /// `orchestrator::run_chat_loop_task`），不是第二份拷贝：
+    ///
+    /// - 前端实时流：补丁逐帧经 `StreamEvent::Update` 下发；
+    /// - VDFS 转写列表：`.vdfs/session/<id>/消息` 把这份缓冲叠加在落库转写之上。
+    ///
+    /// 之所以必须共享：**流式期间消息还没落库**（`persist_messages` 只在每轮结束时
+    /// 写盘）。若 VDFS 只读存储，列表在流式期间就是空的，`created` / `appended`
+    /// 事件到达时消费者去 `list` 会一无所获——「转写即列表」当场失效。
+    ///
+    /// 生命周期：每轮开始时清空（防上一轮残留），本轮落库后清空（防与落库版本重复）。
+    pub live_messages: Arc<Mutex<Vec<cm::ChatMessage>>>,
 }
 
 impl Default for ActiveSessionState {
@@ -49,6 +66,7 @@ impl ActiveSessionState {
                 last_content: String::new(),
                 last_tool_calls: Vec::new(),
             }),
+            live_messages: Arc::new(Mutex::new(Vec::new())),
         }
     }
 

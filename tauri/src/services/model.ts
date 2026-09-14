@@ -12,6 +12,15 @@ import { ChatMessage, ContentPart, MessageContent, ChatRole, ChatMessageType, Me
 
 // ==================== Chat 事件协议（原 schemas/chat_response，仅本模块使用，内联） ====================
 
+/**
+ * 会话事件类型（对齐后端 `session_chat_response::StreamEvent`）。
+ *
+ * 前端只在 `sessionBusWatcher` 里**动作**于 Status / Abort / Error / Connected /
+ * Disconnected 五个——它们才是本通道独有的会话级信息。
+ *
+ * `Update` / `Delete` 的消息本体已归 VDFS 通道（见 `vdfsTranscriptSync`），但后端
+ * **仍会下发**它们（进程内的 subagent 宿主依赖 `Update`），前端需要能识别并跳过。
+ */
 export enum ChatEventType {
   Update = 'update',
   Error = 'error',
@@ -19,28 +28,12 @@ export enum ChatEventType {
   Disconnected = 'disconnected',
   Status = 'status',
   Abort = 'abort',
-  SessionResumed = 'session_resumed',
   Delete = 'delete'
 }
-
-export type StreamEvent =
-  | { type: ChatEventType.Update; message: ChatMessage }
-  | { type: ChatEventType.Error; error: string }
-  | { type: ChatEventType.Connected; session_id: string; is_working: boolean; messages: ChatMessage[] }
-  | { type: ChatEventType.Disconnected }
-  | { type: ChatEventType.Status; status: string }
-  | { type: ChatEventType.Abort }
-  | { type: ChatEventType.SessionResumed; session_id: string; parent_session_id: string; failed: boolean; result: string | null }
-  | { type: ChatEventType.Delete; message_id: string };
 
 export type { ChatMessage, ContentPart, MessageContent, ChatMessageType, MessageStatus, ChatRole }
 
 // ==================== 类型定义 ====================
-
-export interface ChatResponse {
-  content?: string
-  error?: string
-}
 
 /**
  * 连接事件
@@ -56,37 +49,4 @@ export interface ChatEvent {
   done?: boolean
   is_working?: boolean
   [key: string]: any
-}
-
-/**
- * Session 工作状态
- */
-export interface ChatStatus {
-  session_id: string
-  is_working: boolean
-  is_waiting_approval: boolean
-}
-
-/**
- * AI 提供商配置
- */
-export interface ProviderConfig {
-  provider: string
-  api_base: string
-  api_key: string
-  model: string
-  temperature?: number
-  max_tokens?: number
-  api_protocol?: string
-}
-
-/**
- * ChatConnection 接口定义
- */
-export interface ChatConnection {
-  connectionId: string
-  send: (message: ChatMessage, agentId: string) => void
-  abort: () => void
-  close: () => void
-  isConnected: () => boolean
 }

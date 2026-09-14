@@ -51,11 +51,6 @@ fn starts_with_normalized(base: &Path, prefix: &Path) -> bool {
     normalize_for_comparison(base).starts_with(normalize_for_comparison(prefix))
 }
 
-/// 相对路径是否安全（不允许 `..` 向上穿越）
-fn is_safe_relative_path(path: &str) -> bool {
-    path != ".." && !path.starts_with("../") && !path.starts_with("..\\")
-}
-
 /// 物理文件层的访问策略。
 ///
 /// 只有两类规则：`forbidden_paths` 黑名单，以及可选的「限定在工作区 /
@@ -89,13 +84,15 @@ impl Default for FsPolicy {
 }
 
 impl FsPolicy {
+    /// 两道守卫都走机制层的地址规则（[`has_parent_segment`] / [`path_within`]），
+    /// 不在此另写一份——访问层与物理层必须同一条规则，否则修了一处漏另一处。
     fn path_allowed(&self, path: &Path, workspace_dir: &Path) -> bool {
         let s = path.to_string_lossy();
-        if !is_safe_relative_path(&s) {
+        if has_parent_segment(&s) {
             return false;
         }
         for forbidden in &self.forbidden_paths {
-            if s.starts_with(shellexpand::tilde(forbidden).as_ref()) {
+            if path_within(&s, shellexpand::tilde(forbidden).as_ref()) {
                 return false;
             }
         }
@@ -647,11 +644,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&outside);
     }
 
-    /// `..` 穿越在守卫层就被拒（访问层 normalize 也拦，两处独立生效）
+    // `..` 穿越与黑名单前缀的判定规则测试在 `symbio_core::vdfs_provider`
+    // （规则只有一份实现，测试随之只有一份）。这里只验**策略集成**：
+    // 规则接上 `FsPolicy` 之后，哪些路径被真的拦住。
+
+    /// 黑名单命中即拒：`/etcfoo` 放行、`/etc` 拦截
     #[test]
-    fn traversal_is_unsafe() {
-        assert!(!is_safe_relative_path("../etc/passwd"));
-        assert!(!is_safe_relative_path(".."));
-        assert!(is_safe_relative_path("a/../b"));
+    fn blacklist_rejects_only_real_hits() {
+        let p = FsPolicy::default();
+        let ws = temp("ws");
+        assert!(!p.readable(Path::new("/etc/passwd"), &ws));
+        assert!(p.readable(Path::new("/etcfoo/a.txt"), &ws));
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }

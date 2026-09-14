@@ -5,7 +5,7 @@
 
 > **对外已只有一个协议（S11）**：`entities/*` 调用协议已下线——不再有任何插件
 > 路由它，`entities::dispatch` 与其请求/响应一并删除。资源访问统一经 VDFS
-> （`.vdfs/<挂载点>/…`）。
+> （`.vdfs/<子目录>/…`，子目录名 = 插件名，由注册方选定）。
 >
 > **本文件剩下的仍是现行机制**：`EntityProvider` trait（差异化钩子）、注册表
 > （`provider_registry` / `nav_meta_of`）、`entity_write` / `entity_delete`
@@ -56,11 +56,11 @@
 
 ### 2.1 注册表 `provider_registry()`
 
-每条 `EntityProviderInfo`（宿主级单一真相源，挂载点的标签 / 顺序 / 能力由此派生）：
+每条 `EntityProviderInfo`（宿主级单一真相源，子目录的标签 / 顺序 / 能力由此派生）：
 
 | 字段 | 语义 |
 |---|---|
-| `kind` / `label` / `order` | 类型标识（同时是挂载名）/ 展示标签 / 展示顺序（导航排序权威；**无配置覆盖**） |
+| `kind` / `label` / `order` | 类型标识（同时是 `.vdfs` 子目录名）/ 展示标签 / 展示顺序（导航排序权威；**无配置覆盖**） |
 | `supports_upload` | 能否以「最小 manifest」新建（一次 `vdfs/write { create }`） |
 | `supports_import`（S12） | 能否**整包导入**（zip）；目录自管的类型（agent bundle）也可为 true |
 | `container_kinds` | **容器声明**（见 §2.3；空 = 条目不是容器） |
@@ -283,7 +283,7 @@
 2. 在 `provider_registry()` 登记一条 `EntityProviderInfo`
    （`kind` / `order` / `label` / `supports_upload` / `supports_import` /
    `container_kinds`）——**插件 route 不再需要接任何分发**（`entities/*` 已下线），
-   VDFS 侧由 `EntityVdfsAdapter` 自动为它生成 `.vdfs/<kind>` 挂载点；
+   VDFS 侧由 `EntityVdfsAdapter` 自动为它生成 `.vdfs/<kind>` 子目录；
 3. （可选）**整包导入 / 导出**：`supports_import = true` + 按需重写
    `import_zip` / `export_zip`（目录自管的类型必须重写；EntityStore 型走默认的
    通用解包 / 打包，二者互为逆向），并在 `detail_definition` 里声明 `export` 动作；
@@ -291,7 +291,7 @@
 5. （可选，**详情默认路径**）重写 `detail_definition` 钩子下发
    `DetailDefinition`（§3.2），前端零页面/零 ts 开发。
 
-**前端**：**零改动**——挂载点、导航、列表、新建 / 导入 / 删除、实时性全部由
+**前端**：**零改动**——子目录、导航、列表、新建 / 导入 / 删除、实时性全部由
 VDFS 机制生成；仅当详情属「复杂形态」才补一个专属 editor 与图标注册。
 
 ## 5. 一致性要求

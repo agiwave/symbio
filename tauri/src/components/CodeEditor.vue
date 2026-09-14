@@ -19,9 +19,6 @@
       :readonly="readonly"
       @input="onInput"
       @keydown="handleKeydown"
-      @keyup="handleKeyUp"
-      @mouseup="handleMouseUp"
-      @select="handleSelect"
       @scroll="syncScroll"
       spellcheck="false"
     ></textarea>
@@ -34,7 +31,7 @@ import { ref, watch, computed } from 'vue'
 const props = defineProps<{
   modelValue: string
   filePath?: string
-  /** 只读：禁用编辑，但仍允许选区事件 */
+  /** 只读：禁用编辑 */
   readonly?: boolean
 }>()
 
@@ -42,7 +39,6 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   'content-change': [value: string]
   'request-save': []
-  'selection-change': [data: { text: string; startLine: number; endLine: number } | null]
 }>()
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -100,57 +96,6 @@ function handleKeydown(e: KeyboardEvent) {
       onInput()
     }
   }
-}
-
-// 键盘释放时也检查选区（Shift+方向键 选中）
-function handleKeyUp(_e: KeyboardEvent) {
-  checkSelection()
-}
-
-// 原生 select 事件（覆盖键盘 + 拖动等多种选中方式）
-function handleSelect() {
-  checkSelection()
-}
-
-// 处理选区事件
-function handleMouseUp(e: MouseEvent) {
-  e.stopPropagation()
-  checkSelection()
-}
-
-// 检查选区并通知父组件
-function checkSelection() {
-  setTimeout(() => {
-    try {
-      const textarea = textareaRef.value
-      if (!textarea) return
-
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-
-      if (start !== end) {
-        const selectedText = textarea.value.substring(start, end)
-
-        if (selectedText.trim().length > 0) {
-          const textBefore = textarea.value.substring(0, start)
-          const linesBefore = textBefore.split('\n').length
-          const selectedLines = selectedText.split('\n').length
-          const endLine = linesBefore + selectedLines - 1
-
-          emit('selection-change', {
-            text: selectedText.trim(),
-            startLine: linesBefore,
-            endLine: endLine
-          })
-          return
-        }
-      }
-
-      emit('selection-change', null)
-    } catch (e) {
-      // 忽略错误
-    }
-  }, 10)
 }
 
 defineExpose({

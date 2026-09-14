@@ -444,6 +444,18 @@ for child in children {
 - **provider 报出的 `VdfsChange` 不含子目录名**：`path` / `to` 都是该 provider 子树
   内的**相对路径**（与 `list` / `stat` 同一坐标系）。位置是使用方的概念（§2.4），
   provider 无从得知。
+- **`watch(path, sink)` 的 `path` 也是同一坐标系**（provider 根相对，`""` = 自身根）。
+  provider 上报的路径**不相对被订阅的 `path` 收敛**——容器回填时只补**挂载名**
+  （首段），不补被订阅的整条路径。两处若都做前缀处理就会重复拼接：
+
+  ```text
+  watch("session/abc/消息") → 容器拆出 dir="session"、rel="abc/消息"
+  provider 报 "abc/消息/m1" → 容器补成 "session/abc/消息/m1"  ✓
+  provider 若报 "m1"       → 容器补成 "session/m1"          ✗
+  ```
+
+  代价是订阅者会收到兄弟子树的变更（订阅一个会话会看到别的会话的事件），
+  由消费者按路径前缀自行过滤——`list` / `stat` 亦然，坐标系因此始终只有一个。
 - 消费能力由访问位与 provider 实现共同决定；默认 `watch` 为 no-op（无实时能力
   的 provider 直接成功，消费者退回手动拉取）。
 - 宿主侧投递分两跳，**各补一次它那层才知道的信息**：
@@ -454,7 +466,31 @@ for child in children {
      （`kind = "vdfs"`，无会话关联、不入回放缓冲）。
 
   前端 `subscribe({ kind: 'vdfs' })` 按 `path` 前缀自行分流、防抖重拉。
-- **禁止轮询、禁止私有刷新通道**；细粒度帧不得触发列表刷新。
+- **变更词汇**（`VdfsChange::change`，取值唯一，无场景自定义）：
+
+  | 取值 | 语义 | 载荷 | 消费者动作 |
+  |---|---|---|---|
+  | `created` | 多了一个节点 | 可带 `node` / `content` | 列表插入一项（或重拉该目录） |
+  | `updated` | 节点变了，**内容全量** | 可带 `node` / `content` | 就地替换（或重读该节点） |
+  | `appended` | 节点**尾部多了 `delta`**，增量 | `delta` | 拼接 `delta`，**不重读** |
+  | `deleted` | 节点没了 | — | 列表移除一项 |
+  | `renamed` | 节点换了地址 | `to` | 改键（`to` = 新地址） |
+
+  **载荷是「按变更类型可选」的，不是可有可无的装饰**：事件只说「哪里、怎么变」，
+  「变成了什么」按类型附在载荷上——热路径窄、冷路径全。
+
+  - `appended` 的载荷是 `delta`（增量文本），消费者**不得**借此触发重读——这正是
+    它与 `updated` 的全部区别。它每帧都发，载荷必须保持只有增量：任何追加型数据
+    （日志、转写、生成中的文档）若一律用 `updated` + 重读，流量是 O(n²)。
+  - `created` / `updated` 每轮只有寥寥数次，provider **可以**把节点视图
+    （`node`）与内容快照（`content`）一并带上，消费者因此无需 `stat` + `read`
+    两个来回。载荷**可选**：不填时消费者回退到回读，因此这是纯增益扩展。
+  - 逐字段重建 `VdfsChange` 是**错的**——转发层新增字段时会漏（且无编译错误）。
+    使用方一律用 `VdfsChange::map_paths` 一次覆盖全部路径（含 `node` 载荷内的路径）。
+- **禁止轮询、禁止私有刷新通道**。`created` / `updated` / `deleted` 这类
+  粗粒度变更由消费者防抖重拉收敛；`appended` 必须就地增量应用。
+  消费端需自行处理「增量与刷新响应竞争」的情形（见
+  [vdfs-session-messages.md](./vdfs-session-messages.md) §S18）。
 
 ## 10. 扩展指引
 

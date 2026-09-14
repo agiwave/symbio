@@ -14,6 +14,7 @@ import {
   VFDS_EXT_FORM,
   VFDS_EXT_JSON,
   VFDS_EXT_MARKDOWN,
+  VFDS_EXT_MESSAGE,
   VFDS_EXT_SESSION,
   VFDS_EXT_TEXT,
   isVdfsDir,
@@ -27,6 +28,7 @@ import {
  * - `dir`        目录 → 中栏列表 / 树
  * - `form`       定义驱动表单（解析 node.schema）
  * - `session`    会话工作区
+ * - `message`    单条对话消息（**转写列表项**的只读视图）
  * - `markdown` / `json` / `text` 文本类编辑器
  * - `appearance` / `about` 前端状态自持的专属面板（外观设置 / 关于）
  * - `fallback`   通用只读兜底
@@ -35,6 +37,7 @@ export type VdfsRenderer =
   | 'dir'
   | 'form'
   | 'session'
+  | 'message'
   | 'markdown'
   | 'json'
   | 'text'
@@ -46,6 +49,10 @@ export type VdfsRenderer =
 const EXT_RENDERERS: Record<string, VdfsRenderer> = {
   [VFDS_EXT_FORM]: 'form',
   [VFDS_EXT_SESSION]: 'session',
+  // 消息是**只读列表项**（访问位只有 `r`）：专用只读视图按 `attributes` 展示
+  // 角色 / 类型 / 状态 / 错误，正文取节点内容——与「正文在内容、结构在 attributes」
+  // 的分工一一对应。它是文本缓冲，因此流式追加可原地拼接（见 useVdfs.applyAppend）。
+  [VFDS_EXT_MESSAGE]: 'message',
   [VFDS_EXT_MARKDOWN]: 'markdown',
   [VFDS_EXT_JSON]: 'json',
   [VFDS_EXT_TEXT]: 'text',

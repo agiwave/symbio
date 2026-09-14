@@ -24,7 +24,6 @@ import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import {
   listSessions,
-  getSessionMessages as fetchSessionMessages,
   clearSession,
   createSessionId,
   updateSession,
@@ -34,6 +33,8 @@ import {
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
+import { readVdfs } from '@/services/vdfs'
+import { vdfsSessionAddr } from '@/schemas/vdfs'
 import { setLastWorkdir, getLastWorkdir, callPlugin } from '@/services/plugin'
 import { publishEntityChangedLocal, subscribeEntityChanged } from '@/services/eventBus'
 import { logger } from '@/utils/logger'
@@ -51,8 +52,9 @@ export interface SessionLiveStatus {
    * 最近一次"业务事件"到达时间（毫秒）。
    *
    * 注意：
-   * - 这里"业务事件" = 后端 push 的 Update / Status / Error / Abort / Connected / SessionResumed
+   * - 这里"业务事件" = 后端 push 的 Status / Error / Abort / Connected
    *   经过 sessionBusWatcher 写 store 的时刻（即"前端感知到该事件的本地时间"）。
+   *   消息类事件（`Update` / `Delete`）已归 VDFS 通道，由 `vdfsTranscriptSync` 写入。
    * - `putStatus` 内部每次都会**自动更新**此字段（避免漏写）；
    *   `putMessage` 只在产生 assistant 文本预览时同步更新。
    * - 若需判断"状态是否过期"，请使用 `getSessionStaleReason()` 而不是直接读此字段。
@@ -670,15 +672,23 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   /**
    * 加载（并缓存）会话消息到 store。
-   * 总是从后端拉取最新历史，hydrate 到 `sessionMessages[id]`。
-   * 返回消息数组（按 seq 排序）。
+   *
+   * ## 读入口是 VDFS，不是专用协议
+   *
+   * 转写是**列表**（`.vdfs/session/<id>/消息`），而会话叶子
+   * `.vdfs/session/<id>` 的内容就是整份会话文档（含 `messages`）——因此
+   * **一次 `vdfs/read`** 就能拿到全部历史：既省掉一条专用协议，又让前端与
+   * LLM 在**同一地址**上读同一份数据（`session/get_messages` 自此不再是
+   * 前端的读入口）。
+   *
+   * 增量由 `services/vdfsTranscriptSync` 从 `kind = "vdfs"` 变更补上——本函数
+   * 只负责整份替换（切换会话 / 显式刷新）。
    *
    * 修复（CHAT_FLOW_ANALYSIS E-13）：失败时**抛出错误**而不是 swallow，
    * 让 ChatMainPanel 能显示错误状态 + 提供重试按钮。
    */
   async function loadMessages(id: string): Promise<ChatMessage[]> {
-    const { messages: rawMsgs } = await fetchSessionMessages(id) // 错误会自然抛出（session/get_messages）
-    const msgs = rawMsgs as unknown as ChatMessage[]
+    const msgs = await fetchTranscript(id)
     hydrateFromHistory(id, msgs)
     // 同步 list message_count / updated_at
     const idx = list.value.findIndex(s => s.id === id)
@@ -687,6 +697,28 @@ export const useSessionsStore = defineStore('sessions', () => {
       list.value[idx] = { ...list.value[idx], message_count: msgs.length, updated_at: now }
     }
     return getSessionMessages(id)
+  }
+
+  /**
+   * 经 VDFS 读取整份转写（会话叶子的内容是一份 JSON 文档）。
+   *
+   * 文档形状由后端 `session_content` 决定（`{ id, title, metadata, messages, updated_at }`）；
+   * 这里只取 `messages`，其余字段由会话清单（`.vdfs/session`）与实体机制负责。
+   */
+  async function fetchTranscript(id: string): Promise<ChatMessage[]> {
+    const content = await readVdfs(vdfsSessionAddr(id))
+    const text = content?.text
+    if (!text) {
+      throw new Error(`读取会话转写失败：${vdfsSessionAddr(id)}`)
+    }
+    let doc: unknown
+    try {
+      doc = JSON.parse(text)
+    } catch (e) {
+      throw new Error(`会话转写不是合法 JSON（${vdfsSessionAddr(id)}）：${e}`)
+    }
+    const messages = (doc as { messages?: unknown })?.messages
+    return Array.isArray(messages) ? (messages as ChatMessage[]) : []
   }
 
   /**
@@ -868,8 +900,20 @@ export const useSessionsStore = defineStore('sessions', () => {
           refreshList().catch((err) => logger.warn('[sessions]', '实体事件触发刷新失败', err))
         }, 800)
       }
-      // updated：侧栏展示的标题由既有 session 事件（{type:'title'}）维护，
-      // 元数据类更新不影响侧栏展示，无需重拉
+      // updated：**就地消费事件携带的 display_title，不重拉**。
+      //
+      // 后端在标题变更时（含 `orchestrator::ensure_auto_title` 的自动命名）都会发
+      // `updated` + display_title，因此这里直接写 `titles` 与清单项即可——
+      // 元数据类更新（workdir / mode 等）带的标题与现值相同，写一遍无副作用，
+      // 却省掉一次整表重拉。VDFS 侧栏清单另由 `useVdfs` 的导航刷新维护。
+      if (e.title) {
+        titles.value[e.id] = e.title
+        const idx = list.value.findIndex((s) => s.id === e.id)
+        if (idx >= 0) {
+          const cur = list.value[idx]
+          list.value[idx] = { ...cur, metadata: { ...(cur.metadata || {}), title: e.title } }
+        }
+      }
     },
     { parentId: null },
   )

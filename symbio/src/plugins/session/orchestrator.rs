@@ -19,6 +19,7 @@ use crate::symbio_core::schemas::{
     session::chat_message as cm,
     session::{session_append, session_chat, session_chat_response},
 };
+use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     take_errors, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel,
     PluginError, PluginFrame, PluginPayload, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
@@ -196,7 +197,17 @@ impl Drop for WorkingGuard {
 /// This is what guarantees that a session whose stream was observed by the
 /// backend will be persisted with its final status (e.g. `Completed` /
 /// `WaitingUserAction`), instead of being frozen at the first `Streaming` frame.
-fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) {
+///
+/// # 返回值 = 被追加的那段文本
+///
+/// `Some(delta)` 表示本次合并是**尾部追加**（正是 `appended` 变更的语义），
+/// 且 `delta` 就是追加进去的那一段；`None` 表示全量替换或未触及内容。
+///
+/// **为什么由本函数回报，而不是让调用方另行判断**：变更类型（`appended` vs
+/// `updated`）必须与合并方式**逐字一致**——若这里按追加合并、那里判成全量，
+/// 消费者按 `delta` 拼接就会得到错误内容。让唯一决定合并方式的地方顺带说出
+/// 它是哪种方式，这种漂移在结构上就不可能发生。
+fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) -> Option<String> {
     if let Some(role) = &patch.role {
         existing.role = Some(role.clone());
     }
@@ -219,6 +230,9 @@ fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) 
         existing.response_id = Some(rid.clone());
     }
 
+    // 本次合并追加进去的文本（`Some` = 追加型，正是 `appended` 变更的载荷）
+    let mut appended: Option<String> = None;
+
     if let Some(new_content) = &patch.content {
         // 工具流式帧（role=Tool，如 shell 的增量输出）与前端 sessions.ts 的
         // 合并语义保持一致：全量替换，而非 SSE delta 追加。
@@ -236,6 +250,7 @@ fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) 
                         (Some(existing_c), cm::MessageContent::Text(new_text)) => {
                             if let cm::MessageContent::Text(buf) = existing_c {
                                 buf.push_str(new_text);
+                                appended = Some(new_text.clone());
                             } else {
                                 // Type mismatch (rare) — fall back to replacement
                                 *existing_c = cm::MessageContent::Text(new_text.clone());
@@ -243,6 +258,8 @@ fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) 
                         }
                         (None, cm::MessageContent::Text(new_text)) => {
                             existing.content = Some(cm::MessageContent::Text(new_text.clone()));
+                            // 首次写入也是追加：节点此前无正文，尾部多出来的就是全部
+                            appended = Some(new_text.clone());
                         }
                         _ => {
                             // Parts arrays or type mismatch — replace
@@ -276,6 +293,8 @@ fn merge_message_patch(existing: &mut cm::ChatMessage, patch: &cm::ChatMessage) 
             }
         }
     }
+
+    appended
 }
 
 impl SessionPlugin {
@@ -355,8 +374,11 @@ impl SessionPlugin {
             "[Session] Turn 任务启动：session={session_id}, rid={rid}, provider={:?}",
             provider_id
         );
-        let collected_ai_messages =
-            Arc::new(tokio::sync::Mutex::new(Vec::<cm::ChatMessage>::new()));
+        // 在途转写缓冲**取自会话状态本身**（不是新建第二份）：VDFS 转写列表
+        // 因此能在流式期间读到本轮消息，而不必等 `persist_messages` 落库。
+        // 开始前清空——上一轮的收尾已清过一次，这里再清一次是防 panic 残留。
+        let collected_ai_messages = state.live_messages.clone();
+        collected_ai_messages.lock().await.clear();
 
         let stop = Arc::new(super::chat_loop::StopSignal::new(
             Some(parent.clone()),
@@ -629,21 +651,56 @@ impl SessionPlugin {
                     PluginFrame::Data(data) => {
                         // 收集 Model 响应消息：StreamEvent::Update 增量合并，
                         // 确保持久化的终态反映最后已知状态（而非首个 Streaming 帧）。
-                        if let Ok(session_chat_response::StreamEvent::Update { message }) =
-                            serde_json::from_value::<session_chat_response::StreamEvent>(
-                                data.clone(),
-                            )
-                        {
-                            let mut collected = collected_ai_messages.lock().await;
-                            if let Some(existing) =
-                                collected.iter_mut().find(|m| m.id == message.id)
-                            {
-                                merge_message_patch(existing, &message);
-                            } else {
-                                collected.push(message.clone());
+                        //
+                        // 选此处做「合并 + 广播」的收口，而非某个 `emit_update`
+                        // 调用点：本循环是**全部**补丁（模型流式、工具执行、嵌套子
+                        // 会话、审批节点、恢复重写）汇入前端的必经之路——上游有多少
+                        // 个发射点都无所谓，到这里只剩一个。`session_id` 也在作用域内。
+                        match serde_json::from_value::<session_chat_response::StreamEvent>(
+                            data.clone(),
+                        ) {
+                            Ok(session_chat_response::StreamEvent::Update { message }) => {
+                                // 三件事一次算清：是否已存在、追加了什么、合并后的全貌。
+                                // `merged` 是**变更载荷**的来源（`created` / `updated`
+                                // 要带上完整节点视图与内容快照），与下发给前端的
+                                // 增量 `message` 是两回事，不可互相替代。
+                                let (existed, appended, merged) = {
+                                    let mut collected = collected_ai_messages.lock().await;
+                                    match collected.iter_mut().find(|m| m.id == message.id) {
+                                        Some(existing) => {
+                                            let delta = merge_message_patch(existing, &message);
+                                            (true, delta, existing.clone())
+                                        }
+                                        None => {
+                                            collected.push(message.clone());
+                                            (false, None, message.clone())
+                                        }
+                                    }
+                                };
+                                self.emit_message_patch(
+                                    &state,
+                                    &session_id,
+                                    message,
+                                    &merged,
+                                    existed,
+                                    appended,
+                                )
+                                .await;
                             }
+                            // 删除帧（工具恢复时删除旧的 pending/failed 子节点）：
+                            // 转成 VDFS `deleted` 变更——它同样是**消息级变更**，
+                            // 必须与 `created` / `updated` / `appended` 走同一条通道，
+                            // 否则 VDFS 列表会残留一个已被删掉的节点（且永不纠正）。
+                            Ok(session_chat_response::StreamEvent::Delete { message_id }) => {
+                                let _ = self.change_tx.send(vdfs::VdfsChange::new(
+                                    super::plugin::message_path(&session_id, &message_id),
+                                    vdfs::VFDS_CHANGE_DELETED,
+                                ));
+                            }
+                            // 非 Update 帧（Status / Error / Abort / Connected …）
+                            // 不含消息补丁，原样透传。
+                            _ => self.broadcast_frame(&state, frame).await,
                         }
-                        self.broadcast_frame(&state, frame).await;
                     }
                 }
             }
@@ -670,6 +727,11 @@ impl SessionPlugin {
         // （业务 Error 帧 / 消费超时两条提前出口已在循环内自行完成
         //  `persist_failure` + Error 广播 + idle 并直接 return，不会走到这里，
         //  因此前端不会收到第二条 idle 状态事件。）
+        //
+        // 在途缓冲此刻可以清空：通道关闭意味着 `run_chat_loop` 已返回，而
+        // `chat_loop::persist_messages` 在返回前就已把本轮消息落库——转写的
+        // 权威副本已经回到存储，继续叠加在途副本只会让同一条消息出现两次。
+        collected_ai_messages.lock().await.clear();
         {
             let mut inner = state.inner.write().await;
             if inner.is_working {
@@ -1163,11 +1225,15 @@ impl SessionPlugin {
     /// 自动命名：会话尚无显式标题（metadata.title）时，从会话内容生成并持久化。
     ///
     /// 在首个用户消息落盘后调用；规则与 [`super::types::Session::display_title`]
-    /// 一致（首条用户文本消息首行、限长）。持久化后发布 session 总线事件，
-    /// 驱动统一实体列表的防抖刷新（机制级实时能力）。
+    /// 一致（首条用户文本消息首行、限长）。
+    ///
+    /// 落盘后发**与 `handlers::invoke_update` 同构的两条对外信号**——标题变更
+    /// 不该因发起者不同而走不同链路，否则自动命名这条路生成的标题到不了任何清单：
+    ///
+    /// - 实体机制（`publish_entity_changed`，携带 `display_title`）→ 会话清单 store
+    ///   （聊天头部标题与侧栏项名称）；
+    /// - VDFS 变更（`notify_change`）→ VDFS 会话清单（左栏导航按直接子节点变更刷新）。
     pub(crate) async fn ensure_auto_title(&self, session_id: &str) {
-        use crate::symbio_core::event_bus::EventBus;
-
         let Ok(mut session) = self.get_or_create_session(session_id).await else {
             return;
         };
@@ -1188,13 +1254,19 @@ impl SessionPlugin {
         }
         session.updated_at =
             (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
-        if self.save_session(&session).await.is_ok() {
-            EventBus::try_publish(
-                "session",
-                Some(session_id),
-                json!({ "type": "title", "title": title }),
-            );
+        if self.save_session(&session).await.is_err() {
+            return;
         }
+
+        EventBus::publish_entity_changed(
+            crate::symbio_core::entities::ENTITY_SESSION,
+            session_id,
+            "updated",
+            Some(title),
+            session.parent_session_id().map(str::to_string),
+        )
+        .await;
+        self.notify_change(session_id, vdfs::VFDS_CHANGE_UPDATED);
     }
 
     pub async fn broadcast_status(&self, state: &Arc<ActiveSessionState>, status: &str) {
@@ -1423,20 +1495,25 @@ impl SessionPlugin {
             crate::plugin_error!("session", "persist_failure: replace_messages failed: {}", e);
         }
 
-        // 3. 仅广播本次状态真正变化的消息（服务端权威终态，前端只信服务端）：
+        // 6. 仅广播本次状态真正变化的消息（服务端权威终态，前端只信服务端）：
         //    - 根 Turn 的 Failed + error → 错误条 + 重试入口；
         //    - 子节点的 Completed → 结束前端流式动画（不再渲染 ⚠）。
         //    推送发生在 Error 事件之前（调用方先 persist_failure 再 broadcast_error_with_idle），
         //    Error 事件仅承担 transport 级兜底语义。
+        //
+        //    走 `emit_message_patch`（而非直接 `broadcast_frame`）：这几条终态同样是
+        //    **消息补丁**，VDFS 列表必须同步收敛，否则一次失败之后 VDFS 视图会永远
+        //    停在 streaming——`replace_messages` 已把终态写进存储，而列表读的是存储。
+        //    这些消息都已在存储中（`existed = true`），且这里是全量替换终态，
+        //    故一律 `updated`——`patch` 与 `view` 同一条（全量帧本身就是合并结果）。
         for m in changed {
-            self.broadcast_frame(
-                state,
-                PluginFrame::Data(json!(session_chat_response::StreamEvent::Update {
-                    message: m,
-                })),
-            )
-            .await;
+            self.emit_message_patch(state, session_id, m.clone(), &m, true, None)
+                .await;
         }
+
+        // 7. 本轮在途缓冲随之作废：权威副本已由上面的 `replace_messages` 回到存储，
+        //    继续叠加只会让同一条消息在 VDFS 列表里出现两次。
+        collected.lock().await.clear();
     }
 }
 
@@ -1532,6 +1609,100 @@ mod tests {
         assert!(
             is_registered(&state).await,
             "旧守卫的 Drop 误清了新一轮的登记：新一轮 abort 将失去中止能力"
+        );
+    }
+
+    // ==================== 合并语义 ↔ 变更语义（不得漂移） ====================
+
+    fn text_msg(id: &str, content: &str, status: cm::MessageStatus) -> cm::ChatMessage {
+        cm::ChatMessage {
+            id: id.into(),
+            role: Some(cm::MessageRole::Assistant),
+            msg_type: Some(cm::MessageType::Text),
+            content: Some(cm::MessageContent::Text(content.into())),
+            status: Some(status),
+            ..Default::default()
+        }
+    }
+
+    /// 流式文本：合并**回报**被追加的那段，VDFS 变更才能据此产出 `appended`。
+    ///
+    /// 这是「变更语义与合并语义不漂移」的结构保证——判据不是另算一遍，
+    /// 而是合并函数自己说出来的。若有人日后把 `appended` 的判据改成独立实现，
+    /// 这条测试仍会通过（它测的是回报值），所以另有一条测试直接断言两者一致
+    /// （见 `plugin.rs::message_change_maps_patch_to_change_kind`）。
+    #[test]
+    fn merge_reports_appended_delta_for_streamed_text() {
+        let mut existing = text_msg("m1", "你好", cm::MessageStatus::Streaming);
+        let delta = merge_message_patch(
+            &mut existing,
+            &text_msg("m1", "，世界", cm::MessageStatus::Streaming),
+        );
+        assert_eq!(delta.as_deref(), Some("，世界"));
+        assert_eq!(
+            existing.content.as_ref().map(|c| c.to_text()),
+            Some("你好，世界".to_string()),
+            "回报的 delta 必须正是被拼进去的那一段"
+        );
+
+        // 首次写入同样是追加：节点此前无正文，尾部多出来的就是全部
+        let mut empty = text_msg("m2", "", cm::MessageStatus::Streaming);
+        empty.content = None;
+        let delta = merge_message_patch(
+            &mut empty,
+            &text_msg("m2", "开头", cm::MessageStatus::Streaming),
+        );
+        assert_eq!(delta.as_deref(), Some("开头"));
+    }
+
+    /// 全量替换类补丁**不得**回报增量——否则消费者会按 delta 拼接，
+    /// 把「每帧都是完整参数」的工具调用拼成垃圾。
+    #[test]
+    fn merge_reports_no_delta_for_full_replacement() {
+        // ToolCall：每帧全量 JSON
+        let mut tc = cm::ChatMessage {
+            id: "t1".into(),
+            role: Some(cm::MessageRole::Assistant),
+            msg_type: Some(cm::MessageType::ToolCall),
+            content: Some(cm::MessageContent::Text("{\"a\":".into())),
+            ..Default::default()
+        };
+        let patch = cm::ChatMessage {
+            id: "t1".into(),
+            msg_type: Some(cm::MessageType::ToolCall),
+            content: Some(cm::MessageContent::Text("{\"a\":1}".into())),
+            ..Default::default()
+        };
+        assert!(merge_message_patch(&mut tc, &patch).is_none());
+        assert_eq!(
+            tc.content.as_ref().map(|c| c.to_text()),
+            Some("{\"a\":1}".to_string()),
+            "ToolCall 是全量替换，不是追加"
+        );
+
+        // role=Tool 的工具流式帧：全量替换（与前端 sessions.ts 同语义）
+        let mut tool = text_msg("r1", "第一行\n", cm::MessageStatus::Streaming);
+        tool.role = Some(cm::MessageRole::Tool);
+        let patch = cm::ChatMessage {
+            id: "r1".into(),
+            role: Some(cm::MessageRole::Tool),
+            content: Some(cm::MessageContent::Text("第一行\n第二行\n".into())),
+            ..Default::default()
+        };
+        assert!(merge_message_patch(&mut tool, &patch).is_none());
+
+        // 纯状态补丁（只带 id + status）：不触及内容
+        let mut m = text_msg("m3", "正文", cm::MessageStatus::Streaming);
+        let status_only = cm::ChatMessage {
+            id: "m3".into(),
+            status: Some(cm::MessageStatus::Completed),
+            ..Default::default()
+        };
+        assert!(merge_message_patch(&mut m, &status_only).is_none());
+        assert_eq!(m.status, Some(cm::MessageStatus::Completed));
+        assert_eq!(
+            m.content.as_ref().map(|c| c.to_text()),
+            Some("正文".to_string())
         );
     }
 }

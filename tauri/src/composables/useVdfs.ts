@@ -17,6 +17,8 @@
  * - **选中节点**（`selectedNode`）：详情来源，按 `ext` 解析渲染器；
  * - **选中记忆**：同一数据地址的左栏选中项会被记住（往返 push / 返回后恢复）；
  * - **实时**：订阅总线 `vdfs` 频道，受影响的目录防抖刷新（非轮询）。
+ *   其中**追加型变更**（`appended`）就地拼接正文、不重拉——它是唯一一种能带
+ *   增量载荷的变更，也是列表型数据流式输出的承载方式（见 `applyAppend`）。
  *
  * ## UI 约定（S11）
  *
@@ -48,6 +50,7 @@ import {
 } from '@/services/vdfs'
 import { subscribe } from '@/services/eventBus'
 import {
+  VFDS_CHANGE_APPENDED,
   VFDS_EVENT_KIND,
   VFDS_ROOT,
   actionFileOf,
@@ -195,6 +198,50 @@ export function useVdfs(opts: UseVdfsOptions) {
   /** 详情读取代次（防竞态：见 select 内说明） */
   let detailToken = 0
 
+  /**
+   * 追加代际守卫（S18）——防「在途重读覆盖已应用的增量」。
+   *
+   * 场景：节点正文流式追加（`appended` 就地拼接，**不发重读**），而此前发出的
+   * 一次 `read` 响应稍后到达——它带的是**旧快照**，会把刚拼上去的字抹掉，随后
+   * 的追加再拼上去就得到损坏文本。失败是**静默的**：不报错、不崩溃，只少一段字。
+   *
+   * 记法：把「已应用到哪个路径、应用了几次」记下来。`select` 发起读取时取一次
+   * 快照，响应回来若该路径的计数已变，说明期间有增量落地（本地内容比响应新），
+   * **丢弃该响应**。丢弃是安全的：节点增删另有 `created` / `deleted` 事件兜底。
+   *
+   * 不用 `detailToken` 兼任：那个令牌的 `finally` 会据它复位 `loadingDetail`，
+   * 中途自增会让加载态永远复位不了。
+   */
+  let appendGenPath: string | null = null
+  let appendGen = 0
+
+  /** 某路径已应用的追加次数（换到别的路径即视为 0——只关心当前详情） */
+  function appliedAppends(path: string): number {
+    return appendGenPath === path ? appendGen : 0
+  }
+
+  /** 详情渲染器里「正文即文本缓冲」的那些（追加可安全拼接）；表单/二进制不在其列 */
+  const TEXTUAL_RENDERERS = new Set(['text', 'markdown', 'json', 'message'])
+
+  /**
+   * 就地应用一条追加型变更；返回是否命中**当前打开的详情**。
+   *
+   * 命中即拼接，且**不触发刷新**——这正是 `appended` 与 `updated` 的分野：
+   * 前者说「尾部多了这些字」，后者说「这个节点变了，请重读」。
+   * 未命中当前详情时什么也不做：列表项的结构（`created` / `deleted`）与
+   * 预览首行都不受尾部追加影响，为它重拉整目录是纯粹的浪费。
+   */
+  function applyAppend(change: VdfsChange): boolean {
+    const delta = change.delta
+    const node = selectedNode.value
+    if (!delta || !node || node.path !== change.path) return false
+    if (!TEXTUAL_RENDERERS.has(renderer.value)) return false
+    nodeText.value += delta
+    appendGenPath = node.path
+    appendGen += 1
+    return true
+  }
+
   function clearSelection() {
     detailToken++
     selectedNode.value = null
@@ -211,22 +258,32 @@ export function useVdfs(opts: UseVdfsOptions) {
       clearSelection()
       return
     }
+    // 同一个节点的**重读**（刷新收敛）不清空正文缓冲：清空会与在途增量打架——
+    // 见下方代际守卫，被丢弃的旧响应必须留下「本地已更新的那一份」可看，
+    // 而不是留下一片空白。换到别的节点才清。
+    const sameNode = selectedNode.value?.path === node.path
     selectedNode.value = node
-    nodeText.value = ''
-    formData.value = null
-    nodeBinary.value = false
+    if (!sameNode) {
+      nodeText.value = ''
+      formData.value = null
+      nodeBinary.value = false
+    }
     detailError.value = ''
     fieldErrors.value = []
 
     const r = resolveVdfsRenderer(node)
-    if (r !== 'form' && r !== 'text' && r !== 'json' && r !== 'markdown') return
+    if (r !== 'form' && r !== 'text' && r !== 'json' && r !== 'markdown' && r !== 'message')
+      return
 
     // 读取代次令牌：连点多项时，慢响应不得覆盖新选中项的数据
     const token = ++detailToken
+    // 追加代际快照：读取期间若有增量落地，本地内容比这次响应新 → 丢弃响应
+    const gen = appliedAppends(node.path)
     loadingDetail.value = true
     try {
       const content = await readVdfs(node.path)
       if (token !== detailToken) return
+      if (gen !== appliedAppends(node.path)) return
       if (!content) {
         detailError.value = '读取失败'
         return
@@ -439,6 +496,8 @@ export function useVdfs(opts: UseVdfsOptions) {
   // ==================== 实时（总线 vdfs 频道，非轮询） ====================
   // 变更影响当前目录（自身 / 祖先 / 子树内）才刷新；绑定地址一层的变化
   //（左栏子目录增删）顺带重拉导航。其余变更防抖重拉当前目录收敛。
+  //
+  // **追加型变更是唯一的例外**：它就地拼接、不重拉（见 `applyAppend`）。
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   function scheduleRefresh(delay = 400) {
     if (refreshTimer) clearTimeout(refreshTimer)
@@ -457,6 +516,14 @@ export function useVdfs(opts: UseVdfsOptions) {
 
   /** 数据变更回调（路径过滤在 handler 内，订阅恒定一条） */
   function onChange(change: VdfsChange) {
+    // 追加型变更**到此为止**：命中当前详情就就地拼接，未命中就什么也不做。
+    // 它不改变任何节点的存在与顺序，也不改变预览首行——因此既不该重拉目录，
+    // 也不该重拉左栏导航。让它走下面的通用分支，等于给流式每一帧都挂一次
+    // 防抖刷新（O(n²) 流量），正好抵消 `appended` 存在的意义。
+    if (change.change === VFDS_CHANGE_APPENDED) {
+      applyAppend(change)
+      return
+    }
     if (affects(cwd.value, change.path)) scheduleRefresh()
     // 绑定地址一层（左栏子目录增删）→ 导航跟着变
     if (change.path === addr.value || vdfsParent(change.path) === addr.value) {

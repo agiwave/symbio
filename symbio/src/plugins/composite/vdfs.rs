@@ -315,18 +315,16 @@ impl VdfsProvider for CompositeVdfs {
         p.action(ctx, &rel, action, payload).await
     }
 
-    /// 子 provider 报出的相对路径在此补成树内全路径，再交给上层 sink
+    /// 子 provider 报出的相对路径在此补成树内全路径，再交给上层 sink。
+    ///
+    /// 用 [`VdfsChange::map_paths`] 一次覆盖全部路径（含 `node` 载荷内的路径），
+    /// 不逐字段重建——新增字段时不会漏转发。
     async fn watch(&self, ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
         let dirs = self.children_of(ctx).await?;
         let (dir, p, rel) = Self::resolve(&dirs, path)?;
         let dir = dir.to_string();
-        let wrapped: VdfsChangeSink = Arc::new(move |c: VdfsChange| {
-            sink(VdfsChange {
-                path: child_path(&dir, &c.path),
-                change: c.change,
-                to: c.to.as_deref().map(|t| child_path(&dir, t)),
-            });
-        });
+        let wrapped: VdfsChangeSink =
+            Arc::new(move |c: VdfsChange| sink(c.map_paths(|p| child_path(&dir, p))));
         p.watch(ctx, &rel, wrapped).await
     }
 

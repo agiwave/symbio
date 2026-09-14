@@ -45,8 +45,9 @@
 //! - 节点的能力 = 四个**访问位**（[`VdfsAccess`]：`r` 读 / `w` 写 / `l` 列 / `t` 遍历）；
 //! - 内容 = [`VdfsContent`]（文本 `text` 或二进制 `b64`，互斥）；
 //! - 呈现 = 节点的 `ext`（扩展名）→ 使用方选渲染器；渲染器所需描述经 `schema` 透传；
-//! - 变更 = [`VdfsChange`]（子树内**相对路径**；经 [`VdfsChangeSink`] 由使用方
-//!   补成展示地址后投递）。
+//! - 变更 = [`VdfsChange`]（子树内**相对路径** + **按类型可选的载荷**：
+//!   `appended` 带增量 `delta`，`created` / `updated` 可带节点视图与内容快照；
+//!   经 [`VdfsChangeSink`] 由使用方补成展示地址后投递）。
 
 use async_trait::async_trait;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -76,6 +77,8 @@ pub const VFDS_KIND_FILE: &str = "file";
 pub const VFDS_EXT_FORM: &str = "form";
 /// 会话工作区（实时对话流）
 pub const VFDS_EXT_SESSION: &str = "session";
+/// 单条对话消息（**列表项**：正文在内容里，结构在 `attributes` 里）
+pub const VFDS_EXT_MESSAGE: &str = "message";
 /// 纯文本编辑器
 pub const VFDS_EXT_TEXT: &str = "text";
 /// JSON 编辑器
@@ -321,7 +324,7 @@ impl<'de> Deserialize<'de> for VdfsAccess {
 /// `kind` 只承载**场景语义**（如 `session` / `model`），不参与机制判定。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsNode {
-    /// 全路径（含挂载点，如 `/setting/session`）；由分发层回填，provider 可留空
+    /// 全路径（**展示口径**，如 `.vdfs/session/abc`）；由分发层回填，provider 可留空
     #[serde(default)]
     pub path: String,
     /// 唯一标识：父节点内的路径段
@@ -348,7 +351,12 @@ pub struct VdfsNode {
     /// 字节数（文件）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
-    /// 最后更新时间（Unix 秒）
+    /// 最后更新时间（**Unix 时间戳，秒或毫秒都可**）
+    ///
+    /// 机制不规定精度：物理层用秒（文件系统 `mtime`），会话层用毫秒
+    /// （`session/update` 的时间戳口径）。消费者按量级判别
+    /// （`ts < 1e12` 视为秒），前端 `relativeTime()` 即此规则。
+    /// 这里不做归一——归一需要精度信息，而字段只有一个整数。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
     /// 直接子节点数量（目录）
@@ -742,21 +750,62 @@ pub const VFDS_CHANGE_CREATED: &str = "created";
 pub const VFDS_CHANGE_UPDATED: &str = "updated";
 pub const VFDS_CHANGE_DELETED: &str = "deleted";
 pub const VFDS_CHANGE_RENAMED: &str = "renamed";
+/// **追加型**变更：节点内容尾部新增了一段（携带 [`VdfsChange::delta`]）。
+///
+/// 与 `updated` 的区别是**增量的**：`updated` 是「这个节点变了，请重读」，
+/// `appended` 是「这个节点尾部多了这些字，直接用」。列表型 provider 用它承载
+/// 流式输出——一条消息的正文不断追加，消费者无需为每个片段重读整条消息。
+pub const VFDS_CHANGE_APPENDED: &str = "appended";
 
 /// 数据变更事件（**provider 视角**）。
 ///
 /// **不含挂载名**——provider 不知道自己被挂在哪里（见模块文档）。`path` 是该
 /// provider 子树内的**相对路径**，与其 `list` / `stat` 等的路径坐标系一致；
 /// 使用方（分发层）投递时补上挂载名、拼成全路径后转发给消费者。
+///
+/// ## 载荷是**按变更类型可选**的，不是可有可无的装饰
+///
+/// 消费者要知道「变成了什么」，而 `path` + `change` 只说「哪里、怎么变」。
+/// 三种获取方式对应三种成本：
+///
+/// | 变更 | 载荷 | 消费者动作 | 额外往返 |
+/// |---|---|---|---|
+/// | `appended` | [`Self::delta`] | 尾部拼接 | **0**（热路径，逐帧） |
+/// | `created` / `updated` | [`Self::node`]（+ [`Self::content`]） | 就地插入 / 替换 | **0** |
+/// | 未带载荷 | — | 回退：`stat` + `read` | 1–2 |
+///
+/// 设计要点：**热路径窄、冷路径全**。流式追加每帧只多一小段（`delta`），
+/// 若把整节点挂在每帧上，流量会退化成 O(n²)；而 `created` / `updated` 每轮
+/// 只有寥寥数次，把节点视图一并带上就能免掉消费者的回读——这正是既有
+/// `kind = "session"` 消息通道在做的事，VDFS 承载它即可，不必让消费者退步。
+///
+/// 载荷**可选**：provider 可以选择不填（消费者回退到 `stat` / `read`），
+/// 因此这是纯增益扩展，不构成对实现的强制。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsChange {
     /// 变更节点在本 provider 子树内的相对路径
     pub path: String,
-    /// 变更类型（`created` / `updated` / `deleted` / `renamed`）
+    /// 变更类型（`created` / `updated` / `deleted` / `renamed` / `appended`）
     pub change: String,
     /// 重命名时的目标路径（同样为本子树内相对路径）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
+    /// 追加型变更（`appended`）的**增量文本**；其余变更为 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta: Option<String>,
+    /// **节点视图**（`created` / `updated` 的载荷）：变更后该节点的元数据。
+    ///
+    /// 消费者据此免掉一次 `stat`——结构（`name` / `attributes` / `status` / `ext`）
+    /// 直接可用。`None` = 未附带，消费者需自行 `stat`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<VdfsNode>,
+    /// **内容快照**（`created` / `updated` 的载荷）：变更后该节点的正文。
+    ///
+    /// 与 [`Self::delta`] 的区别是**全量 vs 增量**：本字段是「现在是什么」，
+    /// `delta` 是「多了什么」。两者不会同时出现。
+    /// `None` = 未附带，消费者需自行 `read`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }
 
 impl VdfsChange {
@@ -765,6 +814,9 @@ impl VdfsChange {
             path: path.into(),
             change: change.into(),
             to: None,
+            delta: None,
+            node: None,
+            content: None,
         }
     }
 
@@ -773,7 +825,84 @@ impl VdfsChange {
             path: from.into(),
             change: VFDS_CHANGE_RENAMED.to_string(),
             to: Some(to.into()),
+            delta: None,
+            node: None,
+            content: None,
         }
+    }
+
+    /// 追加型变更：`path` 节点尾部新增了 `delta` 这段文本。
+    pub fn appended(path: impl Into<String>, delta: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            change: VFDS_CHANGE_APPENDED.to_string(),
+            to: None,
+            delta: Some(delta.into()),
+            node: None,
+            content: None,
+        }
+    }
+
+    /// 附带**节点视图**（免掉消费者的 `stat`）
+    pub fn with_node(mut self, node: VdfsNode) -> Self {
+        self.node = Some(node);
+        self
+    }
+
+    /// 附带**内容快照**（免掉消费者的 `read`）
+    pub fn with_content(mut self, content: impl Into<String>) -> Self {
+        self.content = Some(content.into());
+        self
+    }
+
+    /// 用 `f` 重写事件里**全部**路径（`path` / `to` / `node.path`）。
+    ///
+    /// 使用方（分发层）补挂载前缀时调用它——**而不是逐字段重建** `VdfsChange`：
+    /// 逐字段重建会在新增字段时被漏掉（新字段静默丢在转发层，且没有任何编译
+    /// 错误提示）。把「路径都要翻译」收进一个函数，漏翻译在结构上不可能发生。
+    ///
+    /// 空路径不动（`node.path` 常为空 = provider 未填，此时以 `path` 为准）。
+    pub fn map_paths(mut self, f: impl Fn(&str) -> String) -> Self {
+        self.path = f(&self.path);
+        self.to = self.to.take().map(|t| f(&t));
+        if let Some(node) = self.node.as_mut() {
+            if !node.path.is_empty() {
+                node.path = f(&node.path);
+            }
+        }
+        self
+    }
+}
+
+// ==================== 路径判定（地址契约的唯一实现） ====================
+//
+// 下面三个函数是**地址规则**的实现，因此归本模块所有：任何按路径段比较、
+// 或需要收敛坐标系的场合都调用它们，不得各写一份。
+//
+// 历史教训：`..` 判定曾按「是否以 `../` 开头」实现，Windows 下
+// `src\..\..\..\Windows` 既不以 `../` 也不以 `..\` 开头，直接绕过守卫；
+// 黑名单前缀曾用裸 `starts_with("/etc")`，把 `/etcfoo` 一并误伤。
+// 两处 bug 同源——**按字符串前缀代替按路径段比较**。
+
+/// 路径中是否含 `..` 段——**两种分隔符都算**。
+///
+/// 只查 `/` 会让 Windows 的 `src\..\..\..\Windows` 绕过守卫；只查带分隔符的
+/// `../` / `..\` 前缀会放过 `a/..`（`..` 收尾）。因此按**段**判定，与分隔符无关。
+pub fn has_parent_segment(path: &str) -> bool {
+    path.split(['/', '\\']).any(|seg| seg == "..")
+}
+
+/// `path` 是否落在 `prefix` 之内——相等，或紧随一个分隔符。
+///
+/// 前缀必须按**路径段**比较：裸 `starts_with("/etc")` 会把 `/etcfoo` 误伤。
+pub fn path_within(path: &str, prefix: &str) -> bool {
+    let prefix = prefix.trim_end_matches(['/', '\\']);
+    if prefix.is_empty() {
+        return false;
+    }
+    match path.strip_prefix(prefix) {
+        Some(rest) => rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\'),
+        None => false,
     }
 }
 
@@ -1183,6 +1312,95 @@ mod tests {
         let c = VdfsChange::new("sub/x.md", VFDS_CHANGE_UPDATED);
         assert_eq!(c.path, "sub/x.md");
         assert!(c.to.is_none());
+
+        // 追加型变更必须携带增量——消费者不得据此触发重读
+        let c = VdfsChange::appended("sub/x.md", "尾部新增");
+        assert_eq!(c.change, VFDS_CHANGE_APPENDED);
+        assert_eq!(c.delta.as_deref(), Some("尾部新增"));
+        assert!(VdfsChange::new("a", VFDS_CHANGE_UPDATED).delta.is_none());
+    }
+
+    /// 载荷按变更类型可选：`appended` 只带增量（热路径窄），
+    /// `created` / `updated` 可带节点视图 + 内容快照（冷路径免回读）。
+    #[test]
+    fn change_payload_is_kind_scoped() {
+        // 默认构造不带任何载荷——provider 不填也能工作（消费者回退 stat/read）
+        let bare = VdfsChange::new("a", VFDS_CHANGE_CREATED);
+        assert!(bare.node.is_none() && bare.content.is_none());
+
+        let node = VdfsNode::file("m1", "助手", VdfsAccess::READ);
+        let c = VdfsChange::new("消息/m1", VFDS_CHANGE_CREATED)
+            .with_node(node)
+            .with_content("你好");
+        assert_eq!(c.node.as_ref().map(|n| n.name.as_str()), Some("m1"));
+        assert_eq!(c.content.as_deref(), Some("你好"));
+        // 全量快照与增量是两个字段，不同时出现
+        assert!(c.delta.is_none());
+
+        // 追加型**只**带增量：逐帧载荷不得随正文变宽（否则退化成 O(n²)）
+        let a = VdfsChange::appended("消息/m1", "世界");
+        assert!(a.node.is_none() && a.content.is_none() && a.delta.is_some());
+
+        // 空载荷字段不序列化（保持既有线上形状不变）
+        let v = serde_json::to_value(VdfsChange::new("a", VFDS_CHANGE_UPDATED)).unwrap();
+        assert!(v.get("delta").is_none() && v.get("node").is_none() && v.get("content").is_none());
+    }
+
+    /// `map_paths` 一次覆盖事件里**全部**路径——使用方补前缀不必逐字段重建。
+    #[test]
+    fn map_paths_covers_every_path_in_the_event() {
+        let node = VdfsNode::file("m1", "助手", VdfsAccess::READ).with_path("abc/消息/m1");
+        let c = VdfsChange::renamed("abc/消息/m1", "abc/消息/m2")
+            .with_node(node)
+            .with_content("正文")
+            .map_paths(|p| format!("session/{p}"));
+
+        assert_eq!(c.path, "session/abc/消息/m1");
+        assert_eq!(c.to.as_deref(), Some("session/abc/消息/m2"));
+        assert_eq!(
+            c.node.as_ref().map(|n| n.path.as_str()),
+            Some("session/abc/消息/m1")
+        );
+        // 载荷本身不是路径，不参与翻译
+        assert_eq!(c.content.as_deref(), Some("正文"));
+        assert_eq!(c.change, VFDS_CHANGE_RENAMED);
+
+        // 节点路径为空（provider 未填）时不动——以事件的 `path` 为准
+        let c = VdfsChange::new("a", VFDS_CHANGE_UPDATED)
+            .with_node(VdfsNode::file("m1", "m1", VdfsAccess::READ))
+            .map_paths(|p| format!("session/{p}"));
+        assert_eq!(c.node.as_ref().map(|n| n.path.as_str()), Some(""));
+    }
+
+    /// `..` 判定按**路径段**，与分隔符无关。
+    #[test]
+    fn parent_segment_is_separator_agnostic() {
+        assert!(has_parent_segment("../etc/passwd"));
+        assert!(has_parent_segment(".."));
+        assert!(has_parent_segment("a/../b"));
+        // `..` 收尾：按前缀实现的旧判定会放过
+        assert!(has_parent_segment("a/.."));
+        // Windows 分隔符：按 `../` 前缀实现的旧判定会放过
+        assert!(has_parent_segment(r"src\..\..\..\Windows"));
+        assert!(has_parent_segment(r"..\etc"));
+        // 含 `..` 但不是独立段 → 合法
+        assert!(!has_parent_segment("a/..b/c"));
+        assert!(!has_parent_segment("src/main.rs"));
+    }
+
+    /// 前缀判定按**路径段**——`/etcfoo` 不在 `/etc` 之内。
+    #[test]
+    fn path_within_respects_segment_boundary() {
+        assert!(path_within("/etc", "/etc"));
+        assert!(path_within("/etc/passwd", "/etc"));
+        assert!(path_within(r"C:\Users\a\.ssh\id", r"C:\Users\a\.ssh"));
+        // 裸 starts_with 会误伤这两个
+        assert!(!path_within("/etcfoo", "/etc"));
+        assert!(!path_within("/etc2/x", "/etc"));
+        assert!(!path_within("/usr/local", "/etc"));
+        // 前缀尾部多余的斜杠不影响判定
+        assert!(path_within("/etc/passwd", "/etc/"));
+        assert!(!path_within("/anything", ""));
     }
 
     #[test]

@@ -59,6 +59,17 @@ export function startSessionBusWatcher(): void {
       const sid = busEvent.data.session_id
       if (!sid) return
 
+      // 本通道只承载**会话级**事件（状态 / 生命周期 / 错误 / 中止）。
+      //
+      // 消息本体（`ChatEventType.Update` / `Delete`）**不在此处理**（S19 收敛）：
+      // 转写的读与实时都已归 VDFS——读走 `.vdfs/session/<sid>`（一次 read 拿整份
+      // 历史），实时走 `kind = "vdfs"` 的变更（见 `vdfsTranscriptSync`）。
+      //
+      // 这两个事件类型仍会从总线到达（**进程内的 subagent 宿主需要它们**：
+      // 子会话审批透传 + 累积 Assistant 文本，见 `agent/host/subagent.rs`），
+      // 因此后端必须继续发布；但前端在这里**故意不处理**——再 patch 一次就会与
+      // VDFS 通道形成双写（流式文本逐词叠字）。详见
+      // `docs/design/vdfs-session-messages.md` §6 S19。
       switch (evt.type) {
         case ChatEventType.Status:
           // 后端 Status 事件 → 更新 store 状态（覆盖所有会话，不分 active/background）
@@ -81,59 +92,19 @@ export function startSessionBusWatcher(): void {
           }
           break
 
-        case ChatEventType.Update: {
-          // Update 事件 → 写入/合并消息到 store。
-          // 设计原则：消息本身**不**携带 session_id，避免每个消息重复存储 session_id。
-          // session_id 来自 store.putMessage(sid, ...) / patchMessage(sid, ...) 的 sid 形参。
-          const patch = evt.message
-          if (patch && patch.id) {
-            store.patchMessage(sid, patch)
-            // 同步活动文字
-            if (patch.status === 'streaming') {
-              if (patch.type === 'reasoning') {
-                store.putStatus(sid, { activity: '正在思考…' })
-              } else if (patch.type === 'tool_call') {
-                store.putStatus(sid, { activity: `正在调用 ${patch.name || '工具'}…` })
-              } else {
-                store.putStatus(sid, { activity: '正在响应…' })
-              }
-            } else if (patch.status === 'waiting_user_action') {
-              // 进入等待审批：点亮卡片"等待审批"角标，并让看门狗能识别"审批等待超时"
-              store.putStatus(sid, { activity: '等待审批…', is_waiting_approval: true })
-            } else if (patch.status === 'completed') {
-              // 该条审批已了结（后端顺序处理工具，同一时刻仅一个 waiting_user_action），
-              // 复位审批角标；若还有其他消息仍在等待，其 waiting_user_action 的
-              // Update 会再次点亮。
-              store.putStatus(sid, { activity: undefined, is_waiting_approval: false })
-            } else if (patch.status === 'failed') {
-              store.putStatus(sid, { activity: '失败', last_failed: true, is_waiting_approval: false })
-            }
-          }
-          break
-        }
-
         case ChatEventType.Abort: {
-          // Abort 事件 → 标记 streaming/waiting 为 completed/failed，并清空 activity
-          const msgs = store.getSessionMessages(sid)
-          for (const msg of msgs) {
-            if (msg.status === 'streaming' || msg.status === 'waiting_user_action') {
-              const textContent = typeof msg.content === 'string'
-                ? msg.content
-                : (Array.isArray(msg.content) ? (msg.content as any[]).filter(p => p.type === 'text').map(p => (p as any).text).join('') : '')
-              if (textContent.trim().length === 0) {
-                // 空内容消息从 store 中移除
-                const mnext = { ...store.sessionMessages }
-                const cur = { ...(mnext[sid] || {}) }
-                delete cur[msg.id]
-                mnext[sid] = cur
-                store.sessionMessages = mnext
-              } else {
-                store.patchMessage(sid, { ...msg, status: 'completed' })
-              }
-            }
-          }
-          // 提示音：用户主动中止的收尾（wasWorking 判定同 idle 分支；
-          // 若本会话本轮已因 Error 响过铃，去重窗口会拦截）
+          // 中止**不在这里收敛消息**（S19 收敛）。
+          //
+          // 在途消息的终态由服务端定稿：`orchestrator` 在中止出口先调
+          // `persist_failure`（把失败 Turn 标 Failed、在途子节点定稿 Completed），
+          // 而这些终态经 `emit_message_patch` 一并发出 VDFS 变更，由
+          // `vdfsTranscriptSync` 落进 store——因此走到这里时消息已是终态，
+          // 此处再扫一遍只会是第二份实现（且可能与 VDFS 通道打架）。
+          //
+          // 空内容节点也不需要在此删除：渲染层（`useChatConnection.messageTree`）
+          // 本就过滤「空内容叶子」，删不删都不显示。
+          //
+          // 这里只做本通道真正独有的事：会话状态收敛 + 提示音。
           const wasWorkingBeforeAbort = store.getSessionStatus(sid).is_working
           store.putStatus(sid, { is_working: false, activity: '已中止', is_waiting_approval: false })
           store.setWorking(sid, false)
@@ -191,21 +162,6 @@ export function startSessionBusWatcher(): void {
           // 业务 working 收敛由后端 Status idle / Abort 事件负责。
           logger.debug('[session-bus-watcher]', `Disconnected: ${sid}`)
           break
-
-        case ChatEventType.Delete: {
-          // Delete 事件：后端通知前端精确删除某条消息。
-          //
-          // 触发场景：工具调用 resume（approve/reject/retry/supply/answer）时，
-          // 后端先删掉旧的 pending/failed 子节点，然后广播本事件让前端同步删除，
-          // 随后通过 Update/Append 写入新子节点 + 父节点状态更新。
-          //
-          // 不调用后端 API（删除已由后端完成）；仅同步前端 store。
-          const messageId = (evt as any).message_id
-          if (messageId) {
-            store.removeMessageById(sid, messageId)
-          }
-          break
-        }
       }
     }
   )
