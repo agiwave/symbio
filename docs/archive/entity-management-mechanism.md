@@ -1,7 +1,26 @@
-# 统一实体管理机制与规范
+# 统一实体管理机制与规范（已归档）
 
-状态：规范（**后端内部机制**；`entities/*` 调用协议已于 S11 下线，S12/S13 补齐整包导入与导出）
-范围：Symbio 全部「实体管理」类功能（顶层实体 + 容器子实体）
+> **⚠️ 历史归档（2026-09-15）** —— 本文件描述的是**已下线的「统一实体管理机制」**：
+> 对外调用协议 `entities/*` + 前端统一实体页机制。二者均已退场——
+> `entities/*` 无任何路由（`entities::dispatch` 已删，`schemas/entities.rs` 中
+> `EntitiesList*` / `EntityGetRequest` / `EntityUploadRequest` / `EntityDeleteRequest`
+> / `EntityStatusRequest` 等一并删除）；前端实体页整体删除
+> （`views/WorkbenchView.vue` / `composables/useWorkbenchView.ts` / `useWorkbench.ts`
+> / `useEntityProviders.ts` / `components/entities/EntityTree.vue` / `EntityDetailPanel.vue`
+> / `services/entities.ts`）。
+>
+> **现行机制**见 [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md)
+> ——后端 `EntityProvider` 抽象（由 `EntityVdfsAdapter` 调用）才是仍在活跃的部分。
+>
+> 本文件仅作**历史参考，不再维护**。文中出现的 `entities/*` 端点、
+> `/entities/:types?` 与 `/container/:kind/:id/entities` 路由、前端页面/组件名
+> （WorkbenchView / EntityTree / EntityDetailPanel / DetailForm 等）均为**当时形态**，
+> 不代表当前实现；§2.2「原端点 → 现在的路径」映射表保留为迁移过程记录。
+
+---
+
+原状态：规范（后端内部机制；`entities/*` 调用协议已于 S11 下线，S12/S13 补齐整包导入与导出）
+原范围：Symbio 全部「实体管理」类功能（顶层实体 + 容器子实体）
 
 > **对外已只有一个协议（S11）**：`entities/*` 调用协议已下线——不再有任何插件
 > 路由它，`entities::dispatch` 与其请求/响应一并删除。资源访问统一经 VDFS

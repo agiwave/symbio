@@ -135,7 +135,7 @@ export interface DetailAction {
   busy_label?: string
 }
 
-/** 详情页定义。binding ∈ upload（实体实体，保存走 entities/upload）| config（配置分区，经 load/save_path 读写）| info（只读概览，字段取值来自 item.config/extra） */
+/** 详情页定义。binding ∈ upload（实体，保存走 manifest 写入）| config（配置分区，经 load/save_path 读写）| info（只读概览，字段取值来自 item.config/extra） */
 export interface DetailDefinition {
   binding: string
   load_path?: string

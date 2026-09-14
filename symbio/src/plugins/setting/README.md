@@ -24,4 +24,4 @@
 
 - 全局配置：`../home/README.md`
 - VDFS 机制：`docs/design/vdfs.md`
-- 实体机制（内部实现，无对外地址）：`docs/design/entity-management-mechanism.md`
+- 实体提供者机制（内部实现，无对外地址）：`docs/design/entity-provider-mechanism.md`

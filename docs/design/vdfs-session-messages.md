@@ -422,5 +422,5 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
   是一个普通扩展名。
 - [vdfs-frontend.md](./vdfs-frontend.md)：该文件的 S1–S15 记录仍然有效；
   S16–S19 的落地见本文 §6。
-- [entity-management-mechanism.md](./entity-management-mechanism.md)：会话实体
+- [entity-provider-mechanism.md](./entity-provider-mechanism.md)：会话实体
   （`EntityProvider`）与本文的 VDFS 视图是**同一份存储的两个视图**，不存在第二份数据。

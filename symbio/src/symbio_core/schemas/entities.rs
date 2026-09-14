@@ -33,7 +33,7 @@ pub const ENTITY_SETTING: &str = "setting";
 
 // ==================== 统一列表项 ====================
 
-/// 统一实体概要（列表项）
+/// 实体概要（列表项）
 ///
 /// `status` 取值建议：`active` / `disabled` / `working` / `error` / `unknown`。
 /// `extra` 展开存放类型特有字段（如 model 的 provider/model、session 的
@@ -92,7 +92,7 @@ impl EntitySummary {
 
 // ==================== 请求 / 响应 ====================
 
-/// `entities/upload` 响应
+/// 实体写入（`vdfs/write` / 整包导入）响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityUploadResponse {
     pub kind: String,
@@ -117,7 +117,7 @@ pub struct EntityExport {
     pub b64: String,
 }
 
-/// `entities/status` 响应
+/// 实体状态（`vdfs/action { action: "test" }`）响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityStatusResponse {
     pub kind: String,
@@ -291,9 +291,9 @@ pub struct DetailAction {
     pub busy_label: Option<String>,
 }
 
-/// 详情页定义。`binding` ∈ upload（实体实体：预填 item.config，保存走
-/// `entities/upload` manifest）| config（配置分区：经 `load_path`/
-/// `save_path` 读写，如 `local/config get|set`）| info（只读概览：
+/// 详情页定义。`binding` ∈ upload（实体：预填 item.config，保存走
+/// manifest 写入）| config（配置分区：经 `load_path`/
+/// `save_path` 读写，如 `config/get` / `config/set`）| info（只读概览：
 /// 无保存，字段取值来自 item.config/extra，配 `static` widget 展示）。
 /// 派生链均为「首个非空」：
 /// `title_from` 生成标题，`name_from` 保存时补名称，`id_from` 新建时

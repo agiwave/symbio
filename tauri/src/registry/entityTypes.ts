@@ -117,7 +117,7 @@ export function getEntityIconFor(target: EntityRegistryTarget): Component | unde
 // ============ 内置注册 ============
 
 // model / mcp / skill 详情与新建、agent bundle 概览、设置三分区均不注册：
-// 由后端 `entities/detail` 下发定义，DetailForm 通用渲染器动态生成
+// 由后端 `detail_definition` 下发定义（随 VDFS 节点 `schema`），DetailForm 通用渲染器动态生成
 // （definition-driven detail）。
 
 // Session（会话）：kind 级注册——详情 = 聊天工作区（ChatMainPanel）；

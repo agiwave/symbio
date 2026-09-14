@@ -120,7 +120,7 @@ pub trait EntityProvider: Send + Sync {
     /// VDFS `write { create }` 的**最小落盘 manifest**。
     ///
     /// 两条链路的「新建」语义不同，故由插件自持：
-    /// - **实体机制**：前端渲染完整表单，字段齐全后一次 `entities/upload`；
+    /// - **实体机制**：前端渲染完整表单，字段齐全后一次 manifest 写入（`vdfs/write`）；
     /// - **VDFS**：`vdfs/write { create: true }` 只带路径名，语义是「先落一份可用的
     ///   默认配置，用户随后在详情里完善」。
     ///
@@ -230,7 +230,7 @@ pub trait EntityProvider: Send + Sync {
 
     // ==================== 容器子实体（container 语义） ====================
 
-    /// 列出容器条目内部的子实体（`entities/list` 携带 `container` 时调用）。
+    /// 列出容器条目内部的子实体（`vdfs/list` 携带 `container` 时调用）。
     ///
     /// `sub_kind` 为 `None` 时返回全部子类型（条目 `kind` 字段供前端分类，
     /// 供容器页做类别计数）；`container` 为容器条目 id（如 agent bundle id）。
@@ -531,8 +531,9 @@ fn ensure_manifest_id(manifest: &serde_json::Value, id: &str) -> serde_json::Val
     m
 }
 
-/// `entities/upload` 的 manifest 分支与 `VdfsProvider::write` 都走这里，
-/// 两条链路因此行为完全一致（同一份校验、同一份写盘、同一个事件）。
+/// 实体机制的 manifest 写入唯一入口：`VdfsProvider::write` 与各 provider
+/// 的默认写盘钩子都走这里，故两条链路行为完全一致（同一份校验、同一份
+/// 写盘、同一个事件）。
 pub async fn entity_write<P: EntityProvider + ?Sized>(
     provider: &P,
     ctx: &Arc<dyn InvokeRequest>,

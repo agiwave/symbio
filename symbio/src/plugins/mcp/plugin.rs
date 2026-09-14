@@ -203,7 +203,7 @@ impl Default for McpPlugin {
     }
 }
 
-// ==================== 统一实体协议 (entities/*) ====================
+// ==================== 实体提供者钩子 (EntityProvider) ====================
 //
 // 公共流程（列表包装 / 幂等删除）由 `entities::entity_write` / `entity_delete`
 // 承载，这里只实现 MCP 的差异化钩子；`entities/*` 协议已随 S11 下线，

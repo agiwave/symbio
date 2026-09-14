@@ -119,7 +119,7 @@ crate::submit_object_creator!(PLUGIN_SETTING, SettingPlugin::build, dyn Plugin);
 
 // ==================== 设置分区清单（单一真相源） ====================
 
-/// 设置分区（固定清单）——统一实体机制与 VDFS 挂载点**共用同一份声明**。
+/// 设置分区（固定清单）——实体提供者机制与 VDFS 挂载点**共用同一份声明**。
 ///
 /// `id` 同时作为前端 editor 的"扩展名"（config_type）；`prefix` 是该分区配置
 /// 读写的目标插件前缀（`None` = 数据由前端状态自持 / 纯展示，VDFS 侧只读）。

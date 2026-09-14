@@ -69,8 +69,8 @@ pub struct ImportResult {
 
 /// bundle 内部实体条目（prompts / skills / mcps 的结构化清单项）。
 ///
-/// `path` 是相对 bundle 目录的路径，也是统一实体协议容器语义
-/// （`entities/*` 携带 `container`）下的实体操作键 `id`；
+/// `path` 是相对 bundle 目录的路径，也是 VDFS 容器语义
+/// （`vdfs/*` 携带 `container`）下的实体操作键 `id`；
 /// 命名与 [`assemble_bundle`] 的扫描规则严格一致（装配结果可直接复现）。
 #[derive(Debug, Clone, Serialize)]
 pub struct BundleEntityEntry {

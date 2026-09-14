@@ -13,7 +13,7 @@
 - `{action}` - 具体能力 (如 `chat`, `list`, `config`)
 
 > `worker` 前缀可省略也可显式写出：`session/chat/send` 与 `worker/session/chat/send` 等价
-> （前者由 home 兜底转发给 worker）。统一实体注册表登记的 `session` / `model` 前缀带 `worker/`。
+> （前者由 home 兜底转发给 worker）。实体注册表登记的 `session` / `model` 前缀带 `worker/`。
 
 ## 通用路由
 
@@ -36,9 +36,12 @@
 > VDFS 节点 `schema` 下发（`.vdfs/setting/<分区>` 的 `vdfs/list` 即可拿到）。
 > 各插件 `config/set` 内部会自行向父级发起 `save_config`，配置才真正落盘。
 
-### 统一实体管理
+### 实体资源（VDFS）
 
-资源型插件的标准实体操作（`list` / `get` / `upload` / `delete` / `status`，可选 `detail` / `watch`），详见下文「通用：统一实体管理」。
+资源型插件**不再提供实体操作路由**：其资源统一经 VDFS 寻址（`.vdfs/<插件名>/…`，
+操作 `vdfs/list|tree|stat|read|write|mkdir|delete|move|edit|search|watch|unwatch|action`）。
+后端 `EntityProvider` 抽象见 [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md)；
+下线经过见下文「通用：统一实体管理（`{plugin}/entities/*`）—— **已下线**」。
 
 ---
 
@@ -53,7 +56,6 @@
 | `home/reload` | 热重载：切换 homedir（可选）+ 重建全部子插件 | 前端切换系统目录后调用 |
 | `work/set_workspace` | 切换工作区，写入 `work.workdir` 与最近使用列表 | 写操作 |
 | `work/get_workspace` | 读取当前工作区、展开路径与最近工作区列表 | 只读；gateway 只读白名单放行 |
-| `entities/providers` | 宿主级实体 provider 注册表（前端启动拉取生成左侧导航） | 顺序可由 `symbio.provider_order` 覆盖 |
 | `save_config` | 将内存配置原子化写入 `<homedir>/config.yaml` | 由子插件 `config/set` 上行触发 |
 
 ---
@@ -241,7 +243,7 @@ mcp_servers:
 | `telegram/status` | 运行状态 |
 | `telegram/config/get` \| `config/set` | Bot 配置读写 |
 
-> Telegram 未接入统一实体协议（不在 `provider_registry()` 中），Bot 配置走 `config/get|set`。
+> Telegram 未接入 VDFS 挂载点体系（不在 `provider_registry()` 中），Bot 配置走 `config/get|set`。
 
 ---
 
@@ -275,7 +277,7 @@ mcp_servers:
 | `setting` 设置 | `.vdfs/setting` | 否（分区固定） | 否 | — |
 
 导航顺序由注册表 `order` 决定（**无配置覆盖**；原 `symbio.provider_order` 已下线）。
-机制详解见 [design/entity-management-mechanism.md](../design/entity-management-mechanism.md)。
+机制详解见 [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md)。
 
 ---
 

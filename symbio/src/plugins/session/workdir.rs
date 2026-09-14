@@ -1,8 +1,8 @@
-//! 会话工作目录的 tree 场景实现（统一实体协议 tree 机制下的一个 provider 场景）
+//! 会话工作目录的 tree 场景实现（VDFS 容器 tree 机制下的一个 provider 场景）
 //!
 //! tree 机制（`ContainerKindInfo.view = "tree"`）只定义「层级 + 懒加载 +
 //! 选择」：节点是统一 `EntitySummary`（`id` = 容器内相对路径、`parent` =
-//! 父路径、`expandable` = 可展开提示），经 `entities/list` 的 `parent`
+//! 父路径、`expandable` = 可展开提示），经 `vdfs/list` 的 `parent`
 //! 请求参数逐层下发。本模块是该机制的一个场景：把**会话工作目录**的
 //! 文件系统层级表达为 tree 节点——机制层不感知文件语义。
 //!
@@ -256,8 +256,8 @@ pub async fn delete_node(workdir: &str, rel: &str) -> Result<(), PluginError> {
 
 /// 工作目录监听管理器（场景级基础设施）。
 ///
-/// 监听生命周期与**前端树视图的挂载期**绑定（`entities/watch` /
-/// `entities/unwatch` 操作对）：每个 workdir 至多一个 [`FsWatcher`]，以
+/// 监听生命周期与**前端树视图的挂载期**绑定（`vdfs/watch` /
+/// `vdfs/unwatch` 操作对）：每个 workdir 至多一个 [`FsWatcher`]，以
 /// 关注它的容器（会话）引用计数维持——不同会话的工作目录各自监听，共享
 /// 工作目录的多个会话共享同一监听，最后一个订阅方释放后监听停止。
 /// 文件变化时向所有关注该 workdir 的容器发布粗粒度 `data` 事件（§2.4，

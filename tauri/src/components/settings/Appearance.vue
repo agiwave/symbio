@@ -153,7 +153,7 @@ import SettingsFormShell from './SettingsFormShell.vue'
 defineOptions({ inheritAttrs: false })
 
 defineProps<{
-  /** 当前设置分区实体项（统一实体协议注入） */
+  /** 当前设置分区实体项（实体提供者机制注入） */
   item?: { id: string; name?: string } | null
 }>()
 

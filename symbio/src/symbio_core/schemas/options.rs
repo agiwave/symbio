@@ -24,8 +24,8 @@
 //! worker/session/options/list   → OptionsResponse（parent 缺省 = 根层；非空 = 该节点的子项）
 //! ```
 //!
-//! 单个端点是刻意的：根层与子层只是 `parent` 参数的有无，与实体机制的
-//! 树懒加载（`entities/list` 的 `parent`）同构，避免为同一机制造第二个通道。
+//! 单个端点是刻意的：根层与子层只是 `parent` 参数的有无，与 VDFS 的
+//! 树懒加载（`vdfs/list` 的 `parent`）同构，避免为同一机制造第二个通道。
 //!
 //! ## 与实体表单机制的统一（§4）
 //!

@@ -193,7 +193,9 @@ Agent 认知类型与关系类型经常变化。
 
 ## ADR-010: 统一实体管理
 
-**状态**：已接受
+**状态**：已被取代（S11 起 `entities/*` 调用协议下线，资源访问统一经 VDFS；
+后端 `EntityProvider` 抽象保留并退为内部机制，见
+[design/entity-provider-mechanism.md](./design/entity-provider-mechanism.md)）
 
 **背景**：
 多种实体 (Agent, Model, Session, MCP, Skill) 需要 CRUD 操作。

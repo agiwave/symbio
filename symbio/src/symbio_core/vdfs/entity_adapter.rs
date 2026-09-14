@@ -14,9 +14,9 @@
 //! | `list` | [`EntityProvider::list_items`] |
 //! | `stat` / 节点呈现 | [`EntityProvider::summarize`] + [`EntityProvider::detail_definition`] |
 //! | `read` | 摘要 `extra.config`（完整配置，与实体详情页**同源**） |
-//! | `write` | [`entity_write`]（`entities/upload` 的 manifest 分支同一实现） |
+//! | `write` | [`entity_write`]（manifest 写入的唯一实现） |
 //! | `write`（二进制） | [`EntityProvider::import_zip`]（zip 整包导入） |
-//! | `delete` | [`entity_delete`]（`entities/delete` 同一实现） |
+//! | `delete` | [`entity_delete`]（删除的唯一实现） |
 //! | `action` | [`VFDS_ACTION_TEST`] → `test_status`；[`VFDS_ACTION_EXPORT`] → `export_zip` |
 //! | `watch` | provider 侧变更广播（写 / 删时触发，**非轮询**） |
 //!
@@ -343,7 +343,7 @@ impl VdfsProvider for EntityVdfsAdapter {
     }
 
     fn description(&self) -> Option<&str> {
-        Some("统一实体机制中的一类资源；读写删与实体管理页共用同一实现。")
+        Some("实体提供者机制中的一类资源；读写删与 VDFS 详情共用同一实现。")
     }
 
     fn order(&self) -> i32 {
@@ -546,7 +546,7 @@ impl VdfsProvider for EntityVdfsAdapter {
 
     /// 写入：**二进制** → 整包导入（zip，见 [`VFDS_NEW_SOURCE_FILE`]）；
     /// `create` → 用插件声明的**最小 manifest** 落一份默认配置；
-    /// 否则 → 以内容为完整 manifest 覆盖（走 `entities/upload` 同一实现）
+    /// 否则 → 以内容为完整 manifest 覆盖（走 `entity_write` 同一实现）
     async fn write(
         &self,
         ctx: &VdfsContext,

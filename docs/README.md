@@ -50,7 +50,7 @@ docs/                            # 系统级文档（跨模块）
 │   └── TROUBLESHOOTING.md       # 故障排查
 ├── design/                      # 现行设计规范（只写跨层取舍与不变量）
 │   ├── context-compression-design.md   # 上下文压缩 L0-L6 分层总览
-│   ├── entity-management-mechanism.md  # 统一实体管理机制
+│   ├── entity-provider-mechanism.md   # 实体提供者机制（EntityProvider）
 │   ├── http-api-transport.md           # Gateway HTTP/WS 传输层设计
 │   └── open-agent-bundle-spec.md       # OAB 包规范
 ├── CHANGELOG.md                 # 更新日志

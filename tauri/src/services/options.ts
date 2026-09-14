@@ -16,7 +16,7 @@ import { logger } from '@/utils/logger'
  * 拉取选项列表。
  *
  * `parent` 缺省 = 根层（会话输入区的根选项）；非空 = 该节点的子项
- * （sub 类型懒加载，与实体机制 `entities/list` 的树懒加载同构）。
+ * （sub 类型懒加载，与 VDFS `vdfs/list` 的树懒加载同构）。
  */
 export async function listOptions(
   sessionId?: string,

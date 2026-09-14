@@ -71,7 +71,7 @@ graph TD
 | `turn.rs`                                                                 | 单轮执行机器与流式类型（`execute_post_with_abort` / `parse_sse_stream` / `ToolCallInfo` / emit 辅助） |
 | `capability.rs`                                                           | `Capability` / `CapabilityVisitor` 能力系统                                               |
 | `capability_error.rs`                                                     | 能力收集期错误通道（写侧=任意 traverse 插件，读侧=session 编排方）                                     |
-| `entities.rs`                                                             | 统一实体框架：`EntityProvider` trait + list/get/upload/delete/status 公共流程                    |
+| `entities.rs`                                                             | 实体提供者框架：`EntityProvider` trait + 注册表 + 写盘/删除/导入/导出公共流程                    |
 | `tools.rs`                                                                | `DefaultToolVisitor` 默认能力管理器                                                          |
 | `schemas/`                                                                | 跨端数据结构 (Request/Response)，Rust 端定义                                                    |
 | `logger.rs`                                                               | 日志系统初始化                                                                               |
@@ -93,7 +93,7 @@ graph TD
 | `local`     | 本地工具         | shell / file_read / file_write / file_edit / glob_search / content_search                                         |
 | `web`       | Web 工具       | http_request / web_search / web_fetch                                                                             |
 | `skill`     | 技能           | 加载与执行技能定义（含 `skill/search`）                                                                                       |
-| `mcp`       | MCP 桥        | MCP server 注册（stdio / http）与工具调用（另含统一实体 `entities/servers` 维护）                                                    |
+| `mcp`       | MCP 桥        | MCP server 注册（stdio / http）与工具调用（资源经 `.vdfs/mcp` 维护）                                                    |
 | `telegram`  | Telegram 通道  | 长轮询收发与“继续会话”交互（`telegram/send`）                                                                                  |
 | `gateway`   | **入站网关**     | HTTP/WS 入站适配（`/api/v1/invoke`、`/api/v1/ws`、`/api/v1/health`，与 route_v2 同构）                                              |
 | `setting`   | 配置           | 系统级配置读写 + `.vdfs/setting` 子目录（`config/get` / `config/set`）                                                     |

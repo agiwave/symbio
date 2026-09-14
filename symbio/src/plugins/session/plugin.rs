@@ -462,7 +462,7 @@ fn session_meta_tags(s: &Session) -> Vec<String> {
     tags
 }
 
-/// 会话 → 统一实体摘要（顶层清单与容器子会话清单共用的单一实现）。
+/// 会话 → 实体摘要（顶层清单与容器子会话清单共用的单一实现）。
 ///
 /// 显示名 = `display_title`（title 优先 → 内容自动生成 → 「新对话」）；
 /// 状态 = working/active；extra 携带 message_count / is_working / metadata /
@@ -492,7 +492,7 @@ fn summarize_session(s: &Session, is_working: bool) -> crate::symbio_core::entit
     it
 }
 
-// ==================== 统一实体协议接入 ====================
+// ==================== 实体提供者接入 (EntityProvider) ====================
 
 #[async_trait]
 impl crate::symbio_core::entities::EntityProvider for SessionPlugin {

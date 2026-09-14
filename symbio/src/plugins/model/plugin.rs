@@ -369,7 +369,7 @@ impl Default for ModelPlugin {
     }
 }
 
-// ==================== 统一实体协议 (entities/*，independent_form 启用于 model) ====================
+// ==================== 实体提供者钩子 (EntityProvider) ====================
 //
 // 公共流程（manifest 写盘 / 幂等删除）由 `entities::entity_write` /
 // `entity_delete` 承载，这里只实现 model 的差异化钩子；`entities/*` 协议

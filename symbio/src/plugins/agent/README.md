@@ -26,4 +26,4 @@
 ## 关联
 
 - 会话编排：`../session/README.md`
-- 统一实体协议：`docs/design/entity-management-mechanism.md`
+- 实体提供者机制：`docs/design/entity-provider-mechanism.md`

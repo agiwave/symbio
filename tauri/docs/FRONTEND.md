@@ -23,4 +23,4 @@ Vue 组件 → API 层 (invoke) → route_v2 / route_v2_send / route_v2_close �
 
 - **流式渲染**：会话视图按帧 `kind` 增量渲染（文本增量、工具调用、状态帧）。
 - **会话中断可见性**：遵循"存储层全量 / 会话层不过滤 Failed / 请求视图层附加中断说明"三层分工（见 `../symbio/src/plugins/session/README.md` 与 `../symbio/src/plugins/session/docs/turn-tool-mechanisms.md`）。
-- **实体驱动**：Agent/Provider/Server 等管理界面基于统一实体协议（`entities/*` 路由，见 `docs/design/entity-management-mechanism.md`）。
+- **实体驱动**：Agent / Model / MCP 等管理界面基于 VDFS 挂载点（`.vdfs/<kind>`，见 `docs/design/vdfs-frontend.md`）；后端实体抽象（`EntityProvider`）见 `docs/design/entity-provider-mechanism.md`。

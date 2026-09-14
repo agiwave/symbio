@@ -184,7 +184,7 @@ impl EventBus {
     /// 前端 `subscribe({ kind: 'entity' })` 即时刷新列表/详情状态角标。
     ///
     /// 无 session 关联，因此**不入回放缓冲**——重连后的最新状态由
-    /// 各 `entities/list` / `entities/get` 的初始拉取兜底。
+    /// 各 `.vdfs/<kind>` 的初始拉取（`vdfs/list` / `vdfs/read`）兜底。
     pub async fn publish_entity_status(
         entity_type: &str,
         id: &str,
@@ -239,7 +239,7 @@ impl EventBus {
     /// 不会误入顶层清单），容器子清单订阅 `parent_id = <容器id>`。
     ///
     /// 无 session 关联，因此**不入回放缓冲**——重连后的清单由
-    /// `entities/list` 初始拉取兜底。
+    /// `vdfs/list` 初始拉取兜底。
     pub async fn publish_entity_changed(
         entity_type: &str,
         id: &str,

@@ -20,7 +20,7 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 ### 你能用它做什么
 
 - **智能体会话**：会话可绑定一个 Agent（OAB Bundle：人格提示词 + `prompt` / `skill` / `mcp` 三类子实体），由 `session` 统一编排工具调用循环；Agent 还可经 `agent_run` 能力委托子智能体。
-- **统一 LLM 接入**：`model` 插件内置 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini 四类协议适配器（统一实体协议 `model/entities/*` 寻址），支持流式与工具调用；由 `session` 在会话循环中直连调用。
+- **统一 LLM 接入**：`model` 插件内置 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini 四类协议适配器（模型资源经 `.vdfs/model` 寻址），支持流式与工具调用；由 `session` 在会话循环中直连调用。
 - **工具与集成**：本地 shell / 文件读写、Web 请求与搜索、技能（skill）、MCP server 注册与调用、Telegram 消息通道。
 - **会话与上下文**：`session/` 负责长连接消息持久化、历史裁剪与上下文压缩。
 - **可扩展**：新能力只需实现 `Plugin` 并注册，即可挂入插件树、被 LLM 通过 `traverse("available_tools")` 自动发现。
@@ -46,7 +46,7 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 
 - **分形路由**：用 `/` 分隔的路径定位任意能力，容器与叶子插件接口完全一致。
 - **LLM 原生**：递归收集插件树中的工具定义，深度支持 Function Calling。
-- **统一实体协议**：资源型插件（`agent` / `skill` / `mcp` / `model` / `session` / `setting`）以同一套 `entities/*` 路径对外，前端按后端下发的 provider 注册表与详情页定义动态渲染。
+- **VDFS 虚拟文件系统**：资源型插件（`agent` / `skill` / `mcp` / `model` / `session` / `setting`）统一以 `.vdfs/<插件名>` 挂载点对外，前端按后端下发的注册表与详情页定义动态渲染。
 - **插件互不可见**：工具、选项与人格片段统一由 `traverse` 收集进 `CapabilityVisitor`；插件之间不直接引用，只依赖 `symbio_core` 的共享契约。
 
 ```
@@ -95,7 +95,7 @@ npm run tauri dev
 
 ### 导入智能体（OAB Bundle）
 
-智能体以 OAB Bundle 形式经插件树导入，无独立二进制入口：上传路径为 `agent/bundle/upload`（或统一实体路径 `agent/entities/upload`，载荷支持 zip 与 JSON manifest）。示例包见 [`examples/fullstack-dev/`](./examples/fullstack-dev)，包规范见 [OAB 规范](./docs/design/open-agent-bundle-spec.md)。
+智能体以 OAB Bundle 形式经插件树导入，无独立二进制入口：导入路径为 `.vdfs/agent` 的**新建类型 `zip`**（载荷为 bundle 整包）。示例包见 [`examples/fullstack-dev/`](./examples/fullstack-dev)，包规范见 [OAB 规范](./docs/design/open-agent-bundle-spec.md)。
 
 ### 运行命令行前端（CLI）
 
@@ -142,7 +142,7 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 - **架构**：[OVERVIEW](./docs/architecture/OVERVIEW.md) · [数据流与调用链](./docs/architecture/DATA_FLOW.md) · [协议规范](./docs/architecture/PROTOCOLS.md) · [决策记录](./docs/DECISIONS.md)
 - **参考**：[路由清单](./docs/reference/ROUTES.md) · [错误码](./docs/reference/ERROR_CODES.md) · [配置参考](./docs/reference/CONFIGURATION.md)
 - **开发**：[插件开发指南](./docs/guides/PLUGIN_DEVELOPMENT.md) · [排障手册](./docs/guides/TROUBLESHOOTING.md) · [贡献指南](./CONTRIBUTING.md)
-- **现行设计**：[统一实体管理机制](./docs/design/entity-management-mechanism.md) · [上下文压缩分层总览](./docs/design/context-compression-design.md) · [OAB 规范](./docs/design/open-agent-bundle-spec.md)
+- **现行设计**：[实体提供者机制](./docs/design/entity-provider-mechanism.md) · [上下文压缩分层总览](./docs/design/context-compression-design.md) · [OAB 规范](./docs/design/open-agent-bundle-spec.md)
 - **模块文档**：每个插件与前端各自维护 `README.md`（详见 [文档中心的模块文档地图](./docs/README.md#模块文档地图)）
 - **CLI 前端**：[cli/README.md](./cli/README.md) · [架构](./cli/docs/architecture.md) · [构建](./cli/docs/building.md) · [用法](./cli/docs/usage.md)
 - **更新日志**：[CHANGELOG](./docs/CHANGELOG.md) · **历史归档**：[archive/](./docs/archive/)

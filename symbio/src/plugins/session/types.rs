@@ -33,7 +33,7 @@ impl Session {
     /// 会话显示名：metadata.title 优先；否则从内容自动生成；再否则回落 id。
     ///
     /// 「从内容生成」= 第一条含文本的用户消息首行（压缩空白、限长），见
-    /// [`derive_session_title`]。列表（entities/list）与本方法共用同一规则，
+    /// [`derive_session_title`]。列表（`vdfs/list`）与本方法共用同一规则，
     /// 保证自动命名会话在任何入口看到的名称一致。
     pub fn display_title(&self) -> String {
         self.metadata
@@ -48,7 +48,7 @@ impl Session {
     /// 父会话 id（`metadata.parent_session_id`；空/自引用视为无归属）。
     ///
     /// 子会话归属的机制级声明：存储层据此路由嵌套目录（文件后端），
-    /// 统一实体协议据此判定「子会话」清单归属。
+    /// 实体提供者机制据此判定「子会话」清单归属。
     pub fn parent_session_id(&self) -> Option<&str> {
         self.metadata
             .get("parent_session_id")

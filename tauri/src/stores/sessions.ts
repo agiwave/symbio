@@ -17,7 +17,7 @@
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
  *                      写入：useChatConnection 收 Status 事件时
- *                      读取：会话列表项状态展示（统一实体页 session 实例）
+ *                      读取：会话列表项状态展示（`.vdfs/session` 实例）
  */
 
 import { defineStore } from 'pinia'

@@ -75,7 +75,7 @@ sequenceDiagram
 |---|------|---------|------|
 | 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 13 个操作：list / tree / stat / read / write / mkdir / delete / move / edit / search / watch / unwatch / action |
 | 2 | 子目录来源 | 各插件自持的 `VdfsProvider`（经 `EntityVdfsAdapter` 适配的实体，或原生 provider） | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
-| 3 | 机制详解 | [design/vdfs.md](../design/vdfs.md)、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范；内部实体机制见 [design/entity-management-mechanism.md](../design/entity-management-mechanism.md) |
+| 3 | 机制详解 | [design/vdfs.md](../design/vdfs.md)、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范；内部实体机制见 [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md) |
 
 ## 全链路追踪
 
@@ -91,7 +91,7 @@ sequenceDiagram
 | 工具不执行 | 链路二 #2（能力收集）、#5（工具循环） |
 | 流式帧丢失 | 链路二 #6（EventBus 订阅）、链路一 #3（连接生命周期） |
 | 外部 HTTP 调用失败 | 链路三 #1/#2（health → 鉴权） |
-| 实体增删查异常 | 通用实体链路 #1/#2 + [entity-management-mechanism] |
+| 实体增删查异常 | 通用实体链路 #1/#2 + [entity-provider-mechanism] |
 | 错误码含义 | [ERROR_CODES.md]（源：`symbio_core/error.rs`） |
 | 配置不生效 | [CONFIGURATION.md] + `setting` 插件（`.vdfs/setting` 的 `vdfs/list` / `vdfs/read`） |
 

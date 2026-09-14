@@ -7,7 +7,7 @@
 - **Provider 注册**：启动时通过 `traverse` 向 `CAPABILITY_VISITOR` 注册**唯一生效的核心 `ModelProvider`**（trait object，由 `bound_provider::BoundProvider` 实现——持久化配置 `ModelProviderConfig` + 协议适配器绑定）。解析链：会话上下文选定的 provider_id > 默认 Provider > 首个启用的 Provider。
 - **协议适配**：协议契约 `ModelProtocol`（钩子收 `&ModelProviderConfig`）**插件私有**，不对外导出；内置 4 个实现——`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`，统一转换为内部 `model_chat::Request/Response` 事件流（文本、思考、工具调用）。`resolve_protocol_id` 别名表与 `MODEL_PROTOCOL_*` 注册常量同样内化于 `protocols/`。
 - **单轮执行**：`execute_turn` 即单轮"发消息→收流"的完整闭环，不含重试、裁剪、压缩等编排逻辑（这些归 session，见 `session/README.md` 六大策略）。
-- **配置存取**：providers CRUD 与引擎参数（API Key、Base URL 等）的 `config get/set/schema`。
+- **配置存取**：providers CRUD 与引擎参数（API Key、Base URL 等）的 `config get/set`。
 
 ## 明确不做
 
@@ -19,10 +19,12 @@
 
 | Path | 说明 |
 |------|------|
-| `entities/*` | 统一实体协议（Provider 实体的 create/get/update/delete/query，见 `docs/design/entity-management-mechanism.md`） |
 | `config/get` / `config/set` | 引擎参数配置（字段定义随 `.vdfs/model` 节点 `schema` 下发） |
-| `status` | 引擎/Provider 状态 |
-| `chat_sync` | 同步单轮调用（当前返回 NotImplemented，预留接口） |
+
+模型实体**不设插件路由**：经 `EntityVdfsAdapter` 适配为 `.vdfs/model` 挂载点
+（见 `docs/design/entity-provider-mechanism.md`）。原 `entities/*` / `config/schema` /
+`status` / `chat_sync` 路由均已下线——字段定义改由 `detail_definition` 随 VDFS 节点
+`schema` 下发，连通性自检改由节点动作 `vdfs/action { action: "test" }`。
 
 ## 关联
 

@@ -2,7 +2,7 @@
 
 状态：现行规范
 范围：会话页输入区下方的「选项行」（根选项 + 级联子项 + 自动化表单）
-关联：`docs/design/entity-management-mechanism.md`（表单机制复用）、
+关联：`docs/design/entity-provider-mechanism.md`（表单机制复用）、
 `symbio/src/symbio_core/schemas/options.rs`（协议权威定义）、
 `symbio/src/symbio_core/option.rs`（收集机制 `OptionVisitor` / `collect_options`）、
 `symbio/src/plugins/session/options.rs`（选项宿主）、

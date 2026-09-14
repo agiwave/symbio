@@ -225,7 +225,7 @@ pub enum PluginPayloadWire {
 >
 > 机制本身（`EntityProvider` trait、注册表、写盘与删除的唯一实现）仍然是
 > 现行代码，只是**退为内部抽象**，由 `EntityVdfsAdapter` 调用——详见
-> [design/entity-management-mechanism.md](../design/entity-management-mechanism.md)。
+> [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md)。
 
 ### 路径约定（历史）
 
@@ -310,7 +310,7 @@ submit_object_creator!(PLUGIN_X, XPlugin::build, dyn Plugin);
 ## 文档映射约定
 
 - **后端**：`// Corresponding Host: <path>` 注释指向该数据结构在宿主层的对应定义
-- **文档集中**：插件不各自维护文档，全部统一在 `docs/`；复杂机制的实现细节见 `docs/design/`（如统一实体管理机制）
+- **文档集中**：插件不各自维护文档，全部统一在 `docs/`；复杂机制的实现细节见 `docs/design/`（如实体提供者机制）
 
 ---
 
