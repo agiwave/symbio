@@ -251,3 +251,82 @@ describe('DetailForm disabled_when：条件成立才禁用', () => {
     expect(w.find<HTMLButtonElement>('.ea-btn').element.disabled).toBe(false)
   })
 })
+
+describe('DetailForm option 绑定（VDFS）：异步 optionData 到达触发预填', () => {
+  // 复现 S 系列迁移后的详情空白 bug：VDFS 走 option 绑定，optionData 来自
+  // `vdfs/read`、在挂载后才异步返回。修复前 watch 身份键恒为 'option'，
+  // 「挂载（null）→ 数据到达（对象）」被门闩判成同一身份而 early-return，
+  // 预填永不执行 ⇒ 标题回落 title_fallback、字段全空。
+  const optionDef = () =>
+    def({
+      binding: 'option',
+      title_from: ['name'],
+      title_fallback: '新建 Provider',
+      subtitle_from: ['provider'],
+      sections: [
+        {
+          fields: [
+            { key: 'name', label: '名称', widget: 'text' },
+            {
+              key: 'provider',
+              label: '提供商',
+              widget: 'select',
+              options: [
+                { value: 'openai', label: 'OpenAI' },
+                { value: 'anthropic', label: 'Anthropic' },
+              ],
+            },
+            { key: 'model', label: '模型', widget: 'datalist' },
+          ],
+        },
+      ],
+      actions: [{ id: 'save', label: '保存', style: 'primary' }],
+    })
+
+  const vdfsItem = { kind: 'model', id: 'gpt4', name: 'gpt4' } as EntitySummary
+
+  it('挂载时 optionData 为 null → 标题回落 fallback、字段空；read 返回后预填生效', async () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition: optionDef(),
+        item: vdfsItem,
+        optionData: null,
+        capabilities: { mutable: true } as never,
+      },
+    })
+
+    // 挂载瞬间：数据未到位，预填被跳过
+    expect(w.find('.title-text').text()).toBe('新建 Provider')
+    expect((w.findAll('input[type="text"]')[0].element as HTMLInputElement).value).toBe('')
+    expect(w.find('select').element.value).toBe('')
+
+    // 模拟 vdfs/read 异步返回（extra.config）
+    await w.setProps({ optionData: { name: 'My GPT', provider: 'openai', model: 'gpt-4o' } })
+
+    // 数据到位后：身份键翻转（…:0 → …:1），触发表单预填
+    expect(w.find('.title-text').text()).toBe('My GPT')
+    const values = w
+      .findAll('input[type="text"]')
+      .map((i) => (i.element as HTMLInputElement).value)
+    expect(values).toContain('My GPT')
+    expect(values).toContain('gpt-4o')
+    expect(w.find('select').element.value).toBe('openai')
+  })
+
+  it('同条目后台刷新（optionData 换新对象但身份键不变）→ 保留编辑现场，不重填', async () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition: optionDef(),
+        item: vdfsItem,
+        optionData: { name: 'A', provider: 'openai', model: 'a-m' },
+        capabilities: { mutable: true } as never,
+      },
+    })
+    expect(w.find('.title-text').text()).toBe('A')
+
+    // 同条目（仍 gpt4）optionData 换成新对象：键仍是 model:gpt4:1 → 不重新预填，
+    // 编辑现场被保留（此处无用户编辑，故维持首次预填值 A，而非 A-REFRESH）
+    await w.setProps({ optionData: { name: 'A-REFRESH', provider: 'anthropic', model: 'a-m2' } })
+    expect(w.find('.title-text').text()).toBe('A')
+  })
+})

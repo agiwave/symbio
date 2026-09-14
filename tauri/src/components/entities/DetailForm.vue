@@ -649,7 +649,13 @@ function initForm() {
 // 表单重置的身份门闩：记录上次绑定实体的 `${kind}:${id}`。事件驱动的后台
 // 清单刷新（refreshKind）会以新对象替换 item——身份未变时跳过重置，保住
 // 编辑现场；仅身份变化（切换实体 / 新建↔编辑）才走完整重置+预填。
-// option 绑定：身份恒为 'option'，预填来源为 props.optionData。
+// option 绑定：预填来源是 props.optionData。关键 —— optionData 通常是**异步**
+// 到位的（如 VDFS 的 `vdfs/read` 在挂载后才返回），挂载瞬间为 null。若身份键
+// 恒为常量 'option'，则「挂载（null）→ 数据到达（对象）」的翻转会被门闩判成
+// 同一身份而 early-return，导致预填永不执行（表现为：标题回落 fallback、字段全空）。
+// 故 option 绑定的身份键必须纳入「数据是否到位」（`0`/`1`），使异步到达能翻转
+// 身份、触发预填；同条目后台刷新（键不变）仍保留编辑现场。有 item 时再带上
+// `kind:id`，使切换实体（即便不靠组件 remount）也能重新预填。
 let lastItemKey: string | null | undefined
 watch(
   () => (isOption.value ? props.optionData : props.item),
@@ -657,7 +663,9 @@ watch(
     if (isConfig.value) return // config 绑定：onMounted 拉取，不随 item 重置
     const it = props.item
     const itemKey = isOption.value
-      ? 'option'
+      ? it
+        ? `${it.kind}:${it.id}:${props.optionData ? 1 : 0}`
+        : `option:${props.optionData ? 1 : 0}`
       : it
         ? `${it.kind}:${it.id}`
         : null
