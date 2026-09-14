@@ -512,6 +512,25 @@ pub fn provider_registry() -> &'static [EntityProviderInfo] {
 /// 职责链：`validate_manifest` 规范化 → 写盘 → `on_uploaded` 内存同步 →
 /// 发布实体生命周期事件。
 ///
+/// manifest 缺 `id`（或为空串）时以实体 id 补全；已有 id 原样保留。
+///
+/// 「实体 id 由路径承载」是写入路径的不变量：编辑链路前端只回纯字段值
+/// （`DetailForm` option 绑定语义，id 不在表单字段里），由本函数统一补齐。
+fn ensure_manifest_id(manifest: &serde_json::Value, id: &str) -> serde_json::Value {
+    let mut m = manifest.clone();
+    let missing = m
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .is_empty();
+    if missing {
+        if let serde_json::Value::Object(ref mut map) = m {
+            map.insert("id".to_string(), serde_json::json!(id));
+        }
+    }
+    m
+}
+
 /// `entities/upload` 的 manifest 分支与 `VdfsProvider::write` 都走这里，
 /// 两条链路因此行为完全一致（同一份校验、同一份写盘、同一个事件）。
 pub async fn entity_write<P: EntityProvider + ?Sized>(
@@ -537,7 +556,13 @@ pub async fn entity_write<P: EntityProvider + ?Sized>(
         .await
         .map_err(|e| PluginError::InternalError(format!("查询实体失败: {e}")))?;
 
-    let normalized = provider.validate_manifest(ctx, id, manifest).await?;
+    // 实体 id 由路径段承载：VDFS 编辑链路（form 的 option 绑定）下发的 manifest
+    // 只含纯字段值、不含 `id`，而部分 provider 的 `validate_manifest` 会把 manifest
+    // 直接反序列化到 `id` 必填的配置结构体（model / mcp），缺 id 即报
+    // 「missing field `id`」。写入前以路径 id 兜底补全——新建链路
+    // （`new_entity_manifest`）与历史 upload 链路本就带 id，此处对它们是 no-op。
+    let manifest = ensure_manifest_id(manifest, id);
+    let normalized = provider.validate_manifest(ctx, id, &manifest).await?;
     let content = serde_json::to_string_pretty(&normalized)?;
     es.write_entity(category, id, manifest_file, &content)
         .await
@@ -865,6 +890,38 @@ impl From<EntityError> for PluginError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VDFS 编辑链路下发的 manifest 只含纯字段值（无 id）——写入前必须能以
+    /// 路径 id 补全，否则 model / mcp 的 `validate_manifest` 反序列化直接报
+    /// 「missing field `id`」（编辑已有 Provider 保存失败即为该症状）。
+    #[test]
+    fn ensure_manifest_id_fills_missing_or_empty() {
+        let no_id = serde_json::json!({ "name": "x", "provider": "openai" });
+        assert_eq!(
+            ensure_manifest_id(&no_id, "p1").get("id"),
+            Some(&serde_json::json!("p1"))
+        );
+        // 其余字段原样保留
+        assert_eq!(
+            ensure_manifest_id(&no_id, "p1").get("name"),
+            Some(&serde_json::json!("x"))
+        );
+
+        let empty_id = serde_json::json!({ "id": "", "name": "x" });
+        assert_eq!(
+            ensure_manifest_id(&empty_id, "p1").get("id"),
+            Some(&serde_json::json!("p1"))
+        );
+    }
+
+    #[test]
+    fn ensure_manifest_id_keeps_existing() {
+        let has_id = serde_json::json!({ "id": "orig", "name": "x" });
+        assert_eq!(
+            ensure_manifest_id(&has_id, "p1").get("id"),
+            Some(&serde_json::json!("orig"))
+        );
+    }
 
     /// 注册表顺序 = 导航顺序（会话 / 模型 / 智能体 / 技能 / MCP / 设置）
     #[test]
