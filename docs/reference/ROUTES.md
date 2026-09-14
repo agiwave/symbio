@@ -31,9 +31,9 @@
 |------|------|------|
 | `{plugin}/config/get` | 获取配置 | GET (payload 空) |
 | `{plugin}/config/set` | 设置配置 | POST (payload 含配置) |
-| `{plugin}/config/schema` | 获取配置 JSON Schema | GET |
 
-> `config/schema` 目前仅 `session`、`model` 提供；其余插件按各自 `config/get` 返回的结构直接读写。
+> `config/schema`（原 session / model 提供）**已下线**：字段定义改随详情定义以
+> VDFS 节点 `schema` 下发（`.vdfs/setting/<分区>` 的 `vdfs/list` 即可拿到）。
 > 各插件 `config/set` 内部会自行向父级发起 `save_config`，配置才真正落盘。
 
 ### 统一实体管理
@@ -99,7 +99,7 @@
 | `session/chat/update_message` | 更新单条消息 | `Data` |
 | `session/append` | 追加消息 | `Data` |
 | `session/heartbeat/trigger` | 触发一次心跳 | `Data` |
-| `session/config/get` \| `config/set` \| `config/schema` | 会话配置读写与 Schema | `Data` |
+| `session/config/get` \| `config/set` | 会话配置读写（`config` 绑定的 load/save_path） | `Data` |
 | `session/entities/*` | **已下线**（S11）：会话作为资源走 `.vdfs/session` | — |
 
 ### 聊天流程
@@ -121,8 +121,10 @@
 | 路径 | 用途 | 返回类型 |
 |------|------|----------|
 | `model/chat` | 调用 LLM 推理 (流式) | `Session` |
-| `model/status` | 获取当前 Provider 状态 | `Data` |
-| `model/config/get` \| `config/set` \| `config/schema` | Provider 配置读写与 Schema | `Data` |
+| `model/config/get` \| `config/set` | Provider 配置读写 | `Data` |
+
+> `model/status` **已下线**：连通性状态改由节点动作 `vdfs/action { action: "test" }`
+> 返回；`model/chat_sync` 原就是 NotImplemented 占位，一并删除。
 | `model/entities/*` | **已下线**（S11）：模型作为资源走 `.vdfs/model` | — |
 
 ### 配置结构
@@ -309,10 +311,11 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 | 路径 | 用途 |
 |------|------|
-| `setting/list` | 列出设置分区清单（general / model / …） |
-| `setting/get` | 读取单个分区的配置项 |
 | `setting/config/get` \| `config/set` | 系统配置整体读写 |
-| `setting/entities/list` | 设置分区作为统一实体（其余实体操作返回未实现） |
+
+> `setting/list` / `setting/get` **已下线**：分区清单与取值分别由 `.vdfs/setting`
+> 的 `vdfs/list` / `vdfs/read` 承担（旧的 `list` 还硬编码着「常规设置 / Model
+> 设置」两个历史分类，与现行六分区早已不符）。
 
 > 新增可配置插件需在 `setting` 的 `SETTING_SECTIONS` 与 `detail_definition()` 登记；
 > 各分区的保存由前端 editor 经对应插件 `config/set` 自持完成。

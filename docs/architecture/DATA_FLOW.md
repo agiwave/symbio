@@ -93,7 +93,7 @@ sequenceDiagram
 | 外部 HTTP 调用失败 | 链路三 #1/#2（health → 鉴权） |
 | 实体增删查异常 | 通用实体链路 #1/#2 + [entity-management-mechanism] |
 | 错误码含义 | [ERROR_CODES.md]（源：`symbio_core/error.rs`） |
-| 配置不生效 | [CONFIGURATION.md] + `setting` 插件（`setting/list`、`setting/get`） |
+| 配置不生效 | [CONFIGURATION.md] + `setting` 插件（`.vdfs/setting` 的 `vdfs/list` / `vdfs/read`） |
 
 ---
 
