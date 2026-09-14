@@ -158,7 +158,18 @@ const capabilities = computed<Record<string, boolean>>(() => ({
  */
 const mechanismActions = computed<DetailAction[]>(() => {
   if (!access.value.write) return []
-  return [{ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' }]
+  // 不与定义声明的动作重复：model / mcp / skill / agent 的详情定义都自带
+  // `delete`（「删除 Provider」/「删除该 Agent」…），若再注入机制版「删除」，
+  // 同一页会渲染出两个删除按钮。两者语义本就相同（都经 @delete →
+  // `vdfs/delete`），故定义已声明的动作不再注入；定义未声明的资源仍由
+  // 机制兜底提供删除入口（写权限判据不变）。
+  const declared = new Set(
+    ((props.node.schema ?? {}) as DetailDefinition).actions?.map((a) => a.id) ?? []
+  )
+  const mine: DetailAction[] = [
+    { id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' },
+  ]
+  return mine.filter((a) => !declared.has(a.id))
 })
 </script>
 
