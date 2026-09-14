@@ -441,9 +441,15 @@ impl VdfsProvider for EntityVdfsAdapter {
                 Ok(VdfsNode::dir("", self.label_of(), self.root_access()))
             }
             AdapterPath::Item(id) => {
-                // 容器条目按**目录视图**回答：`stat` 结果被分发层用作「当前目录
-                // 节点」，其访问位决定是否给出新建入口。
-                if !self.container_kinds().is_empty() {
+                // 容器条目默认按**目录视图**回答：`stat` 结果被分发层用作「当前目录
+                // 节点」，其访问位决定是否给出新建入口。但「有详情定义又是容器」的
+                // 条目（如 agent bundle）在 `node_of` 里已被暴露成 `ext=form` 的表单
+                // 文件，这里必须与之对齐——否则「列表显示表单卡 / stat 却说目录」自相矛盾；
+                // 这类条目点击 = 打开详情（前端 select 处理），「浏览内部」走
+                // `enter(<id>/<子类别>)` 仍是目录语义，两者互不影响。
+                if !self.container_kinds().is_empty()
+                    && self.provider.detail_definition(&host, id).await.is_none()
+                {
                     let item = self.summary_of(&host, id).await?;
                     let mut n = VdfsNode::dir(id, item.name.clone(), VdfsAccess::LIST);
                     n.kind = self.kind.to_string();
@@ -498,7 +504,17 @@ impl VdfsProvider for EntityVdfsAdapter {
                 "该路径是目录，不可读取内容：{path}"
             ))),
             AdapterPath::Item(_) => {
-                if !self.container_kinds().is_empty() {
+                // 容器条目默认按目录拒绝读取。但「有详情定义又是容器」的条目
+                // （如 agent bundle）在 `node_of` 里是 `ext=form` 的表单文件，其概览
+                // 字段随 `summary_of`（走 `list_items`，`extra` 已填充）下发，必须允许
+                // 读取，否则详情页会因读不到数据而报错。仅无详情定义的容器（session）
+                // 才按目录拒绝。
+                if !self.container_kinds().is_empty()
+                    && self.provider
+                        .detail_definition(&host, &self.id_of(path))
+                        .await
+                        .is_none()
+                {
                     return Err(VdfsError::invalid(format!(
                         "该路径是目录，不可读取内容：{path}"
                     )));
@@ -1119,6 +1135,105 @@ mod tests {
                 .is_err(),
             "删除不存在的子实体应报错"
         );
+    }
+
+    /// 「有详情定义又是容器」的条目（agent 形态）：`read` 不再按目录拒绝，而是
+    /// 经 `summary_of`（走 `list_items`，`extra` 已填充）返回概览 JSON；`stat` 与
+    /// `node_of` 对齐，返回 `ext=form` 的表单文件而非目录。
+    ///
+    /// 回归：此前 `read`/`stat` 仅按「是否容器」判定，导致 agent 这类「声明成
+    /// form 但被当作目录」的条目点开详情直接报错（与 `node_of` 自相矛盾）。
+    #[tokio::test]
+    async fn agent_item_reads_overview_and_stat_is_form_file() {
+        use crate::symbio_core::schemas::entities::DetailDefinition;
+        use crate::symbio_core::{PluginError, SimpleRequest};
+
+        struct AgentLikeStub;
+        #[async_trait]
+        impl EntityProvider for AgentLikeStub {
+            fn kind(&self) -> &'static str {
+                ENTITY_AGENT
+            }
+            async fn detail_definition(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+                id: &str,
+            ) -> Option<DetailDefinition> {
+                if id.is_empty() {
+                    return None;
+                }
+                Some(DetailDefinition {
+                    binding: "info".into(),
+                    ..Default::default()
+                })
+            }
+            async fn list_items(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+            ) -> Result<Vec<EntitySummary>, PluginError> {
+                let mut it = EntitySummary::new(ENTITY_AGENT, "a1", "A1");
+                it.extra = serde_json::json!({
+                    "version": "1.0",
+                    "scope": "global",
+                    "dir": "/x",
+                    "count_prompt": 2,
+                    "count_skill": 1,
+                    "count_mcp": 0,
+                });
+                Ok(vec![it])
+            }
+        }
+
+        let a = EntityVdfsAdapter::new(ENTITY_AGENT, Arc::new(AgentLikeStub));
+        let req: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let ctx = VdfsContext::new(req);
+
+        // read 不再报「该路径是目录，不可读取内容」
+        let content = a
+            .read(&ctx, "a1")
+            .await
+            .expect("有详情定义的容器条目应可读取概览");
+        let v: serde_json::Value =
+            serde_json::from_str(content.text.as_deref().unwrap_or("")).unwrap();
+        assert_eq!(v["version"], "1.0");
+        assert_eq!(v["count_prompt"], 2);
+
+        // stat 与 node_of 对齐：表单文件，而非目录
+        let st = a.stat(&ctx, "a1").await.unwrap();
+        assert!(!st.is_dir(), "有详情定义的容器条目应暴露为表单文件");
+        assert_eq!(st.ext.as_deref(), Some(VFDS_EXT_FORM));
+    }
+
+    /// 「容器但无详情定义」的条目（session 形态）：行为不变——`read` 仍按目录
+    /// 拒绝、`stat` 仍返回目录。确保上面的松弛只放行「有详情定义的容器」。
+    #[tokio::test]
+    async fn session_item_read_rejected_and_stat_is_dir() {
+        use crate::symbio_core::{PluginError, SimpleRequest};
+
+        struct SessionLikeStub;
+        #[async_trait]
+        impl EntityProvider for SessionLikeStub {
+            fn kind(&self) -> &'static str {
+                ENTITY_SESSION
+            }
+            async fn list_items(
+                &self,
+                _ctx: &Arc<dyn InvokeRequest>,
+            ) -> Result<Vec<EntitySummary>, PluginError> {
+                Ok(vec![EntitySummary::new(ENTITY_SESSION, "s1", "S1")])
+            }
+        }
+
+        let a = EntityVdfsAdapter::new(ENTITY_SESSION, Arc::new(SessionLikeStub));
+        let req: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let ctx = VdfsContext::new(req);
+
+        assert!(
+            a.read(&ctx, "s1").await.is_err(),
+            "无详情定义的容器条目 read 必须按目录拒绝"
+        );
+        let st = a.stat(&ctx, "s1").await.unwrap();
+        assert!(st.is_dir(), "无详情定义的容器条目 stat 仍返回目录");
     }
 
     /// 节点动作：`test` 接到 `EntityProvider::test_status`；其余标识 NotImplemented
