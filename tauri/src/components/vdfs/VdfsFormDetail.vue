@@ -50,7 +50,6 @@ import DetailForm from '@/components/entities/DetailForm.vue'
 import type {
   DetailAction,
   DetailDefinition,
-  EntityCapabilities,
   EntitySummary,
 } from '@/schemas/entities'
 import {
@@ -142,7 +141,7 @@ const item = computed<EntitySummary>(() => ({
 }))
 
 /** 访问位 → 能力（VDFS 里能力就是访问位，不存在类型特判） */
-const capabilities = computed<EntityCapabilities>(() => ({
+const capabilities = computed<Record<string, boolean>>(() => ({
   mutable: access.value.write,
   test_connection: testable.value,
 }))

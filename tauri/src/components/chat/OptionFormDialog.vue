@@ -32,7 +32,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import DetailForm from '@/components/entities/DetailForm.vue'
-import type { DetailDefinition, EntityCapabilities } from '@/schemas/entities'
+import type { DetailDefinition } from '@/schemas/entities'
 import type { OptionNode } from '@/schemas/options'
 
 const props = defineProps<{
@@ -49,7 +49,7 @@ const emit = defineEmits<{
 }>()
 
 /** 选项表单无实体语义：能力全关（不渲染删除等机制动作） */
-const EMPTY_CAPABILITIES: EntityCapabilities = {
+const EMPTY_CAPABILITIES: Record<string, boolean> = {
   mutable: false,
   test_connection: false,
 }

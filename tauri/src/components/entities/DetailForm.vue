@@ -174,7 +174,6 @@ import type {
   DetailCondition,
   DetailDefinition,
   DetailField,
-  EntityCapabilities,
   EntitySummary,
 } from '@/schemas/entities'
 
@@ -189,7 +188,7 @@ const props = withDefaults(
      * 与 item.config 同构，但来源是「选项」而非「实体」。
      */
     optionData?: Record<string, unknown> | null
-    capabilities: EntityCapabilities
+    capabilities: Record<string, boolean>
     /** 机制动作注入（页面单一定义点计算：容器入口/测试/删除，
      *  已排除定义声明过的动作），与定义动作同排渲染于 header-actions */
     mechanismActions?: DetailAction[]
@@ -247,7 +246,7 @@ function valueOf(key: string): unknown {
   if (key === 'is_existing') return isExisting.value
   if (key === 'is_default') return isDefault.value
   if (key.startsWith('cap.')) {
-    const name = key.slice(4) as keyof EntityCapabilities
+    const name = key.slice(4)
     return props.capabilities[name]
   }
   return form[key]

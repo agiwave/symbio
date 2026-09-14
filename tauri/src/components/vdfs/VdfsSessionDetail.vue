@@ -21,7 +21,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import Session from '@/components/entities/Session.vue'
-import type { DetailAction, EntityCapabilities, EntitySummary } from '@/schemas/entities'
+import type { DetailAction, EntitySummary } from '@/schemas/entities'
 import { vdfsAccessOf, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
 
 // 渲染器统一契约（详见 VdfsTextDetail 同名说明）
@@ -52,7 +52,7 @@ const item = computed<EntitySummary>(() => ({
 }))
 
 /** 访问位 → 能力（VDFS 里能力就是访问位，不存在类型特判） */
-const capabilities = computed<EntityCapabilities>(() => ({
+const capabilities = computed<Record<string, boolean>>(() => ({
   mutable: vdfsAccessOf(props.node).write,
   test_connection: false,
 }))

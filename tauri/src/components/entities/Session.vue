@@ -55,7 +55,7 @@
 
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue'
-import type { DetailAction, EntityCapabilities, EntitySummary } from '@/schemas/entities'
+import type { DetailAction, EntitySummary } from '@/schemas/entities'
 import type { ImageAttachment } from '@/types'
 import { useSessionsStore } from '@/stores/sessions'
 import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
@@ -64,7 +64,7 @@ import ChatOptionBar from '@/components/chat/ChatOptionBar.vue'
 
 const props = defineProps<{
   item: EntitySummary | null
-  capabilities: EntityCapabilities
+  capabilities: Record<string, boolean>
   /** 机制动作注入（页面单一定义点计算：容器入口/删除等） */
   mechanismActions?: DetailAction[]
   saving?: boolean

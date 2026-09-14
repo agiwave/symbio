@@ -7,7 +7,7 @@
  * `entities/*` 调用协议均已下线，前端不再有任何实体协议调用点。保留本文件只因为
  * `DetailDefinition` 是 VDFS 的宿主方言——节点 `schema` 字段**透传**它，
  * `VdfsFormDetail` 据此渲染表单（字段 / 分区 / 徽标 / 动作 / 预设联动）；
- * `EntitySummary` / `EntityCapabilities` 是这套方言的附属形状。
+ * `EntitySummary` 是这套方言的附属形状（详情渲染器的输入形状之一）。
  *
  * 已于 S11 删除的协议时代类型（`ProviderInfo` / `ProvidersResponse` /
  * `EntitiesListResponse` / `EntityUploadResponse` / `EntityStatusResponse` /
@@ -16,18 +16,12 @@
  */
 
 /**
- * 表单渲染器的能力入参（DetailForm 的 `cap.<name>` 求值来源）。
+ * 表单渲染器的能力位（`cap.<name>` 条件求值来源）。
  *
- * 与后端不同：VDFS **不下发**能力表——它由渲染器按节点的访问位与详情定义
- * 声明的动作**自行计算**（后端的能力开关已随 `entities/*` 协议下线）。
- * 因此这里只保留真正被消费的两项。
+ * VDFS **不下发**能力表——它由渲染器按节点的访问位与详情定义声明的动作**自行计算**
+ * （后端的能力开关已随 `entities/*` 协议下线）。`DetailForm` 的 `capabilities`
+ * 入参即为 `Record<string, boolean>`（当前仅 `mutable` / `test_connection`），不再另设类型。
  */
-export interface EntityCapabilities {
-  /** 是否可写（可新增 / 删除） */
-  mutable: boolean
-  /** 是否支持连接测试（`cap.test_connection` 由详情定义引用） */
-  test_connection: boolean
-}
 
 /** 实体概要（VDFS 详情渲染器的输入形状之一） */
 export interface EntitySummary {
