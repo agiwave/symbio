@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 use crate::symbio_core::schemas::entities::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
+use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::vdfs::{
     self, DynVdfsProvider, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsFieldError,
     VdfsNode, VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse,
@@ -261,22 +262,48 @@ fn config_definition(
     }
 }
 
+/// 会话分区：字段默认值**一律从 [`SessionConfig::default()`] 读出**。
+///
+/// 本函数只描述 UI 元信息（类型 / 标题 / 说明 / 取值范围），默认值不写第二份
+/// 字面量——历史上 schema 与 serde 各写一份，出现过 `max_tool_rounds`
+/// schema=15 而 serde=65535 的漂移（面板显示的默认值与实际行为不符）。
+/// 不变式由 `session_definition_defaults_come_from_session_config` 锁定。
 fn session_detail_definition() -> DetailDefinition {
+    let defaults = serde_json::to_value(SessionConfig::default()).unwrap_or_else(|_| json!({}));
+    let num = |key: &str| defaults.get(key).cloned().unwrap_or(Value::Null);
+    let flag = |key: &str| defaults.get(key).and_then(Value::as_bool).unwrap_or(false);
     config_definition(
         "会话设置",
         "控制会话存储与上下文行为",
         "session",
         vec![
-            detail_field_number("max_messages", "最大消息数", "每个会话保存的最大消息数量", 10.0, 1000.0, serde_json::json!(100)),
-            detail_field_toggle("auto_compress", "自动压缩", "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）", true),
-            detail_field_toggle("enable_compact_tool", "工具压缩", "向模型提供主动压缩工具（context_compact）与 55% 水位提醒；关闭后仅保留自动压缩兜底", false),
+            detail_field_number(
+                "max_messages",
+                "最大消息数",
+                "每个会话保存的最大消息数量",
+                10.0,
+                1000.0,
+                num("max_messages"),
+            ),
+            detail_field_toggle(
+                "auto_compress",
+                "自动压缩",
+                "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）",
+                flag("auto_compress"),
+            ),
+            detail_field_toggle(
+                "enable_compact_tool",
+                "工具压缩",
+                "向模型提供主动压缩工具（context_compact）与 55% 水位提醒；关闭后仅保留自动压缩兜底",
+                flag("enable_compact_tool"),
+            ),
             detail_field_number(
                 "context_messages",
                 "上下文消息数量",
                 "Model 对话时包含的上下文消息数量（0 表示不限制，6 表示 3 轮对话）",
                 0.0,
                 200.0,
-                serde_json::json!(6),
+                num("context_messages"),
             ),
         ],
     )
@@ -864,6 +891,49 @@ mod tests {
         assert!(p.list(&vctx(), "session").await.is_err());
         // 未知分区
         assert!(p.stat(&vctx(), "nope").await.is_err());
+    }
+
+    /// 会话设置面板的默认值契约（被删的 `config_schema` 防漂移守卫的**继承者**，
+    /// 守的是现在真正生效的那份定义）。锁定两个不变式：
+    ///
+    /// 1. **面板字段的 key 必须真实存在于 [`SessionConfig`]**，且其默认值取自
+    ///    [`SessionConfig::default()`]——本就同源，故结构上不可能再出现历史上
+    ///    「schema 写 15、serde 写 65535」的双份字面量漂移；
+    /// 2. **`SessionConfig` 自身的两个真源必须一致**：`#[serde(default = …)]`
+    ///    的默认值函数 与 `impl Default`。这两处是各自独立书写的，是本测试
+    ///    唯一能真正抓到的漂移（空对象反序列化走前者，`default()` 走后者）。
+    #[test]
+    fn session_definition_defaults_come_from_session_config() {
+        let defaults = serde_json::to_value(SessionConfig::default())
+            .expect("SessionConfig::default() 必须可序列化");
+
+        // ① 面板字段 ↔ SessionConfig：key 存在 + 默认值同源
+        let def = session_detail_definition();
+        let fields = &def.sections[0].fields;
+        assert!(!fields.is_empty(), "会话分区必须有字段");
+        for f in fields {
+            let declared = f
+                .default
+                .clone()
+                .unwrap_or_else(|| panic!("字段 {} 缺少 default", f.key));
+            let actual = defaults
+                .get(&f.key)
+                .unwrap_or_else(|| panic!("SessionConfig 不存在字段 {}", f.key));
+            assert_eq!(
+                &declared, actual,
+                "面板 {}.default={declared} 与 SessionConfig::default().{}={actual} 不一致",
+                f.key, f.key
+            );
+        }
+
+        // ② SessionConfig 内部：serde 默认值函数 == Default impl
+        let from_empty: SessionConfig =
+            serde_json::from_str("{}").expect("空对象应能反序列化出默认配置");
+        assert_eq!(
+            serde_json::to_value(&from_empty).unwrap(),
+            defaults,
+            "SessionConfig 的 serde 默认值与 Default impl 漂移了（两处各自书写）"
+        );
     }
 
     #[test]
