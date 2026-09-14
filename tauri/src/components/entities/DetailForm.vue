@@ -426,7 +426,12 @@ function actionBusy(a: DetailAction): boolean {
 }
 
 function actionDisabled(a: DetailAction): boolean {
-  return actionBusy(a) || !evalCond(a.disabled_when)
+  if (actionBusy(a)) return true
+  // `disabled_when` = **条件成立才禁用**（缺省 ⇒ 不禁用）。
+  // `evalCond` 对空条件返回 true（那是为 `when` 显隐服务的：无 when ⇒ 显示），
+  // 所以这里必须显式判空，不能写成 `!evalCond(...)`——那样既会把「无条件」
+  // 解释成「不禁用」，又把「条件成立」解释成「不禁用」，与字段语义正好相反。
+  return a.disabled_when ? evalCond(a.disabled_when) : false
 }
 
 /** EntityActions 按索引对齐的进行中/禁用标记 */

@@ -211,3 +211,43 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
     expect(w.find('.ea-divider').exists()).toBe(false)
   })
 })
+
+describe('DetailForm disabled_when：条件成立才禁用', () => {
+  const deleteOnly = {
+    id: 'delete',
+    label: '删除',
+    style: 'danger',
+    disabled_when: { key: 'is_existing', equals: false },
+  }
+
+  function mountWith(item: EntitySummary) {
+    return mount(DetailForm, {
+      props: {
+        definition: def({ sections: [], actions: [deleteOnly] }),
+        item,
+        capabilities: { mutable: true } as never,
+      },
+    })
+  }
+
+  it('已存在条目：条件不成立 ⇒ 按钮可点', () => {
+    const w = mountWith({ kind: 'mcp', id: 'srv', name: 'srv', status: 'active' } as EntitySummary)
+    expect(w.find<HTMLButtonElement>('.ea-btn').element.disabled).toBe(false)
+  })
+
+  it('新建态（id 为空）：条件成立 ⇒ 按钮禁用', () => {
+    const w = mountWith({ kind: 'mcp', id: '', name: '', status: 'active' } as EntitySummary)
+    expect(w.find<HTMLButtonElement>('.ea-btn').element.disabled).toBe(true)
+  })
+
+  it('无 disabled_when ⇒ 一律不禁用（缺省语义不能翻成禁用）', () => {
+    const w = mount(DetailForm, {
+      props: {
+        definition: def({ sections: [], actions: [{ id: 'delete', label: '删除', style: 'danger' }] }),
+        item: { kind: 'mcp', id: 'srv', name: 'srv', status: 'active' } as EntitySummary,
+        capabilities: { mutable: true } as never,
+      },
+    })
+    expect(w.find<HTMLButtonElement>('.ea-btn').element.disabled).toBe(false)
+  })
+})

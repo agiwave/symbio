@@ -136,7 +136,18 @@ pub struct EntityStatusResponse {
 // 复杂详情（会话聊天工作区、appearance 即时生效型、about 信息展示型）
 // 仍走注册 editor，不适用本定义。
 
-/// 条件谓词（徽标/动作显隐）。`all` 存在时为 AND 组合，其余字段忽略。
+/// 条件谓词（徽标/动作显隐/字段显隐）。`all` 存在时为 AND 组合，其余字段忽略。
+///
+/// 语义是**中性的「条件成立」**，由使用方决定成立意味着什么：
+///
+/// | 使用处 | 成立 ⇒ | 缺省（无该字段） |
+/// |---|---|---|
+/// | `when`（动作 / 徽标） | 显示 | 显示 |
+/// | `disabled_when`（动作） | **禁用** | 不禁用 |
+/// | `visible_when`（字段） | 显示 | 显示 |
+///
+/// 因此「缺省」一律按**成立**处理（渲染器侧对空条件求值为 `true`）；只有
+/// `disabled_when` 需要渲染器额外判空——否则「无条件」会被解释成「禁用」。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct DetailCondition {
@@ -267,8 +278,11 @@ pub struct DetailAction {
     /// 图标名（缺省 = 按 id 的默认图标映射；无映射 → 文字按钮）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// 显隐条件：**成立才显示**（缺省 = 显示）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<DetailCondition>,
+    /// 禁用条件：**成立才禁用**（缺省 = 不禁用）。
+    /// 例如 `{key: "is_existing", equals: false}` = 新建态禁用「删除」。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled_when: Option<DetailCondition>,
     #[serde(skip_serializing_if = "Option::is_none")]
