@@ -2,7 +2,7 @@
 //!
 //! ## 每个工具 = 一个框架原生 `Capability`，持有封装的 provider
 //!
-//! 本目录下的每一个文件（`mounts.rs` / `list.rs` / `read.rs` / …）定义一个**框架原生的
+//! 本目录下的每一个文件（`list.rs` / `read.rs` / …）定义一个**框架原生的
 //! `Capability` 实现**——与已下线的原生 local 工具（`read_file` / `file_edit` /
 //! `dir_list` / `glob_search` / `write_file` / `delete_file`）是同一种东西：
 //!
@@ -15,11 +15,13 @@
 //! provider、workdir 透传全部在 [`ToolVdfs`] 内，与前端链路（`super::super::host`）
 //! 共用同一批注册的 provider，不存在第二套实现。
 //!
-//! ## 地址规则（两类，实现在 `ToolVdfs`）
+//! ## 地址规则（三类，实现在 `ToolVdfs`）
 //!
-//! 1. **本地文件地址**（无 `.vdfs/` 前缀）→ `local/xxx`：裸地址即会话工作目录
+//! 1. **本地文件地址**（无 `.vdfs` 前缀）→ `local/xxx`：裸地址即会话工作目录
 //!    地址空间，挂载点名字与 local 插件注册名共用 [`PLUGIN_LOCAL`] 常量；
-//! 2. **虚拟地址**（`.vdfs/<挂载名>/…`）→ 剥掉前缀，首段 = 在 `CapabilityVisitor`
+//! 2. **虚拟目录 `.vdfs`**：系统资源类别**挂接**在此目录之下；`vdfs_list('.vdfs')`
+//!    即可枚举当前可访问的全部类别（不再提供独立的挂载点清单工具）；
+//! 3. **虚拟地址**（`.vdfs/<挂载名>/…`）→ 剥掉前缀，首段 = 在 `CapabilityVisitor`
 //!    里注册的挂载名，直调对应 provider。
 //!
 //! ## provider 从哪来
@@ -28,7 +30,6 @@
 //! 广播中构造 [`ToolVdfs::new(visitor)`] 并把工具注册进同一个 visitor。执行时
 //! visitor 里已注册好全部挂载 provider（容器同时注册的组合根供前端链路使用）。
 
-pub mod mounts;
 pub mod list;
 pub mod tree;
 pub mod stat;
@@ -62,7 +63,7 @@ pub(crate) fn request_of<T: DeserializeOwned + Default>(ctx: &Arc<dyn InvokeRequ
 ///
 /// 与原生本地文件工具（`read_file` 等）**同一套地址规则**：相对路径从工作目录开始。
 pub const PATH_DESC: &str =
-    "路径（本地工作目录）。相对路径从工作目录开始，如 'README.md'、'src/main.rs'；'/' 表示工作目录根；绝对路径直用，如 'D:/tmp/a.txt'。也可使用 '.vdfs/<挂载名>/...' 访问其它资源类别（如 '.vdfs/setting/appearance'）。";
+    "路径（本地工作目录）。相对路径从工作目录开始，如 'README.md'、'src/main.rs'；'/' 表示工作目录根；绝对路径直用，如 'D:/tmp/a.txt'。系统资源类别统一挂接在虚拟目录 '.vdfs' 之下：'.vdfs/<挂载名>/...' 访问对应类别（如 '.vdfs/setting/appearance'）；对 '.vdfs' 本身列目录即可枚举当前可访问的全部类别。";
 
 /// 构造工具元数据骨架；子模块在自身 `meta()` 里直接调用，避免重复样板。
 pub fn tool(
@@ -91,7 +92,6 @@ pub fn tool(
 /// 构造全部 VDFS 工具：每个工具持有**同一个**封装 provider（无状态，可复用）
 pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<Arc<dyn Capability>> {
     vec![
-        Arc::new(mounts::MountsTool::new(provider.clone())),
         Arc::new(list::ListTool::new(provider.clone())),
         Arc::new(tree::TreeTool::new(provider.clone())),
         Arc::new(stat::StatTool::new(provider.clone())),
@@ -153,7 +153,6 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "vdfs_mounts",
                 "vdfs_list",
                 "vdfs_tree",
                 "vdfs_stat",
@@ -166,17 +165,5 @@ mod tests {
                 "vdfs_move",
             ]
         );
-    }
-
-    /// 未挂载任何 provider 时，vdfs_mounts 返回空清单（而非报错）
-    #[tokio::test]
-    async fn mounts_tool_without_providers() {
-        let tool = mounts::MountsTool::new(empty_provider());
-        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
-        let resp = tool.execute(ctx).await.unwrap();
-        let data = resp
-            .get::<super::super::protocol::VdfsProvidersResponse>()
-            .unwrap();
-        assert!(data.providers.is_empty());
     }
 }

@@ -7,15 +7,19 @@
 //! vdfs_* 工具 ──▶ ToolVdfs（翻译地址 + 选 provider + 透传 workdir）──▶ 挂载 provider
 //! ```
 //!
-//! 本类型做三件事，仅此三件：
+//! 本类型做四件事，仅此四件：
 //!
 //! 1. **地址翻译**（`docs/design/vdfs.md` 的 LLM 地址规则）——本地文件地址
 //!    （无 `.vdfs/` 前缀）拼接 `local/` 前缀；虚拟地址（`.vdfs/<挂载名>/…`）剥掉前缀。
 //!    随后 [`normalize_path`] 规范化并拒绝 `..` 穿越，[`split_mount`] 拆出
 //!    「挂载名 + 子树相对路径」；
-//! 2. **按挂载名直调**：从持有的 `CapabilityVisitor` 里 [`CapabilityVisitor::get_vdfs_provider`]
+//! 2. **`.vdfs` 目录约定**：`.vdfs` 本体不存在于任何 provider 之下，而是由访问层
+//!    **合成**的虚拟目录——`list(".vdfs")` 返回全部挂载点节点、`stat(".vdfs")` 返回
+//!    目录节点；其它操作（read / write / delete / mkdir / move）拒绝，与前端
+//!    `vdfs/list { path: ".vdfs" }` 完全等价；
+//! 3. **按挂载名直调**：从持有的 `CapabilityVisitor` 里 [`CapabilityVisitor::get_vdfs_provider`]
 //!    取对应 provider，调用其方法——**不经 composite 的根，也不经协议信封**；
-//! 3. **调用级参数与守卫**：把请求 ctx 的 `WORKDIR` 透传为 provider 参数
+//! 4. **调用级参数与守卫**：把请求 ctx 的 `WORKDIR` 透传为 provider 参数
 //!    （[`call_params`]）；挂载根本体不可读 / 写 / 删 / 建 / 移（与根 `VdfsMountTable`
 //!    的守卫语义一致），跨挂载点移动拒绝。
 
@@ -38,6 +42,12 @@ pub const LOCAL_MOUNT: &str = PLUGIN_LOCAL;
 /// 统一挂到 [`LOCAL_MOUNT`] 下。
 pub const VIRTUAL_PREFIX: &str = ".vdfs/";
 
+/// 约定的虚拟目录名：`.vdfs` 本体由访问层合成，`list`/`stat` 可达，其它操作拒绝。
+///
+/// 前端等价物：`vdfs/list { path: ".vdfs" }` = `vdfs/providers`。工具链路不再提供
+/// 独立的「挂载点清单」工具，发现类别一律用 `vdfs_list('.vdfs')`。
+pub const VIRTUAL_ROOT: &str = ".vdfs";
+
 /// VDFS 工具链路的封装 provider。
 ///
 /// 工具构造时持有 `Arc<Self>`；执行时它从能力管理器里按挂载名取 provider 直调，
@@ -57,6 +67,11 @@ impl ToolVdfs {
     /// 仅拼接 / 剥离而非解析：本地地址挂 [`LOCAL_MOUNT`]（`README.md` →
     /// `local/README.md`、`/` → `local//`），虚拟地址剥 [`VIRTUAL_PREFIX`]
     /// （`.vdfs/setting/appearance` → `setting/appearance`）。规范化后首段即挂载名。
+    ///
+    /// 注意：本函数**不**处理 `.vdfs` 本体（即 [`VIRTUAL_ROOT`]）——它是访问层合成的
+    /// 虚拟目录，不属于任何 provider；只有 `list` / `stat` 特判它。其它操作会经此
+    /// 落到 `local/.vdfs`，由 local provider 以「路径不存在」报错——这是可接受的
+    /// 行为（合成目录本就不可读写）。
     async fn target(&self, raw: &str) -> VdfsResult<(Arc<dyn VdfsProvider>, String)> {
         let scoped = match raw.strip_prefix(VIRTUAL_PREFIX) {
             Some(rest) => rest.to_string(),
@@ -67,10 +82,21 @@ impl ToolVdfs {
             split_mount(&full).ok_or_else(|| VdfsError::invalid(format!("无效地址：{raw}")))?;
         let provider = self.visitor.get_vdfs_provider(mount).await.ok_or_else(|| {
             VdfsError::not_found(format!(
-                "未知挂载点 '{mount}'（可用 vdfs_mounts 查看全部挂载点）"
+                "未知挂载点 '{mount}'（可用 vdfs_list('.vdfs') 查看全部资源类别）"
             ))
         })?;
         Ok((provider, rel.to_string()))
+    }
+
+    /// 判断地址是否指向合成的虚拟根 `.vdfs`（接受 `.vdfs` 与 `.vdfs/` 两种写法）。
+    fn is_virtual_root(raw: &str) -> bool {
+        raw == VIRTUAL_ROOT || raw == VIRTUAL_PREFIX
+    }
+
+    /// 用当前注册的挂载 provider 合成一份 `VdfsMountTable`——`.vdfs` 目录的
+    /// 节点视图（`mount_nodes` / `root_node`）与前端链路共用同一实现。
+    async fn virtual_table(&self) -> VdfsMountTable {
+        VdfsMountTable::new(self.mounts().await)
     }
 
     /// 调用级参数：把请求 ctx 的运行时状态（workdir）翻译成 provider 的约定键。
@@ -81,17 +107,25 @@ impl ToolVdfs {
     }
 
     /// 列出目录的直接子节点（挂载根 = 工作目录根，允许）
+    ///
+    /// 特判 `.vdfs`：返回访问层合成的挂载点节点集合（前端 `vdfs/providers` 的等价物）。
     pub async fn list(
         &self,
         ctx: &Arc<dyn InvokeRequest>,
         path: &str,
     ) -> VdfsResult<Vec<VdfsNode>> {
+        if Self::is_virtual_root(path) {
+            return Ok(self.virtual_table().await.mount_nodes());
+        }
         let (provider, rel) = self.target(path).await?;
         provider.list(&self.vctx(ctx), &rel).await
     }
 
-    /// 读取节点元数据
+    /// 读取节点元数据（`.vdfs` 返回合成的虚拟根节点）
     pub async fn stat(&self, ctx: &Arc<dyn InvokeRequest>, path: &str) -> VdfsResult<VdfsNode> {
+        if Self::is_virtual_root(path) {
+            return Ok(self.virtual_table().await.root_node());
+        }
         let (provider, rel) = self.target(path).await?;
         provider.stat(&self.vctx(ctx), &rel).await
     }
@@ -179,8 +213,10 @@ impl ToolVdfs {
     }
 
     /// 全部挂载点：`(挂载名, provider)`，已按 provider `order` 升序稳定排序
-    /// （[`CapabilityVisitor::list_vdfs_providers`] 的语义）
-    pub async fn mounts(&self) -> Vec<(String, Arc<dyn VdfsProvider>)> {
+    /// （[`CapabilityVisitor::list_vdfs_providers`] 的语义）。
+    ///
+    /// 供 `.vdfs` 目录合成使用；不再对外提供独立的「挂载点清单」LLM 工具。
+    async fn mounts(&self) -> Vec<(String, Arc<dyn VdfsProvider>)> {
         self.visitor.list_vdfs_providers().await
     }
 }
@@ -333,6 +369,62 @@ mod tests {
         let err = vdfs.read(&ctx(), "README.md").await.unwrap_err();
         assert!(matches!(err, VdfsError::NotFound(_)));
         assert!(err.to_string().contains("local"));
+    }
+
+    /// `.vdfs` 是访问层合成的虚拟目录：`list` 返回挂载点节点，不触达任何 provider
+    #[tokio::test]
+    async fn virtual_root_lists_synthesized_mount_nodes() {
+        let local = Rec::new();
+        let setting = Rec::new();
+        let vdfs = ToolVdfs::new(
+            visitor_with(vec![("local", local.clone()), ("setting", setting.clone())]).await,
+        );
+
+        let items = vdfs.list(&ctx(), ".vdfs").await.unwrap();
+        let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["local", "setting"]);
+        assert!(
+            items.iter().all(|n| n.kind == VFDS_KIND_MOUNT),
+            "合成节点必须是 mount 类型"
+        );
+        assert!(local.seen().is_empty() && setting.seen().is_empty(), "不触达 provider");
+    }
+
+    /// `.vdfs/` 与 `.vdfs` 等价（两种写法都被识别为虚拟根）
+    #[tokio::test]
+    async fn virtual_root_trailing_slash_is_equivalent() {
+        let vdfs = ToolVdfs::new(visitor_with(vec![("setting", Rec::new())]).await);
+        let a = vdfs.list(&ctx(), ".vdfs").await.unwrap();
+        let b = vdfs.list(&ctx(), ".vdfs/").await.unwrap();
+        assert_eq!(a.len(), b.len());
+        assert_eq!(a[0].name, b[0].name);
+    }
+
+    /// `.vdfs` 的 `stat` 返回合成的根节点；未挂载任何 provider 时返回空清单
+    #[tokio::test]
+    async fn virtual_root_stat_and_empty_visitors() {
+        let vdfs = ToolVdfs::new(visitor_with(vec![("setting", Rec::new())]).await);
+        let node = vdfs.stat(&ctx(), ".vdfs").await.unwrap();
+        assert_eq!(node.path, VFDS_ROOT);
+        assert_eq!(node.kind, VFDS_KIND_MOUNT);
+
+        let empty = ToolVdfs::new(visitor_with(vec![]).await);
+        assert!(empty.list(&ctx(), ".vdfs").await.unwrap().is_empty());
+    }
+
+    /// 未知挂载点的错误提示指向 `vdfs_list('.vdfs')`（不再有 `vdfs_mounts` 工具）
+    #[tokio::test]
+    async fn unknown_mount_hint_points_to_virtual_root() {
+        let vdfs = ToolVdfs::new(visitor_with(vec![]).await);
+        let err = vdfs.read(&ctx(), ".vdfs/nope/x").await.unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, VdfsError::NotFound(_)));
+        assert!(msg.contains("nope"), "错误应包含挂载名：{msg}");
+        assert!(msg.contains(".vdfs"), "错误应指向 '.vdfs'：{msg}");
+        assert!(
+            !msg.contains("vdfs_mounts"),
+            "错误提示不得再引用已删除的工具：{msg}"
+        );
     }
 
     /// 同挂载点内移动直通；跨挂载点拒绝

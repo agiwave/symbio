@@ -445,7 +445,7 @@ source = file 的类型（整包导入）：名称来自文件名
   | --- | --- |
   | trait | `VdfsProvider::nav_visible()`，缺省 `true`（与 `label` / `order` / `icon` 同为呈现层声明） |
   | 挂载节点 | `mount_node()` 在不可见时写入属性 `nav_visible = false`（场景数据，VDFS 只透传；缺省不序列化） |
-  | 挂载视图 | `VdfsMountInfo.nav_visible`（缺省 `true`，`true` 时不序列化）——`host.rs` 从节点属性读、`vdfs_mounts` 工具从 provider 直接读 |
+  | 挂载视图 | `VdfsMountInfo.nav_visible`（缺省 `true`，`true` 时不序列化）——`host.rs` 从节点属性读、`.vdfs` 合成挂载点节点时同样读该属性（工具链路 `vdfs_list('.vdfs')` 直接看到过滤后的结果） |
   | 声明方 | `plugins/local/vdfs.rs` 覆写 `nav_visible() -> false`：本地文件树是挂载点，但不是资源类别 |
   | 前端 | `schemas/vdfs.ts` 新增 `mountNavVisible()`；`useNavRail` / `useVdfs` 的导航项按标记过滤 |
 

@@ -185,7 +185,6 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "vdfs_mounts",
                 "vdfs_list",
                 "vdfs_tree",
                 "vdfs_stat",

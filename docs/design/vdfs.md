@@ -553,15 +553,19 @@ Ok(VdfsMountTable::new(mounts))
   （`tools/` 下一工具一文件，均为框架原生 `Capability`）构造时持有这同一个
   `Arc<ToolVdfs>`，`execute` 内只是「**对文件系统的操作改为对它的操作** + LLM 封装」
   （行号分页 / ignore 过滤 / 成功 message），不认识能力管理器、不走协议信封。
-  工具：`vdfs_mounts` / `vdfs_list` / `vdfs_tree` / `vdfs_stat` / `vdfs_read` /
+  工具：`vdfs_list` / `vdfs_tree` / `vdfs_stat` / `vdfs_read` /
   `vdfs_edit` / `vdfs_search` / `vdfs_write` / `vdfs_delete` / `vdfs_mkdir` /
-  `vdfs_move`，共十一个。
-- **`ToolVdfs` 只做三件事**：
+  `vdfs_move`，共十个。
+- **`ToolVdfs` 只做四件事**：
   1. **地址翻译**（见下）→ `normalize_path`（拒绝 `..` 穿越）→ `split_mount`
      拆出「挂载名 + 子树相对路径」；
-  2. **按挂载名直调**：`visitor.get_vdfs_provider(挂载名)` 取 provider，
+  2. **`.vdfs` 目录约定**：`.vdfs` 本体由访问层**合成**——`list` 返回挂载点节点集合、
+     `stat` 返回虚拟根节点，其它操作落到 `local/.vdfs` 由 local provider 报错；
+     前端等价物是 `vdfs/providers`（也即 `vdfs/list { path: ".vdfs" }`），
+     工具链路不再提供独立的挂载点清单工具；
+  3. **按挂载名直调**：`visitor.get_vdfs_provider(挂载名)` 取 provider，
      直接调用其方法——**不经 composite 的根，也不经协议信封**；
-  3. **调用级参数与守卫**：经 `host::call_params` 透传 `workdir`（与前端链路共用
+  4. **调用级参数与守卫**：经 `host::call_params` 透传 `workdir`（与前端链路共用
      同一份翻译）；挂载根本体不可读 / 写 / 删 / 建 / 移（列目录与元数据不受限，
      与根 `VdfsMountTable` 的守卫语义一致），跨挂载点移动拒绝。
 - **组合操作只写一次（`host::edit_via` / `host::search_via`）**：`VdfsProvider`
@@ -573,19 +577,23 @@ Ok(VdfsMountTable::new(mounts))
   协议入口（`vdfs/edit` / `vdfs/search` handler）与 LLM 工具链路（`ToolVdfs`）
   共用同一份组合实现；`VdfsEditResponse` / `VdfsSearchResult` 因此归
   `plugins/vdfs/protocol.rs`（访问层形状），不再属于 core。
-- **地址规则（迁移期，两类）**——裸地址即**会话工作目录地址空间**，挂载点名字与
+- **地址规则（迁移期，三类）**——裸地址即**会话工作目录地址空间**，挂载点名字与
   local 插件注册名共用 `PLUGIN_LOCAL` 常量（唯一的软编码点）：
-  1. **本地文件地址**（无 `.vdfs/` 前缀）：挂到 `local` 下，**拼接而非解析**——
+  1. **本地文件地址**（无 `.vdfs` 前缀）：挂到 `local` 下，**拼接而非解析**——
      `Readme.md` → `local/Readme.md`、`/` → `local//`
      （经 `normalize_path` 规范成 `/local`，即工作目录根）；工具描述与示例按
      **本地文件语义**书写。
-  2. **虚拟地址**（以 `.vdfs/` 开头）：剥掉前缀，首段 = 在 `CapabilityVisitor`
+  2. **虚拟目录 `.vdfs`**：系统资源类别**挂接**在此目录之下；`vdfs_list('.vdfs')`
+     由访问层直接合成挂载点节点集合返回（等价于前端 `vdfs/providers`），不再需要
+     独立的挂载点清单工具。
+  3. **虚拟地址**（以 `.vdfs/` 开头）：剥掉前缀，首段 = 在 `CapabilityVisitor`
      里注册的挂载名，直调对应 provider（`.vdfs/setting/appearance` →
      `setting/appearance`）——任意已挂载插件都可通过 `.vdfs/<插件>/…` 暴露给大模型，
      `ToolVdfs` 不持有任何拓扑知识。
 - 前端链路给的是全路径（`/local/README.md`），走 `dispatch_with` 经根分发；
-  工具链路与前端消费**同一批注册的 provider**，不存在第二套实现。`vdfs_mounts`
-  经 `visitor.list_vdfs_providers()` 列出挂载点清单。
+  工具链路与前端消费**同一批注册的 provider**，不存在第二套实现。发现类别一律
+  经 `visitor.list_vdfs_providers()`——前端用 `vdfs/providers`，工具用
+  `vdfs_list('.vdfs')`。
 
 ### 13.4 本地文件（local）——真实文件树 provider
 
