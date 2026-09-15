@@ -193,9 +193,9 @@ Agent 认知类型与关系类型经常变化。
 
 ## ADR-010: 统一实体管理
 
-**状态**：已被取代（S11 起 `entities/*` 调用协议下线，资源访问统一经 VDFS；
-后端 `EntityProvider` 抽象保留并退为内部机制，见
-[design/entity-provider-mechanism.md](./design/entity-provider-mechanism.md)）
+**状态**：已被取代（S11 起 `entities/*` 调用协议下线；VDFS 收敛期结束后
+后端 `EntityProvider` 抽象与 `EntityVdfsAdapter` **一并删除**，各插件直接实现
+`VdfsProvider`，见 [design/vdfs.md](./design/vdfs.md) §13.4）
 
 **背景**：
 多种实体 (Agent, Model, Session, MCP, Skill) 需要 CRUD 操作。
@@ -217,6 +217,19 @@ S11 停止路由，能力开关随 S12 删除。资源访问统一经 VDFS（`.v
 能力改由**访问位**、注册表（supports_upload / supports_import）与**声明式动作**
 （`vdfs/action`）表达，前端页面只剩一台三栏工作台。理由（一份页面实例化多类）
 由 VDFS 以更强的方式满足——**一份机制、零类型知识**。
+
+**收敛终局（EntityProvider 下线）**：过渡期保留的 `EntityProvider` trait（20 个
+钩子）与 `EntityVdfsAdapter`（把 trait 接成 VDFS 子目录）在收敛期结束时删除：
+每个资源插件**直接实现 `VdfsProvider`**，用现成的 `list` / `stat` / `read` /
+`write` / `delete` / `action` / `watch` 表达自身语义；跨插件共用的只剩
+`symbio_core::entities` 里的**存储原语自由函数**（写盘 / 删除 / 导入 / 导出，
+无 trait 约束）。
+
+理由：trait + 适配器这一层曾以「新增实体类型 VDFS 侧零改动」为价值主张，但
+实际代价是把**每类资源的差异**（清单来源、摘要口径、manifest 校验、内存同步、
+容器语义）挤进一张 20 钩子的通用接口里，再由一个 1500 行的适配器去猜；
+去掉它之后，每类资源的语义回到自己的 `impl VdfsProvider` 里，一眼可见、
+改一处只影响一处。
 
 ---
 

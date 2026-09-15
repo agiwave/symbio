@@ -115,129 +115,330 @@ impl SkillPlugin {
     }
 }
 
-// ==================== 实体机制接入（供 VDFS 挂载点使用） ====================
+// ==================== VDFS 挂载点（`.vdfs/skill`） ====================
 //
-// 公共流程（列表包装 / 幂等删除）由 `entities::entity_write` / `entity_delete`
-// 承载，这里只实现 skill 的差异化钩子（SKILL.md 摘要解析）。
-// `entities/*` 协议已随 S11 下线，本 impl 只被 `EntityVdfsAdapter` 调用。
+// 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
+// 写 / 删 / 动作的语义都在这里表达（不再经实体层与适配器）。
+// 跨插件共享的存储原语（写盘 / 删除 / 导入 / 导出）走 `symbio_core::entities`
+// 的自由函数——它们只做 `EntityStore` 的落盘；SKILL.md 的摘要解析与表单映射
+// 是 skill 的差异部分。
+
+use crate::symbio_core::entities::{self, EntitySummary, ENTITY_SKILL};
+use crate::symbio_core::providers::{categories, manifests};
+use crate::symbio_core::vdfs::{from_plugin_error, host_ctx, unwatch_changes, watch_changes};
+use crate::symbio_core::vdfs_provider::{
+    VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
+    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT, VFDS_EXT_FORM,
+    VFDS_EXT_ZIP, VFDS_NEW_SOURCE_FILE,
+};
+
+const LABEL: &str = "技能";
+
+/// 路径末段 → 条目 id（去掉 `.<kind>` 呈现扩展名）
+fn id_of(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    base.strip_suffix(&format!(".{ENTITY_SKILL}"))
+        .unwrap_or(base)
+        .to_string()
+}
+
+/// 导入的**建议名**：末段再去掉 `.zip`（新建地址是 `<name>.zip`）
+fn import_name_of(path: &str) -> String {
+    let base = id_of(path);
+    match base.strip_suffix(".zip") {
+        Some(stem) if !stem.is_empty() => stem.to_string(),
+        _ => base,
+    }
+}
+
+/// 摘要 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
+fn node_of(item: &EntitySummary) -> VdfsNode {
+    let mut n = VdfsNode::file(&item.id, item.name.clone(), VdfsAccess::READ_WRITE);
+    n.kind = ENTITY_SKILL.to_string();
+    n.ext = Some(VFDS_EXT_FORM.to_string());
+    n.schema = serde_json::to_value(super::detail::skill_detail_definition()).ok();
+    n.status = item.status.clone();
+    n.description = item.description.clone().or_else(|| item.summary.clone());
+    n.updated_at = item.updated_at;
+    n
+}
+
+/// 从 SKILL.md 解析摘要：优先 YAML frontmatter（name / description），
+/// 无 frontmatter 时回落到旧的标题/Description 行解析
+fn summarize_of(id: &str, manifest: Option<&str>) -> EntitySummary {
+    let mut it = EntitySummary::new(ENTITY_SKILL, id, id);
+    it.status = "active".to_string();
+    let Some(text) = manifest else {
+        return it;
+    };
+
+    // frontmatter 路径：名称/摘要 + 完整 config（DetailForm 预填用）
+    if let Some((yaml, _body)) = super::detail::parse_skill_md(text) {
+        if let Some(name) = yaml.get("name").and_then(|v| v.as_str()) {
+            it.name = name.to_string();
+        }
+        if let Some(desc) = yaml.get("description").and_then(|v| v.as_str()) {
+            it.summary = Some(desc.to_string());
+        }
+        if let Some(cfg) = super::detail::skill_md_to_config(text) {
+            if let serde_json::Value::Object(ref mut m) = it.extra {
+                let _ = m.insert("config".to_string(), cfg);
+            }
+        }
+        return it;
+    }
+
+    // 旧格式回落：首行标题 + Description 行
+    let cleaned = text.trim();
+    let first_line = cleaned
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_start_matches('#')
+        .trim();
+    if !first_line.is_empty() {
+        it.name = first_line.to_string();
+    }
+    let mut summary = cleaned
+        .lines()
+        .find(|l| l.trim().starts_with("**Description**") || l.trim().starts_with("Description"))
+        .map(|l| {
+            l.trim()
+                .trim_start_matches("**Description**")
+                .trim()
+                .trim_start_matches("Description")
+                .trim()
+                .to_string()
+        })
+        .unwrap_or_default();
+    if summary.is_empty() {
+        summary = cleaned.chars().take(120).collect();
+    }
+    if !summary.is_empty() {
+        it.summary = Some(summary);
+    }
+    it
+}
+
+/// 表单 manifest → SKILL.md 全文（写盘前的校验/规范化）。
+///
+/// 强制 BUG-SR6（名称 == 目录 id）与 BUG-SR7（description ≥ 10 字符），
+/// 错误在保存时即给出（而非下次加载时）。zip 上传路径不经过本函数。
+///
+/// 返回**纯文本**而不是 JSON 值：SKILL.md 是 Markdown，必须原样落盘
+/// （见 `entities::write_entity_text`）——包成 JSON 字符串会让落盘内容带上
+/// 引号与转义的 `\n`，读回来 frontmatter 就解析不出来了。
+fn validate_manifest(id: &str, manifest: &serde_json::Value) -> Result<String, PluginError> {
+    super::detail::manifest_to_skill_md(id, manifest)
+}
+
+/// `write { create }` 的最小清单。
+///
+/// `manifest_to_skill_md` 要求 `name` 与目录名（id）一致、`description`
+/// 至少 10 字符，故这里给出同名的骨架描述，用户随后在详情里完善。
+fn new_manifest(id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "name": id,
+        "description": format!("{id}：请填写该技能的用途与使用时机（至少 10 字）"),
+    })
+}
 
 #[async_trait]
-impl crate::symbio_core::entities::EntityProvider for SkillPlugin {
-    fn kind(&self) -> &'static str {
-        crate::symbio_core::entities::ENTITY_SKILL
+impl VdfsProvider for SkillPlugin {
+    fn label(&self) -> Option<&str> {
+        Some(LABEL)
     }
 
-    fn category(&self) -> Option<&'static str> {
-        Some(crate::symbio_core::providers::categories::SKILL)
+    fn description(&self) -> Option<&str> {
+        Some("Skill 技能包（每项一份 SKILL.md），是可复用能力片段的唯一来源。")
     }
 
-    fn manifest_file(&self) -> Option<&'static str> {
-        Some(crate::symbio_core::providers::manifests::SKILL)
+    fn order(&self) -> i32 {
+        4
     }
 
-    /// 详情页定义：Skill 表单由后端下发（frontmatter 字段 + Markdown 正文），
-    /// 表单 manifest ↔ SKILL.md 映射见 `super::detail`
-    async fn detail_definition(
+    fn icon(&self) -> Option<&str> {
+        Some(ENTITY_SKILL)
+    }
+
+    /// 根下可新建两类：表单新建（最小 SKILL.md）+ 整包导入（zip）
+    fn root_new_types(&self) -> Vec<VdfsNewType> {
+        vec![
+            VdfsNewType::new(ENTITY_SKILL, LABEL)
+                .with_description(format!("新建{LABEL}（先落一份默认配置，随后在详情里完善）")),
+            VdfsNewType::new(VFDS_EXT_ZIP, format!("{LABEL}包"))
+                .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
+                .with_source(VFDS_NEW_SOURCE_FILE),
+        ]
+    }
+
+    async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+        if !path.is_empty() {
+            return Err(VdfsError::not_found(format!(
+                "{LABEL}是叶子资源，没有子项：{path}"
+            )));
+        }
+        let host = host_ctx(ctx)?;
+        let ids = entities::list_entity_ids(&host, categories::SKILL)
+            .await
+            .map_err(from_plugin_error)?;
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            let body = entities::read_manifest(&host, categories::SKILL, manifests::SKILL, &id)
+                .await
+                .ok();
+            out.push(node_of(&summarize_of(&id, body.as_deref())));
+        }
+        Ok(out)
+    }
+
+    async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
+        if path.is_empty() {
+            return Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST));
+        }
+        let host = host_ctx(ctx)?;
+        let id = id_of(path);
+        let content = entities::read_manifest(&host, categories::SKILL, manifests::SKILL, &id)
+            .await
+            .map_err(from_plugin_error)?;
+        Ok(node_of(&summarize_of(&id, Some(&content))))
+    }
+
+    async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
+        if path.is_empty() {
+            return Err(VdfsError::invalid(format!(
+                "该路径是目录，不可读取内容：{path}"
+            )));
+        }
+        let host = host_ctx(ctx)?;
+        let id = id_of(path);
+        let content = entities::read_manifest(&host, categories::SKILL, manifests::SKILL, &id)
+            .await
+            .map_err(from_plugin_error)?;
+        let item = summarize_of(&id, Some(&content));
+        let value = item
+            .extra
+            .get("config")
+            .cloned()
+            .unwrap_or_else(|| item.extra.clone());
+        let text = serde_json::to_string_pretty(&value)
+            .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
+        Ok(VdfsContent::text("", text).with_mime("application/json"))
+    }
+
+    async fn write(
         &self,
-        _ctx: &Arc<dyn crate::symbio_core::InvokeRequest>,
-        _id: &str,
-    ) -> Option<crate::symbio_core::schemas::entities::DetailDefinition> {
-        Some(super::detail::skill_detail_definition())
-    }
-
-    /// 表单上传的校验/规范化：manifest → SKILL.md 全文（实际写盘内容）。
-    ///
-    /// 强制 BUG-SR6（名称 == 目录 id）与 BUG-SR7（description ≥ 10 字符），
-    /// 错误在保存时即给出（而非下次加载时）。zip 上传路径不经过本钩子。
-    async fn validate_manifest(
-        &self,
-        _ctx: &Arc<dyn crate::symbio_core::InvokeRequest>,
-        id: &str,
-        manifest: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        let md = super::detail::manifest_to_skill_md(id, manifest)?;
-        Ok(serde_json::Value::String(md))
-    }
-
-    /// VDFS 新建（`write { create }`）的最小清单。
-    ///
-    /// `manifest_to_skill_md` 要求 `name` 与目录名（id）一致、`description`
-    /// 至少 10 字符，故这里给出同名的骨架描述，用户随后在详情里完善。
-    fn new_entity_manifest(&self, id: &str, _title: &str) -> serde_json::Value {
-        serde_json::json!({
-            "id": id,
-            "name": id,
-            "description": format!("{id}：请填写该技能的用途与使用时机（至少 10 字）"),
+        ctx: &VdfsContext,
+        path: &str,
+        content: &VdfsContent,
+    ) -> VdfsResult<VdfsWriteResponse> {
+        let host = host_ctx(ctx)?;
+        if path.is_empty() {
+            return Err(VdfsError::invalid(format!(
+                "{LABEL}整包只能导入到挂载根下：{path}"
+            )));
+        }
+        // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）
+        if content.binary {
+            let bytes = entities::decode_b64(content.b64.as_deref().unwrap_or_default())
+                .map_err(|e| VdfsError::invalid(e.0))?;
+            let resp = entities::import_zip_to_entity(
+                &host,
+                ENTITY_SKILL,
+                categories::SKILL,
+                &import_name_of(path),
+                &bytes,
+            )
+            .await
+            .map_err(from_plugin_error)?;
+            return Ok(VdfsWriteResponse {
+                path: resp.id,
+                created: resp.created,
+                etag: None,
+            });
+        }
+        let id = id_of(path);
+        let manifest = if content.create {
+            new_manifest(&id)
+        } else {
+            serde_json::from_str::<serde_json::Value>(content.as_text().unwrap_or_default())
+                .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
+        };
+        // SKILL.md 是 Markdown：走**纯文本**写盘原语，不能被 JSON 序列化
+        let normalized = validate_manifest(&id, &manifest).map_err(from_plugin_error)?;
+        let resp = entities::write_entity_text(
+            &host,
+            ENTITY_SKILL,
+            categories::SKILL,
+            manifests::SKILL,
+            &id,
+            &normalized,
+        )
+        .await
+        .map_err(from_plugin_error)?;
+        Ok(VdfsWriteResponse {
+            path: id,
+            created: resp.created,
+            etag: None,
         })
     }
 
-    /// 从 SKILL.md 解析摘要：优先 YAML frontmatter（name / description），
-    /// 无 frontmatter 时回落到旧的标题/Description 行解析
-    async fn summarize(
+    async fn delete(&self, ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
+        if path.is_empty() {
+            return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
+        }
+        let host = host_ctx(ctx)?;
+        let id = id_of(path);
+        // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
+        let _ = entities::read_manifest(&host, categories::SKILL, manifests::SKILL, &id)
+            .await
+            .map_err(from_plugin_error)?;
+        entities::delete_entity_dir(&host, ENTITY_SKILL, categories::SKILL, &id)
+            .await
+            .map_err(from_plugin_error)?;
+        Ok(())
+    }
+
+    async fn action(
         &self,
-        _ctx: &Arc<dyn crate::symbio_core::InvokeRequest>,
-        id: &str,
-        manifest: Option<&str>,
-    ) -> crate::symbio_core::entities::EntitySummary {
-        let mut it = crate::symbio_core::entities::EntitySummary::new(
-            crate::symbio_core::entities::ENTITY_SKILL,
-            id,
-            id,
-        );
-        it.status = "active".to_string();
-        let Some(text) = manifest else {
-            return it;
-        };
-
-        // frontmatter 路径：名称/摘要 + 完整 config（DetailForm 预填用）
-        if let Some((yaml, _body)) = super::detail::parse_skill_md(text) {
-            if let Some(name) = yaml.get("name").and_then(|v| v.as_str()) {
-                it.name = name.to_string();
-            }
-            if let Some(desc) = yaml.get("description").and_then(|v| v.as_str()) {
-                it.summary = Some(desc.to_string());
-            }
-            if let Some(cfg) = super::detail::skill_md_to_config(text) {
-                if let serde_json::Value::Object(ref mut m) = it.extra {
-                    let _ = m.insert("config".to_string(), cfg);
+        ctx: &VdfsContext,
+        path: &str,
+        action: &str,
+        _payload: Option<&serde_json::Value>,
+    ) -> VdfsResult<VdfsActionResult> {
+        match action {
+            VFDS_ACTION_EXPORT => {
+                if path.is_empty() {
+                    return Err(VdfsError::invalid(format!(
+                        "「导出」只对{LABEL}条目可用：{path}"
+                    )));
                 }
+                let host = host_ctx(ctx)?;
+                let id = id_of(path);
+                let export = entities::export_entity_zip(&host, categories::SKILL, &id)
+                    .await
+                    .map_err(from_plugin_error)?;
+                let data = serde_json::to_value(&export)
+                    .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
+                Ok(VdfsActionResult {
+                    action: VFDS_ACTION_EXPORT.to_string(),
+                    ok: true,
+                    message: format!("已打包「{}」", export.filename),
+                    data: Some(data),
+                })
             }
-            return it;
+            _ => Err(VdfsError::NotImplemented),
         }
+    }
 
-        // 旧格式回落：首行标题 + Description 行
-        let cleaned = text.trim();
-        let first_line = cleaned
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .trim_start_matches('#')
-            .trim();
-        if !first_line.is_empty() {
-            it.name = first_line.to_string();
-        }
-        let mut summary = cleaned
-            .lines()
-            .find(|l| {
-                l.trim().starts_with("**Description**") || l.trim().starts_with("Description")
-            })
-            .map(|l| {
-                l.trim()
-                    .trim_start_matches("**Description**")
-                    .trim()
-                    .trim_start_matches("Description")
-                    .trim()
-                    .to_string()
-            })
-            .unwrap_or_default();
-        if summary.is_empty() {
-            summary = cleaned.chars().take(120).collect();
-        }
-        if !summary.is_empty() {
-            it.summary = Some(summary);
-        }
-        it
+    async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
+        watch_changes(ENTITY_SKILL, path, sink).await
+    }
+
+    async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
+        unwatch_changes(ENTITY_SKILL, path).await
     }
 }
 
@@ -365,15 +566,11 @@ impl Plugin for SkillPlugin {
                 }
             }
 
-            // VDFS 挂载点：把本插件的实体能力适配为一份 VDFS 资源（与实体机制
-            // 共用同一份 list/read/write/delete 实现，见 `vdfs::EntityVdfsAdapter`）。
+            // VDFS 挂载点：本插件自身就是 provider（`.vdfs/skill`）——
+            // 列 / 读 / 写 / 删 / 动作直接由 `impl VdfsProvider for SkillPlugin` 承载。
             // 无条件注册——技能清单为空也是合法的挂载点。
             if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-                let me: Arc<dyn crate::symbio_core::entities::EntityProvider> = self.clone();
-                let vdfs_provider = Arc::new(crate::symbio_core::vdfs::EntityVdfsAdapter::new(
-                    crate::symbio_core::entities::ENTITY_SKILL,
-                    me,
-                ));
+                let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
                 tool_visitor
                     .register_vdfs_provider(PLUGIN_SKILL, vdfs_provider)
                     .await;
@@ -384,3 +581,78 @@ impl Plugin for SkillPlugin {
 }
 
 crate::submit_object_creator!(PLUGIN_SKILL, SkillPlugin::build, dyn Plugin);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 路径末段才是 id：`.vdfs/skill/<id>.skill` 与裸 `<id>` 同解
+    #[test]
+    fn id_of_strips_presentation_extension() {
+        assert_eq!(id_of("demo"), "demo");
+        assert_eq!(id_of("demo.skill"), "demo");
+    }
+
+    /// 导入建议名：新建地址是 `<name>.zip`，建议名即去掉 `.zip` 的 `<name>`
+    #[test]
+    fn import_name_of_strips_zip() {
+        assert_eq!(import_name_of("demo.zip"), "demo");
+        assert_eq!(import_name_of("demo.skill"), "demo");
+    }
+
+    /// 摘要优先 YAML frontmatter：`name` 作标题、`description` 作摘要，
+    /// 且完整 config 随节点下发（详情页表单预填用）
+    #[test]
+    fn summarize_prefers_frontmatter() {
+        let md = "---\nname: 演示\ndescription: 一个用于演示的技能\n---\n\n正文\n";
+        let it = summarize_of("demo", Some(md));
+        assert_eq!(it.name, "演示");
+        assert_eq!(it.summary.as_deref(), Some("一个用于演示的技能"));
+        assert!(it.extra.get("config").is_some());
+    }
+
+    /// 回归：**写进去的必须能被读回来**（写读同源）。
+    ///
+    /// SKILL.md 是 Markdown，只能走纯文本写盘。若把 manifest 当 JSON 值写入，
+    /// 落盘会变成 `"---\nname: ...\n"`（外层引号 + `\n` 被转义成字面两字符），
+    /// 而 `parse_skill_md` 以 `strip_prefix("---\n")` 起手 ⇒ 必然失败：
+    /// 保存报成功、文件却是坏的，下次加载解析不出 frontmatter。
+    #[test]
+    fn validate_manifest_produces_parsable_markdown() {
+        let manifest = serde_json::json!({
+            "id": "demo",
+            "name": "demo",
+            "description": "一个用于演示的技能描述",
+        });
+        let md = validate_manifest("demo", &manifest).expect("BUG-SR6 / SR7 均应满足");
+        assert!(
+            md.starts_with("---\n"),
+            "SKILL.md 必须以 frontmatter 起始标记开头（不是引号），实际开头：{:?}",
+            &md[..md.len().min(12)]
+        );
+        // 关键断言：落盘文本经同一份摘要解析能还原出填写的字段
+        let it = summarize_of("demo", Some(&md));
+        assert_eq!(it.name, "demo");
+        assert_eq!(it.summary.as_deref(), Some("一个用于演示的技能描述"));
+    }
+
+    /// 新建链路：最小清单同样必须产出合法 SKILL.md（否则一新建就是坏文件）
+    #[test]
+    fn new_manifest_passes_validation() {
+        let m = new_manifest("demo");
+        let md = validate_manifest("demo", &m).expect("新建的最小清单必须合法");
+        assert!(md.starts_with("---\n"));
+        let it = summarize_of("demo", Some(&md));
+        assert_eq!(it.name, "demo");
+        assert!(it.summary.is_some());
+    }
+
+    /// 无 frontmatter 的旧格式回落：首行标题 + Description 行
+    #[test]
+    fn summarize_falls_back_to_legacy_heading() {
+        let md = "# 旧技能\n\n**Description** 旧格式描述\n";
+        let it = summarize_of("old", Some(md));
+        assert_eq!(it.name, "旧技能");
+        assert_eq!(it.summary.as_deref(), Some("旧格式描述"));
+    }
+}

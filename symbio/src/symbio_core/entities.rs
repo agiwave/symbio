@@ -1,33 +1,33 @@
-//! 实体机制（**后端内部抽象**）—— VDFS 的资源存储层
+//! 存储层原语（**后端内部实现细节**）—— VDFS 挂载点的写盘 / 删除 / 导入 / 导出
 //!
-//! ## 现状（S11 之后）
+//! ## 现状：实体机制已废除
 //!
-//! `entities/*` **调用协议已下线**：不再有任何插件路由它，前端与 LLM 也都不使用。
-//! 资源访问统一经 VDFS（`.vdfs/…`），由 `vdfs::EntityVdfsAdapter` 把本模块的
-//! [`EntityProvider`] trait 适配成挂载点——**同一批资源的同一份实现**，只是不再
-//! 暴露第二套对外地址。
+//! 不再有 `EntityProvider` trait、不再有 `provider_registry()` 注册表、也不再有
+//! `EntityVdfsAdapter` 适配器。**每个插件直接实现
+//! [`VdfsProvider`](crate::symbio_core::vdfs_provider::VdfsProvider)**——列 / 读 /
+//! 写 / 删 / 动作的语义由插件自己表达，VDFS 是唯一协议、唯一地址空间。
 //!
-//! 本模块因此只剩两件事：
+//! 本模块因此只提供**跨插件共享的存储原语**（自由函数，不带任何 trait 约束）：
 //!
-//! - [`EntityProvider`] trait：各插件实现差异化钩子（list_items / summarize /
-//!   validate_manifest / on_uploaded / on_deleted / test_status / 容器子实体 …）；
-//! - [`entity_write`] / [`entity_delete`]：写盘与删除的**唯一实现**，供 VDFS
-//!   适配器调用。
+//! - [`storage_service`]：解析当前请求的 `StorageService`（`~/.symbio/plugins/` 基座）；
+//! - [`write_entity_manifest`] / [`delete_entity_dir`]：`EntityStore` 型资源的写盘与
+//!   删除——**唯一实现**，避免每个插件各写一份（含「实体 id 由路径承载」的补齐）；
+//! - [`read_manifest`]：读单个资源的主文件（摘要的输入）；
+//! - [`import_zip_to_entity`] / [`export_entity_zip`]：整包导入 / 导出；
+//! - zip / base64 工具与 [`EntityError`]。
 //!
-//! [`entity_write`]: crate::symbio_core::entities::entity_write
-//! [`entity_delete`]: crate::symbio_core::entities::entity_delete
+//! **差异化部分不在这里**：清单从哪来、摘要怎么算、manifest 怎么校验、上传后怎么
+//! 同步内存，都是各插件的固有方法——这正是「废除实体机制」的要点：不再用一层
+//! trait 集中差异、再由适配器翻译成 VDFS，而是让插件直接讲 VDFS。
 
 pub use crate::symbio_core::schemas::entities::*;
 
 use crate::symbio_core::providers::{EntityStore, EntityStoreError, StorageService};
 use crate::symbio_core::{create_object, InvokeRequest, PluginError};
-use async_trait::async_trait;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
 
 /// 解析当前请求的存储服务（`~/.symbio/plugins/` 基座）
-///
-/// 各插件 entity handler 共用此函数取 `StorageService`。
 pub fn storage_service(
     ctx: &Arc<dyn InvokeRequest>,
 ) -> Result<Arc<dyn StorageService>, PluginError> {
@@ -35,488 +35,14 @@ pub fn storage_service(
         .ok_or_else(|| PluginError::InternalError("storage_service 不可用".to_string()))
 }
 
-// ==================== EntityProvider trait ====================
+// ==================== 写盘 / 删除 / 导入 / 导出 ====================
 
-/// `test_status` 的结果状态：**连通**（测试通过）
-pub const ENTITY_STATUS_CONNECTED: &str = "connected";
-/// `test_status` 的结果状态：**失败**（测试未通过；原因见 `status_detail`）
-pub const ENTITY_STATUS_FAILED: &str = "failed";
-
-/// 实体提供方 trait —— 各插件实现差异化钩子。
+/// 实体 id 由路径承载：manifest 缺 `id`（或为空串）时以路径段补全，已有 id 原样保留。
 ///
-/// **不对外暴露**：本 trait 的唯一消费者是 `vdfs::EntityVdfsAdapter`
-/// （`entities/*` 协议已随 S11 下线），因此它描述的是「资源怎么存、怎么校验」，
-/// 而不是「外部怎么访问」。
-///
-/// ## 默认实现与重写
-///
-/// - 默认 `list_items` 走 `EntityStore` 枚举 + [`Self::summarize`]（适合
-///   mcp / skill 等纯目录实体）；model / session / agent 等有独立数据源的
-///   重写 `list_items` 接管
-/// - 写盘 / 删除由 [`entity_write`] / [`entity_delete`] 基于 `category` +
-///   `manifest_file` 完成（manifest 写盘 + 幂等删除）；无实体目录的实体
-///   （`category() == None`，如 session）返回 `NotImplemented`
-#[async_trait]
-pub trait EntityProvider: Send + Sync {
-    /// 实体类型常量（ENTITY_MODEL / ENTITY_MCP / ...）
-    fn kind(&self) -> &'static str;
-
-    /// EntityStore 分类；None = 非实体目录存储（session 走 SessionStore）
-    fn category(&self) -> Option<&'static str> {
-        None
-    }
-
-    /// manifest 文件名（`Some(category)` 时用于默认 get / manifest 写盘）
-    fn manifest_file(&self) -> Option<&'static str> {
-        None
-    }
-
-    /// 列出全部实体摘要。默认：EntityStore 枚举 + [`Self::summarize`]。
-    async fn list_items(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<Vec<EntitySummary>, PluginError> {
-        let (Some(category), Some(manifest)) = (self.category(), self.manifest_file()) else {
-            return Err(PluginError::NotImplemented);
-        };
-        let store = storage_service(ctx)?;
-        let es = store.entity_store();
-        let ids = es
-            .list_entities(category)
-            .await
-            .map_err(|e| PluginError::InternalError(format!("列出实体失败: {e}")))?;
-
-        let mut items = Vec::with_capacity(ids.len());
-        for id in ids {
-            // manifest 读失败不阻塞列表（损坏条目降级为占位摘要）
-            let body = es.read_entity(category, &id, manifest).await.ok();
-            items.push(self.summarize(ctx, &id, body.as_deref()).await);
-        }
-        Ok(items)
-    }
-
-    /// 单项摘要钩子。`manifest` 为该实体主文件内容（读取失败时为 None）。
-    async fn summarize(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-        _manifest: Option<&str>,
-    ) -> EntitySummary {
-        EntitySummary::new(self.kind(), id, id)
-    }
-
-    /// manifest 写盘前校验/规范化钩子（默认原样放行）。
-    ///
-    /// 返回值是实际写盘的规范化 manifest（model 用它填充 id/name 缺省值）。
-    async fn validate_manifest(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-        manifest: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
-        Ok(manifest.clone())
-    }
-
-    /// VDFS `write { create }` 的**最小落盘 manifest**。
-    ///
-    /// 两条链路的「新建」语义不同，故由插件自持：
-    /// - **实体机制**：前端渲染完整表单，字段齐全后一次 manifest 写入（`vdfs/write`）；
-    /// - **VDFS**：`vdfs/write { create: true }` 只带路径名，语义是「先落一份可用的
-    ///   默认配置，用户随后在详情里完善」。
-    ///
-    /// 默认实现只给 `id` / `name`（对无必填字段的插件即够）。有必填字段的插件
-    /// 覆盖本方法，给出自己的最小合法配置——**否则该类型在 VDFS 侧无法新建**。
-    fn new_entity_manifest(&self, id: &str, title: &str) -> serde_json::Value {
-        serde_json::json!({ "id": id, "name": title })
-    }
-
-    /// 整包导出钩子：一个实体 → zip 字节（base64）。
-    ///
-    /// VDFS 侧表现为节点动作 `export`（`VFDS_ACTION_EXPORT`），与「新建类型
-    /// `zip`」的导入互为逆向。默认实现走 [`entity_export_zip`]（EntityStore 型
-    /// 打包整个实体目录）；目录自管的 provider（agent bundle）重写本方法。
-    async fn export_zip(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-    ) -> Result<EntityExport, PluginError> {
-        entity_export_zip(self, ctx, id).await
-    }
-
-    /// 整包导入钩子：zip 字节 → 一个实体。
-    ///
-    /// VDFS 侧表现为一个「新建类型」：`ext = zip` 且 `source = file`
-    /// （见 `VFDS_NEW_SOURCE_FILE`）——使用方给出文件选择器，适配器把字节送到这里。
-    /// 因此**导入不是第二条协议**，它就是「新建」的一种内容来源。
-    ///
-    /// 默认实现走 [`entity_import_zip`]（EntityStore 型通用解包，整目录覆盖）。
-    /// 目录自管的 provider（如 agent bundle，id 取自包内 manifest）重写本方法。
-    ///
-    /// `name` 是**建议名**（来自新建地址），可忽略——id 归 provider 自持。
-    async fn import_zip(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-        name: &str,
-        zip: &[u8],
-    ) -> Result<EntityUploadResponse, PluginError> {
-        entity_import_zip(self, ctx, name, zip).await
-    }
-
-    /// 写盘成功后的内存同步钩子（mcp 回灌 config，model 同步注册表，agent 失效缓存）
-    async fn on_uploaded(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    /// 删除单个实体（磁盘/存储删除 + 由 [`entity_delete`] 回调 [`Self::on_deleted`]）。
-    ///
-    /// 默认实现：EntityStore 目录删除（`category()` 提供分类，磁盘已无目录时
-    /// 幂等告警）。**非实体存储型 provider（如 session 走 SessionStore）重写
-    /// 本方法**——删除能力由注册表 `capabilities.mutable` 声明，与本钩子解耦。
-    async fn delete_item(&self, ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
-        let Some(category) = self.category() else {
-            return Err(PluginError::NotImplemented);
-        };
-        let store = storage_service(ctx)?;
-        let es = store.entity_store();
-        match es.delete_entity(category, id).await {
-            Ok(()) => {}
-            Err(EntityStoreError::NotFound { .. }) => {
-                crate::plugin_warn!(self.kind(), "磁盘上已无实体 {} 目录，仅清理内存", id);
-            }
-            Err(e) => {
-                return Err(PluginError::InternalError(format!("删除实体失败: {e}")));
-            }
-        }
-        Ok(())
-    }
-
-    /// 删除成功后的内存/缓存清理钩子
-    async fn on_deleted(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    /// 连接测试/实时状态钩子（默认 NotImplemented）。
-    ///
-    /// 连接失败建议映射为 `Ok(status: "failed")` 而非 Err，
-    /// 以便 VDFS 侧统一呈现（失败是**结果**，不是协议错误）。
-    async fn test_status(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-    ) -> Result<EntityStatusResponse, PluginError> {
-        Err(PluginError::NotImplemented)
-    }
-
-    /// 详情页定义钩子（definition-driven detail）。
-    ///
-    /// 返回 `None` 表示该实体无定义（前端回退注册 editor / 通用面板）；
-    /// `id` 为空表示请求「新建态」定义。交互不复杂的详情页据此由前端
-    /// 通用渲染器（DetailForm）动态生成，见 `schemas::entities::DetailDefinition`。
-    async fn detail_definition(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-    ) -> Option<crate::symbio_core::schemas::entities::DetailDefinition> {
-        None
-    }
-
-    // ==================== 容器子实体（container 语义） ====================
-
-    /// 列出容器条目内部的子实体（`vdfs/list` 携带 `container` 时调用）。
-    ///
-    /// `sub_kind` 为 `None` 时返回全部子类型（条目 `kind` 字段供前端分类，
-    /// 供容器页做类别计数）；`container` 为容器条目 id（如 agent bundle id）。
-    /// `parent` 仅树视图子类别（`view = "tree"`）使用：返回该父路径的下一层
-    /// 子节点（懒加载，`None` = 根层）；列表视图子类别忽略此参数。
-    async fn list_container_items(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _sub_kind: Option<&str>,
-        _container: &str,
-        _parent: Option<&str>,
-    ) -> Result<Vec<EntitySummary>, PluginError> {
-        Err(PluginError::NotImplemented)
-    }
-
-    /// 读取容器子实体详情；文件内容置于 `extra.content`。
-    async fn get_container_item(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-        _container: &str,
-    ) -> Result<EntitySummary, PluginError> {
-        Err(PluginError::NotImplemented)
-    }
-
-    /// 写入（创建/覆盖）容器子实体；`id` 为容器内相对路径。
-    async fn put_container_item(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-        _content: &str,
-        _container: &str,
-    ) -> Result<EntityUploadResponse, PluginError> {
-        Err(PluginError::NotImplemented)
-    }
-
-    /// 删除容器子实体。
-    async fn delete_container_item(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-        _container: &str,
-    ) -> Result<EntityUploadResponse, PluginError> {
-        Err(PluginError::NotImplemented)
-    }
-
-    /// 订阅容器子实体数据变更（树视图等实时场景；前端视图挂载时调用，
-    /// 卸载时经 unwatch_container 配对取消）。变更经粗粒度 `data` 事件下发
-    /// （kind = provider kind、sessionId = 容器 id）。默认 no-op：无实时
-    /// 能力的 provider 直接成功。
-    async fn watch_container(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _sub_kind: Option<&str>,
-        _container: &str,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    /// 取消容器子实体数据变更订阅（与 watch_container 配对；默认 no-op）。
-    async fn unwatch_container(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _sub_kind: Option<&str>,
-        _container: &str,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
-}
-
-// ==================== 容器子实体声明 ====================
-
-/// 容器子实体声明（编译期静态版，下发给前端时转为
-/// [`ContainerKindInfo`](crate::symbio_core::schemas::entities::ContainerKindInfo)）
-#[derive(Debug, Clone, Copy)]
-pub struct ContainerKindSpec {
-    /// 子实体类型（如 `prompt` / `skill` / `mcp`）
-    pub kind: &'static str,
-    /// 展示标签
-    pub label: &'static str,
-    /// 语义说明（前端新建/编辑表单提示文本）
-    pub description: &'static str,
-    /// 新建路径模板（`<name>` 占位符），如 `prompts/<name>.md`；空 = 不可用户创建
-    pub path_hint: &'static str,
-    /// 新建内容模板
-    pub default_content: &'static str,
-    /// 中栏展示形态：`"list"`（缺省）= 列表；`"tree"` = 树视图（懒加载，
-    /// 条目携带 parent 层级）
-    pub view: &'static str,
-}
-
-/// `view` 字段的"列表"取值（ContainerKindSpec 显式声明，下发时缺省省略）
-pub const VIEW_LIST: &str = "list";
-/// `view` 字段的"树视图"取值
-pub const VIEW_TREE: &str = "tree";
-
-/// agent bundle 内部托管的三类文件级子实体（布局与 OAB 装配规则严格一致，
-/// 模板中的 frontmatter priority 约定与装配缺省值对应）。
-pub static AGENT_CONTAINER_KINDS: &[ContainerKindSpec] = &[
-    ContainerKindSpec {
-        kind: "prompt",
-        label: "提示词",
-        description: "Markdown 片段，无条件追加进系统提示词；可用 YAML frontmatter 设置 priority（缺省 10，小者优先）。",
-        path_hint: "prompts/<name>.md",
-        default_content: "---\npriority: 10\n---\n\n在此撰写常驻系统提示词（人格 / 全局规则 / 工作流）…",
-        view: VIEW_LIST,
-    },
-    ContainerKindSpec {
-        kind: "skill",
-        label: "技能",
-        description: "skills/<name>/SKILL.md，正文作为提示词片段；frontmatter priority 缺省 50。",
-        path_hint: "skills/<name>/SKILL.md",
-        default_content: "---\npriority: 50\n---\n\n# 技能名称\n\n描述该技能的适用场景、输入输出与执行步骤…",
-        view: VIEW_LIST,
-    },
-    ContainerKindSpec {
-        kind: "mcp",
-        label: "MCP",
-        description: "MCP server 配置（YAML），是工具的唯一来源，原样透传给宿主 MCP 客户端。",
-        path_hint: "mcps/<name>.yaml",
-        default_content: "# MCP server 配置（YAML，原样透传给宿主 MCP 客户端）\ncommand: \"\"\nargs: []\nenv: {}",
-        view: VIEW_LIST,
-    },
-];
-
-/// session 的容器子实体声明：条目（会话）内部托管**子会话**。
-///
-/// 会话（session）的容器子实体声明：条目（会话）内部托管两类子实体。
-///
-/// - **子会话**（tree 机制之外的列表视图）：由父会话派生（系统管理，
-///   非用户新建），`path_hint` 为空 = 不可用户创建，仅支持查看与删除；
-///   存储由文件后端路由到父会话目录的 `sessions/` 子目录（归属声明
-///   `metadata.parent_session_id`），删除父会话级联删除子会话。
-/// - **目录树**（tree 机制的一个场景实现）：会话工作目录的层级浏览，
-///   `view = "tree"` + 懒加载（`parent` 请求参数逐层下发），只读。
-///   目录树只是 tree 机制下的一个 provider 场景——机制本身只定义
-///   「层级 + 懒加载 + 选择」，不含任何文件系统语义。
-pub static SESSION_CONTAINER_KINDS: &[ContainerKindSpec] = &[
-    ContainerKindSpec {
-        kind: ENTITY_SESSION,
-        label: "子会话",
-        description: "由该会话派生的子会话；随父会话级联删除。",
-        path_hint: "",
-        default_content: "",
-        view: VIEW_LIST,
-    },
-    ContainerKindSpec {
-        kind: "dir",
-        label: "目录树",
-        description: "会话工作目录的层级浏览（文件可查看/编辑，实时刷新）。",
-        path_hint: "",
-        default_content: "",
-        view: VIEW_TREE,
-    },
-];
-
-/// 某 provider kind 的容器子实体声明（空 = 条目不是容器）。
-pub fn container_kinds_for(kind: &str) -> &'static [ContainerKindSpec] {
-    match kind {
-        ENTITY_AGENT => AGENT_CONTAINER_KINDS,
-        ENTITY_SESSION => SESSION_CONTAINER_KINDS,
-        _ => &[],
-    }
-}
-
-// ==================== provider 注册表 ====================
-
-/// 实体类型（provider）注册清单 —— 挂载点能力的**单一真相源**。
-///
-/// 语义上是"后端主动注册有哪些实体 provider"：新插件只需实现 [`EntityProvider`]
-/// 并在此登记一条 [`EntityProviderInfo`]，VDFS 侧就自动多一个挂载点
-/// （`.vdfs/<kind>`）——导航标签 / 顺序 / 可新建类型 / 是否支持整包导入
-/// 全部由此派生，前端零改动（`entities/*` 协议已于 S11 下线）。
-///
-/// - `supports_upload`：能否以「最小 manifest」新建（一次 `vdfs/write { create }`）；
-/// - `supports_import`：能否**整包导入**（zip）。目录自管的类型（agent bundle）
-///   同样可为 true——此时由 provider 重写 [`EntityProvider::import_zip`]，
-///   而不必先有实体目录。
-///
-/// [`EntityProvider::import_zip`]: EntityProvider::import_zip
-#[derive(Debug, Clone, Copy)]
-pub struct EntityProviderInfo {
-    /// 实体类型（kind，同时是挂载名）
-    pub kind: &'static str,
-    pub order: i32,
-    /// 展示标签
-    pub label: &'static str,
-    pub supports_upload: bool,
-    /// 是否支持整包导入（zip）
-    pub supports_import: bool,
-    /// 容器子实体声明（空 = 条目不是容器）
-    pub container_kinds: &'static [ContainerKindSpec],
-}
-
-/// 导航元数据（展示标签 + 顺序）—— 注册表是**单一真相源**。
-///
-/// 供不经过 [`EntityVdfsAdapter`] 的挂载点（session / setting 等自持 `VdfsProvider`
-/// 的插件）复用，使 `.vdfs` 左栏的顺序与标签和实体注册表**恒等**；注册表调整顺序
-/// 时各处导航自动跟随，无需改常量。未登记的 kind 返回 `None`。
-///
-/// [`EntityVdfsAdapter`]: crate::symbio_core::vdfs::EntityVdfsAdapter
-pub fn nav_meta_of(kind: &str) -> Option<(&'static str, i32)> {
-    provider_registry()
-        .iter()
-        .find(|p| p.kind == kind)
-        .map(|p| (p.label, p.order))
-}
-
-/// 全部已注册实体 provider（编译期收起当前六类，顺序即展示顺序）
-///
-/// 顺序：会话 / 模型 / 智能体 / 技能 / MCP / 设置。顺序**只在注册表里登记**
-/// （`order` 字段）——VDFS 挂载点与左栏导航都由此派生，故无需、也不再支持
-/// 用配置项覆盖（原 `symbio.provider_order` 已随 `entities/providers` 下线）。
-pub fn provider_registry() -> &'static [EntityProviderInfo] {
-    const REG: &[EntityProviderInfo] = &[
-        EntityProviderInfo {
-            kind: ENTITY_SESSION,
-            order: 1,
-            label: "会话",
-            // session 走 SessionStore（非 EntityStore）：zip/manifest 上传不适用；
-            // 创建走前端专属 editor 引导，删除经重写的 delete_item 钩子。
-            // 条目是容器：内部托管子会话（SESSION_CONTAINER_KINDS，path_hint 空
-            // = 不可用户创建，仅查看/删除）
-            supports_upload: false,
-            supports_import: false,
-            container_kinds: SESSION_CONTAINER_KINDS,
-        },
-        EntityProviderInfo {
-            kind: ENTITY_MODEL,
-            order: 2,
-            label: "模型",
-            supports_upload: true,
-            supports_import: false,
-            container_kinds: &[],
-        },
-        EntityProviderInfo {
-            kind: ENTITY_AGENT,
-            order: 3,
-            label: "智能体",
-            // agent 只能整包导入（bundle 是整目录能力包，没有「先建空壳」的形态）；
-            // 导入由 provider 重写的 import_zip 走到 BundleStore
-            supports_upload: false,
-            supports_import: true,
-            // agent 条目（OAB bundle）是容器：内部托管 prompt / skill / mcp 三类文件级子实体
-            container_kinds: AGENT_CONTAINER_KINDS,
-        },
-        EntityProviderInfo {
-            kind: ENTITY_SKILL,
-            order: 4,
-            label: "技能",
-            supports_upload: true,
-            supports_import: true,
-            container_kinds: &[],
-        },
-        EntityProviderInfo {
-            kind: ENTITY_MCP,
-            order: 5,
-            label: "MCP",
-            supports_upload: true,
-            supports_import: true,
-            container_kinds: &[],
-        },
-        EntityProviderInfo {
-            kind: ENTITY_SETTING,
-            order: 6,
-            label: "设置",
-            // 设置分区清单固定，不可新建/删除；
-            // 各分区保存由前端 editor 自持通道完成（config/set / appearance store）
-            supports_upload: false,
-            supports_import: false,
-            container_kinds: &[],
-        },
-    ];
-    REG
-}
-
-/// 写入（创建或覆盖）一个**顶层实体**——实体机制与 VDFS 共用的唯一实现。
-///
-/// 职责链：`validate_manifest` 规范化 → 写盘 → `on_uploaded` 内存同步 →
-/// 发布实体生命周期事件。
-///
-/// manifest 缺 `id`（或为空串）时以实体 id 补全；已有 id 原样保留。
-///
-/// 「实体 id 由路径承载」是写入路径的不变量：编辑链路前端只回纯字段值
-/// （`DetailForm` option 绑定语义，id 不在表单字段里），由本函数统一补齐。
-fn ensure_manifest_id(manifest: &serde_json::Value, id: &str) -> serde_json::Value {
+/// 这是写入路径的不变量：编辑链路前端只回纯字段值（`DetailForm` option 绑定语义，
+/// id 不在表单字段里）。插件若在写盘前把 manifest 反序列化到 `id` 必填的结构体
+/// （model / mcp），必须先调用本函数，否则会报「missing field `id`」。
+pub fn ensure_manifest_id(manifest: &serde_json::Value, id: &str) -> serde_json::Value {
     let mut m = manifest.clone();
     let missing = m
         .get("id")
@@ -531,25 +57,56 @@ fn ensure_manifest_id(manifest: &serde_json::Value, id: &str) -> serde_json::Val
     m
 }
 
-/// 实体机制的 manifest 写入唯一入口：`VdfsProvider::write` 与各 provider
-/// 的默认写盘钩子都走这里，故两条链路行为完全一致（同一份校验、同一份
-/// 写盘、同一个事件）。
-pub async fn entity_write<P: EntityProvider + ?Sized>(
-    provider: &P,
+/// 列出某分类下的全部资源 id（`EntityStore` 型）
+///
+/// 列表实现的起点：插件拿到 id 列表后自行读取主文件并产出摘要（摘要口径是
+/// 各插件的差异部分，不在此处）。
+pub async fn list_entity_ids(
     ctx: &Arc<dyn InvokeRequest>,
+    category: &str,
+) -> Result<Vec<String>, PluginError> {
+    let store = storage_service(ctx)?;
+    store
+        .entity_store()
+        .list_entities(category)
+        .await
+        .map_err(|e| PluginError::InternalError(format!("列出实体失败: {e}")))
+}
+
+/// 读单个资源的主文件内容（`EntityStore` 型）。
+///
+/// 列表摘要、详情读取都以它为输入；文件不存在即 `NotFound`。
+pub async fn read_manifest(
+    ctx: &Arc<dyn InvokeRequest>,
+    category: &str,
+    manifest_file: &str,
+    id: &str,
+) -> Result<String, PluginError> {
+    let store = storage_service(ctx)?;
+    store
+        .entity_store()
+        .read_entity(category, id, manifest_file)
+        .await
+        .map_err(|e| PluginError::NotFound(format!("未找到实体「{id}」：{e}")))
+}
+
+/// 写入（创建或覆盖）一个 `EntityStore` 型资源的 **JSON** manifest —— 唯一实现。
+///
+/// 主文件不是 JSON 的资源（skill 的 `SKILL.md` 是 Markdown）改用
+/// [`write_entity_text`]——本函数会做 `to_string_pretty`，把它用在纯文本上
+/// 会写出带引号与转义的文件（详见该函数的说明）。
+///
+/// 职责链：补全 id → 写盘 → 发布实体生命周期事件。**校验与内存同步不在本函数内**：
+/// manifest 的规范化由调用方（插件）先完成，内存同步（原 `on_uploaded`）由调用方在
+/// 本函数返回后自行完成——那是各插件的差异部分。
+pub async fn write_entity_manifest(
+    ctx: &Arc<dyn InvokeRequest>,
+    kind: &str,
+    category: &str,
+    manifest_file: &str,
     id: &str,
     manifest: &serde_json::Value,
 ) -> Result<EntityUploadResponse, PluginError> {
-    let Some(category) = provider.category() else {
-        // 无实体目录的实体（如 session / agent bundle）：协议槽位，走各自通道
-        return Err(PluginError::NotImplemented);
-    };
-    let Some(manifest_file) = provider.manifest_file() else {
-        return Err(PluginError::ValidationError(
-            "该实体不支持表单上传（manifest）".to_string(),
-        ));
-    };
-
     let store = storage_service(ctx)?;
     let es = store.entity_store();
     let existed = es
@@ -557,85 +114,128 @@ pub async fn entity_write<P: EntityProvider + ?Sized>(
         .await
         .map_err(|e| PluginError::InternalError(format!("查询实体失败: {e}")))?;
 
-    // 实体 id 由路径段承载：VDFS 编辑链路（form 的 option 绑定）下发的 manifest
-    // 只含纯字段值、不含 `id`，而部分 provider 的 `validate_manifest` 会把 manifest
-    // 直接反序列化到 `id` 必填的配置结构体（model / mcp），缺 id 即报
-    // 「missing field `id`」。写入前以路径 id 兜底补全——新建链路
-    // （`new_entity_manifest`）与历史 upload 链路本就带 id，此处对它们是 no-op。
     let manifest = ensure_manifest_id(manifest, id);
-    let normalized = provider.validate_manifest(ctx, id, &manifest).await?;
-    let content = serde_json::to_string_pretty(&normalized)?;
+    let content = serde_json::to_string_pretty(&manifest)?;
     es.write_entity(category, id, manifest_file, &content)
         .await
         .map_err(|e| PluginError::InternalError(format!("写入实体失败: {e}")))?;
 
-    provider.on_uploaded(ctx, id).await?;
-
     // 实体生命周期变更通知：前端据此即时同步清单（created 乐观插入 / updated 重拉）。
     // 事件总线不可用不应影响写入本身的结果。写入实体均为顶层（parent_id = None）。
     crate::symbio_core::event_bus::EventBus::publish_entity_changed(
-        provider.kind(),
+        kind,
         id,
         if existed { "updated" } else { "created" },
         None,
         None,
     )
     .await;
+    // VDFS 侧变更：订阅了该挂载点的消费者（前端当前目录）据此即时刷新
+    crate::symbio_core::vdfs::host::notify_change(
+        kind,
+        id,
+        if existed { "updated" } else { "created" },
+    );
 
     Ok(EntityUploadResponse {
-        kind: provider.kind().to_string(),
+        kind: kind.to_string(),
         id: id.to_string(),
         created: !existed,
     })
 }
 
-/// 删除一个**顶层实体**——实体机制与 VDFS 共用的唯一实现。
+/// 写入（创建或覆盖）一个 `EntityStore` 型资源的**纯文本**主文件。
 ///
-/// 职责链：`delete_item` 落盘删除 → `on_deleted` 内存/缓存清理 → 发布生命周期事件。
-pub async fn entity_delete<P: EntityProvider + ?Sized>(
-    provider: &P,
+/// 与 [`write_entity_manifest`] 唯一的区别是形态：本函数把 `text` **原样**落盘，
+/// 不做 JSON 序列化。主文件不是 JSON 的资源（skill 的 `SKILL.md` 是 Markdown）
+/// 必须走这里——若把它当 JSON 值写入，`to_string_pretty` 会加上引号并把换行
+/// 转义成字面 `\n`，读回来 `strip_prefix("---\n")` 必然失败：文件被静默写坏，
+/// 而写盘本身报成功。
+///
+/// 生命周期事件与 VDFS 变更广播与 [`write_entity_manifest`] 完全一致
+/// （两条写路径对消费方无差别）。
+pub async fn write_entity_text(
     ctx: &Arc<dyn InvokeRequest>,
+    kind: &str,
+    category: &str,
+    manifest_file: &str,
     id: &str,
+    text: &str,
 ) -> Result<EntityUploadResponse, PluginError> {
-    provider.delete_item(ctx, id).await?;
-    provider.on_deleted(ctx, id).await?;
+    let store = storage_service(ctx)?;
+    let es = store.entity_store();
+    let existed = es
+        .entity_exists(category, id)
+        .await
+        .map_err(|e| PluginError::InternalError(format!("查询实体失败: {e}")))?;
+
+    es.write_entity(category, id, manifest_file, text)
+        .await
+        .map_err(|e| PluginError::InternalError(format!("写入实体失败: {e}")))?;
 
     crate::symbio_core::event_bus::EventBus::publish_entity_changed(
-        provider.kind(),
+        kind,
         id,
-        "deleted",
+        if existed { "updated" } else { "created" },
         None,
         None,
     )
     .await;
+    crate::symbio_core::vdfs::host::notify_change(
+        kind,
+        id,
+        if existed { "updated" } else { "created" },
+    );
 
     Ok(EntityUploadResponse {
-        kind: provider.kind().to_string(),
+        kind: kind.to_string(),
         id: id.to_string(),
-        created: false,
+        created: !existed,
     })
 }
 
-/// 导入整包（zip）—— 实体机制与 VDFS 共用的唯一实现。
+/// 删除一个 `EntityStore` 型资源目录 —— **唯一实现**。
 ///
-/// 与 [`entity_write`] 同构：`category` 落盘 → `on_uploaded` 内存同步 → 发布
-/// 实体生命周期事件。区别只在内容来源与粒度：
-///
-/// - 内容是一个**完整目录**（zip），不是单份 manifest；
-/// - 同一 id 再次导入即**整目录覆盖**（导入即替换，无合并语义）。
-///
-/// `name` 是建议名（来自新建地址）；目录自管的 provider 不调用本函数，
-/// 而是重写 [`EntityProvider::import_zip`]。
-pub async fn entity_import_zip<P: EntityProvider + ?Sized>(
-    provider: &P,
+/// 磁盘已无目录时幂等告警（不报错），随后发布生命周期事件。
+pub async fn delete_entity_dir(
     ctx: &Arc<dyn InvokeRequest>,
+    kind: &str,
+    category: &str,
+    id: &str,
+) -> Result<(), PluginError> {
+    let store = storage_service(ctx)?;
+    let es = store.entity_store();
+    match es.delete_entity(category, id).await {
+        Ok(()) => {}
+        Err(EntityStoreError::NotFound { .. }) => {
+            crate::plugin_warn!(kind, "磁盘上已无实体 {} 目录，仅清理内存", id);
+        }
+        Err(e) => {
+            return Err(PluginError::InternalError(format!("删除实体失败: {e}")));
+        }
+    }
+    crate::symbio_core::event_bus::EventBus::publish_entity_changed(
+        kind, id, "deleted", None, None,
+    )
+    .await;
+    crate::symbio_core::vdfs::host::notify_change(kind, id, "deleted");
+    Ok(())
+}
+
+/// 导入整包（zip）到 `EntityStore` 型资源 —— **唯一实现**。
+///
+/// 与 [`write_entity_manifest`] 同构：整目录落盘 → 发布生命周期事件。区别只在
+/// 内容来源与粒度：内容是一个**完整目录**（zip），同一 id 再次导入即**整目录覆盖**
+/// （导入即替换，无合并语义）。
+///
+/// `name` 是建议名（来自新建地址）；目录自管的资源（agent bundle）不调用本函数。
+pub async fn import_zip_to_entity(
+    ctx: &Arc<dyn InvokeRequest>,
+    kind: &str,
+    category: &str,
     name: &str,
     zip: &[u8],
 ) -> Result<EntityUploadResponse, PluginError> {
-    let Some(category) = provider.category() else {
-        // 无实体目录的实体（如 session / agent bundle）：走各自的实现
-        return Err(PluginError::NotImplemented);
-    };
     let name = name.trim();
     if name.is_empty() {
         return Err(PluginError::ValidationError(
@@ -651,37 +251,36 @@ pub async fn entity_import_zip<P: EntityProvider + ?Sized>(
 
     extract_zip_to_entity(es, category, name, zip).await?;
 
-    provider.on_uploaded(ctx, name).await?;
-
     crate::symbio_core::event_bus::EventBus::publish_entity_changed(
-        provider.kind(),
+        kind,
         name,
         if existed { "updated" } else { "created" },
         None,
         None,
     )
     .await;
+    crate::symbio_core::vdfs::host::notify_change(
+        kind,
+        name,
+        if existed { "updated" } else { "created" },
+    );
 
     Ok(EntityUploadResponse {
-        kind: provider.kind().to_string(),
+        kind: kind.to_string(),
         id: name.to_string(),
         created: !existed,
     })
 }
 
-/// 导出整包 —— 实体机制与 VDFS 共用的唯一实现（与导入互为逆向）。
+/// 导出整包 —— **唯一实现**（与导入互为逆向）。
 ///
-/// 把 `EntityStore` 的 `<category>/<id>/` 整个目录打包成 zip（包内顶层目录
-/// 名为 id，与导入端的 `strip_common_root` 恰好配对，可原样导回）。
-pub async fn entity_export_zip<P: EntityProvider + ?Sized>(
-    provider: &P,
+/// 把 `EntityStore` 的 `<category>/<id>/` 整个目录打包成 zip（包内顶层目录名为 id，
+/// 与导入端的 `strip_common_root` 恰好配对，可原样导回）。
+pub async fn export_entity_zip(
     ctx: &Arc<dyn InvokeRequest>,
+    category: &str,
     id: &str,
 ) -> Result<EntityExport, PluginError> {
-    let Some(category) = provider.category() else {
-        // 无实体目录的实体（如 session / agent bundle）：走各自的实现
-        return Err(PluginError::NotImplemented);
-    };
     let id = id.trim();
     if id.is_empty() {
         return Err(PluginError::ValidationError("导出目标不能为空".to_string()));
@@ -893,8 +492,8 @@ mod tests {
     use super::*;
 
     /// VDFS 编辑链路下发的 manifest 只含纯字段值（无 id）——写入前必须能以
-    /// 路径 id 补全，否则 model / mcp 的 `validate_manifest` 反序列化直接报
-    /// 「missing field `id`」（编辑已有 Provider 保存失败即为该症状）。
+    /// 路径 id 补全，否则 model / mcp 的校验反序列化直接报「missing field `id`」
+    /// （编辑已有 Provider 保存失败即为该症状）。
     #[test]
     fn ensure_manifest_id_fills_missing_or_empty() {
         let no_id = serde_json::json!({ "name": "x", "provider": "openai" });
@@ -922,38 +521,6 @@ mod tests {
             ensure_manifest_id(&has_id, "p1").get("id"),
             Some(&serde_json::json!("orig"))
         );
-    }
-
-    /// 注册表顺序 = 导航顺序（会话 / 模型 / 智能体 / 技能 / MCP / 设置）
-    #[test]
-    fn registry_order_defines_nav_order() {
-        let kinds: Vec<&str> = provider_registry().iter().map(|p| p.kind).collect();
-        assert_eq!(
-            kinds,
-            vec![
-                ENTITY_SESSION,
-                ENTITY_MODEL,
-                ENTITY_AGENT,
-                ENTITY_SKILL,
-                ENTITY_MCP,
-                ENTITY_SETTING,
-            ]
-        );
-        assert!(
-            provider_registry()
-                .windows(2)
-                .all(|w| w[0].order <= w[1].order),
-            "order 应单调不减"
-        );
-    }
-
-    /// 导航元数据（标签 / 顺序）来自注册表——单一真相源
-    #[test]
-    fn nav_meta_comes_from_registry() {
-        for p in provider_registry() {
-            assert_eq!(nav_meta_of(p.kind), Some((p.label, p.order)));
-        }
-        assert_eq!(nav_meta_of("nope"), None, "未登记的 kind 返回 None");
     }
 
     // ==================== zip 整包解包 ====================
@@ -1062,44 +629,15 @@ mod tests {
         assert_eq!(body, b"# demo".to_vec());
     }
 
-    /// 默认 `export_zip`：无实体目录的 provider（category = None）→ NotImplemented
+    /// 导出：空 id 直接校验失败（不产出空包）
     #[tokio::test]
-    async fn export_zip_requires_entity_dir() {
-        struct BundleLike;
-        #[async_trait]
-        impl EntityProvider for BundleLike {
-            fn kind(&self) -> &'static str {
-                ENTITY_AGENT
-            }
-        }
+    async fn export_entity_zip_rejects_empty_id() {
         let ctx: Arc<dyn InvokeRequest> =
             Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
-        let err = BundleLike.export_zip(&ctx, "demo").await.unwrap_err();
+        let err = export_entity_zip(&ctx, "skill", "  ").await.unwrap_err();
         assert!(
-            matches!(err, PluginError::NotImplemented),
-            "目录自管的 provider 应自己重写 export_zip：{err:?}"
-        );
-    }
-
-    /// 默认 `import_zip`：无实体目录的 provider（category = None）→ NotImplemented
-    #[tokio::test]
-    async fn import_zip_requires_entity_dir() {
-        struct BundleLike;
-        #[async_trait]
-        impl EntityProvider for BundleLike {
-            fn kind(&self) -> &'static str {
-                ENTITY_AGENT
-            }
-        }
-        let ctx: Arc<dyn InvokeRequest> =
-            Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
-        let err = BundleLike
-            .import_zip(&ctx, "demo", b"whatever")
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(err, PluginError::NotImplemented),
-            "目录自管的 provider 应自己重写 import_zip：{err:?}"
+            matches!(err, PluginError::ValidationError(_)),
+            "空导出目标应报校验错误：{err:?}"
         );
     }
 }

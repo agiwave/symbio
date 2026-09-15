@@ -20,6 +20,7 @@
 use crate::plugins::agent::core::spec::assembly::{assemble_bundle, Assembly};
 use crate::plugins::agent::host::capability::BundleIdentityCapability;
 use crate::plugins::agent::host::store::{BundleRecord, BundleStore};
+use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{
     report_error, Capability, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
     PluginMeta, PluginPayload, AGENT_ID, PATH, PLUGIN_AGENT, SESSION_ID,
@@ -235,16 +236,12 @@ impl Plugin for AgentPlugin {
             return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
         };
 
-        // ── VDFS 挂载点：agent 以**只读**挂载 ──
-        // bundle 由 BundleStore 自管目录（工作区级 + 全局级双层），不满足
-        // `entity_write` 的 EntityStore 前提，故适配器据 `writable()` 自动降级为
-        // 只读：列表与详情照常可用，新建仍走实体页的 zip 上传流程。
+        // ── VDFS 挂载点（`.vdfs/agent`）──
+        // 本插件自身就是 provider：bundle 由 BundleStore 自管目录（工作区级 +
+        // 全局级双层），列 / 读 / 写（整包导入）/ 删 / 导出 直接由
+        // `impl VdfsProvider for AgentPlugin` 承载（见 `super::entities`）。
         {
-            let me: Arc<dyn crate::symbio_core::entities::EntityProvider> = self.clone();
-            let vdfs_provider = Arc::new(crate::symbio_core::vdfs::EntityVdfsAdapter::new(
-                crate::symbio_core::entities::ENTITY_AGENT,
-                me,
-            ));
+            let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
             tool_visitor
                 .register_vdfs_provider(PLUGIN_AGENT, vdfs_provider)
                 .await;

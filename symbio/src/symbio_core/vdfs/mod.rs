@@ -6,7 +6,8 @@
 //!
 //! ```text
 //! symbio_core/vdfs_provider.rs   纯接口：VdfsProvider trait + 域类型
-//! symbio_core/vdfs/host.rs       symbio 桥：上下文注入 + 错误翻译
+//! symbio_core/vdfs/host.rs       symbio 桥：上下文注入 + 错误翻译 + 变更广播
+//! symbio_core/entities.rs        存储原语：写盘 / 删除 / 导入 / 导出（自由函数）
 //! plugins/vdfs/protocol.rs       线路信封：vdfs/* 请求响应 + 协议路径常量
 //! plugins/vdfs/host.rs           访问层：取「.vdfs 服务者」+ 翻译操作 + 树遍历 + 事件投递
 //! plugins/composite/vdfs.rs      拓扑：包含子目录列表的 provider（子目录 = 子插件名）
@@ -43,14 +44,12 @@
 //! 3. **路径是唯一地址**：provider 只见自己子树内的相对路径（`""` = 自身根），
 //!    绝不见外层目录前缀；展示地址由宿主门面（plugins/vdfs/fs.rs）统一映射。
 
-pub mod entity_adapter;
 pub mod host;
 
 // ---- 纯接口（宿主无关，定义在 `symbio_core::vdfs_provider`）----
 pub use super::vdfs_provider::*;
 
 // ---- symbio 桥 ----
-pub use host::{from_plugin_error, host_ctx, vdfs_context};
-
-// ---- 实体 → VDFS 适配器（「任何 EntityProvider 自动成为一个挂载点」）----
-pub use entity_adapter::EntityVdfsAdapter;
+pub use host::{
+    from_plugin_error, host_ctx, notify_change, unwatch_changes, vdfs_context, watch_changes,
+};

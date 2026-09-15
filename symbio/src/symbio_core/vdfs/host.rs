@@ -1,10 +1,12 @@
 //! VDFS 宿主桥（symbio 侧）—— 把纯接口接到 symbio 类型上
 //!
-//! ⚠️ 这是 core 中**唯一**依赖宿主的部分。它只做两件事：
+//! ⚠️ 这是 core 中**唯一**依赖宿主的部分。它只做三件事：
 //!
 //! 1. **上下文注入**：`Arc<dyn InvokeRequest>` ↔ [`VdfsContext`]
 //!    （provider 经 `ctx.require::<Arc<dyn InvokeRequest>>()` 取回宿主句柄）；
-//! 2. **错误翻译**：[`VdfsError`] ↔ [`PluginError`] 双向映射。
+//! 2. **错误翻译**：[`VdfsError`] ↔ [`PluginError`] 双向映射；
+//! 3. **变更广播**：挂载点写 / 删后 [`notify_change`]，`watch` 经
+//!    [`watch_changes`] 订阅后转发——前端因此无需轮询（**非**轮询实现）。
 //!
 //! ## 为什么只有这些
 //!
@@ -19,9 +21,13 @@
 //!
 //! [`VdfsProvider`]: crate::symbio_core::vdfs_provider::VdfsProvider
 
-use crate::symbio_core::vdfs_provider::{VdfsContext, VdfsError, VdfsResult, VdfsValidationError};
+use crate::symbio_core::vdfs_provider::{
+    VdfsChange, VdfsChangeSink, VdfsContext, VdfsError, VdfsResult, VdfsValidationError,
+};
 use crate::symbio_core::{InvokeRequest, PluginError};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::broadcast;
 
 /// [`VdfsError`] → [`PluginError`]
 ///
@@ -68,6 +74,70 @@ pub fn vdfs_context(ctx: &Arc<dyn InvokeRequest>) -> VdfsContext {
 /// 从 [`VdfsContext`] 取回 symbio 请求上下文
 pub fn host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn InvokeRequest>> {
     ctx.require::<Arc<dyn InvokeRequest>>().cloned()
+}
+
+// ==================== 挂载点变更广播 ====================
+
+/// 每个挂载点类型一份变更广播：写 / 删后 [`notify_change`]，`watch` 订阅后转发。
+///
+/// 按**类型**（`kind`）而非 provider 实例持有——同一类型的 provider 可能被多次
+/// 构造（每次 `traverse` 一份），共享同一广播才能让订阅与投递天然配对。
+struct ChangeHub {
+    tx: broadcast::Sender<VdfsChange>,
+    /// 已订阅路径 → 转发任务（`unwatch` 时取消）
+    tasks: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+}
+
+fn hub_of(kind: &str) -> Arc<ChangeHub> {
+    static HUBS: OnceLock<Mutex<HashMap<String, Arc<ChangeHub>>>> = OnceLock::new();
+    let hubs = HUBS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut m = hubs.lock().unwrap();
+    if let Some(h) = m.get(kind) {
+        return h.clone();
+    }
+    let (tx, _) = broadcast::channel(64);
+    let hub = Arc::new(ChangeHub {
+        tx,
+        tasks: Mutex::new(HashMap::new()),
+    });
+    m.insert(kind.to_string(), hub.clone());
+    hub
+}
+
+/// 广播一次变更（订阅方据此刷新，**非轮询**）。无订阅者时投递失败属正常。
+///
+/// 由写 / 删的**唯一实现**（`symbio_core::entities`）与目录自管型 provider
+/// （agent bundle）调用。
+pub fn notify_change(kind: &str, path: &str, change: &str) {
+    drop(hub_of(kind).tx.send(VdfsChange::new(path, change)));
+}
+
+/// 订阅某挂载点的变更（`VdfsProvider::watch` 的实现体）；检测到变化时调用 `sink`。
+pub async fn watch_changes(kind: &str, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
+    let hub = hub_of(kind);
+    let mut rx = hub.tx.subscribe();
+    let handle = tokio::spawn(async move {
+        while let Ok(change) = rx.recv().await {
+            sink(change);
+        }
+    });
+    // 同路径重复订阅：覆盖并取消旧任务（机制保证 watch/unwatch 严格配对，
+    // 此处仅作防御）
+    let old = hub.tasks.lock().unwrap().insert(path.to_string(), handle);
+    if let Some(old) = old {
+        old.abort();
+    }
+    Ok(())
+}
+
+/// 取消订阅（`VdfsProvider::unwatch` 的实现体；与 [`watch_changes`] 严格配对）
+pub async fn unwatch_changes(kind: &str, path: &str) -> VdfsResult<()> {
+    let hub = hub_of(kind);
+    let handle = hub.tasks.lock().unwrap().remove(path);
+    if let Some(handle) = handle {
+        handle.abort();
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -305,6 +305,7 @@ source = file 的类型（整包导入）：名称来自文件名
 | **S12 整包导入** | `VdfsNewType.source`（`file`）+ `EntityProvider::import_zip` 钩子；适配器的二进制 `write` 承接导入（agent 走 `BundleStore::import`），agent 补上 `delete_item` | S5/S11 后丢失的 zip 导入回归，且**不新增协议操作** |
 | **S12 清理** | 注册表去掉 `prefix` / `provider_name` / `compact_list` / `status_indicator` 与 `EntityCapabilities`（改由 `supports_import` 表达）；删协议时代的请求/响应与 `get_item`；`agent/bundle/*` 只留 `bundle/export` | 历史冗余与被替换代码清空 |
 | **S13 整包导出** | `VFDS_ACTION_EXPORT` 节点动作 + `EntityProvider::export_zip` 钩子（默认 `zip_dir`、agent 走 `BundleStore::export`）；结果按「文件载荷」（`filename` + `b64`）回传；`agent/bundle/*` 整个下线 | 导入/导出在 VDFS 内闭环；`agent` 插件零自有路由 |
+| **S16 收敛终局（废除实体机制）** | 删 `EntityProvider` trait / `provider_registry()` / `EntityVdfsAdapter`；`model` / `skill` / `agent` 各补一份 `impl VdfsProvider`（与已有的 `session` / `setting` / `mcp` 同构）；`entities.rs` 降为存储原语自由函数 | 后端只剩 VDFS 一套机制；**前端零改动**——挂载名与节点形状不变 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -610,6 +611,27 @@ source = file 的类型（整包导入）：名称来自文件名
     urlencode 数据地址）；两者在 `VdfsView` 一处换算。
   - **首页与内部管理页零差别**：同一个控件、同一份数据逻辑，唯一区别是
     绑定的数据地址（`.vdfs` vs `.vdfs/session/<id>` / `.vdfs/agent/<id>`）。
+
+- **S16 收敛终局（废除实体机制，各插件直连 `VdfsProvider`）**（**已完成**）：
+  S4 的适配器是**过渡装置**——它让「先有实体机制、再搬上 VDFS」两件事并行推进，
+  代价是把每类资源的差异挤进一张 20 钩子的通用接口，再由 1500 行的适配器翻译。
+  收敛期结束后整层删除：
+
+  | 删除 | 取代者 |
+  | --- | --- |
+  | `EntityProvider` trait（20 钩子） | 各插件的 `impl VdfsProvider` |
+  | `provider_registry()` / `EntityProviderInfo` | 各 provider 的 `label()` / `order()` / `icon()` / `root_new_types()` |
+  | `EntityVdfsAdapter`（1504 行） | 无——插件直连，不需要适配器 |
+  | `nav_meta_of()` | 各 provider 自持字面量 |
+
+  - `model` / `skill` / `agent` 三个插件本次补上直连实现（`session` / `setting` /
+    `mcp` 此前已直连）。**挂载名与节点形状完全不变**，故前端零改动。
+  - `symbio_core/entities.rs` 降为**存储原语自由函数**（写盘 / 删除 / 导入 / 导出），
+    没有 trait、没有注册表。
+  - 变更广播从适配器实例提到 `vdfs/host.rs`（`notify_change` / `watch_changes` /
+    `unwatch_changes`），**按 kind 全局持有**——同一 provider 每次 `traverse` 都会新构造，
+    按实例持有会让订阅与投递配不上对。
+  - **不变量**：`vdfs_provider.rs` 未因本次收敛做任何修改（它是核心机制）。
 
 ---
 

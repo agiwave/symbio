@@ -18,6 +18,34 @@
 
 ***
 
+## 2026-09-15: 废除实体提供者机制（各插件直连 VDFS）+ 修复 SKILL.md 保存即损坏
+
+**VDFS 收敛终局**：删除 `EntityProvider` trait（20 个钩子）、`provider_registry()` 注册表与
+`EntityVdfsAdapter`（1504 行）。每个资源插件**直接实现 `VdfsProvider`**，用现有的
+`list` / `stat` / `read` / `write` / `delete` / `action` / `watch` 表达自身语义；
+`vdfs_provider.rs` 未做任何修改。跨插件共享的只剩 `symbio_core/entities.rs` 的
+**存储原语自由函数**（写盘 / 删除 / 导入 / 导出，无 trait 约束）。
+
+- **对外无变化**：挂载名（`.vdfs/model` / `.vdfs/skill` / `.vdfs/agent` 等）、节点形状、
+  `ext` / `schema` / 访问位全部保持原样，前端零改动。
+- **本次补上直连实现**：`model` / `skill` / `agent`（`session` / `setting` / `mcp` 此前已直连）。
+- **实时能力不丢失**：适配器的变更广播提到 `vdfs/host.rs`（`notify_change` / `watch_changes` /
+  `unwatch_changes`），**按 kind 全局持有**——同一 provider 每次 `traverse` 都会新构造，
+  按实例持有会让订阅与投递配不上对。
+- **修复：SKILL.md 保存即损坏**。表单保存链路把 Markdown 当 JSON 值写入，落盘内容变成
+  `"---\nname: ...\n"`（外层引号 + 换行被转义成字面两字符），而读取端 `parse_skill_md`
+  以 `strip_prefix("---\n")` 起手 ⇒ 必然失败：**保存报成功、文件却是坏的**，下次加载解析不出
+  frontmatter，详情表单也读不到字段值。新增纯文本写盘原语 `entities::write_entity_text`
+  （Markdown 主文件专用；`write_entity_manifest` 专用于 JSON 主文件），并以「写进去的必须能被
+  读回来」回归测试钉住。zip 整包导入路径不受影响。
+- **已删除的失效代码**：`EntityStatusResponse`、`ENTITY_STATUS_CONNECTED` /
+  `ENTITY_STATUS_FAILED`（随 `test_status` 钩子一起失去用途）。
+- **文档**：`design/entity-provider-mechanism.md` 归档（原路径留废止 stub 指向 `vdfs.md` §13.4）；
+  `vdfs.md` §13.4 / `DECISIONS.md` ADR-010 / `vdfs-frontend.md` S16 同步；新增
+  `scripts/doc-link-audit.mjs`（站内相对链接审计，默认只报告、`--strict` 才拦截）。
+- **验收**：`cargo check --lib --tests` 0 error / 0 warning；`cargo clippy --workspace --all-targets`
+  零告警；`cargo test --workspace` **464 passed / 0 failed**；`dead-code-audit` 0 文件 / 0 行。
+
 ## 2026-09-13: Session 插件机制收敛（配置契约单一真源 + 会话/骨架化实现去重 + 存储后端补齐）
 
 对 session 插件做了一轮机制审计并据其落地（取证记录见 `docs/architecture/session-mechanism-audit.md`，

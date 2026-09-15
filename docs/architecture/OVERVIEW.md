@@ -71,7 +71,7 @@ graph TD
 | `turn.rs`                                                                 | 单轮执行机器与流式类型（`execute_post_with_abort` / `parse_sse_stream` / `ToolCallInfo` / emit 辅助） |
 | `capability.rs`                                                           | `Capability` / `CapabilityVisitor` 能力系统                                               |
 | `capability_error.rs`                                                     | 能力收集期错误通道（写侧=任意 traverse 插件，读侧=session 编排方）                                     |
-| `entities.rs`                                                             | 实体提供者框架：`EntityProvider` trait + 注册表 + 写盘/删除/导入/导出公共流程                    |
+| `entities.rs`                                                             | 存储原语（自由函数，无 trait）：写盘 / 删除 / 导入 / 导出 + zip / base64 工具                  |
 | `tools.rs`                                                                | `DefaultToolVisitor` 默认能力管理器                                                          |
 | `schemas/`                                                                | 跨端数据结构 (Request/Response)，Rust 端定义                                                    |
 | `logger.rs`                                                               | 日志系统初始化                                                                               |

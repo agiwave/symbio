@@ -438,45 +438,6 @@ fn gateway_detail_definition() -> DetailDefinition {
     )
 }
 
-#[async_trait::async_trait]
-impl crate::symbio_core::entities::EntityProvider for SettingPlugin {
-    fn kind(&self) -> &'static str {
-        crate::symbio_core::entities::ENTITY_SETTING
-    }
-
-    /// 设置分区为固定清单（非 EntityStore 实体目录）：
-    /// 每个分区一项，extra 携带 config_type 供前端按"扩展名"分发 editor。
-    async fn list_items(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<Vec<crate::symbio_core::entities::EntitySummary>, PluginError> {
-        Ok(SETTING_SECTIONS
-            .iter()
-            .map(|s| {
-                let mut it = crate::symbio_core::entities::EntitySummary::new(
-                    crate::symbio_core::entities::ENTITY_SETTING,
-                    s.id,
-                    s.label,
-                );
-                if let serde_json::Value::Object(ref mut m) = it.extra {
-                    let _ = m.insert("config_type".to_string(), serde_json::json!(s.id));
-                }
-                it
-            })
-            .collect())
-    }
-
-    /// 分区详情定义：session/local/web 下发表单定义（前端 DetailForm 渲染）；
-    /// appearance/about 返回 None（保留注册 editor：前端 store 即时生效 / 信息展示）。
-    async fn detail_definition(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-    ) -> Option<DetailDefinition> {
-        section_definition(id)
-    }
-}
-
 // ==================== VDFS 挂载点（/setting） ====================
 //
 // 设置模块是 VDFS 的**首个原生 provider**，示范要点五：
@@ -677,10 +638,9 @@ impl SettingPlugin {
 #[async_trait::async_trait]
 impl VdfsProvider for SettingPlugin {
     fn label(&self) -> Option<&str> {
-        // 标签 / 顺序取自实体注册表（单一真相源），使 `.vdfs` 左栏与实体页恒等
+        // 标签 / 顺序由本 provider 自持（实体注册表已随 VDFS 收敛下线）
         Some(
-            crate::symbio_core::entities::nav_meta_of(crate::symbio_core::entities::ENTITY_SETTING)
-                .map_or("设置", |(label, _)| label),
+            "设置",
         )
     }
 
@@ -689,8 +649,7 @@ impl VdfsProvider for SettingPlugin {
     }
 
     fn order(&self) -> i32 {
-        crate::symbio_core::entities::nav_meta_of(crate::symbio_core::entities::ENTITY_SETTING)
-            .map_or(6, |(_, order)| order)
+        6
     }
 
     fn icon(&self) -> Option<&str> {
@@ -784,35 +743,30 @@ impl VdfsProvider for SettingPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::entities::EntityProvider;
     use crate::symbio_core::entities::ENTITY_SETTING;
-    use crate::symbio_core::SimpleRequest;
 
     #[tokio::test]
-    async fn list_items_returns_sections_in_declared_order() {
+    async fn list_returns_sections_in_declared_order() {
         let plugin = SettingPlugin::default();
-        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
-        let items = plugin.list_items(&ctx).await.unwrap();
+        let items = plugin.list(&vctx(), "").await.unwrap();
 
-        // 固定清单、按声明顺序（前端据此展示，不做二次排序）
-        let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        // 固定清单、按声明顺序（前端据此展示，不做二次排序）。
+        // provider 返回的节点自带 `name`，全路径由分发层补挂载名后合成。
+        let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(
-            ids,
+            names,
             vec!["appearance", "session", "local", "web", "gateway", "about"]
         );
 
-        // kind 标记为 setting，名称正确
+        // kind 标记为 setting；`name` 是地址段、`title` 是人读标签
         let first = &items[0];
         assert_eq!(first.kind, ENTITY_SETTING);
-        assert_eq!(first.name, "外观");
+        assert_eq!(first.name, "appearance");
+        assert_eq!(first.title, "外观");
 
-        // 每项的 extra.config_type 即 editor"扩展名"（与 id 一致）
-        for it in &items {
-            assert_eq!(
-                it.extra.get("config_type").and_then(Value::as_str),
-                Some(it.id.as_str())
-            );
-        }
+        // 无 schema 的分区（appearance / about）：ext 即分区 id —— 前端按
+        // `ext → 渲染器` 的纯 UI 映射回退到专属 editor
+        assert_eq!(items[0].ext.as_deref(), Some("appearance"));
     }
 
     /// 回归：config 绑定分区的 load/save 路径必须命中目标插件的标准
@@ -852,8 +806,7 @@ mod tests {
         // （S4 起不再是 provider 自定的 60）
         assert_eq!(
             p.order(),
-            crate::symbio_core::entities::nav_meta_of(crate::symbio_core::entities::ENTITY_SETTING)
-                .map_or(6, |(_, order)| order)
+            6
         );
         assert_eq!(p.icon(), Some("settings"));
         assert_eq!(p.root_access().flags(), "l");

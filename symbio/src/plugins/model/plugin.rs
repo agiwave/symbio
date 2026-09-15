@@ -369,13 +369,45 @@ impl Default for ModelPlugin {
     }
 }
 
-// ==================== 实体提供者钩子 (EntityProvider) ====================
+// ==================== VDFS 挂载点（`.vdfs/model`） ====================
 //
-// 公共流程（manifest 写盘 / 幂等删除）由 `entities::entity_write` /
-// `entity_delete` 承载，这里只实现 model 的差异化钩子；`entities/*` 协议
-// 已随 S11 下线，本 impl 只被 `EntityVdfsAdapter` 调用。
+// 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
+// 写 / 删 / 动作的语义都在这里表达（不再经实体层与适配器）。
+// 跨插件共享的存储原语（写盘 / 删除）走 `symbio_core::entities` 的自由函数——
+// 它们只做 `EntityStore` 的落盘；校验、内存注册表同步是 model 的差异部分。
+//
 // 列表项 `extra` 展开 `config`（完整 ModelProviderConfig）与 `is_default`，
 // 使 chat 侧（`listModelProviders`）与 VDFS 详情共用同一读取入口。
+
+use crate::symbio_core::entities::{self, EntitySummary, ENTITY_MODEL};
+use crate::symbio_core::providers::{categories, manifests};
+use crate::symbio_core::vdfs::{from_plugin_error, host_ctx, unwatch_changes, watch_changes};
+use crate::symbio_core::vdfs_provider::{
+    VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
+    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_TEST, VFDS_EXT_FORM,
+};
+
+const LABEL: &str = "模型";
+
+/// 路径末段 → 条目 id（去掉 `.<kind>` 呈现扩展名）
+fn id_of(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    base.strip_suffix(&format!(".{ENTITY_MODEL}"))
+        .unwrap_or(base)
+        .to_string()
+}
+
+/// 摘要 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
+fn node_of(item: &EntitySummary) -> VdfsNode {
+    let mut n = VdfsNode::file(&item.id, item.name.clone(), VdfsAccess::READ_WRITE);
+    n.kind = ENTITY_MODEL.to_string();
+    n.ext = Some(VFDS_EXT_FORM.to_string());
+    n.schema = serde_json::to_value(super::detail::model_detail_definition()).ok();
+    n.status = item.status.clone();
+    n.description = item.description.clone().or_else(|| item.summary.clone());
+    n.updated_at = item.updated_at;
+    n
+}
 
 /// 单个 Provider 的摘要 `extra`。
 ///
@@ -396,107 +428,48 @@ fn model_summary_extra(p: &ModelProviderConfig, is_default: bool) -> Map<String,
     m
 }
 
-#[async_trait]
-impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
-    fn kind(&self) -> &'static str {
-        crate::symbio_core::entities::ENTITY_MODEL
-    }
-
-    fn category(&self) -> Option<&'static str> {
-        Some(crate::symbio_core::providers::categories::MODEL)
-    }
-
-    fn manifest_file(&self) -> Option<&'static str> {
-        Some(crate::symbio_core::providers::manifests::PROVIDER)
-    }
-
-    /// 详情页定义：Model 表单由后端下发（预设联动/动态候选/折叠分区）
-    async fn detail_definition(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        _id: &str,
-    ) -> Option<crate::symbio_core::schemas::entities::DetailDefinition> {
-        Some(super::detail::model_detail_definition())
-    }
-
-    /// 单项摘要（`summary_of` 用它产出节点；详情 `read` 也经它取 `extra.config`）。
+impl ModelPlugin {
+    /// 内存注册表里的一条配置 → 摘要。
     ///
-    /// **必须重写**：默认 `summarize` 不读 `manifest`，会丢掉 `config`，导致详情页
-    /// `read` 拿到空 `extra`、表单回退成「新建 Provider」空表单。
-    async fn summarize(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-        manifest: Option<&str>,
-    ) -> crate::symbio_core::entities::EntitySummary {
-        let Some(raw) = manifest.and_then(|c| serde_json::from_str::<ModelProviderConfig>(c).ok())
-        else {
-            return crate::symbio_core::entities::EntitySummary::new(
-                crate::symbio_core::entities::ENTITY_MODEL,
-                id,
-                id,
-            );
-        };
-        let mut it = crate::symbio_core::entities::EntitySummary::new(
-            crate::symbio_core::entities::ENTITY_MODEL,
-            &raw.id,
-            raw.name.clone(),
-        );
-        it.status = if raw.enabled {
+    /// 详情 `read` 与列表 `list` 必须产出同一份 `extra`——尤其是完整 `config`——
+    /// 否则详情读不到配置、表单回退成「新建 Provider」空表单。
+    async fn summary_of_config(&self, p: &ModelProviderConfig) -> EntitySummary {
+        let mut it = EntitySummary::new(ENTITY_MODEL, &p.id, p.name.clone());
+        it.status = if p.enabled {
             "active".to_string()
         } else {
             "disabled".to_string()
         };
-        it.description = Some(raw.model.clone());
+        it.description = Some(p.model.clone());
         let is_default = {
             let providers = self.providers.read().await;
-            providers.default_provider_id.as_deref() == Some(raw.id.as_str())
+            providers.default_provider_id.as_deref() == Some(p.id.as_str())
         };
-        if let serde_json::Value::Object(ref mut m) = it.extra {
-            m.extend(model_summary_extra(&raw, is_default));
+        if let Value::Object(ref mut m) = it.extra {
+            m.extend(model_summary_extra(p, is_default));
         }
         it
     }
 
-    /// 列表来自内存注册表（启动时镜像磁盘）
-    async fn list_items(
+    /// 读盘 → 摘要（`stat` / `read` / `delete` 的存在性校验都走这里）
+    async fn summary_of(
         &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-    ) -> Result<Vec<crate::symbio_core::entities::EntitySummary>, PluginError> {
-        let providers = self.providers.read().await;
-        Ok(providers
-            .providers
-            .values()
-            .map(|p| {
-                let mut it = crate::symbio_core::entities::EntitySummary::new(
-                    crate::symbio_core::entities::ENTITY_MODEL,
-                    &p.id,
-                    p.name.clone(),
-                );
-                it.status = if p.enabled {
-                    "active".to_string()
-                } else {
-                    "disabled".to_string()
-                };
-                it.description = Some(p.model.clone());
-                let is_default = providers.default_provider_id.as_deref() == Some(p.id.as_str());
-                if let serde_json::Value::Object(ref mut m) = it.extra {
-                    m.extend(model_summary_extra(p, is_default));
-                }
-                it
-            })
-            .collect::<Vec<_>>())
+        host: &Arc<dyn InvokeRequest>,
+        id: &str,
+    ) -> VdfsResult<EntitySummary> {
+        let content = entities::read_manifest(host, categories::MODEL, manifests::PROVIDER, id)
+            .await
+            .map_err(from_plugin_error)?;
+        Ok(
+            match serde_json::from_str::<ModelProviderConfig>(&content).ok() {
+                Some(raw) => self.summary_of_config(&raw).await,
+                None => EntitySummary::new(ENTITY_MODEL, id, id),
+            },
+        )
     }
 
-    /// 表单上传的校验/规范化：填充 id/name 缺省值 + 连接校验
-    ///
-    /// 返回规范化后的 manifest（实际写盘内容）。
-    async fn validate_manifest(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-        manifest: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
+    /// 表单 manifest → 规范化配置（写盘前的校验：字段缺省补全 + 连接校验）
+    async fn validate_manifest(&self, id: &str, manifest: &Value) -> Result<Value, PluginError> {
         let mut provider: ModelProviderConfig = serde_json::from_value(manifest.clone())
             .map_err(|e| PluginError::ValidationError(format!("Provider 配置无效: {e}")))?;
         if provider.id.is_empty() {
@@ -527,7 +500,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
 
         let mut v =
             serde_json::to_value(&provider).map_err(|e| PluginError::ParseError(e.to_string()))?;
-        // 保留"设为默认"标记（写盘 + on_uploaded 读取；skip_validation 不落盘）
+        // 保留「设为默认」标记（写盘 + 内存同步时读取；skip_validation 不落盘）
         if manifest
             .get("is_default")
             .and_then(|b| b.as_bool())
@@ -541,7 +514,7 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
     /// VDFS 新建（`write { create }`）的最小配置：先落一份「可用的默认 Provider」，
     /// 用户随后在详情里填 key / 调模型。默认字段取预设首项——与新建表单「选中
     /// 第一个预设」的预填**同源**，两条链路创建出的初始配置因此一致。
-    fn new_entity_manifest(&self, id: &str, title: &str) -> Value {
+    fn new_manifest(&self, id: &str, title: &str) -> Value {
         let (provider, api_base, model, api_protocol) = super::detail::default_provider_fields();
         let mut cfg = ModelProviderConfig {
             id: id.to_string(),
@@ -562,38 +535,26 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
             serde_json::to_value(&cfg).unwrap_or_else(|_| json!({ "id": id, "name": title }));
         // 新建态用户尚未填写 key / base，跳过连接校验。
         // `validate_manifest` 消费该标记后**丢弃**（不落盘）。
-        if let serde_json::Value::Object(ref mut m) = v {
+        if let Value::Object(ref mut m) = v {
             let _ = m.insert("skip_validation".to_string(), Value::Bool(true));
         }
         v
     }
 
-    /// 写盘后同步内存注册表（读回磁盘内容 + 默认 provider 兜底 + 触发父级持久化）
-    async fn on_uploaded(&self, ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
-        let store = create_object::<dyn crate::symbio_core::providers::StorageService>(
-            "storage_service",
-            ctx.clone(),
-        )
-        .ok_or_else(|| PluginError::InternalError("storage_service 不可用".to_string()))?;
-        let es = store.entity_store();
-        let content = es
-            .read_entity(
-                crate::symbio_core::providers::categories::MODEL,
-                id,
-                crate::symbio_core::providers::manifests::PROVIDER,
-            )
+    /// 写盘后同步内存注册表（回读磁盘 + 默认 provider 兜底 + 触发父级持久化）
+    async fn on_uploaded(&self, host: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
+        let content = entities::read_manifest(host, categories::MODEL, manifests::PROVIDER, id)
             .await
             .map_err(|e| PluginError::InternalError(format!("回读 provider 失败: {e}")))?;
-        let raw: serde_json::Value = serde_json::from_str(&content)
+        let raw: Value = serde_json::from_str(&content)
             .map_err(|e| PluginError::ParseError(format!("回读 provider 解析失败: {e}")))?;
-        // "设为默认"标记（validate_manifest 保留、随 manifest 落盘）
+        // 「设为默认」标记（validate_manifest 保留、随 manifest 落盘）
         let is_default = raw
             .get("is_default")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let provider: ModelProviderConfig = serde_json::from_value(raw)
             .map_err(|e| PluginError::ParseError(format!("回读 provider 解析失败: {e}")))?;
-
         {
             let mut providers = self.providers.write().await;
             providers.providers.insert(id.to_string(), provider);
@@ -601,55 +562,222 @@ impl crate::symbio_core::entities::EntityProvider for ModelPlugin {
                 providers.default_provider_id = Some(id.to_string());
             }
         }
-        let _ = self.persist_to_parent(ctx).await;
+        let _ = self.persist_to_parent(host).await;
         Ok(())
     }
 
     /// 删除后清理内存注册表与默认 provider 指向
-    async fn on_deleted(&self, _ctx: &Arc<dyn InvokeRequest>, id: &str) -> Result<(), PluginError> {
+    async fn on_deleted(&self, id: &str) {
         let mut providers = self.providers.write().await;
         providers.providers.remove(id);
         if providers.default_provider_id.as_deref() == Some(id) {
             providers.default_provider_id = None;
         }
-        Ok(())
     }
 
-    /// 连接测试（复用 validate_provider），失败映射 Ok(failed)——结果由 `vdfs/action` 返回
-    async fn test_status(
-        &self,
-        _ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-    ) -> Result<crate::symbio_core::entities::EntityStatusResponse, PluginError> {
+    /// 连接测试（复用 `validate_provider`）：失败也返回 `Ok`，由 `message` 承载原因
+    async fn test_of(&self, id: &str) -> Result<(bool, String), PluginError> {
         let provider = {
             let providers = self.providers.read().await;
             providers.providers.get(id).cloned()
         }
         .ok_or_else(|| PluginError::NotFound(format!("未找到 Model Provider: {id}")))?;
-
         Ok(match Self::validate_provider(&provider).await {
-            None => crate::symbio_core::entities::EntityStatusResponse {
-                kind: crate::symbio_core::entities::ENTITY_MODEL.to_string(),
-                id: id.to_string(),
-                status: "connected".to_string(),
-                status_detail: Some(format!(
-                    "校验通过（{} / {}）",
-                    provider.provider, provider.model
-                )),
-            },
-            Some(e) => crate::symbio_core::entities::EntityStatusResponse {
-                kind: crate::symbio_core::entities::ENTITY_MODEL.to_string(),
-                id: id.to_string(),
-                status: "failed".to_string(),
-                status_detail: Some(e),
-            },
+            None => (
+                true,
+                format!("校验通过（{} / {}）", provider.provider, provider.model),
+            ),
+            Some(e) => (false, e),
         })
+    }
+}
+
+#[async_trait]
+impl VdfsProvider for ModelPlugin {
+    fn label(&self) -> Option<&str> {
+        Some(LABEL)
+    }
+
+    fn description(&self) -> Option<&str> {
+        Some("Model Provider 配置（每项一份 provider.json），是大模型接入的唯一来源。")
+    }
+
+    fn order(&self) -> i32 {
+        2
+    }
+
+    fn icon(&self) -> Option<&str> {
+        Some(ENTITY_MODEL)
+    }
+
+    /// 根下只能新建「模型」条目（model 不支持整包导入）
+    fn root_new_types(&self) -> Vec<VdfsNewType> {
+        vec![VdfsNewType::new(ENTITY_MODEL, LABEL).with_description(format!(
+            "新建{LABEL}（先落一份默认配置，随后在详情里完善）"
+        ))]
+    }
+
+    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+        if !path.is_empty() {
+            return Err(VdfsError::not_found(format!(
+                "{LABEL}是叶子资源，没有子项：{path}"
+            )));
+        }
+        // 列表来自内存注册表（启动时镜像磁盘）
+        let providers = self.providers.read().await;
+        let mut out = Vec::with_capacity(providers.providers.len());
+        for p in providers.providers.values() {
+            out.push(node_of(&self.summary_of_config(p).await));
+        }
+        Ok(out)
+    }
+
+    async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
+        if path.is_empty() {
+            // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
+            return Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST));
+        }
+        let host = host_ctx(ctx)?;
+        Ok(node_of(&self.summary_of(&host, &id_of(path)).await?))
+    }
+
+    async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
+        if path.is_empty() {
+            return Err(VdfsError::invalid(format!(
+                "该路径是目录，不可读取内容：{path}"
+            )));
+        }
+        let host = host_ctx(ctx)?;
+        let item = self.summary_of(&host, &id_of(path)).await?;
+        let value = item
+            .extra
+            .get("config")
+            .cloned()
+            .unwrap_or_else(|| item.extra.clone());
+        let text = serde_json::to_string_pretty(&value)
+            .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
+        Ok(VdfsContent::text("", text).with_mime("application/json"))
+    }
+
+    async fn write(
+        &self,
+        ctx: &VdfsContext,
+        path: &str,
+        content: &VdfsContent,
+    ) -> VdfsResult<VdfsWriteResponse> {
+        let host = host_ctx(ctx)?;
+        if path.is_empty() {
+            return Err(VdfsError::invalid(format!(
+                "{LABEL}不支持在挂载根上写入：{path}"
+            )));
+        }
+        if content.binary {
+            return Err(VdfsError::invalid(format!("{LABEL}不支持整包导入（zip）")));
+        }
+        let id = id_of(path);
+        let manifest = if content.create {
+            // 新建：使用方只给了路径名，最小配置由本插件自持
+            self.new_manifest(&id, &id)
+        } else {
+            serde_json::from_str::<Value>(content.as_text().unwrap_or_default())
+                .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
+        };
+        let normalized = self
+            .validate_manifest(&id, &manifest)
+            .await
+            .map_err(from_plugin_error)?;
+        let resp = entities::write_entity_manifest(
+            &host,
+            ENTITY_MODEL,
+            categories::MODEL,
+            manifests::PROVIDER,
+            &id,
+            &normalized,
+        )
+        .await
+        .map_err(from_plugin_error)?;
+        self.on_uploaded(&host, &id).await.map_err(from_plugin_error)?;
+        Ok(VdfsWriteResponse {
+            path: id,
+            created: resp.created,
+            etag: None,
+        })
+    }
+
+    async fn delete(&self, ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
+        if path.is_empty() {
+            return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
+        }
+        let host = host_ctx(ctx)?;
+        let id = id_of(path);
+        // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
+        self.summary_of(&host, &id).await?;
+        entities::delete_entity_dir(&host, ENTITY_MODEL, categories::MODEL, &id)
+            .await
+            .map_err(from_plugin_error)?;
+        self.on_deleted(&id).await;
+        Ok(())
+    }
+
+    async fn action(
+        &self,
+        ctx: &VdfsContext,
+        path: &str,
+        action: &str,
+        _payload: Option<&Value>,
+    ) -> VdfsResult<VdfsActionResult> {
+        match action {
+            VFDS_ACTION_TEST => {
+                if path.is_empty() {
+                    return Err(VdfsError::invalid(format!(
+                        "「测试连接」只对{LABEL}条目可用：{path}"
+                    )));
+                }
+                let host = host_ctx(ctx)?;
+                let id = id_of(path);
+                // 存在性校验：测试不存在的条目应报 NotFound 而非成功
+                self.summary_of(&host, &id).await?;
+                let (ok, detail) = self.test_of(&id).await.map_err(from_plugin_error)?;
+                Ok(VdfsActionResult {
+                    action: VFDS_ACTION_TEST.to_string(),
+                    ok,
+                    message: detail,
+                    data: None,
+                })
+            }
+            _ => Err(VdfsError::NotImplemented),
+        }
+    }
+
+    async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
+        watch_changes(ENTITY_MODEL, path, sink).await
+    }
+
+    async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
+        unwatch_changes(ENTITY_MODEL, path).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 路径末段才是 id：`.vdfs/model/<id>.model` 与裸 `<id>` 同解
+    #[test]
+    fn id_of_strips_presentation_extension() {
+        assert_eq!(id_of("openai-1"), "openai-1");
+        assert_eq!(id_of("openai-1.model"), "openai-1");
+        assert_eq!(id_of("a/b/openai-1.model"), "openai-1");
+    }
+
+    /// 新建的最小清单必须带 `skip_validation`：此时用户还没填 key / base，
+    /// 走连接校验必然失败（新建态不该被校验挡住）。
+    #[test]
+    fn new_manifest_skips_validation() {
+        let v = ModelPlugin::default().new_manifest("p1", "p1");
+        assert_eq!(v.get("id").and_then(|x| x.as_str()), Some("p1"));
+        assert_eq!(v.get("skip_validation").and_then(|x| x.as_bool()), Some(true));
+    }
 
     /// 回归：详情 `read` 经 `summarize` 必须产出 `extra.config`（完整配置）。
     /// 否则详情表单拿不到字段值、标题回退成「新建 Provider」空表单。
@@ -770,14 +898,9 @@ impl Plugin for ModelPlugin {
         }
 
         if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            // VDFS 挂载点：把本插件的实体能力适配为一份 VDFS 资源。
-            // 新增实体类型时 VDFS 侧零改动——适配器复用 list/read/write/delete
-            // 与注册表元数据（见 `symbio_core::vdfs::EntityVdfsAdapter`）。
-            let me: Arc<dyn crate::symbio_core::entities::EntityProvider> = self.clone();
-            let vdfs_provider = Arc::new(crate::symbio_core::vdfs::EntityVdfsAdapter::new(
-                crate::symbio_core::entities::ENTITY_MODEL,
-                me,
-            ));
+            // VDFS 挂载点：本插件自身就是 provider（`.vdfs/model`）——
+            // 列 / 读 / 写 / 删 / 动作直接由 `impl VdfsProvider for ModelPlugin` 承载
+            let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
             tool_visitor
                 .register_vdfs_provider(PLUGIN_MODEL, vdfs_provider)
                 .await;

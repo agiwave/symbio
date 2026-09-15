@@ -223,8 +223,9 @@ pub enum PluginPayloadWire {
 > （`vdfs/list|tree|stat|read|write|mkdir|delete|move|edit|search|watch|unwatch|action`，
 > 见 [design/vdfs.md](../design/vdfs.md)）。下表仅作历史说明。
 >
-> 机制本身（`EntityProvider` trait、注册表、写盘与删除的唯一实现）仍然是
-> 现行代码，只是**退为内部抽象**，由 `EntityVdfsAdapter` 调用——详见
+> 协议下线后，过渡期保留的 `EntityProvider` trait 与 `EntityVdfsAdapter`
+> 也已随 VDFS 收敛一并删除——各插件直接实现 `VdfsProvider`，`entities.rs`
+> 只留存储原语。详见 [design/vdfs.md](../design/vdfs.md) §13.4 与
 > [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md)。
 
 ### 路径约定（历史）

@@ -117,16 +117,6 @@ pub struct EntityExport {
     pub b64: String,
 }
 
-/// 实体状态（`vdfs/action { action: "test" }`）响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EntityStatusResponse {
-    pub kind: String,
-    pub id: String,
-    pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status_detail: Option<String>,
-}
-
 // ==================== 详情页定义（definition-driven detail） ====================
 //
 // 交互不复杂的详情页由后端下发**定义**、前端通用渲染器（DetailForm）动态生成，

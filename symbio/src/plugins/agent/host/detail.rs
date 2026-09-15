@@ -66,7 +66,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
         badges: vec![],
         actions: vec![
             // 「浏览内部」入口：bundle 内部（提示词 / 技能 / MCP）在 VDFS 上是
-            // 条目同名目录下的子类别（`EntityVdfsAdapter` 的容器寻址），
+            // 条目同名目录下的子类别（VDFS 容器寻址），
             // 由页面层 `enter(节点路径)` 进入——取代原容器实体页。
             DetailAction {
                 id: "open-container".into(),

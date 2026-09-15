@@ -47,7 +47,7 @@ impl SessionPlugin {
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
     ///
     /// 两个消费方：`invoke_clear`（旧 session/clear 路由）与
-    /// `EntityProvider::delete_item` 钩子（VDFS 删除与实体机制共用）。
+    /// `VdfsProvider::delete`（VDFS 删除与此共用同一份实现）。
     pub(crate) async fn delete_session_internal(
         &self,
         session_id: &str,

@@ -9,8 +9,10 @@
 > / `useEntityProviders.ts` / `components/entities/EntityTree.vue` / `EntityDetailPanel.vue`
 > / `services/entities.ts`）。
 >
-> **现行机制**见 [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md)
-> ——后端 `EntityProvider` 抽象（由 `EntityVdfsAdapter` 调用）才是仍在活跃的部分。
+> **现行机制**见 [design/vdfs.md](../design/vdfs.md) §13.4——各资源插件直接实现
+> `VdfsProvider`。（本文件原先指向的 `EntityProvider` 抽象与 `EntityVdfsAdapter`
+> 亦已于 2026-09-15 一并删除，见
+> [archive/entity-provider-mechanism.md](./entity-provider-mechanism.md)。）
 >
 > 本文件仅作**历史参考，不再维护**。文中出现的 `entities/*` 端点、
 > `/entities/:types?` 与 `/container/:kind/:id/entities` 路由、前端页面/组件名

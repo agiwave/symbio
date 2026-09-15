@@ -40,7 +40,7 @@
 
 资源型插件**不再提供实体操作路由**：其资源统一经 VDFS 寻址（`.vdfs/<插件名>/…`，
 操作 `vdfs/list|tree|stat|read|write|mkdir|delete|move|edit|search|watch|unwatch|action`）。
-后端 `EntityProvider` 抽象见 [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md)；
+后端侧各插件直接实现 `VdfsProvider`（见 [design/vdfs.md](../design/vdfs.md) §13.4）；
 下线经过见下文「通用：统一实体管理（`{plugin}/entities/*`）—— **已下线**」。
 
 ---
@@ -264,8 +264,8 @@ mcp_servers:
 | `{plugin}/entities/detail` | 列表节点自带 `schema` |
 | `agent/bundle/export` | `vdfs/action { action: "export" }`（S13） |
 
-`EntityProvider` trait 与 `provider_registry()` 仍是**现行内部机制**（由
-`vdfs::EntityVdfsAdapter` 适配成 `.vdfs` 子目录），只是不再有对外地址：
+各 `.vdfs` 子目录由对应插件的 `impl VdfsProvider` 直接提供（`EntityProvider`
+trait 与 `provider_registry()` 已随 VDFS 收敛删除），能力表不变：
 
 | kind | 地址 | 可新建 | 可整包导入 | 容器子实体 |
 |------|--------|--------|------------|------------|

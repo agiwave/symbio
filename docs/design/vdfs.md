@@ -653,9 +653,24 @@ for child in children {
 - 前端链路与工具链路构造**同一个 `UnifiedFs`**（虚拟层根同源、物理层同一块磁盘），
   消费**同一批注册的 provider**，不存在第二套实现。
 
-### 13.4 会话 / 模型 / 技能 / MCP / 智能体——EntityVdfsAdapter
+### 13.4 会话 / 模型 / 技能 / MCP / 智能体——各插件直连 `VdfsProvider`
 
-- 各实体插件不再各写一份 provider：`symbio_core/vdfs/entity_adapter.rs` 的
-  `EntityVdfsAdapter` 把**任意** `EntityProvider` 接成 VDFS 子目录（注册名 =
-  插件名）。新增一类实体 = 注册表多一项，VDFS 侧零改动。
+- **每个资源插件自己就是 provider**：`session` / `model` / `skill` / `mcp` /
+  `agent` / `setting` 各自有一份 `impl VdfsProvider`，注册名 = 插件名。
+  中间不再有 trait 与适配器——原 `EntityProvider` + `EntityVdfsAdapter`
+  两层已删除（理由见 [DECISIONS](../DECISIONS.md) ADR-010「收敛终局」）。
+- **跨插件共用的只剩存储原语**：`symbio_core::entities` 不再定义 trait，只留
+  一组自由函数承载 `EntityStore` 的落盘（`read_manifest` / `list_entity_ids` /
+  `write_entity_manifest` / `delete_entity_dir` / `import_zip_to_entity` /
+  `export_entity_zip`）。校验、摘要、内存同步、容器语义都是各插件的差异部分，
+  留在各自的 `impl` 里。
+- **目录自管的类型自己落盘**：agent bundle 走 `BundleStore`（工作区级 + 全局级
+  双层），直接用 `import` / `export` / `delete`，不经过 EntityStore 原语；
+  其容器子实体（提示词 / 技能 / MCP）以 `<bundle id>/<子类别标签>/<相对路径>`
+  寻址，子类别用**人读的标签**（`提示词` / `技能` / `MCP`）而非 kind 作路径段
+  ——与会话内部的「子会话 / 工作目录」同一口径。
+- **变更广播按类型全局持有**：`vdfs::host::notify_change` / `watch_changes` /
+  `unwatch_changes`。写 / 删的唯一实现与目录自管型 provider 都调 `notify_change`，
+  使订阅方无需轮询；按 `kind` 而非 provider 实例持有，是因为同一 provider 会被
+  多次构造（每次 `traverse` 一份），共享同一广播才能让订阅与投递天然配对。
 - 详见 [vdfs-frontend.md](vdfs-frontend.md) §7 的 S4 / S6 / S7 记录。

@@ -68,14 +68,15 @@ sequenceDiagram
 
 ## 通用：资源访问链路（`vdfs/*`，`.vdfs/<子目录>/…`）
 
-> `{plugin}/entities/*` 已于 S11 下线（协议），实体机制退为**内部抽象**：
-> 由 `vdfs::EntityVdfsAdapter` 把 `EntityProvider` 适配成 VDFS 子目录。
+> `{plugin}/entities/*` 已于 S11 下线（协议）；VDFS 收敛期结束后，
+> `EntityProvider` 抽象与 `EntityVdfsAdapter` 一并删除——**每个资源插件
+> 直接实现 `VdfsProvider`**，中间不再有 trait 与适配器。
 
 | # | 环节 | 代码位置 | 说明 |
 |---|------|---------|------|
 | 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 13 个操作：list / tree / stat / read / write / mkdir / delete / move / edit / search / watch / unwatch / action |
-| 2 | 子目录来源 | 各插件自持的 `VdfsProvider`（经 `EntityVdfsAdapter` 适配的实体，或原生 provider） | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
-| 3 | 机制详解 | [design/vdfs.md](../design/vdfs.md)、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范；内部实体机制见 [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md) |
+| 2 | 子目录来源 | 各插件自持的 `VdfsProvider`（资源插件直连，无中间适配层） | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
+| 3 | 机制详解 | [design/vdfs.md](../design/vdfs.md)、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范；落盘原语见 `symbio_core/entities.rs` |
 
 ## 全链路追踪
 
