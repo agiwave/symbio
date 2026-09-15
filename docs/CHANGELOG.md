@@ -18,6 +18,29 @@
 
 ***
 
+## 2026-09-15: 插件配置地址化，`CONFIG_GET`/`CONFIG_SET` 协议废弃
+
+插件配置过去是一条私有路由（`<插件>/config/get|set`），并由 `setting` 插件**代理 +
+硬编码映射** 4 个插件分区——于是同一份配置有两个地址（`.vdfs/setting/session` 与
+`session/config/get`），`setting` 必须认识每个插件名，字段定义与校验也寄居在它那里。
+
+- **配置 = 一个普通节点**：`<挂载根>/配置`（`ext = form`、`rw`、`schema` = 该插件
+  自己的详情定义）。读写用的就是 `vdfs/read` / `vdfs/write`，与任何其它资源同一条
+  链路——因此前端与 LLM 用同一种方式改配置。定义与校验**回归配置的拥有者**，
+  默认值从各自的 `Default` 读出（不再有第二份 schema 字面量）。
+- **落盘靠推送**：写配置者把自己的切片推给宿主（`save_config` 载荷
+  `ConfigSlice { plugin, config }`），`home` 按 `plugin_provider` 定位既有条目后
+  **逐键合并**再原子落盘，**不再反向拉取**任何插件的配置。切片里没有
+  `plugin_provider` 的插件（model / mcp）其配置**就是**它们的资源树，不另设配置文档。
+- **`setting` 瘦身为无状态 provider**（794 → 约 250 行）：只剩 `appearance` /
+  `about` 两个前端自持分区。**「设置」页不再聚合插件配置**——会话 / 本地 / 网络 /
+  开放接口的设置现在在各自的挂载点下（`.vdfs/<插件>/配置`），Telegram 首次获得
+  可编辑的配置入口。
+- **前端**：`DetailForm` 的 `config` 绑定与 `DetailDefinition.load_path/save_path`
+  删除（绑定模式只剩 upload / info / option）。
+
+***
+
 ## 2026-09-15: 会话存储由「trait + 三后端」收为一个具体类型
 
 `plugins/session/store` 原本是 `SessionStore` trait + `FileSessionStore` /
