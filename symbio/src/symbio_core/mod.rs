@@ -13,6 +13,7 @@ pub mod model_provider;
 pub mod option;
 mod paths;
 mod plugin;
+mod plugin_dir;
 pub mod providers;
 pub mod schemas;
 mod text;
@@ -41,6 +42,10 @@ pub use keys::*;
 pub use logger::*;
 pub use paths::*;
 pub use plugin::*;
+pub use plugin_dir::{
+    config_file_of, dir_from_ctx, dir_of, plugins_root, ConfigFile, PluginDir, KEY_NAME,
+    KEY_PROVIDER, PLUGINS_DIR, PLUGIN_FILE,
+};
 pub use text::{floor_char_boundary, truncate_bytes};
 pub use tools::DefaultToolVisitor;
 pub use transport::{

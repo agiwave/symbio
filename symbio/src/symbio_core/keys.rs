@@ -123,6 +123,51 @@ impl SymbioKey for ConfigKey {
 }
 pub const CONFIG: ConfigKey = ConfigKey;
 
+// 插件自身目录 Key（`PluginDir`）
+//
+// 容器构造子插件时把它挂到子上下文上——插件据此知道「我的目录在哪」，
+// 从而自己读写 `PLUGIN.yml`（父插件不再代管任何配置）。
+pub struct PluginDirKey;
+impl SymbioKey for PluginDirKey {
+    type Value = crate::symbio_core::PluginDir;
+    fn name(&self) -> &'static str {
+        "plugin_dir"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, v: &Self::Value) -> String {
+        v.dir().to_string_lossy().to_string()
+    }
+}
+pub const PLUGIN_DIR: PluginDirKey = PluginDirKey;
+
+/// 必需插件清单 Key —— **构造者**告诉容器「哪些插件即使没有目录也要补出来」
+///
+/// 容器是通用容器（可以嵌套另一个容器），因此它**不内置**任何插件清单：
+/// 清单是构造者的策略，经本键随构造一起传入。缺省（未传）= 空清单 = 纯扫描。
+pub struct RequiredPluginsKey;
+impl SymbioKey for RequiredPluginsKey {
+    type Value = Vec<String>;
+    fn name(&self) -> &'static str {
+        "required_plugins"
+    }
+    fn parse(&self, s: &str) -> Option<Self::Value> {
+        // 逗号分隔（与其它字符串键在请求头等字符串载体中的表示一致）
+        Some(
+            s.split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect(),
+        )
+    }
+    fn format(&self, v: &Self::Value) -> String {
+        v.join(",")
+    }
+}
+pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
+
 pub struct CapabilityVisitorKey;
 impl SymbioKey for CapabilityVisitorKey {
     type Value = Arc<dyn crate::symbio_core::CapabilityVisitor>;
