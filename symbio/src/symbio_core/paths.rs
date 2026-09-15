@@ -16,8 +16,6 @@
 //! 命名约定：`<PLUGIN>_<OPERATION>` 形式，全部大写下划线
 
 // ============ Session 插件 ============
-/// session/open — 创建/打开会话
-pub const SESSION_OPEN: &str = "session/open";
 /// session/chat — 会话对话（流式）
 pub const SESSION_CHAT: &str = "session/chat";
 
@@ -31,16 +29,6 @@ pub const SESSION_CHAT: &str = "session/chat";
 pub const AGENT_CHAT: &str = "agent/chat";
 /// agent/create — 创建新 Agent
 pub const AGENT_CREATE: &str = "agent/create";
-/// agent/get — 查询 Agent 详情
-pub const AGENT_GET: &str = "agent/get";
-/// agent/list — 列出所有 Agent
-pub const AGENT_LIST: &str = "agent/list";
-/// agent/delete — 删除 Agent
-pub const AGENT_DELETE: &str = "agent/delete";
-
-// ============ Model 插件 ============
-/// model/chat — 直接调 Model 协议
-pub const MODEL_CHAT: &str = "model/chat";
 
 // ============ Hook 插件 ============
 /// hook/fire — 触发命名 hook

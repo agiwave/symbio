@@ -45,7 +45,6 @@ pub const PLUGIN_LOCAL: &str = "local";
 pub const PLUGIN_HOOK: &str = "hook";
 /// VDFS 插件工厂（虚拟文件系统宿主）
 pub const PLUGIN_VDFS: &str = "vdfs";
-/// Explorer 插件工厂
 /// Event Bus 插件工厂（统一事件总线）
 pub const PLUGIN_EVENT_BUS: &str = "event_bus";
 
@@ -65,11 +64,6 @@ pub const CAPABILITY_AGENT_CREATE: &str = "agent_create";
 // 协议 id 属于插件内部实现细节，定义在 model 插件
 // （plugins/model/protocols/mod.rs）；core 不暴露 `MODEL_PROTOCOL_*` 常量，
 // 也不定义 `ModelProtocol` trait。
-
-// ============ Agent 存储后端 id ============
-
-/// 内存存储后端
-pub const AGENT_STORE_MEMORY: &str = "memory_storage";
 
 // ============ Embedding 服务 id ============
 

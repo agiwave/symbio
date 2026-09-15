@@ -20,7 +20,6 @@ const PENDING_EVENTS_CAP: usize = 64;
 
 /// 事件类型常量
 pub const KIND_SESSION: &str = "session";
-pub const KIND_EXPLORER: &str = "explorer";
 pub const KIND_SYSTEM: &str = "system";
 
 // 资源变更**不在本模块设频道**：一切资源的生命周期与状态变化都是 VDFS 变更，
