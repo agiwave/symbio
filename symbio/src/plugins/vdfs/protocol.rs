@@ -78,6 +78,15 @@ pub struct VdfsPathRequest {
     /// 删除目录时是否递归
     #[serde(default)]
     pub recursive: bool,
+    /// 有界列表：至多返回多少项（`None` = 全量，与加窗口之前完全一致）。
+    ///
+    /// 单位是**provider 自己定的**：会话清单按「会话条目」计，转写按**根节点**计
+    /// （一个 Turn 及其全部子孙算一个，因此实际返回条数可能多于 `limit`）。
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// 有界列表：游标（**地址**），返回它之前的一页（`None` = 最新的一页）。
+    #[serde(default)]
+    pub before: Option<String>,
 }
 
 /// 树状遍历请求

@@ -273,11 +273,25 @@ async fn list(
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
 
-    let mut items = root.list(vctx, &addr).await?;
+    // 有界列表：把窗口参数放进**调用级参数袋**再分发。
+    // 之所以用参数袋、而不是给 `VdfsProvider::list` 加参数，是为了让「不认识窗口」
+    // 的 provider **完全不受影响**——它们不取这两个键，行为与从前逐字节一致。
+    let vctx = {
+        let mut c = vctx.clone();
+        if let Some(limit) = req.limit {
+            c = c.with_param(VDFS_PARAM_LIMIT, limit);
+        }
+        if let Some(before) = req.before.as_deref().filter(|b| !b.is_empty()) {
+            c = c.with_param(VDFS_PARAM_BEFORE, before);
+        }
+        c
+    };
+
+    let mut items = root.list(&vctx, &addr).await?;
     fill_paths(&addr, &mut items);
 
     // 目录自身节点：provider 未实现 stat 时按目录形态兜底
-    let node = match root.stat(vctx, &addr).await {
+    let node = match root.stat(&vctx, &addr).await {
         Ok(mut n) => {
             if n.title.is_empty() {
                 n.title = n.name.clone();

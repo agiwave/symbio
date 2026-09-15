@@ -941,6 +941,17 @@ pub type VdfsParams = serde_json::Map<String, Value>;
 /// 在虚拟地址空间里保持不变。
 pub const VDFS_PARAM_WORKDIR: &str = "workdir";
 
+/// 参数键：有界列表的**条数上限**（`list`）。
+///
+/// 可选约定：provider 不认就当没传（全量），不认它的 provider 无需任何改动。
+pub const VDFS_PARAM_LIMIT: &str = "limit";
+
+/// 参数键：有界列表的**游标**——取该地址之前的一页（`list`）。
+///
+/// 游标是**地址**而不是页码：清单在两次请求之间会变（新增 / 删除 / 被顶到前面），
+/// 偏移量会重复或漏项，地址不会。
+pub const VDFS_PARAM_BEFORE: &str = "before";
+
 /// 不透明宿主上下文：VDFS 不假设宿主形态，宿主把运行时状态放进袋子里，
 /// provider 按需 `downcast` 取用。
 ///
