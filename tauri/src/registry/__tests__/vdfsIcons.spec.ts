@@ -32,8 +32,10 @@ describe('registerVdfsIcon / getVdfsIcon', () => {
 })
 
 describe('getVdfsIconFor（项级图标分发）', () => {
-  it('setting 各分区有专属图标（VDFS 列表项复用同一套项级图标）', () => {
-    for (const ext of ['appearance', 'session', 'local', 'web', 'gateway', 'about']) {
+  it('设置清单的项级图标齐备（自有分区 + 各插件配置目录）', () => {
+    // 设置清单 = 自有分区（appearance / about）+ 各插件交出来的配置条目；
+    // 条目的项级标识就是**插件目录名**（VdfsWorkbench 的 iconOf 缺省回落节点名）。
+    for (const ext of ['appearance', 'about', 'session', 'local', 'web', 'gateway', 'telegram']) {
       expect(getVdfsIconFor({ kind: 'setting', config_type: ext })).toBeTruthy()
     }
   })

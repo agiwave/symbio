@@ -146,6 +146,10 @@ registerVdfsIcon(
   )
 )
 registerVdfsIcon(
+  'setting:telegram',
+  svgIcon('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>')
+)
+registerVdfsIcon(
   'setting:about',
   svgIcon(
     '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>'
