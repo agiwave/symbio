@@ -201,7 +201,7 @@ D:/tmp/a.txt     绝对路径                          ─┘
 |---|---|
 | `path` / `name` | 全路径（使用方回填） / 父内唯一标识（路径段） |
 | `title` / `description` | 展示标题 / 语义说明（缺省 `title` = `name`） |
-| `kind` | **场景**类型（`dir` / `file` / 场景自定义）；机制不据此判定 |
+| `kind` | **场景标签**（自由取值；构造器缺省给 `dir` / `file`，场景可覆盖）；机制不据此判定 |
 | `status` | `active` / `working` / `disabled` / `error` / `unknown` |
 | `access` | 访问位（§4），**机制唯一的能力依据** |
 | `ext` | 呈现扩展名——**前端据此选择详情页面**（§7） |
@@ -212,6 +212,22 @@ D:/tmp/a.txt     绝对路径                          ─┘
 
 **目录与文件不做类型区分**：`access` 含 `l` 即可列（目录），含 `r` 即可读
 （文件）。`is_dir()` 的实现就是 `access.list`。
+
+`kind` 与目录性**无关**：`dir` / `file` 只是构造器（`VdfsNode::dir` / `file`）给出的
+**缺省场景标签**，场景想表达别的语义（插件名、条目类别…）就直接覆盖它。因此
+`kind` 只有一个词表——「场景标签」，不存在「基础类型 + 场景类型」两套口径；目录性
+永远只由 `l` 位表达。
+
+**保留字段名**：`attributes` 会 flatten 到节点顶层，因此机制字段名是保留字，场景
+扩展字段**不得**与之同名（否则扁平化后互相覆盖）：
+
+```text
+path  name  title  description  kind  status  access  ext
+size  updated_at  children  binary  schema  new_types  attributes
+```
+
+新增机制字段时须同步本节；场景侧的命名建议带上自己的前缀（如 `config_type`、
+`meta_tags`），但机制不做强制。
 
 ### 3.3 内容
 

@@ -92,12 +92,19 @@
   而 VDFS 侧明明有 `<id>/子会话/<sub>` 这条直达地址。
 - 后果之二：`SessionPlugin::session_of(id)` 为了「存在性校验」调用 `list_sessions()`
   ——**按 id 取一个会话却读取并解析全部会话文件**（`plugin.rs:1276`）。
+  —— ✅ 已修（S7）：store 新增 `load_session_checked`（未命中给 `None`），
+  `session_of` 改为按 id 直取；详见 §5 #4。
 
 ### P2（机制细节）
 
-1. **重复挂载名静默丢一份**：`CompositeVdfs::resolve` 用 `find` 取首个同名项
-   （`composite/vdfs.rs:163`）；两个插件注册同一目录名时，后来者无声消失。
-   → 至少 `warn`，或直接报错。
+1. **重复挂载名静默丢一份** —— ✅ 已修。`CompositeVdfs::children_of` 改为
+   **先排序、再去重**：收集时带上注册者（`(插件名, 目录名, provider)`），按
+   `(order, 目录名, 插件名)` 排序后按目录名去重，重名 `warn` 并**点名双方**
+   （`目录名「x」被 a 与 b 重复注册，保留 a（b 不可达）`）。两个改进：
+   ① 重名不再静默——它必然让后来者完全不可达（`resolve` 只命中一个）；
+   ② 胜出者与展示顺序都不再依赖 `HashMap` 的枚举顺序（原实现同 `order` 的
+   先后完全随机，连「谁胜出」都是随机的）。测试 `duplicate_dir_names_keep_the_first_only`
+   锁定该行为。
 2. **`children_of` 每次操作都全量广播**（有意不缓存，保证与子插件集合一致），
    但 `vdfs/tree` 的递归 `list` 会退化成 O(节点数 × 子插件数)。
    → 可考虑**单次调用内**复用一次收集结果（调用级缓存），保留「不跨调用缓存」的既定语义。
@@ -105,9 +112,16 @@
    （`config_type` / `meta_tags` / `message_count` 与 `path` / `kind` / `ext` 平级）。
    机制新增字段名可能与场景字段撞车且无编译期保护。
    → 文档明确保留字，或场景字段统一加前缀（后者是破坏性变更，建议前者）。
-4. **`kind` 的语义漂移**：机制声明「`kind` 只承载场景语义、不参与判定」，
-   但 `entry.rs::dir_node` 又把它写成 `VFDS_KIND_DIR`；`session`/`setting` 则写插件名。
-   → 统一口径：`kind` 一律是场景标签，目录性只由 `l` 位表达（`dir_node` 改为不写 `kind`）。
+   —— ✅ 已修（取「明确保留字」）：`vdfs.md` §3.2 列出全部机制字段名并声明为保留字，
+   同时给出「新增机制字段须同步本节」的维护约定。
+4. **`kind` 的语义漂移** —— ✅ 已修，但**原判断有误**，记录更正：`kind` 不存在
+   「基础类型 + 场景类型」两套口径。`dir` / `file` 本来就是 `VdfsNode::dir` / `file`
+   给出的**缺省场景标签**（`vdfs.md` §3.2 原文即把它们列为合法取值），插件名只是
+   覆盖它——一个词表，不是漂移。真正的缺陷是**冗余**：`entry.rs::dir_node` 在
+   `VdfsNode::dir` 已写好 `kind` 之后再复写一遍，等于给同一字段留了第二个来源。
+   处置：删除 `dir_node`，三处挂载根（`single_file` / `memory` / `dir` 的 `stat("")`）
+   直接用 `VdfsNode::dir("", label, VdfsAccess::LIST)`；`vdfs.md` §3.2 补一句明确
+   「`kind` 只有一个词表，目录性永远只由 `l` 位表达」。
 
 ### P3（文档与一致性）
 
@@ -174,9 +188,13 @@
 2. ✅ **寻址规则单一**：`paths::safe_id` 不再自带规则，委托 `entry::safe_segment`；
    `session_storage_dir()` 委托 `entry::category_dir(PLUGIN_SESSION)`。
 3. ⬜ `SessionPlugin` 的 `impl VdfsProvider` 仍是**厚实现**（各分支在插件内直接
-   调 store），未抽成「薄组合 + 存储 provider 承接」。
-4. ⬜ P1-4 未修：`session_of` 仍以 `list_sessions()` 全量读后 `find` 取单条
-   （注释说明原因是 `load_session` 对未命中返回空会话，需先有存在性判据）。
+   调 store），未抽成「薄组合 + 存储 provider 承接」。**有意不抽**：本节开头已论证
+   存储层不复用集中实现，再包一层 provider 只是把同样的分支换个地方写。
+4. ✅ P1-4 已修：`session_of` 不再 `list_sessions()` 全量读后 `find`——store 新增
+   `load_session_checked`（未命中给 `None`，而非 `load_session` 的空会话），
+   `session_of` 直接按 id 取。**副作用**：`stat` / `read` 单个会话从「读并解析全部
+   会话文件」降为「读并解析这一个」。`load_session` 变为 `load_session_checked`
+   + 缺省空会话，语义不变。
 
 ## 6. 改造二：配置地址化，废弃 `CONFIG_GET`/`CONFIG_SET`（对应 P1-1/P1-2/P1-3）
 
@@ -230,9 +248,11 @@
 ## 7. 进度
 
 - [x] 评估（本文档）
-- [~] 改造一：会话存储的寻址与 VDFS 的关系（寻址已合一 `19e1c87`；§5 的 #3 / #4 未做）
+- [x] 改造一：会话存储的寻址与 VDFS 的关系（寻址已合一 `19e1c87`；#1/#2/#4 结案，
+      #3 有意不做）
 - [x] 改造二：配置地址化，废弃 `CONFIG_GET`/`CONFIG_SET`（S1 / S2 / S4 / S5 / S6）
-- [ ] P2-1 / P2-4 顺带收敛
+- [x] P2-1 / P2-3 / P2-4 顺带收敛
+- [ ] P2-2（调用级缓存，收益未证实，暂缓）
 
 ### 已落地
 
@@ -269,6 +289,12 @@
   （`configSaving` / `load_path` / `save_path` / `saveConfig`）、
   `schemas/vdfs-form.ts` 的 `load_path` / `save_path`、`VdfsFormDetail` 的通道适配
   与 `DetailFormConfig.spec.ts`。
+
+- **S7 机制细节收敛（P2-1 / P2-3 / P2-4 + §5 #4）**：`CompositeVdfs::children_of`
+  重名记账 + 告警（先排序再去重，胜出者确定）、排序加目录名 / 插件名兜底；
+  删除冗余的 `entry::dir_node`（三处挂载根直接用 `VdfsNode::dir`）；
+  `vdfs.md` §3.2 明确「`kind` 单一词表」与「机制字段保留字」；
+  `SessionStore::load_session_checked`（存在性判据）替换 `session_of` 的全量清单 `find`。
 
 - **门禁**：`cargo check --tests` 零错误零告警；`cargo test --lib` 全绿；
   `vue-tsc --noEmit` 通过；`vitest run` 18 文件 / 140 用例全绿。

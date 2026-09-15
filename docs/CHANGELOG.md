@@ -18,6 +18,25 @@
 
 ***
 
+## 2026-09-15: VDFS 机制细节收敛（重复挂载名、`kind` 口径、会话单条定位）
+
+- **重复挂载名不再静默丢一份**：`CompositeVdfs` 收集子目录时改为**先排序、再去重**
+  （键 `(order, 目录名, 插件名)`），重名 `warn` 并点名双方。此前 `list("")` 会列出
+  两个同名子目录、而路径解析只命中一个——后来者完全不可达，且「谁胜出」取决于
+  `HashMap` 的枚举顺序（同 `order` 时完全随机）。
+- **删除冗余的 `entry::dir_node`**：它只是 `VdfsNode::dir(..., VdfsAccess::LIST)`，
+  且把构造器已写好的 `kind` 再复写一遍。三处挂载根（`single_file` / `memory` /
+  `dir` 的 `stat("")`）直接调用构造器。
+- **文档**：`vdfs.md` §3.2 明确 `kind` 只有一个词表（`dir` / `file` 只是构造器给的
+  **缺省场景标签**，可被插件名等覆盖），目录性永远只由 `l` 位表达；并列出全部机制
+  字段名为**保留字**（`attributes` 会 flatten 到顶层，场景字段不得与之同名）。
+- **会话单条定位不再全量读**：`SessionStore` 新增 `load_session_checked`（未命中给
+  `None`），`session_of` 由「`list_sessions()` 全量读并解析后 `find`」改为按 id 直取
+  ——`stat` / `read` 单个会话的开销不再随会话总数增长。`load_session` 改为
+  `load_session_checked` + 缺省空会话，语义不变。
+
+***
+
 ## 2026-09-15: 插件配置地址化，`CONFIG_GET`/`CONFIG_SET` 协议废弃
 
 插件配置过去是一条私有路由（`<插件>/config/get|set`），并由 `setting` 插件**代理 +
