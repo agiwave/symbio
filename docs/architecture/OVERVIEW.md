@@ -85,8 +85,8 @@ graph TD
 
 | 插件          | 角色           | 关键能力（详见各插件 `plugins/<name>/README.md`）                                                              |
 | ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `home`      | **根容器**      | 持全局配置（`<homedir>/config.yaml`）；仅挂载 `worker` (Composite)，自身终结 `home/*`、`work/*`、`save_config` |
-| `composite` | **动态容器**     | 按配置实例化任意子插件，是"分形"的关键                                                                                              |
+| `home`      | **根容器**      | 持**应用级状态**（`<homedir>/PLUGIN.yml`：工作区与最近记录）；构造 `worker` (Composite) 并传入必需插件清单，自身终结 `home/*`、`work/*` |
+| `composite` | **动态容器**     | **扫描自己的 `plugins/` 目录**实例化子插件（目录驱动，不内置任何清单），是"分形"的关键                                                                                              |
 | `agent`     | **认知中心**     | 管理 Agent 人格；会话选定智能体时经 `traverse` 贡献工具与人格 → `plugins/agent/README.md`                                     |
 | `session`   | **会话中心**     | 长连接、消息持久化、历史裁剪；**会话编排的唯一入口**（收集工具、组装提示词、直连 model 单轮网关）→ `plugins/session/README.md`（含六大压缩策略）                       |
 | `model`     | **单轮 LLM 网关** | 无状态单轮执行（`execute_turn`）；按上下文注册唯一生效 `ModelProvider`（自含参数与协议适配器）、4 协议适配、配置存取；不含工具执行与会话循环 |
@@ -96,7 +96,7 @@ graph TD
 | `mcp`       | MCP 桥        | MCP server 注册（stdio / http）与工具调用（资源经 `.vdfs/mcp` 维护）                                                    |
 | `telegram`  | Telegram 通道  | 长轮询收发与“继续会话”交互（`telegram/send`）                                                                                  |
 | `gateway`   | **入站网关**     | HTTP/WS 入站适配（`/api/v1/invoke`、`/api/v1/ws`、`/api/v1/health`，与 route_v2 同构）                                              |
-| `setting`   | 配置           | 系统级配置读写 + `.vdfs/setting` 子目录（`config/get` / `config/set`）                                                     |
+| `setting`   | 配置           | `.vdfs/setting` 子目录：**各插件交出来的配置条目 + 自有分区**（`appearance` / `about`）；条目指向各插件自己的 `PLUGIN.yml`，本插件不代理读写 |
 | `hook`      | 钩子           | 钩子注册与触发（PreCompact 等生命周期点）                                                                                        |
 | `event_bus` | 事件总线         | 进程内帧广播（连接级 SSE 风格推送）                                                                                              |
 

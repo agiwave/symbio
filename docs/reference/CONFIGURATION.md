@@ -52,7 +52,7 @@ work:
 
 ## 资源与数据的落盘位置
 
-**没有全局「存储后端」开关**：`config.yaml` 里不存在 `storage.backend` 之类的键，
+**没有全局「存储后端」开关**：配置里不存在 `storage.backend` 之类的键，
 也不存在一个统一的存储服务。落盘位置由「谁的数据」决定，各走各的：
 
 | 数据 | 位置 | 由谁决定 |
@@ -126,24 +126,26 @@ work:
 
 ### MCP 插件
 
-```yaml
-# 在 config.yaml 或独立配置中
-mcp_servers:
-  filesystem:
-    transport: stdio
-    command: "npx"
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
-  web_fetch:
-    transport: http
-    url: "http://localhost:3000/mcp"
+**本插件不设配置文档**——配置就是它的资源树：一个 server 一个目录，主文件
+`server.json`（`.vdfs/mcp/<id>`）。
+
+```json
+// ~/.symbio/plugins/mcp/filesystem/server.json
+{
+  "type": "stdio",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+}
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `transport` | String | ✅ | `stdio` 或 `http` |
+| `type` | String | ✅ | `stdio` / `http` / `sse`（默认 `stdio`） |
 | `command` | String | stdio 时 | 可执行文件 |
-| `args` | List[String] | stdio 时 | 命令行参数 |
-| `url` | String | http 时 | HTTP 端点 |
+| `args` | List[String] | ❌ | 命令行参数 |
+| `env` | Map[String,String] | ❌ | stdio 环境变量 |
+| `url` | String | http / sse 时 | 端点 |
+| `enabled` | Bool | ❌ | 运行时是否启用（激活标记） |
 
 ### Telegram 插件
 

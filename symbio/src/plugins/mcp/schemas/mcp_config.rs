@@ -101,9 +101,13 @@ fn default_true() -> bool {
 
 /// MCP configuration - Single Source of Truth
 ///
-/// 持久化路径：`~/.symbio/plugins/mcps/<name>/server.json`。
-/// 内存视图（`servers: HashMap<name, McpServerConfig>`）通过 `McpPlugin`
-/// 从磁盘加载/回写保持一致。
+/// 磁盘上每个 server 是**自己的目录条目**：`<homedir>/plugins/mcp/<name>/server.json`
+/// （见 `plugin.rs` 的 `MANIFEST`）。本结构是 `McpPlugin` 的**内存视图**，由插件
+/// 自己的 `PLUGIN.yml` 载入。
+///
+/// 其中 `servers` 是**旧形态的遗留键**（历史上 server 明细混在配置文件里）：
+/// 迁移时逐项写成 `<name>/server.json`，随后用 `PluginDir::remove_keys` 把该键摘掉，
+/// 因此新形态下恒为空——它保留只为兼容从旧版本升级上来的文件。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpConfig {
     #[serde(default)]

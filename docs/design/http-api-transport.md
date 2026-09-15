@@ -66,7 +66,7 @@ symbio/src/plugins/gateway/
 
 **做法**：网关不取 root，而是持有构造期登记的 `Weak` 父级（worker `Composite`），
 每次请求 `parent.route(ctx)` —— `Composite` 的路径合并语义与 `root.route` 等价，
-home 级路径（`home/*`、`work/*`、`save_config`）由 `Composite`
+home 级路径（`home/*`、`work/*`）由 `Composite`
 未命中时的兜底上行转发覆盖。父级以 `Weak` 保存，不产生循环引用；
 `home/reload` 重建插件树时网关实例随之重建，转发目标恒为当前树。
 
@@ -75,13 +75,15 @@ home 级路径（`home/*`、`work/*`、`save_config`）由 `Composite`
 | 时机 | 行为 |
 |---|---|
 | `build(ctx)` | 读 config；`inbound_enabled` 且 `inbound_protocol = http` → `spawn` server（保存 `JoinHandle` + `CancellationToken`）；`native` 或关闭则不监听 |
-| `config/set` | 落盘（走 parent 的 `save_config`，与 `SettingPlugin` 同款）→ **自行 stop 旧 server + start 新 server**（端口/开关变更必须重启监听，不能像普通配置那样只改内存） |
+| 配置写入 | `vdfs/write` `.vdfs/gateway/PLUGIN.yml` → `ConfigFile::apply` 落盘 → 本插件在自己的 `write` 返回后 **stop 旧 server + start 新 server**（端口/开关变更必须重启监听，不能像普通配置那样只改内存） |
 | `home/reload` | 插件实例被重建（worker composite 清空重建），旧实例 `Drop` → cancel token → 端口释放；新实例按新配置启动 |
 | `Drop` | `CancellationToken::cancel()` + `abort` task |
 | 客户端断开 | 连接读写半关闭 → 结束该会话的 pump 任务（**不** abort 后端任务，与 `tauri://destroyed` 行为一致：AI 继续跑完并持久化） |
 
 > ⚠️ 注意：改配置**不会**自动触发 `home/reload`（`reload` 只在切 homedir 时用）。
-> 所以"开关/端口热生效"必须由插件自己在 `config/set` 里完成，这是插件自治，符合机制。
+> 所以"开关/端口热生效"必须由插件自己在写配置之后完成，这是插件自治，符合机制
+> ——机制不引入回调抽象，`ConfigFile::apply` 只管「校验 → 落内存 → 落自己的文件 →
+> 广播」。
 
 ---
 
@@ -174,15 +176,17 @@ GET /api/v1/health  → { "ok": true }
   设置页「开放接口」显式开启。
 - **绑定地址**：默认 `127.0.0.1`。绑定非回环地址却未设 `inbound_token` →
   `server::start` 直接返回错误（安全护栏），设置页可见。
-- **token**：`inbound_token` 由用户在设置页填写（`password` 控件）并随 `save_config` 持久化；
+- **token**：`inbound_token` 由用户在设置页填写（`password` 控件）并随配置文件落盘
+  （`.vdfs/gateway/PLUGIN.yml`）；
   HTTP 走 `Authorization: Bearer <token>`，WS 走 `?token=`；置空即不校验（仅回环允许）。
 - CORS：响应头固定 `Access-Control-Allow-Origin: *`（`OPTIONS` 预检直接放行），
   跨域隔离依赖 token 与绑定地址，不靠 Origin 白名单。
 - **只读模式**（`inbound_readonly`）：仅放行 `is_readonly_allowed` 白名单
   （清单见 [CONFIGURATION.md](../reference/CONFIGURATION.md)），其余 403/拒绝；
-  `gateway/config/*` 一律拒绝（`config/get` 含 `inbound_token`）。
-- 危险操作分级（`local/shell` 类、`work/set_workspace`、`vdfs/write|delete`、`config/set`
-  归为 `danger`）：**预留**，现行只有只读白名单一层。
+  `gateway/*` 一律拒绝，且 `vdfs/read` 只要落在任何插件的 `PLUGIN.yml` 上就拒绝
+  （配置含 `inbound_token` 等凭据）。
+- 危险操作分级（`local/shell` 类、`work/set_workspace`、`vdfs/write|delete` 归为
+  `danger`）：**预留**，现行只有只读白名单一层。
 - 审计：`trace_id` 随 `metadata` 透传进上下文，invoke 记入 tracing。
 - **HTTPS**：不做。rustls 默认后端 aws-lc-rs 依赖 `aws-lc-sys`（C），与"无 C 编译"铁律冲突。
   策略：默认纯 HTTP + 回环绑定；远程/HTTPS 交由外部反代（Caddy / ssh tunnel / cloudflared）。

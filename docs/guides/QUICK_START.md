@@ -94,15 +94,18 @@ cargo clippy --lib --tests -- -D warnings
 
 ```
 ~/.symbio/
-├── config.yaml              # 主配置
+├── PLUGIN.yml               # 系统级插件（home）的配置：工作区与最近记录
 ├── plugins/
-│   ├── model/               # Model Provider 配置
+│   ├── model/               # 模型资源（<id>/provider.json）+ PLUGIN.yml
 │   ├── agent/               # Agent Bundle 存储
-│   └── ...                  # 其他插件数据
+│   └── ...                  # 其他插件：配置（PLUGIN.yml）与数据同处一个目录
 ├── agents/                  # Agent 定义文件
 ├── storage/                 # 认知存储 (DirStorage 或 SQLite)
 └── logs/                    # 日志文件
 ```
+
+> 每个插件目录都可以**整体拷贝移植**——配置与数据都在里面。
+> 旧版本升级上来的机器还会看到一个 `config.yaml.migrated`：那是旧集中式配置的留档。
 
 ---
 

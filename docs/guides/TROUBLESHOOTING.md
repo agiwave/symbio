@@ -75,8 +75,8 @@ cargo clippy --lib --tests -- -D warnings
 
 **排查步骤**：
 1. 检查路径拼写 (区分大小写)
-2. 确认插件已启用 (`config.yaml`)
-3. 检查插件是否注册到 Composite
+2. 确认插件目录下有可解析的 `PLUGIN.yml`（且 `plugin_provider` 指向已注册的工厂）
+3. 检查插件是否注册到 Composite（容器按目录扫描，不合格的目录会被跳过并点名）
 
 **调试方法**：
 
@@ -112,10 +112,16 @@ curl -X POST ... -d '{"path": "_root"}'
 ### 问题：配置不生效
 
 **排查步骤**：
-1. 确认配置文件路径正确 (`~/.symbio/config.yaml`)
-2. 检查 YAML 格式 (缩进、冒号后空格)
-3. 确认插件 `enabled: true`
-4. 重启应用使配置生效
+1. 确认改的是**插件自己的**配置文件：`~/.symbio/plugins/<插件>/PLUGIN.yml`
+   （系统级插件 `home` 在 `~/.symbio/PLUGIN.yml`）
+2. 检查 YAML 格式 (缩进、冒号后空格)；两个身份字段 `plugin_provider` /
+   `plugin_name` 不要写进配置字段里（它们由 `PluginDir` 自动剥离 / 补回）
+3. 确认写入路径对：前端「设置」页点开对应条目，或直接 `vdfs/write`
+   `.vdfs/<插件>/PLUGIN.yml`——两条路写的是**同一个文件**
+4. 配置改完**不需要重启**（`ConfigFile::apply` 落盘后广播）；只有少数副作用
+   （如网关重建监听）由插件自己在写完后处理
+5. 若刚从旧版本升级：旧 `<homedir>/config.yaml` 已一次性迁移并改名
+   `config.yaml.migrated`——查历史值看那个留档文件
 
 ### 问题：API Key 无效
 

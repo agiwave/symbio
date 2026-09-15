@@ -10,7 +10,11 @@
 
 - `{container}` - 容器插件 (如 `worker`)
 - `{plugin}` - 目标插件 (如 `agent`, `session`, `model`)
-- `{action}` - 具体能力 (如 `chat`, `list`, `config`)
+- `{action}` - 具体能力 (如 `chat`, `list`, `status`)
+
+> **资源与配置都不走这条语法**：资源统一经 `vdfs/*`（`.vdfs/…` 寻址），配置就是
+> 资源树里的一个文档（`.vdfs/<插件>/PLUGIN.yml`）。本文件的 `{plugin}/*` 路由只剩
+> 那些**不是资源**的能力（会话编排、模型推理、网关状态…）。
 
 > `worker` 前缀可省略也可显式写出：`session/chat/send` 与 `worker/session/chat/send` 等价
 > （前者由 home 兜底转发给 worker）。
@@ -23,18 +27,17 @@
 |------|------|------|
 | `_root` | 查询当前节点子插件拓扑 | 子树结构 |
 
-### 配置管理
+### 配置管理（**没有配置路由**）
 
-常量定义见 `symbio_core/paths.rs`（`CONFIG_GET` = `config/get`、`CONFIG_SET` = `config/set`）。
-
-| 路径 | 用途 | 方法 |
-|------|------|------|
-| `{plugin}/config/get` | 获取配置 | GET (payload 空) |
-| `{plugin}/config/set` | 设置配置 | POST (payload 含配置) |
-
-> `config/schema`（原 session / model 提供）**已下线**：字段定义改随详情定义以
-> VDFS 节点 `schema` 下发（`.vdfs/setting/<分区>` 的 `vdfs/list` 即可拿到）。
-> 各插件 `config/set` 内部会自行向父级发起 `save_config`，配置才真正落盘。
+> **`{plugin}/config/get` / `{plugin}/config/set` 已整体下线**（`CONFIG_GET` /
+> `CONFIG_SET` 常量、各插件的两个分支、`save_config` 上行链、`config/schema`
+> 都已删除）。
+>
+> 配置现在就是一个**普通的可寻址文档**：`<插件目录>/PLUGIN.yml`，对外地址
+> `.vdfs/<插件>/PLUGIN.yml`（`ext = form`）。读写用的就是 `vdfs/read` /
+> `vdfs/write`——与任何其它资源同一条链路、同一套寻址，因此前端与 LLM 用同一种
+> 方式改配置。定义与校验归**配置的拥有者**，默认值从它自己的 `Default` 读出。
+> 见 [design/vdfs.md](../design/vdfs.md) §3.4。
 
 ### 资源（VDFS）
 
@@ -58,7 +61,10 @@
 | `home/reload` | 热重载：切换 homedir（可选）+ 重建全部子插件 | 前端切换系统目录后调用 |
 | `work/set_workspace` | 切换工作区，写入 `work.workdir` 与最近使用列表 | 写操作 |
 | `work/get_workspace` | 读取当前工作区、展开路径与最近工作区列表 | 只读；gateway 只读白名单放行 |
-| `save_config` | 将内存配置原子化写入 `<homedir>/config.yaml` | 由子插件 `config/set` 上行触发 |
+
+> `save_config` **已下线**：配置不再由父插件聚合落盘，各插件写自己的
+> `<插件目录>/PLUGIN.yml`（`ConfigFile::apply` = 校验 → 落内存 → 落自己的文件 →
+> 广播）。`home` 只保留 `home/*` 与 `work/*`。
 
 ---
 
@@ -98,7 +104,9 @@
 | `session/chat/update_message` | 更新单条消息 | `Data` |
 | `session/append` | 追加消息 | `Data` |
 | `session/heartbeat/trigger` | 触发一次心跳 | `Data` |
-| `session/config/get` \| `config/set` | 会话配置读写（`config` 绑定的 load/save_path） | `Data` |
+
+> `session/config/get` / `config/set` **已下线**：会话配置在
+> `.vdfs/session/PLUGIN.yml`（`ext = form`），读写走 `vdfs/read` / `vdfs/write`。
 
 ### 聊天流程
 
@@ -119,11 +127,13 @@
 | 路径 | 用途 | 返回类型 |
 |------|------|----------|
 | `model/chat` | 调用 LLM 推理 (流式) | `Session` |
-| `model/config/get` \| `config/set` | Provider 配置读写 | `Data` |
 
+> `model/config/get` / `config/set` **已下线**：模型是**资源型**插件——它的配置就是
+> 自己的资源树，条目在 `.vdfs/model/<id>`（主文件 `provider.json`）；跨条目的状态
+> （`default_provider_id`）在 `.vdfs/model/PLUGIN.yml`。
+>
 > `model/status` **已下线**：连通性状态改由节点动作 `vdfs/action { action: "test" }`
-> 返回；`model/chat_sync` 原就是 NotImplemented 占位，一并删除。模型作为资源走
-> `.vdfs/model`（每个条目一份 `provider.json`）。
+> 返回；`model/chat_sync` 原就是 NotImplemented 占位，一并删除。
 
 ### 配置结构
 
@@ -185,8 +195,8 @@
 | 路径 | 用途 |
 |------|------|
 | `skill/execute` | 按名称执行 Skill（载荷 `{name, args}`） |
-| `skill/config/get` \| `config/set` | Skill 插件配置读写 |
 
+> `skill/config/get` / `config/set` **已下线**，且本插件**不设配置文档**——
 > 技能清单与内容不设私有路由：已安装技能经 `.vdfs/skill` 寻址
 > （一个技能 = 一个目录，主文件 `SKILL.md`，条目内部可下钻）。
 
@@ -202,12 +212,9 @@ skills/<name>/
 
 ## MCP 插件
 
-| 路径 | 用途 |
-|------|------|
-| `mcp/config/get` \| `config/set` | 插件元数据读写（server 定义本身在 `~/.symbio/plugins/mcp/<id>/server.json`） |
-
-> Server 清单与详情不设私有路由：注册 / 列举 / 启停 / 连通性自检一律经
-> `.vdfs/mcp`（一个 server = 一个目录，主文件 `server.json`），
+> **本插件已无自有路由**：`mcp/config/get` / `config/set` 已下线，且**不设配置文档**
+> ——配置就是它的资源树。Server 清单与详情不设私有路由：注册 / 列举 / 启停 /
+> 连通性自检一律经 `.vdfs/mcp`（一个 server = 一个目录，主文件 `server.json`），
 > 「测试连接」是节点动作 `vdfs/action { action: "test" }`。
 
 ### MCP 配置
@@ -234,9 +241,10 @@ mcp_servers:
 | `telegram/start_listener` | 启动后台监听 |
 | `telegram/stop_listener` | 停止后台监听 |
 | `telegram/status` | 运行状态 |
-| `telegram/config/get` \| `config/set` | Bot 配置读写 |
 
-> Telegram 未挂载 VDFS 子目录（不注册 `VdfsProvider`），Bot 配置走 `config/get|set`。
+> `telegram/config/get` / `config/set` **已下线**：本插件挂载 `.vdfs/telegram`，
+> 内容就是一份配置文档 `.vdfs/telegram/PLUGIN.yml`（`ext = form`），读写走
+> `vdfs/read` / `vdfs/write`。
 
 ---
 
@@ -256,30 +264,33 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 | 路径 | 用途 |
 |------|------|
-| `gateway/config/get` | 读取网关配置（扁平键 `inbound_*`） |
-| `gateway/config/set` | 整体替换配置 → 上行 `save_config` → **内部 stop + start 重建监听** |
 | `gateway/status` | 运行状态（是否启用、协议、监听地址与端口、是否已在监听） |
 
+> `gateway/config/get` / `config/set` **已下线**：配置就是
+> `.vdfs/gateway/PLUGIN.yml`（扁平键 `inbound_*`）。前端「设置」页点开的正是这份
+> 表单；写入走 `vdfs/write` → `ConfigFile::apply` 落盘后，本插件在自己的 `write`
+> 里做副作用（**内部 stop + start 重建监听**）——机制不引入回调抽象。
+>
 > `gateway/*` 自身接口**恒走 native**（前端不经 HTTP 访问本插件）。前端出站分发（native / http）由「系统目录」切换器管理，不再由 gateway 配置驱动。
 
 安全：非回环地址需 `inbound_token` 鉴权（回环地址免鉴权）；`inbound_readonly` 开启后仅放行只读白名单
-（`vdfs/list|tree|stat|read|search`、`session/get_messages`、`config/get`、`home/get_homedir`、
-`work/get_workspace`；`gateway/*` 显式排除），详见 [CONFIGURATION.md](CONFIGURATION.md)。
+（`vdfs/list|tree|stat|read|search`、`session/get_messages`、`home/get_homedir`、
+`work/get_workspace`；`gateway/*` 显式排除，且 `vdfs/read` 只要落在任何插件的
+`PLUGIN.yml` 上就拒绝——配置可能含凭据），详见 [CONFIGURATION.md](CONFIGURATION.md)。
 
 ---
 
 ## Setting 插件
 
-| 路径 | 用途 |
-|------|------|
-| `setting/config/get` \| `config/set` | 系统配置整体读写 |
-
-> `setting/list` / `setting/get` **已下线**：分区清单与取值分别由 `.vdfs/setting`
-> 的 `vdfs/list` / `vdfs/read` 承担（旧的 `list` 还硬编码着「常规设置 / Model
-> 设置」两个历史分类，与现行六分区早已不符）。
-
-> 新增可配置插件需在 `setting` 的 `SETTING_SECTIONS` 与 `detail_definition()` 登记；
-> 各分区的保存由前端 editor 经对应插件 `config/set` 自持完成。
+> **本插件已无自有路由**：`setting/config/get` / `config/set` 与更早的
+> `setting/list` / `setting/get` 全部下线。
+>
+> 分区清单与取值分别由 `.vdfs/setting` 的 `vdfs/list` / `vdfs/read` 承担。
+> 清单 = **各插件交出来的配置条目 + 自有分区**（`appearance` / `about`）：
+> 前者由各插件在 `traverse` 里经 `announce_configurable` 声明，容器用共享收集器
+> 收下并写回请求 ctx（见 [design/vdfs.md](../design/vdfs.md) §13.1）——因此
+> **新增一个可配置插件不需要在本插件登记任何东西**；自有分区的数据在前端 store，
+> `read` / `write` 对它们恒 `Forbidden`。
 
 ---
 

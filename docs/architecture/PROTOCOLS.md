@@ -268,11 +268,16 @@ SingleFileVdfs, MemoryVdfs}`。套一层 `dyn` 工厂只会把一次构造换成
 
 ### 容器动态挂载
 
-`HomePlugin::init_worker_composite()` 按 `~/.symbio/config.yaml` 的 `plugins.<name>: { plugin_provider: "..." }` 从注册表取构造函数并实例化子插件。
+`home` 构造 `worker`（Composite）时经 ctx 键 `REQUIRED_PLUGINS` 传入**必需插件清单**
+（`home::SYSTEM_PLUGINS`）；容器据此**扫描自己目录下的 `plugins/`**——逐目录读
+`PLUGIN.yml`，`plugin_provider` 指向已注册工厂（`has_creator`）即 `create_object`
+实例化，并把该目录经 ctx 键 `PLUGIN_DIR` 告知插件（插件据此读写**自己的**配置）。
+容器**不内置任何清单**（它是通用容器，可以嵌套另一个容器）。
 
 新增插件只需：
-1. 把目录放到 `symbio/src/plugins/`
-2. 实现 `Plugin` 并调用 `submit_object_creator!`
+1. 把目录放到 `symbio/src/plugins/` 并实现 `Plugin`
+2. 调用 `submit_object_creator!` 注册工厂
+3. 若要随系统启动，把插件名加进 `home::SYSTEM_PLUGINS`
 3. 在配置里挂载
 
 ---

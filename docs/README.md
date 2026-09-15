@@ -77,8 +77,8 @@ tauri/                           # 前端
 | skill | [plugins/skill/README.md](../symbio/src/plugins/skill/README.md) | 技能脚本（loader/plugin）发现与装载 |
 | local | [plugins/local/README.md](../symbio/src/plugins/local/README.md) | 本地文件系统工具 + system 提示词下发 |
 | web | [plugins/web/README.md](../symbio/src/plugins/web/README.md) | 网页抓取/搜索工具 |
-| home | [plugins/home/README.md](../symbio/src/plugins/home/README.md) | 根插件：持 config.yaml，仅挂载 worker(Composite) |
-| composite | [plugins/composite/README.md](../symbio/src/plugins/composite/README.md) | 子插件容器：路径合并分发 |
+| home | [plugins/home/README.md](../symbio/src/plugins/home/README.md) | 根插件：持应用级状态（`<homedir>/PLUGIN.yml`），构造 worker(Composite) 并传入必需插件清单 |
+| composite | [plugins/composite/README.md](../symbio/src/plugins/composite/README.md) | 子插件容器：扫描 `plugins/` 目录 + 路径合并分发 |
 | gateway | [plugins/gateway/README.md](../symbio/src/plugins/gateway/README.md) | HTTP/WS 入站网关 |
 | setting | [plugins/setting/README.md](../symbio/src/plugins/setting/README.md) | 运行时设置 |
 | hook | [plugins/hook/README.md](../symbio/src/plugins/hook/README.md) | 生命周期钩子 |

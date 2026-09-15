@@ -30,7 +30,7 @@
 │  │                     Plugin Tree (运行时)                             │  │
 │  │                                                                      │  │
 │  │   Home (/)                                                           │  │
-│  │   └── worker (Composite) ─── 按 config.yaml 的 plugins 动态挂载      │  │
+│  │   └── worker (Composite) ─── 扫描 plugins/ 目录（每目录一个 PLUGIN.yml）动态挂载 │  │
 │  │       ├── agent    ─── OAB Bundle 宿主 · 身份工具 · MCP 声明         │  │
 │  │       ├── session  ─── 会话编排唯一入口 · 工具循环 · 压缩 · 直连 model   │  │
 │  │       ├── model    ─── 无状态单轮 LLM 网关 · 多协议适配 │  │
@@ -40,10 +40,10 @@
 │  │       ├── mcp      ─── MCP Server 注册 (stdio/http) · 工具桥接       │  │
 │  │       ├── telegram ─── 消息收发通道                                  │  │
 │  │       ├── gateway  ─── HTTP/WS 入站网关 (route_v2 同构)              │  │
-│  │       ├── setting  ─── 系统配置读写                                  │  │
+│  │       ├── setting  ─── 设置清单：各插件配置条目 + 自有分区            │  │
 │  │       ├── hook     ─── 钩子注册与触发                                │  │
 │  │       └── event_bus─── 进程内帧广播 (SSE 风格)                       │  │
-│  │   Home 自身终结: home/* · work/* · save_config                       │  │
+│  │   Home 自身终结: home/* · work/*                                     │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                             │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │

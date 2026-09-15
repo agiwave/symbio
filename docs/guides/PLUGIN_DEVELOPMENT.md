@@ -261,21 +261,23 @@ mod tests {
 symbio::submit_object_creator!("my_plugin", MyPlugin::build, dyn Plugin);
 ```
 
-### 4. 注册到插件树
+### 4. 让它被装配
 
-在 `symbio/src/plugins/home/plugin.rs` 的 `init_worker_composite()` 中添加：
-
-```rust
-composite.add_instance("my_plugin", MyPlugin::build)?;
-```
-
-### 5. 在配置中启用
-
-编辑 `~/.symbio/config.yaml`：
+**不需要在任何地方登记**：容器**扫描自己的 `plugins/` 目录**，逐目录读 `PLUGIN.yml`，
+`plugin_provider` 指向已注册的工厂（`has_creator`）即实例化，并把该目录经 ctx 键
+`PLUGIN_DIR` 告知插件。
 
 ```yaml
-plugins:
-  my_plugin:
-    plugin_provider: my_plugin
-    enabled: true
+# ~/.symbio/plugins/my_plugin/PLUGIN.yml
+plugin_provider: my_plugin   # 工厂 id（submit_object_creator! 的第一个参数）
+plugin_name: my_plugin       # 实例名，缺省 = 目录名
+# ↓ 以下即本插件自己的配置字段，随你定义
 ```
+
+若要随系统启动（`home` 的必需插件清单），把插件名加进 `symbio/src/plugins/home/plugin.rs`
+的 `SYSTEM_PLUGINS`——**这是唯一的清单点**，且它属于**构造者**（`composite` 是通用容器，
+可以嵌套，因此不内置任何清单）。
+
+> 配置读写走 `symbio_core::plugin_dir` 的 `PluginDir` + `ConfigFile`：插件持有自己的
+> `ConfigFile`，读 / 写**自己**的 `PLUGIN.yml`（`ConfigFile::apply` = 校验 → 落内存 →
+> 落自己的文件 → 广播）。对外地址自动是 `.vdfs/my_plugin/PLUGIN.yml`，无需写任何路由。
