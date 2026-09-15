@@ -8,6 +8,100 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 
+/// 会话列表一行摘要：最后一条含文本消息的首行（压缩空白、限长 60 字符）。
+///
+/// 与 [`derive_session_title`] 同风格；供会话节点的 `description` 驱动列表
+/// 「实时缩略」预览。**清单投影**的一部分（见 [`SessionSummary`]）。
+pub fn derive_session_summary(messages: &[ChatMessage]) -> Option<String> {
+    const SUMMARY_MAX_CHARS: usize = 60;
+    let text = messages
+        .iter()
+        .rev()
+        .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
+        .map(|t| t.trim().to_string())
+        .find(|t| !t.is_empty())?;
+    let first_line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let mut out = String::new();
+    let mut chars = first_line.chars();
+    for _ in 0..SUMMARY_MAX_CHARS {
+        match chars.next() {
+            Some(c) if c.is_whitespace() => {
+                if !out.ends_with(' ') {
+                    out.push(' ');
+                }
+            }
+            Some(c) => out.push(c),
+            None => return Some(out.trim_end().to_string()),
+        }
+    }
+    Some(format!("{}…", out.trim_end()))
+}
+
+/// 会话的通用元信息标签（工作目录名 + 消息数）。
+///
+/// 标签由本函数单点产出，挂在 VDFS 节点的 `attributes.meta_tags` 上，保证同一
+/// 会话在清单与详情里的呈现一致；前端原样渲染，不含语义。
+pub fn session_meta_tags(metadata: &serde_json::Value, message_count: usize) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    if let Some(wd) = metadata
+        .get("workdir")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let base = wd
+            .trim_end_matches(['/', '\\'])
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(wd);
+        if !base.is_empty() {
+            tags.push(base.to_string());
+        }
+    }
+    tags.push(format!("{message_count} 条"));
+    tags
+}
+
+/// 会话清单项 —— **不含消息**。
+///
+/// ## 为什么需要它
+///
+/// 清单（`.vdfs/session` 的 `list`）必须**不读** `messages.json`（那正是存储拆分
+/// 的全部收益），而清单要显示的字段——标题 / 条数 / 摘要 / 标签——原本**全是从
+/// 消息算出来的**。所以这些字段在 `save` 时算好、随元数据落盘：它们是可重算的
+/// **投影**，不是第二份真相，计算入口只有 [`SessionSummary::of`] 一个。
+///
+/// 类型上**不提供** `messages`，是为了让「清单路径又去碰消息」这件事**编译不过**；
+/// 返回「messages 为空的 `Session`」做不到这点。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub id: String,
+    /// `display_title()` 的落盘快照
+    pub title: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub metadata: serde_json::Value,
+    pub message_count: usize,
+    pub summary: Option<String>,
+    pub meta_tags: Vec<String>,
+}
+
+impl SessionSummary {
+    /// 从完整会话算出投影 —— **唯一**计算入口（`save` 时调用；清单只读结果）。
+    pub fn of(s: &Session) -> Self {
+        Self {
+            id: s.id.clone(),
+            title: s.display_title(),
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+            metadata: s.metadata.clone(),
+            message_count: s.messages.len(),
+            summary: derive_session_summary(&s.messages),
+            meta_tags: session_meta_tags(&s.metadata, s.messages.len()),
+        }
+    }
+}
+
 /// 会话数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {

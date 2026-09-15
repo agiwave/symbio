@@ -261,6 +261,195 @@ async fn save_leaves_no_temp_file_behind() {
     );
 }
 
+// ==================== 元数据 / 消息分文件（清单性能） ====================
+//
+// 这一组断言钉住的是「列一次清单的成本与会话聊了多久无关」：清单只读
+// `session.json`，`messages.json` 只有真的要取转写时才读。
+
+/// 造一条用户文本消息（标题 / 摘要推导的输入）
+fn text_msg(role_is_user: bool, text: &str) -> ChatMessage {
+    use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageRole};
+    ChatMessage {
+        id: format!("m{}", text.len()),
+        role: Some(if role_is_user {
+            MessageRole::User
+        } else {
+            MessageRole::Assistant
+        }),
+        content: Some(MessageContent::Text(text.into())),
+        ..Default::default()
+    }
+}
+
+fn session_with_messages(id: &str, updated_at: i64) -> Session {
+    let mut s = Session::new(id);
+    s.messages = vec![
+        text_msg(true, "帮我看看这个仓库的结构"),
+        text_msg(false, "好的，我先看一下目录。"),
+    ];
+    s.updated_at = updated_at;
+    s
+}
+
+/// 保存拆成两个文件：元数据里**不再**内联消息
+#[tokio::test]
+async fn save_splits_metadata_and_messages() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with_messages("v2_sess_split", 1000)).await;
+
+    let dir = dir_for(tmp.path(), "v2_sess_split");
+    assert!(dir.join(SESSION_FILE).is_file());
+    assert!(dir.join(MESSAGES_FILE).is_file());
+
+    let meta_text = std::fs::read_to_string(dir.join(SESSION_FILE)).unwrap();
+    assert!(
+        !meta_text.contains("\"messages\""),
+        "元数据里不该再内联消息：{meta_text}"
+    );
+    let msgs_text = std::fs::read_to_string(dir.join(MESSAGES_FILE)).unwrap();
+    assert!(msgs_text.contains("帮我看看这个仓库的结构"));
+
+    // 往返：消息一条不少
+    let loaded = store.load_session("v2_sess_split").await.unwrap();
+    assert_eq!(loaded.messages.len(), 2);
+}
+
+/// 清单只读元数据：**消息文件坏了也不影响列清单**（这是拆分的核心收益）
+#[tokio::test]
+async fn list_sessions_does_not_touch_messages() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with_messages("v2_sess_ok", 1000)).await;
+
+    // 把消息文件写成垃圾：清单仍然列得出来
+    std::fs::write(
+        dir_for(tmp.path(), "v2_sess_ok").join(MESSAGES_FILE),
+        "{ not json",
+    )
+    .unwrap();
+
+    let listed = store.list_sessions().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, "v2_sess_ok");
+    // 投影还在（保存时算好的），因此清单不受影响
+    assert_eq!(listed[0].message_count, 2);
+}
+
+/// 保存时算好投影：标题 / 条数 / 摘要 / 标签都不必读消息就能拿到
+#[tokio::test]
+async fn save_persists_the_list_projection() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    let mut s = session_with_messages("v2_sess_proj", 1000);
+    s.metadata["workdir"] = json!("/tmp/proj/demo");
+    save(&store, &s).await;
+
+    let listed = store.list_sessions().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    let p = &listed[0];
+    // 标题 = 第一条用户消息的首行（限长）
+    assert_eq!(p.title, "帮我看看这个仓库的结构");
+    assert_eq!(p.message_count, 2);
+    assert_eq!(p.summary.as_deref(), Some("好的，我先看一下目录。"));
+    assert_eq!(p.meta_tags, vec!["demo".to_string(), "2 条".to_string()]);
+}
+
+/// **存量文件**（消息内联、没有投影字段）照样可读，且清单给的是友好名，
+/// 不是 id —— 这条专门钉住「列表退化成一串短 guid」那次回归。
+#[tokio::test]
+async fn legacy_inline_session_keeps_a_friendly_title() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+
+    // 手写一个旧布局文件：消息内联，**没有** title / message_count / summary / meta_tags
+    let dir = dir_for(tmp.path(), "v2_sess_legacy");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(SESSION_FILE),
+        r#"{"id":"v2_sess_legacy","messages":[{"id":"m1","role":"user","content":"老会话的标题"},{"id":"m2","role":"assistant","content":"收到"}],"created_at":1,"updated_at":2,"metadata":{}}"#,
+    )
+    .unwrap();
+
+    let listed = store.list_sessions().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        listed[0].title, "老会话的标题",
+        "投影缺失时必须用内联消息就地补算，否则清单会显示 id"
+    );
+    assert_ne!(listed[0].title, listed[0].id);
+    assert_eq!(listed[0].message_count, 2);
+
+    // 消息也读得回来（旧布局没有 messages.json）
+    let loaded = store.load_session("v2_sess_legacy").await.unwrap();
+    assert_eq!(loaded.messages.len(), 2);
+}
+
+/// 迁移：旧布局 → 两文件，并补写投影；**幂等**（第二次跑不再改动）
+#[tokio::test]
+async fn migrate_splits_legacy_and_is_idempotent() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+
+    let dir = dir_for(tmp.path(), "v2_sess_mig");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(SESSION_FILE),
+        r#"{"id":"v2_sess_mig","messages":[{"id":"m1","role":"user","content":"迁移前的话"}],"created_at":1,"updated_at":2,"metadata":{}}"#,
+    )
+    .unwrap();
+
+    store.migrate_split_messages().await.unwrap();
+    assert!(dir.join(MESSAGES_FILE).is_file(), "消息应被拆出去");
+
+    // 迁移后清单仍有友好名，且元数据里不再内联消息
+    let listed = store.list_sessions().await.unwrap();
+    assert_eq!(listed[0].title, "迁移前的话");
+    let meta_text = std::fs::read_to_string(dir.join(SESSION_FILE)).unwrap();
+    assert!(!meta_text.contains("\"messages\""));
+
+    // 幂等：再跑一次不报错、内容不变
+    store.migrate_split_messages().await.unwrap();
+    let again = store.list_sessions().await.unwrap();
+    assert_eq!(again[0].title, "迁移前的话");
+    assert_eq!(again[0].message_count, 1);
+}
+
+/// 有界清单：`limit` 条 + `before` 游标（按 `updated_at` 降序之后往前翻）
+#[tokio::test]
+async fn session_list_pages_before_cursor() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    for (id, t) in [("a", 3000), ("b", 2000), ("c", 1000)] {
+        save(&store, &session_with(id, None)).await;
+        // session_with 固定 updated_at=1000，这里改成期望值以排出顺序
+        let mut s = store.load_session(id).await.unwrap();
+        s.updated_at = t;
+        save(&store, &s).await;
+    }
+
+    let ids = |v: &[SessionSummary]| -> Vec<String> { v.iter().map(|s| s.id.clone()).collect() };
+
+    let page1 = store.list_sessions_window(Some(2), None).await.unwrap();
+    assert_eq!(ids(&page1), vec!["a", "b"]);
+
+    let page2 = store
+        .list_sessions_window(Some(2), Some("b"))
+        .await
+        .unwrap();
+    assert_eq!(ids(&page2), vec!["c"]);
+
+    // 不传参数 = 全量（与 `list_sessions` 同义）
+    assert_eq!(ids(&store.list_sessions().await.unwrap()), vec!["a", "b", "c"]);
+
+    // 游标是最后一页 ⇒ 空页，自然收敛
+    assert!(store
+        .list_sessions_window(Some(2), Some("c"))
+        .await
+        .unwrap()
+        .is_empty());
+}
+
 /// id 里的分隔符 / `..` 不得让会话目录逃出存储根
 ///
 /// 这条防护是把宿主层 `safe_segment` 接进会话侧（paths::safe_id）之后才有的——

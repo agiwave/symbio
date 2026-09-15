@@ -12,13 +12,14 @@
 //! 切换 homedir 后，新会话将写入新 homedir；存量数据**不会**自动迁移。
 
 use super::chat_session::ChatSession;
-use super::types::Session;
+use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::session_chat_response;
 pub use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::vdfs;
+use crate::symbio_core::vdfs_provider::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use crate::symbio_core::{
     dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginDir,
     PluginError, PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION,
@@ -298,6 +299,13 @@ impl SessionPlugin {
 
         let store = Arc::new(SessionStore::new(Self::session_storage_dir()));
 
+        // 一次性迁移：旧布局（消息内联）→ 元数据 / 消息两个文件，并补写清单投影。
+        // 放在 store 构造之后、首次发布之前——每个进程只跑一次；读路径本来就有
+        // 兜底，迁移失败也不影响可用性。
+        if let Err(e) = store.migrate_split_messages().await {
+            crate::plugin_warn!("session", "会话存储迁移失败（读路径有兜底）: {}", e);
+        }
+
         // OnceCell::set 在多 writer 竞争时可能失败，但失败时另一线程已成功，直接拿
         let _ = self.store.set(Arc::clone(&store));
         Ok(self
@@ -318,8 +326,21 @@ impl SessionPlugin {
         self.get_store().await?.save_session(session).await
     }
 
-    pub(crate) async fn list_sessions(&self) -> Result<Vec<Session>, PluginError> {
+    /// 会话清单（**摘要**，不含消息）
+    pub(crate) async fn list_sessions(&self) -> Result<Vec<SessionSummary>, PluginError> {
         self.get_store().await?.list_sessions().await
+    }
+
+    /// 有界会话清单：`limit` 条、游标 `before` 之后（VDFS 调用级参数袋传入）
+    pub(crate) async fn list_sessions_window(
+        &self,
+        limit: Option<u32>,
+        before: Option<&str>,
+    ) -> Result<Vec<SessionSummary>, PluginError> {
+        self.get_store()
+            .await?
+            .list_sessions_window(limit, before)
+            .await
     }
 
     pub(crate) async fn open_chat_session(
@@ -414,65 +435,6 @@ impl Plugin for SessionPlugin {
 
 crate::submit_object_creator!(PLUGIN_SESSION, SessionPlugin::build, dyn Plugin);
 
-// ==================== 会话列表展示辅助 ====================
-
-/// 会话列表一行摘要：最后一条含文本消息的首行（压缩空白、限长 60 字符）。
-///
-/// 与 [`crate::plugins::session::types::derive_session_title`] 同风格；
-/// 供会话节点的 `description` 驱动列表「实时缩略」预览。
-fn derive_session_summary(
-    messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
-) -> Option<String> {
-    const SUMMARY_MAX_CHARS: usize = 60;
-    let text = messages
-        .iter()
-        .rev()
-        .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
-        .map(|t| t.trim().to_string())
-        .find(|t| !t.is_empty())?;
-    let first_line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
-    let mut out = String::new();
-    let mut chars = first_line.chars();
-    for _ in 0..SUMMARY_MAX_CHARS {
-        match chars.next() {
-            Some(c) if c.is_whitespace() => {
-                if !out.ends_with(' ') {
-                    out.push(' ');
-                }
-            }
-            Some(c) => out.push(c),
-            None => return Some(out.trim_end().to_string()),
-        }
-    }
-    Some(format!("{}…", out.trim_end()))
-}
-
-/// 会话的通用元信息标签（工作目录名 + 消息数）。
-///
-/// 标签由本函数单点产出，挂在 VDFS 节点的 `attributes.meta_tags` 上，保证同一
-/// 会话在清单与详情里的呈现一致；前端原样渲染，不含语义。
-fn session_meta_tags(s: &Session) -> Vec<String> {
-    let mut tags: Vec<String> = Vec::new();
-    if let Some(wd) = s
-        .metadata
-        .get("workdir")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        let base = wd
-            .trim_end_matches(['/', '\\'])
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or(wd);
-        if !base.is_empty() {
-            tags.push(base.to_string());
-        }
-    }
-    tags.push(format!("{} 条", s.messages.len()));
-    tags
-}
-
 // ==================== VDFS 挂载点（/session） ====================
 //
 // 会话是 VDFS 的第二个原生 provider：
@@ -489,15 +451,15 @@ fn session_meta_tags(s: &Session) -> Vec<String> {
 
 /// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）。
 ///
-/// 标题 / 摘要 / 状态 / 元信息标签与清单呈现**同源**（复用
-/// `display_title`、`derive_session_summary` 与 [`session_meta_tags`]），
-/// 保证同一会话在清单与聊天工作区里的呈现一致。
+/// 入参是 [`SessionSummary`] 而非 `Session`——**清单路径根本不持有消息**，
+/// 于是「节点又去碰消息」在类型上就写不出来。标题 / 摘要 / 元信息标签都是
+/// 存储层保存时算好的**投影**（`SessionSummary::of`），呈现口径因此单点。
 ///
 /// 另在 `attributes` 上挂载会话清单所需字段（`message_count` / `metadata` /
 /// `meta_tags`）——它们是**场景数据**，VDFS 只透传；会话清单由此可直接用
 /// `vdfs/list` 一次取全（见 S8）。
-fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
-    let mut n = vdfs::VdfsNode::file(&s.id, s.display_title(), vdfs::VdfsAccess::READ_WRITE);
+fn session_node(s: &SessionSummary, is_working: bool) -> vdfs::VdfsNode {
+    let mut n = vdfs::VdfsNode::file(&s.id, s.title.clone(), vdfs::VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_SESSION.to_string();
     n.ext = Some(vdfs::VDFS_EXT_SESSION.to_string());
     n.status = if is_working {
@@ -507,17 +469,125 @@ fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
     }
     .to_string();
     n.updated_at = Some(s.updated_at);
-    n.description = derive_session_summary(&s.messages);
+    n.description = s.summary.clone();
     let _ = n
         .attributes
-        .insert("message_count".to_string(), json!(s.messages.len()));
+        .insert("message_count".to_string(), json!(s.message_count));
     let _ = n
         .attributes
         .insert("metadata".to_string(), s.metadata.clone());
     let _ = n
         .attributes
-        .insert("meta_tags".to_string(), json!(session_meta_tags(s)));
+        .insert("meta_tags".to_string(), json!(s.meta_tags));
     n
+}
+
+// ==================== 有界列表（VDFS 调用级参数袋） ====================
+//
+// 「只取一页」不是会话专有需求——任何清单都会有这一天。所以它不是一个新接口，
+// 而是 `vdfs/list` 的**调用级参数**：谁传谁生效，不传就与从前逐字节一致
+// （`VdfsProvider::list` 的签名因此不必改动，其它 provider 一行都不用动）。
+
+/// 从调用级参数袋里取窗口：`limit`（条数，名义值）与 `before`（游标 = 上一页
+/// 最后一个条目的地址）。
+fn window_params(ctx: &vdfs::VdfsContext) -> (Option<u32>, Option<&str>) {
+    (
+        ctx.param_as::<u32>(VDFS_PARAM_LIMIT),
+        ctx.param_str(VDFS_PARAM_BEFORE),
+    )
+}
+
+/// 沿 `parent_id` 上溯的步数上限（防御成环；正常转写远小于此）
+const MAX_PARENT_STEPS: usize = 64;
+
+/// 转写的有界窗口 —— **根节点为计量单位**，且**父节点闭合**。
+///
+/// ## 为什么计量单位是「根」而不是「条」
+///
+/// 一个 Turn = 一个根消息 + 它的全部后代（reason / tool_call / 文本分块）。
+/// 按条数截断会把 Turn 劈成两半：前端拿到 reason 却拿不到它属于哪一轮，
+/// 树就拼不起来。所以 `limit` 是**名义值**——实际返回的条数恒 ≥ `limit`。
+///
+/// ## 父节点闭合
+///
+/// 只要某个根被选中，它的**全部**后代都在窗口里；反过来，窗口里不会出现在
+/// 窗口外的父节点（否则同样拼不成树）。
+///
+/// `before` 是上一页最后一条的地址（消息 id 或 `<…>/<id>`）；它会被归到自己的
+/// 根，从那个根**往前**再取 `limit` 个根。找不到游标（已删 / 已到末尾）返回空页，
+/// 让调用方自然收敛，不报错。
+fn transcript_window(
+    msgs: &[cm::ChatMessage],
+    limit: Option<u32>,
+    before: Option<&str>,
+) -> Vec<cm::ChatMessage> {
+    // 没给窗口参数 = 全量（前端流式期间要的就是完整列表）
+    if limit.is_none() && before.is_none() {
+        return msgs.to_vec();
+    }
+
+    let index: HashMap<&str, usize> = msgs
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.id.as_str(), i))
+        .collect();
+
+    // 每条消息的**根**：沿 parent_id 上溯；parent 缺失或不在列表里 ⇒ 自己即根
+    let root_of: Vec<usize> = msgs
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let mut cur = i;
+            for _ in 0..MAX_PARENT_STEPS {
+                let parent = match msgs[cur].parent_id.as_deref() {
+                    Some(p) if !p.is_empty() => p,
+                    _ => break,
+                };
+                match index.get(parent) {
+                    Some(&pi) if pi != cur => cur = pi,
+                    _ => break,
+                }
+            }
+            cur
+        })
+        .collect();
+
+    // 根的出现顺序（去重，保留首次出现序）
+    let mut roots: Vec<usize> = Vec::new();
+    let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for &r in &root_of {
+        if seen.insert(r) {
+            roots.push(r);
+        }
+    }
+
+    let end = match before.and_then(|b| cursor_id(b)).and_then(|b| index.get(b)) {
+        Some(&i) => roots
+            .iter()
+            .position(|&r| r == root_of[i])
+            .unwrap_or(roots.len()),
+        None => roots.len(),
+    };
+    let start = match limit {
+        Some(n) => end.saturating_sub(n as usize),
+        None => 0,
+    };
+
+    let keep: std::collections::HashSet<usize> = roots[start..end].iter().copied().collect();
+    msgs.iter()
+        .zip(&root_of)
+        .filter(|(_, r)| keep.contains(r))
+        .map(|(m, _)| m.clone())
+        .collect()
+}
+
+/// 游标 → 消息 id：游标可以是裸 id，也可以是 `<…>/<id>` 的地址形式
+fn cursor_id(before: &str) -> Option<&str> {
+    let b = before.trim_end_matches('/');
+    match b.rsplit('/').next() {
+        Some(id) if !id.is_empty() => Some(id),
+        _ => None,
+    }
 }
 
 // ==================== VDFS：会话内部寻址 ====================
@@ -942,7 +1012,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
 
     async fn list(
         &self,
-        _ctx: &vdfs::VdfsContext,
+        ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
         // 配置文件优先：`PLUGIN.yml` 是文档，不是会话
@@ -951,16 +1021,17 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 "配置文件是文档，没有子项：{path}"
             )));
         }
+        let (limit, before) = window_params(ctx);
         match parse_session_path(path)? {
             VdfsSessionPath::Root => {
+                // 清单里**只有会话**——配置文件是文档，它进设置菜单走的是
+                // ConfigurableVisitor 那条通道，不该在会话清单里再出现一次
+                // （否则列表底部会多一个「设置」项）。
                 let sessions = self
-                    .list_sessions()
+                    .list_sessions_window(limit, before)
                     .await
                     .map_err(vdfs::from_plugin_error)?;
-                let mut nodes = self.nodes_of_sessions(&sessions).await;
-                // 本插件的配置文件与资源并列（排在资源之后）
-                nodes.push(self.config_file.node());
-                Ok(nodes)
+                Ok(self.nodes_of_sessions(&sessions).await)
             }
             // 会话内部：三个虚拟子目录（会话存在性校验由 `session_of` 承担）
             VdfsSessionPath::Session(id) => {
@@ -973,7 +1044,12 @@ impl vdfs::VdfsProvider for SessionPlugin {
             // 含**在途**消息——流式期间列表就是活的，不必等落库。
             VdfsSessionPath::Messages { id, mid: None } => {
                 let msgs = self.transcript_of(id).await?;
-                Ok(msgs.iter().map(message_node).collect())
+                // 有界窗口：**只在调用方显式给参数时**生效。不给参数 = 全量，
+                // 与从前逐字节一致（流式期间前端要的是完整列表）。
+                Ok(transcript_window(&msgs, limit, before)
+                    .iter()
+                    .map(message_node)
+                    .collect())
             }
             VdfsSessionPath::Messages { mid: Some(_), .. } => Err(vdfs::VdfsError::not_found(
                 format!("消息是列表项，没有子项：{path}"),
@@ -1049,7 +1125,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
             }
             VdfsSessionPath::SubSession { id, sub } => {
                 let session = self.sub_session_of(id, sub).await?;
-                Ok(session_node(&session, self.is_working(sub).await))
+                Ok(session_node(
+                    &SessionSummary::of(&session),
+                    self.is_working(sub).await,
+                ))
             }
             VdfsSessionPath::Workdir { id, rel } => {
                 let workdir = self.workdir_of(id).await?;
@@ -1372,7 +1451,7 @@ impl SessionPlugin {
     }
 
     /// 会话清单 → VDFS 节点（携带实时工作状态）
-    async fn nodes_of_sessions(&self, sessions: &[super::types::Session]) -> Vec<vdfs::VdfsNode> {
+    async fn nodes_of_sessions(&self, sessions: &[SessionSummary]) -> Vec<vdfs::VdfsNode> {
         let active = self.active_mgr.sessions.read().await;
         sessions
             .iter()
@@ -1559,7 +1638,7 @@ mod tests {
         let mut s = Session::new("abc");
         s.updated_at = 1_700_000_000_000;
 
-        let idle = session_node(&s, false);
+        let idle = session_node(&SessionSummary::of(&s), false);
         assert_eq!(idle.name, "abc");
         assert_eq!(idle.effective_ext().as_deref(), Some("session"));
         assert_eq!(idle.kind, PLUGIN_SESSION);
@@ -1568,7 +1647,7 @@ mod tests {
         assert_eq!(idle.access.flags(), "rw", "会话可读可写");
         assert!(!idle.is_dir(), "会话是文档而非目录");
 
-        let busy = session_node(&s, true);
+        let busy = session_node(&SessionSummary::of(&s), true);
         assert_eq!(busy.status, vdfs::VDFS_STATUS_WORKING);
     }
 
@@ -1697,6 +1776,96 @@ mod tests {
         }
     }
 
+    /// 带父指针的消息（一个 Turn = 根 + 它的全部后代）
+    fn child(id: &str, seq: Option<i64>, parent: &str) -> cm::ChatMessage {
+        cm::ChatMessage {
+            id: id.into(),
+            seq,
+            parent_id: Some(parent.into()),
+            ..Default::default()
+        }
+    }
+
+    fn ids(v: &[cm::ChatMessage]) -> Vec<&str> {
+        v.iter().map(|m| m.id.as_str()).collect()
+    }
+
+    /// 没给窗口参数 = 全量：流式期间前端要的就是完整列表，行为必须与从前一致
+    #[test]
+    fn transcript_window_without_params_is_the_whole_list() {
+        let msgs = vec![msg("t1", Some(1)), child("r1", Some(2), "t1")];
+        assert_eq!(ids(&transcript_window(&msgs, None, None)), vec!["t1", "r1"]);
+    }
+
+    /// 父节点闭合：只要根被选中，它的**全部**后代都在窗口里；窗口里也不会出现
+    /// 父节点在窗口外的孤儿（那样前端拼不成树）
+    #[test]
+    fn transcript_window_is_parent_closed() {
+        let msgs = vec![
+            msg("t1", Some(1)),
+            child("r1", Some(2), "t1"),
+            msg("t2", Some(3)),
+            child("r2", Some(4), "t2"),
+        ];
+        // limit=1 → 只取最后一个根（t2），但带上它的后代 r2
+        assert_eq!(ids(&transcript_window(&msgs, Some(1), None)), vec!["t2", "r2"]);
+        // limit=2 → 两个根 + 两个后代
+        assert_eq!(
+            ids(&transcript_window(&msgs, Some(2), None)),
+            vec!["t1", "r1", "t2", "r2"]
+        );
+        // parent 指向不存在 / 空 ⇒ 自己即根（孤儿不被丢弃）
+        let orphan = vec![msg("t1", Some(1)), child("o1", Some(2), "nope")];
+        assert_eq!(ids(&transcript_window(&orphan, Some(1), None)), vec!["o1"]);
+    }
+
+    /// 游标往前翻页：从游标所在根**之前**再取 `limit` 个根
+    #[test]
+    fn transcript_window_pages_before_cursor() {
+        let msgs = vec![
+            msg("t1", Some(1)),
+            msg("t2", Some(2)),
+            msg("t3", Some(3)),
+        ];
+        assert_eq!(
+            ids(&transcript_window(&msgs, Some(2), Some("t3"))),
+            vec!["t1", "t2"]
+        );
+        assert_eq!(
+            ids(&transcript_window(&msgs, Some(1), Some("t2"))),
+            vec!["t1"]
+        );
+        // 游标可以写成地址形式（`<…>/<id>`），不只是裸 id
+        assert_eq!(
+            ids(&transcript_window(&msgs, Some(2), Some(".vdfs/session/s/消息/t3"))),
+            vec!["t1", "t2"]
+        );
+        // 游标在第一页之前 ⇒ 空页（自然收敛，不报错）
+        assert!(transcript_window(&msgs, Some(2), Some("t1")).is_empty());
+    }
+
+    /// **Turn 永不被劈开**：`limit` 是名义值，实际条数恒 ≥ limit
+    ///
+    /// 这是「计量单位是根、不是条」的锁死测试——按条数截断会把一轮 reason /
+    /// tool_call 与它的根分开，前端树就拼不起来。
+    #[test]
+    fn transcript_window_keeps_turns_whole() {
+        let msgs = vec![
+            msg("t2", Some(1)),
+            child("r2", Some(2), "t2"),
+            child("c2", Some(3), "t2"),
+            msg("t3", Some(4)),
+        ];
+        // 无游标 ⇒ 取最新的根：t3（只有它自己）
+        assert_eq!(ids(&transcript_window(&msgs, Some(1), None)), vec!["t3"]);
+        // 游标 t3 ⇒ 前一个根 t2，**连同它的两个后代**一起回来
+        assert_eq!(
+            ids(&transcript_window(&msgs, Some(1), Some("t3"))),
+            vec!["t2", "r2", "c2"],
+            "limit=1 却返回 3 条 —— 一个 Turn 不能拆"
+        );
+    }
+
     /// 列表顺序以 `seq` 为准（唯一权威顺序锚点）：缺 `seq` 的排最后且不打乱相对顺序
     #[test]
     fn vdfs_messages_are_ordered_by_seq() {
@@ -1813,7 +1982,7 @@ mod tests {
         s.updated_at = 1_700_000_000;
         s.metadata = json!({ "workdir": "/tmp/proj/demo", "title": "T" });
 
-        let n = session_node(&s, false);
+        let n = session_node(&SessionSummary::of(&s), false);
         assert_eq!(n.attributes.get("message_count"), Some(&json!(0)));
         assert_eq!(
             n.attributes.get("metadata").and_then(|v| v.get("workdir")),
@@ -1831,7 +2000,10 @@ mod tests {
 
         // is_working 仍由 status 承载（机制口径，不另设 is_working 字段）
         assert_eq!(n.status, vdfs::VDFS_STATUS_ACTIVE);
-        assert_eq!(session_node(&s, true).status, vdfs::VDFS_STATUS_WORKING);
+        assert_eq!(
+            session_node(&SessionSummary::of(&s), true).status,
+            vdfs::VDFS_STATUS_WORKING
+        );
     }
 
     /// 会话内容（VDFS `read`）：转写全文 + 元数据，JSON
@@ -1913,16 +2085,28 @@ mod tests {
         );
     }
 
-    /// 配置文件与资源并列在根下（排在资源之后），且是 `ext = form` 的可写文档
+    /// 配置文件是 `ext = form` 的可写文档，**但它不在会话清单里**。
+    ///
+    /// 「清单 = 业务列表」：`.vdfs/session` 下应当只有会话。配置文件进设置菜单走
+    /// 的是 ConfigurableVisitor 那条通道（`announce_configurable`），不靠清单并列
+    /// ——否则列表底部会多出一个「设置」项。可达性不受影响：`stat` / `read` 照常。
     #[tokio::test]
-    async fn config_document_sits_beside_the_sessions() {
+    async fn config_document_is_reachable_but_not_a_session_list_item() {
         let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+
+        // 可达：按真实文件名 stat / read
+        let node = p.stat(&vctx(), PLUGIN_FILE).await.unwrap();
+        assert_eq!(node.name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
+        assert_eq!(node.ext.as_deref(), Some(vdfs::VDFS_EXT_FORM));
+        assert_eq!(node.access.flags(), "rw");
+        assert!(node.schema.is_some(), "定义随节点下发");
+
+        // 不并列：清单里没有它
         let items = p.list(&vctx(), "").await.unwrap();
-        let last = items.last().expect("根下至少应有配置文件");
-        assert_eq!(last.name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
-        assert_eq!(last.ext.as_deref(), Some(vdfs::VDFS_EXT_FORM));
-        assert_eq!(last.access.flags(), "rw");
-        assert!(last.schema.is_some(), "定义随节点下发");
+        assert!(
+            !items.iter().any(|n| n.name == PLUGIN_FILE),
+            "会话清单里只应有会话，配置文件不该出现"
+        );
 
         // 配置文件不是会话 id：按文件读，不按会话解析
         assert_eq!(
