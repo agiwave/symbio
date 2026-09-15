@@ -1,11 +1,10 @@
 //! 会话引擎：契约（`ChatSession`）+ 唯一实现（`PersistentChatSession`）。
 //!
-//! 实现只有一个，"要不要持久化"的差异下沉到存储后端（`store::FileSessionStore` /
-//! `store::SqliteSessionStore` / `store::InMemorySessionStore`）：内存态会话经
-//! [`PersistentChatSession::detached`] 构造，因此与持久会话共享同一套孤儿清理、
-//! 轮次窗口与配置读取语义（审计 B1）。
+//! 实现只有一个，"要不要持久化"的差异下沉到存储（`store::SessionStore` 的
+//! `new` / `ephemeral` 两种构造）：内存态会话经 [`PersistentChatSession::detached`]
+//! 构造，因此与持久会话共享同一套孤儿清理、轮次窗口与配置读取语义（审计 B1）。
 //!
-//! - 持久化实现委托 `super::store::SessionStore` 落库；内存实现面向 `_t_` 临时会话。
+//! - 持久化实现委托 `super::store::SessionStore` 落库；不落盘面向 `_t_` 临时会话。
 //! - 滑动窗口、孤儿剔除、时间戳回填等纯函数均在本文件。
 //! - `prune_historical_tool_calls`（存储期工具链物理裁剪）由原 `context.rs`
 //!   并入——其唯一消费者就是本模块（体检备注 audit-5）。
@@ -229,7 +228,7 @@ fn backfill_timestamps(messages: Vec<ChatMessage>, now: i64) -> Vec<ChatMessage>
 pub struct PersistentChatSession {
     session_id: String,
     config: Arc<RwLock<SessionConfig>>,
-    store: Arc<dyn SessionStore>,
+    store: Arc<SessionStore>,
     /// 写入期是否执行工具链物理裁剪（[`prune_historical_tool_calls`]）。
     ///
     /// 持久会话为 `true`（控制磁盘与节点树体积）；内存临时会话为 `false`——
@@ -241,7 +240,7 @@ impl PersistentChatSession {
     pub fn new(
         session_id: String,
         config: Arc<RwLock<SessionConfig>>,
-        store: Arc<dyn SessionStore>,
+        store: Arc<SessionStore>,
     ) -> Self {
         Self {
             session_id,
@@ -251,13 +250,13 @@ impl PersistentChatSession {
         }
     }
 
-    /// 内存临时会话：同一份引擎逻辑 + [`InMemorySessionStore`]，零持久化。
+    /// 不落盘的临时会话：同一份引擎逻辑 + [`SessionStore::ephemeral`]，零持久化。
     ///
     /// 审计 B1 的收敛点——原先这里存在第二份手写实现 `EphemeralChatSession`
     /// （116 行），其 seq 分配、轮次 FIFO、剔孤儿、content 归一与持久版各写
     /// 一遍，任何语义调整都要改两处且已经出现行为漂移（持久版有 prune、内存
-    /// 版没有；持久版配置动态读、内存版构造时快照）。"要不要持久化"是**存储
-    /// 后端**的差异，不是会话引擎的差异，故下沉到 store 层。
+    /// 版没有；持久版配置动态读、内存版构造时快照）。"要不要持久化"是**存储**
+    /// 的差异，不是会话引擎的差异，故下沉到 store 层。
     ///
     /// `session_id` 由调用方决定：`_t_` 临时会话用真实传入 id，兜底会话用固定
     /// `"ephemeral"`（随机 id 会让压缩前的 transcript 转存落到永不复现的目录名
@@ -266,7 +265,7 @@ impl PersistentChatSession {
         Self {
             session_id: session_id.into(),
             config,
-            store: Arc::new(super::store::memory::InMemorySessionStore::new()),
+            store: Arc::new(SessionStore::ephemeral()),
             prune_on_write: false,
         }
     }

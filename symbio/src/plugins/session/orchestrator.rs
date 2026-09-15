@@ -1069,8 +1069,9 @@ impl SessionPlugin {
 
             // ── 向 model/chat 交付会话引擎句柄（SESSION_HANDLE）──
             // model 不再反向路由 session/open，直接从 ctx 读句柄；
-            // 交付失败仅记日志：model 侧回退内存会话（`PersistentChatSession::detached`，
-            // 同一引擎逻辑 + InMemorySessionStore，审计 B1）
+            // 交付失败仅记日志：model 侧回退不落盘的内存会话
+            // （`PersistentChatSession::detached`，同一引擎逻辑 + `SessionStore::ephemeral`，
+            // 审计 B1）
             // （与原路由失败路径等价，不阻断会话）。
             if let Ok(session) = this_spawn
                 .open_session_handle(Some(sid_spawn.clone()))

@@ -1,24 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-// 存储后端类型
-
-/// 可选的存储后端
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum StoreKind {
-    /// 目录 + 文件（JSON），默认
-    #[default]
-    File,
-    /// SQLite 数据库
-    Sqlite,
-    /// 进程内内存（不落盘，进程退出即丢失）
-    ///
-    /// 存在意义：让"不落盘的临时会话"复用与持久会话**同一份**会话引擎实现，
-    /// 差异下沉到存储后端（审计 B2）。同时也是 `_t_` 前缀 / 空 `session_id`
-    /// 临时会话的固定后端。
-    Memory,
-}
-
 /// Session configuration - Single Source of Truth
 ///
 /// ## 存储目录
@@ -31,8 +12,15 @@ pub enum StoreKind {
 ///
 /// - `storage_dir`：存储根由 HomedirRegistry 统一决定，留着只会让人误以为可改路径；
 /// - `session_id`：全仓零消费者、零赋值。配置本身即按会话目录存放（id 由目录名决定），
-///   再在内容里存一份 id 属自指冗余。旧 `session_config.json` 中残留的该键会被 serde
-///   静默忽略（本结构未开 `deny_unknown_fields`），无需数据迁移。
+///   再在内容里存一份 id 属自指冗余。
+/// - `store_kind`（及其 `StoreKind` 枚举）：曾经用它在 `file` / `sqlite` / `memory`
+///   三个后端间选型。sqlite 是「可配置但没人能配置」——前端零引用、默认恒为 `file`、
+///   不支持子会话清单，且仍需一个磁盘目录放压缩存档；memory 表达的不是「另一种存储」
+///   而是「要不要持久化」。两者都不是同一件事的第二种实现，选型因此下沉到构造点
+///   （`store::SessionStore::{new, ephemeral}`），配置面少一个假开关。
+///
+/// 旧配置里残留的上述键会被 serde 静默忽略（本结构未开 `deny_unknown_fields`），
+/// 无需数据迁移。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionConfig {
     /// 最大保存会话轮数（每一轮以一个 User 消息开始）
@@ -44,9 +32,6 @@ pub struct SessionConfig {
     /// 上下文会话轮数限制（0 表示不限制，每一轮以一个 User 消息开始）
     #[serde(default = "default_context_messages")]
     pub context_messages: usize,
-    /// 存储后端类型
-    #[serde(default)]
-    pub store_kind: StoreKind,
     /// 最大工具调用迭代轮数（**0 = 不限制**，且 0 即默认值）
     ///
     /// 语义与 `model_chat::Request::max_tool_rounds` 对齐：session 编排层仅在
@@ -149,7 +134,6 @@ impl Default for SessionConfig {
             max_messages: default_max_messages(),
             auto_compress: default_auto_compress(),
             context_messages: default_context_messages(),
-            store_kind: StoreKind::default(),
             max_tool_rounds: default_max_tool_rounds(),
             compress_line_threshold: default_compress_line_threshold(),
             compress_keep_recent: default_compress_keep_recent(),

@@ -18,6 +18,37 @@
 
 ***
 
+## 2026-09-15: 会话存储由「trait + 三后端」收为一个具体类型
+
+`plugins/session/store` 原本是 `SessionStore` trait + `FileSessionStore` /
+`SqliteSessionStore` / `InMemorySessionStore`，由配置项 `store_kind` 经
+`create_store` 选型。两个前提经取证证伪（`docs/architecture/session-*-audit.md`
+早已判定 `store_kind` 为「可配置但不可用」的死机制）：sqlite 前端零引用、默认恒为
+`file`、不支持子会话清单、且仍需一个磁盘目录放压缩存档；memory 表达的不是「另一种
+存储」而是「要不要持久化」。
+
+- **删除** `sqlite.rs`（199 行）与 `memory.rs`，`store` 收为单文件实现 +
+  一个 `tests.rs`；`SessionStore` 由 trait 变为具体类型，落盘 / 不落盘是构造选型
+  （`SessionStore::new(base)` / `SessionStore::ephemeral()`），`async_trait`、
+  `create_store` 工厂、`Arc<dyn SessionStore>` 一并消失。
+- **删除** `StoreKind` 枚举与 `SessionConfig::store_kind` 字段（与既有
+  `storage_dir` / `session_id` 同一处置：旧配置残留键由 serde 静默忽略，无迁移）。
+  `rusqlite` / `tokio-rusqlite` 依赖随之移除。
+- **寻址接入宿主层**：`paths::safe_id` 不再自带一份规则，委托
+  `providers::vdfs_service::entry::safe_segment`；`session_storage_dir()` 委托
+  `entry::category_dir(PLUGIN_SESSION)`。会话目录名与 VDFS 资源条目目录名从此
+  同一份规则（顺带把 `.` / `..` / 控制字符防护带进会话侧——旧实现只替换 `/ \ :`）。
+- **刻意不改用 `vdfs_service` 三型**：`DirVdfs` 的「条目内部可下钻」会把
+  `session.json` / `messages/` / `tool_archives/` / `transcripts/` 变成对外地址，
+  而会话要求 `<id>` 是叶子、内部只以人读语义段呈现；消息内联在 `session.json` 里，
+  条目不是文件字节。理由与规范 §13.4「目录自管的类型自己落盘」同一条判据。
+- **新增测试**：截断 JSON 自愈、原子写不留 `.tmp`、恶意 id 不得逃出存储根、
+  临时与落盘两种驻留方式契约逐条一致。
+
+`cargo test --lib` 495 passed；`clippy --all-targets` 零告警；`fmt --check` 干净。
+
+***
+
 ## 2026-09-15: 废除 storage_service，资源存储收敛为 VdfsProvider 的三个集中实现
 
 **两套并行的资源访问抽象合并为一套**：上一条目（S16）删掉了「差异集中在一张 trait」的

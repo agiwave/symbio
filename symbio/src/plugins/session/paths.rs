@@ -1,15 +1,18 @@
-//! 会话存储路径工具 —— 会话 ID 到文件系统目录的映射唯一权威实现。
+//! Session 插件的路径派生 —— 会话 ID 到文件系统目录的映射入口。
 //!
 //! Session 插件内所有"落盘到会话目录"的组件（存储后端、L0 工具结果守卫、
 //! L3 transcript 转存）都必须经由本模块拼路径，禁止各自
 //! 重复实现 `safe_id` 或手工重建 `<homedir>/plugins/session` 前缀：
 //!
-//! - [`safe_id`]：session_id → 安全目录名（历史教训：同一替换逻辑曾在
-//!   store/file.rs、tool_result_guard.rs、chat_loop.rs、chat_session.rs
-//!   各写一份，行为漂移风险高，故收敛于此）。
+//! - [`safe_id`]：session_id → 安全目录名。**规则本身不在本模块**——它是
+//!   宿主层 [`crate::providers::vdfs_service::entry::safe_segment`]（所有 VDFS
+//!   资源条目共用的那一版，含 `.` / `..` 与控制字符防护），本模块只是会话侧的
+//!   入口。历史教训：同一替换逻辑曾在 store/file.rs、tool_result_guard.rs、
+//!   chat_loop.rs、chat_session.rs 各写一份，行为漂移风险高；收敛到插件内唯一
+//!   之后仍与宿主层并存的第二版，故再上一台阶。
 //! - [`session_dir`] / [`session_subdir`]：基于
-//!   [`SessionPlugin::session_storage_dir`]（其注释声明为存储根目录的
-//!   唯一权威位置）派生会话目录与会话内子目录。
+//!   [`SessionPlugin::session_storage_dir`]（同样委托宿主层 `category_dir`）
+//!   派生会话目录与会话内子目录。
 
 /// 会话内固定子目录名：L0 工具结果全文存档。
 pub const TOOL_ARCHIVES_SUBDIR: &str = "tool_archives";
@@ -29,10 +32,10 @@ pub const RETRIEVAL_HINT: &str = "（取回：vdfs_read 该路径，按 offset/l
 /// 将 session_id 转换为安全的目录名。
 ///
 /// session_id 会直接成为文件系统目录名，必须替换路径分隔符（`/`、`\`）
-/// 与 Windows 盘符冒号（`:`），防止路径穿越与非法目录名。
-/// 空串/空白原样返回（不做 trim），与历史实现行为一致。
+/// 与 Windows 盘符冒号（`:`），防止路径穿越与非法目录名。规则与 VDFS 资源
+/// 条目共用一份（见模块头），因此同一 id 在会话目录与资源目录下的映射不会分叉。
 pub(crate) fn safe_id(session_id: &str) -> String {
-    session_id.replace(['/', '\\', ':'], "_")
+    crate::providers::vdfs_service::entry::safe_segment(session_id)
 }
 
 /// 会话目录：`<homedir>/plugins/session/<safe_id>/`
@@ -63,7 +66,33 @@ mod tests {
     #[test]
     fn safe_id_keeps_normal_ids_untouched() {
         assert_eq!(safe_id("plain-id_123"), "plain-id_123");
-        assert_eq!(safe_id(""), "");
+        assert_eq!(safe_id("v2_sess_1717_a1b2"), "v2_sess_1717_a1b2");
+        // 空 id 归一为占位段名（与资源条目同一规则）；空 / `_t_` 前缀的会话
+        // 走不落盘的临时存储，因此这条映射只是防御性一致，不影响任何磁盘路径。
+        assert_eq!(safe_id(""), "_empty_");
+    }
+
+    /// 会话目录名与 VDFS 资源条目目录名**同一份规则**（本次收敛的不变量）：
+    /// 过去两处各写一版，`*` `?` `.` `..` 等字符的处置不一致，同一个 id 在
+    /// 会话侧与资源侧会落到不同段名下。
+    #[test]
+    fn safe_id_is_the_same_rule_as_vdfs_entry_segments() {
+        for id in [
+            "a/b",
+            "a\\b",
+            "c:tmp",
+            "plain-id_123",
+            "..",
+            ".",
+            "weird*name?.md",
+            " padded ",
+        ] {
+            assert_eq!(
+                safe_id(id),
+                crate::providers::vdfs_service::entry::safe_segment(id),
+                "id `{id}` 的会话段名与资源段名必须同解"
+            );
+        }
     }
 
     #[test]

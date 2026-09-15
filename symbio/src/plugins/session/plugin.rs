@@ -19,8 +19,8 @@ use crate::symbio_core::schemas::session::session_chat_response;
 pub use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
-    PluginFrame, PluginMeta, PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_SESSION,
+    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginFrame, PluginMeta,
+    PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_SESSION,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -36,8 +36,8 @@ pub struct SessionPlugin {
     pub(crate) parent: Option<Weak<dyn Plugin>>,
     /// 活跃会话管理器 (V2 整合版：处理长连接与广播)
     pub(crate) active_mgr: Arc<super::active::ActiveSessionManager>,
-    /// 存储后端单例（全局共享，初始化一次后跨 workdir / 跨会话复用）
-    pub(crate) store: OnceCell<Arc<dyn SessionStore>>,
+    /// 存储单例（全局共享，初始化一次后跨 workdir / 跨会话复用）
+    pub(crate) store: OnceCell<Arc<SessionStore>>,
     /// 心跳任务运行时状态：会话 id -> 最近一次"有效活动"时间戳（毫秒）。
     /// 调度器据此判断会话是否已空闲足够久。
     pub(crate) heartbeat_state: Arc<RwLock<HashMap<String, i64>>>,
@@ -53,7 +53,7 @@ pub struct SessionPlugin {
     pub(crate) watch_tasks: Arc<tokio::sync::Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
-use super::store::{create_store, SessionStore};
+use super::store::SessionStore;
 
 impl SessionPlugin {
     /// 主构造函数（Factory 机制使用）
@@ -265,25 +265,28 @@ impl SessionPlugin {
         self.parent.as_ref().and_then(|w| w.upgrade())
     }
 
-    /// Session 存储目录：从 [`HomedirRegistry`] 派生
+    /// Session 存储目录：`<homedir>/plugins/session`
     ///
-    /// 路径：`<homedir>/plugins/session`
+    /// 构造式不在本插件里手写——直接取宿主层的资源类别根
+    /// [`category_dir`](crate::providers::vdfs_service::entry::category_dir)
+    /// （`<homedir>/plugins/<类别>`，类别段名 = 插件名）。会话因此与
+    /// model / skill / mcp 共用同一条「插件名 → 存储类别」的映射，
+    /// 不再各插件手拼一次 `join("plugins").join(...)`。
     ///
-    /// 这是 session 存储目录的**唯一权威位置**，不再依赖任何 config 字段。
-    /// 切换 homedir 后，下一次 `get_store` 调用将自动使用新 homedir 下的目录。
+    /// 这是 session 存储目录的**唯一权威位置**，不依赖任何 config 字段。
+    /// 切换 homedir 后 worker composite 会整体重建（`home/reload`），
+    /// 新插件实例的下一次 `get_store` 因此用新 homedir 下的目录。
     pub fn session_storage_dir() -> PathBuf {
-        HomedirRegistry::get().join("plugins").join("session")
+        crate::providers::vdfs_service::entry::category_dir(PLUGIN_SESSION)
     }
 
     /// 获取（或初始化）存储后端。全局单例，首次调用时创建。
-    pub(crate) async fn get_store(&self) -> Result<Arc<dyn SessionStore>, PluginError> {
+    pub(crate) async fn get_store(&self) -> Result<Arc<SessionStore>, PluginError> {
         if let Some(store) = self.store.get() {
             return Ok(Arc::clone(store));
         }
 
-        let base_dir = Self::session_storage_dir();
-        let kind = self.config.read().await.store_kind.clone();
-        let store = create_store(base_dir, kind).await?;
+        let store = Arc::new(SessionStore::new(Self::session_storage_dir()));
 
         // OnceCell::set 在多 writer 竞争时可能失败，但失败时另一线程已成功，直接拿
         let _ = self.store.set(Arc::clone(&store));
@@ -1335,14 +1338,23 @@ mod tests {
     // 目录树场景模块（本文件非测试码用 `super::workdir`；测试模块需显式引入）
     use crate::plugins::session::workdir;
 
-    /// 验证 session 存储目录**只**从 HomedirRegistry 派生，不依赖 config
+    /// 验证 session 存储目录**只**从 HomedirRegistry 派生，不依赖 config；
+    /// 且它就是宿主层的资源类别根（`category_dir(PLUGIN_SESSION)`）——
+    /// 会话因此不再手拼一份 `<homedir>/plugins/<类别>` 布局。
     #[test]
     fn test_session_storage_dir_from_homedir() {
         let dir = SessionPlugin::session_storage_dir();
-        let expected = HomedirRegistry::get().join("plugins").join("session");
+        let expected = crate::symbio_core::HomedirRegistry::get()
+            .join("plugins")
+            .join("session");
         assert_eq!(
             dir, expected,
             "session_storage_dir 必须等于 <homedir>/plugins/session"
+        );
+        assert_eq!(
+            dir,
+            crate::providers::vdfs_service::entry::category_dir(PLUGIN_SESSION),
+            "会话存储根必须与 VDFS 资源类别根同一条构造式"
         );
         assert!(
             dir.is_absolute(),

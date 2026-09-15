@@ -41,9 +41,11 @@ flowchart TD
 
 ```yaml
 session:
-  # 存储目录：固定为 <homedir>/plugins/session/，从 HomedirRegistry 派生，
-  # 跟随系统目录 (homedir) 切换，不作为配置项暴露。
-  store_kind: file                         # 存储后端类型: file (文件目录) 或 sqlite (SQLite 数据库)
+  # 存储目录：固定为 <homedir>/plugins/session/，取宿主层的资源类别根
+  # （vdfs_service::entry::category_dir），跟随系统目录 (homedir) 切换，不作为配置项暴露。
+  # 注：会话只有一种落盘布局，没有可切换的"存储后端"——原 `store_kind` 配置项
+  # 已删除（理由见 store/mod.rs 模块头）。临时会话（`_t_` 前缀 / 空 id）不落盘，
+  # 由构造点选择，与用户配置无关。
   # 注：会话默认不绑定智能体（纯工具模式）。智能体选择属于前端会话级偏好，
   # 由 session.metadata.agent_id 按会话记录，后端不提供 default_agent。
   

@@ -56,11 +56,6 @@ inventory = "0.3.24"
 encoding_rs = "0.8.35"
 fastembed = "6.0.2"
 moka = { version = "0.12.16", features = ["future"] }
-# 优化 1 同步：rusqlite 也改为支持 time
-# 注意：tokio-rusqlite 0.7 依赖锁定 rusqlite ^0.37，二者必须配套，不能单独升级 rusqlite
-# （libsqlite3-sys 的 links 约束不允许两个 rusqlite 版本共存）
-rusqlite = { version = "0.37.0", features = ["bundled", "time"] }
-tokio-rusqlite = "0.7.0"
 sqlite-vec = "0.1.9"
 # 统一资源协议：zip 上传解压（MCP / Skill / Agent 以 zip 为主，文件名=目录名）
 # 仅启用 deflate（flate2/miniz_oxide，纯 Rust）：默认 features 会拉入 zstd/lzma 等 C 编译包

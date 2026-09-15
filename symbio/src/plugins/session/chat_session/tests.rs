@@ -3,8 +3,7 @@
 //! 覆盖三条路径：正常配对删除（L2 压缩语义）、保留新列表仍引用的存档
 //! （keep_recent 语义）、以及路径越界防护（`..` 逃逸 / 非 tool_archives 根）。
 
-use super::super::store::create_store;
-use super::super::store::StoreKind;
+use super::super::store::SessionStore;
 use super::super::types::Session;
 use super::{prune_historical_tool_calls, ChatSession, PersistentChatSession};
 use crate::symbio_core::schemas::session::chat_message::{
@@ -41,9 +40,7 @@ fn plain_msg(id: &str) -> ChatMessage {
 /// 建立临时文件存储 + 会话实例；返回 (会话实例, 会话目录, 清理句柄)。
 async fn setup() -> (PersistentChatSession, PathBuf, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("临时目录创建失败");
-    let store = create_store(tmp.path().to_path_buf(), StoreKind::File)
-        .await
-        .expect("文件存储创建失败");
+    let store = Arc::new(SessionStore::new(tmp.path().to_path_buf()));
     let session_id = "test_replace_cleanup".to_string();
     // 先落盘一次空会话，使 session_dir 能解析到实际目录。
     let seed = Session::new(&session_id);
@@ -198,9 +195,7 @@ async fn setup_with_config(
     config: SessionConfig,
 ) -> (PersistentChatSession, PathBuf, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("临时目录创建失败");
-    let store = create_store(tmp.path().to_path_buf(), StoreKind::File)
-        .await
-        .expect("文件存储创建失败");
+    let store = Arc::new(SessionStore::new(tmp.path().to_path_buf()));
     let session_id = "test_config_semantics".to_string();
     let seed = Session::new(&session_id);
     store.save_session(&seed).await.expect("种子会话落盘失败");
