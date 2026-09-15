@@ -18,15 +18,17 @@
 //! 自己身上。
 
 use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
-use crate::symbio_core::HomedirRegistry;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 类别根目录：`<homedir>/plugins/<category>`
 ///
+/// **与插件目录是同一个目录**——一个插件 = 一个目录，配置（`PLUGIN.yml`）与资源
+/// 同处一处。因此这里直接委托 [`plugin_dir::dir_of`]，不另写一份路径规则。
+///
 /// 基址每次现取（不缓存）——`home/reload` 切换 homedir 后必须立刻生效。
 pub fn category_dir(category: &str) -> PathBuf {
-    HomedirRegistry::get().join("plugins").join(category)
+    crate::symbio_core::dir_of(category)
 }
 
 /// 把条目 id 转成安全的磁盘段名

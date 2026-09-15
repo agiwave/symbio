@@ -17,9 +17,9 @@
 
 ## 路由
 
-**无**。model 的全部对外能力都在 VDFS 上（`.vdfs/model`），持久化走
-`save_config` 切片推送（只推 `default_provider_id`，Provider 明细是资源、各存各的
-`provider.json`）。
+**无**。model 的全部对外能力都在 VDFS 上（`.vdfs/model`）。持久化分两处：
+跨条目状态（`default_provider_id`）写自己的 `plugins/model/PLUGIN.yml`，
+Provider 明细是资源、各存各的 `provider.json`。
 
 模型 provider **不设插件路由**：`.vdfs/model` 挂载点由本插件自己的
 `impl VdfsProvider` 提供——落盘走 `providers::vdfs_service::SingleFileVdfs`

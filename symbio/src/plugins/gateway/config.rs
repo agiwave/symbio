@@ -51,9 +51,9 @@ impl Default for GatewayConfig {
 /// 写操作（`write` / `delete` / `mkdir` / `move` / `edit`）与节点动作
 /// （`action`）不在其列。
 ///
-/// **配置文档是例外**：插件配置可能含凭据（网关访问令牌、搜索服务 API Key），
-/// 因此 `vdfs/read` 落到任一配置文档（`<挂载点>/配置`）时一律拒绝——否则
-/// 只读模式下就能把令牌读走。（`tree` / `search` 只回地址与节点描述、不回正文，
+/// **配置文件是例外**：插件配置可能含凭据（网关访问令牌、搜索服务 API Key），
+/// 因此 `vdfs/read` 落到任一插件的配置文件（`<挂载点>/PLUGIN.yml`）时一律拒绝——
+/// 否则只读模式下就能把令牌读走。（`tree` / `search` 只回地址与节点描述、不回正文，
 /// 故不在此列。）
 pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
     let p = path.trim_start_matches('/');
@@ -73,14 +73,14 @@ pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
     )
 }
 
-/// `vdfs/read` 的地址是否正好落在某个配置文档上
+/// `vdfs/read` 的地址是否正好落在某个插件的配置文件上
 fn reads_config_document(payload: &serde_json::Value) -> bool {
     payload
         .get("path")
         .and_then(serde_json::Value::as_str)
         .map(|addr| {
             addr.trim_end_matches('/')
-                .ends_with(&format!("/{}", crate::providers::vdfs_service::config::SEG_CONFIG))
+                .ends_with(&format!("/{}", crate::symbio_core::PLUGIN_FILE))
         })
         .unwrap_or(false)
 }
@@ -122,13 +122,13 @@ mod tests {
         assert!(!is_readonly_allowed("session/chat/send", &none));
         assert!(!is_readonly_allowed("bogus/path", &none));
 
-        // 拒绝：读**配置文档**——插件配置可能含凭据（网关访问令牌、
+        // 拒绝：读**插件配置文件**——配置可能含凭据（网关访问令牌、
         // 搜索服务 API Key），放行等于只读模式下就能把它们读走
-        assert!(!is_readonly_allowed("vdfs/read", &at(".vdfs/gateway/配置")));
-        assert!(!is_readonly_allowed("vdfs/read", &at(".vdfs/web/配置")));
-        // 配置文档的**目录**仍可 stat（节点只有 schema，无正文）
-        assert!(is_readonly_allowed("vdfs/stat", &at(".vdfs/web/配置")));
-        // 与配置文档无关的读不受影响
+        assert!(!is_readonly_allowed("vdfs/read", &at(".vdfs/gateway/PLUGIN.yml")));
+        assert!(!is_readonly_allowed("vdfs/read", &at(".vdfs/web/PLUGIN.yml")));
+        // 配置文件的**节点**仍可 stat（节点只有 schema，无正文）
+        assert!(is_readonly_allowed("vdfs/stat", &at(".vdfs/web/PLUGIN.yml")));
+        // 与配置文件无关的读不受影响
         assert!(is_readonly_allowed("vdfs/read", &at(".vdfs/web")));
     }
 }

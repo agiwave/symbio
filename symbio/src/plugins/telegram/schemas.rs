@@ -21,7 +21,7 @@ fn default_true() -> bool {
 
 /// `allowed_users` 的宽松反序列化：同时接受数字数组与数字字符串数组。
 ///
-/// 落盘形态是数字数组（`config.yaml`），而配置文档的 `list` widget 提交的是
+/// 落盘形态是数字数组（`PLUGIN.yml`），而配置文件的 `list` widget 提交的是
 /// **每行一项的字符串数组**。两种形态都是「用户 ID 列表」，转换放在这里，
 /// 插件不必为此分出一套中间类型。
 fn user_ids<'de, D>(de: D) -> Result<Vec<i64>, D::Error>

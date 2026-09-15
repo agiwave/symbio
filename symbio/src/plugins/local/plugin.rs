@@ -6,7 +6,6 @@ use super::{
     codebase_search::CodebaseSearchTool, content_search::ContentSearchTool, shell::ShellTool,
     todo_write::TodoWriteTool,
 };
-use crate::providers::vdfs_service::config::{self, ConfigDoc};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
@@ -14,15 +13,16 @@ use crate::symbio_core::schemas::session::chat_message::{
 use crate::symbio_core::schemas::session::session_chat_response;
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginChannel, PluginError, PluginFrame, PluginMeta, PluginPayload, PLUGIN_LOCAL,
+    dir_from_ctx, Capability, CapabilityMeta, ConfigFile, InvokeRequest, InvokeRequestExt,
+    InvokeResponse, Plugin, PluginChannel, PluginDir, PluginError, PluginFrame, PluginMeta,
+    PluginPayload, PLUGIN_FILE, PLUGIN_LOCAL,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-// ==================== 配置文档（`.vdfs/local/配置`） ====================
+// ==================== 配置文档（`.vdfs/local/PLUGIN.yml`） ====================
 
 /// 本地工具配置的定义 —— **定义由配置的拥有者产出**。
 ///
@@ -187,8 +187,9 @@ impl Capability for SecureToolWrapper {
 #[derive(Clone)]
 pub struct LocalPlugin {
     config: Arc<RwLock<LocalConfig>>,
-    /// 配置文档（`.vdfs/local/配置`）——节点形状 / 校验 / 落盘推送给它
-    config_doc: ConfigDoc,
+    /// 配置文件的呈现与校验（`.vdfs/local/PLUGIN.yml`）——节点形状 / 校验 / 落盘
+    /// 都在它手上，落盘写的是**本插件自己目录里的**文件
+    config_file: ConfigFile,
     tool_impls: Arc<Vec<Arc<dyn Capability>>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
     security: Arc<SecurityPolicy>,
@@ -197,17 +198,23 @@ pub struct LocalPlugin {
 impl LocalPlugin {
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
-        let config: LocalConfig = ctx
-            .config()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        // 自己的目录由容器经 `PLUGIN_DIR` 告知；配置就存在那里的 PLUGIN.yml
+        let dir = dir_from_ctx(&*ctx, PLUGIN_LOCAL);
+        let config: LocalConfig = match dir.load::<LocalConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => LocalConfig::default(),
+            Err(e) => {
+                crate::plugin_warn!("local", "读取自身配置失败，改用默认值：{e}");
+                LocalConfig::default()
+            }
+        };
 
         let parent = ctx.parent();
 
-        Arc::new(LocalPlugin::new(parent, config)) as Arc<dyn Plugin>
+        Arc::new(LocalPlugin::new(parent, config, dir)) as Arc<dyn Plugin>
     }
 
-    pub fn new(parent: Option<Weak<dyn Plugin>>, config: LocalConfig) -> Self {
+    pub fn new(parent: Option<Weak<dyn Plugin>>, config: LocalConfig, dir: PluginDir) -> Self {
         let security = Arc::new(SecurityPolicy::default());
         let config_lock = Arc::new(RwLock::new(config));
 
@@ -218,13 +225,13 @@ impl LocalPlugin {
 
         // 文件编辑类能力（read/edit/write/delete/list/search）已迁入 VDFS 的物理层
         // （见 plugins/vdfs/physical.rs），由 `vdfs` 插件以 `vdfs_*` 工具统一暴露，
-        // 此处不再提供原生工具。本插件在 VDFS 上只挂一个**配置文档**。
+        // 此处不再提供原生工具。本插件在 VDFS 上只挂一个**配置文件**。
         let tool_impls: Vec<Arc<dyn Capability>> =
             vec![shell, content_search, todo_write, codebase_search];
 
         Self {
             config: config_lock,
-            config_doc: ConfigDoc::new(PLUGIN_LOCAL, "本地工具", config_definition()),
+            config_file: ConfigFile::new(dir, "本地工具", config_definition()),
             tool_impls: Arc::new(tool_impls),
             parent: Arc::new(RwLock::new(parent)),
             security,
@@ -321,10 +328,11 @@ impl Plugin for LocalPlugin {
     }
 }
 
-// ==================== VDFS：配置文档（`.vdfs/local/配置`） ====================
+// ==================== VDFS：配置文档（`.vdfs/local/PLUGIN.yml`） ====================
 //
-// 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文档」。
-// 节点形状、定义校验、落盘推送都在 [`ConfigDoc`] 里，这里只做寻址分流。
+// 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文件」。
+// 节点形状、定义校验、落盘都在 [`ConfigFile`] 里，这里只做寻址分流。
+// 地址就是**真实文件名** `PLUGIN.yml`——它是插件目录里的一个普通文件。
 
 #[async_trait]
 impl vdfs::VdfsProvider for LocalPlugin {
@@ -344,7 +352,7 @@ impl vdfs::VdfsProvider for LocalPlugin {
         Some("terminal")
     }
 
-    /// 根下只有配置文档，不接受新建 / 建目录
+    /// 根下只有配置文件，不接受新建 / 建目录
     fn root_access(&self) -> vdfs::VdfsAccess {
         vdfs::VdfsAccess::LIST
     }
@@ -355,7 +363,7 @@ impl vdfs::VdfsProvider for LocalPlugin {
         path: &str,
     ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
         if path.is_empty() {
-            return Ok(vec![self.config_doc.node()]);
+            return Ok(vec![self.config_file.node()]);
         }
         Err(vdfs::VdfsError::not_found(format!(
             "本地工具是配置挂载点，没有子项：{path}"
@@ -367,8 +375,8 @@ impl vdfs::VdfsProvider for LocalPlugin {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             return Ok(vdfs::VdfsNode::dir("", "本地工具", self.root_access()));
         }
-        if config::is_config_path(path) {
-            return Ok(self.config_doc.node());
+        if path == PLUGIN_FILE {
+            return Ok(self.config_file.node());
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
@@ -378,20 +386,20 @@ impl vdfs::VdfsProvider for LocalPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
-        if config::is_config_path(path) {
-            return self.config_doc.read(&self.config).await;
+        if path == PLUGIN_FILE {
+            return self.config_file.read(&self.config).await;
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
 
     async fn write(
         &self,
-        ctx: &vdfs::VdfsContext,
+        _ctx: &vdfs::VdfsContext,
         path: &str,
         content: &vdfs::VdfsContent,
     ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
-        if config::is_config_path(path) {
-            return self.config_doc.apply(ctx, &self.config, content).await;
+        if path == PLUGIN_FILE {
+            return self.config_file.apply(&self.config, content).await;
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }

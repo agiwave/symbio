@@ -1,17 +1,17 @@
 use super::schemas::{telegram_send, telegram_status};
 use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
-use crate::providers::vdfs_service::config::{self, ConfigDoc};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::InvokeRequestExt;
 use crate::symbio_core::{
+    dir_from_ctx,
     schemas::{
         common,
         session::{session_chat, session_chat_response},
     },
-    CapabilityMeta, InvokeRequest, InvokeResponse, Plugin, PluginError, PluginFrame, PluginMeta,
-    PluginPayload, PLUGIN_TELEGRAM, SESSION_CHAT,
+    CapabilityMeta, ConfigFile, InvokeRequest, InvokeResponse, Plugin, PluginDir, PluginError,
+    PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM, SESSION_CHAT,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -67,8 +67,8 @@ fn config_definition() -> DetailDefinition {
 #[derive(Clone)]
 pub struct TelegramPlugin {
     config: Arc<RwLock<TelegramConfig>>,
-    /// 配置文档（`.vdfs/telegram/配置`）——节点形状 / 校验 / 落盘推送给它
-    config_doc: ConfigDoc,
+    /// 配置文件的呈现与校验（`.vdfs/telegram/PLUGIN.yml`）
+    config_file: ConfigFile,
     client: reqwest::Client,
     /// 更新偏移量
     update_offset: Arc<AtomicI64>,
@@ -85,19 +85,24 @@ pub struct TelegramPlugin {
 impl TelegramPlugin {
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
-        let config: TelegramConfig = ctx
-            .config()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        let dir = dir_from_ctx(&*ctx, PLUGIN_TELEGRAM);
+        let config: TelegramConfig = match dir.load::<TelegramConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => TelegramConfig::default(),
+            Err(e) => {
+                crate::plugin_warn!("telegram", "读取自身配置失败，改用默认值：{e}");
+                TelegramConfig::default()
+            }
+        };
 
-        Arc::new(TelegramPlugin::new(config)) as Arc<dyn Plugin>
+        Arc::new(TelegramPlugin::new(config, dir)) as Arc<dyn Plugin>
     }
 
     /// 主构造函数（Factory 机制使用）
-    pub fn new(config: TelegramConfig) -> Self {
+    pub fn new(config: TelegramConfig, dir: PluginDir) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_doc: ConfigDoc::new(PLUGIN_TELEGRAM, "Telegram 设置", config_definition()),
+            config_file: ConfigFile::new(dir, "Telegram 设置", config_definition()),
             client: reqwest::Client::new(),
             update_offset: Arc::new(AtomicI64::new(0)),
             listener_token: Arc::new(RwLock::new(None)),
@@ -606,7 +611,7 @@ impl TelegramPlugin {
 
 impl Default for TelegramPlugin {
     fn default() -> Self {
-        Self::new(TelegramConfig::default())
+        Self::new(TelegramConfig::default(), PluginDir::of(PLUGIN_TELEGRAM))
     }
 }
 
@@ -691,10 +696,10 @@ impl TelegramPlugin {
     }
 }
 
-// ==================== VDFS：配置文档（`.vdfs/telegram/配置`） ====================
+// ==================== VDFS：配置文档（`.vdfs/telegram/PLUGIN.yml`） ====================
 //
-// 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文档」。
-// 节点形状、定义校验、落盘推送都在 [`ConfigDoc`] 里，这里只做寻址分流。
+// 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文件」。
+// 节点形状、定义校验、落盘都在 [`ConfigFile`] 里，这里只做寻址分流。
 
 #[async_trait]
 impl vdfs::VdfsProvider for TelegramPlugin {
@@ -714,7 +719,7 @@ impl vdfs::VdfsProvider for TelegramPlugin {
         Some("send")
     }
 
-    /// 根下只有配置文档，不接受新建 / 建目录
+    /// 根下只有配置文件，不接受新建 / 建目录
     fn root_access(&self) -> vdfs::VdfsAccess {
         vdfs::VdfsAccess::LIST
     }
@@ -725,7 +730,7 @@ impl vdfs::VdfsProvider for TelegramPlugin {
         path: &str,
     ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
         if path.is_empty() {
-            return Ok(vec![self.config_doc.node()]);
+            return Ok(vec![self.config_file.node()]);
         }
         Err(vdfs::VdfsError::not_found(format!(
             "Telegram 是配置挂载点，没有子项：{path}"
@@ -737,8 +742,8 @@ impl vdfs::VdfsProvider for TelegramPlugin {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             return Ok(vdfs::VdfsNode::dir("", "Telegram", self.root_access()));
         }
-        if config::is_config_path(path) {
-            return Ok(self.config_doc.node());
+        if path == PLUGIN_FILE {
+            return Ok(self.config_file.node());
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
@@ -748,20 +753,20 @@ impl vdfs::VdfsProvider for TelegramPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
-        if config::is_config_path(path) {
-            return self.config_doc.read(&self.config).await;
+        if path == PLUGIN_FILE {
+            return self.config_file.read(&self.config).await;
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
 
     async fn write(
         &self,
-        ctx: &vdfs::VdfsContext,
+        _ctx: &vdfs::VdfsContext,
         path: &str,
         content: &vdfs::VdfsContent,
     ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
-        if config::is_config_path(path) {
-            return self.config_doc.apply(ctx, &self.config, content).await;
+        if path == PLUGIN_FILE {
+            return self.config_file.apply(&self.config, content).await;
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }

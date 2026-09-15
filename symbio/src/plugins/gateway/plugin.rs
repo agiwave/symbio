@@ -4,12 +4,11 @@
 //! worker，调用 `parent.route(ctx)` 等价于既有的 `root.route`：能转发前端会发起的全部路径
 //!（`session/*`、`model/*`、`vdfs/*` …）。因此本插件**无需任何新全局注册表**。
 
-use crate::providers::vdfs_service::config::{self, ConfigDoc};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta, PluginPayload,
-    PATH, PLUGIN_GATEWAY,
+    dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginDir,
+    PluginError, PluginMeta, PluginPayload, PATH, PLUGIN_FILE, PLUGIN_GATEWAY,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -19,7 +18,7 @@ use tracing::{info, warn};
 use super::config::GatewayConfig;
 use super::server;
 
-// ==================== 配置文档（`.vdfs/gateway/配置`） ====================
+// ==================== 配置文档（`.vdfs/gateway/PLUGIN.yml`） ====================
 
 /// 网关配置的定义 —— **定义由配置的拥有者产出**。
 ///
@@ -80,9 +79,9 @@ fn config_definition() -> DetailDefinition {
 
 pub struct GatewayPlugin {
     config: Arc<RwLock<GatewayConfig>>,
-    /// 配置文档（`.vdfs/gateway/配置`）——节点形状 / 校验 / 落盘推送给它
-    config_doc: ConfigDoc,
-    /// 父插件（worker composite）弱引用，用于转发请求与上行落盘
+    /// 配置文件的呈现与校验（`.vdfs/gateway/PLUGIN.yml`）——落盘写的是自己目录里的文件
+    config_file: ConfigFile,
+    /// 父插件（worker composite）弱引用，用于转发请求
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
     /// 入站服务句柄（为空表示未启动）
     server: Arc<RwLock<Option<server::ServerHandle>>>,
@@ -91,12 +90,17 @@ pub struct GatewayPlugin {
 impl GatewayPlugin {
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例（submit_object_creator! 自注册）
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
-        let config: GatewayConfig = ctx
-            .config()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        let dir = dir_from_ctx(&*ctx, PLUGIN_GATEWAY);
+        let config: GatewayConfig = match dir.load::<GatewayConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => GatewayConfig::default(),
+            Err(e) => {
+                crate::plugin_warn!("gateway", "读取自身配置失败，改用默认值：{e}");
+                GatewayConfig::default()
+            }
+        };
         let parent = ctx.parent();
-        let arc = Arc::new(Self::new(parent, config));
+        let arc = Arc::new(Self::new(parent, config, dir));
         // 启动期若已启用入站服务，则拉起监听（配置变更后由 VDFS 写入路径重建）
         let arc2 = arc.clone();
         tokio::spawn(async move {
@@ -105,10 +109,10 @@ impl GatewayPlugin {
         arc
     }
 
-    pub fn new(parent: Option<Weak<dyn Plugin>>, config: GatewayConfig) -> Self {
+    pub fn new(parent: Option<Weak<dyn Plugin>>, config: GatewayConfig, dir: PluginDir) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_doc: ConfigDoc::new(PLUGIN_GATEWAY, "开放接口", config_definition()),
+            config_file: ConfigFile::new(dir, "开放接口", config_definition()),
             parent: Arc::new(RwLock::new(parent)),
             server: Arc::new(RwLock::new(None)),
         }
@@ -234,7 +238,7 @@ impl vdfs::VdfsProvider for GatewayPlugin {
         path: &str,
     ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
         if path.is_empty() {
-            return Ok(vec![self.config_doc.node()]);
+            return Ok(vec![self.config_file.node()]);
         }
         Err(vdfs::VdfsError::not_found(format!(
             "开放接口是配置挂载点，没有子项：{path}"
@@ -246,8 +250,8 @@ impl vdfs::VdfsProvider for GatewayPlugin {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             return Ok(vdfs::VdfsNode::dir("", "开放接口", self.root_access()));
         }
-        if config::is_config_path(path) {
-            return Ok(self.config_doc.node());
+        if path == PLUGIN_FILE {
+            return Ok(self.config_file.node());
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
@@ -257,24 +261,24 @@ impl vdfs::VdfsProvider for GatewayPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
-        if config::is_config_path(path) {
-            return self.config_doc.read(&self.config).await;
+        if path == PLUGIN_FILE {
+            return self.config_file.read(&self.config).await;
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
 
-    /// 写入：校验 → 落内存 → 落盘 → 广播，随后**重建监听**
+    /// 写入：校验 → 落内存 → 落自己的文件 → 广播，随后**重建监听**
     /// （端口 / 开关 / 协议变更必须重建，这是本插件专有的副作用）
     async fn write(
         &self,
-        ctx: &vdfs::VdfsContext,
+        _ctx: &vdfs::VdfsContext,
         path: &str,
         content: &vdfs::VdfsContent,
     ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
-        if !config::is_config_path(path) {
+        if path != PLUGIN_FILE {
             return Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")));
         }
-        let resp = self.config_doc.apply(ctx, &self.config, content).await?;
+        let resp = self.config_file.apply(&self.config, content).await?;
         self.apply_config().await;
         Ok(resp)
     }
@@ -307,13 +311,19 @@ mod tests {
         VdfsContext::empty()
     }
 
+    /// 测试用目录：这些用例都不触发落盘（坏值在写盘之前就被拦下），
+    /// 因此指向一个临时目录即可，不必真建
+    fn tdir() -> PluginDir {
+        PluginDir::at(std::env::temp_dir().join("symbio-test-gateway"), "gateway")
+    }
+
     /// 配置文档的形状：根下唯一一项、`ext = form`（前端据此选通用表单渲染器）、`rw`
     #[tokio::test]
     async fn config_document_is_the_only_child_of_the_root() {
-        let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default()));
+        let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
         let items = plugin.list(&vctx(), "").await.unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].name, config::SEG_CONFIG);
+        assert_eq!(items[0].name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
         assert_eq!(items[0].title, "开放接口");
         assert_eq!(items[0].ext.as_deref(), Some(vdfs::VFDS_EXT_FORM));
         assert_eq!(items[0].access.flags(), "rw");
@@ -329,8 +339,8 @@ mod tests {
             inbound_port: 9231,
             ..GatewayConfig::default()
         };
-        let plugin = Arc::new(GatewayPlugin::new(None, cfg));
-        let content = plugin.read(&vctx(), config::SEG_CONFIG).await.unwrap();
+        let plugin = Arc::new(GatewayPlugin::new(None, cfg, tdir()));
+        let content = plugin.read(&vctx(), PLUGIN_FILE).await.unwrap();
         let got: GatewayConfig = serde_json::from_str(content.text.as_deref().unwrap()).unwrap();
         assert!(got.inbound_enabled);
         assert_eq!(got.inbound_protocol, "http");
@@ -340,9 +350,9 @@ mod tests {
     /// 写：校验先于一切——坏值在落内存之前就被定义拦下（字段级错误）
     #[tokio::test]
     async fn config_document_write_validates_before_applying() {
-        let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default()));
+        let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
         let bad = vdfs::VdfsContent::text("", r#"{"inbound_port": 70000}"#);
-        match plugin.write(&vctx(), config::SEG_CONFIG, &bad).await {
+        match plugin.write(&vctx(), PLUGIN_FILE, &bad).await {
             Err(VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "inbound_port"),
             other => panic!("应为字段级校验错误，实得 {other:?}"),
         }
@@ -352,7 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_reports_server_not_running_when_inbound_disabled() {
-        let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default()));
+        let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
         let resp = call(plugin, "status", None).await.unwrap();
         let v = resp.serialize().unwrap();
         assert_eq!(v["inbound_running"], false);
@@ -361,7 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_path_is_not_found() {
-        let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default()));
+        let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
         assert!(call(plugin.clone(), "bogus", None).await.is_err());
         // 配置文档之外无其它节点
         assert!(plugin.stat(&vctx(), "bogus").await.is_err());

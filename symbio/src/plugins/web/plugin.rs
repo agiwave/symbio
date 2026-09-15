@@ -2,18 +2,17 @@
 
 pub use super::web_config::WebConfig;
 use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::WebSearchTool};
-use crate::providers::vdfs_service::config::{self, ConfigDoc};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    Capability, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
-    PluginPayload, PLUGIN_WEB,
+    dir_from_ctx, Capability, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
+    PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_WEB,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-// ==================== 配置文档（`.vdfs/web/配置`） ====================
+// ==================== 配置文档（`.vdfs/web/PLUGIN.yml`） ====================
 
 /// 网络工具配置的定义 —— **定义由配置的拥有者产出**。
 ///
@@ -51,8 +50,8 @@ fn config_definition() -> DetailDefinition {
 #[derive(Clone)]
 pub struct WebPlugin {
     config: Arc<RwLock<WebConfig>>,
-    /// 配置文档（`.vdfs/web/配置`）——节点形状 / 校验 / 落盘推送给它
-    config_doc: ConfigDoc,
+    /// 配置文件的呈现与校验（`.vdfs/web/PLUGIN.yml`）——落盘写的是本插件自己目录里的文件
+    config_file: ConfigFile,
     tool_impls: Arc<Vec<Arc<dyn Capability>>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
 }
@@ -60,17 +59,22 @@ pub struct WebPlugin {
 impl WebPlugin {
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
-        let config: WebConfig = ctx
-            .config()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        let dir = dir_from_ctx(&*ctx, PLUGIN_WEB);
+        let config: WebConfig = match dir.load::<WebConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => WebConfig::default(),
+            Err(e) => {
+                crate::plugin_warn!("web", "读取自身配置失败，改用默认值：{e}");
+                WebConfig::default()
+            }
+        };
 
         let parent = ctx.parent();
 
-        Arc::new(WebPlugin::new(parent, config)) as Arc<dyn Plugin>
+        Arc::new(WebPlugin::new(parent, config, dir)) as Arc<dyn Plugin>
     }
 
-    pub fn new(parent: Option<Weak<dyn Plugin>>, config: WebConfig) -> Self {
+    pub fn new(parent: Option<Weak<dyn Plugin>>, config: WebConfig, dir: PluginDir) -> Self {
         let config_lock = Arc::new(RwLock::new(config));
 
         let web_fetch = Arc::new(WebFetchTool::new());
@@ -81,7 +85,7 @@ impl WebPlugin {
 
         Self {
             config: config_lock,
-            config_doc: ConfigDoc::new(PLUGIN_WEB, "网络工具", config_definition()),
+            config_file: ConfigFile::new(dir, "网络工具", config_definition()),
             tool_impls: Arc::new(tool_impls),
             parent: Arc::new(RwLock::new(parent)),
         }
@@ -146,7 +150,7 @@ impl Plugin for WebPlugin {
     }
 }
 
-// ==================== VDFS：配置文档（`.vdfs/web/配置`） ====================
+// ==================== VDFS：配置文档（`.vdfs/web/PLUGIN.yml`） ====================
 
 #[async_trait]
 impl vdfs::VdfsProvider for WebPlugin {
@@ -166,7 +170,7 @@ impl vdfs::VdfsProvider for WebPlugin {
         Some("globe")
     }
 
-    /// 根下只有配置文档，不接受新建 / 建目录
+    /// 根下只有配置文件，不接受新建 / 建目录
     fn root_access(&self) -> vdfs::VdfsAccess {
         vdfs::VdfsAccess::LIST
     }
@@ -177,7 +181,7 @@ impl vdfs::VdfsProvider for WebPlugin {
         path: &str,
     ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
         if path.is_empty() {
-            return Ok(vec![self.config_doc.node()]);
+            return Ok(vec![self.config_file.node()]);
         }
         Err(vdfs::VdfsError::not_found(format!(
             "网络工具是配置挂载点，没有子项：{path}"
@@ -189,8 +193,8 @@ impl vdfs::VdfsProvider for WebPlugin {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             return Ok(vdfs::VdfsNode::dir("", "网络工具", self.root_access()));
         }
-        if config::is_config_path(path) {
-            return Ok(self.config_doc.node());
+        if path == PLUGIN_FILE {
+            return Ok(self.config_file.node());
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
@@ -200,20 +204,20 @@ impl vdfs::VdfsProvider for WebPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
-        if config::is_config_path(path) {
-            return self.config_doc.read(&self.config).await;
+        if path == PLUGIN_FILE {
+            return self.config_file.read(&self.config).await;
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
 
     async fn write(
         &self,
-        ctx: &vdfs::VdfsContext,
+        _ctx: &vdfs::VdfsContext,
         path: &str,
         content: &vdfs::VdfsContent,
     ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
-        if config::is_config_path(path) {
-            return self.config_doc.apply(ctx, &self.config, content).await;
+        if path == PLUGIN_FILE {
+            return self.config_file.apply(&self.config, content).await;
         }
         Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }

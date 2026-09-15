@@ -12,32 +12,45 @@ use super::bound_provider::BoundProvider;
 use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
 use crate::providers::vdfs_service::{MemoryVdfs, SingleFileVdfs};
-use crate::symbio_core::schemas::common::ConfigSlice;
 use crate::symbio_core::{
-    create_object, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
-    PluginMeta, PluginPayload, SimpleRequest, PLUGIN_MODEL, SAVE_CONFIG,
+    create_object, dir_from_ctx, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
+    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, PLUGIN_MODEL,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Provider 主文件名（磁盘布局：`~/.symbio/plugins/model/<id>/provider.json`）
 const MANIFEST: &str = "provider.json";
+
+/// 跨条目的插件配置（`<homedir>/plugins/model/PLUGIN.yml`）—— **写入形态**
+///
+/// 只写**跨条目的状态**：单个 Provider 的明细是**资源**，落在
+/// `plugins/model/<id>/provider.json`，不进配置文件。
+///
+/// 读取比写入**宽**：`build` 读的是 `ModelProvidersConfig`。旧形态曾把 Provider
+/// 明细整包存在这里（`providers` 键），读宽一次让既有的一次性迁移能照常把它们
+/// 搬成资源；搬完 `persist()` 把文件归一为只有跨条目状态——同一个事实不留两份。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ModelConfig {
+    #[serde(default)]
+    pub default_provider_id: Option<String>,
+}
 
 /// Universal MODEL Agent Plugin
 #[derive(Clone)]
 pub struct ModelPlugin {
     /// 多 Model Provider 注册表（chat 侧解析唯一生效 Provider 用）
     providers: Arc<RwLock<ModelProvidersConfig>>,
+    /// 本插件的目录（`<homedir>/plugins/model`）——配置文件 `PLUGIN.yml` 就在这里
+    dir: PluginDir,
     /// VDFS 侧条目清单（内存镜像：`id → provider.json` 原文）
     ///
     /// 规范 §13.4：model 的列表来自内存。镜像与注册表**同一处更新**
     /// （[`sync_mirror`](Self::sync_mirror)），因此不存在第二个写入者。
     entries: MemoryVdfs,
-    /// 父插件引用（用于能力路由）
-    parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
 }
 
 impl ModelPlugin {
@@ -45,16 +58,21 @@ impl ModelPlugin {
     ///
     /// 加载策略（按优先级）：
     /// 1. **存储**：从 `~/.symbio/plugins/model/<id>/provider.json` 加载所有 Provider
-    /// 2. **回退到 ctx.config()**：home 通过 composite 传入的 MODEL 节点（用于旧 config.yaml 兼容）
+    /// 2. **跨条目配置**：`~/.symbio/plugins/model/PLUGIN.yml` 里的 `default_provider_id`
+    ///    （旧形态里可能还带着 `providers` 明细，由 `load_from_storage` 搬成资源）
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
-        // 同步 fallback：先从 ctx.config() 解析（兼容旧 config.yaml）
-        let providers_config: ModelProvidersConfig = ctx
-            .config()
-            .and_then(|v| serde_json::from_value::<ModelProvidersConfig>(v).ok())
-            .unwrap_or_default();
+        let dir = dir_from_ctx(&*ctx, PLUGIN_MODEL);
+        // 读宽：兼容旧形态里整包存在配置中的 Provider 明细
+        let providers_config: ModelProvidersConfig = match dir.load::<ModelProvidersConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => ModelProvidersConfig::default(),
+            Err(e) => {
+                plugin_warn!("model", "读取自身配置失败，改用默认值：{e}");
+                ModelProvidersConfig::default()
+            }
+        };
 
-        let parent = ctx.parent();
-        let plugin = Arc::new(Self::new(parent, providers_config));
+        let plugin = Arc::new(Self::new(providers_config, dir));
 
         // 启动后异步触发：从存储加载（并触发首启动数据迁移）
         let plugin_weak = Arc::downgrade(&plugin);
@@ -75,7 +93,7 @@ impl ModelPlugin {
 
     /// 异步加载：从存储拉取所有 Provider
     ///
-    /// 启动时调用此方法，**会**触发首启动数据迁移（从 config.yaml 迁到新存储）。
+    /// 启动时调用此方法，**会**触发首启动数据迁移（从配置文件里的旧明细迁到新存储）。
     /// `ctx` 只用于旧分类迁移后的重入（不再从中取服务对象）。
     pub async fn load_from_storage(&self, ctx: &Arc<dyn InvokeRequest>) {
         let store = Self::store();
@@ -184,7 +202,11 @@ impl ModelPlugin {
         );
     }
 
-    /// 首启动迁移：从 ctx.config() 中残留的旧配置迁到存储
+    /// 首启动迁移：把配置文件里残留的旧 Provider 明细迁到存储
+    ///
+    /// 旧形态把 Provider 整包存在配置里（`PLUGIN.yml` 的 `providers` 键）。
+    /// 迁移把它们写成 `plugins/model/<id>/provider.json`，随后把配置文件**归一**
+    /// 为只有跨条目状态——同一个事实不留两份。
     async fn migrate_from_legacy_config(&self, store: &SingleFileVdfs) {
         let current = self.providers.read().await.clone();
         if current.providers.is_empty() {
@@ -212,41 +234,31 @@ impl ModelPlugin {
             mirror.push((id.clone(), content));
         }
         self.entries.replace_all(mirror);
+
+        // 明细已是资源：把配置文件归一为只有跨条目状态（顺带清掉 `providers` 键）
+        let _ = self.persist().await;
     }
 
     /// 主构造函数（Factory 机制使用）
-    pub fn new(parent: Option<Weak<dyn Plugin>>, providers: ModelProvidersConfig) -> Self {
+    pub fn new(providers: ModelProvidersConfig, dir: PluginDir) -> Self {
         let entries = MemoryVdfs::new(PLUGIN_MODEL).with_label(LABEL);
         Self {
             providers: Arc::new(RwLock::new(providers)),
+            dir,
             entries,
-            parent: Arc::new(RwLock::new(parent)),
         }
     }
 
-    /// 获取父插件引用
-    async fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
-        let guard = self.parent.read().await;
-        guard.as_ref().and_then(|w| w.upgrade())
-    }
-
-    /// 把自己的配置切片推给宿主落盘（`save_config` 路由，载荷 [`ConfigSlice`]）
+    /// 把自己的跨条目配置写回**自己的** `PLUGIN.yml`（不再经父插件）
     ///
-    /// 切片里只放**跨条目的状态**（`default_provider_id`）：单个 Provider 的明细是
-    /// 资源，落在 `plugins/model/<id>/provider.json`，不进 config.yaml。
-    async fn persist_to_parent(&self, ctx: &Arc<dyn InvokeRequest>) -> InvokeResponse<()> {
-        let default_provider_id = self.providers.read().await.default_provider_id.clone();
-        let slice = ConfigSlice::new(
-            PLUGIN_MODEL,
-            json!({ "default_provider_id": default_provider_id }),
-        );
-        if let Some(p) = self.get_parent().await {
-            let save_ctx = ctx.fork();
-            save_ctx.set(crate::symbio_core::PATH, SAVE_CONFIG.to_string());
-            save_ctx.set_payload(slice)?;
-            p.route(save_ctx).await?;
-        } else {
-            plugin_warn!("model", "未找到父插件，配置仅在内存中生效");
+    /// 只写 `default_provider_id`：单个 Provider 的明细是资源，落在
+    /// `plugins/model/<id>/provider.json`，不进配置文件。
+    async fn persist(&self) -> InvokeResponse<()> {
+        let cfg = ModelConfig {
+            default_provider_id: self.providers.read().await.default_provider_id.clone(),
+        };
+        if let Err(e) = self.dir.save(&cfg) {
+            plugin_warn!("model", "配置落盘失败：{e}");
         }
         Ok(())
     }
@@ -367,7 +379,7 @@ impl ModelPlugin {
 
 impl Default for ModelPlugin {
     fn default() -> Self {
-        Self::new(None, ModelProvidersConfig::default())
+        Self::new(ModelProvidersConfig::default(), PluginDir::of(PLUGIN_MODEL))
     }
 }
 
@@ -384,7 +396,7 @@ impl Default for ModelPlugin {
 // 分工与旧写法一致：`list` 读内存镜像，`stat` / `read` / `delete` / `action`
 // 读磁盘（真相源），避免镜像与磁盘在校验路径上出现分歧。
 
-use crate::symbio_core::vdfs::{from_plugin_error, host_ctx, unwatch_changes, watch_changes};
+use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
     VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_TEST, VFDS_EXT_FORM,
@@ -539,15 +551,10 @@ impl ModelPlugin {
         v
     }
 
-    /// 落盘之后同步两份内存视图（chat 侧注册表 + VDFS 镜像）+ 触发父级持久化
+    /// 落盘之后同步两份内存视图（chat 侧注册表 + VDFS 镜像）+ 写回自己的配置文件
     ///
     /// **唯一写入者**：注册表与镜像只在这里成对更新，因此二者不会各说各话。
-    async fn after_uploaded(
-        &self,
-        host: &Arc<dyn InvokeRequest>,
-        id: &str,
-        normalized: &Value,
-    ) -> Result<(), PluginError> {
+    async fn after_uploaded(&self, id: &str, normalized: &Value) -> Result<(), PluginError> {
         // 「设为默认」标记（validate_manifest 保留、随 manifest 落盘）
         let is_default = normalized
             .get("is_default")
@@ -565,7 +572,7 @@ impl ModelPlugin {
         let text = serde_json::to_string_pretty(normalized)
             .map_err(|e| PluginError::ParseError(e.to_string()))?;
         self.entries.set(id, text);
-        let _ = self.persist_to_parent(host).await;
+        let _ = self.persist().await;
         Ok(())
     }
 
@@ -662,11 +669,10 @@ impl VdfsProvider for ModelPlugin {
 
     async fn write(
         &self,
-        ctx: &VdfsContext,
+        _ctx: &VdfsContext,
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        let host = host_ctx(ctx)?;
         if path.is_empty() {
             return Err(VdfsError::invalid(format!(
                 "{LABEL}不支持在挂载根上写入：{path}"
@@ -689,7 +695,7 @@ impl VdfsProvider for ModelPlugin {
             .map_err(from_plugin_error)?;
         // 落盘（原子写 + 变更广播由 vdfs_service 承担）→ 再同步内存视图
         let created = Self::store().write_json(&id, &normalized).await?;
-        self.after_uploaded(&host, &id, &normalized)
+        self.after_uploaded(&id, &normalized)
             .await
             .map_err(from_plugin_error)?;
         Ok(VdfsWriteResponse {
@@ -884,7 +890,7 @@ impl Plugin for ModelPlugin {
     }
 
     /// model 已无自有路由：配置的读写在 VDFS 上（`.vdfs/model/<id>` 的详情表单，
-    /// 以及节点动作 `set-default`），持久化走 `save_config` 切片推送。
+    /// 以及节点动作 `set-default`），跨条目状态写自己的 `plugins/model/PLUGIN.yml`。
     async fn route(
         self: Arc<Self>,
         _ctx: Arc<dyn InvokeRequest>,

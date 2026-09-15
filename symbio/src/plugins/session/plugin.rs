@@ -13,7 +13,6 @@
 
 use super::chat_session::ChatSession;
 use super::types::Session;
-use crate::providers::vdfs_service::config::{self, ConfigDoc};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
@@ -21,8 +20,8 @@ use crate::symbio_core::schemas::session::session_chat_response;
 pub use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginFrame, PluginMeta,
-    PluginPayload, PLUGIN_SESSION,
+    dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginDir,
+    PluginError, PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -34,8 +33,8 @@ use tokio::sync::{OnceCell, RwLock};
 /// Session 插件
 pub struct SessionPlugin {
     pub(crate) config: Arc<RwLock<SessionConfig>>,
-    /// 配置文档（`.vdfs/session/配置`）——节点形状 / 校验 / 落盘推送给它
-    pub(crate) config_doc: ConfigDoc,
+    /// 配置文件的呈现与校验（`.vdfs/session/PLUGIN.yml`）——落盘写自己目录里的文件
+    pub(crate) config_file: ConfigFile,
     /// 父插件引用（用于获取工具列表等）
     pub(crate) parent: Option<Weak<dyn Plugin>>,
     /// 活跃会话管理器 (V2 整合版：处理长连接与广播)
@@ -61,7 +60,7 @@ use super::store::SessionStore;
 
 impl SessionPlugin {
     /// 主构造函数（Factory 机制使用）
-    pub fn new(parent: Option<Weak<dyn Plugin>>, config: SessionConfig) -> Self {
+    pub fn new(parent: Option<Weak<dyn Plugin>>, config: SessionConfig, dir: PluginDir) -> Self {
         // 变更广播：容量只需覆盖「一次突发写入 + 少量并发订阅者」；
         // 无订阅者时 send 静默失败（broadcast 语义），因此不设保留位。
         let (change_tx, _) = tokio::sync::broadcast::channel(64);
@@ -71,7 +70,7 @@ impl SessionPlugin {
         workdir_watches.set_vdfs_sender(change_tx.clone());
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_doc: ConfigDoc::new(PLUGIN_SESSION, "会话设置", config_definition()),
+            config_file: ConfigFile::new(dir, "会话设置", config_definition()),
             parent,
             active_mgr: Arc::new(super::active::ActiveSessionManager::new()),
             store: OnceCell::new(),
@@ -179,15 +178,21 @@ impl SessionPlugin {
 
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
-        // 反序列化时使用 #[serde(default)]，自动忽略 storage_dir 等已被废弃的字段
-        let config: SessionConfig = ctx
-            .config()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        // 自己的目录由容器经 `PLUGIN_DIR` 告知；配置就存在那里的 PLUGIN.yml
+        // （反序列化使用 #[serde(default)]，自动忽略 storage_dir 等已废弃字段）
+        let dir = dir_from_ctx(&*ctx, PLUGIN_SESSION);
+        let config: SessionConfig = match dir.load::<SessionConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => SessionConfig::default(),
+            Err(e) => {
+                crate::plugin_warn!("session", "读取自身配置失败，改用默认值：{e}");
+                SessionConfig::default()
+            }
+        };
 
         let parent = ctx.parent();
 
-        let plugin = Arc::new(SessionPlugin::new(parent, config));
+        let plugin = Arc::new(SessionPlugin::new(parent, config, dir));
 
         // 启动心跳任务调度器（后台常驻）。仅在存在 Tokio runtime 时启动，
         // 避免单元测试（无 runtime）中 `tokio::spawn` 触发 panic。
@@ -938,10 +943,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
-        // 保留段优先：`配置` 是配置文档，不是会话
-        if config::is_config_path(path) {
+        // 配置文件优先：`PLUGIN.yml` 是文档，不是会话
+        if path == PLUGIN_FILE {
             return Err(vdfs::VdfsError::not_found(format!(
-                "配置是文档，没有子项：{path}"
+                "配置文件是文档，没有子项：{path}"
             )));
         }
         match parse_session_path(path)? {
@@ -951,8 +956,8 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     .await
                     .map_err(vdfs::from_plugin_error)?;
                 let mut nodes = self.nodes_of_sessions(&sessions).await;
-                // 本插件的配置文档与资源并列（保留段，排在资源之后）
-                nodes.push(self.config_doc.node());
+                // 本插件的配置文件与资源并列（排在资源之后）
+                nodes.push(self.config_file.node());
                 Ok(nodes)
             }
             // 会话内部：三个虚拟子目录（会话存在性校验由 `session_of` 承担）
@@ -995,9 +1000,9 @@ impl vdfs::VdfsProvider for SessionPlugin {
     }
 
     async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
-        // 保留段优先：`配置` 是配置文档，不是会话
-        if config::is_config_path(path) {
-            return Ok(self.config_doc.node());
+        // 配置文件优先：`PLUGIN.yml` 是文档，不是会话
+        if path == PLUGIN_FILE {
+            return Ok(self.config_file.node());
         }
         match parse_session_path(path)? {
             VdfsSessionPath::Root => {
@@ -1066,9 +1071,9 @@ impl vdfs::VdfsProvider for SessionPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
-        // 保留段优先：`配置` 是配置文档，不是会话
-        if config::is_config_path(path) {
-            return self.config_doc.read(&self.config).await;
+        // 配置文件优先：`PLUGIN.yml` 是文档，不是会话
+        if path == PLUGIN_FILE {
+            return self.config_file.read(&self.config).await;
         }
         match parse_session_path(path)? {
             VdfsSessionPath::Session(id) => {
@@ -1110,13 +1115,13 @@ impl vdfs::VdfsProvider for SessionPlugin {
     /// 前端与 LLM 在**同一个地址**上读同一份数据，写入的唯一入口依旧只有一处。
     async fn write(
         &self,
-        ctx: &vdfs::VdfsContext,
+        _ctx: &vdfs::VdfsContext,
         path: &str,
         content: &vdfs::VdfsContent,
     ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
-        // 保留段优先：`配置` 是配置文档，不是会话
-        if config::is_config_path(path) {
-            return self.config_doc.apply(ctx, &self.config, content).await;
+        // 配置文件优先：`PLUGIN.yml` 是文档，不是会话
+        if path == PLUGIN_FILE {
+            return self.config_file.apply(&self.config, content).await;
         }
         // 工作目录分支：文件写回（与列读同一份实现——路径越界校验 + 落盘）
         match parse_session_path(path)? {
@@ -1214,10 +1219,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
         path: &str,
         _recursive: bool,
     ) -> vdfs::VdfsResult<()> {
-        // 保留段优先：配置文档恒在，不可删
-        if config::is_config_path(path) {
+        // 配置文件恒在，不可删
+        if path == PLUGIN_FILE {
             return Err(vdfs::VdfsError::Forbidden(
-                "配置文档不可删除".to_string(),
+                "配置文件不可删除".to_string(),
             ));
         }
         match parse_session_path(path)? {
@@ -1412,6 +1417,8 @@ mod tests {
     use crate::symbio_core::vdfs_provider::VdfsProvider;
     // 目录树场景模块（本文件非测试码用 `super::workdir`；测试模块需显式引入）
     use crate::plugins::session::workdir;
+    // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
+    use crate::plugins::session::test_dir;
 
     /// 验证 session 存储目录**只**从 HomedirRegistry 派生，不依赖 config；
     /// 且它就是宿主层的资源类别根（`category_dir(PLUGIN_SESSION)`）——
@@ -1519,7 +1526,7 @@ mod tests {
     /// （见 `traverse` 里的 `register_vdfs_provider(PLUGIN_SESSION, ..)`）
     #[tokio::test]
     async fn vdfs_self_description_has_no_mount() {
-        let p = SessionPlugin::new(None, SessionConfig::default());
+        let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
         assert_eq!(p.label(), Some("会话"));
         assert_eq!(p.icon(), Some("session"));
         // 顺序由本 provider 的 order() 自持（**单一真相源**），
@@ -1842,7 +1849,7 @@ mod tests {
     /// 不存在的会话：list / stat 一律 NotFound（不做静默降级）
     #[tokio::test]
     async fn vdfs_list_unknown_session_is_not_found() {
-        let p = SessionPlugin::new(None, SessionConfig::default());
+        let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
         assert!(p.list(&vctx(), "abc").await.is_err());
         assert!(p.stat(&vctx(), "abc").await.is_err());
     }
@@ -1851,7 +1858,7 @@ mod tests {
     /// `unwatch` 取消任务（严格配对）
     #[tokio::test]
     async fn vdfs_watch_forwards_session_changes() {
-        let p = SessionPlugin::new(None, SessionConfig::default());
+        let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
         let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
             let _ = tx.send(c);
@@ -1906,35 +1913,35 @@ mod tests {
         );
     }
 
-    /// 配置文档与资源并列在根下（保留段排在资源之后），且是 `ext = form` 的可写文档
+    /// 配置文件与资源并列在根下（排在资源之后），且是 `ext = form` 的可写文档
     #[tokio::test]
     async fn config_document_sits_beside_the_sessions() {
-        let p = SessionPlugin::new(None, SessionConfig::default());
+        let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
         let items = p.list(&vctx(), "").await.unwrap();
-        let last = items.last().expect("根下至少应有配置文档");
-        assert_eq!(last.name, config::SEG_CONFIG);
+        let last = items.last().expect("根下至少应有配置文件");
+        assert_eq!(last.name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
         assert_eq!(last.ext.as_deref(), Some(vdfs::VFDS_EXT_FORM));
         assert_eq!(last.access.flags(), "rw");
         assert!(last.schema.is_some(), "定义随节点下发");
 
-        // `配置` 是保留段：不会被当成会话 id
-        assert_eq!(p.stat(&vctx(), config::SEG_CONFIG).await.unwrap().name, config::SEG_CONFIG);
-        let content = p.read(&vctx(), config::SEG_CONFIG).await.unwrap();
+        // 配置文件不是会话 id：按文件读，不按会话解析
+        assert_eq!(p.stat(&vctx(), PLUGIN_FILE).await.unwrap().name, PLUGIN_FILE);
+        let content = p.read(&vctx(), PLUGIN_FILE).await.unwrap();
         let cfg: SessionConfig = serde_json::from_str(content.text.as_deref().unwrap()).unwrap();
         assert_eq!(cfg.max_messages, SessionConfig::default().max_messages);
 
         // 文档没有子项，也不可删除
-        assert!(p.list(&vctx(), config::SEG_CONFIG).await.is_err());
-        assert!(p.delete(&vctx(), config::SEG_CONFIG, false).await.is_err());
+        assert!(p.list(&vctx(), PLUGIN_FILE).await.is_err());
+        assert!(p.delete(&vctx(), PLUGIN_FILE, false).await.is_err());
     }
 
     /// 配置写入：校验先于一切（字段级错误），坏值不会改动内存
     #[tokio::test]
     async fn config_write_validates_before_applying() {
-        let p = SessionPlugin::new(None, SessionConfig::default());
+        let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
         let before = p.config.read().await.max_messages;
         let bad = vdfs::VdfsContent::text("", r#"{"max_messages": 1}"#);
-        match p.write(&vctx(), config::SEG_CONFIG, &bad).await {
+        match p.write(&vctx(), PLUGIN_FILE, &bad).await {
             Err(vdfs::VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "max_messages"),
             other => panic!("应为字段级校验错误，实得 {other:?}"),
         }

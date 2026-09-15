@@ -26,8 +26,8 @@
 pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
 use crate::providers::vdfs_service::DirVdfs;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginError, PluginMeta, PluginPayload, PLUGIN_MCP,
+    dir_from_ctx, Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse,
+    Plugin, PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_MCP,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -48,18 +48,26 @@ pub struct McpPlugin {
     manager: Arc<McpManager>,
     /// 首次加载标志（防止 traverse 在 load_from_storage 完成前访问旧 config）
     loaded: Arc<tokio::sync::Mutex<bool>>,
+    /// 本插件的目录（`<homedir>/plugins/mcp`）——配置文件 `PLUGIN.yml` 就在这里
+    dir: PluginDir,
 }
 
 impl McpPlugin {
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
-        // 同步 fallback：先从 ctx.config() 解析（兼容旧 config.yaml）
-        let config: McpConfig = ctx
-            .config()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        // 自己的目录由容器经 `PLUGIN_DIR` 告知；旧形态残留的 `servers` 明细可能还在
+        // 那里的 `PLUGIN.yml` 里，由 `load_from_storage` 搬成资源
+        let dir = dir_from_ctx(&*ctx, PLUGIN_MCP);
+        let config: McpConfig = match dir.load::<McpConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => McpConfig::default(),
+            Err(e) => {
+                crate::plugin_warn!("mcp", "读取自身配置失败，改用默认值：{e}");
+                McpConfig::default()
+            }
+        };
 
-        let plugin = Arc::new(McpPlugin::new(config));
+        let plugin = Arc::new(McpPlugin::new(config, dir));
 
         // 启动后异步触发：从存储加载（并触发首启动数据迁移）
         let plugin_weak = Arc::downgrade(&plugin);
@@ -74,11 +82,12 @@ impl McpPlugin {
     }
 
     /// 主构造函数
-    pub fn new(config: McpConfig) -> Self {
+    pub fn new(config: McpConfig, dir: PluginDir) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
             manager: Arc::new(McpManager::new()),
             loaded: Arc::new(tokio::sync::Mutex::new(false)),
+            dir,
         }
     }
 
@@ -150,7 +159,11 @@ impl McpPlugin {
         }
     }
 
-    /// 首启动迁移：从 ctx.config() 中残留的旧配置迁到存储
+    /// 首启动迁移：把配置文件里残留的旧 Server 明细迁到存储
+    ///
+    /// 旧形态把 Server 整包存在配置里（`PLUGIN.yml` 的 `servers` 键）。迁移把它们
+    /// 写成 `plugins/mcp/<id>/server.json`，随后把配置文件里这些遗留键摘掉——
+    /// 本插件**没有跨条目配置**（它的配置就是资源树），配置文件只剩身份字段。
     async fn migrate_from_legacy_config(&self, store: &DirVdfs) {
         let current = self.config.read().await.clone();
         if current.servers.is_empty() {
@@ -174,12 +187,17 @@ impl McpPlugin {
                 crate::plugin_error!("mcp", "迁移 server {id} 失败");
             }
         }
+
+        // 明细已是资源：配置文件里不该再留一份（`_storage` 是更早形态的遗留键）
+        if let Err(e) = self.dir.remove_keys(&["servers", "_storage"]) {
+            crate::plugin_warn!("mcp", "清理配置文件中的遗留字段失败：{e}");
+        }
     }
 }
 
 impl Default for McpPlugin {
     fn default() -> Self {
-        Self::new(McpConfig::default())
+        Self::new(McpConfig::default(), PluginDir::of(PLUGIN_MCP))
     }
 }
 

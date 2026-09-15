@@ -466,6 +466,8 @@ mod tests {
     use super::*;
     // 仅测试断言用（生产路径已改为 `OptionAction::session_state_bind`）
     use crate::symbio_core::schemas::options::SESSION_STATE_ENDPOINT;
+    // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
+    use crate::plugins::session::test_dir;
 
     #[test]
     fn basename_handles_both_separators() {
@@ -488,7 +490,7 @@ mod tests {
     fn heartbeat_form_keeps_basic_settings_visible() {
         use crate::symbio_core::schemas::session::session_config::SessionConfig;
 
-        let plugin = SessionPlugin::new(None, SessionConfig::default());
+        let plugin = SessionPlugin::new(None, SessionConfig::default(), test_dir());
         let node = plugin.heartbeat_option(None);
         let form = node.form.expect("心跳表单定义存在");
         let fields = &form.sections[0].fields;
@@ -524,7 +526,7 @@ mod tests {
     fn heartbeat_trigger_is_disabled_without_enabled_and_prompt() {
         use crate::symbio_core::schemas::session::session_config::SessionConfig;
 
-        let plugin = SessionPlugin::new(None, SessionConfig::default());
+        let plugin = SessionPlugin::new(None, SessionConfig::default(), test_dir());
 
         // 未启用 / 缺提示词 → 只读并说明原因
         let off = plugin.heartbeat_trigger_option(None);
