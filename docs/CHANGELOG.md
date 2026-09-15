@@ -18,6 +18,44 @@
 
 ***
 
+## 2026-09-15: 插件配置回到插件目录（`PLUGIN.yml`），父插件不再代管配置
+
+上一版把配置做成了「一个普通节点」，但**存储仍由父插件代管**：写配置者推切片、
+`home` 合并落盘到 `<homedir>/config.yaml` 的 `symbio.plugins.<名>`。于是「一个插件的
+配置」横跨三处（home 的合并规则、composite 的分发规则、插件自己的读取），而配置
+**却不在插件自己的目录里**——插件目录因此不能整体拷贝移植。
+
+- **一个插件 = 一个目录**：`<homedir>/plugins/<插件>/` 里既有配置（`PLUGIN.yml`）
+  也有该插件自己的数据 / 资源，因此整个目录可直接拷贝移植。系统级插件（`home`
+  与容器 `composite`）的目录是**系统根本身**，配置在 `<homedir>/PLUGIN.yml`——
+  这同时消掉一个自举环：若 `home` 住在 `plugins/home`，容器扫描插件根时会把它当
+  普通插件再构造一次，而那个 `home` 又会构造容器。
+- **`PLUGIN.yml` 规范**：一个 YAML 映射，身份字段 `plugin_provider`（工厂 id）/
+  `plugin_name`（实例名）**不参与配置反序列化**（`PluginDir` 读写时自动剥离 / 补回），
+  其余键即插件配置。加载判据 = 文件可解析、且 `plugin_provider` 指向已注册的工厂。
+- **容器改为「目录驱动」**：`composite` 扫描**自己目录下的 `plugins/`**（父插件经
+  ctx 键 `PLUGIN_DIR` 告知它的目录），逐目录构造并挂载。它**不内置任何插件清单**
+  （通用容器，可以嵌套另一个容器）——「必需插件」由构造者经 ctx 键
+  `REQUIRED_PLUGINS` 传入（`home` 传的是 `SYSTEM_PLUGINS`），容器只负责把缺失的
+  目录 / 配置文件补出来（只补身份字段，缺省字段由插件自己的 `Default` 兜底）。
+- **配置归插件，写自己的文件**：`ConfigFile::apply` = 校验 → 落内存 → 落自己的文件
+  → 广播。`save_config` 路由、`ConfigSlice` 载荷、`home::merge_slice`、
+  `composite` 的向上转发、`ConfigDoc` / `SEG_CONFIG` / `is_config_path` 全部删除；
+  `ConfigDoc` 由 `symbio_core::plugin_dir` 的 `PluginDir` + `ConfigFile` 取代。
+- **地址从保留段变成真实文件名**：`.vdfs/<插件>/PLUGIN.yml`（原来是
+  `.vdfs/<插件>/配置`）。`ext = form` 显式声明覆盖由文件名推导出的 `yml`——
+  呈现方式由声明决定，不由文件名猜。网关只读白名单随之改判 `…/PLUGIN.yml`。
+- **一次性迁移**：`home` 首次启动读旧 `config.yaml` 的 `symbio.plugins.*`，逐项写
+  各插件目录的 `PLUGIN.yml`（目标已存在则跳过），随后把旧文件改名
+  `config.yaml.migrated` 留档——天然只生效一次。旧形态里把资源明细混在配置中的
+  插件自己消化：`model` 把遗留 `providers` 搬成 `provider.json` 后把配置**归一**为
+  只有跨条目状态；`mcp` 搬完 `servers` 后用 `PluginDir::remove_keys` 把遗留键摘掉。
+- **顺带**：`model` 的 `parent` 通道（仅用于推切片）随之成为死代码并删除；
+  修掉两处既有 clippy 报错（`&mut Vec` → `&mut [_]`、`SettingPlugin::default()`
+  → `SettingPlugin`），本地 `cargo clippy -- -D warnings` 恢复全绿。
+
+***
+
 ## 2026-09-15: VDFS 机制细节收敛（重复挂载名、`kind` 口径、会话单条定位）
 
 - **重复挂载名不再静默丢一份**：`CompositeVdfs` 收集子目录时改为**先排序、再去重**

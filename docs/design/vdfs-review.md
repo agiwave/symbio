@@ -200,23 +200,25 @@
 
 共同部分（两个方案都要做）：
 
-1. **删除协议**：`paths.rs` 的 `CONFIG_GET`/`CONFIG_SET`、各插件 route 里的两个分支、
+1. ✅ **删除协议**：`paths.rs` 的 `CONFIG_GET`/`CONFIG_SET`、各插件 route 里的两个分支、
    `composite` 的配置聚合、`home.collect_plugin_configs`、前端 `DetailForm` 的
    `config` 绑定与 `DetailDefinition.load_path/save_path`。
-2. **配置文档 = 一个 VDFS 节点**：`ext = form`、`access = rw`、
+2. ✅ **配置文档 = 一个 VDFS 节点**：`ext = form`、`access = rw`、
    `schema` = 该插件的详情定义；`read` 返回当前配置 JSON，`write` = 校验 → 落内存 →
-   触发持久化。共享实现放 `providers/vdfs_service/config.rs`（`ConfigDoc`），
-   各插件只是组合它 —— 定义与校验**回归配置的拥有者**，不再寄生在 `setting`。
-3. **校验归定义**：`DetailDefinition::validate(&Value)` 下沉到
+   落盘。共享实现是 `symbio_core::plugin_dir::ConfigFile`，各插件只是组合它 ——
+   定义与校验**回归配置的拥有者**，不再寄生在 `setting`。
+3. ✅ **校验归定义**：`DetailDefinition::validate(&Value)` 下沉到
    `symbio_core::schemas::detail`（定义与校验同源），`setting` 里的
    `validate_section` 随之删除。
-4. **持久化改为推送**：写配置者把**自己的切片**交给宿主
-   （`save_config` 载荷 = `{plugin, config}`），`home` 只负责合并落盘，
-   不再反向拉取。切片按 `plugin_provider` 定位既有键，兼容实例改名。
+4. ✅ **持久化 = 写自己的文件**：**没有宿主中转**。配置的地址就是插件目录里的那个
+   文件（§6.3），写配置者直接落自己的 `PLUGIN.yml`。
+   原先设计的「写配置者推切片（`save_config` 载荷 `{plugin, config}`）→ `home` 合并落盘」
+   已**作废**——它仍然让父插件知道「有哪些插件、各自配置长什么样」，与
+   「父插件不代管配置」的目标相反。
 
 ### 6.1 地址落在哪（**已定：方案甲**）
 
-- **方案甲（配置归插件，已采纳）**：`.vdfs/<插件>/配置`；`setting` 只保留前端自持的
+- **方案甲（配置归插件，已采纳）**：`.vdfs/<插件>/PLUGIN.yml`；`setting` 只保留前端自持的
   `appearance` / `about`。零新机制；代价是「设置」页不再聚合插件配置。
 - **方案乙（设置即容器，未采纳）**：`.vdfs/setting/<插件>` 保留；各插件把配置文档
   **登记**给设置容器（同一广播的第二个登记位），`setting` 变成一个不认识任何插件的
@@ -230,18 +232,82 @@
 
 ### 6.2 配置文档的地址形状
 
-- 挂载根**恒为目录**（前端导航与 `cwd` 语义如此），配置文档是根下的一个**保留子段**
-  `配置`：`.vdfs/<插件>/配置`。
+- 挂载根**恒为目录**（前端导航与 `cwd` 语义如此），配置文档是根下的一个**文件**，
+  文件名就是磁盘上的真实文件名 `PLUGIN.yml`：`.vdfs/<插件>/PLUGIN.yml`。
+  **地址即文件路径**——不另造保留段名，前端拿到的那条就是插件目录里那一份。
 - 已有资源树的插件（session）在自身 `list` / `stat` / `read` / `write`
-  里把 `配置` 段交给 `ConfigDoc`；只有配置、没有资源树的插件
-  （local / web / gateway / telegram）直接把 `ConfigDoc` 作为挂载内容。
+  里按 `path == PLUGIN_FILE` 分流；只有配置、没有资源树的插件
+  （local / web / gateway / telegram）直接把 `ConfigFile` 作为挂载内容。
 - **不设配置文档的插件**：`model` / `mcp` 的配置**就是**它们的资源树
   （`.vdfs/model/<id>` / `.vdfs/mcp/<name>`，各自带详情定义与节点动作）。
-  再挂一个 `配置` 段会是第二份真相，因此不挂——它们的落盘走 `save_config`
-  切片推送（`model` 只推 `default_provider_id`；`mcp` 无需推送）。
-- `配置` 是**保留段**：插件自身资源 id 不得占用（会话 id 是 UUID，天然不冲突；
-  model / mcp 的 id 由用户命名派生，理论上可撞名——由「保留段优先」的判定顺序
-  兜底，并在规范中写明）。
+  再挂一个 `PLUGIN.yml` 会是第二份真相，因此不挂；`model` 只把
+  `default_provider_id` 写进自己的目录（读宽写窄，见 §6.3）。
+- **不再有「保留段」问题**：`PLUGIN.yml` 是**文件**，而资源 id 是**目录名**，
+  天然不冲突（`list_entry_ids` 只列子目录）。
+
+### 6.3 改造三：配置回到插件目录（`PLUGIN.yml`）
+
+把「配置」从「宿主代管的聚合文档」改为「插件目录里的一个文件」。目标不只是地址
+好看，而是**解耦**：父插件不再需要知道任何子插件的配置形状，插件目录成为一个可整体
+拷贝 / 移植的单元。
+
+**规范**
+
+- 一个插件 = 一个目录 `<homedir>/plugins/<插件>/`：里面既有配置 `PLUGIN.yml`，
+  也有该插件自己的数据 / 资源（如 `model/<id>/provider.json`）。整目录可直接拷走。
+- `PLUGIN.yml` 是 YAML 映射，其中两个**身份字段**：
+  - `plugin_provider` —— 工厂 id，装配时据此 `has_creator` 判据；
+  - `plugin_name` —— 实例名（缺省 = 目录名）。
+  二者**不参与配置反序列化**，由 `PluginDir` 读写时自动剥离 / 补回。
+  其余键即插件自己的配置，形状由插件自己定。
+- **加载判据**：`PLUGIN.yml` 存在 + 可解析 + `plugin_provider` 指向已注册工厂。
+
+**系统级插件：目录就是系统根**
+
+- `home` 与它构造的容器 `composite` 的目录是**系统根** `<homedir>` 本身
+  （`PluginDir::system`），配置在 `<homedir>/PLUGIN.yml`；容器只把系统根当**锚点**，
+  它管辖的插件根是 `PluginDir::plugins_root()` = `<系统根>/plugins`。
+  `composite` 可以理解为「`home` 动态加载自己的内置替身」——同目录、无自身配置。
+- ⚠️ **`plugins/` 里不能有 `home`**：否则容器扫描插件根时会把它当普通插件再构造
+  一次，那个 home 又构造容器 → 无限递归。自举环靠「系统级插件不住在 `plugins/` 下」消掉。
+
+**职责划分**
+
+| 角色 | 负责 | 不负责 |
+| --- | --- | --- |
+| 容器（`composite`） | 补必需插件目录、扫描插件根、按判据构造、把**自身目录**经 `PLUGIN_DIR` 告知被构造者 | 配置的形状 / 落盘 |
+| 插件 | 读 / 写**自己目录**里的 `PLUGIN.yml` | 别人的配置 |
+| 父插件（`home`） | 只做「必需插件清单」这一条**策略**（经 `REQUIRED_PLUGINS` 随构造传入） | 任何子插件的配置 |
+
+- `REQUIRED_PLUGINS` 由**构造者**传入而非容器内置：`composite` 只是一个通用容器，
+  它甚至可以自己嵌套另一个 `composite`；「缺省要加载哪些插件」是 `home` 的策略
+  （`home::SYSTEM_PLUGINS`），容器不持有清单。
+- 两个 ctx 键都是既有 `SymbioKey` 机制，**零新机制**：
+  `PLUGIN_DIR`（`Value = PluginDir`）、`REQUIRED_PLUGINS`（`Value = Vec<String>`）。
+
+**一次性迁移**
+
+- 旧 `config.yaml` 的 `symbio.plugins.*` 逐项写成各插件 `PLUGIN.yml`；目标已存在则**跳过**
+  （不覆盖用户已改过的配置）；旧文件改名 `config.yaml.migrated` 留档。
+- `model` / `mcp` 的旧形态把资源明细混在配置里（`providers` / `servers`）：
+  - `model` 走**读宽写窄**——读 `ModelProvidersConfig`（兼容旧形态），写
+    `ModelConfig { default_provider_id }`，迁移完 `persist()` 一次把文件归一；
+  - `mcp` 走 `PluginDir::remove_keys(&["servers", "_storage"])` 摘掉遗留键。
+
+**下线清单**
+
+`providers/vdfs_service/config.rs`（`ConfigDoc` / `SEG_CONFIG` / `is_config_path`）、
+`schemas/common.rs::ConfigSlice`、`paths.rs::SAVE_CONFIG`、`home::save_config` /
+`merge_slice` / `prune_migrated_plugin_data`、`composite` 的向上转发与 `get_parent`、
+`model::persist_to_parent` 与它的 `parent` 通道。
+
+**教训**
+
+- 「保留段」这类约定是**地址污染**：一旦插件根下多出一个非资源项，所有「按场景把挂载根
+  清单映射成业务列表」的前端代码都得按 `ext` 过滤（`listSessions()` 曾因此多出一条
+  id 为 `配置` 的伪会话）。改成**真实文件名**后这条隐患自动消失——文件与目录本就不同名空间。
+- 装配期的 `ensure_manifest` 必须**只补身份字段、绝不覆盖**已有文件；它同时是
+  「必需插件即便从未配置过也要有一个可编辑的 `PLUGIN.yml`」的保证。
 
 ---
 
@@ -251,6 +317,7 @@
 - [x] 改造一：会话存储的寻址与 VDFS 的关系（寻址已合一 `19e1c87`；#1/#2/#4 结案，
       #3 有意不做）
 - [x] 改造二：配置地址化，废弃 `CONFIG_GET`/`CONFIG_SET`（S1 / S2 / S4 / S5 / S6）
+- [x] 改造三：配置回到插件目录（`PLUGIN.yml`），父插件不再代管配置（S8 / S9，见 §6.3）
 - [x] P2-1 / P2-3 / P2-4 顺带收敛
 - [ ] P2-2（调用级缓存，收益未证实，暂缓）
 
@@ -262,26 +329,28 @@
   （-195 行）；`DetailDefinition.load_path` / `save_path` 删除（P1-3 的机制侧旁路）；
   `vdfs_provider.rs` 模块文档的「root 级 provider」改为「目录合成」（P3-1）。
 
-- **S2 配置文档实现**：`providers/vdfs_service/config.rs` 新增 `ConfigDoc`
-  （节点形状 / 定义校验 / 切片推送；**值 + 一组函数，不是 trait**）+
+- **S2 配置文档实现**（机制已在 S8 被取代）：`providers/vdfs_service/config.rs` 新增
+  `ConfigDoc`（节点形状 / 定义校验 / 切片推送；**值 + 一组函数，不是 trait**）+
   `SEG_CONFIG` / `is_config_path`；`paths.rs` 删 `CONFIG_GET`/`CONFIG_SET`、
-  增 `SAVE_CONFIG`；`schemas/common.rs` 新增 `ConfigSlice { plugin, config }`
-  （载荷契约的唯一定义，`ConfigDoc::persist` 与各插件共用）。
+  增 `SAVE_CONFIG`；`schemas/common.rs` 新增 `ConfigSlice { plugin, config }`。
+  —— 该文件的「配置文档」抽象与切片推送在 S8 中**整体删除**，只留下「校验归定义」
+  与「定义归拥有者」两条结论（`DetailDefinition::validate` 保留在 `symbio_core`）。
 
 - **S4 四个插件接入**（local / web / gateway / session）：删除各自的
   `CONFIG_GET`/`CONFIG_SET` 分支；`config_definition()` **回归配置的拥有者**
   （默认值从各自的 `Default` 读出，不再有第二份字面量）；`local` / `web` /
-  `gateway` 直接以 `ConfigDoc` 为挂载内容，`session` 在自身资源树里分流 `配置` 段。
-  网关的只读白名单同步收紧：拒绝对 `<挂载点>/配置` 的 `vdfs/read`（配置含凭据）。
+  `gateway` 直接以 `ConfigDoc` 为挂载内容，`session` 在自身资源树里分流配置段。
+  网关的只读白名单同步收紧：拒绝对配置文档的 `vdfs/read`（配置含凭据）。
+  —— 地址名在 S8 改为 `PLUGIN.yml`。
 
-- **S5 持久化改推送 + 其余插件**：`composite` 删配置聚合分支（只向上转发
-  `SAVE_CONFIG`，不解释）；`home` 的 `save_config` 改为收切片 →
+- **S5 持久化改推送 + 其余插件**（推送部分已在 S8 作废）：`composite` 删配置聚合分支
+  （只向上转发 `SAVE_CONFIG`，不解释）；`home` 的 `save_config` 改为收切片 →
   按 `plugin_provider` 定位既有键 → 逐键合并 → 原子落盘（新增 `merge_slice` /
   `flush`，删除 `collect_plugin_configs`）；`model` / `mcp` / `telegram`
   删两个协议分支——`model` 的 `persist_to_parent` 改为推
   `ConfigSlice { plugin: "model", config: { default_provider_id } }`，
   `mcp` / `telegram` 顺带删掉已无用的 `parent` 字段与访问器，
-  `telegram` 新增 `.vdfs/telegram/配置` 配置文档（原配置无任何地址）。
+  `telegram` 新增配置文档（原配置无任何地址）。
 
 - **S6 setting 瘦身 + 前端清理**：`setting` 变为**无状态 provider**（794 → ~250 行），
   `SETTING_SECTIONS` 从 6 项减为 `appearance` / `about` 两项，`route` 恒 `NotFound`，
@@ -296,5 +365,29 @@
   `vdfs.md` §3.2 明确「`kind` 单一词表」与「机制字段保留字」；
   `SessionStore::load_session_checked`（存在性判据）替换 `session_of` 的全量清单 `find`。
 
-- **门禁**：`cargo check --tests` 零错误零告警；`cargo test --lib` 全绿；
-  `vue-tsc --noEmit` 通过；`vitest run` 18 文件 / 140 用例全绿。
+- **S8 配置回到插件目录（改造三，§6.3）**：新增 `symbio_core::plugin_dir`
+  （`PLUGIN.yml` 规范 + `PluginDir`：`of` / `at` / `system` / `plugins_root` /
+  `read_manifest` / `load` / `save` / `ensure_manifest` / `remove_keys`，身份字段
+  读写自动剥离 / 补回）；新增 `plugin_dir::ConfigFile`（`node` / `read` / `apply` =
+  校验 → 落内存 → 落自己的文件 → 广播），地址用**真实文件名** `PLUGIN.yml`；
+  新增 ctx 键 `PLUGIN_DIR` + `dir_from_ctx` 入口；`local` / `web` / `gateway` /
+  `telegram` / `session` 五个插件从 `ConfigDoc` 迁到 `ConfigFile`；
+  `model` / `mcp` 改为读写自己目录（`model` 读宽写窄 + `persist()` 归一，
+  `mcp` 用 `remove_keys` 摘 `servers` / `_storage`）；`home` 做一次性迁移
+  （旧 `config.yaml` 的 `symbio.plugins.*` → 各插件 `PLUGIN.yml`，已存在则跳过，
+  旧文件改名 `config.yaml.migrated`）；**删除** `providers/vdfs_service/config.rs`
+  （`ConfigDoc` / `SEG_CONFIG` / `is_config_path`）、`ConfigSlice`、`SAVE_CONFIG`、
+  `home::save_config` / `merge_slice` / `prune_migrated_plugin_data`、
+  `composite` 的向上转发与 `get_parent`、`model::persist_to_parent`。
+
+- **S9 系统级插件 + 清单归构造者**（两条架构纠正）：`home` 与容器 `composite` 的目录
+  改为**系统根**（`PluginDir::system`），`plugins/` 下不再有 `home`——消掉
+  「容器扫到 home 再构造一个 home」的自举环；容器经 `PluginDir::plugins_root()` 定位
+  自己管辖的插件根；容器**不再内置**必需插件清单，改由 `home` 经新增的 ctx 键
+  `REQUIRED_PLUGINS` 随构造传入（`home::SYSTEM_PLUGINS`），使 `composite` 成为可嵌套的
+  通用容器。
+
+- **门禁**：`cargo check --tests` 零错误零告警；`cargo clippy --workspace --all-targets
+  -- -D warnings` 通过；`cargo test --lib` 全绿（另顺带修掉两处既有 clippy 报错：
+  `SettingPlugin::default()` × 4、`sort_by_updated_desc` 的 `&mut Vec`）；
+  `vue-tsc --noEmit` 通过；`vitest run` 全绿。
