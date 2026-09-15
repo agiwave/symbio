@@ -220,7 +220,7 @@ impl VdfsProvider for SingleFileVdfs {
     async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
         if path.is_empty() {
             // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
-            return Ok(entry::dir_node("", self.label.clone()));
+            return Ok(VdfsNode::dir("", self.label.clone(), VdfsAccess::LIST));
         }
         Ok(self.node_of(&self.entry(&self.id_of(path)).await?))
     }

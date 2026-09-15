@@ -181,7 +181,8 @@ impl VdfsProvider for MemoryVdfs {
 
     async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
         if path.is_empty() {
-            return Ok(super::entry::dir_node("", self.label.clone()));
+            // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
+            return Ok(VdfsNode::dir("", self.label.clone(), VdfsAccess::LIST));
         }
         let id = self.id_of(path);
         let table = self.entries.read().unwrap();

@@ -344,7 +344,7 @@ impl VdfsProvider for DirVdfs {
     async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
         match entry::split_rel(path) {
             // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
-            None => Ok(entry::dir_node("", self.label.clone())),
+            None => Ok(VdfsNode::dir("", self.label.clone(), VdfsAccess::LIST)),
             Some((id, "")) => Ok(self.node_of(&self.entry(&self.id_of(id)).await?)),
             Some((id, rel)) => {
                 let id = self.id_of(id);

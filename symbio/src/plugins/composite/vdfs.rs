@@ -95,18 +95,27 @@ impl CompositeVdfs {
     }
 
     /// 现场收集：逐个向子插件广播一次能力收集，取回各自注册的 `(目录名, provider)`，
-    /// 按 `order` 升序稳定排序（同序保持收集顺序）。
+    /// 按 `order` 升序排序（同序按目录名、插件名兜底，使结果不依赖子插件的枚举顺序）。
     ///
     /// 不缓存——子插件集合与注册内容由配置与生命周期决定，每次现取才与容器一致。
+    ///
+    /// 目录名是路径首段的唯一键：**重名时保留排序后首个**并 `warn`。若不处理，
+    /// `list("")` 会给出两个同名节点而 `resolve` 只能命中一个——后来者**完全不可达**。
+    /// 因此**先排序、再去重**：胜出者由 `(order, 目录名, 插件名)` 唯一确定，重名是装配
+    /// 错误，必须在日志里可见而不是静默丢弃。
     async fn children_of(&self, ctx: &VdfsContext) -> VdfsResult<Vec<(String, DynVdfsProvider)>> {
         let host = host_ctx(ctx)?;
-        let children: Vec<Arc<dyn Plugin>> = {
+        let children: Vec<(String, Arc<dyn Plugin>)> = {
             let guard = self.instances.read().await;
-            guard.values().cloned().collect()
+            guard
+                .iter()
+                .map(|(name, p)| (name.clone(), Arc::clone(p)))
+                .collect()
         };
 
-        let mut dirs: Vec<(String, DynVdfsProvider)> = Vec::new();
-        for child in children {
+        // `(注册它的子插件, 目录名, provider)`——带上归属，重名告警才点得出双方
+        let mut collected: Vec<(String, String, DynVdfsProvider)> = Vec::new();
+        for (plugin, child) in children {
             let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
             let sub = host.fork();
             sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
@@ -115,9 +124,30 @@ impl CompositeVdfs {
             if let Err(e) = child.clone().traverse(String::new(), sub).await {
                 crate::plugin_warn!("composite", "vdfs: 子插件遍历失败，已跳过其子目录: {e:?}");
             }
-            dirs.extend(visitor.list_vdfs_providers().await);
+            collected.extend(
+                visitor
+                    .list_vdfs_providers()
+                    .await
+                    .into_iter()
+                    .map(|(dir, p)| (plugin.clone(), dir, p)),
+            );
         }
-        dirs.sort_by(|a, b| a.1.order().cmp(&b.1.order()));
+        collected.sort_by(|a, b| (a.2.order(), &a.1, &a.0).cmp(&(b.2.order(), &b.1, &b.0)));
+
+        let mut dirs: Vec<(String, DynVdfsProvider)> = Vec::with_capacity(collected.len());
+        // 目录名 → 已胜出的注册者（仅用于重名告警）
+        let mut owners: HashMap<String, String> = HashMap::new();
+        for (plugin, dir, p) in collected {
+            if let Some(prev) = owners.get(&dir) {
+                crate::plugin_warn!(
+                    "composite",
+                    "vdfs: 目录名「{dir}」被 {prev} 与 {plugin} 重复注册，保留 {prev}（{plugin} 不可达）"
+                );
+                continue;
+            }
+            owners.insert(dir.clone(), plugin);
+            dirs.push((dir, p));
+        }
         Ok(dirs)
     }
 
@@ -475,6 +505,44 @@ mod tests {
             assert_eq!(name, dir);
             assert_eq!(p.label(), Some(label), "provider 与目录名一一对应");
         }
+    }
+
+    /// 两个子插件注册同一目录名 → 只保留排序后首个，不产生同名节点（后者本不可达）
+    #[tokio::test]
+    async fn duplicate_dir_names_keep_the_first_only() {
+        // 插件名与目录名解耦：两个**不同**插件注册同一个目录名
+        let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+        map.insert(
+            "plugin_a".to_string(),
+            Arc::new(FakeChild {
+                dir: "same",
+                label: "甲",
+                order: 2,
+            }),
+        );
+        map.insert(
+            "plugin_b".to_string(),
+            Arc::new(FakeChild {
+                dir: "same",
+                label: "乙",
+                order: 1,
+            }),
+        );
+        let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
+        let ctx = host_ctx();
+
+        let dirs = vdfs.children_of(&ctx).await.unwrap();
+        assert_eq!(dirs.len(), 1, "重名只保留一份，否则会列出两个同名子目录");
+        assert_eq!(dirs[0].0, "same");
+        assert_eq!(
+            dirs[0].1.label(),
+            Some("乙"),
+            "胜出者由 order 决定（1 < 2），不依赖 HashMap 的枚举顺序"
+        );
+
+        let root = vdfs.list(&ctx, "").await.unwrap();
+        assert_eq!(root.len(), 1);
+        assert_eq!(root[0].name, "same");
     }
 
     /// 子树内的路径被拆回相对路径交给叶子 provider，返回项回填树内全路径

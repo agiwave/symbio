@@ -17,9 +17,7 @@
 //! [`DirVdfs`](super::dir::DirVdfs) / [`SingleFileVdfs`](super::single_file::SingleFileVdfs)
 //! 自己身上。
 
-use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsError, VdfsNode, VdfsResult, VFDS_KIND_DIR,
-};
+use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
 use crate::symbio_core::HomedirRegistry;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -245,13 +243,6 @@ pub async fn remove_entry(base: &Path, id: &str) -> VdfsResult<()> {
 /// 条目目录是否存在
 pub fn entry_exists(base: &Path, id: &str) -> bool {
     entry_dir(base, id).is_dir()
-}
-
-/// 目录节点（挂载根 / 可下钻的条目目录）
-pub fn dir_node(name: impl Into<String>, title: impl Into<String>) -> VdfsNode {
-    let mut n = VdfsNode::dir(name, title, VdfsAccess::LIST);
-    n.kind = VFDS_KIND_DIR.to_string();
-    n
 }
 
 /// 目录 mtime（拿不到就 `None`——时间戳是展示信息，不值得为此失败）
