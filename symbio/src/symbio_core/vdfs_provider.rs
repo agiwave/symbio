@@ -24,8 +24,10 @@
 //!   `CapabilityVisitor::register_vdfs_provider(目录名, provider)` 注册自身。
 //!   **目录名由使用方选定**，约定用插件名（`PLUGIN_*` 常量）——插件名在宿主内
 //!   唯一，天然就是合格的目录名；
-//! - **`composite` 容器**是一个 root 级 provider：它的目录内容 = 实现了本接口的
-//!   子插件名（每个子插件一个子目录）；
+//! - **`composite` 容器**只负责**目录合成**：它把各子插件注册的 provider 按
+//!   注册名铺成一级子目录（`plugins/composite/vdfs.rs`）。它自身不是「根级
+//!   provider」——机制里没有根级 provider 这个概念，`.vdfs` 只是使用方在合成
+//!   视图之上取的展示地址；
 //! - **`vdfs` 插件**取容器注册的根，按 `vdfs/*` 协议分发（前端与 LLM 走同一条
 //!   分发链路，不存在第二套实现）；
 //! - 机制只认 [`VdfsAccess`] 的四个访问位（`r` / `w` / `l` / `t`），不做任何

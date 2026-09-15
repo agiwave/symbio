@@ -23,8 +23,6 @@ fn field(key: &str, label: &str, widget: &str) -> DetailField {
 pub fn agent_detail_definition() -> DetailDefinition {
     DetailDefinition {
         binding: "info".into(),
-        load_path: None,
-        save_path: None,
         title_from: vec![],
         title_fallback: Some("Agent".into()),
         subtitle_from: vec!["version".into(), "scope".into()],

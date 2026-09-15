@@ -28,8 +28,6 @@ fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
 pub fn skill_detail_definition() -> DetailDefinition {
     DetailDefinition {
         binding: "upload".into(),
-        load_path: None,
-        save_path: None,
         title_from: vec!["name".into()],
         title_fallback: Some("新建 Skill".into()),
         subtitle_from: vec!["description".into()],

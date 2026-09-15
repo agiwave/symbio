@@ -364,8 +364,6 @@ pub fn model_detail_definition() -> DetailDefinition {
 
     DetailDefinition {
         binding: "upload".into(),
-        load_path: None,
-        save_path: None,
         title_from: vec!["name".into(), "model".into()],
         title_fallback: Some("新建 Provider".into()),
         subtitle_from: vec!["provider".into(), "model".into()],

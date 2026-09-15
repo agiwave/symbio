@@ -8,13 +8,14 @@
 //! 与 VDFS 的接缝只有两处，且都由 provider 自己声明，不存在机制侧的猜测：
 //!
 //! - 节点 `ext = form` → 前端用通用渲染器打开本模块下发的定义；
-//! - 定义里的 `load_path` / `save_path` → 普通的服务端调用地址（可以是 `vdfs/read`
-//!   / `vdfs/write`，也可以是任意既有 path）。
+//! - 提交值的校验 → [`DetailDefinition::validate`]，错误载荷即 `vdfs/write`
+//!   的字段级失败载荷（[`VdfsValidationError`]）。
 //!
 //! 能力判定不在本模块：可写性来自 **VDFS 访问位**，可新建 / 可导入来自 provider 的
 //! `root_access` / `root_new_types`，可测试与否来自 [`DetailDefinition::actions`]
 //! 里声明的动作。
 
+use crate::symbio_core::vdfs_provider::{VdfsFieldError, VdfsValidationError};
 use serde::{Deserialize, Serialize};
 
 // ==================== 详情页定义（definition-driven detail） ====================
@@ -181,20 +182,18 @@ pub struct DetailAction {
 }
 
 /// 详情页定义。`binding` ∈ upload（资源：预填节点内容，保存走
-/// manifest 写入）| config（配置分区：经 `load_path`/
-/// `save_path` 读写，如 `config/get` / `config/set`）| info（只读概览：
-/// 无保存，字段取值来自节点 attributes，配 `static` widget 展示）。
+/// manifest 写入）| option（可选项：字段直接落在表单模型上，保存走节点写入）
+/// | info（只读概览：无保存，字段取值来自节点 attributes，配 `static` widget 展示）。
 /// 派生链均为「首个非空」：
 /// `title_from` 生成标题，`name_from` 保存时补名称，`id_from` 新建时
 /// 派生 slug id（前端去重 `-2` 递增，后端 `validate_manifest` 兜底）。
+///
+/// 校验同源：提交值的合法性由定义自己判定（[`DetailDefinition::validate`]），
+/// 使用方不再各写一套字段规则。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct DetailDefinition {
     pub binding: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub load_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub save_path: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub title_from: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -213,4 +212,275 @@ pub struct DetailDefinition {
     pub badges: Vec<DetailBadge>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<DetailAction>,
+}
+
+// ==================== 定义自带校验 ====================
+//
+// **定义与校验同源**：字段声明在哪里，字段的合法性判定就在哪里。
+// 使用方（配置 provider / 上传 provider）把提交值交给定义即可，不必各自
+// 复写字段规则——这是「定义驱动表单」成立的前提。
+//
+// 结果复用 VDFS 的字段级错误载荷 [`VdfsValidationError`]：定义本就是 VDFS 上
+// 的一种宿主方言（`ext = form`），而 `vdfs/write` 的失败载荷正是它的输出格式。
+
+/// 空值判定：`null` 与「全空白字符串」视为空；数字 / 布尔 / 容器不算空
+/// （`false` / `0` 是**有效值**，不能当成「没填」）。
+fn is_blank(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => true,
+        serde_json::Value::String(s) => s.trim().is_empty(),
+        _ => false,
+    }
+}
+
+impl DetailCondition {
+    /// 以 `value` 为表单模型求值，判断本条件是否成立。
+    ///
+    /// **空条件恒成立**——这是条件字段的中性语义（见本类型文档），
+    /// 也是前端渲染器与后端校验保持一致的关键：`when` / `visible_when`
+    /// 缺省即显示，因此后端不能把「无条件」当成「不成立」。
+    pub fn holds(&self, value: &serde_json::Value) -> bool {
+        if !self.all.iter().all(|c| c.holds(value)) {
+            return false;
+        }
+        let cur = value.get(&self.key);
+        if let Some(eq) = &self.equals {
+            if cur != Some(eq) {
+                return false;
+            }
+        }
+        if let Some(ne) = &self.not_equals {
+            if cur == Some(ne) {
+                return false;
+            }
+        }
+        if let Some(t) = self.truthy {
+            if cur.and_then(serde_json::Value::as_bool).unwrap_or(false) != t {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl DetailField {
+    /// 单字段类型 / 范围校验（`None` = 通过）。
+    ///
+    /// 覆盖 `widget` 声明的形状约束与 `min` / `max` / `options` 声明的取值约束；
+    /// `required` 与条件显隐由 [`DetailDefinition::validate`] 统一处理（它们
+    /// 取决于「有没有提交」而非「值本身合不合法」）。
+    pub fn check(&self, v: &serde_json::Value) -> Option<String> {
+        match self.widget.as_str() {
+            "number" => {
+                let Some(n) = v.as_f64() else {
+                    return Some("必须是数字".to_string());
+                };
+                if let Some(min) = self.min {
+                    if n < min {
+                        return Some(format!("不能小于 {min}"));
+                    }
+                }
+                if let Some(max) = self.max {
+                    if n > max {
+                        return Some(format!("不能大于 {max}"));
+                    }
+                }
+                None
+            }
+            "toggle" => (!v.is_boolean()).then(|| "必须是布尔值".to_string()),
+            "select" => {
+                let Some(s) = v.as_str() else {
+                    return Some("必须是字符串".to_string());
+                };
+                if !self.options.is_empty() && !self.options.iter().any(|o| o.value == s) {
+                    return Some(format!(
+                        "必须是以下之一：{}",
+                        self.options
+                            .iter()
+                            .map(|o| o.value.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" / ")
+                    ));
+                }
+                None
+            }
+            "list" => (!v.is_array()).then(|| "必须是字符串数组".to_string()),
+            "map" => (!v.is_object()).then(|| "必须是键值对象".to_string()),
+            "text" | "password" | "textarea" | "datalist" => {
+                (!v.is_string()).then(|| "必须是字符串".to_string())
+            }
+            _ => None,
+        }
+    }
+}
+
+impl DetailDefinition {
+    /// 按定义逐字段校验提交值；有错则返回**字段级**错误（供前端逐字段高亮）。
+    ///
+    /// 与前端渲染保持一致的两条豁免：`static` 只读字段不参与校验；
+    /// `visible_when` 不成立的隐藏字段不参与校验（没显示的字段不该拦提交）。
+    pub fn validate(&self, value: &serde_json::Value) -> Result<(), VdfsValidationError> {
+        let Some(obj) = value.as_object() else {
+            return Err(VdfsValidationError::new("提交内容必须是 JSON 对象"));
+        };
+        let mut err = VdfsValidationError::new("校验未通过");
+
+        for section in &self.sections {
+            for f in &section.fields {
+                // 只读展示字段不参与校验
+                if f.widget == "static" {
+                    continue;
+                }
+                // 条件隐藏字段不参与校验（与前端渲染保持一致）
+                if let Some(cond) = &f.visible_when {
+                    if !cond.holds(value) {
+                        continue;
+                    }
+                }
+                let Some(current) = obj.get(&f.key) else {
+                    if f.required {
+                        err.fields.push(VdfsFieldError {
+                            field: f.key.clone(),
+                            message: "必填项缺失".to_string(),
+                        });
+                    }
+                    continue;
+                };
+                if f.required && is_blank(current) {
+                    err.fields.push(VdfsFieldError {
+                        field: f.key.clone(),
+                        message: "必填项不能为空".to_string(),
+                    });
+                    continue;
+                }
+                if let Some(message) = f.check(current) {
+                    err.fields.push(VdfsFieldError {
+                        field: f.key.clone(),
+                        message,
+                    });
+                }
+            }
+        }
+
+        if err.has_fields() {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn field(key: &str, widget: &str) -> DetailField {
+        DetailField {
+            key: key.into(),
+            label: key.into(),
+            widget: widget.into(),
+            ..Default::default()
+        }
+    }
+
+    fn def_of(fields: Vec<DetailField>) -> DetailDefinition {
+        DetailDefinition {
+            sections: vec![DetailSection {
+                title: None,
+                collapsed: false,
+                fields,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn required_missing_and_blank_are_reported_per_field() {
+        let mut f = field("host", "text");
+        f.required = true;
+        let def = def_of(vec![f]);
+
+        assert_eq!(
+            def.validate(&json!({})).unwrap_err().fields[0].field,
+            "host"
+        );
+        assert_eq!(
+            def.validate(&json!({ "host": "   " })).unwrap_err().fields[0].field,
+            "host"
+        );
+        // `false` / `0` 是有效值，不是「没填」
+        assert!(def.validate(&json!({ "host": "127.0.0.1" })).is_ok());
+    }
+
+    #[test]
+    fn non_object_payload_is_rejected() {
+        assert!(def_of(vec![]).validate(&json!("nope")).is_err());
+    }
+
+    /// 隐藏字段（`visible_when` 不成立）与只读展示字段都不参与校验：
+    /// 没显示的字段不该拦住提交。
+    #[test]
+    fn hidden_and_static_fields_are_exempt() {
+        let mut hidden = field("port", "number");
+        hidden.required = true;
+        hidden.visible_when = Some(DetailCondition {
+            key: "enabled".into(),
+            equals: Some(json!(true)),
+            ..Default::default()
+        });
+        let mut ro = field("status", "static");
+        ro.required = true;
+
+        let def = def_of(vec![hidden, ro]);
+
+        // 未启用 → 端口整行不渲染 → 缺失也不算错
+        assert!(def.validate(&json!({ "enabled": false })).is_ok());
+        // 启用 → 端口回归校验
+        assert_eq!(
+            def.validate(&json!({ "enabled": true }))
+                .unwrap_err()
+                .fields[0]
+                .field,
+            "port"
+        );
+    }
+
+    /// 空条件恒成立（`when` / `visible_when` 缺省即显示）。
+    #[test]
+    fn empty_condition_always_holds() {
+        assert!(DetailCondition::default().holds(&json!({})));
+    }
+
+    #[test]
+    fn field_check_covers_shape_and_range() {
+        let mut n = field("port", "number");
+        n.min = Some(1.0);
+        n.max = Some(65535.0);
+        assert!(n.check(&json!(80)).is_none());
+        assert!(n.check(&json!(0)).is_some());
+        assert!(n.check(&json!(70000)).is_some());
+        assert!(n.check(&json!("abc")).is_some());
+
+        let mut s = field("proto", "select");
+        s.options = vec![
+            DetailOption {
+                value: "http".into(),
+                label: "HTTP".into(),
+            },
+            DetailOption {
+                value: "https".into(),
+                label: "HTTPS".into(),
+            },
+        ];
+        assert!(s.check(&json!("http")).is_none());
+        assert!(s.check(&json!("carrier-pigeon")).is_some());
+
+        assert!(field("flag", "toggle").check(&json!(true)).is_none());
+        assert!(field("flag", "toggle").check(&json!("yes")).is_some());
+        assert!(field("hosts", "list").check(&json!(["a"])).is_none());
+        assert!(field("hosts", "list").check(&json!("a")).is_some());
+        assert!(field("env", "map").check(&json!({ "K": "V" })).is_none());
+        assert!(field("env", "map").check(&json!([])).is_some());
+    }
 }

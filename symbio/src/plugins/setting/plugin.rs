@@ -10,12 +10,12 @@ use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
 use crate::symbio_core::schemas::detail::{
-    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
+    DetailAction, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::vdfs::{
-    self, DynVdfsProvider, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsFieldError,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse,
+    self, DynVdfsProvider, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
+    VdfsResult, VdfsWriteResponse,
 };
 
 #[derive(Clone)]
@@ -229,19 +229,9 @@ fn detail_field_password(key: &str, label: &str, desc: &str, placeholder: &str) 
 }
 
 /// config 绑定定义骨架：单分区 + 单「保存配置」动作（`_desc` 预留：schema 暂无描述字段）。
-///
-/// load/save 路径由插件前缀 + 协议常量（`CONFIG_GET`/`CONFIG_SET`）构建，
-/// 路径拼写单一来源，禁止手写字面量（防止与协议路由脱节）。
-fn config_definition(
-    title: &str,
-    _desc: &str,
-    prefix: &str,
-    fields: Vec<DetailField>,
-) -> DetailDefinition {
+fn config_definition(title: &str, _desc: &str, fields: Vec<DetailField>) -> DetailDefinition {
     DetailDefinition {
         binding: "config".into(),
-        load_path: Some(format!("{prefix}/{CONFIG_GET}")),
-        save_path: Some(format!("{prefix}/{CONFIG_SET}")),
         title_from: vec![],
         title_fallback: Some(title.into()),
         subtitle_from: vec![],
@@ -275,7 +265,6 @@ fn session_detail_definition() -> DetailDefinition {
     config_definition(
         "会话设置",
         "控制会话存储与上下文行为",
-        "session",
         vec![
             detail_field_number(
                 "max_messages",
@@ -313,7 +302,6 @@ fn local_detail_definition() -> DetailDefinition {
     config_definition(
         "本地工具设置",
         "控制本地 Shell / 文件工具的启用与超时",
-        "local",
         vec![
             detail_field_toggle(
                 "shell_enabled",
@@ -338,7 +326,6 @@ fn web_detail_definition() -> DetailDefinition {
     config_definition(
         "网络工具设置",
         "控制 Web 工具的启用、超时与搜索服务凭据",
-        "web",
         vec![
             detail_field_toggle("web_enabled", "启用 Web 工具", "允许网络请求", true),
             detail_field_number(
@@ -369,7 +356,6 @@ fn gateway_detail_definition() -> DetailDefinition {
     config_definition(
         "开放接口",
         "配置本应用如何被调用（入站，对外提供服务）。前端连向何处（出站）由左下角「系统目录」切换器统一管理，不在本页设置",
-        "gateway",
         vec![
             // ---- 入站 ----
             DetailField {
@@ -476,140 +462,7 @@ fn section_node(s: &SectionSpec) -> VdfsNode {
     n
 }
 
-/// 空值判定（`null` / 空白字符串视为未填）
-fn is_blank(v: &serde_json::Value) -> bool {
-    match v {
-        serde_json::Value::Null => true,
-        serde_json::Value::String(s) => s.trim().is_empty(),
-        _ => false,
-    }
-}
-
-/// 条件求值（与前端 DetailForm 的 `visible_when` 语义一致）
-fn condition_holds(c: &DetailCondition, value: &serde_json::Value) -> bool {
-    let cur = value.get(&c.key);
-    if !c.all.iter().all(|x| condition_holds(x, value)) {
-        return false;
-    }
-    if let Some(eq) = &c.equals {
-        if cur != Some(eq) {
-            return false;
-        }
-    }
-    if let Some(ne) = &c.not_equals {
-        if cur == Some(ne) {
-            return false;
-        }
-    }
-    if let Some(t) = c.truthy {
-        if cur.and_then(serde_json::Value::as_bool).unwrap_or(false) != t {
-            return false;
-        }
-    }
-    true
-}
-
-/// 单字段类型 / 范围校验
-fn field_error(f: &DetailField, v: &serde_json::Value) -> Option<String> {
-    match f.widget.as_str() {
-        "number" => {
-            let Some(n) = v.as_f64() else {
-                return Some("必须是数字".to_string());
-            };
-            if let Some(min) = f.min {
-                if n < min {
-                    return Some(format!("不能小于 {min}"));
-                }
-            }
-            if let Some(max) = f.max {
-                if n > max {
-                    return Some(format!("不能大于 {max}"));
-                }
-            }
-            None
-        }
-        "toggle" => (!v.is_boolean()).then(|| "必须是布尔值".to_string()),
-        "select" => {
-            let Some(s) = v.as_str() else {
-                return Some("必须是字符串".to_string());
-            };
-            if !f.options.is_empty() && !f.options.iter().any(|o| o.value == s) {
-                return Some(format!(
-                    "必须是以下之一：{}",
-                    f.options
-                        .iter()
-                        .map(|o| o.value.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" / ")
-                ));
-            }
-            None
-        }
-        "list" => (!v.is_array()).then(|| "必须是字符串数组".to_string()),
-        "map" => (!v.is_object()).then(|| "必须是键值对象".to_string()),
-        "text" | "password" | "textarea" | "datalist" => {
-            (!v.is_string()).then(|| "必须是字符串".to_string())
-        }
-        _ => None,
-    }
-}
-
 impl SettingPlugin {
-    /// 按分区定义逐字段校验提交值（字段级错误；无错则 `Ok`）
-    fn validate_section(
-        &self,
-        def: &DetailDefinition,
-        value: &serde_json::Value,
-    ) -> Result<(), VdfsValidationError> {
-        let Some(obj) = value.as_object() else {
-            return Err(VdfsValidationError::new("设置内容必须是 JSON 对象"));
-        };
-        let mut err = VdfsValidationError::new("设置校验未通过");
-
-        for section in &def.sections {
-            for f in &section.fields {
-                // 只读展示字段不参与校验
-                if f.widget == "static" {
-                    continue;
-                }
-                // 条件隐藏字段不参与校验（与前端渲染保持一致）
-                if let Some(cond) = &f.visible_when {
-                    if !condition_holds(cond, value) {
-                        continue;
-                    }
-                }
-                let Some(current) = obj.get(&f.key) else {
-                    if f.required {
-                        err.fields.push(VdfsFieldError {
-                            field: f.key.clone(),
-                            message: "必填项缺失".to_string(),
-                        });
-                    }
-                    continue;
-                };
-                if f.required && is_blank(current) {
-                    err.fields.push(VdfsFieldError {
-                        field: f.key.clone(),
-                        message: "必填项不能为空".to_string(),
-                    });
-                    continue;
-                }
-                if let Some(message) = field_error(f, current) {
-                    err.fields.push(VdfsFieldError {
-                        field: f.key.clone(),
-                        message,
-                    });
-                }
-            }
-        }
-
-        if err.has_fields() {
-            Err(err)
-        } else {
-            Ok(())
-        }
-    }
-
     /// 经父容器转发到目标插件的标准配置协议路由（`<prefix>/config/get|set`）
     async fn route_config(
         &self,
@@ -718,8 +571,7 @@ impl VdfsProvider for SettingPlugin {
             .map_err(|e| VdfsError::invalid(format!("设置内容不是合法 JSON：{e}")))?;
 
         if let Some(def) = section_definition(path) {
-            self.validate_section(&def, &value)
-                .map_err(VdfsError::Invalid)?;
+            def.validate(&value).map_err(VdfsError::Invalid)?;
         }
 
         self.route_config(
@@ -764,27 +616,6 @@ mod tests {
         // 无 schema 的分区（appearance / about）：ext 即分区 id —— 前端按
         // `ext → 渲染器` 的纯 UI 映射回退到专属 editor
         assert_eq!(items[0].ext.as_deref(), Some("appearance"));
-    }
-
-    /// 回归：config 绑定分区的 load/save 路径必须命中目标插件的标准
-    /// config 协议路由（`<prefix>/config/get|set`）。
-    #[test]
-    fn config_binding_paths_follow_protocol_constants() {
-        for (def, prefix) in [
-            (session_detail_definition(), "session"),
-            (local_detail_definition(), "local"),
-            (web_detail_definition(), "web"),
-        ] {
-            assert_eq!(def.binding, "config");
-            assert_eq!(
-                def.load_path.as_deref(),
-                Some(&format!("{prefix}/{CONFIG_GET}")[..])
-            );
-            assert_eq!(
-                def.save_path.as_deref(),
-                Some(&format!("{prefix}/{CONFIG_SET}")[..])
-            );
-        }
     }
 
     // ==================== VDFS provider ====================
@@ -885,37 +716,29 @@ mod tests {
 
     #[test]
     fn validation_catches_required_range_type_and_enum() {
-        let plugin = SettingPlugin::default();
         let def = gateway_detail_definition();
 
         // 越界端口
-        let err = plugin
-            .validate_section(&def, &json!({ "inbound_port": 70000 }))
-            .unwrap_err();
+        let err = def.validate(&json!({ "inbound_port": 70000 })).unwrap_err();
         assert_eq!(err.fields[0].field, "inbound_port");
 
         // 类型错误
-        let err = plugin
-            .validate_section(&def, &json!({ "inbound_port": "abc" }))
-            .unwrap_err();
+        let err = def.validate(&json!({ "inbound_port": "abc" })).unwrap_err();
         assert!(err.fields[0].message.contains("必须是数字"));
 
         // 枚举越界
-        let err = plugin
-            .validate_section(&def, &json!({ "inbound_protocol": "carrier-pigeon" }))
+        let err = def
+            .validate(&json!({ "inbound_protocol": "carrier-pigeon" }))
             .unwrap_err();
         assert_eq!(err.fields[0].field, "inbound_protocol");
 
         // 合法值 + 未提交字段 → 通过
-        assert!(plugin
-            .validate_section(
-                &def,
-                &json!({ "inbound_port": 9231, "inbound_protocol": "http" })
-            )
+        assert!(def
+            .validate(&json!({ "inbound_port": 9231, "inbound_protocol": "http" }))
             .is_ok());
 
         // 非对象载荷
-        assert!(plugin.validate_section(&def, &json!("nope")).is_err());
+        assert!(def.validate(&json!("nope")).is_err());
     }
 
     /// 写入：校验先于转发——坏数据在触达目标插件之前就被拦下

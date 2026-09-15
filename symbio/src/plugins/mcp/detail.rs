@@ -61,8 +61,6 @@ fn when_remote() -> DetailCondition {
 pub fn mcp_detail_definition() -> DetailDefinition {
     DetailDefinition {
         binding: "upload".into(),
-        load_path: None,
-        save_path: None,
         title_from: vec![],
         title_fallback: Some("新建 MCP Server".into()),
         subtitle_from: vec!["type".into(), "command".into(), "url".into()],
