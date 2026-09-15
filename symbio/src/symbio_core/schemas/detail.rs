@@ -214,8 +214,108 @@ pub struct DetailDefinition {
     pub actions: Vec<DetailAction>,
 }
 
-// ==================== 定义自带校验 ====================
+// ==================== 定义构造器 ====================
 //
+// 字段与表单骨架的**最小构造**。定义由**资源的拥有者**产出（如每个插件产出
+// 自己的配置定义），因此这些形状要在多处复用——写在 schema 侧一次，
+// 好过在每个使用方各抄一遍（抄出来的副本必然随字段增删而漂移）。
+
+impl DetailField {
+    /// 公共骨架：`description` 为空串即「无说明」（避免下发 `Some("")` 让前端渲染空行）
+    fn base(key: &str, label: &str, widget: &str, description: &str) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            widget: widget.into(),
+            description: (!description.is_empty()).then(|| description.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// 补说明（构造器缺省无说明时用；空串视为无说明）
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        let d = description.into();
+        self.description = (!d.is_empty()).then_some(d);
+        self
+    }
+
+    /// 数字字段（`min` / `max` 与新建态缺省值一并声明）
+    pub fn number(
+        key: &str,
+        label: &str,
+        description: &str,
+        min: f64,
+        max: f64,
+        default: serde_json::Value,
+    ) -> Self {
+        Self {
+            min: Some(min),
+            max: Some(max),
+            step: Some(1.0),
+            default: Some(default),
+            ..Self::base(key, label, "number", description)
+        }
+    }
+
+    /// 开关字段
+    pub fn toggle(key: &str, label: &str, description: &str, default: bool) -> Self {
+        Self {
+            default: Some(serde_json::Value::Bool(default)),
+            ..Self::base(key, label, "toggle", description)
+        }
+    }
+
+    /// 密码字段（前端显隐切换）
+    pub fn password(key: &str, label: &str, description: &str, placeholder: &str) -> Self {
+        Self {
+            placeholder: Some(placeholder.to_string()),
+            ..Self::base(key, label, "password", description)
+        }
+    }
+
+    /// 单行文本字段
+    pub fn text(key: &str, label: &str, description: &str) -> Self {
+        Self::base(key, label, "text", description)
+    }
+
+    /// 下拉字段（静态候选）
+    pub fn select(key: &str, label: &str, options: Vec<DetailOption>, default: &str) -> Self {
+        Self {
+            options,
+            default: Some(serde_json::Value::String(default.to_string())),
+            ..Self::base(key, label, "select", "")
+        }
+    }
+}
+
+impl DetailDefinition {
+    /// 单分区表单骨架：`binding = option` + 一个「保存配置」动作。
+    ///
+    /// `binding = option` 是 **VDFS 宿主表单**的通用语义——「取值来自外部
+    /// （`vdfs/read`）、保存只交回纯字段值（`vdfs/write`）」；`upload` / `info`
+    /// 是另两种宿主形态，不适用本骨架。
+    pub fn form(title: impl Into<String>, fields: Vec<DetailField>) -> Self {
+        Self {
+            binding: "option".into(),
+            title_fallback: Some(title.into()),
+            sections: vec![DetailSection {
+                title: None,
+                collapsed: false,
+                fields,
+            }],
+            actions: vec![DetailAction {
+                id: "save".into(),
+                label: "保存配置".into(),
+                style: "primary".into(),
+                busy_label: Some("保存中…".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+}
+
+// ==================== 定义自带校验 ====================
 // **定义与校验同源**：字段声明在哪里，字段的合法性判定就在哪里。
 // 使用方（配置 provider / 上传 provider）把提交值交给定义即可，不必各自
 // 复写字段规则——这是「定义驱动表单」成立的前提。

@@ -16,6 +16,10 @@
 //! 三者的磁盘布局**完全一致**（`<homedir>/plugins/<category>/<id>/<manifest>`），
 //! 差别只在**访问拓扑**，因此换型不动数据。
 //!
+//! 另有 [`ConfigDoc`]：它不落条目、不构成第四种拓扑，而是「插件的配置文档」的
+//! 唯一实现（节点形状 + 定义校验 + 切片推送）。配置因此与其它资源同协议、
+//! 同寻址——`CONFIG_GET` / `CONFIG_SET` 那条私有路由已随之废弃。
+//!
 //! ## 为什么放在 providers 而不是 symbio_core
 //!
 //! `symbio_core::vdfs_provider` 是**纯接口**（只依赖 std / serde / async_trait，
@@ -30,6 +34,7 @@
 //! 差异（标题、状态、`ext`、`schema`、写前校验、写后内存同步）仍留在各插件，
 //! 由它们在调用点以普通 Rust 参数传入，不经过任何通用钩子。
 
+pub mod config;
 pub mod dir;
 pub mod entry;
 pub mod memory;
