@@ -37,9 +37,9 @@ export type { SessionMetadata } from '../schemas/session_meta'
  *
  * `vdfs/list` 是会话清单的**唯一**读入口：不存在与之并行的第二套清单协议。
  *
- * 挂载根下与资源**并列**的还有本插件的配置文档（保留段 `配置`，`ext = form`，
+ * 挂载根下与资源**并列**的还有本插件的配置文件（`PLUGIN.yml`，`ext = form`，
  * 见 docs/design/vdfs.md §3.4）。它是给通用列表 / 表单视图用的，不属于会话清单，
- * 因此这里按 `ext` 过滤——**只认会话节点**，不按名字特判（保留段名可改，语义不变）。
+ * 因此这里按 `ext` 过滤——**只认会话节点**，不按名字特判（文件名可改，语义不变）。
  */
 export async function listSessions(): Promise<SessionList.SessionListItem[]> {
   const resp = await listVdfs(vdfsJoin(VFDS_ROOT, 'session'))

@@ -4,9 +4,9 @@
  * **职责**：封装后端 home 插件的所有前端 API 调用。
  *
  * home 插件是 Symbio 的根插件，负责：
- * 1. 全局配置持久化（`<homedir>/config.yaml`）
+ * 1. 自身配置持久化（`<homedir>/PLUGIN.yml`：工作区 / 最近记录）
  * 2. 路由分发与工具聚合
- * 3. 子插件（agent/model/mcp/skill/session/explorer）实例化与生命周期管理
+ * 3. 容器 `composite` 的构造（子插件由它扫描 `<homedir>/plugins/*` 得到）
  * 4. **系统目录 (homedir) 切换**：调用 `home/reload` 热重载子插件
  * 5. **工作区 (workdir) 切换**：调用 `work/*` 路由（也由 home 插件处理）
  *

@@ -81,11 +81,11 @@ describe('listSessions（.vdfs/session → SessionListItem）', () => {
     await expect(listSessions()).resolves.toEqual([])
   })
 
-  it('挂载根下与资源并列的配置文档不进清单（按 ext 判据，不按名字特判）', async () => {
+  it('挂载根下与资源并列的配置文件不进清单（按 ext 判据，不按名字特判）', async () => {
     mockList([
       sessionNode({ name: 'abc' }),
-      // 本插件的配置文档：保留段 `配置`，ext = form（见 docs/design/vdfs.md §3.4）
-      sessionNode({ name: '配置', title: '会话设置', ext: 'form' }),
+      // 本插件的配置文件：真实文件名 `PLUGIN.yml`，ext = form（见 docs/design/vdfs.md §3.4）
+      sessionNode({ name: 'PLUGIN.yml', title: '会话设置', ext: 'form' }),
     ])
 
     const out = await listSessions()
