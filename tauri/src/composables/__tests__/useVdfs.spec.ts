@@ -247,3 +247,80 @@ describe('useVdfs 消费 appended（流式即列表项的追加）', () => {
     }
   })
 })
+
+describe('useVdfs 有界列表（中栏只取最新一页 + 加载更早）', () => {
+  /** N 个列表项（name 形如 m<i>，便于断言游标） */
+  function page(from: number, n: number): VdfsNode[] {
+    return Array.from({ length: n }, (_, i) => msgNode('m' + (from + i)))
+  }
+
+  function listReturns(items: VdfsNode[]) {
+    mocks.listVdfs.mockResolvedValue({
+      path: MSG_DIR,
+      node: { ...msgNode('__dir'), access: 'l', ext: undefined },
+      items,
+    })
+  }
+
+  it('首屏只取最新一页（带 limit）', async () => {
+    listReturns(page(0, 100))
+    const { api, wrapper } = mountHost(MSG_DIR)
+    await settle()
+
+    expect(api.items.value).toHaveLength(100)
+    expect(api.hasMore.value, '满页 ⇒ 可能还有更早的').toBe(true)
+    // 目录刷新那一次带窗口参数；左栏导航那次不带（导航项本来就少）
+    expect(mocks.listVdfs).toHaveBeenLastCalledWith(MSG_DIR, { limit: 100 })
+
+    wrapper.unmount()
+  })
+
+  it('不满一页 ⇒ 没有更早的（不会多问一次）', async () => {
+    listReturns(page(0, 7))
+    const { api, wrapper } = mountHost(MSG_DIR)
+    await settle()
+
+    expect(api.items.value).toHaveLength(7)
+    expect(api.hasMore.value).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('加载更早：以最后一项为游标追加，按 path 去重', async () => {
+    listReturns(page(0, 100))
+    const { api, wrapper } = mountHost(MSG_DIR)
+    await settle()
+
+    listReturns(page(100, 3))
+    await api.loadMore()
+    await settle()
+
+    expect(mocks.listVdfs).toHaveBeenLastCalledWith(MSG_DIR, {
+      limit: 100,
+      before: 'm99',
+    })
+    expect(api.items.value).toHaveLength(103)
+    expect(api.items.value[102].name).toBe('m102')
+    expect(api.hasMore.value, '续页不满 ⇒ 到底了').toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('后端不认窗口参数（每页都返回同一整页）⇒ 去重后判到底，不产生重复项', async () => {
+    const full = page(0, 100)
+    listReturns(full)
+    const { api, wrapper } = mountHost(MSG_DIR)
+    await settle()
+    expect(api.hasMore.value).toBe(true)
+
+    // 同一整页再回来一次：新项为 0
+    listReturns(full)
+    await api.loadMore()
+    await settle()
+
+    expect(api.items.value, '不得重复追加').toHaveLength(100)
+    expect(api.hasMore.value, '没有新项即到底').toBe(false)
+
+    wrapper.unmount()
+  })
+})

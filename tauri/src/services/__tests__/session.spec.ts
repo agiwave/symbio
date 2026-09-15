@@ -81,6 +81,21 @@ describe('listSessions（.vdfs/session → SessionListItem）', () => {
     await expect(listSessions()).resolves.toEqual([])
   })
 
+  // 有界列表是**可选能力**：不传参时请求形状必须与从前逐字节一致。
+  // 曾经 `listSessions()` 默认就带 `{ limit: 100 }`，既有断言（上面那条
+  // toHaveBeenCalledWith(path)）因此失败——这条把这个契约钉死。
+  it('只有显式传 limit 才带窗口参数；不传时请求形状不变', async () => {
+    mockList([])
+    await listSessions()
+    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(vdfsJoin(VDFS_ROOT, 'session'))
+
+    mockList([])
+    await listSessions(50)
+    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(vdfsJoin(VDFS_ROOT, 'session'), {
+      limit: 50,
+    })
+  })
+
   it('挂载根下与资源并列的配置文件不进清单（按 ext 判据，不按名字特判）', async () => {
     mockList([
       sessionNode({ name: 'abc' }),

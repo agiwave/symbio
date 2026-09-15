@@ -165,6 +165,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopWatchdog()
+  if (scrollRaf !== null) {
+    cancelAnimationFrame(scrollRaf)
+    scrollRaf = null
+  }
 })
 
 // Handle send or abort logic
@@ -333,8 +337,24 @@ function stopWatchdog() {
   }
 }
 
-// 智能滚动
-watch(messageTree, () => nextTick(() => smartScroll()), { deep: true, flush: 'post' })
+// 智能滚动 —— **只 watch 版本号**，不 deep watch 消息树。
+//
+// `messageTree` 是一棵带 `children` 自引用的树，deep watch 会在每个流式 token
+// 上遍历整棵树（O(n²)），而且监听器本身也会被树里任何一处改动唤醒。改成
+// 订阅 store 的 `transcriptVersion`（一个数字，只在 `commitMessages` 提交时 +1），
+// 再用 rAF 把一帧内的多次提交合并成一次滚动——滚动是**视觉效果**，
+// 一帧一次就够，不必逐 token 同步。
+let scrollRaf: number | null = null
+watch(
+  () => sessionsStore.transcriptVersion,
+  () => {
+    if (scrollRaf !== null) return
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = null
+      smartScroll()
+    })
+  }
+)
 </script>
 
 <style scoped>

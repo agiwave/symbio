@@ -36,13 +36,28 @@ import {
 } from '../schemas/vdfs'
 import { logger } from '@/utils/logger'
 
+/** 有界列表的窗口参数：`limit` 条、游标 `before` 之后 */
+export interface VdfsListOptions {
+  limit?: number
+  before?: string
+}
+
 /**
  * 列目录。`path` 缺省 = `.vdfs` 根目录（左栏导航的来源）。
  * 失败返回空目录（含最小节点），不抛错——列表页永远可渲染。
+ *
+ * `opts` 只在给了字段时才发出对应键：**不传参数时请求形状与从前一致**
+ * （多一个 `limit: undefined` 也会被序列化成键，改变请求体形状）。
  */
-export async function listVdfs(path = VDFS_ROOT): Promise<VdfsListResponse> {
+export async function listVdfs(
+  path = VDFS_ROOT,
+  opts?: VdfsListOptions
+): Promise<VdfsListResponse> {
   try {
-    const resp = await callPlugin<VdfsListResponse>(VDFS_LIST, { path })
+    const payload: Record<string, unknown> = { path }
+    if (opts?.limit !== undefined) payload.limit = opts.limit
+    if (opts?.before) payload.before = opts.before
+    const resp = await callPlugin<VdfsListResponse>(VDFS_LIST, payload)
     if (!resp) return { path, node: emptyNode(path), items: [] }
     return resp
   } catch (err) {

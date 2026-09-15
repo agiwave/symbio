@@ -72,6 +72,15 @@ import type { NavRailItem } from '@/components/common/NavRail.vue'
 /** 各数据地址的左栏选中记忆（模块级：往返 push / 返回后恢复原选中） */
 const selectedMemo = new Map<string, string>()
 
+/**
+ * 中栏一页的**名义**条数。
+ *
+ * 名义 = 后端可以返回更多（会话转写按「根」计量，一个 Turn 不拆），
+ * 也可以返回更少（不认窗口参数的 provider 会返回全部——那种情况下
+ * 「加载更早」一点就到底，见 `hasMore` 的说明）。
+ */
+const VDFS_PAGE_SIZE = 100
+
 export interface UseVdfsOptions {
   /** 绑定的数据地址（如 `.vdfs` 或 `.vdfs/session/<id>`）；变化 = 整体重载 */
   addr: Ref<string>
@@ -115,23 +124,69 @@ export function useVdfs(opts: UseVdfsOptions) {
   const loading = ref(false)
   const loadError = ref('')
 
-  /** 加载当前目录 */
+  /**
+   * 是否还有更早的条目。
+   *
+   * 它是**启发值**：后端返回满页 ⇒ 可能还有；点「加载更早」拿到 0 条新项即判到底。
+   * 之所以不要求后端回 `has_more`：那要每个 provider 都多算一次，而「多翻一次空页」
+   * 的代价只是一次请求——**宁可多问一次，也不要为了精确给机制加字段**。
+   */
+  const hasMore = ref(false)
+  const loadingMore = ref(false)
+
+  /** 加载当前目录（**有界**：默认只取最新一页） */
   async function refresh() {
     loading.value = true
     loadError.value = ''
     try {
-      const resp = await listVdfs(cwd.value)
+      const resp = await listVdfs(cwd.value, { limit: VDFS_PAGE_SIZE })
       items.value = resp.items
       cwdNode.value = resp.node
-      // 选中项若已不在当前目录（被删/被移走），清理选中态
+      hasMore.value = resp.items.length >= VDFS_PAGE_SIZE
+      // 选中项若已不在当前目录（被删/被移走），清理选中态。
+      // ⚠️ 有界列表下**不能**仅凭「不在这页里」就判它没了——它可能只是落在更早的
+      // 一页（深链直开旧会话就是这种情形）。只有确信已拿全时才清理。
       const sel = selectedNode.value
-      if (sel && !items.value.some((n) => n.path === sel.path)) clearSelection()
+      if (sel && !hasMore.value && !items.value.some((n) => n.path === sel.path)) {
+        clearSelection()
+      }
     } catch (err) {
       loadError.value = String(err)
       items.value = []
+      hasMore.value = false
       logger.error('useVdfs', `加载目录失败 ${cwd.value}:`, err)
     } finally {
       loading.value = false
+    }
+  }
+
+  /**
+   * 加载更早的一页（追加到列表尾部）。
+   *
+   * 游标 = 当前最后一项的 `name`（后端按它定位「这一条之后」）。追加时按 `path`
+   * 去重：不认窗口参数的 provider 每次都返回同一整页，去重后**新项为 0**，
+   * 于是 `hasMore` 收敛为 false —— 一次空转换来的正确性，比引入 `has_more`
+   * 协议字段便宜。
+   */
+  async function loadMore() {
+    if (loadingMore.value || !hasMore.value) return
+    const last = items.value[items.value.length - 1]
+    if (!last) return
+    loadingMore.value = true
+    try {
+      const resp = await listVdfs(cwd.value, {
+        limit: VDFS_PAGE_SIZE,
+        before: last.name,
+      })
+      const known = new Set(items.value.map((n) => n.path))
+      const fresh = resp.items.filter((n) => !known.has(n.path))
+      items.value = items.value.concat(fresh)
+      hasMore.value = fresh.length > 0 && resp.items.length >= VDFS_PAGE_SIZE
+    } catch (err) {
+      logger.error('useVdfs', `加载更早失败 ${cwd.value}:`, err)
+      hasMore.value = false
+    } finally {
+      loadingMore.value = false
     }
   }
 
@@ -573,7 +628,10 @@ export function useVdfs(opts: UseVdfsOptions) {
     items,
     loading,
     loadError,
+    hasMore,
+    loadingMore,
     refresh,
+    loadMore,
     reload,
     select,
     // 选中 / 详情

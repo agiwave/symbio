@@ -90,9 +90,8 @@ describe('MessageNode：思考节点始终单行', () => {
     expect(head.exists()).toBe(true)
     expect(head.classes()).toContain('thinking')
     expect(head.text()).toContain('思考中')
-    const body = w.find('.node-body')
-    expect(body.exists()).toBe(true)
-    expect((body.element as HTMLElement).style.display).toBe('none')
+    // 收起 = 不渲染（`v-if`，不是 `v-show`）：折叠内容不该占用 DOM 与渲染成本
+    expect(w.find('.node-body').exists()).toBe(false)
   })
 
   it('完成后：标题「思考」，仍保持折叠', () => {
@@ -100,18 +99,21 @@ describe('MessageNode：思考节点始终单行', () => {
     const head = w.find('.node-head')
     expect(head.text()).toContain('思考')
     expect(head.classes()).not.toContain('thinking')
-    expect((w.find('.node-body').element as HTMLElement).style.display).toBe('none')
+    expect(w.find('.node-body').exists()).toBe(false)
   })
 })
 
 describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', () => {
-  it('默认单行折叠：流式中显示「调用中…」标签，卡片体隐藏', () => {
+  it('默认单行折叠：流式中显示「调用中…」标签，卡片体隐藏', async () => {
     const w = mountNode(
       msg({ id: 'tc1', type: 'tool_call', status: 'streaming', name: 'shell', content: '{"cmd":"ls"}', children: [] }),
     )
     expect(w.find('.node-head').exists()).toBe(true)
     expect(w.text()).toContain('调用中')
-    expect((w.find('.node-body').element as HTMLElement).style.display).toBe('none')
+    // 默认收起 ⇒ 卡片体不在 DOM 里；展开后才渲染（点头部）
+    expect(w.find('.node-body').exists()).toBe(false)
+    await w.find('.node-head').trigger('click')
+    expect(w.find('.node-body').exists()).toBe(true)
   })
 
   it('例外：内含待审批 user_prompt → 自动展开（审批入口可见）', () => {
@@ -133,11 +135,11 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         ],
       }),
     )
-    expect((w.find('.node-body').element as HTMLElement).style.display).not.toBe('none')
+    expect(w.find('.node-body').exists()).toBe(true)
     expect(w.text()).toContain('批准执行')
   })
 
-  it('三段式：请求 / 过程（子会话 Turn）/ 结果', () => {
+  it('三段式：请求 / 过程（子会话 Turn）/ 结果', async () => {
     const w = mountNode(
       msg({
         id: 'tc1',
@@ -159,6 +161,8 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         ],
       }),
     )
+    // 三段式在折叠体里：先展开（收起态不渲染，DOM 里没有）
+    await w.find('.node-head').trigger('click')
     // 请求/结果不设外层标签（内层节点头部「请求/响应」已承载语义），仅「过程」保留
     const labels = w.findAll('.ts-label').map((l) => l.text())
     expect(labels).toEqual(['过程'])
@@ -168,7 +172,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     expect(w.findAll('.turn-group').length).toBe(1)
   })
 
-  it('无子会话的工具：「过程」段整段隐藏（仅 请求 + 结果）', () => {
+  it('无子会话的工具：「过程」段整段隐藏（仅 请求 + 结果）', async () => {
     const w = mountNode(
       msg({
         id: 'tc2',
@@ -178,6 +182,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         children: [msg({ id: 'res2', type: 'text', role: 'tool', status: 'completed', content: '"ok"', parent_id: 'tc2' })],
       }),
     )
+    await w.find('.node-head').trigger('click')
     expect(w.findAll('.tool-section').length).toBe(2)
     expect(w.text()).not.toContain('过程')
   })
@@ -196,7 +201,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     )
     // auto 模式：错误结果已喂给 LLM 继续处理，会话仍在运行 → 重试无意义
     expect(w.text()).not.toContain('重试')
-    expect((w.find('.node-body').element as HTMLElement).style.display).toBe('none')
+    expect(w.find('.node-body').exists()).toBe(false)
   })
 
   it('可恢复失败（meta.recoverable）→ 就地重试（发射 ToolCall id，供单工具 retry）', async () => {

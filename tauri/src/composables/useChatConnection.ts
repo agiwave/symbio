@@ -136,8 +136,12 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       }
     })
 
+    // 判「是不是根」原来是 `visible.find(...)` —— 每个节点都要线性扫一遍，
+    // 整棵树 O(n²)；长会话（数千条）在流式期间每帧都要付一次。换成一次性建
+    // 好的 id 集合，查表 O(1)。
+    const visibleIds = new Set(visible.map(m => m.id))
     const rootMessages = visible.filter(msg => {
-      return !msg.parent_id || !visible.find(m => m.id === msg.parent_id)
+      return !msg.parent_id || !visibleIds.has(msg.parent_id)
     })
 
     rootMessages.sort((a, b) => {

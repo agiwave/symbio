@@ -81,7 +81,7 @@
       </span>
     </div>
 
-    <div v-show="effectiveOpen" class="node-body">
+    <div v-if="effectiveOpen" class="node-body">
       <!-- 用户消息：右对齐气泡（折叠体内容） -->
       <div v-if="isUser" class="user-row">
         <div class="bubble user-bubble">
@@ -106,7 +106,7 @@
         <pre
           v-else-if="renderAsJson || isToolResult"
           :class="['json', isToolRequest ? 'req' : '']"
-          v-html="highlight(props.node.content)"
+          v-html="highlighted"
         />
         <div v-else class="markdown-body" v-html="rendered" />
       </template>
@@ -266,7 +266,7 @@
 
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
-import { useMarkdown } from '@/composables/useMarkdown'
+import { renderMarkdownCached } from '@/composables/useMarkdown'
 import type { ChatMessage, MessageContent } from '@/services/model'
 
 const props = defineProps<{
@@ -286,7 +286,6 @@ const emit = defineEmits<{
   edit: [messageId: string]
 }>()
 
-const { renderMarkdown } = useMarkdown()
 // 会话恢复（retry_turn/retry/approve/reject/supply/answer）：由 ModelChatPanel 提供，
 // 内部走 chat/resume 的 target_id（稳定锚点：Failed Turn 或 ToolCall） + targetSessionId（子会话工具调用需路由回子会话）。
 interface ResumePayload {
@@ -601,10 +600,14 @@ const summaryPreview = computed(() => {
   return raw.length > 80 ? raw.slice(0, 80) + '…' : raw
 })
 
+// JSON 高亮只在依赖变化时重算——放在模板里每次重渲染都会跑一遍
+// JSON.parse + 逐字符着色（工具卡是列表里最常见的大块内容）
+const highlighted = computed(() => highlight(props.node.content))
+
 const rendered = computed(() => {
-  if (isToolResult.value) return highlight(props.node.content)
+  if (isToolResult.value) return highlighted.value
   const t = textContent.value
-  return t ? renderMarkdown(t) : ''
+  return t ? renderMarkdownCached(t) : ''
 })
 
 // 内容为纯 JSON（如工具请求参数 / 工具返回）时以代码块高亮展示，保持会话流内可读且统一

@@ -53,7 +53,7 @@
       </template>
 
       <template #list>
-        <div class="vdfs-list" role="listbox" aria-label="资源列表">
+        <div class="vdfs-list" role="listbox" aria-label="资源列表" @scroll.passive="onListScroll">
           <VdfsCard
             v-for="n in items"
             :key="n.path"
@@ -68,6 +68,18 @@
             :is-active="selectedId === n.path"
             @click="onItemClick(n)"
           />
+          <!-- 有界列表的收尾：滚到底自动续页，也留一个显式入口 -->
+          <div v-if="hasMore" class="list-more">
+            <button
+              v-if="!loadingMore"
+              class="more-btn"
+              :disabled="loading"
+              @click="loadMore"
+            >
+              加载更早
+            </button>
+            <span v-else class="more-hint">加载中…</span>
+          </div>
         </div>
       </template>
 
@@ -250,7 +262,10 @@ const {
   items,
   loading,
   loadError,
+  hasMore,
+  loadingMore,
   refresh,
+  loadMore,
   select,
   selectedNode,
   selectedId,
@@ -282,6 +297,19 @@ const {
 function onItemClick(n: VdfsNode) {
   if (!isVdfsDir(n)) return void select(n)
   emit('open', n.path)
+}
+
+/**
+ * 滚到底自动续页。
+ *
+ * 阈值取一屏的零头（200px）：**不等真正触底**，滚到快到底就开始取，
+ * 用户基本感知不到等待；`loadMore` 内部有 `loadingMore` / `hasMore` 双闸门，
+ * 滚动事件再密集也只会有一个在途请求。
+ */
+function onListScroll(e: Event) {
+  const el = e.target as HTMLElement | null
+  if (!el) return
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) void loadMore()
 }
 
 /**
@@ -487,6 +515,33 @@ function iconOf(n: VdfsNode) {
   flex: 1;
   overflow-y: auto;
   padding: 0.25rem 0;
+}
+
+/* 有界列表的收尾（滚到底可见；也提供显式入口） */
+.list-more {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0 1rem;
+}
+.more-btn {
+  padding: 0.35rem 1rem;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.more-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.more-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.more-hint {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
 }
 
 /* ============== 内联提示栏（新建 / 重命名） ============== */

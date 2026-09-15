@@ -37,12 +37,28 @@ export type { SessionMetadata } from '../schemas/session_meta'
  *
  * `vdfs/list` 是会话清单的**唯一**读入口：不存在与之并行的第二套清单协议。
  *
- * 挂载根下与资源**并列**的还有本插件的配置文件（`PLUGIN.yml`，`ext = form`，
- * 见 docs/design/vdfs.md §3.4）。它是给通用列表 / 表单视图用的，不属于会话清单，
- * 因此这里按 `ext` 过滤——**只认会话节点**，不按名字特判（文件名可改，语义不变）。
+ * 这里按 `ext` 过滤——**只认会话节点**，不按名字特判（文件名可改，语义不变）。
+ * 后端已经不再把插件配置文件（`PLUGIN.yml`，`ext = form`）并列进会话清单
+ * （「清单 = 业务列表」；它进设置菜单走的是 ConfigurableVisitor 那条通道），
+ * 过滤因此是**防御**：万一哪天清单里混进了非会话节点，会话列表也不会被污染。
  */
-export async function listSessions(): Promise<SessionList.SessionListItem[]> {
-  const resp = await listVdfs(vdfsJoin(VDFS_ROOT, 'session'))
+/** 会话清单的名义上限（后端按「清单项」计数；缺省 = 不传参 = 全量） */
+export const SESSION_LIST_LIMIT = 100
+
+/**
+ * 列会话清单。
+ *
+ * 不传 `limit` 时请求里**不带**窗口参数——后端行为与从前逐字节一致
+ * （有界列表是可选能力，不是新契约）。
+ */
+export async function listSessions(
+  limit?: number
+): Promise<SessionList.SessionListItem[]> {
+  // 不传 limit 时**单参调用**——请求形状必须与从前一致（多一个 undefined
+  // 实参也会被 `toHaveBeenCalledWith` 认成「多传了一个参数」）
+  const path = vdfsJoin(VDFS_ROOT, 'session')
+  const resp =
+    limit === undefined ? await listVdfs(path) : await listVdfs(path, { limit })
   return (resp.items || [])
     .filter((n) => vdfsExtOf(n) === VDFS_EXT_SESSION)
     .map((n) => {

@@ -126,6 +126,22 @@ export const useSessionsStore = defineStore('sessions', () => {
   const sessionStatuses = shallowRef<Record<string, SessionLiveStatus>>({})
   const sessionSeq = ref<Record<string, number>>({})
 
+  // 转写版本号：每次 `commitMessages` 提交 +1。
+  //
+  // 消费方（ModelChatPanel）只 watch 这一个**浅值**，不必 deep watch 整棵消息树——
+  // 深 watch 在流式期间每个 token 都要遍历整棵树，是端到端 O(n²) 的主因。
+  const transcriptVersion = ref(0)
+
+  /**
+   * 提交一份新的 messages 映射 —— **唯一**写入口（版本号在此统一推进）。
+   *
+   * 收口的意义：版本号不会漏加，也不会有第二个地方绕过它直接写。
+   */
+  function commitMessages(next: Record<string, Record<string, ChatMessage>>): void {
+    sessionMessages.value = next
+    transcriptVersion.value += 1
+  }
+
   // 会话级错误状态（"错误是状态，不是节点"原则的前端落地）：
   // 仅用于"没有任何失败消息节点、但会话整体因错误中止"的兜底场景（如 transport 级失败、
   // send 在首帧到达前就失败），此时没有"造成中止的节点"可挂错误，错误只能作为会话级状态存在。
@@ -182,7 +198,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         ? { ...msg, seq: nextSeq(sessionId) }
         : msg
     next[sessionId] = cur
-    sessionMessages.value = next
+    commitMessages(next)
 
     // 同步 status.last_preview（取最后一条 assistant 文本）
     if (msg.role === 'assistant' && typeof msg.content === 'string' && msg.content) {
@@ -251,7 +267,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       cur[patch.id] = merged
     }
     next[sessionId] = cur
-    sessionMessages.value = next
+    commitMessages(next)
   }
 
   function nextSeq(sessionId: string): number {
@@ -311,7 +327,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   function dropSessionState(sessionId: string) {
     const mnext = { ...sessionMessages.value }
     delete mnext[sessionId]
-    sessionMessages.value = mnext
+    commitMessages(mnext)
     const snext = { ...sessionStatuses.value }
     delete snext[sessionId]
     sessionStatuses.value = snext
@@ -345,7 +361,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       }
     }
     const next = { ...sessionMessages.value, [sessionId]: map }
-    sessionMessages.value = next
+    commitMessages(next)
     // 续接游标取"已分配 seq 的最大值"，保证下一轮 nextSeq 严格递增。
     const lastSeq = Object.values(map).reduce((mx, m) => Math.max(mx, m.seq ?? 0), 0)
     const snext = { ...sessionSeq.value, [sessionId]: lastSeq }
@@ -522,7 +538,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     // 初始化空 messages / status
     const mnext = { ...sessionMessages.value, [id]: {} }
-    sessionMessages.value = mnext
+    commitMessages(mnext)
     const snext = { ...sessionStatuses.value, [id]: { is_working: false, is_waiting_approval: false, last_event_at: Date.now() } }
     sessionStatuses.value = snext
 
@@ -742,7 +758,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const cur = { ...(next[sessionId] || {}) }
     for (const id of ids) delete cur[id]
     next[sessionId] = cur
-    sessionMessages.value = next
+    commitMessages(next)
   }
 
   /**
@@ -760,7 +776,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (!cur[messageId]) return
     delete cur[messageId]
     next[sessionId] = cur
-    sessionMessages.value = next
+    commitMessages(next)
   }
 
   /**
@@ -807,7 +823,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function clearMessages(sessionId: string): Promise<void> {
     const mnext = { ...sessionMessages.value }
     delete mnext[sessionId]
-    sessionMessages.value = mnext
+    commitMessages(mnext)
     try {
       await apiClearMessages(sessionId)
     } catch (e) {
@@ -965,6 +981,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     lastUsedWorkdir,
     // 多会话实时状态
     sessionMessages,
+    transcriptVersion,
     sessionStatuses,
     // computed
     activeListItem,
