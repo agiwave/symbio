@@ -13,7 +13,7 @@
 //! 路径白名单同风格）。
 
 use crate::symbio_core::event_bus::EventBus;
-use crate::symbio_core::vdfs::VdfsChange;
+use crate::symbio_core::vdfs::{ChangeSubscriptions, VdfsChange};
 use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsNode};
 use crate::symbio_core::{PluginError, PLUGIN_SESSION};
 use dashmap::DashMap;
@@ -253,11 +253,13 @@ pub struct WorkdirWatchManager {
     containers: Arc<DashMap<String, Vec<(String, u64)>>>,
     /// (workdir, container) → 当前世代号（每次 ensure 递增）
     generations: Arc<DashMap<String, u64>>,
-    /// VDFS 变更广播（可选，由 VDFS provider 构造期注入）。
+    /// VDFS 变更订阅表（可选，由 VDFS provider 构造期注入）。
     ///
     /// 同一份目录树场景只服务 VDFS 机制：文件变化时把容器 id 翻译成 VDFS 路径
-    /// 再广播（`VdfsChange`），使 `.vdfs` 页面不必另开一套监听。
-    vdfs_tx: std::sync::Mutex<Option<tokio::sync::broadcast::Sender<VdfsChange>>>,
+    /// 再投递进**会话订阅者共用的那张表**（[`ChangeSubscriptions::notify`]），
+    /// 使 `.vdfs` 页面不必另开一套监听。投递在表内收敛为恰好一次，
+    /// 与前端订阅了几条路径无关。
+    vdfs_subs: std::sync::Mutex<Option<Arc<ChangeSubscriptions>>>,
 }
 
 /// (workdir, container) 的世代守卫键
@@ -266,13 +268,13 @@ fn watch_key(workdir: &str, container: &str) -> String {
 }
 
 impl WorkdirWatchManager {
-    /// 注入 VDFS 变更广播源（VDFS provider 构造期调用一次）。
+    /// 注入 VDFS 变更订阅表（VDFS provider 构造期调用一次）。
     ///
-    /// 未注入广播源时 VDFS 侧不感知（目录树变化仍只发会话频道的粗粒度 `data`
-    /// 事件）；注入后同一批事件额外广播为 [`VdfsChange`]，`.vdfs` 页面即可实时刷新。
-    pub fn set_vdfs_sender(&self, tx: tokio::sync::broadcast::Sender<VdfsChange>) {
-        if let Ok(mut slot) = self.vdfs_tx.lock() {
-            *slot = Some(tx);
+    /// 未注入时 VDFS 侧不感知（目录树变化仍只发会话频道的粗粒度 `data` 事件）；
+    /// 注入后同一批事件额外投递为 [`VdfsChange`]，`.vdfs` 页面即可实时刷新。
+    pub fn set_vdfs_subs(&self, subs: Arc<ChangeSubscriptions>) {
+        if let Ok(mut slot) = self.vdfs_subs.lock() {
+            *slot = Some(subs);
         }
     }
 
@@ -297,7 +299,7 @@ impl WorkdirWatchManager {
 
         let coalesce = Arc::new(std::sync::Mutex::new(CoalesceState::default()));
         let containers = self.containers.clone();
-        let vdfs = self.vdfs_tx.lock().ok().and_then(|s| s.clone());
+        let vdfs = self.vdfs_subs.lock().ok().and_then(|s| s.clone());
         let wd = workdir.to_string();
         let watcher = Arc::new(FsWatcher::new_with_callback(move |abs_path| {
             let rel = Path::new(&abs_path)
@@ -462,18 +464,21 @@ fn publish_data_event(containers: &DashMap<String, Vec<(String, u64)>>, workdir:
     }
 }
 
-/// 把目录树事件翻译为 VDFS 变更并广播（每个关注该 workdir 的容器一条）。
+/// 把目录树事件翻译为 VDFS 变更并投递进订阅表（每个关注该 workdir 的容器一条）。
 ///
 /// 路径是 VDFS 口径：`<容器 id>/工作目录[/<相对路径>]`——与 VDFS provider
 /// 的路径解析严格同一套（见 `SessionPlugin` 的 `parse_session_path`）。
-/// 未注入广播源时静默跳过。
+///
+/// 为什么要按容器逐条枚举：多个会话可以共享同一个工作目录，订阅表按路径前缀
+/// 匹配，只有把每条路径带上各自的容器 id，对应会话的那条订阅才会命中。
+/// 未注入订阅表时静默跳过。
 fn publish_vdfs_change(
-    tx: &Option<tokio::sync::broadcast::Sender<VdfsChange>>,
+    subs: &Option<Arc<ChangeSubscriptions>>,
     containers: &DashMap<String, Vec<(String, u64)>>,
     workdir: &str,
     rel: &str,
 ) {
-    let Some(tx) = tx else {
+    let Some(subs) = subs else {
         return;
     };
     if let Some(list) = containers.get(workdir) {
@@ -483,7 +488,7 @@ fn publish_vdfs_change(
             } else {
                 format!("{container}/{SEG_WORKDIR}/{rel}")
             };
-            let _ = tx.send(VdfsChange::new(
+            subs.notify(&VdfsChange::new(
                 path,
                 crate::symbio_core::vdfs::VDFS_CHANGE_UPDATED,
             ));

@@ -46,10 +46,17 @@ vi.mock('@/services/session', () => ({
   updateMessage: vi.fn(),
 }))
 
-const vdfsApi = vi.hoisted(() => ({ readVdfs: vi.fn(), statVdfs: vi.fn() }))
+const vdfsApi = vi.hoisted(() => ({
+  readVdfs: vi.fn(),
+  statVdfs: vi.fn(),
+  watchVdfs: vi.fn(async () => {}),
+  unwatchVdfs: vi.fn(async () => {}),
+}))
 vi.mock('@/services/vdfs', () => ({
   readVdfs: vdfsApi.readVdfs,
   statVdfs: vdfsApi.statVdfs,
+  watchVdfs: vdfsApi.watchVdfs,
+  unwatchVdfs: vdfsApi.unwatchVdfs,
 }))
 vi.mock('@/services/plugin', () => ({
   setLastWorkdir: vi.fn(),

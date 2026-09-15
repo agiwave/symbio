@@ -12,8 +12,9 @@
  */
 
 import { connectPlugin, callPlugin, type Connection, type ConnectEvent } from './plugin'
+import { watchVdfs, unwatchVdfs } from './vdfs'
 import { logger } from '@/utils/logger'
-import { VDFS_EVENT_KIND, type VdfsChange } from '@/schemas/vdfs'
+import { VDFS_EVENT_KIND, VDFS_ROOT, type VdfsChange } from '@/schemas/vdfs'
 
 /**
  * 从后端 `event_bus` 收到的统一事件结构
@@ -65,6 +66,22 @@ interface EventBusState {
   replayBuffer: Map<string, BusEvent[]>
   /** 前端模式：页面间本地通知注册表（资源变更，与后端事件同构） */
   localVdfsHandlers: Set<(change: VdfsChange) => void>
+  /**
+   * 已向后端登记的路径 → 引用计数。
+   *
+   * 后端 `vdfs/watch` 是按路径引用计数的（`ChangeSubscriptions`），前端必须
+   * 一一对应地登记与摘除，否则要么重复投递（叠字）、要么提前摘掉别人的订阅。
+   */
+  vdfsWatchCounts: Map<string, number>
+  /**
+   * 每个路径的在途 watch / unwatch 链。
+   *
+   * 登记与摘除都是异步调用，**乱序到达即永久错位**：快速切换会话时，
+   * `unwatch(A)` 若晚于 `watch(A)` 发出并先到后端，计数就被清零，随后
+   * `watch(A)` 又建一条——此后该路径的订阅再也摘不掉（幽灵订阅）。
+   * 链上每一环等前一环结束，保证后端的计数变化严格按本端的发起顺序应用。
+   */
+  vdfsWatchChain: Map<string, Promise<void>>
 }
 
 const _G = globalThis as typeof globalThis & { __symEventBusState?: EventBusState }
@@ -76,7 +93,9 @@ const S: EventBusState = _G.__symEventBusState ?? (_G.__symEventBusState = {
   reconnectTimer: null,
   reconnectDelay: 1000,
   replayBuffer: new Map(),
-  localVdfsHandlers: new Set()
+  localVdfsHandlers: new Set(),
+  vdfsWatchCounts: new Map(),
+  vdfsWatchChain: new Map()
 })
 const _maxReconnectDelay = 30000
 
@@ -345,6 +364,16 @@ export function vdfsChangeInScope(scope: VdfsChangeScope, path: string): boolean
  * 本函数只做「频道 + 前缀」两件事，**不解释变更语义**——哪些变更重拉、
  * 哪些变更就地应用，归消费者。
  *
+ * ## 向后端登记 watch（本函数不可省的一半）
+ *
+ * 后端只向**登记过路径**的订阅者投递变更（`vdfs/watch` → `ChangeSubscriptions`）。
+ * 只 `subscribe` 总线而不登记，等于在一条没人开闸的频道上等事件——前端模式
+ * （`publishVdfsChangedLocal`）照常工作、单测照常通过，接上真实后端后**一条
+ * 变更都收不到**。因此这里按作用域前缀登记，并在最后一个订阅者撤走时摘除。
+ *
+ * 登记是异步的且**不能等**：订阅必须在同步语义下立即生效（否则订阅发生在
+ * await 之前、期间的变更全部丢失），所以放进顺序链里 fire-and-forget。
+ *
  * @returns 取消订阅函数
  */
 export function subscribeVdfsChanged(
@@ -365,10 +394,52 @@ export function subscribeVdfsChanged(
     dispatch(busEvent.data?.data as VdfsChange)
   })
 
+  // 向后端登记作用域前缀（同一前缀的多个订阅者共享一次登记）。
+  // `.vdfs` 根本身不在任何 provider 身上、无实时能力，登记它会换来后端报错——
+  // 订根的人只能靠各自拉取，这里与文件浏览器的处理保持一致。
+  const watchPath = normPrefix(scope.prefix)
+  if (watchPath && watchPath !== VDFS_ROOT) {
+    setVdfsWatch(watchPath, 1)
+  }
+
+  let released = false
   return () => {
+    if (released) return
+    released = true
     unsub()
     S.localVdfsHandlers.delete(dispatch)
+    if (watchPath && watchPath !== VDFS_ROOT) setVdfsWatch(watchPath, -1)
   }
+}
+
+/**
+ * 登记 / 摘除一条后端订阅（引用计数 + 串行链）。
+ *
+ * `+1` 表示新增一个消费者，`-1` 表示释放一个；计数归零才真正 `vdfs/unwatch`。
+ * 同一路径上的调用严格按发起顺序执行，避免 watch/unwatch 乱序导致的永久错位。
+ */
+function setVdfsWatch(path: string, delta: 1 | -1): void {
+  const prev = S.vdfsWatchChain.get(path) ?? Promise.resolve()
+  const next = prev.then(async () => {
+    const cur = S.vdfsWatchCounts.get(path) ?? 0
+    const after = cur + delta
+    if (after <= 0) {
+      if (cur > 0) await unwatchVdfs(path)
+      S.vdfsWatchCounts.delete(path)
+      return
+    }
+    // watchVdfs / unwatchVdfs 自身吞错（无实时能力的 provider 由后端 no-op），
+    // 因此这里不区分成败：计数照常推进，链路永不断。
+    if (cur === 0) await watchVdfs(path)
+    S.vdfsWatchCounts.set(path, after)
+  })
+  // 兜底：链上任何意外都不得阻断后续环节（否则该路径的登记会永久卡死）
+  S.vdfsWatchChain.set(
+    path,
+    next.catch((err: unknown) => {
+      logger.warn('[event-bus]', `VDFS watch 登记异常 path=${path} delta=${delta}`, err)
+    })
+  )
 }
 
 // ===== 前端模式：页面间本地通知（与后端事件同构） =====

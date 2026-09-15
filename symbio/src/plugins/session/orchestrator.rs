@@ -692,7 +692,7 @@ impl SessionPlugin {
                             // 必须与 `created` / `updated` / `appended` 走同一条通道，
                             // 否则 VDFS 列表会残留一个已被删掉的节点（且永不纠正）。
                             Ok(session_chat_response::StreamEvent::Delete { message_id }) => {
-                                let _ = self.change_tx.send(vdfs::VdfsChange::new(
+                                self.change_subs.notify(&vdfs::VdfsChange::new(
                                     super::plugin::message_path(&session_id, &message_id),
                                     vdfs::VDFS_CHANGE_DELETED,
                                 ));

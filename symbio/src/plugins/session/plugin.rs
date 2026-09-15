@@ -47,14 +47,15 @@ pub struct SessionPlugin {
     pub(crate) heartbeat_state: Arc<RwLock<HashMap<String, i64>>>,
     /// 工作目录监听管理器（目录树场景的实时数据变更通知）
     pub(crate) workdir_watches: super::workdir::WorkdirWatchManager,
-    /// VDFS 实时：会话变更广播源。
+    /// VDFS 实时：变更订阅表（引用计数 + 恰好一次投递）。
     ///
-    /// provider 是**变更源的持有者**：会话的任何写入 / 删除都经此广播，
-    /// [`vdfs::VdfsProvider::watch`] 的转发任务订阅它并调用 sink，
-    /// 变更因此无需轮询即可到达 VDFS 事件总线。
-    pub(crate) change_tx: tokio::sync::broadcast::Sender<vdfs::VdfsChange>,
-    /// VDFS 实时：被订阅路径 → 转发任务（`unwatch` 时取消）
-    pub(crate) watch_tasks: Arc<tokio::sync::Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+    /// provider 是**变更源的持有者**：会话的任何写入 / 删除都经这张表同步投给
+    /// 当前订阅者，[`vdfs::VdfsProvider::watch`] 只往表里登记——变更因此无需
+    /// 轮询即可到达 VDFS 事件总线，且**重叠订阅不会重复投递**（见该类型的文档）。
+    ///
+    /// 用 `Arc` 而非内联值：工作目录监听器（后台任务）也要投递进同一批订阅者，
+    /// 需要共享所有权。
+    pub(crate) change_subs: Arc<vdfs::ChangeSubscriptions>,
 }
 
 use super::store::SessionStore;
@@ -62,13 +63,12 @@ use super::store::SessionStore;
 impl SessionPlugin {
     /// 主构造函数（Factory 机制使用）
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: SessionConfig, dir: PluginDir) -> Self {
-        // 变更广播：容量只需覆盖「一次突发写入 + 少量并发订阅者」；
-        // 无订阅者时 send 静默失败（broadcast 语义），因此不设保留位。
-        let (change_tx, _) = tokio::sync::broadcast::channel(64);
-        // 目录树场景同时服务 VDFS：文件变化经**同一广播源**转发给 `.vdfs`
+        // 变更订阅表：provider 自持一份，工作目录监听器共享同一份（见下方注入）
+        let change_subs = Arc::new(vdfs::ChangeSubscriptions::default());
+        // 目录树场景同时服务 VDFS：文件变化经**同一张订阅表**转发给 `.vdfs`
         // 订阅方，VDFS 侧不必另开一套监听（实时链路在机制层合流）。
         let workdir_watches = super::workdir::WorkdirWatchManager::default();
-        workdir_watches.set_vdfs_sender(change_tx.clone());
+        workdir_watches.set_vdfs_subs(change_subs.clone());
         Self {
             config: Arc::new(RwLock::new(config)),
             config_file: ConfigFile::new(dir, "会话设置", config_definition()),
@@ -77,18 +77,16 @@ impl SessionPlugin {
             store: OnceCell::new(),
             heartbeat_state: Arc::new(RwLock::new(HashMap::new())),
             workdir_watches,
-            change_tx,
-            watch_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            change_subs,
         }
     }
 
     /// 广播一次会话变更（VDFS 实时链路的数据源）。
     ///
-    /// 无订阅者时静默丢弃；`path` 是 provider 子树内的相对路径（= 会话 id）。
+    /// 无订阅者时直接返回；`path` 是 provider 子树内的相对路径（= 会话 id）。
     pub(crate) fn notify_change(&self, id: &str, change: &str) {
-        let _ = self
-            .change_tx
-            .send(vdfs::VdfsChange::new(id.to_string(), change.to_string()));
+        self.change_subs
+            .notify(&vdfs::VdfsChange::new(id, change));
     }
 
     // ==================== 消息级变更（不经前端补丁通道的那三条路由）====================
@@ -103,7 +101,7 @@ impl SessionPlugin {
 
     /// 删除单条消息 → `deleted`
     pub(crate) fn emit_message_deleted(&self, session_id: &str, mid: &str) {
-        let _ = self.change_tx.send(vdfs::VdfsChange::new(
+        self.change_subs.notify(&vdfs::VdfsChange::new(
             message_path(session_id, mid),
             vdfs::VDFS_CHANGE_DELETED,
         ));
@@ -111,7 +109,7 @@ impl SessionPlugin {
 
     /// 清空整份转写 → 落在 `消息` 目录本身上的 `deleted`（消费者清空列表）
     pub(crate) fn emit_transcript_cleared(&self, session_id: &str) {
-        let _ = self.change_tx.send(vdfs::VdfsChange::new(
+        self.change_subs.notify(&vdfs::VdfsChange::new(
             message_dir_path(session_id),
             vdfs::VDFS_CHANGE_DELETED,
         ));
@@ -119,7 +117,7 @@ impl SessionPlugin {
 
     /// 就地改写单条消息 → `updated`（带节点视图 + 内容快照）
     pub(crate) fn emit_message_updated(&self, session_id: &str, msg: &cm::ChatMessage) {
-        let _ = self.change_tx.send(message_payload(
+        self.change_subs.notify(&message_payload(
             vdfs::VdfsChange::new(message_path(session_id, &msg.id), vdfs::VDFS_CHANGE_UPDATED),
             session_id,
             msg,
@@ -157,11 +155,10 @@ impl SessionPlugin {
         existed: bool,
         appended: Option<String>,
     ) {
-        // 无订阅者时静默丢弃（broadcast 语义），因此这条发射对不关心 VDFS 的
+        // 无订阅者时静默丢弃（订阅表语义），因此这条发射对不关心 VDFS 的
         // 调用方零成本。
-        let _ = self
-            .change_tx
-            .send(message_change(session_id, view, existed, appended));
+        self.change_subs
+            .notify(&message_change(session_id, view, existed, appended));
         self.broadcast_frame(
             state,
             PluginFrame::Data(json!(session_chat_response::StreamEvent::Update {
@@ -1342,15 +1339,17 @@ impl vdfs::VdfsProvider for SessionPlugin {
         }
     }
 
-    /// 订阅：把本插件内部的变更广播转发到 sink（`unwatch` 时取消任务）。
+    /// 订阅：把 sink 登记进本插件的变更订阅表（`unwatch` 时按引用计数摘除）。
     ///
     /// provider 是**变更源的持有者**，因此这里不需要轮询——写入 / 删除路径
-    /// 直接广播（见 [`SessionPlugin::notify_change`]）。
+    /// 直接投递（见 [`SessionPlugin::notify_change`]）。投递在机制层收敛为
+    /// **恰好一次**：重叠订阅（清单订根 + 转写订子树）不会把同一条变更投两遍。
     ///
     /// ## 路径不在这里收敛（容易看错，特此写明）
     ///
-    /// 广播源的路径是 **provider 根口径**（与 `list` / `stat` 同一坐标系：
-    /// `<id>`、`<id>/消息/<mid>`），本方法**原样转发**、不做任何前缀处理。
+    /// 表里的路径与投递出的路径都是 **provider 根口径**（与 `list` / `stat`
+    /// 同一坐标系：`<id>`、`<id>/消息/<mid>`），本方法**原样登记**、不做任何
+    /// 前缀处理。
     ///
     /// 看起来「应该」把它收敛成相对被订阅 `path` 的路径，但那样反而会错：
     /// 容器的 `watch` 包装器（`CompositeVdfs::watch`）只补**挂载名**（首段），
@@ -1372,43 +1371,25 @@ impl vdfs::VdfsProvider for SessionPlugin {
         path: &str,
         sink: vdfs::VdfsChangeSink,
     ) -> vdfs::VdfsResult<()> {
-        // 工作目录子树：接入文件系统监听（文件变化经**同一广播源**到达本 sink，
-        // 见 `SessionPlugin::new` 注入的 `set_vdfs_sender`）
+        // 工作目录子树：接入文件系统监听（文件变化经**同一张订阅表**到达本
+        // sink，见 `SessionPlugin::new` 注入的 `set_vdfs_subs`）
         if let Ok(VdfsSessionPath::Workdir { id, .. }) = parse_session_path(path) {
             if let Ok(workdir) = self.workdir_of(id).await {
                 self.workdir_watches.ensure_watch(&workdir, id);
             }
         }
-        let mut rx = self.change_tx.subscribe();
-        let handle = tokio::spawn(async move {
-            while let Ok(change) = rx.recv().await {
-                sink(change);
-            }
-        });
-        // 同路径重复订阅：覆盖并取消旧任务（机制保证 watch/unwatch 严格配对，
-        // 此处仅作防御）
-        let old = self
-            .watch_tasks
-            .lock()
-            .await
-            .insert(path.to_string(), handle);
-        if let Some(old) = old {
-            old.abort();
-        }
+        self.change_subs.watch(path, sink);
         Ok(())
     }
 
     async fn unwatch(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<()> {
-        // 与 `watch` 严格配对：释放本会话对该工作目录的订阅（引用计数归零才停监听）
+        // 与 `watch` 严格配对：引用计数归零才真正摘掉
         if let Ok(VdfsSessionPath::Workdir { id, .. }) = parse_session_path(path) {
             if let Ok(workdir) = self.workdir_of(id).await {
                 self.workdir_watches.release_watch(&workdir, id);
             }
         }
-        let handle = self.watch_tasks.lock().await.remove(path);
-        if let Some(handle) = handle {
-            handle.abort();
-        }
+        self.change_subs.unwatch(path);
         Ok(())
     }
 }
@@ -2026,12 +2007,31 @@ mod tests {
         assert!(v.get("messages").is_some(), "聊天转写随内容下发");
     }
 
+    /// 测试用会话 id：**每个用例唯一**。
+    ///
+    /// 会话存储目录取自全局 homedir（`<homedir>/plugins/session`）——单元测试
+    /// 不隔离它（`test_dir()` 只重定向配置文件，不重定向 store）。于是写过
+    /// 会话的用例会在真实目录里留下文件，下一个复用同一 id 的用例就读到了
+    /// 别人的数据（`list` 因此不再 NotFound，且结果随并行调度顺序漂移）。
+    /// 这里给每个用例一个进程内只出现一次的 id，从根上消除串扰。
+    fn unique_id(tag: &str) -> String {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("{tag}-{}-{n}", std::process::id())
+    }
+
+    /// 删掉测试自己造的会话目录（不留残留给后续运行）
+    fn cleanup_session_dir(id: &str) {
+        let _ = std::fs::remove_dir_all(SessionPlugin::session_storage_dir().join(id));
+    }
+
     /// 不存在的会话：list / stat 一律 NotFound（不做静默降级）
     #[tokio::test]
     async fn vdfs_list_unknown_session_is_not_found() {
         let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
-        assert!(p.list(&vctx(), "abc").await.is_err());
-        assert!(p.stat(&vctx(), "abc").await.is_err());
+        let id = unique_id("no-such-session");
+        assert!(p.list(&vctx(), &id).await.is_err());
+        assert!(p.stat(&vctx(), &id).await.is_err());
     }
 
     /// `<id>` 的 `stat` 是**目录视图**（只给 `l`），但呈现必须与清单同源。
@@ -2041,12 +2041,13 @@ mod tests {
     #[tokio::test]
     async fn vdfs_stat_session_is_dir_view_with_list_shape() {
         let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
-        let mut s = Session::new("abc");
+        let id = unique_id("stat-view");
+        let mut s = Session::new(&id);
         s.updated_at = 1_700_000_000;
         p.save_session(&s).await.unwrap();
 
-        let n = p.stat(&vctx(), "abc").await.unwrap();
-        assert_eq!(n.name, "abc");
+        let n = p.stat(&vctx(), &id).await.unwrap();
+        assert_eq!(n.name, id);
         assert_eq!(n.access.flags(), "l", "目录视图：可列，但不给新建入口");
         assert!(n.is_dir(), "被当目录访问时的视图");
 
@@ -2060,10 +2061,12 @@ mod tests {
             vdfs::VDFS_STATUS_ACTIVE,
             "空闲是显式状态值，不是空串"
         );
+
+        cleanup_session_dir(&id);
     }
 
-    /// 实时：provider 自持的变更广播经 `watch` 的转发任务到达 sink；
-    /// `unwatch` 取消任务（严格配对）
+    /// 实时：`watch` 登记的 sink 在 `notify_change` 时**同步**收到变更；
+    /// `unwatch` 按引用计数摘除（严格配对，归零才真正停投）
     #[tokio::test]
     async fn vdfs_watch_forwards_session_changes() {
         let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
@@ -2072,19 +2075,35 @@ mod tests {
             let _ = tx.send(c);
         });
 
+        p.watch(&vctx(), "", sink.clone()).await.unwrap();
         p.watch(&vctx(), "", sink).await.unwrap();
+        assert_eq!(p.change_subs.subscriber_count(), 2);
+        assert_eq!(p.change_subs.paths(), vec!["".to_string()]);
+
         p.notify_change("abc", vdfs::VDFS_CHANGE_CREATED);
 
-        // 转发任务与本测试同 runtime：让出一次即可收到
-        let got = rx.recv().await.expect("变更应经 watch 转发到 sink");
+        // 投递是同步的，但两条订阅共用一个投递器 ⇒ 恰好一次
+        let got = rx.recv().await.expect("变更应经 watch 投递到 sink");
         assert_eq!(got.path, "abc");
         assert_eq!(got.change, vdfs::VDFS_CHANGE_CREATED);
+        assert!(
+            rx.try_recv().is_err(),
+            "同一路径的重复订阅不得收到重复帧"
+        );
 
         p.unwatch(&vctx(), "").await.unwrap();
-        assert!(
-            p.watch_tasks.lock().await.is_empty(),
-            "unwatch 必须移除任务"
+        assert_eq!(
+            p.change_subs.subscriber_count(),
+            1,
+            "取消一位仍有另一位，不得提前停投"
         );
+        p.unwatch(&vctx(), "").await.unwrap();
+        assert!(
+            !p.change_subs.has_subscribers(),
+            "unwatch 必须把该路径彻底摘掉"
+        );
+        p.notify_change("abc", vdfs::VDFS_CHANGE_CREATED);
+        assert!(rx.try_recv().is_err(), "无订阅者时不得投递");
     }
 
     // ==================== 配置文档（`.vdfs/session/PLUGIN.yml`） ====================
