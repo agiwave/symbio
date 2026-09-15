@@ -10,7 +10,7 @@
   不会出现「切到坏地址后主页面卡死且无法恢复」的旧问题。
 
   对应后端: symbio/src/plugins/home/plugin.rs::route "home/reload"
-            symbio/src/plugins/gateway/plugin.rs::route "gateway/config/get|set"
+            symbio/src/plugins/gateway/plugin.rs（入站配置 = `.vdfs/gateway/配置`）
   对应服务: tauri/src/services/home.ts (switchHomedir / getHomedirInfo)
             tauri/src/services/systemLocation.ts (系统目录模型与持久化)
   对应 schema: tauri/src/schemas/home_reload.ts

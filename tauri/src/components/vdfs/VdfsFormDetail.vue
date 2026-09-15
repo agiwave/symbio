@@ -13,9 +13,8 @@
 
   ## 通道适配
 
-  DetailForm 的 `config` 绑定自持 load/save_path（那是插件的 config 路由，
-  不是 VDFS 通道）；VDFS 的通道是 `vdfs/read` / `vdfs/write`。因此本组件把定义
-  适配为 `binding: 'option'` —— DetailForm 对它的语义恰好是「数据来自外部、保存
+  VDFS 的通道是 `vdfs/read` / `vdfs/write`。因此本组件把定义适配为
+  `binding: 'option'` —— DetailForm 对它的语义恰好是「数据来自外部、保存
   只交回纯字段值」：预填来自 `values`，保存 emit 纯字段值，由页面写回 `vdfs/write`。
 
   校验仍由 provider 自持（`vdfs/write` 失败带回字段级错误）。
@@ -95,16 +94,15 @@ defineEmits<{
 const access = computed(() => vdfsAccessOf(props.node))
 
 /**
- * 通道适配：数据一律由 VDFS 承载，故清掉定义里的 load/save_path（那是插件的
- * config 路由）。不可写节点同时剥掉写相关的定义动作（避免渲染出无效的「保存」按钮）。
+ * 通道适配：数据一律由 VDFS 承载（`vdfs/read` 取值、`vdfs/write` 保存），
+ * 故把定义归一为 `binding: 'option'`。不可写节点同时剥掉写相关的定义动作
+ * （避免渲染出无效的「保存」按钮）。
  */
 const definition = computed<DetailDefinition>(() => {
   const raw = (props.node.schema ?? {}) as DetailDefinition
   return {
     ...raw,
     binding: 'option',
-    load_path: undefined,
-    save_path: undefined,
     // 只读节点原先整表剥掉动作（避免渲染出无效的「保存」/「删除」），但
     // **与写无关**的动作必须保留：「浏览内部」是纯导航（agent 正是只读却
     // 最需要它的那类资源），「测试连接」是只读自检，「导出」是只读打包，

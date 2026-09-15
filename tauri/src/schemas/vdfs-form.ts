@@ -117,15 +117,12 @@ export interface DetailAction {
 /**
  * 详情页定义。binding ∈
  * - `upload`：清单型资源，保存交回「id + 完整字段值」（id 由节点名给出或按定义派生）；
- * - `config`：配置分区，经 load/save_path 自持读写（插件路由，非 VDFS 通道）；
  * - `info`  ：只读概览，static 字段取值来自节点顶层的扩展字段（flatten 的 attributes）；
  * - `option`：数据来自外部、保存只交回纯字段值 —— VDFS 的 `form` 节点与级联选项表单
  *             都落在这两种形态上（取值统一由渲染器的显式入参传入）。
  */
 export interface DetailDefinition {
   binding: string
-  load_path?: string
-  save_path?: string
   title_from?: string[]
   title_fallback?: string
   subtitle_from?: string[]

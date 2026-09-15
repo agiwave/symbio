@@ -16,8 +16,6 @@
   绑定模式（definition.binding）：
   - upload  ：清单型资源。保存 emit `save`，载荷含派生/回显的 id 与全部字段值，
               由页面写回 `vdfs/write`（后端 validate_manifest 兜底）。
-  - config  ：配置分区。mount 时经 load_path 拉取，保存经 save_path
-              自持写回（插件的 config 通道，非 VDFS），内部管理 saving/toast。
   - info    ：只读概览。无保存，static 字段取值优先来自 `values`，
               缺省时取节点顶层的扩展字段，动作仅限 open-container / delete 等
               机制通道动作（如 agent bundle 概览）。
@@ -169,10 +167,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { callPlugin, reloadGatewayTransport } from '@/services/plugin'
-import { useToast } from '@/composables/useToast'
-import { logger } from '@/utils/logger'
+import { computed, onMounted, reactive, watch } from 'vue'
 import VdfsActions from './VdfsActions.vue'
 import type {
   DetailAction,
@@ -227,7 +222,6 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-const toast = useToast()
 const uid = Math.random().toString(36).slice(2, 8)
 
 // ==================== 表单模型 ====================
@@ -235,13 +229,10 @@ const uid = Math.random().toString(36).slice(2, 8)
 const form = reactive<Record<string, any>>({})
 const reveal = reactive<Record<string, boolean>>({})
 const collapsed = reactive<Record<number, boolean>>({})
-const configSaving = ref(false)
-const configLoaded = ref(false)
 
 const isExisting = computed(() => Boolean(props.node?.name))
 const isDefault = computed(() => Boolean(props.node && props.node.is_default === true))
 const isUpload = computed(() => props.definition.binding === 'upload')
-const isConfig = computed(() => props.definition.binding === 'config')
 const isInfo = computed(() => props.definition.binding === 'info')
 
 // ==================== 条件求值 ====================
@@ -422,7 +413,7 @@ const allActions = computed<DetailAction[]>(() => {
 })
 
 function actionBusy(a: DetailAction): boolean {
-  if (a.id === 'save') return configSaving.value || props.saving
+  if (a.id === 'save') return props.saving
   if (a.id === 'delete') return props.deleting
   // 其余动作（内置 `test`，以及 provider 自持的 VDFS 动作如 `export`）共用
   // 页面层的单一动作忙态——同一时刻只可能有一个动作在执行
@@ -445,11 +436,8 @@ const disabledFlags = computed(() => allActions.value.map((a) => actionDisabled(
 function runAction(a: DetailAction) {
   switch (a.id) {
     case 'save': {
-      if (isConfig.value || isInfo.value) {
-        // config/info 绑定无 save 语义（配置分区自持保存；info 只读）
-        if (isConfig.value) void saveConfig()
-        return
-      }
+      // info 只读：没有 save 语义
+      if (isInfo.value) return
       const values = buildSave()
       if (!isUpload.value) {
         // 数据来自外部的绑定：只交回纯字段值，不让动作载荷污染它
@@ -545,45 +533,12 @@ function buildSave(): Record<string, unknown> {
   return manifest
 }
 
-// ==================== 保存（config 绑定）：load/save_path 自持 ====================
-onMounted(async () => {
+// ==================== 生命周期 ====================
+onMounted(() => {
   for (let i = 0; i < props.definition.sections.length; i++) {
     collapsed[i] = Boolean(props.definition.sections[i]?.collapsed)
   }
-  if (!isConfig.value) return
-  const loadPath = props.definition.load_path
-  if (!loadPath) {
-    configLoaded.value = true
-    return
-  }
-  try {
-    const cfg = await callPlugin<Record<string, unknown>>(loadPath, {})
-    if (cfg && typeof cfg === 'object') Object.assign(form, cfg)
-  } catch (err) {
-    logger.error('DetailForm', `加载配置失败（${loadPath}）`, err)
-    toast.showToast('error', '加载配置失败')
-  } finally {
-    configLoaded.value = true
-  }
 })
-
-async function saveConfig() {
-  const savePath = props.definition.save_path
-  if (!savePath) return
-  configSaving.value = true
-  try {
-    await callPlugin(savePath, { ...form })
-    // 保存 gateway 配置后，重新读取出站配置使新配置立即生效
-    if (savePath.startsWith('gateway/')) {
-      await reloadGatewayTransport()
-    }
-    toast.showToast('success', '配置已保存')
-  } catch (err) {
-    toast.showToast('error', `保存失败: ${err}`)
-  } finally {
-    configSaving.value = false
-  }
-}
 
 function toggleSection(i: number) {
   collapsed[i] = !collapsed[i]
@@ -661,7 +616,6 @@ let lastItemKey: string | null | undefined
 watch(
   () => props.values,
   () => {
-    if (isConfig.value) return // config 绑定：onMounted 拉取，不随 values 重置
     const n = props.node
     const ready = props.values ? 1 : 0
     const itemKey = n ? `${n.kind}:${n.name}:${ready}` : `new:${ready}`
