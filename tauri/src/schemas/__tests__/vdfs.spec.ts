@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  VFDS_ROOT,
+  VDFS_ROOT,
   actionFileOf,
   isVdfsDir,
   newFileNameOf,
@@ -71,7 +71,7 @@ describe('vdfsExtOf', () => {
 
 describe('路径代数（.vdfs 口径）', () => {
   it('vdfsJoin 规整斜杠', () => {
-    expect(vdfsJoin(VFDS_ROOT, 'setting')).toBe('.vdfs/setting')
+    expect(vdfsJoin(VDFS_ROOT, 'setting')).toBe('.vdfs/setting')
     expect(vdfsJoin('.vdfs/setting', 'local')).toBe('.vdfs/setting/local')
     expect(vdfsJoin('.vdfs/setting/', '/local/')).toBe('.vdfs/setting/local')
     expect(vdfsJoin('.vdfs/setting', '')).toBe('.vdfs/setting')
@@ -80,15 +80,15 @@ describe('路径代数（.vdfs 口径）', () => {
 
   it('vdfsParent 逐级上溯到虚拟根', () => {
     expect(vdfsParent('.vdfs/setting/local')).toBe('.vdfs/setting')
-    expect(vdfsParent('.vdfs/setting')).toBe(VFDS_ROOT)
-    expect(vdfsParent(VFDS_ROOT)).toBe(VFDS_ROOT)
+    expect(vdfsParent('.vdfs/setting')).toBe(VDFS_ROOT)
+    expect(vdfsParent(VDFS_ROOT)).toBe(VDFS_ROOT)
     expect(vdfsParent('.vdfs/setting/local/')).toBe('.vdfs/setting')
   })
 
   it('vdfsBase 取末段名', () => {
     expect(vdfsBase('.vdfs/setting/local')).toBe('local')
     expect(vdfsBase('.vdfs/setting/')).toBe('setting')
-    expect(vdfsBase(VFDS_ROOT)).toBe(VFDS_ROOT)
+    expect(vdfsBase(VDFS_ROOT)).toBe(VDFS_ROOT)
   })
 })
 

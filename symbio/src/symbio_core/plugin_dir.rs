@@ -65,7 +65,7 @@ use crate::symbio_core::schemas::detail::DetailDefinition;
 use crate::symbio_core::vdfs::host::notify_change;
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsResult, VdfsWriteResponse,
-    VFDS_CHANGE_UPDATED, VFDS_EXT_FORM,
+    VDFS_CHANGE_UPDATED, VDFS_EXT_FORM,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -360,7 +360,7 @@ impl ConfigFile {
     pub fn node(&self) -> VdfsNode {
         let mut n = VdfsNode::file(PLUGIN_FILE, &self.label, VdfsAccess::READ_WRITE);
         n.kind = self.dir.name().to_string();
-        n.ext = Some(VFDS_EXT_FORM.to_string());
+        n.ext = Some(VDFS_EXT_FORM.to_string());
         n.schema = serde_json::to_value(&self.definition).ok();
         n
     }
@@ -418,7 +418,7 @@ impl ConfigFile {
 
     /// 广播「配置已更新」（前端据此刷新）
     pub fn announce(&self) {
-        notify_change(self.dir.name(), PLUGIN_FILE, VFDS_CHANGE_UPDATED);
+        notify_change(self.dir.name(), PLUGIN_FILE, VDFS_CHANGE_UPDATED);
     }
 }
 
@@ -568,7 +568,7 @@ mod tests {
 
         assert_eq!(n.name, PLUGIN_FILE, "地址就是真实文件名，不是保留段");
         assert_eq!(n.title, "演示设置");
-        assert_eq!(n.ext.as_deref(), Some(VFDS_EXT_FORM));
+        assert_eq!(n.ext.as_deref(), Some(VDFS_EXT_FORM));
         assert_eq!(n.access.flags(), "rw");
         assert!(!n.is_dir(), "配置是文件而非目录");
         assert_eq!(

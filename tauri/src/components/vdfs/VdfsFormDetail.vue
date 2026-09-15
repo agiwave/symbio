@@ -53,8 +53,8 @@ import { computed } from 'vue'
 import DetailForm from './DetailForm.vue'
 import type { DetailAction, DetailDefinition, VdfsNode } from '@/schemas/vdfs'
 import {
-  VFDS_ACTION_EXPORT,
-  VFDS_ACTION_TEST,
+  VDFS_ACTION_EXPORT,
+  VDFS_ACTION_TEST,
   vdfsAccessOf,
   type VdfsFieldError,
 } from '@/schemas/vdfs'
@@ -111,7 +111,7 @@ const definition = computed<DetailDefinition>(() => {
       ? raw.actions
       : (raw.actions ?? []).filter(
           (a) =>
-            a.id === 'open-container' || a.id === VFDS_ACTION_TEST || a.id === VFDS_ACTION_EXPORT
+            a.id === 'open-container' || a.id === VDFS_ACTION_TEST || a.id === VDFS_ACTION_EXPORT
         ),
   }
 })
@@ -123,7 +123,7 @@ const definition = computed<DetailDefinition>(() => {
  * 前端只把它翻译成 DetailForm 的条件键（`cap.test_connection`），不自行猜测。
  */
 const testable = computed(() =>
-  (definition.value.actions ?? []).some((a) => a.id === VFDS_ACTION_TEST)
+  (definition.value.actions ?? []).some((a) => a.id === VDFS_ACTION_TEST)
 )
 
 /** 表单模型对象：页面层 `vdfs/read` 的文本按 JSON 解析后的字段值 */

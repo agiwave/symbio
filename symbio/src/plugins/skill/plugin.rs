@@ -129,8 +129,8 @@ use crate::providers::vdfs_service::DirVdfs;
 use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT, VFDS_EXT_FORM,
-    VFDS_EXT_ZIP, VFDS_NEW_SOURCE_FILE,
+    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_EXT_FORM,
+    VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
 };
 
 const LABEL: &str = "技能";
@@ -161,7 +161,7 @@ fn import_name_of(path: &str) -> String {
 fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::file(id, id, VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_SKILL.to_string();
-    n.ext = Some(VFDS_EXT_FORM.to_string());
+    n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = serde_json::to_value(super::detail::skill_detail_definition()).ok();
     n.status = "active".to_string();
     let Some(text) = raw else { return n };
@@ -257,9 +257,9 @@ impl VdfsProvider for SkillPlugin {
         vec![
             VdfsNewType::new(PLUGIN_SKILL, LABEL)
                 .with_description(format!("新建{LABEL}（先落一份默认配置，随后在详情里完善）")),
-            VdfsNewType::new(VFDS_EXT_ZIP, format!("{LABEL}包"))
+            VdfsNewType::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
                 .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
-                .with_source(VFDS_NEW_SOURCE_FILE),
+                .with_source(VDFS_NEW_SOURCE_FILE),
         ]
     }
 
@@ -363,7 +363,7 @@ impl VdfsProvider for SkillPlugin {
         action: &str,
         _payload: Option<&serde_json::Value>,
     ) -> VdfsResult<VdfsActionResult> {
-        if action != VFDS_ACTION_EXPORT {
+        if action != VDFS_ACTION_EXPORT {
             return Err(VdfsError::NotImplemented);
         }
         if path.is_empty() {
@@ -376,7 +376,7 @@ impl VdfsProvider for SkillPlugin {
         let data = serde_json::to_value(&pack)
             .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
         Ok(VdfsActionResult {
-            action: VFDS_ACTION_EXPORT.to_string(),
+            action: VDFS_ACTION_EXPORT.to_string(),
             ok: true,
             message: format!("已打包「{}」", pack.filename),
             data: Some(data),
@@ -559,7 +559,7 @@ mod tests {
         assert_eq!(n.name, "demo");
         assert_eq!(n.title, "演示");
         assert_eq!(n.description.as_deref(), Some("一个用于演示的技能"));
-        assert_eq!(n.ext.as_deref(), Some(VFDS_EXT_FORM));
+        assert_eq!(n.ext.as_deref(), Some(VDFS_EXT_FORM));
         assert!(n.schema.is_some(), "详情定义必须随节点下发");
     }
 

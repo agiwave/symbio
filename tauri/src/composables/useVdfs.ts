@@ -50,9 +50,9 @@ import {
 } from '@/services/vdfs'
 import { subscribe } from '@/services/eventBus'
 import {
-  VFDS_CHANGE_APPENDED,
-  VFDS_EVENT_KIND,
-  VFDS_ROOT,
+  VDFS_CHANGE_APPENDED,
+  VDFS_EVENT_KIND,
+  VDFS_ROOT,
   actionFileOf,
   isVdfsDir,
   newFileNameOf,
@@ -520,7 +520,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     // 它不改变任何节点的存在与顺序，也不改变预览首行——因此既不该重拉目录，
     // 也不该重拉左栏导航。让它走下面的通用分支，等于给流式每一帧都挂一次
     // 防抖刷新（O(n²) 流量），正好抵消 `appended` 存在的意义。
-    if (change.change === VFDS_CHANGE_APPENDED) {
+    if (change.change === VDFS_CHANGE_APPENDED) {
       applyAppend(change)
       return
     }
@@ -531,7 +531,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     }
   }
 
-  const unsubBus = subscribe({ kind: VFDS_EVENT_KIND }, (busEvent) => {
+  const unsubBus = subscribe({ kind: VDFS_EVENT_KIND }, (busEvent) => {
     const change = busEvent.data?.data as VdfsChange | undefined
     if (!change || typeof change.path !== 'string') return
     onChange(change)
@@ -545,9 +545,9 @@ export function useVdfs(opts: UseVdfsOptions) {
     (next, prev) => {
       // `.vdfs` 根不在任何 provider 身上、无实时能力；跳过 watch/unwatch，否则后端报
       // 「目录不是可操作节点」（见服务器日志 vdfs/watch / vdfs/unwatch 的 ERROR）。
-      if (prev && prev !== VFDS_ROOT && prev !== next) void unwatchVdfs(prev)
+      if (prev && prev !== VDFS_ROOT && prev !== next) void unwatchVdfs(prev)
       watched = next
-      if (next !== VFDS_ROOT) void watchVdfs(next)
+      if (next !== VDFS_ROOT) void watchVdfs(next)
     },
     { immediate: true }
   )
@@ -558,7 +558,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   onBeforeUnmount(() => {
     unsubBus()
     if (refreshTimer) clearTimeout(refreshTimer)
-    if (watched && watched !== VFDS_ROOT) void unwatchVdfs(watched)
+    if (watched && watched !== VDFS_ROOT) void unwatchVdfs(watched)
   })
 
   return {

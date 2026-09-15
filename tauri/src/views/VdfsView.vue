@@ -65,7 +65,7 @@ import { useRoute, useRouter } from 'vue-router'
 import VdfsWorkbench from '@/components/vdfs/VdfsWorkbench.vue'
 import HomedirEntry from '@/components/common/HomedirEntry.vue'
 import { useSessionsStore } from '@/stores/sessions'
-import { VFDS_ROOT } from '@/schemas/vdfs'
+import { VDFS_ROOT } from '@/schemas/vdfs'
 
 const route = useRoute()
 const router = useRouter()
@@ -76,13 +76,13 @@ const router = useRouter()
 const addr = computed(() => {
   const d = route.params.dir
   const rel = (Array.isArray(d) ? d.join('/') : ((d as string) || '')) as string
-  return rel ? `${VFDS_ROOT}/${rel}` : VFDS_ROOT
+  return rel ? `${VDFS_ROOT}/${rel}` : VDFS_ROOT
 })
 
 /** 数据地址 → 浏览器地址（`.vdfs/<rel>` → `/vdfs/<rel>`；根 → `/vdfs`） */
 function browserPathOf(target: string): string {
-  if (target === VFDS_ROOT) return '/vdfs'
-  if (target.startsWith(`${VFDS_ROOT}/`)) return `/vdfs/${target.slice(VFDS_ROOT.length + 1)}`
+  if (target === VDFS_ROOT) return '/vdfs'
+  if (target.startsWith(`${VDFS_ROOT}/`)) return `/vdfs/${target.slice(VDFS_ROOT.length + 1)}`
   return '/vdfs'
 }
 

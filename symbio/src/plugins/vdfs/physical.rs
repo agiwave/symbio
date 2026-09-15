@@ -13,7 +13,7 @@
 //! ## 地址规则
 //!
 //! 进入本层的地址已是「确认非虚拟」的那一半，坐标系是**会话工作目录**
-//! （[`VFDS_PARAM_WORKDIR`]，由访问层透传；缺失即 `Internal`——那是接线错误）：
+//! （[`VDFS_PARAM_WORKDIR`]，由访问层透传；缺失即 `Internal`——那是接线错误）：
 //!
 //! - `""` / `"."` = 工作目录根；
 //! - `README.md`、`src/main.rs` = 工作目录相对；
@@ -119,14 +119,14 @@ impl FsPolicy {
 
 /// 工作目录基准
 fn workdir(ctx: &VdfsContext) -> VdfsResult<PathBuf> {
-    let raw = ctx.param_str(VFDS_PARAM_WORKDIR).ok_or_else(|| {
+    let raw = ctx.param_str(VDFS_PARAM_WORKDIR).ok_or_else(|| {
         VdfsError::internal(format!(
-            "缺少 {VFDS_PARAM_WORKDIR} 参数（访问层未透传工作目录）"
+            "缺少 {VDFS_PARAM_WORKDIR} 参数（访问层未透传工作目录）"
         ))
     })?;
     if raw.is_empty() {
         return Err(VdfsError::internal(format!(
-            "{VFDS_PARAM_WORKDIR} 参数为空"
+            "{VDFS_PARAM_WORKDIR} 参数为空"
         )));
     }
     Ok(PathBuf::from(shellexpand::tilde(raw).into_owned()))
@@ -496,7 +496,7 @@ mod tests {
 
     fn ctx_in(dir: &Path) -> VdfsContext {
         VdfsContext::empty().with_param(
-            VFDS_PARAM_WORKDIR,
+            VDFS_PARAM_WORKDIR,
             serde_json::Value::String(dir.to_string_lossy().into_owned()),
         )
     }

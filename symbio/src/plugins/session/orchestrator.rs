@@ -694,7 +694,7 @@ impl SessionPlugin {
                             Ok(session_chat_response::StreamEvent::Delete { message_id }) => {
                                 let _ = self.change_tx.send(vdfs::VdfsChange::new(
                                     super::plugin::message_path(&session_id, &message_id),
-                                    vdfs::VFDS_CHANGE_DELETED,
+                                    vdfs::VDFS_CHANGE_DELETED,
                                 ));
                             }
                             // 非 Update 帧（Status / Error / Abort / Connected …）
@@ -1253,7 +1253,7 @@ impl SessionPlugin {
             return;
         }
 
-        self.notify_change(session_id, vdfs::VFDS_CHANGE_UPDATED);
+        self.notify_change(session_id, vdfs::VDFS_CHANGE_UPDATED);
     }
 
     pub async fn broadcast_status(&self, state: &Arc<ActiveSessionState>, status: &str) {
@@ -1271,7 +1271,7 @@ impl SessionPlugin {
         let id = state.request_id_str();
         match status {
             "busy" | "idle" => {
-                self.notify_change(&id, vdfs::VFDS_CHANGE_UPDATED);
+                self.notify_change(&id, vdfs::VDFS_CHANGE_UPDATED);
             }
             _ => {}
         }

@@ -40,8 +40,8 @@ use std::sync::Arc;
 
 /// 虚拟根目录的字面名字：系统资源统一在此目录之下。
 ///
-/// 前端与 LLM 两条链路同用此名（前端 `schemas/vdfs.ts` 的 `VFDS_ROOT` 与本常量同源）。
-pub const VFDS_ADDR_ROOT: &str = ".vdfs";
+/// 前端与 LLM 两条链路同用此名（前端 `schemas/vdfs.ts` 的 `VDFS_ROOT` 与本常量同源）。
+pub const VDFS_ADDR_ROOT: &str = ".vdfs";
 
 /// 规范化后的地址落在哪一半
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,7 +82,7 @@ pub fn normalize_addr(raw: &str) -> VdfsResult<String> {
 ///
 /// `.vdfs` 必须**独占首段**：`.vdfsfoo` 不算虚拟地址（按物理地址处理）。
 fn half_of(addr: &str) -> Half {
-    match addr.strip_prefix(VFDS_ADDR_ROOT) {
+    match addr.strip_prefix(VDFS_ADDR_ROOT) {
         Some("") => Half::Virtual(String::new()),
         Some(rest) if rest.starts_with('/') => {
             // 虚拟层树内口径：剥掉 `.vdfs/` 前缀，剩余部分原样透传
@@ -95,9 +95,9 @@ fn half_of(addr: &str) -> Half {
 /// 虚拟层树内口径 → 对外展示地址（`session/x` → `.vdfs/session/x`）
 pub fn to_display(root_rel: &str) -> String {
     if root_rel.is_empty() {
-        return VFDS_ADDR_ROOT.to_string();
+        return VDFS_ADDR_ROOT.to_string();
     }
-    format!("{VFDS_ADDR_ROOT}/{root_rel}")
+    format!("{VDFS_ADDR_ROOT}/{root_rel}")
 }
 
 /// 解析地址并路由（所有操作的共同第一步）
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn display_paths_are_virtual_prefixed() {
-        assert_eq!(to_display(""), VFDS_ADDR_ROOT);
+        assert_eq!(to_display(""), VDFS_ADDR_ROOT);
         assert_eq!(to_display("session"), ".vdfs/session");
         assert_eq!(to_display("session/abc"), ".vdfs/session/abc");
     }
@@ -492,7 +492,7 @@ mod tests {
                 _path: &str,
                 sink: VdfsChangeSink,
             ) -> VdfsResult<()> {
-                sink(VdfsChange::new("session/abc", VFDS_CHANGE_UPDATED));
+                sink(VdfsChange::new("session/abc", VDFS_CHANGE_UPDATED));
                 sink(VdfsChange::renamed("session/old", "session/new"));
                 Ok(())
             }
@@ -518,7 +518,7 @@ mod tests {
             events[0],
             (
                 ".vdfs/session/abc".to_string(),
-                VFDS_CHANGE_UPDATED.to_string(),
+                VDFS_CHANGE_UPDATED.to_string(),
                 None
             )
         );

@@ -94,7 +94,7 @@
 
 | 钩子 | 默认 | 说明 |
 |---|---|---|
-| `test_status(ctx, id) -> EntityStatusResponse`（类型已删除） | `NotImplemented` | VDFS 侧表现为节点动作 `test`（`VFDS_ACTION_TEST`）。**连接失败应映射为 `Ok(status: "failed")` 而非 `Err`**——失败是**结果**，不是协议错误 |
+| `test_status(ctx, id) -> EntityStatusResponse`（类型已删除） | `NotImplemented` | VDFS 侧表现为节点动作 `test`（`VDFS_ACTION_TEST`）。**连接失败应映射为 `Ok(status: "failed")` 而非 `Err`**——失败是**结果**，不是协议错误 |
 
 列表摘要的 `status ∈ active | working | disabled | error | unknown`；`test_status`
 的结果另用 `connected` / `failed`（常量 `ENTITY_STATUS_CONNECTED` /
@@ -105,7 +105,7 @@
 | 钩子 | 默认 | 说明 |
 |---|---|---|
 | `import_zip(ctx, name, zip) -> EntityUploadResponse` | `entity_import_zip`（EntityStore 型通用解包，整目录覆盖） | VDFS 侧是**一种「新建类型」**（`ext = zip`、`source = file`），**不是第二条协议**。目录自管类型（agent bundle）重写——id 取自包内 manifest，`name` 只是建议名 |
-| `export_zip(ctx, id) -> EntityExport` | `entity_export_zip`（打包整个实体目录） | VDFS 侧是节点动作 `export`（`VFDS_ACTION_EXPORT`），与导入互为逆向 |
+| `export_zip(ctx, id) -> EntityExport` | `entity_export_zip`（打包整个实体目录） | VDFS 侧是节点动作 `export`（`VDFS_ACTION_EXPORT`），与导入互为逆向 |
 
 ### 2.5 详情定义
 

@@ -106,7 +106,7 @@
           </template>
 
           <!-- 内容来自本地文件（如 zip 整包导入）：选文件，地址由文件名推导 -->
-          <template v-else-if="createType.source === VFDS_NEW_SOURCE_FILE">
+          <template v-else-if="createType.source === VDFS_NEW_SOURCE_FILE">
             <h3 class="prompt-title">导入{{ createType.title || createType.ext }}</h3>
             <input
               type="file"
@@ -220,7 +220,7 @@ import { getVdfsRenderer, dirIconOf, resolveVdfsRenderer } from '@/registry/vdfs
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
 import '@/registry/vdfsRenderers'
 import {
-  VFDS_NEW_SOURCE_FILE,
+  VDFS_NEW_SOURCE_FILE,
   isVdfsDir,
   newFileNameOf,
   vdfsAccessOf,

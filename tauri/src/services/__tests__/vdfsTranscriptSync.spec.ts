@@ -67,11 +67,11 @@ import {
   stopTranscriptSync,
 } from '../vdfsTranscriptSync'
 import {
-  VFDS_CHANGE_APPENDED,
-  VFDS_CHANGE_CREATED,
-  VFDS_CHANGE_DELETED,
-  VFDS_CHANGE_UPDATED,
-  VFDS_EXT_MESSAGE,
+  VDFS_CHANGE_APPENDED,
+  VDFS_CHANGE_CREATED,
+  VDFS_CHANGE_DELETED,
+  VDFS_CHANGE_UPDATED,
+  VDFS_EXT_MESSAGE,
   parseTranscriptPath,
   vdfsMessageAddr,
   vdfsMessagesAddr,
@@ -89,7 +89,7 @@ function node(partial: Partial<VdfsNode> & { name: string }): VdfsNode {
     kind: 'file',
     status: 'streaming',
     access: 'r',
-    ext: VFDS_EXT_MESSAGE,
+    ext: VDFS_EXT_MESSAGE,
     role: 'assistant',
     type: 'text',
     seq: 1,
@@ -183,7 +183,7 @@ describe('变更 → store', () => {
     const store = useSessionsStore()
     emit({
       path: vdfsMessageAddr(SID, 'm1'),
-      change: VFDS_CHANGE_CREATED,
+      change: VDFS_CHANGE_CREATED,
       node: node({ name: 'm1' }),
       content: '你好',
     })
@@ -199,7 +199,7 @@ describe('变更 → store', () => {
     mocks.statVdfs.mockResolvedValueOnce(node({ name: 'm1' }))
     mocks.readVdfs.mockResolvedValueOnce({ path: '', text: '回读正文', binary: false, size: 12 })
 
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VFDS_CHANGE_CREATED })
+    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_CREATED })
     await drain()
 
     expect(store.getSessionMessages(SID).map((m) => m.content)).toEqual(['回读正文'])
@@ -209,14 +209,14 @@ describe('变更 → store', () => {
     const store = useSessionsStore()
     emit({
       path: vdfsMessageAddr(SID, 'm1'),
-      change: VFDS_CHANGE_CREATED,
+      change: VDFS_CHANGE_CREATED,
       node: node({ name: 'm1' }),
       content: '你好',
     })
     await drain()
 
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VFDS_CHANGE_APPENDED, delta: '，世界' })
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VFDS_CHANGE_APPENDED, delta: '！' })
+    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_APPENDED, delta: '，世界' })
+    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_APPENDED, delta: '！' })
     await drain()
 
     expect(store.getSessionMessages(SID).map((m) => m.content)).toEqual(['你好，世界！'])
@@ -230,9 +230,9 @@ describe('变更 → store', () => {
     mocks.statVdfs.mockResolvedValueOnce(node({ name: 'm1' }))
     mocks.readVdfs.mockReturnValueOnce(inflight.promise)
 
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VFDS_CHANGE_CREATED })
+    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_CREATED })
     // 回读还没回来，增量就到了
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VFDS_CHANGE_APPENDED, delta: 'X' })
+    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_APPENDED, delta: 'X' })
 
     // 旧快照（不含 X）此刻才返回
     inflight.resolve({ path: '', text: 'abc', binary: false, size: 3 })
@@ -248,7 +248,7 @@ describe('变更 → store', () => {
     const store = useSessionsStore()
     emit({
       path: vdfsMessageAddr(SID, 'm1'),
-      change: VFDS_CHANGE_CREATED,
+      change: VDFS_CHANGE_CREATED,
       node: node({ name: 'm1' }),
       content: '半截',
     })
@@ -256,7 +256,7 @@ describe('变更 → store', () => {
 
     emit({
       path: vdfsMessageAddr(SID, 'm1'),
-      change: VFDS_CHANGE_UPDATED,
+      change: VDFS_CHANGE_UPDATED,
       node: node({ name: 'm1', status: 'failed', error: '上游 429' }),
       content: '半截',
     })
@@ -272,7 +272,7 @@ describe('变更 → store', () => {
     for (const id of ['m1', 'm2']) {
       emit({
         path: vdfsMessageAddr(SID, id),
-        change: VFDS_CHANGE_CREATED,
+        change: VDFS_CHANGE_CREATED,
         node: node({ name: id, seq: id === 'm1' ? 1 : 2 }),
         content: id,
       })
@@ -280,20 +280,20 @@ describe('变更 → store', () => {
     await drain()
     expect(store.getSessionMessages(SID)).toHaveLength(2)
 
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VFDS_CHANGE_DELETED })
+    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_DELETED })
     await drain()
     expect(store.getSessionMessages(SID).map((m) => m.id)).toEqual(['m2'])
 
-    emit({ path: vdfsMessagesAddr(SID), change: VFDS_CHANGE_DELETED })
+    emit({ path: vdfsMessagesAddr(SID), change: VDFS_CHANGE_DELETED })
     await drain()
     expect(store.getSessionMessages(SID)).toHaveLength(0)
   })
 
   it('非转写路径的变更一律不碰 store', async () => {
     const store = useSessionsStore()
-    emit({ path: '.vdfs/session/abc/子会话/sub', change: VFDS_CHANGE_UPDATED, content: 'x' })
-    emit({ path: '.vdfs/session/abc', change: VFDS_CHANGE_UPDATED, content: 'x' })
-    emit({ path: '.vdfs/session', change: VFDS_CHANGE_DELETED })
+    emit({ path: '.vdfs/session/abc/子会话/sub', change: VDFS_CHANGE_UPDATED, content: 'x' })
+    emit({ path: '.vdfs/session/abc', change: VDFS_CHANGE_UPDATED, content: 'x' })
+    emit({ path: '.vdfs/session', change: VDFS_CHANGE_DELETED })
     await drain()
 
     expect(store.getSessionMessages(SID)).toHaveLength(0)
@@ -304,7 +304,7 @@ describe('变更 → store', () => {
     const store = useSessionsStore()
     emit({
       path: vdfsMessageAddr(SID, 'p1'),
-      change: VFDS_CHANGE_CREATED,
+      change: VDFS_CHANGE_CREATED,
       node: node({ name: 'p1', status: 'waiting_user_action', type: 'user_prompt' }),
       content: '',
     })
@@ -314,7 +314,7 @@ describe('变更 → store', () => {
 
     emit({
       path: vdfsMessageAddr(SID, 'p1'),
-      change: VFDS_CHANGE_UPDATED,
+      change: VDFS_CHANGE_UPDATED,
       node: node({ name: 'p1', status: 'active', type: 'user_prompt' }),
       content: '',
     })

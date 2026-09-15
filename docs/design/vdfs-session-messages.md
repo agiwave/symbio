@@ -171,7 +171,7 @@ read(.vdfs/session/<sid>/消息/<mid>)
 
 ### S16 —— 机制与读路径（已完成）
 
-- `symbio_core::vdfs_provider`：新增 `VFDS_CHANGE_APPENDED`、`VFDS_EXT_MESSAGE`；
+- `symbio_core::vdfs_provider`：新增 `VDFS_CHANGE_APPENDED`、`VDFS_EXT_MESSAGE`；
   `VdfsChange` 新增 `delta: Option<String>` 与 `VdfsChange::appended(path, delta)`；
 - `plugins/vdfs/protocol`：`VdfsChangeEvent` 新增 `delta`；
 - `plugins/vdfs/host`：`to_change_event` 透传 `delta`；

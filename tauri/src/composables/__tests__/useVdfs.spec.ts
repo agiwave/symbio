@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * useVdfs —— **追加型变更**（`VFDS_CHANGE_APPENDED`）的消费单测
+ * useVdfs —— **追加型变更**（`VDFS_CHANGE_APPENDED`）的消费单测
  *
  * 锁定 S18 的两件事，都是"错了也不报错、只悄悄少一段字"的类型：
  *
@@ -46,16 +46,16 @@ vi.mock('@/utils/logger', () => ({
 
 import { useVdfs } from '../useVdfs'
 import {
-  VFDS_CHANGE_APPENDED,
-  VFDS_CHANGE_UPDATED,
-  VFDS_EXT_MESSAGE,
-  VFDS_ROOT,
+  VDFS_CHANGE_APPENDED,
+  VDFS_CHANGE_UPDATED,
+  VDFS_EXT_MESSAGE,
+  VDFS_ROOT,
   type VdfsChange,
   type VdfsNode,
 } from '@/schemas/vdfs'
 
 /** 消息列表地址（被测的绑定地址） */
-const MSG_DIR = `${VFDS_ROOT}/session/abc/消息`
+const MSG_DIR = `${VDFS_ROOT}/session/abc/消息`
 
 /** 一个 `ext = message` 的列表项（只有 `r`，正文在内容里） */
 function msgNode(id: string, title = id): VdfsNode {
@@ -66,7 +66,7 @@ function msgNode(id: string, title = id): VdfsNode {
     kind: 'file',
     status: 'streaming',
     access: 'r',
-    ext: VFDS_EXT_MESSAGE,
+    ext: VDFS_EXT_MESSAGE,
     role: 'assistant',
     type: 'text',
     seq: 1,
@@ -151,8 +151,8 @@ describe('useVdfs 消费 appended（流式即列表项的追加）', () => {
     const listCalls = mocks.listVdfs.mock.calls.length
 
     // 追加两帧
-    emitChange({ path: node.path, change: VFDS_CHANGE_APPENDED, delta: '，世界' })
-    emitChange({ path: node.path, change: VFDS_CHANGE_APPENDED, delta: '！' })
+    emitChange({ path: node.path, change: VDFS_CHANGE_APPENDED, delta: '，世界' })
+    emitChange({ path: node.path, change: VDFS_CHANGE_APPENDED, delta: '！' })
     await settle()
 
     expect(api.nodeText.value).toBe('你好，世界！')
@@ -180,7 +180,7 @@ describe('useVdfs 消费 appended（流式即列表项的追加）', () => {
     await settle()
 
     const listCalls = mocks.listVdfs.mock.calls.length
-    emitChange({ path: `${MSG_DIR}/other`, change: VFDS_CHANGE_APPENDED, delta: '别处的增量' })
+    emitChange({ path: `${MSG_DIR}/other`, change: VDFS_CHANGE_APPENDED, delta: '别处的增量' })
     await settle()
 
     expect(api.nodeText.value).toBe('你好')
@@ -211,7 +211,7 @@ describe('useVdfs 消费 appended（流式即列表项的追加）', () => {
     mocks.readVdfs.mockReturnValueOnce(inflight.promise)
     const selecting = api.select(node)
 
-    emitChange({ path: node.path, change: VFDS_CHANGE_APPENDED, delta: 'def' })
+    emitChange({ path: node.path, change: VDFS_CHANGE_APPENDED, delta: 'def' })
     expect(api.nodeText.value, '追加应立即可见').toBe('abcdef')
 
     // 旧快照此刻才到达：必须被丢弃
@@ -222,7 +222,7 @@ describe('useVdfs 消费 appended（流式即列表项的追加）', () => {
     expect(api.nodeText.value, '旧快照覆盖了增量 → 后续 append 会拼出损坏文本').toBe('abcdef')
 
     // 再追加一帧：仍是正确拼接（而不是 "abc" + "ghi"）
-    emitChange({ path: node.path, change: VFDS_CHANGE_APPENDED, delta: 'ghi' })
+    emitChange({ path: node.path, change: VDFS_CHANGE_APPENDED, delta: 'ghi' })
     expect(api.nodeText.value).toBe('abcdefghi')
 
     wrapper.unmount()
@@ -235,7 +235,7 @@ describe('useVdfs 消费 appended（流式即列表项的追加）', () => {
       await settle()
       const listCalls = mocks.listVdfs.mock.calls.length
 
-      emitChange({ path: `${MSG_DIR}/m1`, change: VFDS_CHANGE_UPDATED })
+      emitChange({ path: `${MSG_DIR}/m1`, change: VDFS_CHANGE_UPDATED })
       await vi.advanceTimersByTimeAsync(500)
 
       expect(mocks.listVdfs.mock.calls.length, 'updated 必须触发重拉收敛').toBeGreaterThan(

@@ -35,13 +35,13 @@ import {
 } from '@/services/session'
 import { readVdfs, statVdfs } from '@/services/vdfs'
 import {
-  VFDS_CHANGE_APPENDED,
-  VFDS_CHANGE_CREATED,
-  VFDS_CHANGE_DELETED,
-  VFDS_CHANGE_UPDATED,
-  VFDS_ROOT,
-  VFDS_SESSION_DIR,
-  VFDS_STATUS_WORKING,
+  VDFS_CHANGE_APPENDED,
+  VDFS_CHANGE_CREATED,
+  VDFS_CHANGE_DELETED,
+  VDFS_CHANGE_UPDATED,
+  VDFS_ROOT,
+  VDFS_SESSION_DIR,
+  VDFS_STATUS_WORKING,
   vdfsBase,
   vdfsJoin,
   vdfsSessionAddr,
@@ -536,7 +536,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
     // 后端 created 事件（invoke_update is_new 判定）随后到达，各订阅方幂等收敛
-    publishVdfsChangedLocal({ path: vdfsSessionAddr(id), change: VFDS_CHANGE_CREATED })
+    publishVdfsChangedLocal({ path: vdfsSessionAddr(id), change: VDFS_CHANGE_CREATED })
 
     return id
   }
@@ -585,7 +585,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
     // 后端 deleted 事件随后到达，各订阅方幂等收敛
-    publishVdfsChangedLocal({ path: vdfsSessionAddr(id), change: VFDS_CHANGE_DELETED })
+    publishVdfsChangedLocal({ path: vdfsSessionAddr(id), change: VDFS_CHANGE_DELETED })
   }
 
   /**
@@ -917,7 +917,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function syncSessionNode(id: string): Promise<void> {
     const node = await statVdfs(vdfsSessionAddr(id))
     if (!node) return
-    const isWorking = node.status === VFDS_STATUS_WORKING
+    const isWorking = node.status === VDFS_STATUS_WORKING
     const title = typeof node.title === 'string' ? node.title : ''
     const idx = list.value.findIndex((s) => s.id === id)
     if (idx >= 0) {
@@ -934,18 +934,18 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   subscribeVdfsChanged(
-    { prefix: vdfsJoin(VFDS_ROOT, VFDS_SESSION_DIR), directChildren: true },
+    { prefix: vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR), directChildren: true },
     (change) => {
       // 追加型变更只发生在转写列表项上（由 vdfsTranscriptSync 就地应用 delta），
       // 与会话清单无关——绝不能让流式的每一帧触发一次重拉。
-      if (change.change === VFDS_CHANGE_APPENDED) return
+      if (change.change === VDFS_CHANGE_APPENDED) return
       const id = vdfsBase(change.path)
       if (!id) return
-      if (change.change === VFDS_CHANGE_DELETED) {
+      if (change.change === VDFS_CHANGE_DELETED) {
         removeSessionLocal(id)
         return
       }
-      if (change.change === VFDS_CHANGE_UPDATED) {
+      if (change.change === VDFS_CHANGE_UPDATED) {
         void syncSessionNode(id)
         return
       }

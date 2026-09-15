@@ -1,4 +1,4 @@
-//! VFDS 插件 —— 虚拟文件系统的**访问层**（协议入口 + LLM 工具）
+//! VDFS 插件 —— 虚拟文件系统的**访问层**（协议入口 + LLM 工具）
 //!
 //! ## 职责
 //!
@@ -18,12 +18,12 @@
 use super::{host, protocol as p, provider::ToolVdfs, tools};
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
-    PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_VFDS, TRAVERSE_AVAILABLE_TOOLS,
+    PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_VDFS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-/// VFDS 插件：把**容器注册的 VDFS 根**以一组 `vdfs/*` 操作暴露给前端与 LLM。
+/// VDFS 插件：把**容器注册的 VDFS 根**以一组 `vdfs/*` 操作暴露给前端与 LLM。
 ///
 /// 它不持有挂载点表——根之下有什么，由组合容器决定（见 `plugins/composite/vdfs.rs`）。
 pub struct VdfsPlugin {
@@ -59,14 +59,14 @@ impl Plugin for VdfsPlugin {
 
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         // 调用方可能给协议全名（`vdfs/list`），也可能给短名（`list`——容器已剥掉
-        // `vdfs/` 前缀）。两种都归一成协议全名，使 `VFDS_OPS` 与实现共享同一定义。
+        // `vdfs/` 前缀）。两种都归一成协议全名，使 `VDFS_OPS` 与实现共享同一定义。
         let raw = ctx.get(PATH).unwrap_or_default();
         let op = format!(
             "vdfs/{}",
             raw.trim_start_matches('/').trim_start_matches("vdfs/")
         );
-        if !p::VFDS_OPS.contains(&op.as_str()) {
-            return Err(PluginError::NotFound(format!("VFDS: 未知路径 '{raw}'")));
+        if !p::VDFS_OPS.contains(&op.as_str()) {
+            return Err(PluginError::NotFound(format!("VDFS: 未知路径 '{raw}'")));
         }
 
         // 取容器注册的统一文件系统：本插件只转发，不认识任何资源类别
@@ -81,7 +81,7 @@ impl Plugin for VdfsPlugin {
             .await
             .unwrap_or_else(|| {
                 Err(PluginError::InternalError(format!(
-                    "VFDS: 协议路径未分发 {op}"
+                    "VDFS: 协议路径未分发 {op}"
                 )))
             })
     }
@@ -109,7 +109,7 @@ impl Plugin for VdfsPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_VFDS, VdfsPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_VDFS, VdfsPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 mod tests {

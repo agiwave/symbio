@@ -19,47 +19,47 @@ use serde_json::Value;
 // ==================== 协议操作路径 ====================
 
 /// 列目录（一级；`.vdfs` 即资源类别清单）
-pub const VFDS_LIST: &str = "vdfs/list";
+pub const VDFS_LIST: &str = "vdfs/list";
 /// 树状遍历（递归；节点的 `t` 位控制可遍历性）
-pub const VFDS_TREE: &str = "vdfs/tree";
+pub const VDFS_TREE: &str = "vdfs/tree";
 /// 读元数据
-pub const VFDS_STAT: &str = "vdfs/stat";
+pub const VDFS_STAT: &str = "vdfs/stat";
 /// 读内容（`r` 位）
-pub const VFDS_READ: &str = "vdfs/read";
+pub const VDFS_READ: &str = "vdfs/read";
 /// 写内容（`w` 位）
-pub const VFDS_WRITE: &str = "vdfs/write";
+pub const VDFS_WRITE: &str = "vdfs/write";
 /// 删除节点
-pub const VFDS_DELETE: &str = "vdfs/delete";
+pub const VDFS_DELETE: &str = "vdfs/delete";
 /// 新建目录
-pub const VFDS_MKDIR: &str = "vdfs/mkdir";
+pub const VDFS_MKDIR: &str = "vdfs/mkdir";
 /// 移动 / 重命名
-pub const VFDS_MOVE: &str = "vdfs/move";
+pub const VDFS_MOVE: &str = "vdfs/move";
 /// 内容编辑（精确字符串替换）
-pub const VFDS_EDIT: &str = "vdfs/edit";
+pub const VDFS_EDIT: &str = "vdfs/edit";
 /// 文件名模式搜索（glob）
-pub const VFDS_SEARCH: &str = "vdfs/search";
+pub const VDFS_SEARCH: &str = "vdfs/search";
 /// 订阅指定路径的数据变更
-pub const VFDS_WATCH: &str = "vdfs/watch";
+pub const VDFS_WATCH: &str = "vdfs/watch";
 /// 取消订阅（与 watch 配对）
-pub const VFDS_UNWATCH: &str = "vdfs/unwatch";
+pub const VDFS_UNWATCH: &str = "vdfs/unwatch";
 /// 执行**节点动作**（provider 自持的动词，如「测试连接」）
-pub const VFDS_ACTION: &str = "vdfs/action";
+pub const VDFS_ACTION: &str = "vdfs/action";
 
 /// 全部 VDFS 操作（宿主据此判定是否为本协议请求）
-pub const VFDS_OPS: &[&str] = &[
-    VFDS_LIST,
-    VFDS_TREE,
-    VFDS_STAT,
-    VFDS_READ,
-    VFDS_EDIT,
-    VFDS_SEARCH,
-    VFDS_WRITE,
-    VFDS_DELETE,
-    VFDS_MKDIR,
-    VFDS_MOVE,
-    VFDS_WATCH,
-    VFDS_UNWATCH,
-    VFDS_ACTION,
+pub const VDFS_OPS: &[&str] = &[
+    VDFS_LIST,
+    VDFS_TREE,
+    VDFS_STAT,
+    VDFS_READ,
+    VDFS_EDIT,
+    VDFS_SEARCH,
+    VDFS_WRITE,
+    VDFS_DELETE,
+    VDFS_MKDIR,
+    VDFS_MOVE,
+    VDFS_WATCH,
+    VDFS_UNWATCH,
+    VDFS_ACTION,
 ];
 
 // ==================== 请求 ====================
@@ -96,7 +96,7 @@ pub struct VdfsTreeRequest {
 /// 执行节点动作请求
 ///
 /// `action` 是 provider 自持的动词标识（VDFS 不解释），`payload` 原样透传；
-/// 当前宿主约定的取值见 `VFDS_ACTION_TEST`。
+/// 当前宿主约定的取值见 `VDFS_ACTION_TEST`。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsActionRequest {
     pub path: String,
@@ -281,14 +281,14 @@ mod tests {
 
     #[test]
     fn ops_are_unique_and_prefixed() {
-        assert_eq!(VFDS_OPS.len(), 13, "新增协议操作请同步本计数与文档");
-        for op in VFDS_OPS {
+        assert_eq!(VDFS_OPS.len(), 13, "新增协议操作请同步本计数与文档");
+        for op in VDFS_OPS {
             assert!(op.starts_with("vdfs/"), "协议路径必须以 vdfs/ 开头：{op}");
         }
-        let mut sorted = VFDS_OPS.to_vec();
+        let mut sorted = VDFS_OPS.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted.len(), VFDS_OPS.len(), "协议路径不得重复");
+        assert_eq!(sorted.len(), VDFS_OPS.len(), "协议路径不得重复");
     }
 
     #[test]

@@ -48,7 +48,7 @@ use std::sync::Arc;
 
 /// 变更事件在宿主事件总线上的 `kind`
 /// （宿主前端：`subscribe({ kind: 'vdfs' })`）
-pub const VFDS_EVENT_KIND: &str = "vdfs";
+pub const VDFS_EVENT_KIND: &str = "vdfs";
 
 // ==================== 统一文件系统 ====================
 
@@ -140,7 +140,7 @@ fn event_bus_sink() -> VdfsChangeSink {
     Arc::new(move |change: VdfsChange| {
         let event = to_change_event(&change);
         let data = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
-        crate::symbio_core::event_bus::EventBus::try_publish(VFDS_EVENT_KIND, None, data);
+        crate::symbio_core::event_bus::EventBus::try_publish(VDFS_EVENT_KIND, None, data);
     })
 }
 
@@ -160,14 +160,14 @@ fn payload_or_default<T: serde::de::DeserializeOwned + Default + Clone + Send + 
 
 /// 宿主 ctx → VDFS 调用级参数：把运行时状态翻译成 provider 的**约定键**。
 ///
-/// 这里是唯一的翻译点——provider 只认 [`VFDS_PARAM_WORKDIR`] 这类约定键，
+/// 这里是唯一的翻译点——provider 只认 [`VDFS_PARAM_WORKDIR`] 这类约定键，
 /// 不认识宿主 ctx 的键名（`WORKDIR` 等）。两条链路共用：前端协议入口与 LLM 工具
 /// 都把 workdir 送到同一个键上，物理层据此解析相对地址。
 pub fn call_params(ctx: &Arc<dyn InvokeRequest>) -> VdfsParams {
     let mut params = VdfsParams::new();
     if let Some(workdir) = ctx.get(WORKDIR) {
         params.insert(
-            VFDS_PARAM_WORKDIR.to_string(),
+            VDFS_PARAM_WORKDIR.to_string(),
             serde_json::Value::String(workdir),
         );
     }
@@ -235,7 +235,7 @@ fn dir_self(addr: &str) -> VdfsNode {
 /// ```
 ///
 /// `params` 是**调用级参数**：调用方把请求 ctx 里的运行时状态（如 workdir）按约定键
-/// 透传给 provider，provider 因此不必知道宿主 ctx 的键名约定（见 [`VFDS_PARAM_WORKDIR`]）。
+/// 透传给 provider，provider 因此不必知道宿主 ctx 的键名约定（见 [`VDFS_PARAM_WORKDIR`]）。
 /// 不需要任何参数时传空的 [`VdfsParams`]。
 pub async fn dispatch_with(
     fs: &DynVdfsProvider,
@@ -243,24 +243,24 @@ pub async fn dispatch_with(
     ctx: &Arc<dyn InvokeRequest>,
     params: VdfsParams,
 ) -> Option<InvokeResponse<PluginPayload>> {
-    if !VFDS_OPS.contains(&path) {
+    if !VDFS_OPS.contains(&path) {
         return None;
     }
     let vctx = vdfs_context(ctx).with_params(params);
     let resp = match path {
-        VFDS_LIST => list(fs, &vctx, ctx).await,
-        VFDS_TREE => tree(fs, &vctx, ctx).await,
-        VFDS_STAT => stat(fs, &vctx, ctx).await,
-        VFDS_READ => read(fs, &vctx, ctx).await,
-        VFDS_WRITE => write(fs, &vctx, ctx).await,
-        VFDS_DELETE => delete(fs, &vctx, ctx).await,
-        VFDS_MKDIR => mkdir(fs, &vctx, ctx).await,
-        VFDS_MOVE => move_item(fs, &vctx, ctx).await,
-        VFDS_EDIT => edit(fs, &vctx, ctx).await,
-        VFDS_SEARCH => search(fs, &vctx, ctx).await,
-        VFDS_WATCH | VFDS_UNWATCH => watch(fs, &vctx, ctx, path == VFDS_WATCH).await,
-        VFDS_ACTION => action(fs, &vctx, ctx).await,
-        _ => unreachable!("VFDS_OPS 与分发分支必须一一对应"),
+        VDFS_LIST => list(fs, &vctx, ctx).await,
+        VDFS_TREE => tree(fs, &vctx, ctx).await,
+        VDFS_STAT => stat(fs, &vctx, ctx).await,
+        VDFS_READ => read(fs, &vctx, ctx).await,
+        VDFS_WRITE => write(fs, &vctx, ctx).await,
+        VDFS_DELETE => delete(fs, &vctx, ctx).await,
+        VDFS_MKDIR => mkdir(fs, &vctx, ctx).await,
+        VDFS_MOVE => move_item(fs, &vctx, ctx).await,
+        VDFS_EDIT => edit(fs, &vctx, ctx).await,
+        VDFS_SEARCH => search(fs, &vctx, ctx).await,
+        VDFS_WATCH | VDFS_UNWATCH => watch(fs, &vctx, ctx, path == VDFS_WATCH).await,
+        VDFS_ACTION => action(fs, &vctx, ctx).await,
+        _ => unreachable!("VDFS_OPS 与分发分支必须一一对应"),
     };
     Some(resp)
 }
@@ -690,7 +690,7 @@ async fn tree(
 mod tests {
     use super::super::physical::PhysicalFs;
     use super::*;
-    use crate::symbio_core::vdfs_provider::VFDS_KIND_DIR;
+    use crate::symbio_core::vdfs_provider::VDFS_KIND_DIR;
     use crate::symbio_core::{PluginError, PluginMeta, SimpleRequest};
     use async_trait::async_trait;
     use serde_json::{json, Value};
@@ -1046,7 +1046,7 @@ mod tests {
     async fn action_forwards_verb_and_relative_path() {
         let (fs, rec) = fs_roots();
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt", "action": "ping" }));
-        let resp = dispatch(&fs, VFDS_ACTION, &ctx).await.unwrap().unwrap();
+        let resp = dispatch(&fs, VDFS_ACTION, &ctx).await.unwrap().unwrap();
         let data = resp.get::<VdfsActionResult>().unwrap();
         assert_eq!(data.action, "ping");
         assert!(data.ok);
@@ -1054,7 +1054,7 @@ mod tests {
 
         // 空动作标识 → 拒绝（不打扰 provider）
         let bad = ctx_with(json!({ "path": ".vdfs/mem/a.txt", "action": "  " }));
-        assert!(dispatch(&fs, VFDS_ACTION, &bad).await.unwrap().is_err());
+        assert!(dispatch(&fs, VDFS_ACTION, &bad).await.unwrap().is_err());
     }
 
     /// 类别根列表：门面把内部口径回填成 `.vdfs/...` 展示地址 + `ext` 推导
@@ -1062,7 +1062,7 @@ mod tests {
     async fn list_category_root_fills_paths_and_ext() {
         let (fs, rec) = fs_roots();
         let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
-        let resp = dispatch(&fs, VFDS_LIST, &ctx).await.unwrap().unwrap();
+        let resp = dispatch(&fs, VDFS_LIST, &ctx).await.unwrap().unwrap();
         let data = resp.get::<VdfsListResponse>().unwrap();
         assert_eq!(rec.seen(), vec![""], "provider 收到的是相对路径 \"\"");
         assert_eq!(data.path, ".vdfs/mem");
@@ -1080,7 +1080,7 @@ mod tests {
     async fn deep_virtual_paths_pass_through_relative() {
         let (fs, rec) = fs_roots();
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/sub" }));
-        let resp = dispatch(&fs, VFDS_LIST, &ctx).await.unwrap().unwrap();
+        let resp = dispatch(&fs, VDFS_LIST, &ctx).await.unwrap().unwrap();
         let data = resp.get::<VdfsListResponse>().unwrap();
         assert_eq!(
             rec.seen(),
@@ -1096,7 +1096,7 @@ mod tests {
     async fn list_unknown_dir_is_not_found_with_hint() {
         let (fs, _) = fs_roots();
         let ctx = ctx_with(json!({ "path": ".vdfs/nope" }));
-        let err = dispatch(&fs, VFDS_LIST, &ctx).await.unwrap().unwrap_err();
+        let err = dispatch(&fs, VDFS_LIST, &ctx).await.unwrap().unwrap_err();
         assert!(matches!(err, PluginError::NotFound(_)));
         assert!(err.to_string().contains("mem"), "提示现有子目录");
     }
@@ -1106,7 +1106,7 @@ mod tests {
     async fn traversal_path_rejected() {
         let (fs, _) = fs_roots();
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/../../etc" }));
-        let err = dispatch(&fs, VFDS_LIST, &ctx).await.unwrap().unwrap_err();
+        let err = dispatch(&fs, VDFS_LIST, &ctx).await.unwrap().unwrap_err();
         assert!(matches!(err, PluginError::ValidationError(_)));
     }
 
@@ -1115,7 +1115,7 @@ mod tests {
         let (fs, _) = fs_roots();
 
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt" }));
-        let resp = dispatch(&fs, VFDS_READ, &ctx).await.unwrap().unwrap();
+        let resp = dispatch(&fs, VDFS_READ, &ctx).await.unwrap().unwrap();
         let c = resp.get::<VdfsContent>().unwrap();
         assert_eq!(c.text.as_deref(), Some("hello"));
         assert_eq!(
@@ -1124,7 +1124,7 @@ mod tests {
         );
 
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/sub/b.md" }));
-        let n = dispatch(&fs, VFDS_STAT, &ctx)
+        let n = dispatch(&fs, VDFS_STAT, &ctx)
             .await
             .unwrap()
             .unwrap()
@@ -1136,13 +1136,13 @@ mod tests {
 
         // 类别根节点由组合视图合成（provider 不知道自己的类别名）
         let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
-        let n = dispatch(&fs, VFDS_STAT, &ctx)
+        let n = dispatch(&fs, VDFS_STAT, &ctx)
             .await
             .unwrap()
             .unwrap()
             .get::<VdfsNode>()
             .unwrap();
-        assert_eq!(n.kind, VFDS_KIND_DIR);
+        assert_eq!(n.kind, VDFS_KIND_DIR);
         assert_eq!(n.name, "mem");
         assert_eq!(n.title, "内存子树");
     }
@@ -1154,12 +1154,12 @@ mod tests {
 
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt" }));
         assert!(matches!(
-            dispatch(&fs, VFDS_WRITE, &ctx).await.unwrap(),
+            dispatch(&fs, VDFS_WRITE, &ctx).await.unwrap(),
             Err(PluginError::ValidationError(_))
         ));
 
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt", "text": "x" }));
-        let w = dispatch(&fs, VFDS_WRITE, &ctx)
+        let w = dispatch(&fs, VDFS_WRITE, &ctx)
             .await
             .unwrap()
             .unwrap()
@@ -1170,7 +1170,7 @@ mod tests {
 
         // 字段级校验错误：载荷序列化为 JSON 置于错误文案位，可解析还原
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/a.txt", "text": "bad" }));
-        let err = dispatch(&fs, VFDS_WRITE, &ctx).await.unwrap().unwrap_err();
+        let err = dispatch(&fs, VDFS_WRITE, &ctx).await.unwrap().unwrap_err();
         let PluginError::ValidationError(text) = err else {
             panic!("应为校验错误");
         };
@@ -1183,17 +1183,17 @@ mod tests {
         let (fs, _) = fs_roots();
 
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/sub", "recursive": true }));
-        assert!(dispatch(&fs, VFDS_DELETE, &ctx).await.unwrap().is_ok());
+        assert!(dispatch(&fs, VDFS_DELETE, &ctx).await.unwrap().is_ok());
 
         let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
         assert!(matches!(
-            dispatch(&fs, VFDS_DELETE, &ctx).await.unwrap(),
+            dispatch(&fs, VDFS_DELETE, &ctx).await.unwrap(),
             Err(PluginError::Forbidden(_))
         ));
 
         let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
         assert!(matches!(
-            dispatch(&fs, VFDS_MKDIR, &ctx).await.unwrap(),
+            dispatch(&fs, VDFS_MKDIR, &ctx).await.unwrap(),
             Err(PluginError::ValidationError(_))
         ));
     }
@@ -1202,7 +1202,7 @@ mod tests {
     async fn dir_root_is_not_readable() {
         let (fs, _) = fs_roots();
         let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
-        let err = dispatch(&fs, VFDS_READ, &ctx).await.unwrap().unwrap_err();
+        let err = dispatch(&fs, VDFS_READ, &ctx).await.unwrap().unwrap_err();
         assert!(matches!(err, PluginError::Forbidden(_)));
     }
 
@@ -1211,7 +1211,7 @@ mod tests {
     async fn same_category_move_is_forwarded() {
         let (fs, _) = fs_roots();
         let ctx = ctx_with(json!({ "from": ".vdfs/mem/a.txt", "to": ".vdfs/mem/b.txt" }));
-        let resp = dispatch(&fs, VFDS_MOVE, &ctx).await.unwrap().unwrap();
+        let resp = dispatch(&fs, VDFS_MOVE, &ctx).await.unwrap().unwrap();
         let m = resp.get::<VdfsMoveResponse>().unwrap();
         assert_eq!(m.from, ".vdfs/mem/a.txt");
         assert_eq!(m.to, ".vdfs/mem/b.txt");
@@ -1231,7 +1231,7 @@ mod tests {
         ));
         let ctx = ctx_with(json!({ "from": ".vdfs/mem/a.txt", "to": ".vdfs/bare/a.txt" }));
         assert!(matches!(
-            dispatch(&fs, VFDS_MOVE, &ctx).await.unwrap(),
+            dispatch(&fs, VDFS_MOVE, &ctx).await.unwrap(),
             Err(PluginError::ValidationError(_))
         ));
     }
@@ -1242,7 +1242,7 @@ mod tests {
         let (fs, rec) = fs_roots();
         let ctx = ctx_with(json!({ "from": ".vdfs/mem/a.txt", "to": "b.txt" }));
         assert!(matches!(
-            dispatch(&fs, VFDS_MOVE, &ctx).await.unwrap(),
+            dispatch(&fs, VDFS_MOVE, &ctx).await.unwrap(),
             Err(PluginError::ValidationError(_))
         ));
         assert!(rec.seen().is_empty(), "判定发生在触达 provider 之前");
@@ -1252,8 +1252,8 @@ mod tests {
     async fn watch_unwatch_forward_relative_path() {
         let (fs, rec) = fs_roots();
         let ctx = ctx_with(json!({ "path": ".vdfs/mem/sub" }));
-        assert!(dispatch(&fs, VFDS_WATCH, &ctx).await.unwrap().is_ok());
-        assert!(dispatch(&fs, VFDS_UNWATCH, &ctx).await.unwrap().is_ok());
+        assert!(dispatch(&fs, VDFS_WATCH, &ctx).await.unwrap().is_ok());
+        assert!(dispatch(&fs, VDFS_UNWATCH, &ctx).await.unwrap().is_ok());
         assert_eq!(rec.seen(), vec!["sub", "sub"], "provider 收到相对路径");
     }
 
@@ -1262,7 +1262,7 @@ mod tests {
     async fn tree_walks_uniformly_from_root() {
         let (fs, _) = fs_roots();
         let ctx = ctx_with(json!({ "path": ".vdfs" }));
-        let t = dispatch(&fs, VFDS_TREE, &ctx)
+        let t = dispatch(&fs, VDFS_TREE, &ctx)
             .await
             .unwrap()
             .unwrap()
@@ -1286,7 +1286,7 @@ mod tests {
         let (fs, _) = fs_roots();
 
         let ctx = ctx_with(json!({ "path": ".vdfs/mem", "depth": 1 }));
-        let t = dispatch(&fs, VFDS_TREE, &ctx)
+        let t = dispatch(&fs, VDFS_TREE, &ctx)
             .await
             .unwrap()
             .unwrap()
@@ -1299,7 +1299,7 @@ mod tests {
         );
 
         let ctx = ctx_with(json!({ "path": ".vdfs", "limit": 2 }));
-        let t = dispatch(&fs, VFDS_TREE, &ctx)
+        let t = dispatch(&fs, VDFS_TREE, &ctx)
             .await
             .unwrap()
             .unwrap()
@@ -1331,7 +1331,7 @@ mod tests {
         };
 
         let wctx = mk_ctx(json!({ "path": "hello.txt", "text": "hi" }));
-        let w = dispatch_with(&fs, VFDS_WRITE, &wctx, call_params(&wctx))
+        let w = dispatch_with(&fs, VDFS_WRITE, &wctx, call_params(&wctx))
             .await
             .unwrap()
             .unwrap()
@@ -1341,7 +1341,7 @@ mod tests {
         assert!(dir.join("hello.txt").exists());
 
         let rctx = mk_ctx(json!({ "path": "hello.txt" }));
-        let c = dispatch_with(&fs, VFDS_READ, &rctx, call_params(&rctx))
+        let c = dispatch_with(&fs, VDFS_READ, &rctx, call_params(&rctx))
             .await
             .unwrap()
             .unwrap()
@@ -1355,17 +1355,17 @@ mod tests {
     /// 变更事件：门面已把路径补成展示地址，本层只换信封、不再加工
     #[test]
     fn change_event_passes_display_paths_through() {
-        let e = to_change_event(&VdfsChange::new(".vdfs/mem/sub/x.md", VFDS_CHANGE_UPDATED));
+        let e = to_change_event(&VdfsChange::new(".vdfs/mem/sub/x.md", VDFS_CHANGE_UPDATED));
         assert_eq!(e.path, ".vdfs/mem/sub/x.md");
         assert!(e.to.is_none());
 
         let r = to_change_event(&VdfsChange::renamed(".vdfs/mem/a.txt", ".vdfs/mem/b.txt"));
-        assert_eq!(r.change, VFDS_CHANGE_RENAMED);
+        assert_eq!(r.change, VDFS_CHANGE_RENAMED);
         assert_eq!(r.path, ".vdfs/mem/a.txt");
         assert_eq!(r.to.as_deref(), Some(".vdfs/mem/b.txt"));
 
         // 物理半的地址原样保留
-        let n = to_change_event(&VdfsChange::new("README.md", VFDS_CHANGE_CREATED));
+        let n = to_change_event(&VdfsChange::new("README.md", VDFS_CHANGE_CREATED));
         assert_eq!(n.path, "README.md");
     }
 
@@ -1377,7 +1377,7 @@ mod tests {
         let node =
             VdfsNode::file("m1", "助手", VdfsAccess::READ).with_path(".vdfs/session/abc/消息/m1");
         let e = to_change_event(
-            &VdfsChange::new(".vdfs/session/abc/消息/m1", VFDS_CHANGE_UPDATED)
+            &VdfsChange::new(".vdfs/session/abc/消息/m1", VDFS_CHANGE_UPDATED)
                 .with_node(node)
                 .with_content("正文"),
         );
@@ -1398,7 +1398,7 @@ mod tests {
         let fs = resolve_fs(None, &ctx_empty()).await;
 
         let ctx = ctx_with(json!({ "path": ".vdfs" }));
-        let data = dispatch(&fs, VFDS_LIST, &ctx)
+        let data = dispatch(&fs, VDFS_LIST, &ctx)
             .await
             .unwrap()
             .unwrap()
@@ -1410,14 +1410,14 @@ mod tests {
         // 具体虚拟地址一律 NotFound
         let ctx = ctx_with(json!({ "path": ".vdfs/mem" }));
         assert!(matches!(
-            dispatch(&fs, VFDS_LIST, &ctx).await.unwrap(),
+            dispatch(&fs, VDFS_LIST, &ctx).await.unwrap(),
             Err(PluginError::NotFound(_))
         ));
 
         // 物理半不受降级影响（缺 WORKDIR 是接线错误，不是 NotFound）
         let ctx = ctx_with(json!({ "path": "" }));
         assert!(matches!(
-            dispatch(&fs, VFDS_LIST, &ctx).await.unwrap(),
+            dispatch(&fs, VDFS_LIST, &ctx).await.unwrap(),
             Err(PluginError::InternalError(_))
         ));
     }
@@ -1433,7 +1433,7 @@ mod tests {
         ctx.set(CAPABILITY_VISITOR, visitor);
 
         let fs = resolve_fs(None, &ctx).await;
-        let data = dispatch(&fs, VFDS_LIST, &ctx_with(json!({ "path": ".vdfs/mem" })))
+        let data = dispatch(&fs, VDFS_LIST, &ctx_with(json!({ "path": ".vdfs/mem" })))
             .await
             .unwrap()
             .unwrap()
@@ -1478,7 +1478,7 @@ mod tests {
         let parent: Arc<dyn Plugin> = Arc::new(FakeContainer);
         let fs = resolve_fs(Some(&parent), &ctx_empty()).await;
 
-        let items = dispatch(&fs, VFDS_LIST, &ctx_with(json!({ "path": ".vdfs" })))
+        let items = dispatch(&fs, VDFS_LIST, &ctx_with(json!({ "path": ".vdfs" })))
             .await
             .unwrap()
             .unwrap()

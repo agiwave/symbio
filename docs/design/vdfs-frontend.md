@@ -311,7 +311,7 @@ source = file 的类型（整包导入）：名称来自文件名
 | **S11 下线 `entities/*` 协议** | 6 个插件不再路由 `entities/*`，`entities::dispatch` 与其请求/响应、zip 工具一并删除；网关只读白名单改列 `vdfs/*` 读操作 | 对外只剩 VDFS 一个资源协议 |
 | **S12 整包导入** | `VdfsNewType.source`（`file`）+ `EntityProvider::import_zip` 钩子；适配器的二进制 `write` 承接导入（agent 走 `BundleStore::import`），agent 补上 `delete_item` | S5/S11 后丢失的 zip 导入回归，且**不新增协议操作** |
 | **S12 清理** | 注册表去掉 `prefix` / `provider_name` / `compact_list` / `status_indicator` 与 `EntityCapabilities`（改由 `supports_import` 表达）；删协议时代的请求/响应与 `get_item`；`agent/bundle/*` 只留 `bundle/export` | 历史冗余与被替换代码清空 |
-| **S13 整包导出** | `VFDS_ACTION_EXPORT` 节点动作 + `EntityProvider::export_zip` 钩子（默认 `zip_dir`、agent 走 `BundleStore::export`）；结果按「文件载荷」（`filename` + `b64`）回传；`agent/bundle/*` 整个下线 | 导入/导出在 VDFS 内闭环；`agent` 插件零自有路由 |
+| **S13 整包导出** | `VDFS_ACTION_EXPORT` 节点动作 + `EntityProvider::export_zip` 钩子（默认 `zip_dir`、agent 走 `BundleStore::export`）；结果按「文件载荷」（`filename` + `b64`）回传；`agent/bundle/*` 整个下线 | 导入/导出在 VDFS 内闭环；`agent` 插件零自有路由 |
 | **S16 收敛终局（废除实体机制）** | 删 `EntityProvider` trait / `provider_registry()` / `EntityVdfsAdapter`；`model` / `skill` / `agent` 各补一份 `impl VdfsProvider`（与已有的 `session` / `setting` / `mcp` 同构）；`entities.rs` 降为存储原语自由函数 | 后端只剩 VDFS 一套机制；**前端零改动**——挂载名与节点形状不变 |
 | **S17 收敛存储层** | 删 `providers/storage_service` 与 `symbio_core` 的 `EntityStore` / `StorageService` / 存储原语，改为 `providers/vdfs_service` 的三个 `VdfsProvider` 集中实现（单文件 / 目录 / 内存）；`schemas/entities.rs` 收敛为 `DetailDefinition` 表单方言；事件总线只留 `kind = "vdfs"` | 资源存储讲的也是 VDFS 的话；磁盘布局不变，前端只退一个 `entity` 频道订阅 |
 
@@ -559,7 +559,7 @@ source = file 的类型（整包导入）：名称来自文件名
 
   | 层 | 内容 |
   | --- | --- |
-  | 机制 | `VdfsNewType.source`（`VFDS_NEW_SOURCE_FILE = "file"`）：类型声明「内容取自本地文件」；`VFDS_EXT_ZIP = "zip"` 作为导入类型的扩展名 |
+  | 机制 | `VdfsNewType.source`（`VDFS_NEW_SOURCE_FILE = "file"`）：类型声明「内容取自本地文件」；`VDFS_EXT_ZIP = "zip"` 作为导入类型的扩展名 |
   | 后端 | `EntityProvider::import_zip(ctx, name, zip)` 钩子，默认实现 `entity_import_zip`（EntityStore 型通用解包，**整目录覆盖**）；agent 重写走 `BundleStore::import`（id 取自包内 manifest，同名替换） |
   | 适配器 | `root_new_types()` 按注册表 `supports_import` 追加 zip 类型；`write` 的**二进制分支**（`b64`）承接导入，只对挂载根下的条目有效，回 provider 给的 id 并广播变更 |
   | 前端 | `source = file` 的类型渲染**文件选择器**（而非命名输入），目标名由 `newFileNameOf(file.name, ext)` 推导；`arrayBufferToBase64` 分块编码后走既有 `writeVdfsBinary` |
@@ -578,7 +578,7 @@ source = file 的类型（整包导入）：名称来自文件名
 
   | 层 | 内容 |
   | --- | --- |
-  | 机制 | `VFDS_ACTION_EXPORT = "export"`：与 `test` 同为 `vdfs/action` 的动词取值 |
+  | 机制 | `VDFS_ACTION_EXPORT = "export"`：与 `test` 同为 `vdfs/action` 的动词取值 |
   | 后端 | `EntityProvider::export_zip(ctx, id)` 钩子，默认实现 `entity_export_zip`（`zip_dir` 打包整个实体目录，包内顶层目录 = id，与导入端 `strip_common_root` 配对）；agent 重写走 `BundleStore::export` |
   | 结果形状 | `EntityExport { id, filename, b64 }`——字段名与 `VdfsContent.b64` 同构，作为**文件载荷**随 `VdfsActionResult.data` 回传 |
   | 适配器 | `action()` 按标识分派 `action_test` / `action_export`；导出只对条目有效，先做存在性校验，不支持时透传 `NotImplemented` |

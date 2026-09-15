@@ -399,8 +399,8 @@ impl Default for ModelPlugin {
 use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_TEST, VFDS_EXT_FORM,
-    VFDS_STATUS_ACTIVE, VFDS_STATUS_DISABLED,
+    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_TEST, VDFS_EXT_FORM,
+    VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
 };
 
 const LABEL: &str = "模型";
@@ -412,12 +412,12 @@ const LABEL: &str = "模型";
 fn node_of(p: &ModelProviderConfig, updated_at: Option<i64>) -> VdfsNode {
     let mut n = VdfsNode::file(&p.id, p.name.clone(), VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_MODEL.to_string();
-    n.ext = Some(VFDS_EXT_FORM.to_string());
+    n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = serde_json::to_value(super::detail::model_detail_definition()).ok();
     n.status = if p.enabled {
-        VFDS_STATUS_ACTIVE.to_string()
+        VDFS_STATUS_ACTIVE.to_string()
     } else {
-        VFDS_STATUS_DISABLED.to_string()
+        VDFS_STATUS_DISABLED.to_string()
     };
     n.description = Some(p.model.clone());
     n.updated_at = updated_at;
@@ -725,7 +725,7 @@ impl VdfsProvider for ModelPlugin {
         _payload: Option<&Value>,
     ) -> VdfsResult<VdfsActionResult> {
         match action {
-            VFDS_ACTION_TEST => {
+            VDFS_ACTION_TEST => {
                 if path.is_empty() {
                     return Err(VdfsError::invalid(format!(
                         "「测试连接」只对{LABEL}条目可用：{path}"
@@ -736,7 +736,7 @@ impl VdfsProvider for ModelPlugin {
                 self.config_on_disk(&id).await?;
                 let (ok, detail) = self.test_of(&id).await.map_err(from_plugin_error)?;
                 Ok(VdfsActionResult {
-                    action: VFDS_ACTION_TEST.to_string(),
+                    action: VDFS_ACTION_TEST.to_string(),
                     ok,
                     message: detail,
                     data: None,
@@ -803,15 +803,15 @@ mod tests {
         assert_eq!(n.name, "openai-1");
         assert_eq!(n.title, "我的 OpenAI");
         assert_eq!(n.kind, PLUGIN_MODEL);
-        assert_eq!(n.ext.as_deref(), Some(VFDS_EXT_FORM));
-        assert_eq!(n.status, VFDS_STATUS_ACTIVE);
+        assert_eq!(n.ext.as_deref(), Some(VDFS_EXT_FORM));
+        assert_eq!(n.status, VDFS_STATUS_ACTIVE);
         assert_eq!(n.description.as_deref(), Some("gpt-4o"));
         assert_eq!(n.updated_at, Some(123));
         assert!(n.schema.is_some(), "详情定义必须随节点下发");
         // 停用态映射成 disabled（机制只看 status 字符串，不看 kind）
         let mut off = sample();
         off.enabled = false;
-        assert_eq!(node_of(&off, None).status, VFDS_STATUS_DISABLED);
+        assert_eq!(node_of(&off, None).status, VDFS_STATUS_DISABLED);
     }
 
     /// 清单缺 `id` 时以磁盘段名补全（编辑链路的不变量），已有值原样保留

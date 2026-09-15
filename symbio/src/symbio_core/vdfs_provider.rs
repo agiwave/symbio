@@ -59,16 +59,16 @@ use std::sync::Arc;
 
 // ==================== 状态取值 ====================
 
-pub const VFDS_STATUS_ACTIVE: &str = "active";
-pub const VFDS_STATUS_WORKING: &str = "working";
-pub const VFDS_STATUS_DISABLED: &str = "disabled";
-pub const VFDS_STATUS_ERROR: &str = "error";
-pub const VFDS_STATUS_UNKNOWN: &str = "unknown";
+pub const VDFS_STATUS_ACTIVE: &str = "active";
+pub const VDFS_STATUS_WORKING: &str = "working";
+pub const VDFS_STATUS_DISABLED: &str = "disabled";
+pub const VDFS_STATUS_ERROR: &str = "error";
+pub const VDFS_STATUS_UNKNOWN: &str = "unknown";
 
 /// 节点基础类型：目录
-pub const VFDS_KIND_DIR: &str = "dir";
+pub const VDFS_KIND_DIR: &str = "dir";
 /// 节点基础类型：文件
-pub const VFDS_KIND_FILE: &str = "file";
+pub const VDFS_KIND_FILE: &str = "file";
 
 // ==================== 呈现扩展名（约定，宿主可自行扩展） ====================
 //
@@ -76,21 +76,21 @@ pub const VFDS_KIND_FILE: &str = "file";
 // 以下是**约定俗成**的几个取值，宿主可自由增添自己的扩展名。
 
 /// 定义驱动表单（呈现描述放 `node.schema`）
-pub const VFDS_EXT_FORM: &str = "form";
+pub const VDFS_EXT_FORM: &str = "form";
 /// 会话工作区（实时对话流）
-pub const VFDS_EXT_SESSION: &str = "session";
+pub const VDFS_EXT_SESSION: &str = "session";
 /// 单条对话消息（**列表项**：正文在内容里，结构在 `attributes` 里）
-pub const VFDS_EXT_MESSAGE: &str = "message";
+pub const VDFS_EXT_MESSAGE: &str = "message";
 /// 纯文本编辑器
-pub const VFDS_EXT_TEXT: &str = "text";
+pub const VDFS_EXT_TEXT: &str = "text";
 /// JSON 编辑器
-pub const VFDS_EXT_JSON: &str = "json";
+pub const VDFS_EXT_JSON: &str = "json";
 /// Markdown 编辑器
-pub const VFDS_EXT_MARKDOWN: &str = "md";
+pub const VDFS_EXT_MARKDOWN: &str = "md";
 /// 文件树（目录节点的默认呈现）
-pub const VFDS_EXT_DIR: &str = "dir";
+pub const VDFS_EXT_DIR: &str = "dir";
 /// 整包（zip）——**导入**用扩展名：内容是一整个资源目录的压缩包
-pub const VFDS_EXT_ZIP: &str = "zip";
+pub const VDFS_EXT_ZIP: &str = "zip";
 
 // ==================== 节点动作（约定） ====================
 
@@ -99,12 +99,12 @@ pub const VFDS_EXT_ZIP: &str = "zip";
 /// 动作标识由 provider 自持，VDFS 只透传、不解释（与 `ext` 同构）。此处登记的
 /// 是当前的内置约定：
 ///
-/// - [`VFDS_ACTION_TEST`]「测试连接」——模型 / MCP 这类外部资源的连通性自检；
-/// - [`VFDS_ACTION_EXPORT`]「导出」——把整目录资源打包成一个 zip（结果随
+/// - [`VDFS_ACTION_TEST`]「测试连接」——模型 / MCP 这类外部资源的连通性自检；
+/// - [`VDFS_ACTION_EXPORT`]「导出」——把整目录资源打包成一个 zip（结果随
 ///   [`VdfsActionResult::data`] 返回，与导入的二进制写入互为逆向）。
-pub const VFDS_ACTION_TEST: &str = "test";
+pub const VDFS_ACTION_TEST: &str = "test";
 /// 节点动作标识：**导出**（打包下载；与「新建类型 `zip`」的导入互为逆向）
-pub const VFDS_ACTION_EXPORT: &str = "export";
+pub const VDFS_ACTION_EXPORT: &str = "export";
 
 // ==================== 可接受的新建类型 ====================
 
@@ -127,7 +127,7 @@ pub const VFDS_ACTION_EXPORT: &str = "export";
 /// **写进去的内容从哪来**——这是创建语义的一部分，由 provider 声明：
 ///
 /// - `None`（默认）：先命名、后写入（内容为空或 provider 的最小合法内容）；
-/// - [`VFDS_NEW_SOURCE_FILE`]：内容取自**本地文件**，使用方给文件选择器，
+/// - [`VDFS_NEW_SOURCE_FILE`]：内容取自**本地文件**，使用方给文件选择器，
 ///   字节走 [`VdfsContent::b64`] 二进制通道（如 zip 整包导入）。
 ///
 /// [`VdfsProvider::write`]: VdfsProvider::write
@@ -180,7 +180,7 @@ impl VdfsNewType {
 /// 新建内容来源：**本地文件**（[`VdfsNewType::source`] 的取值之一）。
 ///
 /// 声明它的类型意味着「新建 = 选一个本地文件，把它的字节写进目标地址」。
-pub const VFDS_NEW_SOURCE_FILE: &str = "file";
+pub const VDFS_NEW_SOURCE_FILE: &str = "file";
 
 // ==================== 访问位 ====================
 
@@ -399,11 +399,11 @@ pub struct VdfsNode {
 }
 
 fn default_kind() -> String {
-    VFDS_KIND_FILE.to_string()
+    VDFS_KIND_FILE.to_string()
 }
 
 fn default_status() -> String {
-    VFDS_STATUS_ACTIVE.to_string()
+    VDFS_STATUS_ACTIVE.to_string()
 }
 
 impl Default for VdfsNode {
@@ -435,7 +435,7 @@ impl VdfsNode {
         Self {
             name: name.into(),
             title: title.into(),
-            kind: VFDS_KIND_DIR.to_string(),
+            kind: VDFS_KIND_DIR.to_string(),
             access,
             ..Default::default()
         }
@@ -446,7 +446,7 @@ impl VdfsNode {
         Self {
             name: name.into(),
             title: title.into(),
-            kind: VFDS_KIND_FILE.to_string(),
+            kind: VDFS_KIND_FILE.to_string(),
             access,
             ..Default::default()
         }
@@ -765,16 +765,16 @@ impl VdfsError {
 
 // ==================== 变更通知 ====================
 
-pub const VFDS_CHANGE_CREATED: &str = "created";
-pub const VFDS_CHANGE_UPDATED: &str = "updated";
-pub const VFDS_CHANGE_DELETED: &str = "deleted";
-pub const VFDS_CHANGE_RENAMED: &str = "renamed";
+pub const VDFS_CHANGE_CREATED: &str = "created";
+pub const VDFS_CHANGE_UPDATED: &str = "updated";
+pub const VDFS_CHANGE_DELETED: &str = "deleted";
+pub const VDFS_CHANGE_RENAMED: &str = "renamed";
 /// **追加型**变更：节点内容尾部新增了一段（携带 [`VdfsChange::delta`]）。
 ///
 /// 与 `updated` 的区别是**增量的**：`updated` 是「这个节点变了，请重读」，
 /// `appended` 是「这个节点尾部多了这些字，直接用」。列表型 provider 用它承载
 /// 流式输出——一条消息的正文不断追加，消费者无需为每个片段重读整条消息。
-pub const VFDS_CHANGE_APPENDED: &str = "appended";
+pub const VDFS_CHANGE_APPENDED: &str = "appended";
 
 /// 数据变更事件（**provider 视角**）。
 ///
@@ -842,7 +842,7 @@ impl VdfsChange {
     pub fn renamed(from: impl Into<String>, to: impl Into<String>) -> Self {
         Self {
             path: from.into(),
-            change: VFDS_CHANGE_RENAMED.to_string(),
+            change: VDFS_CHANGE_RENAMED.to_string(),
             to: Some(to.into()),
             delta: None,
             node: None,
@@ -854,7 +854,7 @@ impl VdfsChange {
     pub fn appended(path: impl Into<String>, delta: impl Into<String>) -> Self {
         Self {
             path: path.into(),
-            change: VFDS_CHANGE_APPENDED.to_string(),
+            change: VDFS_CHANGE_APPENDED.to_string(),
             to: None,
             delta: Some(delta.into()),
             node: None,
@@ -930,7 +930,7 @@ pub fn path_within(path: &str, prefix: &str) -> bool {
 /// 调用级自定义参数的键值表（**使用方注入 → provider 取用**）。
 ///
 /// 键名是**约定**而非类型：使用方与 provider 通过共享常量对齐（如
-/// [`VFDS_PARAM_WORKDIR`]）。之所以用 JSON 值而非类型化槽位，是为了让机制不依赖
+/// [`VDFS_PARAM_WORKDIR`]）。之所以用 JSON 值而非类型化槽位，是为了让机制不依赖
 /// 任何具体资源语义——**新增一个约定参数不需要改动接口**。
 pub type VdfsParams = serde_json::Map<String, Value>;
 
@@ -939,7 +939,7 @@ pub type VdfsParams = serde_json::Map<String, Value>;
 /// 与宿主 ctx 的 `WORKDIR` 键同名同义：vdfs 访问层把请求 ctx 里的 workdir
 /// 透传给 provider，使「相对路径从工作目录开始」这条既有本地地址规则
 /// 在虚拟地址空间里保持不变。
-pub const VFDS_PARAM_WORKDIR: &str = "workdir";
+pub const VDFS_PARAM_WORKDIR: &str = "workdir";
 
 /// 不透明宿主上下文：VDFS 不假设宿主形态，宿主把运行时状态放进袋子里，
 /// provider 按需 `downcast` 取用。
@@ -949,9 +949,9 @@ pub const VFDS_PARAM_WORKDIR: &str = "workdir";
 ///
 /// ```ignore
 /// // 使用方（访问层）
-/// let vctx = vdfs_context(&ctx).with_param(VFDS_PARAM_WORKDIR, workdir);
+/// let vctx = vdfs_context(&ctx).with_param(VDFS_PARAM_WORKDIR, workdir);
 /// // provider
-/// let workdir = ctx.param_str(VFDS_PARAM_WORKDIR)?;
+/// let workdir = ctx.param_str(VDFS_PARAM_WORKDIR)?;
 /// ```
 #[derive(Clone)]
 pub struct VdfsContext {
@@ -1097,7 +1097,7 @@ pub trait VdfsProvider: Send + Sync + 'static {
 
     /// 自身根的状态
     fn root_status(&self) -> &str {
-        VFDS_STATUS_ACTIVE
+        VDFS_STATUS_ACTIVE
     }
 
     /// 自身根**可接受的新建类型**（缺省空 = 根下不可新建）。
@@ -1150,7 +1150,7 @@ pub trait VdfsProvider: Send + Sync + 'static {
         Err(VdfsError::NotImplemented)
     }
 
-    /// 执行**节点动作**（如 [`VFDS_ACTION_TEST`]「测试连接」）。
+    /// 执行**节点动作**（如 [`VDFS_ACTION_TEST`]「测试连接」）。
     ///
     /// 与固定操作集（列 / 读 / 写 / 删 …）不同，动作是 **provider 自持的动词**：
     /// VDFS 只把 `(节点路径, 动作标识, 载荷)` 透传给 provider，**不解释语义**；
@@ -1337,19 +1337,19 @@ mod tests {
     fn change_constructors_are_mount_free() {
         // provider 只报子树内相对路径，不含挂载名
         let c = VdfsChange::renamed("a", "b");
-        assert_eq!(c.change, VFDS_CHANGE_RENAMED);
+        assert_eq!(c.change, VDFS_CHANGE_RENAMED);
         assert_eq!(c.path, "a");
         assert_eq!(c.to.as_deref(), Some("b"));
 
-        let c = VdfsChange::new("sub/x.md", VFDS_CHANGE_UPDATED);
+        let c = VdfsChange::new("sub/x.md", VDFS_CHANGE_UPDATED);
         assert_eq!(c.path, "sub/x.md");
         assert!(c.to.is_none());
 
         // 追加型变更必须携带增量——消费者不得据此触发重读
         let c = VdfsChange::appended("sub/x.md", "尾部新增");
-        assert_eq!(c.change, VFDS_CHANGE_APPENDED);
+        assert_eq!(c.change, VDFS_CHANGE_APPENDED);
         assert_eq!(c.delta.as_deref(), Some("尾部新增"));
-        assert!(VdfsChange::new("a", VFDS_CHANGE_UPDATED).delta.is_none());
+        assert!(VdfsChange::new("a", VDFS_CHANGE_UPDATED).delta.is_none());
     }
 
     /// 载荷按变更类型可选：`appended` 只带增量（热路径窄），
@@ -1357,11 +1357,11 @@ mod tests {
     #[test]
     fn change_payload_is_kind_scoped() {
         // 默认构造不带任何载荷——provider 不填也能工作（消费者回退 stat/read）
-        let bare = VdfsChange::new("a", VFDS_CHANGE_CREATED);
+        let bare = VdfsChange::new("a", VDFS_CHANGE_CREATED);
         assert!(bare.node.is_none() && bare.content.is_none());
 
         let node = VdfsNode::file("m1", "助手", VdfsAccess::READ);
-        let c = VdfsChange::new("消息/m1", VFDS_CHANGE_CREATED)
+        let c = VdfsChange::new("消息/m1", VDFS_CHANGE_CREATED)
             .with_node(node)
             .with_content("你好");
         assert_eq!(c.node.as_ref().map(|n| n.name.as_str()), Some("m1"));
@@ -1374,7 +1374,7 @@ mod tests {
         assert!(a.node.is_none() && a.content.is_none() && a.delta.is_some());
 
         // 空载荷字段不序列化（保持既有线上形状不变）
-        let v = serde_json::to_value(VdfsChange::new("a", VFDS_CHANGE_UPDATED)).unwrap();
+        let v = serde_json::to_value(VdfsChange::new("a", VDFS_CHANGE_UPDATED)).unwrap();
         assert!(v.get("delta").is_none() && v.get("node").is_none() && v.get("content").is_none());
     }
 
@@ -1395,10 +1395,10 @@ mod tests {
         );
         // 载荷本身不是路径，不参与翻译
         assert_eq!(c.content.as_deref(), Some("正文"));
-        assert_eq!(c.change, VFDS_CHANGE_RENAMED);
+        assert_eq!(c.change, VDFS_CHANGE_RENAMED);
 
         // 节点路径为空（provider 未填）时不动——以事件的 `path` 为准
-        let c = VdfsChange::new("a", VFDS_CHANGE_UPDATED)
+        let c = VdfsChange::new("a", VDFS_CHANGE_UPDATED)
             .with_node(VdfsNode::file("m1", "m1", VdfsAccess::READ))
             .map_paths(|p| format!("session/{p}"));
         assert_eq!(c.node.as_ref().map(|n| n.path.as_str()), Some(""));
@@ -1462,7 +1462,7 @@ mod tests {
         assert_eq!(P.icon(), None);
         assert_eq!(P.order(), 100);
         assert_eq!(P.root_access(), VdfsAccess::LIST);
-        assert_eq!(P.root_status(), VFDS_STATUS_ACTIVE);
+        assert_eq!(P.root_status(), VDFS_STATUS_ACTIVE);
         assert!(P.root_new_types().is_empty(), "缺省根下不可新建");
     }
 

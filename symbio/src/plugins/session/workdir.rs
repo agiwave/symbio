@@ -485,7 +485,7 @@ fn publish_vdfs_change(
             };
             let _ = tx.send(VdfsChange::new(
                 path,
-                crate::symbio_core::vdfs::VFDS_CHANGE_UPDATED,
+                crate::symbio_core::vdfs::VDFS_CHANGE_UPDATED,
             ));
         }
     }

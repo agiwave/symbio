@@ -18,8 +18,8 @@ use crate::providers::vdfs_service;
 use crate::symbio_core::vdfs::{host_ctx, notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT, VFDS_CHANGE_CREATED,
-    VFDS_CHANGE_DELETED, VFDS_CHANGE_UPDATED, VFDS_EXT_FORM, VFDS_EXT_ZIP, VFDS_NEW_SOURCE_FILE,
+    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_CHANGE_CREATED,
+    VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED, VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
 };
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PLUGIN_AGENT};
 use async_trait::async_trait;
@@ -154,7 +154,7 @@ fn bundle_node(r: &BundleRecord, store: &BundleStore) -> VdfsNode {
     };
     let mut n = VdfsNode::file(id, title, VdfsAccess::READ);
     n.kind = PLUGIN_AGENT.to_string();
-    n.ext = Some(VFDS_EXT_FORM.to_string());
+    n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = serde_json::to_value(super::detail::agent_detail_definition()).ok();
     if !r.manifest.description.is_empty() {
         n.description = Some(r.manifest.description.clone());
@@ -255,9 +255,9 @@ impl VdfsProvider for AgentPlugin {
 
     /// bundle 只能整包导入（没有「先建空壳再填字段」的形态）
     fn root_new_types(&self) -> Vec<VdfsNewType> {
-        vec![VdfsNewType::new(VFDS_EXT_ZIP, format!("{LABEL}包"))
+        vec![VdfsNewType::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
             .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
-            .with_source(VFDS_NEW_SOURCE_FILE)]
+            .with_source(VDFS_NEW_SOURCE_FILE)]
     }
 
     async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
@@ -366,9 +366,9 @@ impl VdfsProvider for AgentPlugin {
                 PLUGIN_AGENT,
                 &r.id,
                 if r.replaced {
-                    VFDS_CHANGE_UPDATED
+                    VDFS_CHANGE_UPDATED
                 } else {
-                    VFDS_CHANGE_CREATED
+                    VDFS_CHANGE_CREATED
                 },
             );
             return Ok(VdfsWriteResponse {
@@ -413,9 +413,9 @@ impl VdfsProvider for AgentPlugin {
                 PLUGIN_AGENT,
                 path,
                 if existed {
-                    VFDS_CHANGE_UPDATED
+                    VDFS_CHANGE_UPDATED
                 } else {
-                    VFDS_CHANGE_CREATED
+                    VDFS_CHANGE_CREATED
                 },
             );
             return Ok(VdfsWriteResponse {
@@ -443,14 +443,14 @@ impl VdfsProvider for AgentPlugin {
             store
                 .delete_item(id, item)
                 .map_err(|e| VdfsError::invalid(format!("删除子条目失败：{e}")))?;
-            notify_change(PLUGIN_AGENT, path, VFDS_CHANGE_DELETED);
+            notify_change(PLUGIN_AGENT, path, VDFS_CHANGE_DELETED);
             return Ok(());
         }
         let id = id_of(path);
         store
             .delete(&id)
             .map_err(|e| VdfsError::invalid(format!("删除{LABEL}失败：{e}")))?;
-        notify_change(PLUGIN_AGENT, &id, VFDS_CHANGE_DELETED);
+        notify_change(PLUGIN_AGENT, &id, VDFS_CHANGE_DELETED);
         Ok(())
     }
 
@@ -463,7 +463,7 @@ impl VdfsProvider for AgentPlugin {
         action: &str,
         _payload: Option<&serde_json::Value>,
     ) -> VdfsResult<VdfsActionResult> {
-        if action != VFDS_ACTION_EXPORT {
+        if action != VDFS_ACTION_EXPORT {
             return Err(VdfsError::NotImplemented);
         }
         if !matches!(parse_rel_path(path), RelPath::Item(_)) {
@@ -481,7 +481,7 @@ impl VdfsProvider for AgentPlugin {
         let data = serde_json::to_value(&pack)
             .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
         Ok(VdfsActionResult {
-            action: VFDS_ACTION_EXPORT.to_string(),
+            action: VDFS_ACTION_EXPORT.to_string(),
             ok: true,
             message: format!("已打包「{}」", pack.filename),
             data: Some(data),

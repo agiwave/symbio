@@ -107,7 +107,7 @@ pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<Arc<dyn Capability>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::vdfs_provider::VFDS_PARAM_WORKDIR;
+    use crate::symbio_core::vdfs_provider::VDFS_PARAM_WORKDIR;
     use crate::symbio_core::{DefaultToolVisitor, SimpleRequest, WORKDIR};
 
     /// workdir 由宿主 ctx 翻译成 provider 参数；缺省时不带该键
@@ -122,7 +122,7 @@ mod tests {
         ctx.set(WORKDIR, "/tmp/ws".to_string());
         assert_eq!(
             super::super::host::call_params(&ctx)
-                .get(VFDS_PARAM_WORKDIR)
+                .get(VDFS_PARAM_WORKDIR)
                 .and_then(|v| v.as_str()),
             Some("/tmp/ws")
         );

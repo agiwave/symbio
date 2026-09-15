@@ -13,8 +13,8 @@ use super::entry;
 use crate::symbio_core::vdfs::host::{notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNode,
-    VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT, VFDS_CHANGE_CREATED,
-    VFDS_CHANGE_DELETED, VFDS_CHANGE_UPDATED, VFDS_EXT_ZIP,
+    VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_CHANGE_CREATED,
+    VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED, VDFS_EXT_ZIP,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -119,7 +119,7 @@ impl SingleFileVdfs {
             }
             Err(e) => return Err(e),
         }
-        notify_change(&self.kind, id, VFDS_CHANGE_DELETED);
+        notify_change(&self.kind, id, VDFS_CHANGE_DELETED);
         Ok(())
     }
 
@@ -168,9 +168,9 @@ impl SingleFileVdfs {
             &self.kind,
             id,
             if created {
-                VFDS_CHANGE_CREATED
+                VDFS_CHANGE_CREATED
             } else {
-                VFDS_CHANGE_UPDATED
+                VDFS_CHANGE_UPDATED
             },
         );
     }
@@ -198,9 +198,9 @@ impl VdfsProvider for SingleFileVdfs {
 
     fn root_new_types(&self) -> Vec<crate::symbio_core::vdfs_provider::VdfsNewType> {
         use crate::symbio_core::vdfs_provider::VdfsNewType;
-        vec![VdfsNewType::new(VFDS_EXT_ZIP, format!("{}包", self.label))
+        vec![VdfsNewType::new(VDFS_EXT_ZIP, format!("{}包", self.label))
             .with_description("导入整包（.zip）——整目录覆盖同名条目")
-            .with_source(crate::symbio_core::vdfs_provider::VFDS_NEW_SOURCE_FILE)]
+            .with_source(crate::symbio_core::vdfs_provider::VDFS_NEW_SOURCE_FILE)]
     }
 
     async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
@@ -276,7 +276,7 @@ impl VdfsProvider for SingleFileVdfs {
         action: &str,
         _payload: Option<&serde_json::Value>,
     ) -> VdfsResult<VdfsActionResult> {
-        if action != VFDS_ACTION_EXPORT {
+        if action != VDFS_ACTION_EXPORT {
             return Err(VdfsError::NotImplemented);
         }
         if path.is_empty() {
@@ -287,7 +287,7 @@ impl VdfsProvider for SingleFileVdfs {
         let data = serde_json::to_value(&pack)
             .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
         Ok(VdfsActionResult {
-            action: VFDS_ACTION_EXPORT.to_string(),
+            action: VDFS_ACTION_EXPORT.to_string(),
             ok: true,
             message: format!("已打包「{}」", pack.filename),
             data: Some(data),

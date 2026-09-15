@@ -10,13 +10,13 @@
 import type { Component } from 'vue'
 import { getVdfsIcon } from './vdfsIcons'
 import {
-  VFDS_EXT_DIR,
-  VFDS_EXT_FORM,
-  VFDS_EXT_JSON,
-  VFDS_EXT_MARKDOWN,
-  VFDS_EXT_MESSAGE,
-  VFDS_EXT_SESSION,
-  VFDS_EXT_TEXT,
+  VDFS_EXT_DIR,
+  VDFS_EXT_FORM,
+  VDFS_EXT_JSON,
+  VDFS_EXT_MARKDOWN,
+  VDFS_EXT_MESSAGE,
+  VDFS_EXT_SESSION,
+  VDFS_EXT_TEXT,
   isVdfsDir,
   vdfsExtOf,
   type VdfsNode,
@@ -47,16 +47,16 @@ export type VdfsRenderer =
 
 /** 扩展名 → 渲染器（**唯一的硬编码表**，纯 UI 约定） */
 const EXT_RENDERERS: Record<string, VdfsRenderer> = {
-  [VFDS_EXT_FORM]: 'form',
-  [VFDS_EXT_SESSION]: 'session',
+  [VDFS_EXT_FORM]: 'form',
+  [VDFS_EXT_SESSION]: 'session',
   // 消息是**只读列表项**（访问位只有 `r`）：专用只读视图按 `attributes` 展示
   // 角色 / 类型 / 状态 / 错误，正文取节点内容——与「正文在内容、结构在 attributes」
   // 的分工一一对应。它是文本缓冲，因此流式追加可原地拼接（见 useVdfs.applyAppend）。
-  [VFDS_EXT_MESSAGE]: 'message',
-  [VFDS_EXT_MARKDOWN]: 'markdown',
-  [VFDS_EXT_JSON]: 'json',
-  [VFDS_EXT_TEXT]: 'text',
-  [VFDS_EXT_DIR]: 'dir',
+  [VDFS_EXT_MESSAGE]: 'message',
+  [VDFS_EXT_MARKDOWN]: 'markdown',
+  [VDFS_EXT_JSON]: 'json',
+  [VDFS_EXT_TEXT]: 'text',
+  [VDFS_EXT_DIR]: 'dir',
   // 前端状态自持的专属面板（ext 即语义类型名，由 provider 声明）
   appearance: 'appearance',
   about: 'about',

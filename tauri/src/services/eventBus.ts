@@ -13,7 +13,7 @@
 
 import { connectPlugin, callPlugin, type Connection, type ConnectEvent } from './plugin'
 import { logger } from '@/utils/logger'
-import { VFDS_EVENT_KIND, type VdfsChange } from '@/schemas/vdfs'
+import { VDFS_EVENT_KIND, type VdfsChange } from '@/schemas/vdfs'
 
 /**
  * 从后端 `event_bus` 收到的统一事件结构
@@ -297,7 +297,7 @@ export function subscribe(
 
 // ===== 资源变更：唯一的变更频道 + 按路径前缀分流 =====
 //
-// VDFS 是唯一的资源协议，后端只发 `kind = VFDS_EVENT_KIND` 一条频道，载荷是
+// VDFS 是唯一的资源协议，后端只发 `kind = VDFS_EVENT_KIND` 一条频道，载荷是
 // `VdfsChangeEvent { path, change, to?, delta?, node?, content? }`（`schemas/vdfs.ts`）。
 // 「这条变更属于哪一类资源 / 哪一个会话」由**展示地址前缀**表达，不再靠第二条频道。
 //
@@ -361,7 +361,7 @@ export function subscribeVdfsChanged(
   S.localVdfsHandlers.add(dispatch)
 
   // 后端消息通道：订阅事件总线的 vdfs 频道
-  const unsub = subscribe({ kind: VFDS_EVENT_KIND }, (busEvent) => {
+  const unsub = subscribe({ kind: VDFS_EVENT_KIND }, (busEvent) => {
     dispatch(busEvent.data?.data as VdfsChange)
   })
 

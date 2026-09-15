@@ -58,7 +58,7 @@ vi.mock('@/services/plugin', () => ({
 }))
 
 import { useSessionsStore } from '../sessions'
-import { VFDS_SESSION_DIR, VFDS_ROOT, vdfsJoin } from '@/schemas/vdfs'
+import { VDFS_SESSION_DIR, VDFS_ROOT, vdfsJoin } from '@/schemas/vdfs'
 
 /** 投递一条变更（路径就是展示地址） */
 function emit(change: Record<string, unknown>) {
@@ -67,7 +67,7 @@ function emit(change: Record<string, unknown>) {
 
 function sessionNode(over: Record<string, unknown> = {}) {
   return {
-    path: `${VFDS_ROOT}/${VFDS_SESSION_DIR}/s1`,
+    path: `${VDFS_ROOT}/${VDFS_SESSION_DIR}/s1`,
     name: 's1',
     title: '解释一下 VDFS 的地址模型',
     kind: 'session',
@@ -91,7 +91,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     useSessionsStore()
     expect(captured.handlers).toHaveLength(1)
     expect(captured.scopes[0]).toEqual({
-      prefix: vdfsJoin(VFDS_ROOT, VFDS_SESSION_DIR),
+      prefix: vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR),
       directChildren: true,
     })
   })

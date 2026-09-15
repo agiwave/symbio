@@ -7,9 +7,9 @@
 import { callPlugin } from './plugin'
 import { listVdfs } from './vdfs'
 import {
-  VFDS_EXT_SESSION,
-  VFDS_ROOT,
-  VFDS_STATUS_WORKING,
+  VDFS_EXT_SESSION,
+  VDFS_ROOT,
+  VDFS_STATUS_WORKING,
   vdfsExtOf,
   vdfsJoin,
 } from '@/schemas/vdfs'
@@ -42,9 +42,9 @@ export type { SessionMetadata } from '../schemas/session_meta'
  * 因此这里按 `ext` 过滤——**只认会话节点**，不按名字特判（文件名可改，语义不变）。
  */
 export async function listSessions(): Promise<SessionList.SessionListItem[]> {
-  const resp = await listVdfs(vdfsJoin(VFDS_ROOT, 'session'))
+  const resp = await listVdfs(vdfsJoin(VDFS_ROOT, 'session'))
   return (resp.items || [])
-    .filter((n) => vdfsExtOf(n) === VFDS_EXT_SESSION)
+    .filter((n) => vdfsExtOf(n) === VDFS_EXT_SESSION)
     .map((n) => {
       const v = n as Record<string, any>
       return {
@@ -53,7 +53,7 @@ export async function listSessions(): Promise<SessionList.SessionListItem[]> {
         name: n.title ?? '',
         message_count: Number(v.message_count ?? 0),
         updated_at: n.updated_at ?? 0,
-        is_working: n.status === VFDS_STATUS_WORKING,
+        is_working: n.status === VDFS_STATUS_WORKING,
         metadata: v.metadata ?? {},
       }
     })

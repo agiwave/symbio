@@ -104,7 +104,7 @@ impl SessionPlugin {
     pub(crate) fn emit_message_deleted(&self, session_id: &str, mid: &str) {
         let _ = self.change_tx.send(vdfs::VdfsChange::new(
             message_path(session_id, mid),
-            vdfs::VFDS_CHANGE_DELETED,
+            vdfs::VDFS_CHANGE_DELETED,
         ));
     }
 
@@ -112,14 +112,14 @@ impl SessionPlugin {
     pub(crate) fn emit_transcript_cleared(&self, session_id: &str) {
         let _ = self.change_tx.send(vdfs::VdfsChange::new(
             message_dir_path(session_id),
-            vdfs::VFDS_CHANGE_DELETED,
+            vdfs::VDFS_CHANGE_DELETED,
         ));
     }
 
     /// 就地改写单条消息 → `updated`（带节点视图 + 内容快照）
     pub(crate) fn emit_message_updated(&self, session_id: &str, msg: &cm::ChatMessage) {
         let _ = self.change_tx.send(message_payload(
-            vdfs::VdfsChange::new(message_path(session_id, &msg.id), vdfs::VFDS_CHANGE_UPDATED),
+            vdfs::VdfsChange::new(message_path(session_id, &msg.id), vdfs::VDFS_CHANGE_UPDATED),
             session_id,
             msg,
         ));
@@ -499,11 +499,11 @@ fn session_meta_tags(s: &Session) -> Vec<String> {
 fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
     let mut n = vdfs::VdfsNode::file(&s.id, s.display_title(), vdfs::VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_SESSION.to_string();
-    n.ext = Some(vdfs::VFDS_EXT_SESSION.to_string());
+    n.ext = Some(vdfs::VDFS_EXT_SESSION.to_string());
     n.status = if is_working {
-        vdfs::VFDS_STATUS_WORKING
+        vdfs::VDFS_STATUS_WORKING
     } else {
-        vdfs::VFDS_STATUS_ACTIVE
+        vdfs::VDFS_STATUS_ACTIVE
     }
     .to_string();
     n.updated_at = Some(s.updated_at);
@@ -537,7 +537,7 @@ fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
 ///
 /// 转写是**列表**：`.vdfs/session/<id>/消息` 的每一项是一条消息，顺序由
 /// `seq`（唯一权威顺序锚点）决定。流式输出是列表项的**追加型变更**
-/// （`VFDS_CHANGE_APPENDED`），不是另一条协议。
+/// （`VDFS_CHANGE_APPENDED`），不是另一条协议。
 const SEG_MESSAGES: &str = "消息";
 
 /// 转写列表本身的 provider 子树内路径（`<id>/消息`）。
@@ -584,7 +584,7 @@ fn message_change(
     let path = message_path(session_id, &msg.id);
     if !existed {
         return message_payload(
-            vdfs::VdfsChange::new(path, vdfs::VFDS_CHANGE_CREATED),
+            vdfs::VdfsChange::new(path, vdfs::VDFS_CHANGE_CREATED),
             session_id,
             msg,
         );
@@ -593,7 +593,7 @@ fn message_change(
         // 追加走**窄载荷**：这一路每帧都发，多挂一个字就是 O(n²)。
         Some(delta) => vdfs::VdfsChange::appended(path, delta),
         None => message_payload(
-            vdfs::VdfsChange::new(path, vdfs::VFDS_CHANGE_UPDATED),
+            vdfs::VdfsChange::new(path, vdfs::VDFS_CHANGE_UPDATED),
             session_id,
             msg,
         ),
@@ -729,14 +729,14 @@ fn message_label(m: &cm::ChatMessage) -> String {
 /// 消息状态词——与 `MessageStatus` 的序列化名一致（前端按同一套词渲染角标）。
 ///
 /// `completed` 与「未标注」都落到 VDFS 的常规状态词 `active`：节点状态只有一套
-/// 词汇表（`VFDS_STATUS_*`），不为场景再造一套。
+/// 词汇表（`VDFS_STATUS_*`），不为场景再造一套。
 fn message_status(m: &cm::ChatMessage) -> &'static str {
     match m.status.as_ref() {
         Some(cm::MessageStatus::Pending) => "pending",
         Some(cm::MessageStatus::Streaming) => "streaming",
         Some(cm::MessageStatus::WaitingUserAction) => "waiting_user_action",
         Some(cm::MessageStatus::Failed) => "failed",
-        _ => vdfs::VFDS_STATUS_ACTIVE,
+        _ => vdfs::VDFS_STATUS_ACTIVE,
     }
 }
 
@@ -757,7 +757,7 @@ fn message_preview(m: &cm::ChatMessage) -> Option<String> {
 /// 单条消息 → VDFS 节点（**列表项**）
 fn message_node(m: &cm::ChatMessage) -> vdfs::VdfsNode {
     let mut n = vdfs::VdfsNode::file(&m.id, message_label(m), vdfs::VdfsAccess::READ);
-    n.ext = Some(vdfs::VFDS_EXT_MESSAGE.to_string());
+    n.ext = Some(vdfs::VDFS_EXT_MESSAGE.to_string());
     n.status = message_status(m).to_string();
     n.updated_at = m.timestamp;
     n.description = message_preview(m);
@@ -847,7 +847,7 @@ fn session_content(session: &super::types::Session) -> vdfs::VdfsResult<vdfs::Vd
 fn title_from_new_path(path: &str) -> String {
     let base = path.rsplit('/').next().unwrap_or(path);
     let stem = base
-        .strip_suffix(&format!(".{}", vdfs::VFDS_EXT_SESSION))
+        .strip_suffix(&format!(".{}", vdfs::VDFS_EXT_SESSION))
         .unwrap_or(base)
         .trim();
     if stem.is_empty() {
@@ -937,7 +937,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
 
     /// 根下可新建「会话」（新建语义由 provider 自持，见 `write`）
     fn root_new_types(&self) -> Vec<vdfs::VdfsNewType> {
-        vec![vdfs::VdfsNewType::new(vdfs::VFDS_EXT_SESSION, "会话").with_description("新建会话")]
+        vec![vdfs::VdfsNewType::new(vdfs::VDFS_EXT_SESSION, "会话").with_description("新建会话")]
     }
 
     async fn list(
@@ -1171,7 +1171,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
             self.save_session(&session)
                 .await
                 .map_err(vdfs::from_plugin_error)?;
-            self.notify_change(&id, vdfs::VFDS_CHANGE_CREATED);
+            self.notify_change(&id, vdfs::VDFS_CHANGE_CREATED);
             return Ok(vdfs::VdfsWriteResponse {
                 path: id,
                 created: true,
@@ -1207,7 +1207,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
         self.save_session(&session)
             .await
             .map_err(vdfs::from_plugin_error)?;
-        self.notify_change(path, vdfs::VFDS_CHANGE_UPDATED);
+        self.notify_change(path, vdfs::VDFS_CHANGE_UPDATED);
         Ok(vdfs::VdfsWriteResponse {
             path: path.to_string(),
             created: false,
@@ -1538,7 +1538,7 @@ mod tests {
         // 根下可新建「会话」——类型清单即「新建」入口的唯一依据
         let types = p.root_new_types();
         assert_eq!(types.len(), 1);
-        assert_eq!(types[0].ext, vdfs::VFDS_EXT_SESSION);
+        assert_eq!(types[0].ext, vdfs::VDFS_EXT_SESSION);
         assert_eq!(types[0].title, "会话");
     }
 
@@ -1563,13 +1563,13 @@ mod tests {
         assert_eq!(idle.name, "abc");
         assert_eq!(idle.effective_ext().as_deref(), Some("session"));
         assert_eq!(idle.kind, PLUGIN_SESSION);
-        assert_eq!(idle.status, vdfs::VFDS_STATUS_ACTIVE);
+        assert_eq!(idle.status, vdfs::VDFS_STATUS_ACTIVE);
         assert_eq!(idle.updated_at, Some(1_700_000_000_000));
         assert_eq!(idle.access.flags(), "rw", "会话可读可写");
         assert!(!idle.is_dir(), "会话是文档而非目录");
 
         let busy = session_node(&s, true);
-        assert_eq!(busy.status, vdfs::VFDS_STATUS_WORKING);
+        assert_eq!(busy.status, vdfs::VDFS_STATUS_WORKING);
     }
 
     /// 会话内部寻址（S6/S16）：`<id>` / `<id>/消息[/<mid>]` /
@@ -1662,7 +1662,7 @@ mod tests {
         assert_eq!(n.description.as_deref(), Some("你好，世界"));
         assert_eq!(n.access.flags(), "r", "消息是只读列表项");
         assert_eq!(n.updated_at, Some(1_700_000_000_000));
-        assert_eq!(n.status, vdfs::VFDS_STATUS_ACTIVE, "completed 落常规态");
+        assert_eq!(n.status, vdfs::VDFS_STATUS_ACTIVE, "completed 落常规态");
         // 结构字段全在 attributes 里（VDFS 只透传）
         assert_eq!(n.attributes.get("seq"), Some(&json!(7)));
         assert_eq!(n.attributes.get("role"), Some(&json!("assistant")));
@@ -1753,7 +1753,7 @@ mod tests {
 
         // 新 id
         let c = message_change("abc", &patch, false, None);
-        assert_eq!(c.change, vdfs::VFDS_CHANGE_CREATED);
+        assert_eq!(c.change, vdfs::VDFS_CHANGE_CREATED);
         assert_eq!(c.path, "abc/消息/m1", "变更地址与 list 的节点地址同源");
         assert!(c.delta.is_none());
         // 载荷：结构（attributes）与正文各自就位，消费者无需回读
@@ -1764,13 +1764,13 @@ mod tests {
         );
         assert_eq!(
             c.node.as_ref().and_then(|n| n.effective_ext()),
-            Some(vdfs::VFDS_EXT_MESSAGE.to_string())
+            Some(vdfs::VDFS_EXT_MESSAGE.to_string())
         );
         assert_eq!(c.content.as_deref(), Some("正文"));
 
         // 已有 id + 增量 → appended（只带 delta，不带节点视图 / 内容快照）
         let c = message_change("abc", &patch, true, Some("追加".into()));
-        assert_eq!(c.change, vdfs::VFDS_CHANGE_APPENDED);
+        assert_eq!(c.change, vdfs::VDFS_CHANGE_APPENDED);
         assert_eq!(c.delta.as_deref(), Some("追加"));
         assert!(
             c.node.is_none() && c.content.is_none(),
@@ -1779,13 +1779,13 @@ mod tests {
 
         // 已有 id、无增量（状态迁移 / 全量替换）→ updated（同样带全量载荷）
         let c = message_change("abc", &patch, true, None);
-        assert_eq!(c.change, vdfs::VFDS_CHANGE_UPDATED);
+        assert_eq!(c.change, vdfs::VDFS_CHANGE_UPDATED);
         assert!(c.delta.is_none());
         assert!(c.node.is_some() && c.content.is_some());
 
         // 空增量不算追加（避免发一条什么都不带的 appended 让消费者空转）
         let c = message_change("abc", &patch, true, Some(String::new()));
-        assert_eq!(c.change, vdfs::VFDS_CHANGE_UPDATED);
+        assert_eq!(c.change, vdfs::VDFS_CHANGE_UPDATED);
     }
 
     /// 地址的「拼」与「解」互逆——改地址方案时漏改一边会被这条挡住
@@ -1830,8 +1830,8 @@ mod tests {
         assert_eq!(tags[1], json!("0 条"));
 
         // is_working 仍由 status 承载（机制口径，不另设 is_working 字段）
-        assert_eq!(n.status, vdfs::VFDS_STATUS_ACTIVE);
-        assert_eq!(session_node(&s, true).status, vdfs::VFDS_STATUS_WORKING);
+        assert_eq!(n.status, vdfs::VDFS_STATUS_ACTIVE);
+        assert_eq!(session_node(&s, true).status, vdfs::VDFS_STATUS_WORKING);
     }
 
     /// 会话内容（VDFS `read`）：转写全文 + 元数据，JSON
@@ -1865,12 +1865,12 @@ mod tests {
         });
 
         p.watch(&vctx(), "", sink).await.unwrap();
-        p.notify_change("abc", vdfs::VFDS_CHANGE_CREATED);
+        p.notify_change("abc", vdfs::VDFS_CHANGE_CREATED);
 
         // 转发任务与本测试同 runtime：让出一次即可收到
         let got = rx.recv().await.expect("变更应经 watch 转发到 sink");
         assert_eq!(got.path, "abc");
-        assert_eq!(got.change, vdfs::VFDS_CHANGE_CREATED);
+        assert_eq!(got.change, vdfs::VDFS_CHANGE_CREATED);
 
         p.unwatch(&vctx(), "").await.unwrap();
         assert!(
@@ -1920,7 +1920,7 @@ mod tests {
         let items = p.list(&vctx(), "").await.unwrap();
         let last = items.last().expect("根下至少应有配置文件");
         assert_eq!(last.name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
-        assert_eq!(last.ext.as_deref(), Some(vdfs::VFDS_EXT_FORM));
+        assert_eq!(last.ext.as_deref(), Some(vdfs::VDFS_EXT_FORM));
         assert_eq!(last.access.flags(), "rw");
         assert!(last.schema.is_some(), "定义随节点下发");
 

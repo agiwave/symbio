@@ -28,7 +28,7 @@
 ## 2. 机制为什么是简洁的（保留项，勿在改造中破坏）
 
 1. **centerpiece 是纯接口**：`vdfs_provider.rs` 零 `use crate::`，可原样抽出成独立 crate；
-   线路信封（`vdfs/*`、`VFDS_OPS`）只存在于 `plugins/vdfs/protocol.rs`。
+   线路信封（`vdfs/*`、`VDFS_OPS`）只存在于 `plugins/vdfs/protocol.rs`。
    「core = 纯 trait，协议适配在插件」与 `model_provider` 同构。
 2. **地址规则只有一条**（`UnifiedFs::half_of`）：规范化后是否以 `.vdfs` 打头。
    展示口径 ↔ 树内口径的映射只在门面进出两处各做一次，provider 只见自身子树相对路径。

@@ -509,7 +509,7 @@ mod tests {
         );
         assert_eq!(root[0].path, "beta");
         assert_eq!(root[0].title, "乙");
-        assert_eq!(root[0].kind, VFDS_KIND_DIR);
+        assert_eq!(root[0].kind, VDFS_KIND_DIR);
 
         let root_node = vdfs.stat(&ctx, "").await.unwrap();
         assert_eq!(root_node.path, "");

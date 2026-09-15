@@ -14,7 +14,7 @@ vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn(), connectPlugin: vi.fn(
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() } }))
 
 import { callPlugin } from '@/services/plugin'
-import { VFDS_ACTION, VFDS_ROOT, VFDS_WRITE, vdfsJoin } from '@/schemas/vdfs'
+import { VDFS_ACTION, VDFS_ROOT, VDFS_WRITE, vdfsJoin } from '@/schemas/vdfs'
 import { arrayBufferToBase64, base64ToBytes, runVdfsAction, writeVdfsBinary } from '../vdfs'
 import { vdfsChangeInScope } from '../eventBus'
 
@@ -32,12 +32,12 @@ describe('runVdfsAction（vdfs/action）', () => {
       ok: true,
       message: '校验通过',
     })
-    const path = vdfsJoin(vdfsJoin(VFDS_ROOT, 'model'), 'openai-gpt4o')
+    const path = vdfsJoin(vdfsJoin(VDFS_ROOT, 'model'), 'openai-gpt4o')
     const r = await runVdfsAction(path, 'test')
 
     expect(r.ok).toBe(true)
     expect(r.message).toBe('校验通过')
-    expect(lastCall().op).toBe(VFDS_ACTION)
+    expect(lastCall().op).toBe(VDFS_ACTION)
     expect(lastCall().payload).toEqual({
       path: '.vdfs/model/openai-gpt4o',
       action: 'test',
@@ -46,14 +46,14 @@ describe('runVdfsAction（vdfs/action）', () => {
 
   it('无载荷时不发送 payload 字段（后端按 Option 处理）', async () => {
     vi.mocked(callPlugin).mockResolvedValueOnce({ action: 'test', ok: false, message: '失败' })
-    await runVdfsAction(vdfsJoin(vdfsJoin(VFDS_ROOT, 'mcp'), 'github'), 'test')
+    await runVdfsAction(vdfsJoin(vdfsJoin(VDFS_ROOT, 'mcp'), 'github'), 'test')
 
     expect(lastCall().payload).toEqual({ path: '.vdfs/mcp/github', action: 'test' })
   })
 
   it('有载荷时原样透传（前端不解释其内容）', async () => {
     vi.mocked(callPlugin).mockResolvedValueOnce({ action: 'test', ok: true, message: 'ok' })
-    await runVdfsAction(vdfsJoin(vdfsJoin(VFDS_ROOT, 'mcp'), 'github'), 'test', { verbose: true })
+    await runVdfsAction(vdfsJoin(vdfsJoin(VDFS_ROOT, 'mcp'), 'github'), 'test', { verbose: true })
 
     expect(lastCall().payload).toEqual({
       path: '.vdfs/mcp/github',
@@ -73,13 +73,13 @@ describe('整包导入（vdfs/write 的二进制通道）', () => {
   it('writeVdfsBinary 原样发送 b64（后端据 b64 判定二进制）', async () => {
     vi.mocked(callPlugin).mockResolvedValueOnce({ path: '.vdfs/skill/demo.zip', created: true })
     const r = await writeVdfsBinary(
-      vdfsJoin(vdfsJoin(VFDS_ROOT, 'skill'), 'demo.zip'),
+      vdfsJoin(vdfsJoin(VDFS_ROOT, 'skill'), 'demo.zip'),
       'UEsDBA==',
       { create: true }
     )
 
     expect(r.created).toBe(true)
-    expect(lastCall().op).toBe(VFDS_WRITE)
+    expect(lastCall().op).toBe(VDFS_WRITE)
     expect(lastCall().payload).toEqual({
       path: '.vdfs/skill/demo.zip',
       b64: 'UEsDBA==',
@@ -100,7 +100,7 @@ describe('整包导入（vdfs/write 的二进制通道）', () => {
  * 判错的后果是**静默漏事件**（该刷新的不刷新），故直接测谓词本身。
  */
 describe('vdfsChangeInScope（按展示地址前缀分流）', () => {
-  const SESSIONS = vdfsJoin(VFDS_ROOT, 'session')
+  const SESSIONS = vdfsJoin(VDFS_ROOT, 'session')
 
   it('前缀本身与子树内的变更都算命中', () => {
     expect(vdfsChangeInScope({ prefix: SESSIONS }, SESSIONS)).toBe(true)
@@ -109,7 +109,7 @@ describe('vdfsChangeInScope（按展示地址前缀分流）', () => {
   })
 
   it('别人的路径不算命中（前缀必须整段匹配，不是字符串前缀）', () => {
-    expect(vdfsChangeInScope({ prefix: SESSIONS }, vdfsJoin(VFDS_ROOT, 'model/openai'))).toBe(false)
+    expect(vdfsChangeInScope({ prefix: SESSIONS }, vdfsJoin(VDFS_ROOT, 'model/openai'))).toBe(false)
     expect(vdfsChangeInScope({ prefix: SESSIONS }, '.vdfs/session-templates/x')).toBe(false)
   })
 

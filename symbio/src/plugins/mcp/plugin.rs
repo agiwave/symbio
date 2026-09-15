@@ -214,8 +214,8 @@ impl Default for McpPlugin {
 use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT, VFDS_ACTION_TEST,
-    VFDS_EXT_FORM, VFDS_EXT_ZIP, VFDS_NEW_SOURCE_FILE,
+    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_TEST,
+    VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
 };
 
 const LABEL: &str = "MCP";
@@ -239,7 +239,7 @@ fn import_name_of(path: &str) -> String {
 fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::file(id, id, VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_MCP.to_string();
-    n.ext = Some(VFDS_EXT_FORM.to_string());
+    n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = serde_json::to_value(super::detail::mcp_detail_definition()).ok();
     let Some(server) = raw.and_then(|c| serde_json::from_str::<McpServerConfig>(c).ok()) else {
         // 坏条目降级：以 id 呈现、状态未知，但**仍在列表里**（可点开看到原文再修）
@@ -324,9 +324,9 @@ impl VdfsProvider for McpPlugin {
         vec![
             VdfsNewType::new(PLUGIN_MCP, LABEL)
                 .with_description("新建 MCP Server（先落一份默认配置，随后在详情里完善）"),
-            VdfsNewType::new(VFDS_EXT_ZIP, "MCP 包")
+            VdfsNewType::new(VDFS_EXT_ZIP, "MCP 包")
                 .with_description("导入 MCP Server 整包（.zip）——整目录覆盖同名条目")
-                .with_source(VFDS_NEW_SOURCE_FILE),
+                .with_source(VDFS_NEW_SOURCE_FILE),
         ]
     }
 
@@ -445,7 +445,7 @@ impl VdfsProvider for McpPlugin {
         match action {
             // 连接测试：stdio 握手 / http streams。连接失败映射为 ok=false（失败是
             // **结果**，不是协议错误）
-            VFDS_ACTION_TEST => {
+            VDFS_ACTION_TEST => {
                 let server = self.server_config(&id).await?;
                 let (ok, message) = match self.manager.test_connection(&id, &server).await {
                     Ok(r) => (
@@ -466,7 +466,7 @@ impl VdfsProvider for McpPlugin {
                 })
             }
             // 导出：整包打包下载（与「新建类型 zip」的导入互为逆向）
-            VFDS_ACTION_EXPORT => {
+            VDFS_ACTION_EXPORT => {
                 let pack = McpPlugin::store().export_pack(&id).await?;
                 let data = serde_json::to_value(&pack)
                     .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;

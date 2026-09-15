@@ -13,18 +13,18 @@
 
 import { callPlugin } from './plugin'
 import {
-  VFDS_ACTION,
-  VFDS_DELETE,
-  VFDS_LIST,
-  VFDS_MKDIR,
-  VFDS_MOVE,
-  VFDS_READ,
-  VFDS_STAT,
-  VFDS_TREE,
-  VFDS_UNWATCH,
-  VFDS_WATCH,
-  VFDS_WRITE,
-  VFDS_ROOT,
+  VDFS_ACTION,
+  VDFS_DELETE,
+  VDFS_LIST,
+  VDFS_MKDIR,
+  VDFS_MOVE,
+  VDFS_READ,
+  VDFS_STAT,
+  VDFS_TREE,
+  VDFS_UNWATCH,
+  VDFS_WATCH,
+  VDFS_WRITE,
+  VDFS_ROOT,
   type VdfsActionResponse,
   type VdfsContent,
   type VdfsDeleteResponse,
@@ -40,9 +40,9 @@ import { logger } from '@/utils/logger'
  * 列目录。`path` 缺省 = `.vdfs` 根目录（左栏导航的来源）。
  * 失败返回空目录（含最小节点），不抛错——列表页永远可渲染。
  */
-export async function listVdfs(path = VFDS_ROOT): Promise<VdfsListResponse> {
+export async function listVdfs(path = VDFS_ROOT): Promise<VdfsListResponse> {
   try {
-    const resp = await callPlugin<VdfsListResponse>(VFDS_LIST, { path })
+    const resp = await callPlugin<VdfsListResponse>(VDFS_LIST, { path })
     if (!resp) return { path, node: emptyNode(path), items: [] }
     return resp
   } catch (err) {
@@ -57,7 +57,7 @@ export async function treeVdfs(
   opts?: { depth?: number; limit?: number }
 ): Promise<VdfsTreeResponse> {
   try {
-    const resp = await callPlugin<VdfsTreeResponse>(VFDS_TREE, {
+    const resp = await callPlugin<VdfsTreeResponse>(VDFS_TREE, {
       path,
       depth: opts?.depth,
       limit: opts?.limit,
@@ -73,7 +73,7 @@ export async function treeVdfs(
 /** 读元数据；失败返回 null */
 export async function statVdfs(path: string): Promise<VdfsNode | null> {
   try {
-    return await callPlugin<VdfsNode>(VFDS_STAT, { path })
+    return await callPlugin<VdfsNode>(VDFS_STAT, { path })
   } catch (err) {
     logger.debug('vdfs-service', `statVdfs(${path}) failed:`, err)
     return null
@@ -83,7 +83,7 @@ export async function statVdfs(path: string): Promise<VdfsNode | null> {
 /** 读内容；失败返回 null */
 export async function readVdfs(path: string): Promise<VdfsContent | null> {
   try {
-    return await callPlugin<VdfsContent>(VFDS_READ, { path })
+    return await callPlugin<VdfsContent>(VDFS_READ, { path })
   } catch (err) {
     logger.error('vdfs-service', `readVdfs(${path}) failed:`, err)
     return null
@@ -101,7 +101,7 @@ export async function writeVdfs(
   text: string,
   opts?: { create?: boolean; etag?: string }
 ): Promise<VdfsWriteResponse> {
-  return callPlugin<VdfsWriteResponse>(VFDS_WRITE, {
+  return callPlugin<VdfsWriteResponse>(VDFS_WRITE, {
     path,
     text,
     create: opts?.create,
@@ -154,7 +154,7 @@ export async function writeVdfsBinary(
   b64: string,
   opts?: { create?: boolean }
 ): Promise<VdfsWriteResponse> {
-  return callPlugin<VdfsWriteResponse>(VFDS_WRITE, {
+  return callPlugin<VdfsWriteResponse>(VDFS_WRITE, {
     path,
     b64,
     create: opts?.create,
@@ -163,7 +163,7 @@ export async function writeVdfsBinary(
 
 /** 删除节点（目录需 recursive） */
 export async function deleteVdfs(path: string, recursive = false): Promise<VdfsDeleteResponse> {
-  return callPlugin<VdfsDeleteResponse>(VFDS_DELETE, { path, recursive })
+  return callPlugin<VdfsDeleteResponse>(VDFS_DELETE, { path, recursive })
 }
 
 /**
@@ -177,7 +177,7 @@ export async function runVdfsAction(
   action: string,
   payload?: unknown
 ): Promise<VdfsActionResponse> {
-  return callPlugin<VdfsActionResponse>(VFDS_ACTION, {
+  return callPlugin<VdfsActionResponse>(VDFS_ACTION, {
     path,
     action,
     ...(payload === undefined ? {} : { payload }),
@@ -186,12 +186,12 @@ export async function runVdfsAction(
 
 /** 新建目录 */
 export async function mkdirVdfs(path: string): Promise<VdfsWriteResponse> {
-  return callPlugin<VdfsWriteResponse>(VFDS_MKDIR, { path })
+  return callPlugin<VdfsWriteResponse>(VDFS_MKDIR, { path })
 }
 
 /** 移动 / 重命名（同一地址空间内） */
 export async function moveVdfs(from: string, to: string): Promise<VdfsMoveResponse> {
-  return callPlugin<VdfsMoveResponse>(VFDS_MOVE, { from, to })
+  return callPlugin<VdfsMoveResponse>(VDFS_MOVE, { from, to })
 }
 
 /**
@@ -200,7 +200,7 @@ export async function moveVdfs(from: string, to: string): Promise<VdfsMoveRespon
  */
 export async function watchVdfs(path: string): Promise<void> {
   try {
-    await callPlugin(VFDS_WATCH, { path })
+    await callPlugin(VDFS_WATCH, { path })
   } catch (err) {
     logger.debug('vdfs-service', `watchVdfs(${path}) failed:`, err)
   }
@@ -208,7 +208,7 @@ export async function watchVdfs(path: string): Promise<void> {
 
 export async function unwatchVdfs(path: string): Promise<void> {
   try {
-    await callPlugin(VFDS_UNWATCH, { path })
+    await callPlugin(VDFS_UNWATCH, { path })
   } catch (err) {
     logger.debug('vdfs-service', `unwatchVdfs(${path}) failed:`, err)
   }

@@ -336,7 +336,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
         assert_eq!(items[0].title, "开放接口");
-        assert_eq!(items[0].ext.as_deref(), Some(vdfs::VFDS_EXT_FORM));
+        assert_eq!(items[0].ext.as_deref(), Some(vdfs::VDFS_EXT_FORM));
         assert_eq!(items[0].access.flags(), "rw");
         assert!(items[0].schema.is_some(), "定义随节点下发");
     }

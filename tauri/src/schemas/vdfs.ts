@@ -15,40 +15,40 @@
 
 export * from './vdfs-form'
 
-export const VFDS_LIST = 'vdfs/list'
-export const VFDS_TREE = 'vdfs/tree'
-export const VFDS_STAT = 'vdfs/stat'
-export const VFDS_READ = 'vdfs/read'
-export const VFDS_WRITE = 'vdfs/write'
-export const VFDS_DELETE = 'vdfs/delete'
-export const VFDS_MKDIR = 'vdfs/mkdir'
-export const VFDS_MOVE = 'vdfs/move'
-export const VFDS_WATCH = 'vdfs/watch'
-export const VFDS_UNWATCH = 'vdfs/unwatch'
+export const VDFS_LIST = 'vdfs/list'
+export const VDFS_TREE = 'vdfs/tree'
+export const VDFS_STAT = 'vdfs/stat'
+export const VDFS_READ = 'vdfs/read'
+export const VDFS_WRITE = 'vdfs/write'
+export const VDFS_DELETE = 'vdfs/delete'
+export const VDFS_MKDIR = 'vdfs/mkdir'
+export const VDFS_MOVE = 'vdfs/move'
+export const VDFS_WATCH = 'vdfs/watch'
+export const VDFS_UNWATCH = 'vdfs/unwatch'
 /** 执行节点动作（provider 自持的动词，如「测试连接」） */
-export const VFDS_ACTION = 'vdfs/action'
+export const VDFS_ACTION = 'vdfs/action'
 
 /** 虚拟根路径（系统资源类别统一挂接在此目录之下）。
  *
  * 地址规则与后端 [`UnifiedFs`] 同源：`.vdfs` 打头 = 系统资源，其余 = 磁盘文件。
  * 前端与后端共用同一套地址口径，**不存在另一套线路翻译**。 */
-export const VFDS_ROOT = '.vdfs'
+export const VDFS_ROOT = '.vdfs'
 
 /** 节点状态：进行中（其余状态词由 provider 自定，前端只做呈现映射） */
-export const VFDS_STATUS_WORKING = 'working'
+export const VDFS_STATUS_WORKING = 'working'
 
 /** 约定呈现扩展名（宿主可自行扩展） */
-export const VFDS_EXT_FORM = 'form'
-export const VFDS_EXT_SESSION = 'session'
+export const VDFS_EXT_FORM = 'form'
+export const VDFS_EXT_SESSION = 'session'
 /** 单条对话消息（**列表项**：正文在内容里，结构在 `attributes` 里） */
-export const VFDS_EXT_MESSAGE = 'message'
-export const VFDS_EXT_TEXT = 'text'
-export const VFDS_EXT_JSON = 'json'
-export const VFDS_EXT_MARKDOWN = 'md'
-export const VFDS_EXT_DIR = 'dir'
+export const VDFS_EXT_MESSAGE = 'message'
+export const VDFS_EXT_TEXT = 'text'
+export const VDFS_EXT_JSON = 'json'
+export const VDFS_EXT_MARKDOWN = 'md'
+export const VDFS_EXT_DIR = 'dir'
 
-/** 变更事件的总线 kind（后端 host::VFDS_EVENT_KIND） */
-export const VFDS_EVENT_KIND = 'vdfs'
+/** 变更事件的总线 kind（后端 host::VDFS_EVENT_KIND） */
+export const VDFS_EVENT_KIND = 'vdfs'
 
 /** 访问位解析结果 */
 export interface VdfsAccess {
@@ -82,12 +82,12 @@ export interface VdfsNewType {
   description?: string
   /** 图标名（纯 UI 映射） */
   icon?: string
-  /** 内容来源（后端 `VFDS_NEW_SOURCE_FILE`）：'file' = 选择本地文件 */
+  /** 内容来源（后端 `VDFS_NEW_SOURCE_FILE`）：'file' = 选择本地文件 */
   source?: string
 }
 
-/** 新建内容来源：本地文件（后端 `VFDS_NEW_SOURCE_FILE`） */
-export const VFDS_NEW_SOURCE_FILE = 'file'
+/** 新建内容来源：本地文件（后端 `VDFS_NEW_SOURCE_FILE`） */
+export const VDFS_NEW_SOURCE_FILE = 'file'
 
 /**
  * 虚拟文件系统节点。
@@ -171,10 +171,10 @@ export function actionFileOf(data: unknown): VdfsActionFile | null {
   return { filename: d.filename, b64: d.b64 }
 }
 
-/** 已知动作标识：连接测试（后端 `VFDS_ACTION_TEST`） */
-export const VFDS_ACTION_TEST = 'test'
-/** 已知动作标识：导出打包（后端 `VFDS_ACTION_EXPORT`） */
-export const VFDS_ACTION_EXPORT = 'export'
+/** 已知动作标识：连接测试（后端 `VDFS_ACTION_TEST`） */
+export const VDFS_ACTION_TEST = 'test'
+/** 已知动作标识：导出打包（后端 `VDFS_ACTION_EXPORT`） */
+export const VDFS_ACTION_EXPORT = 'export'
 
 export interface VdfsListResponse {
   path: string
@@ -206,13 +206,13 @@ export interface VdfsMoveResponse {
 /** 变更类型
  *
  *  后端还会发 `renamed`——前端不区分它（无专用常量），按通用变更走重拉即可。 */
-export const VFDS_CHANGE_CREATED = 'created'
-export const VFDS_CHANGE_UPDATED = 'updated'
-export const VFDS_CHANGE_DELETED = 'deleted'
+export const VDFS_CHANGE_CREATED = 'created'
+export const VDFS_CHANGE_UPDATED = 'updated'
+export const VDFS_CHANGE_DELETED = 'deleted'
 /** **追加型**变更：节点内容尾部新增了一段（携带 `delta`）。
  *  与 `updated` 的区别是增量的——消费者直接拼接，无需重读整个节点。
  *  列表型数据的流式输出（如会话转写里一条正在生成的消息）走这一种。 */
-export const VFDS_CHANGE_APPENDED = 'appended'
+export const VDFS_CHANGE_APPENDED = 'appended'
 
 /** 数据变更事件（总线下发的形状；后端 `VdfsChangeEvent`）。
  *  路径即对外展示地址（`.vdfs/…` 或工作目录相对地址），消费方直接比对。
@@ -232,7 +232,7 @@ export interface VdfsChange {
   path: string
   change: string
   to?: string
-  /** 追加型变更（`VFDS_CHANGE_APPENDED`）携带的**增量文本**；其余变更为 undefined */
+  /** 追加型变更（`VDFS_CHANGE_APPENDED`）携带的**增量文本**；其余变更为 undefined */
   delta?: string
   /** **节点视图**（`created` / `updated` 可携带）：变更后该节点的元数据 */
   node?: VdfsNode
@@ -258,9 +258,9 @@ export interface VdfsValidationError {
 
 /** 规整目录段：空 / 根 → 根；否则去尾部斜杠 */
 function normalizeDir(dir: string): string {
-  if (!dir || dir === VFDS_ROOT) return VFDS_ROOT
+  if (!dir || dir === VDFS_ROOT) return VDFS_ROOT
   const trimmed = dir.replace(/\/+$/, '')
-  return trimmed || VFDS_ROOT
+  return trimmed || VDFS_ROOT
 }
 
 /** 拼接（父目录 + 单段名；自动规整多余斜杠） */
@@ -290,15 +290,15 @@ export function newFileNameOf(fileName: string, ext: string): string {
 /** 父目录（类别根的父 = 虚拟根；虚拟根的父 = 虚拟根） */
 export function vdfsParent(path: string): string {
   const p = path.replace(/\/+$/, '')
-  if (!p || p === VFDS_ROOT) return VFDS_ROOT
+  if (!p || p === VDFS_ROOT) return VDFS_ROOT
   const i = p.lastIndexOf('/')
-  return i <= 0 ? VFDS_ROOT : p.slice(0, i)
+  return i <= 0 ? VDFS_ROOT : p.slice(0, i)
 }
 
 /** 末段名（虚拟根 → 虚拟根） */
 export function vdfsBase(path: string): string {
   const p = path.replace(/\/+$/, '')
-  if (!p || p === VFDS_ROOT) return VFDS_ROOT
+  if (!p || p === VDFS_ROOT) return VDFS_ROOT
   const i = p.lastIndexOf('/')
   return i < 0 ? p : p.slice(i + 1)
 }
@@ -332,19 +332,19 @@ export function isVdfsDir(node: { access?: string } | null | undefined): boolean
 // 会被两侧的单测挡住。
 
 /** 转写列表的路径段（后端 `session::SEG_MESSAGES`；同时是展示名） */
-export const VFDS_SEG_MESSAGES = '消息'
+export const VDFS_SEG_MESSAGES = '消息'
 
 /** 会话清单的挂载名（`.vdfs/session`） */
-export const VFDS_SESSION_DIR = 'session'
+export const VDFS_SESSION_DIR = 'session'
 
 /** 单个会话的地址：`.vdfs/session/<id>`（叶子） */
 export function vdfsSessionAddr(sessionId: string): string {
-  return vdfsJoin(vdfsJoin(VFDS_ROOT, VFDS_SESSION_DIR), sessionId)
+  return vdfsJoin(vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR), sessionId)
 }
 
 /** 会话转写列表的地址：`.vdfs/session/<id>/消息` */
 export function vdfsMessagesAddr(sessionId: string): string {
-  return vdfsJoin(vdfsSessionAddr(sessionId), VFDS_SEG_MESSAGES)
+  return vdfsJoin(vdfsSessionAddr(sessionId), VDFS_SEG_MESSAGES)
 }
 
 /** 单条消息的地址：`.vdfs/session/<id>/消息/<mid>` */
@@ -361,11 +361,11 @@ export function vdfsMessageAddr(sessionId: string, messageId: string): string {
 export function parseTranscriptPath(
   path: string,
 ): { sessionId: string; messageId?: string } | null {
-  const prefix = `${VFDS_ROOT}/${VFDS_SESSION_DIR}/`
+  const prefix = `${VDFS_ROOT}/${VDFS_SESSION_DIR}/`
   if (!path.startsWith(prefix)) return null
   const segs = path.slice(prefix.length).split('/')
   const sessionId = segs[0]
-  if (!sessionId || segs[1] !== VFDS_SEG_MESSAGES) return null
+  if (!sessionId || segs[1] !== VDFS_SEG_MESSAGES) return null
   if (segs.length === 2) return { sessionId }
   if (segs.length === 3 && segs[2]) return { sessionId, messageId: segs[2] }
   return null

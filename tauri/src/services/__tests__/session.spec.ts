@@ -14,7 +14,7 @@ vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn() }))
 vi.mock('@/services/vdfs', () => ({ listVdfs: vi.fn() }))
 
 import { listVdfs } from '@/services/vdfs'
-import { VFDS_ROOT, vdfsJoin, type VdfsNode } from '@/schemas/vdfs'
+import { VDFS_ROOT, vdfsJoin, type VdfsNode } from '@/schemas/vdfs'
 import { listSessions } from '../session'
 
 /** 构造一个会话节点（attributes 为 flatten 的场景字段） */
@@ -34,7 +34,7 @@ function sessionNode(over: Partial<VdfsNode> = {}): VdfsNode {
 
 function mockList(items: VdfsNode[]) {
   vi.mocked(listVdfs).mockResolvedValueOnce({
-    path: vdfsJoin(VFDS_ROOT, 'session'),
+    path: vdfsJoin(VDFS_ROOT, 'session'),
     node: sessionNode({ name: 'session', title: '会话' }),
     items,
   })
@@ -52,7 +52,7 @@ describe('listSessions（.vdfs/session → SessionListItem）', () => {
 
     const out = await listSessions()
 
-    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(vdfsJoin(VFDS_ROOT, 'session'))
+    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(vdfsJoin(VDFS_ROOT, 'session'))
     expect(out).toHaveLength(1)
     expect(out[0]).toMatchObject({
       id: 'abc',

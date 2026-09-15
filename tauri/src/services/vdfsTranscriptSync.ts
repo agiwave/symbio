@@ -37,11 +37,11 @@
 import { subscribe as busSubscribe, type BusEvent } from './eventBus'
 import { readVdfs, statVdfs } from './vdfs'
 import {
-  VFDS_CHANGE_APPENDED,
-  VFDS_CHANGE_CREATED,
-  VFDS_CHANGE_DELETED,
-  VFDS_CHANGE_UPDATED,
-  VFDS_EVENT_KIND,
+  VDFS_CHANGE_APPENDED,
+  VDFS_CHANGE_CREATED,
+  VDFS_CHANGE_DELETED,
+  VDFS_CHANGE_UPDATED,
+  VDFS_EVENT_KIND,
   parseTranscriptPath,
   type VdfsChange,
   type VdfsNode,
@@ -68,7 +68,7 @@ function messageStatusOf(node: VdfsNode): MessageStatus | undefined {
       return 'waiting_user_action'
     case 'failed':
       return 'failed'
-    // VDFS 节点只有一套状态词汇（`VFDS_STATUS_*`）：`completed` 与「未标注」
+    // VDFS 节点只有一套状态词汇（`VDFS_STATUS_*`）：`completed` 与「未标注」
     // 都落到 `active`。对消息而言两者渲染一致（都不是进行中），取 `completed`。
     case 'active':
       return 'completed'
@@ -147,12 +147,12 @@ export async function drain(key?: string): Promise<void> {
 async function applyChange(change: VdfsChange, sessionId: string, messageId: string): Promise<void> {
   const store = useSessionsStore()
 
-  if (change.change === VFDS_CHANGE_DELETED) {
+  if (change.change === VDFS_CHANGE_DELETED) {
     store.removeMessageById(sessionId, messageId)
     return
   }
 
-  if (change.change === VFDS_CHANGE_APPENDED) {
+  if (change.change === VDFS_CHANGE_APPENDED) {
     const delta = change.delta
     if (!delta) return
     // store.patchMessage 对非工具消息做**字符串追加**（与后端合并语义同源）
@@ -160,7 +160,7 @@ async function applyChange(change: VdfsChange, sessionId: string, messageId: str
     return
   }
 
-  if (change.change !== VFDS_CHANGE_CREATED && change.change !== VFDS_CHANGE_UPDATED) return
+  if (change.change !== VDFS_CHANGE_CREATED && change.change !== VDFS_CHANGE_UPDATED) return
 
   let node = change.node
   let content = change.content
@@ -180,7 +180,7 @@ async function applyChange(change: VdfsChange, sessionId: string, messageId: str
   // 整条替换：`created` 是新项，`updated` 是权威全量（状态迁移 / 全量替换）
   store.putMessage(sessionId, msg)
 
-  if (change.change === VFDS_CHANGE_CREATED || change.change === VFDS_CHANGE_UPDATED) {
+  if (change.change === VDFS_CHANGE_CREATED || change.change === VDFS_CHANGE_UPDATED) {
     syncActivity(store, sessionId, msg)
   }
 }
@@ -233,7 +233,7 @@ export function startTranscriptSync(): void {
   }
   _G.__symTranscriptSyncStarted = true
 
-  _unsubscribe = busSubscribe({ kind: VFDS_EVENT_KIND }, (busEvent: BusEvent) => {
+  _unsubscribe = busSubscribe({ kind: VDFS_EVENT_KIND }, (busEvent: BusEvent) => {
     const change = busEvent.data?.data as VdfsChange | undefined
     if (!change || typeof change.path !== 'string') return
 
@@ -242,7 +242,7 @@ export function startTranscriptSync(): void {
 
     // 落在 `消息` 目录本身 = 整表清空
     if (!parsed.messageId) {
-      if (change.change === VFDS_CHANGE_DELETED) {
+      if (change.change === VDFS_CHANGE_DELETED) {
         enqueue(change.path, async () => clearTranscript(parsed.sessionId))
       }
       return

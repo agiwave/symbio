@@ -144,7 +144,7 @@ pub fn skill_detail_definition() -> DetailDefinition {
             // 「导出」：VDFS 节点动作 `export`（vdfs/action）→ provider 的
             // `export_zip`；与「新建类型 zip」的导入互为逆向
             DetailAction {
-                id: crate::symbio_core::vdfs_provider::VFDS_ACTION_EXPORT.into(),
+                id: crate::symbio_core::vdfs_provider::VDFS_ACTION_EXPORT.into(),
                 label: "导出整包".into(),
                 style: "secondary".into(),
                 disabled_when: Some(DetailCondition {

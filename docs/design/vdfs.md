@@ -103,7 +103,7 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 |---|---|---|---|
 | 纯接口（centerpiece） | `symbio_core/vdfs_provider.rs` | `std` / `serde` / `serde_json` / `async_trait` | `VdfsProvider` trait、域类型、`VdfsContext`、路径工具、回填 |
 | 宿主桥 | `symbio_core/vdfs/host.rs` | 宿主自有 | 上下文注入、`VdfsError` ↔ `PluginError` |
-| 线路信封 | `plugins/vdfs/protocol.rs` | 上面两层 | `vdfs/*` 请求 / 响应、协议路径常量与 `VFDS_OPS`、`VdfsChangeEvent` |
+| 线路信封 | `plugins/vdfs/protocol.rs` | 上面两层 | `vdfs/*` 请求 / 响应、协议路径常量与 `VDFS_OPS`、`VdfsChangeEvent` |
 | 地址分流 | `plugins/vdfs/fs.rs` | 上面两层 | `UnifiedFs`：`.vdfs` / 物理分流、口径映射、`normalize_addr` |
 | 物理层 | `plugins/vdfs/physical.rs` | 上面两层 | 磁盘 IO + `FsPolicy`（白名单 / 符号链接 / 限额） |
 | 访问层 | `plugins/vdfs/host.rs` | 宿主自有 | 拆信封、翻译操作、树状遍历、事件总线投递 |
@@ -327,7 +327,7 @@ size  updated_at  children  binary  hidden  schema  new_types  attributes
 
 ## 5. 协议操作
 
-`plugins/vdfs/protocol.rs` 的 `VFDS_OPS` 是唯一操作清单（**线路信封只存在于插件内，
+`plugins/vdfs/protocol.rs` 的 `VDFS_OPS` 是唯一操作清单（**线路信封只存在于插件内，
 core 不暴露**）：
 
 | 操作 | 请求载荷 | 响应 | 说明 |
@@ -469,7 +469,7 @@ for child in children {
 | **调用级参数** | `VdfsParams`（`serde_json::Map` + 约定键） | 运行时状态（如 `workdir`） |
 
 调用级参数是**开放约定**而非类型化槽位：键名由使用方与 provider 用共享常量对齐
-（`VFDS_PARAM_WORKDIR` = `"workdir"`），因此**新增一个约定参数不需要改接口**，
+（`VDFS_PARAM_WORKDIR` = `"workdir"`），因此**新增一个约定参数不需要改接口**，
 资源语义也不会渗进 `VdfsProvider`。翻译只在访问层发生一次
 （`host::call_params`：宿主 ctx 的 `WORKDIR` → 约定键 `workdir`），provider 因此
 **不认识宿主 ctx 的键名约定**。
@@ -658,7 +658,7 @@ for child in children {
 - 任何新的资源访问功能 **不得** 绕开 `vdfs/*` 新造私有协议。
 - `symbio_core/vdfs_provider.rs` **不得**引入 `crate::` 依赖；宿主专有类型一律经
   `VdfsContext` 注入。
-- 线路类型（请求 / 响应信封、`VFDS_OPS`）**不得**上浮到 core；它们只属于
+- 线路类型（请求 / 响应信封、`VDFS_OPS`）**不得**上浮到 core；它们只属于
   `plugins/vdfs/protocol.rs`。
 - provider **不得**提供或假设自己的位置（trait 上无 `mount()` / `category()` /
   root 概念）；只接收自身子树内的相对路径。

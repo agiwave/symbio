@@ -70,7 +70,7 @@ impl SessionPlugin {
         // 前端据此把该会话从清单移除。session/clear 与 VDFS 删除两条删除路径共用此处。
         // 作用域按**路径前缀**分流（子会话落在 `<sid>/子会话/…` 之下），因此这里
         // 不再需要实体时代的 `parent_id` 载荷——也不必为发事件多读一次盘。
-        self.notify_change(session_id, crate::symbio_core::vdfs::VFDS_CHANGE_DELETED);
+        self.notify_change(session_id, crate::symbio_core::vdfs::VDFS_CHANGE_DELETED);
 
         Ok(())
     }
@@ -258,9 +258,9 @@ impl SessionPlugin {
         self.notify_change(
             &req.session_id,
             if is_new {
-                crate::symbio_core::vdfs::VFDS_CHANGE_CREATED
+                crate::symbio_core::vdfs::VDFS_CHANGE_CREATED
             } else {
-                crate::symbio_core::vdfs::VFDS_CHANGE_UPDATED
+                crate::symbio_core::vdfs::VDFS_CHANGE_UPDATED
             },
         );
 
