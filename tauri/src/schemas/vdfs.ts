@@ -36,6 +36,17 @@ export const VDFS_ROOT = '.vdfs'
 
 /** 节点状态：进行中（其余状态词由 provider 自定，前端只做呈现映射） */
 export const VDFS_STATUS_WORKING = 'working'
+/** 节点状态：空闲 / 正常 */
+export const VDFS_STATUS_ACTIVE = 'active'
+
+/** 「运行中」的唯一判据：节点 `status == working`。
+ *
+ * 「会话忙不忙」不是会话的私有布尔，它就是节点状态的一个取值——
+ * 因此任何地方都不要另设 `is_working` 字段，一律由此函数派生，
+ * 免得同一份真相出现两种写法（且新增 error / disabled 时不必再加布尔）。 */
+export function isWorkingStatus(status?: string | null): boolean {
+  return status === VDFS_STATUS_WORKING
+}
 
 /** 约定呈现扩展名（宿主可自行扩展） */
 export const VDFS_EXT_FORM = 'form'

@@ -99,7 +99,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
   it('updated → 重读该会话节点拿新 status，就地落角标且零整表重拉', async () => {
     const store = useSessionsStore()
     store.titles['s1'] = '新对话'
-    store.list.push({ id: 's1', message_count: 0, updated_at: 0, is_working: false, metadata: { title: '新对话' } } as never)
+    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: { title: '新对话' } } as never)
     vdfsApi.statVdfs.mockResolvedValueOnce(sessionNode({ status: 'working' }))
 
     emit({ path: '.vdfs/session/s1', change: 'updated' })
@@ -107,8 +107,8 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
 
     // 唯一取值位置就是这次 stat（地址即展示地址）
     expect(vdfsApi.statVdfs).toHaveBeenCalledWith('.vdfs/session/s1')
-    expect(store.list[0].is_working).toBe(true)
-    expect(store.getSessionStatus('s1').is_working).toBe(true)
+    expect(store.list[0].status).toBe('working')
+    expect(store.isSessionWorking('s1')).toBe(true)
     // 标题也随节点自述就地更新，不因为一次变更把整张清单重拉一遍
     expect(store.titles['s1']).toBe('解释一下 VDFS 的地址模型')
     expect(store.list[0].metadata?.title).toBe('解释一下 VDFS 的地址模型')
@@ -117,13 +117,13 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
 
   it('updated 但重读失败 → 不改动任何状态（也不凭空重拉）', async () => {
     const store = useSessionsStore()
-    store.list.push({ id: 's1', message_count: 0, updated_at: 0, is_working: true, metadata: { title: 'T' } } as never)
+    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: { title: 'T' } } as never)
     vdfsApi.statVdfs.mockResolvedValueOnce(null)
 
     emit({ path: '.vdfs/session/s1', change: 'updated' })
     await flushPromises()
 
-    expect(store.list[0].is_working).toBe(true)
+    expect(store.list[0].status).toBe('working')
     expect(sessionApi.listSessions).not.toHaveBeenCalled()
   })
 
@@ -143,7 +143,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
 
   it('deleted → 本地即时移除，不等重拉', () => {
     const store = useSessionsStore()
-    store.list.push({ id: 's1', message_count: 0, updated_at: 0, is_working: false, metadata: {} } as never)
+    store.list.push({ id: 's1', message_count: 0, updated_at: 0, metadata: {} } as never)
 
     emit({ path: '.vdfs/session/s1', change: 'deleted' })
 
@@ -153,7 +153,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
 
   it('appended（转写增量）与会话清单无关：既不重读也不重拉', async () => {
     const store = useSessionsStore()
-    store.list.push({ id: 's1', message_count: 0, updated_at: 0, is_working: false, metadata: {} } as never)
+    store.list.push({ id: 's1', message_count: 0, updated_at: 0, metadata: {} } as never)
 
     emit({ path: '.vdfs/session/s1/消息/m1', change: 'appended', delta: '半句' })
     await flushPromises()

@@ -27,6 +27,7 @@ import { subscribe as busSubscribe, type BusEvent } from './eventBus'
 import { ChatEventType, type ChatEvent } from './model'
 import { playCompletionChime } from './completionChime'
 import { useSessionsStore } from '@/stores/sessions'
+import { VDFS_STATUS_ACTIVE, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 
 let _unsubscribe: (() => void) | null = null
@@ -77,17 +78,19 @@ export function startSessionBusWatcher(): void {
             // 进入 busy 时审批态尚未可知，先复位（waiting_user_action 的 Update
             // 到达时会重新置位）；否则旧会话的"等待审批"角标会残留。
             // 同时清空 last_failed / 会话级错误：新一轮交互已开始，上一次的失败不再"最新"。
-            store.putStatus(sid, { is_working: true, activity: '处理中…', is_waiting_approval: false, last_failed: false })
+            // 事件通道的 busy / idle 与 VDFS 节点 status（working / active）
+            // 是同一件事的两个词表，此处是唯一的翻译点。
+            store.putStatus(sid, { status: VDFS_STATUS_WORKING, activity: '处理中…', is_waiting_approval: false, last_failed: false })
             store.setSessionError(sid, null)
-            store.setWorking(sid, true)
+            store.setSessionStatus(sid, VDFS_STATUS_WORKING)
           } else if (evt.status === 'idle') {
             // idle 表示一轮交互彻底结束（含审批已了结），复位审批角标
             // 提示音：仅"忙碌 → 结束"的真实收尾才响（应用启动/事件重放等
             // 非工作态的 idle 不响），且 Abort/Error 已响过的同轮结束会被去重
-            const wasWorking = store.getSessionStatus(sid).is_working
-            store.putStatus(sid, { is_working: false, activity: undefined, is_waiting_approval: false })
+            const wasWorking = store.isSessionWorking(sid)
+            store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: undefined, is_waiting_approval: false })
             store.setSessionError(sid, null)
-            store.setWorking(sid, false)
+            store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
             if (wasWorking) playCompletionChime('completed', sid)
           }
           break
@@ -105,9 +108,9 @@ export function startSessionBusWatcher(): void {
           // 本就过滤「空内容叶子」，删不删都不显示。
           //
           // 这里只做本通道真正独有的事：会话状态收敛 + 提示音。
-          const wasWorkingBeforeAbort = store.getSessionStatus(sid).is_working
-          store.putStatus(sid, { is_working: false, activity: '已中止', is_waiting_approval: false })
-          store.setWorking(sid, false)
+          const wasWorkingBeforeAbort = store.isSessionWorking(sid)
+          store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '已中止', is_waiting_approval: false })
+          store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
           if (wasWorkingBeforeAbort) playCompletionChime('aborted', sid)
           break
         }
@@ -125,7 +128,7 @@ export function startSessionBusWatcher(): void {
           // - 仅当没有任何失败消息节点（错误发生在任何消息创建之前，如 transport 级失败）
           //   时，才把错误落到**会话级错误状态**（setSessionError）——它是一条状态，
           //   不是消息树里的一个节点，UI 在会话级错误条里展示并许可重试。
-          const wasWorkingBeforeError = store.getSessionStatus(sid).is_working
+          const wasWorkingBeforeError = store.isSessionWorking(sid)
           const msgs = store.getSessionMessages(sid)
           const hasFailedNode = msgs.some(
             (m) => m.status === 'failed' && !(m.meta as any)?.ephemeral,
@@ -134,12 +137,12 @@ export function startSessionBusWatcher(): void {
             store.setSessionError(sid, evt.error || 'Unknown error')
           }
           store.putStatus(sid, {
-            is_working: false,
+            status: VDFS_STATUS_ACTIVE,
             activity: '错误',
             last_failed: true,
             is_waiting_approval: false
           })
-          store.setWorking(sid, false)
+          store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
           // 提示音：异常结束（wasWorking 判定与去重同上）
           if (wasWorkingBeforeError) playCompletionChime('failed', sid)
           break
@@ -147,10 +150,11 @@ export function startSessionBusWatcher(): void {
 
         case ChatEventType.Connected:
           // Connected 事件 → 标记为 working；新一轮交互开始，清空 last_failed / 会话级错误
+          // （`evt.is_working` 是**线路字段**，属后端事件载荷；本地一律转写成节点 status）
           if (evt.is_working === true) {
-            store.putStatus(sid, { is_working: true, activity: '处理中…', last_failed: false })
+            store.putStatus(sid, { status: VDFS_STATUS_WORKING, activity: '处理中…', last_failed: false })
             store.setSessionError(sid, null)
-            store.setWorking(sid, true)
+            store.setSessionStatus(sid, VDFS_STATUS_WORKING)
           }
           break
 

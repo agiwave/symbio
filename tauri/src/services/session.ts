@@ -9,7 +9,6 @@ import { listVdfs } from './vdfs'
 import {
   VDFS_EXT_SESSION,
   VDFS_ROOT,
-  VDFS_STATUS_WORKING,
   vdfsExtOf,
   vdfsJoin,
 } from '@/schemas/vdfs'
@@ -69,7 +68,8 @@ export async function listSessions(
         name: n.title ?? '',
         message_count: Number(v.message_count ?? 0),
         updated_at: n.updated_at ?? 0,
-        is_working: n.status === VDFS_STATUS_WORKING,
+        // 直接透传节点状态，不在边界上压缩成布尔（否则 error / disabled 会丢）
+        status: n.status,
         metadata: v.metadata ?? {},
       }
     })

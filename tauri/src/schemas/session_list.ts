@@ -6,8 +6,11 @@ export interface SessionListItem {
   name?: string;
   message_count: number;
   updated_at: number;
-  /** 实时运行状态：是否正在与 AI 通信 */
-  is_working: boolean;
+  /** 运行状态：与 VDFS 节点 `status` 同一词表（`working` / `active` / …）。
+   *
+   * 不存 `is_working` 布尔——「忙不忙」是 `status` 的一个取值，
+   * 由 `isWorkingStatus()` 派生；这里存原值，其余状态（error / disabled）才不丢。 */
+  status?: string;
   /** 会话元数据摘要（workdir / title / agent_id 等） */
   metadata: Record<string, any>;
 }

@@ -10,7 +10,7 @@
  *
  * ## 关键状态
  *
- * - `list`           : SessionListItem[]（来自后端 list + 实时 is_working 合并）
+ * - `list`           : SessionListItem[]（来自后端 list + 本地状态镜像合并）
  * - `activeId`       : 当前"详细窗口"展示的会话
  * - `sessionMessages`: 实时 messages map，key 是 sessionId，value 是 `{msgId: ChatMessage}`
  *                      写入：useChatConnection 收 bus 事件时；loadMessages 时
@@ -41,7 +41,9 @@ import {
   VDFS_CHANGE_UPDATED,
   VDFS_ROOT,
   VDFS_SESSION_DIR,
+  VDFS_STATUS_ACTIVE,
   VDFS_STATUS_WORKING,
+  isWorkingStatus,
   vdfsBase,
   vdfsJoin,
   vdfsSessionAddr,
@@ -55,8 +57,15 @@ import type { ImageAttachment } from '@/types'
 
 /** 单个 session 的实时状态（用于缩略卡展示） */
 export interface SessionLiveStatus {
-  /** 后端报告当前 session 正在处理（Status busy / Connected.is_working=true） */
-  is_working: boolean
+  /** 会话的运行状态：与 VDFS 节点 `status` **同一词表**（`working` / `active` / …）。
+   *
+   * 这里不是「第二份真相」，而是**节点状态的本地镜像**：`status` 只在
+   * `list` / `stat` 时可见，而 busy / idle 是事件流；两次采样之间（尤其是
+   * send 的乐观置位）必须有处落脚。分页后当前会话也可能不在这一页里，
+   * 按 list 取节点会落空——所以按 id 索引的这份 map 不能省。
+   *
+   * 读法一律走 `isWorkingStatus(status)`：**不要**再引入 `is_working` 布尔。 */
+  status?: string
   /** 是否有消息处于 waiting_user_action 状态（缩略卡显示"等待审批"角标） */
   is_waiting_approval: boolean
   /**
@@ -80,7 +89,7 @@ export interface SessionLiveStatus {
 }
 
 export const useSessionsStore = defineStore('sessions', () => {
-  // 列表（来自后端 list + 实时 is_working）
+  // 列表（来自后端 list + 本地状态镜像）
   const list = ref<SessionListItem[]>([])
   const activeId = ref<string | null>(null)
   const loading = ref(false)
@@ -159,9 +168,13 @@ export const useSessionsStore = defineStore('sessions', () => {
     })
   }
 
+  /** 会话是否运行中（运行态的唯一读法：节点 `status == working`） */
+  function isSessionWorking(id: string): boolean {
+    return isWorkingStatus(sessionStatuses.value[id]?.status)
+  }
+
   function getSessionStatus(id: string): SessionLiveStatus {
     return sessionStatuses.value[id] || {
-      is_working: false,
       is_waiting_approval: false,
       last_event_at: 0
     }
@@ -181,7 +194,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const STALE_THRESHOLD_MS = 30 * 60 * 1000 // 30 分钟
     const elapsed = nowMs - status.last_event_at
     if (elapsed <= STALE_THRESHOLD_MS) return null
-    if (status.is_working) return `已无响应 ${Math.floor(elapsed / 60000)} 分钟`
+    if (isWorkingStatus(status.status)) return `已无响应 ${Math.floor(elapsed / 60000)} 分钟`
     if (status.is_waiting_approval) return `审批等待超时 ${Math.floor(elapsed / 60000)} 分钟`
     return `状态已过期 ${Math.floor(elapsed / 60000)} 分钟`
   }
@@ -204,7 +217,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (msg.role === 'assistant' && typeof msg.content === 'string' && msg.content) {
       const preview = msg.content.length > 60 ? msg.content.slice(0, 60) + '…' : msg.content
       const snext = { ...sessionStatuses.value }
-      const scur = { ...(snext[sessionId] || { is_working: false, is_waiting_approval: false, last_event_at: 0 }) }
+      const scur = { ...(snext[sessionId] || { is_waiting_approval: false, last_event_at: 0 }) }
       scur.last_preview = preview
       scur.last_event_at = Date.now()
       snext[sessionId] = scur
@@ -217,7 +230,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       if (txt) {
         const preview = txt.length > 60 ? txt.slice(0, 60) + '…' : txt
         const snext = { ...sessionStatuses.value }
-        const scur = { ...(snext[sessionId] || { is_working: false, is_waiting_approval: false, last_event_at: 0 }) }
+        const scur = { ...(snext[sessionId] || { is_waiting_approval: false, last_event_at: 0 }) }
         scur.last_preview = preview
         scur.last_event_at = Date.now()
         snext[sessionId] = scur
@@ -292,13 +305,12 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * - `sessionBusWatcher` 处理 Status / Update / Abort / Error / Connected 时
  * - `useChatConnection.send` / `abort` 收敛状态时
- * - `setWorking` 同步 list.is_working 时
+ * - `setSessionStatus` 同步 list.status 时
    */
   function putStatus(sessionId: string, partial: Partial<SessionLiveStatus>) {
     if (!sessionId) return
     const next = { ...sessionStatuses.value }
     const cur = next[sessionId] || {
-      is_working: false,
       is_waiting_approval: false,
       last_event_at: 0
     }
@@ -366,7 +378,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const lastSeq = Object.values(map).reduce((mx, m) => Math.max(mx, m.seq ?? 0), 0)
     const snext = { ...sessionSeq.value, [sessionId]: lastSeq }
     sessionSeq.value = snext
-    const prevStatus = sessionStatuses.value[sessionId] ?? { is_working: false, is_waiting_approval: false, last_event_at: Date.now() }
+    const prevStatus = sessionStatuses.value[sessionId] ?? { is_waiting_approval: false, last_event_at: Date.now() }
     sessionStatuses.value = {
       ...sessionStatuses.value,
       [sessionId]: {
@@ -447,8 +459,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     const m = activeListItem.value?.metadata
     return (m?.workdir as string | undefined) || undefined
   })
-  const isActiveWorking = computed(() => activeListItem.value?.is_working || false)
-  const runningCount = computed(() => list.value.filter(s => s.is_working).length)
+  const isActiveWorking = computed(() => isWorkingStatus(activeListItem.value?.status))
+  const runningCount = computed(() => list.value.filter(s => isWorkingStatus(s.status)).length)
 
   // ---- 操作 ----
 
@@ -474,21 +486,25 @@ export const useSessionsStore = defineStore('sessions', () => {
       // 回填会话级选择（mode / risk_level）到 store map（机制见 backfillSessionMaps）
       backfillSessionMaps(items)
 
-      // 合并实时 is_working：list 接口返回的是后端 ActiveSessionManager 的权威状态
+      // 合并运行态：list 接口返回的是后端 ActiveSessionManager 的权威状态
       const liveStatuses = sessionStatuses.value
       list.value = items.map((it) => {
         const live = liveStatuses[it.id]
-        return live ? { ...it, is_working: live.is_working } : it
+        // 本地镜像说「运行中」就保留：send 的乐观置位不能被一次稍早的 list
+        // 快照打回（否则按钮会闪回「发送」）。其余一律以服务端 `status` 为准。
+        return live && isWorkingStatus(live.status)
+          ? { ...it, status: live.status }
+          : it
       })
 
-      // 关键：把后端权威 is_working 回填到 sessionStatuses（isLoading 的唯一来源）。
+      // 关键：把后端权威 status 回填到 sessionStatuses（isLoading 的唯一来源）。
       // 否则页面重载/视图挂载后，运行中的会话在输入框显示为禁用的"发送"按钮，
       // 用户无法点击停止（stop 按钮失效 bug）。
       // 仅做 false→true 的升级：true→false 的收敛交给事件流的 idle/Abort/Error 事件，
       // 避免 list 快照与实时事件竞争时误降级。
       for (const it of items) {
-        if (it.is_working && !liveStatuses[it.id]?.is_working) {
-          putStatus(it.id, { is_working: true, activity: '处理中…' })
+        if (isWorkingStatus(it.status) && !isWorkingStatus(liveStatuses[it.id]?.status)) {
+          putStatus(it.id, { status: VDFS_STATUS_WORKING, activity: '处理中…' })
         }
       }
     } catch (e) {
@@ -527,7 +543,6 @@ export const useSessionsStore = defineStore('sessions', () => {
       id,
       message_count: 0,
       updated_at: now,
-      is_working: false,
       metadata: meta
     }
     list.value = [local, ...list.value]
@@ -539,7 +554,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 初始化空 messages / status
     const mnext = { ...sessionMessages.value, [id]: {} }
     commitMessages(mnext)
-    const snext = { ...sessionStatuses.value, [id]: { is_working: false, is_waiting_approval: false, last_event_at: Date.now() } }
+    const snext = { ...sessionStatuses.value, [id]: { is_waiting_approval: false, last_event_at: Date.now() } }
     sessionStatuses.value = snext
 
     // 2. 同步写后端 metadata（草稿选择），让后续 list 能拿到正确信息
@@ -582,7 +597,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (!target) return
 
     // 删除前先 abort 活跃任务
-    if (target.is_working) {
+    if (isWorkingStatus(target.status)) {
       try {
         await callPlugin(CHAT_ABORT, { session_id: id }, undefined, { session_id: id })
       } catch (e) {
@@ -678,23 +693,26 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  /** 主动设置会话的运行状态（来自 useSessionChat 的事件） */
-  function setWorking(id: string, isWorking: boolean) {
+  /** 主动设置会话的运行状态（来自事件通道）：同步 list 项与 sessionStatuses 两处镜像。
+   *
+   * 入参是**节点状态**（`VDFS_STATUS_*`）而非布尔——「忙不忙」由
+   * `isWorkingStatus()` 派生，这里只负责把状态值落到两处镜像上。 */
+  function setSessionStatus(id: string, status?: string) {
     const idx = list.value.findIndex(s => s.id === id)
     if (idx >= 0) {
-      list.value[idx] = { ...list.value[idx], is_working: isWorking }
+      list.value[idx] = { ...list.value[idx], status }
     } else {
       // 列表里还没有该会话（极少见，比如刚收到状态事件），补一个
       list.value.unshift({
         id,
         message_count: 0,
         updated_at: Math.floor(Date.now() / 1000),
-        is_working: isWorking,
+        status,
         metadata: {}
       })
     }
     // 同步到 sessionStatuses
-    putStatus(id, { is_working: isWorking })
+    putStatus(id, { status })
   }
 
   /**
@@ -881,11 +899,11 @@ export const useSessionsStore = defineStore('sessions', () => {
       setSessionError(sessionId, errorText)
     }
     putStatus(sessionId, {
-      is_working: false,
+      status: VDFS_STATUS_ACTIVE,
       activity: undefined,
       last_failed: true
     })
-    setWorking(sessionId, false)
+    setSessionStatus(sessionId, VDFS_STATUS_ACTIVE)
   }
 
   /** 同步 list 中某会话的 message_count / updated_at（删除 / 清空后调用） */
@@ -933,20 +951,20 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function syncSessionNode(id: string): Promise<void> {
     const node = await statVdfs(vdfsSessionAddr(id))
     if (!node) return
-    const isWorking = node.status === VDFS_STATUS_WORKING
     const title = typeof node.title === 'string' ? node.title : ''
     const idx = list.value.findIndex((s) => s.id === id)
     if (idx >= 0) {
       const cur = list.value[idx]
       list.value[idx] = {
         ...cur,
-        is_working: isWorking,
+        status: node.status,
         updated_at: node.updated_at ?? cur.updated_at,
         metadata: title ? { ...(cur.metadata || {}), title } : cur.metadata,
       }
     }
     if (title) titles.value[id] = title
-    putStatus(id, { is_working: isWorking })
+    // 节点自述即镜像的值（不折算成布尔：其余状态也因此保留）
+    putStatus(id, { status: node.status })
   }
 
   subscribeVdfsChanged(
@@ -997,7 +1015,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     setActiveWorkdir,
     getSessionWorkdir,
     rename,
-    setWorking,
+    setSessionStatus,
+    isSessionWorking,
     loadMessages,
     // 历史管理（删除 / 编辑 / 清空 / 卡死持久化）
     deleteMessage,

@@ -14,7 +14,7 @@ vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn() }))
 vi.mock('@/services/vdfs', () => ({ listVdfs: vi.fn() }))
 
 import { listVdfs } from '@/services/vdfs'
-import { VDFS_ROOT, vdfsJoin, type VdfsNode } from '@/schemas/vdfs'
+import { VDFS_ROOT, isWorkingStatus, vdfsJoin, type VdfsNode } from '@/schemas/vdfs'
 import { listSessions } from '../session'
 
 /** 构造一个会话节点（attributes 为 flatten 的场景字段） */
@@ -59,18 +59,19 @@ describe('listSessions（.vdfs/session → SessionListItem）', () => {
       name: '会话标题',
       message_count: 12,
       updated_at: 1_700_000_000,
-      is_working: false,
+      status: 'active',
       metadata: { workdir: '/tmp/demo', title: 'T' },
     })
   })
 
-  it('status = working 判为运行中；缺省字段回落空态', async () => {
+  it('节点 status 原样透传（不压缩成布尔）；缺省字段回落空态', async () => {
     mockList([sessionNode({ status: 'working', updated_at: undefined })])
 
     const [first] = await listSessions()
 
-    // 运行中标记来自节点 status（机制口径：不另设 is_working 字段）
-    expect(first.is_working).toBe(true)
+    // 运行态就是节点 status 的一个取值，边界上不折算成 is_working
+    expect(first.status).toBe('working')
+    expect(isWorkingStatus(first.status)).toBe(true)
     expect(first.updated_at).toBe(0)
     expect(first.message_count).toBe(0)
     expect(first.metadata).toEqual({})

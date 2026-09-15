@@ -3,6 +3,7 @@ import { callPlugin } from '@/services/plugin'
 import type { ChatMessage } from '@/services/model'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
+import { VDFS_STATUS_ACTIVE, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 import { CHAT_SEND, CHAT_ABORT } from '@/constants/pluginPaths'
 
 export interface UseChatConnectionOptions {
@@ -172,7 +173,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   const isLoading = computed(() => {
     const sid = options.sessionId
     if (!sid) return false
-    return store.getSessionStatus(sid).is_working
+    return store.isSessionWorking(sid)
   })
 
   const isWaitingApproval = computed(() => {
@@ -193,9 +194,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     }
     // 立即置为 working（让 UI 立即反映 send 已经发出）；
     // 同时清空 last_failed / 会话级错误：新一轮交互开始，上一次失败不再"最新"（避免重试成功后仍显示"上次失败"）。
-    store.putStatus(sid, { is_working: true, activity: '处理中…', last_failed: false })
+    store.putStatus(sid, { status: VDFS_STATUS_WORKING, activity: '处理中…', last_failed: false })
     store.setSessionError(sid, null)
-    store.setWorking(sid, true)
+    store.setSessionStatus(sid, VDFS_STATUS_WORKING)
 
     // 运行模式：取会话记忆值（= `session.metadata.mode` 的本地镜像，选择经选项机制落库）。
     // 后端 orchestrator.handle_chat_send_oneoff 据此把 MODE 写入 chat ctx，
@@ -221,8 +222,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       })
     } catch (err: any) {
       const errText = `Send failed: ${err.message || String(err)}`
-      store.putStatus(sid, { is_working: false, activity: '错误', last_failed: true })
-      store.setWorking(sid, false)
+      store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '错误', last_failed: true })
+      store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
 
       // 仅当没有任何 streaming/等待消息承载错误时，才落"会话级错误状态"（而非注入错误节点）：
       // 否则助手根级 Turn 会在 bus Error 事件中带上错误，避免"根级节点 + 会话级"重复报错。
@@ -281,9 +282,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // 立即置为 working（让 UI 立即反映 resume 已经发出）；
     // 同一会话才切 working 状态，避免跨会话工具调用误改父会话状态。
     if (targetSid === sid) {
-      store.putStatus(sid, { is_working: true, activity: '处理中…', last_failed: false })
+      store.putStatus(sid, { status: VDFS_STATUS_WORKING, activity: '处理中…', last_failed: false })
       store.setSessionError(sid, null)
-      store.setWorking(sid, true)
+      store.setSessionStatus(sid, VDFS_STATUS_WORKING)
     }
 
     // 运行模式 / 风险等级：与 send 同级别的回退链——会话记忆值 > 默认值。
@@ -321,15 +322,15 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       if (resp?.status === 'session_busy') {
         logger.warn('useChatConnection', `[${sid}] resume rejected: session_busy`)
         if (targetSid === sid) {
-          store.putStatus(sid, { is_working: false, activity: '会话忙', last_failed: true })
-          store.setWorking(sid, false)
+          store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '会话忙', last_failed: true })
+          store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
         }
       }
     } catch (err: any) {
       logger.error('useChatConnection', 'Failed to resume:', err)
       if (targetSid === sid) {
-        store.putStatus(sid, { is_working: false, activity: '错误', last_failed: true })
-        store.setWorking(sid, false)
+        store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '错误', last_failed: true })
+        store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
       }
     }
   }

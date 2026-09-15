@@ -78,6 +78,7 @@ import { type ChatMessage, type MessageContent, type ContentPart, type ChatRole 
 import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
+import { isWorkingStatus } from '@/schemas/vdfs'
 
 import MessageNode from './MessageNode.vue'
 import ChatInputArea from './chat/ChatInputArea.vue'
@@ -311,7 +312,7 @@ async function saveEdit() {
 }
 
 // ── 看门狗：会话卡在"处理中"且长时间无业务事件（疑似后台崩溃 / 断流）──
-// 每 15s 检查一次：若 is_working 但已超过阈值时间无事件，则把仍在
+// 每 15s 检查一次：若运行中（节点 status == working）但已超过阈值时间无事件，则把仍在
 // streaming/waiting 的消息持久化为 Failed —— 直接出现在对话流中（带内联重试按钮），
 // 切回会话仍能看到上次的错误，无需任何顶部 banner。
 let watchdogTimer: ReturnType<typeof setInterval> | null = null
@@ -321,7 +322,7 @@ function startWatchdog() {
     const sid = props.sessionId
     if (!sid) return
     const status = sessionsStore.getSessionStatus(sid)
-    if (!status.is_working) return
+    if (!isWorkingStatus(status.status)) return
     const reason = sessionsStore.getSessionStaleReason(sid)
     if (!reason) return
     // 把卡死的消息持久化为 Failed（会出现在对话流中，带内联重试），不再用顶部 banner
