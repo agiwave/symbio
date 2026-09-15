@@ -4,9 +4,12 @@
 //! worker，调用 `parent.route(ctx)` 等价于既有的 `root.route`：能转发前端会发起的全部路径
 //!（`session/*`、`model/*`、`vdfs/*` …）。因此本插件**无需任何新全局注册表**。
 
+use crate::providers::vdfs_service::config::{self, ConfigDoc};
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
+use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
-    PluginPayload, CONFIG_GET, CONFIG_SET, PATH, PLUGIN_GATEWAY,
+    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta, PluginPayload,
+    PATH, PLUGIN_GATEWAY,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -16,8 +19,69 @@ use tracing::{info, warn};
 use super::config::GatewayConfig;
 use super::server;
 
+// ==================== 配置文档（`.vdfs/gateway/配置`） ====================
+
+/// 网关配置的定义 —— **定义由配置的拥有者产出**。
+///
+/// 默认值从 [`GatewayConfig::default()`] 读出，不写第二份字面量。
+fn config_definition() -> DetailDefinition {
+    let d = GatewayConfig::default();
+    DetailDefinition::form(
+        "开放接口",
+        vec![
+            DetailField::toggle("inbound_enabled", "启用入站服务", "", d.inbound_enabled)
+                .with_description(
+                    "开启后本应用通过 HTTP/WebSocket 对外提供与前端完全一致的 API，\
+                     第三方或其他 Symbio 实例可据此驱动本应用",
+                ),
+            DetailField::select(
+                "inbound_protocol",
+                "入站协议",
+                vec![
+                    DetailOption {
+                        value: "native".into(),
+                        label: "native（仅本机 Tauri IPC，不监听端口）".into(),
+                    },
+                    DetailOption {
+                        value: "http".into(),
+                        label: "http（监听端口，第三方/其他实例可访问）".into(),
+                    },
+                ],
+                &d.inbound_protocol,
+            ),
+            DetailField::text(
+                "inbound_bind",
+                "监听地址",
+                "127.0.0.1 仅本机；0.0.0.0 暴露给全网（需配合访问令牌）",
+            ),
+            DetailField::number(
+                "inbound_port",
+                "监听端口",
+                "",
+                1.0,
+                65535.0,
+                serde_json::json!(d.inbound_port),
+            ),
+            DetailField::password(
+                "inbound_token",
+                "访问令牌 (API Key)",
+                "Bearer Token；回环地址可留空，非回环地址必填",
+                "留空则不校验（仅限 127.0.0.1）",
+            ),
+            DetailField::toggle(
+                "inbound_readonly",
+                "只读模式",
+                "仅放行查询类路径，禁止写操作与命令执行",
+                d.inbound_readonly,
+            ),
+        ],
+    )
+}
+
 pub struct GatewayPlugin {
     config: Arc<RwLock<GatewayConfig>>,
+    /// 配置文档（`.vdfs/gateway/配置`）——节点形状 / 校验 / 落盘推送给它
+    config_doc: ConfigDoc,
     /// 父插件（worker composite）弱引用，用于转发请求与上行落盘
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
     /// 入站服务句柄（为空表示未启动）
@@ -33,7 +97,7 @@ impl GatewayPlugin {
             .unwrap_or_default();
         let parent = ctx.parent();
         let arc = Arc::new(Self::new(parent, config));
-        // 启动期若已启用入站服务，则拉起监听（配置变更后由 config/set 重建）
+        // 启动期若已启用入站服务，则拉起监听（配置变更后由 VDFS 写入路径重建）
         let arc2 = arc.clone();
         tokio::spawn(async move {
             arc2.start_server().await;
@@ -44,6 +108,7 @@ impl GatewayPlugin {
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: GatewayConfig) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
+            config_doc: ConfigDoc::new(PLUGIN_GATEWAY, "开放接口", config_definition()),
             parent: Arc::new(RwLock::new(parent)),
             server: Arc::new(RwLock::new(None)),
         }
@@ -108,26 +173,6 @@ impl Plugin for GatewayPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
-            CONFIG_GET => {
-                let cfg = self.config.read().await;
-                Ok(PluginPayload::new(&*cfg))
-            }
-            CONFIG_SET => {
-                let next: GatewayConfig = ctx.payload()?;
-                {
-                    let mut cfg = self.config.write().await;
-                    *cfg = next;
-                }
-                // 与 SettingPlugin 同款：交父级上行落盘（save_config → home 聚合写盘）
-                if let Some(p) = self.get_parent().await {
-                    let save_ctx = ctx.fork();
-                    save_ctx.set(PATH, "save_config".to_string());
-                    p.route(save_ctx).await?;
-                }
-                // 端口/开关/协议变更需重建监听
-                self.apply_config().await;
-                Ok(PluginPayload::new(&serde_json::json!({ "ok": true })))
-            }
             "status" => {
                 let cfg = self.config.read().await;
                 let running = self.server.read().await.is_some();
@@ -147,9 +192,91 @@ impl Plugin for GatewayPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
+        if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+            // 本插件在 VDFS 上的全部内容 = 一个配置文档
+            let me: vdfs::DynVdfsProvider = self.clone();
+            visitor.register_vdfs_provider(PLUGIN_GATEWAY, me).await;
+        }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+}
+
+// ==================== VDFS：配置文档（`.vdfs/gateway/配置`） ====================
+
+#[async_trait]
+impl vdfs::VdfsProvider for GatewayPlugin {
+    fn label(&self) -> Option<&str> {
+        Some("开放接口")
+    }
+
+    fn description(&self) -> Option<&str> {
+        Some("本应用如何被调用（入站，对外提供服务）。")
+    }
+
+    fn order(&self) -> i32 {
+        9
+    }
+
+    fn icon(&self) -> Option<&str> {
+        Some("plug")
+    }
+
+    /// 根下只有配置文档，不接受新建 / 建目录
+    fn root_access(&self) -> vdfs::VdfsAccess {
+        vdfs::VdfsAccess::LIST
+    }
+
+    async fn list(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+    ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
+        if path.is_empty() {
+            return Ok(vec![self.config_doc.node()]);
+        }
+        Err(vdfs::VdfsError::not_found(format!(
+            "开放接口是配置挂载点，没有子项：{path}"
+        )))
+    }
+
+    async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
+        if path.is_empty() {
+            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+            return Ok(vdfs::VdfsNode::dir("", "开放接口", self.root_access()));
+        }
+        if config::is_config_path(path) {
+            return Ok(self.config_doc.node());
+        }
+        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+    }
+
+    async fn read(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+    ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
+        if config::is_config_path(path) {
+            return self.config_doc.read(&self.config).await;
+        }
+        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+    }
+
+    /// 写入：校验 → 落内存 → 落盘 → 广播，随后**重建监听**
+    /// （端口 / 开关 / 协议变更必须重建，这是本插件专有的副作用）
+    async fn write(
+        &self,
+        ctx: &vdfs::VdfsContext,
+        path: &str,
+        content: &vdfs::VdfsContent,
+    ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
+        if !config::is_config_path(path) {
+            return Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")));
+        }
+        let resp = self.config_doc.apply(ctx, &self.config, content).await?;
+        self.apply_config().await;
+        Ok(resp)
     }
 }
 
@@ -158,12 +285,10 @@ crate::submit_object_creator!(PLUGIN_GATEWAY, GatewayPlugin::build, dyn Plugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::{
-        InvokeRequestExt, InvokeResponse, Plugin, PluginPayload, SimpleRequest, PATH,
-    };
-    use std::sync::Arc;
+    use crate::symbio_core::vdfs::{VdfsContext, VdfsError, VdfsProvider};
+    use crate::symbio_core::{InvokeRequestExt, InvokeResponse, Plugin, PluginPayload, SimpleRequest};
 
-    /// 以子插件直接收的**已剥离前缀**路径（如 `config/get`）调用 route，
+    /// 以子插件直接收的**已剥离前缀**路径（如 `status`）调用 route，
     /// 模拟 home composite 转发后的行为。
     async fn call(
         plugin: Arc<GatewayPlugin>,
@@ -178,8 +303,26 @@ mod tests {
         plugin.clone().route(Arc::new(ctx)).await
     }
 
+    fn vctx() -> VdfsContext {
+        VdfsContext::empty()
+    }
+
+    /// 配置文档的形状：根下唯一一项、`ext = form`（前端据此选通用表单渲染器）、`rw`
     #[tokio::test]
-    async fn config_get_returns_current_config() {
+    async fn config_document_is_the_only_child_of_the_root() {
+        let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default()));
+        let items = plugin.list(&vctx(), "").await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, config::SEG_CONFIG);
+        assert_eq!(items[0].title, "开放接口");
+        assert_eq!(items[0].ext.as_deref(), Some(vdfs::VFDS_EXT_FORM));
+        assert_eq!(items[0].access.flags(), "rw");
+        assert!(items[0].schema.is_some(), "定义随节点下发");
+    }
+
+    /// 读：配置文档回当前配置（pretty JSON）
+    #[tokio::test]
+    async fn config_document_reads_current_config() {
         let cfg = GatewayConfig {
             inbound_enabled: true,
             inbound_protocol: "http".into(),
@@ -187,37 +330,24 @@ mod tests {
             ..GatewayConfig::default()
         };
         let plugin = Arc::new(GatewayPlugin::new(None, cfg));
-        let resp = call(plugin, "config/get", None).await.unwrap();
-        let got: GatewayConfig = resp.get().unwrap();
+        let content = plugin.read(&vctx(), config::SEG_CONFIG).await.unwrap();
+        let got: GatewayConfig = serde_json::from_str(content.text.as_deref().unwrap()).unwrap();
         assert!(got.inbound_enabled);
         assert_eq!(got.inbound_protocol, "http");
         assert_eq!(got.inbound_port, 9231);
     }
 
+    /// 写：校验先于一切——坏值在落内存之前就被定义拦下（字段级错误）
     #[tokio::test]
-    async fn config_set_persists_and_is_readable_back() {
+    async fn config_document_write_validates_before_applying() {
         let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default()));
-
-        let next = GatewayConfig {
-            inbound_enabled: true,
-            inbound_bind: "0.0.0.0".into(),
-            ..GatewayConfig::default()
-        };
-        let set_resp = call(
-            plugin.clone(),
-            "config/set",
-            Some(serde_json::to_value(&next).unwrap()),
-        )
-        .await
-        .unwrap();
-        // config/set 返回 { ok: true }
-        assert_eq!(set_resp.serialize().unwrap()["ok"], true);
-
-        // 随后 config/get 应读回新值（父级为 None，不触发落盘/启服，仅内存生效）
-        let got = call(plugin.clone(), "config/get", None).await.unwrap();
-        let reread: GatewayConfig = got.get().unwrap();
-        assert!(reread.inbound_enabled);
-        assert_eq!(reread.inbound_bind, "0.0.0.0");
+        let bad = vdfs::VdfsContent::text("", r#"{"inbound_port": 70000}"#);
+        match plugin.write(&vctx(), config::SEG_CONFIG, &bad).await {
+            Err(VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "inbound_port"),
+            other => panic!("应为字段级校验错误，实得 {other:?}"),
+        }
+        // 未被改动
+        assert_eq!(plugin.config.read().await.inbound_port, 9231);
     }
 
     #[tokio::test]
@@ -232,7 +362,8 @@ mod tests {
     #[tokio::test]
     async fn unknown_path_is_not_found() {
         let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default()));
-        let r = call(plugin, "config/delete", None).await;
-        assert!(r.is_err());
+        assert!(call(plugin.clone(), "bogus", None).await.is_err());
+        // 配置文档之外无其它节点
+        assert!(plugin.stat(&vctx(), "bogus").await.is_err());
     }
 }

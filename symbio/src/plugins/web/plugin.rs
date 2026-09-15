@@ -2,18 +2,57 @@
 
 pub use super::web_config::WebConfig;
 use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::WebSearchTool};
-use crate::symbio_core::schemas::common::SimpleResponse;
+use crate::providers::vdfs_service::config::{self, ConfigDoc};
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
+use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     Capability, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
-    PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_WEB,
+    PluginPayload, PLUGIN_WEB,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
+// ==================== 配置文档（`.vdfs/web/配置`） ====================
+
+/// 网络工具配置的定义 —— **定义由配置的拥有者产出**。
+///
+/// 默认值从 [`WebConfig::default()`] 读出，不写第二份字面量。
+fn config_definition() -> DetailDefinition {
+    let d = WebConfig::default();
+    DetailDefinition::form(
+        "网络工具设置",
+        vec![
+            DetailField::toggle("web_enabled", "启用 Web 工具", "允许网络请求", d.web_enabled),
+            DetailField::number(
+                "web_timeout",
+                "Web 超时（秒）",
+                "Web 请求超时时间",
+                1.0,
+                300.0,
+                serde_json::json!(d.web_timeout),
+            ),
+            DetailField::password(
+                "tavily_api_key",
+                "Tavily API Key",
+                "用于高级网页搜索（优先）",
+                "输入 Tavily API Key",
+            ),
+            DetailField::password(
+                "serper_api_key",
+                "Serper API Key",
+                "用于 Google 网页搜索（备用）",
+                "输入 Serper API Key",
+            ),
+        ],
+    )
+}
+
 #[derive(Clone)]
 pub struct WebPlugin {
     config: Arc<RwLock<WebConfig>>,
+    /// 配置文档（`.vdfs/web/配置`）——节点形状 / 校验 / 落盘推送给它
+    config_doc: ConfigDoc,
     tool_impls: Arc<Vec<Arc<dyn Capability>>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
 }
@@ -42,6 +81,7 @@ impl WebPlugin {
 
         Self {
             config: config_lock,
+            config_doc: ConfigDoc::new(PLUGIN_WEB, "网络工具", config_definition()),
             tool_impls: Arc::new(tool_impls),
             parent: Arc::new(RwLock::new(parent)),
         }
@@ -74,31 +114,10 @@ impl Plugin for WebPlugin {
             }
         }
 
-        match path.as_str() {
-            CONFIG_GET => {
-                let cfg = self.config.read().await;
-                Ok(PluginPayload::new(&*cfg))
-            }
-            CONFIG_SET => {
-                let new_cfg: WebConfig = ctx.payload()?;
-                {
-                    let mut cfg = self.config.write().await;
-                    *cfg = new_cfg.clone();
-                }
-                if let Some(p) = self.get_parent().await {
-                    let save_ctx = ctx.fork();
-                    save_ctx.set(crate::symbio_core::PATH, "save_config".to_string());
-                    let _ = p.route(save_ctx).await;
-                }
-                Ok(PluginPayload::new(&SimpleResponse::success()))
-            }
-            _ => {
-                if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
-                    return tool.execute(ctx).await;
-                }
-                Err(PluginError::NotFound(format!("路径不存在: {path}")))
-            }
+        if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
+            return tool.execute(ctx).await;
         }
+        Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }
 
     async fn traverse(
@@ -114,13 +133,89 @@ impl Plugin for WebPlugin {
             )));
         }
 
-        if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+        if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             for tool in self.tool_impls.iter() {
-                tool_visitor.register(tool.clone()).await;
+                visitor.register(tool.clone()).await;
             }
+            // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
+            let me: vdfs::DynVdfsProvider = self.clone();
+            visitor.register_vdfs_provider(PLUGIN_WEB, me).await;
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+}
+
+// ==================== VDFS：配置文档（`.vdfs/web/配置`） ====================
+
+#[async_trait]
+impl vdfs::VdfsProvider for WebPlugin {
+    fn label(&self) -> Option<&str> {
+        Some("网络工具")
+    }
+
+    fn description(&self) -> Option<&str> {
+        Some("Web 工具的启用、超时与搜索服务凭据。")
+    }
+
+    fn order(&self) -> i32 {
+        8
+    }
+
+    fn icon(&self) -> Option<&str> {
+        Some("globe")
+    }
+
+    /// 根下只有配置文档，不接受新建 / 建目录
+    fn root_access(&self) -> vdfs::VdfsAccess {
+        vdfs::VdfsAccess::LIST
+    }
+
+    async fn list(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+    ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
+        if path.is_empty() {
+            return Ok(vec![self.config_doc.node()]);
+        }
+        Err(vdfs::VdfsError::not_found(format!(
+            "网络工具是配置挂载点，没有子项：{path}"
+        )))
+    }
+
+    async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
+        if path.is_empty() {
+            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+            return Ok(vdfs::VdfsNode::dir("", "网络工具", self.root_access()));
+        }
+        if config::is_config_path(path) {
+            return Ok(self.config_doc.node());
+        }
+        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+    }
+
+    async fn read(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+    ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
+        if config::is_config_path(path) {
+            return self.config_doc.read(&self.config).await;
+        }
+        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+    }
+
+    async fn write(
+        &self,
+        ctx: &vdfs::VdfsContext,
+        path: &str,
+        content: &vdfs::VdfsContent,
+    ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
+        if config::is_config_path(path) {
+            return self.config_doc.apply(ctx, &self.config, content).await;
+        }
+        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
 }
 

@@ -202,7 +202,7 @@ session:
     ```xml
     <state_snapshot>
       <completed_items>已成功重构 Session 核心，并在 symbio 中消灭了硬编码。</completed_items>
-      <knowledge_discovered>Model 插件和 Agent 插件解耦，跨插件必须路由 session/config/get。</knowledge_discovered>
+      <knowledge_discovered>Model 插件和 Agent 插件解耦，跨插件只能经 VDFS 地址与 save_config 切片交互。</knowledge_discovered>
       <open_issues>前端 UI 还需适配并提交 tool_context_window 新字段。</open_issues>
     </state_snapshot>
     ```

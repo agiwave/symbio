@@ -12,10 +12,10 @@ use super::bound_provider::BoundProvider;
 use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
 use crate::providers::vdfs_service::{MemoryVdfs, SingleFileVdfs};
-use crate::symbio_core::schemas::common;
+use crate::symbio_core::schemas::common::ConfigSlice;
 use crate::symbio_core::{
     create_object, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
-    PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, CONFIG_SET, PLUGIN_MODEL,
+    PluginMeta, PluginPayload, SimpleRequest, PLUGIN_MODEL, SAVE_CONFIG,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use async_trait::async_trait;
@@ -230,11 +230,20 @@ impl ModelPlugin {
         guard.as_ref().and_then(|w| w.upgrade())
     }
 
-    /// 触发父插件持久化（save_config 路由）
+    /// 把自己的配置切片推给宿主落盘（`save_config` 路由，载荷 [`ConfigSlice`]）
+    ///
+    /// 切片里只放**跨条目的状态**（`default_provider_id`）：单个 Provider 的明细是
+    /// 资源，落在 `plugins/model/<id>/provider.json`，不进 config.yaml。
     async fn persist_to_parent(&self, ctx: &Arc<dyn InvokeRequest>) -> InvokeResponse<()> {
+        let default_provider_id = self.providers.read().await.default_provider_id.clone();
+        let slice = ConfigSlice::new(
+            PLUGIN_MODEL,
+            json!({ "default_provider_id": default_provider_id }),
+        );
         if let Some(p) = self.get_parent().await {
             let save_ctx = ctx.fork();
-            save_ctx.set(crate::symbio_core::PATH, "save_config".to_string());
+            save_ctx.set(crate::symbio_core::PATH, SAVE_CONFIG.to_string());
+            save_ctx.set_payload(slice)?;
             p.route(save_ctx).await?;
         } else {
             plugin_warn!("model", "未找到父插件，配置仅在内存中生效");
@@ -874,40 +883,15 @@ impl Plugin for ModelPlugin {
         Self::metadata()
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
-
-        match path.as_str() {
-            CONFIG_GET => {
-                // 新存储策略：实际 provider 数据存放在
-                // `~/.symbio/plugins/model/<id>/provider.json`，不在 config.yaml 中。
-                //
-                // 这里只返回**元数据**（default_provider_id），让 home 的
-                // save_config 不会把完整 provider 写回 config.yaml。
-                let providers = self.providers.read().await.clone();
-                let metadata = serde_json::json!({
-                    "default_provider_id": providers.default_provider_id,
-                    "plugin_provider": "model",
-                    "plugin_name": "model",
-                    "_storage": "plugins/model",  // 标记数据已迁移到新存储
-                });
-                Ok(PluginPayload::new(&metadata))
-            }
-            CONFIG_SET => {
-                let new_cfg: ModelProvidersConfig = ctx.payload()?;
-                {
-                    let mut providers = self.providers.write().await;
-                    *providers = new_cfg;
-                }
-                self.persist_to_parent(&ctx).await?;
-                Ok(PluginPayload::new(&common::SuccessResponse::default()))
-            }
-            // `config/schema` / `status` / `chat_sync` 已下线：
-            // - 字段定义改由 `detail_definition`（随 VDFS 节点 `schema` 下发）；
-            // - 连通性自检改由节点动作 `vdfs/action { action: "test" }`；
-            // - `chat_sync` 本就是 NotImplemented 占位，chat 族归 session 插件。
-            _ => Err(PluginError::NotFound(format!("未知路径: {path}"))),
-        }
+    /// model 已无自有路由：配置的读写在 VDFS 上（`.vdfs/model/<id>` 的详情表单，
+    /// 以及节点动作 `set-default`），持久化走 `save_config` 切片推送。
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn InvokeRequest>,
+    ) -> InvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound(format!(
+            "{PLUGIN_MODEL} 已无自有路由，请改用 VDFS 地址"
+        )))
     }
 
     async fn traverse(

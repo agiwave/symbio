@@ -12,9 +12,10 @@
 
 use super::schemas::{home_reload, work_get_workspace};
 use crate::symbio_core::schemas::common;
+use crate::symbio_core::schemas::ConfigSlice;
 use crate::symbio_core::{
     HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
-    PluginMeta, PluginPayload, SimpleRequest, CONFIG_GET, PATH, PLUGIN_COMPOSITE, PLUGIN_HOME,
+    PluginMeta, PluginPayload, SimpleRequest, PATH, PLUGIN_COMPOSITE, PLUGIN_HOME, SAVE_CONFIG,
 };
 use crate::{plugin_debug, plugin_error, plugin_info, plugin_warn};
 use serde_json::Value;
@@ -122,7 +123,7 @@ impl HomePlugin {
                     tokio::spawn(async move {
                         plugin_info!("home", "正在自动恢复上次的工作区: {}", path_to_restore);
                         if home_clone.set_workspace(&path_to_restore).await.is_ok() {
-                            let _ = home_clone.save_config().await;
+                            let _ = home_clone.flush().await;
                         }
                     });
                 }
@@ -197,7 +198,7 @@ impl HomePlugin {
 
         // 2. 把旧 config 写回旧 homedir（仅在 homedir_changed 时）
         if homedir_changed {
-            if let Err(e) = self.save_config().await {
+            if let Err(e) = self.flush().await {
                 plugin_warn!(
                     "home",
                     "homedir 切换前持久化旧 config 失败（忽略继续）: {}",
@@ -274,7 +275,7 @@ impl HomePlugin {
     /// 清理已迁到新存储（`~/.symbio/plugins/`）的插件数据
     ///
     /// **策略**：
-    /// - `model`（原 `ai`）：删除 `providers` 字段，保留 `default_provider_id` 和 `_storage` 标记
+    /// - `model`（原 `ai`）：删除 `providers` 字段，保留 `default_provider_id`
     /// - `mcp`：删除 `servers` 字段
     ///
     /// 这样 config.yaml 不再包含已迁移的实际数据，避免下次启动时
@@ -431,32 +432,17 @@ impl HomePlugin {
         }))
     }
 
-    /// 保存配置到文件（原子化保存）
-    pub async fn save_config(&self) -> Result<(), PluginError> {
-        plugin_debug!("home", "开始收集活跃插件配置...");
-        let collected = self.collect_plugin_configs().await;
-
+    /// 保存一份**配置切片**到文件（原子化保存）
+    ///
+    /// 写配置的插件把自己的切片推上来（`save_config` 路由 + [`ConfigSlice`] 载荷），
+    /// 本方法只负责「按插件定位既有条目 → 合并 → 原子落盘」。宿主**不反向拉取**
+    /// 任何插件的配置——「读配置」这一动作不再同时承担「给 UI 显示」与
+    /// 「给宿主落盘」两个毫不相干的用途。
+    pub async fn save_config(&self, slice: ConfigSlice) -> Result<(), PluginError> {
+        plugin_debug!("home", "收到配置切片，准备合并落盘: {}", slice.plugin);
         {
             let mut cfg = self.config.write().await;
-            // 增量合并，不直接覆盖整个插件节点，而是合并对象属性
-            for (name, new_val) in collected {
-                let existing_val = cfg
-                    .symbio
-                    .entry(name.clone())
-                    .or_insert_with(|| serde_json::json!({}));
-
-                if let (Some(existing_obj), Some(new_obj)) =
-                    (existing_val.as_object_mut(), new_val.as_object())
-                {
-                    // 将新获取的配置合并到现有配置中
-                    for (k, v) in new_obj {
-                        existing_obj.insert(k.clone(), v.clone());
-                    }
-                } else {
-                    // 如果不是对象，则直接覆盖
-                    cfg.symbio.insert(name, new_val);
-                }
-            }
+            Self::merge_slice(&mut cfg.symbio, &slice);
 
             // ⭐ 清理已迁到新存储的插件的实际数据字段
             // model（原 ai）：实际 providers 数据在 ~/.symbio/plugins/model/<id>/provider.json
@@ -464,7 +450,57 @@ impl HomePlugin {
             // 保留元数据（如 default_provider_id）以兼容旧读取路径
             Self::prune_migrated_plugin_data(&mut cfg.symbio);
         }
+        self.flush().await
+    }
 
+    /// 把一份切片并入 `symbio.plugins.<键>`。
+    ///
+    /// 键按 `plugin_provider` 定位既有条目——**兼容实例改名**：`worker` 下挂的
+    /// 实例名与插件名可以不同，但 `plugin_provider` 恒为工厂 id；找不到才用插件名
+    /// 新建。合并是**逐键插入**，因此既有条目上的 `plugin_provider` / `plugin_name`
+    /// 以及本切片未覆盖的字段都原样保留——切片只带自己那一份，不该顺手抹掉别的。
+    fn merge_slice(symbio: &mut serde_json::Map<String, Value>, slice: &ConfigSlice) {
+        let plugins = symbio
+            .entry("plugins".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        let Some(map) = plugins.as_object_mut() else {
+            return;
+        };
+
+        let key = map
+            .iter()
+            .find(|(_, v)| {
+                v.get("plugin_provider").and_then(Value::as_str) == Some(slice.plugin.as_str())
+            })
+            .map(|(k, _)| k.clone())
+            .unwrap_or_else(|| slice.plugin.clone());
+
+        let entry = map
+            .entry(key.clone())
+            .or_insert_with(|| serde_json::json!({}));
+        match (entry.as_object_mut(), slice.config.as_object()) {
+            (Some(obj), Some(new)) => {
+                for (k, v) in new {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+            _ => *entry = slice.config.clone(),
+        }
+        if let Some(obj) = entry.as_object_mut() {
+            obj.insert(
+                "plugin_provider".to_string(),
+                Value::String(slice.plugin.clone()),
+            );
+            obj.entry("plugin_name".to_string())
+                .or_insert_with(|| Value::String(key));
+        }
+    }
+
+    /// 把内存中的配置**原子落盘**（`tmp` → `rename`）。
+    ///
+    /// 与 [`save_config`](Self::save_config) 分开：只改**自己**的配置时
+    /// （如切换工作区）没有切片要合并，直接落盘即可。
+    pub async fn flush(&self) -> Result<(), PluginError> {
         let path = config_path();
         let tmp_path = path.with_extension("yaml.tmp");
 
@@ -513,37 +549,10 @@ impl HomePlugin {
 
         plugin_info!(
             "home",
-            "活跃插件配置已成功原子化持久化至: {}",
+            "配置已成功原子化持久化至: {}",
             path.display()
         );
         Ok(())
-    }
-
-    /// 收集所有子插件配置
-    async fn collect_plugin_configs(&self) -> serde_json::Map<String, Value> {
-        let mut configs = serde_json::Map::new();
-
-        let worker_opt = {
-            let instances = self.instances.read().await;
-            instances.get("worker").cloned()
-        };
-
-        if let Some(worker) = worker_opt {
-            let ctx = Arc::new(SimpleRequest::new(None, None));
-            ctx.set(PATH, CONFIG_GET.to_string());
-
-            match worker.clone().route(ctx).await {
-                Ok(resp) => {
-                    if let Ok(data) = resp.get::<serde_json::Value>() {
-                        configs.insert("plugins".to_string(), data);
-                    }
-                }
-                Err(e) => {
-                    plugin_error!("home", format!("获取插件 'worker' 配置失败: {}", e));
-                }
-            }
-        }
-        configs
     }
 
     /// 解析路径，返回 (子插件名, 剩余路径)
@@ -580,10 +589,11 @@ impl Plugin for HomePlugin {
         match path {
             // 资源类别清单由 `vdfs/providers`（`.vdfs` 虚拟根）下发，
             // 导航与顺序都在那里。
-            "save_config" => {
+            SAVE_CONFIG => {
+                let slice: ConfigSlice = ctx.payload()?;
                 let this = Arc::clone(&self);
                 tokio::spawn(async move {
-                    if let Err(e) = this.save_config().await {
+                    if let Err(e) = this.save_config(slice).await {
                         plugin_error!("home", format!("异步持久化任务失败: {}", e));
                     }
                 });
@@ -610,7 +620,7 @@ impl Plugin for HomePlugin {
                     tokio::spawn(async move {
                         plugin_info!("home", "reload: 正在恢复 workdir: {}", path_to_restore);
                         if home_arc.set_workspace(&path_to_restore).await.is_ok() {
-                            let _ = home_arc.save_config().await;
+                            let _ = home_arc.flush().await;
                         }
                     });
                 }
@@ -634,7 +644,7 @@ impl Plugin for HomePlugin {
                 // 切换成功后，异步触发一次配置持久化
                 let this = Arc::clone(&self);
                 tokio::spawn(async move {
-                    if let Err(e) = this.save_config().await {
+                    if let Err(e) = this.flush().await {
                         plugin_error!("home", format!("切换工作区后自动持久化失败: {}", e));
                     }
                 });

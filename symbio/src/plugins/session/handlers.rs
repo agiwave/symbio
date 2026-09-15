@@ -6,14 +6,10 @@
 
 use super::chat_session::{ChatSession, ChatSessionHandle, PersistentChatSession};
 use super::plugin::SessionPlugin;
-use crate::symbio_core::schemas::session::session_config::SessionConfig;
-use crate::symbio_core::schemas::{
-    common,
-    session::{
-        chat_message as cm, session_append, session_clear, session_clear_messages,
-        session_delete_message, session_get_messages, session_open, session_update,
-        session_update_message,
-    },
+use crate::symbio_core::schemas::session::{
+    chat_message as cm, session_append, session_clear, session_clear_messages,
+    session_delete_message, session_get_messages, session_open, session_update,
+    session_update_message,
 };
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginPayload};
 use crate::symbio_core::{InvokeResponse, PluginError};
@@ -273,28 +269,6 @@ impl SessionPlugin {
             session: serde_json::to_value(session)?,
         })
         .unwrap_or_default())
-    }
-
-    pub async fn invoke_config_get(&self) -> InvokeResponse<Value> {
-        let cfg = self.config.read().await;
-        Ok(serde_json::to_value(&*cfg)?)
-    }
-
-    pub async fn invoke_config_set(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
-        let new_cfg: SessionConfig = ctx.payload()?;
-
-        {
-            let mut cfg = self.config.write().await;
-            *cfg = new_cfg;
-        }
-
-        if let Some(p) = self.get_parent() {
-            let save_ctx = ctx.fork();
-            save_ctx.set(crate::symbio_core::PATH, "save_config".to_string());
-            let _ = p.route(save_ctx).await;
-        }
-
-        Ok(serde_json::to_value(common::SuccessResponse::default())?)
     }
 
     /// 按 session_id 构造会话引擎实例（唯一构造实现）。

@@ -230,6 +230,42 @@ D:/tmp/a.txt     绝对路径                          ─┘
 时返回 `NotImplemented`，使用方据此不给出入口；支持与否由 provider 自陈，
 与「新建类型」同理（详见 [vdfs-frontend.md](vdfs-frontend.md) §7 的 S13）。
 
+### 3.4 配置文档（保留段 `配置`）
+
+「一个插件的配置」就是一个**普通的可寻址文档**——不设第二条配置协议：
+
+```
+.vdfs/session/配置     会话设置
+.vdfs/local/配置       本地工具设置
+.vdfs/gateway/配置     开放接口设置
+.vdfs/telegram/配置    Telegram 设置
+```
+
+- **地址形状**：`<挂载根>/配置`（`SEG_CONFIG`）。挂载根恒为目录（前端导航只列
+  目录，§7），因此配置是根下的一个**保留子段**——判定顺序上 `配置` 优先于插件
+  自身的资源 id。插件不得把该名用作资源 id（会话 id 是 UUID、模型 / MCP 的 id
+  由用户命名派生，理论上可撞名）。
+- **节点形状**：`ext = form`、`access = rw`、`schema` = 该插件自己的
+  `DetailDefinition`。读写用的就是 `vdfs/read` / `vdfs/write`（§5），与任何其它
+  资源同一条链路、同一套寻址——因此前端与 LLM 用同一种方式改配置。
+- **定义与校验同源**：提交值交给 `DetailDefinition::validate`，失败即字段级
+  `VdfsValidationError`（§8）。字段定义由**配置的拥有者**产出（默认值从该插件的
+  `Default` 读出），不另写一份 schema 字面量。
+- **落盘靠推送**：写配置者把自己的切片推给宿主（`save_config` 路由，载荷
+  `ConfigSlice { plugin, config }`），宿主按 `plugin_provider` 定位既有条目并
+  **逐键合并**落盘（因此实例改名不丢配置）。宿主**不反向拉取**任何插件的配置
+  ——「读配置」不再同时承担「给 UI 显示」与「给宿主落盘」两个不相干的用途。
+  「插件让父容器帮自己存」这一层保持不变：变的只是取数方向（推 vs 拉）。
+- **副作用留在插件**：写完配置之后还要做什么（如网关重建监听）在插件自己的
+  `write` 里做，机制不引入回调抽象。
+- **实现只写一次**：`providers/vdfs_service/config.rs` 的 `ConfigDoc`
+  （**值 + 一组函数**，不是 trait：没有注册表、没有回调）承担节点形状 / 定义校验 /
+  切片推送。只有配置、没有资源树的插件（local / web / gateway / telegram）直接以
+  它为挂载内容；已有资源树的插件（session）在自身 `list` / `stat` / `read` /
+  `write` 里把 `配置` 段分流给它。
+- **凭据在配置里**：配置文档与其它节点一样受访问位约束（`r`），即**可读**。
+  对外暴露面（如网关的只读白名单）需自行拒绝落在 `<挂载根>/配置` 上的读取。
+
 ## 4. 访问位（r / w / l / t）
 
 访问位是**机制唯一的能力依据**，线上表示为紧凑字符串（按 `r` `w` `l` `t` 顺序）：
@@ -435,8 +471,9 @@ for child in children {
 - 机制只做与资源语义无关的守卫（§5）。
 - provider 在 `write` 内完成必填 / 范围 / 枚举 / 类型 / 跨字段校验，失败返回
   `VdfsError::Invalid(VdfsValidationError { message, fields })`。
-- **校验先于副作用**：校验不过时 provider 不得触达被代理的下游写入
-  （设置模块在转发 `config/set` 之前完成校验）。
+- **校验先于副作用**：校验不过时 provider 不得触达落盘或任何下游写入
+  （配置文档的 `ConfigDoc::apply` 即「先 `decode` 校验 → 再落内存 → 最后推切片」；
+  校验不过时既不落内存也不触达宿主）。
 - 前端据 `fields[].field` 逐字段提示，与 `schema` 中的字段键对齐。
 
 ## 9. 实时性
@@ -602,17 +639,19 @@ for child in children {
 
 ## 13. 范例（实例，非机制组成部分）
 
-### 13.1 设置（setting）——原生 provider + 自持校验
+### 13.1 设置（setting）——只服务前端自持分区
 
 - 注册名 = 插件名 `PLUGIN_SETTING`（= `.vdfs/setting` 子目录）；`root_access = l`
   （分区清单固定，每一项是叶子文档，不可 `t`）。provider 自身不含位置概念。
-- 分区节点：`ext = form`，`schema` = 该分区的 `DetailDefinition`；
-  `access = rw`（可写分区）或 `r`（前端自持分区，如 `appearance` / `about`）。
-- `read` → 转发目标插件的 `config/get`，返回格式化 JSON 文本。
-- `write` → **先按定义逐字段校验**（必填 / 范围 / 枚举 / 类型 / 条件显隐），
-  通过后才转发 `config/set`；失败返回字段级错误。
-- 分区清单是**单一真相源**：`.vdfs/setting` 的子目录内容与各分区的详情定义都由
-  同一份声明派生（不再有独立的实体注册表）。
+- 本插件是**无状态 provider**：`SETTING_SECTIONS` 只登记 `appearance` / `about`
+  两个**前端状态自持**的分区（主题、版本信息等数据不在后端），`route` 恒
+  `NotFound`。
+- 分区节点：`access = r`、`ext` = 分区 id（前端据此直接渲染专属面板，§7）。
+  `read` / `write` 对它们恒 `Forbidden`——数据在前端 store。
+- 插件配置**不在这里**：各插件的配置归各插件自己的配置文档（§3.4），
+  如 `.vdfs/session/配置`、`.vdfs/local/配置`。原 `setting/config/get` /
+  `setting/config/set` 与 `SETTING_SECTIONS` 里的 4 个插件分区（各自的 `prefix`
+  与代理转发）已随之退场——那正是「同一份配置有两个地址」的根源。
 
 ### 13.2 组合容器（composite）——包含子目录列表的 provider
 

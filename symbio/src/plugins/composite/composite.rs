@@ -6,10 +6,9 @@ use super::vdfs::CompositeVdfs;
 use crate::symbio_core::{
     create_object, has_creator, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
     PluginError, PluginMeta, PluginPayload, SimpleRequest, VdfsProvider, CAPABILITY_VISITOR,
-    CONFIG_GET, PATH, PLUGIN_COMPOSITE, TRAVERSE_AVAILABLE_TOOLS,
+    PATH, PLUGIN_COMPOSITE, SAVE_CONFIG, TRAVERSE_AVAILABLE_TOOLS,
 };
 
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -176,48 +175,16 @@ impl Plugin for Composite {
         let path = ctx.get(PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
-        // 1. 绝对路径重定向：如果路径收到 save_config/load_config，直接转发给防节点
-        if path == "save_config" {
+        // 1. 绝对路径重定向：`save_config` 一路向上转发到落盘的那一层（home）。
+        //    载荷 `{plugin, config}` 由**写配置的插件**自己填（推自己的切片），
+        //    容器只转发、不解释、也不反向拉取任何子插件的配置。
+        if path == SAVE_CONFIG {
             if let Some(parent) = self.get_parent().await {
                 return parent.route(ctx).await;
             }
         }
 
-        // 2. 配置聚合
-        if path == CONFIG_GET {
-            let mut configs = serde_json::Map::new();
-            let plugins: Vec<(String, Arc<dyn Plugin>)> = {
-                let instances = self.instances.read().await;
-                instances
-                    .iter()
-                    .map(|(name, plugin)| (name.clone(), Arc::clone(plugin)))
-                    .collect()
-            };
-            for (name, plugin) in plugins {
-                let sub_ctx = ctx.fork();
-                sub_ctx.set(PATH, CONFIG_GET.to_string());
-
-                if let Ok(payload) = plugin.clone().route(sub_ctx).await {
-                    if let Ok(mut data) = payload.get::<Value>() {
-                        // 注入插件 provider 信息 (从插件 meta 中获取)
-                        if let Some(obj) = data.as_object_mut() {
-                            obj.insert(
-                                "plugin_provider".to_string(),
-                                serde_json::json!(plugin.meta().id),
-                            );
-                            // 同时也确保 plugin_name 存在 (可选，但推荐)
-                            if !obj.contains_key("plugin_name") {
-                                obj.insert("plugin_name".to_string(), serde_json::json!(name));
-                            }
-                        }
-                        configs.insert(name, data);
-                    }
-                }
-            }
-            return Ok(PluginPayload::new(&Value::Object(configs)));
-        }
-
-        // 4. 子插件分发
+        // 2. 子插件分发
         if let Some((name, rest)) = Self::parse_path(path) {
             let plugin_opt = {
                 let instances = self.instances.read().await;

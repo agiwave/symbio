@@ -1,6 +1,9 @@
 use super::schemas::{telegram_send, telegram_status};
 use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
+use crate::providers::vdfs_service::config::{self, ConfigDoc};
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
+use crate::symbio_core::vdfs;
 use crate::symbio_core::InvokeRequestExt;
 use crate::symbio_core::{
     schemas::{
@@ -8,23 +11,64 @@ use crate::symbio_core::{
         session::{session_chat, session_chat_response},
     },
     CapabilityMeta, InvokeRequest, InvokeResponse, Plugin, PluginError, PluginFrame, PluginMeta,
-    PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_TELEGRAM, SESSION_CHAT,
+    PluginPayload, PLUGIN_TELEGRAM, SESSION_CHAT,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 /// Telegram 消息最大长度
 const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
 
+/// Telegram 配置的定义 —— **定义由配置的拥有者产出**。
+///
+/// 字段真源即 [`TelegramConfig`]：默认值从 `Default` 读出，不写第二份字面量。
+fn config_definition() -> DetailDefinition {
+    let d = TelegramConfig::default();
+    DetailDefinition::form(
+        "Telegram 设置",
+        vec![
+            DetailField::password(
+                "bot_token",
+                "Bot Token",
+                "BotFather 签发的访问令牌",
+                "123456:ABC-DEF...",
+            ),
+            DetailField::text("chat_id", "默认 Chat ID", "未指定时按会话推送"),
+            DetailField::toggle(
+                "streaming_enabled",
+                "流式回复",
+                "边生成边推送，减少等待感",
+                d.streaming_enabled,
+            ),
+            DetailField::toggle(
+                "poll_enabled",
+                "接收消息",
+                "轮询更新，把用户消息交给会话处理",
+                d.poll_enabled,
+            ),
+            DetailField {
+                key: "allowed_users".into(),
+                label: "允许的用户 ID".into(),
+                description: Some("每行一个用户 ID；留空表示不限制".into()),
+                widget: "list".into(),
+                full_width: true,
+                ..Default::default()
+            },
+        ],
+    )
+}
+
 /// Telegram 插件
 #[derive(Clone)]
 pub struct TelegramPlugin {
     config: Arc<RwLock<TelegramConfig>>,
+    /// 配置文档（`.vdfs/telegram/配置`）——节点形状 / 校验 / 落盘推送给它
+    config_doc: ConfigDoc,
     client: reqwest::Client,
     /// 更新偏移量
     update_offset: Arc<AtomicI64>,
@@ -36,8 +80,6 @@ pub struct TelegramPlugin {
     latest_version: Arc<RwLock<HashMap<String, u64>>>,
     /// LLM 插件引用（用于调用 chat）
     llm_plugin: Arc<RwLock<Option<Arc<dyn Plugin>>>>,
-    /// 父插件引用
-    parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
 }
 
 impl TelegramPlugin {
@@ -48,22 +90,20 @@ impl TelegramPlugin {
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
 
-        let parent = ctx.parent();
-
-        Arc::new(TelegramPlugin::new(parent, config)) as Arc<dyn Plugin>
+        Arc::new(TelegramPlugin::new(config)) as Arc<dyn Plugin>
     }
 
     /// 主构造函数（Factory 机制使用）
-    pub fn new(parent: Option<Weak<dyn Plugin>>, config: TelegramConfig) -> Self {
+    pub fn new(config: TelegramConfig) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
+            config_doc: ConfigDoc::new(PLUGIN_TELEGRAM, "Telegram 设置", config_definition()),
             client: reqwest::Client::new(),
             update_offset: Arc::new(AtomicI64::new(0)),
             listener_token: Arc::new(RwLock::new(None)),
             listener_running: Arc::new(AtomicBool::new(false)),
             latest_version: Arc::new(RwLock::new(HashMap::new())),
             llm_plugin: Arc::new(RwLock::new(None)),
-            parent: Arc::new(RwLock::new(parent)),
         }
     }
 
@@ -566,7 +606,7 @@ impl TelegramPlugin {
 
 impl Default for TelegramPlugin {
     fn default() -> Self {
-        Self::new(None, TelegramConfig::default())
+        Self::new(TelegramConfig::default())
     }
 }
 
@@ -589,6 +629,12 @@ impl Plugin for TelegramPlugin {
             )));
         }
 
+        // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
+        if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+            let me: vdfs::DynVdfsProvider = self.clone();
+            visitor.register_vdfs_provider(PLUGIN_TELEGRAM, me).await;
+        }
+
         Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()))
     }
 
@@ -599,8 +645,6 @@ impl Plugin for TelegramPlugin {
         let data = match path {
             "send" => self.invoke_send(ctx.clone()).await?,
             "get_updates" => self.invoke_get_updates().await?,
-            CONFIG_SET => self.invoke_configure(ctx.clone()).await?,
-            CONFIG_GET => self.invoke_get_config().await?,
             "set_chat_id" => self.invoke_set_chat_id(ctx.clone()).await?,
             "start_listener" => self.invoke_start_listener(ctx.clone()).await?,
             "stop_listener" => self.invoke_stop_listener().await?,
@@ -621,31 +665,7 @@ impl TelegramPlugin {
         self.handle_get_updates().await
     }
 
-    async fn invoke_configure(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
-        let new_cfg: TelegramConfig = ctx.payload()?;
 
-        if let Ok(mut config) = self.config.try_write() {
-            *config = new_cfg;
-        }
-
-        if let Some(p) = self.get_parent_plugin().await {
-            let save_ctx = ctx.fork();
-            save_ctx.set(crate::symbio_core::PATH, "save_config".to_string());
-            p.route(save_ctx).await?;
-        }
-
-        Ok(serde_json::to_value(common::SuccessResponse::default())?)
-    }
-
-    async fn get_parent_plugin(&self) -> Option<Arc<dyn Plugin>> {
-        let guard = self.parent.read().await;
-        guard.as_ref().and_then(|w| w.upgrade())
-    }
-
-    async fn invoke_get_config(&self) -> InvokeResponse<Value> {
-        let config = self.config.read().await;
-        Ok(serde_json::to_value(&*config)?)
-    }
 
     async fn invoke_set_chat_id(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
         let new_cfg: TelegramConfig = ctx.payload()?;
@@ -668,6 +688,82 @@ impl TelegramPlugin {
 
     async fn invoke_status(&self) -> InvokeResponse<Value> {
         self.handle_status().await
+    }
+}
+
+// ==================== VDFS：配置文档（`.vdfs/telegram/配置`） ====================
+//
+// 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文档」。
+// 节点形状、定义校验、落盘推送都在 [`ConfigDoc`] 里，这里只做寻址分流。
+
+#[async_trait]
+impl vdfs::VdfsProvider for TelegramPlugin {
+    fn label(&self) -> Option<&str> {
+        Some("Telegram")
+    }
+
+    fn description(&self) -> Option<&str> {
+        Some("Telegram Bot 的连接与推送配置。")
+    }
+
+    fn order(&self) -> i32 {
+        10
+    }
+
+    fn icon(&self) -> Option<&str> {
+        Some("send")
+    }
+
+    /// 根下只有配置文档，不接受新建 / 建目录
+    fn root_access(&self) -> vdfs::VdfsAccess {
+        vdfs::VdfsAccess::LIST
+    }
+
+    async fn list(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+    ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
+        if path.is_empty() {
+            return Ok(vec![self.config_doc.node()]);
+        }
+        Err(vdfs::VdfsError::not_found(format!(
+            "Telegram 是配置挂载点，没有子项：{path}"
+        )))
+    }
+
+    async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
+        if path.is_empty() {
+            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+            return Ok(vdfs::VdfsNode::dir("", "Telegram", self.root_access()));
+        }
+        if config::is_config_path(path) {
+            return Ok(self.config_doc.node());
+        }
+        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+    }
+
+    async fn read(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+    ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
+        if config::is_config_path(path) {
+            return self.config_doc.read(&self.config).await;
+        }
+        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+    }
+
+    async fn write(
+        &self,
+        ctx: &vdfs::VdfsContext,
+        path: &str,
+        content: &vdfs::VdfsContent,
+    ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
+        if config::is_config_path(path) {
+            return self.config_doc.apply(ctx, &self.config, content).await;
+        }
+        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
 }
 

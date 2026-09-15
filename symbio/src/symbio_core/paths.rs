@@ -15,12 +15,6 @@
 //!
 //! 命名约定：`<PLUGIN>_<OPERATION>` 形式，全部大写下划线
 
-// ============ Config 插件 ============
-/// config/get — 读取全局配置项
-pub const CONFIG_GET: &str = "config/get";
-/// config/set — 写入全局配置项
-pub const CONFIG_SET: &str = "config/set";
-
 // ============ 宿主（home）============
 /// save_config — 插件把自己的**配置切片**推给宿主落盘
 ///

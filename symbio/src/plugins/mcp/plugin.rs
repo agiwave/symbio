@@ -25,13 +25,12 @@
 
 pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
 use crate::providers::vdfs_service::DirVdfs;
-use crate::symbio_core::schemas::common;
 use crate::symbio_core::{
     Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginError, PluginMeta, PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_MCP,
+    PluginError, PluginMeta, PluginPayload, PLUGIN_MCP,
 };
 use async_trait::async_trait;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::warn;
 
@@ -47,9 +46,7 @@ pub struct McpPlugin {
     config: Arc<RwLock<McpConfig>>,
     /// MCP transport 路由器（无状态，跨调用共享）
     manager: Arc<McpManager>,
-    /// 父插件引用
-    parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
-    /// 首次加载标志（防止 route / traverse 在 load_from_storage 完成前访问旧 config）
+    /// 首次加载标志（防止 traverse 在 load_from_storage 完成前访问旧 config）
     loaded: Arc<tokio::sync::Mutex<bool>>,
 }
 
@@ -62,8 +59,7 @@ impl McpPlugin {
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
 
-        let parent = ctx.parent();
-        let plugin = Arc::new(McpPlugin::new(parent, config));
+        let plugin = Arc::new(McpPlugin::new(config));
 
         // 启动后异步触发：从存储加载（并触发首启动数据迁移）
         let plugin_weak = Arc::downgrade(&plugin);
@@ -78,11 +74,10 @@ impl McpPlugin {
     }
 
     /// 主构造函数
-    pub fn new(parent: Option<Weak<dyn Plugin>>, config: McpConfig) -> Self {
+    pub fn new(config: McpConfig) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
             manager: Arc::new(McpManager::new()),
-            parent: Arc::new(RwLock::new(parent)),
             loaded: Arc::new(tokio::sync::Mutex::new(false)),
         }
     }
@@ -96,11 +91,6 @@ impl McpPlugin {
         PluginMeta::new("mcp", "MCP 工具集成")
             .with_description("提供与 MCP 服务器的连接和交互功能")
             .with_version("0.3.0")
-    }
-
-    async fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
-        let guard = self.parent.read().await;
-        guard.as_ref().and_then(|w| w.upgrade())
     }
 
     /// 异步加载：从 `~/.symbio/plugins/mcp/` 读取所有 MCP Server
@@ -189,7 +179,7 @@ impl McpPlugin {
 
 impl Default for McpPlugin {
     fn default() -> Self {
-        Self::new(None, McpConfig::default())
+        Self::new(McpConfig::default())
     }
 }
 
@@ -592,42 +582,15 @@ impl Plugin for McpPlugin {
         Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()))
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        self.ensure_loaded(&ctx).await;
-
-        let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
-        let path = path.strip_prefix('/').unwrap_or(&path);
-
-        let data = match path {
-            CONFIG_GET => {
-                // 新存储策略：实际 server 数据存放在
-                // `~/.symbio/plugins/mcps/<name>/server.json`，
-                // 不在 config.yaml 中。这里只返回元数据。
-                let metadata = serde_json::json!({
-                    "plugin_provider": "mcp",
-                    "plugin_name": "mcp",
-                    "_storage": "plugins/mcps",
-                });
-                serde_json::to_value(metadata)?
-            }
-            CONFIG_SET => {
-                let new_cfg: McpConfig = ctx.payload()?;
-                {
-                    let mut cfg = self.config.write().await;
-                    *cfg = new_cfg;
-                }
-                if let Some(p) = self.get_parent().await {
-                    let save_ctx = ctx.fork();
-                    save_ctx.set(crate::symbio_core::PATH, "save_config".to_string());
-                    p.route(save_ctx).await?;
-                }
-                serde_json::to_value(common::SuccessResponse::default())?
-            }
-
-            _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
-        };
-
-        Ok(PluginPayload::new(&data))
+    /// mcp 已无自有路由：每个 MCP Server 都是 VDFS 上的一个可寻址条目
+    /// （`.vdfs/mcp/<name>`，见 `impl VdfsProvider`），配置因此没有第二条入口。
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn InvokeRequest>,
+    ) -> InvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound(format!(
+            "{PLUGIN_MCP} 已无自有路由，请改用 VDFS 地址"
+        )))
     }
 }
 

@@ -368,7 +368,7 @@ async fn dispatch_once(
         .get("path")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    if readonly && !is_readonly_allowed(path) {
+    if readonly && !is_readonly_allowed(path, &msg.payload) {
         return Err(format!("只读模式下禁止调用: {path}"));
     }
 
@@ -471,7 +471,7 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
         .get("path")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    if readonly && !is_readonly_allowed(path) {
+    if readonly && !is_readonly_allowed(path, &msg.payload) {
         let _ = ws_send_text(
             &mut write_half,
             &format!("{{\"Error\":[\"只读模式下禁止调用: {path}\"]}}"),

@@ -16,10 +16,10 @@
 
 问题不在机制，而在**两处历史遗留的旁路**，它们各自绕开了机制、又各自复制了一份机制已经解决的东西：
 
-| # | 旁路 | 性质 |
-|---|---|---|
-| A | 插件配置走 `CONFIG_GET`/`CONFIG_SET`（第二套资源协议），并由 `setting` 插件**代理 + 硬编码映射** | 与不变量 1（「所有资源只用 `vdfs/*`」）冲突；跨插件耦合；定义与校验寄生在 `setting` |
-| B | 会话存储自造落盘原语，且**寻址有两套**（VDFS 语义路径 vs 磁盘目录函数） | 与 `providers/vdfs_service/entry.rs` 重复；子会话靠全盘扫描定位 |
+| # | 旁路 | 性质 | 现状 |
+|---|---|---|---|
+| A | 插件配置走 `CONFIG_GET`/`CONFIG_SET`（第二套资源协议），并由 `setting` 插件**代理 + 硬编码映射** | 与不变量 1（「所有资源只用 `vdfs/*`」）冲突；跨插件耦合；定义与校验寄生在 `setting` | **已消除**（§6） |
+| B | 会话存储自造落盘原语，且**寻址有两套**（VDFS 语义路径 vs 磁盘目录函数） | 与 `providers/vdfs_service/entry.rs` 重复；子会话靠全盘扫描定位 | **寻址已合一**（`19e1c87`）；落盘原语为**有意不合并**，见 §5 |
 
 另有若干 P2/P3 细节（见 §3）。两项改造的方案见 §5 / §6。
 
@@ -48,7 +48,7 @@
 
 ## 3. 需要优化之处
 
-### P1-1 插件配置是「第二套协议 + 一层代理」（对应 §1 的 A）
+### P1-1 插件配置是「第二套协议 + 一层代理」（对应 §1 的 A）—— ✅ 已消除（§6）
 
 - `setting/plugin.rs` 的 `SETTING_SECTIONS` **硬编码** 6 个分区与各自的 `prefix`
   （`:132`），`read`/`write` 经 `route_config` 转发到目标插件的
@@ -60,7 +60,7 @@
 - 定义（`session_detail_definition` 等）与校验（`validate_section`）也寄生在 `setting`，
   而字段的真源在各自的 `*Config` 类型里：**定义与数据分居两处**。
 
-### P1-2 `CONFIG_GET`/`CONFIG_SET` 越权承担了「持久化聚合」
+### P1-2 `CONFIG_GET`/`CONFIG_SET` 越权承担了「持久化聚合」—— ✅ 已消除（§6）
 
 `home.save_config()` 的实现是「向 `worker` 要 `config/get` → composite 逐个插件聚合
 → 合并进 `symbio.plugins.*` → 写 config.yaml」（`home/plugin.rs:435`、`:523`；
@@ -72,7 +72,7 @@
 - 「配置协议」与「持久化协议」应当分开：**写配置者自报切片**，宿主只负责落盘
   （`save_config` 本来就是这样的路由，只是它现在还靠 `config/get` 反向拉取）。
 
-### P1-3 前端 `config` 绑定已是死代码
+### P1-3 前端 `config` 绑定已是死代码 —— ✅ 已删除（S6）
 
 `VdfsFormDetail` 把定义适配为 `binding: 'option'` 并清空 `load_path`/`save_path`
 （`components/vdfs/VdfsFormDetail.vue:101-107`），因此 `DetailForm` 的 `config`
@@ -81,7 +81,7 @@
 
 → 应删：机制里留一条「插件路由通道」的旁路，只会诱导后续实现再次绕开 VDFS。
 
-### P1-4 会话存储是旁路，且寻址有两套（对应 §1 的 B）
+### P1-4 会话存储是旁路，且寻址有两套（对应 §1 的 B）—— 寻址已合一，余项见 §5
 
 - `session/store/mod.rs` 自造原子写、目录清单、删除（`:154`、`:214`、`:189`），
   与 `providers/vdfs_service/entry.rs`（`write_entry` / `list_entry_ids` /
@@ -113,7 +113,9 @@
 
 1. `symbio_core/vdfs_provider.rs` 的模块文档仍写「`composite` 容器是一个 **root 级
    provider**」（`:27`），与 `vdfs.md` §2.5「没有根级 provider 的概念」自相矛盾。
+   —— ✅ 已修（S1）。
 2. `symbio_core/paths.rs:18` 的注释「Config 插件」在协议废弃后应删。
+   —— ✅ 已删（S2，`CONFIG_GET` / `CONFIG_SET` 常量一并删除）。
 3. 本仓 `docs/design/vdfs.md` §13.4 已同步到「实体机制已删」，无需再改。
 
 ---
@@ -133,24 +135,48 @@
 
 ---
 
-## 5. 改造一：会话存储改用 `VdfsProvider`（对应 P1-4）
+## 5. 改造一：会话存储的寻址与 VDFS 的关系（对应 P1-4）
 
 **原则：存储层不再是「插件旁边的私有存储」，而是 VDFS 的一部分。**
 
-1. `SessionStore` 实现 `VdfsProvider`，地址空间 = 会话存储半边：
-   `<id>`（会话文档）、`<id>/消息/<mid>`（转写列表项）、`<id>/子会话/<sub>`。
-   - 落盘原语复用 `providers/vdfs_service/entry.rs`（`safe_segment` / 原子写 /
-     目录清单 / 删除），删除 `store/mod.rs` 里的重复实现；
-   - 子会话由 `<id>/子会话/<sub>` 直达，`find_nested_dir` 的全盘扫描不再参与 VDFS 寻址；
-   - 临时会话（`ephemeral`）同一 trait，只是不落盘。
-2. **寻址规则单一**：`parse_session_path` 归存储 provider，插件**复用**它做分流
-   （不再各写一份）。
-3. `SessionPlugin` 的 `impl VdfsProvider` 收敛为薄组合：
-   - `工作目录` 分支 → `workdir` 模块（会话的工作区是**另一个文件系统**，不属于会话存储）；
-   - 其余分支 → 存储 provider 原样承接；
-   - **运行时叠加**（在途消息、工作状态）留在插件（那是会话引擎的状态，不是存储）；
-   - 变更广播留在插件（它是唯一带**载荷**的 provider，见 vdfs.md §9）。
-4. 顺带修 P1-4 的 `session_of`：按 id 直接取，不再 `list_sessions()` 全量读。
+> **落地结果（`19e1c87`，与本方案的差异已记录）**
+>
+> 对外已满足原则：`.vdfs/session` 只有一个入口——`SessionPlugin` 的
+> `impl VdfsProvider`（清单 / `消息` / `子会话` / `工作目录`），存储是它下面的真相源。
+>
+> 对内**没有**让 `SessionStore` 自己实现 `VdfsProvider`，也没有复用
+> `vdfs_service` 的三种集中实现——这是**有意的**，理由记在
+> `plugins/session/store/mod.rs` 模块文档里：
+>
+> - `DirVdfs` 的定义是「条目内部可下钻浏览」，套上之后 `session.json` /
+>   `messages/` / `tool_archives/` / `transcripts/` / `sessions/` 会原样成为对外
+>   地址——**把物理布局当公共契约**；而会话要求 `<id>` 是叶子、内部只以人读语义段
+>   呈现（与 agent bundle 的 `提示词` / `技能` / `MCP` 同一口径，vdfs.md §13.4）。
+> - 条目也不是文件字节：消息**内联**在 `session.json` 里，`<id>/消息/<mid>` 是从
+>   整份 `Session` 派生的视图，`append` / `replace` / `update` 的 seq 分配与剔孤儿
+>   是会话专有的写入语义。
+>
+> 真正共用的是**寻址**：类别根取宿主层 `entry::category_dir`、id→段名取
+> `entry::safe_segment`（经 `paths::safe_id`），因此会话目录名与 VDFS 资源条目
+> 目录名永远是同一份规则（顺带把 `.` / `..` / 控制字符防护带进会话侧）。
+> 判据与 vdfs.md §13.4 一致：**目录自管的类型自己落盘，不经 `vdfs_service`**。
+>
+> **因此本节的第 1 项按「更优形态」结案，第 2 项已完成；第 3 / 4 项未做，见下。**
+
+1. ~~`SessionStore` 实现 `VdfsProvider`~~ —— 见上：**不复用集中实现**是定论，
+   不再追求「存储层本身是一个 provider」。
+   - ~~落盘原语复用 `entry.rs`~~ —— 只有**寻址**共用（`category_dir` /
+     `safe_segment`），落盘原语保留在 store（拓扑相反，见上）。
+   - **子会话直达**：`<id>/子会话/<sub>` 是 VDFS 侧地址；但 `find_nested_dir`
+     的全盘扫描仍是 store 的定位手段，未收敛。
+   - 临时会话（`ephemeral`）是**构造选型**（`SessionStore::ephemeral()`），不是
+     第二个 trait 实现。
+2. ✅ **寻址规则单一**：`paths::safe_id` 不再自带规则，委托 `entry::safe_segment`；
+   `session_storage_dir()` 委托 `entry::category_dir(PLUGIN_SESSION)`。
+3. ⬜ `SessionPlugin` 的 `impl VdfsProvider` 仍是**厚实现**（各分支在插件内直接
+   调 store），未抽成「薄组合 + 存储 provider 承接」。
+4. ⬜ P1-4 未修：`session_of` 仍以 `list_sessions()` 全量读后 `find` 取单条
+   （注释说明原因是 `load_session` 对未命中返回空会话，需先有存在性判据）。
 
 ## 6. 改造二：配置地址化，废弃 `CONFIG_GET`/`CONFIG_SET`（对应 P1-1/P1-2/P1-3）
 
@@ -161,7 +187,7 @@
    `config` 绑定与 `DetailDefinition.load_path/save_path`。
 2. **配置文档 = 一个 VDFS 节点**：`ext = form`、`access = rw`、
    `schema` = 该插件的详情定义；`read` 返回当前配置 JSON，`write` = 校验 → 落内存 →
-   触发持久化。共享实现放 `providers/vdfs_service/config.rs`（`ConfigVdfs`），
+   触发持久化。共享实现放 `providers/vdfs_service/config.rs`（`ConfigDoc`），
    各插件只是组合它 —— 定义与校验**回归配置的拥有者**，不再寄生在 `setting`。
 3. **校验归定义**：`DetailDefinition::validate(&Value)` 下沉到
    `symbio_core::schemas::detail`（定义与校验同源），`setting` 里的
@@ -188,9 +214,13 @@
 
 - 挂载根**恒为目录**（前端导航与 `cwd` 语义如此），配置文档是根下的一个**保留子段**
   `配置`：`.vdfs/<插件>/配置`。
-- 已有资源树的插件（session / model / mcp）在自身 `list` / `stat` / `read` / `write`
-  里把 `配置` 段交给 `ConfigVdfs`；只有配置、没有资源树的插件
-  （local / web / gateway / telegram）直接把 `ConfigVdfs` 注册为挂载点。
+- 已有资源树的插件（session）在自身 `list` / `stat` / `read` / `write`
+  里把 `配置` 段交给 `ConfigDoc`；只有配置、没有资源树的插件
+  （local / web / gateway / telegram）直接把 `ConfigDoc` 作为挂载内容。
+- **不设配置文档的插件**：`model` / `mcp` 的配置**就是**它们的资源树
+  （`.vdfs/model/<id>` / `.vdfs/mcp/<name>`，各自带详情定义与节点动作）。
+  再挂一个 `配置` 段会是第二份真相，因此不挂——它们的落盘走 `save_config`
+  切片推送（`model` 只推 `default_provider_id`；`mcp` 无需推送）。
 - `配置` 是**保留段**：插件自身资源 id 不得占用（会话 id 是 UUID，天然不冲突；
   model / mcp 的 id 由用户命名派生，理论上可撞名——由「保留段优先」的判定顺序
   兜底，并在规范中写明）。
@@ -200,8 +230,8 @@
 ## 7. 进度
 
 - [x] 评估（本文档）
-- [ ] 改造一：会话存储上 `VdfsProvider`
-- [ ] 改造二：配置地址化，废弃 `CONFIG_GET`/`CONFIG_SET`
+- [~] 改造一：会话存储的寻址与 VDFS 的关系（寻址已合一 `19e1c87`；§5 的 #3 / #4 未做）
+- [x] 改造二：配置地址化，废弃 `CONFIG_GET`/`CONFIG_SET`（S1 / S2 / S4 / S5 / S6）
 - [ ] P2-1 / P2-4 顺带收敛
 
 ### 已落地
@@ -211,3 +241,34 @@
   `symbio_core::schemas::detail`；`setting::validate_section` 与三个自由函数删除
   （-195 行）；`DetailDefinition.load_path` / `save_path` 删除（P1-3 的机制侧旁路）；
   `vdfs_provider.rs` 模块文档的「root 级 provider」改为「目录合成」（P3-1）。
+
+- **S2 配置文档实现**：`providers/vdfs_service/config.rs` 新增 `ConfigDoc`
+  （节点形状 / 定义校验 / 切片推送；**值 + 一组函数，不是 trait**）+
+  `SEG_CONFIG` / `is_config_path`；`paths.rs` 删 `CONFIG_GET`/`CONFIG_SET`、
+  增 `SAVE_CONFIG`；`schemas/common.rs` 新增 `ConfigSlice { plugin, config }`
+  （载荷契约的唯一定义，`ConfigDoc::persist` 与各插件共用）。
+
+- **S4 四个插件接入**（local / web / gateway / session）：删除各自的
+  `CONFIG_GET`/`CONFIG_SET` 分支；`config_definition()` **回归配置的拥有者**
+  （默认值从各自的 `Default` 读出，不再有第二份字面量）；`local` / `web` /
+  `gateway` 直接以 `ConfigDoc` 为挂载内容，`session` 在自身资源树里分流 `配置` 段。
+  网关的只读白名单同步收紧：拒绝对 `<挂载点>/配置` 的 `vdfs/read`（配置含凭据）。
+
+- **S5 持久化改推送 + 其余插件**：`composite` 删配置聚合分支（只向上转发
+  `SAVE_CONFIG`，不解释）；`home` 的 `save_config` 改为收切片 →
+  按 `plugin_provider` 定位既有键 → 逐键合并 → 原子落盘（新增 `merge_slice` /
+  `flush`，删除 `collect_plugin_configs`）；`model` / `mcp` / `telegram`
+  删两个协议分支——`model` 的 `persist_to_parent` 改为推
+  `ConfigSlice { plugin: "model", config: { default_provider_id } }`，
+  `mcp` / `telegram` 顺带删掉已无用的 `parent` 字段与访问器，
+  `telegram` 新增 `.vdfs/telegram/配置` 配置文档（原配置无任何地址）。
+
+- **S6 setting 瘦身 + 前端清理**：`setting` 变为**无状态 provider**（794 → ~250 行），
+  `SETTING_SECTIONS` 从 6 项减为 `appearance` / `about` 两项，`route` 恒 `NotFound`，
+  `read`/`write` 对分区恒 `Forbidden`；前端删 `DetailForm` 的 `config` 绑定
+  （`configSaving` / `load_path` / `save_path` / `saveConfig`）、
+  `schemas/vdfs-form.ts` 的 `load_path` / `save_path`、`VdfsFormDetail` 的通道适配
+  与 `DetailFormConfig.spec.ts`。
+
+- **门禁**：`cargo check --tests` 零错误零告警；`cargo test --lib` 全绿；
+  `vue-tsc --noEmit` 通过；`vitest run` 18 文件 / 140 用例全绿。

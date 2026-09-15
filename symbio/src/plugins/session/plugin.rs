@@ -13,6 +13,8 @@
 
 use super::chat_session::ChatSession;
 use super::types::Session;
+use crate::providers::vdfs_service::config::{self, ConfigDoc};
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::session_chat_response;
@@ -20,7 +22,7 @@ pub use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginFrame, PluginMeta,
-    PluginPayload, CONFIG_GET, CONFIG_SET, PLUGIN_SESSION,
+    PluginPayload, PLUGIN_SESSION,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -32,6 +34,8 @@ use tokio::sync::{OnceCell, RwLock};
 /// Session 插件
 pub struct SessionPlugin {
     pub(crate) config: Arc<RwLock<SessionConfig>>,
+    /// 配置文档（`.vdfs/session/配置`）——节点形状 / 校验 / 落盘推送给它
+    pub(crate) config_doc: ConfigDoc,
     /// 父插件引用（用于获取工具列表等）
     pub(crate) parent: Option<Weak<dyn Plugin>>,
     /// 活跃会话管理器 (V2 整合版：处理长连接与广播)
@@ -67,6 +71,7 @@ impl SessionPlugin {
         workdir_watches.set_vdfs_sender(change_tx.clone());
         Self {
             config: Arc::new(RwLock::new(config)),
+            config_doc: ConfigDoc::new(PLUGIN_SESSION, "会话设置", config_definition()),
             parent,
             active_mgr: Arc::new(super::active::ActiveSessionManager::new()),
             store: OnceCell::new(),
@@ -348,10 +353,6 @@ impl Plugin for SessionPlugin {
             "chat/delete_message" => self.invoke_delete_message(ctx.clone()).await?,
             "chat/update_message" => self.invoke_update_message(ctx.clone()).await?,
             "update" => self.invoke_update(ctx.clone()).await?,
-            // 会话配置分区的读写通道（`config` 绑定的 `load_path` / `save_path`）；
-            // 字段定义不再经 `config/schema`——它随详情定义以节点 `schema` 下发。
-            CONFIG_GET => self.invoke_config_get().await?,
-            CONFIG_SET => self.invoke_config_set(ctx.clone()).await?,
             // 级联选项机制：会话是选项宿主，根选项列表在全项目收集后一次下发
             // （子层经 payload.parent 懒加载，与 vdfs/list 的 parent 懒加载同构）
             OPTIONS_LIST => return super::options::handle_list_options(self.as_ref(), ctx).await,
@@ -857,6 +858,52 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+// ==================== 配置文档（`.vdfs/session/配置`） ====================
+
+/// 会话配置的定义 —— **定义由配置的拥有者产出**。
+///
+/// 字段默认值一律从 [`SessionConfig::default()`] 读出，不写第二份字面量：
+/// 历史上定义寄居在 setting 插件里，schema 与 serde 各写一份默认值，出现过
+/// `max_tool_rounds` schema=15 而 serde=65535 的漂移（面板显示的默认值与
+/// 实际行为不符）。不变式由 `config_definition_defaults_come_from_session_config`
+/// 锁定。
+fn config_definition() -> DetailDefinition {
+    let d = SessionConfig::default();
+    DetailDefinition::form(
+        "会话设置",
+        vec![
+            DetailField::number(
+                "max_messages",
+                "最大消息数",
+                "每个会话保存的最大消息数量",
+                10.0,
+                1000.0,
+                json!(d.max_messages),
+            ),
+            DetailField::toggle(
+                "auto_compress",
+                "自动压缩",
+                "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）",
+                d.auto_compress,
+            ),
+            DetailField::toggle(
+                "enable_compact_tool",
+                "工具压缩",
+                "向模型提供主动压缩工具（context_compact）与 55% 水位提醒；关闭后仅保留自动压缩兜底",
+                d.enable_compact_tool,
+            ),
+            DetailField::number(
+                "context_messages",
+                "上下文消息数量",
+                "Model 对话时包含的上下文消息数量（0 表示不限制，6 表示 3 轮对话）",
+                0.0,
+                200.0,
+                json!(d.context_messages),
+            ),
+        ],
+    )
+}
+
 #[async_trait]
 impl vdfs::VdfsProvider for SessionPlugin {
     fn label(&self) -> Option<&str> {
@@ -891,13 +938,22 @@ impl vdfs::VdfsProvider for SessionPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
+        // 保留段优先：`配置` 是配置文档，不是会话
+        if config::is_config_path(path) {
+            return Err(vdfs::VdfsError::not_found(format!(
+                "配置是文档，没有子项：{path}"
+            )));
+        }
         match parse_session_path(path)? {
             VdfsSessionPath::Root => {
                 let sessions = self
                     .list_sessions()
                     .await
                     .map_err(vdfs::from_plugin_error)?;
-                Ok(self.nodes_of_sessions(&sessions).await)
+                let mut nodes = self.nodes_of_sessions(&sessions).await;
+                // 本插件的配置文档与资源并列（保留段，排在资源之后）
+                nodes.push(self.config_doc.node());
+                Ok(nodes)
             }
             // 会话内部：三个虚拟子目录（会话存在性校验由 `session_of` 承担）
             VdfsSessionPath::Session(id) => {
@@ -939,6 +995,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
     }
 
     async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
+        // 保留段优先：`配置` 是配置文档，不是会话
+        if config::is_config_path(path) {
+            return Ok(self.config_doc.node());
+        }
         match parse_session_path(path)? {
             VdfsSessionPath::Root => {
                 // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
@@ -1006,6 +1066,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
         _ctx: &vdfs::VdfsContext,
         path: &str,
     ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
+        // 保留段优先：`配置` 是配置文档，不是会话
+        if config::is_config_path(path) {
+            return self.config_doc.read(&self.config).await;
+        }
         match parse_session_path(path)? {
             VdfsSessionPath::Session(id) => {
                 let session = self.session_of(id).await?;
@@ -1046,10 +1110,14 @@ impl vdfs::VdfsProvider for SessionPlugin {
     /// 前端与 LLM 在**同一个地址**上读同一份数据，写入的唯一入口依旧只有一处。
     async fn write(
         &self,
-        _ctx: &vdfs::VdfsContext,
+        ctx: &vdfs::VdfsContext,
         path: &str,
         content: &vdfs::VdfsContent,
     ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
+        // 保留段优先：`配置` 是配置文档，不是会话
+        if config::is_config_path(path) {
+            return self.config_doc.apply(ctx, &self.config, content).await;
+        }
         // 工作目录分支：文件写回（与列读同一份实现——路径越界校验 + 落盘）
         match parse_session_path(path)? {
             VdfsSessionPath::Workdir { id, rel } if !rel.is_empty() => {
@@ -1146,6 +1214,12 @@ impl vdfs::VdfsProvider for SessionPlugin {
         path: &str,
         _recursive: bool,
     ) -> vdfs::VdfsResult<()> {
+        // 保留段优先：配置文档恒在，不可删
+        if config::is_config_path(path) {
+            return Err(vdfs::VdfsError::Forbidden(
+                "配置文档不可删除".to_string(),
+            ));
+        }
         match parse_session_path(path)? {
             VdfsSessionPath::Root => {
                 Err(vdfs::VdfsError::Forbidden("会话挂载根不可删除".to_string()))
@@ -1795,5 +1869,74 @@ mod tests {
             p.watch_tasks.lock().await.is_empty(),
             "unwatch 必须移除任务"
         );
+    }
+
+    // ==================== 配置文档（`.vdfs/session/配置`） ====================
+
+    /// **定义与配置同源**：面板字段的默认值一律来自 `SessionConfig::default()`，
+    /// 且 serde 默认值函数与 `Default` impl 不漂移（两处各自书写必然漂移）。
+    #[test]
+    fn config_definition_defaults_come_from_session_config() {
+        let defaults = serde_json::to_value(SessionConfig::default()).unwrap();
+        let def = config_definition();
+        let fields = &def.sections[0].fields;
+        assert!(!fields.is_empty(), "会话配置必须有字段");
+        for f in fields {
+            let declared = f
+                .default
+                .clone()
+                .unwrap_or_else(|| panic!("字段 {} 缺少 default", f.key));
+            let actual = defaults
+                .get(&f.key)
+                .unwrap_or_else(|| panic!("SessionConfig 不存在字段 {}", f.key));
+            assert_eq!(
+                &declared, actual,
+                "面板 {}.default={declared} 与 SessionConfig::default().{}={actual} 不一致",
+                f.key, f.key
+            );
+        }
+
+        let from_empty: SessionConfig =
+            serde_json::from_str("{}").expect("空对象应能反序列化出默认配置");
+        assert_eq!(
+            serde_json::to_value(&from_empty).unwrap(),
+            defaults,
+            "SessionConfig 的 serde 默认值与 Default impl 漂移了（两处各自书写）"
+        );
+    }
+
+    /// 配置文档与资源并列在根下（保留段排在资源之后），且是 `ext = form` 的可写文档
+    #[tokio::test]
+    async fn config_document_sits_beside_the_sessions() {
+        let p = SessionPlugin::new(None, SessionConfig::default());
+        let items = p.list(&vctx(), "").await.unwrap();
+        let last = items.last().expect("根下至少应有配置文档");
+        assert_eq!(last.name, config::SEG_CONFIG);
+        assert_eq!(last.ext.as_deref(), Some(vdfs::VFDS_EXT_FORM));
+        assert_eq!(last.access.flags(), "rw");
+        assert!(last.schema.is_some(), "定义随节点下发");
+
+        // `配置` 是保留段：不会被当成会话 id
+        assert_eq!(p.stat(&vctx(), config::SEG_CONFIG).await.unwrap().name, config::SEG_CONFIG);
+        let content = p.read(&vctx(), config::SEG_CONFIG).await.unwrap();
+        let cfg: SessionConfig = serde_json::from_str(content.text.as_deref().unwrap()).unwrap();
+        assert_eq!(cfg.max_messages, SessionConfig::default().max_messages);
+
+        // 文档没有子项，也不可删除
+        assert!(p.list(&vctx(), config::SEG_CONFIG).await.is_err());
+        assert!(p.delete(&vctx(), config::SEG_CONFIG, false).await.is_err());
+    }
+
+    /// 配置写入：校验先于一切（字段级错误），坏值不会改动内存
+    #[tokio::test]
+    async fn config_write_validates_before_applying() {
+        let p = SessionPlugin::new(None, SessionConfig::default());
+        let before = p.config.read().await.max_messages;
+        let bad = vdfs::VdfsContent::text("", r#"{"max_messages": 1}"#);
+        match p.write(&vctx(), config::SEG_CONFIG, &bad).await {
+            Err(vdfs::VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "max_messages"),
+            other => panic!("应为字段级校验错误，实得 {other:?}"),
+        }
+        assert_eq!(p.config.read().await.max_messages, before);
     }
 }

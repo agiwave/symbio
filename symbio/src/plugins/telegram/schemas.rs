@@ -11,12 +11,38 @@ pub struct TelegramConfig {
     pub streaming_enabled: bool,
     #[serde(default = "default_true")]
     pub poll_enabled: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "user_ids")]
     pub allowed_users: Vec<i64>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// `allowed_users` 的宽松反序列化：同时接受数字数组与数字字符串数组。
+///
+/// 落盘形态是数字数组（`config.yaml`），而配置文档的 `list` widget 提交的是
+/// **每行一项的字符串数组**。两种形态都是「用户 ID 列表」，转换放在这里，
+/// 插件不必为此分出一套中间类型。
+fn user_ids<'de, D>(de: D) -> Result<Vec<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+
+    let raw = Vec::<serde_json::Value>::deserialize(de)?;
+    raw.iter()
+        .map(|v| match v {
+            serde_json::Value::Number(n) => n
+                .as_i64()
+                .ok_or_else(|| D::Error::custom(format!("用户 ID 必须是整数：{n}"))),
+            serde_json::Value::String(s) => s
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| D::Error::custom(format!("「{s}」不是合法的 Telegram 用户 ID"))),
+            other => Err(D::Error::custom(format!("用户 ID 必须是整数：{other}"))),
+        })
+        .collect()
 }
 
 impl Default for TelegramConfig {

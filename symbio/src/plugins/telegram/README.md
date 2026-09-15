@@ -28,4 +28,10 @@ telegram:
 | `start_listener` | 启动消息监听 |
 | `stop_listener` | 停止消息监听 |
 | `status` | 查询 Bot 状态 |
-| `config/get` / `config/set` | 读写 `bot_token` / `allowed_chat_ids` 等配置 |
+
+## 配置
+
+`bot_token` / `chat_id` / `streaming_enabled` / `poll_enabled` / `allowed_users`
+是**可寻址的配置文档**：`.vdfs/telegram/配置`（`ext = form`，字段定义随节点
+`schema` 下发）。读写走 `vdfs/read` / `vdfs/write`，落盘由本插件推
+`save_config` 切片完成——不再有 `config/get` / `config/set` 路由。
