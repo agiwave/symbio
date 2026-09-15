@@ -370,7 +370,7 @@ fn read_sessions_in(dir: &Path) -> Vec<Session> {
 }
 
 /// 清单排序：`updated_at` 降序（两种驻留方式共用同一份，清单顺序不分叉）
-fn sort_by_updated_desc(sessions: &mut Vec<Session>) {
+fn sort_by_updated_desc(sessions: &mut [Session]) {
     sessions.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
 }
 

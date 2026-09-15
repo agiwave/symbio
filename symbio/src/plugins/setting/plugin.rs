@@ -190,7 +190,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_returns_sections_in_declared_order() {
-        let plugin = SettingPlugin::default();
+        let plugin = SettingPlugin;
         let items = plugin.list(&vctx(), "").await.unwrap();
 
         // 固定清单、按声明顺序（前端据此展示，不做二次排序）。
@@ -220,7 +220,7 @@ mod tests {
     /// （见 `traverse` 里的 `register_vdfs_provider(PLUGIN_SETTING, ..)`）
     #[tokio::test]
     async fn vdfs_self_description_has_no_mount() {
-        let p = SettingPlugin::default();
+        let p = SettingPlugin;
         assert_eq!(p.label(), Some("设置"));
         assert_eq!(p.icon(), Some("settings"));
         assert_eq!(p.order(), 6);
@@ -233,7 +233,7 @@ mod tests {
     /// 分区是叶子：不参与树遍历，也不接受新建
     #[tokio::test]
     async fn sections_are_leaves_without_new_types() {
-        let p = SettingPlugin::default();
+        let p = SettingPlugin;
         assert_eq!(p.root_access(), VdfsAccess::LIST);
         assert!(p.root_new_types().is_empty());
 
@@ -245,7 +245,7 @@ mod tests {
     /// 前端自持分区在 VDFS 侧无正文：读写都明确拒绝（而非静默返回空）
     #[tokio::test]
     async fn frontend_owned_sections_reject_read_and_write() {
-        let p = SettingPlugin::default();
+        let p = SettingPlugin;
         assert!(matches!(
             p.read(&vctx(), "appearance").await,
             Err(VdfsError::Forbidden(_))
