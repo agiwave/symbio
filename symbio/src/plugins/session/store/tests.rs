@@ -33,6 +33,52 @@ async fn top_level_sessions_stay_flat() {
     assert_eq!(listed[0].id, "v2_sess_aaa");
 }
 
+/// `load_session_checked` 是存在性判据：命中给 `Some`、未命中给 `None`（而不是空
+/// 会话），且**按 id 直取**——嵌套子会话同样命中，无需先列全量清单再 `find`
+#[tokio::test]
+async fn load_session_checked_distinguishes_missing_from_empty() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+    save(&store, &session_with("v2_sess_parent", None)).await;
+    save(
+        &store,
+        &session_with("v2_sess_child", Some("v2_sess_parent")),
+    )
+    .await;
+
+    // 命中：顶层与嵌套子会话都凭自身 id 直取
+    for id in ["v2_sess_parent", "v2_sess_child"] {
+        let got = store.load_session_checked(id).await.unwrap();
+        assert_eq!(got.map(|s| s.id), Some(id.to_string()), "{id} 应命中");
+    }
+
+    // 未命中：`None`——这正是 `load_session`（返回空会话）无法给出的区分
+    assert!(store
+        .load_session_checked("v2_sess_none")
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        store.load_session("v2_sess_none").await.unwrap().id,
+        "v2_sess_none",
+        "同一份存储上 load_session 仍按「未命中 = 空会话」回答"
+    );
+
+    // 不落盘型同契约
+    let mem = SessionStore::ephemeral();
+    assert!(mem
+        .load_session_checked("v2_sess_none")
+        .await
+        .unwrap()
+        .is_none());
+    save(&mem, &session_with("v2_sess_mem", None)).await;
+    assert!(mem
+        .load_session_checked("v2_sess_mem")
+        .await
+        .unwrap()
+        .is_some());
+}
+
 #[tokio::test]
 async fn sub_session_routes_into_parent_dir() {
     let tmp = TempDir::new().unwrap();

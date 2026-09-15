@@ -1346,13 +1346,14 @@ impl SessionPlugin {
     }
 
     /// 按 id 取会话（**存在性校验**：`load_session` 对未命中会返回空会话，
-    /// 因此这里以清单为准判定存在性）
+    /// 因此这里走带存在性判据的 `load_session_checked`）
     async fn session_of(&self, id: &str) -> vdfs::VdfsResult<Session> {
-        self.list_sessions()
+        self.get_store()
             .await
             .map_err(vdfs::from_plugin_error)?
-            .into_iter()
-            .find(|s| s.id == id)
+            .load_session_checked(id)
+            .await
+            .map_err(vdfs::from_plugin_error)?
             .ok_or_else(|| vdfs::VdfsError::not_found(format!("会话不存在：{id}")))
     }
 

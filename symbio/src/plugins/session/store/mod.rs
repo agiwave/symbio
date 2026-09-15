@@ -120,11 +120,23 @@ impl SessionStore {
     /// 加载指定会话；**不存在时返回新建的空 Session**（不报错——"没有"与
     /// "读坏了"是两件事，后者才该失败）
     pub async fn load_session(&self, session_id: &str) -> Result<Session, PluginError> {
+        Ok(self
+            .load_session_checked(session_id)
+            .await?
+            .unwrap_or_else(|| Session::new(session_id)))
+    }
+
+    /// 加载指定会话；**不存在时返回 `None`**。
+    ///
+    /// 与 [`Self::load_session`] 的差别只在未命中：那个版本把「没有」也归成空会话，
+    /// 于是调用方拿不到存在性判据。需要区分两者时（VDFS 的 `stat` / `read` 必须对
+    /// 不存在的会话报 `NotFound`）用本方法——**按 id 直取**，不必先列全量清单再 `find`。
+    pub async fn load_session_checked(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<Session>, PluginError> {
         let Some(base) = self.disk() else {
-            return match self.mem.read().await.get(session_id) {
-                Some(session) => Ok(session.clone()),
-                None => Ok(Session::new(session_id)),
-            };
+            return Ok(self.mem.read().await.get(session_id).cloned());
         };
 
         let path = file_for(base, session_id);
@@ -133,7 +145,7 @@ impl SessionStore {
                 .await
                 .map_err(|e| PluginError::InternalError(format!("读取会话文件失败: {e}")))?;
             return match parse_session_content(&content) {
-                Some(s) => Ok(s),
+                Some(s) => Ok(Some(s)),
                 None => Err(PluginError::ParseError(
                     "解析会话失败: 内容无法恢复".to_string(),
                 )),
@@ -141,11 +153,9 @@ impl SessionStore {
         }
         // 顶层未命中：嵌套查找（子会话凭自身 id 直接寻址）
         if let Some(dir) = find_nested_dir(base, session_id) {
-            if let Some(s) = read_session_file(&dir.join(SESSION_FILE)) {
-                return Ok(s);
-            }
+            return Ok(read_session_file(&dir.join(SESSION_FILE)));
         }
-        Ok(Session::new(session_id))
+        Ok(None)
     }
 
     // ==================== 写 / 删 ====================
