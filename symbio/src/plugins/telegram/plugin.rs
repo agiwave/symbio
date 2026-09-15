@@ -670,8 +670,6 @@ impl TelegramPlugin {
         self.handle_get_updates().await
     }
 
-
-
     async fn invoke_set_chat_id(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
         let new_cfg: TelegramConfig = ctx.payload()?;
 

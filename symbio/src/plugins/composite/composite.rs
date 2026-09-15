@@ -24,10 +24,10 @@
 
 use super::vdfs::CompositeVdfs;
 use crate::symbio_core::{
-    create_object, has_creator, plugins_root, InvokeRequest, InvokeRequestExt,
-    InvokeResponse, Plugin, PluginError, PluginMeta, PluginPayload, PluginDir, SimpleRequest,
-    VdfsProvider, CAPABILITY_VISITOR, KEY_PROVIDER, PATH, PLUGIN_COMPOSITE, PLUGIN_DIR,
-    PLUGIN_FILE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_TOOLS,
+    create_object, has_creator, plugins_root, InvokeRequest, InvokeRequestExt, InvokeResponse,
+    Plugin, PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, VdfsProvider,
+    CAPABILITY_VISITOR, KEY_PROVIDER, PATH, PLUGIN_COMPOSITE, PLUGIN_DIR, PLUGIN_FILE,
+    REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_TOOLS,
 };
 
 use serde_json::Value;
@@ -161,11 +161,7 @@ impl Composite {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 crate::plugin_warn!("composite", "插件根不存在：{}", root.display());
             }
-            Err(e) => crate::plugin_warn!(
-                "composite",
-                "读取插件根失败 {}：{e}",
-                root.display()
-            ),
+            Err(e) => crate::plugin_warn!("composite", "读取插件根失败 {}：{e}", root.display()),
         }
         names.sort();
 
@@ -174,10 +170,7 @@ impl Composite {
             let provider = match Self::provider_of(&dir) {
                 Ok(p) => p,
                 Err(e) => {
-                    crate::plugin_warn!(
-                        "composite",
-                        "跳过插件目录（配置不符合要求）{name}：{e}"
-                    );
+                    crate::plugin_warn!("composite", "跳过插件目录（配置不符合要求）{name}：{e}");
                     continue;
                 }
             };

@@ -2,7 +2,7 @@
 
 `.vdfs/setting` 挂载点的实现者：只承载**前端状态自持**的设置分区
 （`appearance` / `about`）。插件配置不在这里——各插件的配置归各插件自己
-（如 `.vdfs/session/配置`、`.vdfs/local/配置`）。
+（如 `.vdfs/session/PLUGIN.yml`、`.vdfs/local/PLUGIN.yml`）。
 
 ## 路由
 

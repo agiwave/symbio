@@ -207,7 +207,7 @@ impl Plugin for GatewayPlugin {
     }
 }
 
-// ==================== VDFS：配置文档（`.vdfs/gateway/配置`） ====================
+// ==================== VDFS：配置文档（`.vdfs/gateway/PLUGIN.yml`） ====================
 
 #[async_trait]
 impl vdfs::VdfsProvider for GatewayPlugin {
@@ -290,7 +290,9 @@ crate::submit_object_creator!(PLUGIN_GATEWAY, GatewayPlugin::build, dyn Plugin);
 mod tests {
     use super::*;
     use crate::symbio_core::vdfs::{VdfsContext, VdfsError, VdfsProvider};
-    use crate::symbio_core::{InvokeRequestExt, InvokeResponse, Plugin, PluginPayload, SimpleRequest};
+    use crate::symbio_core::{
+        InvokeRequestExt, InvokeResponse, Plugin, PluginPayload, SimpleRequest,
+    };
 
     /// 以子插件直接收的**已剥离前缀**路径（如 `status`）调用 route，
     /// 模拟 home composite 转发后的行为。

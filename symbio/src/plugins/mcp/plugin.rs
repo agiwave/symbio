@@ -602,10 +602,7 @@ impl Plugin for McpPlugin {
 
     /// mcp 已无自有路由：每个 MCP Server 都是 VDFS 上的一个可寻址条目
     /// （`.vdfs/mcp/<name>`，见 `impl VdfsProvider`），配置因此没有第二条入口。
-    async fn route(
-        self: Arc<Self>,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+    async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!(
             "{PLUGIN_MCP} 已无自有路由，请改用 VDFS 地址"
         )))

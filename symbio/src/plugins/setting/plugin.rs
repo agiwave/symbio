@@ -7,7 +7,7 @@
 //! `route_config` 代理到 `<prefix>/config/get|set`。那是横向耦合的典型——
 //! 同一份配置有两个地址，定义与校验寄居在不是配置拥有者的插件里。
 //!
-//! 配置地址化之后，四个分区各自回到拥有者名下（`.vdfs/<插件>/配置`），
+//! 配置回到插件目录之后，四个分区各自回到拥有者名下（`.vdfs/<插件>/PLUGIN.yml`），
 //! 本插件只保留两个**前端自持**的分区：
 //!
 //! - `appearance`（外观）：取值与保存都在前端 store（即时生效），VDFS 侧无数据；
@@ -17,8 +17,8 @@
 //! 前端按 `ext → 渲染器` 的纯 UI 映射回退到各自的专属 editor。
 
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta, PluginPayload,
-    PLUGIN_SETTING,
+    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
+    PluginPayload, PLUGIN_SETTING,
 };
 use std::sync::Arc;
 

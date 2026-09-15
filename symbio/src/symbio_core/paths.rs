@@ -15,16 +15,6 @@
 //!
 //! 命名约定：`<PLUGIN>_<OPERATION>` 形式，全部大写下划线
 
-// ============ 宿主（home）============
-/// save_config — 插件把自己的**配置切片**推给宿主落盘
-///
-/// 载荷 [`ConfigSlice`](crate::symbio_core::schemas::common::ConfigSlice)
-/// （`{ plugin: <插件名>, config: <配置对象> }`）：宿主只负责按插件定位既有键并
-/// 合并写入 `config.yaml`，**不反向拉取**任何插件的配置。
-///
-/// 「插件读配置」不在这里——它是一条普通的 VDFS 读取（`<挂载根>/配置`）。
-pub const SAVE_CONFIG: &str = "save_config";
-
 // ============ Session 插件 ============
 /// session/open — 创建/打开会话
 pub const SESSION_OPEN: &str = "session/open";

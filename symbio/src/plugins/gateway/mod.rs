@@ -4,7 +4,7 @@
 //!
 //! 1. **入站（inbound）**：按配置启动/停止对外 HTTP/WebSocket 服务，使第三方或另一个
 //!    Symbio 实例能像前端一样访问本应用。
-//! 2. **配置**：`.vdfs/gateway/配置` 这一个可寻址文档（`ext = form`，字段定义随节点
+//! 2. **配置**：`.vdfs/gateway/PLUGIN.yml` 这一个可寻址文档（`ext = form`，字段定义随节点
 //!    `schema` 下发），读写走 `vdfs/read` / `vdfs/write`。
 //!
 //! ## 出站（前端连向何处）不在本插件范畴

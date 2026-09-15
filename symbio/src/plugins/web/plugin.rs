@@ -22,7 +22,12 @@ fn config_definition() -> DetailDefinition {
     DetailDefinition::form(
         "网络工具设置",
         vec![
-            DetailField::toggle("web_enabled", "启用 Web 工具", "允许网络请求", d.web_enabled),
+            DetailField::toggle(
+                "web_enabled",
+                "启用 Web 工具",
+                "允许网络请求",
+                d.web_enabled,
+            ),
             DetailField::number(
                 "web_timeout",
                 "Web 超时（秒）",

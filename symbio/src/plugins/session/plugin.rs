@@ -863,7 +863,7 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-// ==================== 配置文档（`.vdfs/session/配置`） ====================
+// ==================== 配置文档（`.vdfs/session/PLUGIN.yml`） ====================
 
 /// 会话配置的定义 —— **定义由配置的拥有者产出**。
 ///
@@ -1221,9 +1221,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
     ) -> vdfs::VdfsResult<()> {
         // 配置文件恒在，不可删
         if path == PLUGIN_FILE {
-            return Err(vdfs::VdfsError::Forbidden(
-                "配置文件不可删除".to_string(),
-            ));
+            return Err(vdfs::VdfsError::Forbidden("配置文件不可删除".to_string()));
         }
         match parse_session_path(path)? {
             VdfsSessionPath::Root => {
@@ -1879,7 +1877,7 @@ mod tests {
         );
     }
 
-    // ==================== 配置文档（`.vdfs/session/配置`） ====================
+    // ==================== 配置文档（`.vdfs/session/PLUGIN.yml`） ====================
 
     /// **定义与配置同源**：面板字段的默认值一律来自 `SessionConfig::default()`，
     /// 且 serde 默认值函数与 `Default` impl 不漂移（两处各自书写必然漂移）。
@@ -1925,7 +1923,10 @@ mod tests {
         assert!(last.schema.is_some(), "定义随节点下发");
 
         // 配置文件不是会话 id：按文件读，不按会话解析
-        assert_eq!(p.stat(&vctx(), PLUGIN_FILE).await.unwrap().name, PLUGIN_FILE);
+        assert_eq!(
+            p.stat(&vctx(), PLUGIN_FILE).await.unwrap().name,
+            PLUGIN_FILE
+        );
         let content = p.read(&vctx(), PLUGIN_FILE).await.unwrap();
         let cfg: SessionConfig = serde_json::from_str(content.text.as_deref().unwrap()).unwrap();
         assert_eq!(cfg.max_messages, SessionConfig::default().max_messages);

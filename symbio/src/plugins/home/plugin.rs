@@ -86,7 +86,9 @@ pub struct HomeConfig {
 impl HomeConfig {
     /// 确保 `work` 节点存在（首次启动时给一个可写的空壳）
     pub fn ensure_defaults(&mut self) {
-        self.work.entry("workdir".to_string()).or_insert_with(|| Value::String(String::new()));
+        self.work
+            .entry("workdir".to_string())
+            .or_insert_with(|| Value::String(String::new()));
         self.work
             .entry("recent_workspaces".to_string())
             .or_insert_with(|| Value::Array(Vec::new()));
@@ -173,11 +175,7 @@ impl HomePlugin {
             .ok()
             .and_then(|text| serde_yaml_ng::from_str(&text).ok());
         let Some(symbio) = parsed.as_ref().and_then(|v| v.get("symbio")).cloned() else {
-            plugin_warn!(
-                "home",
-                "旧配置无法解析，跳过迁移：{}",
-                path.display()
-            );
+            plugin_warn!("home", "旧配置无法解析，跳过迁移：{}", path.display());
             return None;
         };
 

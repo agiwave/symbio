@@ -124,10 +124,19 @@ mod tests {
 
         // 拒绝：读**插件配置文件**——配置可能含凭据（网关访问令牌、
         // 搜索服务 API Key），放行等于只读模式下就能把它们读走
-        assert!(!is_readonly_allowed("vdfs/read", &at(".vdfs/gateway/PLUGIN.yml")));
-        assert!(!is_readonly_allowed("vdfs/read", &at(".vdfs/web/PLUGIN.yml")));
+        assert!(!is_readonly_allowed(
+            "vdfs/read",
+            &at(".vdfs/gateway/PLUGIN.yml")
+        ));
+        assert!(!is_readonly_allowed(
+            "vdfs/read",
+            &at(".vdfs/web/PLUGIN.yml")
+        ));
         // 配置文件的**节点**仍可 stat（节点只有 schema，无正文）
-        assert!(is_readonly_allowed("vdfs/stat", &at(".vdfs/web/PLUGIN.yml")));
+        assert!(is_readonly_allowed(
+            "vdfs/stat",
+            &at(".vdfs/web/PLUGIN.yml")
+        ));
         // 与配置文件无关的读不受影响
         assert!(is_readonly_allowed("vdfs/read", &at(".vdfs/web")));
     }

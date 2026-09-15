@@ -891,10 +891,7 @@ impl Plugin for ModelPlugin {
 
     /// model 已无自有路由：配置的读写在 VDFS 上（`.vdfs/model/<id>` 的详情表单，
     /// 以及节点动作 `set-default`），跨条目状态写自己的 `plugins/model/PLUGIN.yml`。
-    async fn route(
-        self: Arc<Self>,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+    async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!(
             "{PLUGIN_MODEL} 已无自有路由，请改用 VDFS 地址"
         )))

@@ -64,8 +64,8 @@ use crate::symbio_core::homedir::HomedirRegistry;
 use crate::symbio_core::schemas::detail::DetailDefinition;
 use crate::symbio_core::vdfs::host::notify_change;
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsResult, VdfsWriteResponse, VFDS_CHANGE_UPDATED,
-    VFDS_EXT_FORM,
+    VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsResult, VdfsWriteResponse,
+    VFDS_CHANGE_UPDATED, VFDS_EXT_FORM,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -216,7 +216,12 @@ impl PluginDir {
         map.remove(KEY_NAME);
         serde_json::from_value(Value::Object(map))
             .map(Some)
-            .map_err(|e| format!("{} 与当前版本的配置结构不符：{e}", self.config_path().display()))
+            .map_err(|e| {
+                format!(
+                    "{} 与当前版本的配置结构不符：{e}",
+                    self.config_path().display()
+                )
+            })
     }
 
     // ==================== 写 ====================
@@ -226,15 +231,17 @@ impl PluginDir {
     /// 同步实现：配置文件只有几百字节，且 `composite::build` 本身在同步上下文里
     /// 补默认配置——一处实现能同时服务装配期与运行期，不值得为此分两份。
     pub fn save<C: Serialize>(&self, value: &C) -> Result<(), String> {
-        let mut map = match serde_json::to_value(value)
-            .map_err(|e| format!("配置序列化失败：{e}"))?
-        {
-            Value::Object(m) => m,
-            other => {
-                return Err(format!("配置必须是映射，实得 {other}"));
-            }
-        };
-        map.insert(KEY_PROVIDER.to_string(), Value::String(self.provider.clone()));
+        let mut map =
+            match serde_json::to_value(value).map_err(|e| format!("配置序列化失败：{e}"))? {
+                Value::Object(m) => m,
+                other => {
+                    return Err(format!("配置必须是映射，实得 {other}"));
+                }
+            };
+        map.insert(
+            KEY_PROVIDER.to_string(),
+            Value::String(self.provider.clone()),
+        );
         map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
         self.write_map(&map)
     }
@@ -250,7 +257,10 @@ impl PluginDir {
             return Ok(());
         }
         let mut map = Map::new();
-        map.insert(KEY_PROVIDER.to_string(), Value::String(self.provider.clone()));
+        map.insert(
+            KEY_PROVIDER.to_string(),
+            Value::String(self.provider.clone()),
+        );
         map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
         self.write_map(&map)
     }
@@ -272,7 +282,10 @@ impl PluginDir {
             return Ok(());
         }
         // 身份字段恒在（手写的配置文件可能漏了它们）
-        map.insert(KEY_PROVIDER.to_string(), Value::String(self.provider.clone()));
+        map.insert(
+            KEY_PROVIDER.to_string(),
+            Value::String(self.provider.clone()),
+        );
         map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
         self.write_map(&map)
     }
@@ -280,8 +293,7 @@ impl PluginDir {
     fn write_map(&self, map: &Map<String, Value>) -> Result<(), String> {
         std::fs::create_dir_all(&self.dir)
             .map_err(|e| format!("创建插件目录 {} 失败：{e}", self.dir.display()))?;
-        let text =
-            serde_yaml_ng::to_string(map).map_err(|e| format!("配置序列化失败：{e}"))?;
+        let text = serde_yaml_ng::to_string(map).map_err(|e| format!("配置序列化失败：{e}"))?;
 
         // 原子写：先写临时文件再 rename 覆盖，避免并发写交错留下半截 YAML
         let path = self.config_path();
@@ -393,7 +405,9 @@ impl ConfigFile {
             .ok_or_else(|| VdfsError::invalid("配置写入需要文本（JSON）内容"))?;
         let value: Value = serde_json::from_str(text)
             .map_err(|e| VdfsError::invalid(format!("配置不是合法 JSON：{e}")))?;
-        self.definition.validate(&value).map_err(VdfsError::Invalid)?;
+        self.definition
+            .validate(&value)
+            .map_err(VdfsError::Invalid)?;
         Ok(value)
     }
 
@@ -528,7 +542,10 @@ mod tests {
         d.remove_keys(&["servers"]).unwrap();
         let text = std::fs::read_to_string(d.config_path()).unwrap();
         assert!(!text.contains("servers"), "{text}");
-        assert!(text.contains("_storage: plugins/x"), "未点名的键不动：{text}");
+        assert!(
+            text.contains("_storage: plugins/x"),
+            "未点名的键不动：{text}"
+        );
         assert!(text.contains("plugin_provider: demo"), "{text}");
 
         // 再摘一个不存在的键：文件不动
@@ -549,7 +566,10 @@ mod tests {
         assert_eq!(n.ext.as_deref(), Some(VFDS_EXT_FORM));
         assert_eq!(n.access.flags(), "rw");
         assert!(!n.is_dir(), "配置是文件而非目录");
-        assert_eq!(n.schema.as_ref().unwrap()["sections"][0]["fields"][0]["key"], "port");
+        assert_eq!(
+            n.schema.as_ref().unwrap()["sections"][0]["fields"][0]["key"],
+            "port"
+        );
     }
 
     /// 解码即校验：越界 / 缺必填 / 非 JSON 都拦在这里，且是**字段级**错误
