@@ -387,6 +387,23 @@
   `REQUIRED_PLUGINS` 随构造传入（`home::SYSTEM_PLUGINS`），使 `composite` 成为可嵌套的
   通用容器。
 
+- **S10 隐藏属性 + 设置页的插件配置清单**（改造三的两个收尾，见 §6.3 与 vdfs.md §3.2 / §13.1）：
+  ① **隐藏属性回归机制**——`VdfsNode::hidden`（文件 / 目录通用：列表里不出现、可达性不受
+  影响）+ `VdfsProvider::root_hidden()`（与 `root_access` / `root_status` / `root_new_types`
+  同构，容器合成该目录节点时回填）；过滤由**产出列表的一方**执行（容器对自己合成的子目录
+  清单与任何子 provider 交回来的 `list` 结果做同一条过滤）。`web` / `local` / `gateway`
+  三个「只有一份配置文档」的目录据此从左侧导航隐去。**未引入**「挂载索引 / 挂载清单」这类
+  中间物——provider 的根本来就是一个目录节点。② **第三条收集通道 `ConfigurableVisitor`**
+  （ctx 键 `CONFIG_VISITOR`）：与能力 / 选项并列，共用同一次 `traverse` 广播；插件侧唯一
+  入口 `announce_configurable(&ctx, &self.config_file)`，条目形状由 `entry_of(&ConfigFile)`
+  统一构造（名字 = 目录名、地址 = 真实地址 `<目录名>/PLUGIN.yml`、标题 / `ext` / 表单定义
+  取自 `ConfigFile::node()`）；容器用**共享**收集器（声明自带目录名，无归属歧义）并
+  **写回请求 ctx**，设置插件据此列清单——不反查插件目录、不硬编码插件表、协议零新增字段。
+  设置插件的 `list` 因此 = 自有分区 + 各插件交出来的配置条目（不代理读写，条目地址就是
+  拥有者那份文件）。前端只补 `setting:telegram` 图标（图标本就不进协议，按
+  `kind:<目录名>` 查 UI 映射表）。**词汇口径**：`mount` / `link` 都不进协议——VDFS 下一切
+  都是目录和文件，地址由节点自己的 `path` 表达。
+
 - **门禁**：`cargo check --tests` 零错误零告警；`cargo clippy --workspace --all-targets
   -- -D warnings` 通过；`cargo test --lib` 全绿（另顺带修掉两处既有 clippy 报错：
   `SettingPlugin::default()` × 4、`sort_by_updated_desc` 的 `&mut Vec`）；

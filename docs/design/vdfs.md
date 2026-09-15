@@ -213,6 +213,22 @@ D:/tmp/a.txt     绝对路径                          ─┘
 **目录与文件不做类型区分**：`access` 含 `l` 即可列（目录），含 `r` 即可读
 （文件）。`is_dir()` 的实现就是 `access.list`。
 
+**`hidden` 与文件系统的隐藏属性同义**，是**机制级的节点属性**：任何节点都可以带，
+与它是不是目录、属于哪个场景无关——provider 的根**本来就是一个目录节点**，所以
+「它在父目录的清单里显示还是隐藏」与文件 / 目录是同一件事。语义边界只有两条：
+
+- **列表里不出现**：父目录的 `list` 结果不含它（`children` 计数同理）；
+- **可达性不受影响**：按路径 `stat` / `read` / `write` / 子树操作一概照常。
+
+因此「隐藏」既不是权限（那是 §4 的访问位），也不代表节点不在系统里——它照旧存在，
+只是清单里不列。**过滤发生在产出列表的一方**：容器对自己合成的子目录清单、以及任何
+子 provider 交回来的 `list` 结果都做同一条过滤，所以标了 `hidden` 的子节点不因来自
+哪个 provider 而异。缺省不隐藏（序列化时省略）。
+
+典型用法：内容只有一份配置文档、没有用户资源可浏览的目录
+（`.vdfs/web` / `.vdfs/local` / `.vdfs/gateway`，见 §13.2）不必出现在导航列表里，
+但它们仍按 `.vdfs/<插件>/PLUGIN.yml` 完全可寻址。
+
 `kind` 与目录性**无关**：`dir` / `file` 只是构造器（`VdfsNode::dir` / `file`）给出的
 **缺省场景标签**，场景想表达别的语义（插件名、条目类别…）就直接覆盖它。因此
 `kind` 只有一个词表——「场景标签」，不存在「基础类型 + 场景类型」两套口径；目录性
@@ -223,7 +239,7 @@ D:/tmp/a.txt     绝对路径                          ─┘
 
 ```text
 path  name  title  description  kind  status  access  ext
-size  updated_at  children  binary  schema  new_types  attributes
+size  updated_at  children  binary  hidden  schema  new_types  attributes
 ```
 
 新增机制字段时须同步本节；场景侧的命名建议带上自己的前缀（如 `config_type`、
@@ -264,8 +280,8 @@ size  updated_at  children  binary  schema  new_types  attributes
 系统级插件（`home` 与容器 `composite`）的目录是系统根本身，配置在
 `<homedir>/PLUGIN.yml`。
 
-- **地址形状**：`<挂载根>/PLUGIN.yml`——**真实文件名**，不是保留段。挂载根恒为
-  目录（前端导航只列目录，§7），配置只是根下的一个普通文件；插件自身的资源 id
+- **地址形状**：`<插件目录>/PLUGIN.yml`——**真实文件名**，不是保留段。插件目录恒为
+  目录（前端导航只列目录，§7），配置只是它下面的一个普通文件；插件自身的资源 id
   与它不冲突（会话 id 是 UUID、模型 / MCP 的 id 由用户命名派生）。
 - **节点形状**：`ext = form`、`access = rw`、`schema` = 该插件自己的
   `DetailDefinition`。`ext` 显式声明为 `form`，**覆盖**由文件名推导出的 `yml`——
@@ -287,7 +303,10 @@ size  updated_at  children  binary  schema  new_types  attributes
   含遗留字段清理）与 `ConfigFile`（节点形状 + 定义校验 + 落盘）——
   **值 + 一组函数**，不是 trait：没有注册表、没有回调。
 - **凭据在配置里**：配置文件与其它节点一样受访问位约束（`r`），即**可读**。
-  对外暴露面（如网关的只读白名单）需自行拒绝落在 `<挂载根>/PLUGIN.yml` 上的读取。
+  对外暴露面（如网关的只读白名单）需自行拒绝落在 `<插件目录>/PLUGIN.yml` 上的读取。
+- **设置页只是「指路」**：设置插件的清单里会出现这些配置文档（见 §13.1），但条目
+  携带的是**它自己的真实地址**（`<插件目录>/PLUGIN.yml`），读写仍走拥有者——同一份
+  配置只有一个地址，设置页不代理读写、也不复制一份。
 
 ## 4. 访问位（r / w / l / t）
 
@@ -564,7 +583,7 @@ for child in children {
 
 1. 为模块实现 `VdfsProvider` —— **没有必填方法**：
    - 自描述按需：`label`（缺省由使用方以目录名代替）/ `description` / `order`
-     / `root_access` / `root_status` / `root_new_types`；
+     / `root_access` / `root_status` / `root_new_types` / `root_hidden`；
    - 数据操作按需实现 `list` / `stat` / `read` / `write` / `delete` / `mkdir`
      / `move_item` / `action` / `watch` / `unwatch`；未实现者保持默认
      （`NotImplemented`）。
@@ -615,8 +634,10 @@ for child in children {
   行号分页、`ignore` 过滤、精确字符串替换（保持换行符风格）、文件名 Glob
   均由访问层组合操作对齐。
 - **`CapabilityVisitor`**：由「工具 + 模型服务 + 系统提示词」扩展为
-  「+ VDFS 注册项 + `.vdfs` 服务者槽位」。全部共用一次 traverse 广播，
-  不引入新通道。
+  「+ VDFS 注册项 + `.vdfs` 服务者槽位」。与**选项**（`OptionVisitor`）、
+  **可配置**（`ConfigurableVisitor`，§13.1）一样，都搭同一次 traverse 广播的
+  便车：三条通道平行，各有自己的 ctx 键与降级行为（收集器缺席 = 当作没人声明），
+  不新造广播、也不互相依赖。
 - **容器**：容器是「目录 + 拓扑」的自然落点——它实现 `VdfsProvider` 并被装配为
   `.vdfs` 的服务者。容器**不必**认识任何具体资源：它只逐子插件收集，
   子目录内部层级由各 provider 的 `list` 表达。
@@ -662,19 +683,33 @@ for child in children {
 
 ## 13. 范例（实例，非机制组成部分）
 
-### 13.1 设置（setting）——只服务前端自持分区
+### 13.1 设置（setting）——自有分区 + 插件配置清单
 
 - 注册名 = 插件名 `PLUGIN_SETTING`（= `.vdfs/setting` 子目录）；`root_access = l`
-  （分区清单固定，每一项是叶子文档，不可 `t`）。provider 自身不含位置概念。
+  （清单固定，每一项是叶子文档，不可 `t`）。provider 自身不含位置概念。
 - 本插件是**无状态 provider**：`SETTING_SECTIONS` 只登记 `appearance` / `about`
   两个**前端状态自持**的分区（主题、版本信息等数据不在后端），`route` 恒
   `NotFound`。
 - 分区节点：`access = r`、`ext` = 分区 id（前端据此直接渲染专属面板，§7）。
   `read` / `write` 对它们恒 `Forbidden`——数据在前端 store。
-- 插件配置**不在这里**：各插件的配置归各插件自己的目录（§3.4），
-  如 `.vdfs/session/PLUGIN.yml`、`.vdfs/local/PLUGIN.yml`。原 `setting/config/get` /
+- 清单 = 自有分区 + **各插件自己交出来的配置条目**。条目的 `kind = setting`、
+  `name` = 插件目录名（前端图标键 `setting:<目录名>`）、`path` = 该插件配置文档的
+  **真实地址**（`<插件目录>/PLUGIN.yml`）。所以设置页只是「指路」：点开读写的还是
+  拥有者那份文件，本插件不代理读写、也不复制配置。
+- 插件配置**不再由本插件代存**：各插件的配置归各插件自己的目录（§3.4），如
+  `.vdfs/session/PLUGIN.yml`、`.vdfs/local/PLUGIN.yml`。原 `setting/config/get` /
   `setting/config/set` 与 `SETTING_SECTIONS` 里的 4 个插件分区（各自的 `prefix`
   与代理转发）已随之退场——那正是「同一份配置有两个地址」的根源。
+
+**可配置收集通道**（第三条收集通道，与能力 / 选项并列，见 §10.1）：插件在
+`traverse` 里调 `announce_configurable(&ctx, &self.config_file)`，声明「我有一份配置
+文档」。容器在 `children_of` 的那次广播里用一个**共享**收集器收下——不是像 VDFS
+provider 那样每个子插件一个：声明自带目录名，不存在归属歧义。收集结果**写回请求
+ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读到清单，因此**无需反查
+插件目录、无需硬编码插件表、也不需要协议上的新字段**。条目由
+`entry_of(&ConfigFile)` 生成，标题 / `ext` / `schema` 都取自 `ConfigFile::node()`；
+**图标不进协议**（前端 `kind:<目录名>` 的纯 UI 映射）。通道缺席时本插件照常只列
+自有分区。
 
 ### 13.2 组合容器（composite）——包含子目录列表的 provider
 
@@ -689,6 +724,12 @@ for child in children {
   汇总为 `(目录名, provider)` 清单（按 `order` 升序）。
 - 守卫：自身目录与子目录根不可读 / 写 / 删 / 移、`mkdir` 已存在报错、
   跨子目录移动被拒、子节点路径回填树内全路径、事件相对路径补全（§5）。
+- 隐藏属性：合成子目录节点时把子 provider 的 `root_hidden()` 回填进
+  `VdfsNode::hidden`，并据此过滤掉不该出现在清单里的子目录（§3.2）；委派回来的
+  `list` 结果同样过滤——隐藏是**机制级**属性，不因节点来自哪个 provider 而异。
+  `stat` 仍如实报告该属性（隐藏只影响列表，不影响可达性）。当前标为隐藏的是内容
+  仅一份配置文档的目录：`web` / `local` / `gateway`（各自的配置地址
+  `.vdfs/<插件>/PLUGIN.yml` 照常可寻址，也照常出现在设置页清单里）。
 - 在 `traverse` 中把该视图登记进 `register_vdfs_root` 槽位（§6.2）。
 
 **子插件从哪来：插件目录**（见 `symbio_core::plugin_dir`）。容器是**通用**容器
