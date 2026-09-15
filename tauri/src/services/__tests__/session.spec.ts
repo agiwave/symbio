@@ -80,4 +80,17 @@ describe('listSessions（.vdfs/session → SessionListItem）', () => {
     mockList([])
     await expect(listSessions()).resolves.toEqual([])
   })
+
+  it('挂载根下与资源并列的配置文档不进清单（按 ext 判据，不按名字特判）', async () => {
+    mockList([
+      sessionNode({ name: 'abc' }),
+      // 本插件的配置文档：保留段 `配置`，ext = form（见 docs/design/vdfs.md §3.4）
+      sessionNode({ name: '配置', title: '会话设置', ext: 'form' }),
+    ])
+
+    const out = await listSessions()
+
+    expect(out).toHaveLength(1)
+    expect(out[0].id).toBe('abc')
+  })
 })

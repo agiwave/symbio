@@ -6,7 +6,13 @@
 
 import { callPlugin } from './plugin'
 import { listVdfs } from './vdfs'
-import { VFDS_ROOT, VFDS_STATUS_WORKING, vdfsJoin } from '@/schemas/vdfs'
+import {
+  VFDS_EXT_SESSION,
+  VFDS_ROOT,
+  VFDS_STATUS_WORKING,
+  vdfsExtOf,
+  vdfsJoin,
+} from '@/schemas/vdfs'
 import { ChatMessage as SessionMessage } from '../schemas/chat_message'
 import * as SessionList from '../schemas/session_list'
 import * as SessionClear from '../schemas/session_clear'
@@ -30,21 +36,27 @@ export type { SessionMetadata } from '../schemas/session_meta'
  * `SessionListItem`，以便既有 `sessions` store / 对话组件保持兼容。
  *
  * `vdfs/list` 是会话清单的**唯一**读入口：不存在与之并行的第二套清单协议。
+ *
+ * 挂载根下与资源**并列**的还有本插件的配置文档（保留段 `配置`，`ext = form`，
+ * 见 docs/design/vdfs.md §3.4）。它是给通用列表 / 表单视图用的，不属于会话清单，
+ * 因此这里按 `ext` 过滤——**只认会话节点**，不按名字特判（保留段名可改，语义不变）。
  */
 export async function listSessions(): Promise<SessionList.SessionListItem[]> {
   const resp = await listVdfs(vdfsJoin(VFDS_ROOT, 'session'))
-  return (resp.items || []).map((n) => {
-    const v = n as Record<string, any>
-    return {
-      id: n.name,
-      // 后端 display_title：metadata.title 优先，否则从会话内容自动生成
-      name: n.title ?? '',
-      message_count: Number(v.message_count ?? 0),
-      updated_at: n.updated_at ?? 0,
-      is_working: n.status === VFDS_STATUS_WORKING,
-      metadata: v.metadata ?? {},
-    }
-  })
+  return (resp.items || [])
+    .filter((n) => vdfsExtOf(n) === VFDS_EXT_SESSION)
+    .map((n) => {
+      const v = n as Record<string, any>
+      return {
+        id: n.name,
+        // 后端 display_title：metadata.title 优先，否则从会话内容自动生成
+        name: n.title ?? '',
+        message_count: Number(v.message_count ?? 0),
+        updated_at: n.updated_at ?? 0,
+        is_working: n.status === VFDS_STATUS_WORKING,
+        metadata: v.metadata ?? {},
+      }
+    })
 }
 
 export async function clearSession(sessionId: string): Promise<void> {
