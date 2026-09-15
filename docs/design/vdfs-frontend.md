@@ -306,7 +306,7 @@ source = file 的类型（整包导入）：名称来自文件名
 | **S6 会话内部重建** | 会话内部结构（子会话 / 工作目录树）改由 VDFS 同名目录承载，原容器实体页可替代 | S5 的阻塞解除 |
 | **S7 容器子实体重建** | 通用适配器按 `container_kinds` 支持 `<id>/<子类别>/<条目>`；agent bundle 内部（提示词 / 技能 / MCP）上 VDFS | 容器页最后一处不可替代能力消失 |
 | **S8 会话清单上 VDFS** | 会话节点自带 `message_count` / `metadata` / `meta_tags`；`listSessions()` 改走 `vdfs/list`，`services/entities.ts` 删除 | 前端 `entities/*` 调用点归零 |
-| **S9 导航可见性** | ~~机制层新增 `VdfsProvider::nav_visible()`~~ **已整体撤销**：物理层从 `plugins/local` 迁入 `plugins/vdfs`，本地文件不再是子目录，左栏自然回到「六类资源」，无需可见性标记 | 左栏 = 六类资源，无按名硬编码（**结果达成，机制未引入**） |
+| **S9 导航可见性** | ~~机制层新增 `VdfsProvider::nav_visible()`~~ **已整体撤销**：物理层从 `plugins/local` 迁入 `plugins/vdfs`，本地文件不再是子目录，左栏自然回到「六类资源」，无需可见性标记（**2026-09-15 复核**：改造三之后 `web`/`local`/`gateway` 必须留在树里，改用机制级隐藏属性 `VdfsNode::hidden` + `root_hidden()`，见下） | 左栏 = 六类资源，无按名硬编码（**结果达成，机制未引入**；后来的隐藏属性是「存在但不列」这一独立问题的机制解） |
 | **S10 节点动作** | 新增 `vdfs/action` 操作 + `VdfsProvider::action()`（默认 `NotImplemented`）；适配器把 `test` 接到 `EntityProvider::test_status`；前端把「测试连接」接回 | S5 后丢失的连通性自检回归 |
 | **S11 下线 `entities/*` 协议** | 6 个插件不再路由 `entities/*`，`entities::dispatch` 与其请求/响应、zip 工具一并删除；网关只读白名单改列 `vdfs/*` 读操作 | 对外只剩 VDFS 一个资源协议 |
 | **S12 整包导入** | `VdfsNewType.source`（`file`）+ `EntityProvider::import_zip` 钩子；适配器的二进制 `write` 承接导入（agent 走 `BundleStore::import`），agent 补上 `delete_item` | S5/S11 后丢失的 zip 导入回归，且**不新增协议操作** |
@@ -483,6 +483,26 @@ source = file 的类型（整包导入）：名称来自文件名
 
   这是一次「先加机制、再发现机制不必存在」的记录：正确结论是
   **一个东西不该出现在左栏，就不该是子目录**，而不是给它打一个隐藏标记。
+
+  **2026-09-15 追加（改造三之后）**：上面的结论要分两种情况读。S9 之所以能撤销机制，
+  是因为 `local` 当时**本来就不必是子目录**（物理层已并入 `plugins/vdfs`）——
+  「不该出现就不该是子目录」对那种情形成立。但改造三之后，`web` / `local` /
+  `gateway` 三个目录**必须留在树里**：它们的全部内容就是一份配置文档，而这份文档的
+  地址是**真实地址** `.vdfs/<插件>/PLUGIN.yml`（vdfs.md §3.4），删掉目录等于删掉
+  配置的地址。「它存在、但不必出现在清单里」于是成了另一个问题，答案仍是**机制级**的：
+  `VdfsNode::hidden`（与文件系统的隐藏属性同义，文件 / 目录通用：列表里不出现、
+  可达性不受影响）+ `VdfsProvider::root_hidden()`（provider 的根也不过是一个目录
+  节点，所以「它显示还是隐藏」由这条声明回答，容器合成该目录节点时回填）。
+
+  它**不是** S9 那个 `nav_visible` 的复活：那套东西引入了 `VdfsMountInfo` /
+  `mount_node()` / `vdfs/providers` 一整套「挂载清单」中间物，而这次没有任何新概念
+  ——隐藏属性本来就该是节点的属性，过滤本来就该在产出列表的一方（容器过滤自己合成的
+  子目录清单，以及任何子 provider 交回来的 `list` 结果）。另见 vdfs.md §3.2 / §13.2
+  与 vdfs-review.md §7 的 S10。
+
+  同时，设置页（`.vdfs/setting`）现在会列出这些配置文档——但那是**另一个目录的清单**，
+  条目携带的是各自的真实地址，点开读写仍落在拥有者那份文件上：一处隐藏、一处列出，
+  配置本身只有一个地址，没有重复。
 
 - **S10 节点动作（`vdfs/action`）**（**已完成**）：S5 下线实体页时丢了一项能力——
   `model` / `mcp` 的「测试连接」仍在后端（`EntityProvider::test_status`），

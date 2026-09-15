@@ -29,15 +29,19 @@ npm run tauri dev
 
 ### 3. 配置 API Key
 
-首次启动后，进入设置页面配置 LLM API Key：
+首次启动后，在左侧导航选择**模型**，新建（或打开已有）一个模型条目，填入 API Key：
 
 - OpenAI: `sk-...`
 - Anthropic: `sk-ant-...`
 
+> 模型配置不是「设置」页里的一项：设置页列的是**各插件自己交出来的配置文档**
+> （会话 / 网络工具 / 本地工具 / 开放接口 / Telegram），模型这类「资源型」插件的
+> 配置就是它的资源树本身（`.vdfs/model/<id>`）。
+
 或直接编辑配置文件：
 
 ```bash
-# ~/.symbio/plugins/model/default/provider.json
+# ~/.symbio/plugins/model/<id>/provider.json
 {
   "default_provider_id": "openai_main",
   "providers": {

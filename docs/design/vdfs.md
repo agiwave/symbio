@@ -692,10 +692,11 @@ for child in children {
   `NotFound`。
 - 分区节点：`access = r`、`ext` = 分区 id（前端据此直接渲染专属面板，§7）。
   `read` / `write` 对它们恒 `Forbidden`——数据在前端 store。
-- 清单 = 自有分区 + **各插件自己交出来的配置条目**。条目的 `kind = setting`、
-  `name` = 插件目录名（前端图标键 `setting:<目录名>`）、`path` = 该插件配置文档的
-  **真实地址**（`<插件目录>/PLUGIN.yml`）。所以设置页只是「指路」：点开读写的还是
-  拥有者那份文件，本插件不代理读写、也不复制配置。
+- 清单 = **各插件自己交出来的配置条目** + 自有分区。顺序上配置在前、`appearance` /
+  `about` 垫后：前者是用户在设置页里真正要动手的东西，后者是应用自身的展示项。
+  条目的 `kind = setting`、`name` = 插件目录名（前端图标键 `setting:<目录名>`）、
+  `path` = 该插件配置文档的**真实地址**（`<插件目录>/PLUGIN.yml`）。所以设置页只是
+  「指路」：点开读写的还是拥有者那份文件，本插件不代理读写、也不复制配置。
 - 插件配置**不再由本插件代存**：各插件的配置归各插件自己的目录（§3.4），如
   `.vdfs/session/PLUGIN.yml`、`.vdfs/local/PLUGIN.yml`。原 `setting/config/get` /
   `setting/config/set` 与 `SETTING_SECTIONS` 里的 4 个插件分区（各自的 `prefix`

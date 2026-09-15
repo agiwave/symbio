@@ -4,63 +4,49 @@
 
 ## 配置文件位置
 
+**一个插件 = 一个目录**：配置是该目录下的 `PLUGIN.yml`，与该插件自己的数据 / 资源
+同处一个目录，因此整个目录可以直接拷贝移植（机制见
+[design/vdfs.md](../design/vdfs.md) §3.4 / §13.2）。
+
 | 文件 | 用途 |
 |------|------|
-| `~/.symbio/config.yaml` | 主配置文件 |
-| `~/.symbio/plugins/<plugin>/<id>/provider.json` | 插件专属配置 (如 model) |
+| `~/.symbio/PLUGIN.yml` | 系统级插件（`home`）的配置——工作区与最近记录 |
+| `~/.symbio/plugins/<插件>/PLUGIN.yml` | 各插件的配置（`session` / `model` / `web` / `local` / `gateway` / `telegram` …） |
+| `~/.symbio/plugins/<插件>/<id>/<主文件>` | 插件资源条目（`model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`…） |
 | `~/.symbio/agents/` | Agent Bundle 存储目录 |
+| `~/.symbio/config.yaml.migrated` | 旧集中式配置的留档（首次迁移后改名，见下） |
+
+`PLUGIN.yml` 是一个 YAML 映射，其中两个**身份字段**——`plugin_provider`（工厂 id）与
+`plugin_name`（实例名，缺省 = 目录名）——**不参与配置反序列化**，由 `PluginDir` 读写时
+自动剥离 / 补回。加载判据 = 文件存在 + 可解析 + `plugin_provider` 指向已注册的工厂。
+
+**配置的地址**：`.vdfs/<插件>/PLUGIN.yml`（`ext = form`，`rw`，`schema` = 该插件自己的
+`DetailDefinition`）。读写用的就是 `vdfs/read` / `vdfs/write`——与任何其它资源同一条
+链路，因此前端与 LLM 用同一种方式改配置。**没有第二条配置协议。**
 
 ---
 
-## 主配置 (config.yaml)
+## 系统根配置（`~/.symbio/PLUGIN.yml`）
+
+`home` 的目录就是**系统根**，它不住在 `plugins/` 下——否则容器扫描插件根时会把它当
+普通插件再构造一次，而那个 `home` 又会构造容器，自举成环。它的配置只有**应用级状态**：
 
 ```yaml
-# ~/.symbio/config.yaml
-
-# 工作区根路径 (可选，默认 ~/.symbio)
-workdir: ~/.symbio
-
-# 插件挂载配置
-plugins:
-  # 每个插件一个条目
-  agent:
-    plugin_provider: agent    # 插件类型 (对应 submit_object_creator! 注册的 ID)
-    enabled: true
-  session:
-    plugin_provider: session
-    enabled: true
-  model:
-    plugin_provider: model
-    enabled: true
-  local:
-    plugin_provider: local
-    enabled: true
-  web:
-    plugin_provider: web
-    enabled: true
-  skill:
-    plugin_provider: skill
-    enabled: true
-  mcp:
-    plugin_provider: mcp
-    enabled: true
-  telegram:
-    plugin_provider: telegram
-    enabled: false
-
-# 存储位置：config.yaml **没有** `storage:` 配置项——见下文「资源与数据的落盘位置」
-
-# 嵌入配置 (向量检索)
-embedding:
-  provider: fastembed
-  model: BAAI/bge-small-en-v1.5
-  dimension: 384
-
-# 日志配置
-logging:
-  level: info                    # debug / info / warn / error
-  format: pretty                 # pretty / json / compact
+# ~/.symbio/PLUGIN.yml
+plugin_provider: home
+plugin_name: home
+work:
+  workdir: ~/.symbio
+  recent_workspaces: []
 ```
+
+> **旧 `config.yaml` 已不存在**：首次启动时 `home` 把旧文件里 `symbio.plugins.*` 的每一项
+> 逐项写进各插件自己的 `PLUGIN.yml`（目标已存在则跳过），随后把旧文件改名
+> `config.yaml.migrated` 留档——天然只生效一次。
+>
+> 旧文件里的 `plugins:`（插件挂载表）、`embedding:`、`logging:` 三个段**都没有新家**：
+> 插件挂载由**扫描插件目录**决定（容器不内置任何清单），嵌入服务与日志级别由代码默认值
+> / 环境变量决定，不再有集中配置项。
 
 ---
 
@@ -71,10 +57,11 @@ logging:
 
 | 数据 | 位置 | 由谁决定 |
 |------|------|----------|
+| **插件配置** | `<homedir>/plugins/<插件>/PLUGIN.yml`（系统级插件在 `<homedir>/PLUGIN.yml`） | 配置的**拥有者**自己读写（`ConfigFile`）；地址 `.vdfs/<插件>/PLUGIN.yml`，**没有第二条配置协议** |
 | 插件资源（model / mcp / skill 等） | `<homedir>/plugins/<类别>/<id>/<主文件>` | 类别段名 = 插件名（如 `model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`）；由 `symbio/src/providers/vdfs_service/` 的集中实现读写，**不可配置、无第二种后端** |
 | 会话与其消息 | 会话自己的 store（`SessionStore`），非 `plugins/<类别>/<id>/` 资源布局 | 会话配置项 `store_kind`：`file`（默认）\| `sqlite` \| `memory`；SQLite 后端在会话存储根目录下建 `sessions.db` |
 | Agent bundle | bundle 目录（工作区级 + 全局级双层，`BundleStore` 自管） | 工作区切换，不经 `vdfs_service` |
-| 全局配置 | `<homedir>/config.yaml` | homedir 由前端「系统目录」切换（`home/reload`） |
+| 应用级状态 | `<homedir>/PLUGIN.yml` | homedir 由前端「系统目录」切换（`home/reload`） |
 
 > 换 homedir 即换一切：`<homedir>` 由 `HomedirRegistry` 现取，资源类别根每次解析时
 > 拼接，因此切换后无需重启即可读到新址的清单（内存镜像随之重建）。
@@ -82,6 +69,24 @@ logging:
 ---
 
 ## 插件配置
+
+各插件的配置都在**自己目录**的 `PLUGIN.yml` 里；前端「设置」页（`.vdfs/setting`）会把
+它们一并列出，但条目携带的是**各自的真实地址**——点开读写的还是拥有者那份文件，
+设置页只是指路，不代理、不复制。
+
+下表是各插件的配置地址与主要键。**默认值以代码为准**：字段定义由配置的拥有者产出，
+默认值从该插件自己的 `Default` 读出，因此面板显示值与实际行为同源。
+
+| 插件 | 配置地址 | 主要键 |
+|---|---|---|
+| `home` | `.vdfs/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
+| `session` | `.vdfs/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `store_kind` …（字段全表见 `SessionConfig`） |
+| `web` | `.vdfs/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |
+| `local` | `.vdfs/local/PLUGIN.yml` | `shell_enabled` / `file_enabled` / `shell_timeout` |
+| `gateway` | `.vdfs/gateway/PLUGIN.yml` | 见下 |
+| `telegram` | `.vdfs/telegram/PLUGIN.yml` | 见下 |
+| `model` | `.vdfs/model/PLUGIN.yml` | `default_provider_id`（**读宽写窄**：兼容旧形态遗留的 `providers` 明细，迁移后归一） |
+| `mcp` | 无配置文档 | 配置就是它的资源树（`.vdfs/mcp/<id>`） |
 
 ### Model 插件
 
@@ -143,17 +148,42 @@ mcp_servers:
 ### Telegram 插件
 
 ```yaml
-telegram:
-  bots:
-    my_bot:
-      token: "123456:ABC-DEF..."
-      allowed_chats: [123456789]
-      webhook_url: "https://example.com/webhook"
+# ~/.symbio/plugins/telegram/PLUGIN.yml
+plugin_provider: telegram
+bot_token: "123456:ABC-DEF..."
+chat_id: ""
+streaming_enabled: true
+poll_enabled: true
+allowed_users: [123456789]
 ```
+
+| 键 | 类型 | 默认值 | 说明 |
+|----|------|--------|------|
+| `bot_token` | String | 空 | BotFather 下发的令牌 |
+| `chat_id` | String | 空 | 默认会话（留空 = 由用户消息决定） |
+| `streaming_enabled` | Bool | `true` | 是否流式回包 |
+| `poll_enabled` | Bool | `true` | 是否轮询接收更新 |
+| `allowed_users` | List[Int] | `[]` | 允许使用的 Telegram 用户 ID（空 = 不限制） |
+
+> `allowed_users` 的落盘形态是**数字数组**，而配置文件的 `list` 控件提交的是
+> **每行一项的字符串数组**——两者都是「用户 ID 列表」，转换在插件边界完成
+> （宽松反序列化），磁盘形态不受前端控件形态影响。
 
 ### Gateway 插件
 
-扁平键配置，整体持久化于 `symbio.plugins.gateway`（前端"设置页"经 `gateway/config/get` / `gateway/config/set` 按键读写，`set` 为整体替换）：
+```yaml
+# ~/.symbio/plugins/gateway/PLUGIN.yml
+plugin_provider: gateway
+inbound_enabled: false
+inbound_protocol: native
+inbound_bind: 127.0.0.1
+inbound_port: 9231
+inbound_token: ""
+inbound_readonly: false
+```
+
+扁平键配置，**整体读写于插件自己的文件**（前端「设置」页点开 `.vdfs/gateway/PLUGIN.yml`
+就是这份表单；`vdfs/write` 是整体替换，与其它资源同一条链路）：
 
 | 键 | 默认值 | 说明 |
 |----|--------|------|
@@ -164,11 +194,11 @@ telegram:
 | `inbound_token` | 空 | Bearer 令牌；**为空仅允许回环地址**，非回环监听必须设置 |
 | `inbound_readonly` | `false` | 只读模式：仅放行查询类路径（白名单见 `gateway/config.rs::is_readonly_allowed`） |
 
-> 出站配置（前端连向何处）已不在本表——连接目标由前端"系统目录"切换器统一管理（localStorage 为权威），经 `initGatewayTransport` 决定 native / http 出站，不再持久化于网关插件配置。
+> 出站配置（前端连向何处）不在这里——连接目标由前端"系统目录"切换器统一管理（localStorage 为权威），经 `initGatewayTransport` 决定 native / http 出站。
 >
-> 只读白名单（精确匹配）：`vdfs/list`、`vdfs/tree`、`vdfs/stat`、`vdfs/read`、`vdfs/search`、`session/get_messages`、`config/get`、`home/get_homedir`、`work/get_workspace`（另有 `config/get` 前缀匹配）。资源一律经 VDFS，故放行的是它的**读操作**——`vdfs/write` / `delete` / `mkdir` / `move` / `edit` 与节点动作 `vdfs/action` 都不在列；早已下线的 `entities/*` 也不再放行。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
+> 只读白名单（精确匹配）：`vdfs/list`、`vdfs/tree`、`vdfs/stat`、`vdfs/read`、`vdfs/search`、`session/get_messages`、`home/get_homedir`、`work/get_workspace`。资源一律经 VDFS，故放行的是它的**读操作**——`vdfs/write` / `delete` / `mkdir` / `move` / `edit` 与节点动作 `vdfs/action` 都不在列；早已下线的 `entities/*` 也不再放行。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
 >
-> **网关自身配置不在白名单内**：`gateway/*` 接口恒走 native（前端不经 HTTP 访问本插件），且 `gateway/config/get` 会返回 `inbound_token`——只读模式下一旦放行即可读走令牌，故 `gateway/config/get` 与 `gateway/config/set` 一律拒绝。
+> **配置文件本身不在白名单内**：`vdfs/read` 只要地址落在任一插件的 `PLUGIN.yml` 上就一律拒绝（`reads_config_document`）——配置可能含凭据（网关访问令牌、搜索服务 API Key），放行等于只读模式下就能把它们读走。网关自身的 `gateway/*` 接口也恒走 native（前端不经 HTTP 访问本插件）。
 
 ---
 
@@ -176,11 +206,12 @@ telegram:
 
 | 变量 | 用途 | 示例 |
 |------|------|------|
-| `RUST_LOG` | Rust 日志级别 | `debug`, `symbio=trace` |
-| `VITE_LOG_LEVEL` | 前端日志级别 | `debug`, `info` |
-| `SYMBIO_WORKDIR` | 覆盖工作区路径 | `/custom/path` |
-| `OPENAI_API_KEY` | OpenAI API Key (备用) | `sk-...` |
-| `ANTHROPIC_API_KEY` | Anthropic API Key (备用) | `sk-ant-...` |
+| `RUST_LOG` | Rust 日志级别（`symbio_core::logger` 读取） | `debug`, `symbio=trace` |
+| `VITE_LOG_LEVEL` | 前端日志级别（`tauri/src/utils/logger.ts` 读取） | `debug`, `info` |
+
+> 工作区路径**不是**环境变量：它由前端「系统目录」切换器决定，落在
+> `<homedir>/PLUGIN.yml` 的 `work.workdir`。API Key 也不是环境变量——它属于**资源**，
+> 在模型条目自己的 `provider.json` 里。
 
 ---
 
@@ -190,9 +221,9 @@ telegram:
 
 | 配置 | 热加载方式 |
 |------|-----------|
-| `plugins/*/config` | 通过 `route("{plugin}/config", ...)` 实时更新 |
-| `mcp_servers` | 注册/注销 MCP Server 即时生效 |
-| `logging.level` | 通过 tracing-subscriber 动态调整 |
+| 插件配置（`PLUGIN.yml`） | 一次 `vdfs/write` → `ConfigFile::apply` = **校验 → 落内存 → 落自己的文件 → 广播**，订阅方（前端 / LLM）随事件收敛；需要副作用的插件（如网关重建监听）在自己的 `write` 返回后执行 |
+| 插件集合 | 容器**不缓存**子插件清单——每次现取（`children_of`），因此新增 / 移除插件目录即时可见 |
+| 资源条目 | 走 VDFS 的 `watch` / `unwatch` 事件，前端按路径防抖刷新（**禁止轮询**） |
 
 ---
 

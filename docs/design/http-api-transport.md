@@ -24,14 +24,19 @@
 | 机制 | 位置 | 本接口如何依托 |
 |---|---|---|
 | 分形路由唯一入口 | `root.route(ctx)`；入口参数是上下文键值对（`symbio_core/keys.rs`） | 服务只做"请求 → `SimpleRequest`"翻译，业务零改动 |
-| 插件注册清单 | `plugins/home/plugin.rs` `ensure_defaults()` 的默认插件数组 | `gateway` 在数组内，随 `worker` 一并实例化（存量 config.yaml 由 `obj.entry().or_insert_with` 自动补齐） |
-| 插件构造 | `Composite::build` 按 config 逐项 `create_object` | 网关的 `enabled` 直接来自持久化配置 |
-| 插件配置协议 | `config/get` / `config/set`（`symbio_core/paths.rs`） | 实现这两个路由即可被设置页读写 |
-| 设置页分区清单 | `plugins/setting/plugin.rs` `SETTING_SECTIONS` | `("gateway", "开放接口")` 是其中一个分区 |
-| 设置页表单定义 | `plugins/setting/plugin.rs` `config_definition()`（`binding: "config"`，`load_path/save_path` = `<prefix>/config get\|set`） | 网关表单由后端下发定义，**前端 `DetailForm.vue` 自动渲染** |
+| 必需插件清单 | `plugins/home/plugin.rs` 的 `SYSTEM_PLUGINS`，经 ctx 键 `REQUIRED_PLUGINS` 随构造传入 | `gateway` 在清单内，容器据此补目录 / 配置文件并实例化（容器**不内置**任何清单） |
+| 插件构造 | `Composite::build` **扫描自己的 `plugins/` 目录**，逐目录 `create_object`，并把插件自身目录经 `PLUGIN_DIR` 告知它 | 网关的开关就是它自己 `PLUGIN.yml` 里的 `inbound_enabled` |
+| 插件配置 | **没有第二条配置协议**：配置 = 插件目录里的 `PLUGIN.yml`（`.vdfs/gateway/PLUGIN.yml`），读写走 `vdfs/read` / `vdfs/write` | 网关只要把自己的 `ConfigFile` 声明出去即可被设置页与 LLM 同时读写 |
+| 设置页清单 | `ConfigurableVisitor` 收集通道（`symbio_core/configurable.rs`）：插件在 `traverse` 里 `announce_configurable` 一次 | 网关的「开放接口」自动出现在设置页，**前端零改动** |
+| 设置页表单 | 由配置的**拥有者**产出 `DetailDefinition`（作为节点 `schema` 下发） | 网关表单由后端下发定义，前端表单渲染器自动渲染 |
 | 宿主级上下文注册表先例 | `HomedirRegistry`（`symbio_core/homedir.rs`） | 全局弱引用登记表的同款风格（见 §4.1 的 `parent` 转发） |
 | 连接管理 | `RouteConnectionManager`（tauri 宿主层，纯 tokio） | 宿主层用它管前端流式连接；网关在 WS 循环内自持连接生命周期 |
 | 事件总线 | `EventBus` + `event_bus/subscribe` | 直接复用（AI 流的信源，见 §5.3） |
+
+> **2026-09-15 复核**：上表原先列的是 `config/get` / `config/set` 协议、`SETTING_SECTIONS`
+> 分区表与 `load_path` / `save_path`——这三样已随「配置回到插件目录」整体退场。
+> 本设计的结论不变（**做成插件、复用既有机制、前端零改动**），依托点换成了 VDFS
+> 的配置文件 + 可配置收集通道，见 [design/vdfs.md](vdfs.md) §3.4 / §13.1。
 
 ---
 
@@ -40,13 +45,13 @@
 ```
 symbio/src/plugins/gateway/
 ├── mod.rs        // 插件职责与"只搬运行李"的设计说明
-├── plugin.rs     // GatewayPlugin：Plugin trait + config get/set + 生命周期
+├── plugin.rs     // GatewayPlugin：Plugin trait + 生命周期 + 配置文档声明
 ├── config.rs     // GatewayConfig（扁平 inbound_* 键）+ 只读白名单
 └── server.rs     // 手写 HTTP/1.1 + WebSocket：/api/v1/invoke、/api/v1/ws、/api/v1/health
 ```
 
 - 插件 id：`PLUGIN_GATEWAY = "gateway"`（`symbio_core/ids.rs`）。
-- 配置键、默认值与只读白名单：见 [reference/CONFIGURATION.md](../reference/CONFIGURATION.md)「Gateway 插件」；设置页表单由 `setting` 下发的 `DetailDefinition` 渲染。
+- 配置键、默认值与只读白名单：见 [reference/CONFIGURATION.md](../reference/CONFIGURATION.md)「Gateway 插件」；设置页表单由**配置的拥有者**下发的 `DetailDefinition` 渲染。
 - **零新依赖、纯 Rust**（手写 HTTP/1.1 + WS 帧解析，不引 axum / tungstenite），与"无 C 编译"铁律一致。
 
 ---
