@@ -95,8 +95,8 @@ subscriber（默认过滤级别 `info,symbio=debug`），把插件日志混进�
 （先于插件树构建）。`HomedirRegistry` 优先级链：**环境变量 > `~/.symbio_bootstrap` > 默认
 `<当前目录>/.symbio`**（环境变量最高，因此 `--homedir` 总是生效）。
 
-若该目录下没有 `config.yaml`，CLI 会提示并退回内置默认配置（通常表现为"没有可用
-Provider"）。
+若该目录下没有任何模型条目（`plugins/model/<id>/provider.json`），CLI 会提示并退回内置
+默认配置（通常表现为"没有可用 Provider"）。
 
 ## 构建（要点）
 

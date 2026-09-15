@@ -108,9 +108,10 @@ printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe
 - **homedir**：默认 `<当前目录>/.symbio`。`--homedir` 参数在 `SymbioClient::start()` 内注入
   **`SYMBIO_HOMEDIR` 环境变量**（先于插件树构建）；`HomedirRegistry` 的优先级链为
   **环境变量 > 用户主目录 bootstrap 文件 > 默认 `<当前目录>/.symbio`**。该目录下没有
-  `config.yaml` 时，CLI 提示并退回内置默认配置（通常表现为「没有可用 Provider」）。
+  任何模型条目（`plugins/model/<id>/provider.json`）时，CLI 提示并退回内置默认配置
+  （通常表现为「没有可用 Provider」）。
 - **provider**：CLI 默认 `usrouter-glm5-3-flash`（开箱即连一个可用模型）；`--provider default` 显式
-  保留「回退到系统目录 `config.yaml` 的 `default_provider_id`」能力。
+  保留「回退到系统目录 `plugins/model/PLUGIN.yml` 的 `default_provider_id`」能力。
 - **mode**：默认 `auto`（无人值守）—— 遇到需审批的工具，后端返回友好错误后继续，不挂起等待。人在环的
   审批卡片属于 tauri 前端的职责。
 

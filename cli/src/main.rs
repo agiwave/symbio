@@ -49,13 +49,19 @@ async fn main() -> ExitCode {
         Command::Run(a) => *a,
     };
 
-    // 系统目录缺失 config.yaml 时给出明确提示：此时插件树会退回内置默认值，
+    // 系统目录下没有任何模型条目时给出明确提示：此时插件树会退回内置默认值，
     // 通常表现为「没有任何可用 Provider」，属于最常见的一次性配置问题。
-    if !args.homedir.join("config.yaml").exists() {
+    //
+    // 注意这里看的是**模型条目目录**而不是某个配置文件：配置已回到插件目录
+    // （`<homedir>/plugins/model/<id>/provider.json`），旧的集中式 `config.yaml`
+    // 只会在首次迁移后被改名留档，不能再拿它当判据。
+    if !has_model_entry(&args.homedir) {
         eprintln!(
-            "提示: 系统目录 {} 下没有 config.yaml，将使用内置默认配置（可能没有可用模型）。",
+            "提示: 系统目录 {} 下没有模型配置（plugins/model/<id>/provider.json），\
+             将使用内置默认配置（可能没有可用模型）。",
             args.homedir.display()
         );
+        eprintln!("      在应用左侧导航的「模型」里添加一个模型，或直接放一份 provider.json。");
         eprintln!("      如需指定其它系统目录，用 --homedir <路径>。");
     }
 
@@ -332,4 +338,17 @@ async fn read_stdin_all() -> Result<String, String> {
         buf.push('\n');
     }
     Ok(buf)
+}
+
+/// 系统目录下是否至少有一个模型条目（`plugins/model/<id>/provider.json`）。
+///
+/// 只做**目录形态**判据：条目内容是否可用由后端插件在构造时自己判定（读不出来的
+/// 条目会各自跳过），CLI 不重复那套校验——这里只回答「有没有配置过模型」。
+fn has_model_entry(homedir: &std::path::Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(homedir.join("plugins").join("model")) else {
+        return false;
+    };
+    entries
+        .flatten()
+        .any(|e| e.path().is_dir() && e.path().join("provider.json").is_file())
 }
