@@ -9,7 +9,7 @@
 //!   保存 / 设为默认 / 删除）
 //! - id·name 派生回落链（前端 slug 去重，后端 `validate_manifest` 兜底）
 
-use crate::symbio_core::schemas::entities::{
+use crate::symbio_core::schemas::detail::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection,
 };
@@ -341,8 +341,9 @@ fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
 
 /// 新建 Provider 的默认配置字段（VDFS `write { create }` 用）。
 ///
-/// 取**预设首项**——与新建表单「选中第一个预设」的预填**同源**，因此实体机制
-/// 与 VDFS 两条链路创建出的初始配置一致。返回 `(供应商, 端点, 模型, 协议)`。
+/// 取**预设首项**——与新建表单「选中第一个预设」的预填**同源**，因此前端新建
+/// 表单与 VDFS `write { create }` 两条链路创建出的初始配置一致。
+/// 返回 `(供应商, 端点, 模型, 协议)`。
 pub fn default_provider_fields() -> (&'static str, &'static str, &'static str, &'static str) {
     let (provider, _label, base, models, protocols) =
         PRESETS

@@ -5,8 +5,12 @@
 > `EntityVdfsAdapter`（1504 行，把 trait 接成 VDFS 子目录）。三者均已删除。
 >
 > **现行机制**见 [design/vdfs.md](../design/vdfs.md) §13.4——**每个资源插件
-> 直接实现 `VdfsProvider`**；`symbio_core/entities.rs` 只留存储原语自由函数。
-> 归档经过亦记于 [design/vdfs-frontend.md](../design/vdfs-frontend.md) §7 的 S16。
+> 直接实现 `VdfsProvider`**。本文件当时所说的「`symbio_core/entities.rs` 只留
+> 存储原语自由函数」也已是历史：`EntityStore` / `StorageService` 与那组存储原语
+> （`symbio_core::entities`）随后一并废除，资源存储现在是
+> **`VdfsProvider` 的三个集中实现**（`providers/vdfs_service`：单文件 / 目录 / 内存），
+> 磁盘布局一字未改。
+> 归档经过亦记于 [design/vdfs-frontend.md](../design/vdfs-frontend.md) §7 的 S16 / S17。
 >
 > 本文件仅作**历史参考，不再维护**。
 
@@ -16,8 +20,9 @@
 关联（**均为当时形态**）：
 - [vdfs.md](../design/vdfs.md)（VDFS 机制规范；本文件描述的是它当时 §11 / §13.4 所依赖的实体底座）
 - [vdfs-frontend.md](../design/vdfs-frontend.md)（前端页面规范）
-- `symbio/src/symbio_core/entities.rs` —— trait、注册表、统一操作实现（**现只剩存储原语**）
-- `symbio/src/symbio_core/schemas/entities.rs` —— 数据结构权威定义
+- `symbio/src/symbio_core/entities.rs` —— trait、注册表、统一操作实现（**已删除**）
+- `symbio/src/symbio_core/schemas/entities.rs` —— 数据结构权威定义（**已收敛为
+  `DetailDefinition` 表单方言模块**，`EntitySummary` / `EntityExport` 等协议类型删除）
 - `symbio/src/symbio_core/vdfs/entity_adapter.rs` —— `EntityVdfsAdapter`，本机制的**唯一消费者**（**已删除**）
 
 > **对外只有一个协议（VDFS）**：`entities/*` 调用协议已于 S11 下线，前端统一实体页
@@ -89,7 +94,7 @@
 
 | 钩子 | 默认 | 说明 |
 |---|---|---|
-| `test_status(ctx, id) -> EntityStatusResponse` | `NotImplemented` | VDFS 侧表现为节点动作 `test`（`VFDS_ACTION_TEST`）。**连接失败应映射为 `Ok(status: "failed")` 而非 `Err`**——失败是**结果**，不是协议错误 |
+| `test_status(ctx, id) -> EntityStatusResponse`（类型已删除） | `NotImplemented` | VDFS 侧表现为节点动作 `test`（`VFDS_ACTION_TEST`）。**连接失败应映射为 `Ok(status: "failed")` 而非 `Err`**——失败是**结果**，不是协议错误 |
 
 列表摘要的 `status ∈ active | working | disabled | error | unknown`；`test_status`
 的结果另用 `connected` / `failed`（常量 `ENTITY_STATUS_CONNECTED` /

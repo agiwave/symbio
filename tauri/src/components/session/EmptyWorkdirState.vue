@@ -9,7 +9,7 @@
     </div>
     <h2 class="empty-title">未选择工作目录</h2>
     <p class="empty-desc">
-      为当前会话绑定一个项目目录后，AI 才能在正确的上下文中回答，右栏实体浏览器才能加载。
+      为当前会话绑定一个项目目录后，AI 才能在正确的上下文中回答，右栏文件树才能加载。
     </p>
     <button class="primary-btn" @click="onPick" :disabled="picking">
       {{ picking ? '选择中…' : '选择工作目录' }}

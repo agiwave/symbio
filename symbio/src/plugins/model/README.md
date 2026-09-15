@@ -21,8 +21,10 @@
 |------|------|
 | `config/get` / `config/set` | 引擎参数配置（字段定义随 `.vdfs/model` 节点 `schema` 下发） |
 
-模型实体**不设插件路由**：经 `EntityVdfsAdapter` 适配为 `.vdfs/model` 挂载点
-（见 `docs/design/entity-provider-mechanism.md`）。原 `entities/*` / `config/schema` /
+模型 provider **不设插件路由**：`.vdfs/model` 挂载点由本插件自己的
+`impl VdfsProvider` 提供——落盘走 `providers::vdfs_service::SingleFileVdfs`
+（一个条目 = 一份 `provider.json`，条目内部不外露），清单走 `MemoryVdfs`
+（内存镜像：启动时从磁盘灌入、写盘成功后回灌）。原 `entities/*` / `config/schema` /
 `status` / `chat_sync` 路由均已下线——字段定义改由 `detail_definition` 随 VDFS 节点
 `schema` 下发，连通性自检改由节点动作 `vdfs/action { action: "test" }`。
 

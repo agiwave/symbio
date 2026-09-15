@@ -1,8 +1,8 @@
 <!--
-  EntityShell — 通用"左列表 + 右详情"两栏布局
+  VdfsShell — 通用"左列表 + 右详情"两栏布局
 
-  适用场景：管理类页面（Model Provider、MCP Server、Skill、Agent、Channel 等）
-  这些页面共享：
+  适用场景：资源管理页（模型 / MCP / 技能 / 智能体 / 设置等，数据一律来自
+  `vdfs/list`）。这些页面共享：
   - 顶部 panel-header（标题 + 操作按钮）
   - 状态条（list-meta）
   - 卡片列表
@@ -18,10 +18,10 @@
   - `empty`：空状态
   - `loading`：加载态
   - `detail`：右侧详情
-  - `toast`：浮动消息（不传则用 EntityShell 内置）
+  - `toast`：浮动消息（不传则用 VdfsShell 内置）
 -->
 <template>
-  <div class="entity-shell">
+  <div class="vdfs-shell">
     <!-- 左栏 -->
     <aside class="shell-list" :style="{ width: `${listWidth}px` }">
       <header class="panel-header">
@@ -86,7 +86,7 @@
 <script setup lang="ts">
 
 
-interface EntityShellProps {
+interface VdfsShellProps {
   title: string
   /** 左侧栏宽度（px），默认 260 */
   listWidth?: number
@@ -98,7 +98,7 @@ interface EntityShellProps {
   loading?: boolean
 }
 
-const props = withDefaults(defineProps<EntityShellProps>(), {
+const props = withDefaults(defineProps<VdfsShellProps>(), {
   listWidth: 260,
   hideDefaultNew: false,
   hasListContent: false,
@@ -115,7 +115,7 @@ function emitNew() {
 </script>
 
 <style scoped>
-.entity-shell {
+.vdfs-shell {
   display: flex;
   width: 100%;
   height: 100%;

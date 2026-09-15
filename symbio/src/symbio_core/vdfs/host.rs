@@ -106,8 +106,8 @@ fn hub_of(kind: &str) -> Arc<ChangeHub> {
 
 /// 广播一次变更（订阅方据此刷新，**非轮询**）。无订阅者时投递失败属正常。
 ///
-/// 由写 / 删的**唯一实现**（`symbio_core::entities`）与目录自管型 provider
-/// （agent bundle）调用。
+/// 由集中式存储实现（`crate::providers::vdfs_service` 的三种拓扑）与目录自管型
+/// provider（agent bundle）在写 / 删成功后调用。
 pub fn notify_change(kind: &str, path: &str, change: &str) {
     drop(hub_of(kind).tx.send(VdfsChange::new(path, change)));
 }

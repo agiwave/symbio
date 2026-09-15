@@ -4,18 +4,17 @@
 
 ## 职责
 
-- Agent 实体 CRUD 与默认/激活管理
+- Bundle 资产管理：作为 `.vdfs/agent` 挂载点提供 bundle 的浏览 / 整包导入 / 导出 / 删除，目录自管（`BundleStore`：工作区级 + 全局级双层）
 - 人格贡献：`traverse(agent/persona)` 返回人格提示词，session 组装 system prompt 时取用
-- 工具贡献：`traverse(agent/available_tools)` 把该 Agent 关联的工具加入会话工具集
-- 子插件 `MindscapeScaffold`：CU（认知单元）的存储与检索脚手架
+- 工具贡献：`traverse(agent/available_tools)` 把 `agent_run`（子智能体委托）加入会话工具集
+- 选项贡献：`traverse(agent/available_options)` 提供会话页的「智能体」选择项
 
 ## 路由
 
-| Path | 说明 |
-|------|------|
-| `agent/chat` | 与 Agent 对话（经 session 编排） |
-| `agent/list` / `agent/create` / `agent/update` / `agent/delete` | Agent 实体管理 |
-| `agent/set_default` / `agent/set_active` / `agent/get_active` / `agent/available` | 默认与激活态管理 |
+**agent 插件没有任何自有路由**：`route()` 直接返回 `NotFound` 并指引到 VDFS。
+历史上的 `agent/entities/*`（S11）与 `agent/bundle/*`（S12 / S13）全部下线，
+bundle 及其内部（提示词 / 技能 / MCP）一律经
+`.vdfs/agent/<id>/<子类别标签>/<相对路径>` 寻址。
 
 ## 机制化原则
 
@@ -26,4 +25,4 @@
 ## 关联
 
 - 会话编排：`../session/README.md`
-- 实体提供者机制：`docs/design/entity-provider-mechanism.md`
+- VDFS 机制（`.vdfs/agent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/design/vdfs.md` §13.4

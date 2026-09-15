@@ -23,5 +23,5 @@
 ## 关联
 
 - 全局配置：`../home/README.md`
-- VDFS 机制：`docs/design/vdfs.md`
-- 实体提供者机制（内部实现，无对外地址）：`docs/design/entity-provider-mechanism.md`
+- VDFS 机制：`docs/design/vdfs.md`（§13.1 setting 范例；`DetailDefinition` 是
+  `ext = form` 节点的 `schema` 方言）

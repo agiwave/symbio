@@ -14,7 +14,7 @@ vi.mock('@/services/plugin', () => ({
 }))
 
 import DetailForm from '../DetailForm.vue'
-import type { DetailDefinition, EntitySummary } from '@/schemas/entities'
+import type { DetailDefinition, VdfsNode } from '@/schemas/vdfs'
 
 const sessionDef: DetailDefinition = {
   binding: 'config',
@@ -33,6 +33,18 @@ const sessionDef: DetailDefinition = {
   actions: [{ id: 'save', label: '保存配置', style: 'primary' }],
 }
 
+/** 设置分区节点（config 绑定的取值走 load_path，不来自节点也不来自 values） */
+function settingNode(): VdfsNode {
+  return {
+    path: '.vdfs/setting/session',
+    name: 'session',
+    title: '会话设置',
+    kind: 'setting',
+    status: 'active',
+    access: 'rw',
+  }
+}
+
 describe('DetailForm config 绑定：load_path 填充', () => {
   beforeEach(() => {
     callPluginMock.mockReset()
@@ -48,8 +60,8 @@ describe('DetailForm config 绑定：load_path 填充', () => {
     const w = mount(DetailForm, {
       props: {
         definition: sessionDef,
-        item: { kind: 'setting', id: 'session', name: '会话设置', status: 'active' } as EntitySummary,
-        capabilities: { mutable: false } as never,
+        node: settingNode(),
+        capabilities: { mutable: false },
       },
     })
     await flushPromises()
@@ -67,8 +79,8 @@ describe('DetailForm config 绑定：load_path 填充', () => {
     const w = mount(DetailForm, {
       props: {
         definition: sessionDef,
-        item: { kind: 'setting', id: 'session', name: '会话设置', status: 'active' } as EntitySummary,
-        capabilities: { mutable: false } as never,
+        node: settingNode(),
+        capabilities: { mutable: false },
       },
     })
     await flushPromises()
@@ -84,8 +96,8 @@ describe('DetailForm config 绑定：load_path 填充', () => {
     const w = mount(DetailForm, {
       props: {
         definition: sessionDef,
-        item: { kind: 'setting', id: 'session', name: '会话设置', status: 'active' } as EntitySummary,
-        capabilities: { mutable: false } as never,
+        node: settingNode(),
+        capabilities: { mutable: false },
       },
     })
     await flushPromises()

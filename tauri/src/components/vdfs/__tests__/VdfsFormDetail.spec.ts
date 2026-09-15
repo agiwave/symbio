@@ -11,9 +11,8 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VdfsFormDetail from '../VdfsFormDetail.vue'
-import DetailForm from '@/components/entities/DetailForm.vue'
-import type { DetailDefinition } from '@/schemas/entities'
-import type { VdfsNode } from '@/schemas/vdfs'
+import DetailForm from '../DetailForm.vue'
+import type { DetailDefinition, VdfsNode } from '@/schemas/vdfs'
 
 function formNode(schema: Partial<DetailDefinition>): VdfsNode {
   return {
@@ -60,5 +59,16 @@ describe('VdfsFormDetail 机制动作注入去重', () => {
       },
     })
     expect(injectedActions(w).some((a) => a.id === 'delete')).toBe(true)
+  })
+
+  it('取值显式下传：read 解析结果 → DetailForm 的 values，节点原样 → node', () => {
+    const node = formNode({})
+    const w = mount(VdfsFormDetail, {
+      props: { node, data: { base_url: 'https://api' } },
+    })
+    const form = w.findComponent(DetailForm)
+    expect(form.props('values')).toEqual({ base_url: 'https://api' })
+    // 节点原样下传（同一份 VdfsNode，不再映射成另一种摘要形状）
+    expect(form.props('node')).toEqual(node)
   })
 })

@@ -147,14 +147,15 @@ import { useAppearanceStore, type ThemeMode, type FontSize } from '@/stores/appe
 import { useSoundSettingsStore } from '@/stores/soundSettings'
 import { playCompletionChime } from '@/services/completionChime'
 import SettingsFormShell from './SettingsFormShell.vue'
+import type { VdfsNode } from '@/schemas/vdfs'
 
 // VDFS 的 form 渲染器会透传 capabilities/saving/testing/deleting 等编辑器级 props，
 // 本表单不消费它们，禁止落根 DOM（清 fallthrough 污染）。
 defineOptions({ inheritAttrs: false })
 
 defineProps<{
-  /** 当前设置分区实体项（实体提供者机制注入） */
-  item?: { id: string; name?: string } | null
+  /** 当前节点（渲染器统一契约透传；本表单一律自取 store） */
+  node?: VdfsNode | null
 }>()
 
 const appearance = useAppearanceStore()

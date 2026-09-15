@@ -3,7 +3,6 @@
 mod capability;
 mod capability_error;
 pub(crate) mod creator;
-pub mod entities;
 mod error;
 pub mod event_bus;
 mod homedir;

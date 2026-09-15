@@ -13,6 +13,12 @@
 > 本文件只写**前端页面规范**与**迁移路线**。机制（trait、访问位、协议操作）
 > 一律以 `vdfs.md` 为准，本文件不重复、不覆盖。凡与本文件冲突，以 `vdfs.md`
 > 的机制条款为准。
+>
+> **现状说明（2026-09-15 起）**：§7 中以 `EntityProvider` / `EntityVdfsAdapter` /
+> `EntityStore` 为主语的条目是**进度档案**，原样保留不改写。后端资源存储的**当前**
+> 形态是 `providers/vdfs_service` 的三个 `VdfsProvider` 集中实现（单文件 / 目录 /
+> 内存），对外地址、节点形状与协议操作**不变**；记录见 §7 的 S17 与
+> `vdfs.md` §13.4。
 
 ---
 
@@ -23,8 +29,9 @@
 从而让整个前端收敛为「通用资源状态查看 / 管理工具」：新增一类资源只需后端
 新增一个 `VdfsProvider`，前端零页面开发。
 
-最终目标：**逐步替代前后端现有的几乎全部既有协议（`entities/*` 等），全面
-拥抱 VDFS**。迁移期两者并存，新能力一律接入 VDFS，逐模块迁移后下线旧协议。
+最终目标：**替代前后端现有的几乎全部既有协议（`entities/*` 等），全面
+拥抱 VDFS**。**已达成**——`entities/*` 自 S11 起无任何路由（迁移期两者并存的
+局面已结束，过程记录见 §7）；新能力一律接入 VDFS。
 
 不变量（承 `vdfs.md` §1，前端侧重申）：
 
@@ -306,6 +313,7 @@ source = file 的类型（整包导入）：名称来自文件名
 | **S12 清理** | 注册表去掉 `prefix` / `provider_name` / `compact_list` / `status_indicator` 与 `EntityCapabilities`（改由 `supports_import` 表达）；删协议时代的请求/响应与 `get_item`；`agent/bundle/*` 只留 `bundle/export` | 历史冗余与被替换代码清空 |
 | **S13 整包导出** | `VFDS_ACTION_EXPORT` 节点动作 + `EntityProvider::export_zip` 钩子（默认 `zip_dir`、agent 走 `BundleStore::export`）；结果按「文件载荷」（`filename` + `b64`）回传；`agent/bundle/*` 整个下线 | 导入/导出在 VDFS 内闭环；`agent` 插件零自有路由 |
 | **S16 收敛终局（废除实体机制）** | 删 `EntityProvider` trait / `provider_registry()` / `EntityVdfsAdapter`；`model` / `skill` / `agent` 各补一份 `impl VdfsProvider`（与已有的 `session` / `setting` / `mcp` 同构）；`entities.rs` 降为存储原语自由函数 | 后端只剩 VDFS 一套机制；**前端零改动**——挂载名与节点形状不变 |
+| **S17 收敛存储层** | 删 `providers/storage_service` 与 `symbio_core` 的 `EntityStore` / `StorageService` / 存储原语，改为 `providers/vdfs_service` 的三个 `VdfsProvider` 集中实现（单文件 / 目录 / 内存）；`schemas/entities.rs` 收敛为 `DetailDefinition` 表单方言；事件总线只留 `kind = "vdfs"` | 资源存储讲的也是 VDFS 的话；磁盘布局不变，前端只退一个 `entity` 频道订阅 |
 
 每阶段的验收：`cargo check` + `cargo test` + `vitest run` 全绿；被迁移资源的
 **新建 / 列出 / 详情 / 编辑 / 删除 / 实时** 六项行为与迁移前**等价**。
@@ -632,6 +640,34 @@ source = file 的类型（整包导入）：名称来自文件名
     `unwatch_changes`），**按 kind 全局持有**——同一 provider 每次 `traverse` 都会新构造，
     按实例持有会让订阅与投递配不上对。
   - **不变量**：`vdfs_provider.rs` 未因本次收敛做任何修改（它是核心机制）。
+
+- **S17 收敛存储层（`storage_service` → `vdfs_service`，entity 词汇清零）**（**已完成**）：
+  S16 删掉了「差异集中在一张 trait」的那一层，但**落盘那一层仍然讲着非 VDFS 的话**：
+  磁盘资源由一套私有抽象（`StorageService` / `EntityStore`）表达，各插件再手翻成
+  `VdfsNode` / `VdfsContent`——「一类资源 = 一份存储抽象 + 一份翻译」。本阶段把这套
+  抽象换成**直接就是 `VdfsProvider` 的三个集中实现**：
+
+  | 删除 | 取代者 |
+  | --- | --- |
+  | `providers/storage_service`（`StorageService` / `FileEntityStore` / `path_resolver::safe_id`，含一份从未参与编译的 `entity_store.rs`） | `providers/vdfs_service`：`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs` |
+  | `symbio_core::entities` 的存储原语自由函数 | `vdfs_service::entry`（寻址 + 原子落盘 + 广播）与 `vdfs_service::pack`（zip / base64）；「manifest 补 id」下沉为 model / mcp 各一份 `with_id` |
+  | `symbio_core/providers/storage.rs`（trait + `categories` / `manifests` 常量） | 类别段名 = 插件名 = vdfs 子目录名（`PLUGIN_*` 常量），主文件名写在各插件内部的 `const MANIFEST` |
+  | `schemas/entities.rs` 的 `EntitySummary` / `EntityUploadResponse` / `EntityExport` / `ENTITY_*` 常量 | 列表项与详情输入 = `VdfsNode`；写响应 = `VdfsWriteResponse`；导出载荷 = `VdfsPack`（线上字段与原 `EntityExport` 逐字一致） |
+  | 事件总线第二条频道 `kind = "entity"`（`KIND_ENTITY` + `publish_entity_changed` / `publish_entity_status`） | 唯一一条 `kind = "vdfs"`：生命周期与运行时状态变化都经 `notify_change` 广播 |
+
+  - **磁盘布局一个字没改**：仍是 `<homedir>/plugins/<category>/<id>/<manifest>`。
+    三型只是三种**访问拓扑**（单文件不外露条目内部 / 目录可下钻 / 内存不落盘），
+    换拓扑不动数据，因此**前端零改动**——地址、`ext`、`schema`、访问位全部原样。
+  - **不是第二个抽象**：三个实现本身就是完整的 `impl VdfsProvider`（不是 trait、
+    不是适配器、没有钩子表），差异由调用点以普通参数传入；`vdfs_provider.rs` 与
+    `plugins/vdfs/*`（协议 / 访问层 / 物理层）**本次零改动**。
+  - **前端连带改动**（唯一一处）：`services/eventBus.ts` 的 `KIND_ENTITY` 与实体
+    生命周期 / 状态分支退场，清单与状态角标一律订阅 `kind = 'vdfs'`。
+  - **明确代价**：`notify_change` 只报 `(kind, path, change)` 三元组、**不携带
+    `node` / `content` 载荷**（扩展它等于改 core 协议，本次刻意不做）。因此
+    `created` / `updated` / `deleted` 在前端**只能防抖重拉**；带载荷的增益投递
+    只存在于 provider 自己实现的 `watch` 里（如会话消息的 `appended` + `delta`）。
+    状态角标同理：收到该节点的一次 `updated` 后重读 `vdfs/stat`。
 
 ---
 

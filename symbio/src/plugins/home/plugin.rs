@@ -578,8 +578,8 @@ impl Plugin for HomePlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
-            // `entities/providers` 已随 S11 下线：资源类别清单改由
-            // `vdfs/providers`（`.vdfs` 虚拟根）下发，导航与顺序都在那里。
+            // 资源类别清单由 `vdfs/providers`（`.vdfs` 虚拟根）下发，
+            // 导航与顺序都在那里。
             "save_config" => {
                 let this = Arc::clone(&self);
                 tokio::spawn(async move {

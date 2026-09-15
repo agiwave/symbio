@@ -1,8 +1,8 @@
 /**
  * session 服务 —— 会话清单映射单测（node 环境）
  *
- * S8 起 `listSessions()` 不再走 `entities/list`，而是读 `.vdfs/session` 的目录
- * 内容（`vdfs/list`）。本单测锁定「VdfsNode → SessionListItem」的映射口径：
+ * `listSessions()` 走 `vdfs/list`：读 `.vdfs/session` 的目录内容。
+ * 本单测锁定「VdfsNode → SessionListItem」的映射口径：
  * 会话侧栏的标题 / 工作目录 / 运行中状态全部依赖它，一旦后端字段名或前端取值
  * 方式漂移，表现为**静默退化**（侧栏拿不到 workdir、停止按钮失效），很难肉眼发现。
  */

@@ -1,19 +1,21 @@
-//! 会话工作目录的 tree 场景实现（VDFS 容器 tree 机制下的一个 provider 场景）
+//! 会话工作目录的 VDFS 场景实现（`.vdfs/session/<id>/工作目录/<rel>`）
 //!
-//! tree 机制（`ContainerKindInfo.view = "tree"`）只定义「层级 + 懒加载 +
-//! 选择」：节点是统一 `EntitySummary`（`id` = 容器内相对路径、`parent` =
-//! 父路径、`expandable` = 可展开提示），经 `vdfs/list` 的 `parent`
-//! 请求参数逐层下发。本模块是该机制的一个场景：把**会话工作目录**的
-//! 文件系统层级表达为 tree 节点——机制层不感知文件语义。
+//! 本模块把**会话工作目录**的文件系统层级表达为 VDFS 节点：目录 → 只读
+//! （`l`，可下钻），文件 → 可读写（`rw`）。列 / 读 / 写 / 删四个函数是
+//! `SessionPlugin` 的 `VdfsProvider` 实现在「工作目录」这一段上的落点——
+//! **不存在第二套树协议**。
 //!
-//! 路径安全：节点 id 一律为工作目录内的相对路径（`/` 分隔）；拒绝 `..`
+//! 与磁盘上的物理层（`plugins/vdfs/physical.rs`）不同，这里的地址是**会话内**
+//! 的（工作目录由会话元数据决定），因此归 session 插件，而不是 vdfs 插件。
+//!
+//! 路径安全：节点地址一律为工作目录内的相对路径（`/` 分隔）；拒绝 `..`
 //! 与绝对路径，并在 join 后做前缀校验（双重闸门，与 agent bundle 的
 //! 路径白名单同风格）。
 
-use crate::symbio_core::entities::EntitySummary;
 use crate::symbio_core::event_bus::EventBus;
 use crate::symbio_core::vdfs::VdfsChange;
-use crate::symbio_core::PluginError;
+use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsNode};
+use crate::symbio_core::{PluginError, PLUGIN_SESSION};
 use dashmap::DashMap;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -22,8 +24,11 @@ use std::sync::Arc;
 use super::fs_watcher::FsWatcher;
 use super::types::Session;
 
-/// 子类别的统一 kind（provider 场景自定；机制层仅透传）
+/// 工作目录树节点的 kind（场景自定；机制层仅透传，不参与能力判定）
 pub const TREE_KIND: &str = "dir";
+
+/// 子类别的项级图标分发键（前端 `registry/vdfsIcons` 按 `config_type` 取图）
+const ATTR_CONFIG_TYPE: &str = "config_type";
 
 /// 会话内部：子会话清单的路径段（同时是展示名）
 pub const SEG_SUB_SESSIONS: &str = "子会话";
@@ -86,16 +91,16 @@ fn canonicalize_loose(p: &Path) -> PathBuf {
 
 /// 列出 `parent`（相对路径，`None` = 根层）的下一层节点。
 ///
-/// 节点：`kind = "dir"`（场景子类别）、`id` = 相对路径、`parent` = 父路径、
-/// `expandable` = 是否目录；隐藏项（`.` 开头）不下发。排序：目录优先、
-/// 名称字典序（与前端树展示约定一致）。
+/// 节点形状完全由访问位表达：目录 → `l`（可下钻），文件 → `rw`（可编辑）。
+/// `name` 是**本层段名**（不是全相对路径——全路径由分发层按请求路径回填），
+/// `config_type` 是项级图标分发键；隐藏项（`.` 开头）不下发。
+/// 排序：目录优先、名称字典序（与前端树展示约定一致）。
 ///
-/// 与 `read_node` / `write_node` / `delete_node` 同形：**不依赖请求 ctx**
-/// （同一份场景实现同时服务实体机制与 VDFS 机制）。
+/// 与 `read_node` / `write_node` / `delete_node` 同形：**不依赖请求 ctx**。
 pub async fn list_children(
     workdir: &str,
     parent: Option<&str>,
-) -> Result<Vec<EntitySummary>, PluginError> {
+) -> Result<Vec<VdfsNode>, PluginError> {
     let parent_rel = parent.unwrap_or("").trim_matches('/').to_string();
     let (dir_abs, _) = resolve_under(workdir, &parent_rel)?;
     if !dir_abs.is_dir() {
@@ -106,7 +111,7 @@ pub async fn list_children(
         .await
         .map_err(|e| PluginError::InternalError(format!("读取目录失败: {e}")))?;
 
-    let mut nodes: Vec<EntitySummary> = Vec::new();
+    let mut nodes: Vec<VdfsNode> = Vec::new();
     while let Some(entry) = entries
         .next_entry()
         .await
@@ -116,49 +121,50 @@ pub async fn list_children(
         if name.starts_with('.') {
             continue; // 隐藏项不下发
         }
-        let child_rel = if parent_rel.is_empty() {
-            name.clone()
-        } else {
-            format!("{parent_rel}/{name}")
-        };
         let meta = entry
             .metadata()
             .await
             .map_err(|e| PluginError::InternalError(e.to_string()))?;
-        let is_dir = meta.is_dir();
-
-        let mut it = EntitySummary::new(TREE_KIND, child_rel.clone(), name);
-        if !parent_rel.is_empty() {
-            it.parent = Some(parent_rel.clone());
-        }
-        it.expandable = Some(is_dir);
-        it.description = None;
-        if let serde_json::Value::Object(ref mut m) = it.extra {
-            let _ = m.insert("is_dir".to_string(), json!(is_dir));
-            // 项级图标分发键（registry：dir:directory / dir:file）
-            let _ = m.insert(
-                "config_type".to_string(),
-                json!(if is_dir { "directory" } else { "file" }),
-            );
-            if !is_dir {
-                let _ = m.insert("size".to_string(), json!(meta.len()));
-            }
-        }
-        nodes.push(it);
+        nodes.push(tree_node(&name, &meta));
     }
 
-    // 目录优先，其余按名称字典序
+    // 目录优先，其余按名称字典序（判定只看访问位，不看 kind）
     nodes.sort_by(|a, b| {
-        let da = a.extra.get("is_dir").and_then(|v| v.as_bool()) != Some(true);
-        let db = b.extra.get("is_dir").and_then(|v| v.as_bool()) != Some(true);
-        da.cmp(&db).then_with(|| a.name.cmp(&b.name))
+        (!a.is_dir())
+            .cmp(&!b.is_dir())
+            .then_with(|| a.name.cmp(&b.name))
     });
     Ok(nodes)
 }
 
-/// 读取单个树节点：目录 → 无内容概要；文件 → 内容置于 `extra.content`
-/// （写回经 entities/put 门控）。
-pub async fn read_node(workdir: &str, rel: &str) -> Result<EntitySummary, PluginError> {
+/// 文件 / 目录元数据 → 节点（列与 stat 共用同一份形状，两条链路不会分叉）
+fn tree_node(name: &str, meta: &std::fs::Metadata) -> VdfsNode {
+    let is_dir = meta.is_dir();
+    let mut n = if is_dir {
+        VdfsNode::dir(name, name, VdfsAccess::LIST)
+    } else {
+        let mut f = VdfsNode::file(name, name, VdfsAccess::READ_WRITE);
+        f.size = Some(meta.len());
+        f
+    };
+    n.kind = TREE_KIND.to_string();
+    n.updated_at = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64);
+    n.attributes.insert(
+        ATTR_CONFIG_TYPE.to_string(),
+        json!(if is_dir { "directory" } else { "file" }),
+    );
+    n
+}
+
+/// 读取单个树节点的元数据（目录 → 只读；文件 → 可读写 + 字节数）。
+///
+/// **不内联正文**：内容语义只在 `vdfs/read` 上（见 [`read_content`]），
+/// `stat` 只回答「这是个什么节点」。
+pub async fn read_node(workdir: &str, rel: &str) -> Result<VdfsNode, PluginError> {
     let (abs, rel_norm) = resolve_under(workdir, rel)?;
     let meta = tokio::fs::metadata(&abs)
         .await
@@ -166,43 +172,9 @@ pub async fn read_node(workdir: &str, rel: &str) -> Result<EntitySummary, Plugin
     let name = abs
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| rel_norm.to_string());
-    let parent_rel = match rel_norm.rsplit_once('/') {
-        Some((p, _)) => p.to_string(),
-        None => String::new(),
-    };
-
-    let mut it = EntitySummary::new(TREE_KIND, rel_norm.clone(), name);
-    if !parent_rel.is_empty() {
-        it.parent = Some(parent_rel);
-    }
-    let is_dir = meta.is_dir();
-    it.expandable = Some(is_dir);
-    if let serde_json::Value::Object(ref mut m) = it.extra {
-        let _ = m.insert("is_dir".to_string(), json!(is_dir));
-        let _ = m.insert(
-            "config_type".to_string(),
-            json!(if is_dir { "directory" } else { "file" }),
-        );
-        if !is_dir {
-            let _ = m.insert("size".to_string(), json!(meta.len()));
-            if meta.len() <= MAX_INLINE_READ_BYTES {
-                match tokio::fs::read_to_string(&abs).await {
-                    Ok(content) => {
-                        let _ = m.insert("content".to_string(), json!(content));
-                    }
-                    Err(_) => {
-                        // 二进制/不可解码文件：不下发内容，详情回落只读概要
-                    }
-                }
-            }
-        }
-    }
-    Ok(it)
+        .unwrap_or_else(|| rel_norm.rsplit('/').next().unwrap_or(&rel_norm).to_string());
+    Ok(tree_node(&name, &meta))
 }
-
-/// 内容内联下发上限（64 KiB）；超限文件只给概要，避免大文件撑爆列表协议
-const MAX_INLINE_READ_BYTES: u64 = 64 * 1024;
 
 /// 读取文件内容（UTF-8）。目录 / 不存在 / 不可解码均报错。
 pub async fn read_content(workdir: &str, rel: &str) -> Result<String, PluginError> {
@@ -283,9 +255,8 @@ pub struct WorkdirWatchManager {
     generations: Arc<DashMap<String, u64>>,
     /// VDFS 变更广播（可选，由 VDFS provider 构造期注入）。
     ///
-    /// 同一份目录树场景同时服务实体机制（粗粒度 `data` 事件）与 VDFS 机制
-    /// （`VdfsChange`）：文件变化时把容器 id 翻译成 VDFS 路径再广播，
-    /// 使 `.vdfs` 页面不必另开一套监听。
+    /// 同一份目录树场景只服务 VDFS 机制：文件变化时把容器 id 翻译成 VDFS 路径
+    /// 再广播（`VdfsChange`），使 `.vdfs` 页面不必另开一套监听。
     vdfs_tx: std::sync::Mutex<Option<tokio::sync::broadcast::Sender<VdfsChange>>>,
 }
 
@@ -297,8 +268,8 @@ fn watch_key(workdir: &str, container: &str) -> String {
 impl WorkdirWatchManager {
     /// 注入 VDFS 变更广播源（VDFS provider 构造期调用一次）。
     ///
-    /// 未注入时目录树事件仍只走实体机制的 `data` 事件，VDFS 侧不感知；
-    /// 注入后同一批事件额外广播为 [`VdfsChange`]，`.vdfs` 页面即可实时刷新。
+    /// 未注入广播源时 VDFS 侧不感知（目录树变化仍只发会话频道的粗粒度 `data`
+    /// 事件）；注入后同一批事件额外广播为 [`VdfsChange`]，`.vdfs` 页面即可实时刷新。
     pub fn set_vdfs_sender(&self, tx: tokio::sync::broadcast::Sender<VdfsChange>) {
         if let Ok(mut slot) = self.vdfs_tx.lock() {
             *slot = Some(tx);
@@ -483,7 +454,7 @@ fn publish_data_event(containers: &DashMap<String, Vec<(String, u64)>>, workdir:
     if let Some(list) = containers.get(workdir) {
         for (container, _) in list.iter() {
             EventBus::try_publish(
-                crate::symbio_core::entities::ENTITY_SESSION,
+                PLUGIN_SESSION,
                 Some(container),
                 json!({ "type": "data", "workdir": workdir, "path": rel }),
             );
@@ -495,7 +466,7 @@ fn publish_data_event(containers: &DashMap<String, Vec<(String, u64)>>, workdir:
 ///
 /// 路径是 VDFS 口径：`<容器 id>/工作目录[/<相对路径>]`——与 VDFS provider
 /// 的路径解析严格同一套（见 `SessionPlugin` 的 `parse_session_path`）。
-/// 未注入广播源（实体机制独立使用本场景）时静默跳过。
+/// 未注入广播源时静默跳过。
 fn publish_vdfs_change(
     tx: &Option<tokio::sync::broadcast::Sender<VdfsChange>>,
     containers: &DashMap<String, Vec<(String, u64)>>,
@@ -613,23 +584,24 @@ mod tests {
         let nodes = list_children(tmp.path().to_str().unwrap(), None)
             .await
             .unwrap();
-        let ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
-        assert_eq!(ids, vec!["src", "README.md"]);
-        assert_eq!(nodes[0].expandable, Some(true));
-        assert_eq!(nodes[1].expandable, Some(false));
-        assert_eq!(nodes[0].parent, None);
+        let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["src", "README.md"]);
+        // 是否可展开只看访问位，不看 kind
+        assert!(nodes[0].is_dir(), "目录 → `l`");
+        assert!(!nodes[1].is_dir(), "文件 → 不可列");
+        assert_eq!(nodes[1].access.flags(), "rw");
     }
 
     #[tokio::test]
-    async fn nested_level_carries_parent_pointer() {
+    async fn nested_level_reports_only_its_own_segment() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path()).await;
         let nodes = list_children(tmp.path().to_str().unwrap(), Some("src"))
             .await
             .unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].id, "src/lib.rs");
-        assert_eq!(nodes[0].parent.as_deref(), Some("src"));
+        // 全路径由分发层按请求路径回填，本层只给段名
+        assert_eq!(nodes[0].name, "lib.rs");
     }
 
     #[tokio::test]
@@ -641,19 +613,23 @@ mod tests {
         assert!(read_node(wd, "../secrets").await.is_err());
     }
 
+    /// `stat` 只回答节点形状，正文归 `vdfs/read`（不再内联，也不误读大文件）
     #[tokio::test]
-    async fn file_node_inlines_content() {
+    async fn stat_shapes_the_node_without_inlining_content() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path()).await;
         let wd = tmp.path().to_str().unwrap();
-        let node = read_node(wd, "README.md").await.unwrap();
+        let f = read_node(wd, "README.md").await.unwrap();
+        assert_eq!(f.name, "README.md");
+        assert_eq!(f.size, Some(6));
         assert_eq!(
-            node.extra.get("content").and_then(|c| c.as_str()),
-            Some("# demo")
+            f.attributes.get(ATTR_CONFIG_TYPE).and_then(|v| v.as_str()),
+            Some("file")
         );
-        let dir_node = read_node(wd, "src").await.unwrap();
-        assert!(dir_node.extra.get("content").is_none());
-        assert_eq!(dir_node.expandable, Some(true));
+        let d = read_node(wd, "src").await.unwrap();
+        assert!(d.is_dir());
+        assert!(d.size.is_none(), "目录没有字节数语义");
+        assert_eq!(read_content(wd, "README.md").await.unwrap(), "# demo");
     }
 
     /// 工作目录**往返**：写 → 列 → 读 → 删（S6 会话内部链路的真实 IO 闭合）
@@ -671,8 +647,8 @@ mod tests {
             .await
             .unwrap();
         let nested = list_children(wd, Some("src")).await.unwrap();
-        let ids: Vec<&str> = nested.iter().map(|n| n.id.as_str()).collect();
-        assert_eq!(ids, vec!["src/lib.rs", "src/new.rs"], "写入后出现在清单中");
+        let names: Vec<&str> = nested.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["lib.rs", "new.rs"], "写入后出现在清单中");
 
         // 读回（VDFS `read` 走 `read_content`）
         assert_eq!(
@@ -693,7 +669,7 @@ mod tests {
         delete_node(wd, "src/new.rs").await.unwrap();
         let nested = list_children(wd, Some("src")).await.unwrap();
         assert_eq!(nested.len(), 1);
-        assert_eq!(nested[0].id, "src/lib.rs");
+        assert_eq!(nested[0].name, "lib.rs");
 
         // 越界写入 / 读取目录内容均被拒（沙箱边界是这条链路的安全底线）
         assert!(write_node(wd, "../escape.rs", "x").await.is_err());

@@ -6,8 +6,8 @@
         <span v-if="store.isActiveWorking" class="status-working">● AI 处理中</span>
       </div>
       <div class="header-right">
-        <!-- 机制动作（页面注入：容器入口/删除等）与编辑器自身按钮并排，同构图标风格 -->
-        <EntityActions
+        <!-- 机制动作（页面注入：浏览内部/删除等）与自身按钮并排，同构图标风格 -->
+        <VdfsActions
           v-if="(mechanismActions ?? []).length"
           :actions="mechanismActions ?? []"
           :busy="mechBusy"
@@ -79,11 +79,11 @@ import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
 import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
-import EntityActions from '@/components/entities/EntityActions.vue'
-import type { DetailAction } from '@/schemas/entities'
+import VdfsActions from '@/components/vdfs/VdfsActions.vue'
+import type { DetailAction } from '@/schemas/vdfs'
 
 const props = defineProps<{
-  /** 机制动作注入（页面单一定义点计算：容器入口/删除等），与自身按钮并排渲染 */
+  /** 机制动作注入（页面单一定义点计算：浏览内部/删除等），与自身按钮并排渲染 */
   mechanismActions?: DetailAction[]
   /** 删除进行中（机制删除动作的 busy 状态） */
   deleting?: boolean

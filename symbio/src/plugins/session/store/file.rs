@@ -3,7 +3,7 @@
 //! 顶层会话：`<base_dir>/<safe_id>/session.json`
 //! 消息压缩存档写入：`<base_dir>/<safe_id>/messages/msg_*.txt`
 //!
-//! ## 子会话嵌套存储（机制约定，见 docs/design/entity-provider-mechanism.md）
+//! ## 子会话嵌套存储（机制约定，见 docs/design/vdfs.md）
 //!
 //! 会话可派生子会话：子会话不是顶层平级实体，而是存放在父会话目录内的
 //! `sessions/` 子目录——`<base_dir>/<safe(父)>/sessions/<safe(子)>/`。

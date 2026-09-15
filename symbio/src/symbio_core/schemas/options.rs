@@ -27,11 +27,12 @@
 //! 单个端点是刻意的：根层与子层只是 `parent` 参数的有无，与 VDFS 的
 //! 树懒加载（`vdfs/list` 的 `parent`）同构，避免为同一机制造第二个通道。
 //!
-//! ## 与实体表单机制的统一（§4）
+//! ## 与详情表单方言的统一（`docs/design/vdfs.md` §7）
 //!
-//! `form` 类型直接复用 [`DetailDefinition`]：字段/分区/条件显隐/预设联动的
-//! 表达能力与实体详情页完全一致，前端复用唯一渲染器 `DetailForm`（新增
-//! `binding = "option"`：预填自节点 `data`，保存回 `action`）。
+//! `form` 类型直接复用详情表单方言 [`DetailDefinition`]（字段/分区/条件显隐/
+//! 预设联动的表达能力见 `crate::symbio_core::schemas::detail`）：与 VDFS 节点
+//! `ext = form` 的详情页完全一致，前端复用唯一渲染器 `DetailForm`
+//! （`binding = "option"`：预填自节点 `data`，保存回 `action`）。
 //!
 //! ## 状态落库
 //!
@@ -53,7 +54,7 @@ pub const OPTIONS_LIST: &str = "options/list";
 /// 前端不持有任何业务字段名。
 pub const SESSION_STATE_ENDPOINT: &str = "worker/session/update";
 
-/// 状态取值约定（与实体机制 §2.4 完全一致，复用同一语义）
+/// 状态取值约定（与 VDFS 节点 `status` 同一套语义，见 `docs/design/vdfs.md` §3.2）
 pub const OPTION_STATUS_ACTIVE: &str = "active";
 pub const OPTION_STATUS_WORKING: &str = "working";
 pub const OPTION_STATUS_DISABLED: &str = "disabled";
@@ -163,9 +164,9 @@ pub struct OptionNode {
     /// invoke / form：执行规格
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<OptionAction>,
-    /// form：表单定义（与实体详情表单同一套 schema）
+    /// form：表单定义（与资源详情表单同一套 schema）
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub form: Option<super::entities::DetailDefinition>,
+    pub form: Option<super::detail::DetailDefinition>,
     /// form：表单初始数据（字段名 → 值；前端 DetailForm 预填）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,

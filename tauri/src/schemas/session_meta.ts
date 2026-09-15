@@ -2,7 +2,7 @@
  * Session 元数据约定
  *
  * 写入后端的 `Session.metadata` JSON 字段：
- *  - workdir:  会话级工作目录（决定 AI 工具调用上下文与右侧实体树）
+ *  - workdir:  会话级工作目录（决定 AI 工具调用上下文与右侧文件树）
  *  - title:    会话标题（用于会话列表展示）
  *  - agent_id: 使用的 Agent 标识
  *  - provider_id: 选定的 Model Provider ID（与 agent_id 同级别）

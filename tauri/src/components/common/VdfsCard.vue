@@ -1,16 +1,17 @@
 <!--
-  EntityCard — 通用"列表项"卡片
+  VdfsCard — 通用"列表项"卡片（VDFS 节点的一张卡）
 
-  适用于所有 EntityShell 的左侧列表：Model Provider / MCP Server / Skill / Agent。
+  适用于 VdfsShell / Workbench 的左侧列表：模型 / MCP / 技能 / 智能体 / 设置分区…
+  一切由 `vdfs/list` 下发的节点，卡片本身不认识资源类型。
 
-  视觉风格对齐 SessionCard：
+  视觉风格对齐会话卡片：
   - 状态点 + 标题行
   - 副标题（描述预览）
   - 元信息行（来源/类型/其他标签）
 -->
 <template>
   <div
-    class="entity-card"
+    class="vdfs-card"
     :class="{ active: isActive, disabled }"
     role="option"
     :tabindex="disabled ? -1 : 0"
@@ -56,7 +57,7 @@ interface Tag {
   kind?: 'default' | 'primary' | 'success' | 'warn' | 'info' | 'muted'
 }
 
-interface EntityCardProps {
+interface VdfsCardProps {
   title: string
   subtitle?: string
   status?: 'active' | 'working' | 'disabled' | 'warning' | 'error' | 'muted'
@@ -66,13 +67,13 @@ interface EntityCardProps {
   isActive?: boolean
   disabled?: boolean
   tags?: Tag[]
-  /** 类型图标组件（实体注册表下发，如设置分区图标） */
+  /** 类型图标组件（registry/vdfsIcons 的纯 UI 映射，如设置分区图标） */
   icon?: Component
   /** 是否显示状态点（由节点 status 决定；无状态的类型由调用方关闭） */
   showStatus?: boolean
 }
 
-const props = withDefaults(defineProps<EntityCardProps>(), {
+const props = withDefaults(defineProps<VdfsCardProps>(), {
   status: 'active',
   statusTitle: '',
   badgeKind: 'default',
@@ -91,7 +92,7 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 </script>
 
 <style scoped>
-.entity-card {
+.vdfs-card {
   margin: var(--space-1) var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: var(--surface-overlay);
@@ -104,17 +105,17 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
   user-select: none;
 }
 
-.entity-card:hover {
+.vdfs-card:hover {
   border-color: var(--accent);
   box-shadow: var(--shadow-1);
 }
 
-.entity-card.active {
+.vdfs-card.active {
   border-color: var(--accent);
   background: var(--surface-selected);
 }
 
-.entity-card.disabled {
+.vdfs-card.disabled {
   opacity: 0.55;
 }
 

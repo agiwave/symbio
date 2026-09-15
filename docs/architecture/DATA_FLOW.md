@@ -34,7 +34,7 @@ sequenceDiagram
 | 3 | 连接管理 | `tauri/src-tauri/src/route_connection.rs` | 流式连接的生命周期（send/close） |
 | 4 | 核心库入口 | `symbio/src/lib.rs` → `Routeable::route` | `self.plugins.route(&request)` |
 | 5 | 根组装 | `symbio/src/init.rs` → `create_root_plugin` | 根插件为 `home` |
-| 6 | home 分发 | `symbio/src/plugins/home/plugin.rs` | 根插件 `home`：自身终结 `home/*`、`work/*`、`entities/providers`、`save_config`，其余转发 `worker` |
+| 6 | home 分发 | `symbio/src/plugins/home/plugin.rs` | 根插件 `home`：自身终结 `home/*`、`work/*`、`save_config`，其余转发 `worker` |
 | 7 | composite 分发 | `symbio/src/plugins/composite/` | `worker`（Composite）按 `config.yaml` 的 `symbio.plugins` 挂载**全部**子插件：`agent` / `session` / `model` / `local` / `web` / `skill` / `mcp` / `telegram` / `gateway` / `setting` / `hook` / `event_bus` |
 | 8 | 插件处理 | 各插件 `plugin.rs` 的 `route()` | 路径清单见 [ROUTES.md](../reference/ROUTES.md) |
 | 9 | 错误返回 | `symbio_core/error.rs` | 错误码对照 [ERROR_CODES.md](../reference/ERROR_CODES.md) |
@@ -70,13 +70,21 @@ sequenceDiagram
 
 > `{plugin}/entities/*` 已于 S11 下线（协议）；VDFS 收敛期结束后，
 > `EntityProvider` 抽象与 `EntityVdfsAdapter` 一并删除——**每个资源插件
-> 直接实现 `VdfsProvider`**，中间不再有 trait 与适配器。
+> 直接实现 `VdfsProvider`**，中间不再有 trait 与适配器。其下的
+> `providers/storage_service`（`StorageService` / `EntityStore`）与
+> `symbio_core::entities` 存储原语随后也废除，落盘收敛为
+> `providers/vdfs_service` 的三个集中实现（见 #4）。
 
 | # | 环节 | 代码位置 | 说明 |
 |---|------|---------|------|
 | 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 13 个操作：list / tree / stat / read / write / mkdir / delete / move / edit / search / watch / unwatch / action |
-| 2 | 子目录来源 | 各插件自持的 `VdfsProvider`（资源插件直连，无中间适配层） | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
-| 3 | 机制详解 | [design/vdfs.md](../design/vdfs.md)、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范；落盘原语见 `symbio_core/entities.rs` |
+| 2 | 地址分流 | `plugins/vdfs/fs.rs`（`UnifiedFs`） | `.vdfs` 独占首段 → 虚拟层（容器组合视图）；其余 → 物理层 `physical.rs`（工作目录 / 绝对路径的真实文件） |
+| 3 | 子目录来源 | `plugins/composite/vdfs.rs` 逐子插件收集，委派给各插件自持的 `impl VdfsProvider` | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
+| 4 | **落盘在哪一层** | `providers/vdfs_service`（`DirVdfs` / `SingleFileVdfs` / `MemoryVdfs` + `entry.rs` / `pack.rs`） | 虚拟层再往下的一跳：条目寻址与原子落盘（`<homedir>/plugins/<类别>/<id>/<manifest>`）、整包 zip / base64、变更广播。**不在** core 协议层，也**不走** `create_object` 工厂。目录自管的资源（agent bundle 走 `BundleStore`、session 走自己的 `SessionStore`）不进这一层 |
+| 5 | 机制详解 | [design/vdfs.md](../design/vdfs.md)（§11 / §13.4）、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范 |
+
+**排障口诀**：列不出 / 读不到 → 查 #2 地址分流与 #3 收集结果；写盘没生效 / 前端不刷新
+→ 查 #4（`vdfs_service` 的写入与 `notify_change` 广播）；物理路径被拒 → 查 #2 的 `FsPolicy`。
 
 ## 全链路追踪
 
@@ -92,7 +100,7 @@ sequenceDiagram
 | 工具不执行 | 链路二 #2（能力收集）、#5（工具循环） |
 | 流式帧丢失 | 链路二 #6（EventBus 订阅）、链路一 #3（连接生命周期） |
 | 外部 HTTP 调用失败 | 链路三 #1/#2（health → 鉴权） |
-| 实体增删查异常 | 通用实体链路 #1/#2 + [entity-provider-mechanism] |
+| 资源增删查异常 | 通用：资源访问链路（`vdfs/*`）#2/#3/#4 + [design/vdfs.md](../design/vdfs.md) §13.4 + `symbio/src/providers/vdfs_service/` |
 | 错误码含义 | [ERROR_CODES.md]（源：`symbio_core/error.rs`） |
 | 配置不生效 | [CONFIGURATION.md] + `setting` 插件（`.vdfs/setting` 的 `vdfs/list` / `vdfs/read`） |
 

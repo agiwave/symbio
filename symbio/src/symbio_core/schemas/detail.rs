@@ -1,121 +1,21 @@
-//! 实体机制的**宿主方言**（S11 之后）
+//! 详情表单的**宿主方言**（definition-driven detail）
 //!
-//! `entities/*` **调用协议已下线**，对外地址只剩 VDFS（`.vdfs/…`）。本模块
-//! 因此不再是「对外契约」，而是 VDFS `ext = form` 这一**呈现形态的宿主方言**：
+//! 这里讲的**不是 VDFS 机制**，而是 VDFS 之上的一种**呈现形态**：后端下发一份
+//! [`DetailDefinition`]，前端通用渲染器（DetailForm）据此渲染详情与表单，
+//! **零页面开发**。VDFS 侧只提供节点、访问位与读写通道，字段布局、预设联动、
+//! 条件显隐全是宿主方言。
 //!
-//! - [`DetailDefinition`] 及其附属形状（`DetailSection` / `DetailField` /
-//!   `DetailOption` / `DetailBadge` / `DetailAction` / 预设 …）：后端下发、
-//!   前端通用渲染器（DetailForm）据此渲染详情，**零页面开发**；
-//! - [`EntitySummary`]：provider 之间的交换形状（列表项 / 详情数据源）；
-//! - [`EntityUploadResponse`] / [`EntityStatusResponse`]：写盘与状态钩子的
-//!   返回形状（VDFS 侧的写 / 动作结果由此派生）。
+//! 与 VDFS 的接缝只有两处，且都由 provider 自己声明，不存在机制侧的猜测：
 //!
-//! 能力判定不在本模块：可写性来自 **VDFS 访问位**，可新建 / 可导入来自
-//! `provider_registry()` 的 `supports_upload` / `supports_import`，可测试
-//! 与否来自 `DetailDefinition.actions` 里声明的动作。
+//! - 节点 `ext = form` → 前端用通用渲染器打开本模块下发的定义；
+//! - 定义里的 `load_path` / `save_path` → 普通的服务端调用地址（可以是 `vdfs/read`
+//!   / `vdfs/write`，也可以是任意既有 path）。
+//!
+//! 能力判定不在本模块：可写性来自 **VDFS 访问位**，可新建 / 可导入来自 provider 的
+//! `root_access` / `root_new_types`，可测试与否来自 [`DetailDefinition::actions`]
+//! 里声明的动作。
 
 use serde::{Deserialize, Serialize};
-
-// ==================== 实体类型常量 ====================
-
-/// Model Provider
-pub const ENTITY_MODEL: &str = "model";
-/// MCP Server
-pub const ENTITY_MCP: &str = "mcp";
-/// Agent（智能体）
-pub const ENTITY_AGENT: &str = "agent";
-/// Skill（技能）
-pub const ENTITY_SKILL: &str = "skill";
-/// Session（会话）
-pub const ENTITY_SESSION: &str = "session";
-/// Setting（设置分区）
-pub const ENTITY_SETTING: &str = "setting";
-
-// ==================== 统一列表项 ====================
-
-/// 实体概要（列表项）
-///
-/// `status` 取值建议：`active` / `disabled` / `working` / `error` / `unknown`。
-/// `extra` 展开存放类型特有字段（如 model 的 provider/model、session 的
-/// message_count 等），前端按需读取。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EntitySummary {
-    /// 实体类型标识（`model` / `mcp` / `agent` / `skill` / `session`）
-    pub kind: String,
-    /// 显示名
-    pub name: String,
-    /// 唯一 id（即服务器端目录名）
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// 一行摘要（如 skill 的 body 开头 / agent 描述）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    /// 最近更新时间（秒时间戳）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<i64>,
-    /// 状态
-    pub status: String,
-    /// 状态补充说明（如连接失败原因、等待审批）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status_detail: Option<String>,
-    /// 父节点 id（树视图专用：`view = "tree"` 的子类别条目以容器内相对路径
-    /// 为 id、父路径为 parent 构成层级；根层条目缺省。列表视图不用此字段）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
-    /// 可展开提示（树视图专用：true = 该节点可懒加载下一层；缺省按可展开
-    /// 处理，展开请求返回空则收敛为叶子。列表视图不用此字段）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expandable: Option<bool>,
-    /// 类型特有扩展字段
-    #[serde(flatten)]
-    pub extra: serde_json::Value,
-}
-
-impl EntitySummary {
-    pub fn new(kind: &str, id: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            kind: kind.to_string(),
-            id: id.into(),
-            name: name.into(),
-            description: None,
-            summary: None,
-            updated_at: None,
-            status: "active".to_string(),
-            status_detail: None,
-            parent: None,
-            expandable: None,
-            extra: serde_json::Value::Object(Default::default()),
-        }
-    }
-}
-
-// ==================== 请求 / 响应 ====================
-
-/// 实体写入（`vdfs/write` / 整包导入）响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EntityUploadResponse {
-    pub kind: String,
-    pub id: String,
-    pub created: bool,
-}
-
-/// 整包导出结果（VDFS 动作 `export` 的 `data` 载荷）
-///
-/// 与「新建类型 `zip`」的导入互为逆向：导入把 zip 字节展开成实体目录，
-/// 导出把实体目录打包成 zip 字节（base64，走 VDFS 的二进制通道）。
-///
-/// 字段名与 [`VdfsContent::b64`] 同构——前端据此把它当**文件载荷**处理
-/// （有 `filename` + `b64` 就下载），不认识「导出」这个动作本身。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EntityExport {
-    /// 被导出的实体 id
-    pub id: String,
-    /// 建议文件名（`<id>.zip`）
-    pub filename: String,
-    /// 打包字节（base64）
-    pub b64: String,
-}
 
 // ==================== 详情页定义（definition-driven detail） ====================
 //
@@ -251,8 +151,7 @@ pub struct DetailBadge {
 }
 
 /// 动作按钮。`id` ∈ save | test | delete | set-default | open-container
-/// （机制语义动作，前端接统一通道；`open-container` 经 `payload.kind`
-/// 路由推入容器实体页）或自定义（预留）；`payload` 合并进 save 负载
+/// （机制语义动作，前端接统一通道）或自定义（预留）；`payload` 合并进 save 负载
 /// （如 `skip_validation`）；`busy_label` 为进行中文案。
 ///
 /// `icon`：图标名（可选）。语义动作 id 自带默认图标映射（前端纯 UI 资产），
@@ -281,10 +180,10 @@ pub struct DetailAction {
     pub busy_label: Option<String>,
 }
 
-/// 详情页定义。`binding` ∈ upload（实体：预填 item.config，保存走
+/// 详情页定义。`binding` ∈ upload（资源：预填节点内容，保存走
 /// manifest 写入）| config（配置分区：经 `load_path`/
 /// `save_path` 读写，如 `config/get` / `config/set`）| info（只读概览：
-/// 无保存，字段取值来自 item.config/extra，配 `static` widget 展示）。
+/// 无保存，字段取值来自节点 attributes，配 `static` widget 展示）。
 /// 派生链均为「首个非空」：
 /// `title_from` 生成标题，`name_from` 保存时补名称，`id_from` 新建时
 /// 派生 slug id（前端去重 `-2` 递增，后端 `validate_manifest` 兜底）。

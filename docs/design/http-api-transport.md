@@ -56,12 +56,12 @@ symbio/src/plugins/gateway/
 ### 4.1 拿到转发目标：`parent.route()`
 
 **问题**：子插件的 `ctx.parent()` 只能拿到直接父级（worker `Composite`），
-拿不到 root（`HomePlugin`）。而第三方需要访问 `entities/providers`、`home/*` 等 root 级路由。
+拿不到 root（`HomePlugin`）。而第三方需要访问 `home/*`、`work/*` 等 root 级路由。
 `reload` 时 root 还会整个重建，捕获的 `Arc<dyn Plugin>` 会变成"旧 root"。
 
 **做法**：网关不取 root，而是持有构造期登记的 `Weak` 父级（worker `Composite`），
 每次请求 `parent.route(ctx)` —— `Composite` 的路径合并语义与 `root.route` 等价，
-home 级路径（`home/*`、`work/*`、`entities/providers`、`save_config`）由 `Composite`
+home 级路径（`home/*`、`work/*`、`save_config`）由 `Composite`
 未命中时的兜底上行转发覆盖。父级以 `Weak` 保存，不产生循环引用；
 `home/reload` 重建插件树时网关实例随之重建，转发目标恒为当前树。
 
@@ -176,7 +176,7 @@ GET /api/v1/health  → { "ok": true }
 - **只读模式**（`inbound_readonly`）：仅放行 `is_readonly_allowed` 白名单
   （清单见 [CONFIGURATION.md](../reference/CONFIGURATION.md)），其余 403/拒绝；
   `gateway/config/*` 一律拒绝（`config/get` 含 `inbound_token`）。
-- 危险操作分级（`local/shell` 类、`work/set_workspace`、`entities/delete`、`config/set`
+- 危险操作分级（`local/shell` 类、`work/set_workspace`、`vdfs/write|delete`、`config/set`
   归为 `danger`）：**预留**，现行只有只读白名单一层。
 - 审计：`trace_id` 随 `metadata` 透传进上下文，invoke 记入 tracing。
 - **HTTPS**：不做。rustls 默认后端 aws-lc-rs 依赖 `aws-lc-sys`（C），与"无 C 编译"铁律冲突。

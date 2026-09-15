@@ -4,16 +4,21 @@
   职责：把节点的 `schema`（宿主方言的呈现描述，此处为 DetailDefinition）交给
   通用渲染器 DetailForm 动态生成表单，并把保存桥接到 VDFS 传输。
 
-  ## 传输适配（本组件存在的原因）
+  ## 两个入参各归各位
 
-  DetailForm 的 `config` 绑定自持 load/save_path（那是实体机制的通道）；
-  VDFS 通道是 `vdfs/read` / `vdfs/write`。因此本组件把定义适配为
-  `binding: 'option'` —— DetailForm 对它的语义恰好是「数据来自外部、保存
-  只交回纯字段值」，与 VDFS 完全一致：预填来自 `optionData`（= vdfs/read 的
-  解析结果），保存 emit 纯字段值，由页面写回 `vdfs/write`。
+  - **定义** = `node.schema`（provider 下发，VDFS 只透传）；
+  - **取值** = `data` —— 页面层 `vdfs/read` 拿到的 `VdfsContent.text` 经 JSON
+    parse 后的**表单模型对象**，显式传给渲染器的 `values` 入参。
+    节点自身不携带正文，取值只有这一条来源。
 
-  因此 provider 无需为 VDFS 另写一份定义；同一份 DetailDefinition 同时服务
-  实体页（config 通道）与 VDFS 页（vdfs 通道），校验仍由 provider 自持。
+  ## 通道适配
+
+  DetailForm 的 `config` 绑定自持 load/save_path（那是插件的 config 路由，
+  不是 VDFS 通道）；VDFS 的通道是 `vdfs/read` / `vdfs/write`。因此本组件把定义
+  适配为 `binding: 'option'` —— DetailForm 对它的语义恰好是「数据来自外部、保存
+  只交回纯字段值」：预填来自 `values`，保存 emit 纯字段值，由页面写回 `vdfs/write`。
+
+  校验仍由 provider 自持（`vdfs/write` 失败带回字段级错误）。
 -->
 <template>
   <div class="vdfs-form">
@@ -29,13 +34,13 @@
     </div>
     <DetailForm
       :definition="definition"
-      :item="item"
-      :option-data="optionData"
+      :node="node"
+      :values="values"
       :capabilities="capabilities"
       :mechanism-actions="mechanismActions"
       :saving="saving"
       :testing="testing"
-      @option-save="(v) => $emit('save', v)"
+      @save="(v) => $emit('save', v)"
       @delete="$emit('delete')"
       @open-container="$emit('browse')"
       @test="$emit('action', 'test')"
@@ -46,18 +51,13 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import DetailForm from '@/components/entities/DetailForm.vue'
-import type {
-  DetailAction,
-  DetailDefinition,
-  EntitySummary,
-} from '@/schemas/entities'
+import DetailForm from './DetailForm.vue'
+import type { DetailAction, DetailDefinition, VdfsNode } from '@/schemas/vdfs'
 import {
   VFDS_ACTION_EXPORT,
   VFDS_ACTION_TEST,
   vdfsAccessOf,
   type VdfsFieldError,
-  type VdfsNode,
 } from '@/schemas/vdfs'
 
 const props = withDefaults(
@@ -95,8 +95,8 @@ defineEmits<{
 const access = computed(() => vdfsAccessOf(props.node))
 
 /**
- * 通道适配：清掉实体机制的 load/save_path，改由 VDFS 承载数据。
- * 不可写节点同时剥掉定义动作（避免渲染出无效的「保存」按钮）。
+ * 通道适配：数据一律由 VDFS 承载，故清掉定义里的 load/save_path（那是插件的
+ * config 路由）。不可写节点同时剥掉写相关的定义动作（避免渲染出无效的「保存」按钮）。
  */
 const definition = computed<DetailDefinition>(() => {
   const raw = (props.node.schema ?? {}) as DetailDefinition
@@ -128,17 +128,10 @@ const testable = computed(() =>
   (definition.value.actions ?? []).some((a) => a.id === VFDS_ACTION_TEST)
 )
 
-const optionData = computed<Record<string, unknown> | null>(() =>
+/** 表单模型对象：页面层 `vdfs/read` 的文本按 JSON 解析后的字段值 */
+const values = computed<Record<string, unknown> | null>(() =>
   props.data && typeof props.data === 'object' ? (props.data as Record<string, unknown>) : null
 )
-
-/** 节点 → 实体摘要（仅供 DetailForm 读取 id/name 参与标题回落链） */
-const item = computed<EntitySummary>(() => ({
-  kind: props.node.kind,
-  id: props.node.name,
-  name: props.node.title || props.node.name,
-  status: props.node.status,
-}))
 
 /** 访问位 → 能力（VDFS 里能力就是访问位，不存在类型特判） */
 const capabilities = computed<Record<string, boolean>>(() => ({
@@ -152,9 +145,9 @@ const capabilities = computed<Record<string, boolean>>(() => ({
  * 能力判据是节点的访问位（`w` = 可写 ⇒ 可删）。删除请求经 `@delete` 回到页面层，
  * 由页面统一走 `vdfs/delete`（`VdfsProvider::delete`），本组件不直接发协议。
  *
- * 说明：`ext = form` 在 S4 之前只由「设置分区」这类固定清单项使用（增删无语义），
- * S4 起 model / skill / mcp 的实体详情同样落到 form（`schema` 来自
- * `EntityProvider::detail_definition`），此时删除是有语义的，故按访问位注入。
+ * 说明：`ext = form` 早期只由「设置分区」这类固定清单项使用（增删无语义），
+ * 现在 model / skill / mcp / agent 的详情同样落到 form（`schema` 来自 provider 的
+ * `detail_definition`），此时删除是有语义的，故按访问位注入。
  */
 const mechanismActions = computed<DetailAction[]>(() => {
   if (!access.value.write) return []

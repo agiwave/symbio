@@ -1,14 +1,13 @@
 <!--
   VdfsSessionDetail — VDFS `session` 渲染器（会话工作区）
 
-  薄适配层：会话资源的呈现已由 `components/entities/Session.vue` 实现，
-  VDFS 侧只需把节点映射为实体摘要并透传能力。同一份渲染器同时服务
-  实体机制与 VDFS 机制——这正是「ext 决定渲染器」这一约定的价值：
-  详情实现只有一份，两个机制共用。
+  薄适配层：会话的呈现已由 `components/vdfs/Session.vue` 实现，本组件只做两件事
+  —— 把节点原样交给它（不再映射成另一种摘要形状），以及把访问位翻译成能力与
+  机制动作。这正是「ext 决定渲染器」这一约定的价值：详情实现只有一份。
 -->
 <template>
   <Session
-    :item="item"
+    :node="node"
     :capabilities="capabilities"
     :mechanism-actions="mechanismActions"
     :saving="saving"
@@ -20,9 +19,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import Session from '@/components/entities/Session.vue'
-import type { DetailAction, EntitySummary } from '@/schemas/entities'
-import { vdfsAccessOf, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
+import Session from './Session.vue'
+import { vdfsAccessOf, type DetailAction, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
 
 // 渲染器统一契约（详见 VdfsTextDetail 同名说明）
 const props = defineProps<{
@@ -42,15 +40,6 @@ defineEmits<{
   (e: 'rename'): void
 }>()
 
-const item = computed<EntitySummary>(() => ({
-  kind: props.node.kind || 'session',
-  id: props.node.name,
-  name: props.node.title || props.node.name,
-  description: props.node.description,
-  status: props.node.status,
-  updated_at: props.node.updated_at,
-}))
-
 /** 访问位 → 能力（VDFS 里能力就是访问位，不存在类型特判） */
 const capabilities = computed<Record<string, boolean>>(() => ({
   mutable: vdfsAccessOf(props.node).write,
@@ -60,10 +49,10 @@ const capabilities = computed<Record<string, boolean>>(() => ({
 /**
  * 机制动作注入（在 ChatMainPanel 头部与自身按钮并排渲染）。
  *
- * - **浏览内部**：会话内部结构（子会话 / 工作目录树）在 VDFS 上是「会话同名
- *   目录」，由页面层 `enter(node.path)` 进入——取代原容器实体页。只读能力，
+ * - **浏览内部**：会话的内部结构（子会话 / 工作目录树）在 VDFS 上是「会话同名
+ *   目录」，由页面层 `enter(node.path)` 进入。只读能力，
  *   与访问位无关，恒可见。
- * - **删除**：能力判据是节点的访问位（`w` = 可写 ⇒ 可删），与实体机制同构；
+ * - **删除**：能力判据是节点的访问位（`w` = 可写 ⇒ 可删）；
  *   删除请求经 `@delete` 回到页面层，统一走 `vdfs/delete`
  *   （`VdfsProvider::delete` → `delete_session_internal`）。
  *

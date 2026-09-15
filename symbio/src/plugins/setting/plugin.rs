@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-use crate::symbio_core::schemas::entities::{
+use crate::symbio_core::schemas::detail::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
 use crate::symbio_core::schemas::session::session_config::SessionConfig;
@@ -119,7 +119,7 @@ crate::submit_object_creator!(PLUGIN_SETTING, SettingPlugin::build, dyn Plugin);
 
 // ==================== 设置分区清单（单一真相源） ====================
 
-/// 设置分区（固定清单）——实体提供者机制与 VDFS 挂载点**共用同一份声明**。
+/// 设置分区（固定清单）是 VDFS 挂载点声明与详情表单的**同一份真相源**。
 ///
 /// `id` 同时作为前端 editor 的"扩展名"（config_type）；`prefix` 是该分区配置
 /// 读写的目标插件前缀（`None` = 数据由前端状态自持 / 纯展示，VDFS 侧只读）。
@@ -463,7 +463,7 @@ fn section_node(s: &SectionSpec) -> VdfsNode {
     };
     let definition = section_definition(s.id);
     let mut n = VdfsNode::file(s.id, s.label, access);
-    n.kind = crate::symbio_core::entities::ENTITY_SETTING.to_string();
+    n.kind = PLUGIN_SETTING.to_string();
     n.ext = Some(if definition.is_some() {
         vdfs::VFDS_EXT_FORM.to_string()
     } else {
@@ -639,9 +639,7 @@ impl SettingPlugin {
 impl VdfsProvider for SettingPlugin {
     fn label(&self) -> Option<&str> {
         // 标签 / 顺序由本 provider 自持（实体注册表已随 VDFS 收敛下线）
-        Some(
-            "设置",
-        )
+        Some("设置")
     }
 
     fn description(&self) -> Option<&str> {
@@ -743,7 +741,6 @@ impl VdfsProvider for SettingPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::entities::ENTITY_SETTING;
 
     #[tokio::test]
     async fn list_returns_sections_in_declared_order() {
@@ -760,7 +757,7 @@ mod tests {
 
         // kind 标记为 setting；`name` 是地址段、`title` 是人读标签
         let first = &items[0];
-        assert_eq!(first.kind, ENTITY_SETTING);
+        assert_eq!(first.kind, PLUGIN_SETTING);
         assert_eq!(first.name, "appearance");
         assert_eq!(first.title, "外观");
 
@@ -802,12 +799,9 @@ mod tests {
     async fn vdfs_self_description_has_no_mount() {
         let p = SettingPlugin::default();
         assert_eq!(p.label(), Some("设置"));
-        // 顺序取自实体注册表（**单一真相源**），使 `.vdfs` 左栏与实体页恒等
-        // （S4 起不再是 provider 自定的 60）
-        assert_eq!(
-            p.order(),
-            6
-        );
+        // 顺序由本 provider 的 order() 自持（**单一真相源**），
+        // 使 `.vdfs` 左栏与详情恒等
+        assert_eq!(p.order(), 6);
         assert_eq!(p.icon(), Some("settings"));
         assert_eq!(p.root_access().flags(), "l");
         assert!(!p.root_access().traverse, "分区是叶子，不参与树遍历");

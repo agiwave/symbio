@@ -6,7 +6,7 @@
  * 会话输入区下方的「选项行」完全由后端下发（选项宿主 = session 插件，
  * `worker/session/options/list`）。本组合式函数实现**机制**：
  *
- * - 拉取根选项 / 懒加载子项（`parent` 参数，与实体机制 `list_items` 同构）；
+ * - 拉取根选项 / 懒加载子项（`parent` 参数，与 VDFS 的目录寻址同构）；
  * - 通用分派 `dispatch`：把 `OptionAction` 变为真实调用——
  *   `payload` 深拷贝 → 原生取值原语（`pick`）→ 动态值写入点路径（`bind`）→
  *   `callPlugin(endpoint, payload)`；

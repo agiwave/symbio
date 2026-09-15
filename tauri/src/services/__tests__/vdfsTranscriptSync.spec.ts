@@ -21,8 +21,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/services/eventBus', () => ({
   subscribe: mocks.subscribe,
-  publishEntityChangedLocal: vi.fn(),
-  subscribeEntityChanged: vi.fn(() => () => {}),
+  publishVdfsChangedLocal: vi.fn(),
+  subscribeVdfsChanged: vi.fn(() => () => {}),
 }))
 vi.mock('@/services/vdfs', () => ({
   readVdfs: mocks.readVdfs,

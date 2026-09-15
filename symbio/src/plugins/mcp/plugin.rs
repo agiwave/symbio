@@ -17,13 +17,14 @@
 //!
 //! ## 存储策略
 //!
-//! 每个 MCP Server 作为独立实体存放在
-//! `~/.symbio/plugins/mcps/<name>/server.json`。
+//! 每个 MCP Server 是一个**目录型条目**：`~/.symbio/plugins/mcp/<name>/server.json`
+//! （主文件 `server.json` + 可选附属文件），由
+//! [`DirVdfs`](crate::providers::vdfs_service::DirVdfs) 承载落盘。
 //! `McpConfig` 的内存视图（`servers: HashMap<name, McpServerConfig>`）
 //! 通过从磁盘加载/回写保持一致。
 
 pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
-use crate::symbio_core::create_object;
+use crate::providers::vdfs_service::DirVdfs;
 use crate::symbio_core::schemas::common;
 use crate::symbio_core::{
     Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
@@ -36,6 +37,9 @@ use tracing::warn;
 
 use super::capability::McpToolCapability;
 use super::manager::McpManager;
+
+/// Server 主文件（磁盘布局：`~/.symbio/plugins/mcp/<id>/server.json`）
+const MANIFEST: &str = "server.json";
 
 /// MCP 插件
 pub struct McpPlugin {
@@ -61,7 +65,7 @@ impl McpPlugin {
         let parent = ctx.parent();
         let plugin = Arc::new(McpPlugin::new(parent, config));
 
-        // 启动后异步触发：从新存储加载（并触发首启动数据迁移）
+        // 启动后异步触发：从存储加载（并触发首启动数据迁移）
         let plugin_weak = Arc::downgrade(&plugin);
         let ctx_clone = ctx.clone();
         tokio::spawn(async move {
@@ -83,6 +87,11 @@ impl McpPlugin {
         }
     }
 
+    /// 磁盘底座（每次现取，跟随 homedir 切换）
+    fn store() -> DirVdfs {
+        DirVdfs::for_category(PLUGIN_MCP, MANIFEST).with_label(LABEL)
+    }
+
     pub fn metadata() -> PluginMeta {
         PluginMeta::new("mcp", "MCP 工具集成")
             .with_description("提供与 MCP 服务器的连接和交互功能")
@@ -94,27 +103,14 @@ impl McpPlugin {
         guard.as_ref().and_then(|w| w.upgrade())
     }
 
-    /// 异步加载：从 `~/.symbio/plugins/mcps/` 读取所有 MCP Server
+    /// 异步加载：从 `~/.symbio/plugins/mcp/` 读取所有 MCP Server
     ///
-    /// - 若新存储为空，则触发首启动迁移（从 ctx.config()）
-    pub async fn load_from_storage(&self, ctx: &Arc<dyn InvokeRequest>) {
-        let store = match create_object::<dyn crate::symbio_core::providers::StorageService>(
-            "storage_service",
-            ctx.clone(),
-        ) {
-            Some(s) => s,
-            None => {
-                crate::plugin_warn!("mcp", "未找到 storage_service，跳过新存储加载");
-                return;
-            }
-        };
+    /// - 若存储为空，则触发首启动迁移（从 ctx.config()）
+    pub async fn load_from_storage(&self, _ctx: &Arc<dyn InvokeRequest>) {
+        let store = Self::store();
 
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::MCP;
-        let manifest = crate::symbio_core::providers::manifests::SERVER;
-
-        // 1. 列出新存储中的所有 MCP Server
-        let ids = match es.list_entities(category).await {
+        // 1. 存储中的所有 MCP Server
+        let entries = match store.entries().await {
             Ok(v) => v,
             Err(_e) => {
                 crate::plugin_warn!("mcp", "list mcps 失败");
@@ -122,23 +118,24 @@ impl McpPlugin {
             }
         };
 
-        // 2. 如果新存储为空，触发首启动迁移
-        if ids.is_empty() {
-            self.migrate_from_legacy_config(&*store).await;
+        // 2. 如果存储为空，触发首启动迁移
+        if entries.is_empty() {
+            self.migrate_from_legacy_config(&store).await;
             return;
         }
 
-        // 3. 加载新存储的内容
+        // 3. 加载存储内容
         let mut new_servers = std::collections::HashMap::new();
-        for id in &ids {
-            match es.read_entity(category, id, manifest).await {
-                Ok(content) => match serde_json::from_str::<McpServerConfig>(&content) {
-                    Ok(s) => {
-                        new_servers.insert(id.clone(), s);
-                    }
-                    Err(_e) => crate::plugin_warn!("mcp", "解析 server {id} 失败"),
-                },
-                Err(_e) => crate::plugin_warn!("mcp", "读取 server {id} 失败"),
+        for e in &entries {
+            match e
+                .raw
+                .as_deref()
+                .and_then(|c| serde_json::from_str::<McpServerConfig>(c).ok())
+            {
+                Some(s) => {
+                    new_servers.insert(e.id.clone(), s);
+                }
+                None => crate::plugin_warn!("mcp", "解析 server {} 失败", e.id),
             }
         }
 
@@ -146,7 +143,7 @@ impl McpPlugin {
         cfg.servers = new_servers;
         crate::plugin_info!(
             "mcp",
-            "从 ~/.symbio/plugins/mcps/ 加载了 {} 个 MCP Server",
+            "从 ~/.symbio/plugins/mcp/ 加载了 {} 个 MCP Server",
             cfg.servers.len()
         );
     }
@@ -163,11 +160,8 @@ impl McpPlugin {
         }
     }
 
-    /// 首启动迁移：从 ctx.config() 中残留的旧配置迁到新存储
-    async fn migrate_from_legacy_config(
-        &self,
-        store: &dyn crate::symbio_core::providers::StorageService,
-    ) {
+    /// 首启动迁移：从 ctx.config() 中残留的旧配置迁到存储
+    async fn migrate_from_legacy_config(&self, store: &DirVdfs) {
         let current = self.config.read().await.clone();
         if current.servers.is_empty() {
             return;
@@ -175,12 +169,8 @@ impl McpPlugin {
 
         crate::plugin_info!(
             "mcp",
-            "检测到旧 config 中的 MCP Servers，开始迁移到 ~/.symbio/plugins/mcps/"
+            "检测到旧 config 中的 MCP Servers，开始迁移到 ~/.symbio/plugins/mcp/"
         );
-
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::MCP;
-        let manifest = crate::symbio_core::providers::manifests::SERVER;
 
         for (id, s) in &current.servers {
             let content = match serde_json::to_string_pretty(s) {
@@ -190,7 +180,7 @@ impl McpPlugin {
                     continue;
                 }
             };
-            if let Err(_e) = es.write_entity(category, id, manifest, &content).await {
+            if let Err(_e) = store.write_text(id, &content).await {
                 crate::plugin_error!("mcp", "迁移 server {id} 失败");
             }
         }
@@ -206,15 +196,14 @@ impl Default for McpPlugin {
 // ==================== VDFS 挂载点（`.vdfs/mcp`） ====================
 //
 // 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
-// 写 / 删 / 动作的语义都在这里表达（不再经实体层与适配器）。
-// 跨插件共享的存储原语（写盘 / 删除 / 导入 / 导出）走 `symbio_core::entities`
-// 的自由函数——它们只做 `EntityStore` 的落盘，校验与内存同步是本插件的差异部分。
+// 写 / 删 / 动作的语义都在这里表达。
+//
+// 存储走 `providers::vdfs_service::DirVdfs`（一个 server = 一个目录，主文件
+// `server.json`）——条目寻址、原子写、mtime、整包 zip、变更广播都在集中实现里。
+// 本模块只剩 **mcp 特有的三件事**：详情定义随节点下发、transport 必填项校验、
+// 写后把 server 回灌进内存 config 与 manager 缓存。
 
-use crate::symbio_core::entities::{self, EntitySummary, ENTITY_MCP};
-use crate::symbio_core::providers::{categories, manifests};
-use crate::symbio_core::vdfs::{
-    from_plugin_error, host_ctx, unwatch_changes, watch_changes,
-};
+use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
     VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT, VFDS_ACTION_TEST,
@@ -223,33 +212,42 @@ use crate::symbio_core::vdfs_provider::{
 
 const LABEL: &str = "MCP";
 
-/// 路径末段 → 条目 id（去掉 `.<kind>` 呈现扩展名）
+/// 路径末段 → 条目 id（去掉 `.mcp` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    let base = path.rsplit('/').next().unwrap_or(path);
-    base.strip_suffix(&format!(".{ENTITY_MCP}"))
-        .unwrap_or(base)
-        .to_string()
+    crate::providers::vdfs_service::entry::id_of(path, PLUGIN_MCP)
 }
 
 /// 导入的**建议名**：末段再去掉 `.zip`（新建地址是 `<name>.zip`；id 的最终解释权
 /// 仍在插件——整包导入时以包内 server.json 为准）
 fn import_name_of(path: &str) -> String {
-    let base = id_of(path);
-    match base.strip_suffix(".zip") {
-        Some(stem) if !stem.is_empty() => stem.to_string(),
-        _ => base,
-    }
+    crate::providers::vdfs_service::entry::pack_name_of(path, PLUGIN_MCP)
 }
 
-/// 摘要 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
-fn node_of(item: &EntitySummary) -> VdfsNode {
-    let mut n = VdfsNode::file(&item.id, item.name.clone(), VdfsAccess::READ_WRITE);
-    n.kind = ENTITY_MCP.to_string();
+/// 主文件原文 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
+///
+/// `server.json` **没有展示名字段**（`McpServerConfig` 只有 transport 相关字段），
+/// 因此标题就是条目 id——与原摘要口径一致；`transport` 进 `attributes` 供列表
+/// 卡片直接呈现，副标题取 `command` / `url`。
+fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
+    let mut n = VdfsNode::file(id, id, VdfsAccess::READ_WRITE);
+    n.kind = PLUGIN_MCP.to_string();
     n.ext = Some(VFDS_EXT_FORM.to_string());
     n.schema = serde_json::to_value(super::detail::mcp_detail_definition()).ok();
-    n.status = item.status.clone();
-    n.description = item.description.clone().or_else(|| item.summary.clone());
-    n.updated_at = item.updated_at;
+    let Some(server) = raw.and_then(|c| serde_json::from_str::<McpServerConfig>(c).ok()) else {
+        // 坏条目降级：以 id 呈现、状态未知，但**仍在列表里**（可点开看到原文再修）
+        n.status = "unknown".to_string();
+        return n;
+    };
+    n.status = if server.enabled {
+        "active".to_string()
+    } else {
+        "disabled".to_string()
+    };
+    n.description = server.command.clone().or_else(|| server.url.clone());
+    n.attributes.insert(
+        "transport".to_string(),
+        format!("{:?}", server.transport_type).to_lowercase().into(),
+    );
     n
 }
 
@@ -295,51 +293,6 @@ fn new_manifest(id: &str) -> serde_json::Value {
     })
 }
 
-/// 从 server.json 解析摘要：enabled → active/disabled、command/url、transport
-fn summarize_of(id: &str, manifest: Option<&str>) -> EntitySummary {
-    let mut it = EntitySummary::new(ENTITY_MCP, id, id);
-    if let Some(server) = manifest.and_then(|c| serde_json::from_str::<McpServerConfig>(c).ok()) {
-        it.status = if server.enabled {
-            "active".to_string()
-        } else {
-            "disabled".to_string()
-        };
-        it.summary = server.command.clone().or(server.url.clone());
-        let transport = format!("{:?}", server.transport_type).to_lowercase();
-        if let serde_json::Value::Object(ref mut m) = it.extra {
-            m.insert("transport".to_string(), transport.into());
-            // 完整配置随列表下发（extra.config flatten），DetailForm 预填用
-            if let Ok(cfg) = serde_json::to_value(&server) {
-                let _ = m.insert("config".to_string(), cfg);
-            }
-        }
-    }
-    it
-}
-
-impl McpPlugin {
-    /// 单个条目的摘要（读盘 → 解析）
-    async fn summary_of(
-        &self,
-        host: &Arc<dyn InvokeRequest>,
-        id: &str,
-    ) -> VdfsResult<EntitySummary> {
-        let content = entities::read_manifest(host, categories::MCP, manifests::SERVER, id)
-            .await
-            .map_err(from_plugin_error)?;
-        Ok(summarize_of(id, Some(&content)))
-    }
-
-    /// 写盘 / 删除后清理内存 config 与 manager 缓存
-    async fn forget_server(&self, id: &str) {
-        {
-            let mut cfg = self.config.write().await;
-            cfg.servers.remove(id);
-        }
-        self.manager.forget_server(id).await;
-    }
-}
-
 #[async_trait]
 impl VdfsProvider for McpPlugin {
     fn label(&self) -> Option<&str> {
@@ -355,13 +308,13 @@ impl VdfsProvider for McpPlugin {
     }
 
     fn icon(&self) -> Option<&str> {
-        Some("mcp")
+        Some(PLUGIN_MCP)
     }
 
     /// 根下可新建两类：表单新建（最小配置）+ 整包导入（zip）
     fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![
-            VdfsNewType::new(ENTITY_MCP, LABEL)
+            VdfsNewType::new(PLUGIN_MCP, LABEL)
                 .with_description("新建 MCP Server（先落一份默认配置，随后在详情里完善）"),
             VdfsNewType::new(VFDS_EXT_ZIP, "MCP 包")
                 .with_description("导入 MCP Server 整包（.zip）——整目录覆盖同名条目")
@@ -369,85 +322,65 @@ impl VdfsProvider for McpPlugin {
         ]
     }
 
-    async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
         if !path.is_empty() {
             return Err(VdfsError::not_found(format!(
                 "{LABEL}是叶子资源，没有子项：{path}"
             )));
         }
-        let host = host_ctx(ctx)?;
-        let ids = entities::list_entity_ids(&host, categories::MCP)
-            .await
-            .map_err(from_plugin_error)?;
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            // manifest 读失败不阻塞列表（损坏条目降级为占位摘要）
-            let body = entities::read_manifest(&host, categories::MCP, manifests::SERVER, &id)
-                .await
-                .ok();
-            out.push(node_of(&summarize_of(&id, body.as_deref())));
-        }
-        Ok(out)
+        Ok(McpPlugin::store()
+            .entries()
+            .await?
+            .iter()
+            .map(|e| node_of(&e.id, e.raw.as_deref()))
+            .collect())
     }
 
-    async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
+    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
         if path.is_empty() {
             // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
             return Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST));
         }
-        let host = host_ctx(ctx)?;
-        Ok(node_of(&self.summary_of(&host, &id_of(path)).await?))
+        let e = McpPlugin::store().entry(&id_of(path)).await?;
+        Ok(node_of(&e.id, e.raw.as_deref()))
     }
 
-    async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
+    /// 详情读的是**表单能填的形状**（server.json），条目内部文件走
+    /// `read(<id>/<rel>)` 这一真实地址（目录型天然支持）。
+    async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
         if path.is_empty() {
             return Err(VdfsError::invalid(format!(
                 "该路径是目录，不可读取内容：{path}"
             )));
         }
-        let host = host_ctx(ctx)?;
-        let item = self.summary_of(&host, &id_of(path)).await?;
-        let value = item
-            .extra
-            .get("config")
-            .cloned()
-            .unwrap_or_else(|| item.extra.clone());
-        let text = serde_json::to_string_pretty(&value)
-            .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
-        Ok(VdfsContent::text("", text).with_mime("application/json"))
+        let text = McpPlugin::store().read_text(&id_of(path)).await?;
+        Ok(VdfsContent::text(path, text).with_mime("application/json"))
     }
 
     async fn write(
         &self,
-        ctx: &VdfsContext,
+        _ctx: &VdfsContext,
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        let host = host_ctx(ctx)?;
         if path.is_empty() {
             return Err(VdfsError::invalid(format!(
                 "{LABEL}整包只能导入到挂载根下：{path}"
             )));
         }
+        let store = McpPlugin::store();
         // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）
         if content.binary {
-            let bytes = entities::decode_b64(content.b64.as_deref().unwrap_or_default())
-                .map_err(|e| VdfsError::invalid(e.0))?;
-            let resp = entities::import_zip_to_entity(
-                &host,
-                ENTITY_MCP,
-                categories::MCP,
-                &import_name_of(path),
-                &bytes,
+            let bytes = crate::providers::vdfs_service::decode_b64(
+                content.b64.as_deref().unwrap_or_default(),
             )
-            .await
-            .map_err(from_plugin_error)?;
-            self.reload_server_from_storage(&host, &resp.id)
-                .await
-                .map_err(from_plugin_error)?;
+            .map_err(|e| VdfsError::invalid(e.0))?;
+            let name = import_name_of(path);
+            let created = store.import_pack(&name, &bytes).await?;
+            self.reload_server_from_storage(&name).await?;
             return Ok(VdfsWriteResponse {
-                path: resp.id,
-                created: resp.created,
+                path: name,
+                created,
                 etag: None,
             });
         }
@@ -459,54 +392,40 @@ impl VdfsProvider for McpPlugin {
             serde_json::from_str::<serde_json::Value>(content.as_text().unwrap_or_default())
                 .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
         };
-        // 「实体 id 由路径承载」：编辑链路下发的 manifest 不含 id，校验前先补齐
+        // 「条目 id 由路径承载」：编辑链路下发的 manifest 不含 id，校验前先补齐
         // （`validate_manifest` 会反序列化到 id 必填的结构体）
-        let manifest = entities::ensure_manifest_id(&manifest, &id);
+        let manifest = with_id(&manifest, &id);
         let normalized = validate_manifest(&manifest).map_err(from_plugin_error)?;
-        let resp = entities::write_entity_manifest(
-            &host,
-            ENTITY_MCP,
-            categories::MCP,
-            manifests::SERVER,
-            &id,
-            &normalized,
-        )
-        .await
-        .map_err(from_plugin_error)?;
-        // 写盘成功后把 server 从磁盘回灌到内存 config（并失效相关缓存）
-        self.reload_server_from_storage(&host, &id)
-            .await
-            .map_err(from_plugin_error)?;
+        let created = store.write_json(&id, &normalized).await?;
+        // 落盘成功后把 server 从磁盘回灌到内存 config（并失效相关缓存）
+        self.reload_server_from_storage(&id).await?;
         Ok(VdfsWriteResponse {
             path: id,
-            created: resp.created,
+            created,
             etag: None,
         })
     }
 
-    async fn delete(&self, ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
+    async fn delete(&self, _ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
         if path.is_empty() {
             return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
         }
-        let host = host_ctx(ctx)?;
+        let store = McpPlugin::store();
         let id = id_of(path);
         // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
-        self.summary_of(&host, &id).await?;
-        entities::delete_entity_dir(&host, ENTITY_MCP, categories::MCP, &id)
-            .await
-            .map_err(from_plugin_error)?;
+        store.entry(&id).await?;
+        store.remove(&id).await?;
         self.forget_server(&id).await;
         Ok(())
     }
 
     async fn action(
         &self,
-        ctx: &VdfsContext,
+        _ctx: &VdfsContext,
         path: &str,
         action: &str,
         _payload: Option<&serde_json::Value>,
     ) -> VdfsResult<VdfsActionResult> {
-        let host = host_ctx(ctx)?;
         if path.is_empty() {
             return Err(VdfsError::invalid(format!(
                 "动作只对{LABEL}条目可用：{path}"
@@ -514,15 +433,12 @@ impl VdfsProvider for McpPlugin {
         }
         let id = id_of(path);
         // 存在性校验：对不存在的条目做动作应报 NotFound
-        self.summary_of(&host, &id).await?;
+        McpPlugin::store().entry(&id).await?;
         match action {
             // 连接测试：stdio 握手 / http streams。连接失败映射为 ok=false（失败是
             // **结果**，不是协议错误）
             VFDS_ACTION_TEST => {
-                let server = self
-                    .read_server_config(&host, &id)
-                    .await
-                    .map_err(from_plugin_error)?;
+                let server = self.server_config(&id).await?;
                 let (ok, message) = match self.manager.test_connection(&id, &server).await {
                     Ok(r) => (
                         true,
@@ -543,15 +459,13 @@ impl VdfsProvider for McpPlugin {
             }
             // 导出：整包打包下载（与「新建类型 zip」的导入互为逆向）
             VFDS_ACTION_EXPORT => {
-                let export = entities::export_entity_zip(&host, categories::MCP, &id)
-                    .await
-                    .map_err(from_plugin_error)?;
-                let data = serde_json::to_value(&export)
+                let pack = McpPlugin::store().export_pack(&id).await?;
+                let data = serde_json::to_value(&pack)
                     .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
                 Ok(VdfsActionResult {
                     action: action.to_string(),
                     ok: true,
-                    message: format!("已打包「{}」", export.filename),
+                    message: format!("已打包「{}」", pack.filename),
                     data: Some(data),
                 })
             }
@@ -559,51 +473,54 @@ impl VdfsProvider for McpPlugin {
         }
     }
 
-    async fn watch(
-        &self,
-        _ctx: &VdfsContext,
-        path: &str,
-        sink: VdfsChangeSink,
-    ) -> VdfsResult<()> {
-        watch_changes(ENTITY_MCP, path, sink).await
+    async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
+        watch_changes(PLUGIN_MCP, path, sink).await
     }
 
     async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        unwatch_changes(ENTITY_MCP, path).await
+        unwatch_changes(PLUGIN_MCP, path).await
     }
 }
 
+/// manifest 缺 `id`（或空串）时以路径段补全，已有值原样保留
+///
+/// 这是写入路径的不变量：`DetailForm` 的 option 绑定只回纯字段值（id 不在表单
+/// 字段里），而 `McpServerConfig` 的 id 是必填 ⇒ 不补就报「missing field `id`」。
+fn with_id(manifest: &serde_json::Value, id: &str) -> serde_json::Value {
+    let mut m = manifest.clone();
+    let missing = m
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .is_empty();
+    if missing {
+        if let serde_json::Value::Object(map) = &mut m {
+            map.insert("id".to_string(), serde_json::json!(id));
+        }
+    }
+    m
+}
+
 impl McpPlugin {
-    /// 从 EntityStore 读取并解析单个 server 配置
-    async fn read_server_config(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-        id: &str,
-    ) -> Result<McpServerConfig, PluginError> {
-        let store = crate::symbio_core::entities::storage_service(ctx)?;
-        let es = store.entity_store();
-        let category = crate::symbio_core::providers::categories::MCP;
-        let manifest = crate::symbio_core::providers::manifests::SERVER;
-        let content = match es.read_entity(category, id, manifest).await {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(PluginError::NotFound(format!(
-                    "未找到 MCP Server {id}（读取失败: {e}）"
-                )))
-            }
-        };
+    /// 从存储读取并解析单个 server 配置
+    async fn server_config(&self, id: &str) -> VdfsResult<McpServerConfig> {
+        let content = McpPlugin::store().read_text(id).await?;
         serde_json::from_str::<McpServerConfig>(&content)
-            .map_err(|e| PluginError::InternalError(format!("解析 {id} 配置失败: {e}")))
+            .map_err(|e| VdfsError::internal(format!("解析 {id} 配置失败: {e}")))
     }
 
-    /// 上传后把单个 server 从磁盘回灌到内存 config（并失效相关缓存）
-    pub async fn reload_server_from_storage(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-        name: &str,
-    ) -> Result<(), PluginError> {
-        let server = self.read_server_config(ctx, name).await?;
+    /// 写盘 / 删除后清理内存 config 与 manager 缓存
+    async fn forget_server(&self, id: &str) {
+        {
+            let mut cfg = self.config.write().await;
+            cfg.servers.remove(id);
+        }
+        self.manager.forget_server(id).await;
+    }
 
+    /// 落盘后把单个 server 从磁盘回灌到内存 config（并失效相关缓存）
+    pub async fn reload_server_from_storage(&self, name: &str) -> VdfsResult<()> {
+        let server = self.server_config(name).await?;
         {
             let mut cfg = self.config.write().await;
             cfg.servers.insert(name.to_string(), server);

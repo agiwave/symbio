@@ -2,7 +2,7 @@
 //!
 //! 挂载于 worker composite 之下（与 `model`/`session` 平级），故 `ctx.parent()` 即为
 //! worker，调用 `parent.route(ctx)` 等价于既有的 `root.route`：能转发前端会发起的全部路径
-//!（`session/*`、`model/*`、`entities/*` …）。因此本插件**无需任何新全局注册表**。
+//!（`session/*`、`model/*`、`vdfs/*` …）。因此本插件**无需任何新全局注册表**。
 
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,

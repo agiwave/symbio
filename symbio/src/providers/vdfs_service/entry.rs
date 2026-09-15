@@ -1,0 +1,417 @@
+//! 条目寻址与落盘原语（三种集中实现**共用**的同一套磁盘布局）
+//!
+//! ## 磁盘布局（与旧的 `FileEntityStore` **完全一致**，不做数据迁移）
+//!
+//! ```text
+//! <homedir>/plugins/<category>/<id>/<manifest>
+//! ```
+//!
+//! 三个实现的区别**不在布局**，而在**访问拓扑**：单文件型只暴露主文件、
+//! 目录型还能下钻条目内部、内存型不落盘。因此「换拓扑」不动磁盘，
+//! 「换类别」不碰协议。
+//!
+//! ## 为什么是自由函数而不是又一个 trait
+//!
+//! 这些操作没有第二种实现需要切换（磁盘就是磁盘），把它们抽成 trait 只会
+//! 重新制造「`EntityStore` 抽象 + 一个实现」那层空转。类型化入口都收在
+//! [`DirVdfs`](super::dir::DirVdfs) / [`SingleFileVdfs`](super::single_file::SingleFileVdfs)
+//! 自己身上。
+
+use crate::symbio_core::vdfs_provider::{
+    VdfsAccess, VdfsError, VdfsNode, VdfsResult, VFDS_KIND_DIR,
+};
+use crate::symbio_core::HomedirRegistry;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// 类别根目录：`<homedir>/plugins/<category>`
+///
+/// 基址每次现取（不缓存）——`home/reload` 切换 homedir 后必须立刻生效。
+pub fn category_dir(category: &str) -> PathBuf {
+    HomedirRegistry::get().join("plugins").join(category)
+}
+
+/// 把条目 id 转成安全的磁盘段名
+///
+/// - `/` `\` `:` `*` `?` `"` `<` `>` `|` 替换为 `_`
+/// - 去除前后空白；空串归一为 `_empty_`
+/// - 禁止 `.` 与 `..`（否则条目目录会逃逸出类别根）
+pub fn safe_segment(id: &str) -> String {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        return "_empty_".to_string();
+    }
+    if trimmed == "." || trimmed == ".." {
+        return format!("_{}_", trimmed);
+    }
+    let mut s = trimmed.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+    s = s
+        .chars()
+        .map(|c| if c.is_control() { '_' } else { c })
+        .collect();
+    s
+}
+
+/// 条目目录：`<base>/<safe(id)>`
+pub fn entry_dir(base: &Path, id: &str) -> PathBuf {
+    base.join(safe_segment(id))
+}
+
+/// 相对路径 → `(条目 id 段, 条目内剩余路径)`
+///
+/// provider 只见子树内相对路径（规范 §2.4），首段即条目；剩余段用于目录型的
+/// 下钻。`""` → `None`（挂载根，不是任何条目）。
+pub fn split_rel(path: &str) -> Option<(&str, &str)> {
+    let p = path.trim_matches('/');
+    if p.is_empty() {
+        return None;
+    }
+    Some(match p.split_once('/') {
+        Some((head, rest)) => (head, rest.trim_matches('/')),
+        None => (p, ""),
+    })
+}
+
+/// 路径末段 → 条目 id（去掉 `.<kind>` 呈现扩展名）
+///
+/// `.vdfs/skill/demo.skill` 与裸 `demo` 同解——呈现扩展名是**前端选渲染器**的
+/// 键，不是地址的一部分，因此寻址必须先剥掉。历史上这段代码在每个资源插件里
+/// 各有一份，收敛到这里。
+pub fn id_of(path: &str, kind: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    base.strip_suffix(&format!(".{kind}"))
+        .unwrap_or(base)
+        .to_string()
+}
+
+/// 整包导入的**建议名**：末段再去掉 `.zip`（新建地址是 `<name>.zip`）
+pub fn pack_name_of(path: &str, kind: &str) -> String {
+    let base = id_of(path, kind);
+    match base.strip_suffix(".zip") {
+        Some(stem) if !stem.is_empty() => stem.to_string(),
+        _ => base,
+    }
+}
+
+/// 条目摘要（落盘原语向上传递的**唯一**素材形状）
+///
+/// 「标题 / 状态 / 呈现扩展名 / schema」是各资源的差异，本层给不出，也不该猜；
+/// 本层只保证把**寻址、原文、时间戳、字节数**这四样取准，其余由调用方合成节点。
+#[derive(Debug, Clone)]
+pub struct Entry {
+    /// 条目 id（= 磁盘目录名，已安全化）
+    pub id: String,
+    /// 主文件原文；`None` = 主文件缺失或读失败（条目**存在**但内容不可用）
+    pub raw: Option<String>,
+    /// 主文件更新时间（Unix 秒）
+    pub updated_at: Option<i64>,
+    /// 主文件字节数
+    pub size: Option<u64>,
+}
+
+impl Entry {
+    /// 缺省节点：以 id 为名字与标题，`ext` 由主文件名推导
+    ///
+    /// 无差异的挂载点（不需要自定义标题 / 状态 / schema）直接用它即可，
+    /// 这就是「单文件型 / 目录型可以原样注册为挂载点」的落点。
+    pub fn node(&self, manifest_file: &str) -> VdfsNode {
+        let mut n = VdfsNode::file(self.id.clone(), self.id.clone(), VdfsAccess::READ_WRITE);
+        n.ext = manifest_file
+            .rsplit_once('.')
+            .map(|(_, e)| e.to_ascii_lowercase());
+        n.updated_at = self.updated_at;
+        n.size = self.size;
+        n
+    }
+}
+
+/// 条目清单：类别根下的**一层目录**，按名升序
+///
+/// 目录不存在 = 清单为空（首次使用某类别是正常状态，不是错误）。
+pub async fn list_entry_ids(base: &Path) -> VdfsResult<Vec<String>> {
+    let mut rd = match tokio::fs::read_dir(base).await {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(VdfsError::internal(format!("读取条目清单失败：{e}"))),
+    };
+    let mut ids = Vec::new();
+    while let Some(entry) = rd
+        .next_entry()
+        .await
+        .map_err(|e| VdfsError::internal(format!("遍历条目清单失败：{e}")))?
+    {
+        let file_type = entry
+            .file_type()
+            .await
+            .map_err(|e| VdfsError::internal(format!("读取条目类型失败：{e}")))?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        // 目录名即 id：非 UTF-8 的名称无法在地址空间里表达，跳过
+        if let Some(name) = entry.file_name().to_str() {
+            ids.push(name.to_string());
+        }
+    }
+    ids.sort();
+    Ok(ids)
+}
+
+/// 读条目主文件原文（不存在 → [`VdfsError::NotFound`]）
+pub async fn read_entry(base: &Path, id: &str, manifest_file: &str) -> VdfsResult<Entry> {
+    let dir = entry_dir(base, id);
+    let path = dir.join(manifest_file);
+    let meta = match tokio::fs::metadata(&path).await {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(VdfsError::NotFound(format!("未找到条目「{id}」：{path:?}")))
+        }
+        Err(e) => return Err(VdfsError::internal(format!("读取条目失败：{e}"))),
+    };
+    let text = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| VdfsError::internal(format!("读取条目内容失败（非文本？）：{e}")))?;
+    Ok(Entry {
+        id: dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(id)
+            .to_string(),
+        updated_at: meta.modified().ok().and_then(to_unix),
+        size: Some(meta.len()),
+        raw: Some(text),
+    })
+}
+
+/// 读条目主文件原文，**读失败降级为 `None`**（列表用的宽松版）
+///
+/// 列表不得被单个坏条目挡住：损坏条目降级呈现，而不是让整次 `list` 失败。
+pub async fn read_entry_tolerant(base: &Path, id: &str, manifest_file: &str) -> Entry {
+    match read_entry(base, id, manifest_file).await {
+        Ok(e) => e,
+        Err(_) => Entry {
+            id: safe_segment(id),
+            raw: None,
+            updated_at: stat_mtime(&entry_dir(base, id)).await,
+            size: None,
+        },
+    }
+}
+
+/// 写条目主文件（原子：`<name>.tmp` → rename），返回**是否为新建**
+pub async fn write_entry(
+    base: &Path,
+    id: &str,
+    manifest_file: &str,
+    text: &str,
+) -> VdfsResult<bool> {
+    let dir = entry_dir(base, id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| VdfsError::internal(format!("创建条目目录失败：{e}")))?;
+
+    let final_path = dir.join(manifest_file);
+    let tmp_path = {
+        let mut name = final_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("manifest")
+            .to_string();
+        name.push_str(".tmp");
+        final_path.with_file_name(name)
+    };
+
+    let created = !final_path.exists();
+    tokio::fs::write(&tmp_path, text)
+        .await
+        .map_err(|e| VdfsError::internal(format!("写入临时文件失败：{e}")))?;
+    if let Err(e) = tokio::fs::rename(&tmp_path, &final_path).await {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(VdfsError::internal(format!("落盘失败：{e}")));
+    }
+    Ok(created)
+}
+
+/// 删除条目目录（不存在 → [`VdfsError::NotFound`]，交由调用方决定是否幂等）
+pub async fn remove_entry(base: &Path, id: &str) -> VdfsResult<()> {
+    let dir = entry_dir(base, id);
+    if !dir.is_dir() {
+        return Err(VdfsError::NotFound(format!("磁盘上已无条目目录「{id}」")));
+    }
+    tokio::fs::remove_dir_all(&dir)
+        .await
+        .map_err(|e| VdfsError::internal(format!("删除条目失败：{e}")))
+}
+
+/// 条目目录是否存在
+pub fn entry_exists(base: &Path, id: &str) -> bool {
+    entry_dir(base, id).is_dir()
+}
+
+/// 目录节点（挂载根 / 可下钻的条目目录）
+pub fn dir_node(name: impl Into<String>, title: impl Into<String>) -> VdfsNode {
+    let mut n = VdfsNode::dir(name, title, VdfsAccess::LIST);
+    n.kind = VFDS_KIND_DIR.to_string();
+    n
+}
+
+/// 目录 mtime（拿不到就 `None`——时间戳是展示信息，不值得为此失败）
+async fn stat_mtime(path: &Path) -> Option<i64> {
+    tokio::fs::metadata(path)
+        .await
+        .ok()?
+        .modified()
+        .ok()
+        .and_then(to_unix)
+}
+
+/// `SystemTime` → Unix 秒
+fn to_unix(t: SystemTime) -> Option<i64> {
+    t.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
+}
+
+/// 文件 / 目录元数据 → 节点（目录型下钻时呈现真实条目内部）
+pub async fn tree_node(path: &Path, name: &str) -> VdfsResult<VdfsNode> {
+    let meta = tokio::fs::metadata(path)
+        .await
+        .map_err(|e| VdfsError::not_found(format!("无法读取元数据 {path:?}：{e}")))?;
+    let mut n = if meta.is_dir() {
+        VdfsNode::dir(name, name, VdfsAccess::dir(true, true))
+    } else {
+        VdfsNode::file(name, name, VdfsAccess::file(true))
+    };
+    n.updated_at = meta.modified().ok().and_then(to_unix);
+    if !meta.is_dir() {
+        n.size = Some(meta.len());
+    }
+    Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// id 安全化：分隔符与控制字符全部落地为 `_`，点段被禁用
+    #[test]
+    fn safe_segment_neutralizes_separators() {
+        assert_eq!(safe_segment("demo"), "demo");
+        assert_eq!(safe_segment("  demo  "), "demo");
+        assert_eq!(safe_segment("a/b\\c:d"), "a_b_c_d");
+        assert_eq!(safe_segment("."), "_._");
+        assert_eq!(safe_segment(".."), "_.._");
+        assert_eq!(safe_segment(""), "_empty_");
+        // 首尾空白清掉后仍为空 ⇒ 与空串同解
+        assert_eq!(safe_segment("   "), "_empty_");
+    }
+
+    /// 呈现扩展名不是地址的一部分：带不带 `.skill` 必须寻到同一个条目
+    #[test]
+    fn id_of_strips_presentation_extension() {
+        assert_eq!(id_of("demo", "skill"), "demo");
+        assert_eq!(id_of("demo.skill", "skill"), "demo");
+        assert_eq!(id_of("a/b/demo.skill", "skill"), "demo");
+        // 别人的扩展名不误剥（mcp 条目不会因 `.skill` 结尾被改名）
+        assert_eq!(id_of("demo.other", "skill"), "demo.other");
+        // 只有 `.skill` 一个段时剥完仍回落到自身（不产生空 id）
+        assert_eq!(id_of("demo", "skill"), "demo");
+    }
+
+    #[test]
+    fn pack_name_strips_zip_then_kind() {
+        assert_eq!(pack_name_of("demo.zip", "skill"), "demo");
+        assert_eq!(pack_name_of("demo.skill", "skill"), "demo");
+        assert_eq!(pack_name_of(".zip", "skill"), ".zip");
+    }
+
+    #[test]
+    fn split_rel_separates_entry_and_inner_path() {
+        assert_eq!(split_rel(""), None);
+        assert_eq!(split_rel("/"), None);
+        assert_eq!(split_rel("demo"), Some(("demo", "")));
+        assert_eq!(
+            split_rel("demo/scripts/run.sh"),
+            Some(("demo", "scripts/run.sh"))
+        );
+        assert_eq!(split_rel("demo/sub/"), Some(("demo", "sub")));
+    }
+
+    /// 缺省节点：`ext` 由主文件名推导，不硬编码资源类型
+    #[test]
+    fn entry_default_node_derives_ext_from_manifest_file() {
+        let e = Entry {
+            id: "demo".into(),
+            raw: Some("{}".into()),
+            updated_at: Some(100),
+            size: Some(2),
+        };
+        let n = e.node("SKILL.md");
+        assert_eq!(n.ext.as_deref(), Some("md"));
+        assert_eq!(n.name, "demo");
+        assert_eq!(n.updated_at, Some(100));
+        assert_eq!(e.node("provider.json").ext.as_deref(), Some("json"));
+    }
+
+    #[tokio::test]
+    async fn missing_category_dir_is_an_empty_list() {
+        let base = std::env::temp_dir().join("symbio-entry-missing-category");
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(list_entry_ids(&base).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn write_then_read_then_remove_roundtrips() {
+        let base = temp_base("roundtrip");
+        let created = write_entry(&base, "p1", "provider.json", "{\"id\":\"p1\"}")
+            .await
+            .unwrap();
+        assert!(created, "首次写入即新建");
+        // 覆盖写不再算新建
+        assert!(
+            !write_entry(&base, "p1", "provider.json", "{\"id\":\"p1\",\"x\":1}")
+                .await
+                .unwrap()
+        );
+
+        let e = read_entry(&base, "p1", "provider.json").await.unwrap();
+        assert_eq!(e.raw.as_deref(), Some("{\"id\":\"p1\",\"x\":1}"));
+        assert_eq!(e.size, Some(17));
+        assert!(e.updated_at.is_some());
+        assert_eq!(list_entry_ids(&base).await.unwrap(), vec!["p1".to_string()]);
+        assert!(entry_exists(&base, "p1"));
+
+        remove_entry(&base, "p1").await.unwrap();
+        assert!(!entry_exists(&base, "p1"));
+        // 删除已不存在的条目报 NotFound（幂等与否由调用方决定）
+        assert!(matches!(
+            remove_entry(&base, "p1").await.unwrap_err(),
+            VdfsError::NotFound(_)
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 坏条目不得让整次列表失败：主文件缺失时降级为 `raw = None`
+    #[tokio::test]
+    async fn tolerant_read_degrades_instead_of_failing() {
+        let base = temp_base("tolerant");
+        std::fs::create_dir_all(base.join("broken")).unwrap();
+        let e = read_entry_tolerant(&base, "broken", "SKILL.md").await;
+        assert!(e.raw.is_none());
+        assert_eq!(e.id, "broken");
+        assert!(read_entry(&base, "broken", "SKILL.md").await.is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn temp_base(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "symbio-vdfs-entry-{tag}-{}-{:?}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+}

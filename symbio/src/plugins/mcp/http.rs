@@ -20,7 +20,7 @@
 //! POST {url}                      # tools/call
 //! ```
 //!
-//! ## 实体管理
+//! ## 连接复用与缓存
 //!
 //! - 共享 `reqwest::Client`（连接池）
 //! - 复用 `Mcp-Session-Id`（同一 server 多次调用共享 session）
@@ -161,7 +161,7 @@ impl super::manager::McpManager {
     /// - 仍会建立/复用 HTTP session（与正常调用一致）
     /// - 返回 `TestConnectionResult`（含 tool count + 协议版本 + server 名称/版本/instructions）
     ///
-    /// 连接测试能力：供统一 `entities` 连接测试复用
+    /// 连接测试能力：供详情表单的 `test` 动作（`vdfs/action`）复用
     #[allow(dead_code)]
     pub async fn test_connection_http(
         &self,

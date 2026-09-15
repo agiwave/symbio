@@ -48,7 +48,7 @@ impl Session {
     /// 父会话 id（`metadata.parent_session_id`；空/自引用视为无归属）。
     ///
     /// 子会话归属的机制级声明：存储层据此路由嵌套目录（文件后端），
-    /// 实体提供者机制据此判定「子会话」清单归属。
+    /// 会话 provider 据此判定「子会话」清单归属。
     pub fn parent_session_id(&self) -> Option<&str> {
         self.metadata
             .get("parent_session_id")

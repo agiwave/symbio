@@ -13,7 +13,7 @@
 - `{action}` - 具体能力 (如 `chat`, `list`, `config`)
 
 > `worker` 前缀可省略也可显式写出：`session/chat/send` 与 `worker/session/chat/send` 等价
-> （前者由 home 兜底转发给 worker）。实体注册表登记的 `session` / `model` 前缀带 `worker/`。
+> （前者由 home 兜底转发给 worker）。
 
 ## 通用路由
 
@@ -36,12 +36,14 @@
 > VDFS 节点 `schema` 下发（`.vdfs/setting/<分区>` 的 `vdfs/list` 即可拿到）。
 > 各插件 `config/set` 内部会自行向父级发起 `save_config`，配置才真正落盘。
 
-### 实体资源（VDFS）
+### 资源（VDFS）
 
-资源型插件**不再提供实体操作路由**：其资源统一经 VDFS 寻址（`.vdfs/<插件名>/…`，
-操作 `vdfs/list|tree|stat|read|write|mkdir|delete|move|edit|search|watch|unwatch|action`）。
-后端侧各插件直接实现 `VdfsProvider`（见 [design/vdfs.md](../design/vdfs.md) §13.4）；
-下线经过见下文「通用：统一实体管理（`{plugin}/entities/*`）—— **已下线**」。
+资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址
+（`.vdfs/<插件名>/…`，操作
+`vdfs/list|tree|stat|read|write|mkdir|delete|move|edit|search|watch|unwatch|action`）。
+每个 `.vdfs` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘（需要持久化的那些）
+经 `symbio/src/providers/vdfs_service/`——见 [design/vdfs.md](../design/vdfs.md) §13.4。
+历史上的 `{plugin}/entities/*` 一族端点自 S11 起无任何路由，本文件不再登记。
 
 ---
 
@@ -77,11 +79,6 @@
 |------|------|
 | `agent_identity` | 返回 Agent 人格/提示词片段（由能力管理器 `invoke` 调用，不经 `route`） |
 
-### 统一实体（**已下线**）
-
-`agent/entities/*` 随 S11 下线：Bundle 及其内部 `prompt` / `skill` / `mcp`
-一律经 VDFS 寻址（`.vdfs/agent/<id>/<子类别标签>/<相对路径>`）。
-
 ---
 
 ## Session 插件
@@ -102,7 +99,6 @@
 | `session/append` | 追加消息 | `Data` |
 | `session/heartbeat/trigger` | 触发一次心跳 | `Data` |
 | `session/config/get` \| `config/set` | 会话配置读写（`config` 绑定的 load/save_path） | `Data` |
-| `session/entities/*` | **已下线**（S11）：会话作为资源走 `.vdfs/session` | — |
 
 ### 聊天流程
 
@@ -126,8 +122,8 @@
 | `model/config/get` \| `config/set` | Provider 配置读写 | `Data` |
 
 > `model/status` **已下线**：连通性状态改由节点动作 `vdfs/action { action: "test" }`
-> 返回；`model/chat_sync` 原就是 NotImplemented 占位，一并删除。
-| `model/entities/*` | **已下线**（S11）：模型作为资源走 `.vdfs/model` | — |
+> 返回；`model/chat_sync` 原就是 NotImplemented 占位，一并删除。模型作为资源走
+> `.vdfs/model`（每个条目一份 `provider.json`）。
 
 ### 配置结构
 
@@ -188,13 +184,11 @@
 
 | 路径 | 用途 |
 |------|------|
-| `skill/entities/list` | 列出已安装 Skill |
-| `skill/entities/get` | 获取 Skill 详情 |
-| `skill/entities/upload` | 安装 Skill |
-| `skill/entities/delete` | 卸载 Skill |
-| `skill/entities/status` | Skill 启用/禁用状态 |
 | `skill/execute` | 按名称执行 Skill（载荷 `{name, args}`） |
 | `skill/config/get` \| `config/set` | Skill 插件配置读写 |
+
+> 技能清单与内容不设私有路由：已安装技能经 `.vdfs/skill` 寻址
+> （一个技能 = 一个目录，主文件 `SKILL.md`，条目内部可下钻）。
 
 ### Skill 结构
 
@@ -210,12 +204,11 @@ skills/<name>/
 
 | 路径 | 用途 |
 |------|------|
-| `mcp/entities/list` | 列出 MCP Server |
-| `mcp/entities/get` | 获取 Server 详情 |
-| `mcp/entities/upload` | 注册 Server |
-| `mcp/entities/delete` | 注销 Server |
-| `mcp/entities/status` | Server 启用/禁用状态 |
-| `mcp/config/get` \| `config/set` | 插件元数据读写（实际 server 数据在 `~/.symbio/plugins/mcps/<name>/server.json`） |
+| `mcp/config/get` \| `config/set` | 插件元数据读写（server 定义本身在 `~/.symbio/plugins/mcp/<id>/server.json`） |
+
+> Server 清单与详情不设私有路由：注册 / 列举 / 启停 / 连通性自检一律经
+> `.vdfs/mcp`（一个 server = 一个目录，主文件 `server.json`），
+> 「测试连接」是节点动作 `vdfs/action { action: "test" }`。
 
 ### MCP 配置
 
@@ -243,41 +236,7 @@ mcp_servers:
 | `telegram/status` | 运行状态 |
 | `telegram/config/get` \| `config/set` | Bot 配置读写 |
 
-> Telegram 未接入 VDFS 挂载点体系（不在 `provider_registry()` 中），Bot 配置走 `config/get|set`。
-
----
-
-## 通用：统一实体管理（`{plugin}/entities/*`）—— **已下线**
-
-> **S11 起本节不再是有效路由**：资源访问统一经 VDFS（`vdfs/*`），地址口径
-> `.vdfs/<子目录>/…`；子目录清单就是 `.vdfs` 自身的 `vdfs/list`，没有独立的
-> 清单端点。见 [design/vdfs.md](../design/vdfs.md) 与
-> [design/vdfs-frontend.md](../design/vdfs-frontend.md)。
-
-| 原路径 | 现在的路径 |
-|--------|-----------|
-| `{plugin}/entities/list` | `vdfs/list`（`.vdfs/<kind>`） |
-| `{plugin}/entities/get` | `vdfs/read` |
-| `{plugin}/entities/upload` | `vdfs/write`（manifest）／`vdfs/write`（二进制，新建类型 `zip` = 整包导入） |
-| `{plugin}/entities/delete` | `vdfs/delete` |
-| `{plugin}/entities/status` | `vdfs/action { action: "test" }` |
-| `{plugin}/entities/detail` | 列表节点自带 `schema` |
-| `agent/bundle/export` | `vdfs/action { action: "export" }`（S13） |
-
-各 `.vdfs` 子目录由对应插件的 `impl VdfsProvider` 直接提供（`EntityProvider`
-trait 与 `provider_registry()` 已随 VDFS 收敛删除），能力表不变：
-
-| kind | 地址 | 可新建 | 可整包导入 | 容器子实体 |
-|------|--------|--------|------------|------------|
-| `session` 会话 | `.vdfs/session` | 否（走 SessionStore + 前端专属 editor） | 否 | 子会话 / 目录树 |
-| `model` 模型 | `.vdfs/model` | 是 | 否 | — |
-| `agent` 智能体 | `.vdfs/agent` | 否（bundle 只能整包导入） | 是 | `prompt` / `skill` / `mcp` |
-| `skill` 技能 | `.vdfs/skill` | 是 | 是 | — |
-| `mcp` MCP | `.vdfs/mcp` | 是 | 是 | — |
-| `setting` 设置 | `.vdfs/setting` | 否（分区固定） | 否 | — |
-
-导航顺序由注册表 `order` 决定（**无配置覆盖**；原 `symbio.provider_order` 已下线）。
-机制详解见 [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md)。
+> Telegram 未挂载 VDFS 子目录（不注册 `VdfsProvider`），Bot 配置走 `config/get|set`。
 
 ---
 
@@ -304,8 +263,8 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 > `gateway/*` 自身接口**恒走 native**（前端不经 HTTP 访问本插件）。前端出站分发（native / http）由「系统目录」切换器管理，不再由 gateway 配置驱动。
 
 安全：非回环地址需 `inbound_token` 鉴权（回环地址免鉴权）；`inbound_readonly` 开启后仅放行只读白名单
-（`config/get`、`entities/list|get|detail|status`、`entities/providers`、`session/get_messages`、
-`home/get_homedir`、`work/get_workspace`），详见 [CONFIGURATION.md](CONFIGURATION.md)。
+（`vdfs/list|tree|stat|read|search`、`session/get_messages`、`config/get`、`home/get_homedir`、
+`work/get_workspace`；`gateway/*` 显式排除），详见 [CONFIGURATION.md](CONFIGURATION.md)。
 
 ---
 

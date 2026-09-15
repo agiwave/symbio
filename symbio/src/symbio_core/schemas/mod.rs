@@ -1,5 +1,5 @@
 pub mod common;
-pub mod entities;
+pub mod detail;
 pub mod hook;
 pub mod options;
 pub mod session;

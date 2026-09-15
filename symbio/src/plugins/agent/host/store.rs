@@ -13,7 +13,7 @@
 //! （含 `manifest.yaml` 与约定能力目录 prompts/ skills/ mcps/）。
 //! 工作区级仅在工作区上下文存在时参与，为按项目安装与测试隔离提供位置。
 //!
-//! bundle 即规范 §3 的完整目录（manifest + 约定能力目录 + 实体），导入导出
+//! bundle 即规范 §3 的完整目录（manifest + 约定能力目录 + 条目），导入导出
 //! 均为整目录 zip——**分发的是完整 agent 能力**，这正是 OAB 与 Skill/MCP
 //! 单件分发的根本差异。
 //!
@@ -67,14 +67,14 @@ pub struct ImportResult {
     pub replaced: bool,
 }
 
-/// bundle 内部实体条目（prompts / skills / mcps 的结构化清单项）。
+/// bundle 内部条目（prompts / skills / mcps 的结构化清单项）。
 ///
 /// `path` 是相对 bundle 目录的路径，也是 VDFS 容器语义
-/// （`vdfs/*` 携带 `container`）下的实体操作键 `id`；
+/// （`vdfs/*` 携带 `container`）下的条目操作键 `id`；
 /// 命名与 [`assemble_bundle`] 的扫描规则严格一致（装配结果可直接复现）。
 #[derive(Debug, Clone, Serialize)]
-pub struct BundleEntityEntry {
-    /// 实体类别：`prompt` | `skill` | `mcp`
+pub struct BundleItemEntry {
+    /// 条目类别：`prompt` | `skill` | `mcp`
     pub kind: String,
     /// 条目名（prompt=文件 stem；skill=目录名；mcp=文件名或目录名，与装配 source 命名一致）
     pub name: String,
@@ -86,7 +86,7 @@ pub struct BundleEntityEntry {
     pub size: u64,
 }
 
-/// 校验并分类 bundle 内部实体的相对路径。
+/// 校验并分类 bundle 内部条目的相对路径。
 ///
 /// 规则与 [`crate::plugins::agent::core::spec::assembly`] 的扫描严格对齐：
 /// - `prompts/<name>.md`（或 `.markdown`，单层，装配只扫直接子文件）
@@ -96,38 +96,38 @@ pub struct BundleEntityEntry {
 ///
 /// 拒绝绝对路径、`..` 段与一切不合规布局（路径沙箱第一道闸）。
 /// 返回 `(kind, name)`。
-pub fn classify_entity_path(rel: &str) -> Result<(&'static str, String), String> {
+pub fn classify_item_path(rel: &str) -> Result<(&'static str, String), String> {
     let rel = rel.trim().replace('\\', "/");
     let rel = rel.trim_start_matches("./");
     if rel.is_empty() || rel.starts_with('/') {
-        return Err(format!("非法实体路径 `{rel}`"));
+        return Err(format!("非法条目路径 `{rel}`"));
     }
     if rel.split('/').any(|seg| seg == ".." || seg.is_empty()) {
-        return Err(format!("实体路径 `{rel}` 含非法段（`..` / 空段）"));
+        return Err(format!("条目路径 `{rel}` 含非法段（`..` / 空段）"));
     }
     if let Some(rest) = rel.strip_prefix("prompts/") {
         if rest.contains('/') {
-            return Err("prompt 实体必须位于 prompts/ 直接子层（prompts/<name>.md）".into());
+            return Err("prompt 条目必须位于 prompts/ 直接子层（prompts/<name>.md）".into());
         }
         let stem = rest
             .strip_suffix(".md")
             .or_else(|| rest.strip_suffix(".markdown"))
-            .ok_or_else(|| format!("prompt 实体必须是 Markdown（`{rest}`）"))?;
+            .ok_or_else(|| format!("prompt 条目必须是 Markdown（`{rest}`）"))?;
         if stem.is_empty() {
-            return Err("prompt 实体名不能为空".into());
+            return Err("prompt 条目名不能为空".into());
         }
         return Ok(("prompt", stem.to_string()));
     }
     if let Some(rest) = rel.strip_prefix("skills/") {
         let mut parts = rest.splitn(2, '/');
         let (Some(dir), Some(file)) = (parts.next(), parts.next()) else {
-            return Err("skill 实体必须是目录形态（skills/<name>/SKILL.md）".into());
+            return Err("skill 条目必须是目录形态（skills/<name>/SKILL.md）".into());
         };
         if dir.is_empty() || dir.contains('/') {
             return Err(format!("非法 skill 目录名 `{dir}`"));
         }
         if file != "SKILL.md" {
-            return Err(format!("skill 实体文件必须是 SKILL.md（得到 `{file}`）"));
+            return Err(format!("skill 条目文件必须是 SKILL.md（得到 `{file}`）"));
         }
         return Ok(("skill", dir.to_string()));
     }
@@ -158,7 +158,7 @@ pub fn classify_entity_path(rel: &str) -> Result<(&'static str, String), String>
         return Ok(("mcp", rest.to_string()));
     }
     Err(format!(
-        "实体路径必须以 prompts/ skills/ mcps/ 开头（得到 `{rel}`）"
+        "条目路径必须以 prompts/ skills/ mcps/ 开头（得到 `{rel}`）"
     ))
 }
 
@@ -383,18 +383,18 @@ impl BundleStore {
         Ok(record.dir.display().to_string())
     }
 
-    // ==================== bundle 内部实体（prompts / skills / mcps） ====================
+    // ==================== bundle 内部条目（prompts / skills / mcps） ====================
     //
     // 单文件级读写，供宿主 UI 在 Agent 详情页内直接管理 bundle 能力来源。
-    // 安全模型：rel_path 必须先过 [`classify_entity_path`]（白名单布局 +
+    // 安全模型：rel_path 必须先过 [`classify_item_path`]（白名单布局 +
     // 拒绝 `..`），再经 [`absolutize`] 逐段构建（免疫穿越），双重闸门。
 
-    /// 列出 bundle 内部实体（结构化清单，扫描规则与装配严格一致）。
-    pub fn list_entities(&self, bundle_id: &str) -> Result<Vec<BundleEntityEntry>, String> {
+    /// 列出 bundle 内部条目（结构化清单，扫描规则与装配严格一致）。
+    pub fn list_items(&self, bundle_id: &str) -> Result<Vec<BundleItemEntry>, String> {
         let record = self
             .get(bundle_id)
             .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
-        let mut out: Vec<BundleEntityEntry> = Vec::new();
+        let mut out: Vec<BundleItemEntry> = Vec::new();
 
         // prompts/<name>.md（直接子文件）
         if let Ok(entries) = std::fs::read_dir(record.dir.join("prompts")) {
@@ -411,7 +411,7 @@ impl BundleStore {
                     continue; // 非 Markdown 忽略（与装配一致）
                 };
                 let (size, priority) = file_meta(&p);
-                out.push(BundleEntityEntry {
+                out.push(BundleItemEntry {
                     kind: "prompt".into(),
                     name: stem.to_string(),
                     path: format!("prompts/{fname}"),
@@ -434,7 +434,7 @@ impl BundleStore {
                     continue;
                 }
                 let (size, priority) = file_meta(&skill);
-                out.push(BundleEntityEntry {
+                out.push(BundleItemEntry {
                     kind: "skill".into(),
                     name,
                     path: format!("skills/{}/SKILL.md", e.file_name().to_string_lossy()),
@@ -455,7 +455,7 @@ impl BundleStore {
                         continue;
                     }
                     let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                    out.push(BundleEntityEntry {
+                    out.push(BundleItemEntry {
                         kind: "mcp".into(),
                         name: name.clone(),
                         path: format!("mcps/{name}"),
@@ -480,7 +480,7 @@ impl BundleStore {
                     };
                     let cfg_name = cfg.file_name().unwrap_or_default().to_string_lossy();
                     let size = std::fs::metadata(&cfg).map(|m| m.len()).unwrap_or(0);
-                    out.push(BundleEntityEntry {
+                    out.push(BundleItemEntry {
                         kind: "mcp".into(),
                         name,
                         path: format!("mcps/{}/{}", e.file_name().to_string_lossy(), cfg_name),
@@ -495,29 +495,24 @@ impl BundleStore {
         Ok(out)
     }
 
-    /// 读取 bundle 内部实体文件内容。
-    pub fn read_entity(&self, bundle_id: &str, rel_path: &str) -> Result<String, String> {
+    /// 读取 bundle 内部条目文件内容。
+    pub fn read_item(&self, bundle_id: &str, rel_path: &str) -> Result<String, String> {
         let record = self
             .get(bundle_id)
             .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
-        classify_entity_path(rel_path)?;
+        classify_item_path(rel_path)?;
         let full = absolutize(&record.dir, rel_path);
         debug_assert!(full.starts_with(&record.dir));
         std::fs::read_to_string(&full)
-            .map_err(|e| format!("读取实体失败（{}）: {e}", full.display()))
+            .map_err(|e| format!("读取条目失败（{}）: {e}", full.display()))
     }
 
-    /// 写入（创建/覆盖）bundle 内部实体文件；父目录自动创建。
-    pub fn write_entity(
-        &self,
-        bundle_id: &str,
-        rel_path: &str,
-        content: &str,
-    ) -> Result<(), String> {
+    /// 写入（创建/覆盖）bundle 内部条目文件；父目录自动创建。
+    pub fn write_item(&self, bundle_id: &str, rel_path: &str, content: &str) -> Result<(), String> {
         let record = self
             .get(bundle_id)
             .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
-        classify_entity_path(rel_path)?;
+        classify_item_path(rel_path)?;
         let full = absolutize(&record.dir, rel_path);
         debug_assert!(full.starts_with(&record.dir));
         if let Some(parent) = full.parent() {
@@ -525,22 +520,22 @@ impl BundleStore {
                 .map_err(|e| format!("创建目录失败（{}）: {e}", parent.display()))?;
         }
         std::fs::write(&full, content)
-            .map_err(|e| format!("写入实体失败（{}）: {e}", full.display()))
+            .map_err(|e| format!("写入条目失败（{}）: {e}", full.display()))
     }
 
-    /// 删除 bundle 内部实体文件；skill / mcp 目录形态下若父目录因此变空则一并清理。
-    pub fn delete_entity(&self, bundle_id: &str, rel_path: &str) -> Result<(), String> {
+    /// 删除 bundle 内部条目文件；skill / mcp 目录形态下若父目录因此变空则一并清理。
+    pub fn delete_item(&self, bundle_id: &str, rel_path: &str) -> Result<(), String> {
         let record = self
             .get(bundle_id)
             .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
-        let (kind, _) = classify_entity_path(rel_path)?;
+        let (kind, _) = classify_item_path(rel_path)?;
         let full = absolutize(&record.dir, rel_path);
         debug_assert!(full.starts_with(&record.dir));
         if !full.is_file() {
-            return Err(format!("实体不存在（{}）", full.display()));
+            return Err(format!("条目不存在（{}）", full.display()));
         }
         std::fs::remove_file(&full)
-            .map_err(|e| format!("删除实体失败（{}）: {e}", full.display()))?;
+            .map_err(|e| format!("删除条目失败（{}）: {e}", full.display()))?;
         // 目录形态（skills/<name>/、mcps/<name>/）清空后顺手移除空目录
         if kind != "prompt" {
             if let Some(parent) = full.parent() {
@@ -691,32 +686,32 @@ mod tests {
     #[test]
     fn classify_accepts_convention_layouts() {
         assert_eq!(
-            classify_entity_path("prompts/persona.md"),
+            classify_item_path("prompts/persona.md"),
             Ok(("prompt", "persona".into()))
         );
         assert_eq!(
-            classify_entity_path("prompts/a.markdown"),
+            classify_item_path("prompts/a.markdown"),
             Ok(("prompt", "a".into()))
         );
         assert_eq!(
-            classify_entity_path("skills/playbook/SKILL.md"),
+            classify_item_path("skills/playbook/SKILL.md"),
             Ok(("skill", "playbook".into()))
         );
         assert_eq!(
-            classify_entity_path("mcps/search.yaml"),
+            classify_item_path("mcps/search.yaml"),
             Ok(("mcp", "search.yaml".into()))
         );
         assert_eq!(
-            classify_entity_path("mcps/search/config.yaml"),
+            classify_item_path("mcps/search/config.yaml"),
             Ok(("mcp", "search".into()))
         );
         assert_eq!(
-            classify_entity_path("mcps/search/server.json"),
+            classify_item_path("mcps/search/server.json"),
             Ok(("mcp", "search".into()))
         );
         // 反斜杠 + ./ 前缀归一化
         assert_eq!(
-            classify_entity_path("./prompts\\x.md"),
+            classify_item_path("./prompts\\x.md"),
             Ok(("prompt", "x".into()))
         );
     }
@@ -738,7 +733,7 @@ mod tests {
             "prompts/",
             "",
         ] {
-            assert!(classify_entity_path(bad).is_err(), "should reject `{bad}`");
+            assert!(classify_item_path(bad).is_err(), "should reject `{bad}`");
         }
     }
 }

@@ -1,6 +1,17 @@
-# 统一资源管理器：混合列表 + 前后端动态 provider 注册（当前实现）
+# 统一资源管理器：混合列表 + 前后端动态 provider 注册（**已废止**）
 
-> 本文是**现状实现说明**（非历史方案）。历史演进过程见 `统一资源管理器多类型升级.md` / `统一资源管理器混合列表+优化.md` / `统一资源协议trait化与死代码清理.md`。
+> ⚠️ **本文件是历史方案，非现状**。文中的 `provider_registry()` 静态注册表、
+> `ResourceProvider` trait、宿主 `resources/providers` 端点、以及
+> `ResourceManagerView` / `useEntityProviders` 一类前端资产均已删除。
+>
+> 资源清单与导航现在的唯一机制是 **VDFS**：各插件直接 `impl VdfsProvider`，
+> 自描述 `label()` / `order()` / `icon()` / `root_new_types()`，由 composite 容器
+> 聚合成 `.vdfs` 目录，前端经 `vdfs/providers` + `vdfs/list` 动态生成导航。
+> 权威规范见 [`docs/design/vdfs.md`](../../docs/design/vdfs.md)（§6 注册与收集、
+> §13.4 各插件直连 `VdfsProvider`）。
+>
+> 历史演进过程另见 `统一资源管理器多类型升级.md` /
+> `统一资源管理器混合列表+优化.md` / `统一资源协议trait化与死代码清理.md`。
 
 ## 目标与已确认决策
 

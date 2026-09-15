@@ -6,16 +6,19 @@
 
 - **全局配置**：读取/维护 `<homedir>/config.yaml`（插件树拓扑、各插件参数的唯一事实源）。
 - **拓扑挂载**：按配置实例化 worker (Composite)，由 Composite 按需挂载其余 13 个插件。
-- **自身终结的路由**：`home/*`、`work/*`、`entities/providers`、`save_config`。
+- **自身终结的路由**：`home/*`、`work/*`、`save_config`。
 
 ## 路由
 
 | Path | 说明 |
 |------|------|
-| `home/status` | 根节点状态 |
-| `work/*` | 工作区级指令转发 |
-| `entities/providers` | Provider 实体列表（聚合自 model） |
+| `home/get_homedir` | 当前系统目录（homedir）与 bootstrap 路径 |
+| `home/reload` | 热重载：切换 homedir（可选）+ 重建全部子插件 |
+| `work/*` | 工作区级指令（`set_workspace` / `get_workspace`） |
 | `save_config` | 持久化全局配置 |
+
+> 资源类别清单不设终结路由：`.vdfs` 自身的 `vdfs/list` 就是子目录清单
+> （由组合容器逐子插件收集，见 `../composite/README.md` 与 `docs/design/vdfs.md` §2.5）。
 
 ## 关联
 

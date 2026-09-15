@@ -2,7 +2,8 @@
 
 状态：现行规范
 范围：会话页输入区下方的「选项行」（根选项 + 级联子项 + 自动化表单）
-关联：`docs/design/entity-provider-mechanism.md`（表单机制复用）、
+关联：`docs/design/vdfs.md`（§7 `ext = form` 与 `node.schema` 方言——表单机制复用）、
+`symbio/src/symbio_core/schemas/entities.rs`（`DetailDefinition` 表单方言权威定义）、
 `symbio/src/symbio_core/schemas/options.rs`（协议权威定义）、
 `symbio/src/symbio_core/option.rs`（收集机制 `OptionVisitor` / `collect_options`）、
 `symbio/src/plugins/session/options.rs`（选项宿主）、
@@ -34,8 +35,8 @@
 - **前端是纯消费者**：前端只允许补充「UI 映射」（图标名 → emoji）与「机制级
   原语」（原生目录/文件对话框、点路径写入），存放于 `registry/optionIcons.ts`
   与 `useSessionOptions.ts`，与业务契约严格分离。
-- **单通道**：根层与子层共用 `options/list`，仅以 `parent` 参数区分——与实体
-  机制 `entities/list` 的树懒加载同构。不为同一机制造第二个协议通道。
+- **单通道**：根层与子层共用 `options/list`，仅以 `parent` 参数区分——与 VDFS
+  `vdfs/list`（懒列子目录）同一形状。不为同一机制造第二个协议通道。
 - **选项不感知彼此**：插件之间不可见，跨插件的展示顺序用**号段约定**（§3.2）
   协调，不引入插件间直接依赖。
 
@@ -68,10 +69,10 @@ worker/session/options/list  → OptionsResponse { nodes: OptionNode[] }
 | `label` / `icon` / `description` | **显示信息**：显示名 / 图标名（前端 UI 资产映射）/ 语义说明（悬浮提示） |
 | `option_type` | **类型**：`invoke` \| `sub` \| `form`（缺省 `invoke`） |
 | `order` | 展示顺序（升序；跨插件贡献时必需） |
-| `status` / `status_detail` / `enabled` | **状态信息**：`active`\|`working`\|`disabled`\|`error`\|`unknown`（与实体机制 §2.4 同一语义）；补充说明；是否可选（`false` = 只读展示） |
+| `status` / `status_detail` / `enabled` | **状态信息**：`active`\|`working`\|`disabled`\|`error`\|`unknown`（与 VDFS 节点 `status` 同一取值域，见 `vdfs.md` §3.2）；补充说明；是否可选（`false` = 只读展示） |
 | `value` / `value_label` | 当前选中值 / 其展示文本（状态型选项；缺省展示文本 = `value`） |
 | `action` | `invoke` / `form` 的执行规格（见下） |
-| `form` / `data` | `form`：表单定义（`DetailDefinition`，与实体详情表单同一套 schema）/ 表单初始数据 |
+| `form` / `data` | `form`：表单定义（`DetailDefinition`，与 VDFS `ext = form` 节点 `schema` 同一套方言）/ 表单初始数据 |
 | `children` | `sub`：子选项（内联；空 = 经 `parent` 懒加载） |
 
 `OptionAction`：
@@ -93,13 +94,14 @@ worker/session/options/list  → OptionsResponse { nodes: OptionNode[] }
 
 - `sub` 的层级**任意深度**：子项可再是 `sub`；子项内联（`children`）或经
   `parent` 懒加载。前端以**菜单栈**渲染，深度不构成特例。
-- `form` 与实体详情表单**同源**：字段 / 分区 / 条件显隐（`visible_when`）/
+- `form` 与 VDFS `ext = form` 的详情表单**同源**（同一套 `DetailDefinition`）：
+  字段 / 分区 / 条件显隐（`visible_when`）/
   预设联动 / 结构化控件（list / map / toggle / number / textarea…）完全复用，
   仅绑定模式为 `option`（§4.3）。新增表单型选项 = 后端下发定义，前端零改动。
 
 ### 2.4 状态与展示约定（机制级）
 
-- 状态取值复用实体机制 §2.4 的闭集；`disabled` 与 `enabled = false` 语义分工：
+- 状态取值复用 VDFS 节点 `status` 的闭集（`vdfs.md` §3.2）；`disabled` 与 `enabled = false` 语义分工：
   `enabled = false` 表示**不可交互**（前端不响应点击），`status = disabled`
   表示「未启用但可交互」（如心跳表单未开启）。二者常同时置位表示只读。
 - `working` 由前端渲染为旋转指示，`error` 渲染为告警标记，**不得**折叠成
@@ -177,7 +179,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
    `with_description` / `with_enabled`）；
 3. `ctx.get::<Arc<dyn OptionVisitor>>(OPTION_VISITOR)` 后 `register_option`。
 
-无法回填当前值时（如选中的实体已不存在）应仍下发节点并允许重选，不做特例。
+无法回填当前值时（如选中的资源已不存在）应仍下发节点并允许重选，不做特例。
 
 ## 4. 前端机制分层
 
@@ -211,7 +213,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 
 - `DetailForm` 新增绑定模式 `option`（与 `upload` / `config` / `info` 并列）：
   **预填**自 `optionData`（= 节点 `data`），**保存** `emit('option-save', 字段值)`
-  ——纯字段值、不含 id、不参与实体校验。
+  ——纯字段值、不含 id、不经资源侧的 `write` 校验（保存目标是会话状态，不是某个资源）。
 - 序列化差异：`upload` 绑定跳过 `visible_when` 不满足的字段（互斥字段不落库）；
   `option` 绑定保存**全部字段**——表单选项对应一份**完整配置对象**（如心跳任务：
   关闭开关不得丢失间隔/提示词）。
@@ -277,7 +279,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
   下发**禁用态**节点并给出引导文案（前端零特判）。当前值由 `ctx[PROVIDER_ID]`
   或默认 Provider 回填。
 
-### 7.4 心跳任务（`form` 复用实体表单机制 + `invoke` 命令）
+### 7.4 心跳任务（`form` 复用 VDFS 表单方言 + `invoke` 命令）
 
 - `form` 节点：字段 = 启用开关 / 空闲间隔 / 任务提示词 / 携带历史；四项
   **恒可见**（基础设置不加 `visible_when` 门控）——`DetailField` 只能表达
@@ -285,6 +287,6 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
   若按启用态显隐，未启用时表单只剩开关、看不到任何可填参数。恒可见还允许
   「先填参数、再开开关、一次保存」（`option` 绑定保存**全部字段**，关开关不丢参数）。
   `bind = "metadata.heartbeat"`（经 `OptionAction::session_state_bind`），
-  定义与实体详情表单同一套 schema，前端复用唯一渲染器。
+  定义与 VDFS `ext = form` 的详情表单同一套方言（`DetailDefinition`），前端复用唯一渲染器。
 - `invoke` 节点「立即心跳」：`endpoint = worker/session/heartbeat/trigger`，
   未启用（或缺提示词）时置为只读并说明原因。

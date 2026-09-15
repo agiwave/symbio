@@ -26,7 +26,7 @@
 //! `60` 心跳任务；新增贡献方取空闲号段。
 
 use super::plugin::SessionPlugin;
-use crate::symbio_core::schemas::entities::{
+use crate::symbio_core::schemas::detail::{
     DetailAction, DetailDefinition, DetailField, DetailSection,
 };
 use crate::symbio_core::schemas::options::{
@@ -80,7 +80,7 @@ fn meta_str(metadata: &Value, key: &str) -> Option<String> {
 ///
 /// 根层：把会话当前状态注入收集上下文，广播全项目收集选项，返回节点列表；
 /// 子层（`parent` 非空）：在**同一份收集结果**中定位该节点并返回其子项
-/// （懒加载与实体机制 `list_items` 的 `parent` 同构，单一通道）。
+/// （懒加载与 VDFS `vdfs/list` 的 `parent` 同构，单一通道）。
 pub(crate) async fn handle_list_options(
     plugin: &SessionPlugin,
     ctx: Arc<dyn InvokeRequest>,
@@ -297,7 +297,7 @@ impl SessionPlugin {
             .with_description("工具失败时是否阻塞模型继续")
     }
 
-    /// 心跳任务：自动化表单（复用实体详情表单机制）。
+    /// 心跳任务：自动化表单（复用详情表单方言 [`DetailDefinition`]）。
     ///
     /// `enabled` 开关与三项**基础设置**（空闲间隔 / 任务提示词 / 携带历史）
     /// **恒可见**：基础设置不使用 `visible_when` 门控——未启用时用户同样能
@@ -330,7 +330,7 @@ impl SessionPlugin {
             .unwrap_or(true);
 
         let definition = DetailDefinition {
-            // option 绑定：预填自节点 data、保存回节点 action（与实体详情表单同构）
+            // option 绑定：预填自节点 data、保存回节点 action（与 VDFS 详情表单同一方言）
             binding: "option".to_string(),
             title_fallback: Some("心跳任务".to_string()),
             sections: vec![DetailSection {

@@ -142,7 +142,7 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 - **架构**：[OVERVIEW](./docs/architecture/OVERVIEW.md) · [数据流与调用链](./docs/architecture/DATA_FLOW.md) · [协议规范](./docs/architecture/PROTOCOLS.md) · [决策记录](./docs/DECISIONS.md)
 - **参考**：[路由清单](./docs/reference/ROUTES.md) · [错误码](./docs/reference/ERROR_CODES.md) · [配置参考](./docs/reference/CONFIGURATION.md)
 - **开发**：[插件开发指南](./docs/guides/PLUGIN_DEVELOPMENT.md) · [排障手册](./docs/guides/TROUBLESHOOTING.md) · [贡献指南](./CONTRIBUTING.md)
-- **现行设计**：[实体提供者机制](./docs/design/entity-provider-mechanism.md) · [上下文压缩分层总览](./docs/design/context-compression-design.md) · [OAB 规范](./docs/design/open-agent-bundle-spec.md)
+- **现行设计**：[VDFS 虚拟动态文件系统](./docs/design/vdfs.md) · [上下文压缩分层总览](./docs/design/context-compression-design.md) · [OAB 规范](./docs/design/open-agent-bundle-spec.md)
 - **模块文档**：每个插件与前端各自维护 `README.md`（详见 [文档中心的模块文档地图](./docs/README.md#模块文档地图)）
 - **CLI 前端**：[cli/README.md](./cli/README.md) · [架构](./cli/docs/architecture.md) · [构建](./cli/docs/building.md) · [用法](./cli/docs/usage.md)
 - **更新日志**：[CHANGELOG](./docs/CHANGELOG.md) · **历史归档**：[archive/](./docs/archive/)

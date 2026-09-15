@@ -67,31 +67,13 @@ impl SessionPlugin {
         // 清理活跃条目
         self.active_mgr.sessions.write().await.remove(session_id);
 
-        // 删除前先读归属：子会话事件的 parent_id = 父会话 id，供前端按作用域
-        // 过滤（顶层清单订阅 null 归属即可排除）。store 获取失败按顶层处理
-        // （事件照发）；load_session 未命中返回空 Session（无 parent 声明），
-        // 语义安全。
         let store = self.get_store().await?;
-        let parent_id = store
-            .load_session(session_id)
-            .await
-            .ok()
-            .and_then(|s| s.parent_session_id().map(str::to_string));
-
         store.delete_session(session_id).await?;
 
-        // 实体生命周期变更通知（机制级）：前端据此即时把该会话从清单移除，
-        // 无需等待全量重拉。session/clear 与 VDFS 删除两条删除路径共用此处。
-        crate::symbio_core::event_bus::EventBus::publish_entity_changed(
-            crate::symbio_core::entities::ENTITY_SESSION,
-            session_id,
-            "deleted",
-            None,
-            parent_id,
-        )
-        .await;
-
-        // VDFS 实时链路（provider 侧变更广播 → watch 的 sink）
+        // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：
+        // 前端据此把该会话从清单移除。session/clear 与 VDFS 删除两条删除路径共用此处。
+        // 作用域按**路径前缀**分流（子会话落在 `<sid>/子会话/…` 之下），因此这里
+        // 不再需要实体时代的 `parent_id` 载荷——也不必为发事件多读一次盘。
         self.notify_change(session_id, crate::symbio_core::vdfs::VFDS_CHANGE_DELETED);
 
         Ok(())
@@ -274,21 +256,9 @@ impl SessionPlugin {
         session.updated_at = (OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
         self.save_session(&session).await?;
 
-        // 实体生命周期变更通知（机制级）：新建 → created，其余 → updated。
-        // 前端订阅 entity kind 事件，按归属过滤后同步清单（乐观插入 / 防抖重拉）。
-        // 携带 display_title 便于前端乐观更新时直接命名；携带 parent_id 归属
-        // （子会话事件的 parent_id = 父会话 id），顶层清单订阅 null 归属即可排除。
-        crate::symbio_core::event_bus::EventBus::publish_entity_changed(
-            crate::symbio_core::entities::ENTITY_SESSION,
-            &req.session_id,
-            if is_new { "created" } else { "updated" },
-            Some(session.display_title()),
-            session.parent_session_id().map(str::to_string),
-        )
-        .await;
-
-        // VDFS 实时链路（provider 侧变更广播 → watch 的 sink）：VDFS 会话清单
-        // 因此无需轮询即可收敛。
+        // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：
+        // 新建 → created，其余 → updated。VDFS 会话清单因此无需轮询即可收敛；
+        // 发起方本次就拿到的完整 session（见下方响应），不依赖事件携带标题。
         self.notify_change(
             &req.session_id,
             if is_new {

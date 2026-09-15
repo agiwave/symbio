@@ -7,7 +7,13 @@
  *
  * 前端只消费协议形状；**资源类型、能力、标签、路径模板一律来自后端**，
  * 前端仅持有 ext → 渲染器、资源类别 → 图标这类纯 UI 映射（见 registry/vdfsTypes.ts）。
+ *
+ * `ext = form` 节点的 `schema` 携带宿主方言（呈现描述），其类型见
+ * `schemas/vdfs-form.ts`，并由本文件**统一出口**再导出一份
+ * （消费方一律 `import ... from '@/schemas/vdfs'`）。
  */
+
+export * from './vdfs-form'
 
 export const VFDS_LIST = 'vdfs/list'
 export const VFDS_TREE = 'vdfs/tree'
@@ -28,7 +34,7 @@ export const VFDS_ACTION = 'vdfs/action'
  * 前端与后端共用同一套地址口径，**不存在另一套线路翻译**。 */
 export const VFDS_ROOT = '.vdfs'
 
-/** 节点状态（与实体机制同一约定） */
+/** 节点状态：进行中（其余状态词由 provider 自定，前端只做呈现映射） */
 export const VFDS_STATUS_WORKING = 'working'
 
 /** 约定呈现扩展名（宿主可自行扩展） */
@@ -108,7 +114,7 @@ export interface VdfsNode {
   binary?: boolean
   /**
    * 呈现描述（宿主方言，VDFS 只透传）。
-   * ext = 'form' 时本字段为 DetailDefinition（schemas/entities.ts）。
+   * ext = 'form' 时本字段为 DetailDefinition（schemas/vdfs-form.ts）。
    */
   schema?: unknown
   /** 本目录可接受的新建类型（空 / 缺省 = 不可新建） */

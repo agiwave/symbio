@@ -1,10 +1,10 @@
 <!--
   OptionFormDialog — 级联选项机制中 `form` 类型选项的通用承载
 
-  职责单一：把选项节点自带的 `form`（DetailDefinition，与实体详情表单同一套
+  职责单一：把选项节点自带的 `form`（DetailDefinition，与资源详情表单同一套
   schema）交给唯一渲染器 DetailForm 渲染，绑定模式 `option`：
 
-  - 预填：节点 `data` → DetailForm 的 optionData；
+  - 预填：节点 `data` → DetailForm 的 `values`（表单模型对象）；
   - 保存：DetailForm 回吐纯字段值 → 本组件上抛 `save`，由父级（ChatOptionBar）
     经 `useSessionOptions.dispatch` 写入 `action.bind` 并调用后端服务。
 
@@ -17,11 +17,11 @@
         <DetailForm
           v-if="definition"
           :definition="definition"
-          :item="null"
-          :option-data="node.data ?? {}"
+          :node="null"
+          :values="node.data ?? {}"
           :capabilities="EMPTY_CAPABILITIES"
           :saving="saving"
-          @option-save="onSave"
+          @save="onSave"
           @cancel="$emit('close')"
         />
       </div>
@@ -31,8 +31,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import DetailForm from '@/components/entities/DetailForm.vue'
-import type { DetailDefinition } from '@/schemas/entities'
+import DetailForm from '@/components/vdfs/DetailForm.vue'
+import type { DetailDefinition } from '@/schemas/vdfs'
 import type { OptionNode } from '@/schemas/options'
 
 const props = defineProps<{
@@ -48,7 +48,7 @@ const emit = defineEmits<{
   save: [values: Record<string, unknown>]
 }>()
 
-/** 选项表单无实体语义：能力全关（不渲染删除等机制动作） */
+/** 选项表单无资源语义：能力全关（不渲染删除等机制动作） */
 const EMPTY_CAPABILITIES: Record<string, boolean> = {
   mutable: false,
   test_connection: false,

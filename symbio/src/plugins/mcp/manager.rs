@@ -294,7 +294,7 @@ impl McpManager {
     /// - `Ok(result)` 包含 tool count、协议版本、server 名称/版本、instructions
     /// - `Err(e)` 表示失败
     ///
-    /// 连接测试能力：供统一 `entities` 连接测试/表单复用（尚未接入，故带 dead_code 放行）
+    /// 连接测试能力：供详情表单的 `test` 动作（`vdfs/action`）复用（尚未接入，故带 dead_code 放行）
     #[allow(dead_code)]
     pub async fn test_connection(
         &self,

@@ -217,49 +217,6 @@ pub enum PluginPayloadWire {
 
 ---
 
-## 统一实体管理（**协议已下线**）
-
-> **S11 起 `{plugin}/entities/*` 不再有任何路由**：资源访问统一经 VDFS
-> （`vdfs/list|tree|stat|read|write|mkdir|delete|move|edit|search|watch|unwatch|action`，
-> 见 [design/vdfs.md](../design/vdfs.md)）。下表仅作历史说明。
->
-> 协议下线后，过渡期保留的 `EntityProvider` trait 与 `EntityVdfsAdapter`
-> 也已随 VDFS 收敛一并删除——各插件直接实现 `VdfsProvider`，`entities.rs`
-> 只留存储原语。详见 [design/vdfs.md](../design/vdfs.md) §13.4 与
-> [design/entity-provider-mechanism.md](../design/entity-provider-mechanism.md)。
-
-### 路径约定（历史）
-
-```
-{plugin}/entities/list|get|upload|delete|status
-```
-
-### 操作类型（历史 → 现由 VDFS 承担）
-
-| 原操作 | 现在的路径 |
-|--------|-----------|
-| `entities/list` | `vdfs/list`（`.vdfs/<kind>`） |
-| `entities/get` | `vdfs/read` |
-| `entities/upload`（manifest） | `vdfs/write` |
-| `entities/upload`（zip） | `vdfs/write`（二进制）= 「新建类型 `zip`」，即整包导入 |
-| `entities/delete` | `vdfs/delete` |
-| `entities/status` | `vdfs/action { action: "test" }` |
-| `entities/detail` | 列表节点自带 `schema`（详情定义随列表下发） |
-| `entities/providers` | 无对应物——VDFS 没有「根级 provider 清单」这一概念；`.vdfs` 本身就是清单 |
-
-### 能力开关（**已删除**）
-
-`EntityCapabilities`（zip 上传 / 独立表单 / 实时状态 / 列表可刷新 / 可写 /
-连接测试 / 只读）已随 S12 清理删除。VDFS 之后，能力来自三处**声明**：
-
-- **访问位**（`r` / `w` / `l` / `t`）：节点可读 / 可写 / 可列 / 可遍历；
-- **注册表**：`supports_upload`（可最小 manifest 新建）与 `supports_import`
-  （可整包导入）；
-- **声明式动作**：详情定义 `DetailDefinition.actions` / `vdfs/action`
-  （如「测试连接」）。
-
----
-
 ## AI 会话流式规范
 
 1. **建立会话**：发起 `route("session/chat/send", payload)`，后端返回 `PluginPayload::Session(channel)`
@@ -297,6 +254,18 @@ submit_object_creator!(PLUGIN_X, XPlugin::build, dyn Plugin);
 
 宏利用 [`inventory`](https://docs.rs/inventory) 在编译期把构造函数注册到全局 `ObjectCreatorRegistry`。宿主首次调用 `create_object::<dyn Plugin>(id, ctx)` 时惰性收集完毕，**无需手动注册**。
 
+### 工厂只给「有第二种实现」的服务
+
+`create_object::<dyn T>(名字, ctx)` 的价值是**换实现不改调用方**，因此只有可替换的
+宿主服务登记工厂项（`dyn Plugin`、`dyn EmbeddingService`）。
+
+**资源存储不走工厂**：`providers/vdfs_service` 的三个实现（`SingleFileVdfs` /
+`DirVdfs` / `MemoryVdfs`）本身就是 `VdfsProvider`（接口在 core 已定，不会换），
+插件**直接组合具体类型**——`use crate::providers::vdfs_service::{DirVdfs,
+SingleFileVdfs, MemoryVdfs}`。套一层 `dyn` 工厂只会把一次构造换成一次字符串查表。
+（历史上这里有一个工厂项 `"storage_service"`，随 `StorageService` / `EntityStore`
+一并废除；定位与依赖边界见 [design/vdfs.md](../design/vdfs.md) §11 与 §13.4。）
+
 ### 容器动态挂载
 
 `HomePlugin::init_worker_composite()` 按 `~/.symbio/config.yaml` 的 `plugins.<name>: { plugin_provider: "..." }` 从注册表取构造函数并实例化子插件。
@@ -311,7 +280,7 @@ submit_object_creator!(PLUGIN_X, XPlugin::build, dyn Plugin);
 ## 文档映射约定
 
 - **后端**：`// Corresponding Host: <path>` 注释指向该数据结构在宿主层的对应定义
-- **文档集中**：插件不各自维护文档，全部统一在 `docs/`；复杂机制的实现细节见 `docs/design/`（如实体提供者机制）
+- **文档集中**：插件不各自维护文档，全部统一在 `docs/`；复杂机制的实现细节见 `docs/design/`（如 VDFS 机制规范 `vdfs.md`）
 
 ---
 

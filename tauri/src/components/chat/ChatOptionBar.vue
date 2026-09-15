@@ -85,7 +85,7 @@
  * 级联选项栏（机制内置，唯一实现）
  *
  * 协议端点：选项宿主（session 插件）的 `worker/session/options/list`。
- * 根层与子层共用该端点（`parent` 参数区分）——与实体机制 `list_items`
+ * 根层与子层共用该端点（`parent` 参数区分）——与 VDFS 的目录寻址
  * 的树懒加载同构，机制只有一条通道。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'

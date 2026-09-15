@@ -7,11 +7,11 @@
 //! | [`plugin`] | 插件主体：`traverse(available_tools)` → 扫描约定目录装配 → 身份工具注册 |
 //! | [`store`] | bundle 存储：系统目录 `plugins/agent/`、zip 导入（zip-slip 防护）、导出 |
 //! | [`capability`] | `agent_identity` 身份工具（提示词片段锚定） |
-//! | [`entities`] | VDFS 挂载点适配（kind=`agent`，`.vdfs/agent/…` 自动发现） |
+//! | [`vdfs`] | VDFS 挂载点（`.vdfs/agent/…`，本插件直接 `impl VdfsProvider`） |
 //!
 //! **本层没有任何自有协议路由**：bundle 的浏览 / 导入 / 删除 / 导出分别由
 //! `vdfs/list`、`vdfs/write`（二进制）、`vdfs/delete`、节点动作 `export` 承担，
-//! 原 `bundle/*` 与 `entities/*` 协议均已下线。
+//! 原 `bundle/*` 协议已下线。
 //!
 //! ## 装配契约（三个能力来源）
 //!
@@ -31,10 +31,10 @@
 
 pub mod capability;
 mod detail;
-pub mod entities;
 pub mod plugin;
 pub mod store;
 pub mod subagent;
+pub mod vdfs;
 
 #[cfg(test)]
 mod tests;

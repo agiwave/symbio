@@ -19,7 +19,7 @@
 //!
 //! ## 存储策略
 //!
-//! 每个 MCP Server 作为一个独立实体存放在
+//! 每个 MCP Server 作为一个独立条目存放在
 //! `~/.symbio/plugins/mcps/<name>/server.json`。
 //!
 //! `McpConfig` 的内存视图（`servers: HashMap<name, McpServerConfig>`）

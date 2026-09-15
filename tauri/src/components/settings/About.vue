@@ -20,13 +20,14 @@
 <script setup lang="ts">
 import SettingsFormShell from './SettingsFormShell.vue'
 import logoUrl from '../../assets/logo.svg'
+import type { VdfsNode } from '@/schemas/vdfs'
 
 // VDFS 的 form 渲染器会透传编辑器级 props，本面板只读不消费，禁止落根 DOM。
 defineOptions({ inheritAttrs: false })
 
 defineProps<{
-  /** 当前设置分区实体项（实体提供者机制注入） */
-  item?: { id: string; name?: string } | null
+  /** 当前节点（渲染器统一契约透传；本面板的信息一律自己取） */
+  node?: VdfsNode | null
 }>()
 </script>
 

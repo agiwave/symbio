@@ -1,45 +1,24 @@
 /**
  * VDFS `ext = form` 的**宿主方言**（前端侧类型契约）
  *
- * 与后端对齐：symbio/src/symbio_core/schemas/entities.rs（详情页定义部分）。
+ * 与后端对齐：详情定义由 provider 的 `detail_definition` 产出，随 `VdfsNode.schema`
+ * **原样透传**到前端（VDFS 不解释其内容）。规范：docs/design/vdfs.md。
  *
- * **前端定位（S5 / S8 / S11 后）**：统一实体页、`services/entities.ts` 与
- * `entities/*` 调用协议均已下线，前端不再有任何实体协议调用点。保留本文件只因为
- * `DetailDefinition` 是 VDFS 的宿主方言——节点 `schema` 字段**透传**它，
- * `VdfsFormDetail` 据此渲染表单（字段 / 分区 / 徽标 / 动作 / 预设联动）；
- * `EntitySummary` 是这套方言的附属形状（详情渲染器的输入形状之一）。
+ * **本文件是数据契约层：零组件知识**（不得导入任何 Vue 组件）。
+ * 渲染它的是 `components/vdfs/DetailForm.vue`。
  *
- * 已于 S11 删除的协议时代类型（`ProviderInfo` / `ProvidersResponse` /
- * `EntitiesListResponse` / `EntityUploadResponse` / `EntityStatusResponse` /
- * `ContainerKindInfo` / `DetailDefinitionResponse` / `ENTITY_LABELS`）不再需要：
- * 资源类别来自 `vdfs/providers`、列表来自 `vdfs/list`、动作来自 `vdfs/action`。
+ * 表单的**取值输入**与定义分开：定义说「有哪些字段」，字段当前值来自
+ * `vdfs/read` 返回的 `VdfsContent.text`（JSON 文本，前端 parse 成对象后
+ * 作为显式入参交给渲染器）。节点上**没有** config / extra 这类携带正文的字段。
  */
 
 /**
  * 表单渲染器的能力位（`cap.<name>` 条件求值来源）。
  *
  * VDFS **不下发**能力表——它由渲染器按节点的访问位与详情定义声明的动作**自行计算**
- * （后端的能力开关已随 `entities/*` 协议下线）。`DetailForm` 的 `capabilities`
+ * （见 `VdfsFormDetail` 的 `capabilities`）。`DetailForm` 的 `capabilities`
  * 入参即为 `Record<string, boolean>`（当前仅 `mutable` / `test_connection`），不再另设类型。
  */
-
-/** 实体概要（VDFS 详情渲染器的输入形状之一） */
-export interface EntitySummary {
-  kind: string
-  name: string
-  id: string
-  description?: string
-  summary?: string
-  updated_at?: number
-  status: string
-  status_detail?: string
-  /** 树视图：父节点 id（容器内相对路径；根层缺省） */
-  parent?: string
-  /** 树视图：可展开提示（false = 叶子；缺省按可展开处理，展开为空则收敛） */
-  expandable?: boolean
-  // 类型特有扩展字段（flatten）
-  [extra: string]: unknown
-}
 
 // ==================== 详情页定义（definition-driven detail） ====================
 
@@ -120,7 +99,7 @@ export interface DetailBadge {
 }
 
 /**
- * 动作按钮。id ∈ save|test|delete|set-default|open-container（payload.kind 指定容器类别）或自定义。
+ * 动作按钮。id ∈ save|test|delete|set-default|open-container（payload.kind 指定子类别）或自定义。
  * icon：图标名（可选）——语义动作 id 自带默认图标映射；仅当需要区分同 id 多形态
  * （如「跳过校验保存」）或自定义动作需要图标时显式指定；未知图标名回落为文字按钮。
  */
@@ -135,7 +114,14 @@ export interface DetailAction {
   busy_label?: string
 }
 
-/** 详情页定义。binding ∈ upload（实体，保存走 manifest 写入）| config（配置分区，经 load/save_path 读写）| info（只读概览，字段取值来自 item.config/extra） */
+/**
+ * 详情页定义。binding ∈
+ * - `upload`：清单型资源，保存交回「id + 完整字段值」（id 由节点名给出或按定义派生）；
+ * - `config`：配置分区，经 load/save_path 自持读写（插件路由，非 VDFS 通道）；
+ * - `info`  ：只读概览，static 字段取值来自节点顶层的扩展字段（flatten 的 attributes）；
+ * - `option`：数据来自外部、保存只交回纯字段值 —— VDFS 的 `form` 节点与级联选项表单
+ *             都落在这两种形态上（取值统一由渲染器的显式入参传入）。
+ */
 export interface DetailDefinition {
   binding: string
   load_path?: string

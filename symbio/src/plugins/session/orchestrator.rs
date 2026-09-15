@@ -1224,12 +1224,9 @@ impl SessionPlugin {
     /// 在首个用户消息落盘后调用；规则与 [`super::types::Session::display_title`]
     /// 一致（首条用户文本消息首行、限长）。
     ///
-    /// 落盘后发**与 `handlers::invoke_update` 同构的两条对外信号**——标题变更
-    /// 不该因发起者不同而走不同链路，否则自动命名这条路生成的标题到不了任何清单：
-    ///
-    /// - 实体机制（`publish_entity_changed`，携带 `display_title`）→ 会话清单 store
-    ///   （聊天头部标题与侧栏项名称）；
-    /// - VDFS 变更（`notify_change`）→ VDFS 会话清单（左栏导航按直接子节点变更刷新）。
+    /// 落盘后发一条 VDFS 变更（`notify_change`）——标题变更不该因发起者不同而走
+    /// 不同链路。VDFS 变更同时到达两类订阅者：会话清单 store 与左栏导航，二者都
+    /// 按 path 重读 `vdfs/stat` 取得最新标题，因此这里无需（也无法）在事件里携带载荷。
     pub(crate) async fn ensure_auto_title(&self, session_id: &str) {
         let Ok(mut session) = self.get_or_create_session(session_id).await else {
             return;
@@ -1255,14 +1252,6 @@ impl SessionPlugin {
             return;
         }
 
-        EventBus::publish_entity_changed(
-            crate::symbio_core::entities::ENTITY_SESSION,
-            session_id,
-            "updated",
-            Some(title),
-            session.parent_session_id().map(str::to_string),
-        )
-        .await;
         self.notify_change(session_id, vdfs::VFDS_CHANGE_UPDATED);
     }
 
@@ -1275,28 +1264,13 @@ impl SessionPlugin {
         )
         .await;
 
-        // 实体实时状态协议：把会话 busy/idle 同步推送为 entity 事件，
-        // 供列表/详情按 id 即时刷新状态角标（初始态由清单接口兜底）。
-        use crate::symbio_core::event_bus::EventBus;
+        // 会话的忙/闲是**节点状态**，不是流式内容：以一次 VDFS 变更通知订阅方，
+        // 由列表/详情按 path 重读 `vdfs/stat` 取最新 status（角标即时刷新，
+        // 初始态仍由清单接口兜底）。
         let id = state.request_id_str();
         match status {
-            "busy" => {
-                EventBus::publish_entity_status(
-                    crate::symbio_core::entities::ENTITY_SESSION,
-                    &id,
-                    "working",
-                    Some("处理中…".to_string()),
-                )
-                .await;
-            }
-            "idle" => {
-                EventBus::publish_entity_status(
-                    crate::symbio_core::entities::ENTITY_SESSION,
-                    &id,
-                    "active",
-                    None,
-                )
-                .await;
+            "busy" | "idle" => {
+                self.notify_change(&id, vdfs::VFDS_CHANGE_UPDATED);
             }
             _ => {}
         }

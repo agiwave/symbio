@@ -6,29 +6,35 @@
   动态生成交互不复杂的详情页——新增此类详情 = 后端下发定义即可，
   前端零页面/零 ts 开发。
 
+  两个入参分工明确（VDFS 口径）：
+  - `node`    —— 被编辑的**资源节点**（VdfsNode）：提供 kind / name / title 与
+                 场景扩展字段（flatten 到顶层），参与标题回落链与条件求值；
+  - `values`  —— **表单模型对象**：字段当前值。它来自 `vdfs/read` 的
+                 `VdfsContent.text`（JSON 文本由数据层 parse）或选项节点的 `data`。
+                 节点自身不携带正文——正文只有 `vdfs/read` 这一条来源。
+
   绑定模式（definition.binding）：
-  - upload  ：实体实体。预填 item.config；保存 emit save（VDFS 下由
-              `vdfs/write` 承载，后端 validate_manifest 兜底）。
+  - upload  ：清单型资源。保存 emit `save`，载荷含派生/回显的 id 与全部字段值，
+              由页面写回 `vdfs/write`（后端 validate_manifest 兜底）。
   - config  ：配置分区。mount 时经 load_path 拉取，保存经 save_path
-              自持写回（后端 config/set 通道），内部管理 saving/toast。
-  - info    ：只读概览。无保存，字段（static widget）取值来自
-              item.config/extra，动作仅限 open-container/delete 等
+              自持写回（插件的 config 通道，非 VDFS），内部管理 saving/toast。
+  - info    ：只读概览。无保存，static 字段取值优先来自 `values`，
+              缺省时取节点顶层的扩展字段，动作仅限 open-container / delete 等
               机制通道动作（如 agent bundle 概览）。
-  - option  ：级联选项机制的表单选项（自动化表单）。预填自 `optionData`
-              （由选项节点 `data` 下发），保存 emit option-save 纯字段值
-              ——由选项机制按 `action.bind` 写回后调用后端服务。
+  - option  ：数据来自外部、保存只交回纯字段值——VDFS 的 `form` 节点
+              （VdfsFormDetail 适配）与级联选项表单都走这一形态。
 
   结构化 widget 表单模型约定（与后端 validate_manifest 两侧一致）：
   list = 字符串数组（编辑态每行一项）；map = 键值对（编辑态每行 KEY=VALUE）。
 
-  解析顺序（详情页分发）：注册专属 editor → 本渲染器（有定义）→ 通用兜底。
-  VDFS 下本渲染器由 `ext = form` 选中（VdfsFormDetail 薄适配）。
+  解析顺序（详情页分发）：按 ext 命中的专属渲染器 → 本渲染器（ext = form）
+  → 通用兜底（registry/vdfsRenderers 登记）。
   会话聊天工作区 / appearance 即时生效 / about 信息展示等复杂详情
-  不适用本渲染器，仍走注册 editor。
+  不适用本渲染器，各自登记专属组件。
 -->
 <template>
   <div class="detail-form">
-    <!-- 顶部：标题 + 徽标 + 操作（与注册 editor 的 form-header 同构） -->
+    <!-- 顶部：标题 + 徽标 + 操作（与专属渲染器的 form-header 同构） -->
     <header class="form-header">
       <div class="title-area">
         <div class="title-block">
@@ -46,7 +52,7 @@
         </div>
       </div>
       <div v-if="allActions.length" class="header-actions">
-        <EntityActions
+        <VdfsActions
           :actions="allActions"
           :busy="busyFlags"
           :disabled="disabledFlags"
@@ -167,27 +173,27 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { callPlugin, reloadGatewayTransport } from '@/services/plugin'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
-import EntityActions from './EntityActions.vue'
+import VdfsActions from './VdfsActions.vue'
 import type {
   DetailAction,
   DetailBadge,
   DetailCondition,
   DetailDefinition,
   DetailField,
-  EntitySummary,
-} from '@/schemas/entities'
+  VdfsNode,
+} from '@/schemas/vdfs'
 
 const props = withDefaults(
   defineProps<{
     /** 下发的详情页定义（本渲染器的唯一形态来源） */
     definition: DetailDefinition
-    /** 选中的实体（null = 新建模式；upload 绑定据此预填 item.config） */
-    item: EntitySummary | null
+    /** 被编辑的资源节点（null = 新建模式） */
+    node: VdfsNode | null
     /**
-     * option 绑定：表单初始数据（字段名 → 值），由选项节点 `data` 下发。
-     * 与 item.config 同构，但来源是「选项」而非「实体」。
+     * 表单模型对象（字段名 → 当前值）：来自 `vdfs/read` 内容的 JSON parse，
+     * 或级联选项节点的 `data`。异步到位（挂载后才返回）时会触发一次预填。
      */
-    optionData?: Record<string, unknown> | null
+    values?: Record<string, unknown> | null
     capabilities: Record<string, boolean>
     /** 机制动作注入（页面单一定义点计算：容器入口/测试/删除，
      *  已排除定义声明过的动作），与定义动作同排渲染于 header-actions */
@@ -198,21 +204,20 @@ const props = withDefaults(
     /** 新建模式下用于 ID 去重的现有 id 列表 */
     existingIds?: string[]
   }>(),
-  { mechanismActions: () => [], saving: false, testing: false, deleting: false, existingIds: () => [] }
+  { values: null, mechanismActions: () => [], saving: false, testing: false, deleting: false, existingIds: () => [] }
 )
 
 const emit = defineEmits<{
-  /** 统一保存入口：id 为实体目录名，manifest 为完整配置，extra 合并动作 payload */
-  save: [payload: { id: string; manifest: Record<string, unknown>; skipValidation: boolean }]
   /**
-   * option 绑定保存：纯字段值（已按 widget 序列化，未含 id）。
-   * 由选项机制写入 `action.bind` 指定路径后调用后端服务。
+   * 统一保存入口：字段值对象（已按 widget 序列化）。
+   * upload 绑定额外带上 `id`（节点名或按定义派生）与动作 payload 的附加键
+   * （如 `skip_validation`）；其余绑定只交回纯字段值。
    */
-  'option-save': [values: Record<string, unknown>]
+  save: [values: Record<string, unknown>]
   test: []
   delete: []
   'set-default': []
-  /** 机制导航动作：路由推入容器实体页（payload.kind 指定容器类别） */
+  /** 机制导航动作：进入节点内部（payload.kind 指定子类别） */
   'open-container': [kind: string]
   /**
    * **未在本渲染器内实现**的动作：原样上抛动作标识（如 VDFS 节点动作
@@ -233,12 +238,11 @@ const collapsed = reactive<Record<number, boolean>>({})
 const configSaving = ref(false)
 const configLoaded = ref(false)
 
-const isExisting = computed(() => Boolean(props.item?.id))
-const isDefault = computed(() => Boolean(props.item && props.item.is_default === true))
+const isExisting = computed(() => Boolean(props.node?.name))
+const isDefault = computed(() => Boolean(props.node && props.node.is_default === true))
+const isUpload = computed(() => props.definition.binding === 'upload')
 const isConfig = computed(() => props.definition.binding === 'config')
 const isInfo = computed(() => props.definition.binding === 'info')
-/** 级联选项机制的表单选项（自动化表单）：预填自 optionData、保存回选项机制 */
-const isOption = computed(() => props.definition.binding === 'option')
 
 // ==================== 条件求值 ====================
 /** 求值键：表单字段 / is_existing / is_default / cap.<name> */
@@ -366,7 +370,8 @@ const displayTitle = computed(
   () =>
     firstNonEmpty(props.definition.title_from) ||
     props.definition.title_fallback ||
-    props.item?.name ||
+    props.node?.title ||
+    props.node?.name ||
     '详情'
 )
 
@@ -433,31 +438,26 @@ function actionDisabled(a: DetailAction): boolean {
   return a.disabled_when ? evalCond(a.disabled_when) : false
 }
 
-/** EntityActions 按索引对齐的进行中/禁用标记 */
+/** VdfsActions 按索引对齐的进行中/禁用标记 */
 const busyFlags = computed(() => allActions.value.map((a) => actionBusy(a)))
 const disabledFlags = computed(() => allActions.value.map((a) => actionDisabled(a)))
 
 function runAction(a: DetailAction) {
   switch (a.id) {
     case 'save': {
-      // option 绑定：保存纯字段值，交由级联选项机制按 action.bind 落库后调后端服务
-      if (isOption.value) {
-        emit('option-save', buildValues(true))
-        return
-      }
       if (isConfig.value || isInfo.value) {
         // config/info 绑定无 save 语义（配置分区自持保存；info 只读）
         if (isConfig.value) void saveConfig()
         return
       }
-      // extra 动作 payload（如 skip_validation）合并进 manifest 并同步 emit 标志
-      const extra = (a.payload ?? {}) as Record<string, unknown>
-      const { id, manifest } = buildSave()
-      emit('save', {
-        id,
-        manifest: { ...manifest, ...extra },
-        skipValidation: extra.skip_validation === true,
-      })
+      const values = buildSave()
+      if (!isUpload.value) {
+        // 数据来自外部的绑定：只交回纯字段值，不让动作载荷污染它
+        emit('save', values)
+        return
+      }
+      // upload 绑定：动作 payload（如 skip_validation）作为附加键并入
+      emit('save', { ...values, ...((a.payload ?? {}) as Record<string, unknown>) })
       return
     }
     case 'cancel':
@@ -494,7 +494,7 @@ function generateId(base: string): string {
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9-_]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'entity'
+      .replace(/^-+|-+$/g, '') || 'resource'
   let id = slug
   let counter = 2
   while (used.has(id)) {
@@ -509,10 +509,10 @@ function generateId(base: string): string {
  *
  * `ignoreVisibility = false`（upload 绑定）时，`visible_when` 不满足的字段
  * 不参与保存（如 mcp 的 stdio/http 互斥字段）；
- * `ignoreVisibility = true`（option 绑定）时保存全部字段——表单选项对应一份
+ * `ignoreVisibility = true`（其余绑定）时保存全部字段——表单对应的是一份
  * **完整配置对象**（如心跳任务：关闭开关不得丢失间隔/提示词）。
  */
-function buildValues(ignoreVisibility = false): Record<string, unknown> {
+function buildValues(ignoreVisibility: boolean): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const sec of props.definition.sections) {
     for (const f of sec.fields) {
@@ -526,19 +526,23 @@ function buildValues(ignoreVisibility = false): Record<string, unknown> {
   return out
 }
 
-function buildSave(): { id: string; manifest: Record<string, unknown> } {
-  let id = (props.item?.id as string) ?? ''
-  if (!id) {
-    id = generateId(firstNonEmpty(props.definition.id_from) || 'entity')
-  }
-  const manifest: Record<string, unknown> = { id, ...buildValues() }
-  // 名称回落链：首个非空字段补 name（不覆盖用户已填的 name）
+/**
+ * 保存载荷（机制唯一入口）：
+ * - 非 upload 绑定：纯字段值，由页面写回它自己的通道；
+ * - upload 绑定：带上 id（既有节点用 `node.name`，新建态按定义派生），
+ *   并补齐 name 回落链（首个非空字段补 name，不覆盖用户已填的 name）。
+ */
+function buildSave(): Record<string, unknown> {
+  if (!isUpload.value) return buildValues(true)
+  const id = props.node?.name || generateId(firstNonEmpty(props.definition.id_from) || 'resource')
+  const values = buildValues(false)
+  const manifest: Record<string, unknown> = { id, ...values }
   const nameFrom = firstNonEmpty(props.definition.name_from)
   const nameKey = props.definition.name_from?.[0]
   if (nameKey && nameFrom && isEmpty(form[nameKey])) {
     manifest[nameKey] = nameFrom
   }
-  return { id, manifest }
+  return manifest
 }
 
 // ==================== 保存（config 绑定）：load/save_path 自持 ====================
@@ -637,7 +641,7 @@ function onPresetFieldChange(f: DetailField) {
   }
 }
 
-// ==================== 预填（watch item：编辑态 / 新建态重置） ====================
+// ==================== 预填（watch values：编辑态 / 新建态重置） ====================
 function initForm() {
   for (const sec of props.definition.sections) {
     for (const f of sec.fields) {
@@ -646,39 +650,29 @@ function initForm() {
   }
 }
 
-// 表单重置的身份门闩：记录上次绑定实体的 `${kind}:${id}`。事件驱动的后台
-// 清单刷新（refreshKind）会以新对象替换 item——身份未变时跳过重置，保住
-// 编辑现场；仅身份变化（切换实体 / 新建↔编辑）才走完整重置+预填。
-// option 绑定：预填来源是 props.optionData。关键 —— optionData 通常是**异步**
-// 到位的（如 VDFS 的 `vdfs/read` 在挂载后才返回），挂载瞬间为 null。若身份键
-// 恒为常量 'option'，则「挂载（null）→ 数据到达（对象）」的翻转会被门闩判成
-// 同一身份而 early-return，导致预填永不执行（表现为：标题回落 fallback、字段全空）。
-// 故 option 绑定的身份键必须纳入「数据是否到位」（`0`/`1`），使异步到达能翻转
-// 身份、触发预填；同条目后台刷新（键不变）仍保留编辑现场。有 item 时再带上
-// `kind:id`，使切换实体（即便不靠组件 remount）也能重新预填。
+// 表单重置的身份门闩：记录上次绑定节点的 `${kind}:${name}` 与「表单模型对象
+// 是否到位」。事件驱动的后台清单刷新会以新对象替换 node——身份未变时跳过重置，
+// 保住编辑现场；仅身份变化（切换节点 / 新建↔编辑）或数据首次到位才走完整重置+预填。
+// 「到位位」（`0`/`1`）必须纳入身份键：`values` 通常是**异步**到位的（VDFS 的
+// `vdfs/read` 在挂载后才返回），挂载瞬间为 null。若身份键恒为常量，则
+// 「挂载（null）→ 数据到达（对象）」的翻转会被门闩判成同一身份而 early-return，
+// 导致预填永不执行（表现为：标题回落 fallback、字段全空）。
 let lastItemKey: string | null | undefined
 watch(
-  () => (isOption.value ? props.optionData : props.item),
+  () => props.values,
   () => {
-    if (isConfig.value) return // config 绑定：onMounted 拉取，不随 item 重置
-    const it = props.item
-    const itemKey = isOption.value
-      ? it
-        ? `${it.kind}:${it.id}:${props.optionData ? 1 : 0}`
-        : `option:${props.optionData ? 1 : 0}`
-      : it
-        ? `${it.kind}:${it.id}`
-        : null
-    if (itemKey === lastItemKey) return // 同一实体的后台刷新 → 保留输入现场
+    if (isConfig.value) return // config 绑定：onMounted 拉取，不随 values 重置
+    const n = props.node
+    const ready = props.values ? 1 : 0
+    const itemKey = n ? `${n.kind}:${n.name}:${ready}` : `new:${ready}`
+    if (itemKey === lastItemKey) return // 同一节点的后台刷新 → 保留输入现场
     lastItemKey = itemKey
     initForm()
-    // 预填来源：option → props.optionData（选项节点 data）；
-    // 其余 → item.config（后端下发的完整配置）优先，
-    // info 绑定的 static 字段取自 item 顶层（extra flatten 下发的概览字段）
-    const cfg = isOption.value
-      ? ((props.optionData ?? null) as Record<string, unknown> | null)
-      : (((it?.config ?? null) as Record<string, unknown> | null) ??
-        (isInfo.value ? ((it ?? null) as unknown as Record<string, unknown> | null) : null))
+    // 预填来源：`values`（vdfs/read 的解析结果 / 选项节点 data）；
+    // info 绑定的 static 字段在 values 缺省时取节点顶层的扩展字段
+    const cfg =
+      props.values ??
+      (isInfo.value ? ((n as unknown as Record<string, unknown> | null) ?? null) : null)
     if (cfg && typeof cfg === 'object') {
       for (const sec of props.definition.sections) {
         for (const f of sec.fields) {
@@ -702,7 +696,7 @@ watch(
   min-height: 0;
 }
 
-/* ============ 顶部 header：与注册 editor 的 form-header 同构 ============ */
+/* ============ 顶部 header：与专属渲染器的 form-header 同构 ============ */
 .form-header {
   display: flex;
   align-items: center;

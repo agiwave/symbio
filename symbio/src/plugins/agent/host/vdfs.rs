@@ -1,38 +1,39 @@
 //! VDFS 挂载点（`.vdfs/agent`）—— 本插件**直接实现 `VdfsProvider`**。
 //!
-//! ## 与 [`super::handlers`] 的分工
+//! ## 与其它资源插件的分工差异
 //!
-//! - 列表 / 读写：本模块 override，直接枚举 [`BundleStore`]（bundle 不是
-//!   EntityStore 型，不落 `~/.symbio/plugins/<category>/`）；
-//! - 写 / 删：bundle 由 [`BundleStore`] 自管目录与 manifest 校验（zip-slip
-//!   防护 / 版本硬门槛），故不复用 EntityStore 写盘原语；
-//! - 落盘后的变更广播：走 `vdfs::notify_change`（与 EntityStore 型资源同一通道）。
+//! bundle 是**目录自管型**资源：它的落盘由 [`BundleStore`] 负责（工作区级 +
+//! 全局级双层、zip-slip 防护、版本硬门槛），**不经 `vdfs_service`**——
+//! `vdfs_service` 的三种拓扑都是「`<homedir>/plugins/<类别>/<id>/…`」这一固定落位，
+//! 而 bundle 要同时看见工作目录与系统目录两层，寻址规则本身是 bundle 语义的一部分。
+//!
+//! 相同的是**广播**：落盘后一律走 `vdfs::notify_change`，与 `vdfs_service` 三个
+//! 实现投的是同一条频道，订阅方无需区分资源住在哪儿。
 //!
 //! 外部访问一律走 `.vdfs/agent/…`。
 
 use super::plugin::AgentPlugin;
-use super::store::{classify_entity_path, BundleRecord, BundleStore};
-use crate::symbio_core::entities::EntitySummary;
-use crate::symbio_core::entities::ENTITY_AGENT;
+use super::store::{classify_item_path, BundleRecord, BundleStore};
+use crate::providers::vdfs_service;
 use crate::symbio_core::vdfs::{host_ctx, notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT, VFDS_EXT_FORM,
-    VFDS_EXT_ZIP, VFDS_NEW_SOURCE_FILE,
+    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT, VFDS_CHANGE_CREATED,
+    VFDS_CHANGE_DELETED, VFDS_CHANGE_UPDATED, VFDS_EXT_FORM, VFDS_EXT_ZIP, VFDS_NEW_SOURCE_FILE,
 };
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt};
+use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PLUGIN_AGENT};
 use async_trait::async_trait;
 use std::sync::Arc;
 
 const LABEL: &str = "智能体";
 
-// ==================== 容器子实体声明（bundle 内部文件） ====================
+// ==================== 容器子条目声明（bundle 内部文件） ====================
 //
 // bundle 条目即容器：内部 prompts / skills / mcps 以
 // `<bundle id>/<子类别标签>/<相对路径>` 寻址，实现复用 [`BundleStore`] 的
-// 沙箱化方法（路径白名单 `classify_entity_path` + absolutize 双重闸门）。
+// 沙箱化方法（路径白名单 `classify_item_path` + absolutize 双重闸门）。
 
-/// 一类容器子实体（以**标签**而非 kind 作路径段——与会话内部同一口径：
+/// 一类容器子条目（以**标签**而非 kind 作路径段——与会话内部同一口径：
 /// 路径是给人看的，kind 是实现标识）
 struct ContainerKind {
     kind: &'static str,
@@ -74,7 +75,7 @@ fn section_of(seg: &str) -> Option<&'static ContainerKind> {
 
 // ==================== 路径解析 ====================
 
-/// 挂载点内相对路径（至多切三段：条目 / 子类别 / 子实体）
+/// 挂载点内相对路径（至多切三段：条目 / 子类别 / 子条目）
 #[derive(Debug)]
 enum RelPath<'a> {
     Root,
@@ -104,38 +105,18 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
     }
 }
 
-/// 路径末段 → 条目 id（去掉 `.<kind>` 呈现扩展名）
+/// 路径末段 → 条目 id（去掉 `.agent` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    let base = path.rsplit('/').next().unwrap_or(path);
-    base.strip_suffix(&format!(".{ENTITY_AGENT}"))
-        .unwrap_or(base)
-        .to_string()
+    vdfs_service::entry::id_of(path, PLUGIN_AGENT)
 }
 
 // ==================== 节点合成 ====================
 
-/// bundle 记录 → 摘要
-fn summary_of(r: &BundleRecord, store: &BundleStore) -> EntitySummary {
-    let mut it = EntitySummary::new(
-        ENTITY_AGENT,
-        r.manifest.id.clone(),
-        if r.manifest.name.is_empty() {
-            r.manifest.id.clone()
-        } else {
-            r.manifest.name.clone()
-        },
-    );
-    it.status = "active".to_string();
-    if !r.manifest.description.is_empty() {
-        it.description = Some(r.manifest.description.clone());
-        it.summary = Some(r.manifest.description.clone());
-    }
-    // 类型特有扩展：版本 / 规格 / 来源层级 / 安装目录 / 内部实体计数
-    // （前端 DetailForm info 绑定按需展示）
-    // config_type = "bundle"：项级分发键，前端据此分发，必须保留；
-    // 明细展示走 DetailForm info 绑定
+/// bundle 概览（`read` 与详情表单共用的信息载荷）
+fn bundle_info(r: &BundleRecord, store: &BundleStore) -> serde_json::Value {
+    // 内部条目计数：概览要回答「这个包里有什么」，目录清单是它的唯一真相源
     let mut counts = (0usize, 0usize, 0usize);
-    if let Ok(entries) = store.list_entities(&r.manifest.id) {
+    if let Ok(entries) = store.list_items(&r.manifest.id) {
         for e in entries {
             match e.kind.as_str() {
                 "prompt" => counts.0 += 1,
@@ -145,7 +126,8 @@ fn summary_of(r: &BundleRecord, store: &BundleStore) -> EntitySummary {
             }
         }
     }
-    it.extra = serde_json::json!({
+    serde_json::json!({
+        // config_type = "bundle"：项级图标 / 详情分发的顶层键（VdfsNode attributes flatten）
         "config_type": "bundle",
         "version": r.manifest.version,
         "spec": r.manifest.spec,
@@ -155,28 +137,38 @@ fn summary_of(r: &BundleRecord, store: &BundleStore) -> EntitySummary {
         "count_prompt": counts.0,
         "count_skill": counts.1,
         "count_mcp": counts.2,
-    });
-    it
+    })
 }
 
-/// 摘要 → VDFS 节点（只读概览表单：`ext = form` + 定义随 `schema` 下发）
+/// bundle 记录 → VDFS 节点（只读概览表单：`ext = form` + 定义随 `schema` 下发）
 ///
 /// bundle 条目同时是容器（内部可浏览提示词 / 技能 / MCP），但**有详情定义**，
 /// 故呈现为表单文件——「浏览内部」走 `enter(<id>/<子类别>)` 的目录语义，
 /// 与详情页互不影响。
-fn node_of(item: &EntitySummary) -> VdfsNode {
-    let mut n = VdfsNode::file(&item.id, item.name.clone(), VdfsAccess::READ);
-    n.kind = ENTITY_AGENT.to_string();
+fn bundle_node(r: &BundleRecord, store: &BundleStore) -> VdfsNode {
+    let id = r.manifest.id.clone();
+    let title = if r.manifest.name.is_empty() {
+        id.clone()
+    } else {
+        r.manifest.name.clone()
+    };
+    let mut n = VdfsNode::file(id, title, VdfsAccess::READ);
+    n.kind = PLUGIN_AGENT.to_string();
     n.ext = Some(VFDS_EXT_FORM.to_string());
     n.schema = serde_json::to_value(super::detail::agent_detail_definition()).ok();
-    n.status = item.status.clone();
-    n.description = item.description.clone().or_else(|| item.summary.clone());
+    if !r.manifest.description.is_empty() {
+        n.description = Some(r.manifest.description.clone());
+    }
+    n.attributes = bundle_info(r, store)
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
     n
 }
 
 /// 子类别目录节点。可新建的类型由 `path_hint` 决定——非空即可创建，
 /// 扩展名取自路径模板（`prompts/<name>.md` → `md`）。
-fn section_node(spec: &ContainerKind) -> VdfsNode {
+fn section_node(spec: &'static ContainerKind) -> VdfsNode {
     let mut n = VdfsNode::dir(spec.label, spec.label, VdfsAccess::LIST);
     n.kind = spec.kind.to_string();
     n.description = Some(spec.description.to_string());
@@ -189,12 +181,21 @@ fn section_node(spec: &ContainerKind) -> VdfsNode {
     n
 }
 
-/// 子实体条目 → VDFS 节点（文件；`ext` 由文件名推导，渲染器据此分发）
-fn container_node(spec: &ContainerKind, it: &EntitySummary) -> VdfsNode {
-    let mut n = VdfsNode::file(it.id.clone(), it.name.clone(), VdfsAccess::READ_WRITE);
+/// 子条目 → VDFS 节点（文件；`ext` 由文件名推导，渲染器据此分发）
+fn container_node(
+    spec: &ContainerKind,
+    path: &str,
+    name: &str,
+    size: Option<u64>,
+    priority: Option<i64>,
+) -> VdfsNode {
+    let mut n = VdfsNode::file(path, name, VdfsAccess::READ_WRITE);
     n.kind = spec.kind.to_string();
-    n.size = it.extra.get("size").and_then(|v| v.as_u64());
-    n.description = it.description.clone();
+    n.size = size;
+    if let Some(p) = priority {
+        n.attributes
+            .insert("priority".to_string(), serde_json::json!(p));
+    }
     n
 }
 
@@ -203,22 +204,30 @@ impl AgentPlugin {
     fn store_of(ctx: &Arc<dyn InvokeRequest>) -> BundleStore {
         BundleStore::new(ctx.get(crate::symbio_core::WORKDIR).as_deref())
     }
-}
 
-/// 子实体条目 → 摘要（含正文，`read` 直接取用）
-fn container_item_of(store: &BundleStore, container: &str, rel: &str) -> VdfsResult<EntitySummary> {
-    let (kind, name) = classify_entity_path(rel)
-        .map_err(|e| VdfsError::invalid(format!("子实体路径不合规：{e}")))?;
-    let content = store
-        .read_entity(container, rel)
-        .map_err(|e| VdfsError::not_found(format!("读取子实体失败：{e}")))?;
-    let mut it = EntitySummary::new(kind, rel, name);
-    it.status = "active".to_string();
-    it.extra = serde_json::json!({
-        "container": container,
-        "content": content,
-    });
-    Ok(it)
+    /// 子条目 → `(节点, 正文)`（`read` 直接取用正文）
+    fn container_item(
+        store: &BundleStore,
+        container: &str,
+        rel: &str,
+    ) -> VdfsResult<(VdfsNode, String)> {
+        let (kind, name) = classify_item_path(rel)
+            .map_err(|e| VdfsError::invalid(format!("子条目路径不合规：{e}")))?;
+        let content = store
+            .read_item(container, rel)
+            .map_err(|e| VdfsError::not_found(format!("读取子条目失败：{e}")))?;
+        let spec = CONTAINER_KINDS.iter().find(|k| k.kind == kind);
+        // `rel` 是节点地址、`name` 是展示标题：与目录型资源同一口径
+        let node = match spec {
+            Some(spec) => container_node(spec, rel, &name, None, None),
+            None => {
+                let mut n = VdfsNode::file(rel, name, VdfsAccess::READ_WRITE);
+                n.kind = kind.to_string();
+                n
+            }
+        };
+        Ok((node, content))
+    }
 }
 
 #[async_trait]
@@ -236,10 +245,10 @@ impl VdfsProvider for AgentPlugin {
     }
 
     fn icon(&self) -> Option<&str> {
-        Some(ENTITY_AGENT)
+        Some(PLUGIN_AGENT)
     }
 
-    /// 根可列举 + 可递归遍历（bundle 内部有子实体）
+    /// 根可列举 + 可递归遍历（bundle 内部有子条目）
     fn root_access(&self) -> VdfsAccess {
         VdfsAccess::LIST_TRAVERSE
     }
@@ -258,7 +267,7 @@ impl VdfsProvider for AgentPlugin {
             RelPath::Root => Ok(store
                 .list()
                 .into_iter()
-                .map(|r| node_of(&summary_of(&r, &store)))
+                .map(|r| bundle_node(&r, &store))
                 .collect()),
             // 条目即容器：子类别清单（提示词 / 技能 / MCP）
             RelPath::Item(id) => {
@@ -273,25 +282,16 @@ impl VdfsProvider for AgentPlugin {
                 let spec = section_of(seg)
                     .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
                 let entries = store
-                    .list_entities(id)
-                    .map_err(|e| VdfsError::not_found(format!("列出子实体失败：{e}")))?;
+                    .list_items(id)
+                    .map_err(|e| VdfsError::not_found(format!("列出子条目失败：{e}")))?;
                 Ok(entries
                     .into_iter()
                     .filter(|e| e.kind == spec.kind)
-                    .map(|e| {
-                        let mut it = EntitySummary::new(&e.kind, e.path.clone(), e.name.clone());
-                        it.status = "active".to_string();
-                        it.extra = serde_json::json!({
-                            "container": id,
-                            "priority": e.priority,
-                            "size": e.size,
-                        });
-                        container_node(spec, &it)
-                    })
+                    .map(|e| container_node(spec, &e.path, &e.name, Some(e.size), e.priority))
                     .collect())
             }
             RelPath::SubItem { .. } => Err(VdfsError::not_found(format!(
-                "子实体是叶子节点，没有子项：{path}"
+                "子条目是叶子节点，没有子项：{path}"
             ))),
         }
     }
@@ -300,23 +300,19 @@ impl VdfsProvider for AgentPlugin {
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
         match parse_rel_path(path) {
-            // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
+            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             RelPath::Root => Ok(VdfsNode::dir("", LABEL, self.root_access())),
             RelPath::Item(id) => {
                 let id = id_of(id);
                 let r = store
                     .get(&id)
                     .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}「{id}」")))?;
-                Ok(node_of(&summary_of(&r, &store)))
+                Ok(bundle_node(&r, &store))
             }
             RelPath::Section { seg, .. } => section_of(seg)
                 .map(section_node)
                 .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}"))),
-            RelPath::SubItem { id, seg, item } => {
-                let spec = section_of(seg)
-                    .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
-                Ok(container_node(spec, &container_item_of(&store, id, item)?))
-            }
+            RelPath::SubItem { id, item, .. } => Ok(Self::container_item(&store, id, item)?.0),
         }
     }
 
@@ -324,38 +320,24 @@ impl VdfsProvider for AgentPlugin {
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
         match parse_rel_path(path) {
-            // 子实体：bundle 沙箱内读取，正文随摘要下发
-            RelPath::SubItem { id, seg, item } => {
-                let _ = section_of(seg)
-                    .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
-                let it = container_item_of(&store, id, item)?;
-                let text = it
-                    .extra
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        VdfsError::invalid(format!("该子实体没有可读的文本内容：{path}"))
-                    })?
-                    .to_string();
-                Ok(VdfsContent::text("", text))
+            // 子条目：bundle 沙箱内读取正文
+            RelPath::SubItem { id, item, .. } => {
+                let (node, content) = Self::container_item(&store, id, item)?;
+                let _ = node;
+                Ok(VdfsContent::text(path, content))
             }
             RelPath::Root | RelPath::Section { .. } => Err(VdfsError::invalid(format!(
                 "该路径是目录，不可读取内容：{path}"
             ))),
+            // bundle 条目本身：读的是**概览**（详情表单 `binding: info` 的输入）
             RelPath::Item(id) => {
                 let id = id_of(id);
                 let r = store
                     .get(&id)
                     .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}「{id}」")))?;
-                let item = summary_of(&r, &store);
-                let value = item
-                    .extra
-                    .get("config")
-                    .cloned()
-                    .unwrap_or_else(|| item.extra.clone());
-                let text = serde_json::to_string_pretty(&value)
-                    .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
-                Ok(VdfsContent::text("", text).with_mime("application/json"))
+                let text = serde_json::to_string_pretty(&bundle_info(&r, &store))
+                    .map_err(|e| VdfsError::internal(format!("概览序列化失败：{e}")))?;
+                Ok(VdfsContent::text(path, text).with_mime("application/json"))
             }
         }
     }
@@ -375,17 +357,19 @@ impl VdfsProvider for AgentPlugin {
                     "{LABEL}整包只能导入到挂载根下：{path}"
                 )));
             }
-            let bytes = crate::symbio_core::entities::decode_b64(
-                content.b64.as_deref().unwrap_or_default(),
-            )
-            .map_err(|e| VdfsError::invalid(e.0))?;
+            let bytes = vdfs_service::decode_b64(content.b64.as_deref().unwrap_or_default())
+                .map_err(|e| VdfsError::invalid(e.0))?;
             let r = store
                 .import(&bytes, true)
                 .map_err(|e| VdfsError::invalid(format!("导入失败：{e}")))?;
             notify_change(
-                ENTITY_AGENT,
+                PLUGIN_AGENT,
                 &r.id,
-                if r.replaced { "updated" } else { "created" },
+                if r.replaced {
+                    VFDS_CHANGE_UPDATED
+                } else {
+                    VFDS_CHANGE_CREATED
+                },
             );
             return Ok(VdfsWriteResponse {
                 path: r.id,
@@ -393,7 +377,7 @@ impl VdfsProvider for AgentPlugin {
                 etag: None,
             });
         }
-        // 子实体写回（bundle 沙箱内写入）；新建时按 `path_hint` 落位
+        // 子条目写回（bundle 沙箱内写入）；新建时按 `path_hint` 落位
         if let RelPath::SubItem { id, seg, item } = parse_rel_path(path) {
             let spec = section_of(seg)
                 .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
@@ -418,17 +402,21 @@ impl VdfsProvider for AgentPlugin {
                 text
             };
             let existed = store
-                .list_entities(id)
-                .map_err(|e| VdfsError::not_found(format!("列出子实体失败：{e}")))?
+                .list_items(id)
+                .map_err(|e| VdfsError::not_found(format!("列出子条目失败：{e}")))?
                 .iter()
                 .any(|e| e.path == target);
             store
-                .write_entity(id, &target, text)
-                .map_err(|e| VdfsError::invalid(format!("写入子实体失败：{e}")))?;
+                .write_item(id, &target, text)
+                .map_err(|e| VdfsError::invalid(format!("写入子条目失败：{e}")))?;
             notify_change(
-                ENTITY_AGENT,
+                PLUGIN_AGENT,
                 path,
-                if existed { "updated" } else { "created" },
+                if existed {
+                    VFDS_CHANGE_UPDATED
+                } else {
+                    VFDS_CHANGE_CREATED
+                },
             );
             return Ok(VdfsWriteResponse {
                 path: path.to_string(),
@@ -448,21 +436,21 @@ impl VdfsProvider for AgentPlugin {
         }
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
-        // 子实体删除（bundle 沙箱内删除）
+        // 子条目删除（bundle 沙箱内删除）
         if let RelPath::SubItem { id, seg, item } = parse_rel_path(path) {
             let _ = section_of(seg)
                 .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
             store
-                .delete_entity(id, item)
-                .map_err(|e| VdfsError::invalid(format!("删除子实体失败：{e}")))?;
-            notify_change(ENTITY_AGENT, path, "deleted");
+                .delete_item(id, item)
+                .map_err(|e| VdfsError::invalid(format!("删除子条目失败：{e}")))?;
+            notify_change(PLUGIN_AGENT, path, VFDS_CHANGE_DELETED);
             return Ok(());
         }
         let id = id_of(path);
         store
             .delete(&id)
             .map_err(|e| VdfsError::invalid(format!("删除{LABEL}失败：{e}")))?;
-        notify_change(ENTITY_AGENT, &id, "deleted");
+        notify_change(PLUGIN_AGENT, &id, VFDS_CHANGE_DELETED);
         Ok(())
     }
 
@@ -475,44 +463,37 @@ impl VdfsProvider for AgentPlugin {
         action: &str,
         _payload: Option<&serde_json::Value>,
     ) -> VdfsResult<VdfsActionResult> {
-        match action {
-            VFDS_ACTION_EXPORT => {
-                if !matches!(parse_rel_path(path), RelPath::Item(_)) {
-                    return Err(VdfsError::invalid(format!(
-                        "「导出」只对{LABEL}条目可用：{path}"
-                    )));
-                }
-                let host = host_ctx(ctx)?;
-                let store = Self::store_of(&host);
-                let id = id_of(path);
-                let bytes = store
-                    .export(&id)
-                    .map_err(|e| VdfsError::not_found(format!("导出失败：{e}")))?;
-                let filename = format!("{id}.zip");
-                let data =
-                    serde_json::to_value(crate::symbio_core::schemas::entities::EntityExport {
-                        id: id.clone(),
-                        filename: filename.clone(),
-                        b64: crate::symbio_core::entities::encode_b64(&bytes),
-                    })
-                    .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
-                Ok(VdfsActionResult {
-                    action: VFDS_ACTION_EXPORT.to_string(),
-                    ok: true,
-                    message: format!("已打包「{filename}」"),
-                    data: Some(data),
-                })
-            }
-            _ => Err(VdfsError::NotImplemented),
+        if action != VFDS_ACTION_EXPORT {
+            return Err(VdfsError::NotImplemented);
         }
+        if !matches!(parse_rel_path(path), RelPath::Item(_)) {
+            return Err(VdfsError::invalid(format!(
+                "「导出」只对{LABEL}条目可用：{path}"
+            )));
+        }
+        let host = host_ctx(ctx)?;
+        let store = Self::store_of(&host);
+        let id = id_of(path);
+        let bytes = store
+            .export(&id)
+            .map_err(|e| VdfsError::not_found(format!("导出失败：{e}")))?;
+        let pack = vdfs_service::VdfsPack::new(&id, &bytes);
+        let data = serde_json::to_value(&pack)
+            .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
+        Ok(VdfsActionResult {
+            action: VFDS_ACTION_EXPORT.to_string(),
+            ok: true,
+            message: format!("已打包「{}」", pack.filename),
+            data: Some(data),
+        })
     }
 
     async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
-        watch_changes(ENTITY_AGENT, path, sink).await
+        watch_changes(PLUGIN_AGENT, path, sink).await
     }
 
     async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        unwatch_changes(ENTITY_AGENT, path).await
+        unwatch_changes(PLUGIN_AGENT, path).await
     }
 }
 
@@ -520,7 +501,7 @@ impl VdfsProvider for AgentPlugin {
 mod tests {
     use super::*;
 
-    /// 挂载点内相对路径至多切三段：条目 / 子类别 / 子实体
+    /// 挂载点内相对路径至多切三段：条目 / 子类别 / 子条目
     #[test]
     fn rel_path_parses_three_segments() {
         assert!(matches!(parse_rel_path(""), RelPath::Root));
@@ -561,5 +542,15 @@ mod tests {
     fn id_of_strips_presentation_extension() {
         assert_eq!(id_of("demo"), "demo");
         assert_eq!(id_of("demo.agent"), "demo");
+    }
+
+    /// 子类别可新建的类型由路径模板推导（`prompts/<name>.md` → `md`）
+    #[test]
+    fn section_node_declares_new_type_from_path_hint() {
+        let prompt = section_node(section_of("提示词").unwrap());
+        assert_eq!(prompt.new_types.len(), 1);
+        assert_eq!(prompt.new_types[0].ext, "md");
+        // 条目名 = 展示标题缺省同源（描述为空时不硬造）
+        assert_eq!(prompt.name, "提示词");
     }
 }

@@ -12,10 +12,10 @@
  * 三类选项：
  * - `invoke`：调用特定后端服务（`action.endpoint`）；
  * - `sub`：子选项列表（级联；`children` 内联或经 `parent` 懒加载）；
- * - `form`：自动化表单（复用 `DetailDefinition` / `DetailForm`）。
+ * - `form`：自动化表单（复用 `DetailDefinition` 这套宿主方言）。
  */
 
-import type { DetailDefinition } from './entities'
+import type { DetailDefinition } from './vdfs'
 
 /** 选项节点类型 */
 export type OptionType = 'invoke' | 'sub' | 'form'
@@ -74,7 +74,7 @@ export interface OptionNode {
   /** 是否可选（false = 只读展示） */
   enabled?: boolean
   action?: OptionAction
-  /** form：表单定义（与实体详情表单同一套 schema） */
+  /** form：表单定义（与资源详情表单同一套 schema） */
   form?: DetailDefinition
   /** form：表单初始数据（字段名 → 值） */
   data?: Record<string, unknown>

@@ -239,7 +239,7 @@ impl Plugin for AgentPlugin {
         // ── VDFS 挂载点（`.vdfs/agent`）──
         // 本插件自身就是 provider：bundle 由 BundleStore 自管目录（工作区级 +
         // 全局级双层），列 / 读 / 写（整包导入）/ 删 / 导出 直接由
-        // `impl VdfsProvider for AgentPlugin` 承载（见 `super::entities`）。
+        // `impl VdfsProvider for AgentPlugin` 承载（见 `super::vdfs`）。
         {
             let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
             tool_visitor

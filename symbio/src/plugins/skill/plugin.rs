@@ -118,14 +118,15 @@ impl SkillPlugin {
 // ==================== VDFS 挂载点（`.vdfs/skill`） ====================
 //
 // 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
-// 写 / 删 / 动作的语义都在这里表达（不再经实体层与适配器）。
-// 跨插件共享的存储原语（写盘 / 删除 / 导入 / 导出）走 `symbio_core::entities`
-// 的自由函数——它们只做 `EntityStore` 的落盘；SKILL.md 的摘要解析与表单映射
-// 是 skill 的差异部分。
+// 写 / 删 / 动作的语义都在这里表达。
+//
+// 存储走 `providers::vdfs_service::DirVdfs`（一个技能 = 一个目录，主文件
+// `SKILL.md`）：条目寻址、原子写、mtime、整包 zip、变更广播都在集中实现里，
+// 本模块只剩 **skill 特有的两件事**——SKILL.md 的摘要解析（frontmatter →
+// 标题/摘要/config）与写前的表单校验。
 
-use crate::symbio_core::entities::{self, EntitySummary, ENTITY_SKILL};
-use crate::symbio_core::providers::{categories, manifests};
-use crate::symbio_core::vdfs::{from_plugin_error, host_ctx, unwatch_changes, watch_changes};
+use crate::providers::vdfs_service::DirVdfs;
+use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
     VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VFDS_ACTION_EXPORT, VFDS_EXT_FORM,
@@ -134,58 +135,46 @@ use crate::symbio_core::vdfs_provider::{
 
 const LABEL: &str = "技能";
 
-/// 路径末段 → 条目 id（去掉 `.<kind>` 呈现扩展名）
+/// 技能主文件（Markdown，**必须按纯文本落盘**）
+const MANIFEST: &str = "SKILL.md";
+
+/// 磁盘底座（每次现取，跟随 homedir 切换）
+fn store() -> DirVdfs {
+    DirVdfs::for_category(PLUGIN_SKILL, MANIFEST).with_label(LABEL)
+}
+
+/// 路径末段 → 条目 id（去掉 `.skill` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    let base = path.rsplit('/').next().unwrap_or(path);
-    base.strip_suffix(&format!(".{ENTITY_SKILL}"))
-        .unwrap_or(base)
-        .to_string()
+    crate::providers::vdfs_service::entry::id_of(path, PLUGIN_SKILL)
 }
 
 /// 导入的**建议名**：末段再去掉 `.zip`（新建地址是 `<name>.zip`）
 fn import_name_of(path: &str) -> String {
-    let base = id_of(path);
-    match base.strip_suffix(".zip") {
-        Some(stem) if !stem.is_empty() => stem.to_string(),
-        _ => base,
-    }
+    crate::providers::vdfs_service::entry::pack_name_of(path, PLUGIN_SKILL)
 }
 
-/// 摘要 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
-fn node_of(item: &EntitySummary) -> VdfsNode {
-    let mut n = VdfsNode::file(&item.id, item.name.clone(), VdfsAccess::READ_WRITE);
-    n.kind = ENTITY_SKILL.to_string();
+/// 主文件原文 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
+///
+/// 摘要优先 YAML frontmatter（name / description），无 frontmatter 时回落到旧的
+/// 标题 / Description 行解析；主文件缺失（`raw = None`）时降级为以 id 呈现的
+/// 占位条目——列表不得因单个坏条目而少一项或多失败。
+fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
+    let mut n = VdfsNode::file(id, id, VdfsAccess::READ_WRITE);
+    n.kind = PLUGIN_SKILL.to_string();
     n.ext = Some(VFDS_EXT_FORM.to_string());
     n.schema = serde_json::to_value(super::detail::skill_detail_definition()).ok();
-    n.status = item.status.clone();
-    n.description = item.description.clone().or_else(|| item.summary.clone());
-    n.updated_at = item.updated_at;
-    n
-}
+    n.status = "active".to_string();
+    let Some(text) = raw else { return n };
 
-/// 从 SKILL.md 解析摘要：优先 YAML frontmatter（name / description），
-/// 无 frontmatter 时回落到旧的标题/Description 行解析
-fn summarize_of(id: &str, manifest: Option<&str>) -> EntitySummary {
-    let mut it = EntitySummary::new(ENTITY_SKILL, id, id);
-    it.status = "active".to_string();
-    let Some(text) = manifest else {
-        return it;
-    };
-
-    // frontmatter 路径：名称/摘要 + 完整 config（DetailForm 预填用）
+    // frontmatter 路径：名称 / 摘要
     if let Some((yaml, _body)) = super::detail::parse_skill_md(text) {
         if let Some(name) = yaml.get("name").and_then(|v| v.as_str()) {
-            it.name = name.to_string();
+            n.title = name.to_string();
         }
         if let Some(desc) = yaml.get("description").and_then(|v| v.as_str()) {
-            it.summary = Some(desc.to_string());
+            n.description = Some(desc.to_string());
         }
-        if let Some(cfg) = super::detail::skill_md_to_config(text) {
-            if let serde_json::Value::Object(ref mut m) = it.extra {
-                let _ = m.insert("config".to_string(), cfg);
-            }
-        }
-        return it;
+        return n;
     }
 
     // 旧格式回落：首行标题 + Description 行
@@ -198,7 +187,7 @@ fn summarize_of(id: &str, manifest: Option<&str>) -> EntitySummary {
         .trim_start_matches('#')
         .trim();
     if !first_line.is_empty() {
-        it.name = first_line.to_string();
+        n.title = first_line.to_string();
     }
     let mut summary = cleaned
         .lines()
@@ -216,9 +205,9 @@ fn summarize_of(id: &str, manifest: Option<&str>) -> EntitySummary {
         summary = cleaned.chars().take(120).collect();
     }
     if !summary.is_empty() {
-        it.summary = Some(summary);
+        n.description = Some(summary);
     }
-    it
+    n
 }
 
 /// 表单 manifest → SKILL.md 全文（写盘前的校验/规范化）。
@@ -226,9 +215,9 @@ fn summarize_of(id: &str, manifest: Option<&str>) -> EntitySummary {
 /// 强制 BUG-SR6（名称 == 目录 id）与 BUG-SR7（description ≥ 10 字符），
 /// 错误在保存时即给出（而非下次加载时）。zip 上传路径不经过本函数。
 ///
-/// 返回**纯文本**而不是 JSON 值：SKILL.md 是 Markdown，必须原样落盘
-/// （见 `entities::write_entity_text`）——包成 JSON 字符串会让落盘内容带上
-/// 引号与转义的 `\n`，读回来 frontmatter 就解析不出来了。
+/// 返回**纯文本**而不是 JSON 值：SKILL.md 是 Markdown，必须原样落盘——包成
+/// JSON 字符串会让落盘内容带上引号与转义的 `\n`，读回来 frontmatter 就解析不
+/// 出来了（`DirVdfs::write_json` 因此对本资源禁用）。
 fn validate_manifest(id: &str, manifest: &serde_json::Value) -> Result<String, PluginError> {
     super::detail::manifest_to_skill_md(id, manifest)
 }
@@ -260,13 +249,13 @@ impl VdfsProvider for SkillPlugin {
     }
 
     fn icon(&self) -> Option<&str> {
-        Some(ENTITY_SKILL)
+        Some(PLUGIN_SKILL)
     }
 
     /// 根下可新建两类：表单新建（最小 SKILL.md）+ 整包导入（zip）
     fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![
-            VdfsNewType::new(ENTITY_SKILL, LABEL)
+            VdfsNewType::new(PLUGIN_SKILL, LABEL)
                 .with_description(format!("新建{LABEL}（先落一份默认配置，随后在详情里完善）")),
             VdfsNewType::new(VFDS_EXT_ZIP, format!("{LABEL}包"))
                 .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
@@ -274,88 +263,68 @@ impl VdfsProvider for SkillPlugin {
         ]
     }
 
-    async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
         if !path.is_empty() {
             return Err(VdfsError::not_found(format!(
                 "{LABEL}是叶子资源，没有子项：{path}"
             )));
         }
-        let host = host_ctx(ctx)?;
-        let ids = entities::list_entity_ids(&host, categories::SKILL)
-            .await
-            .map_err(from_plugin_error)?;
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            let body = entities::read_manifest(&host, categories::SKILL, manifests::SKILL, &id)
-                .await
-                .ok();
-            out.push(node_of(&summarize_of(&id, body.as_deref())));
-        }
-        Ok(out)
+        Ok(store()
+            .entries()
+            .await?
+            .iter()
+            .map(|e| node_of(&e.id, e.raw.as_deref()))
+            .collect())
     }
 
-    async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
+    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
         if path.is_empty() {
             return Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST));
         }
-        let host = host_ctx(ctx)?;
-        let id = id_of(path);
-        let content = entities::read_manifest(&host, categories::SKILL, manifests::SKILL, &id)
-            .await
-            .map_err(from_plugin_error)?;
-        Ok(node_of(&summarize_of(&id, Some(&content))))
+        let e = store().entry(&id_of(path)).await?;
+        Ok(node_of(&e.id, e.raw.as_deref()))
     }
 
-    async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
+    /// 详情读的是**表单能填的形状**（config JSON），不是 Markdown 原文——
+    /// 原文由 `read(<id>/SKILL.md)` 这一真实地址给出（目录型天然支持）。
+    async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
         if path.is_empty() {
             return Err(VdfsError::invalid(format!(
                 "该路径是目录，不可读取内容：{path}"
             )));
         }
-        let host = host_ctx(ctx)?;
-        let id = id_of(path);
-        let content = entities::read_manifest(&host, categories::SKILL, manifests::SKILL, &id)
-            .await
-            .map_err(from_plugin_error)?;
-        let item = summarize_of(&id, Some(&content));
-        let value = item
-            .extra
-            .get("config")
-            .cloned()
-            .unwrap_or_else(|| item.extra.clone());
-        let text = serde_json::to_string_pretty(&value)
+        let text = store().read_text(&id_of(path)).await?;
+        let value = super::detail::skill_md_to_config(&text).unwrap_or_else(
+            || serde_json::json!({ "name": id_of(path), "description": "", "content": text }),
+        );
+        let body = serde_json::to_string_pretty(&value)
             .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
-        Ok(VdfsContent::text("", text).with_mime("application/json"))
+        Ok(VdfsContent::text(path, body).with_mime("application/json"))
     }
 
     async fn write(
         &self,
-        ctx: &VdfsContext,
+        _ctx: &VdfsContext,
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        let host = host_ctx(ctx)?;
         if path.is_empty() {
             return Err(VdfsError::invalid(format!(
                 "{LABEL}整包只能导入到挂载根下：{path}"
             )));
         }
+        let s = store();
         // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）
         if content.binary {
-            let bytes = entities::decode_b64(content.b64.as_deref().unwrap_or_default())
-                .map_err(|e| VdfsError::invalid(e.0))?;
-            let resp = entities::import_zip_to_entity(
-                &host,
-                ENTITY_SKILL,
-                categories::SKILL,
-                &import_name_of(path),
-                &bytes,
+            let bytes = crate::providers::vdfs_service::decode_b64(
+                content.b64.as_deref().unwrap_or_default(),
             )
-            .await
-            .map_err(from_plugin_error)?;
+            .map_err(|e| VdfsError::invalid(e.0))?;
+            let name = import_name_of(path);
+            let created = s.import_pack(&name, &bytes).await?;
             return Ok(VdfsWriteResponse {
-                path: resp.id,
-                created: resp.created,
+                path: name,
+                created,
                 etag: None,
             });
         }
@@ -366,79 +335,60 @@ impl VdfsProvider for SkillPlugin {
             serde_json::from_str::<serde_json::Value>(content.as_text().unwrap_or_default())
                 .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
         };
-        // SKILL.md 是 Markdown：走**纯文本**写盘原语，不能被 JSON 序列化
+        // SKILL.md 是 Markdown：走**纯文本**写入，不能被 JSON 序列化
         let normalized = validate_manifest(&id, &manifest).map_err(from_plugin_error)?;
-        let resp = entities::write_entity_text(
-            &host,
-            ENTITY_SKILL,
-            categories::SKILL,
-            manifests::SKILL,
-            &id,
-            &normalized,
-        )
-        .await
-        .map_err(from_plugin_error)?;
+        let created = s.write_text(&id, &normalized).await?;
         Ok(VdfsWriteResponse {
             path: id,
-            created: resp.created,
+            created,
             etag: None,
         })
     }
 
-    async fn delete(&self, ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
+    async fn delete(&self, _ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
         if path.is_empty() {
             return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
         }
-        let host = host_ctx(ctx)?;
+        let s = store();
         let id = id_of(path);
         // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
-        let _ = entities::read_manifest(&host, categories::SKILL, manifests::SKILL, &id)
-            .await
-            .map_err(from_plugin_error)?;
-        entities::delete_entity_dir(&host, ENTITY_SKILL, categories::SKILL, &id)
-            .await
-            .map_err(from_plugin_error)?;
-        Ok(())
+        s.entry(&id).await?;
+        s.remove(&id).await
     }
 
     async fn action(
         &self,
-        ctx: &VdfsContext,
+        _ctx: &VdfsContext,
         path: &str,
         action: &str,
         _payload: Option<&serde_json::Value>,
     ) -> VdfsResult<VdfsActionResult> {
-        match action {
-            VFDS_ACTION_EXPORT => {
-                if path.is_empty() {
-                    return Err(VdfsError::invalid(format!(
-                        "「导出」只对{LABEL}条目可用：{path}"
-                    )));
-                }
-                let host = host_ctx(ctx)?;
-                let id = id_of(path);
-                let export = entities::export_entity_zip(&host, categories::SKILL, &id)
-                    .await
-                    .map_err(from_plugin_error)?;
-                let data = serde_json::to_value(&export)
-                    .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
-                Ok(VdfsActionResult {
-                    action: VFDS_ACTION_EXPORT.to_string(),
-                    ok: true,
-                    message: format!("已打包「{}」", export.filename),
-                    data: Some(data),
-                })
-            }
-            _ => Err(VdfsError::NotImplemented),
+        if action != VFDS_ACTION_EXPORT {
+            return Err(VdfsError::NotImplemented);
         }
+        if path.is_empty() {
+            return Err(VdfsError::invalid(format!(
+                "「导出」只对{LABEL}条目可用：{path}"
+            )));
+        }
+        let id = id_of(path);
+        let pack = store().export_pack(&id).await?;
+        let data = serde_json::to_value(&pack)
+            .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
+        Ok(VdfsActionResult {
+            action: VFDS_ACTION_EXPORT.to_string(),
+            ok: true,
+            message: format!("已打包「{}」", pack.filename),
+            data: Some(data),
+        })
     }
 
     async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
-        watch_changes(ENTITY_SKILL, path, sink).await
+        watch_changes(PLUGIN_SKILL, path, sink).await
     }
 
     async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        unwatch_changes(ENTITY_SKILL, path).await
+        unwatch_changes(PLUGIN_SKILL, path).await
     }
 }
 
@@ -601,19 +551,39 @@ mod tests {
     }
 
     /// 摘要优先 YAML frontmatter：`name` 作标题、`description` 作摘要，
-    /// 且完整 config 随节点下发（详情页表单预填用）
+    /// 且详情定义随节点 `schema` 下发（详情页表单预填靠 `read`）
     #[test]
-    fn summarize_prefers_frontmatter() {
+    fn node_prefers_frontmatter() {
         let md = "---\nname: 演示\ndescription: 一个用于演示的技能\n---\n\n正文\n";
-        let it = summarize_of("demo", Some(md));
-        assert_eq!(it.name, "演示");
-        assert_eq!(it.summary.as_deref(), Some("一个用于演示的技能"));
-        assert!(it.extra.get("config").is_some());
+        let n = node_of("demo", Some(md));
+        assert_eq!(n.name, "demo");
+        assert_eq!(n.title, "演示");
+        assert_eq!(n.description.as_deref(), Some("一个用于演示的技能"));
+        assert_eq!(n.ext.as_deref(), Some(VFDS_EXT_FORM));
+        assert!(n.schema.is_some(), "详情定义必须随节点下发");
+    }
+
+    /// 无 frontmatter 的旧格式回落：首行标题 + Description 行
+    #[test]
+    fn node_falls_back_to_legacy_heading() {
+        let md = "# 旧技能\n\n**Description** 旧格式描述\n";
+        let n = node_of("old", Some(md));
+        assert_eq!(n.title, "旧技能");
+        assert_eq!(n.description.as_deref(), Some("旧格式描述"));
+    }
+
+    /// 主文件缺失（坏条目）降级为 id 占位，不阻断整张列表
+    #[test]
+    fn node_degrades_to_the_id_when_manifest_unreadable() {
+        let n = node_of("broken", None);
+        assert_eq!(n.name, "broken");
+        assert_eq!(n.title, "broken");
+        assert!(n.description.is_none());
     }
 
     /// 回归：**写进去的必须能被读回来**（写读同源）。
     ///
-    /// SKILL.md 是 Markdown，只能走纯文本写盘。若把 manifest 当 JSON 值写入，
+    /// SKILL.md 是 Markdown，只能走纯文本落盘。若把 manifest 当 JSON 值写入，
     /// 落盘会变成 `"---\nname: ...\n"`（外层引号 + `\n` 被转义成字面两字符），
     /// 而 `parse_skill_md` 以 `strip_prefix("---\n")` 起手 ⇒ 必然失败：
     /// 保存报成功、文件却是坏的，下次加载解析不出 frontmatter。
@@ -631,9 +601,9 @@ mod tests {
             &md[..md.len().min(12)]
         );
         // 关键断言：落盘文本经同一份摘要解析能还原出填写的字段
-        let it = summarize_of("demo", Some(&md));
-        assert_eq!(it.name, "demo");
-        assert_eq!(it.summary.as_deref(), Some("一个用于演示的技能描述"));
+        let n = node_of("demo", Some(&md));
+        assert_eq!(n.title, "demo");
+        assert_eq!(n.description.as_deref(), Some("一个用于演示的技能描述"));
     }
 
     /// 新建链路：最小清单同样必须产出合法 SKILL.md（否则一新建就是坏文件）
@@ -642,17 +612,40 @@ mod tests {
         let m = new_manifest("demo");
         let md = validate_manifest("demo", &m).expect("新建的最小清单必须合法");
         assert!(md.starts_with("---\n"));
-        let it = summarize_of("demo", Some(&md));
-        assert_eq!(it.name, "demo");
-        assert!(it.summary.is_some());
+        let n = node_of("demo", Some(&md));
+        assert_eq!(n.title, "demo");
+        assert!(n.description.is_some());
     }
 
-    /// 无 frontmatter 的旧格式回落：首行标题 + Description 行
-    #[test]
-    fn summarize_falls_back_to_legacy_heading() {
-        let md = "# 旧技能\n\n**Description** 旧格式描述\n";
-        let it = summarize_of("old", Some(md));
-        assert_eq!(it.name, "旧技能");
-        assert_eq!(it.summary.as_deref(), Some("旧格式描述"));
+    /// 集中实现接上真实磁盘：写 → 列 → 读 → 删全程往返
+    /// （`read` 给出**表单形状**，Markdown 原文走条目内部地址）
+    #[tokio::test]
+    async fn store_roundtrip_through_the_dir_impl() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = DirVdfs::at(tmp.path().join("plugins/skill"), PLUGIN_SKILL, MANIFEST);
+        let ctx = VdfsContext::empty();
+
+        let md = validate_manifest("demo", &new_manifest("demo")).unwrap();
+        s.write_text("demo", &md).await.unwrap();
+
+        let entries = s.entries().await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            node_of(&entries[0].id, entries[0].raw.as_deref()).title,
+            "demo"
+        );
+        assert_eq!(s.read_text("demo").await.unwrap(), md);
+        assert!(
+            s.list(&ctx, "").await.unwrap()[0].is_dir(),
+            "条目内部可下钻"
+        );
+        assert_eq!(
+            s.read(&ctx, "demo/SKILL.md").await.unwrap().as_text(),
+            Some(md.as_str()),
+            "原文地址读到的就是落盘原文"
+        );
+
+        s.remove("demo").await.unwrap();
+        assert!(s.entries().await.unwrap().is_empty());
     }
 }

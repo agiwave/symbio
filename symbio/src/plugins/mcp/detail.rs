@@ -12,7 +12,7 @@
 //! 新建态派生目录 id，`validate_manifest` 时丢弃），校验与规范化在
 //! `validate_manifest`（plugin.rs）完成。
 
-use crate::symbio_core::schemas::entities::{
+use crate::symbio_core::schemas::detail::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailSection,
 };
@@ -75,11 +75,11 @@ pub fn mcp_detail_definition() -> DetailDefinition {
                 fields: vec![
                     DetailField {
                         required: true,
-                        placeholder: Some("例如：github（即实体目录名）".into()),
+                        placeholder: Some("例如：github（即条目目录名）".into()),
                         ..field(
                             "name",
                             "名称",
-                            "用于生成实体目录名（ID），不写入 server.json",
+                            "用于生成条目目录名（ID），不写入 server.json",
                             "text",
                         )
                     },

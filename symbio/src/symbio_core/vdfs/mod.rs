@@ -7,7 +7,7 @@
 //! ```text
 //! symbio_core/vdfs_provider.rs   纯接口：VdfsProvider trait + 域类型
 //! symbio_core/vdfs/host.rs       symbio 桥：上下文注入 + 错误翻译 + 变更广播
-//! symbio_core/entities.rs        存储原语：写盘 / 删除 / 导入 / 导出（自由函数）
+//! providers/vdfs_service/        存储实现：单文件 / 目录 / 内存三种拓扑
 //! plugins/vdfs/protocol.rs       线路信封：vdfs/* 请求响应 + 协议路径常量
 //! plugins/vdfs/host.rs           访问层：取「.vdfs 服务者」+ 翻译操作 + 树遍历 + 事件投递
 //! plugins/composite/vdfs.rs      拓扑：包含子目录列表的 provider（子目录 = 子插件名）

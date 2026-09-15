@@ -33,10 +33,21 @@ import {
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
-import { readVdfs } from '@/services/vdfs'
-import { vdfsSessionAddr } from '@/schemas/vdfs'
+import { readVdfs, statVdfs } from '@/services/vdfs'
+import {
+  VFDS_CHANGE_APPENDED,
+  VFDS_CHANGE_CREATED,
+  VFDS_CHANGE_DELETED,
+  VFDS_CHANGE_UPDATED,
+  VFDS_ROOT,
+  VFDS_SESSION_DIR,
+  VFDS_STATUS_WORKING,
+  vdfsBase,
+  vdfsJoin,
+  vdfsSessionAddr,
+} from '@/schemas/vdfs'
 import { setLastWorkdir, getLastWorkdir, callPlugin } from '@/services/plugin'
-import { publishEntityChangedLocal, subscribeEntityChanged } from '@/services/eventBus'
+import { publishVdfsChangedLocal, subscribeVdfsChanged } from '@/services/eventBus'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/services/model'
@@ -82,7 +93,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   const lastUsedWorkdir = ref<string | null>(null)
 
   // ===== 新建模式（无 id 详情）：首条消息发送时才真正创建会话（懒创建） =====
-  // 新建态不创建实体、列表不更新；用户发送首条消息时 Session editor 才调
+  // 新建态不创建节点、清单不更新；用户发送首条消息时 Session 渲染器才调
   // createSession 真正建会话，并把首条消息排队在此。ModelChatPanel 挂载后
   // 消费（按 id 匹配），完成"建会话 + 发首条消息"的闭环。
   /** 排队中的首条消息：文本 + 可选的图片附件（草稿→会话转移，object URL 所有权一并转移，不可 revoke） */
@@ -391,7 +402,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 把一次 `session.metadata` 补丁镜射到本地（后端 `session/update` 的浅合并语义）。
    *
    * 供**级联选项机制**使用：选项选择统一经 `worker/session/update` 落库，
-   * 本方法让前端无需等待实体事件往返即可收敛本地视图（`activeWorkdir`、
+   * 本方法让前端无需等待资源变更事件往返即可收敛本地视图（`activeWorkdir`、
    * mode/risk 回退取值、最近使用目录）。它不含选项语义——只是 session/update
    * 的本地镜像，故任何带 metadata 补丁的调用方都可复用。
    */
@@ -525,7 +536,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
     // 后端 created 事件（invoke_update is_new 判定）随后到达，各订阅方幂等收敛
-    publishEntityChangedLocal('session', 'created', id, titles.value[id])
+    publishVdfsChangedLocal({ path: vdfsSessionAddr(id), change: VFDS_CHANGE_CREATED })
 
     return id
   }
@@ -574,7 +585,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
     // 后端 deleted 事件随后到达，各订阅方幂等收敛
-    publishEntityChangedLocal('session', 'deleted', id)
+    publishVdfsChangedLocal({ path: vdfsSessionAddr(id), change: VFDS_CHANGE_DELETED })
   }
 
   /**
@@ -703,7 +714,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 经 VDFS 读取整份转写（会话叶子的内容是一份 JSON 文档）。
    *
    * 文档形状由后端 `session_content` 决定（`{ id, title, metadata, messages, updated_at }`）；
-   * 这里只取 `messages`，其余字段由会话清单（`.vdfs/session`）与实体机制负责。
+   * 这里只取 `messages`，其余字段由会话清单节点（`.vdfs/session/<id>`）承载。
    */
   async function fetchTranscript(id: string): Promise<ChatMessage[]> {
     const content = await readVdfs(vdfsSessionAddr(id))
@@ -873,49 +884,75 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   // ---- helpers ----
 
-  // ===== 实体生命周期事件 → 侧栏列表同步（后端消息模式） =====
+  // ===== 会话节点的 VDFS 变更 → 侧栏清单同步（后端消息模式） =====
   //
-  // 列表同步双模式约定：
-  // - 后端消息模式（本订阅）：后端增删改实体 → publish_entity_changed →
-  //   此处收敛同步（跨窗口一致的唯一事实源）。deleted 本地即时移除；
-  //   created 防抖重拉（合并风暴 + 收敛服务端真相）。
+  // 清单同步双模式约定：
+  // - 后端消息模式（本订阅）：后端增删改节点 → `notify_change`（唯一的 `vdfs` 频道）
+  //   → 此处收敛同步（跨窗口一致的唯一事实源）。载荷是**粗粒度**的（只有 path +
+  //   change，不带快照），所以：deleted 本地即时移除、created 防抖重拉、
+  //   updated 重读该节点。
   // - 前端模式（乐观更新）：本 store 的 createSession/deleteSession 已直接
-  //   变更本地 list，并经 publishEntityChangedLocal 以同构载荷即时通知
+  //   变更本地 list，并经 publishVdfsChangedLocal 以同构载荷即时通知
   //   其他页面（如工作台清单），不等事件往返；后端事件随后幂等收敛。
-  // 作用域 parentId: null = 仅顶层会话：子会话（归属父会话）事件不进侧栏，
-  // 父会话详情的子会话清单将来按 parent_id=<父id> 订阅。
+  // 作用域 directChildren = 只看会话叶子节点（`.vdfs/session/<id>`）：子会话
+  // （`.vdfs/session/<id>/子会话/…`）与转写列表项的变更不进侧栏清单。
   let listRefreshTimer: ReturnType<typeof setTimeout> | null = null
-  subscribeEntityChanged(
-    'session',
-    (e) => {
-      if (e.change === 'deleted') {
-        removeSessionLocal(e.id)
+  function scheduleListRefresh() {
+    if (listRefreshTimer) clearTimeout(listRefreshTimer)
+    listRefreshTimer = setTimeout(() => {
+      listRefreshTimer = null
+      refreshList().catch((err) => logger.warn('[sessions]', '资源变更触发清单刷新失败', err))
+    }, 800)
+  }
+
+  /**
+   * 重读单个会话节点，把它自述的 status 与标题就地落进清单。
+   *
+   * 运行态（busy / idle）**没有独立事件**——它就是该节点的一次 `updated`，
+   * 因此角标的唯一取值位置是这次 `vdfs/stat`（`status == working` ⇒ 运行中）。
+   * 标题变更（含后端 `orchestrator::ensure_auto_title` 的自动命名）同理走这里：
+   * 一次 stat 换掉一次整表重拉。原 `status_detail` 不再是独立的事件字段
+   * ——节点的自述就是 `description`。
+   */
+  async function syncSessionNode(id: string): Promise<void> {
+    const node = await statVdfs(vdfsSessionAddr(id))
+    if (!node) return
+    const isWorking = node.status === VFDS_STATUS_WORKING
+    const title = typeof node.title === 'string' ? node.title : ''
+    const idx = list.value.findIndex((s) => s.id === id)
+    if (idx >= 0) {
+      const cur = list.value[idx]
+      list.value[idx] = {
+        ...cur,
+        is_working: isWorking,
+        updated_at: node.updated_at ?? cur.updated_at,
+        metadata: title ? { ...(cur.metadata || {}), title } : cur.metadata,
+      }
+    }
+    if (title) titles.value[id] = title
+    putStatus(id, { is_working: isWorking })
+  }
+
+  subscribeVdfsChanged(
+    { prefix: vdfsJoin(VFDS_ROOT, VFDS_SESSION_DIR), directChildren: true },
+    (change) => {
+      // 追加型变更只发生在转写列表项上（由 vdfsTranscriptSync 就地应用 delta），
+      // 与会话清单无关——绝不能让流式的每一帧触发一次重拉。
+      if (change.change === VFDS_CHANGE_APPENDED) return
+      const id = vdfsBase(change.path)
+      if (!id) return
+      if (change.change === VFDS_CHANGE_DELETED) {
+        removeSessionLocal(id)
         return
       }
-      if (e.change === 'created') {
-        // 本地乐观插入已覆盖同窗口场景；此处防抖重拉，收敛排序/完整字段
-        if (listRefreshTimer) clearTimeout(listRefreshTimer)
-        listRefreshTimer = setTimeout(() => {
-          listRefreshTimer = null
-          refreshList().catch((err) => logger.warn('[sessions]', '实体事件触发刷新失败', err))
-        }, 800)
+      if (change.change === VFDS_CHANGE_UPDATED) {
+        void syncSessionNode(id)
+        return
       }
-      // updated：**就地消费事件携带的 display_title，不重拉**。
-      //
-      // 后端在标题变更时（含 `orchestrator::ensure_auto_title` 的自动命名）都会发
-      // `updated` + display_title，因此这里直接写 `titles` 与清单项即可——
-      // 元数据类更新（workdir / mode 等）带的标题与现值相同，写一遍无副作用，
-      // 却省掉一次整表重拉。VDFS 侧栏清单另由 `useVdfs` 的导航刷新维护。
-      if (e.title) {
-        titles.value[e.id] = e.title
-        const idx = list.value.findIndex((s) => s.id === e.id)
-        if (idx >= 0) {
-          const cur = list.value[idx]
-          list.value[idx] = { ...cur, metadata: { ...(cur.metadata || {}), title: e.title } }
-        }
-      }
-    },
-    { parentId: null },
+      // created / renamed 等：本地乐观插入已覆盖同窗口场景；
+      // 此处防抖重拉，收敛排序与完整字段。
+      scheduleListRefresh()
+    }
   )
 
   return {

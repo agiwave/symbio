@@ -5,13 +5,12 @@
 
   - 传 railItems → 渲染第一栏（NavRail），rail-header / rail-footer 由宿主注入
     （返回键 / logo / 系统目录入口等宿主件）；
-  - 工作区 = 内置 EntityShell（列表 + 详情），list / detail / empty / meta /
+  - 工作区 = 内置 VdfsShell（列表 + 详情），list / detail / empty / meta /
     header-actions 插槽逐一定向转发。
 
   VDFS 的三栏页面 = VdfsWorkbench 控件（components/vdfs）+ useVdfs 数据逻辑
   （绑定数据地址，自取左栏/中栏/详情）+ 本容器。类别集合一律由后端下发
-  （VDFS 目录节点），前端零硬编码。
-  （原「统一实体页」WorkbenchView 与其状态机 useWorkbench 已于 S5 下线。）
+  （VDFS 目录节点），前端零硬编码（规范：docs/design/vdfs.md）。
 -->
 <template>
   <div class="workbench">
@@ -29,10 +28,10 @@
     </NavRail>
 
     <!-- 工作区（第二/三栏）：content 插槽完全接管（应用外壳模式），
-         否则内置 EntityShell（列表 + 详情，实体页模式），插槽逐一定向转发 -->
+         否则内置 VdfsShell（列表 + 详情，资源页模式），插槽逐一定向转发 -->
     <main class="workbench-content">
       <slot v-if="$slots.content" name="content" />
-      <EntityShell
+      <VdfsShell
         v-else
         :title="title ?? ''"
         :list-width="listWidth"
@@ -48,7 +47,7 @@
         <template v-if="$slots.list" #list><slot name="list" /></template>
         <template v-if="$slots.empty" #empty><slot name="empty" /></template>
         <template v-if="$slots.detail" #detail><slot name="detail" /></template>
-      </EntityShell>
+      </VdfsShell>
     </main>
   </div>
 </template>
@@ -56,16 +55,16 @@
 <script setup lang="ts">
 import NavRail from '@/components/common/NavRail.vue'
 import type { NavRailItem } from '@/components/common/NavRail.vue'
-import EntityShell from '@/components/common/EntityShell.vue'
+import VdfsShell from '@/components/common/VdfsShell.vue'
 
 withDefaults(
   defineProps<{
-    /** 侧边栏类别项（后端注册表下发；不传 = 本页无侧边栏） */
+    /** 侧边栏类别项（后端下发的 VDFS 挂载点清单；不传 = 本页无侧边栏） */
     railItems?: NavRailItem[]
     /** 侧边栏返回键（容器页用） */
     back?: boolean
     backTitle?: string
-    /** —— 以下透传 EntityShell（实体页模式）—— */
+    /** —— 以下透传 VdfsShell（资源页模式）—— */
     title?: string
     listWidth?: number
     hideDefaultNew?: boolean

@@ -18,6 +18,54 @@
 
 ***
 
+## 2026-09-15: 废除 storage_service，资源存储收敛为 VdfsProvider 的三个集中实现
+
+**两套并行的资源访问抽象合并为一套**：上一条目（S16）删掉了「差异集中在一张 trait」的
+适配层，但落盘那一层仍是与 VDFS 并行的私有抽象——磁盘资源用 `EntityStore` 的
+`list_entities` / `read_entity` / `write_entity` 表达，再由每个插件手翻成
+`VdfsNode` / `VdfsContent`。本次把这一层也换成讲 VDFS 的话的实现（决策见
+[DECISIONS.md](./DECISIONS.md) ADR-011，机制定位见
+[design/vdfs.md](./design/vdfs.md) §11 与 §13.4）。
+
+- **删除**：`providers/storage_service`（`StorageService` / `EntityStore` /
+  `EntityStoreError` / `FileEntityStore` / `path_resolver::safe_id`，含一份从未参与
+  编译的孤儿文件 `entity_store.rs`）；`symbio_core/entities.rs` 的 13 个存储原语自由
+  函数与 `EntityError`；`symbio_core/providers/storage.rs`（trait + `categories` /
+  `manifests` 常量，类别段名从此就是插件名 `PLUGIN_*`，主文件名写在各插件内部的
+  `const MANIFEST`）；`symbio_core/schemas/entities.rs` 里的 `EntitySummary` /
+  `EntityUploadResponse` / `EntityExport` 与 `ENTITY_MODEL`…`ENTITY_SETTING` 常量
+  ——该文件收敛为纯 `DetailDefinition` 表单方言模块。
+- **新增** `providers/vdfs_service/`：三个**本身就是 `impl VdfsProvider`** 的集中实现
+  ——`SingleFileVdfs`（一个条目 = 一份主文件，条目内部不外露；消费者 `model`）、
+  `DirVdfs`（一个条目 = 一个目录，可下钻，主文件承载内容；消费者 `skill` / `mcp`）、
+  `MemoryVdfs`（条目只在进程内；消费者 `model` 的 VDFS 清单镜像）。共享的寻址与落盘
+  原语在 `entry.rs`（`category_dir` / `safe_segment` / `entry_dir` / `split_rel` /
+  `id_of` / `pack_name_of` / `Entry` + 读写删），整包 zip / base64 与导出载荷
+  `VdfsPack { id, filename, b64 }` 在 `pack.rs`。**不是新抽象**：没有 trait、没有
+  注册表、没有适配器，差异（呈现、写前校验、写后内存同步）仍在各插件的 `impl` 里由
+  调用点以普通参数传入；也**不走** `create_object` 工厂（不存在第二种实现）。
+- **磁盘布局一个字没改**：仍是 `<homedir>/plugins/<category>/<id>/<manifest>`，三型
+  只是三种访问拓扑，换拓扑不动数据。因此对外**零变化**——地址、`ext`、`schema`、
+  访问位、导出包的线上字段全部原样。
+- **事件通道收敛为一条 `kind = "vdfs"`**：`event_bus.rs` 的 `KIND_ENTITY` 与
+  `publish_entity_changed` / `publish_entity_status` / `try_publish_*` 全部删除。
+  生命周期与运行时状态变化一律经 `vdfs::host::notify_change` 广播，由 provider 的
+  `watch` 经门面补成展示地址后以 `VdfsChangeEvent` 下发。
+  **明确代价**：`notify_change` 只报 `(kind, path, change)` 三元组、不带载荷（不为此
+  扩展 core 协议），故 `created` / `updated` / `deleted` 由消费者**防抖重拉**收敛；
+  带载荷的增益投递只存在于 provider 自己实现的 `watch` 里。
+- **协议层零改动**：`symbio_core/vdfs_provider.rs`（纯接口）与 `plugins/vdfs/*`
+  （协议 / 访问层 / 物理层）本次未修改——`vdfs_service` 是对该接口的实现，不是扩展。
+- **前端连带改动**：`services/eventBus.ts` 的 `KIND_ENTITY` 与实体生命周期 / 状态
+  分支退场，清单与状态角标一律订阅 `kind = 'vdfs'`；资源协议面不变。
+- **文档**：删除废止 stub `design/entity-provider-mechanism.md`（内容并入 `vdfs.md`
+  §13.4 与 ADR-010/011）；`archive/` 两份实体机制档案补终局说明并修失效引用；
+  `vdfs-frontend.md` 新增 S17；`PROTOCOLS.md` 删除「统一实体管理」整节并新增工厂
+  适用边界；`ROUTES.md` 删除 `{plugin}/entities/*` 各节；`DATA_FLOW.md` 资源链路
+  补「落盘在哪一层」一跳；`CONFIGURATION.md` 删除代码中并不存在的 `storage.backend`
+  配置项、改为如实描述各类数据的落盘位置；`SYSTEM_MAP.md` 与 model / home / agent /
+  setting / composite 五个插件 README 同步现状口径。
+
 ## 2026-09-15: 废除实体提供者机制（各插件直连 VDFS）+ 修复 SKILL.md 保存即损坏
 
 **VDFS 收敛终局**：删除 `EntityProvider` trait（20 个钩子）、`provider_registry()` 注册表与

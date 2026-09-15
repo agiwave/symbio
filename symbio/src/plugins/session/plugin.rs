@@ -350,7 +350,7 @@ impl Plugin for SessionPlugin {
             CONFIG_GET => self.invoke_config_get().await?,
             CONFIG_SET => self.invoke_config_set(ctx.clone()).await?,
             // 级联选项机制：会话是选项宿主，根选项列表在全项目收集后一次下发
-            // （子层经 payload.parent 懒加载，与实体机制 list_items 同构）
+            // （子层经 payload.parent 懒加载，与 vdfs/list 的 parent 懒加载同构）
             OPTIONS_LIST => return super::options::handle_list_options(self.as_ref(), ctx).await,
             "heartbeat/trigger" => return self.handle_heartbeat_trigger_oneoff(ctx).await,
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
@@ -408,7 +408,7 @@ crate::submit_object_creator!(PLUGIN_SESSION, SessionPlugin::build, dyn Plugin);
 /// 会话列表一行摘要：最后一条含文本消息的首行（压缩空白、限长 60 字符）。
 ///
 /// 与 [`crate::plugins::session::types::derive_session_title`] 同风格；
-/// 供 EntitySummary.summary（通用字段）驱动列表「实时缩略」预览。
+/// 供会话节点的 `description` 驱动列表「实时缩略」预览。
 fn derive_session_summary(
     messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
 ) -> Option<String> {
@@ -438,8 +438,8 @@ fn derive_session_summary(
 
 /// 会话的通用元信息标签（工作目录名 + 消息数）。
 ///
-/// 实体机制（`extra.meta_tags`）与 VDFS（节点 `attributes.meta_tags`）**共用同一份
-/// 实现**，保证同一会话在两条链路上的列表呈现一致；前端原样渲染，不含语义。
+/// 标签由本函数单点产出，挂在 VDFS 节点的 `attributes.meta_tags` 上，保证同一
+/// 会话在清单与详情里的呈现一致；前端原样渲染，不含语义。
 fn session_meta_tags(s: &Session) -> Vec<String> {
     let mut tags: Vec<String> = Vec::new();
     if let Some(wd) = s
@@ -470,7 +470,7 @@ fn session_meta_tags(s: &Session) -> Vec<String> {
 //   （`new_types`），**新建语义完全由本 provider 自持**——id 由 provider 生成、
 //   路径名作标题、经 `create` 写意图区分「新建」与「覆盖」；
 // - **节点 = 单个会话**：`ext = session` → 前端聊天工作区渲染器（同一份详情实现
-//   同时服务实体机制与 VDFS 机制）；
+//   只服务 VDFS 机制）；
 // - **实时**：会话的任何变更经 [`SessionPlugin::notify_change`] 广播 → `watch`
 //   的转发任务 → VDFS 事件总线，前端列表无需轮询即可收敛。
 //
@@ -478,16 +478,16 @@ fn session_meta_tags(s: &Session) -> Vec<String> {
 
 /// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）。
 ///
-/// 标题 / 摘要 / 状态 / 元信息标签与实体机制的列表呈现**同源**（复用
+/// 标题 / 摘要 / 状态 / 元信息标签与清单呈现**同源**（复用
 /// `display_title`、`derive_session_summary` 与 [`session_meta_tags`]），
-/// 保证同一会话在两条链路上的呈现一致。
+/// 保证同一会话在清单与聊天工作区里的呈现一致。
 ///
 /// 另在 `attributes` 上挂载会话清单所需字段（`message_count` / `metadata` /
 /// `meta_tags`）——它们是**场景数据**，VDFS 只透传；会话清单由此可直接用
-/// `vdfs/list` 承载（见 S8），无需再走 `entities/list`。
+/// `vdfs/list` 一次取全（见 S8）。
 fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
     let mut n = vdfs::VdfsNode::file(&s.id, s.display_title(), vdfs::VdfsAccess::READ_WRITE);
-    n.kind = crate::symbio_core::entities::ENTITY_SESSION.to_string();
+    n.kind = PLUGIN_SESSION.to_string();
     n.ext = Some(vdfs::VFDS_EXT_SESSION.to_string());
     n.status = if is_working {
         vdfs::VFDS_STATUS_WORKING
@@ -519,8 +519,7 @@ fn session_node(s: &Session, is_working: bool) -> vdfs::VdfsNode {
 //   <id>/子会话[/<sub>]    → 子会话清单 / 单个子会话（查看 · 删除）
 //   <id>/工作目录[/<rel>]  → 工作目录树（文件可查看 / 编辑）
 //
-// 该寻址取代原「容器实体页」（`/container/session/<id>/entities`）——同一批
-// 能力改由 VDFS 承载，机制侧零新增概念；场景实现仍复用 `workdir` 与
+// 该寻址取代原「容器页」——同一批能力改由 VDFS 承载，机制侧零新增概念；
 // 场景实现仍复用 `workdir` 与子会话清单，VDFS 是这些能力的唯一入口。
 
 /// 会话内部：转写列表的路径段（同时是展示名）。
@@ -816,27 +815,6 @@ fn message_of<'a>(msgs: &'a [cm::ChatMessage], mid: &str) -> vdfs::VdfsResult<&'
         .ok_or_else(|| vdfs::VdfsError::not_found(format!("消息不存在：{mid}")))
 }
 
-/// 工作目录条目（`EntitySummary`）→ VDFS 节点。
-///
-/// 目录 → 只读（`l`；工作目录不提供新建，与原容器语义一致）；
-/// 文件 → 可读写（`rw`）。`ext` 不显式设置：由文件名推导（`a.md` → `md`），
-/// 渲染器据此分发。
-fn workdir_node(it: &crate::symbio_core::entities::EntitySummary) -> vdfs::VdfsNode {
-    let is_dir = it
-        .extra
-        .get("is_dir")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let name = it.name.clone();
-    if is_dir {
-        vdfs::VdfsNode::dir(name.clone(), name, vdfs::VdfsAccess::LIST)
-    } else {
-        let mut n = vdfs::VdfsNode::file(name.clone(), name, vdfs::VdfsAccess::READ_WRITE);
-        n.size = it.extra.get("size").and_then(|v| v.as_u64());
-        n
-    }
-}
-
 /// 会话内容（转写全文 + 元数据）→ VDFS 文本内容
 fn session_content(session: &super::types::Session) -> vdfs::VdfsResult<vdfs::VdfsContent> {
     let payload = json!({
@@ -880,9 +858,7 @@ fn now_ms() -> i64 {
 impl vdfs::VdfsProvider for SessionPlugin {
     fn label(&self) -> Option<&str> {
         // 标签 / 顺序由本 provider 自持（实体注册表已随 VDFS 收敛下线）
-        Some(
-            "会话",
-        )
+        Some("会话")
     }
 
     fn description(&self) -> Option<&str> {
@@ -950,12 +926,11 @@ impl vdfs::VdfsProvider for SessionPlugin {
             ))),
             VdfsSessionPath::Workdir { id, rel } => {
                 let workdir = self.workdir_of(id).await?;
-                // 目录树场景的实时监听（与实体机制同一套，按会话 id 引用计数）
+                // 目录树场景的实时监听（按会话 id 引用计数）
                 self.workdir_watches.ensure_watch(&workdir, id);
-                let items = super::workdir::list_children(&workdir, Some(rel))
+                super::workdir::list_children(&workdir, Some(rel))
                     .await
-                    .map_err(vdfs::from_plugin_error)?;
-                Ok(items.iter().map(workdir_node).collect())
+                    .map_err(vdfs::from_plugin_error)
             }
         }
     }
@@ -975,7 +950,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 let session = self.session_of(id).await?;
                 let mut n =
                     vdfs::VdfsNode::dir(id, session.display_title(), vdfs::VdfsAccess::LIST);
-                n.kind = crate::symbio_core::entities::ENTITY_SESSION.to_string();
+                n.kind = PLUGIN_SESSION.to_string();
                 Ok(n)
             }
             VdfsSessionPath::Messages { id, mid } => match mid {
@@ -1015,10 +990,9 @@ impl vdfs::VdfsProvider for SessionPlugin {
                         vdfs::VdfsAccess::LIST,
                     ));
                 }
-                let it = super::workdir::read_node(&workdir, rel)
+                super::workdir::read_node(&workdir, rel)
                     .await
-                    .map_err(vdfs::from_plugin_error)?;
-                Ok(workdir_node(&it))
+                    .map_err(vdfs::from_plugin_error)
             }
         }
     }
@@ -1073,7 +1047,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
         path: &str,
         content: &vdfs::VdfsContent,
     ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
-        // 工作目录分支：文件写回（与实体机制同一份实现——路径越界校验 + 落盘）
+        // 工作目录分支：文件写回（与列读同一份实现——路径越界校验 + 落盘）
         match parse_session_path(path)? {
             VdfsSessionPath::Workdir { id, rel } if !rel.is_empty() => {
                 let workdir = self.workdir_of(id).await?;
@@ -1461,12 +1435,9 @@ mod tests {
         let p = SessionPlugin::new(None, SessionConfig::default());
         assert_eq!(p.label(), Some("会话"));
         assert_eq!(p.icon(), Some("session"));
-        // 顺序取自实体注册表（**单一真相源**），使 `.vdfs` 左栏与实体页恒等
-        // （S4 起不再是 provider 自定的 10）
-        assert_eq!(
-            p.order(),
-            1
-        );
+        // 顺序由本 provider 的 order() 自持（**单一真相源**），
+        // 使 `.vdfs` 左栏与详情恒等
+        assert_eq!(p.order(), 1);
         assert_eq!(p.root_access().flags(), "l");
         assert!(!p.root_access().traverse, "会话是叶子，不参与树遍历");
 
@@ -1488,7 +1459,7 @@ mod tests {
     }
 
     /// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）、
-    /// kind / 状态 / 更新时间 / 摘要与实体机制同源
+    /// kind / 状态 / 更新时间 / 摘要与 `session_node` 的单点形状同源
     #[test]
     fn session_node_carries_renderer_ext_and_presentation() {
         let mut s = Session::new("abc");
@@ -1497,7 +1468,7 @@ mod tests {
         let idle = session_node(&s, false);
         assert_eq!(idle.name, "abc");
         assert_eq!(idle.effective_ext().as_deref(), Some("session"));
-        assert_eq!(idle.kind, crate::symbio_core::entities::ENTITY_SESSION);
+        assert_eq!(idle.kind, PLUGIN_SESSION);
         assert_eq!(idle.status, vdfs::VFDS_STATUS_ACTIVE);
         assert_eq!(idle.updated_at, Some(1_700_000_000_000));
         assert_eq!(idle.access.flags(), "rw", "会话可读可写");
@@ -1737,32 +1708,11 @@ mod tests {
         ));
     }
 
-    /// 工作目录条目 → VDFS 节点：目录只读（`l`），文件可读写（`rw`）+ 字节数
-    #[test]
-    fn vdfs_workdir_node_shapes() {
-        use crate::symbio_core::entities::EntitySummary;
-
-        let mut d = EntitySummary::new(workdir::TREE_KIND, "src", "src");
-        if let Value::Object(ref mut m) = d.extra {
-            let _ = m.insert("is_dir".to_string(), json!(true));
-        }
-        let dn = workdir_node(&d);
-        assert!(dn.is_dir());
-        assert_eq!(dn.access.flags(), "l", "工作目录子目录只读");
-
-        let mut f = EntitySummary::new(workdir::TREE_KIND, "README.md", "README.md");
-        if let Value::Object(ref mut m) = f.extra {
-            let _ = m.insert("is_dir".to_string(), json!(false));
-            let _ = m.insert("size".to_string(), json!(42u64));
-        }
-        let file = workdir_node(&f);
-        assert!(!file.is_dir());
-        assert_eq!(file.access.flags(), "rw", "工作目录文件可编辑");
-        assert_eq!(file.size, Some(42));
-    }
+    // 工作目录节点的形状由 `workdir::tree_node` 单点保证（见其单测）：
+    // 目录 `l`、文件 `rw`——本文件不再另设一份转换逻辑，因此无需重复断言。
 
     /// 会话节点自带清单字段（S8）：`message_count` / `metadata` / `meta_tags`
-    /// 挂在 flatten 的 attributes 上，使会话清单无需再走 `entities/list`
+    /// 挂在 flatten 的 attributes 上，使会话清单无需再走一次额外的列接口
     #[test]
     fn vdfs_session_node_carries_list_fields() {
         let mut s = Session::new("abc");

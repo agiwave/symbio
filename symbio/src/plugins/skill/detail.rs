@@ -1,17 +1,17 @@
 //! Skill 详情页定义（definition-driven detail）
 //!
-//! Skill 实体的持久化形态是 `<目录名>/SKILL.md`（YAML frontmatter + Markdown
+//! Skill 条目的持久化形态是 `<目录名>/SKILL.md`（YAML frontmatter + Markdown
 //! body，解析权威在 `super::super::loader::parse_skill_file`）。本模块提供：
 //! - 表单定义：frontmatter 字段 + body 的完整表单（upload 绑定）；
 //! - 双向映射：表单 manifest → SKILL.md（`validate_manifest`，plugin.rs），
-//!   SKILL.md → `extra.config` 预填（`summarize`，plugin.rs）。
+//!   SKILL.md → 表单预填（本模块的 [`skill_md_to_config`]，经 `vdfs/read` 下发）。
 //!
 //! 表单字段键与 frontmatter 键一致（`allowed_tools`/`disable_model_invocation`
 //! 保存时映射为行业键 `allowedTools`/`disable-model-invocation`）。
 //! BUG-SR6 硬约束（目录名 == frontmatter name）由 `manifest_to_skill_md` 强制。
 
-use crate::symbio_core::schemas::entities::{
-    DetailAction, DetailDefinition, DetailField, DetailSection,
+use crate::symbio_core::schemas::detail::{
+    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
 };
 
 fn field(key: &str, label: &str, desc: &str, widget: &str) -> DetailField {
@@ -46,7 +46,7 @@ pub fn skill_detail_definition() -> DetailDefinition {
                         ..field(
                             "name",
                             "名称",
-                            "即实体目录名（ID），保存时必须与目录名一致",
+                            "即条目目录名（ID），保存时必须与目录名一致",
                             "text",
                         )
                     },
@@ -149,7 +149,7 @@ pub fn skill_detail_definition() -> DetailDefinition {
                 id: crate::symbio_core::vdfs_provider::VFDS_ACTION_EXPORT.into(),
                 label: "导出整包".into(),
                 style: "secondary".into(),
-                disabled_when: Some(crate::symbio_core::schemas::entities::DetailCondition {
+                disabled_when: Some(DetailCondition {
                     key: "is_existing".into(),
                     equals: Some(serde_json::json!(false)),
                     ..Default::default()
@@ -167,7 +167,7 @@ pub fn skill_detail_definition() -> DetailDefinition {
                 id: "delete".into(),
                 label: "删除 Skill".into(),
                 style: "icon danger".into(),
-                disabled_when: Some(crate::symbio_core::schemas::entities::DetailCondition {
+                disabled_when: Some(DetailCondition {
                     key: "is_existing".into(),
                     equals: Some(serde_json::json!(false)),
                     ..Default::default()
@@ -278,7 +278,7 @@ pub fn manifest_to_skill_md(
     Ok(format!("---\n{yaml}---\n{body}\n"))
 }
 
-/// SKILL.md → 预填 config（表单字段键；`summarize` 塞进 extra.config）
+/// SKILL.md → 预填 config（表单字段键；`vdfs/read` 把它作为 JSON 正文下发）
 pub fn skill_md_to_config(content: &str) -> Option<serde_json::Value> {
     let (yaml, body) = parse_skill_md(content)?;
     let get_str = |key: &str| -> Option<String> {

@@ -14,6 +14,12 @@
 > 亦已于 2026-09-15 一并删除，见
 > [archive/entity-provider-mechanism.md](./entity-provider-mechanism.md)。）
 >
+> **终局**：连 `EntityStore` / `StorageService` 与 `symbio_core::entities` 那组
+> 存储原语也已于同日一并废除——资源存储现在是「`VdfsProvider` 的三个集中实现」
+> （`providers/vdfs_service`：单文件 / 目录 / 内存，磁盘布局不变）。本文件里的
+> `EntitySummary` / `EntityUploadResponse` / `EntityExport` 等内部形状因此同样不存在：
+> 列表项与详情输入就是 `VdfsNode`，写响应是 `VdfsWriteResponse`，导出载荷是 `VdfsPack`。
+>
 > 本文件仅作**历史参考，不再维护**。文中出现的 `entities/*` 端点、
 > `/entities/:types?` 与 `/container/:kind/:id/entities` 路由、前端页面/组件名
 > （WorkbenchView / EntityTree / EntityDetailPanel / DetailForm 等）均为**当时形态**，
@@ -40,8 +46,9 @@
 > （见 `docs/design/vdfs-frontend.md` §7）。文中出现的前端页面/组件名与
 > `entities/*` 路由均作历史说明。
 关联：`docs/design/open-agent-bundle-spec.md`（OAB 标准）、
-`symbio/src/symbio_core/schemas/entities.rs`（协议权威定义）、
-`symbio/src/symbio_core/entities.rs`（注册表与统一分发）
+`symbio/src/symbio_core/schemas/entities.rs`（协议权威定义，**现已收敛为
+`DetailDefinition` 表单方言模块**）、
+`symbio/src/symbio_core/entities.rs`（注册表与统一分发，**已删除**）
 
 > 本文件只写**规范与机制**。具体实体（会话、模型、设置分区……）如何应用
 > 机制一律属于**范例**（§6），不是机制的组成部分；实例的新增/下线/调整
@@ -72,8 +79,13 @@
 > 其请求/响应结构（`EntitiesList*` / `EntityGetRequest` / `EntityUploadRequest`
 > / `EntityDeleteRequest` / `EntityStatusRequest` / `DetailDefinition*`）已从
 > `schemas/entities.rs` 删除。保留本节是为了说明**机制内部形状**的来历：
-> 列表项仍是 `EntitySummary`，写盘结果仍是 `EntityUploadResponse`，状态仍是
-> `EntityStatusResponse`——它们由 `EntityVdfsAdapter` 直接使用，只是不再经协议。
+> 迁移期列表项曾统一为 `VdfsNode`（原 `EntitySummary`）、写盘结果曾统一为
+> `VdfsWriteResponse`（原 `EntityUploadResponse`）、状态角标曾由 `vdfs/action`
+> 承担（原 `EntityStatusResponse` 与 `test_status` 钩子一同删除）。
+> **终局**：`EntityVdfsAdapter` 与其唯一依赖的 `EntityProvider` 抽象、以及
+> `symbio_core::entities` 那组存储原语，均已随资源存储收敛到
+> `providers/vdfs_service` 而删除——本节的内部形状如今只剩 `DetailDefinition`
+> （VDFS `ext = form` 的宿主方言）。
 
 ### 2.1 注册表 `provider_registry()`
 

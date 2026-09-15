@@ -48,11 +48,7 @@ plugins:
     plugin_provider: telegram
     enabled: false
 
-# 存储配置
-storage:
-  backend: dir                   # dir 或 sqlite
-  path: ~/.symbio/storage        # DirStorage 路径
-  # sqlite_path: ~/.symbio/symbio.db  # SQLite 路径 (backend=sqlite 时)
+# 存储位置：config.yaml **没有** `storage:` 配置项——见下文「资源与数据的落盘位置」
 
 # 嵌入配置 (向量检索)
 embedding:
@@ -65,6 +61,23 @@ logging:
   level: info                    # debug / info / warn / error
   format: pretty                 # pretty / json / compact
 ```
+
+---
+
+## 资源与数据的落盘位置
+
+**没有全局「存储后端」开关**：`config.yaml` 里不存在 `storage.backend` 之类的键，
+也不存在一个统一的存储服务。落盘位置由「谁的数据」决定，各走各的：
+
+| 数据 | 位置 | 由谁决定 |
+|------|------|----------|
+| 插件资源（model / mcp / skill 等） | `<homedir>/plugins/<类别>/<id>/<主文件>` | 类别段名 = 插件名（如 `model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`）；由 `symbio/src/providers/vdfs_service/` 的集中实现读写，**不可配置、无第二种后端** |
+| 会话与其消息 | 会话自己的 store（`SessionStore`），非 `plugins/<类别>/<id>/` 资源布局 | 会话配置项 `store_kind`：`file`（默认）\| `sqlite` \| `memory`；SQLite 后端在会话存储根目录下建 `sessions.db` |
+| Agent bundle | bundle 目录（工作区级 + 全局级双层，`BundleStore` 自管） | 工作区切换，不经 `vdfs_service` |
+| 全局配置 | `<homedir>/config.yaml` | homedir 由前端「系统目录」切换（`home/reload`） |
+
+> 换 homedir 即换一切：`<homedir>` 由 `HomedirRegistry` 现取，资源类别根每次解析时
+> 拼接，因此切换后无需重启即可读到新址的清单（内存镜像随之重建）。
 
 ---
 
@@ -153,7 +166,7 @@ telegram:
 
 > 出站配置（前端连向何处）已不在本表——连接目标由前端"系统目录"切换器统一管理（localStorage 为权威），经 `initGatewayTransport` 决定 native / http 出站，不再持久化于网关插件配置。
 >
-> 只读白名单（精确匹配）：`entities/list`、`entities/get`、`entities/status`、`entities/detail`、`entities/providers`、`session/get_messages`、`config/get`、`home/get_homedir`、`work/get_workspace`，另有 `config/get`、`entities/list`、`entities/get`、`entities/detail` 四个前缀匹配。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
+> 只读白名单（精确匹配）：`vdfs/list`、`vdfs/tree`、`vdfs/stat`、`vdfs/read`、`vdfs/search`、`session/get_messages`、`config/get`、`home/get_homedir`、`work/get_workspace`（另有 `config/get` 前缀匹配）。资源一律经 VDFS，故放行的是它的**读操作**——`vdfs/write` / `delete` / `mkdir` / `move` / `edit` 与节点动作 `vdfs/action` 都不在列；早已下线的 `entities/*` 也不再放行。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
 >
 > **网关自身配置不在白名单内**：`gateway/*` 接口恒走 native（前端不经 HTTP 访问本插件），且 `gateway/config/get` 会返回 `inbound_token`——只读模式下一旦放行即可读走令牌，故 `gateway/config/get` 与 `gateway/config/set` 一律拒绝。
 

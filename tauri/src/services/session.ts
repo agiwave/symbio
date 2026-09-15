@@ -29,8 +29,7 @@ export type { SessionMetadata } from '../schemas/session_meta'
  * `meta_tags`，VDFS 只透传场景字段），故这里把节点直接映射为
  * `SessionListItem`，以便既有 `sessions` store / 对话组件保持兼容。
  *
- * 这是 `entities/list` 在前端的最后一处调用点（S8）——迁走后
- * `services/entities.ts` 已整体删除。
+ * `vdfs/list` 是会话清单的**唯一**读入口：不存在与之并行的第二套清单协议。
  */
 export async function listSessions(): Promise<SessionList.SessionListItem[]> {
   const resp = await listVdfs(vdfsJoin(VFDS_ROOT, 'session'))

@@ -1,12 +1,12 @@
 //! Agent（OAB bundle）详情页定义 —— 只读概览（`info` 绑定）
 //!
-//! 概览字段（版本/来源层级/安装目录）+ 内部实体计数（list_items
+//! 概览字段（版本/来源层级/安装目录）+ 内部条目计数（list_items
 //! 下发的 `count_*`）+ `open-container` / `export` / `delete` 动作。
-//! 「管理内部实体」入口由页面机制
+//! 「管理内部条目」入口由页面机制
 //! 统一渲染（provider 声明 container_kinds 的条目，详情区顶部入口条），
 //! 不属于本定义。
 
-use crate::symbio_core::schemas::entities::{
+use crate::symbio_core::schemas::detail::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
 
@@ -53,7 +53,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
                 ],
             },
             DetailSection {
-                title: Some("内部实体概览".into()),
+                title: Some("内部条目概览".into()),
                 collapsed: false,
                 fields: vec![
                     field("count_prompt", "提示词", "static"),
@@ -67,7 +67,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
         actions: vec![
             // 「浏览内部」入口：bundle 内部（提示词 / 技能 / MCP）在 VDFS 上是
             // 条目同名目录下的子类别（VDFS 容器寻址），
-            // 由页面层 `enter(节点路径)` 进入——取代原容器实体页。
+            // 由页面层 `enter(节点路径)` 进入——取代原容器页。
             DetailAction {
                 id: "open-container".into(),
                 label: "浏览内部".into(),

@@ -361,6 +361,15 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
 
   前端侧配套：`stores/sessions.ts` 的实体 `updated` 分支改为**就地消费**
   事件携带的 `display_title`（写 `titles` 与清单项），不再等重拉。
+
+  **终局（2026-09-15）**：上面的「双发」也只是过渡形态——`kind = "entity"` 频道
+  连同 `publish_entity_changed` / `publish_entity_status` 已整体删除，会话只剩
+  `kind = "vdfs"` 一条变更通道。标题 / 状态一类变化的落地方式因此改为：
+  **该会话节点的一次 `updated`**（session 侧的 `notify_change(sid, "updated")`），
+  前端收到后重读 `vdfs/stat` 取新标题与状态。`notify_change` 不携带 `node`
+  载荷（不为此扩展 core 协议），故这条路径上**没有**「就地消费事件字段」这一说，
+  一律防抖重拉；带载荷的增益投递只存在于 provider 自己实现的 `watch` 里
+  （消息转写的 `appended` + `delta` 就是它）。
 - 前端死文件 `schemas/session_get_messages.ts` 删除（`getSessionMessages` 包装器
   失效后它失去唯一引用）；`session/get_messages` **后端路由保留**——它仍被
   `agent/host/subagent.rs` 用来读父会话历史。
@@ -422,5 +431,7 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
   是一个普通扩展名。
 - [vdfs-frontend.md](./vdfs-frontend.md)：该文件的 S1–S15 记录仍然有效；
   S16–S19 的落地见本文 §6。
-- [entity-provider-mechanism.md](./entity-provider-mechanism.md)：会话实体
-  （`EntityProvider`）与本文的 VDFS 视图是**同一份存储的两个视图**，不存在第二份数据。
+- [vdfs.md](./vdfs.md) §13.4：会话子目录由 `session` 插件自己的 `impl VdfsProvider`
+  提供（清单与消息视图背后是**同一份存储**，不存在第二份数据）。曾经的「会话实体」
+  抽象（`EntityProvider` / `EntityStore`）与其历史形态见
+  [archive/entity-provider-mechanism.md](../archive/entity-provider-mechanism.md)。

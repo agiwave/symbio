@@ -1,5 +1,5 @@
 <!--
-  EntityActions — 实体动作按钮统一渲染件（机制内置，唯一实现）
+  VdfsActions — 节点动作按钮统一渲染件（机制内置，唯一实现）
 
   机制约定（§2.3 统一动作区）：动作 = 图标优先（图标按钮 + tooltip 显示
   动作名 / 进行中文案），无图标映射的动作回落为文字按钮；同一行内图标与
@@ -8,7 +8,7 @@
 
   消费方（全部在详情页内部渲染，页面不得另加外框）：
   - DetailForm（定义驱动：定义动作 + 机制动作注入，同排）；
-  - 自定义 editor（经 mechanism-actions prop 接收，渲染在自己的动作区）；
+  - 自定义渲染器（经 mechanism-actions prop 接收，渲染在自己的动作区）；
   - 通用只读兜底面板（VDFS 下为 VdfsReadonlyDetail）。
 
   busy / disabled 为与 actions 等长的标记数组（按索引对齐，允许同 id
@@ -46,8 +46,8 @@
 </template>
 
 <script setup lang="ts">
-import type { DetailAction } from '@/schemas/entities'
-import { getActionIcon } from '@/registry/entityTypes'
+import type { DetailAction } from '@/schemas/vdfs'
+import { getActionIcon } from '@/registry/vdfsIcons'
 
 const props = defineProps<{
   /** 动作清单（调用方完成条件求值 / 排序 / 注入合并） */

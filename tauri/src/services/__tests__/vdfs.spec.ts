@@ -9,13 +9,14 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn() }))
+vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn(), connectPlugin: vi.fn() }))
 // 日志模块依赖浏览器环境，这里只测透传逻辑，故整体替身
-vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn() } }))
+vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() } }))
 
 import { callPlugin } from '@/services/plugin'
 import { VFDS_ACTION, VFDS_ROOT, VFDS_WRITE, vdfsJoin } from '@/schemas/vdfs'
 import { arrayBufferToBase64, base64ToBytes, runVdfsAction, writeVdfsBinary } from '../vdfs'
+import { vdfsChangeInScope } from '../eventBus'
 
 /** 最近一次插件调用（op + 载荷） */
 function lastCall(): { op: string; payload: Record<string, unknown> } {
@@ -91,5 +92,36 @@ describe('整包导入（vdfs/write 的二进制通道）', () => {
     for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251
     const b64 = arrayBufferToBase64(bytes.buffer)
     expect(Array.from(base64ToBytes(b64))).toEqual(Array.from(bytes))
+  })
+})
+
+/**
+ * 变更订阅的作用域判定 —— VDFS 是唯一频道，「哪一类资源」全靠路径前缀分流。
+ * 判错的后果是**静默漏事件**（该刷新的不刷新），故直接测谓词本身。
+ */
+describe('vdfsChangeInScope（按展示地址前缀分流）', () => {
+  const SESSIONS = vdfsJoin(VFDS_ROOT, 'session')
+
+  it('前缀本身与子树内的变更都算命中', () => {
+    expect(vdfsChangeInScope({ prefix: SESSIONS }, SESSIONS)).toBe(true)
+    expect(vdfsChangeInScope({ prefix: SESSIONS }, `${SESSIONS}/abc`)).toBe(true)
+    expect(vdfsChangeInScope({ prefix: SESSIONS }, `${SESSIONS}/abc/消息/m1`)).toBe(true)
+  })
+
+  it('别人的路径不算命中（前缀必须整段匹配，不是字符串前缀）', () => {
+    expect(vdfsChangeInScope({ prefix: SESSIONS }, vdfsJoin(VFDS_ROOT, 'model/openai'))).toBe(false)
+    expect(vdfsChangeInScope({ prefix: SESSIONS }, '.vdfs/session-templates/x')).toBe(false)
+  })
+
+  it('directChildren 只放行直接子项（会话叶子），挡住更深的区段', () => {
+    const scope = { prefix: SESSIONS, directChildren: true }
+    expect(vdfsChangeInScope(scope, `${SESSIONS}/abc`)).toBe(true)
+    expect(vdfsChangeInScope(scope, `${SESSIONS}/abc/消息/m1`)).toBe(false)
+    // 前缀自身不是「子项」
+    expect(vdfsChangeInScope(scope, SESSIONS)).toBe(false)
+  })
+
+  it('尾部斜杠不影响判定', () => {
+    expect(vdfsChangeInScope({ prefix: `${SESSIONS}/` }, `${SESSIONS}/abc`)).toBe(true)
   })
 })

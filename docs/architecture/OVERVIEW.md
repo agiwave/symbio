@@ -85,7 +85,7 @@ graph TD
 
 | 插件          | 角色           | 关键能力（详见各插件 `plugins/<name>/README.md`）                                                              |
 | ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `home`      | **根容器**      | 持全局配置（`<homedir>/config.yaml`）；仅挂载 `worker` (Composite)，自身终结 `home/*`、`work/*`、`entities/providers`、`save_config` |
+| `home`      | **根容器**      | 持全局配置（`<homedir>/config.yaml`）；仅挂载 `worker` (Composite)，自身终结 `home/*`、`work/*`、`save_config` |
 | `composite` | **动态容器**     | 按配置实例化任意子插件，是"分形"的关键                                                                                              |
 | `agent`     | **认知中心**     | 管理 Agent 人格；会话选定智能体时经 `traverse` 贡献工具与人格 → `plugins/agent/README.md`                                     |
 | `session`   | **会话中心**     | 长连接、消息持久化、历史裁剪；**会话编排的唯一入口**（收集工具、组装提示词、直连 model 单轮网关）→ `plugins/session/README.md`（含六大压缩策略）                       |

@@ -14,7 +14,10 @@
 //!
 //! ## 子模块
 //!
-//! - `storage`：`EntityStore` / `StorageService` 抽象 + 业务常量
+//! 这里只保留**存在第二种实现**的服务抽象。历史上的 `storage`
+//! （`StorageService` / `EntityStore`）已随实体机制一并废除：资源存储的
+//! 唯一机制面是 `VdfsProvider`，其集中实现见 `crate::providers::vdfs_service`
+//! （插件直接组合具体类型，不经工厂查表）。
 //!
 //! ## workdir 无服务端缓存
 //!
@@ -22,7 +25,5 @@
 //! 后端不维护全局"活跃 workdir"缓存，因此不设 `WorkspaceService` 抽象。
 
 mod embedding;
-mod storage;
 
 pub use embedding::{EmbeddingError, EmbeddingService};
-pub use storage::{categories, manifests, EntityStore, EntityStoreError, StorageService};

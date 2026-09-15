@@ -2,7 +2,7 @@
   Toast.vue — 全局浮动消息浮层
 
   全站唯一实例，挂在 MainLayout 中。消费 useToast() 的单例状态，
-  取代原先散落在各实体页的 4 套本地 toast 实现。
+  取代原先散落在各资源页的 4 套本地 toast 实现。
 
   视觉全部令牌化（浅色/深色均正确）：
   - 浮层底色：--surface-overlay

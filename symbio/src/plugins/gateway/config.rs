@@ -49,7 +49,7 @@ impl Default for GatewayConfig {
 /// **资源一律经 VDFS**（`vdfs/<操作>`）：只读放行其**读操作**——
 /// `list`（`.vdfs` 即资源类别清单）/ `tree` / `stat` / `read` / `search`；
 /// 写操作（`write` / `delete` / `mkdir` / `move` / `edit`）与节点动作
-/// （`action`）不在其列。旧的 `entities/*` 资源协议已下线（S11），不再放行。
+/// （`action`）不在其列。
 ///
 /// **网关自身配置不在放行范围内**：`gateway/*` 接口恒走 native（前端不经 HTTP
 /// 访问本插件），且 `gateway/config/get` 会返回 `inbound_token`，一旦放行等于
@@ -98,13 +98,12 @@ mod tests {
         assert!(is_readonly_allowed("home/get_homedir"));
         assert!(is_readonly_allowed("work/get_workspace"));
 
-        // 拒绝：写操作 / 命令执行 / 未知 / 已下线的实体协议
+        // 拒绝：写操作 / 命令执行 / 未知路径
         assert!(!is_readonly_allowed("config/set"));
         assert!(!is_readonly_allowed("session/chat/send"));
         assert!(!is_readonly_allowed("vdfs/write"));
         assert!(!is_readonly_allowed("vdfs/delete"));
         assert!(!is_readonly_allowed("vdfs/action"));
-        assert!(!is_readonly_allowed("entities/list"));
         assert!(!is_readonly_allowed("bogus/path"));
 
         // 拒绝：网关自身配置——`gateway/*` 恒走 native，且 config/get 含 inbound_token。

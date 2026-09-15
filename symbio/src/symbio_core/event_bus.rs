@@ -22,8 +22,12 @@ const PENDING_EVENTS_CAP: usize = 64;
 pub const KIND_SESSION: &str = "session";
 pub const KIND_EXPLORER: &str = "explorer";
 pub const KIND_SYSTEM: &str = "system";
-/// 实体状态实时事件（model / mcp / skill / agent / session 通用）
-pub const KIND_ENTITY: &str = "entity";
+
+// 资源变更**不在本模块设频道**：一切资源的生命周期与状态变化都是 VDFS 变更，
+// 由 `crate::symbio_core::vdfs::host::notify_change` 投递，经 provider 的
+// `watch` 与门面补全地址后以 `kind = "vdfs"` 下发前端（规范 §9）。
+// 历史上并存的 `kind = "entity"` 频道（`publish_entity_changed` /
+// `publish_entity_status`）已随实体机制一并废除。
 
 /// 事件 Bus 全局订阅者容器
 ///
@@ -176,110 +180,6 @@ impl EventBus {
             return entry.drain(..).collect();
         }
         Vec::new()
-    }
-
-    /// 发布一个实体状态变更事件（entity kind）
-    ///
-    /// 各实体插件在状态**运行时变化**（如会话 busy/idle、连接测试结果）时调用，
-    /// 前端 `subscribe({ kind: 'entity' })` 即时刷新列表/详情状态角标。
-    ///
-    /// 无 session 关联，因此**不入回放缓冲**——重连后的最新状态由
-    /// 各 `.vdfs/<kind>` 的初始拉取（`vdfs/list` / `vdfs/read`）兜底。
-    pub async fn publish_entity_status(
-        entity_type: &str,
-        id: &str,
-        status: &str,
-        status_detail: Option<String>,
-    ) {
-        Self::publish(
-            KIND_ENTITY,
-            None,
-            json!({
-                "entity_type": entity_type,
-                "id": id,
-                "status": status,
-                "status_detail": status_detail,
-            }),
-        )
-        .await;
-    }
-
-    /// `publish_entity_status` 的同步版本（用于非异步回调）
-    pub fn try_publish_entity_status(
-        entity_type: &str,
-        id: &str,
-        status: &str,
-        status_detail: Option<String>,
-    ) {
-        Self::try_publish(
-            KIND_ENTITY,
-            None,
-            json!({
-                "entity_type": entity_type,
-                "id": id,
-                "status": status,
-                "status_detail": status_detail,
-            }),
-        );
-    }
-
-    /// 发布一个实体**生命周期变更**事件（entity kind）
-    ///
-    /// 各实体插件在实体被**创建 / 更新 / 删除**时调用（区别于 `publish_entity_status`
-    /// 的运行时状态变化），前端据此即时同步清单（新增项插入、删除项移除、
-    /// 其余防抖重拉），保证详情页操作实时反映到列表。
-    ///
-    /// - `change`: `"created"` | `"updated"` | `"deleted"`
-    /// - `title`: 可选展示名，便于前端做乐观更新（删除移除/新增插入时可直接用）
-    ///
-    /// 实体生命周期变更通知（机制级）。
-    ///
-    /// `parent_id` 为容器归属声明（如子会话的父会话 id）：顶层实体为 `None`。
-    /// 前端订阅端按归属过滤——顶层清单订阅 `parent_id = null`（子会话事件
-    /// 不会误入顶层清单），容器子清单订阅 `parent_id = <容器id>`。
-    ///
-    /// 无 session 关联，因此**不入回放缓冲**——重连后的清单由
-    /// `vdfs/list` 初始拉取兜底。
-    pub async fn publish_entity_changed(
-        entity_type: &str,
-        id: &str,
-        change: &str,
-        title: Option<String>,
-        parent_id: Option<String>,
-    ) {
-        Self::publish(
-            KIND_ENTITY,
-            None,
-            json!({
-                "entity_type": entity_type,
-                "id": id,
-                "change": change,
-                "title": title,
-                "parent_id": parent_id,
-            }),
-        )
-        .await;
-    }
-
-    /// `publish_entity_changed` 的同步版本（用于非异步回调）
-    pub fn try_publish_entity_changed(
-        entity_type: &str,
-        id: &str,
-        change: &str,
-        title: Option<String>,
-        parent_id: Option<String>,
-    ) {
-        Self::try_publish(
-            KIND_ENTITY,
-            None,
-            json!({
-                "entity_type": entity_type,
-                "id": id,
-                "change": change,
-                "title": title,
-                "parent_id": parent_id,
-            }),
-        );
     }
 
     /// 当前订阅者数量（用于调试）

@@ -49,12 +49,14 @@ docs/                            # 系统级文档（跨模块）
 │   ├── PLUGIN_DEVELOPMENT.md    # 插件开发
 │   └── TROUBLESHOOTING.md       # 故障排查
 ├── design/                      # 现行设计规范（只写跨层取舍与不变量）
-│   ├── context-compression-design.md   # 上下文压缩 L0-L6 分层总览
-│   ├── entity-provider-mechanism.md   # 实体提供者机制（已废止，指向 vdfs.md）
-│   ├── http-api-transport.md           # Gateway HTTP/WS 传输层设计
-│   └── open-agent-bundle-spec.md       # OAB 包规范
+│   ├── vdfs.md                          # VDFS 机制规范（权威；资源存储见 §11 / §13.4）
+│   ├── context-compression-design.md    # 上下文压缩 L0-L6 分层总览
+│   ├── http-api-transport.md            # Gateway HTTP/WS 传输层设计
+│   └── open-agent-bundle-spec.md        # OAB 包规范
 ├── CHANGELOG.md                 # 更新日志
-└── archive/                     # 历史归档 (仅供参考，含 implementation-logs/)
+└── archive/                     # 历史归档 (仅供参考，含 implementation-logs/；
+                                 #  已废止的实体机制档案在此：entity-provider-mechanism.md /
+                                 #  entity-management-mechanism.md)
 
 symbio/src/plugins/<plugin>/     # 模块级文档（就近原则）
 └── README.md                    # 插件职责、路由、内部机制（14 个插件全覆盖）

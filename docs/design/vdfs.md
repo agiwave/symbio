@@ -10,7 +10,9 @@
 `symbio/src/plugins/vdfs/fs.rs`（**统一文件系统 `UnifiedFs`：`.vdfs` / 物理地址分流**）、
 `symbio/src/plugins/vdfs/host.rs`（**访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递**）、
 `symbio/src/plugins/vdfs/physical.rs`（**物理层：磁盘真实文件 + 路径守卫**）、
-`symbio/src/plugins/composite/vdfs.rs`（**拓扑：包含子目录列表的 provider**）
+`symbio/src/plugins/composite/vdfs.rs`（**拓扑：包含子目录列表的 provider**）、
+`symbio/src/providers/vdfs_service/`（**宿主实现层：`VdfsProvider` 的三个集中实现**
+——单文件 / 目录 / 内存，§11）
 
 > 本文件只写**规范与机制**。具体子目录（会话、模型、设置分区、工作目录……）
 > 一律属于**范例**（§13），不是机制的组成部分；子目录的增删改不影响本规范的
@@ -466,6 +468,10 @@ for child in children {
      （`kind = "vdfs"`，无会话关联、不入回放缓冲）。
 
   前端 `subscribe({ kind: 'vdfs' })` 按 `path` 前缀自行分流、防抖重拉。
+- **`vdfs::host::notify_change(kind, path, change)` 只报三元组，不携带载荷**：它是
+  provider 侧唯一的广播入口，带不带 `node` / `content` 由 provider 自己的 `watch`
+  决定——**带载荷的增益投递只存在于 provider 自己实现的 `watch` 里**（下表 `created`
+  / `updated` 的可选载荷即由此补上）。经 `notify_change` 进来的变更，消费者只能防抖重拉。
 - **变更词汇**（`VdfsChange::change`，取值唯一，无场景自定义）：
 
   | 取值 | 语义 | 载荷 | 消费者动作 |
@@ -554,6 +560,15 @@ for child in children {
 - **容器**：容器是「目录 + 拓扑」的自然落点——它实现 `VdfsProvider` 并被装配为
   `.vdfs` 的服务者。容器**不必**认识任何具体资源：它只逐子插件收集，
   子目录内部层级由各 provider 的 `list` 表达。
+- **资源存储（`providers/vdfs_service`）**：属于**宿主实现层**（与
+  `providers/embedding` 同层），**不在** §2.1 / §2.2 的纯接口层里——
+  `symbio_core/vdfs_provider.rs` 依旧只有 trait 与域类型，零 `use crate::`。
+  三个实现（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）本身就是**完整的
+  `impl VdfsProvider`**，插件直接组合具体类型，**不走 `create_object` 工厂**
+  （不存在第二种实现，套 `dyn` 只是把一次构造换成一次字符串查表）。
+  它与 VDFS 广播机制的**唯一接触点**是 `symbio_core::vdfs::host` 的
+  `notify_change` / `watch_changes` / `unwatch_changes`；此外它只是一份条目存储
+  （寻址 + 原子写 + zip 整包），不认识任何资源语义（§13.4）。
 - **详情定义**：`DetailDefinition` 从 VDFS 协议中**移出**，降级为 symbio 的
   `schema` 方言，从而不污染开放接口。
 
@@ -596,7 +611,8 @@ for child in children {
 - `read` → 转发目标插件的 `config/get`，返回格式化 JSON 文本。
 - `write` → **先按定义逐字段校验**（必填 / 范围 / 枚举 / 类型 / 条件显隐），
   通过后才转发 `config/set`；失败返回字段级错误。
-- 分区清单是**单一真相源**：实体注册表与 VDFS 资源共用同一份声明。
+- 分区清单是**单一真相源**：`.vdfs/setting` 的子目录内容与各分区的详情定义都由
+  同一份声明派生（不再有独立的实体注册表）。
 
 ### 13.2 组合容器（composite）——包含子目录列表的 provider
 
@@ -657,20 +673,43 @@ for child in children {
 
 - **每个资源插件自己就是 provider**：`session` / `model` / `skill` / `mcp` /
   `agent` / `setting` 各自有一份 `impl VdfsProvider`，注册名 = 插件名。
-  中间不再有 trait 与适配器——原 `EntityProvider` + `EntityVdfsAdapter`
-  两层已删除（理由见 [DECISIONS](../DECISIONS.md) ADR-010「收敛终局」）。
-- **跨插件共用的只剩存储原语**：`symbio_core::entities` 不再定义 trait，只留
-  一组自由函数承载 `EntityStore` 的落盘（`read_manifest` / `list_entity_ids` /
-  `write_entity_manifest` / `delete_entity_dir` / `import_zip_to_entity` /
-  `export_entity_zip`）。校验、摘要、内存同步、容器语义都是各插件的差异部分，
-  留在各自的 `impl` 里。
+  中间不再有 trait 与适配器——**（历史）**曾有的 `EntityProvider` +
+  `EntityVdfsAdapter` 两层，以及其下的 `providers/storage_service`
+  （`StorageService` / `EntityStore`）与 `symbio_core::entities` 那组存储原语，
+  已先后全部删除（理由见 [DECISIONS](../DECISIONS.md) ADR-010「收敛终局」与
+  ADR-011）。
+- **跨插件共用的是 `providers/vdfs_service` 的三个 `VdfsProvider` 集中实现**
+  ——**三种拓扑、一份磁盘布局**（`<homedir>/plugins/<category>/<id>/<manifest>`，
+  因此换拓扑不动数据、换类别不碰协议）：
+
+  | 实现 | 一个条目 = | 条目内部 | 消费者 |
+  |---|---|---|---|
+  | `SingleFileVdfs`（`single_file.rs`） | 一份主文件 | **不外露**（叶子） | `model` |
+  | `DirVdfs`（`dir.rs`） | 一个目录 | 可下钻浏览，主文件承载条目内容 | `skill` / `mcp` |
+  | `MemoryVdfs`（`memory.rs`） | 进程内一条记录 | 无（不落盘） | `model` 的 VDFS 清单镜像 |
+
+  三者共用 `entry.rs` 的条目寻址与落盘原语（`category_dir` / `safe_segment` /
+  `entry_dir` / `split_rel` / `id_of` / `pack_name_of` / `Entry` + 读写删）；
+  zip / base64 与导出载荷 `VdfsPack { id, filename, b64 }` 在 `pack.rs`。
+  **差异（呈现、写前校验、写后内存同步）仍在各插件自己的 `impl` 里**，由调用点
+  以普通 Rust 参数传入——没有新 trait、没有适配器、没有注册表。用哪一型是挂载点
+  在构造时**声明**的（类别段名 = 插件名 = `PLUGIN_*`，主文件名 = 插件内部
+  `const MANIFEST`），不是机制去目录里看出来的。
+- **清单的真相源不止磁盘一种**：`model` 的列表来自内存（`MemoryVdfs` 镜像——启动时
+  从磁盘灌入、写盘成功后回灌，镜像与运行时注册表同一处更新）。内存型与磁盘两型的
+  操作语义同构、走同一条变更广播频道，消费者分不清也不必分清条目住在哪儿。
+- **「manifest 补齐 id」由各插件自己实现**：编辑链路只回纯字段值（id 由路径承载），
+  `model` / `mcp` 各有一份 `with_id`——那是该资源的写入语义，不再是跨插件共享原语。
 - **目录自管的类型自己落盘**：agent bundle 走 `BundleStore`（工作区级 + 全局级
-  双层），直接用 `import` / `export` / `delete`，不经过 EntityStore 原语；
-  其容器子实体（提示词 / 技能 / MCP）以 `<bundle id>/<子类别标签>/<相对路径>`
+  双层），直接用 `import` / `export` / `delete`，**不经 vdfs_service**；
+  其目录内部（提示词 / 技能 / MCP）以 `<bundle id>/<子类别标签>/<相对路径>`
   寻址，子类别用**人读的标签**（`提示词` / `技能` / `MCP`）而非 kind 作路径段
   ——与会话内部的「子会话 / 工作目录」同一口径。
 - **变更广播按类型全局持有**：`vdfs::host::notify_change` / `watch_changes` /
-  `unwatch_changes`。写 / 删的唯一实现与目录自管型 provider 都调 `notify_change`，
-  使订阅方无需轮询；按 `kind` 而非 provider 实例持有，是因为同一 provider 会被
-  多次构造（每次 `traverse` 一份），共享同一广播才能让订阅与投递天然配对。
-- 详见 [vdfs-frontend.md](vdfs-frontend.md) §7 的 S4 / S6 / S7 记录。
+  `unwatch_changes`。落盘的写 / 删（`vdfs_service` 三实现内部）与目录自管型 provider
+  都调 `notify_change`，使订阅方无需轮询；按 `kind` 而非 provider 实例持有，是因为
+  同一 provider 会被多次构造（每次 `traverse` 一份），共享同一广播才能让订阅与投递
+  天然配对。**生命周期与运行时状态变化共用这一条 `kind = "vdfs"` 频道**——曾有第二条
+  `kind = "entity"` 频道（状态角标 / 清单增删各报一次），已整体删除：状态变化同样是
+  该节点的一次 `updated`，前端收到后重读 `vdfs/stat`（§9 的不带载荷那一档）。
+- 详见 [vdfs-frontend.md](vdfs-frontend.md) §7 的 S4 / S6 / S7 与 S17 记录。

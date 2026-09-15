@@ -54,7 +54,7 @@
 
       <template #list>
         <div class="vdfs-list" role="listbox" aria-label="资源列表">
-          <EntityCard
+          <VdfsCard
             v-for="n in items"
             :key="n.path"
             :title="n.title || n.name"
@@ -214,7 +214,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Workbench from '@/components/common/Workbench.vue'
-import EntityCard from '@/components/common/EntityCard.vue'
+import VdfsCard from '@/components/common/VdfsCard.vue'
 import { useVdfs } from '@/composables/useVdfs'
 import { getVdfsRenderer, dirIconOf, resolveVdfsRenderer } from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
@@ -229,7 +229,7 @@ import {
   type VdfsNewType,
   type VdfsNode,
 } from '@/schemas/vdfs'
-import { getEntityIcon, getEntityIconFor } from '@/registry/entityTypes'
+import { getVdfsIcon, getVdfsIconFor } from '@/registry/vdfsIcons'
 
 const props = defineProps<{
   /** 绑定的 vdfs 数据地址（如 `.vdfs` 或 `.vdfs/session/<id>`）；变化 = 整体重载 */
@@ -431,8 +431,8 @@ function badgeKindOf(n: VdfsNode): 'default' | 'primary' | 'success' | 'warn' | 
 function tagsOf(n: VdfsNode): Array<{ label: string; kind?: 'muted' | 'primary' }> {
   const out: Array<{ label: string; kind?: 'muted' | 'primary' }> = []
   if (vdfsAccessOf(n).write) out.push({ label: '可写', kind: 'primary' })
-  // `meta_tags` 是后端决定的类型特有标签（VDFS 只透传，与实体机制的
-  // extra.meta_tags 同口径），前端原样渲染、不含语义（如会话的工作目录名 / 消息数）
+  // `meta_tags` 是后端决定的类型特有标签（VDFS 只透传），
+  // 前端原样渲染、不含语义（如会话的工作目录名 / 消息数）
   const tags = n.meta_tags
   if (Array.isArray(tags)) {
     for (const label of tags) {
@@ -456,14 +456,16 @@ function relativeTime(ts?: number): string {
 }
 
 /**
- * 图标：目录用目录名映射的图标；文件按「kind + 节点名」查项级图标，
+ * 图标：目录用目录名映射的图标；文件按「kind + 项级扩展名」查项级图标，
  * 再回退 kind 级。全部是纯 UI 映射（VDFS 不下发图标）。
+ * 项级标识直接读节点顶层的 `config_type`（后端 flatten 下发），缺省回落节点名。
  */
 function iconOf(n: VdfsNode) {
   if (isVdfsDir(n)) return dirIconOf(n.name) ?? undefined
+  const ext = typeof n.config_type === 'string' && n.config_type ? n.config_type : n.name
   return (
-    getEntityIconFor({ kind: n.kind, config_type: n.name }) ??
-    getEntityIcon(n.kind) ??
+    getVdfsIconFor({ kind: n.kind, config_type: ext }) ??
+    getVdfsIcon(n.kind) ??
     dirIconOf(n.kind) ??
     undefined
   )
