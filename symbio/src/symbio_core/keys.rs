@@ -199,3 +199,21 @@ impl SymbioKey for OptionVisitorKey {
     }
 }
 pub const OPTION_VISITOR: OptionVisitorKey = OptionVisitorKey;
+
+/// 可配置声明收集器 Key —— 第三条收集通道
+/// （能力 = 可调用对象；选项 = 可展示的数据节点；可配置 = 「我有配置文档」这一句话，
+/// 见 `symbio_core::configurable`）
+pub struct ConfigurableVisitorKey;
+impl SymbioKey for ConfigurableVisitorKey {
+    type Value = Arc<dyn crate::symbio_core::ConfigurableVisitor>;
+    fn name(&self) -> &'static str {
+        "configurable_visitor"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "configurable_visitor".to_string()
+    }
+}
+pub const CONFIG_VISITOR: ConfigurableVisitorKey = ConfigurableVisitorKey;

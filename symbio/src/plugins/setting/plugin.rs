@@ -1,6 +1,6 @@
 //! Setting 插件 - 设置管理
 //!
-//! ## 本插件现在只剩「本应用自身的设置」
+//! ## 本插件只有两样东西：自有分区 + 插件配置清单
 //!
 //! 曾经这里挂着六个分区，其中四个（会话 / 本地工具 / 网络工具 / 开放接口）是
 //! **别的插件的配置**：本插件硬编码了它们的插件名与配置路由前缀，读写经
@@ -15,10 +15,22 @@
 //!
 //! 两者都不是「资源」，因此不实现 `read` / `write`；节点的 `ext` 即分区 id，
 //! 前端按 `ext → 渲染器` 的纯 UI 映射回退到各自的专属 editor。
+//!
+//! ## 插件配置清单：列出来，但不代管
+//!
+//! 各插件的配置文档仍归各插件（同一份配置只有一个地址），但用户在设置页也应该
+//! 看得到它们——所以本插件的 `list` 会把**各插件自己交出来的条目**排在自有分区
+//! 之后。条目由 `ConfigurableVisitor` 通道在 `traverse` 广播中收集（见
+//! `symbio_core::configurable`），**不是**本插件去反查插件目录、更不是硬编码清单：
+//!
+//! - 条目自带**真实地址**（`<插件>/PLUGIN.yml`）与呈现定义，所以点开就是那个插件
+//!   的配置表单，读写照旧落在它自己的文件上；
+//! - 本插件只补一个场景标签（`kind = setting`）——列表在哪儿，场景就是哪儿。
 
+use crate::symbio_core::vdfs::host_ctx;
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
-    PluginPayload, PLUGIN_SETTING,
+    PluginPayload, CONFIG_VISITOR, PLUGIN_SETTING,
 };
 use std::sync::Arc;
 
@@ -117,6 +129,36 @@ fn section_node(s: &SectionSpec) -> VdfsNode {
     n
 }
 
+/// 「插件配置」条目：**各插件自己交出来的**（见 `symbio_core::configurable`）。
+///
+/// 条目本身就是那些插件的配置文档——标题、呈现定义、**真实地址**
+/// （`<插件>/PLUGIN.yml`）都由拥有者给出，本插件只按列表口径补一个场景标签
+/// （`kind = setting`，前端据此查图标 `setting:<条目名>`）。
+///
+/// **不代管读写**：条目的地址指向拥有者自己的文件，读 / 写 / 校验照旧走那条路径，
+/// 同一份配置因此只有一个地址。
+///
+/// 声明由容器在广播 `TRAVERSE_AVAILABLE_TOOLS` 时收集并写回请求 ctx
+/// （见 `plugins/composite/vdfs.rs::children_of`），所以这里既不需要反查插件目录，
+/// 也不需要硬编码任何插件名；收集器缺失时（例如容器没参与本次请求）静默为空。
+async fn config_entries(ctx: &VdfsContext) -> Vec<VdfsNode> {
+    let Ok(host) = host_ctx(ctx) else {
+        return Vec::new();
+    };
+    let Some(visitor) = host.get(CONFIG_VISITOR) else {
+        return Vec::new();
+    };
+    visitor
+        .list_configurables()
+        .await
+        .into_iter()
+        .map(|mut n| {
+            n.kind = PLUGIN_SETTING.to_string();
+            n
+        })
+        .collect()
+}
+
 #[async_trait::async_trait]
 impl VdfsProvider for SettingPlugin {
     fn label(&self) -> Option<&str> {
@@ -124,7 +166,7 @@ impl VdfsProvider for SettingPlugin {
     }
 
     fn description(&self) -> Option<&str> {
-        Some("本应用自身的设置（外观 / 关于）。插件配置在各插件自己的挂载点下。")
+        Some("本应用自身的设置，以及各插件配置文档的清单。")
     }
 
     fn order(&self) -> i32 {
@@ -140,13 +182,15 @@ impl VdfsProvider for SettingPlugin {
         VdfsAccess::LIST
     }
 
-    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+    async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
         if !path.is_empty() {
             return Err(VdfsError::not_found(format!(
                 "设置分区是叶子节点，没有子项：{path}"
             )));
         }
-        Ok(SETTING_SECTIONS.iter().map(section_node).collect())
+        let mut items: Vec<VdfsNode> = SETTING_SECTIONS.iter().map(section_node).collect();
+        items.extend(config_entries(ctx).await);
+        Ok(items)
     }
 
     async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
@@ -260,5 +304,57 @@ mod tests {
             p.stat(&vctx(), "session").await,
             Err(VdfsError::NotFound(_))
         ));
+    }
+
+    // ==================== 插件配置清单 ====================
+
+    /// 造一份带可配置声明的请求 ctx（声明通常由容器在广播中收集，这里直接给）
+    async fn ctx_with_configs() -> VdfsContext {
+        use crate::symbio_core::schemas::detail::DetailDefinition;
+        use crate::symbio_core::{
+            entry_of, vdfs::vdfs_context, ConfigFile, ConfigurableVisitor,
+            DefaultConfigurableVisitor, PluginDir, SimpleRequest, CONFIG_VISITOR,
+        };
+
+        let visitor: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
+        visitor
+            .register_configurable(entry_of(&ConfigFile::new(
+                PluginDir::at(std::env::temp_dir(), "web"),
+                "网络工具",
+                DetailDefinition::default(),
+            )))
+            .await;
+
+        let host: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        host.set(CONFIG_VISITOR, visitor);
+        vdfs_context(&host)
+    }
+
+    /// 各插件交出来的配置文档，排在自有分区之后一起列出
+    #[tokio::test]
+    async fn list_appends_declared_plugin_configs() {
+        let p = SettingPlugin;
+        let items = p.list(&ctx_with_configs().await, "").await.unwrap();
+
+        let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["appearance", "about", "web"]);
+
+        let web = &items[2];
+        assert_eq!(web.title, "网络工具");
+        // 地址指向**拥有者自己的文件**：读写不经过本插件，同一份配置只有一个地址
+        assert_eq!(web.path, "web/PLUGIN.yml");
+        // 场景标签换成本列表的 kind（前端据此查图标 `setting:web`）
+        assert_eq!(web.kind, PLUGIN_SETTING);
+        assert_eq!(web.ext.as_deref(), Some("form"));
+        assert!(!web.is_dir(), "条目是文档，不是目录");
+    }
+
+    /// 没有声明通道时只列自有分区——本通道是增益，缺了不影响本插件工作
+    #[tokio::test]
+    async fn list_without_declarations_is_just_the_sections() {
+        let p = SettingPlugin;
+        let items = p.list(&vctx(), "").await.unwrap();
+        let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["appearance", "about"]);
     }
 }

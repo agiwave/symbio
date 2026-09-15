@@ -367,6 +367,19 @@ pub struct VdfsNode {
     /// 内容是否为二进制（文件）
     #[serde(default)]
     pub binary: bool,
+    /// **隐藏属性**：是否在父目录的列表里隐藏（文件 / 目录通用）
+    ///
+    /// 与文件系统的隐藏属性同义，是**机制级的节点属性**——任何节点都可以带，
+    /// 与它是不是目录、属于哪个场景无关（provider 的根也不过是一个目录节点）。
+    ///
+    /// 语义边界只有两条：
+    /// - **列表里不出现**：父目录 `list` 的结果不含它（目录的 `children` 计数同理）；
+    /// - **可达性不受影响**：按路径 `stat` / `read` / `write` / 子树操作一概照常，
+    ///   因此「隐藏」既不是权限，也不是卸载。
+    ///
+    /// 典型用法：没有用户资源、只有一份配置文档的目录不必出现在导航列表里。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
     /// 自描述呈现描述（**宿主方言，VDFS 只透传**）。
     ///
     /// 约定：当 `ext` 命中某个需要结构描述（如表单）的渲染器时，渲染器所需数据
@@ -408,6 +421,7 @@ impl Default for VdfsNode {
             updated_at: None,
             children: None,
             binary: false,
+            hidden: false,
             schema: None,
             new_types: Vec::new(),
             attributes: serde_json::Map::new(),
@@ -561,7 +575,10 @@ pub struct VdfsContent {
     pub create: bool,
 }
 
-/// serde 辅助：`false` 不序列化（保持读取结果的线上形状不变）
+/// serde 辅助：`false` 不序列化（保持线上形状与「缺省即 false」的字段兼容）
+///
+/// 用于 [`VdfsNode::hidden`] 与 [`VdfsContent::create`] 这类**绝大多数情况为
+/// false** 的布尔位——省掉它们能让既有消费者的 JSON 形状一字不变。
 fn is_false(b: &bool) -> bool {
     !*b
 }
@@ -1058,6 +1075,19 @@ pub trait VdfsProvider: Send + Sync + 'static {
     /// 图标名（使用方纯 UI 映射）
     fn icon(&self) -> Option<&str> {
         None
+    }
+
+    /// 自身根节点的**隐藏属性**（缺省不隐藏）
+    ///
+    /// 与 [`root_access`](Self::root_access) / [`root_status`](Self::root_status) /
+    /// [`root_new_types`](Self::root_new_types) 同构：描述 provider 的**根**
+    /// 这一层的元数据，由使用方在合成该目录节点时回填到 [`VdfsNode::hidden`]。
+    ///
+    /// 它不是什么新概念——provider 的根**本来就是一个目录节点**，
+    /// 所以「这个目录在父目录的列表里显示还是隐藏」由这条声明回答，
+    /// 与文件 / 目录的隐藏属性是同一件事（语义见 [`VdfsNode::hidden`]）。
+    fn root_hidden(&self) -> bool {
+        false
     }
 
     /// 自身根的访问位（缺省「可列目录」）

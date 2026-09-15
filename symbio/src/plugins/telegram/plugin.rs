@@ -639,6 +639,8 @@ impl Plugin for TelegramPlugin {
             let me: vdfs::DynVdfsProvider = self.clone();
             visitor.register_vdfs_provider(PLUGIN_TELEGRAM, me).await;
         }
+        // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
+        crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()))
     }
@@ -715,6 +717,10 @@ impl vdfs::VdfsProvider for TelegramPlugin {
 
     fn icon(&self) -> Option<&str> {
         Some("send")
+    }
+
+    fn root_hidden(&self) -> bool {
+        true
     }
 
     /// 根下只有配置文件，不接受新建 / 建目录

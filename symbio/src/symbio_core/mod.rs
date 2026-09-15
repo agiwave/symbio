@@ -2,6 +2,7 @@
 
 mod capability;
 mod capability_error;
+mod configurable;
 pub(crate) mod creator;
 mod error;
 pub mod event_bus;
@@ -34,6 +35,9 @@ pub use option::{
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 pub use capability::{
     Capability, CapabilityCategory, CapabilityMeta, CapabilityVisitor, ToolContextRetention,
+};
+pub use configurable::{
+    announce_configurable, entry_of, ConfigurableVisitor, DefaultConfigurableVisitor,
 };
 pub use error::*;
 pub use homedir::{expand_tilde_path, HomedirRegistry, DEFAULT_HOMEDIR};

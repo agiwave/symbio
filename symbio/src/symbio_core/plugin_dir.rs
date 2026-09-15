@@ -343,6 +343,11 @@ impl ConfigFile {
         &self.dir
     }
 
+    /// 展示标签（如「网络工具」）——节点标题与「可配置声明」共用这一份
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
     pub fn definition(&self) -> &DetailDefinition {
         &self.definition
     }

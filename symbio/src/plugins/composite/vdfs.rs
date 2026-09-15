@@ -40,8 +40,8 @@
 use crate::symbio_core::vdfs::host_ctx;
 use crate::symbio_core::vdfs_provider::*;
 use crate::symbio_core::{
-    CapabilityVisitor, DefaultToolVisitor, InvokeRequestExt, Plugin, CAPABILITY_VISITOR, PATH,
-    TRAVERSE_AVAILABLE_TOOLS,
+    CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor,
+    InvokeRequestExt, Plugin, CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -113,6 +113,19 @@ impl CompositeVdfs {
                 .collect()
         };
 
+        // 可配置声明通道（第三条收集通道）：与 VDFS provider 共用这次广播，但用
+        // **共享收集器**——声明自带目录名，不存在归属歧义，所有子插件注册进同一个。
+        // 收集结果**写回请求 ctx**：同一次请求里稍后被委派的子 provider（如设置插件）
+        // 据此知道「哪些插件有配置文档」，无需自己反查插件目录、也无需硬编码清单。
+        let configs: Arc<dyn ConfigurableVisitor> = match host.get(CONFIG_VISITOR) {
+            Some(v) => v,
+            None => {
+                let v: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
+                host.set(CONFIG_VISITOR, v.clone());
+                v
+            }
+        };
+
         // `(注册它的子插件, 目录名, provider)`——带上归属，重名告警才点得出双方
         let mut collected: Vec<(String, String, DynVdfsProvider)> = Vec::new();
         for (plugin, child) in children {
@@ -120,6 +133,7 @@ impl CompositeVdfs {
             let sub = host.fork();
             sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
             sub.set(CAPABILITY_VISITOR, visitor.clone());
+            sub.set(CONFIG_VISITOR, configs.clone());
 
             if let Err(e) = child.clone().traverse(String::new(), sub).await {
                 crate::plugin_warn!("composite", "vdfs: 子插件遍历失败，已跳过其子目录: {e:?}");
@@ -177,6 +191,8 @@ impl CompositeVdfs {
         n.status = p.root_status().to_string();
         n.description = p.description().map(str::to_string);
         n.new_types = p.root_new_types();
+        // 子目录节点：它的隐藏属性来自子 provider 的根声明
+        n.hidden = p.root_hidden();
         n
     }
 
@@ -239,12 +255,21 @@ impl VdfsProvider for CompositeVdfs {
     async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
         let dirs = self.children_of(ctx).await?;
         match split_first(path) {
-            // 自身目录：子目录清单（合成，无需子 provider 参与）
-            None => Ok(dirs.iter().map(|(d, p)| Self::dir_node(d, p)).collect()),
+            // 自身目录：子目录清单（合成，无需子 provider 参与）。
+            // **隐藏属性在这里生效**：`hidden` 的子目录不出现在清单里，
+            // 但仍留在 `dirs` 中——目录本身照旧存在，按路径照常可寻址（见 `resolve`）。
+            None => Ok(dirs
+                .iter()
+                .map(|(d, p)| Self::dir_node(d, p))
+                .filter(|n| !n.hidden)
+                .collect()),
             Some(_) => {
                 let (dir, p, rel) = Self::resolve(&dirs, path)?;
                 let mut items = p.list(ctx, &rel).await?;
                 fill_node_paths(dir, &rel, &mut items);
+                // 隐藏属性是**机制级**的：任何子树里被标为 hidden 的子节点都不出现，
+                // 不因它来自哪个 provider 而异。
+                items.retain(|n| !n.hidden);
                 Ok(items)
             }
         }
@@ -370,10 +395,11 @@ mod tests {
         InvokeRequest, PluginError, PluginMeta, PluginPayload, SimpleRequest,
     };
 
-    /// 只暴露一个 `a.txt` 的 provider；标签 / 顺序可配，便于断言归属
+    /// 只暴露一个 `a.txt` 的 provider；标签 / 顺序 / 隐藏可配，便于断言归属
     struct LeafProvider {
         label: &'static str,
         order: i32,
+        hidden: bool,
     }
 
     #[async_trait]
@@ -384,6 +410,10 @@ mod tests {
 
         fn order(&self) -> i32 {
             self.order
+        }
+
+        fn root_hidden(&self) -> bool {
+            self.hidden
         }
 
         async fn list(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<Vec<VdfsNode>> {
@@ -400,6 +430,7 @@ mod tests {
         dir: &'static str,
         label: &'static str,
         order: i32,
+        hidden: bool,
     }
 
     #[async_trait]
@@ -425,6 +456,7 @@ mod tests {
                             Arc::new(LeafProvider {
                                 label: self.label,
                                 order: self.order,
+                                hidden: self.hidden,
                             }),
                         )
                         .await;
@@ -457,11 +489,13 @@ mod tests {
                 dir: "alpha",
                 label: "甲",
                 order: 20,
+                hidden: false,
             },
             FakeChild {
                 dir: "beta",
                 label: "乙",
                 order: 10,
+                hidden: false,
             },
         ]);
         let ctx = host_ctx();
@@ -482,6 +516,98 @@ mod tests {
         assert!(root_node.is_dir());
     }
 
+    /// 隐藏属性：`root_hidden` 的子目录不出现在列表里，但**照常可寻址**
+    ///
+    /// 与文件系统的隐藏属性同义——隐藏只影响列表，不是权限也不是卸载。
+    #[tokio::test]
+    async fn hidden_dirs_are_filtered_from_listing_but_still_reachable() {
+        let vdfs = container(vec![
+            FakeChild {
+                dir: "shown",
+                label: "看得见",
+                order: 1,
+                hidden: false,
+            },
+            FakeChild {
+                dir: "masked",
+                label: "看不见",
+                order: 2,
+                hidden: true,
+            },
+        ]);
+        let ctx = host_ctx();
+
+        // 列表里只有未隐藏的那个
+        let root = vdfs.list(&ctx, "").await.unwrap();
+        assert_eq!(
+            root.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+            vec!["shown"]
+        );
+
+        // 但按路径 stat 照常命中，且**如实报告**隐藏属性
+        let n = vdfs.stat(&ctx, "masked").await.unwrap();
+        assert_eq!(n.name, "masked");
+        assert_eq!(n.title, "看不见");
+        assert!(n.hidden, "stat 不该替消费者隐瞒属性");
+
+        // 子树内容也照常可读
+        let items = vdfs.list(&ctx, "masked").await.unwrap();
+        assert_eq!(items[0].path, "masked/a.txt");
+    }
+
+    /// 隐藏属性是机制级的：子 provider 交回来的 `list` 里标了 `hidden` 的条目同样不出现
+    #[tokio::test]
+    async fn hidden_children_from_any_provider_are_filtered() {
+        struct MixedProvider;
+
+        #[async_trait]
+        impl VdfsProvider for MixedProvider {
+            async fn list(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<Vec<VdfsNode>> {
+                let mut masked = VdfsNode::file("secret.txt", "内部", VdfsAccess::READ);
+                masked.hidden = true;
+                Ok(vec![VdfsNode::file("a.txt", "A", VdfsAccess::READ), masked])
+            }
+        }
+
+        struct MixedChild;
+
+        #[async_trait]
+        impl Plugin for MixedChild {
+            fn meta(&self) -> PluginMeta {
+                PluginMeta::new("mixed", "mixed")
+            }
+
+            async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse {
+                Err(PluginError::NotFound("mixed".into()))
+            }
+
+            async fn traverse(
+                self: Arc<Self>,
+                _path: String,
+                ctx: Arc<dyn InvokeRequest>,
+            ) -> InvokeResponse {
+                if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
+                    if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
+                        visitor
+                            .register_vdfs_provider("mixed", Arc::new(MixedProvider))
+                            .await;
+                    }
+                }
+                Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+            }
+        }
+
+        let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+        map.insert("mixed".to_string(), Arc::new(MixedChild));
+        let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
+        let items = vdfs.list(&host_ctx(), "mixed").await.unwrap();
+        assert_eq!(
+            items.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+            vec!["a.txt"],
+            "机制级的隐藏属性与 provider 是谁无关"
+        );
+    }
+
     /// 每个子插件用**独立**收集器：provider 不会张冠李戴
     #[tokio::test]
     async fn per_child_collection_keeps_ownership() {
@@ -490,11 +616,13 @@ mod tests {
                 dir: "alpha",
                 label: "甲",
                 order: 1,
+                hidden: false,
             },
             FakeChild {
                 dir: "beta",
                 label: "乙",
                 order: 2,
+                hidden: false,
             },
         ]);
         let ctx = host_ctx();
@@ -518,6 +646,7 @@ mod tests {
                 dir: "same",
                 label: "甲",
                 order: 2,
+                hidden: false,
             }),
         );
         map.insert(
@@ -526,6 +655,7 @@ mod tests {
                 dir: "same",
                 label: "乙",
                 order: 1,
+                hidden: false,
             }),
         );
         let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
@@ -552,6 +682,7 @@ mod tests {
             dir: "alpha",
             label: "甲",
             order: 1,
+            hidden: false,
         }]);
         let ctx = host_ctx();
 
@@ -584,6 +715,7 @@ mod tests {
             dir: "alpha",
             label: "甲",
             order: 1,
+            hidden: false,
         }]);
         let ctx = host_ctx();
 
@@ -620,11 +752,13 @@ mod tests {
                 dir: "alpha",
                 label: "甲",
                 order: 1,
+                hidden: false,
             },
             FakeChild {
                 dir: "beta",
                 label: "乙",
                 order: 2,
+                hidden: false,
             },
         ]);
         let ctx = host_ctx();

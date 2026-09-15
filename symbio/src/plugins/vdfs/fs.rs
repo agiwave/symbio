@@ -135,9 +135,14 @@ impl UnifiedFs {
     /// `read` / `write` 三处的回填口径因此完全一致：**只翻译已填的，不代填。**
     fn retag(&self, nodes: &mut [VdfsNode]) {
         for n in nodes.iter_mut() {
-            if !n.path.is_empty() {
-                n.path = to_display(&n.path);
-            }
+            Self::retag_one(n);
+        }
+    }
+
+    /// 单个节点的口径翻译（`list` 与 `stat` 共用，避免两处口径漂移）
+    fn retag_one(n: &mut VdfsNode) {
+        if !n.path.is_empty() {
+            n.path = to_display(&n.path);
         }
     }
 }
@@ -171,9 +176,7 @@ impl VdfsProvider for UnifiedFs {
         match route(path)? {
             Half::Virtual(v) => {
                 let mut n = self.virtual_root.stat(ctx, &v).await?;
-                if !n.path.is_empty() {
-                    n.path = to_display(&n.path);
-                }
+                Self::retag_one(&mut n);
                 Ok(n)
             }
             Half::Physical(p) => self.physical.stat(ctx, &p).await,
