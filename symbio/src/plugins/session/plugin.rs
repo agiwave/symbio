@@ -1094,9 +1094,17 @@ impl vdfs::VdfsProvider for SessionPlugin {
             // 新建 / 建目录，故只声明 `l`。
             VdfsSessionPath::Session(id) => {
                 let session = self.session_of(id).await?;
+                // 呈现与清单**同源**（`session_node`）：status / ext / 更新时间 /
+                // 摘要都随节点给出。缺了 `status`，运行态在这条链路上永远读不到
+                // ——`stat` 正是角标的取值点（变更通知 → 重读 `stat` →
+                // `status == working` ⇒ 运行中），缺它会把本地乐观置的工作态
+                // 在下一次变更时立刻改回空闲。
+                // 只有访问位按**目录视图**回答（只给 `l`）：stat 的结果被分发层
+                // 当作「当前目录节点」，其访问位决定是否给出新建入口；
+                // 会话内部不支持新建 / 建目录。
                 let mut n =
-                    vdfs::VdfsNode::dir(id, session.display_title(), vdfs::VdfsAccess::LIST);
-                n.kind = PLUGIN_SESSION.to_string();
+                    session_node(&SessionSummary::of(&session), self.is_working(&id).await);
+                n.access = vdfs::VdfsAccess::LIST;
                 Ok(n)
             }
             VdfsSessionPath::Messages { id, mid } => match mid {
@@ -2024,6 +2032,34 @@ mod tests {
         let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
         assert!(p.list(&vctx(), "abc").await.is_err());
         assert!(p.stat(&vctx(), "abc").await.is_err());
+    }
+
+    /// `<id>` 的 `stat` 是**目录视图**（只给 `l`），但呈现必须与清单同源。
+    ///
+    /// `status` 是运行态的唯一取值点：变更通知 → 重读 `stat` → `status == working`。
+    /// 少了它，前端刚乐观置上的「运行中」会被下一次变更立刻改回空闲。
+    #[tokio::test]
+    async fn vdfs_stat_session_is_dir_view_with_list_shape() {
+        let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+        let mut s = Session::new("abc");
+        s.updated_at = 1_700_000_000;
+        p.save_session(&s).await.unwrap();
+
+        let n = p.stat(&vctx(), "abc").await.unwrap();
+        assert_eq!(n.name, "abc");
+        assert_eq!(n.access.flags(), "l", "目录视图：可列，但不给新建入口");
+        assert!(n.is_dir(), "被当目录访问时的视图");
+
+        // 同源判据：与清单节点逐字段一致（不是另写一份「目录版」形状）
+        let listed = session_node(&SessionSummary::of(&s), false);
+        assert_eq!(n.status, listed.status);
+        assert_eq!(n.ext, listed.ext);
+        assert_eq!(n.updated_at, listed.updated_at);
+        assert_eq!(
+            n.status,
+            vdfs::VDFS_STATUS_ACTIVE,
+            "空闲是显式状态值，不是空串"
+        );
     }
 
     /// 实时：provider 自持的变更广播经 `watch` 的转发任务到达 sink；
