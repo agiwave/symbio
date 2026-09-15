@@ -19,8 +19,9 @@
 //! ## 插件配置清单：列出来，但不代管
 //!
 //! 各插件的配置文档仍归各插件（同一份配置只有一个地址），但用户在设置页也应该
-//! 看得到它们——所以本插件的 `list` 会把**各插件自己交出来的条目**排在自有分区
-//! 之后。条目由 `ConfigurableVisitor` 通道在 `traverse` 广播中收集（见
+//! 看得到它们——所以本插件的 `list` 会把**各插件自己交出来的条目**列出来，
+//! 排在自有分区**之前**（用户真正要动手的是前者）。条目由 `ConfigurableVisitor`
+//! 通道在 `traverse` 广播中收集（见
 //! `symbio_core::configurable`），**不是**本插件去反查插件目录、更不是硬编码清单：
 //!
 //! - 条目自带**真实地址**（`<插件>/PLUGIN.yml`）与呈现定义，所以点开就是那个插件
@@ -182,14 +183,19 @@ impl VdfsProvider for SettingPlugin {
         VdfsAccess::LIST
     }
 
+    /// 清单 = **各插件交出来的配置条目** + 自有分区。
+    ///
+    /// 顺序上插件配置在前、`appearance` / `about` 在后：前者是用户在设置页里真正要
+    /// 动手的东西，后者是应用自身的展示项，排尾不挡路。两段各自保序（插件段按声明
+    /// 注册顺序，分区段按 `SETTING_SECTIONS`）。
     async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
         if !path.is_empty() {
             return Err(VdfsError::not_found(format!(
                 "设置分区是叶子节点，没有子项：{path}"
             )));
         }
-        let mut items: Vec<VdfsNode> = SETTING_SECTIONS.iter().map(section_node).collect();
-        items.extend(config_entries(ctx).await);
+        let mut items = config_entries(ctx).await;
+        items.extend(SETTING_SECTIONS.iter().map(section_node));
         Ok(items)
     }
 
@@ -330,16 +336,16 @@ mod tests {
         vdfs_context(&host)
     }
 
-    /// 各插件交出来的配置文档，排在自有分区之后一起列出
+    /// 各插件交出来的配置文档排在**前**，自有分区垫后
     #[tokio::test]
-    async fn list_appends_declared_plugin_configs() {
+    async fn list_puts_declared_plugin_configs_before_the_sections() {
         let p = SettingPlugin;
         let items = p.list(&ctx_with_configs().await, "").await.unwrap();
 
         let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
-        assert_eq!(names, vec!["appearance", "about", "web"]);
+        assert_eq!(names, vec!["web", "appearance", "about"]);
 
-        let web = &items[2];
+        let web = &items[0];
         assert_eq!(web.title, "网络工具");
         // 地址指向**拥有者自己的文件**：读写不经过本插件，同一份配置只有一个地址
         assert_eq!(web.path, "web/PLUGIN.yml");
