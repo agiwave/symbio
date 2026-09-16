@@ -361,3 +361,6 @@ impl ChatOrchestrator {
         emit_status(channel, root_id.into(), MessageStatus::Completed).await;
     }
 }
+
+#[cfg(test)]
+mod tests;

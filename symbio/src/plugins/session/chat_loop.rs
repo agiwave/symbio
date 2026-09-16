@@ -427,8 +427,4 @@ async fn finish_turn(
 }
 
 #[cfg(test)]
-mod gate_tests;
-#[cfg(test)]
-mod stop_signal_tests;
-#[cfg(test)]
 mod tests;

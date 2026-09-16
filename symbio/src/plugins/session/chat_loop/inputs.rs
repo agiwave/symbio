@@ -250,3 +250,6 @@ pub(crate) async fn apply_compaction(
     );
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,12 +1,12 @@
-//! `chat_loop` 模块的单元测试 —— stop_signal_tests。
+//! `chat_loop/state.rs` 的单元测试 —— 会话上下文 / 请求快照 / 单轮状态 / 闸门结果 /
+//! 退出原因 / 编排器。
 //!
-//! 与实现分文件（约定同 `store/tests.rs` / `chat_session/tests.rs`）：
-//! `chat_loop.rs` 只保留生产代码，测试全部放本文件。
+//! 与实现同目录分文件（约定同 `store/tests.rs`）：测试跟着被测试的实现走。
 //!
-//! Stop 恰好一次的契约测试。
-//!
-//! 走真实 `fire_hook` 链路（自建 recorder 插件，不 mock 内部函数），
-//! 验证显式触发 / 生命周期兜底 / 二者叠加时的幂等性。
+//! 覆盖两部分：
+//! - `TurnRequest::new` 的**请求级默认值快照**（默认值的唯一真源是 `SessionConfig`）；
+//! - `StopSignal` 的**恰好一次**契约——走真实 `fire_hook` 链路（自建 recorder 插件，
+//!   不 mock 内部函数），验证显式触发 / 生命周期兜底 / 二者叠加时的幂等性。
 
 use super::*;
 use crate::symbio_core::{InvokeResponse, PluginMeta, PluginPayload, SimpleRequest};
@@ -178,4 +178,49 @@ async fn signal_without_parent_stays_silent() {
     stop.fire_fallback();
     drop(stop);
     tokio::task::yield_now().await;
+}
+
+// ── 请求级默认值快照（默认值的唯一真源是 SessionConfig）────────────────
+
+#[test]
+fn request_defaults_come_from_session_config() {
+    let defaults = SessionConfig::default();
+    let r = TurnRequest::new(&model_chat::Request::default());
+    assert_eq!(r.auto_compress, defaults.auto_compress);
+    assert_eq!(r.enable_compact_tool, defaults.enable_compact_tool);
+    assert_eq!(r.tool_context_window, defaults.tool_context_window);
+    assert_eq!(r.max_tool_rounds, None, "默认 = 无上限");
+    assert!(r.load_history, "该字段无配置对应项：缺省即加载历史");
+    assert_eq!(r.system_prompt, None);
+    assert_eq!(r.provider_id, None);
+}
+
+#[test]
+fn explicit_request_values_win_over_defaults() {
+    let defaults = SessionConfig::default();
+    let r = TurnRequest::new(&model_chat::Request {
+        max_tool_rounds: Some(7),
+        auto_compress: Some(!defaults.auto_compress),
+        enable_compact_tool: Some(!defaults.enable_compact_tool),
+        tool_context_window: Some(defaults.tool_context_window + 1),
+        system_prompt: Some("p".into()),
+        provider_id: Some("openai".into()),
+        ..Default::default()
+    });
+    assert_eq!(r.max_tool_rounds, Some(7));
+    assert_eq!(r.auto_compress, !defaults.auto_compress);
+    assert_eq!(r.enable_compact_tool, !defaults.enable_compact_tool);
+    assert_eq!(r.tool_context_window, defaults.tool_context_window + 1);
+    assert_eq!(r.system_prompt.as_deref(), Some("p"));
+    assert_eq!(r.provider_id.as_deref(), Some("openai"));
+}
+
+#[test]
+fn load_history_false_is_honored() {
+    // 心跳等无上下文场景：`load_history = false` 必须透传，不能被默认值覆盖。
+    let r = TurnRequest::new(&model_chat::Request {
+        load_history: Some(false),
+        ..Default::default()
+    });
+    assert!(!r.load_history);
 }

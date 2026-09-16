@@ -499,3 +499,6 @@ pub(crate) fn title_from_new_path(path: &str) -> String {
         stem.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests;

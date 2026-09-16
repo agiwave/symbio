@@ -510,3 +510,6 @@ impl SessionPlugin {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
