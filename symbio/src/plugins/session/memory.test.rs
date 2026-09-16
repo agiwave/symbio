@@ -12,10 +12,15 @@ use super::*;
 use crate::symbio_core::MemoryFile;
 use tempfile::TempDir;
 
+/// 测试用会话存储根（只算路径，不落盘）
+fn root() -> std::path::PathBuf {
+    std::path::Path::new("/symbio-test").join(PLUGIN_SESSION)
+}
+
 /// 落位在会话目录下，与 `session.json` / `messages.json` 同级
 #[test]
 fn memory_lives_in_the_session_directory() {
-    let p = memory_path("abc");
+    let p = memory_path(&root(), "abc");
     assert_eq!(p.file_name().unwrap(), AGENTS_FILE);
     assert_eq!(p.parent().unwrap().file_name().unwrap(), "abc");
     assert_eq!(
@@ -31,14 +36,20 @@ fn session_id_is_sanitized_before_joining() {
     // `safe_segment` 只替换分隔符与非法字符（`/ \ : * ? " < > |`）与控制字符，
     // **点号保留**——`..` 因此变成 `_.._`（两侧下划线来自两个 `/`），
     // 整串不再是一个可上溯的路径段。
-    let p = memory_path("../../etc");
+    let p = memory_path(&root(), "../../etc");
     assert_eq!(
         p.parent().unwrap().file_name().unwrap(),
         ".._.._etc",
         "id 里的分隔符被替换，不能穿越目录"
     );
     assert!(
-        p.starts_with(memory_path("x").parent().unwrap().parent().unwrap()),
+        p.starts_with(
+            memory_path(&root(), "x")
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+        ),
         "归一后仍落在 session 存储根之下"
     );
 }
@@ -52,22 +63,22 @@ fn address_is_under_the_session_node() {
 /// 无会话 id = 无作用域（闸门在 [`store`] 一处收口）
 #[test]
 fn no_session_means_no_scope() {
-    let m = store(None, 1024, 256);
+    let m = store(&root(), None, 1024, 256);
     assert!(!m.has_scope());
     assert!(m.path().is_none());
     assert_eq!(m.inject().unwrap(), None, "无会话不注入任何记忆");
 
     for blank in ["", "   "] {
-        assert!(!store(Some(blank), 1024, 256).has_scope());
+        assert!(!store(&root(), Some(blank), 1024, 256).has_scope());
     }
 }
 
 /// 有会话 id 时落位正确，且两道闸门原样交给内核
 #[test]
 fn scope_carries_the_two_gates_into_the_kernel() {
-    let m = store(Some("abc"), 1234, 321);
+    let m = store(&root(), Some("abc"), 1234, 321);
     assert!(m.has_scope());
-    assert_eq!(m.path(), Some(memory_path("abc").as_path()));
+    assert_eq!(m.path(), Some(memory_path(&root(), "abc").as_path()));
     assert_eq!(m.write_max_bytes(), 1234);
     assert_eq!(m.inject_max_bytes(), 321);
     assert_eq!(m.file_name(), AGENTS_FILE);

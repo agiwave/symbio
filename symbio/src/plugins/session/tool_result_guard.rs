@@ -18,7 +18,7 @@
 
 use super::text_split::{split_head_tail, HeadTailSplit};
 use super::tokenizer::{default_tokenizer, Tokenizer};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// 单条工具结果 token 预算（默认 ≈ 32KB 文本），可由调用方按需覆盖。
@@ -41,11 +41,11 @@ pub struct GuardedResult {
 
 /// L0 存档目录：会话标识可用时存入会话目录（跟随会话生命周期，可被历史取回），
 /// 否则退回系统临时目录兜底（与旧行为一致，仅作为无会话上下文时的降级路径）。
-fn resolve_archive_dir(session_id: Option<&str>) -> Option<PathBuf> {
+fn resolve_archive_dir(root: &Path, session_id: Option<&str>) -> Option<PathBuf> {
     if let Some(sid) = session_id {
         if !sid.trim().is_empty() {
             // 路径派生统一走 paths 模块（safe_id / 会话根目录的唯一权威实现）
-            let dir = super::paths::session_subdir(sid, super::paths::TOOL_ARCHIVES_SUBDIR);
+            let dir = super::paths::session_subdir(root, sid, super::paths::TOOL_ARCHIVES_SUBDIR);
             if std::fs::create_dir_all(&dir).is_ok() {
                 return Some(dir);
             }
@@ -74,8 +74,13 @@ fn content_fingerprint(text: &str) -> String {
 /// 文件名 = `tool_{毫秒ts}_{token数}_{内容指纹}.txt`：毫秒 + 指纹双保险，
 /// 修复旧实现"秒级时间戳 + token 数"在同秒同 token 数时互相覆盖的碰撞缺陷。
 /// 写入成功后按修改时间保留最新 [`TOOL_ARCHIVE_KEEP`] 个存档。
-fn archive_full_text(text: &str, token_count: usize, session_id: Option<&str>) -> Option<String> {
-    let dir = resolve_archive_dir(session_id)?;
+fn archive_full_text(
+    text: &str,
+    token_count: usize,
+    session_id: Option<&str>,
+    root: &Path,
+) -> Option<String> {
+    let dir = resolve_archive_dir(root, session_id)?;
     archive_into_dir(text, token_count, &dir)
 }
 
@@ -156,6 +161,7 @@ pub fn guard_tool_result(
     text: &str,
     budget_tokens: usize,
     session_id: Option<&str>,
+    root: &Path,
 ) -> GuardedResult {
     let tok = default_tokenizer();
     let n = tok.count(text);
@@ -168,7 +174,7 @@ pub fn guard_tool_result(
         };
     }
 
-    let archive_path = archive_full_text(text, n, session_id);
+    let archive_path = archive_full_text(text, n, session_id, root);
 
     let omit = n.saturating_sub(budget_tokens);
     // 统一取回协议（P1-2）：三层压缩占位符共用同一格式 —— 「已存档至: <路径> +

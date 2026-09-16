@@ -255,7 +255,8 @@ async fn session_memory_is_injected_verbatim() {
         test_dir(),
     ));
     let id = scratch_id("mem-content");
-    let dir = SessionPlugin::session_storage_dir().join(&id);
+    // 用**实例自己的目录**（装配态的权威来源），不是无实例回退
+    let dir = p.storage_dir().join(&id);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join(crate::symbio_core::AGENTS_FILE),

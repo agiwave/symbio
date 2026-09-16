@@ -54,7 +54,11 @@ fn retrieval_hint_mentions_unified_entry() {
 
 #[test]
 fn session_subdir_appends_under_safe_session_dir() {
-    let dir = session_subdir("a/b", TOOL_ARCHIVES_SUBDIR);
+    let dir = session_subdir(
+        std::path::Path::new("/symbio-test/session"),
+        "a/b",
+        TOOL_ARCHIVES_SUBDIR,
+    );
     let parts: Vec<_> = dir.components().collect();
     // 末两段应为 safe_id 段与子目录段
     assert!(parts.len() >= 2);

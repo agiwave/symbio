@@ -5,9 +5,17 @@
 
 use super::*;
 
+/// 测试用会话存储根（只算路径 / 落临时目录，不碰真实 homedir）
+fn root() -> std::path::PathBuf {
+    // 末段保留 `session`：下条用例断言存档路径含 `session/<id>/tool_archives`
+    std::env::temp_dir()
+        .join("symbio-guard-test")
+        .join("session")
+}
+
 #[test]
 fn short_text_passes_through() {
-    let g = guard_tool_result("hello world", 8192, None);
+    let g = guard_tool_result("hello world", 8192, None, &root());
     assert!(!g.truncated);
     assert_eq!(g.text, "hello world");
 }
@@ -17,7 +25,7 @@ fn long_text_is_truncated_and_keeps_head_tail() {
     // 构造远超预算的多行文本
     let line = "fn main() {\n    println!(\"line\");\n}\n";
     let big = line.repeat(2000);
-    let g = guard_tool_result(&big, 500, None);
+    let g = guard_tool_result(&big, 500, None, &root());
     assert!(g.truncated);
     assert!(g.text.contains("[... 已省略"));
     // 统一取回协议：占位符含存档路径与 vdfs_read 取回入口（P1-2）
@@ -34,7 +42,7 @@ fn long_text_is_truncated_and_keeps_head_tail() {
 #[test]
 fn single_long_line_is_char_truncated() {
     let huge = format!("{{\"entries\":[\"{}\"]}}", "x".repeat(10_000));
-    let g = guard_tool_result(&huge, 300, None);
+    let g = guard_tool_result(&huge, 300, None, &root());
     assert!(g.truncated, "单行超预算应触发存档截断");
     assert!(g.text.contains("vdfs_read"), "占位提示应存在");
     assert!(
@@ -106,7 +114,7 @@ fn prune_keeps_only_latest_files() {
 #[test]
 fn archive_prefers_session_dir_when_session_id_given() {
     let sid = "test_session_guard_01";
-    let g = guard_tool_result(&"line\n".repeat(3000), 500, Some(sid));
+    let g = guard_tool_result(&"line\n".repeat(3000), 500, Some(sid), &root());
     assert!(g.truncated);
     let p = g.archive_path.expect("会话目录可写时应产出存档路径");
     let expected_frag = format!(
@@ -120,9 +128,6 @@ fn archive_prefers_session_dir_when_session_id_given() {
         "存档应位于会话 tool_archives/ 目录: {p}"
     );
     // 收尾：删除该测试会话的存档目录（不影响其他测试）
-    let dir = crate::symbio_core::HomedirRegistry::get()
-        .join("session")
-        .join(sid)
-        .join("tool_archives");
+    let dir = root().join(sid).join("tool_archives");
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -7,6 +7,7 @@
 //! "怎么压"只有一个实现。
 
 use super::*;
+use crate::symbio_core::{dir_from_ctx, PLUGIN_SESSION};
 
 /// 被动自动压缩（L1）：阈值判定 → 切分 → 收益护栏 → 交执行内核。
 ///
@@ -121,7 +122,13 @@ async fn compress_with_snapshot_core(
     // 可回溯原则：压缩前把完整历史转存为 transcript，路径记入快照 meta。
     // 若跳过此步直接 replace_messages，被压掉的历史在物理层"凭空消失"，
     // 旧存档文件成为孤儿，事后无法审计。
-    let transcript_path = save_transcript_archive(&original_messages, context.session.session_id());
+    // 会话存储根 = 本插件自己的目录（装配态由父插件经 `PLUGIN_DIR` 告知）
+    let storage_root = dir_from_ctx(&**ctx, PLUGIN_SESSION);
+    let transcript_path = save_transcript_archive(
+        &original_messages,
+        context.session.session_id(),
+        storage_root.dir(),
+    );
 
     // ── 输入超限死锁预判（日志实证的恶性循环）──────────────────────────
     // LLM 摘要请求的请求体**就携带完整待压缩历史**——若历史本身已超 Provider
@@ -401,12 +408,19 @@ pub(crate) async fn run_context_compact(
 }
 
 /// 压缩前把完整历史转存为 JSON transcript（best-effort）。
-/// 落在会话存储目录内（`<本插件目录>/<id>/transcripts/`，跟随会话生命周期），
+/// 落在会话存储目录内（`<会话存储根>/<id>/transcripts/`，跟随会话生命周期），
 /// 而非系统临时目录（临时目录无 GC、跨会话堆积、脱离会话管理）。
 /// 路径派生统一走 paths 模块（safe_id / 会话根目录的唯一权威实现）。
-fn save_transcript_archive(messages: &[ChatMessage], session_id: &str) -> Option<String> {
-    let root =
-        super::super::paths::session_subdir(session_id, super::super::paths::TRANSCRIPTS_SUBDIR);
+fn save_transcript_archive(
+    messages: &[ChatMessage],
+    session_id: &str,
+    root: &std::path::Path,
+) -> Option<String> {
+    let root = super::super::paths::session_subdir(
+        root,
+        session_id,
+        super::super::paths::TRANSCRIPTS_SUBDIR,
+    );
     std::fs::create_dir_all(&root).ok()?;
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

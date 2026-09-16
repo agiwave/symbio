@@ -18,6 +18,29 @@
 
 ***
 
+## 2026-09-16: session 存储根改为插件实例目录（补完上一条的未竟项）
+
+上一条遗留：`session_storage_dir()` 仍按插件名反推落位。现已收口——**会话存储根 =
+本插件自己的目录**，`paths` / `memory` / `tool_result_guard` 这些按 id 派生路径的
+自由函数一律**由调用方把根传进去**：
+
+- `paths::session_dir(root, id)` / `session_subdir(root, id, subdir)`：只做
+  「id → 目录名」，不认识任何全局布局；
+- `memory::memory_path(root, id)` / `store(root, session_id, …)`、插件的
+  `store_with(root, …)` 同步加 `root`；
+- `guard_tool_result(…, root)` / `resolve_archive_dir(root, …)` /
+  `archive_full_text(…, root)`；调用点 `tool_executor` 与 `compress` 都拿得到
+  `ctx`，经 `dir_from_ctx(ctx, PLUGIN_SESSION)` 取自己的目录；
+- `SessionPlugin::storage_dir(&self)` 成为生产唯一入口；
+  `session_storage_dir()` 降级为 **`#[cfg(test)]` 回退**（无实例时按插件名取常规落位）。
+
+顺带修了一个被掩盖的问题：原有用例把记忆写进**全局回退**目录、却断言插件实例读到
+它——两条路径恰好同值时能通过。现在用例改用 `p.storage_dir()`。
+
+门禁：`gate.mjs --fix` 16/16（647 = 基线）。
+
+***
+
 ## 2026-09-16: 插件落位去掉 `plugins/` 这一层 —— 插件直接并列在系统根下
 
 `<homedir>/plugins/<插件>/` → `<homedir>/<插件>/`。那一层不承载任何语义（既非挂载点、

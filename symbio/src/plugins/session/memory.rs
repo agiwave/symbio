@@ -46,8 +46,8 @@ pub const MEMORY_DESCRIPTION: &str =
     "本会话自己的长期约定（跨轮次保留，不被上下文压缩淘汰）：钉住的结论、约束、待办。";
 
 /// 会话记忆文件：`<会话目录>/AGENTS.md`
-pub fn memory_path(session_id: &str) -> PathBuf {
-    super::paths::session_dir(session_id).join(AGENTS_FILE)
+pub fn memory_path(root: &std::path::Path, session_id: &str) -> PathBuf {
+    super::paths::session_dir(root, session_id).join(AGENTS_FILE)
 }
 
 /// 记忆文件的 **VDFS 展示地址**（下发给模型的可编辑地址）。
@@ -71,6 +71,7 @@ pub fn memory_rel_path(session_id: &str) -> String {
 ///
 /// 两道闸门在此注入：内核只认「上限是多少」，不关心它从哪个配置来。
 pub fn store(
+    root: &std::path::Path,
     session_id: Option<&str>,
     write_max_bytes: usize,
     inject_max_bytes: usize,
@@ -78,7 +79,7 @@ pub fn store(
     let path = session_id
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(memory_path);
+        .map(|id| memory_path(root, id));
     MemoryFile::new(path, write_max_bytes, inject_max_bytes)
 }
 

@@ -10,9 +10,9 @@
 //!   入口。历史教训：同一替换逻辑曾在 store/file.rs、tool_result_guard.rs、
 //!   chat_loop.rs、chat_session.rs 各写一份，行为漂移风险高；收敛到插件内唯一
 //!   之后仍与宿主层并存的第二版，故再上一台阶。
-//! - [`session_dir`] / [`session_subdir`]：基于
-//!   [`SessionPlugin::session_storage_dir`]（同样委托宿主层 `category_dir`）
-//!   派生会话目录与会话内子目录。
+//! - [`session_dir`] / [`session_subdir`]：会话目录与会话内子目录。
+//!   **根由调用方给**（装配态即本插件自己的目录，由父插件经 `PLUGIN_DIR` 告知）——
+//!   本模块只做「id → 目录名」这一段，不认识任何全局布局。
 
 /// 会话内固定子目录名：L0 工具结果全文存档。
 pub const TOOL_ARCHIVES_SUBDIR: &str = "tool_archives";
@@ -38,17 +38,23 @@ pub(crate) fn safe_id(session_id: &str) -> String {
     crate::providers::vdfs_service::entry::safe_segment(session_id)
 }
 
-/// 会话目录：`<本插件目录>/<safe_id>/`
-pub(crate) fn session_dir(session_id: &str) -> std::path::PathBuf {
-    super::plugin::SessionPlugin::session_storage_dir().join(safe_id(session_id))
+/// 会话目录：`<会话存储根>/<safe_id>/`
+///
+/// `root` = 会话存储根（本插件自己的目录）。
+pub(crate) fn session_dir(root: &std::path::Path, session_id: &str) -> std::path::PathBuf {
+    root.join(safe_id(session_id))
 }
 
-/// 会话内子目录：`<本插件目录>/<safe_id>/<subdir>/`
+/// 会话内子目录：`<会话存储根>/<safe_id>/<subdir>/`
 ///
 /// 用于 tool_archives / transcripts 等固定子目录
 ///（常量见本模块 [`TOOL_ARCHIVES_SUBDIR`] / [`TRANSCRIPTS_SUBDIR`]）。
-pub(crate) fn session_subdir(session_id: &str, subdir: &str) -> std::path::PathBuf {
-    session_dir(session_id).join(subdir)
+pub(crate) fn session_subdir(
+    root: &std::path::Path,
+    session_id: &str,
+    subdir: &str,
+) -> std::path::PathBuf {
+    session_dir(root, session_id).join(subdir)
 }
 
 #[cfg(test)]

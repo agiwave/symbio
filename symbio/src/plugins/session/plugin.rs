@@ -289,13 +289,19 @@ impl SessionPlugin {
     /// model / skill / mcp 共用同一条「插件名 → 存储类别」的映射，
     /// 不再各插件手拼一次目录段。
     ///
-    /// ⚠️ 这里是**无实例回退**：`paths` / `memory` / `tool_result_guard` 那些按 id
-    /// 派生路径的自由函数拿不到插件实例，只能走这一条。装配态下插件自己的目录才是
-    /// 权威来源（父插件经 `PLUGIN_DIR` 告知），两者取值相同。
+    /// 装配态下**插件自己的目录**才是权威来源（父插件经 `PLUGIN_DIR` 告知）；
+    /// 按 id 派生路径的自由函数一律由调用方把根传进去（见 `paths::session_dir`）。
     ///
     /// 这是 session 存储目录的**唯一权威位置**，不依赖任何 config 字段。
     /// 切换 homedir 后 worker composite 会整体重建（`home/reload`），
     /// 新插件实例的下一次 `get_store` 因此用新 homedir 下的目录。
+    pub fn storage_dir(&self) -> PathBuf {
+        self.config_file.dir().dir().to_path_buf()
+    }
+
+    /// **仅测试用**的回退：没有插件实例时（自由函数 / 单测）拿不到自己的目录，
+    /// 只能按插件名取常规落位。生产路径一律走 [`Self::storage_dir`]。
+    #[cfg(test)]
     pub fn session_storage_dir() -> PathBuf {
         crate::providers::vdfs_service::entry::category_dir(PLUGIN_SESSION)
     }
@@ -306,7 +312,7 @@ impl SessionPlugin {
             return Ok(Arc::clone(store));
         }
 
-        let store = Arc::new(SessionStore::new(Self::session_storage_dir()));
+        let store = Arc::new(SessionStore::new(self.storage_dir()));
 
         // 一次性迁移：旧布局（消息内联）→ 元数据 / 消息两个文件，并补写清单投影。
         // 放在 store 构造之后、首次发布之前——每个进程只跑一次；读路径本来就有
@@ -374,8 +380,13 @@ impl SessionPlugin {
     ///
     /// **作用域闸门**（id 缺失 / 空 → 无作用域）与**两道容量闸门**都在这一处注入，
     /// 因此调用点不必各自判断。
-    fn store_with(session_id: Option<&str>, cfg: &SessionConfig) -> MemoryFile {
+    fn store_with(
+        root: &std::path::Path,
+        session_id: Option<&str>,
+        cfg: &SessionConfig,
+    ) -> MemoryFile {
         super::memory::store(
+            root,
             session_id,
             cfg.effective_memory_max_bytes(),
             cfg.effective_memory_inject_bytes(),
@@ -388,7 +399,8 @@ impl SessionPlugin {
     /// 两者都归到这一个构造点，作用域闸门与两道容量闸门因此只写一遍。
     pub(crate) async fn memory_store(&self, session_id: &str) -> MemoryFile {
         let cfg = self.config.read().await;
-        Self::store_with(Some(session_id), &cfg)
+        let root = self.storage_dir();
+        Self::store_with(&root, Some(session_id), &cfg)
     }
 
     /// 参与能力收集：交出**会话记忆**（系统提示词片段）。
