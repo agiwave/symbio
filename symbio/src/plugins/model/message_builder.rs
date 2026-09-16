@@ -353,6 +353,7 @@ mod tests {
             id: Some("tc-1".to_string()),
             name: Some(name.to_string()),
             arguments: serde_json::json!({ "k": "v" }),
+            parse_error: None,
         }
     }
 

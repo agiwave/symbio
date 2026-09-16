@@ -659,6 +659,34 @@ pub async fn process_tool_calls_async(
             }
         };
 
+        // 参数 JSON 非空却解析失败（典型：被 max_tokens 截断）→ **拒绝执行**。
+        // 旧行为是带着占位 `{}` 继续执行，工具必然报「缺少必填参数」，而这条错误
+        // 对模型毫无信息量（它认为自己发了完整参数），于是原样重试 → 卡思考死循环。
+        // 这里以协议错误形态回报，明确告诉模型「参数残破，需重发完整调用」。
+        if let Some(raw) = tc.parse_error.as_ref() {
+            let preview: String = raw.chars().take(400).collect();
+            let truncated = raw.chars().count() > 400;
+            plugin_error!(
+                "session",
+                "Protocol Error: Tool call arguments JSON parse failed, refusing to execute. ID: {id}, name: {name}"
+            );
+            record_protocol_failure(
+                channel,
+                &id,
+                &format!(
+                    "工具参数 JSON 解析失败（可能被长度上限截断），本次调用未执行。\
+                     只有完整且可解析的 JSON 参数才会被执行，请勿以相同内容重试。\n\
+                     参数原文（{} 字符{}）：{preview}",
+                    raw.chars().count(),
+                    if truncated { "，已截断展示" } else { "" }
+                ),
+                &mut tool_messages,
+                &mut parent_updates,
+            )
+            .await;
+            continue;
+        }
+
         let result_msg_id = uuid::Uuid::new_v4().to_string();
 
         let pre_output = fire_hook(

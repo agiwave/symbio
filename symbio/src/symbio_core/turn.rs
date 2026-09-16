@@ -352,6 +352,16 @@ pub struct ToolCallInfo {
     pub id: Option<String>,
     pub name: Option<String>,
     pub arguments: Value,
+    /// 参数 JSON **非空且解析失败**时的原始文本；其余情况为 `None`。
+    ///
+    /// 存在理由：`get_completed` 早先对解析失败静默回退 `{}`，于是「参数被
+    /// max_tokens 截断、参数残破」与「无参工具的空参数」在下游长得一模一样——
+    /// 工具收到空参后报「缺少必填参数」，模型误以为调用合法而原样重试，
+    /// 形成卡思考死循环。此字段把「解析失败」这一事实显式携带到执行侧，
+    /// 由 `process_tool_calls_async` 拒绝执行并回报明确错误。
+    ///
+    /// `None` 且 `arguments == {}` 是合法的：无参工具的空串/纯空白参数。
+    pub parse_error: Option<String>,
 }
 
 /// Accumulates incremental tool call deltas.
@@ -428,21 +438,33 @@ impl ToolCallAccumulator {
                 {
                     call.id = Some(short_id());
                 }
-                let args: Value = match serde_json::from_str(&call.arguments) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(
-                            error = %e,
-                            raw_arguments = %call.arguments,
-                            "tool call parse error"
-                        );
-                        serde_json::json!({})
+                // 参数解析：区分三种情况，**绝不**把解析失败伪装成空参数。
+                //  - 空串/纯空白：无参工具的合法形态（`from_str("")` 必失败），视为 `{}`；
+                //  - 合法 JSON：照常使用；
+                //  - 非空且非法：参数已残破（典型为 max_tokens 截断），保留原文交给
+                //    parse_error，由执行侧拒绝执行——静默 `{}` 会让工具报「缺少必填
+                //    参数」，模型看不懂原因便原样重试，卡死在思考循环里。
+                let raw = call.arguments.as_str();
+                let (args, parse_error) = if raw.trim().is_empty() {
+                    (serde_json::json!({}), None)
+                } else {
+                    match serde_json::from_str::<Value>(raw) {
+                        Ok(v) => (v, None),
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                raw_arguments = %raw,
+                                "tool call arguments JSON invalid — refusing to execute"
+                            );
+                            (serde_json::json!({}), Some(call.arguments.clone()))
+                        }
                     }
                 };
                 ToolCallInfo {
                     id: call.id.clone(),
                     name: call.name.clone(),
                     arguments: args,
+                    parse_error,
                 }
             })
             .collect()
@@ -568,13 +590,19 @@ pub fn build_assistant_messages(
     // ToolCall 组合节点自身携带请求参数（content = JSON 文本），不设独立的请求子节点
     for tc in tool_calls {
         let tc_id = tc.id.clone().unwrap_or_else(short_id);
+        // 解析失败时落库**残破原文**而非占位 `{}`：存储层保真，事后能看出模型
+        // 究竟发了什么（截断在哪一字符），而不是留下一个看似合法的假空参数。
+        let args_text = match &tc.parse_error {
+            Some(raw) => raw.clone(),
+            None => tc.arguments.to_string(),
+        };
         msgs.push(ChatMessage {
             id: tc_id.clone(),
             parent_id: Some(id.to_string()),
             role: Some(MessageRole::Assistant),
             msg_type: Some(MessageType::ToolCall),
             name: tc.name.clone(),
-            content: Some(MessageContent::Text(tc.arguments.to_string())),
+            content: Some(MessageContent::Text(args_text)),
             status: Some(MessageStatus::Completed),
             timestamp: Some(timestamp),
             ..Default::default()
@@ -1227,6 +1255,56 @@ mod tool_call_tests {
         done.sort_by(|a, b| a.id.cmp(&b.id));
         assert_eq!(done[0].id.as_deref(), Some("call_a"));
         assert_eq!(done[1].id.as_deref(), Some("call_b"));
+    }
+
+    /// 空串/纯空白参数是无参工具的合法形态（`from_str("")` 必失败）：
+    /// 必须视为 `{}` 且**不得**标记 parse_error，否则无参工具会被误拒。
+    #[test]
+    fn empty_arguments_treated_as_empty_object() {
+        let mut acc = ToolCallAccumulator::default();
+        acc.process_delta(0, Some("call_e"), Some("vdfs_list"), Some(""));
+        acc.process_delta(1, Some("call_w"), Some("vdfs_list"), Some("   "));
+
+        let done = acc.get_completed();
+        assert_eq!(done.len(), 2);
+        for tc in &done {
+            assert_eq!(tc.arguments, serde_json::json!({}));
+            assert!(tc.parse_error.is_none(), "空参数不得标记为解析失败");
+        }
+    }
+
+    /// 合法 JSON 参数照常解析，parse_error 为 None。
+    #[test]
+    fn valid_arguments_parse_without_error() {
+        let mut acc = ToolCallAccumulator::default();
+        acc.process_delta(
+            0,
+            Some("call_v"),
+            Some("cmd"),
+            Some(r#"{"command": "dir"}"#),
+        );
+
+        let done = acc.get_completed();
+        assert_eq!(done[0].arguments, serde_json::json!({"command": "dir"}));
+        assert!(done[0].parse_error.is_none());
+    }
+
+    /// 回归（卡思考根因）：非空但非法的参数 JSON（典型为 max_tokens 截断）
+    /// **不得**静默回退 `{}`——必须保留原文于 parse_error，由执行侧拒绝执行。
+    /// 静默 `{}` 会让工具报「缺少必填参数」，模型看不懂原因便原样重试。
+    #[test]
+    fn truncated_arguments_flagged_not_silently_emptied() {
+        let mut acc = ToolCallAccumulator::default();
+        let raw = r#"{"command": "cargo test"#;
+        acc.process_delta(0, Some("call_t"), Some("cmd"), Some(raw));
+
+        let done = acc.get_completed();
+        assert_eq!(done[0].arguments, serde_json::json!({}), "占位仍为 空对象");
+        assert_eq!(
+            done[0].parse_error.as_deref(),
+            Some(raw),
+            "必须保留残破原文"
+        );
     }
 }
 

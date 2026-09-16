@@ -22,6 +22,7 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
         id: None,
         name: Some("vdfs_list".into()),
         arguments: json!({ "path": "." }),
+        parse_error: None,
     }];
 
     let (msgs, updates) =
@@ -61,6 +62,7 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
         id: Some(String::new()),
         name: Some("vdfs_list".into()),
         arguments: json!({}),
+        parse_error: None,
     }];
 
     let (msgs, updates) =
@@ -79,6 +81,7 @@ async fn missing_tool_name_is_recorded_as_failure() {
         id: Some("tc-known".into()),
         name: Some(String::new()),
         arguments: json!({}),
+        parse_error: None,
     }];
 
     let (msgs, updates) =
@@ -88,6 +91,42 @@ async fn missing_tool_name_is_recorded_as_failure() {
     assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-known"));
     assert_eq!(updates.len(), 1);
     assert_eq!(updates[0].id, "tc-known");
+}
+
+/// 回归（卡思考根因）：参数 JSON 解析失败（截断残破）的调用必须被拒绝执行，
+/// 走协议失败路径——生成 role=Tool 错误子节点 + 父节点失败补丁，
+/// 而非静默以 `{}` 执行（那会让模型看到「缺少必填参数」后原样重试）。
+#[tokio::test]
+async fn unparseable_arguments_are_refused_not_executed() {
+    let (_host, mut plugin_chan) = PluginChannel::pair(64);
+    let abort = Arc::new(AtomicBool::new(false));
+    let tcs = vec![ToolCallInfo {
+        id: Some("tc-broken".into()),
+        name: Some("cmd".into()),
+        arguments: json!({}),
+        parse_error: Some(r#"{"command": "cargo test"#.into()),
+    }];
+
+    let (msgs, updates) =
+        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
+
+    assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
+    assert_eq!(msgs[0].role, Some(MessageRole::Tool));
+    assert_eq!(msgs[0].status, Some(MessageStatus::Completed));
+    assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-broken"));
+    let text = msgs[0]
+        .content
+        .as_ref()
+        .map(|c| c.to_text())
+        .unwrap_or_default();
+    assert!(
+        text.contains("Error:") && text.contains("参数 JSON 解析失败"),
+        "结果应说明参数 JSON 解析失败，实际：{text}"
+    );
+
+    assert_eq!(updates.len(), 1, "必须生成父节点失败补丁");
+    assert_eq!(updates[0].id, "tc-broken");
+    assert_eq!(updates[0].status, Some(MessageStatus::Completed));
 }
 
 /// 回归（真实事故）：中文参数摘要不得在字节边界上 panic。
