@@ -65,10 +65,16 @@ pub fn now_ms() -> i64 {
 | **S4** | `orchestrator.rs` 1513 | **320** + `orchestrator/{broadcast,consume,entry,failure}.rs` |
 
 **保真纪律**：每步做「归一化代码行多重集比对」——把旧文件与「新父文件 + 各子模块」
-归一化（去 `//!` / `use` / `mod` / 空行，抹平 `pub(crate)` 等可见性前缀，还原
-`super::super::`）后比较行多重集，**差异必须逐条归因**。S2 归因 13 条（6 处路径加深 +
-2 处 rustfmt 折行 + 5 行 re-export 脚手架）、S3 归因 21 条、**S4 归因 0 条**
-（双向差集均为空）。
+归一化（去 `//!` / `use` / `mod` / 空行、去行首缩进，抹平 `pub(crate)` 等可见性前缀，
+还原 `super::super::`）后比较行多重集，**差异必须逐条归因**。S2 归因 13 条（6 处路径加深 +
+2 处 rustfmt 折行 + 5 行 re-export 脚手架）、S3 归因 21 条、S4 拆分脚本落盘后**归因 0 条**。
+
+⚠️ **S4 复测更正**（2026-09-16 补测）：`cargo fmt --all` 之后再测，S4 为 旧独有 6 行 /
+新独有 20 行，**全部可归因**——8 行（4 条语句）是「`super::` 加深 → 超 `max_width`
+→ rustfmt 折行」的连锁，6 行是 `impl` 由 1 块拆成 4 块多出的 `impl`/`}`，1 行是新增模块
+分工注释，−1 行来自后续 `now_ms` 提交。**教训：保真校验必须在 `cargo fmt` 之后复测**；
+归因表比「差集为 0」这个数字更有价值（详见
+[session/docs/module-layout.md §4.6](../symbio/src/plugins/session/docs/module-layout.md)）。
 
 **可见性口径**（S2 新确立，S3/S4 沿用）：
 

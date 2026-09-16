@@ -376,9 +376,20 @@ mod tests;
 | `orchestrator/entry.rs` | 457 | `resolve_session_params` / `handle_chat_send_oneoff`(298) / `handle_chat_abort_oneoff` / `ensure_auto_title` |
 | `orchestrator/failure.rs` | 242 | `persist_failure`(185) + `subtree_of` |
 
-**保真校验**（口径同 §4.2/§4.3）：归一化代码行多重集 **旧 848 行 vs 新 848 行，
-双向差集均为 0 条**——即**零代码改写、零注释丢失**。可见性提升（`pub(super)` ×4）
-与路径加深（`super::` ×12）被归一化吸收，未计入差异。
+**保真校验**（口径同 §4.2/§4.3）：归一化代码行多重集比对，**差异逐条归因**。
+拆分脚本落盘后（`cargo fmt` 之前）**双向差集为 0 条**；跑完 `cargo fmt --all`
+（门禁要求）后复测得 旧独有 6 行 / 新独有 20 行，**全部可归因到四类机械原因**：
+
+| 原因 | 行数 | 说明 |
+|---|---:|---|
+| `super::` 加深导致 rustfmt 重新折行 | 8 行（4 条语句） | 路径变长超 `max_width=100` ⇒ 单行拆成 2~3 行；归一化能折叠 `super::super::`，但**无法把已拆开的行重新粘回** |
+| `impl SessionPlugin` 由 1 块拆成 4 块 | 6 行（`impl` ×3 + `}` ×3） | 结构性差异，符合预期 |
+| 根文件新增模块分工表注释 | 1 行 | `// 子模块：impl SessionPlugin 按职责分块…` |
+| 后续 `now_ms` 收敛提交（`242ed9e`） | −1 行 | `session.updated_at = (time::…);`（2 行）→ `now_ms()`（1 行），非本次拆分引入 |
+
+⚠️ **教训**：保真校验必须**在 `cargo fmt` 之后复测一遍**——`super::` 加深会改变行宽，
+进而触发折行，使「逐字未改」的结论在格式化后不再严格成立。归因表比「差集为 0」
+这个数字更有价值。
 
 **三个踩过的坑**（脚本已断言，供后续参考）：
 
