@@ -122,11 +122,14 @@ fn section_of(id: &str) -> Option<&'static SectionSpec> {
 /// 数据由前端状态自持（外观即时生效 / 关于纯展示），VDFS 侧无正文，
 /// 因此 `access` 只声明 `r`，且 `read` / `write` 恒为 `Forbidden`——
 /// 前端的专属 editor 不读 VDFS。
+///
+/// ⚠️ **不给 `description`**：该字段只出现在**用户看的列表**里（`VdfsCard` 副标题），
+/// 而「数据由前端自持、VDFS 侧无正文」是机制说明——`label`（「外观」「关于」）已足够，
+/// 实现细节不往列表里放。
 fn section_node(s: &SectionSpec) -> VdfsNode {
     let mut n = VdfsNode::file(s.id, s.label, VdfsAccess::READ);
     n.kind = PLUGIN_SETTING.to_string();
     n.ext = Some(s.id.to_string());
-    n.description = Some("该分区数据由前端状态自持，VDFS 侧无正文".to_string());
     n
 }
 

@@ -54,6 +54,8 @@
 
       <template #list>
         <div class="vdfs-list" role="listbox" aria-label="资源列表" @scroll.passive="onListScroll">
+          <!-- 徽标只给目录（子项数）。⚠️ 文件不给徽标：`ext` 是**渲染器键**
+               （`form` / `session` 之类），属机制细节，不该出现在给用户看的列表里。 -->
           <VdfsCard
             v-for="n in items"
             :key="n.path"
@@ -62,7 +64,7 @@
             :status="cardStatus(n)"
             :status-title="n.status"
             :badge="badgeOf(n)"
-            :badge-kind="badgeKindOf(n)"
+            badge-kind="primary"
             :tags="tagsOf(n)"
             :icon="iconOf(n)"
             :is-active="selectedId === n.path"
@@ -213,7 +215,6 @@ import {
   VDFS_NEW_SOURCE_FILE,
   isVdfsDir,
   newFileNameOf,
-  vdfsAccessOf,
   vdfsJoin,
   vdfsParent,
   type VdfsNewType,
@@ -453,19 +454,27 @@ function cardStatus(n: VdfsNode): 'active' | 'working' | 'disabled' | 'warning' 
   }
 }
 
-/** 徽标：目录显示子项数，文件显示扩展名（纯 UI 呈现） */
+/**
+ * 徽标：**只有目录**给徽标（子项数），文件一律不给。
+ *
+ * 文件原先显示 `n.ext`——那是**渲染器键**（`form` / `session` / `model`），
+ * 是「谁来渲染这一项」的机制细节，不是给用户看的类型名。用户要看的是标题、
+ * 描述与状态；`ext` 属于实现，列表里不出现。
+ */
 function badgeOf(n: VdfsNode): string | undefined {
-  if (isVdfsDir(n)) return typeof n.children === 'number' ? String(n.children) : undefined
-  return n.ext || undefined
-}
-function badgeKindOf(n: VdfsNode): 'default' | 'primary' | 'success' | 'warn' | 'info' {
-  return isVdfsDir(n) ? 'primary' : 'default'
+  if (!isVdfsDir(n)) return undefined
+  return typeof n.children === 'number' ? String(n.children) : undefined
 }
 
-/** 标签：可写标记（访问位是唯一能力判据）+ 后端声明的类型特有标签 + 相对时间 */
+/**
+ * 标签：后端声明的类型特有标签（`meta_tags`，VDFS 只透传）+ 相对时间。
+ *
+ * ⚠️ **不渲染机制级字段**：访问位（`w` = 可写）是**能力判据**，用来决定「能不能
+ * 保存 / 删除 / 新建」，不是给用户看的标签——能力在详情页的动作上自会体现。
+ * 同理不显示 `ext` / `path` / `kind` 这类机制字段。
+ */
 function tagsOf(n: VdfsNode): Array<{ label: string; kind?: 'muted' | 'primary' }> {
   const out: Array<{ label: string; kind?: 'muted' | 'primary' }> = []
-  if (vdfsAccessOf(n).write) out.push({ label: '可写', kind: 'primary' })
   // `meta_tags` 是后端决定的类型特有标签（VDFS 只透传），
   // 前端原样渲染、不含语义（如会话的工作目录名 / 消息数）
   const tags = n.meta_tags
