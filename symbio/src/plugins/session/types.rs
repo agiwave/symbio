@@ -8,15 +8,26 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 
-/// 会话列表一行摘要：最后一条含文本消息的首行（压缩空白、限长 60 字符）。
+/// 会话列表一行摘要：**最新一条助手回复**的首行（压缩空白、限长 60 字符）。
 ///
-/// 与 [`derive_session_title`] 同风格；供会话节点的 `description` 驱动列表
-/// 「实时缩略」预览。**清单投影**的一部分（见 [`SessionSummary`]）。
+/// 与 [`derive_session_title`] 配对：标题 = 用户最后说的话，摘要 = 助手最后的回答。
+/// 列表一行因此读作「用户问了什么 → 助手回了什么」，而不是同一句话出现两遍。
+/// 供会话节点的 `description` 驱动列表「实时缩略」预览；**清单投影**的一部分
+/// （见 [`SessionSummary`]）。
+///
+/// 只认**助手**消息：用户刚发的那句已经在标题里了。纯工具调用 / 推理消息没有
+/// 正文（`to_text()` 为空），`find` 会继续往前找最近一条**有文本**的回复。
 pub fn derive_session_summary(messages: &[ChatMessage]) -> Option<String> {
     const SUMMARY_MAX_CHARS: usize = 60;
     let text = messages
         .iter()
         .rev()
+        .filter(|m| {
+            matches!(
+                m.role,
+                Some(crate::symbio_core::schemas::session::chat_message::MessageRole::Assistant)
+            )
+        })
         .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
         .map(|t| t.trim().to_string())
         .find(|t| !t.is_empty())?;
@@ -154,11 +165,15 @@ impl Session {
 
 /// 从会话消息内容自动生成会话标题（无显式命名时的兜底）。
 ///
-/// 规则：第一条**含文本**的用户消息 → 首行 → 压缩连续空白 → 限长
+/// 规则：**最后一条**含文本的用户消息 → 首行 → 压缩连续空白 → 限长
 /// [`SESSION_TITLE_MAX_CHARS`] 字符（超长追加省略号）。找不到文本时返回 None。
+///
+/// 取**最后一条**而非第一条：列表里的会话名该反映「最近在聊什么」，不该被
+/// 第一句话永久钉住。显式命名（`metadata.title`）仍然优先——用户自己起的名字
+/// 不该被自动派生顶掉（见 [`Session::display_title`]）。
 pub(crate) fn derive_session_title(messages: &[ChatMessage]) -> Option<String> {
     const SESSION_TITLE_MAX_CHARS: usize = 24;
-    for m in messages {
+    for m in messages.iter().rev() {
         if !matches!(
             m.role,
             Some(crate::symbio_core::schemas::session::chat_message::MessageRole::User)

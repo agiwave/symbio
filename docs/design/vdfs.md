@@ -202,7 +202,7 @@ D:/tmp/a.txt     绝对路径                          ─┘
 | `path` / `name` | 全路径（使用方回填） / 父内唯一标识（路径段） |
 | `title` / `description` | 展示标题 / 语义说明（缺省 `title` = `name`） |
 | `kind` | **场景标签**（自由取值；构造器缺省给 `dir` / `file`，场景可覆盖）；机制不据此判定 |
-| `status` | `active` / `working` / `disabled` / `error` / `unknown` |
+| `status` | `active` / `working` / `disabled` / `error` / `unknown`；缺省 `active`，**空串 = 显式声明「无运行态」**（`VDFS_STATUS_NONE`，列表不画状态点） |
 | `access` | 访问位（§4），**机制唯一的能力依据** |
 | `ext` | 呈现扩展名——**前端据此选择详情页面**（§7） |
 | `size` / `updated_at` / `children` / `binary` | 元数据 |

@@ -126,10 +126,16 @@ fn section_of(id: &str) -> Option<&'static SectionSpec> {
 /// ⚠️ **不给 `description`**：该字段只出现在**用户看的列表**里（`VdfsCard` 副标题），
 /// 而「数据由前端自持、VDFS 侧无正文」是机制说明——`label`（「外观」「关于」）已足够，
 /// 实现细节不往列表里放。
+///
+/// ⚠️ **显式声明无状态**（[`vdfs::VDFS_STATUS_NONE`]）：分区是**静态**的，没有
+/// 「运行中 / 就绪」可言。节点 `status` 缺省是 `active`，不清掉就会在列表里画一个
+/// 绿点——那是个**不存在的信息**（列表据此不渲染状态点，见
+/// `docs/design/vdfs-frontend.md` §4.2）。
 fn section_node(s: &SectionSpec) -> VdfsNode {
     let mut n = VdfsNode::file(s.id, s.label, VdfsAccess::READ);
     n.kind = PLUGIN_SETTING.to_string();
     n.ext = Some(s.id.to_string());
+    n.status = vdfs::VDFS_STATUS_NONE.to_string();
     n
 }
 
@@ -158,6 +164,9 @@ async fn config_entries(ctx: &VdfsContext) -> Vec<VdfsNode> {
         .into_iter()
         .map(|mut n| {
             n.kind = PLUGIN_SETTING.to_string();
+            // 配置条目同样是**静态**的（它就是一份文档，没有运行态可言）——
+            // 与分区一致地显式声明无状态，设置列表因此整列没有状态点。
+            n.status = vdfs::VDFS_STATUS_NONE.to_string();
             n
         })
         .collect()

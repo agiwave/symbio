@@ -173,6 +173,11 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
   （子项数），文件不给徽标；「可写」这类由访问位派生的标签不出现——能不能保存 /
   删除，在详情页的动作上自会体现。机制字段只在**详情**保留（尤其只读兜底
   `VdfsReadonlyDetail`，它是结构浏览器 / 调试视图，S14）。
+- **状态点**：只有**声明了** `status` 的节点才画（`VdfsCard` 的 `showStatus`）。
+  节点 `status` 的缺省值是 `active`，所以后端要用 `VDFS_STATUS_NONE`（空串）**显式
+  声明**「本资源没有运行态」（设置分区 / 配置条目这类静态文档即是），列表据此不画点。
+  状态点是**真实状态**的指示器，不是装饰——没有状态可言时画一个点等于凭空造信息。
+  hover 提示走**文案映射**（`working` → 「进行中」），不把后端枚举漏给用户。
 - **形态**：目录（`access` 含 `l`）→ 点击进入；文件 → 点击选中（右栏出详情）。
 - **列表头（S11）**：按当前节点的 `new_types` 显示**新建按钮**（§5）。
   **不再显示「新建目录」按钮**——「新建」就是新建一种资源；需要多种元素类型时，
@@ -233,8 +238,8 @@ G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 - 因此没有「第二种新建形态」——除了下面 `source = file` 那一条。
 
 名字**不由前端先问**：它是 provider 的私有知识（`id 归 provider`）。名字要么在
-详情页里产生（会话由首条消息派生标题），要么在保存时由 provider 生成
-（写目录自身，见 §5.3）。
+详情页里产生（会话由**最后一条用户消息**派生标题——列表名跟随「最近在聊什么」，
+不是被第一句话钉住），要么在保存时由 provider 生成（写目录自身，见 §5.3）。
 
 **两条键：`ext` 与 `node_ext`**。类型清单里的 `ext` 是**呈现扩展名**（地址末段
 后缀，provider 用 `id_of` 按它剥条目 id），它**不**决定详情怎么渲染：配置型资源
@@ -381,7 +386,8 @@ source = file 的类型（整包导入）：名称来自文件名
 - **S3 会话迁移**（**已完成**）：
   - **后端 `session` provider**：根 = 会话清单（`new_types = [会话]`、`root_access = l`），
     节点 = 会话（`ext = session`、`kind = session`、`status` 反映 working、`name = 会话 id`、
-    `title = display_title()`、`description = derive_session_summary`）。`read` 返回会话
+    `title = display_title()`——`metadata.title` 优先，否则取**最后一条用户消息**；
+    `description = derive_session_summary`——**最新一条助手回复**）。`read` 返回会话
     元数据 JSON；`write` 分两支——`create` 位 → 新建（**id 由 provider 生成**，路径名
     去扩展名作标题，`created_via = "vdfs"`），否则 → 合并 `metadata` / `title`（其余字段
     明确拒绝，不静默丢弃）；`delete` 转发 `delete_session_internal`。

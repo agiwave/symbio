@@ -62,7 +62,8 @@
             :title="n.title || n.name"
             :subtitle="n.description"
             :status="cardStatus(n)"
-            :status-title="n.status"
+            :status-title="cardStatusTitle(n)"
+            :show-status="Boolean(n.status)"
             :badge="badgeOf(n)"
             badge-kind="primary"
             :tags="tagsOf(n)"
@@ -444,6 +445,11 @@ async function submitRename() {
 }
 
 // ==================== 列表项展示（机制级，无类型知识） ====================
+//
+// **状态点显示与否由节点自己声明**：`status` 为空串（后端的 `VDFS_STATUS_NONE`）
+// = 该资源**没有运行态**（设置分区 / 配置条目这类静态文档），列表因此不画点。
+// 节点 `status` 的缺省值是 `active`，所以「没有点」只可能是后端**显式声明**的
+// 结果，不是前端猜出来的类型知识。
 function cardStatus(n: VdfsNode): 'active' | 'working' | 'disabled' | 'warning' | 'error' | 'muted' {
   switch (n.status) {
     case 'working': return 'working'
@@ -452,6 +458,26 @@ function cardStatus(n: VdfsNode): 'active' | 'working' | 'disabled' | 'warning' 
     case 'active': return 'active'
     default: return 'muted'
   }
+}
+
+/**
+ * 状态点的 hover 提示（纯 UI 文案映射）。
+ *
+ * ⚠️ 节点 `status` 是**后端取值**（`working` / `active` / `disabled` / `error`…），
+ * 直接拿来当 tooltip 就是把机制词摆给用户看——与 `ext` 徽标是同一类问题。
+ * 这里只做**文案**映射：它不参与任何判据（能力判据只认访问位），也不改变状态点
+ * 的颜色语义（颜色仍由 `cardStatus` 决定）。
+ *
+ * 未知取值返回**空串**：宁可不显示提示，也不要把后端枚举漏出去。
+ */
+const STATUS_TEXT: Record<string, string> = {
+  working: '进行中',
+  active: '就绪',
+  disabled: '已停用',
+  error: '出错',
+}
+function cardStatusTitle(n: VdfsNode): string {
+  return STATUS_TEXT[n.status ?? ''] ?? ''
 }
 
 /**

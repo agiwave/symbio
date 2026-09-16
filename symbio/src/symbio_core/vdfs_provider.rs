@@ -64,6 +64,15 @@ pub const VDFS_STATUS_WORKING: &str = "working";
 pub const VDFS_STATUS_DISABLED: &str = "disabled";
 pub const VDFS_STATUS_ERROR: &str = "error";
 pub const VDFS_STATUS_UNKNOWN: &str = "unknown";
+/// **无运行状态** —— 显式声明「本节点没有会变化的状态」。
+///
+/// 与 [`VDFS_STATUS_ACTIVE`]（就绪，一个**真实**状态）不同，本值表示**不适用**：
+/// 静态资源（如设置分区）本来就没有「运行中 / 就绪」可言，给它画一个状态点
+/// 只是噪音。列表据此**不渲染状态点**（见 `docs/design/vdfs-frontend.md` §4.2）。
+///
+/// 缺省仍是 `active`（见 [`default_status`]）：只有**显式**声明本值的节点才会
+/// 失去状态点，因此这是「声明出来的无状态」，不是「忘了填」。
+pub const VDFS_STATUS_NONE: &str = "";
 
 /// 节点基础类型：目录
 pub const VDFS_KIND_DIR: &str = "dir";
