@@ -6,7 +6,7 @@
  * home 插件是 Symbio 的根插件，负责：
  * 1. 自身配置持久化（`<homedir>/PLUGIN.yml`：工作区 / 最近记录）
  * 2. 路由分发与工具聚合
- * 3. 容器 `composite` 的构造（子插件由它扫描 `<homedir>/plugins/*` 得到）
+ * 3. 容器 `composite` 的构造（子插件由它扫描 `<homedir>/*` 得到：一层目录 = 一个插件）
  * 4. **系统目录 (homedir) 切换**：调用 `home/reload` 热重载子插件
  * 5. **工作区 (workdir) 切换**：调用 `work/*` 路由（也由 home 插件处理）
  *
