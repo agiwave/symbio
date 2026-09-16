@@ -85,8 +85,7 @@ impl SessionPlugin {
     ///
     /// 无订阅者时直接返回；`path` 是 provider 子树内的相对路径（= 会话 id）。
     pub(crate) fn notify_change(&self, id: &str, change: &str) {
-        self.change_subs
-            .notify(&vdfs::VdfsChange::new(id, change));
+        self.change_subs.notify(&vdfs::VdfsChange::new(id, change));
     }
 
     // ==================== 消息级变更（不经前端补丁通道的那三条路由）====================

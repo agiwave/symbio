@@ -306,7 +306,10 @@ impl SessionStore {
 
     /// 子会话清单：`<根>/<safe(父)>/sessions/*/session.json`，`updated_at` 降序。
     /// 不落盘的临时会话恒空（无目录概念）。
-    pub async fn list_sub_sessions(&self, parent_id: &str) -> Result<Vec<SessionSummary>, PluginError> {
+    pub async fn list_sub_sessions(
+        &self,
+        parent_id: &str,
+    ) -> Result<Vec<SessionSummary>, PluginError> {
         let Some(base) = self.disk() else {
             return Ok(Vec::new());
         };

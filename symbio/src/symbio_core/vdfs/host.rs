@@ -314,7 +314,10 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         for _ in 0..2 {
             let s = seen.clone();
-            subs.watch("a", Arc::new(move |c: VdfsChange| s.lock().unwrap().push(c.path)));
+            subs.watch(
+                "a",
+                Arc::new(move |c: VdfsChange| s.lock().unwrap().push(c.path)),
+            );
         }
         subs.notify(&VdfsChange::new("a", "updated"));
         assert_eq!(subs.subscriber_count(), 2);
@@ -341,7 +344,10 @@ mod tests {
         let narrow = Arc::new(Mutex::new(Vec::new()));
         {
             let b = broad.clone();
-            subs.watch("", Arc::new(move |c: VdfsChange| b.lock().unwrap().push(c.path)));
+            subs.watch(
+                "",
+                Arc::new(move |c: VdfsChange| b.lock().unwrap().push(c.path)),
+            );
             let n = narrow.clone();
             subs.watch(
                 "abc/消息",
