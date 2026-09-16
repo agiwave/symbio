@@ -14,7 +14,7 @@
 //! | 列自身目录 | `list("")` 返回子目录清单（合成，无需子 provider 参与） |
 //! | 路径解析 | 首段 = 子目录名，其余 = 该子 provider 的**相对路径** |
 //! | 全路径回填 | 子节点 / 内容 / 写入响应的 `path` 补成 `<子目录>/<rel>` |
-//! | 子目录根守卫 | 子目录根不可读 / 写 / 删，也不可 mkdir / move |
+//! | 子目录根守卫 | 子目录根不可读 / 删 / 移，也不可 mkdir（**写不在其中**） |
 //! | 跨子目录拒绝 | `move` 只允许在同一子目录内 |
 //! | 事件补全 | 子 provider 报出的相对路径补成树内全路径再交给上层 sink |
 //!
@@ -196,6 +196,24 @@ impl CompositeVdfs {
         n
     }
 
+    /// 子 provider 返回的路径 → 树内全路径。
+    ///
+    /// 子 provider 只认**自身子树内的相对路径**（见 `VdfsProvider::write`），所以它
+    /// 回显的、或它为新条目生成的名字都只是 `<rel>`，必须补上 `<子目录>/` 才能交给上层
+    /// （访问层还要再翻译成展示地址）。空串 = 「没填」（例如物理层无从表达新名字）
+    /// → 用**请求地址**兜底。
+    ///
+    /// ⚠️ 不能只在空串时兜底：`write` 的返回值是使用方得知「刚建出来的东西在哪」的
+    /// **唯一**途径（见 `VdfsProvider::write` 的返回值一节）。漏补即等于新建之后
+    /// 找不到新节点——前端只能停在草稿上。
+    fn fill_path(requested: &str, returned: &str) -> String {
+        if returned.is_empty() {
+            return requested.to_string();
+        }
+        let dir = split_first(requested).map(|(d, _)| d).unwrap_or("");
+        child_path(dir, returned)
+    }
+
     /// 树内路径 → `(子目录名, provider, 相对路径)`；自身目录或无匹配时按错误返回
     fn resolve<'a>(
         dirs: &'a [(String, DynVdfsProvider)],
@@ -298,9 +316,7 @@ impl VdfsProvider for CompositeVdfs {
             ));
         }
         let mut c = p.read(ctx, &rel).await?;
-        if c.path.is_empty() {
-            c.path = path.to_string();
-        }
+        c.path = Self::fill_path(path, &c.path);
         Ok(c)
     }
 
@@ -312,13 +328,13 @@ impl VdfsProvider for CompositeVdfs {
     ) -> VdfsResult<VdfsWriteResponse> {
         let dirs = self.children_of(ctx).await?;
         let (_, p, rel) = Self::resolve(&dirs, path)?;
-        if rel.is_empty() {
-            return Err(VdfsError::Forbidden("目录不可写".to_string()));
-        }
+        // `rel` 为空 = 写在**挂载点目录自身**上。这正是「新建」的机制形态：
+        // 使用方只说「建在哪个目录」，不说「叫什么」——名字由 provider 生成
+        // （见 `VdfsProvider::write` 的文档）。是否支持由 provider 判定，
+        // 容器不做类型特判（与 `action` 对空 `rel` 的处理一致）。
         let mut r = p.write(ctx, &rel, content).await?;
-        if r.path.is_empty() {
-            r.path = path.to_string();
-        }
+        // provider 生成的名字（写在目录自身时）与它回显的相对路径都在这**一次**补齐。
+        r.path = Self::fill_path(path, &r.path);
         Ok(r)
     }
 
@@ -468,11 +484,53 @@ mod tests {
 
     type InvokeResponse = crate::symbio_core::InvokeResponse<PluginPayload>;
 
+    /// 假子插件：`traverse` 时把**给定的** provider 注册到自己目录名下
+    ///
+    /// 与 [`FakeChild`] 的区别只有一个：那个固定注册 [`LeafProvider`]，这个让测试
+    /// 自带一个只关心某一两个方法的 provider（如「只实现 `write`」的替身）。
+    struct ProviderChild {
+        dir: &'static str,
+        provider: Arc<dyn VdfsProvider>,
+    }
+
+    #[async_trait]
+    impl Plugin for ProviderChild {
+        fn meta(&self) -> PluginMeta {
+            PluginMeta::new(self.dir, self.dir)
+        }
+
+        async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse {
+            Err(PluginError::NotFound(self.dir.to_string()))
+        }
+
+        async fn traverse(
+            self: Arc<Self>,
+            _path: String,
+            ctx: Arc<dyn InvokeRequest>,
+        ) -> InvokeResponse {
+            if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
+                if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
+                    visitor
+                        .register_vdfs_provider(self.dir, self.provider.clone())
+                        .await;
+                }
+            }
+            Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+        }
+    }
+
     fn container(children: Vec<FakeChild>) -> CompositeVdfs {
         let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
         for c in children {
             map.insert(c.dir.to_string(), Arc::new(c));
         }
+        CompositeVdfs::new(Arc::new(RwLock::new(map)))
+    }
+
+    /// 只含一个子插件的容器，子插件把 `provider` 注册在 `dir` 下
+    fn container_of(dir: &'static str, provider: Arc<dyn VdfsProvider>) -> CompositeVdfs {
+        let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+        map.insert(dir.to_string(), Arc::new(ProviderChild { dir, provider }));
         CompositeVdfs::new(Arc::new(RwLock::new(map)))
     }
 
@@ -708,7 +766,12 @@ mod tests {
         assert_eq!(vdfs.stat(&ctx, "").await.unwrap().path, "");
     }
 
-    /// 自身目录与子目录的守卫：不可读 / 写 / 删 / 移，mkdir 报已存在
+    /// 自身目录与子目录的守卫：不可读 / 删 / 移，mkdir 报已存在
+    ///
+    /// ⚠️ **写不在此列**：写子目录根 = 写在**挂载点目录自身**上，那是「新建」的
+    /// 机制形态（使用方只说建在哪个目录，不说叫什么）。容器**不做类型特判**，
+    /// 一律转发给子 provider 判定——这里 `LeafProvider` 没实现 `write`，
+    /// 所以落到缺省的 `NotImplemented`，而不是容器自己抛 `Forbidden`。
     #[tokio::test]
     async fn guards_self_and_child_dir_roots() {
         let vdfs = container(vec![FakeChild {
@@ -723,12 +786,13 @@ mod tests {
             vdfs.read(&ctx, "alpha").await.unwrap_err(),
             VdfsError::Forbidden(_)
         ));
-        assert!(matches!(
+        assert!(
             vdfs.write(&ctx, "alpha", &VdfsContent::text("", "x"))
                 .await
-                .unwrap_err(),
-            VdfsError::Forbidden(_)
-        ));
+                .unwrap_err()
+                .is_not_implemented(),
+            "容器不替子 provider 判「目录自身能不能写」，只转发"
+        );
         assert!(matches!(
             vdfs.delete(&ctx, "alpha", true).await.unwrap_err(),
             VdfsError::Forbidden(_)
@@ -742,6 +806,69 @@ mod tests {
             vdfs.read(&ctx, "").await.unwrap_err(),
             VdfsError::Invalid(_)
         ));
+    }
+
+    /// 写在挂载点目录自身：`rel` 原样（空串）转发，返回的新路径补成树内全路径
+    ///
+    /// 这是「新建 = 写目录自身」在容器层唯一要做的事——provider 生成名字后
+    /// 必须能把新地址交回使用方（见 `VdfsProvider::write` 的返回值一节）。
+    #[tokio::test]
+    async fn dir_root_write_is_forwarded_and_path_is_prefixed() {
+        /// 支持「无名字新建」的假 provider：只记录收到的 `rel`，返回自己生成的名字
+        struct RootWritableProvider;
+
+        #[async_trait]
+        impl VdfsProvider for RootWritableProvider {
+            async fn write(
+                &self,
+                _ctx: &VdfsContext,
+                path: &str,
+                _content: &VdfsContent,
+            ) -> VdfsResult<VdfsWriteResponse> {
+                assert_eq!(path, "", "容器必须原样转发空 rel，而不是替 provider 拼名字");
+                Ok(VdfsWriteResponse {
+                    path: "generated-1".to_string(),
+                    created: true,
+                    etag: None,
+                })
+            }
+        }
+
+        let vdfs = container_of("rw", Arc::new(RootWritableProvider));
+        let r = vdfs
+            .write(
+                &host_ctx(),
+                "rw",
+                &VdfsContent::text("", "{}").with_create(),
+            )
+            .await
+            .unwrap();
+        assert!(r.created);
+        assert_eq!(r.path, "rw/generated-1", "相对路径被回填成树内全路径");
+    }
+
+    /// 读回的内容路径同样补成树内全路径
+    ///
+    /// 三个 form 型插件（model / mcp / skill）的 `read` 都把收到的相对路径原样回显
+    /// （`VdfsContent::text(path, …)`），因此这条不是假想：漏补前缀，上层就会把它翻译
+    /// 成 `.vdfs/<rel>`——一个并不存在的地址。
+    #[tokio::test]
+    async fn read_content_path_is_prefixed_with_dir() {
+        struct EchoPathProvider;
+
+        #[async_trait]
+        impl VdfsProvider for EchoPathProvider {
+            async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
+                Ok(VdfsContent::text(path, "{}"))
+            }
+        }
+
+        let vdfs = container_of("echo", Arc::new(EchoPathProvider));
+        let c = vdfs.read(&host_ctx(), "echo/item.json").await.unwrap();
+        assert_eq!(
+            c.path, "echo/item.json",
+            "provider 回显的相对路径被补成树内全路径"
+        );
     }
 
     /// 未知目录明确报错；跨子目录移动被拒；同子目录内移动转发相对路径

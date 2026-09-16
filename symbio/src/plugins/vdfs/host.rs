@@ -964,11 +964,18 @@ mod tests {
             path: &str,
             content: &VdfsContent,
         ) -> VdfsResult<VdfsWriteResponse> {
+            let (d, _) =
+                split_dir(path).ok_or_else(|| VdfsError::invalid("根目录不是可操作节点"))?;
             let (p, rel) = self.resolve(path)?;
-            if rel.is_empty() {
-                return Err(VdfsError::Forbidden("目录不可写".to_string()));
+            // 与生产容器同构：`rel` 为空 = 写在**挂载点目录自身**上（「新建」的
+            // 机制形态），原样转发给 provider 判定；provider 生成的名字要补回树内路径。
+            let mut r = p.write(ctx, &rel, content).await?;
+            if r.path.is_empty() {
+                r.path = path.to_string();
+            } else if !r.path.starts_with(&format!("{d}/")) {
+                r.path = format!("{d}/{}", r.path);
             }
-            p.write(ctx, &rel, content).await
+            Ok(r)
         }
 
         async fn delete(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {

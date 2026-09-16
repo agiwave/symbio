@@ -236,11 +236,17 @@ fn import_name_of(path: &str) -> String {
 /// `server.json` **没有展示名字段**（`McpServerConfig` 只有 transport 相关字段），
 /// 因此标题就是条目 id——与原摘要口径一致；`transport` 进 `attributes` 供列表
 /// 卡片直接呈现，副标题取 `command` / `url`。
+/// 详情定义（JSON 形态）——**唯一出处**：节点 `schema` 与新建类型 `schema` 都读它，
+/// 因此「点新建」的草稿表单与「选中一项」的详情表单是同一张。
+fn detail_definition() -> serde_json::Value {
+    serde_json::to_value(super::detail::mcp_detail_definition()).unwrap_or(serde_json::Value::Null)
+}
+
 fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::file(id, id, VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_MCP.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
-    n.schema = serde_json::to_value(super::detail::mcp_detail_definition()).ok();
+    n.schema = Some(detail_definition());
     let Some(server) = raw.and_then(|c| serde_json::from_str::<McpServerConfig>(c).ok()) else {
         // 坏条目降级：以 id 呈现、状态未知，但**仍在列表里**（可点开看到原文再修）
         n.status = "unknown".to_string();
@@ -319,11 +325,17 @@ impl VdfsProvider for McpPlugin {
         Some(PLUGIN_MCP)
     }
 
-    /// 根下可新建两类：表单新建（最小配置）+ 整包导入（zip）
+    /// 根下可新建两类：表单新建 + 整包导入（zip）
+    ///
+    /// `ext = mcp` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
+    /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义（草稿详情页据此
+    /// 渲染出与落成后同一张表单）。
     fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![
             VdfsNewType::new(PLUGIN_MCP, LABEL)
-                .with_description("新建 MCP Server（先落一份默认配置，随后在详情里完善）"),
+                .with_description("新建 MCP Server（在详情页里填好，保存时一次写入）")
+                .with_node_ext(VDFS_EXT_FORM)
+                .with_schema(detail_definition()),
             VdfsNewType::new(VDFS_EXT_ZIP, "MCP 包")
                 .with_description("导入 MCP Server 整包（.zip）——整目录覆盖同名条目")
                 .with_source(VDFS_NEW_SOURCE_FILE),
@@ -371,14 +383,16 @@ impl VdfsProvider for McpPlugin {
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        if path.is_empty() {
-            return Err(VdfsError::invalid(format!(
-                "{LABEL}整包只能导入到挂载根下：{path}"
-            )));
-        }
         let store = McpPlugin::store();
-        // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）
+        // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）。
+        // 导入的**名字来自目标地址末段**（使用方由文件名推导），所以必须有名字：
+        // 「无名字导入」无从命名，直接拒绝。
         if content.binary {
+            if path.trim_matches('/').is_empty() {
+                return Err(VdfsError::invalid(format!(
+                    "{LABEL}整包导入需要目标名（地址末段）：{path}"
+                )));
+            }
             let bytes = crate::providers::vdfs_service::decode_b64(
                 content.b64.as_deref().unwrap_or_default(),
             )
@@ -392,12 +406,27 @@ impl VdfsProvider for McpPlugin {
                 etag: None,
             });
         }
-        let id = id_of(path);
-        let manifest = if content.create {
-            // 新建：使用方只给了路径名，最小配置由本插件自持
+        // 无名字（写在挂载点目录自身）→ 「新建一项，名字由本插件生成」。
+        // 目录自身没有可覆盖的目标，因此必须有 create 意图（见 `VdfsProvider::write`）。
+        let id = if path.trim_matches('/').is_empty() {
+            if !content.create {
+                return Err(VdfsError::invalid(format!(
+                    "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
+                )));
+            }
+            crate::providers::vdfs_service::entry::auto_id(PLUGIN_MCP)
+        } else {
+            id_of(path)
+        };
+        let text = content.as_text().unwrap_or_default();
+        // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
+        // 填好的字段必须原样落盘。唯一例外是**内容为空**——「先建一个，随后再填」
+        // 是合法形态，此时落一份最小配置。
+        let manifest = if content.create && text.trim().is_empty() {
+            // 使用方只给了地址（或连名字都没有），最小配置由本插件自持
             new_manifest(&id)
         } else {
-            serde_json::from_str::<serde_json::Value>(content.as_text().unwrap_or_default())
+            serde_json::from_str::<serde_json::Value>(text)
                 .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
         };
         // 「条目 id 由路径承载」：编辑链路下发的 manifest 不含 id，校验前先补齐
@@ -610,3 +639,7 @@ impl Plugin for McpPlugin {
 }
 
 crate::submit_object_creator!(PLUGIN_MCP, McpPlugin::build, dyn Plugin);
+
+#[cfg(test)]
+#[path = "plugin.test.rs"]
+mod tests;

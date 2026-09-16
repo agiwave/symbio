@@ -158,11 +158,18 @@ fn import_name_of(path: &str) -> String {
 /// 摘要优先 YAML frontmatter（name / description），无 frontmatter 时回落到旧的
 /// 标题 / Description 行解析；主文件缺失（`raw = None`）时降级为以 id 呈现的
 /// 占位条目——列表不得因单个坏条目而少一项或多失败。
+/// 详情定义（JSON 形态）——**唯一出处**：节点 `schema` 与新建类型 `schema` 都读它，
+/// 因此「点新建」的草稿表单与「选中一项」的详情表单是同一张。
+fn detail_definition() -> serde_json::Value {
+    serde_json::to_value(super::detail::skill_detail_definition())
+        .unwrap_or(serde_json::Value::Null)
+}
+
 fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::file(id, id, VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_SKILL.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
-    n.schema = serde_json::to_value(super::detail::skill_detail_definition()).ok();
+    n.schema = Some(detail_definition());
     n.status = "active".to_string();
     let Some(text) = raw else { return n };
 
@@ -252,11 +259,17 @@ impl VdfsProvider for SkillPlugin {
         Some(PLUGIN_SKILL)
     }
 
-    /// 根下可新建两类：表单新建（最小 SKILL.md）+ 整包导入（zip）
+    /// 根下可新建两类：表单新建 + 整包导入（zip）
+    ///
+    /// `ext = skill` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
+    /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义（草稿详情页据此
+    /// 渲染出与落成后同一张表单）。
     fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![
             VdfsNewType::new(PLUGIN_SKILL, LABEL)
-                .with_description(format!("新建{LABEL}（先落一份默认配置，随后在详情里完善）")),
+                .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
+                .with_node_ext(VDFS_EXT_FORM)
+                .with_schema(detail_definition()),
             VdfsNewType::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
                 .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
                 .with_source(VDFS_NEW_SOURCE_FILE),
@@ -308,14 +321,16 @@ impl VdfsProvider for SkillPlugin {
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        if path.is_empty() {
-            return Err(VdfsError::invalid(format!(
-                "{LABEL}整包只能导入到挂载根下：{path}"
-            )));
-        }
         let s = store();
-        // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）
+        // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）。
+        // 导入的**名字来自目标地址末段**（使用方由文件名推导），所以必须有名字：
+        // 「无名字导入」无从命名，直接拒绝。
         if content.binary {
+            if path.trim_matches('/').is_empty() {
+                return Err(VdfsError::invalid(format!(
+                    "{LABEL}整包导入需要目标名（地址末段）：{path}"
+                )));
+            }
             let bytes = crate::providers::vdfs_service::decode_b64(
                 content.b64.as_deref().unwrap_or_default(),
             )
@@ -328,11 +343,26 @@ impl VdfsProvider for SkillPlugin {
                 etag: None,
             });
         }
-        let id = id_of(path);
-        let manifest = if content.create {
+        // 无名字（写在挂载点目录自身）→ 「新建一项，名字由本插件生成」。
+        // 目录自身没有可覆盖的目标，因此必须有 create 意图（见 `VdfsProvider::write`）。
+        let id = if path.trim_matches('/').is_empty() {
+            if !content.create {
+                return Err(VdfsError::invalid(format!(
+                    "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
+                )));
+            }
+            crate::providers::vdfs_service::entry::auto_id(PLUGIN_SKILL)
+        } else {
+            id_of(path)
+        };
+        let text = content.as_text().unwrap_or_default();
+        // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
+        // 填好的字段必须原样落盘。唯一例外是**内容为空**——「先建一个，随后再填」
+        // 是合法形态，此时落一份最小内容。
+        let manifest = if content.create && text.trim().is_empty() {
             new_manifest(&id)
         } else {
-            serde_json::from_str::<serde_json::Value>(content.as_text().unwrap_or_default())
+            serde_json::from_str::<serde_json::Value>(text)
                 .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
         };
         // SKILL.md 是 Markdown：走**纯文本**写入，不能被 JSON 序列化
@@ -533,119 +563,5 @@ impl Plugin for SkillPlugin {
 crate::submit_object_creator!(PLUGIN_SKILL, SkillPlugin::build, dyn Plugin);
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 路径末段才是 id：`.vdfs/skill/<id>.skill` 与裸 `<id>` 同解
-    #[test]
-    fn id_of_strips_presentation_extension() {
-        assert_eq!(id_of("demo"), "demo");
-        assert_eq!(id_of("demo.skill"), "demo");
-    }
-
-    /// 导入建议名：新建地址是 `<name>.zip`，建议名即去掉 `.zip` 的 `<name>`
-    #[test]
-    fn import_name_of_strips_zip() {
-        assert_eq!(import_name_of("demo.zip"), "demo");
-        assert_eq!(import_name_of("demo.skill"), "demo");
-    }
-
-    /// 摘要优先 YAML frontmatter：`name` 作标题、`description` 作摘要，
-    /// 且详情定义随节点 `schema` 下发（详情页表单预填靠 `read`）
-    #[test]
-    fn node_prefers_frontmatter() {
-        let md = "---\nname: 演示\ndescription: 一个用于演示的技能\n---\n\n正文\n";
-        let n = node_of("demo", Some(md));
-        assert_eq!(n.name, "demo");
-        assert_eq!(n.title, "演示");
-        assert_eq!(n.description.as_deref(), Some("一个用于演示的技能"));
-        assert_eq!(n.ext.as_deref(), Some(VDFS_EXT_FORM));
-        assert!(n.schema.is_some(), "详情定义必须随节点下发");
-    }
-
-    /// 无 frontmatter 的旧格式回落：首行标题 + Description 行
-    #[test]
-    fn node_falls_back_to_legacy_heading() {
-        let md = "# 旧技能\n\n**Description** 旧格式描述\n";
-        let n = node_of("old", Some(md));
-        assert_eq!(n.title, "旧技能");
-        assert_eq!(n.description.as_deref(), Some("旧格式描述"));
-    }
-
-    /// 主文件缺失（坏条目）降级为 id 占位，不阻断整张列表
-    #[test]
-    fn node_degrades_to_the_id_when_manifest_unreadable() {
-        let n = node_of("broken", None);
-        assert_eq!(n.name, "broken");
-        assert_eq!(n.title, "broken");
-        assert!(n.description.is_none());
-    }
-
-    /// 回归：**写进去的必须能被读回来**（写读同源）。
-    ///
-    /// SKILL.md 是 Markdown，只能走纯文本落盘。若把 manifest 当 JSON 值写入，
-    /// 落盘会变成 `"---\nname: ...\n"`（外层引号 + `\n` 被转义成字面两字符），
-    /// 而 `parse_skill_md` 以 `strip_prefix("---\n")` 起手 ⇒ 必然失败：
-    /// 保存报成功、文件却是坏的，下次加载解析不出 frontmatter。
-    #[test]
-    fn validate_manifest_produces_parsable_markdown() {
-        let manifest = serde_json::json!({
-            "id": "demo",
-            "name": "demo",
-            "description": "一个用于演示的技能描述",
-        });
-        let md = validate_manifest("demo", &manifest).expect("BUG-SR6 / SR7 均应满足");
-        assert!(
-            md.starts_with("---\n"),
-            "SKILL.md 必须以 frontmatter 起始标记开头（不是引号），实际开头：{:?}",
-            &md[..md.len().min(12)]
-        );
-        // 关键断言：落盘文本经同一份摘要解析能还原出填写的字段
-        let n = node_of("demo", Some(&md));
-        assert_eq!(n.title, "demo");
-        assert_eq!(n.description.as_deref(), Some("一个用于演示的技能描述"));
-    }
-
-    /// 新建链路：最小清单同样必须产出合法 SKILL.md（否则一新建就是坏文件）
-    #[test]
-    fn new_manifest_passes_validation() {
-        let m = new_manifest("demo");
-        let md = validate_manifest("demo", &m).expect("新建的最小清单必须合法");
-        assert!(md.starts_with("---\n"));
-        let n = node_of("demo", Some(&md));
-        assert_eq!(n.title, "demo");
-        assert!(n.description.is_some());
-    }
-
-    /// 集中实现接上真实磁盘：写 → 列 → 读 → 删全程往返
-    /// （`read` 给出**表单形状**，Markdown 原文走条目内部地址）
-    #[tokio::test]
-    async fn store_roundtrip_through_the_dir_impl() {
-        let tmp = tempfile::tempdir().unwrap();
-        let s = DirVdfs::at(tmp.path().join("plugins/skill"), PLUGIN_SKILL, MANIFEST);
-        let ctx = VdfsContext::empty();
-
-        let md = validate_manifest("demo", &new_manifest("demo")).unwrap();
-        s.write_text("demo", &md).await.unwrap();
-
-        let entries = s.entries().await.unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(
-            node_of(&entries[0].id, entries[0].raw.as_deref()).title,
-            "demo"
-        );
-        assert_eq!(s.read_text("demo").await.unwrap(), md);
-        assert!(
-            s.list(&ctx, "").await.unwrap()[0].is_dir(),
-            "条目内部可下钻"
-        );
-        assert_eq!(
-            s.read(&ctx, "demo/SKILL.md").await.unwrap().as_text(),
-            Some(md.as_str()),
-            "原文地址读到的就是落盘原文"
-        );
-
-        s.remove("demo").await.unwrap();
-        assert!(s.entries().await.unwrap().is_empty());
-    }
-}
+#[path = "plugin.test.rs"]
+mod tests;

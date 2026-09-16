@@ -405,6 +405,12 @@ use crate::symbio_core::vdfs_provider::{
 
 const LABEL: &str = "模型";
 
+/// 详情定义（JSON 形态）——**唯一出处**：节点 `schema` 与新建类型 `schema` 都读它，
+/// 因此「点新建」的草稿表单与「选中一项」的详情表单是同一张（用户第 1 点）。
+fn detail_definition() -> Value {
+    serde_json::to_value(super::detail::model_detail_definition()).unwrap_or(Value::Null)
+}
+
 /// 配置 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
 ///
 /// 标题取 `name`、副标题取 `model`、状态取 `enabled`——这三样是 model 的呈现
@@ -413,7 +419,7 @@ fn node_of(p: &ModelProviderConfig, updated_at: Option<i64>) -> VdfsNode {
     let mut n = VdfsNode::file(&p.id, p.name.clone(), VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_MODEL.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
-    n.schema = serde_json::to_value(super::detail::model_detail_definition()).ok();
+    n.schema = Some(detail_definition());
     n.status = if p.enabled {
         VDFS_STATUS_ACTIVE.to_string()
     } else {
@@ -628,9 +634,15 @@ impl VdfsProvider for ModelPlugin {
     }
 
     /// 根下只能新建「模型」条目（model 不支持整包导入）
+    ///
+    /// `ext = model` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
+    /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义：使用方据此
+    /// 在「还没创建」时就能渲染出与落成后同一张表单（草稿详情页）。
     fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![VdfsNewType::new(PLUGIN_MODEL, LABEL)
-            .with_description(format!("新建{LABEL}（先落一份默认配置，随后在详情里完善）"))]
+            .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
+            .with_node_ext(VDFS_EXT_FORM)
+            .with_schema(detail_definition())]
     }
 
     async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
@@ -682,11 +694,15 @@ impl VdfsProvider for ModelPlugin {
             return Err(VdfsError::invalid(format!("{LABEL}不支持整包导入（zip）")));
         }
         let id = Self::id_of(path);
-        let manifest = if content.create {
-            // 新建：使用方只给了路径名，最小配置由本插件自持
+        let text = content.as_text().unwrap_or_default();
+        // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
+        // 填好的字段必须原样落盘（否则「填完再保存」等于白填）。唯一例外是
+        // **内容为空**——「先建一个，随后再填」是合法形态，此时落一份最小配置。
+        let manifest = if content.create && text.trim().is_empty() {
+            // 使用方只给了地址（或连名字都没有），最小配置由本插件自持
             self.new_manifest(&id, &id)
         } else {
-            serde_json::from_str::<Value>(content.as_text().unwrap_or_default())
+            serde_json::from_str::<Value>(text)
                 .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
         };
         let normalized = self
@@ -756,130 +772,8 @@ impl VdfsProvider for ModelPlugin {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 路径末段才是 id：`.vdfs/model/<id>.model` 与裸 `<id>` 同解
-    #[test]
-    fn id_of_strips_presentation_extension() {
-        assert_eq!(ModelPlugin::id_of("openai-1"), "openai-1");
-        assert_eq!(ModelPlugin::id_of("openai-1.model"), "openai-1");
-        assert_eq!(ModelPlugin::id_of("a/b/openai-1.model"), "openai-1");
-    }
-
-    /// 新建的最小清单必须带 `skip_validation`：此时用户还没填 key / base，
-    /// 走连接校验必然失败（新建态不该被校验挡住）。
-    #[test]
-    fn new_manifest_skips_validation() {
-        let v = ModelPlugin::default().new_manifest("p1", "p1");
-        assert_eq!(v.get("id").and_then(|x| x.as_str()), Some("p1"));
-        assert_eq!(
-            v.get("skip_validation").and_then(|x| x.as_bool()),
-            Some(true)
-        );
-    }
-
-    fn sample() -> ModelProviderConfig {
-        ModelProviderConfig {
-            id: "openai-1".into(),
-            name: "我的 OpenAI".into(),
-            provider: "openai".into(),
-            api_base: "https://api.openai.com/v1".into(),
-            model: "gpt-4o".into(),
-            ..Default::default()
-        }
-    }
-
-    /// `sample()` 的 JSON 形态（落盘原文 / 前端下发的 manifest 都是这个形状）
-    fn sample_value() -> Value {
-        serde_json::to_value(sample()).unwrap()
-    }
-
-    /// 呈现差异（标题 / 副标题 / 状态 / 详情定义）都落在节点上，
-    /// 且 `ext = form` 时 `schema` 必须随节点下发——否则前端渲染不出表单。
-    #[test]
-    fn node_carries_presentation_differential() {
-        let n = node_of(&sample(), Some(123));
-        assert_eq!(n.name, "openai-1");
-        assert_eq!(n.title, "我的 OpenAI");
-        assert_eq!(n.kind, PLUGIN_MODEL);
-        assert_eq!(n.ext.as_deref(), Some(VDFS_EXT_FORM));
-        assert_eq!(n.status, VDFS_STATUS_ACTIVE);
-        assert_eq!(n.description.as_deref(), Some("gpt-4o"));
-        assert_eq!(n.updated_at, Some(123));
-        assert!(n.schema.is_some(), "详情定义必须随节点下发");
-        // 停用态映射成 disabled（机制只看 status 字符串，不看 kind）
-        let mut off = sample();
-        off.enabled = false;
-        assert_eq!(node_of(&off, None).status, VDFS_STATUS_DISABLED);
-    }
-
-    /// 清单缺 `id` 时以磁盘段名补全（编辑链路的不变量），已有值原样保留
-    #[test]
-    fn config_of_falls_back_to_the_path_segment() {
-        let bare = serde_json::json!({
-            "provider": "openai",
-            "api_base": "https://api.openai.com/v1",
-            "model": "gpt-4o",
-        })
-        .to_string();
-        let p = config_of("seg-1", &bare).expect("补 id 后应解析成功");
-        assert_eq!(p.id, "seg-1");
-        // `name` 的 serde 缺省是 "Default"；显式空串才回落磁盘段名
-        assert_eq!(p.name, "Default");
-        let blank = serde_json::json!({
-            "provider": "openai",
-            "api_base": "https://api.openai.com/v1",
-            "api_key": null,
-            "model": "gpt-4o",
-            "name": "",
-        })
-        .to_string();
-        assert_eq!(config_of("seg-2", &blank).unwrap().name, "seg-2");
-        // 已有值原样保留
-        let full = serde_json::to_string(&sample()).unwrap();
-        assert_eq!(config_of("other", &full).unwrap().id, "openai-1");
-        assert_eq!(config_of("other", &full).unwrap().name, "我的 OpenAI");
-        // 坏清单不是配置：不产出节点（列表宁可少一项）
-        assert!(config_of("x", "not json").is_none());
-        // 写入路径同样补 id（否则「编辑已有 Provider 保存」必报 missing field `id`）
-        assert_eq!(
-            with_id(&serde_json::json!({ "provider": "openai" }), "p9")
-                .get("id")
-                .and_then(|v| v.as_str()),
-            Some("p9")
-        );
-        assert_eq!(
-            with_id(&sample_value(), "p9")
-                .get("id")
-                .and_then(|v| v.as_str()),
-            Some("openai-1"),
-            "已有 id 不被路径段覆盖"
-        );
-    }
-
-    /// 内存镜像是 `list` 的唯一来源：灌进去的条目才列得出来
-    #[tokio::test]
-    async fn list_comes_from_the_memory_mirror() {
-        let plugin = ModelPlugin::default();
-        let ctx = VdfsContext::empty();
-        assert!(plugin.list(&ctx, "").await.unwrap().is_empty());
-
-        plugin
-            .entries
-            .set("openai-1", serde_json::to_string(&sample()).unwrap());
-        // 坏条目降级：列不出来，而不是列一个空壳
-        plugin.entries.set("broken", "}}}");
-        let nodes = plugin.list(&ctx, "").await.unwrap();
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].name, "openai-1");
-        assert_eq!(nodes[0].title, "我的 OpenAI");
-        assert!(
-            plugin.list(&ctx, "openai-1").await.is_err(),
-            "叶子资源无子项"
-        );
-    }
-}
+#[path = "plugin.test.rs"]
+mod tests;
 
 crate::submit_object_creator!(PLUGIN_MODEL, ModelPlugin::build, dyn Plugin);
 

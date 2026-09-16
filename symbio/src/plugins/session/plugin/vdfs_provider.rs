@@ -307,6 +307,18 @@ impl vdfs::VdfsProvider for SessionPlugin {
             }
             // 会话本身（`path` 即会话 id；新建时是 `<标题>.session`）
             VdfsSessionPath::Session(_) => {}
+            // 挂载根 = 「新建一个会话，名字由 provider 生成」。
+            //
+            // 写目录自身没有可覆盖的目标，因此 `create` 是唯一合法意图
+            // （见 `VdfsProvider::write` 的两种目标形态）；缺它即报错，
+            // 不静默落成「一次无意义的写」。
+            VdfsSessionPath::Root => {
+                if !content.create {
+                    return Err(vdfs::VdfsError::invalid(
+                        "写会话挂载根需要 create 意图：目录自身没有可覆盖的目标",
+                    ));
+                }
+            }
             VdfsSessionPath::Messages { .. } => {
                 return Err(vdfs::VdfsError::Forbidden(
                     "转写列表只读：发言请走聊天协议（一次发言触发一整轮编排）".to_string(),
@@ -326,12 +338,36 @@ impl vdfs::VdfsProvider for SessionPlugin {
             .as_object()
             .ok_or_else(|| vdfs::VdfsError::invalid("会话写入需要 JSON 对象"))?;
 
-        // 新建：id 由 provider 生成，路径名（去扩展名）作标题
+        // 新建：**id 由 provider 生成**（它是存储细节，不属于使用方的知识）。
+        // 名字（若有）在路径末段里——写挂载根时没有名字，标题留给
+        // `display_title` 从首条消息派生（那条规则只有一处实现，使用方不预造）。
         if content.create {
-            let title = title_from_new_path(path);
             let id = uuid::Uuid::new_v4().to_string();
             let mut session = Session::new(&id);
-            session.metadata = json!({ "title": title, "created_via": "vdfs" });
+            let mut meta = serde_json::Map::new();
+            // 使用方给的 metadata（草稿态选择的 workdir / agent / model / mode…）：
+            // 与 `session/update` 同一浅合并语义，字段名由使用方与插件约定，这里不解释
+            if let Some(incoming) = obj.get("metadata").and_then(Value::as_object) {
+                for (k, v) in incoming {
+                    meta.insert(k.clone(), v.clone());
+                }
+            }
+            // 具名新建（`<名字>.session`）→ 名字作标题；写目录自身（无名字）→ 不写标题
+            if !path.trim_matches('/').is_empty() {
+                meta.insert(
+                    "title".to_string(),
+                    Value::String(title_from_new_path(path)),
+                );
+            }
+            // 显式 title 优先于路径名（使用方可以只给 title，不给 metadata）
+            if let Some(t) = obj.get("title").and_then(Value::as_str) {
+                if !t.trim().is_empty() {
+                    meta.insert("title".to_string(), Value::String(t.trim().to_string()));
+                }
+            }
+            meta.entry("created_via".to_string())
+                .or_insert_with(|| Value::String("vdfs".to_string()));
+            session.metadata = Value::Object(meta);
             session.updated_at = now_ms();
             self.save_session(&session)
                 .await
