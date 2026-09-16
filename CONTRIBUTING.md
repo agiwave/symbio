@@ -74,6 +74,9 @@ git config core.hooksPath scripts/git-hooks
 - ⚠️⚠️ **批量改名绝不用 `git rm` / `git mv`**：它们写索引，被 SIGTERM 中断后留下 0 字节 `.git/index.lock` 并写坏索引 ⇒ 上百文件误报「已删除」。正解 = 纯文件系统改名 + 最后一次 `git add -A`。**恢复**：`rm -f .git/index.lock` → `git checkout -- .`（索引损坏时 `reset --hard` 不可靠）。单个文件用 `git mv` 无妨。
 - ⚠️ **无备份绝不 `git checkout -- .` / 大范围删除**。回滚先 `stash push` 或 `git diff > /c/Temp/x.patch`。
 - ⚠️ **rustfmt 只用 `cargo fmt`**，绝不裸跑 `rustfmt`（工具链锁定版本不同 ⇒ 格式漂移）。
+- ⚠️ 改 `.github/workflows/*.yml` 后**先自检语法**：YAML 错了 CI 会直接不触发（而非报错），
+  很容易误判成"没跑"。本机若无 `js-yaml`，可用 `python -c "import yaml; yaml.safe_load(open(...))"`
+  （必要时在隔离 venv 里 `pip install pyyaml`）。
 - ⚠️ vitest 4 的 `toBe(v, 'msg')` 只收 1 个参数（写两个参数静默失效）。
 - ⚠️ `.workbuddy-ai/` 被 gitignore：**不要提交、不要删除**。仓库另有 `.workbuddy/`（旧 harness 遗留）——以 `.workbuddy-ai/` 为准。
 
