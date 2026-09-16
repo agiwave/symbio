@@ -440,7 +440,10 @@ async fn session_list_pages_before_cursor() {
     assert_eq!(ids(&page2), vec!["c"]);
 
     // 不传参数 = 全量（与 `list_sessions` 同义）
-    assert_eq!(ids(&store.list_sessions().await.unwrap()), vec!["a", "b", "c"]);
+    assert_eq!(
+        ids(&store.list_sessions().await.unwrap()),
+        vec!["a", "b", "c"]
+    );
 
     // 游标是最后一页 ⇒ 空页，自然收敛
     assert!(store

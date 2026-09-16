@@ -27,9 +27,10 @@ use crate::symbio_core::FinishReason;
 /// 提升为模块级常量，供 `close_turn` 使用，取值不变）。
 const MAX_CONTINUE_ROUNDS: u32 = 3;
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, ModelProvider, Plugin, PluginChannel, PluginError,
-    PluginFrame, Usage,
+    CapabilityMeta, InvokeRequest, InvokeRequestExt, ModelProvider, Plugin, PluginChannel,
+    PluginError, PluginFrame, Usage,
 };
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -47,6 +48,113 @@ use crate::symbio_core::schemas::session::session_config::SessionConfig;
 struct SessionContext {
     pub messages: Vec<ChatMessage>,
     pub session: Arc<dyn ChatSession>,
+}
+
+/// 请求级不可变配置（`model_chat::Request` 的取值快照，全程只读）。
+///
+/// 收口前，`req.xxx.unwrap_or(cfg_defaults.yyy)` 散落在主循环各处；现在只在构造
+/// 这一份快照时求值一次，下游阶段函数只读快照字段。默认值的唯一真源仍是
+/// `SessionConfig`（审计 C2）——本结构只是它的**请求级投影**，不引入第二份默认值。
+struct TurnRequest {
+    /// 显式软上限（`None` = 不限制；`Some(0)` 与 `None` 同义）
+    max_tool_rounds: Option<usize>,
+    auto_compress: bool,
+    enable_compact_tool: bool,
+    tool_context_window: usize,
+    load_history: bool,
+    system_prompt: Option<String>,
+    provider_id: Option<String>,
+}
+
+impl TurnRequest {
+    fn new(req: &model_chat::Request) -> Self {
+        let defaults = SessionConfig::default();
+        Self {
+            // 用户明确要求**不要**设置 max_tool_rounds 硬性上限（智能体会话轮次越来越
+            // 多）。默认（request 未显式给出）=「无上限」；仅调用方**显式**设置时才作为
+            // 软上限。`Some(0)` 与 `None` 同义（不限制）——与
+            // `SessionConfig::max_tool_rounds` 的 "0 = 不限制" 契约一致，
+            // 避免 0 被解释成"0 轮即熔断"。
+            max_tool_rounds: req.max_tool_rounds.filter(|n| *n > 0),
+            auto_compress: req.auto_compress.unwrap_or(defaults.auto_compress),
+            enable_compact_tool: req
+                .enable_compact_tool
+                .unwrap_or(defaults.enable_compact_tool),
+            tool_context_window: req
+                .tool_context_window
+                .unwrap_or(defaults.tool_context_window),
+            // 请求级默认（该字段无配置对应项），语义为"缺省即加载历史"。
+            load_history: req.load_history.unwrap_or(true),
+            system_prompt: req.system_prompt.clone(),
+            provider_id: req.provider_id.clone(),
+        }
+    }
+}
+
+/// 轮次状态：请求作用域内的可变状态。
+///
+/// 收口前这些量散落在 `run_chat_loop` 的循环作用域里，并以 6 个 `&mut` 参数逐个
+/// 穿进 `close_turn`；现在收成一个结构体，主循环与阶段函数共享同一份状态。
+#[derive(Default)]
+struct TurnState {
+    /// 用户中止标志（`provider.execute_turn` 与工具执行共享同一份）
+    abort_flag: Arc<AtomicBool>,
+    /// 已完成的工具轮次（跨轮累加；软上限判定与 fade 判定都读它）
+    tool_rounds: usize,
+    /// 长度截断自动续写次数（跨轮累加）
+    continuation_count: u32,
+    /// 水位提醒一次性标记（主动压缩成功后重置，允许上下文回落后再次提醒）
+    nudged_this_request: bool,
+    /// 增量落库锚点：本轮已落库到的下标（每轮开始时重置为本轮起始消息数）
+    last_saved: usize,
+    /// 本轮已派发、尚未产出结果的工具调用 id —— **启动条件的权威判据**。
+    ///
+    /// 级别 1（同步工具执行）：`close_turn` 把本批工具全部跑完才返回，回到闸门时
+    /// 该集合恒为空。
+    /// 级别 2（异步工具调用）：`settle_turn` 把每个工具 spawn 出去并登记 id，
+    /// 完成回调逐个移除；全部移除后唤醒主循环——**不完整不唤醒**。
+    in_flight_tools: HashSet<String>,
+}
+
+/// 主循环的唯一退出原因。
+///
+/// 每个出口只负责**判定原因**；收尾（提示文案 + 增量落库 + Stop 钩子 + 返回语义）
+/// 统一由 [`finish_turn`] 执行——新增出口不必再记得补齐三件套。
+#[derive(Debug)]
+enum TurnExit {
+    /// 正常收尾：无工具调用 / 工具待用户输入。
+    Completed,
+    /// 循环顶部的中止检查点：上一轮 Turn 已定稿落库，**不冒泡** `Err(Aborted)`
+    /// （否则消费循环的 `persist_failure` 会把成功的 Turn 误回滚为 Failed）。
+    AbortedAtBoundary,
+    /// 显式软上限：先广播明确提示再退出，绝不静默。
+    MaxToolRounds { max: usize },
+    /// 用户中止且**在途 Turn 尚未定稿**：冒泡 `Err(Aborted)`，由消费循环收尾为
+    /// Failed + 错误条 + 重试入口。
+    Aborted,
+    /// LLM / 编排失败：冒泡原始错误。
+    Failed(PluginError),
+    /// resume 已完成，无需进入主循环。
+    ResumeDone,
+}
+
+/// 主循环顶部的唯一闸门：**启动条件 + 退出条件**。
+#[derive(Debug)]
+enum Gate {
+    /// 条件齐备 → 进入本轮准备与推理。
+    Proceed,
+    /// 在途工具尚未全部产出结果 → 不唤醒本轮（详见 [`gate_turn`]）。
+    WaitForTools,
+    /// 必须退出，携带原因。
+    Exit(TurnExit),
+}
+
+/// 本轮推理产物（`TurnOutput` 被 `into_messages` 按值消费前取出的字段）。
+struct TurnResult {
+    root_id: String,
+    tools_done: Vec<ToolCallInfo>,
+    finish: FinishReason,
+    had_tool: bool,
 }
 
 /// Stop 钩子的幂等触发器。
@@ -326,7 +434,13 @@ pub async fn run_chat_loop(
     ctx: Arc<dyn InvokeRequest>,
     mut channel: PluginChannel,
 ) -> Result<(), PluginError> {
+    // ── 前步骤 ①：请求解析与请求级配置快照 ─────────────────────────────────
     let mut req: model_chat::Request = ctx.payload()?;
+    // 请求体未给出的字段一律回落到 `SessionConfig::default()`，本函数不再自带魔法数
+    // ——默认值的唯一真源在配置层（审计 C2）。历史上这里是 `unwrap_or(true)` /
+    // `unwrap_or(false)` / `unwrap_or(15)` 三份影子默认值，与配置默认值恰好相等纯属
+    // 巧合，改配置会静默失效。
+    let turn_req = TurnRequest::new(&req);
 
     plugin_info!(
         "session",
@@ -334,42 +448,19 @@ pub async fn run_chat_loop(
         orchestrator.provider.api_protocol()
     );
 
-    // 用户明确要求**不要**设置 max_tool_rounds 硬性上限（智能体会话轮次越来越多）。
-    // 因此默认（request 未显式给出）=「无上限」；仅在调用方**显式**设置时才作为软上限并给出提示。
-    // `Some(0)` 与 `None` 同义（不限制）——与 `SessionConfig::max_tool_rounds` 的 "0 = 不限制"
-    // 契约保持一致，避免 0 被解释成"0 轮即熔断"。
-    let configured_max_tool_rounds = req.max_tool_rounds.filter(|n| *n > 0);
-    // 审计 C2（§3.2 默认值双源）：请求体未给出的字段一律回落到
-    // `SessionConfig::default()`，本函数不再自带魔法数——默认值的唯一真源在配置层。
-    // 历史上这里是 `unwrap_or(true)` / `unwrap_or(false)` / `unwrap_or(15)` 三份影子默认值，
-    // 与配置默认值恰好相等纯属巧合，改配置会静默失效。
-    let cfg_defaults = SessionConfig::default();
-    let auto_compress = req.auto_compress.unwrap_or(cfg_defaults.auto_compress);
-    // context_compact 主动压缩机制默认关闭，必须在插件配置中显式开启才生效
-    let enable_compact_tool = req
-        .enable_compact_tool
-        .unwrap_or(cfg_defaults.enable_compact_tool);
-
-    let mut tool_rounds: usize = 0;
-    let mut continuation_count: u32 = 0;
-    // 水位提醒（nudge）一次性标记：每次用户请求生命周期内最多注入一次；
-    // 主动压缩成功后重置（上下文回落后允许再次提醒）。
-    let mut nudged_this_request = false;
-
+    // ── 前步骤 ②：会话引擎 ────────────────────────────────────────────────
     let session = open_chat_session(&ctx).await;
-    // 轮次老化淡化（fade）的两个旋钮：激活阈值与保留窗口。历史上是这里的两个
-    // 硬编码常量（审计 R3：与 `SessionConfig` 双源），现由会话引擎从配置暴露
-    // （`ChatSession::fade_activate_rounds` / `fade_keep_recent_turns`）。
-    // 每次用户请求读一次，与 `configured_max_tool_rounds` 等同类快照保持一致语义。
-    let fade_activate_rounds = session.fade_activate_rounds();
-    let fade_keep_recent_turns = session.fade_keep_recent_turns();
-    let mut single_message = req.single_message;
+
+    // ── 前步骤 ③：轮次状态 + 上下文容器 ───────────────────────────────────
+    let mut turn = TurnState {
+        abort_flag: Arc::new(AtomicBool::new(false)),
+        ..Default::default()
+    };
+    let mut single_message = req.single_message.take();
     let mut context = SessionContext {
         messages: Vec::new(),
         session,
     };
-
-    let abort_flag = Arc::new(AtomicBool::new(false));
 
     // ── 会话恢复（resume）：在 turn 循环前处理 ──────────────────────────────
     //
@@ -387,7 +478,7 @@ pub async fn run_chat_loop(
             orchestrator,
             &ctx,
             &mut channel,
-            &abort_flag,
+            &turn.abort_flag,
             &context.session,
             tr,
         )
@@ -397,24 +488,29 @@ pub async fn run_chat_loop(
                 // 成功：turn 循环会从 session 加载含新工具结果的历史
             }
             Ok(crate::plugins::session::resume::ResumeOutcome::Done) => {
-                fire_stop_hook(orchestrator, &[]).await;
-                return Ok(());
+                return finish_turn(
+                    orchestrator,
+                    &context,
+                    &channel,
+                    &turn,
+                    TurnExit::ResumeDone,
+                )
+                .await;
             }
             Err(e) => {
                 plugin_warn!("session", "[Resume] process_resume failed: {}", e);
-                fire_stop_hook(orchestrator, &[]).await;
-                return Err(e);
+                return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Failed(e))
+                    .await;
             }
         }
     }
 
     loop {
-        // 每轮开始时从 ChatSession 获取最新上下文（轮次窗口生效；骨架化/淡化为请求视图层职责）。
-        // 心跳任务等场景可设置 `load_history = false`：仅用本次 single_message，
-        // 完全不加载历史，也不保留上一轮内存累积（上一轮内容随本轮重置）。
-        // 注：这里的 `unwrap_or(true)` 是**请求级**默认（该字段无配置对应项，
-        // 不属审计 C2 的"配置默认值双源"范畴），语义为"缺省即加载历史"。
-        context.messages = if req.load_history.unwrap_or(true) {
+        // ── 步骤 1：加载本轮上下文 ───────────────────────────────────────────
+        // 每轮开始时从 ChatSession 获取最新上下文（轮次窗口生效；骨架化/淡化为请求
+        // 视图层职责）。心跳任务等场景可设置 `load_history = false`：仅用本次
+        // single_message，完全不加载历史，也不保留上一轮内存累积（随本轮重置）。
+        context.messages = if turn_req.load_history {
             context
                 .session
                 .get_context_messages(None)
@@ -428,7 +524,7 @@ pub async fn run_chat_loop(
         // 首轮追加当前用户消息（去重：避免与存储中已持久化的消息重复）
         // resume 时 single_message=None，不应触发 user_prompt_submit_hook
         //（否则会把工具结果当 user_text 传给 hook，产生错误副作用）。
-        if tool_rounds == 0 {
+        if turn.tool_rounds == 0 {
             let mut had_user_msg = false;
             if let Some(msg) = single_message.take() {
                 if !context.messages.iter().any(|m| m.id == msg.id) {
@@ -441,169 +537,57 @@ pub async fn run_chat_loop(
             }
         }
 
-        let mut last_saved = context.messages.len();
+        turn.last_saved = context.messages.len();
 
-        // 显式软上限：仅当调用方**主动**给出 max_tool_rounds 才生效（默认 None = 无限轮次）。
-        // 达到上限时必须给出明确提示再退出，绝不静默返回。
-        if let Some(max) = configured_max_tool_rounds {
-            if tool_rounds >= max {
-                let _ = channel
-                    .tx
-                    .send(PluginFrame::Data(
-                        serde_json::to_value(session_chat_response::StreamEvent::Error {
-                            error: format!(
-                                "已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"
-                            ),
-                        })
-                        .unwrap_or_default(),
-                    ))
+        // ── 步骤 2：闸门（启动条件 + 退出条件，唯一判定点）───────────────────
+        // 收口前，这里散落 4 处 `if abort_flag { ... return }`（其中两处相邻重复）
+        // 与一处软上限判定，各自重写收尾三件套。
+        match gate_turn(&turn_req, &turn) {
+            Gate::Proceed => {}
+            Gate::WaitForTools => {
+                // 不完整不唤醒：本轮不发起 LLM 请求。级别 1（同步工具执行）下恒不
+                // 命中——工具在 close_turn 内全部跑完才回到这里。级别 2 会在此
+                // await 全部完成的通知后 continue；当前实现退出本轮，由下一次唤醒
+                // （用户消息 / 心跳）重新入闸。
+                plugin_warn!(
+                    "session",
+                    "[Gate] 在途工具未全部产出结果（{} 个），本轮不唤醒",
+                    turn.in_flight_tools.len()
+                );
+                return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Completed)
                     .await;
-                persist_messages(&context, last_saved, &channel).await;
-                fire_stop_hook(orchestrator, &context.messages).await;
-                return Ok(());
             }
-        }
-
-        if abort_flag.load(Ordering::SeqCst) {
-            // 早期 return 路径上的副作用（last_saved 尚未用作流式增量锚点，
-            // 此分支里不更新，但保留 last_saved 维持语义对称）。
-            fire_stop_hook(orchestrator, &context.messages).await;
-            return Ok(());
+            Gate::Exit(exit) => {
+                return finish_turn(orchestrator, &context, &channel, &turn, exit).await
+            }
         }
 
         plugin_info!(
             "session",
             "--- TURN {} START --- (msgs={}, tools={})",
-            tool_rounds,
+            turn.tool_rounds,
             context.messages.len(),
             0
         );
 
-        if check_abort(&abort_flag).await {
-            fire_stop_hook(orchestrator, &context.messages).await;
-            return Ok(());
-        }
-
-        // ── 被动语义压缩（L5：70% 触发）────────────────────────────────
-        // 系统提示词：唯一真源 resolve_system_prompt。解析结果同时供
-        // 压缩开销估算与 execute_turn 实际请求使用，确保插件经 traverse
-        // 注册的系统提示词能真正送达模型。
-        let system_prompt_owned = resolve_system_prompt(
-            req.system_prompt.as_deref(),
-            req.provider_id.as_deref(),
+        // ── 步骤 3：本轮输入准备（收口 ②，唯一准备点）────────────────────────
+        // 系统提示词与工具在同一函数内、同一时刻收集（同一个 CapabilityVisitor），
+        // 并由此派生请求级开销与请求视图；自动压缩、水位提醒一并收口在该函数内。
+        let inputs = match prepare_turn_inputs(
+            orchestrator,
             &ctx,
+            &mut context,
+            &mut channel,
+            &mut turn,
+            &turn_req,
         )
-        .await;
-        let system_prompt_for_request = system_prompt_owned.as_str();
-        if auto_compress {
-            match auto_compress_process(
-                orchestrator,
-                &mut context,
-                &mut channel,
-                &ctx,
-                &abort_flag,
-                system_prompt_for_request,
-                false,
-                None,
-            )
-            .await
-            {
-                Ok(Some(history_count)) => {
-                    plugin_info!(
-                        "session",
-                        "Context compressed: {} messages -> 1 message",
-                        history_count
-                    );
-                    last_saved = context.messages.len();
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    plugin_warn!("session", "auto_compress_process failed: {e}");
-                    fire_stop_hook(orchestrator, &context.messages).await;
-                    return Err(e);
-                }
-            }
-        }
-
-        // ── 水位提醒（nudge）─────────────────────────────────────────────
-        // 估算用量 ≥ 55% 有效上限时，在请求视图末尾注入一条一次性系统提示
-        // （请求级、不落库，由 build_request_view 统一追加），引导模型在
-        // "阶段间隙"主动调用 context_compact（比 70% 硬触发更早、时机更优）。
-        // 门控：提醒只为引导工具调用，跟随工具开关（enable_compact_tool），
-        // 与自动压缩开关解耦（关自动压缩、开工具压缩时仍需提醒）。
-        // 去重：每次用户请求生命周期内最多注入一次（主动压缩成功后重置）；
-        // 提醒不落库，无需扫描历史做去重，也不占用轮次窗口的 User 计数。
-        let mut inject_nudge = false;
-        if enable_compact_tool && !nudged_this_request {
-            let effective_limit = orchestrator.context_limit as usize;
-            let overhead =
-                compression::estimate_request_overhead(system_prompt_for_request, &ctx).await;
-            if compression::should_emit_context_nudge(&context.messages, effective_limit, overhead)
-            {
-                nudged_this_request = true;
-                inject_nudge = true;
-                plugin_info!(
-                    "session",
-                    "[Compress] context nudge emitted (~55% of limit), suggesting context_compact"
-                );
-            }
-        }
-
-        let root_id: String = short_id();
-        emit_streaming_start(&mut channel, &root_id, Some(tool_rounds)).await;
-
-        let mut tools = if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR)
+        .await
         {
-            tool_visitor.list_capability().await
-        } else {
-            Vec::new()
+            Ok(inputs) => inputs,
+            Err(exit) => {
+                return finish_turn(orchestrator, &context, &channel, &turn, exit).await;
+            }
         };
-        // 主动压缩工具：仅当工具压缩启用时暴露给模型（独立于自动压缩开关）。
-        // 执行不走 CapabilityVisitor 分发，由下方拦截逻辑处理（需要编排器内部链路）。
-        if enable_compact_tool {
-            tools.push(compression::context_compact_tool_meta());
-        }
-
-        // 请求视图（唯一入口 build_request_view）：存储视图之上叠加四项**不落库**的
-        // 裁剪，全部只作用于本次 send_request 的请求包，不回写 context.messages——
-        // 存储保持完整历史，last_saved 锚点与 persist_messages 切片不会错位。
-        // 1) 内容节点淡化：B1 保护窗口（末条 + 最近 N 个内容节点）外的超大正文/思考
-        //    做 head/tail 摘要（阈值取会话配置 line_threshold / token 上限 2048）；
-        // 2) fade：轮次过多时淡化较早的工具结果（存储保留全文，视图每轮重建，天然幂等）；
-        // 3) 工具级骨架化：从 CapabilityVisitor 的能力声明（context_retention）动态解析
-        //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
-        //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
-        // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
-        let request_view: Vec<ChatMessage> = {
-            let window = req
-                .tool_context_window
-                .unwrap_or(cfg_defaults.tool_context_window);
-            let retention: std::collections::HashMap<
-                String,
-                crate::symbio_core::ToolContextRetention,
-            > = tools
-                .iter()
-                .filter_map(|t| {
-                    t.context_retention
-                        .filter(|r| !matches!(r, crate::symbio_core::ToolContextRetention::All))
-                        .map(|r| {
-                            let short = t.name.rsplit('/').next().unwrap_or(&t.name);
-                            (short.to_string(), r)
-                        })
-                })
-                .collect();
-            compression::build_request_view(
-                &context.messages,
-                window,
-                &retention,
-                tool_rounds > fade_activate_rounds,
-                fade_keep_recent_turns,
-                context.session.compress_keep_recent(),
-                context.session.line_threshold(),
-                inject_nudge,
-            )
-        };
-        let request_messages: &[ChatMessage] = request_view.as_slice();
 
         // Turn 创建后的首个 abort 检查点：覆盖"压缩阶段中止"等 send_request
         // 之前置位的场景。压缩失败已就地降级（不冒泡），但 abort_flag 仍为
@@ -612,24 +596,23 @@ pub async fn run_chat_loop(
         // 冒泡 Err(Aborted) → 消费循环 ABORTED 分支 → persist_failure 把本轮
         // Turn 收尾为 Failed + "用户手动中止了本次回复"（错误条 + 重试入口），
         // 不会波及上一轮已成功的 Turn（persist_failure 按 failing_turn 子树收窄）。
-        if abort_flag.load(Ordering::SeqCst) {
-            fire_stop_hook(orchestrator, &context.messages).await;
-            return Err(PluginError::Aborted);
+        if turn.abort_flag.load(Ordering::SeqCst) {
+            return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Aborted).await;
         }
 
         let result = orchestrator
             .provider
             .execute_turn(
-                system_prompt_for_request,
-                request_messages,
-                &tools,
-                &root_id,
+                &inputs.system_prompt,
+                &inputs.request_view,
+                &inputs.tools,
+                &inputs.root_id,
                 &mut channel,
-                &abort_flag,
+                &turn.abort_flag,
             )
             .await;
 
-        let mut out = match result {
+        let out = match result {
             Err(PluginError::RetryWithoutContextId) => {
                 for m in &mut context.messages {
                     m.response_id = None;
@@ -653,132 +636,453 @@ pub async fn run_chat_loop(
                 // 后走 persist_failure —— 在途 Turn 持久化为 Failed + error，前端
                 // 可渲染错误条与重试入口；若在此直接返回 Ok，在途 Turn 不落库，
                 // 刷新即消失且无重试入口。
-                fire_stop_hook(orchestrator, &context.messages).await;
-                return Err(PluginError::Aborted);
+                return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Aborted)
+                    .await;
             }
             Err(e) => {
                 plugin_warn!("session", "send_request failed: {e}");
-                fire_stop_hook(orchestrator, &context.messages).await;
-                return Err(e);
+                return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Failed(e))
+                    .await;
             }
             Ok(out) => out,
         };
 
-        if abort_flag.load(Ordering::SeqCst) {
+        if turn.abort_flag.load(Ordering::SeqCst) {
             // 与 Err(PluginError::Aborted) 分支同理：请求结束后才置位的 abort 标志
             // 同样向上冒泡，由消费循环统一收尾（在途 Turn → Failed + error + 可重试）。
             // 仅 send_request 之后的 abort 冒泡；turn 循环顶部的边界检查点不冒泡——
             // 上一轮已定稿落库，冒泡会把成功的 Turn 误回滚为 Failed。
-            fire_stop_hook(orchestrator, &context.messages).await;
-            return Err(PluginError::Aborted);
+            return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Aborted).await;
         }
 
-        let tools_done = out.tool_accumulator.get_completed();
-        // 提前取出本轮的结束原因 / 用量 / 是否出现过工具调用 / 文本子节点 id，
-        // 因为 `out.into_messages` 会按值消费 out，之后无法再读这些字段。
-        let had_tool = out.tool_accumulator.had_any_tool_call();
-        let finish = out.finish.clone();
-        let usage = out.usage;
-        let rtid = out.response_text_child_id.clone();
-        let rrid = out.reasoning_child_id.clone();
+        // ── 步骤 3：推理收尾（定格子节点 → 校准估算 → 并入上下文）────────────
+        let result =
+            settle_reasoning(orchestrator, &mut context, &channel, &inputs.root_id, out).await;
 
-        orchestrator
-            .finalize_assistant_turn(&root_id, &out, &tools_done, &channel)
-            .await;
-
-        // 用 provider 返回的真实用量滚动校准 token 估算。
-        feedback_estimate(usage, &out, &tools_done);
-
-        let new_msgs = out.into_messages(&root_id, tools_done.len());
-        // 工具上下文保留策略：策略不 Stamp 到节点 meta 持久化，
-        // 由 run_chat_loop 在构建 LLM 请求前从 CapabilityVisitor 动态解析，
-        // 节点 name 即 LLM 可见工具名，与声明名直接匹配。
-        context.messages.extend(new_msgs);
-
-        // 被长度截断的 Turn 打标（供前端「继续」按钮与回溯），不得静默结束。
-        if finish.is_length() {
-            for m in context.messages.iter_mut() {
-                if m.id == rtid || m.id == rrid {
-                    let mut meta = m.meta.clone().unwrap_or_else(|| serde_json::json!({}));
-                    meta["finish_reason"] = serde_json::json!("length");
-                    m.meta = Some(meta);
-                }
-            }
-        }
-
-        let flow = close_turn(
+        // ── 步骤 4：本轮结算 + 下一步判定 ───────────────────────────────────
+        match close_turn(
             orchestrator,
             ctx.clone(),
             &mut channel,
             &mut context,
-            &abort_flag,
-            &root_id,
-            tools_done,
-            finish,
-            had_tool,
-            &mut tool_rounds,
-            last_saved,
-            &mut continuation_count,
-            &mut nudged_this_request,
-            enable_compact_tool,
+            &mut turn,
+            result,
+            &turn_req,
         )
-        .await;
-        match flow {
-            TurnFlow::Finish(r) => return r,
+        .await
+        {
             TurnFlow::NextTurn => {}
+            TurnFlow::Finish(exit) => {
+                return finish_turn(orchestrator, &context, &channel, &turn, exit).await
+            }
         }
     }
 }
 
-/// `run_chat_loop` 单轮的流向（批次 D 拆分产物）。
+/// `run_chat_loop` 单轮的流向。
 ///
-/// - `Finish`：本轮即请求终态，携带 `run_chat_loop` 应返回的结果
+/// - `Finish`：本轮即请求终态，携带退出原因（收尾由 [`finish_turn`] 统一执行）
 /// - `NextTurn`：工具轮结束，进入下一轮 LLM 请求
 enum TurnFlow {
-    Finish(Result<(), PluginError>),
+    Finish(TurnExit),
     NextTurn,
+}
+
+/// 主循环顶部的**唯一闸门**：启动条件 + 退出条件。
+///
+/// 收口前，循环顶部与推理前后散落 4 处 `if abort_flag { ... return }`（其中两处
+/// 相邻重复，中间只隔一行日志），软上限判定另占一处，每处各自重写收尾三件套。
+/// 现在：**退出条件只在本函数判定一次**，收尾动作只在 [`finish_turn`] 出现一次。
+///
+/// ## 启动条件：本轮在途工具是否已全部产出结果
+///
+/// 语义是「多个工具调用全部结束后才唤醒主循环，不完整不唤醒」。判据取自
+/// [`TurnState::in_flight_tools`]（运行时在途集合），**不是**"历史中所有
+/// ToolCall 都有结果子节点"——
+///
+/// ⚠️ 后者在本代码库并不成立：「ToolCall 无结果」是**合法状态**。交互模式下工具批
+/// 被用户审批中断时，本批剩余 ToolCall 会被有意留空，由请求视图层
+/// `flatten_chat_messages`（`plugins/model/message_builder.rs`）合成占位 tool 结果
+/// 喂回模型。按历史判定会让 approve/reject 恢复后的续写被永久挡住。
+///
+/// 级别 1（当前，同步工具执行）：`close_turn` 内的 `process_tool_calls_async` 会把
+/// 本批工具全部跑完才返回，回到闸门时在途集合恒为空 ⇒ 恒放行。
+/// 级别 2（异步工具调用）：`settle_turn` 把每个工具 spawn 出去并登记 id，完成回调
+/// 逐个移除；集合非空时本函数返回 [`Gate::WaitForTools`]。
+fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate {
+    // ── 启动条件 ─────────────────────────────────────────────────────────
+    if !turn.in_flight_tools.is_empty() {
+        return Gate::WaitForTools;
+    }
+
+    // ── 退出条件 ①：显式软上限 ────────────────────────────────────────────
+    // 仅当调用方**主动**给出 max_tool_rounds 才生效（默认 None = 无限轮次）。
+    // 达到上限时必须给出明确提示再退出，绝不静默返回。
+    if let Some(max) = req.max_tool_rounds {
+        if turn.tool_rounds >= max {
+            return Gate::Exit(TurnExit::MaxToolRounds { max });
+        }
+    }
+
+    // ── 退出条件 ②：用户中止（边界检查点）─────────────────────────────────
+    // 循环顶部的中止检查点**不冒泡** `Err(Aborted)`：上一轮 Turn 已定稿落库，
+    // 冒泡会让消费循环的 `persist_failure` 把成功的 Turn 误回滚为 Failed。
+    // 推理前后（在途 Turn 尚未定稿）的中止才走 [`TurnExit::Aborted`]。
+    if turn.abort_flag.load(Ordering::SeqCst) {
+        return Gate::Exit(TurnExit::AbortedAtBoundary);
+    }
+
+    Gate::Proceed
+}
+
+/// 一次 LLM 请求所需的全部输入（收口 ② 的产物）。
+///
+/// **唯一收集点**：系统提示词与工具在同一函数（[`prepare_turn_inputs`]）内依次取得
+/// ——同一个 `CapabilityVisitor`、同一个时刻；下游（推理 / 收尾）只读本结构，
+/// 不再各自去 visitor 取值。
+struct TurnInputs {
+    /// Turn 根节点 id（本步内创建，供流式占位与推理产物挂载）
+    root_id: String,
+    /// 系统提示词（`resolve_system_prompt` 为唯一真源）
+    system_prompt: String,
+    /// 本轮到模型的完整工具清单（含条件注入的 `context_compact`）
+    tools: Vec<CapabilityMeta>,
+    /// 请求视图（`build_request_view` 唯一入口的产物，**不落库**）
+    request_view: Vec<ChatMessage>,
+}
+
+/// 收口 ②：本轮 LLM 请求输入的**唯一准备点**。
+///
+/// ## 硬约束：系统提示词与工具必须同机制、同时机、始终一起收集
+///
+/// 两者都由插件经 `CapabilityVisitor` 注册、经同一次 `traverse` 汇集到同一个
+/// visitor 上——来源与生命周期完全一致。拆成两处、两个时机收集，会让"这一轮模型
+/// 看到的人格"与"这一轮模型能调的工具"出现不一致窗口。故本函数是它们的唯一取值
+/// 点，且两步紧邻、中间不插入任何其它动作。
+///
+/// ## 时机：每轮 Turn 开头（循环内），**不**提升到前步骤
+///
+/// `list_capability` / `list_system_prompts` 都是纯内存读 visitor 注册表、不触发
+/// I/O，相对一次 LLM 推理可忽略；换来的是"每轮可动态调整人格与工具集"（例如中途
+/// 新连上的 MCP 工具，下一轮即可见）。若将来要提升到循环外（例如单轮工具轮次极多
+/// 使查询成为可观开销，或需要"一次请求内人格与工具集冻结"），**必须两者一起提升**，
+/// 不允许只提升其一。
+///
+/// ## 本步内的顺序（与收口前逐条对齐，语义不变）
+///
+/// 1. 系统提示词 + 工具（同函数、同一时刻）
+/// 2. 派生请求级开销 `overhead_tokens`（口径：**不含**下面条件注入的
+///    `context_compact`，与历史一致 → 压缩阈值 / 水位提醒的判定行为不变）
+/// 3. 压缩（收口 ③：[`apply_compaction`]，自动语义压缩 + 水位提醒的唯一响应点）
+/// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）
+/// 5. 请求视图重建（`build_request_view` 唯一入口）
+async fn prepare_turn_inputs(
+    orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn InvokeRequest>,
+    context: &mut SessionContext,
+    channel: &mut PluginChannel,
+    turn: &mut TurnState,
+    req: &TurnRequest,
+) -> Result<TurnInputs, TurnExit> {
+    // ── ① 系统提示词 + 工具：同一函数、同一时刻、同一 CapabilityVisitor ──────
+    let system_prompt = resolve_system_prompt(
+        req.system_prompt.as_deref(),
+        req.provider_id.as_deref(),
+        ctx,
+    )
+    .await;
+
+    let mut tools = match ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+        Some(visitor) => visitor.list_capability().await,
+        None => Vec::new(),
+    };
+
+    // ── ② 请求级固定开销：一轮只算一次，供下方压缩（阈值与提醒）共用
+    //        （收口前两处各算一次，且各自要重新取一遍工具清单）────────────────
+    let overhead_tokens = compression::estimate_overhead_with_tools(&system_prompt, &tools);
+
+    // 主动压缩工具：仅当工具压缩启用时暴露给模型（独立于自动压缩开关）。
+    // 执行不走 CapabilityVisitor 分发，由 `close_turn` 拦截处理（需要编排器内部链路）。
+    if req.enable_compact_tool {
+        tools.push(compression::context_compact_tool_meta());
+    }
+
+    // ── ③ 压缩（收口 ③：自动语义压缩 + 水位提醒，唯一响应点）───────────────
+    let inject_nudge = apply_compaction(
+        orchestrator,
+        ctx,
+        context,
+        channel,
+        turn,
+        req,
+        overhead_tokens,
+    )
+    .await?;
+
+    // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
+    let root_id: String = short_id();
+    emit_streaming_start(channel, &root_id, Some(turn.tool_rounds)).await;
+
+    // ── ⑤ 请求视图（唯一入口 build_request_view）──────────────────────────
+    // 在存储视图之上叠加四项**不落库**的裁剪，全部只作用于本次 execute_turn 的
+    // 请求包，不回写 context.messages——存储保持完整历史，last_saved 锚点与
+    // persist_messages 切片不会错位。
+    // 1) 内容节点淡化：B1 保护窗口（末条 + 最近 N 个内容节点）外的超大正文/思考
+    //    做 head/tail 摘要（阈值取会话配置 line_threshold / token 上限 2048）；
+    // 2) fade：轮次过多时淡化较早的工具结果（存储保留全文，视图每轮重建，天然幂等）；
+    // 3) 工具级骨架化：从 CapabilityVisitor 的能力声明（context_retention）动态解析
+    //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
+    //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
+    // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
+    let retention: HashMap<String, crate::symbio_core::ToolContextRetention> = tools
+        .iter()
+        .filter_map(|t| {
+            t.context_retention
+                .filter(|r| !matches!(r, crate::symbio_core::ToolContextRetention::All))
+                .map(|r| {
+                    let short = t.name.rsplit('/').next().unwrap_or(&t.name);
+                    (short.to_string(), r)
+                })
+        })
+        .collect();
+    let request_view = compression::build_request_view(
+        &context.messages,
+        req.tool_context_window,
+        &retention,
+        turn.tool_rounds > context.session.fade_activate_rounds(),
+        context.session.fade_keep_recent_turns(),
+        context.session.compress_keep_recent(),
+        context.session.line_threshold(),
+        inject_nudge,
+    );
+
+    Ok(TurnInputs {
+        root_id,
+        system_prompt,
+        tools,
+        request_view,
+    })
+}
+
+/// 收口 ③：上下文水位的**唯一响应点**——自动语义压缩与水位提醒只在这里判定与执行。
+///
+/// ## 顺序不可交换（收口前由主循环体的行序隐含保证，现在由本函数内部保证）
+///
+/// 先按 70% 阈值执行 L1 自动语义压缩（就地改写 `context.messages`），再按**压缩
+/// 之后**的真实水位判 55% 水位提醒。反过来会让"刚压完就提醒"自相矛盾；两个阈值
+/// 分处两地时，一次行序调整就能无声破坏该语义，故必须收在同一个函数内、顺序写死。
+///
+/// ## 与 `context_compact`（模型主动调用）的分工
+///
+/// 那条路径由模型在任务阶段间隙自行发起，判定点在 `close_turn` 的工具拦截处
+/// （`run_context_compact`），**不走本函数**；两条路径共用同一执行内核
+/// [`compress_with_snapshot_core`]——"何时压"有两个入口，"怎么压"只有一个实现。
+///
+/// 返回：是否需要在请求视图末尾注入一次性水位提醒。
+async fn apply_compaction(
+    orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn InvokeRequest>,
+    context: &mut SessionContext,
+    channel: &mut PluginChannel,
+    turn: &mut TurnState,
+    req: &TurnRequest,
+    overhead_tokens: usize,
+) -> Result<bool, TurnExit> {
+    // ── ① 自动语义压缩（L1：70% 触发）────────────────────────────────────
+    if req.auto_compress {
+        match auto_compress_process(
+            orchestrator,
+            context,
+            channel,
+            ctx,
+            &turn.abort_flag,
+            overhead_tokens,
+            false,
+        )
+        .await
+        {
+            Ok(Some(history_count)) => {
+                plugin_info!(
+                    "session",
+                    "Context compressed: {} messages -> 1 message",
+                    history_count
+                );
+                turn.last_saved = context.messages.len();
+            }
+            Ok(None) => {}
+            Err(e) => {
+                plugin_warn!("session", "auto_compress_process failed: {e}");
+                return Err(TurnExit::Failed(e));
+            }
+        }
+    }
+
+    // ── ② 水位提醒（nudge：55% 触发）─────────────────────────────────────
+    // 估算用量 ≥ 55% 有效上限时，在请求视图末尾注入一条一次性系统提示
+    // （请求级、不落库，由 build_request_view 统一追加），引导模型在
+    // "阶段间隙"主动调用 context_compact（比 70% 硬触发更早、时机更优）。
+    // 门控：提醒只为引导工具调用，跟随工具开关（enable_compact_tool），
+    // 与自动压缩开关解耦（关自动压缩、开工具压缩时仍需提醒）。
+    // 去重：每次用户请求生命周期内最多注入一次（主动压缩成功后重置）；
+    // 提醒不落库，无需扫描历史做去重，也不占用轮次窗口的 User 计数。
+    if !req.enable_compact_tool || turn.nudged_this_request {
+        return Ok(false);
+    }
+    let effective_limit = orchestrator.context_limit as usize;
+    if !compression::should_emit_context_nudge(&context.messages, effective_limit, overhead_tokens)
+    {
+        return Ok(false);
+    }
+    turn.nudged_this_request = true;
+    plugin_info!(
+        "session",
+        "[Compress] context nudge emitted (~55% of limit), suggesting context_compact"
+    );
+    Ok(true)
+}
+
+/// 主循环的**唯一收尾点**：软上限提示 → 增量落库 → Stop 钩子 → 返回语义。
+///
+/// 收口前，12 个出口各自重写「Stop 钩子 + 落库 + 返回」三件套，新增出口必须记得
+/// 补齐（漏了只有 `StopSignal` 的 RAII 兜底能发现）。现在每个出口只负责判定
+/// [`TurnExit`]，收尾动作只在本函数出现一次。
+///
+/// `persist_messages` 在锚点已对齐时是 no-op（切片为空即返回），因此所有出口都可以
+/// 无条件调用——不会重复落库：`close_turn` 与压缩流程每次落库后都会同步推进
+/// [`TurnState::last_saved`]。
+async fn finish_turn(
+    orchestrator: &ChatOrchestrator,
+    context: &SessionContext,
+    channel: &PluginChannel,
+    turn: &TurnState,
+    exit: TurnExit,
+) -> Result<(), PluginError> {
+    // 软上限：先广播明确提示再退出，绝不静默（文案唯一出处）。
+    if let TurnExit::MaxToolRounds { max } = &exit {
+        let _ = channel
+            .tx
+            .send(PluginFrame::Data(
+                serde_json::to_value(session_chat_response::StreamEvent::Error {
+                    error: format!("已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"),
+                })
+                .unwrap_or_default(),
+            ))
+            .await;
+    }
+
+    // 增量落库（锚点已对齐时为空切片，天然 no-op）。
+    persist_messages(context, turn.last_saved, channel).await;
+
+    // Stop 钩子（幂等）：resume 出口发生在主循环之前，此时尚无消息列表
+    // （收口前该分支即传空切片），其余出口一律携带当前消息列表。
+    let messages: &[ChatMessage] = match exit {
+        TurnExit::ResumeDone => &[],
+        _ => &context.messages,
+    };
+    fire_stop_hook(orchestrator, messages).await;
+
+    // 返回语义：中止与失败向上冒泡，由消费循环统一收尾（在途 Turn → Failed + 可重试）。
+    match exit {
+        TurnExit::Aborted => Err(PluginError::Aborted),
+        TurnExit::Failed(e) => Err(e),
+        _ => Ok(()),
+    }
+}
+
+/// 推理收尾：定格 assistant 子节点状态 → 校准 token 估算 → 把本轮产出并入上下文。
+///
+/// 自 `run_chat_loop` 原样搬移（拆函数不拆行为）：语句、注释、调用顺序与搬移前
+/// 逐字一致，仅把"提前取出的字段"收进 [`TurnResult`] 返回给调用方。
+async fn settle_reasoning(
+    orchestrator: &ChatOrchestrator,
+    context: &mut SessionContext,
+    channel: &PluginChannel,
+    root_id: &str,
+    mut out: TurnOutput,
+) -> TurnResult {
+    let tools_done = out.tool_accumulator.get_completed();
+    // 提前取出本轮的结束原因 / 用量 / 是否出现过工具调用 / 文本子节点 id，
+    // 因为 `out.into_messages` 会按值消费 out，之后无法再读这些字段。
+    let had_tool = out.tool_accumulator.had_any_tool_call();
+    let finish = out.finish.clone();
+    let usage = out.usage;
+    let rtid = out.response_text_child_id.clone();
+    let rrid = out.reasoning_child_id.clone();
+
+    orchestrator
+        .finalize_assistant_turn(root_id, &out, &tools_done, channel)
+        .await;
+
+    // 用 provider 返回的真实用量滚动校准 token 估算。
+    feedback_estimate(usage, &out, &tools_done);
+
+    let new_msgs = out.into_messages(root_id, tools_done.len());
+    // 工具上下文保留策略：策略不 Stamp 到节点 meta 持久化，
+    // 由 run_chat_loop 在构建 LLM 请求前从 CapabilityVisitor 动态解析，
+    // 节点 name 即 LLM 可见工具名，与声明名直接匹配。
+    context.messages.extend(new_msgs);
+
+    // 被长度截断的 Turn 打标（供前端「继续」按钮与回溯），不得静默结束。
+    if finish.is_length() {
+        for m in context.messages.iter_mut() {
+            if m.id == rtid || m.id == rrid {
+                let mut meta = m.meta.clone().unwrap_or_else(|| serde_json::json!({}));
+                meta["finish_reason"] = serde_json::json!("length");
+                m.meta = Some(meta);
+            }
+        }
+    }
+
+    TurnResult {
+        root_id: root_id.to_string(),
+        tools_done,
+        finish,
+        had_tool,
+    }
 }
 
 /// 本轮收尾阶段：截断续写 / 主动压缩拦截 / 工具分发 / 父节点状态落库 / 停等判定。
 ///
 /// 批次 D 自 `run_chat_loop` **原样搬移**（拆函数不拆行为）：语句、注释、广播顺序、
 /// 错误文案与搬移前逐字一致；仅出口由 `return Ok(())`/`continue` 改为 [`TurnFlow`]，
-/// `context`/`channel`/`continuation_count` 等由循环作用域改为显式参数。
-#[allow(clippy::too_many_arguments)] // 搬移自循环体，参数即原循环作用域捕获的变量集（批次 D 不重构行为）
+/// 循环作用域捕获的变量改为 [`TurnState`] / [`TurnRequest`] / [`TurnResult`]。
+///
+/// **不承担终态收尾**：`fire_stop_hook` 与最终 `persist_messages` 由 [`finish_turn`]
+/// 统一执行（本函数返回 `Finish` 前会把 [`TurnState::last_saved`] 推进到最新，
+/// 使 `finish_turn` 的落库成为 no-op）。
 async fn close_turn(
     orchestrator: &ChatOrchestrator,
     ctx: Arc<dyn InvokeRequest>,
     channel: &mut PluginChannel,
     context: &mut SessionContext,
-    abort_flag: &Arc<AtomicBool>,
-    root_id: &str,
-    tools_done: Vec<ToolCallInfo>,
-    finish: FinishReason,
-    had_tool: bool,
-    // 工具轮次计数：声明于请求作用域、跨轮累加，故以可变引用传入
-    // （软上限判定与首轮 fade 判定在 `run_chat_loop` 侧读取同一计数）。
-    tool_rounds: &mut usize,
-    mut last_saved: usize,
-    continuation_count: &mut u32,
-    // 水位提醒一次性标记：主动压缩成功后重置（允许上下文回落再次提醒）。
-    nudged_this_request: &mut bool,
-    enable_compact_tool: bool,
+    turn: &mut TurnState,
+    result: TurnResult,
+    req: &TurnRequest,
 ) -> TurnFlow {
+    let TurnResult {
+        root_id,
+        tools_done,
+        finish,
+        had_tool,
+    } = result;
+    let root_id = root_id.as_str();
+
     if tools_done.is_empty() {
         // 本轮无工具调用 —— 正常收尾，除非是被长度截断。
         if finish.is_length() && !had_tool {
             // 纯文本被 max_tokens 截断且参数完整 → 自动续写：
             // 已产出的（截断）文本已作为 assistant 消息进入上下文，下一轮请求时模型会
             // 自然从断点继续。最多续写 MAX_CONTINUE_ROUNDS 次，避免失控死循环。
-            if *continuation_count < MAX_CONTINUE_ROUNDS {
-                *continuation_count += 1;
+            if turn.continuation_count < MAX_CONTINUE_ROUNDS {
+                turn.continuation_count += 1;
                 plugin_info!(
                     "session",
                     "finish=Length，自动续写 ({}/{})",
-                    continuation_count,
+                    turn.continuation_count,
                     MAX_CONTINUE_ROUNDS
                 );
-                persist_messages(context, last_saved, channel).await;
+                persist_messages(context, turn.last_saved, channel).await;
+                turn.last_saved = context.messages.len();
                 return TurnFlow::NextTurn;
             }
             // 续写次数耗尽：明确告知，绝不静默结束。
@@ -802,14 +1106,14 @@ async fn close_turn(
                 .unwrap_or_default(),
             )).await;
         }
-        persist_messages(context, last_saved, channel).await;
-        fire_stop_hook(orchestrator, &context.messages).await;
         plugin_info!(
             "session",
             "--- TURN END (正常收尾，无工具调用) --- finish={:?}",
             finish
         );
-        return TurnFlow::Finish(Ok(()));
+        persist_messages(context, turn.last_saved, channel).await;
+        turn.last_saved = context.messages.len();
+        return TurnFlow::Finish(TurnExit::Completed);
     }
 
     // ── 主动压缩工具拦截 ─────────────────────────────────────────────
@@ -818,7 +1122,7 @@ async fn close_turn(
     // 在此拆分：压缩调用就地执行并生成合成工具结果；其余工具正常分发。
     // 门控：仅当工具压缩开关开启时拦截；开关关闭时工具不暴露，模型幻觉
     // 调用则归入标准工具链，以"未知路径"错误返回（不执行内部压缩链路）。
-    let (compact_calls, other_calls): (Vec<_>, Vec<_>) = if enable_compact_tool {
+    let (compact_calls, other_calls): (Vec<_>, Vec<_>) = if req.enable_compact_tool {
         tools_done.into_iter().partition(|tc| {
             tc.name
                 .as_deref()
@@ -852,17 +1156,17 @@ async fn close_turn(
                 context,
                 channel,
                 &ctx,
-                abort_flag,
+                &turn.abort_flag,
                 split_user_idx,
                 hints.as_deref(),
             )
             .await;
             if ok {
                 // 压缩成功：上下文回落后允许再次水位提醒
-                *nudged_this_request = false;
+                turn.nudged_this_request = false;
                 // replace_messages 已整体重写会话存储，当前内存镜像即已落库状态；
                 // 重置持久化锚点，避免末尾 persist_messages 用旧下标切片越界/重复落库
-                last_saved = context.messages.len();
+                turn.last_saved = context.messages.len();
                 plugin_info!(
                     "session",
                     "[Compress] manual compaction done: ~{} -> ~{} tokens",
@@ -941,14 +1245,21 @@ async fn close_turn(
         }
     }
 
+    // 登记本轮派发的工具调用到在途集合（**启动条件的权威判据**）：
+    // 级别 1 在 `process_tool_calls_async` 返回时同步清空——工具已全部跑完，
+    // 回到闸门时集合为空；级别 2 会改为由每个工具的完成回调逐个移除，
+    // 全部移除后才唤醒主循环（不完整不唤醒）。
+    turn.in_flight_tools
+        .extend(other_calls.iter().filter_map(|tc| tc.id.clone()));
     let (other_results, other_parent_updates) = process_tool_calls_async(
         other_calls,
         &orchestrator.parent,
         channel,
-        abort_flag,
+        &turn.abort_flag,
         ctx.clone(),
     )
     .await;
+    turn.in_flight_tools.clear();
     tool_results.extend(other_results);
     parent_updates.extend(other_parent_updates);
     context.messages.extend(tool_results.clone());
@@ -979,7 +1290,8 @@ async fn close_turn(
         }
     }
 
-    persist_messages(context, last_saved, channel).await;
+    persist_messages(context, turn.last_saved, channel).await;
+    turn.last_saved = context.messages.len();
 
     // 检测工具待用户恢复 → 退出本轮：
     // 仅当存在 UserPrompt/WaitingUserAction（confirm/ask_user）时才算需要用户输入。
@@ -999,17 +1311,16 @@ async fn close_turn(
         // 恢复」的场景；
         // user_prompt(WaitingUserAction) 驱动的暂停走 approve/reject/answer 恢复。
         plugin_info!("session", "工具待用户恢复（mode={}），退出本轮", mode);
-        fire_stop_hook(orchestrator, &context.messages).await;
-        return TurnFlow::Finish(Ok(()));
+        return TurnFlow::Finish(TurnExit::Completed);
     }
 
     // 轮次计数：用户明确要求不设硬性上限，超长对话的规模控制由请求视图层的
     // fade / 骨架化（build_request_view）承担——存储保持完整历史，视图逐轮裁剪。
-    *tool_rounds += 1;
+    turn.tool_rounds += 1;
     plugin_info!(
         "session",
         "--- TURN {} DONE (工具轮结束，进入下一轮) --- 工具调用 {} 个",
-        *tool_rounds - 1,
+        turn.tool_rounds - 1,
         tool_results.len()
     );
     TurnFlow::NextTurn
@@ -1135,28 +1446,30 @@ async fn emit_streaming_start(channel: &mut PluginChannel, root_id: &str, turn: 
         .await;
 }
 
-async fn check_abort(abort_flag: &Arc<AtomicBool>) -> bool {
-    abort_flag.load(Ordering::SeqCst)
-}
-
-// 8 个参数均为流程管道的直通依赖，提取 struct 反而增加一层无谓的间接性（代码库中
-// chat_loop 主流程同样以长参数管道为惯例），故允许超参。
-#[allow(clippy::too_many_arguments)]
+/// 被动自动压缩（L1）：阈值判定 → 切分 → 收益护栏 → 交执行内核。
+///
+/// `force` 为 `compression::should_start_compression` 的公开契约（跳过阈值），
+/// 本路径恒为 `false`（自动压缩必须走阈值）；强制压缩属主动路径，由
+/// `run_context_compact` 承担，不经此处。
+///
+/// 无 `extra_hints`：自动压缩没有"用户"在环内提供保留提示——`hints` 是
+/// `context_compact` 工具的入参，只在主动路径有意义（见 `compress_with_snapshot_core`）。
 async fn auto_compress_process(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
     channel: &mut PluginChannel,
     ctx: &Arc<dyn InvokeRequest>,
     abort_flag: &Arc<AtomicBool>,
-    system_prompt: &str,
+    overhead_tokens: usize,
     force: bool,
-    extra_hints: Option<&str>,
 ) -> Result<Option<usize>, PluginError> {
     let effective_context_limit = orchestrator.context_limit as usize;
 
     // 请求级固定开销（system prompt + 工具定义）必须计入阈值判断，
     // 否则上下文实际占用被低估，压缩触发过晚 → 撞 provider 的 context-length 400。
-    let overhead = compression::estimate_request_overhead(system_prompt, ctx).await;
+    // 口径由调用方（`prepare_turn_inputs`）算好后传入：本函数原先只拿它算这一处，
+    // 却因此需要自己再取一次工具清单，与主循环的收集重复。
+    let overhead = overhead_tokens;
 
     if !compression::should_start_compression(
         &context.messages,
@@ -1173,13 +1486,12 @@ async fn auto_compress_process(
             None => return Ok(None),
         };
 
-    // 主动压缩收益护栏：待压缩历史太小就不值得一次 LLM 调用
-    // （被动压缩天然满足，这里主要防 context_compact 的无效触发）。
+    // 压缩收益护栏（门槛的唯一出处：`compression::has_compaction_payoff`）
     let compress_tokens: usize = history_to_compress
         .iter()
         .map(compression::estimate_message_tokens)
         .sum();
-    if compress_tokens < compression::MIN_COMPACT_TOKENS {
+    if !compression::has_compaction_payoff(compress_tokens) {
         return Ok(None);
     }
 
@@ -1194,7 +1506,8 @@ async fn auto_compress_process(
         abort_flag,
         compression_msg,
         history_to_keep,
-        extra_hints,
+        // 自动路径无用户保留提示（hints 只在主动路径有来源）
+        None,
         "auto",
     )
     .await;
@@ -1493,7 +1806,8 @@ async fn run_context_compact(
         .iter()
         .map(compression::estimate_message_tokens)
         .sum();
-    if before_tokens < compression::MIN_COMPACT_TOKENS {
+    // 压缩收益护栏（门槛的唯一出处：`compression::has_compaction_payoff`）
+    if !compression::has_compaction_payoff(before_tokens) {
         return (false, before_tokens, before_tokens);
     }
 
@@ -1541,7 +1855,6 @@ fn save_transcript_archive(messages: &[ChatMessage], session_id: &str) -> Option
     path.to_str().map(|s| s.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn send_compression_request(
     orchestrator: &ChatOrchestrator,
     system_prompt: &str,
@@ -1678,246 +1991,10 @@ async fn fire_stop_hook(orchestrator: &ChatOrchestrator, messages: &[ChatMessage
     orchestrator.stop.fire(messages).await;
 }
 
+// ── 测试（实现与测试分文件）────────────────────────────────────────────
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::symbio_core::{CapabilityVisitor, DefaultToolVisitor, SimpleRequest};
-
-    /// 构造带 CAPABILITY_VISITOR 的上下文；`prompts` 为 (名称, 内容) 注册表。
-    async fn ctx_prompts(prompts: &[(&str, &str)]) -> Arc<dyn InvokeRequest> {
-        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
-        let visitor = Arc::new(DefaultToolVisitor::new());
-        for (name, text) in prompts {
-            visitor.register_system_prompt(name, text.to_string()).await;
-        }
-        ctx.set(
-            crate::symbio_core::CAPABILITY_VISITOR,
-            visitor as Arc<dyn CapabilityVisitor>,
-        );
-        ctx
-    }
-
-    #[tokio::test]
-    async fn explicit_prompt_wins() {
-        let ctx = ctx_prompts(&[("default", "from-visitor")]).await;
-        let got = resolve_system_prompt(Some("explicit"), Some("openai"), &ctx).await;
-        assert_eq!(got, "explicit");
-    }
-
-    #[tokio::test]
-    async fn empty_explicit_prompt_falls_through_to_default() {
-        let ctx = ctx_prompts(&[("openai", "from-openai"), ("default", "from-default")]).await;
-        let got = resolve_system_prompt(Some(""), Some("openai"), &ctx).await;
-        assert_eq!(got, "from-default", "default 优先于 provider_id 匹配");
-    }
-
-    #[tokio::test]
-    async fn provider_id_matches_registered_key() {
-        let ctx = ctx_prompts(&[("anthropic", "a"), ("openai", "o")]).await;
-        let got = resolve_system_prompt(None, Some("openai"), &ctx).await;
-        assert_eq!(got, "o");
-    }
-
-    #[tokio::test]
-    async fn first_registered_when_no_default_or_provider_match() {
-        let ctx = ctx_prompts(&[("anthropic", "a"), ("openai", "o")]).await;
-        let got = resolve_system_prompt(None, Some("unknown"), &ctx).await;
-        assert_eq!(got, "a", "保序取首个注册项");
-    }
-
-    #[tokio::test]
-    async fn fallback_without_visitor() {
-        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
-        let got = resolve_system_prompt(None, None, &ctx).await;
-        assert_eq!(got, "You are a helpful MODEL assistant.");
-    }
-
-    #[tokio::test]
-    async fn empty_visitor_registry_uses_fallback() {
-        let ctx = ctx_prompts(&[]).await;
-        let got = resolve_system_prompt(None, None, &ctx).await;
-        assert_eq!(got, "You are a helpful MODEL assistant.");
-    }
-}
-
-/// Stop 恰好一次的契约测试。
-///
-/// 走真实 `fire_hook` 链路（自建 recorder 插件，不 mock 内部函数），
-/// 验证显式触发 / 生命周期兜底 / 二者叠加时的幂等性。
+mod gate_tests;
 #[cfg(test)]
-mod stop_signal_tests {
-    use super::*;
-    use crate::symbio_core::{InvokeResponse, PluginMeta, PluginPayload, SimpleRequest};
-    use async_trait::async_trait;
-    use serde_json::Value;
-    use std::sync::Mutex as StdMutex;
-
-    /// 记录收到的 Hook 事件（按 `fire_hook` 的 payload 协议解析）。
-    #[derive(Default)]
-    struct HookRecorder {
-        stops: StdMutex<Vec<String>>,
-        others: StdMutex<usize>,
-    }
-
-    impl HookRecorder {
-        fn stop_count(&self) -> usize {
-            self.stops.lock().unwrap().len()
-        }
-        fn last_stop_message(&self) -> String {
-            self.stops
-                .lock()
-                .unwrap()
-                .last()
-                .cloned()
-                .unwrap_or_default()
-        }
-        fn other_count(&self) -> usize {
-            *self.others.lock().unwrap()
-        }
-    }
-
-    #[async_trait]
-    impl Plugin for HookRecorder {
-        fn meta(&self) -> PluginMeta {
-            PluginMeta {
-                id: "test-hook-recorder".into(),
-                name: "test-hook-recorder".into(),
-                description: None,
-                version: None,
-                author: None,
-            }
-        }
-
-        async fn route(
-            self: Arc<Self>,
-            ctx: Arc<dyn InvokeRequest>,
-        ) -> InvokeResponse<PluginPayload> {
-            if ctx.get(crate::symbio_core::PATH).as_deref() != Some("hook/fire") {
-                *self.others.lock().unwrap() += 1;
-                return Ok(PluginPayload::new(&Value::Null));
-            }
-            let payload: Value = ctx.payload::<Value>().ok().unwrap_or(Value::Null);
-            let event = payload.get("event");
-            if event
-                .and_then(|e: &Value| e.get("event"))
-                .and_then(|v: &Value| v.as_str())
-                == Some("Stop")
-            {
-                let msg = event
-                    .and_then(|e: &Value| e.get("data"))
-                    .and_then(|d: &Value| d.get("last_message"))
-                    .and_then(|v: &Value| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                self.stops.lock().unwrap().push(msg);
-            } else {
-                *self.others.lock().unwrap() += 1;
-            }
-            Ok(PluginPayload::new(&Value::Null))
-        }
-
-        async fn traverse(
-            self: Arc<Self>,
-            _path: String,
-            _ctx: Arc<dyn InvokeRequest>,
-        ) -> InvokeResponse<PluginPayload> {
-            Ok(PluginPayload::new(&Value::Null))
-        }
-    }
-
-    fn text_msg(id: &str, text: &str) -> ChatMessage {
-        ChatMessage {
-            id: id.to_string(),
-            content: Some(MessageContent::Text(text.to_string())),
-            ..Default::default()
-        }
-    }
-
-    fn recorder_signal() -> (Arc<StopSignal>, Arc<HookRecorder>) {
-        let recorder = Arc::new(HookRecorder::default());
-        let parent = Some(recorder.clone() as Arc<dyn Plugin>);
-        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
-        (Arc::new(StopSignal::new(parent, ctx)), recorder)
-    }
-
-    /// 显式触发：携带准确末条消息，且第二次调用不再外发。
-    #[tokio::test]
-    async fn explicit_fire_is_exactly_once_and_carries_last_message() {
-        let (stop, recorder) = recorder_signal();
-        assert!(!stop.fired());
-
-        let msgs = vec![text_msg("1", "user turn"), text_msg("2", "assistant turn")];
-        assert!(stop.fire(&msgs).await, "首次显式触发应生效");
-        assert!(!stop.fire(&msgs).await, "第二次显式触发应被幂等吞掉");
-        assert!(stop.fired());
-
-        assert_eq!(recorder.stop_count(), 1);
-        assert_eq!(recorder.last_stop_message(), "assistant turn");
-        assert_eq!(recorder.other_count(), 0);
-
-        drop(stop);
-        assert_eq!(recorder.stop_count(), 1, "Drop 不得重复补发");
-    }
-
-    /// 空 transcript：仍然触发一次，`last_message` 为空串。
-    #[tokio::test]
-    async fn explicit_fire_with_empty_transcript() {
-        let (stop, recorder) = recorder_signal();
-        assert!(stop.fire(&[]).await);
-        assert_eq!(recorder.stop_count(), 1);
-        assert_eq!(recorder.last_stop_message(), "");
-    }
-
-    /// 兜底触发：显式触发点未执行时补发一次（异步 detached 任务）。
-    #[tokio::test]
-    async fn fallback_fire_covers_missing_explicit_call() {
-        let (stop, recorder) = recorder_signal();
-        stop.fire_fallback();
-        // fire_fallback 投递 detached 任务，让运行时调度若干次
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-        }
-        assert_eq!(recorder.stop_count(), 1);
-        assert_eq!(recorder.last_stop_message(), "");
-
-        // 兜底之后再显式触发也不得外发
-        assert!(!stop.fire(&[text_msg("1", "late")]).await);
-        assert_eq!(recorder.stop_count(), 1);
-    }
-
-    /// 兜底幂等：多次 `fire_fallback` 只外发一次。
-    #[tokio::test]
-    async fn fallback_fire_is_idempotent() {
-        let (stop, recorder) = recorder_signal();
-        stop.fire_fallback();
-        stop.fire_fallback();
-        stop.fire_fallback();
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-        }
-        assert_eq!(recorder.stop_count(), 1);
-    }
-
-    /// 最后防线：`StopSignal` 被 Drop 时补发（模拟 chat_loop 提前 return）。
-    #[tokio::test]
-    async fn drop_emits_fallback_stop() {
-        let (stop, recorder) = recorder_signal();
-        drop(stop);
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-        }
-        assert_eq!(recorder.stop_count(), 1);
-    }
-
-    /// 无父插件（standalone 会话）：仍然置位 fired，且不产生任何外发/告警噪声。
-    #[tokio::test]
-    async fn signal_without_parent_stays_silent() {
-        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
-        let stop = Arc::new(StopSignal::new(None, ctx));
-        assert!(stop.fire(&[text_msg("1", "x")]).await);
-        assert!(stop.fired());
-        stop.fire_fallback();
-        drop(stop);
-        tokio::task::yield_now().await;
-    }
-}
+mod stop_signal_tests;
+#[cfg(test)]
+mod tests;

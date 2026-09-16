@@ -4,7 +4,7 @@
 //!
 //! 这里过去是「一个 trait + 三个后端」：`FileSessionStore` / `SqliteSessionStore`
 //! / `InMemorySessionStore`，由配置项 `store_kind` 经 `create_store` 工厂选型。
-//! 那个形状有两个已证伪的前提（见 docs/architecture/session-*-audit.md）：
+//! 那个形状有两个已证伪的前提（见 docs/*-audit.md）：
 //!
 //! - **sqlite 是「可配置但没人能配置」**：前端全量搜索 `store_kind` 零命中，
 //!   默认值恒为 `file`；它还不支持子会话清单（有测试专门锁死这条限制），
@@ -278,7 +278,7 @@ impl SessionStore {
     ///
     /// 排序与截断都在内存里做：窗口约束的是**响应大小**（少传多少节点给前端），
     /// 而 IO 成本已经由「清单只读 `session.json`」压平了——再引入一份索引文件
-    /// 换来的收益不值一个新文件（见 docs/design/session-perf.md §3）。
+    /// 换来的收益不值一个新文件（见 docs/perf.md §3）。
     pub async fn list_sessions_window(
         &self,
         limit: Option<u32>,
@@ -341,7 +341,7 @@ impl SessionStore {
     ///
     /// 幂等：新布局且投影齐全的目录直接跳过（`get_store` 每次构造只跑一次）。
     /// 为什么要补投影：投影字段是后来加的 `#[serde(default)]`，存量文件里没有，
-    /// 少了它清单会静默退化成显示 id（见 docs/design/session-perf.md §11.3）。
+    /// 少了它清单会静默退化成显示 id（见 docs/perf.md §11.3）。
     pub(crate) async fn migrate_split_messages(&self) -> Result<(), PluginError> {
         let Some(base) = self.disk() else {
             return Ok(());
