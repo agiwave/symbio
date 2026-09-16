@@ -1,6 +1,6 @@
 # 会话消息的 VDFS 化 —— 转写即列表，流式即追加
 
-> 前置阅读：[vdfs.md](./vdfs.md)（机制规范）、[vdfs-frontend.md](./vdfs-frontend.md)（前端页面规范）。
+> 前置阅读：[vdfs.md](../../../../../docs/design/vdfs.md)（机制规范）、[vdfs-frontend.md](../../../../../docs/design/vdfs-frontend.md)（前端页面规范）。
 >
 > 本文回答一个问题：**会话消息如何整体并入 VDFS 体系**，以及为什么
 > 「会话列表本身也是列表，流模式其实就是列表项的变更，变更类型为追加」
@@ -426,12 +426,12 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
 
 ## 9. 与既有文档的关系
 
-- [vdfs.md](./vdfs.md)：机制规范。本文是它在**会话场景**上的应用，不引入新机制——
+- [vdfs.md](../../../../../docs/design/vdfs.md)：机制规范。本文是它在**会话场景**上的应用，不引入新机制——
   `appended` 是变更类型的一个取值，`消息` 是一个普通子目录，`ext = message`
   是一个普通扩展名。
-- [vdfs-frontend.md](./vdfs-frontend.md)：该文件的 S1–S15 记录仍然有效；
+- [vdfs-frontend.md](../../../../../docs/design/vdfs-frontend.md)：该文件的 S1–S15 记录仍然有效；
   S16–S19 的落地见本文 §6。
-- [vdfs.md](./vdfs.md) §13.4：会话子目录由 `session` 插件自己的 `impl VdfsProvider`
+- [vdfs.md](../../../../../docs/design/vdfs.md) §13.4：会话子目录由 `session` 插件自己的 `impl VdfsProvider`
   提供（清单与消息视图背后是**同一份存储**，不存在第二份数据）。曾经的「会话实体」
   抽象（`EntityProvider` / `EntityStore`）与其历史形态见
-  [archive/entity-provider-mechanism.md](../archive/entity-provider-mechanism.md)。
+  [archive/entity-provider-mechanism.md](../../../../../docs/archive/entity-provider-mechanism.md)。

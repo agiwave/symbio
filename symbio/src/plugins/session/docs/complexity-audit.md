@@ -209,7 +209,7 @@ P2（EphemeralChatSession 归一、FallbackChatSession 语义对齐、resume 互
 
 - **P1-③ 配置面默认值单一真源**：`config_schema` 原先逐字段硬编码 `default` 字面量（`100 / true / false / 6 / 15 / 200 / 3 / 15 / "file"`），与 `SessionConfig` 的 serde default 各写一份；现改为先 `serde_json::to_value(SessionConfig::default())`，每个字段的 `"default"` 一律取自该结果（局部闭包 `d(key)`），schema 只保留 UI 元信息（type/title/description/enum）。注：原 schema 本就未声明 `min`/`max`，本次不新增边界，避免再造一套假约束。`session_id` 属身份/路由字段（由调用方注入），不进设置面板，在覆盖性测试中以 `NON_CONFIGURABLE` 常量显式豁免并注明理由。
 - **P1-④ 请求构造去重**：`orchestrator.rs` 三个分支各自重复书写 8 个会话派生字段（`stream / max_tool_rounds / tool_context_window / auto_compress / enable_compact_tool / provider_id / load_history / resume`），收敛为单一 `req_base` + 各分支 `..req_base` 仅覆盖真正不同的字段（resume 分支只覆盖 `load_history: Some(true)`）。重复字段行 24 → 0，文件净 -6 行；真正的收益是"改一处不再漏两处"。
-- **P1-⑤ 死字段清理**：删除 `model_chat::ThinkingConfig` 与 `Request.thinking`（session 各构造点恒为 `None`、无任何消费者；provider 侧 thinking 走 `cfg.reasoning`，与本字段无关）。因原字段带 `skip_serializing_if = "Option::is_none"`，删除后**跨语言线上格式零变化**；`load_history` 的序列化行为本轮刻意保持原样（超出当时授权范围；该项已于 2026-09-13 经授权收口，见 `session-mechanism-audit.md` §8.6-①）。
+- **P1-⑤ 死字段清理**：删除 `model_chat::ThinkingConfig` 与 `Request.thinking`（session 各构造点恒为 `None`、无任何消费者；provider 侧 thinking 走 `cfg.reasoning`，与本字段无关）。因原字段带 `skip_serializing_if = "Option::is_none"`，删除后**跨语言线上格式零变化**；`load_history` 的序列化行为本轮刻意保持原样（超出当时授权范围；该项已于 2026-09-13 经授权收口，见 `./mechanism-audit.md` §8.6-①）。
 
 ### 8.3 存储/视图矛盾的处理（P1-②）
 
@@ -250,9 +250,9 @@ P2（EphemeralChatSession 归一、FallbackChatSession 语义对齐、resume 互
    `FallbackChatSession` 均删除，临时/降级会话改为 `PersistentChatSession` + `InMemorySessionStore`
    （`impl ChatSession for` 由 4 降到 1）；`orchestrator.rs` 中 resume 与 message 同时提供时显式报错，
    不再让 user 消息被静默落库而请求走 resume 分支。
-6. **两份审计文档的取舍** → **本文件归档，`session-mechanism-audit.md` 为现行权威版本**。
+6. **两份审计文档的取舍** → **本文件归档，`./mechanism-audit.md` 为现行权威版本**。
    机制审计 §6 已逐条修正本文的判断（P2/P4 撤销、P6 降级、R6"死机制"作废等），批次 A/B/C 的
    落地记录亦写在机制审计 §8；本文保留作取证过程与规模基线的历史记录。
 
 > 对外可见的行为/配置变更事实统一记于 `docs/CHANGELOG.md` 的 2026-09-13 条目；
-> 现行机制描述见 `symbio/src/plugins/session/README.md`。
+> 现行机制描述见 `../README.md`。

@@ -40,7 +40,7 @@ symbio/
 
 ## 3. 提交前清单（CI 必查）
 
-CI 流水线位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，**所有 PR 必须通过**：
+CI 流水线位于 [.github/workflows/ci.yml](./.github/workflows/ci.yml)，**所有 PR 必须通过**：
 
 | 步骤 | 命令 | 失败后果 |
 |---|---|---|
@@ -71,8 +71,8 @@ cd symbio && cargo fmt --check && cargo clippy --all-targets -- -D warnings && c
   - 项目在 `tauri/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
 - 错误：实现 `thiserror` 派生 `PluginError` 变体，不要用 `String` 当错误类型。
 - 新增能力：优先在合适的 `Plugin` 下添加子路径（`worker/xxx/yyy`），
-  路由规则见 [docs/architecture/OVERVIEW.md](../docs/architecture/OVERVIEW.md)，
-  请求全链路见 [docs/architecture/DATA_FLOW.md](../docs/architecture/DATA_FLOW.md)。
+  路由规则见 [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md)，
+  请求全链路见 [docs/architecture/DATA_FLOW.md](./docs/architecture/DATA_FLOW.md)。
 
 ### TypeScript / Vue 侧
 
@@ -89,13 +89,13 @@ cd symbio && cargo fmt --check && cargo clippy --all-targets -- -D warnings && c
 新增一个业务插件的最短路径：
 
 1. 在 `symbio/src/plugins/<name>/` 下创建 `mod.rs` + `plugin.rs`。
-2. 实现 [`Plugin`](../docs/architecture/PROTOCOLS.md) trait 的 `route()` 与 `traverse()`。
+2. 实现 [`Plugin`](./docs/architecture/PROTOCOLS.md) trait 的 `route()` 与 `traverse()`。
 3. 在 `init.rs::create_root_plugin()` 中注册（挂载方式参考 `plugins/home/plugin.rs` 的默认挂载逻辑）。
 4. 在 `tauri/src/constants/pluginPaths.ts` 中添加路由常量。
 5. 在 `tauri/src/services/` 下添加对应 TS 客户端。
 6. 在 `docs/CHANGELOG.md` 追加条目；如涉及路由/协议/配置变更，同步更新 `docs/reference/`（ROUTES / ERROR_CODES / CONFIGURATION）与 `docs/architecture/`（OVERVIEW / DATA_FLOW）对应内容。
 
-完整教程见 [docs/guides/PLUGIN_DEVELOPMENT.md](../docs/guides/PLUGIN_DEVELOPMENT.md)。
+完整教程见 [docs/guides/PLUGIN_DEVELOPMENT.md](./docs/guides/PLUGIN_DEVELOPMENT.md)。
 
 ---
 
@@ -134,4 +134,4 @@ cd symbio && cargo fmt --check && cargo clippy --all-targets -- -D warnings && c
 
 ## 9. 许可证
 
-提交即表示你同意本项目以 [MIT License](../LICENSE) 发布你的贡献。
+提交即表示你同意本项目以 [MIT License](./LICENSE) 发布你的贡献。

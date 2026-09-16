@@ -28,4 +28,4 @@
 
 ## 关联
 
-- 请求视图剪裁与压缩分层：`../README.md` 策略⑥ + `docs/design/context-compression-design.md`（L0-L6 总览）
+- 请求视图剪裁与压缩分层：`../README.md` 策略⑥ + `./context-compression-design.md`（L0-L6 总览）

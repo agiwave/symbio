@@ -10,7 +10,7 @@
 - **系统级文档**（本目录）只保留**跨模块**的核心逻辑、边界与约定，涉及单模块内部实现时**引用**模块文档，不复制细节；
 - **历史实施记录**一律进 `archive/`，现行文档只描述当前行为。
 
-示例：会话上下文压缩的 L0-L6 分层总览在 [design/context-compression-design.md](./design/context-compression-design.md)，而各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md)。
+示例：会话上下文压缩的 L0-L6 分层总览在 [session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md)，各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md)——**会话相关的一切文档都在 `symbio/src/plugins/session/docs/` 内**；系统级目录只保留跨模块规范（如 [design/vdfs.md](./design/vdfs.md)）。
 
 ## 快速导航
 
@@ -50,7 +50,8 @@ docs/                            # 系统级文档（跨模块）
 │   └── TROUBLESHOOTING.md       # 故障排查
 ├── design/                      # 现行设计规范（只写跨层取舍与不变量）
 │   ├── vdfs.md                          # VDFS 机制规范（权威；资源存储见 §11 / §13.4）
-│   ├── context-compression-design.md    # 上下文压缩 L0-L6 分层总览
+│   ├── vdfs-frontend.md                 # VDFS 前端页面规范
+│   ├── vdfs-review.md                   # VDFS 审查记录
 │   ├── http-api-transport.md            # Gateway HTTP/WS 传输层设计
 │   └── open-agent-bundle-spec.md        # OAB 包规范
 ├── CHANGELOG.md                 # 更新日志
@@ -59,7 +60,10 @@ docs/                            # 系统级文档（跨模块）
                                  #  entity-management-mechanism.md)
 
 symbio/src/plugins/<plugin>/     # 模块级文档（就近原则）
-└── README.md                    # 插件职责、路由、内部机制（14 个插件全覆盖）
+├── README.md                    # 插件职责、路由、内部机制（14 个插件全覆盖）
+└── docs/                        # 可选：该模块的深度设计 / 审计 / 性能文档
+                                 #  例：session/docs/（核心循环、压缩设计、心跳、
+                                 #  模块分工、性能、级联选项、VDFS 会话消息……）
 
 tauri/                           # 前端
 ├── README.md                    # 前端入口

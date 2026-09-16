@@ -18,6 +18,44 @@
 
 ***
 
+## 2026-09-16: session 文档下沉插件目录（高内聚）+ 实现与测试分文件
+
+**文档下沉**：session 相关的 9 份文档从系统级目录迁入 [`symbio/src/plugins/session/docs/`](../symbio/src/plugins/session/docs/)
+（新建 [索引](../symbio/src/plugins/session/docs/README.md)），落实 `docs/README.md` 早已写明的
+「单模块文档放在该模块目录内」原则——此前该原则只在 `turn-tool-mechanisms.md` 上兑现过。
+
+| 原位置 | 新位置 |
+|---|---|
+| `docs/design/session-core-loop.md` | `session/docs/core-loop.md` |
+| `docs/design/session-perf.md` | `session/docs/perf.md` |
+| `docs/design/context-compression-design.md` | `session/docs/context-compression-design.md` |
+| `docs/design/heartbeat-mechanism.md` | `session/docs/heartbeat-mechanism.md` |
+| `docs/design/vdfs-session-messages.md` | `session/docs/vdfs-session-messages.md` |
+| `docs/design/cascading-options-mechanism.md` | `session/docs/cascading-options-mechanism.md` |
+| `docs/architecture/session-mechanism-audit.md` | `session/docs/mechanism-audit.md` |
+| `docs/architecture/session-complexity-audit.md` | `session/docs/complexity-audit.md` |
+| `docs/architecture/session-module-layout.md` | `session/docs/module-layout.md` |
+
+去掉冗余 `session-` 前缀（目录已表达归属）。共改写 16 处文档内相对链接 + 14 处外部引用
+（`docs/design/vdfs.md`、`README.md`、`cli/docs/usage.md`、`local/README.md`、
+`session/plugin.rs`、`session/store/mod.rs`、`tauri/src/schemas/session_meta.ts`、
+`tauri/src/services/sessionBusWatcher.ts`、本文件历史条目）。
+路径书写约定：**同插件内用插件相对 `docs/x.md`，跨模块用仓库根相对**。
+
+**审计工具扩范围**：`scripts/doc-link-audit.mjs` 原只扫 `docs/`，文档下沉后新位置将不受保护。
+扫描根扩为 `docs` / `symbio/src` / `tauri` / `cli` / `examples` + 根目录 `*.md`
+（跳过 `node_modules` / `target` / `dist` 等）。覆盖面 172 → 223 条链接。
+顺带暴露并修复 `CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` 的 7 条**既有**坏链
+（根目录文件却写 `../` 前缀，等同跳出仓库）。
+
+**实现与测试分文件**：session 插件 21 个文件的 `#[cfg(test)] mod tests { … }` 内联块
+移出为同目录 `<module>/tests.rs`（沿用 `store/tests.rs` / `chat_session/tests.rs` 既有约定），
+生产代码从 16,647 行降到 12,419 行（测试 4,313 行独立）。同时产出
+[模块分工评审](../symbio/src/plugins/session/docs/module-layout.md)（`chat_loop.rs` 2400 行
+的超长文件问题、目标结构、S1–S4 执行顺序）。
+
+---
+
 ## 2026-09-15: 节点隐藏属性（`hidden`）与设置页的插件配置清单
 
 改造三之后，左侧导航多出 `local` / `web` / `gateway` 三个入口——它们的全部内容只有
@@ -245,8 +283,8 @@
 
 ## 2026-09-13: Session 插件机制收敛（配置契约单一真源 + 会话/骨架化实现去重 + 存储后端补齐）
 
-对 session 插件做了一轮机制审计并据其落地（取证记录见 `docs/architecture/session-mechanism-audit.md`，
-早期复杂度审计 `session-complexity-audit.md` 已归档为历史版本）。以下为**对外可见**的行为/配置变更：
+对 session 插件做了一轮机制审计并据其落地（取证记录见 `symbio/src/plugins/session/docs/mechanism-audit.md`，
+早期复杂度审计 `symbio/src/plugins/session/docs/complexity-audit.md` 已归档为历史版本）。以下为**对外可见**的行为/配置变更：
 
 - **`max_tool_rounds` 默认值 `15` → `0`（`0 = 不限制`）**：此前配置面声明"默认 15"与 README 宣称的
   "实质无上限"互相矛盾，且 `chat_loop` 另持一份 `unwrap_or(15)` 兜底。现默认值、schema 描述、
@@ -339,7 +377,7 @@
 - **CLI 心跳守护模式**（`cli/`：args/client/main）：`symbio-cli --heartbeat` 驻留进程，为本 homedir 下所有启用心跳的会话触发空闲心跳并渲染状态；与 `-m`/`--repl` 互斥，模式判定顺序 `--heartbeat` 优先。
 - **homedir 优先级修复**（`symbio_core/homedir.rs`）：`HomedirRegistry` 优先级改为 **`SYMBIO_HOMEDIR` 环境变量 > bootstrap 文件 > 默认 `<cwd>/.symbio`**（修复前 bootstrap 优先，`--homedir` 被静默覆盖）；新增回归测试 `test_env_var_overrides_bootstrap`。
 - **空闲基线语义修复**（`plugins/session/heartbeat.rs`）：空闲基线改为 `max(内存锚点, 磁盘 updated_at)` —— 修复前空闲时钟从「上次触发/上次消息接收」起算，回合结束后 14.1s 即重触发（违反「无活动之后满 interval」契约）；修复后空闲严格从活动结束（最后一次落盘）起算，E2E 43 次触发最小间隔 36.2s 全部合规。新增测试 `idle_baseline_prefers_latest_activity`（全套 286 项测试通过）。
-- **文档**：新增 `docs/design/heartbeat-mechanism.md`（语义契约/调度细节/工具 API/E2E 摘要）；`cli/docs/usage.md` 补守护模式、`--heartbeat` 参数与 homedir 优先级链。
+- **文档**：新增 `symbio/src/plugins/session/docs/heartbeat-mechanism.md`（语义契约/调度细节/工具 API/E2E 摘要）；`cli/docs/usage.md` 补守护模式、`--heartbeat` 参数与 homedir 优先级链。
 
 ## 2026-09-09: L1 消息压缩豁免与批次保护（ToolCall 参数永久豁免 + 最近 N 条原文保护 + 头尾保留 + 删除死代码路由）
 
@@ -397,7 +435,7 @@
 
 - **历史实施日志归档**：`symbio/docs/model-session-refactor.md`、`turn-tool-mechanisms.md` 原文移入 [archive/implementation-logs/](./archive/implementation-logs/)（加状态横幅）；机制现行版精简下沉为 [session/docs/turn-tool-mechanisms.md](../symbio/src/plugins/session/docs/turn-tool-mechanisms.md)；`symbio/docs/` 目录清空。
 
-- **去重**：[design/context-compression-design.md](./design/context-compression-design.md) 瘦身为 L0-L6 分层总览 + 取舍原则 + 不变量，各层阈值与实现细节归 [session/README.md](../symbio/src/plugins/session/README.md)；[OVERVIEW.md](./architecture/OVERVIEW.md) 删除 agent 模块内部细节章节，"插件不各自维护文档"的旧约定改写为下沉原则。
+- **去重**：[session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md) 瘦身为 L0-L6 分层总览 + 取舍原则 + 不变量，各层阈值与实现细节归 [session/README.md](../symbio/src/plugins/session/README.md)；[OVERVIEW.md](./architecture/OVERVIEW.md) 删除 agent 模块内部细节章节，"插件不各自维护文档"的旧约定改写为下沉原则。
 
 - **口径修正**：单元测试数以实际统计为准修正为 **239**（原 README 355 / 重构日志 227 均不准）；README/SYSTEM_MAP 同步 model 与 session 职责新表述。
 
@@ -410,7 +448,7 @@
   [CONFIGURATION.md](./reference/CONFIGURATION.md) 写明理由。
   **验证**：`cargo test --lib gateway::config` 3 passed / 0 failed。
 
-- **新增设计稿** [design/context-compression-design.md](./design/context-compression-design.md)：
+- **新增设计稿** [session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md)：
   针对"长对话上下文超限导致会话中断"，盘点现有四层压缩（轮次窗口 / 工具结果窗口 /
   单条消息存档 / 自动摘要），定位 7 条根因（其中 `finish_reason` 全链路未解析、
   token 估算误用 UTF-8 字节数、`max_tokens` 默认值与模型能力脱钩为 P0），

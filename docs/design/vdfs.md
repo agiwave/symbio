@@ -590,7 +590,7 @@ for child in children {
 - **禁止轮询、禁止私有刷新通道**。`created` / `updated` / `deleted` 这类
   粗粒度变更由消费者防抖重拉收敛；`appended` 必须就地增量应用。
   消费端需自行处理「增量与刷新响应竞争」的情形（见
-  [vdfs-session-messages.md](./vdfs-session-messages.md) §S18）。
+  [vdfs-session-messages.md](../../symbio/src/plugins/session/docs/vdfs-session-messages.md) §S18）。
 
 ## 10. 扩展指引
 

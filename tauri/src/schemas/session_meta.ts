@@ -18,7 +18,7 @@
  * `session.metadata` 持久化（写入唯一经**级联选项机制**——
  * 会话页选项行选择 → `worker/session/update` 浅合并）
  * + 后端各解析链按 metadata 回退取值。
- * 前端不持有任何业务字段名，详见 `docs/design/cascading-options-mechanism.md`。
+ * 前端不持有任何业务字段名，详见 `symbio/src/plugins/session/docs/cascading-options-mechanism.md`。
  */
 export interface SessionMetadata {
   workdir?: string;

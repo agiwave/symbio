@@ -2,9 +2,17 @@
 /**
  * doc-link-audit — 文档相对链接审计
  *
- * 用途：扫描 `docs/` 下 Markdown 的**站内相对链接**，报告目标不存在者。
+ * 用途：扫描**全部文档**（系统级 + 模块级）的**站内相对链接**，报告目标不存在者。
  *   文档移动 / 归档（`git mv`）最容易留下静默坏链——阅读时才发现，
  *   而它本可以在提交前被机械地查出来。
+ *
+ * 扫描范围（与「文档下沉原则」对齐：单模块文档在该模块目录内）：
+ *   docs/                系统级文档（含 archive/）
+ *   symbio/src/          插件模块文档（plugins/<plugin>/README.md + plugins/<plugin>/docs/）
+ *   tauri/               前端模块文档（README.md + docs/）
+ *   cli/                 命令行模块文档（README.md + docs/）
+ *   examples/            示例文档
+ *   根目录 *.md          README / CONTRIBUTING / CODE_OF_CONDUCT
  *
  * 用法：
  *   node scripts/doc-link-audit.mjs              # 报告全部失效链接
@@ -23,9 +31,17 @@ import { fileURLToPath } from 'node:url'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
-const docsDir = path.join(repoRoot, 'docs')
 
 const STRICT = process.argv.includes('--strict')
+
+/** 扫描根（相对 repoRoot）；目录递归，文件直接检查 */
+const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'examples']
+
+/** 根目录下的散落 Markdown */
+const ROOT_FILES = ['README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
+
+/** 递归时跳过的目录名（构建产物 / 依赖 / 版本库） */
+const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.venv'])
 
 // 形如 [文字](目标)；目标里的括号不常见，按非贪婪取到第一个右括号
 const LINK = /\[[^\]]*\]\(([^)]+)\)/g
@@ -41,9 +57,12 @@ let total = 0
 
 const walk = (dir) => {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) walk(full)
-    else if (entry.name.endsWith('.md')) check(full)
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name)) continue
+      walk(path.join(dir, entry.name))
+    } else if (entry.name.endsWith('.md')) {
+      check(path.join(dir, entry.name))
+    }
   }
 }
 
@@ -62,11 +81,18 @@ function check(file) {
   }
 }
 
-if (!fs.existsSync(docsDir)) {
-  console.error(`找不到文档目录：${docsDir}`)
-  process.exit(1)
+for (const rel of ROOTS) {
+  const dir = path.join(repoRoot, rel)
+  if (!fs.existsSync(dir)) {
+    console.error(`找不到扫描根：${dir}`)
+    process.exit(1)
+  }
+  walk(dir)
 }
-walk(docsDir)
+for (const rel of ROOT_FILES) {
+  const file = path.join(repoRoot, rel)
+  if (fs.existsSync(file)) check(file)
+}
 
 console.log(`扫描相对链接 ${total} 条，失效 ${bad.length} 条`)
 for (const { from, to } of bad) {

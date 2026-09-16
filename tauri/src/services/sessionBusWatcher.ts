@@ -70,7 +70,7 @@ export function startSessionBusWatcher(): void {
       // 子会话审批透传 + 累积 Assistant 文本，见 `agent/host/subagent.rs`），
       // 因此后端必须继续发布；但前端在这里**故意不处理**——再 patch 一次就会与
       // VDFS 通道形成双写（流式文本逐词叠字）。详见
-      // `docs/design/vdfs-session-messages.md` §6 S19。
+      // `symbio/src/plugins/session/docs/vdfs-session-messages.md` §6 S19。
       switch (evt.type) {
         case ChatEventType.Status:
           // 后端 Status 事件 → 更新 store 状态（覆盖所有会话，不分 active/background）
