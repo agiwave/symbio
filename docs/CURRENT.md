@@ -13,7 +13,7 @@
 
 | 插件目录 | 注册名 | VDFS 挂载点 | 自有路由（静态可提取） | 实现的核心 trait | 配置文件 | 模块 README |
 |---|---|---|---|---|---|---|
-| `agent` | `agent` | .vdfs/agent | （动态）已无自有路由（一律 `NotFound` 并指引到 `.vdfs/agent`） | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
+| `agent` | `agent` | .vdfs/agent · （运行期动态） | （动态）已无自有路由（一律 `NotFound` 并指引到 `.vdfs/agent`） | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `composite` | `composite` | — | （动态）容器：按配置挂载的子插件名分发，运行期动态 | `Plugin` · `VdfsProvider` | — | ✓ |
 | `event_bus` | `event_bus` | — | `event_bus/pending/snapshot` · `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
 | `gateway` | `gateway` | .vdfs/gateway | `gateway/status` | `Plugin` | ✓ | ✓ |
@@ -105,7 +105,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio\src` | 206 文件 / 52789 行 | 47 文件 / 8564 行 |
+| `symbio\src` | 207 文件 / 53114 行 | 47 文件 / 8637 行 |
 | `cli\src` | 4 文件 / 1143 行 | 0 文件 / 0 行 |
 | `tauri\src-tauri\src` | 3 文件 / 347 行 | 0 文件 / 0 行 |
 | `tauri\src` | 76 文件 / 15644 行 | 19 文件 / 2889 行 |
@@ -119,4 +119,4 @@
 
 ---
 
-> 生成时间：2026-09-16 17:24:57 UTC · 源：`git rev-parse HEAD` = `eb85caf`
+> 生成时间：2026-09-16 23:51:43 UTC · 源：`git rev-parse HEAD` = `21ddafa`

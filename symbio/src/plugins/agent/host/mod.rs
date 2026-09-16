@@ -43,6 +43,7 @@ mod detail;
 pub mod memory;
 pub mod plugin;
 mod prompt;
+pub mod scope;
 pub mod store;
 pub mod subagent;
 pub mod vdfs;

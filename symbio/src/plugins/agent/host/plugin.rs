@@ -27,10 +27,11 @@ use crate::plugins::agent::host::store::{BundleRecord, BundleStore};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{
-    announce_configurable, dir_from_ctx, report_error, Capability, ConfigFile, InvokeRequest,
-    InvokeRequestExt, InvokeResponse, Plugin, PluginDir, PluginError, PluginMeta, PluginPayload,
-    AGENT_ID, PATH, PLUGIN_AGENT, SESSION_ID, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
-    WORKDIR,
+    announce_configurable, create_object, dir_from_ctx, report_error, Capability,
+    CapabilityVisitor, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
+    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, AGENT_ID, CAPABILITY_VISITOR,
+    PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR, REQUIRED_PLUGINS, SESSION_ID,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -79,8 +80,33 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
+/// v2 规范标识（见 `docs/design/agent-directory-spec.md`）
+///
+/// 子 Agent 目录只有在 `manifest.yaml` 声明了这个 `spec` 时才按 v2 装配（挂
+/// composite 插件树）。声明 `oab/v1` 的旧目录走 legacy 装配路径——两者按 manifest
+/// 分流，迁移只需改写 manifest 与目录（规范 §12）。
+const SPEC_V2: &str = "agent-dir/v2";
+
+/// 子 Agent 的必需插件清单（规范 §7.2 推荐的最小集合）
+///
+/// 只有与「认知能力」相关的插件才属于子 Agent；会话编排、模型网关、宿主基础设施
+/// 属于系统 Agent，不在这里。
+const SUB_AGENT_PLUGINS: &[&str] = &["mcp", "skill", "work"];
+
+/// 读 Agent 目录下 `manifest.yaml` 的 `spec` 字段（读不到 / 解析不了 = `None`）
+fn manifest_spec(dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("manifest.yaml")).ok()?;
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).ok()?;
+    value
+        .get("spec")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
 /// AgentBundle 插件主结构。
 pub struct AgentPlugin {
+    /// 已构造的子 Agent 插件树（惰性构造 + 缓存，见 [`Self::sub_agent`]）
+    sub_agents: tokio::sync::RwLock<std::collections::HashMap<String, Arc<dyn Plugin>>>,
     /// 插件间路由入口（composite 容器的弱引用）。
     ///
     /// 在 `build(ctx)` 时捕获：composite 构造子插件时注入的 ctx 已携带
@@ -108,6 +134,7 @@ impl AgentPlugin {
             }
         };
         Arc::new(Self {
+            sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             router,
             config: Arc::new(RwLock::new(config)),
             config_file: ConfigFile::new(dir, "智能体设置", config_definition()),
@@ -117,6 +144,7 @@ impl AgentPlugin {
     /// 无装配上下文的实例（测试 / 默认构造）：配置落常规位置，读写仍自洽。
     pub fn new() -> Self {
         Self {
+            sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             router: None,
             config: Arc::new(RwLock::new(AgentConfig::default())),
             config_file: ConfigFile::new(
@@ -158,6 +186,79 @@ impl AgentPlugin {
     /// 配置槽位（[`ConfigFile::read`] / [`ConfigFile::apply`] 的读写对象）
     pub(crate) fn config_slot(&self) -> &RwLock<AgentConfig> {
         &self.config
+    }
+
+    /// 取得（必要时构造）子 Agent 的插件树
+    ///
+    /// **惰性**：只在会话真的绑定它时才构造。全量预建会连带启动每个子 Agent 的
+    /// MCP server，子 Agent 一多就撑不住（规范 §9.1）。
+    ///
+    /// 返回 `None` = 该 id 不是 v2 子 Agent（目录不存在 / manifest 不是
+    /// `agent-dir/v2`）——调用方据此回退到 legacy 约定目录装配。
+    async fn sub_agent(&self, id: &str, ctx: &Arc<dyn InvokeRequest>) -> Option<Arc<dyn Plugin>> {
+        if let Some(tree) = self.sub_agents.read().await.get(id) {
+            return Some(Arc::clone(tree));
+        }
+
+        let dir = self.config_file.dir().dir().join(id);
+        if manifest_spec(&dir).as_deref() != Some(SPEC_V2) {
+            return None;
+        }
+
+        // 与 `home` 造 `worker` 同形：把目录（子 Agent 的根）与必需插件清单告知
+        // 容器，其余交给 composite 扫描装配——子 Agent 与系统 Agent 因此结构相同。
+        let sub_context = Arc::new(SimpleRequest::new(self.router.clone(), None));
+        if let Some(std_ctx) = ctx.as_any().downcast_ref::<SimpleRequest>() {
+            let mut envs = sub_context.envs.write().unwrap();
+            *envs = std_ctx.envs.read().unwrap().clone();
+        }
+        sub_context.set(PLUGIN_DIR, PluginDir::at(&dir, PLUGIN_COMPOSITE));
+        sub_context.set(
+            REQUIRED_PLUGINS,
+            SUB_AGENT_PLUGINS.iter().map(|s| (*s).to_string()).collect(),
+        );
+
+        crate::plugin_info!("agent", "装配子 Agent `{}` -> {}", id, dir.display());
+        let tree = create_object::<dyn Plugin>(PLUGIN_COMPOSITE, sub_context)?;
+        self.sub_agents
+            .write()
+            .await
+            .insert(id.to_string(), Arc::clone(&tree));
+        Some(tree)
+    }
+
+    /// 把能力收集转发进子 Agent 的插件树
+    ///
+    /// 注册经 [`super::scope::SubAgentVisitor`] 代理（加来源前缀），因此与系统树的
+    /// 同名注册**不冲突**，两份都生效——并集，且结果与遍历顺序无关。
+    async fn forward_to_sub_agent(
+        &self,
+        tree: &Arc<dyn Plugin>,
+        id: &str,
+        ctx: &Arc<dyn InvokeRequest>,
+        visitor: &Arc<dyn CapabilityVisitor>,
+    ) {
+        let sub = ctx.fork();
+        sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+        // 子 Agent 的作用域 = 它自己的目录：其中的 `work` 实例因此拥有
+        // `<agent dir>/AGENTS.md`，而不是沿用父的 workdir（规范 §6.2：一个作用域
+        // 只有一个所有者，否则同一份记忆会被注入两次）。
+        sub.set(
+            WORKDIR,
+            self.config_file
+                .dir()
+                .dir()
+                .join(id)
+                .to_string_lossy()
+                .to_string(),
+        );
+        let scoped: Arc<dyn CapabilityVisitor> =
+            Arc::new(super::scope::SubAgentVisitor::new(Arc::clone(visitor), id));
+        sub.set(CAPABILITY_VISITOR, scoped);
+
+        if let Err(e) = tree.clone().traverse(String::new(), sub).await {
+            crate::plugin_warn!("agent", "子 Agent `{id}` 能力收集失败：{e:?}");
+        }
     }
 
     pub fn metadata() -> PluginMeta {
@@ -391,20 +492,30 @@ impl Plugin for AgentPlugin {
             ) as Arc<dyn Capability>])
             .await;
 
-        // ── 已选择智能体 → 约定目录装配（人格片段 + 身份工具）──
+        // ── 已选择智能体 → 装配它的能力 ──
         if let Some(bundle_id) = bundle_id {
-            if let Err(e) = self
-                .attach_bundle(&ctx, &bundle_id, workdir, session_id, &tool_visitor)
-                .await
-            {
-                // 硬错误：会话绑定了一个不合规/不存在的 bundle——必须中止并明确提示，
-                // 绝不静默降级为「无人格的通用助手」；装配失败一律以收集期错误上报。
-                report_error(
-                    &ctx,
-                    PLUGIN_AGENT,
-                    format!("bundle `{bundle_id}` 装配失败: {e}"),
-                )
-                .await;
+            match self.sub_agent(&bundle_id, &ctx).await {
+                // v2：子 Agent 是一棵 composite 插件树，能力经代理层并集进来
+                Some(tree) => {
+                    self.forward_to_sub_agent(&tree, &bundle_id, &ctx, &tool_visitor)
+                        .await
+                }
+                // 仍是 v1 manifest → legacy 约定目录装配（迁移完成后整条删掉）
+                None => {
+                    if let Err(e) = self
+                        .attach_bundle(&ctx, &bundle_id, workdir, session_id, &tool_visitor)
+                        .await
+                    {
+                        // 硬错误：会话绑定了一个不合规/不存在的 bundle——必须中止并明确
+                        // 提示，绝不静默降级为「无人格的通用助手」。
+                        report_error(
+                            &ctx,
+                            PLUGIN_AGENT,
+                            format!("bundle `{bundle_id}` 装配失败: {e}"),
+                        )
+                        .await;
+                    }
+                }
             }
         }
 

@@ -62,9 +62,14 @@ const backendDir = path.join(repoRoot, 'symbio')
 const frontendDir = path.join(repoRoot, 'tauri')
 const logDir = path.join(repoRoot, '.workbuddy-ai', 'gate-logs')
 
-/** 通过数基线（**只增不减**；跑高了请更新这里并说明理由） */
+/**
+ * 通过数基线（**只增不减**；跑高了请更新这里并说明理由）
+ *
+ * 650：+3 = 子 Agent 并集装配（`plugins/agent/host/scope.rs` 两个前缀规则单测
+ * + `host/tests.rs::v2_sub_agent_tree_is_assembled_and_prefixed` 一个装配端到端）。
+ */
 const BASELINE = {
-  rustTests: 647,
+  rustTests: 650,
   vitestFiles: 19,
   vitestTests: 156,
 }

@@ -87,8 +87,13 @@ impl SkillPlugin {
             max_skills: config.max_skills,
             max_body_chars: config.max_body_chars,
         };
-        let mut skills =
-            load_skills_from_dirs_with_budget(&config.skill_dirs, workdir_path, budget).await?;
+        // **本插件自己的目录**是第一来源（其后才是配置里的 `skill_dirs`）。
+        // 于是子 Agent 的 skill 实例自包含——技能就放在 `<agent dir>/skill/` 下，
+        // 不需要任何全局配置，复制整个目录即复制这个 Agent 的全部技能。
+        let mut dirs: Vec<String> = Vec::with_capacity(config.skill_dirs.len() + 1);
+        dirs.push(self.dir.dir().to_string_lossy().to_string());
+        dirs.extend(config.skill_dirs.iter().cloned());
+        let mut skills = load_skills_from_dirs_with_budget(&dirs, workdir_path, budget).await?;
 
         // 如果从工作目录没有加载到技能，尝试从项目根目录加载
         if skills.is_empty() {

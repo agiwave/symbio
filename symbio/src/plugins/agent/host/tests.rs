@@ -217,3 +217,76 @@ async fn version_mismatch_bundle_is_rejected_and_unbound_session_is_silent() {
         "未选择智能体时不得注入任何人格 / 记忆片段"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v2：子 Agent 是一棵 composite 插件树（规范 `docs/design/agent-directory-spec.md`）
+// ---------------------------------------------------------------------
+// 验证三件事：manifest 声明 `agent-dir/v2` 的目录会被挂成插件树；它的注册经
+// 代理层带上来源前缀（与系统树不冲突）；它的 work 实例作用域是自己的目录。
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
+    use crate::symbio_core::{PluginDir, PLUGIN_AGENT, PLUGIN_DIR};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let agent_root = tmp.path().join("agent");
+    let sub = agent_root.join("reviewer");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        sub.join("manifest.yaml"),
+        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires:/n  spec: \"^2\"\n",
+    )
+    .unwrap();
+    // 人格 + 记忆：由子 Agent 的 work 实例拥有（forward 时把 WORKDIR 指向该目录）
+    std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
+    // 一个技能：落在子 Agent **自己的** skill 插件目录下（有技能它才注册 read_skill）
+    let skill_dir = sub.join("skill").join("demo");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: demo\ndescription: 演示技能：对改动做一次评审\n---\n\n# 演示\n",
+    )
+    .unwrap();
+
+    // 构造插件：把 PLUGIN_DIR 指到 <tmp>/agent
+    let build_ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    build_ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_AGENT));
+    let plugin = AgentPlugin::build(build_ctx);
+
+    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    ctx.set(AGENT_ID, "reviewer".to_string());
+    ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
+    let manager: Arc<DefaultToolVisitor> = Arc::new(DefaultToolVisitor::new());
+    ctx.set(
+        CAPABILITY_VISITOR,
+        Arc::clone(&manager) as Arc<dyn CapabilityVisitor>,
+    );
+
+    plugin.traverse(String::new(), ctx).await.unwrap();
+
+    // 1) 子 Agent 的 work 实例注入了记忆段，且段名带来源前缀（与系统的 `work` 不冲突）
+    let names: Vec<String> = manager
+        .list_system_prompts()
+        .await
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    assert!(
+        names.iter().any(|n| n.starts_with("agent/reviewer/")),
+        "子 Agent 的注册应带来源前缀，实际：{names:?}"
+    );
+
+    // 2) 子 Agent 的 skill 实例注册的工具被代理层改名，不与系统的 `read_skill` 撞名
+    let tools: Vec<String> = manager
+        .list_capability()
+        .await
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    assert!(
+        tools.iter().any(|t| t.starts_with("agent_reviewer_")),
+        "子 Agent 的工具应带来源前缀，实际：{tools:?}"
+    );
+}

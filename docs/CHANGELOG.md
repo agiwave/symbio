@@ -18,6 +18,33 @@
 
 ***
 
+## 2026-09-17: 子 Agent 改为 composite 插件树（Agent 目录规范 v2 落地，第一步）
+
+规范见 [`docs/design/agent-directory-spec.md`](../design/agent-directory-spec.md)
+（取代 `open-agent-bundle-spec.md`）。本次是**代码侧第一步**，只加新路径，
+旧的 OAB v1 约定目录装配仍保留，按 `manifest.yaml` 的 `spec` 分流。
+
+- **子 Agent = 一棵 composite 插件树**：`{homedir}/agent/<id>/manifest.yaml` 声明
+  `spec: agent-dir/v2` 的目录，由 agent 插件照 `home` 造 `worker` 的同形写法挂成
+  composite（`PLUGIN_DIR` + `REQUIRED_PLUGINS = ["mcp","skill","work"]`），
+  **惰性构造 + 缓存**（全量预建会连带启动每个子 Agent 的 MCP server）。
+- **注册代理层** `agent/host/scope.rs`：子 Agent 树的注册经它转发，
+  一切注册项加来源前缀——提示词段 / VDFS 用 `agent/<id>/<name>`，工具用
+  `agent_<safe_id>_<name>`（工具名进 function-calling 协议，只收 `[A-Za-z0-9_-]`）。
+  加前缀后**名字根本不冲突**，于是并集与遍历顺序无关
+  （`Composite::traverse` 遍历 `HashMap`，顺序不确定，不能依赖"后注册者胜"）。
+- **单槽注册不转发**：`register_vdfs_root` / `register_model_provider` 被丢弃——
+  子 Agent 的容器会把自己登记成 VDFS 根，原样转发会劫持系统侧全部挂载点。
+- **作用域**：转发时把 `WORKDIR` 指向子 Agent 目录，其中的 `work` 实例因此拥有
+  `<agent dir>/AGENTS.md`，而不是沿用父的 workdir（规范 §6.2：一个作用域只有一个
+  所有者，否则同一份记忆被注入两次）。
+- **skill 插件**：技能检索加上**本插件自己的目录**作为第一来源，子 Agent 的
+  `skill` 实例因此自包含（技能就在 `<agent dir>/skill/` 下），不再依赖全局配置。
+
+未动 `symbio_core`：代理层实现的是既有 `CapabilityVisitor` trait，放在 agent 插件内。
+
+测试 650（+3，基线同步更新）；门禁 14/14。
+
 ## 2026-09-16: session 存储根改为插件实例目录（补完上一条的未竟项）
 
 上一条遗留：`session_storage_dir()` 仍按插件名反推落位。现已收口——**会话存储根 =
