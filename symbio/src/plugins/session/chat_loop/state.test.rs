@@ -192,7 +192,6 @@ fn request_defaults_come_from_session_config() {
     assert_eq!(r.max_tool_rounds, None, "默认 = 无上限");
     assert!(r.load_history, "该字段无配置对应项：缺省即加载历史");
     assert_eq!(r.system_prompt, None);
-    assert_eq!(r.provider_id, None);
 }
 
 #[test]
@@ -204,7 +203,6 @@ fn explicit_request_values_win_over_defaults() {
         enable_compact_tool: Some(!defaults.enable_compact_tool),
         tool_context_window: Some(defaults.tool_context_window + 1),
         system_prompt: Some("p".into()),
-        provider_id: Some("openai".into()),
         ..Default::default()
     });
     assert_eq!(r.max_tool_rounds, Some(7));
@@ -212,7 +210,6 @@ fn explicit_request_values_win_over_defaults() {
     assert_eq!(r.enable_compact_tool, !defaults.enable_compact_tool);
     assert_eq!(r.tool_context_window, defaults.tool_context_window + 1);
     assert_eq!(r.system_prompt.as_deref(), Some("p"));
-    assert_eq!(r.provider_id.as_deref(), Some("openai"));
 }
 
 #[test]

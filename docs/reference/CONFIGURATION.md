@@ -80,7 +80,9 @@ work:
 | 插件 | 配置地址 | 主要键 |
 |---|---|---|
 | `home` | `.vdfs/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
-| `session` | `.vdfs/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history`（字段全表见 `SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
+| `session` | `.vdfs/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `session/config.rs::SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
+| `agent` | `.vdfs/agent/PLUGIN.yml` | `item_max_bytes` / `identity_inject_max_bytes` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `agent/host/config.rs::AgentConfig`） |
+| `work` | `.vdfs/work/PLUGIN.yml` | `memory_enabled` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `work/config.rs::WorkConfig`） |
 | `web` | `.vdfs/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |
 | `local` | `.vdfs/local/PLUGIN.yml` | `shell_enabled` / `file_enabled` / `shell_timeout` |
 | `gateway` | `.vdfs/gateway/PLUGIN.yml` | 见下 |

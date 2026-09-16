@@ -1,20 +1,24 @@
 //! 把 OAB bundle 贡献的能力包装为 symbio `Capability`。
 //!
-//! ## 唯一的能力：身份/提示词锚定
+//! ## 唯一的能力：身份全文取回
 //!
 //! bundle 对模型的贡献只有两类（规范 §5）：
 //!
-//! - **提示词**：`prompts/` + `skills/` 装配出的片段 → 汇总注册为 **一个**
-//!   [`BundleIdentityCapability`]（`agent_identity` 工具）；
+//! - **提示词**：`prompts/` + `skills/` 装配出的人格；
 //! - **工具**：来自 `mcps/` 的 MCP server，由**宿主已有的 MCP 客户端**启动并注册，
 //!   本插件不包壳、不实现任何 OAB 专有执行器。
 //!
-//! ## 为什么人格是工具而不是系统提示词通道
+//! 人格本体走**系统提示词片段**通道（见 [`super::prompt`]）——每轮随提示词注入，
+//! 模型一开始就知道自己是谁。本模块的 [`BundleIdentityCapability`] 是它的**配套**：
+//! 片段只带注入预算内的部分，超出的正文由 `agent_identity` 工具取回。
 //!
-//! symbio 的会话编排（session orchestrator）只组装与智能体无关的基础提示词，
-//! 人格由「agent_identity 工具说明」承载。bundle 的
-//! 提示词片段经装配汇总后在此注册为**一个**身份工具：模型在每轮工具列表里看到
-//! 它的描述（身份锚定），调用即取回全文。
+//! ## 为什么两个通道都要
+//!
+//! 只要工具：模型得先「决定去调用它」才看得到人格，人格就不是「我是谁」而是
+//! 「一个可调用的东西」。
+//! 只要片段：注入预算一旦被截断，模型就再也拿不到剩下的部分——人格缺一块且无声。
+//!
+//! 片段保证**在场**，工具保证**完整**。
 
 use crate::symbio_core::{
     Capability, CapabilityCategory, CapabilityMeta, InvokeRequest, InvokeResponse, PluginPayload,

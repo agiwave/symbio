@@ -5,6 +5,11 @@
 //! 分别在 `plugin/nodes.test.rs`、`plugin/vdfs_provider.test.rs`。
 
 use super::*;
+// 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
+use crate::plugins::session::test_dir;
+use crate::symbio_core::{
+    CapabilityVisitor, DefaultToolVisitor, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
+};
 
 /// 验证 session 存储目录**只**从 HomedirRegistry 派生，不依赖 config；
 /// 且它就是宿主层的资源类别根（`category_dir(PLUGIN_SESSION)`）——
@@ -134,4 +139,144 @@ fn config_definition_defaults_come_from_session_config() {
         defaults,
         "SessionConfig 的 serde 默认值与 Default impl 漂移了（两处各自书写）"
     );
+}
+
+// ==================== 会话记忆（`.vdfs/session/<id>/AGENTS.md`）====================
+//
+// 机制（读写 / 限容 / 截断 / 排版）已在 `symbio_core::memory.test.rs` 与
+// `session/memory.test.rs` 钉住；这里只测**收集期**这一侧：什么情况下注入、
+// 注入的那一段长什么样。
+
+/// 构造带能力收集器的上下文；`session_id` 为 `None` 即「没有会话上下文」
+fn collect_ctx(session_id: Option<&str>) -> (Arc<dyn InvokeRequest>, Arc<DefaultToolVisitor>) {
+    let ctx: Arc<dyn InvokeRequest> = Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+    if let Some(sid) = session_id {
+        ctx.set(SESSION_ID, sid.to_string());
+    }
+    ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    let visitor = Arc::new(DefaultToolVisitor::new());
+    ctx.set(
+        CAPABILITY_VISITOR,
+        Arc::clone(&visitor) as Arc<dyn CapabilityVisitor>,
+    );
+    (ctx, visitor)
+}
+
+/// 本用例独占的会话 id（会话存储目录取自全局 homedir，复用 id 会串扰）
+fn scratch_id(tag: &str) -> String {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{tag}-{}-{n}", std::process::id())
+}
+
+/// 取本插件注册的那一段系统提示词
+async fn memory_segment(visitor: &Arc<DefaultToolVisitor>) -> Option<String> {
+    visitor
+        .list_system_prompts()
+        .await
+        .into_iter()
+        .find(|(n, _)| n == crate::plugins::session::memory::SEGMENT_NAME)
+        .map(|(_, t)| t)
+}
+
+/// 没有会话上下文 → 不注入（「本会话的记忆」无从谈起，这不是故障）
+#[tokio::test]
+async fn no_session_context_injects_no_memory() {
+    let p = Arc::new(SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        test_dir(),
+    ));
+    let (ctx, visitor) = collect_ctx(None);
+
+    p.traverse(String::new(), ctx).await.unwrap();
+
+    assert!(
+        memory_segment(&visitor).await.is_none(),
+        "没有会话 id 时不得凭空造一份记忆出来"
+    );
+    // 但挂载点照旧交出：挂载点的存在不依赖某次请求的作用域
+    assert!(visitor.get_vdfs_provider(PLUGIN_SESSION).await.is_some());
+}
+
+/// 空串 / 纯空白的会话 id 与「没有会话」同解（闸门在 `store` 一处收口）
+#[tokio::test]
+async fn blank_session_id_is_treated_as_no_session() {
+    let p = Arc::new(SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        test_dir(),
+    ));
+    for blank in ["", "   "] {
+        let (ctx, visitor) = collect_ctx(Some(blank));
+        p.clone().traverse(String::new(), ctx).await.unwrap();
+        assert!(memory_segment(&visitor).await.is_none(), "blank={blank:?}");
+    }
+}
+
+/// 还没写过 → 仍然注入一段（教会模型「你可以往这里写」），
+/// 头信息里带**地址**与**容量**（这是它区别于只读指令的地方）
+#[tokio::test]
+async fn empty_memory_still_teaches_where_and_how_big() {
+    let p = Arc::new(SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        test_dir(),
+    ));
+    let id = scratch_id("mem-empty");
+    let (ctx, visitor) = collect_ctx(Some(&id));
+
+    p.traverse(String::new(), ctx).await.unwrap();
+
+    let seg = memory_segment(&visitor).await.expect("有会话就应注入");
+    assert!(seg.contains("【会话记忆】"), "{seg}");
+    assert!(
+        seg.contains(&format!(".vdfs/session/{id}/AGENTS.md")),
+        "地址必须真实可达：{seg}"
+    );
+    assert!(
+        seg.contains(&format!(
+            "{}字节",
+            SessionConfig::default().memory_max_bytes
+        )),
+        "上限来自本插件配置：{seg}"
+    );
+    assert!(
+        seg.contains("暂无内容"),
+        "空记忆也要教会模型怎么建立：{seg}"
+    );
+    assert!(
+        seg.contains("与【工作区记忆】【智能体记忆】相互独立"),
+        "三层同名不同域，必须点明：{seg}"
+    );
+}
+
+/// 已写入的内容**原样**进片段（不加工、不摘要）
+#[tokio::test]
+async fn session_memory_is_injected_verbatim() {
+    let p = Arc::new(SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        test_dir(),
+    ));
+    let id = scratch_id("mem-content");
+    let dir = SessionPlugin::session_storage_dir().join(&id);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(crate::symbio_core::AGENTS_FILE),
+        "本会话约定：所有时间用 UTC。",
+    )
+    .unwrap();
+
+    let (ctx, visitor) = collect_ctx(Some(&id));
+    p.traverse(String::new(), ctx).await.unwrap();
+
+    let seg = memory_segment(&visitor).await.expect("有会话就应注入");
+    assert!(seg.contains("本会话约定：所有时间用 UTC。"), "{seg}");
+    assert!(
+        seg.contains("改写前先 vdfs_read"),
+        "必须教会模型「先读后写」，否则会整篇覆盖：{seg}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

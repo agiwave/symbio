@@ -314,15 +314,16 @@ impl SessionPlugin {
 
             attach_capabilities(&chat_ctx, tool_visitor);
 
-            // ── 基础提示词（与智能体无关）：AGENTS.md 全局 / 工作区指令 ──
-            // 智能体人格不在这里——由 agent_identity 工具说明承载。
-            let base_prompt =
-                super::super::prompt::build_system_prompt(Some(w_clone.as_str())).await;
-            let system_prompt_opt = if base_prompt.trim().is_empty() {
-                None
-            } else {
-                Some(base_prompt)
-            };
+            // ── 基础提示词：**不在这里拼** ──
+            // 全局指令（`{homedir}/AGENTS.md`）与各层记忆都由插件在能力收集期经
+            // `register_system_prompt` 注册，由 `chat_loop::inputs::resolve_system_prompt`
+            // 统一拼接。曾经在这里把 AGENTS.md 装配成 `req.system_prompt` 传入，
+            // 后果有二：① 同一份工作区 AGENTS.md 被 work 插件再注入一次（进两次上下文）；
+            // ② 显式 `system_prompt` 会**顶掉**模型插件注册的人格——用户写了一份指令，
+            // 模型却换了个人格。两处都已按「一个作用域一个所有者」收口。
+            //
+            // 因此下面各分支一律传 `system_prompt: None`（ping 分支除外：那是刻意的
+            // 极简探活提示，不参与正常编排）。
 
             // 构造 model_chat::Request：会话派生字段收敛为单一 base（历史上三个分支
             // 近重复构造 10 个字段，改一处漏两处），分支只覆盖真正不同的 4 个字段。
@@ -341,7 +342,7 @@ impl SessionPlugin {
             };
             let chat_input = if let Some(tr) = resume_spawn {
                 json!(model_chat::Request {
-                    system_prompt: system_prompt_opt,
+                    system_prompt: None,
                     // resume 必须加载历史以定位目标消息
                     load_history: Some(true),
                     resume: Some(tr),
@@ -366,7 +367,7 @@ impl SessionPlugin {
                     m
                 });
                 json!(model_chat::Request {
-                    system_prompt: system_prompt_opt,
+                    system_prompt: None,
                     single_message: single,
                     load_history: include_history,
                     ..req_base

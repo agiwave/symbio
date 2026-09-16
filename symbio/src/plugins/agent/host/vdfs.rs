@@ -21,7 +21,7 @@ use crate::symbio_core::vdfs_provider::{
     VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_CHANGE_CREATED,
     VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED, VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
 };
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PLUGIN_AGENT};
+use crate::symbio_core::{InvokeRequest, InvokeRequestExt, AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -73,6 +73,18 @@ fn section_of(seg: &str) -> Option<&'static ContainerKind> {
     CONTAINER_KINDS.iter().find(|k| k.label == seg)
 }
 
+/// 子类别的「展示标签 + 相对路径模板」清单。
+///
+/// 人格片段（`super::prompt`）据此生成给模型的编辑地址——地址由**寻址规则的
+/// 同一份声明**产出，不另写字面量：改了 `path_hint`，提示词里的地址跟着变，
+/// 不会出现「提示词指着一个不存在的路径」。
+pub(super) fn item_address_templates() -> Vec<(&'static str, &'static str)> {
+    CONTAINER_KINDS
+        .iter()
+        .map(|k| (k.label, k.path_hint))
+        .collect()
+}
+
 // ==================== 路径解析 ====================
 
 /// 挂载点内相对路径（至多切三段：条目 / 子类别 / 子条目）
@@ -80,6 +92,10 @@ fn section_of(seg: &str) -> Option<&'static ContainerKind> {
 enum RelPath<'a> {
     Root,
     Item(&'a str),
+    /// 智能体记忆：`<id>/AGENTS.md`（bundle 根下的普通文件，**不是**子类别）
+    Memory {
+        id: &'a str,
+    },
     Section {
         id: &'a str,
         seg: &'a str,
@@ -99,6 +115,8 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
     match p.split_once('/') {
         None => RelPath::Item(p),
         Some((id, rest)) => match rest.split_once('/') {
+            // 第二段是记忆文件名 → 记忆，而不是「名为 AGENTS.md 的子类别」
+            None if rest == AGENTS_FILE => RelPath::Memory { id },
             None => RelPath::Section { id, seg: rest },
             Some((seg, item)) => RelPath::SubItem { id, seg, item },
         },
@@ -182,6 +200,17 @@ fn section_node(spec: &'static ContainerKind) -> VdfsNode {
 }
 
 /// 子条目 → VDFS 节点（文件；`ext` 由文件名推导，渲染器据此分发）
+/// 智能体记忆 → VDFS 节点（`ext` 由文件名推导为 `md`，前端据此选 Markdown 编辑器）
+fn memory_node(size: u64) -> VdfsNode {
+    let mut n = VdfsNode::file(AGENTS_FILE, AGENTS_FILE, VdfsAccess::READ_WRITE);
+    n.kind = "memory".to_string();
+    n.size = Some(size);
+    n.description = Some(
+        "该智能体自己的长期记忆（跨会话保留）：只在选中本智能体时注入系统提示词。".to_string(),
+    );
+    n
+}
+
 fn container_node(
     spec: &ContainerKind,
     path: &str,
@@ -268,16 +297,22 @@ impl VdfsProvider for AgentPlugin {
                 .list()
                 .into_iter()
                 .map(|r| bundle_node(&r, &store))
-                .collect()),
-            // 条目即容器：子类别清单（提示词 / 技能 / MCP）
+                .collect()), // 条目即容器：记忆文件 + 子类别清单（提示词 / 技能 / MCP）
             RelPath::Item(id) => {
                 let id = id_of(id);
                 // 存在性校验：不存在的条目应报 NotFound 而非给出空类别清单
                 store
                     .get(&id)
                     .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}「{id}」")))?;
-                Ok(CONTAINER_KINDS.iter().map(section_node).collect())
+                let memory_size = store.read_memory(&id).map(|t| t.len() as u64).unwrap_or(0);
+                let mut nodes = vec![memory_node(memory_size)];
+                nodes.extend(CONTAINER_KINDS.iter().map(section_node));
+                Ok(nodes)
             }
+            // 记忆是叶子节点
+            RelPath::Memory { .. } => Err(VdfsError::not_found(format!(
+                "智能体记忆是叶子节点，没有子项：{path}"
+            ))),
             RelPath::Section { id, seg } => {
                 let spec = section_of(seg)
                     .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}")))?;
@@ -299,6 +334,10 @@ impl VdfsProvider for AgentPlugin {
     async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
+        // 配置文档按**真实文件名**可达（列表里不并列，进设置走 ConfigurableVisitor）
+        if path.trim_matches('/') == PLUGIN_FILE {
+            return Ok(self.config_file().node());
+        }
         match parse_rel_path(path) {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             RelPath::Root => Ok(VdfsNode::dir("", LABEL, self.root_access())),
@@ -312,6 +351,13 @@ impl VdfsProvider for AgentPlugin {
             RelPath::Section { seg, .. } => section_of(seg)
                 .map(section_node)
                 .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}"))),
+            RelPath::Memory { id } => {
+                let id = id_of(id);
+                let text = store
+                    .read_memory(&id)
+                    .map_err(|e| VdfsError::not_found(format!("读取智能体记忆失败：{e}")))?;
+                Ok(memory_node(text.len() as u64))
+            }
             RelPath::SubItem { id, item, .. } => Ok(Self::container_item(&store, id, item)?.0),
         }
     }
@@ -319,12 +365,23 @@ impl VdfsProvider for AgentPlugin {
     async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
+        if path.trim_matches('/') == PLUGIN_FILE {
+            return self.config_file().read(self.config_slot()).await;
+        }
         match parse_rel_path(path) {
             // 子条目：bundle 沙箱内读取正文
             RelPath::SubItem { id, item, .. } => {
                 let (node, content) = Self::container_item(&store, id, item)?;
                 let _ = node;
                 Ok(VdfsContent::text(path, content))
+            }
+            // 智能体记忆：bundle 目录下的 `AGENTS.md`
+            RelPath::Memory { id } => {
+                let id = id_of(id);
+                let text = store
+                    .read_memory(&id)
+                    .map_err(|e| VdfsError::not_found(format!("读取智能体记忆失败：{e}")))?;
+                Ok(VdfsContent::text(path, text))
             }
             RelPath::Root | RelPath::Section { .. } => Err(VdfsError::invalid(format!(
                 "该路径是目录，不可读取内容：{path}"
@@ -350,6 +407,40 @@ impl VdfsProvider for AgentPlugin {
     ) -> VdfsResult<VdfsWriteResponse> {
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
+        // 配置文档：与其它插件同一口径（写自己的 `PLUGIN.yml`）
+        if path.trim_matches('/') == PLUGIN_FILE {
+            return self.config_file().apply(self.config_slot(), content).await;
+        }
+        // 智能体记忆写回（容量闸门取自插件配置）
+        if let RelPath::Memory { id } = parse_rel_path(path) {
+            if content.binary {
+                return Err(VdfsError::invalid("智能体记忆是文本文件，不接受二进制内容"));
+            }
+            let id = id_of(id);
+            let existed = store
+                .read_memory(&id)
+                .map(|t| !t.is_empty())
+                .unwrap_or(false);
+            let text = content.text.as_deref().unwrap_or_default();
+            let max_bytes = self.memory_max_bytes().await;
+            store
+                .write_memory(&id, text, max_bytes)
+                .map_err(VdfsError::invalid)?;
+            notify_change(
+                PLUGIN_AGENT,
+                path,
+                if existed {
+                    VDFS_CHANGE_UPDATED
+                } else {
+                    VDFS_CHANGE_CREATED
+                },
+            );
+            return Ok(VdfsWriteResponse {
+                path: path.to_string(),
+                created: !existed,
+                etag: None,
+            });
+        }
         // 整包导入：bundle **唯一的创建方式**（id 取自包内 manifest，忽略建议名）
         if content.binary {
             if !matches!(parse_rel_path(path), RelPath::Item(_)) {
@@ -406,8 +497,10 @@ impl VdfsProvider for AgentPlugin {
                 .map_err(|e| VdfsError::not_found(format!("列出子条目失败：{e}")))?
                 .iter()
                 .any(|e| e.path == target);
+            // 写入闸门：条目内容上限取自插件配置（唯一取值点）
+            let max_bytes = self.item_max_bytes().await;
             store
-                .write_item(id, &target, text)
+                .write_item(id, &target, text, max_bytes)
                 .map_err(|e| VdfsError::invalid(format!("写入子条目失败：{e}")))?;
             notify_change(
                 PLUGIN_AGENT,
@@ -436,6 +529,13 @@ impl VdfsProvider for AgentPlugin {
         }
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
+        // 智能体记忆不可删除（与工作区记忆同一口径）：要清空就写入空内容
+        if matches!(parse_rel_path(path), RelPath::Memory { .. }) {
+            return Err(VdfsError::Forbidden(format!(
+                "智能体记忆不可删除（删除即丢失全部长期记忆）。\
+                 如需清空，请向 `{AGENTS_FILE}` 写入空内容。"
+            )));
+        }
         // 子条目删除（bundle 沙箱内删除）
         if let RelPath::SubItem { id, seg, item } = parse_rel_path(path) {
             let _ = section_of(seg)
@@ -523,6 +623,18 @@ mod tests {
                 assert_eq!(id, "b1");
                 assert_eq!(seg, "提示词");
                 assert_eq!(item, "prompts/a.md");
+            }
+            other => panic!("期望 SubItem，实际：{other:?}"),
+        }
+        // 第二段是记忆文件名 → 记忆，而不是「名为 AGENTS.md 的子类别」
+        match parse_rel_path("b1/AGENTS.md") {
+            RelPath::Memory { id } => assert_eq!(id, "b1"),
+            other => panic!("期望 Memory，实际：{other:?}"),
+        }
+        // 子类别里的同名文件仍是子条目（记忆只在 bundle 根这一层）
+        match parse_rel_path("b1/提示词/AGENTS.md") {
+            RelPath::SubItem { id, seg, item } => {
+                assert_eq!((id, seg, item), ("b1", "提示词", "AGENTS.md"));
             }
             other => panic!("期望 SubItem，实际：{other:?}"),
         }

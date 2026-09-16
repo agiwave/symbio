@@ -68,9 +68,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::compression;
+use super::config::SessionConfig;
 use super::tool_executor::{fire_hook, process_tool_calls_async};
 use crate::symbio_core::schemas::session::session_chat_response;
-use crate::symbio_core::schemas::session::session_config::SessionConfig;
 
 pub async fn run_chat_loop(
     orchestrator: &ChatOrchestrator,

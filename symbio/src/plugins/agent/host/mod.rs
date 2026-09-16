@@ -4,9 +4,11 @@
 //!
 //! | 模块 | 职责 |
 //! |---|---|
-//! | [`plugin`] | 插件主体：`traverse(available_tools)` → 扫描约定目录装配 → 身份工具注册 |
+//! | [`plugin`] | 插件主体：`traverse(available_tools)` → 扫描约定目录装配 → 人格片段 + 身份工具注册 |
 //! | [`store`] | bundle 存储：系统目录 `plugins/agent/`、zip 导入（zip-slip 防护）、导出 |
-//! | [`capability`] | `agent_identity` 身份工具（提示词片段锚定） |
+//! | [`prompt`] | 人格的**系统提示词片段**（含可编辑地址与容量口径） |
+//! | [`capability`] | `agent_identity` 身份工具（取回超出注入预算的全文） |
+//! | [`config`] | 插件配置（两道容量闸门：条目写入上限 / 人格注入上限） |
 //! | [`vdfs`] | VDFS 挂载点（`.vdfs/agent/…`，本插件直接 `impl VdfsProvider`） |
 //!
 //! **本层没有任何自有协议路由**：bundle 的浏览 / 导入 / 删除 / 导出分别由
@@ -17,9 +19,14 @@
 //!
 //! | 约定目录 | 产出 |
 //! |---|---|
-//! | `prompts/<name>.md` | 系统提示词片段（frontmatter `priority`，默认 10） |
-//! | `skills/<name>/SKILL.md` | 系统提示词片段（priority 默认 50，行业 SKILL 格式） |
+//! | `prompts/<name>.md` | 人格片段（frontmatter `priority`，默认 10） |
+//! | `skills/<name>/SKILL.md` | 人格片段（priority 默认 50，行业 SKILL 格式） |
 //! | `mcps/<name>…` | MCP server 声明 → 宿主 MCP 客户端（**工具唯一来源**） |
+//!
+//! `prompts/` 与 `skills/` 装配出的人格交出**两份**：系统提示词片段（每轮注入的
+//! 本体，见 [`prompt`]）与 `agent_identity` 工具（取回超出注入预算的全文）。
+//! 两者都只在**会话选择了智能体**（`ctx[AGENT_ID]` 非空）时注册——没选智能体就
+//! 没有人格可注入，这是 [`plugin::AgentPlugin::traverse`] 的分支条件。
 //!
 //! 协议不定义宿主专有执行器：工具一律经 MCP 接入，宿主复用已有 MCP 机制。
 //!
@@ -30,8 +37,10 @@
 //! [`crate::plugins::agent::core`]，且 core 对本层零依赖。
 
 pub mod capability;
+mod config;
 mod detail;
 pub mod plugin;
+mod prompt;
 pub mod store;
 pub mod subagent;
 pub mod vdfs;

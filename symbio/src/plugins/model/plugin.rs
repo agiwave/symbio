@@ -942,19 +942,17 @@ impl Plugin for ModelPlugin {
                         ctx.clone(),
                     ) {
                         Some(protocol) => {
-                            // 系统提示词双键注册（provider_id 键 + "default" 键兜底）
-                            // 在移动 p 之前读取
+                            // 人格在**注册期**就已选定（上面 `providers.resolve` 按
+                            // `PROVIDER_ID` 解析出唯一生效 provider），因此这里只注册
+                            // 一个条目。历史上曾同时注册 `provider_id` 与 `"default"`
+                            // 两个键——值完全相同，而消费侧早已不再按 key 挑选，
+                            // 属于纯粹冗余（见 `CapabilityVisitor::register_system_prompt`）。
                             let system_prompt = p.system_prompt.clone();
-                            let provider_id = p.id.clone();
                             let provider = Arc::new(BoundProvider::new(p, protocol));
                             tool_visitor.register_model_provider(provider).await;
                             if let Some(sp) = &system_prompt {
                                 tool_visitor
-                                    .register_system_prompt(&provider_id, sp.clone())
-                                    .await;
-                                // "default" 键兜底：消费侧提示词解析链的首选键
-                                tool_visitor
-                                    .register_system_prompt("default", sp.clone())
+                                    .register_system_prompt(PLUGIN_MODEL, sp.clone())
                                     .await;
                             }
                         }

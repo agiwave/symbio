@@ -61,13 +61,18 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     .map_err(vdfs::from_plugin_error)?;
                 Ok(self.nodes_of_sessions(&sessions).await)
             }
-            // 会话内部：三个虚拟子目录（会话存在性校验由 `session_of` 承担）
+            // 会话内部：三个虚拟子目录 + 记忆文件（会话存在性校验由 `session_of` 承担）
             VdfsSessionPath::Session(id) => {
                 let session = self.session_of(id).await?;
                 Ok(internal_dirs(
                     super::super::workdir::workdir_of(&session).is_some(),
+                    self.memory_node_of(id).await,
                 ))
             }
+            // 记忆是**单个文件**：没有子项
+            VdfsSessionPath::Memory(_) => Err(vdfs::VdfsError::not_found(format!(
+                "记忆是文件，没有子项：{path}"
+            ))),
             // 转写列表：每一条消息是一个列表项，顺序由 `seq` 决定。
             // 含**在途**消息——流式期间列表就是活的，不必等落库。
             VdfsSessionPath::Messages { id, mid: None } => {
@@ -134,6 +139,12 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 n.access = vdfs::VdfsAccess::LIST;
                 Ok(n)
             }
+            // 记忆：单个文件，形状由内核产出（`list` 与 `stat` 同源）
+            VdfsSessionPath::Memory(id) => {
+                // 存在性校验：会话不在，就没有「它的记忆」可谈
+                self.session_of(id).await?;
+                Ok(self.memory_node_of(id).await)
+            }
             VdfsSessionPath::Messages { id, mid } => match mid {
                 // 列表本身是个目录（`l` 位：可列，不参与树遍历——会话整体是叶子）。
                 // 只需存在性校验，不必取全量转写。
@@ -196,6 +207,17 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 let session = self.session_of(id).await?;
                 session_content(&session)
             }
+            // 会话记忆（`.vdfs/session/<id>/AGENTS.md`）：正文即文件全文。
+            // 文件不存在 → 空串（不是错误）——「还没写过」是记忆的正常状态。
+            VdfsSessionPath::Memory(id) => {
+                self.session_of(id).await?;
+                let text = self
+                    .memory_store(id)
+                    .await
+                    .read()
+                    .map_err(vdfs::VdfsError::internal)?;
+                Ok(vdfs::VdfsContent::text("", text))
+            }
             // 单条消息的正文（列表项内容）——流式追加的正是它。
             // 同样取含在途的转写：追加型变更的消费者读到的必须是**已含该增量**的正文。
             VdfsSessionPath::Messages { id, mid: Some(mid) } => {
@@ -251,6 +273,35 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 return Ok(vdfs::VdfsWriteResponse {
                     path: path.to_string(),
                     created: false,
+                    etag: None,
+                });
+            }
+            // 会话记忆：**纯文本**写入（容量闸门在内核 `MemoryFile::write`，本插件不重复实现）
+            VdfsSessionPath::Memory(id) => {
+                if content.binary {
+                    return Err(vdfs::VdfsError::invalid(
+                        "会话记忆是文本文件，不接受二进制内容",
+                    ));
+                }
+                // 存在性校验：会话不在，就没有「它的记忆」可写
+                self.session_of(id).await?;
+                let store = self.memory_store(id).await;
+                let existed = store.exists();
+                let text = content.text.as_deref().unwrap_or_default();
+                store.write(text).map_err(vdfs::VdfsError::invalid)?;
+                // 变更路径与 `list` 返回的节点地址同源（provider 子树口径，
+                // 挂载名由容器的 watch 包装补上——见本文件 `watch` 的说明）
+                self.change_subs.notify(&vdfs::VdfsChange::new(
+                    super::super::memory::memory_rel_path(id),
+                    if existed {
+                        vdfs::VDFS_CHANGE_UPDATED
+                    } else {
+                        vdfs::VDFS_CHANGE_CREATED
+                    },
+                ));
+                return Ok(vdfs::VdfsWriteResponse {
+                    path: path.to_string(),
+                    created: !existed,
                     etag: None,
                 });
             }
@@ -363,6 +414,14 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     .await
                     .map_err(vdfs::from_plugin_error)
             }
+            // 记忆**不可删除**（与 work / agent 的记忆层同一内核约定）：
+            // 删除即丢失本会话的长期约定，且没有东西能把它找回来。要清空就写入空内容
+            // ——那是一次可读、可审、可撤销的显式动作。
+            VdfsSessionPath::Memory(_) => Err(vdfs::VdfsError::Forbidden(format!(
+                "会话记忆不可删除（删除即丢失本会话的长期约定）。\
+                 如需清空，请向 `{}` 写入空内容。",
+                crate::symbio_core::AGENTS_FILE
+            ))),
             _ => Err(vdfs::VdfsError::Forbidden(format!(
                 "该路径不可删除：{path}"
             ))),
@@ -489,6 +548,20 @@ impl SessionPlugin {
         let session = self.session_of(id).await?;
         super::super::workdir::workdir_of(&session)
             .ok_or_else(|| vdfs::VdfsError::not_found(format!("会话 {id} 没有工作目录")))
+    }
+
+    /// 会话记忆 → VDFS 节点。
+    ///
+    /// 形状由内核 [`MemoryFile::node`] 产出，`list`（经 `internal_dirs`）与 `stat`
+    /// **共用同一份**——「列表里的和点开的不是同一个东西」这类 bug 因此写不出来。
+    async fn memory_node_of(&self, id: &str) -> vdfs::VdfsNode {
+        self.memory_store(id)
+            .await
+            .node(&crate::symbio_core::NodeSpec {
+                title: super::super::memory::SEGMENT_TITLE,
+                kind: PLUGIN_SESSION,
+                description: super::super::memory::MEMORY_DESCRIPTION,
+            })
     }
 
     /// 取子会话（**归属校验**：必须确实挂在 `id` 之下，避免跨会话越权访问）

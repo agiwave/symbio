@@ -3,13 +3,13 @@
 //! 覆盖三条路径：正常配对删除（L2 压缩语义）、保留新列表仍引用的存档
 //! （keep_recent 语义）、以及路径越界防护（`..` 逃逸 / 非 tool_archives 根）。
 
+use super::super::config::SessionConfig;
 use super::super::store::SessionStore;
 use super::super::types::Session;
 use super::{prune_historical_tool_calls, ChatSession, PersistentChatSession};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
-use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;

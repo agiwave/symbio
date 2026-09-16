@@ -10,40 +10,62 @@ use super::*;
 
 /// 系统提示词的唯一真源。
 ///
-/// 解析优先级：
-/// 1. 请求显式指定（`req.system_prompt`）
-/// 2. 统一收集机制注册的系统提示词：优先 `"default"` 键，其次请求指定的
-///    `provider_id` 键，再退首个注册项
-/// 3. 硬编码兜底
+/// 结果 = **请求显式段（若有）** + **全部注册段**，按「先显式、后注册顺序」拼接。
+///
+/// ## 只有一个集合，没有竞争
+///
+/// 插件经 `CapabilityVisitor::register_system_prompt` 注册的每一段都**一定会送达
+/// 模型**——不存在「按优先级链取一个」的竞争，因此也没有「谁把谁挤掉」这类事故。
+/// 人格的选择发生在**注册期**（model 插件按 `PROVIDER_ID` 解析出唯一生效 provider
+/// 后才注册），消费侧不需要也不应该再选一次。
+///
+/// ## 显式段**不吞掉**注册段
+///
+/// `req_system_prompt` 只决定「开头是什么」，不决定「后面还有没有」。若它一出现就
+/// 让注册段消失，换个调用方（CLI / 子智能体 / 测试）就会静默丢掉记忆与人格——
+/// 而丢的方式是「模型不再知道它存在」，没有任何报错。
+///
+/// ## 空段不占位
+///
+/// 注册了空串/纯空白的段会被跳过，因此不会产出「连续空行」这种噪声。
 ///
 /// 单点约束：压缩开销估算与实际请求**必须**共用同一份解析结果——
 /// 若各自取值，插件经 `traverse` 注册的系统提示词会被实际请求绕过，
 /// 从未真正送达模型。
 pub(crate) async fn resolve_system_prompt(
     req_system_prompt: Option<&str>,
-    req_provider_id: Option<&str>,
     ctx: &Arc<dyn InvokeRequest>,
 ) -> String {
-    let fallback = || "You are a helpful MODEL assistant.".to_string();
-    if let Some(s) = req_system_prompt {
-        if !s.is_empty() {
-            return s.to_string();
+    let mut out = String::new();
+
+    if let Some(explicit) = req_system_prompt.filter(|s| !s.trim().is_empty()) {
+        out.push_str(explicit);
+    }
+
+    if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+        for (_, text) in visitor.list_system_prompts().await {
+            if text.trim().is_empty() {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str(&text);
         }
     }
-    let resolved = match ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-        Some(visitor) => {
-            let prompts = visitor.list_system_prompts().await;
-            prompts
-                .iter()
-                .find(|(k, _)| k == "default")
-                .or_else(|| req_provider_id.and_then(|pid| prompts.iter().find(|(k, _)| k == pid)))
-                .or_else(|| prompts.first())
-                .map(|(_, v)| v.clone())
-        }
-        None => None,
-    };
-    resolved.filter(|s| !s.is_empty()).unwrap_or_else(fallback)
+
+    // 全空（既无显式段也无注册段）→ 硬编码兜底，绝不把空提示词发给模型
+    if out.trim().is_empty() {
+        return FALLBACK_SYSTEM_PROMPT.to_string();
+    }
+    out
 }
+
+/// 兜底系统提示词 —— 只在「显式段与注册段都为空」时使用。
+///
+/// 正常情况下 model 插件会注册一段人格，本常量因此几乎不会出现；它的存在是为了
+/// 让「没装 model 插件的裸环境」也有一句可说，而不是把空串发给模型。
+pub(crate) const FALLBACK_SYSTEM_PROMPT: &str = "You are a helpful MODEL assistant.";
 
 /// 一次 LLM 请求所需的全部输入（收口 ② 的产物）。
 ///
@@ -95,12 +117,7 @@ pub(crate) async fn prepare_turn_inputs(
     req: &TurnRequest,
 ) -> Result<TurnInputs, TurnExit> {
     // ── ① 系统提示词 + 工具：同一函数、同一时刻、同一 CapabilityVisitor ──────
-    let system_prompt = resolve_system_prompt(
-        req.system_prompt.as_deref(),
-        req.provider_id.as_deref(),
-        ctx,
-    )
-    .await;
+    let system_prompt = resolve_system_prompt(req.system_prompt.as_deref(), ctx).await;
 
     let mut tools = match ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
         Some(visitor) => visitor.list_capability().await,

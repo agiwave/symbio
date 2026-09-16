@@ -25,6 +25,11 @@ pub(crate) struct SessionContext {
 /// 收口前，`req.xxx.unwrap_or(cfg_defaults.yyy)` 散落在主循环各处；现在只在构造
 /// 这一份快照时求值一次，下游阶段函数只读快照字段。默认值的唯一真源仍是
 /// `SessionConfig`（审计 C2）——本结构只是它的**请求级投影**，不引入第二份默认值。
+///
+/// 快照**只收主循环真正要读的字段**：`provider_id` 不在这里——provider 的选择发生在
+/// **注册期**（model 插件 traverse 时按 `PROVIDER_ID` 解析出唯一生效 provider），
+/// 循环内再持一份只会变成永不读的死字段（错误文案要用的那一份在
+/// `orchestrator::consume::run_chat_loop_task` 的参数里）。
 pub(crate) struct TurnRequest {
     /// 显式软上限（`None` = 不限制；`Some(0)` 与 `None` 同义）
     pub(crate) max_tool_rounds: Option<usize>,
@@ -32,8 +37,9 @@ pub(crate) struct TurnRequest {
     pub(crate) enable_compact_tool: bool,
     pub(crate) tool_context_window: usize,
     pub(crate) load_history: bool,
+    /// 请求显式给的系统提示词（`None` = 只有注册段；不吞掉注册段，见
+    /// `chat_loop::inputs::resolve_system_prompt`）
     pub(crate) system_prompt: Option<String>,
-    pub(crate) provider_id: Option<String>,
 }
 
 impl TurnRequest {
@@ -56,7 +62,6 @@ impl TurnRequest {
             // 请求级默认（该字段无配置对应项），语义为"缺省即加载历史"。
             load_history: req.load_history.unwrap_or(true),
             system_prompt: req.system_prompt.clone(),
-            provider_id: req.provider_id.clone(),
         }
     }
 }

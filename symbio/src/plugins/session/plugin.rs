@@ -20,17 +20,18 @@
 //! 能力注册（`impl Plugin`）、配置定义，以及各子模块的**共享面重导出**。
 
 use super::chat_session::ChatSession;
+pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::session_chat_response;
-pub use crate::symbio_core::schemas::session::session_config::SessionConfig;
 use crate::symbio_core::vdfs;
 use crate::symbio_core::vdfs_provider::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use crate::symbio_core::{
-    dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginDir,
-    PluginError, PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION,
+    dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, MemoryFile, Plugin,
+    PluginDir, PluginError, PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION,
+    SESSION_ID,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -358,6 +359,59 @@ impl SessionPlugin {
             store,
         )))
     }
+
+    // ==================== 会话记忆（`.vdfs/session/<id>/AGENTS.md`）====================
+    //
+    // 机制在 `symbio_core::memory`（三层记忆同一份实现），本插件只有「个性」：
+    // 落位在会话目录、地址挂在会话节点下、两道闸门取自 [`SessionConfig`]。
+    // 归属原则是「谁能读写它，谁负责注入它」——工作区记忆归 work，本层只认会话。
+
+    /// 由会话 id + 生效配置构造记忆门面。
+    ///
+    /// **作用域闸门**（id 缺失 / 空 → 无作用域）与**两道容量闸门**都在这一处注入，
+    /// 因此调用点不必各自判断。
+    fn store_with(session_id: Option<&str>, cfg: &SessionConfig) -> MemoryFile {
+        super::memory::store(
+            session_id,
+            cfg.effective_memory_max_bytes(),
+            cfg.effective_memory_inject_bytes(),
+        )
+    }
+
+    /// 依会话 id 构造记忆门面。
+    ///
+    /// 会话 id 有两个来源——收集期来自 `ctx[SESSION_ID]`，VDFS 侧来自**路径**——
+    /// 两者都归到这一个构造点，作用域闸门与两道容量闸门因此只写一遍。
+    pub(crate) async fn memory_store(&self, session_id: &str) -> MemoryFile {
+        let cfg = self.config.read().await;
+        Self::store_with(Some(session_id), &cfg)
+    }
+
+    /// 参与能力收集：交出**会话记忆**（系统提示词片段）。
+    ///
+    /// 无会话 id 时静默跳过——没有会话就没有「本会话的记忆」，这不是故障，
+    /// 不该往收集期错误桶里塞东西。
+    async fn contribute_memory(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>,
+    ) {
+        let sid = ctx.get(SESSION_ID).unwrap_or_default();
+        let store = self.memory_store(&sid).await;
+        if !store.has_scope() {
+            return;
+        }
+        let address = super::memory::memory_address(&sid);
+        match store.segment(&super::memory::segment_spec(&address)) {
+            Ok(Some(segment)) => {
+                visitor
+                    .register_system_prompt(super::memory::SEGMENT_NAME, segment)
+                    .await;
+            }
+            Ok(None) => {}
+            Err(e) => crate::plugin_warn!("session", "读取会话记忆失败，本轮不注入：{e}"),
+        }
+    }
 }
 
 #[async_trait]
@@ -430,6 +484,23 @@ impl Plugin for SessionPlugin {
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             let me: vdfs::DynVdfsProvider = self.clone();
             visitor.register_vdfs_provider(PLUGIN_SESSION, me).await;
+
+            // 全局指令（`{homedir}/AGENTS.md`）：**只读、无地址、无容量**——它不是记忆
+            // （模型改不动它），因此不进 `symbio_core::memory` 那套内核，由会话侧直接
+            // 注入。走注册通道而非 `req.system_prompt`：后者会顶掉模型插件的人格。
+            //
+            // 工作区 `AGENTS.md` **不在这里**——那是 work 插件的工作区记忆，
+            // 「谁能读写它，谁负责注入它」。
+            if let Some(text) = super::prompt::global_instruction().await {
+                visitor
+                    .register_system_prompt(super::prompt::GLOBAL_PROMPT_NAME, text)
+                    .await;
+            }
+
+            // 会话记忆（`.vdfs/session/<id>/AGENTS.md`）：**本会话私有**，可读写、有地址、
+            // 有两道容量闸门——因此它归内核那套机制，本插件只负责「落位 + 标题 + 地址」。
+            // 作用域闸门在 `contribute_memory` 内一处收口（无 `ctx[SESSION_ID]` 即不注入）。
+            self.contribute_memory(&ctx, &visitor).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
@@ -480,6 +551,22 @@ fn config_definition() -> DetailDefinition {
                 0.0,
                 200.0,
                 json!(d.context_messages),
+            ),
+            DetailField::number(
+                "memory_max_bytes",
+                "记忆写入上限（字节）",
+                "会话记忆（.vdfs/session/<id>/AGENTS.md）单次写入的字节上限，超出会被拒绝",
+                1.0,
+                1_048_576.0,
+                json!(d.memory_max_bytes),
+            ),
+            DetailField::number(
+                "memory_inject_max_bytes",
+                "记忆注入上限（字节）",
+                "每轮注入系统提示词的会话记忆正文字节上限，超出部分截断",
+                1.0,
+                1_048_576.0,
+                json!(d.memory_inject_max_bytes),
             ),
         ],
     )

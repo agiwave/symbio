@@ -36,7 +36,7 @@ fn session_node_carries_renderer_ext_and_presentation() {
     assert_eq!(busy.status, vdfs::VDFS_STATUS_WORKING);
 }
 
-/// 会话内部寻址（S6/S16）：`<id>` / `<id>/消息[/<mid>]` /
+/// 会话内部寻址（S6/S16）：`<id>` / `<id>/AGENTS.md` / `<id>/消息[/<mid>]` /
 /// `<id>/子会话[/<sub>]` / `<id>/工作目录[/<rel>]`。
 /// 未知区段与越界层级一律 NotFound——不给半通不通的路径留口子。
 #[test]
@@ -45,6 +45,15 @@ fn vdfs_internal_path_parsing() {
     assert!(matches!(parse_session_path("").unwrap(), Root));
     assert!(matches!(parse_session_path("/").unwrap(), Root));
     assert!(matches!(parse_session_path("abc").unwrap(), Session("abc")));
+    // 会话记忆：单个文件，地址用真实文件名
+    assert!(matches!(
+        parse_session_path("abc/AGENTS.md").unwrap(),
+        Memory("abc")
+    ));
+    assert!(
+        parse_session_path("abc/AGENTS.md/deeper").is_err(),
+        "记忆是文件，没有更深层级"
+    );
     // 转写列表：目录本身与列表项两级
     assert!(matches!(
         parse_session_path("abc/消息").unwrap(),
@@ -88,21 +97,40 @@ fn vdfs_internal_path_parsing() {
     assert!(parse_session_path("abc/子会话/s1/deeper").is_err());
 }
 
-/// 会话内部的三个虚拟子目录：转写列表恒在，工作目录按会话是否声明 workdir 出现
+/// 会话内部的虚拟子项：转写列表与子会话恒在，记忆是**文件**且恒在，
+/// 工作目录按会话是否声明 workdir 出现。
 #[test]
 fn vdfs_internal_dirs_conditional() {
-    let without = internal_dirs(false);
-    assert_eq!(without.len(), 2);
+    let memory = || {
+        crate::symbio_core::MemoryFile::absent(1024, 256).node(&crate::symbio_core::NodeSpec {
+            title: "会话记忆",
+            kind: PLUGIN_SESSION,
+            description: "d",
+        })
+    };
+
+    let without = internal_dirs(false, memory());
+    assert_eq!(without.len(), 3);
     assert_eq!(without[0].name, SEG_MESSAGES, "转写列表恒在（会话的本体）");
     assert_eq!(without[1].name, workdir::SEG_SUB_SESSIONS);
-    assert!(without.iter().all(|n| n.is_dir()));
-
-    let with = internal_dirs(true);
-    assert_eq!(with.len(), 3);
-    assert_eq!(with[2].name, workdir::SEG_WORKDIR);
+    assert_eq!(
+        without[2].name,
+        crate::symbio_core::AGENTS_FILE,
+        "记忆恒在——它本来就是会话的一部分"
+    );
+    assert!(!without[2].is_dir(), "记忆是文件，不是目录");
+    assert!(without[2].access.write, "记忆可写（模型与用户共用这一份）");
     assert!(
-        with.iter().all(|n| n.is_dir() && !n.access.write),
-        "三个内部区段都是只读目录（工作目录不提供新建）"
+        without[..2].iter().all(|n| n.is_dir() && !n.access.write),
+        "两个目录区段都是只读目录"
+    );
+
+    let with = internal_dirs(true, memory());
+    assert_eq!(with.len(), 4);
+    assert_eq!(with[3].name, workdir::SEG_WORKDIR);
+    assert!(
+        with[3].is_dir() && !with[3].access.write,
+        "工作目录是只读目录（不提供新建）"
     );
 }
 

@@ -6,8 +6,9 @@
 //! 映射进 symbio 的会话机制——
 //!
 //! - **提示词**：`traverse(available_tools)` 时扫描 `prompts/` `skills/`，
-//!   把片段汇总为 [`BundleIdentityCapability`]（`agent_identity` 工具），
-//!   宿主据此追加/影响系统提示词（**零会话编排改动**）；
+//!   把片段汇总后交出**两份**——系统提示词片段（每轮注入的人格本体 + 可编辑
+//!   地址，见 [`identity_segment`]）与 [`BundleIdentityCapability`]
+//!   （`agent_identity` 工具，取回超出注入预算的全文）；
 //! - **MCP**：扫描 `mcps/` 得到 MCP server 声明，**交给宿主已有的 MCP 客户端**启动
 //!   （OAB 不重新发明工具运行时，工具唯一来源即 MCP）；
 //! - **版本匹配**：bundle 校验（含 `requires.spec` 硬门槛）失败 = 收集期
@@ -19,15 +20,65 @@
 
 use crate::plugins::agent::core::spec::assembly::{assemble_bundle, Assembly};
 use crate::plugins::agent::host::capability::BundleIdentityCapability;
+use crate::plugins::agent::host::config::AgentConfig;
+use crate::plugins::agent::host::prompt::{
+    identity_segment, memory_segment, MEMORY_SEGMENT_NAME, SEGMENT_NAME as IDENTITY_SEGMENT,
+};
 use crate::plugins::agent::host::store::{BundleRecord, BundleStore};
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{
-    report_error, Capability, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
-    PluginMeta, PluginPayload, AGENT_ID, PATH, PLUGIN_AGENT, SESSION_ID,
-    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    announce_configurable, dir_from_ctx, report_error, Capability, ConfigFile, InvokeRequest,
+    InvokeRequestExt, InvokeResponse, Plugin, PluginDir, PluginError, PluginMeta, PluginPayload,
+    AGENT_ID, PATH, PLUGIN_AGENT, SESSION_ID, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    WORKDIR,
 };
 use async_trait::async_trait;
+use serde_json::json;
 use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// 配置表单的定义 —— 默认值从 [`AgentConfig::default`] 读出，不写第二份字面量
+fn config_definition() -> DetailDefinition {
+    let d = AgentConfig::default();
+    DetailDefinition::form(
+        "智能体设置",
+        vec![
+            DetailField::number(
+                "item_max_bytes",
+                "条目写入上限（字节）",
+                "bundle 内单个条目文件（提示词 / 技能 / MCP）的写入字节上限，超出会被拒绝",
+                1.0,
+                1_048_576.0,
+                json!(d.item_max_bytes),
+            ),
+            DetailField::number(
+                "identity_inject_max_bytes",
+                "人格注入上限（字节）",
+                "每轮注入系统提示词的人格字节上限，超出部分截断（可用 agent_identity 取回全文）",
+                1.0,
+                1_048_576.0,
+                json!(d.identity_inject_max_bytes),
+            ),
+            DetailField::number(
+                "memory_max_bytes",
+                "记忆写入上限（字节）",
+                "智能体记忆（bundle 目录下的 AGENTS.md）的写入字节上限，超出会被拒绝",
+                1.0,
+                1_048_576.0,
+                json!(d.memory_max_bytes),
+            ),
+            DetailField::number(
+                "memory_inject_max_bytes",
+                "记忆注入上限（字节）",
+                "每轮注入系统提示词的智能体记忆字节上限，超出部分截断",
+                1.0,
+                1_048_576.0,
+                json!(d.memory_inject_max_bytes),
+            ),
+        ],
+    )
+}
 
 /// AgentBundle 插件主结构。
 pub struct AgentPlugin {
@@ -38,19 +89,63 @@ pub struct AgentPlugin {
     /// 凭它把 `session/chat/send` 等请求路由给兄弟插件——工具 ctx 经 chat
     /// loop 一路 fork，自身并不携带路由入口。
     router: Option<std::sync::Weak<dyn Plugin>>,
+    /// 生效配置（两道容量闸门的取值点）
+    config: Arc<RwLock<AgentConfig>>,
+    /// 配置文件的呈现与校验（`.vdfs/agent/PLUGIN.yml`）
+    config_file: ConfigFile,
 }
 
 impl AgentPlugin {
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例（composite 配置驱动）。
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
-        // 消费配置以兼容未来扩展（当前使用默认值）
-        let _config = ctx.config().as_ref().and_then(|c| c.get("agent"));
         let router = ctx.parent();
-        Arc::new(Self { router }) as Arc<dyn Plugin>
+        let dir = dir_from_ctx(&*ctx, PLUGIN_AGENT);
+        let config: AgentConfig = match dir.load::<AgentConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => AgentConfig::default(),
+            Err(e) => {
+                crate::plugin_warn!("agent", "读取自身配置失败，改用默认值：{e}");
+                AgentConfig::default()
+            }
+        };
+        Arc::new(Self {
+            router,
+            config: Arc::new(RwLock::new(config)),
+            config_file: ConfigFile::new(dir, "智能体设置", config_definition()),
+        }) as Arc<dyn Plugin>
     }
 
+    /// 无装配上下文的实例（测试 / 默认构造）：配置落常规位置，读写仍自洽。
     pub fn new() -> Self {
-        Self { router: None }
+        Self {
+            router: None,
+            config: Arc::new(RwLock::new(AgentConfig::default())),
+            config_file: ConfigFile::new(
+                PluginDir::of(PLUGIN_AGENT),
+                "智能体设置",
+                config_definition(),
+            ),
+        }
+    }
+
+    /// 生效的条目写入上限（**写入闸门的唯一取值点**）
+    pub(crate) async fn item_max_bytes(&self) -> usize {
+        self.config.read().await.effective_item_max_bytes()
+    }
+
+    /// 生效的智能体记忆写入上限（**记忆写入闸门的唯一取值点**）
+    pub(crate) async fn memory_max_bytes(&self) -> usize {
+        self.config.read().await.effective_memory_max_bytes()
+    }
+
+    /// 配置文档（VDFS 侧读写的入口）
+    pub(crate) fn config_file(&self) -> &ConfigFile {
+        &self.config_file
+    }
+
+    /// 配置槽位（[`ConfigFile::read`] / [`ConfigFile::apply`] 的读写对象）
+    pub(crate) fn config_slot(&self) -> &RwLock<AgentConfig> {
+        &self.config
     }
 
     pub fn metadata() -> PluginMeta {
@@ -102,13 +197,39 @@ impl AgentPlugin {
         let mut caps: Vec<Arc<dyn Capability>> = Vec::new();
         let identity_text = assembly.identity_text();
         if !identity_text.trim().is_empty() {
-            caps.push(
-                BundleIdentityCapability::new(identity_text, record.manifest.id.clone())
-                    as Arc<dyn Capability>,
-            );
+            caps.push(BundleIdentityCapability::new(
+                identity_text.clone(),
+                record.manifest.id.clone(),
+            ) as Arc<dyn Capability>);
         }
 
         tool_visitor.register_batch(caps).await;
+
+        // ── 4. 人格 + 智能体记忆 → 系统提示词（每轮注入，带可编辑地址与容量口径）──
+        // 与身份工具**同时机、同一次广播**注册：同一个人格的两个面——提示词负责
+        // 「一开始就知道自己是谁」，工具负责「取回超出注入预算的全文」。
+        // 记忆读失败降级为空串：读不出来不该让整轮会话拿不到人格。
+        let cfg = self.config.read().await.clone();
+        tool_visitor
+            .register_system_prompt(
+                IDENTITY_SEGMENT,
+                identity_segment(&record.manifest.id, &identity_text, &cfg),
+            )
+            .await;
+        let memory = match store.read_memory(&record.manifest.id) {
+            Ok(text) => text,
+            Err(e) => {
+                crate::plugin_warn!("agent", "读取智能体记忆失败，本轮按空记忆注入：{e}");
+                String::new()
+            }
+        };
+        tool_visitor
+            .register_system_prompt(
+                MEMORY_SEGMENT_NAME,
+                memory_segment(&record.manifest.id, &memory, &cfg),
+            )
+            .await;
+
         Ok(())
     }
 
@@ -257,7 +378,7 @@ impl Plugin for AgentPlugin {
             ) as Arc<dyn Capability>])
             .await;
 
-        // ── 已选择智能体 → 约定目录装配（身份工具等）──
+        // ── 已选择智能体 → 约定目录装配（人格片段 + 身份工具）──
         if let Some(bundle_id) = bundle_id {
             if let Err(e) = self
                 .attach_bundle(&ctx, &bundle_id, workdir, session_id, &tool_visitor)
@@ -273,6 +394,9 @@ impl Plugin for AgentPlugin {
                 .await;
             }
         }
+
+        // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
+        announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

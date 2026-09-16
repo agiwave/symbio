@@ -41,6 +41,8 @@ pub const PLUGIN_SESSION: &str = "session";
 pub const PLUGIN_MCP: &str = "mcp";
 /// Local 插件工厂
 pub const PLUGIN_LOCAL: &str = "local";
+/// Work 插件工厂（工作区记忆）
+pub const PLUGIN_WORK: &str = "work";
 /// Hook 插件工厂
 pub const PLUGIN_HOOK: &str = "hook";
 /// VDFS 插件工厂（虚拟文件系统宿主）

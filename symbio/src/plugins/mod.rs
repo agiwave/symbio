@@ -28,3 +28,4 @@ mod skill;
 mod telegram;
 mod vdfs;
 mod web;
+mod work;

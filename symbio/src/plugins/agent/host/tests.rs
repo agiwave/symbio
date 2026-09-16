@@ -132,6 +132,51 @@ async fn bundle_import_traverse_and_identity() {
     assert!(identity.contains("先澄清需求再动工"));
     assert!(!identity.contains("priority"), "frontmatter 应被剥离");
 
+    // ── 3b. 系统提示词片段：人格 + 智能体记忆（选了这个智能体才注入）──
+    let segments = manager.list_system_prompts().await;
+    let names: Vec<&str> = segments.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["agent-identity", "agent-memory"],
+        "两个片段都要注册: {names:?}"
+    );
+    let identity_seg = &segments[0].1;
+    assert!(
+        identity_seg.contains("全栈开发人格") && identity_seg.contains("先澄清需求再动工"),
+        "人格片段要带全文（persona + skill）: {identity_seg}"
+    );
+    assert!(
+        identity_seg.contains(".vdfs/agent/com.symbio.test-fixture/"),
+        "人格条目要带可编辑来源目录: {identity_seg}"
+    );
+    assert!(
+        identity_seg.contains("prompts/<name>.md"),
+        "人格条目要带条目地址模板: {identity_seg}"
+    );
+    let memory_seg = &segments[1].1;
+    assert!(
+        memory_seg.contains(".vdfs/agent/com.symbio.test-fixture/AGENTS.md"),
+        "记忆片段要带地址（在智能体自己的目录里）: {memory_seg}"
+    );
+
+    // ── 3c. 记忆落位：bundle 自己的目录，不是工作区根 ──
+    store
+        .write_memory("com.symbio.test-fixture", "该智能体记住：先写测试。", 1024)
+        .unwrap();
+    assert_eq!(
+        store.memory_path("com.symbio.test-fixture").unwrap(),
+        Path::new(&result.dir).join("AGENTS.md"),
+        "智能体记忆落在 bundle 目录"
+    );
+    assert!(
+        !Path::new(workdir).join("AGENTS.md").exists(),
+        "智能体记忆不得落到工作区根（那是 work 插件的作用域）"
+    );
+    assert_eq!(
+        store.read_memory("com.symbio.test-fixture").unwrap(),
+        "该智能体记住：先写测试。"
+    );
+
     // ── 4. 导出（打包下载语义）──
     let exported = store.export("com.symbio.test-fixture").unwrap();
     assert!(!exported.is_empty());
@@ -164,4 +209,9 @@ async fn version_mismatch_bundle_is_rejected_and_unbound_session_is_silent() {
     let caps = manager.list_capability().await;
     assert_eq!(caps.len(), 1, "仅注册 agent_run: {caps:?}");
     assert_eq!(caps[0].name, "agent_run");
+    // 没选智能体 → 人格与记忆都**不注入**（这是作用域闸门，不是优化）
+    assert!(
+        manager.list_system_prompts().await.is_empty(),
+        "未选择智能体时不得注入任何人格 / 记忆片段"
+    );
 }

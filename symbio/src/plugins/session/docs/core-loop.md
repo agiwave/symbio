@@ -61,7 +61,7 @@
              用户消息落库 + 自动命名 + agent_id 解析
              chat_ctx 装配（WORKDIR / SESSION_ID / AGENT_ID / SESSION_HANDLE）
              collect_capabilities(traverse) → CAPABILITY_VISITOR
-             build_system_prompt（AGENTS.md 基础提示词）
+             （系统提示词与工具都在这一步收集；本层**不**拼提示词）
              构造 model_chat::Request → run_chat_loop_task
 ② 宿主层   run_chat_loop_task                     orchestrator.rs:363
              WorkingGuard（panic 兜底）/ StopSignal / AiControlGuard

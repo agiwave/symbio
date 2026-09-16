@@ -1,7 +1,9 @@
-//! `prompt` 模块的单元测试。
+//! `session/prompt.rs` 的单元测试 —— 时间上下文与全局指令。
 //!
-//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
-//! `prompt.rs` 只保留生产代码，测试全部放本文件。
+//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
+//!
+//! 这里同时钉住**一次移除**：工作区 `AGENTS.md` 不得再出现在本模块的产物里
+//! （那是 work 插件的工作区记忆，见模块文档的归属说明）。
 
 use super::*;
 
@@ -26,18 +28,17 @@ fn temporal_context_ignores_empty_workdir() {
     assert!(!result.contains("工作区"), "空白 workdir 应被忽略");
 }
 
-#[tokio::test]
-async fn empty_workdir_yields_no_instructions() {
-    // 无 workdir 时不应 panic，且工作区指令段缺失
-    let prompt = build_system_prompt(None).await;
-    assert!(
-        !prompt.contains("## 工作区指令"),
-        "无 workdir 时不应有工作区指令段"
-    );
+/// 全局指令**没有**地址与容量：宿主不提供它的编辑面，假装有只会误导模型
+#[test]
+fn global_instruction_has_no_address_or_capacity() {
+    let rendered = format!("【{GLOBAL_TITLE}】（{AGENTS_FILE}，对所有会话生效）\n正文\n");
+    assert!(rendered.contains("【全局指令】"));
+    assert!(!rendered.contains(".vdfs"), "全局指令不该带 VDFS 地址");
+    assert!(!rendered.contains("上限"), "全局指令不该带容量口径");
 }
 
+/// 注册名是覆盖键，不是分类——改名会让「同名覆盖」失效
 #[test]
-fn relative_workdir_is_rejected() {
-    // 相对路径不得被解析为工作区指令路径
-    assert!(!Path::new("relative/dir").is_absolute());
+fn global_prompt_name_is_stable() {
+    assert_eq!(GLOBAL_PROMPT_NAME, "session-global-instructions");
 }

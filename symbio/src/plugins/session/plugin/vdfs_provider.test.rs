@@ -184,3 +184,146 @@ async fn config_write_validates_before_applying() {
     }
     assert_eq!(p.config.read().await.max_messages, before);
 }
+
+// ==================== 会话记忆（`.vdfs/session/<id>/AGENTS.md`）====================
+
+/// 会话记忆是会话内部的一个**可读写文件**：与三个目录并列、`stat` 与 `list` 同源、
+/// 写后读得回、**不可删除**（与 work / agent 的记忆层同一内核约定）。
+#[tokio::test]
+async fn memory_is_a_read_write_file_inside_the_session() {
+    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let id = unique_id("memory");
+    p.save_session(&Session::new(&id)).await.unwrap();
+    let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
+
+    // ① 会话内部并列着记忆（它本来就是会话的一部分，不另开一条寻址）
+    let items = p.list(&vctx(), &id).await.unwrap();
+    let mem = items
+        .iter()
+        .find(|n| n.name == crate::symbio_core::AGENTS_FILE)
+        .expect("会话内部应列出记忆文件");
+    assert!(!mem.is_dir(), "记忆是文件，不是目录");
+    assert_eq!(mem.access.flags(), "rw", "模型与用户共用这一份，可读可写");
+    assert_eq!(mem.kind, PLUGIN_SESSION);
+    assert!(mem.description.is_some(), "列表里要能看出它是干什么的");
+
+    // ② `stat` 与 `list` 同源（同一份形状，不是另写一份「详情版」）
+    let stat = p.stat(&vctx(), &path).await.unwrap();
+    assert_eq!(stat.name, mem.name);
+    assert_eq!(stat.access.flags(), mem.access.flags());
+    assert_eq!(stat.size, mem.size);
+    assert_eq!(stat.description, mem.description);
+
+    // ③ 还没写过 → 空串（「还没写过」是记忆的正常状态，不是错误）
+    assert_eq!(
+        p.read(&vctx(), &path).await.unwrap().text.as_deref(),
+        Some("")
+    );
+
+    // ④ 写入 → 读回（写闸门在内核，本层不重复实现）
+    let r = p
+        .write(
+            &vctx(),
+            &path,
+            &vdfs::VdfsContent::text("", "本会话约定：所有时间用 UTC。"),
+        )
+        .await
+        .unwrap();
+    assert!(r.created, "首次写入应报 created");
+    assert_eq!(
+        p.read(&vctx(), &path).await.unwrap().text.as_deref(),
+        Some("本会话约定：所有时间用 UTC。")
+    );
+    let again = p
+        .write(&vctx(), &path, &vdfs::VdfsContent::text("", "改主意了"))
+        .await
+        .unwrap();
+    assert!(!again.created, "覆盖写入不是 created");
+
+    // ⑤ 记忆不可删除：要清空就写空内容（一次可读、可审、可撤销的显式动作）
+    assert!(
+        matches!(
+            p.delete(&vctx(), &path, false).await,
+            Err(vdfs::VdfsError::Forbidden(_))
+        ),
+        "删除即丢失本会话的长期约定，必须明确拒绝"
+    );
+    assert!(p.read(&vctx(), &path).await.is_ok(), "拒绝删除后内容仍在");
+
+    // ⑥ 记忆是文件：没有子项；更深层级也不解析
+    assert!(p.list(&vctx(), &path).await.is_err());
+
+    cleanup_session_dir(&id);
+}
+
+/// 写入闸门取自 `SessionConfig`：配小 → 同一个写入被**拒绝**（而不是截断），
+/// 且被拒绝的写入不得留下半截内容。
+#[tokio::test]
+async fn memory_write_respects_the_configured_gate() {
+    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    *p.config.write().await = SessionConfig {
+        memory_max_bytes: 4,
+        ..SessionConfig::default()
+    };
+    let id = unique_id("memory-gate");
+    p.save_session(&Session::new(&id)).await.unwrap();
+    let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
+
+    assert!(
+        p.write(&vctx(), &path, &vdfs::VdfsContent::text("", "12345"))
+            .await
+            .is_err(),
+        "超出写入上限必须被拒绝"
+    );
+    assert_eq!(
+        p.read(&vctx(), &path).await.unwrap().text.as_deref(),
+        Some(""),
+        "被拒绝的写入不得留下半截内容"
+    );
+
+    cleanup_session_dir(&id);
+}
+
+/// 不存在的会话：记忆路径一律 NotFound（不为幽灵会话造一份记忆）
+#[tokio::test]
+async fn memory_of_unknown_session_is_not_found() {
+    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let id = unique_id("memory-ghost");
+    let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
+
+    assert!(p.stat(&vctx(), &path).await.is_err());
+    assert!(p.read(&vctx(), &path).await.is_err());
+    assert!(p
+        .write(&vctx(), &path, &vdfs::VdfsContent::text("", "x"))
+        .await
+        .is_err());
+}
+
+/// 记忆写入经订阅表投递变更（与 `list` 的节点地址同一坐标系：`<id>/AGENTS.md`）
+#[tokio::test]
+async fn memory_write_notifies_subscribers() {
+    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let id = unique_id("memory-notify");
+    p.save_session(&Session::new(&id)).await.unwrap();
+    let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
+    let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
+        let _ = tx.send(c);
+    });
+    p.watch(&vctx(), &id, sink).await.unwrap();
+
+    p.write(&vctx(), &path, &vdfs::VdfsContent::text("", "记一笔"))
+        .await
+        .unwrap();
+
+    let got = rx.recv().await.expect("写入应投递一条变更");
+    assert_eq!(
+        got.path,
+        format!("{id}/{}", crate::symbio_core::AGENTS_FILE),
+        "变更路径与 list 返回的节点地址同源"
+    );
+    assert_eq!(got.change, vdfs::VDFS_CHANGE_CREATED, "首次写入是 created");
+
+    cleanup_session_dir(&id);
+}

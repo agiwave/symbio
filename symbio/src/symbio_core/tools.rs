@@ -21,7 +21,7 @@ use tokio::sync::RwLock;
 /// 除工具外，同时承载四组注册（与工具同一 traverse 收集机制）：
 /// - `provider`：当前生效的模型服务（单槽；model 插件按上下文解析出
 ///   唯一生效 Provider 后注册，重复注册覆盖）
-/// - `system_prompts`：系统提示词（按名称保序）
+/// - `system_prompts`：系统提示词（按名称保序；**全部**送达模型，不做竞争）
 /// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）
 /// - `vdfs_root`：VDFS 根 provider（单槽；组合容器注册，访问层据此转发）
 pub struct DefaultToolVisitor {
@@ -220,25 +220,24 @@ mod tests {
         assert_eq!(got.provider_id(), "p2");
     }
 
+    /// 同名覆盖只改内容、**不改槽位**（顺序 = 首次注册顺序）
     #[tokio::test]
     async fn system_prompt_overwrite_keeps_first_registration_slot() {
         let mgr = DefaultToolVisitor::new();
-        mgr.register_system_prompt("default", "默认提示词".to_string())
+        mgr.register_system_prompt("persona", "默认提示词".to_string())
             .await;
-        mgr.register_system_prompt("p1", "P1 提示词".to_string())
+        mgr.register_system_prompt("work", "记忆".to_string()).await;
+        mgr.register_system_prompt("persona", "默认提示词（覆盖）".to_string())
             .await;
-        mgr.register_system_prompt("default", "默认提示词（覆盖）".to_string())
-            .await;
-        mgr.register_system_prompt("p2", "P2 提示词".to_string())
+        mgr.register_system_prompt("agent", "人格".to_string())
             .await;
 
-        let prompts = mgr.list_system_prompts().await;
         assert_eq!(
-            prompts,
+            mgr.list_system_prompts().await,
             vec![
-                ("default".to_string(), "默认提示词（覆盖）".to_string()),
-                ("p1".to_string(), "P1 提示词".to_string()),
-                ("p2".to_string(), "P2 提示词".to_string()),
+                ("persona".to_string(), "默认提示词（覆盖）".to_string()),
+                ("work".to_string(), "记忆".to_string()),
+                ("agent".to_string(), "人格".to_string()),
             ]
         );
     }

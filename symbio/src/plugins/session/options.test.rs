@@ -28,7 +28,7 @@ fn state_invoke_carries_metadata_patch() {
 
 #[test]
 fn heartbeat_form_keeps_basic_settings_visible() {
-    use crate::symbio_core::schemas::session::session_config::SessionConfig;
+    use crate::plugins::session::config::SessionConfig;
 
     let plugin = SessionPlugin::new(None, SessionConfig::default(), test_dir());
     let node = plugin.heartbeat_option(None);
@@ -64,7 +64,7 @@ fn heartbeat_form_keeps_basic_settings_visible() {
 
 #[test]
 fn heartbeat_trigger_is_disabled_without_enabled_and_prompt() {
-    use crate::symbio_core::schemas::session::session_config::SessionConfig;
+    use crate::plugins::session::config::SessionConfig;
 
     let plugin = SessionPlugin::new(None, SessionConfig::default(), test_dir());
 

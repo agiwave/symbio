@@ -13,7 +13,7 @@
 
 | 插件目录 | 注册名 | VDFS 挂载点 | 自有路由（静态可提取） | 实现的核心 trait | 配置文件 | 模块 README |
 |---|---|---|---|---|---|---|
-| `agent` | `agent` | .vdfs/agent | （动态）已无自有路由（一律 `NotFound` 并指引到 `.vdfs/agent`） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `agent` | `agent` | .vdfs/agent | （动态）已无自有路由（一律 `NotFound` 并指引到 `.vdfs/agent`） | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `composite` | `composite` | — | （动态）容器：按配置挂载的子插件名分发，运行期动态 | `Plugin` · `VdfsProvider` | — | ✓ |
 | `event_bus` | `event_bus` | — | `event_bus/pending/snapshot` · `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
 | `gateway` | `gateway` | .vdfs/gateway | `gateway/status` | `Plugin` | ✓ | ✓ |
@@ -28,6 +28,7 @@
 | `telegram` | `telegram` | .vdfs/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
 | `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，13 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `web` | `web` | .vdfs/web | — | `Capability` · `Plugin` | ✓ | ✓ |
+| `work` | `work` | .vdfs/work | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
 
 > 读表须知：
 > - **挂载点** = 该插件在 `traverse` 里 `register_vdfs_provider(目录名, provider)` 的目录名；
@@ -104,7 +105,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio\src` | 196 文件 / 50383 行 | 34 文件 / 6400 行 |
+| `symbio\src` | 205 文件 / 52318 行 | 43 文件 / 7962 行 |
 | `cli\src` | 4 文件 / 1143 行 | 0 文件 / 0 行 |
 | `tauri\src-tauri\src` | 3 文件 / 347 行 | 0 文件 / 0 行 |
 | `tauri\src` | 76 文件 / 15475 行 | 19 文件 / 2779 行 |
@@ -118,4 +119,4 @@
 
 ---
 
-> 生成时间：2026-09-16 08:49:10 UTC · 源：`git rev-parse HEAD` = `9690ae9`
+> 生成时间：2026-09-16 11:50:13 UTC · 源：`git rev-parse HEAD` = `a99523e`

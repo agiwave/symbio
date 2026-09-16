@@ -11,6 +11,7 @@ mod homedir;
 mod ids;
 mod keys;
 mod logger;
+mod memory;
 pub mod model_provider;
 pub mod option;
 mod paths;
@@ -29,6 +30,7 @@ pub use capability_error::{
     init_error_bucket, report_error, take_errors, CapabilityError, CAPABILITY_ERRORS,
 };
 pub use creator::{create_object, has_creator};
+pub use memory::{render_segment, InjectedMemory, MemoryFile, NodeSpec, SegmentSpec, AGENTS_FILE};
 pub use model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
 pub use option::{
     collect_options, DefaultOptionVisitor, OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS,

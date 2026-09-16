@@ -1,6 +1,6 @@
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是**唯一的会话编排入口**：加载历史、组装系统提示词、经 CapabilityVisitor 汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（core 纯 trait，`Arc<dyn ModelProvider>` 单一契约；协议适配细节内化于 model 插件）并在进程内驱动会话循环；Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是**唯一的会话编排入口**：加载历史、**解析**系统提示词（收集各插件经 `register_system_prompt` 注册的段，本层不自己拼）、经 CapabilityVisitor 汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（core 纯 trait，`Arc<dyn ModelProvider>` 单一契约；协议适配细节内化于 model 插件）并在进程内驱动会话循环；Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
@@ -18,7 +18,7 @@ flowchart TD
     User([1. 用户发起 Chat 请求]) --> SessionChat[Session 插件 - chat 路由]
     SessionChat --> SaveUser[2. 保存/追加用户消息]
     SaveUser --> LoadHistory[3. 加载历史上下文<br>get_context_messages 轮次窗口对齐]
-    LoadHistory --> BuildPrompt[4. 构建系统提示词<br>prompt.rs 人格/心智流形注入]
+    LoadHistory --> BuildPrompt[4. 解析系统提示词<br>收集各插件注册的段<br>人格/记忆/指令]
 
     subgraph Session 会话编排层（唯一编排入口）
         BuildPrompt --> AggTools[5. 工具汇集<br>CAPABILITY_VISITOR 注册表]
@@ -40,7 +40,15 @@ flowchart TD
 
 ## 二、 核心参数与配置 Schema (Configuration Details)
 
-会话与压缩系统的全部表现都由全局会话配置参数控制。以下是 `symbio.toml` (或动态 SessionConfig) 中关于会话与记忆的完整配置示例：
+会话与压缩系统的全部表现都由会话配置参数控制。配置落在**本插件自己的目录**：
+
+```text
+{homedir}/plugins/session/PLUGIN.yml     本插件的配置（可在 .vdfs/session/PLUGIN.yml 上编辑）
+```
+
+字段真源是本插件的 `config.rs::SessionConfig`（**定义由配置的拥有者产出**：设置页的表单定义从 `SessionConfig::default()` 读出，不写第二份字面量，避免「面板显示值与实际行为漂移」）。
+
+以下是完整配置示例：
 
 ```yaml
 session:
@@ -74,6 +82,10 @@ session:
   
   # 6. 水位提醒与主动压缩
   enable_compact_tool: false     # 是否启用 55% Token 水位提醒 (nudge) 注入与 context_compact 主动压缩工具 (默认关闭，须手动开启；关闭后仅保留 70% 自动压缩兜底)
+  
+  # 7. 会话记忆（<会话目录>/AGENTS.md，可编辑地址 .vdfs/session/<id>/AGENTS.md）
+  memory_max_bytes: 16384        # 单次**写入**的字节上限，超出直接拒绝（不截断、不部分写入）
+  memory_inject_max_bytes: 4096  # 每轮**注入**系统提示词的字节上限，超出部分截断并指路 vdfs_read 取全文
 ```
 
 ---
@@ -298,7 +310,81 @@ session:
 
 ---
 
-## 四、 策略对比与总结 (Summary Matrix)
+## 四、 会话记忆 (Session Memory)
+
+会话记忆是**本会话自己钉住的约定与结论**：轮次一多，早期的结论会被压缩、淡化乃至淘汰出上下文；会话记忆的价值恰恰在于**不随上下文水位消失**。
+
+```text
+{homedir}/plugins/session/<会话 id>/AGENTS.md     记忆本体（与 session.json / messages.json 同目录）
+.vdfs/session/<会话 id>/AGENTS.md                 可编辑地址（模型与用户共用）
+```
+
+它与转写（`messages.json`）的分工：转写是**流水**（说过什么），会话记忆是**从这个会话里提炼出来的、不许被压缩掉的那几条**。它不是「对话摘要」（那是压缩快照的活），也不是「跨会话的经验」（那该写进工作区或智能体记忆）。
+
+### 三层记忆是同一件事的三个作用域
+
+| 层 | 所有者插件 | 物理落位 | VDFS 地址 |
+|---|---|---|---|
+| 工作区 | work | `{workdir}/AGENTS.md` | `.vdfs/work/AGENTS.md` |
+| **会话** | **session** | **`{会话目录}/AGENTS.md`** | **`.vdfs/session/<id>/AGENTS.md`** |
+| 智能体 | agent | `{bundle 目录}/AGENTS.md` | `.vdfs/agent/<id>/AGENTS.md` |
+
+三层形态完全一样（一个 UTF-8 文本文件 + 两道容量闸门 + 一行头信息的提示词片段 + 一个 VDFS 读写节点），因此**共用一份内核实现**（`symbio_core::memory`）。各插件只提供「个性」：落位、地址、标题、空内容提示、两道闸门开多大。
+
+### 两道闸门（三层统一）
+
+| 闸门 | 位置 | 行为 |
+|---|---|---|
+| 写入（`memory_max_bytes`） | `MemoryFile::write` | **拒绝**（不截断、不部分写入） |
+| 注入（`memory_inject_max_bytes`） | `MemoryFile::inject` | **截断** + 明确告知地址 |
+
+写侧拒绝的理由：截断会让模型「以为写进去了、其实丢了一半」——静默丢内容是最坏的一类失败；拒绝把判断权交回模型（精简后重写）。读侧截断的理由：记忆文件可以比注入预算大，超出部分靠模型按地址 `vdfs_read` 读取。**两者取值不同才有意义**。
+
+### 归属：一个作用域只有一个所有者
+
+**谁能读写它，谁负责注入它。** 这条原则消灭了两类问题：
+
+- **重叠**：`{workdir}/AGENTS.md` 曾被本插件（当「工作区指令」进 `req.system_prompt` 基座，只读、无地址）与 work 插件（当「工作区记忆」进注册段，可读写、有地址）**各注入一次**，同一内容进两次上下文；
+- **模糊**：同一个文件被一处叫「指令」、一处叫「记忆」，用户看不出该往哪写。
+
+副作用一并修掉：走 `req.system_prompt` 会**顶掉**模型插件注册的人格（旧优先级链的第一位是显式值）。改为走注册通道后，指令与人格**并列共存**。
+
+**本插件不再读 `{workdir}/AGENTS.md`**——那是 work 的工作区记忆。
+
+### 系统提示词：只有一个注册通道
+
+`CapabilityVisitor::register_system_prompt` 是**唯一**注册入口：注册的每一段都按注册顺序送达模型，**不存在「按优先级链取一个」的竞争**。`resolve_system_prompt` 的结果 = **请求显式段（若有）** + **全部注册段**，全空时才用兜底常量。
+
+「取一个」这个需求本身站不住：人格的**选择**发生在**注册期**（model 插件已按 `PROVIDER_ID` 解析出唯一生效 provider 后才注册），消费侧再按 key 选一次是空动作。
+
+会话侧经这个通道贡献两段：
+
+| 注册名 | 内容 | 形态 |
+|---|---|---|
+| `session-global-instructions` | `{homedir}/AGENTS.md`（**全局指令**） | **只读**：无地址、无容量、模型改不动 |
+| `session-memory` | 本会话的 `AGENTS.md`（**会话记忆**） | 可读写：有地址、两道闸门 |
+
+前者不进记忆内核——判据是一条可检验的线：**内核收「模型能自己改的东西」（要有地址、要限容）；只读指令走普通片段即可**。
+
+### VDFS 侧
+
+会话记忆挂在**会话节点之下**，与 `消息` / `子会话` / `工作目录` 并列——它本来就是会话的一部分，不另开一条寻址：
+
+```text
+.vdfs/session/<id>/AGENTS.md     rw    记忆（文件；写受闸门约束）
+```
+
+- `list` 与 `stat` **共用内核产出的同一份形状**，两条链路不会分叉；
+- 写入经 `notify_change` 投递变更（路径 `<id>/AGENTS.md`，与列表地址同源）；
+- **不可删除**（`delete` 恒 `Forbidden`）：删除即丢失本会话的长期约定，而抹掉之后没有东西能把它找回来。要清空就写入空内容——那是一次可读、可审、可撤销的显式动作。
+
+### 作用域闸门
+
+`ctx[SESSION_ID]` 缺失 / 为空 → **什么都不注入**。收集期拿不到会话 id 的广播（例如设置页的选项收集）不该凭空造一份记忆出来。闸门在 `SessionPlugin::store_with` 一处收口。
+
+---
+
+## 五、 策略对比与总结 (Summary Matrix)
 
 | 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
 | :--- | :--- | :--- | :--- | :--- |

@@ -25,6 +25,7 @@
 use crate::plugins::agent::core::spec::manifest::BundleManifest;
 use crate::plugins::agent::core::spec::validate::validate_manifest;
 use crate::plugins::agent::core::SPEC_MAJOR;
+use crate::symbio_core::AGENTS_FILE;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -508,11 +509,28 @@ impl BundleStore {
     }
 
     /// 写入（创建/覆盖）bundle 内部条目文件；父目录自动创建。
-    pub fn write_item(&self, bundle_id: &str, rel_path: &str, content: &str) -> Result<(), String> {
+    ///
+    /// `max_bytes` 是**写入闸门**：条目内容超过上限直接拒绝，不截断——人格 / 技能是
+    /// 跨会话生效的东西，「以为写进去了、实际少了一段」是这里最坏的失败形态
+    /// （没有任何报错，只表现为智能体行为异常）。拒绝则是一次显式、可重试的失败。
+    pub fn write_item(
+        &self,
+        bundle_id: &str,
+        rel_path: &str,
+        content: &str,
+        max_bytes: usize,
+    ) -> Result<(), String> {
         let record = self
             .get(bundle_id)
             .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
         classify_item_path(rel_path)?;
+        if content.len() > max_bytes {
+            return Err(format!(
+                "条目内容超出容量上限：当前 {} 字节，上限 {max_bytes} 字节（{rel_path}）。\
+                 请精简后再写入。",
+                content.len()
+            ));
+        }
         let full = absolutize(&record.dir, rel_path);
         debug_assert!(full.starts_with(&record.dir));
         if let Some(parent) = full.parent() {
@@ -552,8 +570,55 @@ impl BundleStore {
         Ok(())
     }
 
-    /// zip entry 名 → bundle 内相对路径。
+    // ==================== 智能体记忆（bundle 根下的 `AGENTS.md`） ====================
+    //
+    // 记忆**不是条目**：它不参与 `classify_item_path` 的白名单（那条白名单描述的是
+    // 「bundle 的约定能力目录」prompts/ skills/ mcps/，记忆不在其列），也不计入
+    // 概览里的条目计数。它是 bundle 根下的一个普通文件，与工作区级的
+    // `{workdir}/AGENTS.md` **同名同语义**（见 `symbio_core::memory`）——
+    // 放哪个作用域就管哪个作用域。
+
+    /// 智能体记忆文件：`<bundle 目录>/AGENTS.md`
+    pub fn memory_path(&self, bundle_id: &str) -> Result<PathBuf, String> {
+        let record = self
+            .get(bundle_id)
+            .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
+        Ok(record.dir.join(AGENTS_FILE))
+    }
+
+    /// 读智能体记忆（文件不存在 → **空串**：记忆是「可以还没有」的东西）
+    pub fn read_memory(&self, bundle_id: &str) -> Result<String, String> {
+        let path = self.memory_path(bundle_id)?;
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Ok(text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+            Err(e) => Err(format!("读取智能体记忆失败（{}）: {e}", path.display())),
+        }
+    }
+
+    /// 写智能体记忆。
     ///
+    /// `max_bytes` 是**写入闸门**：超过上限直接拒绝，不截断——记忆是跨会话累积的东西，
+    /// 「以为写进去了、实际少了一半」不会报错，只会让智能体以后行为不对。
+    pub fn write_memory(
+        &self,
+        bundle_id: &str,
+        text: &str,
+        max_bytes: usize,
+    ) -> Result<(), String> {
+        let path = self.memory_path(bundle_id)?;
+        if text.len() > max_bytes {
+            return Err(format!(
+                "智能体记忆超出容量上限：当前 {} 字节，上限 {max_bytes} 字节。\
+                 请精简后再写入（可先读取现有内容，合并改写而不是整篇重写）。",
+                text.len()
+            ));
+        }
+        std::fs::write(&path, text)
+            .map_err(|e| format!("写入智能体记忆失败（{}）: {e}", path.display()))
+    }
+
+    /// zip entry 名 → bundle 内相对路径。    ///
     /// 支持两种打包布局：根目录直打包（`manifest.yaml`、`providers/...`）与
     /// 单顶层目录打包（`<bundle_id>/manifest.yaml`、`<bundle_id>/providers/...`）。
     /// 返回 `None` 表示跳过（目录项 / 顶层杂项）。
@@ -735,5 +800,78 @@ mod tests {
         ] {
             assert!(classify_item_path(bad).is_err(), "should reject `{bad}`");
         }
+    }
+
+    /// 在工作区级落一个最小 bundle（不经 zip：以下用例只关心写入闸门）
+    fn workspace_store_with_bundle() -> (tempfile::TempDir, BundleStore) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = BundleStore::new(Some(dir.path().to_str().unwrap()));
+        let bundle = dir.path().join(".symbio/plugins/agent/b");
+        std::fs::create_dir_all(bundle.join("prompts")).unwrap();
+        std::fs::write(
+            bundle.join("manifest.yaml"),
+            "spec: \"oab/v1\"\nid: \"b\"\nname: \"B\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^1\"\n",
+        )
+        .unwrap();
+        assert!(store.get("b").is_some(), "前置：bundle 应被扫描到");
+        (dir, store)
+    }
+
+    /// 写入闸门：超限**拒绝**，且不留下半截内容
+    #[test]
+    fn write_item_rejects_oversized_content_without_touching_the_file() {
+        let (_dir, store) = workspace_store_with_bundle();
+
+        store
+            .write_item("b", "prompts/persona.md", "0123456789", 10)
+            .unwrap();
+        let err = store
+            .write_item("b", "prompts/persona.md", "0123456789X", 10)
+            .unwrap_err();
+        assert!(err.contains("超出容量上限"), "{err}");
+        assert!(err.contains("10"), "错误信息要带上限值：{err}");
+        assert_eq!(
+            store.read_item("b", "prompts/persona.md").unwrap(),
+            "0123456789",
+            "被拒绝的写入不得改动文件"
+        );
+    }
+
+    /// 智能体记忆：落位在 **bundle 自己的目录**（不是工作区目录），文件名与工作区级同名
+    #[test]
+    fn memory_lives_in_the_bundle_dir() {
+        let (dir, store) = workspace_store_with_bundle();
+        let path = store.memory_path("b").unwrap();
+        assert_eq!(
+            path,
+            dir.path().join(".symbio/plugins/agent/b").join(AGENTS_FILE)
+        );
+        assert_eq!(path.file_name().unwrap(), "AGENTS.md");
+        // 不是工作区根的那个 AGENTS.md
+        assert_ne!(path, dir.path().join(AGENTS_FILE));
+    }
+
+    #[test]
+    fn memory_read_write_roundtrips_and_gates_capacity() {
+        let (_dir, store) = workspace_store_with_bundle();
+
+        // 还没有记忆 → 空串（不是错误）
+        assert_eq!(store.read_memory("b").unwrap(), "");
+
+        store.write_memory("b", "该智能体的长期记忆", 64).unwrap();
+        assert_eq!(store.read_memory("b").unwrap(), "该智能体的长期记忆");
+
+        let err = store.write_memory("b", &"x".repeat(8), 4).unwrap_err();
+        assert!(err.contains("超出容量上限"), "{err}");
+        assert!(err.contains("4"), "{err}");
+        assert_eq!(
+            store.read_memory("b").unwrap(),
+            "该智能体的长期记忆",
+            "被拒绝的写入不得改动文件"
+        );
+
+        // 不存在的 bundle：明确报错
+        assert!(store.read_memory("nope").is_err());
+        assert!(store.write_memory("nope", "x", 64).is_err());
     }
 }

@@ -56,6 +56,7 @@ pub const SYSTEM_PLUGINS: &[&str] = &[
     "skill",
     "gateway",
     "vdfs",
+    "work",
 ];
 
 /// Home 自己的插件目录 = **系统根** `<homedir>`

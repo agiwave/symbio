@@ -18,6 +18,83 @@
 
 ***
 
+## 2026-09-16: 三层记忆归属收口 + 系统提示词单一通道 + `SessionConfig` 下沉
+
+三件事同一个判据：**一个作用域只有一个所有者，核心只留跨插件共享的抽象**。
+
+### 1. 三层记忆：一个作用域一个所有者（新增 `work` 插件）
+
+工作区 / 会话 / 智能体三层记忆形态完全相同——**一个 UTF-8 文本文件 + 两道容量闸门 +
+一行头信息的提示词片段 + 一个 VDFS 读写节点**。三份实现就是三份会各自漂移的口径
+（「写侧是拒绝还是截断」「读不到算不算错误」一旦分叉，用户看到的行为会随「这条记忆
+属于哪一层」而变，而用户无从知道差异从哪来），因此收敛为**一份内核**：
+
+| 层 | 所有者 | 物理落位 | VDFS 地址 |
+|---|---|---|---|
+| 工作区 | **work（新插件）** | `{workdir}/AGENTS.md` | `.vdfs/work/AGENTS.md` |
+| 会话 | session | `{会话目录}/AGENTS.md` | `.vdfs/session/<id>/AGENTS.md` |
+| 智能体 | agent | `{bundle 目录}/AGENTS.md` | `.vdfs/agent/<id>/AGENTS.md` |
+
+- **内核** `symbio_core::memory`（`MemoryFile` / `InjectedMemory` / `SegmentSpec` /
+  `NodeSpec` / `render_segment`）：读写、两道闸门、片段排版、节点形状。给的是
+  **值对象 + 纯函数**而非 trait——「provider」的前提是调用方需要运行时多态
+  （`VdfsProvider` 三后端 / `ModelProvider` 各家模型），记忆不是，全项目没有一处
+  `dyn MemoryProvider`。
+- **两道闸门**：写侧**拒绝**（不截断、不部分写入——静默丢内容是最坏的失败）；读侧
+  **截断** + 明确告知地址。`total_bytes` 取读到的全文长度而非文件 metadata，与写入
+  闸门同一把尺子，避免「显示 8000 字节、再写一点就被拒」的错位。
+- **作用域闸门**：无作用域（无工作区 / 无会话 / 无智能体）是**正常状态**而非错误
+  ——读→空串、注入→`None`、写→明确报错，闸门在构造点一处收口。
+- **删除语义三层统一**：记忆一律 `Forbidden`——删除即丢失全部长期事实，抹掉之后没有
+  东西能找回来；要清空就写入空内容（一次可读、可审、可撤销的显式动作）。
+- **消除重叠**：`{workdir}/AGENTS.md` 原先被 session（当「工作区指令」进
+  `req.system_prompt` 基座，只读、无地址）与 work（当「工作区记忆」进注册段，可读写、
+  有地址与容量）**各注入一次**。按「**谁能读写它，谁负责注入它**」收口到 work，
+  session 不再读它。副作用一并修掉：走 `req.system_prompt` 会**顶掉**模型插件注册的
+  人格（旧优先级链第一位是显式值），改走注册通道后指令与人格**并列共存**。
+- `{homedir}/AGENTS.md`（全局）**不建设**为记忆层（无地址、无容量、模型改不动），
+  但从 `req.system_prompt` 挪到注册通道，归 session。判据因此是一条可检验的线：
+  **内核收「模型能自己改的东西」（要有地址、要限容）；只读指令走普通片段即可。**
+
+### 2. 系统提示词：两条通道合并为一条
+
+`register_system_prompt_segment` / `list_system_prompt_segments` **删除**，只留
+`register_system_prompt` / `list_system_prompts`。语义收敛为一条：**注册在这里的东西
+一定会送达模型**——全部条目按注册顺序拼接，不做「取一个」的竞争。
+
+「取一个」这个需求本身站不住：人格的**选择**发生在**注册期**（model 插件已按
+`PROVIDER_ID` 解析出唯一生效 provider 后才注册），消费侧再按 key 选一次是空动作；
+且实测 model 插件那两处「双键注册」（`provider_id` 键 + `"default"` 键）写的还是
+**同一份内容**。`resolve_system_prompt` 从「基座竞争 + 片段追加」简化为
+「**显式段（若有）+ 全部注册段 + 全空兜底**」。
+
+### 3. `SessionConfig` 从 `symbio_core` 下沉到 session 插件
+
+它原先住在 `symbio_core::schemas::session::session_config`，与同目录的 `session_chat` /
+`chat_message` / `session_update` 并列，但两者性质不同：那几个是**跨插件协议**
+（agent / local / model 都按同一份定义拼 WS 帧与 payload），而 `SessionConfig`
+**全仓引用只在 `src/plugins/session/` 内**，前端与 CLI 零镜像、`lib.rs` 也不导出——
+它描述的是「本插件自己的旋钮」。判据与 `ChatSession` 契约下沉时同一条（见
+`session/chat_session.rs` 模块文档）：**核心架构只保留跨插件共享的抽象，不承载单一
+模块的内部定义。** 新位置 `plugins/session/config.rs`，与 `work` / `agent` 的
+`config.rs` 回到同一形态。
+
+落盘契约不变：字段名仍是 `PLUGIN.yml` 里的键，`#[serde(default)]` 仍在，未知键仍被
+静默忽略，**存量配置无需迁移**。
+
+### 其他
+
+- 新增两个配置项（session 与 work 各有）：`memory_max_bytes`（写闸门，默认 16 KiB）、
+  `memory_inject_max_bytes`（注入预算，默认 4 KiB）。
+- 新增模块文档：`plugins/work/README.md`（此前 15 个插件里唯一缺 README 的）、
+  `plugins/session/README.md` §四「会话记忆」。
+- 修正 3 处失效引用：`agent/host/store.rs` 的 `symbio_core::agents_md`（模块已并入
+  `memory`）、`session/docs/core-loop.md` 的 `build_system_prompt`（函数已删）、
+  `session/docs/complexity-audit.md` 与 `mechanism-audit.md` 保留原样（**审计快照**，
+  记录的是当时形态与行号，不追改）。
+
+***
+
 ## 2026-09-16: 读侧修复第一批（agent 自评估落地）
 
 一个真实消费者（审查本仓库的 agent 会话）报告了「理解这套设计太贵」的五类摩擦。
