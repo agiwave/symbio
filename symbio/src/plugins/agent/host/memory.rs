@@ -3,8 +3,8 @@
 //! ## 落位：bundle 自己的目录
 //!
 //! ```text
-//! {系统目录}/plugins/agent/<bundle_id>/AGENTS.md           全局级 bundle 的记忆
-//! {workdir}/.symbio/plugins/agent/<bundle_id>/AGENTS.md    工作区级 bundle 的记忆
+//! <本插件目录>/<bundle_id>/AGENTS.md           全局级 bundle 的记忆
+//! {workdir}/<本插件目录>/<bundle_id>/AGENTS.md    工作区级 bundle 的记忆
 //! ```
 //!
 //! 记忆**跟着智能体走**，不跟着工作区走：同一个智能体在 A 项目与 B 项目里记得同一批事。

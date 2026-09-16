@@ -38,7 +38,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
                         options: vec![
                             DetailOption {
                                 value: "workspace".into(),
-                                label: "工作区级（.symbio/plugins/agent）".into(),
+                                label: "工作区级（<本插件目录>）".into(),
                             },
                             DetailOption {
                                 value: "global".into(),

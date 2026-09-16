@@ -128,9 +128,10 @@ impl Composite {
     /// 3. 构造时把**插件自身目录**经 [`PLUGIN_DIR`] 告知它——它据此自己读写
     ///    `PLUGIN.yml`，容器不碰它的配置。
     ///
-    /// 插件根**由容器自己的目录推出**（`<系统根>/plugins`）：父插件把系统根告知它，
-    /// 它据此定位自己管辖的地盘，而不是去读一个全局常量。`home` 自己不住在
-    /// `plugins/` 下，因此扫描不会构造出第二个 home。
+    /// 插件根**由容器自己的目录推出**：系统级插件（`home` 及本容器）的目录就是
+    /// 系统根，插件根与之**重合**——即插件直接并列在系统根下。父插件把系统根告知
+    /// 它，它据此定位自己管辖的地盘，而不是去读一个全局常量。
+    /// `home` 的目录是系统根本身而非其下的一层，因此扫描不会构造出第二个 home。
     fn mount_from_plugin_dirs(
         composite: &Arc<Self>,
         ctx: &Arc<dyn InvokeRequest>,
@@ -168,7 +169,13 @@ impl Composite {
         for name in names {
             let dir = PluginDir::at(root.join(&name), &name);
             let provider = match Self::provider_of(&dir) {
-                Ok(p) => p,
+                // 插件根 = 系统根本身，其下**本来就有非插件目录**（如用户自建的
+                // 目录）。没有 `PLUGIN.yml` 只是「它不是插件」，不是异常，故只记 debug。
+                Ok(None) => {
+                    crate::plugin_debug!("composite", "跳过目录（没有 {PLUGIN_FILE}）{name}");
+                    continue;
+                }
+                Ok(Some(p)) => p,
                 Err(e) => {
                     crate::plugin_warn!("composite", "跳过插件目录（配置不符合要求）{name}：{e}");
                     continue;
@@ -192,7 +199,7 @@ impl Composite {
         }
     }
 
-    /// 容器管辖的插件根：**自己的目录（系统根）下的 `plugins/`**
+    /// 容器管辖的插件根 = **自己的目录（系统根）本身**
     ///
     /// 父插件经 [`PLUGIN_DIR`] 告知系统根；缺省（测试 / 未装配）退回全局定义
     /// [`plugins_root`]——两者在装配态下是同一个路径。
@@ -204,14 +211,18 @@ impl Composite {
 
     /// 插件目录的**身份**：`PLUGIN.yml` 里的 `plugin_provider`
     ///
-    /// 「配置符合要求」的判据就在这里——文件不存在、不可解析、没声明 provider，
-    /// 三者都是「这个目录不是可加载的插件」。
-    fn provider_of(dir: &PluginDir) -> Result<String, String> {
+    /// 三态返回（**刻意区分「不是插件」与「是个坏插件」**）：
+    ///
+    /// - `Ok(None)`：目录下没有 `PLUGIN.yml` ⇒ 它压根不是插件候选（静默跳过）；
+    /// - `Ok(Some(p))`：可加载，`p` 是工厂 id；
+    /// - `Err(_)`：有 `PLUGIN.yml` 但不可解析 / 未声明 provider ⇒ **告警**，
+    ///   因为「配了一半」是用户需要知道的事。
+    fn provider_of(dir: &PluginDir) -> Result<Option<String>, String> {
         let Some(manifest) = dir.read_manifest()? else {
-            return Err(format!("目录下没有 {PLUGIN_FILE}"));
+            return Ok(None);
         };
         match manifest.get(KEY_PROVIDER) {
-            Some(Value::String(p)) if !p.is_empty() => Ok(p.clone()),
+            Some(Value::String(p)) if !p.is_empty() => Ok(Some(p.clone())),
             _ => Err(format!("{PLUGIN_FILE} 未声明 {KEY_PROVIDER}")),
         }
     }

@@ -4,7 +4,7 @@
 //! 本模块在工具结果写进上下文**之前**按 token 预算裁剪：
 //!
 //! 1. 估算 token 数 ≤ 预算 → 原样返回；
-//! 2. 否则：把全文存档到**会话存档目录**（`<homedir>/plugins/session/<safe_id>/tool_archives/`，
+//! 2. 否则：把全文存档到**会话存档目录**（`<本插件目录>/<safe_id>/tool_archives/`，
 //!    可经 `local/file_read` 取回），并对正文做
 //!    **head/tail 摘要**（保留前 60% + 后 40% 预算，尾部通常是结论/错误，更关键），
 //!    中间插入占位说明。
@@ -150,7 +150,7 @@ fn omit_placeholder_prefix(omit: usize) -> String {
 /// 守卫工具结果：超过预算则存档 + head/tail 摘要，否则原样返回。
 ///
 /// `session_id`：当前会话标识。提供时存档写入会话目录
-/// `<homedir>/plugins/session/<safe_id>/tool_archives/`（跟随会话生命周期）；
+/// `<本插件目录>/<safe_id>/tool_archives/`（跟随会话生命周期）；
 /// 为 None/空或目录创建失败时退回系统临时目录兜底。
 pub fn guard_tool_result(
     text: &str,

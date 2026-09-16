@@ -268,7 +268,7 @@ symbio::submit_object_creator!("my_plugin", MyPlugin::build, dyn Plugin);
 `PLUGIN_DIR` 告知插件。
 
 ```yaml
-# ~/.symbio/plugins/my_plugin/PLUGIN.yml
+# ~/.symbio/my_plugin/PLUGIN.yml
 plugin_provider: my_plugin   # 工厂 id（submit_object_creator! 的第一个参数）
 plugin_name: my_plugin       # 实例名，缺省 = 目录名
 # ↓ 以下即本插件自己的配置字段，随你定义

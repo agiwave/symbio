@@ -41,7 +41,7 @@ npm run tauri dev
 或直接编辑配置文件：
 
 ```bash
-# ~/.symbio/plugins/model/<id>/provider.json
+# ~/.symbio/model/<id>/provider.json
 {
   "default_provider_id": "openai_main",
   "providers": {

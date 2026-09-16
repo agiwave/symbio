@@ -3,8 +3,8 @@ use crate::plugins::skill::loader::{load_skills_from_dirs_with_budget, LoadBudge
 use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
 use crate::symbio_core::{
-    HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError,
-    PluginMeta, PluginPayload, PLUGIN_SKILL, TRAVERSE_AVAILABLE_TOOLS,
+    dir_from_ctx, HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
+    PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_SKILL, TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use std::path::Path;
@@ -13,20 +13,23 @@ use tokio::sync::RwLock;
 
 pub struct SkillPlugin {
     config: Arc<RwLock<SkillConfig>>,
+    /// 本插件自己的目录（构造时由父插件经 `PLUGIN_DIR` 告知）
+    dir: PluginDir,
 }
 
 impl SkillPlugin {
     /// 把 skill_dirs 里的 `{HOMEDIR}` 占位符解析为当前系统目录
     fn resolve_skill_dirs_template(dirs: &mut [String]) {
+        // `{HOMEDIR}` 是**用户配置里的占位符**（配置文件可手改），其语义就是
+        // 「系统目录」，由 home 插件持有；这里只做替换，不代表本插件知道自己落在哪。
         let homedir = HomedirRegistry::get()
-            .join("plugins")
             .join("skills")
             .to_string_lossy()
             .to_string();
         for d in dirs.iter_mut() {
-            if d.contains("{HOMEDIR}/plugins/skills") {
-                *d = d.replace("{HOMEDIR}/plugins/skills", &homedir);
-            } else if d == "{HOMEDIR}/plugins/skills" {
+            if d.contains("{HOMEDIR}/skills") {
+                *d = d.replace("{HOMEDIR}/skills", &homedir);
+            } else if d == "{HOMEDIR}/skills" {
                 *d = homedir.clone();
             }
         }
@@ -40,12 +43,9 @@ impl SkillPlugin {
             .unwrap_or_else(|| SkillConfig {
                 // 加载路径优先级：
                 // 1. 工作区级别：`.symbio/skills`（项目内）
-                // 2. 系统级别：`<homedir>/plugins/skills`（symbio 系统级）
+                // 2. 系统级别：`<本插件目录>`（symbio 系统级）
                 // 3. 第三方工具兼容：`.qwen/skills`、`.sixth/skills`、`.qoder/skills`
-                skill_dirs: vec![
-                    ".symbio/skills".to_string(),
-                    "{HOMEDIR}/plugins/skills".to_string(),
-                ],
+                skill_dirs: vec![".symbio/skills".to_string(), "{HOMEDIR}/skills".to_string()],
                 // 预算字段使用 SkillConfig::default() 的值
                 ..SkillConfig::default()
             });
@@ -53,12 +53,14 @@ impl SkillPlugin {
         // 解析 {HOMEDIR} 占位符
         Self::resolve_skill_dirs_template(&mut config.skill_dirs);
 
-        Arc::new(SkillPlugin::new(config)) as Arc<dyn Plugin>
+        let dir = dir_from_ctx(&*ctx, PLUGIN_SKILL);
+        Arc::new(SkillPlugin::new(config, dir)) as Arc<dyn Plugin>
     }
 
-    pub fn new(config: SkillConfig) -> Self {
+    pub fn new(config: SkillConfig, dir: PluginDir) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
+            dir,
         }
     }
 
@@ -138,9 +140,19 @@ const LABEL: &str = "技能";
 /// 技能主文件（Markdown，**必须按纯文本落盘**）
 const MANIFEST: &str = "SKILL.md";
 
+impl SkillPlugin {
+    /// 本插件的磁盘底座（根 = 自己的目录）
+    fn store(&self) -> DirVdfs {
+        store(&self.dir)
+    }
+}
+
 /// 磁盘底座（每次现取，跟随 homedir 切换）
-fn store() -> DirVdfs {
-    DirVdfs::for_category(PLUGIN_SKILL, MANIFEST).with_label(LABEL)
+///
+/// 根 = **本插件自己的目录**（构造时由父插件经 `PLUGIN_DIR` 告知）——
+/// 这里不按插件名反推落位，插件不知道、也不该知道自己被放在哪。
+fn store(dir: &PluginDir) -> DirVdfs {
+    DirVdfs::at(dir.dir(), PLUGIN_SKILL, MANIFEST).with_label(LABEL)
 }
 
 /// 路径末段 → 条目 id（去掉 `.skill` 呈现扩展名）
@@ -299,7 +311,8 @@ impl VdfsProvider for SkillPlugin {
                 "{LABEL}是叶子资源，没有子项：{path}"
             )));
         }
-        Ok(store()
+        Ok(self
+            .store()
             .entries()
             .await?
             .iter()
@@ -311,7 +324,7 @@ impl VdfsProvider for SkillPlugin {
         if path.is_empty() {
             return Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST));
         }
-        let e = store().entry(&id_of(path)).await?;
+        let e = self.store().entry(&id_of(path)).await?;
         Ok(node_of(&e.id, e.raw.as_deref()))
     }
 
@@ -323,7 +336,7 @@ impl VdfsProvider for SkillPlugin {
                 "该路径是目录，不可读取内容：{path}"
             )));
         }
-        let text = store().read_text(&id_of(path)).await?;
+        let text = self.store().read_text(&id_of(path)).await?;
         let value = super::detail::skill_md_to_config(&text).unwrap_or_else(
             || serde_json::json!({ "name": id_of(path), "description": "", "content": text }),
         );
@@ -338,7 +351,7 @@ impl VdfsProvider for SkillPlugin {
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        let s = store();
+        let s = self.store();
         // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）。
         // 导入的**名字来自目标地址末段**（使用方由文件名推导），所以必须有名字：
         // 「无名字导入」无从命名，直接拒绝。
@@ -387,7 +400,7 @@ impl VdfsProvider for SkillPlugin {
         if path.is_empty() {
             return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
         }
-        let s = store();
+        let s = self.store();
         let id = id_of(path);
         // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
         s.entry(&id).await?;
@@ -410,7 +423,7 @@ impl VdfsProvider for SkillPlugin {
             )));
         }
         let id = id_of(path);
-        let pack = store().export_pack(&id).await?;
+        let pack = self.store().export_pack(&id).await?;
         let data = serde_json::to_value(&pack)
             .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
         Ok(VdfsActionResult {

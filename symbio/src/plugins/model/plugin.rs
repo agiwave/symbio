@@ -22,13 +22,13 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// Provider 主文件名（磁盘布局：`~/.symbio/plugins/model/<id>/provider.json`）
+/// Provider 主文件名（磁盘布局：`<本插件目录>/<id>/provider.json`）
 const MANIFEST: &str = "provider.json";
 
-/// 跨条目的插件配置（`<homedir>/plugins/model/PLUGIN.yml`）—— **写入形态**
+/// 跨条目的插件配置（`<本插件目录>/PLUGIN.yml`）—— **写入形态**
 ///
 /// 只写**跨条目的状态**：单个 Provider 的明细是**资源**，落在
-/// `plugins/model/<id>/provider.json`，不进配置文件。
+/// `<本插件目录>/<id>/provider.json`，不进配置文件。
 ///
 /// 读取比写入**宽**：`build` 读的是 `ModelProvidersConfig`。旧形态曾把 Provider
 /// 明细整包存在这里（`providers` 键），读宽一次让既有的一次性迁移能照常把它们
@@ -44,7 +44,7 @@ pub struct ModelConfig {
 pub struct ModelPlugin {
     /// 多 Model Provider 注册表（chat 侧解析唯一生效 Provider 用）
     providers: Arc<RwLock<ModelProvidersConfig>>,
-    /// 本插件的目录（`<homedir>/plugins/model`）——配置文件 `PLUGIN.yml` 就在这里
+    /// 本插件的目录（`<本插件目录>`）——配置文件 `PLUGIN.yml` 就在这里
     dir: PluginDir,
     /// VDFS 侧条目清单（内存镜像：`id → provider.json` 原文）
     ///
@@ -57,8 +57,8 @@ impl ModelPlugin {
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
     ///
     /// 加载策略（按优先级）：
-    /// 1. **存储**：从 `~/.symbio/plugins/model/<id>/provider.json` 加载所有 Provider
-    /// 2. **跨条目配置**：`~/.symbio/plugins/model/PLUGIN.yml` 里的 `default_provider_id`
+    /// 1. **存储**：从 `<本插件目录>/<id>/provider.json` 加载所有 Provider
+    /// 2. **跨条目配置**：`<本插件目录>/PLUGIN.yml` 里的 `default_provider_id`
     ///    （旧形态里可能还带着 `providers` 明细，由 `load_from_storage` 搬成资源）
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
         let dir = dir_from_ctx(&*ctx, PLUGIN_MODEL);
@@ -87,8 +87,11 @@ impl ModelPlugin {
     }
 
     /// 磁盘底座（每次现取，跟随 homedir 切换）
-    fn store() -> SingleFileVdfs {
-        SingleFileVdfs::for_category(PLUGIN_MODEL, MANIFEST).with_label(LABEL)
+    ///
+    /// 根 = **本插件自己的目录**（构造时由父插件经 `PLUGIN_DIR` 告知）——
+    /// 这里不按插件名反推落位，插件不知道、也不该知道自己被放在哪。
+    fn store(&self) -> SingleFileVdfs {
+        SingleFileVdfs::at(self.dir.dir(), PLUGIN_MODEL, MANIFEST).with_label(LABEL)
     }
 
     /// 异步加载：从存储拉取所有 Provider
@@ -96,7 +99,7 @@ impl ModelPlugin {
     /// 启动时调用此方法，**会**触发首启动数据迁移（从配置文件里的旧明细迁到新存储）。
     /// `ctx` 只用于旧分类迁移后的重入（不再从中取服务对象）。
     pub async fn load_from_storage(&self, ctx: &Arc<dyn InvokeRequest>) {
-        let store = Self::store();
+        let store = self.store();
 
         // 1. 存储中的所有 Provider
         let entries = match store.entries().await {
@@ -109,6 +112,7 @@ impl ModelPlugin {
 
         // 1.5 兼容旧分类 `ai`：若 model 分类为空但旧分类有数据，自动迁移
         if entries.is_empty() {
+            // 迁移专用：旧分类 `ai` 是**历史落位**，只有迁移代码可以认识它
             let legacy = SingleFileVdfs::for_category("ai", MANIFEST);
             let legacy_entries = legacy.entries().await.unwrap_or_default();
             if !legacy_entries.is_empty() {
@@ -197,7 +201,7 @@ impl ModelPlugin {
         self.entries.replace_all(mirror);
         plugin_info!(
             "model",
-            "从 ~/.symbio/plugins/model/ 加载了 {} 个 Model Provider",
+            "从 <本插件目录>/ 加载了 {} 个 Model Provider",
             self.entries.ids().len()
         );
     }
@@ -205,7 +209,7 @@ impl ModelPlugin {
     /// 首启动迁移：把配置文件里残留的旧 Provider 明细迁到存储
     ///
     /// 旧形态把 Provider 整包存在配置里（`PLUGIN.yml` 的 `providers` 键）。
-    /// 迁移把它们写成 `plugins/model/<id>/provider.json`，随后把配置文件**归一**
+    /// 迁移把它们写成 `<本插件目录>/<id>/provider.json`，随后把配置文件**归一**
     /// 为只有跨条目状态——同一个事实不留两份。
     async fn migrate_from_legacy_config(&self, store: &SingleFileVdfs) {
         let current = self.providers.read().await.clone();
@@ -215,7 +219,7 @@ impl ModelPlugin {
 
         plugin_info!(
             "model",
-            "检测到旧 config 中的 Model Providers，开始迁移到 ~/.symbio/plugins/model/"
+            "检测到旧 config 中的 Model Providers，开始迁移到 <本插件目录>/"
         );
 
         let mut mirror = Vec::with_capacity(current.providers.len());
@@ -252,7 +256,7 @@ impl ModelPlugin {
     /// 把自己的跨条目配置写回**自己的** `PLUGIN.yml`（不再经父插件）
     ///
     /// 只写 `default_provider_id`：单个 Provider 的明细是资源，落在
-    /// `plugins/model/<id>/provider.json`，不进配置文件。
+    /// `<本插件目录>/<id>/provider.json`，不进配置文件。
     async fn persist(&self) -> InvokeResponse<()> {
         let cfg = ModelConfig {
             default_provider_id: self.providers.read().await.default_provider_id.clone(),
@@ -478,7 +482,7 @@ impl ModelPlugin {
 
     /// 读盘 → 配置（`stat` / `read` / `delete` / `action` 的存在性校验都走这里）
     async fn config_on_disk(&self, id: &str) -> VdfsResult<ModelProviderConfig> {
-        let store = Self::store();
+        let store = self.store();
         let entry = store.entry(id).await?;
         config_of(id, entry.raw.as_deref().unwrap_or_default())
             .ok_or_else(|| VdfsError::internal(format!("Provider「{id}」的清单不是合法配置")))
@@ -680,7 +684,7 @@ impl VdfsProvider for ModelPlugin {
             return Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST));
         }
         let id = Self::id_of(path);
-        let entry = Self::store().entry(&id).await?;
+        let entry = self.store().entry(&id).await?;
         let p = config_of(&id, entry.raw.as_deref().unwrap_or_default())
             .ok_or_else(|| VdfsError::internal(format!("Provider「{id}」的清单不是合法配置")))?;
         Ok(node_of(&p, entry.updated_at))
@@ -694,7 +698,7 @@ impl VdfsProvider for ModelPlugin {
         }
         // 读磁盘原文：DetailForm 以它作预填输入，`is_default` 这类落盘标记因此
         // 与磁盘严格一致（不在读取时重新推导）。
-        let text = Self::store().read_text(&Self::id_of(path)).await?;
+        let text = self.store().read_text(&Self::id_of(path)).await?;
         Ok(VdfsContent::text(path, text).with_mime("application/json"))
     }
 
@@ -724,7 +728,7 @@ impl VdfsProvider for ModelPlugin {
             .await
             .map_err(from_plugin_error)?;
         // 落盘（原子写 + 变更广播由 vdfs_service 承担）→ 再同步内存视图
-        let created = Self::store().write_json(&id, &normalized).await?;
+        let created = self.store().write_json(&id, &normalized).await?;
         self.after_uploaded(&id, &normalized)
             .await
             .map_err(from_plugin_error)?;
@@ -742,7 +746,7 @@ impl VdfsProvider for ModelPlugin {
         let id = Self::id_of(path);
         // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
         self.config_on_disk(&id).await?;
-        Self::store().remove(&id).await?;
+        self.store().remove(&id).await?;
         self.after_deleted(&id).await;
         Ok(())
     }
@@ -798,7 +802,7 @@ impl Plugin for ModelPlugin {
     }
 
     /// model 已无自有路由：配置的读写在 VDFS 上（`.vdfs/model/<id>` 的详情表单，
-    /// 以及节点动作 `set-default`），跨条目状态写自己的 `plugins/model/PLUGIN.yml`。
+    /// 以及节点动作 `set-default`），跨条目状态写自己的 `<本插件目录>/PLUGIN.yml`。
     async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!(
             "{PLUGIN_MODEL} 已无自有路由，请改用 VDFS 地址"

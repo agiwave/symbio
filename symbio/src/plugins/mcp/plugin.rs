@@ -17,7 +17,7 @@
 //!
 //! ## 存储策略
 //!
-//! 每个 MCP Server 是一个**目录型条目**：`~/.symbio/plugins/mcp/<name>/server.json`
+//! 每个 MCP Server 是一个**目录型条目**：`<本插件目录>/<name>/server.json`
 //! （主文件 `server.json` + 可选附属文件），由
 //! [`DirVdfs`](crate::providers::vdfs_service::DirVdfs) 承载落盘。
 //! `McpConfig` 的内存视图（`servers: HashMap<name, McpServerConfig>`）
@@ -37,7 +37,7 @@ use tracing::warn;
 use super::capability::McpToolCapability;
 use super::manager::McpManager;
 
-/// Server 主文件（磁盘布局：`~/.symbio/plugins/mcp/<id>/server.json`）
+/// Server 主文件（磁盘布局：`<本插件目录>/<id>/server.json`）
 const MANIFEST: &str = "server.json";
 
 /// MCP 插件
@@ -48,7 +48,7 @@ pub struct McpPlugin {
     manager: Arc<McpManager>,
     /// 首次加载标志（防止 traverse 在 load_from_storage 完成前访问旧 config）
     loaded: Arc<tokio::sync::Mutex<bool>>,
-    /// 本插件的目录（`<homedir>/plugins/mcp`）——配置文件 `PLUGIN.yml` 就在这里
+    /// 本插件的目录（`<本插件目录>`）——配置文件 `PLUGIN.yml` 就在这里
     dir: PluginDir,
 }
 
@@ -92,8 +92,11 @@ impl McpPlugin {
     }
 
     /// 磁盘底座（每次现取，跟随 homedir 切换）
-    fn store() -> DirVdfs {
-        DirVdfs::for_category(PLUGIN_MCP, MANIFEST).with_label(LABEL)
+    ///
+    /// 根 = **本插件自己的目录**（构造时由父插件经 `PLUGIN_DIR` 告知）——
+    /// 这里不按插件名反推落位，插件不知道、也不该知道自己被放在哪。
+    fn store(&self) -> DirVdfs {
+        DirVdfs::at(self.dir.dir(), PLUGIN_MCP, MANIFEST).with_label(LABEL)
     }
 
     pub fn metadata() -> PluginMeta {
@@ -102,11 +105,11 @@ impl McpPlugin {
             .with_version("0.3.0")
     }
 
-    /// 异步加载：从 `~/.symbio/plugins/mcp/` 读取所有 MCP Server
+    /// 异步加载：从 `<本插件目录>/` 读取所有 MCP Server
     ///
     /// - 若存储为空，则触发首启动迁移（从 ctx.config()）
     pub async fn load_from_storage(&self, _ctx: &Arc<dyn InvokeRequest>) {
-        let store = Self::store();
+        let store = self.store();
 
         // 1. 存储中的所有 MCP Server
         let entries = match store.entries().await {
@@ -142,7 +145,7 @@ impl McpPlugin {
         cfg.servers = new_servers;
         crate::plugin_info!(
             "mcp",
-            "从 ~/.symbio/plugins/mcp/ 加载了 {} 个 MCP Server",
+            "从 <本插件目录>/ 加载了 {} 个 MCP Server",
             cfg.servers.len()
         );
     }
@@ -162,7 +165,7 @@ impl McpPlugin {
     /// 首启动迁移：把配置文件里残留的旧 Server 明细迁到存储
     ///
     /// 旧形态把 Server 整包存在配置里（`PLUGIN.yml` 的 `servers` 键）。迁移把它们
-    /// 写成 `plugins/mcp/<id>/server.json`，随后把配置文件里这些遗留键摘掉——
+    /// 写成 `<本插件目录>/<id>/server.json`，随后把配置文件里这些遗留键摘掉——
     /// 本插件**没有跨条目配置**（它的配置就是资源树），配置文件只剩身份字段。
     async fn migrate_from_legacy_config(&self, store: &DirVdfs) {
         let current = self.config.read().await.clone();
@@ -172,7 +175,7 @@ impl McpPlugin {
 
         crate::plugin_info!(
             "mcp",
-            "检测到旧 config 中的 MCP Servers，开始迁移到 ~/.symbio/plugins/mcp/"
+            "检测到旧 config 中的 MCP Servers，开始迁移到 <本插件目录>/"
         );
 
         for (id, s) in &current.servers {
@@ -365,7 +368,8 @@ impl VdfsProvider for McpPlugin {
                 "{LABEL}是叶子资源，没有子项：{path}"
             )));
         }
-        Ok(McpPlugin::store()
+        Ok(self
+            .store()
             .entries()
             .await?
             .iter()
@@ -378,7 +382,7 @@ impl VdfsProvider for McpPlugin {
             // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
             return Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST));
         }
-        let e = McpPlugin::store().entry(&id_of(path)).await?;
+        let e = self.store().entry(&id_of(path)).await?;
         Ok(node_of(&e.id, e.raw.as_deref()))
     }
 
@@ -390,7 +394,7 @@ impl VdfsProvider for McpPlugin {
                 "该路径是目录，不可读取内容：{path}"
             )));
         }
-        let text = McpPlugin::store().read_text(&id_of(path)).await?;
+        let text = self.store().read_text(&id_of(path)).await?;
         Ok(VdfsContent::text(path, text).with_mime("application/json"))
     }
 
@@ -400,7 +404,7 @@ impl VdfsProvider for McpPlugin {
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        let store = McpPlugin::store();
+        let store = self.store();
         // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）。
         // 导入的**名字来自目标地址末段**（使用方由文件名推导），所以必须有名字：
         // 「无名字导入」无从命名，直接拒绝。
@@ -455,7 +459,7 @@ impl VdfsProvider for McpPlugin {
         if path.is_empty() {
             return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
         }
-        let store = McpPlugin::store();
+        let store = self.store();
         let id = id_of(path);
         // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
         store.entry(&id).await?;
@@ -478,7 +482,7 @@ impl VdfsProvider for McpPlugin {
         }
         let id = id_of(path);
         // 存在性校验：对不存在的条目做动作应报 NotFound
-        McpPlugin::store().entry(&id).await?;
+        self.store().entry(&id).await?;
         match action {
             // 连接测试：stdio 握手 / http streams。连接失败映射为 ok=false（失败是
             // **结果**，不是协议错误）
@@ -504,7 +508,7 @@ impl VdfsProvider for McpPlugin {
             }
             // 导出：整包打包下载（与「新建类型 zip」的导入互为逆向）
             VDFS_ACTION_EXPORT => {
-                let pack = McpPlugin::store().export_pack(&id).await?;
+                let pack = self.store().export_pack(&id).await?;
                 let data = serde_json::to_value(&pack)
                     .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
                 Ok(VdfsActionResult {
@@ -549,7 +553,7 @@ fn with_id(manifest: &serde_json::Value, id: &str) -> serde_json::Value {
 impl McpPlugin {
     /// 从存储读取并解析单个 server 配置
     async fn server_config(&self, id: &str) -> VdfsResult<McpServerConfig> {
-        let content = McpPlugin::store().read_text(id).await?;
+        let content = self.store().read_text(id).await?;
         serde_json::from_str::<McpServerConfig>(&content)
             .map_err(|e| VdfsError::internal(format!("解析 {id} 配置失败: {e}")))
     }

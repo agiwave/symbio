@@ -19,7 +19,7 @@
 //!
 //! | 驻留方式 | 构造 | 条目住在 |
 //!|---|---|---|
-//! | 持久会话 | [`SessionStore::new`]（根 = `<homedir>/plugins/session`） | 磁盘 `<根>/<id>/{session.json, messages.json}` |
+//! | 持久会话 | [`SessionStore::new`]（根 = `<本插件目录>`） | 磁盘 `<根>/<id>/{session.json, messages.json}` |
 //! | 临时会话 | [`SessionStore::ephemeral`] | 进程内，退出即丢 |
 //!
 //! ## 与 VDFS 的关系
@@ -118,7 +118,7 @@ pub struct SessionStore {
 impl SessionStore {
     /// 持久会话存储；`base_dir` 通常是
     /// [`SessionPlugin::session_storage_dir`](super::plugin::SessionPlugin::session_storage_dir)
-    /// （即宿主层的 `<homedir>/plugins/session` 类别根），测试注入临时目录。
+    /// （即宿主层的 `<本插件目录>` 类别根），测试注入临时目录。
     pub fn new(base_dir: PathBuf) -> Self {
         Self {
             base_dir: Some(base_dir),

@@ -101,7 +101,7 @@ fn default_true() -> bool {
 
 /// MCP configuration - Single Source of Truth
 ///
-/// 磁盘上每个 server 是**自己的目录条目**：`<homedir>/plugins/mcp/<name>/server.json`
+/// 磁盘上每个 server 是**自己的目录条目**：`<本插件目录>/<name>/server.json`
 /// （见 `plugin.rs` 的 `MANIFEST`）。本结构是 `McpPlugin` 的**内存视图**，由插件
 /// 自己的 `PLUGIN.yml` 载入。
 ///

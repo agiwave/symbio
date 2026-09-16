@@ -11,8 +11,8 @@
 | 文件 | 用途 |
 |------|------|
 | `~/.symbio/PLUGIN.yml` | 系统级插件（`home`）的配置——工作区与最近记录 |
-| `~/.symbio/plugins/<插件>/PLUGIN.yml` | 各插件的配置（`session` / `model` / `web` / `local` / `gateway` / `telegram` …） |
-| `~/.symbio/plugins/<插件>/<id>/<主文件>` | 插件资源条目（`model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`…） |
+| `~/.symbio/<插件>/PLUGIN.yml` | 各插件的配置（`session` / `model` / `web` / `local` / `gateway` / `telegram` …） |
+| `~/.symbio/<插件>/<id>/<主文件>` | 插件资源条目（`model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`…） |
 | `~/.symbio/agents/` | Agent Bundle 存储目录 |
 | `~/.symbio/config.yaml.migrated` | 旧集中式配置的留档（首次迁移后改名，见下） |
 
@@ -57,8 +57,8 @@ work:
 
 | 数据 | 位置 | 由谁决定 |
 |------|------|----------|
-| **插件配置** | `<homedir>/plugins/<插件>/PLUGIN.yml`（系统级插件在 `<homedir>/PLUGIN.yml`） | 配置的**拥有者**自己读写（`ConfigFile`）；地址 `.vdfs/<插件>/PLUGIN.yml`，**没有第二条配置协议** |
-| 插件资源（model / mcp / skill 等） | `<homedir>/plugins/<类别>/<id>/<主文件>` | 类别段名 = 插件名（如 `model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`）；由 `symbio/src/providers/vdfs_service/` 的集中实现读写，**不可配置、无第二种后端** |
+| **插件配置** | `<homedir>/<插件>/PLUGIN.yml`（系统级插件在 `<homedir>/PLUGIN.yml`） | 配置的**拥有者**自己读写（`ConfigFile`）；地址 `.vdfs/<插件>/PLUGIN.yml`，**没有第二条配置协议** |
+| 插件资源（model / mcp / skill 等） | `<homedir>/<类别>/<id>/<主文件>` | 类别段名 = 插件名（如 `model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`）；由 `symbio/src/providers/vdfs_service/` 的集中实现读写，**不可配置、无第二种后端** |
 | 会话与其消息 | 会话自己的 store（`SessionStore`），非 `plugins/<类别>/<id>/` 资源布局 | 已收为**单一具体类型**：持久会话 = 磁盘 `<根>/<id>/{session.json, messages.json}`，临时会话 = 进程内驻留。`store_kind` / sqlite / memory 后端选型**已删除**（见 ADR-011 及 `session/store/mod.rs` 顶部「它不是什么」）|
 | Agent bundle | bundle 目录（工作区级 + 全局级双层，`BundleStore` 自管） | 工作区切换，不经 `vdfs_service` |
 | 应用级状态 | `<homedir>/PLUGIN.yml` | homedir 由前端「系统目录」切换（`home/reload`） |
@@ -93,7 +93,7 @@ work:
 ### Model 插件
 
 ```json
-// ~/.symbio/plugins/model/<id>/provider.json
+// ~/.symbio/model/<id>/provider.json
 {
   "default_provider_id": "openai_main",
   "providers": {
@@ -132,7 +132,7 @@ work:
 `server.json`（`.vdfs/mcp/<id>`）。
 
 ```json
-// ~/.symbio/plugins/mcp/filesystem/server.json
+// ~/.symbio/mcp/filesystem/server.json
 {
   "type": "stdio",
   "command": "npx",
@@ -152,7 +152,7 @@ work:
 ### Telegram 插件
 
 ```yaml
-# ~/.symbio/plugins/telegram/PLUGIN.yml
+# ~/.symbio/telegram/PLUGIN.yml
 plugin_provider: telegram
 bot_token: "123456:ABC-DEF..."
 chat_id: ""
@@ -176,7 +176,7 @@ allowed_users: [123456789]
 ### Gateway 插件
 
 ```yaml
-# ~/.symbio/plugins/gateway/PLUGIN.yml
+# ~/.symbio/gateway/PLUGIN.yml
 plugin_provider: gateway
 inbound_enabled: false
 inbound_protocol: native

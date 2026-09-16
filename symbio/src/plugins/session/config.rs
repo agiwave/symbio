@@ -1,4 +1,4 @@
-//! 会话插件的配置（`<homedir>/plugins/session/PLUGIN.yml`）。
+//! 会话插件的配置（`<本插件目录>/PLUGIN.yml`）。
 //!
 //! ## 为什么在插件里，而不是 `symbio_core::schemas`
 //!
@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 /// ## 存储目录
 ///
 /// Session 存储目录**不是**配置项，而是从 [`crate::symbio_core::HomedirRegistry`]
-/// 直接派生：`<homedir>/plugins/session`。
+/// 直接派生：`<本插件目录>`。
 /// 这样 session 存储始终跟随系统目录，与 homedir 切换逻辑天然契合。
 ///
 /// ## 已移除字段

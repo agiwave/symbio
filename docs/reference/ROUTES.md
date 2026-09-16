@@ -135,7 +135,7 @@
 ### 配置结构
 
 ```yaml
-# ~/.symbio/plugins/model/<id>/provider.json
+# ~/.symbio/model/<id>/provider.json
 {
   "default_provider_id": "openai_main",
   "providers": {

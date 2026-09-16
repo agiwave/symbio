@@ -43,7 +43,7 @@ flowchart TD
 会话与压缩系统的全部表现都由会话配置参数控制。配置落在**本插件自己的目录**：
 
 ```text
-{homedir}/plugins/session/PLUGIN.yml     本插件的配置（可在 .vdfs/session/PLUGIN.yml 上编辑）
+{homedir}/session/PLUGIN.yml     本插件的配置（可在 .vdfs/session/PLUGIN.yml 上编辑）
 ```
 
 字段真源是本插件的 `config.rs::SessionConfig`（**定义由配置的拥有者产出**：设置页的表单定义从 `SessionConfig::default()` 读出，不写第二份字面量，避免「面板显示值与实际行为漂移」）。
@@ -52,7 +52,7 @@ flowchart TD
 
 ```yaml
 session:
-  # 存储目录：固定为 <homedir>/plugins/session/，取宿主层的资源类别根
+  # 存储目录：固定为 <homedir>/session/，取宿主层的资源类别根
   # （vdfs_service::entry::category_dir），跟随系统目录 (homedir) 切换，不作为配置项暴露。
   # 注：会话只有一种落盘布局，没有可切换的"存储后端"——原 `store_kind` 配置项
   # 已删除（理由见 store/mod.rs 模块头）。临时会话（`_t_` 前缀 / 空 id）不落盘，
@@ -315,7 +315,7 @@ session:
 会话记忆是**本会话自己钉住的约定与结论**：轮次一多，早期的结论会被压缩、淡化乃至淘汰出上下文；会话记忆的价值恰恰在于**不随上下文水位消失**。
 
 ```text
-{homedir}/plugins/session/<会话 id>/AGENTS.md     记忆本体（与 session.json / messages.json 同目录）
+{homedir}/session/<会话 id>/AGENTS.md     记忆本体（与 session.json / messages.json 同目录）
 .vdfs/session/<会话 id>/AGENTS.md                 可编辑地址（模型与用户共用）
 ```
 

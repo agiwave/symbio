@@ -3,7 +3,7 @@
 //! ## 布局：一个插件 = 一个目录
 //!
 //! ```text
-//! <homedir>/plugins/<插件>/
+//! <homedir>/<插件>/
 //!   PLUGIN.yml     ← 插件配置（插件自持读写）
 //!   …              ← 该插件自己的数据 / 资源
 //! ```
@@ -13,16 +13,22 @@
 //!
 //! ## 系统级插件：目录就是系统根
 //!
-//! `home` 与它构造的容器 `composite`（home 的动态内置替身）不住在 `plugins/` 下，
-//! 它们的目录就是**系统根** `<homedir>` 本身：
+//! `home` 与它构造的容器 `composite`（home 的动态内置替身）的目录就是**系统根**
+//! `<homedir>` 本身，它们与业务插件**并列**：
 //!
 //! ```text
 //! <homedir>/
 //!   PLUGIN.yml     ← home 的配置（系统级状态）
-//!   plugins/       ← 容器管辖的插件根：一层目录 = 一个插件
+//!   session/       ← 容器管辖的插件根（= 系统根）：一层目录 = 一个插件
+//!   model/
+//!   …
 //! ```
 //!
-//! 这同时消掉一个自举环：若 `home` 住在 `plugins/home`，容器扫描插件根时会把它
+//! 插件根**不额外嵌套一层**（早先是 `<homedir>/plugins/<插件>`）：那一层既不承载
+//! 语义、又让每个插件的路径深一段，而系统根下本来就是「一个插件一个目录」的扁平
+//! 结构，再加一层纯属重复。
+//!
+//! 这同时消掉一个自举环：若 `home` 住在 `<homedir>/home`，容器扫描插件根时会把它
 //! 当成普通插件再构造一次，而那个 `home` 又会构造容器……系统级插件不参与扫描。
 //!
 //! ## 配置规范（`PLUGIN.yml`）
@@ -76,27 +82,29 @@ use tokio::sync::RwLock;
 /// 插件配置文件名（插件目录下）
 pub const PLUGIN_FILE: &str = "PLUGIN.yml";
 
-/// 插件根目录名（系统根下的这一层：一层目录 = 一个插件）
-pub const PLUGINS_DIR: &str = "plugins";
+// 注：早先这里有常量 `PLUGINS_DIR = "plugins"`，插件落位是 `<homedir>/plugins/<插件>`。
+// 那一层不承载语义（既非挂载点、也不参与寻址），只是把每个插件的路径都加深一段，
+// 现已去掉——插件直接并列在系统根下。**「插件根 = 哪一层」只有本文件这一处定义**：
+// 依赖方一律走 [`plugins_root`] / [`dir_of`]，不要自己 `join` 目录段。
 
 /// 身份字段：工厂 id（构造插件用）
 pub const KEY_PROVIDER: &str = "plugin_provider";
 /// 身份字段：实例名（缺省 = 目录名）
 pub const KEY_NAME: &str = "plugin_name";
 
-/// 插件根目录：`<homedir>/plugins`
+/// 插件根 = **系统根本身**：一层目录 = 一个插件
 ///
 /// 每次现取（不缓存）——`home/reload` 切换 homedir 后必须立刻生效。
 pub fn plugins_root() -> PathBuf {
-    HomedirRegistry::get().join(PLUGINS_DIR)
+    HomedirRegistry::get()
 }
 
-/// 某插件的目录：`<homedir>/plugins/<插件>`
+/// 某插件的目录：`<homedir>/<插件>`
 pub fn dir_of(plugin: &str) -> PathBuf {
     plugins_root().join(plugin)
 }
 
-/// 某插件的配置文件：`<homedir>/plugins/<插件>/PLUGIN.yml`
+/// 某插件的配置文件：`<homedir>/<插件>/PLUGIN.yml`
 pub fn config_file_of(plugin: &str) -> PathBuf {
     dir_of(plugin).join(PLUGIN_FILE)
 }
@@ -147,17 +155,17 @@ impl PluginDir {
     /// **系统级插件**的目录 = 系统根 `<homedir>` 本身
     ///
     /// `home` 与它构造的容器 `composite` 走这一条：系统根下的 `PLUGIN.yml` 是
-    /// `home` 的配置，容器只把系统根当**锚点**（它管辖的插件根是
-    /// [`plugins_root`](Self::plugins_root)），容器自身没有配置、不写 manifest。
+    /// `home` 的配置，容器只把系统根当**锚点**（它管辖的插件根就是系统根本身），
+    /// 容器自身没有配置、不写 manifest。
     pub fn system(plugin: impl Into<String>) -> Self {
         Self::at(HomedirRegistry::get(), plugin)
     }
 
-    /// 以本目录为**系统根**，插件根在其下：`<本目录>/plugins`
+    /// 以本目录为**系统根**，插件根就是它自己：`<本目录>/<插件>`
     ///
     /// 容器的视角——它拿到系统根，据此定位自己管辖的插件。
     pub fn plugins_root(&self) -> PathBuf {
-        self.dir.join(PLUGINS_DIR)
+        self.dir.clone()
     }
 
     /// 实例名与工厂 id 不同（装配时实例改名）

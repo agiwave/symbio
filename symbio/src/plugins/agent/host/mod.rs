@@ -5,7 +5,7 @@
 //! | 模块 | 职责 |
 //! |---|---|
 //! | [`plugin`] | 插件主体：`traverse(available_tools)` → 扫描约定目录装配 → 人格片段 + 身份工具注册 |
-//! | [`store`] | bundle 存储：系统目录 `plugins/agent/`、zip 导入（zip-slip 防护）、导出 |
+//! | [`store`] | bundle 存储：**本插件自己的目录**、zip 导入（zip-slip 防护）、导出 |
 //! | [`prompt`] | **人格**的系统提示词片段（多文件装配，自己排版但形态与内核对齐） |
 //! | [`memory`] | **智能体记忆**的落位与地址（机制在 `symbio_core::memory`） |
 //! | [`capability`] | `agent_identity` 身份工具（取回超出注入预算的全文） |

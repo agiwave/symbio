@@ -307,8 +307,8 @@ size  updated_at  children  binary  hidden  schema  new_types  attributes
 .vdfs/telegram/PLUGIN.yml    Telegram 设置
 ```
 
-磁盘上就是 `<homedir>/plugins/<插件>/PLUGIN.yml`，与插件自己的数据**同处一个目录**
-（`<homedir>/plugins/session/<会话 id>/`、`<homedir>/plugins/model/<id>/provider.json`…），
+磁盘上就是 `<homedir>/<插件>/PLUGIN.yml`，与插件自己的数据**同处一个目录**
+（`<homedir>/session/<会话 id>/`、`<homedir>/model/<id>/provider.json`…），
 因此整个目录可以直接拷贝移植——搬走目录 = 搬走插件（连同配置与数据）。
 系统级插件（`home` 与容器 `composite`）的目录是系统根本身，配置在
 `<homedir>/PLUGIN.yml`。
@@ -806,7 +806,7 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
 **子插件从哪来：插件目录**（见 `symbio_core::plugin_dir`）。容器是**通用**容器
 （可以嵌套另一个容器），子项因此不来自父插件塞进来的配置表，而来自**扫描插件根**：
 
-- 布局：`<homedir>/plugins/<插件>/PLUGIN.yml`（配置）+ 该插件自己的数据 / 资源，
+- 布局：`<homedir>/<插件>/PLUGIN.yml`（配置）+ 该插件自己的数据 / 资源，
   同处一个目录，因此整个目录可直接拷贝移植。系统级插件（`home` / `composite`）的
   目录是**系统根本身**，配置在 `<homedir>/PLUGIN.yml`。
 - 加载判据：目录下的 `PLUGIN.yml` 可解析、且 `plugin_provider` 指向已注册的工厂
@@ -868,7 +868,7 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
   已先后全部删除（理由见 [DECISIONS](../DECISIONS.md) ADR-010「收敛终局」与
   ADR-011）。
 - **跨插件共用的是 `providers/vdfs_service` 的三个 `VdfsProvider` 集中实现**
-  ——**三种拓扑、一份磁盘布局**（`<homedir>/plugins/<category>/<id>/<manifest>`，
+  ——**三种拓扑、一份磁盘布局**（`<homedir>/<category>/<id>/<manifest>`，
   因此换拓扑不动数据、换类别不碰协议）：
 
   | 实现 | 一个条目 = | 条目内部 | 消费者 |

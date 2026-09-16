@@ -1,4 +1,4 @@
-//! agent 插件的配置（`<homedir>/plugins/agent/PLUGIN.yml`）。
+//! agent 插件的配置（`<本插件目录>/PLUGIN.yml`）。
 //!
 //! 四个字段 = 两组容量闸门，与 work 插件同一套口径（**写侧拒绝、读侧截断**）：
 //!

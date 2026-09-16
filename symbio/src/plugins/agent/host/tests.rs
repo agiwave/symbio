@@ -90,7 +90,7 @@ async fn bundle_import_traverse_and_identity() {
     let workdir = dir.path().to_str().unwrap();
 
     // ── 1. 导入（zip → bundle store）──
-    let store = BundleStore::new(Some(workdir));
+    let store = BundleStore::new(dir.path().join("agent"), Some(workdir));
     let zip_bytes = build_bundle_zip("com.symbio.test-fixture", "^1");
     let result = store
         .import(&zip_bytes, false)
@@ -194,7 +194,7 @@ async fn version_mismatch_bundle_is_rejected_and_unbound_session_is_silent() {
     let dir = tempfile::tempdir().unwrap();
     let workdir = dir.path().to_str().unwrap();
 
-    let store = BundleStore::new(Some(workdir));
+    let store = BundleStore::new(dir.path().join("agent"), Some(workdir));
     // requires.spec = ^2 与宿主 SPEC_MAJOR=1 不匹配 → 导入即拒绝（规范 §10.2）
     let zip_bytes = build_bundle_zip("com.acme.future", "^2");
     let err = store.import(&zip_bytes, false).unwrap_err();

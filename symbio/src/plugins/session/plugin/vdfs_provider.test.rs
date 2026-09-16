@@ -36,7 +36,7 @@ async fn vdfs_self_description_has_no_mount() {
 
 /// 测试用会话 id：**每个用例唯一**。
 ///
-/// 会话存储目录取自全局 homedir（`<homedir>/plugins/session`）——单元测试
+/// 会话存储目录取自全局 homedir（`<本插件目录>`）——单元测试
 /// 不隔离它（`test_dir()` 只重定向配置文件，不重定向 store）。于是写过
 /// 会话的用例会在真实目录里留下文件，下一个复用同一 id 的用例就读到了
 /// 别人的数据（`list` 因此不再 NotFound，且结果随并行调度顺序漂移）。

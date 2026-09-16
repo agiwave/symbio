@@ -3,7 +3,7 @@
 //! ## 磁盘布局（与旧的 `FileEntityStore` **完全一致**，不做数据迁移）
 //!
 //! ```text
-//! <homedir>/plugins/<category>/<id>/<manifest>
+//! <类别根>/<id>/<manifest>
 //! ```
 //!
 //! 三个实现的区别**不在布局**，而在**访问拓扑**：单文件型只暴露主文件、
@@ -21,7 +21,7 @@ use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsError, VdfsNode, VdfsRes
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// 类别根目录：`<homedir>/plugins/<category>`
+/// 类别根目录：`<category>` 段对应的目录（未装配回退；生产上由插件传入自己的目录）
 ///
 /// **与插件目录是同一个目录**——一个插件 = 一个目录，配置（`PLUGIN.yml`）与资源
 /// 同处一处。因此这里直接委托 [`plugin_dir::dir_of`]，不另写一份路径规则。

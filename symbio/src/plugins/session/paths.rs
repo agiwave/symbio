@@ -2,7 +2,7 @@
 //!
 //! Session 插件内所有"落盘到会话目录"的组件（存储后端、L0 工具结果守卫、
 //! L3 transcript 转存）都必须经由本模块拼路径，禁止各自
-//! 重复实现 `safe_id` 或手工重建 `<homedir>/plugins/session` 前缀：
+//! 重复实现 `safe_id` 或手工重建 `<本插件目录>` 前缀：
 //!
 //! - [`safe_id`]：session_id → 安全目录名。**规则本身不在本模块**——它是
 //!   宿主层 [`crate::providers::vdfs_service::entry::safe_segment`]（所有 VDFS
@@ -38,12 +38,12 @@ pub(crate) fn safe_id(session_id: &str) -> String {
     crate::providers::vdfs_service::entry::safe_segment(session_id)
 }
 
-/// 会话目录：`<homedir>/plugins/session/<safe_id>/`
+/// 会话目录：`<本插件目录>/<safe_id>/`
 pub(crate) fn session_dir(session_id: &str) -> std::path::PathBuf {
     super::plugin::SessionPlugin::session_storage_dir().join(safe_id(session_id))
 }
 
-/// 会话内子目录：`<homedir>/plugins/session/<safe_id>/<subdir>/`
+/// 会话内子目录：`<本插件目录>/<safe_id>/<subdir>/`
 ///
 /// 用于 tool_archives / transcripts 等固定子目录
 ///（常量见本模块 [`TOOL_ARCHIVES_SUBDIR`] / [`TRANSCRIPTS_SUBDIR`]）。

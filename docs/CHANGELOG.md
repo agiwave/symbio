@@ -18,6 +18,47 @@
 
 ***
 
+## 2026-09-16: 插件落位去掉 `plugins/` 这一层 —— 插件直接并列在系统根下
+
+`<homedir>/plugins/<插件>/` → `<homedir>/<插件>/`。那一层不承载任何语义（既非挂载点、
+也不参与寻址），只是把每个插件的路径都加深一段。
+
+### 1. 插件**不再知道**自己被放在哪
+
+改的不只是路径，更是依赖方向：**插件目录由父插件经 `PLUGIN_DIR` 传入**（`dir_from_ctx`），
+插件实现与注释里都不再出现 `<homedir>/…` 这类硬编码：
+
+- `agent`：`BundleStore::new(global_root, workdir)` —— 根由调用方给（装配态来自
+  `AgentPlugin` 自己的 `PluginDir`），不再自己拼 `HomedirRegistry/…/agent`；
+  `AgentRunCapability` 增加 `bundle_root` 字段透传，工作区级改 `{workdir}/.symbio/agent`。
+- `model` / `mcp` / `skill`：存储根改为本插件自己的目录（`DirVdfs::at` / `SingleFileVdfs::at`），
+  不再按插件名反推落位；`skill` 新增 `dir` 字段。
+- `DirVdfs::for_category` **删除**（已无使用者）；`SingleFileVdfs::for_category` 保留但
+  标注**仅供迁移**（model 迁移旧分类 `ai`）。
+- `skill` 的默认 `skill_dirs`：`{HOMEDIR}/plugins/skills` → `{HOMEDIR}/skills`
+  （`{HOMEDIR}` 是用户可改的配置占位符，语义就是「系统目录」）。
+
+⚠️ **未完成的一处**：session 的 `session_storage_dir()` 仍走 `category_dir(PLUGIN_SESSION)`
+—— `paths` / `memory` / `tool_result_guard` 是按 id 派生路径的**自由函数**，拿不到插件
+实例。已在函数文档标注这是**无实例回退**，装配态下取值与插件自己的目录相同。
+
+### 2. 容器扫描：区分「不是插件」与「是个坏插件」
+
+插件根现在是系统根本身，其下**本来就有非插件目录**。`provider_of` 改为三态返回：
+目录里没有 `PLUGIN.yml` → `Ok(None)`，静默跳过（只记 debug）；有但不可解析 / 未声明
+`plugin_provider` → `Err`，**告警**（"配了一半"是用户需要知道的）。
+
+### 3. 文档同步
+
+`PLUGINS_DIR` 常量删除；插件与 `providers/` 的注释、13 份 `docs/`、事实生成器
+`gen-current-facts.mjs` 一并更新。`docs/CHANGELOG.md` 的历史条目**未改**（历史就是历史）。
+
+### 数据迁移
+
+⚠️ **代码不做迁移**：既有安装需把 `<homedir>/plugins/*` 上移到 `<homedir>/` 下。
+
+***
+
 ## 2026-09-16: CI 收口为同一个 `gate.mjs` —— 检查逻辑只剩一处
 
 `.github/workflows/ci.yml` 此前手写全部命令，与本地 `gate.mjs` 是**两处真相**（且 CI 用

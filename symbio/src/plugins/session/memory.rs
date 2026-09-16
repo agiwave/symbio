@@ -3,7 +3,7 @@
 //! ## 落位与地址
 //!
 //! ```text
-//! {homedir}/plugins/session/<会话 id>/AGENTS.md   记忆本体
+//! <本插件目录>/<会话 id>/AGENTS.md   记忆本体
 //! .vdfs/session/<会话 id>/AGENTS.md               可编辑地址（模型与用户共用）
 //! ```
 //!

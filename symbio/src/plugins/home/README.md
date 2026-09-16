@@ -6,10 +6,10 @@
 ## 职责
 
 - **自身配置**：读写 `<homedir>/PLUGIN.yml`（工作区 / 最近记录）。**不再管任何子插件的
-  配置**——各插件配置在自己的目录里（`plugins/<插件>/PLUGIN.yml`），谁写谁读。
+  配置**——各插件配置在自己的目录里（`<插件>/PLUGIN.yml`），谁写谁读。
 - **拓扑挂载**：构造 worker (Composite)，并把系统根目录（`PLUGIN_DIR`）与系统必备
   插件清单（`SYSTEM_PLUGINS` → `REQUIRED_PLUGINS`）告知它；由 Composite 扫描
-  `<homedir>/plugins/*` 挂载子插件。
+  `<homedir>/*` 挂载子插件。
 - **自身终结的路由**：`home/*`、`work/*`。
 
 ## 路由

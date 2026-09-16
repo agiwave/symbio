@@ -80,7 +80,7 @@ sequenceDiagram
 | 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 13 个操作：list / tree / stat / read / write / mkdir / delete / move / edit / search / watch / unwatch / action |
 | 2 | 地址分流 | `plugins/vdfs/fs.rs`（`UnifiedFs`） | `.vdfs` 独占首段 → 虚拟层（容器组合视图）；其余 → 物理层 `physical.rs`（工作目录 / 绝对路径的真实文件） |
 | 3 | 子目录来源 | `plugins/composite/vdfs.rs` 逐子插件收集，委派给各插件自持的 `impl VdfsProvider` | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
-| 4 | **落盘在哪一层** | `providers/vdfs_service`（`DirVdfs` / `SingleFileVdfs` / `MemoryVdfs` + `entry.rs` / `pack.rs`） | 虚拟层再往下的一跳：条目寻址与原子落盘（`<homedir>/plugins/<类别>/<id>/<manifest>`）、整包 zip / base64、变更广播。**不在** core 协议层，也**不走** `create_object` 工厂。目录自管的资源（agent bundle 走 `BundleStore`、session 走自己的 `SessionStore`）不进这一层 |
+| 4 | **落盘在哪一层** | `providers/vdfs_service`（`DirVdfs` / `SingleFileVdfs` / `MemoryVdfs` + `entry.rs` / `pack.rs`） | 虚拟层再往下的一跳：条目寻址与原子落盘（`<homedir>/<类别>/<id>/<manifest>`）、整包 zip / base64、变更广播。**不在** core 协议层，也**不走** `create_object` 工厂。目录自管的资源（agent bundle 走 `BundleStore`、session 走自己的 `SessionStore`）不进这一层 |
 | 5 | 机制详解 | [design/vdfs.md](../design/vdfs.md)（§11 / §13.4）、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范 |
 
 **排障口诀**：列不出 / 读不到 → 查 #2 地址分流与 #3 收集结果；写盘没生效 / 前端不刷新

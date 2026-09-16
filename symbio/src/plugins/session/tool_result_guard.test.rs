@@ -110,8 +110,7 @@ fn archive_prefers_session_dir_when_session_id_given() {
     assert!(g.truncated);
     let p = g.archive_path.expect("会话目录可写时应产出存档路径");
     let expected_frag = format!(
-        "plugins{}session{}{}{}tool_archives",
-        std::path::MAIN_SEPARATOR,
+        "session{}{}{}tool_archives",
         std::path::MAIN_SEPARATOR,
         sid,
         std::path::MAIN_SEPARATOR
@@ -122,7 +121,6 @@ fn archive_prefers_session_dir_when_session_id_given() {
     );
     // 收尾：删除该测试会话的存档目录（不影响其他测试）
     let dir = crate::symbio_core::HomedirRegistry::get()
-        .join("plugins")
         .join("session")
         .join(sid)
         .join("tool_archives");

@@ -2,13 +2,13 @@
 //!
 //! 提供会话历史和上下文管理。
 //!
-//! 存储路径：`<homedir>/plugins/session/`（从 [`HomedirRegistry`] 直接派生）。
+//! 存储路径：`<本插件目录>/`（从 [`HomedirRegistry`] 直接派生）。
 //! 不再使用 `storage_dir` 配置项，session 存储始终跟随系统目录。
 //! 会话本身携带 `metadata.workdir` 用于 MODEL 工具调用上下文。
 //!
 //! ## 系统目录 (homedir)
 //!
-//! Session 存储目录由 [`HomedirRegistry::get()`] 派生：`<homedir>/plugins/session`。
+//! Session 存储目录由 [`HomedirRegistry::get()`] 派生：`<本插件目录>`。
 //! 切换 homedir 后，新会话将写入新 homedir；存量数据**不会**自动迁移。
 //!
 //! ## 子模块分工（拆文件不拆行为）
@@ -281,13 +281,17 @@ impl SessionPlugin {
         self.parent.as_ref().and_then(|w| w.upgrade())
     }
 
-    /// Session 存储目录：`<homedir>/plugins/session`
+    /// Session 存储目录：`<本插件目录>`
     ///
     /// 构造式不在本插件里手写——直接取宿主层的资源类别根
     /// [`category_dir`](crate::providers::vdfs_service::entry::category_dir)
-    /// （`<homedir>/plugins/<类别>`，类别段名 = 插件名）。会话因此与
+    /// （= 本插件自己的目录）。会话因此与
     /// model / skill / mcp 共用同一条「插件名 → 存储类别」的映射，
-    /// 不再各插件手拼一次 `join("plugins").join(...)`。
+    /// 不再各插件手拼一次目录段。
+    ///
+    /// ⚠️ 这里是**无实例回退**：`paths` / `memory` / `tool_result_guard` 那些按 id
+    /// 派生路径的自由函数拿不到插件实例，只能走这一条。装配态下插件自己的目录才是
+    /// 权威来源（父插件经 `PLUGIN_DIR` 告知），两者取值相同。
     ///
     /// 这是 session 存储目录的**唯一权威位置**，不依赖任何 config 字段。
     /// 切换 homedir 后 worker composite 会整体重建（`home/reload`），
@@ -424,7 +428,7 @@ impl Plugin for SessionPlugin {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
-        // 会话存储已迁移到 ~/.symbio/plugins/session/ 全局目录，session/* 系列接口
+        // 会话存储已迁移到 <本插件目录>/ 全局目录，session/* 系列接口
         // 不再依赖 ctx.workdir；ctx.workdir 仅在 chat 路径和需要 Model 路由时使用。
         let data = match path {
             "chat/send" => return self.handle_chat_send_oneoff(ctx).await,

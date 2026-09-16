@@ -91,7 +91,7 @@ fn new_manifest_passes_validation() {
 #[tokio::test]
 async fn store_roundtrip_through_the_dir_impl() {
     let tmp = tempfile::tempdir().unwrap();
-    let s = DirVdfs::at(tmp.path().join("plugins/skill"), PLUGIN_SKILL, MANIFEST);
+    let s = DirVdfs::at(tmp.path().join("skill"), PLUGIN_SKILL, MANIFEST);
     let ctx = VdfsContext::empty();
 
     let md = validate_manifest("demo", &new_manifest("demo")).unwrap();
@@ -126,6 +126,7 @@ async fn store_roundtrip_through_the_dir_impl() {
 fn new_type_declares_the_landing_detail() {
     let plugin = SkillPlugin {
         config: Arc::new(RwLock::new(SkillConfig::default())),
+        dir: PluginDir::of(PLUGIN_SKILL),
     };
     let types = plugin.root_new_types();
     let form = types

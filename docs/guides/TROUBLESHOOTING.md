@@ -112,7 +112,7 @@ curl -X POST ... -d '{"path": "_root"}'
 ### 问题：配置不生效
 
 **排查步骤**：
-1. 确认改的是**插件自己的**配置文件：`~/.symbio/plugins/<插件>/PLUGIN.yml`
+1. 确认改的是**插件自己的**配置文件：`~/.symbio/<插件>/PLUGIN.yml`
    （系统级插件 `home` 在 `~/.symbio/PLUGIN.yml`）
 2. 检查 YAML 格式 (缩进、冒号后空格)；两个身份字段 `plugin_provider` /
    `plugin_name` 不要写进配置字段里（它们由 `PluginDir` 自动剥离 / 补回）

@@ -3,13 +3,14 @@
 //! ## 目录布局
 //!
 //! ```text
-//! {系统目录}/plugins/agent/<bundle_id>/           全局级（HomedirRegistry）
-//! {workdir}/.symbio/plugins/agent/<bundle_id>/    工作区级（同名覆盖全局级）
+//! {系统目录}/agent/<bundle_id>/                   全局级（= 本插件自己的目录）
+//! {workdir}/.symbio/agent/<bundle_id>/            工作区级（同名覆盖全局级）
 //! ```
 //!
-//! 全局级：智能体（bundle）统一存放在「系统目录」下的
-//! `plugins/agent/`，系统目录由 [`crate::symbio_core::HomedirRegistry`] 提供
-//! （可被「切换系统目录」改变并持久化到 bootstrap）。每个子目录即一个 bundle
+//! 全局级：智能体（bundle）统一存放在**本插件自己的目录**下（装配态即
+//! `<homedir>/agent`）。该目录由父插件经 `PLUGIN_DIR` 告知（见
+//! [`BundleStore::new`]），本模块**不自己拼**——系统目录可被「切换系统目录」
+//! 改变并持久化到 bootstrap，手拼就会与装配态不一致。每个子目录即一个 bundle
 //! （含 `manifest.yaml` 与约定能力目录 prompts/ skills/ mcps/）。
 //! 工作区级仅在工作区上下文存在时参与，为按项目安装与测试隔离提供位置。
 //!
@@ -44,9 +45,9 @@ pub struct BundleRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BundleScope {
-    /// `{workdir}/.symbio/plugins/agent/`
+    /// `{workdir}/.symbio/agent/`
     Workspace,
-    /// `{系统目录}/plugins/agent/`
+    /// `{系统目录}/agent/`（本插件自己的目录）
     Global,
 }
 
@@ -182,30 +183,31 @@ fn file_meta(path: &Path) -> (u64, Option<i64>) {
 pub struct BundleStore {
     /// 工作区级根（None = 无工作区上下文）
     workspace_root: Option<PathBuf>,
-    /// 全局根（`{homedir}/bundles`）
+    /// 全局根 = **本插件自己的目录**（`<homedir>/agent`）
     global_root: PathBuf,
 }
 
 impl BundleStore {
-    pub fn new(workdir: Option<&str>) -> Self {
+    /// `global_root` = 本插件自己的目录。
+    ///
+    /// ⚠️ 这个目录**必须由调用方给**（装配态下来自父插件经 `PLUGIN_DIR` 传下的
+    /// [`PluginDir`]，见 `AgentPlugin::build`），本文件**不得**自己拼
+    /// `<homedir>/…/agent`：插件只认父插件告知的目录，这是「插件不认识全局布局」
+    /// 这条约束的一部分——手拼就等于把布局知识复制一份，改布局时必然漏改。
+    pub fn new(global_root: impl Into<PathBuf>, workdir: Option<&str>) -> Self {
         // 两级发现：
-        // - 全局级 = 系统目录下的 `plugins/agent/<id>`（系统目录由
-        //   HomedirRegistry::get() 提供，可被「切换系统目录」改变并持久化到
-        //   bootstrap）—— 这是用户安装 bundle 的主位置，必须始终被扫描；
-        // - 工作区级 = `{workdir}/.symbio/plugins/agent/<id>`（同名时覆盖全局级）。
+        // - 全局级 = 本插件目录下的 `<id>`（目录由父插件告知，可被「切换系统目录」
+        //   改变并持久化到 bootstrap）—— 这是用户安装 bundle 的主位置，必须始终被扫描；
+        // - 工作区级 = `{workdir}/.symbio/agent/<id>`（同名时覆盖全局级）。
         //   工作区层同时为测试提供隔离：测试用 tempdir 作 workdir 时不会污染真实系统目录。
-        let workspace_root =
-            workdir.map(|w| Path::new(w).join(".symbio").join("plugins").join("agent"));
-        let global_root = crate::symbio_core::HomedirRegistry::get()
-            .join("plugins")
-            .join("agent");
+        let workspace_root = workdir.map(|w| Path::new(w).join(".symbio").join("agent"));
         Self {
             workspace_root,
-            global_root,
+            global_root: global_root.into(),
         }
     }
 
-    /// 全量 bundle 列表（当前为单来源：系统目录 `plugins/agent/`）。
+    /// 全量 bundle 列表（当前为单来源：本插件目录下的 `<id>`）。
     pub fn list(&self) -> Vec<BundleRecord> {
         let mut records: Vec<BundleRecord> = Vec::new();
         for (scope, root) in [
@@ -781,8 +783,11 @@ mod tests {
     /// 在工作区级落一个最小 bundle（不经 zip：以下用例只关心写入闸门）
     fn workspace_store_with_bundle() -> (tempfile::TempDir, BundleStore) {
         let dir = tempfile::TempDir::new().unwrap();
-        let store = BundleStore::new(Some(dir.path().to_str().unwrap()));
-        let bundle = dir.path().join(".symbio/plugins/agent/b");
+        let store = BundleStore::new(
+            dir.path().join("global-agent"),
+            Some(dir.path().to_str().unwrap()),
+        );
+        let bundle = dir.path().join(".symbio/agent/b");
         std::fs::create_dir_all(bundle.join("prompts")).unwrap();
         std::fs::write(
             bundle.join("manifest.yaml"),
@@ -821,10 +826,7 @@ mod tests {
     fn memory_lives_in_the_bundle_dir() {
         let (dir, store) = workspace_store_with_bundle();
         let path = store.memory_path("b").unwrap();
-        assert_eq!(
-            path,
-            dir.path().join(".symbio/plugins/agent/b").join(AGENTS_FILE)
-        );
+        assert_eq!(path, dir.path().join(".symbio/agent/b").join(AGENTS_FILE));
         assert_eq!(path.file_name().unwrap(), "AGENTS.md");
         // 不是工作区根的那个 AGENTS.md
         assert_ne!(path, dir.path().join(AGENTS_FILE));

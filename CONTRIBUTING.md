@@ -77,6 +77,10 @@ git config core.hooksPath scripts/git-hooks
 - ⚠️ 改 `.github/workflows/*.yml` 后**先自检语法**：YAML 错了 CI 会直接不触发（而非报错），
   很容易误判成"没跑"。本机若无 `js-yaml`，可用 `python -c "import yaml; yaml.safe_load(open(...))"`
   （必要时在隔离 venv 里 `pip install pyyaml`）。
+- ⚠️ **改 `.rs` 后必须保持 LF**（`.gitattributes` 锁定 `*.rs text eol=lf`，对齐
+  `rustfmt.toml` 的 `newline_style = "Unix"`）。用脚本批量改 Rust 文件时尤其容易踩：
+  写入时把 `\n` 转成了 CRLF，rustfmt 会**逐文件**报 `Incorrect newline style` 并以
+  非零码退出，症状是「fmt 门禁突然挂了但代码没变」。
 - ⚠️ vitest 4 的 `toBe(v, 'msg')` 只收 1 个参数（写两个参数静默失效）。
 - ⚠️ `.workbuddy-ai/` 被 gitignore：**不要提交、不要删除**。仓库另有 `.workbuddy/`（旧 harness 遗留）——以 `.workbuddy-ai/` 为准。
 

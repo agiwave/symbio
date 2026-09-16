@@ -23,15 +23,15 @@
 //! ```text
 //! ~/.symbio/
 //! ├── config.yaml                              # 仅 home 自身配置（work / recent_workspaces）
-//! └── plugins/                                 # ⭐ 所有插件的资源数据
+//! ├── session/                                 # ⭐ 一个插件 = 一个目录（配置+数据同处）
 //!     ├── model/<id>/provider.json             # Model Provider
 //!     ├── mcp/<id>/server.json                 # MCP Server
 //!     ├── skill/<id>/SKILL.md                  # Skill
 //!     └── session/<id>/session.json            # Session（自有 store，不经 vdfs_service）
 //! ```
 //!
-//! **重要**：所有插件数据都放在 `plugins/` 下，**便于通过遍历
-//! `~/.symbio/plugins/` 即可知道加载了哪些插件**。
+//! **重要**：一个插件 = 系统根下的一个目录，**便于通过遍历
+//! `~/.symbio/` 即可知道加载了哪些插件**。
 //!
 //! ## 关于 workspace_service
 //!

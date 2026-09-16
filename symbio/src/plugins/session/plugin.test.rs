@@ -13,17 +13,12 @@ use crate::symbio_core::{
 
 /// 验证 session 存储目录**只**从 HomedirRegistry 派生，不依赖 config；
 /// 且它就是宿主层的资源类别根（`category_dir(PLUGIN_SESSION)`）——
-/// 会话因此不再手拼一份 `<homedir>/plugins/<类别>` 布局。
+/// 会话因此不再手拼一份 类别根布局。
 #[test]
 fn test_session_storage_dir_from_homedir() {
     let dir = SessionPlugin::session_storage_dir();
-    let expected = crate::symbio_core::HomedirRegistry::get()
-        .join("plugins")
-        .join("session");
-    assert_eq!(
-        dir, expected,
-        "session_storage_dir 必须等于 <homedir>/plugins/session"
-    );
+    let expected = crate::symbio_core::HomedirRegistry::get().join("session");
+    assert_eq!(dir, expected, "session_storage_dir 必须等于 <本插件目录>");
     assert_eq!(
         dir,
         crate::providers::vdfs_service::entry::category_dir(PLUGIN_SESSION),

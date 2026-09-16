@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 /// CLI 默认使用的 Model Provider。
 ///
-/// 之所以在这里给一个具体默认值（而不是交给后端 `plugins/model/PLUGIN.yml` 的
+/// 之所以在这里给一个具体默认值（而不是交给后端 model 插件目录下的 `PLUGIN.yml` 的
 /// `default_provider_id`）：CLI 的定位是「开箱即用地连上一个可用模型」，
 /// 而 `--provider default` 显式保留「回退到系统目录配置」的能力。
 pub const DEFAULT_PROVIDER: &str = "usrouter-glm5-3-flash";

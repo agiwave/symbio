@@ -180,7 +180,7 @@ impl AgentPlugin {
         tool_visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>,
     ) -> Result<(), PluginError> {
         // ── 1. 加载 bundle ──
-        let store = BundleStore::new(workdir.as_deref());
+        let store = BundleStore::new(self.config_file.dir().dir(), workdir.as_deref());
         let record: BundleRecord = store.get(bundle_id).ok_or_else(|| {
             PluginError::NotFound(format!(
                 "bundle `{bundle_id}` 不存在（workdir={workdir:?}），无法开始对话。\
@@ -264,7 +264,7 @@ impl AgentPlugin {
         // 展示顺序号段约定：20 = 智能体（见 session::options 模块文档）
         const ORDER: i32 = 20;
 
-        let store = BundleStore::new(workdir.as_deref());
+        let store = BundleStore::new(self.config_file.dir().dir(), workdir.as_deref());
         let bundles = store.list();
 
         let mut children: Vec<crate::symbio_core::schemas::options::OptionNode> =
@@ -381,10 +381,11 @@ impl Plugin for AgentPlugin {
         }
 
         // ── agent_run：无条件注册 ──
-        let store = BundleStore::new(workdir.as_deref());
+        let store = BundleStore::new(self.config_file.dir().dir(), workdir.as_deref());
         tool_visitor
             .register_batch(vec![super::subagent::AgentRunCapability::new(
                 workdir.clone(),
+                self.config_file.dir().dir().to_path_buf(),
                 super::subagent::format_bundles_brief(&store.list()),
                 self.router.clone(),
             ) as Arc<dyn Capability>])

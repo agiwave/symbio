@@ -4,7 +4,7 @@
 //!
 //! bundle 是**目录自管型**资源：它的落盘由 [`BundleStore`] 负责（工作区级 +
 //! 全局级双层、zip-slip 防护、版本硬门槛），**不经 `vdfs_service`**——
-//! `vdfs_service` 的三种拓扑都是「`<homedir>/plugins/<类别>/<id>/…`」这一固定落位，
+//! `vdfs_service` 的三种拓扑都是「`<本插件目录>/<id>/…`」这一固定落位，
 //! 而 bundle 要同时看见工作目录与系统目录两层，寻址规则本身是 bundle 语义的一部分。
 //!
 //! 相同的是**广播**：落盘后一律走 `vdfs::notify_change`，与 `vdfs_service` 三个
@@ -22,7 +22,9 @@ use crate::symbio_core::vdfs_provider::{
     VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_CHANGE_CREATED,
     VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED, VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
 };
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt, AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
+use crate::symbio_core::{
+    dir_from_ctx, InvokeRequest, InvokeRequestExt, AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE,
+};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -220,8 +222,13 @@ fn container_node(
 
 impl AgentPlugin {
     /// 依请求上下文构造 BundleStore（每次请求独立，与 route 入口一致）
+    ///
+    /// bundle 根 = **本插件自己的目录**，取自父插件经 `PLUGIN_DIR` 传下的目录
+    /// （`dir_from_ctx`；缺省退回常规落位）——与 `AgentPlugin::build` 同源，
+    /// 这里不另拼一份 `<homedir>/…/agent`。
     fn store_of(ctx: &Arc<dyn InvokeRequest>) -> BundleStore {
-        BundleStore::new(ctx.get(crate::symbio_core::WORKDIR).as_deref())
+        let dir = dir_from_ctx(&**ctx, PLUGIN_AGENT);
+        BundleStore::new(dir.dir(), ctx.get(crate::symbio_core::WORKDIR).as_deref())
     }
 
     /// 子条目 → `(节点, 正文)`（`read` 直接取用正文）

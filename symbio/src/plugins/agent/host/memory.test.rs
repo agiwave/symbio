@@ -14,8 +14,11 @@ use tempfile::TempDir;
 /// 在工作区级落一个最小 bundle（不经 zip：以下用例只关心记忆的落位与作用域）
 fn workspace_with_bundle() -> (TempDir, BundleStore) {
     let dir = TempDir::new().unwrap();
-    let store = BundleStore::new(Some(dir.path().to_str().unwrap()));
-    let bundle = dir.path().join(".symbio/plugins/agent/b");
+    let store = BundleStore::new(
+        dir.path().join("global-agent"),
+        Some(dir.path().to_str().unwrap()),
+    );
+    let bundle = dir.path().join(".symbio/agent/b");
     std::fs::create_dir_all(bundle.join("prompts")).unwrap();
     std::fs::write(
         bundle.join("manifest.yaml"),
@@ -56,7 +59,7 @@ fn memory_lives_next_to_the_bundle_manifest() {
     assert!(m.has_scope());
     assert_eq!(
         m.path().unwrap(),
-        dir.path().join(".symbio/plugins/agent/b/AGENTS.md")
+        dir.path().join(".symbio/agent/b/AGENTS.md")
     );
     assert_eq!(m.file_name(), AGENTS_FILE, "节点名 = 真实文件名");
     // 不是工作区根的那个 AGENTS.md —— 那是 work 插件的作用域

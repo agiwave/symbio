@@ -253,7 +253,7 @@
 
 **规范**
 
-- 一个插件 = 一个目录 `<homedir>/plugins/<插件>/`：里面既有配置 `PLUGIN.yml`，
+- 一个插件 = 一个目录 `<homedir>/<插件>/`：里面既有配置 `PLUGIN.yml`，
   也有该插件自己的数据 / 资源（如 `model/<id>/provider.json`）。整目录可直接拷走。
 - `PLUGIN.yml` 是 YAML 映射，其中两个**身份字段**：
   - `plugin_provider` —— 工厂 id，装配时据此 `has_creator` 判据；

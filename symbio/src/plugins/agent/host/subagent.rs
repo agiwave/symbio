@@ -63,6 +63,10 @@ const KEY_PARENT_SESSION_ID: &str = "parent_session_id";
 pub struct AgentRunCapability {
     /// 子会话默认 workdir（构造时解析：父 ctx > 无）
     workdir: Option<String>,
+    /// bundle 存储根 = **本插件自己的目录**（构造时由插件实例传入）
+    ///
+    /// 能力侧同样不认识全局布局：目录由插件给，这里只透传给 [`BundleStore`]。
+    bundle_root: std::path::PathBuf,
     /// 工具描述中的可用 bundle 清单（供 LLM 选择 agent_id）
     bundles_brief: String,
     /// 插件间路由入口（composite 容器弱引用，构造时由插件实例捕获）
@@ -72,11 +76,13 @@ pub struct AgentRunCapability {
 impl AgentRunCapability {
     pub fn new(
         workdir: Option<String>,
+        bundle_root: std::path::PathBuf,
         bundles_brief: String,
         router: Option<std::sync::Weak<dyn Plugin>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             workdir,
+            bundle_root,
             bundles_brief,
             router,
         })
@@ -203,7 +209,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             None => self.workdir.clone(),
         };
         if let Some(aid) = &agent_id {
-            let store = BundleStore::new(effective_workdir.as_deref());
+            let store = BundleStore::new(&self.bundle_root, effective_workdir.as_deref());
             if store.get(aid).is_none() {
                 return Err(PluginError::NotFound(format!(
                     "目标智能体 '{aid}' 不存在，无法委托任务。请检查 agent_id 是否正确。"

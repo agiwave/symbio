@@ -401,7 +401,7 @@ pub(crate) async fn run_context_compact(
 }
 
 /// 压缩前把完整历史转存为 JSON transcript（best-effort）。
-/// 落在会话存储目录内（`<homedir>/plugins/session/<id>/transcripts/`，跟随会话生命周期），
+/// 落在会话存储目录内（`<本插件目录>/<id>/transcripts/`，跟随会话生命周期），
 /// 而非系统临时目录（临时目录无 GC、跨会话堆积、脱离会话管理）。
 /// 路径派生统一走 paths 模块（safe_id / 会话根目录的唯一权威实现）。
 fn save_transcript_archive(messages: &[ChatMessage], session_id: &str) -> Option<String> {

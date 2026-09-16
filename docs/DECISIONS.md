@@ -188,7 +188,7 @@ Agent 认知数据需要持久化。
 `SessionStore` 的三个实现由会话配置项 `store_kind` 选择（`file` 默认 / `sqlite` /
 `memory`，工厂 `plugins/session/store/mod.rs::create_store`）。它与已废除的
 `StorageService` / `EntityStore`（旧 `providers/storage_service`）**不是一回事**，
-也和 `~/.symbio/plugins/<类别>/<id>/<主文件>` 的资源存储无关——后者**没有**第二种后端、
+也和 `~/.symbio/<类别>/<id>/<主文件>` 的资源存储无关——后者**没有**第二种后端、
 不可配置（见 ADR-011）。
 
 ---
@@ -290,7 +290,7 @@ ADR-010 删掉了「差异集中在一张 trait」的适配层，但落盘那一
 `DirVdfs`（一个条目 = 一个目录，可下钻，主文件承载条目内容）、`MemoryVdfs`
 （条目只在进程内，不落盘）。三者共用 `entry.rs` 的条目寻址与落盘原语、`pack.rs`
 的 zip / base64 与导出载荷 `VdfsPack`。**磁盘布局一字未改**
-（`<homedir>/plugins/<category>/<id>/<manifest>`）。同时删除
+（`<homedir>/<category>/<id>/<manifest>`）。同时删除
 `providers/storage_service`、`symbio_core::entities`、
 `symbio_core/providers/storage.rs`（含 `categories` / `manifests` 常量）与
 `symbio_core/schemas/entities.rs` 里的协议时代类型。

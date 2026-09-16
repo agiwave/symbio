@@ -20,7 +20,7 @@
 ```text
 {workdir}/AGENTS.md                      记忆本体（行业通行约定，随仓库可版本化）
 .vdfs/work/AGENTS.md                     可编辑地址（模型与用户共用）
-{homedir}/plugins/work/PLUGIN.yml        本插件配置（两道闸门开多大）
+{homedir}/work/PLUGIN.yml        本插件配置（两道闸门开多大）
 ```
 
 文件名与位置**刻意对齐行业惯例**（`AGENTS.md`：给编码智能体的工作区级指令文件），于是记忆**不属于 symbio**：换工具照样生效，能被 `git` 版本化、被 review。

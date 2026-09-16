@@ -727,7 +727,7 @@ source = file 的类型（整包导入）：名称来自文件名
   | `schemas/entities.rs` 的 `EntitySummary` / `EntityUploadResponse` / `EntityExport` / `ENTITY_*` 常量 | 列表项与详情输入 = `VdfsNode`；写响应 = `VdfsWriteResponse`；导出载荷 = `VdfsPack`（线上字段与原 `EntityExport` 逐字一致） |
   | 事件总线第二条频道 `kind = "entity"`（`KIND_ENTITY` + `publish_entity_changed` / `publish_entity_status`） | 唯一一条 `kind = "vdfs"`：生命周期与运行时状态变化都经 `notify_change` 广播 |
 
-  - **磁盘布局一个字没改**：仍是 `<homedir>/plugins/<category>/<id>/<manifest>`。
+  - **磁盘布局一个字没改**：仍是 `<homedir>/<category>/<id>/<manifest>`。
     三型只是三种**访问拓扑**（单文件不外露条目内部 / 目录可下钻 / 内存不落盘），
     换拓扑不动数据，因此**前端零改动**——地址、`ext`、`schema`、访问位全部原样。
   - **不是第二个抽象**：三个实现本身就是完整的 `impl VdfsProvider`（不是 trait、

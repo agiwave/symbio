@@ -13,7 +13,7 @@
 //!| [`DirVdfs`] | 一个目录 | 可下钻浏览 | Skill / MCP Server |
 //!| [`MemoryVdfs`] | 内存一条记录 | 无 | 运行期注册表 / 磁盘镜像 |
 //!
-//! 三者的磁盘布局**完全一致**（`<homedir>/plugins/<category>/<id>/<manifest>`），
+//! 三者的磁盘布局**完全一致**（`<类别根>/<id>/<manifest>`），
 //! 差别只在**访问拓扑**，因此换型不动数据。
 //!
 //! ## 为什么放在 providers 而不是 symbio_core

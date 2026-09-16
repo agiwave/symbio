@@ -9,7 +9,7 @@
 //! Home 是**系统根插件**：它的目录就是系统根 [`HomedirRegistry::get()`] 本身，
 //! 配置在 `<homedir>/PLUGIN.yml`——与其它插件**同一套规范**
 //! （见 [`plugin_dir`](crate::symbio_core::plugin_dir)），只是它住在系统根而不是
-//! `plugins/` 下（它管辖的插件根正是 `<homedir>/plugins`）。
+//! 业务插件**并列**在系统根下（它管辖的插件根就是系统根本身）。
 //! homedir 切换通过 `home/reload` 路由热重载实现。
 //!
 //! 它构造的容器 `composite` 是它的**动态内置替身**，共用同一个系统根目录。
@@ -61,7 +61,7 @@ pub const SYSTEM_PLUGINS: &[&str] = &[
 
 /// Home 自己的插件目录 = **系统根** `<homedir>`
 ///
-/// 不落在 `plugins/` 下：若落在那里，容器扫描插件根时会把它当普通插件再构造一次，
+/// 不落在插件根下：若落在那里（即系统根下再有一层 `home/`），容器扫描插件根时会把它当普通插件再构造一次，
 /// 那个 home 又去构造容器——自举环。系统级插件不参与扫描。
 fn home_dir() -> PluginDir {
     PluginDir::system(PLUGIN_HOME)
@@ -99,7 +99,7 @@ impl HomeConfig {
 pub struct HomePlugin {
     /// 子插件实例容器 (如 "work" -> AgentPlugin)
     pub instances: Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>>,
-    /// 自己的配置缓存（`<homedir>/plugins/home/PLUGIN.yml`）
+    /// 自己的配置缓存（`<本插件目录>/PLUGIN.yml`）
     config: Arc<RwLock<HomeConfig>>,
     /// 插件上下文（用于动态创建子插件）
     context: Arc<dyn InvokeRequest>,

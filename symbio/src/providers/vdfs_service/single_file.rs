@@ -33,16 +33,18 @@ pub struct SingleFileVdfs {
 }
 
 impl SingleFileVdfs {
-    /// 按插件名建一个单文件型存储：类别段 = 子目录名 = 广播频道键
+    /// 按类别名建一个单文件型存储：类别段 = 子目录名 = 广播频道键
     ///
-    /// 基址在构造时解析（**不缓存**跨请求），homedir 切换后重建即可拿到新址。
+    /// ⚠️ **仅迁移 / 兼容旧落位使用**。插件的正常存储根是它自己的目录，应由调用方
+    /// 经 [`at`](Self::at) 显式传入；按名字反推落位等于让插件猜自己被放在哪。
+    /// 当前唯一使用者是 model 插件迁移旧分类 `ai` 的那段代码。
     pub fn for_category(kind: impl Into<String>, manifest: impl Into<String>) -> Self {
         let kind = kind.into();
         let base = entry::category_dir(&kind);
         Self::at(base, kind, manifest)
     }
 
-    /// 显式指定类别根（测试与非常规落位用；生产走 [`for_category`](Self::for_category))
+    /// 显式指定类别根（生产路径：根 = 调用方的插件目录）
     pub fn at(
         base: impl Into<PathBuf>,
         kind: impl Into<String>,
@@ -337,9 +339,9 @@ mod tests {
     #[tokio::test]
     async fn keeps_the_existing_disk_layout() {
         let tmp = tempfile::tempdir().unwrap();
-        let s = store_in(&tmp.path().join("plugins/model"));
+        let s = store_in(&tmp.path().join("model"));
         s.write_text("p1", "{}").await.unwrap();
-        assert!(tmp.path().join("plugins/model/p1/provider.json").exists());
+        assert!(tmp.path().join("model/p1/provider.json").exists());
     }
 
     #[tokio::test]

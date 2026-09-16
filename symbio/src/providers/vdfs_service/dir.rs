@@ -42,14 +42,11 @@ pub struct DirVdfs {
 }
 
 impl DirVdfs {
-    /// 按插件名建一个目录型存储：类别段 = 子目录名 = 广播频道键
-    pub fn for_category(kind: impl Into<String>, manifest: impl Into<String>) -> Self {
-        let kind = kind.into();
-        let base = entry::category_dir(&kind);
-        Self::at(base, kind, manifest)
-    }
-
-    /// 显式指定类别根（测试与非常规落位用）
+    /// 显式指定类别根
+    ///
+    /// 根**必须由调用方给**（生产上就是插件自己的目录，来自父插件经 `PLUGIN_DIR`
+    /// 传下的 `PluginDir`）。早先这里有 `for_category(kind)` 按插件名反推落位，
+    /// 那是让插件猜自己被放在哪，已去掉。
     pub fn at(
         base: impl Into<PathBuf>,
         kind: impl Into<String>,
@@ -482,13 +479,13 @@ mod tests {
     #[tokio::test]
     async fn entry_is_a_drillable_directory() {
         let tmp = tempfile::tempdir().unwrap();
-        let s = store_in(&tmp.path().join("plugins/skill"));
+        let s = store_in(&tmp.path().join("skill"));
         let ctx = VdfsContext::empty();
 
         s.write(&ctx, "demo.skill", &VdfsContent::text("", "# demo"))
             .await
             .unwrap();
-        assert!(tmp.path().join("plugins/skill/demo/SKILL.md").exists());
+        assert!(tmp.path().join("skill/demo/SKILL.md").exists());
 
         // 条目内部进地址空间：写一个附属文件，再从根下钻读回
         s.write(
