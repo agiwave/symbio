@@ -82,6 +82,27 @@
 落盘契约不变：字段名仍是 `PLUGIN.yml` 里的键，`#[serde(default)]` 仍在，未知键仍被
 静默忽略，**存量配置无需迁移**。
 
+### 4. agent 记忆的**存储**也收口到内核（三层不再有第二份闸门）
+
+前面只统一了 agent 记忆的**渲染**（复用内核 `render_segment`），读写仍走
+`BundleStore::read_memory` / `write_memory`——它自带一份字节闸门与自己的错误文案，
+与 work / session 两层仍是**第二份口径**。本次收口：
+
+- `BundleStore` 只保留 `memory_path`（回答「记忆文件在哪」），
+  `read_memory` / `write_memory` **删除**——存储层不再持有闸门；
+- 新增 `agent/host/memory.rs`（本层的「个性」：落位 / 地址 / 标题 / 空提示 / 节点规格），
+  与 `work/memory.rs`、`session/memory.rs` 回到同一形态；
+- `AgentPlugin::memory_store(bundles, bundle_id)` 成为**记忆的唯一构造点**：作用域
+  （bundle 是否存在）与两道闸门在此一次收口，`vdfs` 的 list / stat / read / write 与
+  `traverse` 的注入全部复用它；
+- VDFS 记忆节点改由内核 `MemoryFile::node` 产出（`list` 与 `stat` 同源），手搓的
+  `memory_node(size)` 删除。**两处顺带对齐**：节点 `title` 由文件名改为「智能体记忆」
+  （与「工作区记忆」「会话记忆」一致），`kind` 由**无人登记**的 `memory` 改为所属插件的
+  场景标签 `agent`（前端 `registerVdfsIcon` 里没有任何 `memory` 条目，是个没有消费者的
+  死标签）；`updated_at` 也随内核带上（此前缺，列表无法按时间排序）。
+- **读失败不再降级成一段「暂无记忆」**：那会让模型以为确实没有，比不注入更坏；
+  改为记 warning 后**不注册**该片段（人格在上面已注册，不受影响）。
+
 ### 其他
 
 - 新增两个配置项（session 与 work 各有）：`memory_max_bytes`（写闸门，默认 16 KiB）、

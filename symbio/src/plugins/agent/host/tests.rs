@@ -102,7 +102,12 @@ async fn bundle_import_traverse_and_identity() {
     // ── 2. traverse：扫描约定目录装配 → 身份工具注册（工具经 MCP，不由本插件注册）──
     let plugin = Arc::new(AgentPlugin::new());
     let (ctx, manager) = ctx_with(Some(workdir), Some("com.symbio.test-fixture"));
-    plugin.traverse(String::new(), ctx.clone()).await.unwrap();
+    // `traverse` 是 `self: Arc<Self>`，会吃掉这个 Arc —— 后面还要用它构造记忆门面
+    plugin
+        .clone()
+        .traverse(String::new(), ctx.clone())
+        .await
+        .unwrap();
 
     // 收集期错误桶应为空（装配成功）
     let errors = crate::symbio_core::take_errors(&ctx).await;
@@ -160,11 +165,11 @@ async fn bundle_import_traverse_and_identity() {
     );
 
     // ── 3c. 记忆落位：bundle 自己的目录，不是工作区根 ──
-    store
-        .write_memory("com.symbio.test-fixture", "该智能体记住：先写测试。", 1024)
-        .unwrap();
+    // 读写走内核（`MemoryFile`），本插件只提供落位与地址
+    let memory = plugin.memory_store(&store, "com.symbio.test-fixture").await;
+    memory.write("该智能体记住：先写测试。").unwrap();
     assert_eq!(
-        store.memory_path("com.symbio.test-fixture").unwrap(),
+        memory.path().unwrap(),
         Path::new(&result.dir).join("AGENTS.md"),
         "智能体记忆落在 bundle 目录"
     );
@@ -172,10 +177,7 @@ async fn bundle_import_traverse_and_identity() {
         !Path::new(workdir).join("AGENTS.md").exists(),
         "智能体记忆不得落到工作区根（那是 work 插件的作用域）"
     );
-    assert_eq!(
-        store.read_memory("com.symbio.test-fixture").unwrap(),
-        "该智能体记住：先写测试。"
-    );
+    assert_eq!(memory.read().unwrap(), "该智能体记住：先写测试。");
 
     // ── 4. 导出（打包下载语义）──
     let exported = store.export("com.symbio.test-fixture").unwrap();

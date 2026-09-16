@@ -6,9 +6,10 @@
 //! |---|---|
 //! | [`plugin`] | 插件主体：`traverse(available_tools)` → 扫描约定目录装配 → 人格片段 + 身份工具注册 |
 //! | [`store`] | bundle 存储：系统目录 `plugins/agent/`、zip 导入（zip-slip 防护）、导出 |
-//! | [`prompt`] | 人格的**系统提示词片段**（含可编辑地址与容量口径） |
+//! | [`prompt`] | **人格**的系统提示词片段（多文件装配，自己排版但形态与内核对齐） |
+//! | [`memory`] | **智能体记忆**的落位与地址（机制在 `symbio_core::memory`） |
 //! | [`capability`] | `agent_identity` 身份工具（取回超出注入预算的全文） |
-//! | [`config`] | 插件配置（两道容量闸门：条目写入上限 / 人格注入上限） |
+//! | [`config`] | 插件配置（两组容量闸门：条目 / 人格注入，记忆两道） |
 //! | [`vdfs`] | VDFS 挂载点（`.vdfs/agent/…`，本插件直接 `impl VdfsProvider`） |
 //!
 //! **本层没有任何自有协议路由**：bundle 的浏览 / 导入 / 删除 / 导出分别由
@@ -39,6 +40,7 @@
 pub mod capability;
 mod config;
 mod detail;
+pub mod memory;
 pub mod plugin;
 mod prompt;
 pub mod store;

@@ -577,45 +577,21 @@ impl BundleStore {
     // 概览里的条目计数。它是 bundle 根下的一个普通文件，与工作区级的
     // `{workdir}/AGENTS.md` **同名同语义**（见 `symbio_core::memory`）——
     // 放哪个作用域就管哪个作用域。
+    //
+    // ⚠️ 本模块**只负责回答「记忆文件在哪」**：读 / 写 / 两道容量闸门一律走内核
+    // （`symbio_core::memory::MemoryFile`）。此前这里自带一份 `read_memory` /
+    // `write_memory` 与自己的字节闸门，与 work / session 两层各写一份口径——
+    // 「超限是拒绝还是截断」「读不到算不算错误」一旦分叉，用户看到的行为就会随
+    // 「这条记忆属于哪一层」而变化。收口后三层共用同一份实现，本模块不再持有闸门。
 
     /// 智能体记忆文件：`<bundle 目录>/AGENTS.md`
+    ///
+    /// bundle 不存在 → 明确报错（调用方 [`super::memory::store`] 据此构造「无作用域」门面）。
     pub fn memory_path(&self, bundle_id: &str) -> Result<PathBuf, String> {
         let record = self
             .get(bundle_id)
             .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
         Ok(record.dir.join(AGENTS_FILE))
-    }
-
-    /// 读智能体记忆（文件不存在 → **空串**：记忆是「可以还没有」的东西）
-    pub fn read_memory(&self, bundle_id: &str) -> Result<String, String> {
-        let path = self.memory_path(bundle_id)?;
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Ok(text),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-            Err(e) => Err(format!("读取智能体记忆失败（{}）: {e}", path.display())),
-        }
-    }
-
-    /// 写智能体记忆。
-    ///
-    /// `max_bytes` 是**写入闸门**：超过上限直接拒绝，不截断——记忆是跨会话累积的东西，
-    /// 「以为写进去了、实际少了一半」不会报错，只会让智能体以后行为不对。
-    pub fn write_memory(
-        &self,
-        bundle_id: &str,
-        text: &str,
-        max_bytes: usize,
-    ) -> Result<(), String> {
-        let path = self.memory_path(bundle_id)?;
-        if text.len() > max_bytes {
-            return Err(format!(
-                "智能体记忆超出容量上限：当前 {} 字节，上限 {max_bytes} 字节。\
-                 请精简后再写入（可先读取现有内容，合并改写而不是整篇重写）。",
-                text.len()
-            ));
-        }
-        std::fs::write(&path, text)
-            .map_err(|e| format!("写入智能体记忆失败（{}）: {e}", path.display()))
     }
 
     /// zip entry 名 → bundle 内相对路径。    ///
@@ -837,7 +813,10 @@ mod tests {
         );
     }
 
-    /// 智能体记忆：落位在 **bundle 自己的目录**（不是工作区目录），文件名与工作区级同名
+    /// 智能体记忆**落位**在 bundle 自己的目录（不是工作区目录），文件名与工作区级同名。
+    ///
+    /// 读写与两道容量闸门不在这里测——它们已收口到内核，用例在
+    /// `agent/host/memory.test.rs`（本模块只回答「记忆文件在哪」）。
     #[test]
     fn memory_lives_in_the_bundle_dir() {
         let (dir, store) = workspace_store_with_bundle();
@@ -849,29 +828,7 @@ mod tests {
         assert_eq!(path.file_name().unwrap(), "AGENTS.md");
         // 不是工作区根的那个 AGENTS.md
         assert_ne!(path, dir.path().join(AGENTS_FILE));
-    }
-
-    #[test]
-    fn memory_read_write_roundtrips_and_gates_capacity() {
-        let (_dir, store) = workspace_store_with_bundle();
-
-        // 还没有记忆 → 空串（不是错误）
-        assert_eq!(store.read_memory("b").unwrap(), "");
-
-        store.write_memory("b", "该智能体的长期记忆", 64).unwrap();
-        assert_eq!(store.read_memory("b").unwrap(), "该智能体的长期记忆");
-
-        let err = store.write_memory("b", &"x".repeat(8), 4).unwrap_err();
-        assert!(err.contains("超出容量上限"), "{err}");
-        assert!(err.contains("4"), "{err}");
-        assert_eq!(
-            store.read_memory("b").unwrap(),
-            "该智能体的长期记忆",
-            "被拒绝的写入不得改动文件"
-        );
-
-        // 不存在的 bundle：明确报错
-        assert!(store.read_memory("nope").is_err());
-        assert!(store.write_memory("nope", "x", 64).is_err());
+        // bundle 不存在 → 明确报错（`memory::store` 据此构造「无作用域」门面）
+        assert!(store.memory_path("nope").is_err());
     }
 }

@@ -6,12 +6,16 @@
 //! |---|---|---|---|
 //! | `item_max_bytes` | 人格条目写入 | [`BundleStore::write_item`](super::store::BundleStore::write_item) | **拒绝** |
 //! | `identity_inject_max_bytes` | 人格注入 | [`identity_segment`](super::prompt::identity_segment) | **截断** + 告知地址 |
-//! | `memory_max_bytes` | 智能体记忆写入 | [`BundleStore::write_memory`](super::store::BundleStore::write_memory) | **拒绝** |
-//! | `memory_inject_max_bytes` | 智能体记忆注入 | [`memory_segment`](super::prompt::memory_segment) | **截断** + 告知地址 |
+//! | `memory_max_bytes` | 智能体记忆写入 | [`MemoryFile::write`](crate::symbio_core::MemoryFile::write) | **拒绝** |
+//! | `memory_inject_max_bytes` | 智能体记忆注入 | [`MemoryFile::inject`](crate::symbio_core::MemoryFile::inject) | **截断** + 告知地址 |
 //!
 //! 为什么写侧是拒绝：人格与记忆都是**跨会话生效**的东西，写入被截断意味着
 //! 模型以为改好了、实际少了一块——这种失败没有任何报错，只能靠「拒绝」
 //! 把它变成一次显式的、可重试的失败。
+//!
+//! ⚠️ 后两行**不落在本插件**：智能体记忆的读写与两道闸门都在内核
+//! （`symbio_core::memory`），与 work / session 两层共用同一份实现。本插件只提供
+//! 落位与地址，配置在这里的作用是**把闸门取值喂给内核**。
 
 use serde::{Deserialize, Serialize};
 

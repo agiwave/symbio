@@ -21,9 +21,8 @@
 use crate::plugins::agent::core::spec::assembly::{assemble_bundle, Assembly};
 use crate::plugins::agent::host::capability::BundleIdentityCapability;
 use crate::plugins::agent::host::config::AgentConfig;
-use crate::plugins::agent::host::prompt::{
-    identity_segment, memory_segment, MEMORY_SEGMENT_NAME, SEGMENT_NAME as IDENTITY_SEGMENT,
-};
+use crate::plugins::agent::host::memory;
+use crate::plugins::agent::host::prompt::{identity_segment, SEGMENT_NAME as IDENTITY_SEGMENT};
 use crate::plugins::agent::host::store::{BundleRecord, BundleStore};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs_provider::VdfsProvider;
@@ -133,9 +132,22 @@ impl AgentPlugin {
         self.config.read().await.effective_item_max_bytes()
     }
 
-    /// 生效的智能体记忆写入上限（**记忆写入闸门的唯一取值点**）
-    pub(crate) async fn memory_max_bytes(&self) -> usize {
-        self.config.read().await.effective_memory_max_bytes()
+    /// 依 bundle 记录构造记忆门面（**记忆的唯一构造点**：作用域 + 两道闸门在此收口）。
+    ///
+    /// 内核只认「上限是多少」，不关心它从哪个配置来；bundle 不存在 → 无作用域，
+    /// 之后读 / 注入 / 写三条路各自降级，调用点不需要重复判断。
+    pub(crate) async fn memory_store(
+        &self,
+        bundles: &BundleStore,
+        bundle_id: &str,
+    ) -> crate::symbio_core::MemoryFile {
+        let cfg = self.config.read().await;
+        memory::store(
+            bundles,
+            bundle_id,
+            cfg.effective_memory_max_bytes(),
+            cfg.effective_memory_inject_bytes(),
+        )
     }
 
     /// 配置文档（VDFS 侧读写的入口）
@@ -208,7 +220,6 @@ impl AgentPlugin {
         // ── 4. 人格 + 智能体记忆 → 系统提示词（每轮注入，带可编辑地址与容量口径）──
         // 与身份工具**同时机、同一次广播**注册：同一个人格的两个面——提示词负责
         // 「一开始就知道自己是谁」，工具负责「取回超出注入预算的全文」。
-        // 记忆读失败降级为空串：读不出来不该让整轮会话拿不到人格。
         let cfg = self.config.read().await.clone();
         tool_visitor
             .register_system_prompt(
@@ -216,19 +227,20 @@ impl AgentPlugin {
                 identity_segment(&record.manifest.id, &identity_text, &cfg),
             )
             .await;
-        let memory = match store.read_memory(&record.manifest.id) {
-            Ok(text) => text,
-            Err(e) => {
-                crate::plugin_warn!("agent", "读取智能体记忆失败，本轮按空记忆注入：{e}");
-                String::new()
+        // 记忆：机制在内核（读写 / 两道闸门 / 排版），本插件只给落位与地址。
+        // 读失败**不注册**（而不是降级成一段「暂无记忆」）——那会让模型以为确实没有，
+        // 比不注入更坏；人格在上面已经注册，不受影响。
+        let memory = self.memory_store(&store, &record.manifest.id).await;
+        let address = memory::memory_address(&record.manifest.id);
+        match memory.segment(&memory::segment_spec(&address)) {
+            Ok(Some(segment)) => {
+                tool_visitor
+                    .register_system_prompt(memory::SEGMENT_NAME, segment)
+                    .await;
             }
-        };
-        tool_visitor
-            .register_system_prompt(
-                MEMORY_SEGMENT_NAME,
-                memory_segment(&record.manifest.id, &memory, &cfg),
-            )
-            .await;
+            Ok(None) => {}
+            Err(e) => crate::plugin_warn!("agent", "读取智能体记忆失败，本轮不注入：{e}"),
+        }
 
         Ok(())
     }

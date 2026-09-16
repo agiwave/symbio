@@ -12,6 +12,7 @@
 //!
 //! 外部访问一律走 `.vdfs/agent/…`。
 
+use super::memory;
 use super::plugin::AgentPlugin;
 use super::store::{classify_item_path, BundleRecord, BundleStore};
 use crate::providers::vdfs_service;
@@ -200,17 +201,6 @@ fn section_node(spec: &'static ContainerKind) -> VdfsNode {
 }
 
 /// 子条目 → VDFS 节点（文件；`ext` 由文件名推导，渲染器据此分发）
-/// 智能体记忆 → VDFS 节点（`ext` 由文件名推导为 `md`，前端据此选 Markdown 编辑器）
-fn memory_node(size: u64) -> VdfsNode {
-    let mut n = VdfsNode::file(AGENTS_FILE, AGENTS_FILE, VdfsAccess::READ_WRITE);
-    n.kind = "memory".to_string();
-    n.size = Some(size);
-    n.description = Some(
-        "该智能体自己的长期记忆（跨会话保留）：只在选中本智能体时注入系统提示词。".to_string(),
-    );
-    n
-}
-
 fn container_node(
     spec: &ContainerKind,
     path: &str,
@@ -304,8 +294,12 @@ impl VdfsProvider for AgentPlugin {
                 store
                     .get(&id)
                     .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}「{id}」")))?;
-                let memory_size = store.read_memory(&id).map(|t| t.len() as u64).unwrap_or(0);
-                let mut nodes = vec![memory_node(memory_size)];
+                // 记忆节点：形状来自内核（`MemoryFile::node`），与 `stat` 同源
+                let memory_node = self
+                    .memory_store(&store, &id)
+                    .await
+                    .node(&memory::node_spec());
+                let mut nodes = vec![memory_node];
                 nodes.extend(CONTAINER_KINDS.iter().map(section_node));
                 Ok(nodes)
             }
@@ -353,10 +347,11 @@ impl VdfsProvider for AgentPlugin {
                 .ok_or_else(|| VdfsError::not_found(format!("不存在子类别：{path}"))),
             RelPath::Memory { id } => {
                 let id = id_of(id);
-                let text = store
-                    .read_memory(&id)
-                    .map_err(|e| VdfsError::not_found(format!("读取智能体记忆失败：{e}")))?;
-                Ok(memory_node(text.len() as u64))
+                let memory = self.memory_store(&store, &id).await;
+                if !memory.has_scope() {
+                    return Err(VdfsError::not_found(format!("未找到{LABEL}「{id}」")));
+                }
+                Ok(memory.node(&memory::node_spec()))
             }
             RelPath::SubItem { id, item, .. } => Ok(Self::container_item(&store, id, item)?.0),
         }
@@ -378,8 +373,10 @@ impl VdfsProvider for AgentPlugin {
             // 智能体记忆：bundle 目录下的 `AGENTS.md`
             RelPath::Memory { id } => {
                 let id = id_of(id);
-                let text = store
-                    .read_memory(&id)
+                let text = self
+                    .memory_store(&store, &id)
+                    .await
+                    .read()
                     .map_err(|e| VdfsError::not_found(format!("读取智能体记忆失败：{e}")))?;
                 Ok(VdfsContent::text(path, text))
             }
@@ -411,21 +408,19 @@ impl VdfsProvider for AgentPlugin {
         if path.trim_matches('/') == PLUGIN_FILE {
             return self.config_file().apply(self.config_slot(), content).await;
         }
-        // 智能体记忆写回（容量闸门取自插件配置）
+        // 智能体记忆写回（容量闸门在内核里，本插件不重复实现）
         if let RelPath::Memory { id } = parse_rel_path(path) {
             if content.binary {
                 return Err(VdfsError::invalid("智能体记忆是文本文件，不接受二进制内容"));
             }
             let id = id_of(id);
-            let existed = store
-                .read_memory(&id)
-                .map(|t| !t.is_empty())
-                .unwrap_or(false);
+            let memory = self.memory_store(&store, &id).await;
+            if !memory.has_scope() {
+                return Err(VdfsError::not_found(format!("未找到{LABEL}「{id}」")));
+            }
+            let existed = memory.exists();
             let text = content.text.as_deref().unwrap_or_default();
-            let max_bytes = self.memory_max_bytes().await;
-            store
-                .write_memory(&id, text, max_bytes)
-                .map_err(VdfsError::invalid)?;
+            memory.write(text).map_err(VdfsError::invalid)?;
             notify_change(
                 PLUGIN_AGENT,
                 path,
