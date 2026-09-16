@@ -1,6 +1,6 @@
 # Session 插件模块分工评审
 
-> 状态：**评审 + 执行方案**（S1 已落地；S2–S4 待执行）
+> 状态：**评审 + 执行方案**（S1/S2 已落地；S3–S4 待执行）
 > 触发：`chat_loop.rs` 达 2400 行，已到"不该再往单文件里加东西"的程度
 > 范围：`symbio/src/plugins/session/`（27 个 .rs，合计 16647 行；**S1 后**生产 12419 + 测试 4313）
 > 相关：`./core-loop.md`（核心循环收口，同批次完成）
@@ -164,7 +164,7 @@ orchestrator/tests.rs    测试                                                 
 | 步 | 内容 | 风险 | 验收 |
 |---|---|---|---|
 | **S1** ✅ | 测试外置（**21** 个文件 → `<module>/tests.rs`；含 `chat_loop/` 的 3 个测试模块） | 低（纯搬移，`use super::*` 语义不变） | 每步 `cargo check --tests`；末次 `cargo test --lib` 用例数不变 |
-| **S2** | 拆 `chat_loop.rs`（§3.1） | 中（跨模块可见性） | 生产代码总量不变；`cargo test --lib` 用例数不变 |
+| **S2** ✅ | 拆 `chat_loop.rs`（§3.1） | 中（跨模块可见性） | 生产代码总量不变；`cargo test --lib` 用例数不变 |
 | **S3** | 拆 `plugin.rs`（§3.2） | 中 | 同上 |
 | **S4** | 拆 `orchestrator.rs`（§3.3） | 中高（消费循环是事故敏感区） | 同上 + 消费循环帧合并 / `persist_failure` 作用域逐字不变 |
 
@@ -182,6 +182,49 @@ orchestrator/tests.rs    测试                                                 
 - 父文件末尾统一为 `#[cfg(test)] mod tests;`（`chat_loop.rs` 为三个 `mod`）。
 - 验证：`cargo check --tests` 通过；`cargo clippy --all-targets -- -D warnings` 零告警；
   `cargo test --lib` 用例数**未减少**。
+
+### 4.2 S2 实施结果（2026-09-16）
+
+`chat_loop.rs` **2000 → 434 行**（只留主循环骨架），拆出 5 个子模块：
+
+| 文件 | 行数 | 内容 |
+|---|---:|---|
+| `chat_loop.rs` | 434 | `mod` 声明 + 共享面 re-export + `run_chat_loop` / `TurnFlow` / `gate_turn` / `finish_turn` |
+| `chat_loop/state.rs` | 363 | `SessionContext` / `TurnRequest` / `TurnState` / `TurnExit` / `Gate` / `TurnResult` / `StopSignal` / `ChatOrchestrator` |
+| `chat_loop/inputs.rs` | 252 | `resolve_system_prompt` / `TurnInputs` / `prepare_turn_inputs` / `apply_compaction` |
+| `chat_loop/turn.rs` | 372 | `settle_reasoning` / `close_turn` / `feedback_estimate` / `MAX_CONTINUE_ROUNDS` |
+| `chat_loop/compress.rs` | 544 | 压缩流水线 7 个函数（含唯一内核 `compress_with_snapshot_core`） |
+| `chat_loop/io.rs` | 116 | 落库 / 广播 / 流式占位 / 开会话 / 生命周期钩子 |
+
+**搬移纪律**：语句、注释、调用顺序**逐字保留**，只加模块头、`use` 与可见性；
+函数体一行未改（`close_turn` 的 286 行原样搬入 `turn.rs`）。
+
+**保真校验（S3/S4 请照做）**：拆完先做一次「代码行多重集比对」——把旧文件与
+「新父文件 + 各子模块」都归一化（去掉 `//!` / `use` / `mod` / 空行，抹平
+`pub(crate)` 等可见性前缀），再比较两侧的行多重集。**差异必须能逐条归因**，
+本次归因结果：
+
+| 差异 | 条数 | 性质 |
+|---|---:|---|
+| `super::tokenizer` / `super::compression` / `super::paths` → 加深一层 | 6 | 刻意（多了一层 `chat_loop/`） |
+| 两处函数签名被 rustfmt 折行（`persist_messages` / `emit_streaming_start`） | 2 → 展开为 8 | 纯格式 |
+| 父模块新增 re-export 块与注释 | 5 | 新增脚手架 |
+
+除上述外**零差异**，即无任何代码行被丢失或改写。
+
+**可见性口径**（本次新确立，供 S3/S4 沿用）：
+
+- **跨模块契约**（`orchestrator.rs` / `resume.rs` 经 `chat_loop::X` 引用）→ `pub`
+  + 父模块 `pub use`：仅 `ChatOrchestrator`、`StopSignal`。
+- **模块内共享面** → 子模块 `pub(crate)` + 父模块 `pub(crate) use`。
+  ⚠️ `pub use` 要求条目为 `pub`，否则报 `E0364/E0365`；`pub(crate) use` 才是正确搭配。
+- **跨模块访问的字段**必须逐个标 `pub(crate)` —— Rust 的**字段可见性不随结构体**，
+  结构体公开不等于字段可读（本次 `TurnRequest` / `TurnState` / `TurnResult` /
+  `TurnInputs` 共 21 个字段）。
+- **子模块统一 `use super::*;`**：子模块可看到父模块的私有条目，故父模块的
+  `use` 清单与 re-export 就是子模块的共享导入面，无需逐文件重复导入。
+- 被搬移代码里的 `super::X::` 需**加深一层**（现在多了一层 `chat_loop/`）：
+  本次 5 处（`super::tokenizer` / `super::compression` / `super::paths`）。
 
 **全程硬约束**：
 

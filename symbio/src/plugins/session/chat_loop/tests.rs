@@ -3,6 +3,7 @@
 //! 与实现分文件（约定同 `store/tests.rs` / `chat_session/tests.rs`）：
 //! `chat_loop.rs` 只保留生产代码，测试全部放本文件。
 
+use super::inputs::resolve_system_prompt;
 use super::*;
 use crate::symbio_core::{CapabilityVisitor, DefaultToolVisitor, SimpleRequest};
 

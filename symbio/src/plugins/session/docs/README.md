@@ -15,7 +15,7 @@
 | 文档 | 状态 | 一句话 |
 |---|---|---|
 | [core-loop.md](./core-loop.md) | 现行设计（批次 A/B/C 已落地，D 待授权） | LLM × 工具会话主循环的结构与四个收口点（`gate_turn` / `prepare_turn_inputs` / `apply_compaction` / `finish_turn`） |
-| [module-layout.md](./module-layout.md) | 评审 + 执行方案 | 插件模块分工评审：单文件过长问题、目标目录结构、S1–S4 执行顺序与验收 |
+| [module-layout.md](./module-layout.md) | 评审 + 执行方案（S1/S2 已落地，S3–S4 待做） | 插件模块分工评审：单文件过长问题、目标目录结构、S1–S4 执行顺序与验收、可见性口径 |
 | [mechanism-audit.md](./mechanism-audit.md) | 现行权威审计 | 机制复杂性成因、冗余清单、简化方案；所有结论带 `文件:行号` 证据 |
 | [complexity-audit.md](./complexity-audit.md) | 历史审计（已被上一份取代） | 早期复杂度审计；保留其取证与实施记录 |
 | [context-compression-design.md](./context-compression-design.md) | 现行设计总览 | 上下文压缩 L0–L6 分层机制、优先取舍、不变量（实现细节见 `../README.md`） |

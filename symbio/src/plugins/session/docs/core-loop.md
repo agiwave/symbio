@@ -1,6 +1,9 @@
 # Session 核心循环（LLM × 工具）梳理与收口设计
 
 > 状态：**批次 A/B/C 已落地**（`cargo check --tests` 通过）；批次 D（异步工具并发）待授权
+> 代码位置：其后又做了模块拆分（S2），`chat_loop.rs` **2000 → 434 行**，拆出
+> `chat_loop/{state,inputs,turn,compress,io}.rs`（见 [`./module-layout.md`](./module-layout.md) §4.2）。
+> 本文的"文件:行"只作**历史取证**，请按**符号名**检索。
 > 范围：`symbio/src/plugins/session/` 中"调用大语言模型 + 执行工具"的会话主循环
 > 审计基线 commit：`88a6800`（设计稿）→ 实施基线 `5c60806`（本设计文档首次提交）
 > 上游文档：`./mechanism-audit.md`（批次 A–D 已落地）、
@@ -394,7 +397,11 @@ struct TurnState {
 
 ## 3. 落地后的代码骨架
 
-> 以下为**批次 A/B/C 落地后**的实际形态（已与 `chat_loop.rs` 对齐，非设计稿）。
+> 以下为**批次 A/B/C 落地后**的实际形态（已与代码对齐，非设计稿）。
+> 模块拆分（S2）后各符号的落点：`run_chat_loop` / `gate_turn` / `finish_turn` / `TurnFlow`
+> 在 `chat_loop.rs`；`TurnRequest` / `TurnState` / `TurnExit` / `Gate` / `TurnResult` /
+> `ChatOrchestrator` 在 `chat_loop/state.rs`；`prepare_turn_inputs` / `apply_compaction`
+> 在 `chat_loop/inputs.rs`；`close_turn` / `settle_reasoning` 在 `chat_loop/turn.rs`。
 
 ```rust
 pub async fn run_chat_loop(
@@ -625,7 +632,9 @@ node scripts/grep-audit.mjs && node scripts/style-audit.mjs
 ## 附：证据索引（文件:行）
 
 > ⚠️ 以下行号指向**审计基线 `88a6800`**（收口前），用于复核 §1 的"现状"描述；
-> 收口后行号已整体位移，请按符号名检索（如 `prepare_turn_inputs` / `apply_compaction`）。
+> 收口后行号已整体位移，S2 拆分后 `chat_loop.rs` 的符号又分散到 `chat_loop/*.rs`，
+> 因此**一律按符号名检索**（如 `prepare_turn_inputs` / `apply_compaction`）。
+> 新增条目请只写文件名（不写行号）。
 
 - `chat_loop.rs:324` — `run_chat_loop` 入口
 - `chat_loop.rs:385–409` — resume 前步骤（含出口 ①②）
