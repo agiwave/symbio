@@ -58,7 +58,9 @@ node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 找不到某条机制 / 约定写在哪：`node scripts/doc-find.mjs <关键词>`（搜全仓 `*.md` 与源码
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
-CI 流水线见 [.github/workflows/ci.yml](./.github/workflows/ci.yml)；提交信息规范由
+CI（[.github/workflows/ci.yml](./.github/workflows/ci.yml)）跑的是**同一个脚本**
+（`--only=backend --ci --profile=<dev|release>` / `--only=frontend` / `--only=docs,facts`），
+所以本地通过 ≈ CI 通过。提交信息规范由
 `scripts/check-commit-msg.mjs` 判定，本机一次性挂上即可自动生效：
 
 ```bash
