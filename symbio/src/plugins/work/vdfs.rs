@@ -82,6 +82,10 @@ impl VdfsProvider for WorkPlugin {
         VdfsAccess::LIST_TRAVERSE
     }
 
+    fn root_hidden(&self) -> bool {
+        true
+    }
+
     /// 根下不可新建：记忆文件是**唯一且恒在**的那一个，没有第二种东西可建
     fn root_new_types(&self) -> Vec<crate::symbio_core::vdfs_provider::VdfsNewType> {
         Vec::new()
