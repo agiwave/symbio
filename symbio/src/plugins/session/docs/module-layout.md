@@ -1,6 +1,6 @@
 # Session 插件模块分工评审
 
-> 状态：**评审 + 执行方案**（S1/S2 已落地；S3–S4 待执行）
+> 状态：**评审 + 执行方案**（S1/S2/S3 已落地；S4 待执行）
 > 触发：`chat_loop.rs` 达 2400 行，已到"不该再往单文件里加东西"的程度
 > 范围：`symbio/src/plugins/session/`（27 个 .rs，合计 16647 行；**S1 后**生产 12419 + 测试 4313）
 > 相关：`./core-loop.md`（核心循环收口，同批次完成）
@@ -133,23 +133,44 @@ chat_loop/tests.rs      测试                                                  
 
 ### 3.2 `plugin.rs` → `plugin/`
 
+原计划二分（下表曾是二分口径），实测 `plugin.rs` 去掉保留段后仍有 1030 行，
+二分等于把"长文件"从 `plugin.rs` 搬成 `plugin/vdfs.rs`，问题没解决。
+**实际按三分执行**：
+
 ```text
-plugin.rs                SessionPlugin 定义 + impl Plugin（路由 / traverse / 生命周期）   ~600
-plugin/vdfs.rs           impl VdfsProvider + 全部 VDFS 节点构造辅助（25 个函数）           ~600
-plugin/tests.rs          测试                                                           ~712
+plugin.rs                SessionPlugin 定义 + impl SessionPlugin + impl Plugin +
+                         配置定义 / now_ms + 模块声明与共享面 re-export            ~523
+plugin/nodes.rs          VDFS 节点构造 / 路径模型 / 消息投影（纯函数，不持有 self）  ~501
+plugin/vdfs_provider.rs  impl VdfsProvider + 其私有辅助（impl SessionPlugin 第二块） ~512
+plugin/tests.rs          测试（S1 已外置）                                            714
 ```
+
+命名注意：子模块**不能叫 `vdfs`**——`plugin.rs` 已 `use crate::symbio_core::vdfs;`，
+同名会 `E0255`（且子模块内 `vdfs::X` 会解析到自己）。故取 `vdfs_provider`。
 
 ### 3.3 `orchestrator.rs` → `orchestrator/`
 
+原计划（`consume.rs` + `guards.rs`）在实测后调整为**四分**：`impl SessionPlugin`
+独占 1197 行，若只拆出 guards，`consume.rs` 会拿到 773 行（其中
+`run_chat_loop_task` 一个函数就 382 行）。实测边界与落位：
+
 ```text
-orchestrator.rs          装配层：handle_chat_send_oneoff / resolve_session_params /
-                         ChatOrchestrator 装配                                             ~500
-orchestrator/consume.rs  消费循环：run_chat_loop_task / persist_failure /
-                         broadcast_status / handle_abort                                   ~570
-orchestrator/guards.rs   AiControlGuard / WorkingGuard / merge_message_patch /
-                         subtree_of                                                        ~300
-orchestrator/tests.rs    测试                                                             ~180
+orchestrator.rs          模块根：装配 + RAII 守卫 + resolve_required_session_id       ~320
+                         （守卫 71..299 = AiControlGuard / WorkingGuard /
+                           merge_message_patch，合计 229 行，留在根文件）
+orchestrator/consume.rs  消费循环：broadcast_error_with_idle / fail_before_loop /
+                         run_chat_loop_task(382) / handle_abort                        ~515
+orchestrator/send.rs     发送入口：resolve_session_params / handle_chat_send_oneoff(298) /
+                         handle_chat_abort_oneoff / ensure_auto_title                   ~425
+orchestrator/report.rs   上报与失败落库：broadcast_frame / broadcast_status /
+                         persist_failure(185) / subtree_of                              ~270
+orchestrator/tests.rs    测试（S1 已外置）                                             182
 ```
+
+拆 `impl SessionPlugin`（1197 行）意味着**拆成 4 个 `impl` 块**分散到 4 个文件
+——Rust 允许，且**方法声明顺序无语义**，故各文件内保持原相对顺序即可。
+⚠️ `handle_chat_send_oneoff` / `handle_chat_abort_oneoff` / `broadcast_frame`
+被 `plugin.rs` / `heartbeat.rs` 跨模块调用，必须 `pub(crate)`。
 
 ### 3.4 保持不动
 
@@ -165,7 +186,7 @@ orchestrator/tests.rs    测试                                                 
 |---|---|---|---|
 | **S1** ✅ | 测试外置（**21** 个文件 → `<module>/tests.rs`；含 `chat_loop/` 的 3 个测试模块） | 低（纯搬移，`use super::*` 语义不变） | 每步 `cargo check --tests`；末次 `cargo test --lib` 用例数不变 |
 | **S2** ✅ | 拆 `chat_loop.rs`（§3.1） | 中（跨模块可见性） | 生产代码总量不变；`cargo test --lib` 用例数不变 |
-| **S3** | 拆 `plugin.rs`（§3.2） | 中 | 同上 |
+| **S3** ✅ | 拆 `plugin.rs`（§3.2，实为**三分**） | 中 | 同上 |
 | **S4** | 拆 `orchestrator.rs`（§3.3） | 中高（消费循环是事故敏感区） | 同上 + 消费循环帧合并 / `persist_failure` 作用域逐字不变 |
 
 ### 4.1 S1 实施结果（2026-09-16）
@@ -225,6 +246,44 @@ orchestrator/tests.rs    测试                                                 
   `use` 清单与 re-export 就是子模块的共享导入面，无需逐文件重复导入。
 - 被搬移代码里的 `super::X::` 需**加深一层**（现在多了一层 `chat_loop/`）：
   本次 5 处（`super::tokenizer` / `super::compression` / `super::paths`）。
+
+### 4.3 S3 实施结果（2026-09-16）
+
+`plugin.rs` **1480 → 523 行**，拆出 2 个子模块（三分见 §3.2）：
+
+| 文件 | 行数 | 内容 |
+|---|---:|---|
+| `plugin.rs` | 523 | 结构体 / `impl SessionPlugin` / `impl Plugin` / `config_definition` / `now_ms` / 模块声明与 re-export |
+| `plugin/nodes.rs` | 501 | 23 个纯函数：路径模型 7 + 节点构造 6 + 消息投影 10 |
+| `plugin/vdfs_provider.rs` | 512 | `impl VdfsProvider`（415 行）+ `impl SessionPlugin` 私有辅助（7 个只读函数） |
+
+**归属微调**（与 §3.2 原表的差异，按"内聚"而非"行数"落位）：
+
+| 项 | 原计划 | 实际落位 | 理由 |
+|---|---|---|---|
+| `title_from_new_path` | `entities.rs` | `nodes.rs` | 它是**新建语义**（`new_types` → 路径名作标题），属 VDFS 路径模型 |
+| `config_definition` | `entities.rs` | `plugin.rs` | 配置面，紧邻其唯一调用点 `ConfigFile::new(dir, "会话设置", …)` |
+| `now_ms` | `entities.rs` | `plugin.rs` | 通用工具，模块根是它的自然归宿 |
+| `entities.rs` | 新建 | **不建** | 三个条目彼此无关，凑成一个 70 行文件反而降低内聚 |
+
+**保真校验**（口径同 §4.2）：旧 `plugin.rs` 994 条归一化代码行 vs. 新三文件 1011 条，
+差异**只有 21 条**且逐条可归因——4 条函数签名被 rustfmt 折行（`message_of` /
+`overlay_live` / `session_content` / `sub_session_of`，各展开为 4 行）+ 5 条新增的
+re-export 块脚手架；注释行差异 30 条全部是新增模块头，**零注释丢失、零代码改写**。
+
+**本次新增的可见性/路径经验**：
+
+- 被父模块 `pub(crate) use` 重导出的条目必须是 `pub(crate)`（§4.2 已记）；
+  **只被本模块子级使用**的（如 `now_ms`）保持私有即可——子模块经 `use super::*;`
+  可看到父模块的**私有**条目。
+- `super::X::` 加深一层：`nodes.rs` 7 处、`vdfs_provider.rs` 12 处
+  （`super::workdir::` → `super::super::workdir::`）。
+- 父模块 `use` 清单中**只被子模块使用**的导入**不会**触发 `unused_imports`
+  ——子模块的 glob 导入算作使用（S2/S3 两次验证）。
+
+**遗留（未做，属"零行为变更"之外）**：`plugin.rs` 的 `now_ms()` 与
+`heartbeat.rs` 的 `pub(crate) fn now_ms()` 是**两份等价实现**（前者 `SystemTime`、
+后者 `time::OffsetDateTime`）。合并为一处属行为微调，留待单独提交。
 
 **全程硬约束**：
 

@@ -1,0 +1,501 @@
+//! VDFS **节点构造 / 路径模型 / 消息投影**（自 `plugin.rs` 原样搬移，拆文件不拆行为）。
+//!
+//! 三组**纯函数**，都不持有 `self`：
+//! - **路径模型**：[`VdfsSessionPath`] / [`parse_session_path`] / [`SEG_MESSAGES`] /
+//!   [`message_dir_path`] / [`message_path`] / [`internal_dirs`] / [`title_from_new_path`]
+//! - **节点构造**：[`session_node`] / [`message_node`] / [`transcript_window`] /
+//!   [`window_params`] / `MAX_PARENT_STEPS` / `cursor_id`
+//! - **消息投影**：[`message_change`] / [`message_payload`] / `message_label` /
+//!   `message_status` / `message_preview` / [`message_text`] / [`ordered`] /
+//!   [`overlay_live`] / [`message_of`] / [`session_content`]
+//!
+//! 可见性：被 `plugin.rs` / `vdfs_provider.rs` / `plugin/tests.rs` 取用的项标
+//! `pub(crate)`，由 `plugin.rs` 统一重导出；只在本文件内部使用的保持私有。
+
+use super::*;
+
+/// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）。
+///
+/// 入参是 [`SessionSummary`] 而非 `Session`——**清单路径根本不持有消息**，
+/// 于是「节点又去碰消息」在类型上就写不出来。标题 / 摘要 / 元信息标签都是
+/// 存储层保存时算好的**投影**（`SessionSummary::of`），呈现口径因此单点。
+///
+/// 另在 `attributes` 上挂载会话清单所需字段（`message_count` / `metadata` /
+/// `meta_tags`）——它们是**场景数据**，VDFS 只透传；会话清单由此可直接用
+/// `vdfs/list` 一次取全（见 S8）。
+pub(crate) fn session_node(s: &SessionSummary, is_working: bool) -> vdfs::VdfsNode {
+    let mut n = vdfs::VdfsNode::file(&s.id, s.title.clone(), vdfs::VdfsAccess::READ_WRITE);
+    n.kind = PLUGIN_SESSION.to_string();
+    n.ext = Some(vdfs::VDFS_EXT_SESSION.to_string());
+    n.status = if is_working {
+        vdfs::VDFS_STATUS_WORKING
+    } else {
+        vdfs::VDFS_STATUS_ACTIVE
+    }
+    .to_string();
+    n.updated_at = Some(s.updated_at);
+    n.description = s.summary.clone();
+    let _ = n
+        .attributes
+        .insert("message_count".to_string(), json!(s.message_count));
+    let _ = n
+        .attributes
+        .insert("metadata".to_string(), s.metadata.clone());
+    let _ = n
+        .attributes
+        .insert("meta_tags".to_string(), json!(s.meta_tags));
+    n
+}
+
+// ==================== 有界列表（VDFS 调用级参数袋） ====================
+//
+// 「只取一页」不是会话专有需求——任何清单都会有这一天。所以它不是一个新接口，
+// 而是 `vdfs/list` 的**调用级参数**：谁传谁生效，不传就与从前逐字节一致
+// （`VdfsProvider::list` 的签名因此不必改动，其它 provider 一行都不用动）。
+
+/// 从调用级参数袋里取窗口：`limit`（条数，名义值）与 `before`（游标 = 上一页
+/// 最后一个条目的地址）。
+pub(crate) fn window_params(ctx: &vdfs::VdfsContext) -> (Option<u32>, Option<&str>) {
+    (
+        ctx.param_as::<u32>(VDFS_PARAM_LIMIT),
+        ctx.param_str(VDFS_PARAM_BEFORE),
+    )
+}
+
+/// 沿 `parent_id` 上溯的步数上限（防御成环；正常转写远小于此）
+const MAX_PARENT_STEPS: usize = 64;
+
+/// 转写的有界窗口 —— **根节点为计量单位**，且**父节点闭合**。
+///
+/// ## 为什么计量单位是「根」而不是「条」
+///
+/// 一个 Turn = 一个根消息 + 它的全部后代（reason / tool_call / 文本分块）。
+/// 按条数截断会把 Turn 劈成两半：前端拿到 reason 却拿不到它属于哪一轮，
+/// 树就拼不起来。所以 `limit` 是**名义值**——实际返回的条数恒 ≥ `limit`。
+///
+/// ## 父节点闭合
+///
+/// 只要某个根被选中，它的**全部**后代都在窗口里；反过来，窗口里不会出现在
+/// 窗口外的父节点（否则同样拼不成树）。
+///
+/// `before` 是上一页最后一条的地址（消息 id 或 `<…>/<id>`）；它会被归到自己的
+/// 根，从那个根**往前**再取 `limit` 个根。找不到游标（已删 / 已到末尾）返回空页，
+/// 让调用方自然收敛，不报错。
+pub(crate) fn transcript_window(
+    msgs: &[cm::ChatMessage],
+    limit: Option<u32>,
+    before: Option<&str>,
+) -> Vec<cm::ChatMessage> {
+    // 没给窗口参数 = 全量（前端流式期间要的就是完整列表）
+    if limit.is_none() && before.is_none() {
+        return msgs.to_vec();
+    }
+
+    let index: HashMap<&str, usize> = msgs
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.id.as_str(), i))
+        .collect();
+
+    // 每条消息的**根**：沿 parent_id 上溯；parent 缺失或不在列表里 ⇒ 自己即根
+    let root_of: Vec<usize> = msgs
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let mut cur = i;
+            for _ in 0..MAX_PARENT_STEPS {
+                let parent = match msgs[cur].parent_id.as_deref() {
+                    Some(p) if !p.is_empty() => p,
+                    _ => break,
+                };
+                match index.get(parent) {
+                    Some(&pi) if pi != cur => cur = pi,
+                    _ => break,
+                }
+            }
+            cur
+        })
+        .collect();
+
+    // 根的出现顺序（去重，保留首次出现序）
+    let mut roots: Vec<usize> = Vec::new();
+    let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for &r in &root_of {
+        if seen.insert(r) {
+            roots.push(r);
+        }
+    }
+
+    let end = match before.and_then(|b| cursor_id(b)).and_then(|b| index.get(b)) {
+        Some(&i) => roots
+            .iter()
+            .position(|&r| r == root_of[i])
+            .unwrap_or(roots.len()),
+        None => roots.len(),
+    };
+    let start = match limit {
+        Some(n) => end.saturating_sub(n as usize),
+        None => 0,
+    };
+
+    let keep: std::collections::HashSet<usize> = roots[start..end].iter().copied().collect();
+    msgs.iter()
+        .zip(&root_of)
+        .filter(|(_, r)| keep.contains(r))
+        .map(|(m, _)| m.clone())
+        .collect()
+}
+
+/// 游标 → 消息 id：游标可以是裸 id，也可以是 `<…>/<id>` 的地址形式
+fn cursor_id(before: &str) -> Option<&str> {
+    let b = before.trim_end_matches('/');
+    match b.rsplit('/').next() {
+        Some(id) if !id.is_empty() => Some(id),
+        _ => None,
+    }
+}
+
+// ==================== VDFS：会话内部寻址 ====================
+//
+// 会话在 VDFS 上**保持叶子**（`ext = session`，点击进聊天详情，语义不变）；
+// 其内部结构（转写 / 子会话 / 工作目录树）作为**会话同名目录**挂在会话之下：
+//
+//   <id>                  → 会话叶子（聊天详情）
+//   <id>/消息[/<mid>]      → 转写列表 / 单条消息（**列表项**）
+//   <id>/子会话[/<sub>]    → 子会话清单 / 单个子会话（查看 · 删除）
+//   <id>/工作目录[/<rel>]  → 工作目录树（文件可查看 / 编辑）
+//
+// 该寻址取代原「容器页」——同一批能力改由 VDFS 承载，机制侧零新增概念；
+// 场景实现仍复用 `workdir` 与子会话清单，VDFS 是这些能力的唯一入口。
+
+/// 会话内部：转写列表的路径段（同时是展示名）。
+///
+/// 转写是**列表**：`.vdfs/session/<id>/消息` 的每一项是一条消息，顺序由
+/// `seq`（唯一权威顺序锚点）决定。流式输出是列表项的**追加型变更**
+/// （`VDFS_CHANGE_APPENDED`），不是另一条协议。
+pub(crate) const SEG_MESSAGES: &str = "消息";
+
+/// 转写列表本身的 provider 子树内路径（`<id>/消息`）。
+///
+/// 与 [`message_path`] 同源：列表与列表项是同一地址方案的两级。
+pub(crate) fn message_dir_path(session_id: &str) -> String {
+    format!("{session_id}/{SEG_MESSAGES}")
+}
+
+/// 单条消息的 provider 子树内路径（`<id>/消息/<mid>`）。
+///
+/// 与 [`parse_session_path`] 互逆，因此与它同处——地址的「拼」与「解」必须同源，
+/// 分开写就会在改地址方案时漏改一边。变更发射（[`message_change`]）用它构造
+/// `VdfsChange::path`，与 `list` 返回的节点地址严格一致；编排层的删除帧
+/// （`orchestrator` 的消费循环）也用它——**同一条消息只有一个地址**，
+/// 不能一处拼一种。
+pub(crate) fn message_path(session_id: &str, mid: &str) -> String {
+    format!("{session_id}/{SEG_MESSAGES}/{mid}")
+}
+
+/// 一条消息补丁 → VDFS 变更。
+///
+/// 规则见 `docs/vdfs-session-messages.md` §4：
+///
+/// | 补丁形状 | 变更 | 载荷 |
+/// |---|---|---|
+/// | 新 `id`（此前未出现） | `created` | 节点视图 + 内容快照 |
+/// | 尾部追加了 `delta` | `appended` | **仅** `delta` |
+/// | 其余（状态迁移 / 全量替换） | `updated` | 节点视图 + 内容快照 |
+///
+/// `existed` 与 `appended` 都来自实际合并结果（`orchestrator::merge_message_patch`
+/// 的返回值），本函数**不做任何再判断**——它只把既成事实翻译成变更词汇。
+/// 判据若在这里重算一遍，就有可能与合并方式不一致：合并按追加、这里判成替换，
+/// 消费者按 `delta` 拼接就会得到错误内容。
+///
+/// `msg` 必须是**合并后的完整消息**（不是补丁）——载荷要能独立成立，
+/// 消费者拿到它就不必再回读。
+pub(crate) fn message_change(
+    session_id: &str,
+    msg: &cm::ChatMessage,
+    existed: bool,
+    appended: Option<String>,
+) -> vdfs::VdfsChange {
+    let path = message_path(session_id, &msg.id);
+    if !existed {
+        return message_payload(
+            vdfs::VdfsChange::new(path, vdfs::VDFS_CHANGE_CREATED),
+            session_id,
+            msg,
+        );
+    }
+    match appended.filter(|d| !d.is_empty()) {
+        // 追加走**窄载荷**：这一路每帧都发，多挂一个字就是 O(n²)。
+        Some(delta) => vdfs::VdfsChange::appended(path, delta),
+        None => message_payload(
+            vdfs::VdfsChange::new(path, vdfs::VDFS_CHANGE_UPDATED),
+            session_id,
+            msg,
+        ),
+    }
+}
+
+/// 给 `created` / `updated` 变更挂上**节点视图 + 内容快照**。
+///
+/// 这两类变更每轮只有寥寥数次，把「变成了什么」一并带上，消费者就不必
+/// 为了填一条消息再跑 `stat` + `read` 两个来回——VDFS 承载会话转写因此
+/// 不比既有的专用消息通道更贵。
+///
+/// `appended` **不走这里**：它每帧都发，载荷必须保持只有增量。
+pub(crate) fn message_payload(
+    change: vdfs::VdfsChange,
+    session_id: &str,
+    msg: &cm::ChatMessage,
+) -> vdfs::VdfsChange {
+    // 节点路径填成 provider 子树内相对路径，由分发层（`fs` / `composite` 的
+    // watch 包装）经 `map_paths` 补成展示地址——与 `list` 返回的节点同口径。
+    let mut node = message_node(msg);
+    node.path = message_path(session_id, &msg.id);
+    change.with_node(node).with_content(message_text(msg))
+}
+
+/// 会话挂载点内的路径解析结果
+pub(crate) enum VdfsSessionPath<'a> {
+    /// 挂载根 = 会话清单
+    Root,
+    /// `<id>`：单个会话（叶子）
+    Session(&'a str),
+    /// `<id>/消息[/<mid>]`：转写列表 / 单条消息；`mid` 空 = 列表本身
+    Messages { id: &'a str, mid: Option<&'a str> },
+    /// `<id>/子会话`：子会话清单
+    SubSessions(&'a str),
+    /// `<id>/子会话/<sub>`：单个子会话
+    SubSession { id: &'a str, sub: &'a str },
+    /// `<id>/工作目录[/<rel>]`：工作目录树；`rel` 空 = 工作目录根
+    Workdir { id: &'a str, rel: &'a str },
+}
+
+/// 解析会话挂载点内的相对路径（首段 = 会话 id，次段 = 内部区段）。
+pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath<'_>> {
+    let p = path.trim_matches('/');
+    if p.is_empty() {
+        return Ok(VdfsSessionPath::Root);
+    }
+    let (id, rest) = match p.split_once('/') {
+        Some((id, rest)) => (id, rest),
+        None => return Ok(VdfsSessionPath::Session(p)),
+    };
+    let (seg, sub) = match rest.split_once('/') {
+        Some((seg, sub)) => (seg, Some(sub)),
+        None => (rest, None),
+    };
+    let not_found = || vdfs::VdfsError::not_found(format!("会话内部不存在该路径：{path}"));
+    match seg {
+        SEG_MESSAGES => match sub {
+            None => Ok(VdfsSessionPath::Messages { id, mid: None }),
+            Some(mid) if !mid.is_empty() && !mid.contains('/') => {
+                Ok(VdfsSessionPath::Messages { id, mid: Some(mid) })
+            }
+            Some(_) => Err(vdfs::VdfsError::not_found(format!(
+                "消息是列表项，没有更深层级：{path}"
+            ))),
+        },
+        super::super::workdir::SEG_SUB_SESSIONS => match sub {
+            None => Ok(VdfsSessionPath::SubSessions(id)),
+            Some(sub) if !sub.is_empty() && !sub.contains('/') => {
+                Ok(VdfsSessionPath::SubSession { id, sub })
+            }
+            Some(_) => Err(vdfs::VdfsError::not_found(format!(
+                "子会话是叶子节点，没有更深层级：{path}"
+            ))),
+        },
+        super::super::workdir::SEG_WORKDIR => Ok(VdfsSessionPath::Workdir {
+            id,
+            rel: sub.unwrap_or(""),
+        }),
+        _ => Err(not_found()),
+    }
+}
+
+/// 会话内部的三个虚拟子目录（工作目录按会话是否声明 workdir 决定是否出现）
+pub(crate) fn internal_dirs(has_workdir: bool) -> Vec<vdfs::VdfsNode> {
+    let mut out = vec![
+        vdfs::VdfsNode::dir(SEG_MESSAGES, SEG_MESSAGES, vdfs::VdfsAccess::LIST),
+        vdfs::VdfsNode::dir(
+            super::super::workdir::SEG_SUB_SESSIONS,
+            super::super::workdir::SEG_SUB_SESSIONS,
+            vdfs::VdfsAccess::LIST,
+        ),
+    ];
+    if has_workdir {
+        out.push(vdfs::VdfsNode::dir(
+            super::super::workdir::SEG_WORKDIR,
+            super::super::workdir::SEG_WORKDIR,
+            vdfs::VdfsAccess::LIST,
+        ));
+    }
+    out
+}
+
+// ==================== VDFS：转写列表项 ====================
+//
+// 呈现的分工只有一条：**正文进内容，结构进 `attributes`**。
+// - `read` 取到的是这条消息的**正文**——流式追加的正是它，因此追加型变更的增量
+//   可以直接拼在尾部，消费者无需为每个片段重读整条消息；
+// - 角色 / 类型 / 状态 / 顺序 / 归属等**结构字段**放 `attributes`——它们是场景
+//   数据，VDFS 只透传，渲染器按 `ext = message` 自行取用。
+//
+// 消息在 VDFS 上是**只读列表项**：发言由聊天协议承载（一次发言触发一整轮编排，
+// 不是一次文件写入），VDFS 只做「读同一份数据」，因此不存在两条写路径。
+
+/// 消息节点的标题：角色（工具调用补上工具名，否则一屏全是「助手」）
+fn message_label(m: &cm::ChatMessage) -> String {
+    let role = match m.role {
+        Some(cm::MessageRole::User) => "用户",
+        Some(cm::MessageRole::Assistant) => "助手",
+        Some(cm::MessageRole::Tool) => "工具",
+        Some(cm::MessageRole::System) => "系统",
+        None => "消息",
+    };
+    match (m.msg_type.as_ref(), m.name.as_deref()) {
+        (Some(cm::MessageType::ToolCall), Some(name)) if !name.is_empty() => {
+            format!("{role} · {name}")
+        }
+        (Some(cm::MessageType::ToolCall), _) => format!("{role} · 工具调用"),
+        _ => role.to_string(),
+    }
+}
+
+/// 消息状态词——与 `MessageStatus` 的序列化名一致（前端按同一套词渲染角标）。
+///
+/// `completed` 与「未标注」都落到 VDFS 的常规状态词 `active`：节点状态只有一套
+/// 词汇表（`VDFS_STATUS_*`），不为场景再造一套。
+fn message_status(m: &cm::ChatMessage) -> &'static str {
+    match m.status.as_ref() {
+        Some(cm::MessageStatus::Pending) => "pending",
+        Some(cm::MessageStatus::Streaming) => "streaming",
+        Some(cm::MessageStatus::WaitingUserAction) => "waiting_user_action",
+        Some(cm::MessageStatus::Failed) => "failed",
+        _ => vdfs::VDFS_STATUS_ACTIVE,
+    }
+}
+
+/// 消息摘要（首行、压空白、限长）——列表里的一行预览
+fn message_preview(m: &cm::ChatMessage) -> Option<String> {
+    let text = m.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.is_empty() {
+        return None;
+    }
+    const MAX: usize = 60;
+    if flat.chars().count() <= MAX {
+        return Some(flat);
+    }
+    Some(format!("{}…", flat.chars().take(MAX).collect::<String>()))
+}
+
+/// 单条消息 → VDFS 节点（**列表项**）
+pub(crate) fn message_node(m: &cm::ChatMessage) -> vdfs::VdfsNode {
+    let mut n = vdfs::VdfsNode::file(&m.id, message_label(m), vdfs::VdfsAccess::READ);
+    n.ext = Some(vdfs::VDFS_EXT_MESSAGE.to_string());
+    n.status = message_status(m).to_string();
+    n.updated_at = m.timestamp;
+    n.description = message_preview(m);
+    for (k, v) in [
+        ("role", json!(m.role)),
+        ("type", json!(m.msg_type)),
+        ("parent_id", json!(m.parent_id)),
+        ("seq", json!(m.seq)),
+        ("error", json!(m.error)),
+    ] {
+        let _ = n.attributes.insert(k.to_string(), v);
+    }
+    let _ = n
+        .attributes
+        .insert("meta".to_string(), m.meta.clone().unwrap_or(Value::Null));
+    n
+}
+
+/// 消息正文——**流式追加的正是它**。
+///
+/// - `Text` / `Reasoning` / `UserPrompt`：纯文本正文；
+/// - `Turn` / `ToolCall`（组合节点，本身无正文）：给一份稳定的 JSON 视图，
+///   使前端与 LLM 在同一个地址上都能取到完整结构。
+pub(crate) fn message_text(m: &cm::ChatMessage) -> String {
+    match m.msg_type {
+        Some(cm::MessageType::Turn) | Some(cm::MessageType::ToolCall) => {
+            serde_json::to_string_pretty(m).unwrap_or_default()
+        }
+        _ => m.content.as_ref().map(|c| c.to_text()).unwrap_or_default(),
+    }
+}
+
+/// 转写按 `seq` 升序——`seq` 是唯一权威顺序锚点。
+///
+/// 稳定排序：缺 `seq` 的（本轮**在途**消息——存储尚未写入、因而还没分配 `seq`）
+/// 排在最后并保持原有相对顺序，恰好落在「最新的消息在末尾」，不会被排到历史之前。
+pub(crate) fn ordered(mut msgs: Vec<cm::ChatMessage>) -> Vec<cm::ChatMessage> {
+    msgs.sort_by_key(|m| m.seq.unwrap_or(i64::MAX));
+    msgs
+}
+
+/// 把本轮**在途**消息叠加到落库转写上。
+///
+/// 同 id 时在途版本胜出（它是更新的那一份），但 `seq` 例外——顺序锚点只由存储
+/// 在写入时分配，在途副本没有，必须从落库版本继承。否则同一条消息会以
+/// 「有 seq / 无 seq」两种形态被排到列表的两个位置。
+pub(crate) fn overlay_live(
+    stored: Vec<cm::ChatMessage>,
+    live: Vec<cm::ChatMessage>,
+) -> Vec<cm::ChatMessage> {
+    let mut out = stored;
+    for l in live {
+        match out.iter_mut().find(|m| m.id == l.id) {
+            Some(s) => {
+                let seq = s.seq;
+                *s = l;
+                s.seq = seq;
+            }
+            None => out.push(l),
+        }
+    }
+    out
+}
+
+/// 按 id 取单条消息
+pub(crate) fn message_of<'a>(
+    msgs: &'a [cm::ChatMessage],
+    mid: &str,
+) -> vdfs::VdfsResult<&'a cm::ChatMessage> {
+    msgs.iter()
+        .find(|m| m.id == mid)
+        .ok_or_else(|| vdfs::VdfsError::not_found(format!("消息不存在：{mid}")))
+}
+
+/// 会话内容（转写全文 + 元数据）→ VDFS 文本内容
+pub(crate) fn session_content(
+    session: &super::super::types::Session,
+) -> vdfs::VdfsResult<vdfs::VdfsContent> {
+    let payload = json!({
+        "id": session.id,
+        "title": session.display_title(),
+        "metadata": session.metadata,
+        "messages": session.messages,
+        "updated_at": session.updated_at,
+    });
+    let text = serde_json::to_string_pretty(&payload)
+        .map_err(|e| vdfs::VdfsError::internal(format!("会话序列化失败：{e}")))?;
+    Ok(vdfs::VdfsContent::text("", text).with_mime("application/json"))
+}
+
+/// 新建会话的标题：路径名去掉扩展名（`<标题>.session` → `<标题>`）。
+///
+/// 新建时使用方给出的是**标题**而非会话 id——id 是存储细节，由 provider 生成
+/// （见 [`vdfs::VdfsProvider::write`] 的 `create` 分支），不属于使用方的知识。
+pub(crate) fn title_from_new_path(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    let stem = base
+        .strip_suffix(&format!(".{}", vdfs::VDFS_EXT_SESSION))
+        .unwrap_or(base)
+        .trim();
+    if stem.is_empty() {
+        "新对话".to_string()
+    } else {
+        stem.to_string()
+    }
+}

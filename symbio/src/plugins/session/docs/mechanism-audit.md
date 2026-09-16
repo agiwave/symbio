@@ -3,6 +3,8 @@
 > 状态：审计结论（含可执行方案）。本文是 `docs/archive/implementation-logs/session-mechanism-simplification.md`
 > 的后续核查版——那份方案里的部分判断被本次取证推翻或修正，差异见 §6。
 > 所有结论都带 `文件:行号` 证据，可逐条复核。
+> ⚠️ **行号是审计当时的快照**：S2/S3（2026-09-16）已把 `chat_loop.rs`、`plugin.rs`
+> 拆成多文件（见 `./module-layout.md`），行号必然漂移，**一律按符号名检索**。
 
 ---
 
