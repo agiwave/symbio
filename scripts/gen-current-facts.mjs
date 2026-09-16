@@ -316,6 +316,150 @@ function analyzePlugin(dirName, ids) {
   };
 }
 
+// ================= 规模与宿主接缝的提取 =================
+
+/** 目录遍历时跳过的名字（构建产物 / 依赖 / 版本库） */
+const SCOPE_SKIP = ["target", "vendor", "node_modules", "dist", ".git"];
+
+/** 递归收集指定后缀的文件（测试文件按 `*.test.rs` / `*.spec.*` 单独归类，不混进实现） */
+function walkScope(dir, exts, isTest) {
+  const out = [];
+  let ents;
+  try {
+    ents = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of ents) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (SCOPE_SKIP.includes(e.name)) continue;
+      out.push(...walkScope(p, exts, isTest));
+      continue;
+    }
+    const test = e.name.endsWith(".test.rs") || e.name.endsWith(".spec.ts") || e.name === "tests.rs";
+    if (!exts.some((x) => e.name.endsWith(x)) || test !== isTest) continue;
+    out.push(p);
+  }
+  return out;
+}
+
+function countLines(files) {
+  let n = 0;
+  for (const f of files) n += readFileSync(f, "utf8").split("\n").length - 1;
+  return n;
+}
+
+/** 一个统计范围：dir 相对仓库根，exts 参与统计的后缀 */
+function scopeRow(dir, exts) {
+  const impl = walkScope(path.join(ROOT, dir), exts, false);
+  const test = walkScope(path.join(ROOT, dir), exts, true);
+  return {
+    dir,
+    implFiles: impl.length,
+    implLines: countLines(impl),
+    testFiles: test.length,
+    testLines: countLines(test),
+  };
+}
+
+function scopeRows() {
+  return [
+    scopeRow(path.join("symbio", "src"), [".rs"]),
+    scopeRow(path.join("cli", "src"), [".rs"]),
+    scopeRow(path.join("tauri", "src-tauri", "src"), [".rs"]),
+    scopeRow(path.join("tauri", "src"), [".ts", ".vue"]),
+  ];
+}
+
+/** `generate_handler![…]` 里**实际注册**的 command（先剥注释，被注释掉的不算接缝） */
+function tauriCommands() {
+  const file = path.join(ROOT, "tauri", "src-tauri", "src", "main.rs");
+  let txt;
+  try {
+    txt = stripComments(readFileSync(file, "utf8"));
+  } catch {
+    return [];
+  }
+  const m = txt.match(/generate_handler!\s*\[([\s\S]*?)\]/);
+  if (!m) return [];
+  return [...m[1].matchAll(/(?:commands|crate)::([a-z0-9_]+)|^\s*([a-z0-9_]+)\s*,/gm)]
+    .map((g) => g[1] ?? g[2])
+    .filter(Boolean);
+}
+
+/** 前端 router：route 条数与真实组件数（redirect 不算组件——视图收敛程度是可数的事实） */
+function tauriViews() {
+  const file = path.join(ROOT, "tauri", "src", "router", "index.ts");
+  let txt;
+  try {
+    txt = readFileSync(file, "utf8");
+  } catch {
+    return { routes: 0, components: 0, components_list: [] };
+  }
+  const routes = [...txt.matchAll(/\{\s*(?:path|redirect)/g)].length;
+  const comps = [...new Set([...txt.matchAll(/component:\s*([A-Za-z]\w*)/g)].map((g) => g[1]))];
+  return { routes, components: comps.length, components_list: comps };
+}
+
+/**
+ * CLI 面：进程选项 + REPL 内置命令。
+ *
+ * 权威来源是 `cli/src/args.rs` 的 `HELP` 常量（无子命令树、不依赖 clap）。
+ * 之所以用提取而非手写清单：手写时我把「交互模式内置命令」当成了不存在的
+ * 「子命令」，还漏掉了 `--heartbeat`——事实表里的清单一旦手写就会腐烂。
+ */
+function cliSurface() {
+  const file = path.join(ROOT, "cli", "src", "args.rs");
+  let txt;
+  try {
+    txt = readFileSync(file, "utf8");
+  } catch {
+    return { longs: [], shorts: [], repl: [] };
+  }
+  const m = txt.match(/const HELP: &str = "\s*([\s\S]*?)\n"/);
+  const help = m ? m[1] : "";
+  const section = (from, to) => {
+    const a = help.indexOf(from);
+    if (a < 0) return "";
+    const rest = help.slice(a + from.length);
+    const b = to ? rest.indexOf(to) : -1;
+    return b < 0 ? rest : rest.slice(0, b);
+  };
+  const optBlock = section("选项:", "交互模式内置命令:");
+  const replBlock = section("交互模式内置命令:", "输出约定:");
+  return {
+    longs: [...new Set([...optBlock.matchAll(/--[a-z][\w-]*/g)].map((g) => g[0]))],
+    shorts: [...new Set([...optBlock.matchAll(/(?:^|\s)-([A-Za-z])(?=[\s,])/g)].map((g) => `-${g[1]}`))],
+    repl: [...new Set([...replBlock.matchAll(/(?:^|\s)(\/[\w-]+)/g)].map((g) => g[1]))],
+  };
+}
+
+/**
+ * Gateway 对外端点：从 `server.rs` 的分派代码提取，而不是从 README 抄。
+ *
+ * 动机：README 里写的是 `/api/route`、`/api/ws`，代码里是 `/api/v1/invoke`、
+ * `/api/v1/health`——文档腐烂的活案例。端点由 `req.path.starts_with("…")` 决定，
+ * 所以正则扫代码就是权威。
+ */
+function gatewayEndpoints() {
+  const file = path.join(ROOT, "symbio", "src", "plugins", "gateway", "server.rs");
+  let txt;
+  try {
+    txt = stripComments(readFileSync(file, "utf8"));
+  } catch {
+    return { http: [], ws: false };
+  }
+  const http = [
+    ...new Set(
+      [...txt.matchAll(/req\.method == "(\w+)" && req\.path\.starts_with\("([^"]+)"\)/g)].map(
+        (g) => `${g[1]} ${g[2]}`
+      )
+    ),
+  ];
+  return { http, ws: /fn\s+ws_handshake/.test(txt) };
+}
+
 // ================= 渲染 =================
 
 const TOOL_NOTES = {
@@ -473,7 +617,50 @@ function render() {
   );
   L.push("");
 
-  // ── §5 生成信息 ─────────────────────────────────────────────────────
+  // ── §5 规模与宿主接缝（可验证的量化事实）──────────────────────────
+  L.push("## 5. 规模与宿主接缝");
+  L.push("");
+  L.push("### 5.1 代码规模（不含 `target/` `vendor/` `node_modules/` `dist/`，实现与测试分列）");
+  L.push("");
+  L.push("| 范围 | 实现 | 测试 |");
+  L.push("|---|---|---|");
+  for (const s of scopeRows()) {
+    L.push(
+      `| \`${s.dir}\` | ${s.implFiles} 文件 / ${s.implLines} 行 | ${s.testFiles} 文件 / ${s.testLines} 行 |`
+    );
+  }
+  L.push("");
+  L.push("### 5.2 宿主接缝（前端到底有多大）");
+  L.push("");
+  const ipc = tauriCommands();
+  L.push(
+    `- **Tauri IPC**：注册 ${ipc.length} 个 command —— ${fmtList(ipc)}（` +
+      "`tauri/src-tauri/src/main.rs::generate_handler!`；`commands.rs` 内另有未注册的" +
+      "历史 `#[tauri::command]` 函数，不计入接缝）"
+  );
+  const views = tauriViews();
+  L.push(
+    `- **前端路由**：${views.routes} 条 route，其中真实组件 ${views.components} 个（${fmtList(
+      views.components_list
+    )}）；其余为旧地址 ` +
+      "`redirect`。即「一台控件承载全部资源类型」在代码里可数。"
+  );
+  const gw = gatewayEndpoints();
+  L.push(
+    `- **Gateway 端点**：${fmtList(gw.http)}${gw.ws ? " + WS 升级（任意 path，首帧 = `PluginMessageWire`）" : ""}` +
+      "（提取自 `gateway/server.rs` 的 `req.path.starts_with`；README 旧写的 `/api/route`、`/api/ws` 与代码不符）"
+  );
+  const cli = cliSurface();
+  L.push(
+    `- **CLI 面**：进程选项 ${cli.longs.length} 个长 + ${cli.shorts.length} 个短（${fmtList(
+      cli.longs
+    )}）；交互模式内置命令 ${cli.repl.length} 个（${fmtList(
+      cli.repl
+    )}）。无子命令树、不依赖 clap，权威来源是 \`cli/src/args.rs\` 的 \`HELP\`。`
+  );
+  L.push("");
+
+  // ── §6 生成信息 ─────────────────────────────────────────────────────
   L.push("---");
   L.push("");
   const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");

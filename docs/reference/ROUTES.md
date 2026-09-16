@@ -162,14 +162,20 @@
 
 ## Local 插件
 
+> **路由按工具名动态分发**：`local/<工具短名>`，与 LLM 工具是同一份集合
+> （`route()` 里 `tool_impls.iter().find(|t| t.name() == path)`）。
+
 | 路径 | 用途 | 安全风险 |
 |------|------|----------|
-| `local/shell` | 执行 Shell 命令 | ⚠️ 高危 |
-| `local/file_read` | 读取文件 | 安全 |
-| `local/file_write` | 写入文件 | ⚠️ 中 |
-| `local/file_edit` | 编辑文件 | ⚠️ 中 |
-| `local/glob_search` | 文件模式搜索 | 安全 |
+| `local/cmd`（Windows）/ `local/sh`（macOS / Linux） | 执行 Shell 命令（工具名按操作系统取） | ⚠️ 高危 |
 | `local/content_search` | 内容搜索 (ripgrep) | 安全 |
+| `local/todo_write` | 会话任务清单（`LastOnly` 保留策略） | 安全 |
+| `local/codebase_search` | 语义代码搜索 | 安全 |
+
+> 文件编辑类原生工具（`file_read` / `file_write` / `file_edit` / `glob_search` 等）
+> **已迁入 VDFS 物理层**，由 `vdfs` 插件以 `vdfs_read` / `vdfs_write` / `vdfs_edit` /
+> `vdfs_search` 等统一暴露（见 §资源（VDFS）），本插件不再提供。
+> `ask_user` 能力源码存在但**暂未注册**（见 `plugins/local/ask_user.rs` 顶部注释）。
 
 ### Shell 命令策略
 
@@ -293,11 +299,13 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ## Hook 插件
 
+> 注意命名空间是**注册名 `hooks`**（目录名是 `hook`，`PluginMeta::new("hooks", …)`）。
+
 | 路径 | 用途 |
 |------|------|
-| `hook/register` | 注册钩子 |
-| `hook/trigger` | 触发钩子 |
-| `hook/list` | 列出已注册钩子 |
+| `hooks/register` | 注册钩子 |
+| `hooks/fire` | 触发钩子（源码 `route()` 臂为 `fire`，无 `trigger`） |
+| `hooks/list` | 列出已注册钩子 |
 
 ### 系统事件
 
@@ -319,8 +327,12 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 | 路径 | 用途 |
 |------|------|
-| `event_bus/subscribe` | 订阅事件 |
-| `event_bus/publish` | 发布事件 |
+| `event_bus/subscribe` | 订阅事件（连接级 SSE 风格推送） |
+| `event_bus/ping` | 存活探测 |
+| `event_bus/pending/snapshot` | 拉取待消费事件快照 |
+
+> `event_bus/publish` **不存在**：本插件是进程内帧广播（如会话流式增量、
+> VDFS 变更），发布方在进程内直接调用，不经路由。
 
 ---
 

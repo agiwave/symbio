@@ -34,7 +34,7 @@
 │  │       ├── agent    ─── OAB Bundle 宿主 · 身份工具 · MCP 声明         │  │
 │  │       ├── session  ─── 会话编排唯一入口 · 工具循环 · 压缩 · 直连 model   │  │
 │  │       ├── model    ─── 无状态单轮 LLM 网关 · 多协议适配 │  │
-│  │       ├── local    ─── shell / file_read|write|edit / glob / search  │  │
+│  │       ├── local    ─── cmd|sh / search / todo / codebase_search          │  │
 │  │       ├── web      ─── http_request / web_search / web_fetch         │  │
 │  │       ├── vdfs     ─── 文件系统本身 · vdfs/* 协议 + vdfs_* 工具      │  │
 │  │       ├── skill    ─── SKILL.md 加载与执行                           │  │

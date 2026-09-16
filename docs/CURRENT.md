@@ -98,6 +98,24 @@
 | Agent bundle | bundle 目录（工作区级 + 全局级双层） | `BundleStore` 自管，不经 `vdfs_service` |
 | 插件配置（含会话配置） | `<homedir>/plugins/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `ConfigFile` 自读写，**无第二种后端、无第二条配置协议** |
 
+## 5. 规模与宿主接缝
+
+### 5.1 代码规模（不含 `target/` `vendor/` `node_modules/` `dist/`，实现与测试分列）
+
+| 范围 | 实现 | 测试 |
+|---|---|---|
+| `symbio\src` | 196 文件 / 50383 行 | 34 文件 / 6400 行 |
+| `cli\src` | 4 文件 / 1143 行 | 0 文件 / 0 行 |
+| `tauri\src-tauri\src` | 3 文件 / 347 行 | 0 文件 / 0 行 |
+| `tauri\src` | 76 文件 / 15475 行 | 19 文件 / 2779 行 |
+
+### 5.2 宿主接缝（前端到底有多大）
+
+- **Tauri IPC**：注册 3 个 command —— `route_v2` · `route_v2_send` · `route_v2_close`（`tauri/src-tauri/src/main.rs::generate_handler!`；`commands.rs` 内另有未注册的历史 `#[tauri::command]` 函数，不计入接缝）
+- **前端路由**：9 条 route，其中真实组件 2 个（`MainLayout` · `VdfsView`）；其余为旧地址 `redirect`。即「一台控件承载全部资源类型」在代码里可数。
+- **Gateway 端点**：`GET /api/v1/health` · `POST /api/v1/invoke` + WS 升级（任意 path，首帧 = `PluginMessageWire`）（提取自 `gateway/server.rs` 的 `req.path.starts_with`；README 旧写的 `/api/route`、`/api/ws` 与代码不符）
+- **CLI 面**：进程选项 13 个长 + 7 个短（`--message` · `--session` · `--provider` · `--mode` · `--workdir` · `--homedir` · `--agent` · `--repl` · `--heartbeat` · `--quiet` · `--verbose` · `--help` · `--version`）；交互模式内置命令 7 个（`/help` · `/new` · `/session` · `/provider` · `/workdir` · `/exit` · `/quit`）。无子命令树、不依赖 clap，权威来源是 `cli/src/args.rs` 的 `HELP`。
+
 ---
 
-> 生成时间：2026-09-16 07:34:24 UTC · 源：`git rev-parse HEAD` = `621c17a`
+> 生成时间：2026-09-16 08:49:10 UTC · 源：`git rev-parse HEAD` = `9690ae9`

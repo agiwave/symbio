@@ -72,7 +72,7 @@ HTTP/WS 客户端 ──(gateway 插件)──►  Home /        setting / hook 
 | `agent` | 智能体资产 | OAB Bundle 宿主：装配人格片段、声明 MCP、经 `traverse` 贡献 `agent_identity` 与 `agent_run` 能力 |
 | `session` | 会话中心 | 会话编排唯一入口：工具调用循环、提示词组装、消息持久化与上下文压缩 |
 | `model` | LLM 网关 | 无状态单轮推理（`ModelProvider::execute_turn`，由 session 收集后直调，不占路由），多协议适配（OpenAI Chat / Responses / Anthropic / Gemini） |
-| `local` | 本地工具 | shell / file_read / file_write / file_edit / glob_search / content_search |
+| `local` | 本地工具 | `cmd`（Win）/`sh`（Unix）/ content_search / todo_write / codebase_search（文件操作已迁 `vdfs_*`，见 [docs/CURRENT.md](./docs/CURRENT.md)） |
 | `web` | Web 工具 | http_request / web_search / web_fetch |
 | `vdfs` | 资源文件系统 | 文件系统本身：对前端 `vdfs/*`（13 操作）、对 LLM `vdfs_*` 工具；`.vdfs`/物理两层由同一 `UnifiedFs` 分流 |
 | `skill` | 技能 | 加载与执行技能定义 |

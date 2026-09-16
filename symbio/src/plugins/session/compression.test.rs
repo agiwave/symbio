@@ -289,6 +289,49 @@ fn test_compression_prompt_has_reconciliation_and_hygiene_rules() {
     );
 }
 
+/// 模板回归锚点：可再生事实的**指针化**，以及内核提示词的**去项目化**。
+///
+/// 事故一（为什么要有指针化规则）：某轮压缩把「session store kinds =
+/// file/sqlite/memory」写进 key_knowledge，而该三后端选型早已被删除、事实表
+/// §4 也已更新。过期事实以权威口吻进入快照后，直接误导了下一轮判断。根因不是
+/// 模型抄错，而是让摘要器复述可再生的仓库事实——摘要器只拿到 history JSON、
+/// 没有工具，规则里"旧快照是未验证的输入"它根本无力执行。
+///
+/// 事故二（为什么规则里不许出现项目专名）：第一版规则直接写了
+/// `docs/CURRENT.md` 与 "plugins / store backends"。本文件是**通用**压缩器，
+/// 随 agent 分发到任意仓库；把某个仓库的目录约定编进内核，等于让内核依赖
+/// 它不该知道的东西，对其他项目既无效又是腐化点。项目特定知识归项目侧
+/// （persona / 事实表自身的说明），内核只保留可迁移的原则。
+///
+/// 故三条断言缺一不可：
+/// 1. 指针化原则在场（区分可再生 vs 仅对话可知）；
+/// 2. 反向护栏在场（仅对话可知者必须完整保留，防"少写点"式误读）；
+/// 3. 项目专名缺席——用不含任何路径的通用措辞表达前两条。
+#[test]
+fn test_compression_prompt_delegates_regenerable_facts_generically() {
+    let prompt = get_compression_prompt();
+    assert!(
+        prompt.contains("REGENERABLE"),
+        "模板缺少「可再生事实指针化」原则"
+    );
+    assert!(
+        prompt.contains("MUST be kept in full"),
+        "模板缺少反向护栏：仅对话可知的事实必须完整保留"
+    );
+    // 护栏必须限定指针化的适用边界，否则会被误读成整体减少信息量。
+    assert!(
+        prompt.contains("never a licence to lose judgement"),
+        "模板未声明指针化不等于丢弃判断依据"
+    );
+    // 内核不得携带任何具体仓库的路径或模块约定
+    for forbidden in ["CURRENT.md", "docs/", "symbio/"] {
+        assert!(
+            !prompt.contains(forbidden),
+            "通用压缩提示词混入项目专有知识：{forbidden}"
+        );
+    }
+}
+
 /// 诉求3：压缩模板只走 system role，user 消息只携带待压缩数据
 /// （prepare_compression / build_compression_request 均不得内嵌模板）。
 #[test]
