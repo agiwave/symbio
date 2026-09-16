@@ -68,8 +68,11 @@ fn home_dir() -> PluginDir {
 }
 
 /// 旧形态的集中式配置文件（迁移用；迁移后改名保留）
+///
+/// 位于系统根下——home 自己的目录就是系统根，所以从 [`home_dir`] 取，
+/// 不再另写一份全局路径。
 fn legacy_config_path() -> PathBuf {
-    HomedirRegistry::get().join("config.yaml")
+    home_dir().dir().join("config.yaml")
 }
 
 /// Home 自己的配置（`<homedir>/PLUGIN.yml`）

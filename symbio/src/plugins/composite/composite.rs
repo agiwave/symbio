@@ -205,7 +205,7 @@ impl Composite {
     /// [`plugins_root`]——两者在装配态下是同一个路径。
     fn plugins_root_of(ctx: &Arc<dyn InvokeRequest>) -> PathBuf {
         ctx.get(PLUGIN_DIR)
-            .map(|d| d.plugins_root())
+            .map(|d| d.as_plugins_root())
             .unwrap_or_else(plugins_root)
     }
 

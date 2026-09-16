@@ -815,8 +815,9 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
   读写配置（§3.4），容器不碰它的配置。
 - 「必需插件」清单是**构造者的策略**，经 ctx 键 `REQUIRED_PLUGINS` 传入——容器
   不内置任何清单。`home` 声明 `SYSTEM_PLUGINS` 并随构造传入。
-- 容器扫描的是**自己目录下的 `plugins/`**（`PluginDir::plugins_root`）：`home`
-  不住在 `plugins/` 下，因此扫描不会构造出第二个 `home`（否则自举成环）。
+- 容器扫描的是**自己的目录**（`PluginDir::as_plugins_root`，= 系统根）：系统级插件
+  `home` 的目录就是系统根本身、不与业务插件并列，因此扫描不会构造出第二个 `home`
+  （否则自举成环）。
 
 ### 13.3 VDFS 插件（vdfs）——访问层与统一文件系统
 

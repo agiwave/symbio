@@ -176,10 +176,12 @@ impl PluginDir {
         Self::at(HomedirRegistry::get(), plugin)
     }
 
-    /// 以本目录为**系统根**，插件根就是它自己：`<本目录>/<插件>`
+    /// 把**本目录当成系统根**：插件根就是它自己（`<本目录>/<插件>`）
     ///
-    /// 容器的视角——它拿到系统根，据此定位自己管辖的插件。
-    pub fn plugins_root(&self) -> PathBuf {
+    /// ⚠️ 只有**系统级插件**（`home` / `composite`，其目录就是系统根）可以这样看。
+    /// 叶子插件调它拿到的是自己的目录，不是任何「根」——需要自己的目录直接用
+    /// [`dir`](Self::dir)。名字里的 `as_` 正是在提示这是一种**视角转换**，不是查询。
+    pub fn as_plugins_root(&self) -> PathBuf {
         self.dir.clone()
     }
 

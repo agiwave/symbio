@@ -30,7 +30,7 @@
 │  │                     Plugin Tree (运行时)                             │  │
 │  │                                                                      │  │
 │  │   Home (/)                                                           │  │
-│  │   └── worker (Composite) ─── 扫描 plugins/ 目录（每目录一个 PLUGIN.yml）动态挂载 │  │
+│  │   └── worker (Composite) ─── 扫描自己的目录（每目录一个 PLUGIN.yml） │  │
 │  │       ├── agent    ─── OAB Bundle 宿主 · 身份工具 · MCP 声明         │  │
 │  │       ├── session  ─── 会话编排唯一入口 · 工具循环 · 压缩 · 直连 model   │  │
 │  │       ├── model    ─── 无状态单轮 LLM 网关 · 多协议适配 │  │

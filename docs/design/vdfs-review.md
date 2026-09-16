@@ -266,10 +266,11 @@
 
 - `home` 与它构造的容器 `composite` 的目录是**系统根** `<homedir>` 本身
   （`PluginDir::system`），配置在 `<homedir>/PLUGIN.yml`；容器只把系统根当**锚点**，
-  它管辖的插件根是 `PluginDir::plugins_root()` = `<系统根>/plugins`。
+  它管辖的插件根是 `PluginDir::as_plugins_root()` = 系统根本身。
   `composite` 可以理解为「`home` 动态加载自己的内置替身」——同目录、无自身配置。
-- ⚠️ **`plugins/` 里不能有 `home`**：否则容器扫描插件根时会把它当普通插件再构造
-  一次，那个 home 又构造容器 → 无限递归。自举环靠「系统级插件不住在 `plugins/` 下」消掉。
+- ⚠️ **插件根下不能有 `home`**：否则容器扫描插件根时会把它当普通插件再构造
+  一次，那个 home 又构造容器 → 无限递归。自举环靠「系统级插件不住在插件根下」消掉
+  （它的目录就是系统根，不与业务插件并列）。
 
 **职责划分**
 
@@ -366,7 +367,7 @@
   `SessionStore::load_session_checked`（存在性判据）替换 `session_of` 的全量清单 `find`。
 
 - **S8 配置回到插件目录（改造三，§6.3）**：新增 `symbio_core::plugin_dir`
-  （`PLUGIN.yml` 规范 + `PluginDir`：`of` / `at` / `system` / `plugins_root` /
+  （`PLUGIN.yml` 规范 + `PluginDir`：`of` / `at` / `system` / `as_plugins_root` /
   `read_manifest` / `load` / `save` / `ensure_manifest` / `remove_keys`，身份字段
   读写自动剥离 / 补回）；新增 `plugin_dir::ConfigFile`（`node` / `read` / `apply` =
   校验 → 落内存 → 落自己的文件 → 广播），地址用**真实文件名** `PLUGIN.yml`；
@@ -381,8 +382,8 @@
   `composite` 的向上转发与 `get_parent`、`model::persist_to_parent`。
 
 - **S9 系统级插件 + 清单归构造者**（两条架构纠正）：`home` 与容器 `composite` 的目录
-  改为**系统根**（`PluginDir::system`），`plugins/` 下不再有 `home`——消掉
-  「容器扫到 home 再构造一个 home」的自举环；容器经 `PluginDir::plugins_root()` 定位
+  改为**系统根**（`PluginDir::system`），插件根下不再有 `home`——消掉
+  「容器扫到 home 再构造一个 home」的自举环；容器经 `PluginDir::as_plugins_root()` 定位
   自己管辖的插件根；容器**不再内置**必需插件清单，改由 `home` 经新增的 ctx 键
   `REQUIRED_PLUGINS` 随构造传入（`home::SYSTEM_PLUGINS`），使 `composite` 成为可嵌套的
   通用容器。
