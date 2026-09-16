@@ -1,6 +1,6 @@
 # Session 插件模块分工评审
 
-> 状态：**评审 + 执行方案**（S1/S2/S3 已落地；S4 待执行）
+> 状态：**评审 + 执行方案**（S1/S2/S3 + 测试扁平化已落地；S4 待执行）
 > 触发：`chat_loop.rs` 达 2400 行，已到"不该再往单文件里加东西"的程度
 > 范围：`symbio/src/plugins/session/`（27 个 .rs，合计 16647 行；**S1 后**生产 12419 + 测试 4313）
 > 相关：`./core-loop.md`（核心循环收口，同批次完成）
@@ -12,7 +12,7 @@
 分工的**骨架是清楚的**（引擎 / 存储 / 策略 / 执行 / 场景各有其文件），问题出在两点：
 
 1. **测试与实现混放**——全插件 **3713 行（22%）** 是内联 `#[cfg(test)] mod tests`，
-   而项目里**已经有两处正确示范**（`chat_session/tests.rs`、`store/tests.rs`）。
+   而项目里**已经有两处正确示范**（`chat_session.test.rs`、`store/mod.rs` + `store/tests.rs`）。
    仅此一项就能把 `chat_loop.rs` 2400 → 1993、`plugin.rs` 2191 → 1479、
    `compression.rs` 1641 → 806、`context_window.rs` 875 → 411。
 2. **三个"什么都往里放"的文件**——`chat_loop.rs` / `plugin.rs` / `orchestrator.rs`
@@ -79,8 +79,9 @@
 - 20 个文件带内联 `#[cfg(test)] mod tests`，合计 **3713 行**。
 - `compression.rs`（835 > 806）与 `context_window.rs`（464 > 411）**测试比生产代码还多**，
   读实现时要在 800+ 行测试里找生产函数。
-- **已有正确示范**：`chat_session.rs` 尾部 `#[cfg(test)] mod tests;` + `chat_session/tests.rs`；
-  `store/mod.rs` 同理 + `store/tests.rs`。**约定已存在，只是没铺开。**
+- **已有正确示范**：`chat_session.rs` 尾部 `#[cfg(test)] mod tests;` + `chat_session.test.rs`；
+  `store/mod.rs` 同理 + `store/tests.rs`（`mod.rs` 形态的模块，测试与 `mod.rs` 同级）。
+  **约定已存在，只是没铺开。**
 
 ### P2 · `chat_loop.rs` 六类职责同处一文件
 
@@ -128,7 +129,7 @@ chat_loop/turn.rs       单轮结算：settle_reasoning / close_turn / feedback_
 chat_loop/compress.rs   压缩流水线：8 个函数（与 compression.rs 策略层配对）              ~560
 chat_loop/io.rs         通道与钩子：persist_messages / broadcast_message_update /
                         emit_streaming_start / open_chat_session / fire_*_hook          ~150
-chat_loop/tests.rs      测试                                                            ~410
+chat_loop.test.rs       测试（+ `inputs.test.rs` / `state.test.rs`）                    ~410
 ```
 
 ### 3.2 `plugin.rs` → `plugin/`
@@ -142,7 +143,7 @@ plugin.rs                SessionPlugin 定义 + impl SessionPlugin + impl Plugin
                          配置定义 / now_ms + 模块声明与共享面 re-export            ~523
 plugin/nodes.rs          VDFS 节点构造 / 路径模型 / 消息投影（纯函数，不持有 self）  ~501
 plugin/vdfs_provider.rs  impl VdfsProvider + 其私有辅助（impl SessionPlugin 第二块） ~512
-plugin/tests.rs          测试（S1 已外置）                                            714
+plugin.test.rs           测试（S1 已外置；S3 后按实现文件再拆为 3 份）                 137
 ```
 
 命名注意：子模块**不能叫 `vdfs`**——`plugin.rs` 已 `use crate::symbio_core::vdfs;`，
@@ -164,7 +165,7 @@ orchestrator/send.rs     发送入口：resolve_session_params / handle_chat_sen
                          handle_chat_abort_oneoff / ensure_auto_title                   ~425
 orchestrator/report.rs   上报与失败落库：broadcast_frame / broadcast_status /
                          persist_failure(185) / subtree_of                              ~270
-orchestrator/tests.rs    测试（S1 已外置）                                             182
+orchestrator.test.rs     测试（S1 已外置）                                             182
 ```
 
 拆 `impl SessionPlugin`（1197 行）意味着**拆成 4 个 `impl` 块**分散到 4 个文件
@@ -185,6 +186,8 @@ orchestrator/tests.rs    测试（S1 已外置）                               
 | 步 | 内容 | 风险 | 验收 |
 |---|---|---|---|
 | **S1** ✅ | 测试外置（**21** 个文件 → `<module>/tests.rs`；含 `chat_loop/` 的 3 个测试模块） | 低（纯搬移，`use super::*` 语义不变） | 每步 `cargo check --tests`；末次 `cargo test --lib` 用例数不变 |
+| **S1b** ✅ | 测试文件**扁平化**（`<module>/tests.rs` → `<module>.test.rs`，去掉只为放测试而建的目录，见 §4.4） | 低（纯改名 + `#[path]`） | 同上 |
+| **S1c** ✅ | 测试**归位**到被测试的实现文件旁（高内聚，见 §4.5） | 低（纯搬移） | 同上 |
 | **S2** ✅ | 拆 `chat_loop.rs`（§3.1） | 中（跨模块可见性） | 生产代码总量不变；`cargo test --lib` 用例数不变 |
 | **S3** ✅ | 拆 `plugin.rs`（§3.2，实为**三分**） | 中 | 同上 |
 | **S4** | 拆 `orchestrator.rs`（§3.3） | 中高（消费循环是事故敏感区） | 同上 + 消费循环帧合并 / `persist_failure` 作用域逐字不变 |
@@ -199,6 +202,8 @@ orchestrator/tests.rs    测试（S1 已外置）                               
 | **全插件** | 16647 总 | **12419 生产 + 4313 测试** |
 
 - 21 个新测试文件：18 个模块级 `<module>/tests.rs` + `chat_loop/{tests,gate_tests,stop_signal_tests}.rs`。
+  > 后续 S1b 把 `<module>/tests.rs` 扁平化为 `<module>.test.rs`，S1c 又把 3 个 `chat_loop/*_tests.rs`
+  > 按实现文件重新归位（`gate_tests.rs` → `chat_loop.test.rs`，`stop_signal_tests.rs` → `state.test.rs`）。
 - 每个测试文件带统一文件头（`//!` 说明"与实现分文件，约定同 `store/tests.rs`"）。
 - 父文件末尾统一为 `#[cfg(test)] mod tests;`（`chat_loop.rs` 为三个 `mod`）。
 - 验证：`cargo check --tests` 通过；`cargo clippy --all-targets -- -D warnings` 零告警；
@@ -293,13 +298,68 @@ re-export 块脚手架；注释行差异 30 条全部是新增模块头，**零�
 - ⚠️ 格式化**必须** `cd symbio && cargo fmt --all`（rust-toolchain.toml 锁 1.93.1 / rustfmt 1.8.0）；
   裸 `rustfmt` 走 default toolchain，版本漂移会产生假差异。
 
+### 4.4 测试文件扁平化（S1b，2026-09-16）
+
+**问题**：S1 把测试外置成 `<module>/tests.rs`，于是每个被测模块多出一个**只放一个测试
+文件**的目录——`workdir/`、`compression/`、`chat_session/`…… 全仓 32 个。目录本身不
+携带任何信息，反而让"模块"与"目录"两个概念混在一起。
+
+**改法**：`X.rs` + `X.test.rs`（同级扁平）。靠 `#[path]` 属性实现：
+
+```rust
+// X.rs 末尾
+#[cfg(test)]
+#[path = "X.test.rs"]
+mod tests;
+```
+
+`#[path]` 相对**声明它的文件所在目录**解析，所以测试文件与实现文件同级；而**模块路径
+不变**（仍是 `X::tests`），`use super::*;` 的语义逐字不变——这是一次**纯文件搬迁**，
+不涉及任何可见性或导入面调整。
+
+**结果**：32 处扁平化，移除 30 个只为放测试而建的目录。两个目录**保留**：
+`chat_loop/` 与 `plugin/`——它们另有真实子模块（`compress.rs`/`inputs.rs`/… 、
+`nodes.rs`/`vdfs_provider.rs`），目录本身有存在理由。
+
+**例外（`mod.rs` 形态）**：`store/`、`plugins/agent/host/` 的模块文件是 `mod.rs`，
+测试就放在 `mod.rs` **同级**的 `tests.rs`——已是正确形态，不动。
+
+**验收**：① 逐文件**行多重集指纹**比对（改名前后必须逐字相同）；② 断言 32 个实现文件
+都带上了 `#[path]`；③ `cargo check --tests` 0 错。
+
+**顺带清理**：删除 `plugins/skill/plugin/tests.rs`——一个自初始提交起就**没被任何
+`mod` 声明引用**的孤立文件，它引用的 `SkillPlugin::classify_skill_source` /
+`get_skill_detail` 在当前代码里**已不存在**（"技能来源分类"功能整体下线），
+故那 9 个用例从未运行、也不可能编译。删除后 `skill/plugin/` 目录随之消失。
+
+### 4.5 测试归位到被测试的实现文件（S1c，2026-09-16）
+
+**用户口径**：测试单独一个文件是对的，但**测试代码要和被测试代码在一起**——不能
+"测试一处、被测试代码一处"。S1 把测试搬出了实现文件，却让 `plugin/tests.rs` 一个
+文件同时服务 `plugin.rs` / `plugin/nodes.rs` / `plugin/vdfs_provider.rs` 三个实现，
+`chat_loop` 的三个测试模块同病。**这违反高内聚**。
+
+**改法**：测试文件跟着**它测的那个实现文件**走，一个实现文件对应一个测试文件。
+
+| 实现文件 | 测试文件 | 用例数 |
+|---|---|---:|
+| `plugin.rs` | `plugin.test.rs` | 6 |
+| `plugin/nodes.rs` | `plugin/nodes.test.rs` | 15 |
+| `plugin/vdfs_provider.rs` | `plugin/vdfs_provider.test.rs` | 6 |
+| `chat_loop.rs` | `chat_loop.test.rs`（`gate_turn` 契约） | 9 |
+| `chat_loop/state.rs` | `chat_loop/state.test.rs`（`StopSignal` + `TurnRequest`） | 9 |
+| `chat_loop/inputs.rs` | `chat_loop/inputs.test.rs`（`resolve_system_prompt`） | 6 |
+
+删除 `chat_loop/gate_tests.rs` / `chat_loop/stop_signal_tests.rs`（内容已并入上表）。
+**用例数零丢失**：`chat_loop` 24（9+9+6）、`plugin` 27（6+15+6）。
+
 ---
 
 ## 5. 不做的事
 
 - **不改模块间的调用关系**：本评审不引入新抽象、不合并文件、不删除模块。
 - **不动 `compression.rs` 的策略划分**（阈值 / 切分 / 视图重建已内聚）。
-- **不动 `store/` 与 `chat_session/`**（已有正确形态，是本次的范本）。
+- **不动 `store/`**（`mod.rs` 形态，测试与 `mod.rs` 同级，已是正确形态）。
 - **不动 `close_turn`(286) / `compress_with_snapshot_core`(230) 的内部结构**——
   它们是"单一实现"约束的落点，拆开会让两条压缩入口各自维护流水线（见
   `./core-loop.md` §6）。

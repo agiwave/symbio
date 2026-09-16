@@ -128,4 +128,5 @@ pub(crate) fn split_head_tail(
 }
 
 #[cfg(test)]
+#[path = "text_split.test.rs"]
 mod tests;

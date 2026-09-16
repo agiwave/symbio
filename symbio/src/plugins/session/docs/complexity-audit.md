@@ -223,7 +223,7 @@ P2（EphemeralChatSession 归一、FallbackChatSession 语义对齐、resume 互
 - `cargo check --workspace`：0 error / 0 warning；`cargo clippy --lib -- -D warnings`：通过。
 - `cargo test --lib`：**325 passed / 0 failed**（基线 313 → 325，新增 12 个用例，无忽略项）。
 - 新增用例（按文件）：
-  - `chat_session/tests.rs`（8 个，均 `#[tokio::test]`）：`prune_zero_keep_turns_does_not_panic`、`prune_empty_messages_zero_keep_turns_is_noop`、`prune_keeps_recent_turns_and_drops_older_tool_chain`、`append_messages_with_zero_context_messages_does_not_fail`、`append_messages_prunes_tool_chain_by_default`、`append_messages_keeps_tool_chain_when_prune_disabled`、`max_messages_below_legacy_store_floor_is_honored`、`max_messages_zero_means_unlimited`。
+  - `chat_session.test.rs`（8 个，均 `#[tokio::test]`）：`prune_zero_keep_turns_does_not_panic`、`prune_empty_messages_zero_keep_turns_is_noop`、`prune_keeps_recent_turns_and_drops_older_tool_chain`、`append_messages_with_zero_context_messages_does_not_fail`、`append_messages_prunes_tool_chain_by_default`、`append_messages_keeps_tool_chain_when_prune_disabled`、`max_messages_below_legacy_store_floor_is_honored`、`max_messages_zero_means_unlimited`。
   - `plugin.rs`（2 个）：`config_schema_defaults_match_session_config_default`、`config_schema_covers_all_session_config_fields`。
   - `session_config.rs`（2 个）：`max_tool_rounds_zero_maps_to_unlimited`、`default_max_tool_rounds_is_effectively_unlimited`。
 - 原有 `test_replace_messages_*`（4 个，含 2 个路径穿越拒绝用例）保持通过，未因本轮改动退化。

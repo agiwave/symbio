@@ -279,4 +279,5 @@ async fn parse_skill_file(path: &Path, max_body_chars: usize) -> Result<Skill, P
 }
 
 #[cfg(test)]
+#[path = "loader.test.rs"]
 mod tests;

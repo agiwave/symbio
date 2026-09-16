@@ -74,6 +74,36 @@ cd symbio && cargo fmt --check && cargo clippy --all-targets -- -D warnings && c
   路由规则见 [docs/architecture/OVERVIEW.md](./docs/architecture/OVERVIEW.md)，
   请求全链路见 [docs/architecture/DATA_FLOW.md](./docs/architecture/DATA_FLOW.md)。
 
+#### 测试文件布局（约定）
+
+测试**独立成文件**，且与**被测试的实现文件同级**、同名加 `.test` 后缀：
+
+```text
+workdir.rs          实现
+workdir.test.rs     它的测试（同级，不放子目录）
+```
+
+父文件末尾用 `#[path]` 指向同级测试文件：
+
+```rust
+#[cfg(test)]
+#[path = "workdir.test.rs"]
+mod tests;
+```
+
+要点：
+
+- **一个实现文件对应一个测试文件**。不要写"一个测试文件同时测几个实现文件"，
+  也不要写"几个测试文件测同一个实现文件"——测试跟着它测的那个实现走。
+- **不要为测试文件单独建目录**。`X/tests.rs` 那种形态会让"模块"与"目录"两个概念
+  混在一起；`#[path]` 相对声明它的文件解析，测试文件完全可以与实现同级。
+- **例外**：模块文件是 `mod.rs` 的（如 `store/mod.rs`），测试放同级的 `tests.rs`。
+- `#[path]` **不改变模块路径**（仍是 `X::tests`），故 `use super::*;` 语义与内联
+  `mod tests { … }` 完全一致，拆分/搬移是纯文件操作，不涉及可见性调整。
+
+> 存量代码里仍有大量内联 `#[cfg(test)] mod tests { … }`。**新增代码请按上述约定**；
+> 存量按"改到哪个文件就顺手拆哪个"渐进处理，不做全仓一次性搬移。
+
 ### TypeScript / Vue 侧
 
 - 使用 `<script setup lang="ts">`，**不要**使用 Options API。

@@ -254,4 +254,5 @@ impl SessionPlugin {
 }
 
 #[cfg(test)]
+#[path = "heartbeat.test.rs"]
 mod tests;

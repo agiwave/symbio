@@ -77,4 +77,5 @@ impl FsWatcher {
 }
 
 #[cfg(test)]
+#[path = "fs_watcher.test.rs"]
 mod tests;

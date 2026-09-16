@@ -427,4 +427,5 @@ async fn finish_turn(
 }
 
 #[cfg(test)]
+#[path = "chat_loop.test.rs"]
 mod tests;

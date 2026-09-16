@@ -115,4 +115,5 @@ pub struct McpConfig {
 }
 
 #[cfg(test)]
+#[path = "mcp_config.test.rs"]
 mod tests;

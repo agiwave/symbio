@@ -510,7 +510,7 @@ fn now_ms() -> i64 {
 mod nodes;
 mod vdfs_provider;
 
-// 模块内共享面：`nodes` / `vdfs_provider` 经 `use super::*;` 取用，测试（`plugin/tests.rs`）亦同。
+// 模块内共享面：`nodes` / `vdfs_provider` 经 `use super::*;` 取用，测试（`plugin.test.rs`）亦同。
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
     internal_dirs, message_change, message_dir_path, message_node, message_of, message_path,
@@ -520,4 +520,5 @@ pub(crate) use self::nodes::{
 };
 
 #[cfg(test)]
+#[path = "plugin.test.rs"]
 mod tests;

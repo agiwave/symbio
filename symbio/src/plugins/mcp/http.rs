@@ -574,4 +574,5 @@ impl super::manager::McpManager {
 }
 
 #[cfg(test)]
+#[path = "http.test.rs"]
 mod tests;

@@ -252,4 +252,5 @@ pub(crate) async fn apply_compaction(
 }
 
 #[cfg(test)]
+#[path = "inputs.test.rs"]
 mod tests;

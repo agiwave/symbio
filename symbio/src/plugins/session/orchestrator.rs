@@ -1509,4 +1509,5 @@ fn subtree_of(messages: &[cm::ChatMessage], root: &str) -> std::collections::Has
 }
 
 #[cfg(test)]
+#[path = "orchestrator.test.rs"]
 mod tests;

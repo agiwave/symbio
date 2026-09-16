@@ -190,4 +190,5 @@ impl HeartbeatTool {
 }
 
 #[cfg(test)]
+#[path = "heartbeat_tool.test.rs"]
 mod tests;

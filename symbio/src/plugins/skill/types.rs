@@ -114,4 +114,5 @@ fn default_true() -> bool {
 }
 
 #[cfg(test)]
+#[path = "types.test.rs"]
 mod tests;

@@ -60,4 +60,5 @@ pub struct Request {
 }
 
 #[cfg(test)]
+#[path = "model_chat.test.rs"]
 mod tests;

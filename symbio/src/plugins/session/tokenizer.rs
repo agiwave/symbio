@@ -229,4 +229,5 @@ pub fn report_provider_usage(estimated: usize, actual: Option<u32>) {
 }
 
 #[cfg(test)]
+#[path = "tokenizer.test.rs"]
 mod tests;

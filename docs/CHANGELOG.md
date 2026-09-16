@@ -18,6 +18,58 @@
 
 ***
 
+## 2026-09-16: 测试文件扁平化（`X.rs` + `X.test.rs`）与测试归位
+
+**问题**：此前"实现与测试分文件"用的是 `<module>/tests.rs`，于是每个被测模块都多出一个
+**只放一个测试文件**的目录——全仓 32 个（`workdir/`、`compression/`、`chat_session/`……）。
+目录本身不携带信息，却把"模块"与"目录"两个概念混在了一起。
+
+**改法**：测试文件与实现文件**同级**，同名加 `.test` 后缀，靠 `#[path]` 属性定位：
+
+```rust
+// workdir.rs 末尾
+#[cfg(test)]
+#[path = "workdir.test.rs"]
+mod tests;
+```
+
+`#[path]` 相对**声明它的文件所在目录**解析，故测试文件与实现同级；**模块路径不变**
+（仍是 `workdir::tests`），`use super::*;` 的语义与内联 `mod tests { … }` 逐字一致
+——这是一次纯文件搬迁，不涉及任何可见性或导入面调整。
+
+- 32 处扁平化，移除 30 个只为放测试而建的目录；`chat_loop/`、`plugin/` 两个目录**保留**
+  （另有真实子模块，目录本身有存在理由）。
+- **例外**：模块文件是 `mod.rs` 的（`store/mod.rs`、`plugins/agent/host/mod.rs`），
+  测试放同级 `tests.rs`，已是正确形态，不动。
+- 验收：逐文件**行多重集指纹**比对（改名前后逐字相同）+ 断言 32 个实现文件都带上
+  `#[path]` + `cargo check --tests` 0 错。
+
+**测试归位（高内聚）**：S1 曾把测试搬出实现文件，但 `plugin/tests.rs` 一个文件同时服务
+`plugin.rs` / `plugin/nodes.rs` / `plugin/vdfs_provider.rs` 三个实现——**测试一处、被测试
+代码一处**，违反高内聚。现按"一个实现文件对应一个测试文件"归位：
+
+| 实现文件 | 测试文件 | 用例 |
+|---|---|---:|
+| `plugin.rs` | `plugin.test.rs` | 6 |
+| `plugin/nodes.rs` | `plugin/nodes.test.rs` | 15 |
+| `plugin/vdfs_provider.rs` | `plugin/vdfs_provider.test.rs` | 6 |
+| `chat_loop.rs` | `chat_loop.test.rs`（`gate_turn` 契约） | 9 |
+| `chat_loop/state.rs` | `chat_loop/state.test.rs`（`StopSignal` + `TurnRequest`） | 9 |
+| `chat_loop/inputs.rs` | `chat_loop/inputs.test.rs`（`resolve_system_prompt`） | 6 |
+
+`chat_loop/gate_tests.rs` / `chat_loop/stop_signal_tests.rs` 已并入上表并删除；
+用例数**零丢失**（`chat_loop` 24、`plugin` 27）。
+
+**顺带清理**：删除 `symbio/src/plugins/skill/plugin/tests.rs`——自初始提交起就**没被任何
+`mod` 声明引用**的孤立文件，它引用的 `SkillPlugin::classify_skill_source` /
+`get_skill_detail` 在当前代码里**已不存在**（"技能来源分类"功能整体下线），
+故那 9 个用例从未运行、也不可能编译。删除后 `skill/plugin/` 目录随之消失。
+
+**约定入文档**：测试文件布局写进 [`CONTRIBUTING.md`](../CONTRIBUTING.md) §4「测试文件布局」；
+`session/docs/module-layout.md` 增补 §4.4（扁平化）/ §4.5（归位）两节实施记录。
+
+---
+
 ## 2026-09-16: session 文档下沉插件目录（高内聚）+ 实现与测试分文件
 
 **文档下沉**：session 相关的 9 份文档从系统级目录迁入 [`symbio/src/plugins/session/docs/`](../symbio/src/plugins/session/docs/)

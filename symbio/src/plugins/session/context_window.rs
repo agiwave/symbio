@@ -410,4 +410,5 @@ pub fn apply_layered_sliding_window(
 }
 
 #[cfg(test)]
+#[path = "context_window.test.rs"]
 mod tests;

@@ -9,7 +9,7 @@
 //!   `message_status` / `message_preview` / [`message_text`] / [`ordered`] /
 //!   [`overlay_live`] / [`message_of`] / [`session_content`]
 //!
-//! 可见性：被 `plugin.rs` / `vdfs_provider.rs` / `plugin/tests.rs` 取用的项标
+//! 可见性：被 `plugin.rs` / `vdfs_provider.rs` / `plugin.test.rs` 取用的项标
 //! `pub(crate)`，由 `plugin.rs` 统一重导出；只在本文件内部使用的保持私有。
 
 use super::*;
@@ -501,4 +501,5 @@ pub(crate) fn title_from_new_path(path: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "nodes.test.rs"]
 mod tests;

@@ -865,4 +865,5 @@ pub async fn process_tool_calls_async(
 }
 
 #[cfg(test)]
+#[path = "tool_executor.test.rs"]
 mod tests;

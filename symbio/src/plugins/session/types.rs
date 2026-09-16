@@ -283,4 +283,5 @@ impl HeartbeatConfig {
 }
 
 #[cfg(test)]
+#[path = "types.test.rs"]
 mod tests;

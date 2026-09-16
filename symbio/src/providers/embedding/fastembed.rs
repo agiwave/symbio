@@ -122,4 +122,5 @@ crate::submit_object_creator!(EMBEDDING_FASTEMBED, build_fastembed, dyn Embeddin
 crate::submit_object_creator!(EMBEDDING_NOOP, build_noop, dyn EmbeddingService);
 
 #[cfg(test)]
+#[path = "fastembed.test.rs"]
 mod tests;

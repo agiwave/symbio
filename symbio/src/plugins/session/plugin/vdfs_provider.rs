@@ -512,4 +512,5 @@ impl SessionPlugin {
 }
 
 #[cfg(test)]
+#[path = "vdfs_provider.test.rs"]
 mod tests;

@@ -462,4 +462,5 @@ impl SessionPlugin {
 }
 
 #[cfg(test)]
+#[path = "options.test.rs"]
 mod tests;

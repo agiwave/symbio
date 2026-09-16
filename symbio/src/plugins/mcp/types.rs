@@ -266,4 +266,5 @@ pub fn filter_valid_tool_names(tools: Vec<McpTool>) -> (Vec<McpTool>, usize) {
 }
 
 #[cfg(test)]
+#[path = "types.test.rs"]
 mod tests;

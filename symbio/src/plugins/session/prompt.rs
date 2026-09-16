@@ -115,4 +115,5 @@ async fn read_to_string_safe(path: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
+#[path = "prompt.test.rs"]
 mod tests;

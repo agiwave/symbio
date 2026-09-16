@@ -584,4 +584,5 @@ pub fn prune_historical_tool_calls(messages: &mut Vec<ChatMessage>, keep_turns: 
 }
 
 #[cfg(test)]
+#[path = "chat_session.test.rs"]
 mod tests;

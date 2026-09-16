@@ -363,4 +363,5 @@ impl ChatOrchestrator {
 }
 
 #[cfg(test)]
+#[path = "state.test.rs"]
 mod tests;

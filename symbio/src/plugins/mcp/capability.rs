@@ -97,4 +97,5 @@ impl Capability for McpToolCapability {
 }
 
 #[cfg(test)]
+#[path = "capability.test.rs"]
 mod tests;

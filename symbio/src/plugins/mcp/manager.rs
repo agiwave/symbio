@@ -371,4 +371,5 @@ impl Default for McpManager {
 }
 
 #[cfg(test)]
+#[path = "manager.test.rs"]
 mod tests;

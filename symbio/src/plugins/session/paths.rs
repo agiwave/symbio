@@ -52,4 +52,5 @@ pub(crate) fn session_subdir(session_id: &str, subdir: &str) -> std::path::PathB
 }
 
 #[cfg(test)]
+#[path = "paths.test.rs"]
 mod tests;

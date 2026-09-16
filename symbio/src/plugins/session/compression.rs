@@ -805,4 +805,5 @@ pub fn context_compact_tool_meta() -> crate::symbio_core::CapabilityMeta {
 }
 
 #[cfg(test)]
+#[path = "compression.test.rs"]
 mod tests;

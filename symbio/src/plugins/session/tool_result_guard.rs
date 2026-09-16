@@ -221,4 +221,5 @@ pub(crate) fn summarize_head_tail(text: &str, budget_tokens: usize, omit_note: &
 }
 
 #[cfg(test)]
+#[path = "tool_result_guard.test.rs"]
 mod tests;

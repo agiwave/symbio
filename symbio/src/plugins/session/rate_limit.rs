@@ -77,4 +77,5 @@ impl ProviderRateLimiter {
 }
 
 #[cfg(test)]
+#[path = "rate_limit.test.rs"]
 mod tests;
