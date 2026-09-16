@@ -227,6 +227,13 @@ impl ContentSearchTool {
             if !fp.is_file() {
                 continue;
             }
+            // 展示路径：剥掉 Windows `canonicalize` 的 `\\?\` 扩展前缀。搜索根在
+            // 调用方已过 `fs::canonicalize`，walk 出来的每个 `entry.path()` 因此都带
+            // 前缀；逐行原样回显会让每行多占 ~30 字符且模型不可读（真实会话实证）。
+            // ⚠️ 仅用于**输出展示**——所有 IO（read / search_path）仍用原始 `fp`，
+            // 剥前缀后的路径若超长或含尾随空格会破坏 Windows 路径语义。
+            let disp = super::policy::normalize_path_for_comparison(fp);
+            let disp = disp.display();
 
             if multiline {
                 // 跨行：整文件读入后用 Matcher 手动迭代匹配（'.' 已开启匹配换行）
@@ -256,11 +263,11 @@ impl ContentSearchTool {
                 }
                 if !file_matches.is_empty() {
                     if output_mode == "files_with_matches" {
-                        out.push(fp.display().to_string());
+                        out.push(disp.to_string());
                     } else if output_mode == "count" {
-                        out.push(format!("{}:{}", fp.display(), file_matches.len()));
+                        out.push(format!("{}:{}", disp, file_matches.len()));
                     } else {
-                        out.push(format!("{}", fp.display()));
+                        out.push(format!("{}", disp));
                         out.extend(file_matches.clone());
                     }
                     match_count += file_matches.len() as u64;
@@ -281,12 +288,12 @@ impl ContentSearchTool {
                 match_count += file_matches.len() as u64;
 
                 if output_mode == "files_with_matches" {
-                    out.push(fp.display().to_string());
+                    out.push(disp.to_string());
                 } else if output_mode == "count" {
-                    out.push(format!("{}:{}", fp.display(), file_matches.len()));
+                    out.push(format!("{}:{}", disp, file_matches.len()));
                 } else if context_before == 0 && context_after == 0 {
                     for (ln, text) in &file_matches {
-                        out.push(format!("{}:{}:{}", fp.display(), ln, text));
+                        out.push(format!("{}:{}:{}", disp, ln, text));
                     }
                 } else {
                     // 手动上下文窗口：读文件行，合并匹配 ± 上下文行号
@@ -311,7 +318,7 @@ impl ContentSearchTool {
                             continue;
                         }
                         let text = line_vec[i].to_str_lossy().into_owned();
-                        out.push(format!("{}:{}:{}", fp.display(), i + 1, text));
+                        out.push(format!("{}:{}:{}", disp, i + 1, text));
                     }
                 }
             }
