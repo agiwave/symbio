@@ -18,6 +18,103 @@
 
 ***
 
+## 2026-09-16: 新建 = 直接进入该类型的详情页（草稿态）+ 无名字新建
+
+「点新建」原先走一条**独立于详情页**的通道：先弹一个命名输入框，填完名字才写文件。
+这条通道把「新建」和「查看 / 编辑」割成了两种形态，而名字本不该由使用方先给——
+**`id` 归 provider**。四件事一起收口。
+
+### 1. 前端：新建 = 选中一张草稿节点
+
+- **草稿节点**（`useVdfs.draftNodeOf`）：`path === ''`、`name === ''`、`access = 'w'`，
+  其余呈现字段留空——「还没有的东西」不假装有内容（新建态就是缺 id / 名字的那一页）。
+  它与「选中一项」走**同一条**详情通道：同一个 `ext` → 同一个渲染器。
+- 命名输入框、`createTyped(type, name)` 一并删除；`startNew(type)` 只做「选中草稿」。
+  连续新建由新增的 `draftSeq` 作临时身份（草稿没有路径，`:key` 会撞在一起而残留
+  上一份输入）。
+- 两条配套约束：`select()` 对草稿**直接返回**（没有内容可读，去读只会落到目录地址
+  上）；`refresh()` 清理选中态时**跳过草稿**（它本来就不在清单里）。
+- 草稿详情页剥掉以「资源已存在」为前提的动作（删除 / 测试连接 / 浏览内部 / 导出）——
+  点下去只会打到一个不存在的地址上。
+- `source = file`（zip 整包导入）是**唯一**不进详情页的形态：内容在打开详情页之前
+  就已经齐备，没有「边看边填」的过程。
+
+### 2. 机制：`new_types` 必须声明「落成后的节点」
+
+类型清单里的 `ext` 一直是**呈现扩展名**（地址末段后缀，provider 用 `id_of` 按它剥
+条目 id），但它**不是**渲染器键——model / mcp / skill 落成后统一是 `ext = form`。
+于是「点新建」若按 `ext` 选渲染器就会落到通用兜底，而不是同一张表单。`VdfsNewType`
+因此补两个字段描述落成后的节点：
+
+| 字段 | 语义 |
+|---|---|
+| `node_ext` | 落成后的节点 `ext`（**渲染器键**）；缺省 = 与 `ext` 相同（会话即如此） |
+| `schema` | 落成后的节点 `schema`（`form` 渲染器所需的定义） |
+
+漏了 `node_ext` 草稿会落到通用兜底，漏了 `schema` 会渲染出空表单。model / mcp / skill
+三个 provider 已在 `root_new_types()` 回填（`node_ext = form` + 详情定义），且定义与
+节点 `schema` 同源（`detail_definition()` 唯一出处）。
+
+### 3. 后端：写目录自身 = 「新建一个，名字由你定」
+
+`vdfs/write` 的 `path` 现在有两种目标形态，实现方都必须考虑：
+
+- **具名节点**：常规的「写这个节点」，不存在则看 `create` 位；
+- **目录自身**（`""`）：使用方**没有给名字**——这正是「新建」在机制上的形态。
+
+容器原先对空 `rel` 直接 `Forbidden("目录不可写")`，把这条形态堵死了。现在改为
+**原样转发**给子 provider 判定（与 `action` 对空 `rel` 的处理一致），并把 provider
+生成的名字补回树内全路径。四个 provider 随之支持无名字新建：
+
+- `session`：id 由 `Uuid::new_v4()` 生成，从 JSON 体读 `metadata`（浅合并）与可选
+  `title`；**无名字时不写 `title`**（留给 `display_title` 从首条消息派生）。
+- `model` / `mcp` / `skill`：无名字时用新增的 `entry::auto_id(kind)` 生成
+  `<kind>-<8hex>`（带前缀、`safe_segment` 安全）。
+- 整包导入（`mcp` / `skill` 的二进制分支）**仍要求有名字**：名字来自地址末段，
+  「无名字导入」无从命名，明确拒绝。
+
+### 4. `create` 位只管「不存在时怎么办」
+
+原实现把 `create = true` 理解成「忽略使用方给的内容、一律落最小默认配置」。草稿
+详情页填好字段再保存时，这会让**用户填的每一个字段都丢掉**。现在语义收窄为：
+
+| 目标 | `create = false` | `create = true` |
+|---|---|---|
+| 已存在 | 覆盖 | 覆盖（`created = false`） |
+| 不存在 | `NotFound` | **创建**（`created = true`） |
+
+内容一律取自本次写入；唯一例外是**内容为空**（「先建一个，随后再填」，如新建会话），
+此时 provider 落一份自己的最小合法内容。「有名字但文件不存在则自动创建」就是
+`create = true` 的具名写。
+
+### 5. 顺带
+
+- `stores/sessions.ts::createSession` 改为一次 `vdfs/write` 到会话挂载根，id 由后端
+  给出（原先前端 `createSessionId()` 预造 id + `session/update`，绕开了「id 归
+  provider」）。空地址响应被显式挡掉（`vdfsBase('')` 返回虚拟根哨兵，`if (!id)`
+  挡不住，会插一条 id 为 `.vdfs` 的幽灵会话）。
+- `plugins/vdfs/host.rs` 的测试替身同步新语义（它原先带着与生产容器同构的
+  `Forbidden` 守卫，留着就是给下一个人挖坑）。
+- 测试文件按约定拆分：`model/plugin.rs` 与 `skill/plugin.rs` 的内联 `mod tests`
+  移到同级 `plugin.test.rs`；`mcp` 新建 `plugin.test.rs`。
+
+### 6. 容器：写入响应的相对路径必须补成树内全路径
+
+`CompositeVdfs` 的职责表一直写着「全路径回填：子节点 / 内容 / 写入响应的 `path` 补成
+`<子目录>/<rel>`」，但实现只对**空串**兜底。provider 生成的名字（如 `openai-1`）非空，
+于是原样漏了出去：访问层把它当**树内全路径**翻译成 `.vdfs/openai-1`——一个并不存在的
+地址。前端 `write()` 拿 `resp.path` 去清单里找刚建出来的那一项，找不到，**只能停在
+草稿上**（正是「点新建后进不去详情页」的另一半原因）。
+
+现在 `read` / `write` 两处统一走 `CompositeVdfs::fill_path`：provider 给的**非空**路径
+一律按「子树内相对路径」补前缀，只有空串（= 未填，如物理层无从表达新名字）才用请求
+地址兜底。`read` 同理——model / mcp / skill 三个 provider 都把收到的相对路径原样回显
+（`VdfsContent::text(path, …)`），不补前缀就会给出 `.vdfs/<rel>` 这个错地址。
+两条测试锁定：`dir_root_write_is_forwarded_and_path_is_prefixed`、
+`read_content_path_is_prefixed_with_dir`。
+
+***
+
 ## 2026-09-16: 三层记忆归属收口 + 系统提示词单一通道 + `SessionConfig` 下沉
 
 三件事同一个判据：**一个作用域只有一个所有者，核心只留跨插件共享的抽象**。

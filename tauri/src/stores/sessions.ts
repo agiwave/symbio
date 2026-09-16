@@ -25,7 +25,6 @@ import { computed, ref, shallowRef } from 'vue'
 import {
   listSessions,
   clearSession,
-  createSessionId,
   updateSession,
   clearMessages as apiClearMessages,
   deleteMessage as apiDeleteMessage,
@@ -33,7 +32,7 @@ import {
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
-import { readVdfs, statVdfs } from '@/services/vdfs'
+import { readVdfs, statVdfs, writeVdfs } from '@/services/vdfs'
 import {
   VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_CREATED,
@@ -523,13 +522,15 @@ export const useSessionsStore = defineStore('sessions', () => {
    *   与后端 `session/update` 同一浅合并语义，故这里直接透传，前端不解释字段名。
    *   workdir 缺省时回退最近使用目录（`lastUsedWorkdir` → `getLastWorkdir`）。
    *
-   * 流程：本地乐观插入条目（与后端写同一份 metadata，保证挂载即水合）→
-   * 后端 `session/update` 落库 → 发布前端 created 事件（后端事件随后幂等收敛）。
+   * 流程：**经 VDFS 在会话挂载根上写一次**（`create: true`，不给名字）→ 后端生成
+   * id 并把 metadata 一并落库 → 本地乐观插入条目（与后端写同一份 metadata，
+   * 保证挂载即水合）→ 发布前端 created 事件（后端事件随后幂等收敛）。
+   *
+   * 「新建」在机制上就是对**目录自身**的一次 `vdfs/write`（见后端
+   * `VdfsProvider::write` 的两种目标形态）：id 是 provider 的私有知识，前端不预先
+   * 编造——它只需要知道「建在哪」（`.vdfs/session`），名字由后端给。
    */
   async function createSession(metadata?: Record<string, unknown>): Promise<string> {
-    const id = createSessionId()
-    const now = Math.floor(Date.now() / 1000)
-
     const meta = { created_via: 'ui', ...(metadata ?? {}) } as SessionMetadata
     // 兜底顺序：草稿显式选择 > 最近使用目录；lastWorkdir 仅作新建默认。
     if (!meta.workdir) {
@@ -537,12 +538,23 @@ export const useSessionsStore = defineStore('sessions', () => {
       if (fallback) meta.workdir = fallback
     }
 
-    // 1. 立即在本地插入"未持久化"条目（与后端 updateSession 用同一份 meta，
-    //    保证 ModelChatPanel onMounted 从本地 list.metadata 同步水合时拿得到草稿选择）
+    // 1. 后端生成 id：写会话挂载根 = 「新建一个会话，名字由 provider 定」
+    const resp = await writeVdfs(
+      vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR),
+      JSON.stringify({ metadata: meta }),
+      { create: true }
+    )
+    const id = vdfsBase(resp.path)
+    // `vdfsBase` 对空路径返回**虚拟根**这个哨兵，因此空地址既不是 `''` 也不是
+    // 合法 id——必须显式挡掉，否则会插一条 id 为 `.vdfs` 的幽灵会话。
+    if (!id || id === VDFS_ROOT) throw new Error('新建会话未返回地址（provider 未给出新节点路径）')
+
+    // 2. 立即在本地插入"未持久化"条目（与后端写同一份 meta，保证
+    //    ModelChatPanel onMounted 从本地 list.metadata 同步水合时拿得到草稿选择）
     const local: SessionListItem = {
       id,
       message_count: 0,
-      updated_at: now,
+      updated_at: Math.floor(Date.now() / 1000),
       metadata: meta
     }
     list.value = [local, ...list.value]
@@ -557,16 +569,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     const snext = { ...sessionStatuses.value, [id]: { is_waiting_approval: false, last_event_at: Date.now() } }
     sessionStatuses.value = snext
 
-    // 2. 同步写后端 metadata（草稿选择），让后续 list 能拿到正确信息
-    try {
-      await updateSession(id, meta)
-      if (typeof meta.workdir === 'string' && meta.workdir) lastUsedWorkdir.value = meta.workdir
-    } catch (e) {
-      logger.warn('[sessions]', 'updateSession(metadata) 失败（仅本地生效）', e)
-    }
+    if (typeof meta.workdir === 'string' && meta.workdir) lastUsedWorkdir.value = meta.workdir
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
-    // 后端 created 事件（invoke_update is_new 判定）随后到达，各订阅方幂等收敛
+    // 后端 created 事件（`vdfs/write` 落库后广播）随后到达，各订阅方幂等收敛
     publishVdfsChangedLocal({ path: vdfsSessionAddr(id), change: VDFS_CHANGE_CREATED })
 
     return id

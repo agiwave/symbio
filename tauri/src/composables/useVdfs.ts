@@ -24,8 +24,9 @@
  *
  * - **无面包屑**：路径即导航，层级靠左栏切目录 + 中栏点目录钻入 + 宿主返回键；
  * - **无「新建目录」按钮**：新建 = 新建一种**类型**（会话 / 模型 / …）；
- *   类型清单由当前目录节点声明（`new_types`），多类型时先选类型再命名；
- *   目录结构节点由后端 provider 自持，前端不暴露 mkdir 入口。
+ *   类型清单由当前目录节点声明（`new_types`），多类型时先选类型，然后
+ *   **直接进入该类型的详情页**（草稿态：无 id / 名字，与选中一项同一条通道，
+ *   见 `startNew`）；目录结构节点由后端 provider 自持，前端不暴露 mkdir 入口。
  *
  * ## 校验错误的消费约定（要点五的消费端）
  *
@@ -53,6 +54,7 @@ import {
   VDFS_CHANGE_APPENDED,
   VDFS_EVENT_KIND,
   VDFS_ROOT,
+  VDFS_STATUS_ACTIVE,
   actionFileOf,
   isVdfsDir,
   newFileNameOf,
@@ -146,8 +148,14 @@ export function useVdfs(opts: UseVdfsOptions) {
       // 选中项若已不在当前目录（被删/被移走），清理选中态。
       // ⚠️ 有界列表下**不能**仅凭「不在这页里」就判它没了——它可能只是落在更早的
       // 一页（深链直开旧会话就是这种情形）。只有确信已拿全时才清理。
+      // ⚠️ **草稿不受此判**：它本来就不在清单里（还没落盘），路径为空。
       const sel = selectedNode.value
-      if (sel && !hasMore.value && !items.value.some((n) => n.path === sel.path)) {
+      if (
+        sel &&
+        !isDraftNode(sel) &&
+        !hasMore.value &&
+        !items.value.some((n) => n.path === sel.path)
+      ) {
         clearSelection()
       }
     } catch (err) {
@@ -326,6 +334,11 @@ export function useVdfs(opts: UseVdfsOptions) {
     detailError.value = ''
     fieldErrors.value = []
 
+    // 草稿（新建态）**没有内容可读**：它还没落盘，路径是空的——去读它只会落到
+    // 目录地址上。详情渲染器自己知道怎么呈现「还没有的东西」（表单给默认值、
+    // 会话给新建引导），机制只需保证不替它读一个不存在的节点。
+    if (isDraftNode(node)) return
+
     const r = resolveVdfsRenderer(node)
     if (r !== 'form' && r !== 'text' && r !== 'json' && r !== 'markdown' && r !== 'message')
       return
@@ -371,19 +384,37 @@ export function useVdfs(opts: UseVdfsOptions) {
     return String(err)
   }
 
-  /** 写入选中节点内容（form 传字段值对象，文本渲染器传文本） */
+  /**
+   * 写入选中节点内容（form 传字段值对象，文本渲染器传文本）。
+   *
+   * **草稿（新建态）的写入目标 = 当前目录自身**：使用方没有给名字，名字由
+   * provider 生成（`id 归 provider`）——这正是「新建」在机制上的形态，与
+   * 「保存一项已有资源」是同一个动作（同一条 `vdfs/write`），差别只有
+   * 目标地址与 `create` 意图（目录自身没有可覆盖的目标，必须带 create）。
+   *
+   * 写完落到 provider 在响应里给出的**新地址**上：新建的落点是刚建出来的
+   * 那一项，而不是那张已经失效的草稿。
+   */
   async function write(payload: Record<string, unknown> | string): Promise<boolean> {
     const node = selectedNode.value
     if (!node) return false
+    const draft = isDraftNode(node)
     const text = typeof payload === 'string' ? payload : JSON.stringify(payload)
     saving.value = true
     detailError.value = ''
     fieldErrors.value = []
     try {
-      await writeVdfs(node.path, text)
-      showToast('success', `已保存「${node.title || node.name}」`)
+      const resp = await writeVdfs(draft ? cwd.value : node.path, text, draft ? { create: true } : undefined)
+      showToast('success', draft ? '已新建' : `已保存「${node.title || node.name}」`)
       // 写入可能改变节点元数据（大小/状态）→ 就地重载
-      await Promise.all([refresh(), select(node)])
+      await refresh()
+      if (!draft) {
+        await select(node)
+      } else {
+        // 新建：选中 provider 建出来的那一项（响应 `path` 是展示口径，与清单同源）
+        const created = items.value.find((n) => n.path === resp.path)
+        if (created) await select(created)
+      }
       return true
     } catch (err) {
       detailError.value = captureError(err)
@@ -464,9 +495,13 @@ export function useVdfs(opts: UseVdfsOptions) {
   // ==================== 可接受的新建类型（§5） ====================
   //
   // 当前目录节点声明自己能新建哪些类型（`new_types`）；前端只负责「选类型 +
-  // 填名 + 组装地址 + 发写请求」，不认识任何具体类型——创建语义由 provider 自持。
+  // 进入详情页」，不认识任何具体类型——创建语义由 provider 自持。
   // `.vdfs/session` 这类子目录节点由后端合成时携带其 new_types，因此无需任何
   // 「按目录名回退」的特判。
+  //
+  // **新建 = 选中一张草稿节点**，与「选中一项」走同一条详情通道：同一个
+  // `ext` → 同一个渲染器 → 同一个保存入口。名字不由前端先问：它是 provider
+  // 的私有知识，保存时由后端生成（写目录自身，见 `write`）。
 
   /** 当前目录可接受的新建类型 */
   const creatableTypes = computed<VdfsNewType[]>(() => cwdNode.value?.new_types ?? [])
@@ -474,36 +509,61 @@ export function useVdfs(opts: UseVdfsOptions) {
   /** 是否有可新建类型（添加按钮可见性；机制只认节点声明） */
   const canCreate = computed(() => creatableTypes.value.length > 0)
 
-  /** 按类型新建：目标地址 = `<当前目录>/<名称>.<ext>`，一次 `write(create:true)` */
-  async function createTyped(type: VdfsNewType, name: string): Promise<boolean> {
-    const trimmed = name.trim()
-    if (!trimmed) {
-      showToast('error', '请填写名称')
-      return false
+  /**
+   * 草稿节点 = 「新建」的选中态：**没有 id、也没有名字**。
+   *
+   * 它只需要两样东西就够渲染出**该类型真实的详情页**：
+   *
+   * - `ext` = 该类型落成后的节点扩展名（渲染器键）。它**不总是** `type.ext`：
+   *   后者是呈现扩展名（地址末段后缀，如 `model`），而落成后的节点是
+   *   `form`（配置型资源的详情是定义驱动表单）。后端用 `node_ext` 声明这个差
+   *   异，缺省时两者相同（会话即如此）；
+   * - `schema` = 该类型的呈现描述（form 定义）——没有它表单渲染不出任何字段。
+   *
+   * 其余呈现字段留空——「还没有的东西」不该假装有内容（用户第 2 点：新建时
+   * 详情页是缺 id / 名字的，选中一项后才是带内容的那一页）。
+   */
+  function draftNodeOf(type: VdfsNewType): VdfsNode {
+    return {
+      path: '',
+      name: '',
+      title: '',
+      kind: type.ext,
+      status: VDFS_STATUS_ACTIVE,
+      access: 'w',
+      ext: type.node_ext || type.ext,
+      // 呈现描述随类型下发：草稿与落成后**同一张详情**（用户第 1 点）
+      schema: type.schema,
+      // 图标键读 `config_type`（与清单项同源）——纯 UI 映射，草稿照给
+      config_type: type.ext,
     }
-    const target = vdfsJoin(cwd.value, type.ext ? `${trimmed}.${type.ext}` : trimmed)
-    saving.value = true
-    detailError.value = ''
-    fieldErrors.value = []
-    try {
-      await writeVdfs(target, '', { create: true })
-      showToast('success', `已新建「${trimmed}」`)
-      await refresh()
-      return true
-    } catch (err) {
-      detailError.value = captureError(err)
-      showToast('error', `新建失败：${detailError.value}`)
-      return false
-    } finally {
-      saving.value = false
-    }
+  }
+
+  /** 是否草稿节点（判据 = **没有路径**：草稿还没落盘，也就没有地址） */
+  function isDraftNode(node: VdfsNode): boolean {
+    return !node.path
+  }
+
+  /**
+   * 草稿代际：每进一次新建态 +1。
+   *
+   * 详情组件的 `:key` 用节点路径——草稿没有路径，连续新建时 key 会撞在一起，
+   * 组件不重挂载就会**留着上一份草稿的内容**。这个自增号就是草稿的临时身份。
+   */
+  const draftSeq = ref(0)
+
+  /** 进入新建态：选中一张该类型的草稿节点（详情区按 `ext` 渲染） */
+  function startNew(type: VdfsNewType) {
+    draftSeq.value += 1
+    void select(draftNodeOf(type))
   }
 
   /**
    * 按类型从**本地文件**新建（整包导入）：内容走二进制通道。
    *
-   * 与 `createTyped` 同构——差别只是内容来源：`source = file` 的类型（如
-   * `zip` 整包）不填名，目标名由**文件名**推导（主干 + 类型扩展名）。
+   * 这是「新建」里唯一**不进入详情页**的形态——因为内容（字节）在打开详情页
+   * 之前就已经齐了，没有「边看边填」的过程：`source = file` 的类型（如 `zip`
+   * 整包）目标名由**文件名**推导（主干 + 类型扩展名），一次写完即完成。
    */
   async function createTypedFile(type: VdfsNewType, file: File): Promise<boolean> {
     const target = vdfsJoin(cwd.value, newFileNameOf(file.name, type.ext))
@@ -652,7 +712,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     saveText,
     runAction,
     removeSelected,
-    createTyped,
+    startNew,
+    draftSeq,
     createTypedFile,
     creatableTypes,
     canCreate,

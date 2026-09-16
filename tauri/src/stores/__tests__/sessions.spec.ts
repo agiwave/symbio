@@ -49,12 +49,14 @@ vi.mock('@/services/session', () => ({
 const vdfsApi = vi.hoisted(() => ({
   readVdfs: vi.fn(),
   statVdfs: vi.fn(),
+  writeVdfs: vi.fn(),
   watchVdfs: vi.fn(async () => {}),
   unwatchVdfs: vi.fn(async () => {}),
 }))
 vi.mock('@/services/vdfs', () => ({
   readVdfs: vdfsApi.readVdfs,
   statVdfs: vdfsApi.statVdfs,
+  writeVdfs: vdfsApi.writeVdfs,
   watchVdfs: vdfsApi.watchVdfs,
   unwatchVdfs: vdfsApi.unwatchVdfs,
 }))
@@ -91,7 +93,33 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     captured.handlers.length = 0
     sessionApi.listSessions.mockClear()
     vdfsApi.statVdfs.mockReset()
+    vdfsApi.writeVdfs.mockReset()
     vdfsApi.readVdfs.mockResolvedValue({ text: '{"messages":[]}' })
+  })
+
+  it('新建会话 = 一次 vdfs/write 到会话挂载根；id 由后端生成，前端不编造', async () => {
+    // 后端返回的是**树内相对路径**（容器把挂载目录名补在前面），前端只取末段
+    vdfsApi.writeVdfs.mockResolvedValue({ path: 'session/s9', created: true })
+    const store = useSessionsStore()
+
+    const id = await store.createSession({ workdir: 'D:/work' })
+
+    expect(id).toBe('s9')
+    expect(vdfsApi.writeVdfs).toHaveBeenCalledTimes(1)
+    const [path, body, opts] = vdfsApi.writeVdfs.mock.calls[0] as [string, string, { create: boolean }]
+    expect(path).toBe(vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR))
+    expect(opts).toEqual({ create: true })
+    // 目标名不由前端给：会话名字来自首条消息（display_title），此处只带 metadata
+    expect(JSON.parse(body)).toEqual({ metadata: expect.objectContaining({ workdir: 'D:/work' }) })
+    expect(store.list[0]?.id).toBe('s9')
+    expect(store.activeId).toBe('s9')
+  })
+
+  it('后端没给出新地址时报错，而不是插一条 id 为空的会话', async () => {
+    vdfsApi.writeVdfs.mockResolvedValue({ path: '', created: true })
+    const store = useSessionsStore()
+    await expect(store.createSession()).rejects.toThrow()
+    expect(store.list).toHaveLength(0)
   })
 
   it('store 在 setup 时恰好订阅一次，作用域 = 会话叶子的直接子项', () => {

@@ -46,6 +46,9 @@ const capabilities = computed<Record<string, boolean>>(() => ({
   test_connection: false,
 }))
 
+/** 是否已落盘的会话（判据 = 有没有 id；草稿态没有名字，也就没有 id） */
+const hasId = computed(() => Boolean(props.node?.name))
+
 /**
  * 机制动作注入（在 ChatMainPanel 头部与自身按钮并排渲染）。
  *
@@ -56,9 +59,12 @@ const capabilities = computed<Record<string, boolean>>(() => ({
  *   删除请求经 `@delete` 回到页面层，统一走 `vdfs/delete`
  *   （`VdfsProvider::delete` → `delete_session_internal`）。
  *
+ * **草稿态（新建）两者都不给**：还没有落盘的东西，既无内部可浏览，也无从删除。
+ *
  * 本组件不直接发协议——动作一律回到页面层执行。
  */
 const mechanismActions = computed<DetailAction[]>(() => {
+  if (!hasId.value) return []
   const out: DetailAction[] = [
     { id: 'open-container', label: '浏览内部', style: 'primary', payload: { kind: 'session' } },
   ]

@@ -94,6 +94,28 @@ defineEmits<{
 const access = computed(() => vdfsAccessOf(props.node))
 
 /**
+ * 草稿节点（机制「新建」态）：**还没有 id / 名字**——它还没落盘。
+ *
+ * 判据与 `useVdfs.isDraftNode` 同源（路径为空），此处用 `name` 表达：
+ * 对 form 资源两者等价，且 `name` 正是「详情页缺 id」的那一项。
+ */
+const isDraft = computed(() => !props.node.name)
+
+/**
+ * 草稿态**不成立**的定义动作：它们都以「这个资源已经存在」为前提。
+ *
+ * 保存本身（`save`）当然保留——草稿的保存就是「新建」。其余动作点下去只会
+ * 打到一个不存在的地址上：删除没有目标、测试连接没有配置、浏览内部没有内部、
+ * 导出没有内容。
+ */
+const DRAFT_UNAVAILABLE_ACTIONS = new Set<string>([
+  'delete',
+  VDFS_ACTION_TEST,
+  VDFS_ACTION_EXPORT,
+  'open-container',
+])
+
+/**
  * 通道适配：数据一律由 VDFS 承载（`vdfs/read` 取值、`vdfs/write` 保存），
  * 故把定义归一为 `binding: 'option'`。不可写节点同时剥掉写相关的定义动作
  * （避免渲染出无效的「保存」按钮）。
@@ -107,12 +129,13 @@ const definition = computed<DetailDefinition>(() => {
     // **与写无关**的动作必须保留：「浏览内部」是纯导航（agent 正是只读却
     // 最需要它的那类资源），「测试连接」是只读自检，「导出」是只读打包，
     // 三者都不依赖写权限。
-    actions: access.value.write
+    actions: (access.value.write
       ? raw.actions
       : (raw.actions ?? []).filter(
           (a) =>
             a.id === 'open-container' || a.id === VDFS_ACTION_TEST || a.id === VDFS_ACTION_EXPORT
-        ),
+        )
+    )?.filter((a) => !isDraft.value || !DRAFT_UNAVAILABLE_ACTIONS.has(a.id)),
   }
 })
 
@@ -148,7 +171,8 @@ const capabilities = computed<Record<string, boolean>>(() => ({
  * `detail_definition`），此时删除是有语义的，故按访问位注入。
  */
 const mechanismActions = computed<DetailAction[]>(() => {
-  if (!access.value.write) return []
+  // 草稿没有可删的东西：机制版「删除」只在已落盘的节点上出现
+  if (!access.value.write || isDraft.value) return []
   // 不与定义声明的动作重复：model / mcp / skill / agent 的详情定义都自带
   // `delete`（「删除 Provider」/「删除该 Agent」…），若再注入机制版「删除」，
   // 同一页会渲染出两个删除按钮。两者语义本就相同（都经 @delete →

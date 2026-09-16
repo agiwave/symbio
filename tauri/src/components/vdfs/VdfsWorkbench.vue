@@ -94,7 +94,9 @@
       </template>
 
       <template #detail>
-        <!-- 新建（类型化）：类型由节点 new_types 声明；多于一项先选类型 -->
+        <!-- 新建：多于一种类型时先选类型。选完**直接进入该类型的详情页**
+             （草稿态：无 id / 名字），与「选中一项」是同一条通道——名字要么在
+             详情页里产生（如会话的首条消息），要么由后端生成。 -->
         <div v-if="creatingTyped" class="vdfs-prompt">
           <template v-if="!createType">
             <h3 class="prompt-title">新建</h3>
@@ -105,7 +107,7 @@
                 :key="t.ext"
                 type="button"
                 class="type-choice-btn"
-                @click="createType = t"
+                @click="chooseType(t)"
               >
                 <span class="type-choice-label">{{ t.title || t.ext }}</span>
                 <span class="type-choice-hint">{{ t.ext }}</span>
@@ -117,8 +119,9 @@
             </div>
           </template>
 
-          <!-- 内容来自本地文件（如 zip 整包导入）：选文件，地址由文件名推导 -->
-          <template v-else-if="createType.source === VDFS_NEW_SOURCE_FILE">
+          <!-- 内容来自本地文件（如 zip 整包导入）：内容在打开详情页之前就已齐备，
+               没有「边看边填」的过程，因此选文件即完成（唯一不进详情页的新建形态） -->
+          <template v-else>
             <h3 class="prompt-title">导入{{ createType.title || createType.ext }}</h3>
             <input
               type="file"
@@ -132,34 +135,6 @@
             <div class="prompt-actions">
               <button class="action-btn" :disabled="saving || !typedFile" @click="submitTypedFile">
                 {{ saving ? '导入中…' : '导入' }}
-              </button>
-              <button
-                v-if="creatableTypes.length > 1"
-                class="action-btn secondary"
-                :disabled="saving"
-                @click="createType = null"
-              >
-                上一步
-              </button>
-              <button class="action-btn secondary" :disabled="saving" @click="cancelTyped">取消</button>
-            </div>
-          </template>
-
-          <template v-else>
-            <h3 class="prompt-title">新建{{ createType.title || createType.ext }}</h3>
-            <input
-              v-model="typedName"
-              class="prompt-input"
-              placeholder="名称"
-              spellcheck="false"
-              @keyup.enter="submitTyped"
-            />
-            <p class="prompt-hint">写入地址：<code>{{ typedPreview }}</code></p>
-            <p v-if="createType.description" class="prompt-hint">{{ createType.description }}</p>
-            <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
-            <div class="prompt-actions">
-              <button class="action-btn" :disabled="saving" @click="submitTyped">
-                {{ saving ? '创建中…' : '创建' }}
               </button>
               <button
                 v-if="creatableTypes.length > 1"
@@ -196,11 +171,13 @@
           </div>
         </div>
 
-        <!-- 详情：渲染器由节点 ext 决定（唯一分发点） -->
+        <!-- 详情：渲染器由节点 ext 决定（唯一分发点）。**草稿（新建态）也走这里**
+             ——同一个 ext 用同一个渲染器，因此「点新建」与「选中一项」在交互上
+             没有第二种形态（key 对草稿另取，保证连续新建时重挂载）。 -->
         <component
           :is="rendererComp"
           v-else-if="selectedNode && rendererComp"
-          :key="selectedNode.path"
+          :key="selectedNode.path || `draft-${draftSeq}`"
           :node="selectedNode"
           :data="rendererData"
           :error="detailError"
@@ -210,6 +187,7 @@
           @save="onSave"
           @delete="onDelete"
           @action="onAction"
+          @created="onCreated"
           @rename="startRename"
           @browse="browseInto"
         />
@@ -281,10 +259,11 @@ const {
   saveText,
   runAction,
   removeSelected,
-  createTyped,
+  startNew,
   createTypedFile,
   creatableTypes,
   canCreate,
+  draftSeq,
   renameSelected,
 } = useVdfs({ addr: computed(() => props.addr) })
 
@@ -356,19 +335,20 @@ function onAction(id: string) {
 }
 
 // ==================== 新建（类型化；类型由节点声明，§5） ====================
+//
+// 两种形态，判据是**内容是否在打开详情页之前就已齐备**：
+//
+// - 缺省：点新建 = **进入该类型的详情页**（草稿态，无 id / 名字）——名字要么
+//   在详情页里产生（如会话的首条消息），要么由后端生成（写目录自身，
+//   见 `useVdfs.write`）；
+// - `source = file`：内容就是那份本地文件，选文件即完成（进详情页无事可做）。
+//
+// 多于一种类型时先让用户选类型，选完立刻落到上面两条之一。
+
 const creatingTyped = ref(false)
 const createType = ref<VdfsNewType | null>(null)
-const typedName = ref('')
 /** `source = file` 的类型：待导入的本地文件 */
 const typedFile = ref<File | null>(null)
-
-/** 新建地址预览（类型 ext 决定扩展名） */
-const typedPreview = computed(() => {
-  const t = createType.value
-  if (!t) return ''
-  const name = typedName.value.trim() || '<名称>'
-  return vdfsJoin(cwd.value, t.ext ? `${name}.${t.ext}` : name)
-})
 
 /** 导入地址预览（目标名由**文件名**推导，故用户不填名） */
 const typedFilePreview = computed(() => {
@@ -392,24 +372,51 @@ async function submitTypedFile() {
   if (await createTypedFile(t, f)) cancelTyped()
 }
 
+/** 选定类型 → 落到「进详情页」或「选文件」两条路之一 */
+function chooseType(t: VdfsNewType) {
+  if (t.source === VDFS_NEW_SOURCE_FILE) {
+    createType.value = t
+    return
+  }
+  // 进详情页 = 收起类型面板 + 选中一张草稿节点（与选中一项同一条通道）
+  creatingTyped.value = false
+  createType.value = null
+  detailError.value = ''
+  startNew(t)
+}
+
 function startTypedNew() {
   renaming.value = false
-  creatingTyped.value = true
-  typedName.value = ''
+  typedFile.value = null
   detailError.value = ''
-  // 恰好一种类型：跳过类型选择，直接进入命名
-  createType.value = creatableTypes.value.length === 1 ? creatableTypes.value[0] : null
+  const types = creatableTypes.value
+  // 恰好一种类型：跳过类型选择，直接落到那一条路
+  const only = types[0]
+  if (types.length === 1 && only) {
+    chooseType(only)
+    return
+  }
+  creatingTyped.value = true
+  createType.value = null
 }
 function cancelTyped() {
   creatingTyped.value = false
   createType.value = null
-  typedName.value = ''
   typedFile.value = null
 }
-async function submitTyped() {
-  const t = createType.value
-  if (!t) return
-  if (await createTyped(t, typedName.value)) cancelTyped()
+
+/**
+ * 详情渲染器完成资源创建后上报新节点的 **id**（如新建会话落库）：刷新清单并选中它。
+ *
+ * 草稿态由机制进入、创建由渲染器发起（只有它知道怎么建），落点再交回机制统一
+ * 处理——于是「新建 → 详情页 → 创建 → 选中」是一条闭合通道，本控件不需要认识
+ * 任何具体资源类型。
+ */
+async function onCreated(id: string) {
+  if (!id) return
+  await refresh()
+  const target = items.value.find((n) => n.path === vdfsJoin(cwd.value, id))
+  if (target) void select(target)
 }
 
 // ==================== 重命名（内联交互态；S11 起不再有「新建目录」入口） ==========

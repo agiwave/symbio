@@ -6,13 +6,14 @@
   内容（`.vdfs/session/<id>` 的 `vdfs/read`），删除经 `@delete` 由页面层统一走
   `vdfs/delete`。本组件只承载会话的"详情差异化"：
 
-  - node 非 null（选中态）：聊天工作区 = ChatMainPanel（工作目录的层级
-    浏览不在详情页——经机制动作「浏览内部」进入会话同名目录
+  - node 有 id（选中态）：聊天工作区 = ChatMainPanel（工作目录的层级浏览不在
+    详情页——经机制动作「浏览内部」进入会话同名目录
     `<id>/工作目录[/<rel>]`，与子会话并列，见 docs/design/vdfs.md）；
-  - node 为 null（机制"新建"态）：新建会话引导——输入区与现有会话完全一致
-    （ChatInputArea + ChatOptionBar 草稿态：目录/Agent/模型/模式/风险等级/心跳
-    均可选，由级联选项机制下发，暂存于机制内部的 metadata 缓冲，发送首条消息时
-    经 createSession(patch) 一并写入 metadata 落库）。
+  - node 无 id（机制「新建」态 = **草稿节点**，见 `useVdfs.startNew`）：新建会话
+    引导——输入区与现有会话完全一致（ChatInputArea + ChatOptionBar 草稿态：
+    目录/Agent/模型/模式/风险等级/心跳均可选，由级联选项机制下发，暂存于机制
+    内部的 metadata 缓冲，发送首条消息时经 createSession(patch) **一次
+    `vdfs/write`** 创建并落库——id 由后端生成）。
 
   选中同步：机制选中（:key 重挂载）是唯一真相，watch node.name → store.selectSession。
   创建经 emit('created') 回到机制页面层。机制动作（删除/浏览内部等）经
@@ -21,7 +22,7 @@
   页面不得另加外框。
 -->
 <template>
-  <div v-if="node" class="session-editor">
+  <div v-if="hasId" class="session-editor">
     <ChatMainPanel
       class="col-chat"
       :mechanism-actions="mechanismActions"
@@ -52,16 +53,18 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { DetailAction, VdfsNode } from '@/schemas/vdfs'
 import type { ImageAttachment } from '@/types'
 import { useSessionsStore } from '@/stores/sessions'
+import { useToast } from '@/composables/useToast'
+import { logger } from '@/utils/logger'
 import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
 import ChatInputArea from '@/components/chat/ChatInputArea.vue'
 import ChatOptionBar from '@/components/chat/ChatOptionBar.vue'
 
 const props = defineProps<{
-  /** 会话节点（`.vdfs/session/<id>`）；null = 新建引导态 */
+  /** 会话节点（`.vdfs/session/<id>`）；无 id / 名字 = 新建草稿态 */
   node: VdfsNode | null
   capabilities: Record<string, boolean>
   /** 机制动作注入（页面单一定义点计算：浏览内部/删除等） */
@@ -81,7 +84,17 @@ const emit = defineEmits<{
 }>()
 
 const store = useSessionsStore()
+const { showToast } = useToast()
 const creating = ref(false)
+
+/**
+ * 是否已落盘的会话。
+ *
+ * **判据 = 有没有 id**（节点名即会话 id）：新建态由机制以「草稿节点」进入
+ * （无 path / 无 name），因此「点新建」与「选中一项」走的是同一个渲染器、
+ * 同一张详情页——差别只是这一页有没有东西可看。不再需要第二种页面形态。
+ */
+const hasId = computed(() => Boolean(props.node?.name))
 
 /**
  * 新建态（懒创建）草稿：输入文本 + 选项行的 metadata 缓冲。
@@ -131,8 +144,9 @@ async function onSendFirst() {
   if ((!text && draftImages.value.length === 0) || creating.value) return
   creating.value = true
   try {
-    // 懒创建：此刻才真正建会话；草稿选择（机制通用 metadata 补丁）写入本地条目
-    // 与后端 metadata，保证选中切换后选项栏回显与草稿一致。
+    // 懒创建：此刻才真正建会话——一次 `vdfs/write`（写会话挂载根，无名字，
+    // id 由后端生成）；草稿选择（机制通用 metadata 补丁）随创建一并落库，
+    // 保证选中切换后选项栏回显与草稿一致。
     const id = await store.createSession(draftOptionsRef.value?.getDraftMetadata())
     // 首条消息（含附件）排队给新会话的 ChatMainPanel；附件 thumbnailUrl 是
     // object URL，所有权随载荷转移（消费端发送后 revoke），此处**不可 revoke**。
@@ -145,6 +159,10 @@ async function onSendFirst() {
     draftText.value = ''
     draftImages.value = []
     emit('created', id)
+  } catch (e) {
+    // 创建失败（后端没落库）→ 必须说出来，否则「点了没反应」；草稿内容原样保留，可重试
+    logger.error('Session', '新建会话失败：', e)
+    showToast('error', `新建会话失败：${e instanceof Error ? e.message : String(e)}`)
   } finally {
     creating.value = false
   }

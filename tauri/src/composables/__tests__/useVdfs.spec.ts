@@ -19,6 +19,7 @@ import { mount } from '@vue/test-utils'
 const mocks = vi.hoisted(() => ({
   listVdfs: vi.fn(),
   readVdfs: vi.fn(),
+  writeVdfs: vi.fn(),
   watchVdfs: vi.fn(),
   unwatchVdfs: vi.fn(),
   subscribe: vi.fn(),
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/services/vdfs', () => ({
   listVdfs: mocks.listVdfs,
   readVdfs: mocks.readVdfs,
+  writeVdfs: mocks.writeVdfs,
   watchVdfs: mocks.watchVdfs,
   unwatchVdfs: mocks.unwatchVdfs,
   // 以下未被本用例触达，仅为满足模块导入
@@ -36,7 +38,6 @@ vi.mock('@/services/vdfs', () => ({
   downloadBlob: vi.fn(),
   moveVdfs: vi.fn(),
   runVdfsAction: vi.fn(),
-  writeVdfs: vi.fn(),
   writeVdfsBinary: vi.fn(),
 }))
 vi.mock('@/services/eventBus', () => ({ subscribe: mocks.subscribe }))
@@ -320,6 +321,87 @@ describe('useVdfs 有界列表（中栏只取最新一页 + 加载更早）', ()
 
     expect(api.items.value, '不得重复追加').toHaveLength(100)
     expect(api.hasMore.value, '没有新项即到底').toBe(false)
+
+    wrapper.unmount()
+  })
+})
+
+describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同一条详情通道）', () => {
+  const MODEL_DIR = `${VDFS_ROOT}/model`
+
+  /** 目录声明的「可新建类型」：`ext` 是呈现扩展名，`node_ext` 才是渲染器键 */
+  const MODEL_NEW_TYPE = {
+    ext: 'model',
+    title: '模型',
+    node_ext: 'form',
+    schema: { sections: [{ title: null, collapsed: false, fields: [] }] },
+  }
+
+  function dirNode() {
+    return {
+      path: MODEL_DIR,
+      name: 'model',
+      title: '模型',
+      kind: 'dir',
+      status: 'active',
+      access: 'l',
+      new_types: [MODEL_NEW_TYPE],
+    }
+  }
+
+  it('草稿节点没有 id / 名字，但渲染器与 schema 就是该类型落成后的那一套', async () => {
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+    expect(api.canCreate.value).toBe(true)
+
+    api.startNew(api.creatableTypes.value[0]!)
+    await settle()
+
+    const n = api.selectedNode.value!
+    expect(n.path, '草稿还没落盘 ⇒ 没有地址').toBe('')
+    expect(n.name, '草稿还没有名字').toBe('')
+    // 关键：渲染器键取 `node_ext`（form），不是呈现扩展名（model）——
+    // 否则会落到 fallback 兜底，而不是与「选中一项」同一个详情页
+    expect(n.ext).toBe('form')
+    expect(n.schema).toEqual(MODEL_NEW_TYPE.schema)
+    expect(api.renderer.value).toBe('form')
+    expect(mocks.readVdfs, '草稿没有内容可读，不该去读一个不存在的节点').not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('草稿保存：写到**目录自身**并带 create 意图（名字由后端生成）', async () => {
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+    api.startNew(api.creatableTypes.value[0]!)
+    await settle()
+
+    mocks.writeVdfs.mockResolvedValue({ path: `${MODEL_DIR}/model-a1b2c3d4`, created: true })
+    await api.saveFields({ name: '我的模型' })
+
+    const [path, text, opts] = mocks.writeVdfs.mock.calls[0] as [
+      string,
+      string,
+      { create: boolean },
+    ]
+    expect(path, '草稿的目标是它所在的那个目录（使用方不说叫什么）').toBe(MODEL_DIR)
+    expect(opts).toEqual({ create: true })
+    expect(JSON.parse(text), '填好的字段必须原样送出').toEqual({ name: '我的模型' })
+
+    wrapper.unmount()
+  })
+
+  it('连续两次新建：草稿代际自增，详情组件据此重挂载（不残留上一份草稿）', async () => {
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+
+    api.startNew(api.creatableTypes.value[0]!)
+    const first = api.draftSeq.value
+    api.startNew(api.creatableTypes.value[0]!)
+    expect(api.draftSeq.value).toBe(first + 1)
 
     wrapper.unmount()
   })
