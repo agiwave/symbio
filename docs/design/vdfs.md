@@ -262,12 +262,18 @@ size  updated_at  children  binary  hidden  schema  new_types  attributes
   `VdfsWriteResponse.path` 里给出新节点的相对路径**——那是使用方唯一能拿到新地址
   的地方。不支持（该目录没有可新建的类型）则照常报错。
 
-`create` 位**只回答「目标不存在时怎么办」**：
+`create` 位 = **使用方的写意图**：
 
 | 目标 | `create = false` | `create = true` |
 |---|---|---|
-| 已存在 | 覆盖 | 覆盖（`created = false`） |
-| 不存在 | `NotFound` | **创建**（`created = true`） |
+| 已存在 | 覆盖（`created = false`） | 覆盖（`created = false`） |
+| 不存在 · **具名节点** | 写入型资源**就地创建**（`created = true`）；「更新既有对象的字段」型语义可报 `NotFound` | **创建**（`created = true`） |
+| 不存在 · **目录自身** | 报错（没有可覆盖的目标） | **创建**，名字由 provider 生成 |
+
+⚠️ **具名 + 目标不存在时不要一律报 `NotFound`**：使用方要的是「给了名字就写得进去」
+——配置型资源的地址**就是它的身份**（`model` / `mcp` / `skill` 皆如此），不存在就建
+一个。只有「写的是某个**既有对象的一个字段**」（如会话 metadata）才该拒绝：没有对象
+就没有可更新的字段。
 
 于是「保存一份还没落盘的草稿」与「新建一项」是同一个动作的两种意图，使用方无需
 先 `stat` 再决定写还是建（那会引入一次多余的往返与竞态）。
