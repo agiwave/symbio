@@ -598,6 +598,25 @@ impl ModelPlugin {
         crate::providers::vdfs_service::entry::id_of(path, PLUGIN_MODEL)
     }
 
+    /// 目标地址 → 条目 id（**唯一**判据，`write` 与测试共用）。
+    ///
+    /// 两种目标形态见 [`VdfsProvider::write`](crate::symbio_core::vdfs_provider::VdfsProvider::write)：
+    /// 地址末段非空 ⇒ 名字由使用方给（`id_of` 按呈现扩展名剥后缀）；地址为空
+    /// ⇒ **使用方没给名字**（写挂载点目录自身），id 由本插件生成——这正是
+    /// 「点新建，直接进详情页填，保存时一次写入」的机制形态。
+    /// 目录自身没有可覆盖的目标，所以必须带 `create` 意图。
+    fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
+        if !path.trim_matches('/').is_empty() {
+            return Ok(Self::id_of(path));
+        }
+        if !create {
+            return Err(VdfsError::invalid(format!(
+                "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
+            )));
+        }
+        Ok(crate::providers::vdfs_service::entry::auto_id(PLUGIN_MODEL))
+    }
+
     /// 连接测试（复用 `validate_provider`）：失败也返回 `Ok`，由 `message` 承载原因
     async fn test_of(&self, id: &str) -> Result<(bool, String), PluginError> {
         let provider = {
@@ -685,15 +704,10 @@ impl VdfsProvider for ModelPlugin {
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        if path.is_empty() {
-            return Err(VdfsError::invalid(format!(
-                "{LABEL}不支持在挂载根上写入：{path}"
-            )));
-        }
         if content.binary {
             return Err(VdfsError::invalid(format!("{LABEL}不支持整包导入（zip）")));
         }
-        let id = Self::id_of(path);
+        let id = Self::resolve_id(path, content.create)?;
         let text = content.as_text().unwrap_or_default();
         // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
         // 填好的字段必须原样落盘（否则「填完再保存」等于白填）。唯一例外是

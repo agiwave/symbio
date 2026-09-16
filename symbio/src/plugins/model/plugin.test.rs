@@ -147,3 +147,26 @@ fn new_type_declares_the_landing_detail() {
     );
     assert!(t.schema.is_some(), "没有 schema，表单渲染不出任何字段");
 }
+
+/// 无名字新建 = 写挂载点目录自身：id 由本插件生成（用户第 3 点）。
+///
+/// 目录自身没有可覆盖的目标 ⇒ 必须带 `create` 意图；带了就必须**建得出来**，
+/// 不能像原先那样一律 `Invalid("不支持在挂载根上写入")`——那会让「点新建 → 在
+/// 详情页填好 → 保存」在 model 这一栏永远失败（前端只能停在草稿上）。
+#[test]
+fn nameless_write_generates_an_id() {
+    // 有名字：末段即 id（呈现扩展名由 `id_of` 剥掉）
+    assert_eq!(
+        ModelPlugin::resolve_id("openai-1.model", false).unwrap(),
+        "openai-1"
+    );
+    // 无名字又没有 create 意图 → 明确报错，而不是静默建一个
+    assert!(
+        ModelPlugin::resolve_id("", false).is_err(),
+        "目录自身没有可覆盖的目标，必须显式表达 create 意图"
+    );
+    // 无名字 + create → 生成带前缀、定长、安全的 id
+    let id = ModelPlugin::resolve_id("", true).unwrap();
+    assert!(id.starts_with("model-"), "带类别前缀便于人读：{id}");
+    assert_eq!(id.len(), "model-".len() + 8, "随机段定长：{id}");
+}

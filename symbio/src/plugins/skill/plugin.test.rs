@@ -145,3 +145,19 @@ fn new_type_declares_the_landing_detail() {
         .expect("可导入整包");
     assert!(pack.node_ext.is_none() && pack.schema.is_none());
 }
+
+/// 无名字新建 = 写挂载点目录自身：id 由本插件生成（用户第 3 点）。
+///
+/// 目录自身没有可覆盖的目标 ⇒ 必须带 `create` 意图；带了就必须建得出来，
+/// 否则「点新建 → 在详情页填好 → 保存」会停在草稿上。
+#[test]
+fn nameless_write_generates_an_id() {
+    assert_eq!(resolve_id("demo", false).unwrap(), "demo");
+    assert!(
+        resolve_id("", false).is_err(),
+        "目录自身没有可覆盖的目标，必须显式表达 create 意图"
+    );
+    let id = resolve_id("", true).unwrap();
+    assert!(id.starts_with("skill-"), "带类别前缀便于人读：{id}");
+    assert_eq!(id.len(), "skill-".len() + 8, "随机段定长：{id}");
+}

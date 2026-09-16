@@ -225,6 +225,23 @@ fn id_of(path: &str) -> String {
     crate::providers::vdfs_service::entry::id_of(path, PLUGIN_MCP)
 }
 
+/// 目标地址 → 条目 id（`write` 与测试共用的**唯一**判据）。
+///
+/// 末段非空 ⇒ 名字由使用方给；地址为空 ⇒ **使用方没给名字**（写挂载点目录自身，
+/// 即「点新建 → 在详情页填好 → 保存」），id 由本插件生成。目录自身没有可覆盖的
+/// 目标，所以必须带 `create` 意图（见 [`VdfsProvider::write`]）。
+fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
+    if !path.trim_matches('/').is_empty() {
+        return Ok(id_of(path));
+    }
+    if !create {
+        return Err(VdfsError::invalid(format!(
+            "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
+        )));
+    }
+    Ok(crate::providers::vdfs_service::entry::auto_id(PLUGIN_MCP))
+}
+
 /// 导入的**建议名**：末段再去掉 `.zip`（新建地址是 `<name>.zip`；id 的最终解释权
 /// 仍在插件——整包导入时以包内 server.json 为准）
 fn import_name_of(path: &str) -> String {
@@ -408,16 +425,7 @@ impl VdfsProvider for McpPlugin {
         }
         // 无名字（写在挂载点目录自身）→ 「新建一项，名字由本插件生成」。
         // 目录自身没有可覆盖的目标，因此必须有 create 意图（见 `VdfsProvider::write`）。
-        let id = if path.trim_matches('/').is_empty() {
-            if !content.create {
-                return Err(VdfsError::invalid(format!(
-                    "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
-                )));
-            }
-            crate::providers::vdfs_service::entry::auto_id(PLUGIN_MCP)
-        } else {
-            id_of(path)
-        };
+        let id = resolve_id(path, content.create)?;
         let text = content.as_text().unwrap_or_default();
         // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
         // 填好的字段必须原样落盘。唯一例外是**内容为空**——「先建一个，随后再填」
