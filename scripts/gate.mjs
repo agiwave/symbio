@@ -210,6 +210,23 @@ function grabInt(output, re) {
   return m ? Number(m[1]) : null
 }
 
+/**
+ * 把**所有**匹配的捕获组相加。
+ *
+ * `cargo test --workspace` 会为每个测试目标各打一行 `test result:`，
+ * 只抓第一行会拿到某个小目标的数字（甚至是 0），必须求和才是有意义的通过数。
+ */
+function sumInt(output, re) {
+  const text = stripAnsi(output)
+  let total = 0
+  let found = false
+  for (const m of text.matchAll(new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`))) {
+    total += Number(m[1])
+    found = true
+  }
+  return found ? total : null
+}
+
 // ── 阶段 ───────────────────────────────────────────────────────────────
 const results = []
 function record(stage, label, pass, note) {
@@ -244,7 +261,10 @@ async function stageBackend() {
   })
   const passed = grabInt(test.output, /test result: ok\. (\d+) passed/)
   if (CI) {
-    // CI 跑全量（含集成测试），通过数与 `--lib` 基线不同 ⇒ 只信退出码
+    // CI 跑全量（含集成测试）：每个测试目标各打一行 ⇒ 求和；通过数与 `--lib`
+    // 基线不是一回事，故不比基线，只信退出码（数字仅作信息展示）
+    const total = sumInt(test.output, /test result: ok\. (\d+) passed/)
+    if (total !== null) console.log(dim(`      ${total} passed（--workspace 全量；只信退出码）`))
     record('backend', `cargo ${testArgs.join(' ')}`, test.ok)
   } else if (passed === null) {
     record('backend', 'cargo test --lib', test.ok, '未能解析通过数')

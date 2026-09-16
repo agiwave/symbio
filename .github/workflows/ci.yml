@@ -17,6 +17,8 @@ on:
       - 'clippy.toml'
       - '.editorconfig'
       - '.github/workflows/ci.yml'
+      # 检查逻辑本身在 scripts/ 下（gate.mjs 与各审计），改脚本也必须触发 CI
+      - 'scripts/**'
   pull_request:
     branches: [ main, master ]
     paths:
@@ -33,6 +35,8 @@ on:
       - 'clippy.toml'
       - '.editorconfig'
       - '.github/workflows/ci.yml'
+      # 检查逻辑本身在 scripts/ 下（gate.mjs 与各审计），改脚本也必须触发 CI
+      - 'scripts/**'
 
 jobs:
   # Rust代码质量检查
@@ -63,37 +67,12 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Check formatting
-        # rustfmt.toml 在仓库根目录，rustfmt 会从源文件目录向上查找配置
-        run: cargo fmt --all -- --check
-        working-directory: symbio
-
-      - name: Clippy check
-        # clippy.toml 在 symbio/ 目录（与 Cargo.toml 同级），自动被 cargo clippy 读取
-        # -D warnings 把告警当错误，强制团队修掉
-        run: cargo clippy --workspace --all-targets -- -D warnings
-        working-directory: symbio
-
-      - name: Build
-        run: cargo build --profile ${{ matrix.profile }}
-        working-directory: symbio
-
-      - name: Run tests
-        run: cargo test --workspace
-        working-directory: symbio
-
-      - name: Run project audit
-        # S-002 异步锁 / S-007 CHANGELOG / I-014 硬编码等审计
-        # 失败时让 PR 无法合并
-        # grep-audit.mjs 为纯 Node 实现，不依赖 ripgrep（原 .sh 版依赖 rg，需额外 apt 安装）
-        run: node scripts/grep-audit.mjs
-        continue-on-error: false
-
-      - name: Docs facts drift gate (docs/CURRENT.md)
-        # 读侧事实表是"现在是什么"的唯一自动来源（agent / 新读者据此免掉逐条反推代码）。
-        # 它由代码提取生成，故此门禁保证：改了插件 / 挂载点 / 工具 / 路由 / 走查事实后，
-        # 必须重新运行 `node scripts/gen-current-facts.mjs` 并提交，否则本步骤失败。
-        run: node scripts/gen-current-facts.mjs --check
+      - name: Backend gate
+        # 与本地**同一条命令**（含 cli/ 独立 workspace）：cargo check --tests、
+        # 单测、clippy -D warnings、cargo fmt --check，以及 --profile 指定的构建。
+        # ⚠️ 检查项只在 scripts/gate.mjs 里定义一处（CONTRIBUTING 的清单已删），
+        #    要加 / 改检查就改脚本，不要在这里另写 cargo 命令。
+        run: node scripts/gate.mjs --only=backend --ci --profile=${{ matrix.profile }}
         continue-on-error: false
 
   # 前端代码质量检查 (如果存在前端构建工具)
@@ -117,27 +96,12 @@ jobs:
         working-directory: tauri
         run: npm ci
 
-      - name: Type check (vue-tsc)
-        # 防止 TS 类型错误合入
-        working-directory: tauri
-        run: npx vue-tsc --noEmit
-
-      - name: Style usage audit (style-audit)
-        # 样式定义使用情况双向审计（编译检查的一部分）：
-        # - 使用的类/设计令牌必须有定义（ERROR，阻断合入）
-        # - 定义未被使用给 WARNING（加 --strict 后同样阻断）
-        run: node scripts/style-audit.mjs
-
-      - name: Unit tests (vitest)
-        # 纯逻辑层（utils / composables / services）单元测试门禁
-        working-directory: tauri
-        run: npm test
-
-      - name: Check for obvious frontend issues
-        # 简单检查：确保没有明显的语法错误
-        run: |
-          echo "Basic frontend sanity check passed"
-          # 这里可以添加更具体的检查，如eslint如果可用的话
+      - name: Frontend gate
+        # 与本地同一条命令：vue-tsc 类型检查 + vitest。
+        # ⚠️ 检查项只在 scripts/gate.mjs 里定义一处（不依赖 npx；脚本直接跑
+        #    node_modules 里的二进制，避免 CI 上 npx 解析差异）。
+        run: node scripts/gate.mjs --only=frontend
+        continue-on-error: false
 
       - name: Validate package.json
         # 注意：npm 没有 `pkg validate` 子命令，这里用 pkg get 验证 package.json 可解析
@@ -151,7 +115,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Docs & facts gate
+        # 与本地同一条命令：grep-audit（S-002 异步锁等）、style-audit（使用的类必须有
+        # 定义）、doc-link-audit、test-layout-audit，以及 docs/CURRENT.md 漂移门禁
+        # —— 事实表由代码提取生成，改了插件 / 挂载点 / 工具 / 路由就必须重新生成并提交。
+        run: node scripts/gate.mjs --only=docs,facts
+        continue-on-error: false
+
       - name: Check for obvious documentation issues
         run: |
           # 检查README是否存在基本结构

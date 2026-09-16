@@ -18,6 +18,28 @@
 
 ***
 
+## 2026-09-16: CI 收口为同一个 `gate.mjs` —— 检查逻辑只剩一处
+
+`.github/workflows/ci.yml` 此前手写全部命令，与本地 `gate.mjs` 是**两处真相**（且 CI 用
+`--workspace`、本地用 `--lib`，口径本就不同）。现在三个 job 都调同一条命令：
+
+| Job | 命令 |
+|---|---|
+| `rust-checks`（matrix dev/release） | `node scripts/gate.mjs --only=backend --ci --profile=${{ matrix.profile }}` |
+| `frontend-checks` | `node scripts/gate.mjs --only=frontend` |
+| `docs-validation` | `node scripts/gate.mjs --only=docs,facts` |
+
+- 原先散在 job 里的 `cargo fmt` / `clippy` / `build` / `test`、`npx vue-tsc`、
+  `npm test`、`grep-audit` / `style-audit` / `gen-current-facts --check` 全部删除，
+  改由脚本按阶段编排；`paths` 触发器新增 `scripts/**`（改脚本本身也要触发 CI）。
+- **覆盖度不降反升**：`symbio/Cargo.toml` 是单 package（`--workspace` 与默认等价），
+  而脚本额外检查 `cli/` 这个 CI 从未覆盖的独立 workspace。
+- `gate.mjs` 新增 `sumInt()`：`cargo test --workspace` 会为每个测试目标各打一行
+  `test result:`，原先 `grabInt` 只抓第一行（可能拿到某个小目标的 0），CI 模式下现在
+  **求和**展示（仅信息用途，判定仍只信退出码；`FAILED` 行不计入）。
+
+***
+
 ## 2026-09-16: 知识回归文档 —— 新增 `doc-find`，记忆从 15KB 压到 1.6KB
 
 **问题**：长期记忆里囤了大量「某机制是什么」的摘要。核查后发现**九成已在文档里**
