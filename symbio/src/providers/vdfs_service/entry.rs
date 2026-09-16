@@ -21,7 +21,11 @@ use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsError, VdfsNode, VdfsRes
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// 类别根目录：`<category>` 段对应的目录（未装配回退；生产上由插件传入自己的目录）
+/// 类别根目录：`<category>` 段对应的目录
+///
+/// ⚠️ **生产代码不应调用它** —— 插件一律用父插件经 `PLUGIN_DIR` 告知的目录，
+/// 不按插件名反推自己落在哪。当前仅剩两处合法使用：
+/// ① 读旧版历史落位的数据迁移（model 的旧分类 `ai`）；② 测试构造。
 ///
 /// **与插件目录是同一个目录**——一个插件 = 一个目录，配置（`PLUGIN.yml`）与资源
 /// 同处一处。因此这里直接委托 [`plugin_dir::dir_of`]，不另写一份路径规则。

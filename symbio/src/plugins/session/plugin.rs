@@ -281,16 +281,14 @@ impl SessionPlugin {
         self.parent.as_ref().and_then(|w| w.upgrade())
     }
 
-    /// Session 存储目录：`<本插件目录>`
+    /// Session 存储目录：**本插件自己的目录**
     ///
-    /// 构造式不在本插件里手写——直接取宿主层的资源类别根
-    /// [`category_dir`](crate::providers::vdfs_service::entry::category_dir)
-    /// （= 本插件自己的目录）。会话因此与
-    /// model / skill / mcp 共用同一条「插件名 → 存储类别」的映射，
-    /// 不再各插件手拼一次目录段。
+    /// 根不在本插件里推导——来自构造时父插件经 `PLUGIN_DIR` 告知的 `PluginDir`。
+    /// 插件不知道、也不该知道自己被放在哪。
     ///
-    /// 装配态下**插件自己的目录**才是权威来源（父插件经 `PLUGIN_DIR` 告知）；
-    /// 按 id 派生路径的自由函数一律由调用方把根传进去（见 `paths::session_dir`）。
+    /// 按 id 派生路径的自由函数（`paths::session_dir` / `memory_path` /
+    /// `resolve_archive_dir` / `save_transcript_archive`）一概由**调用方把根传进去**，
+    /// 不在内部反查全局布局。
     ///
     /// 这是 session 存储目录的**唯一权威位置**，不依赖任何 config 字段。
     /// 切换 homedir 后 worker composite 会整体重建（`home/reload`），

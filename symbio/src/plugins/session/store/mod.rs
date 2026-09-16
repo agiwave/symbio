@@ -37,7 +37,7 @@
 //!   `append` / `replace` / `update` 的 seq 分配与剔孤儿是会话专有的写入语义
 //!   （在 `super::chat_session`）。
 //!
-//! 真正共用的是**寻址**：类别根取宿主层的 [`category_dir`]、id→段名取
+//! 真正共用的是**寻址**：根由调用方传入（装配态即插件自己的目录），id→段名取
 //! [`safe_segment`]（经 [`super::paths::safe_id`]），所以会话目录名与资源条目目录名
 //! 永远是同一份规则。这与规范 §13.4 里「目录自管的类型自己落盘，不经 vdfs_service」
 //! 是同一条判据——agent bundle 是先例。
@@ -117,8 +117,8 @@ pub struct SessionStore {
 
 impl SessionStore {
     /// 持久会话存储；`base_dir` 通常是
-    /// [`SessionPlugin::session_storage_dir`](super::plugin::SessionPlugin::session_storage_dir)
-    /// （即宿主层的 `<本插件目录>` 类别根），测试注入临时目录。
+    /// [`SessionPlugin::storage_dir`](super::plugin::SessionPlugin::storage_dir)
+    /// （= 本插件自己的目录），测试注入临时目录。
     pub fn new(base_dir: PathBuf) -> Self {
         Self {
             base_dir: Some(base_dir),
