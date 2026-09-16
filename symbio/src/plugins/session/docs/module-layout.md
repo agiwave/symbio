@@ -1,6 +1,6 @@
 # Session 插件模块分工评审
 
-> 状态：**评审 + 执行方案**（S1/S2/S3 + 测试扁平化已落地；S4 待执行）
+> 状态：**评审 + 执行方案**（S1/S2/S3/S4 + 测试扁平化**全部落地**）
 > 触发：`chat_loop.rs` 达 2400 行，已到"不该再往单文件里加东西"的程度
 > 范围：`symbio/src/plugins/session/`（27 个 .rs，合计 16647 行；**S1 后**生产 12419 + 测试 4313）
 > 相关：`./core-loop.md`（核心循环收口，同批次完成）
@@ -156,22 +156,33 @@ plugin.test.rs           测试（S1 已外置；S3 后按实现文件再拆为 
 `run_chat_loop_task` 一个函数就 382 行）。实测边界与落位：
 
 ```text
-orchestrator.rs          模块根：装配 + RAII 守卫 + resolve_required_session_id       ~320
-                         （守卫 71..299 = AiControlGuard / WorkingGuard /
-                           merge_message_patch，合计 229 行，留在根文件）
-orchestrator/consume.rs  消费循环：broadcast_error_with_idle / fail_before_loop /
-                         run_chat_loop_task(382) / handle_abort                        ~515
-orchestrator/send.rs     发送入口：resolve_session_params / handle_chat_send_oneoff(298) /
-                         handle_chat_abort_oneoff / ensure_auto_title                   ~425
-orchestrator/report.rs   上报与失败落库：broadcast_frame / broadcast_status /
-                         persist_failure(185) / subtree_of                              ~270
-orchestrator.test.rs     测试（S1 已外置）                                             182
+orchestrator.rs           模块根：装配 + RAII 守卫（AiControlGuard / WorkingGuard）+
+                          merge_message_patch + resolve_required_session_id            320
+orchestrator/broadcast.rs 三个广播出口：broadcast_error_with_idle / broadcast_frame /
+                          broadcast_status                                              82
+orchestrator/consume.rs   消费循环：fail_before_loop / run_chat_loop_task(382) /
+                          handle_abort                                                 491
+orchestrator/entry.rs     两个 one-off 入口：resolve_session_params /
+                          handle_chat_send_oneoff(298) / handle_chat_abort_oneoff /
+                          ensure_auto_title                                            457
+orchestrator/failure.rs   失败降级：persist_failure(185) + subtree_of                  242
+orchestrator.test.rs      测试（S1 已外置；5 例全部测根文件的守卫与补丁合并）           182
 ```
+
+> 原表把 `send.rs` / `report.rs` 作为落点，实测按**内聚**重新划分为
+> `entry.rs`（两个入口 + 自动命名）与 `broadcast.rs` / `failure.rs`（投递与降级分开）。
 
 拆 `impl SessionPlugin`（1197 行）意味着**拆成 4 个 `impl` 块**分散到 4 个文件
 ——Rust 允许，且**方法声明顺序无语义**，故各文件内保持原相对顺序即可。
-⚠️ `handle_chat_send_oneoff` / `handle_chat_abort_oneoff` / `broadcast_frame`
-被 `plugin.rs` / `heartbeat.rs` 跨模块调用，必须 `pub(crate)`。
+⚠️ 可见性（实测口径）：
+
+- **跨子模块**（原本私有 → `pub(super)`）：`broadcast_error_with_idle` /
+  `run_chat_loop_task` / `persist_failure`，以及根文件的 `merge_message_patch`。
+- **跨模块**（原本即 `pub`，**保持不动**）：`handle_chat_send_oneoff` /
+  `handle_chat_abort_oneoff` / `broadcast_frame` / `broadcast_status` / `handle_abort`
+  ——被 `plugin.rs` 路由与 `heartbeat.rs` 调用。本次只做"搬家"，不顺手收窄可见性。
+- 子模块统一 `use super::*;`：父模块的 `use` 清单即子模块的共享导入面。
+- 被搬移代码里的 `super::X::` 需**加深一层**（`consume.rs` 6 处、`entry.rs` 6 处）。
 
 ### 3.4 保持不动
 
@@ -190,7 +201,7 @@ orchestrator.test.rs     测试（S1 已外置）                               
 | **S1c** ✅ | 测试**归位**到被测试的实现文件旁（高内聚，见 §4.5） | 低（纯搬移） | 同上 |
 | **S2** ✅ | 拆 `chat_loop.rs`（§3.1） | 中（跨模块可见性） | 生产代码总量不变；`cargo test --lib` 用例数不变 |
 | **S3** ✅ | 拆 `plugin.rs`（§3.2，实为**三分**） | 中 | 同上 |
-| **S4** | 拆 `orchestrator.rs`（§3.3） | 中高（消费循环是事故敏感区） | 同上 + 消费循环帧合并 / `persist_failure` 作用域逐字不变 |
+| **S4** ✅ | 拆 `orchestrator.rs`（§3.3，实为**四分**） | 中高（消费循环是事故敏感区） | 同上 + 消费循环帧合并 / `persist_failure` 作用域逐字不变 |
 
 ### 4.1 S1 实施结果（2026-09-16）
 
@@ -352,6 +363,34 @@ mod tests;
 
 删除 `chat_loop/gate_tests.rs` / `chat_loop/stop_signal_tests.rs`（内容已并入上表）。
 **用例数零丢失**：`chat_loop` 24（9+9+6）、`plugin` 27（6+15+6）。
+
+### 4.6 S4 实施结果（2026-09-16）
+
+`orchestrator.rs` **1513 → 320 行**，拆出 4 个子模块（四分见 §3.3）：
+
+| 文件 | 行数 | 内容 |
+|---|---:|---|
+| `orchestrator.rs` | 320 | 装配 + `resolve_required_session_id` + `AiControlGuard` + `WorkingGuard` + `merge_message_patch` + `mod` 声明 |
+| `orchestrator/broadcast.rs` | 82 | `broadcast_error_with_idle` / `broadcast_frame` / `broadcast_status` |
+| `orchestrator/consume.rs` | 491 | `fail_before_loop` / `run_chat_loop_task`(382) / `handle_abort` |
+| `orchestrator/entry.rs` | 457 | `resolve_session_params` / `handle_chat_send_oneoff`(298) / `handle_chat_abort_oneoff` / `ensure_auto_title` |
+| `orchestrator/failure.rs` | 242 | `persist_failure`(185) + `subtree_of` |
+
+**保真校验**（口径同 §4.2/§4.3）：归一化代码行多重集 **旧 848 行 vs 新 848 行，
+双向差集均为 0 条**——即**零代码改写、零注释丢失**。可见性提升（`pub(super)` ×4）
+与路径加深（`super::` ×12）被归一化吸收，未计入差异。
+
+**三个踩过的坑**（脚本已断言，供后续参考）：
+
+1. **自由函数不能落进 `impl` 块**：`subtree_of` 是模块级自由函数，
+   若与 `persist_failure` 一起塞进 `impl SessionPlugin { … }`，会报
+   `E0425: cannot find function`（Rust 提示 `consider using the associated function
+   on Self`）。它必须在 `impl` 块**之外**。
+2. **段间"分节注释"要跟着下一块走**：`handle_abort` 与 `resolve_session_params`
+   之间有一条 `// ============ One-off 模式 … ============`，
+   按"向前吃 `///`"的规则会把它留在空档里；应并入**下一个**块。
+3. **目标目录可能已被上游步骤删掉**：S1b 扁平化把只剩 `tests.rs` 的
+   `orchestrator/` 目录移除了，写子模块前需 `mkdir`。
 
 ---
 

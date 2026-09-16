@@ -18,6 +18,46 @@
 
 ***
 
+## 2026-09-16: session 插件模块拆分（S1–S4）—— 消除 2300 行超长文件
+
+`chat_loop.rs` 达 2401 行、`orchestrator.rs` 1513 行、`plugin.rs` 1480 行——单文件承载
+3~6 类不相干职责，靠"文件"这一层已无法表达边界。分四步拆分，**全程零行为变更**
+（只搬家：不改任何判定 / 阈值 / 文案 / 执行顺序）：
+
+| 步 | 前 | 后 |
+|---|---:|---|
+| **S1** | 21 个文件带内联 `#[cfg(test)] mod tests`（合计 3713 行） | 测试外置 ⇒ 生产 **16647 → 12419** 行 |
+| **S2** | `chat_loop.rs` 2401 | **434** + `chat_loop/{state,inputs,turn,compress,io}.rs` |
+| **S3** | `plugin.rs` 1480 | **523** + `plugin/nodes.rs` 501 + `plugin/vdfs_provider.rs` 512 |
+| **S4** | `orchestrator.rs` 1513 | **320** + `orchestrator/{broadcast,consume,entry,failure}.rs` |
+
+**保真纪律**：每步做「归一化代码行多重集比对」——把旧文件与「新父文件 + 各子模块」
+归一化（去 `//!` / `use` / `mod` / 空行，抹平 `pub(crate)` 等可见性前缀，还原
+`super::super::`）后比较行多重集，**差异必须逐条归因**。S2 归因 13 条（6 处路径加深 +
+2 处 rustfmt 折行 + 5 行 re-export 脚手架）、S3 归因 21 条、**S4 归因 0 条**
+（双向差集均为空）。
+
+**可见性口径**（S2 新确立，S3/S4 沿用）：
+
+- 模块内共享面 = 子模块 `pub(crate)` 条目 + 父模块 `pub(crate) use`；
+  ⚠️ `pub use` 要求条目本身是 `pub`，否则 `E0364`/`E0365`。
+- 跨模块访问的**字段**必须逐个标 `pub(crate)`——Rust 的**字段可见性不随结构体**。
+- 子模块统一 `use super::*;`：子模块可看到父模块的**私有**条目，故父模块的 `use`
+  清单即子模块的共享导入面；**只被子模块使用**的导入**不会**触发 `unused_imports`。
+- 被搬移代码里的 `super::X::` 需**加深一层**（S2 5 处 / S3 19 处 / S4 12 处）。
+
+**踩过的坑**：① 子模块**不能与作用域内的 `use` 同名**——`plugin.rs` 已有
+`use crate::symbio_core::vdfs;`，故子模块取名 `vdfs_provider` 而非 `vdfs`（否则 `E0255`，
+且模块内 `vdfs::X` 会解析到自己）；② **自由函数不能落进 `impl` 块**——S4 的
+`subtree_of` 若随 `persist_failure` 一起塞进 `impl SessionPlugin`，报
+`E0425: cannot find function`；③ 段间的"分节注释"要并入**下一个**块，否则会留在空档里。
+
+评审、目标结构与逐步实施记录见
+[`symbio/src/plugins/session/docs/module-layout.md`](../symbio/src/plugins/session/docs/module-layout.md)。
+门禁：`cargo test --lib` **544 passed / 0 failed**（基线未减）；clippy `--all-targets -- -D warnings` 零告警。
+
+---
+
 ## 2026-09-16: 测试文件扁平化（`X.rs` + `X.test.rs`）与测试归位
 
 **问题**：此前"实现与测试分文件"用的是 `<module>/tests.rs`，于是每个被测模块都多出一个
