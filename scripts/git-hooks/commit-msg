@@ -1,0 +1,16 @@
+#!/bin/sh
+#
+# commit-msg — 提交信息规范检查（把「提交格式要求」从记忆搬进机制）
+#
+# 启用（一次性，本机生效）：
+#   git config core.hooksPath scripts/git-hooks
+#
+# 校验规则见 scripts/check-commit-msg.mjs：
+#   1. 标题 = `<type>(<scope>): <中文标题>`
+#   2. 正文编号分节
+#   3. 末尾有「门禁：」段
+#
+# 想跳过某次（如 WIP 提交）：git commit --no-verify
+# ⚠️ 本文件需在 git 里有执行位：git update-index --chmod=+x scripts/git-hooks/commit-msg
+
+node scripts/check-commit-msg.mjs --file "$1"

@@ -10,6 +10,11 @@
 - **系统级文档**（本目录）只保留**跨模块**的核心逻辑、边界与约定，涉及单模块内部实现时**引用**模块文档，不复制细节；
 - **历史实施记录**一律进 `archive/`，现行文档只描述当前行为。
 
+文档是**下沉**的，所以「某条约定写在哪」要靠检索而不是靠记：
+`node scripts/doc-find.mjs <关键词>` 会同时搜 `*.md` 与源码里的 `//!` / `///`
+（相当一部分机制就写在模块文档注释里，如 `symbio_core::memory`）。
+**知识只写一处，且写在文档里**——不要以摘要形式复制到别处，复制必然漂移。
+
 示例：会话上下文压缩的 L0-L6 分层总览在 [session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md)，各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md)——**会话相关的一切文档都在 `symbio/src/plugins/session/docs/` 内**；系统级目录只保留跨模块规范（如 [design/vdfs.md](./design/vdfs.md)）。
 
 ## 快速导航
@@ -28,6 +33,7 @@
 | 开发新插件 | [PLUGIN_DEVELOPMENT.md](./guides/PLUGIN_DEVELOPMENT.md) |
 | 排查问题 | [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) |
 | 了解设计决策 | [DECISIONS.md](./DECISIONS.md) |
+| 查「某条约定写在哪」 | `node scripts/doc-find.mjs <词>`（全仓 md + Rust 文档注释检索） |
 | 看某个插件/前端的职责与机制 | 各模块 `README.md`（见下方模块文档地图） |
 
 ## 文档结构

@@ -363,7 +363,7 @@ async function stageFrontend() {
 
 async function stageDocs() {
   stageHeader(3, 4, '静态审计')
-  for (const name of ['grep-audit', 'style-audit', 'doc-link-audit']) {
+  for (const name of ['grep-audit', 'style-audit', 'doc-link-audit', 'test-layout-audit']) {
     const r = await run({
       label: `scripts/${name}.mjs`,
       cmd: process.execPath,

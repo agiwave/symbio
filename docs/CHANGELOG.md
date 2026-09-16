@@ -18,6 +18,49 @@
 
 ***
 
+## 2026-09-16: 知识回归文档 —— 新增 `doc-find`，记忆从 15KB 压到 1.6KB
+
+**问题**：长期记忆里囤了大量「某机制是什么」的摘要。核查后发现**九成已在文档里**
+（`docs/design/vdfs.md`、各模块 `README.md` / `docs/`、以及源码 `//!` 模块文档，
+如 `symbio_core::memory` 的三层记忆说明）。记忆长的根因不是文档缺，而是**文档下沉后
+找不到**，于是每轮都把摘要复制一份进来，而复制必然漂移。
+
+### 1. 新增 `scripts/doc-find.mjs` —— 全仓文档检索
+
+```bash
+node scripts/doc-find.mjs 三层记忆          # 搜 md + Rust 文档注释
+node scripts/doc-find.mjs canonicalize_loose --rs --context 3
+node scripts/doc-find.mjs 闸门 --limit 30
+```
+
+- 同时搜 `*.md` 与 `*.rs` 的 `//!` / `///`；`--md` / `--rs` 可限定。
+- ⚠️ Rust 侧除文档注释外**也匹配定义行**（`fn` / `struct` / `const` …）：只搜注释会漏掉
+  最常见的「搜符号名」用法——`canonicalize_loose` 的说明写在上方 `///` 里，那三行并不含
+  该词，真正的命中行是 `fn canonicalize_loose(...)`。
+- `CHANGELOG` 命中**排序靠后**（它是历史，不是「现在是什么」）；排除 `archive/`、`node_modules/`、
+  `target/`、`.git/`、`.symbio/`、`.workbuddy*/`。
+
+### 2. 文档三处收口
+
+- `CONTRIBUTING.md` §3：原「提交前清单」表格（7 行手写命令）**删掉**，改指向 `gate.mjs`
+  —— 它与 CI 是两处真相，必然漂移；新增「本机操作陷阱」小节（cargo/git 不接管道、
+  Windows 下 `-F "C:/..."`、批量改名不用 `git rm/mv`、rustfmt 只用 `cargo fmt` 等）。
+- `docs/README.md`：文档下沉原则补「知识只写一处，靠检索而非记忆」+ 快速导航加检索行。
+- 测试布局约定补一句「由 `test-layout-audit.mjs` 判定」。
+
+### 3. 长期记忆 `.workbuddy-ai/memory/MEMORY.md`
+
+15.2KB → **1.65KB**：只留两个入口（`doc-find` / `gate.mjs`）、三条协作约定（提交精确
+指定文件、改机制同步 `docs/reference` + `CHANGELOG`、`.workbuddy-ai/` 勿删），
+并在文件头写明 **发现「只在记忆里」的知识 = 文档缺了，写回文档而不是写进这里**。
+
+### 门禁
+
+`gate.mjs --only=docs,facts` **5/5**（grep / style / doc-link / test-layout / 事实文件一致）。
+链接失效仍为 17 条，全在 `docs/archive/`。
+
+***
+
 ## 2026-09-16: 门禁收口为一条命令 —— `node scripts/gate.mjs`
 
 「改动后必跑」原先是一条**记在文档与记忆里**的清单：四道后端命令、两条前端命令、

@@ -38,25 +38,42 @@ symbio/
 
 ---
 
-## 3. 提交前清单（CI 必查）
+## 3. 提交前检查
 
-CI 流水线位于 [.github/workflows/ci.yml](./.github/workflows/ci.yml)，**所有 PR 必须通过**：
-
-| 步骤 | 命令 | 失败后果 |
-|---|---|---|
-| TypeScript 类型检查 | `cd tauri && npx vue-tsc --noEmit` | 阻止合入 |
-| 样式使用审计 | `node scripts/style-audit.mjs` | 阻止合入（ERROR；`--strict` 连 WARNING 一并阻断） |
-| Rustfmt | `cd symbio && cargo fmt --check` | 阻止合入 |
-| Clippy | `cd symbio && cargo clippy --all-targets -- -D warnings` | 阻止合入 |
-| Rust 单元测试 | `cd symbio && cargo test --lib` | 阻止合入 |
-| E2E 测试 | `cd symbio && cargo test --test verification` | 阻止合入 |
-| 项目审计 | `node scripts/grep-audit.mjs` | 阻止合入 |
-
-本地预检一条命令：
+**一条命令跑完全部**（后端含 `cli/` → 前端 → 4 项审计 → 事实文件）：
 
 ```bash
-cd symbio && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --lib
+node scripts/gate.mjs                 # 全量
+node scripts/gate.mjs --only=frontend # 单阶段（也有 --skip=）
+node scripts/gate.mjs --fix           # 先自动格式化 / 重生成，再检查
+node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 ```
+
+覆盖：Rust 编译 / 单测 / clippy / rustfmt、TypeScript 类型检查、vitest、以及 4 项审计
+（`grep-audit`、`style-audit`、`doc-link-audit`、`test-layout-audit`）与事实文件一致性。
+完整输出落 `.workbuddy-ai/gate-logs/`；通过数低于基线会报错、高于基线提示更新 `BASELINE`。
+
+⚠️ **要加检查就改 `scripts/gate.mjs`**——本文档、CI、记忆里都不再另立清单，两份清单必然漂移。
+
+找不到某条机制 / 约定写在哪：`node scripts/doc-find.mjs <关键词>`（搜全仓 `*.md` 与源码
+`//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
+
+CI 流水线见 [.github/workflows/ci.yml](./.github/workflows/ci.yml)；提交信息规范由
+`scripts/check-commit-msg.mjs` 判定，本机一次性挂上即可自动生效：
+
+```bash
+git config core.hooksPath scripts/git-hooks
+```
+
+### 本机操作陷阱（都踩过）
+
+- ⚠️ **cargo / git 一律不接管道**（`| tail` / `| head`）：输出到 EOF 才刷 ⇒ 看着像卡死；且管道**吞掉退出码** ⇒ 失败的命令看起来是成功的。要看长输出就用 `gate.mjs`（它落日志、只信退出码）。
+- ⚠️ **`git commit -F /c/Temp/msg.txt` 会失败**（Windows git 不认 MSYS 路径）⇒ 写 `-F "C:/Temp/msg.txt"`。
+- ⚠️⚠️ **批量改名绝不用 `git rm` / `git mv`**：它们写索引，被 SIGTERM 中断后留下 0 字节 `.git/index.lock` 并写坏索引 ⇒ 上百文件误报「已删除」。正解 = 纯文件系统改名 + 最后一次 `git add -A`。**恢复**：`rm -f .git/index.lock` → `git checkout -- .`（索引损坏时 `reset --hard` 不可靠）。单个文件用 `git mv` 无妨。
+- ⚠️ **无备份绝不 `git checkout -- .` / 大范围删除**。回滚先 `stash push` 或 `git diff > /c/Temp/x.patch`。
+- ⚠️ **rustfmt 只用 `cargo fmt`**，绝不裸跑 `rustfmt`（工具链锁定版本不同 ⇒ 格式漂移）。
+- ⚠️ vitest 4 的 `toBe(v, 'msg')` 只收 1 个参数（写两个参数静默失效）。
+- ⚠️ `.workbuddy-ai/` 被 gitignore：**不要提交、不要删除**。仓库另有 `.workbuddy/`（旧 harness 遗留）——以 `.workbuddy-ai/` 为准。
 
 ---
 
@@ -93,6 +110,7 @@ mod tests;
 
 要点：
 
+- 布局由 `node scripts/test-layout-audit.mjs` 判定（已接入 `gate.mjs`），不靠人工记住。
 - **一个实现文件对应一个测试文件**。不要写"一个测试文件同时测几个实现文件"，
   也不要写"几个测试文件测同一个实现文件"——测试跟着它测的那个实现走。
 - **不要为测试文件单独建目录**。`X/tests.rs` 那种形态会让"模块"与"目录"两个概念
