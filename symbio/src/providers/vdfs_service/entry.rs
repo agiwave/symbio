@@ -93,6 +93,20 @@ pub fn pack_name_of(path: &str, kind: &str) -> String {
     }
 }
 
+/// **无名字新建**时的自动条目 id —— 使用方只说「建在这个目录」，名字由插件定。
+///
+/// 形状 = `<kind>-<8 位十六进制>`：类别前缀让人读得懂磁盘目录名（目录名即 id），
+/// 随机段保证唯一——同一个目录里并发新建两项不会撞名。
+///
+/// 它与 [`id_of`] 是同一件事的两半：**有名字**时 id 来自地址（使用方给），
+/// **没名字**时 id 由这里生成（provider 给）。两者都只产出「条目 id」，
+/// 谁生成的对外不可见——地址里的 id 永远由 provider 决定。
+pub fn auto_id(kind: &str) -> String {
+    let mut u = uuid::Uuid::new_v4().simple().to_string();
+    u.truncate(8);
+    format!("{kind}-{u}")
+}
+
 /// 条目摘要（落盘原语向上传递的**唯一**素材形状）
 ///
 /// 「标题 / 状态 / 呈现扩展名 / schema」是各资源的差异，本层给不出，也不该猜；
@@ -315,6 +329,17 @@ mod tests {
         assert_eq!(pack_name_of("demo.zip", "skill"), "demo");
         assert_eq!(pack_name_of("demo.skill", "skill"), "demo");
         assert_eq!(pack_name_of(".zip", "skill"), ".zip");
+    }
+
+    /// 无名字新建的自动 id：带类别前缀、随机段定长、两次不撞、且本身就是安全段名
+    #[test]
+    fn auto_id_is_prefixed_unique_and_safe() {
+        let a = auto_id("model");
+        let b = auto_id("model");
+        assert!(a.starts_with("model-"), "带类别前缀便于人读：{a}");
+        assert_eq!(a.len(), "model-".len() + 8, "随机段定长：{a}");
+        assert_ne!(a, b, "两次生成必须不同");
+        assert_eq!(safe_segment(&a), a, "自动 id 必须本身就是安全段名");
     }
 
     #[test]

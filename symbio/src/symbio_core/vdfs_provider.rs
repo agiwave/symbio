@@ -117,24 +117,37 @@ pub const VDFS_ACTION_EXPORT: &str = "export";
 /// - 多于一项 → 先选类型再命名；
 /// - 为空 → 不显示添加入口。
 ///
-/// 类型以 [`VdfsNewType::ext`] 标识（扩展名），与 [`VdfsNode::ext`] 同一命名空间，
-/// 因此**新建后的详情渲染器与既有节点一致**。本结构是**纯呈现元数据**：
-/// VDFS 只透传、不解释；具体创建语义由 provider 在 [`VdfsProvider::write`] 中自持。
+/// ## 两条独立的键：`ext` 与 `node_ext`
+///
+/// [`ext`](Self::ext) 是**呈现扩展名**——地址末段可能带的后缀，provider 用
+/// [`entry::id_of`] 一族按它剥出条目 id（`.vdfs/model/openai-1.model` → `openai-1`）。
+/// 它**不**决定详情怎么渲染：配置型资源（`model` / `mcp` / `skill`）落成后统一是
+/// `ext = form`，呈现扩展名只留在地址里。
+///
+/// [`node_ext`](Self::node_ext) 才是**新元素落成后的 [`VdfsNode::ext`]**（详情渲染器键）。
+/// 缺省 = 用 `ext`——会话这类「呈现扩展名就是渲染器键」的资源不必声明。
+///
+/// 两个键分开声明，是为了让使用方在**还没创建**时就能渲染出该类型的详情页
+/// （草稿节点：无 id、无名字，但渲染器与 `schema` 与落成后完全一致）。
 ///
 /// ## 内容来源 [`VdfsNewType::source`]
 ///
 /// 「新建」在机制上就是一次 [`VdfsProvider::write`]（`create: true`），因此要说清
 /// **写进去的内容从哪来**——这是创建语义的一部分，由 provider 声明：
 ///
-/// - `None`（默认）：先命名、后写入（内容为空或 provider 的最小合法内容）；
+/// - `None`（默认）：在详情页里边看边填（先进入草稿详情，保存时一次写入）；
 /// - [`VDFS_NEW_SOURCE_FILE`]：内容取自**本地文件**，使用方给文件选择器，
 ///   字节走 [`VdfsContent::b64`] 二进制通道（如 zip 整包导入）。
 ///
+/// 本结构是**纯呈现元数据**：VDFS 只透传、不解释；具体创建语义由 provider 在
+/// [`VdfsProvider::write`] 中自持。
+///
 /// [`VdfsProvider::write`]: VdfsProvider::write
 /// [`VdfsContent::b64`]: VdfsContent::b64
+/// [`entry::id_of`]: crate::providers::vdfs_service::entry::id_of
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsNewType {
-    /// 新元素扩展名（决定创建后的详情渲染器）
+    /// 新元素**呈现扩展名**（地址末段后缀，`id_of` 按它剥 id；**不是**渲染器键）
     pub ext: String,
     /// 展示标题（如「会话」「模型」）
     pub title: String,
@@ -144,9 +157,17 @@ pub struct VdfsNewType {
     /// 图标名（使用方纯 UI 映射）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// 内容来源（见结构文档）：`None` = 命名后写入；`"file"` = 选择本地文件
+    /// 内容来源（见结构文档）：`None` = 在详情页里填；`"file"` = 选择本地文件
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// 新元素落成后的 [`VdfsNode::ext`]（**详情渲染器键**）；缺省 = 与 [`ext`](Self::ext) 相同
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_ext: Option<String>,
+    /// 新元素的呈现描述（与 [`VdfsNode::schema`] 同义）。
+    ///
+    /// 由 provider 下发——草稿详情页据此渲染出与落成后**同一张**表单。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Value>,
 }
 
 impl VdfsNewType {
@@ -158,6 +179,8 @@ impl VdfsNewType {
             description: None,
             icon: None,
             source: None,
+            node_ext: None,
+            schema: None,
         }
     }
 
@@ -173,6 +196,18 @@ impl VdfsNewType {
 
     pub fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source = Some(source.into());
+        self
+    }
+
+    /// 新元素落成后的呈现扩展名（详情渲染器键）——与 [`ext`](Self::ext) 不同的资源必填
+    pub fn with_node_ext(mut self, node_ext: impl Into<String>) -> Self {
+        self.node_ext = Some(node_ext.into());
+        self
+    }
+
+    /// 新元素的呈现描述（草稿详情页据此渲染出与落成后同一张详情）
+    pub fn with_schema(mut self, schema: Value) -> Self {
+        self.schema = Some(schema);
         self
     }
 }
@@ -571,6 +606,14 @@ pub struct VdfsContent {
     /// provider 据此区分「新建」与「覆盖」——规范 §5.3 的「新建」正是
     /// 「对目标地址的一次 `vdfs/write`（`create: true`）」，创建语义（生成
     /// 标识、校验归属……）由 provider 自持。读取结果恒为 `false`。
+    ///
+    /// ⚠️ 它只回答「目标不存在时怎么办」（`true` = 建，`false` = `NotFound`），
+    /// **不改变内容的处理方式**：内容一律取自本次写入（见
+    /// [`VdfsProvider::write`] 的 `create` 位一节）。唯一例外是内容为空
+    /// ——那是「先建一个，随后再填」，由 provider 落最小合法内容。
+    ///
+    /// 写**目录自身**（无名字，见 [`VdfsProvider::write`]）时本字段是唯一判据：
+    /// 那种写没有任何「已存在的目标」可覆盖，`false` 只能报错。
     #[serde(default, skip_serializing_if = "is_false")]
     pub create: bool,
 }
@@ -1136,7 +1179,50 @@ pub trait VdfsProvider: Send + Sync + 'static {
         Err(VdfsError::NotImplemented)
     }
 
-    /// 写入内容（`w` 位）——**实现方在此完成全部校验**
+    /// 写入内容（`w` 位）——**实现方在此完成全部校验**。
+    ///
+    /// ## 两种目标形态：具名节点 / 目录自身
+    ///
+    /// `path` 是本子树内的相对路径，它可以指向**两种东西**，实现方都必须考虑：
+    ///
+    /// - **具名节点**（`<名字>` 或 `<父>/<名字>`）：常规的「写这个节点」。
+    ///   它存在就覆盖，不存在则看 `create` 位（见下）。
+    /// - **目录自身**（`""` = 自身根，或任何指向目录的地址）：此时使用方**没有给名字**
+    ///   ——「新建一个，叫什么由你定」。这是「新建」在机制上的形态：使用方只说
+    ///   **建在哪个目录**，不说叫什么（名字是 provider 的私有知识，见
+    ///   [`VdfsNode::name`] 的「唯一标识」定位）。
+    ///
+    /// 因此**写目录自身不是错误**：provider 若支持在自己名下创建条目，就生成一个
+    /// 名字（id 归 provider）、落盘、并**在返回值里给出新节点的相对路径**——那是
+    /// 使用方唯一能拿到新地址的地方。不支持（如该目录没有可新建的类型）则照常报错。
+    ///
+    /// ## `create` 位 = 「允许创建」
+    ///
+    /// [`VdfsContent::create`] 是**使用方的写意图**，实现方据此区分「新建」与「覆盖」：
+    ///
+    /// | 目标 | `create = false` | `create = true` |
+    /// |---|---|---|
+    /// | 已存在 | 覆盖 | 覆盖（`created = false`） |
+    /// | 不存在 | [`VdfsError::NotFound`] | **创建**（`created = true`） |
+    ///
+    /// 于是「保存一份还没落盘的草稿」与「新建一项」是同一个动作的两种意图，
+    /// 使用方无需先 `stat` 再决定写还是建——那会引入一次多余的往返与竞态。
+    ///
+    /// ⚠️ **`create` 只管「不存在时怎么办」，不改变内容的处理方式**：内容一律取自
+    /// [`VdfsContent`]（写目录自身时使用方可能给空内容，见下）。**不要**把
+    /// `create = true` 实现成「忽略使用方给的内容、一律落默认值」——那会让
+    /// 「在草稿详情页填好再保存」丢掉用户填的每一个字段。
+    ///
+    /// 唯一的例外是**内容为空**：那是「先建一个，随后再填」的合法形态
+    /// （新建会话、或使用方只想要一份可用的初始配置），此时由 provider 落一份
+    /// 自己的**最小合法内容**。
+    ///
+    ///
+    /// ## 返回值
+    ///
+    /// [`VdfsWriteResponse::path`] 必须是**本子树内**的路径（与 `list` 返回的节点
+    /// 同口径），使用方据此把结果翻译成展示地址并选中新节点。provider 生成了名字
+    /// 却不填 `path`，使用方就找不到刚建出来的东西。
     async fn write(
         &self,
         _ctx: &VdfsContext,

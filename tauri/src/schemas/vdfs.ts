@@ -76,16 +76,24 @@ export interface VdfsAccess {
 /**
  * 目录可接受的新建元素类型（「新建」入口的类型清单元素）。
  *
- * 对齐后端 `symbio_core/vdfs_provider.rs` 的 `VdfsNewType`：以扩展名 `ext` 标识，
- * 与节点 `ext` 同一命名空间，因此**新建后的详情渲染器与既有节点一致**。
- * 清单非空 → 显示添加入口；多于一项 → 先选类型再命名。
+ * 对齐后端 `symbio_core/vdfs_provider.rs` 的 `VdfsNewType`。
+ *
+ * ## 两条独立的键：`ext` 与 `node_ext`
+ *
+ * `ext` 是**呈现扩展名**——地址末段可能带的后缀（后端 `id_of` 按它剥出条目 id），
+ * 它**不**决定详情怎么渲染：配置型资源（model / mcp / skill）落成后统一是
+ * `ext = form`。`node_ext` 才是**新元素落成后的节点 `ext`**（渲染器键），
+ * 缺省 = 用 `ext`。
+ *
+ * 分开声明是为了让**草稿节点**（还没创建、无 id 无名字）能用上与该类型落成后
+ * **完全相同**的渲染器与 `schema`——这正是「点新建与选中一项进入同一个详情页」。
  *
  * `source` 说明**写进去的内容从哪来**（后端声明、前端照做）：
- * 缺省 = 先命名后写入；`'file'` = 选一个本地文件，字节走二进制通道
+ * 缺省 = 在详情页里边看边填；`'file'` = 选一个本地文件，字节走二进制通道
  * （典型场景：zip 整包导入）。
  */
 export interface VdfsNewType {
-  /** 新元素扩展名（决定创建后的详情渲染器） */
+  /** 新元素**呈现扩展名**（地址末段后缀；**不是**渲染器键） */
   ext: string
   /** 展示标题（如「会话」「模型」） */
   title: string
@@ -95,6 +103,10 @@ export interface VdfsNewType {
   icon?: string
   /** 内容来源（后端 `VDFS_NEW_SOURCE_FILE`）：'file' = 选择本地文件 */
   source?: string
+  /** 新元素落成后的节点 `ext`（**详情渲染器键**）；缺省 = 与 `ext` 相同 */
+  node_ext?: string
+  /** 新元素的呈现描述（与节点 `schema` 同义）；草稿详情页据此渲染出同一张详情 */
+  schema?: unknown
 }
 
 /** 新建内容来源：本地文件（后端 `VDFS_NEW_SOURCE_FILE`） */
