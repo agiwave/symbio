@@ -18,6 +18,39 @@
 
 ***
 
+## 2026-09-16: 「当前时间（Unix 毫秒）」收敛为 `symbio_core::clock::now_ms`
+
+同一语义此前在**三个层各写了一份，共 7 处**：
+
+| 位置 | 原写法 |
+|---|---|
+| `symbio_core/turn.rs`（2 处内联） | `time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000` |
+| `plugins/session/heartbeat.rs`（`pub(crate) fn now_ms`） | 同上 |
+| `plugins/session/plugin.rs`（私有 `fn now_ms`） | `SystemTime::now().duration_since(UNIX_EPOCH)…unwrap_or(0)` |
+| `providers/vdfs_service/memory.rs`（私有 `fn now_ms`） | 同上 |
+| `plugins/session/chat_session.rs`（`pub(crate) fn now_millis`） | `time::OffsetDateTime` 版 |
+| `handlers.rs` / `orchestrator/entry.rs` / `resume.rs` / `types.rs` / `heartbeat_tool.rs` | 内联表达式 |
+
+两种写法对本项目时间范围等价，但**分散在层间意味着改口径时必然漏改**（`plugin.rs`
+与 `vdfs_service/memory.rs` 的 `SystemTime` 版本还带 `unwrap_or(0)` 兜底，会静默产生
+`1970-01-01`）。现统一为 [`symbio_core::clock::now_ms`](../symbio/src/symbio_core/clock.rs)：
+
+```rust
+pub fn now_ms() -> i64 {
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
+```
+
+- 模块名取 `clock` 而非 `time`——后者会与外部 crate `time` 同名，使 crate 内
+  `time::OffsetDateTime` 的解析产生歧义（同 `plugin.rs` 不能用 `mod vdfs` 的陷阱）。
+- 共 **11 个文件、17 处调用点**改为引用同一实现；3 处本地定义 + 4 处内联表达式删除。
+- **有意保留**（语义不同，非「当前时间」）：`chat_loop/compress.rs:411`（单位是**秒**）、
+  `vdfs/host.rs` / `vdfs/physical.rs` / `vdfs_service/entry.rs` 的测试临时目录名
+  （用 `as_nanos()` 求**唯一性**，不是时间戳）、`to_unix` 一族与 `workdir.rs:154`
+  （转换**任意** `SystemTime`，不是「此刻」）。
+
+***
+
 ## 2026-09-16: session 插件模块拆分（S1–S4）—— 消除 2300 行超长文件
 
 `chat_loop.rs` 达 2401 行、`orchestrator.rs` 1513 行、`plugin.rs` 1480 行——单文件承载

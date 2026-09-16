@@ -13,6 +13,7 @@
 //!   [`SingleFileVdfs`](super::single_file::SingleFileVdfs) 灌入，写盘成功后回灌
 //!   ——列表读走内存，落盘走另一型。
 
+use crate::symbio_core::now_ms;
 use crate::symbio_core::vdfs::host::{notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
@@ -21,7 +22,6 @@ use crate::symbio_core::vdfs_provider::{
 use async_trait::async_trait;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 一条内存条目
 #[derive(Debug, Clone)]
@@ -133,13 +133,6 @@ impl MemoryVdfs {
 /// 插入并回答「是否为新建」
 fn created_of(table: &mut BTreeMap<String, MemEntry>, id: &str, e: MemEntry) -> bool {
     table.insert(id.to_string(), e).is_none()
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 #[async_trait]

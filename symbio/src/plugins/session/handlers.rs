@@ -15,7 +15,6 @@ use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginPayload};
 use crate::symbio_core::{InvokeResponse, PluginError};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use time::OffsetDateTime;
 
 impl SessionPlugin {
     pub async fn invoke_get_messages(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
@@ -249,7 +248,7 @@ impl SessionPlugin {
             }
         }
 
-        session.updated_at = (OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+        session.updated_at = crate::symbio_core::now_ms();
         self.save_session(&session).await?;
 
         // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：

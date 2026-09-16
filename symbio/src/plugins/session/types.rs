@@ -114,7 +114,7 @@ pub struct Session {
 
 impl Session {
     pub fn new(id: impl Into<String>) -> Self {
-        let now = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+        let now = crate::symbio_core::now_ms();
         Self {
             id: id.into(),
             messages: Vec::new(),

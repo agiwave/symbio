@@ -2,6 +2,7 @@
 
 mod capability;
 mod capability_error;
+mod clock;
 mod configurable;
 pub(crate) mod creator;
 mod error;
@@ -36,6 +37,7 @@ pub use option::{
 pub use capability::{
     Capability, CapabilityCategory, CapabilityMeta, CapabilityVisitor, ToolContextRetention,
 };
+pub use clock::now_ms;
 pub use configurable::{
     announce_configurable, entry_of, ConfigurableVisitor, DefaultConfigurableVisitor,
 };

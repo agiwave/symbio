@@ -7,6 +7,7 @@
 //! - 只读辅助：转写（含在途消息）、存在性校验、实时工作状态、工作目录、子会话。
 
 use super::*;
+use crate::symbio_core::now_ms;
 
 #[async_trait]
 impl vdfs::VdfsProvider for SessionPlugin {

@@ -446,8 +446,7 @@ impl SessionPlugin {
         if let Some(obj) = session.metadata.as_object_mut() {
             obj.insert("title".to_string(), json!(title));
         }
-        session.updated_at =
-            (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+        session.updated_at = crate::symbio_core::now_ms();
         if self.save_session(&session).await.is_err() {
             return;
         }

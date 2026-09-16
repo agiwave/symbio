@@ -7,6 +7,7 @@
 
 use super::plugin::SessionPlugin;
 use super::types::HeartbeatConfig;
+use crate::symbio_core::now_ms;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::session_chat;
 use crate::symbio_core::{
@@ -24,13 +25,6 @@ const HEARTBEAT_TICK_SECS: u64 = 15;
 const HEARTBEAT_MAX_PER_TICK: usize = 2;
 /// 心跳间隔的确定性抖动上限（秒）：按会话 id 哈希错峰，避免同间隔会话同时触发
 const HEARTBEAT_JITTER_SECS: u64 = 30;
-
-/// 当前毫秒时间戳（与 `Session.updated_at` 单位一致：unix 毫秒）
-///
-/// `pub(crate)`：同插件的 heartbeat_tool（设置工具）写回会话时复用同一时间源。
-pub(crate) fn now_ms() -> i64 {
-    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
-}
 
 /// 按会话 id 派生的确定性抖动（0..HEARTBEAT_JITTER_SECS 秒），用于错峰触发。
 ///

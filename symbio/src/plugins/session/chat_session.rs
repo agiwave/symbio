@@ -18,6 +18,7 @@
 
 use super::store::SessionStore;
 use crate::plugin_info;
+use crate::symbio_core::now_ms;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
@@ -203,13 +204,6 @@ pub(crate) fn drop_orphan_messages(mut messages: Vec<ChatMessage>) -> Vec<ChatMe
     }
 }
 
-/// 当前毫秒时间戳：会话引擎内所有 `timestamp` / `updated_at` 取值的唯一入口
-/// （审计 B1 顺带收敛：原先 `append_messages` / `replace_messages` / 兜底回填三处
-/// 各写一遍同样的 `unix_timestamp_nanos() / 1_000_000` 表达式）。
-pub(crate) fn now_millis() -> i64 {
-    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
-}
-
 /// 为缺失 `timestamp` 的消息回填 `now`，保持数组内的相对顺序不被排序打乱。
 fn backfill_timestamps(messages: Vec<ChatMessage>, now: i64) -> Vec<ChatMessage> {
     messages
@@ -348,7 +342,7 @@ impl ChatSession for PersistentChatSession {
 
     async fn append_messages(&self, messages: Vec<ChatMessage>) -> Result<usize, PluginError> {
         let mut session = self.load_session().await?;
-        let now = now_millis();
+        let now = now_ms();
 
         let cfg = self.config.read().await;
 
@@ -425,7 +419,7 @@ impl ChatSession for PersistentChatSession {
 
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
         let mut session = self.load_session().await?;
-        let now = now_millis();
+        let now = now_ms();
         // 回填缺失的 timestamp 与 seq：replace 会整体重写消息列表，若保留 `None`，
         // `get_messages` 只能靠"哨兵 + 稳定排序"兜底，容易打乱"父先于子"的顺序。
         // seq 按调用方给出的数组顺序递增分配，因此**数组顺序即权威顺序**。
@@ -471,7 +465,7 @@ impl ChatSession for PersistentChatSession {
 
     async fn update_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
         let mut session = self.load_session().await?;
-        let now = now_millis();
+        let now = now_ms();
         for patch in messages {
             if let Some(existing) = session.messages.iter_mut().find(|m| m.id == patch.id) {
                 // 增量合并（非整条覆盖）：只更新 patch 中显式携带的字段。

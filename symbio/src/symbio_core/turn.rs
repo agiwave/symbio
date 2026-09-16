@@ -499,7 +499,7 @@ pub fn build_assistant_messages(
 ) -> Vec<ChatMessage> {
     let child_ids = child_ids.normalized();
     let mut msgs = Vec::new();
-    let timestamp = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+    let timestamp = crate::symbio_core::now_ms();
 
     // ── Turn 消息（根级，与 User 互为兄弟）───────────────────────────────
     msgs.push(ChatMessage {
@@ -612,9 +612,7 @@ pub fn build_tool_message(
             MessageStatus::Failed
         }),
         meta: Some(serde_json::json!({ "success": success })),
-        timestamp: Some(
-            (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64,
-        ),
+        timestamp: Some(crate::symbio_core::now_ms()),
         ..Default::default()
     }
 }

@@ -265,7 +265,7 @@ async fn process_tool_resume_action(
 
     // 7. 创建新子节点（新 id，Text 类型，工具结果）
     let new_child_id = short_id();
-    let now_ts = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+    let now_ts = crate::symbio_core::now_ms();
     let new_child = ChatMessage {
         id: new_child_id.clone(),
         parent_id: Some(req.target_id.clone()),

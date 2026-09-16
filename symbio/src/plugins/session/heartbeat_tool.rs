@@ -185,7 +185,7 @@ impl HeartbeatTool {
         } else {
             session.metadata = json!({ "heartbeat": hb_json });
         }
-        session.updated_at = super::heartbeat::now_ms();
+        session.updated_at = crate::symbio_core::now_ms();
     }
 }
 

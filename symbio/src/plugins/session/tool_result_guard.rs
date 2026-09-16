@@ -19,7 +19,7 @@
 use super::text_split::{split_head_tail, HeadTailSplit};
 use super::tokenizer::{default_tokenizer, Tokenizer};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 /// 单条工具结果 token 预算（默认 ≈ 32KB 文本），可由调用方按需覆盖。
 pub const DEFAULT_TOOL_RESULT_TOKEN_CAP: usize = 8192;
@@ -81,10 +81,7 @@ fn archive_full_text(text: &str, token_count: usize, session_id: Option<&str>) -
 
 /// 写入指定目录并执行清理（目录由调用方解析；拆出便于测试注入目录）。
 fn archive_into_dir(text: &str, token_count: usize, dir: &std::path::Path) -> Option<String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+    let now = crate::symbio_core::now_ms();
     let file_name = format!(
         "tool_{}_{}_{}.txt",
         now,

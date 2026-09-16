@@ -485,14 +485,6 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
-/// 当前时间（Unix 毫秒）——与 `session/update` 的时间戳口径一致
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 // ==================== VDFS 挂载点（/session） ====================
 //
 // 会话是 VDFS 的第二个原生 provider：
