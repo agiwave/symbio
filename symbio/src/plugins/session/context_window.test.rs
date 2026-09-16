@@ -419,7 +419,7 @@ fn skeletonized_without_anchor_falls_back_to_generic() {
     );
 }
 
-/// P2-1：单行 JSON 结果骨架化时应产出语义摘要（count + 首条目定位字段），
+/// P2-1：单行 JSON 结果骨架化时应产出语义摘要（count + 条目名列表），
 /// 而非 96 字符裸切片（真实会话实证：`{"count":16,"entries":[{"modified":…`
 /// 对模型毫无信息量，迫使重跑工具）。
 #[test]
@@ -441,26 +441,181 @@ fn json_result_gets_semantic_digest() {
     let text = param_of(result);
     assert!(text.contains("count=16"), "应提取规模字段: {text}");
     assert!(
-        text.contains("name=main.rs"),
-        "应提取首条目定位字段: {text}"
+        text.contains("first=main.rs"),
+        "单条目应给出定位名（first=）: {text}"
     );
     assert!(!text.contains(r#""next""#), "不应残留大体积切片: {text}");
 }
 
-/// P2-1：无 count/条目定位字段的对象 → 键名列表兜底；数组 → 元素类型。
+/// P2-1 升级：列表类输出的摘要要给出**多个**条目名（只给首条目无法一次建模，
+/// 模型只能逐轮重跑工具——这是真实 agent 会话报告的头号摩擦）。
+#[test]
+fn json_list_digest_lists_multiple_entry_names() {
+    let entries: Vec<String> = (0..23)
+        .map(|i| format!(r#"{{"name":"entry{i}.md","type":"file"}}"#))
+        .collect();
+    let body = format!(r#"{{"count":23,"entries":[{}]}}"#, entries.join(","));
+    let messages = vec![
+        tc_msg("l1", "vdfs_list", r#"{"path":"."}"#),
+        tool_result("l1", &body),
+    ];
+    let ret = HashMap::new();
+    let out = apply_layered_sliding_window(&messages, 0, &ret);
+    let text = param_of(
+        out.iter()
+            .find(|m| m.parent_id.as_deref() == Some("l1"))
+            .unwrap(),
+    );
+    assert!(text.contains("count=23"), "规模感不应丢: {text}");
+    assert!(
+        text.contains("entry0.md") && text.contains("entry7.md"),
+        "应列出前若干条目名: {text}"
+    );
+    assert!(
+        text.contains("+15"),
+        "应标注未列出的余量（23 - 8 = 15）: {text}"
+    );
+    assert!(!text.contains(r#""type""#), "条目字段不应整包保留: {text}");
+
+    // 预算不变式：names 列表必须闭合（收尾 `]` 不能被摘要预算截掉，
+    // 否则余量标注与括号一起消失，摘要变成噪声——实测踩过）
+    let summary = text
+        .split("Summary: ")
+        .nth(1)
+        .expect("摘要应存在")
+        .split(". Re-run")
+        .next()
+        .unwrap();
+    assert!(
+        summary.ends_with(']'),
+        "摘要不应被预算截断在 names 列表中间: {summary}"
+    );
+}
+
+/// 取回指引：结果占位符必须告诉模型"重跑哪个工具能拿回全文"——
+/// 核对成本高到模型选择"用自信语气包装未验证结论"时，这条指引是最小成本的解。
+#[test]
+fn skeletonized_result_carries_retry_hint() {
+    let ret = HashMap::new();
+    // 成功结果
+    let messages = vec![
+        tc_msg("h1", "vdfs_list", r#"{"path":"."}"#),
+        tool_result("h1", r#"{"count":2,"entries":[{"name":"a"},{"name":"b"}]}"#),
+    ];
+    let out = apply_layered_sliding_window(&messages, 0, &ret);
+    let text = param_of(
+        out.iter()
+            .find(|m| m.parent_id.as_deref() == Some("h1"))
+            .unwrap(),
+    );
+    assert!(
+        text.contains("Re-run vdfs_list to get the full output."),
+        "应给出重跑指引: {text}"
+    );
+
+    // 失败结果同样带指引（错误摘要与取回指引并存）
+    let mut failed = tool_result("h1", "boom");
+    failed.meta = Some(serde_json::json!({ "success": false, "failure_kind": "io" }));
+    let messages = vec![tc_msg("h1", "vdfs_list", r#"{"path":"."}"#), failed];
+    let out = apply_layered_sliding_window(&messages, 0, &ret);
+    let text = param_of(
+        out.iter()
+            .find(|m| m.parent_id.as_deref() == Some("h1"))
+            .unwrap(),
+    );
+    assert!(text.contains("failed"), "失败仍应标注: {text}");
+    assert!(
+        text.contains("Re-run vdfs_list"),
+        "失败结果也应给出重跑指引: {text}"
+    );
+}
+
+/// 无配对调用时结果保持原样（取回指引只在能指认工具名时才给出，不编造）
+#[test]
+fn result_without_parent_call_is_left_untouched() {
+    let messages = vec![
+        tc_msg("n1", "local/shell", r#"{"command":"dir"}"#),
+        ChatMessage {
+            id: "orphan".to_string(),
+            parent_id: Some("n1".to_string()),
+            role: Some(MessageRole::Tool),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text("body".to_string())),
+            status: Some(MessageStatus::Completed),
+            ..Default::default()
+        },
+    ];
+    let ret = HashMap::new();
+    let out = apply_layered_sliding_window(&messages, 0, &ret);
+    let text = param_of(out.iter().find(|m| m.id == "orphan").unwrap());
+    assert!(
+        text.contains("Re-run local/shell"),
+        "有配对调用时应带上工具名: {text}"
+    );
+
+    // 孤儿结果（parent 指向不存在的节点）→ 不骨架化，故无指引可言
+    let orphan = ChatMessage {
+        id: "orphan2".to_string(),
+        parent_id: Some("missing".to_string()),
+        role: Some(MessageRole::Tool),
+        msg_type: Some(MessageType::Text),
+        content: Some(MessageContent::Text("body2".to_string())),
+        status: Some(MessageStatus::Completed),
+        ..Default::default()
+    };
+    let out = apply_layered_sliding_window(&[orphan], 0, &ret);
+    assert_eq!(param_of(&out[0]), "body2", "孤立结果不应被改写");
+}
+
+/// pretty-print 的多行 JSON 也要走语义摘要：只解析首行（`{`）必然失败，
+/// 摘要会退化成 `"count": 16,` 这类中间行切片。
+#[test]
+fn pretty_printed_json_gets_semantic_digest() {
+    let body = r#"{
+  "count": 3,
+  "entries": [
+    { "name": "a.rs" },
+    { "name": "b.rs" },
+    { "name": "c.rs" }
+  ]
+}"#;
+    let messages = vec![
+        tc_msg("p9", "vdfs_list", r#"{"path":"."}"#),
+        tool_result("p9", body),
+    ];
+    let ret = HashMap::new();
+    let out = apply_layered_sliding_window(&messages, 0, &ret);
+    let text = param_of(
+        out.iter()
+            .find(|m| m.parent_id.as_deref() == Some("p9"))
+            .unwrap(),
+    );
+    assert!(text.contains("count=3"), "应解析整体 JSON 取规模: {text}");
+    assert!(
+        text.contains("names=[a.rs,b.rs,c.rs]"),
+        "应列出条目名: {text}"
+    );
+}
+
+/// P2-1：无规模/条目名可比的对象 → 顶层键名兜底；纯数组取长度 + 元素名；
+/// 非 JSON / 解析失败 → 原有首行切片行为不变（回归保护）。
 #[test]
 fn json_digest_falls_back_to_structure() {
     // 顶层键名兜底
     let keys_only = r#"{"alpha":1,"beta":2,"gamma":3,"delta":4}"#;
-    let d1 = first_line_digest(keys_only);
+    let d1 = success_digest(keys_only);
     assert!(d1.contains("keys=alpha,beta"), "对象应兜底键名列表: {d1}");
-    // 纯数组元素类型兜底
-    let d2 = first_line_digest(r#"["a","b","c"]"#);
-    assert!(
-        d2.contains("items=string/string/string"),
-        "数组应兜底元素类型: {d2}"
-    );
+    // 字符串数组：长度 + 元素名（旧实现只报 `items=string/string/string`，
+    // 既不给"有几条"也不给"是什么"，实测对建模无用）
+    let d2 = success_digest(r#"["a","b","c"]"#);
+    assert_eq!(d2, "count=3 names=[a,b,c]", "数组应取长度与元素名: {d2}");
+    // 数值数组：无条目名可比，只报长度
+    let d3 = success_digest("[1,2,3]");
+    assert_eq!(d3, "count=3", "数值数组只报长度: {d3}");
+    // 单条目：退化为 first=<name>（少一层方括号歧义）
+    let d4 = success_digest(r#"{"count":1,"entries":[{"name":"only.rs"}]}"#);
+    assert_eq!(d4, "count=1 first=only.rs", "单条目应退化为 first=: {d4}");
     // 非 JSON / 解析失败 → 原有首行切片行为不变（回归保护）
     let plain = "just a plain line of output";
-    assert_eq!(first_line_digest(plain), plain);
+    assert_eq!(success_digest(plain), plain);
 }

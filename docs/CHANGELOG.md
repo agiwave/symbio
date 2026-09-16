@@ -18,6 +18,64 @@
 
 ***
 
+## 2026-09-16: 读侧修复第一批（agent 自评估落地）
+
+一个真实消费者（审查本仓库的 agent 会话）报告了「理解这套设计太贵」的五类摩擦。
+经逐条对代码核实后落地第一批修复：
+
+- **`content_search` 输出剥 `\\?\` 前缀**（`621c17a`）：搜索根经 `canonicalize` 后
+  walk 出的每行路径都带 Windows 扩展前缀，模型可见输出每行白占 ~30 字符。
+  复用既有 `normalize_path_for_comparison`，仅展示侧剥前缀、IO 仍走原路径。
+- **补 `plugins/vdfs/README.md`**：15 个插件里唯一缺模块文档的恰是文件系统本身。
+- **文档漂移修正 6 处**：① SYSTEM_MAP 存储层仍写「SessionStore = file/sqlite/memory」
+  （后端已删）；② docs/README「14 个插件全覆盖」实为 15（漏 vdfs）；③ README 插件清单
+  表与树图漏 vdfs；④ README 示例路由 `model/chat` / `local/shell` 均已非路由
+  （model 无自有路由）；⑤ ROUTES.md 仍列 `model/chat` 为可用路由；⑥ CONFIGURATION.md
+  两处把已删除的 `store_kind` 当现行配置。
+- **11 篇 ADR 各补一行「当前状态」**（已实现（现行）/ 部分实现 / 已被取代 / 已回退 /
+  未落地）：读者第一次能在不反推代码的情况下分辨终态。核实中的两个关键发现：
+  ADR-004 的 Gemini/Anthropic 适配器**真实存在**（评估者存疑的那条反而可信）；
+  ADR-009 的 CU 认知层**已整体不在代码里**——`agent_cognition` 只剩 `ids.rs`
+  一个无实现的悬空常量（评估者未核实到的更大漂移）。
+
+门禁：clippy 0 告警；544 单测全过；fmt 0 差异；doc-link-audit 17 失效（全在
+archive，与基线一致）；grep-audit 0 err。
+
+***
+
+## 2026-09-16: 读侧修复第二批（骨架化摘要 + 读侧事实表 + CI 防漂移）
+
+第二批针对 agent 自评估的头号摩擦——「输出骨架化让我永远无法一次建模」
+与「没有可核对的'现在是什么'」：
+
+- **骨架化摘要升级（`session/context_window.rs`）**：
+  - 列表类 JSON 摘要从 `count=23 first[name=.editorconfig]`（一个条目）
+    升级为 `count=23 names=[8 个条目名,…+15]`——一次摘要即可建模目录/搜索
+    结果，而不是逐轮重跑工具；pretty-print 多行 JSON 在 64 KiB 内整体解析
+    （只解析首行 `{` 必然失败，摘要退化成 `"count": 16,` 中间行切片）。
+  - 摘要 token 上限 48 → 64：`truncate_tokens` 的截断口径是「token × 2 → 字符」，
+    48 装不满一屏条目名；条目名预算按同一口径推导（`DIGEST_CHAR_PROXY_PER_TOKEN`），
+    保证 `names=[…]` 收尾不被截断（截在半个名字上等于噪声，实测踩坑）。
+  - 占位符新增**取回指引** `Re-run <tool> to get the full output.`：核对成本
+    从"猜摘要够不够"变成一次可预期的工具调用（「核对不划算就放弃核对」的
+    最小成本解）。
+- **读侧事实表（`docs/CURRENT.md` + `scripts/gen-current-facts.mjs`）**：
+  插件 × 注册名 × VDFS 挂载点 × 自有路由臂 × LLM 工具 × 核心 trait × 存储布局，
+  **全部从代码提取**、提取不到的标「运行期动态」不臆造。
+  实现上修了三处会让"事实"变错的坑：`#[cfg(test)]` 内的假 meta
+  （vdfs 被抽成 `fake`）按花括号配对精确剔除；测试模块之后还有生产代码的文件
+  （model 的 `.vdfs/model` 挂载点）不能一刀截断；注释剥离必须字符串感知
+  （否则 `"https://…"` 被砍断，扫描器还会死循环）。
+- **CI 门禁**：`gen-current-facts.mjs --check` 进 ci.yml 与 release.yml——
+  改插件/工具/路由忘跑生成器即失败；README / docs/README 指明以生成表为准。
+- **ADR-012**：把「读侧成本是设计约束」立为正式决策（写侧省的是改代码，
+  读侧成本随读者数相乘；且核对贵过阈值时，模型会开始用自信语气包装
+  未验证结论）。
+
+门禁：session 模块 198 单测全过；全库测试 / clippy / fmt 见同日批次复核。
+
+***
+
 ## 2026-09-16: 「当前时间（Unix 毫秒）」收敛为 `symbio_core::clock::now_ms`
 
 同一语义此前在**三个层各写了一份，共 7 处**：

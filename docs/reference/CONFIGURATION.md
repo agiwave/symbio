@@ -59,7 +59,7 @@ work:
 |------|------|----------|
 | **插件配置** | `<homedir>/plugins/<插件>/PLUGIN.yml`（系统级插件在 `<homedir>/PLUGIN.yml`） | 配置的**拥有者**自己读写（`ConfigFile`）；地址 `.vdfs/<插件>/PLUGIN.yml`，**没有第二条配置协议** |
 | 插件资源（model / mcp / skill 等） | `<homedir>/plugins/<类别>/<id>/<主文件>` | 类别段名 = 插件名（如 `model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`）；由 `symbio/src/providers/vdfs_service/` 的集中实现读写，**不可配置、无第二种后端** |
-| 会话与其消息 | 会话自己的 store（`SessionStore`），非 `plugins/<类别>/<id>/` 资源布局 | 会话配置项 `store_kind`：`file`（默认）\| `sqlite` \| `memory`；SQLite 后端在会话存储根目录下建 `sessions.db` |
+| 会话与其消息 | 会话自己的 store（`SessionStore`），非 `plugins/<类别>/<id>/` 资源布局 | 已收为**单一具体类型**：持久会话 = 磁盘 `<根>/<id>/{session.json, messages.json}`，临时会话 = 进程内驻留。`store_kind` / sqlite / memory 后端选型**已删除**（见 ADR-011 及 `session/store/mod.rs` 顶部「它不是什么」）|
 | Agent bundle | bundle 目录（工作区级 + 全局级双层，`BundleStore` 自管） | 工作区切换，不经 `vdfs_service` |
 | 应用级状态 | `<homedir>/PLUGIN.yml` | homedir 由前端「系统目录」切换（`home/reload`） |
 
@@ -80,7 +80,7 @@ work:
 | 插件 | 配置地址 | 主要键 |
 |---|---|---|
 | `home` | `.vdfs/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
-| `session` | `.vdfs/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `store_kind` …（字段全表见 `SessionConfig`） |
+| `session` | `.vdfs/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history`（字段全表见 `SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
 | `web` | `.vdfs/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |
 | `local` | `.vdfs/local/PLUGIN.yml` | `shell_enabled` / `file_enabled` / `shell_timeout` |
 | `gateway` | `.vdfs/gateway/PLUGIN.yml` | 见下 |

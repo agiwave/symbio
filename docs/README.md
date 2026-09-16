@@ -16,6 +16,7 @@
 
 | 我想... | 查阅 |
 |---------|------|
+| 核对"现在是什么"（插件 × 挂载点 × 路由 × 工具，自动生成） | [CURRENT.md](./CURRENT.md) |
 | 了解系统全貌 | [SYSTEM_MAP.md](./SYSTEM_MAP.md) |
 | 理解架构设计 | [OVERVIEW.md](./architecture/OVERVIEW.md) |
 | 查看协议规范 | [PROTOCOLS.md](./architecture/PROTOCOLS.md) |
@@ -34,6 +35,7 @@
 ```
 docs/                            # 系统级文档（跨模块）
 ├── README.md                    # 本文档 (入口)
+├── CURRENT.md                   # 当前事实表（scripts/gen-current-facts.mjs 自动生成，勿手改）
 ├── SYSTEM_MAP.md                # 系统地图 (一图胜千言)
 ├── DECISIONS.md                 # 架构决策记录 (ADRs)
 ├── architecture/                # 架构文档
@@ -60,7 +62,7 @@ docs/                            # 系统级文档（跨模块）
                                  #  entity-management-mechanism.md)
 
 symbio/src/plugins/<plugin>/     # 模块级文档（就近原则）
-├── README.md                    # 插件职责、路由、内部机制（14 个插件全覆盖）
+├── README.md                    # 插件职责、路由、内部机制（15 个插件全覆盖）
 └── docs/                        # 可选：该模块的深度设计 / 审计 / 性能文档
                                  #  例：session/docs/（核心循环、压缩设计、心跳、
                                  #  模块分工、性能、级联选项、VDFS 会话消息……）
@@ -80,6 +82,7 @@ tauri/                           # 前端
 | mcp | [plugins/mcp/README.md](../symbio/src/plugins/mcp/README.md) | MCP 外部工具接入与能力注册 |
 | skill | [plugins/skill/README.md](../symbio/src/plugins/skill/README.md) | 技能脚本（loader/plugin）发现与装载 |
 | local | [plugins/local/README.md](../symbio/src/plugins/local/README.md) | 本地文件系统工具 + system 提示词下发 |
+| vdfs | [plugins/vdfs/README.md](../symbio/src/plugins/vdfs/README.md) | 文件系统本身：`vdfs/*` 协议入口 + `vdfs_*` LLM 工具（规范见 design/vdfs.md） |
 | web | [plugins/web/README.md](../symbio/src/plugins/web/README.md) | 网页抓取/搜索工具 |
 | home | [plugins/home/README.md](../symbio/src/plugins/home/README.md) | 根插件：持应用级状态（`<homedir>/PLUGIN.yml`），构造 worker(Composite) 并传入必需插件清单 |
 | composite | [plugins/composite/README.md](../symbio/src/plugins/composite/README.md) | 子插件容器：扫描 `plugins/` 目录 + 路径合并分发 |
@@ -104,6 +107,7 @@ tauri/                           # 前端
 | 新增路由 | `ROUTES.md`（系统级总表）+ 对应模块 `README.md` 路由段 |
 | 新增错误码 | `ERROR_CODES.md` |
 | 新增配置项 | `CONFIGURATION.md` |
+| 插件 / 挂载点 / 工具 / 存储布局变更 | 重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁；`CURRENT.md` 不手改） |
 | 模块内部机制变更 | 该模块 `README.md`（系统级文档不复制细节） |
 | 跨模块架构变更 | `OVERVIEW.md` + `DECISIONS.md` + `SYSTEM_MAP.md` |
 | 协议变更 | `PROTOCOLS.md` |

@@ -89,6 +89,13 @@ jobs:
         run: node scripts/grep-audit.mjs
         continue-on-error: false
 
+      - name: Docs facts drift gate (docs/CURRENT.md)
+        # 读侧事实表是"现在是什么"的唯一自动来源（agent / 新读者据此免掉逐条反推代码）。
+        # 它由代码提取生成，故此门禁保证：改了插件 / 挂载点 / 工具 / 路由 / 走查事实后，
+        # 必须重新运行 `node scripts/gen-current-facts.mjs` 并提交，否则本步骤失败。
+        run: node scripts/gen-current-facts.mjs --check
+        continue-on-error: false
+
   # 前端代码质量检查 (如果存在前端构建工具)
   frontend-checks:
     if: |

@@ -68,6 +68,11 @@ jobs:
         # 原 .sh 版在本步骤因 runner 未装 rg 而空跑并误报 CHANGELOG 错误。
         run: node scripts/grep-audit.mjs
 
+      - name: Docs facts drift gate (docs/CURRENT.md)
+        # 与 ci.yml 同一条门禁：事实表必须与代码一致
+        run: node scripts/gen-current-facts.mjs --check
+        continue-on-error: false
+
   # 检查版本一致性
   check-version:
     name: Check Version Consistency

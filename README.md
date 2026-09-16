@@ -12,7 +12,7 @@
 
 ## 这是什么
 
-Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat`、`local/shell`、`model/chat`）。
+Symbio 让你用**路径寻址**的方式调用任意能力（例如 `session/chat/send`、`agent/chat`、`vdfs/list`）。
 所有能力都以"插件"形式存在，插件可以无限嵌套组合，从而把多智能体协作、长期记忆、外部工具（MCP / Web / 本地 shell / Telegram）编排进同一棵可寻址的插件树。
 
 核心库 `symbio` **不依赖 UI**，可被桌面应用、命令行或后端服务复用。
@@ -52,6 +52,7 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `agent/chat
 ```
 桌面端 / CLI  ──(route_v2)──►  Home / ── worker(Composite) ──┬─ agent / session / model
                                                             ├─ local / web / skill / mcp
+                                                            ├─ vdfs  (文件系统本身)
                                                             └─ telegram
 HTTP/WS 客户端 ──(gateway 插件)──►  Home /        setting / hook / event_bus 直挂根下
 ```
@@ -59,6 +60,10 @@ HTTP/WS 客户端 ──(gateway 插件)──►  Home /        setting / hook 
 ---
 
 ## 实际插件清单 (`symbio/src/plugins/`)
+
+> ⚠️ 本表是**速览**，手抄会漂移。**插件 × VDFS 挂载点 × 自有路由 × LLM 工具 × trait**
+> 的权威事实表是 [docs/CURRENT.md](./docs/CURRENT.md)——由 `scripts/gen-current-facts.mjs`
+> 从代码提取生成、CI `--check` 门禁防漂移。核对"现在是什么"请以那份为准。
 
 | 插件 | 角色 | 关键能力 |
 | --- | --- | --- |
@@ -69,6 +74,7 @@ HTTP/WS 客户端 ──(gateway 插件)──►  Home /        setting / hook 
 | `model` | LLM 网关 | 无状态单轮推理（`ModelProvider::execute_turn`，由 session 收集后直调，不占路由），多协议适配（OpenAI Chat / Responses / Anthropic / Gemini） |
 | `local` | 本地工具 | shell / file_read / file_write / file_edit / glob_search / content_search |
 | `web` | Web 工具 | http_request / web_search / web_fetch |
+| `vdfs` | 资源文件系统 | 文件系统本身：对前端 `vdfs/*`（13 操作）、对 LLM `vdfs_*` 工具；`.vdfs`/物理两层由同一 `UnifiedFs` 分流 |
 | `skill` | 技能 | 加载与执行技能定义 |
 | `mcp` | MCP 桥 | MCP server 注册（stdio / http）与工具调用 |
 | `telegram` | Telegram 通道 | 消息收发与人机交互 |
@@ -140,7 +146,7 @@ cargo clippy --lib --tests -- -D warnings   # 质量门禁（warning 视为 erro
 详细文档见 **[文档中心 (docs/README.md)](./docs/README.md)**，快速导航：
 
 - **架构**：[OVERVIEW](./docs/architecture/OVERVIEW.md) · [数据流与调用链](./docs/architecture/DATA_FLOW.md) · [协议规范](./docs/architecture/PROTOCOLS.md) · [决策记录](./docs/DECISIONS.md)
-- **参考**：[路由清单](./docs/reference/ROUTES.md) · [错误码](./docs/reference/ERROR_CODES.md) · [配置参考](./docs/reference/CONFIGURATION.md)
+- **参考**：[当前事实表](./docs/CURRENT.md) · [路由清单](./docs/reference/ROUTES.md) · [错误码](./docs/reference/ERROR_CODES.md) · [配置参考](./docs/reference/CONFIGURATION.md)
 - **开发**：[插件开发指南](./docs/guides/PLUGIN_DEVELOPMENT.md) · [排障手册](./docs/guides/TROUBLESHOOTING.md) · [贡献指南](./CONTRIBUTING.md)
 - **现行设计**：[VDFS 虚拟动态文件系统](./docs/design/vdfs.md) · [上下文压缩分层总览](./symbio/src/plugins/session/docs/context-compression-design.md) · [OAB 规范](./docs/design/open-agent-bundle-spec.md)
 - **模块文档**：每个插件与前端各自维护 `README.md`（详见 [文档中心的模块文档地图](./docs/README.md#模块文档地图)）
@@ -159,7 +165,7 @@ symbio/
 ├── symbio/              # Rust 核心库
 │   ├── src/
 │   │   ├── symbio_core/ # 公共契约（Plugin trait / InvokeRequest / 路径常量）
-│   │   ├── plugins/     # 14 个私有 plugin 实现（各含 README.md）
+│   │   ├── plugins/     # 15 个插件实现（各含 README.md）
 │   │   ├── providers/   # 基础设施实现（向量嵌入、文件存储）
 │   │   ├── init.rs      # 日志初始化 + 根插件装配
 │   │   └── lib.rs

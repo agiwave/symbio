@@ -124,16 +124,13 @@
 
 ## Model 插件
 
-| 路径 | 用途 | 返回类型 |
-|------|------|----------|
-| `model/chat` | 调用 LLM 推理 (流式) | `Session` |
+> **`model` 已无自有路由**（Phase E-② 后 `ModelProvider::execute_turn` 由 `session`
+> 在会话循环内直连调用，不占路由；配置读写全在 VDFS 上）。本插件不再有路由条目。
 
-> `model/config/get` / `config/set` **已下线**：模型是**资源型**插件——它的配置就是
-> 自己的资源树，条目在 `.vdfs/model/<id>`（主文件 `provider.json`）；跨条目的状态
-> （`default_provider_id`）在 `.vdfs/model/PLUGIN.yml`。
->
-> `model/status` **已下线**：连通性状态改由节点动作 `vdfs/action { action: "test" }`
-> 返回；`model/chat_sync` 原就是 NotImplemented 占位，一并删除。
+历史入口（**均已下线**，列此仅作迁移指引）：`model/chat` 收归 session 直连（改用
+`session/chat/send`）；`model/config/*` 迁到 `.vdfs/model/<id>` 与 `.vdfs/model/PLUGIN.yml`；
+`model/status` 改由节点动作 `vdfs/action { action: "test" }` 返回；`model/chat_sync`
+本就是 NotImplemented 占位。
 
 ### 配置结构
 

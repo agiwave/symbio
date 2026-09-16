@@ -36,6 +36,7 @@
 │  │       ├── model    ─── 无状态单轮 LLM 网关 · 多协议适配 │  │
 │  │       ├── local    ─── shell / file_read|write|edit / glob / search  │  │
 │  │       ├── web      ─── http_request / web_search / web_fetch         │  │
+│  │       ├── vdfs     ─── 文件系统本身 · vdfs/* 协议 + vdfs_* 工具      │  │
 │  │       ├── skill    ─── SKILL.md 加载与执行                           │  │
 │  │       ├── mcp      ─── MCP Server 注册 (stdio/http) · 工具桥接       │  │
 │  │       ├── telegram ─── 消息收发通道                                  │  │
@@ -50,7 +51,7 @@
 │  │                    Providers (基础设施)                                │  │
 │  │   ├── Embedding (fastembed)     ─── 向量嵌入                         │  │
 │  │   ├── vdfs_service              ─── 资源存储 = 单文件/目录/内存      │  │
-│  │   └── (插件内 SessionStore)     ─── file / sqlite / memory           │  │
+│  │   └── (插件内 SessionStore)     ─── 一种磁盘布局 + 进程内驻留       │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
