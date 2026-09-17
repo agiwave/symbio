@@ -197,7 +197,7 @@ Agent 认知数据需要持久化。
 
 **状态**：已接受
 
-> **当前状态**：**未落地 / 已回退**。CU（认知单元）+ `prop` 驱动的认知层已从代码中移除——无 `seed_cus.jsonl`、无认知单元解析；`CAPABILITY_AGENT_COGNITION` 仅剩 `ids.rs` 一个**无实现的悬空常量**。现存的只有 `CapabilityCategory::Metacognition` 一个分类枚举值。
+> **当前状态**：**未落地 / 已回退**。CU（认知单元）+ `prop` 驱动的认知层已从代码中移除——无 `seed_cus.jsonl`、无认知单元解析；`ids.rs` 也已无本 ADR 的常量残留（原「Agent 能力 id」区的 `CAPABILITY_AGENT_COGNITION` / `_CHAT` / `_IDENTITY` / `_CREATE` 四个悬空常量于 2026-09-17 随 OAB v1 装配实现一并清理，见 CHANGELOG 同日）。现存的只有 `CapabilityCategory::Metacognition` 一个分类枚举值。
 
 **背景**：
 Agent 认知类型与关系类型经常变化。

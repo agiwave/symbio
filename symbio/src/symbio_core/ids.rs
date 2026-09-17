@@ -5,16 +5,17 @@
 //!
 //! 收益：
 //! - **单一真相源**：注册侧（`submit_object_creator!` 第一参）和使用侧
-//!   （`AGENT_CAPABILITY_IDS`、`create_object(id, ...)`、测试期望等）共享同一常量
+//!   （`create_object(id, ...)`、测试期望等）共享同一常量
 //! - **避免拼写漂移**：任何漏改 / 错改一处都会被编译期拦下
 //! - **IDE 友好**：所有调用方跳转即可看到完整 id 列表
 //!
 //! 命名约定：
 //! - 插件工厂：`<plugin>`，例如 `home` / `model` / `agent`
-//! - Agent 能力：`<capability>`，例如 `agent_chat` / `agent_memory`
-//! - Model 协议：`<protocol>`，例如 `anthropic_messages` / `openai_responses`
-//! - 存储后端：`<backend>`，例如 `memory_storage`
 //! - Embedding 服务：`<service>`，例如 `fastembed` / `noop`
+//!
+//! 边界：**LLM 工具名不在这里**。工具名是 `CapabilityMeta.name` 短名，属各插件自己的
+//! 实现细节（`agent_run` 在 `plugins/agent/host/subagent.rs`，`vdfs_*` 由
+//! `plugins/vfds/protocol.rs::VDFS_OPS` 派生），不经全局注册表。
 
 // ============ 插件工厂 id ============
 
@@ -50,16 +51,10 @@ pub const PLUGIN_VDFS: &str = "vdfs";
 /// Event Bus 插件工厂（统一事件总线）
 pub const PLUGIN_EVENT_BUS: &str = "event_bus";
 
-// ============ Agent 能力 id ============
-
-/// Agent 对话能力（子智能体委托）
-pub const CAPABILITY_AGENT_CHAT: &str = "agent_chat";
-/// Agent 身份能力：把智能体人格（身份/规则/策略/预算）随工具说明送达 LLM
-pub const CAPABILITY_AGENT_IDENTITY: &str = "agent_identity";
-/// Agent 统一认知能力（合并 memory/reason/learn/plan/metacognition，27 个操作）
-pub const CAPABILITY_AGENT_COGNITION: &str = "agent_cognition";
-/// Agent 创建能力
-pub const CAPABILITY_AGENT_CREATE: &str = "agent_create";
+// （原「Agent 能力 id」区已整体移除：`agent_chat` / `agent_identity` /
+//  `agent_cognition` / `agent_create` 是 OAB v1 的能力对象 id，随 v1 装配实现一并
+//  下线；现行 agent 域只经 VDFS 暴露资源、经 `agent_run` 一个工具对外委托，
+//  没有需要注册到全局注册表的独立对象。）
 
 // ============ Model 协议 id ============
 //

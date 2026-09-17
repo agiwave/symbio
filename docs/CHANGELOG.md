@@ -18,6 +18,27 @@
 
 ***
 
+## 2026-09-17: 清理 OAB v1 遗留的悬空 id 常量、收敛 `agent_run` 工具名
+
+**性质：死代码清理 + 单一真相源**，无行为变化（回归测试照旧锁住对外工具名）。
+
+- **删 `ids.rs` 的「Agent 能力 id」区**：`CAPABILITY_AGENT_CHAT` / `_IDENTITY` /
+  `_COGNITION` / `_CREATE` 四者在 `symbio/src` 与 `tauri/src` 中**零引用**——它们是
+  OAB v1 的能力对象 id，随同日 `refactor(agent): 删除 OAB v1 装配实现` 一并失去注册方。
+  `ids.rs` 的职责是「经 `submit_object_creator!` 注册到全局注册表的对象 id」，
+  这四条已不属其中（`docs/DECISIONS.md` ADR-009 早已记录 `_COGNITION` 是悬空常量）。
+  原地留一行移除说明，以免被当成漏项补回。
+- **修 `ids.rs` 头部两处过期内容**：收益说明里引用的 `AGENT_CAPABILITY_IDS` 已不存在；
+  命名约定列表中的「Agent 能力」「Model 协议」「存储后端」三类在本文件都没有对应区
+  （Model 协议早已明确不在此定义，存储后端选型已删）。并补一句边界：
+  **LLM 工具名不归本文件**（它是 `CapabilityMeta.name` 短名，属各插件实现细节）。
+- **`agent_run` 工具名收敛为常量**：`plugins/agent/host/subagent.rs` 里它此前有**两个**
+  硬编码点——`CapabilityMeta.name`（LLM 看到的短名）与审批续跑载荷里的 `tool_name`
+  （`session/resume` 据此决定重执行哪个工具）。只改一处会**静默断掉审批续跑**，
+  故收敛为本模块私有的 `NAME`；测试继续断言字面量 `"agent_run"`，以锁住对外契约。
+
+***
+
 ## 2026-09-17: 智能体自身的 `AGENTS.md` 归 agent 插件（v2 落地，第二步）
 
 **取代同日上一条中的「作用域」做法**（`REQUIRED_PLUGINS` 含 `work`、转发时把 `WORKDIR`

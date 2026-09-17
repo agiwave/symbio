@@ -53,7 +53,11 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-// ── 本工具的 meta 键约定（续跑参数承载于审批节点的 meta.prompt.args）──
+// ── 本工具的身份与 meta 键约定（续跑参数承载于审批节点的 meta.prompt.args）──
+/// 工具名。**两处必须同源**：`CapabilityMeta.name`（LLM 看到的短名）与审批续跑载荷
+/// 里的 `tool_name`（`session/resume` 据此决定重执行哪个工具）——只改一处会静默
+/// 断掉审批续跑，故收敛为一个常量。
+const NAME: &str = "agent_run";
 /// 审批节点 meta.prompt：resume 重执行工具时的参数来源（session/resume 提取）
 const META_PROMPT: &str = "prompt";
 /// 子会话元数据键：父会话 id（session 存储归档依据）
@@ -93,7 +97,7 @@ impl AgentRunCapability {
 impl crate::symbio_core::Capability for AgentRunCapability {
     fn meta(&self) -> crate::symbio_core::CapabilityMeta {
         crate::symbio_core::CapabilityMeta {
-            name: "agent_run".to_string(),
+            name: NAME.to_string(),
             context_retention: None,
             description: format!(
                 "将任务委托给一个独立的子智能体会话：在其独立会话中执行任务，\
@@ -454,7 +458,7 @@ async fn stream_relay_bridge(
                     obj.insert(
                         META_PROMPT.to_string(),
                         json!({
-                            "tool_name": "agent_run",
+                            "tool_name": NAME,
                             "args": {
                                 "agent_id": agent_id,
                                 "session_id": child_session_id,
