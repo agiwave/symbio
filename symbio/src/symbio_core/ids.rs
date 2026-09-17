@@ -65,6 +65,6 @@ pub const PLUGIN_EVENT_BUS: &str = "event_bus";
 // ============ Embedding 服务 id ============
 
 /// 本地嵌入服务（tract 纯 Rust ONNX，`providers/embedding/local.rs`）
-pub const EMBEDDING_LOCAL: &str = "local";
+pub const EMBEDDING_LOCAL: &str = "embedding_local";
 /// noop embedding 服务（占位 / 禁用）
 pub const EMBEDDING_NOOP: &str = "noop";
