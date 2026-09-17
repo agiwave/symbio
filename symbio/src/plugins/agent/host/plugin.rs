@@ -196,9 +196,7 @@ impl AgentPlugin {
         // 路径会让工作区里安装的 Agent 找不到——v1 的 `attach_bundle` 走的就是
         // store，v2 不能比它少看一层。
         let store = BundleStore::new(self.config_file.dir().dir(), ctx.get(WORKDIR).as_deref());
-        let Some(record) = store.get(id) else {
-            return None;
-        };
+        let record = store.get(id)?;
         let dir = record.dir.clone();
 
         // v1 目录 → 就地迁移成 v2 后再装配。迁移是**幂等**的，且失败不阻断：

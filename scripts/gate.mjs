@@ -63,13 +63,18 @@ const frontendDir = path.join(repoRoot, 'tauri')
 const logDir = path.join(repoRoot, '.workbuddy-ai', 'gate-logs')
 
 /**
- * 通过数基线（**只增不减**；跑高了请更新这里并说明理由）
+ * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
  *
- * 650：+3 = 子 Agent 并集装配（`plugins/agent/host/scope.rs` 两个前缀规则单测
- * + `host/tests.rs::v2_sub_agent_tree_is_assembled_and_prefixed` 一个装配端到端）。
+ * 639：v1→v2 迁移 + v2 manifest 校验 +6（migrate 2 / manifest 4）。
+ *
+ * 638：删除 OAB v1 装配实现后 **-18**——删的是 v1 的用例本身
+ * （`core/spec/*` 协议核心、`host/prompt.rs` 人格片段、`host/capability.rs`
+ * 身份工具、`BundleStore` 的 prompt/skill/mcp 分类扫描），补的是 v2 主链路
+ * 「不合规目录拒绝接入且写明双侧版本」+1。v1 的装配语义已不存在，它的测试
+ * 不该留下——留着就是在给一段已删的实现作证。
  */
 const BASELINE = {
-  rustTests: 650,
+  rustTests: 638,
   vitestFiles: 19,
   vitestTests: 156,
 }
