@@ -38,6 +38,24 @@ export const VDFS_ROOT = '.vdfs'
 export const VDFS_STATUS_WORKING = 'working'
 /** 节点状态：空闲 / 正常 */
 export const VDFS_STATUS_ACTIVE = 'active'
+/** 节点状态：**以错误结束**（消息与会话共用这个词）。
+ *
+ * 会话用它取代「`active` + `last_failed` 布尔」这种「状态 + 平行标志位」写法：
+ * 「上一轮失败了吗」= `status == VDFS_STATUS_FAILED`，一处判定，不会漏读。
+ * 见 `symbio/src/plugins/session/docs/node-state-streaming.md` §2.3.1。 */
+export const VDFS_STATUS_FAILED = 'failed'
+/** 节点状态：未开始（消息；会话没有这个态——它是长驻容器） */
+export const VDFS_STATUS_PENDING = 'pending'
+/** 节点状态：正在产生内容（消息的「运行中」） */
+export const VDFS_STATUS_STREAMING = 'streaming'
+/** 节点状态：等待用户响应（审批 / 提问） */
+export const VDFS_STATUS_WAITING_USER_ACTION = 'waiting_user_action'
+/** 节点状态：已结束（消息的终态）。
+ *
+ * **不与 `VDFS_STATUS_ACTIVE` 合并**：`active` 是「无特殊状态」，`completed`
+ * 是「终态」，二者曾被后端映射成同一个字符串，导致消费端必须把 `active`
+ * **猜回** `completed`（一次信息丢失 + 一次猜测还原）。现在状态原样透传。 */
+export const VDFS_STATUS_COMPLETED = 'completed'
 
 /** 「运行中」的唯一判据：节点 `status == working`。
  *
@@ -46,6 +64,11 @@ export const VDFS_STATUS_ACTIVE = 'active'
  * 免得同一份真相出现两种写法（且新增 error / disabled 时不必再加布尔）。 */
 export function isWorkingStatus(status?: string | null): boolean {
   return status === VDFS_STATUS_WORKING
+}
+
+/** 「上一轮失败」的唯一判据：节点 `status == failed`。 */
+export function isFailedStatus(status?: string | null): boolean {
+  return status === VDFS_STATUS_FAILED
 }
 
 /** 约定呈现扩展名（宿主可自行扩展） */
@@ -236,6 +259,14 @@ export const VDFS_CHANGE_DELETED = 'deleted'
  *  与 `updated` 的区别是增量的——消费者直接拼接，无需重读整个节点。
  *  列表型数据的流式输出（如会话转写里一条正在生成的消息）走这一种。 */
 export const VDFS_CHANGE_APPENDED = 'appended'
+/** **尾部截断**变更：`path` 所指节点**及其之后的全部兄弟**都已被移除。
+ *
+ *  与 `deleted`（「**这一个**节点没了」，移除一项即可、与顺序无关）是两种语义：
+ *  本变更描述的是列表尾部的一段**区间**，消费者要按自己的顺序取「该节点及其后」。
+ *
+ *  分开的理由是**可分辨**与**代价**：逐条下发截断时，「删这一个」与「从这里删到
+ *  末尾」在载荷上完全一样（只能靠外部知识去猜），且删一条早期消息要发 N 条变更。 */
+export const VDFS_CHANGE_TRUNCATED = 'truncated'
 
 /** 数据变更事件（总线下发的形状；后端 `VdfsChangeEvent`）。
  *  路径即对外展示地址（`.vdfs/…` 或工作目录相对地址），消费方直接比对。
@@ -376,22 +407,95 @@ export function vdfsMessageAddr(sessionId: string, messageId: string): string {
 }
 
 /**
- * 反向解析：从一条变更路径取出会话 id 与（可选的）消息 id。
+ * 会话域地址 → 本域目标（**按地址分派**的唯一实现）。
  *
- * 不是转写路径（含 `.vdfs/session` 清单本身、会话叶子、子会话 / 工作目录区段）
- * 一律返回 `null`——调用方据此跳过，无需自己切字符串。
+ * ## 为什么是「按地址」而不是「按事件类型」
+ *
+ * 事件流的分派必须写成 `switch (event.type)`，而每个分支都隐含「之前发生过什么」
+ * ——顺序一变就错。地址分派不记录历史：每个地址只认**自己那份状态**，
+ * 因此变更可以丢、可以重放、可以乱序，视图仍然正确。
+ *
+ * 不是会话域的地址一律返回 `null`（会话清单本身、子会话 / 工作目录区段、
+ * `.vdfs/model` 等）——调用方据此跳过，无需自己切字符串。
  */
-export function parseTranscriptPath(
-  path: string,
-): { sessionId: string; messageId?: string } | null {
+export type SessionRoute =
+  /** `.vdfs/session/<sid>`：会话叶子（运行态的承载者） */
+  | { target: 'session'; sessionId: string }
+  /** `.vdfs/session/<sid>/消息`：转写列表（整表） */
+  | { target: 'messages'; sessionId: string }
+  /** `.vdfs/session/<sid>/消息/<mid>`：单条消息 */
+  | { target: 'message'; sessionId: string; messageId: string }
+
+/** 从一条变更路径解出会话域目标（纯函数，可单测） */
+export function sessionRouteOf(path: string): SessionRoute | null {
   const prefix = `${VDFS_ROOT}/${VDFS_SESSION_DIR}/`
   if (!path.startsWith(prefix)) return null
   const segs = path.slice(prefix.length).split('/')
   const sessionId = segs[0]
-  if (!sessionId || segs[1] !== VDFS_SEG_MESSAGES) return null
-  if (segs.length === 2) return { sessionId }
-  if (segs.length === 3 && segs[2]) return { sessionId, messageId: segs[2] }
+  if (!sessionId) return null
+  // 会话叶子：`.vdfs/session/<sid>`
+  if (segs.length === 1) return { target: 'session', sessionId }
+  if (segs[1] !== VDFS_SEG_MESSAGES) return null
+  if (segs.length === 2) return { target: 'messages', sessionId }
+  if (segs.length === 3 && segs[2]) return { target: 'message', sessionId, messageId: segs[2] }
   return null
+}
+
+// ==================== 会话运行态（会话节点的场景属性） ====================
+//
+// 会话「忙不忙 / 上一轮怎么结束的」是**会话节点的属性**，不是事件：
+//
+//   status             = 'working' | 'active' | 'failed'
+//   attributes.outcome = 'completed' | 'aborted' | 'failed'   （上一轮的结局）
+//   attributes.error   = "<面向用户的短消息>"                   （仅 failed 时存在）
+//
+// 于是前端不需要「知道上一条事件是什么」就能渲染正确——这正是
+// `eventBus.replayBuffer`（切会话防乱序缓冲）可以被删掉的原因。
+// 见 `symbio/src/plugins/session/docs/node-state-streaming.md` §3.3。
+
+/** 结局：正常结束 */
+export const OUTCOME_COMPLETED = 'completed'
+/** 结局：用户中止 */
+export const OUTCOME_ABORTED = 'aborted'
+/** 结局：以错误结束 */
+export const OUTCOME_FAILED = 'failed'
+
+export type SessionOutcome = 'completed' | 'aborted' | 'failed'
+
+/** 会话运行态（会话节点的三个取值 + 两个场景属性） */
+export interface SessionRuntime {
+  /** 节点状态：`working` / `active` / `failed` */
+  status: string
+  /** 上一轮的结局（从未跑过任何一轮时为 undefined） */
+  outcome?: SessionOutcome
+  /** 面向用户的错误短消息（仅 `failed` 时存在） */
+  error?: string
+}
+
+/**
+ * 从节点视图读出会话运行态（纯函数：缺字段即缺省，**不做推断**）。
+ *
+ * `error` 取节点自述的 `attributes.error`——它覆盖「错误发生在任何消息节点
+ * 创建之前」这一类（能力收集失败 / provider 解析失败 / transport 级失败），
+ * 此时没有任何失败节点可承载错误。
+ */
+export function sessionRuntimeOf(node: VdfsNode): SessionRuntime {
+  const attrs = node as unknown as Record<string, unknown>
+  const outcome = attrs.outcome
+  const error = attrs.error
+  const rt: SessionRuntime = { status: node.status }
+  if (outcome === OUTCOME_COMPLETED || outcome === OUTCOME_ABORTED || outcome === OUTCOME_FAILED) {
+    rt.outcome = outcome
+  }
+  if (typeof error === 'string' && error) rt.error = error
+  return rt
+}
+
+/** 结局 → 提示音音色（纯映射；未知结局按正常结束处理） */
+export function chimeKindOfOutcome(outcome?: SessionOutcome): 'completed' | 'aborted' | 'failed' {
+  if (outcome === OUTCOME_ABORTED) return 'aborted'
+  if (outcome === OUTCOME_FAILED) return 'failed'
+  return 'completed'
 }
 
 /** 生效的呈现扩展名：显式 ext 优先，否则由 name 推导 */

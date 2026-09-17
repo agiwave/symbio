@@ -12,7 +12,7 @@ import { ref, watch } from 'vue'
 
 const STORAGE_KEY = 'symbio.completion-sound'
 
-/** 会话结束类型（与 sessionBusWatcher 的三个终态分支一一对应） */
+/** 会话结束类型（与后端 `attributes.outcome` 的三个取值一一对应） */
 export type CompletionKind = 'completed' | 'aborted' | 'failed'
 
 interface PersistedSoundSettings {

@@ -94,9 +94,23 @@ const msrvTargetDir = path.join(repoRoot, '.workbuddy-ai', 'msrv-target')
  * 不该留下——留着就是在给一段已删的实现作证。
  */
 const BASELINE = {
-  rustTests: 657,
+  // 657 → 660：嵌入 2 个真实推理回归测试 + `codebase_search` 注册护栏测试
+  // 660 → 666：节点状态流 S20——会话运行态投影（`SessionRuntime` /
+  //   `session_node` / `session_change`）与 `MessageStatus` 词表对齐的回归测试
+  // 666 → 668：S20.1——中止批次必然收口（无节点停在 `Streaming`）、
+  //   未执行的终态是 `Completed` 而非 `Failed`
+  // 668 → 671：S20.2——级联删除只发一条 `truncated`（不是 N 条 `deleted`）、
+  //   删末尾一条走同一语义、目标不存在时一条变更都不发
+  rustTests: 671,
   vitestFiles: 19,
-  vitestTests: 156,
+  // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
+  //   状态迁移驱动的提示音、`failed` 作为独立会话状态
+  // 160 → 164：工具调用运行态——「运行中」标签 + 动效点 + 已运行时长、
+  //   `waiting_user_action` 的「待确认」标签、终态不给标签
+  // 164 → 172：S20.2——`removeFrom` 的级联范围与边界（删末尾 / 锚点缺失 /
+  //   缺 seq 的旧数据）、`deleteMessage` 的失败回滚与权威列表对齐、
+  //   `truncated` 与 `deleted` 两种删除语义不互相污染
+  vitestTests: 172,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */

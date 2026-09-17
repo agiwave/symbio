@@ -200,7 +200,33 @@ async fn process_tool_resume_action(
     let (tool_name, base_args, _failure_kind) = extract_tool_context(&messages, tc_idx, child_idx);
     let old_child_id = messages[child_idx].id.clone();
 
-    // 5. 根据 action 执行
+    // 5. 根据 action 执行。
+    //
+    // 会**真正重跑工具**的三个 action（approve / retry / supply）先把父 ToolCall
+    // 置「运行中」再执行——与 `process_tool_calls_async` 同一条规则：ToolCall 节点
+    // 覆盖整段执行窗口，而不是"参数齐了就结束"（`docs/node-state-streaming.md` §2.2）。
+    // 否则用户点下「批准执行」后画面毫无变化，直到结果突然出现，无法判断是否在跑。
+    //
+    // `meta.started_at` 与 `emit_tool_running` 同源：前端据此显示"已运行 47s"。
+    //
+    // reject / answer 不执行工具（就地生成结果），下发"运行中"只会闪一帧，故排除。
+    if matches!(
+        &req.action,
+        ResumeAction::Approve | ResumeAction::Retry | ResumeAction::Supply
+    ) {
+        let _ = channel
+            .tx
+            .send(PluginFrame::Data(json!(StreamEvent::Update {
+                message: ChatMessage {
+                    id: req.target_id.clone(),
+                    status: Some(MessageStatus::Streaming),
+                    meta: Some(json!({ "started_at": crate::symbio_core::now_ms() })),
+                    ..Default::default()
+                },
+            })))
+            .await;
+    }
+
     let (final_result_text, final_success, new_tc_args) = match req.action {
         ResumeAction::RetryTurn => unreachable!("RetryTurn 已在顶层分发，此处不可达"),
         ResumeAction::Reject => {

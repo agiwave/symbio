@@ -98,6 +98,10 @@ impl SessionPlugin {
     /// 然后把"它及其之后的所有消息"整段 `drain` 掉即可——无需任何 parent_id 级联逻辑。
     /// 这样既能保证会话消息的连续性（不会出现孤立的后半截助手回复），
     /// 又足够简单直接。
+    ///
+    /// 注意目标消息**不存在**时：`deleted_ids` 为空，因此**不发任何变更**——
+    /// 「什么都没删」不该在 VDFS 上留下痕迹（发了 `truncated` 会让消费者
+    /// 从一条并不存在的节点起截断，把整个列表清空）。
     pub async fn invoke_delete_message(
         &self,
         ctx: Arc<dyn InvokeRequest>,
@@ -118,9 +122,12 @@ impl SessionPlugin {
         };
 
         chat_session.replace_messages(messages).await?;
-        // VDFS 视图同步：逐条发 `deleted`（与前端本地移除的 id 列表严格一致）
-        for id in &deleted_ids {
-            self.emit_message_deleted(&req.session_id, id);
+        // VDFS 视图同步：**一条** `truncated`（落在目标消息地址上），不是 N 条
+        // `deleted`。语义是"从这里到列表末尾全没了"，消费者按自己的顺序取区间即可
+        // ——它不需要收到被删的每一条，前端也因此不必等一场"大面积通知"。
+        // 前端本地删除走的是同一条语义（`stores/sessions.ts::removeFrom`）。
+        if !deleted_ids.is_empty() {
+            self.emit_transcript_truncated(&req.session_id, &req.message_id);
         }
         Ok(serde_json::to_value(session_delete_message::Response {
             deleted: deleted_ids.len(),
@@ -252,16 +259,16 @@ impl SessionPlugin {
         self.save_session(&session).await?;
 
         // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：
-        // 新建 → created，其余 → updated。VDFS 会话清单因此无需轮询即可收敛；
-        // 发起方本次就拿到的完整 session（见下方响应），不依赖事件携带标题。
-        self.notify_change(
-            &req.session_id,
-            if is_new {
-                crate::symbio_core::vdfs::VDFS_CHANGE_CREATED
-            } else {
-                crate::symbio_core::vdfs::VDFS_CHANGE_UPDATED
-            },
-        );
+        // 新建 → created（粗粒度，消费方重拉清单）；其余 → **带节点视图的 updated**
+        // （标题 / 元数据等就地收敛，消费方零回读）。VDFS 会话清单因此无需轮询。
+        if is_new {
+            self.notify_change(
+                &req.session_id,
+                crate::symbio_core::vdfs::VDFS_CHANGE_CREATED,
+            );
+        } else {
+            self.notify_session_state(&req.session_id).await;
+        }
 
         Ok(serde_json::to_value(session_update::Response {
             success: true,
@@ -314,3 +321,7 @@ impl SessionPlugin {
         ))))
     }
 }
+
+#[cfg(test)]
+#[path = "handlers.test.rs"]
+mod tests;

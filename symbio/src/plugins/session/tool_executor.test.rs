@@ -160,3 +160,77 @@ fn args_summary_handles_multibyte_args() {
     // 短参数原样返回
     assert_eq!(args_summary(&json!({"a": 1}), 200), "{\"a\":1}");
 }
+
+/// S20.1 不变量：**本批每个 ToolCall 都必须以终态收场**。
+///
+/// 中止（`is_aborted`）时循环在第一个工具之前就 `break`，本批一个都没执行——
+/// 若不收口，这些节点会停在参数流式阶段广播出的 `Streaming` 上：
+/// 前端永远转「运行中」（把"卡住"伪装成"在跑"），重启后还会被
+/// `cleanup_crashed_sessions` 误判为崩溃遗留。
+#[tokio::test]
+async fn aborted_batch_terminates_every_tool_call() {
+    let (_host, mut plugin_chan) = PluginChannel::pair(64);
+    let abort = Arc::new(AtomicBool::new(true)); // 已中止：本批一个都不执行
+    let tcs = vec![
+        ToolCallInfo {
+            id: Some("tc1".into()),
+            name: Some("vdfs_list".into()),
+            arguments: json!({ "path": "." }),
+            parse_error: None,
+        },
+        ToolCallInfo {
+            id: Some("tc2".into()),
+            name: Some("vdfs_list".into()),
+            arguments: json!({ "path": "." }),
+            parse_error: None,
+        },
+    ];
+
+    let (msgs, updates) =
+        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
+
+    assert!(msgs.is_empty(), "中止时不应产出任何工具结果子节点");
+    assert_eq!(updates.len(), 2, "两个未执行的调用都必须收到终态补丁");
+    for u in &updates {
+        assert_eq!(u.status, Some(MessageStatus::Completed));
+        assert_eq!(
+            u.meta
+                .as_ref()
+                .and_then(|m| m.get("failure_kind"))
+                .and_then(|v| v.as_str()),
+            Some("not_executed"),
+            "未执行必须留下可区分的标记，否则与「跑完了」无从分辨"
+        );
+        assert!(u.error.is_none(), "未执行不是错误：挂 error 会让前端渲染 ⚠");
+    }
+}
+
+/// 未执行的终态必须是 `Completed` 而非 `Failed`。
+///
+/// `Failed` 会让 `get_context_messages` 过滤掉父 ToolCall 节点，留下"孤儿 tool 结果"
+/// → 下一轮 LLM 请求携带非法 `tool_call_id`。与既有口径一致：工具失败属**信息性**，
+/// 差异由 `meta.failure_kind` 承载。
+#[test]
+fn not_executed_patch_is_completed_not_failed() {
+    let p = not_executed_patch("tc1", "not_executed");
+    assert_eq!(p.id, "tc1");
+    assert_eq!(p.status, Some(MessageStatus::Completed));
+    assert!(p.error.is_none());
+    assert_eq!(
+        p.meta.as_ref().and_then(|m| m.get("success")),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        p.meta.as_ref().and_then(|m| m.get("failure_kind")),
+        Some(&json!("not_executed"))
+    );
+    // 成因可区分：「被钩子拦下」与「批次没轮到」不是同一件事，
+    // 共用一个标记会让事后排查只能靠猜。
+    assert_eq!(
+        not_executed_patch("tc1", "blocked")
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("failure_kind")),
+        Some(&json!("blocked"))
+    );
+}

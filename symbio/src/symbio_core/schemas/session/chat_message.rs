@@ -54,6 +54,28 @@ pub enum MessageStatus {
     Failed,
 }
 
+impl MessageStatus {
+    /// 状态词——**与 `serde` 的序列化名逐字一致**（由单测锁死）。
+    ///
+    /// ## 为什么需要它
+    ///
+    /// VDFS 节点投影（`plugins/session/plugin/nodes.rs::message_status`）要把状态
+    /// 写进 `VdfsNode.status`，而前端按同一套词读回。若那里手写字符串字面量，
+    /// 枚举改名时就会出现「存储写 `streaming`、节点报 `streaming` 之外的词」
+    /// 这种**编译期看不见**的分叉。
+    ///
+    /// 于是状态词只有一份定义（本函数），投影与序列化都从它派生。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MessageStatus::Pending => "pending",
+            MessageStatus::Streaming => "streaming",
+            MessageStatus::WaitingUserAction => "waiting_user_action",
+            MessageStatus::Completed => "completed",
+            MessageStatus::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageUrl {
     pub url: String,
@@ -358,4 +380,42 @@ pub struct ResumeRequest {
     /// answer（ask_user）时的答案对象
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer: Option<Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `MessageStatus::as_str()` 必须与 `serde` 的序列化名逐字一致。
+    ///
+    /// 这条断言是**唯一**能拦住「VDFS 节点状态词与存储状态词分叉」的地方：
+    /// 两者一旦不同，前端就会按节点状态渲染出与存储不一致的角标，
+    /// 且编译期与运行期都不会报错（只会静默显示错的状态）。
+    #[test]
+    fn message_status_word_matches_serde() {
+        for st in [
+            MessageStatus::Pending,
+            MessageStatus::Streaming,
+            MessageStatus::WaitingUserAction,
+            MessageStatus::Completed,
+            MessageStatus::Failed,
+        ] {
+            let wire = serde_json::to_value(&st).unwrap();
+            assert_eq!(
+                wire.as_str(),
+                Some(st.as_str()),
+                "状态词与序列化名分叉：{st:?}"
+            );
+        }
+    }
+
+    /// `Completed` 不得与「未标注」被折叠成同一个节点状态词。
+    ///
+    /// 折叠曾让消费端必须把 `active` **猜回** `completed`（一次信息丢失 + 一次还原）；
+    /// 这条断言把"两者可区分"钉住。
+    #[test]
+    fn completed_is_distinct_from_unset_sentinel() {
+        assert_eq!(MessageStatus::Completed.as_str(), "completed");
+        assert_ne!(MessageStatus::Completed.as_str(), "active");
+    }
 }

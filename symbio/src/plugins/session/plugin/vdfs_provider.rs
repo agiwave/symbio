@@ -135,7 +135,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 // 只有访问位按**目录视图**回答（只给 `l`）：stat 的结果被分发层
                 // 当作「当前目录节点」，其访问位决定是否给出新建入口；
                 // 会话内部不支持新建 / 建目录。
-                let mut n = session_node(&SessionSummary::of(&session), self.is_working(id).await);
+                let mut n = session_node(
+                    &SessionSummary::of(&session),
+                    &self.session_runtime(id).await,
+                );
                 n.access = vdfs::VdfsAccess::LIST;
                 Ok(n)
             }
@@ -173,7 +176,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 let session = self.sub_session_of(id, sub).await?;
                 Ok(session_node(
                     &SessionSummary::of(&session),
-                    self.is_working(sub).await,
+                    &self.session_runtime(sub).await,
                 ))
             }
             VdfsSessionPath::Workdir { id, rel } => {
@@ -408,7 +411,8 @@ impl vdfs::VdfsProvider for SessionPlugin {
         self.save_session(&session)
             .await
             .map_err(vdfs::from_plugin_error)?;
-        self.notify_change(path, vdfs::VDFS_CHANGE_UPDATED);
+        // 带节点视图：标题 / 元数据的变更就地收敛（消费方零回读）
+        self.notify_session_state(path).await;
         Ok(vdfs::VdfsWriteResponse {
             path: path.to_string(),
             created: false,
@@ -545,7 +549,7 @@ impl SessionPlugin {
 
     /// 按 id 取会话（**存在性校验**：`load_session` 对未命中会返回空会话，
     /// 因此这里走带存在性判据的 `load_session_checked`）
-    async fn session_of(&self, id: &str) -> vdfs::VdfsResult<Session> {
+    pub(crate) async fn session_of(&self, id: &str) -> vdfs::VdfsResult<Session> {
         self.get_store()
             .await
             .map_err(vdfs::from_plugin_error)?
@@ -555,26 +559,48 @@ impl SessionPlugin {
             .ok_or_else(|| vdfs::VdfsError::not_found(format!("会话不存在：{id}")))
     }
 
-    /// 单个会话的实时工作状态
-    async fn is_working(&self, id: &str) -> bool {
+    /// 单个会话的**运行态**（节点状态的唯一来源，见 [`SessionRuntime`]）。
+    ///
+    /// 无活跃状态（进程内从未跑过该会话）⇒ 空闲。读的是同一份
+    /// `ActiveSessionStateInner`，因此 `list` / `stat` / 变更发射三处口径必然一致
+    /// ——不存在"列表说空闲、变更说运行中"这种分叉。
+    pub(crate) async fn session_runtime(&self, id: &str) -> SessionRuntime {
         let active = self.active_mgr.sessions.read().await;
-        active
-            .get(id)
-            .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
-            .unwrap_or(false)
+        let Some(st) = active.get(id) else {
+            return SessionRuntime::idle();
+        };
+        // `try_read` 失败（正被写者持有）时按"运行中"回答：运行态的写入都是
+        // 瞬时操作，读不到就说明此刻正在变更——宁可多报一次运行中（前端会
+        // 在下一次变更收敛），也不要凭空把正在跑的会话报成空闲（那会让停止
+        // 按钮消失、用户无法中止）。
+        let Ok(inner) = st.inner.try_read() else {
+            return SessionRuntime::working();
+        };
+        SessionRuntime::from_state(
+            inner.is_working,
+            inner.last_outcome.clone(),
+            inner.last_error.clone(),
+        )
     }
 
-    /// 会话清单 → VDFS 节点（携带实时工作状态）
+    /// 会话清单 → VDFS 节点（携带实时运行态）
     async fn nodes_of_sessions(&self, sessions: &[SessionSummary]) -> Vec<vdfs::VdfsNode> {
         let active = self.active_mgr.sessions.read().await;
         sessions
             .iter()
             .map(|s| {
-                let is_working = active
-                    .get(&s.id)
-                    .map(|st| st.inner.try_read().map(|i| i.is_working).unwrap_or(false))
-                    .unwrap_or(false);
-                session_node(s, is_working)
+                let rt = match active.get(&s.id) {
+                    Some(st) => match st.inner.try_read() {
+                        Ok(inner) => SessionRuntime::from_state(
+                            inner.is_working,
+                            inner.last_outcome.clone(),
+                            inner.last_error.clone(),
+                        ),
+                        Err(_) => SessionRuntime::working(),
+                    },
+                    None => SessionRuntime::idle(),
+                };
+                session_node(s, &rt)
             })
             .collect()
     }

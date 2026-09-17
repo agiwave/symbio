@@ -8,9 +8,12 @@
 
 use super::plugin::AgentPlugin;
 use super::store::BundleStore;
+use crate::symbio_core::{vdfs, vdfs_provider::VdfsProvider};
 use crate::symbio_core::{
-    CapabilityVisitor, DefaultToolVisitor, InvokeRequest, InvokeRequestExt, Plugin, SimpleRequest,
-    AGENT_ID, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor,
+    InvokeRequest, InvokeRequestExt, Plugin, PluginDir, SimpleRequest, AGENT_ID,
+    CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, PLUGIN_DIR, TRAVERSE_AVAILABLE_TOOLS,
+    WORKDIR,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -303,4 +306,77 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
         tools.iter().any(|t| t.starts_with("agent_reviewer_")),
         "子 Agent 的工具应带来源前缀，实际：{tools:?}"
     );
+}
+
+/// agent 挂载根**只列装进来的子智能体**，系统自身的指令（`AGENTS.md`）不在此列——
+/// 它是「本 agent 的修改」，入口在设置页，混进列表会被读成某个包。
+#[tokio::test]
+async fn mount_root_lists_only_installed_agents() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workdir = tmp.path().to_string_lossy().to_string();
+    let agent_root = tmp.path().join("agent");
+    std::fs::create_dir_all(&agent_root).unwrap();
+
+    let store = BundleStore::new(agent_root.clone(), Some(&workdir));
+    store
+        .import(&build_agent_zip("com.acme.demo", "^2"), false)
+        .unwrap();
+
+    let host: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    host.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_AGENT));
+    host.set(WORKDIR, workdir);
+    let ctx = vdfs::vdfs_context(&host);
+
+    let plugin = AgentPlugin::new();
+    let items = plugin.list(&ctx, "").await.unwrap();
+    let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["com.acme.demo"],
+        "挂载根只有装进来的智能体，系统指令不在此列：{names:?}"
+    );
+
+    // 不进清单 ≠ 不可达：地址照旧可读（设置页那个入口指向它）
+    let n = plugin.stat(&ctx, "AGENTS.md").await.unwrap();
+    assert_eq!(n.title, "全局指令");
+}
+
+/// 设置页收到两条 agent 条目：配置文档（`agent/PLUGIN.yml`）+ 系统自身指令
+/// （`agent/AGENTS.md`）——两条地址都指向本插件，读写仍落在本插件文件上。
+#[tokio::test]
+async fn traverse_declares_config_and_instruction_in_settings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workdir = tmp.path().to_string_lossy().to_string();
+    let agent_root = tmp.path().join("agent");
+    std::fs::create_dir_all(&agent_root).unwrap();
+    // 系统智能体自身的指令：挂在 agent 目录的**父目录**（homedir）
+    std::fs::write(tmp.path().join("AGENTS.md"), "你是系统智能体。").unwrap();
+
+    let store = BundleStore::new(agent_root.clone(), Some(&workdir));
+    store
+        .import(&build_agent_zip("com.acme.demo", "^2"), false)
+        .unwrap();
+
+    let plugin = Arc::new(AgentPlugin::new());
+    let (ctx, _manager) = ctx_with(Some(&workdir), Some("com.acme.demo"));
+    let configs: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
+    ctx.set(CONFIG_VISITOR, Arc::clone(&configs));
+
+    plugin.traverse(String::new(), ctx).await.unwrap();
+
+    let entries = configs.list_configurables().await;
+    let by_name: std::collections::HashMap<&str, &crate::symbio_core::vdfs_provider::VdfsNode> =
+        entries.iter().map(|n| (n.name.as_str(), n)).collect();
+    // 配置文档（name = 目录名 agent）
+    assert!(
+        by_name.contains_key("agent"),
+        "应含 agent 配置文档：{by_name:?}"
+    );
+    // 系统自身指令（name = AGENTS.md，地址指向本插件）
+    let instr = by_name
+        .get("AGENTS.md")
+        .expect("设置页应含系统指令条目（agent 列表里没有它）");
+    assert_eq!(instr.path, "agent/AGENTS.md");
+    assert_eq!(instr.title, "全局指令");
+    assert_eq!(instr.ext.as_deref(), Some("md"));
 }

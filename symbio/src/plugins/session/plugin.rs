@@ -97,6 +97,29 @@ impl SessionPlugin {
         self.change_subs.notify(&vdfs::VdfsChange::new(id, change));
     }
 
+    /// 广播一次**会话运行态**变更：带节点视图的 `updated`。
+    ///
+    /// ## 与 `notify_change` 的分工
+    ///
+    /// `notify_change` 是**粗粒度**的（只报"变了"），消费者必须回读 `vdfs/stat`
+    /// 才知道变成了什么——对标题一类低频变化足够。运行态不同：它是最需要即时的
+    /// 路径（角标 / 停止按钮 / 提示音都挂在这上面），一次状态迁移配一次回读
+    /// 会让"开始处理"到 UI 反映之间多一个往返。因此这里把节点视图**一并带上**。
+    ///
+    /// 这是会话状态下发给前端的**唯一出口**（`session/docs/node-state-streaming.md`
+    /// §8.6）：任何改动运行态的地方都必须经它，否则 UI 会永久停在旧状态，
+    /// 而两条链路互不校验、不会有人发现。
+    ///
+    /// 会话不存在（如刚被删）时静默返回：变更无处可挂，删除本身另有 `deleted`。
+    pub(crate) async fn notify_session_state(&self, id: &str) {
+        let Ok(session) = self.session_of(id).await else {
+            return;
+        };
+        let rt = self.session_runtime(id).await;
+        let node = session_node(&SessionSummary::of(&session), &rt);
+        self.change_subs.notify(&session_change(id, node));
+    }
+
     // ==================== 消息级变更（不经前端补丁通道的那三条路由）====================
     //
     // `chat/clear_messages` / `chat/delete_message` / `chat/update_message` 是
@@ -107,11 +130,19 @@ impl SessionPlugin {
     // 因此这三条路由各有一个「只发变更」的入口：与 `emit_message_patch` 的区别
     // 只在**不发前端帧**，发射规则（载荷宽度、地址拼法）完全同源。
 
-    /// 删除单条消息 → `deleted`
-    pub(crate) fn emit_message_deleted(&self, session_id: &str, mid: &str) {
+    /// 从某条消息起**截断到列表末尾** → `truncated`（一条，而不是 N 条 `deleted`）。
+    ///
+    /// 这是本插件发出的**唯一**一种消息级删除变更。另一种删除语义（`deleted`：
+    /// 「**这一个**节点没了」）来自工具调用恢复流程，由消费循环直接从
+    /// `StreamEvent::Delete` 转译（见 `orchestrator::consume`）——那是按子树
+    /// 逐节点删，与「从这里到末尾」不是同一件事，因此不共用入口。
+    ///
+    /// 逐节点下发截断的代价：删一条早期消息会连带删掉上百条，变更数会与历史
+    /// 长度线性相关。见 [`vdfs::VDFS_CHANGE_TRUNCATED`] 的说明。
+    pub(crate) fn emit_transcript_truncated(&self, session_id: &str, mid: &str) {
         self.change_subs.notify(&vdfs::VdfsChange::new(
             message_path(session_id, mid),
-            vdfs::VDFS_CHANGE_DELETED,
+            vdfs::VDFS_CHANGE_TRUNCATED,
         ));
     }
 
@@ -600,8 +631,9 @@ mod vdfs_provider;
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
     internal_dirs, message_change, message_dir_path, message_node, message_of, message_path,
-    message_payload, message_text, ordered, overlay_live, parse_session_path, session_content,
-    session_node, title_from_new_path, transcript_window, window_params, VdfsSessionPath,
+    message_payload, message_text, ordered, overlay_live, parse_session_path, session_change,
+    session_content, session_node, title_from_new_path, transcript_window, window_params,
+    SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED,
     SEG_MESSAGES,
 };
 

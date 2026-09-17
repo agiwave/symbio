@@ -126,10 +126,24 @@ const messageTree = chat.messageTree
 const sessionsStore = useSessionsStore()
 
 // --- 计算属性 ---
-  // 会话级错误状态（"错误是状态、不是节点"的兜底展示）：仅当没有任何 Failed Turn 节点、
-  // 但会话整体因错误中止（transport 级失败 / send 在首帧前失败）时非空。此时没有"造成
-  // 中止的节点"可挂重试，错误作为会话级状态展示在会话错误条，并许可重试。
-  const sessionError = computed(() => sessionsStore.getSessionError(props.sessionId))
+  // 会话级错误条（"错误是状态、不是节点"的兜底展示）。
+  //
+  // 两个来源：会话节点的 `attributes.error`（服务端权威）与 send / resume 的本地乐观
+  // 错误。但**有失败节点时一律不显示**——那时错误由根级 Turn 承载（⚠ + 重试），
+  // 再显示一条会话级横幅就是同一条错误报两遍。
+  //
+  // 这个判定放在**渲染时**（从节点表算出）而不是事件到达时：事件时判定隐含
+  // "错误事件到达的那一刻恰好能看到失败节点"，而两条通道的先后无法保证。
+  // 从节点表派生则没有这个问题——同一份节点表必然得到同一个结论
+  // （`node-state-streaming.md` §5.2「派生是纯函数」）。
+  const sessionError = computed(() => {
+    const err = sessionsStore.getSessionError(props.sessionId)
+    if (!err) return null
+    const hasFailedNode = sessionsStore
+      .getSessionMessages(props.sessionId)
+      .some((m) => m.status === 'failed' && !(m.meta as { ephemeral?: boolean } | undefined)?.ephemeral)
+    return hasFailedNode ? null : err
+  })
 
   /** 会话级错误重试：重新发送用户最后一条消息（复用其 id 避免乐观消息重复节点）。
    *  仅用于"无 Failed Turn 节点"的兜底错误；有 Failed Turn 时错误由其节点承载、走 handleRetry。 */

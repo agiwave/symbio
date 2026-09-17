@@ -202,7 +202,9 @@ impl SessionPlugin {
         let user_msg_spawn = user_msg;
 
         tokio::spawn(async move {
-            this_spawn.broadcast_status(&state_spawn, "busy").await;
+            this_spawn
+                .emit_session_state(&state_spawn, SessionStateChange::Working)
+                .await;
 
             let is_ping = user_msg_spawn
                 .as_ref()
@@ -453,6 +455,9 @@ impl SessionPlugin {
             return;
         }
 
-        self.notify_change(session_id, vdfs::VDFS_CHANGE_UPDATED);
+        // 标题变更 = 该会话节点的一次 `updated`，**带节点视图**：前端清单项与
+        // 聊天头部标题因此一次变更即收敛，不必再回读 `vdfs/stat`
+        // （自动命名与手动改名走同一条链路，不因发起者不同而分流）。
+        self.notify_session_state(session_id).await;
     }
 }

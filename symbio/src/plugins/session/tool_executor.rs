@@ -557,6 +557,67 @@ async fn record_protocol_failure(
     parent_updates.push(parent_update);
 }
 
+/// 广播父 ToolCall 的「执行中」状态（`Streaming`）。
+///
+/// ## 为什么需要它
+///
+/// ToolCall 节点的生命周期**不在模型停止输出参数时结束**——那只是"参数齐了"。
+/// 它此后还要经历一段**执行窗口**：一次编译、一次网络请求、一个子智能体跑完，
+/// 往往比参数流式本身长得多。若此处不下发状态，前端在整段窗口里没有任何
+/// 「运行中」迹象：参数流完画面静止，直到结果突然出现——用户无法判断
+/// 是"还在跑"还是"卡死了"。
+///
+/// 状态机（`docs/node-state-streaming.md` §2.2）：
+/// `pending → streaming（参数流式 + 执行）→ waiting_user_action → completed / failed`。
+/// 因此 `Streaming` 在这里**不是**"正在接收流"，而是"这次调用正在跑"。
+///
+/// 同时写入 `meta.started_at`（毫秒）：前端据此显示"已运行 47s"——「运行中」是断言，
+/// 时长才是**判据**，用户靠它区分"还在跑"与"卡住了"。用节点属性承载而不是前端
+/// 自己计时，切会话/重连后时长仍然连续（前端计时会从零重来）。
+async fn emit_tool_running(channel: &PluginChannel, tool_call_id: &str) {
+    let _ = channel
+        .tx
+        .send(PluginFrame::Data(
+            serde_json::to_value(session_chat_response::StreamEvent::Update {
+                message: ChatMessage {
+                    id: tool_call_id.to_string(),
+                    status: Some(MessageStatus::Streaming),
+                    meta: Some(json!({ "started_at": crate::symbio_core::now_ms() })),
+                    ..Default::default()
+                },
+            })
+            .unwrap_or_default(),
+        ))
+        .await;
+}
+
+/// 本批**未执行**的工具调用的终态补丁。`reason` 区分两种成因，写进 `meta.failure_kind`：
+///
+/// - `"not_executed"`：批次没轮到它（用户中止 / 交互模式下前一个工具待用户恢复）；
+/// - `"blocked"`：被 `PreToolUse` 钩子拦下（已有 `Blocked:` 结果子节点）。
+///
+/// 两条路径都必须给出终态，否则节点会永远停在 `Streaming`——前端一直转"运行中"，
+/// 且重启后 `cleanup_crashed_sessions` 会把它误判成崩溃遗留。
+///
+/// ## 为什么是 `Completed` 而不是 `Failed`
+///
+/// `Failed` 的语义是"以错误结束"，而"没轮到执行"与"被策略拦下"都不是错误。
+/// 标 `Failed` 还会连带两个后果：前端渲染 ⚠ 错误条（用户以为工具真的失败了），以及
+/// `get_context_messages` 过滤掉父节点后留下孤儿结果子节点（下一轮请求非法）。
+/// 与既有口径一致——工具失败属**信息性**，父节点一律 `Completed`，
+/// 差异由 `meta.failure_kind` 承载。
+fn not_executed_patch(tool_call_id: &str, reason: &str) -> ChatMessage {
+    ChatMessage {
+        id: tool_call_id.to_string(),
+        status: Some(MessageStatus::Completed),
+        meta: Some(json!({
+            "success": false,
+            "failure_kind": reason,
+        })),
+        ..Default::default()
+    }
+}
+
 /// 顺序处理一批工具调用，向 channel 广播每个工具的结果，
 /// 并返回 `(tool_messages, parent_updates)`：
 /// - `tool_messages`：工具结果子节点（用于追加到对话历史）
@@ -565,6 +626,13 @@ async fn record_protocol_failure(
 ///
 /// 交互模式（interactive）下，若前一个工具产出 user_prompt（待审批/询问）或失败，
 /// 则中止本批剩余工具（用户需逐个处理）；auto 模式不中止，失败结果传 LLM 继续。
+///
+/// ## 父节点状态的不变量（本函数负责保证）
+///
+/// **本批每一个工具调用都必须以终态收场**（`Completed` / `WaitingUserAction`）：
+/// 调用前广播 `Streaming`（[`emit_tool_running`]），调用后广播终态；未执行的
+/// （阻塞 / 中止 / 交互中断）在函数末尾统一由 [`not_executed_patch`] 收口。
+/// 漏掉任何一条，前端就会有一个永远转下去的「运行中」。
 #[allow(clippy::too_many_arguments)]
 pub async fn process_tool_calls_async(
     tool_calls: Vec<ToolCallInfo>,
@@ -587,6 +655,15 @@ pub async fn process_tool_calls_async(
         tool_calls.len(),
         mode
     );
+
+    // 本批全部工具调用 id。循环按值消费 `tool_calls`，而"哪些没被执行"要在循环
+    // **之后**才知道（break 出口），故先留一份 id 清单供末尾收口。
+    let batch_ids: Vec<String> = tool_calls
+        .iter()
+        .filter_map(|tc| tc.id.as_ref())
+        .filter(|id| !id.trim().is_empty())
+        .cloned()
+        .collect();
 
     for tc in tool_calls {
         if is_aborted.load(Ordering::Relaxed) {
@@ -715,8 +792,26 @@ pub async fn process_tool_calls_async(
                 Some(result_msg_id.clone()),
             );
             tool_messages.push(tool_msg);
+            // 被钩子拦下 → 父节点同样必须收敛（此前只推了结果子节点，父节点
+            // 靠 `finalize_assistant_turn` 的 Completed 兜着；那条兜底已移除）。
+            let parent_update = not_executed_patch(&id, "blocked");
+            let _ = channel
+                .tx
+                .send(PluginFrame::Data(
+                    serde_json::to_value(session_chat_response::StreamEvent::Update {
+                        message: parent_update.clone(),
+                    })
+                    .unwrap_or_default(),
+                ))
+                .await;
+            parent_updates.push(parent_update);
             continue;
         }
+
+        // 工具即将真正执行 → 父 ToolCall 置「运行中」。这是整段执行窗口的**唯一**
+        // 运行中信号来源，必须紧贴 `execute_tool_async` 之前（`finalize_assistant_turn`
+        // 已不再在参数流结束时提前定格）。
+        emit_tool_running(channel, &id).await;
 
         let (res, success, mut pending_user_prompt) = execute_tool_async(
             parent,
@@ -891,6 +986,27 @@ pub async fn process_tool_calls_async(
         }
 
         tool_messages.push(tool_msg);
+    }
+
+    // ── 收口：本批未执行的工具调用不得停在 `Streaming` ────────────────────
+    // 两条路径会走到这里：① 用户中止；② 交互模式下前一个工具待用户恢复，
+    // 本批剩余被 break 掉。它们从未经过 `emit_tool_running`，但参数流式阶段
+    // 已经把它们广播成 `Streaming`——不定格就是前端一个永远转下去的「运行中」。
+    for id in &batch_ids {
+        if parent_updates.iter().any(|p| p.id == *id) {
+            continue;
+        }
+        let parent_update = not_executed_patch(id, "not_executed");
+        let _ = channel
+            .tx
+            .send(PluginFrame::Data(
+                serde_json::to_value(session_chat_response::StreamEvent::Update {
+                    message: parent_update.clone(),
+                })
+                .unwrap_or_default(),
+            ))
+            .await;
+        parent_updates.push(parent_update);
     }
 
     (tool_messages, parent_updates)

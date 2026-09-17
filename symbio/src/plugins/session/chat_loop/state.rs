@@ -355,12 +355,21 @@ impl ChatOrchestrator {
             .await;
         }
 
-        // Mark tool calls (composite) as completed
-        for tc in tools {
-            if let Some(tc_id) = &tc.id {
-                emit_status(channel, tc_id.clone(), MessageStatus::Completed).await;
-            }
-        }
+        // ToolCall 子节点**不在这里定格**。
+        //
+        // 这里只表示"模型停止输出参数"，不表示"这次工具调用结束了"：节点此后还要
+        // 走完一整段**执行窗口**（一次编译 / 一次网络请求 / 一个子智能体跑完，
+        // 往往比参数流式本身长得多）。若在此标 `Completed`，前端在整段窗口里就
+        // 没有任何「运行中」迹象——参数流完画面静止，直到结果突然出现，用户无法
+        // 判断是"还在跑"还是"卡死了"。
+        //
+        // 因此 ToolCall 的终态只由**执行方**给出，且恰好一处：
+        // - 正常分发：`tool_executor::process_tool_calls_async`（执行前 `Streaming`，
+        //   执行后 `Completed` / `WaitingUserAction`；未执行的批尾统一收口）
+        // - 恢复执行：`resume::process_tool_resume_action`（approve/retry/supply）
+        //
+        // 状态机见 `docs/node-state-streaming.md` §2.2；
+        // 「每个 ToolCall 必然到达终态」这条不变量由上面两处负责保证。
 
         // Mark the root Turn node as completed
         emit_status(channel, root_id.into(), MessageStatus::Completed).await;

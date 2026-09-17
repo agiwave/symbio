@@ -427,7 +427,16 @@ impl SessionPlugin {
             }
         }
         guard.done = true;
-        self.broadcast_status(&state, "idle").await;
+        // 正常收尾：运行态收敛为「上一轮正常结束」——这是**节点状态**，
+        // 由 `emit_session_state` 经 VDFS 变更下发（前端不再收事件）。
+        self.emit_session_state(
+            &state,
+            SessionStateChange::Finished {
+                outcome: OUTCOME_COMPLETED,
+                error: None,
+            },
+        )
+        .await;
     }
 
     pub async fn handle_abort(&self, state: &Arc<ActiveSessionState>) {
@@ -486,6 +495,16 @@ impl SessionPlugin {
             PluginFrame::Data(json!(session_chat_response::StreamEvent::Abort)),
         )
         .await;
-        self.broadcast_status(state, "idle").await;
+        // 运行态收敛为「用户中止」。中止**不是**失败：会话节点的 `outcome` 记
+        // `aborted`（提示音据此选音色），而 `status` 回到空闲——用户知道自己按了停止，
+        // 再给一个失败角标只是噪音。
+        self.emit_session_state(
+            state,
+            SessionStateChange::Finished {
+                outcome: OUTCOME_ABORTED,
+                error: None,
+            },
+        )
+        .await;
     }
 }

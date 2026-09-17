@@ -71,7 +71,10 @@
       <span v-if="isHeartbeat" class="node-heartbeat" title="系统心跳任务自动发送">♥ 心跳</span>
       <!-- 收起态展示单行摘要（深层级 / 子步骤默认收起时，让用户无需展开即知内容） -->
       <span v-if="!effectiveOpen && summaryPreview" class="node-preview">{{ summaryPreview }}</span>
-      <span v-if="statusTag" class="node-tag" :class="tagClass">{{ statusTag }}</span>
+      <span v-if="statusTag" class="node-tag" :class="tagClass">
+        <span v-if="isRunningTool" class="tag-dots"><span /><span /><span /></span>{{ statusTag
+        }}<span v-if="isRunningTool && runningDuration" class="tag-elapsed">{{ runningDuration }}</span>
+      </span>
       <span v-if="isStreaming && !isReasoning && !isToolCall" class="node-live">回复中…</span>
       <!-- 悬停操作：用户消息可编辑；失败工具可就地重试；仅 root 级节点可删除 -->
       <span class="node-actions" @click.stop>
@@ -265,8 +268,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue'
+import { computed, inject, onScopeDispose, ref, watch } from 'vue'
 import { renderMarkdownCached } from '@/composables/useMarkdown'
+import { useRunningClock } from '@/composables/useRunningClock'
 import type { ChatMessage, MessageContent } from '@/services/model'
 
 const props = defineProps<{
@@ -465,6 +469,50 @@ const isResponseText = computed(
 const isStreaming = computed(() => status.value === 'streaming')
 const isFailed = computed(() => status.value === 'failed')
 const isWaiting = computed(() => status.value === 'waiting_user_action')
+// 正在执行中的工具调用。ToolCall 默认单行折叠，头部就是用户能看到的全部，
+// 因此"正在跑"必须由这里派生的信号承担。
+const isRunningTool = computed(() => isToolCall.value && isStreaming.value)
+
+// ── 运行中计时（共享秒级时钟）──────────────────────────────
+// 「运行中」是一个**断言**，「已运行 47s」才是**判据**：工具执行可能持续几十秒到
+// 几分钟（首次语义索引、长命令、子智能体），用户需要靠它区分"还在跑"与"卡住了"。
+//
+// 锚点**只取**后端写入的 `meta.started_at`（工具开始执行那一刻），前端不自造锚点：
+// 用挂载时刻当锚点，切会话/重连后会把"已经跑了 3 分钟"显示成"刚刚开始"，
+// 恰好丢掉用户最需要的那条信息。锚点缺失（旧数据）就不显示时长——
+// 宁可不说，也不给一个看起来合理但没有依据的数。
+//
+// 时钟本体是**模块级共享单例**（`useRunningClock`）：本组件是递归组件，
+// 每实例一个定时器会让数量随会话长度线性增长。见该模块的注释。
+const { nowMs, acquire, release } = useRunningClock()
+watch(
+  isRunningTool,
+  (running) => {
+    if (running) acquire()
+    else release()
+  },
+  { immediate: true },
+)
+onScopeDispose(() => {
+  // 卸载兜底：漏 release 会让时钟永不停止（功能不错，只是白耗电）
+  if (isRunningTool.value) release()
+})
+
+/** 运行中已持续的秒数；无锚点时返回 null（不显示时长，而不是编一个） */
+const runningSeconds = computed(() => {
+  if (!isRunningTool.value) return null
+  const meta = props.node.meta as Record<string, unknown> | undefined
+  const raw = meta?.started_at
+  if (typeof raw !== 'number' || raw <= 0) return null
+  return Math.max(0, Math.floor((nowMs.value - raw) / 1000))
+})
+/** 时长文案：60s 内用秒，之后用「分m秒s」（长任务最常见的就是分钟级） */
+const runningDuration = computed(() => {
+  const s = runningSeconds.value
+  if (s === null) return ''
+  if (s < 60) return `${s}s`
+  return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`
+})
 
 const typeClass = computed(() => `type-${type.value}`)
 const statusClass = computed(() => `status-${status.value}`)
@@ -548,15 +596,27 @@ const title = computed(() => {
   if (isToolResult.value) return '响应'
   return role.value === 'assistant' ? '助手' : '消息'
 })
+// 工具调用的状态标签 —— **折叠态下唯一的运行中信号**。
+//
+// ToolCall 默认单行折叠（见 `defaultOpen`），头部就是用户能看到的全部：
+// 图标 + 名称 + 参数摘要 + 本标签。因此标签必须覆盖**全部非终态**，
+// 留空等于"什么都没发生"：
+//   · `streaming`            = 参数流式 + 工具执行（后端在整个执行窗口内持续置此态）
+//   · `waiting_user_action`  = 待用户批准 / 补充参数（`.warn` 样式此前是死代码）
+//   · `failed`               = 失败
+// 终态（`completed`）刻意不给标签：绝大多数工具调用都会成功结束，
+// 给每个成功的调用挂一个「已完成」只会把真正需要注意的状态淹掉。
 const statusTag = computed(() => {
   if (!isToolCall.value) return ''
   if (isFailed.value) return '失败'
-  if (isStreaming.value) return '调用中…'
+  if (isWaiting.value) return '待确认'
+  if (isStreaming.value) return '运行中'
   return ''
 })
 const tagClass = computed(() => {
   if (isWaiting.value) return 'warn'
   if (isFailed.value) return 'err'
+  if (isStreaming.value) return 'run'
   return 'sub'
 })
 const headClass = computed(() => ({
@@ -564,7 +624,10 @@ const headClass = computed(() => ({
   sub: isSubSession.value,
   tool: isToolCall.value,
   reasoning: isReasoning.value,
-  thinking: isReasoning.value && isStreaming.value,
+  // 标题呼吸动效（`.node-head.thinking .node-title`）：思考中 **与工具执行中** 共用。
+  // 两者都是"正在进行、内容尚未成形"的行，共用同一手法保证观感一致；
+  // 工具调用另有状态标签与动效点，三重信号叠加，而不是各自发明一套。
+  thinking: (isReasoning.value || isToolCall.value) && isStreaming.value,
 }))
 
 // ── 内容渲染 ───────────────────────────────────────────────
@@ -787,7 +850,9 @@ function highlightJsonString(s: string): string {
   font-size: 0.8rem;
   color: var(--color-text-muted, #94a3b8);
 }
-/* 思考行流式动效：标题呼吸闪烁（单行态，不展开内容） */
+/* 思考行流式动效：标题呼吸闪烁（单行态，不展开内容）。
+   思考中 **与工具执行中** 共用（`headClass.thinking`）——两者都是"正在进行、
+   内容尚未成形"的行，同一手法保证观感一致。 */
 .node-head.thinking .node-title {
   animation: think-pulse 1.4s ease-in-out infinite;
 }
@@ -1034,6 +1099,39 @@ function highlightJsonString(s: string): string {
 .node-tag.sub {
   background: var(--color-tag-sub-bg);
   color: var(--color-tag-sub-fg);
+}
+/* 工具调用「运行中」：主色 + 三点脉动 + 已运行时长。
+   三点与 `.turn-pending-dots` 同一手法（同节奏、同三点，仅尺寸缩到标签内），
+   使"正在跑"在会话流里无论出现在等待骨架还是工具行，观感都是同一件事。
+   时长是**判据**而非装饰：用户靠它区分"还在跑"与"卡住了"。 */
+.node-tag.run {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--accent-subtle-bg);
+  color: var(--accent);
+}
+.tag-dots {
+  display: inline-flex;
+  gap: 0.15rem;
+}
+.tag-dots span {
+  width: 0.25rem;
+  height: 0.25rem;
+  border-radius: 50%;
+  background: currentColor;
+  animation: turn-pulse 1.2s infinite ease-in-out;
+}
+.tag-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.tag-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+/* 时长用等宽数字，避免每秒跳动时标签宽度抖动 */
+.tag-elapsed {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
 }
 .node-tag.warn {
   background: var(--color-tag-warn-bg);

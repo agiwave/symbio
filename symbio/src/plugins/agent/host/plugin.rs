@@ -38,9 +38,10 @@ use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
     CapabilityVisitor, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, AGENT_ID, CAPABILITY_VISITOR,
-    PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_WORK, REQUIRED_PLUGINS,
-    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, AGENTS_FILE, AGENT_ID,
+    CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR,
+    PLUGIN_FILE, PLUGIN_WORK, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
+    TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -577,6 +578,17 @@ impl Plugin for AgentPlugin {
 
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         announce_configurable(&ctx, &self.config_file).await;
+
+        // 系统智能体自身的指令（`.vdfs/agent/AGENTS.md`）也是「本 agent 的修改」，
+        // 因此进**设置**而非 agent 列表：复用挂载根里那份指令节点，按设置列表口径补
+        // 真实地址（读写仍落在本插件的 AGENTS.md 上，设置页只列入口、不代管）。
+        // 走的是既有 `ConfigurableVisitor` 通道——本插件只是多交一条节点，不动 symbio_core。
+        if let Some(v) = ctx.get(CONFIG_VISITOR) {
+            let mut n = self.instruction_node().await;
+            n.path = format!("{PLUGIN_AGENT}/{AGENTS_FILE}");
+            n.ext = Some("md".to_string());
+            v.register_configurable(n).await;
+        }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

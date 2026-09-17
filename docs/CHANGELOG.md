@@ -18,6 +18,237 @@
 
 ***
 
+## 2026-09-18: 删除的两种语义分开——级联截断不再逐条通知（S20.2）
+
+**性质：修复**。修掉一个一直存在的**语义混淆**，顺带把「删除一条早期消息要发上百条
+变更」这件事消除。
+
+### 为什么
+
+`deleted` 这一个值此前同时被用来表达两件不同的事：
+
+| 场景 | 真实语义 | 被删数量 |
+|---|---|---|
+| 工具调用恢复（`resume` 的 `Delete` 帧） | **这一个**节点没了，后面的留着 | 1–N（一棵子树） |
+| 删除某条消息（`chat/delete_message`） | 从这里**到列表末尾**全没了 | 可达上百 |
+
+后果有两个，都不轻：
+
+1. **消费者无从分辨**。前端收到的每一条都长得一样，只能靠外部知识去猜是哪一种。
+   猜错的代价是实打实的：按级联处理 → 重试一轮会把后面的会话全删掉；
+   按单条处理 → 删一条消息后列表尾部残留一堆后端已不存在的节点。
+2. **代价与历史长度线性相关**。删一条早期消息要发 N 条变更，而 VDFS 与流式视图
+   互不校验——漏一条就永久不一致。
+
+### 变更
+
+- **`symbio_core/vdfs_provider.rs`**：新增 `VDFS_CHANGE_TRUNCATED`——`path` 所指节点
+  **及其之后的全部兄弟**已移除。与 `deleted` 的分界写在常量文档里。
+  没有选择「在 `deleted` 上挂 `cascade: bool`」：那会让「是哪种删除」变成两个字段
+  必须一起读才正确，正是本仓库反复否决的「状态 + 平行标志位」。
+- **`session/plugin.rs`**：`emit_message_deleted`（逐条）删除，改为
+  `emit_transcript_truncated`（一条）。逐节点删除的唯一来源收敛到 `resume` 的
+  `StreamEvent::Delete`（由消费循环直接转译）。
+- **`session/handlers.rs`**：`invoke_delete_message` 改发**一条** `truncated`；
+  目标消息不存在时**一条变更都不发**（否则消费者会从一条并不存在的节点起截断，
+  把整个列表清空）。
+- **前端 `stores/sessions.ts`**：新增 `removeFrom(sessionId, messageId)`——按 `seq`
+  取「该节点及其后」。判据与后端 `messages.drain(i..)` **同源**（两侧都按
+  `seq` 升序），因此是同一个集合；按**排序后的位置**切片而不是比较 `seq` 大小，
+  这样缺 `seq` 的旧数据也正确。
+  `deleteMessage` 改为**本地先行级联**：UI 立即收敛，不等后端把被删的每一条逐个
+  通知回来；随后用权威 `deleted_ids` 幂等对齐；写后端失败则**回滚**本地改动
+  （保持「没落库就不显示已删除」）。`removeMessageById` 的存在性检查提到对象展开
+  之前——截断会引发一串针对已删节点的冗余通知，每次白拷贝两份对象太亏。
+- **前端 `vdfsTranscriptSync.ts`**：`truncated` → `removeFrom`；`deleted` 仍只删一项。
+
+### 验证
+
+- 后端 +3：级联只发一条 `truncated`（不是 N 条 `deleted`）、删末尾一条走同一语义、
+  目标不存在时零变更。
+- 前端 +8：级联范围（从用户消息 / 从 Turn / 删末尾）、锚点缺失不截断、
+  缺 `seq` 的旧数据按位置截断、`deleteMessage` 的权威对齐与失败回滚、
+  `truncated` 与 `deleted` 互不污染（后者是工具恢复的回归护栏）。
+- 门禁 21/21。
+
+***
+
+## 2026-09-18: 工具调用的「运行中」跨越执行窗口——标签 + 动效 + 已运行时长
+
+**性质：修复（S20.1）**。修掉 S20 交付时留下的一个**显示层缺口**。
+
+### 为什么
+
+S20 把**会话**运行态搬到了节点上，但**工具调用**的运行态断在执行窗口之外：
+`finalize_assistant_turn` 在 LLM 流结束时就把 ToolCall 标成 `Completed`。
+而那一刻只是"参数齐了"，工具**还没开始跑**。
+
+于是用户看到的是：参数流式期间有「调用中…」标签 → 流一结束标签消失 → 之后整段执行
+（一次编译、一次网络请求、一个子智能体跑完，往往是最长的一段）**画面静止、没有任何
+运行迹象** → 结果突然出现。窗口越长，这段静默越长，用户无法判断是"还在跑"还是
+"卡死了"。会话级活动文字（`正在调用 <name>…`）同样被那条 `Completed` 提前清空。
+
+### 变更
+
+- **`finalize_assistant_turn` 不再定格 ToolCall**：参数齐 ≠ 调用结束。终态只由执行方给出。
+- **执行前广播运行中**：`tool_executor::process_tool_calls_async` 在 `execute_tool_async`
+  之前置 `Streaming` + `meta.started_at`；`resume` 的 approve / retry / supply
+  （三个真正重跑工具的 action）同样处理。
+- **"每个 ToolCall 必然到达终态"成为不变量**：被 PreToolUse 拦下 / 用户中止 /
+  交互中断而**未执行**的批尾，在函数末尾统一收口为 `Completed` +
+  `meta.failure_kind = "not_executed"`（不标 `Failed`：未轮到执行不是错误，标 `Failed`
+  会渲染 ⚠ 并让 `get_context_messages` 过滤掉父节点、留下孤儿结果子节点）。
+- **前端状态标签覆盖全部非终态**：`运行中`（主色 + 三点脉动 + 已运行时长）/
+  `待确认`（`.warn`，此前是**死代码**）/ `失败`；终态刻意不给标签——绝大多数调用都会
+  成功结束，给每个成功的调用挂「已完成」只会把真正需要注意的状态淹掉。
+- **标题呼吸动效**扩展到工具执行中（与「思考中…」同一手法）。
+- **已运行时长**（`运行中 · 47s`，超过 60s 用 `2m05s`）：锚点取后端写入的
+  `meta.started_at`，**前端不自造锚点**——用挂载时刻当锚点，切会话/重连后会把
+  "已经跑了 3 分钟"显示成"刚刚开始"，恰好丢掉用户最需要的那条信息；
+  锚点缺失（旧数据）就不显示时长，宁可不说也不给一个没有依据的数。
+- **新增 `composables/useRunningClock.ts`**：全应用共享的秒级时钟，引用计数归零即停表。
+  `MessageNode` 是递归组件，每实例一个 `setInterval` 会让定时器数量随会话长度线性增长。
+
+### 不做
+
+- **不新增状态词**：`streaming` 同时覆盖「参数流式」与「执行」两段——对用户而言
+  "这次调用还没结束"是同一件事；新增词会牵动 `status-*` CSS 类名（漏改不报错、
+  不失败，只会让动画静默消失）。
+- **不自动展开运行中的工具调用**：会与用户的手动折叠选择打架；折叠态下的
+  标签 + 动效点 + 呼吸标题已是足够信号。
+
+### 文档
+
+- [`node-state-streaming.md`](../symbio/src/plugins/session/docs/node-state-streaming.md)
+  新增 §5.3.1（`streaming` 覆盖两段的原因、终态来源表、`meta.started_at` 的取舍）、
+  S20.1 迁移表，不变量增至 12 条，验收清单 #3 由「不变」升级为「更强」。
+
+### 门禁
+
+- 前端 +4 用例（运行中标签与动效点、时长两种格式、锚点缺失不显示时长、
+  `待确认` 与终态不给标签）；`vitestTests` 基线 160 → 164。
+
+***
+
+## 2026-09-18: 流模式改为「节点状态」驱动——会话运行态上节点，前端不再消费事件序列
+
+
+**性质：架构调整（S20）**。用户可见行为等价，但**正确性不再依赖事件到达顺序**。
+
+### 为什么
+
+会话的实时显示原先基于**事件流**（`kind = "session"` 的 `Status{busy|idle}` / `Abort` /
+`Error`），前端 `switch (event.type)` 逐类处理。代价是正确性依赖顺序，而顺序不是免费
+保证的——最直白的证据就是 `eventBus.ts` 里那段「切会话防乱序」的 `replayBuffer`：
+**一段只为修顺序而存在的机制，说明模型本身选错了**。
+
+### 变更
+
+- **会话运行态成为会话节点的属性**：`status`（`working` / `active` / `failed`）
+  + `attributes.outcome`（`completed` / `aborted` / `failed`）+ `attributes.error`。
+  状态类变更（`updated`）**必带全量节点视图**，前端**零回读**。
+- **`failed` 是独立状态**，取代「`active` + `last_failed` 布尔」：判据从两处变一处。
+- **修掉一处有损映射**：`completed` 与「未标注」曾被后端都映射成 `active`，消费端必须
+  把 `active` **猜回** `completed`；现在消息状态原样透传（`active` 仅作旧数据别名）。
+- **前端按地址分派**：`sessionRouteOf(地址)`（纯函数），**没有 `switch (event.type)`**。
+- **删除的顺序机制**：`sessionBusWatcher.ts`（整模块）、`eventBus.replayBuffer`、
+  `eventBus.fetchPendingSnapshot`、`MainLayout` 的 `startSessionBusWatcher()` 接线。
+- **错误条改由节点表派生**：有失败节点则隐藏（原先在事件到达时判定，隐含"那一刻恰好
+  能看到失败节点"，两条通道先后无法保证）。
+- **提示音改由状态迁移触发**：`working → 非 working` 的迁移 + `outcome` 选音色，
+  不再靠"谁先到"区分中止与失败。
+- **`kind = "session"` 帧保留**：进程内消费者（子会话审批透传、以 `Status idle` 判定
+  子会话结束）仍依赖它，前端不再订阅。
+
+### 不做
+
+- **不合并 `streaming` / `working`**：会连带改 `status-*` CSS 类名，而漏改不报错、
+  不失败，只会让流式动画静默消失。收益（少记一个词）远小于风险。
+- **工具调用请求不另立地址**（S21）：`read(.../消息/<tc-id>)` 的正文就是请求体，
+  子节点就是响应——另立地址会让同一份参数存两处。
+
+### 文档
+
+- 新增 [`node-state-streaming.md`](../symbio/src/plugins/session/docs/node-state-streaming.md)：
+  节点分类与状态机、传输契约、顺序无关性（含三条残留假设）、前端消费模型、
+  11 项「体验等价清单」、10 条不变量。
+- [ADR-015](./DECISIONS.md) 记录决策与后果；[DATA_FLOW.md](./architecture/DATA_FLOW.md)
+  链路二 #6 由「流式帧推送」改写为「前端显示由节点状态驱动」。
+
+### 门禁
+
+- 后端 +6 单测（`SessionRuntime` 投影 / `session_node` / `session_change` /
+  `MessageStatus` 词表与 serde 一致）；前端 +4（`sessionRouteOf` 分派、节点载荷零回读、
+  状态迁移驱动提示音、`failed` 作为独立状态）。
+
+***
+
+## 2026-09-18: 系统智能体自身的 `AGENTS.md` 入口从 agent 列表移到设置页
+
+**性质：前端可见行为调整**。地址不变（`.vdfs/agent/AGENTS.md` 照旧可达、读写不变），
+只是**不再出现在 agent 挂载根的列表里**。
+
+### 变更
+- **挂载根 = 装进来的智能体清单**。此前 `.vdfs/agent/AGENTS.md` 排在列表**最前**，
+  用「排最前」来暗示它不是一个包——但列表本身没有语义，读者仍会把它读成某个 bundle。
+  现在它整条移出列表，挂载根与 session / model 列表同口径：**只有装进来的东西**。
+- **入口归设置页**：`AgentPlugin::traverse` 经既有 `ConfigurableVisitor` 通道补一条
+  节点（`instruction_node()` 改 `path` 后注册），复用挂载根里那份指令节点，
+  不改 `symbio_core`、不新增通道。
+- `instruction_node()` 由 `async fn` 私有改为 `pub(crate) async fn`（`list` / `stat` /
+  `traverse` 三处共用同一份形状）。
+
+### 门禁
+- 新增 `mount_root_lists_only_installed_agents`：断言挂载根只列 bundle，
+  防止「排最前」这种隐式约定日后被重新引入。
+
+***
+
+## 2026-09-18: 修复本地嵌入模型 tract 加载失败，恢复 `codebase_search` 工具
+
+**性质：修复 + 工具面恢复**。模型文件本身未变，仍是 24 MB 的 int8 `model.onnx`。
+
+### 修复：嵌入服务不再静默降级为 Noop
+启动日志曾报 `Failed analyse for node #203 "/Unsqueeze" AddDims`，
+`LocalEmbeddingService` 初始化失败后回退 `NoopEmbeddingService`，语义搜索被禁用。
+
+模型是完好的（`onnx.load()` 通过，opset 11 / 527 节点），问题在 tract 侧配置，
+两条约束由此确立（已写入 `local.rs` 注释与 ADR-014 修订小节）：
+
+- 必须 `.with_ignore_value_info(true)`：该模型是 ONNX Runtime 动态量化导出，图里带
+  `value_info`，把中间张量声明成 `batch_size`/`sequence_length` 符号；tract 拿输入 fact
+  的 `1` 与之 unify 时报 `Impossible to unify Sym(batch_size) with Val(1)`。
+  这也是「固定 seq=512」兜底无效的原因（照报同一个错）。
+- 动态长度路径不要自建 `SymbolScope` + `set_input_fact`：tract 0.23.7 会触发
+  `ProofCacheSession scope_id mismatch` 断言（panic）。不覆盖输入 fact 即可。
+
+顺带修掉一个静默失效坑：`outlet_label` 对图输入返回**空串**，输入名改取
+`model.node(outlet.node).name`，否则三个输入全部落进「未知输入名」分支而返回 `None`。
+
+**精度实证**（同一句「你好，世界」，7 token，CLS + L2 归一化）：
+
+| 路径 | vs ONNX Runtime 余弦相似度 |
+|---|---|
+| 动态长度（默认） | **0.999961** |
+| 固定 seq=512（兜底） | 0.994482 |
+
+兜底路径精度下降是因为补位改变了 `DynamicQuantizeLinear` 的 per-tensor scale，
+故固定长度只作兜底，不作默认。
+
+### 恢复：`codebase_search` 重新挂回工具清单
+该工具在 `30ef62c`（"temporarily-disable-broken-codebase-search"）被摘出
+`tool_impls`、降级为未使用的局部变量。现随嵌入服务修复一并恢复，
+并加了一条断言工具清单的回归测试，避免再次被静默摘掉。
+
+### 门禁
+- `BASELINE.rustTests` 657 → 660（新增 3 个测试）。
+
+### 实证
+- `cargo +1.93.1 test --lib` **660/660 通过**。
+- `cargo clippy -p symbio --lib`：1 warning，位于 `plugins::model::message_builder`（既有，未新增）。
+
+***
+
 ## 2026-09-17: 质量收敛——迁移与持久化修复、门禁收紧、吞错清理
 
 **性质：修复 + 门禁收紧**。协议、工具面、前端行为均无变化。
