@@ -5,8 +5,16 @@
 use super::*;
 // trait 方法（list/stat/read/write/delete/watch/unwatch）需 trait 在作用域内才可解析
 use crate::symbio_core::vdfs_provider::VdfsProvider;
-// 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
-use crate::plugins::session::test_dir;
+// 每例独占存储根；guard 在插件之后释放，失败时也会清理。
+fn fixture() -> (tempfile::TempDir, SessionPlugin) {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        crate::symbio_core::PluginDir::at(dir.path(), "session"),
+    );
+    (dir, plugin)
+}
 
 // ==================== VDFS provider ====================
 
@@ -18,7 +26,7 @@ fn vctx() -> vdfs::VdfsContext {
 /// （见 `traverse` 里的 `register_vdfs_provider(PLUGIN_SESSION, ..)`）
 #[tokio::test]
 async fn vdfs_self_description_has_no_mount() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
     assert_eq!(p.label(), Some("会话"));
     assert_eq!(p.icon(), Some("session"));
     // 顺序由本 provider 的 order() 自持（**单一真相源**），
@@ -34,28 +42,15 @@ async fn vdfs_self_description_has_no_mount() {
     assert_eq!(types[0].title, "会话");
 }
 
-/// 测试用会话 id：**每个用例唯一**。
-///
-/// 会话存储目录取自全局 homedir（`<本插件目录>`）——单元测试
-/// 不隔离它（`test_dir()` 只重定向配置文件，不重定向 store）。于是写过
-/// 会话的用例会在真实目录里留下文件，下一个复用同一 id 的用例就读到了
-/// 别人的数据（`list` 因此不再 NotFound，且结果随并行调度顺序漂移）。
-/// 这里给每个用例一个进程内只出现一次的 id，从根上消除串扰。
+// 根目录已隔离，id 只需在本例内稳定。
 fn unique_id(tag: &str) -> String {
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("{tag}-{}-{n}", std::process::id())
-}
-
-/// 删掉测试自己造的会话目录（不留残留给后续运行）
-fn cleanup_session_dir(id: &str) {
-    let _ = std::fs::remove_dir_all(SessionPlugin::session_storage_dir().join(id));
+    tag.to_owned()
 }
 
 /// 不存在的会话：list / stat 一律 NotFound（不做静默降级）
 #[tokio::test]
 async fn vdfs_list_unknown_session_is_not_found() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
     let id = unique_id("no-such-session");
     assert!(p.list(&vctx(), &id).await.is_err());
     assert!(p.stat(&vctx(), &id).await.is_err());
@@ -67,7 +62,7 @@ async fn vdfs_list_unknown_session_is_not_found() {
 /// 少了它，前端刚乐观置上的「运行中」会被下一次变更立刻改回空闲。
 #[tokio::test]
 async fn vdfs_stat_session_is_dir_view_with_list_shape() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
     let id = unique_id("stat-view");
     let mut s = Session::new(&id);
     s.updated_at = 1_700_000_000;
@@ -88,15 +83,13 @@ async fn vdfs_stat_session_is_dir_view_with_list_shape() {
         vdfs::VDFS_STATUS_ACTIVE,
         "空闲是显式状态值，不是空串"
     );
-
-    cleanup_session_dir(&id);
 }
 
 /// 实时：`watch` 登记的 sink 在 `notify_change` 时**同步**收到变更；
 /// `unwatch` 按引用计数摘除（严格配对，归零才真正停投）
 #[tokio::test]
 async fn vdfs_watch_forwards_session_changes() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
     let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
         let _ = tx.send(c);
@@ -142,7 +135,7 @@ async fn vdfs_watch_forwards_session_changes() {
 /// ——否则列表底部会多出一个「设置」项。可达性不受影响：`stat` / `read` 照常。
 #[tokio::test]
 async fn config_document_is_reachable_but_not_a_session_list_item() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
 
     // 可达：按真实文件名 stat / read
     let node = p.stat(&vctx(), PLUGIN_FILE).await.unwrap();
@@ -175,7 +168,7 @@ async fn config_document_is_reachable_but_not_a_session_list_item() {
 /// 配置写入：校验先于一切（字段级错误），坏值不会改动内存
 #[tokio::test]
 async fn config_write_validates_before_applying() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
     let before = p.config.read().await.max_messages;
     let bad = vdfs::VdfsContent::text("", r#"{"max_messages": 1}"#);
     match p.write(&vctx(), PLUGIN_FILE, &bad).await {
@@ -191,7 +184,7 @@ async fn config_write_validates_before_applying() {
 /// 写后读得回、**不可删除**（与 work / agent 的记忆层同一内核约定）。
 #[tokio::test]
 async fn memory_is_a_read_write_file_inside_the_session() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
     let id = unique_id("memory");
     p.save_session(&Session::new(&id)).await.unwrap();
     let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
@@ -252,15 +245,13 @@ async fn memory_is_a_read_write_file_inside_the_session() {
 
     // ⑥ 记忆是文件：没有子项；更深层级也不解析
     assert!(p.list(&vctx(), &path).await.is_err());
-
-    cleanup_session_dir(&id);
 }
 
 /// 写入闸门取自 `SessionConfig`：配小 → 同一个写入被**拒绝**（而不是截断），
 /// 且被拒绝的写入不得留下半截内容。
 #[tokio::test]
 async fn memory_write_respects_the_configured_gate() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
     *p.config.write().await = SessionConfig {
         memory_max_bytes: 4,
         ..SessionConfig::default()
@@ -280,14 +271,12 @@ async fn memory_write_respects_the_configured_gate() {
         Some(""),
         "被拒绝的写入不得留下半截内容"
     );
-
-    cleanup_session_dir(&id);
 }
 
 /// 不存在的会话：记忆路径一律 NotFound（不为幽灵会话造一份记忆）
 #[tokio::test]
 async fn memory_of_unknown_session_is_not_found() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
     let id = unique_id("memory-ghost");
     let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
 
@@ -302,7 +291,7 @@ async fn memory_of_unknown_session_is_not_found() {
 /// 记忆写入经订阅表投递变更（与 `list` 的节点地址同一坐标系：`<id>/AGENTS.md`）
 #[tokio::test]
 async fn memory_write_notifies_subscribers() {
-    let p = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let (_dir, p) = fixture();
     let id = unique_id("memory-notify");
     p.save_session(&Session::new(&id)).await.unwrap();
     let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
@@ -324,6 +313,4 @@ async fn memory_write_notifies_subscribers() {
         "变更路径与 list 返回的节点地址同源"
     );
     assert_eq!(got.change, vdfs::VDFS_CHANGE_CREATED, "首次写入是 created");
-
-    cleanup_session_dir(&id);
 }
