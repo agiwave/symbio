@@ -822,35 +822,99 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /**
-   * 从前端局部状态中精确移除单条消息（仅本地，不调用后端）。
+   * 从某条消息起**截断到列表末尾**：移除「目标 + 其后全部」。
    *
-   * 用于工具调用 resume 流程：后端广播 `Delete` 事件通知前端删掉旧的
-   * pending/failed 子节点（随后会广播新的 Update/Append 写入新子节点）。
-   * 与 `removeMessages` 不同，此处仅处理单条，且不触发 message_count 同步
-   * ——因为新子节点会立即顶上，总数应保持不变。
+   * ## 为什么前端要自己算这段区间
+   *
+   * 后端 `chat/delete_message` 的语义就是「在已排序列表里删掉目标及其之后的所有
+   * 消息」（`handlers.rs::invoke_delete_message` 的 `messages.drain(i..)`）。前端若
+   * 只删这一条、再等后端把被删的每一条逐个通知回来，就把一次确定的**区间删除**拆成了
+   * N 次通知；而且只要漏掉其中任意一条，列表尾部就会残留一个后端已不存在的节点，
+   * **没有任何机制会纠正它**（VDFS 与流式视图互不校验）。
+   *
+   * 判据与后端**同源**：两边都按 `seq` 升序排（后端 `ordered()` / `get_messages()`
+   * 用 `seq.unwrap_or(i64::MAX)`；本 store 用 `seq ?? timestamp`），因此「取目标及其
+   * 之后的全部」在两侧是同一个集合。这里按**排序后的位置**切片而不是直接比较 `seq`
+   * 大小：两种写法在有 `seq` 时等价，而位置切片在缺 `seq` 的旧数据上也仍然正确
+   * （不需要额外假设 `seq` 一定存在）。
+   *
+   * 锚点不在本地（会话没加载 / 已被别处删掉）时**什么都不删**并返回空数组——
+   * 绝不拿一个并不存在的锚点去截断整个列表。
+   *
+   * @returns 实际被移除的消息（调用方据此回滚 / 记日志）
    */
-  function removeMessageById(sessionId: string, messageId: string) {
-    if (!sessionId || !messageId) return
+  function removeFrom(sessionId: string, messageId: string): ChatMessage[] {
+    if (!sessionId || !messageId) return []
+    const cur = sessionMessages.value[sessionId]
+    if (!cur || !cur[messageId]) return []
+    const orderedIds = getSessionMessages(sessionId).map((m) => m.id)
+    const anchorIdx = orderedIds.indexOf(messageId)
+    if (anchorIdx < 0) return []
+
+    const removed: ChatMessage[] = []
+    const rest = { ...cur }
+    for (const id of orderedIds.slice(anchorIdx)) {
+      const m = rest[id]
+      if (!m) continue
+      delete rest[id]
+      removed.push(m)
+    }
+    if (removed.length === 0) return []
+    commitMessages({ ...sessionMessages.value, [sessionId]: rest })
+    return removed
+  }
+
+  /** 把一批消息放回局部状态（`removeFrom` 的回滚口，仅在写后端失败时使用） */
+  function restoreMessages(sessionId: string, msgs: ChatMessage[]) {
+    if (msgs.length === 0) return
     const next = { ...sessionMessages.value }
     const cur = { ...(next[sessionId] || {}) }
-    if (!cur[messageId]) return
-    delete cur[messageId]
+    for (const m of msgs) cur[m.id] = m
     next[sessionId] = cur
     commitMessages(next)
   }
 
   /**
-   * 删除单条会话消息（后台落库 + 前端精确移除）。
+   * 从前端局部状态中精确移除单条消息（仅本地，不调用后端）。
    *
-   * 后端会从已排序列表中删除目标消息及其之后所有消息，并返回被删 id 列表；
-   * 前端据此精确移除本地状态，最后同步 list 的 message_count。
+   * 用于**逐节点**删除：工具调用恢复时后端广播 `deleted`，前端删掉旧的
+   * pending/failed 子节点（随后会广播新的 `updated` / `created` 写入新子节点）。
+   * 与 `removeFrom` 的区别是它只删**这一个**节点，与顺序无关——正是 `deleted`
+   * 与 `truncated` 两种变更语义的分界。
+   *
+   * 不触发 message_count 同步：新子节点会立即顶上，总数应保持不变。
+   */
+  function removeMessageById(sessionId: string, messageId: string) {
+    if (!sessionId || !messageId) return
+    const cur = sessionMessages.value[sessionId]
+    // 存在性检查放在任何对象展开**之前**：截断删除会连带引发一串针对已删节点的
+    // 冗余通知，每一次都白拷贝两份对象就太亏了（这是幂等收口的常见路径）。
+    if (!cur || !cur[messageId]) return
+    const next = { ...sessionMessages.value }
+    const rest = { ...cur }
+    delete rest[messageId]
+    next[sessionId] = rest
+    commitMessages(next)
+  }
+
+  /**
+   * 删除单条会话消息（连同其后续所有消息）。
+   *
+   * 前端**自己**做这段级联（`removeFrom`，判据与后端同源），而不是等后端把被删的
+   * 每一条逐个通知回来：UI 立即收敛，且不依赖任何一条通知的送达。
+   * 随后用后端返回的权威 `deleted_ids` 做一次幂等对齐——本地推算若因锚点缺失等原因
+   * 偏窄，这里补齐。写后端失败则回滚本地改动，保持「没落库就不显示已删除」。
    */
   async function deleteMessage(sessionId: string, messageId: string): Promise<void> {
+    const removed = removeFrom(sessionId, messageId)
+    syncMessageCount(sessionId)
     try {
       const res = await apiDeleteMessage(sessionId, messageId)
       removeMessages(sessionId, res.deleted_ids)
     } catch (e) {
       logger.error('[sessions]', 'deleteMessage 失败', e)
+      restoreMessages(sessionId, removed)
+      syncMessageCount(sessionId)
       throw e
     }
     syncMessageCount(sessionId)
@@ -1132,6 +1196,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     dropSessionState,
     hydrateFromHistory,
     removeMessageById,
+    removeFrom,
     // 运行模式（auto / interactive）：写入统一走级联选项机制（metadata 补丁），
     // store 只提供读取 + 本地镜射，避免第二条写入路径。
     getSessionMode,

@@ -99,13 +99,18 @@ const BASELINE = {
   //   `session_node` / `session_change`）与 `MessageStatus` 词表对齐的回归测试
   // 666 → 668：S20.1——中止批次必然收口（无节点停在 `Streaming`）、
   //   未执行的终态是 `Completed` 而非 `Failed`
-  rustTests: 668,
+  // 668 → 671：S20.2——级联删除只发一条 `truncated`（不是 N 条 `deleted`）、
+  //   删末尾一条走同一语义、目标不存在时一条变更都不发
+  rustTests: 671,
   vitestFiles: 19,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态
   // 160 → 164：工具调用运行态——「运行中」标签 + 动效点 + 已运行时长、
   //   `waiting_user_action` 的「待确认」标签、终态不给标签
-  vitestTests: 164,
+  // 164 → 172：S20.2——`removeFrom` 的级联范围与边界（删末尾 / 锚点缺失 /
+  //   缺 seq 的旧数据）、`deleteMessage` 的失败回滚与权威列表对齐、
+  //   `truncated` 与 `deleted` 两种删除语义不互相污染
+  vitestTests: 172,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */

@@ -130,11 +130,19 @@ impl SessionPlugin {
     // 因此这三条路由各有一个「只发变更」的入口：与 `emit_message_patch` 的区别
     // 只在**不发前端帧**，发射规则（载荷宽度、地址拼法）完全同源。
 
-    /// 删除单条消息 → `deleted`
-    pub(crate) fn emit_message_deleted(&self, session_id: &str, mid: &str) {
+    /// 从某条消息起**截断到列表末尾** → `truncated`（一条，而不是 N 条 `deleted`）。
+    ///
+    /// 这是本插件发出的**唯一**一种消息级删除变更。另一种删除语义（`deleted`：
+    /// 「**这一个**节点没了」）来自工具调用恢复流程，由消费循环直接从
+    /// `StreamEvent::Delete` 转译（见 `orchestrator::consume`）——那是按子树
+    /// 逐节点删，与「从这里到末尾」不是同一件事，因此不共用入口。
+    ///
+    /// 逐节点下发截断的代价：删一条早期消息会连带删掉上百条，变更数会与历史
+    /// 长度线性相关。见 [`vdfs::VDFS_CHANGE_TRUNCATED`] 的说明。
+    pub(crate) fn emit_transcript_truncated(&self, session_id: &str, mid: &str) {
         self.change_subs.notify(&vdfs::VdfsChange::new(
             message_path(session_id, mid),
-            vdfs::VDFS_CHANGE_DELETED,
+            vdfs::VDFS_CHANGE_TRUNCATED,
         ));
     }
 

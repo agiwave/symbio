@@ -8,6 +8,8 @@
  * 2. **逐路径串行**：`created` 的回读与紧随其后的 `appended` 不得竞争——回读
  *    挂起期间到达的增量必须等到回读落地之后再拼接，否则会被旧快照覆盖（静默丢字）。
  * 3. **非转写路径一律不碰**（子会话 / 工作目录 / 会话清单的变更与本模块无关）。
+ * 4. **两种删除语义不可混淆**：`deleted` 只删一个节点（工具调用恢复删旧子节点，
+ *    后面的节点必须留着）；`truncated` 删「该节点及其后全部」，区间由本地按 `seq` 算。
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -70,6 +72,7 @@ import {
   VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_CREATED,
   VDFS_CHANGE_DELETED,
+  VDFS_CHANGE_TRUNCATED,
   VDFS_CHANGE_UPDATED,
   VDFS_EXT_MESSAGE,
   sessionRouteOf,
@@ -273,7 +276,7 @@ describe('变更 → store', () => {
     expect(msg.error).toBe('上游 429')
   })
 
-  it('deleted 精确移除；落在 `消息` 目录上则清空整份转写', async () => {
+  it('deleted 精确移除**单个**节点（工具调用恢复：删旧子节点，与顺序无关）', async () => {
     const store = useSessionsStore()
     for (const id of ['m1', 'm2']) {
       emit({
@@ -286,6 +289,9 @@ describe('变更 → store', () => {
     await drain()
     expect(store.getSessionMessages(SID)).toHaveLength(2)
 
+    // 删中间/靠前的节点**不得**连带删掉它之后的节点——工具调用恢复删的是
+    // 子树里的旧子节点，后面还有父节点的最终回答。这正是 deleted 与 truncated
+    // 必须分开的原因（曾经两者共用 deleted，前端无从分辨）。
     emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_DELETED })
     await drain()
     expect(store.getSessionMessages(SID).map((m) => m.id)).toEqual(['m2'])
@@ -293,6 +299,54 @@ describe('变更 → store', () => {
     emit({ path: vdfsMessagesAddr(SID), change: VDFS_CHANGE_DELETED })
     await drain()
     expect(store.getSessionMessages(SID)).toHaveLength(0)
+  })
+
+  it('truncated 由本地按 seq 取区间：目标及其后全部移除，之前的一条不动', async () => {
+    const store = useSessionsStore()
+    for (const [id, seq] of [
+      ['m1', 1],
+      ['m2', 2],
+      ['m3', 3],
+    ] as const) {
+      emit({
+        path: vdfsMessageAddr(SID, id),
+        change: VDFS_CHANGE_CREATED,
+        node: node({ name: id, seq }),
+        content: id,
+      })
+    }
+    await drain()
+    expect(store.getSessionMessages(SID)).toHaveLength(3)
+
+    // **一条**变更即可收敛整段区间：后端不再逐条通知被删的每一个节点
+    emit({ path: vdfsMessageAddr(SID, 'm2'), change: VDFS_CHANGE_TRUNCATED })
+    await drain()
+
+    expect(
+      store.getSessionMessages(SID).map((m) => m.id),
+      '截断范围由本地按 seq 算，不等后端把 m2/m3 各通知一遍',
+    ).toEqual(['m1'])
+  })
+
+  it('truncated 锚点不在本地时什么都不删（不拿不存在的锚点截断整个列表）', async () => {
+    const store = useSessionsStore()
+    for (const [id, seq] of [
+      ['m1', 1],
+      ['m2', 2],
+    ] as const) {
+      emit({
+        path: vdfsMessageAddr(SID, id),
+        change: VDFS_CHANGE_CREATED,
+        node: node({ name: id, seq }),
+        content: id,
+      })
+    }
+    await drain()
+
+    emit({ path: vdfsMessageAddr(SID, '不存在'), change: VDFS_CHANGE_TRUNCATED })
+    await drain()
+
+    expect(store.getSessionMessages(SID).map((m) => m.id)).toEqual(['m1', 'm2'])
   })
 
   it('非转写路径的变更一律不碰 store', async () => {

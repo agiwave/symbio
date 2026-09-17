@@ -46,6 +46,17 @@
  * （`VdfsChange.node` / `.content`），因此常规路径**零回读**——这正是 VDFS
  * 承载转写不比既有专用通道更贵的原因。仅当 provider 未附带时才回退
  * `stat` + `read`（通用消费端的正确降级，不假设任何 provider 的行为）。
+ *
+ * ## 删除有**两种**语义，不能合并
+ *
+ * | 变更 | 含义 | 本地动作 |
+ * |---|---|---|
+ * | `deleted` | **这一个**节点没了（工具调用恢复时删旧子节点） | 移除一项 |
+ * | `truncated` | 该节点**及其之后全部**没了（删除某条消息） | 按 `seq` 取区间移除 |
+ *
+ * 两者的区别不是粒度而是**语义**：前者与顺序无关，后者描述的是一段区间。若都用
+ * `deleted` 逐条下发，消费者既无法分辨，又要为删一条早期消息收下上百条通知——
+ * 因此后端发一条 `truncated`，区间由本地按 `seq` 算（与后端 `drain(i..)` 同源）。
  */
 
 import { subscribe as busSubscribe, type BusEvent } from './eventBus'
@@ -54,6 +65,7 @@ import {
   VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_CREATED,
   VDFS_CHANGE_DELETED,
+  VDFS_CHANGE_TRUNCATED,
   VDFS_CHANGE_UPDATED,
   VDFS_EVENT_KIND,
   VDFS_STATUS_ACTIVE,
@@ -169,7 +181,17 @@ export async function drain(key?: string): Promise<void> {
 async function applyChange(change: VdfsChange, sessionId: string, messageId: string): Promise<void> {
   const store = useSessionsStore()
 
+  if (change.change === VDFS_CHANGE_TRUNCATED) {
+    // 尾部截断：「该节点及其后全部」都没了。**由本地算区间**，不等后端把被删的
+    // 每一条逐个通知回来（那是 N 次通知，且漏一条就永久残留一个后端不存在的节点）。
+    // 判据是 store 里的 `seq` 顺序，与后端 `messages.drain(i..)` 同源。
+    store.removeFrom(sessionId, messageId)
+    return
+  }
+
   if (change.change === VDFS_CHANGE_DELETED) {
+    // 逐节点删除（工具调用恢复时删掉旧的 pending/failed 子节点）——**只删这一个**，
+    // 与顺序无关。这与 `truncated` 的分界是语义上的，不是粒度上的。
     store.removeMessageById(sessionId, messageId)
     return
   }

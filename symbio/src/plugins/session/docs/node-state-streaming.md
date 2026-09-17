@@ -163,7 +163,12 @@ S16–S19 已经把**转写（消息）**整体迁到 VDFS：读走一次 `vdfs/
 | `created` | 新节点出现（新会话 / 新消息） | `node` + `content` | 插入（**零回读**） |
 | `appended` | 节点正文尾部追加（流式 token） | **仅** `delta` | 尾部拼接（**零回读**） |
 | `updated` | 状态迁移 / 全量替换（**含会话运行态**） | `node` + `content` | 就地替换（**零回读**） |
-| `deleted` | 节点消失 / 转写清空 | — | 移除 |
+| `deleted` | **这一个**节点消失（工具恢复删旧子节点）/ 转写清空 | — | 移除这一项 |
+| `truncated` | 该节点**及其之后全部**消失（删除某条消息） | — | 按 `seq` 取「该节点及其后」移除 |
+
+`deleted` 与 `truncated` 是两种语义而不是两种粒度：前者与顺序无关（删完后面还有
+父节点的最终回答），后者描述的是一段区间。合并成一个值会让消费者无从分辨，且
+截断的代价与历史长度线性相关——见 `vdfs-session-messages.md` §2.2。
 
 **载荷宽度按频率分配**：`appended` 每帧都发 → 只带增量；`updated` 每轮数次 → 带全量。
 若 `updated` 不带节点视图，消费者就得回读 `vdfs/stat`——一次状态迁移一次 IPC，
@@ -193,6 +198,7 @@ attributes.error   = "<面向用户的错误短消息>"              // 仅 fail
 | `updated`（含会话态） | **是** | **是** | 携带全量节点视图；同一节点的两个状态按任意顺序应用，收敛到较新者 |
 | `created` | 是 | 是 | 幂等插入 |
 | `deleted` | 是 | 否（与 `created` 竞争） | 需要路径级串行 |
+| `truncated` | 是 | 否（与 `created` 竞争） | 同上；区间由**接收方**按 `seq` 算，故不依赖被删节点的通知是否到齐 |
 | `appended` | 否 | 否 | 增量语义天然有序 |
 
 因此规则是：**状态类变更按地址应用即可；同一地址上的变更串成一条顺序链**
@@ -370,6 +376,24 @@ S20 把**会话**运行态搬到了节点上，但**工具调用**的运行态�
 | `session/resume.rs` | approve / retry / supply 三个真正重跑工具的 action 在执行前同样置 `Streaming` + `meta.started_at`（reject / answer 不执行工具，不置） |
 | 前端 `composables/useRunningClock.ts` | **新增**：全应用共享的秒级时钟，引用计数归零即停表（`MessageNode` 是递归组件，每实例一个定时器会线性增长） |
 | 前端 `components/MessageNode.vue` | 状态标签覆盖全部非终态（`运行中` / `待确认` / `失败`）；运行中带三点脉动 + 已运行时长；`headClass.thinking` 扩展到工具调用（标题呼吸） |
+
+### S20.2 —— 删除的两种语义分开，级联由前端自己算（本次）
+
+S20/S20.1 处理的是「状态怎么到节点上」，本次处理一个一直存在的**语义混淆**：
+`deleted` 同时被用来表达「删这一个节点」和「从这里删到末尾」，前端无从分辨。
+
+| 层 | 改动 |
+|---|---|
+| `symbio_core/vdfs_provider.rs` | 新增 `VDFS_CHANGE_TRUNCATED`：`path` 所指节点**及其之后全部**已移除 |
+| `session/plugin.rs` | `emit_message_deleted`（逐条）**删除**，改为 `emit_transcript_truncated`（一条）；逐节点删除的唯一来源是 `resume` 的 `StreamEvent::Delete`（消费循环直接转译） |
+| `session/handlers.rs` | `invoke_delete_message` 由「逐条发 `deleted`」改为「发一条 `truncated`」；目标不存在时不发任何变更 |
+| 前端 `schemas/vdfs.ts` | 补 `VDFS_CHANGE_TRUNCATED` |
+| 前端 `stores/sessions.ts` | 新增 `removeFrom`（按 `seq` 取「该节点及其后」）；`deleteMessage` 改为**本地先行级联** + 失败回滚 + 用权威 `deleted_ids` 幂等对齐；`removeMessageById` 的存在性检查提到对象展开之前 |
+| 前端 `services/vdfsTranscriptSync.ts` | `truncated` → `removeFrom`；`deleted` 仍只删一项（工具恢复依赖它） |
+
+为什么不是「在 `deleted` 上挂 `cascade` 布尔」：那会让「是哪种删除」变成两个字段
+必须一起读才正确，正是本仓库反复否决的「状态 + 平行标志位」。见
+`vdfs-session-messages.md` §2.2。
 
 ### S21 —— 工具调用请求显式化（**本次不做，留待需要时**）
 把 ToolCall 的参数从 `content` 提升为一个真子节点（`type = tool_request`）。

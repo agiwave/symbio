@@ -837,6 +837,27 @@ pub const VDFS_CHANGE_RENAMED: &str = "renamed";
 /// 流式输出——一条消息的正文不断追加，消费者无需为每个片段重读整条消息。
 pub const VDFS_CHANGE_APPENDED: &str = "appended";
 
+/// **尾部截断**变更：`path` 所指节点**及其之后的全部兄弟**都已被移除。
+///
+/// ## 为什么不能复用 `deleted`
+///
+/// `deleted` 的语义是「**这一个**节点没了」，消费者据此移除一项即可，与顺序无关
+/// ——这正是它作为通用变更类型该有的样子（重试一轮时删掉它的子树、恢复工具调用时
+/// 删掉旧的结果子节点，都是这种**逐节点**删除）。
+///
+/// 而「删除某条消息，其后的消息一并删除」是另一种语义：它描述的是**列表尾部的一段
+/// 区间**，而不是若干个独立节点。若仍用 `deleted` 逐条下发，会同时坏掉两件事：
+///
+/// 1. **消费者无从分辨**——收到的每一条都长得一样，「删这一个」与「从这里删到末尾」
+///    在载荷上完全不可区分，只能靠外部知识去猜；
+/// 2. **代价随被删数量线性增长**——删一条早期消息要发 N 条变更，N 可达上百。
+///
+/// 因此把它拆成一个**独立的变更类型**，而不是在 `deleted` 上挂一个 `cascade` 布尔：
+/// 「是哪种删除」只有一个取值处（`change` 本身），不会出现两个字段必须一起读才正确
+/// 的写法。消费者侧也不需要预知任何上下文——按自己的列表顺序取「该节点及其后」即可，
+/// 与它是怎么被删的无关。
+pub const VDFS_CHANGE_TRUNCATED: &str = "truncated";
+
 /// 数据变更事件（**provider 视角**）。
 ///
 /// **不含挂载名**——provider 不知道自己被挂在哪里（见模块文档）。`path` 是该
@@ -865,7 +886,7 @@ pub const VDFS_CHANGE_APPENDED: &str = "appended";
 pub struct VdfsChange {
     /// 变更节点在本 provider 子树内的相对路径
     pub path: String,
-    /// 变更类型（`created` / `updated` / `deleted` / `renamed` / `appended`）
+    /// 变更类型（`created` / `updated` / `deleted` / `renamed` / `appended` / `truncated`）
     pub change: String,
     /// 重命名时的目标路径（同样为本子树内相对路径）
     #[serde(default, skip_serializing_if = "Option::is_none")]
