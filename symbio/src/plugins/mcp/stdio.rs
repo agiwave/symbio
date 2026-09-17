@@ -36,7 +36,7 @@ use tracing::{debug, info, warn};
 /// stdio 读超时（discover / call 各 30s）
 const STDIO_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// graceful shutdown 等待时间（先 SIGTERM，超时后 SIGKILL）
+/// graceful shutdown 等待时间（先关闭 stdin，超时后强制终止）
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// 构造 `initialize` 请求的 `params`
@@ -208,14 +208,16 @@ impl McpManager {
 }
 
 /// 优雅关闭子进程：
-/// - 先尝试 wait 短时间（让 server 自行清理）
+/// - 先关闭 stdin 发送 EOF，再 wait 短时间让 server 自行清理
 /// - 超时后强制 kill + wait
 ///
 /// 避免直接 SIGKILL 造成 server 状态损坏（特别是 LSP / 数据库型 server）。
 async fn shutdown_child_graceful(child: &mut tokio::process::Child) {
-    // 尝试优雅退出（部分 server 收到 EOF stdin 后会自行退出）
-    let _ = tokio::time::timeout(GRACEFUL_SHUTDOWN_TIMEOUT, child.wait()).await;
-    // 强制 kill 并 wait
+    // Tokio Child::wait 会关闭仍由 Child 持有的 stdin，发送 EOF。
+    if let Ok(Ok(_)) = tokio::time::timeout(GRACEFUL_SHUTDOWN_TIMEOUT, child.wait()).await {
+        return;
+    }
+    // 超时或等待失败时强制终止并回收。
     let _ = child.kill().await;
     let _ = child.wait().await;
 }
@@ -323,8 +325,16 @@ async fn stdio_handshake(
             "params": {}
         });
         let line = format!("{notification}\n");
-        let _ = stdin.write_all(line.as_bytes()).await;
-        let _ = stdin.flush().await;
+        stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to write notifications/initialized: {e}"))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| format!("Failed to flush notifications/initialized: {e}"))?;
+    } else {
+        return Err("child stdin unavailable for notifications/initialized".to_string());
     }
 
     Ok((
@@ -471,3 +481,7 @@ fn decode_line(bytes: &[u8]) -> String {
         .trim_end_matches('\r')
         .to_string()
 }
+
+#[cfg(test)]
+#[path = "stdio.test.rs"]
+mod tests;
