@@ -70,14 +70,15 @@ notify = "8.2.0"
 dashmap = "6.2.1"
 inventory = "0.3.24"
 encoding_rs = "0.8.35"
-# 纯离线嵌入：`providers/embedding/fastembed.rs` 把 model.onnx / tokenizer*.json 用
-# `include_bytes!` 编进二进制，只走 `try_new_from_user_defined`（吃 bytes），**从不下载**。
-# 故关掉默认 features 里的 `hf-hub-native-tls` ⇒ 整条 `hf-hub → ureq → rustls/ring` 消失
-# （`ureq` 的 `rustls` feature 硬编码 `_ring`，是 `ring` 在本仓唯一的来源）。
-# `ort-download-binaries-native-tls` 必须保留：ONNX Runtime 的预编译二进制是 build 期拉取的。
-fastembed = { version = "6.0.2", default-features = false, features = [
-    "ort-download-binaries-native-tls",
-] }
+# 本地嵌入（`providers/embedding/local.rs`）：tract 纯 Rust ONNX 推理，跑 int8 量化
+# bge-small-zh-v1.5（model.onnx / tokenizer.json 由 `include_bytes!` 编进二进制，从不下载）。
+# 选型过程见 ADR-014：此前用 fastembed（→ ort → ONNX Runtime 预编译二进制，Windows 只有
+# directml flavour：341MB .lib + 18MB DLL），2026-09-17 起改纯 Rust，Windows/macOS 上
+# C/C++ 编译归零；分词用 tokenizers 的纯 Rust 正则后端 fancy-regex（此前 fastembed 硬编码
+# onig ⇒ onig_sys 是仓里最后一条 C 编译链）。MSRV：tract 0.23.7 = 1.91，与本仓持平。
+# 数值基线：CLS 池化 + L2 归一化，与 fastembed 时代余弦相似度 0.999558（spike 实测）。
+tract-onnx = "0.23.5"
+tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }
 moka = { version = "0.12.16", features = ["future"] }
 # 统一资源协议：zip 上传解压（MCP / Skill / Agent 以 zip 为主，文件名=目录名）
 # 仅启用 deflate（flate2/miniz_oxide，纯 Rust）：默认 features 会拉入 zstd/lzma 等 C 编译包

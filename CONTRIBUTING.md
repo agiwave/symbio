@@ -20,8 +20,9 @@
 
 > **为什么只有 Linux 需要额外系统库**：TLS 后端是平台原生栈——Windows 用 SChannel、macOS 用
 > Security.framework，两者都是**纯 Rust FFI 绑定**（无 C 源、无需额外系统包）；只有 Linux 落到
-> 系统 OpenSSL，因此需要上面的开发包。三平台**都**还需要 C 编译器：依赖树里 `onig_sys` 要编 C
-> （`fastembed` → `tokenizers` 硬编码了 `onig` feature，关不掉）。
+> 系统 OpenSSL，因此需要上面的开发包。Windows/macOS **无需 C/C++ 编译器**：最后一条 C 编译链
+> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `tract-onnx`（纯 Rust，[ADR-014](./docs/DECISIONS.md)）
+> 退出依赖树；Linux 侧同理只剩编译 Rust 本身。
 
 ---
 

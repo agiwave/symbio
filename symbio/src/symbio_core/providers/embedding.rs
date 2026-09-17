@@ -1,12 +1,12 @@
 //! 嵌入服务抽象（symbio_core 层）
 //!
 //! 所有插件通过 `dyn EmbeddingService` 访问嵌入能力，
-//! **不**直接引用 `crate::providers::embedding::FastEmbedService` 等具体实现。
+//! **不**直接引用 `crate::providers::embedding::LocalEmbeddingService` 等具体实现。
 //!
 //! 这是 `providers/`（具体实现层）之上的**抽象接口层**：trait 在此定义，
-//! 具体实现（FastEmbed / Noop 等）放在 `src/providers/embedding`，
-//! 并通过通用对象创建机制自注册到 `fastembed` / `noop` id，
-//! 业务模块用 `create_object::<dyn EmbeddingService>("fastembed", ctx)` 获取实例。
+//! 具体实现（Local / Noop 等）放在 `src/providers/embedding`，
+//! 并通过通用对象创建机制自注册到 `local` / `noop` id，
+//! 业务模块用 `create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx)` 获取实例。
 
 use async_trait::async_trait;
 use thiserror::Error;

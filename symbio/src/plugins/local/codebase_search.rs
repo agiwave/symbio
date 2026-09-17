@@ -1,6 +1,6 @@
 //! 语义代码检索工具（对应 Trae 的 SearchCodebase）
 //!
-//! 复用 `EmbeddingService`（fastembed 本地模型）对源码分块嵌入，
+//! 复用 `EmbeddingService`（local 本地模型，tract 纯 Rust ONNX）对源码分块嵌入，
 //! 对查询做近似最近邻（余弦相似度）检索。
 //! 若嵌入服务不可用，自动降级为正则关键词检索（ripgrep 库，非外部可执行文件）。
 //!
@@ -10,7 +10,7 @@ use super::policy::SecurityPolicy;
 use crate::symbio_core::providers::EmbeddingService;
 use crate::symbio_core::{
     create_object, Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    PluginError, PluginPayload, SimpleRequest,
+    PluginError, PluginPayload, SimpleRequest, EMBEDDING_LOCAL,
 };
 use async_trait::async_trait;
 use grep::regex::RegexMatcherBuilder;
@@ -93,7 +93,7 @@ impl CodebaseSearchTool {
         let workspace_dir = PathBuf::from(shellexpand::tilde(workdir).to_string());
 
         let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
-        let embed = create_object::<dyn EmbeddingService>("fastembed", ctx);
+        let embed = create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx);
 
         let mut results: Vec<Value> = Vec::new();
         let mut mode = "keyword_fallback";

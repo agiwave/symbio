@@ -18,6 +18,34 @@
 
 ***
 
+## 2026-09-17: 本地嵌入切到 `tract-onnx`（`fastembed` 废弃，最后一条 C 编译链 `onig_sys` 退出）
+
+**性质：依赖树收敛 + 实现替换**。协议、工具面、前端行为**均无变化**；取舍与实证见 ADR-014。
+
+### 改动
+- `symbio/Cargo.toml`：移除 `fastembed`；新增 `tract-onnx = "0.23.5"`（实际解析 0.23.7）与
+  `tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }`。
+  **不用伞包 `tract`**（多带 6 个 tract-* crate 及其依赖）。
+- 新增 `providers/embedding/local.rs`：tract 纯 Rust ONNX 推理（符号化 seq 维一次编译、
+  CLS 池化 + L2 归一化、`spawn_blocking`），删除 `fastembed.rs`；
+  嵌入服务注册 id `"fastembed"` → `"local"`（`EMBEDDING_LOCAL`，消费方仅 `codebase_search`）。
+- 删除 fastembed 专用侧车文件 `config.json` / `special_tokens_map.json` / `tokenizer_config.json`
+  （tokenizers 只需 `tokenizer.json`）。
+
+### 实证（不靠推断）
+- `cargo tree -i fastembed / ort-sys / onig` → 全部 **"did not match any packages"**；
+  `ureq` 下载链（ort-sys 的 build-dep）与 `winapi` 族一并退出，共 19 包；
+  lock `[[package]]` 357 → 398（tract 11 件套及其纯 Rust 依赖进入）。
+- **~391 MB 的 ONNX Runtime 预编译缓存消失**（Windows x64 `directml` flavour：341 MB `.lib`
+  + 18 MB DLL）；Windows/macOS 构建 **C/C++ 编译归零**。
+- 数值对齐：tract vs fastembed 同模型同分词器，**余弦相似度 0.999558**（int8 计算序差异，
+  语义等价）；输出 L2 归一化对齐（fastembed 实测范数恒为 1.0）。
+- `cargo check --lib --tests --locked` / `clippy -D warnings` / `fmt --check` 全 0；
+  `cli` 亦 `cargo check --locked` 通过；`node scripts/gate.mjs --only=docs,facts` 8/8、
+  `--only=msrv` 2/2（1.91.0 实编译，tract 0.23.7 MSRV 与本仓持平）。
+
+***
+
 ## 2026-09-17: TLS 后端切到平台原生栈（`aws-lc-sys` / `rustls` 族退出依赖树，`cmake` 消失）
 
 **性质：依赖树收敛**。协议、LLM 工具面、前端行为**均无变化**；依赖树净减 **27 个包**

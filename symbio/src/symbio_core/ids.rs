@@ -11,7 +11,7 @@
 //!
 //! 命名约定：
 //! - 插件工厂：`<plugin>`，例如 `home` / `model` / `agent`
-//! - Embedding 服务：`<service>`，例如 `fastembed` / `noop`
+//! - Embedding 服务：`<service>`，例如 `local` / `noop`
 //!
 //! 边界：**LLM 工具名不在这里**。工具名是 `CapabilityMeta.name` 短名，属各插件自己的
 //! 实现细节（`agent_run` 在 `plugins/agent/host/subagent.rs`，`vdfs_*` 由
@@ -64,7 +64,7 @@ pub const PLUGIN_EVENT_BUS: &str = "event_bus";
 
 // ============ Embedding 服务 id ============
 
-/// fastembed embedding 服务
-pub const EMBEDDING_FASTEMBED: &str = "fastembed";
+/// 本地嵌入服务（tract 纯 Rust ONNX，`providers/embedding/local.rs`）
+pub const EMBEDDING_LOCAL: &str = "local";
 /// noop embedding 服务（占位 / 禁用）
 pub const EMBEDDING_NOOP: &str = "noop";

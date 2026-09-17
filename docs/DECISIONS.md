@@ -449,4 +449,57 @@ HTTP 出口的 TLS 后端改为**平台原生栈**（`reqwest` 的 `native-tls` 
 
 ---
 
+## ADR-014: 本地嵌入 = `tract-onnx` 纯 Rust ONNX 推理，废弃 `fastembed`（ORT / onig 彻底退出）
+
+**状态**：已接受（已实现）
+
+> **当前状态**：`symbio/Cargo.toml` 直接依赖 `tract-onnx`（0.23.7，MSRV 1.91 与本仓持平）+
+> `tokenizers`（`default-features = false` + `fancy-regex` 纯 Rust 正则后端）。
+> `cargo tree -i fastembed / ort-sys / onig` → 全部 "did not match any packages"。
+> 实现：`symbio/src/providers/embedding/local.rs`；注册 id 由 `EMBEDDING_FASTEMBED`（"fastembed"）
+> 改为 `EMBEDDING_LOCAL`（"local"），消费方仅 `codebase_search.rs` 一处。
+
+**背景**：
+ADR-013 收敛后，依赖树里**最后一条 C 编译链**是 `onig_sys`（←`onig`←`tokenizers`←`fastembed`
+硬编码 `tokenizers/onig`，关不掉）。同时 `fastembed` → `ort`（ONNX Runtime）在 Windows x64
+强制 `directml` flavour：预编译产物缓存 341 MB `.lib` + 18 MB DLL（合计 ~391 MB），
+且 `ort-sys` 的 build-dep `ureq` 下载链拖着一串无谓包。体积与"零 C 编译"两个目标都指向同一结论：
+嵌入推理不能经由 ONNX Runtime 预编译二进制。
+
+**决策**：
+- 拆掉 `fastembed`，**直接依赖 `tract-onnx`**（不用伞包 `tract`——它会带 17 个 tract-* crate，
+  直连 `tract-onnx` 只需 11 个，少 40+ 包）。
+- 分词保留 `tokenizers`，但关掉 default（onig），启用 `fancy-regex` 纯 Rust 正则后端；
+  只需要 `tokenizer.json` 一个文件（`config.json` / `special_tokens_map.json` /
+  `tokenizer_config.json` 是 fastembed 的 `TokenizerFiles` 专用，随迁删除）。
+- `local.rs` 行为与 fastembed 逐项对齐：`encode(text, true)`、CLS 池化、**L2 归一化**
+  （spike 实测 fastembed 输出范数恒为 1.0 ⇒ 它做了这一步，修正此前"不归一化"的误判）。
+- 模型/分词器仍 `include_bytes!` 内嵌（int8 量化 `model.onnx`，24 MB）。
+- 单例 `LazyLock` 懒加载，`into_typed()?.into_optimized()?.into_runnable()` 一次编译；
+  符号化 seq 维（S）⇒ 任意长度输入复用同一计划；`plan` 即 `Arc<SimplePlan>`，`&self` 并发
+  安全无需 Mutex；推理放 `spawn_blocking`。
+
+**理由**：
+- `tract` 是纯 Rust ONNX 推理器（无 C/C++、无预编译二进制、无下载步骤），
+  是"更小、更成熟、原生"三个维度的唯一交集；`ort` 不行（directml 391 MB）。
+- 数值等价有实证：迁移 spike（umbrella `tract` 时代）对同一份模型+分词器，
+  tract 管线 vs fastembed 管线 **余弦相似度 0.999558**（int8 模型内计算序差异所致，
+  语义等价）；余弦相似度对尺度不变，L2 归一化保证向量表示与 fastembed 一致。
+- 瘦身是显式要求：伞包 `tract` 在 lock 上 +102 包（459 blocks），直连 `tract-onnx` 417 blocks。
+
+**后果**：
+- **Windows / macOS 构建的 C/C++ 编译真正归零**（Linux 仅剩 TLS 的系统 OpenSSL，
+  见 ADR-013 的平台分支）；`onig_sys` 退出 ⇒ 最后一条 C 链消失。
+- **~391 MB 的 ORT 预编译缓存消失**；lock `[[package]]` 357 → 398（净增 41）：
+  退出 fastembed / ort / ort-sys / onig / onig_sys / ureq 下载链 / winapi 族等 19 包，
+  进入 tract 11 件套及其纯 Rust 依赖（prost、rustfft、nom 等）。体积换依赖树纯净，
+  属明确接受的取舍（模型本体 24 MB 不变，编译后二进制增量待用户侧 `cargo build` 实测）。
+- 推理性能与 ORT 有差距（tract 无 GPU/图级极致优化），但嵌入场景是离线索引 + 单条查询，
+  秒级可接受；初始化编译为秒级一次性开销。
+- 注册 id 变更 `"fastembed"` → `"local"`：3 处触点（`ids.rs` / 注册 / `codebase_search.rs`），
+  配置就是 `PLUGIN.yml`、无外部引用，无迁移成本。
+- MSRV 仍 1.91：`node scripts/gate.mjs --only=msrv` 2/2 通过（tract 0.23.7 `rust_version = 1.91`）。
+
+---
+
 > **维护原则**：每个架构决策必须记录在此，包括背景、决策、理由、后果。
