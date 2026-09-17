@@ -40,7 +40,9 @@
 pub mod capability;
 mod config;
 mod detail;
+pub mod manifest;
 pub mod memory;
+pub mod migrate;
 pub mod plugin;
 mod prompt;
 pub mod scope;

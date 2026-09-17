@@ -85,7 +85,10 @@ fn config_definition() -> DetailDefinition {
 /// 子 Agent 目录只有在 `manifest.yaml` 声明了这个 `spec` 时才按 v2 装配（挂
 /// composite 插件树）。声明 `oab/v1` 的旧目录走 legacy 装配路径——两者按 manifest
 /// 分流，迁移只需改写 manifest 与目录（规范 §12）。
-const SPEC_V2: &str = "agent-dir/v2";
+pub(crate) const SPEC_V2: &str = "agent-dir/v2";
+
+/// v1 的规范标识（OAB 约定目录装配形态，见 [`super::migrate`]）
+pub(crate) const SPEC_V1: &str = "oab/v1";
 
 /// 子 Agent 的必需插件清单（规范 §7.2 推荐的最小集合）
 ///
@@ -201,6 +204,21 @@ impl AgentPlugin {
         }
 
         let dir = self.config_file.dir().dir().join(id);
+
+        // v1 目录 → 就地迁移成 v2 后再装配。迁移是**幂等**的，且失败不阻断：
+        // 返回 `None` 让调用方拒接（§10），宁可显式报错，也不要在半迁移状态下继续。
+        if manifest_spec(&dir).as_deref() == Some(SPEC_V1) {
+            match super::migrate::migrate_v1_to_v2(&dir) {
+                Ok(true) => {
+                    crate::plugin_info!("agent", "已把 `{}` 从 oab/v1 迁移为 agent-dir/v2", id)
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    crate::plugin_warn!("agent", "`{}` 的 v1→v2 迁移失败：{e}", id)
+                }
+            }
+        }
+
         if manifest_spec(&dir).as_deref() != Some(SPEC_V2) {
             return None;
         }
