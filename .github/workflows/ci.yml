@@ -75,6 +75,38 @@ jobs:
         run: node scripts/gate.mjs --only=backend --ci --profile=${{ matrix.profile }}
         continue-on-error: false
 
+  # MSRV 验证：`rust-version` 声明的最低版本必须**真能编译**。
+  # 其余 job 都锁 rust-toolchain.toml 的 1.93.1 ⇒ 少了这个 job，「1.91」就只是
+  # Cargo.toml 里一句没人验证的话（此前正是如此）。检查逻辑在 gate.mjs 的 msrv
+  # 阶段，此处不重抄；该阶段会核对实际生效的 rustc 版本，装错了也不会假通过。
+  msrv-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install MSRV toolchain
+        # 版本须与 symbio/Cargo.toml、cli/Cargo.toml 的 rust-version 一致
+        # （gate.mjs 把 "1.91" 补全为 "1.91.0" 后比对；更新的 patch 证明不了下限）
+        run: rustup toolchain install 1.91.0 --profile minimal
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .workbuddy-ai/msrv-target
+          # 与 rust-checks 分开的 key：不同编译器不共享 artifact，混用只会互相覆盖
+          key: ${{ runner.os }}-cargo-msrv191-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: MSRV gate
+        run: node scripts/gate.mjs --only=msrv
+
   # 前端代码质量检查 (如果存在前端构建工具)
   frontend-checks:
     if: |

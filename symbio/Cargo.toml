@@ -9,7 +9,8 @@ edition = "2021"
 # 最低支持 Rust 版本（MSRV）——与 cli/Cargo.toml 的 rust-version、clippy.toml 的 msrv 一致。
 # 1.91 是**语言特性下限**：submit_object_creator! 依赖 TypeId::of 在 const 上下文的稳定化。
 # 它不是「本机使用的版本」：本机与 CI 固定用 symbio/rust-toolchain.toml 的 1.93.1。
-# MSRV 未被 CI 验证，改动该宏时请在本机以 1.91 实测。
+# 该声明**由 CI 实编译验证**：`.github/workflows/ci.yml` 的 msrv-check job 装 1.91.0
+# 后跑 `node scripts/gate.mjs --only=msrv`（本地装了同一工具链也会顺带跑到）。
 rust-version = "1.91"
 
 [lints.rust]
@@ -55,7 +56,14 @@ notify = "8.2.0"
 dashmap = "6.2.1"
 inventory = "0.3.24"
 encoding_rs = "0.8.35"
-fastembed = "6.0.2"
+# 纯离线嵌入：`providers/embedding/fastembed.rs` 把 model.onnx / tokenizer*.json 用
+# `include_bytes!` 编进二进制，只走 `try_new_from_user_defined`（吃 bytes），**从不下载**。
+# 故关掉默认 features 里的 `hf-hub-native-tls` ⇒ 整条 `hf-hub → ureq → rustls/ring` 消失
+# （`ureq` 的 `rustls` feature 硬编码 `_ring`，是 `ring` 在本仓唯一的来源）。
+# `ort-download-binaries-native-tls` 必须保留：ONNX Runtime 的预编译二进制是 build 期拉取的。
+fastembed = { version = "6.0.2", default-features = false, features = [
+    "ort-download-binaries-native-tls",
+] }
 moka = { version = "0.12.16", features = ["future"] }
 # 统一资源协议：zip 上传解压（MCP / Skill / Agent 以 zip 为主，文件名=目录名）
 # 仅启用 deflate（flate2/miniz_oxide，纯 Rust）：默认 features 会拉入 zstd/lzma 等 C 编译包

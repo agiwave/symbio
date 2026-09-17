@@ -18,6 +18,59 @@
 
 ***
 
+## 2026-09-17: 摘掉白带的 `hf-hub`（`ring` 彻底退出依赖树）+ MSRV 接入 CI 实编译校验
+
+**性质：依赖清理 + 门禁补漏**。协议与 LLM 工具面**无变化**；依赖树净减 **72 个包**。
+
+### 依赖：`ring` 的引用是白带的，删掉即净减 72 个包
+- `fastembed` 默认 features 里的 `hf-hub-native-tls` 打开了 `hf-hub → ureq`，而 `ureq` 的
+  `rustls` feature 硬编码 `_ring`（= `rustls?/ring`）—— 这是 `ring` 在本仓**唯一**来源。
+  但嵌入模型根本不需要下载：`providers/embedding/fastembed.rs` 把 `model.onnx` /
+  `tokenizer*.json` 全部 `include_bytes!` 编进二进制，只走 `try_new_from_user_defined`
+  （吃 bytes），日志亦写着 "offline (in-memory) mode"；`hf-hub` 只门控 `pull_from_hf` /
+  `load_tokenizer_hf_hub` 这类下载路径，从未被调用。
+- 故改为
+  `fastembed = { default-features = false, features = ["ort-download-binaries-native-tls"] }`：
+  连带去掉 `hf-hub`、`ureq`（runtime 那份）与 `image-models`（`image` 及其编解码链
+  `rav1e` / `ravif` / `exr` / `tiff` / `png` / `gif` / `webp` / `zune-*` 等）。
+- **实证（不靠推断）**：`cargo tree -i ring --target all` 无输出；`target/debug/.fingerprint/`
+  下 `ring-*` 最新时间戳停在改动之前，而同一时刻 `rustls-*` 有当日新指纹 ⇒ ring 不再被编译。
+- `Cargo.lock`：`[[package]]` 条目 **460 → 386（-74）**，唯一包名 **429 → 357（-72）**，
+  **零新增**。锁里 `ring` 那个 `[[package]]` 条目成了无消费方的残留（`rustls` / `ureq`
+  的依赖列表都已不含它），cargo 未回收，不影响构建。
+- 剩余 C 依赖只有 `onig_sys`（←`onig`←`tokenizers`）与 `aws-lc-sys`（←`rustls`），
+  都在真实使用链上，本次不动。
+
+### MSRV：从「注释里的数字」变成 CI 实编译校验
+- 此前 `rust-version = "1.91"` 只在注释里声明，而本机与 CI 都锁 `rust-toolchain.toml` 的
+  1.93.1 ⇒ **没有任何一次构建用过 1.91**，等于没声明。
+- `scripts/gate.mjs` 新增 **msrv 阶段**（顺序：后端 → 前端 → 静态审计 → **MSRV** → 事实文件）：
+  从 `Cargo.toml` 的 `rust-version` 读下限（**唯一真相源**，`1.91` 自动补全为 `1.91.0`），
+  用 `RUSTUP_TOOLCHAIN` 覆盖工具链文件，对 `symbio/` 与 `cli/` 各跑一次
+  `cargo check --locked --all-targets`。
+- 两个要点都**不是平台限制**，而是防假结论：
+  ① `RUSTUP_TOOLCHAIN` **只对 rustup 装的 cargo 生效**（发行版包 / homebrew 的 cargo 会静默
+  忽略）⇒ 阶段先探 `rustc --version`，实际编译器 ≠ 声明值就**跳过并提示**，绝不拿默认编译器
+  冒充 MSRV 结论；
+  ② 换编译器会让 target 缓存整体失效 ⇒ 用独立 `CARGO_TARGET_DIR`
+  （`.workbuddy-ai/msrv-target/`，已 gitignore），否则每跑一次门禁就触发一次整树重编。
+  判据只有版本号与退出码，不依赖 OS / shell。
+- CI 新增独立 job `msrv-check`：`rustup toolchain install 1.91.0 --profile minimal` 后跑
+  `gate.mjs --only=msrv`（独立 cache key，不与 1.93.1 的 artifact 混用）。
+- 注释同步（`symbio/Cargo.toml`、`symbio/rust-toolchain.toml`）：删掉「MSRV 未被 CI 验证」，
+  改为指向该 job。`CONTRIBUTING.md` §3 补上 `--only=msrv` 用法与独立 target 的说明。
+- 顺带修 `gate.mjs` 顶部注释里一处早已损坏的字符（U+FFFD）。
+
+**验证**：`cargo fmt --all -- --check` / `cargo check --lib --tests` / `cargo clippy
+--all-targets -- -D warnings` 全 0；门禁 `--only=docs,facts` **7/7**；msrv 阶段的跳过分支
+已实跑（临时把 `rust-version` 指向未安装版本 → 正确跳过并给出安装提示）。
+
+**未验证项（诚实标注）**：MSRV 的**真编译**分支在本机沙箱跑不通——`aws-lc-sys` 的 C 编译
+在沙箱内写 `.obj` 失败（`fatal error C1056`，`cl.exe` 是找得到的）。故该分支的首次真实
+结论由 CI 给出；本地装了 1.91.0 后可自行 `node scripts/gate.mjs --only=msrv` 复现。
+
+***
+
 ## 2026-09-17: 质量收敛 —— 删零引用依赖 / 处置游离审计脚本 / 接线 ask_user / 动作按钮收敛
 
 **性质：依赖清理 + 审计体系补漏 + 一个功能接线**。协议无变化；LLM 工具面 **+1**。

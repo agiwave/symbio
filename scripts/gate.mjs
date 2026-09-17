@@ -5,8 +5,9 @@
  * 用途：把「改动后必跑」的那一串命令与它们的坑**收进代码**，而不是记在
  * 文档 / 记忆里靠人背。跑法只有一条：
  *
- *   node scripts/gate.mjs              # 全量（后端 → 前端 → 审计 → 事实文件）
+ *   node scripts/gate.mjs              # 全量（后端 → 前端 → 审计 → MSRV → 事实文件）
  *   node scripts/gate.mjs --only=frontend
+ *   node scripts/gate.mjs --only=msrv   # 用 `rust-version` 声明的最低工具链真跑一次 cargo check
  *   node scripts/gate.mjs --skip=backend
  *   node scripts/gate.mjs --fix        # 先自动格式化 / 重生成，再检查
  *   node scripts/gate.mjs --ci         # CI 对齐：cargo test --workspace（含集成测试）
@@ -26,7 +27,10 @@
  *   2. frontend  vue-tsc --noEmit / vitest run（在 `tauri/`）
  *   3. docs      grep-audit / style-audit / doc-link-audit / test-layout-audit
  *                / dead-code-audit（均判定型）+ schema-audit（报告型，仅防崩溃）
- *   4. facts     gen-current-facts --check（**必须最后**：它由代码生成，
+ *   4. msrv      用 `rust-version` 声明的**最低**工具链跑 cargo check（symbio/ 与 cli/）。
+ *                本机没装该工具链时**跳过并提示**（要真跑需 `rustup toolchain install`）；
+ *                CI 里装了 ⇒ 一定跑，故「MSRV 写了但没人验证」这条不再成立。
+ *   5. facts     gen-current-facts --check（**必须最后**：它由代码生成，
  *                前面任何自动修复都可能改动代码）
  *
  * ## 封装进去的坑（改本脚本前请先读这些，它们都是踩出来的）
@@ -42,7 +46,15 @@
  * - **vitest 不能后台跑**：后台会卡死近一小时。本脚本前台跑 + 超时 kill。
  *   它还有两类**假失败**（与 cargo 并发 / 缓存 `EPERM rename .tmp-…`），
  *   判据都是「用例数没少」：退出码非 0 但用例数 ≥ 基线 ⇒ 记为疑似假失败，
- *   打印原因并继续（真失败会用数��变少暴露出来）。
+ *   打印原因并继续（真失败会用「用例数变少」暴露出来）。
+ * - **MSRV 阶段要单独的工具链**：`rust-version` 声明的是 1.91，而本机与 CI 默认锁
+ *   1.93.1（`rust-toolchain.toml`）。故该阶段用 `RUSTUP_TOOLCHAIN` **覆盖**工具链文件
+ *   （环境变量优先级高于 `rust-toolchain.toml`）换编译器跑。两个附带约束：
+ *   ① `RUSTUP_TOOLCHAIN` **只对 rustup 装的 cargo 生效**（发行版包 / homebrew 的 cargo
+ *   静默忽略它）⇒ 该阶段先探 `rustc --version`，版本 ≠ 声明值就跳过，绝不拿默认编译器
+ *   冒充 MSRV 结论；② 换编译器会让 target 缓存整体失效 ⇒ 用独立 `CARGO_TARGET_DIR`
+ *   （`.workbuddy-ai/msrv-target/`），否则每跑一次门禁就触发一次整树重编。
+ *   整段逻辑只看版本号与退出码，不依赖 OS / shell，三端一致。
  * - **基线只增不减**：`cargo test --lib` / vitest 的通过数低于基线即失败。
  *   高于基线时提示更新本文件顶部的 `BASELINE`——那是刻意要人看一眼的地方。
  *
@@ -62,6 +74,15 @@ const repoRoot = path.resolve(scriptDir, '..')
 const backendDir = path.join(repoRoot, 'symbio')
 const frontendDir = path.join(repoRoot, 'tauri')
 const logDir = path.join(repoRoot, '.workbuddy-ai', 'gate-logs')
+/**
+ * MSRV 阶段专用的 target 目录。
+ *
+ * 为什么必须隔离：MSRV（1.91）与默认工具链（1.93.1）是**两个编译器**，而 cargo 的
+ * fingerprint 含 rustc 版本 —— 共用 target 会让两边互相作废，本地每跑一次门禁就等于
+ * 触发一次整树重编（切回去再重编一次）。独立目录后：MSRV 检查不影响日常构建缓存，
+ * 且它自己第二次起是增量的。路径在 `.workbuddy-ai/` 下（已 gitignore）。
+ */
+const msrvTargetDir = path.join(repoRoot, '.workbuddy-ai', 'msrv-target')
 
 /**
  * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
@@ -107,9 +128,16 @@ const bold = paint('1')
 
 const enabled = (id) => (only ? only.includes(id) : true) && !skip.includes(id)
 
-function stageHeader(n, total, title) {
+/**
+ * 阶段顺序 —— **必须与主流程里的调用顺序一致**（`enabled()` 的 id 也从这里取）。
+ * 序号由它推导，免得手写「3/4」之后插了新阶段忘了改数字。
+ */
+const STAGE_ORDER = ['backend', 'frontend', 'docs', 'msrv', 'facts']
+
+function stageHeader(id, title) {
+  const n = STAGE_ORDER.indexOf(id) + 1
   console.log()
-  console.log(bold(`── 阶段 ${n}/${total} · ${title} ${'─'.repeat(Math.max(0, 44 - title.length))}`))
+  console.log(bold(`── 阶段 ${n}/${STAGE_ORDER.length} · ${title} ${'─'.repeat(Math.max(0, 44 - title.length))}`))
 }
 
 function fmtDuration(ms) {
@@ -132,10 +160,11 @@ const NOISE = /^(?:\s*$|.*\r$|\s*(Compiling|Checking|Downloading|Downloaded|Upda
  * @param {'filtered'|'all'|'none'} [o.echo] 控制台转发策略：`filtered` = 过滤 cargo
  *        进度噪音后转发（默认，长任务用它），`all` = 全转发（短任务用它），
  *        `none` = 不转发（只看结果）。**无论哪种，全文都会落日志。**
+ * @param {Record<string,string>} [o.env] 追加/覆盖的环境变量（MSRV 阶段用它换工具链）
  * @returns {Promise<{ok: boolean, code: number|null, signal: string|null, output: string, timedOut: boolean}>}
  */
 function run(o) {
-  const { label, cmd, args, cwd = repoRoot, timeoutMs = 0, echo = 'filtered' } = o
+  const { label, cmd, args, cwd = repoRoot, timeoutMs = 0, echo = 'filtered', env } = o
   process.stdout.write(`  ▸ ${label} … `)
 
   return new Promise((resolve) => {
@@ -143,7 +172,7 @@ function run(o) {
     let output = ''
     let timedOut = false
 
-    const child = spawn(cmd, args, { cwd, shell: false, env: process.env })
+    const child = spawn(cmd, args, { cwd, shell: false, env: { ...process.env, ...env } })
     let timer = null
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
@@ -245,7 +274,7 @@ function record(stage, label, pass, note) {
 }
 
 async function stageBackend() {
-  stageHeader(1, 4, '后端（cargo）')
+  stageHeader('backend', '后端（cargo）')
   if (!fs.existsSync(path.join(backendDir, 'Cargo.toml'))) {
     console.log(yellow(`  跳过：未找到 ${backendDir}/Cargo.toml`))
     return
@@ -339,7 +368,7 @@ async function stageBackend() {
 }
 
 async function stageFrontend() {
-  stageHeader(2, 4, '前端（vue-tsc / vitest）')
+  stageHeader('frontend', '前端（vue-tsc / vitest）')
   const pkg = path.join(frontendDir, 'package.json')
   if (!fs.existsSync(pkg)) {
     console.log(yellow(`  跳过：未找到 ${frontendDir}/package.json`))
@@ -393,7 +422,7 @@ async function stageFrontend() {
 }
 
 async function stageDocs() {
-  stageHeader(3, 4, '静态审计')
+  stageHeader('docs', '静态审计')
   // 判定型：有发现即以非零退出码失败。
   for (const name of ['grep-audit', 'style-audit', 'doc-link-audit', 'test-layout-audit', 'dead-code-audit']) {
     const r = await run({
@@ -420,8 +449,86 @@ async function stageDocs() {
   console.log(dim('      doc-link-audit 已豁免 docs/archive/（归档记录当时形态，改写即篡改历史）'))
 }
 
+/**
+ * 从 `Cargo.toml` 读 `rust-version` —— MSRV 的**唯一真相源**（`clippy.toml` 的 `msrv`
+ * 只是给 clippy 看的副本，取值必须与它一致）。读不到返回 null。
+ *
+ * 返回值补全成 `x.y.z`：rustup 的工具链名带 patch（`1.91.0-x86_64-…`），而
+ * `rust-version` 允许只写 `1.91`，两者对齐才能命中同一个已安装的工具链。
+ */
+function readMsrv(dir) {
+  const toml = path.join(dir, 'Cargo.toml')
+  if (!fs.existsSync(toml)) return null
+  const m = fs.readFileSync(toml, 'utf8').match(/^\s*rust-version\s*=\s*"([^"]+)"/m)
+  if (!m) return null
+  const parts = m[1].trim().split('.')
+  while (parts.length < 3) parts.push('0')
+  return parts.join('.')
+}
+
+/**
+ * MSRV 阶段：让 `rust-version` 从「注释里的一个数字」变成**真被编译验证过的约束**。
+ *
+ * 本机与 CI 都锁 `rust-toolchain.toml` 的 1.93.1 ⇒ 平时用的**不是** MSRV；声明 1.91
+ * 却从没在 1.91 上跑过，等于没声明。这里用 `RUSTUP_TOOLCHAIN` **覆盖**工具链文件
+ * （环境变量优先级高于 `rust-toolchain.toml`）换编译器真跑一次
+ * `cargo check --locked --all-targets`。
+ *
+ * 没装该工具链时**跳过并提示**，不判失败 —— 否则没装 1.91 的人跑全量门禁必红。
+ * CI 的 msrv job 会先 `rustup toolchain install`，所以那里一定真跑。
+ */
+async function stageMsrv() {
+  stageHeader('msrv', 'MSRV（rust-version 实编译校验）')
+  const jobs = [
+    ['symbio', backendDir],
+    ['cli', path.join(repoRoot, 'cli')],
+  ]
+    .map(([name, dir]) => [name, dir, readMsrv(dir)])
+    .filter(([, dir, msrv]) => msrv && fs.existsSync(path.join(dir, 'Cargo.toml')))
+
+  if (jobs.length === 0) {
+    console.log(yellow('  跳过：两个 workspace 都没有可读的 rust-version 声明'))
+    return
+  }
+
+  for (const [name, dir, msrv] of jobs) {
+    // 先用**同一个环境**探一次 rustc 版本。关键：`RUSTUP_TOOLCHAIN` 只有在 rustup
+    // 安装的 cargo 上才生效（发行版包 / homebrew 的 cargo 会**静默忽略**它）。若不先
+    // 核对版本，那些环境会拿默认编译器跑完并报告「MSRV 通过」——假阳性比不检查更糟。
+    // 故：实际编译器 ≠ 声明值，一律跳过并写明原因。平台无关（不看 OS，只看版本号）。
+    const probe = await run({
+      label: `${name}: rustc --version（要求 ${msrv}）`,
+      cmd: 'rustc',
+      args: ['--version'],
+      cwd: dir,
+      env: { RUSTUP_TOOLCHAIN: msrv },
+      echo: 'none',
+    })
+    const actual = stripAnsi(probe.output).match(/^rustc (\d+\.\d+\.\d+)/m)?.[1] ?? null
+    if (actual !== msrv) {
+      const why = actual ? `当前生效的是 ${actual}` : '取不到 rustc 版本'
+      console.log(yellow(`      ↳ ${name}: 跳过（${why}）。要真验证需恰好装 ${msrv}：`))
+      console.log(yellow(`         rustup toolchain install ${msrv}    # 更新的 patch 不能代替，证明不了下限`))
+      record('msrv', `${name} @ ${msrv}`, true, `跳过：无 ${msrv} 工具链`)
+      continue
+    }
+
+    const r = await run({
+      label: `${name}: cargo check --all-targets @ ${msrv}`,
+      cmd: 'cargo',
+      args: ['check', '--locked', '--all-targets'],
+      cwd: dir,
+      // CARGO_TARGET_DIR 隔离：不让换编译器的检查作废日常构建缓存（见 msrvTargetDir 注释）
+      env: { RUSTUP_TOOLCHAIN: msrv, CARGO_TARGET_DIR: path.join(msrvTargetDir, name) },
+    })
+    if (!r.ok) console.log(red(`      ↳ ${name} 在 ${msrv} 上编译失败 ⇒ rust-version 声明与实际不符`))
+    record('msrv', `${name} @ ${msrv}`, r.ok)
+  }
+  console.log(dim(`      独立 target：${path.relative(repoRoot, msrvTargetDir) || '.'}/（不污染日常构建缓存）`))
+}
+
 async function stageFacts() {
-  stageHeader(4, 4, '事实文件（必须最后）')
+  stageHeader('facts', '事实文件（必须最后）')
   if (FIX) {
     const gen = await run({
       label: 'gen-current-facts.mjs（--fix 写入）',
@@ -450,6 +557,7 @@ console.log(dim(`  完整日志：${path.relative(repoRoot, logDir) || '.'}/`))
 if (enabled('backend')) await stageBackend()
 if (enabled('frontend')) await stageFrontend()
 if (enabled('docs')) await stageDocs()
+if (enabled('msrv')) await stageMsrv()
 if (enabled('facts')) await stageFacts()
 
 // ── 汇总 ───────────────────────────────────────────────────────────────

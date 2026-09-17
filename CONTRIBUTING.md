@@ -47,17 +47,23 @@ symbio/
 
 ## 3. 提交前检查
 
-**一条命令跑完全部**（后端含 `cli/` → 前端 → 静态审计 → 事实文件）：
+**一条命令跑完全部**（后端含 `cli/` → 前端 → 静态审计 → MSRV → 事实文件）：
 
 ```bash
 node scripts/gate.mjs                 # 全量
 node scripts/gate.mjs --only=frontend # 单阶段（也有 --skip=）
+node scripts/gate.mjs --only=msrv     # 用 rust-version 声明的最低工具链真跑一次 check
 node scripts/gate.mjs --fix           # 先自动格式化 / 重生成，再检查
 node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 ```
 
-覆盖：Rust 编译 / 单测 / clippy / rustfmt、TypeScript 类型检查、vitest、静态审计、事实文件一致性。
-完整输出落 `.workbuddy-ai/gate-logs/`；通过数低于基线会报错、高于基线提示更新 `BASELINE`。
+覆盖：Rust 编译 / 单测 / clippy / rustfmt、TypeScript 类型检查、vitest、静态审计、
+**MSRV 实编译校验**、事实文件一致性。完整输出落 `.workbuddy-ai/gate-logs/`；通过数低于基线
+会报错、高于基线提示更新 `BASELINE`。
+
+MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）并写独立 target
+（`.workbuddy-ai/msrv-target/`），所以**不会**动日常构建缓存；本机没装该工具链时跳过并提示
+（`rustup toolchain install 1.91.0`），CI 的 `msrv-check` job 装好后一定会真跑。
 
 ⚠️ **检查项的权威清单只在 `scripts/gate.mjs`**——本文档、CI、记忆里都不另抄一份，
 抄了必然漂移。要加检查就改 `gate.mjs`。
@@ -66,7 +72,8 @@ node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
 CI（[.github/workflows/ci.yml](./.github/workflows/ci.yml)）跑的是**同一个脚本**
-（`--only=backend --ci --profile=<dev|release>` / `--only=frontend` / `--only=docs,facts`），
+（`--only=backend --ci --profile=<dev|release>` / `--only=frontend` / `--only=docs,facts`
+/ `--only=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链），
 所以本地通过 ≈ CI 通过。提交信息规范由
 `scripts/check-commit-msg.mjs` 判定，本机一次性挂上即可自动生效：
 
