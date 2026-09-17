@@ -94,7 +94,8 @@ const msrvTargetDir = path.join(repoRoot, '.workbuddy-ai', 'msrv-target')
  * 不该留下——留着就是在给一段已删的实现作证。
  */
 const BASELINE = {
-  rustTests: 657,
+  // 657 → 660：嵌入 2 个真实推理回归测试 + `codebase_search` 注册护栏测试
+  rustTests: 660,
   vitestFiles: 19,
   vitestTests: 156,
 }

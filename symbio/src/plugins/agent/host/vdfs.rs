@@ -20,11 +20,14 @@
 //! `AGENTS.md`（§6 人格与记忆），它走内核的 `MemoryFile::node`（带容量闸门），
 //! 与工作区记忆同一口径。
 //!
-//! ## 挂载根下还有一个文件：系统智能体自身的指令
+//! ## 挂载根只列「装进来的智能体」
 //!
-//! `.vdfs/agent/AGENTS.md` 不是某个 bundle 的条目，而是**本应用（系统智能体）自身**的
-//! 指令文件（`{homedir}/AGENTS.md`，见 [`super::instruction`]）。它排在列表**最前**：
-//! 剩下的都是「装进来的智能体」，而它不是——先摆出来才不会被当成某个包看走眼。
+//! 挂载根清单 = 各 bundle（装进来的子智能体），与 session / model 列表同一口径。
+//! `.vdfs/agent/AGENTS.md` 也挂在这棵树上，但它**不在清单里**——它是**本应用
+//! （系统智能体）自身**的指令（`{homedir}/AGENTS.md`，见 [`super::instruction`]），
+//! 属于「本 agent 的修改」，入口在**设置页**（`traverse` 里经 `ConfigurableVisitor`
+//! 注册，读写仍落在本插件的地址上），混在 agent 列表里会被读成某个包。
+//!
 //! 与 bundle 无关的那三个字母 `AGENTS.md` 因此是挂载根下的**保留名**；bundle id 的
 //! 字符集要求首字符是小写字母或数字，不可能与之相撞（§5.1）。
 //!
@@ -175,7 +178,10 @@ impl AgentPlugin {
     }
 
     /// 系统智能体自身指令 → VDFS 节点（`list` 与 `stat` 共用同一份形状）
-    async fn instruction_node(&self) -> VdfsNode {
+    /// 系统智能体自身指令 → VDFS 节点（`list` 与 `stat` 共用同一份形状）。
+    ///
+    /// `traverse` 也用它拼设置页条目：调用方拿到节点后改 `path` 为真实地址即可。
+    pub(crate) async fn instruction_node(&self) -> VdfsNode {
         self.instruction_store()
             .await
             .node(&instruction::node_spec())
@@ -216,12 +222,17 @@ impl VdfsProvider for AgentPlugin {
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
         match parse_rel_path(path) {
-            RelPath::Root => {
-                // 本应用自身的指令排最前：剩下每一项都是「装进来的智能体」，它不是
-                let mut nodes = vec![self.instruction_node().await];
-                nodes.extend(store.list().into_iter().map(|r| bundle_node(&r, &store)));
-                Ok(nodes)
-            }
+            // 挂载根 = **装进来的智能体清单**，一样别的都没有。
+            //
+            // 本应用自身的指令（`.vdfs/agent/AGENTS.md`）也挂在这棵树上，但它是
+            // **本应用自身的设置**，不是装进来的智能体——混在这张列表里会让人
+            // 把它读成某个包。它的入口在设置页（见 `super::plugin` 的 `traverse`），
+            // 地址（`.vdfs/agent/AGENTS.md`）照旧可达，只是不在这里列出。
+            RelPath::Root => Ok(store
+                .list()
+                .into_iter()
+                .map(|r| bundle_node(&r, &store))
+                .collect()),
             // 指令是叶子节点
             RelPath::Instruction => Err(VdfsError::invalid(format!(
                 "该路径是文件，不可列举：{path}"

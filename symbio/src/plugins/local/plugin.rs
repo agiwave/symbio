@@ -221,7 +221,7 @@ impl LocalPlugin {
         let shell = Arc::new(ShellTool::new(Arc::clone(&security)));
         let content_search = Arc::new(ContentSearchTool::new(Arc::clone(&security)));
         let todo_write = Arc::new(TodoWriteTool::new(Arc::clone(&security)));
-        let _codebase_search = Arc::new(CodebaseSearchTool::new(Arc::clone(&security)));
+        let codebase_search = Arc::new(CodebaseSearchTool::new(Arc::clone(&security)));
         // 询问用户：不接触文件系统，故不持 SecurityPolicy；产出 user_prompt 节点
         // 等用户回答（与下面的 confirm 审批共用同一套节点 / 回填机制）。
         let ask_user = Arc::new(AskUserTool);
@@ -230,7 +230,7 @@ impl LocalPlugin {
         // （见 plugins/vdfs/physical.rs），由 `vdfs` 插件以 `vdfs_*` 工具统一暴露，
         // 此处不再提供原生工具。本插件在 VDFS 上只挂一个**配置文件**。
         let tool_impls: Vec<Arc<dyn Capability>> =
-            vec![shell, content_search, todo_write, ask_user];
+            vec![shell, content_search, todo_write, codebase_search, ask_user];
 
         Self {
             config: config_lock,
@@ -418,3 +418,26 @@ impl vdfs::VdfsProvider for LocalPlugin {
 }
 
 crate::submit_object_creator!(PLUGIN_LOCAL, LocalPlugin::build, dyn Plugin);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 工具清单回归护栏。
+    ///
+    /// `codebase_search` 曾被临时摘出 `tool_impls`（提交 `30ef62c`）。摘掉之后语义检索
+    /// 直接消失，而其余单测全绿——只有显式断言工具清单才拦得住这种静默退化。
+    #[test]
+    fn codebase_search_is_registered() {
+        let dir = PluginDir::at(
+            std::env::temp_dir().join("symbio-local-plugin-tool-list"),
+            PLUGIN_LOCAL,
+        );
+        let plugin = LocalPlugin::new(None, LocalConfig::default(), dir);
+        let names: Vec<String> = plugin.tool_impls.iter().map(|t| t.name()).collect();
+        assert!(
+            names.iter().any(|n| n == "codebase_search"),
+            "codebase_search 未注册，实际工具清单：{names:?}"
+        );
+    }
+}

@@ -18,6 +18,72 @@
 
 ***
 
+## 2026-09-18: 系统智能体自身的 `AGENTS.md` 入口从 agent 列表移到设置页
+
+**性质：前端可见行为调整**。地址不变（`.vdfs/agent/AGENTS.md` 照旧可达、读写不变），
+只是**不再出现在 agent 挂载根的列表里**。
+
+### 变更
+- **挂载根 = 装进来的智能体清单**。此前 `.vdfs/agent/AGENTS.md` 排在列表**最前**，
+  用「排最前」来暗示它不是一个包——但列表本身没有语义，读者仍会把它读成某个 bundle。
+  现在它整条移出列表，挂载根与 session / model 列表同口径：**只有装进来的东西**。
+- **入口归设置页**：`AgentPlugin::traverse` 经既有 `ConfigurableVisitor` 通道补一条
+  节点（`instruction_node()` 改 `path` 后注册），复用挂载根里那份指令节点，
+  不改 `symbio_core`、不新增通道。
+- `instruction_node()` 由 `async fn` 私有改为 `pub(crate) async fn`（`list` / `stat` /
+  `traverse` 三处共用同一份形状）。
+
+### 门禁
+- 新增 `mount_root_lists_only_installed_agents`：断言挂载根只列 bundle，
+  防止「排最前」这种隐式约定日后被重新引入。
+
+***
+
+## 2026-09-18: 修复本地嵌入模型 tract 加载失败，恢复 `codebase_search` 工具
+
+**性质：修复 + 工具面恢复**。模型文件本身未变，仍是 24 MB 的 int8 `model.onnx`。
+
+### 修复：嵌入服务不再静默降级为 Noop
+启动日志曾报 `Failed analyse for node #203 "/Unsqueeze" AddDims`，
+`LocalEmbeddingService` 初始化失败后回退 `NoopEmbeddingService`，语义搜索被禁用。
+
+模型是完好的（`onnx.load()` 通过，opset 11 / 527 节点），问题在 tract 侧配置，
+两条约束由此确立（已写入 `local.rs` 注释与 ADR-014 修订小节）：
+
+- 必须 `.with_ignore_value_info(true)`：该模型是 ONNX Runtime 动态量化导出，图里带
+  `value_info`，把中间张量声明成 `batch_size`/`sequence_length` 符号；tract 拿输入 fact
+  的 `1` 与之 unify 时报 `Impossible to unify Sym(batch_size) with Val(1)`。
+  这也是「固定 seq=512」兜底无效的原因（照报同一个错）。
+- 动态长度路径不要自建 `SymbolScope` + `set_input_fact`：tract 0.23.7 会触发
+  `ProofCacheSession scope_id mismatch` 断言（panic）。不覆盖输入 fact 即可。
+
+顺带修掉一个静默失效坑：`outlet_label` 对图输入返回**空串**，输入名改取
+`model.node(outlet.node).name`，否则三个输入全部落进「未知输入名」分支而返回 `None`。
+
+**精度实证**（同一句「你好，世界」，7 token，CLS + L2 归一化）：
+
+| 路径 | vs ONNX Runtime 余弦相似度 |
+|---|---|
+| 动态长度（默认） | **0.999961** |
+| 固定 seq=512（兜底） | 0.994482 |
+
+兜底路径精度下降是因为补位改变了 `DynamicQuantizeLinear` 的 per-tensor scale，
+故固定长度只作兜底，不作默认。
+
+### 恢复：`codebase_search` 重新挂回工具清单
+该工具在 `30ef62c`（"temporarily-disable-broken-codebase-search"）被摘出
+`tool_impls`、降级为未使用的局部变量。现随嵌入服务修复一并恢复，
+并加了一条断言工具清单的回归测试，避免再次被静默摘掉。
+
+### 门禁
+- `BASELINE.rustTests` 657 → 660（新增 3 个测试）。
+
+### 实证
+- `cargo +1.93.1 test --lib` **660/660 通过**。
+- `cargo clippy -p symbio --lib`：1 warning，位于 `plugins::model::message_builder`（既有，未新增）。
+
+***
+
 ## 2026-09-17: 质量收敛——迁移与持久化修复、门禁收紧、吞错清理
 
 **性质：修复 + 门禁收紧**。协议、工具面、前端行为均无变化。

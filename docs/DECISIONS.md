@@ -513,6 +513,35 @@ ADR-013 收敛后，依赖树里**最后一条 C 编译链**是 `onig_sys`（←
   配置就是 `PLUGIN.yml`、无外部引用，无迁移成本。
 - MSRV 仍 1.91：`node scripts/gate.mjs --only=msrv` 2/2 通过（tract 0.23.7 `rust_version = 1.91`）。
 
+### 修订（2026-09-18）： tract 加载该模型的两条硬约束
+
+上线后发现 `LocalEmbeddingService` 初始化失败并静默回退 Noop（`Failed analyse for node #203
+"/Unsqueeze" AddDims`），语义搜索被禁用。排查结论：**模型本身完好**（`onnx.load()` 通过，
+opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条约束由此确立并写进 `build_plan`
+的注释：
+
+1. **必须 `.with_ignore_value_info(true)`**。该模型是 ONNX Runtime 动态量化导出，图里带
+   `value_info`，把中间张量声明成 `batch_size` / `sequence_length` 符号。保留这些声明时，
+   tract 会拿输入 fact 的 `1` 与 `value_info` 的 `batch_size` 做 unify，直接报
+   `Impossible to unify Sym(batch_size) with Val(1)`。
+   ——这也是「固定 seq」兜底无效的原因：报错与 seq 是不是符号无关。
+2. **动态长度不能自建 `SymbolScope` + `set_input_fact`**，那样 tract 0.23.7 会在
+   `ProofCacheSession` 里触发 `scope_id mismatch` 断言（是 panic 不是 Err）。正确做法是
+   **不覆盖输入 fact**，直接沿用模型自己声明的符号维。
+
+顺带修掉一个会让服务静默失效的坑：**`outlet_label` 对图输入返回空串**，取输入名必须走
+`model.node(outlet.node).name`，否则三个输入全部落进「未知输入名」分支而返回 `None`。
+
+数值复核（同一句「你好，世界」，7 个 token，CLS + L2）：
+
+| 路径 | vs ONNX Runtime 余弦相似度 |
+|---|---|
+| 动态长度（首选） | **0.999961** |
+| 固定 seq=512 兜底 | 0.994482 |
+
+兜底路径精度下降的原因：补位改变了 `DynamicQuantizeLinear` 的 per-tensor scale，量化误差
+随之变化。故固定长度只作兜底，不作默认。
+
 ---
 
 > **维护原则**：每个架构决策必须记录在此，包括背景、决策、理由、后果。
