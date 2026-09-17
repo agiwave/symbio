@@ -490,10 +490,23 @@ ADR-013 收敛后，依赖树里**最后一条 C 编译链**是 `onig_sys`（←
 **后果**：
 - **Windows / macOS 构建的 C/C++ 编译真正归零**（Linux 仅剩 TLS 的系统 OpenSSL，
   见 ADR-013 的平台分支）；`onig_sys` 退出 ⇒ 最后一条 C 链消失。
-- **~391 MB 的 ORT 预编译缓存消失**；lock `[[package]]` 357 → 398（净增 41）：
+- **~391 MB 的 ORT 预编译开销消失**；lock `[[package]]` 357 → 398（净增 41）：
   退出 fastembed / ort / ort-sys / onig / onig_sys / ureq 下载链 / winapi 族等 19 包，
-  进入 tract 11 件套及其纯 Rust 依赖（prost、rustfft、nom 等）。体积换依赖树纯净，
-  属明确接受的取舍（模型本体 24 MB 不变，编译后二进制增量待用户侧 `cargo build` 实测）。
+  进入 tract 11 件套及其纯 Rust 依赖（prost、rustfft、nom 等）。
+- **二进制体积实测（2026-09-17，release + rust-lld，同机 A/B）**：以 worktree 隔离重建
+  2f9c04a（fastembed + ort 静态链接）作基线，`symbio-cli.exe` 59.8 MiB（62,718,464 B）；
+  HEAD（tract）61.2 MiB（64,150,528 B）——**exe 反而 +1.4 MiB（+2.3%）**。原因：326 MiB 的
+  `onnxruntime.lib` 大部分并未被链接器拉入 exe，静态链接进来的 ORT 实际对象小于 tract 的
+  Rust 代码量。**结论要诚实：exe 体积基本持平、略增**；tract 的收益不在 exe 体积，而在
+  构建链与交付面——① Windows/macOS 构建零 C/C++ 编译；② 326 MiB 的 `ort.pyke.io`
+  预编译缓存不再参与构建（可直接删除）；③ 不再需要随程序交付 `DirectML.dll`（18 MB）；
+  ④ 离线/全新环境构建不再依赖 ORT 下载链（实测：离线下 ort-sys 解析不到预编译 flavour
+  会静默退化为「不链接」，链接期才以 `undefined symbol: OrtGetApiBase` 报错，很隐蔽）。
+- **family 11 crate 已是下限，无进一步可裁空间**：`tract-onnx` 0.23.7 对 `tract-extra` /
+  `tract-hir` / `tract-nnef` / `tract-onnx-opl` / `tract-transformers` 均为**硬依赖**
+  （manifest 无 `optional`，features 仅 `getrandom-js` 一项）；`tract-pulse` 链经
+  `tract-onnx-opl → tract-extra` 间接硬拉。伞包 `tract` 多出的 6 个 crate
+  （tensorflow 域等）才是真冗余，已通过直连 `tract-onnx` 避开。
 - 推理性能与 ORT 有差距（tract 无 GPU/图级极致优化），但嵌入场景是离线索引 + 单条查询，
   秒级可接受；初始化编译为秒级一次性开销。
 - 注册 id 变更 `"fastembed"` → `"local"`：3 处触点（`ids.rs` / 注册 / `codebase_search.rs`），

@@ -36,8 +36,12 @@
 - `cargo tree -i fastembed / ort-sys / onig` → 全部 **"did not match any packages"**；
   `ureq` 下载链（ort-sys 的 build-dep）与 `winapi` 族一并退出，共 19 包；
   lock `[[package]]` 357 → 398（tract 11 件套及其纯 Rust 依赖进入）。
-- **~391 MB 的 ONNX Runtime 预编译缓存消失**（Windows x64 `directml` flavour：341 MB `.lib`
+- **~391 MB 的 ONNX Runtime 预编译开销消失**（Windows x64 `directml` flavour：341 MB `.lib`
   + 18 MB DLL）；Windows/macOS 构建 **C/C++ 编译归零**。
+- **二进制体积 A/B 实测**（同 release profile、同 rust-lld，worktree 隔离重建 2f9c04a 作基线）：
+  `symbio-cli.exe` 59.8 MiB（fastembed+ort）→ 61.2 MiB（tract），**+1.4 MiB（+2.3%）**——
+  exe 基本持平略增，收益在构建链与交付面（零 C 编译、326 MiB 预编译缓存可删、
+  不再需要 DirectML.dll），见 ADR-014。
 - 数值对齐：tract vs fastembed 同模型同分词器，**余弦相似度 0.999558**（int8 计算序差异，
   语义等价）；输出 L2 归一化对齐（fastembed 实测范数恒为 1.0）。
 - `cargo check --lib --tests --locked` / `clippy -D warnings` / `fmt --check` 全 0；
