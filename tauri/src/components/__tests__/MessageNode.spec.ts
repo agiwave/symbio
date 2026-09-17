@@ -11,6 +11,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MessageNode from '../MessageNode.vue'
+import { useRunningClock } from '@/composables/useRunningClock'
 import type { ChatMessage } from '@/services/model'
 
 /** 构造合法 ChatMessage（缺省：assistant/text/completed） */
@@ -104,16 +105,79 @@ describe('MessageNode：思考节点始终单行', () => {
 })
 
 describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', () => {
-  it('默认单行折叠：流式中显示「调用中…」标签，卡片体隐藏', async () => {
+  it('默认单行折叠：运行中显示「运行中」标签 + 动效点，卡片体隐藏', async () => {
     const w = mountNode(
       msg({ id: 'tc1', type: 'tool_call', status: 'streaming', name: 'shell', content: '{"cmd":"ls"}', children: [] }),
     )
     expect(w.find('.node-head').exists()).toBe(true)
-    expect(w.text()).toContain('调用中')
+    expect(w.text()).toContain('运行中')
+    // 折叠态下头部是用户能看到的全部：标签必须带「会动」的标记，
+    // 否则"正在跑"只是一个静态文字，与"已完成"在观感上无从区分。
+    const tag = w.find('.node-tag')
+    expect(tag.classes()).toContain('run')
+    expect(tag.find('.tag-dots').exists()).toBe(true)
+    // 标题呼吸动效（与思考中同一手法）
+    expect(w.find('.node-head').classes()).toContain('thinking')
     // 默认收起 ⇒ 卡片体不在 DOM 里；展开后才渲染（点头部）
     expect(w.find('.node-body').exists()).toBe(false)
     await w.find('.node-head').trigger('click')
     expect(w.find('.node-body').exists()).toBe(true)
+  })
+
+  it('运行中：显示已运行时长（「还在跑」与「卡住了」的判据）', () => {
+    // 锚点以共享时钟的当前值为基准取值 ⇒ 断言精确且不受 1s 粒度影响
+    const { nowMs } = useRunningClock()
+    const w = mountNode(
+      msg({
+        id: 'tc1',
+        type: 'tool_call',
+        status: 'streaming',
+        name: 'codebase_search',
+        content: '{}',
+        meta: { started_at: nowMs.value - 47_000 },
+        children: [],
+      }),
+    )
+    expect(w.find('.tag-elapsed').text()).toBe('47s')
+  })
+
+  it('运行中：超过 60s 用「分m秒s」，避免长任务读数退化成三位数秒', () => {
+    const { nowMs } = useRunningClock()
+    const w = mountNode(
+      msg({
+        id: 'tc1',
+        type: 'tool_call',
+        status: 'streaming',
+        name: 'codebase_search',
+        content: '{}',
+        meta: { started_at: nowMs.value - 125_000 },
+        children: [],
+      }),
+    )
+    expect(w.find('.tag-elapsed').text()).toBe('2m05s')
+  })
+
+  it('无 started_at（旧数据）→ 不显示时长，也不编一个数', () => {
+    const w = mountNode(
+      msg({ id: 'tc1', type: 'tool_call', status: 'streaming', name: 'shell', content: '{}', children: [] }),
+    )
+    expect(w.find('.node-tag.run').exists()).toBe(true)
+    expect(w.find('.tag-elapsed').exists()).toBe(false)
+  })
+
+  it('待用户确认 → 「待确认」标签（warn 变体）；终态不给标签', () => {
+    const waiting = mountNode(
+      msg({ id: 'tc1', type: 'tool_call', status: 'waiting_user_action', name: 'shell', content: '{}', children: [] }),
+    )
+    expect(waiting.find('.node-tag').text()).toContain('待确认')
+    expect(waiting.find('.node-tag').classes()).toContain('warn')
+
+    // 终态刻意不给标签：绝大多数调用都会成功结束，给每个成功的调用挂「已完成」
+    // 只会把真正需要注意的状态淹掉。
+    const done = mountNode(
+      msg({ id: 'tc2', type: 'tool_call', status: 'completed', name: 'shell', content: '{}', children: [] }),
+    )
+    expect(done.find('.node-tag').exists()).toBe(false)
   })
 
   it('例外：内含待审批 user_prompt → 自动展开（审批入口可见）', () => {

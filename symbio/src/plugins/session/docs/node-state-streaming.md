@@ -284,6 +284,59 @@ kind = "vdfs" 变更
 `meta.__toolRequest` 保留为**渲染标记**（表示"这是一个由内容提升出来的请求视图"），
 但它**不再是状态来源**——状态一律读 ToolCall 节点。
 
+### 5.3.1 ToolCall 的 `streaming` 覆盖「参数流式 + 执行」两段（S20.1）
+
+§2.2 的状态机写的是 `pending → streaming → waiting_user_action → completed / failed`，
+其中 `streaming` **同时覆盖两个阶段**：
+
+```text
+  pending ──▶ streaming ────────────────────────────────▶ completed / failed
+              │                    │
+              │ ① 参数流式          │ ② 执行窗口
+              │   （模型逐 token     │   （一次编译 / 一次网络请求 /
+              │     吐出 arguments） │     一个子智能体跑完 —— 往往最长）
+              └────────────────────┴──────────────────────
+```
+
+**这两段之间没有中间态**，也不该有：对用户而言"这次调用还没结束"是同一件事。
+
+#### 为什么必须有 ② 的状态
+
+`finalize_assistant_turn` 在 LLM 流结束时天然是"参数齐了"这一刻。它**曾在此把所有
+ToolCall 标 `Completed`**——于是前端在执行窗口内没有任何「运行中」迹象：参数流完
+画面静止，直到结果突然出现。窗口越长的工具（语义索引、长命令、子智能体），
+这段静默越长，用户无法判断"还在跑"还是"卡死了"。**这是 S20 交付时留下的一个
+显示层缺口，S20.1 修掉。**
+
+#### 不变量：ToolCall 的终态只由执行方给出
+
+| 执行路径 | 终态来源 |
+|---|---|
+| 正常分发 | `tool_executor::process_tool_calls_async` |
+| 恢复执行（approve / retry / supply） | `resume::process_tool_resume_action` |
+| 被 PreToolUse 拦下 / 用户中止 / 交互中断 | `process_tool_calls_async` 末尾统一收口为 `Completed` + `meta.failure_kind = "not_executed"` |
+
+**"本批每一个 ToolCall 都必须以终态收场"** 由 `process_tool_calls_async` 负责保证：
+调用前广播 `Streaming`，调用后广播终态，未执行的批尾在函数末尾一次性收口。
+漏掉任何一条，前端就会有一个**永远转下去的「运行中」**（比"没有迹象"更糟：
+它把"卡住"伪装成"在跑"）。
+
+#### `meta.started_at`：把"运行中"从断言变成判据
+
+`Streaming` 状态只回答"在不在跑"，不回答"跑了多久"。因此执行开始时同时写入
+`meta.started_at`（毫秒），前端据此显示 `运行中 · 47s`：
+
+- **为什么是节点属性而不是前端计时**：切会话 / 重连后前端计时从零重来，会把
+  "已经跑了 3 分钟"显示成"刚刚开始"——恰好丢掉用户最需要的那条信息；
+- **为什么前端在锚点缺失时不显示时长**：宁可不说，也不给一个看起来合理但
+  没有依据的数（旧数据没有该字段）；
+- 只写 `started_at`（一个不可变的事实），**不写** `running: true` 这类布尔——
+  布尔在结束时需要有人负责清除，漏清就是永久误报。
+
+> 前端另有一条独立收益：`syncActivity` 原本会在 `finalize_assistant_turn` 的
+> `Completed` 到达时把活动文字清空，执行窗口内因此也是空的。运行态跨越执行窗口后，
+> 活动文字（`正在调用 <name>…`）与节点标签自然同步，无需额外接线。
+
 ---
 
 ## 6. 迁移阶段
@@ -305,8 +358,20 @@ kind = "vdfs" 变更
 | 前端 `services/sessionBusWatcher.ts` | **删除**（连同 `MainLayout.vue` 的接线） |
 | 前端 `services/eventBus.ts` | 删除 `replayBuffer` / `fetchPendingSnapshot`（失去唯一调用方） |
 
-### S21 —— 工具调用请求显式化（**本次不做，留待需要时**）
+### S20.1 —— ToolCall 运行态跨越执行窗口（本次）
 
+S20 把**会话**运行态搬到了节点上，但**工具调用**的运行态还断在执行窗口之外
+（`finalize_assistant_turn` 提前定格）。本次补齐：
+
+| 层 | 改动 |
+|---|---|
+| `session/chat_loop/state.rs` | `finalize_assistant_turn` **不再**在 LLM 流结束时把 ToolCall 标 `Completed`（参数齐 ≠ 调用结束） |
+| `session/tool_executor.rs` | 新增 `emit_tool_running`（执行前 `Streaming` + `meta.started_at`）与 `not_executed_patch`；被拦下 / 中止 / 交互中断的批尾在函数末尾统一收口 |
+| `session/resume.rs` | approve / retry / supply 三个真正重跑工具的 action 在执行前同样置 `Streaming` + `meta.started_at`（reject / answer 不执行工具，不置） |
+| 前端 `composables/useRunningClock.ts` | **新增**：全应用共享的秒级时钟，引用计数归零即停表（`MessageNode` 是递归组件，每实例一个定时器会线性增长） |
+| 前端 `components/MessageNode.vue` | 状态标签覆盖全部非终态（`运行中` / `待确认` / `失败`）；运行中带三点脉动 + 已运行时长；`headClass.thinking` 扩展到工具调用（标题呼吸） |
+
+### S21 —— 工具调用请求显式化（**本次不做，留待需要时**）
 把 ToolCall 的参数从 `content` 提升为一个真子节点（`type = tool_request`）。
 **现在不做**，因为它要求 `plugins/model/message_builder` 的请求扁平化同步改造，
 而收益只是"地址更纯"——§2.2 已论证：请求就是 ToolCall 的**内容**，
@@ -322,7 +387,7 @@ kind = "vdfs" 变更
 |---|---|---|---|
 | 1 | 发送后立即显示"处理中…" | 不变（本地乐观置位保留，随后被权威节点状态覆盖） | `useChatConnection.send` |
 | 2 | 流式逐字输出 | 不变（`appended` + `delta` 就地拼接，零回读） | §3.2 |
-| 3 | 思考 / 工具调用单行折叠 + 状态标签 | 不变（`MessageNode` 状态类，状态词不改） | §2.3 |
+| 3 | 思考 / 工具调用单行折叠 + 状态标签 | **更强**：标签覆盖 `运行中 / 待确认 / 失败`（此前 `待确认` 的 warn 样式是死代码），运行中另带三点脉动 + 已运行时长 | §5.3.1 |
 | 4 | 工具审批：卡片角标 + 表单 | 不变（`waiting_user_action` 节点状态，本就是 VDFS） | §5.2 |
 | 5 | 失败：根级 Turn ⚠ + 重试 | 不变（失败节点状态） | §5.2 |
 | 6 | 失败但无节点（transport 级） | 会话节点 `failed` + `attributes.error` → 同一条错误条 | §3.3 |
@@ -350,6 +415,11 @@ kind = "vdfs" 变更
 10. **事件通道仍在，但不承载显示**：`kind = "session"` 的帧继续发布给**进程内**
     消费者（`agent/host/subagent.rs` 需要 `Update` 与 `Status idle` 判断子会话结束），
     前端不再订阅它。
+11. **ToolCall 的 `streaming` 覆盖执行窗口**：`finalize_assistant_turn` 不得提前定格；
+    每个 ToolCall 都必须以终态收场（未执行者收口为 `Completed` +
+    `meta.failure_kind = "not_executed"`），不得有节点停在 `Streaming`（§5.3.1）。
+12. **运行时长是节点属性**：`meta.started_at` 由执行方写入；前端不自造锚点，
+    锚点缺失即不显示时长。
 
 ---
 
