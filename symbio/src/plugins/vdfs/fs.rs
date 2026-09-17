@@ -506,7 +506,7 @@ mod tests {
             &VdfsContext::empty(),
             ".vdfs/session",
             Arc::new(move |c: VdfsChange| {
-                out.lock().unwrap().push((c.path, c.change, c.to));
+                out.lock().unwrap().push((c.path, c.change, c.to)); // grep-audit-allow S-002: temporary guard drops at this semicolon; await is outside the callback
             }),
         )
         .await

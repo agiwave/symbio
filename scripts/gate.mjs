@@ -43,10 +43,8 @@
  *   是沙箱拦截，**不是失败**——看退出码，不要grep 文本。
  * - **rustfmt 只用 `cargo fmt`**：工具链锁 1.93.1（rustfmt 1.8.0），裸 `rustfmt`
  *   走 rustup default ⇒ 格式漂移。CI 与本脚本都用 `cargo fmt --all -- --check`。
- * - **vitest 不能后台跑**：后台会卡死近一小时。本脚本前台跑 + 超时 kill。
- *   它还有两类**假失败**（与 cargo 并发 / 缓存 `EPERM rename .tmp-…`），
- *   判据都是「用例数没少」：退出码非 0 但用例数 ≥ 基线 ⇒ 记为疑似假失败，
- *   打印原因并继续（真失败会用「用例数变少」暴露出来）。
+ * - **vitest 不能后台跑**：本脚本前台跑 + 超时 kill。总结和通过数只是附加检查，
+ *   不能覆盖非零退出码、超时或信号终止；缓存 / 并发异常也必须排查后重跑。
  * - **MSRV 阶段要单独的工具链**：`rust-version` 声明的是 1.91，而本机与 CI 默认锁
  *   1.93.1（`rust-toolchain.toml`）。故该阶段用 `RUSTUP_TOOLCHAIN` **覆盖**工具链文件
  *   （环境变量优先级高于 `rust-toolchain.toml`）换编译器跑。两个附带约束：
@@ -96,12 +94,12 @@ const msrvTargetDir = path.join(repoRoot, '.workbuddy-ai', 'msrv-target')
  * 不该留下——留着就是在给一段已删的实现作证。
  */
 const BASELINE = {
-  rustTests: 638,
+  rustTests: 657,
   vitestFiles: 19,
   vitestTests: 156,
 }
 
-/** vitest 前台最长等待（毫秒）——超时即 kill，判定交给「用例数是否达标」 */
+/** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */
 const VITEST_TIMEOUT_MS = 180_000
 
 // ── 参数 ───────────────────────────────────────────────────────────────
@@ -177,25 +175,13 @@ function run(o) {
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
         timedOut = true
-        child.kill('SIGTERM')
+        child.kill('SIGKILL')
       }, timeoutMs)
-    }
-
-    // 「跑完了但进程不自己退出」的子进程（如 vitest）：总结行一出现就等一小会儿
-    // 再收尾，不必干等到超时。
-    let settled = false
-    let settleTimer = null
-    const maybeSettle = () => {
-      if (settled || !o.settleAfter) return
-      if (!o.settleAfter.re.test(stripAnsi(output))) return
-      settled = true
-      settleTimer = setTimeout(() => child.kill('SIGTERM'), o.settleAfter.delayMs ?? 1500)
     }
 
     const consume = (chunk) => {
       const text = chunk.toString()
       output += text
-      maybeSettle()
       if (echo !== 'none') {
         for (const raw of text.split('\n')) {
           const line = raw.replace(/\r/g, '').trimEnd()
@@ -217,21 +203,18 @@ function run(o) {
 
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer)
-      if (settleTimer) clearTimeout(settleTimer)
+      const ok = code === 0 && signal === null && !timedOut
       const ms = Date.now() - started
       fs.mkdirSync(logDir, { recursive: true })
       fs.writeFileSync(path.join(logDir, `${slug(label)}.log`), output, 'utf8')
       if (timedOut) {
         console.log(yellow(`超时（已 kill，${fmtDuration(ms)}）`))
-      } else if (code === 0) {
+      } else if (ok) {
         console.log(green(`ok (${fmtDuration(ms)})`))
-      } else if (settled) {
-        // 总结行已出、进程不自退：退出码无意义，**结果由用例数判定**（见调用方）
-        console.log(green(`ok (${fmtDuration(ms)}；进程未自退，已收尾)`))
       } else {
         console.log(red(`失败 (exit=${code}${signal ? `, ${signal}` : ''}, ${fmtDuration(ms)})`))
       }
-      resolve({ ok: code === 0 || settled, code, signal, output, timedOut, settled })
+      resolve({ ok, code, signal, output, timedOut })
     })
   })
 }
@@ -316,7 +299,7 @@ async function stageBackend() {
     } else {
       console.log(dim(`      ${passed} passed（基线 ${BASELINE.rustTests}）`))
     }
-    record('backend', 'cargo test --lib', test.ok || passed >= BASELINE.rustTests, passed > BASELINE.rustTests ? `通过数 ${passed}（基线待更新）` : '')
+    record('backend', 'cargo test --lib', test.ok, passed > BASELINE.rustTests ? `通过数 ${passed}（基线待更新）` : '')
   }
 
   const clippy = await run({
@@ -389,40 +372,31 @@ async function stageFrontend() {
     args: [path.join(frontendDir, 'node_modules', 'vitest', 'vitest.mjs'), 'run'],
     cwd: frontendDir,
     timeoutMs: VITEST_TIMEOUT_MS,
-    // vitest 跑完测试**不会自己退出**（已知行为）：总结行一出就收尾，不必干等超时
-    settleAfter: { re: /Tests\s+\d+ passed/, delayMs: 1500 },
   })
   const files = grabInt(vitest.output, /Test Files\s+(\d+) passed/)
   const tests = grabInt(vitest.output, /Tests\s+(\d+) passed/)
   const enough =
     files !== null && tests !== null && files >= BASELINE.vitestFiles && tests >= BASELINE.vitestTests
 
-  if (tests !== null) {
-    if (tests < BASELINE.vitestTests) {
-      record('frontend', 'vitest run', false, `用例数 ${tests} < 基线 ${BASELINE.vitestTests}`)
-    } else if (!vitest.ok) {
-      // 判据是「用例数没少」：进程不自退 / 与 cargo 并发 / 缓存 EPERM 都长这样
-      const why = vitest.settled ? '进程未自退（已收尾）' : '退出码非 0'
-      console.log(yellow(`      ⚠ ${why}，但用例数没少（${files} 文件 / ${tests} 用例）——不判失败`))
-      if (!vitest.settled) {
-        console.log(yellow('        常见原因：与 cargo 并发 / 缓存 EPERM rename / 跑满超时被 SIGTERM'))
-      }
-      record('frontend', 'vitest run', true, vitest.settled ? '用例数达标' : '疑似假失败（用例数达标）')
-    } else {
-      if (tests > BASELINE.vitestTests) {
-        console.log(yellow(`      ⚠ 用例数 ${tests} > 基线 ${BASELINE.vitestTests}：请更新 scripts/gate.mjs 的 BASELINE.vitestTests`))
-      } else {
-        console.log(dim(`      ${files} 文件 / ${tests} 用例（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`))
-      }
-      record('frontend', 'vitest run', true)
-    }
+  if (!vitest.ok) {
+    record('frontend', 'vitest run', false, vitest.timedOut ? '超时终止' : `exit=${vitest.code}, signal=${vitest.signal}`)
+  } else if (!enough) {
+    record('frontend', 'vitest run', false, `文件/用例数未达基线或无法解析：${files}/${tests}（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`)
   } else {
-    record('frontend', 'vitest run', vitest.ok && !vitest.timedOut, enough ? '' : '未能解析用例数')
+    console.log(dim(`      ${files} 文件 / ${tests} 用例（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`))
+    record('frontend', 'vitest run', true)
   }
 }
 
 async function stageDocs() {
   stageHeader('docs', '静态审计')
+  const auditTests = await run({
+    label: 'grep-audit 回归测试',
+    cmd: process.execPath,
+    args: ['--test', path.join(scriptDir, 'grep-audit.test.mjs')],
+    cwd: repoRoot,
+  })
+  record('docs', 'grep-audit 回归测试', auditTests.ok)
   // 判定型：有发现即以非零退出码失败。
   for (const name of ['grep-audit', 'style-audit', 'doc-link-audit', 'test-layout-audit', 'dead-code-audit']) {
     const r = await run({

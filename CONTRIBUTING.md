@@ -113,7 +113,8 @@ git config core.hooksPath scripts/git-hooks
 
 - 遵循 `rustfmt.toml` + `clippy.toml`，**不要**手动格式化后被 CI 反复退回。
 - 异步上下文请使用 `tokio::sync::Mutex` / `tokio::sync::RwLock`；`std::sync::*` 只在 `spawn_blocking` 内部使用。
-  - 审计脚本 `scripts/grep-audit.mjs` 中的 **S-002 规则**专门检测此问题。
+  - 审计脚本 `scripts/grep-audit.mjs` 中的 **S-002 规则**默认扫描全部插件（含测试代码）；这是邻近行启发式检查，不替代锁生命周期审查。
+  - 已人工确认的 S-002 误报可在命中行末添加 `// grep-audit-allow S-002: 具体理由`，仅豁免该行，不应借此隐藏真实跨 await 持锁。回归测试 `node --test scripts/grep-audit.test.mjs` 已接入统一门禁。
 - 日志：使用 `tracing`（`info!` / `warn!` / `error!` / `debug!`），**不要**用 `eprintln!` / `println!`。
   - 项目在 `tauri/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
 - 错误：实现 `thiserror` 派生 `PluginError` 变体，不要用 `String` 当错误类型。

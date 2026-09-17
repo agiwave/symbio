@@ -8,7 +8,7 @@
  *   - S-007:        CHANGELOG 缺关键修复条目（v25-N6 案例）
  *
  * 用法：
- *   node scripts/grep-audit.mjs            # 审计 src/plugins/agent
+ *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
  *   node scripts/grep-audit.mjs --strict   # 严格模式：warning 也算失败
  *   SCOPE=<dir> node scripts/grep-audit.mjs
  *
@@ -64,13 +64,13 @@ const isDir = (p) => {
 function resolveScope() {
   if (process.env.SCOPE) return path.resolve(cwd, process.env.SCOPE)
   for (const p of [
-    path.resolve(cwd, 'src/plugins/agent'),
-    path.resolve(cwd, 'symbio/src/plugins/agent'),
-    path.resolve(repoRoot, 'symbio/src/plugins/agent'),
+    path.resolve(cwd, 'src/plugins'),
+    path.resolve(cwd, 'symbio/src/plugins'),
+    path.resolve(repoRoot, 'symbio/src/plugins'),
   ]) {
     if (isDir(p)) return p
   }
-  return path.resolve(cwd, 'src/plugins/agent')
+  return path.resolve(cwd, 'src/plugins')
 }
 
 const scopeAbs = resolveScope()
@@ -139,6 +139,8 @@ if (files.length === 0) {
       if (lockLines.length === 0 || awaitLines.length === 0) continue
 
       for (const ln of lockLines) {
+        // 仅允许带理由的行级人工豁免；测试代码同样参与检查。
+        if (/\/\/\s*grep-audit-allow S-002:\s*\S/.test(lines[ln - 1])) continue
         if (awaitLines.some((a) => a > ln && a <= ln + 5)) {
           err(
             `${disp(file)}:${ln}  std::sync::Mutex 持锁后 5 行内出现 .await` +
