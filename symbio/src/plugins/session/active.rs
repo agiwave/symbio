@@ -17,6 +17,21 @@ pub struct ActiveSessionStateInner {
     pub frontends: Vec<mpsc::Sender<PluginFrame>>,
     pub last_content: String,
     pub last_tool_calls: Vec<Value>,
+    /// 上一轮交互的**结局**（`completed` / `aborted` / `failed`）。
+    ///
+    /// 这是**状态**而不是事件：提示音 / 错误条 / 重试入口都据此判定，
+    /// 不需要「Abort 与 Error 谁先到」这种顺序知识（见
+    /// `session/docs/node-state-streaming.md` §3.3）。
+    ///
+    /// `None` = 本进程内还没有跑完过一轮（或刚被新一轮请求复位）。
+    pub last_outcome: Option<String>,
+    /// 上一轮的错误短消息（面向用户）。仅当 `last_outcome == failed` 时存在。
+    ///
+    /// 存在的意义：错误可能发生在**任何消息节点创建之前**（能力收集失败 /
+    /// provider 解析失败 / transport 级失败），此时没有失败节点可承载它，
+    /// 只能挂在会话节点上——原先是前端一个平行状态（`sessionErrors`），
+    /// 现在它是节点的属性（`attributes.error`）。
+    pub last_error: Option<String>,
 }
 
 /// 会话状态锚点
@@ -65,6 +80,8 @@ impl ActiveSessionState {
                 frontends: Vec::new(),
                 last_content: String::new(),
                 last_tool_calls: Vec::new(),
+                last_outcome: None,
+                last_error: None,
             }),
             live_messages: Arc::new(Mutex::new(Vec::new())),
         }

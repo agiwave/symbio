@@ -252,16 +252,16 @@ impl SessionPlugin {
         self.save_session(&session).await?;
 
         // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：
-        // 新建 → created，其余 → updated。VDFS 会话清单因此无需轮询即可收敛；
-        // 发起方本次就拿到的完整 session（见下方响应），不依赖事件携带标题。
-        self.notify_change(
-            &req.session_id,
-            if is_new {
-                crate::symbio_core::vdfs::VDFS_CHANGE_CREATED
-            } else {
-                crate::symbio_core::vdfs::VDFS_CHANGE_UPDATED
-            },
-        );
+        // 新建 → created（粗粒度，消费方重拉清单）；其余 → **带节点视图的 updated**
+        // （标题 / 元数据等就地收敛，消费方零回读）。VDFS 会话清单因此无需轮询。
+        if is_new {
+            self.notify_change(
+                &req.session_id,
+                crate::symbio_core::vdfs::VDFS_CHANGE_CREATED,
+            );
+        } else {
+            self.notify_session_state(&req.session_id).await;
+        }
 
         Ok(serde_json::to_value(session_update::Response {
             success: true,

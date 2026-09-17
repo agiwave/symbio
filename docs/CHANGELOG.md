@@ -18,6 +18,58 @@
 
 ***
 
+## 2026-09-18: 流模式改为「节点状态」驱动——会话运行态上节点，前端不再消费事件序列
+
+**性质：架构调整（S20）**。用户可见行为等价，但**正确性不再依赖事件到达顺序**。
+
+### 为什么
+
+会话的实时显示原先基于**事件流**（`kind = "session"` 的 `Status{busy|idle}` / `Abort` /
+`Error`），前端 `switch (event.type)` 逐类处理。代价是正确性依赖顺序，而顺序不是免费
+保证的——最直白的证据就是 `eventBus.ts` 里那段「切会话防乱序」的 `replayBuffer`：
+**一段只为修顺序而存在的机制，说明模型本身选错了**。
+
+### 变更
+
+- **会话运行态成为会话节点的属性**：`status`（`working` / `active` / `failed`）
+  + `attributes.outcome`（`completed` / `aborted` / `failed`）+ `attributes.error`。
+  状态类变更（`updated`）**必带全量节点视图**，前端**零回读**。
+- **`failed` 是独立状态**，取代「`active` + `last_failed` 布尔」：判据从两处变一处。
+- **修掉一处有损映射**：`completed` 与「未标注」曾被后端都映射成 `active`，消费端必须
+  把 `active` **猜回** `completed`；现在消息状态原样透传（`active` 仅作旧数据别名）。
+- **前端按地址分派**：`sessionRouteOf(地址)`（纯函数），**没有 `switch (event.type)`**。
+- **删除的顺序机制**：`sessionBusWatcher.ts`（整模块）、`eventBus.replayBuffer`、
+  `eventBus.fetchPendingSnapshot`、`MainLayout` 的 `startSessionBusWatcher()` 接线。
+- **错误条改由节点表派生**：有失败节点则隐藏（原先在事件到达时判定，隐含"那一刻恰好
+  能看到失败节点"，两条通道先后无法保证）。
+- **提示音改由状态迁移触发**：`working → 非 working` 的迁移 + `outcome` 选音色，
+  不再靠"谁先到"区分中止与失败。
+- **`kind = "session"` 帧保留**：进程内消费者（子会话审批透传、以 `Status idle` 判定
+  子会话结束）仍依赖它，前端不再订阅。
+
+### 不做
+
+- **不合并 `streaming` / `working`**：会连带改 `status-*` CSS 类名，而漏改不报错、
+  不失败，只会让流式动画静默消失。收益（少记一个词）远小于风险。
+- **工具调用请求不另立地址**（S21）：`read(.../消息/<tc-id>)` 的正文就是请求体，
+  子节点就是响应——另立地址会让同一份参数存两处。
+
+### 文档
+
+- 新增 [`node-state-streaming.md`](../symbio/src/plugins/session/docs/node-state-streaming.md)：
+  节点分类与状态机、传输契约、顺序无关性（含三条残留假设）、前端消费模型、
+  11 项「体验等价清单」、10 条不变量。
+- [ADR-015](./DECISIONS.md) 记录决策与后果；[DATA_FLOW.md](./architecture/DATA_FLOW.md)
+  链路二 #6 由「流式帧推送」改写为「前端显示由节点状态驱动」。
+
+### 门禁
+
+- 后端 +6 单测（`SessionRuntime` 投影 / `session_node` / `session_change` /
+  `MessageStatus` 词表与 serde 一致）；前端 +4（`sessionRouteOf` 分派、节点载荷零回读、
+  状态迁移驱动提示音、`failed` 作为独立状态）。
+
+***
+
 ## 2026-09-18: 系统智能体自身的 `AGENTS.md` 入口从 agent 列表移到设置页
 
 **性质：前端可见行为调整**。地址不变（`.vdfs/agent/AGENTS.md` 照旧可达、读写不变），

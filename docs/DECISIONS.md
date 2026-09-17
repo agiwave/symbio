@@ -544,4 +544,66 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
 
 ---
 
+## ADR-015: 前端显示由**节点状态**驱动，不由事件顺序驱动
+
+**状态**：已接受
+
+> **当前状态**：**已实现（现行）**。会话域的全部实时显示经 `kind = "vdfs"` 一条频道，
+> 按**地址**分派（`schemas/vdfs.ts::sessionRouteOf`）；`services/sessionBusWatcher.ts`
+> 与 `eventBus` 的防乱序缓冲已删除。详见
+> [`symbio/src/plugins/session/docs/node-state-streaming.md`](../symbio/src/plugins/session/docs/node-state-streaming.md)。
+
+**背景**：
+会话的实时显示原先基于**事件流**：`kind = "session"` 上发 `Status{busy|idle}` / `Abort` /
+`Error` / `Connected`，前端 `switch (event.type)` 逐类处理，并靠 `last_failed` 布尔、
+`sessionErrors` 平行状态等补丁拼出完整状态。
+
+代价是**正确性依赖到达顺序**，而顺序不是免费保证的。最直白的证据就是
+`eventBus.ts` 里那段 `replayBuffer`（切会话防乱序缓冲）——它的注释写着：
+
+> 「旧实现：先订阅，再异步拉 snapshot。副作用：实时事件先到 handler，snapshot 中的
+> "更早的事件"反而晚到，造成 Status / Abort 顺序错乱。」
+
+**一段只为修顺序而存在的机制，说明模型本身选错了**：把「现在是什么」表达成
+「刚刚发生了什么」的增量序列。
+
+**决策**：
+**把运行态从事件里拿出来，变成节点的属性**，前端按地址消费节点状态。
+
+- 会话节点 `.vdfs/session/<sid>` 承载 `status`（`working` / `active` / `failed`）+
+  `attributes.outcome`（`completed` / `aborted` / `failed`）+ `attributes.error`；
+- 消息节点 `.vdfs/session/<sid>/消息/<mid>` 承载 `status`
+  （`pending` / `streaming` / `waiting_user_action` / `completed` / `failed`）；
+- 状态类变更（`updated`）**必带全量节点视图**，消费端**零回读**；
+- 前端只有 `sessionRouteOf(地址)` 分派，**没有 `switch (event.type)`**；
+- 等待审批、活动文字、可重试性等都由节点表**派生**（纯函数）。
+
+**理由**：
+
+- **状态幂等、可交换、丢一次不影响正确性**；事件是增量、有顺序、丢了没有第二次机会。
+  一次变更携带全量视图后，「谁先到」只影响收敛**速度**，不影响**正确性**。
+- **补丁随之消失**：`replayBuffer` / `fetchPendingSnapshot` / `sessionBusWatcher`
+  存在的理由都是"顺序敏感"，前提没了，补丁也就不需要了。
+- **判据只剩一处**：`failed` 单独成态后，「上一轮失败了吗」= `status == 'failed'`，
+  不再需要同时读 `status` 与 `last_failed` 两个字段（漏读一处即静默错）。
+- **修掉一处有损映射**：`completed` 与「未标注」曾被后端都映射成 `active`，消费端必须
+  把 `active` **猜回** `completed`。现在状态原样透传。
+
+**后果**：
+
+- **新增一条不变量**：任何送达前端的会话状态变化都必须经 `emit_session_state`
+  （运行态的唯一出口），且 `updated` 必带 `node`。漏发即 UI 永久停在旧状态且无人纠正
+  ——两条链路互不校验。消费者侧**不做静默回读兜底**（那会把它掩盖成"看起来能用"），
+  只记 warn，靠下一次 `list` 快照收敛。
+- **三条残留假设写进文档**（不假装没有）：总线是单条有序通道；`list` 快照只能把
+  `active` 升级为 `working`、不得降级；`appended` 依赖路径级串行。前两条是既有的，
+  第三条是增量语义的固有属性。
+- **`kind = "session"` 未整体删除**：进程内消费者（`agent/host/subagent.rs` 的审批透传、
+  文本累积、以 `Status idle` 判定子会话结束）仍依赖它。前端不再订阅。
+- **词汇不合并**：`streaming`（消息）与 `working`（会话）保持两个词。合并会连带改
+  `status-*` CSS 类名与 `isWorkingStatus()`，而**漏改 CSS 类名不报错、不失败，只会让
+  流式动画静默消失**——正是"体验不得变差"要防的那类回归。
+
+---
+
 > **维护原则**：每个架构决策必须记录在此，包括背景、决策、理由、后果。

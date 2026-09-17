@@ -23,7 +23,7 @@ fn session_node_carries_renderer_ext_and_presentation() {
     let mut s = Session::new("abc");
     s.updated_at = 1_700_000_000_000;
 
-    let idle = session_node(&SessionSummary::of(&s), false);
+    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
     assert_eq!(idle.name, "abc");
     assert_eq!(idle.effective_ext().as_deref(), Some("session"));
     assert_eq!(idle.kind, PLUGIN_SESSION);
@@ -32,8 +32,61 @@ fn session_node_carries_renderer_ext_and_presentation() {
     assert_eq!(idle.access.flags(), "rw", "会话可读可写");
     assert!(!idle.is_dir(), "会话是文档而非目录");
 
-    let busy = session_node(&SessionSummary::of(&s), true);
+    let busy = session_node(&SessionSummary::of(&s), &SessionRuntime::working());
     assert_eq!(busy.status, vdfs::VDFS_STATUS_WORKING);
+}
+
+/// 会话运行态投影：**三个状态**（运行中 / 空闲 / 失败），不是「状态 + `last_failed` 布尔」。
+///
+/// 这条断言钉住三件事：
+/// 1. `failed` 是一个真实状态值（可重试性 = `status == 'failed'`，一处判定）；
+/// 2. 「运行中」压过「上次失败」——否则重试期间会同时显示处理中与错误；
+/// 3. 中止**不是**失败（状态回空闲，结局只记在 `outcome`，供提示音选音色）。
+#[test]
+fn session_node_projects_runtime_state() {
+    let mut s = Session::new("abc");
+    s.updated_at = 1_700_000_000;
+
+    let failed = session_node(
+        &SessionSummary::of(&s),
+        &SessionRuntime::finished(OUTCOME_FAILED, Some("上游 502".to_string())),
+    );
+    assert_eq!(failed.status, vdfs::VDFS_STATUS_FAILED);
+    assert_eq!(failed.attributes.get("outcome"), Some(&json!("failed")));
+    assert_eq!(failed.attributes.get("error"), Some(&json!("上游 502")));
+
+    let aborted = session_node(
+        &SessionSummary::of(&s),
+        &SessionRuntime::finished(OUTCOME_ABORTED, None),
+    );
+    assert_eq!(aborted.status, vdfs::VDFS_STATUS_ACTIVE, "中止不是失败");
+    assert_eq!(aborted.attributes.get("outcome"), Some(&json!("aborted")));
+    assert_eq!(aborted.attributes.get("error"), None, "中止不带错误文案");
+
+    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
+    assert_eq!(idle.status, vdfs::VDFS_STATUS_ACTIVE);
+    assert_eq!(
+        idle.attributes.get("outcome"),
+        None,
+        "「还不知道上一轮结局」不写成 null：与「上一轮正常结束」是两件事"
+    );
+}
+
+/// 运行态变更**带节点视图、不带内容**。
+///
+/// 会话节点的 `content` 是整份会话 JSON；若每次状态迁移都带上它，
+/// 一次「开始处理」就要重传整份转写——而状态迁移是最频繁的一类变更。
+#[test]
+fn session_change_carries_node_but_not_content() {
+    let mut s = Session::new("abc");
+    s.updated_at = 1_700_000_000;
+    let node = session_node(&SessionSummary::of(&s), &SessionRuntime::working());
+    let c = session_change("abc", node);
+    assert_eq!(c.path, "abc", "provider 子树内口径，挂载名由容器补");
+    assert_eq!(c.change, vdfs::VDFS_CHANGE_UPDATED);
+    assert!(c.node.is_some(), "状态由节点视图表达");
+    assert!(c.content.is_none(), "不得捎带整份会话正文");
+    assert!(c.delta.is_none(), "状态变更不是追加");
 }
 
 /// 会话内部寻址（S6/S16）：`<id>` / `<id>/AGENTS.md` / `<id>/消息[/<mid>]` /
@@ -154,7 +207,15 @@ fn vdfs_message_node_splits_text_and_structure() {
     assert_eq!(n.description.as_deref(), Some("你好，世界"));
     assert_eq!(n.access.flags(), "r", "消息是只读列表项");
     assert_eq!(n.updated_at, Some(1_700_000_000_000));
-    assert_eq!(n.status, vdfs::VDFS_STATUS_ACTIVE, "completed 落常规态");
+    assert_eq!(
+        n.status, "completed",
+        "消息状态**直通**，不再坍缩成会话态 active——\
+         坍缩会把 completed / failed 两种结局压成同一个值，消费端再也猜不回来"
+    );
+    // 没写 status 的历史消息（老数据）默认已结束：缺省不等于「未开始」
+    m.status = None;
+    assert_eq!(message_node(&m).status, "completed");
+    m.status = Some(cm::MessageStatus::Completed);
     // 结构字段全在 attributes 里（VDFS 只透传）
     assert_eq!(n.attributes.get("seq"), Some(&json!(7)));
     assert_eq!(n.attributes.get("role"), Some(&json!("assistant")));
@@ -398,7 +459,7 @@ fn vdfs_session_node_carries_list_fields() {
     s.updated_at = 1_700_000_000;
     s.metadata = json!({ "workdir": "/tmp/proj/demo", "title": "T" });
 
-    let n = session_node(&SessionSummary::of(&s), false);
+    let n = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
     assert_eq!(n.attributes.get("message_count"), Some(&json!(0)));
     assert_eq!(
         n.attributes.get("metadata").and_then(|v| v.get("workdir")),
@@ -414,11 +475,30 @@ fn vdfs_session_node_carries_list_fields() {
     assert_eq!(tags[0], json!("demo"), "标签取工作目录 basename");
     assert_eq!(tags[1], json!("0 条"));
 
-    // is_working 仍由 status 承载（机制口径，不另设 is_working 字段）
+    // 运行态由 status 承载（机制口径，不另设 is_working 字段）：
+    // 空闲 / 运行中 / 上次失败是三个**并列的状态值**，不是布尔 + 标志位
     assert_eq!(n.status, vdfs::VDFS_STATUS_ACTIVE);
     assert_eq!(
-        session_node(&SessionSummary::of(&s), true).status,
+        session_node(&SessionSummary::of(&s), &SessionRuntime::working()).status,
         vdfs::VDFS_STATUS_WORKING
+    );
+    assert_eq!(
+        session_node(
+            &SessionSummary::of(&s),
+            &SessionRuntime::finished(OUTCOME_FAILED, Some("boom".into()))
+        )
+        .status,
+        vdfs::VDFS_STATUS_FAILED,
+        "以错误结束是一个独立状态：空闲但上次失败"
+    );
+    // 正常收尾 → 回到空闲（不是第三个「已完成」态：会话是长驻容器，不是一次性任务）
+    assert_eq!(
+        session_node(
+            &SessionSummary::of(&s),
+            &SessionRuntime::finished(OUTCOME_COMPLETED, None)
+        )
+        .status,
+        vdfs::VDFS_STATUS_ACTIVE
     );
 }
 

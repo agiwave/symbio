@@ -62,7 +62,14 @@ use std::sync::Arc;
 pub const VDFS_STATUS_ACTIVE: &str = "active";
 pub const VDFS_STATUS_WORKING: &str = "working";
 pub const VDFS_STATUS_DISABLED: &str = "disabled";
-pub const VDFS_STATUS_ERROR: &str = "error";
+/// **以错误结束** —— 节点存在，但上一次运行失败了。
+///
+/// 与 [`VDFS_STATUS_ACTIVE`]（就绪）并列的一个**真实状态**，不是标志位：
+/// 「会话上次失败了」= `status == failed`，而不是「状态 + `last_failed` 布尔」——
+/// 后者要求读状态的人同时读两个字段，漏读一处就静默错。
+///
+/// 词面与消息层的 `MessageStatus::Failed` 一致：同一个概念在两类节点上不换词。
+pub const VDFS_STATUS_FAILED: &str = "failed";
 pub const VDFS_STATUS_UNKNOWN: &str = "unknown";
 /// **无运行状态** —— 显式声明「本节点没有会变化的状态」。
 ///

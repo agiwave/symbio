@@ -8,8 +8,22 @@
  *
  * 现在它只是一张**列表**：地址 `.vdfs/session/<sid>/消息`，每一项是一条消息；
  * 流式输出是列表项的**追加型变更**（`appended`）。于是读路径与实时路径都归
- * VDFS，`kind = "vdfs"` 成为消息的唯一变更通道（会话级事件——状态 / 标题 /
- * 生命周期——仍走原通道）。
+ * VDFS，`kind = "vdfs"` 成为消息的唯一变更通道。
+ *
+ * ## 分派是「按地址」的，不是「按事件类型」的
+ *
+ * 入口只有一个：`sessionRouteOf(变更地址)`（`schemas/vdfs.ts`，纯函数、可单测）。
+ * 它把地址解成 `session` / `messages` / `message` 三种目标，各自的处理互不知道
+ * 对方存在——**没有 `switch (event.type)`**。
+ *
+ * 这不是风格问题：事件类型分派必须知道「之前发生过什么」（顺序一变就错），
+ * 地址分派只认「这个地址现在的状态」。会话运行态因此可以整体搬到节点上，
+ * 前端不再需要 `eventBus.replayBuffer` 那套防乱序缓冲。
+ * 见 `symbio/src/plugins/session/docs/node-state-streaming.md` §5.1。
+ *
+ * 会话叶子（`.vdfs/session/<sid>`，即运行态的承载者）由 **store 自己**的
+ * 订阅作用域处理（`stores/sessions.ts::applySessionNode`）——清单是它的状态，
+ * 就地收敛零回读；本模块只负责转写。
  *
  * ## 为什么逐路径串行（本模块的核心不变量）
  *
@@ -42,7 +56,13 @@ import {
   VDFS_CHANGE_DELETED,
   VDFS_CHANGE_UPDATED,
   VDFS_EVENT_KIND,
-  parseTranscriptPath,
+  VDFS_STATUS_ACTIVE,
+  VDFS_STATUS_COMPLETED,
+  VDFS_STATUS_FAILED,
+  VDFS_STATUS_PENDING,
+  VDFS_STATUS_STREAMING,
+  VDFS_STATUS_WAITING_USER_ACTION,
+  sessionRouteOf,
   type VdfsChange,
   type VdfsNode,
 } from '@/schemas/vdfs'
@@ -54,24 +74,26 @@ let _unsubscribe: (() => void) | null = null
 
 // HMR 守卫：模块热更新会重置 `_unsubscribe`，导致二次订阅 → 同一条消息被两个
 // handler 各应用一次（流式文本叠字）。启动标记挂到 globalThis，跨模块重载幂等。
-// （与 sessionBusWatcher 同一套理由，同一个坑不踩两次。）
 const _G = globalThis as typeof globalThis & { __symTranscriptSyncStarted?: boolean }
 
-/** 节点状态词 → 消息状态词。 */
+/**
+ * 节点状态词 → 消息状态词。
+ *
+ * **原样透传**：后端 `message_status()` 已经把 `MessageStatus` 的序列化名直接写成
+ * 节点 `status`，前端不再做任何「读回」式还原。`active` 只作为**旧数据的兜底别名**
+ * 保留（历史上 `completed` 与「未标注」都被映射成 `active`），遇到即按已结束处理。
+ */
 function messageStatusOf(node: VdfsNode): MessageStatus | undefined {
   switch (node.status) {
-    case 'pending':
-      return 'pending'
-    case 'streaming':
-      return 'streaming'
-    case 'waiting_user_action':
-      return 'waiting_user_action'
-    case 'failed':
-      return 'failed'
-    // VDFS 节点只有一套状态词汇（`VDFS_STATUS_*`）：`completed` 与「未标注」
-    // 都落到 `active`。对消息而言两者渲染一致（都不是进行中），取 `completed`。
-    case 'active':
-      return 'completed'
+    case VDFS_STATUS_PENDING:
+    case VDFS_STATUS_STREAMING:
+    case VDFS_STATUS_WAITING_USER_ACTION:
+    case VDFS_STATUS_COMPLETED:
+    case VDFS_STATUS_FAILED:
+      return node.status
+    case VDFS_STATUS_ACTIVE:
+      // 旧数据别名：仅用于兼容已落库的历史节点，新节点不会再出现这个值
+      return VDFS_STATUS_COMPLETED
     default:
       return undefined
   }
@@ -186,30 +208,34 @@ async function applyChange(change: VdfsChange, sessionId: string, messageId: str
 }
 
 /**
- * 由**权威消息**派生会话活动文字 / 审批角标。
+ * 由**权威消息节点**派生会话活动文字 / 审批角标。
  *
  * 放在这里而不是事件处理函数里：事件只带路径与载荷，而活动文字要看
- * `status` + `type` + `name`——从完整消息派生是唯一不需要猜的位置。
+ * `status` + `type` + `name`——从完整节点派生是唯一不需要猜的位置。
  * 只在 `created` / `updated` 调用（`appended` 每帧都来，状态不会因此变化）。
+ *
+ * 全部由**节点状态**决定，不记录「上一条事件是什么」：
+ * 同一份节点表必然派生出同一份文字（§5.2「派生是纯函数」）。
  */
 function syncActivity(
   store: ReturnType<typeof useSessionsStore>,
   sessionId: string,
   msg: ChatMessage,
 ): void {
-  if (msg.status === 'streaming') {
+  if (msg.status === VDFS_STATUS_STREAMING) {
     if (msg.type === 'reasoning') store.putStatus(sessionId, { activity: '正在思考…' })
     else if (msg.type === 'tool_call') store.putStatus(sessionId, { activity: `正在调用 ${msg.name || '工具'}…` })
     else store.putStatus(sessionId, { activity: '正在响应…' })
-  } else if (msg.status === 'waiting_user_action') {
+  } else if (msg.status === VDFS_STATUS_WAITING_USER_ACTION) {
     store.putStatus(sessionId, { activity: '等待审批…', is_waiting_approval: true })
-  } else if (msg.status === 'completed') {
+  } else if (msg.status === VDFS_STATUS_COMPLETED) {
     // 该条审批已了结（后端顺序处理工具，同一时刻仅一个 waiting_user_action）；
     // 若还有其他消息仍在等待，其 waiting_user_action 的更新会再次点亮。
     store.putStatus(sessionId, { activity: undefined, is_waiting_approval: false })
-  } else if (msg.status === 'failed') {
-    store.putStatus(sessionId, { activity: '失败', last_failed: true, is_waiting_approval: false })
   }
+  // `failed` 不在此处理：「这一轮失败了」是**会话节点**的状态
+  // （`status = failed` + `attributes.error`），由 `applySessionNode` 一处落定。
+  // 在消息层再写一次，就是同一份真相的第二种写法（且与节点状态可能不一致）。
 }
 
 /** 清空某会话的转写（`deleted` 落在 `消息` 目录本身） */
@@ -237,18 +263,21 @@ export function startTranscriptSync(): void {
     const change = busEvent.data?.data as VdfsChange | undefined
     if (!change || typeof change.path !== 'string') return
 
-    const parsed = parseTranscriptPath(change.path)
-    if (!parsed) return
+    // **按地址分派**（唯一入口，纯函数）。会话叶子归 store 自己的作用域，
+    // 这里只认转写；其余地址返回 null，直接跳过。
+    const route = sessionRouteOf(change.path)
+    if (!route) return
 
-    // 落在 `消息` 目录本身 = 整表清空
-    if (!parsed.messageId) {
+    if (route.target === 'messages') {
+      // 落在 `消息` 目录本身 = 整表清空
       if (change.change === VDFS_CHANGE_DELETED) {
-        enqueue(change.path, async () => clearTranscript(parsed.sessionId))
+        enqueue(change.path, async () => clearTranscript(route.sessionId))
       }
       return
     }
+    if (route.target !== 'message') return
 
-    const { sessionId, messageId } = parsed
+    const { sessionId, messageId } = route
     enqueue(change.path, () => applyChange(change, sessionId, messageId))
   })
 

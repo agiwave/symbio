@@ -15,11 +15,13 @@ import { ChatMessage, ContentPart, MessageContent, ChatRole, ChatMessageType, Me
 /**
  * 会话事件类型（对齐后端 `session_chat_response::StreamEvent`）。
  *
- * 前端只在 `sessionBusWatcher` 里**动作**于 Status / Abort / Error / Connected /
- * Disconnected 五个——它们才是本通道独有的会话级信息。
+ * ## 前端已不再订阅这条通道（S20）
  *
- * `Update` / `Delete` 的消息本体已归 VDFS 通道（见 `vdfsTranscriptSync`），但后端
- * **仍会下发**它们（进程内的 subagent 宿主依赖 `Update`），前端需要能识别并跳过。
+ * 会话的显示——运行态 / 结局 / 错误 / 消息——**全部**由 VDFS 节点状态承载
+ * （`kind = "vdfs"` 变更，见 `symbio/src/plugins/session/docs/node-state-streaming.md`）。
+ * 本枚举保留为**线路协议的类型描述**：后端仍发布这些帧，因为**进程内**消费者
+ * 依赖它们（`agent/host/subagent.rs` 以 `Update` 做审批透传与文本累积、
+ * 以 `Status idle` 判定子会话结束）。
  */
 export enum ChatEventType {
   Update = 'update',

@@ -4,19 +4,27 @@
  * ## 多会话缩略窗口架构
  *
  * - 每个 session 都有独立的状态空间（`sessionMessages[id]` / `sessionStatuses[id]`）
- * - 左侧列表项 = 缩略卡片：订阅 bus 状态事件，实时显示"最后一条消息预览 + 状态点"
+ * - 左侧列表项 = 缩略卡片：实时显示"最后一条消息预览 + 状态点"
  * - 中间主区 = 详细窗口：单一 activeId 详细渲染（与现有行为一致）
  * - 所有数据（历史 + 流式）都写入 store，组件**只读** — 消除切换赛跑
+ *
+ * ## 状态来自节点，不来自事件
+ *
+ * 会话的运行态是**会话节点的属性**（`status` + `attributes.outcome` / `.error`），
+ * 经 `kind = "vdfs"` 的 `updated` 变更**带载荷**下发（零回读）。因此本 store
+ * 不再订阅 `kind = "session"` 事件通道，也不再需要「防乱序」缓冲——状态是幂等
+ * 的全量视图，变更可丢、可重放、可乱序。见
+ * `symbio/src/plugins/session/docs/node-state-streaming.md`。
  *
  * ## 关键状态
  *
  * - `list`           : SessionListItem[]（来自后端 list + 本地状态镜像合并）
  * - `activeId`       : 当前"详细窗口"展示的会话
  * - `sessionMessages`: 实时 messages map，key 是 sessionId，value 是 `{msgId: ChatMessage}`
- *                      写入：useChatConnection 收 bus 事件时；loadMessages 时
+ *                      写入：`vdfsTranscriptSync`（VDFS 变更）与 loadMessages
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
- *                      写入：useChatConnection 收 Status 事件时
+ *                      写入：`applySessionNode`（会话节点变更）/ send 的乐观置位
  *                      读取：会话列表项状态展示（`.vdfs/session` 实例）
  */
 
@@ -32,7 +40,7 @@ import {
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
-import { readVdfs, statVdfs, writeVdfs } from '@/services/vdfs'
+import { readVdfs, writeVdfs } from '@/services/vdfs'
 import {
   VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_CREATED,
@@ -40,15 +48,22 @@ import {
   VDFS_CHANGE_UPDATED,
   VDFS_ROOT,
   VDFS_SESSION_DIR,
-  VDFS_STATUS_ACTIVE,
+  VDFS_STATUS_FAILED,
   VDFS_STATUS_WORKING,
+  chimeKindOfOutcome,
+  isFailedStatus,
   isWorkingStatus,
+  sessionRuntimeOf,
   vdfsBase,
   vdfsJoin,
   vdfsSessionAddr,
+  type SessionOutcome,
+  type VdfsChange,
+  type VdfsNode,
 } from '@/schemas/vdfs'
 import { setLastWorkdir, getLastWorkdir, callPlugin } from '@/services/plugin'
 import { publishVdfsChangedLocal, subscribeVdfsChanged } from '@/services/eventBus'
+import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/services/model'
@@ -68,12 +83,11 @@ export interface SessionLiveStatus {
   /** 是否有消息处于 waiting_user_action 状态（缩略卡显示"等待审批"角标） */
   is_waiting_approval: boolean
   /**
-   * 最近一次"业务事件"到达时间（毫秒）。
+   * 最近一次"状态写入"的本地时间（毫秒）。
    *
    * 注意：
-   * - 这里"业务事件" = 后端 push 的 Status / Error / Abort / Connected
-   *   经过 sessionBusWatcher 写 store 的时刻（即"前端感知到该事件的本地时间"）。
-   *   消息类事件（`Update` / `Delete`）已归 VDFS 通道，由 `vdfsTranscriptSync` 写入。
+   * - 写入来源是**节点状态**，不是事件：会话节点的 VDFS 变更（`applySessionNode`）
+   *   与消息节点的变更（`vdfsTranscriptSync`），以及 send / resume 的乐观置位。
    * - `putStatus` 内部每次都会**自动更新**此字段（避免漏写）；
    *   `putMessage` 只在产生 assistant 文本预览时同步更新。
    * - 若需判断"状态是否过期"，请使用 `getSessionStaleReason()` 而不是直接读此字段。
@@ -83,8 +97,16 @@ export interface SessionLiveStatus {
   activity?: string
   /** 最后一条消息预览（assistant 的 text 内容） */
   last_preview?: string
-  /** 终态：上次完成时是否失败 */
-  last_failed?: boolean
+  /**
+   * 上一轮的结局（会话节点 `attributes.outcome` 的本地镜像）。
+   *
+   * 提示音据此选音色——它是**状态**（"上一轮怎么结束的"），不是事件：
+   * 不需要靠"谁先到"来区分中止与失败。
+   *
+   * 注意「上一轮是否失败」**不看这里**，看 `status == 'failed'`
+   * （`isFailedStatus`）——结局是过程记录，状态是当前事实，两者职责不同。
+   */
+  outcome?: SessionOutcome
 }
 
 export const useSessionsStore = defineStore('sessions', () => {
@@ -170,6 +192,16 @@ export const useSessionsStore = defineStore('sessions', () => {
   /** 会话是否运行中（运行态的唯一读法：节点 `status == working`） */
   function isSessionWorking(id: string): boolean {
     return isWorkingStatus(sessionStatuses.value[id]?.status)
+  }
+
+  /**
+   * 会话上一轮是否以错误结束（唯一读法：节点 `status == 'failed'`）。
+   *
+   * 取代原先「`active` + `last_failed` 布尔」的写法：那是"状态 + 平行标志位"，
+   * 要求读状态的人同时读两个字段，漏读一处就静默错。
+   */
+  function isSessionFailed(id: string): boolean {
+    return isFailedStatus(sessionStatuses.value[id]?.status)
   }
 
   function getSessionStatus(id: string): SessionLiveStatus {
@@ -302,9 +334,10 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * ## 调用方
    *
-   * - `sessionBusWatcher` 处理 Status / Update / Abort / Error / Connected 时
- * - `useChatConnection.send` / `abort` 收敛状态时
- * - `setSessionStatus` 同步 list.status 时
+   * - `applySessionNode`（会话节点状态迁移）
+   * - `vdfsTranscriptSync`（由消息节点派生活动文字 / 审批角标）
+   * - `useChatConnection.send` / `resume` 的乐观置位
+   * - `setSessionStatus` 同步 list.status 时
    */
   function putStatus(sessionId: string, partial: Partial<SessionLiveStatus>) {
     if (!sessionId) return
@@ -325,9 +358,14 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
   /**
    * 设置/清除会话级错误状态。
-   * - 仅在"没有任何失败消息节点"的兜底路径调用（见 sessionBusWatcher Error 分支 /
-   *   useChatConnection send 兜底）：把错误作为会话级状态，而非往消息树注入错误节点。
-   * - 传 null 清除（新一轮交互开始时调用方负责清除，避免旧错误残留）。
+   *
+   * 两个来源，后者覆盖前者（服务端权威）：
+   * - **节点属性**：`applySessionNode` 取会话节点的 `attributes.error`
+   *   （覆盖"错误发生在任何消息节点创建之前"的场景）；
+   * - **本地乐观**：`useChatConnection` 在 send / resume 请求本身失败时落一条
+   *   （此时后端可能还没产生任何节点）。
+   *
+   * 传 null 清除（新一轮交互开始时节点不带 error ⇒ 自动清空）。
    */
   function setSessionError(sessionId: string, err: string | null) {
     if (!sessionId) return
@@ -357,7 +395,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     )
     let idx = maxSeq + 1
     let waitingApproval = false
-    let hasFailed = false
     for (const m of messages) {
       if (m.id) {
         // 后端单调序号 `seq` 即权威顺序；缺失 seq 的旧数据用递增游标兜底。
@@ -365,10 +402,6 @@ export const useSessionsStore = defineStore('sessions', () => {
         map[m.id] = { ...m, seq }
         // 还原"等待审批"状态，使会话卡片角标在重开会话时正确显示
         if (m.status === 'waiting_user_action') waitingApproval = true
-        // 还原"失败"状态（Bug 1 修复）：切换会话再切回时，若历史中存在 Failed
-        // 消息（如流模式 LLM 失败 / 手动模式工具失败的根 Turn），需让 last_failed
-        // 重新置位，保证失败终态在重载后仍然可见、可重试。
-        if (m.status === 'failed') hasFailed = true
       }
     }
     const next = { ...sessionMessages.value, [sessionId]: map }
@@ -377,13 +410,16 @@ export const useSessionsStore = defineStore('sessions', () => {
     const lastSeq = Object.values(map).reduce((mx, m) => Math.max(mx, m.seq ?? 0), 0)
     const snext = { ...sessionSeq.value, [sessionId]: lastSeq }
     sessionSeq.value = snext
+    // 只还原"等待审批"（它由转写派生，是**消息**节点的属性）。
+    // 「上一轮失败」不在此还原：它是**会话节点**的状态（`status == 'failed'`），
+    // 由 `list` 快照 / 节点变更落定——从消息历史反推会造出第二份真相，
+    // 且与节点状态可能不一致（历史里有失败 Turn ≠ 会话当前处于失败态）。
     const prevStatus = sessionStatuses.value[sessionId] ?? { is_waiting_approval: false, last_event_at: Date.now() }
     sessionStatuses.value = {
       ...sessionStatuses.value,
       [sessionId]: {
         ...prevStatus,
-        is_waiting_approval: waitingApproval,
-        last_failed: prevStatus.last_failed || hasFailed
+        is_waiting_approval: waitingApproval
       }
     }
   }
@@ -904,12 +940,15 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (!rootTurnFailed) {
       setSessionError(sessionId, errorText)
     }
+    // 收敛为「以错误结束」这个**状态值**（不再是 `active` + `last_failed` 布尔）。
+    // 后端随后的权威节点视图会覆盖这里——本次是本地看门狗的乐观收尾，
+    // 与后端 `emit_session_state(Finished{failed})` 语义一致，故不会互相打架。
     putStatus(sessionId, {
-      status: VDFS_STATUS_ACTIVE,
-      activity: undefined,
-      last_failed: true
+      status: VDFS_STATUS_FAILED,
+      activity: '错误',
+      outcome: 'failed'
     })
-    setSessionStatus(sessionId, VDFS_STATUS_ACTIVE)
+    setSessionStatus(sessionId, VDFS_STATUS_FAILED)
   }
 
   /** 同步 list 中某会话的 message_count / updated_at（删除 / 清空后调用） */
@@ -946,31 +985,80 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /**
-   * 重读单个会话节点，把它自述的 status 与标题就地落进清单。
+   * 应用一条**会话节点**变更（`updated`）：状态 / 结局 / 错误 / 标题就地收敛。
    *
-   * 运行态（busy / idle）**没有独立事件**——它就是该节点的一次 `updated`，
-   * 因此角标的唯一取值位置是这次 `vdfs/stat`（`status == working` ⇒ 运行中）。
-   * 标题变更（含后端 `orchestrator::ensure_auto_title` 的自动命名）同理走这里：
-   * 一次 stat 换掉一次整表重拉。原 `status_detail` 不再是独立的事件字段
-   * ——节点的自述就是 `description`。
+   * ## 零回读（本函数存在的理由）
+   *
+   * 后端在会话节点的 `updated` 变更上附带**全量节点视图**
+   * （`change.node`），所以这里**不需要**再发一次 `vdfs/stat`。
+   * 一次状态迁移一次 IPC 恰恰是最不该省的那一步——状态迁移是最需要即时的路径。
+   *
+   * 因此 `node` 缺失时**不做回读兜底**，只记一条 warn 并放弃：
+   * 那意味着后端违反了「状态变更必带节点视图」这条不变量
+   * （`node-state-streaming.md` §8.2），静默回读只会把它掩盖成"看起来能用"。
+   * 真丢了一次也不要紧——下一次 `list` 快照会收敛，因为状态是幂等的。
+   *
+   * ## 状态迁移是唯一驱动提示音的东西
+   *
+   * 只有 `working → 非 working` 的**迁移**才响（`refreshList` 的重复采样、
+   * 标题更新、消息计数更新都不会误触发），音色取节点自述的 `outcome`。
+   * 迁移判定放在 store 是因为**上一状态只有这里有**——它本来就是节点表的一部分，
+   * 不是"上一条事件"。
    */
-  async function syncSessionNode(id: string): Promise<void> {
-    const node = await statVdfs(vdfsSessionAddr(id))
-    if (!node) return
+  function applySessionNode(id: string, change: VdfsChange): void {
+    const node: VdfsNode | undefined = change.node
+    if (!node) {
+      logger.warn(
+        '[sessions]',
+        `会话节点变更未携带节点视图，已忽略（后端违反「状态变更必带载荷」不变量）：${change.path}`,
+      )
+      return
+    }
+
+    const rt = sessionRuntimeOf(node)
+    const prev = sessionStatuses.value[id]
+    const wasWorking = isWorkingStatus(prev?.status)
+    const nowWorking = isWorkingStatus(rt.status)
+
+    // ① 清单条目就地收敛（不整表重拉）
     const title = typeof node.title === 'string' ? node.title : ''
     const idx = list.value.findIndex((s) => s.id === id)
     if (idx >= 0) {
       const cur = list.value[idx]
       list.value[idx] = {
         ...cur,
-        status: node.status,
+        status: rt.status,
         updated_at: node.updated_at ?? cur.updated_at,
+        // 节点自述的 message_count 随载荷下发；缺失则保留原值
+        message_count:
+          typeof node.message_count === 'number' ? node.message_count : cur.message_count,
         metadata: title ? { ...(cur.metadata || {}), title } : cur.metadata,
       }
     }
     if (title) titles.value[id] = title
-    // 节点自述即镜像的值（不折算成布尔：其余状态也因此保留）
-    putStatus(id, { status: node.status })
+
+    // ② 运行态镜像：节点状态 / 结局直通；`activity` 只在**迁移**时改写
+    //    （否则一次标题更新会把消息节点派生的"正在思考…"顶掉，造成闪动）
+    const patch: Partial<SessionLiveStatus> = { status: rt.status, outcome: rt.outcome }
+    if (wasWorking !== nowWorking) {
+      if (nowWorking) {
+        patch.activity = '处理中…'
+        patch.is_waiting_approval = false
+      } else {
+        patch.activity =
+          rt.outcome === 'aborted' ? '已中止' : rt.outcome === 'failed' ? '错误' : undefined
+      }
+    }
+    putStatus(id, patch)
+
+    // ③ 会话级错误 = 节点属性（覆盖「错误发生在任何消息节点创建之前」的场景）。
+    //    新一轮开始（working）时节点不带 error ⇒ 自动清空上一轮的错误。
+    setSessionError(id, rt.error ?? null)
+
+    // ④ 提示音：状态迁移 + 结局选音色
+    if (wasWorking && !nowWorking) {
+      playCompletionChime(chimeKindOfOutcome(rt.outcome), id)
+    }
   }
 
   subscribeVdfsChanged(
@@ -986,7 +1074,8 @@ export const useSessionsStore = defineStore('sessions', () => {
         return
       }
       if (change.change === VDFS_CHANGE_UPDATED) {
-        void syncSessionNode(id)
+        // 带载荷的状态迁移（含 busy / idle / 失败）——就地收敛，零回读
+        applySessionNode(id, change)
         return
       }
       // created / renamed 等：本地乐观插入已覆盖同窗口场景；
@@ -1023,6 +1112,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     rename,
     setSessionStatus,
     isSessionWorking,
+    isSessionFailed,
     loadMessages,
     // 历史管理（删除 / 编辑 / 清空 / 卡死持久化）
     deleteMessage,
@@ -1036,6 +1126,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     putMessage,
     patchMessage,
     putStatus,
+    applySessionNode,
     getSessionError,
     setSessionError,
     dropSessionState,

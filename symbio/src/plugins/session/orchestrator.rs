@@ -21,7 +21,9 @@ use super::active::{ActiveSessionState, REQUEST_ID_COUNTER};
 use super::chat_loop::StopSignal;
 use super::chat_pipeline::{attach_capabilities, collect_capabilities};
 use super::model_chat;
-use super::plugin::SessionPlugin;
+// 运行态的结局常量与变更类型：子模块经 `use super::*;` 取用（`consume` / `entry`
+// / 本文件都要用），因此在这里导入一次，而不是各子模块各导一遍。
+use super::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use crate::plugin_debug;
 use crate::symbio_core::event_bus::EventBus;
 use crate::symbio_core::schemas::{
@@ -33,6 +35,7 @@ use crate::symbio_core::{
     take_errors, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel,
     PluginError, PluginFrame, PluginPayload, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
+use broadcast::SessionStateChange;
 use serde_json::json;
 use std::sync::atomic::Ordering;
 
@@ -187,7 +190,17 @@ impl Drop for WorkingGuard {
                         })),
                     )
                     .await;
-                plugin.broadcast_status(&state, "idle").await;
+                // 运行态收敛为「以错误结束」：`status = failed` + `attributes.error`
+                // 随节点视图一并下发，前端因此不需要"事件 + 启发式"就能显示错误条。
+                plugin
+                    .emit_session_state(
+                        &state,
+                        SessionStateChange::Finished {
+                            outcome: OUTCOME_FAILED,
+                            error: Some(crash_msg),
+                        },
+                    )
+                    .await;
             });
         }
     }

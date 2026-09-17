@@ -74,7 +74,7 @@ async fn vdfs_stat_session_is_dir_view_with_list_shape() {
     assert!(n.is_dir(), "被当目录访问时的视图");
 
     // 同源判据：与清单节点逐字段一致（不是另写一份「目录版」形状）
-    let listed = session_node(&SessionSummary::of(&s), false);
+    let listed = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
     assert_eq!(n.status, listed.status);
     assert_eq!(n.ext, listed.ext);
     assert_eq!(n.updated_at, listed.updated_at);

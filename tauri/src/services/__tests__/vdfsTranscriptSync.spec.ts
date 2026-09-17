@@ -72,9 +72,10 @@ import {
   VDFS_CHANGE_DELETED,
   VDFS_CHANGE_UPDATED,
   VDFS_EXT_MESSAGE,
-  parseTranscriptPath,
+  sessionRouteOf,
   vdfsMessageAddr,
   vdfsMessagesAddr,
+  vdfsSessionAddr,
   type VdfsChange,
   type VdfsNode,
 } from '@/schemas/vdfs'
@@ -122,22 +123,23 @@ beforeEach(() => {
   startTranscriptSync()
 })
 
-describe('parseTranscriptPath（地址的「解」与后端「拼」同源）', () => {
-  it('转写列表 / 列表项两级可解', () => {
-    expect(parseTranscriptPath(vdfsMessagesAddr(SID))).toEqual({ sessionId: SID })
-    expect(parseTranscriptPath(vdfsMessageAddr(SID, 'm1'))).toEqual({
+describe('sessionRouteOf（地址 → 本域目标：按地址分派，不按事件类型）', () => {
+  it('会话叶子 / 转写列表 / 单条消息三级可解', () => {
+    expect(sessionRouteOf(vdfsSessionAddr(SID))).toEqual({ target: 'session', sessionId: SID })
+    expect(sessionRouteOf(vdfsMessagesAddr(SID))).toEqual({ target: 'messages', sessionId: SID })
+    expect(sessionRouteOf(vdfsMessageAddr(SID, 'm1'))).toEqual({
+      target: 'message',
       sessionId: SID,
       messageId: 'm1',
     })
   })
 
-  it('非转写路径一律 null（会话清单 / 会话叶子 / 子会话 / 工作目录）', () => {
-    expect(parseTranscriptPath('.vdfs/session')).toBeNull()
-    expect(parseTranscriptPath('.vdfs/session/abc')).toBeNull()
-    expect(parseTranscriptPath('.vdfs/session/abc/子会话/sub')).toBeNull()
-    expect(parseTranscriptPath('.vdfs/session/abc/工作目录/a.md')).toBeNull()
-    expect(parseTranscriptPath('.vdfs/model/p1')).toBeNull()
-    expect(parseTranscriptPath('.vdfs/session/abc/消息/m1/deeper')).toBeNull()
+  it('非会话域路径一律 null（清单 / 子会话 / 工作目录 / 其他资源）', () => {
+    expect(sessionRouteOf('.vdfs/session')).toBeNull()
+    expect(sessionRouteOf('.vdfs/session/abc/子会话/sub')).toBeNull()
+    expect(sessionRouteOf('.vdfs/session/abc/工作目录/a.md')).toBeNull()
+    expect(sessionRouteOf('.vdfs/model/p1')).toBeNull()
+    expect(sessionRouteOf('.vdfs/session/abc/消息/m1/deeper')).toBeNull()
   })
 })
 
@@ -169,12 +171,16 @@ describe('messageFromNode（结构取 attributes，正文取内容）', () => {
     })
   })
 
-  it('节点状态词 active（= completed 或未标注）落到消息的 completed', () => {
-    expect(messageFromNode(node({ name: 'm1', status: 'active' }), '').status).toBe('completed')
+  it('消息状态**原样透传**；active 只作旧数据别名保留', () => {
+    expect(messageFromNode(node({ name: 'm1', status: 'completed' }), '').status).toBe('completed')
     expect(messageFromNode(node({ name: 'm2', status: 'streaming' }), '').status).toBe('streaming')
-    expect(messageFromNode(node({ name: 'm3', status: 'waiting_user_action' }), '').status).toBe(
+    expect(messageFromNode(node({ name: 'm3', status: 'pending' }), '').status).toBe('pending')
+    expect(messageFromNode(node({ name: 'm4', status: 'waiting_user_action' }), '').status).toBe(
       'waiting_user_action',
     )
+    expect(messageFromNode(node({ name: 'm5', status: 'failed' }), '').status).toBe('failed')
+    // 旧数据别名：历史上 completed 与「未标注」都被写成 active，遇到即按已结束处理
+    expect(messageFromNode(node({ name: 'm6', status: 'active' }), '').status).toBe('completed')
   })
 })
 

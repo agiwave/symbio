@@ -14,6 +14,111 @@
 
 use super::*;
 
+/// 会话的**运行态**——非持久化，随进程与当前请求变化。
+///
+/// 它是「会话节点状态」的唯一来源：节点 `status` 与 `attributes.outcome` /
+/// `attributes.error` 全部由它投影，因此「会话忙不忙 / 上一轮怎么结束的」
+/// 在任何消费端都只有一处判据（见 `session/docs/node-state-streaming.md` §2.3）。
+///
+/// 为什么不是一个 `is_working: bool` 参数：布尔只能表达两态，而会话需要三态
+/// （`working` / `active` / `failed`），且 `failed` 还要带上错误文案。
+/// 让调用方各自拼状态串，等于把判据复制到每个调用点。
+pub(crate) struct SessionRuntime {
+    /// 正在处理一轮交互
+    pub working: bool,
+    /// 上一轮结局：`completed` / `aborted` / `failed`（`None` = 本进程内尚未跑完过一轮）
+    pub outcome: Option<String>,
+    /// 上一轮的错误短消息（仅 `outcome == failed` 时有意义）
+    pub error: Option<String>,
+}
+
+/// 上一轮结局：正常结束
+pub(crate) const OUTCOME_COMPLETED: &str = "completed";
+/// 上一轮结局：用户中止
+pub(crate) const OUTCOME_ABORTED: &str = "aborted";
+/// 上一轮结局：以错误结束
+pub(crate) const OUTCOME_FAILED: &str = "failed";
+
+impl SessionRuntime {
+    /// 空闲：没在跑，也没有已知的上一轮结局
+    pub(crate) fn idle() -> Self {
+        Self {
+            working: false,
+            outcome: None,
+            error: None,
+        }
+    }
+
+    /// 运行中：新一轮开始，上一轮的结局随之作废（否则失败角标会残留）
+    pub(crate) fn working() -> Self {
+        Self {
+            working: true,
+            outcome: None,
+            error: None,
+        }
+    }
+
+    /// 由上一轮结局构造（`failed` 时带错误文案）
+    pub(crate) fn finished(outcome: &str, error: Option<String>) -> Self {
+        Self {
+            working: false,
+            outcome: Some(outcome.to_string()),
+            error: if outcome == OUTCOME_FAILED {
+                error
+            } else {
+                None
+            },
+        }
+    }
+
+    /// 从活跃会话状态（`is_working` + 结局 + 错误）投影运行态。
+    ///
+    /// **唯一入口**：把「运行中时结局一律作废」这条规则收在一处——否则
+    /// 「正在跑却带着上次错误」这种非法组合会在每个调用点各拼一次，而它的
+    /// 表现是静默的（前端同时显示"处理中"与"错误"）。
+    pub(crate) fn from_state(
+        working: bool,
+        outcome: Option<String>,
+        error: Option<String>,
+    ) -> Self {
+        if working {
+            return Self::working();
+        }
+        match outcome.as_deref() {
+            Some(o) => Self::finished(o, error),
+            None => Self::idle(),
+        }
+    }
+
+    /// 节点状态：运行中 > 上次失败 > 空闲。
+    ///
+    /// 顺序有意义——「正在跑」永远压过「上次失败了」：否则重试期间会同时
+    /// 显示"处理中"与"错误"。
+    fn status(&self) -> &'static str {
+        if self.working {
+            return vdfs::VDFS_STATUS_WORKING;
+        }
+        if self.outcome.as_deref() == Some(OUTCOME_FAILED) {
+            return vdfs::VDFS_STATUS_FAILED;
+        }
+        vdfs::VDFS_STATUS_ACTIVE
+    }
+}
+
+/// 会话运行态 → VDFS 变更（**带节点视图，不带内容**）。
+///
+/// ## 为什么只带 `node`、不带 `content`
+///
+/// 会话节点的 `content` 是**整份会话 JSON**（历史读入口，见 [`session_content`]）。
+/// 若每次状态迁移都把它一并下发，一次「开始处理」就要重传整份转写——
+/// 而状态迁移恰恰是最频繁的一类变更。
+///
+/// 状态由 `node` 表达已足够：消费者要的是 `status` / `outcome` / `error` /
+/// `title`，全在节点视图里。正文另有 `.vdfs/session/<id>/消息` 承载。
+pub(crate) fn session_change(id: &str, node: vdfs::VdfsNode) -> vdfs::VdfsChange {
+    vdfs::VdfsChange::new(id, vdfs::VDFS_CHANGE_UPDATED).with_node(node)
+}
+
 /// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）。
 ///
 /// 入参是 [`SessionSummary`] 而非 `Session`——**清单路径根本不持有消息**，
@@ -23,16 +128,14 @@ use super::*;
 /// 另在 `attributes` 上挂载会话清单所需字段（`message_count` / `metadata` /
 /// `meta_tags`）——它们是**场景数据**，VDFS 只透传；会话清单由此可直接用
 /// `vdfs/list` 一次取全（见 S8）。
-pub(crate) fn session_node(s: &SessionSummary, is_working: bool) -> vdfs::VdfsNode {
+///
+/// 运行态由 [`SessionRuntime`] 投影：`status` 是运行态本身，`outcome` / `error`
+/// 是它的两个场景属性（消费者据此选提示音音色、渲染会话级错误条）。
+pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> vdfs::VdfsNode {
     let mut n = vdfs::VdfsNode::file(&s.id, s.title.clone(), vdfs::VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_SESSION.to_string();
     n.ext = Some(vdfs::VDFS_EXT_SESSION.to_string());
-    n.status = if is_working {
-        vdfs::VDFS_STATUS_WORKING
-    } else {
-        vdfs::VDFS_STATUS_ACTIVE
-    }
-    .to_string();
+    n.status = rt.status().to_string();
     n.updated_at = Some(s.updated_at);
     n.description = s.summary.clone();
     let _ = n
@@ -44,6 +147,14 @@ pub(crate) fn session_node(s: &SessionSummary, is_working: bool) -> vdfs::VdfsNo
     let _ = n
         .attributes
         .insert("meta_tags".to_string(), json!(s.meta_tags));
+    // 上一轮结局：只在知道时出现（不写成 null——「还不知道」与「上一轮正常结束」
+    // 是两件事，不该在线上形状里混为一谈）
+    if let Some(outcome) = &rt.outcome {
+        let _ = n.attributes.insert("outcome".to_string(), json!(outcome));
+    }
+    if let Some(error) = &rt.error {
+        let _ = n.attributes.insert("error".to_string(), json!(error));
+    }
     n
 }
 
@@ -376,17 +487,24 @@ fn message_label(m: &cm::ChatMessage) -> String {
     }
 }
 
-/// 消息状态词——与 `MessageStatus` 的序列化名一致（前端按同一套词渲染角标）。
+/// 消息状态词——**就是 `MessageStatus` 自己的状态词**（[`cm::MessageStatus::as_str`]）。
 ///
-/// `completed` 与「未标注」都落到 VDFS 的常规状态词 `active`：节点状态只有一套
-/// 词汇表（`VDFS_STATUS_*`），不为场景再造一套。
+/// ## 为什么不再做映射
+///
+/// 原先这里把 `Completed` 与「未标注」**都**映射成 VDFS 的常规状态词 `active`，
+/// 理由是「节点状态只有一套词汇表，不为场景再造一套」。方向是对的，做法错了：
+/// 它把**两个不同的状态**合并成同一个字符串，于是消费端必须把 `active`
+/// **猜回** `completed`（`vdfsTranscriptSync::messageStatusOf`）——一次信息丢失
+/// 加一次还原，任何一端改口径都会静默错。
+///
+/// 现在改为**原样透传**：`pending` / `streaming` / `waiting_user_action` /
+/// `completed` / `failed` 就是节点状态词。会话节点的 `active`（空闲）与消息的
+/// `completed`（已结束）因此不再撞名——它们本来就是两件事。
 fn message_status(m: &cm::ChatMessage) -> &'static str {
     match m.status.as_ref() {
-        Some(cm::MessageStatus::Pending) => "pending",
-        Some(cm::MessageStatus::Streaming) => "streaming",
-        Some(cm::MessageStatus::WaitingUserAction) => "waiting_user_action",
-        Some(cm::MessageStatus::Failed) => "failed",
-        _ => vdfs::VDFS_STATUS_ACTIVE,
+        Some(s) => s.as_str(),
+        // 未标注 = 已结束（流式中的节点一定带 `Streaming`，故 `None` 不可能是"进行中"）
+        None => cm::MessageStatus::Completed.as_str(),
     }
 }
 

@@ -50,10 +50,10 @@ sequenceDiagram
 | 3 | 默认能力 | `symbio_core/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
 | 4 | 模型调用 | `symbio/src/plugins/model/plugin.rs` | 4 协议适配：OpenAI / Anthropic / Gemini / Ollama |
 | 5 | 工具循环 | `model` 内 tool loop | 工具实现方：`local` / `web` / `telegram` 等 |
-| 6 | 流式帧推送 | `symbio_core/event_bus.rs` + `plugins/event_bus/` | session → EventBus → 前端订阅 |
+| 6 | 前端显示 | `symbio_core/event_bus.rs` + `plugins/event_bus/` → `kind = "vdfs"` 变更 | **显示只由节点状态驱动**：会话运行态是会话节点的属性（`status` + `attributes.outcome`/`.error`），转写是消息节点的列表——两者都经 VDFS 变更带**节点视图/增量**下发，前端按**地址**分派（`sessionRouteOf`），不按事件类型、不依赖到达顺序。见 [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) |
 | 7 | 会话持久化 | `plugins/session/`（存储层） | 帧格式见 [PROTOCOLS.md]「AI 会话流式规范」 |
 
-**排障口诀**：不出字 → 查 #4 协议适配与 provider 配置；工具不触发 → 查 #2 收集结果与 #5 循环；前端收不到帧 → 查 #6 EventBus 订阅。
+**排障口诀**：不出字 → 查 #4 协议适配与 provider 配置；工具不触发 → 查 #2 收集结果与 #5 循环；**状态不刷新** → 查 #6：会话节点 `updated` 是否带 `node` 载荷（不变量），以及前端订阅作用域是否覆盖该地址；状态不动而消息正常 → 多半是 `emit_session_state` 漏调（它是运行态的**唯一出口**）。
 
 ## 链路三：HTTP/WS 入站（gateway 插件）
 
@@ -98,7 +98,8 @@ sequenceDiagram
 | 路由 404 / UNKNOWN_PATH | [ROUTES.md] + home/composite 挂载（链路一 #6/#7） |
 | 聊天无响应/不出字 | 链路二 #4（协议适配）、provider 配置 |
 | 工具不执行 | 链路二 #2（能力收集）、#5（工具循环） |
-| 流式帧丢失 | 链路二 #6（EventBus 订阅）、链路一 #3（连接生命周期） |
+| 流式帧丢失 | 链路二 #6（VDFS 变更 + 订阅作用域）、链路一 #3（连接生命周期） |
+| 会话状态不刷新（角标/停止按钮不动） | 链路二 #6：`emit_session_state` 是否被调（运行态的唯一出口）、`updated` 是否带 `node` 载荷 |
 | 外部 HTTP 调用失败 | 链路三 #1/#2（health → 鉴权） |
 | 资源增删查异常 | 通用：资源访问链路（`vdfs/*`）#2/#3/#4 + [design/vdfs.md](../design/vdfs.md) §13.4 + `symbio/src/providers/vdfs_service/` |
 | 错误码含义 | [ERROR_CODES.md]（源：`symbio_core/error.rs`） |

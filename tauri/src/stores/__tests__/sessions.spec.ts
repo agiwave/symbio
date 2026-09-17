@@ -7,9 +7,9 @@
  * 1. **只有一条变更频道**：会话清单的同步来自 `kind = 'vdfs'` 的
  *    `VdfsChangeEvent`，作用域按**展示地址前缀**分流（`.vdfs/session` 的直接子项
  *    = 会话叶子；转写列表项 / 子会话的变更不进侧栏）。
- * 2. **载荷是粗粒度的**（只有 path + change，不带快照）：
- *    - `updated`（含 busy/idle 运行态与标题变更）→ **重读该会话节点**（`vdfs/stat`）
- *      就地落定，零整表重拉；
+ * 2. **状态类变更必带节点视图**（`node-state-streaming.md` §8.2）：
+ *    - `updated`（含 busy/idle/failed 运行态与标题变更）→ 用**载荷**就地收敛，
+ *      **零回读**、零整表重拉；
  *    - `created` → 防抖重拉收敛排序与完整字段；
  *    - `deleted` → 本地即时移除。
  */
@@ -66,6 +66,12 @@ vi.mock('@/services/plugin', () => ({
   callPlugin: vi.fn(),
 }))
 
+// 提示音是**副作用**（会碰 Web Audio）：此处只断言"在正确的状态迁移上被调用"
+const chime = vi.hoisted(() => ({ playCompletionChime: vi.fn() }))
+vi.mock('@/services/completionChime', () => ({
+  playCompletionChime: chime.playCompletionChime,
+}))
+
 import { useSessionsStore } from '../sessions'
 import { VDFS_SESSION_DIR, VDFS_ROOT, vdfsJoin } from '@/schemas/vdfs'
 
@@ -92,6 +98,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     captured.scopes.length = 0
     captured.handlers.length = 0
     sessionApi.listSessions.mockClear()
+    chime.playCompletionChime.mockClear()
     vdfsApi.statVdfs.mockReset()
     vdfsApi.writeVdfs.mockReset()
     vdfsApi.readVdfs.mockResolvedValue({ text: '{"messages":[]}' })
@@ -131,18 +138,22 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     })
   })
 
-  it('updated → 重读该会话节点拿新 status，就地落角标且零整表重拉', async () => {
+  it('updated 带节点视图 → 就地落 status / 标题，零回读、零整表重拉', async () => {
     const store = useSessionsStore()
     store.titles['s1'] = '新对话'
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: { title: '新对话' } } as never)
-    vdfsApi.statVdfs.mockResolvedValueOnce(sessionNode({ status: 'working' }))
 
-    emit({ path: '.vdfs/session/s1', change: 'updated' })
+    emit({
+      path: '.vdfs/session/s1',
+      change: 'updated',
+      node: sessionNode({ status: 'working', message_count: 7 }),
+    })
     await flushPromises()
 
-    // 唯一取值位置就是这次 stat（地址即展示地址）
-    expect(vdfsApi.statVdfs).toHaveBeenCalledWith('.vdfs/session/s1')
+    // 状态是**节点属性**，随载荷送达 ⇒ 不必也不能回读
+    expect(vdfsApi.statVdfs, '状态类变更带载荷：不得回读').not.toHaveBeenCalled()
     expect(store.list[0].status).toBe('working')
+    expect(store.list[0].message_count).toBe(7)
     expect(store.isSessionWorking('s1')).toBe(true)
     // 标题也随节点自述就地更新，不因为一次变更把整张清单重拉一遍
     expect(store.titles['s1']).toBe('解释一下 VDFS 的地址模型')
@@ -150,16 +161,96 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     expect(sessionApi.listSessions).not.toHaveBeenCalled()
   })
 
-  it('updated 但重读失败 → 不改动任何状态（也不凭空重拉）', async () => {
+  it('updated 未带节点视图 → 忽略并留痕（不做静默回读兜底）', async () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: { title: 'T' } } as never)
-    vdfsApi.statVdfs.mockResolvedValueOnce(null)
 
     emit({ path: '.vdfs/session/s1', change: 'updated' })
     await flushPromises()
 
+    // 载荷缺失意味着后端违反了「状态变更必带节点视图」的不变量；
+    // 回读兜底会把它掩盖成"看起来能用"，所以这里既不改状态也不回读。
+    expect(vdfsApi.statVdfs).not.toHaveBeenCalled()
     expect(store.list[0].status).toBe('working')
     expect(sessionApi.listSessions).not.toHaveBeenCalled()
+  })
+
+  it('failed 是独立的会话状态，不是 active + 布尔标志', async () => {
+    const store = useSessionsStore()
+    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: {} } as never)
+
+    emit({
+      path: '.vdfs/session/s1',
+      change: 'updated',
+      node: sessionNode({ status: 'failed', outcome: 'failed', error: '上游 429' }),
+    })
+
+    expect(store.getSessionStatus('s1').status).toBe('failed')
+    expect(store.isSessionFailed('s1')).toBe(true)
+    expect(store.isSessionWorking('s1')).toBe(false)
+    // 会话级错误是**节点属性**（覆盖"错误发生在任何消息节点创建之前"的场景）
+    expect(store.getSessionError('s1')).toBe('上游 429')
+  })
+
+  it('新一轮开始（working）时节点不带 error ⇒ 上一轮错误自动清空', async () => {
+    const store = useSessionsStore()
+    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'failed', metadata: {} } as never)
+    store.setSessionError('s1', '上一轮的错误')
+
+    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+
+    expect(store.getSessionError('s1')).toBeNull()
+    expect(store.isSessionFailed('s1')).toBe(false)
+  })
+
+  it('提示音只在 working → 非 working 的**迁移**上响，音色取 outcome', async () => {
+    const store = useSessionsStore()
+    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
+
+    // ① 空闲 → 空闲（标题更新等）：不是迁移，不响
+    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'active' }) })
+    expect(chime.playCompletionChime).not.toHaveBeenCalled()
+
+    // ② 空闲 → 运行中：是迁移，但不是"结束"，不响
+    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    expect(chime.playCompletionChime).not.toHaveBeenCalled()
+
+    // ③ 运行中 → 空闲（正常结束）：响 completed
+    emit({
+      path: '.vdfs/session/s1',
+      change: 'updated',
+      node: sessionNode({ status: 'active', outcome: 'completed' }),
+    })
+    expect(chime.playCompletionChime).toHaveBeenCalledWith('completed', 's1')
+
+    // ④ 中止与失败各取自己的音色（结局是状态，不靠"谁先到"区分）
+    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    emit({
+      path: '.vdfs/session/s1',
+      change: 'updated',
+      node: sessionNode({ status: 'active', outcome: 'aborted' }),
+    })
+    expect(chime.playCompletionChime).toHaveBeenLastCalledWith('aborted', 's1')
+
+    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    emit({
+      path: '.vdfs/session/s1',
+      change: 'updated',
+      node: sessionNode({ status: 'failed', outcome: 'failed', error: 'boom' }),
+    })
+    expect(chime.playCompletionChime).toHaveBeenLastCalledWith('failed', 's1')
+    expect(chime.playCompletionChime).toHaveBeenCalledTimes(3)
+  })
+
+  it('标题更新（状态未变）不覆盖消息节点派生的活动文字', async () => {
+    const store = useSessionsStore()
+    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
+    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    store.putStatus('s1', { activity: '正在思考…' })
+
+    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+
+    expect(store.getSessionStatus('s1').activity).toBe('正在思考…')
   })
 
   it('created → 防抖重拉清单（收敛排序与完整字段）', async () => {

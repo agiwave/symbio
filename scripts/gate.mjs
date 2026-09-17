@@ -95,9 +95,13 @@ const msrvTargetDir = path.join(repoRoot, '.workbuddy-ai', 'msrv-target')
  */
 const BASELINE = {
   // 657 → 660：嵌入 2 个真实推理回归测试 + `codebase_search` 注册护栏测试
-  rustTests: 660,
+  // 660 → 666：节点状态流 S20——会话运行态投影（`SessionRuntime` /
+  //   `session_node` / `session_change`）与 `MessageStatus` 词表对齐的回归测试
+  rustTests: 666,
   vitestFiles: 19,
-  vitestTests: 156,
+  // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
+  //   状态迁移驱动的提示音、`failed` 作为独立会话状态
+  vitestTests: 160,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */

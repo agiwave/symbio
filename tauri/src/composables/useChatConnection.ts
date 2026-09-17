@@ -3,7 +3,7 @@ import { callPlugin } from '@/services/plugin'
 import type { ChatMessage } from '@/services/model'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
-import { VDFS_STATUS_ACTIVE, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
+import { VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 import { CHAT_SEND, CHAT_ABORT } from '@/constants/pluginPaths'
 
 export interface UseChatConnectionOptions {
@@ -46,7 +46,10 @@ export interface UseChatConnectionReturn {
  *
  * ## 设计（重要变化）
  *
- * - **所有 bus 事件写入由全局 `SessionBusWatcher` 负责**，本 composable 不再订阅 bus 也不写 store
+ * - **所有状态写入由全局消费端负责**，本 composable 不订阅任何通道：
+ *   消息与转写走 `services/vdfsTranscriptSync`（`kind = "vdfs"` 变更），
+ *   会话运行态走 `stores/sessions.ts::applySessionNode`（同一个频道的会话叶子地址）。
+ *   本 composable 只在**发起动作**时做乐观置位（随后被节点状态覆盖）。
  * - 组件订阅此 hook 只是为了：
  *   1. 拿到 `send` / `abort` 两个 one-off 命令
  *   2. 拿到派生自 store 的 `isLoading` / `isWaitingApproval` 给 UI
@@ -57,7 +60,7 @@ export interface UseChatConnectionReturn {
  * - 每个 `ModelChatPanel` 调一次 `useChatConnection`，都只读 store，互不干扰
  * - 切换会话时 `:key="activeId"` 触发组件 remount，旧的 useChatConnection 销毁，
  *   新的 useChatConnection 创建；store 状态保持不变，UI 立即显示
- * - 多个 session 并发时，SessionBusWatcher 把每个 session 的事件写入 store，
+ * - 多个 session 并发时，消费端把每个会话的节点状态写入 store，
  *   缩略卡 SessionCard 通过 store.sessionStatuses 实时刷新
  *
  * ## 不再需要的旧机制
@@ -65,6 +68,7 @@ export interface UseChatConnectionReturn {
  * - ❌ `messagesMap`（per-instance 缓存）—— store 是唯一权威
  * - ❌ `flushMessagesToStore`（onBeforeUnmount 写回）—— store 自动维护
  * - ❌ `onUpdateMessages` 回调—— store 直接读
+ * - ❌ `kind = "session"` 事件订阅—— 状态是节点属性，不是事件（S20）
  *
  * ## `removeMessage` / `markRemoved`
  *
@@ -193,8 +197,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       store.putMessage(sid, outgoing)
     }
     // 立即置为 working（让 UI 立即反映 send 已经发出）；
-    // 同时清空 last_failed / 会话级错误：新一轮交互开始，上一次失败不再"最新"（避免重试成功后仍显示"上次失败"）。
-    store.putStatus(sid, { status: VDFS_STATUS_WORKING, activity: '处理中…', last_failed: false })
+    // 同时清空会话级错误：新一轮交互开始，上一次失败不再"最新"。
+    // 这是**乐观置位**，随后会被后端会话节点的权威状态覆盖（零回读）。
+    store.putStatus(sid, { status: VDFS_STATUS_WORKING, activity: '处理中…', outcome: undefined })
     store.setSessionError(sid, null)
     store.setSessionStatus(sid, VDFS_STATUS_WORKING)
 
@@ -222,8 +227,10 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       })
     } catch (err: any) {
       const errText = `Send failed: ${err.message || String(err)}`
-      store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '错误', last_failed: true })
-      store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
+      // 请求本身失败（transport 级）：收敛为「以错误结束」这个状态值。
+      // 后端若已开始工作，它的节点视图随后会覆盖这里——权威在服务端。
+      store.putStatus(sid, { status: VDFS_STATUS_FAILED, activity: '错误', outcome: 'failed' })
+      store.setSessionStatus(sid, VDFS_STATUS_FAILED)
 
       // 仅当没有任何 streaming/等待消息承载错误时，才落"会话级错误状态"（而非注入错误节点）：
       // 否则助手根级 Turn 会在 bus Error 事件中带上错误，避免"根级节点 + 会话级"重复报错。
@@ -264,8 +271,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    * - retry_turn：删除 Failed Turn 及其所有子孙节点 → 重新走 LLM 请求
    * - retry/approve/reject/supply/answer：删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点
    *
-   * 前端不在此处构造新消息——后端通过 bus 广播 `Delete`（删旧节点）+ `Update`/
-   * `Append`（写新节点 + 父节点状态更新）事件，由 `sessionBusWatcher` 写入 store。
+   * 前端不在此处构造新消息——后端经 VDFS 广播变更：`deleted`（删旧节点）+
+   * `updated` / `appended`（写新节点 + 父节点状态更新），由 `vdfsTranscriptSync`
+   * 与 `sessions.applySessionNode` 就地收敛。
    *
    * 会话参数：智能体 / 模型 provider 由后端 `resolve_session_params` 从
    * `session.metadata` 回退解析；`mode` / `risk_level` 从会话记忆（metadata 的本地镜像）
@@ -282,7 +290,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // 立即置为 working（让 UI 立即反映 resume 已经发出）；
     // 同一会话才切 working 状态，避免跨会话工具调用误改父会话状态。
     if (targetSid === sid) {
-      store.putStatus(sid, { status: VDFS_STATUS_WORKING, activity: '处理中…', last_failed: false })
+      store.putStatus(sid, { status: VDFS_STATUS_WORKING, activity: '处理中…', outcome: undefined })
       store.setSessionError(sid, null)
       store.setSessionStatus(sid, VDFS_STATUS_WORKING)
     }
@@ -322,15 +330,17 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       if (resp?.status === 'session_busy') {
         logger.warn('useChatConnection', `[${sid}] resume rejected: session_busy`)
         if (targetSid === sid) {
-          store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '会话忙', last_failed: true })
+          // 「会话忙」是**当前事实**（空闲），不是失败：回落 `active`，
+          // 不置 `failed`——否则会显示一个并不存在的失败终态。
+          store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '会话忙' })
           store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
         }
       }
     } catch (err: any) {
       logger.error('useChatConnection', 'Failed to resume:', err)
       if (targetSid === sid) {
-        store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '错误', last_failed: true })
-        store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
+        store.putStatus(sid, { status: VDFS_STATUS_FAILED, activity: '错误', outcome: 'failed' })
+        store.setSessionStatus(sid, VDFS_STATUS_FAILED)
       }
     }
   }
@@ -338,7 +348,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   return {
     isLoading,
     isWaitingApproval,
-    isConnected: computed(() => true), // 始终视为已连接（事件由全局 watcher 接收）
+    isConnected: computed(() => true), // 始终视为已连接（状态由全局消费端收敛）
     messageTree,
     send,
     abort,
