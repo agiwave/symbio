@@ -13,8 +13,7 @@
         <span class="kind">{{ node.kind }}</span>
       </div>
       <div class="head-actions">
-        <button v-if="writable" class="action-btn secondary" :disabled="saving" @click="$emit('rename')">重命名</button>
-        <button v-if="writable" class="danger-btn" :disabled="saving" @click="$emit('delete')">删除</button>
+        <VdfsActions :actions="actions" :busy="busy" @run="onAction" />
       </div>
     </header>
 
@@ -44,7 +43,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { vdfsAccessOf, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
+import VdfsActions from './VdfsActions.vue'
+import { vdfsAccessOf, type DetailAction, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
 
 // 渲染器统一契约（详见 VdfsTextDetail 同名说明）
 const props = defineProps<{
@@ -55,7 +55,7 @@ const props = defineProps<{
   saving?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'save', payload: unknown): void
   (e: 'delete'): void
   (e: 'rename'): void
@@ -63,6 +63,25 @@ defineEmits<{
 
 const access = computed(() => vdfsAccessOf(props.node))
 const writable = computed(() => access.value.write)
+
+/**
+ * 动作区与其余详情页共用同一机制实现 `VdfsActions`（本渲染器不自建按钮）。
+ * 能力判据是访问位（`w` = 可写 ⇒ 可改名 / 可删）；动作一律回到页面层执行。
+ */
+const actions = computed<DetailAction[]>(() =>
+  writable.value
+    ? [
+        { id: 'rename', label: '重命名', style: 'secondary' },
+        { id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' },
+      ]
+    : []
+)
+const busy = computed(() => actions.value.map(() => Boolean(props.saving)))
+
+function onAction(a: DetailAction): void {
+  if (a.id === 'rename') emit('rename')
+  else if (a.id === 'delete') emit('delete')
+}
 
 const accessText = computed(() => {
   const a = access.value

@@ -6,9 +6,10 @@ authors = ["Symbio Team"]
 license = "MIT"
 repository = ""
 edition = "2021"
-# 最低支持 Rust 版本（与 clippy.toml 的 msrv 保持一致）
-# 主要使用 1.95.0 stable；锁定 1.91 是因为 submit_object_creator! 宏依赖
-# TypeId::of 在 const 上下文的稳定化（1.91 起 stable）
+# 最低支持 Rust 版本（MSRV）——与 cli/Cargo.toml 的 rust-version、clippy.toml 的 msrv 一致。
+# 1.91 是**语言特性下限**：submit_object_creator! 依赖 TypeId::of 在 const 上下文的稳定化。
+# 它不是「本机使用的版本」：本机与 CI 固定用 symbio/rust-toolchain.toml 的 1.93.1。
+# MSRV 未被 CI 验证，改动该宏时请在本机以 1.91 实测。
 rust-version = "1.91"
 
 [lints.rust]
@@ -56,7 +57,6 @@ inventory = "0.3.24"
 encoding_rs = "0.8.35"
 fastembed = "6.0.2"
 moka = { version = "0.12.16", features = ["future"] }
-sqlite-vec = "0.1.9"
 # 统一资源协议：zip 上传解压（MCP / Skill / Agent 以 zip 为主，文件名=目录名）
 # 仅启用 deflate（flate2/miniz_oxide，纯 Rust）：默认 features 会拉入 zstd/lzma 等 C 编译包
 zip = { version = "2.4.1", default-features = false, features = ["deflate"] }

@@ -12,12 +12,7 @@
         <code class="path">{{ node.path }}</code>
       </div>
       <div class="head-actions">
-        <button class="action-btn" :disabled="saving || !dirty || readonly" @click="save">
-          {{ saving ? '保存中…' : '保存' }}
-        </button>
-        <button class="action-btn secondary" :disabled="saving" @click="reset">还原</button>
-        <button v-if="!readonly" class="action-btn secondary" :disabled="saving" @click="$emit('rename')">重命名</button>
-        <button v-if="!readonly" class="danger-btn" :disabled="saving" @click="$emit('delete')">删除</button>
+        <VdfsActions :actions="actions" :busy="busy" :disabled="disabledFlags" @run="onAction" />
       </div>
     </header>
 
@@ -38,7 +33,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import CodeEditor from '@/components/CodeEditor.vue'
-import { vdfsAccessOf, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
+import VdfsActions from './VdfsActions.vue'
+import { vdfsAccessOf, type DetailAction, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
 
 // 渲染器统一契约（页面按同一组 props/事件装配；未用到的项一并声明，
 // 避免 Vue 把多余的 prop/监听器作为属性透传到根元素）
@@ -61,6 +57,34 @@ const readonly = computed(() => !vdfsAccessOf(props.node).write)
 const base = computed(() => (typeof props.data === 'string' ? props.data : ''))
 const draft = ref(base.value)
 const dirty = computed(() => draft.value !== base.value)
+
+/**
+ * 动作区与其余详情页共用同一机制实现 `VdfsActions`（本渲染器不自建按钮）。
+ * 前两项是本渲染器自有的编辑动作；后两项是机制动作（改名 / 删除，回到页面层执行）。
+ * `busy` = 进行中（显示 busy_label 并禁用）；`disabledFlags` = 与 saving 无关的禁用条件。
+ */
+const actions = computed<DetailAction[]>(() => {
+  const out: DetailAction[] = [
+    { id: 'save', label: '保存', style: 'primary', busy_label: '保存中…' },
+    { id: 'reset', label: '还原', style: 'secondary' },
+  ]
+  if (!readonly.value) {
+    out.push({ id: 'rename', label: '重命名', style: 'secondary' })
+    out.push({ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' })
+  }
+  return out
+})
+const busy = computed(() => actions.value.map(() => Boolean(props.saving)))
+const disabledFlags = computed(() =>
+  actions.value.map((a) => (a.id === 'save' ? !dirty.value || readonly.value : false))
+)
+
+function onAction(a: DetailAction): void {
+  if (a.id === 'save') save()
+  else if (a.id === 'reset') reset()
+  else if (a.id === 'rename') emit('rename')
+  else if (a.id === 'delete') emit('delete')
+}
 
 // 节点身份或后端内容变化时重置草稿（编辑中不覆盖：仅当节点切换/保存回调后同步）
 watch(

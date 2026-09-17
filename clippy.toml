@@ -6,6 +6,6 @@
 # 这里只放项目级（默认）策略；具体禁用需在源码中以属性形式标注。
 
 avoid-breaking-exported-api = false
-# 与 symbio/Cargo.toml 的 rust-version 保持一致。
+# 与 symbio/Cargo.toml、cli/Cargo.toml 的 rust-version 保持一致。
 # 代码依赖 TypeId::of 在 const 上下文的稳定化（1.91），故 MSRV 锁定 1.91。
 msrv = "1.91"

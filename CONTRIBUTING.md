@@ -47,7 +47,7 @@ symbio/
 
 ## 3. 提交前检查
 
-**一条命令跑完全部**（后端含 `cli/` → 前端 → 4 项审计 → 事实文件）：
+**一条命令跑完全部**（后端含 `cli/` → 前端 → 静态审计 → 事实文件）：
 
 ```bash
 node scripts/gate.mjs                 # 全量
@@ -56,11 +56,11 @@ node scripts/gate.mjs --fix           # 先自动格式化 / 重生成，再检�
 node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 ```
 
-覆盖：Rust 编译 / 单测 / clippy / rustfmt、TypeScript 类型检查、vitest、以及 4 项审计
-（`grep-audit`、`style-audit`、`doc-link-audit`、`test-layout-audit`）与事实文件一致性。
+覆盖：Rust 编译 / 单测 / clippy / rustfmt、TypeScript 类型检查、vitest、静态审计、事实文件一致性。
 完整输出落 `.workbuddy-ai/gate-logs/`；通过数低于基线会报错、高于基线提示更新 `BASELINE`。
 
-⚠️ **要加检查就改 `scripts/gate.mjs`**——本文档、CI、记忆里都不再另立清单，两份清单必然漂移。
+⚠️ **检查项的权威清单只在 `scripts/gate.mjs`**——本文档、CI、记忆里都不另抄一份，
+抄了必然漂移。要加检查就改 `gate.mjs`。
 
 找不到某条机制 / 约定写在哪：`node scripts/doc-find.mjs <关键词>`（搜全仓 `*.md` 与源码
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。

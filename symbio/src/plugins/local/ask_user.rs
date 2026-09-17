@@ -1,6 +1,3 @@
-// 暂未注册（AskUserTool 功能后续成熟后再考虑启用），抑制 dead_code 警告。
-#![allow(dead_code)]
-
 //! 询问用户工具 - 实现 Capability（对应 Trae 的 AskUserQuestion）
 //!
 //! 支持单问题（question）或批量问题（questions[]，1~4 个，对齐 Trae）。
@@ -8,8 +5,12 @@
 //! 编排层在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通 `user` 消息
 //! （`meta.responds_to` 指向本节点）回填后，新一轮会重跑本工具并拿到答案。
 //! options 自动补充 "Other" 选项。
+//!
+//! 与 `local` 的 confirm 流程是**同一机制的两种问法**（见 `plugin.rs::emit_confirm_prompt`）：
+//! confirm 问「是否允许执行某工具」，本工具问「请回答问题」；两者产出的节点形状一致，
+//! 前端的提问卡与回答回填链路共用。自动模式（`mode == "auto"`）下不产节点，
+//! 返回 `tool_unavailable` 让 LLM 自行继续，避免无人值守时阻塞。
 
-use super::policy::SecurityPolicy;
 use crate::symbio_core::{
     schemas::session::chat_message::{
         ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
@@ -26,16 +27,11 @@ const MAX_QUESTIONS: usize = 4;
 const MIN_OPTIONS: usize = 2;
 const MAX_OPTIONS: usize = 4;
 
-#[derive(Clone)]
-pub struct AskUserTool {
-    #[allow(dead_code)]
-    security: Arc<SecurityPolicy>,
-}
-impl AskUserTool {
-    pub fn new(security: Arc<SecurityPolicy>) -> Self {
-        Self { security }
-    }
+/// 询问用户工具。本身不接触文件系统，故不持有 `SecurityPolicy`。
+#[derive(Clone, Default)]
+pub struct AskUserTool;
 
+impl AskUserTool {
     /// 构造 `user_prompt` 节点载荷（含问题或确认信息）
     fn build_prompt_payload(&self, args: &Value) -> Result<Value, String> {
         // 批量模式：questions[]

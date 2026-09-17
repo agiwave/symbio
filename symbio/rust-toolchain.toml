@@ -4,6 +4,9 @@
 # 锁定到具体版本：CI 与本地必须用同一版 rustfmt/clippy，否则 cargo fmt --check
 # 会因版本间格式规则漂移而失败（2026-07 的 CI 失败即此原因）。
 channel = "1.93.1"
-# 最低支持的 Rust 版本（与 symbio/Cargo.toml 的 rust-version 保持一致）
+# ⚠️ channel ≠ MSRV：本 channel 是「本机与 CI 固定使用」的版本；MSRV（最低支持版本）
+# 另由 symbio/Cargo.toml、cli/Cargo.toml 的 rust-version 与 clippy.toml 的 msrv 声明
+# （三者均为 1.91）——那是**语言特性下限**（submit_object_creator! 依赖 const 上下文
+# 的 TypeId::of，1.91 起稳定），不以本 channel 为准，也未被 CI 验证。
 components = ["rustfmt", "clippy"]
 profile = "minimal"

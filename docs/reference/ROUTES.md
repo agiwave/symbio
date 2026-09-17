@@ -173,11 +173,13 @@
 | `local/content_search` | 内容搜索 (ripgrep) | 安全 |
 | `local/todo_write` | 会话任务清单（`LastOnly` 保留策略） | 安全 |
 | `local/codebase_search` | 语义代码搜索 | 安全 |
+| `local/ask_user` | 向用户提结构化问题（单问题或 1~4 批量，自动补 `Other`） | 安全 |
 
 > 文件编辑类原生工具（`file_read` / `file_write` / `file_edit` / `glob_search` 等）
 > **已迁入 VDFS 物理层**，由 `vdfs` 插件以 `vdfs_read` / `vdfs_write` / `vdfs_edit` /
 > `vdfs_search` 等统一暴露（见 §资源（VDFS）），本插件不再提供。
-> `ask_user` 能力源码存在但**暂未注册**（见 `plugins/local/ask_user.rs` 顶部注释）。
+> `ask_user` 产 `user_prompt` 节点等用户回答（与工具审批同一套回填机制）；自动模式下
+> 不产节点、返回 `tool_unavailable` 让模型自行继续。
 
 ### Shell 命令策略
 

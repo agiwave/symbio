@@ -7,19 +7,23 @@
  *   而它本可以在提交前被机械地查出来。
  *
  * 扫描范围（与「文档下沉原则」对齐：单模块文档在该模块目录内）：
- *   docs/                系统级文档（含 archive/）
+ *   docs/                系统级文档（**archive/ 除外**，见下）
  *   symbio/src/          插件模块文档（plugins/<plugin>/README.md + plugins/<plugin>/docs/）
  *   tauri/               前端模块文档（README.md + docs/）
  *   cli/                 命令行模块文档（README.md + docs/）
  *   examples/            示例文档
  *   根目录 *.md          README / CONTRIBUTING / CODE_OF_CONDUCT
  *
+ * **整体豁免 `docs/archive/`**：归档记录的是**当时形态**，其中指向的兄弟文档可能
+ *   早已被合并 / 删除，改写归档链接等于篡改历史。故该目录整体跳过（跳过文件数会打印）。
+ *   活文档（其余全部范围）的失效链接照常报。
+ *
  * 用法：
  *   node scripts/doc-link-audit.mjs              # 报告全部失效链接
  *   node scripts/doc-link-audit.mjs --strict     # 有失效链接即失败（退出码 1）
  *
  * 退出码：
- *   0 = 无失效链接（或 --strict 未开且有历史遗留）
+ *   0 = 无失效链接
  *   1 = --strict 且存在失效链接
  *
  * 与仓库约定一致：纯 Node 实现，不依赖 bash / ripgrep，Windows / macOS / Linux 通用。
@@ -40,6 +44,12 @@ const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'examples']
 /** 根目录下的散落 Markdown */
 const ROOT_FILES = ['README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
 
+/**
+ * 整体豁免的目录（相对 repoRoot，以 `/` 结尾）。
+ * docs/archive/ = 历史归档，其链接指向的是**当时**的兄弟文档，改写等于篡改历史。
+ */
+const EXEMPT_DIRS = ['docs/archive/']
+
 /** 递归时跳过的目录名（构建产物 / 依赖 / 版本库） */
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.venv'])
 
@@ -54,6 +64,7 @@ const isExternal = (t) =>
 
 const bad = []
 let total = 0
+let skippedFiles = 0
 
 const walk = (dir) => {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -67,6 +78,11 @@ const walk = (dir) => {
 }
 
 function check(file) {
+  const rel = path.relative(repoRoot, file).split(path.sep).join('/')
+  if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) {
+    skippedFiles += 1
+    return
+  }
   const text = fs.readFileSync(file, 'utf8')
   for (const m of text.matchAll(LINK)) {
     const raw = m[1].trim()
@@ -94,15 +110,13 @@ for (const rel of ROOT_FILES) {
   if (fs.existsSync(file)) check(file)
 }
 
-console.log(`扫描相对链接 ${total} 条，失效 ${bad.length} 条`)
+const exemptNote = skippedFiles > 0 ? `（豁免 docs/archive/ 下 ${skippedFiles} 个文件）` : ''
+console.log(`扫描相对链接 ${total} 条，失效 ${bad.length} 条${exemptNote}`)
 for (const { from, to } of bad) {
   console.log(`  ${from}  ->  ${to}`)
 }
 if (bad.length > 0) {
-  console.log(
-    '\n提示：失效链接若全在 docs/archive/ 的历史文件里，可暂不处理' +
-      '（归档记录的是当时形态）；新产生的必须修。'
-  )
+  console.log('\n提示：活文档的失效链接必须修（多为文档移动 / 改名后未更新入链）。')
 }
 
 process.exit(STRICT && bad.length > 0 ? 1 : 0)

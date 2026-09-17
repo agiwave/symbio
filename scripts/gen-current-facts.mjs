@@ -273,13 +273,13 @@ const CORE_TRAITS = ["Plugin", "VdfsProvider", "Capability", "ModelProvider", "C
 /**
  * 「未接线」标记：模块级 `#![allow(dead_code)]`。
  *
- * 为什么需要：`plugins/local/ask_user.rs` 顶部自述「暂未注册（AskUserTool 功能后续成熟后
- * 再考虑启用）」，并用该内层属性抑制 dead_code。它里面的 `CapabilityMeta { name: … }`
- * 是**未接线的定义**，不是 LLM 可见工具；不排除就会让 §2 报出一个模型根本看不到的工具
- * （2026-09-17 核对 `plugins/local/plugin.rs` 的 `tool_impls`，实际只注册了
- * `shell` / `content_search` / `todo_write` / `codebase_search` 四个）。
+ * 为什么需要：模块级地整体抑制 dead_code，等于自述「这块代码还没有接线」。
+ * 它里面的 `CapabilityMeta { name: … }` 是**未接线的定义**，不是 LLM 可见工具；
+ * 不排除就会让 §2 报出一个模型根本看不到的工具。
  *
- * 判据取**模块级属性**而不是猜注释文案——全仓仅此一例，可用 grep 复核。
+ * 判据取**模块级属性**而不是猜注释文案——可用 grep 复核。当前全仓**无实例**
+ * （唯一的 `plugins/local/ask_user.rs` 已于 2026-09-17 接线注册并由 §2 正常收录）；
+ * 保留此判据是为了将来再出现未接线模块时自动生效。
  */
 const UNWIRED_MARKER = "#![allow(dead_code)]";
 

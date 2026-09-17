@@ -7,8 +7,9 @@
  *  L2 字符串引用兜底：不可达但文件名仍被源码提及 → 降级「疑似」，不自动判死。
  *  L3 schema 契约：schemas/*.ts 若被 route 调用方以类型名引用则视为存活。
  *
- * 用法： node scripts/dead-code-audit.mjs
- * 退出码：发现「确认死代码」时为 1（便于 CI 拦截）
+ * 用法： node scripts/dead-code-audit.mjs             # 死代码清单（明细只印死代码）
+ *        node scripts/dead-code-audit.mjs --verbose   # 附带「未被引用的导出」明细
+ * 退出码：发现「确认死代码」时为 1（已接入 gate.mjs 的 docs 阶段，是判定型检查）
  */
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative, extname, basename } from 'node:path'
@@ -18,6 +19,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..', 'tauri')
 const SRC = join(ROOT, 'src')
 const EXT = ['.vue', '.ts', '.js', '.tsx', '.mts']
+/** 打印「未被引用的导出」明细（默认只给个数，见文件末段说明） */
+const VERBOSE = process.argv.includes('--verbose')
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -116,8 +119,10 @@ if (suspicious.length) {
 }
 
 // ── 未使用的导出（死代码的细粒度形式）──
+// 属**降级提示**：本检查对「仅在本文件内按类型用」「经 barrel 再导出」都会命中，
+// 故默认只给个数，明细加 `--verbose` 才打印——否则每次门禁刷 50+ 行噪音。
 console.log(`\n【导出级检查】`)
-let unusedExports = 0
+const unusedList = []
 for (const f of reachable) {
   if (isTest(f) || f.endsWith('.d.ts')) continue
   const code = readFileSync(f, 'utf8')
@@ -130,11 +135,14 @@ for (const f of reachable) {
     // 同名标识符在其它任何文件中出现即视为可能被使用（保守）
     const re = new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`)
     const used = corpus.some(([g, c]) => g !== f && re.test(c))
-    if (!used) {
-      console.log(`  ${dir} :: ${n}`)
-      unusedExports++
-    }
+    if (!used) unusedList.push(`${dir} :: ${n}`)
   }
+}
+const unusedExports = unusedList.length
+if (VERBOSE) {
+  for (const line of unusedList) console.log(`  ${line}`)
+} else if (unusedExports) {
+  console.log(`  ${unusedExports} 个导出未被其他文件引用（降级提示，不判失败；--verbose 看明细）`)
 }
 if (!unusedExports) console.log('  （无未被引用的导出）')
 

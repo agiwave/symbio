@@ -4,7 +4,7 @@
 
 ## 工具
 
-清单与逐项说明见 `docs/reference/ROUTES.md` §Local 插件（**权威**）。共 4 个原生工具：
+清单与逐项说明见 `docs/reference/ROUTES.md` §Local 插件（**权威**）。共 5 个原生工具：
 
 | 工具 | 说明 |
 |------|------|
@@ -12,10 +12,9 @@
 | `local/content_search` | 文件内容正则搜索（ripgrep） |
 | `local/todo_write` | 会话级任务清单（id/content/status/priority），支持 merge；返回紧凑确认（count+message），**不回显全量清单**——最新一次调用经 `LastOnly` 保留策略始终完整，避免每轮全量回显的 token 冗余 |
 | `local/codebase_search` | 语义化代码检索（向量相似度，不可用时降级正则） |
+| `local/ask_user` | 向用户提出结构化问题（单问题或 1~4 批量，自动补 `Other`）；产 `user_prompt` 节点等回答，自动模式下降级为 `tool_unavailable` 不阻塞 |
 
 > **文件编辑类能力已迁入 VDFS**：`read`/`edit`/`write`/`delete`/`list`/`search` 统一由 `vdfs` 插件以 `vdfs_read` / `vdfs_edit` / `vdfs_write` / `vdfs_delete` / `vdfs_list` / `vdfs_search` 暴露（详见 `../vdfs/README.md`）。本地文件挂在 `local` 挂载点下，与任意已挂载资源走同一条分发链路——「LLM 能做的 = 前端能做的」。
->
-> `ask_user` 源码保留但**暂未注册**（`plugins/local/ask_user.rs` 顶部注明），故不在清单内。
 
 ## 机制
 

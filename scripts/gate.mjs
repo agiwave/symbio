@@ -24,7 +24,8 @@
  *
  *   1. backend   cargo check --tests / test --lib / clippy / fmt --check（在 `symbio/`）
  *   2. frontend  vue-tsc --noEmit / vitest run（在 `tauri/`）
- *   3. docs      grep-audit / style-audit / doc-link-audit
+ *   3. docs      grep-audit / style-audit / doc-link-audit / test-layout-audit
+ *                / dead-code-audit（均判定型）+ schema-audit（报告型，仅防崩溃）
  *   4. facts     gen-current-facts --check（**必须最后**：它由代码生成，
  *                前面任何自动修复都可能改动代码）
  *
@@ -393,7 +394,8 @@ async function stageFrontend() {
 
 async function stageDocs() {
   stageHeader(3, 4, '静态审计')
-  for (const name of ['grep-audit', 'style-audit', 'doc-link-audit', 'test-layout-audit']) {
+  // 判定型：有发现即以非零退出码失败。
+  for (const name of ['grep-audit', 'style-audit', 'doc-link-audit', 'test-layout-audit', 'dead-code-audit']) {
     const r = await run({
       label: `scripts/${name}.mjs`,
       cmd: process.execPath,
@@ -403,7 +405,19 @@ async function stageDocs() {
     })
     record('docs', `${name}`, r.ok)
   }
-  console.log(dim('      doc-link-audit 的失效链接若全在 docs/archive/ 属历史形态，可不处理'))
+  // 报告型：schema-audit 只出「可删 / 可下放」候选清单，退出码恒为 0（判定需人工
+  // grep 复核）。故**只有它崩溃才会让门禁红**——这正是防它腐烂的机制。
+  // 报告正文长且含人工判断项，走日志不刷屏。
+  const schemaAudit = await run({
+    label: 'scripts/schema-audit.mjs（报告型）',
+    cmd: process.execPath,
+    args: [path.join(scriptDir, 'schema-audit.mjs')],
+    cwd: repoRoot,
+    echo: 'none',
+  })
+  record('docs', 'schema-audit（仅防崩溃）', schemaAudit.ok)
+  console.log(dim('      schema-audit / dead-code-audit 报告正文见 .workbuddy-ai/gate-logs/'))
+  console.log(dim('      doc-link-audit 已豁免 docs/archive/（归档记录当时形态，改写即篡改历史）'))
 }
 
 async function stageFacts() {

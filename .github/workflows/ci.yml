@@ -122,9 +122,11 @@ jobs:
           node-version: '22'
 
       - name: Docs & facts gate
-        # 与本地同一条命令：grep-audit（S-002 异步锁等）、style-audit（使用的类必须有
-        # 定义）、doc-link-audit、test-layout-audit，以及 docs/CURRENT.md 漂移门禁
-        # —— 事实表由代码提取生成，改了插件 / 挂载点 / 工具 / 路由就必须重新生成并提交。
+        # 与本地同一条命令。检查项清单只在 scripts/gate.mjs 里（此处不重抄，抄了会漂移）：
+        # 静态审计阶段含 grep-audit（S-002 异步锁等）、style-audit（使用的类必须有定义）、
+        # doc-link-audit（已豁免 docs/archive/）、test-layout-audit、dead-code-audit，
+        # 外加报告型 schema-audit；facts 阶段是 docs/CURRENT.md 漂移门禁——事实表由代码
+        # 提取生成，改了插件 / 挂载点 / 工具 / 路由就必须重新生成并提交。
         run: node scripts/gate.mjs --only=docs,facts
         continue-on-error: false
 

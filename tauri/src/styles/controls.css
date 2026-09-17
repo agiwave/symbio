@@ -2,7 +2,7 @@
  * Symbio 共享控件样式（在 base.css 之后引入）
  *
  * 目的：收敛各组件 scoped <style> 中反复复制粘贴的通用控件按钮/输入框样式
- * （.action-btn / .danger-btn / .icon-btn / .text-input），
+ * （.action-btn / .icon-btn / .text-input），
  * 做到一次定义、处处复用。
  *
  * 兼容性：存量组件仍持有同名 scoped 副本（`.action-btn[data-v-x]` 特异性更高），
@@ -35,20 +35,6 @@
   border: 1px solid var(--border-default);
 }
 .action-btn.secondary:hover:not(:disabled) { background: var(--surface-hover); }
-
-/* 危险按钮（实心红） */
-.danger-btn {
-  padding: 0.45rem 0.95rem;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--danger-solid);
-  color: var(--text-inverse);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: opacity var(--motion-fast) var(--motion-ease);
-}
-.danger-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* 方形图标按钮（工具栏 / header 操作） */
 .icon-btn {

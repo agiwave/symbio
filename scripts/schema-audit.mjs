@@ -2,17 +2,26 @@
 /**
  * schema-audit.mjs —— schemas 定义使用情况审计
  *
- * 目标（用户要求）：
+ * 目标：
  *   1. 找出「未被使用」的 schema 定义（后端 symbio_core/schemas、前端 tauri/src/schemas）
  *   2. 找出「仅被一个模块使用」的 schema 模块（下放候选）
+ *
+ * 性质：**决策支持报告，不是判定**。它只输出候选清单，退出码恒为 0（除非自身崩溃）——
+ *   因为「未被使用」的判定有天然盲区，必须人工 grep 复核后才可动手：
+ *     · 后端：仅统计 `schemas::` 路径引用与标识符出现；`pub use` 再导出的顶层名
+ *       （`crate::symbio_core::ChatMessage`）靠标识符出现兜底。
+ *     · 前端：模块级引用识别 `from '...'`（含 `export * from`）与相对路径，
+ *       故 schemas 内部的再导出链（`vdfs.ts` → `./vdfs-form`）不再误报死文件。
+ *   本脚本已接入 `gate.mjs`（docs 阶段）：**崩溃会让门禁失败**，报告内容不判失败。
  *
  * 用法：node scripts/schema-audit.mjs
  * 输出：控制台报告。零外部依赖，纯 Node 实现。
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, relative, sep, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = process.cwd();
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---------- 工具 ----------
 function walk(dir, exts, out = []) {
@@ -236,7 +245,10 @@ for (const [top, cons] of [...topConsumers].sort((a, b) => a[0].localeCompare(b[
 // ---------- 前端 ----------
 const feFiles = walk(join(ROOT, 'tauri/src'), ['.ts', '.vue']);
 const feSchemasRoot = join(ROOT, 'tauri/src/schemas');
-const feSchemaFiles = feFiles.filter((f) => f.startsWith(feSchemasRoot));
+// 测试文件本身不是「schema 定义」，不参与被审计集合；但**仍作为消费方**计入
+// （测试引用某个 schema 说明它被使用）。
+const isTestFile = (p) => /[\\/]__tests__[\\/]/.test(p) || /\.(spec|test)\.[cm]?[jt]sx?$/.test(p);
+const feSchemaFiles = feFiles.filter((f) => f.startsWith(feSchemasRoot) && !isTestFile(f));
 
 const feExports = new Map(); // file -> Set(name)
 for (const f of feSchemaFiles) {
@@ -249,23 +261,34 @@ for (const f of feSchemaFiles) {
 }
 
 // import 来源分析
+// 说明：**不能只看 `import`**——`export * from './x'` / `export { a } from './x'` 同样是引用，
+// 且 schemas 目录内部的相对导入（vdfs.ts → ./vdfs-form）也必须计入，
+// 否则「统一出口再导出一份」的模块会被误报成死文件。
+const stripTs = (p) => p.replace(/\.ts$/, '');
+const feSchemaByModule = new Map(); // 'vdfs-form' -> 绝对路径
+for (const sf of feSchemaFiles) {
+  feSchemaByModule.set(relative(feSchemasRoot, sf).split(sep).join('/').replace(/\.ts$/, ''), sf);
+}
+
 const feImporters = new Map(); // schemaFile -> Set(importerFile)
 const feDeadExportUse = new Map(); // file -> Set(name) 实际被引用的导出名
 for (const f of feFiles) {
   const src = readFileSync(f, 'utf8');
-  if (!f.startsWith(feSchemasRoot)) {
-    const re = /from\s+['"]([^'"]*schemas\/([\w-]+))['"]/g;
-    let m;
-    while ((m = re.exec(src))) {
-      const mod = m[2];
-      const target = feSchemaFiles.find((sf) => {
-        const r = relative(feSchemasRoot, sf).split(sep).join('/').replace(/\.ts$/, '');
-        return r === mod;
-      });
-      if (target) {
-        if (!feImporters.has(target)) feImporters.set(target, new Set());
-        feImporters.get(target).add(f);
-      }
+  const re = /from\s+['"]([^'"]+)['"]/g;
+  let m;
+  while ((m = re.exec(src))) {
+    const spec = m[1];
+    let target = null;
+    if (spec.startsWith('.')) {
+      const base = stripTs(join(dirname(f), spec));
+      target = feSchemaFiles.find((sf) => stripTs(sf) === base || stripTs(sf) === join(base, 'index')) ?? null;
+    } else {
+      const i = spec.indexOf('schemas/');
+      if (i !== -1) target = feSchemaByModule.get(spec.slice(i + 'schemas/'.length).replace(/\.ts$/, '')) ?? null;
+    }
+    if (target && target !== f) {
+      if (!feImporters.has(target)) feImporters.set(target, new Set());
+      feImporters.get(target).add(f);
     }
   }
   // 标识符出现（供死导出判断，排除定义文件）
@@ -286,7 +309,7 @@ for (const f of feSchemaFiles.sort()) {
   const cons = [...(feImporters.get(f) ?? [])].map(rel);
   const mod = relative(feSchemasRoot, f).split(sep).join('/');
   const status = cons.length === 0 ? '【死文件：无引用】' : cons.length === 1 ? '【单消费方】' : `【${cons.length} 个消费方】`;
-  console.log(`  ${mod.padEnd(28)} ${status} ${cons.map(rel).join(', ')}`);
+  console.log(`  ${mod.padEnd(28)} ${status} ${cons.join(', ')}`);
 }
 
 console.log('\n--- 死导出（文件被引用但该导出名无人用） ---');

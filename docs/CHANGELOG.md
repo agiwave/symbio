@@ -18,6 +18,67 @@
 
 ***
 
+## 2026-09-17: 质量收敛 —— 删零引用依赖 / 处置游离审计脚本 / 接线 ask_user / 动作按钮收敛
+
+**性质：依赖清理 + 审计体系补漏 + 一个功能接线**。协议无变化；LLM 工具面 **+1**。
+
+### 依赖：删掉 4 条 C/C++ 编译链里纯属白费的一条
+- `symbio/Cargo.toml` 删除 `sqlite-vec`：**全仓零代码引用**（`symbio/src` 里 `sqlite` 的命中
+  全是「解释已删存储后端」的注释，`cli/src`、`tauri/src-tauri/src` 零命中）——它是
+  ADR-008 回退多存储后端后的遗留，却独自把 `cc` 拖进构建。`Cargo.lock`（含 `cli/`）同步收缩。
+- 另三条（`onig_sys`←`fastembed`、`ring` / `aws-lc-sys`←`rustls`）仍在，属真实使用或
+  无净收益的取舍，本次不动。
+
+### 审计体系：4 个游离脚本，2 删 2 接
+- `scripts/` 下有 4 个脚本**既不在 `gate.mjs` 也不在 CI**：
+  - **删** `test-capabilities.mjs` / `test-capability-chain.mjs`：它们验证的是 `agent_query` /
+    `agent_store` / `agent_metacognition` 等 **10 个已不存在的能力工具**（ADR-005 / ADR-009
+    回退后 capability 面早已不是这一套），且需 release 构建 + 真实 LLM 才能跑 —— 是死检查，
+    留着只会误导。
+  - **接** `dead-code-audit.mjs`（**判定型**，并入 docs 阶段；有死码即失败）与
+    `schema-audit.mjs`（**报告型**，退出码恒为 0 ⇒ 只有它**崩溃**才让门禁红，这正是防它腐烂的机制）。
+- **修 `schema-audit.mjs` 两处缺陷**（不修就等于把一份会说谎的报告接进门禁）：
+  1. `ROOT` 由 `process.cwd()` 改为按脚本位置推导（原来在仓库根之外跑会全盘错位）；
+  2. 前端模块引用只认 `from '...schemas/x'`，**漏掉 schemas 内部的相对导入与 `export * from`**
+     ⇒ `vdfs-form.ts` 被误判成「死文件」；改为解析相对路径 + 别名，并把测试文件排除出被审计集合
+     （仍计入消费方）。顺带修掉一处重复 `rel()` 映射（过去靠 cwd == 仓库根掩盖）。
+- **`doc-link-audit.mjs` 整体豁免 `docs/archive/`**：归档记录的是**当时形态**，其失效链接改写
+  等于篡改历史。现在报「扫描 204 条、失效 0（豁免 38 个归档文件）」，长期噪音消失。
+- `dead-code-audit` 的「导出级检查」55 条属**降级提示**（对「仅在本文件按类型用」「经 barrel
+  再导出」都会命中），默认只印个数，明细加 `--verbose` —— 否则每次门禁刷 50+ 行噪音。
+- **检查清单不再重抄**：`CONTRIBUTING.md` 与 `.github/workflows/ci.yml` 里逐项列举的审计清单
+  本就违反 CONTRIBUTING 自己的「权威清单只在 gate.mjs」约定，已改为指向 `gate.mjs`。
+
+### 功能接线：`local/ask_user` 从「暂未注册」转为生效
+- 该工具（267 行，整文件 `#![allow(dead_code)]` + 文件头自述「暂未注册」）已接入
+  `plugins/local/plugin.rs` 的 `tool_impls`，`local` 原生工具 **4 → 5**。
+- 接线依据：它依赖的机制**早已端到端跑通**——`plugin.rs::emit_confirm_prompt`（工具审批）
+  产出的是同形状的 `user_prompt` 节点，前端 `MessageNode.vue` 的提问卡（选项 / `Other` 自由输入 /
+  提交）与回答回填链路现成；`session` 侧 `turn.rs` / `resume.rs` 的注释本就写着「confirm/ask_user」
+  两种情况。故这是把已建好的能力接上，不是新建能力。
+- 顺带：`AskUserTool` 不再持 `SecurityPolicy`（它不碰文件系统，该字段纯属 dead）；
+  `policy` 风险表把它显式归为 `Low`（否则默认 `Medium`：会话阈值设为 low 时，
+  **提问本身要先过一次审批**）。
+- 自动模式（`mode == "auto"`）不产节点，返回 `tool_unavailable` 让模型自行继续，不阻塞。
+- 文档同步：`local/README.md`、`docs/reference/ROUTES.md` §Local 插件；`docs/CURRENT.md`
+  的 §2 工具表已自动收录 `ask_user`。
+
+### 前端：详情页动作按钮收敛到唯一实现
+- `VdfsReadonlyDetail.vue` / `VdfsTextDetail.vue` 原先各自手写 `action-btn` / `danger-btn`，
+  而机制实现是 `VdfsActions`（`.ea-btn`，图标优先 + busy_label + tooltip）。两者现已收敛，
+  同一个交互（重命名 / 删除 / 保存 / 还原）在全仓只有一份实现。
+- 连带清理：`.danger-btn` 失去**最后两个**消费者 ⇒ 从 `controls.css` 删除（连带文件头清单）；
+  它唯一引用的令牌 `--text-inverse` 按既有约定登记进 `style-audit` 的 `ALLOW_UNUSED_PROPS`
+  （令牌层是完整语义层，与 `--radius-xs` 同例）。
+
+### 注释纠错（非漂移）
+- `symbio/rust-toolchain.toml` 的 MSRV 注释**错位**：它挂在 `components` 上方、描述一个该文件里
+  并不存在的字段。已改写为说清 **channel（1.93.1，本机+CI 固定使用）≠ MSRV（1.91，语言特性
+  下限：`submit_object_creator!` 依赖 const 上下文 `TypeId::of`）**，并注明 MSRV 未被 CI 验证。
+- `symbio/Cargo.toml` 的 MSRV 注释里那句「主要使用 1.95.0 stable」是过时描述，已删。
+
+***
+
 ## 2026-09-17: 修复前端样式审计暴露的既有问题（VDFS 详情按钮无样式 / 死样式 / 审计假阳性）
 
 **性质：真 bug 修复 + 死样式清理 + 审计脚本修复**，无协议与行为变化。

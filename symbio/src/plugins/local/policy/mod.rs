@@ -308,8 +308,11 @@ impl SecurityPolicy {
         args: Option<&serde_json::Value>,
     ) -> RiskLevel {
         match tool_name {
+            // `ask_user` 只是向用户提问，不触碰任何资源；若不显式归为 Low，
+            // 它会落到默认 Medium —— 当会话把执行风险阈值设为 low 时，
+            // 提问本身反而要先过一次审批，属荒谬路径。
             "read_file" | "web_fetch" | "web_search" | "glob_search" | "content_search"
-            | "vdfs_read" | "vdfs_search" => RiskLevel::Low,
+            | "vdfs_read" | "vdfs_search" | "ask_user" => RiskLevel::Low,
             "shell" => {
                 if let Some(cmd) = args.and_then(|a| a.get("command")).and_then(|c| c.as_str()) {
                     self.command_risk_level(cmd)

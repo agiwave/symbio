@@ -445,6 +445,7 @@ const ALLOW_UNUSED_PROPS = new Set([
   '--radius-xs', // 圆角刻度 xs→xl 的一档（唯一消费者 .path-pill 为死样式，已删）
   '--font-size-xl', // 字号刻度 xs→xl 的一档（20px 页面标题）
   '--font-weight-regular', // 字重刻度 regular / medium / semibold 的一档
+  '--text-inverse', // 反色表面前景，与 --text-on-accent 并列（浅/深各一份）；唯一消费者 .danger-btn 为死样式，已删
 ]);
 const propUsed = new Set();
 for (const v of vueModels) for (const n of v.varUsages) propUsed.add(n);
