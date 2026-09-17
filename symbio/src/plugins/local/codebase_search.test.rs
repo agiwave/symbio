@@ -365,6 +365,64 @@ fn index_lives_under_the_workspace_dot_symbio() {
     assert!(!SOURCE_EXTS.contains(&"bin"));
 }
 
+/// 从盘上读来的索引**必须进进程内缓存**。
+///
+/// 否则每次调用都会 cache-miss → 重读并解码整个索引文件（本仓 25 MB），
+/// 一个不报错、只让每次检索都慢一截的漏洞。
+///
+/// 判据：把盘上的索引删掉之后再调一次——若快路径没进缓存，这次会 cache-miss 且
+/// 读不到盘，于是退化成全量重建（`embedded_files > 0`）；进了缓存则零嵌入。
+#[tokio::test]
+async fn disk_loaded_index_is_cached_for_subsequent_calls() {
+    let dir = tempfile::tempdir().unwrap();
+    let embed = CountingEmbed::new();
+    let key = dir.path().to_string_lossy().to_string();
+
+    tokio::fs::write(
+        dir.path().join("a.rs"),
+        "fn a() {}
+",
+    )
+    .await
+    .unwrap();
+
+    // 建一次（rebuild 绕过任何既有状态），落盘 + 进缓存
+    let (built, s1) = get_index(dir.path(), true, &embed.as_service())
+        .await
+        .expect("首次构建");
+    let chunks = built.chunk_count();
+    assert_eq!(s1.embedded_files, 1);
+    assert!(index_path(dir.path()).exists(), "应已落盘");
+
+    // 模拟"进程重启"：清掉进程内缓存，只留盘上的索引
+    cache().lock().await.remove(&key);
+
+    let before = embed.calls();
+    let (from_disk, s2) = get_index(dir.path(), false, &embed.as_service())
+        .await
+        .expect("读盘");
+    assert_eq!(s2.embedded_files, 0, "指纹未变，不该重嵌");
+    assert_eq!(from_disk.chunk_count(), chunks);
+    assert_eq!(embed.calls() - before, 0);
+
+    // 关键一步：把盘上的索引删掉。此时若上一次没进缓存，就会 cache-miss + 无盘可读
+    // → 全量重建。这正是要防的那条路径。
+    tokio::fs::remove_file(index_path(dir.path()))
+        .await
+        .unwrap();
+
+    let before = embed.calls();
+    let (again, s3) = get_index(dir.path(), false, &embed.as_service())
+        .await
+        .expect("第三次");
+    assert_eq!(
+        s3.embedded_files, 0,
+        "盘上索引已删，却仍在重嵌 ⇒ 上次读盘的结果没进进程内缓存"
+    );
+    assert_eq!(embed.calls() - before, 0);
+    assert_eq!(again.chunk_count(), chunks);
+}
+
 // ==================== 生成物闸门 ====================
 
 /// 生成物不进索引：锁文件 / 压缩产物按名字挡掉

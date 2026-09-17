@@ -502,9 +502,15 @@ async fn get_index(
         return None;
     }
 
-    // 快路径：文件集与指纹逐项相同 ⇒ 一个块都不用重嵌，索引原样复用
+    // 快路径：文件集与指纹逐项相同 ⇒ 一个块都不用重嵌，索引原样复用。
+    //
+    // 这里**也必须进缓存**：`previous` 可能是刚从盘上读出来的（进程内缓存未命中），
+    // 那份索引不在缓存里。直接 `return` 会让下一次调用再次 cache-miss，
+    // 于是**每次调用都重读并解码整个索引文件**（本仓 25 MB）——一个不会报错、
+    // 只会让每次检索都慢上几十毫秒的漏洞。
     if let Some(prev) = &previous {
         if prev.matches_scan(&scanned) {
+            cache().lock().await.insert(key, Arc::clone(prev));
             let stats = IndexStats {
                 files: prev.files.len(),
                 chunks: prev.chunk_count(),
