@@ -395,6 +395,45 @@ S20/S20.1 处理的是「状态怎么到节点上」，本次处理一个一直�
 必须一起读才正确，正是本仓库反复否决的「状态 + 平行标志位」。见
 `vdfs-session-messages.md` §2.2。
 
+### S20.3 —— 中止收口与在途可见性（本次）
+
+S20~S20.2 都假设「节点状态会自己走到终态」。本次处理两个**同源**缺口——它们都
+出在「存储里的权威副本」与「正在跑但还没落库的那一份」不一致时：
+
+1. **在途消息不可见**：assistant 侧节点**每轮结束**才落库（`chat_loop::persist_messages`），
+   而会话叶子 `read` 只序列化存储 ⇒ 前端 `loadMessages`（读叶子）在流式期间看不到
+   正在跑的那一轮；切走再切回，在途消息凭空消失。
+2. **中止后节点停在「运行中」**：非流式工具执行（`PluginPayload::Data` 分支）是一次
+   `await`，不轮询通道也不看 `abort_flag`；`handle_abort` 的 3s 兜底一旦触发就会强制
+   `is_working = false`，消费循环下一帧因 `!is_working` **直接 `break`，跳过
+   `persist_failure`** ⇒ 工具节点永远停在 `Streaming`。这正是「终止后还显示运行中」。
+
+| 层 | 改动 |
+|---|---|
+| `session/orchestrator/failure.rs` | 新增 `is_inflight`（在途集合的**唯一**定义）与 `converge_inflight`：扫**存储 + 在途缓冲**两个数据源，非终态定稿 `Completed` 并广播补丁，**幂等** |
+| `session/orchestrator/consume.rs` | 循环出口记 `exit_state`：中止出口发 `aborted`（此前一律 `completed`，与 `handle_abort` 抢同一个字段，收敛靠 3s 轮询的时序侥幸） |
+| `session/orchestrator/consume.rs` | `handle_abort` 复位 `is_working` 后**自己**调 `converge_inflight`——中止路径自己的收口责任，不等 chat_loop |
+| `session/tool_executor.rs` | 新增 `wait_tool_abort`：`route_fut` 与它 `select!`，让**非流式**工具也能被中止（abort 帧 / 取消令牌 / 已置位三条来源） |
+| `session/resume.rs` | 重跑工具时中止：父 ToolCall 已落库且置 `Streaming`，返回前用 `not_executed_patch(.., "aborted")` 就地定稿并广播 |
+| `session/plugin/nodes.rs` | `session_content` 叠加 `live`（与 `transcript_of` 同源的 `overlay_live`）——叶子与转写列表必须是同一份消息集合 |
+| `session/plugin/vdfs_provider.rs` | 叶子 `read`（含子会话）取 `live_messages_of`；子会话叠加**它自己**的在途缓冲，不是父会话的 |
+| 前端 `stores/sessions.ts` | `hydrateFromHistory` 改**合并**语义：快照权威；快照里没有的本地节点**仅当仍在飞行中**才保留 |
+
+**为什么在途集合不含 `WaitingUserAction`**：它不是「正在跑」，是「等用户回答」——
+中止时抹掉它等于把审批入口删了；它也不会让前端显示"运行中"（前端对它有独立的
+「待确认」标签）。反之漏掉 `Pending` / `Streaming` 中的任何一个，表现就是一个
+永远转下去的「运行中」，而它**不报错、只会一直转**——因此这个集合由测试直接锁定
+（`orchestrator.test.rs::inflight_set_covers_..`），不靠读代码。
+
+**为什么 `converge_inflight` 要扫两个数据源**：存储侧覆盖 `resume` 重跑工具时**已落库**
+的父 ToolCall（它从不出现在在途缓冲里）；在途侧覆盖尚未落库的流式节点。只扫一个，
+另一个场景的中止就会漏收。
+
+**为什么 `wait_tool_abort` 忽略通道关闭**：对端消失（chat_loop 已返回）不是中止信号。
+把它当中止会让**每一次正常收尾**都变成"用户中止"，于是正常完成的会话被报成
+`aborted`、提示音选错音色。这条曾写错并被回退测试抓到
+（`tool_executor.test.rs::wait_tool_abort_ignores_closed_channel`）。
+
 ### S21 —— 工具调用请求显式化（**本次不做，留待需要时**）
 把 ToolCall 的参数从 `content` 提升为一个真子节点（`type = tool_request`）。
 **现在不做**，因为它要求 `plugins/model/message_builder` 的请求扁平化同步改造，
@@ -420,6 +459,8 @@ S20/S20.1 处理的是「状态怎么到节点上」，本次处理一个一直�
 | 9 | 切会话来回不丢状态 | **更强**：状态是节点属性，不依赖回放缓冲 | §4 |
 | 10 | 会话列表状态点 | 不变（节点 `status`） | §5.2 |
 | 11 | 重连后状态收敛 | 不变（`list` 快照 + 只升不降规则） | §4.2 |
+| 12 | 中止后不再有节点转圈 | ToolCall / reason / Turn 全部落终态；Turn 落 `Failed` 以给出重试入口 | §6 S20.3 |
+| 13 | 切回「正在跑」的会话 | 正在跑的那一轮**仍在**（叶子读含在途 + 前端水合不丢弃在途） | §6 S20.3 |
 
 ---
 
@@ -444,6 +485,12 @@ S20/S20.1 处理的是「状态怎么到节点上」，本次处理一个一直�
     `meta.failure_kind = "not_executed"`），不得有节点停在 `Streaming`（§5.3.1）。
 12. **运行时长是节点属性**：`meta.started_at` 由执行方写入；前端不自造锚点，
     锚点缺失即不显示时长。
+13. **中止自行收口，不等 chat_loop**：`handle_abort` 一旦复位 `is_working`，消费循环
+    就可能因 `!is_working` 提前 `break` 而跳过 `persist_failure`。因此中止路径自己调
+    `converge_inflight`，且必须**幂等**（`handle_abort` 与消费循环的中止出口都会跑）。
+14. **同一份数据的两个地址给出同一份内容**：会话叶子 `read` 与转写列表都叠加在途缓冲
+    （`overlay_live`）；在途副本**继承**存储分配的 `seq`——顺序锚点只由存储分配，
+    否则同一条消息会以「有 seq / 无 seq」两种形态排到列表的两个位置。
 
 ---
 

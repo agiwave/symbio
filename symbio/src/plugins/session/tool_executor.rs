@@ -136,6 +136,65 @@ pub async fn fire_hook(
 
 // 单工具执行（无阻塞）
 
+/// 等待「用户中止」信号（工具执行期间）。
+///
+/// 三条来源与 `symbio_core::turn::wait_for_abort_signal` 同源，不另立口径：
+/// 1. `is_aborted` 已被置位（上游已判定，或本函数自己刚置的）；
+/// 2. 主通道收到 abort 帧——`handle_abort` 投递的正是它；
+/// 3. `cancel_token` 被取消（会话销毁 / 消费循环超时兜底）。
+///
+/// 非 abort 的帧一律**忽略**：工具执行期间主通道不应有业务帧（业务帧走的是
+/// 反方向——chat_loop 发往消费循环），`wait_for_abort_signal` 对 LLM POST
+/// 也是同一处理。
+///
+/// **通道关闭不算中止**：它只说明对端（消费循环）已消失，此后只保留
+/// `is_aborted` / `cancel_token` 两条来源继续等。把它当中止会在会话正常收尾时
+/// 把仍在跑的工具误报成"被用户中止"。
+///
+/// **返回即意味着放弃工具**：调用方用 `select!` 包着它，因此工具 future 会被
+/// drop。这与既有的硬超时分支语义一致（那条路同样是 drop），不引入新的副作用
+/// 类别；代价是工具可能留下半完成的副作用——但「用户按下停止」本就要求尽快放手，
+/// 而让它继续跑完 600s 才是更坏的选择。
+async fn wait_tool_abort(channel: &mut PluginChannel, is_aborted: &AtomicBool) {
+    if is_aborted.load(Ordering::Relaxed) {
+        return;
+    }
+    let cancel = channel.cancel_token.clone();
+    let mut rx_alive = true;
+    loop {
+        if rx_alive {
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+                _ = cancel.cancelled() => {
+                    is_aborted.store(true, Ordering::Relaxed);
+                    return;
+                }
+                frame = channel.rx.recv() => match frame {
+                    Some(PluginFrame::Data(m))
+                        if m.get("type").and_then(|v| v.as_str()) == Some("abort") =>
+                    {
+                        is_aborted.store(true, Ordering::Relaxed);
+                        return;
+                    }
+                    Some(_) => {}
+                    None => rx_alive = false,
+                },
+            }
+        } else {
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+                _ = cancel.cancelled() => {
+                    is_aborted.store(true, Ordering::Relaxed);
+                    return;
+                }
+            }
+        }
+        if is_aborted.load(Ordering::Relaxed) {
+            return;
+        }
+    }
+}
+
 /// 执行单个工具调用（不阻塞等待用户）。
 ///
 /// 返回 `(result_text, success)`。
@@ -218,26 +277,49 @@ pub async fn execute_tool_async(
         Box::pin(async move { p2.route(tool_ctx2).await })
     };
 
-    let route_result = match tokio::time::timeout(
-        std::time::Duration::from_secs(TOOL_EXEC_HARD_TIMEOUT_SECS),
-        route_fut,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(_) => {
-            plugin_error!(
+    // 中止感知：**非流式**工具（`read_file` / `web_search` / MCP / `codebase_search`
+    // …，即绝大多数工具）在这里是一次**单次 await**，期间没有任何帧可观测。若不与
+    // 中止信号 select，用户按下停止后会连锁发生三件事：
+    //   1. 工具照跑（最长硬超时 600s），整个 Turn 继续推进——用户以为停了，其实没停；
+    //   2. `handle_abort` 的 3s 兜底把 `is_working` 复位，消费循环在下一帧醒来时
+    //      因 `!is_working` 直接 break，**跳过 `persist_failure`**，于是工具节点
+    //      永远停在 `Streaming`（违反 `docs/node-state-streaming.md` §8.11）；
+    //   3. 工具返回后的 `Completed` 补丁被那个已 break 的消费循环丢弃，前端收不到。
+    // 因此「中止」必须是与「工具返回」「硬超时」并列的第三个出口。
+    let route_result = tokio::select! {
+        r = tokio::time::timeout(
+            std::time::Duration::from_secs(TOOL_EXEC_HARD_TIMEOUT_SECS),
+            route_fut,
+        ) => match r {
+            Ok(r) => r,
+            Err(_) => {
+                plugin_error!(
+                    "session",
+                    format!(
+                        "[Tool] 执行硬超时 ({}s): {}，已中断。call_id={}",
+                        TOOL_EXEC_HARD_TIMEOUT_SECS, tool_name, tool_call_id
+                    )
+                );
+                return (
+                    format!(
+                        "Error: 工具 {} 执行超过 {} 秒未返回，已强制中断（疑似挂死）",
+                        tool_name, TOOL_EXEC_HARD_TIMEOUT_SECS
+                    ),
+                    false,
+                    None,
+                );
+            }
+        },
+        _ = wait_tool_abort(channel, is_aborted) => {
+            plugin_warn!(
                 "session",
-                format!(
-                    "[Tool] 执行硬超时 ({}s): {}，已中断。call_id={}",
-                    TOOL_EXEC_HARD_TIMEOUT_SECS, tool_name, tool_call_id
-                )
+                "[Tool] 执行期间被用户中止: {} (耗时 {}ms, call_id={})",
+                tool_name,
+                started_at.elapsed().as_millis(),
+                tool_call_id
             );
             return (
-                format!(
-                    "Error: 工具 {} 执行超过 {} 秒未返回，已强制中断（疑似挂死）",
-                    tool_name, TOOL_EXEC_HARD_TIMEOUT_SECS
-                ),
+                format!("Error: 工具 {} 被用户中止，未返回结果", tool_name),
                 false,
                 None,
             );
@@ -606,7 +688,16 @@ async fn emit_tool_running(channel: &PluginChannel, tool_call_id: &str) {
 /// `get_context_messages` 过滤掉父节点后留下孤儿结果子节点（下一轮请求非法）。
 /// 与既有口径一致——工具失败属**信息性**，父节点一律 `Completed`，
 /// 差异由 `meta.failure_kind` 承载。
-fn not_executed_patch(tool_call_id: &str, reason: &str) -> ChatMessage {
+/// 「本批未执行的工具调用」的父节点补丁——**唯一**口径。
+///
+/// 语义是「没跑」而不是「跑失败」：`Completed` + `meta.failure_kind`，
+/// **不挂 error**。三个调用方共用它：
+/// - 批处理末尾收口（交互模式下前一个工具待审批 → 本批剩余 break）；
+/// - PreToolUse 钩子拦下（`failure_kind = "blocked"`）；
+/// - `resume` 重跑工具期间被中止（`failure_kind = "aborted"`，见 `resume.rs`）。
+///
+/// 可见性 `pub(super)`：`resume.rs` 要用同一份定义，否则同一语义会长出第二个写法。
+pub(super) fn not_executed_patch(tool_call_id: &str, reason: &str) -> ChatMessage {
     ChatMessage {
         id: tool_call_id.to_string(),
         status: Some(MessageStatus::Completed),

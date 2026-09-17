@@ -234,3 +234,104 @@ fn not_executed_patch_is_completed_not_failed() {
         Some(&json!("blocked"))
     );
 }
+
+// ==================== 工具执行期间的中止感知 ====================
+
+/// `handle_abort` 投递的正是这条帧：主通道上的 `{"type":"abort"}`。
+///
+/// 非流式工具（`read_file` / `web_search` / MCP / `codebase_search` …，即绝大多数
+/// 工具）在执行期间是**单次 await**，没有任何帧可观测。若不与中止信号 select，
+/// 用户按下停止后工具照跑（最长硬超时 600s），整个 Turn 继续推进——用户以为停了，
+/// 其实没停。这条测试锁定「中止帧能让等待立即结束」。
+#[tokio::test]
+async fn wait_tool_abort_returns_on_abort_frame() {
+    let (host, mut plugin_chan) = PluginChannel::pair(64);
+    let aborted = AtomicBool::new(false);
+
+    host.tx
+        .send(PluginFrame::Data(json!({ "type": "abort" })))
+        .await
+        .unwrap();
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        wait_tool_abort(&mut plugin_chan, &aborted),
+    )
+    .await
+    .expect("中止帧到达后应立即返回，而不是继续等工具");
+    assert!(aborted.load(Ordering::Relaxed), "返回时必须置位中止标志");
+}
+
+/// 已置位的标志（上游已判定）→ 不必等任何帧。
+#[tokio::test]
+async fn wait_tool_abort_returns_immediately_when_already_aborted() {
+    let (_host, mut plugin_chan) = PluginChannel::pair(64);
+    let aborted = AtomicBool::new(true);
+    tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        wait_tool_abort(&mut plugin_chan, &aborted),
+    )
+    .await
+    .expect("标志已置位时应立即返回");
+}
+
+/// `cancel_token` 取消（会话销毁 / 消费循环超时兜底）→ 同样视为中止。
+#[tokio::test]
+async fn wait_tool_abort_returns_on_cancelled_token() {
+    let (host, mut plugin_chan) = PluginChannel::pair(64);
+    let aborted = AtomicBool::new(false);
+    host.cancel_token.cancel();
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        wait_tool_abort(&mut plugin_chan, &aborted),
+    )
+    .await
+    .expect("cancel_token 取消后应立即返回");
+    assert!(aborted.load(Ordering::Relaxed));
+}
+
+/// **通道关闭 ≠ 中止**——回归测试。
+///
+/// 消费循环消失（会话正常收尾 / 被丢弃）会让 `rx.recv()` 返回 `None`。把 `None`
+/// 直接当成中止返回，会在会话正常收尾时把**仍在跑**的工具误报为"被用户中止"，
+/// 并让 `select!` 立刻 drop 掉工具 future。正确行为是：此后只保留
+/// `is_aborted` / `cancel_token` 两条来源继续等。
+#[tokio::test]
+async fn wait_tool_abort_ignores_closed_channel() {
+    let (host, mut plugin_chan) = PluginChannel::pair(64);
+    let aborted = AtomicBool::new(false);
+    drop(host); // 对端消失 → rx 关闭
+
+    let r = tokio::time::timeout(
+        std::time::Duration::from_millis(300),
+        wait_tool_abort(&mut plugin_chan, &aborted),
+    )
+    .await;
+    assert!(
+        r.is_err(),
+        "通道关闭被误判成了中止：正在跑的工具会被无故丢弃并报成「用户中止」"
+    );
+    assert!(!aborted.load(Ordering::Relaxed), "通道关闭不得置位中止标志");
+}
+
+/// 非 abort 的业务帧不得被当成中止。
+#[tokio::test]
+async fn wait_tool_abort_ignores_other_frames() {
+    let (host, mut plugin_chan) = PluginChannel::pair(64);
+    let aborted = AtomicBool::new(false);
+    host.tx
+        .send(PluginFrame::Data(
+            json!({ "type": "status", "status": "idle" }),
+        ))
+        .await
+        .unwrap();
+
+    let r = tokio::time::timeout(
+        std::time::Duration::from_millis(300),
+        wait_tool_abort(&mut plugin_chan, &aborted),
+    )
+    .await;
+    assert!(r.is_err(), "普通帧不是中止信号");
+    assert!(!aborted.load(Ordering::Relaxed));
+}

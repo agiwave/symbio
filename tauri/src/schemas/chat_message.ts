@@ -2,6 +2,21 @@ export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 export type ChatMessageType = 'text' | 'reasoning' | 'tool_call' | 'turn' | 'user_prompt';
 export type MessageStatus = 'pending' | 'streaming' | 'waiting_user_action' | 'completed' | 'failed';
 
+/**
+ * 消息是否**仍在飞行中**（尚未定稿）。
+ *
+ * 与后端 `orchestrator::failure::is_inflight` 是**同一集合**：`pending` / `streaming`，
+ * 加上「还没标注状态」（流式补丁可能只带了内容，状态在后续帧才到）。
+ *
+ * `waiting_user_action` **不在此列**：它不是「正在跑」，而是「等用户回答」——
+ * 用户仍可从审批卡片回答或忽略，把它当成在途会让审批入口在中止时被误删。
+ *
+ * 消费方：`hydrateFromHistory` 用它决定「快照里没有的本地节点是否该保留」。
+ */
+export function isInflightMessageStatus(status?: MessageStatus | null): boolean {
+  return status === undefined || status === null || status === 'pending' || status === 'streaming';
+}
+
 export interface ImageUrl {
   url: string;
   detail?: string;

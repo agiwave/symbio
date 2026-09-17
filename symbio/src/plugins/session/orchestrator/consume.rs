@@ -218,6 +218,12 @@ impl SessionPlugin {
         // 控制通道登记/注销成对出现，注销由 `AiControlGuard` 的 Drop 兜底——
         // 因此提前 `return` 与 panic 都不会漏掉清理（历史上正是漏清理导致
         // `handle_abort` 的"子任务是否仍在运行"判据永久为假）。
+        // 本循环的**出口结局**：中止与「正常通道关闭」走同一段循环后收尾，
+        // 因此必须在这里记下"是不是中止"，否则收尾会把用户中止报成「正常完成」。
+        // 与 `handle_abort` 共用 `SessionStateChange::aborted()` 这一个构造点——
+        // 两个写者写同一个值，时序竞态因此无害。
+        // 声明必须在块**外**：循环后的统一收尾在块外。
+        let mut exit_state = SessionStateChange::completed();
         {
             let mut sub_channel = host_chan;
             let mut ai_control_guard = {
@@ -318,6 +324,7 @@ impl SessionPlugin {
                                 "用户手动中止了本次回复",
                             )
                             .await;
+                            exit_state = SessionStateChange::aborted();
                             break;
                         }
                         // 透传 plugin-level Error 帧作为业务级 Error 事件。
@@ -427,16 +434,9 @@ impl SessionPlugin {
             }
         }
         guard.done = true;
-        // 正常收尾：运行态收敛为「上一轮正常结束」——这是**节点状态**，
-        // 由 `emit_session_state` 经 VDFS 变更下发（前端不再收事件）。
-        self.emit_session_state(
-            &state,
-            SessionStateChange::Finished {
-                outcome: OUTCOME_COMPLETED,
-                error: None,
-            },
-        )
-        .await;
+        // 正常收尾：运行态收敛为「上一轮结束」。结局由 `exit_state` 决定——
+        // 中止出口是 `aborted`（不是 `completed`），与 `handle_abort` 同一构造点。
+        self.emit_session_state(&state, exit_state).await;
     }
 
     pub async fn handle_abort(&self, state: &Arc<ActiveSessionState>) {
@@ -490,6 +490,21 @@ impl SessionPlugin {
             inner.ai_control_tx = None;
         }
 
+        // 节点收口——**中止路径自己的责任**，不能等 chat_loop。
+        //
+        // 上面的 3s 兜底一旦超时，说明 chat_loop 卡在某个不轮询通道的 await 里
+        // （非流式工具执行是典型：`route_fut` 是单次 await，最长硬超时 600s）。
+        // 此时 abort 帧仍躺在通道里没人取，`abort_flag` 永远不置位，chat_loop 也
+        // 就不会冒泡 `Err(Aborted)`；而消费循环在下一帧醒来时因 `!is_working`
+        // 直接 `break`，**跳过 `persist_failure`**。于是工具节点停在 `Streaming`
+        // 并永远转下去——「终止后还显示运行中」的根因。
+        //
+        // 无论 chat_loop 是否已收口，这里都跑一次：正常收口路径（消费循环的
+        // ABORTED 分支）已把节点定稿，本调用因此是幂等的空操作。
+        let converged = self
+            .converge_inflight(state, &state.request_id_str(), "用户中止")
+            .await;
+
         self.broadcast_frame(
             state,
             PluginFrame::Data(json!(session_chat_response::StreamEvent::Abort)),
@@ -498,13 +513,16 @@ impl SessionPlugin {
         // 运行态收敛为「用户中止」。中止**不是**失败：会话节点的 `outcome` 记
         // `aborted`（提示音据此选音色），而 `status` 回到空闲——用户知道自己按了停止，
         // 再给一个失败角标只是噪音。
-        self.emit_session_state(
-            state,
-            SessionStateChange::Finished {
-                outcome: OUTCOME_ABORTED,
-                error: None,
-            },
-        )
-        .await;
+        //
+        // 顺序有意：节点补丁先于会话状态。前端 `applySessionNode` 在
+        // `working → 非 working` 迁移时会清掉"等待审批"角标与活动文字，因此
+        // 消息节点必须先落地，否则会出现"会话已空闲、节点还在跑"的一帧。
+        crate::plugin_info!(
+            "session",
+            "[Abort] 收口完成：{} 个在途节点定稿为 Completed",
+            converged
+        );
+        self.emit_session_state(state, SessionStateChange::aborted())
+            .await;
     }
 }

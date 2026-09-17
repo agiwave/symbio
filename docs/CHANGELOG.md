@@ -18,6 +18,59 @@
 
 ***
 
+## 2026-09-18: 会话消息节点前后端一致性——在途消息可见、中止后节点不再停在「运行中」
+
+**性质：修复**。用户点名两个症状，排查后确认**同源**：「存储里的权威副本」与「正在跑
+但还没落库的那一份」不一致。
+
+### 一、在途消息可见性
+
+**根因**：assistant 侧节点**每轮结束**才落库（`chat_loop::persist_messages`）；而会话叶子
+`read`（`.vdfs/session/<id>`）只序列化存储中的消息。转写列表（`transcript_of`）早已有
+`overlay_live` 叠加在途，**叶子没有** ⇒ 同一份数据的两个地址给出不同内容。
+
+前端 `loadMessages` 走的正是叶子（`readVdfs(vdfsSessionAddr(id))`），
+`session/get_messages` 已不是前端读入口 ⇒ 流式期间读叶子会少掉整个正在跑的那一轮；
+切走再切回，在途消息凭空消失（直到每轮结束落库才回来）。
+
+**改法**：`session_content` 叠加 `live`，与 `transcript_of` 共用 `overlay_live`（同 id 在途
+版本胜出，但 `seq` 从落库版本继承——顺序锚点只由存储分配）；子会话叠加**它自己**的在途
+缓冲而非父会话的；前端 `hydrateFromHistory` 由**整表替换**改**合并**语义——整表替换是
+经典 lost update：一次 IPC 往返期间到达的流式补丁会被覆盖，且它们不会被重发。
+
+### 二、中止后节点停在「运行中」
+
+**缺口 A**：`tool_executor.rs` 的 `PluginPayload::Data(_)` 分支（**非流式**——绝大多数工具
+走这条：`read_file` / `web_search` / MCP / `codebase_search`）是一次 `await`，只被 600s 硬
+超时包着，**不轮询通道也不看 `abort_flag`**。`handle_abort` 的 3s 兜底一旦触发就强制
+`is_working = false`，消费循环下一帧因 `!is_working` **直接 `break`，跳过
+`persist_failure`** ⇒ 工具节点永远停在 `Streaming`。这正是"终止后还显示运行中"。
+
+**缺口 B**：`resume` 重跑工具时父 ToolCall 被置 `Streaming` **并已落库**——它不是流式节点，
+没有任何后续机制会再碰它；中止时原代码直接 `return Ok(Done)`。
+
+**改法**：
+- 新增 `wait_tool_abort`：`route_fut` 与它 `select!`，让非流式工具也能被中止（abort 帧 /
+  取消令牌 / 已置位三条来源）。**忽略通道关闭**——对端消失不是中止信号，否则每次正常
+  收尾都会被报成"用户中止"（提示音选错音色）。这条曾写错，被回退测试抓到。
+- 新增 `converge_inflight`：扫**存储 + 在途缓冲**两个数据源，非终态定稿 `Completed` 并广播
+  补丁；`handle_abort` 复位 `is_working` 后**自己**调用（不等 chat_loop），且**幂等**。
+- `resume` 中止时父节点用 `not_executed_patch(.., "aborted")` 就地定稿并广播。
+- 消费循环出口记 `exit_state`：中止出口发 `aborted`（此前一律 `completed`，与
+  `handle_abort` 抢同一个字段，收敛只靠 3s 轮询的时序侥幸）。
+
+**在途集合的唯一定义**：`None` / `Pending` / `Streaming`，**不含 `WaitingUserAction`**——
+它不是"正在跑"而是"等用户回答"，中止时抹掉它等于把审批入口删了。该集合由测试直接锁定，
+不靠读代码：漏掉任何一个，表现就是一个**永远转下去**的「运行中」，而它不报错、只会一直转。
+
+### 三、验证
+
+后端 **700** 个测试通过（新增 13），前端 **177** 个通过（新增 5）。新增回归覆盖：在途集合、
+存储与在途两个数据源、幂等、`wait_tool_abort` 四个出口、中止与完成结局可区分、会话叶子
+含在途、resume 父节点定稿、前端水合合并语义。
+
+***
+
 ## 2026-09-18: `codebase_search` 从"永远超时"变成可用——嵌入后端换 `ort`，索引落盘并按 mtime 增量重建
 
 **性质：修复**（含一处架构决策推翻）。两件事都不改工具对外的用法，改的是它**能不能用**。

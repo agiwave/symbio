@@ -39,6 +39,28 @@ pub enum SessionStateChange {
 }
 
 impl SessionStateChange {
+    /// 一轮**正常结束**。
+    pub(crate) fn completed() -> Self {
+        Self::Finished {
+            outcome: OUTCOME_COMPLETED,
+            error: None,
+        }
+    }
+
+    /// 一轮**被用户中止**。
+    ///
+    /// **唯一构造点**，因为中止有两个写者：消费循环的 ABORTED 出口与
+    /// `handle_abort`。曾经两边各写各的（一边 `completed`、一边 `aborted`），
+    /// 最终显示哪个取决于「3s 轮询」与「循环收尾」谁先跑到——窗口期内 UI 会
+    /// 短暂显示"已完成"，提示音也可能选错音色。收成一个构造函数之后，
+    /// 两个写者写的是同一个值，竞态因此无害。
+    pub(crate) fn aborted() -> Self {
+        Self::Finished {
+            outcome: OUTCOME_ABORTED,
+            error: None,
+        }
+    }
+
     /// 对应的线路状态词（`StreamEvent::Status` 的取值，进程内契约）
     fn status_word(&self) -> &'static str {
         match self {

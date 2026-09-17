@@ -402,3 +402,89 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
     expect(ids(store), '失败必须把消息放回去').toEqual(['u1', 't1', 'a1', 'u2', 't2', 'a2'])
   })
 })
+
+/**
+ * `hydrateFromHistory` 的**合并语义**（不是整表替换）。
+ *
+ * 它接收的是「一次 IPC 往返之前」的快照，取回期间流式补丁仍在写入 store。
+ * 整表替换会把这些**更新的**补丁覆盖掉（经典 lost update），而它们不会被重发
+ * ——表现是消息内容倒退若干 token，或整条在途节点凭空消失，也就是
+ * 「Turn 运行中切走再切回，正在跑的那一轮不见了」。
+ *
+ * 规则：快照权威；快照里没有的本地节点**仅当仍在飞行中**才保留。
+ */
+describe('sessions store — 历史水合是合并，不是整表替换', () => {
+  const SID = 's1'
+  const snapshot = (messages: unknown[]) => {
+    vdfsApi.readVdfs.mockResolvedValue({ text: JSON.stringify({ messages }) })
+  }
+  const ids = (store: ReturnType<typeof useSessionsStore>) =>
+    store.getSessionMessages(SID).map((m) => m.id)
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    sessionApi.listSessions.mockResolvedValue([])
+  })
+
+  it('快照里没有的在途节点必须保留（正在跑的那一轮不能凭空消失）', async () => {
+    const store = useSessionsStore()
+    store.hydrateFromHistory(SID, [
+      { id: 'u1', role: 'user', type: 'user_prompt', seq: 1, content: '问题' },
+    ] as never)
+    store.putMessage(SID, {
+      id: 'turn-live',
+      type: 'turn',
+      status: 'streaming',
+      content: '半截',
+    } as never)
+
+    snapshot([{ id: 'u1', role: 'user', type: 'user_prompt', seq: 1, content: '问题' }])
+    await store.loadMessages(SID)
+
+    const msgs = store.getSessionMessages(SID)
+    expect(msgs.map((m) => m.id)).toEqual(['u1', 'turn-live'])
+    expect(msgs[1].status).toBe('streaming')
+    expect(msgs[1].content).toBe('半截')
+  })
+
+  it('保留的在途节点重排到历史之后（本地 seq 游标可能小于快照最大值）', async () => {
+    const store = useSessionsStore()
+    // 本地游标从 0 起 ⇒ 这条在途节点拿到 seq = 1，远小于快照里的 5/6
+    store.putMessage(SID, { id: 'live', type: 'text', status: 'streaming' } as never)
+
+    snapshot([
+      { id: 'h1', type: 'text', seq: 5 },
+      { id: 'h2', type: 'text', seq: 6 },
+    ])
+    await store.loadMessages(SID)
+
+    expect(ids(store), '沿用旧 seq 会让在途节点排到历史之前').toEqual(['h1', 'h2', 'live'])
+  })
+
+  it('终态且不在快照里的本地节点被丢弃（被删除的陈旧副本不得复活）', async () => {
+    const store = useSessionsStore()
+    store.putMessage(SID, { id: 'ghost', type: 'text', status: 'completed' } as never)
+
+    snapshot([{ id: 'h1', type: 'text', seq: 1 }])
+    await store.loadMessages(SID)
+
+    expect(ids(store)).toEqual(['h1'])
+  })
+
+  it('快照里的节点整条替换：内容与状态都以快照为准', async () => {
+    const store = useSessionsStore()
+    store.putMessage(SID, {
+      id: 'a1',
+      type: 'text',
+      status: 'streaming',
+      content: '半截',
+    } as never)
+
+    snapshot([{ id: 'a1', type: 'text', seq: 3, status: 'completed', content: '完整' }])
+    await store.loadMessages(SID)
+
+    const [a1] = store.getSessionMessages(SID)
+    expect(a1.content).toBe('完整')
+    expect(a1.status).toBe('completed')
+  })
+})

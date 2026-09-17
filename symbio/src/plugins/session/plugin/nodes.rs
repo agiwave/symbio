@@ -600,15 +600,31 @@ pub(crate) fn message_of<'a>(
         .ok_or_else(|| vdfs::VdfsError::not_found(format!("消息不存在：{mid}")))
 }
 
-/// 会话内容（转写全文 + 元数据）→ VDFS 文本内容
+/// 会话内容（转写全文 + 元数据）→ VDFS 文本内容。
+///
+/// ## `live` 不是可选装饰
+///
+/// 会话叶子（`.vdfs/session/<id>`）与转写列表（`<id>/消息`）是**同一份数据的两个
+/// 地址**，必须给出**同一份消息集合**。转写列表经 [`super::vdfs_provider`] 的
+/// `transcript_of` 叠加了在途缓冲，因此叶子也必须叠加——否则「读叶子拿历史」与
+/// 「按变更拼实时」两条路径会在流式期间分叉：叶子少掉**正在跑的那一轮**。
+///
+/// 这不是理论风险：前端 `loadMessages` 走的正是叶子（`fetchTranscript` →
+/// `readVdfs(vdfsSessionAddr(id))`），而 `session/get_messages` 已不再是前端读入口。
+/// 只读存储的话，Turn 运行中切走再切回就会看到「正在跑的消息凭空消失」，
+/// 直到 `persist_messages` 在每轮结束时落库为止。
 pub(crate) fn session_content(
     session: &super::super::types::Session,
+    live: Vec<cm::ChatMessage>,
 ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
+    // 与 `transcript_of` 同一组合（`ordered(overlay_live(..))`），不另立口径：
+    // 同 id 在途版本胜出（它更新），顺序锚点仍由存储分配的 `seq` 决定。
+    let messages = ordered(overlay_live(session.messages.clone(), live));
     let payload = json!({
         "id": session.id,
         "title": session.display_title(),
         "metadata": session.metadata,
-        "messages": session.messages,
+        "messages": messages,
         "updated_at": session.updated_at,
     });
     let text = serde_json::to_string_pretty(&payload)

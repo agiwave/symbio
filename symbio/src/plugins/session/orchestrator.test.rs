@@ -88,7 +88,6 @@ async fn disarmed_guard_does_not_clobber_next_turn_registration() {
 }
 
 // ==================== 合并语义 ↔ 变更语义（不得漂移） ====================
-
 fn text_msg(id: &str, content: &str, status: cm::MessageStatus) -> cm::ChatMessage {
     cm::ChatMessage {
         id: id.into(),
@@ -178,5 +177,173 @@ fn merge_reports_no_delta_for_full_replacement() {
     assert_eq!(
         m.content.as_ref().map(|c| c.to_text()),
         Some("正文".to_string())
+    );
+}
+
+// ==================== 中止收口（converge_inflight） ====================
+
+use crate::plugins::session::config::SessionConfig;
+use crate::plugins::session::plugin::SessionPlugin;
+use crate::plugins::session::types::Session;
+use crate::symbio_core::PluginDir;
+
+/// 每例独占存储根。
+fn fixture() -> (tempfile::TempDir, SessionPlugin) {
+    let dir = tempfile::tempdir().expect("临时目录创建失败");
+    let plugin = SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        PluginDir::at(dir.path(), "session"),
+    );
+    (dir, plugin)
+}
+
+fn node(id: &str, parent: Option<&str>, status: cm::MessageStatus) -> cm::ChatMessage {
+    cm::ChatMessage {
+        id: id.into(),
+        parent_id: parent.map(|p| p.into()),
+        role: Some(cm::MessageRole::Assistant),
+        msg_type: Some(cm::MessageType::Text),
+        status: Some(status),
+        ..Default::default()
+    }
+}
+
+/// 「在途」集合的**唯一**定义，直接锁定。
+///
+/// 少一个状态 = 前端一个永远转下去的「运行中」——它不报错、只是一直转，
+/// 因此必须有测试盯着这个集合，而不是靠读代码。
+#[test]
+fn inflight_set_covers_pending_and_streaming_but_not_waiting_user_action() {
+    use super::failure::is_inflight;
+    assert!(is_inflight(&None), "未标注状态视为在途（历史数据）");
+    assert!(is_inflight(&Some(cm::MessageStatus::Pending)));
+    assert!(is_inflight(&Some(cm::MessageStatus::Streaming)));
+    assert!(
+        !is_inflight(&Some(cm::MessageStatus::WaitingUserAction)),
+        "等待用户回答不是「正在跑」：中止不该把审批入口一并抹掉"
+    );
+    assert!(!is_inflight(&Some(cm::MessageStatus::Completed)));
+    assert!(!is_inflight(&Some(cm::MessageStatus::Failed)));
+}
+
+/// 中止收口必须**同时**扫存储与在途缓冲——只扫一个，另一个场景的中止就会漏收。
+///
+/// - 存储里的 `Streaming`：`resume` 重跑工具时父 ToolCall 被直接落库，
+///   从不出现在在途缓冲里；
+/// - 在途缓冲里的 `Streaming`：流式节点的常规位置（尚未落库）。
+#[tokio::test]
+async fn converge_inflight_finalizes_nodes_from_both_sources() {
+    let (_dir, p) = fixture();
+    let sid = "s-abort";
+    let store = p.get_store().await.expect("存储不可用");
+    store.save_session(&Session::new(sid)).await.unwrap();
+
+    // 存储侧：Turn(Streaming) → ToolCall(Streaming) + WaitingUserAction 子节点
+    let chat = p.open_chat_session(sid).await.unwrap();
+    chat.replace_messages(vec![
+        node("turn", None, cm::MessageStatus::Streaming),
+        node("tc", Some("turn"), cm::MessageStatus::Streaming),
+        node("ask", Some("tc"), cm::MessageStatus::WaitingUserAction),
+    ])
+    .await
+    .unwrap();
+
+    // 在途侧：Turn 下未落库的 reasoning(Streaming) 与一个父不存在的孤儿
+    let state = Arc::new(ActiveSessionState::with_session_id(sid.into()));
+    {
+        let mut live = state.live_messages.lock().await;
+        live.push(node("reason", Some("turn"), cm::MessageStatus::Streaming));
+        live.push(node(
+            "orphan",
+            Some("ghost-parent"),
+            cm::MessageStatus::Streaming,
+        ));
+    }
+
+    let converged = p.converge_inflight(&state, sid, "用户中止").await;
+    assert_eq!(converged, 3, "存储侧 2 条 + 在途侧 1 条（孤儿被丢弃）");
+
+    let after = chat.get_messages().await.unwrap();
+    let status_of = |id: &str| {
+        after
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| m.status.clone())
+            .unwrap_or(None)
+    };
+    assert_eq!(status_of("turn"), Some(cm::MessageStatus::Completed));
+    assert_eq!(status_of("tc"), Some(cm::MessageStatus::Completed));
+    assert_eq!(
+        status_of("ask"),
+        Some(cm::MessageStatus::WaitingUserAction),
+        "等待用户回答不该被中止抹掉——它是审批入口，不是「运行中」"
+    );
+    assert_eq!(
+        status_of("reason"),
+        Some(cm::MessageStatus::Completed),
+        "在途缓冲里的节点必须被补写为终态"
+    );
+    assert_eq!(status_of("orphan"), None, "父节点不存在的孤儿不得写入存储");
+
+    assert!(
+        state.live_messages.lock().await.is_empty(),
+        "权威副本已回到存储，在途缓冲必须作废——否则陈旧副本会继续参与叠加"
+    );
+}
+
+/// 幂等：已经收口过的会话再收一次不得产生任何变更（`handle_abort` 与消费循环的
+/// ABORTED 分支都会调用它，两者都可能先跑）。
+#[tokio::test]
+async fn converge_inflight_is_idempotent() {
+    let (_dir, p) = fixture();
+    let sid = "s-idem";
+    let store = p.get_store().await.expect("存储不可用");
+    store.save_session(&Session::new(sid)).await.unwrap();
+    let chat = p.open_chat_session(sid).await.unwrap();
+    chat.replace_messages(vec![node("turn", None, cm::MessageStatus::Streaming)])
+        .await
+        .unwrap();
+
+    let state = Arc::new(ActiveSessionState::with_session_id(sid.into()));
+    assert_eq!(p.converge_inflight(&state, sid, "用户中止").await, 1);
+    assert_eq!(
+        p.converge_inflight(&state, sid, "用户中止").await,
+        0,
+        "第二次必须是空操作：否则每次中止都会对同一批节点重复广播"
+    );
+}
+
+/// 中止与正常结束必须是**不同**的结局，且都经同一个构造点产出。
+///
+/// 回归：消费循环的 ABORTED 出口曾经广播 `completed`，而 `handle_abort` 广播
+/// `aborted`——最终显示哪个取决于「3s 轮询」与「循环收尾」谁先跑到：窗口期内
+/// UI 会短暂显示"已完成"，提示音也可能选错音色。
+#[tokio::test]
+async fn aborted_and_completed_outcomes_are_distinct() {
+    let (_dir, p) = fixture();
+    let sid = "s-outcome";
+    p.get_store()
+        .await
+        .unwrap()
+        .save_session(&Session::new(sid))
+        .await
+        .unwrap();
+    let state = Arc::new(ActiveSessionState::with_session_id(sid.into()));
+
+    p.emit_session_state(&state, SessionStateChange::aborted())
+        .await;
+    {
+        let inner = state.inner.read().await;
+        assert_eq!(inner.last_outcome.as_deref(), Some(OUTCOME_ABORTED));
+        assert!(!inner.is_working, "中止后必须收敛为空闲");
+    }
+
+    p.emit_session_state(&state, SessionStateChange::completed())
+        .await;
+    assert_eq!(
+        state.inner.read().await.last_outcome.as_deref(),
+        Some(OUTCOME_COMPLETED),
+        "两个结局不得坍缩成同一个值——坍缩后中止会被当成正常完成"
     );
 }

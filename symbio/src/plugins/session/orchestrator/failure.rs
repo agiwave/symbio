@@ -9,6 +9,22 @@
 
 use super::*;
 
+/// 「这个节点还在飞行中」——**唯一**判据。
+///
+/// 收口类操作（失败降级 / 中止收口）都必须用同一份定义：漏掉一个状态，
+/// 表现就是前端一个**永远转下去**的「运行中」，而它不会报错、只会一直转。
+/// `WaitingUserAction` **不在此列**：它不是「正在跑」，而是「等用户回答」——
+/// 用户仍可从审批卡片回答或忽略，抹掉它等于把入口删了。
+///
+/// 可见性 `pub(super)`：`orchestrator.test.rs` 直接锁定这个集合，
+/// 避免它被悄悄改小（少一个状态 = 前端一个永远转下去的「运行中」）。
+pub(super) fn is_inflight(status: &Option<cm::MessageStatus>) -> bool {
+    matches!(
+        status,
+        None | Some(cm::MessageStatus::Pending) | Some(cm::MessageStatus::Streaming)
+    )
+}
+
 impl SessionPlugin {
     /// 把"仍在进行中"的 AI 响应消息持久化为 `Failed` + 错误原因。
     ///
@@ -154,11 +170,7 @@ impl SessionPlugin {
                             }
                             changed.push(existing.clone());
                         }
-                    } else if matches!(
-                        existing.status,
-                        None | Some(cm::MessageStatus::Streaming)
-                            | Some(cm::MessageStatus::Pending)
-                    ) {
+                    } else if is_inflight(&existing.status) {
                         // 进行中的子节点定稿为 Completed（结束前端流式动画），不挂 error。
                         existing.status = Some(cm::MessageStatus::Completed);
                         existing.error = None;
@@ -219,6 +231,124 @@ impl SessionPlugin {
         // 7. 本轮在途缓冲随之作废：权威副本已由上面的 `replace_messages` 回到存储，
         //    继续叠加只会让同一条消息在 VDFS 列表里出现两次。
         collected.lock().await.clear();
+    }
+
+    /// 中止收口：把该会话**仍在飞行中的消息节点**定稿，使「用户按下停止」与
+    /// 「界面不再显示运行中」之间没有窗口。返回被定稿的节点数。
+    ///
+    /// ## 为什么不能只靠 [`Self::persist_failure`]
+    ///
+    /// `persist_failure` 的触发点是**消费循环收到 Error 帧**。但中止信号是经
+    /// `ai_control_tx` 投给 chat_loop 的，而 chat_loop 只在**检查点**才能看到它：
+    /// 一旦它卡在某个不轮询通道的 await 里，帧就一直躺在通道里没人取
+    /// （非流式工具执行就是典型——`route_fut` 是单次 await，最长硬超时 600s）。
+    ///
+    /// `handle_abort` 的 3s 兜底会把 `is_working` 复位，于是消费循环在下一帧醒来时
+    /// 直接 `break`（`!is_working`），**跳过 `persist_failure`**；而工具节点早已被
+    /// `emit_tool_running` 置为 `Streaming` 并广播出去。结果：会话显示「已中止」，
+    /// 节点显示「运行中」，且没有任何机制会纠正它——违反
+    /// `session/docs/node-state-streaming.md` §8.11「不得有节点停在 Streaming」。
+    ///
+    /// 因此中止路径**自己**承担收口责任，不依赖 chat_loop 是否已退出：这是个
+    /// 「谁宣称状态、谁负责收口」的划分，不是补丁。
+    ///
+    /// ## 两个数据源都要看
+    ///
+    /// - **存储**：`resume` 重跑工具时父 ToolCall 被直接 `replace_messages` 落库
+    ///   （`resume.rs` 步骤 5），从不出现在在途缓冲里；
+    /// - **在途缓冲**（`state.live_messages`）：流式节点的常规位置。
+    ///
+    /// 只扫其中一个，另一个场景的中止就会漏收。
+    pub(super) async fn converge_inflight(
+        &self,
+        state: &Arc<ActiveSessionState>,
+        session_id: &str,
+        reason: &str,
+    ) -> usize {
+        let chat_session = match self.open_chat_session(session_id).await {
+            Ok(cs) => cs,
+            Err(e) => {
+                crate::plugin_error!("session", "converge_inflight: open session failed: {}", e);
+                return 0;
+            }
+        };
+        let mut all = match chat_session.get_messages().await {
+            Ok(m) => m,
+            Err(e) => {
+                crate::plugin_error!("session", "converge_inflight: get_messages failed: {}", e);
+                return 0;
+            }
+        };
+        let live = state.live_messages.lock().await.clone();
+
+        // `(节点, 存储里是否已存在)` —— `existed` 是 VDFS 变更类型的唯一判据
+        // （`created` 与 `updated` 的区别），必须由这里如实报出。
+        let mut changed: Vec<(cm::ChatMessage, bool)> = Vec::new();
+
+        // ① 存储中仍在飞行的节点
+        for m in all.iter_mut() {
+            if is_inflight(&m.status) {
+                m.status = Some(cm::MessageStatus::Completed);
+                m.error = None;
+                changed.push((m.clone(), true));
+            }
+        }
+
+        // ② 在途缓冲里**尚未落库**的节点：补写，前提是父节点存在
+        //    （与 `persist_failure` 同一孤儿规则——写入无父的悬空节点会污染前端渲染）。
+        for l in &live {
+            if !is_inflight(&l.status) || all.iter().any(|m| m.id == l.id) {
+                continue;
+            }
+            let parent_exists = l
+                .parent_id
+                .as_ref()
+                .map(|pid| all.iter().any(|m| m.id == *pid))
+                .unwrap_or(true);
+            if !parent_exists {
+                continue;
+            }
+            let mut new = l.clone();
+            new.status = Some(cm::MessageStatus::Completed);
+            new.error = None;
+            all.push(new.clone());
+            changed.push((new, false));
+        }
+
+        if changed.is_empty() {
+            // 在途缓冲仍要作废：本轮要么已由 `persist_failure` 收口（权威副本已在
+            // 存储里），要么根本没有在途节点。留着只会让陈旧副本继续参与叠加。
+            state.live_messages.lock().await.clear();
+            return 0;
+        }
+
+        if let Err(e) = chat_session.replace_messages(all).await {
+            crate::plugin_error!(
+                "session",
+                "converge_inflight: replace_messages failed: {}",
+                e
+            );
+            return 0;
+        }
+
+        crate::plugin_info!(
+            "session",
+            "converge_inflight: {} 个节点定稿为 Completed（原因：{}）",
+            changed.len(),
+            reason
+        );
+        let converged = changed.len();
+
+        // 广播：走 `emit_message_patch` 而非直接 `broadcast_frame` —— 这些终态同样是
+        // **消息补丁**，VDFS 列表必须同步收敛（列表读存储 + 在途叠加，而存储已被改写）。
+        for (m, existed) in changed {
+            self.emit_message_patch(state, session_id, m.clone(), &m, existed, None)
+                .await;
+        }
+
+        // 权威副本已回到存储，在途缓冲作废（与 `persist_failure` 步骤 7 同一理由）。
+        state.live_messages.lock().await.clear();
+        converged
     }
 }
 

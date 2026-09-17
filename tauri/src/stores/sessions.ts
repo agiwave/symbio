@@ -67,6 +67,7 @@ import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/services/model'
+import { isInflightMessageStatus } from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
 
 /** 单个 session 的实时状态（用于缩略卡展示） */
@@ -382,9 +383,25 @@ export const useSessionsStore = defineStore('sessions', () => {
     sessionStatuses.value = snext
   }
 
-  /** 用后端拉来的历史替换 store 中的实时缓存（loadMessages 调用） */
+  /**
+   * 把后端拉来的历史**合并**进 store 的实时缓存（loadMessages 调用）。
+   *
+   * ## 为什么是合并而不是整表替换
+   *
+   * 这份快照来自一次 IPC 往返，取回期间流式补丁仍在到达并写入 store。
+   * 整表替换会把那些**更新的**补丁覆盖掉（经典 lost update），而它们不会被重发
+   * ——结果就是消息内容倒退若干 token，或整条在途节点凭空消失。
+   *
+   * 规则：
+   * - 快照里的节点 → 权威，整条替换（含状态与 `seq`）；
+   * - 本地有、快照没有的节点 → **仅当它仍在飞行中**（`isInflightMessageStatus`）
+   *   时保留。那正是 `persist_messages` 还没写盘的在途节点，也是「Turn 运行中切走
+   *   再切回」时最容易被丢掉的东西；终态且不在快照里的一律丢弃（被删除或已过期的
+   *   陈旧副本，保留它会让幽灵节点复活）。
+   */
   function hydrateFromHistory(sessionId: string, messages: ChatMessage[]) {
     const map: Record<string, ChatMessage> = {}
+    const fromSnapshot = new Set<string>()
     // 以"已分配 seq 的最大值 + 1"作为兜底游标起点，保证：
     // 1) 缺失 seq 的旧数据按后端数组顺序排在有 seq 的消息之后（不抢到前面）；
     // 2) 后续流式消息的 seq 从 max(seq) 之后继续，绝不小于任何历史 seq，
@@ -400,10 +417,21 @@ export const useSessionsStore = defineStore('sessions', () => {
         // 后端单调序号 `seq` 即权威顺序；缺失 seq 的旧数据用递增游标兜底。
         const seq = typeof m.seq === 'number' ? m.seq : idx++
         map[m.id] = { ...m, seq }
+        fromSnapshot.add(m.id)
         // 还原"等待审批"状态，使会话卡片角标在重开会话时正确显示
         if (m.status === 'waiting_user_action') waitingApproval = true
       }
     }
+
+    // 保留本地在途节点。**重新分配 seq**：本地游标可能小于快照的最大 seq
+    // （页面刚加载时游标从 0 起），沿用会让在途节点排到历史之前。
+    // `waiting_user_action` 不在保留集合里，因此不会影响上面的审批角标。
+    const local = sessionMessages.value[sessionId] || {}
+    for (const [id, m] of Object.entries(local)) {
+      if (fromSnapshot.has(id) || !isInflightMessageStatus(m.status)) continue
+      map[id] = { ...m, seq: idx++ }
+    }
+
     const next = { ...sessionMessages.value, [sessionId]: map }
     commitMessages(next)
     // 续接游标取"已分配 seq 的最大值"，保证下一轮 nextSeq 严格递增。

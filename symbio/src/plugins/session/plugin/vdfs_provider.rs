@@ -208,7 +208,11 @@ impl vdfs::VdfsProvider for SessionPlugin {
         match parse_session_path(path)? {
             VdfsSessionPath::Session(id) => {
                 let session = self.session_of(id).await?;
-                session_content(&session)
+                // 含在途：叶子与转写列表必须是同一份消息集合，否则前端
+                // `loadMessages`（读叶子）会在流式期间看不到正在跑的那一轮。
+                // 详见 `session_content` 的文档。
+                let live = self.live_messages_of(id).await;
+                session_content(&session, live)
             }
             // 会话记忆（`.vdfs/session/<id>/AGENTS.md`）：正文即文件全文。
             // 文件不存在 → 空串（不是错误）——「还没写过」是记忆的正常状态。
@@ -232,7 +236,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
             }
             VdfsSessionPath::SubSession { id, sub } => {
                 let session = self.sub_session_of(id, sub).await?;
-                session_content(&session)
+                // 子会话是**独立会话**（有自己的 id 与活跃状态），因此叠加的是它
+                // 自己的在途缓冲，而不是父会话的——父会话的在途消息不属于它。
+                let live = self.live_messages_of(&session.id).await;
+                session_content(&session, live)
             }
             VdfsSessionPath::Workdir { id, rel } if !rel.is_empty() => {
                 let workdir = self.workdir_of(id).await?;

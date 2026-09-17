@@ -507,9 +507,44 @@ fn vdfs_session_node_carries_list_fields() {
 fn vdfs_session_content_is_json() {
     let mut s = Session::new("abc");
     s.updated_at = 1_700_000_000_000;
-    let c = session_content(&s).unwrap();
+    let c = session_content(&s, Vec::new()).unwrap();
     let text = c.text.as_deref().unwrap_or("");
     let v: Value = serde_json::from_str(text).unwrap();
     assert_eq!(v["id"], "abc");
     assert!(v.get("messages").is_some(), "聊天转写随内容下发");
+}
+
+/// 会话内容必须**叠加在途消息**，与转写列表同源。
+///
+/// 前端 `loadMessages` 读的是叶子（`fetchTranscript` → `readVdfs(vdfsSessionAddr)`），
+/// 不是 `session/get_messages`。若叶子只序列化存储，Turn 运行中切走再切回就会
+/// 看不到正在跑的那一轮——它在 `persist_messages` 落库之前只存在于在途缓冲里。
+#[test]
+fn vdfs_session_content_overlays_live_messages() {
+    let mut s = Session::new("abc");
+    s.messages = vec![msg("stored-1", None)];
+
+    let c = session_content(&s, vec![msg("live-1", None)]).unwrap();
+    let v: Value = serde_json::from_str(c.text.as_deref().unwrap_or("")).unwrap();
+    let ids: Vec<&str> = v["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["stored-1", "live-1"], "落库在前，在途在后");
+
+    // 同 id：在途版本胜出（它更新），但 `seq` 从落库版本继承——否则同一条消息
+    // 会以「有 seq / 无 seq」两种形态排到列表的两个位置。
+    let mut stored = msg("same", Some(7));
+    stored.content = Some(cm::MessageContent::Text("旧".into()));
+    let mut live = msg("same", None);
+    live.content = Some(cm::MessageContent::Text("新".into()));
+    let mut s2 = Session::new("abc");
+    s2.messages = vec![stored];
+    let c = session_content(&s2, vec![live]).unwrap();
+    let v: Value = serde_json::from_str(c.text.as_deref().unwrap_or("")).unwrap();
+    let only = &v["messages"].as_array().unwrap()[0];
+    assert_eq!(only["content"], "新");
+    assert_eq!(only["seq"], 7, "顺序锚点只由存储分配，在途副本必须继承");
 }
