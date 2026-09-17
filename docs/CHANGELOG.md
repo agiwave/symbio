@@ -18,9 +18,40 @@
 
 ***
 
+## 2026-09-17: 智能体自身的 `AGENTS.md` 归 agent 插件（v2 落地，第二步）
+
+**取代同日上一条中的「作用域」做法**（`REQUIRED_PLUGINS` 含 `work`、转发时把 `WORKDIR`
+指向子 Agent 目录）——那条是错的，详见下。
+
+- **智能体域归一处**：`{homedir}/AGENTS.md`（系统智能体）与 `<agent dir>/AGENTS.md`
+  （子智能体）两份指令文件**都归 agent 插件**，各自带可编辑地址
+  （`.vdfs/agent/AGENTS.md` / `.vdfs/agent/<id>/AGENTS.md`）、两道容量闸门与片段注入。
+  读写面与注入面因此落在同一个所有者上——`谁能读写它，谁负责注入它` 才完整。
+- **`REQUIRED_PLUGINS` 收窄为 `["mcp","skill"]`**：只放解释能力资产的插件。
+  - `work` 移除：它的作用域语义是 `ctx[WORKDIR]`（工作区）。**转发时不再覆写
+    `WORKDIR`**——覆写让它的名字与实际管的东西对不上，并与系统侧那个实例读同一份文件、
+    注入两次。子树现在继承父会话的 `WORKDIR`。
+  - `setting` 移除：它是**设置页的入口**（自有分区 + 各插件配置清单），不是任何内容
+    文件的所有者；它在子树里既无挂载点也无可声明配置（注册会串味），无事可做。
+- **`session` 不再读 `{homedir}/AGENTS.md`**：删掉 `prompt::global_instruction()` 与
+  `session-global-instructions` 段。会话不是那个文件的所有者（既不给地址也不限容），
+  读一遍注入只是把「智能体自身的指令」临时挂在会话上。
+- **记忆的读写与闸门只在内核**：`BundleStore` 只回答「记忆文件在哪」（`memory_path`），
+  不再自带读写与自己的字节闸门；读写、两道闸门、片段排版、节点形状全部来自
+  `symbio_core::memory`（与 work / session 同源）。
+- **旧装配清理**：旧 bundle 目录里被自动补建的 `work/PLUGIN.yml` 由
+  `archive_retired_work_tree` 改名为 `PLUGIN.yml.disabled`（= 卸载，幂等且可逆）。
+- **挂载根保留名**：`.vdfs/agent/AGENTS.md` 是本应用自身的指令，不是名为它的 bundle
+  （bundle id 首字符必须是小写字母或数字，不可能相撞）。
+
+规范同步：`docs/design/agent-directory-spec.md` §6.2 从「`work` 实例换作用域」
+改为「所有权判据 + 禁止靠改指作用域实现」，附录 A.1 / A.3 记录新做法。
+
+***
+
 ## 2026-09-17: 子 Agent 改为 composite 插件树（Agent 目录规范 v2 落地，第一步）
 
-规范见 [`docs/design/agent-directory-spec.md`](../design/agent-directory-spec.md)
+规范见 [`docs/design/agent-directory-spec.md`](./design/agent-directory-spec.md)
 （取代 `open-agent-bundle-spec.md`）。本次是**代码侧第一步**，只加新路径，
 旧的 OAB v1 约定目录装配仍保留，按 `manifest.yaml` 的 `spec` 分流。
 

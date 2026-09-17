@@ -1,9 +1,9 @@
-//! `session/prompt.rs` 的单元测试 —— 时间上下文与全局指令。
+//! `session/prompt.rs` 的单元测试 —— 时间上下文。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
-//! 这里同时钉住**一次移除**：工作区 `AGENTS.md` 不得再出现在本模块的产物里
-//! （那是 work 插件的工作区记忆，见模块文档的归属说明）。
+//! 这里同时钉住**一次移除**：本模块不得再出现任何 `AGENTS.md` 的读取——
+//! 智能体自身那个文件归 `setting` 插件，工作区那个归 `work` 插件。
 
 use super::*;
 
@@ -26,19 +26,4 @@ fn temporal_context_without_workdir() {
 fn temporal_context_ignores_empty_workdir() {
     let result = temporal_context(Some("   "));
     assert!(!result.contains("工作区"), "空白 workdir 应被忽略");
-}
-
-/// 全局指令**没有**地址与容量：宿主不提供它的编辑面，假装有只会误导模型
-#[test]
-fn global_instruction_has_no_address_or_capacity() {
-    let rendered = format!("【{GLOBAL_TITLE}】（{AGENTS_FILE}，对所有会话生效）\n正文\n");
-    assert!(rendered.contains("【全局指令】"));
-    assert!(!rendered.contains(".vdfs"), "全局指令不该带 VDFS 地址");
-    assert!(!rendered.contains("上限"), "全局指令不该带容量口径");
-}
-
-/// 注册名是覆盖键，不是分类——改名会让「同名覆盖」失效
-#[test]
-fn global_prompt_name_is_stable() {
-    assert_eq!(GLOBAL_PROMPT_NAME, "session-global-instructions");
 }

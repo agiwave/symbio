@@ -84,7 +84,10 @@ fn migrate_prompts_to_agents_md(dir: &Path) -> Result<bool, String> {
     }
 
     let mut entries: Vec<(i64, String, String)> = Vec::new();
-    for entry in std::fs::read_dir(&prompts).map_err(|e| e.to_string())?.flatten() {
+    for entry in std::fs::read_dir(&prompts)
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -165,7 +168,10 @@ fn migrate_mcps(dir: &Path) -> Result<bool, String> {
     let target_root = dir.join("mcp");
     let mut acted = false;
 
-    for entry in std::fs::read_dir(&mcps).map_err(|e| e.to_string())?.flatten() {
+    for entry in std::fs::read_dir(&mcps)
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
         let path = entry.path();
         let name = path
             .file_stem()
@@ -265,7 +271,10 @@ mod tests {
         assert!(migrate_v1_to_v2(&d).unwrap());
 
         // manifest 的 spec 已改写
-        assert_eq!(read_spec(&d.join("manifest.yaml")).as_deref(), Some(SPEC_V2));
+        assert_eq!(
+            read_spec(&d.join("manifest.yaml")).as_deref(),
+            Some(SPEC_V2)
+        );
         // prompts → 根 AGENTS.md（frontmatter 已剥离）
         assert_eq!(
             std::fs::read_to_string(d.join("AGENTS.md")).unwrap().trim(),
@@ -275,9 +284,10 @@ mod tests {
         assert!(d.join("skill").join("playbook").join("SKILL.md").exists());
         assert!(!d.join("skills").exists());
         // mcps → mcp/<n>/server.json，transport 改名为 type
-        let server: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(d.join("mcp").join("demo").join("server.json")).unwrap())
-                .unwrap();
+        let server: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(d.join("mcp").join("demo").join("server.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(server["type"], "stdio");
         assert_eq!(server["command"], "npx");
     }

@@ -334,10 +334,17 @@ impl BundleStore {
             return Err(format!("不是目录：{}", dir.display()));
         }
         let mut out: Vec<FileEntry> = Vec::new();
-        for e in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        for e in std::fs::read_dir(&dir)
+            .map_err(|e| e.to_string())?
+            .flatten()
+        {
             let p = e.path();
             let name = e.file_name().to_string_lossy().to_string();
-            let path = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            let path = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
             let meta = std::fs::metadata(&p);
             out.push(FileEntry {
                 path,
@@ -359,7 +366,11 @@ impl BundleStore {
         let full = absolutize(&record.dir, &rel);
         debug_assert!(full.starts_with(&record.dir));
         let meta = std::fs::metadata(&full).map_err(|_| format!("条目不存在（`{rel}`）"))?;
-        Ok(FileEntry { path: rel, size: meta.len(), is_dir: meta.is_dir() })
+        Ok(FileEntry {
+            path: rel,
+            size: meta.len(),
+            is_dir: meta.is_dir(),
+        })
     }
 
     /// 条目在磁盘上的绝对路径（沙箱化后；供删除目录用）。
@@ -432,7 +443,9 @@ impl BundleStore {
         if let Some(parent) = full.parent() {
             if parent != record.dir
                 && parent.starts_with(&record.dir)
-                && std::fs::read_dir(parent).map(|mut d| d.next().is_none()).unwrap_or(false)
+                && std::fs::read_dir(parent)
+                    .map(|mut d| d.next().is_none())
+                    .unwrap_or(false)
             {
                 let _ = std::fs::remove_dir(parent);
             }
@@ -572,16 +585,31 @@ mod tests {
     #[test]
     fn path_sandbox_accepts_any_inner_path() {
         // v2 不再解释布局：只挡住逃逸，其它一律放行（含 manifest.yaml 等）
-        for ok in ["manifest.yaml", "skill/foo/SKILL.md", "mcp/x/server.json", "assets/a.png"] {
+        for ok in [
+            "manifest.yaml",
+            "skill/foo/SKILL.md",
+            "mcp/x/server.json",
+            "assets/a.png",
+        ] {
             assert_eq!(normalize_item_path(ok).as_deref(), Ok(ok));
         }
         // 反斜杠 + ./ 前缀归一化
-        assert_eq!(normalize_item_path("./skill\\x/SKILL.md").as_deref(), Ok("skill/x/SKILL.md"));
+        assert_eq!(
+            normalize_item_path("./skill\\x/SKILL.md").as_deref(),
+            Ok("skill/x/SKILL.md")
+        );
     }
 
     #[test]
     fn path_sandbox_rejects_escapes() {
-        for bad in ["../etc/passwd", "/abs/path.md", "a/../../b", "a//b", "a/", ""] {
+        for bad in [
+            "../etc/passwd",
+            "/abs/path.md",
+            "a/../../b",
+            "a//b",
+            "a/",
+            "",
+        ] {
             assert!(normalize_item_path(bad).is_err(), "should reject `{bad}`");
         }
     }

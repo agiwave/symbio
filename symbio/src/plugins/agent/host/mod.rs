@@ -1,44 +1,52 @@
-//! symbio 宿主适配层 —— OAB 协议（`oab/v1`）的第一个接入方实现。
+//! agent 插件的宿主接入层 —— Agent 目录规范 v2（`agent-dir/v2`）的实现。
 //!
-//! ## 职责（规范 §12 宿主参考实现）
+//! ## 职责（规范 §3.2 宿主）
 //!
 //! | 模块 | 职责 |
 //! |---|---|
-//! | [`plugin`] | 插件主体：`traverse(available_tools)` → 扫描约定目录装配 → 人格片段 + 身份工具注册 |
-//! | [`store`] | bundle 存储：**本插件自己的目录**、zip 导入（zip-slip 防护）、导出 |
-//! | [`prompt`] | **人格**的系统提示词片段（多文件装配，自己排版但形态与内核对齐） |
-//! | [`memory`] | **智能体记忆**的落位与地址（机制在 `symbio_core::memory`） |
-//! | [`capability`] | `agent_identity` 身份工具（取回超出注入预算的全文） |
-//! | [`config`] | 插件配置（两组容量闸门：条目 / 人格注入，记忆两道） |
+//! | [`plugin`] | 插件主体：`traverse` 里的托管（装配子 Agent 插件树）+ 门槛（manifest 校验）+ 指令注入 |
+//! | [`store`] | bundle 存储：**本插件目录 / 工作区目录**两级、zip 导入（zip-slip 防护）、导出、条目读写 |
+//! | [`memory`] | **子智能体**自身的 `AGENTS.md`（`<agentdir>/AGENTS.md`）：落位、地址、注入 |
+//! | [`instruction`] | **系统智能体**自身的 `AGENTS.md`（`{homedir}/AGENTS.md`）：落位、地址、注入 |
+//! | [`config`] | 插件配置（条目写入上限 + 智能体指令的两道闸门，见 §「闸门」） |
+//! | [`manifest`] | `manifest.yaml` 的读取与接入校验（§5 / §10） |
+//! | [`migrate`] | `oab/v1` 目录 → `agent-dir/v2` 的**就地幂等迁移**（§12） |
+//! | [`scope`] | `SubAgentVisitor` 代理层：把子树的注册加 `agent/<id>/` 前缀并进系统树（§8.2） |
+//! | [`subagent`] | `agent_run`（子智能体委托）能力 |
+//! | [`detail`] | bundle 概览 / 详情表单的呈现定义 |
 //! | [`vdfs`] | VDFS 挂载点（`.vdfs/agent/…`，本插件直接 `impl VdfsProvider`） |
 //!
 //! **本层没有任何自有协议路由**：bundle 的浏览 / 导入 / 删除 / 导出分别由
 //! `vdfs/list`、`vdfs/write`（二进制）、`vdfs/delete`、节点动作 `export` 承担，
 //! 原 `bundle/*` 协议已下线。
 //!
-//! ## 装配契约（三个能力来源）
+//! ## 本插件是智能体域的**唯一所有者**
 //!
-//! | 约定目录 | 产出 |
-//! |---|---|
-//! | `prompts/<name>.md` | 人格片段（frontmatter `priority`，默认 10） |
-//! | `skills/<name>/SKILL.md` | 人格片段（priority 默认 50，行业 SKILL 格式） |
-//! | `mcps/<name>…` | MCP server 声明 → 宿主 MCP 客户端（**工具唯一来源**） |
+//! 「拥有智能体」在这套架构里包含三件同源的事，它们必须在同一个插件里：
 //!
-//! `prompts/` 与 `skills/` 装配出的人格交出**两份**：系统提示词片段（每轮注入的
-//! 本体，见 [`prompt`]）与 `agent_identity` 工具（取回超出注入预算的全文）。
-//! 两者都只在**会话选择了智能体**（`ctx[AGENT_ID]` 非空）时注册——没选智能体就
-//! 没有人格可注入，这是 [`plugin::AgentPlugin::traverse`] 的分支条件。
+//! 1. **智能体库**：扫描 / 导入 / 导出 / 删除 bundle（[`store`]）；
+//! 2. **智能体的装配**：把 bundle 目录挂成插件树并收集其能力（[`plugin`] / [`scope`]）；
+//! 3. **智能体自身的指令**：`{homedir}/AGENTS.md` 与 `<agentdir>/AGENTS.md`
+//!    （[`instruction`] / [`memory`]）。
 //!
-//! 协议不定义宿主专有执行器：工具一律经 MCP 接入，宿主复用已有 MCP 机制。
+//! 第 3 件事曾经散落在别处（`session` 读系统那一份，子树的 `work` 实例读 bundle 那一份），
+//! 也一度试图收进 `setting`——但 `setting` 是**设置页的入口**（自有分区 + 各插件配置清单），
+//! 不是任何内容文件的所有者。指令属于智能体域，于是回到本插件：
+//! **读写面与注入面落在同一个所有者上**。
 //!
-//! ## 协议与宿主的边界
+//! ## 闸门
 //!
-//! 本层只做「约定目录 ↔ 宿主机制」的映射（装配语义 → traverse/collect 能力
-//! 收集；bundle 权限 → 声明提示），**不实现协议本身**——协议在
-//! [`crate::plugins::agent::core`]，且 core 对本层零依赖。
+//! Agent 目录里所有写入都由本插件执行，因此闸门取值只有一个来源（[`config`]）：
+//!
+//! - `item_max_bytes`：bundle 内条目文件（提示词 / 技能 / MCP）的写入上限；
+//! - `memory_max_bytes` / `memory_inject_max_bytes`：智能体自身的 `AGENTS.md`
+//!   的写入与注入上限——**两个作用域共用一对**（它们是同一类东西，只是作用域不同）。
+//!
+//! 闸门的**执行**全在内核（`symbio_core::memory`），与 work / session 几层同源。
 
 mod config;
 mod detail;
+pub mod instruction;
 pub mod manifest;
 pub mod memory;
 pub mod migrate;

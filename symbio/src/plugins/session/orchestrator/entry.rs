@@ -315,10 +315,11 @@ impl SessionPlugin {
             attach_capabilities(&chat_ctx, tool_visitor);
 
             // ── 基础提示词：**不在这里拼** ──
-            // 全局指令（`{homedir}/AGENTS.md`）与各层记忆都由插件在能力收集期经
-            // `register_system_prompt` 注册，由 `chat_loop::inputs::resolve_system_prompt`
-            // 统一拼接。曾经在这里把 AGENTS.md 装配成 `req.system_prompt` 传入，
-            // 后果有二：① 同一份工作区 AGENTS.md 被 work 插件再注入一次（进两次上下文）；
+            // 各层指令与记忆（智能体自身目录归 `agent`，工作区归 `work`，会话归本插件）
+            // 都由插件在能力收集期经 `register_system_prompt` 注册，由
+            // `chat_loop::inputs::resolve_system_prompt` 统一拼接。曾经在这里把
+            // `{homedir}/AGENTS.md` 装配成 `req.system_prompt` 传入，后果有二：
+            // ① 同一份工作区 AGENTS.md 被 work 插件再注入一次（进两次上下文）；
             // ② 显式 `system_prompt` 会**顶掉**模型插件注册的人格——用户写了一份指令，
             // 模型却换了个人格。两处都已按「一个作用域一个所有者」收口。
             //

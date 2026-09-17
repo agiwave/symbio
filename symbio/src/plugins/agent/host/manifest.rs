@@ -54,7 +54,10 @@ pub struct AgentManifest {
 pub fn spec_requirement_matches(req: &str, host_major: u64) -> bool {
     let s = req.trim();
     let major = s.strip_prefix('^').unwrap_or(s).trim();
-    major.parse::<u64>().map(|n| n == host_major).unwrap_or(false)
+    major
+        .parse::<u64>()
+        .map(|n| n == host_major)
+        .unwrap_or(false)
 }
 
 /// 兼容性声明
@@ -180,7 +183,11 @@ pub fn validate(m: &AgentManifest) -> Result<(), String> {
     if m.spec != super::plugin::SPEC_V2 {
         return Err(format!(
             "manifest.spec 为 `{}`，本宿主只支持 `{}`",
-            if m.spec.is_empty() { "（缺失）" } else { &m.spec },
+            if m.spec.is_empty() {
+                "（缺失）"
+            } else {
+                &m.spec
+            },
             super::plugin::SPEC_V2
         ));
     }
@@ -237,7 +244,8 @@ mod tests {
     #[test]
     fn rejects_spec_and_version_mismatch() {
         let base = "id: \"x\"\nname: \"X\"\nversion: \"1.0.0\"\n";
-        let v1 = serde_yaml_ng::from_str::<AgentManifest>(&format!("spec: \"oab/v1\"\n{base}")).unwrap();
+        let v1 =
+            serde_yaml_ng::from_str::<AgentManifest>(&format!("spec: \"oab/v1\"\n{base}")).unwrap();
         assert!(validate(&v1).unwrap_err().contains("agent-dir/v2"));
 
         let wrong_req = serde_yaml_ng::from_str::<AgentManifest>(&format!(

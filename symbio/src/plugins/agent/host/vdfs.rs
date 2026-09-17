@@ -20,8 +20,17 @@
 //! `AGENTS.md`（§6 人格与记忆），它走内核的 `MemoryFile::node`（带容量闸门），
 //! 与工作区记忆同一口径。
 //!
+//! ## 挂载根下还有一个文件：系统智能体自身的指令
+//!
+//! `.vdfs/agent/AGENTS.md` 不是某个 bundle 的条目，而是**本应用（系统智能体）自身**的
+//! 指令文件（`{homedir}/AGENTS.md`，见 [`super::instruction`]）。它排在列表**最前**：
+//! 剩下的都是「装进来的智能体」，而它不是——先摆出来才不会被当成某个包看走眼。
+//! 与 bundle 无关的那三个字母 `AGENTS.md` 因此是挂载根下的**保留名**；bundle id 的
+//! 字符集要求首字符是小写字母或数字，不可能与之相撞（§5.1）。
+//!
 //! 外部访问一律走 `.vdfs/agent/…`。
 
+use super::instruction;
 use super::memory;
 use super::plugin::AgentPlugin;
 use super::store::{BundleRecord, BundleStore, FileEntry};
@@ -46,6 +55,8 @@ const LABEL: &str = "智能体";
 #[derive(Debug)]
 enum RelPath<'a> {
     Root,
+    /// 系统智能体自身的指令：挂载根下的 `AGENTS.md`（与 bundle 无关，见模块文档）
+    Instruction,
     /// Agent 本身（`<id>`）
     Agent {
         id: &'a str,
@@ -65,6 +76,11 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
     let p = path.trim_matches('/');
     if p.is_empty() {
         return RelPath::Root;
+    }
+    // 保留名：挂载根下的 `AGENTS.md` 是**本应用自身**的指令，不是名为它的 bundle
+    // （bundle id 首字符必须是小写字母或数字，两者不可能相撞）
+    if p == AGENTS_FILE {
+        return RelPath::Instruction;
     }
     match p.split_once('/') {
         None => RelPath::Agent { id: p },
@@ -158,7 +174,12 @@ impl AgentPlugin {
         BundleStore::new(dir.dir(), ctx.get(crate::symbio_core::WORKDIR).as_deref())
     }
 
-
+    /// 系统智能体自身指令 → VDFS 节点（`list` 与 `stat` 共用同一份形状）
+    async fn instruction_node(&self) -> VdfsNode {
+        self.instruction_store()
+            .await
+            .node(&instruction::node_spec())
+    }
 }
 
 #[async_trait]
@@ -168,7 +189,7 @@ impl VdfsProvider for AgentPlugin {
     }
 
     fn description(&self) -> Option<&str> {
-        Some("智能体（整目录能力包：人格 / 技能 / MCP / 记忆各自成目录）。")
+        Some("智能体实例（整目录能力包）与本应用自身的指令。")
     }
 
     fn order(&self) -> i32 {
@@ -195,11 +216,16 @@ impl VdfsProvider for AgentPlugin {
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
         match parse_rel_path(path) {
-            RelPath::Root => Ok(store
-                .list()
-                .into_iter()
-                .map(|r| bundle_node(&r, &store))
-                .collect()),
+            RelPath::Root => {
+                // 本应用自身的指令排最前：剩下每一项都是「装进来的智能体」，它不是
+                let mut nodes = vec![self.instruction_node().await];
+                nodes.extend(store.list().into_iter().map(|r| bundle_node(&r, &store)));
+                Ok(nodes)
+            }
+            // 指令是叶子节点
+            RelPath::Instruction => Err(VdfsError::invalid(format!(
+                "该路径是文件，不可列举：{path}"
+            ))),
             RelPath::Agent { id } => {
                 let id = id_of(id);
                 // 存在性校验：不存在的条目应报 NotFound 而非给出空清单
@@ -233,7 +259,9 @@ impl VdfsProvider for AgentPlugin {
                     .stat_item(&id, rel)
                     .map_err(|e| VdfsError::not_found(format!("未找到路径「{path}」：{e}")))?;
                 if !e.is_dir {
-                    return Err(VdfsError::invalid(format!("该路径是文件，不可列举：{path}")));
+                    return Err(VdfsError::invalid(format!(
+                        "该路径是文件，不可列举：{path}"
+                    )));
                 }
                 Ok(store
                     .list_files(&id, rel)
@@ -255,6 +283,8 @@ impl VdfsProvider for AgentPlugin {
         match parse_rel_path(path) {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             RelPath::Root => Ok(VdfsNode::dir("", LABEL, self.root_access())),
+            // 本应用自身的指令（`{homedir}/AGENTS.md`）
+            RelPath::Instruction => Ok(self.instruction_node().await),
             RelPath::Agent { id } => {
                 let id = id_of(id);
                 let r = store
@@ -287,6 +317,15 @@ impl VdfsProvider for AgentPlugin {
             return self.config_file().read(self.config_slot()).await;
         }
         match parse_rel_path(path) {
+            // 本应用自身的指令（`{homedir}/AGENTS.md`）
+            RelPath::Instruction => {
+                let text = self
+                    .instruction_store()
+                    .await
+                    .read()
+                    .map_err(|e| VdfsError::not_found(format!("读取系统指令失败：{e}")))?;
+                Ok(VdfsContent::text(path, text))
+            }
             // Agent 目录内的文件：直读（沙箱在 store 里）
             RelPath::File { id, rel } => {
                 let id = id_of(id);
@@ -332,6 +371,30 @@ impl VdfsProvider for AgentPlugin {
         // 配置文档：与其它插件同一口径（写自己的 `PLUGIN.yml`）
         if path.trim_matches('/') == PLUGIN_FILE {
             return self.config_file().apply(self.config_slot(), content).await;
+        }
+        // 系统智能体自身的指令写回（容量闸门在内核里，本插件不重复实现）
+        if matches!(parse_rel_path(path), RelPath::Instruction) {
+            if content.binary {
+                return Err(VdfsError::invalid("AGENTS.md 是文本文件，不接受二进制内容"));
+            }
+            let instr = self.instruction_store().await;
+            let existed = instr.exists();
+            let text = content.text.as_deref().unwrap_or_default();
+            instr.write(text).map_err(VdfsError::invalid)?;
+            notify_change(
+                PLUGIN_AGENT,
+                path,
+                if existed {
+                    VDFS_CHANGE_UPDATED
+                } else {
+                    VDFS_CHANGE_CREATED
+                },
+            );
+            return Ok(VdfsWriteResponse {
+                path: path.to_string(),
+                created: !existed,
+                etag: None,
+            });
         }
         // 智能体记忆写回（容量闸门在内核里，本插件不重复实现）
         if let RelPath::Memory { id } = parse_rel_path(path) {
@@ -424,6 +487,13 @@ impl VdfsProvider for AgentPlugin {
         }
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
+        // 系统指令不可删除（与各层记忆同一口径）：要清空就写入空内容
+        if matches!(parse_rel_path(path), RelPath::Instruction) {
+            return Err(VdfsError::Forbidden(format!(
+                "系统指令不可删除（删除即丢失全部指令）。\
+                 如需清空，请向 `{AGENTS_FILE}` 写入空内容。"
+            )));
+        }
         // 智能体记忆不可删除（与工作区记忆同一口径）：要清空就写入空内容
         if matches!(parse_rel_path(path), RelPath::Memory { .. }) {
             return Err(VdfsError::Forbidden(format!(
@@ -528,6 +598,21 @@ mod tests {
         // 更深处的同名文件仍是普通文件（记忆只在 Agent 根这一层）
         assert!(matches!(
             parse_rel_path("b1/skill/AGENTS.md"),
+            RelPath::File { .. }
+        ));
+    }
+
+    /// 挂载根下的 `AGENTS.md` 是**本应用自身的指令**，不是名为它的 bundle
+    ///
+    /// 两者不可能相撞：bundle id 的首字符必须是小写字母或数字（§5.1），
+    /// 而保留名以大写 `A` 开头。
+    #[test]
+    fn root_agents_md_is_the_host_instruction_not_a_bundle() {
+        assert!(matches!(parse_rel_path(AGENTS_FILE), RelPath::Instruction));
+        assert!(matches!(parse_rel_path("/AGENTS.md"), RelPath::Instruction));
+        // 带子路径时不再命中保留名（那是一条指向不存在条目的普通 bundle 路径）
+        assert!(matches!(
+            parse_rel_path("AGENTS.md/x"),
             RelPath::File { .. }
         ));
     }

@@ -4,7 +4,7 @@
 //! 的主链路，全部进程内完成（tempdir + 内存 zip），不依赖真实文件系统布局。
 //!
 //! Agent 采用**目录即配置**布局（约定优于配置）：`manifest.yaml` + `AGENTS.md`
-//! + 能力插件目录（`skill/` `mcp/` `work/`），存在即安装，无需在 manifest 里登记。
+//! + 能力插件目录（`skill/` `mcp/` `setting/`），存在即安装，无需在 manifest 里登记。
 
 use super::plugin::AgentPlugin;
 use super::store::BundleStore;
@@ -36,7 +36,8 @@ requires:
 "#
         );
         let agents_md = "你是全栈开发人格：先澄清需求再动工。";
-        let skill_md = "---\nname: playbook\ndescription: 交付流程手册：先澄清需求再动工\n---\n\n# 交付\n";
+        let skill_md =
+            "---\nname: playbook\ndescription: 交付流程手册：先澄清需求再动工\n---\n\n# 交付\n";
 
         let files: Vec<(&str, &str)> = vec![
             ("manifest.yaml", &manifest),
@@ -88,7 +89,9 @@ async fn agent_import_traverse_and_memory() {
     assert_eq!(result.id, "com.symbio.test-fixture");
     assert!(!result.replaced);
     assert!(Path::new(&result.dir).join("AGENTS.md").exists());
-    assert!(Path::new(&result.dir).join("skill/playbook/SKILL.md").exists());
+    assert!(Path::new(&result.dir)
+        .join("skill/playbook/SKILL.md")
+        .exists());
 
     // ── 2. traverse：整棵插件树并进会话（能力带来源前缀，§8.2）──
     let plugin = Arc::new(AgentPlugin::new());
@@ -116,12 +119,28 @@ async fn agent_import_traverse_and_memory() {
         caps.iter().map(|c| &c.name).collect::<Vec<_>>()
     );
 
-    // ── 3. 系统提示词：人格 / 记忆由子 Agent 的 work 实例注入（带来源前缀）──
+    // ── 3. 系统提示词：子 Agent 自身的 AGENTS.md 由**本插件**注入 ──
+    // 子树里没有 `agent` 实例，而认识 Agent 目录的正是本插件；段名经作用域 visitor
+    // 加 `agent/<id>/` 前缀，因此与系统侧的同名条目互不覆盖
     let segments = manager.list_system_prompts().await;
     let names: Vec<&str> = segments.iter().map(|(n, _)| n.as_str()).collect();
+    const OWN_SEGMENT: &str = "agent/com.symbio.test-fixture/agent-memory";
     assert!(
-        names.iter().any(|n| n.starts_with("agent/com.symbio.test-fixture/")),
-        "人格 / 记忆片段应由子 Agent 的 work 实例注入: {names:?}"
+        names.contains(&OWN_SEGMENT),
+        "智能体自身的 AGENTS.md 应由本插件带前缀注入: {names:?}"
+    );
+    let injected = segments
+        .iter()
+        .find(|(n, _)| n == OWN_SEGMENT)
+        .map(|(_, t)| t.as_str())
+        .unwrap();
+    assert!(
+        injected.contains("你是全栈开发人格"),
+        "注入内容应来自该 bundle 自己的 AGENTS.md: {injected}"
+    );
+    assert!(
+        injected.contains(".vdfs/agent/com.symbio.test-fixture/AGENTS.md"),
+        "片段应指路整包浏览面里的那个地址: {injected}"
     );
 
     // ── 3b. 记忆落位：Agent 自己的目录，不是工作区根 ──
@@ -202,7 +221,8 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 // v2：子 Agent 是一棵 composite 插件树（规范 `docs/design/agent-directory-spec.md`）
 // ---------------------------------------------------------------------
 // 验证三件事：manifest 声明 `agent-dir/v2` 的目录会被挂成插件树；它的注册经
-// 代理层带上来源前缀（与系统树不冲突）；它的 work 实例作用域是自己的目录。
+// 代理层带上来源前缀（与系统树不冲突）；它的 `setting` 实例把自己目录下的
+// `AGENTS.md` 注入成【智能体指令】。
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
@@ -218,7 +238,8 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
         "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires://n  spec: \"^2\"\n",
     )
     .unwrap();
-    // 人格 + 记忆：由子 Agent 的 work 实例拥有（forward 时把 WORKDIR 指向该目录）
+    // 人格 / 记忆：`<agentdir>/AGENTS.md`，由子树的 `setting` 实例读取并注入
+    // （宿主不再把子树的 WORKDIR 改指本目录——`work` 只认工作区，那个覆写是错的）
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
     // 一个技能：落在子 Agent **自己的** skill 插件目录下（有技能它才注册 read_skill）
     let skill_dir = sub.join("skill").join("demo");
@@ -246,16 +267,29 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
 
     plugin.traverse(String::new(), ctx).await.unwrap();
 
-    // 1) 子 Agent 的 work 实例注入了记忆段，且段名带来源前缀（与系统的 `work` 不冲突）
-    let names: Vec<String> = manager
-        .list_system_prompts()
-        .await
-        .into_iter()
-        .map(|(n, _)| n)
-        .collect();
+    // 1) 子 Agent 的 AGENTS.md 由本插件注入，段名带来源前缀
+    //    （与系统侧的 `agent-memory` / `agent-instructions` 不冲突）
+    let prompts = manager.list_system_prompts().await;
+    let names: Vec<String> = prompts.iter().map(|(n, _)| n.clone()).collect();
+    const OWN_SEGMENT: &str = "agent/reviewer/agent-memory";
     assert!(
-        names.iter().any(|n| n.starts_with("agent/reviewer/")),
+        names.contains(&OWN_SEGMENT.to_string()),
         "子 Agent 的注册应带来源前缀，实际：{names:?}"
+    );
+    let injected = prompts
+        .iter()
+        .find(|(n, _)| n == OWN_SEGMENT)
+        .map(|(_, t)| t.as_str())
+        .unwrap();
+    assert!(injected.contains("你是评审专家"), "{injected}");
+    // 地址指向本插件的整包浏览面，且**印出真实写入闸门**（闸门由本插件执行）
+    assert!(
+        injected.contains(".vdfs/agent/reviewer/AGENTS.md"),
+        "片段应指路整包浏览面里的地址: {injected}"
+    );
+    assert!(
+        injected.contains("本智能体私有，与【工作区记忆】相互独立"),
+        "同名不同作用域必须点明，否则模型会把两件事写混: {injected}"
     );
 
     // 2) 子 Agent 的 skill 实例注册的工具被代理层改名，不与系统的 `read_skill` 撞名

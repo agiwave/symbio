@@ -499,17 +499,10 @@ impl Plugin for SessionPlugin {
             let me: vdfs::DynVdfsProvider = self.clone();
             visitor.register_vdfs_provider(PLUGIN_SESSION, me).await;
 
-            // 全局指令（`{homedir}/AGENTS.md`）：**只读、无地址、无容量**——它不是记忆
-            // （模型改不动它），因此不进 `symbio_core::memory` 那套内核，由会话侧直接
-            // 注入。走注册通道而非 `req.system_prompt`：后者会顶掉模型插件的人格。
-            //
-            // 工作区 `AGENTS.md` **不在这里**——那是 work 插件的工作区记忆，
-            // 「谁能读写它，谁负责注入它」。
-            if let Some(text) = super::prompt::global_instruction().await {
-                visitor
-                    .register_system_prompt(super::prompt::GLOBAL_PROMPT_NAME, text)
-                    .await;
-            }
+            // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）**不再在此注入**：
+            // 那是「智能体自身目录」这个作用域，归 setting 插件（谁能读写它，谁负责
+            // 注入它）。工作区 `AGENTS.md` 归 work 插件，本会话的 `AGENTS.md` 归本
+            // 插件——三层各有一个所有者，见 `symbio_core::memory` 的模块文档。
 
             // 会话记忆（`.vdfs/session/<id>/AGENTS.md`）：**本会话私有**，可读写、有地址、
             // 有两道容量闸门——因此它归内核那套机制，本插件只负责「落位 + 标题 + 地址」。
