@@ -13,8 +13,8 @@
         <span class="kind">{{ node.kind }}</span>
       </div>
       <div class="head-actions">
-        <button v-if="writable" class="btn" :disabled="saving" @click="$emit('rename')">重命名</button>
-        <button v-if="writable" class="btn danger" :disabled="saving" @click="$emit('delete')">删除</button>
+        <button v-if="writable" class="action-btn secondary" :disabled="saving" @click="$emit('rename')">重命名</button>
+        <button v-if="writable" class="danger-btn" :disabled="saving" @click="$emit('delete')">删除</button>
       </div>
     </header>
 

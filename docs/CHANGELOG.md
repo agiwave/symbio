@@ -18,6 +18,42 @@
 
 ***
 
+## 2026-09-17: 修复前端样式审计暴露的既有问题（VDFS 详情按钮无样式 / 死样式 / 审计假阳性）
+
+**性质：真 bug 修复 + 死样式清理 + 审计脚本修复**，无协议与行为变化。
+
+- **修真 bug：VDFS 详情页的动作按钮一直是无样式的原生按钮**。`VdfsReadonlyDetail`
+  与 `VdfsTextDetail` 用 `class="btn" / "btn primary" / "btn danger"`，但 `.btn`
+  **在任何地方都没有定义**（全仓该名字只存在于 `HomedirSwitcher.vue` 的 scoped 样式，
+  且 scoped 属性对子组件元素不生效；`git log -S'.btn {' tauri/src/styles/` 为空，
+  说明全局 `.btn` 从未存在）。改为 `controls.css` 的共享控件类：
+  `.action-btn`（保存）/ `.action-btn secondary`（还原、重命名）/ `.danger-btn`（删除）
+  —— 与同页 `VdfsWorkbench.vue` 的既有写法一致，且复活了此前零引用的 `.danger-btn`。
+- **删死样式**：`DetailForm.vue` 的 `.path-pill`（无任何模板/脚本引用，唯一消费者已
+  消失）、`controls.css` 的 `.field-label`（全仓零引用）及其在文件头清单中的登记。
+- **修 `style-audit.mjs` 的数组分支**：`:class="[...]"` 原先在收完字符串字面量后
+  直接 `return`，把**模板字面量前缀**与**对象键**两类痕迹全丢掉 —— 最常见的
+  `` :class="[`st-${node.status}`, …]" `` 因此被误报成「定义未使用」（`.option-btn.st-error`）。
+  现改为显式 `addKeys` / `addPrefixes` / `addTernary` 收尾；数组分支**刻意不套用**
+  裸标识符简写规则：数组里的裸标识符是变量（`[statusClass, …]`），当成类名会凭空
+  造出「使用未定义」的 ERROR（修的过程中确实撞到过 `.statusClass`）。
+- **审计新增两处「无引用但属正常」登记**（都写明原因，见脚本头注）：
+  `ALLOW_UNUSED_SCOPED` —— 后端协议词表驱动的修饰类（`DetailAction.style` →
+  `.ea-btn.primary/.danger`；`DetailBadge.style` → `.badge.disabled/.accent`，
+  词表在 Rust 侧，静态不可解析）；`ALLOW_UNUSED_PROPS` —— 设计系统成员
+  （`--accent-subtle-border` / `--surface-fade` / `--color-banner-bg` / `--radius-xs`
+  / `--font-size-xl` / `--font-weight-regular`），令牌层按语义组与刻度成组定义，
+  未被消费不等于死代码。**结果：16 条警告 → 0 错 0 警。**
+- **删过期检查 `grep-audit.mjs` 的 I-014-light**：它审的 `CognitiveUnit` 已随认知体系
+  回退从 `symbio/src` 彻底消失（`typed_unit` / `meta_belief` / `is_meta` 亦零引用），
+  4 处命中实为 `agent_run` 的 **JSON Schema 键**（`"description":`），且其引用的
+  「PLAN M-1」也已不存在。删后 grep-audit 0 错 0 警。
+- **补全协议文档**：`symbio_core/schemas/detail.rs` 的 `DetailAction.style` 注释漏了
+  **实际在产出**的 `divider`（mcp / agent / skill / model 详情的分隔线），改为按真实
+  语义描述（空格分隔的 class 修饰词，`icon` 可叠加 `danger`，`divider` 渲染分隔线）。
+
+***
+
 ## 2026-09-17: 清理 OAB v1 遗留的悬空 id 常量、收敛 `agent_run` 工具名
 
 **性质：死代码清理 + 单一真相源**，无行为变化（回归测试照旧锁住对外工具名）。

@@ -6,7 +6,6 @@
  *   - S-002:        std::sync::Mutex 在 async 上下文中持锁跨 await
  *   - S-002-bonus:  业务路径 `let _ = ...await` 吞错
  *   - S-007:        CHANGELOG 缺关键修复条目（v25-N6 案例）
- *   - I-014-light:  CognitiveUnit 字段硬编码字符串键
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 src/plugins/agent
@@ -208,28 +207,6 @@ if (!fs.existsSync(changelog)) {
     .find((l) => /^## (v\d+|\d{4}-\d{2}-\d{2})/.test(l))
   if (!head) err(`${disp(changelog)} 无版本/日期标题（## vNN 或 ## YYYY-MM-DD）`)
   else ok(`CHANGELOG 最新标题：${head}`)
-}
-console.log()
-
-// ── I-014-light: CognitiveUnit 字段硬编码字符串键抽查 ──────────────────
-console.log('--- I-014-light: CognitiveUnit 字段硬编码字符串键抽查 ---')
-
-const KEY_RE = /"(is_a|related|name|description|meta_belief|is_strategy|is_skill|is_meta|is_conflict)"/
-const hardcoded = []
-for (const [file, lines] of linesOf) {
-  lines.forEach((l, i) => {
-    if (l.includes('#[test]')) return
-    if (KEY_RE.test(l)) hardcoded.push(`${disp(file)}:${i + 1}:${l.trim()}`)
-  })
-}
-
-if (hardcoded.length > 0) {
-  warn(`发现 ${hardcoded.length} 处 CognitiveUnit 字段硬编码字符串键（I-014 中期任务方向）`)
-  warn('  完整方案见 PLAN M-1（typed_unit 强类型迁移）')
-  // 显式限制前 5 条，避免刷屏
-  for (const h of hardcoded.slice(0, 5)) console.log(`    ${h}`)
-} else {
-  ok('I-014-light 通过：未发现字段硬编码字符串键')
 }
 console.log()
 

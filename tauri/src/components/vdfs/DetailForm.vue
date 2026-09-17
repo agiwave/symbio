@@ -710,18 +710,6 @@ watch(
 .subtitle-part { display: inline-flex; align-items: center; gap: 0.3rem; }
 .dot { opacity: 0.5; }
 
-.path-pill {
-  display: inline-block;
-  padding: 0 0.35rem;
-  background: var(--surface-sunken);
-  border-radius: var(--radius-xs);
-  font-size: 0.65rem;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
-}
 .badge {
   font-size: 0.65rem;
   padding: 0.1rem 0.45rem;

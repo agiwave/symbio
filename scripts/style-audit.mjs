@@ -17,6 +17,11 @@
  *     属于过近似的"已使用"判定 —— 宁可漏报 unused，不误报 used）
  *   - 设计令牌（--custom-property）：定义 vs var() 使用，双向检查
  *
+ * 「无引用但属正常」只在本文件内显式登记（每条附原因），共四处：
+ * ALLOW_UNUSED_CLASS_PREFIXES / ALLOW_UNUSED_EXACT（第三方库钩子）、
+ * ALLOW_UNUSED_SCOPED（后端协议词表驱动的修饰类）、ALLOW_RUNTIME_PROPS
+ * （运行时由 JS 写入）、ALLOW_UNUSED_PROPS（设计系统成员）。不要为消警告绕过登记。
+ *
  * 退出码：0 = 通过；1 = 存在 ERROR（或 --strict 下存在 WARNING）
  *
  * 约定：平台无关（Node.js ESM、零外部依赖、spawnSync 数组传参）。
@@ -49,6 +54,18 @@ const ALLOW_UNUSED_EXACT = new Set([
 const isAllowedUnused = (name) =>
   ALLOW_UNUSED_EXACT.has(name) ||
   ALLOW_UNUSED_CLASS_PREFIXES.some((p) => name.startsWith(p));
+
+// ── 协议驱动的修饰类（按文件登记：定义未使用告警的豁免）─────────────────
+// 有些修饰类由**后端下发的词表**取值决定，词表不在本仓库的这一侧：
+//   DetailBadge.style  ∈ default | disabled | accent   （标题徽标）
+//   DetailAction.style ∈ primary | secondary | danger | icon [danger] | divider（动作按钮）
+// 组件以 `:class="b.style"` / `:class="[a.style, …]"` 绑定，静态不可解析。
+// 逐个登记（文件 → 类名 → 原因）。**只登记确来自协议词表的类名**，
+// 不要拿它掩盖普通的死样式（那类应当直接删除）。
+const ALLOW_UNUSED_SCOPED = new Map([
+  ['tauri/src/components/vdfs/VdfsActions.vue', new Set(['primary', 'danger'])], // DetailAction.style
+  ['tauri/src/components/vdfs/DetailForm.vue', new Set(['disabled', 'accent'])], // DetailBadge.style
+]);
 
 // ── 工具 ────────────────────────────────────────────────────────
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -152,7 +169,10 @@ const VALID_CLASS = /^[a-zA-Z_][\w-]*$/;
  * 从 :class 绑定表达式提取静态可解析的类名（写入 usages）与动态前缀（写入 prefixes）。
  * 捕获规则（刻意保守，宁可漏报不可误报）：
  *   - 整体是字符串字面量：:class="'flat'"
- *   - 数组字面量内的全部字符串：['a', cond && 'b']
+ *   - 数组字面量内的全部字符串：['a', cond && 'b']；数组里同样会有对象字面量与
+ *     模板字面量前缀（`[`tag-${x}`, { open: f }]`），故数组分支额外收这两类。
+ *     ⚠️ 数组分支**不套用下面的裸标识符简写规则** —— 数组里的裸标识符是变量
+ *     （`[statusClass, …]`），当成类名会凭空造出「使用未定义」的 ERROR。
  *   - 对象键（引号/非引号）：{ 'is-expanded': x } / { error: cond }
  *   - 三元分支值：cond ? 'a' : 'b'
  *   - 动态前缀：'risk-' + x、`tag-${x}` → 前缀使用
@@ -162,6 +182,32 @@ function extractBindingClasses(expr, usages, prefixes) {
   const add = (n) => {
     if (n && VALID_CLASS.test(n)) usages.add(n);
   };
+  // 对象键（引号 / 非引号）。注意：模板字面量的插值 `${...}` 不是对象字面量，
+  // 必须先剔除——否则 `` `role-${roleKey}` `` 会被"简写对象键"规则误判成
+  // 使用了类名 `roleKey`（`{roleKey}` 与 `${roleKey}` 文本上只差一个 `$`）。
+  const addKeys = (text) => {
+    const noInterp = text.replace(/\$\{[^{}]*\}/g, ' ');
+    for (const s of noInterp.matchAll(/([{,]\s*)'([^']+)'\s*:|([{,]\s*)"([^"]+)"\s*:/g)) {
+      const key = s[2] ?? s[4];
+      if (key) key.split(/\s+/).forEach(add);
+    }
+    for (const s of noInterp.matchAll(/([{,]\s*)([a-zA-Z_][\w-]*)\s*:/g)) add(s[2]);
+  };
+  // 动态拼接前缀：'risk-' + x / `tag-${x}`
+  const addPrefixes = (text) => {
+    for (const s of text.matchAll(/'([a-zA-Z][\w-]*-)'|`([a-zA-Z][\w-]*-)(?:\$\{|)/g)) {
+      const p = s[1] ?? s[2];
+      if (p) prefixes.add(p);
+    }
+  };
+  // 三元分支值
+  const addTernary = (text) => {
+    for (const s of text.matchAll(/[?:]\s*'([^']*)'|\?\s*"([^"]*)"/g)) {
+      const lit = s[1] ?? s[2];
+      if (lit) lit.split(/\s+/).forEach(add);
+    }
+  };
+
   const whole = expr.trim().match(/^'([^']+)'$|^"([^"]+)"$/);
   if (whole) {
     (whole[1] ?? whole[2]).split(/\s+/).forEach(add);
@@ -172,30 +218,18 @@ function extractBindingClasses(expr, usages, prefixes) {
       const lit = s[1] ?? s[2];
       if (lit) lit.split(/\s+/).forEach(add);
     }
+    addKeys(expr);
+    addPrefixes(expr);
+    addTernary(expr);
     return;
   }
-  // 对象键（引号 / 非引号 / 简写 { expanded }）
-  //
-  // 注意：模板字面量的插值 `${...}` 不是对象字面量，必须先剔除——否则
-  // `` `role-${roleKey}` `` 会被"简写对象键"规则误判成使用了类名 `roleKey`
-  // （`{roleKey}` 与 `${roleKey}` 文本上只差一个 `$`）。
+  addKeys(expr);
+  // 简写对象键 { expanded }：只走非数组路径（数组里的裸标识符是变量，见函数头注）。
+  // 仍须剔除 `${...}` 插值，理由同 addKeys。
   const noInterp = expr.replace(/\$\{[^{}]*\}/g, ' ');
-  for (const s of noInterp.matchAll(/([{,]\s*)'([^']+)'\s*:|([{,]\s*)"([^"]+)"\s*:/g)) {
-    const key = s[2] ?? s[4];
-    if (key) key.split(/\s+/).forEach(add);
-  }
-  for (const s of noInterp.matchAll(/([{,]\s*)([a-zA-Z_][\w-]*)\s*:/g)) add(s[2]);
   for (const s of noInterp.matchAll(/([{,]\s*)([a-zA-Z_][\w-]*)\s*(?=[},])/g)) add(s[2]);
-  // 三元分支值
-  for (const s of expr.matchAll(/[?:]\s*'([^']*)'|\?\s*"([^"]*)"/g)) {
-    const lit = s[1] ?? s[2];
-    if (lit) lit.split(/\s+/).forEach(add);
-  }
-  // 动态拼接前缀：'risk-' + x / `tag-${x}`
-  for (const s of expr.matchAll(/'([a-zA-Z][\w-]*-)'|`([a-zA-Z][\w-]*-)(?:\$\{|)/g)) {
-    const p = s[1] ?? s[2];
-    if (p) prefixes.add(p);
-  }
+  addTernary(expr);
+  addPrefixes(expr);
 }
 
 /** 从模板文本提取静态可解析的 class 使用 */
@@ -371,11 +405,13 @@ for (const v of vueModels) {
     ...v.scriptTokens, // return 'warn' / { thinking: cond } 等动态痕迹
   ]);
   const localPrefixes = [...v.prefixUsages, ...(v.scriptPrefixes ?? [])];
+  const perFileAllowed = ALLOW_UNUSED_SCOPED.get(v.file);
   for (const n of v.scopedClasses) {
     if (
       localUsed.has(n) ||
       localPrefixes.some((p) => n.startsWith(p)) ||
       (v.scopedDeep.has(n) && usedByAnyTemplate.has(n)) ||
+      perFileAllowed?.has(n) ||
       isAllowedUnused(n)
     ) {
       continue;
@@ -398,6 +434,18 @@ for (const v of vueModels) {
 const ALLOW_RUNTIME_PROPS = new Set([
   '--font-scale', // appearance store 按用户字体档位写入根元素（见 styles/base.css 头注）
 ]);
+// 已定义、但当前无 var() 引用的令牌（登记豁免 + 原因）。
+// 令牌层是**完整语义层**：浅/深各一份，按语义组与刻度成组定义（前端 UI 设计
+// 约定即「§4.1 各组令牌齐备」）。成员是否被消费取决于当前组件，「未被引用」
+// 不等于死代码。此处只登记确认为设计系统成员的项，其余仍按警告处理。
+const ALLOW_UNUSED_PROPS = new Set([
+  '--accent-subtle-border', // accent 组第 4 个成员（描边），与 --danger-border 对称
+  '--surface-fade', // 折叠区渐隐遮罩终点，浅/深各一份（供折叠面板消费）
+  '--color-banner-bg', // banner 组（bg / border / fg）成员，成组齐全
+  '--radius-xs', // 圆角刻度 xs→xl 的一档（唯一消费者 .path-pill 为死样式，已删）
+  '--font-size-xl', // 字号刻度 xs→xl 的一档（20px 页面标题）
+  '--font-weight-regular', // 字重刻度 regular / medium / semibold 的一档
+]);
 const propUsed = new Set();
 for (const v of vueModels) for (const n of v.varUsages) propUsed.add(n);
 for (const f of globalCssFiles) {
@@ -410,7 +458,7 @@ for (const n of propUsed) {
   errors.push(`${red}: 设计令牌 "${n}" 被使用，但未在任何 CSS 中定义（若为运行时注入请登记 ALLOW_RUNTIME_PROPS）`);
 }
 for (const [name, files] of allPropsDefined) {
-  if (propUsed.has(name)) continue;
+  if (propUsed.has(name) || ALLOW_UNUSED_PROPS.has(name)) continue;
   warnings.push(`${yellow}: 设计令牌 "${name}"（定义于 ${files.join(', ')}）未被 var() 引用`);
 }
 
@@ -435,8 +483,12 @@ for (const [name, files] of allPropsDefined) {
   };
   for (const f of [...vueFiles, ...tsFiles]) {
     const t = fs.readFileSync(f, 'utf8');
+    // 三类 import 都要算边：named/default（`from 'x'`）、动态（`import('x')`）、
+    // **副作用裸导入**（`import 'x'` —— 注册表类模块的挂载方式，如
+    // `VdfsWorkbench.vue` 的 `import '@/registry/vdfsRenderers'`）。
+    // 漏掉裸导入会让整条注册链在图上断开，把被注册的组件全误报成死组件。
     const specs = [
-      ...[...t.matchAll(/(?:from\s+|import\s*\(\s*)['"]([^'"]+)['"]/g)].map((m) => m[1]),
+      ...[...t.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)['"]([^'"]+)['"]/g)].map((m) => m[1]),
     ];
     const deps = [];
     for (const spec of specs) {

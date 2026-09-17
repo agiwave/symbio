@@ -12,12 +12,12 @@
         <code class="path">{{ node.path }}</code>
       </div>
       <div class="head-actions">
-        <button class="btn primary" :disabled="saving || !dirty || readonly" @click="save">
+        <button class="action-btn" :disabled="saving || !dirty || readonly" @click="save">
           {{ saving ? '保存中…' : '保存' }}
         </button>
-        <button class="btn" :disabled="saving" @click="reset">还原</button>
-        <button v-if="!readonly" class="btn" :disabled="saving" @click="$emit('rename')">重命名</button>
-        <button v-if="!readonly" class="btn danger" :disabled="saving" @click="$emit('delete')">删除</button>
+        <button class="action-btn secondary" :disabled="saving" @click="reset">还原</button>
+        <button v-if="!readonly" class="action-btn secondary" :disabled="saving" @click="$emit('rename')">重命名</button>
+        <button v-if="!readonly" class="danger-btn" :disabled="saving" @click="$emit('delete')">删除</button>
       </div>
     </header>
 

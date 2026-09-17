@@ -163,7 +163,8 @@ pub struct DetailBadge {
 pub struct DetailAction {
     pub id: String,
     pub label: String,
-    /// primary | secondary | danger | icon
+    /// 空格分隔的 class 修饰词：`primary` / `secondary`（默认观感，无专属规则）/ `danger` /
+    /// `icon`（图标按钮，可叠加 → `icon danger`）；单值 `divider` 渲染为分隔线而非按钮
     pub style: String,
     /// 图标名（缺省 = 按 id 的默认图标映射；无映射 → 文字按钮）
     #[serde(skip_serializing_if = "Option::is_none")]
