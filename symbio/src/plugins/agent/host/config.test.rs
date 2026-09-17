@@ -8,7 +8,6 @@ use super::*;
 fn defaults_are_the_shipped_behaviour() {
     let c = AgentConfig::default();
     assert_eq!(c.item_max_bytes, 32 * 1024);
-    assert_eq!(c.identity_inject_max_bytes, 8 * 1024);
     assert_eq!(c.memory_max_bytes, 16 * 1024);
     assert_eq!(c.memory_inject_max_bytes, 4 * 1024);
 }
@@ -19,25 +18,21 @@ fn missing_fields_fall_back_to_defaults() {
     let d = AgentConfig::default();
     let c: AgentConfig = serde_json::from_str("{}").unwrap();
     assert_eq!(c.item_max_bytes, d.item_max_bytes);
-    assert_eq!(c.identity_inject_max_bytes, d.identity_inject_max_bytes);
     assert_eq!(c.memory_max_bytes, d.memory_max_bytes);
     assert_eq!(c.memory_inject_max_bytes, d.memory_inject_max_bytes);
 
     let c: AgentConfig = serde_json::from_str(r#"{"item_max_bytes": 128}"#).unwrap();
     assert_eq!(c.item_max_bytes, 128);
-    assert_eq!(c.identity_inject_max_bytes, 8 * 1024);
 }
 
 #[test]
 fn zero_limits_are_clamped_to_one() {
     let c = AgentConfig {
         item_max_bytes: 0,
-        identity_inject_max_bytes: 0,
         memory_max_bytes: 0,
         memory_inject_max_bytes: 0,
     };
     assert_eq!(c.effective_item_max_bytes(), 1);
-    assert_eq!(c.effective_inject_bytes(), 1);
     assert_eq!(c.effective_memory_max_bytes(), 1);
     assert_eq!(c.effective_memory_inject_bytes(), 1);
 }
@@ -46,14 +41,12 @@ fn zero_limits_are_clamped_to_one() {
 fn roundtrip_is_lossless() {
     let c = AgentConfig {
         item_max_bytes: 11,
-        identity_inject_max_bytes: 5,
         memory_max_bytes: 7,
         memory_inject_max_bytes: 3,
     };
     let json = serde_json::to_string(&c).unwrap();
     let back: AgentConfig = serde_json::from_str(&json).unwrap();
     assert_eq!(back.item_max_bytes, 11);
-    assert_eq!(back.identity_inject_max_bytes, 5);
     assert_eq!(back.memory_max_bytes, 7);
     assert_eq!(back.memory_inject_max_bytes, 3);
 }

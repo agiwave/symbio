@@ -1,36 +1,33 @@
-//! agent 插件 —— OAB 协议的宿主接入层（单协议、约定目录装配）。
+//! agent 插件 —— Agent 目录规范 v2 的宿主接入层。
 //!
-//! ## 定位（规范 §12 宿主参考实现）
+//! ## 定位（规范 §3.2 宿主）
 //!
-//! symbio 是 OAB 协议的第一个接入方：本插件把 bundle 的约定目录装配语义
-//! 映射进 symbio 的会话机制——
+//! 本插件**不再装配能力**——它只做两件事：
 //!
-//! - **提示词**：`traverse(available_tools)` 时扫描 `prompts/` `skills/`，
-//!   把片段汇总后交出**两份**——系统提示词片段（每轮注入的人格本体 + 可编辑
-//!   地址，见 [`identity_segment`]）与 [`BundleIdentityCapability`]
-//!   （`agent_identity` 工具，取回超出注入预算的全文）；
-//! - **MCP**：扫描 `mcps/` 得到 MCP server 声明，**交给宿主已有的 MCP 客户端**启动
-//!   （OAB 不重新发明工具运行时，工具唯一来源即 MCP）；
-//! - **版本匹配**：bundle 校验（含 `requires.spec` 硬门槛）失败 = 收集期
-//!   硬错误，会话中止并明确报错——绝不静默降级成"没有人格的通用助手"。
+//! - **托管**：为 `{homedir}/agent/<id>/` 下每个 Agent 构造一棵 composite 插件树
+//!   （与系统 Agent 同构，§1.1），收集期把它的注册经 [`super::scope::SubAgentVisitor`]
+//!   代理并进系统树（并集，§8.2）；
+//! - **门槛**：manifest 不合 §5 / §10 时**拒绝接入**并明确报错——绝不静默降级成
+//!   "没有人格的通用助手"。
 //!
-//! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时，本插件仅静默跳过 bundle 装配，
-//! 但 **agent_run（子智能体委托）始终注册**——未指定 agent_id 时默认沿用当前
-//! 会话的智能体，两者皆空则子会话以无智能体的纯对话模式运行。
+//! 能力（技能 / MCP / 记忆）由 Agent 目录里的插件实例自己解释，**复用宿主已有
+//! 的对应系统**（§3.2 第 2 条）——这正是 v1 的失败之处：那时宿主为 bundle 再写
+//! 一遍技能与 MCP 的解析，两条链长期不同步。
+//!
+//! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时不装配任何 Agent，但 **agent_run
+//! （子智能体委托）始终注册**。
 
-use crate::plugins::agent::core::spec::assembly::{assemble_bundle, Assembly};
-use crate::plugins::agent::host::capability::BundleIdentityCapability;
 use crate::plugins::agent::host::config::AgentConfig;
+use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::memory;
-use crate::plugins::agent::host::prompt::{identity_segment, SEGMENT_NAME as IDENTITY_SEGMENT};
-use crate::plugins::agent::host::store::{BundleRecord, BundleStore};
+use crate::plugins::agent::host::store::BundleStore;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
     CapabilityVisitor, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
     PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, AGENT_ID, CAPABILITY_VISITOR,
-    PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR, REQUIRED_PLUGINS, SESSION_ID,
+    PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR, REQUIRED_PLUGINS,
     TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use async_trait::async_trait;
@@ -51,14 +48,6 @@ fn config_definition() -> DetailDefinition {
                 1.0,
                 1_048_576.0,
                 json!(d.item_max_bytes),
-            ),
-            DetailField::number(
-                "identity_inject_max_bytes",
-                "人格注入上限（字节）",
-                "每轮注入系统提示词的人格字节上限，超出部分截断（可用 agent_identity 取回全文）",
-                1.0,
-                1_048_576.0,
-                json!(d.identity_inject_max_bytes),
             ),
             DetailField::number(
                 "memory_max_bytes",
@@ -203,7 +192,14 @@ impl AgentPlugin {
             return Some(Arc::clone(tree));
         }
 
-        let dir = self.config_file.dir().dir().join(id);
+        // 目录经 store 解析：**两级都找**（工作区级覆盖全局级）。只在全局根拼
+        // 路径会让工作区里安装的 Agent 找不到——v1 的 `attach_bundle` 走的就是
+        // store，v2 不能比它少看一层。
+        let store = BundleStore::new(self.config_file.dir().dir(), ctx.get(WORKDIR).as_deref());
+        let Some(record) = store.get(id) else {
+            return None;
+        };
+        let dir = record.dir.clone();
 
         // v1 目录 → 就地迁移成 v2 后再装配。迁移是**幂等**的，且失败不阻断：
         // 返回 `None` 让调用方拒接（§10），宁可显式报错，也不要在半迁移状态下继续。
@@ -253,6 +249,7 @@ impl AgentPlugin {
         &self,
         tree: &Arc<dyn Plugin>,
         id: &str,
+        dir: &std::path::Path,
         ctx: &Arc<dyn InvokeRequest>,
         visitor: &Arc<dyn CapabilityVisitor>,
     ) {
@@ -261,15 +258,7 @@ impl AgentPlugin {
         // 子 Agent 的作用域 = 它自己的目录：其中的 `work` 实例因此拥有
         // `<agent dir>/AGENTS.md`，而不是沿用父的 workdir（规范 §6.2：一个作用域
         // 只有一个所有者，否则同一份记忆会被注入两次）。
-        sub.set(
-            WORKDIR,
-            self.config_file
-                .dir()
-                .dir()
-                .join(id)
-                .to_string_lossy()
-                .to_string(),
-        );
+        sub.set(WORKDIR, dir.to_string_lossy().to_string());
         let scoped: Arc<dyn CapabilityVisitor> =
             Arc::new(super::scope::SubAgentVisitor::new(Arc::clone(visitor), id));
         sub.set(CAPABILITY_VISITOR, scoped);
@@ -280,88 +269,12 @@ impl AgentPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_AGENT, "Agent Bundle（OAB 协议）")
+        PluginMeta::new(PLUGIN_AGENT, "智能体（Agent 目录规范 v2）")
             .with_description(
-                "OAB（Open Agent Bundle）协议宿主：管理 bundle 实例（安装/导出/删除），\
-                 会话绑定 bundle 时按约定目录装配系统提示词（prompts/ skills/）\
-                 与 MCP server 声明（mcps/）",
+                "Agent 目录宿主：管理 Agent 实例（安装/导出/删除），会话绑定 Agent 时\
+                 把它整棵插件树的能力并进会话（技能 / MCP / 记忆由目录里的插件实例自己解释）",
             )
             .with_version("0.1.0")
-    }
-
-    /// traverse 主逻辑：扫描约定目录 → 装配 → 身份工具注册。
-    async fn attach_bundle(
-        self: &Arc<Self>,
-        _ctx: &Arc<dyn InvokeRequest>,
-        bundle_id: &str,
-        workdir: Option<String>,
-        _session_id: Option<String>,
-        tool_visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>,
-    ) -> Result<(), PluginError> {
-        // ── 1. 加载 bundle ──
-        let store = BundleStore::new(self.config_file.dir().dir(), workdir.as_deref());
-        let record: BundleRecord = store.get(bundle_id).ok_or_else(|| {
-            PluginError::NotFound(format!(
-                "bundle `{bundle_id}` 不存在（workdir={workdir:?}），无法开始对话。\
-                 请重新选择 bundle。"
-            ))
-        })?;
-
-        // ── 2. 约定目录装配（纯数据扫描，规范 §3 / §5）──
-        let assembly: Assembly = assemble_bundle(&record.dir, &record.manifest);
-
-        // 软故障诊断：转 warning 日志，不阻断装配
-        for d in &assembly.diagnostics {
-            tracing::warn!(code = %d.code, message = %d.message, "[oab] 装配诊断");
-        }
-        // MCP server 声明：交给宿主已有的 MCP 客户端启动（工具唯一来源）。
-        // 参考实现尚未桥接时如实告警，不静默吞掉——宿主接入 MCP 客户端即在此消费。
-        for s in &assembly.mcp_servers {
-            tracing::warn!(
-                server = %s.name,
-                "[oab] mcp server `{}` 已声明，等待宿主 MCP 客户端桥接启动",
-                s.name
-            );
-        }
-
-        // ── 3. 提示词片段 → agent_identity 身份工具 ──
-        let mut caps: Vec<Arc<dyn Capability>> = Vec::new();
-        let identity_text = assembly.identity_text();
-        if !identity_text.trim().is_empty() {
-            caps.push(BundleIdentityCapability::new(
-                identity_text.clone(),
-                record.manifest.id.clone(),
-            ) as Arc<dyn Capability>);
-        }
-
-        tool_visitor.register_batch(caps).await;
-
-        // ── 4. 人格 + 智能体记忆 → 系统提示词（每轮注入，带可编辑地址与容量口径）──
-        // 与身份工具**同时机、同一次广播**注册：同一个人格的两个面——提示词负责
-        // 「一开始就知道自己是谁」，工具负责「取回超出注入预算的全文」。
-        let cfg = self.config.read().await.clone();
-        tool_visitor
-            .register_system_prompt(
-                IDENTITY_SEGMENT,
-                identity_segment(&record.manifest.id, &identity_text, &cfg),
-            )
-            .await;
-        // 记忆：机制在内核（读写 / 两道闸门 / 排版），本插件只给落位与地址。
-        // 读失败**不注册**（而不是降级成一段「暂无记忆」）——那会让模型以为确实没有，
-        // 比不注入更坏；人格在上面已经注册，不受影响。
-        let memory = self.memory_store(&store, &record.manifest.id).await;
-        let address = memory::memory_address(&record.manifest.id);
-        match memory.segment(&memory::segment_spec(&address)) {
-            Ok(Some(segment)) => {
-                tool_visitor
-                    .register_system_prompt(memory::SEGMENT_NAME, segment)
-                    .await;
-            }
-            Ok(None) => {}
-            Err(e) => crate::plugin_warn!("agent", "读取智能体记忆失败，本轮不注入：{e}"),
-        }
-
-        Ok(())
     }
 
     /// 参与 `available_options` 收集：贡献「智能体」选择项。
@@ -482,7 +395,6 @@ impl Plugin for AgentPlugin {
             .filter(|s| !s.is_empty());
 
         let workdir = ctx.get(WORKDIR);
-        let session_id = ctx.get(SESSION_ID);
 
         let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) else {
             return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
@@ -515,24 +427,37 @@ impl Plugin for AgentPlugin {
             match self.sub_agent(&bundle_id, &ctx).await {
                 // v2：子 Agent 是一棵 composite 插件树，能力经代理层并集进来
                 Some(tree) => {
-                    self.forward_to_sub_agent(&tree, &bundle_id, &ctx, &tool_visitor)
+                    let dir = BundleStore::new(
+                        self.config_file.dir().dir(),
+                        ctx.get(WORKDIR).as_deref(),
+                    )
+                    .get(&bundle_id)
+                    .map(|r| r.dir)
+                    .unwrap_or_else(|| self.config_file.dir().dir().join(&bundle_id));
+                    self.forward_to_sub_agent(&tree, &bundle_id, &dir, &ctx, &tool_visitor)
                         .await
                 }
-                // 仍是 v1 manifest → legacy 约定目录装配（迁移完成后整条删掉）
+                // §10：不匹配必须拒绝接入，且不得静默降级为「无人格的通用助手」。
+                // 迁移（v1 → v2）已在 [`Self::sub_agent`] 里试过；走到这里说明目录
+                // 根本没有合规 manifest，错误信息写明双侧版本。
                 None => {
-                    if let Err(e) = self
-                        .attach_bundle(&ctx, &bundle_id, workdir, session_id, &tool_visitor)
-                        .await
-                    {
-                        // 硬错误：会话绑定了一个不合规/不存在的 bundle——必须中止并明确
-                        // 提示，绝不静默降级为「无人格的通用助手」。
-                        report_error(
-                            &ctx,
-                            PLUGIN_AGENT,
-                            format!("bundle `{bundle_id}` 装配失败: {e}"),
-                        )
-                        .await;
-                    }
+                    let dir = self.config_file.dir().dir().join(&bundle_id);
+                    let reason = match manifest::load(&dir) {
+                        Some(m) => manifest::validate(&m).unwrap_err(),
+                        None => format!(
+                            "`{}` 下没有可解析的 manifest.yaml（已尝试 {}）；\
+                             本宿主只支持 `agent-dir/v{}`",
+                            dir.display(),
+                            manifest::MANIFEST_NAMES.join(" / "),
+                            manifest::SPEC_MAJOR
+                        ),
+                    };
+                    report_error(
+                        &ctx,
+                        PLUGIN_AGENT,
+                        format!("智能体 `{bundle_id}` 拒绝接入：{reason}"),
+                    )
+                    .await;
                 }
             }
         }

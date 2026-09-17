@@ -38,25 +38,14 @@
 //! 由 [`super::prompt`] 自己排版（但形态与内核对齐：一行头信息 + 正文 + 空 / 截断提示）。
 
 use super::store::BundleStore;
-use crate::symbio_core::{MemoryFile, NodeSpec, SegmentSpec, AGENTS_FILE, PLUGIN_AGENT};
+use crate::symbio_core::{MemoryFile, NodeSpec, PLUGIN_AGENT};
 
 /// 片段的标题（渲染为 `【智能体记忆】`）
 pub const SEGMENT_TITLE: &str = "智能体记忆";
 
-/// 系统提示词条目在收集器里的注册名（同名覆盖的键）
-pub const SEGMENT_NAME: &str = "agent-memory";
-
 /// 记忆文件的语义描述（VDFS 节点与插件元数据共用）
 pub const MEMORY_DESCRIPTION: &str =
     "该智能体自己的长期记忆（跨会话保留）：只在选中本智能体时注入系统提示词。";
-
-/// 智能体记忆文件的 **VDFS 展示地址**（下发给模型的可编辑地址）。
-///
-/// 与其它资源同一口径：展示地址以 `.vdfs` 开头，线路协议仍是 `/…`；
-/// 翻译只发生在 `tauri/src/services/vdfs.ts`。
-pub fn memory_address(bundle_id: &str) -> String {
-    format!(".vdfs/{PLUGIN_AGENT}/{bundle_id}/{AGENTS_FILE}")
-}
 
 /// 由 bundle 记录构造记忆门面（bundle 不存在 → **无作用域**）。
 ///
@@ -71,20 +60,6 @@ pub fn store(
     match bundles.memory_path(bundle_id) {
         Ok(path) => MemoryFile::new(Some(path), write_max_bytes, inject_max_bytes),
         Err(_) => MemoryFile::absent(write_max_bytes, inject_max_bytes),
-    }
-}
-
-/// 片段规格 —— 本层的「个性」只有三样：标题、地址、空内容时说什么。
-///
-/// 排版（一行头信息 + 正文 + 空 / 截断提示）由内核
-/// [`render_segment`](crate::symbio_core::render_segment) 统一决定。
-pub fn segment_spec(address: &str) -> SegmentSpec<'_> {
-    SegmentSpec {
-        title: SEGMENT_TITLE,
-        address,
-        // 与 work 的工作区记忆同名不同域：不点明的话模型会把两件事写混
-        note: Some("该智能体私有，与【工作区记忆】相互独立"),
-        empty_hint: "暂无记忆，可写入该智能体跨会话应记住的偏好、结论、教训",
     }
 }
 

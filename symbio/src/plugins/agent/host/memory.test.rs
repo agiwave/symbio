@@ -2,13 +2,16 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
-//! 记忆的**机制**（读写 / 两道闸门 / 排版 / 节点形状）由 `symbio_core::memory`
-//! 自己测；这里钉的是**本层的个性**：落在哪、地址是什么、bundle 不存在时怎么降级、
-//! 以及「与工作区记忆同名不同域」有没有说清楚。
+//! 记忆的**机制**（读写 / 两道闸门 / 节点形状）由 `symbio_core::memory`
+//! 自己测；这里钉的是**本层的个性**：落在哪、Agent 不存在时怎么降级。
+//!
+//! ⚠️ 注入片段**不在本层**：v2 里 Agent 的 `AGENTS.md` 由该 Agent 自己的 `work`
+//! 插件实例注入（§6.2 一个作用域只有一个所有者）。本模块只回答「文件在哪」与
+//! 「VDFS 上长什么样」。
 
 use super::super::config::AgentConfig;
 use super::*;
-use crate::symbio_core::VdfsAccess;
+use crate::symbio_core::{VdfsAccess, AGENTS_FILE};
 use tempfile::TempDir;
 
 /// 在工作区级落一个最小 bundle（不经 zip：以下用例只关心记忆的落位与作用域）
@@ -40,19 +43,11 @@ fn store_of(bundles: &BundleStore, id: &str) -> MemoryFile {
     )
 }
 
-// ==================== 落位与地址 ====================
+// ==================== 落位 ====================
 
-/// 记忆落在 **bundle 自己的目录**里（不是工作区目录）
+/// 记忆落在 **Agent 自己的目录**里（不是工作区目录）
 #[test]
-fn memory_address_is_inside_the_bundle_dir() {
-    assert_eq!(
-        memory_address("com.acme.cr"),
-        ".vdfs/agent/com.acme.cr/AGENTS.md"
-    );
-}
-
-#[test]
-fn memory_lives_next_to_the_bundle_manifest() {
+fn memory_lives_next_to_the_agent_manifest() {
     let (dir, bundles) = workspace_with_bundle();
     let m = store_of(&bundles, "b");
 
@@ -66,7 +61,7 @@ fn memory_lives_next_to_the_bundle_manifest() {
     assert_ne!(m.path().unwrap(), dir.path().join(AGENTS_FILE));
 }
 
-/// bundle 不存在 = **无作用域**，是正常状态而不是崩溃
+/// Agent 不存在 = **无作用域**，是正常状态而不是崩溃（VDFS 据此报 NotFound）
 #[test]
 fn missing_bundle_means_no_scope() {
     let (_dir, bundles) = workspace_with_bundle();
@@ -77,16 +72,12 @@ fn missing_bundle_means_no_scope() {
     assert!(m.write("x").is_err());
     // 注入是 None —— 静默跳过，不往收集期错误桶里塞东西
     assert_eq!(m.inject().unwrap(), None);
-    assert_eq!(
-        m.segment(&segment_spec(&memory_address("nope"))).unwrap(),
-        None
-    );
 }
 
-// ==================== 端到端：写 → 读 → 片段 ====================
+// ==================== 端到端：写 → 读 ====================
 
 #[test]
-fn memory_roundtrips_and_renders_the_kernel_segment() {
+fn memory_roundtrips() {
     let (_dir, bundles) = workspace_with_bundle();
     let m = store_of(&bundles, "b");
 
@@ -96,35 +87,6 @@ fn memory_roundtrips_and_renders_the_kernel_segment() {
     let text = "该智能体记住：先写测试。";
     m.write(text).unwrap();
     assert_eq!(m.read().unwrap(), text);
-
-    let seg = m
-        .segment(&segment_spec(&memory_address("b")))
-        .unwrap()
-        .unwrap();
-    assert!(seg.contains("【智能体记忆】"), "{seg}");
-    assert!(seg.contains(".vdfs/agent/b/AGENTS.md"), "{seg}");
-    assert!(seg.contains(text), "正文要原样带上: {seg}");
-    assert!(
-        seg.contains("vdfs_read") && seg.contains("vdfs_write"),
-        "{seg}"
-    );
-    assert!(
-        seg.contains("与【工作区记忆】相互独立"),
-        "两层记忆同名不同域，不点明模型会写错地方: {seg}"
-    );
-}
-
-#[test]
-fn empty_memory_teaches_how_to_remember() {
-    let (_dir, bundles) = workspace_with_bundle();
-    let seg = store_of(&bundles, "b")
-        .segment(&segment_spec(&memory_address("b")))
-        .unwrap()
-        .unwrap();
-
-    assert!(seg.contains("暂无记忆"), "{seg}");
-    assert!(seg.contains("vdfs_write"));
-    assert!(!seg.contains("已截断"), "空记忆不得谎报截断");
 }
 
 // ==================== 两道闸门由内核执行（本层不重复实现） ====================
@@ -139,21 +101,18 @@ fn write_gate_is_enforced_by_the_kernel() {
     assert_eq!(m.read().unwrap(), "", "被拒绝的写入不得留下半截内容");
 }
 
+/// 注入闸门由内核执行：超预算截断，并在片段里指路（片段形状由内核测）
 #[test]
-fn inject_gate_truncates_and_points_at_the_address() {
+fn inject_gate_truncates() {
     let (_dir, bundles) = workspace_with_bundle();
     let m = store(&bundles, "b", 256, 4);
     m.write("0123456789").unwrap();
 
-    let seg = m
-        .segment(&segment_spec(&memory_address("b")))
-        .unwrap()
-        .unwrap();
-    assert!(seg.contains("已截断"), "{seg}");
-    assert!(!seg.contains("0123456789"), "超预算的部分不注入: {seg}");
+    let injected = m.inject().unwrap().unwrap();
+    assert!(injected.truncated, "超预算应标记截断：{injected:?}");
     assert!(
-        seg.contains(".vdfs/agent/b/AGENTS.md"),
-        "要指路读全文: {seg}"
+        injected.text.len() <= injected.budget_bytes,
+        "注入正文不得超过预算: {injected:?}"
     );
 }
 

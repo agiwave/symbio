@@ -1,7 +1,8 @@
-//! Agent（OAB bundle）详情页定义 —— 只读概览（`info` 绑定）
+//! Agent 详情页定义 —— 只读概览（`info` 绑定）
 //!
-//! 概览字段（版本/来源层级/安装目录）+ 内部条目计数（list_items
-//! 下发的 `count_*`）+ `open-container` / `export` / `delete` 动作。
+//! 概览字段（版本/来源层级/安装目录/已装能力目录）+ `open-container` /
+//! `export` / `delete` 动作。「装了哪些能力」由**目录**回答（§4.1），不按类别
+//! 点数——点数是 v1 的做法，与真实的能力来源两份真相。
 //! 「管理内部条目」入口由页面机制
 //! 统一渲染（provider 声明 container_kinds 的条目，详情区顶部入口条），
 //! 不属于本定义。
@@ -51,13 +52,9 @@ pub fn agent_detail_definition() -> DetailDefinition {
                 ],
             },
             DetailSection {
-                title: Some("内部条目概览".into()),
+                title: Some("已装能力".into()),
                 collapsed: false,
-                fields: vec![
-                    field("count_prompt", "提示词", "static"),
-                    field("count_skill", "技能", "static"),
-                    field("count_mcp", "MCP", "static"),
-                ],
+                fields: vec![field("capabilities", "能力目录", "static")],
             },
         ],
         presets: None,

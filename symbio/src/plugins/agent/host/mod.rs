@@ -37,14 +37,12 @@
 //! 收集；bundle 权限 → 声明提示），**不实现协议本身**——协议在
 //! [`crate::plugins::agent::core`]，且 core 对本层零依赖。
 
-pub mod capability;
 mod config;
 mod detail;
 pub mod manifest;
 pub mod memory;
 pub mod migrate;
 pub mod plugin;
-mod prompt;
 pub mod scope;
 pub mod store;
 pub mod subagent;

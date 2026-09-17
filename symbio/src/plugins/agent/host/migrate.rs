@@ -21,7 +21,7 @@
 
 use super::plugin::{SPEC_V1, SPEC_V2};
 use crate::symbio_core::AGENTS_FILE;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// 执行迁移。返回是否真的做了迁移动作（幂等：已迁移 / 非 v1 目录 → `false`）
 pub fn migrate_v1_to_v2(dir: &Path) -> Result<bool, String> {
@@ -227,6 +227,7 @@ fn migrate_mcps(dir: &Path) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn v1_dir(tmp: &Path, id: &str) -> PathBuf {
         let d = tmp.join(id);

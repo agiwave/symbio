@@ -1,11 +1,10 @@
-//! host 层端到端测试：bundle 导入 → traverse 装配 → 身份提示词 → 导出 → 删除。
+//! host 层端到端测试：Agent 导入 → traverse 装配 → 记忆落位 → 导出 → 删除。
 //!
-//! 覆盖规范 §3（约定目录）/ §5（能力单元）/ §6（装配语义）/ §10（版本接入门槛）
+//! 覆盖规范 §4（目录结构）/ §5（manifest）/ §8（装配语义）/ §10（版本接入门槛）
 //! 的主链路，全部进程内完成（tempdir + 内存 zip），不依赖真实文件系统布局。
 //!
-//! bundle 采用**约定目录布局**（约定优于配置）：`prompts/`、`skills/`、
-//! `mcps/`，存在即安装，无任何额外配置文件。工具只经 `mcps/`（MCP）接入，
-//! 协议不含 `oab.echo` 之类的宿主专有执行器。
+//! Agent 采用**目录即配置**布局（约定优于配置）：`manifest.yaml` + `AGENTS.md`
+//! + 能力插件目录（`skill/` `mcp/` `work/`），存在即安装，无需在 manifest 里登记。
 
 use super::plugin::AgentPlugin;
 use super::store::BundleStore;
@@ -16,45 +15,36 @@ use crate::symbio_core::{
 use std::path::Path;
 use std::sync::Arc;
 
-/// 在内存中生成一个约定目录布局的 bundle zip。
+/// 在内存中生成一个 v2 布局的 Agent zip。
 ///
-/// 三个能力来源：
-/// - `prompts/persona.md`：OAB 原生系统提示词片段（frontmatter `priority: 0` 身份锚定）
-/// - `skills/playbook/SKILL.md`：行业 SKILL 格式（正文作为提示词片段）
-/// - `mcps/demo.yaml`：行业 MCP server 配置（工具唯一来源）
-fn build_bundle_zip(bundle_id: &str, requires_spec: &str) -> Vec<u8> {
+/// - `manifest.yaml`：身份 + 兼容门槛（§5 / §10）
+/// - `AGENTS.md`：人格与记忆（§6）
+/// - `skill/playbook/SKILL.md`：技能插件目录（§7）
+fn build_agent_zip(agent_id: &str, requires_spec: &str) -> Vec<u8> {
     use std::io::Write as _;
     let mut buf = std::io::Cursor::new(Vec::new());
     {
         let mut w = zip::ZipWriter::new(&mut buf);
         let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default();
         let manifest = format!(
-            r#"spec: "oab/v1"
-id: "{bundle_id}"
+            r#"spec: "agent-dir/v2"
+id: "{agent_id}"
 name: "全栈开发智能体"
 version: "1.0.0"
 requires:
   spec: "{requires_spec}"
-permissions:
-  host_apis:
-    - "host/log"
 "#
         );
-        // prompts/persona.md：frontmatter 携带 priority（装配时剥离），支持 $bundle.* 变量
-        let persona_md = "---\npriority: 0\n---\n你是 $bundle.id 的全栈开发人格。";
-        // skills/playbook/SKILL.md：行业 SKILL 格式，正文作为提示词片段
-        let skill_md = "---\nname: delivery\n---\n先澄清需求再动工。";
-        // mcps/demo.yaml：行业 MCP server 配置（原样透传给宿主 MCP 客户端）
-        let mcp_yaml = "command: npx\nargs: [\"-y\", \"@modelcontextprotocol/server-demo\"]\n";
+        let agents_md = "你是全栈开发人格：先澄清需求再动工。";
+        let skill_md = "---\nname: playbook\ndescription: 交付流程手册：先澄清需求再动工\n---\n\n# 交付\n";
 
         let files: Vec<(&str, &str)> = vec![
             ("manifest.yaml", &manifest),
-            ("prompts/persona.md", persona_md),
-            ("skills/playbook/SKILL.md", skill_md),
-            ("mcps/demo.yaml", mcp_yaml),
+            ("AGENTS.md", agents_md),
+            ("skill/playbook/SKILL.md", skill_md),
         ];
         for (name, content) in files {
-            let arcname = format!("{bundle_id}/{name}");
+            let arcname = format!("{agent_id}/{name}");
             w.start_file(arcname.as_str(), opts).unwrap();
             w.write_all(content.as_bytes()).unwrap();
         }
@@ -85,24 +75,24 @@ fn ctx_with(
 }
 
 #[tokio::test]
-async fn bundle_import_traverse_and_identity() {
+async fn agent_import_traverse_and_memory() {
     let dir = tempfile::tempdir().unwrap();
     let workdir = dir.path().to_str().unwrap();
 
-    // ── 1. 导入（zip → bundle store）──
+    // ── 1. 导入（zip → Agent 目录）──
     let store = BundleStore::new(dir.path().join("agent"), Some(workdir));
-    let zip_bytes = build_bundle_zip("com.symbio.test-fixture", "^1");
+    let zip_bytes = build_agent_zip("com.symbio.test-fixture", "^2");
     let result = store
         .import(&zip_bytes, false)
         .unwrap_or_else(|e| panic!("import 失败: {e}"));
     assert_eq!(result.id, "com.symbio.test-fixture");
     assert!(!result.replaced);
-    assert!(Path::new(&result.dir).join("prompts/persona.md").exists());
+    assert!(Path::new(&result.dir).join("AGENTS.md").exists());
+    assert!(Path::new(&result.dir).join("skill/playbook/SKILL.md").exists());
 
-    // ── 2. traverse：扫描约定目录装配 → 身份工具注册（工具经 MCP，不由本插件注册）──
+    // ── 2. traverse：整棵插件树并进会话（能力带来源前缀，§8.2）──
     let plugin = Arc::new(AgentPlugin::new());
     let (ctx, manager) = ctx_with(Some(workdir), Some("com.symbio.test-fixture"));
-    // `traverse` 是 `self: Arc<Self>`，会吃掉这个 Arc —— 后面还要用它构造记忆门面
     plugin
         .clone()
         .traverse(String::new(), ctx.clone())
@@ -113,71 +103,40 @@ async fn bundle_import_traverse_and_identity() {
     let errors = crate::symbio_core::take_errors(&ctx).await;
     assert!(errors.is_empty(), "不应有收集期错误: {errors:?}");
 
-    // 注册两个能力：agent_identity（persona + skill 拼接）+ agent_run（始终注册的
-    // 子智能体委托工具，不依赖"是否选择智能体"）
+    // agent_run 无条件注册；子 Agent 的技能工具带来源前缀进来
     let caps = manager.list_capability().await;
-    assert_eq!(
-        caps.len(),
-        2,
-        "应注册 identity + agent_run 两个能力: {caps:?}"
-    );
-    let identity_meta = caps.iter().find(|c| c.name == "agent_identity").unwrap();
     assert!(
-        identity_meta.description.contains("全栈开发人格"),
-        "身份描述应含 persona 片段（身份锚定）: {}",
-        identity_meta.description
+        caps.iter().any(|c| c.name == "agent_run"),
+        "agent_run 应始终注册: {caps:?}"
+    );
+    assert!(
+        caps.iter()
+            .any(|c| c.name.starts_with("agent_com_symbio_test-fixture_")),
+        "子 Agent 的能力应带来源前缀: {:?}",
+        caps.iter().map(|c| &c.name).collect::<Vec<_>>()
     );
 
-    // ── 3. 身份工具调用：取回全文（persona + skill）──
-    let tool_ctx = ctx.fork();
-    let resp = manager.invoke("agent_identity", tool_ctx).await.unwrap();
-    let data: serde_json::Value = resp.get().unwrap();
-    let identity = data["content"].as_str().unwrap();
-    assert!(identity.contains("com.symbio.test-fixture"));
-    assert!(identity.contains("先澄清需求再动工"));
-    assert!(!identity.contains("priority"), "frontmatter 应被剥离");
-
-    // ── 3b. 系统提示词片段：人格 + 智能体记忆（选了这个智能体才注入）──
+    // ── 3. 系统提示词：人格 / 记忆由子 Agent 的 work 实例注入（带来源前缀）──
     let segments = manager.list_system_prompts().await;
     let names: Vec<&str> = segments.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(
-        names,
-        vec!["agent-identity", "agent-memory"],
-        "两个片段都要注册: {names:?}"
-    );
-    let identity_seg = &segments[0].1;
     assert!(
-        identity_seg.contains("全栈开发人格") && identity_seg.contains("先澄清需求再动工"),
-        "人格片段要带全文（persona + skill）: {identity_seg}"
-    );
-    assert!(
-        identity_seg.contains(".vdfs/agent/com.symbio.test-fixture/"),
-        "人格条目要带可编辑来源目录: {identity_seg}"
-    );
-    assert!(
-        identity_seg.contains("prompts/<name>.md"),
-        "人格条目要带条目地址模板: {identity_seg}"
-    );
-    let memory_seg = &segments[1].1;
-    assert!(
-        memory_seg.contains(".vdfs/agent/com.symbio.test-fixture/AGENTS.md"),
-        "记忆片段要带地址（在智能体自己的目录里）: {memory_seg}"
+        names.iter().any(|n| n.starts_with("agent/com.symbio.test-fixture/")),
+        "人格 / 记忆片段应由子 Agent 的 work 实例注入: {names:?}"
     );
 
-    // ── 3c. 记忆落位：bundle 自己的目录，不是工作区根 ──
-    // 读写走内核（`MemoryFile`），本插件只提供落位与地址
+    // ── 3b. 记忆落位：Agent 自己的目录，不是工作区根 ──
+    // 读写走内核（`MemoryFile`），本插件只提供落位
     let memory = plugin.memory_store(&store, "com.symbio.test-fixture").await;
     memory.write("该智能体记住：先写测试。").unwrap();
     assert_eq!(
         memory.path().unwrap(),
         Path::new(&result.dir).join("AGENTS.md"),
-        "智能体记忆落在 bundle 目录"
+        "智能体记忆落在 Agent 目录"
     );
     assert!(
         !Path::new(workdir).join("AGENTS.md").exists(),
         "智能体记忆不得落到工作区根（那是 work 插件的作用域）"
     );
-    assert_eq!(memory.read().unwrap(), "该智能体记住：先写测试。");
 
     // ── 4. 导出（打包下载语义）──
     let exported = store.export("com.symbio.test-fixture").unwrap();
@@ -190,19 +149,18 @@ async fn bundle_import_traverse_and_identity() {
 }
 
 #[tokio::test]
-async fn version_mismatch_bundle_is_rejected_and_unbound_session_is_silent() {
+async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     let dir = tempfile::tempdir().unwrap();
     let workdir = dir.path().to_str().unwrap();
 
     let store = BundleStore::new(dir.path().join("agent"), Some(workdir));
-    // requires.spec = ^2 与宿主 SPEC_MAJOR=1 不匹配 → 导入即拒绝（规范 §10.2）
-    let zip_bytes = build_bundle_zip("com.acme.future", "^2");
+    // requires.spec = ^9 与宿主主版本 2 不匹配 → 导入即拒绝（规范 §10）
+    let zip_bytes = build_agent_zip("com.acme.future", "^9");
     let err = store.import(&zip_bytes, false).unwrap_err();
     assert!(err.contains("拒绝导入"), "错误应含版本拒绝语义: {err}");
 
-    // 未选择智能体的会话：bundle 装配静默跳过（无 identity），错误桶为空；
-    // agent_run 作为会话基础能力仍然注册（agent_id 可选，默认沿用当前会话智能体，
-    // 两者皆空则子会话以纯对话模式运行）。
+    // 未选择智能体的会话：不装配任何 Agent，错误桶为空；
+    // agent_run 作为会话基础能力仍然注册。
     let plugin = Arc::new(AgentPlugin::new());
     let (ctx, manager) = ctx_with(None, None);
     plugin.traverse(String::new(), ctx.clone()).await.unwrap();
@@ -211,10 +169,32 @@ async fn version_mismatch_bundle_is_rejected_and_unbound_session_is_silent() {
     let caps = manager.list_capability().await;
     assert_eq!(caps.len(), 1, "仅注册 agent_run: {caps:?}");
     assert_eq!(caps[0].name, "agent_run");
-    // 没选智能体 → 人格与记忆都**不注入**（这是作用域闸门，不是优化）
+    // 没选智能体 → 不注入任何人格 / 记忆片段（这是作用域闸门，不是优化）
     assert!(
         manager.list_system_prompts().await.is_empty(),
         "未选择智能体时不得注入任何人格 / 记忆片段"
+    );
+}
+
+/// manifest 不合规的目录**拒绝接入**，且错误写明双侧版本（§10 不得静默降级）
+#[tokio::test]
+async fn nonconforming_agent_is_rejected_with_both_versions() {
+    let dir = tempfile::tempdir().unwrap();
+    let workdir = dir.path().to_str().unwrap();
+    let root = dir.path().join("agent");
+    // 一个没有 manifest 的目录：store 扫不到 → 绑定它应报拒绝接入
+    std::fs::create_dir_all(root.join("ghost")).unwrap();
+
+    let plugin = Arc::new(AgentPlugin::new());
+    let (ctx, _manager) = ctx_with(Some(workdir), Some("ghost"));
+    plugin.traverse(String::new(), ctx.clone()).await.unwrap();
+
+    let errors = crate::symbio_core::take_errors(&ctx).await;
+    assert_eq!(errors.len(), 1, "应有且仅有一条拒绝接入: {errors:?}");
+    assert!(
+        errors[0].message.contains("拒绝接入") && errors[0].message.contains("agent-dir/v2"),
+        "错误应写明本宿主支持的版本: {:?}",
+        errors[0]
     );
 }
 
@@ -235,7 +215,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(
         sub.join("manifest.yaml"),
-        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires:/n  spec: \"^2\"\n",
+        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires://n  spec: \"^2\"\n",
     )
     .unwrap();
     // 人格 + 记忆：由子 Agent 的 work 实例拥有（forward 时把 WORKDIR 指向该目录）
