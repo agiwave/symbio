@@ -6,7 +6,7 @@
 > 本文的"文件:行"只作**历史取证**，请按**符号名**检索。
 > 范围：`symbio/src/plugins/session/` 中"调用大语言模型 + 执行工具"的会话主循环
 > 审计基线 commit：`88a6800`（设计稿）→ 实施基线 `5c60806`（本设计文档首次提交）
-> 上游文档：`./mechanism-audit.md`（批次 A–D 已落地）、
+> 上游文档：`docs/archive/implementation-logs/session-mechanism-audit.md`（批次 A–D 已落地，已归档）、
 > `../README.md`（六大压缩策略）
 > 本文不重复"压缩策略有哪些"，只回答一个问题：**主循环的结构是否收口**。
 

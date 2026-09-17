@@ -4,14 +4,15 @@
 
 ## 路由
 
-| Path | 说明 |
-|------|------|
-| `event_bus/subscribe` | 订阅事件流（长连接，帧式推送） |
-| `event_bus/publish` | 发布事件帧 |
+清单见 `docs/reference/ROUTES.md` §Event Bus 插件（**权威**）：`event_bus/subscribe`、
+`event_bus/ping`、`event_bus/pending/snapshot`。
+
+> `event_bus/publish` **不存在**：本插件是进程内帧广播（会话流式增量、VDFS 变更等），
+> 发布方在进程内直接调用 `EventBus`，不经路由。
 
 ## 机制
 
-- gateway 的 `/api/events`（SSE）经 event_bus 取得广播帧；tauri 宿主的前端推送同理。
+- 前端推送（会话流式、VDFS 变更）经 event_bus 取得广播帧；tauri 宿主同理。
 - 帧 payload 与 PluginChannel 的 Session 帧同构，客户端按 `kind` 分发。
 
 ## 关联

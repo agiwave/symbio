@@ -10,7 +10,7 @@
 
 | 工具 | 版本 | 说明 |
 |---|---|---|
-| Rust | stable (≥ 1.80) | 由 `symbio/rust-toolchain.toml` 自动锁定 |
+| Rust | **1.93.1（锁定）** | 由 `symbio/rust-toolchain.toml` 自动激活；CI 与本地必须同版，否则 `cargo fmt --check` 会因格式规则漂移而失败 |
 | Node.js | ≥ 18 | 前端构建 |
 | Tauri CLI | 2.x | `cargo install tauri-cli --version "^2.0"` |
 | 平台 | Windows / macOS / Linux | Tauri 三平台均已配置 CI |
@@ -23,18 +23,25 @@
 
 ```
 symbio/
-├── symbio/              # Rust 核心库（29K 行，202 文件）
+├── symbio/              # Rust 核心库（crate 根：cargo 命令在此目录跑）
 │   ├── src/
 │   │   ├── symbio_core/ # 框架层：Plugin trait / 路由 / Schema
-│   │   ├── plugins/     # 业务插件（home / composite / model / agent / session ...）
-│   └── init.rs      # 根插件装配入口
-│   ├── rust-toolchain.toml
-│   ├── rustfmt.toml
-│   └── clippy.toml
-└── tauri/               # Vue 3 桌面端（13K 行 TS/Vue + 347 行 Rust）
-    ├── src/             # 前端代码
-    └── src-tauri/       # 仅 3 个 Tauri command 的薄适配层
+│   │   ├── plugins/     # 业务插件（各含 README.md）
+│   │   ├── providers/   # 基础设施（嵌入、文件存储）
+│   │   ├── init.rs      # 根插件装配入口
+│   │   └── lib.rs
+│   ├── rust-toolchain.toml   # 锁定 Rust 版本
+│   └── Cargo.toml
+├── tauri/               # Vue 3 桌面端
+│   ├── src/             # 前端代码
+│   └── src-tauri/       # 仅 3 个 Tauri command 的薄适配层
+├── cli/                 # 纯 Rust CLI 前端（进程内直连插件树）
+├── docs/                # 系统级文档（历史归档在 docs/archive/）
+├── scripts/             # 门禁与生成脚本（gate.mjs / gen-current-facts.mjs …）
+└── rustfmt.toml · clippy.toml   # 位于仓库根
 ```
+
+> 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [docs/CURRENT.md](./docs/CURRENT.md) §5（自动生成）。
 
 ---
 
@@ -146,11 +153,14 @@ mod tests;
 新增一个业务插件的最短路径：
 
 1. 在 `symbio/src/plugins/<name>/` 下创建 `mod.rs` + `plugin.rs`。
-2. 实现 [`Plugin`](./docs/architecture/PROTOCOLS.md) trait 的 `route()` 与 `traverse()`。
-3. 在 `init.rs::create_root_plugin()` 中注册（挂载方式参考 `plugins/home/plugin.rs` 的默认挂载逻辑）。
-4. 在 `tauri/src/constants/pluginPaths.ts` 中添加路由常量。
-5. 在 `tauri/src/services/` 下添加对应 TS 客户端。
-6. 在 `docs/CHANGELOG.md` 追加条目；如涉及路由/协议/配置变更，同步更新 `docs/reference/`（ROUTES / ERROR_CODES / CONFIGURATION）与 `docs/architecture/`（OVERVIEW / DATA_FLOW）对应内容。
+2. 在 `symbio/src/plugins/mod.rs` 加一行**私有** `mod <name>;`（`mod` 刻意私有——插件之间互不可见）。
+3. 实现 [`Plugin`](./docs/architecture/PROTOCOLS.md) trait 的 `route()` 与 `traverse()`；在文件末尾用
+   `submit_object_creator!(PLUGIN_<NAME>, <Name>Plugin::build, dyn Plugin)` 自注册。
+   **无需改 `init.rs`**：`home` 构造 `worker`(Composite) 时按目录扫描子插件——这正是"零配置"。
+4. 若插件**可配置**（要出现在设置页）：在 `home` 的 `ensure_defaults` 加插件名、在 `setting` 的
+   `SETTING_SECTIONS` 加 `(id, 中文名)`、并在该插件自己的 `detail_definition()` 加返回 `config_definition(...)` 的分支。
+5. 若插件要出现在前端：在 `tauri/src/constants/pluginPaths.ts` 添加路由常量，`tauri/src/services/` 下加对应 TS 客户端。
+6. 在 `docs/CHANGELOG.md` 追加条目。文档按**唯一来源**更新：**新增路由只在 [ROUTES.md](./docs/reference/ROUTES.md) 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 CONFIGURATION.md、错误码进 ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/gen-current-facts.mjs`。
 
 完整教程见 [docs/guides/PLUGIN_DEVELOPMENT.md](./docs/guides/PLUGIN_DEVELOPMENT.md)。
 

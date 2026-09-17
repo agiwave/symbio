@@ -1,5 +1,12 @@
 # Session 插件机制审计：复杂性成因、冗余清单与简化方案
 
+> **【归档说明】** 本文档是 **2026-09-16 的机制审计与简化方案（过程产物）**，已于 2026-09-17
+> 移入 `docs/archive/implementation-logs/`。它提出的方案已全部落地（批次 A–D 见 §8，
+> 结构收敛见 [`module-layout.md`](../../../symbio/src/plugins/session/docs/module-layout.md)），
+> 已不再驱动任何待做项。session 现行机制见
+> [`session/README.md`](../../../symbio/src/plugins/session/README.md) 与
+> [`session/docs/`](../../../symbio/src/plugins/session/docs/)。本文不再更新。
+
 > 状态：审计结论（含可执行方案）。本文是 `docs/archive/implementation-logs/session-mechanism-simplification.md`
 > 的后续核查版——那份方案里的部分判断被本次取证推翻或修正，差异见 §6。
 > 所有结论都带 `文件:行号` 证据，可逐条复核。

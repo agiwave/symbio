@@ -270,12 +270,26 @@ function extractRouteArms(t, pluginName) {
 /** 核心 trait 白名单：只统计真正定义插件形态的 trait */
 const CORE_TRAITS = ["Plugin", "VdfsProvider", "Capability", "ModelProvider", "ConfigurableVisitor"];
 
+/**
+ * 「未接线」标记：模块级 `#![allow(dead_code)]`。
+ *
+ * 为什么需要：`plugins/local/ask_user.rs` 顶部自述「暂未注册（AskUserTool 功能后续成熟后
+ * 再考虑启用）」，并用该内层属性抑制 dead_code。它里面的 `CapabilityMeta { name: … }`
+ * 是**未接线的定义**，不是 LLM 可见工具；不排除就会让 §2 报出一个模型根本看不到的工具
+ * （2026-09-17 核对 `plugins/local/plugin.rs` 的 `tool_impls`，实际只注册了
+ * `shell` / `content_search` / `todo_write` / `codebase_search` 四个）。
+ *
+ * 判据取**模块级属性**而不是猜注释文案——全仓仅此一例，可用 grep 复核。
+ */
+const UNWIRED_MARKER = "#![allow(dead_code)]";
+
 /** 单个插件的静态事实 */
 function analyzePlugin(dirName, ids) {
   const dir = path.join(PLUGINS_DIR, dirName);
-  const contents = collectRs(dir).map((f) =>
-    stripTestModules(stripComments(readFileSync(f, "utf8")))
-  );
+  const contents = collectRs(dir)
+    .map((f) => readFileSync(f, "utf8"))
+    .filter((raw) => !raw.includes(UNWIRED_MARKER))
+    .map((raw) => stripTestModules(stripComments(raw)));
   const consts = new Map();
   for (const t of contents) parseConsts(t, consts);
 
@@ -438,9 +452,9 @@ function cliSurface() {
 /**
  * Gateway 对外端点：从 `server.rs` 的分派代码提取，而不是从 README 抄。
  *
- * 动机：README 里写的是 `/api/route`、`/api/ws`，代码里是 `/api/v1/invoke`、
- * `/api/v1/health`——文档腐烂的活案例。端点由 `req.path.starts_with("…")` 决定，
- * 所以正则扫代码就是权威。
+ * 端点由 `req.path.starts_with("…")` 决定，所以正则扫代码就是权威；插件 README
+ * 只指向 ROUTES.md、不再自列端点（早年 README 写 `/api/route`、`/api/ws` 而代码
+ * 是 `/api/v1/invoke`、`/api/v1/health`，是文档腐烂的活案例）。
  */
 function gatewayEndpoints() {
   const file = path.join(ROOT, "symbio", "src", "plugins", "gateway", "server.rs");
@@ -648,7 +662,7 @@ function render() {
   const gw = gatewayEndpoints();
   L.push(
     `- **Gateway 端点**：${fmtList(gw.http)}${gw.ws ? " + WS 升级（任意 path，首帧 = `PluginMessageWire`）" : ""}` +
-      "（提取自 `gateway/server.rs` 的 `req.path.starts_with`；README 旧写的 `/api/route`、`/api/ws` 与代码不符）"
+      "（提取自 `gateway/server.rs` 的 `req.path.starts_with`）"
   );
   const cli = cliSurface();
   L.push(

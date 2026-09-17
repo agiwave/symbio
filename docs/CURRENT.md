@@ -47,7 +47,6 @@
 | 工具（短名） | 贡献插件 | 类别 / 备注 |
 |---|---|---|
 | `agent_run` | `agent` | 委托子智能体 |
-| `ask_user` | `local` | 向用户提问 |
 | `codebase_search` | `local` | 语义代码搜索 |
 | `content_search` | `local` | 正则内容搜索（ripgrep 库） |
 | `todo_write` | `local` | 任务清单（`LastOnly` 保留策略） |
@@ -113,9 +112,9 @@
 
 - **Tauri IPC**：注册 3 个 command —— `route_v2` · `route_v2_send` · `route_v2_close`（`tauri/src-tauri/src/main.rs::generate_handler!`；`commands.rs` 内另有未注册的历史 `#[tauri::command]` 函数，不计入接缝）
 - **前端路由**：9 条 route，其中真实组件 2 个（`MainLayout` · `VdfsView`）；其余为旧地址 `redirect`。即「一台控件承载全部资源类型」在代码里可数。
-- **Gateway 端点**：`GET /api/v1/health` · `POST /api/v1/invoke` + WS 升级（任意 path，首帧 = `PluginMessageWire`）（提取自 `gateway/server.rs` 的 `req.path.starts_with`；README 旧写的 `/api/route`、`/api/ws` 与代码不符）
+- **Gateway 端点**：`GET /api/v1/health` · `POST /api/v1/invoke` + WS 升级（任意 path，首帧 = `PluginMessageWire`）（提取自 `gateway/server.rs` 的 `req.path.starts_with`）
 - **CLI 面**：进程选项 13 个长 + 7 个短（`--message` · `--session` · `--provider` · `--mode` · `--workdir` · `--homedir` · `--agent` · `--repl` · `--heartbeat` · `--quiet` · `--verbose` · `--help` · `--version`）；交互模式内置命令 7 个（`/help` · `/new` · `/session` · `/provider` · `/workdir` · `/exit` · `/quit`）。无子命令树、不依赖 clap，权威来源是 `cli/src/args.rs` 的 `HELP`。
 
 ---
 
-> 生成时间：2026-09-17 04:35:13 UTC · 源：`git rev-parse HEAD` = `aedb426`
+> 生成时间：2026-09-17 05:00:52 UTC · 源：`git rev-parse HEAD` = `ae67aa2`

@@ -59,16 +59,19 @@ docs/                            # 系统级文档（跨模块）
 ├── design/                      # 现行设计规范（只写跨层取舍与不变量）
 │   ├── vdfs.md                          # VDFS 机制规范（权威；资源存储见 §11 / §13.4）
 │   ├── vdfs-frontend.md                 # VDFS 前端页面规范
-│   ├── vdfs-review.md                   # VDFS 审查记录
+│   ├── agent-directory-spec.md          # agent 插件（智能体域）规范
 │   ├── http-api-transport.md            # Gateway HTTP/WS 传输层设计
-│   └── open-agent-bundle-spec.md        # OAB 包规范
+│   ├── class-diagram.mermaid            # 类图
+│   └── sequence-diagram.mermaid         # 时序图
 ├── CHANGELOG.md                 # 更新日志
-└── archive/                     # 历史归档 (仅供参考，含 implementation-logs/；
-                                 #  已废止的实体机制档案在此：entity-provider-mechanism.md /
-                                 #  entity-management-mechanism.md)
+└── archive/                     # 历史归档（仅供参考；含 implementation-logs/、proj/）
+                                 #  已废止机制与旧规范：entity-management-mechanism.md /
+                                 #  entity-provider-mechanism.md / open-agent-bundle-spec.md /
+                                 #  vdfs-review.md / frontend-ui-ux-*.md
 
 symbio/src/plugins/<plugin>/     # 模块级文档（就近原则）
-├── README.md                    # 插件职责、路由、内部机制（15 个插件全覆盖）
+├── README.md                    # 插件职责与内部机制，**不复制路由表**（指向 ROUTES.md）
+│                                #  （16 个插件全覆盖）
 └── docs/                        # 可选：该模块的深度设计 / 审计 / 性能文档
                                  #  例：session/docs/（核心循环、压缩设计、心跳、
                                  #  模块分工、性能、级联选项、VDFS 会话消息……）
@@ -84,16 +87,17 @@ tauri/                           # 前端
 |------|------|-----------|
 | session | [plugins/session/README.md](../symbio/src/plugins/session/README.md) | 会话编排唯一入口：工具循环、提示词组装、上下文压缩 |
 | model | [plugins/model/README.md](../symbio/src/plugins/model/README.md) | 无状态单轮 LLM 网关（execute_turn），多协议适配 |
-| agent | [plugins/agent/README.md](../symbio/src/plugins/agent/README.md) | 人格/智能体资产：经 traverse 贡献工具与人格 |
+| agent | [plugins/agent/README.md](../symbio/src/plugins/agent/README.md) | 智能体域唯一所有者：bundle 库、子树装配、两作用域 `AGENTS.md` |
 | mcp | [plugins/mcp/README.md](../symbio/src/plugins/mcp/README.md) | MCP 外部工具接入与能力注册 |
 | skill | [plugins/skill/README.md](../symbio/src/plugins/skill/README.md) | 技能脚本（loader/plugin）发现与装载 |
-| local | [plugins/local/README.md](../symbio/src/plugins/local/README.md) | 本地文件系统工具 + system 提示词下发 |
+| local | [plugins/local/README.md](../symbio/src/plugins/local/README.md) | 本地原生工具（shell / 内容与语义搜索 / 任务清单）；文件操作已迁 VDFS |
 | vdfs | [plugins/vdfs/README.md](../symbio/src/plugins/vdfs/README.md) | 文件系统本身：`vdfs/*` 协议入口 + `vdfs_*` LLM 工具（规范见 design/vdfs.md） |
 | web | [plugins/web/README.md](../symbio/src/plugins/web/README.md) | 网页抓取/搜索工具 |
 | home | [plugins/home/README.md](../symbio/src/plugins/home/README.md) | 根插件：持应用级状态（`<homedir>/PLUGIN.yml`），构造 worker(Composite) 并传入必需插件清单 |
 | composite | [plugins/composite/README.md](../symbio/src/plugins/composite/README.md) | 子插件容器：扫描自己的目录（其下一层目录即一个插件）+ 路径合并分发 |
+| work | [plugins/work/README.md](../symbio/src/plugins/work/README.md) | 工作区记忆：注入 `{workdir}/AGENTS.md`，可经 `.vdfs/work` 编辑 |
 | gateway | [plugins/gateway/README.md](../symbio/src/plugins/gateway/README.md) | HTTP/WS 入站网关 |
-| setting | [plugins/setting/README.md](../symbio/src/plugins/setting/README.md) | 运行时设置 |
+| setting | [plugins/setting/README.md](../symbio/src/plugins/setting/README.md) | 纯设置入口：自有分区（appearance/about）+ 各插件配置条目（无自有配置） |
 | hook | [plugins/hook/README.md](../symbio/src/plugins/hook/README.md) | 生命周期钩子 |
 | event_bus | [plugins/event_bus/README.md](../symbio/src/plugins/event_bus/README.md) | 进程内事件总线 |
 | telegram | [plugins/telegram/README.md](../symbio/src/plugins/telegram/README.md) | Telegram 通道接入 |
@@ -110,7 +114,7 @@ tauri/                           # 前端
 
 | 变更类型 | 需要更新的文档 |
 |----------|----------------|
-| 新增路由 | `ROUTES.md`（系统级总表）+ 对应模块 `README.md` 路由段 |
+| 新增路由 | **只在 `ROUTES.md` 登记**（模块 `README.md` 不复制路由表，只写机制并指向 `ROUTES.md`） |
 | 新增错误码 | `ERROR_CODES.md` |
 | 新增配置项 | `CONFIGURATION.md` |
 | 插件 / 挂载点 / 工具 / 存储布局变更 | 重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁；`CURRENT.md` 不手改） |

@@ -4,16 +4,18 @@
 
 ## 工具
 
+清单与逐项说明见 `docs/reference/ROUTES.md` §Local 插件（**权威**）。共 4 个原生工具：
+
 | 工具 | 说明 |
 |------|------|
-| `local/shell` | 执行 Shell 命令（受工作目录约束） |
+| `local/cmd`（Windows）/ `local/sh`（macOS / Linux） | 执行 Shell 命令（受工作目录约束）；工具名按操作系统取 |
 | `local/content_search` | 文件内容正则搜索（ripgrep） |
-| `local/todo_write` | 会话级任务清单（id/content/status/priority），支持 merge 合并；返回紧凑确认（count+message），**不回显全量清单**——最新一次调用经 `LastOnly` 保留策略始终完整，避免每轮全量回显的 token 冗余 |
-| `local/ask_user` | 向用户提出结构化问题（含选项），阻塞等待用户输入 |
+| `local/todo_write` | 会话级任务清单（id/content/status/priority），支持 merge；返回紧凑确认（count+message），**不回显全量清单**——最新一次调用经 `LastOnly` 保留策略始终完整，避免每轮全量回显的 token 冗余 |
 | `local/codebase_search` | 语义化代码检索（向量相似度，不可用时降级正则） |
-| `local/system` | 系统信息查询 |
 
 > **文件编辑类能力已迁入 VDFS**：`read`/`edit`/`write`/`delete`/`list`/`search` 统一由 `vdfs` 插件以 `vdfs_read` / `vdfs_edit` / `vdfs_write` / `vdfs_delete` / `vdfs_list` / `vdfs_search` 暴露（详见 `../vdfs/README.md`）。本地文件挂在 `local` 挂载点下，与任意已挂载资源走同一条分发链路——「LLM 能做的 = 前端能做的」。
+>
+> `ask_user` 源码保留但**暂未注册**（`plugins/local/ask_user.rs` 顶部注明），故不在清单内。
 
 ## 机制
 

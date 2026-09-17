@@ -1,6 +1,10 @@
 # Open Agent Bundle（OAB）规范 v1
 
-> ⚠️ **已被取代**：本规范（v1）由 [`agent-directory-spec.md`](./agent-directory-spec.md)
+> **【归档说明】** 本文档为**已废止的规范（v1）**，已于 2026-09-17 移入 `docs/archive/`。
+> 现行规范是 [`docs/design/agent-directory-spec.md`](../design/agent-directory-spec.md)
+> （Agent 目录规范 v2），本文件仅作历史与迁移参考，不再更新。
+
+> ⚠️ **已被取代**：本规范（v1）由 [`agent-directory-spec.md`](../design/agent-directory-spec.md)
 > （Agent 目录规范 v2）取代，不再作为新实现的依据，保留作历史与迁移参考（v2 §12）。
 >
 > 取代的原因：v1 让宿主为 bundle 单独再实现一遍技能与 MCP 的解析，同一件事两套

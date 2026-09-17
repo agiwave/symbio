@@ -1,10 +1,14 @@
 # VDFS 机制评估与收敛计划
 
+> **【归档说明】** 本文档是一次性的**机制评估与收敛计划（过程产物）**，已于 2026-09-17 移入
+> `docs/archive/`。VDFS 现行规范见 [`docs/design/vdfs.md`](../design/vdfs.md)（机制）与
+> [`docs/design/vdfs-frontend.md`](../design/vdfs-frontend.md)（前端）。本文不再更新。
+
 状态：评估（结论 + 待办）；落地进度见文末「进度」。
 范围：`symbio_core/vdfs_provider.rs`（纯接口）、`plugins/vdfs/*`（访问层 / 门面 / 物理层）、
 `plugins/composite/vdfs.rs`（容器）、`providers/vdfs_service/*`（集中实现）、
 以及消费方（各资源插件 + 前端）。
-关联规范：[vdfs.md](vdfs.md)（机制）、[vdfs-frontend.md](vdfs-frontend.md)（前端）。
+关联规范：[vdfs.md](../design/vdfs.md)（机制）、[vdfs-frontend.md](../design/vdfs-frontend.md)（前端）。
 
 ---
 

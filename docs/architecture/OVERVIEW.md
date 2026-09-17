@@ -22,10 +22,6 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 
 物理代码平铺（`symbio/src/plugins/<name>/`），逻辑层级通过 `Composite` 容器动态维护。
 
-### 5. 机制化 (Mechanismization)
-
-在 Agent 内部，关系类型与展示行为由数据（CU）驱动而非硬编码，新增关系或认知类型无需改动核心代码。详见 `symbio/src/plugins/agent/README.md`。
-
 ## 核心架构层级
 
 ```mermaid
@@ -50,9 +46,8 @@ graph TD
         P2 --> P5[agent]
         P2 --> P6[session]
         P2 --> P7[model]
-        P2 --> P8[local / web / skill / mcp / telegram]
+        P2 --> P8[local / web / skill / mcp / telegram / vdfs / work]
         P2 --> P10[hook / event_bus]
-        P5 --> P9[MindscapeScaffold]
     end
 
     SR --> P1
@@ -76,7 +71,7 @@ graph TD
 | `schemas/`                                                                | 跨端数据结构 (Request/Response)，Rust 端定义                                                    |
 | `logger.rs`                                                               | 日志系统初始化                                                                               |
 | `keys.rs`                                                                 | 上下文键（`PATH` / `WORKDIR` / `SESSION_ID` / `TRACE_ID` …）                                |
-| `ids.rs`                                                                  | 插件 id 常量（`PLUGIN_HOME` 等）与能力/路径常量                                                     |
+| `ids.rs`                                                                  | 插件 id 常量（`PLUGIN_HOME` 等）与注册对象 id（**不含 LLM 工具名**——工具名是各插件自己的 `CapabilityMeta.name`） |
 | `paths.rs` / `homedir.rs` / `event_bus.rs` / `providers.rs` | 路径常量、主目录、事件总线、服务 trait 等                                                         |
 
 ### `plugins/` — 实现层
@@ -87,13 +82,15 @@ graph TD
 | ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `home`      | **根容器**      | 持**应用级状态**（`<homedir>/PLUGIN.yml`：工作区与最近记录）；构造 `worker` (Composite) 并传入必需插件清单，自身终结 `home/*`、`work/*` |
 | `composite` | **动态容器**     | **扫描自己的目录**（系统根）实例化子插件（目录驱动，不内置任何清单），是"分形"的关键                                                                                              |
-| `agent`     | **认知中心**     | 管理 Agent 人格；会话选定智能体时经 `traverse` 贡献工具与人格 → `plugins/agent/README.md`                                     |
+| `agent`     | **智能体域**     | 智能体域唯一所有者：bundle 库（`.vdfs/agent`）+ 子树装配（`agent/<id>/`，工具前缀 `agent_<id>_`）+ 两作用域 `AGENTS.md`；贡献 `agent_run` 工具 → `plugins/agent/README.md` |
 | `session`   | **会话中心**     | 长连接、消息持久化、历史裁剪；**会话编排的唯一入口**（收集工具、组装提示词、直连 model 单轮网关）→ `plugins/session/README.md`（含六大压缩策略）                       |
 | `model`     | **单轮 LLM 网关** | 无状态单轮执行（`execute_turn`）；按上下文注册唯一生效 `ModelProvider`（自含参数与协议适配器）、4 协议适配、配置存取；不含工具执行与会话循环 |
 | `local`     | 本地工具         | `cmd`(Win)/`sh`(Unix) / content_search / todo_write / codebase_search（文件操作已迁 vdfs_*）                      |
 | `web`       | Web 工具       | http_request / web_search / web_fetch                                                                             |
+| `vdfs`      | **资源访问层**   | 统一资源访问：`vdfs/*` 协议入口 + `vdfs_*` LLM 工具（规范见 `docs/design/vdfs.md`）                                       |
 | `skill`     | 技能           | 加载与执行技能定义（`skill/execute`）                                                                                       |
-| `mcp`       | MCP 桥        | MCP server 注册（stdio / http）与工具调用（资源经 `.vdfs/mcp` 维护）                                                    |
+| `mcp`       | MCP 桥        | MCP server 注册（stdio / http / sse）与工具调用（资源经 `.vdfs/mcp` 维护）                                              |
+| `work`      | **工作区记忆**   | 注入 `{workdir}/AGENTS.md`（`.vdfs/work` 可编辑）；`route()` 恒 `NotFound`                                              |
 | `telegram`  | Telegram 通道  | 长轮询收发与“继续会话”交互（`telegram/send`）                                                                                  |
 | `gateway`   | **入站网关**     | HTTP/WS 入站适配（`/api/v1/invoke`、`/api/v1/ws`、`/api/v1/health`，与 route_v2 同构）                                              |
 | `setting`   | 配置           | `.vdfs/setting` 子目录：**各插件交出来的配置条目 + 自有分区**（`appearance` / `about`）；条目指向各插件自己的 `PLUGIN.yml`，本插件不代理读写 |
@@ -148,7 +145,7 @@ pub trait Plugin: Send + Sync + 'static {
 
 **理由**：
 
-1. **关注点分离**：Agent 只负责"人格"，Session 负责"对话"
+1. **关注点分离**：Agent 负责"智能体资产"（bundle / 子树装配 / 记忆），Session 负责"对话"
 2. **可组合性**：同一 Session 可绑定不同 Agent，或无 Agent 纯工具模式
 3. **可测试性**：Session 可独立于 Agent 测试
 
@@ -167,15 +164,9 @@ gemini_api         // generateContent
 
 **理由**：供应商无关、协议演进、功能差异适配；核心契约保持 object-safe trait，协议细节可独立演进
 
-## 机制化原则（Agent 子系统）
-
-Agent 插件自 v9 起贯彻**机制化 (Mechanismization)** 原则：关系判定与展示规则由数据（CU）驱动而非硬编码。机制细节（`prop` CU、`RelationPropRegistry`、`seed_cus.jsonl` 单一事实源）见 `symbio/src/plugins/agent/README.md`。
-
 ## 文档体系约定（下沉原则）
 
-- **模块文档下沉**：每个插件的职责、路由、内部机制写在插件目录内的 `README.md`（可选 `docs/` 子目录），如 `symbio/src/plugins/session/README.md`；前端同理见 `tauri/README.md` 与 `tauri/docs/`。
-- **系统级文档只留跨模块内容**：`docs/` 只保留跨模块的架构、协议、导航与设计总览，单模块细节一律引用模块文档，不在系统级重复维护。
-- **后端注释**：`// Corresponding Host: <path>` 注释指向该数据结构在宿主层的对应定义。
+见 [docs/README.md](../README.md) §文档下沉原则——系统级文档只留跨模块内容，模块细节一律引用模块 `README.md`，本文件不再复述。
 
 ---
 

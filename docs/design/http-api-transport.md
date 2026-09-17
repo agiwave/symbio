@@ -185,7 +185,7 @@ GET /api/v1/health  → { "ok": true }
   （清单见 [CONFIGURATION.md](../reference/CONFIGURATION.md)），其余 403/拒绝；
   `gateway/*` 一律拒绝，且 `vdfs/read` 只要落在任何插件的 `PLUGIN.yml` 上就拒绝
   （配置含 `inbound_token` 等凭据）。
-- 危险操作分级（`local/shell` 类、`work/set_workspace`、`vdfs/write|delete` 归为
+- 危险操作分级（`local/cmd`（Windows）/ `local/sh` 类、`work/set_workspace`、`vdfs/write|delete` 归为
   `danger`）：**预留**，现行只有只读白名单一层。
 - 审计：`trace_id` 随 `metadata` 透传进上下文，invoke 记入 tracing。
 - **HTTPS**：不做。rustls 默认后端 aws-lc-rs 依赖 `aws-lc-sys`（C），与"无 C 编译"铁律冲突。

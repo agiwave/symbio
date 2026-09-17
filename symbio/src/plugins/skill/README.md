@@ -4,11 +4,9 @@
 
 ## 路由
 
-| Path | 说明 |
-|------|------|
-| `skill/list` | 列出已加载技能 |
-| `skill/search` | 技能检索 |
-| `skill/run` | 执行指定技能 |
+只有一条自有路由 `skill/execute`（载荷 `{name, args}`，按名称执行技能）。
+技能清单与内容**不设私有路由**——已安装技能经 `.vdfs/skill` 寻址（一个技能 = 一个目录，主文件 `SKILL.md`）。
+见 `docs/reference/ROUTES.md` §Skill 插件（**权威**）。
 
 ## 机制
 

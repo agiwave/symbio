@@ -79,11 +79,13 @@
 > 于 S13 删除——**agent 插件不再有任何自有协议路由**，`route()` 直接返回
 > `NotFound` 并指引到 VDFS。
 
-### 身份能力（**不是路由**）
+### 能力贡献（**不是路由**）
 
-| 能力名 | 用途 |
-|------|------|
-| `agent_identity` | 返回 Agent 人格/提示词片段（由能力管理器 `invoke` 调用，不经 `route`） |
+> agent 插件不贡献路由，只贡献 LLM 工具：唯一工具 `agent_run`（启动 / 续跑子智能体，
+> 源码 `plugins/agent/host/subagent.rs`）由模型经能力调用触达，不经 `route`。
+> **LLM 可见工具清单以 [CURRENT.md](../CURRENT.md) §2 为准**，本文件不重复登记。
+>
+> （历史 `agent_identity` 能力已随 OAB v1 能力体系一同移除——见 `symbio_core/ids.rs` 顶部。）
 
 ---
 
@@ -115,7 +117,7 @@
 2. 从 PluginChannel 接收 PluginFrame
 3. 帧类型:
    - Data({type: "text_delta", content: "..."})     → 增量文本
-   - Data({type: "tool_use", name: "local/shell"})  → 工具调用
+   - Data({type: "tool_use", name: "local/content_search"})  → 工具调用
    - Data({type: "done"})                           → 完成
    - Error(msg, details)                            → 错误
 ```

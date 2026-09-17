@@ -51,15 +51,15 @@
 
 ## 模块分工
 
-| 文件 | 行数 | 职责 |
-|------|---:|------|
-| `fs.rs` | 536 | `UnifiedFs`——**唯一的地址翻译点**，`.vdfs`/物理分流 |
-| `host.rs` | 1506 | 访问层：取根 / 翻译操作 / 树遍历 / 事件投递 |
-| `physical.rs` | 663 | 物理文件层（磁盘读写 + 路径守卫） |
-| `provider.rs` | 372 | `ToolVdfs` 封装 provider（工具链路） |
-| `protocol.rs` | 370 | 线路信封（`vdfs/*` 请求响应 + `VDFS_OPS`） |
-| `plugin.rs` | 186 | 插件装配（`route` 分发 + `traverse` 注册工具） |
-| `tools/*.rs` | 10 个 | 一个操作一个文件 |
+| 文件 | 职责 |
+|------|------|
+| `fs.rs` | `UnifiedFs`——**唯一的地址翻译点**，`.vdfs`/物理分流 |
+| `host.rs` | 访问层：取根 / 翻译操作 / 树遍历 / 事件投递 |
+| `physical.rs` | 物理文件层（磁盘读写 + 路径守卫） |
+| `provider.rs` | `ToolVdfs` 封装 provider（工具链路） |
+| `protocol.rs` | 线路信封（`vdfs/*` 请求响应 + `VDFS_OPS`） |
+| `plugin.rs` | 插件装配（`route` 分发 + `traverse` 注册工具） |
+| `tools/` | 10 个工具，一操作一文件（见上表） |
 
 ## 关键不变量
 

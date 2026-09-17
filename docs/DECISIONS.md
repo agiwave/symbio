@@ -6,7 +6,7 @@
 
 **状态**：已接受
 
-> **当前状态**：**已实现（现行）**。容器与叶子同接口，`home` → `worker(composite)` → 13 个业务插件即为这棵树。
+> **当前状态**：**已实现（现行）**。容器与叶子同接口，`home` → `worker(composite)` → 14 个业务插件即为这棵树（总 16 个插件 = 根 `home` + 容器 `composite` + 14 叶子，清单见 [CURRENT.md](./CURRENT.md) §1）。
 
 **背景**：
 需要一种架构，使新增功能无需修改核心代码，且能灵活组合。
@@ -98,7 +98,11 @@ Model 插件内置 4 套协议适配器 (OpenAI Chat, OpenAI Responses, Anthropi
 
 **状态**：已接受
 
-> **当前状态**：**已实现**。Agent 插件即 OAB 宿主，导入经 `.vdfs/agent` 新建类型 `zip`。
+> **当前状态**：**已演进**。Agent 插件仍是 Bundle 宿主、导入仍走 `.vdfs/agent` 新建类型 `zip`；
+> 但 OAB v1 的**约定目录协议**（`prompts/` `skills/` `mcps/` 由宿主硬编码解释）已被
+> [`agent-dir/v2`](./design/agent-directory-spec.md) 取代——**Agent 就是一棵插件树**：
+> 技能 / MCP 复用宿主既有的 `skill` / `mcp` 插件目录，人格改为根 `AGENTS.md`。
+> v1 规范见 [archive/open-agent-bundle-spec.md](./archive/open-agent-bundle-spec.md)。
 
 **背景**：
 Agent 需要一种标准化的打包与分发格式。

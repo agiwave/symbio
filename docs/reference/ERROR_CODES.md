@@ -52,10 +52,10 @@ impl PluginError {
 {
   "error": {
     "code": "NOT_FOUND",
-    "message": "路由路径不存在: agent/unknown",
+    "message": "路由路径不存在: session/chat/unknown",
     "details": {
-      "path": "agent/unknown",
-      "available": ["agent/chat", "agent/list", "agent/get"]
+      "path": "session/chat/unknown",
+      "available": ["session/chat/send", "session/chat/abort", "session/open"]
     }
   }
 }
@@ -156,8 +156,8 @@ VITE_LOG_LEVEL=debug npm run dev
 每个请求的 `metadata` 应包含 `trace_id`，后端会记录在日志中：
 
 ```
-INFO trace_id=abc123 path=agent/chat Start routing
-DEBUG trace_id=abc123 path=agent/chat Routing finished
+INFO trace_id=abc123 path=session/chat/send Start routing
+DEBUG trace_id=abc123 path=session/chat/send Routing finished
 ```
 
 ---

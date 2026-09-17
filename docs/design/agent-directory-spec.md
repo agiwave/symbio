@@ -1,7 +1,7 @@
 # Agent 目录规范 v2
 
 > 状态：草案 v2 ｜ 协议标识：`agent-dir/v2`
-> **取代** [`open-agent-bundle-spec.md`](./open-agent-bundle-spec.md)（OAB v1）。
+> **取代** [`open-agent-bundle-spec.md`](../archive/open-agent-bundle-spec.md)（OAB v1，已归档）。
 >
 > v1 定义的是「一个可分发的包里有哪些约定目录」——`prompts/` `skills/` `mcps/` 由宿主
 > 自己解释。v2 换了一个主张：**Agent 就是一棵插件树**，约定目录不再由宿主硬编码——

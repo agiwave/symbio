@@ -4,11 +4,9 @@
 
 ## 路由
 
-| Path | 说明 |
-|------|------|
-| `hook/register` | 注册钩子 |
-| `hook/list` | 列出已注册钩子 |
-| `hook/trigger` | 触发钩子（也可由系统内部在生命周期点调用） |
+> 注意命名空间是**注册名 `hooks`**（目录名是 `hook`，`PluginMeta::new("hooks", …)`）。
+> 清单见 `docs/reference/ROUTES.md` §Hook 插件（**权威**）：`hooks/register`、`hooks/fire`、`hooks/list`。
+> 触发臂是 `fire`（无 `trigger`）。
 
 ## 机制
 

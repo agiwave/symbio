@@ -22,8 +22,8 @@ VITE_LOG_LEVEL=debug npm run dev
 每个请求的 `metadata` 应包含 `trace_id`：
 
 ```
-INFO trace_id=abc123 path=agent/chat Start routing
-DEBUG trace_id=abc123 path=agent/chat Routing finished
+INFO trace_id=abc123 path=session/chat/send Start routing
+DEBUG trace_id=abc123 path=session/chat/send Routing finished
 ```
 
 ---

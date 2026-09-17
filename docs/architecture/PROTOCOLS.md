@@ -119,7 +119,7 @@ pub trait InvokeRequest: Send + Sync {
 
 | 键 | 类型 | 用途 |
 |----|------|------|
-| `PATH` | String | 目标路径 (如 `agent/chat`) |
+| `PATH` | String | 目标路径 (如 `session/chat/send`；资源类走 `vdfs/*` + `.vdfs/…` 地址) |
 | `PAYLOAD` | Value | 交互载荷数据 |
 | `WORKDIR` | String | 当前工作区根路径 |
 | `SESSION_ID` | String | 会话唯一标识 |
@@ -148,7 +148,7 @@ pub const TRAVERSE_AVAILABLE_TOOLS: &str = "available_tools";
 1. 调用 root.traverse("available_tools", ctx)
 2. 容器插件将自身 path 前缀下发给子插件
 3. 叶子插件返回 ToolDefinition 列表
-4. 工具名自动带命名空间 (如 "local/shell")
+4. 工具对模型的全名 = `<挂载点>/<短名>` (如 "local/content_search")
 ```
 
 ### 工具定义
