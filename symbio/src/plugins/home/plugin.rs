@@ -436,19 +436,30 @@ impl HomePlugin {
         Ok(())
     }
 
-    /// 切换工作区：仅更新配置和最近使用记录
+    /// 切换工作区：候选配置保存成功后才发布到内存。
     pub async fn set_workspace(&self, path_str: &str) -> Result<Value, PluginError> {
+        self.set_workspace_in(path_str, &home_dir()).await
+    }
+
+    // 显式目录让故障测试不必改动进程级 homedir。
+    async fn set_workspace_in(
+        &self,
+        path_str: &str,
+        dir: &PluginDir,
+    ) -> Result<Value, PluginError> {
         let expanded_path = shellexpand::tilde(path_str).to_string();
 
         plugin_info!("home", "正在切换到工作区: {}", expanded_path);
 
-        // 更新配置缓存
+        // 写锁覆盖候选构造、落盘与发布；失败时缓存完全不变。
         let recents = {
             let mut cfg = self.config.write().await;
-            cfg.work
+            let mut candidate = cfg.clone();
+            candidate
+                .work
                 .insert("workdir".to_string(), serde_json::json!(path_str));
 
-            let mut recents = cfg
+            let mut recents = candidate
                 .work
                 .get("recent_workspaces")
                 .and_then(|v| v.as_array())
@@ -460,10 +471,14 @@ impl HomePlugin {
             recents.insert(0, current_path);
             recents.truncate(10);
 
-            cfg.work.insert(
+            candidate.work.insert(
                 "recent_workspaces".to_string(),
                 Value::Array(recents.clone()),
             );
+            dir.save(&candidate)
+                .map_err(|e| PluginError::InternalError(format!("持久化自身配置失败: {e}")))?;
+            // 保存和发布之间没有 await，避免任务取消留下半次切换。
+            *cfg = candidate;
 
             recents
                 .iter()
@@ -484,8 +499,12 @@ impl HomePlugin {
     /// 只写**自己**的配置（工作区 / 最近记录）。过去这里还要合并所有子插件推来的
     /// 配置切片；现在每个插件写自己的文件，本方法只剩「把自己这份存好」。
     pub async fn flush(&self) -> Result<(), PluginError> {
-        let dir = home_dir();
-        let cfg = self.config.read().await;
+        self.flush_in(&home_dir()).await
+    }
+
+    async fn flush_in(&self, dir: &PluginDir) -> Result<(), PluginError> {
+        // save 使用固定临时文件名；flush 之间也必须串行，不能仅持读锁。
+        let cfg = self.config.write().await;
         dir.save(&*cfg)
             .map_err(|e| PluginError::InternalError(format!("持久化自身配置失败: {e}")))?;
         plugin_info!("home", "配置已持久化至: {}", dir.config_path().display());
@@ -565,15 +584,8 @@ impl Plugin for HomePlugin {
                 let req: SetWorkspaceRequest = ctx.payload()?;
                 let path_str = &req.path;
 
+                // set_workspace 已确认持久化成功，无需再后台 flush。
                 let result = self.set_workspace(path_str).await?;
-
-                // 切换成功后，异步触发一次配置持久化
-                let this = Arc::clone(&self);
-                tokio::spawn(async move {
-                    if let Err(e) = this.flush().await {
-                        plugin_error!("home", format!("切换工作区后自动持久化失败: {}", e));
-                    }
-                });
 
                 return Ok(PluginPayload::new(&result));
             }
@@ -686,3 +698,7 @@ impl Clone for HomePlugin {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "plugin.test.rs"]
+mod tests;
