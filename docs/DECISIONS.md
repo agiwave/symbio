@@ -451,7 +451,12 @@ HTTP 出口的 TLS 后端改为**平台原生栈**（`reqwest` 的 `native-tls` 
 
 ## ADR-014: 本地嵌入 = `tract-onnx` 纯 Rust ONNX 推理，废弃 `fastembed`（ORT / onig 彻底退出）
 
-**状态**：已接受（已实现）
+**状态**：⚠️ **已被 [ADR-016](#adr-016-本地嵌入改用-ortonnx-runtime推翻-adr-014-的性能前提并接受它当初拒绝的代价) 部分推翻**（2026-09-18）
+
+> **推翻范围**：本 ADR 的"零 C/C++ 编译"目标**仍然保持**（ADR-016 同样满足）；
+> 但"用 `tract-onnx` 做推理"与"推理性能秒级可接受"两点**已作废**——
+> 实测每 token ≈ 22.5 ms、全仓建索引 ≈ 6 小时，`codebase_search` 永远撞 600 s 硬超时。
+> 下文保留原样作为决策记录，**不要据此认为当前实现是 tract**。
 
 > **当前状态**：`symbio/Cargo.toml` 直接依赖 `tract-onnx`（0.23.7，MSRV 1.91 与本仓持平）+
 > `tokenizers`（`default-features = false` + `fancy-regex` 纯 Rust 正则后端）。
@@ -603,6 +608,124 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
 - **词汇不合并**：`streaming`（消息）与 `working`（会话）保持两个词。合并会连带改
   `status-*` CSS 类名与 `isWorkingStatus()`，而**漏改 CSS 类名不报错、不失败，只会让
   流式动画静默消失**——正是"体验不得变差"要防的那类回归。
+
+## ADR-016: 本地嵌入改用 `ort`（ONNX Runtime）——推翻 ADR-014 的性能前提，并接受它当初拒绝的代价
+
+**状态**：已接受（已实现）
+
+> **当前状态**：`symbio/Cargo.toml` 依赖 `ort = "2.0.0-rc.13"`（默认 features）+ `tokenizers`
+> （`default-features = false` + `fancy-regex`）。`tract-onnx` 已移除；
+> `cargo tree -i cc` / `-i ring` / `-i onig_sys` 三者皆空（**零 C/C++ 编译仍成立**）。
+> 实现：`symbio/src/providers/embedding/local.rs`。
+
+### 背景：ADR-014 的性能前提被实测证伪
+
+ADR-014 选 `tract-onnx`（纯 Rust）而弃 ORT，理由有三：① 零 C/C++ 编译；② 不引入
+~391 MB 的 ORT 预编译产物；③ 不必随程序交付 `DirectML.dll`（18 MB）。它对性能的判断是：
+
+> 推理性能与 ORT 有差距……但嵌入场景是离线索引 + 单条查询，秒级可接受。
+
+**这句话对"单条查询"成立，对"建索引"完全不成立。** 2026-09-18 实测（本机，release）：
+
+| 输入 | token | tract | ort | 倍数 |
+|---|---|---|---|---|
+| 短查询 | 13 | 386 ms | 2.4 ms | 161× |
+| 一个 40 行块（≈1500 字符） | ~600 → 截 512 | 9.83 s | 19 ms | 517× |
+| 超长（截到上限） | 512 | 9.80 s | 13 ms | 754× |
+
+即 **每 token ≈ 22.5 ms、纯线性**；release 只比 debug 快 16% ⇒ 是**结构性**慢
+（tract 没有 ORT 级的算子融合与多线程 GEMM），不是"没调好"。
+
+后果：`codebase_search` 要给整个工作区分块嵌入。本仓 500 个文件 / 6,681 块 ⇒
+**全量建索引 ≈ 6 小时**（tract）vs **59 秒**（ort）。而工具执行有
+`TOOL_EXEC_HARD_TIMEOUT_SECS = 600` 的硬超时——**语义检索在 tract 下永远拿不到结果**，
+用户看到的是"一直回复中，永远没有响应"。ADR-014 的"秒级可接受"必须撤回。
+
+### 决策
+
+1. **推理后端换 `ort`**（ONNX Runtime 的 Rust 绑定），**其余一律不动**：模型仍是内嵌的
+   int8 `bge-small-zh-v1.5`，分词仍用 `tokenizers` + `fancy-regex`，后处理仍是
+   `encode(text, true)` + CLS 池化 + L2 归一化。
+2. **不恢复 `fastembed`**。它的 C 编译链主犯是硬编码的 `tokenizers/onig`（⇒ `onig_sys`），
+   不是 ORT；它唯一不可替代的部分只是"调 ONNX Runtime"。直接依赖 `ort` 就能拿到同样的
+   推理速度，而不必把 `onig_sys` 请回来。
+3. **接受 ADR-014 当初拒绝的三项代价**（逐条核实见下），因为"不可用"比"贵"更糟。
+
+### 代价（逐条核实，不粉饰）
+
+- **C/C++ 编译：仍然为零。** `ort-sys` 的 ORT 是 build 期下载的**预编译二进制**；
+  `cargo tree -i cc / -i ring / -i onig_sys` 三者皆空。ADR-014 的这个目标保住了。
+- **341 MB + 18 MB 的预编译产物：回来了。** Windows x64 拿到的是 **DirectML flavour**——
+  `ort-sys` 的 `BinariesSource::Pyke` 分支源码注释写明 *"pyke libs always ship compiled with
+  DirectML on Windows"*，且 `directml` 虽是可关 feature，**pyke 预编译本身已含 DML EP，
+  用 features 关不掉**。缓存落在 `%LOCALAPPDATA%\ort.pyke.io`：
+  `onnxruntime.lib` 341,152,186 B + `DirectML.dll` 18,527,776 B（与 ADR-014 引用的数字一致）。
+- **`DirectML.dll` 是静态导入，不是延迟加载。** 解析构建产物的 PE 导入表确认
+  （`directml.dll` / `d3d12.dll` / `dxgi.dll` 都在静态导入列表里，延迟导入为空）。
+  好消息：**Win10 1903+ / Win11 由系统提供该 DLL**（本机 `C:\Windows\System32\DirectML.dll`
+  3.0 MB），实测把随包那份删掉后 `cargo test --release --lib embedding` 仍 4/4 通过。
+  故目标平台（Win11 23H2）不必额外交付 18 MB；**跨到更老的 Windows 则需要随包**。
+- **离线构建会静默退化。** 拉不到预编译 flavour 时 `ort-sys` 不报错，只是"不链接"，
+  直到链接期才以 `undefined symbol: OrtGetApiBase` 失败（ADR-014 已记录过这个坑）。
+  CI 需要能联网，或经 `ORT_LIB_LOCATION` 指向本地副本。
+- **exe 体积：反而变小了。** `symbio-cli.exe` release 实测 **62,310,912 B = 59.42 MiB**，
+  比 ADR-014 记的 tract 61.18 MiB **小 1.76 MiB**，也比 fastembed+ort(1.x) 的 59.81 MiB
+  略小。原因同 ADR-014 的分析：341 MB 的 `onnxruntime.lib` 是静态库归档，链接器只拉
+  被引用到的对象，实际进 exe 的部分小于 tract 的 Rust 代码量。
+  （口径说明：这三次测量不是同一次提交的 A/B——本轮还改了 `codebase_search`。
+  但量级与方向可信：**换 ort 没有让交付物体积变差**。）
+
+### 数值一致性（换引擎不该换语义）
+
+一次性对照探针（`.workbuddy-ai/align-probe/`，跑完即删）让 tract 与 ort 跑同一批文本：
+
+| 样本 | token | tract | ort | 余弦 |
+|---|---|---|---|---|
+| query_zh | 13 | 386 ms | 2.4 ms | 1.000000 |
+| query_en | 20 | 470 ms | 2.4 ms | 0.999852 |
+| code_rs | 91 | 1,889 ms | 4.0 ms | **0.996661** |
+| mixed | 39 | 788 ms | 2.2 ms | 1.000000 |
+| tiny | 3 | 156 ms | 1.1 ms | 1.000000 |
+| long_512 | 512 | 9,832 ms | 18.8 ms | 0.998969 |
+
+- **最低余弦 0.996661**，比 ADR-014 记录的 fastembed↔tract（0.999961）大一个量级。
+- **这是偏差不是噪声**：两个引擎各自的**自一致性 ≥0.999999**（同一输入重跑逐位可复现），
+  所以差异来自 int8 核的累加顺序与中间精度，是可复现的**引擎差异**。
+- 结论按传递性给出：|ort − fastembed| ≤ |ort − tract| + |tract − fastembed|，故 ort 与
+  fastembed 的余弦**不低于约 0.9966**。而 `ort` 本来就是 fastembed 用的那个引擎，
+  这个量级是 int8 量化噪声，不是质量退步。
+- **未做的验证（如实说明）**：**没有**量"换引擎是否改变 top-k 检索排序"。判断性能差距
+  已足够悬殊、不必再跑，该对照被中止。若后续要补：同一语料两个引擎各排一次序，
+  比 top-10 重合度与平均名次位移。
+
+### 顺带确立的两条索引侧决策
+
+- **索引落盘 + 按 `mtime` 增量重建**（`{workdir}/.symbio/cache/codebase-index.bin`）。
+  这是"索引静默过期"的修复：此前 `INDEX_CACHE` 是纯进程内、**零失效机制**
+  （全文件搜 `mtime` / `modified` / `invalidate` / `stale` 命中 0 次），agent 会拿一份
+  不含自己刚写的代码的索引去搜，且完全无从察觉。现在每次调用都扫一遍文件指纹，
+  未变的文件零嵌入。实测：冷启动（读盘 + 增量）**9.9 ms**，改 1 个文件 **434 ms**。
+  已知边界：指纹 = `mtime` + 字节数，**刻意保留 `mtime` 的写入（如 `rsync -t`）检测不到**，
+  这是 `mtime` 型增量的固有取舍，`rebuild=true` 是兜底。
+- **生成物不进索引**：`tokenizer.json`（21,277 行）与 `package-lock.json`（7,249 行）
+  两个文件就占掉全库 8,104 块里的 1,426 块（≈18%），且会**挤占 top-k**（词表里全是短
+  token，对任何查询都有中等相似度）。按名字排除锁文件/压缩产物 + 按 5,000 行上限排除
+  生成的数据文件 ⇒ 块数 8,104 → 6,681，冷建 69 s → 59 s，索引 29.5 MB → 25.2 MB。
+- **未做的一件计划内改动**：原先打算顺手去掉 `CHUNK_STEP(20)` / `CHUNK_LINES(40)` 的
+  50% 重叠（工作量减半）。**没有做**——当初提这个是为了把 6 小时砍到 3 小时，而那个
+  前提在 ort 下已消失；重叠对跨块边界的召回有实际价值，不该为已不存在的性能问题让路。
+  如需再压冷建时间，正确顺序是：先做批推理（同长度分桶，避免 ADR-014 记录过的
+  「补位改变 `DynamicQuantizeLinear` scale」精度损失），而不是先砍重叠。
+
+### 后果
+
+- `codebase_search` 从"永远超时"变成可用：首次建索引 59 s（一次性、落盘），
+  之后每次调用 ~10 ms 内确认新鲜度、仅重嵌改动过的文件。
+- `symbio` 的 lock 净减：退出 tract 11 件套及其纯 Rust 依赖。
+- 构建环境新增两个外部依赖：**联网**（或 `ORT_LIB_LOCATION`）与
+  `%LOCALAPPDATA%\ort.pyke.io` 的 ~359 MB 缓存。
+- **ADR-014 的状态改为「已被 ADR-016 部分推翻」**：其"零 C/C++ 编译"的目标仍然保持，
+  "用 tract 做推理"与"性能秒级可接受"两点作废。
 
 ---
 

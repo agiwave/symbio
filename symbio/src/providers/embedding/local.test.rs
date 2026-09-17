@@ -2,9 +2,9 @@
 //!
 //! 对应源文件: `local.rs`
 //!
-//! 数值对齐验证（tract vs fastembed 余弦相似度 0.999558）在迁移 spike 阶段
-//! 已实测通过并记录于 `docs/DECISIONS.md` ADR-014；fastembed 依赖本体已移除，
-//! 无法在单测中再跑参考管线。
+//! 数值对齐验证：fastembed → tract 的余弦相似度 0.999558 记录于 `docs/DECISIONS.md`
+//! ADR-014；tract → ort 的余弦相似度记录于 ADR-015。两者都是迁移 spike 阶段实测，
+//! 参考管线（fastembed / tract）的依赖本体已移除，无法在单测中再跑。
 
 use super::*;
 
@@ -42,7 +42,8 @@ async fn test_local_embedding_produces_unit_vector() {
 
 /// 超过模型位置表上限（512）的文本必须被截断而不是让推理崩掉。
 ///
-/// 动态长度路径下 seq 是符号维，不截断会让 position embedding 的 Gather 越界。
+/// 位置嵌入表只有 512 项，不截断会让 position embedding 的 Gather 越界。
+/// （`tract` 时代这一条是"符号维未固定"，ORT 下是实打实的越界。）
 #[tokio::test]
 async fn test_local_embedding_truncates_overlong_input() {
     let svc = match LocalEmbeddingService::get_instance() {

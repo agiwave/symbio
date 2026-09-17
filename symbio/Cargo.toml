@@ -70,14 +70,30 @@ notify = "8.2.0"
 dashmap = "6.2.1"
 inventory = "0.3.24"
 encoding_rs = "0.8.35"
-# 本地嵌入（`providers/embedding/local.rs`）：tract 纯 Rust ONNX 推理，跑 int8 量化
-# bge-small-zh-v1.5（model.onnx / tokenizer.json 由 `include_bytes!` 编进二进制，从不下载）。
-# 选型过程见 ADR-014：此前用 fastembed（→ ort → ONNX Runtime 预编译二进制，Windows 只有
-# directml flavour：341MB .lib + 18MB DLL），2026-09-17 起改纯 Rust，Windows/macOS 上
-# C/C++ 编译归零；分词用 tokenizers 的纯 Rust 正则后端 fancy-regex（此前 fastembed 硬编码
-# onig ⇒ onig_sys 是仓里最后一条 C 编译链）。MSRV：tract 0.23.7 = 1.91，与本仓持平。
-# 数值基线：CLS 池化 + L2 归一化，与 fastembed 时代余弦相似度 0.999558（spike 实测）。
-tract-onnx = "0.23.5"
+# 本地嵌入（`providers/embedding/local.rs`）：跑 int8 量化的 bge-small-zh-v1.5
+# （model.onnx / tokenizer.json 由 `include_bytes!` 编进二进制，**从不下载模型**）。
+#
+# 选型见 ADR-016（本行下方是结论，理由与实测数据在 ADR 里）：
+# - **推理用 `ort`**（ONNX Runtime 的 Rust 绑定）。此前用 `tract-onnx` 纯 Rust 推理，
+#   因实测每 token ≈ 22.5ms、512 token 单块 ≈ 9.83s，全仓建索引 ≈ 6 小时，**不可用**；
+#   换 ort 后同一块 19ms（≈520×），全仓建索引 59s。
+# - **零 C/C++ 编译仍然成立**：`ort` 默认 features 走 `tls-native`（Windows 为 schannel），
+#   不拉 `ring`；`ort-sys` 的 ONNX Runtime 是 **build 期下载预编译二进制**，不编译源码。
+#   `cargo tree -i cc / ring / onig_sys` 三者均为空。
+#   **不要**开 `tls-rustls`（会把 `ring` 的 C/汇编链拉回来）。
+# - **但预编译产物不便宜，别以为它免费**：Windows x64 拿到的是 **DirectML flavour**
+#   （`BinariesSource::Pyke`，其源码注释写明 "pyke libs always ship compiled with DirectML
+#   on Windows"，无法用 features 关掉）⇒ 构建缓存 `%LOCALAPPDATA%\ort.pyke.io` 落
+#   341 MB `onnxruntime.lib` + 18 MB `DirectML.dll`；且 exe **静态导入 `DirectML.dll`**
+#   （已用 PE 导入表核对，非延迟加载）。好在 Win10 1903+ / Win11 由系统提供该 DLL，
+#   实测删掉随包的那份仍能推理。离线构建会静默退化为「不链接」，到链接期才报
+#   `undefined symbol: OrtGetApiBase`——CI 需要能联网，或用 `ORT_LIB_LOCATION` 指本地副本。
+# - **不依赖 `fastembed`**：它硬编码 `tokenizers/onig`（⇒ `onig_sys` ⇒ 真正的 C 编译链），
+#   而分词我们自己用 `tokenizers` + `fancy-regex`（纯 Rust）就够——`fastembed` 唯一
+#   不可替代的部分只是"调 ORT"，直接依赖 `ort` 即可。
+# - MSRV：`ort` 2.0.0-rc.13 = 1.88，低于本仓 1.91。
+# - 数值基线：CLS 池化 + L2 归一化；与 tract 时代的余弦相似度见 ADR-016（实测 ≥0.9967）。
+ort = "2.0.0-rc.13"
 tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }
 moka = { version = "0.12.16", features = ["future"] }
 # 统一资源协议：zip 上传解压（MCP / Skill / Agent 以 zip 为主，文件名=目录名）

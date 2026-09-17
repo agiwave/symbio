@@ -18,6 +18,76 @@
 
 ***
 
+## 2026-09-18: `codebase_search` 从"永远超时"变成可用——嵌入后端换 `ort`，索引落盘并按 mtime 增量重建
+
+**性质：修复**（含一处架构决策推翻）。两件事都不改工具对外的用法，改的是它**能不能用**。
+
+### 一、嵌入推理后端：`tract-onnx` → `ort`（ADR-016）
+
+**症状**：前端一调 `codebase_search` 就卡住，永远"回复中"，没有结果。
+
+**根因不是工具逻辑，是嵌入推理慢到不可能完成**。2026-09-18 实测（本机，release）：
+
+| 输入 | token | tract | ort |
+|---|---|---|---|
+| 短查询 | 13 | 386 ms | 2.4 ms |
+| 一个 40 行块 | ~600 → 截 512 | **9.83 s** | **19 ms** |
+| 超长（截到上限） | 512 | 9.80 s | 13 ms |
+
+即 **每 token ≈ 22.5 ms、纯线性**，release 只比 debug 快 16% ⇒ 结构性慢。
+本仓 500 个文件 / 6,681 块 ⇒ 全量建索引 **≈ 6 小时**，而工具执行有
+`TOOL_EXEC_HARD_TIMEOUT_SECS = 600` 的硬超时。**ADR-014 写的"离线索引 + 单条查询，
+秒级可接受"对查询成立、对建索引不成立**，该前提作废。
+
+**改法**：推理后端换成 `ort`（ONNX Runtime），其余一律不动——模型仍是内嵌的 int8
+`bge-small-zh-v1.5`，分词仍是 `tokenizers` + `fancy-regex`，后处理仍是
+`encode(text, true)` + CLS 池化 + L2 归一化。**不恢复 `fastembed`**：它的 C 编译链主犯
+是硬编码的 `tokenizers/onig`，不是 ORT；直接依赖 `ort` 即可拿到同样速度。
+
+**代价（如实记录，不粉饰）**：`ort` 在 Windows x64 拿到的预编译是 **DirectML flavour**
+（`ort-sys` 的 `BinariesSource::Pyke`，源码注释写明 "pyke libs always ship compiled with
+DirectML on Windows"，用 features 关不掉）⇒ 构建缓存 341 MB `onnxruntime.lib` + 18 MB
+`DirectML.dll`；exe **静态导入 `DirectML.dll`**（PE 导入表核对，非延迟加载）。
+好在 Win10 1903+ / Win11 由系统提供该 DLL，实测删掉随包那份仍能推理。
+**"零 C/C++ 编译"仍然成立**：`cargo tree -i cc / -i ring / -i onig_sys` 三者皆空。
+
+**数值一致性**：tract 与 ort 跑同一批文本，最低余弦 **0.996661**（两引擎自一致性均
+≥0.999999，故是引擎差异不是噪声）。换引擎不换语义。
+
+### 二、索引时效性：此前**零机制**，现在落盘 + 按 mtime 增量
+
+**症状**：索引是"首次调用那一刻的快照"。`INDEX_CACHE` 是纯进程内 `HashMap`，
+全文件搜 `mtime` / `modified` / `hash` / `watch` / `invalidate` / `stale` **命中 0 次**；
+唯一绕过缓存的 `rebuild` 是 LLM 传参、默认 false。**比慢更糟——是静默地错**：
+agent 会拿一份不包含自己刚写的代码的索引去搜，且完全无从察觉。
+
+**改法**（`symbio/src/plugins/local/codebase_search.rs`）：
+
+- **每次调用都扫一遍文件指纹**（`stat` 全部候选文件，500 个 ≈ 毫秒级），
+  文件集（相对路径 + `mtime` + 字节数）完全一致就直接复用，**一次嵌入都不做**。
+- **有差异只重嵌改动过的文件**：未变文件的块原样搬过来，新增/改动重新分块嵌入，
+  已删除整条丢掉。
+- **索引落盘**到 `{workdir}/.symbio/cache/codebase-index.bin`（与 `agent` 的工作区级
+  落位同源；`.symbio` 是隐藏目录、`.bin` 不在扩展名白名单，两重保险确保索引不会
+  把自己索引进去）。手写小端二进制格式，**临时文件 + `rename`** 原子替换。
+- 返回体新增 `index` 字段（`files` / `chunks` / `reused_files` / `embedded_files`），
+  让"索引有没有跟上磁盘"可观测，而不是靠猜——`embedded_files == 0` 即索引已最新。
+
+**实测**（本仓，release）：冷建 59 s（一次性、落盘）→ 冷启动读盘 + 增量 **9.9 ms**
+→ 改 1 个文件 **434 ms**。
+
+**已知边界**：指纹用 `mtime` + 字节数，**刻意保留 `mtime` 的写入（如 `rsync -t`）
+检测不到**——这是 mtime 型增量的固有取舍，`rebuild=true` 是兜底。
+
+### 三、顺带：生成物不再进索引
+
+`tokenizer.json`（21,277 行）与 `package-lock.json`（7,249 行）两个文件就占掉全库
+8,104 块里的 1,426 块（≈18%），且会**挤占 top-k**（词表里全是短 token，对任何查询
+都有中等相似度）。按名字排除锁文件/压缩产物 + 按 5,000 行上限排除生成的数据文件
+⇒ 块数 8,104 → **6,681**，冷建 69 s → **59 s**，索引 29.5 MB → **25.2 MB**。
+
+***
+
 ## 2026-09-18: 删除的两种语义分开——级联截断不再逐条通知（S20.2）
 
 **性质：修复**。修掉一个一直存在的**语义混淆**，顺带把「删除一条早期消息要发上百条
