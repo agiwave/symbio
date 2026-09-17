@@ -1,4 +1,4 @@
-//! `plugin.rs` 的单元测试（model Provider 的 VDFS 行为）。
+//! `plugin.rs` 的单元测试（model Provider 的 VDFS 行为与迁移数据保全）。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
 //! `plugin.rs` 只保留生产代码，测试全部放本文件。
@@ -169,4 +169,219 @@ fn nameless_write_generates_an_id() {
     let id = ModelPlugin::resolve_id("", true).unwrap();
     assert!(id.starts_with("model-"), "带类别前缀便于人读：{id}");
     assert_eq!(id.len(), "model-".len() + 8, "随机段定长：{id}");
+}
+
+// 全部落在独立临时目录，不切换全局 homedir，不依赖权限或测试执行顺序。
+struct MigrationFixture {
+    _tmp: tempfile::TempDir,
+    plugin: ModelPlugin,
+    legacy: SingleFileVdfs,
+}
+
+impl MigrationFixture {
+    fn new() -> Self {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin = ModelPlugin::new(
+            ModelProvidersConfig::default(),
+            PluginDir::at(tmp.path().join("model"), "model"),
+        );
+        let legacy = SingleFileVdfs::at(tmp.path().join("ai"), "ai", MANIFEST);
+        Self {
+            _tmp: tmp,
+            plugin,
+            legacy,
+        }
+    }
+
+    fn block_write(&self, id: &str) -> std::path::PathBuf {
+        // read_text 仍返回 NotFound；真正的 write_text 在写临时文件时失败。
+        let blocker = self
+            .plugin
+            .store()
+            .entry_dir(id)
+            .join(format!("{MANIFEST}.tmp"));
+        std::fs::create_dir_all(&blocker).unwrap();
+        blocker
+    }
+
+    fn embed(&self, ids: &[&str]) -> Vec<u8> {
+        let mut cfg = ModelProvidersConfig::default();
+        for id in ids {
+            cfg.providers
+                .insert((*id).into(), migration_provider(id, "old"));
+        }
+        cfg.default_provider_id = ids.first().map(|s| (*s).to_string());
+        self.plugin.dir.save(&cfg).unwrap();
+        std::fs::read(self.plugin.dir.config_path()).unwrap()
+    }
+}
+
+fn migration_provider(id: &str, model: &str) -> ModelProviderConfig {
+    ModelProviderConfig {
+        id: id.into(),
+        model: model.into(),
+        ..sample()
+    }
+}
+
+fn migration_text(id: &str, model: &str) -> String {
+    serde_json::to_string_pretty(&migration_provider(id, model)).unwrap()
+}
+
+#[tokio::test]
+async fn legacy_partial_write_failure_retains_all_sources_and_resumes_without_overwrite() {
+    let f = MigrationFixture::new();
+    let store = f.plugin.store();
+    for id in ["a", "b", "c"] {
+        f.legacy
+            .write_text(id, &migration_text(id, "old"))
+            .await
+            .unwrap();
+    }
+    let updated = migration_text("a", "updated");
+    store.write_text("a", &updated).await.unwrap();
+    let blocker = f.block_write("b");
+    f.plugin.load_with_legacy(&f.legacy).await;
+    assert_eq!(f.legacy.entries().await.unwrap().len(), 3);
+    for id in ["a", "b", "c"] {
+        assert_eq!(
+            f.legacy.read_text(id).await.unwrap(),
+            migration_text(id, "old")
+        );
+    }
+    assert_eq!(store.read_text("a").await.unwrap(), updated);
+    assert_eq!(
+        store.read_text("c").await.unwrap(),
+        migration_text("c", "old")
+    );
+    assert!(store.read_text("b").await.is_err());
+
+    // 模拟部分迁移之后用户更新成功项，再以全新实例启动续迁。
+    let newer = migration_text("c", "newer");
+    store.write_text("c", &newer).await.unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    let restarted = ModelPlugin::new(ModelProvidersConfig::default(), f.plugin.dir.clone());
+    restarted.load_with_legacy(&f.legacy).await;
+    assert!(f.legacy.entries().await.unwrap().is_empty());
+    assert_eq!(store.read_text("a").await.unwrap(), updated);
+    assert_eq!(
+        store.read_text("b").await.unwrap(),
+        migration_text("b", "old")
+    );
+    assert_eq!(store.read_text("c").await.unwrap(), newer);
+    assert_eq!(restarted.providers.read().await.providers.len(), 3);
+    assert_eq!(restarted.entries.ids().len(), 3);
+}
+
+#[tokio::test]
+async fn embedded_partial_failure_preserves_manifest_even_on_persist_and_resumes() {
+    let f = MigrationFixture::new();
+    let original = f.embed(&["a", "b", "c"]);
+    let store = f.plugin.store();
+    let updated = migration_text("a", "updated");
+    store.write_text("a", &updated).await.unwrap();
+    let blocker = f.block_write("b");
+    f.plugin.load_with_legacy(&f.legacy).await;
+    assert_eq!(std::fs::read(f.plugin.dir.config_path()).unwrap(), original);
+    assert_eq!(store.read_text("a").await.unwrap(), updated);
+    assert!(store.read_text("c").await.is_ok());
+    assert!(store.read_text("b").await.is_err());
+    let source = f.plugin.dir.read_manifest().unwrap().unwrap()["providers"].clone();
+    f.plugin.providers.write().await.default_provider_id = Some("c".into());
+    f.plugin.persist().await.unwrap();
+    assert_eq!(
+        f.plugin.dir.read_manifest().unwrap().unwrap()["providers"],
+        source
+    );
+
+    let newer = migration_text("c", "newer");
+    store.write_text("c", &newer).await.unwrap();
+    std::fs::remove_dir(blocker).unwrap();
+    let cfg: ModelProvidersConfig = f.plugin.dir.load().unwrap().unwrap();
+    let restarted = ModelPlugin::new(cfg, f.plugin.dir.clone());
+    restarted.load_with_legacy(&f.legacy).await;
+    let manifest = f.plugin.dir.read_manifest().unwrap().unwrap();
+    assert!(!manifest.contains_key("providers"));
+    assert_eq!(manifest["default_provider_id"], "c");
+    assert_eq!(store.read_text("a").await.unwrap(), updated);
+    assert_eq!(
+        store.read_text("b").await.unwrap(),
+        migration_text("b", "old")
+    );
+    assert_eq!(store.read_text("c").await.unwrap(), newer);
+    assert_eq!(restarted.providers.read().await.providers.len(), 3);
+}
+
+#[tokio::test]
+async fn all_writes_failing_preserves_both_migration_sources() {
+    let f = MigrationFixture::new();
+    let original = f.embed(&["embedded"]);
+    let text = migration_text("legacy", "old");
+    f.legacy.write_text("legacy", &text).await.unwrap();
+    f.block_write("legacy");
+    f.block_write("embedded");
+    f.plugin.load_with_legacy(&f.legacy).await;
+    assert_eq!(f.legacy.read_text("legacy").await.unwrap(), text);
+    assert_eq!(std::fs::read(f.plugin.dir.config_path()).unwrap(), original);
+    assert!(f.plugin.store().read_text("embedded").await.is_err());
+    assert!(f.plugin.store().read_text("legacy").await.is_err());
+}
+
+#[tokio::test]
+async fn unreadable_legacy_source_keeps_the_whole_batch() {
+    let f = MigrationFixture::new();
+    f.legacy
+        .write_text("good", &migration_text("good", "old"))
+        .await
+        .unwrap();
+    // 非 UTF-8 主文件让 entries() 宽松读取降级为 raw=None。
+    std::fs::create_dir_all(f.legacy.entry_dir("bad")).unwrap();
+    let bad = f.legacy.entry_dir("bad").join(MANIFEST);
+    std::fs::write(&bad, [0xff, 0xfe]).unwrap();
+    f.plugin.load_with_legacy(&f.legacy).await;
+    assert_eq!(f.legacy.entries().await.unwrap().len(), 2);
+    assert_eq!(std::fs::read(bad).unwrap(), [0xff, 0xfe]);
+    assert!(f.plugin.store().read_text("good").await.is_ok());
+}
+
+#[tokio::test]
+async fn invalid_or_unreadable_targets_are_not_overwritten_and_keep_sources() {
+    let f = MigrationFixture::new();
+    let original = f.embed(&["invalid", "unreadable"]);
+    let store = f.plugin.store();
+    for id in ["invalid", "unreadable"] {
+        f.legacy
+            .write_text(id, &migration_text(id, "old"))
+            .await
+            .unwrap();
+        std::fs::create_dir_all(store.entry_dir(id)).unwrap();
+    }
+    store.write_text("invalid", "not json").await.unwrap();
+    let unreadable = store.entry_dir("unreadable").join(MANIFEST);
+    std::fs::create_dir(&unreadable).unwrap();
+    f.plugin.load_with_legacy(&f.legacy).await;
+    assert_eq!(store.read_text("invalid").await.unwrap(), "not json");
+    assert!(unreadable.is_dir());
+    assert_eq!(f.legacy.entries().await.unwrap().len(), 2);
+    assert_eq!(std::fs::read(f.plugin.dir.config_path()).unwrap(), original);
+}
+
+#[tokio::test]
+async fn embedded_manifest_save_failure_retains_source_and_retries() {
+    let f = MigrationFixture::new();
+    let original = f.embed(&["a"]);
+    let blocker = f.plugin.dir.config_path().with_extension("yml.tmp");
+    std::fs::create_dir(&blocker).unwrap();
+    f.plugin.load_with_legacy(&f.legacy).await;
+    assert!(f.plugin.store().read_text("a").await.is_ok());
+    assert_eq!(std::fs::read(f.plugin.dir.config_path()).unwrap(), original);
+    std::fs::remove_dir(blocker).unwrap();
+    f.plugin.load_with_legacy(&f.legacy).await;
+    assert!(!f
+        .plugin
+        .dir
+        .read_manifest()
+        .unwrap()
+        .unwrap()
+        .contains_key("providers"));
 }

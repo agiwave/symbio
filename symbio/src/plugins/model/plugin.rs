@@ -97,11 +97,23 @@ impl ModelPlugin {
     /// 异步加载：从存储拉取所有 Provider
     ///
     /// 启动时调用此方法，**会**触发首启动数据迁移（从配置文件里的旧明细迁到新存储）。
-    /// `ctx` 只用于旧分类迁移后的重入（不再从中取服务对象）。
-    pub async fn load_from_storage(&self, ctx: &Arc<dyn InvokeRequest>) {
-        let store = self.store();
+    /// `ctx` 保留给调用方兼容；迁移不依赖请求上下文。
+    pub async fn load_from_storage(&self, _ctx: &Arc<dyn InvokeRequest>) {
+        // 仅兼容迁移认识旧分类的历史落位。
+        let legacy = SingleFileVdfs::for_category("ai", MANIFEST);
+        self.load_with_legacy(&legacy).await;
+    }
 
-        // 1. 存储中的所有 Provider
+    async fn load_with_legacy(&self, legacy: &SingleFileVdfs) {
+        let store = self.store();
+        // 无法枚举目标时不做迁移或清理。
+        if let Err(e) = store.entries().await {
+            plugin_warn!("model", "list models 失败: {e}");
+            return;
+        }
+        self.migrate_legacy_category(&store, legacy).await;
+        self.migrate_from_legacy_config(&store).await;
+        // 迁移后重新读取，不递归重入，也不以“目标为空”作为续迁条件。
         let entries = match store.entries().await {
             Ok(v) => v,
             Err(e) => {
@@ -109,43 +121,6 @@ impl ModelPlugin {
                 return;
             }
         };
-
-        // 1.5 兼容旧分类 `ai`：若 model 分类为空但旧分类有数据，自动迁移
-        if entries.is_empty() {
-            // 迁移专用：旧分类 `ai` 是**历史落位**，只有迁移代码可以认识它
-            let legacy = SingleFileVdfs::for_category("ai", MANIFEST);
-            let legacy_entries = legacy.entries().await.unwrap_or_default();
-            if !legacy_entries.is_empty() {
-                plugin_info!(
-                    "model",
-                    "检测到旧分类 'ai' 中有 {} 个 Provider，正在迁移到 '{}'",
-                    legacy_entries.len(),
-                    PLUGIN_MODEL
-                );
-                for e in &legacy_entries {
-                    let Some(text) = e.raw.as_deref() else {
-                        continue;
-                    };
-                    if let Err(err) = store.write_text(&e.id, text).await {
-                        plugin_warn!("model", "迁移 provider {} 失败: {err}", e.id);
-                    }
-                }
-                // 迁移成功才清理旧分类，并用新分类的结果重入一次
-                let moved = store.entries().await.unwrap_or_default();
-                if !moved.is_empty() {
-                    for e in &legacy_entries {
-                        let _ = legacy.remove(&e.id).await;
-                    }
-                    return Box::pin(self.load_from_storage(ctx)).await;
-                }
-            }
-        }
-
-        // 2. 存储为空，触发首启动迁移
-        if entries.is_empty() {
-            self.migrate_from_legacy_config(&store).await;
-            return;
-        }
 
         // 3. 加载存储内容（注册表 + VDFS 镜像一次性同构填充）
         let mut new_providers = std::collections::HashMap::new();
@@ -206,41 +181,112 @@ impl ModelPlugin {
         );
     }
 
-    /// 首启动迁移：把配置文件里残留的旧 Provider 明细迁到存储
-    ///
-    /// 旧形态把 Provider 整包存在配置里（`PLUGIN.yml` 的 `providers` 键）。
-    /// 迁移把它们写成 `<本插件目录>/<id>/provider.json`，随后把配置文件**归一**
-    /// 为只有跨条目状态——同一个事实不留两份。
-    async fn migrate_from_legacy_config(&self, store: &SingleFileVdfs) {
-        let current = self.providers.read().await.clone();
-        if current.providers.is_empty() {
-            return;
+    /// 已有可解析目标是权威版本；坏文件/读失败不是“缺失”，不能覆盖。
+    /// 新写入必须回读一致，才算本次迁移成功。
+    async fn migrate_provider(store: &SingleFileVdfs, id: &str, text: &str) -> bool {
+        if crate::providers::vdfs_service::entry::safe_segment(id) != id
+            || serde_json::from_str::<ModelProviderConfig>(text).is_err()
+        {
+            plugin_warn!(
+                "model",
+                "迁移 provider {id} 失败：源格式或 id 不可用，保留源"
+            );
+            return false;
         }
-
-        plugin_info!(
-            "model",
-            "检测到旧 config 中的 Model Providers，开始迁移到 <本插件目录>/"
-        );
-
-        let mut mirror = Vec::with_capacity(current.providers.len());
-        for (id, p) in &current.providers {
-            let content = match serde_json::to_string_pretty(p) {
-                Ok(s) => s,
-                Err(_e) => {
-                    plugin_error!("model", "序列化 provider {id} 失败");
-                    continue;
+        match store.read_text(id).await {
+            Ok(existing) => {
+                let valid = serde_json::from_str::<ModelProviderConfig>(&existing).is_ok();
+                if !valid {
+                    plugin_warn!(
+                        "model",
+                        "迁移 provider {id} 失败：目标不可解析，不覆盖并保留源"
+                    );
                 }
-            };
-            if let Err(_e) = store.write_text(id, &content).await {
-                plugin_error!("model", "迁移 provider {id} 失败");
-                continue;
+                return valid;
             }
-            mirror.push((id.clone(), content));
+            Err(VdfsError::NotFound(_)) => {}
+            Err(e) => {
+                plugin_warn!("model", "迁移 provider {id} 读取目标失败：{e}，保留源");
+                return false;
+            }
         }
-        self.entries.replace_all(mirror);
+        if let Err(e) = store.write_text(id, text).await {
+            plugin_warn!("model", "迁移 provider {id} 写入失败：{e}，保留源");
+            return false;
+        }
+        match store.read_text(id).await {
+            Ok(written) if written == text => true,
+            _ => {
+                plugin_warn!("model", "迁移 provider {id} 回读确认失败，保留源");
+                false
+            }
+        }
+    }
 
-        // 明细已是资源：把配置文件归一为只有跨条目状态（顺带清掉 `providers` 键）
-        let _ = self.persist().await;
+    /// 整批确认后才清理旧分类；失败保留全部源，下一次只补缺失项。
+    async fn migrate_legacy_category(&self, store: &SingleFileVdfs, legacy: &SingleFileVdfs) {
+        let entries = match legacy.entries().await {
+            Ok(entries) => entries,
+            Err(e) => {
+                plugin_warn!("model", "读取旧分类失败：{e}，保留源");
+                return;
+            }
+        };
+        let mut complete = true;
+        for e in &entries {
+            match e.raw.as_deref() {
+                Some(text) => complete &= Self::migrate_provider(store, &e.id, text).await,
+                None => {
+                    plugin_warn!("model", "读取旧 provider {} 失败，保留整批源", e.id);
+                    complete = false;
+                }
+            }
+        }
+        if complete {
+            for e in &entries {
+                if let Err(err) = legacy.remove(&e.id).await {
+                    plugin_warn!("model", "清理旧 provider {} 失败：{err}，下次重试", e.id);
+                }
+            }
+        }
+    }
+
+    /// 每次从磁盘旧配置续迁，不把运行期注册表误当成待迁移源。
+    async fn migrate_from_legacy_config(&self, store: &SingleFileVdfs) {
+        let manifest = match self.dir.read_manifest() {
+            Ok(Some(m)) if m.contains_key("providers") => m,
+            Ok(_) => return,
+            Err(e) => {
+                plugin_warn!("model", "读取旧配置失败：{e}，保留源");
+                return;
+            }
+        };
+        let current: ModelProvidersConfig = match serde_json::from_value(Value::Object(manifest)) {
+            Ok(c) => c,
+            Err(e) => {
+                plugin_warn!("model", "解析旧配置失败：{e}，保留源");
+                return;
+            }
+        };
+        let mut complete = true;
+        for (id, p) in &current.providers {
+            match serde_json::to_string_pretty(p) {
+                Ok(text) => complete &= Self::migrate_provider(store, id, &text).await,
+                Err(e) => {
+                    plugin_error!("model", format!("序列化 provider {id} 失败：{e}，保留源"));
+                    complete = false;
+                }
+            }
+        }
+        if complete {
+            // 所有明细均已确认落盘才允许清掉内嵌源。save 的原子写失败仍保留旧文件。
+            let cfg = ModelConfig {
+                default_provider_id: current.default_provider_id,
+            };
+            if let Err(e) = self.dir.save(&cfg) {
+                plugin_warn!("model", "迁移配置归一失败：{e}，保留源待重试");
+            }
+        }
     }
 
     /// 主构造函数（Factory 机制使用）
@@ -261,10 +307,19 @@ impl ModelPlugin {
         let cfg = ModelConfig {
             default_provider_id: self.providers.read().await.default_provider_id.clone(),
         };
-        if let Err(e) = self.dir.save(&cfg) {
-            plugin_warn!("model", "配置落盘失败：{e}");
-        }
-        Ok(())
+        // 迁移未完成时，普通编辑 / set-default 也不能间接抹掉内嵌源。
+        let mut manifest = self
+            .dir
+            .read_manifest()
+            .map_err(PluginError::InternalError)?
+            .unwrap_or_default();
+        let result = if manifest.contains_key("providers") {
+            manifest.insert("default_provider_id".into(), json!(cfg.default_provider_id));
+            self.dir.save(&manifest)
+        } else {
+            self.dir.save(&cfg)
+        };
+        result.map_err(PluginError::InternalError)
     }
 
     /// 验证给定的 Model Provider 配置（不写入状态）
@@ -582,8 +637,7 @@ impl ModelPlugin {
         let text = serde_json::to_string_pretty(normalized)
             .map_err(|e| PluginError::ParseError(e.to_string()))?;
         self.entries.set(id, text);
-        let _ = self.persist().await;
-        Ok(())
+        self.persist().await
     }
 
     /// 删除后清理两份内存视图
