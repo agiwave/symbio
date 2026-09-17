@@ -618,18 +618,6 @@ pub fn extract_snapshot(text: &str) -> Option<String> {
     Some(format!("{OPEN}\n{inner}\n{CLOSE}"))
 }
 
-/// 快照校验失败时的兜底：把纯文本输出包裹为极简快照。
-/// 有总比无好——但明确标注这是降级产物，下一轮压缩时模型可据此补全结构。
-pub fn fallback_snapshot(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "<state_snapshot>\n[降级快照：上次压缩时模型未按结构输出，以下为原始摘要，内容可能不完整]\n\n{trimmed}\n</state_snapshot>"
-    ))
-}
-
 /// 输入超限死锁的本地机械兜底（**不依赖 LLM**）。
 ///
 /// 场景（日志实证）：上下文估算已超 Provider 有效输入上限时，LLM 摘要请求与

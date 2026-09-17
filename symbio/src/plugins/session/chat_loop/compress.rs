@@ -92,7 +92,7 @@ pub(crate) async fn auto_compress_process(
 /// 1. PreCompact 钩子 + 压缩前完整历史 transcript 转存（可回溯原则）；
 /// 2. 上下文临时替换为 `[compression_msg]`，以专用压缩提示词发起 LLM 请求；
 /// 3. 快照校验：提取 `<state_snapshot>` → 缺失则附纠正指令重试一次 →
-///    仍失败降级 `fallback_snapshot`；两次均空 → 回滚并放弃；
+///    仍失败 → 保留原历史，回滚并放弃本次压缩；
 /// 4. 构造快照消息（meta：compacted/post_tokens/transcript_path/compact_hints/
 ///    protocol_version/prompt_fingerprint）并与保留区拼接，replace_messages 落库。
 ///
@@ -201,7 +201,7 @@ async fn compress_with_snapshot_core(
     // 专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离）
     let compression_prompt = compression::get_compression_prompt();
     let root_id = short_id();
-    let mut summary = match send_compression_request(
+    let summary = match send_compression_request(
         orchestrator,
         &compression_prompt,
         &context.messages,
@@ -237,7 +237,7 @@ async fn compress_with_snapshot_core(
     };
 
     // 快照校验：从输出提取 <state_snapshot>；缺失则纠正重试一次；
-    // 仍失败则降级为纯文本快照（有总比无好，且标注为降级产物）。
+    // 仍失败则保留原历史，不把未验证原文作为快照落库。
     // 只检查非空是不够的——模型输出散文/scratchpad 泄漏/截断时，
     // 残缺内容会原样成为唯一记忆。
     let mut validated = compression::extract_snapshot(&summary_text(&summary));
@@ -268,18 +268,18 @@ async fn compress_with_snapshot_core(
         if let Ok(s) = retry {
             if let Some(snapshot) = compression::extract_snapshot(&summary_text(&s)) {
                 validated = Some(snapshot);
-                summary = s;
             }
         }
     }
-    let snapshot_text = validated
-        .or_else(|| compression::fallback_snapshot(&summary_text(&summary)))
-        .unwrap_or_default();
-    if snapshot_text.is_empty() {
-        // 连兜底都拿不到内容（两次请求均为空流）：回滚，下一轮再试
+    let Some(snapshot_text) = validated else {
+        // 两次均未得到有效快照：保留原历史，禁止把未验证散文升级为唯一记忆。
+        plugin_warn!(
+            "session",
+            "[Compress] {log_tag}: invalid snapshot after retry; preserving history"
+        );
         context.messages = original_messages;
         return None;
-    }
+    };
     context.messages.clear();
 
     // 落库前渲染为纯文本分节（历史中不残留 XML 标签，切断格式模仿链）

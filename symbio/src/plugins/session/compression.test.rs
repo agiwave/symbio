@@ -244,22 +244,21 @@ fn test_extract_snapshot() {
 }
 
 #[test]
-fn test_fallback_snapshot() {
-    let s = fallback_snapshot("plain summary").unwrap();
-    assert!(s.contains("state_snapshot"));
-    assert!(s.contains("plain summary"));
-    assert!(fallback_snapshot("  \n ").is_none());
+fn test_extract_snapshot_rejects_unvalidated_prose() {
+    // 真实上下文的降级形态：过程叙述 + 重复结论，没有闭合的快照块。
+    // 调用方在重试后仍提取失败时必须回滚，不能再包裹原始散文。
+    let prose = "Let me analyze the conversation history carefully.\n\nCompleted items: checks passed.\nNow structure the snapshot.\nCompleted items: checks passed.";
+    assert!(extract_snapshot(prose).is_none());
+    assert!(extract_snapshot("<state_snapshot>truncated").is_none());
+    assert!(extract_snapshot("  \n ").is_none());
 }
 
-/// 诉求3：降级快照不得引入 `<key_knowledge>` 标签——
-/// 它会持久化到历史中，诱导模型在正常对话里复述该格式。
 #[test]
-fn test_fallback_snapshot_has_no_key_knowledge_tag() {
-    let s = fallback_snapshot("plain summary").unwrap();
-    assert!(
-        !s.contains("<key_knowledge>"),
-        "降级快照不得包含 key_knowledge 结构标签"
-    );
+fn test_snapshot_excludes_surrounding_prose() {
+    let output = "process notes\n<state_snapshot><overall_goal>continue</overall_goal></state_snapshot>\nrepeated notes";
+    let snapshot = extract_snapshot(output).unwrap();
+    assert!(!snapshot.contains("notes"));
+    assert!(snapshot.contains("continue"));
 }
 
 /// 模板回归锚点：Signal-to-noise 规则必须包含（1）旧快照对账规则——
