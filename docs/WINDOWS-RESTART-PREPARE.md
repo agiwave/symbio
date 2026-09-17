@@ -2,7 +2,7 @@
 
 入口：`scripts/windows-restart-prepare.mjs`。Windows、Node.js 20+、PowerShell、Cargo/MSVC 工具链；无新增 npm 依赖。
 
-**这不是自动重启器。** 当前仅交付一次性 prepare：未验证可靠的停机、应用就绪、数据目录交接及中断回合恢复协议，因此不实现 stop/start/switch。没有任何杀进程、启动候选应用、计划任务、持久服务、提权、权限绕过或 heartbeat 设置操作。不要将 `ready.json` 理解为可以直接替换生产实例的许可。
+**此入口不是自动重启器。** 本文仅描述一次性 prepare：不实现 stop/start/switch；没有杀进程、启动候选应用、计划任务、持久服务、提权、权限绕过或 heartbeat 设置操作。不要将 `ready.json` 理解为可以直接替换生产实例的许可。需要显式授权的一次性切换请看新增的 [Windows 重启监督脚本](WINDOWS-RESTART.md)，prepare-only 接口不变。
 
 ## 已读构建入口与范围
 
