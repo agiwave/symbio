@@ -18,6 +18,37 @@
 
 ***
 
+## 2026-09-17: 质量收敛——迁移与持久化修复、门禁收紧、吞错清理
+
+**性质：修复 + 门禁收紧**。协议、工具面、前端行为均无变化。
+
+### 修复
+- **model 插件迁移**：重写迁移逻辑——已可解析的目标文件为权威（不再被迁移覆写）、
+  写后读回校验、失败保留源文件；legacy 清理改为整批确认后才执行；
+  迁移源改为读盘上 manifest（不再依赖运行时注册表）；`persist()` 失败向上传播
+  （含 `after_uploaded`，不再 `let _ =` 吞错）。
+- **home 插件**：`set_workspace` 改为候选内存先落盘、成功后才发布（写盘失败保留
+  旧工作区，内存与磁盘不再分叉）；`flush` 从读锁改写锁，消除固定临时文件名并发
+  覆盖竞态；移除 set 后的后台 flush spawn。
+- **mcp stdio 握手**：`notifications/initialized` 的 stdin 写入/flush 失败向上传播，
+  缺 stdin 报错（不再静默）。
+- **session 压缩**：删除未经验证 prose 兜底成快照的路径——快照校验重试后仍无效时
+  保留原历史并返回 `None`（输入溢出死锁的本地紧急尾压缩仍作最后兜底）。
+
+### 门禁与审计
+- `gate.mjs`：vitest 判定收紧——超时即 SIGKILL、`ok` 必须退出码 0 且无信号，
+  删除「退出码非 0 但用例数达标」的假失败放行；后端测试同样禁止通过数覆盖失败退出码；
+  `BASELINE.rustTests` 638 → 657。
+- `grep-audit.mjs`：S-002 默认扫描全部插件（原仅 `plugins/agent`）；新增行级豁免
+  `// grep-audit-allow S-002: 理由`（`vdfs/fs.rs:509` 已豁免一处误报）；
+  新增 6 个回归测试（`scripts/grep-audit.test.mjs`，接入 gate docs 阶段）。
+
+### 实证
+- `cargo +1.93.1 test --lib` 657/657；`cargo +1.93.1 clippy -D warnings`（symbio + cli）绿；
+  `node scripts/gate.mjs` 19/19（锁定工具链 1.93.1）。
+
+***
+
 ## 2026-09-17: 本地嵌入切到 `tract-onnx`（`fastembed` 废弃，最后一条 C 编译链 `onig_sys` 退出）
 
 **性质：依赖树收敛 + 实现替换**。协议、工具面、前端行为**均无变化**；取舍与实证见 ADR-014。
