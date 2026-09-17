@@ -188,8 +188,13 @@ GET /api/v1/health  → { "ok": true }
 - 危险操作分级（`local/cmd`（Windows）/ `local/sh` 类、`work/set_workspace`、`vdfs/write|delete` 归为
   `danger`）：**预留**，现行只有只读白名单一层。
 - 审计：`trace_id` 随 `metadata` 透传进上下文，invoke 记入 tracing。
-- **HTTPS**：不做。rustls 默认后端 aws-lc-rs 依赖 `aws-lc-sys`（C），与"无 C 编译"铁律冲突。
-  策略：默认纯 HTTP + 回环绑定；远程/HTTPS 交由外部反代（Caddy / ssh tunnel / cloudflared）。
+- **HTTPS**：不做。策略：默认纯 HTTP + 回环绑定；远程/HTTPS 交由外部反代（Caddy / ssh tunnel / cloudflared）。
+  > **2026-09-17 更新（[ADR-013](../DECISIONS.md)）**：本条**原先的理由已失效**。原理由是
+  > 「rustls 默认后端 aws-lc-rs 依赖 `aws-lc-sys`（C），与"无 C 编译"铁律冲突」——而 HTTP 出口的
+  > TLS 后端已改为**平台原生栈**（`native-tls`），`aws-lc-sys` 与整个 rustls 族已退出依赖树，
+  > **依赖不再是阻碍**。于是「网关自带 HTTPS」从"被依赖问题挡住"变成**一个可自由裁量的产品决策**：
+  > 现状行为不变（仍默认回环 HTTP + 外部反代）；若要开放，需另行设计证书配置面（签发方式 /
+  > 证书存放 / 与 `inbound_token` 的关系 / 绑定非回环时的取舍）——那是产品设计，不是依赖问题。
 
 ---
 
@@ -235,7 +240,7 @@ curl -H "Authorization: Bearer $T" -X POST http://127.0.0.1:9231/api/v1/invoke \
 | 开放接口 = 第三方可执行 shell / 写文件 | **高** | 默认关闭 + 回环绑定 + token + 只读模式（危险分级为预留层） |
 | 插件拿不到转发目标 / reload 后失效 | 中 | 构造期登记 `Weak` 父级（`parent.route`），reload 时网关实例随树重建 |
 | 端口占用 / 重启端口未释放 | 中 | `CancellationToken` + `abort` + 启动失败信息回写到设置页 |
-| HTTPS 与"无 C 编译"冲突 | 中 | 默认回环 HTTP，TLS 交外部反代 |
+| ~~HTTPS 与"无 C 编译"冲突~~ **已消解** | 低 | 依赖不再是阻碍（[ADR-013](../DECISIONS.md)：TLS 已走平台原生栈）；现状仍默认回环 HTTP，TLS 交外部反代 |
 | 第三方以为连上 WS 就有 AI 流 | 中 | §5.3 显式设计 + SDK 内置"连接即自动订阅"默认行为 |
 | `chat/send` 无 `is_working` 守卫，多客户端并发互踩 | 低 | 文档声明需自行串行；预留方向：会话租约 |
 | 路由无注册表 → 文档漂移 | 低 | 预留方向：manifest 机制（§7） |

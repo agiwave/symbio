@@ -18,6 +18,79 @@
 
 ***
 
+## 2026-09-17: TLS 后端切到平台原生栈（`aws-lc-sys` / `rustls` 族退出依赖树，`cmake` 消失）
+
+**性质：依赖树收敛**。协议、LLM 工具面、前端行为**均无变化**；依赖树净减 **27 个包**
+（`[[package]]` 386 → 357，唯一包名 357 → 330；新增仅 2 个）。
+
+### 起因：只剩两条路，取舍见 ADR-013
+`reqwest` 的 TLS 原走 rustls，而 rustls 的两个官方密码学后端**都是 C**：默认 `aws-lc-rs`、备选 `ring`。
+`aws-lc-sys` 是整份 BoringSSL（414 `.c` + 178 `.cc` + 941 汇编 / 145,513 行 C / 69 MB），
+且**无条件**依赖 `cmake`。纯 Rust 的 `rustls-rustcrypto` 上游标注 DO NOT USE IN PRODUCTION
+⇒ 只剩「换 provider（`ring`）」与「换掉 rustls（OS 原生栈）」两条路。选后者，唯一理由是它能把
+目标平台上的 **C 编译真正降到零**（Windows = SChannel、macOS = Security.framework，皆纯 Rust FFI），
+`ring` 路线只是把 69 MB 的 C 换成 8.3 MB 的 C。
+
+### 改动：一处依赖声明
+`symbio/Cargo.toml` 的 `reqwest` 由隐式 default 改为显式 feature 集：
+
+```toml
+reqwest = { version = "0.13.4", default-features = false, features = [
+    "json", "stream", "charset", "http2", "system-proxy", "native-tls",
+] }
+```
+
+`default-features = false` 会关掉 `default` 里的 `default-tls`(=rustls) **以及**三个非 TLS 能力，
+故 `charset` / `http2` / `system-proxy` 必须显式补回——否则响应体编码判定、HTTP/2、
+系统代理读取会**静默**失效。
+
+### 实证（不靠推断）
+- `cargo tree -i aws-lc-sys --target all`（及 `-i aws-lc-rs`、`-i rustls-platform-verifier`）
+  → **"did not match any packages"**，彻底不在图里；`rustls` / `ring` / `rustls-webpki` /
+  `hyper-rustls` / `tokio-rustls` → "nothing to print"，无任何消费方。
+- `cargo tree -e features -i reqwest@0.13.4` 的实际 feature 集合即为上表七项，
+  **无 `default-tls` / `rustls` / `__rustls-aws-lc-rs`**。
+- `target/debug/.fingerprint/reqwest-*/lib-reqwest.json` 里记录的 `features` 也正是这七项
+  ⇒ 落盘产物确实按新 feature 编出，而不是"以为改了"。
+- 锁文件**净删 29 个包**：`aws-lc-sys` `aws-lc-rs` `cmake` `dunce` `fs_extra` `jobserver`
+  `rustc_version` `cfg_aliases` `combine` `chacha20` `cpufeatures` `rand_pcg` `lru-slab`
+  `quinn` `quinn-proto` `quinn-udp` `rustc-hash` `rustls-native-certs` `rustls-platform-verifier`
+  `rustls-platform-verifier-android` `simd_cesu8` `simdutf8` `tinyvec` `tinyvec_macros` `web-time`
+  `jni` `jni-macros` `jni-sys` `jni-sys-macros`；**净增 2 个**：`hyper-tls` / `tokio-native-tls`
+  （`native-tls` 与 `schannel` 早已因 `ort-sys` 的 build-dependency `ureq` 在树里）。
+  **无任何既有包被升版**（`rand` / `rand_core` 只是多版本中的一份被移除）。`cli/Cargo.lock` 同步。
+- **`cmake` 从构建前置工具里消失**：它的 `[[package]]` 整块已不在锁文件里。
+
+### 代价（明确接受，见 ADR-013）
+- **引入平台分支**：Windows → SChannel、macOS → Security.framework（两者零 C 编译）、
+  **Linux → 系统 OpenSSL**（需 `libssl-dev` + `pkg-config`）。CI（Ubuntu）与本地（Windows）
+  从此跑不同 TLS 栈，TLS 版本上限 / 密码套件 / 错误文案随 OS 变。
+- 顺带修正 `symbio/.cargo/config.toml` 里「零 C/C++ 工具链参与」这句不准确的注释：只有**链接**
+  阶段成立（rust-lld）；**编译**阶段仍剩 `onig_sys`。
+
+### 附带收益：MSRV 门禁的「真编译」分支本机跑通了
+前一条（MSRV 接入 CI）留下的未验证项，其根因**不是** MSRV 也不是沙箱限制，而是 `aws-lc-sys`
+的 C 编译（写 `.obj` 被拦 → `fatal error C1056`）。它退树后，本机沙箱里
+`node scripts/gate.mjs --only=msrv` **完整通过**：
+
+```
+▸ symbio: cargo check --all-targets @ 1.91.0 … ok (3m 51s)
+▸ cli:    cargo check --all-targets @ 1.91.0 … ok (3m 40s)
+  通过 2 / 2   全部通过   MSRV_GATE_EXIT=0
+```
+
+同一沙箱里 `onig_sys` 的 C 编译**正常成功**，反证了失败与「沙箱不能编 C」无关。
+⇒ MSRV 的真编译结论现在本地可复现，不必再等 CI；该项可从「未验证」划掉。
+
+**验证**：`cargo fmt --all -- --check` / `cargo check --lib --tests --locked` /
+`cargo clippy --all-targets -- -D warnings` 全 0；`cli/` 亦 `cargo check --locked` 通过；
+门禁 `--only=msrv` 2/2（见上）。
+
+**未验证项（诚实标注）**：Linux（OpenSSL）与 macOS（Security.framework）两个分支**本机无法实跑**
+（本机只能构建 Windows/SChannel 分支），跨平台正确性由 CI 给出结论。
+
+***
+
 ## 2026-09-17: 摘掉白带的 `hf-hub`（`ring` 彻底退出依赖树）+ MSRV 接入 CI 实编译校验
 
 **性质：依赖清理 + 门禁补漏**。协议与 LLM 工具面**无变化**；依赖树净减 **72 个包**。
@@ -40,6 +113,7 @@
   的依赖列表都已不含它），cargo 未回收，不影响构建。
 - 剩余 C 依赖只有 `onig_sys`（←`onig`←`tokenizers`）与 `aws-lc-sys`（←`rustls`），
   都在真实使用链上，本次不动。
+  **（`aws-lc-sys` 已于同日更晚的 TLS 条目中移除，见文件顶部；现仅剩 `onig_sys` 一条。）**
 
 ### MSRV：从「注释里的数字」变成 CI 实编译校验
 - 此前 `rust-version = "1.91"` 只在注释里声明，而本机与 CI 都锁 `rust-toolchain.toml` 的
@@ -69,6 +143,11 @@
 在沙箱内写 `.obj` 失败（`fatal error C1056`，`cl.exe` 是找得到的）。故该分支的首次真实
 结论由 CI 给出；本地装了 1.91.0 后可自行 `node scripts/gate.mjs --only=msrv` 复现。
 
+> **已解决（同日更晚的 TLS 条目）**：根因是 `aws-lc-sys` 的 C 编译，与 MSRV、沙箱均无关。
+> `aws-lc-sys` 随 TLS 后端切换退树后，该分支在本机沙箱**完整通过**（`symbio` + `cli` 各
+> `cargo check --all-targets @ 1.91.0`，2/2，`MSRV_GATE_EXIT=0`）。CI 的首次真实结论虽仍由
+> `msrv-check` job 给出，但本地已可复现，不再依赖 CI。
+
 ***
 
 ## 2026-09-17: 质量收敛 —— 删零引用依赖 / 处置游离审计脚本 / 接线 ask_user / 动作按钮收敛
@@ -81,6 +160,7 @@
   ADR-008 回退多存储后端后的遗留，却独自把 `cc` 拖进构建。`Cargo.lock`（含 `cli/`）同步收缩。
 - 另三条（`onig_sys`←`fastembed`、`ring` / `aws-lc-sys`←`rustls`）仍在，属真实使用或
   无净收益的取舍，本次不动。
+  **（后续进展：`ring` 随 hf-hub 摘除、`aws-lc-sys` 随 TLS 后端切换，先后退出依赖树——见上两条条目。）**
 
 ### 审计体系：4 个游离脚本，2 删 2 接
 - `scripts/` 下有 4 个脚本**既不在 `gate.mjs` 也不在 CI**：

@@ -30,7 +30,21 @@ dirs = "6.0.0"
 uuid = { version = "1.26.0", features = ["v4", "serde"] }
 # 优化 1：从 chrono 迁移到更轻量的 time
 time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macros"] }
-reqwest = { version = "0.13.4", features = ["json", "stream"] }
+# TLS 后端 = 平台原生栈：Windows → SChannel，macOS → Security.framework，Linux → 系统 OpenSSL。
+# Windows/macOS 上因此**零 C 编译**（schannel 是纯 Rust FFI 绑定，无源码、无 build.rs）。
+# 代价是引入平台分支：Linux 侧需要系统 OpenSSL（libssl-dev），否则要改开 native-tls-vendored。
+# 换来的是整条 rustls 链退出构建 —— aws-lc-sys 是 414 个 .c + 178 个 .cc + 941 个汇编、
+# 145k 行 C，且**无条件**依赖 cmake，曾是依赖树里最脆的一环。
+# `default-features = false` 后必须显式补回 `default` 里的非 TLS 能力：
+#   charset（响应体编码判定）· http2（LLM API 基本都走 h2）· system-proxy（读系统代理）。
+reqwest = { version = "0.13.4", default-features = false, features = [
+    "json",
+    "stream",
+    "charset",
+    "http2",
+    "system-proxy",
+    "native-tls",
+] }
 reqwest-eventsource = "0.6.0"
 async-stream = "0.3.6"
 url = "2.5.8"

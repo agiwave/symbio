@@ -381,4 +381,72 @@ ADR-010 删掉了「差异集中在一张 trait」的适配层，但落盘那一
 
 ---
 
+## ADR-013: TLS 后端 = 平台原生栈（`native-tls`），不做纯 Rust 密码学
+
+**状态**：已接受
+
+> **当前状态**：**已实现（现行）**。`symbio/Cargo.toml` 的 `reqwest` 改为
+> `default-features = false` + `native-tls`；`aws-lc-sys` / `aws-lc-rs` / `rustls` 族已退出
+> 构建图（`cargo tree -i aws-lc-sys` 报 "did not match any packages"）。
+
+**背景**：
+本仓的 HTTP 出口（LLM 适配、MCP http transport、web 插件、telegram）统一走 `reqwest`，其
+TLS 原由 rustls 提供，而 rustls 的两个官方密码学后端**都是 C**：默认的 `aws-lc-rs` 与备选的
+`ring`。这带来两个具体代价：
+
+1. `aws-lc-sys` 是整份 BoringSSL 分支 —— 实测 414 个 `.c` + 178 个 `.cc` + 941 个汇编、
+   145,513 行 C、69 MB 源码，且**无条件**依赖 `cmake`（`build-dependencies.cmake`）。
+   它是依赖树里最脆的一环：在本机沙箱里其 C 编译必然失败（写 `.obj` 被拦 → `fatal error C1056`），
+   连 MSRV 门禁的真编译分支都跑不通。
+2. 纯 Rust 的替代 `rustls-rustcrypto` 上游自述 **DO NOT USE IN PRODUCTION**（仅 0.0.x-alpha）
+   ⇒ "纯 Rust + 生产可用"这条路今天不存在。
+
+于是可选项只有两个：换 rustls 的 provider（`ring`），或换掉 rustls 本身（OS 原生栈）。
+
+**决策**：
+HTTP 出口的 TLS 后端改为**平台原生栈**（`reqwest` 的 `native-tls` feature）：
+
+- Windows → SChannel（`schannel`，纯 Rust FFI 绑定，**零 C 源**）
+- macOS → Security.framework（`security-framework`）
+- Linux → 系统 OpenSSL（`openssl` / `openssl-sys`）
+
+**明确接受**由此引入的**平台分支**：Linux 需要系统 OpenSSL 开发包。
+
+**理由**：
+- 选它而非 `ring`，唯一理由是它能把目标平台上的 C 编译**真正降到零**。`ring` 路线只是把
+  69 MB 的 C 换成 8.3 MB 的 C（`ring` 自身 17 个 `.c` + 90 个汇编），
+  "依赖树里不要 C"这个目标达不到；而 `native-tls` 在 Windows/macOS 上完全不编 C，
+  并连带移除 `cmake` 这个构建期前置工具。
+- 它**几乎不新增依赖族**：`native-tls` / `schannel` 早已因 `ort-sys` 的 build-dependency
+  `ureq`（ONNX Runtime 下载链）在树里；本次净增只有 `hyper-tls` + `tokio-native-tls` 两个包
+  （锁文件 `[[package]]` 386 → 357，唯一包名 357 → 330）。
+- 语义上**证书信任本就来自系统库**：原路线的 `rustls-platform-verifier` 做的正是同一件事，
+  两条路线在企业根证书 / 系统更新上的行为接近 ⇒ 属于**换实现而非换语义**，
+  且 `symbio/src` 未使用任何 rustls 专属的 `reqwest` 配置项（`tls_certs_only` / `crls` /
+  `hostname_verification` 全仓零命中），故无功能面损失。
+- 代价被判定为可接受：项目的主要目标形态是 Windows 桌面端；Linux 侧只需在构建环境装
+  `libssl-dev`，属常规做法。
+
+**后果**：
+- **`docs/design/http-api-transport.md` 里「HTTPS 不做」的前提失效**：该决策当初的理由正是
+  "rustls 默认后端 aws-lc-rs 依赖 `aws-lc-sys`（C），与无 C 编译冲突"。这条理由已不成立 ⇒
+  网关是否开放 HTTPS 成为一个**重新可议**的产品决策（本次不改行为，仍默认回环 HTTP + 外部反代）。
+- **剩余 C 编译源只剩 `onig_sys`**（←`onig`←`tokenizers`←`fastembed`）：
+  `fastembed` 硬编码 `tokenizers/onig` 关不掉；`esaxx-rs` 虽是 tokenizers 的非可选依赖，
+  但被声明为 `default-features = false`（其 `cpp` feature 关闭）⇒ **不编 C++**。
+  即"零 C 编译"仍未达成，但已从 4 条链收敛到 1 条。
+- **跨平台行为从此随 OS 变**：CI（Ubuntu）与本地（Windows）跑不同 TLS 栈，
+  TLS 版本上限 / 密码套件 / 错误文案都不同 ⇒ 一类"CI 绿本地红"的问题排查成本上升；
+  这是本决策**明确接受的代价**。
+- Linux 构建前置：`libssl-dev` + `pkg-config`（Debian/Ubuntu）或 `openssl-devel`（RHEL/Fedora），
+  已记入 [CONTRIBUTING.md](../CONTRIBUTING.md) §1。
+- **顺带解掉一个未验证项**：此前 MSRV 门禁的**真编译**分支在本机沙箱跑不通，根因正是
+  `aws-lc-sys` 的 C 编译（写 `.obj` 被拦 → `fatal error C1056`），与 MSRV 本身无关。
+  `aws-lc-sys` 退树后，`node scripts/gate.mjs --only=msrv` 在本机沙箱**完整跑通**
+  （1.91.0 实编译 `symbio` + `cli`，2/2；隔离 target 目录，不污染日常构建缓存）。
+- 将来若要 HTTP/3 或后量子（ML-KEM），需回到 rustls 并重新接受 C 依赖——本决策不阻断该回退，
+  只是要重付一次代价。
+
+---
+
 > **维护原则**：每个架构决策必须记录在此，包括背景、决策、理由、后果。

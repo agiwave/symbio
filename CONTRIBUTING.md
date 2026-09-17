@@ -14,8 +14,14 @@
 | Node.js | ≥ 18 | 前端构建 |
 | Tauri CLI | 2.x | `cargo install tauri-cli --version "^2.0"` |
 | 平台 | Windows / macOS / Linux | Tauri 三平台均已配置 CI |
+| **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**（[ADR-013](./docs/DECISIONS.md)）：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
 
 可选：使用 [rustup](https://rustup.rs/) 安装 Rust — `rust-toolchain.toml` 会自动激活对应的 channel 与组件。
+
+> **为什么只有 Linux 需要额外系统库**：TLS 后端是平台原生栈——Windows 用 SChannel、macOS 用
+> Security.framework，两者都是**纯 Rust FFI 绑定**（无 C 源、无需额外系统包）；只有 Linux 落到
+> 系统 OpenSSL，因此需要上面的开发包。三平台**都**还需要 C 编译器：依赖树里 `onig_sys` 要编 C
+> （`fastembed` → `tokenizers` 硬编码了 `onig` feature，关不掉）。
 
 ---
 

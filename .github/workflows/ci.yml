@@ -58,6 +58,13 @@ jobs:
         # 使用 rust-toolchain.toml 锁定版本，保证与本地开发环境一致（避免 rustfmt 版本漂移导致 fmt 失败）
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
+      - name: Install Linux system libs (OpenSSL)
+        # HTTP 出口的 TLS 走平台原生栈（ADR-013）：Windows = SChannel、macOS =
+        # Security.framework、**Linux = 系统 OpenSSL** ⇒ 只有 Ubuntu runner 需要它。
+        # runner 镜像通常已预装，此处显式声明是为了：① 让这条平台前置在 CI 里可见；
+        # ② 镜像变更时以「openssl-sys 找不到库」之外的方式暴露出来。
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -93,6 +100,10 @@ jobs:
         # 版本须与 symbio/Cargo.toml、cli/Cargo.toml 的 rust-version 一致
         # （gate.mjs 把 "1.91" 补全为 "1.91.0" 后比对；更新的 patch 证明不了下限）
         run: rustup toolchain install 1.91.0 --profile minimal
+
+      - name: Install Linux system libs (OpenSSL)
+        # 同 rust-checks：Linux 侧 TLS 依赖系统 OpenSSL（ADR-013）
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
       - name: Cache cargo registry
         uses: actions/cache@v4
