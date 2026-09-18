@@ -25,8 +25,8 @@
  *
  *   1. backend   cargo check --tests / test --lib / clippy / fmt --check（在 `symbio/`）
  *   2. frontend  vue-tsc --noEmit / vitest run（在 `tauri/`）
- *   3. docs      grep-audit / mechanism-audit / style-audit / doc-link-audit
- *                / test-layout-audit / dead-code-audit（均判定型）
+ *   3. docs      grep-audit / mechanism-audit / plugin-entry-audit / style-audit
+ *                / doc-link-audit / test-layout-audit / dead-code-audit（均判定型）
  *                + schema-audit（报告型，仅防崩溃）
  *                每个判定型守卫都先跑**自己的回归测试**（证明它能变红）
  *   4. msrv      用 `rust-version` 声明的**最低**工具链跑 cargo check（symbio/ 与 cli/）。
@@ -474,7 +474,7 @@ async function stageDocs() {
   // 判定型守卫的**回归测试**必须先跑：一个只会亮绿灯的守卫等于没有守卫，
   // 而它腐烂的方式恰恰是「规则写错了所以永远不命中」——只有注入真实违规
   // 并断言脚本变红，才能把「通过」和「没在工作」区分开。
-  for (const name of ['grep-audit', 'mechanism-audit']) {
+  for (const name of ['grep-audit', 'mechanism-audit', 'plugin-entry-audit']) {
     const t = await run({
       label: `${name} 回归测试`,
       cmd: process.execPath,
@@ -484,9 +484,13 @@ async function stageDocs() {
     record('docs', `${name} 回归测试`, t.ok)
   }
   // 判定型：有发现即以非零退出码失败。
+  // `plugin-entry-audit` 也是判定型，但只有 E-001 ~ E-004（ERROR）会失败；
+  // E-005 / E-006 是 WARNING（退出码仍为 0），因为运行期拼路径数不出来，
+  // 「定义了但没人用」只能报给人看，不能自动判死。
   for (const name of [
     'grep-audit',
     'mechanism-audit',
+    'plugin-entry-audit',
     'style-audit',
     'doc-link-audit',
     'test-layout-audit',

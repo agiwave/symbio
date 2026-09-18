@@ -1,35 +1,108 @@
 //! 全项目调用路径（route path）统一常量
 //!
-//! 设计原则：所有通过 `ctx.set(PATH, "<plugin>/<cap>")` 注入的路由路径，
-//! 或在 plugin 内部 `match path.as_str() { "<plugin>/<cap>" => ... }` 中使用的字符串，
-//! 必须在本模块中以 `&'static str` 常量定义并复用。
+//! # 地址规则
 //!
-//! 与 [`ids`] 模块的差别：
-//! - `ids` 描述"注册到注册表的对象 id"（插件工厂、capability、协议）
-//! - 本模块描述"运行期调用的路由路径"（`plugin/operation`）
+//! > 本模块文档是地址规则的**权威表述**；展开版（含审计结果与守卫边界）见
+//! > [`docs/design/plugin-route-address.md`](../../../docs/design/plugin-route-address.md)。
 //!
-//! 收益：
-//! - **单一真相源**：注册侧（plugin handler 的 `match` 分支）和调用侧（`ctx.set(PATH, ...)`）一致
-//! - **编译期检查**：拼写漂移 / 漏改 / 错改立刻被 `cargo check` 拦截
-//! - **IDE 友好**：跳转即可看到所有可用路径
+//! ## 一、地址只有两种形态
 //!
-//! 命名约定：`<PLUGIN>_<OPERATION>` 形式，全部大写下划线
+//! | 形态 | 形状 | 谁写它 | 谁读它 |
+//! |---|---|---|---|
+//! | **绝对地址** | `<插件目录名>/<子路径>` | 调用方（`ctx.set(PATH, …)` 后过 `route`） | 容器剥首段 → 目标插件的 `match` |
+//! | **相对臂** | `<子路径>` | 目标插件自己的 `route` 体内 `match` | 容器剥完首段后剩下的那截 |
+//!
+//! 两者的关系是**一次剥离**：容器按首段找到子插件，把**余下部分**塞回 `PATH` 再转发。
+//! 所以插件里的 `match` 永远只写相对臂，跨插件调用永远写绝对地址——**不要**在插件内
+//! 匹配绝对地址，也**不要**在调用侧写相对臂。
+//!
+//! ## 二、前缀是**插件目录名**，不是 `PluginMeta`
+//!
+//! 容器（`composite`）扫描插件根下的**一层目录**建实例表，键就是目录名
+//! （`composite.rs` 注释：「目录名 = 实例名」），`route` 也按它分发。因此目录名
+//! 才是真正的路由前缀。`PluginMeta::new` 的首参（`id`）**是只写字段**
+//! （`Plugin::meta()` 全仓无生产消费方），拿它当前缀会产出**不存在的路由**——
+//! `hook` 插件写成 `"hooks"` 就曾让 `docs/CURRENT.md` 与两处文档照抄出 `hooks/fire`。
+//! 该不一致由 `scripts/plugin-entry-audit.mjs` 的 E-001 守住。
+//!
+//! ## 三、过路由才设 `PATH`；直连方法**不设**
+//!
+//! `PATH` 是给**容器**看的。调用方如果拿到的是插件实例并直连方法
+//! （`self.handle_xxx(…)`），`PATH` 不会被任何人读——设了就是死赋值。
+//! 判据很简单：**下一跳是 `route()` 还是方法调用**。
+//!
+//! ## 四、`traverse` 的 `PATH` 只有两个合法值
+//!
+//! [`TRAVERSE_AVAILABLE_TOOLS`](crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS) 与
+//! [`TRAVERSE_AVAILABLE_OPTIONS`](crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS)。
+//! 它们是**协议端点**，不是插件路径，因此不进本模块。
+//!
+//! # 本模块的职责与边界
+//!
+//! 本模块收**有真实调用方的绝对地址常量**（`&'static str`）。收益：
+//! - **单一真相源**：注册侧（插件的 `match` 臂）与调用侧（`ctx.set(PATH, …)`）一致；
+//! - **编译期检查**：拼写漂移 / 漏改 / 错改立刻被 `cargo check` 拦截；
+//! - **IDE 友好**：跳转即可看到所有可用路径。
+//!
+//! **不为「将来可能用到」的路由预置常量**——那正是本模块 2026-09-18 清掉的那类腐烂
+//! （见 [`HOOK_FIRE`] 上方关于 `AGENT_CHAT` 的说明）。当前无调用方的路由由审计脚本
+//! 报告，由人决定去留，而不是先给它们一个体面的常量名。
+//!
+//! 与 [`ids`](crate::symbio_core::ids) 的差别：
+//! - `ids` 描述「注册到注册表的对象 id」（插件工厂、capability、协议）；
+//! - 本模块描述「运行期跨插件调用的路由路径」（`<插件目录名>/<子路径>`）。
+//!
+//! 命名约定：`<PLUGIN>_<OPERATION>` 形式，全部大写下划线。
 
 // ============ Session 插件 ============
-/// session/chat — 会话对话（流式）
-pub const SESSION_CHAT: &str = "session/chat";
-
-// ============ Agent 插件 ============
-/// agent/chat — **子智能体会话执行入口**（仅 agent_run 能力内部调用）
+/// session/chat/send — 发起一轮对话（**统一编排入口**）
 ///
-/// 适用范围：顶层会话不经过此路径。前端会话统一走
-/// `session/chat/send`（session 插件编排），agent 插件只通过
-/// `traverse(available_tools)` 向会话贡献工具；只有当上级会话需要派生一个
-/// 子智能体会话时，才会由此路径进入 agent 插件内部执行。
-pub const AGENT_CHAT: &str = "agent/chat";
-/// agent/create — 创建新 Agent
-pub const AGENT_CREATE: &str = "agent/create";
+/// 这是全仓**唯一**的会话发言入口。子智能体派生（`agent/host/subagent.rs`）、
+/// 心跳（`session/heartbeat.rs`，直连）、Telegram 通道都汇到这里。
+///
+/// 注意不是 `session/chat`：那个路径**不存在**（session 的 `route` 只认
+/// `chat/send` 与 `chat/abort` 两条相对臂）。Telegram 曾用它，见下方 [`HOOK_FIRE`]
+/// 同类的记录。
+pub const SESSION_CHAT_SEND: &str = "session/chat/send";
+
+/// session/chat/abort — 中止进行中的一轮
+///
+/// 当前唯一调用方在前端（`tauri/src/constants/pluginPaths.ts::CHAT_ABORT`）。
+pub const SESSION_CHAT_ABORT: &str = "session/chat/abort";
+
+/// session/get_messages — 读会话历史（**仅供续会话存在性轻校验**）
+///
+/// 唯一调用方 `agent/host/subagent.rs::validate_subsession_exists`。
+/// 它不是「会话的读接口」——读历史走 `vdfs/read`，见
+/// `plugins/session/docs/legacy-route-migration.md` §3.4。
+pub const SESSION_GET_MESSAGES: &str = "session/get_messages";
+
+/// session/update — 合并写入会话 metadata（**仅供 CLI 与子会话登记**）
+///
+/// 调用方：`cli/src/client.rs`（`--session <ID>` 语义）、
+/// `agent/host/subagent.rs`（登记子会话元数据）。
+pub const SESSION_UPDATE: &str = "session/update";
+
+// ============ Event Bus 插件 ============
+/// event_bus/subscribe — 建立进程内帧订阅连接
+///
+/// 唯一调用方 `cli/src/client.rs::start`：拿 `PluginPayload::Session(c)` 当事件通道。
+pub const EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 
 // ============ Hook 插件 ============
 /// hook/fire — 触发命名 hook
+///
+/// 前缀是**目录名 `hook`**（不是 `PluginMeta` 曾写的 `"hooks"`）。
+/// 唯一调用方 `session/tool_executor.rs::fire_hook`（PreToolUse / Stop 等生命周期点）。
+///
+/// ---
+///
+/// **被本模块删掉的两个常量（2026-09-18）**：`AGENT_CHAT = "agent/chat"` 与
+/// `AGENT_CREATE = "agent/create"`。它们全仓**零调用方**，而且描述的路径**根本不存在**
+/// ——`agent` 插件的 `route` 恒返回 `NotFound`（bundle 一律经 VDFS 访问），
+/// 子智能体派生走的是 [`SESSION_CHAT_SEND`]。
+///
+/// 留着它们比没有更糟：`AGENT_CHAT` 的文档曾写着「子智能体会话执行入口
+/// （仅 agent_run 能力内部调用）」，而**没有任何代码那样调用**——这正是本模块
+/// 存在的理由（防止路径漂移）被反过来利用的样子。`paths.rs` 只收有真实调用方的路径。
 pub const HOOK_FIRE: &str = "hook/fire";

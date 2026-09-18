@@ -1,7 +1,8 @@
 //! Hook 插件 - 提供 Hook 事件机制
 //!
 //! Hook 通过插件路由机制实现：
-//! - 其他插件通过 `hooks/fire` 路由触发 Hook
+//! - 其他插件通过 `hook/fire` 路由触发 Hook（路径前缀是**目录名 `hook`**，
+//!   不是 `PluginMeta` 的首参——见 [`HooksPlugin::metadata`] 的说明）
 //! - Hook 执行结果通过 PluginMessage 返回
 //! - 不需要在 symbio_core 中添加特殊处理
 
@@ -46,8 +47,19 @@ impl HooksPlugin {
         }
     }
 
+    /// 插件元信息。
+    ///
+    /// 首参（`PluginMeta::id`）**必须等于插件目录名**，这是全仓统一的地址规则：
+    /// 容器（`composite`）按**目录名**建实例表并在 `route` 里按它分发
+    /// （见 `composite.rs`「目录名 = 实例名」），因此目录名才是真正的路由前缀。
+    ///
+    /// 这里曾写死 `"hooks"`——与目录名 `hook`、工厂 id `PLUGIN_HOOK` 都不一致。
+    /// `Plugin::meta()` 全仓无生产消费方（`PluginMeta` 事实上是只写字段），
+    /// 所以那个错名**不影响运行**，却足以让 `docs/CURRENT.md` 的生成器与三处文档
+    /// 写出 `hooks/fire` 这类**不存在的路由**。改用 `PLUGIN_HOOK` 后三者对齐，
+    /// 由 `scripts/plugin-entry-audit.mjs` 的 E-001 守住。
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new("hooks", "钩子插件")
+        PluginMeta::new(PLUGIN_HOOK, "钩子插件")
             .with_description("提供事件钩子机制，支持插件间事件订阅与触发")
             .with_version("0.1.0")
     }

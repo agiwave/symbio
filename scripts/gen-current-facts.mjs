@@ -241,7 +241,16 @@ function extractToolNames(t, consts) {
  * 不整段抓字符串——后者会把 `get("approved")` 这类参数名当成路由（实测踩坑）。
  *
  * 臂是**相对路径**：容器（composite）先剥掉首段，插件只分发剩下的部分，
- * 故渲染时要补回插件注册名（`home` 是根容器，臂已是全名，不补）。
+ * 故渲染时要补回前缀。
+ *
+ * ## 前缀取**目录名**，不取 `PluginMeta::new` 的首参
+ *
+ * 容器按**目录名**建实例表并在 `route` 里按它分发（`composite.rs`「目录名 = 实例名」），
+ * 所以目录名才是真正的路由前缀。`PluginMeta` 首参曾长期被当作前缀用，而它是**只写字段**
+ * （`Plugin::meta()` 全仓无生产消费方）——`hook` 插件写成 `"hooks"` 就由此产出了
+ * `hooks/fire` 这类**不存在的路由**，并被本表与三处文档照抄。改用目录名后，
+ * 「生成器说出的路由」与「容器真正认的路由」同源；`plugin-entry-audit.mjs` 的 E-001
+ * 另外把「`PluginMeta` 首参 == 目录名」钉住，使两者不会再分叉。
  */
 function extractRouteArms(t, pluginName) {
   const out = new Set();
@@ -293,7 +302,9 @@ function analyzePlugin(dirName, ids) {
   const consts = new Map();
   for (const t of contents) parseConsts(t, consts);
 
-  let metaName = null;
+  // `PluginMeta::new` 的**首参**（`id`）——注意不是 `name`（第二参）。
+  // 它只用于本表的「注册名」列：**不参与路由**，路由前缀取目录名（见 extractRouteArms）。
+  let metaId = null;
   const mounts = new Set();
   const tools = new Set();
   const traits = new Set();
@@ -301,9 +312,9 @@ function analyzePlugin(dirName, ids) {
   let hasConfig = false;
 
   for (const t of contents) {
-    if (!metaName) {
+    if (!metaId) {
       const mm = t.match(/PluginMeta::new\(([^,\n]+)/);
-      if (mm) metaName = resolveArg(mm[1], ids);
+      if (mm) metaId = resolveArg(mm[1], ids);
     }
     for (const mm of t.matchAll(/register_vdfs_provider\(\s*([^,\n]+)/g)) {
       mounts.add(resolveArg(mm[1], ids));
@@ -315,12 +326,12 @@ function analyzePlugin(dirName, ids) {
     )) {
       if (CORE_TRAITS.includes(mm[1])) traits.add(mm[1]);
     }
-    for (const arm of extractRouteArms(t, metaName)) routes.add(arm);
+    for (const arm of extractRouteArms(t, dirName)) routes.add(arm);
   }
 
   return {
     dirName,
-    metaName,
+    metaId,
     mounts: [...mounts].sort(),
     tools: [...tools].sort(),
     traits: [...traits].sort(),
@@ -557,7 +568,7 @@ function render() {
         ? `（动态）${DYNAMIC_ROUTES[p.dirName]}`
         : "—";
     L.push(
-      `| \`${p.dirName}\` | \`${p.metaName ?? "—"}\` | ${fmtMounts(p.mounts)} | ${routeCell} | ${fmtList(
+      `| \`${p.dirName}\` | \`${p.metaId ?? "—"}\` | ${fmtMounts(p.mounts)} | ${routeCell} | ${fmtList(
         p.traits
       )} | ${p.hasConfig ? "✓" : "—"} | ${p.hasReadme ? "✓" : "**缺**"} |`
     );
@@ -568,7 +579,9 @@ function render() {
   L.push(">   容器（`composite`）按子插件注册名合成目录树，其自身挂载点是运行期动态。");
   L.push(">   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。");
   L.push("> - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，");
-  L.push(">   容器已剥掉首段，故此处补回注册名）；标「（动态）」的是按运行期规则分发、无法静态枚举的。");
+  L.push(">   容器已剥掉首段，故此处补回**插件目录名**——容器按目录名建实例表并按它分发，");
+  L.push(">   目录名才是真正的路由前缀；`PluginMeta` 首参是只写字段，不参与路由。");
+  L.push(">   标「（动态）」的是按运行期规则分发、无法静态枚举的。");
   L.push(">   漏项与歧义以 [ROUTES.md](./reference/ROUTES.md) 为准。");
   L.push("> - **配置文件** = 该插件调用过 `announce_configurable`（配置就是 `.vdfs/<挂载点>/PLUGIN.yml`，");
   L.push(">   读写走 `vdfs/read` / `vdfs/write`，**没有配置专用路由**）。");

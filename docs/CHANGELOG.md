@@ -18,6 +18,46 @@
 
 ***
 
+## 2026-09-18: 插件路由地址规则规范化 + `route`/`traverse` 入口审计
+
+**性质：规则 + 守卫 + 修漂移**。新增
+[`docs/design/plugin-route-address.md`](./design/plugin-route-address.md)
+（地址规则四条 + 审计结果）与守卫
+[`scripts/plugin-entry-audit.mjs`](../scripts/plugin-entry-audit.mjs)（E-001 ~ E-006）。
+
+`Plugin` trait 的 `route` / `traverse` 是全仓仅有的两条跨插件寻址通道，而地址是
+**字符串**——不会因改名而编译失败，只会静默指向不存在的地方。本次把规则写清、把
+规则变成可执行的守卫，并修掉审计抓到的**四处漂移**：
+
+1. **`hook` 的幽灵命名空间**（影响面最大）。`PluginMeta::new("hooks", …)` 与目录名
+   `hook`、工厂 id `PLUGIN_HOOK` 都不一致；`Plugin::meta()` 全仓无生产消费方，所以
+   它不影响运行，却让 `docs/CURRENT.md` 的生成器与两处文档写出 **`hooks/fire`、
+   `hooks/list`、`hooks/register`** 三条不存在的路由。而代码侧唯一在用的
+   `paths::HOOK_FIRE = "hook/fire"` 一直是对的——**代码对、文档错**，长期并存。
+   修复：首参改 `PLUGIN_HOOK`；`gen-current-facts.mjs` 的路由前缀改用**目录名**
+   （防御）；三处文档改正。
+2. **`paths.rs` 的两个幽灵常量**：`AGENT_CHAT` / `AGENT_CREATE` 全仓零调用方，
+   且 `agent` 的 `route` 恒 `NotFound`——它们描述的路由不存在，是被重构淘汰后忘了删的。
+3. **Telegram 的 `session/chat`**：该路径不存在（session 只认 `chat/send` / `chat/abort`），
+   那处调用**必定**落到 `NotFound`。改用 `SESSION_CHAT_SEND`。
+4. **`session/heartbeat.rs` 的死赋值**：`ctx.set(PATH, "chat/send")` 后走的是直连方法
+   （`handle_chat_send_oneoff`），`PATH` 无人读；且值还是相对臂。
+
+同时把调用侧散落的字面量收敛到 `symbio_core::paths` 常量
+（`subagent.rs` × 3、`cli/src/client.rs` × 1、`telegram/plugin.rs` × 1），
+并补齐该模块的常量与模块文档（原文档声称「所有 route path 必须在本模块定义」，
+实际只有 4 个，其中 2 个还是幽灵）。
+
+**审计还报出但本轮未动的**（属能力取舍，非地址规则）：六条「零消费方」路由
+——`event_bus/pending/snapshot`（有意保留，是网关对外 API）、`event_bus/ping`、
+`gateway/status`、`hook/register`、`hook/list`、`skill/execute`（与
+`SkillExecuteTool` 重复实现）、`telegram/*` 六条（与 `llm_plugin` 恒 `None` 同源，
+整条 LLM 回复链路休眠）。详见 design 文档 §4。
+
+门禁：`node scripts/gate.mjs` **23/23**（新增两项：守卫本体 + 它的回归测试）。
+
+***
+
 ## 2026-09-18: 取消「立即心跳」按钮与 `session/heartbeat/trigger`
 
 **性质：能力取消**（不是迁移）。会话路由表 6 → 5 条。

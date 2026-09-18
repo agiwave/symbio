@@ -2,6 +2,15 @@
 
 > **文档类型：参考** — 所有可用路径的完整清单。
 
+> **本文是人工维护的清单**，因此也是唯一会漂移的那一份——`docs/CURRENT.md` 的
+> 「自有路由」列由代码生成，必然一致。守本文的是
+> [`scripts/plugin-entry-audit.mjs`](../../scripts/plugin-entry-audit.mjs) 的 **E-006**
+> （判前缀合法性：清单里必须能提到已退役的路由，但**前缀不能写错**——
+> `hooks/fire` 就曾在这里长期存在）。
+>
+> 地址规则（前缀是**插件目录名**、绝对地址 vs 相对臂、`traverse` 的两个端点）见
+> [`docs/design/plugin-route-address.md`](../design/plugin-route-address.md)。
+
 ## 路由语法
 
 ```
@@ -335,13 +344,18 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ## Hook 插件
 
-> 注意命名空间是**注册名 `hooks`**（目录名是 `hook`，`PluginMeta::new("hooks", …)`）。
+> **命名空间是目录名 `hook`，不是 `hooks`。** 容器（`composite`）按**目录名**建实例表
+> 并在 `route` 里按它分发（`composite.rs`：「目录名 = 实例名」），所以目录名才是真正的
+> 路由前缀。`PluginMeta::new` 曾写死 `"hooks"`，且 `Plugin::meta()` 全仓无生产消费方
+> ——那个名字**从不参与路由**，却让本表与 `hook/README.md` 长期写着不存在的 `hooks/*`。
+> 2026-09-18 已把首参改为 `PLUGIN_HOOK`（`hook`），三者对齐。
+> 真实的调用点见 `symbio_core::paths::HOOK_FIRE`。
 
 | 路径 | 用途 |
 |------|------|
-| `hooks/register` | 注册钩子 |
-| `hooks/fire` | 触发钩子（源码 `route()` 臂为 `fire`，无 `trigger`） |
-| `hooks/list` | 列出已注册钩子 |
+| `hook/register` | 注册钩子 |
+| `hook/fire` | 触发钩子（源码 `route()` 臂为 `fire`，无 `trigger`） |
+| `hook/list` | 列出已注册钩子 |
 
 ### 系统事件
 

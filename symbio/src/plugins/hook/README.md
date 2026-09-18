@@ -4,9 +4,14 @@
 
 ## 路由
 
-> 注意命名空间是**注册名 `hooks`**（目录名是 `hook`，`PluginMeta::new("hooks", …)`）。
-> 清单见 `docs/reference/ROUTES.md` §Hook 插件（**权威**）：`hooks/register`、`hooks/fire`、`hooks/list`。
-> 触发臂是 `fire`（无 `trigger`）。
+> **命名空间是目录名 `hook`**（不是 `hooks`）：容器按目录名建实例表并按它分发
+> （`composite.rs`「目录名 = 实例名」）。本 README 与 `ROUTES.md` 曾据
+> `PluginMeta::new("hooks", …)` 写成 `hooks/*`——而 `Plugin::meta()` 全仓无生产消费方，
+> 那个名字**从不参与路由**，于是两处文档写的是**不存在的路径**。已修正（2026-09-18）。
+>
+> 清单见 `docs/reference/ROUTES.md` §Hook 插件（**权威**）：`hook/register`、`hook/fire`、`hook/list`。
+> 触发臂是 `fire`（无 `trigger`）。调用侧唯一入口是 `symbio_core::paths::HOOK_FIRE`
+> （`session/tool_executor.rs::fire_hook`）。
 
 ## 机制
 

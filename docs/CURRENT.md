@@ -18,7 +18,7 @@
 | `event_bus` | `event_bus` | — | `event_bus/pending/snapshot` · `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
 | `gateway` | `gateway` | .vdfs/gateway | `gateway/status` | `Plugin` | ✓ | ✓ |
 | `home` | `home` | — | `home/get_homedir` · `home/reload` · `work/get_workspace` · `work/set_workspace` | `Plugin` | — | ✓ |
-| `hook` | `hooks` | — | `hooks/fire` · `hooks/list` · `hooks/register` | `Plugin` | — | ✓ |
+| `hook` | `hook` | — | `hook/fire` · `hook/list` · `hook/register` | `Plugin` | — | ✓ |
 | `local` | `local` | .vdfs/local | （动态）`local/<工具短名>`——按已注册工具名分发（与 §2 的工具清单同一份集合） | `Capability` · `Plugin` | ✓ | ✓ |
 | `mcp` | `mcp` | .vdfs/mcp | — | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `model` | `model` | .vdfs/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
@@ -35,7 +35,9 @@
 >   容器（`composite`）按子插件注册名合成目录树，其自身挂载点是运行期动态。
 >   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。
 > - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，
->   容器已剥掉首段，故此处补回注册名）；标「（动态）」的是按运行期规则分发、无法静态枚举的。
+>   容器已剥掉首段，故此处补回**插件目录名**——容器按目录名建实例表并按它分发，
+>   目录名才是真正的路由前缀；`PluginMeta` 首参是只写字段，不参与路由。
+>   标「（动态）」的是按运行期规则分发、无法静态枚举的。
 >   漏项与歧义以 [ROUTES.md](./reference/ROUTES.md) 为准。
 > - **配置文件** = 该插件调用过 `announce_configurable`（配置就是 `.vdfs/<挂载点>/PLUGIN.yml`，
 >   读写走 `vdfs/read` / `vdfs/write`，**没有配置专用路由**）。
@@ -104,8 +106,8 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio\src` | 197 文件 / 54959 行 | 53 文件 / 11100 行 |
-| `cli\src` | 4 文件 / 1143 行 | 0 文件 / 0 行 |
+| `symbio\src` | 197 文件 / 55052 行 | 53 文件 / 11100 行 |
+| `cli\src` | 4 文件 / 1145 行 | 0 文件 / 0 行 |
 | `tauri\src-tauri\src` | 3 文件 / 347 行 | 0 文件 / 0 行 |
 | `tauri\src` | 84 文件 / 17320 行 | 24 文件 / 4699 行 |
 
@@ -118,4 +120,4 @@
 
 ---
 
-> 生成时间：2026-09-18 15:25:30 UTC · 源：`git rev-parse HEAD` = `14a79e9`
+> 生成时间：2026-09-18 15:53:38 UTC · 源：`git rev-parse HEAD` = `2569da2`

@@ -11,7 +11,7 @@ use crate::symbio_core::{
         session::{session_chat, session_chat_response},
     },
     CapabilityMeta, ConfigFile, InvokeRequest, InvokeResponse, Plugin, PluginDir, PluginError,
-    PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM, SESSION_CHAT,
+    PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM, SESSION_CHAT_SEND,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -502,7 +502,10 @@ impl TelegramPlugin {
                 .unwrap_or_default();
 
                 let sub_ctx = ctx.fork();
-                sub_ctx.set(crate::symbio_core::PATH, SESSION_CHAT.to_string());
+                // 路径取常量：此处曾写 `SESSION_CHAT`（`"session/chat"`）——**该路径不存在**，
+                // session 的 `route` 只认 `chat/send` / `chat/abort` 两条相对臂，
+                // 所以这里以前必定落到 `_ => NotFound`。见 `symbio_core::paths` 的地址规则。
+                sub_ctx.set(crate::symbio_core::PATH, SESSION_CHAT_SEND.to_string());
                 let _ = sub_ctx.set_payload(chat_input);
                 sub_ctx.set(crate::symbio_core::WORKDIR, ".".to_string());
                 sub_ctx.set(crate::symbio_core::SESSION_ID, chat_id.clone());

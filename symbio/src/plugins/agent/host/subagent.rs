@@ -47,7 +47,8 @@ use crate::symbio_core::schemas::session::session_get_messages;
 use crate::symbio_core::schemas::session::session_update;
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel, PluginError,
-    PluginFrame, PluginPayload, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID,
+    PluginFrame, PluginPayload, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_CHAT_SEND,
+    SESSION_GET_MESSAGES, SESSION_ID, SESSION_UPDATE, TOOL_CALL_ID,
 };
 use serde_json::json;
 use std::collections::HashSet;
@@ -267,7 +268,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
                 // `agent_id` / `workdir` 供 chat 编排回退链与详情展示。
                 let sid = uuid::Uuid::new_v4().to_string();
                 let upd_ctx = ctx.fork();
-                upd_ctx.set(PATH, "session/update".to_string());
+                upd_ctx.set(PATH, SESSION_UPDATE.to_string());
                 let _ = upd_ctx.set_payload(session_update::Request {
                     session_id: sid.clone(),
                     metadata: json!({
@@ -295,7 +296,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         // mode / risk_level / provider_id 随请求显式继承（resolve_session_params
         // 的回退链是 req > metadata > 默认，ctx 键会被覆盖，必须走 req 字段）。
         let send_ctx = ctx.fork();
-        send_ctx.set(PATH, "session/chat/send".to_string());
+        send_ctx.set(PATH, SESSION_CHAT_SEND.to_string());
         send_ctx.set(SESSION_ID, child_session_id.clone());
         let _ = send_ctx.set_payload(session_chat::Request {
             session_id: Some(child_session_id.clone()),
@@ -361,7 +362,7 @@ async fn validate_subsession_exists(
     session_id: &str,
 ) -> Result<(), PluginError> {
     let gm_ctx = ctx.fork();
-    gm_ctx.set(PATH, "session/get_messages".to_string());
+    gm_ctx.set(PATH, SESSION_GET_MESSAGES.to_string());
     let _ = gm_ctx.set_payload(session_get_messages::Request {
         session_id: session_id.to_string(),
     });

@@ -31,7 +31,8 @@ use symbio::symbio_core::schemas::session::session_chat;
 use symbio::symbio_core::schemas::session::session_chat_response::StreamEvent;
 use symbio::symbio_core::schemas::session::session_update;
 use symbio::symbio_core::{
-    InvokeRequestExt, Plugin, PluginFrame, PluginPayload, SimpleRequest, PATH, SESSION_ID, WORKDIR,
+    InvokeRequestExt, Plugin, PluginFrame, PluginPayload, SimpleRequest, EVENT_BUS_SUBSCRIBE, PATH,
+    SESSION_ID, WORKDIR,
 };
 
 use crate::render::Renderer;
@@ -110,8 +111,9 @@ impl SymbioClient {
         let root = create_root_plugin().await;
 
         // 订阅事件总线：一次订阅覆盖所有会话，切会话无需重连。
+        // 路径取 `symbio_core::paths` 常量——调用侧不写字面量（见该模块「地址规则」）。
         let ctx = Arc::new(SimpleRequest::new(None, None));
-        ctx.set(PATH, "event_bus/subscribe".to_string());
+        ctx.set(PATH, EVENT_BUS_SUBSCRIBE.to_string());
         ctx.set_payload(SubscribeRequest { kinds: None })
             .map_err(|e| format!("设置订阅载荷失败: {e}"))?;
         let mut chan = match Arc::clone(&root)
