@@ -306,12 +306,27 @@ pub fn max_seq(messages: &[ChatMessage]) -> i64 {
     messages.iter().filter_map(|m| m.seq).max().unwrap_or(0)
 }
 
-/// 按切片顺序为"尚未分配序号"的消息补发 `seq`，返回分配后的新水位。
+/// 按切片顺序为消息补发 / **纠正** `seq`，返回分配后的新水位。
+///
+/// # 不变式：`seq` 必须沿数组单调不减
+///
+/// 调用方（`replace_messages`）的契约是「**数组顺序即权威顺序**」。因此 `seq`
+/// 一旦与数组顺序不一致，它就是**错的顺序**，而不是"值得保留的历史值"。
+///
+/// 典型反例（L2 压缩）：新列表是 `[快照, 保留区…]`——快照是新建的（无 seq，
+/// 拿到 `base+1`，成了**最大**），而保留区沿用旧的**低**序号。于是 `ordered()`
+/// 会把快照排到最后：压缩后的历史记忆跑到整段转写末尾，前端表现为消息顺序错乱
+/// （用户消息插进了"更早"的历史里）。这也是"保留原值"这条旧规则的字面后果。
+///
+/// 因此已带 `seq` 的消息也要检查：一旦它不大于已分配的水位（即会破坏单调性），
+/// 就按数组顺序重新发号。
 ///
 /// # 语义（Lamport 计数器）
 ///
 /// - 起点是 `base`（通常是当前会话已有的最大 seq），新值严格 `base+1, base+2, …`；
-/// - 已带 `seq` 的消息**保持原值不动**（避免重排历史）；
+/// - **正常路径不会触发任何重排**：数组顺序本就等于 seq 顺序时，既有序号原样保留
+///   （由 `assign_seq_leaves_already_ordered_seqs_untouched` 锁定）——
+///   本函数只在顺序**已经错了**的时候才改写既有序号；
 /// - 由于起点取自"已有最大值"，跨调用、跨进程重启都不会回退或撞号。
 ///
 /// `base = max_seq(existing)` 需在调用前算好：本批次内已带 seq 的消息不参与递增，
@@ -320,12 +335,10 @@ pub fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
     let mut cursor = base;
     for m in messages.iter_mut() {
         match m.seq {
-            Some(existing) => {
-                if existing > cursor {
-                    cursor = existing;
-                }
-            }
-            None => {
+            // 已带序号且仍大于水位：沿用，并把水位抬到它（正常路径走的都是这支）
+            Some(existing) if existing > cursor => cursor = existing,
+            // 缺号，**或**已带但已破坏单调性：按数组顺序重新发号
+            _ => {
                 cursor += 1;
                 m.seq = Some(cursor);
             }
@@ -417,5 +430,68 @@ mod tests {
     fn completed_is_distinct_from_unset_sentinel() {
         assert_eq!(MessageStatus::Completed.as_str(), "completed");
         assert_ne!(MessageStatus::Completed.as_str(), "active");
+    }
+
+    /// `assign_seq` 必须让 `seq` 沿数组**单调不减**——数组顺序即权威顺序。
+    ///
+    /// 反例（L2 压缩）：新列表是 `[快照(新建、无 seq), 保留区(沿用旧低序号)]`。
+    /// 「已带 seq 的一律保持原值」会让快照拿到 `base+1`（**最大**），而保留区仍是
+    /// 更小的旧序号 ⇒ `ordered()` 把快照排到**最后**：压缩后的历史记忆跑到整段
+    /// 转写末尾，前端表现为消息顺序错乱（用户消息插进了"更早"的历史里）。
+    #[test]
+    fn assign_seq_keeps_array_order_authoritative() {
+        let mut msgs = vec![
+            ChatMessage {
+                id: "snapshot".into(),
+                seq: None,
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "keep1".into(),
+                seq: Some(95),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "keep2".into(),
+                seq: Some(96),
+                ..Default::default()
+            },
+        ];
+        // base = 100：压缩前会话已有的水位
+        assign_seq(&mut msgs, 100);
+        assert_eq!(msgs[0].seq, Some(101), "快照是数组首元素，必须先于保留区");
+        assert!(
+            msgs[0].seq.unwrap() < msgs[1].seq.unwrap(),
+            "seq 必须沿数组递增，否则 ordered() 会重排数组顺序"
+        );
+        assert!(msgs[1].seq.unwrap() < msgs[2].seq.unwrap());
+    }
+
+    /// 正常路径**不得**触发重排：数组顺序本就等于 seq 顺序时，既有序号原样保留。
+    ///
+    /// 这条是上面那条的反面保险——修单调性不能以"每次落库都重排历史"为代价。
+    #[test]
+    fn assign_seq_leaves_already_ordered_seqs_untouched() {
+        let mut msgs = vec![
+            ChatMessage {
+                id: "a".into(),
+                seq: Some(5),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "b".into(),
+                seq: Some(6),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "c".into(),
+                seq: None,
+                ..Default::default()
+            },
+        ];
+        assign_seq(&mut msgs, 0);
+        assert_eq!(msgs[0].seq, Some(5), "已有序的历史不得被改写");
+        assert_eq!(msgs[1].seq, Some(6));
+        assert_eq!(msgs[2].seq, Some(7), "缺号者续接水位");
     }
 }
