@@ -32,6 +32,15 @@ pub struct ActiveSessionStateInner {
     /// 只能挂在会话节点上——原先是前端一个平行状态（`sessionErrors`），
     /// 现在它是节点的属性（`attributes.error`）。
     pub last_error: Option<String>,
+    /// 连续自动压缩失败次数（仅自动路径计数；主动 `context_compact` 不计）。
+    ///
+    /// 熔断依据：LLM 压缩是**整段历史的完整请求**，失败一次就是数分钟的注定浪费。
+    /// 连续失败达到阈值即"开闸"跳过自动压缩——历史已回滚、本轮仍能正常回复，
+    /// 不必每轮再白等一次注定失败的请求（实测会话 `09d74431` 就是这种反复失败）。
+    /// 任一次压缩**成功**清零；开闸后按冷却时长重试一次（半开），让瞬时错误自愈。
+    pub auto_compress_failures: u32,
+    /// 熔断开闸时刻（`None` = 未开闸）。用于冷却判断。
+    pub auto_compress_circuit_opened_at: Option<std::time::Instant>,
 }
 
 /// 会话状态锚点
@@ -82,8 +91,53 @@ impl ActiveSessionState {
                 last_tool_calls: Vec::new(),
                 last_outcome: None,
                 last_error: None,
+                auto_compress_failures: 0,
+                auto_compress_circuit_opened_at: None,
             }),
             live_messages: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// 自动压缩熔断阈值：连续失败达到此数即开闸跳过。
+    pub const COMPRESS_CIRCUIT_LIMIT: u32 = 3;
+    /// 开闸后的冷却时长：期间跳过自动压缩；冷却结束允许一次重试（半开）。
+    pub const COMPRESS_CIRCUIT_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(300);
+
+    /// 自动压缩熔断：是否应跳过本次自动压缩。
+    ///
+    /// 判定：连续失败达到阈值即认为"这次 LLM 压缩注定失败"——继续重试只是每轮
+    /// 白等数分钟。开闸后冷却期内一律跳过；冷却结束放行一次（半开），由这次
+    /// 成功与否决定是否复位或重开。
+    pub async fn compression_should_skip(&self) -> bool {
+        let inner = self.inner.read().await;
+        if inner.auto_compress_failures < Self::COMPRESS_CIRCUIT_LIMIT {
+            return false;
+        }
+        match inner.auto_compress_circuit_opened_at {
+            // 已开闸且冷却未到：跳过
+            Some(opened) => opened.elapsed() < Self::COMPRESS_CIRCUIT_COOLDOWN,
+            // 计数达标却没记录开闸时刻（不应发生）：保守放行一次探查
+            None => false,
+        }
+    }
+
+    /// 记录一次自动压缩**成功**：清零失败计数与开闸时刻。
+    /// 任何路径的压缩成功都调用——熔断只在"连续失败"时维持。
+    pub async fn compression_record_success(&self) {
+        let mut inner = self.inner.write().await;
+        inner.auto_compress_failures = 0;
+        inner.auto_compress_circuit_opened_at = None;
+    }
+
+    /// 记录一次自动压缩**失败**：计数 +1；首次达到阈值时记下开闸时刻。
+    /// 冷却期内失败不刷新开闸时刻（避免「每次失败都重置冷却」导致永不重试）。
+    pub async fn compression_record_failure(&self) {
+        let mut inner = self.inner.write().await;
+        inner.auto_compress_failures += 1;
+        if inner.auto_compress_failures >= Self::COMPRESS_CIRCUIT_LIMIT
+            && inner.auto_compress_circuit_opened_at.is_none()
+        {
+            inner.auto_compress_circuit_opened_at = Some(std::time::Instant::now());
         }
     }
 
@@ -125,3 +179,7 @@ impl ActiveSessionManager {
         state
     }
 }
+
+#[cfg(test)]
+#[path = "active.test.rs"]
+mod tests;

@@ -277,7 +277,7 @@ impl Drop for StopSignal {
 /// 发变更需要两样东西：store（取会话摘要）与 `change_subs`（投递），两者都在插件上。
 pub struct CompressionEmitter {
     plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
-    state: Arc<crate::plugins::session::active::ActiveSessionState>,
+    pub(crate) state: Arc<crate::plugins::session::active::ActiveSessionState>,
 }
 
 impl CompressionEmitter {
@@ -310,23 +310,46 @@ impl CompressionEmitter {
     ///
     /// 在途缓冲里找不到该 id 时（例如前端是在压缩开始之后才连上的）**照样构造
     /// 并广播**——终态必须到达，否则那个 `Streaming` 节点会永远留在前端转圈。
-    pub async fn finish(&self, node_id: &str, status: MessageStatus, text: &str) -> ChatMessage {
+    ///
+    /// `failure_kind`：失败原因码（写进 `meta.failure_kind`）。必须在**广播之前**
+    /// 设好——本方法先 `emit` 再返回，事后改 meta 前端拿到的是没有原因码的那份。
+    pub async fn finish(
+        &self,
+        node_id: &str,
+        status: MessageStatus,
+        text: &str,
+        failure_kind: Option<&str>,
+    ) -> ChatMessage {
         let node = {
             let mut live = self.state.live_messages.lock().await;
             match live.iter_mut().find(|m| m.id == node_id) {
                 Some(existing) => {
                     existing.status = Some(status.clone());
                     existing.content = Some(MessageContent::Text(text.to_string()));
+                    if let Some(kind) = failure_kind {
+                        let mut meta = existing
+                            .meta
+                            .clone()
+                            .unwrap_or_else(|| serde_json::json!({}));
+                        meta["failure_kind"] = serde_json::json!(kind);
+                        existing.meta = Some(meta);
+                    }
                     existing.clone()
                 }
-                None => ChatMessage {
-                    id: node_id.to_string(),
-                    role: Some(MessageRole::Assistant),
-                    msg_type: Some(MessageType::Compression),
-                    status: Some(status.clone()),
-                    content: Some(MessageContent::Text(text.to_string())),
-                    ..Default::default()
-                },
+                None => {
+                    let mut node = ChatMessage {
+                        id: node_id.to_string(),
+                        role: Some(MessageRole::Assistant),
+                        msg_type: Some(MessageType::Compression),
+                        status: Some(status.clone()),
+                        content: Some(MessageContent::Text(text.to_string())),
+                        ..Default::default()
+                    };
+                    if let Some(kind) = failure_kind {
+                        node.meta = Some(serde_json::json!({ "failure_kind": kind }));
+                    }
+                    node
+                }
             }
         };
         // 权威副本即将由调用方落库，在途副本必须作废：否则同一条消息会以

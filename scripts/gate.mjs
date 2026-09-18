@@ -114,7 +114,9 @@ const BASELINE = {
   //   （快照先于保留区），以及"正常路径不得触发重排"这条反面保险
   // 704 → 704：压缩改走消息流节点——新增 `compression_request` ×2 + `flatten` 跳过
   //   压缩节点 ×1，与移除的会话级 `phase` 后端 ×2 相抵，净零
-  rustTests: 704,
+  // 704 → 712：会话 id 改短 GUID（8 位十六进制）×2 + 自动压缩熔断状态机 ×3 +
+  //   压缩失败原因可诊断（kind / message / Display）×3
+  rustTests: 712,
   vitestFiles: 19,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态

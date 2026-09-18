@@ -237,9 +237,11 @@ pub(crate) async fn apply_compaction(
                 turn.last_saved = context.messages.len();
             }
             Ok(None) => {}
+            // 压缩失败**不失败整轮**：压缩是优化项，失败已就地回滚、历史完整，
+            // 本轮仍应正常回复用户。失败原因已写入压缩节点（meta.failure_kind +
+            // error），连续失败会触发熔断（跳过后续自动压缩）。
             Err(e) => {
                 plugin_warn!("session", "auto_compress_process failed: {e}");
-                return Err(TurnExit::Failed(e));
             }
         }
     }

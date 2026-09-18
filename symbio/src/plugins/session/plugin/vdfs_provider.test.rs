@@ -314,3 +314,59 @@ async fn memory_write_notifies_subscribers() {
     );
     assert_eq!(got.change, vdfs::VDFS_CHANGE_CREATED, "首次写入是 created");
 }
+
+// ==================== 会话 id 形状 ====================
+
+/// 新建会话的 id 是**短 GUID**（8 位十六进制）。
+///
+/// 会话 id 直接出现在用户视野里——它是 VDFS 目录名（`.symbio/session/<id>`），
+/// 列表与地址栏都要读。此前是 36 字符带连字符的完整 UUID，与项目既有的两处
+/// 短 id 约定（`turn::short_id` / `vdfs_service::entry::auto_id`）不一致。
+///
+/// 这条测试盯的是**形状**：一旦有人改回长 UUID，这里立刻红。
+#[tokio::test]
+async fn new_session_id_is_a_short_guid() {
+    let (_dir, p) = fixture();
+    let content = vdfs::VdfsContent {
+        create: true,
+        ..vdfs::VdfsContent::text("", "{}")
+    };
+    let r = p.write(&vctx(), "", &content).await.unwrap();
+    assert!(r.created);
+
+    let id = r.path;
+    assert_eq!(id.len(), 8, "短 GUID 应为 8 位，实得 {id:?}");
+    assert!(
+        id.chars().all(|c| c.is_ascii_hexdigit()),
+        "应为十六进制字符，实得 {id:?}"
+    );
+    assert!(!id.contains('-'), "短 GUID 不带连字符，实得 {id:?}");
+
+    // 生成后确实落了盘：能按这个 id 读回会话
+    assert!(
+        p.get_store().await.unwrap().session_dir(&id).is_some(),
+        "新会话目录应按 id 建出"
+    );
+}
+
+/// 连续新建不会撞 id（碰撞即新建失败，属于用户可见错误）。
+#[tokio::test]
+async fn new_session_ids_are_distinct() {
+    let (_dir, p) = fixture();
+    let mut ids = std::collections::HashSet::new();
+    for _ in 0..32 {
+        let r = p
+            .write(
+                &vctx(),
+                "",
+                &vdfs::VdfsContent {
+                    create: true,
+                    ..vdfs::VdfsContent::text("", "{}")
+                },
+            )
+            .await
+            .unwrap();
+        assert!(ids.insert(r.path.clone()), "id 重复：{}", r.path);
+    }
+    assert_eq!(ids.len(), 32);
+}

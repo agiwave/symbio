@@ -28,7 +28,7 @@
 //! - 具体协议实现层决定如何使用这些历史（有状态协议可能只使用部分或不使用）
 //! - 请求中只包含当前要发送的单条消息（single_message）
 
-mod compress;
+pub(crate) mod compress;
 mod inputs;
 mod io;
 mod state;

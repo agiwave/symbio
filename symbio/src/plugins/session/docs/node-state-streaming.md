@@ -494,6 +494,47 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
 压缩**指令**的措辞刻意不提 `<state_snapshot>` 标签名：结构定义只在 system 侧出现
 一次，在对话里重复格式指令会诱导模型模仿模板而非按 system 输出。
 
+### S20.6 —— 压缩失败的**可诊断性**与**熔断**（本次）
+
+实测会话 `09d74431…`（长 GUID，见下）出现过**两次**压缩失败，相隔约 4 分钟，两条
+`compression` 节点都是 `Failed` 且 `meta = None`、`error = None`——连失败原因都没留下。
+这意味着：① 用户每发一条消息都要白等一次数分钟的**注定失败** LLM 请求；② 事后完全无法
+判断是 LLM 请求失败 / 快照校验失败 / 兜底无收益。两个缺陷都修。
+
+**失败原因必须可诊断**（任务 26）：
+
+- `compress_snapshot_inner` 旧逻辑所有失败出口统一 `return None`，调用方只知"失败"不知
+  原因。`CompressionFailure` 枚举把出口细分为 `Llm(String)`（带 provider 错误文本）/
+  `InvalidSnapshot` / `NoPayoff`，由包装层经 `CompressionEmitter::finish(node, status, text,
+  failure_kind)` 写进节点：`error` 装人读原因、`meta.failure_kind` 装机读码（与未执行工具节点
+  同一字段约定）。
+- 自动路径的 `auto_compress_process` 改为 `Result<Option<usize>, CompressionFailure>`
+  透传；手动 `run_context_compact` 同样用 `message()` 回写节点。
+
+**连续失败必须熔断**（任务 27）：
+
+- 根因：`auto_compress_process` 只看当前 token 水位，不记得"上次失败"。压缩失败→上下文
+  **原样回滚**→下轮仍超阈值→再压→再败——死循环，且每次都是一次完整的 LLM 往返。
+- `ActiveSessionStateInner` 新增 `auto_compress_failures: u8` 与
+  `auto_compress_circuit_opened_at: Option<Instant>`，由三个 `async` 辅助方法集中维护
+  （`compression_should_skip` / `compression_record_success` / `compression_record_failure`）：
+  - 连续失败达 `COMPRESS_CIRCUIT_LIMIT`（3）即开闸；
+  - 冷却期 `COMPRESS_CIRCUIT_COOLDOWN`（5 分钟）内一律跳过 LLM 压缩——历史不回滚、不
+    阻塞回复；
+  - 冷却结束放行**一次**（半开），由这次结果决定复位或重开。冷却期内的失败**不刷新**
+    开闸时刻（否则"每次失败都重置冷却"导致永不重试）。
+- **压缩失败不得阻断主回复**：自动压缩是优化项，历史已回滚，因此它失败最坏的代价是
+  "本轮用更长的上下文跑"。`inputs.rs` 里 `auto_compress_process` 的 `Err` 从"让整轮
+  `TurnExit::Failed`"改为"告警 + 继续"——这是"反复压缩失败"体验糟糕的**根因之一**，
+  现在压缩失败只是日志里一行，用户的消息照常得到回复。
+
+**会话 ID 默认短 GUID**（任务 25，与本次同源）：
+
+`vdfs_provider.rs` 新建会话用 `uuid::Uuid::new_v4()`（36 字符带连字符），而项目已有两处
+8 位短 ID 约定（`turn::short_id` / `vdfs_service::entry::auto_id`）。会话 ID 是 VDFS 目录名
+（`.symbio/session/<id>`），也是用户可见地址，应一致。改为 `crate::symbio_core::turn::short_id()`
++ 目录碰撞重试（重试仍撞则错误外抛——目录冲突属真异常，不该静默吞）。
+
 ### S21 —— 工具调用请求显式化（**本次不做，留待需要时**）
 把 ToolCall 的参数从 `content` 提升为一个真子节点（`type = tool_request`）。
 **现在不做**，因为它要求 `plugins/model/message_builder` 的请求扁平化同步改造，
@@ -523,6 +564,8 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
 | 13 | 切回「正在跑」的会话 | 正在跑的那一轮**仍在**（叶子读含在途 + 前端水合不丢弃在途） | §6 S20.3 |
 | 14 | 长会话触发压缩时 | 消息流里出现「上下文压缩」节点：运行中脉动 + 已用秒数，完成后显示"已压缩上下文（X → Y 条）"（此前**完全无提示**，表现为卡死） | §6 S20.4 |
 | 15 | 压缩请求的内容 | 历史以**对话形态**下发（不是 JSON 转储），末尾一条压缩指令 | §6 S20.5 |
+| 16 | 压缩失败 | 节点落到 `Failed`/`Completed(aborted)`，且 `error` + `meta.failure_kind` 写明**原因**（Llm / InvalidSnapshot / NoPayoff）；不再是一句无差别的"压缩未完成"且无 `meta` | §6 S20.6 |
+| 17 | 压缩连续失败 | 达阈值后熔断 5 分钟冷却，期间**跳过 LLM 压缩**但仍正常回复（不白等、不阻断）；冷却结束半开重试一次 | §6 S20.6 |
 
 ---
 
@@ -560,6 +603,14 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
 16. **给模型的输入按模型的视角投影**：压缩请求把历史**原样**交给 provider 的
     `flatten_chat_messages`，而不是 `serde_json` 序列化存储结构——后者会为 `id` /
     `parent_id` / `seq` / `meta` 等模型完全不关心的字段原样付费（§6 S20.5）。
+17. **失败要留证**：节点的 `Failed`/`Completed(aborted)` 必须带 `error`（人读原因）与
+    `meta.failure_kind`（机读码），不得无差别地落"未完成"却留空 `meta`/`error`——否则事后
+    无法区分"LLM 挂了"与"摘要结构非法"（§6 S20.6）。
+18. **优化项失败不得阻断主路径**：自动压缩是上下文优化、失败时历史已回滚，因此它失败
+    最坏的代价是"本轮用更长上下文跑"，绝不能 `TurnExit::Failed` 让用户消息也拿不到回复
+    （§6 S20.6）。
+19. **连续失败要熔断**：只看当前水位不看历史，会让"注定失败的压缩"每轮重试、每次都白等
+    一次完整 LLM 往返。达阈值即开闸冷却，冷却期内跳过而非硬扛（§6 S20.6）。
 
 ---
 

@@ -922,3 +922,47 @@ fn test_emergency_tail_compression_gives_up_when_no_turn_boundary() {
     assert_eq!(removed, 0);
     assert_eq!(out.len(), 2);
 }
+
+// ==================== 压缩失败的可诊断性 ====================
+//
+// 回归动机：实测会话 `09d74431` 的两条 failed 压缩节点 `meta` / `error` 全空，
+// 排查者无法判断是「模型请求失败」「模型输出不合法」还是「输入超限兜底无收益」——
+// 三种应对完全不同。失败原因必须可机读（kind）且可人读（message）。
+
+#[test]
+fn failure_kind_is_machine_readable_and_distinct() {
+    use crate::plugins::session::chat_loop::compress::CompressionFailure;
+    assert_eq!(
+        CompressionFailure::Llm("rate limit".into()).kind(),
+        "llm_error"
+    );
+    assert_eq!(
+        CompressionFailure::InvalidSnapshot.kind(),
+        "invalid_snapshot"
+    );
+    assert_eq!(CompressionFailure::NoPayoff.kind(), "no_payoff");
+}
+
+#[test]
+fn failure_message_carries_the_reason() {
+    use crate::plugins::session::chat_loop::compress::CompressionFailure;
+    // LLM 失败必须带上 provider 的错误文本——它是唯一能区分限流与参数错误的东西
+    let llm = CompressionFailure::Llm("429 Too Many Requests".into());
+    assert!(llm.message().contains("429 Too Many Requests"));
+    assert!(llm.message().contains("模型请求失败"));
+    // 三种失败都明示「已保留完整历史」，即失败不是破坏性的
+    assert!(CompressionFailure::InvalidSnapshot
+        .message()
+        .contains("已保留完整历史"));
+    assert!(CompressionFailure::NoPayoff
+        .message()
+        .contains("已保留完整历史"));
+}
+
+#[test]
+fn failure_displays_as_message() {
+    use crate::plugins::session::chat_loop::compress::CompressionFailure;
+    let f = CompressionFailure::Llm("boom".into());
+    // `Display` 即 `message()`：日志里 `auto_compress_process failed: {e}` 能拿到原因
+    assert_eq!(format!("{f}"), f.message());
+}

@@ -25,7 +25,7 @@ pub(crate) async fn auto_compress_process(
     abort_flag: &Arc<AtomicBool>,
     overhead_tokens: usize,
     force: bool,
-) -> Result<Option<usize>, PluginError> {
+) -> Result<Option<usize>, CompressionFailure> {
     let effective_context_limit = orchestrator.context_limit as usize;
 
     // 请求级固定开销（system prompt + 工具定义）必须计入阈值判断，
@@ -33,6 +33,20 @@ pub(crate) async fn auto_compress_process(
     // 口径由调用方（`prepare_turn_inputs`）算好后传入：本函数原先只拿它算这一处，
     // 却因此需要自己再取一次工具清单，与主循环的收集重复。
     let overhead = overhead_tokens;
+
+    // 自动压缩熔断：连续失败达到阈值后，跳过本次自动压缩——历史已回滚、本轮仍
+    // 能正常回复，不必每轮再白等一次注定失败的 LLM 请求（实测会话 `09d74431` 的
+    // 反复失败就是这个形态）。手动 `context_compact` 不受影响，且任一次压缩成功
+    // 都会清零计数（半开冷却期内放行一次重试，让瞬时错误自愈）。
+    if let Some(em) = &orchestrator.compression {
+        if em.state.compression_should_skip().await {
+            plugin_warn!(
+                "session",
+                "自动压缩熔断：连续失败已达阈值，本次跳过（冷却中），历史保持完整"
+            );
+            return Ok(None);
+        }
+    }
 
     if !compression::should_start_compression(
         &context.messages,
@@ -75,8 +89,19 @@ pub(crate) async fn auto_compress_process(
     )
     .await;
     match post_tokens {
-        Some(_) => Ok(Some(original_count)),
-        None => Ok(None),
+        Ok(Some(_)) => {
+            if let Some(em) = &orchestrator.compression {
+                em.state.compression_record_success().await;
+            }
+            Ok(Some(original_count))
+        }
+        Ok(None) => Ok(None),
+        Err(f) => {
+            if let Some(em) = &orchestrator.compression {
+                em.state.compression_record_failure().await;
+            }
+            Err(f)
+        }
     }
 }
 
@@ -103,6 +128,60 @@ pub(crate) async fn auto_compress_process(
 /// manual = 当前用户指令 + 进行中 Turn 及之后，保证 Turn 子树 parent 链完整，
 /// 详见 [`run_context_compact`] 文档中的切分点约束）。
 /// 成功返回 `Some(post_tokens)`（压缩后内容水位：快照 + 保留区，不含请求级 overhead）。
+/// 压缩为什么没完成。
+///
+/// ## 为什么需要它
+///
+/// 此前所有失败出口统一返回 `None`，调用方只拿到"失败了"，节点写死一句
+/// "压缩未完成，已保留完整历史"，`error` 与 `meta` 全空。实测会话
+/// `09d74431` 的两条 failed 压缩节点就是这副样子——**无法区分**是 LLM 请求
+/// 失败、模型没输出合法快照、还是本地兜底无收益。用户看到的是同一个结果，
+/// 但三者的应对完全不同（重试 / 换模型 / 手动清理），不可诊断就无法处理。
+///
+/// 它同时给出两个视图：`message()` 面向用户（进节点 content），
+/// `kind()` 机器可读（进 `meta.failure_kind`，与未执行工具节点同一字段约定）。
+pub(crate) enum CompressionFailure {
+    /// LLM 请求本身失败（网络 / 限流 / provider 报错）。
+    /// 携带 provider 的错误文本——它是唯一能区分"限流"与"参数错误"的东西。
+    Llm(String),
+    /// 两次尝试都未取得合法 `<state_snapshot>`（模型输出散文 / scratchpad
+    /// 泄漏 / 被截断）。
+    InvalidSnapshot,
+    /// 摘要请求输入超限，且本地机械兜底也无收益（保留区无法以 user 轮边界开头）。
+    NoPayoff,
+}
+
+impl std::fmt::Display for CompressionFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+impl CompressionFailure {
+    /// 机器可读的原因码（节点 `meta.failure_kind`）
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::Llm(_) => "llm_error",
+            Self::InvalidSnapshot => "invalid_snapshot",
+            Self::NoPayoff => "no_payoff",
+        }
+    }
+
+    /// 面向用户的短说明（节点 content）
+    pub(crate) fn message(&self) -> String {
+        match self {
+            Self::Llm(e) => format!("压缩未完成（模型请求失败：{e}），已保留完整历史"),
+            Self::InvalidSnapshot => {
+                "压缩未完成（模型未按要求输出摘要），已保留完整历史".to_string()
+            }
+            Self::NoPayoff => {
+                "压缩未完成（待压缩内容超出模型输入上限，且本地兜底无收益），已保留完整历史"
+                    .to_string()
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn compress_snapshot_inner(
     orchestrator: &ChatOrchestrator,
@@ -114,7 +193,7 @@ async fn compress_snapshot_inner(
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
     log_tag: &str,
-) -> Option<usize> {
+) -> Result<Option<usize>, CompressionFailure> {
     // 保存原始历史：压缩失败时回滚，绝不能让压缩请求残留在上下文里。
     let original_messages = context.messages.clone();
     let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await;
@@ -187,11 +266,11 @@ async fn compress_snapshot_inner(
                 .iter()
                 .map(compression::estimate_message_tokens)
                 .sum();
-            return Some(post_tokens);
+            return Ok(Some(post_tokens));
         }
-        // 兜底也无需截断（理论上不可达：能进压缩说明已越线）——回滚放弃
+        // 兜底也无需截断（保留区无法以 user 轮边界开头）——回滚放弃
         context.messages = original_messages;
-        return None;
+        return Err(CompressionFailure::NoPayoff);
     }
 
     // 压缩请求的**全部内容**：待压缩历史（正常对话形态）+ 末尾压缩指令。
@@ -233,7 +312,7 @@ async fn compress_snapshot_inner(
                 e
             );
             context.messages = original_messages;
-            return None;
+            return Err(CompressionFailure::Llm(e.to_string()));
         }
     };
 
@@ -279,7 +358,7 @@ async fn compress_snapshot_inner(
             "[Compress] {log_tag}: invalid snapshot after retry; preserving history"
         );
         context.messages = original_messages;
-        return None;
+        return Err(CompressionFailure::InvalidSnapshot);
     };
     context.messages.clear();
 
@@ -338,7 +417,7 @@ async fn compress_snapshot_inner(
         .replace_messages(context.messages.clone())
         .await;
 
-    Some(post_tokens)
+    Ok(Some(post_tokens))
 }
 
 /// 压缩内核的**包装层**：只负责「正在压缩」这个会话阶段的置位与清位。
@@ -363,7 +442,7 @@ async fn compress_with_snapshot_core(
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
     log_tag: &str,
-) -> Option<usize> {
+) -> Result<Option<usize>, CompressionFailure> {
     // 压缩节点的 id 在**包装层**生成：这里才有发射器，而内层只管压缩逻辑。
     let node_id = short_id();
     let before = context.messages.len();
@@ -384,17 +463,23 @@ async fn compress_with_snapshot_core(
     .await;
     if let Some(e) = &orchestrator.compression {
         let after = context.messages.len();
-        let (status, text) = match result {
-            Some(_) => (
+        // 失败必须带上**原因**：三种失败的应对完全不同（重试 / 换模型 / 手动清理），
+        // 只说"压缩未完成"等于让用户和排查者都无从下手——实测会话 `09d74431`
+        // 的两条 failed 节点就是只有这句话、`error` 与 `meta` 全空。
+        let (status, text, kind) = match &result {
+            Ok(Some(_)) => (
                 MessageStatus::Completed,
                 format!("已压缩上下文（{before} → {after} 条）"),
+                None,
             ),
-            None => (
-                MessageStatus::Failed,
-                "压缩未完成，已保留完整历史".to_string(),
+            Ok(None) => (
+                MessageStatus::Completed,
+                "未触发压缩（内容未达阈值）".to_string(),
+                None,
             ),
+            Err(f) => (MessageStatus::Failed, f.message(), Some(f.kind())),
         };
-        let node = e.finish(&node_id, status, &text).await;
+        let node = e.finish(&node_id, status, &text, kind).await;
         // 落库：压缩是会话里真实发生的一步，应当留下记录。否则用户刷新后只看到
         // "历史突然变短了"，却没有任何东西说明发生过什么。
         if let Err(err) = context.session.append_messages(vec![node]).await {
@@ -468,9 +553,12 @@ pub(crate) async fn run_context_compact(
     .await;
 
     match post_tokens {
-        Some(after) => (true, before_tokens, after),
-        // 未执行 / 失败：压缩放弃（历史已回滚），工具结果如实反映无收益
-        None => (false, before_tokens, before_tokens),
+        Ok(Some(after)) => (true, before_tokens, after),
+        // 未执行（内容未达阈值）：工具结果如实反映无收益
+        Ok(None) => (false, before_tokens, before_tokens),
+        // 失败：历史已在核心内回滚；具体原因已写入压缩节点（meta.failure_kind +
+        // error），这里只如实反映工具无收益。失败不再冒泡为整轮失败。
+        Err(_) => (false, before_tokens, before_tokens),
     }
 }
 

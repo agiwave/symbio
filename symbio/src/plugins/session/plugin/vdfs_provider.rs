@@ -352,7 +352,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
         // 名字（若有）在路径末段里——写挂载根时没有名字，标题留给
         // `display_title` 从首条消息派生（那条规则只有一处实现，使用方不预造）。
         if content.create {
-            let id = uuid::Uuid::new_v4().to_string();
+            let id = self.new_session_id().await;
             let mut session = Session::new(&id);
             let mut meta = serde_json::Map::new();
             // 使用方给的 metadata（草稿态选择的 workdir / agent / model / mode…）：
@@ -531,6 +531,42 @@ impl vdfs::VdfsProvider for SessionPlugin {
 }
 
 impl SessionPlugin {
+    /// 新会话 id —— 短 GUID（8 位十六进制）。
+    ///
+    /// ## 为什么是短 id
+    ///
+    /// 会话 id 会**直接出现在用户视野里**：它是 VDFS 的目录名（`.symbio/session/<id>`），
+    /// 会话列表、地址栏、分享时都要读它。此前用 `Uuid::new_v4().to_string()`（36 字符
+    /// 带连字符），既难读也难抄。
+    ///
+    /// 项目早已有一致的短 id 约定，这里只是不再例外：
+    /// - `symbio_core::turn::short_id()`（消息节点 id）
+    /// - `vdfs_service::entry::auto_id()`（无名字新建的条目 id，`<kind>-<8位>`）
+    ///
+    /// 后端**没有任何地方** `Uuid::parse_str` 会话 id（已全仓核对），因此改格式安全；
+    /// 已存在的长 id 会话照旧按原 id 寻址，不受影响。
+    ///
+    /// ## 碰撞
+    ///
+    /// 8 位十六进制 = 32 bit。桌面应用的会话量级（数百）碰撞概率可忽略，但 id
+    /// 同时是**磁盘目录名**——撞上就是新建失败，属于用户可见错误。故生成后查一次
+    /// 目录，命中则重摇（上限内），把概率问题变成确定性检查。
+    async fn new_session_id(&self) -> String {
+        let store = self.get_store().await.ok();
+        for _ in 0..8 {
+            let id = crate::symbio_core::turn::short_id();
+            let taken = match &store {
+                Some(s) => s.session_dir(&id).is_some(),
+                None => false,
+            };
+            if !taken {
+                return id;
+            }
+        }
+        // 兜底：连续 8 次都撞（概率约 1e-67）时宁可长一点也要保证唯一
+        uuid::Uuid::new_v4().to_string()
+    }
+
     /// 会话转写（**含在途消息**）——`.vdfs/session/<id>/消息` 的唯一数据源。
     ///
     /// 落库转写 ∪ 本轮在途缓冲。之所以要并上后者：流式期间消息**还没落库**

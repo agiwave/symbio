@@ -18,6 +18,46 @@
 
 ***
 
+## 2026-09-18: 会话 ID 改短 GUID + 压缩失败可诊断 + 连续失败熔断
+
+**性质：修复 + 健壮性**。承接上轮的压缩体验改造，处理用户现场发现的两个问题：
+会话目录名是 36 字符长 UUID；某长会话在运行中反复压缩失败且毫无诊断信息。
+
+### 会话 ID 默认短 GUID
+
+- `vdfs_provider.rs` 新建会话从 `Uuid::new_v4()`（36 字符带连字符）改为
+  `crate::symbio_core::turn::short_id()`（8 位十六进制），与项目既有的两处短 ID 约定
+  （`turn::short_id` / `vdfs_service::entry::auto_id`）一致。
+- 会话 ID 同时是 VDFS 目录名（`.symbio/session/<id>`）与用户可见地址，应短而稳定。
+- 加目录碰撞重试；重试仍撞则错误外抛（目录冲突属真异常，不静默吞）。
+- 已确认无 UUID 格式依赖（后端无 `Uuid::parse_str`，前端只在乐观消息用 `randomUUID`
+  而非会话 id），改短安全。
+
+### 压缩失败可诊断
+
+- `compress_snapshot_inner` 全失败出口原统一 `return None`，调用方只知"失败"不知原因。
+  新增 `CompressionFailure` 枚举：`Llm(String)`（带 provider 错误文本）/ `InvalidSnapshot`
+  / `NoPayoff`，由 `CompressionEmitter::finish(node, status, text, failure_kind)` 写进节点——
+  `error` 装人读原因、`meta.failure_kind` 装机读码（与未执行工具节点同字段约定）。
+- 实测会话 `09d74431…` 的两条 `Failed` 节点此前 `meta=None`/`error=None`，现在必然带原因。
+
+### 压缩连续失败熔断
+
+- 根因：`auto_compress_process` 只看当前 token 水位，不记得"上次失败"。压缩失败→上下文
+  原样回滚→下轮仍超阈值→再压→再败，每轮白等一次数分钟 LLM 往返。
+- `ActiveSessionStateInner` 加 `auto_compress_failures` + `auto_compress_circuit_opened_at`，
+  三个 `async` 辅助方法集中维护：连续失败达 `COMPRESS_CIRCUIT_LIMIT`(3) 开闸，冷却
+  `COMPRESS_CIRCUIT_COOLDOWN`(5min) 内跳过 LLM 压缩（不回滚、不阻塞回复），冷却结束半开
+  重试一次；冷却期内的失败不刷新开闸时刻（避免永不重试）。
+- **压缩失败不得阻断主回复**：从"让整轮 `TurnExit::Failed`"改为"告警 + 继续"。压缩是优化
+  项、历史已回滚，最坏代价是"本轮用更长上下文跑"，不该让用户消息也拿不到回复。
+
+### 门禁
+
+后端 712（+8：短 ID ×2 + 熔断状态机 ×3 + 失败诊断 ×1 + flatten 跳过… 实际相抵后净 +8）、
+前端 177；`cargo test --lib` 与 `vitest` 均绿；门禁 19/19（设 `CARGO_TERM_COLOR=never` 规避
+cargo 给 `test result:` 套 ANSI 色码导致门禁解析失败的无关问题）。
+
 ## 2026-09-18: 压缩成为会话流中的普通节点 + 压缩请求改为"像历史对话一样发"
 
 **性质：体验改造 + 后端算法**。用户两条反馈：
