@@ -268,12 +268,20 @@ mod tests {
     // 测试串行化（修改全局状态需要互斥）
     static TEST_LOCK: StdMutex<()> = StdMutex::new(());
 
+    /// 取串行锁。**读全局状态的测试也必须取**——不只是写它的那些。
+    ///
+    /// 踩过的坑：`test_default_homedir_is_user_home_dot_symbio` 起初没取锁，
+    /// 理由是"它只读、不改"。但同文件的其它测试会 `set(SYMBIO_HOMEDIR)`，于是
+    /// 它会在别人持有期间读到被改过的值而失败——**单独跑必过、全量跑随机红**。
+    /// 这种 flake 最坏的地方在于它看起来像"本次改动引入的"，会让人去查错误的
+    /// 方向（本次就是这么发现的：一次全量 720/1，重跑三遍全绿）。
     fn lock_test() -> std::sync::MutexGuard<'static, ()> {
         TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     #[test]
     fn test_default_homedir_is_user_home_dot_symbio() {
+        let _g = lock_test();
         // SYMBIO_HOMEDIR 未设置时，应返回 `<user_home>/.symbio`（**绝对路径**）
         // 不能直接断言绝对路径（CI 上 home 不同），但需断言为绝对路径且以 ".symbio" 结尾
         let p = default_homedir();

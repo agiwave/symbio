@@ -4,6 +4,9 @@ import router from './router'
 import './styles/tokens.css'
 import './styles/base.css'
 import './styles/controls.css'
+// 内容呈现（Markdown 正文排版 / JSON 语法着色）：全局而非组件 scoped，
+// 理由见该文件头注释（类名契约 + 特异性可控）
+import './styles/markdown.css'
 import App from './App.vue'
 import { useAppearanceStore } from './stores/appearance'
 import { initGatewayTransport } from './services/plugin'

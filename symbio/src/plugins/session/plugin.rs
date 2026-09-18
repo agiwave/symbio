@@ -477,7 +477,9 @@ impl Plugin for SessionPlugin {
             "get_messages" => self.invoke_get_messages(ctx.clone()).await?,
             "append" => self.invoke_append(ctx.clone()).await?,
             "open" => return self.invoke_open(ctx.clone()).await,
-            "clear" => self.invoke_clear(ctx.clone()).await?,
+            // 删除会话**没有** `session/clear` 路由：VDFS 的
+            // `delete(.vdfs/session/<id>)` 是唯一入口，两者共用
+            // `delete_session_internal`。旧路由已退役（前端与 CLI 都不再调用）。
             "chat/clear_messages" => self.invoke_clear_messages(ctx.clone()).await?,
             "chat/delete_message" => self.invoke_delete_message(ctx.clone()).await?,
             "chat/update_message" => self.invoke_update_message(ctx.clone()).await?,

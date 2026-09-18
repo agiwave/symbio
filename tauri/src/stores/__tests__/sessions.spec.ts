@@ -41,7 +41,7 @@ const sessionApi = vi.hoisted(() => ({
 }))
 vi.mock('@/services/session', () => ({
   listSessions: sessionApi.listSessions,
-  clearSession: vi.fn(),
+  deleteSession: vi.fn(),
   createSessionId: () => 'generated-id',
   updateSession: vi.fn(),
   clearMessages: vi.fn(),

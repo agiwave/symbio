@@ -163,3 +163,101 @@ async fn deleting_an_unknown_message_emits_nothing() {
          把整个列表清空"
     );
 }
+
+// ==================== 会话 metadata：两条路径的一致性 ====================
+//
+// 会话 metadata 有**两个**写入入口：
+//   · `session/update` 路由 —— 只有 CLI 用（它需要客户端指定会话 id）
+//   · `vdfs/write(.vdfs/session/<id>)` —— 前端用
+//
+// 两者曾经各写一遍浅合并。分叉的后果是"前端改名生效、CLI 改名不生效"这类**只在
+// 一条路径上出现**的行为差异，而没有任何测试会覆盖两条路径的**一致性**——下面
+// 这例就是那条曾经缺失的测试。实现侧已收敛到 `Session::merge_metadata_object`。
+
+/// 种子会话（带上指定的初始 metadata）
+async fn seed_session(p: &SessionPlugin, sid: &str, metadata: serde_json::Value) {
+    let store = p.get_store().await.expect("存储不可用");
+    let mut s = Session::new(sid);
+    s.metadata = metadata;
+    store.save_session(&s).await.expect("种子会话落盘失败");
+}
+
+/// 读回某会话的 metadata（**从存储读**，不是读内存——落盘才算数）
+async fn load_meta(p: &SessionPlugin, sid: &str) -> serde_json::Value {
+    let store = p.get_store().await.expect("存储不可用");
+    store.load_session(sid).await.expect("读会话失败").metadata
+}
+
+#[tokio::test]
+async fn session_update_and_vdfs_write_agree_on_metadata() {
+    use crate::symbio_core::vdfs_provider::VdfsProvider;
+
+    let initial = json!({ "workdir": "/old", "agent_id": "keep-me" });
+    let incoming = json!({ "metadata": { "workdir": "/new" }, "title": "改名" });
+
+    // ── 路径 A：`session/update` 路由（CLI）──
+    let (_d1, p1) = fixture();
+    seed_session(&p1, "s1", initial.clone()).await;
+    p1.invoke_update(ctx_with(json!({
+        "session_id": "s1",
+        "metadata": incoming["metadata"].clone(),
+        "title": incoming["title"].clone(),
+    })))
+    .await
+    .expect("session/update 失败");
+    let after_route = load_meta(&p1, "s1").await;
+
+    // ── 路径 B：VDFS `write`（前端）──
+    let (_d2, p2) = fixture();
+    seed_session(&p2, "s1", initial.clone()).await;
+    p2.write(
+        &crate::symbio_core::vdfs::VdfsContext::empty(),
+        "s1",
+        &crate::symbio_core::vdfs::VdfsContent::text("", incoming.to_string()),
+    )
+    .await
+    .expect("vdfs/write 失败");
+    let after_vdfs = load_meta(&p2, "s1").await;
+
+    // 1) 两条路径产出**逐字相同**的 metadata
+    assert_eq!(
+        after_route, after_vdfs,
+        "session/update 与 vdfs/write 必须产出相同的 metadata"
+    );
+    // 2) 并且确实是**浅合并**：没提到的键保持不变
+    assert_eq!(after_route["agent_id"], json!("keep-me"));
+    assert_eq!(after_route["workdir"], json!("/new"));
+    assert_eq!(after_route["title"], json!("改名"));
+}
+
+/// `session/clear` 路由已退役：删除会话的唯一入口是
+/// `vdfs/delete(.vdfs/session/<id>)`。
+///
+/// 为什么值得锁：退役一条路由**不会**让任何既有测试变红——调用方全改完了，剩下的
+/// 只是一个不再被解析的字符串。若哪天有人"顺手"把它加回来，同一件事就又有了两个
+/// 入口、两条会各自漂移的实现，而没有任何测试会覆盖它们的一致性。
+///
+/// 断言**错误消息**而不只是错误类型：变异测试时发现，把 `"clear"` 加回去却让它
+/// 返回 `NotFound` 也能骗过"只查类型"的断言——而那种写法与"没有这条路由"行为完全
+/// 相同，根本不是回归。真正要锁的是「`clear` 落到了**默认分支**」，那正是
+/// `未知路径` 这条消息的出处。
+#[tokio::test]
+async fn session_clear_route_is_retired() {
+    use crate::symbio_core::{InvokeRequestExt, Plugin};
+
+    let (_dir, p) = fixture();
+    let ctx = ctx_with(json!({ "session_id": "s1" }));
+    ctx.set(crate::symbio_core::PATH, "clear".to_string());
+
+    let err = Plugin::route(std::sync::Arc::new(p), ctx)
+        .await
+        .expect_err("session/clear 已退役，不该再被解析");
+
+    match err {
+        crate::symbio_core::PluginError::NotFound(msg) => assert!(
+            msg.contains("未知路径"),
+            "clear 应落到默认分支（未知路径），实际消息：{msg}"
+        ),
+        other => panic!("应报 NotFound（未知路径），实际：{other:?}"),
+    }
+}

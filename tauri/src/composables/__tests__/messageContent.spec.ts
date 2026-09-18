@@ -1,0 +1,163 @@
+/**
+ * 消息内容呈现 — 纯函数单测（node 环境）
+ *
+ * 覆盖两类：
+ * 1. 「内容 → 显示」的取值规则：三种内容形状、失败文案优先级、JSON 判定与高亮退化、
+ *    摘要截断。这些规则原先散在 `MessageNode` 的 computed 里，与渲染混在一起。
+ * 2. **类名契约**：`messageHighlightedOf` 在 TS 里拼出 `class="json-key"` 一类的字符串，
+ *    而样式在 `styles/markdown.css`。两者之间没有编译期约束——这条断言就是那道约束
+ *    （它挡住过一次真实缺陷：这些类名曾写在组件的 `<style scoped>` 里，
+ *    而 scoped 编译会给选择器补 `[data-v-xxx]`，`v-html` 注入的元素拿不到该属性，
+ *    于是着色从未生效）。
+ */
+
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+import {
+  messageErrorTextOf,
+  messageHighlightedOf,
+  messageIsJsonContent,
+  messageRenderAsJsonOf,
+  messageRenderedOf,
+  messageSummaryPreviewOf,
+  messageTextOf,
+} from '../useMessageContent'
+import { MESSAGE_PREVIEW_MAX } from '@/registry/messageTypes'
+import type { MessageContent } from '@/schemas/chat_message'
+
+/**
+ * `{ text }` / `{ parts }` 是**历史与变体形状**：不在当前 `MessageContent` 联合类型里，
+ * 但后端与旧数据仍可能出现，取值函数必须认。这里用显式断言把它们喂进去，
+ * 顺带把「类型之外的形状也要兜住」这件事固定在测试里。
+ */
+const asContent = (v: unknown) => v as MessageContent
+
+describe('messageTextOf：三种内容形状', () => {
+  it('字符串直接返回', () => {
+    expect(messageTextOf('hello')).toBe('hello')
+  })
+
+  it('{ text } 取 text', () => {
+    expect(messageTextOf(asContent({ text: 'hi' }))).toBe('hi')
+  })
+
+  it('{ parts } 按顺序拼接各段 text', () => {
+    expect(messageTextOf(asContent({ parts: [{ text: 'a' }, { text: 'b' }] }))).toBe('a\nb')
+  })
+
+  it('缺省 / 未知形状返回空串，而不是 String() 成 [object Object]', () => {
+    expect(messageTextOf(undefined)).toBe('')
+    expect(messageTextOf('')).toBe('')
+    expect(messageTextOf([{ type: 'image_url', image_url: { url: 'x' } }])).toBe('')
+  })
+})
+
+describe('messageErrorTextOf：优先级', () => {
+  it('节点 error 字段最权威', () => {
+    expect(messageErrorTextOf({ error: '请求失败', content: '正文', meta: { error: '旧' } })).toBe(
+      '请求失败',
+    )
+  })
+
+  it('回退顺序：meta.error → 正文 → 兜底文案', () => {
+    expect(messageErrorTextOf({ content: '正文', meta: { error: '旧路径' } })).toBe('旧路径')
+    expect(messageErrorTextOf({ content: '正文' })).toBe('正文')
+    expect(messageErrorTextOf({})).toBe('执行失败')
+  })
+})
+
+describe('JSON 判定与高亮', () => {
+  it('只有完整可解析的对象 / 数组算 JSON 内容', () => {
+    expect(messageIsJsonContent('{"a":1}')).toBe(true)
+    expect(messageIsJsonContent('[1,2]')).toBe(true)
+    expect(messageIsJsonContent('{"a":')).toBe(false) // 流式半截
+    expect(messageIsJsonContent('纯文本')).toBe(false)
+    expect(messageIsJsonContent('')).toBe(false)
+  })
+
+  it('合法 JSON 被 pretty-print 并逐 token 着色', () => {
+    const html = messageHighlightedOf('{"a":1,"b":true,"c":null}')
+    expect(html).toContain('json-key')
+    expect(html).toContain('json-num')
+    expect(html).toContain('json-bool')
+    expect(html).toContain('json-null')
+  })
+
+  it('解析失败退化为整段字符串着色（流式期间 JSON 不完整是常态）', () => {
+    const html = messageHighlightedOf('{"a":')
+    expect(html).toContain('json-str')
+    expect(html).toContain('{"a":') // 原文照出，不因解析失败变空白
+  })
+
+  it('HTML 特殊字符被转义（v-html 注入的安全底线）', () => {
+    const html = messageHighlightedOf('<img src=x onerror=alert(1)>')
+    expect(html).not.toContain('<img')
+    expect(html).toContain('&lt;img')
+  })
+
+  it('工具结果走 JSON 高亮，其余走 Markdown', () => {
+    expect(messageRenderedOf('{"a":1}', true)).toContain('json-key')
+    expect(messageRenderedOf('# 标题', false)).toContain('<h1')
+  })
+
+  it('失败体不再重复渲染成 JSON 代码块', () => {
+    expect(messageRenderAsJsonOf('{"a":1}', false, false)).toBe(true)
+    expect(messageRenderAsJsonOf('{"a":1}', false, true)).toBe(false)
+    expect(messageRenderAsJsonOf('{"a":1}', true, false)).toBe(false)
+  })
+})
+
+describe('收起态单行摘要', () => {
+  it('分组节点取首个文本 / 思考子节点的内容（容器自身没有正文）', () => {
+    const node = {
+      id: 'tc',
+      content: '{"args":1}',
+      children: [
+        { id: 'r', type: 'reasoning' as const, content: '想了什么' },
+        { id: 'x', type: 'text' as const, content: '正文' },
+      ],
+    }
+    expect(messageSummaryPreviewOf(node, true)).toBe('想了什么')
+    expect(messageSummaryPreviewOf(node, false)).toBe('{"args":1}')
+  })
+
+  it('空白折叠成单空格；超长按上限截断并加省略号', () => {
+    expect(messageSummaryPreviewOf({ id: 'x', content: '  a\n\n  b  ' }, false)).toBe('a b')
+    const long = 'x'.repeat(MESSAGE_PREVIEW_MAX + 50)
+    const out = messageSummaryPreviewOf({ id: 'x', content: long }, false)
+    expect(out.length).toBe(MESSAGE_PREVIEW_MAX + 1)
+    expect(out.endsWith('…')).toBe(true)
+  })
+
+  it('无内容返回空串（头部据此不显示摘要）', () => {
+    expect(messageSummaryPreviewOf({ id: 'x' }, false)).toBe('')
+  })
+})
+
+describe('类名契约：高亮产出的类必须在全局样式表里有规则', () => {
+  // 去注释后再断言：文件头的说明文字里就写着 `[data-v-xxx]`（解释为什么不能用 scoped），
+  // 不去掉注释会把「解释」误判成「违规」。
+  const css = readFileSync(new URL('../../styles/markdown.css', import.meta.url), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    '',
+  )
+
+  it('JSON 着色的每个类都有对应样式（且不是 scoped 选择器）', () => {
+    for (const cls of ['json', 'json-key', 'json-str', 'json-num', 'json-bool', 'json-null']) {
+      expect(css, `样式表缺 .${cls} 规则`).toContain(`.${cls}`)
+    }
+    // scoped 编译会补 [data-v-*]，而 v-html 注入的元素拿不到该属性 → 着色静默失效
+    expect(css, 'markdown.css 必须是全局样式表（不得出现 scoped 属性选择器）').not.toContain(
+      '[data-v-',
+    )
+  })
+
+  it('实际产出的类名与样式表对得上（防止两边各改一半）', () => {
+    const html = messageHighlightedOf('{"k":"v","n":1,"b":false,"z":null}')
+    const produced = [...html.matchAll(/class="([^"]+)"/g)].map((m) => m[1])
+    expect(produced.length).toBeGreaterThan(0)
+    for (const cls of produced) {
+      expect(css, `高亮产出了 .${cls}，但样式表里没有`).toContain(`.${cls}`)
+    }
+  })
+})

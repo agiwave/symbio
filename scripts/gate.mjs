@@ -25,8 +25,10 @@
  *
  *   1. backend   cargo check --tests / test --lib / clippy / fmt --check（在 `symbio/`）
  *   2. frontend  vue-tsc --noEmit / vitest run（在 `tauri/`）
- *   3. docs      grep-audit / style-audit / doc-link-audit / test-layout-audit
- *                / dead-code-audit（均判定型）+ schema-audit（报告型，仅防崩溃）
+ *   3. docs      grep-audit / mechanism-audit / style-audit / doc-link-audit
+ *                / test-layout-audit / dead-code-audit（均判定型）
+ *                + schema-audit（报告型，仅防崩溃）
+ *                每个判定型守卫都先跑**自己的回归测试**（证明它能变红）
  *   4. msrv      用 `rust-version` 声明的**最低**工具链跑 cargo check（symbio/ 与 cli/）。
  *                本机没装该工具链时**跳过并提示**（要真跑需 `rustup toolchain install`）；
  *                CI 里装了 ⇒ 一定跑，故「MSRV 写了但没人验证」这条不再成立。
@@ -118,8 +120,14 @@ const BASELINE = {
   //   压缩失败原因可诊断（kind / message / Display）×3
   // 712 → 714：中止收口终态化——`abort_terminal_of` 让根 Turn 一律定稿 Aborted、
   //   `converge_inflight` 与 `persist_failure` 的终态不再混用 Completed（均经回退验证确认会红）
-  rustTests: 714,
-  vitestFiles: 19,
+  // 714 → 721：会话级写入并入 VDFS——`Session::merge_metadata_object` 的 5 例
+  //   （浅合并保留未提到的键 / 只给 title 不动 metadata / 非对象整体替换 /
+  //   空 title 原样写入 / 空对象是 no-op）+ 2 例跨路径断言
+  //   （`session/update` 与 `vdfs/write` 产出**逐字相同**的 metadata、
+  //   `session/clear` 落到默认分支）。两条均经回退验证确认会红：前者注入
+  //   "invoke_update 丢 title" 即红，后者注入"把 clear 路由加回来"即红。
+  rustTests: 721,
+  vitestFiles: 24,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态
   // 160 → 164：工具调用运行态——「运行中」标签 + 动效点 + 已运行时长、
@@ -137,7 +145,24 @@ const BASELINE = {
   //   压缩节点 ×1（均经回退验证确认会红）
   // 177 → 179：中止收口终态化——`MessageNode` 对 `aborted` 终态的渲染：组级交代条
   //   + 重试入口；`completed` 终态的"无角标无重试"反向断言（均经回退验证确认会红）
-  vitestTests: 179,
+  // 179 → 308（文件 19 → 24）：消息域机制化改造。
+  //   · `MessageNode` 从 1549 行拆成「facets → 渲染器标识 → 组件」的分派器，
+  //     8 个子渲染器 + 装配点各自补测（新增 messageRenderers.spec.ts）；
+  //   · 消息级业务规则（重试 / 补参 / 重试路由）抽成纯函数后可直接单测；
+  //   · 会话 store 拆出 `sessionTranscript` / `sessionLive` 两个纯模块，
+  //     原属 store 的用例随之可脱离 Pinia 单测（新增两个 spec）；
+  //   · 新增 `messageContent.spec.ts`——含**类名契约**断言（`.json-*` 规则必须
+  //     存在于**全局**样式表）：scoped 编译会补 `[data-v-*]`，而 `v-html` 注入的
+  //     元素拿不到它 ⇒ 着色静默失效，这是回归防线；
+  //   · 本次新增 4 个 spec：`messageRenderers` / `messageContent` /
+  //     `sessionTranscript` / `sessionLive`（19 → 24 里其余增量来自同一轮改造
+  //     中更早完成的拆分，已计入上一版基线口径）。
+  //   注：`scripts/mechanism-audit.test.mjs` 走 `node --test`（阶段 3），不计入此处。
+  // 308 → 313：会话级写入并入 VDFS——`session.spec.ts` 新增 5 例，锁定
+  //   删除走 `vdfs/delete(.vdfs/session/<id>)`、metadata 走
+  //   `vdfs/write(.vdfs/session/<id>)`，并断言**地址**（地址拼错在真实环境里
+  //   表现为删错会话，是灾难级）。经回退验证：改成挂载根地址 + 丢 title 两项皆红。
+  vitestTests: 313,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */
@@ -431,15 +456,27 @@ async function stageFrontend() {
 
 async function stageDocs() {
   stageHeader('docs', '静态审计')
-  const auditTests = await run({
-    label: 'grep-audit 回归测试',
-    cmd: process.execPath,
-    args: ['--test', path.join(scriptDir, 'grep-audit.test.mjs')],
-    cwd: repoRoot,
-  })
-  record('docs', 'grep-audit 回归测试', auditTests.ok)
+  // 判定型守卫的**回归测试**必须先跑：一个只会亮绿灯的守卫等于没有守卫，
+  // 而它腐烂的方式恰恰是「规则写错了所以永远不命中」——只有注入真实违规
+  // 并断言脚本变红，才能把「通过」和「没在工作」区分开。
+  for (const name of ['grep-audit', 'mechanism-audit']) {
+    const t = await run({
+      label: `${name} 回归测试`,
+      cmd: process.execPath,
+      args: ['--test', path.join(scriptDir, `${name}.test.mjs`)],
+      cwd: repoRoot,
+    })
+    record('docs', `${name} 回归测试`, t.ok)
+  }
   // 判定型：有发现即以非零退出码失败。
-  for (const name of ['grep-audit', 'style-audit', 'doc-link-audit', 'test-layout-audit', 'dead-code-audit']) {
+  for (const name of [
+    'grep-audit',
+    'mechanism-audit',
+    'style-audit',
+    'doc-link-audit',
+    'test-layout-audit',
+    'dead-code-audit',
+  ]) {
     const r = await run({
       label: `scripts/${name}.mjs`,
       cmd: process.execPath,

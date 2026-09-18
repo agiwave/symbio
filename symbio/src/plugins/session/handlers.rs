@@ -1,15 +1,17 @@
 //! SessionPlugin 的 invoke 处理方法集合（按 `schemas/session/*` 请求类型分发）。
 //!
 //! 路由层在 `plugin.rs`（`Plugin::route`），本文件只承载各 invoke 的实现体：
-//! 消息增删改查、会话删除/清空、
+//! 消息增删改查、清空消息、
 //! metadata 合并与统一删除路径 `delete_session_internal` 等。
+//!
+//! 会话**删除**没有 invoke 方法：唯一入口是 `VdfsProvider::delete`
+//! （`delete(.vdfs/session/<id>)`），旧 `session/clear` 路由已退役。
 
 use super::chat_session::{ChatSession, ChatSessionHandle, PersistentChatSession};
 use super::plugin::SessionPlugin;
 use crate::symbio_core::schemas::session::{
-    chat_message as cm, session_append, session_clear, session_clear_messages,
-    session_delete_message, session_get_messages, session_open, session_update,
-    session_update_message,
+    chat_message as cm, session_append, session_clear_messages, session_delete_message,
+    session_get_messages, session_open, session_update, session_update_message,
 };
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginPayload};
 use crate::symbio_core::{InvokeResponse, PluginError};
@@ -33,16 +35,11 @@ impl SessionPlugin {
         Ok(serde_json::to_value(session_append::Response { message_count }).unwrap_or_default())
     }
 
-    pub async fn invoke_clear(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
-        let req: session_clear::Request = ctx.payload()?;
-        self.delete_session_internal(&req.session_id).await?;
-        Ok(serde_json::to_value("会话已删除".to_string())?)
-    }
-
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
     ///
-    /// 两个消费方：`invoke_clear`（旧 session/clear 路由）与
-    /// `VdfsProvider::delete`（VDFS 删除与此共用同一份实现）。
+    /// 唯一消费方：`VdfsProvider::delete`（`delete(.vdfs/session/<id>)`）。
+    /// 曾经的 `session/clear` 路由是它的第二个消费方，已退役——两个入口对同一件事
+    /// 就是两条会各自漂移的实现，VDFS 侧本来就已经完整具备这个能力。
     pub(crate) async fn delete_session_internal(
         &self,
         session_id: &str,
@@ -76,7 +73,7 @@ impl SessionPlugin {
 
     /// 清空会话消息（保留 metadata / 工作目录 / 标题等）。
     ///
-    /// 与 `invoke_clear`（删除整个会话文件）不同：这里只把 `session.messages`
+    /// 与 `VdfsProvider::delete`（删除整个会话）不同：这里只把 `session.messages`
     /// 整体替换为空，会话本体继续存在。UI 的"清空历史"按钮走此路径。
     pub async fn invoke_clear_messages(
         &self,
@@ -221,6 +218,11 @@ impl SessionPlugin {
     }
 
     /// 合并写入会话 metadata（workdir / title / agent_id 等）。
+    ///
+    /// **仅 CLI 使用**。前端走 `VdfsProvider::write`（`vdfs/write(.vdfs/session/<id>)`）
+    /// ——两条路径共用 `Session::merge_metadata_object`，语义不可能分叉。
+    /// 本路由保留的原因：CLI 需要**客户端指定会话 id**（`cli/src/client.rs` 自己
+    /// `gen_id` 后 upsert），而 VDFS 新建会话是 provider 生成 id。
     pub async fn invoke_update(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
         let req: session_update::Request = ctx.payload()?;
 
@@ -235,25 +237,11 @@ impl SessionPlugin {
                 .map(|o| o.is_empty())
                 .unwrap_or(true);
 
-        // 合并 metadata（浅合并）
-        if let Some(existing_obj) = session.metadata.as_object_mut() {
-            if let Some(new_obj) = req.metadata.as_object() {
-                for (k, v) in new_obj {
-                    existing_obj.insert(k.clone(), v.clone());
-                }
-            } else {
-                session.metadata = req.metadata.clone();
-            }
-        } else {
-            session.metadata = req.metadata.clone();
-        }
-
-        // 单独处理 title 字段
-        if let Some(title) = &req.title {
-            if let Some(obj) = session.metadata.as_object_mut() {
-                obj.insert("title".to_string(), Value::String(title.clone()));
-            }
-        }
+        // 合并 metadata + title —— 与 VDFS `write` 同一份实现（见该方法文档）
+        session.merge_metadata_object(&json!({
+            "metadata": req.metadata,
+            "title": req.title,
+        }));
 
         session.updated_at = crate::symbio_core::now_ms();
         self.save_session(&session).await?;

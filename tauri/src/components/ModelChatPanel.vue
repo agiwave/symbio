@@ -41,11 +41,10 @@
       </div>
 
       <MessageNode
-        v-for="(node, i) in messageTree"
+        v-for="node in messageTree"
         :key="node.id"
         :node="node"
         :depth="0"
-        :is-last="i === messageTree.length - 1"
         @retry="handleRetry"
         @delete="handleDelete"
         @edit="handleEdit"
@@ -79,6 +78,15 @@ import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { isWorkingStatus } from '@/schemas/vdfs'
+import { CHAT_ROLE_USER } from '@/schemas/chat_message'
+// 消息级判定与业务规则全部来自 registry（本组件不解释消息词表，也不读后端 meta 字段）
+import {
+  isFailedStatus,
+  messageIsEphemeral,
+  messageRetryTargetOf,
+  messageRoleOf,
+  messageStatusOf,
+} from '@/registry/messageTypes'
 
 import MessageNode from './MessageNode.vue'
 import ChatInputArea from './chat/ChatInputArea.vue'
@@ -141,7 +149,9 @@ const sessionsStore = useSessionsStore()
     if (!err) return null
     const hasFailedNode = sessionsStore
       .getSessionMessages(props.sessionId)
-      .some((m) => m.status === 'failed' && !(m.meta as { ephemeral?: boolean } | undefined)?.ephemeral)
+      // 「失败节点」的判据与后端 meta 字段的读取都收在 registry/messageTypes：
+      // 本组件不解释 `status` 取值，也不碰 `meta.ephemeral` 这种后端字段名。
+      .some((m) => isFailedStatus(messageStatusOf(m)) && !messageIsEphemeral(m))
     return hasFailedNode ? null : err
   })
 
@@ -149,12 +159,12 @@ const sessionsStore = useSessionsStore()
    *  仅用于"无 Failed Turn 节点"的兜底错误；有 Failed Turn 时错误由其节点承载、走 handleRetry。 */
   function handleSessionRetry() {
     const msgs = sessionsStore.getSessionMessages(props.sessionId)
-    const lastUser = [...msgs].reverse().find((m) => m.role === 'user')
+    const lastUser = [...msgs].reverse().find((m) => messageRoleOf(m) === CHAT_ROLE_USER)
     sessionsStore.setSessionError(props.sessionId, null)
     if (!lastUser) return
     const retryMsg: ChatMessage = {
       id: lastUser.id, // 复用原 user 消息 id：重发而非新建节点
-      role: 'user',
+      role: CHAT_ROLE_USER,
       content: lastUser.content,
       timestamp: Date.now(),
     }
@@ -242,37 +252,23 @@ function handleSend() {
 }
 
 
+/**
+ * 重试入口：分派规则在 `registry/messageTypes.messageRetryTargetOf`——
+ * 「工具调用失败 → 单工具重试」「其余失败 → 整轮重试（叶子回溯到父 Turn）」
+ * 是**消息级业务规则**，不属于面板。本面板只负责取节点 + 发恢复请求。
+ */
 function handleRetry(messageId: string) {
   const msg = sessionsStore.getSessionMessages(props.sessionId).find(m => m.id === messageId)
   if (!msg) return
-
-  // 工具调用失败 → resume retry（删除旧失败子节点 + 重新执行工具 + 生成新响应）
-  if (msg.type === 'tool_call' && msg.status === 'failed') {
-    chat.resume({
-      targetId: messageId,
-      action: 'retry',
-    })
-    return
-  }
-
-  // LLM 失败 → resume retry_turn（删除 Failed Turn 及其所有子孙节点 + 重新走 LLM 请求）
-  // 失败节点可能是 Turn 本身，也可能是其下的 Text/Reasoning/Thinking 叶子；
-  // 后端 process_retry_turn 要求 target_id 指向 Failed Turn（msg_type=turn），
-  // 因此对叶子节点需回溯到父 Turn。
-  const turnId = msg.type === 'turn'
-    ? messageId
-    : (msg.parent_id || messageId)
-  chat.resume({
-    targetId: turnId,
-    action: 'retry_turn',
-  })
+  const target = messageRetryTargetOf(msg)
+  chat.resume({ targetId: target.targetId, action: target.action })
 }
 
 /** 删除单条消息（由 store 调后端持久化）；若为 user 消息，删除后将其内容回填输入框 */
 async function handleDelete(messageId: string) {
   // 删除前先取出消息：回填空需要其内容
   const msg = sessionsStore.getSessionMessages(props.sessionId).find(m => m.id === messageId)
-  const isUserMsg = msg?.role === 'user'
+  const isUserMsg = msg ? messageRoleOf(msg) === CHAT_ROLE_USER : false
   const content = msg?.content
   const userText = isUserMsg
     ? (typeof content === 'string'

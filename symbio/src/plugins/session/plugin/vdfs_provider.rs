@@ -257,6 +257,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
 
     /// 写入：`create` → 新建会话；否则 → 合并会话 metadata（`session/update` 语义）。
     ///
+    /// 覆盖分支的浅合并与 `session/update` 路由**共用**
+    /// [`Session::merge_metadata_object`]（不是"语义相同"，是同一份代码）。
+    /// 新建分支另有一层优先级（路径名 → 显式 `title`），见下方注释。
+    ///
     /// **转写列表（`<id>/消息`）只读**——发言不是一次文件写入，而是一次**动作**
     /// （触发一整轮编排：模型调用 → 工具执行 → 流式落库），因此入口仍是聊天协议。
     /// 这不是「两套写路径」：VDFS 侧根本没有消息的写路径，只有读路径——
@@ -355,8 +359,13 @@ impl vdfs::VdfsProvider for SessionPlugin {
             let id = self.new_session_id().await;
             let mut session = Session::new(&id);
             let mut meta = serde_json::Map::new();
-            // 使用方给的 metadata（草稿态选择的 workdir / agent / model / mode…）：
-            // 与 `session/update` 同一浅合并语义，字段名由使用方与插件约定，这里不解释
+            // 使用方给的 metadata（草稿态选择的 workdir / agent / model / mode…）。
+            //
+            // 这里**不**走 `merge_metadata_object`：新建是"建立初始 metadata"，
+            // 与"往既有 metadata 上浅合并"不是同一件事——前者还要处理路径名与
+            // 显式 title 的优先级、`created_via` 缺省填充。而 `merge_metadata_object`
+            // 服务的是**两条**路径（`session/update` 与 `write` 的覆盖分支）之间
+            // 的一致性，那才是会漂移的一对。
             if let Some(incoming) = obj.get("metadata").and_then(Value::as_object) {
                 for (k, v) in incoming {
                     meta.insert(k.clone(), v.clone());
@@ -400,20 +409,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
             ));
         }
         let mut session = self.session_of(path).await?;
-        if let Some(incoming) = obj.get("metadata").and_then(Value::as_object) {
-            let target = session
-                .metadata
-                .as_object_mut()
-                .ok_or_else(|| vdfs::VdfsError::invalid("会话 metadata 不是对象"))?;
-            for (k, v) in incoming {
-                target.insert(k.clone(), v.clone());
-            }
-        }
-        if let Some(title) = obj.get("title").and_then(Value::as_str) {
-            if let Some(m) = session.metadata.as_object_mut() {
-                m.insert("title".to_string(), Value::String(title.to_string()));
-            }
-        }
+        // 浅合并 —— 与 `session/update` 路由（CLI 用）**同一份实现**。
+        // 两处各写一遍的话，「前端改名生效 / CLI 改名不生效」这类只在一条路径上
+        // 出现的行为差异迟早会发生，而没有任何测试会覆盖两条路径的一致性。
+        session.merge_metadata_object(&value);
         session.updated_at = now_ms();
         self.save_session(&session)
             .await

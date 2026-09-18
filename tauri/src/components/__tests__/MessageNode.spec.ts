@@ -345,3 +345,60 @@ describe('MessageNode：用户中止的 Turn 同样可重试', () => {
     expect(w.findAll('button.retry').length).toBe(0)
   })
 })
+
+/**
+ * 分派器路由与内容形态 —— 分派器只做「路由」，渲染形态由各渲染器负责。
+ *
+ * 这一组同时是两处**真实缺陷**的回归锚：
+ * 1. 压缩节点曾因模板里 `v-else-if="isTextLike"` 排在 `v-else-if="isCompression"` 之前，
+ *    使压缩分支**永不执行**（压缩类型也满足 isTextLike），`.compress-note` 是死代码；
+ * 2. 工具请求 / 返回的 JSON 着色类名由 `useMessageContent` 在 TS 里拼出，
+ *    样式却写在组件 scoped 块里 —— scoped 会补 `[data-v-*]`，v-html 注入的元素拿不到，
+ *    于是着色静默失效。样式已移入全局 `styles/markdown.css`。
+ */
+describe('MessageNode：分派器路由与内容形态', () => {
+  it('压缩节点渲染为「系统动作」样式（compress-note），不是普通 Markdown 正文', () => {
+    const w = mountNode(
+      msg({ id: 'cp1', type: 'compression', status: 'streaming', content: '正在压缩上下文…' }),
+    )
+    expect(w.find('.compress-note').exists()).toBe(true)
+    expect(w.find('.compress-note').text()).toContain('正在压缩上下文')
+    // 回归：曾落到 isTextLike 分支被当成 markdown-body 渲染
+    expect(w.find('.markdown-body').exists()).toBe(false)
+    // 压缩是默认折叠的单行动作：头部标签是唯一的运行中信号
+    expect(w.find('.node-tag').text()).toContain('压缩中')
+  })
+
+  it('用户消息走右对齐气泡，头部是「你」', () => {
+    const w = mountNode(msg({ id: 'u1', role: 'user', type: 'text', content: '你好' }))
+    expect(w.find('.user-bubble').exists()).toBe(true)
+    expect(w.find('.node-head').text()).toContain('你')
+    expect(w.find('.user-bubble').text()).toContain('你好')
+  })
+
+  it('未登记的消息类型落到 fallback：内容照常显示，会话流不空白', () => {
+    const w = mountNode(
+      msg({ id: 'new1', type: 'brand_new_type' as ChatMessage['type'], content: '未来类型的内容' }),
+    )
+    expect(w.text()).toContain('未来类型的内容')
+    expect(w.find('.node-head').exists()).toBe(true)
+  })
+
+  it('工具请求参数走 JSON 代码块并带请求强调边（着色类名已由全局样式表承接）', async () => {
+    const w = mountNode(
+      msg({
+        id: 'tc1',
+        type: 'tool_call',
+        status: 'completed',
+        name: 'shell',
+        content: '{"cmd":"ls"}',
+        children: [],
+      }),
+    )
+    await w.find('.node-head').trigger('click')
+    const pre = w.find('pre.json')
+    expect(pre.exists()).toBe(true)
+    expect(pre.classes()).toContain('req')
+    expect(pre.html()).toContain('json-key')
+  })
+})

@@ -4,6 +4,7 @@
 //! `types.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
+use serde_json::json;
 
 #[test]
 fn from_metadata_missing_returns_disabled_default() {
@@ -133,4 +134,78 @@ fn summary_skips_textless_assistant_messages() {
         derive_session_summary(&msgs).as_deref(),
         Some("有文本的回复")
     );
+}
+
+// ==================== merge_metadata_object ====================
+//
+// 会话 metadata 有**两个**写入入口：`session/update` 路由（CLI 用）与
+// `VdfsProvider::write`（前端用）。下面这几例锁住的是**语义**本身——两处共用
+// 同一份实现，因此这些断言同时是两条路径的契约。
+
+#[test]
+fn merge_metadata_is_shallow_and_keeps_untouched_keys() {
+    let mut s = Session::new("s1");
+    s.metadata = json!({ "workdir": "/a", "agent_id": "x" });
+
+    s.merge_metadata_object(&json!({ "metadata": { "workdir": "/b" } }));
+
+    // 提到的键被覆盖，没提到的键**保持不变**（这正是"浅合并"的全部含义）
+    assert_eq!(s.metadata["workdir"], json!("/b"));
+    assert_eq!(s.metadata["agent_id"], json!("x"));
+}
+
+#[test]
+fn merge_metadata_absent_field_leaves_metadata_alone() {
+    let mut s = Session::new("s1");
+    s.metadata = json!({ "workdir": "/a" });
+
+    // 只给 title、不给 metadata ⇒ metadata 一个键都不该被动
+    s.merge_metadata_object(&json!({ "title": "新名字" }));
+
+    assert_eq!(s.metadata["workdir"], json!("/a"));
+    assert_eq!(s.metadata["title"], json!("新名字"));
+}
+
+#[test]
+fn merge_metadata_non_object_replaces_wholesale() {
+    let mut s = Session::new("s1");
+    s.metadata = json!({ "workdir": "/a" });
+
+    // 非对象无法"逐键合并"⇒ 整体替换（与旧 `invoke_update` 的兜底分支一致）
+    s.merge_metadata_object(&json!({ "metadata": null }));
+    assert_eq!(s.metadata, json!(null));
+
+    // 反向：自身不是对象时也整体替换（否则合并无处落笔）
+    let mut s2 = Session::new("s2");
+    s2.metadata = json!("不是对象");
+    s2.merge_metadata_object(&json!({ "metadata": { "k": 1 } }));
+    assert_eq!(s2.metadata, json!({ "k": 1 }));
+}
+
+#[test]
+fn merge_metadata_writes_empty_title_verbatim() {
+    let mut s = Session::new("s1");
+    s.metadata = json!({ "title": "旧名字" });
+
+    // 本方法**不做**空串判定：空标题是"显式清空"还是"忽略"由使用方决定，
+    // 它只负责忠实写入。（新建会话时"路径名 vs 显式 title"的优先级是另一件事，
+    // 在 `VdfsProvider::write` 的 create 分支里。）
+    s.merge_metadata_object(&json!({ "title": "" }));
+    assert_eq!(s.metadata["title"], json!(""));
+
+    // 非字符串 title（如 null）不写 —— 类型不对就不该污染 metadata
+    let mut s2 = Session::new("s2");
+    s2.merge_metadata_object(&json!({ "title": null }));
+    assert!(s2.metadata.get("title").is_none());
+}
+
+#[test]
+fn merge_metadata_empty_object_is_a_noop() {
+    let mut s = Session::new("s1");
+    s.metadata = json!({ "workdir": "/a", "title": "旧" });
+
+    s.merge_metadata_object(&json!({}));
+
+    // 什么都不给的写入不该有任何副作用（否则"空写入"会变成清空）
+    assert_eq!(s.metadata, json!({ "workdir": "/a", "title": "旧" }));
 }

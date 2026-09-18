@@ -1,13 +1,88 @@
-export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
-export type ChatMessageType = 'text' | 'reasoning' | 'tool_call' | 'turn' | 'user_prompt' | 'compression';
-export type MessageStatus =
-  | 'pending'
-  | 'streaming'
-  | 'waiting_user_action'
-  | 'completed'
-  | /** 用户主动终止：没出错，但也没跑完——与 `failed` 一样可重试 */
-  'aborted'
-  | 'failed';
+/**
+ * 对话消息的数据契约（与后端 `symbio_core` 的消息形状对齐）
+ *
+ * ## 为什么词表要有**运行时常量**，而不只是类型联合
+ *
+ * 类型联合（`type MessageStatus = 'pending' | ...`）只在编译期存在，运行时拿不到
+ * 名字。于是消费方只能各写各的字面量——`'tool_call'` / `'turn'` / `'failed'`
+ * 散落在组件、store、服务层，改一处漏一处。
+ *
+ * 这里为每个取值导出常量，**并让类型由常量数组派生**：
+ * 加一个取值 = 加一行数组元素，类型与常量同时到位，不存在「类型改了常量没改」。
+ * 呈现映射（图标 / 标题 / 标签）在 `registry/messageTypes.ts`；本文件零呈现知识。
+ */
+
+// ==================== 角色 ====================
+
+/** 用户发言 */
+export const CHAT_ROLE_USER = 'user'
+/** 助手（模型）发言 */
+export const CHAT_ROLE_ASSISTANT = 'assistant'
+/** 工具返回（含子智能体响应的 Turn） */
+export const CHAT_ROLE_TOOL = 'tool'
+/** 系统发言（心跳等） */
+export const CHAT_ROLE_SYSTEM = 'system'
+
+export const CHAT_ROLES = [
+  CHAT_ROLE_USER,
+  CHAT_ROLE_ASSISTANT,
+  CHAT_ROLE_TOOL,
+  CHAT_ROLE_SYSTEM,
+] as const
+
+export type ChatRole = (typeof CHAT_ROLES)[number]
+
+// ==================== 消息类型 ====================
+
+/** 正文文本 */
+export const MESSAGE_TYPE_TEXT = 'text'
+/** 思考过程（reasoning） */
+export const MESSAGE_TYPE_REASONING = 'reasoning'
+/** 工具调用（组合节点：请求 / 过程 / 结果） */
+export const MESSAGE_TYPE_TOOL_CALL = 'tool_call'
+/** 轮次分组（一轮响应的容器，根级助手回合与子会话回合共用） */
+export const MESSAGE_TYPE_TURN = 'turn'
+/** 待用户响应（ask_user 提问 / 工具确认） */
+export const MESSAGE_TYPE_USER_PROMPT = 'user_prompt'
+/** 上下文压缩（系统对历史的一次整理动作，不是对话内容） */
+export const MESSAGE_TYPE_COMPRESSION = 'compression'
+
+export const MESSAGE_TYPES = [
+  MESSAGE_TYPE_TEXT,
+  MESSAGE_TYPE_REASONING,
+  MESSAGE_TYPE_TOOL_CALL,
+  MESSAGE_TYPE_TURN,
+  MESSAGE_TYPE_USER_PROMPT,
+  MESSAGE_TYPE_COMPRESSION,
+] as const
+
+export type ChatMessageType = (typeof MESSAGE_TYPES)[number]
+
+// ==================== 消息状态 ====================
+
+/** 未开始 */
+export const MESSAGE_STATUS_PENDING = 'pending'
+/** 正在产生内容 */
+export const MESSAGE_STATUS_STREAMING = 'streaming'
+/** 等待用户响应（审批 / 提问） */
+export const MESSAGE_STATUS_WAITING_USER_ACTION = 'waiting_user_action'
+/** 终态：正常结束 */
+export const MESSAGE_STATUS_COMPLETED = 'completed'
+/** 终态：用户主动终止（没出错，但也没跑完——与 `failed` 一样可重试） */
+export const MESSAGE_STATUS_ABORTED = 'aborted'
+/** 终态：以错误结束 */
+export const MESSAGE_STATUS_FAILED = 'failed'
+
+export const MESSAGE_STATUSES = [
+  MESSAGE_STATUS_PENDING,
+  MESSAGE_STATUS_STREAMING,
+  MESSAGE_STATUS_WAITING_USER_ACTION,
+  MESSAGE_STATUS_COMPLETED,
+  MESSAGE_STATUS_ABORTED,
+  MESSAGE_STATUS_FAILED,
+] as const
+
+export type MessageStatus = (typeof MESSAGE_STATUSES)[number]
 
 /**
  * 消息是否**仍在飞行中**（尚未定稿）。
@@ -21,7 +96,22 @@ export type MessageStatus =
  * 消费方：`hydrateFromHistory` 用它决定「快照里没有的本地节点是否该保留」。
  */
 export function isInflightMessageStatus(status?: MessageStatus | null): boolean {
-  return status === undefined || status === null || status === 'pending' || status === 'streaming';
+  return (
+    status === undefined ||
+    status === null ||
+    status === MESSAGE_STATUS_PENDING ||
+    status === MESSAGE_STATUS_STREAMING
+  )
+}
+
+/**
+ * 需要向用户交代的**非正常终态**：失败或用户中止。
+ *
+ * 两者都要渲染交代条并给重试入口——中止不是故障，但这一轮只跑了一半，
+ * 用户通常就想重跑它。放在契约层是因为它同时被「渲染」与「业务规则」消费。
+ */
+export function isUnsettledMessageStatus(status?: MessageStatus | null): boolean {
+  return status === MESSAGE_STATUS_FAILED || status === MESSAGE_STATUS_ABORTED
 }
 
 export interface ImageUrl {

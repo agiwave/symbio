@@ -18,6 +18,63 @@
 
 ***
 
+## 2026-09-18: 会话级写入并入 VDFS；前端消息域建立渲染注册表
+
+**性质：重构**。两件事，同一目标——**同一件事只有一份实现**。
+
+### 一、会话级写入并入 VDFS
+
+会话的**读**（清单 / 转写）与**实时变更**早已走 VDFS，但写入还留着两条专用路由。
+核查后发现它们与 VDFS 侧**功能重叠**：
+
+| 操作 | 旧入口 | 新入口 |
+|---|---|---|
+| 删除会话 | `session/clear` | `vdfs/delete(.vdfs/session/<id>)` |
+| 改 metadata / 标题 | `session/update`（前端） | `vdfs/write(.vdfs/session/<id>)` |
+
+`session/clear` 与 `vdfs/delete` 本就**共用** `delete_session_internal`
+（代码注释自己写着前者是"旧路由"）——这不是换一种删法，是收尾没做。该路由连同
+`session_clear.rs` / `session_clear.ts` 一并删除。
+
+**两处浅合并收敛成一份代码**：新增 `Session::merge_metadata_object`，
+`session/update`（仅 CLI 用）与 `VdfsProvider::write`（前端用）共用它。
+此前是两份实现 + 两条注释都写着"语义相同"——**那正是漂移的许可证**：
+写注释的人知道它们该一致，但没有任何机制让它们一致。分叉的后果是
+"前端改名生效、CLI 改名不生效"这类只在一条路径上出现的差异。
+
+`session/update` 路由**保留给 CLI**：它需要客户端指定会话 id
+（`cli/src/client.rs` 自己 `gen_id`），而 VDFS 新建是 provider 生成 id
+（id 是存储细节，不属于使用方的知识）。两种模型对"id 归谁"的答案相反，
+合并必然要动 `--session <ID>` 的用户可见语义。
+
+**消息级三条（`clear_messages` / `delete_message` / `update_message`）留在聊天协议**：
+消息没有 VDFS 写路径，理由见 `symbio/src/plugins/session/docs/vdfs-session-messages.md` §5。
+其中 `delete_message` 的迁移代价是丢掉 `deleted_ids` 回执（前端用它做幂等对齐），
+`vdfs/delete` 只回 `{path}`——有意不做。
+
+### 二、前端消息域建立渲染注册表
+
+`MessageNode.vue` 从 **1549 行**（63 处条件分支、约 40 个派生布尔）拆成
+**~115 行的纯分派器**：「facets → 渲染器标识 → 组件」，与资源域的
+`vdfsRenderers.ts` 完全同构。新增一种消息类型的代价从"改 5 处"降到
+"词表加一取值 + 映射加一行 + 装配点登记一行"。
+
+配套：消息级业务规则（重试 / 补参 / 重试路由）抽成纯函数；
+会话 store 拆出 `sessionTranscript` / `sessionLive` 两个可脱离 Pinia 单测的纯模块；
+新增 `scripts/mechanism-audit.mjs`（6 条规则 + 17 例回归测试）守卫机制不变量。
+
+### 顺带修掉的两个真实缺陷（被改造暴露，非引入）
+
+1. **压缩节点从未被渲染**：旧模板里 `v-else-if="isTextLike"` 排在
+   `v-else-if="isCompression"` 之前，而压缩节点满足前者 ⇒ `.compress-note` 是死代码。
+2. **JSON 着色从未生效**：`.json-*` 类名由 TS 拼字符串产出，规则却写在
+   `<style scoped>` ⇒ 编译成 `.json-key[data-v-*]`，`v-html` 注入的元素拿不到该属性。
+   已移到全局样式表；生产构建产物 `grep -c 'json-key\[data-v'` = 0 可证。
+
+另修一处既有 flaky 测试（`homedir` 的默认值测试未取串行锁，全量跑偶发失败）。
+
+***
+
 ## 2026-09-18: 中止有独立终态——已中止的 Turn 也可重试
 
 **性质：修复**。用户现场报告：reason 阶段点停止后该轮没有「重试」按钮，下一轮想重跑

@@ -73,10 +73,7 @@ function mountTree(tree: ChatMessage[]) {
   return mount(
     {
       setup() {
-        return () =>
-          tree.map((n, i) =>
-            h(MessageNode, { node: n, depth: 0, isLast: i === tree.length - 1, key: n.id }),
-          )
+        return () => tree.map((n) => h(MessageNode, { node: n, depth: 0, key: n.id }))
       },
     },
     { global: { provide: { resume: () => {} } } },

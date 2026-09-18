@@ -99,14 +99,32 @@
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
 | `session/get_messages` | 获取对话历史 | `Data` |
 | `session/open` | 打开/创建会话 | `Data` |
-| `session/update` | 更新会话属性 | `Data` |
-| `session/clear` | 清空会话历史 | `Data` |
+| `session/update` | 合并写入会话 metadata（**仅 CLI**） | `Data` |
 | `session/chat/clear_messages` | 清空指定消息 | `Data` |
 | `session/chat/delete_message` | 删除单条消息 | `Data` |
 | `session/chat/update_message` | 更新单条消息 | `Data` |
 | `session/append` | 追加消息 | `Data` |
 | `session/heartbeat/trigger` | 触发一次心跳 | `Data` |
 
+> **会话级操作已并入 VDFS**（专用路由不再存在或不再被前端使用）：
+>
+> | 操作 | 入口 |
+> |---|---|
+> | 列会话清单 | `vdfs/list(.vdfs/session)` |
+> | 读整份转写 | `vdfs/read(.vdfs/session/<id>)` |
+> | 新建会话 | `vdfs/write(.vdfs/session, { create: true })` |
+> | **删除会话** | `vdfs/delete(.vdfs/session/<id>)` |
+> | **改 metadata / 标题** | `vdfs/write(.vdfs/session/<id>)` |
+>
+> `session/clear` **已退役**（与 `vdfs/delete` 共用 `delete_session_internal`）。
+> `session/update` 保留但只有 CLI 用——它需要**客户端指定会话 id**，而 VDFS 新建
+> 是 provider 生成 id。两者的 metadata 浅合并已收敛到同一份实现
+> （`Session::merge_metadata_object`），因此不会漂移。
+>
+> 消息级的三条（`clear_messages` / `delete_message` / `update_message`）**留在
+> 聊天协议**：消息没有 VDFS 写路径，理由见
+> [`symbio/src/plugins/session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md) §5。
+>
 > `session/config/get` / `config/set` **已下线**：会话配置在
 > `.vdfs/session/PLUGIN.yml`（`ext = form`），读写走 `vdfs/read` / `vdfs/write`。
 

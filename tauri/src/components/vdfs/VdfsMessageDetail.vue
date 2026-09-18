@@ -45,6 +45,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { VdfsFieldError, VdfsNode } from '@/schemas/vdfs'
+import { MESSAGE_TYPE_TEXT } from '@/schemas/chat_message'
+import { messageRoleLabel, messageStatusLabel, messageTypeLabel } from '@/registry/messageTypes'
 
 // 渲染器统一契约（详见 VdfsTextDetail 同名说明）：
 // `data` 是节点内容（消息正文），`node` 携带结构（attributes）
@@ -68,41 +70,19 @@ const body = computed(() => (typeof props.data === 'string' ? props.data : ''))
 /** `attributes.role`（VDFS 只透传，渲染器自行取用） */
 const roleKey = computed(() => String(props.node.role ?? 'unknown'))
 
-const ROLE_TEXT: Record<string, string> = {
-  user: '用户',
-  assistant: '助手',
-  tool: '工具',
-  system: '系统',
-}
-
-const roleText = computed(() => ROLE_TEXT[roleKey.value] ?? roleKey.value)
-
-const TYPE_TEXT: Record<string, string> = {
-  text: '文本',
-  reasoning: '思考',
-  turn: '轮次',
-  tool_call: '工具调用',
-  user_prompt: '待响应',
-}
+// 文案一律查 `registry/messageTypes`——那是消息词表的**唯一来源**。
+// 本组件不再自带 ROLE_TEXT / TYPE_TEXT / STATUS_TEXT 副本（曾经是三份实现之一）。
+const roleText = computed(() => messageRoleLabel(roleKey.value))
 
 /** 类型缺省不显示（文本是常态，标出来只是噪音） */
 const typeText = computed(() => {
   const t = props.node.type
-  if (!t || t === 'text') return ''
-  return TYPE_TEXT[String(t)] ?? String(t)
+  if (!t || t === MESSAGE_TYPE_TEXT) return ''
+  return messageTypeLabel(String(t))
 })
 
-const STATUS_TEXT: Record<string, string> = {
-  pending: '排队中',
-  streaming: '生成中',
-  waiting_user_action: '等待响应',
-  completed: '已完成',
-  failed: '失败',
-  active: '正常',
-}
-
-const statusText = computed(
-  () => STATUS_TEXT[props.node.status] ?? props.node.status ?? '未知',
+const statusText = computed(() =>
+  props.node.status ? messageStatusLabel(String(props.node.status)) : '未知',
 )
 
 const seq = computed(() => {

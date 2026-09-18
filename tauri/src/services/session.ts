@@ -1,31 +1,89 @@
 /**
- * Session 服务
+ * Session 服务 —— 会话的读（清单）与写（清空消息 / 删除消息 / 改消息 / 改元数据）
  *
- * 管理聊天会话历史
+ * ## 路由集中在一张表
+ *
+ * 每个端点原先各自拼一遍 `${SESSION_PATH}/...`，改一个路径要全文搜索；
+ * 现在路由只有一处（`SESSION_ROUTES`），端点函数只声明「发什么 body、返回什么形状」。
+ *
+ * 两个不变式由 `callSession` 统一保证，端点函数不再各自重复：
+ * 1. 路由取自路由表；
+ * 2. 请求体恒带 `session_id`（出站请求的 `options.session_id` 同源）。
+ *
+ * ## 哪些操作**不在**这张表里（它们走 VDFS，不在这里）
+ *
+ * | 操作 | 入口 |
+ * |---|---|
+ * | 列会话清单 | `vdfs/list(.vdfs/session)` |
+ * | 读整份转写 | `vdfs/read(.vdfs/session/<id>)` |
+ * | 新建会话 | `vdfs/write(.vdfs/session, { create: true })` |
+ * | **删除会话** | `vdfs/delete(.vdfs/session/<id>)` |
+ * | **改 metadata / 标题** | `vdfs/write(.vdfs/session/<id>)` |
+ *
+ * 后两条原先各有专用路由（`session/clear` / `session/update`）。VDFS 侧本来就
+ * 完整具备这两种能力，专用路由只是同一件事的第二份实现——会各自漂移。
+ * `session/clear` 已整体退役；`session/update` 仅保留给 CLI
+ * （它需要**客户端指定会话 id**，而 VDFS 新建是 provider 生成 id）。
+ *
+ * 仍然留在本文件的三条是**消息级**操作：它们没有 VDFS 写路径
+ * （见 `symbio/src/plugins/session/docs/vdfs-session-messages.md` §5）。
  */
 
 import { callPlugin } from './plugin'
-import { listVdfs } from './vdfs'
+import { deleteVdfs, listVdfs, writeVdfs } from './vdfs'
 import {
   VDFS_EXT_SESSION,
   VDFS_ROOT,
+  VDFS_SESSION_DIR,
   vdfsExtOf,
   vdfsJoin,
+  vdfsSessionAddr,
 } from '@/schemas/vdfs'
 import { ChatMessage as SessionMessage } from '../schemas/chat_message'
 import * as SessionList from '../schemas/session_list'
-import * as SessionClear from '../schemas/session_clear'
-import * as SessionUpdate from '../schemas/session_update'
 import * as SessionClearMessages from '../schemas/session_clear_messages'
 import * as SessionDeleteMessage from '../schemas/session_delete_message'
 import * as SessionUpdateMessage from '../schemas/session_update_message'
 import type { SessionMetadata } from '../schemas/session_meta'
-import { SESSION_PATH } from '../constants/pluginPaths'
+import { CHAT_PATH } from '../constants/pluginPaths'
 
 export type { SessionMessage }
 
 export type { SessionListItem } from '../schemas/session_list'
 export type { SessionMetadata } from '../schemas/session_meta'
+
+/**
+ * 会话写端点路由表（**唯一**的会话专用路由清单）。
+ *
+ * 三条都是**消息级**操作。会话级操作（删除 / 改 metadata）走 VDFS，不在这里
+ * ——见文件头那张表。
+ */
+const SESSION_ROUTES = {
+  /** 清空历史消息（保留会话本身 / 工作目录 / 标题） */
+  clearMessages: `${CHAT_PATH}/clear_messages`,
+  /** 删除单条消息（连同其后所有消息） */
+  deleteMessage: `${CHAT_PATH}/delete_message`,
+  /** 更新单条消息（手工编辑 / 标错重试） */
+  updateMessage: `${CHAT_PATH}/update_message`,
+} as const
+
+/** 所有会话写请求的公共字段 */
+interface SessionScopedRequest {
+  session_id: string
+}
+
+/**
+ * 发起一次会话写操作。
+ *
+ * `timeoutMs` 传 `undefined` 以走 `callPlugin` 的默认超时——显式写数字会与
+ * 默认值各改各的，反而失去单一来源。
+ */
+function callSession<TResp, TReq extends SessionScopedRequest>(
+  route: string,
+  req: TReq,
+): Promise<TResp> {
+  return callPlugin<TResp, TReq>(route, req, undefined, { session_id: req.session_id })
+}
 
 /**
  * 获取会话列表（VDFS：`.vdfs/session` 的目录内容）
@@ -55,7 +113,7 @@ export async function listSessions(
 ): Promise<SessionList.SessionListItem[]> {
   // 不传 limit 时**单参调用**——请求形状必须与从前一致（多一个 undefined
   // 实参也会被 `toHaveBeenCalledWith` 认成「多传了一个参数」）
-  const path = vdfsJoin(VDFS_ROOT, 'session')
+  const path = vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR)
   const resp =
     limit === undefined ? await listVdfs(path) : await listVdfs(path, { limit })
   return (resp.items || [])
@@ -75,13 +133,20 @@ export async function listSessions(
     })
 }
 
-export async function clearSession(sessionId: string): Promise<void> {
-  await callPlugin<void, SessionClear.Request>(
-    `${SESSION_PATH}/clear`,
-    { session_id: sessionId },
-    undefined,
-    { session_id: sessionId }
-  )
+/**
+ * 删除会话（连同其全部消息）。
+ *
+ * **走 VDFS**：`delete(.vdfs/session/<id>)`。后端 provider 的 `delete` 与曾经的
+ * `session/clear` 路由共用同一份实现（`delete_session_internal`），因此这不是
+ * 换一种删除方式，而是**同一个删除**换一个入口——专用路由已退役。
+ *
+ * 语义差异（有意接受）：VDFS 侧先做存在性校验，删不存在的会话返回 `NotFound`；
+ * 旧路由是静默成功。调用方（`stores/sessions.ts::deleteSession`）本就只在
+ * 清单里找得到的会话上调用，因此这条差异在真实路径上不可达——而"删不存在的东西
+ * 报错"比"静默成功"更诚实。
+ */
+export async function deleteSession(sessionId: string): Promise<void> {
+  await deleteVdfs(vdfsSessionAddr(sessionId))
 }
 
 /**
@@ -89,10 +154,8 @@ export async function clearSession(sessionId: string): Promise<void> {
  * 路由：`worker/session/chat/clear_messages`
  */
 export async function clearMessages(sessionId: string): Promise<SessionClearMessages.Response> {
-  return await callPlugin<SessionClearMessages.Response, SessionClearMessages.Request>(
-    `${SESSION_PATH}/chat/clear_messages`,
-    { session_id: sessionId },
-    undefined,
+  return callSession<SessionClearMessages.Response, SessionClearMessages.Request>(
+    SESSION_ROUTES.clearMessages,
     { session_id: sessionId }
   )
 }
@@ -105,11 +168,9 @@ export async function deleteMessage(
   sessionId: string,
   messageId: string
 ): Promise<SessionDeleteMessage.Response> {
-  return await callPlugin<SessionDeleteMessage.Response, SessionDeleteMessage.Request>(
-    `${SESSION_PATH}/chat/delete_message`,
-    { session_id: sessionId, message_id: messageId },
-    undefined,
-    { session_id: sessionId }
+  return callSession<SessionDeleteMessage.Response, SessionDeleteMessage.Request>(
+    SESSION_ROUTES.deleteMessage,
+    { session_id: sessionId, message_id: messageId }
   )
 }
 
@@ -121,28 +182,32 @@ export async function updateMessage(
   sessionId: string,
   message: SessionMessage
 ): Promise<SessionUpdateMessage.Response> {
-  return await callPlugin<SessionUpdateMessage.Response, SessionUpdateMessage.Request>(
-    `${SESSION_PATH}/chat/update_message`,
-    { session_id: sessionId, message },
-    undefined,
-    { session_id: sessionId }
+  return callSession<SessionUpdateMessage.Response, SessionUpdateMessage.Request>(
+    SESSION_ROUTES.updateMessage,
+    { session_id: sessionId, message }
   )
 }
 
 /**
  * 合并写入会话 metadata（workdir / title / agent_id 等）。
- * 后端会保留已有字段，浅合并新字段。
+ *
+ * **走 VDFS**：`write(.vdfs/session/<id>)`，请求体即
+ * `{ metadata?, title? }`。后端 provider 的 `write` 对这两个字段实现**浅合并**
+ * （未提供的字段保持不变），与 `session/update` 的语义逐字一致——两侧共用同一份
+ * 合并实现，因此不存在"两条路径各自漂移"的窗口。
+ *
+ * `session/update` 路由**仍保留**，但只服务 CLI：它需要**客户端指定会话 id**
+ * （`cli/src/client.rs` 自己 `gen_id` 后 upsert），而 VDFS 新建会话是
+ * provider 生成 id（id 是存储细节，不属于使用方的知识）。
  */
 export async function updateSession(
   sessionId: string,
   metadata: SessionMetadata,
   title?: string
-): Promise<SessionUpdate.Response> {
-  return await callPlugin<SessionUpdate.Response, SessionUpdate.Request>(
-    `${SESSION_PATH}/update`,
-    { session_id: sessionId, metadata, ...(title ? { title } : {}) },
-    undefined,
-    { session_id: sessionId }
+): Promise<void> {
+  await writeVdfs(
+    vdfsSessionAddr(sessionId),
+    JSON.stringify({ metadata, ...(title ? { title } : {}) })
   )
 }
 
@@ -152,4 +217,3 @@ export async function updateSession(
 export function createSessionId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2)
 }
-

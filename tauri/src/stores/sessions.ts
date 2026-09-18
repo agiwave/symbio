@@ -32,7 +32,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import {
   listSessions,
-  clearSession,
+  deleteSession as apiDeleteSession,
   updateSession,
   clearMessages as apiClearMessages,
   deleteMessage as apiDeleteMessage,
@@ -57,7 +57,6 @@ import {
   vdfsBase,
   vdfsJoin,
   vdfsSessionAddr,
-  type SessionOutcome,
   type VdfsChange,
   type VdfsNode,
 } from '@/schemas/vdfs'
@@ -67,48 +66,36 @@ import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/services/model'
-import { isInflightMessageStatus } from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
+// 消息转写规则（纯逻辑）：合并 / 水合 / 截断 / 看门狗判据
+import {
+  hydrateTranscript,
+  isInProgressMessage,
+  isRootTurn,
+  mergeMessagePatch,
+  previewOf,
+  sortTranscript,
+  truncateIdsFrom,
+} from './sessionTranscript'
+// 会话实时状态的派生规则（纯逻辑）：清单条目 / 运行态 / 选项回填
+import {
+  ACTIVITY_WORKING,
+  listItemPatchOf,
+  liveStatusPatchOf,
+  mergeListWithLive,
+  modeRiskBackfillOf,
+  titleOf,
+  workdirOf,
+  workingUpgradesOf,
+  type SessionLiveStatus,
+  type SessionMode,
+  type SessionRiskLevel,
+} from './sessionLive'
 
-/** 单个 session 的实时状态（用于缩略卡展示） */
-export interface SessionLiveStatus {
-  /** 会话的运行状态：与 VDFS 节点 `status` **同一词表**（`working` / `active` / …）。
-   *
-   * 这里不是「第二份真相」，而是**节点状态的本地镜像**：`status` 只在
-   * `list` / `stat` 时可见，而 busy / idle 是事件流；两次采样之间（尤其是
-   * send 的乐观置位）必须有处落脚。分页后当前会话也可能不在这一页里，
-   * 按 list 取节点会落空——所以按 id 索引的这份 map 不能省。
-   *
-   * 读法一律走 `isWorkingStatus(status)`：**不要**再引入 `is_working` 布尔。 */
-  status?: string
-  /** 是否有消息处于 waiting_user_action 状态（缩略卡显示"等待审批"角标） */
-  is_waiting_approval: boolean
-  /**
-   * 最近一次"状态写入"的本地时间（毫秒）。
-   *
-   * 注意：
-   * - 写入来源是**节点状态**，不是事件：会话节点的 VDFS 变更（`applySessionNode`）
-   *   与消息节点的变更（`vdfsTranscriptSync`），以及 send / resume 的乐观置位。
-   * - `putStatus` 内部每次都会**自动更新**此字段（避免漏写）；
-   *   `putMessage` 只在产生 assistant 文本预览时同步更新。
-   * - 若需判断"状态是否过期"，请使用 `getSessionStaleReason()` 而不是直接读此字段。
-   */
-  last_event_at: number
-  /** 当前活动状态文字（如 "正在思考..." / "正在调用工具 ls..."） */
-  activity?: string
-  /** 最后一条消息预览（assistant 的 text 内容） */
-  last_preview?: string
-  /**
-   * 上一轮的结局（会话节点 `attributes.outcome` 的本地镜像）。
-   *
-   * 提示音据此选音色——它是**状态**（"上一轮怎么结束的"），不是事件：
-   * 不需要靠"谁先到"来区分中止与失败。
-   *
-   * 注意「上一轮是否失败」**不看这里**，看 `status == 'failed'`
-   * （`isFailedStatus`）——结局是过程记录，状态是当前事实，两者职责不同。
-   */
-  outcome?: SessionOutcome
-}
+// 对外类型契约保持原路径（消费方一直从 `@/stores/sessions` 取）
+export type { SessionLiveStatus } from './sessionLive'
+
+/** 单个 session 的实时状态（用于缩略卡展示）—— 定义见 `./sessionLive`，此处仅经上方 re-export 暴露 */
 
 export const useSessionsStore = defineStore('sessions', () => {
   // 列表（来自后端 list + 本地状态镜像）
@@ -182,12 +169,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   // 兼容旧 API：返回 messages 数组形式（按 seq 排序；缺失 seq 时回退 timestamp）
   function getSessionMessages(id: string): ChatMessage[] {
-    const m = sessionMessages.value[id] || {}
-    return Object.values(m).sort((a, b) => {
-      const sa = a.seq ?? a.timestamp ?? 0
-      const sb = b.seq ?? b.timestamp ?? 0
-      return sa - sb
-    })
+    return sortTranscript(Object.values(sessionMessages.value[id] || {}))
   }
 
   /** 会话是否运行中（运行态的唯一读法：节点 `status == working`） */
@@ -245,29 +227,15 @@ export const useSessionsStore = defineStore('sessions', () => {
     next[sessionId] = cur
     commitMessages(next)
 
-    // 同步 status.last_preview（取最后一条 assistant 文本）
-    if (msg.role === 'assistant' && typeof msg.content === 'string' && msg.content) {
-      const preview = msg.content.length > 60 ? msg.content.slice(0, 60) + '…' : msg.content
+    // 同步 status.last_preview（取最后一条 assistant 文本；取不到则不动）
+    const preview = previewOf(msg)
+    if (preview !== null) {
       const snext = { ...sessionStatuses.value }
       const scur = { ...(snext[sessionId] || { is_waiting_approval: false, last_event_at: 0 }) }
       scur.last_preview = preview
       scur.last_event_at = Date.now()
       snext[sessionId] = scur
       sessionStatuses.value = snext
-    } else if (msg.role === 'assistant' && Array.isArray(msg.content)) {
-      const txt = (msg.content as any[])
-        .filter((p) => p?.type === 'text')
-        .map((p) => p?.text || '')
-        .join('')
-      if (txt) {
-        const preview = txt.length > 60 ? txt.slice(0, 60) + '…' : txt
-        const snext = { ...sessionStatuses.value }
-        const scur = { ...(snext[sessionId] || { is_waiting_approval: false, last_event_at: 0 }) }
-        scur.last_preview = preview
-        scur.last_event_at = Date.now()
-        snext[sessionId] = scur
-        sessionStatuses.value = snext
-      }
     }
   }
 
@@ -287,29 +255,8 @@ export const useSessionsStore = defineStore('sessions', () => {
         ...patch
       }
     } else {
-      // 沿用 useChatConnection 的合并语义：text/reasoning 追加，tool_call 替换
-      const merged: ChatMessage = { ...existing, ...patch }
-      if (patch.content != null) {
-        // tool_call / tool 结果：全量替换（避免流式增量重复拼接）。
-        // 注意：终态状态补发（content 为 null/undefined）时不应清空已有内容，
-        // 因此仅在 patch 确实携带内容时才覆盖（ToolCall 的参数即存于自身 content）。
-        const isFullReplace =
-          existing.type === 'tool_call' ||
-          patch.type === 'tool_call' ||
-          patch.role === 'tool' ||
-          existing.role === 'tool'
-        if (isFullReplace) {
-          merged.content = patch.content
-        } else if (typeof patch.content === 'string') {
-          merged.content = (typeof existing.content === 'string' ? existing.content : '') + patch.content
-        } else {
-          merged.content = patch.content
-        }
-      }
-      if (patch.meta) {
-        merged.meta = { ...(existing.meta || {}), ...patch.meta }
-      }
-      cur[patch.id] = merged
+      // 合并语义见 `sessionTranscript.mergeMessagePatch`（追加 vs 整条替换）
+      cur[patch.id] = mergeMessagePatch(existing, patch)
     }
     next[sessionId] = cur
     commitMessages(next)
@@ -386,106 +333,55 @@ export const useSessionsStore = defineStore('sessions', () => {
   /**
    * 把后端拉来的历史**合并**进 store 的实时缓存（loadMessages 调用）。
    *
-   * ## 为什么是合并而不是整表替换
-   *
-   * 这份快照来自一次 IPC 往返，取回期间流式补丁仍在到达并写入 store。
-   * 整表替换会把那些**更新的**补丁覆盖掉（经典 lost update），而它们不会被重发
-   * ——结果就是消息内容倒退若干 token，或整条在途节点凭空消失。
-   *
-   * 规则：
-   * - 快照里的节点 → 权威，整条替换（含状态与 `seq`）；
-   * - 本地有、快照没有的节点 → **仅当它仍在飞行中**（`isInflightMessageStatus`）
-   *   时保留。那正是 `persist_messages` 还没写盘的在途节点，也是「Turn 运行中切走
-   *   再切回」时最容易被丢掉的东西；终态且不在快照里的一律丢弃（被删除或已过期的
-   *   陈旧副本，保留它会让幽灵节点复活）。
+   * 合并规则（保留谁 / 丢弃谁 / `seq` 怎么分配）全部在
+   * `sessionTranscript.hydrateTranscript` —— 那是「快照 vs 在途节点」的唯一判据实现。
    */
   function hydrateFromHistory(sessionId: string, messages: ChatMessage[]) {
-    const map: Record<string, ChatMessage> = {}
-    const fromSnapshot = new Set<string>()
-    // 以"已分配 seq 的最大值 + 1"作为兜底游标起点，保证：
-    // 1) 缺失 seq 的旧数据按后端数组顺序排在有 seq 的消息之后（不抢到前面）；
-    // 2) 后续流式消息的 seq 从 max(seq) 之后继续，绝不小于任何历史 seq，
-    //    避免"新流式消息被排到旧持久化消息之前"的顺序错乱。
-    const maxSeq = messages.reduce(
-      (mx, m) => Math.max(mx, typeof m.seq === 'number' ? m.seq : 0),
-      0,
+    const { map, waitingApproval, lastSeq } = hydrateTranscript(
+      messages,
+      sessionMessages.value[sessionId] || {},
     )
-    let idx = maxSeq + 1
-    let waitingApproval = false
-    for (const m of messages) {
-      if (m.id) {
-        // 后端单调序号 `seq` 即权威顺序；缺失 seq 的旧数据用递增游标兜底。
-        const seq = typeof m.seq === 'number' ? m.seq : idx++
-        map[m.id] = { ...m, seq }
-        fromSnapshot.add(m.id)
-        // 还原"等待审批"状态，使会话卡片角标在重开会话时正确显示
-        if (m.status === 'waiting_user_action') waitingApproval = true
-      }
-    }
 
-    // 保留本地在途节点。**重新分配 seq**：本地游标可能小于快照的最大 seq
-    // （页面刚加载时游标从 0 起），沿用会让在途节点排到历史之前。
-    // `waiting_user_action` 不在保留集合里，因此不会影响上面的审批角标。
-    const local = sessionMessages.value[sessionId] || {}
-    for (const [id, m] of Object.entries(local)) {
-      if (fromSnapshot.has(id) || !isInflightMessageStatus(m.status)) continue
-      map[id] = { ...m, seq: idx++ }
-    }
-
-    const next = { ...sessionMessages.value, [sessionId]: map }
-    commitMessages(next)
+    commitMessages({ ...sessionMessages.value, [sessionId]: map })
     // 续接游标取"已分配 seq 的最大值"，保证下一轮 nextSeq 严格递增。
-    const lastSeq = Object.values(map).reduce((mx, m) => Math.max(mx, m.seq ?? 0), 0)
-    const snext = { ...sessionSeq.value, [sessionId]: lastSeq }
-    sessionSeq.value = snext
+    sessionSeq.value = { ...sessionSeq.value, [sessionId]: lastSeq }
+
     // 只还原"等待审批"（它由转写派生，是**消息**节点的属性）。
     // 「上一轮失败」不在此还原：它是**会话节点**的状态（`status == 'failed'`），
     // 由 `list` 快照 / 节点变更落定——从消息历史反推会造出第二份真相，
     // 且与节点状态可能不一致（历史里有失败 Turn ≠ 会话当前处于失败态）。
-    const prevStatus = sessionStatuses.value[sessionId] ?? { is_waiting_approval: false, last_event_at: Date.now() }
+    const prevStatus = sessionStatuses.value[sessionId] ?? {
+      is_waiting_approval: false,
+      last_event_at: Date.now(),
+    }
     sessionStatuses.value = {
       ...sessionStatuses.value,
-      [sessionId]: {
-        ...prevStatus,
-        is_waiting_approval: waitingApproval
-      }
+      [sessionId]: { ...prevStatus, is_waiting_approval: waitingApproval },
     }
   }
 
   /** 读取会话运行模式（默认 interactive） */
-  function getSessionMode(id: string): 'auto' | 'interactive' {
+  function getSessionMode(id: string): SessionMode {
     return sessionModes.value[id] || 'interactive'
   }
 
   /** 读取会话执行风险等级（默认 medium） */
-  function getSessionRiskLevel(id: string): 'low' | 'medium' | 'high' {
+  function getSessionRiskLevel(id: string): SessionRiskLevel {
     return sessionRiskLevels.value[id] || 'medium'
   }
 
   /**
    * 从清单项回填会话级选择（mode / risk_level）到 store map。
    *
-   * 与 agent_id/provider_id 不同，mode/risk_level 的 UI 状态在 store（不在
-   * 组件 ref），故需在清单刷新 / 元数据补丁时回填，使切换会话或改写后下拉态一致。
+   * 合法取值判定在 `sessionLive.modeRiskBackfillOf`；本函数只负责写回 ref。
    */
   function backfillSessionMaps(items: SessionListItem[]) {
-    const modeBackfill: Record<string, 'auto' | 'interactive'> = {}
-    const riskBackfill: Record<string, 'low' | 'medium' | 'high'> = {}
-    for (const it of items) {
-      const m = it.metadata
-      if (!m) continue
-      if (m.mode === 'auto' || m.mode === 'interactive') {
-        modeBackfill[it.id] = m.mode
-      }
-      if (m.risk_level === 'low' || m.risk_level === 'medium' || m.risk_level === 'high') {
-        riskBackfill[it.id] = m.risk_level
-      }
+    const { modes, risks } = modeRiskBackfillOf(items)
+    if (Object.keys(modes).length > 0) {
+      sessionModes.value = { ...sessionModes.value, ...modes }
     }
-    if (Object.keys(modeBackfill).length > 0) {
-      sessionModes.value = { ...sessionModes.value, ...modeBackfill }
-    }
-    if (Object.keys(riskBackfill).length > 0) {
-      sessionRiskLevels.value = { ...sessionRiskLevels.value, ...riskBackfill }
+    if (Object.keys(risks).length > 0) {
+      sessionRiskLevels.value = { ...sessionRiskLevels.value, ...risks }
     }
   }
 
@@ -533,42 +429,29 @@ export const useSessionsStore = defineStore('sessions', () => {
     error.value = null
     try {
       const items = await listSessions()
-      // 同步 lastUsedWorkdir
+      // 同步 lastUsedWorkdir 与标题缓存（后端 vdfs/list 的 title 已按 display_title
+      // 下发：metadata.title 优先，否则从会话内容自动生成——前端不再自行拉消息推导）
       for (const it of items) {
-        const wd = it.metadata?.workdir
-        if (typeof wd === 'string' && wd) {
-          lastUsedWorkdir.value = wd
-        }
-        // 同步标题（后端 vdfs/list 的 title 已按 display_title 下发：
-        // metadata.title 优先，否则从会话内容自动生成——前端不再自行拉消息推导）
-        const t = (typeof it.metadata?.title === 'string' && it.metadata.title) || it.name
-        if (t) {
-          titles.value[it.id] = t
-        }
+        const wd = workdirOf(it)
+        if (wd) lastUsedWorkdir.value = wd
+        const t = titleOf(it)
+        if (t) titles.value[it.id] = t
       }
       // 回填会话级选择（mode / risk_level）到 store map（机制见 backfillSessionMaps）
       backfillSessionMaps(items)
 
-      // 合并运行态：list 接口返回的是后端 ActiveSessionManager 的权威状态
+      // 合并运行态：list 接口返回的是后端 ActiveSessionManager 的权威状态；
+      // 本地镜像说「运行中」的条目保留（乐观置位不能被稍早的 list 快照打回）
       const liveStatuses = sessionStatuses.value
-      list.value = items.map((it) => {
-        const live = liveStatuses[it.id]
-        // 本地镜像说「运行中」就保留：send 的乐观置位不能被一次稍早的 list
-        // 快照打回（否则按钮会闪回「发送」）。其余一律以服务端 `status` 为准。
-        return live && isWorkingStatus(live.status)
-          ? { ...it, status: live.status }
-          : it
-      })
+      list.value = mergeListWithLive(items, liveStatuses)
 
       // 关键：把后端权威 status 回填到 sessionStatuses（isLoading 的唯一来源）。
       // 否则页面重载/视图挂载后，运行中的会话在输入框显示为禁用的"发送"按钮，
       // 用户无法点击停止（stop 按钮失效 bug）。
-      // 仅做 false→true 的升级：true→false 的收敛交给事件流的 idle/Abort/Error 事件，
-      // 避免 list 快照与实时事件竞争时误降级。
-      for (const it of items) {
-        if (isWorkingStatus(it.status) && !isWorkingStatus(liveStatuses[it.id]?.status)) {
-          putStatus(it.id, { status: VDFS_STATUS_WORKING, activity: '处理中…' })
-        }
+      // 仅做 false→true 的升级：true→false 的收敛交给节点状态变更，
+      // 避免 list 快照与实时变更竞争时误降级。
+      for (const id of workingUpgradesOf(items, liveStatuses)) {
+        putStatus(id, { status: VDFS_STATUS_WORKING, activity: ACTIVITY_WORKING })
       }
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -662,6 +545,16 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
+  /**
+   * 删除会话（连同其全部消息）。
+   *
+   * 写入入口是 **VDFS**：`delete(.vdfs/session/<id>)`（`services/session.ts::deleteSession`
+   * 只是它的具名包装）。后端 provider 的 `delete` 与曾经的 `session/clear` 路由
+   * 共用同一份实现，因此这是一次入口替换，不是第二种删除方式。
+   *
+   * 本地清单的移除由 `removeSessionLocal` 完成（乐观收敛），后端 `deleted` 变更
+   * 随后到达、各订阅方幂等收敛——两条路径行为一致。
+   */
   async function deleteSession(id: string) {
     const target = list.value.find(s => s.id === id)
     if (!target) return
@@ -676,9 +569,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
 
     try {
-      await clearSession(id)
+      await apiDeleteSession(id)
     } catch (e) {
-      logger.error('[sessions]', 'clearSession 失败', e)
+      logger.error('[sessions]', 'deleteSession 失败', e)
       throw e
     }
 
@@ -852,20 +745,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   /**
    * 从某条消息起**截断到列表末尾**：移除「目标 + 其后全部」。
    *
-   * ## 为什么前端要自己算这段区间
-   *
-   * 后端 `chat/delete_message` 的语义就是「在已排序列表里删掉目标及其之后的所有
-   * 消息」（`handlers.rs::invoke_delete_message` 的 `messages.drain(i..)`）。前端若
-   * 只删这一条、再等后端把被删的每一条逐个通知回来，就把一次确定的**区间删除**拆成了
-   * N 次通知；而且只要漏掉其中任意一条，列表尾部就会残留一个后端已不存在的节点，
-   * **没有任何机制会纠正它**（VDFS 与流式视图互不校验）。
-   *
-   * 判据与后端**同源**：两边都按 `seq` 升序排（后端 `ordered()` / `get_messages()`
-   * 用 `seq.unwrap_or(i64::MAX)`；本 store 用 `seq ?? timestamp`），因此「取目标及其
-   * 之后的全部」在两侧是同一个集合。这里按**排序后的位置**切片而不是直接比较 `seq`
-   * 大小：两种写法在有 `seq` 时等价，而位置切片在缺 `seq` 的旧数据上也仍然正确
-   * （不需要额外假设 `seq` 一定存在）。
-   *
+   * 区间判据在 `sessionTranscript.truncateIdsFrom`（与后端 `drain(i..)` 同源）。
    * 锚点不在本地（会话没加载 / 已被别处删掉）时**什么都不删**并返回空数组——
    * 绝不拿一个并不存在的锚点去截断整个列表。
    *
@@ -875,13 +755,13 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (!sessionId || !messageId) return []
     const cur = sessionMessages.value[sessionId]
     if (!cur || !cur[messageId]) return []
-    const orderedIds = getSessionMessages(sessionId).map((m) => m.id)
-    const anchorIdx = orderedIds.indexOf(messageId)
-    if (anchorIdx < 0) return []
 
-    const removed: ChatMessage[] = []
+    const ids = truncateIdsFrom(getSessionMessages(sessionId), messageId)
+    if (ids.length === 0) return []
+
     const rest = { ...cur }
-    for (const id of orderedIds.slice(anchorIdx)) {
+    const removed: ChatMessage[] = []
+    for (const id of ids) {
       const m = rest[id]
       if (!m) continue
       delete rest[id]
@@ -997,17 +877,14 @@ export const useSessionsStore = defineStore('sessions', () => {
     errorText: string
   ): Promise<void> {
     const msgs = getSessionMessages(sessionId)
-    const stuck = msgs.filter(
-      (m) => m.status === 'streaming' || m.status === 'waiting_user_action'
-    )
+    const stuck = msgs.filter(isInProgressMessage)
     // 与后端 persist_failure 对齐（"错误是状态、且只由造成中止的根 Turn 承载"）：
     // 仅把"根级 Turn（msg_type=turn 且 parent_id 为空）"标 Failed + error；
     // 其余仍在进行中的子节点（text / reasoning / tool_call）定稿为 Completed、
     // 绝不挂 error，避免把同一条错误刷到每条半截消息上（即原始 429 刷屏的根因）。
     let rootTurnFailed = false
     for (const m of stuck) {
-      const isRootTurn = m.type === 'turn' && !m.parent_id
-      if (isRootTurn) {
+      if (isRootTurn(m)) {
         const failed: ChatMessage = { ...m, status: 'failed', error: errorText }
         try {
           await apiUpdateMessage(sessionId, failed)
@@ -1112,41 +989,16 @@ export const useSessionsStore = defineStore('sessions', () => {
     const wasWorking = isWorkingStatus(prev?.status)
     const nowWorking = isWorkingStatus(rt.status)
 
-    // ① 清单条目就地收敛（不整表重拉）
+    // ① 清单条目就地收敛（不整表重拉）：补丁口径见 `sessionLive.listItemPatchOf`
     const title = typeof node.title === 'string' ? node.title : ''
     const idx = list.value.findIndex((s) => s.id === id)
     if (idx >= 0) {
-      const cur = list.value[idx]
-      list.value[idx] = {
-        ...cur,
-        status: rt.status,
-        updated_at: node.updated_at ?? cur.updated_at,
-        // 节点自述的 message_count 随载荷下发；缺失则保留原值
-        message_count:
-          typeof node.message_count === 'number' ? node.message_count : cur.message_count,
-        metadata: title ? { ...(cur.metadata || {}), title } : cur.metadata,
-      }
+      list.value[idx] = listItemPatchOf(node, list.value[idx], rt.status)
     }
     if (title) titles.value[id] = title
 
-    // ② 运行态镜像：节点状态 / 结局直通
-    const patch: Partial<SessionLiveStatus> = {
-      status: rt.status,
-      outcome: rt.outcome,
-    }
-    // `activity` 只在 working ↔ 非 working **迁移**时改写：否则一次标题更新就会
-    // 把消息节点派生的"正在思考…"顶掉，造成闪动。
-    if (wasWorking !== nowWorking) {
-      if (nowWorking) patch.is_waiting_approval = false
-      patch.activity = nowWorking
-        ? '处理中…'
-        : rt.outcome === 'aborted'
-          ? '已中止'
-          : rt.outcome === 'failed'
-            ? '错误'
-            : undefined
-    }
-    putStatus(id, patch)
+    // ② 运行态镜像：节点状态 / 结局直通；activity 只在迁移时改写（见 liveStatusPatchOf）
+    putStatus(id, liveStatusPatchOf(rt, wasWorking, nowWorking))
 
     // ③ 会话级错误 = 节点属性（覆盖「错误发生在任何消息节点创建之前」的场景）。
     //    新一轮开始（working）时节点不带 error ⇒ 自动清空上一轮的错误。
