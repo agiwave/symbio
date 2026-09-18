@@ -1,5 +1,5 @@
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
-export type ChatMessageType = 'text' | 'reasoning' | 'tool_call' | 'turn' | 'user_prompt';
+export type ChatMessageType = 'text' | 'reasoning' | 'tool_call' | 'turn' | 'user_prompt' | 'compression';
 export type MessageStatus = 'pending' | 'streaming' | 'waiting_user_action' | 'completed' | 'failed';
 
 /**

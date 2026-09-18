@@ -32,7 +32,7 @@ fn session_node_carries_renderer_ext_and_presentation() {
     assert_eq!(idle.access.flags(), "rw", "会话可读可写");
     assert!(!idle.is_dir(), "会话是文档而非目录");
 
-    let busy = session_node(&SessionSummary::of(&s), &SessionRuntime::working(None));
+    let busy = session_node(&SessionSummary::of(&s), &SessionRuntime::working());
     assert_eq!(busy.status, vdfs::VDFS_STATUS_WORKING);
 }
 
@@ -80,7 +80,7 @@ fn session_node_projects_runtime_state() {
 fn session_change_carries_node_but_not_content() {
     let mut s = Session::new("abc");
     s.updated_at = 1_700_000_000;
-    let node = session_node(&SessionSummary::of(&s), &SessionRuntime::working(None));
+    let node = session_node(&SessionSummary::of(&s), &SessionRuntime::working());
     let c = session_change("abc", node);
     assert_eq!(c.path, "abc", "provider 子树内口径，挂载名由容器补");
     assert_eq!(c.change, vdfs::VDFS_CHANGE_UPDATED);
@@ -479,7 +479,7 @@ fn vdfs_session_node_carries_list_fields() {
     // 空闲 / 运行中 / 上次失败是三个**并列的状态值**，不是布尔 + 标志位
     assert_eq!(n.status, vdfs::VDFS_STATUS_ACTIVE);
     assert_eq!(
-        session_node(&SessionSummary::of(&s), &SessionRuntime::working(None)).status,
+        session_node(&SessionSummary::of(&s), &SessionRuntime::working()).status,
         vdfs::VDFS_STATUS_WORKING
     );
     assert_eq!(
@@ -547,52 +547,4 @@ fn vdfs_session_content_overlays_live_messages() {
     let only = &v["messages"].as_array().unwrap()[0];
     assert_eq!(only["content"], "新");
     assert_eq!(only["seq"], 7, "顺序锚点只由存储分配，在途副本必须继承");
-}
-
-/// 处理阶段 `phase`：只在**运行中**投影到节点属性。
-///
-/// 压缩是唯一需要它的场景——那段时间内没有任何消息节点可渲染（Turn 还没创建、
-/// 出帧又被静音），前端只能靠会话节点的这一个字段告诉用户"正在压缩"，
-/// 否则表现为卡死。
-#[test]
-fn phase_is_projected_only_while_working() {
-    let s = Session::new("abc");
-
-    let busy = session_node(
-        &SessionSummary::of(&s),
-        &SessionRuntime::working(Some(PHASE_COMPRESSING.to_string())),
-    );
-    assert_eq!(busy.status, vdfs::VDFS_STATUS_WORKING);
-    assert_eq!(
-        busy.attributes.get("phase").and_then(|v| v.as_str()),
-        Some(PHASE_COMPRESSING),
-        "运行中：阶段必须随节点下发，否则压缩窗口内前端无事可渲染"
-    );
-
-    // 空闲 / 已结束：阶段一律不出现——"在忙什么"只在忙的时候有意义
-    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
-    assert!(idle.attributes.get("phase").is_none());
-    let done = session_node(
-        &SessionSummary::of(&s),
-        &SessionRuntime::finished(OUTCOME_COMPLETED, None),
-    );
-    assert!(done.attributes.get("phase").is_none());
-}
-
-/// `from_state` 是运行态投影的**唯一入口**：非运行分支必须丢掉 `phase`。
-///
-/// 否则一次压缩异常残留（例如压缩中被中止）会让会话回到空闲后仍挂着
-/// "正在压缩上下文"，而没有任何机制会纠正它——前端也没有第二道防线可依赖。
-#[test]
-fn from_state_drops_phase_when_not_working() {
-    let busy = SessionRuntime::from_state(true, None, None, Some(PHASE_COMPRESSING.to_string()));
-    assert!(busy.working);
-    assert_eq!(busy.phase.as_deref(), Some(PHASE_COMPRESSING));
-
-    let idle = SessionRuntime::from_state(false, None, None, Some(PHASE_COMPRESSING.to_string()));
-    assert!(!idle.working);
-    assert_eq!(
-        idle.phase, None,
-        "非运行分支必须丢掉 phase：会话已空闲就不该再说'正在压缩'"
-    );
 }

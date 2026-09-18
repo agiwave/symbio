@@ -150,7 +150,7 @@ impl SessionPlugin {
         // 提示。发射器需要插件 + 会话状态：`notify_session_state` 要用 store（取会话
         // 摘要）与 `change_subs`（投递），两者都在插件上。
         let phase = Some(std::sync::Arc::new(
-            super::super::chat_loop::PhaseEmitter::new(self.clone(), state.clone()),
+            super::super::chat_loop::CompressionEmitter::new(self.clone(), state.clone()),
         ));
         let orchestrator = super::super::chat_loop::ChatOrchestrator::new(
             provider,

@@ -18,6 +18,55 @@
 
 ***
 
+## 2026-09-18: 压缩成为会话流中的普通节点 + 压缩请求改为"像历史对话一样发"
+
+**性质：体验改造 + 后端算法**。用户两条反馈：
+
+1. 压缩应是会话中间的一个节点，而不是会话窗口顶部的横幅；
+2. 后端把整个历史 `Vec<ChatMessage>` 序列化成 JSON 塞进一条 user 消息发给大模型，
+   里面带着 `id`/`parent_id`/`seq`/`status`/`meta`/`timestamp` 等模型完全不关心的字段，
+   既浪费 token 又冗余。
+
+### 请求形态：从 JSON 转储改为正常对话
+
+- `build_compression_request` 不再 `serde_json::to_string(history)`。改为：**历史消息原样
+  逐条透传** + 末尾追加一条纯**指令**消息（`compression_instruction`）。
+- provider 层的 `flatten_chat_messages` 会把这串消息投影成模型该看的对话形态
+  （Turn→assistant 聚合、ToolCall→tool_calls、结果→role=tool），与一次普通对话**同源**。
+  压缩请求因此天然省掉所有存储字段。
+- hints 从"嵌进数据 JSON"改为"拼进指令消息"——指令里只描述要 distill 成什么结构，
+  不再内嵌 `<state_snapshot>` 标签模板（模板仍只走 system role，这条防线保留）。
+- 重试路径顺势变成自然的多轮（历史 → 指令 → 纠正），比原先"再拼一个 JSON"更稳。
+- `pending_tokens` 估算口径修正：旧的把**不发给模型**的 `keep_messages` 也算进去了，
+  现已只统计真正下发的消息。
+
+### 压缩节点：进会话流
+
+- 新增消息类型 `MessageType::Compression`（`chat_message.rs`，`"compression"`）。
+- 自动压缩触发时，在**当前时刻**（user 消息之后）插入一条 `Streaming` 的压缩节点，
+  走 `emit_message_patch`——它走 `state.inner.frontends` + VDFS 变更订阅，**不经过**被静音
+  的 turn channel，所以压缩窗口内前端能看见这个节点。
+- 压缩完成 → 节点定稿为 `Completed`（meta 记 `compressed_count`，渲染"已压缩 N 条历史消息"）；
+  LLM 失败 → `Failed`；用户中止 → `Completed`（带 `failure_kind=aborted`，与 S20.3 同一口径，
+  不挂 error 文案）。
+- 节点同时进**在途缓冲**，切走再切回仍可见（复用 S20.3 的叠加机制）。
+- 清除机制：同 S20.3 的 `CompressionEmitter`（原 `PhaseEmitter`），生命周期收在包装层，
+  覆盖成功/失败回滚/校验失败/紧急兜底/无收益/中止全部出口；且幂等——重复调用不产生重复节点。
+
+### 移除：会话级 `phase` 机制
+
+上一轮（`e00dc9c`）做的"会话节点 `attributes.phase` + 顶部横幅"被本改造取代——既然压缩
+现在有了自己的消息节点，横幅就不再有消费者，整条链路（后端 `ActiveSessionStateInner.phase`
+/ `SessionRuntime.phase` / `PHASE_COMPRESSING`、前端 `VDFS_PHASE_COMPRESSING` / store `phase`
+/ `ModelChatPanel` 横幅）一并删除，避免死代码触发 `dead-code-audit` 门禁。
+
+### 压缩节点不进请求包
+
+`flatten_chat_messages` 跳过 `Compression` 类型——它是过程记录，不是对话内容，不应再占上下文。
+
+验证：后端 704、前端 177（含 `compression_request` 与 `flatten_chat_messages` 压缩节点跳过两条
+新测试，均经回退验证确认会红）；门禁 19/19。
+
 ## 2026-09-18: 修复压缩后消息顺序倒挂（用户消息插进更早的历史）
 
 **性质：修复**。用户报"会话中的前端消息显示顺序不对，用户消息显示到了最新消息位置"，

@@ -634,7 +634,7 @@ pub(crate) use self::nodes::{
     message_payload, message_text, ordered, overlay_live, parse_session_path, session_change,
     session_content, session_node, title_from_new_path, transcript_window, window_params,
     SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED,
-    PHASE_COMPRESSING, SEG_MESSAGES,
+    SEG_MESSAGES,
 };
 
 #[cfg(test)]

@@ -35,7 +35,7 @@ mod state;
 mod turn;
 
 // 跨模块契约：`orchestrator.rs` / `resume.rs` 经 `chat_loop::X` 引用。
-pub use self::state::{ChatOrchestrator, PhaseEmitter, StopSignal};
+pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal};
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
 pub(crate) use self::compress::{auto_compress_process, run_context_compact};

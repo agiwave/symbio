@@ -256,34 +256,31 @@ impl Drop for StopSignal {
 ///
 /// 生命周期与 [`StopSignal`] 绑定：Stop 的显式触发点在本 loop 的各出口，
 /// RAII 兜底点在 `run_chat_loop_task` 的 `WorkingGuard`。
-/// 会话运行态「阶段」的发射器（压缩期用）。
+/// 把「正在压缩」作为**消息节点**呈现的发射器（压缩期 UI 的唯一出口）。
 ///
-/// ## 为什么需要它
+/// ## 为什么是消息节点，而不是会话级提示
 ///
-/// 压缩发生在 Turn 创建**之前**（`apply_compaction`），且出帧被刻意静音——
-/// `send_compression_request` 用一个哑 `tx` 接住压缩 LLM 的全部流式帧，目的是
-/// 避免泄漏一个永不 finalize 的空 Turn 骨架。代价是：整段压缩窗口内**没有任何
-/// 消息节点**可供前端渲染，而长上下文时这段可达数分钟，用户视角就是卡死。
+/// 压缩是会话里真实发生的一步。用户应当像看到一次工具调用那样看到它：
+/// 有自己的位置（当前时刻）、自己的状态（进行中 / 已完成），被压掉的历史
+/// 就发生在它之前。挂在窗口顶部的横幅没有位置概念——用户滚到消息流中间时
+/// 看不见它，事后也无法回溯「上次压缩发生在哪里、压掉了多少」。
 ///
-/// 但压缩是**会话级**状态，不是消息节点——它仍应经 VDFS 变更下发，让前端在会话
-/// 节点上读到 `attributes.phase` 并给出等待提示。
+/// ## 为什么能在静音窗口里发出去
+///
+/// 压缩 LLM 请求的出帧被刻意静音（`send_compression_request` 用哑 `tx` 接住
+/// 全部流式帧，以免泄漏一个永不 finalize 的空 Turn 骨架）。但本发射器走
+/// `emit_message_patch` → `broadcast_frame` → `state.inner.frontends` 与 VDFS
+/// 变更订阅，**不经过**那条被静音的 turn channel。
 ///
 /// ## 为什么持有插件而不是「一个回调」
 ///
 /// 发变更需要两样东西：store（取会话摘要）与 `change_subs`（投递），两者都在插件上。
-/// 只写 `ActiveSessionStateInner.phase` 而不通知，UI 不会刷新——而压缩窗口恰恰没有
-/// 任何其它变更会顺带把它带下去（这正是"静音"的定义）。
-///
-/// ## 为什么能发出去
-///
-/// `notify_session_state` 走的是 `state.inner.frontends` + VDFS 变更订阅，
-/// **不经过**被静音的那条 turn channel。所以不是"发不出"，是"从没发过"。
-pub struct PhaseEmitter {
+pub struct CompressionEmitter {
     plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
     state: Arc<crate::plugins::session::active::ActiveSessionState>,
 }
 
-impl PhaseEmitter {
+impl CompressionEmitter {
     pub fn new(
         plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
         state: Arc<crate::plugins::session::active::ActiveSessionState>,
@@ -291,21 +288,69 @@ impl PhaseEmitter {
         Self { plugin, state }
     }
 
-    /// 置位 / 清位当前阶段，并立即下发会话节点变更。
+    /// 插入「正在压缩」节点：进在途缓冲 + 广播。
     ///
-    /// 只改字段不通知等于没改（见类型文档）：压缩窗口内没有第二个变更会把它带下去。
-    pub async fn set(&self, phase: Option<&'static str>) {
-        {
-            let mut inner = self.state.inner.write().await;
-            inner.phase = phase.map(|p| p.to_string());
-        }
-        let id = self.state.request_id_str();
-        self.plugin.notify_session_state(&id).await;
+    /// 进在途缓冲是必要的：会话叶子 `read` 会叠加在途（见 `overlay_live`），
+    /// 因此压缩期间切走再切回，这个节点仍然可见——否则用户切回来只看到「什么
+    /// 都没有」，又变回最初那个"卡死"观感。
+    pub async fn begin(&self, node_id: &str) {
+        let node = ChatMessage {
+            id: node_id.to_string(),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::Compression),
+            status: Some(MessageStatus::Streaming),
+            content: Some(MessageContent::Text("正在压缩上下文…".to_string())),
+            ..Default::default()
+        };
+        self.state.live_messages.lock().await.push(node.clone());
+        self.emit(node, false).await;
     }
 
-    /// 回到「常规处理」（阶段置空）。
-    pub async fn clear(&self) {
-        self.set(None).await;
+    /// 定稿节点并使其离开在途缓冲，返回终态副本供调用方落库。
+    ///
+    /// 在途缓冲里找不到该 id 时（例如前端是在压缩开始之后才连上的）**照样构造
+    /// 并广播**——终态必须到达，否则那个 `Streaming` 节点会永远留在前端转圈。
+    pub async fn finish(&self, node_id: &str, status: MessageStatus, text: &str) -> ChatMessage {
+        let node = {
+            let mut live = self.state.live_messages.lock().await;
+            match live.iter_mut().find(|m| m.id == node_id) {
+                Some(existing) => {
+                    existing.status = Some(status.clone());
+                    existing.content = Some(MessageContent::Text(text.to_string()));
+                    existing.clone()
+                }
+                None => ChatMessage {
+                    id: node_id.to_string(),
+                    role: Some(MessageRole::Assistant),
+                    msg_type: Some(MessageType::Compression),
+                    status: Some(status.clone()),
+                    content: Some(MessageContent::Text(text.to_string())),
+                    ..Default::default()
+                },
+            }
+        };
+        // 权威副本即将由调用方落库，在途副本必须作废：否则同一条消息会以
+        // 「存储一份 + 在途一份」两种形态参与叠加。
+        self.state
+            .live_messages
+            .lock()
+            .await
+            .retain(|m| m.id != node_id);
+        self.emit(node.clone(), true).await;
+        node
+    }
+
+    async fn emit(&self, node: ChatMessage, existed: bool) {
+        self.plugin
+            .emit_message_patch(
+                &self.state,
+                &self.state.session_id,
+                node.clone(),
+                &node,
+                existed,
+                None,
+            )
+            .await;
     }
 }
 
@@ -320,12 +365,12 @@ pub struct ChatOrchestrator {
     /// 本次请求生命周期的 Stop 触发器（由 `run_chat_loop_task` 创建并共享给
     /// `WorkingGuard` 兜底，见 [`StopSignal`]）
     pub stop: Arc<StopSignal>,
-    /// 会话运行态「阶段」的发射器（压缩期用）。
+    /// 压缩节点的发射器（把「正在压缩」作为消息节点呈现）。
     ///
-    /// `None` = 调用方没有提供（测试 / 无前端场景）：压缩照常执行，只是不发信号。
+    /// `None` = 调用方没有提供（测试 / 无前端场景）：压缩照常执行，只是不呈现节点。
     /// 之所以是可选而非必填：`run_chat_loop` 的其它调用场景（单测）根本没有
     /// 会话状态与前端订阅者，让它们为「一个提示」去构造插件实例是本末倒置。
-    pub phase: Option<Arc<PhaseEmitter>>,
+    pub compression: Option<Arc<CompressionEmitter>>,
 }
 
 impl ChatOrchestrator {
@@ -334,14 +379,14 @@ impl ChatOrchestrator {
         parent: Option<Arc<dyn Plugin>>,
         context_limit: u32,
         stop: Arc<StopSignal>,
-        phase: Option<Arc<PhaseEmitter>>,
+        compression: Option<Arc<CompressionEmitter>>,
     ) -> Self {
         Self {
             provider,
             parent,
             context_limit,
             stop,
-            phase,
+            compression,
         }
     }
 

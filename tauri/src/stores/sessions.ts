@@ -47,7 +47,6 @@ import {
   VDFS_CHANGE_DELETED,
   VDFS_CHANGE_UPDATED,
   VDFS_ROOT,
-  VDFS_PHASE_COMPRESSING,
   VDFS_SESSION_DIR,
   VDFS_STATUS_FAILED,
   VDFS_STATUS_WORKING,
@@ -109,13 +108,6 @@ export interface SessionLiveStatus {
    * （`isFailedStatus`）——结局是过程记录，状态是当前事实，两者职责不同。
    */
   outcome?: SessionOutcome
-  /**
-   * 当前处理阶段（会话节点 `attributes.phase` 的本地镜像）。
-   *
-   * 只在**运行中**有意义。压缩是唯一需要它的场景：那段时间没有任何消息节点
-   * 可渲染，主聊天区只能靠它给出等待提示，否则表现为卡死。
-   */
-  phase?: string
 }
 
 export const useSessionsStore = defineStore('sessions', () => {
@@ -1137,30 +1129,17 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
     if (title) titles.value[id] = title
 
-    // ② 运行态镜像：节点状态 / 结局 / 阶段直通
-    const prevPhase = prev?.phase
-    const nowPhase = rt.phase
-    const compressing = nowPhase === VDFS_PHASE_COMPRESSING
+    // ② 运行态镜像：节点状态 / 结局直通
     const patch: Partial<SessionLiveStatus> = {
       status: rt.status,
       outcome: rt.outcome,
-      // 阶段只在**运行中**采信（与后端 `SessionRuntime::from_state` 同一规则）：
-      // 会话已空闲就不该再说"正在压缩"，否则一次压缩异常残留会让提示条永远挂着。
-      phase: nowWorking ? nowPhase : undefined,
     }
-    // `activity` 的两类改写时机：
-    // - working ↔ 非 working **迁移**（原逻辑）：只在迁移时改，否则一次标题更新
-    //   就会把消息节点派生的"正在思考…"顶掉，造成闪动；
-    // - **阶段变化**（新增）：压缩窗口内没有任何消息节点，"处理中…"是唯一可见的
-    //   文案，必须说清在忙什么——长上下文压缩可达数分钟，说不清就等于卡死。
-    if (wasWorking !== nowWorking && nowWorking) {
-      patch.is_waiting_approval = false
-    }
-    if (wasWorking !== nowWorking || prevPhase !== nowPhase) {
+    // `activity` 只在 working ↔ 非 working **迁移**时改写：否则一次标题更新就会
+    // 把消息节点派生的"正在思考…"顶掉，造成闪动。
+    if (wasWorking !== nowWorking) {
+      if (nowWorking) patch.is_waiting_approval = false
       patch.activity = nowWorking
-        ? compressing
-          ? '正在压缩上下文…'
-          : '处理中…'
+        ? '处理中…'
         : rt.outcome === 'aborted'
           ? '已中止'
           : rt.outcome === 'failed'

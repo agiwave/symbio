@@ -30,8 +30,6 @@ pub(crate) struct SessionRuntime {
     pub outcome: Option<String>,
     /// 上一轮的错误短消息（仅 `outcome == failed` 时有意义）
     pub error: Option<String>,
-    /// 当前处理阶段（`None` = 常规处理）。语义见 `ActiveSessionStateInner::phase`。
-    pub phase: Option<String>,
 }
 
 /// 上一轮结局：正常结束
@@ -41,14 +39,6 @@ pub(crate) const OUTCOME_ABORTED: &str = "aborted";
 /// 上一轮结局：以错误结束
 pub(crate) const OUTCOME_FAILED: &str = "failed";
 
-/// 处理阶段：正在压缩上下文。
-///
-/// 压缩是**内部 LLM 请求**——它发生在 Turn 创建**之前**（`apply_compaction`），
-/// 且出帧被刻意静音（避免泄漏一个永不 finalize 的空 Turn 骨架）。于是整段窗口内
-/// **没有任何消息节点**可供前端渲染，而长上下文时这段可达数分钟：用户视角就是
-/// 卡死。它是会话级状态却不是消息节点，因此只能挂在会话节点的 `phase` 上。
-pub(crate) const PHASE_COMPRESSING: &str = "compressing";
-
 impl SessionRuntime {
     /// 空闲：没在跑，也没有已知的上一轮结局
     pub(crate) fn idle() -> Self {
@@ -56,17 +46,15 @@ impl SessionRuntime {
             working: false,
             outcome: None,
             error: None,
-            phase: None,
         }
     }
 
     /// 运行中：新一轮开始，上一轮的结局随之作废（否则失败角标会残留）
-    pub(crate) fn working(phase: Option<String>) -> Self {
+    pub(crate) fn working() -> Self {
         Self {
             working: true,
             outcome: None,
             error: None,
-            phase,
         }
     }
 
@@ -80,7 +68,6 @@ impl SessionRuntime {
             } else {
                 None
             },
-            phase: None,
         }
     }
 
@@ -93,13 +80,9 @@ impl SessionRuntime {
         working: bool,
         outcome: Option<String>,
         error: Option<String>,
-        phase: Option<String>,
     ) -> Self {
-        // `phase` 只在**运行中**有意义：没在跑就谈不上"在忙什么"。非运行分支一律
-        // 丢掉它——否则一次压缩异常残留（如压缩中被中止）会让会话回到空闲后
-        // 仍挂着"正在压缩上下文"。
         if working {
-            return Self::working(phase);
+            return Self::working();
         }
         match outcome.as_deref() {
             Some(o) => Self::finished(o, error),
@@ -171,12 +154,6 @@ pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> vdfs::Vdf
     }
     if let Some(error) = &rt.error {
         let _ = n.attributes.insert("error".to_string(), json!(error));
-    }
-    // 当前阶段：只在非常规处理时出现（压缩）。与 `outcome` / `error` 同一手法——
-    // 场景字段，VDFS 只透传；消费者（前端）据此在**没有消息节点可渲染**的窗口里
-    // 给出等待提示。
-    if let Some(phase) = &rt.phase {
-        let _ = n.attributes.insert("phase".to_string(), json!(phase));
     }
     n
 }

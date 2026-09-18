@@ -235,6 +235,10 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                 result.push(native);
                 result.extend(tool_results);
             }
+            // 上下文压缩节点**不是对话内容**：它是系统对历史的一次整理动作，
+            // 只服务于前端呈现与事后审计。发给模型纯属噪音——既占上下文，
+            // 又会把"系统整理过上下文"当成一条事实陈述摆进对话序列。
+            Some(MessageType::Compression) => {}
             _ => {
                 // User / System 等根级内容节点
                 let mut native: NativeMessage = m.clone().into();
@@ -1111,5 +1115,33 @@ mod tests {
             .find(|n| n.tool_call_id.as_deref() == Some("tc-s"))
             .expect("成功工具结果应保留");
         assert_eq!(ok_tool.success, None, "成功工具结果保持 None");
+    }
+
+    /// 压缩节点**不是对话内容**，不得进入请求包。
+    ///
+    /// 它是系统对历史的一次整理动作，只服务于前端呈现与事后审计。发进请求包
+    /// 既白占上下文，又会让模型把"系统整理过上下文"当成一条事实陈述读进去。
+    #[test]
+    fn compression_nodes_are_excluded_from_request_view() {
+        let msgs = vec![
+            ChatMessage {
+                id: "u1".into(),
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text("问题".into())),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "c1".into(),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Compression),
+                content: Some(MessageContent::Text("已压缩上下文（12 → 4 条）".into())),
+                status: Some(MessageStatus::Completed),
+                ..Default::default()
+            },
+        ];
+        let natives = flatten_chat_messages(&msgs);
+        assert_eq!(natives.len(), 1, "压缩节点必须被剔除出请求包");
+        assert_eq!(natives[0].role, MessageRole::User);
     }
 }

@@ -43,7 +43,7 @@ pub(crate) async fn auto_compress_process(
         return Ok(None);
     }
 
-    let (compression_msg, history_to_compress, history_to_keep) =
+    let (compression_request, history_to_compress, history_to_keep) =
         match compression::prepare_compression(&context.messages) {
             Some(v) => v,
             None => return Ok(None),
@@ -67,7 +67,7 @@ pub(crate) async fn auto_compress_process(
         channel,
         ctx,
         abort_flag,
-        compression_msg,
+        compression_request,
         history_to_keep,
         // 自动路径无用户保留提示（hints 只在主动路径有来源）
         None,
@@ -110,12 +110,12 @@ async fn compress_snapshot_inner(
     channel: &mut PluginChannel,
     ctx: &Arc<dyn InvokeRequest>,
     abort_flag: &Arc<AtomicBool>,
-    compression_msg: ChatMessage,
+    compression_request: Vec<ChatMessage>,
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
     log_tag: &str,
 ) -> Option<usize> {
-    // 保存原始历史：压缩失败时回滚，绝不能让 `[compression_msg]` 残留在上下文里。
+    // 保存原始历史：压缩失败时回滚，绝不能让压缩请求残留在上下文里。
     let original_messages = context.messages.clone();
     let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await;
 
@@ -136,15 +136,13 @@ async fn compress_snapshot_inner(
     // 且每轮自动压缩都会重发这条注定失败的巨型请求：压缩永不收敛、每轮开头
     // 多一段漫长的无响应。预判命中时跳过 doomed 请求，直接本地机械兜底
     // （尾部保留 + 说明头，不依赖 LLM），让上下文水位立即回落到可工作区间。
-    let pending: Vec<ChatMessage> = {
-        let mut v = Vec::with_capacity(1 + keep_messages.len());
-        v.push(compression_msg.clone());
-        v.extend(keep_messages.iter().cloned());
-        v
-    };
+    // 请求体的实际内容 = 压缩 system 提示词 + `compression_request`（历史对话 + 末尾指令）。
+    //
+    // **不含 `keep_messages`**：保留区根本不发往模型，把它算进来只会高估请求体，
+    // 让本可成功的 LLM 摘要被误判成"注定超限"，退化成机械兜底（快照质量显著下降）。
     let overhead_tokens =
         compression::estimate_request_overhead(&compression::get_compression_prompt(), ctx).await;
-    let pending_tokens: usize = pending
+    let pending_tokens: usize = compression_request
         .iter()
         .map(compression::estimate_message_tokens)
         .sum();
@@ -196,7 +194,10 @@ async fn compress_snapshot_inner(
         return None;
     }
 
-    context.messages = vec![compression_msg];
+    // 压缩请求的**全部内容**：待压缩历史（正常对话形态）+ 末尾压缩指令。
+    // provider 的 `flatten_chat_messages` 会把它投影成模型该看的对话，
+    // 而不是把存储字段原样倒给模型（见 `build_compression_request` 的说明）。
+    context.messages = compression_request;
 
     // 专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离）
     let compression_prompt = compression::get_compression_prompt();
@@ -358,14 +359,16 @@ async fn compress_with_snapshot_core(
     channel: &mut PluginChannel,
     ctx: &Arc<dyn InvokeRequest>,
     abort_flag: &Arc<AtomicBool>,
-    compression_msg: ChatMessage,
+    compression_request: Vec<ChatMessage>,
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
     log_tag: &str,
 ) -> Option<usize> {
-    if let Some(e) = &orchestrator.phase {
-        e.set(Some(crate::plugins::session::plugin::PHASE_COMPRESSING))
-            .await;
+    // 压缩节点的 id 在**包装层**生成：这里才有发射器，而内层只管压缩逻辑。
+    let node_id = short_id();
+    let before = context.messages.len();
+    if let Some(e) = &orchestrator.compression {
+        e.begin(&node_id).await;
     }
     let result = compress_snapshot_inner(
         orchestrator,
@@ -373,14 +376,33 @@ async fn compress_with_snapshot_core(
         channel,
         ctx,
         abort_flag,
-        compression_msg,
+        compression_request,
         keep_messages,
         extra_hints,
         log_tag,
     )
     .await;
-    if let Some(e) = &orchestrator.phase {
-        e.clear().await;
+    if let Some(e) = &orchestrator.compression {
+        let after = context.messages.len();
+        let (status, text) = match result {
+            Some(_) => (
+                MessageStatus::Completed,
+                format!("已压缩上下文（{before} → {after} 条）"),
+            ),
+            None => (
+                MessageStatus::Failed,
+                "压缩未完成，已保留完整历史".to_string(),
+            ),
+        };
+        let node = e.finish(&node_id, status, &text).await;
+        // 落库：压缩是会话里真实发生的一步，应当留下记录。否则用户刷新后只看到
+        // "历史突然变短了"，却没有任何东西说明发生过什么。
+        if let Err(err) = context.session.append_messages(vec![node]).await {
+            plugin_warn!(
+                "session",
+                "[Compress] 压缩节点落库失败（前端已收到终态）: {err}"
+            );
+        }
     }
     result
 }
@@ -427,7 +449,7 @@ pub(crate) async fn run_context_compact(
     }
 
     let keep_messages: Vec<ChatMessage> = context.messages[split_user_idx..].to_vec();
-    let compression_msg = compression::build_compression_request(&history, hints);
+    let compression_request = compression::build_compression_request(&history, hints);
 
     // 压缩流水线与被动自动压缩共用同一核心（transcript 转存 → LLM 压缩请求 →
     // 快照校验/纠正重试/降级兜底 → meta 构造 → 保留区拼接落库）；失败已在核心内
@@ -438,7 +460,7 @@ pub(crate) async fn run_context_compact(
         channel,
         ctx,
         abort_flag,
-        compression_msg,
+        compression_request,
         keep_messages,
         hints,
         "manual",

@@ -72,8 +72,8 @@
       <!-- 收起态展示单行摘要（深层级 / 子步骤默认收起时，让用户无需展开即知内容） -->
       <span v-if="!effectiveOpen && summaryPreview" class="node-preview">{{ summaryPreview }}</span>
       <span v-if="statusTag" class="node-tag" :class="tagClass">
-        <span v-if="isRunningTool" class="tag-dots"><span /><span /><span /></span>{{ statusTag
-        }}<span v-if="isRunningTool && runningDuration" class="tag-elapsed">{{ runningDuration }}</span>
+        <span v-if="isRunningAction" class="tag-dots"><span /><span /><span /></span>{{ statusTag
+        }}<span v-if="isRunningAction && runningDuration" class="tag-elapsed">{{ runningDuration }}</span>
       </span>
       <span v-if="isStreaming && !isReasoning && !isToolCall" class="node-live">回复中…</span>
       <!-- 悬停操作：用户消息可编辑；失败工具可就地重试；仅 root 级节点可删除 -->
@@ -113,6 +113,10 @@
         />
         <div v-else class="markdown-body" v-html="rendered" />
       </template>
+
+      <!-- 上下文压缩：系统对历史的一次整理动作（不是对话内容）。
+           正文由后端给出——运行中「正在压缩上下文…」，完成后「已压缩上下文（X → Y 条）」。 -->
+      <div v-else-if="isCompression" class="compress-note">{{ textContent }}</div>
 
       <!-- 待用户响应（user_prompt：ask_user 提问 / 工具确认） -->
       <template v-else-if="isUserPrompt">
@@ -402,6 +406,11 @@ const isToolCall = computed(() => type.value === 'tool_call')
 const isReasoning = computed(() => type.value === 'reasoning')
 // 待用户响应的提问/确认节点（后端 ask_user / 工具确认广播的 user_prompt 类型）
 const isUserPrompt = computed(() => type.value === 'user_prompt')
+// 上下文压缩节点：后端在压缩期作为**消息节点**下发，而不是挂在窗口顶部的横幅。
+// 它不是对话内容，而是系统对历史的一次整理动作——有自己的位置（当前时刻）与
+// 状态（进行中 / 已完成），因此用户滚动到消息流中间也能看见"这里压缩过"，
+// 事后也能回溯。横幅做不到这一点：它没有位置概念，滚动即消失。
+const isCompression = computed(() => type.value === 'compression')
 // 原始工具返回：直接挂在 ToolCall 下的 role=Tool 文本节点（JSON 结果），标题「响应」。
 // 必须限定 parentType='tool_call'：子 agent 响应 Turn 内部的文本子节点 role 也是 Tool，
 // 但若误判为「工具返回」会被渲染成独立「响应」块，破坏与根级 Turn 的一致性（见 isResponseText）。
@@ -469,9 +478,12 @@ const isResponseText = computed(
 const isStreaming = computed(() => status.value === 'streaming')
 const isFailed = computed(() => status.value === 'failed')
 const isWaiting = computed(() => status.value === 'waiting_user_action')
-// 正在执行中的工具调用。ToolCall 默认单行折叠，头部就是用户能看到的全部，
-// 因此"正在跑"必须由这里派生的信号承担。
-const isRunningTool = computed(() => isToolCall.value && isStreaming.value)
+// 正在执行中的**动作**节点：工具执行 / 上下文压缩。
+// 两者都默认折叠成单行，头部就是用户能看到的全部，因此"正在跑"必须由这里
+// 派生的信号承担（脉动动效 + 已用秒数）——留空等于"什么都没发生"。
+const isRunningAction = computed(
+  () => (isToolCall.value || isCompression.value) && isStreaming.value,
+)
 
 // ── 运行中计时（共享秒级时钟）──────────────────────────────
 // 「运行中」是一个**断言**，「已运行 47s」才是**判据**：工具执行可能持续几十秒到
@@ -486,7 +498,7 @@ const isRunningTool = computed(() => isToolCall.value && isStreaming.value)
 // 每实例一个定时器会让数量随会话长度线性增长。见该模块的注释。
 const { nowMs, acquire, release } = useRunningClock()
 watch(
-  isRunningTool,
+  isRunningAction,
   (running) => {
     if (running) acquire()
     else release()
@@ -495,12 +507,12 @@ watch(
 )
 onScopeDispose(() => {
   // 卸载兜底：漏 release 会让时钟永不停止（功能不错，只是白耗电）
-  if (isRunningTool.value) release()
+  if (isRunningAction.value) release()
 })
 
 /** 运行中已持续的秒数；无锚点时返回 null（不显示时长，而不是编一个） */
 const runningSeconds = computed(() => {
-  if (!isRunningTool.value) return null
+  if (!isRunningAction.value) return null
   const meta = props.node.meta as Record<string, unknown> | undefined
   const raw = meta?.started_at
   if (typeof raw !== 'number' || raw <= 0) return null
@@ -571,6 +583,7 @@ function toggle() {
 const icon = computed(() => {
   if (isUser.value) return '👤'
   if (isUserPrompt.value) return '❓'
+  if (isCompression.value) return '🗜'
   if (isToolRequest.value) return '📤'
   if (isReasoning.value) return '💭'
   if (isToolCall.value) return '🔧'
@@ -588,6 +601,7 @@ const agentName = computed(() => {
 const title = computed(() => {
   if (isUser.value) return '你'
   if (isUserPrompt.value) return prompt.value?.kind === 'confirm' ? '工具确认' : '提问'
+  if (isCompression.value) return '上下文压缩'
   if (isToolRequest.value) return '请求'
   // 思考：流式中「思考中…」+ 头部动效；完成后「思考」单行
   if (isReasoning.value) return isStreaming.value ? '思考中…' : '思考'
@@ -607,6 +621,13 @@ const title = computed(() => {
 // 终态（`completed`）刻意不给标签：绝大多数工具调用都会成功结束，
 // 给每个成功的调用挂一个「已完成」只会把真正需要注意的状态淹掉。
 const statusTag = computed(() => {
+  // 压缩节点同样需要非终态标签：它默认折叠成单行，标签是唯一的"还在忙"信号，
+  // 留空会让整段窗口看起来什么都没发生（正是改造前"压缩期毫无反应"的观感）。
+  if (isCompression.value) {
+    if (isFailed.value) return '未完成'
+    if (isStreaming.value) return '压缩中'
+    return ''
+  }
   if (!isToolCall.value) return ''
   if (isFailed.value) return '失败'
   if (isWaiting.value) return '待确认'
@@ -1525,5 +1546,13 @@ function highlightJsonString(s: string): string {
 }
 .supply-submit:hover {
   background: var(--color-primary-dark);
+}
+
+/* 上下文压缩节点的正文：弱化到"系统动作"的观感，不与对话正文争视觉重量。
+   不引入新的主题变量——压缩是低频节点，跟随父级文字色即可。 */
+.compress-note {
+  padding: 0.2rem 0 0.1rem;
+  font-size: 0.82rem;
+  opacity: 0.75;
 }
 </style>

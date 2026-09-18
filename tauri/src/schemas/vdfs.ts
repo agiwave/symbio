@@ -57,17 +57,6 @@ export const VDFS_STATUS_WAITING_USER_ACTION = 'waiting_user_action'
  * **猜回** `completed`（一次信息丢失 + 一次猜测还原）。现在状态原样透传。 */
 export const VDFS_STATUS_COMPLETED = 'completed'
 
-/**
- * 处理阶段：正在压缩上下文（节点 `attributes.phase`）。
- *
- * 压缩是**内部 LLM 请求**——它发生在 Turn 创建**之前**，且出帧被刻意静音
- * （避免泄漏一个永不 finalize 的空 Turn 骨架），于是整段窗口内**没有任何消息节点**
- * 可供渲染。长上下文时这段可达数分钟，用户视角就是卡死。
- *
- * 它是唯一一个无法用消息节点表达、却又必须让用户看见的阶段，因此挂在会话节点上。
- */
-export const VDFS_PHASE_COMPRESSING = 'compressing'
-
 /** 「运行中」的唯一判据：节点 `status == working`。
  *
  * 「会话忙不忙」不是会话的私有布尔，它就是节点状态的一个取值——
@@ -481,13 +470,6 @@ export interface SessionRuntime {
   outcome?: SessionOutcome
   /** 面向用户的错误短消息（仅 `failed` 时存在） */
   error?: string
-  /**
-   * 当前处理阶段（`working` 时才可能有值）。
-   *
-   * 与 `status` 的分工：`status` 回答"忙不忙"，`phase` 回答"在忙什么"。
-   * 目前只有 `compressing` 一个取值——其余阶段都能由消息节点自己表达。
-   */
-  phase?: string
 }
 
 /**
@@ -506,8 +488,6 @@ export function sessionRuntimeOf(node: VdfsNode): SessionRuntime {
     rt.outcome = outcome
   }
   if (typeof error === 'string' && error) rt.error = error
-  // 阶段只接受已知取值：未知阶段一律当作常规处理，不为它臆造 UI
-  if (attrs.phase === VDFS_PHASE_COMPRESSING) rt.phase = attrs.phase
   return rt
 }
 

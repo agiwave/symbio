@@ -32,17 +32,6 @@ pub struct ActiveSessionStateInner {
     /// 只能挂在会话节点上——原先是前端一个平行状态（`sessionErrors`），
     /// 现在它是节点的属性（`attributes.error`）。
     pub last_error: Option<String>,
-    /// 当前所处的**处理阶段**（`None` = 常规处理）。
-    ///
-    /// 与 `is_working` 的分工：`is_working` 回答"忙不忙"，`phase` 回答"在忙什么"。
-    ///
-    /// 需要它的唯一场景是**压缩**：它发生在 Turn 创建**之前**，而出帧又被刻意静音
-    /// （避免泄漏一个永不 finalize 的空 Turn 骨架），于是整段窗口内**没有任何消息
-    /// 节点**可供前端渲染——长上下文时这段可达数分钟，用户视角就是卡死。
-    /// 压缩是**会话级**状态却不是消息节点，因此只能挂在这里。
-    ///
-    /// 取值见 `plugin::nodes::PHASE_COMPRESSING`。
-    pub phase: Option<String>,
 }
 
 /// 会话状态锚点
@@ -93,7 +82,6 @@ impl ActiveSessionState {
                 last_tool_calls: Vec::new(),
                 last_outcome: None,
                 last_error: None,
-                phase: None,
             }),
             live_messages: Arc::new(Mutex::new(Vec::new())),
         }

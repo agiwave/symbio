@@ -349,11 +349,11 @@ pub fn should_emit_context_nudge(
     current >= (context_limit as f64 * CONTEXT_NUDGE_THRESHOLD) as usize
 }
 
-/// 准备压缩：将要压缩的历史提取出来，生成压缩指令
-/// 返回 (压缩指令, 要压缩的历史, 要保留的历史)
+/// 准备压缩：将要压缩的历史提取出来，生成压缩请求
+/// 返回 (压缩请求, 要压缩的历史, 要保留的历史)
 pub fn prepare_compression(
     messages: &[ChatMessage],
-) -> Option<(ChatMessage, Vec<ChatMessage>, Vec<ChatMessage>)> {
+) -> Option<(Vec<ChatMessage>, Vec<ChatMessage>, Vec<ChatMessage>)> {
     let split_point = find_compress_split_point(messages, 1.0 - COMPRESSION_PRESERVE_THRESHOLD);
     if split_point == 0 {
         return None;
@@ -378,21 +378,12 @@ pub fn prepare_compression(
         return None;
     }
 
-    // 生成压缩指令
-    let history_json = serde_json::to_string(&history_to_compress).unwrap_or_default();
-    // 诉求3：user 消息只携带数据；压缩模板由调用方经 system role 注入，
-    // 避免格式指令在对话中出现两次（system 一次 + user 一次）诱导模型模仿输出
-    let prompt = format!("## Chat History to Summarize:\n{history_json}");
+    // 生成压缩请求：历史对话原样 + 末尾指令（唯一构造点，主动路径亦复用）。
+    // 压缩模板由调用方经 system role 注入，避免格式指令在对话中出现两次
+    // （system 一次 + user 一次）诱导模型模仿输出。
+    let compression_request = build_compression_request(&history_to_compress, None);
 
-    let compression_msg = ChatMessage {
-        id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
-        content: Some(MessageContent::Text(prompt)),
-        ..Default::default()
-    };
-
-    Some((compression_msg, history_to_compress, history_to_keep))
+    Some((compression_request, history_to_compress, history_to_keep))
 }
 
 /// 轮次淡化（请求视图级）：当对话轮次过多时，把较早的工具结果（`role=Tool`、`msg_type=Text`）
@@ -736,8 +727,32 @@ pub fn render_snapshot_for_history(snapshot_text: &str) -> String {
 /// 与被动压缩（`prepare_compression`）的差异：显式指定待压缩历史，
 /// 并把模型的 `hints`（必须保留的关键信息）追加进提示词——
 /// 让模型"亲手"决定快照里必须留下什么。
-pub fn build_compression_request(history: &[ChatMessage], hints: Option<&str>) -> ChatMessage {
-    let history_json = serde_json::to_string(history).unwrap_or_else(|_| "[]".to_string());
+/// 构造压缩 LLM 请求的消息序列：**待压缩历史原样 + 末尾一条压缩指令**。
+///
+/// # 为什么不再把历史序列化成 JSON
+///
+/// 旧写法是 `serde_json::to_string(history)` 塞进单条 user 消息的 content。
+/// 每条 [`ChatMessage`] 都带着 `id` / `parent_id` / `seq` / `status` / `timestamp` /
+/// `meta`（token 统计、工具名、转存路径……）——这些是**存储与前端**需要的，
+/// 模型一个都不关心，却要为它们的 JSON 语法原样付费：字段名、引号、转义、
+/// 嵌套括号全是纯开销，且随历史长度与消息条数线性放大。
+///
+/// 改为把历史消息**原样**交给 provider：它的 `flatten_chat_messages` 会把消息树
+/// 投影成模型熟悉的对话形态（`Turn` → assistant 聚合、`ToolCall` → tool_calls、
+/// 工具结果 → `role=tool`，并裁掉陈旧思考链）。模型看到的是**对话**，不是数据转储。
+///
+/// 附带好处：快照校验失败时的纠正重试（`context.messages.push(retry_msg)`）天然
+/// 变成一段正常的多轮对话（历史 → 指令 → 纠正），而不是「JSON 之后追加一句话」。
+pub fn build_compression_request(history: &[ChatMessage], hints: Option<&str>) -> Vec<ChatMessage> {
+    let mut out = history.to_vec();
+    out.push(compression_instruction(hints));
+    out
+}
+
+/// 压缩指令：历史以对话形态排在它**之前**，因此这里只需说"把上面这段蒸馏成快照"。
+///
+/// 输出结构的全部约束在 system 提示词里，此处不重复——重复会诱导模型模仿格式。
+fn compression_instruction(hints: Option<&str>) -> ChatMessage {
     let hints_section = match hints {
         Some(h) if !h.trim().is_empty() => {
             format!(
@@ -746,14 +761,16 @@ pub fn build_compression_request(history: &[ChatMessage], hints: Option<&str>) -
         }
         _ => String::new(),
     };
-    // 诉求3：user 消息只携带数据；压缩模板由调用方经 system role 注入，
-    // 避免格式指令在对话中出现两次（system 一次 + user 一次）诱导模仿
-    let prompt = format!("## Chat History to Summarize:\n{history_json}{hints_section}");
     ChatMessage {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(MessageRole::User),
         msg_type: Some(MessageType::Text),
-        content: Some(MessageContent::Text(prompt)),
+        // 措辞刻意**不提** `<state_snapshot>` 标签名：结构定义只在 system 侧出现
+        // 一次。在对话里重复格式指令会诱导模型模仿模板而非按 system 输出。
+        content: Some(MessageContent::Text(format!(
+            "Distill the conversation above into the structured snapshot that your \
+             instructions define. Output the snapshot only.{hints_section}"
+        ))),
         status: Some(MessageStatus::Completed),
         ..Default::default()
     }

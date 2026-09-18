@@ -112,6 +112,8 @@ const BASELINE = {
   //   丢掉（`from_state` 是唯一入口，两条规则各一例）
   // 702 → 704：修复压缩后消息顺序倒挂——`assign_seq` 必须让 `seq` 沿数组单调不减
   //   （快照先于保留区），以及"正常路径不得触发重排"这条反面保险
+  // 704 → 704：压缩改走消息流节点——新增 `compression_request` ×2 + `flatten` 跳过
+  //   压缩节点 ×1，与移除的会话级 `phase` 后端 ×2 相抵，净零
   rustTests: 704,
   vitestFiles: 19,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
@@ -125,7 +127,11 @@ const BASELINE = {
   //   不消失）、保留节点重排到历史之后、终态本地节点被丢弃、快照整条覆盖同 id 节点
   // 177 → 181：会话节点阶段 `phase`——运行中采信 / 非运行不采信 / 未知阶段当作
   //   常规处理 / 压缩结束回到空
-  vitestTests: 181,
+  // 181 → 177：压缩改走消息流节点（新增 `Compression` 类型 + 请求形态改造），
+  //   会话级 `phase` 机制随之移除（4 例前端 `phase` 测试删除，2 例后端 `phase`
+  //   测试删除）；净增 `compression_request` ×2 + `flatten_chat_messages` 跳过
+  //   压缩节点 ×1（均经回退验证确认会红）
+  vitestTests: 177,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */

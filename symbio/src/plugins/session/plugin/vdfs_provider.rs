@@ -581,13 +581,12 @@ impl SessionPlugin {
         // 在下一次变更收敛），也不要凭空把正在跑的会话报成空闲（那会让停止
         // 按钮消失、用户无法中止）。
         let Ok(inner) = st.inner.try_read() else {
-            return SessionRuntime::working(None);
+            return SessionRuntime::working();
         };
         SessionRuntime::from_state(
             inner.is_working,
             inner.last_outcome.clone(),
             inner.last_error.clone(),
-            inner.phase.clone(),
         )
     }
 
@@ -603,9 +602,8 @@ impl SessionPlugin {
                             inner.is_working,
                             inner.last_outcome.clone(),
                             inner.last_error.clone(),
-                            inner.phase.clone(),
                         ),
-                        Err(_) => SessionRuntime::working(None),
+                        Err(_) => SessionRuntime::working(),
                     },
                     None => SessionRuntime::idle(),
                 };

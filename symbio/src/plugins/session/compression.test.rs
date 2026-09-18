@@ -331,35 +331,80 @@ fn test_compression_prompt_delegates_regenerable_facts_generically() {
     }
 }
 
-/// 诉求3：压缩模板只走 system role，user 消息只携带待压缩数据
+/// 诉求3：压缩模板只走 system role，请求消息只携带待压缩对话
 /// （prepare_compression / build_compression_request 均不得内嵌模板）。
 #[test]
 fn test_compression_request_user_message_carries_data_only() {
+    let text_of =
+        |m: &ChatMessage| -> String { m.content.as_ref().map(|c| c.to_text()).unwrap_or_default() };
     let msgs = vec![
         user_msg(&"x".repeat(1000)),
         assistant_msg(&"y".repeat(1000)),
         user_msg(&"z".repeat(1000)),
     ];
-    let (msg, _, _) = prepare_compression(&msgs).unwrap();
-    let text = msg
-        .content
-        .as_ref()
-        .map(|c| c.to_text())
-        .unwrap_or_default();
-    assert!(text.contains("Chat History to Summarize"));
+    let (req, _, _) = prepare_compression(&msgs).unwrap();
+    // 末尾一条是压缩指令：模板必须只在 system 侧出现
+    let instruction = text_of(req.last().expect("末尾为压缩指令"));
     assert!(
-        !text.contains("<state_snapshot>"),
-        "压缩模板不得随 user 消息下发"
+        !instruction.contains("<state_snapshot>"),
+        "压缩模板不得随请求消息下发"
     );
 
     let req = build_compression_request(&msgs, Some("keep file paths"));
-    let req_text = req
-        .content
-        .as_ref()
-        .map(|c| c.to_text())
-        .unwrap_or_default();
-    assert!(req_text.contains("keep file paths"));
-    assert!(!req_text.contains("<state_snapshot>"));
+    let instruction = text_of(req.last().expect("末尾为压缩指令"));
+    assert!(
+        instruction.contains("keep file paths"),
+        "hints 必须随指令下发"
+    );
+    assert!(!instruction.contains("<state_snapshot>"));
+}
+
+/// 压缩请求**不再**把历史序列化成 JSON——模型看到的是对话，不是数据转储。
+///
+/// 旧写法 `serde_json::to_string(history)` 会把每条消息的 `id` / `parent_id` /
+/// `seq` / `status` / `meta` 一并倒给模型：全是模型不关心却要原样付费的字符
+/// （字段名、引号、转义、嵌套括号），且随历史长度线性放大。
+///
+/// 这条测试锁住"省掉的是什么"：一旦有人图省事改回 JSON，这里会立刻红。
+#[test]
+fn compression_request_carries_history_as_conversation_not_json() {
+    let text_of =
+        |m: &ChatMessage| -> String { m.content.as_ref().map(|c| c.to_text()).unwrap_or_default() };
+    // 数据必须带 `parent_id`：否则序列化时被 `skip_serializing_if` 跳过，
+    // "改回 JSON 转储"这条回归就**抓不到**（字段名根本不出现在输出里）。
+    let m1 = user_msg("第一条");
+    let mut m2 = assistant_msg("第二条");
+    m2.parent_id = Some(m1.id.clone());
+    let msgs = vec![m1, m2];
+
+    let req = build_compression_request(&msgs, None);
+
+    assert_eq!(
+        req.len(),
+        msgs.len() + 1,
+        "历史逐条保留，末尾追加一条压缩指令"
+    );
+    assert_eq!(req[0].id, msgs[0].id, "历史消息原样透传（不重造节点）");
+    assert_eq!(req[1].id, msgs[1].id);
+    assert_eq!(text_of(&req[0]), "第一条", "正文原样透传，不做序列化");
+    assert_eq!(text_of(&req[1]), "第二条");
+
+    // 最直接的一条：历史若被序列化进指令，正文必然出现在指令的 content 里
+    let instruction = text_of(req.last().expect("末尾为压缩指令"));
+    assert!(
+        !instruction.contains("第一条") && !instruction.contains("第二条"),
+        "历史不得被序列化进压缩指令（否则又回到 JSON 转储）"
+    );
+    for m in &req {
+        assert!(
+            !text_of(m).contains("\"parent_id\""),
+            "历史不得以 JSON 形式下发（发现存储字段名）"
+        );
+    }
+    assert!(
+        !instruction.contains("Chat History to Summarize"),
+        "旧 JSON 转储的标题不应再出现"
+    );
 }
 
 /// 诉求3：落库快照渲染后不残留 XML 标签——
