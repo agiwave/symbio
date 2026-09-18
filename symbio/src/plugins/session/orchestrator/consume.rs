@@ -32,8 +32,14 @@ impl SessionPlugin {
     ) {
         let err = error.into();
         crate::plugin_error!("session", "{}", &err);
-        self.persist_failure(state, session_id, collected, &err)
-            .await;
+        self.persist_failure(
+            state,
+            session_id,
+            collected,
+            &err,
+            cm::MessageStatus::Failed,
+        )
+        .await;
         // 本轮无 transcript（loop 未产生任何消息）→ last_message 为空串
         stop.fire(&[]).await;
         self.broadcast_error_with_idle(state, err).await;
@@ -269,8 +275,14 @@ impl SessionPlugin {
                             1800
                         );
                         crate::plugin_error!("session", "[Consume] {}", &msg);
-                        self.persist_failure(&state, &session_id, &collected_ai_messages, &msg)
-                            .await;
+                        self.persist_failure(
+                            &state,
+                            &session_id,
+                            &collected_ai_messages,
+                            &msg,
+                            cm::MessageStatus::Failed,
+                        )
+                        .await;
                         self.broadcast_error_with_idle(&state, msg).await;
                         guard.done = true;
                         // 本出口已自行完成收尾，直接 return（不再走下方 idle 广播，
@@ -331,6 +343,14 @@ impl SessionPlugin {
                                 &session_id,
                                 &collected_ai_messages,
                                 "用户手动中止了本次回复",
+                                // 中止**不是**失败：不挂 error 文案，也不该给一个 ⚠ 角标
+                                // ——用户是自己按的停止。但它是**可重试**的终态：
+                                // 这一轮只跑了一半，`Completed` 等于宣布它正常结束。
+                                // 这里与 `handle_abort` 的 `converge_inflight` 写同一个
+                                // 值，因此谁先谁后都不影响结果（此前两者分别是
+                                // `Failed` 与 `Completed`，重试入口的出现与否取决于
+                                // abort 信号落在哪个检查点）。
+                                cm::MessageStatus::Aborted,
                             )
                             .await;
                             exit_state = SessionStateChange::aborted();
@@ -339,8 +359,14 @@ impl SessionPlugin {
                         // 透传 plugin-level Error 帧作为业务级 Error 事件。
                         // 同时把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
                         // 这样切回会话时能看到上次失败的终态。
-                        self.persist_failure(&state, &session_id, &collected_ai_messages, msg)
-                            .await;
+                        self.persist_failure(
+                            &state,
+                            &session_id,
+                            &collected_ai_messages,
+                            msg,
+                            cm::MessageStatus::Failed,
+                        )
+                        .await;
                         // 复位 is_working + 广播 Error + 广播 idle：
                         // 必须复位 is_working，否则后续 resume 请求会被
                         // `handle_chat_send_oneoff` 的 session_busy 守卫静默拒绝，

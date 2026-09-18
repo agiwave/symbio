@@ -178,7 +178,13 @@ impl Drop for WorkingGuard {
                 // 把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因
                 // （切回会话时能看到上次失败的终态，目标 3）。
                 plugin
-                    .persist_failure(&state, &session_id, &collected, &crash_msg)
+                    .persist_failure(
+                        &state,
+                        &session_id,
+                        &collected,
+                        &crash_msg,
+                        cm::MessageStatus::Failed,
+                    )
                     .await;
                 // 同时向前端广播一条业务级 Error 事件，使 UI 立即显示错误
                 // （否则前端只会收到 idle，那条 streaming 消息会一直显示"回复中…"）。

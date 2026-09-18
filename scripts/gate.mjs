@@ -116,7 +116,9 @@ const BASELINE = {
   //   压缩节点 ×1，与移除的会话级 `phase` 后端 ×2 相抵，净零
   // 704 → 712：会话 id 改短 GUID（8 位十六进制）×2 + 自动压缩熔断状态机 ×3 +
   //   压缩失败原因可诊断（kind / message / Display）×3
-  rustTests: 712,
+  // 712 → 714：中止收口终态化——`abort_terminal_of` 让根 Turn 一律定稿 Aborted、
+  //   `converge_inflight` 与 `persist_failure` 的终态不再混用 Completed（均经回退验证确认会红）
+  rustTests: 714,
   vitestFiles: 19,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态
@@ -133,7 +135,9 @@ const BASELINE = {
   //   会话级 `phase` 机制随之移除（4 例前端 `phase` 测试删除，2 例后端 `phase`
   //   测试删除）；净增 `compression_request` ×2 + `flatten_chat_messages` 跳过
   //   压缩节点 ×1（均经回退验证确认会红）
-  vitestTests: 177,
+  // 177 → 179：中止收口终态化——`MessageNode` 对 `aborted` 终态的渲染：组级交代条
+  //   + 重试入口；`completed` 终态的"无角标无重试"反向断言（均经回退验证确认会红）
+  vitestTests: 179,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */

@@ -53,9 +53,12 @@
         @delete="emit('delete', $event)"
         @edit="emit('edit', $event)"
       />
-      <div v-if="isFailed" class="error-box turn-error">
-        <span class="err-icon">⚠</span>
-        <span class="err-text">{{ errorText }}</span>
+      <!-- 组级交代条：`failed`（出错了）与 `aborted`（用户终止）都渲染。
+           中止不是故障，因此文案与图标都与失败区分开，但**重试入口照给**——
+           这一轮只跑了一半，用户中止后通常就想重跑它。 -->
+      <div v-if="isUnsettled" class="error-box turn-error" :class="{ aborted: isAborted }">
+        <span class="err-icon">{{ isAborted ? '⏹' : '⚠' }}</span>
+        <span class="err-text">{{ isAborted ? '已中止：本轮被提前终止' : errorText }}</span>
         <!-- 仅根级助手 Turn 提供组级重试（resume retry_turn 需要父会话内的 Turn 锚点） -->
         <button v-if="isRootAssistantTurn" class="retry" @click="emit('retry', node.id)">重试</button>
       </div>
@@ -478,6 +481,11 @@ const isResponseText = computed(
 const isStreaming = computed(() => status.value === 'streaming')
 const isFailed = computed(() => status.value === 'failed')
 const isWaiting = computed(() => status.value === 'waiting_user_action')
+// 用户终止：没出错（不是 `failed`），但也没跑完（不是 `completed`）。
+// 与 `failed` 一样**可重试**——这一轮是半截的，用户会想重跑它。
+const isAborted = computed(() => status.value === 'aborted')
+// 需要向用户交代的**非正常终态**（渲染交代条 + 组级重试入口的判据）。
+const isUnsettled = computed(() => isFailed.value || isAborted.value)
 // 正在执行中的**动作**节点：工具执行 / 上下文压缩。
 // 两者都默认折叠成单行，头部就是用户能看到的全部，因此"正在跑"必须由这里
 // 派生的信号承担（脉动动效 + 已用秒数）——留空等于"什么都没发生"。
@@ -625,17 +633,21 @@ const statusTag = computed(() => {
   // 留空会让整段窗口看起来什么都没发生（正是改造前"压缩期毫无反应"的观感）。
   if (isCompression.value) {
     if (isFailed.value) return '未完成'
+    if (isAborted.value) return '已中止'
     if (isStreaming.value) return '压缩中'
     return ''
   }
   if (!isToolCall.value) return ''
   if (isFailed.value) return '失败'
+  if (isAborted.value) return '已中止'
   if (isWaiting.value) return '待确认'
   if (isStreaming.value) return '运行中'
   return ''
 })
 const tagClass = computed(() => {
   if (isWaiting.value) return 'warn'
+  // 中止不是错误：不给红色角标，否则用户按停止也会看到一片失败红。
+  if (isAborted.value) return 'sub'
   if (isFailed.value) return 'err'
   if (isStreaming.value) return 'run'
   return 'sub'
@@ -1481,6 +1493,17 @@ function highlightJsonString(s: string): string {
 /* 失败 Turn 的错误条（error-box + turn-error 组合）：与上下文留出间距 */
 .turn-error {
   margin: 0.25rem 0 0.375rem;
+}
+/* 中止不是失败：中性配色，只交代"这一轮没跑完"，不渲染成故障红。 */
+.error-box.aborted {
+  background: var(--color-option-bg);
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+.error-box.aborted .retry {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
 }
 .retry {
   flex-shrink: 0;

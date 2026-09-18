@@ -302,3 +302,46 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     expect(w.find('.supply').exists()).toBe(true)
   })
 })
+
+describe('MessageNode：用户中止的 Turn 同样可重试', () => {
+  /**
+   * 中止与失败是**两个终态**，但都要能重试：这一轮只跑了一半，用户按停止后
+   * 通常就想重跑它。
+   *
+   * 回归：`aborted` 曾是 `completed`（中止收口把它一律定稿为"已完成"），
+   * 组级交代条与重试入口都不渲染——用户看到的是"这一轮正常结束了"，
+   * 而内容明明是半截的。
+   */
+  it('Turn 中止 → 组级交代条 + 重试（发射 Turn id）', async () => {
+    const w = mountNode(
+      msg({
+        id: 't1',
+        type: 'turn',
+        status: 'aborted',
+        children: [msg({ id: 'x1', type: 'text', content: '半截', parent_id: 't1' })],
+      }),
+    )
+    const boxes = w.findAll('.error-box')
+    expect(boxes.length, '中止必须有交代，否则这一轮看起来像正常结束').toBe(1)
+    // 中止不是故障：文案与图标都与失败区分开
+    expect(boxes[0].text()).toContain('已中止')
+    expect(boxes[0].text()).not.toContain('⚠')
+    expect(boxes[0].classes(), '不渲染成故障红').toContain('aborted')
+
+    await boxes[0].find('button.retry').trigger('click')
+    expect(w.emitted('retry')?.[0]).toEqual(['t1'])
+  })
+
+  it('已完成 → 既无交代条也无重试（正常结束不该有多余角标）', () => {
+    const w = mountNode(
+      msg({
+        id: 't1',
+        type: 'turn',
+        status: 'completed',
+        children: [msg({ id: 'x1', type: 'text', content: '完整', parent_id: 't1' })],
+      }),
+    )
+    expect(w.findAll('.error-box').length).toBe(0)
+    expect(w.findAll('button.retry').length).toBe(0)
+  })
+})

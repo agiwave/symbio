@@ -25,6 +25,24 @@ pub(super) fn is_inflight(status: &Option<cm::MessageStatus>) -> bool {
     )
 }
 
+/// 中止时这个节点该落到哪个终态。
+///
+/// **根级 Turn → `Aborted`，其余 → `Completed`。**
+///
+/// 这不是措辞讲究，而是「能不能重试」的分界：前端的重试入口挂在 Turn 的终态上，
+/// 定稿成 `Completed` 就等于宣布这一轮正常结束，入口随之消失——而用户明明是按了
+/// 停止，那一轮是半截的。子节点（正文 / 思考 / 工具调用）没有独立的重试语义，
+/// 它们的重试归组级 Turn，因此按现状定稿 `Completed` 结束流式动画即可。
+///
+/// 可见性 `pub(super)`：`orchestrator.test.rs` 直接锁定这个映射。
+pub(super) fn abort_terminal_of(m: &cm::ChatMessage) -> cm::MessageStatus {
+    if m.msg_type == Some(cm::MessageType::Turn) && m.parent_id.is_none() {
+        cm::MessageStatus::Aborted
+    } else {
+        cm::MessageStatus::Completed
+    }
+}
+
 impl SessionPlugin {
     /// 把"仍在进行中"的 AI 响应消息持久化为 `Failed` + 错误原因。
     ///
@@ -52,18 +70,28 @@ impl SessionPlugin {
     ///
     /// 直接 `replace_messages(collected)` 会**覆盖掉整段历史**（用户之前的消息也会被清掉），
     /// 所以这里走"载入整会话 → 按 id 合并 → 整体替换"：
-    /// - 失败 Turn（根级）：标 `Failed` + `error`，这是前端唯一渲染 ⚠ 错误条 + 重试入口的节点
+    /// - 失败 Turn（根级）：标 `terminal` —— 业务错误是 `Failed`（+ `error`，这是前端唯一
+    ///   渲染 ⚠ 错误条 + 重试入口的节点），用户中止是 `Aborted`（**不挂 error**：中止不是故障）
     /// - 失败 Turn 的子节点（text / reasoning / tool_call / 工具结果）：仅把仍在进行中的
     ///   (None / Streaming / Pending) 定稿为 Completed，**绝不挂 error**
     /// - 尚未落库的子节点：补写，前提是其父节点存在（避免写入悬空孤儿节点）
     ///
     /// 这样切回会话时（`get_messages`）能看到上次的失败终态与原因（CHAT_FLOW_ANALYSIS 目标 3）。
+    ///
+    /// ## 为什么 `terminal` 是参数而不是「调用方事后改状态」
+    ///
+    /// 中止与失败是**两个终态**，不是「同一种降级 + 一个分类标志位」。
+    /// 中止路径（`handle_abort` → [`Self::converge_inflight`]）与这里都可能在同一次
+    /// 中止里跑到（谁先谁后取决于 abort 信号落在哪个检查点）；若两处各自判定，
+    /// 同一轮就有了两个真相。收成参数后两条路写**同一个值**，竞态因此无害。
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn persist_failure(
         &self,
         state: &Arc<ActiveSessionState>,
         session_id: &str,
         collected: &Arc<tokio::sync::Mutex<Vec<cm::ChatMessage>>>,
         error: &str,
+        terminal: cm::MessageStatus,
     ) {
         // 1. 定位失败 Turn。
         //    `collected` 为空表示错误发生在任何 Turn 节点创建之前（例如能力收集失败、
@@ -112,10 +140,10 @@ impl SessionPlugin {
                     continue;
                 }
                 if m.id == failing_turn_id {
-                    m.status = Some(cm::MessageStatus::Failed);
-                    if m.error.is_none() {
-                        m.error = Some(error.to_string());
-                    }
+                    m.status = Some(terminal.clone());
+                    // 中止不挂 error：它是用户自己的操作，不是故障；前端按状态渲染
+                    // 「已中止」，不需要一条错误文案来凑。
+                    m.error = (terminal == cm::MessageStatus::Failed).then(|| error.to_string());
                 } else if matches!(
                     m.status,
                     None | Some(cm::MessageStatus::Streaming) | Some(cm::MessageStatus::Pending)
@@ -160,13 +188,19 @@ impl SessionPlugin {
             match all.iter_mut().find(|m| m.id == cm_msg.id) {
                 Some(existing) => {
                     if is_failing_turn {
-                        // 仅失败 Turn 承载错误 + 重试入口。
-                        if existing.status != Some(cm::MessageStatus::Failed)
-                            || existing.error.is_none()
+                        // 仅失败 Turn 承载错误 + 重试入口；中止（`Aborted`）同样可重试，
+                        // 但不挂 error 文案——状态本身已经说清了发生了什么。
+                        let want_error = if terminal == cm::MessageStatus::Failed {
+                            Some(error.to_string())
+                        } else {
+                            None
+                        };
+                        if existing.status != Some(terminal.clone())
+                            || (want_error.is_some() && existing.error.is_none())
                         {
-                            existing.status = Some(cm::MessageStatus::Failed);
+                            existing.status = Some(terminal.clone());
                             if existing.error.is_none() {
-                                existing.error = Some(error.to_string());
+                                existing.error = want_error;
                             }
                             changed.push(existing.clone());
                         }
@@ -190,10 +224,13 @@ impl SessionPlugin {
                         .unwrap_or(true);
                     let mut new = cm_msg.clone();
                     if is_failing_turn {
-                        new.status = Some(cm::MessageStatus::Failed);
-                        if new.error.is_none() {
-                            new.error = Some(error.to_string());
-                        }
+                        new.status = Some(terminal.clone());
+                        // 同上：只有失败才承载 error 文案，中止不挂。
+                        new.error = if terminal == cm::MessageStatus::Failed {
+                            Some(error.to_string())
+                        } else {
+                            None
+                        };
                         all.push(new.clone());
                         changed.push(new);
                     } else if parent_exists {
@@ -235,6 +272,9 @@ impl SessionPlugin {
 
     /// 中止收口：把该会话**仍在飞行中的消息节点**定稿，使「用户按下停止」与
     /// 「界面不再显示运行中」之间没有窗口。返回被定稿的节点数。
+    ///
+    /// 终态分工：根级 Turn → [`cm::MessageStatus::Aborted`]（可重试），
+    /// 子节点 → `Completed`（结束流式动画）。判据见 [`abort_terminal_of`]。
     ///
     /// ## 为什么不能只靠 [`Self::persist_failure`]
     ///
@@ -288,7 +328,7 @@ impl SessionPlugin {
         // ① 存储中仍在飞行的节点
         for m in all.iter_mut() {
             if is_inflight(&m.status) {
-                m.status = Some(cm::MessageStatus::Completed);
+                m.status = Some(abort_terminal_of(m));
                 m.error = None;
                 changed.push((m.clone(), true));
             }
@@ -309,7 +349,7 @@ impl SessionPlugin {
                 continue;
             }
             let mut new = l.clone();
-            new.status = Some(cm::MessageStatus::Completed);
+            new.status = Some(abort_terminal_of(l));
             new.error = None;
             all.push(new.clone());
             changed.push((new, false));
@@ -333,7 +373,7 @@ impl SessionPlugin {
 
         crate::plugin_info!(
             "session",
-            "converge_inflight: {} 个节点定稿为 Completed（原因：{}）",
+            "converge_inflight: {} 个节点定稿（根 Turn → Aborted，子节点 → Completed；原因：{}）",
             changed.len(),
             reason
         );

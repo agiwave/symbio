@@ -58,6 +58,15 @@ pub enum MessageStatus {
     Streaming,
     WaitingUserAction,
     Completed,
+    /// 用户主动终止。
+    ///
+    /// 它既不是 `Failed`（没有出错，是用户按了停止）也不是 `Completed`（没有跑完，
+    /// 内容是半截的）。此前中止只能二选一：冒泡路径标 `Failed`（给一个 ⚠ 错误角标，
+    /// 把用户自己的操作渲染成故障），其余路径标 `Completed`（说谎——那一轮根本没跑完）。
+    ///
+    /// 语义上它**可重试**：`RetryTurn` 本就不看状态（只校验节点是 Turn），
+    /// 缺的只是前端一个「这个终态可以重试」的判据。
+    Aborted,
     Failed,
 }
 
@@ -78,6 +87,7 @@ impl MessageStatus {
             MessageStatus::Streaming => "streaming",
             MessageStatus::WaitingUserAction => "waiting_user_action",
             MessageStatus::Completed => "completed",
+            MessageStatus::Aborted => "aborted",
             MessageStatus::Failed => "failed",
         }
     }
@@ -418,6 +428,7 @@ mod tests {
             MessageStatus::Streaming,
             MessageStatus::WaitingUserAction,
             MessageStatus::Completed,
+            MessageStatus::Aborted,
             MessageStatus::Failed,
         ] {
             let wire = serde_json::to_value(&st).unwrap();

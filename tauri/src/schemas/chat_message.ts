@@ -1,6 +1,13 @@
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 export type ChatMessageType = 'text' | 'reasoning' | 'tool_call' | 'turn' | 'user_prompt' | 'compression';
-export type MessageStatus = 'pending' | 'streaming' | 'waiting_user_action' | 'completed' | 'failed';
+export type MessageStatus =
+  | 'pending'
+  | 'streaming'
+  | 'waiting_user_action'
+  | 'completed'
+  | /** 用户主动终止：没出错，但也没跑完——与 `failed` 一样可重试 */
+  'aborted'
+  | 'failed';
 
 /**
  * 消息是否**仍在飞行中**（尚未定稿）。

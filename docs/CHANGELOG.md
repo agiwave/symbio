@@ -18,6 +18,48 @@
 
 ***
 
+## 2026-09-18: 中止有独立终态——已中止的 Turn 也可重试
+
+**性质：修复**。用户现场报告：reason 阶段点停止后该轮没有「重试」按钮，下一轮想重跑
+这一轮只能手敲——体感上中止等于「这一轮结束了」，但内容是半截的。
+
+### 根因
+
+收口路径有三条互相竞速，**给 Turn 的终态不一致**：
+
+| 路径 | 触发 | 终态 | 重试入口 |
+| --- | --- | --- | --- |
+| A | `chat_loop` 冒泡 `Err(Aborted)` → Error 帧 → `persist_failure` | `Failed` | ✅ |
+| B | 循环顶边界 `AbortedAtBoundary` → `finish_turn` 收尾成 `Ok(())` → **无 Error 帧** → 消费循环 break | `Completed`（`converge_inflight`） | ❌ |
+| C | `handle_abort` 3s 超时强制复位 → 消费循环提前 break，丢弃未处理 Error 帧 | `Completed`（`converge_inflight`） | ❌ |
+
+reason 阶段中止能否重试，取决于中止信号落在哪个检查点——不合理；`Completed` 还是假话
+（Turn 没跑完）。**前端的 `v-if="isFailed"` 是唯一闸门**，后端 `RetryTurn` 实际不校验状态。
+
+### 改动
+
+- 新终态 `MessageStatus::Aborted`——**既不是失败也没跑完**。
+- `converge_inflight` 增加 `abort_terminal_of(parent_id)`：根级 Turn 一律定稿 `Aborted`
+  （子节点仍是 `Completed`），其它照旧；两条路径写同一个值，竞速因此无害。
+- `persist_failure` 增加 `terminal: MessageStatus` 参数；Abort 收口传 `Aborted`（不挂
+  `error` 文案——用户自己按的停止，不是故障）；其它失败仍传 `Failed`。
+- 前端：`MessageNode` 加 `isAborted`/`isUnsettled`，Turn 级别「重试」按钮的 `v-if` 改为
+  `isUnsettled`（即 failed **或** aborted），错误条文案与图标按状态区分：
+  - `aborted` → 「⏹ 已中止」
+  - `failed`  → 「⚠ <error 文本>」
+  - `completed` → 不渲染（无角标、无重试）
+
+### 验证
+
+`abort_terminal_of` 与 `converge_inflight_marks_root_turn_as_aborted` 两例后端断言均
+经回退验证（把根 Turn 一律改回 `Completed` 时会红）；前端两条 `vitest`（`MessageNode`
+对 `aborted` 终态的渲染、`completed` 终态无角标）同样经回退验证。
+
+### 门禁
+
+后端 714（+2）、前端 179（+2）；`cargo test --lib` 与 `vitest` 均绿；门禁 19/19 全过；
+rustfmt 经 `gate --fix` 自动修齐，无须手工改。
+
 ## 2026-09-18: 会话 ID 改短 GUID + 压缩失败可诊断 + 连续失败熔断
 
 **性质：修复 + 健壮性**。承接上轮的压缩体验改造，处理用户现场发现的两个问题：
