@@ -491,16 +491,21 @@ impl Plugin for SessionPlugin {
             // - `chat/clear_messages`  —— `action(<id>/消息, "clear")`。
             // - `chat/delete_message`  —— `action(<id>/消息/<mid>, "truncate")`。
             // - `chat/update_message`  —— `write(<id>/消息/<mid>)`。
+            // - `heartbeat/trigger`    —— **不是迁到 VDFS，而是能力整体取消**：它唯一的
+            //                 入口是选项面板上的「立即心跳」按钮（`invoke` 型选项），
+            //                 而那个按钮的作用与「在输入框里直接发一条消息」完全重复
+            //                 ——心跳的实质就是往会话发一轮提示词。留着它等于给同一件事
+            //                 两个入口，且按钮那个还绕开了对话本身。
+            //                 见 `options.rs::heartbeat_option` 的说明。
             //
-            // 剩下三条 + `get_messages` + `update` 都不是 CRUD：前三条是**编排 / 控制 /
-            // 选项 / 心跳**，后两条各有一个「非 VDFS 能表达」的理由
+            // 剩下两条 + `get_messages` + `update` 都不是 CRUD：前两条是**编排 / 控制**，
+            // 后两条各有一个「非 VDFS 能表达」的理由
             // （`get_messages`：跨插件进程内读，见 `docs/legacy-route-migration.md` §3.4；
             //   `update`：CLI 需要客户端指定会话 id，见同文 §3.5）。
             //
             // 级联选项机制：会话是选项宿主，根选项列表在全项目收集后一次下发
             // （子层经 payload.parent 懒加载，与 vdfs/list 的 parent 懒加载同构）
             OPTIONS_LIST => return super::options::handle_list_options(self.as_ref(), ctx).await,
-            "heartbeat/trigger" => return self.handle_heartbeat_trigger_oneoff(ctx).await,
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         };
 

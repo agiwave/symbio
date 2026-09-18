@@ -62,29 +62,33 @@ fn heartbeat_form_keeps_basic_settings_visible() {
     assert_eq!(node.value_label.as_deref(), Some("未开启"));
 }
 
-#[test]
-fn heartbeat_trigger_is_disabled_without_enabled_and_prompt() {
+/// 「立即心跳」按钮**已取消** —— 防回归。
+///
+/// 它原是一个 `invoke` 型选项（图标 `play`，`heartbeat_trigger_option` 发布），
+/// 点了直接调 `session/heartbeat/trigger`。取消的理由是**它的作用与「在输入框里
+/// 直接发一条消息」完全重复**——心跳的实质就是往会话发一轮提示词，想立刻做一次
+/// 直接在输入框发即可。若哪天有人把它加回来，同一件事就又有了两个入口，
+/// 且按钮那个绕开了对话本身。
+///
+/// 注意这里锁的是**两件事**：触发按钮没了、**心跳配置仍在**（取消的只是那个
+/// 手动触发入口，不是心跳任务本身）。
+#[tokio::test]
+async fn heartbeat_trigger_option_is_gone() {
     use crate::plugins::session::config::SessionConfig;
+    use crate::symbio_core::SimpleRequest;
 
     let plugin = SessionPlugin::new(None, SessionConfig::default(), test_dir());
+    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let nodes = plugin.build_option_nodes(&ctx).await;
 
-    // 未启用 / 缺提示词 → 只读并说明原因
-    let off = plugin.heartbeat_trigger_option(None);
-    assert_eq!(off.option_type, OptionType::Invoke);
-    assert!(!off.enabled);
-    assert_eq!(off.status, OPTION_STATUS_DISABLED);
-    assert_eq!(
-        off.action.expect("触发动作存在").endpoint,
-        HEARTBEAT_TRIGGER_ENDPOINT
+    assert!(
+        find_node(&nodes, "heartbeat_trigger").is_none(),
+        "「立即心跳」按钮不得被加回来：它与「输入框里直接发一条消息」重复"
     );
-
-    // 已启用且提示词非空 → 可点击
-    let on = plugin.heartbeat_trigger_option(Some(json!({
-        "enabled": true,
-        "prompt": "推进一项小任务",
-    })));
-    assert!(on.enabled);
-    assert_eq!(on.status, OPTION_STATUS_ACTIVE);
+    assert!(
+        find_node(&nodes, "heartbeat").is_some(),
+        "心跳任务**配置**必须保留——取消的只是手动触发入口"
+    );
 }
 
 #[test]

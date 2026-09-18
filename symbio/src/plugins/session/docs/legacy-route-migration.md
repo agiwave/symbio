@@ -320,7 +320,41 @@ VDFS 的**线路信封**（`vdfs/*` 请求响应 + 协议路径常量 `VDFS_STAT
 |---|---|
 | `chat/abort` | 控制信号（中断正在跑的一轮），不是对数据的变更。VDFS 的 13 个操作里没有「中断」这一格。 |
 | `options/list` | 级联选项**收集**（各层经 `OptionVisitor` 汇流），是遍历期机制，与会话数据无关。 |
-| `heartbeat/trigger` | 心跳调度器的触发入口，读的是 `Session.metadata.heartbeat` 配置、跑的是后台任务，不是 CRUD。 |
+
+---
+
+## 5.1 E 档：`heartbeat/trigger` 为什么是「取消」而不是「保留」
+
+初版审计把它判为 **C 档（保留）**，理由写的是「心跳调度入口，不是会话 CRUD」——
+这条理由本身没错，但它回答的是**「能不能迁 VDFS」**，而这条路由的真问题是
+**「该不该存在」**。改判发生在补上第二个判据之后：
+
+| 判据 | 提问 | `heartbeat/trigger` 的答案 |
+|---|---|---|
+| 迁移判据 | VDFS 有没有等价能力？ | 没有。它不是数据变更。**→ 这条只证明「不该迁」** |
+| **存在判据** | 这个能力有没有**独立**存在的理由？ | 没有。见下 |
+
+**能力重复的论证**：心跳的实质是「到点了，往会话发一轮提示词」。
+用户想立刻做一次，**在输入框里直接发一条消息就是完全等价的动作**——
+而且是同一个动作、同一条路径（`chat/send`）、同一份提示词。
+而「立即心跳」按钮做的也是同一件事，只是**绕开了对话本身**。
+
+于是它的存在意义只剩「让用户不用打字就能发那条消息」，而代价是：
+- 同一件事有**两个入口**（输入框 / 按钮），两者行为一旦分叉（例如按钮不看会话是否忙、
+  或按钮用的提示词与当前编辑中的不一致）就是一类难以察觉的 bug；
+- 它是一个 `invoke` 型选项，要占一份 `OptionNode` 的构造、门控与前端渲染路径，
+  却不为系统带来任何输入框做不到的能力。
+
+**它不是「没用」，而是「重复」**——所以处理方式是删掉，而不是保留。
+
+**删除后能力有没有损失？没有。** 心跳机制本身完好：
+- 配置（`metadata.heartbeat`）与后台调度器（`HEARTBEAT_TICK_SECS = 15`）未动；
+- LLM 可见的 `heartbeat` 工具仍有 `set` / `get` / `cancel` 三个 action，
+  **从来没有「立即触发」这一格**——即连工具面也不曾暴露这个能力；
+- 唯一被删的是那个按钮，以及它背后这个只为按钮存在的路由。
+
+**这是一条可复用的判据**：审计一条路由时，先问「能不能迁」，再问「该不该有」。
+前一问的答案（不能迁）**不能**推出后一问的答案（该保留）。
 
 ---
 
@@ -357,8 +391,9 @@ provider 只回答「这个地址能不能写」，不回答「谁在写」。
 | S5 | provider 加消息 `action("truncate")`（返回 `deleted_ids`）→ 前端 `deleteMessage` 改走 VDFS | ✅ **已完成** |
 | S6 | provider 加消息 `action("clear")` → 前端 `clearMessages` 改走 VDFS | ✅ **已完成** |
 | S7 | 文档同步：本文档、`CURRENT.md` 重生成、`CHANGELOG.md`、`ROUTES.md`、`vdfs-session-messages.md` | ✅ **已完成** |
+| S8 | 删 `session/heartbeat/trigger` 整条能力（路由臂 + `handle_heartbeat_trigger_oneoff` + `heartbeat_trigger_option` 选项节点 + 两个常量） | ✅ **已完成**（§5.1） |
 
-**S1–S6 全部落地：路由表 11 → 6 条**，`gate.mjs` 全绿。
+**S1–S6 全部落地：路由表 11 → 6 条**；S8 之后 **11 → 5 条**，`gate.mjs` 全绿。
 
 ### S4–S6 落地时对计划的两处修正
 
@@ -419,7 +454,7 @@ provider 只回答「这个地址能不能写」，不回答「谁在写」。
 |---|---|---|
 | `ModelChatPanel.vue:282` → `deleteMessage` | `session/chat/delete_message` | `vdfs/action(<sid>/消息/<mid>, "truncate")` |
 | `ModelChatPanel.vue:316` → `updateMessage` | `session/chat/update_message` | `vdfs/write(<sid>/消息/<mid>)` |
-| `ChatMainPanel.vue:181` → `clearMessages` | `session/chat/clear_messages` | `vdfs/delete(<sid>/消息, recursive)` |
+| `ChatMainPanel.vue:181` → `clearMessages` | `session/chat/clear_messages` | `vdfs/action(<sid>/消息, "clear")` |
 
 store 层签名不变（`stores/sessions.ts:816/836/855`），只换内部实现——
 **组件零改动**。这正是「机制化」的收益：特殊逻辑集中在 `services/session.ts` 一处，

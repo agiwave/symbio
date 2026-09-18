@@ -53,6 +53,10 @@ use std::time::Duration;
 /// 只靠 `unwrap_or("default")` 再自我判定为非法，使 `req.session_id` 永远不可达。
 /// `"default"` 作为非法值的理由并非"它是保留 id"，而是它曾是缺省占位符——
 /// 拿它当真实会话去 abort/触发会静默作用于不存在的会话，宁可显式报错。
+///
+/// 注：`heartbeat_trigger` 入口已于 2026-09-18 整体取消（见
+/// `docs/legacy-route-migration.md` §5.1），此处保留它是因为这条注释记录的是
+/// **当时的修复范围**——把已删入口从历史里抹掉会让「为什么这个函数长这样」失去依据。
 pub(crate) fn resolve_required_session_id(
     ctx: &Arc<dyn InvokeRequest>,
     fallback: Option<&str>,

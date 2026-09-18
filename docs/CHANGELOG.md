@@ -18,6 +18,39 @@
 
 ***
 
+## 2026-09-18: 取消「立即心跳」按钮与 `session/heartbeat/trigger`
+
+**性质：能力取消**（不是迁移）。会话路由表 6 → 5 条。
+
+选项面板上的「立即心跳」按钮（`invoke` 型 `OptionNode`，`id = heartbeat_trigger`，
+图标 `play`）与它唯一的后端入口 `session/heartbeat/trigger` 一并删除。
+
+**理由：重复，不是没用。** 心跳的实质是「到点了，往会话发一轮提示词」。
+用户想立刻做一次，**在输入框里直接发一条消息就是完全等价的动作**——
+同一个动作、同一条路径（`chat/send`）、同一份提示词。
+按钮做的也是这件事，只是绕开了对话本身。留着它等于给同一件事两个入口，
+两者行为一旦分叉就是一类难以察觉的 bug。
+
+**这不是「保留 vs 迁移」的二选一**。初版审计把它判为「不可迁 → 保留」，
+那条理由只回答了「能不能迁 VDFS」，而真问题是「该不该存在」。
+审计文档据此新增 **E 档（能力整体取消）** 与 §5.1 的论证。
+
+**能力无损失**：心跳配置（`metadata.heartbeat`）、后台调度器
+（`HEARTBEAT_TICK_SECS = 15`）、LLM 可见的 `heartbeat` 工具
+（`set` / `get` / `cancel` 三个 action）全部未动——该工具**从来没有**「立即触发」这一格。
+
+删除物：
+
+- `options.rs`：`heartbeat_trigger_option` 方法、`ORDER_HEARTBEAT_TRIGGER`、
+  `HEARTBEAT_TRIGGER_ENDPOINT`（`invoke` 型选项的最小样例因此在本插件消失；
+  机制本身完好）。
+- `plugin.rs`：`"heartbeat/trigger"` 路由臂。
+- `heartbeat.rs`：`handle_heartbeat_trigger_oneoff`（35 行）+ import 收窄。
+- 测试：`options.test.rs` 删 1 例、加 1 例防回归
+  （`heartbeat_trigger_option_is_gone`：按钮不得被加回来 + 心跳表单仍在）。
+
+***
+
 ## 2026-09-18: 会话旧路由审计；5 条会话路由退役（含消息增删改）
 
 **性质：审计 + 迁移**。会话路由表 11 → 6 条。

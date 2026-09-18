@@ -279,7 +279,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
   下发**禁用态**节点并给出引导文案（前端零特判）。当前值由 `ctx[PROVIDER_ID]`
   或默认 Provider 回填。
 
-### 7.4 心跳任务（`form` 复用 VDFS 表单方言 + `invoke` 命令）
+### 7.4 心跳任务（`form` 复用 VDFS 表单方言）
 
 - `form` 节点：字段 = 启用开关 / 空闲间隔 / 任务提示词 / 携带历史；四项
   **恒可见**（基础设置不加 `visible_when` 门控）——`DetailField` 只能表达
@@ -288,5 +288,13 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
   「先填参数、再开开关、一次保存」（`option` 绑定保存**全部字段**，关开关不丢参数）。
   `bind = "metadata.heartbeat"`（经 `OptionAction::session_state_bind`），
   定义与 VDFS `ext = form` 的详情表单同一套方言（`DetailDefinition`），前端复用唯一渲染器。
-- `invoke` 节点「立即心跳」：`endpoint = worker/session/heartbeat/trigger`，
-  未启用（或缺提示词）时置为只读并说明原因。
+
+> **「立即心跳」按钮已取消（2026-09-18）**。它原是一个 `invoke` 型节点
+> （`endpoint = worker/session/heartbeat/trigger`，未启用时只读并说明原因），
+> 取消理由是**它的作用与「在输入框里直接发一条消息」完全重复**——心跳的实质
+> 就是往会话发一轮提示词，用户想立刻做一次，在输入框发即可。
+> 论证见 [legacy-route-migration.md §5.1](./legacy-route-migration.md)。
+>
+> 影响面：`invoke` 型选项**本身没有消失**（机制完好，仍可用于其它纯命令节点），
+> 只是会话插件不再贡献这一格。这段记录保留，是因为它曾是 `invoke` 型选项
+> 的最小样例——读者若想找现存的 `invoke` 型实例，需另寻宿主。

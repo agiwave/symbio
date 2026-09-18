@@ -44,10 +44,6 @@ const ORDER_WORKDIR: i32 = 10;
 const ORDER_RISK: i32 = 40;
 const ORDER_MODE: i32 = 50;
 const ORDER_HEARTBEAT: i32 = 60;
-const ORDER_HEARTBEAT_TRIGGER: i32 = 61;
-
-/// 心跳手动触发端点（宿主自有、`invoke` 类型的纯命令选项）
-const HEARTBEAT_TRIGGER_ENDPOINT: &str = "worker/session/heartbeat/trigger";
 
 /// 心跳任务默认空闲间隔（秒），与前端历史默认值一致
 const DEFAULT_HEARTBEAT_INTERVAL: i64 = 300;
@@ -215,7 +211,6 @@ impl SessionPlugin {
             self.risk_option(meta_str(&meta, "risk_level")),
             self.mode_option(meta_str(&meta, "mode")),
             self.heartbeat_option(meta.get("heartbeat").cloned()),
-            self.heartbeat_trigger_option(meta.get("heartbeat").cloned()),
         ]
     }
 
@@ -303,8 +298,12 @@ impl SessionPlugin {
     /// **恒可见**：基础设置不使用 `visible_when` 门控——未启用时用户同样能
     /// 看到并可预先填写，开关与参数一次保存即生效（`option` 绑定保存全部字段，
     /// 关闭开关也不会丢失已填参数）。
-    /// 「立即执行一次」不属于本表单，由 [`Self::heartbeat_trigger_option`]
-    /// 以独立 `invoke` 选项发布。
+    ///
+    /// 「立即执行一次」**已取消**（2026-09-18）：它原是一个 `invoke` 类型的独立
+    /// 命令选项（图标 `play`，点了直接调 `session/heartbeat/trigger`），但它的作用
+    /// 与「在输入框里直接发一条消息」完全重复——心跳的实质就是往会话发一轮提示词，
+    /// 用户想立刻做一次，直接在输入框发即可。留着它等于给同一件事两个入口，
+    /// 且按钮那个还绕开了对话本身。
     fn heartbeat_option(&self, raw: Option<Value>) -> OptionNode {
         let enabled = raw
             .as_ref()
@@ -417,47 +416,6 @@ impl SessionPlugin {
             if enabled { "已开启" } else { "未开启" },
         )
         .with_description("会话空闲时自动触发一次对话（定时任务）")
-    }
-
-    /// 心跳任务：立即执行一次。
-    ///
-    /// `invoke` 类型的最小样例：**纯命令、无状态**——不写 metadata、不回显选中值，
-    /// 点击即调用后端服务。未启用（或缺提示词）时置为只读并说明原因，
-    /// 前端无需任何特判（与表单型选项共用同一渲染机制）。
-    fn heartbeat_trigger_option(&self, raw: Option<Value>) -> OptionNode {
-        let enabled = raw
-            .as_ref()
-            .and_then(|v| v.get("enabled"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let prompt_ready = raw
-            .as_ref()
-            .and_then(|v| v.get("prompt"))
-            .and_then(|v| v.as_str())
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false);
-
-        let node = OptionNode::invoke(
-            "heartbeat_trigger",
-            "立即心跳",
-            OptionAction {
-                endpoint: HEARTBEAT_TRIGGER_ENDPOINT.to_string(),
-                payload: json!({}),
-                pick: None,
-                bind: None,
-            },
-        )
-        .with_icon("play")
-        .with_order(ORDER_HEARTBEAT_TRIGGER);
-
-        if enabled && prompt_ready {
-            node.with_status(OPTION_STATUS_ACTIVE)
-                .with_description("立即以当前提示词触发一次心跳（会话空闲时生效）")
-        } else {
-            node.with_status(OPTION_STATUS_DISABLED)
-                .with_enabled(false)
-                .with_description("请先启用心跳任务并填写任务提示词")
-        }
     }
 }
 

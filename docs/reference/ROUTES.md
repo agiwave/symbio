@@ -99,9 +99,8 @@
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
 | `session/get_messages` | 获取对话历史（**仅 `agent_run` 的续会话存在性校验**用） | `Data` |
 | `session/update` | 合并写入会话 metadata（**仅 CLI**） | `Data` |
-| `session/heartbeat/trigger` | 触发一次心跳 | `Data` |
 
-> **`session/append`、`session/open` 与三条消息路由已退役**（2026-09-18）：
+> **`session/append`、`session/open`、三条消息路由与 `session/heartbeat/trigger` 已退役**（2026-09-18）：
 > - `append` —— 消息追加的唯一入口是聊天协议（`chat/send`），而编排自身的落库走引擎直连
 >   （`orchestrator/entry.rs` 的 `open_chat_session` + `append_messages`）。
 >   该路由的最后形态是「为一次数据追加搭 invoke 信封」，纯开销。
@@ -110,6 +109,10 @@
 > - `chat/update_message` / `chat/delete_message` / `chat/clear_messages` —— 三条都是
 >   **纯存储操作**（不触发编排），已迁到 VDFS（见下表）。它们曾与 `vdfs/write` /
 >   `vdfs/action` 各有一份实现，正是要消灭的那种重复。
+> - `heartbeat/trigger` —— **不是迁移，是能力整体取消**：它唯一的入口是选项面板上的
+>   「立即心跳」按钮，而那个按钮的作用与「在输入框里直接发一条消息」完全重复
+>   （心跳的实质就是往会话发一轮提示词）。心跳机制本身（配置、后台调度器、LLM 侧
+>   `heartbeat` 工具的 `set`/`get`/`cancel`）未受影响。
 >
 > 审计与迁移记录见
 > [`symbio/src/plugins/session/docs/legacy-route-migration.md`](../../symbio/src/plugins/session/docs/legacy-route-migration.md)。

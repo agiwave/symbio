@@ -10,10 +10,7 @@ use super::types::HeartbeatConfig;
 use crate::symbio_core::now_ms;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::session_chat;
-use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError, PluginPayload, SimpleRequest,
-    PATH, SESSION_ID,
-};
+use crate::symbio_core::{InvokeRequestExt, SimpleRequest, PATH, SESSION_ID};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -200,50 +197,6 @@ impl SessionPlugin {
                 e
             );
         }
-    }
-
-    /// 手动立即触发指定会话的心跳任务（前端"立即执行一次"按钮使用）。
-    ///
-    /// 与后台调度器共用 [`SessionPlugin::trigger_heartbeat`]，遵循相同的约束：
-    /// - 未启用心跳 / 提示词为空则拒绝
-    /// - 会话正在工作时跳过
-    pub async fn handle_heartbeat_trigger_oneoff(
-        self: Arc<Self>,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
-        let body_id = ctx.payload::<serde_json::Value>().ok().and_then(|v| {
-            v.get("session_id")
-                .and_then(|s| s.as_str())
-                .map(|s| s.to_string())
-        });
-        let session_id =
-            super::orchestrator::resolve_required_session_id(&ctx, body_id.as_deref())?;
-
-        let session = self.get_or_create_session(&session_id).await?;
-        let hb = HeartbeatConfig::from_metadata(&session.metadata);
-        if !hb.enabled {
-            return Err(PluginError::ValidationError("该会话未启用心跳任务".into()));
-        }
-        if hb.prompt.trim().is_empty() {
-            return Err(PluginError::ValidationError("心跳任务提示词为空".into()));
-        }
-
-        let state = self.active_mgr.get_or_create(&session_id).await;
-        if state.inner.read().await.is_working {
-            return Ok(PluginPayload::new(&serde_json::json!({
-                "status": "skipped",
-                "reason": "会话正在工作中，已跳过",
-                "session_id": session_id
-            })));
-        }
-
-        self.trigger_heartbeat(&session_id, &hb).await;
-
-        Ok(PluginPayload::new(&serde_json::json!({
-            "status": "triggered",
-            "session_id": session_id,
-            "include_history": hb.include_history
-        })))
     }
 }
 
