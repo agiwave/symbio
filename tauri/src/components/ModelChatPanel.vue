@@ -15,6 +15,20 @@
       </div>
     </Transition>
 
+    <!-- 会话级压缩提示条。
+         压缩是**内部 LLM 请求**：它发生在 Turn 创建**之前**（此时转写里还没有任何
+         助手节点），且后端刻意静音了出帧（避免泄漏一个永不 finalize 的空 Turn
+         骨架）。于是整段窗口内**没有任何消息节点**可渲染——长上下文时可达数分钟。
+         没有这条横幅，用户看到的就是"点了发送、界面毫无反应"。 -->
+    <Transition name="banner">
+      <div v-if="compressing" class="session-compress-banner" role="status" aria-live="polite">
+        <span class="compress-spinner" aria-hidden="true"></span>
+        <span class="banner-text">
+          正在压缩上下文（历史较长，需要先整理记忆）… 已用 {{ compressElapsedSec }}s
+        </span>
+      </div>
+    </Transition>
+
     <!-- 编辑单条消息的浮层 -->
     <Transition name="banner">
       <div v-if="editing" class="edit-overlay" @click.self="editing = null">
@@ -78,7 +92,8 @@ import { type ChatMessage, type MessageContent, type ContentPart, type ChatRole 
 import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
-import { isWorkingStatus } from '@/schemas/vdfs'
+import { isWorkingStatus, VDFS_PHASE_COMPRESSING } from '@/schemas/vdfs'
+import { useRunningClock } from '@/composables/useRunningClock'
 
 import MessageNode from './MessageNode.vue'
 import ChatInputArea from './chat/ChatInputArea.vue'
@@ -144,6 +159,41 @@ const sessionsStore = useSessionsStore()
       .some((m) => m.status === 'failed' && !(m.meta as { ephemeral?: boolean } | undefined)?.ephemeral)
     return hasFailedNode ? null : err
   })
+
+  // 会话级压缩提示（"阶段"是会话节点的**属性**，不是事件）。
+  //
+  // 判据里带 `isWorkingStatus`：阶段只在**运行中**有意义。加这一重是为了兜住
+  // "压缩异常残留"——若会话已空闲却仍带着 phase，这里静默不显示，而不是让一条
+  // "正在压缩…"永远挂在界面上（后端 `SessionRuntime::from_state` 已在非运行分支
+  // 丢掉 phase，这是同一规则的第二道防线）。
+  const compressing = computed(() => {
+    const st = sessionsStore.getSessionStatus(props.sessionId)
+    if (!st || !isWorkingStatus(st.status)) return false
+    return st.phase === VDFS_PHASE_COMPRESSING
+  })
+
+  // 已用秒数：起点是**前端首次观察到 compressing 的时刻**。
+  // 后端不下发"开始时间戳"——阶段是状态而非事件，前端不需要（也不该）依赖一条
+  // "开始"通知；状态迁移本身就是起点，这与"派生是纯函数"是同一条原则。
+  const { nowMs, acquire, release } = useRunningClock()
+  const compressStartedAt = ref(0)
+  watch(compressing, (on) => {
+    if (on) {
+      compressStartedAt.value = Date.now()
+      acquire()
+    } else {
+      compressStartedAt.value = 0
+      release()
+    }
+  })
+  onBeforeUnmount(() => {
+    if (compressing.value) release()
+  })
+  const compressElapsedSec = computed(() =>
+    compressing.value
+      ? Math.max(0, Math.floor((nowMs.value - compressStartedAt.value) / 1000))
+      : 0,
+  )
 
   /** 会话级错误重试：重新发送用户最后一条消息（复用其 id 避免乐观消息重复节点）。
    *  仅用于"无 Failed Turn 节点"的兜底错误；有 Failed Turn 时错误由其节点承载、走 handleRetry。 */
@@ -465,6 +515,44 @@ watch(
   color: var(--color-error-fg);
   font-size: 0.82rem;
   flex-shrink: 0;
+}
+
+/* 压缩提示条：与错误条同版式，但走 accent 色系——它不是错误，是"需要多等一会儿"。
+   压缩窗口内没有任何消息节点可渲染，这条横幅是唯一能说明"系统在做事"的东西。 */
+.session-compress-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  background: var(--color-option-bg);
+  border: 1px solid var(--color-border);
+  border-left: 0.1875rem solid var(--accent);
+  color: var(--accent);
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+/* 脉动圆点：与 MessageNode 的"运行中"标签同一套视觉语言，
+   让用户认得出"这是在忙"，而不是界面卡住了。 */
+.compress-spinner {
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+  animation: compress-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes compress-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .banner-retry {

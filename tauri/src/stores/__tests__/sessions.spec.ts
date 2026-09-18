@@ -76,7 +76,13 @@ vi.mock('@/services/completionChime', () => ({
 }))
 
 import { useSessionsStore } from '../sessions'
-import { VDFS_SESSION_DIR, VDFS_ROOT, vdfsJoin } from '@/schemas/vdfs'
+import {
+  VDFS_CHANGE_UPDATED,
+  VDFS_SESSION_DIR,
+  VDFS_ROOT,
+  vdfsJoin,
+  vdfsSessionAddr,
+} from '@/schemas/vdfs'
 
 /** 投递一条变更（路径就是展示地址） */
 function emit(change: Record<string, unknown>) {
@@ -486,5 +492,59 @@ describe('sessions store — 历史水合是合并，不是整表替换', () => 
     const [a1] = store.getSessionMessages(SID)
     expect(a1.content).toBe('完整')
     expect(a1.status).toBe('completed')
+  })
+})
+
+/**
+ * 会话节点的「阶段」`phase` —— 压缩期的等待提示。
+ *
+ * 压缩是**内部 LLM 请求**：它发生在 Turn 创建**之前**（此时转写里还没有任何助手
+ * 节点），且后端刻意静音了出帧（避免泄漏一个永不 finalize 的空 Turn 骨架）。于是
+ * 整段窗口内**没有任何消息节点**可渲染，长上下文时可达数分钟。
+ *
+ * 因此"正在压缩"只能作为会话节点属性下发；前端据此在主聊天区给出提示条。
+ */
+describe('sessions store — 会话节点的阶段（压缩期等待提示）', () => {
+  const SID = 's1'
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    sessionApi.listSessions.mockResolvedValue([])
+  })
+
+  const nodeChange = (status: string, phase?: string) =>
+    ({
+      path: vdfsSessionAddr(SID),
+      change: VDFS_CHANGE_UPDATED,
+      node: { name: SID, status, ...(phase ? { phase } : {}) },
+    }) as never
+
+  it('运行中 + phase=compressing → 阶段被记入状态', () => {
+    const store = useSessionsStore()
+    store.applySessionNode(SID, nodeChange('working', 'compressing'))
+    expect(store.getSessionStatus(SID).phase).toBe('compressing')
+  })
+
+  it('非运行中时阶段不被采信（会话已空闲就不该再说「正在压缩」）', () => {
+    const store = useSessionsStore()
+    store.applySessionNode(SID, nodeChange('active', 'compressing'))
+    // 与后端 `SessionRuntime::from_state` 同一规则：非运行分支一律丢掉 phase，
+    // 否则一次压缩异常残留会让提示条永远挂在主聊天区。
+    expect(store.getSessionStatus(SID).phase).toBeUndefined()
+  })
+
+  it('未知阶段一律当作常规处理（不为它臆造 UI）', () => {
+    const store = useSessionsStore()
+    store.applySessionNode(SID, nodeChange('working', 'teleporting'))
+    expect(store.getSessionStatus(SID).phase).toBeUndefined()
+  })
+
+  it('压缩结束时阶段回到空（提示条随之消失）', () => {
+    const store = useSessionsStore()
+    store.applySessionNode(SID, nodeChange('working', 'compressing'))
+    expect(store.getSessionStatus(SID).phase).toBe('compressing')
+    // 后端在压缩内核的所有出口都会清位，这里验证前端随之收敛
+    store.applySessionNode(SID, nodeChange('working'))
+    expect(store.getSessionStatus(SID).phase).toBeUndefined()
   })
 })

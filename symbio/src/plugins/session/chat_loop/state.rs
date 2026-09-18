@@ -256,6 +256,59 @@ impl Drop for StopSignal {
 ///
 /// 生命周期与 [`StopSignal`] 绑定：Stop 的显式触发点在本 loop 的各出口，
 /// RAII 兜底点在 `run_chat_loop_task` 的 `WorkingGuard`。
+/// 会话运行态「阶段」的发射器（压缩期用）。
+///
+/// ## 为什么需要它
+///
+/// 压缩发生在 Turn 创建**之前**（`apply_compaction`），且出帧被刻意静音——
+/// `send_compression_request` 用一个哑 `tx` 接住压缩 LLM 的全部流式帧，目的是
+/// 避免泄漏一个永不 finalize 的空 Turn 骨架。代价是：整段压缩窗口内**没有任何
+/// 消息节点**可供前端渲染，而长上下文时这段可达数分钟，用户视角就是卡死。
+///
+/// 但压缩是**会话级**状态，不是消息节点——它仍应经 VDFS 变更下发，让前端在会话
+/// 节点上读到 `attributes.phase` 并给出等待提示。
+///
+/// ## 为什么持有插件而不是「一个回调」
+///
+/// 发变更需要两样东西：store（取会话摘要）与 `change_subs`（投递），两者都在插件上。
+/// 只写 `ActiveSessionStateInner.phase` 而不通知，UI 不会刷新——而压缩窗口恰恰没有
+/// 任何其它变更会顺带把它带下去（这正是"静音"的定义）。
+///
+/// ## 为什么能发出去
+///
+/// `notify_session_state` 走的是 `state.inner.frontends` + VDFS 变更订阅，
+/// **不经过**被静音的那条 turn channel。所以不是"发不出"，是"从没发过"。
+pub struct PhaseEmitter {
+    plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
+    state: Arc<crate::plugins::session::active::ActiveSessionState>,
+}
+
+impl PhaseEmitter {
+    pub fn new(
+        plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
+        state: Arc<crate::plugins::session::active::ActiveSessionState>,
+    ) -> Self {
+        Self { plugin, state }
+    }
+
+    /// 置位 / 清位当前阶段，并立即下发会话节点变更。
+    ///
+    /// 只改字段不通知等于没改（见类型文档）：压缩窗口内没有第二个变更会把它带下去。
+    pub async fn set(&self, phase: Option<&'static str>) {
+        {
+            let mut inner = self.state.inner.write().await;
+            inner.phase = phase.map(|p| p.to_string());
+        }
+        let id = self.state.request_id_str();
+        self.plugin.notify_session_state(&id).await;
+    }
+
+    /// 回到「常规处理」（阶段置空）。
+    pub async fn clear(&self) {
+        self.set(None).await;
+    }
+}
+
 pub struct ChatOrchestrator {
     /// 唯一生效的模型服务（model 插件按上下文解析后经 CAPABILITY_VISITOR 注册；
     /// core 纯 trait 的 trait object——session 对协议实现零依赖）
@@ -267,6 +320,12 @@ pub struct ChatOrchestrator {
     /// 本次请求生命周期的 Stop 触发器（由 `run_chat_loop_task` 创建并共享给
     /// `WorkingGuard` 兜底，见 [`StopSignal`]）
     pub stop: Arc<StopSignal>,
+    /// 会话运行态「阶段」的发射器（压缩期用）。
+    ///
+    /// `None` = 调用方没有提供（测试 / 无前端场景）：压缩照常执行，只是不发信号。
+    /// 之所以是可选而非必填：`run_chat_loop` 的其它调用场景（单测）根本没有
+    /// 会话状态与前端订阅者，让它们为「一个提示」去构造插件实例是本末倒置。
+    pub phase: Option<Arc<PhaseEmitter>>,
 }
 
 impl ChatOrchestrator {
@@ -275,12 +334,14 @@ impl ChatOrchestrator {
         parent: Option<Arc<dyn Plugin>>,
         context_limit: u32,
         stop: Arc<StopSignal>,
+        phase: Option<Arc<PhaseEmitter>>,
     ) -> Self {
         Self {
             provider,
             parent,
             context_limit,
             stop,
+            phase,
         }
     }
 

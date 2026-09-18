@@ -104,7 +104,7 @@ pub(crate) async fn auto_compress_process(
 /// 详见 [`run_context_compact`] 文档中的切分点约束）。
 /// 成功返回 `Some(post_tokens)`（压缩后内容水位：快照 + 保留区，不含请求级 overhead）。
 #[allow(clippy::too_many_arguments)]
-async fn compress_with_snapshot_core(
+async fn compress_snapshot_inner(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
     channel: &mut PluginChannel,
@@ -338,6 +338,51 @@ async fn compress_with_snapshot_core(
         .await;
 
     Some(post_tokens)
+}
+
+/// 压缩内核的**包装层**：只负责「正在压缩」这个会话阶段的置位与清位。
+///
+/// ## 为什么清位必须收在这一层
+///
+/// 内核有**六个**出口（成功 / LLM 失败回滚 / 快照校验失败 / 输入超限紧急兜底 /
+/// 兜底亦无收益 / 用户中止），漏掉任何一个，会话就会在回到空闲后仍挂着
+/// "正在压缩上下文"——而且没有任何机制会纠正它（`is_working` 已经归位，
+/// 后续也不会再有压缩相关的变更）。
+///
+/// 置位/清位散落到每个 `return` 前的写法，每加一个出口就要记得补一次，
+/// 正是最容易静默失效的一类结构；收成包装层之后，新增出口自动被覆盖。
+#[allow(clippy::too_many_arguments)]
+async fn compress_with_snapshot_core(
+    orchestrator: &ChatOrchestrator,
+    context: &mut SessionContext,
+    channel: &mut PluginChannel,
+    ctx: &Arc<dyn InvokeRequest>,
+    abort_flag: &Arc<AtomicBool>,
+    compression_msg: ChatMessage,
+    keep_messages: Vec<ChatMessage>,
+    extra_hints: Option<&str>,
+    log_tag: &str,
+) -> Option<usize> {
+    if let Some(e) = &orchestrator.phase {
+        e.set(Some(crate::plugins::session::plugin::PHASE_COMPRESSING))
+            .await;
+    }
+    let result = compress_snapshot_inner(
+        orchestrator,
+        context,
+        channel,
+        ctx,
+        abort_flag,
+        compression_msg,
+        keep_messages,
+        extra_hints,
+        log_tag,
+    )
+    .await;
+    if let Some(e) = &orchestrator.phase {
+        e.clear().await;
+    }
+    result
 }
 
 /// 取消息纯文本（快照校验用）

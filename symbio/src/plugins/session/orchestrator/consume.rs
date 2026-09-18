@@ -144,11 +144,20 @@ impl SessionPlugin {
                 provider.max_context_tokens()
             );
         }
+        // 压缩期要能把「正在压缩」作为**会话阶段**下发：压缩发生在 Turn 创建之前，
+        // 且出帧被刻意静音，整段窗口内没有任何消息节点可渲染（长上下文时可达数
+        // 分钟，用户视角＝卡死），前端只能靠会话节点的 `attributes.phase` 给出等待
+        // 提示。发射器需要插件 + 会话状态：`notify_session_state` 要用 store（取会话
+        // 摘要）与 `change_subs`（投递），两者都在插件上。
+        let phase = Some(std::sync::Arc::new(
+            super::super::chat_loop::PhaseEmitter::new(self.clone(), state.clone()),
+        ));
         let orchestrator = super::super::chat_loop::ChatOrchestrator::new(
             provider,
             Some(parent),
             context_limit,
             stop.clone(),
+            phase,
         );
         let ctx_clone = chat_ctx.fork();
         let error_tx = plugin_chan.tx.clone();

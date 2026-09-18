@@ -434,6 +434,44 @@ S20~S20.2 都假设「节点状态会自己走到终态」。本次处理两个*
 `aborted`、提示音选错音色。这条曾写错并被回退测试抓到
 （`tool_executor.test.rs::wait_tool_abort_ignores_closed_channel`）。
 
+### S20.4 —— 压缩期「阶段」上会话节点（本次）
+
+S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠前的空档：**节点根本还没
+被创建**。
+
+自动压缩（`apply_compaction`）跑在每轮 Turn **创建之前**，而它是一次把整段历史
+塞进请求体的完整 LLM 请求——长上下文时**可达数分钟**。这段时间里：
+
+- 后端刻意静音了全部出帧（`send_compression_request` 用哑 `tx` 接住压缩 delta），
+  以免泄漏一个永不 finalize 的空 Turn 骨架；
+- 于是**没有任何消息节点**可供前端渲染，前端对"compress"零引用；
+- 用户视角：点了发送，界面毫无反应（只有侧边会话卡片上一句乐观的"处理中…"）。
+
+压缩是**会话级**状态却不是消息节点，因此挂到会话节点的 `attributes.phase` 上：
+
+| 层 | 改动 |
+|---|---|
+| `session/active.rs` | `ActiveSessionStateInner` 新增 `phase`（`is_working` 回答"忙不忙"，`phase` 回答"在忙什么"） |
+| `session/plugin/nodes.rs` | `SessionRuntime` 新增 `phase`；`from_state` 是**唯一投影入口**；`session_node` 写 `attributes.phase` |
+| `session/chat_loop/state.rs` | 新增 `PhaseEmitter`：写 `inner.phase` **并**立即 `notify_session_state` |
+| `session/chat_loop/compress.rs` | 内核包一层 `compress_with_snapshot_core`：置位 / 清位 |
+| `session/orchestrator/consume.rs` | 构造 `PhaseEmitter`（`run_chat_loop_task` 同时持有 `Arc<Self>` 与 `Arc<ActiveSessionState>`） |
+| 前端 `schemas/vdfs.ts` | `VDFS_PHASE_COMPRESSING`；`sessionRuntimeOf` 只接受已知阶段 |
+| 前端 `stores/sessions.ts` | `applySessionNode` 直通 `phase`，并把 `activity` 改写为"正在压缩上下文…" |
+| 前端 `components/ModelChatPanel.vue` | 会话级压缩提示条（复用 `session-error-banner` 版式）+ 已用秒数 |
+
+**为什么能发出去**：`notify_session_state` 走 `state.inner.frontends` 与 VDFS 变更订阅，
+**不经过**被静音的那条 turn channel。所以不是"发不出"，是"从没发过"。
+
+**为什么清位要收在包装层**：压缩内核有**六个**出口（成功 / LLM 失败回滚 / 快照校验
+失败 / 输入超限紧急兜底 / 兜底亦无收益 / 用户中止）。散落在每个 `return` 前的写法
+每加一个出口就要记得补一次——漏一个，会话就会在空闲后仍挂着"正在压缩"，且没有任何
+机制会纠正。收成包装层后，新增出口自动被覆盖。
+
+**为什么非运行分支一律丢掉 `phase`**：没在跑就谈不上"在忙什么"。否则一次压缩异常
+残留（例如压缩中被中止）会让提示条永远挂在主聊天区。前端 `applySessionNode` 与
+`ModelChatPanel` 的 `isWorkingStatus` 判据是同一规则的第二、三道防线。
+
 ### S21 —— 工具调用请求显式化（**本次不做，留待需要时**）
 把 ToolCall 的参数从 `content` 提升为一个真子节点（`type = tool_request`）。
 **现在不做**，因为它要求 `plugins/model/message_builder` 的请求扁平化同步改造，
@@ -461,6 +499,7 @@ S20~S20.2 都假设「节点状态会自己走到终态」。本次处理两个*
 | 11 | 重连后状态收敛 | 不变（`list` 快照 + 只升不降规则） | §4.2 |
 | 12 | 中止后不再有节点转圈 | ToolCall / reason / Turn 全部落终态；Turn 落 `Failed` 以给出重试入口 | §6 S20.3 |
 | 13 | 切回「正在跑」的会话 | 正在跑的那一轮**仍在**（叶子读含在途 + 前端水合不丢弃在途） | §6 S20.3 |
+| 14 | 长会话触发压缩时 | 主聊天区显示"正在压缩上下文… 已用 Ns"（此前**完全无提示**，表现为卡死） | §6 S20.4 |
 
 ---
 
@@ -491,6 +530,9 @@ S20~S20.2 都假设「节点状态会自己走到终态」。本次处理两个*
 14. **同一份数据的两个地址给出同一份内容**：会话叶子 `read` 与转写列表都叠加在途缓冲
     （`overlay_live`）；在途副本**继承**存储分配的 `seq`——顺序锚点只由存储分配，
     否则同一条消息会以「有 seq / 无 seq」两种形态排到列表的两个位置。
+15. **没有一个节点可渲染时，状态挂会话节点**：`is_working` 回答"忙不忙"，
+    `attributes.phase` 回答"在忙什么"，且 `phase` 只在**运行中**成立（非运行一律丢弃）。
+    置位/清位必须成对收在同一个包装层，不得散落到多个 `return` 前（§6 S20.4）。
 
 ---
 
