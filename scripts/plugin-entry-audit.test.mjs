@@ -92,7 +92,7 @@ const CLEAN = {
 test('干净树通过（exit 0）', () => {
   const r = audit(CLEAN)
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /六条规则全部通过/)
+  assert.match(r.stdout, /七条规则全部通过/)
 })
 
 test('报告段给出每条路由的消费方计数', () => {
@@ -319,6 +319,111 @@ test('形态识别：`route` 恒 Err 判为「恒 NotFound」', () => {
   })
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /work\s+\[恒 NotFound\]/)
+})
+
+// ── E-007：插件不得按值持有兄弟插件实例 ──────────────────────────────────
+//
+// 违规形态取自真实事件：`telegram` 曾有个 `llm_plugin` 字段按值持有 session 实例，
+// 而唯一写入点传的是 `None` ⇒ 整条 LLM 回复链路从未通。测试用 `field` 参数
+// 替换那一行，其余部分保持一个干净插件，确保命中的**只**是字段形态。
+const siblingPlugin = (field) => `use std::sync::Arc;
+
+pub struct TelegramPlugin {
+    ${field}
+}
+
+impl Plugin for TelegramPlugin {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("telegram", "Telegram 集成")
+    }
+
+    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+        let path = ctx.get(PATH).unwrap_or_default();
+        match path.as_str() {
+            "send" => Ok(PluginPayload::new(&1)),
+            _ => Err(PluginError::NotFound(path)),
+        }
+    }
+
+    async fn traverse(self: Arc<Self>, _path: String, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+        let sub_path = ctx.get(PATH).unwrap_or_default();
+        if sub_path != TRAVERSE_AVAILABLE_TOOLS {
+            return Err(PluginError::NotFound(sub_path));
+        }
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+}
+`
+
+const withField = (field) => ({
+  ...CLEAN,
+  'symbio/src/plugins/telegram/plugin.rs': siblingPlugin(field),
+})
+
+// 断言一律落在**报错行**上，不用裸 `/E-007/`：汇总段那句
+// `✓ E-007  不按值持有兄弟插件` 也含 `E-007`，会把「不误报」的用例喂成假绿。
+// （E-006 的第一版就踩过这个坑。）
+const E007_HIT = /\[ERROR\]\s+E-007\s+symbio\/src\/plugins\/telegram\/plugin\.rs:\d/
+
+test('E-007 命中：`Arc<RwLock<Option<Arc<dyn Plugin>>>>` 字段（telegram 的历史形态）', () => {
+  const r = audit(withField('llm_plugin: Arc<RwLock<Option<Arc<dyn Plugin>>>>,'))
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E007_HIT)
+})
+
+test('E-007 命中：直接 `Option<Arc<dyn Plugin>>` 字段（没有 RwLock 包一层）', () => {
+  const r = audit(withField('llm_plugin: Option<Arc<dyn Plugin>>,'))
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E007_HIT)
+})
+
+test('E-007 不误报：`Weak`（向上引用父）', () => {
+  const r = audit(withField('parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,'))
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E007_HIT)
+})
+
+test('E-007 不误报：容器按名持有多个子实例（HashMap）', () => {
+  const r = audit(withField('instances: Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>>,'))
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E007_HIT)
+})
+
+test('E-007 不误报：字段名是 parent / router（本仓专指向上引用）', () => {
+  for (const field of ['parent: Option<Arc<dyn Plugin>>,', 'router: Option<Arc<dyn Plugin>>,']) {
+    const r = audit(withField(field))
+    assert.equal(r.status, 0, `${field}\n${r.stdout}`)
+    assert.doesNotMatch(r.stdout, E007_HIT)
+  }
+})
+
+test('E-007 不误报：借用形参（`&Arc<dyn Plugin>` 不可能是字段）', () => {
+  const r = audit(withField('tree: &Arc<dyn Plugin>,'))
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E007_HIT)
+})
+
+test('E-007 不误报：不在 `plugins/` 之下的同类字段', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/symbio_core/registry.rs': 'pub struct Reg {\n    held: Arc<RwLock<Option<Arc<dyn Plugin>>>>,\n}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E007_HIT)
+})
+
+test('E-007 豁免：带理由的 plugin-entry-allow 不再报', () => {
+  const r = audit(
+    withField('// plugin-entry-allow E-007: 本插件就是容器，按名持有子实例\n    held: Option<Arc<dyn Plugin>>,'),
+  )
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E007_HIT)
+})
+
+test('E-007 豁免理由为空视为未豁免', () => {
+  const r = audit(withField('// plugin-entry-allow E-007:\n    held: Option<Arc<dyn Plugin>>,'))
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E007_HIT)
 })
 
 // ── 提取正确性：测试替身不得顶替生产实现 ──────────────────────────────

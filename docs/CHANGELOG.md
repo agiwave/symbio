@@ -18,6 +18,43 @@
 
 ***
 
+## 2026-09-18: 修复 Telegram LLM 回复链路 + 新增守卫 E-007
+
+**性质：功能修复 + 新增守卫**。承上一条：上一轮修好了 Telegram 的**地址**
+（`session/chat` → `session/chat/send`），但那条链路**仍然不通**——本轮把功能修通，
+并把病因变成守卫。
+
+**病灶不是「漏传了一个参数」，而是「按值持有兄弟插件」这个设计。**
+`telegram/plugin.rs` 有个 `llm_plugin: Arc<RwLock<Option<Arc<dyn Plugin>>>>` 字段，
+只在 `handle_start_listener(Some(p), …)` 里被写入，而唯一调用点
+`invoke_start_listener` 传的是 `None` ⇒ `process_update` 恒走「LLM 插件未配置」，
+每条 Telegram 消息都被回成这句话。`git log` 显示这个形态**从初始提交
+（`e00832d`）就是这样**：自始至终没通过。
+
+修复方式是**回到地址规则**（`docs/design/plugin-route-address.md` 规则五）：
+删掉该字段与注入参数，`process_update` 改用 `ctx.parent()` 取容器后
+`parent.route(ctx)`，地址走 `SESSION_CHAT_SEND`。容器本来就塞好了入口
+（`composite.rs` 的 `SimpleRequest::new(Some(composite_weak), None)`，`fork()` 保留
+`PARENT`），可运行先例是 `agent/host/subagent.rs` 的三处 `parent.route`。
+
+**同时纠正上一轮的一个错误结论。** 上一条把 `telegram/*` 六条读成「休眠」，
+依据是「零调用方」。**零调用方 ≠ 不可达**：网关把请求体里的 `path` 原样转发给
+容器 `route`（`gateway/server.rs` 的 `dispatch_once` / `handle_ws`，只过一层只读
+白名单）⇒ **对外 API 天然是 `refs=0`**。所以这不是死代码，是一条真的对外通道，
+只是它一直在回「LLM 插件未配置」。审计报告段与 design 文档 §4 都补上了这条前提。
+
+**新增守卫 E-007**（`scripts/plugin-entry-audit.mjs`）：插件不得按强引用持有兄弟
+插件实例。判据是结构体字段类型含 `Arc<dyn Plugin>` 且不含 `Weak`，四条豁免逐条
+对应仓里的真实形态：`Weak`（向上引用父）· `HashMap`/`Vec`/`BTreeMap`（容器按名
+持有多个子实例）· 字段名 `parent`/`router`（本仓专指向上引用）· 类型以 `&` 开头
+（借用，字段不可能是这个形态 ⇒ 必是形参）。**ERROR 级**——全仓现有形态扫下来零命中。
+
+回归测试 21 → 30 例（新增 9 例覆盖 E-007 的命中 / 四条豁免 / 豁免注释 / 理由为空）。
+
+门禁：`node scripts/gate.mjs` **23/23**。
+
+***
+
 ## 2026-09-18: 插件路由地址规则规范化 + `route`/`traverse` 入口审计
 
 **性质：规则 + 守卫 + 修漂移**。新增
@@ -51,8 +88,8 @@
 **审计还报出但本轮未动的**（属能力取舍，非地址规则）：六条「零消费方」路由
 ——`event_bus/pending/snapshot`（有意保留，是网关对外 API）、`event_bus/ping`、
 `gateway/status`、`hook/register`、`hook/list`、`skill/execute`（与
-`SkillExecuteTool` 重复实现）、`telegram/*` 六条（与 `llm_plugin` 恒 `None` 同源，
-整条 LLM 回复链路休眠）。详见 design 文档 §4。
+`SkillExecuteTool` 重复实现）、`telegram/*` 六条（当时记为「休眠」——**该判断已在
+下一条更正**：它不是死代码，而是对外 API，只是功能坏了）。详见 design 文档 §4。
 
 门禁：`node scripts/gate.mjs` **23/23**（新增两项：守卫本体 + 它的回归测试）。
 

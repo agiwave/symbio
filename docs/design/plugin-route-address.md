@@ -71,6 +71,21 @@ HTTP 传输文档里那句「路由是运行时分形分发，各插件内部 `m
 处理哪个、不处理哪个由插件自己决定：不贡献选项的插件对 `available_options`
 返回 `NotFound` 是**正确**行为（`collect_options` 会忽略该子树的错误）。
 
+### 规则五：跨插件调用**经父容器**，不按值持有兄弟实例
+
+调用另一个插件时，`ctx.parent()` 取容器、再用**绝对地址** `parent.route(ctx)`
+（规则三）。入口容器早就塞好了：`composite.rs` 挂载子插件时用
+`SimpleRequest::new(Some(composite_weak), None)`，而 `fork()` 保留整个 extensions 桶
+（含 `PARENT`），所以任意深度的子 ctx 都拿得到。
+
+**不要**把兄弟插件当字段存起来（`llm_plugin: Arc<dyn Plugin>`）。两个代价：
+① 绕过容器的地址分发——直接调 `session.route(ctx)` 拿到的是绝对地址，
+对方的 `match` 只认相对臂，必然 `NotFound`；② 插件重建后钉住旧实例。
+守卫 **E-007** 盯这个形态。
+
+允许的两种持有：`Weak<dyn Plugin>`（向上引用父）与 `HashMap<String, Arc<dyn Plugin>>`
+（容器按名持有子实例）。可运行先例：`agent/host/subagent.rs` 的三处 `parent.route(ctx)`。
+
 ### 常量放在哪
 
 | 位置 | 收什么 |
@@ -116,22 +131,38 @@ HTTP 传输文档里那句「路由是运行时分形分发，各插件内部 `m
 
 修复：删除两个常量，并把「不为将来的路由预置常量」写进 `paths.rs` 的模块文档。
 
-### 3.3 Telegram 的 `session/chat`（已修，链路仍不可达）
+### 3.3 Telegram 的 `session/chat`（已修：地址 + 注入路径）
 
 `telegram/plugin.rs` 用 `SESSION_CHAT = "session/chat"` 路由——**该路径不存在**。
 session 的 `route` 只认 `chat/send` 与 `chat/abort` 两条相对臂，所以那处调用
 **必定**落到 `_ => NotFound`。
 
-修复：改用 `SESSION_CHAT_SEND`。
+**地址修好之后，功能仍然不通**——真正的病灶在调用方式上，分两层：
 
-> **但这不修好功能**：那段代码本身是**不可达**的。`llm_plugin` 只在
-> `handle_start_listener(Some(plugin), …)` 里被赋值，而唯一的调用点
-> `invoke_start_listener` 传的是 **`None`**（`plugin.rs:687`）。于是
-> `if let Some(ref plugin) = *llm` 永远不成立。
->
-> 叠加「`telegram/start_listener` 也没有任何调用方」（§4），
-> **Telegram 的 LLM 回复链路整体处于休眠状态**。这属于产品决策，本轮只修地址、
-> 不动行为——见 §4。
+1. **`llm_plugin` 字段从未被写入。** 它只在 `handle_start_listener(Some(plugin), …)`
+   里赋值，而唯一的调用点 `invoke_start_listener` 传的是 **`None`**。于是
+   `process_update` 里 `if let Some(ref plugin) = *llm` 永远不成立，
+   每条消息都被回成「LLM 插件未配置」。`git log` 显示这个形态**从初始提交
+   （`e00832d`）就是这样**：这条链路自始至终没通过。
+
+2. **病灶是「按值持有兄弟插件」这个设计本身**（而不是漏传了一个参数）。
+   它违反地址规则：跨插件调用必须**经父容器**——`telegram` 与 `session` 在
+   worker 下平级，只有容器的 `route` 认识绝对地址 `session/chat/send`。
+   按值持有还有第二个代价：插件重建后钉住的是**旧实例**。
+
+   容器其实早就把入口塞好了：`composite.rs` 挂载子插件时用
+   `SimpleRequest::new(Some(composite_weak), None)`，`fork()` 又保留 `PARENT`
+   （`plugin.rs:206`），所以 `ctx.parent()` 一直可用。仓库里的**可运行先例**
+   是 `agent/host/subagent.rs`（三处 `parent.route(ctx)` + 绝对地址常量）。
+
+修复：删掉 `llm_plugin` 字段与 `handle_start_listener` 的注入参数，
+`process_update` 改为 `ctx.parent()` → `parent.route(ctx)`。
+守卫 **E-007** 盯住这个形态（§5）。
+
+> 顺带纠正上一轮的一个**错误结论**：当时把 `telegram/*` 六条读成「休眠」，
+> 理由是「零调用方」。**零调用方 ≠ 不可达**——网关会把外部 `path` 原样转发给
+> 容器 `route`（`gateway/server.rs` 的 `dispatch_once` / `handle_ws`，
+> 只过一层只读白名单），对外 API 天然是 `refs=0`。见 §4.2。
 
 ### 3.4 `session/heartbeat.rs` 的死赋值（已删）
 
@@ -149,7 +180,13 @@ self.handle_chat_send_oneoff(Arc::new(ctx)).await   // 直连方法，不过路�
 ## 4. 审计结果：路由表与消费方
 
 `refs` = 代码里对该绝对地址的引用数（字面量 + 解析到它的常量，定义处不计）。
-**`refs=0` 不是判决**——运行期拼路径（工具名、子插件名、`VDFS_OPS`）数不出来。
+**`refs=0` 不是判决**，有两条理由，第二条很容易被漏掉：
+
+1. 运行期拼路径（工具名、子插件名、`VDFS_OPS`）数不出来；
+2. **网关是对外入口**：`gateway/server.rs` 把请求体里的 `path` 原样交给
+   `router.route(ctx)`（`dispatch_once` / `handle_ws`，只过一层只读白名单），
+   所以**对外 API 天然是 `refs=0`**。
+
 它的用途是**指出需要人工判断的位置**。
 
 ### 4.1 `route` 侧
@@ -188,7 +225,9 @@ self.handle_chat_send_oneoff(Arc::new(ctx)).await   // 直连方法，不过路�
 与 `work` **插件**的命名空间重名。`work` 插件的 `route` 恒 `NotFound`，
 所以不冲突——但这条「同名不同主」的事实只存在于代码里，本表是它唯一的文字记录。
 
-### 4.2 六条「零消费方」路由的性质各不相同
+### 4.2 「零消费方」路由的性质各不相同
+
+先记住 §4 的前提：**`refs=0` 只说明仓内没有调用方**，不代表不可达（网关是对外入口）。
 
 | 路由 | 判断 |
 |---|---|
@@ -197,10 +236,10 @@ self.handle_chat_send_oneoff(Arc::new(ctx)).await   // 直连方法，不过路�
 | `gateway/status` | 疑似**未接线**：`gateway` 的入站端点（`/api/v1/*`）有真实用户，但这条 `route` 没有。 |
 | `hook/register` · `hook/list` | 疑似**未接线**：钩子目前只有「触发」在用（`hook/fire`），注册走的是别处。 |
 | `skill/execute` | **重复实现**：`SkillExecuteTool`（`skill_tool.rs`）直接读 `self.skills` 完成同一件事，不经过这条路由。这是「同一能力两份实现」的典型形态。 |
-| `telegram/*`（6 条） | **休眠**：与 §3.3 的 `llm_plugin` 恒 `None` 同源。 |
+| `telegram/*`（6 条） | **对外 API，本轮已修复**：原先因 §3.3 的 `llm_plugin` 恒 `None`，每条消息都被回成「LLM 插件未配置」。地址与注入路径已修（§3.3）。 |
 
-这些**本轮一律未动**：删路由是能力取舍（网关对外 API / 未接线的插件面），
-不属于「地址规则规范化」的范围。脚本把它们报出来，判定留给人。
+除 `telegram/*` 外，其余**本轮一律未动**：删路由是能力取舍（网关对外 API /
+未接线的插件面），不属于「地址规则规范化」的范围。脚本把它们报出来，判定留给人。
 
 ### 4.3 `traverse` 侧
 
@@ -222,9 +261,14 @@ self.handle_chat_send_oneoff(Arc::new(ctx)).await   // 直连方法，不过路�
 | E-004 | `traverse` 内不得出现 `available_tools` / `available_options` 字面量 | ERROR |
 | E-005 | 引用的路径必须对应到某条真实 `route` 臂 | WARNING |
 | E-006 | **权威清单**（`ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | WARNING |
+| E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段） | ERROR |
 
 ERROR 判据是 airtight 的（不依赖任何白名单），因此可以进 `--strict`；
 WARNING 需要「动态命名空间」白名单配合，宁可先报给人看。
+
+E-007 有四条豁免，逐条对应仓里的真实形态：`Weak`（向上引用父）·
+`HashMap`/`Vec`/`BTreeMap`（容器按名持有多个子实例）· 字段名 `parent`/`router`
+（本仓专指向上引用）· 类型以 `&` 开头（借用，字段不可能是这个形态 ⇒ 必是形参）。
 
 ### 为什么 E-006 只判**前缀**，不判整条路径是否存在
 

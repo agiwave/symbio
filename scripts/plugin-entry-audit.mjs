@@ -29,12 +29,17 @@
  * | E-004 | `traverse` 内不得出现 `available_tools` / `available_options` 字面量 | 协议端点只有两个，且必须是常量（`TRAVERSE_AVAILABLE_*`） |
  * | E-005 | 引用的路径必须对应到某条真实 `route` 臂                        | 抓「路径写错一截」：`session/chat` 少了 `/send` |
  * | E-006 | **权威清单**（`ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
+ * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  *
- * E-001 ~ E-004 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
+ * E-001 ~ E-004 与 E-007 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
  * E-005 / E-006 是 **WARNING**（需要「动态命名空间」白名单配合，宁可先报给人看）。
  *
  * 报告段另给一张表：**每条路由 → 消费方计数**。`refs=0` 的行是「定义了但没人用」
- * 的候选——**它不是判决**，因为运行期拼路径（工具名、子插件名）数不出来。
+ * 的候选——**它不是判决**，理由有两条，都很容易把人骗过去：
+ * ① 运行期拼路径（工具名、子插件名）数不出来；
+ * ② **网关会把外部 `path` 原样转发给容器 `route`**（`gateway/server.rs` 的
+ * `dispatch_once` / `handle_ws`，只过一层只读白名单）⇒ 对外 API 天然是 `refs=0`。
+ * 第一版把 `telegram/*` 六条读成「休眠」，就是漏了第 ② 条。
  *
  * ## 地址规则（本脚本的依据）
  *
@@ -365,6 +370,9 @@ const DYNAMIC_DISPATCH = /parse_path\(|\.find\(\|t\| t\.name\(\)|VDFS_OPS/
 // ── 插件事实提取 ─────────────────────────────────────────────────────────
 const PLUGINS_DIR = path.join(repoRoot, 'symbio', 'src', 'plugins')
 
+/** 该绝对路径是否落在 `plugins/` 之下（E-007 的适用范围） */
+const isInPluginsDir = (abs) => abs.startsWith(PLUGINS_DIR + path.sep)
+
 /**
  * 提取 `async fn <name>(…)` 的函数体。
  *
@@ -534,6 +542,43 @@ const EXEMPT_RE = /plugin-entry-allow\s+(E-\d{3})\s*:\s*(\S.*)$/
 const CONST_DEF_RE = /(?:pub\s+)?const\s+[A-Z][A-Z0-9_]*\s*:\s*&\s*(?:'static\s+)?str\s*=/
 
 /**
+ * 字段/形参声明行：`name: Type,`（可带 `pub`）。
+ *
+ * E-007 用它取「字段名 + 类型」。**形参也会命中**——这是刻意的：Rust 里
+ * 「按值持有」与「按参数收下」在语法上长得一样，只能用类型形态与字段名区分，
+ * 见 `isSiblingPluginRef` 的四条豁免。
+ */
+const FIELD_DECL_RE = /^\s*(?:pub\s+)?([a-z_][a-z0-9_]*)\s*:\s*(.+?),?\s*$/
+
+/**
+ * 这两个名字在本仓**专指「向上引用父」**（`gateway` / `hook` / `local` /
+ * `vdfs::host` / `session` 的编排链都用它们指向容器）。
+ * 容器挂载子插件时把自身 `Weak` 塞进子 ctx，`ctx.parent()` 取的就是它——
+ * 父引用是**允许**按值持有的（弱引用拿不到时才能退化为错误，强引用不会）。
+ */
+const UPWARD_FIELD_NAMES = new Set(['parent', 'router'])
+
+/**
+ * 该「`name: Type`」行是否构成**按值持有兄弟插件实例**（E-007 命中）。
+ *
+ * 四条豁免，逐条都有实据（不是猜的）：
+ * 1. 类型含 `Weak` —— 向上引用父，且**不阻止**实例释放；
+ * 2. 类型含 `HashMap` / `BTreeMap` / `Vec` —— 容器按名持有**多个子实例**
+ *    （`composite.instances`、`home.instances`、`agent.host.sub_agents`）；
+ * 3. 字段名是 `parent` / `router` —— 向上引用，见 `UPWARD_FIELD_NAMES`；
+ * 4. 类型以 `&` 开头 —— 借用，**字段不可能长这样**（没有生命周期的结构体字段
+ *    编译不过），所以这类行必然是形参（`agent.host::…(tree: &Arc<dyn Plugin>)`）。
+ */
+function isSiblingPluginRef(name, typeText) {
+  if (!/Arc<\s*dyn\s+Plugin\s*>/.test(typeText)) return false
+  if (/Weak/.test(typeText)) return false
+  if (/(?:HashMap|BTreeMap|Vec)\s*</.test(typeText)) return false
+  if (UPWARD_FIELD_NAMES.has(name)) return false
+  if (typeText.trimStart().startsWith('&')) return false
+  return true
+}
+
+/**
  * 该行是否对某条规则留了豁免（理由不可为空）。
  *
  * **必须在原始行上找**：豁免写在注释里，去注释之后它自己也消失了——
@@ -586,6 +631,25 @@ for (const abs of codeFiles) {
           rel(abs),
           i + 1,
           `协议端点写了字面量 —— 必须用 \`TRAVERSE_AVAILABLE_TOOLS\` / \`TRAVERSE_AVAILABLE_OPTIONS\``,
+        )
+      }
+    }
+
+    // E-007：插件不得按值持有兄弟插件实例
+    //
+    // 只扫 `plugins/` 之下：`session/chat_loop/state.rs` 等虽在 `plugins/` 里，
+    // 但其 `parent` 字段是向上引用（豁免 3），不会误报。
+    if (isRust && isInPluginsDir(abs)) {
+      const m = line.match(FIELD_DECL_RE)
+      if (m && isSiblingPluginRef(m[1], m[2]) && !exempted(raw, i, 'E-007')) {
+        report(
+          'E-007',
+          'error',
+          rel(abs),
+          i + 1,
+          `\`${m[1]}: ${m[2]}\` —— 插件不得按值持有兄弟插件实例；` +
+            `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`` +
+            `（绝对地址由容器分发，见 \`docs/design/plugin-route-address.md\`）`,
         )
       }
     }
@@ -726,6 +790,7 @@ const ruleNames = {
   'E-004': 'traverse 端点用常量',
   'E-005': '路径真实存在',
   'E-006': '权威清单前缀合法',
+  'E-007': '不按值持有兄弟插件',
 }
 for (const [rule, name] of Object.entries(ruleNames)) {
   const n = hitsByRule.get(rule) ?? 0
@@ -742,5 +807,5 @@ if (warnings > 0 && STRICT) {
   console.log(yellow(`  ${warnings} 个 WARNING（--strict 视为失败）`))
   process.exit(2)
 }
-console.log(green(`  六条规则全部通过${warnings ? `（${warnings} 个 WARNING）` : ''}`))
+console.log(green(`  七条规则全部通过${warnings ? `（${warnings} 个 WARNING）` : ''}`))
 process.exit(0)

@@ -78,8 +78,8 @@ pub struct TelegramPlugin {
     listener_running: Arc<AtomicBool>,
     /// 最新消息版本
     latest_version: Arc<RwLock<HashMap<String, u64>>>,
-    /// LLM 插件引用（用于调用 chat）
-    llm_plugin: Arc<RwLock<Option<Arc<dyn Plugin>>>>,
+    // 这里曾有 `llm_plugin: Arc<RwLock<Option<Arc<dyn Plugin>>>>`——**按值持有兄弟插件**。
+    // 已删除：跨插件调用一律经 `ctx.parent()` 走容器（见 `process_update`）。
 }
 
 impl TelegramPlugin {
@@ -108,7 +108,6 @@ impl TelegramPlugin {
             listener_token: Arc::new(RwLock::new(None)),
             listener_running: Arc::new(AtomicBool::new(false)),
             latest_version: Arc::new(RwLock::new(HashMap::new())),
-            llm_plugin: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -277,18 +276,14 @@ impl TelegramPlugin {
     }
 
     /// 启动监听器
-    async fn handle_start_listener(
-        &self,
-        llm_plugin: Option<Arc<dyn Plugin>>,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<Value> {
-        // 设置 LLM 插件引用
-        if let Some(ref plugin) = llm_plugin {
-            if let Ok(mut p) = self.llm_plugin.try_write() {
-                *p = Some(plugin.clone());
-            }
-        }
-
+    ///
+    /// **不接受「注入 LLM 插件」参数**：跨插件调用一律经 `ctx.parent()` 走容器，
+    /// 见 `docs/design/plugin-route-address.md`。
+    ///
+    /// 原先的 `llm_plugin: Option<Arc<dyn Plugin>>` 参数是个从未生效的设计：
+    /// 它只在传 `Some(..)` 时写入字段，而唯一调用点传的是 `None`，于是
+    /// `process_update` 恒走「LLM 插件未配置」分支——**整条回复链路自始至终没通**。
+    async fn handle_start_listener(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
         // 检查是否已运行
         if self.listener_running.load(Ordering::SeqCst) {
             return Ok(json!({
@@ -311,7 +306,6 @@ impl TelegramPlugin {
         let client = self.client.clone();
         let update_offset = Arc::clone(&self.update_offset);
         let latest_version = Arc::clone(&self.latest_version);
-        let llm_plugin_arc = Arc::clone(&self.llm_plugin);
         let base_ctx = ctx.fork();
 
         tokio::spawn(async move {
@@ -355,7 +349,6 @@ impl TelegramPlugin {
                                                 &config,
                                                 &update_offset,
                                                 &latest_version,
-                                                &llm_plugin_arc,
                                                 base_ctx.clone(),
                                             ).await {
                                                 tracing::error!("[telegram] 处理消息错误: {}", e);
@@ -424,7 +417,6 @@ impl TelegramPlugin {
         config: &Arc<RwLock<TelegramConfig>>,
         update_offset: &Arc<AtomicI64>,
         latest_version: &Arc<RwLock<HashMap<String, u64>>>,
-        llm_plugin: &Arc<RwLock<Option<Arc<dyn Plugin>>>>,
         ctx: Arc<dyn InvokeRequest>,
     ) -> Result<(), String> {
         // 解析消息
@@ -474,9 +466,13 @@ impl TelegramPlugin {
         let typing_guard = TypingGuard::new(client.clone(), api_url.to_string(), chat_id.clone());
 
         // 获取 LLM 响应
-        let response = {
-            let llm = llm_plugin.try_read().map_err(|e| e.to_string())?;
-            if let Some(ref plugin) = *llm {
+        //
+        // 跨插件调用必须**经父容器**：`telegram` 与 `session` 在 worker 下平级，
+        // 只有容器的 `route` 认识绝对地址 `session/chat/send`（容器挂载子插件时把
+        // 自身 Weak 塞进子 ctx，`fork()` 会原样保留它）。直接调兄弟实例的 `route`
+        // 既绕过容器，又会在插件重建后钉住旧实例——这正是此前的写法。
+        let response = match ctx.parent().and_then(|w| w.upgrade()) {
+            Some(router) => {
                 let chat_input = serde_json::to_value(session_chat::Request {
                     session_id: Some(chat_id.clone()),
                     agent_id: None,
@@ -510,7 +506,7 @@ impl TelegramPlugin {
                 sub_ctx.set(crate::symbio_core::WORKDIR, ".".to_string());
                 sub_ctx.set(crate::symbio_core::SESSION_ID, chat_id.clone());
 
-                match plugin.clone().route(sub_ctx).await {
+                match router.route(sub_ctx).await {
                     Ok(payload) => {
                         let mut full_text = String::new();
                         match payload {
@@ -568,9 +564,8 @@ impl TelegramPlugin {
                     }
                     Err(e) => format!("LLM 调用失败: {e}"),
                 }
-            } else {
-                "LLM 插件未配置".to_string()
             }
+            None => "未挂载到插件容器，无法调用 LLM".to_string(),
         };
 
         // 检查消息是否被中断
@@ -687,7 +682,7 @@ impl TelegramPlugin {
     }
 
     async fn invoke_start_listener(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
-        self.handle_start_listener(None, ctx).await
+        self.handle_start_listener(ctx).await
     }
 
     async fn invoke_stop_listener(&self) -> InvokeResponse<Value> {

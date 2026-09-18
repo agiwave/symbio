@@ -21,6 +21,16 @@ Telegram Bot 集成插件：长轮询收发与"继续会话"交互。
 
 > 清单以 `docs/reference/ROUTES.md` §Telegram 插件为准（**权威**）。
 
+## 怎么被调用
+
+本插件是**对外通道**：`start_listener` 等路由仓内没有调用方，但网关会把外部请求
+里的 `path` 原样转发给容器 `route`（`gateway/server.rs`），所以它们是**对外开放
+接口**，不是死代码。（审计报告里的 `refs=0` 只统计仓内调用方。）
+
+监听器收到消息后要调 LLM，走的是 **`ctx.parent()` → `parent.route(ctx)`**，
+地址 `session/chat/send`（绝对地址由容器分发）。**不要**按值持有 session 实例——
+`docs/design/plugin-route-address.md` 规则五，守卫 E-007 会拦。
+
 ## 配置
 
 `bot_token` / `chat_id` / `streaming_enabled` / `poll_enabled` / `allowed_users`
