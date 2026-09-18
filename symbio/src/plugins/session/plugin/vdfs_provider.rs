@@ -255,16 +255,24 @@ impl vdfs::VdfsProvider for SessionPlugin {
         }
     }
 
-    /// 写入：`create` → 新建会话；否则 → 合并会话 metadata（`session/update` 语义）。
+    /// 写入：`create` → 新建会话；`<id>/消息/<mid>` → 改写该条消息；否则 → 合并会话
+    /// metadata（`session/update` 语义）。
     ///
     /// 覆盖分支的浅合并与 `session/update` 路由**共用**
     /// [`Session::merge_metadata_object`]（不是"语义相同"，是同一份代码）。
     /// 新建分支另有一层优先级（路径名 → 显式 `title`），见下方注释。
     ///
-    /// **转写列表（`<id>/消息`）只读**——发言不是一次文件写入，而是一次**动作**
-    /// （触发一整轮编排：模型调用 → 工具执行 → 流式落库），因此入口仍是聊天协议。
-    /// 这不是「两套写路径」：VDFS 侧根本没有消息的写路径，只有读路径——
-    /// 前端与 LLM 在**同一个地址**上读同一份数据，写入的唯一入口依旧只有一处。
+    /// ## 消息节点可写，但**转写列表不可写**（这条区分是刻意的）
+    ///
+    /// - `write(<id>/消息/<mid>)` —— 改**既有**消息的字段。它不是一次发言：不触发
+    ///   任何编排，只是对既有节点的一次存储改写，与会话 metadata 的写入同类
+    ///   （两者都只是"把内容存到那个地址"）。地址语义在这里完全成立：消息节点的
+    ///   内容就是这条消息。
+    /// - `write(<id>/消息)` —— **拒绝**。往列表里放一条新消息 = 发言 = 一次**动作**
+    ///   （触发一整轮编排：模型调用 → 工具执行 → 流式落库），不是一次写入。
+    ///   入口仍然只有聊天协议一处。
+    /// - `create` 意图在消息路径上**一律拒绝**：新建消息就是发言，静默接受会把
+    ///   「追加消息不经 VDFS」这条不变量悄悄破掉。
     async fn write(
         &self,
         _ctx: &vdfs::VdfsContext,
@@ -333,7 +341,56 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     ));
                 }
             }
-            VdfsSessionPath::Messages { .. } => {
+            // 单条消息：改写既有消息的字段（**不是发言**——不触发编排）
+            VdfsSessionPath::Messages { id, mid: Some(mid) } => {
+                if content.create {
+                    return Err(vdfs::VdfsError::invalid(
+                        "消息不支持 create 意图：新增消息即发言，请走聊天协议\
+                         （一次发言触发一整轮编排）",
+                    ));
+                }
+                if content.binary {
+                    return Err(vdfs::VdfsError::invalid(
+                        "消息是文本（JSON 字段补丁），不接受二进制内容",
+                    ));
+                }
+                // 补丁缺 `id` 时由**地址**补上：地址是消息身份的唯一权威，
+                // 因此「不给 id」（`{"content":"..."}`）是合法用法，而「给了别的
+                // id」是错误（由 `patch_message` 报出）。
+                //
+                // 必须在这里补而不是靠 `ChatMessage` 的 serde 默认值：`id` 在
+                // 该结构里是必填字段（它也是存储层的主键），反序列化会**先一步**
+                // 拒绝掉不带 id 的补丁——那样「补丁是字段子集、未提供的保持不变」
+                // 这条承诺在 `id` 上就是假的，调用方被迫把地址里已有的信息
+                // 再抄一遍。
+                let raw = content.text.as_deref().unwrap_or("").trim();
+                let mut value: Value = serde_json::from_str(raw).map_err(|e| {
+                    vdfs::VdfsError::invalid(format!(
+                        "消息补丁需要合法 JSON（ChatMessage 字段子集）：{e}"
+                    ))
+                })?;
+                let obj = value.as_object_mut().ok_or_else(|| {
+                    vdfs::VdfsError::invalid("消息补丁需要 JSON 对象（ChatMessage 字段子集）")
+                })?;
+                if !obj.contains_key("id") {
+                    obj.insert("id".to_string(), Value::String(mid.to_string()));
+                }
+                let patch: cm::ChatMessage = serde_json::from_value(value).map_err(|e| {
+                    vdfs::VdfsError::invalid(format!(
+                        "消息补丁需要合法 JSON（ChatMessage 字段子集）：{e}"
+                    ))
+                })?;
+                self.patch_message(id, mid, &patch)
+                    .await
+                    .map_err(vdfs::from_plugin_error)?;
+                return Ok(vdfs::VdfsWriteResponse {
+                    path: path.to_string(),
+                    created: false,
+                    etag: None,
+                });
+            }
+            // 转写列表本身：**仍只读**。往里放一条 = 发言 = 动作，不是写入。
+            VdfsSessionPath::Messages { mid: None, .. } => {
                 return Err(vdfs::VdfsError::Forbidden(
                     "转写列表只读：发言请走聊天协议（一次发言触发一整轮编排）".to_string(),
                 ));
@@ -468,9 +525,86 @@ impl vdfs::VdfsProvider for SessionPlugin {
                  如需清空，请向 `{}` 写入空内容。",
                 crate::symbio_core::AGENTS_FILE
             ))),
+            // 转写区段（列表与单条）**不可 delete**：它的两种删除语义各有自己的动作，
+            // 而 `delete` 的全局语义是「**这一个**节点没了」（→ `deleted` 变更）。
+            // 「从这里到末尾全没了」是 `truncated`（落在起始消息上）、「整个列表空了」
+            // 是 `deleted`（落在列表目录上）——动作不共用一个动词，
+            // 见 `VDFS_ACTION_TRUNCATE` 的文档。
+            VdfsSessionPath::Messages { .. } => Err(vdfs::VdfsError::Forbidden(format!(
+                "转写区段不可 delete：清空列表请用 action(\"{clear}\")，\
+                 删除某条及其之后请用 action(\"{truncate}\")：{path}",
+                clear = vdfs::VDFS_ACTION_CLEAR,
+                truncate = vdfs::VDFS_ACTION_TRUNCATE,
+            ))),
             _ => Err(vdfs::VdfsError::Forbidden(format!(
                 "该路径不可删除：{path}"
             ))),
+        }
+    }
+
+    /// 节点动作：转写区段的两种**集合操作**。
+    ///
+    /// | 路径 | 动作 | 语义 | 变更 | `data` |
+    /// |---|---|---|---|---|
+    /// | `<id>/消息/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 该节点上 `truncated` | 被删 id 列表 |
+    /// | `<id>/消息` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 列表目录上 `deleted` | 无 |
+    ///
+    /// 清空为什么复用 `deleted` 而不是自造一个值：见 [`VDFS_ACTION_TRUNCATE`]
+    /// 的文档——`deleted` 落在**列表目录**这个地址上时没有第二种读法，地址已把
+    /// 语义定死；只有「从这里删到末尾」这种 `deleted` 表达不了的集合操作才需要
+    /// 自己的变更值。
+    ///
+    /// 为什么是动作而不是 `delete`：见 [`VDFS_ACTION_TRUNCATE`] 的文档
+    /// （三种删除语义各有一个变更值，不共用一个动词）。
+    ///
+    /// 其它路径 / 未实现的动作一律 [`VdfsError::NotImplemented`]——消费方据此
+    /// 不给出入口，而不是收到一个"成功但什么都没做"。
+    async fn action(
+        &self,
+        _ctx: &vdfs::VdfsContext,
+        path: &str,
+        action: &str,
+        _payload: Option<&Value>,
+    ) -> vdfs::VdfsResult<vdfs::VdfsActionResult> {
+        match parse_session_path(path)? {
+            VdfsSessionPath::Messages { id, mid: Some(mid) }
+                if action == vdfs::VDFS_ACTION_TRUNCATE =>
+            {
+                let deleted_ids = self
+                    .truncate_messages(id, mid)
+                    .await
+                    .map_err(vdfs::from_plugin_error)?;
+                // 回执带**权威**的被删 id 列表：消费方本地若因锚点缺失而删窄了，
+                // 据它补齐（`vdfs/delete` 只回 `{path}`，带不回这个）。
+                let data = serde_json::to_value(&deleted_ids)
+                    .map_err(|e| vdfs::VdfsError::internal(format!("截断回执序列化失败：{e}")))?;
+                let message = if deleted_ids.is_empty() {
+                    // 目标不存在 ⇒ 什么都没删。这是**结果**不是错误，但也不发变更
+                    // ——「什么都没删」不该在 VDFS 上留下痕迹（发了 `truncated`
+                    // 会让消费者从一条并不存在的节点起截断，把整个列表清空）。
+                    format!("目标消息不存在，未做任何修改：{mid}")
+                } else {
+                    format!("已从 {mid} 起截断 {} 条消息", deleted_ids.len())
+                };
+                Ok(vdfs::VdfsActionResult {
+                    action: action.to_string(),
+                    ok: true,
+                    message,
+                    data: Some(data),
+                })
+            }
+            VdfsSessionPath::Messages { id, mid: None } if action == vdfs::VDFS_ACTION_CLEAR => {
+                self.clear_messages(id)
+                    .await
+                    .map_err(vdfs::from_plugin_error)?;
+                Ok(vdfs::VdfsActionResult {
+                    action: action.to_string(),
+                    ok: true,
+                    message: "已清空会话历史（会话本身与元数据保留）".to_string(),
+                    data: None,
+                })
+            }
+            _ => Err(vdfs::VdfsError::NotImplemented),
         }
     }
 
@@ -587,6 +721,154 @@ impl SessionPlugin {
             Some(st) => st.live_messages.lock().await.clone(),
             None => Vec::new(),
         }
+    }
+
+    // ==================== 消息的三个变更操作（VDFS 入口的实现） ====================
+    //
+    // 这三个方法是 `write(<id>/消息/<mid>)` / `action(truncate)` /
+    // `action(clear)` 的**唯一实现**。它们曾经各有一个专用路由
+    // （`chat/update_message` / `chat/delete_message` / `chat/clear_messages`），
+    // 逻辑就在那三个 invoke 里——迁到 VDFS 时整体搬过来，不是重写一遍：
+    // 「同一个操作两份实现」正是本轮要消灭的东西。
+    //
+    // 三者的**变更发射都在这里**（不留给调用方）：漏发任何一条，VDFS 视图都会
+    // 残留一个已不存在的节点且永不纠正。
+
+    /// 改写单条消息（`write(<id>/消息/<mid>)` 的实现）。
+    ///
+    /// 按**地址**定位（`mid` 即消息 id），只覆盖补丁里**提供**的字段
+    /// （content / status / error / meta 等），未提供的保持不变。
+    ///
+    /// 补丁里的 `id` 若与地址不符即报错，不静默按地址写——调用方把消息发错了
+    /// 节点是**它自己不知道的 bug**，静默写下去会把它埋掉。
+    ///
+    /// 补丁**不带** `id` 是合法用法：调用方 `write` 时已按地址补齐（见那里的注释），
+    /// 因此到这里 `patch.id` 必然等于 `mid`，除非调用方**明确**写了一个别的 id。
+    pub(crate) async fn patch_message(
+        &self,
+        session_id: &str,
+        mid: &str,
+        patch: &cm::ChatMessage,
+    ) -> Result<cm::ChatMessage, PluginError> {
+        if patch.id != mid {
+            return Err(PluginError::ValidationError(format!(
+                "消息补丁的 id（{}）与地址不符（{mid}）：地址是消息身份的唯一权威",
+                patch.id
+            )));
+        }
+        let chat_session = self.open_chat_session(session_id).await?;
+        let mut messages = chat_session.get_messages().await?;
+
+        let Some(existing) = messages.iter_mut().find(|m| m.id == mid) else {
+            return Err(PluginError::NotFound(format!("消息不存在: {mid}")));
+        };
+
+        if let Some(role) = &patch.role {
+            existing.role = Some(role.clone());
+        }
+        if let Some(t) = &patch.msg_type {
+            existing.msg_type = Some(t.clone());
+        }
+        if let Some(n) = &patch.name {
+            existing.name = Some(n.clone());
+        }
+        if let Some(p) = &patch.parent_id {
+            existing.parent_id = Some(p.clone());
+        }
+        if let Some(c) = &patch.content {
+            existing.content = Some(c.clone());
+        }
+        if let Some(s) = &patch.status {
+            existing.status = Some(s.clone());
+        }
+        if let Some(e) = &patch.error {
+            existing.error = Some(e.clone());
+        } else if patch
+            .status
+            .as_ref()
+            .map(|s| *s != cm::MessageStatus::Failed)
+            .unwrap_or(false)
+        {
+            // 状态不再是 Failed 时，顺带清掉旧的 error，避免残留误导。
+            existing.error = None;
+        }
+        if let Some(ts) = patch.timestamp {
+            existing.timestamp = Some(ts);
+        }
+        if let Some(rid) = &patch.response_id {
+            existing.response_id = Some(rid.clone());
+        }
+        if let Some(new_meta) = &patch.meta {
+            match &mut existing.meta {
+                Some(existing_meta) => {
+                    if let (Some(a), Some(b)) =
+                        (existing_meta.as_object_mut(), new_meta.as_object())
+                    {
+                        for (k, v) in b {
+                            a.insert(k.clone(), v.clone());
+                        }
+                    } else {
+                        existing.meta = Some(new_meta.clone());
+                    }
+                }
+                None => {
+                    existing.meta = Some(new_meta.clone());
+                }
+            }
+        }
+
+        let updated = existing.clone();
+        chat_session.replace_messages(messages).await?;
+        // 变更：把合并后的**完整消息**作为载荷发出（消费者零回读）
+        self.emit_message_updated(session_id, &updated);
+        Ok(updated)
+    }
+
+    /// 从某条消息起截断（`action(<id>/消息/<mid>, "truncate")` 的实现）。
+    ///
+    /// 消息列表已按时间 / 顺序排好序，因此只需按列表顺序定位目标，然后把
+    /// 「它及其之后的所有消息」整段 `drain` 掉——无需任何 `parent_id` 级联逻辑。
+    /// 这样既保证会话消息的连续性（不会出现孤立的后半截助手回复），又足够简单直接。
+    ///
+    /// 目标**不存在**时返回空列表且**不发任何变更**：「什么都没删」不该在 VDFS 上
+    /// 留下痕迹（发了 `truncated` 会让消费者从一条并不存在的节点起截断，把整个列表清空）。
+    pub(crate) async fn truncate_messages(
+        &self,
+        session_id: &str,
+        mid: &str,
+    ) -> Result<Vec<String>, PluginError> {
+        let chat_session = self.open_chat_session(session_id).await?;
+        let mut messages = chat_session.get_messages().await?;
+
+        let deleted_ids: Vec<String> = match messages.iter().position(|m| m.id == mid) {
+            Some(i) => {
+                let removed: Vec<String> = messages[i..].iter().map(|m| m.id.clone()).collect();
+                messages.drain(i..);
+                removed
+            }
+            None => Vec::new(),
+        };
+
+        chat_session.replace_messages(messages).await?;
+        // 变更：**一条** `truncated`（落在目标消息地址上），不是 N 条 `deleted`。
+        // 语义是"从这里到列表末尾全没了"，消费者按自己的顺序取区间即可——它不需要
+        // 收到被删的每一条，前端也因此不必等一场"大面积通知"。
+        if !deleted_ids.is_empty() {
+            self.emit_transcript_truncated(session_id, mid);
+        }
+        Ok(deleted_ids)
+    }
+
+    /// 清空会话消息（`action(<id>/消息, "clear")` 的实现）。
+    ///
+    /// 与 `delete(<id>)`（删除整个会话）不同：这里只把 `session.messages` 整体替换为
+    /// 空，会话本体 / 元数据 / 工作目录 / 标题继续存在。UI 的「清空历史」走此路径。
+    pub(crate) async fn clear_messages(&self, session_id: &str) -> Result<(), PluginError> {
+        let chat_session = self.open_chat_session(session_id).await?;
+        chat_session.replace_messages(Vec::new()).await?;
+        // 变更：列表整体失效（前端已在本地收敛，故只发变更、不发前端帧）
+        self.emit_transcript_cleared(session_id);
+        Ok(())
     }
 
     /// 按 id 取会话（**存在性校验**：`load_session` 对未命中会返回空会话，

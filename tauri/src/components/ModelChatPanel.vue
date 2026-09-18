@@ -73,7 +73,7 @@
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, provide } from 'vue'
 import { useChatConnection, type ResumePayload } from '@/composables/useChatConnection'
 import { useChatScroll } from '@/composables/useChatScroll'
-import { type ChatMessage, type MessageContent, type ContentPart, type ChatRole } from '@/services/model'
+import { type ChatMessage, type MessageContent, type ContentPart, type ChatRole } from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'

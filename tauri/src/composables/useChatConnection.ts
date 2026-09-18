@@ -1,6 +1,6 @@
 import { shallowRef, computed, type ComputedRef } from 'vue'
 import { callPlugin } from '@/services/plugin'
-import type { ChatMessage } from '@/services/model'
+import type { ChatMessage } from '@/schemas/chat_message'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING } from '@/schemas/vdfs'

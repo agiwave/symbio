@@ -117,10 +117,41 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 ///
 /// - [`VDFS_ACTION_TEST`]「测试连接」——模型 / MCP 这类外部资源的连通性自检；
 /// - [`VDFS_ACTION_EXPORT`]「导出」——把整目录资源打包成一个 zip（结果随
-///   [`VdfsActionResult::data`] 返回，与导入的二进制写入互为逆向）。
+///   [`VdfsActionResult::data`] 返回，与导入的二进制写入互为逆向）；
+/// - [`VDFS_ACTION_TRUNCATE`] / [`VDFS_ACTION_CLEAR`]——列表类资源的**区间删除**：
+///   前者删「该条及其之后」，后者清空整个列表。
+///
+/// ## 为什么「截断 / 清空」是动作而不是 `delete`
+///
+/// [`VdfsProvider::delete`] 的全局语义是「**这一个**节点没了」，对应
+/// [`VDFS_CHANGE_DELETED`]。
+///
+/// - 「从这里到末尾全没了」需要**自己的**变更值 [`VDFS_CHANGE_TRUNCATED`]：
+///   若按 `deleted` 逐条下发，消费者既分不清「删这一个」与「从这里删到末尾」，
+///   代价也随被删条数线性增长（见该常量的文档）。
+/// - 「整个列表空了」**不需要**新值：它落在**列表目录**这个地址上，`deleted`
+///   在此处只有一种读法（目录没了 ⇒ 里面的条目都没了），地址本身已把语义定死。
+///
+/// 所以判据不是「每种删除各配一个值」，而是**「`deleted` 在该地址上仍有歧义的，
+/// 才配自己的值」**——`truncated` 是这种情况，清空不是。会话 provider 的清空
+/// 因此发的是落在 `<id>/消息` 上的 `deleted`（见 `SessionPlugin::
+/// emit_transcript_cleared`）。
+///
+/// 那为什么后两者仍不做成 `delete`？因为 `delete` 的语义是**逐节点**的：拿它
+/// 表达「删一个节点却删掉了它后面所有」会成为一条**没人能预期的默认行为**；
+/// 而拿 `cascade: bool` 之类的附加位区分，则让「是哪种删除」变成两个字段必须
+/// 一起读。动作是 provider 自持的动词，正好承载这类**集合操作**：VDFS 只透传，
+/// 不解释。
 pub const VDFS_ACTION_TEST: &str = "test";
 /// 节点动作标识：**导出**（打包下载；与「新建类型 `zip`」的导入互为逆向）
 pub const VDFS_ACTION_EXPORT: &str = "export";
+/// 节点动作标识：**截断**（列表资源：删除该条目**及其之后**的全部条目）。
+///
+/// 结果里带被删条目的 id 列表（随 [`VdfsActionResult::data`]）——消费方用它做
+/// 幂等对齐：本地若因锚点缺失而删窄了，据权威列表补齐。
+pub const VDFS_ACTION_TRUNCATE: &str = "truncate";
+/// 节点动作标识：**清空**（列表资源：保留容器本身，清掉全部条目）
+pub const VDFS_ACTION_CLEAR: &str = "clear";
 
 // ==================== 可接受的新建类型 ====================
 

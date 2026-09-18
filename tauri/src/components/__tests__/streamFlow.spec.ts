@@ -11,7 +11,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import MessageNode from '../MessageNode.vue'
 import { useSessionsStore } from '@/stores/sessions'
-import type { ChatMessage } from '@/services/model'
+import type { ChatMessage } from '@/schemas/chat_message'
 
 /** 与后端 emit_streaming_start / dispatch_protocol_event / finalize 完全一致的帧构造器 */
 function turnStart(id: string): Partial<ChatMessage> {

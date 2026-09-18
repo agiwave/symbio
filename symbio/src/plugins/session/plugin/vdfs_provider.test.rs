@@ -370,3 +370,425 @@ async fn new_session_ids_are_distinct() {
     }
     assert_eq!(ids.len(), 32);
 }
+
+// ==================== 转写区段（`.vdfs/session/<id>/消息`）的三个入口 ====================
+//
+// 消息的**改写 / 截断 / 清空**曾经各有专用路由（`chat/update_message` /
+// `chat/delete_message` / `chat/clear_messages`），2026-09-18 迁到 VDFS：
+//
+// | 操作 | 入口 | 变更 |
+// |---|---|---|
+// | 改写某条 | `write(<id>/消息/<mid>)` | 该消息上 `updated` |
+// | 删该条及其后 | `action(<id>/消息/<mid>, "truncate")` | 起始消息上 `truncated` |
+// | 清空历史 | `action(<id>/消息, "clear")` | **列表目录**上 `deleted` |
+//
+// 本段锁定这三条路径的**对外行为**，并盯住三条不该被打破的边界：
+// `create` 意图（新增消息 = 发言，入口只有聊天协议）、`delete`（逐节点语义，
+// 表达不了这两种集合操作）、以及「什么都没删 ⇒ 不发变更」。
+
+/// 造一个带 N 条消息的会话：id 为 `m0..mN`、`seq` 单调（顺序的唯一权威锚点）。
+async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
+    let mut s = Session::new(id);
+    s.messages = texts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| cm::ChatMessage {
+            id: format!("m{i}"),
+            role: Some(cm::MessageRole::User),
+            msg_type: Some(cm::MessageType::Text),
+            content: Some(cm::MessageContent::Text((*t).to_string())),
+            seq: Some(i as i64),
+            ..Default::default()
+        })
+        .collect();
+    p.save_session(&s).await.unwrap();
+}
+
+/// 转写列表里现有哪几条（经 VDFS 的 `消息` 列表，即使用方看到的那一份）。
+async fn transcript_ids(p: &SessionPlugin, id: &str) -> Vec<String> {
+    p.list(&vctx(), &message_dir_path(id))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|n| n.name)
+        .collect()
+}
+
+/// 订阅某会话的变更，返回接收端（订阅是同步登记的，因此返回时已生效）。
+async fn subscribe(
+    p: &SessionPlugin,
+    id: &str,
+) -> tokio::sync::mpsc::UnboundedReceiver<vdfs::VdfsChange> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
+    let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
+        let _ = tx.send(c);
+    });
+    p.watch(&vctx(), id, sink).await.unwrap();
+    rx
+}
+
+/// 改写单条消息：只覆盖补丁里**提供**的字段，未提供的原样保留。
+///
+/// 补丁语义与旧 `chat/update_message` 逐字一致——那次迁移是**搬移**不是重写，
+/// 这条测试就是搬移的回归锚。
+#[tokio::test]
+async fn message_write_patches_only_the_provided_fields() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-patch");
+    seed_messages(&p, &id, &["第一条", "第二条"]).await;
+
+    let r = p
+        .write(
+            &vctx(),
+            &message_path(&id, "m0"),
+            &vdfs::VdfsContent::text("", r#"{"content":"改过的第一条"}"#),
+        )
+        .await
+        .unwrap();
+    assert!(!r.created, "改写既有消息不是新建");
+
+    assert_eq!(
+        p.read(&vctx(), &message_path(&id, "m0"))
+            .await
+            .unwrap()
+            .text
+            .as_deref(),
+        Some("改过的第一条"),
+        "改写后的正文应读得回"
+    );
+
+    let msgs = p.transcript_of(&id).await.unwrap();
+    let m0 = msgs.iter().find(|m| m.id == "m0").unwrap();
+    let m1 = msgs.iter().find(|m| m.id == "m1").unwrap();
+    assert_eq!(
+        m0.role,
+        Some(cm::MessageRole::User),
+        "未提供的 role 必须原样保留"
+    );
+    // 改写走 `replace_messages`，而它会按**数组顺序**重新分配 seq
+    // （注释：「数组顺序即权威顺序」）。所以这里锁的是**相对顺序**而非绝对值——
+    // 哪天改成"就地更新、不重排"，这条断言依然成立。
+    assert!(
+        m0.seq < m1.seq,
+        "改写后 m0 仍应排在 m1 之前（实得 {:?} / {:?}）",
+        m0.seq,
+        m1.seq
+    );
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["m0", "m1"],
+        "改写不增删条目"
+    );
+}
+
+/// 改写**不存在**的消息：报错，不静默新建一条。
+#[tokio::test]
+async fn message_write_unknown_message_is_not_found() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-patch-ghost");
+    seed_messages(&p, &id, &["唯一一条"]).await;
+
+    assert!(
+        p.write(
+            &vctx(),
+            &message_path(&id, "nope"),
+            &vdfs::VdfsContent::text("", r#"{"content":"x"}"#),
+        )
+        .await
+        .is_err(),
+        "改写不存在的消息必须报错"
+    );
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["m0"],
+        "失败的改写不得改动列表"
+    );
+}
+
+/// 补丁里的 `id` 与地址不符 → 报错。
+///
+/// 地址是消息身份的**唯一权威**。静默按地址写下去，会把调用方「发错了节点」
+/// 这个它自己并不知道的 bug 埋掉。
+#[tokio::test]
+async fn message_write_rejects_id_that_contradicts_the_address() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-patch-idclash");
+    seed_messages(&p, &id, &["第一条", "第二条"]).await;
+
+    // 两种写法都不得通过：给了**别的** id、给了**空** id
+    // （「不给 id」是合法的——见下一例；给了却是错的那种才该报错）
+    for patch in [r#"{"id":"m1","content":"想改 m1"}"#, r#"{"id":""}"#] {
+        assert!(
+            p.write(
+                &vctx(),
+                &message_path(&id, "m0"),
+                &vdfs::VdfsContent::text("", patch),
+            )
+            .await
+            .is_err(),
+            "{patch} 的 id 与地址不符，必须报错"
+        );
+    }
+    assert_eq!(
+        p.read(&vctx(), &message_path(&id, "m1"))
+            .await
+            .unwrap()
+            .text
+            .as_deref(),
+        Some("第二条"),
+        "冲突的补丁不得落到任何一条上"
+    );
+}
+
+/// 补丁**不带** `id` 是合法用法：地址就是消息身份，调用方不必把地址里已有的
+/// 信息再抄一遍。
+///
+/// 这条曾经是坏的——`ChatMessage::id` 在结构里是必填字段（它同时是存储层的主键），
+/// 于是 `{"content":"…"}` 会在**反序列化阶段**被拒，而「补丁是字段子集、未提供的
+/// 保持不变」这条承诺在 `id` 上就是假的。修法是让地址把 id 补齐（地址本就是身份
+/// 的唯一权威），而不是要求调用方重复它。
+#[tokio::test]
+async fn message_write_accepts_a_patch_without_id() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-patch-noid");
+    seed_messages(&p, &id, &["第一条"]).await;
+
+    p.write(
+        &vctx(),
+        &message_path(&id, "m0"),
+        &vdfs::VdfsContent::text("", r#"{"status":"completed"}"#),
+    )
+    .await
+    .expect("不带 id 的补丁应按地址补齐，而不是报 JSON 缺字段");
+
+    let msgs = p.transcript_of(&id).await.unwrap();
+    assert_eq!(msgs[0].status, Some(cm::MessageStatus::Completed));
+    assert_eq!(msgs[0].id, "m0", "id 由地址给出");
+    assert_eq!(
+        msgs[0].content.as_ref().map(|c| c.to_text()).as_deref(),
+        Some("第一条"),
+        "未提供的 content 原样保留"
+    );
+}
+
+/// `create` 意图在消息路径上**一律拒绝**：新增消息就是发言（一整轮编排），
+/// 静默接受会把「追加消息不经 VDFS」这条不变量悄悄破掉。
+#[tokio::test]
+async fn message_write_rejects_create_intent() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-create");
+    seed_messages(&p, &id, &["第一条"]).await;
+
+    let content = vdfs::VdfsContent {
+        create: true,
+        ..vdfs::VdfsContent::text("", r#"{"content":"新消息"}"#)
+    };
+    assert!(
+        p.write(&vctx(), &message_path(&id, "m9"), &content)
+            .await
+            .is_err(),
+        "新建消息即发言，必须走聊天协议"
+    );
+    assert_eq!(transcript_ids(&p, &id).await, vec!["m0"]);
+}
+
+/// 转写**列表**本身不可写：往里放一条 = 发言。
+#[tokio::test]
+async fn transcript_list_is_not_writable() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-list-ro");
+    seed_messages(&p, &id, &["第一条"]).await;
+
+    assert!(
+        matches!(
+            p.write(
+                &vctx(),
+                &message_dir_path(&id),
+                &vdfs::VdfsContent::text("", r#"{"content":"新消息"}"#)
+            )
+            .await,
+            Err(vdfs::VdfsError::Forbidden(_))
+        ),
+        "往列表里放一条是发言，不是写入"
+    );
+}
+
+/// 转写区段不可 `delete`（列表与单条都是）：`delete` 是逐节点语义，
+/// 表达不了这两种集合操作。
+#[tokio::test]
+async fn transcript_segment_is_not_deletable() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-no-delete");
+    seed_messages(&p, &id, &["第一条", "第二条"]).await;
+
+    for path in [message_dir_path(&id), message_path(&id, "m0")] {
+        let err = p.delete(&vctx(), &path, false).await.unwrap_err();
+        assert!(matches!(err, vdfs::VdfsError::Forbidden(_)), "{path}");
+    }
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["m0", "m1"],
+        "被拒的删除不得改动列表"
+    );
+}
+
+/// 截断：从目标起**及其之后**全部没了；回执给出权威的被删 id 列表。
+///
+/// 回执是这条路径选择 `action` 而非 `delete` 的关键收益——`vdfs/delete` 只回
+/// `{path}`，带不回这个列表，而前端 store 靠它做幂等对齐。
+#[tokio::test]
+async fn truncate_removes_the_target_and_everything_after() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-truncate");
+    seed_messages(&p, &id, &["一", "二", "三", "四"]).await;
+
+    let r = p
+        .action(
+            &vctx(),
+            &message_path(&id, "m1"),
+            vdfs::VDFS_ACTION_TRUNCATE,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(r.ok);
+    assert_eq!(
+        r.data,
+        Some(json!(["m1", "m2", "m3"])),
+        "回执是权威的被删列表"
+    );
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["m0"],
+        "只剩目标之前的那条"
+    );
+}
+
+/// 截断的变更：**一条** `truncated` 落在起始消息地址上，不是 N 条 `deleted`。
+#[tokio::test]
+async fn truncate_notifies_once_on_the_starting_message() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-truncate-notify");
+    seed_messages(&p, &id, &["一", "二", "三"]).await;
+    let mut rx = subscribe(&p, &id).await;
+
+    p.action(
+        &vctx(),
+        &message_path(&id, "m1"),
+        vdfs::VDFS_ACTION_TRUNCATE,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let got = rx.recv().await.expect("截断应投递一条变更");
+    assert_eq!(got.path, message_path(&id, "m1"), "落在起始消息上");
+    assert_eq!(got.change, vdfs::VDFS_CHANGE_TRUNCATED);
+    assert!(rx.try_recv().is_err(), "区间用一条变更表达，不得逐条下发");
+}
+
+/// 截断一个**不存在**的目标：回执是空列表，且**不发任何变更**。
+///
+/// 「什么都没删」不该在 VDFS 上留下痕迹——发了 `truncated` 会让消费者从一条
+/// 并不存在的节点起截断，把整个列表清空。
+#[tokio::test]
+async fn truncate_of_missing_target_changes_nothing() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-truncate-miss");
+    seed_messages(&p, &id, &["一", "二"]).await;
+    let mut rx = subscribe(&p, &id).await;
+
+    let r = p
+        .action(
+            &vctx(),
+            &message_path(&id, "nope"),
+            vdfs::VDFS_ACTION_TRUNCATE,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(r.ok, "目标不存在是**结果**，不是错误");
+    assert_eq!(r.data, Some(json!([])), "回执是空列表");
+    assert_eq!(transcript_ids(&p, &id).await, vec!["m0", "m1"], "列表未动");
+    assert!(rx.try_recv().is_err(), "什么都没删 ⇒ 不发变更");
+}
+
+/// 清空：消息全没了，**会话本体保留**（id / metadata / 工作目录）。
+#[tokio::test]
+async fn clear_empties_the_transcript_but_keeps_the_session() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-clear");
+    seed_messages(&p, &id, &["一", "二", "三"]).await;
+
+    let r = p
+        .action(
+            &vctx(),
+            &message_dir_path(&id),
+            vdfs::VDFS_ACTION_CLEAR,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(r.ok);
+    assert!(transcript_ids(&p, &id).await.is_empty(), "列表应清空");
+
+    // 会话本体还在（清空不是删除会话）
+    let n = p.stat(&vctx(), &id).await.unwrap();
+    assert_eq!(n.name, id);
+}
+
+/// 清空的变更：落在**列表目录**上的 `deleted`（目录没了 ⇒ 条目都没了）。
+///
+/// 这正是「清空不必自造一个变更值」的依据：同一个 `deleted`，靠**地址**区分
+/// 语义——落在目录上时只有一种读法，没有歧义可消。
+#[tokio::test]
+async fn clear_notifies_with_deleted_on_the_list_directory() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-clear-notify");
+    seed_messages(&p, &id, &["一", "二"]).await;
+    let mut rx = subscribe(&p, &id).await;
+
+    p.action(
+        &vctx(),
+        &message_dir_path(&id),
+        vdfs::VDFS_ACTION_CLEAR,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let got = rx.recv().await.expect("清空应投递一条变更");
+    assert_eq!(got.path, message_dir_path(&id), "落在列表目录上");
+    assert_eq!(got.change, vdfs::VDFS_CHANGE_DELETED);
+}
+
+/// 动作不认识、或动作放错地址：`NotImplemented`（消费方据此**不给出入口**），
+/// 而不是「成功但什么都没做」。
+#[tokio::test]
+async fn unknown_or_misplaced_action_is_not_implemented() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-action-unknown");
+    seed_messages(&p, &id, &["一"]).await;
+
+    for (path, action) in [
+        // 动作标识不认识
+        (message_path(&id, "m0"), "explode"),
+        // 动作对、地址不对：`clear` 落在单条消息上
+        (message_path(&id, "m0"), vdfs::VDFS_ACTION_CLEAR),
+        // 动作对、地址不对：`truncate` 落在列表目录上
+        (message_dir_path(&id), vdfs::VDFS_ACTION_TRUNCATE),
+    ] {
+        assert!(
+            matches!(
+                p.action(&vctx(), &path, action, None).await,
+                Err(vdfs::VdfsError::NotImplemented)
+            ),
+            "{path} + {action} 应报 NotImplemented"
+        );
+    }
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["m0"],
+        "未实现的动作不得改动列表"
+    );
+}

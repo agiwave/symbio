@@ -221,6 +221,22 @@ export function actionFileOf(data: unknown): VdfsActionFile | null {
 export const VDFS_ACTION_TEST = 'test'
 /** 已知动作标识：导出打包（后端 `VDFS_ACTION_EXPORT`） */
 export const VDFS_ACTION_EXPORT = 'export'
+/**
+ * 已知动作标识：**截断**（后端 `VDFS_ACTION_TRUNCATE`）——列表资源删除
+ * 「该条目及其之后」的全部条目，`data` 带回被删条目 id 列表。
+ */
+export const VDFS_ACTION_TRUNCATE = 'truncate'
+/**
+ * 已知动作标识：**清空**（后端 `VDFS_ACTION_CLEAR`）——列表资源保留容器、
+ * 清掉全部条目。
+ *
+ * 为什么「截断 / 清空」是动作而不是 `delete`：见后端
+ * `symbio_core::vdfs_provider` 的 `VDFS_ACTION_TRUNCATE` 文档——`delete` 是
+ * **逐节点**语义，表达不了「从这里删到末尾」这类集合操作；而清空虽然也能用
+ * `delete` 表达（`deleted` 落在列表目录上无歧义），仍与截断一起走动作，
+ * 好让**同一个区段的删除只有一种入口形态**。
+ */
+export const VDFS_ACTION_CLEAR = 'clear'
 
 export interface VdfsListResponse {
   path: string

@@ -29,8 +29,8 @@
 
 ### 为什么选 `event_bus` 而不是 session 私有通道
 
-后端下行有三条通道：① session 私有长连接（需先 `session/open`）；② 全局 `EventBus`
-（`event_bus/subscribe` 一条连接收全部事件）；③ 前端主动拉取。
+后端下行有三条通道：① session 私有长连接（当年经 `session/open` 取通道，该路由已退役）；
+② 全局 `EventBus`（`event_bus/subscribe` 一条连接收全部事件）；③ 前端主动拉取。
 
 CLI 选 ②：它与「当前打开哪个会话」**解耦** —— 订阅一次即可覆盖之后所有会话，切会话不必
 重建连接。这恰好也是 Tauri 前端会话列表实时更新的同一机制。代价是转发任务里要按

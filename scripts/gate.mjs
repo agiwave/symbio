@@ -126,7 +126,16 @@ const BASELINE = {
   //   （`session/update` 与 `vdfs/write` 产出**逐字相同**的 metadata、
   //   `session/clear` 落到默认分支）。两条均经回退验证确认会红：前者注入
   //   "invoke_update 丢 title" 即红，后者注入"把 clear 路由加回来"即红。
-  rustTests: 721,
+  // 721 → 732：会话消息的三条旧路由迁 VDFS——`vdfs_provider.test.rs` 新增 13 例
+  //   （改写：只覆盖提供的字段 / 不带 id / id 冲突 / `create` 被拒 / 目标不存在；
+  //   截断：区间 + **一条** `truncated` + 目标不存在不发变更；清空：会话本体保留 +
+  //   目录上 `deleted`；`delete` 对区段被拒；动作不认识 / 放错地址），
+  //   `handlers.test.rs` 删掉随 `invoke_delete_message` 退役的 3 例（契约已搬到
+  //   provider 测试，见该文件头对照表）并新增 `migrated_session_routes_stay_retired`
+  //   ×1（5 条退役路由不得被加回来）。净 +11。
+  //   经回退验证：去掉消息 `write` 的 id 补齐逻辑，`message_write_accepts_a_patch_without_id`
+  //   即红——该例正是首轮跑测试抓出的真实缺陷（`ChatMessage::id` 必填让「字段子集」不成立）。
+  rustTests: 732,
   vitestFiles: 24,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态
@@ -162,7 +171,13 @@ const BASELINE = {
   //   删除走 `vdfs/delete(.vdfs/session/<id>)`、metadata 走
   //   `vdfs/write(.vdfs/session/<id>)`，并断言**地址**（地址拼错在真实环境里
   //   表现为删错会话，是灾难级）。经回退验证：改成挂载根地址 + 丢 title 两项皆红。
-  vitestTests: 313,
+  // 313 → 321：会话消息的三条旧路由迁 VDFS——`session.spec.ts` 新增 8 例：
+  //   `updateMessage` 写**单条消息**地址（含载荷形状与「地址取自 message.id」）、
+  //   `deleteMessage` 走 `action("truncate")` 且回执映射为 `deleted_ids`
+  //   （含非字符串过滤 / `data` 缺失回落空列表）、`clearMessages` 走
+  //   `action("clear")` 且地址是**消息列表目录**。三组都断言**地址**——
+  //   少一层就清到会话本体，是灾难级。
+  vitestTests: 321,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */

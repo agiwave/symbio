@@ -475,15 +475,28 @@ impl Plugin for SessionPlugin {
             "chat/send" => return self.handle_chat_send_oneoff(ctx).await,
             "chat/abort" => return self.handle_chat_abort_oneoff(ctx).await,
             "get_messages" => self.invoke_get_messages(ctx.clone()).await?,
-            "append" => self.invoke_append(ctx.clone()).await?,
-            "open" => return self.invoke_open(ctx.clone()).await,
-            // 删除会话**没有** `session/clear` 路由：VDFS 的
-            // `delete(.vdfs/session/<id>)` 是唯一入口，两者共用
-            // `delete_session_internal`。旧路由已退役（前端与 CLI 都不再调用）。
-            "chat/clear_messages" => self.invoke_clear_messages(ctx.clone()).await?,
-            "chat/delete_message" => self.invoke_delete_message(ctx.clone()).await?,
-            "chat/update_message" => self.invoke_update_message(ctx.clone()).await?,
             "update" => self.invoke_update(ctx.clone()).await?,
+            // ==================== 本表只留「不是数据 CRUD」的路由 ====================
+            //
+            // 会话与消息的增删改查**全部**经 VDFS 地址完成（`vdfs/list|read|write|
+            // action|delete`），因此下面这些曾经存在的路由已退役——它们每一个都是
+            // VDFS 侧同一能力的第二份实现，会各自漂移：
+            //
+            // - `append`   —— 消息追加的唯一入口是聊天协议（`chat/send`），编排自身的
+            //                 落库走引擎直连（`open_chat_session` + `append_messages`）。
+            //                 旧形态是「为一次数据追加搭 invoke 信封」，纯开销。
+            // - `open`     —— 返回的是**进程内句柄**，而句柄交付早已改由编排器直接塞进
+            //                 `chat_ctx`（`SESSION_HANDLE`），不走路由。
+            // - `clear`    —— 删除会话的唯一入口是 `delete(.vdfs/session/<id>)`。
+            // - `chat/clear_messages`  —— `action(<id>/消息, "clear")`。
+            // - `chat/delete_message`  —— `action(<id>/消息/<mid>, "truncate")`。
+            // - `chat/update_message`  —— `write(<id>/消息/<mid>)`。
+            //
+            // 剩下三条 + `get_messages` + `update` 都不是 CRUD：前三条是**编排 / 控制 /
+            // 选项 / 心跳**，后两条各有一个「非 VDFS 能表达」的理由
+            // （`get_messages`：跨插件进程内读，见 `docs/legacy-route-migration.md` §3.4；
+            //   `update`：CLI 需要客户端指定会话 id，见同文 §3.5）。
+            //
             // 级联选项机制：会话是选项宿主，根选项列表在全项目收集后一次下发
             // （子层经 payload.parent 懒加载，与 vdfs/list 的 parent 懒加载同构）
             OPTIONS_LIST => return super::options::handle_list_options(self.as_ref(), ctx).await,

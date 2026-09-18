@@ -1,89 +1,54 @@
 /**
- * Session 服务 —— 会话的读（清单）与写（清空消息 / 删除消息 / 改消息 / 改元数据）
+ * Session 服务 —— 会话域的**纯 VDFS 门面**
  *
- * ## 路由集中在一张表
+ * ## 这里已经没有任何会话专用路由
  *
- * 每个端点原先各自拼一遍 `${SESSION_PATH}/...`，改一个路径要全文搜索；
- * 现在路由只有一处（`SESSION_ROUTES`），端点函数只声明「发什么 body、返回什么形状」。
- *
- * 两个不变式由 `callSession` 统一保证，端点函数不再各自重复：
- * 1. 路由取自路由表；
- * 2. 请求体恒带 `session_id`（出站请求的 `options.session_id` 同源）。
- *
- * ## 哪些操作**不在**这张表里（它们走 VDFS，不在这里）
+ * 本文件曾有一张 `SESSION_ROUTES` 表（消息的清空 / 删除 / 改写三条）与一个
+ * `callSession` 信封函数。它们连同后端的三个 `invoke_*` 与三个 schema 一并退役
+ * （2026-09-18）——**同一个操作两份实现**正是要消灭的东西。
  *
  * | 操作 | 入口 |
  * |---|---|
  * | 列会话清单 | `vdfs/list(.vdfs/session)` |
  * | 读整份转写 | `vdfs/read(.vdfs/session/<id>)` |
  * | 新建会话 | `vdfs/write(.vdfs/session, { create: true })` |
- * | **删除会话** | `vdfs/delete(.vdfs/session/<id>)` |
- * | **改 metadata / 标题** | `vdfs/write(.vdfs/session/<id>)` |
+ * | 删除会话 | `vdfs/delete(.vdfs/session/<id>)` |
+ * | 改 metadata / 标题 | `vdfs/write(.vdfs/session/<id>)` |
+ * | **改写某条消息** | `vdfs/write(.vdfs/session/<id>/消息/<mid>)` |
+ * | **删除某条及其后** | `vdfs/action(…/消息/<mid>, "truncate")` |
+ * | **清空历史** | `vdfs/action(…/消息, "clear")` |
  *
- * 后两条原先各有专用路由（`session/clear` / `session/update`）。VDFS 侧本来就
- * 完整具备这两种能力，专用路由只是同一件事的第二份实现——会各自漂移。
- * `session/clear` 已整体退役；`session/update` 仅保留给 CLI
- * （它需要**客户端指定会话 id**，而 VDFS 新建是 provider 生成 id）。
+ * 本文件保留的只是**地址拼接 + 形状适配**（把 VDFS 域响应映射成 store 习惯的
+ * 形状），没有任何协议知识——新增一种会话操作**不需要**在这里加路由。
  *
- * 仍然留在本文件的三条是**消息级**操作：它们没有 VDFS 写路径
- * （见 `symbio/src/plugins/session/docs/vdfs-session-messages.md` §5）。
+ * ## 发言为什么不在上表
+ *
+ * 发言不是写入也不是动作，是**一轮编排**（模型调用 → 工具执行 → 流式落库），
+ * 入口仍是聊天协议（`CHAT_SEND`）。因此「往转写列表里放一条」在 VDFS 侧被显式
+ * 拒绝——`write` 只改**既有**消息，`create` 意图一律驳回。
  */
 
-import { callPlugin } from './plugin'
-import { deleteVdfs, listVdfs, writeVdfs } from './vdfs'
+import { deleteVdfs, listVdfs, runVdfsAction, writeVdfs } from './vdfs'
 import {
+  VDFS_ACTION_CLEAR,
+  VDFS_ACTION_TRUNCATE,
   VDFS_EXT_SESSION,
   VDFS_ROOT,
   VDFS_SESSION_DIR,
   vdfsExtOf,
   vdfsJoin,
+  vdfsMessageAddr,
+  vdfsMessagesAddr,
   vdfsSessionAddr,
 } from '@/schemas/vdfs'
 import { ChatMessage as SessionMessage } from '../schemas/chat_message'
 import * as SessionList from '../schemas/session_list'
-import * as SessionClearMessages from '../schemas/session_clear_messages'
-import * as SessionDeleteMessage from '../schemas/session_delete_message'
-import * as SessionUpdateMessage from '../schemas/session_update_message'
 import type { SessionMetadata } from '../schemas/session_meta'
-import { CHAT_PATH } from '../constants/pluginPaths'
 
 export type { SessionMessage }
 
 export type { SessionListItem } from '../schemas/session_list'
 export type { SessionMetadata } from '../schemas/session_meta'
-
-/**
- * 会话写端点路由表（**唯一**的会话专用路由清单）。
- *
- * 三条都是**消息级**操作。会话级操作（删除 / 改 metadata）走 VDFS，不在这里
- * ——见文件头那张表。
- */
-const SESSION_ROUTES = {
-  /** 清空历史消息（保留会话本身 / 工作目录 / 标题） */
-  clearMessages: `${CHAT_PATH}/clear_messages`,
-  /** 删除单条消息（连同其后所有消息） */
-  deleteMessage: `${CHAT_PATH}/delete_message`,
-  /** 更新单条消息（手工编辑 / 标错重试） */
-  updateMessage: `${CHAT_PATH}/update_message`,
-} as const
-
-/** 所有会话写请求的公共字段 */
-interface SessionScopedRequest {
-  session_id: string
-}
-
-/**
- * 发起一次会话写操作。
- *
- * `timeoutMs` 传 `undefined` 以走 `callPlugin` 的默认超时——显式写数字会与
- * 默认值各改各的，反而失去单一来源。
- */
-function callSession<TResp, TReq extends SessionScopedRequest>(
-  route: string,
-  req: TReq,
-): Promise<TResp> {
-  return callPlugin<TResp, TReq>(route, req, undefined, { session_id: req.session_id })
-}
 
 /**
  * 获取会话列表（VDFS：`.vdfs/session` 的目录内容）
@@ -150,42 +115,70 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 /**
- * 清空会话历史消息（保留会话本身 / 工作目录 / 标题等元数据）。
- * 路由：`worker/session/chat/clear_messages`
+ * 删除单条消息的**回执**。
+ *
+ * `deleted_ids` 是后端给出的**权威**被删列表（`vdfs/action` 的 `data`）——
+ * store 用它做幂等对齐：本地若因锚点缺失等原因删窄了，据它补齐。
+ * 这也是「截断」走 `action` 而不是 `delete` 的收益之一
+ * （`vdfs/delete` 只回 `{path}`，带不回这个列表）。
  */
-export async function clearMessages(sessionId: string): Promise<SessionClearMessages.Response> {
-  return callSession<SessionClearMessages.Response, SessionClearMessages.Request>(
-    SESSION_ROUTES.clearMessages,
-    { session_id: sessionId }
-  )
+export interface DeleteMessageResult {
+  deleted_ids: string[]
+}
+
+/**
+ * 清空会话历史消息（保留会话本身 / 工作目录 / 标题等元数据）。
+ *
+ * **走 VDFS**：`action(.vdfs/session/<id>/消息, "clear")`。
+ *
+ * 为什么是 `action` 而不是 `delete`：`delete` 的语义是**逐节点**的「这一个没了」，
+ * 表达不了截断那类集合操作；而转写区段的删除因此统一走动作——**同一个区段的删除
+ * 只有一种入口形态**，使用者不必记「哪种删除走哪个入口」。变更上，清空发的是
+ * 落在**列表目录**上的 `deleted`（目录没了 ⇒ 条目都没了，无歧义），
+ * 见后端 `symbio_core::vdfs_provider` 的 `VDFS_ACTION_TRUNCATE` 文档。
+ */
+export async function clearMessages(sessionId: string): Promise<void> {
+  await runVdfsAction(vdfsMessagesAddr(sessionId), VDFS_ACTION_CLEAR)
 }
 
 /**
  * 删除单条会话消息（连同其之后的所有消息一并删除）。
- * 路由：`worker/session/chat/delete_message`
+ *
+ * **走 VDFS**：`action(.vdfs/session/<id>/消息/<mid>, "truncate")`。语义是
+ * 「从这条到列表末尾全没了」（VDFS 变更词汇里的 `truncated`），不是「删这一个」。
+ *
+ * 目标消息不存在时后端返回空列表且**不发变更**——「什么都没删」不该在 VDFS 上
+ * 留下痕迹。回执照常返回，调用方的幂等对齐因此是空操作。
  */
 export async function deleteMessage(
   sessionId: string,
   messageId: string
-): Promise<SessionDeleteMessage.Response> {
-  return callSession<SessionDeleteMessage.Response, SessionDeleteMessage.Request>(
-    SESSION_ROUTES.deleteMessage,
-    { session_id: sessionId, message_id: messageId }
+): Promise<DeleteMessageResult> {
+  const res = await runVdfsAction(
+    vdfsMessageAddr(sessionId, messageId),
+    VDFS_ACTION_TRUNCATE
   )
+  return {
+    deleted_ids: Array.isArray(res.data)
+      ? (res.data as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [],
+  }
 }
 
 /**
  * 更新单条会话消息（手工编辑 / 标错重试等）。
- * 路由：`worker/session/chat/update_message`
+ *
+ * **走 VDFS**：`write(.vdfs/session/<id>/消息/<mid>)`，请求体是消息的**字段子集**
+ * （JSON 浅合并，未提供的字段保持不变）。后端 provider 只覆盖补丁里出现的字段。
+ *
+ * 这不是「发言」：它不触发任何编排，只是对**既有**节点的一次存储改写。新增消息
+ * 仍只有聊天协议一个入口（后端对消息路径的 `create` 意图一律驳回）。
  */
 export async function updateMessage(
   sessionId: string,
   message: SessionMessage
-): Promise<SessionUpdateMessage.Response> {
-  return callSession<SessionUpdateMessage.Response, SessionUpdateMessage.Request>(
-    SESSION_ROUTES.updateMessage,
-    { session_id: sessionId, message }
-  )
+): Promise<void> {
+  await writeVdfs(vdfsMessageAddr(sessionId, message.id), JSON.stringify(message))
 }
 
 /**

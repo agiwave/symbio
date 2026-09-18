@@ -224,14 +224,19 @@ impl SessionPlugin {
             }
 
             // 仅 message 分支（非 ping）追加用户消息到存储
+            //
+            // **直连会话引擎，不经路由**：这里曾经构造一个 invoke 信封
+            // （`ctx_spawn.set_payload(..)` + 调 `invoke_append`）只为追加一条数据——
+            // 而 `invoke_append` 的全部内容就是「解载荷 → `open_chat_session` →
+            // `append_messages`」。信封是纯开销，且让一次数据追加看起来像一次跨插件调用。
             if let Some(msg) = &user_msg_spawn {
                 if !is_ping {
-                    let append_req = session_append::Request {
-                        session_id: sid_spawn.clone(),
-                        messages: vec![msg.clone()],
-                    };
-                    let _ = ctx_spawn.set_payload(append_req);
-                    if let Err(e) = this_spawn.invoke_append(ctx_spawn.clone()).await {
+                    let appended = async {
+                        let session = this_spawn.open_chat_session(&sid_spawn).await?;
+                        session.append_messages(vec![msg.clone()]).await
+                    }
+                    .await;
+                    if let Err(e) = appended {
                         let msg = format!("追加用户消息到存储失败: {}", e);
                         crate::plugin_error!("session", "{}", &msg);
                         this_spawn

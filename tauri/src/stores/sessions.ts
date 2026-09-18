@@ -65,7 +65,7 @@ import { publishVdfsChangedLocal, subscribeVdfsChanged } from '@/services/eventB
 import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
-import type { ChatMessage } from '@/services/model'
+import type { ChatMessage } from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
 // 消息转写规则（纯逻辑）：合并 / 水合 / 截断 / 看门狗判据
 import {

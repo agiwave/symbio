@@ -28,7 +28,7 @@ use crate::plugin_debug;
 use crate::symbio_core::event_bus::EventBus;
 use crate::symbio_core::schemas::{
     session::chat_message as cm,
-    session::{session_append, session_chat, session_chat_response},
+    session::{session_chat, session_chat_response},
 };
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{

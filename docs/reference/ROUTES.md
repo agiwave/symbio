@@ -97,14 +97,22 @@
 |------|------|----------|
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
-| `session/get_messages` | 获取对话历史 | `Data` |
-| `session/open` | 打开/创建会话 | `Data` |
+| `session/get_messages` | 获取对话历史（**仅 `agent_run` 的续会话存在性校验**用） | `Data` |
 | `session/update` | 合并写入会话 metadata（**仅 CLI**） | `Data` |
-| `session/chat/clear_messages` | 清空指定消息 | `Data` |
-| `session/chat/delete_message` | 删除单条消息 | `Data` |
-| `session/chat/update_message` | 更新单条消息 | `Data` |
-| `session/append` | 追加消息 | `Data` |
 | `session/heartbeat/trigger` | 触发一次心跳 | `Data` |
+
+> **`session/append`、`session/open` 与三条消息路由已退役**（2026-09-18）：
+> - `append` —— 消息追加的唯一入口是聊天协议（`chat/send`），而编排自身的落库走引擎直连
+>   （`orchestrator/entry.rs` 的 `open_chat_session` + `append_messages`）。
+>   该路由的最后形态是「为一次数据追加搭 invoke 信封」，纯开销。
+> - `open` —— 它返回的是**进程内句柄**（`ChatSessionHandle`），而句柄交付早已改由编排器
+>   直接塞进 `chat_ctx`（`SESSION_HANDLE`），不走路由。
+> - `chat/update_message` / `chat/delete_message` / `chat/clear_messages` —— 三条都是
+>   **纯存储操作**（不触发编排），已迁到 VDFS（见下表）。它们曾与 `vdfs/write` /
+>   `vdfs/action` 各有一份实现，正是要消灭的那种重复。
+>
+> 审计与迁移记录见
+> [`symbio/src/plugins/session/docs/legacy-route-migration.md`](../../symbio/src/plugins/session/docs/legacy-route-migration.md)。
 
 > **会话级操作已并入 VDFS**（专用路由不再存在或不再被前端使用）：
 >
@@ -115,15 +123,18 @@
 > | 新建会话 | `vdfs/write(.vdfs/session, { create: true })` |
 > | **删除会话** | `vdfs/delete(.vdfs/session/<id>)` |
 > | **改 metadata / 标题** | `vdfs/write(.vdfs/session/<id>)` |
+> | **改写某条消息** | `vdfs/write(.vdfs/session/<id>/消息/<mid>)` |
+> | **删该条及其后** | `vdfs/action(…/消息/<mid>, "truncate")` |
+> | **清空历史** | `vdfs/action(…/消息, "clear")` |
 >
 > `session/clear` **已退役**（与 `vdfs/delete` 共用 `delete_session_internal`）。
 > `session/update` 保留但只有 CLI 用——它需要**客户端指定会话 id**，而 VDFS 新建
 > 是 provider 生成 id。两者的 metadata 浅合并已收敛到同一份实现
 > （`Session::merge_metadata_object`），因此不会漂移。
 >
-> 消息级的三条（`clear_messages` / `delete_message` / `update_message`）**留在
-> 聊天协议**：消息没有 VDFS 写路径，理由见
-> [`symbio/src/plugins/session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md) §5。
+> **发言仍只有聊天协议一处**（`chat/send`）：新增消息会触发一整轮编排，不是一次写入。
+> 但**改写与删除**是普通的 VDFS 节点操作——判据是「触发不触发编排」，不是「碰不碰消息」。
+> 见 [`symbio/src/plugins/session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md) §5.2。
 >
 > `session/config/get` / `config/set` **已下线**：会话配置在
 > `.vdfs/session/PLUGIN.yml`（`ext = form`），读写走 `vdfs/read` / `vdfs/write`。

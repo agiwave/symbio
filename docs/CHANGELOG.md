@@ -18,6 +18,55 @@
 
 ***
 
+## 2026-09-18: 会话旧路由审计；5 条会话路由退役（含消息增删改）
+
+**性质：审计 + 迁移**。会话路由表 11 → 6 条。
+
+新增审计文档
+[`symbio/src/plugins/session/docs/legacy-route-migration.md`](../symbio/src/plugins/session/docs/legacy-route-migration.md)：
+按「有没有真实消费方」与「VDFS 侧有没有等价能力」两条判据，把 11 条会话路由分成
+**可删 / 可迁 / 保留 / 可评估**四档，并给出影响面与执行顺序。
+
+本轮落地其中两项（纯死码，行为逐字等价）：
+
+- **`session/append` 整条链路退役**（路由 + `invoke_append` + `session_append.rs`）。
+  它早无外部消费方，唯一「实现还活着」的理由是编排器**绕路由**调它
+  （`orchestrator/entry.rs` 构造 invoke 信封 → `set_payload` → `invoke_append`），
+  而 `invoke_append` 的全部内容就是「解载荷 → `open_chat_session` → `append_messages`」。
+  已改为**直连引擎**：信封是纯开销，且让一次数据追加看起来像一次跨插件调用。
+- **`session/open` 整条链路退役**（路由 + `invoke_open` + `session_open.rs`）。
+  它返回的是**进程内句柄**（`ChatSessionHandle`），而句柄交付早已改由编排器直接塞进
+  `chat_ctx`（`SESSION_HANDLE`，`entry.rs`），不走路由——路由臂是改架构时留下的空壳。
+  顺带修正 `cli/src/client.rs` 与 `cli/docs/architecture.md` 里「需先 `session/open`
+  拿通道」的**过期注释**（CLI 实际走 `event_bus/subscribe`）。
+
+**改判一项**：`session/get_messages` 原本列入「可迁 VDFS」（用 `vdfs/stat` 的
+`message_count` 替代「读出全部消息看空不空」），实测后**判定不做**——后端没有进程内
+消费 VDFS 的先例，`vdfs/*` 线路信封刻意留在 vdfs 插件内部（core 只暴露纯接口），
+且 `get_vdfs_root` 只存在于每次能力收集现造的 `DefaultToolVisitor` 上。
+走 VDFS 要么新增**插件 → 插件**的编译期依赖，要么新造一项 core 全局 accessor，
+两者都比它换掉的东西更重。详见审计文档 §3.4。
+
+**待做项已全部落地**（同日续做）：`chat/update_message` / `chat/delete_message` /
+`chat/clear_messages` 三条**已迁 VDFS**（`write(<sid>/消息/<mid>)` /
+`action(<sid>/消息/<mid>, "truncate")` / `action(<sid>/消息, "clear")`），路由表 11 → 6 条。
+「LLM 能否改写消息」按**全开**决策——LLM 的访问面由 `CapabilityVisitor` 的注册处控制，
+那是唯一入口，因此 provider 侧不需要再建闸门。
+
+迁移时两处偏离原计划（都记在审计文档 §3.3 / §7）：
+
+- **清空从 `delete` 改成 `action`**：让同一区段的删除只有一种入口形态。
+  清空本可以用 `delete`（`deleted` 落在列表目录上无歧义），改走动作是为了不让使用者
+  去记「哪种删除走哪个入口」。
+- **补丁的 `id` 由地址补齐**：`ChatMessage::id` 是必填字段，不补的话
+  `{"content":"…"}` 会在反序列化阶段被拒，「补丁是字段子集」这条承诺在 `id` 上就是假的。
+  **这条是首轮回归测试抓出来的**。
+
+验证：`scripts/gate.mjs` 全绿。测试净增（后端 +10 / 前端 +8），基线只增不减；
+`docs/CURRENT.md` 已重生成。
+
+***
+
 ## 2026-09-18: 会话级写入并入 VDFS；前端消息域建立渲染注册表
 
 **性质：重构**。两件事，同一目标——**同一件事只有一份实现**。

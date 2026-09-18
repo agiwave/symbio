@@ -4,7 +4,9 @@
  * ## 它替换了什么
  *
  * 会话转写原先是**专用协议 + 专用通道**：读走 `session/get_messages`，
- * 实时走 `kind = "session"` 的 `ChatEventType.Update` / `Delete`。
+ * 实时走 `kind = "session"` 的会话事件帧（`update` / `delete`）。
+ * （前端那侧的帧类型描述 `ChatEventType` / `ChatEvent` 已随 `services/model.ts`
+ * 一并退役——本模块改按**地址**分派后，前端不再需要这条通道的类型。）
  *
  * 现在它只是一张**列表**：地址 `.vdfs/session/<sid>/消息`，每一项是一条消息；
  * 流式输出是列表项的**追加型变更**（`appended`）。于是读路径与实时路径都归

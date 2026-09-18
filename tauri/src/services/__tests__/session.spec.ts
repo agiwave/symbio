@@ -1,13 +1,23 @@
 /**
- * session 服务 —— 会话清单映射 + 会话级写入路由单测（node 环境）
+ * session 服务 —— 会话清单映射 + 全部写入落点单测（node 环境）
  *
  * `listSessions()` 走 `vdfs/list`：读 `.vdfs/session` 的目录内容。
  * 本单测锁定「VdfsNode → SessionListItem」的映射口径：
  * 会话侧栏的标题 / 工作目录 / 运行中状态全部依赖它，一旦后端字段名或前端取值
  * 方式漂移，表现为**静默退化**（侧栏拿不到 workdir、停止按钮失效），很难肉眼发现。
  *
- * 另锁定两条**会话级写入**的落点：删除 → `vdfs/delete`，改 metadata → `vdfs/write`。
- * 这两条曾经各有专用路由（`session/clear` / `session/update`），已并入 VDFS——
+ * 另锁定**全部五个写入落点**——它们曾经各有专用路由（`session/clear` /
+ * `session/update` / `chat/update_message` / `chat/delete_message` /
+ * `chat/clear_messages`），2026-09-18 起全部并入 VDFS：
+ *
+ * | 操作 | 落点 |
+ * |---|---|
+ * | 删除会话 | `vdfs/delete(.vdfs/session/<id>)` |
+ * | 改 metadata / 标题 | `vdfs/write(.vdfs/session/<id>)` |
+ * | 改写某条消息 | `vdfs/write(…/消息/<mid>)` |
+ * | 删该条及其后 | `vdfs/action(…/消息/<mid>, "truncate")` |
+ * | 清空历史 | `vdfs/action(…/消息, "clear")` |
+ *
  * 若哪天有人把路由改回去，这里会红。断言**地址**而不只是"调用了某个函数"：
  * 地址拼错（比如少了会话 id）在真实环境里表现为删错会话，是灾难级的。
  */
@@ -20,17 +30,30 @@ vi.mock('@/services/vdfs', () => ({
   listVdfs: vi.fn(),
   deleteVdfs: vi.fn(),
   writeVdfs: vi.fn(),
+  runVdfsAction: vi.fn(),
 }))
 
-import { deleteVdfs, listVdfs, writeVdfs } from '@/services/vdfs'
+import { deleteVdfs, listVdfs, runVdfsAction, writeVdfs } from '@/services/vdfs'
 import {
+  VDFS_ACTION_CLEAR,
+  VDFS_ACTION_TRUNCATE,
   VDFS_ROOT,
   isWorkingStatus,
   vdfsJoin,
+  vdfsMessageAddr,
+  vdfsMessagesAddr,
   vdfsSessionAddr,
   type VdfsNode,
 } from '@/schemas/vdfs'
-import { deleteSession, listSessions, updateSession } from '../session'
+import {
+  clearMessages,
+  deleteMessage,
+  deleteSession,
+  listSessions,
+  updateMessage,
+  updateSession,
+  type SessionMessage,
+} from '../session'
 
 /** 构造一个会话节点（attributes 为 flatten 的场景字段） */
 function sessionNode(over: Partial<VdfsNode> = {}): VdfsNode {
@@ -181,5 +204,112 @@ describe('updateSession（会话 metadata → vdfs/write）', () => {
 
     const body = JSON.parse(vi.mocked(writeVdfs).mock.lastCall![1] as string)
     expect(body).not.toHaveProperty('title')
+  })
+})
+
+describe('updateMessage（改写某条消息 → vdfs/write）', () => {
+  it('写**单条消息**地址，载荷是消息 JSON', async () => {
+    vi.mocked(writeVdfs).mockResolvedValueOnce({
+      path: vdfsMessageAddr('abc', 'm1'),
+      created: false,
+    })
+
+    const patch: SessionMessage = { id: 'm1', content: '改过的' }
+    await updateMessage('abc', patch)
+
+    const [addr, body] = vi.mocked(writeVdfs).mock.lastCall!
+    expect(addr).toBe(vdfsMessageAddr('abc', 'm1'))
+    // 地址必须**指到那一条**：少一层就落到列表上（后端会拒），再少一层就是
+    // 会话 metadata（会静默写错地方——那才是最坏的结果）
+    expect(vdfsMessageAddr('abc', 'm1')).toBe('.vdfs/session/abc/消息/m1')
+    expect(JSON.parse(body as string)).toEqual({ id: 'm1', content: '改过的' })
+  })
+
+  it('地址取自 message.id —— 载荷与地址必须指同一条', async () => {
+    vi.mocked(writeVdfs).mockResolvedValueOnce({
+      path: vdfsMessageAddr('abc', 'm7'),
+      created: false,
+    })
+
+    await updateMessage('abc', { id: 'm7' })
+
+    expect(vi.mocked(writeVdfs).mock.lastCall![0]).toBe(vdfsMessageAddr('abc', 'm7'))
+  })
+})
+
+describe('deleteMessage（删该条及其后 → action("truncate")）', () => {
+  it('地址是**单条消息**，动作是 truncate（不是 delete）', async () => {
+    vi.mocked(runVdfsAction).mockResolvedValueOnce({
+      action: VDFS_ACTION_TRUNCATE,
+      ok: true,
+      message: '已截断 2 条',
+      data: ['m2', 'm3'],
+    })
+
+    await deleteMessage('abc', 'm2')
+
+    expect(vi.mocked(runVdfsAction)).toHaveBeenCalledWith(
+      vdfsMessageAddr('abc', 'm2'),
+      VDFS_ACTION_TRUNCATE
+    )
+    expect(vdfsMessageAddr('abc', 'm2')).toBe('.vdfs/session/abc/消息/m2')
+  })
+
+  it('回执原样透传：store 靠它做幂等对齐', async () => {
+    vi.mocked(runVdfsAction).mockResolvedValueOnce({
+      action: VDFS_ACTION_TRUNCATE,
+      ok: true,
+      message: '已截断 2 条',
+      data: ['m2', 'm3'],
+    })
+
+    await expect(deleteMessage('abc', 'm2')).resolves.toEqual({
+      deleted_ids: ['m2', 'm3'],
+    })
+  })
+
+  it('data 里的非字符串被滤掉（不把脏数据当消息 id 用）', async () => {
+    vi.mocked(runVdfsAction).mockResolvedValueOnce({
+      action: VDFS_ACTION_TRUNCATE,
+      ok: true,
+      message: 'ok',
+      data: [1, null, 'm3', { id: 'm4' }],
+    })
+
+    await expect(deleteMessage('abc', 'm1')).resolves.toEqual({ deleted_ids: ['m3'] })
+  })
+
+  it('data 缺失 ⇒ 空列表（目标不存在 = 什么都没删）', async () => {
+    vi.mocked(runVdfsAction).mockResolvedValueOnce({
+      action: VDFS_ACTION_TRUNCATE,
+      ok: true,
+      message: '目标消息不存在，未做任何修改',
+    })
+
+    await expect(deleteMessage('abc', 'gone')).resolves.toEqual({ deleted_ids: [] })
+  })
+})
+
+describe('clearMessages（清空历史 → action("clear")）', () => {
+  it('地址是**消息列表目录**（不是单条、也不是会话本体），动作是 clear', async () => {
+    vi.mocked(runVdfsAction).mockResolvedValueOnce({
+      action: VDFS_ACTION_CLEAR,
+      ok: true,
+      message: '已清空会话历史',
+    })
+
+    await clearMessages('abc')
+
+    expect(vi.mocked(runVdfsAction)).toHaveBeenCalledWith(
+      vdfsMessagesAddr('abc'),
+      VDFS_ACTION_CLEAR
+    )
+    // 少一层就清到会话本体（元数据 / 标题一并没了），多一层就不是列表
+    expect(vdfsMessagesAddr('abc')).toBe('.vdfs/session/abc/消息')
+  })
+
+  it('失败向上抛（调用方据此不做本地清空）', async () => {
+    vi.mocked(runVdfsAction).mockRejectedValueOnce(new Error('Forbidden'))
+    await expect(clearMessages('abc')).rejects.toThrow('Forbidden')
   })
 })

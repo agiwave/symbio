@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MessageNode from '../MessageNode.vue'
 import { useRunningClock } from '@/composables/useRunningClock'
-import type { ChatMessage } from '@/services/model'
+import type { ChatMessage } from '@/schemas/chat_message'
 
 /** 构造合法 ChatMessage（缺省：assistant/text/completed） */
 function msg(p: Partial<ChatMessage> & { id: string }): ChatMessage {

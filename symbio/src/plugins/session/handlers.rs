@@ -1,19 +1,34 @@
-//! SessionPlugin 的 invoke 处理方法集合（按 `schemas/session/*` 请求类型分发）。
+//! SessionPlugin 里**仅剩的两个** invoke 路由的实现体，加上两个非路由的内部函数。
 //!
-//! 路由层在 `plugin.rs`（`Plugin::route`），本文件只承载各 invoke 的实现体：
-//! 消息增删改查、清空消息、
-//! metadata 合并与统一删除路径 `delete_session_internal` 等。
+//! 路由层在 `plugin.rs`（`Plugin::route`）。本文件已经收缩到只剩四件事，
+//! 因为会话与消息的增删改查**全部**经 VDFS 地址完成了：
 //!
-//! 会话**删除**没有 invoke 方法：唯一入口是 `VdfsProvider::delete`
-//! （`delete(.vdfs/session/<id>)`），旧 `session/clear` 路由已退役。
+//! | 函数 | 性质 | 为什么还在这里 |
+//! |---|---|---|
+//! | `invoke_get_messages` | 路由 `get_messages` | 跨插件**进程内**读（`agent_run` 的续会话存在性校验）。VDFS 线路信封刻意留在 vdfs 插件内部，所以它迁不过去——见 `docs/legacy-route-migration.md` §3.4 |
+//! | `invoke_update` | 路由 `update` | 仅 CLI：它需要**客户端指定会话 id**，而 VDFS 新建是 provider 生成 id——见同文 §3.5 |
+//! | `delete_session_internal` | **非路由** | `VdfsProvider::delete` 的内部实现（唯一消费方） |
+//! | `open_session_handle` | **非路由** | 编排器构造会话引擎句柄（`SESSION_HANDLE`）用 |
+//!
+//! ## 已退役的（各自都有 VDFS 侧等价入口，留着就是第二份实现）
+//!
+//! - `append` → 消息追加的唯一入口是聊天协议，编排自身的落库走引擎直连
+//!   （`orchestrator/entry.rs` 的 `open_chat_session` + `append_messages`）。
+//! - `open` → 它返回的是**进程内句柄**，而句柄交付早已改由编排器直接塞进
+//!   `chat_ctx`，不走路由。
+//! - `clear`（会话）→ `delete(.vdfs/session/<id>)`。
+//! - `chat/clear_messages` → `action(<id>/消息, "clear")`。
+//! - `chat/delete_message` → `action(<id>/消息/<mid>, "truncate")`。
+//! - `chat/update_message` → `write(<id>/消息/<mid>)`。
+//!
+//! 后三者的实现搬到了 `plugin/vdfs_provider.rs`（`patch_message` /
+//! `truncate_messages` / `clear_messages`）——**搬移不是重写**：同一个操作只有
+//! 一份实现，正是本文件收缩的全部意义。
 
-use super::chat_session::{ChatSession, ChatSessionHandle, PersistentChatSession};
+use super::chat_session::{ChatSession, PersistentChatSession};
 use super::plugin::SessionPlugin;
-use crate::symbio_core::schemas::session::{
-    chat_message as cm, session_append, session_clear_messages, session_delete_message,
-    session_get_messages, session_open, session_update, session_update_message,
-};
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt, PluginPayload};
+use crate::symbio_core::schemas::session::{session_get_messages, session_update};
+use crate::symbio_core::{InvokeRequest, InvokeRequestExt};
 use crate::symbio_core::{InvokeResponse, PluginError};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -25,14 +40,6 @@ impl SessionPlugin {
         let messages = chat_session.get_messages().await?;
 
         Ok(serde_json::to_value(session_get_messages::Response { messages }).unwrap_or_default())
-    }
-
-    pub async fn invoke_append(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
-        let req: session_append::Request = ctx.payload()?;
-        let chat_session = self.open_chat_session(&req.session_id).await?;
-        let message_count = chat_session.append_messages(req.messages).await?;
-
-        Ok(serde_json::to_value(session_append::Response { message_count }).unwrap_or_default())
     }
 
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
@@ -69,152 +76,6 @@ impl SessionPlugin {
         self.notify_change(session_id, crate::symbio_core::vdfs::VDFS_CHANGE_DELETED);
 
         Ok(())
-    }
-
-    /// 清空会话消息（保留 metadata / 工作目录 / 标题等）。
-    ///
-    /// 与 `VdfsProvider::delete`（删除整个会话）不同：这里只把 `session.messages`
-    /// 整体替换为空，会话本体继续存在。UI 的"清空历史"按钮走此路径。
-    pub async fn invoke_clear_messages(
-        &self,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<Value> {
-        let req: session_clear_messages::Request = ctx.payload()?;
-        let chat_session = self.open_chat_session(&req.session_id).await?;
-        chat_session.replace_messages(Vec::new()).await?;
-        // VDFS 视图同步（前端已在本地收敛，故只发变更、不发前端帧）
-        self.emit_transcript_cleared(&req.session_id);
-        Ok(serde_json::to_value(session_clear_messages::Response {
-            cleared: true,
-        })?)
-    }
-
-    /// 删除单条消息（连同其后续所有消息一并删除）。
-    ///
-    /// 消息列表本身已按时间/顺序排好序，因此只需按列表顺序定位到目标消息，
-    /// 然后把"它及其之后的所有消息"整段 `drain` 掉即可——无需任何 parent_id 级联逻辑。
-    /// 这样既能保证会话消息的连续性（不会出现孤立的后半截助手回复），
-    /// 又足够简单直接。
-    ///
-    /// 注意目标消息**不存在**时：`deleted_ids` 为空，因此**不发任何变更**——
-    /// 「什么都没删」不该在 VDFS 上留下痕迹（发了 `truncated` 会让消费者
-    /// 从一条并不存在的节点起截断，把整个列表清空）。
-    pub async fn invoke_delete_message(
-        &self,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<Value> {
-        let req: session_delete_message::Request = ctx.payload()?;
-        let chat_session = self.open_chat_session(&req.session_id).await?;
-        let mut messages = chat_session.get_messages().await?;
-
-        // 在已排序的列表中定位目标消息，删除"它及其之后的全部消息"。
-        let idx = messages.iter().position(|m| m.id == req.message_id);
-        let deleted_ids: Vec<String> = match idx {
-            Some(i) => {
-                let removed: Vec<String> = messages[i..].iter().map(|m| m.id.clone()).collect();
-                messages.drain(i..);
-                removed
-            }
-            None => Vec::new(),
-        };
-
-        chat_session.replace_messages(messages).await?;
-        // VDFS 视图同步：**一条** `truncated`（落在目标消息地址上），不是 N 条
-        // `deleted`。语义是"从这里到列表末尾全没了"，消费者按自己的顺序取区间即可
-        // ——它不需要收到被删的每一条，前端也因此不必等一场"大面积通知"。
-        // 前端本地删除走的是同一条语义（`stores/sessions.ts::removeFrom`）。
-        if !deleted_ids.is_empty() {
-            self.emit_transcript_truncated(&req.session_id, &req.message_id);
-        }
-        Ok(serde_json::to_value(session_delete_message::Response {
-            deleted: deleted_ids.len(),
-            deleted_ids,
-        })?)
-    }
-
-    /// 更新单条消息（手工编辑 / 标错重试等场景）。
-    ///
-    /// 按 `message.id` 定位，仅覆盖请求中提供的字段
-    /// （content / status / error / meta 等），未提供的字段保持不变。
-    pub async fn invoke_update_message(
-        &self,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<Value> {
-        let req: session_update_message::Request = ctx.payload()?;
-        let patch = &req.message;
-        if patch.id.is_empty() {
-            return Err(PluginError::ValidationError(
-                "message.id 不能为空".to_string(),
-            ));
-        }
-        let chat_session = self.open_chat_session(&req.session_id).await?;
-        let mut messages = chat_session.get_messages().await?;
-
-        let Some(existing) = messages.iter_mut().find(|m| m.id == patch.id) else {
-            return Err(PluginError::NotFound(format!("消息不存在: {}", patch.id)));
-        };
-
-        if let Some(role) = &patch.role {
-            existing.role = Some(role.clone());
-        }
-        if let Some(t) = &patch.msg_type {
-            existing.msg_type = Some(t.clone());
-        }
-        if let Some(n) = &patch.name {
-            existing.name = Some(n.clone());
-        }
-        if let Some(p) = &patch.parent_id {
-            existing.parent_id = Some(p.clone());
-        }
-        if let Some(c) = &patch.content {
-            existing.content = Some(c.clone());
-        }
-        if let Some(s) = &patch.status {
-            existing.status = Some(s.clone());
-        }
-        if let Some(e) = &patch.error {
-            existing.error = Some(e.clone());
-        } else if patch
-            .status
-            .as_ref()
-            .map(|s| *s != cm::MessageStatus::Failed)
-            .unwrap_or(false)
-        {
-            // 状态不再是 Failed 时，顺带清掉旧的 error，避免残留误导。
-            existing.error = None;
-        }
-        if let Some(ts) = patch.timestamp {
-            existing.timestamp = Some(ts);
-        }
-        if let Some(rid) = &patch.response_id {
-            existing.response_id = Some(rid.clone());
-        }
-        if let Some(new_meta) = &patch.meta {
-            match &mut existing.meta {
-                Some(existing_meta) => {
-                    if let (Some(a), Some(b)) =
-                        (existing_meta.as_object_mut(), new_meta.as_object())
-                    {
-                        for (k, v) in b {
-                            a.insert(k.clone(), v.clone());
-                        }
-                    } else {
-                        existing.meta = Some(new_meta.clone());
-                    }
-                }
-                None => {
-                    existing.meta = Some(new_meta.clone());
-                }
-            }
-        }
-
-        let updated = existing.clone();
-        chat_session.replace_messages(messages).await?;
-        // VDFS 视图同步：把合并后的**完整消息**作为载荷发出（消费者零回读）
-        self.emit_message_updated(&req.session_id, &updated);
-        Ok(serde_json::to_value(session_update_message::Response {
-            updated: true,
-        })?)
     }
 
     /// 合并写入会话 metadata（workdir / title / agent_id 等）。
@@ -274,8 +135,10 @@ impl SessionPlugin {
     /// 两类会话共用 [`PersistentChatSession`]，差异只在存储后端（审计 B1）；
     /// ephemeral 会话的配置取当前值的快照（内存会话不随 `session/config` 变更而变）。
     ///
-    /// 消费方：session/open 路由（对外 API），以及会话编排器向 chat_ctx
-    /// 交付会话句柄（SESSION_HANDLE，交付失败时 model 侧兜底内存会话）。
+    /// 消费方**只有一处**：会话编排器向 chat_ctx 交付会话句柄
+    /// （`orchestrator/entry.rs` 的 `SESSION_HANDLE`，交付失败时 model 侧兜底内存会话）。
+    /// 曾经还有一个 `session/open` 路由消费它（对外返回进程内句柄），已退役——
+    /// 进程内句柄不该有对外路由。
     pub async fn open_session_handle(
         &self,
         session_id: Option<String>,
@@ -298,15 +161,6 @@ impl SessionPlugin {
         };
 
         Ok(session)
-    }
-
-    pub async fn invoke_open(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let req: session_open::Request = ctx.payload()?;
-        let session = self.open_session_handle(req.session_id).await?;
-
-        Ok(PluginPayload::Native(Arc::new(ChatSessionHandle::new(
-            session,
-        ))))
     }
 }
 

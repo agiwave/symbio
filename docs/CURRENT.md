@@ -22,7 +22,7 @@
 | `local` | `local` | .vdfs/local | （动态）`local/<工具短名>`——按已注册工具名分发（与 §2 的工具清单同一份集合） | `Capability` · `Plugin` | ✓ | ✓ |
 | `mcp` | `mcp` | .vdfs/mcp | — | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `model` | `model` | .vdfs/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
-| `session` | `session` | .vdfs/session | `session/append` · `session/chat/abort` · `session/chat/clear_messages` · `session/chat/delete_message` · `session/chat/send` · `session/chat/update_message` · `session/get_messages` · `session/heartbeat/trigger` · `session/open` · `session/update` | `Capability` · `Plugin` | ✓ | ✓ |
+| `session` | `session` | .vdfs/session | `session/chat/abort` · `session/chat/send` · `session/get_messages` · `session/heartbeat/trigger` · `session/update` | `Capability` · `Plugin` | ✓ | ✓ |
 | `setting` | `setting` | .vdfs/setting | — | `Plugin` · `VdfsProvider` | — | ✓ |
 | `skill` | `skill` | .vdfs/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `telegram` | `telegram` | .vdfs/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
@@ -104,10 +104,10 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio\src` | 202 文件 / 54946 行 | 53 文件 / 10747 行 |
+| `symbio\src` | 197 文件 / 55039 行 | 53 文件 / 11096 行 |
 | `cli\src` | 4 文件 / 1143 行 | 0 文件 / 0 行 |
 | `tauri\src-tauri\src` | 3 文件 / 347 行 | 0 文件 / 0 行 |
-| `tauri\src` | 88 文件 / 17392 行 | 24 文件 / 4569 行 |
+| `tauri\src` | 84 文件 / 17320 行 | 24 文件 / 4699 行 |
 
 ### 5.2 宿主接缝（前端到底有多大）
 
@@ -118,4 +118,4 @@
 
 ---
 
-> 生成时间：2026-09-18 14:05:43 UTC · 源：`git rev-parse HEAD` = `2993adf`
+> 生成时间：2026-09-18 15:07:23 UTC · 源：`git rev-parse HEAD` = `680c98c`

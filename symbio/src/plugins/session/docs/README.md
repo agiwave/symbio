@@ -22,6 +22,7 @@
 | [perf.md](./perf.md) | 现行设计 | 会话/转写的前端性能设计 + 存储拆分（元数据与消息分文件，清单慢的根因解药） |
 | [vdfs-session-messages.md](./vdfs-session-messages.md) | 现行设计（S16–S19 已完成） | 会话消息的 VDFS 化：转写即列表、流式即追加；地址与节点形状、变更语义、迁移路线 |
 | [cascading-options-mechanism.md](./cascading-options-mechanism.md) | 现行规范 | 会话页「选项行」的级联选项机制与规范（宿主 = `options.rs`，收集走 core 的 `OptionVisitor`） |
+| [legacy-route-migration.md](./legacy-route-migration.md) | 审计（待执行，S1–S7） | 会话旧路由审计：11 条路由分「可删（死路由）/ 可迁 VDFS / 必须保留」三档，附影响面与执行顺序 |
 
 > **已归档的过程产物**（两份审计，`docs/archive/implementation-logs/`）：
 > [`session-mechanism-audit.md`](../../../../../docs/archive/implementation-logs/session-mechanism-audit.md)（机制审计与简化方案，方案已全部落地）
