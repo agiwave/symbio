@@ -247,11 +247,7 @@ impl SessionStore {
             },
         )
         .await?;
-        atomic_write(
-            &dir.join(SESSION_FILE),
-            &SessionMetaFile::of(&summary),
-        )
-        .await
+        atomic_write(&dir.join(SESSION_FILE), &SessionMetaFile::of(&summary)).await
     }
 
     /// 删除指定会话（含所有关联存档与——顶层会话的——全部子会话）
@@ -676,11 +672,7 @@ async fn split_inline_messages(dir: &Path) -> Result<(), PluginError> {
         updated_at: meta.updated_at,
         metadata: meta.metadata.clone(),
     });
-    atomic_write(
-        &dir.join(SESSION_FILE),
-        &SessionMetaFile::of(&summary),
-    )
-    .await
+    atomic_write(&dir.join(SESSION_FILE), &SessionMetaFile::of(&summary)).await
 }
 
 /// 清单排序：`updated_at` 降序（两种驻留方式共用同一份，清单顺序不分叉）

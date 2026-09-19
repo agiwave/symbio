@@ -106,28 +106,45 @@ function stripComments(txt) {
  * 故按**花括号配对**精确剔除模块体，并对字符串字面量做感知（测试代码里
  * `format!("{{}}")` 这类字面量括号会让朴素配对错位）。
  */
-function stripTestModules(txt) {
+/**
+ * 收集 `#[cfg(test)]` 测试模块占据的字符区间 `[start, end)`。
+ *
+ * 扫描逻辑的**唯一真源**：`stripTestModules`（提取事实时剔除测试代码）与
+ * `splitRustLines`（统计行数时把内联测试归属到"测试"列）都建立在它之上。
+ */
+function testModuleSpans(txt) {
   const MARKER = "#[cfg(test)]";
-  let out = "";
+  const spans = [];
   let i = 0;
   for (;;) {
     const idx = txt.indexOf(MARKER, i);
-    if (idx < 0) {
-      out += txt.slice(i);
-      return out;
-    }
-    out += txt.slice(i, idx);
+    if (idx < 0) return spans;
     const after = txt.slice(idx + MARKER.length);
     const modHead = after.match(/^\s*(?:#\[[^\]]*\]\s*)*mod\s+[A-Za-z0-9_]+\s*\{/);
     // 进度保证：无论匹配是否成功，i 都必须严格前进（否则死循环）
     if (modHead) {
       const open = idx + MARKER.length + modHead[0].length - 1;
-      i = Math.max(matchBrace(txt, open) + 1, open + 1);
+      const end = Math.max(matchBrace(txt, open) + 1, open + 1);
+      spans.push([idx, end]);
+      i = end;
     } else {
       // 不是模块（如 `#[cfg(test)] use …;`）——只吞掉标记本身，保留后续代码
       i = idx + MARKER.length;
     }
   }
+}
+
+/** 剔除上面那些区间，其余文本原样保留（顺序拼接即等价于"挖掉"） */
+function stripTestModules(txt) {
+  const spans = testModuleSpans(txt);
+  if (spans.length === 0) return txt;
+  let out = "";
+  let i = 0;
+  for (const [s, e] of spans) {
+    out += txt.slice(i, s);
+    i = e;
+  }
+  return out + txt.slice(i);
 }
 
 /** 从 `{` 起做字符串感知的花括号配对，返回对应 `}` 的下标（失败返回文本末尾） */
@@ -375,16 +392,46 @@ function countLines(files) {
   return n;
 }
 
+/**
+ * `.rs` 文件的实现/测试行数归属。
+ *
+ * 为什么需要：`#[cfg(test)] mod tests { … }` 是**内联**在实现文件里的，按"整文件"
+ * 归类会把测试行算进实现（实测：`symbio/src` 的实现行因此虚高约 7.5k，测试行虚低
+ * 同量，会让人误判测试密度）。独立测试文件（`*.test.rs` / `tests.rs`）本来就被
+ * `walkScope` 分开了，这里只处理内联模块。
+ *
+ * 返回仍按**行数**（换行符个数）计，与 `countLines` 同口径。
+ */
+function splitRustLines(files) {
+  let impl = 0;
+  let test = 0;
+  for (const f of files) {
+    const txt = readFileSync(f, "utf8");
+    const total = txt.split("\n").length - 1;
+    let inlineTest = 0;
+    for (const [s, e] of testModuleSpans(txt)) {
+      inlineTest += txt.slice(s, e).split("\n").length - 1;
+    }
+    impl += total - inlineTest;
+    test += inlineTest;
+  }
+  return { impl, test };
+}
+
 /** 一个统计范围：dir 相对仓库根，exts 参与统计的后缀 */
 function scopeRow(dir, exts) {
   const impl = walkScope(path.join(ROOT, dir), exts, false);
   const test = walkScope(path.join(ROOT, dir), exts, true);
+  // `.rs` 的内联测试模块按归属从「实现」移入「测试」；其它后缀没有这个概念
+  const split = exts.includes(".rs")
+    ? splitRustLines(impl)
+    : { impl: countLines(impl), test: 0 };
   return {
     dir,
     implFiles: impl.length,
-    implLines: countLines(impl),
+    implLines: split.impl,
     testFiles: test.length,
-    testLines: countLines(test),
+    testLines: countLines(test) + split.test,
   };
 }
 

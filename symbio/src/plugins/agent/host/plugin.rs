@@ -256,11 +256,7 @@ impl AgentPlugin {
 
         // 与 `home` 造 `worker` 同形：把目录（子 Agent 的根）与必需插件清单告知
         // 容器，其余交给 composite 扫描装配——子 Agent 与系统 Agent 因此结构相同。
-        let sub_context = Arc::new(SimpleRequest::new(self.router.clone(), None));
-        if let Some(std_ctx) = ctx.as_any().downcast_ref::<SimpleRequest>() {
-            let mut envs = sub_context.envs.write().unwrap();
-            *envs = std_ctx.envs.read().unwrap().clone();
-        }
+        let sub_context = Arc::new(SimpleRequest::child_of(ctx, self.router.clone()));
         sub_context.set(PLUGIN_DIR, PluginDir::at(&dir, PLUGIN_COMPOSITE));
         sub_context.set(
             REQUIRED_PLUGINS,

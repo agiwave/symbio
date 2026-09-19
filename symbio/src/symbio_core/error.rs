@@ -152,78 +152,37 @@ impl From<serde_json::Error> for PluginError {
     }
 }
 
-impl From<std::io::Error> for PluginError {
-    fn from(err: std::io::Error) -> Self {
-        Self::InternalError(err.to_string())
-    }
-}
+// 曾有一个 `From<std::io::Error> for PluginError`（经 `to_string()` 收敛为
+// `InternalError`）。它已删除，且**不要**加回来：
+//
+// - 它把 `io::ErrorKind` 抹平成文案，调用方再没法把"文件不存在"与"权限不足"
+//   分开，而本文件的既定纪律恰恰是"分派只认类型化错误码，不认文案"；
+// - 它在这套代码里**零可达路径**：所有 io 失败都在边界处显式
+//   `.map_err(..)` 成各自正确的分类（如 `store.rs` 的"条目不存在"）。
+//   保留一个无人使用、且用起来会丢信息的 impl，只会诱导后来者走错路。
+//   真需要 `?` 传播 io 错误时，编译器会报出来，那正是应当停下来做分类决策的点。
 
-/// 锁操作结果类型别名
-pub type LockResult<T> = std::sync::LockResult<T>;
-
-/// 将 PoisonError 转换为 PluginError
+/// 取读锁；**锁毒化时恢复数据，而不是二次 panic**。
+///
+/// 为什么是恢复：这些锁保护的都是普通表（`envs` / `extensions` / 内存条目表），
+/// 毒化只可能来自"持锁线程 panic"这一种情形，表本身依旧结构完好。此时若跟着
+/// panic，一个线程的崩溃就把整个插件永久变成不可用——代价远大于收益。
+///
+/// 可见性刻意是 `pub(crate)`：写成 `pub` 会被本模块的 `pub use error::*`
+/// 出口成对外 API，`dead_code` 便对它结构性失明，最终攒出一批"无人调用的
+/// 词汇表"（本文件曾有一版 8 个这样的 helper，全仓零使用）。`pub(crate)`
+/// 让编译器继续盯着：一旦没人用了，它会直接报出来。
 #[inline]
-pub fn map_poison_error(e: std::sync::PoisonError<()>) -> PluginError {
-    PluginError::InternalError(format!("Lock poisoned: {e}"))
-}
-
-/// 将 RwLock 读写锁错误转换为 PluginError
-#[inline]
-pub fn from_rwlock_write_error<T>(
-    e: std::sync::TryLockError<RwLockWriteGuard<'_, T>>,
-) -> PluginError {
-    match e {
-        std::sync::TryLockError::Poisoned(_) => {
-            PluginError::InternalError("Write lock poisoned".to_string())
-        }
-        std::sync::TryLockError::WouldBlock => {
-            PluginError::InternalError("Write lock would block".to_string())
-        }
-    }
-}
-
-#[inline]
-pub fn from_rwlock_read_error<T>(
-    e: std::sync::TryLockError<RwLockReadGuard<'_, T>>,
-) -> PluginError {
-    match e {
-        std::sync::TryLockError::Poisoned(_) => {
-            PluginError::InternalError("Read lock poisoned".to_string())
-        }
-        std::sync::TryLockError::WouldBlock => {
-            PluginError::InternalError("Read lock would block".to_string())
-        }
-    }
-}
-
-/// 转换 RwLock 写锁为 Result
-#[inline]
-pub fn rwlock_write<T>(lock: &std::sync::RwLock<T>) -> LockResult<RwLockWriteGuard<'_, T>> {
-    lock.write()
-}
-
-/// 转换 RwLock 读锁为 Result
-#[inline]
-pub fn rwlock_read<T>(lock: &std::sync::RwLock<T>) -> LockResult<RwLockReadGuard<'_, T>> {
+pub(crate) fn lock_read<T>(lock: &std::sync::RwLock<T>) -> RwLockReadGuard<'_, T> {
     lock.read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// 将 Option 转换为 PluginError
+/// 取写锁；毒化时恢复（理由见 [`lock_read`]）。
 #[inline]
-pub fn ok_or_plugin_error<T>(opt: Option<T>, msg: impl Into<String>) -> Result<T, PluginError> {
-    opt.ok_or_else(|| PluginError::NotFound(msg.into()))
-}
-
-/// 通用错误转换：从 String 到 PluginError
-#[inline]
-pub fn into_plugin_error(s: String) -> PluginError {
-    PluginError::InternalError(s)
-}
-
-/// 将 Box<dyn Error> 转换为 PluginError
-#[inline]
-pub fn from_boxed_error(e: Box<dyn std::error::Error + Send + Sync>) -> PluginError {
-    PluginError::InternalError(e.to_string())
+pub(crate) fn lock_write<T>(lock: &std::sync::RwLock<T>) -> RwLockWriteGuard<'_, T> {
+    lock.write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(test)]
@@ -295,5 +254,25 @@ mod tests {
         assert!(PluginError::Aborted.is_abort());
         assert!(!PluginError::Timeout.is_abort());
         assert!(!PluginError::RetryWithoutContextId.is_abort());
+    }
+
+    /// 锁被毒化（持锁线程 panic）后，取锁辅助仍能拿回数据——而不是跟着 panic
+    /// 把整个插件带走。这是 `lock_read` / `lock_write` 存在的唯一理由。
+    #[test]
+    fn lock_helpers_recover_from_poisoning() {
+        let lock = std::sync::RwLock::new(vec![1, 2, 3]);
+
+        // 在另一线程持写锁并 panic ⇒ 毒化
+        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = lock.write().unwrap();
+            panic!("持锁崩溃，制造毒化");
+        }));
+        assert!(died.is_err(), "前提：该线程应当 panic 掉");
+        assert!(lock.read().is_err(), "前提：锁此时确实已被毒化");
+
+        // 常规写法会在这里二次 panic；我们的辅助应当恢复数据并继续
+        assert_eq!(*lock_read(&lock), vec![1, 2, 3], "毒化后数据应完好可取");
+        lock_write(&lock).push(4);
+        assert_eq!(*lock_read(&lock), vec![1, 2, 3, 4], "毒化后仍可正常写入");
     }
 }

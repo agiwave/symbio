@@ -24,10 +24,10 @@
 
 use super::vdfs::CompositeVdfs;
 use crate::symbio_core::{
-    create_object, has_creator, plugins_root, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    Plugin, PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, VdfsProvider,
-    CAPABILITY_VISITOR, KEY_PROVIDER, PATH, PLUGIN_COMPOSITE, PLUGIN_DIR, PLUGIN_FILE,
-    REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_TOOLS,
+    create_object, has_creator, lock_read, plugins_root, InvokeRequest, InvokeRequestExt,
+    InvokeResponse, Plugin, PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest,
+    VdfsProvider, CAPABILITY_VISITOR, KEY_PROVIDER, PATH, PLUGIN_COMPOSITE, PLUGIN_DIR,
+    PLUGIN_FILE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_TOOLS,
 };
 
 use serde_json::Value;
@@ -104,7 +104,7 @@ impl Composite {
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
         let envs = if let Some(std_ctx) = ctx.as_any().downcast_ref::<SimpleRequest>() {
-            std_ctx.envs.read().unwrap().clone()
+            lock_read(&std_ctx.envs).clone()
         } else {
             HashMap::new()
         };
@@ -238,12 +238,7 @@ impl Composite {
     ) {
         // 子上下文只带两样东西：父引用与**自身目录**。
         // 配置不再经 ctx 传递——插件从自己的目录里读。
-        let sub_context = Arc::new(SimpleRequest::new(Some(composite_weak.clone()), None));
-
-        if let Some(std_ctx) = ctx.as_any().downcast_ref::<SimpleRequest>() {
-            let mut sub_envs = sub_context.envs.write().unwrap();
-            *sub_envs = std_ctx.envs.read().unwrap().clone();
-        }
+        let sub_context = Arc::new(SimpleRequest::child_of(ctx, Some(composite_weak.clone())));
         sub_context.set(PLUGIN_DIR, dir);
 
         crate::plugin_info!("composite", "正在构造子插件 {name} -> {provider}");

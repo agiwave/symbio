@@ -156,7 +156,10 @@ mod tests {
     fn data_of(p: PluginPayload) -> serde_json::Value {
         match p {
             PluginPayload::Data(d) => d.serialize().unwrap(),
-            other => panic!("expected data payload, got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "expected data payload, got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 

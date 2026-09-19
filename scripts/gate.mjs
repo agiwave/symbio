@@ -135,7 +135,27 @@ const BASELINE = {
   //   ×1（5 条退役路由不得被加回来）。净 +11。
   //   经回退验证：去掉消息 `write` 的 id 补齐逻辑，`message_write_accepts_a_patch_without_id`
   //   即红——该例正是首轮跑测试抓出的真实缺陷（`ChatMessage::id` 必填让「字段子集」不成立）。
-  rustTests: 732,
+  // 732 → 765：后端审查 8 项发现落地的回归测试（+33，按文件分布：
+  //   web/http_request 6、local/policy 5、web/web_search 4、telegram/schemas 4、
+  //   hook/registry 4、model/protocols/mod 3、event_bus/plugin 3、session/store/tests 2、
+  //   vdfs_service/dir 1、vdfs/fs 1）。
+  //   覆盖：路径穿越的反斜杠分支与条目层分隔符走私（写哨兵目录证明 `remove_dir_all`
+  //   逃不出条目根）、shell 判定改为逐段过白名单 / 命令替换被拒 / wrapper 强制审批 /
+  //   限流由恒 false 变为真生效、会话并发保存的 tmp 名唯一与「整段读-改-写」串行化、
+  //   SSE 前缀容忍、web 的 SSRF 与通配域名标签边界。
+  //   该批同时修掉两个真实缺陷（SSRF 私有 IP 前缀判定、裸 `ends_with` 放行
+  //   `evil-example.com`），故这 +33 不只是「补测试」，也把缺陷本身钉住了；
+  //   另补 web / hook / telegram / event_bus 四个原零测试插件的首批用例。
+  // 765 → 785：后端架构评估的改进项落地（+20，按文件分布：
+  //   gateway/server 12、home/plugin.test 4、symbio_core/plugin 3、symbio_core/error 1）。
+  //   覆盖：此前**零测试**的 gateway 网络面（SHA-1 已知答案与 RFC 6455 握手向量、
+  //   Bearer 鉴权不得凭前缀放行、头 64K / 体 8M / WS 帧上限须在**分配之前**拒绝、
+  //   掩码帧解码与三种长度编码往返）、home 的 `parse_path` 路由原语与
+  //   `work/get_workspace` 读配置缓存、`SimpleRequest::child_of` 的环境**快照**语义
+  //   （改子不得回流到父）、锁辅助在毒化后**恢复数据而非二次 panic**。
+  //   顺带把 `read_request` 由 `TcpStream` 泛化到 `AsyncRead`——那三道防 DoS 的
+  //   闸门此前根本无法被测，只能靠"读代码看起来对"。
+  rustTests: 785,
   vitestFiles: 31,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态

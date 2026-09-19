@@ -408,15 +408,8 @@ impl HomePlugin {
             .clone()
             .expect("HomePlugin self_weak not set");
 
-        let sub_context = Arc::new(SimpleRequest::new(Some(self_weak), None));
-
-        // 继承父上下文的环境变量
-        if let Some(std_ctx) = self.context.as_any().downcast_ref::<SimpleRequest>() {
-            if let Some(sub_std_ctx) = sub_context.as_any().downcast_ref::<SimpleRequest>() {
-                let mut sub_envs = sub_std_ctx.envs.write().unwrap();
-                *sub_envs = std_ctx.envs.read().unwrap().clone();
-            }
-        }
+        // 子上下文继承父上下文的环境变量（收口在 `SimpleRequest::child_of`）
+        let sub_context = Arc::new(SimpleRequest::child_of(&self.context, Some(self_weak)));
 
         // 告知容器它的目录：**系统根**（与 home 同一处），以及系统必备插件清单
         sub_context.set(PLUGIN_DIR, PluginDir::system(PLUGIN_COMPOSITE));

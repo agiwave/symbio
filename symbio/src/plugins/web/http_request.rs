@@ -366,7 +366,10 @@ mod tests {
         assert!(allow("api.github.com"));
         assert!(allow("API.github.COM"));
         assert!(!allow("evil.api.github.com"), "无通配项时只允许精确匹配");
-        assert!(host_matches_allowlist("anything.at.all", &["*".to_string()]));
+        assert!(host_matches_allowlist(
+            "anything.at.all",
+            &["*".to_string()]
+        ));
     }
 
     #[test]

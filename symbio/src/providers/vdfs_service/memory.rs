@@ -19,6 +19,7 @@ use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
     VdfsResult, VdfsWriteResponse, VDFS_CHANGE_DELETED,
 };
+use crate::symbio_core::{lock_read, lock_write};
 use async_trait::async_trait;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -61,23 +62,23 @@ impl MemoryVdfs {
 
     /// 条目 id 清单（按名升序——`BTreeMap` 天然有序）
     pub fn ids(&self) -> Vec<String> {
-        self.entries.read().unwrap().keys().cloned().collect()
+        lock_read(&self.entries).keys().cloned().collect()
     }
 
     /// 条目原文（不存在 → `None`）
     pub fn get(&self, id: &str) -> Option<String> {
-        self.entries.read().unwrap().get(id).map(|e| e.text.clone())
+        lock_read(&self.entries).get(id).map(|e| e.text.clone())
     }
 
     /// 条目写入时间（Unix 毫秒；不存在 → `None`）
     pub fn updated_at(&self, id: &str) -> Option<i64> {
-        self.entries.read().unwrap().get(id).map(|e| e.updated_at)
+        lock_read(&self.entries).get(id).map(|e| e.updated_at)
     }
 
     /// 写条目（新建或覆盖）+ 变更广播；返回是否为**新建**
     pub fn set(&self, id: &str, text: impl Into<String>) -> bool {
         let created = {
-            let mut table = self.entries.write().unwrap();
+            let mut table = lock_write(&self.entries);
             created_of(
                 &mut table,
                 id,
@@ -112,12 +113,12 @@ impl MemoryVdfs {
                 },
             );
         }
-        *self.entries.write().unwrap() = table;
+        *lock_write(&self.entries) = table;
     }
 
     /// 删除条目 + 变更广播（不存在 = `false`，不报错）
     pub fn remove(&self, id: &str) -> bool {
-        let removed = self.entries.write().unwrap().remove(id).is_some();
+        let removed = lock_write(&self.entries).remove(id).is_some();
         if removed {
             notify_change(&self.kind, id, VDFS_CHANGE_DELETED);
         }
@@ -159,7 +160,7 @@ impl VdfsProvider for MemoryVdfs {
                 "内存条目是叶子，没有子项：{path}"
             )));
         }
-        let table = self.entries.read().unwrap();
+        let table = lock_read(&self.entries);
         Ok(table
             .iter()
             .map(|(id, e)| {
@@ -178,7 +179,7 @@ impl VdfsProvider for MemoryVdfs {
             return Ok(VdfsNode::dir("", self.label.clone(), VdfsAccess::LIST));
         }
         let id = self.id_of(path);
-        let table = self.entries.read().unwrap();
+        let table = lock_read(&self.entries);
         let e = table
             .get(&id)
             .ok_or_else(|| VdfsError::NotFound(format!("未找到条目「{id}」")))?;

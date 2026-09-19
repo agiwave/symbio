@@ -261,10 +261,7 @@ async fn save_leaves_no_temp_file_behind() {
         .map(|e| e.file_name().to_string_lossy().to_string())
         .filter(|n| n.ends_with(".tmp"))
         .collect();
-    assert!(
-        leftovers.is_empty(),
-        "rename 后临时文件不该存在"
-    );
+    assert!(leftovers.is_empty(), "rename 后临时文件不该存在");
 }
 
 // ==================== 元数据 / 消息分文件（清单性能） ====================
@@ -497,9 +494,16 @@ fn atomic_tmp_paths_are_unique_per_call() {
     let b = tmp_path_for(&target);
     assert_ne!(a, b, "两次调用必须给出不同 tmp 名");
     let name = a.file_name().unwrap().to_string_lossy().to_string();
-    assert!(name.starts_with("messages.json."), "应保留目标名前缀：{name}");
+    assert!(
+        name.starts_with("messages.json."),
+        "应保留目标名前缀：{name}"
+    );
     assert!(name.ends_with(".tmp"), "{name}");
-    assert_eq!(a.parent(), target.parent(), "tmp 必须落在同目录（同盘才能 rename）");
+    assert_eq!(
+        a.parent(),
+        target.parent(),
+        "tmp 必须落在同目录（同盘才能 rename）"
+    );
 }
 
 /// 同一会话的并发保存不得互相覆盖（「整份 load → 改 → 整份重写」的丢更新）

@@ -44,6 +44,9 @@ pub use configurable::{
     announce_configurable, entry_of, ConfigurableVisitor, DefaultConfigurableVisitor,
 };
 pub use error::*;
+// 锁辅助函数**刻意不走 `pub use error::*`**（见 `error.rs::lock_read` 的说明）：
+// 显式 `pub(crate)` 导入，既让全 crate 可用，又保留 `dead_code` 的可见性。
+pub(crate) use error::{lock_read, lock_write};
 pub use homedir::{expand_tilde_path, HomedirRegistry, DEFAULT_HOMEDIR};
 pub use ids::*;
 pub use keys::*;
