@@ -2,9 +2,14 @@
  * Symbio 前端设计令牌（Design Tokens）
  * -----------------------------------------------------------------------------
  * 单一令牌来源：浅色 :root + 深色 :root[data-theme="dark"] 各一套。
- * 现有 --color-* 作为「别名层」映射到新的语义令牌，保证：
- *   1. 已完成的会话区改造零改动、零回退；
- *   2. 曾「被引用但未定义」的令牌（如 --font-mono）均有真实值。
+ * 令牌分两组，命名即归属：
+ *   - **语义令牌**（--surface-* / --border-* / --text-* / --accent* / --danger-*…）
+ *     是通用 UI 的唯一取值来源；
+ *   - **聊天域令牌**（--color-chip-* / --color-*-bubble / --color-banner-*…）
+ *     是会话与消息渲染的专用语义，与语义令牌并列成组定义在此。
+ * **不存在第二套别名层**：旧 --color-* 通用别名（bg/surface/border/text/
+ * primary/input-bg/surface-strong 十个）已于 2026-09-19 全量改名到语义令牌后
+ * 删除——任何新代码一律引用语义令牌，不得再造别名。
  * ============================================================================= */
 
 :root {
@@ -31,7 +36,7 @@
 
   /* ── 描边 border ──────────────────────────────────────────────── */
   --border-subtle:       #eceef2;   /* hairline 分隔线 */
-  --border-default:      #dfe3ea;   /* 常规描边（替代 --color-border） */
+  --border-default:      #dfe3ea;   /* 常规描边 */
   --border-strong:       #c6ccd8;   /* 输入框 hover / 强调描边 */
 
   /* ── 强调色 accent ────────────────────────────────────────────── */
@@ -146,18 +151,6 @@
   --color-banner-bg: #fef3c7;
   --color-banner-border: #f59e0b;
   --color-banner-fg: #92400e;
-
-  /* ── 别名层：将旧 --color-* 映射到新语义令牌 ──────────────────── */
-  --color-bg:           var(--surface-page);
-  --color-surface:      var(--surface-panel);
-  --color-border:       var(--border-default);
-  --color-text:         var(--text-primary);
-  --color-text-secondary: var(--text-secondary);
-  --color-text-muted:   var(--text-muted);
-  --color-primary:      var(--accent);
-  --color-primary-dark: var(--accent-hover);
-  --color-input-bg:     var(--surface-sunken);
-  --color-surface-strong: var(--surface-overlay);
 }
 
 :root[data-theme="dark"] {
@@ -249,16 +242,4 @@
   --color-banner-bg: #3a2f12;
   --color-banner-border: #b45309;
   --color-banner-fg: #fcd34d;
-
-  /* ── 别名层（深色，需重新声明以覆盖浅色别名）────────────────── */
-  --color-bg:           var(--surface-page);
-  --color-surface:      var(--surface-panel);
-  --color-border:       var(--border-default);
-  --color-text:         var(--text-primary);
-  --color-text-secondary: var(--text-secondary);
-  --color-text-muted:   var(--text-muted);
-  --color-primary:      var(--accent);
-  --color-primary-dark: var(--accent-hover);
-  --color-input-bg:     var(--surface-sunken);
-  --color-surface-strong: var(--surface-overlay);
 }

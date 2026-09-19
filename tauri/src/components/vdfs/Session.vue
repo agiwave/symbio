@@ -10,10 +10,10 @@
     详情页——经机制动作「浏览内部」进入会话同名目录
     `<id>/工作目录[/<rel>]`，与子会话并列，见 docs/design/vdfs.md）；
   - node 无 id（机制「新建」态 = **草稿节点**，见 `useVdfs.startNew`）：新建会话
-    引导——输入区与现有会话完全一致（ChatInputArea + ChatOptionBar 草稿态：
-    目录/Agent/模型/模式/风险等级/心跳均可选，由级联选项机制下发，暂存于机制
-    内部的 metadata 缓冲，发送首条消息时经 createSession(patch) **一次
-    `vdfs/write`** 创建并落库——id 由后端生成）。
+    引导——输入区与现有会话完全一致（`ChatComposer` 草稿态：目录/Agent/模型/模式/
+    风险等级/心跳均可选，由级联选项机制下发，暂存于机制内部的 metadata 缓冲，
+    发送首条消息时经 `createSessionWithFirstMessage` **一次 `vdfs/write`** 创建并
+    落库——id 由后端生成）。
 
   选中同步：机制选中（:key 重挂载）是唯一真相，watch node.name → store.selectSession。
   创建经 emit('created') 回到机制页面层。
@@ -42,31 +42,28 @@
       <p class="create-desc">
         输入区与现有会话完全一致——工作目录、智能体、模型、运行模式与风险等级均可在发送前选择；发送第一条消息时才会真正创建会话（懒创建，不产生空会话）。
       </p>
-      <ChatInputArea
-        ref="draftInputRef"
+      <ChatComposer
+        ref="draftComposerRef"
         v-model="draftText"
         v-model:attached-images="draftImages"
         :is-loading="creating"
+        autofocus
         class="create-chat-input"
         @submit="onSendFirst"
       />
-      <!-- 草稿态选项行：与已有会话同源（级联选项机制），无会话时选择缓冲于
-           机制内部，创建会话时作为 metadata 补丁一次写入 -->
-      <ChatOptionBar ref="draftOptionsRef" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { isVdfsDraft, type DetailAction, type VdfsNode } from '@/schemas/vdfs'
 import type { ImageAttachment } from '@/types'
 import { useSessionsStore } from '@/stores/sessions'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
 import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
-import ChatInputArea from '@/components/chat/ChatInputArea.vue'
-import ChatOptionBar from '@/components/chat/ChatOptionBar.vue'
+import ChatComposer from '@/components/chat/ChatComposer.vue'
 
 const props = defineProps<{
   /** 会话节点（`.vdfs/session/<id>`）；无 id / 名字 = 新建草稿态 */
@@ -105,17 +102,14 @@ const hasId = computed(() => !isVdfsDraft(props.node))
 
 /**
  * 新建态（懒创建）草稿：输入文本 + 选项行的 metadata 缓冲。
- * 发送首条消息时经 createSession(metadataPatch) 一并写入 metadata 落库。
+ * 发送首条消息时经 createSessionWithFirstMessage(metadataPatch, 首条消息)
+ * 原子地「建会话 + 排队首条消息」（队列项的 id 必然等于新建出来的 id）。
  */
-const draftInputRef = ref<{ resetHeight: () => void; textarea: HTMLTextAreaElement | null } | null>(null)
-const draftOptionsRef = ref<{ getDraftMetadata: () => Record<string, unknown> } | null>(null)
+const draftComposerRef = ref<{
+  getDraftMetadata: () => Record<string, unknown>
+} | null>(null)
 const draftText = ref('')
 const draftImages = ref<ImageAttachment[]>([])
-
-// 挂载后自动聚焦输入框（新建引导，减少一次点击）
-onMounted(() => {
-  void nextTick(() => draftInputRef.value?.textarea?.focus())
-})
 
 /** 动作分发（ChatMainPanel 头部按钮 → 页面层机制通道） */
 function onAction(a: DetailAction) {
@@ -139,9 +133,10 @@ watch(
  *
  * 机制约定（资源生命周期联动）：
  * - 新建态不创建任何节点、清单不更新；
- * - 发送首条消息才调 createSession 真正建会话（草稿选项行的 metadata 补丁由
- *   级联选项机制通用缓冲产出，创建时一次性写入 metadata；workdir 缺省回退最近
- *   使用目录由 createSession 兜底），同时向 store 排队该首条消息（文本 + 附件）；
+ * - 发送首条消息才真正建会话（草稿选项行的 metadata 补丁由级联选项机制通用
+ *   缓冲产出；workdir 缺省回退最近使用目录由 store 兜底），同时把首条消息排进
+ *   邮箱——**建会话与排队是一个原子操作**（`createSessionWithFirstMessage`），
+ *   否则「队列项的 id === 新建出来的 id」这条不变式就得由调用方用局部变量维持；
  * - emit('created', id) 让工作台刷新清单并立即选中新会话；
  * - 本组件卸载 → 新选中项的 ChatMainPanel/ModelChatPanel 挂载 →
  *   消费排队消息（按 id 匹配）→ 发出首条消息，完成闭环。
@@ -154,15 +149,12 @@ async function onSendFirst() {
     // 懒创建：此刻才真正建会话——一次 `vdfs/write`（写会话挂载根，无名字，
     // id 由后端生成）；草稿选择（机制通用 metadata 补丁）随创建一并落库，
     // 保证选中切换后选项栏回显与草稿一致。
-    const id = await store.createSession(draftOptionsRef.value?.getDraftMetadata())
-    // 首条消息（含附件）排队给新会话的 ChatMainPanel；附件 thumbnailUrl 是
-    // object URL，所有权随载荷转移（消费端发送后 revoke），此处**不可 revoke**。
-    store.pendingFirstMessage = {
-      id,
-      text,
-      images: draftImages.value.length ? draftImages.value : undefined
-    }
-    // 清空本地草稿输入（附件不 revoke，见上）
+    const id = await store.createSessionWithFirstMessage(
+      draftComposerRef.value?.getDraftMetadata(),
+      { text, images: draftImages.value.length ? draftImages.value : undefined }
+    )
+    // 清空本地草稿输入（附件的 object URL 所有权已随载荷转移给邮箱，
+    // 故此处**不可 revoke**——契约见 store 的 `PendingFirstMessage`）
     draftText.value = ''
     draftImages.value = []
     emit('created', id)
@@ -182,7 +174,7 @@ async function onSendFirst() {
   width: 100%;
   height: 100%;
   min-height: 0;
-  background: var(--color-bg);
+  background: var(--surface-page);
 }
 
 .col-chat {

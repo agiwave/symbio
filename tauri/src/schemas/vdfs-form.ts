@@ -188,3 +188,81 @@ export function mergeDetailActions(
   }
   return { actions, busy, disabled }
 }
+
+// ==================== 预设联动（机制唯一实现） ====================
+//
+// 「选中某个预设 ⇒ 联动填充若干字段 / 注入若干动态候选」这一整套规则原先写在
+// `DetailForm.vue` 的 computed 与 `applyPreset` 里，只能经**组件挂载**间接覆盖。
+// 而它恰是本层最绕的一段（fill 策略 / set_always / 动态候选 / 建议合并）——
+// 最该被直接钉住的规则，覆盖却最薄。故下沉为纯函数：**规则在这里，状态在组件**。
+
+/** 判定空值（`set` 的 `if_empty` 策略用；与上传绑定的 id/name 回落链同口径） */
+function isDetailValueEmpty(v: unknown): boolean {
+  return v == null || v === '' || (Array.isArray(v) && v.length === 0)
+}
+
+/** 由触发字段的当前值解出命中的预设（无规格 / 未命中 → `null`） */
+export function detailPresetOf(
+  spec: DetailPresetSpec | null | undefined,
+  triggerValue: unknown,
+): DetailPreset | null {
+  if (!spec) return null
+  return spec.presets.find((p) => p.value === triggerValue) ?? null
+}
+
+/**
+ * 字段候选：`options_from_preset` 时取当前预设注入的候选（**值即标签**——
+ * 预设给的是协议名 / 模型名一类标识，没有另一套展示文案），否则用静态 options。
+ */
+export function detailPresetFieldOptions(
+  f: DetailField,
+  preset: DetailPreset | null,
+): DetailOption[] {
+  if (!f.options_from_preset) return f.options ?? []
+  return (preset?.options?.[f.key] ?? []).map((v) => ({ value: v, label: v }))
+}
+
+/** datalist 建议：静态 `suggestions` 在前 + 预设动态候选在后（去重） */
+export function detailPresetFieldSuggestions(
+  f: DetailField,
+  preset: DetailPreset | null,
+): string[] {
+  const staticSug = f.suggestions ?? []
+  if (!f.suggestions_from_preset) return staticSug
+  const dyn = preset?.options?.[f.key] ?? []
+  return [...staticSug, ...dyn.filter((v) => !staticSug.includes(v))]
+}
+
+/**
+ * 预设变更要写入的**字段补丁**（不直接改表单模型：规则层不持状态）。
+ *
+ * 两条规则，缺一不可：
+ *
+ * 1. `set` 按 `spec.fill` 策略填充 —— `if_empty` 只补空字段（不覆盖用户已填的），
+ *    `always` 一律覆盖；
+ * 2. `set_always` **总是**覆盖，且**不受 `applySet` 影响**（如切换预设时把协议
+ *    校正为该预设支持的首个协议——「编辑态不重填」不该把它一并跳过）。
+ *
+ * @param applySet `false` = 只应用 `set_always`。编辑态预填走这条路：不覆盖用户
+ *   已填的一般字段，但仍要校正必须一致的字段。
+ * @param valueOf  取字段当前值（表单模型在组件里，规则层只问不存）
+ */
+export function detailPresetPatch(
+  spec: DetailPresetSpec | null | undefined,
+  preset: DetailPreset | null,
+  valueOf: (key: string) => unknown,
+  applySet: boolean,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  if (spec && preset && applySet && preset.set) {
+    const ifEmpty = spec.fill !== 'always'
+    for (const [k, v] of Object.entries(preset.set)) {
+      if (!ifEmpty || isDetailValueEmpty(valueOf(k))) patch[k] = v
+    }
+  }
+  // set_always 后写：同一键同时出现在 set 与 set_always 时，以后者为准
+  if (preset?.set_always) {
+    for (const [k, v] of Object.entries(preset.set_always)) patch[k] = v
+  }
+  return patch
+}

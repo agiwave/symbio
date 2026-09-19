@@ -24,7 +24,7 @@
 .markdown-body {
   font-size: 0.9rem;
   line-height: 1.6;
-  color: var(--color-text, #0f172a);
+  color: var(--text-primary);
   word-break: break-word;
   overflow-wrap: anywhere;
   max-width: 100%;
@@ -78,7 +78,7 @@
   margin: 0.2rem 0;
 }
 .markdown-body a {
-  color: var(--color-primary, #667eea);
+  color: var(--accent);
   text-decoration: none;
 }
 .markdown-body a:hover {
@@ -107,8 +107,8 @@
 .markdown-body blockquote {
   margin: 0.5rem 0;
   padding-left: 0.8rem;
-  border-left: 0.1875rem solid var(--color-border, #e2e8f0);
-  color: var(--color-text-secondary, #475569);
+  border-left: 0.1875rem solid var(--border-default);
+  color: var(--text-secondary);
 }
 .markdown-body table {
   border-collapse: collapse;
@@ -118,7 +118,7 @@
 }
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid var(--color-border, #e2e8f0);
+  border: 1px solid var(--border-default);
   padding: 0.3rem 0.5rem;
   font-size: 0.85rem;
 }

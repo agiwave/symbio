@@ -94,82 +94,56 @@
     </template>
 
     <template #detail>
-      <!-- 新建：多于一种类型时先选类型。选完**直接进入该类型的详情页**
-           （草稿态：无 id / 名字），与「选中一项」是同一条通道——名字要么在
-           详情页里产生（如会话的首条消息），要么由后端生成。 -->
-      <div v-if="creatingTyped" class="vdfs-prompt">
-        <template v-if="!createType">
-          <h3 class="prompt-title">新建</h3>
-          <p class="prompt-hint">请选择要新建的类型</p>
-          <div class="type-choice-list">
-            <button
-              v-for="t in creatableTypes"
-              :key="t.ext"
-              type="button"
-              class="type-choice-btn"
-              @click="chooseType(t)"
-            >
-              <span class="type-choice-label">{{ t.title || t.ext }}</span>
-              <span class="type-choice-hint">{{ t.ext }}</span>
-            </button>
-          </div>
-          <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
-          <div class="prompt-actions">
-            <button class="action-btn secondary" :disabled="saving" @click="cancelTyped">取消</button>
-          </div>
-        </template>
+      <!-- ==================== 提示态（与详情态互斥） ====================
+           新建（选类型 / 选文件）与重命名是三种**瞬态交互**，都占用详情槽；
+           它们与「选中一项的详情」互斥——这个不变式由**一个判别式状态**
+           （`promptKind`）表达，而不是若干布尔各自在 startXxx 里互相复位
+           （漏一处就是两个提示叠在同一个槽里）。
 
-        <!-- 内容来自本地文件（如 zip 整包导入）：内容在打开详情页之前就已齐备，
-             没有「边看边填」的过程，因此选文件即完成（唯一不进详情页的新建形态） -->
-        <template v-else>
-          <h3 class="prompt-title">导入{{ createType.title || createType.ext }}</h3>
+           三者都套 `DetailShell`：它本就是「详情槽内容的外壳」（标题行 +
+           动作行 + 错误行 + 内容）。提示不是例外——先前那两份手写提示外壳
+           （各自一套标题 / 动作行 / 错误行 / 忙态样式）是同一结构抄了两遍。 -->
+      <DetailShell
+        v-if="promptKind !== 'none'"
+        :title="promptTitle"
+        :actions="promptActions"
+        :busy="promptBusy"
+        :disabled="promptDisabled"
+        :error="detailError"
+        @run="onPromptAction"
+      >
+        <!-- 选类型：清单**就是**动作行（见 promptBar），此处只留一句引导。
+             ⚠️ 不再把 `t.ext` 显示出来：那是**渲染器键**（`session` / `form`），
+             属机制细节——与「列表徽标只给目录、不给文件 ext」是同一条约定。 -->
+        <p v-if="promptKind === 'type'" class="prompt-hint">请选择要新建的类型</p>
+
+        <!-- 从本地文件新建：内容（字节）在打开提示之前就已齐备，故选文件即完成
+             ——唯一不进详情页的新建形态 -->
+        <template v-else-if="promptKind === 'file'">
           <input
             type="file"
             class="prompt-input"
-            :accept="createType.ext ? `.${createType.ext}` : undefined"
-            @change="onTypedFile"
+            :accept="promptAccept"
+            @change="onPromptFile"
           />
           <p class="prompt-hint">写入地址：<code>{{ typedFilePreview }}</code></p>
-          <p v-if="createType.description" class="prompt-hint">{{ createType.description }}</p>
-          <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
-          <div class="prompt-actions">
-            <button class="action-btn" :disabled="saving || !typedFile" @click="submitTypedFile">
-              {{ saving ? '导入中…' : '导入' }}
-            </button>
-            <button
-              v-if="creatableTypes.length > 1"
-              class="action-btn secondary"
-              :disabled="saving"
-              @click="createType = null"
-            >
-              上一步
-            </button>
-            <button class="action-btn secondary" :disabled="saving" @click="cancelTyped">取消</button>
-          </div>
+          <p v-if="promptDescription" class="prompt-hint">{{ promptDescription }}</p>
         </template>
-      </div>
 
-      <!-- 重命名（内联；同一地址空间内移动） -->
-      <div v-else-if="renaming && selectedNode" class="vdfs-prompt">
-        <h3 class="prompt-title">重命名</h3>
-        <input
-          v-model="draftName"
-          class="prompt-input"
-          spellcheck="false"
-          @keyup.enter="submitRename"
-        />
-        <p class="prompt-hint">
-          由 <code>{{ selectedNode.path }}</code> 移动至
-          <code>{{ renamePreview }}</code>
-        </p>
-        <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
-        <div class="prompt-actions">
-          <button class="action-btn" :disabled="saving" @click="submitRename">
-            {{ saving ? '处理中…' : '确定' }}
-          </button>
-          <button class="action-btn secondary" :disabled="saving" @click="cancelRename">取消</button>
-        </div>
-      </div>
+        <!-- 重命名：单字段；回车与动作行的「确定」同一入口 -->
+        <template v-else>
+          <input
+            v-model="promptDraft"
+            class="prompt-input"
+            spellcheck="false"
+            @keyup.enter="submitRename"
+          />
+          <p class="prompt-hint">
+            由 <code>{{ selectedNode?.path }}</code> 移动至
+            <code>{{ renamePreview }}</code>
+          </p>
+        </template>
+      </DetailShell>
 
       <!-- 详情：渲染器由节点 ext 决定（唯一分发点）。**草稿（新建态）也走这里**
            ——同一个 ext 用同一个渲染器，因此「点新建」与「选中一项」在交互上
@@ -207,9 +181,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
+import DetailShell from './DetailShell.vue'
 import { useVdfs } from '@/composables/useVdfs'
 import { getVdfsRenderer, dirIconOf, resolveVdfsRenderer } from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
@@ -220,6 +195,7 @@ import {
   newFileNameOf,
   vdfsJoin,
   vdfsParent,
+  type DetailAction,
   type VdfsNewType,
   type VdfsNode,
 } from '@/schemas/vdfs'
@@ -341,61 +317,146 @@ function onAction(id: string) {
   void runAction(id)
 }
 
-// ==================== 新建（类型化；类型由节点声明，§5） ====================
+// ==================== 提示态（选类型 / 选文件 / 重命名） ====================
 //
-// 两种形态，判据是**内容是否在打开详情页之前就已齐备**：
+// 三者互斥、且都不进「选中项的详情」通道，故用一个**判别式**表达：
+// `promptKind` 决定界面上是哪一个（`none` = 没有提示，详情槽交给渲染器）。
+// 旧写法是两个布尔（creatingTyped / renaming）加三个载荷 ref，互斥靠两个
+// startXxx 各自把对方复位来维持——那是不变式存在两种写法的典型。
 //
+// 新建的两种形态，判据是**内容是否在打开详情页之前就已齐备**：
 // - 缺省：点新建 = **进入该类型的详情页**（草稿态，无 id / 名字）——名字要么
-//   在详情页里产生（如会话的首条消息），要么由后端生成（写目录自身，
-//   见 `useVdfs.write`）；
+//   在详情页里产生（如会话的首条消息），要么由后端生成（写目录自身，见 `write`）；
 // - `source = file`：内容就是那份本地文件，选文件即完成（进详情页无事可做）。
 //
 // 多于一种类型时先让用户选类型，选完立刻落到上面两条之一。
 
-const creatingTyped = ref(false)
-const createType = ref<VdfsNewType | null>(null)
-/** `source = file` 的类型：待导入的本地文件 */
-const typedFile = ref<File | null>(null)
+/** 详情槽当前显示的提示（`none` = 显示选中项的详情） */
+const promptKind = ref<'none' | 'type' | 'file' | 'rename'>('none')
+/** 提示态载荷：`file` 形态下待导入的类型（其 `source = file`） */
+const promptType = ref<VdfsNewType | null>(null)
+/** 提示态载荷：`file` 形态下已选的本地文件 */
+const promptFile = ref<File | null>(null)
+/** 提示态载荷：重命名的草稿名 */
+const promptDraft = ref('')
+
+/** 进入提示态（清掉上一条详情级错误：提示是新的开始，不继承旧错） */
+function openPrompt(kind: 'type' | 'file' | 'rename') {
+  detailError.value = ''
+  promptKind.value = kind
+}
+
+/** 收起提示态（载荷一并清空，避免下次打开时看到上一次的残留） */
+function closePrompt() {
+  promptKind.value = 'none'
+  promptType.value = null
+  promptFile.value = null
+  promptDraft.value = ''
+}
+
+const promptTitle = computed(() => {
+  switch (promptKind.value) {
+    case 'type':
+      return '新建'
+    case 'file': {
+      const t = promptType.value
+      return `导入${t?.title || t?.ext || ''}`
+    }
+    case 'rename':
+      return '重命名'
+    default:
+      return ''
+  }
+})
+
+/**
+ * 提示态的行动作行 + 等长禁用标记（**同源计算**：两处各算一遍必然漂移）。
+ *
+ * 「选类型」的清单**就是**动作行：类型之间是并列的等价选择，「选一个 ⇒ 前进」
+ * 正是动作的语义；用一行按钮表达，既不必另写一套列表渲染与样式，也不再需要
+ * 把 `ext` 摆给用户看（见模板注释）。类型动作 id 取 `new:<ext>`，与语义动作 id
+ * （save / delete / …）不冲突，故一律渲染为文字按钮。
+ */
+const promptBar = computed(() => {
+  const actions: DetailAction[] = []
+  const disabled: boolean[] = []
+  const add = (a: DetailAction, off = false) => {
+    actions.push(a)
+    disabled.push(off)
+  }
+  switch (promptKind.value) {
+    case 'type':
+      for (const t of creatableTypes.value) {
+        add({ id: `new:${t.ext}`, label: t.title || t.ext, style: 'secondary' })
+      }
+      add({ id: 'cancel', label: '取消', style: 'secondary' })
+      break
+    case 'file':
+      // 未选文件时「导入」不可点（选文件与导入是两步，避免点了没反应）
+      add({ id: 'import', label: '导入', style: 'primary' }, !promptFile.value)
+      // 多于一种类型时才有「上一步」（回到类型选择）
+      if (creatableTypes.value.length > 1) {
+        add({ id: 'back', label: '上一步', style: 'secondary' })
+      }
+      add({ id: 'cancel', label: '取消', style: 'secondary' })
+      break
+    case 'rename':
+      add({ id: 'confirm', label: '确定', style: 'primary' })
+      add({ id: 'cancel', label: '取消', style: 'secondary' })
+      break
+  }
+  return { actions, disabled }
+})
+const promptActions = computed(() => promptBar.value.actions)
+const promptDisabled = computed(() => promptBar.value.disabled)
+/** 提示态的忙态：写操作（导入 / 重命名）在途时锁住整行，与旧提示态一致 */
+const promptBusy = computed(() => promptActions.value.map(() => saving.value))
+
+/** 文件选择器的接受类型（类型声明的呈现扩展名；未声明则不限） */
+const promptAccept = computed(() => (promptType.value?.ext ? `.${promptType.value.ext}` : undefined))
+/** 该类型的语义说明（provider 下发；没有就不显示） */
+const promptDescription = computed(() => promptType.value?.description ?? '')
 
 /** 导入地址预览（目标名由**文件名**推导，故用户不填名） */
 const typedFilePreview = computed(() => {
-  const t = createType.value
+  const t = promptType.value
   if (!t) return ''
-  const f = typedFile.value
+  const f = promptFile.value
   if (!f) return vdfsJoin(cwd.value, `<文件名>${t.ext ? `.${t.ext}` : ''}`)
   return vdfsJoin(cwd.value, newFileNameOf(f.name, t.ext))
 })
 
-function onTypedFile(e: Event) {
-  const input = e.target as HTMLInputElement
-  typedFile.value = input.files?.[0] ?? null
-  detailError.value = ''
-}
+const renamePreview = computed(() =>
+  selectedNode.value ? vdfsJoin(vdfsParent(selectedNode.value.path), promptDraft.value || '<名称>') : ''
+)
 
-async function submitTypedFile() {
-  const t = createType.value
-  const f = typedFile.value
-  if (!t || !f) return
-  if (await createTypedFile(t, f)) cancelTyped()
-}
-
-/** 选定类型 → 落到「进详情页」或「选文件」两条路之一 */
-function chooseType(t: VdfsNewType) {
-  if (t.source === VDFS_NEW_SOURCE_FILE) {
-    createType.value = t
+function onPromptAction(a: DetailAction) {
+  // 选类型：`new:<ext>` → 落到「进详情页」或「选文件」两条路之一
+  if (promptKind.value === 'type' && a.id.startsWith('new:')) {
+    const t = creatableTypes.value.find((x) => x.ext === a.id.slice(4))
+    if (t) chooseType(t)
     return
   }
-  // 进详情页 = 收起类型面板 + 选中一张草稿节点（与选中一项同一条通道）
-  creatingTyped.value = false
-  createType.value = null
-  detailError.value = ''
-  startNew(t)
+  switch (a.id) {
+    case 'import':
+      void submitTypedFile()
+      return
+    case 'back':
+      // 回到类型选择（只有多类型时动作行才给出这一项）
+      promptKind.value = 'type'
+      return
+    case 'confirm':
+      void submitRename()
+      return
+    case 'cancel':
+      closePrompt()
+  }
 }
 
 function startTypedNew() {
-  renaming.value = false
-  typedFile.value = null
-  detailError.value = ''
+  // 先整体收起当前提示（载荷一并清空）——「新建」可能是在重命名提示开着时点的，
+  // 判别式只保证**界面**上不叠两个提示，残留的 `promptDraft` 得靠这一步清掉。
+  closePrompt()
   const types = creatableTypes.value
   // 恰好一种类型：跳过类型选择，直接落到那一条路
   const only = types[0]
@@ -403,14 +464,55 @@ function startTypedNew() {
     chooseType(only)
     return
   }
-  creatingTyped.value = true
-  createType.value = null
+  openPrompt('type')
 }
-function cancelTyped() {
-  creatingTyped.value = false
-  createType.value = null
-  typedFile.value = null
+
+/** 选定类型 → 落到「进详情页」或「选文件」两条路之一 */
+function chooseType(t: VdfsNewType) {
+  if (t.source === VDFS_NEW_SOURCE_FILE) {
+    promptType.value = t
+    promptFile.value = null
+    openPrompt('file')
+    return
+  }
+  // 进详情页 = 收起提示 + 选中一张草稿节点（与选中一项同一条通道）
+  closePrompt()
+  startNew(t)
 }
+
+function onPromptFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  promptFile.value = input.files?.[0] ?? null
+  detailError.value = ''
+}
+
+async function submitTypedFile() {
+  const t = promptType.value
+  const f = promptFile.value
+  if (!t || !f) return
+  if (await createTypedFile(t, f)) closePrompt()
+}
+
+// ==================== 重命名（内联交互态；S11 起不再有「新建目录」入口） ==========
+
+function startRename() {
+  const node = selectedNode.value
+  if (!node) return
+  promptDraft.value = node.name
+  openPrompt('rename')
+}
+
+async function submitRename() {
+  if (promptKind.value !== 'rename') return
+  if (await renameSelected(promptDraft.value)) closePrompt()
+}
+
+// 选中被清掉（刷新收敛判定该项已消失 / 用户点了别处）时收起重命名提示：
+// 它锚在选中项上——没有选中项就无从改名。
+// 「选类型 / 选文件」不锚在选中项上，故不受影响。
+watch(selectedNode, (n) => {
+  if (!n && promptKind.value === 'rename') closePrompt()
+})
 
 /**
  * 详情渲染器完成资源创建后上报新节点的 **id**（如新建会话落库）：刷新清单并选中它。
@@ -424,29 +526,6 @@ async function onCreated(id: string) {
   await refresh()
   const target = items.value.find((n) => n.path === vdfsJoin(cwd.value, id))
   if (target) void select(target)
-}
-
-// ==================== 重命名（内联交互态；S11 起不再有「新建目录」入口） ==========
-const renaming = ref(false)
-const draftName = ref('')
-
-const renamePreview = computed(() =>
-  selectedNode.value ? vdfsJoin(vdfsParent(selectedNode.value.path), draftName.value || '<名称>') : ''
-)
-
-function startRename() {
-  if (!selectedNode.value) return
-  creatingTyped.value = false
-  renaming.value = true
-  draftName.value = selectedNode.value.name
-  detailError.value = ''
-}
-function cancelRename() {
-  renaming.value = false
-  draftName.value = ''
-}
-async function submitRename() {
-  if (await renameSelected(draftName.value)) cancelRename()
 }
 
 // ==================== 列表项展示（机制级，无类型知识） ====================
@@ -571,20 +650,11 @@ function iconOf(n: VdfsNode) {
   color: var(--text-muted);
 }
 
-/* ============== 内联提示栏（新建 / 重命名） ============== */
-.vdfs-prompt {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 1rem;
-  max-width: 28rem;
-}
-.prompt-title {
-  margin: 0;
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
-}
+/* ============== 提示态（选类型 / 选文件 / 重命名）的**内容**样式 ==============
+   外壳（标题行 / 动作行 / 错误行 / 忙态）由 `DetailShell` 提供——提示不是详情槽
+   的例外。这里只剩三类提示各自的**内容**：一个输入框、若干说明文字。
+   故旧有的 .vdfs-prompt / .prompt-title / .prompt-actions 及整套 .type-choice-*
+   （类型列表已改为动作行，见 promptBar）都已删除。 */
 .prompt-input {
   padding: 0.45rem 0.7rem;
   border: 1px solid var(--border-default);
@@ -619,47 +689,6 @@ function iconOf(n: VdfsNode) {
   margin: 0;
   font-size: 0.78rem;
   color: var(--danger-fg);
-}
-.prompt-actions {
-  display: flex;
-  gap: 0.5rem;
-  padding-top: 0.25rem;
-}
-
-/* ============== 新建类型选择（类型由节点声明） ============== */
-.type-choice-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: 100%;
-  max-width: 18rem;
-}
-.type-choice-btn {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.7rem 1rem;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--surface-panel);
-  cursor: pointer;
-  transition: border-color var(--motion-fast) var(--motion-ease),
-    background var(--motion-fast) var(--motion-ease);
-}
-.type-choice-btn:hover {
-  border-color: var(--accent);
-  background: var(--surface-hover);
-}
-.type-choice-label {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
-}
-.type-choice-hint {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
 }
 
 /* ============== 占位 ============== */

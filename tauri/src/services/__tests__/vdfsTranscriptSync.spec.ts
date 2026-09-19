@@ -44,7 +44,6 @@ vi.mock('@/services/vdfs', () => ({
 vi.mock('@/services/session', () => ({
   listSessions: vi.fn(),
   deleteSession: vi.fn(),
-  createSessionId: vi.fn(),
   updateSession: vi.fn(),
   clearMessages: vi.fn(),
   deleteMessage: vi.fn(),

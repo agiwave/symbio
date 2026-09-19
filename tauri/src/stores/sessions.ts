@@ -108,19 +108,39 @@ export const useSessionsStore = defineStore('sessions', () => {
   const lastUsedWorkdir = ref<string | null>(null)
 
   // ===== 新建模式（无 id 详情）：首条消息发送时才真正创建会话（懒创建） =====
-  // 新建态不创建节点、清单不更新；用户发送首条消息时 Session 渲染器才调
-  // createSession 真正建会话，并把首条消息排队在此。ModelChatPanel 挂载后
-  // 消费（按 id 匹配），完成"建会话 + 发首条消息"的闭环。
-  /** 排队中的首条消息：文本 + 可选的图片附件（草稿→会话转移，object URL 所有权一并转移，不可 revoke） */
-  const pendingFirstMessage = ref<{
+  //
+  // 新建态不创建节点、清单不更新；用户发送首条消息时经
+  // `createSessionWithFirstMessage` **原子地**建会话 + 把首条消息排进下面的邮箱。
+  // 新会话面板（ModelChatPanel）挂载后消费（按 id 匹配），完成「建会话 + 发首条
+  // 消息」的闭环。
+  //
+  // 为什么必须是邮箱（而不是 prop 逐级传）：生产者在 `Session`（草稿详情）里，
+  // 消费者是**创建成功后才被选中、才挂载**的另一个组件——消费者此刻还不存在，
+  // 没有可传的对象。故只能经由 store 这个双方共同祖先转交。
+  //
+  // 为什么必须原子（而不是「先 create 再赋值」两步）：队列项的 `id` 必须等于
+  // 刚建出来的 `id`。两步写法下这条不变式由调用方的局部变量维持，漏第二步就是
+  // 静默丢首条消息；收进 store 后此不变式无法被破坏。
+
+  /**
+   * 排队中的首条消息：文本 + 可选的图片附件。
+   *
+   * **所有权契约**：附件的 `thumbnailUrl` 是 `URL.createObjectURL` 出来的
+   * object URL，所有权随载荷从「草稿输入区」转移到本邮箱，再转移到消费它的会话
+   * 面板。转移链上的任何一环**都不得 revoke**——只有最终发送者（ModelChatPanel
+   * 的 `handleSend`）在消息发出后才 revoke。提前 revoke 会让预览图变成裂图。
+   */
+  interface PendingFirstMessage {
+    /** 队列项属于哪个会话（= 刚创建出来的会话 id） */
     id: string
     text: string
     images?: ImageAttachment[]
-  } | null>(null)
+  }
+
+  const pendingFirstMessage = ref<PendingFirstMessage | null>(null)
+
   /** 取出属于 sessionId 的排队首条消息（取出即清除；不匹配返回 null） */
-  function consumePendingFirstMessage(
-    sessionId: string
-  ): { id: string; text: string; images?: ImageAttachment[] } | null {
+  function consumePendingFirstMessage(sessionId: string): PendingFirstMessage | null {
     const p = pendingFirstMessage.value
     if (!p || p.id !== sessionId) return null
     pendingFirstMessage.value = null
@@ -536,6 +556,26 @@ export const useSessionsStore = defineStore('sessions', () => {
       logger.warn('[sessions]', '转写段解析失败（将在下次清单刷新时重试）', e),
     )
 
+    return id
+  }
+
+  /**
+   * 新建会话并排队其首条消息（懒创建的唯一入口）。
+   *
+   * 把「建会话」与「排队首条消息」合成**一个原子操作**：队列项的 `id` 由本函数
+   * 直接取自 `createSession` 的返回值，故「排队项的 id === 新建出来的 id」这条
+   * 不变式不可能被调用方写错（此前是调用方先拿 id、再赋值 `pendingFirstMessage`，
+   * 漏第二步即静默丢首条消息）。
+   *
+   * 失败语义：`createSession` 抛错时邮箱**保持原样**（不会留下指向不存在会话的
+   * 半截队列项），调用方保留草稿即可重试。
+   */
+  async function createSessionWithFirstMessage(
+    metadata: Record<string, unknown> | undefined,
+    first: { text: string; images?: ImageAttachment[] }
+  ): Promise<string> {
+    const id = await createSession(metadata)
+    pendingFirstMessage.value = { id, text: first.text, images: first.images }
     return id
   }
 
@@ -1030,8 +1070,11 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 运行模式（auto / interactive）：写入统一走级联选项机制（metadata 补丁），
     // store 只提供读取 + 本地镜射，避免第二条写入路径。
     getSessionMode,
-    // 新建模式（无 id 详情）懒创建：首条消息排队
-    pendingFirstMessage,
+    // 新建模式（无 id 详情）懒创建：建会话 + 排队首条消息（原子），以及取出
+    // 排队消息。邮箱本体（`pendingFirstMessage`）**不对外暴露**——唯一入口是
+    // `createSessionWithFirstMessage`，否则「排队项的 id === 新建出来的 id」
+    // 这条不变式又散回调用方。
+    createSessionWithFirstMessage,
     consumePendingFirstMessage,
     // 执行风险等级（low / medium / high）
     getSessionRiskLevel,

@@ -61,13 +61,13 @@ const emit = defineEmits<{ retry: [] }>()
 /* 中止不是失败：中性配色，只交代"这一轮没跑完"，不渲染成故障红。 */
 .error-box.aborted {
   background: var(--color-option-bg);
-  border-color: var(--color-border);
-  color: var(--color-text-secondary);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
 }
 .error-box.aborted .retry {
   background: transparent;
-  border-color: var(--color-border);
-  color: var(--color-text-secondary);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
 }
 .retry {
   flex-shrink: 0;

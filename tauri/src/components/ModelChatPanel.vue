@@ -51,20 +51,16 @@
       />
     </div>
 
-    <!-- 输入控制区域 -->
+    <!-- 输入控制区域：输入框 + 选项行由 ChatComposer 唯一装配（不再在此各拼一半） -->
     <div class="chat-controls">
-      <!-- 输入区域 -->
-      <ChatInputArea
-        ref="inputAreaRef"
+      <ChatComposer
+        ref="composerRef"
         v-model="inputText"
         v-model:attached-images="attachedImages"
         :is-loading="isLoading"
+        :session-id="props.sessionId"
         @submit="handleSendOrAbort"
       />
-
-      <!-- 选项行（级联选项机制：工作目录 / 智能体 / 模型 / 运行模式 / 风险等级 /
-           心跳任务… 全部由后端下发，前端只渲染机制，无业务代码） -->
-      <ChatOptionBar :session-id="props.sessionId" />
     </div>
   </div>
 </template>
@@ -95,8 +91,7 @@ import {
 } from '@/registry/messageTypes'
 
 import MessageNode from './MessageNode.vue'
-import ChatInputArea from './chat/ChatInputArea.vue'
-import ChatOptionBar from './chat/ChatOptionBar.vue'
+import ChatComposer from './chat/ChatComposer.vue'
 
 // Props（多会话缩略窗口架构下，ModelChatPanel 只接收 sessionId）
 const props = defineProps<{
@@ -108,7 +103,10 @@ const props = defineProps<{
 
 // --- 状态管理 ---
 const messagesRef = ref<HTMLElement | null>(null)
-const inputAreaRef = ref<any>(null)
+/** 输入区（ChatComposer）：发送后复位高度、排队首条消息回填文本与附件 */
+const composerRef = ref<{
+  resetHeight: () => void
+} | null>(null)
 const inputText = ref('')
 const attachedImages = ref<ImageAttachment[]>([])
 // 编辑单条消息的浮层状态
@@ -243,7 +241,7 @@ function handleSend() {
   inputText.value = ''
   attachedImages.value.forEach(img => img.thumbnailUrl && URL.revokeObjectURL(img.thumbnailUrl))
   attachedImages.value = []
-  inputAreaRef.value?.resetHeight()
+  composerRef.value?.resetHeight()
 
   nextTick(() => scrollToBottom())
 
@@ -394,7 +392,7 @@ watch(
 
 .empty-chat {
   text-align: center;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   padding: 3rem 1rem;
   display: flex;
   flex-direction: column;
@@ -412,8 +410,8 @@ watch(
 
 .chat-controls {
   padding: 0.75rem 1rem;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-surface);
+  border-top: 1px solid var(--border-default);
+  background: var(--surface-panel);
   flex-shrink: 0;
 }
 

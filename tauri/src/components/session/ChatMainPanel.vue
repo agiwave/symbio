@@ -109,6 +109,7 @@ import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
 import VdfsActions from '@/components/vdfs/VdfsActions.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { mergeDetailActions, type DetailAction } from '@/schemas/vdfs'
 
 const props = defineProps<{
@@ -148,14 +149,18 @@ const messagesReady = ref(false)
 const currentLoadedId = ref<string | null>(null)
 const loadError = ref<string | null>(null)
 
-// 防止快切时的 stale guard：保存一个 sequence 编号，
-// 每次 activeId 变化时递增；loadMessages 完成后比对，确认是当前 active 的响应
-let loadSequence = 0
+/**
+ * 会话切换的**代次守卫**（机制唯一实现，见 `useGenerationGuard`）。
+ *
+ * 快速连切会话时，先发出的 `loadMessages` 可能后回来——它会用旧会话的消息
+ * 覆盖新会话的界面。取号 → 响应回来比对 → 过期即丢。
+ */
+const loadGuard = useGenerationGuard()
 
 watch(
   () => store.activeId,
   async (id) => {
-    const seq = ++loadSequence
+    const rev = loadGuard.advance()
     messagesReady.value = false
     currentLoadedId.value = null
     loadError.value = null
@@ -163,14 +168,14 @@ watch(
       try {
         await store.loadMessages(id)
         // 检查是否被新的切换打断
-        if (seq !== loadSequence) {
+        if (loadGuard.revision() !== rev) {
           logger.debug('ChatMainPanel', `loadMessages(${id}) was superseded by a later switch`)
           return
         }
         currentLoadedId.value = id
         messagesReady.value = true
       } catch (e) {
-        if (seq !== loadSequence) return
+        if (loadGuard.revision() !== rev) return
         const msg = e instanceof Error ? e.message : String(e || '未知错误')
         loadError.value = msg
         // 仍然把 currentLoadedId 设为 id，避免 messagesReady 永久 false
@@ -184,15 +189,25 @@ watch(
   { immediate: true }
 )
 
+/**
+ * 重试当前会话的历史加载。
+ *
+ * 同样过守卫：重试期间用户切走了会话，这次响应不得落地——原先直接读
+ * `store.activeId`，会把**新会话**标成已加载，而装的其实是旧会话的消息。
+ */
 async function reloadCurrent() {
-  if (!store.activeId) return
+  const id = store.activeId
+  if (!id) return
+  const rev = loadGuard.advance()
   loadError.value = null
   messagesReady.value = false
   try {
-    await store.loadMessages(store.activeId)
-    currentLoadedId.value = store.activeId
+    await store.loadMessages(id)
+    if (loadGuard.revision() !== rev) return
+    currentLoadedId.value = id
     messagesReady.value = true
   } catch (e) {
+    if (loadGuard.revision() !== rev) return
     const msg = e instanceof Error ? e.message : String(e || '未知错误')
     loadError.value = msg
     messagesReady.value = true
@@ -254,7 +269,7 @@ async function onClearHistory() {
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background: var(--color-surface);
+  background: var(--surface-panel);
   overflow: hidden;
 }
 
@@ -263,7 +278,7 @@ async function onClearHistory() {
   align-items: center;
   justify-content: space-between;
   padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border-default);
   flex-shrink: 0;
   min-height: 2.75rem;
 }
@@ -278,7 +293,7 @@ async function onClearHistory() {
 .session-name {
   font-size: 0.95rem;
   font-weight: 500;
-  color: var(--color-text);
+  color: var(--text-primary);
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -296,7 +311,7 @@ async function onClearHistory() {
   font-family: inherit;
   font-size: 0.95rem;
   font-weight: 500;
-  color: var(--color-text);
+  color: var(--text-primary);
   background: var(--surface-sunken);
   border: 1px solid var(--accent);
   border-radius: 0.375rem;
@@ -321,13 +336,13 @@ async function onClearHistory() {
   background: transparent;
   border-radius: 0.375rem;
   cursor: pointer;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
   transition: all 0.15s;
 }
 
 .header-btn:hover {
   background: var(--surface-hover);
-  color: var(--color-text);
+  color: var(--text-primary);
 }
 
 .chat-body {
@@ -348,7 +363,7 @@ async function onClearHistory() {
   align-items: center;
   justify-content: center;
   width: 100%;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   text-align: center;
   padding: 2rem;
 }
@@ -368,7 +383,7 @@ async function onClearHistory() {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   font-size: 0.9rem;
 }
 
@@ -383,7 +398,7 @@ async function onClearHistory() {
   width: 100%;
   height: 100%;
   text-align: center;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   padding: 2rem;
   gap: 0.5rem;
 }
@@ -397,13 +412,13 @@ async function onClearHistory() {
 .load-error-title {
   font-size: 1rem;
   font-weight: 600;
-  color: var(--color-text);
+  color: var(--text-primary);
   margin: 0;
 }
 
 .load-error-desc {
   font-size: 0.85rem;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   margin: 0;
   max-width: 30rem;
   word-break: break-word;
@@ -423,9 +438,9 @@ async function onClearHistory() {
   padding: 0.4rem 1rem;
   border-radius: 0.375rem;
   font-size: 0.85rem;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text);
+  border: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  color: var(--text-primary);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -435,9 +450,9 @@ async function onClearHistory() {
 }
 
 .load-error-btn.primary {
-  background: var(--color-primary);
+  background: var(--accent);
   color: var(--text-on-accent);
-  border-color: var(--color-primary);
+  border-color: var(--accent);
 }
 
 .load-error-btn.primary:hover {

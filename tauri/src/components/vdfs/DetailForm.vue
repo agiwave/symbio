@@ -167,6 +167,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, watch } from 'vue'
 import DetailShell from './DetailShell.vue'
+import {
+  detailPresetFieldOptions,
+  detailPresetFieldSuggestions,
+  detailPresetOf,
+  detailPresetPatch,
+} from '@/schemas/vdfs-form'
 import type {
   DetailAction,
   DetailBadge,
@@ -546,49 +552,28 @@ function toggleSection(i: number) {
 }
 
 // ==================== 预设联动 ====================
+// 规则本身在 `schemas/vdfs-form`（纯函数，可直接单测）——此处只做状态编排：
+// 「读表单值 → 算补丁 → 写回」。
 const presetSpec = computed(() => props.definition.presets ?? null)
 const currentPreset = computed(() => {
   const spec = presetSpec.value
-  if (!spec) return null
-  return spec.presets.find((p) => p.value === form[spec.field]) ?? null
+  return spec ? detailPresetOf(spec, form[spec.field]) : null
 })
 
-/** 字段候选：静态 options 优先，options_from_preset 时来自当前预设注入 */
+/** 字段候选：静态 options，或 `options_from_preset` 时当前预设注入的候选 */
 function fieldOptions(f: DetailField) {
-  if (f.options_from_preset) {
-    const opts = currentPreset.value?.options?.[f.key] ?? []
-    return opts.map((v) => ({ value: v, label: v }))
-  }
-  return f.options ?? []
+  return detailPresetFieldOptions(f, currentPreset.value)
 }
 
-/** datalist 建议：静态 suggestions + 预设动态候选 */
+/** datalist 建议：静态 + 预设动态候选 */
 function fieldSuggestions(f: DetailField): string[] {
-  const staticSug = f.suggestions ?? []
-  if (!f.suggestions_from_preset) return staticSug
-  const dyn = currentPreset.value?.options?.[f.key] ?? []
-  return [...staticSug, ...dyn.filter((v) => !staticSug.includes(v))]
+  return detailPresetFieldSuggestions(f, currentPreset.value)
 }
 
-/**
- * 预设变更：注入动态候选（总是应用）；按 fill 策略填充 set 值
- * （if_empty = 仅空字段，always = 总是覆盖）。
- */
+/** 应用预设联动算出的字段补丁（fill 策略见 schemas/vdfs-form.detailPresetPatch） */
 function applyPreset(applySet: boolean) {
-  const spec = presetSpec.value
-  if (!spec) return
-  const preset = presetSpec.value!.presets.find((p) => p.value === form[spec.field])
-  if (!preset) return
-  if (applySet && preset.set) {
-    const ifEmpty = spec.fill !== 'always'
-    for (const [k, v] of Object.entries(preset.set)) {
-      if (!ifEmpty || isEmpty(form[k])) form[k] = v
-    }
-  }
-  // set_always：总是覆盖（如切换预设时协议校正为该预设支持的首个协议）
-  if (preset.set_always) {
-    for (const [k, v] of Object.entries(preset.set_always)) form[k] = v
-  }
+  const patch = detailPresetPatch(presetSpec.value, currentPreset.value, (k) => form[k], applySet)
+  Object.assign(form, patch)
 }
 
 function onPresetFieldChange(f: DetailField) {

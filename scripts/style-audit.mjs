@@ -15,6 +15,11 @@
  *     / :class="'a'" 字面量、classList.add/remove/toggle/toggle 字面量、
  *     <script> 中的 kebab-case 字符串字面量（覆盖 computed 返回动态 class 的场景，
  *     属于过近似的"已使用"判定 —— 宁可漏报 unused，不误报 used）
+ *   - **registry 词表**：组件 import 的 `src/registry/**` 模块里的字面量 / 对象键 /
+ *     字符串联合成员。registry 的职责正是「数据 → 呈现」的纯映射（修饰类 / 状态
+ *     色调 / 图标 / 标题），组件把它的返回值直接绑上 `:class`，因此那些词
+ *     **不在组件源码里出现**——不认这条来源就会把 `.node-head.tool` 这类
+ *     真实在用的 scoped 修饰类误报成「定义未使用」。
  *   - 设计令牌（--custom-property）：定义 vs var() 使用，双向检查
  *
  * 「无引用但属正常」只在本文件内显式登记（每条附原因），共四处：
@@ -62,6 +67,10 @@ const isAllowedUnused = (name) =>
 // 组件以 `:class="b.style"` / `:class="[a.style, …]"` 绑定，静态不可解析。
 // 逐个登记（文件 → 类名 → 原因）。**只登记确来自协议词表的类名**，
 // 不要拿它掩盖普通的死样式（那类应当直接删除）。
+//
+// ⚠️ **由本仓库 registry 产出的词表不在此登记**——那条来源由下面的
+// 「registry 词表」规则自动认（组件 import 的 registry 模块即其修饰类来源），
+// 因为它在仓库这一侧、可解析；登记表只留给「词表在后端、前端只是照做」的情形。
 const ALLOW_UNUSED_SCOPED = new Map([
   ['tauri/src/components/vdfs/VdfsActions.vue', new Set(['primary', 'danger'])], // DetailAction.style
   ['tauri/src/components/vdfs/DetailForm.vue', new Set(['disabled', 'accent'])], // DetailBadge.style
@@ -89,6 +98,11 @@ function walk(dir, exts, out = []) {
 }
 
 const stripCssComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+/** 去 JS/TS 注释（块注释 + 行注释）。词表采集不得从注释散文里取词：
+ *  注释里出现「.tool / .run 这类类名」是解释，不是产出。 */
+const stripJsComments = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
 /** 提取 CSS 文本中的类名定义与自定义属性定义。
  *  返回 classes: Map<name, deep:boolean> —— deep=true 表示该类出现在
@@ -145,6 +159,47 @@ for (const f of globalCssFiles) {
     if (!globalProps.has(n)) globalProps.set(n, []);
     globalProps.get(n).push(rel(f));
   }
+}
+
+// ── 1.5 registry 词表（组件 scoped 修饰类的**产出方**）─────────────
+// registry/ 是「数据 → 呈现」的纯映射层：修饰类、状态色调、图标、标题都以
+// 字面量或字符串联合写在那里（如 `MessageHeadModifier` / `MessageStatusTone`），
+// 组件把返回值直接绑到 `:class` 上——于是那些词**不在组件源码里**，
+// 只扫组件必然把真实在用的 scoped 修饰类报成「定义未使用」。
+//
+// 规则（刻意不全局放宽）：**只认组件显式 import 的 registry 模块**，把其中的
+// 字面量 / 对象键 / 字符串联合成员当作该组件的潜在类名来源。它只影响 check B
+// （定义未使用），不参与 check A（使用未定义），因此不会掩盖「引用了不存在
+// 的类」这类真错。与文件头的既有偏向一致：宁可漏报 unused，不误报 used。
+function harvestPresentationTokens(text) {
+  const src = stripJsComments(text);
+  const out = new Set();
+  for (const m of src.matchAll(/'([^'\n]+)'|"([^"\n]+)"/g)) {
+    const s = m[1] ?? m[2];
+    if (/^[a-zA-Z_][\w-]*$/.test(s)) out.add(s);
+  }
+  for (const m of src.matchAll(/\b([a-zA-Z_][\w-]*)\s*:/g)) out.add(m[1]);
+  return out;
+}
+
+const registryFiles = walk(path.join(SRC, 'registry'), ['.ts']);
+const registryTokensByFile = new Map(
+  registryFiles.map((f) => [path.resolve(f), harvestPresentationTokens(fs.readFileSync(f, 'utf8'))]),
+);
+
+/** import 说明符 → 已扫描的 registry 文件（支持扩展名省略 / @ 别名） */
+function resolveRegistryModule(spec, fromFile) {
+  const base = spec.startsWith('@/')
+    ? path.join(SRC, spec.slice(2))
+    : spec.startsWith('.')
+      ? path.resolve(path.dirname(fromFile), spec)
+      : null;
+  if (!base) return null;
+  for (const cand of [base, `${base}.ts`, path.join(base, 'index.ts')]) {
+    const abs = path.resolve(cand);
+    if (registryTokensByFile.has(abs)) return abs;
+  }
+  return null;
 }
 
 // ── 2. 收集 Vue 组件定义与使用 ──────────────────────────────────
@@ -299,6 +354,12 @@ for (const f of vueFiles) {
     if (/^[a-zA-Z_][\w-]*$/.test(s)) scriptTokens.add(s);
   }
   for (const m of script.matchAll(/\b([a-zA-Z_][\w-]*)\s*:/g)) scriptTokens.add(m[1]);
+  // 组件 import 的 registry 模块 = 其 scoped 修饰类的产出方（见 §1.5）
+  const registryTokens = new Set();
+  for (const m of script.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)['"]([^'"]+)['"]/g)) {
+    const mod = resolveRegistryModule(m[1], f);
+    if (mod) for (const t of registryTokensByFile.get(mod)) registryTokens.add(t);
+  }
   vueModels.push({
     file: rel(f),
     scopedClasses: [...scopedClasses.keys()],
@@ -306,6 +367,7 @@ for (const f of vueFiles) {
     globalFromVue: [...globalFromVue.keys()],
     vueProps: [...vueProps],
     scriptTokens: [...scriptTokens],
+    registryTokens: [...registryTokens],
     scriptPrefixes: [...script.matchAll(/`([a-zA-Z][\w-]*-)(?:\$\{|'|"|\s)/g)].map((m) => m[1]),
     tpl: extractTemplateClassUsages(template),
     scriptLiterals: [...script.matchAll(/'([^'\n]+)'|"([^"\n]+)"/g)]
@@ -403,6 +465,7 @@ for (const v of vueModels) {
     ...v.softUsages,
     ...v.scriptLiterals,
     ...v.scriptTokens, // return 'warn' / { thinking: cond } 等动态痕迹
+    ...v.registryTokens, // 本组件 import 的 registry 词表（见 §1.5）
   ]);
   const localPrefixes = [...v.prefixUsages, ...(v.scriptPrefixes ?? [])];
   const perFileAllowed = ALLOW_UNUSED_SCOPED.get(v.file);

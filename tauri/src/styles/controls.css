@@ -1,40 +1,17 @@
 /* =============================================================================
  * Symbio 共享控件样式（在 base.css 之后引入）
  *
- * 目的：收敛各组件 scoped <style> 中反复复制粘贴的通用控件按钮/输入框样式
- * （.action-btn / .icon-btn / .text-input），
- * 做到一次定义、处处复用。
+ * 目的：收敛各组件 scoped <style> 中反复复制粘贴的通用控件样式
+ * （.icon-btn / .text-input），做到一次定义、处处复用。
  *
- * 兼容性：存量组件仍持有同名 scoped 副本（`.action-btn[data-v-x]` 特异性更高），
+ * 兼容性：存量组件仍持有同名 scoped 副本（`.icon-btn[data-v-x]` 特异性更高），
  * 其视觉不受本文件影响；新组件应直接使用此处定义，不再复制粘贴。
+ *
+ * 注：`.action-btn` / `.action-btn.secondary` 曾在这里定义，唯一生产者是
+ * VdfsWorkbench 手写的提示态按钮。提示态改用 `DetailShell`（动作行由
+ * `VdfsActions` 渲染）后已无生产者，故删除（2026-09-19）——按钮一律走
+ * 动作机制，不要再引入第二套按钮类。
  * ============================================================================= */
-
-/* 主操作按钮（实心主色） */
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.95rem;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--text-on-accent);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--motion-fast) var(--motion-ease),
-    opacity var(--motion-fast) var(--motion-ease);
-}
-.action-btn:hover:not(:disabled) { background: var(--accent-hover); }
-.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* 次级按钮（描边） */
-.action-btn.secondary {
-  background: transparent;
-  color: var(--text-primary);
-  border: 1px solid var(--border-default);
-}
-.action-btn.secondary:hover:not(:disabled) { background: var(--surface-hover); }
 
 /* 方形图标按钮（工具栏 / header 操作） */
 .icon-btn {

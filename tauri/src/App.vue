@@ -22,8 +22,8 @@ html, body {
 
 body {
   font-family: var(--font-sans);
-  background: var(--color-bg);
-  color: var(--color-text);
+  background: var(--surface-page);
+  color: var(--text-primary);
   line-height: 1.5;
 }
 

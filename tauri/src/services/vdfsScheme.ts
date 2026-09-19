@@ -67,17 +67,6 @@ export function vdfsSessionScheme(): VdfsSessionScheme | null {
   return { mountDir: cachedMountDir, messagesSeg: cachedMessagesSeg }
 }
 
-/**
- * 直接写入已解析的方案（**仅供测试**）。
- *
- * 测试持有的是协议夹具（`.vdfs/session/abc/消息/m1` 这类字面地址）——
- * 那是测试该有的东西；把方案注入进去即可，不必也不该让测试去列目录。
- */
-export function setVdfsSessionScheme(scheme: VdfsSessionScheme | null): void {
-  cachedMountDir = scheme?.mountDir ?? null
-  cachedMessagesSeg = scheme?.messagesSeg ?? null
-}
-
 /** 清空缓存（测试用） */
 export function resetVdfsSessionScheme(): void {
   cachedMountDir = null

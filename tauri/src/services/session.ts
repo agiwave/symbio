@@ -62,9 +62,6 @@ export type { SessionMetadata } from '../schemas/session_meta'
  * （「清单 = 业务列表」；它进设置菜单走的是 ConfigurableVisitor 那条通道），
  * 过滤因此是**防御**：万一哪天清单里混进了非会话节点，会话列表也不会被污染。
  */
-/** 会话清单的名义上限（后端按「清单项」计数；缺省 = 不传参 = 全量） */
-export const SESSION_LIST_LIMIT = 100
-
 /**
  * 列会话清单。
  *
@@ -228,11 +225,4 @@ export async function updateSession(
     vdfsSessionAddr(await ensureSessionMountDir(), sessionId),
     JSON.stringify({ metadata, ...(title ? { title } : {}) })
   )
-}
-
-/**
- * 创建新会话（生成 ID 并初始化）
- */
-export function createSessionId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2)
 }

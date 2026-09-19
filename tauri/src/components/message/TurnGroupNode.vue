@@ -136,7 +136,7 @@ const { errorText } = useMessageContent(
   width: 0.375rem;
   height: 0.375rem;
   border-radius: 50%;
-  background: var(--color-primary);
+  background: var(--accent);
   animation: turn-pulse 1.2s infinite ease-in-out;
 }
 .turn-pending-dots span:nth-child(2) {
@@ -159,6 +159,6 @@ const { errorText } = useMessageContent(
 }
 .turn-pending-text {
   font-size: 0.8rem;
-  color: var(--color-text-muted, #94a3b8);
+  color: var(--text-muted);
 }
 </style>

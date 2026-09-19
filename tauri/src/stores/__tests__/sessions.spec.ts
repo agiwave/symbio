@@ -64,7 +64,6 @@ const sessionApi = vi.hoisted(() => ({
 vi.mock('@/services/session', () => ({
   listSessions: sessionApi.listSessions,
   deleteSession: vi.fn(),
-  createSessionId: () => 'generated-id',
   updateSession: vi.fn(),
   readSessionTranscript: sessionApi.readSessionTranscript,
   clearMessages: vi.fn(),
@@ -167,6 +166,57 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     const store = useSessionsStore()
     await expect(store.createSession()).rejects.toThrow()
     expect(store.list).toHaveLength(0)
+  })
+
+  // ── 懒创建握手：建会话 + 排队首条消息 ──────────────────────────────
+  //
+  // 「队列项的 id === 新建出来的 id」是这条链路的**唯一不变式**，且它必须由
+  // store 保证：此前是调用方先拿 id 再赋值邮箱（两步），漏第二步就是静默丢首条
+  // 消息。邮箱本体不对组件暴露，故这里只能经 `consumePendingFirstMessage` 观察
+  // ——正因如此，下面这些断言同时也是「只有一扇门」的护栏。
+
+  it('懒创建是原子操作：排队的首条消息归属于刚建出来的那个 id', async () => {
+    vdfsApi.writeVdfs.mockResolvedValue({ path: 'session/s9', created: true })
+    const store = useSessionsStore()
+    const img = { base64: 'AAA', mimeType: 'image/png', thumbnailUrl: 'blob:1' }
+
+    const id = await store.createSessionWithFirstMessage(
+      { workdir: 'D:/work' },
+      { text: '你好', images: [img] }
+    )
+
+    expect(id).toBe('s9')
+    expect(store.consumePendingFirstMessage('s9')).toEqual({
+      id: 's9',
+      text: '你好',
+      images: [img],
+    })
+    // 取出即清除：邮箱不是可重复读的缓存，重复消费拿不到东西
+    expect(store.consumePendingFirstMessage('s9')).toBeNull()
+  })
+
+  it('邮箱按 id 匹配，别的会话取不走属于本会话的首条消息', async () => {
+    vdfsApi.writeVdfs.mockResolvedValue({ path: 'session/s9', created: true })
+    const store = useSessionsStore()
+    await store.createSessionWithFirstMessage(undefined, { text: 'hi' })
+
+    expect(store.consumePendingFirstMessage('s10')).toBeNull()
+    expect(store.consumePendingFirstMessage('s9')?.text).toBe('hi')
+  })
+
+  it('创建失败不留半截队列项，也不污染邮箱里原有的那条', async () => {
+    vdfsApi.writeVdfs.mockResolvedValue({ path: 'session/s9', created: true })
+    const store = useSessionsStore()
+    await store.createSessionWithFirstMessage(undefined, { text: '第一条' })
+
+    // 第二次创建失败（后端没回地址）
+    vdfsApi.writeVdfs.mockResolvedValue({ path: '', created: true })
+    await expect(
+      store.createSessionWithFirstMessage(undefined, { text: '第二条' })
+    ).rejects.toThrow()
+
+    // 邮箱仍是第一次排的那条：失败的那次没写进任何东西
+    expect(store.consumePendingFirstMessage('s9')?.text).toBe('第一条')
   })
 
   it('订阅恰好建立一次，作用域 = 会话叶子的直接子项', () => {

@@ -5,7 +5,8 @@
   - 顶部：分区标题 + 描述
   - 中部：setting 行（slot 默认，可用类：setting-item / setting-info / setting-desc /
     toggle / segmented / seg-btn 等，经 :deep 生效于 slot 内容）
-  - 底部：操作区（slot footer，通常放保存按钮，可用类：action-btn）
+  - 底部：操作区（slot footer，通常放保存按钮；按钮类由调用方自持——
+    本壳不提供按钮样式，`.action-btn` 已随工作台提示态改造删除）
 -->
 <template>
   <div class="settings-form">
@@ -189,28 +190,5 @@ defineProps<{
   background: var(--surface-panel);
   color: var(--accent);
   font-weight: var(--font-weight-medium);
-}
-
-/* 按钮（footer 内） */
-.form-footer :deep(.action-btn) {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--text-on-accent);
-  font-size: var(--font-size-base);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
-}
-.form-footer :deep(.action-btn:hover:not(:disabled)) {
-  background: var(--accent-hover);
-}
-.form-footer :deep(.action-btn:disabled) {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 </style>

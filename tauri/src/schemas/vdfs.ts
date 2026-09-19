@@ -16,12 +16,10 @@
 export * from './vdfs-form'
 
 export const VDFS_LIST = 'vdfs/list'
-export const VDFS_TREE = 'vdfs/tree'
 export const VDFS_STAT = 'vdfs/stat'
 export const VDFS_READ = 'vdfs/read'
 export const VDFS_WRITE = 'vdfs/write'
 export const VDFS_DELETE = 'vdfs/delete'
-export const VDFS_MKDIR = 'vdfs/mkdir'
 export const VDFS_MOVE = 'vdfs/move'
 export const VDFS_WATCH = 'vdfs/watch'
 export const VDFS_UNWATCH = 'vdfs/unwatch'
@@ -242,12 +240,6 @@ export interface VdfsListResponse {
   path: string
   node: VdfsNode
   items: VdfsNode[]
-}
-
-export interface VdfsTreeResponse {
-  path: string
-  nodes: VdfsNode[]
-  truncated: boolean
 }
 
 export interface VdfsWriteResponse {

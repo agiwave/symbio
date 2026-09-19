@@ -220,7 +220,7 @@ function submitSupply() {
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.08em;
-  color: var(--color-text-muted, #94a3b8);
+  color: var(--text-muted);
 }
 
 /* ── 工具失败补充参数 UI ── */
@@ -262,11 +262,11 @@ function submitSupply() {
   outline: none;
 }
 .supply-textarea:focus {
-  border-color: var(--color-primary);
+  border-color: var(--accent);
 }
 .supply-submit {
   align-self: flex-start;
-  background: var(--color-primary);
+  background: var(--accent);
   color: var(--text-on-accent);
   border: none;
   border-radius: 0.375rem;
@@ -275,6 +275,6 @@ function submitSupply() {
   cursor: pointer;
 }
 .supply-submit:hover {
-  background: var(--color-primary-dark);
+  background: var(--accent-hover);
 }
 </style>

@@ -72,6 +72,7 @@ import {
 } from '@/schemas/vdfs'
 import { dirIconOf, resolveVdfsRenderer, type VdfsRenderer } from '@/registry/vdfsTypes'
 import { useToast } from '@/composables/useToast'
+import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { logger } from '@/utils/logger'
 import type { WorkbenchRailItem } from '@/components/common/Workbench.vue'
 
@@ -262,30 +263,29 @@ export function useVdfs(opts: UseVdfsOptions) {
   /** 字段级校验错误（provider 自持校验的产物；机制不解释其含义） */
   const fieldErrors = ref<VdfsFieldError[]>([])
 
-  /** 详情读取代次（防竞态：见 select 内说明） */
-  let detailToken = 0
+  /**
+   * 详情读取的**代次守卫**（机制唯一实现，见 `useGenerationGuard`）。
+   *
+   * 连点多项时，慢响应不得覆盖新选中项的数据；清空选中同样要使在途响应作废
+   * （`clearSelection` advance 一次即可）。
+   */
+  const detailGuard = useGenerationGuard()
 
   /**
-   * 追加代际守卫（S18）——防「在途重读覆盖已应用的增量」。
+   * 追加的**代际守卫**（键控：键 = 节点路径）——防「在途重读覆盖已应用的增量」。
    *
    * 场景：节点正文流式追加（`appended` 就地拼接，**不发重读**），而此前发出的
    * 一次 `read` 响应稍后到达——它带的是**旧快照**，会把刚拼上去的字抹掉，随后
    * 的追加再拼上去就得到损坏文本。失败是**静默的**：不报错、不崩溃，只少一段字。
    *
-   * 记法：把「已应用到哪个路径、应用了几次」记下来。`select` 发起读取时取一次
-   * 快照，响应回来若该路径的计数已变，说明期间有增量落地（本地内容比响应新），
-   * **丢弃该响应**。丢弃是安全的：节点增删另有 `created` / `deleted` 事件兜底。
+   * 记法：读取前记下该路径「已应用过几次追加」，响应回来若这个数变了，说明读取
+   * 期间有增量落地（本地内容比响应新），**丢弃该响应**。丢弃是安全的：节点增删
+   * 另有 `created` / `deleted` 事件兜底。
    *
-   * 不用 `detailToken` 兼任：那个令牌的 `finally` 会据它复位 `loadingDetail`，
-   * 中途自增会让加载态永远复位不了。
+   * 与详情读取的代次**必须是两个实例**：两者作废时机不同（前者随选中变化，
+   * 后者随增量落地），共用一个代次会互相误伤。
    */
-  let appendGenPath: string | null = null
-  let appendGen = 0
-
-  /** 某路径已应用的追加次数（换到别的路径即视为 0——只关心当前详情） */
-  function appliedAppends(path: string): number {
-    return appendGenPath === path ? appendGen : 0
-  }
+  const appendGuard = useGenerationGuard()
 
   /** 详情渲染器里「正文即文本缓冲」的那些（追加可安全拼接）；表单/二进制不在其列 */
   const TEXTUAL_RENDERERS = new Set(['text', 'markdown', 'json', 'message'])
@@ -304,13 +304,12 @@ export function useVdfs(opts: UseVdfsOptions) {
     if (!delta || !node || node.path !== change.path) return false
     if (!TEXTUAL_RENDERERS.has(renderer.value)) return false
     nodeText.value += delta
-    appendGenPath = node.path
-    appendGen += 1
+    appendGuard.advance(node.path)
     return true
   }
 
   function clearSelection() {
-    detailToken++
+    detailGuard.advance()
     selectedNode.value = null
     nodeText.value = ''
     formData.value = null
@@ -326,7 +325,7 @@ export function useVdfs(opts: UseVdfsOptions) {
       return
     }
     // 同一个节点的**重读**（刷新收敛）不清空正文缓冲：清空会与在途增量打架——
-    // 见下方代际守卫，被丢弃的旧响应必须留下「本地已更新的那一份」可看，
+    // 见 `appendGuard`，被丢弃的旧响应必须留下「本地已更新的那一份」可看，
     // 而不是留下一片空白。换到别的节点才清。
     const sameNode = selectedNode.value?.path === node.path
     selectedNode.value = node
@@ -348,14 +347,14 @@ export function useVdfs(opts: UseVdfsOptions) {
       return
 
     // 读取代次令牌：连点多项时，慢响应不得覆盖新选中项的数据
-    const token = ++detailToken
+    const token = detailGuard.advance()
     // 追加代际快照：读取期间若有增量落地，本地内容比这次响应新 → 丢弃响应
-    const gen = appliedAppends(node.path)
+    const gen = appendGuard.revision(node.path)
     loadingDetail.value = true
     try {
       const content = await readVdfs(node.path)
-      if (token !== detailToken) return
-      if (gen !== appliedAppends(node.path)) return
+      if (detailGuard.revision() !== token) return
+      if (appendGuard.revision(node.path) !== gen) return
       if (!content) {
         detailError.value = '读取失败'
         return
@@ -372,7 +371,9 @@ export function useVdfs(opts: UseVdfsOptions) {
         nodeText.value = text
       }
     } finally {
-      if (token === detailToken) loadingDetail.value = false
+      // 用**自己取到的那个代次**比对，不重新 revision()：中途自增会让加载态
+      // 永远复位不了（见 useGenerationGuard 的「边界」）
+      if (detailGuard.revision() === token) loadingDetail.value = false
     }
   }
 

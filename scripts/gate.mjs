@@ -136,7 +136,7 @@ const BASELINE = {
   //   经回退验证：去掉消息 `write` 的 id 补齐逻辑，`message_write_accepts_a_patch_without_id`
   //   即红——该例正是首轮跑测试抓出的真实缺陷（`ChatMessage::id` 必填让「字段子集」不成立）。
   rustTests: 732,
-  vitestFiles: 28,
+  vitestFiles: 31,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态
   // 160 → 164：工具调用运行态——「运行中」标签 + 动效点 + 已运行时长、
@@ -201,7 +201,34 @@ const BASELINE = {
   //   `components/vdfs/VdfsDetailActions.spec.ts` ×8（三个渲染器的动作装配护栏）、
   //   `schemas/vdfs.spec.ts` +5（`isVdfsDraft` / `isVdfsSystemAddr`）；
   //   `VdfsFormDetail.spec.ts` 由「自算去重」改为「传参直通」基线（3 → 3，净零）。
-  vitestTests: 360,
+  // 360 → 400（文件 28 → 31）：二次复核识别出的 6 项缺口逐项落地。
+  //   · **竞态守卫单点**：新增 `composables/useGenerationGuard.ts`（约 25 行）+
+  //     `useGenerationGuard.spec.ts` ×7，替掉 `useVdfs` 的 `detailToken` /
+  //     `appendGen+appendGenPath+appliedAppends` 与 `ChatMainPanel.loadSequence`
+  //     三份手写实现（「取代次 → 响应回来比对 → 过期即丢」此前写了三遍）。
+  //   · **`DetailForm` 纯逻辑下沉**：`schemas/vdfs-form.spec.ts` ×13 —— 预设联动
+  //     （`detailPresetOf` / `…FieldOptions` / `…FieldSuggestions` / `…PresetPatch`）
+  //     从 907 行的组件里搬到 schemas，规则因此可直接单测；6 → 19。
+  //   · **VdfsWorkbench 内联 prompt 机制化**：新增
+  //     `components/vdfs/__tests__/VdfsWorkbench.spec.ts` ×9 —— 两个布尔
+  //     （`creatingTyped`/`renaming`）+ 三个载荷 ref 收成一个判别式 `promptKind`，
+  //     外壳改用 `DetailShell`；用例钉住「三个瞬态互斥」与「类型清单不显示 `ext`」。
+  //   · **会话懒创建握手收敛**：新增 `components/chat/__tests__/ChatComposer.spec.ts`
+  //     ×8 —— 输入区（`ChatInputArea + ChatOptionBar`）此前在 `Session.vue` 与
+  //     `ModelChatPanel.vue` 各装配一遍，收成一个 `ChatComposer`；用例钉住两件都在、
+  //     `sessionId` 草稿态必须是 `undefined`（透传成空串会丢掉草稿选择）、
+  //     `resetHeight`/`getDraftMetadata` 只经一个 ref 委派。
+  //     `sessions.spec.ts` ×3 —— `createSessionWithFirstMessage` 把「建会话 + 排队
+  //     首条消息」合成原子操作，「队列项 id === 新建出的 id」这条不变式由 store
+  //     保证；邮箱本体不再对外暴露（唯一入口是该原子方法）。
+  //   · 余下两项是**改脚本/纯减法**，不增用例：`style-audit.mjs` 新增 §1.5
+  //     「registry 词表」规则（认识动态绑定的**来源**，消掉 7 条 scoped 死类误报，
+  //     而非加白名单）；删 `createSessionId` / `SESSION_LIST_LIMIT` / `VDFS_TREE` /
+  //     `VDFS_MKDIR` / `VdfsTreeResponse` / `setVdfsSessionScheme` 及 CSS 通用
+  //     别名层（10 个 `--color-*` 改名到语义令牌，60 处引用）。
+  //   注：`--color-chip-*` / `--color-error-*` / `--color-banner-*` 等是**聊天域
+  //   令牌**（直接给字面值，与语义令牌并列成组），不属被删的别名层，勿连带删除。
+  vitestTests: 400,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */

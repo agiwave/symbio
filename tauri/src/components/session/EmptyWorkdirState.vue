@@ -69,12 +69,12 @@ async function onUseLast() {
   text-align: center;
   padding: 3rem 1.5rem;
   height: 100%;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
 }
 
 .empty-illustration {
   margin-bottom: 1.5rem;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   opacity: 0.6;
 }
 
@@ -88,21 +88,21 @@ async function onUseLast() {
 .empty-title {
   font-size: 1.15rem;
   font-weight: 500;
-  color: var(--color-text);
+  color: var(--text-primary);
   margin-bottom: 0.5rem;
 }
 
 .empty-desc {
   max-width: 22.5rem;
   font-size: 0.85rem;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
   margin-bottom: 1.5rem;
   line-height: 1.6;
 }
 
 .primary-btn {
   padding: 0.6rem 1.2rem;
-  background: var(--color-primary);
+  background: var(--accent);
   color: var(--text-on-accent);
   border: none;
   border-radius: 0.5rem;
@@ -118,9 +118,9 @@ async function onUseLast() {
 .secondary-btn {
   padding: 0.5rem 1rem;
   background: transparent;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border-default);
   border-radius: 0.5rem;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
   font-size: 0.85rem;
   cursor: pointer;
 }

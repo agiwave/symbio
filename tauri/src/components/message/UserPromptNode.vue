@@ -227,7 +227,7 @@ function submitQuestions() {
 }
 .up-qtext {
   font-size: 0.82rem;
-  color: var(--color-text);
+  color: var(--text-primary);
 }
 .up-options {
   display: flex;
@@ -251,11 +251,11 @@ function submitQuestions() {
 }
 .up-opt-label {
   font-weight: 500;
-  color: var(--color-text);
+  color: var(--text-primary);
 }
 .up-opt-desc {
   font-size: 0.74rem;
-  color: var(--color-text-muted);
+  color: var(--text-muted);
 }
 .up-option-other {
   gap: 0.35rem;
@@ -269,7 +269,7 @@ function submitQuestions() {
 }
 .up-submit {
   align-self: flex-start;
-  background: var(--color-primary);
+  background: var(--accent);
   color: var(--text-on-accent);
   border: none;
   border-radius: 0.375rem;
@@ -294,7 +294,7 @@ function submitQuestions() {
 .up-tool-name {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--color-text);
+  color: var(--text-primary);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 .up-risk {
@@ -315,7 +315,7 @@ function submitQuestions() {
 }
 .up-confirm-desc {
   font-size: 0.8rem;
-  color: var(--color-text-secondary);
+  color: var(--text-secondary);
 }
 .up-args {
   margin: 0;

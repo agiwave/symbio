@@ -63,6 +63,8 @@ import { logger } from '@/utils/logger'
 
 const props = defineProps<{
   isLoading: boolean
+  /** 挂载即聚焦输入框（新建引导等「一进来就该能打字」的场景） */
+  autofocus?: boolean
 }>()
 
 const modelValue = defineModel<string>({ default: '' })
@@ -154,6 +156,9 @@ function handleGlobalPaste(event: ClipboardEvent) {
 
 onMounted(() => {
   window.addEventListener('paste', handleGlobalPaste)
+  // 聚焦归输入框自己管：它才是 textarea 的所有者（此前由父级各写一遍
+  // nextTick + `ref.textarea.focus()`，与 textarea 的暴露形状耦合在父级）。
+  if (props.autofocus) void nextTick(() => textareaRef.value?.focus())
 })
 
 onUnmounted(() => {
@@ -214,16 +219,16 @@ watch(modelValue, () => {
   display: flex;
   align-items: flex-end;
   gap: 0.5rem;
-  background: var(--color-input-bg, #f5f5f5);
-  border: 1px solid var(--color-border);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-default);
   border-radius: 0.75rem;
   padding: 0.5rem;
   transition: border-color 0.2s;
 }
 
 .input-wrapper:focus-within {
-  border-color: var(--color-primary);
-  background: var(--color-surface-strong, #fff);
+  border-color: var(--accent);
+  background: var(--surface-overlay);
 }
 
 textarea {
@@ -259,15 +264,15 @@ textarea::placeholder {
   padding: 0;
 }
 
-.send-btn { background: var(--color-primary); color: var(--text-on-accent); }
+.send-btn { background: var(--accent); color: var(--text-on-accent); }
 .send-btn:hover:not(:disabled) { opacity: 0.9; transform: scale(1.05); }
 .send-btn:active:not(:disabled) { transform: scale(0.95); }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 /* 停止态：仅换背景，前景沿用 --text-on-accent（深/浅两态均由令牌给出对比度达标值） */
 .send-btn.stop-btn { background: var(--danger-solid); }
 
-.attach-btn { background: transparent; color: var(--color-text-muted); }
-.attach-btn:hover { background: var(--surface-hover); color: var(--color-text-secondary); }
+.attach-btn { background: transparent; color: var(--text-muted); }
+.attach-btn:hover { background: var(--surface-hover); color: var(--text-secondary); }
 
 .images-preview {
   display: flex;
@@ -283,7 +288,7 @@ textarea::placeholder {
   height: 5rem;
   border-radius: 0.5rem;
   overflow: hidden;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border-default);
 }
 
 .image-item img { width: 100%; height: 100%; object-fit: cover; }

@@ -247,7 +247,7 @@ const runningDuration = computed(() => {
 .node-title {
   font-weight: 500;
   font-size: 0.8rem;
-  color: var(--color-text-secondary, #475569);
+  color: var(--text-secondary);
   flex-shrink: 1;
   min-width: 0;
   overflow: hidden;
@@ -262,7 +262,7 @@ const runningDuration = computed(() => {
   flex: 1;
   min-width: 0;
   font-size: 0.74rem;
-  color: var(--color-text-muted, #94a3b8);
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
