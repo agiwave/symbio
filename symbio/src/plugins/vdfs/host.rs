@@ -36,6 +36,7 @@
 
 use super::fs::{normalize_addr, UnifiedFs};
 use super::protocol::*;
+use crate::symbio_core::event_bus::KIND_VDFS;
 use crate::symbio_core::vdfs::vdfs_context;
 use crate::symbio_core::vdfs_provider::*;
 use crate::symbio_core::{
@@ -46,9 +47,8 @@ use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-/// 变更事件在宿主事件总线上的 `kind`
-/// （宿主前端：`subscribe({ kind: 'vdfs' })`）
-pub const VDFS_EVENT_KIND: &str = "vdfs";
+// 变更事件的 `kind` 不自持：取自词表的家 `symbio_core::event_bus::KIND_VDFS`
+// （前端 `subscribe({ kind: 'vdfs' })`，见 PROTOCOLS.md §事件总线频道）。
 
 // ==================== 统一文件系统 ====================
 
@@ -135,12 +135,12 @@ fn to_change_event(change: &VdfsChange) -> VdfsChangeEvent {
     }
 }
 
-/// 构造变更投递器：接到全局事件总线，下发前端（`kind = "vdfs"`）。
+/// 构造变更投递器：接到全局事件总线，下发前端（`kind = KIND_VDFS`）。
 fn event_bus_sink() -> VdfsChangeSink {
     Arc::new(move |change: VdfsChange| {
         let event = to_change_event(&change);
         let data = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
-        crate::symbio_core::event_bus::EventBus::try_publish(VDFS_EVENT_KIND, None, data);
+        crate::symbio_core::event_bus::EventBus::try_publish(KIND_VDFS, None, data);
     })
 }
 

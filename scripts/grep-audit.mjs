@@ -7,6 +7,7 @@
  *   - S-002-bonus:  业务路径 `let _ = ...await` 吞错
  *   - S-007:        CHANGELOG 缺关键修复条目（v25-N6 案例）
  *   - S-008:        VdfsNode.status 用裸字面量赋值（词表只有 `VDFS_STATUS_*`）
+ *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
@@ -256,6 +257,39 @@ for (const [file, lines] of linesOf) {
   })
 }
 if (s008 === 0) ok('S-008 通过：status 一律取自 VDFS_STATUS_* 常量')
+console.log()
+
+// ── S-009: 事件总线 kind 不得用裸字面量 ────────────────────────────────
+//
+// 词表只有一套：`symbio_core::event_bus::KIND_*`（文档见
+// `docs/architecture/PROTOCOLS.md` §事件总线频道）。与 S-008 同源：`kind` 是
+// **跨进程**字符串，改名不会编译失败，只会让消费方的「按 kind 分派」静默失效。
+//
+// 为什么单独立一条：真实事故就是「发布点写裸字面量 → 常量声明出来却无人引用」，
+// 被 `dead-code-audit` 的 R-001 当成死代码报了出来（`KIND_SESSION` / `KIND_SYSTEM`
+// 的家史）。而 R-001 只在常量**全仓零引用**时才响——只要别处引用过一次，写裸字面量
+// 的发布点就再也无人发现。故按位置立此规则。
+//
+// 判据（只认 `publish` / `try_publish` 首参直接是字面量的形态，宁可漏报）：
+//   · `EventBus::publish("<字面量>"` / `EventBus::try_publish("<字面量>"`
+//   · `<receiver>.publish("<字面量>"` / `.try_publish("<字面量>"`
+console.log('--- S-009: 事件总线 kind 字面量检查 ---')
+
+const KIND_LITERAL_RE = /(?:try_)?publish\(\s*"/
+const WAIVER_S009_RE = /\/\/\s*grep-audit-allow S-009:\s*\S/
+
+let s009 = 0
+for (const [file, lines] of linesOf) {
+  lines.forEach((l, i) => {
+    if (!KIND_LITERAL_RE.test(l) || WAIVER_S009_RE.test(l)) return
+    err(
+      `${disp(file)}:${i + 1}  publish 首参是裸 kind 字面量；` +
+        `改引 KIND_* 常量（kind 是跨进程字符串，改名不会编译失败）`,
+    )
+    s009++
+  })
+}
+if (s009 === 0) ok('S-009 通过：事件 kind 一律取自 KIND_* 常量')
 console.log()
 
 // ── 汇总 ───────────────────────────────────────────────────────────────

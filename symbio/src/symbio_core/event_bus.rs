@@ -18,20 +18,30 @@ use tokio::sync::mpsc;
 /// 每个 sessionId 最多保留的回放事件数
 const PENDING_EVENTS_CAP: usize = 64;
 
-/// 事件类型（`kind`）词表 —— 前端按它分发，**发布方一律引本常量，不要写裸字面量**。
+/// 事件类型（`kind`）词表 —— **发布方一律引本常量，不要写裸字面量**。
 ///
-/// 为什么要有它：`kind` 是**跨进程边界的字符串**，改名不会编译失败，只会让前端
+/// 为什么要有它：`kind` 是**跨进程边界的字符串**，改名不会编译失败，只会让消费方
 /// 的分发静默失效（与 `symbio_core::paths` 同一类风险）。发布点曾直接写
 /// `"session"` / `"system"`，于是这两个常量声明出来后无人引用——正是
 /// `chat_message.rs` 那段「枚举改名时就会出现不一致」警告的形状。
+///
+/// **闭集只有一个家**：词表住在这里，哪怕发布方在别的插件（`KIND_SESSION` 由 session
+/// 发、`KIND_VDFS` 由 vdfs 发）。文档见 `docs/architecture/PROTOCOLS.md`
+/// §事件总线频道——那一行带 `<!-- vocab:KIND_ -->` 标记，由 `plugin-entry-audit`
+/// 的 E-008 与代码**双向**比对；「发布点写裸字面量」由 `grep-audit` 的 S-009 拦。
 pub const KIND_SESSION: &str = "session";
 pub const KIND_SYSTEM: &str = "system";
 
-// 资源变更**不在本模块设频道**：一切资源的生命周期与状态变化都是 VDFS 变更，
-// 由 `crate::symbio_core::vdfs::host::notify_change` 投递，经 provider 的
-// `watch` 与门面补全地址后以 `kind = "vdfs"` 下发前端（规范 §9）。
-// 历史上并存的 `kind = "entity"` 频道（`publish_entity_changed` /
-// `publish_entity_status`）已随实体机制一并废除。
+/// VDFS 变更频道 —— **资源实时的唯一频道**。
+///
+/// 不由本模块发布：一切资源的生命周期与状态变化都是 VDFS 变更，由 provider 写成功后
+/// 调 `symbio_core::vdfs::host::notify_change`，经 `watch` 的 sink
+/// （`plugins/vdfs/host.rs::event_bus_sink`）装进 `VdfsChangeEvent` 投到总线上（规范 §9）。
+///
+/// 常量放这里而非 vdfs 插件，是贯彻上面那条「闭集只有一个家」——发布方只是引用者。
+/// 历史上并存的 `kind = "entity"` 频道（`publish_entity_changed` /
+/// `publish_entity_status`）已随实体机制一并废除。
+pub const KIND_VDFS: &str = "vdfs";
 
 /// 事件 Bus 全局订阅者容器
 ///

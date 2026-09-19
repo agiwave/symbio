@@ -13,7 +13,8 @@
 ## 机制
 
 - 前端推送（会话流式、VDFS 变更）经 event_bus 取得广播帧；tauri 宿主同理。
-- 帧 payload 与 PluginChannel 的 Session 帧同构，客户端按 `kind` 分发。
+- 帧 payload 与 PluginChannel 的 Session 帧同构，客户端按 `kind` 分发（闭集与常量见
+  `docs/architecture/PROTOCOLS.md` §事件总线频道）。
 
 ## 关联
 

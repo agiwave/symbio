@@ -106,3 +106,31 @@ test('S-008 waiver requires a reason', () => {
   assert.equal(audit(statusSuspect, { waiver: '// grep-audit-allow S-008: reviewed fixture' }).status, 0)
   assert.equal(audit(statusSuspect, { waiver: '// grep-audit-allow S-008:   ' }).status, 1)
 })
+
+// ── S-009：事件总线 kind 不得用裸字面量 ────────────────────────────────
+// 词表只有 `symbio_core::event_bus::KIND_*` 一套；`kind` 是跨进程字符串，裸字面量
+// 改名时不会编译失败。本规则拦的正是「发布点写字面量 → 常量无人引用」的**成因**
+// （那正是 R-001 当初报出 `KIND_SESSION` / `KIND_SYSTEM` 的由来）。
+const kindSuspect = `async fn emit() {
+    EventBus::publish("session", None, data).await; WAIVER
+}
+`
+test('S-009 fires on a bare kind literal', () => {
+  const r = audit(kindSuspect)
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /sample\.rs:2/)
+})
+test('S-009 fires on try_publish and on a receiver call', () => {
+  assert.equal(audit('fn f() {\n    EventBus::try_publish("vdfs", None, d);\n}\n').status, 1)
+  assert.equal(audit('fn f() {\n    bus.publish("system", None, d);\n}\n').status, 1)
+})
+test('S-009 stays silent when the kind comes from a constant', () => {
+  assert.equal(audit('fn f() {\n    EventBus::try_publish(KIND_SESSION, None, d);\n}\n').status, 0)
+})
+test('S-009 does not mistake a non-literal first argument', () => {
+  assert.equal(audit('fn f(kind: &str) {\n    EventBus::try_publish(kind, None, d);\n}\n').status, 0)
+})
+test('S-009 waiver requires a reason', () => {
+  assert.equal(audit(kindSuspect, { waiver: '// grep-audit-allow S-009: reviewed fixture' }).status, 0)
+  assert.equal(audit(kindSuspect, { waiver: '// grep-audit-allow S-009:   ' }).status, 1)
+})

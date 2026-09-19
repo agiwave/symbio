@@ -226,6 +226,28 @@ pub enum PluginPayloadWire {
 
 ---
 
+## 事件总线频道 (`kind`)
+
+AI 增量与资源变更**不随请求返回**，而是经全局事件总线广播：客户端建立连接后另发一帧
+`event_bus/subscribe`（HTTP/WS 入口见 [design/http-api-transport.md](../design/http-api-transport.md) §5.3），
+之后持续收到 `{ type: "bus_event", data: { kind, session_id, data } }` 帧，**按 `kind` 分派**。
+
+`kind` 的闭集是 `session` / `system` / `vdfs` <!-- vocab:KIND_ -->，常量定义在
+`symbio_core::event_bus`（`KIND_SESSION` / `KIND_SYSTEM` / `KIND_VDFS`）。**发布方一律引
+常量**——`kind` 是跨进程字符串，改名不会编译失败，只会让消费方静默失效（`grep-audit`
+的 S-009 拦裸字面量）：
+
+| `kind` | 发布方 | 消费方 |
+|--------|--------|--------|
+| `session` | 会话编排（`session/orchestrator/broadcast.rs`） | **进程内**：subagent 宿主以 `Status idle` 判定子会话结束（`agent/host/subagent.rs`）。前端**不**订阅，收到也不处理 |
+| `system` | 总线插件自身（`event_bus/subscribe` 的 `connected` 握手） | 前端订阅连接 |
+| `vdfs` | vdfs 宿主的变更投递（`plugins/vdfs/host.rs`） | **前端**——唯一被订阅的频道，按**地址**分派，不依赖事件到达顺序 |
+
+> 资源变更**不另设频道**：一切资源的生命周期与状态变化都是 VDFS 变更，统一走 `vdfs`；
+> 历史上并存的 `entity` 频道已随实体机制废除。
+
+---
+
 ## 数据契约 (Schemas)
 
 所有跨端数据结构集中定义在 `symbio/src/symbio_core/schemas/`，按业务域拆分：
