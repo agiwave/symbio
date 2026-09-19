@@ -177,6 +177,28 @@ export const useSessionsStore = defineStore('sessions', () => {
     transcriptVersion.value += 1
   }
 
+  /**
+   * 对某个会话的消息字典做一次变更并提交 —— **唯一的变更通道**。
+   *
+   * 「展开外层 → 展开本会话 → 改 → 塞回 → `commitMessages`」这五步此前在六处
+   * 各写一遍（写一条 / 合并 patch / 删单条 / 删一批 / 从某条起截断 / 回滚），
+   * 每处都得自己记得调 `commitMessages`——漏一次就是版本号不推进、视图不刷新，
+   * 而且这种漏法**不报错**（只是界面悄悄不更新）。
+   *
+   * 收敛到这里之后，调用方只写「这一步要改什么」：`mutate` 直接改传入的字典，
+   * 或返回一份新的（返回 `undefined` 表示已在原地改完）。
+   */
+  function updateMessages(
+    sessionId: string,
+    mutate: (cur: Record<string, ChatMessage>) => Record<string, ChatMessage> | void,
+  ): void {
+    if (!sessionId) return
+    const next = { ...sessionMessages.value }
+    const cur = { ...(next[sessionId] || {}) }
+    next[sessionId] = mutate(cur) ?? cur
+    commitMessages(next)
+  }
+
   // 会话级错误状态（"错误是状态，不是节点"原则的前端落地）：
   // 仅用于"没有任何失败消息节点、但会话整体因错误中止"的兜底场景（如 transport 级失败、
   // send 在首帧到达前就失败），此时没有"造成中止的节点"可挂错误，错误只能作为会话级状态存在。
@@ -233,16 +255,14 @@ export const useSessionsStore = defineStore('sessions', () => {
   /** 写入或更新一条消息到指定 session（替换整个对象） */
   function putMessage(sessionId: string, msg: ChatMessage) {
     if (!sessionId || !msg.id) return
-    const next = { ...sessionMessages.value }
-    const cur = { ...(next[sessionId] || {}) }
-    // 缺失 seq 时自动补一个单调序号，保证与流式 patch 的 seq 处于同一单调递增序列，
-    // 否则用户消息（仅靠 timestamp ≈ epoch ms）会被排到小整数 seq 的助手节点之后。
-    cur[msg.id] =
-      msg.seq === undefined
-        ? { ...msg, seq: nextSeq(sessionId) }
-        : msg
-    next[sessionId] = cur
-    commitMessages(next)
+    updateMessages(sessionId, (cur) => {
+      // 缺失 seq 时自动补一个单调序号，保证与流式 patch 的 seq 处于同一单调递增序列，
+      // 否则用户消息（仅靠 timestamp ≈ epoch ms）会被排到小整数 seq 的助手节点之后。
+      cur[msg.id] =
+        msg.seq === undefined
+          ? { ...msg, seq: nextSeq(sessionId) }
+          : msg
+    })
 
     // 同步 status.last_preview（取最后一条 assistant 文本；取不到则不动）
     const preview = previewOf(msg)
@@ -259,24 +279,22 @@ export const useSessionsStore = defineStore('sessions', () => {
   /** 合并 patch 到指定 session 的某条消息（不替换，只覆盖 patch 提供的字段） */
   function patchMessage(sessionId: string, patch: ChatMessage) {
     if (!sessionId || !patch.id) return
-    const next = { ...sessionMessages.value }
-    const cur = { ...(next[sessionId] || {}) }
-    const existing = cur[patch.id]
-    if (!existing) {
-      cur[patch.id] = {
-        content: '',
-        status: 'streaming',
-        role: 'assistant',
-        timestamp: Date.now(),
-        seq: nextSeq(sessionId),
-        ...patch
+    updateMessages(sessionId, (cur) => {
+      const existing = cur[patch.id]
+      if (!existing) {
+        cur[patch.id] = {
+          content: '',
+          status: 'streaming',
+          role: 'assistant',
+          timestamp: Date.now(),
+          seq: nextSeq(sessionId),
+          ...patch
+        }
+      } else {
+        // 合并语义见 `sessionTranscript.mergeMessagePatch`（追加 vs 整条替换）
+        cur[patch.id] = mergeMessagePatch(existing, patch)
       }
-    } else {
-      // 合并语义见 `sessionTranscript.mergeMessagePatch`（追加 vs 整条替换）
-      cur[patch.id] = mergeMessagePatch(existing, patch)
-    }
-    next[sessionId] = cur
-    commitMessages(next)
+    })
   }
 
   function nextSeq(sessionId: string): number {
@@ -771,11 +789,9 @@ export const useSessionsStore = defineStore('sessions', () => {
    */
   function removeMessages(sessionId: string, ids: string[]) {
     if (ids.length === 0) return
-    const next = { ...sessionMessages.value }
-    const cur = { ...(next[sessionId] || {}) }
-    for (const id of ids) delete cur[id]
-    next[sessionId] = cur
-    commitMessages(next)
+    updateMessages(sessionId, (cur) => {
+      for (const id of ids) delete cur[id]
+    })
   }
 
   /**
@@ -795,27 +811,25 @@ export const useSessionsStore = defineStore('sessions', () => {
     const ids = truncateIdsFrom(getSessionMessages(sessionId), messageId)
     if (ids.length === 0) return []
 
-    const rest = { ...cur }
     const removed: ChatMessage[] = []
-    for (const id of ids) {
-      const m = rest[id]
-      if (!m) continue
-      delete rest[id]
-      removed.push(m)
-    }
+    updateMessages(sessionId, (rest) => {
+      for (const id of ids) {
+        const m = rest[id]
+        if (!m) continue
+        delete rest[id]
+        removed.push(m)
+      }
+    })
     if (removed.length === 0) return []
-    commitMessages({ ...sessionMessages.value, [sessionId]: rest })
     return removed
   }
 
   /** 把一批消息放回局部状态（`removeFrom` 的回滚口，仅在写后端失败时使用） */
   function restoreMessages(sessionId: string, msgs: ChatMessage[]) {
     if (msgs.length === 0) return
-    const next = { ...sessionMessages.value }
-    const cur = { ...(next[sessionId] || {}) }
-    for (const m of msgs) cur[m.id] = m
-    next[sessionId] = cur
-    commitMessages(next)
+    updateMessages(sessionId, (cur) => {
+      for (const m of msgs) cur[m.id] = m
+    })
   }
 
   /**
@@ -834,11 +848,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 存在性检查放在任何对象展开**之前**：截断删除会连带引发一串针对已删节点的
     // 冗余通知，每一次都白拷贝两份对象就太亏了（这是幂等收口的常见路径）。
     if (!cur || !cur[messageId]) return
-    const next = { ...sessionMessages.value }
-    const rest = { ...cur }
-    delete rest[messageId]
-    next[sessionId] = rest
-    commitMessages(next)
+    updateMessages(sessionId, (c) => {
+      delete c[messageId]
+    })
   }
 
   /**

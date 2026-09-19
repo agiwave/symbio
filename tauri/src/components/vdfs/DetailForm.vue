@@ -71,24 +71,24 @@
         </button>
         <div v-show="!collapsed[si]" class="setting-group" :class="{ 'advanced-group': sec.title }">
           <template v-for="f in sec.fields" :key="f.key">
-            <div v-if="fieldVisible(f)" class="setting-item" :class="{ column: isFullWidth(f) }">
+            <div v-if="fieldVisible(f)" class="setting-item" :class="{ column: widgetIsFullWidth(f) }">
             <div class="setting-info">
               <label>{{ f.label }}<span v-if="f.required" class="required">*</span></label>
               <p v-if="f.description" class="setting-desc">{{ f.description }}</p>
             </div>
 
             <!-- static（只读展示：info 绑定概览 / 只读字段；options 作值→标签映射） -->
-            <div v-if="f.widget === 'static'" class="static-value">{{ staticDisplay(f) }}</div>
+            <div v-if="specOf(f).tag === 'static'" class="static-value">{{ staticDisplay(f) }}</div>
 
             <!-- toggle -->
-            <label v-else-if="f.widget === 'toggle'" class="toggle">
+            <label v-else-if="specOf(f).tag === 'toggle'" class="toggle">
               <input type="checkbox" v-model="form[f.key]" />
               <span class="toggle-slider" />
             </label>
 
             <!-- select（静态或预设动态选项） -->
             <select
-              v-else-if="f.widget === 'select'"
+              v-else-if="specOf(f).tag === 'select'"
               v-model="form[f.key]"
               @change="onPresetFieldChange(f)"
             >
@@ -97,15 +97,15 @@
 
             <!-- textarea / list（每行一项）/ map（每行 KEY=VALUE） -->
             <textarea
-              v-else-if="f.widget === 'textarea' || f.widget === 'list' || f.widget === 'map'"
+              v-else-if="specOf(f).tag === 'textarea'"
               v-model="form[f.key]"
               :rows="f.rows ?? 3"
-              :placeholder="structuredPlaceholder(f)"
+              :placeholder="widgetPlaceholderOf(f)"
               spellcheck="false"
             />
 
             <!-- text / password / number / datalist -->
-            <div v-else-if="f.widget === 'password'" class="input-row">
+            <div v-else-if="specOf(f).revealable" class="input-row">
               <input
                 v-model="form[f.key]"
                 :type="reveal[f.key] ? 'text' : 'password'"
@@ -129,16 +129,16 @@
             </div>
 
             <input
-              v-else-if="f.widget === 'number'"
+              v-else-if="specOf(f).inputType === 'number'"
               v-model.number="form[f.key]"
               type="number"
               :min="f.min"
               :max="f.max"
               :step="f.step"
-              :placeholder="f.placeholder"
+              :placeholder="widgetPlaceholderOf(f)"
             />
 
-            <div v-else-if="f.widget === 'datalist'" class="input-wrap">
+            <div v-else-if="specOf(f).datalist" class="input-wrap">
               <input
                 v-model="form[f.key]"
                 type="text"
@@ -153,8 +153,8 @@
             <input
               v-else
               v-model="form[f.key]"
-              type="text"
-              :placeholder="f.placeholder"
+              :type="specOf(f).inputType ?? 'text'"
+              :placeholder="widgetPlaceholderOf(f)"
             />
             </div>
           </template>
@@ -173,6 +173,15 @@ import {
   detailPresetOf,
   detailPresetPatch,
 } from '@/schemas/vdfs-form'
+import {
+  widgetFromEdit,
+  widgetInitialOf,
+  widgetIsFullWidth,
+  widgetIsReadonly,
+  widgetPlaceholderOf,
+  widgetSpecOf,
+  widgetToEdit,
+} from '@/registry/formWidgets'
 import type {
   DetailAction,
   DetailBadge,
@@ -285,65 +294,15 @@ function fieldVisible(f: DetailField): boolean {
   return evalCond(f.visible_when)
 }
 
-/** 整行布局：显式 full_width 或天然宽控件 */
-function isFullWidth(f: DetailField): boolean {
-  return Boolean(f.full_width) || ['textarea', 'list', 'map'].includes(f.widget)
-}
+// ==================== widget 查表（呈现与编解码的唯一来源） ====================
+//
+// 「哪种 widget 怎么呈现 / 怎么编解码 / 占不占整行 / 参不参与保存」一律查
+// `registry/formWidgets`。本渲染器不再出现任何按 widget 名的分支——新增一种
+// widget 只需在那张表加一行；未登记的回落到 `text`（页面永不空白）。
 
-// ==================== 结构化 widget（list/map/static） ====================
-// 表单模型约定：list/map 编辑态为多行文本，保存时序列化回结构（与后端
-// validate_manifest 两侧一致）；static 只读展示，不参与保存。
-
-/** 编辑态占位：结构化 widget 给出格式提示 */
-function structuredPlaceholder(f: DetailField): string {
-  if (f.widget === 'list') return f.placeholder ?? '每行一项'
-  if (f.widget === 'map') return f.placeholder ?? '每行一项：KEY=VALUE'
-  return f.placeholder ?? ''
-}
-
-/** 编辑文本 → string[]（去空行/首尾空白） */
-function parseList(text: unknown): string[] {
-  if (!Array.isArray(text) && typeof text !== 'string') return []
-  return String(text)
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-}
-
-/** 编辑文本 → 键值对（首个 = 分隔；无 = 视为空值键） */
-function parseMap(text: unknown): Record<string, string> {
-  const out: Record<string, string> = {}
-  if (typeof text !== 'string') {
-    if (text && typeof text === 'object') {
-      for (const [k, v] of Object.entries(text as Record<string, unknown>)) out[k] = String(v)
-    }
-    return out
-  }
-  for (const line of text.split('\n')) {
-    const t = line.trim()
-    if (!t) continue
-    const eq = t.indexOf('=')
-    if (eq < 0) {
-      out[t] = ''
-    } else {
-      out[t.slice(0, eq).trim()] = t.slice(eq + 1).trim()
-    }
-  }
-  return out
-}
-
-/** 值 → 编辑文本（list 逐行、map 逐行 KEY=VALUE，其余原样） */
-function toEditValue(widget: string, v: unknown): unknown {
-  if (widget === 'list') return Array.isArray(v) ? v.map(String).join('\n') : ''
-  if (widget === 'map') {
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      return Object.entries(v as Record<string, unknown>)
-        .map(([k, val]) => `${k}=${val}`)
-        .join('\n')
-    }
-    return ''
-  }
-  return v ?? ''
+/** 字段的 widget 规格（模板与逻辑共用同一份查表结果） */
+function specOf(f: DetailField) {
+  return widgetSpecOf(f.widget)
 }
 
 /** static 只读展示：options 值→标签映射，数组/对象友好展开 */
@@ -397,7 +356,7 @@ const selectFieldOptions = computed<Record<string, Array<{ value: string; label:
     const map: Record<string, Array<{ value: string; label: string }>> = {}
     for (const sec of props.definition.sections) {
       for (const f of sec.fields) {
-        if (f.widget === 'select' && !f.options_from_preset) map[f.key] = fieldOptions(f)
+        if (specOf(f).tag === 'select' && !f.options_from_preset) map[f.key] = fieldOptions(f)
       }
     }
     return map
@@ -511,11 +470,9 @@ function buildValues(ignoreVisibility: boolean): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const sec of props.definition.sections) {
     for (const f of sec.fields) {
-      if (f.widget === 'static') continue
+      if (widgetIsReadonly(f.widget)) continue
       if (!ignoreVisibility && !fieldVisible(f)) continue
-      if (f.widget === 'list') out[f.key] = parseList(form[f.key])
-      else if (f.widget === 'map') out[f.key] = parseMap(form[f.key])
-      else out[f.key] = form[f.key]
+      out[f.key] = widgetFromEdit(f.widget, form[f.key])
     }
   }
   return out
@@ -586,7 +543,7 @@ function onPresetFieldChange(f: DetailField) {
 function initForm() {
   for (const sec of props.definition.sections) {
     for (const f of sec.fields) {
-      form[f.key] = f.default ?? (f.widget === 'toggle' ? false : '')
+      form[f.key] = widgetInitialOf(f)
     }
   }
 }
@@ -616,7 +573,7 @@ watch(
     if (cfg && typeof cfg === 'object') {
       for (const sec of props.definition.sections) {
         for (const f of sec.fields) {
-          if (cfg[f.key] !== undefined && cfg[f.key] !== null) form[f.key] = toEditValue(f.widget, cfg[f.key])
+          if (cfg[f.key] !== undefined && cfg[f.key] !== null) form[f.key] = widgetToEdit(f.widget, cfg[f.key])
         }
       }
     }

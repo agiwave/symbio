@@ -266,3 +266,60 @@ export function detailPresetPatch(
   }
   return patch
 }
+
+// ==================== 结构化取值编解码（机制唯一实现） ====================
+//
+// 表单模型约定（渲染器与后端 `validate_manifest` 两侧一致）：
+//   list = 字符串数组（编辑态每行一项）；map = 键值对（编辑态每行 `KEY=VALUE`）。
+//
+// 这组函数是「编辑态文本 ↔ 存储态结构」的**唯一**转换实现。此前它长在
+// DetailForm 内部、与 widget 分支绑在一起（新增一种结构化 widget 要同时改解析、
+// 序列化与模板三处）；提到此处后，`registry/formWidgets` 的 widget 表只引用它，
+// 且它可脱离组件直接单测。
+
+/** 编辑文本 → string[]（去空行 / 首尾空白；已是数组时逐项转字符串） */
+export function parseListValue(text: unknown): string[] {
+  if (!Array.isArray(text) && typeof text !== 'string') return []
+  return String(text)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+}
+
+/** 编辑文本 → 键值对（首个 `=` 分隔；无 `=` 视为空值键） */
+export function parseMapValue(text: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (typeof text !== 'string') {
+    if (text && typeof text === 'object') {
+      for (const [k, v] of Object.entries(text as Record<string, unknown>)) out[k] = String(v)
+    }
+    return out
+  }
+  for (const line of text.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    const eq = t.indexOf('=')
+    if (eq < 0) {
+      out[t] = ''
+    } else {
+      out[t.slice(0, eq).trim()] = t.slice(eq + 1).trim()
+    }
+  }
+  return out
+}
+
+/**
+ * 存储态 → 编辑文本（list 逐行、map 逐行 `KEY=VALUE`）。
+ *
+ * 只对**结构化** widget 有意义；其余 widget 的编辑态就是存储态本身，
+ * 由 `registry/formWidgets` 的 widget 表直接透传，不必经过这里。
+ */
+export function editTextOf(kind: 'list' | 'map', v: unknown): string {
+  if (kind === 'list') return Array.isArray(v) ? v.map(String).join('\n') : ''
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    return Object.entries(v as Record<string, unknown>)
+      .map(([k, val]) => `${k}=${val}`)
+      .join('\n')
+  }
+  return ''
+}

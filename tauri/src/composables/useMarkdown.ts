@@ -1,7 +1,8 @@
 /**
- * Markdown 渲染 composable
- * 
- * 提供统一的 Markdown 渲染功能，供 ModelChatPanel 和 ModelSelectionDialog 使用
+ * Markdown 渲染（模块级：不依赖组件实例，缓存才有处可挂）
+ *
+ * 对外只有 `renderMarkdownCached` 一个入口——会话流经 `useMessageContent` 调用它，
+ * 渲染结果按内容缓存（流式期间同一份正文只渲染一次）。
  */
 
 import { marked } from 'marked'
@@ -20,7 +21,7 @@ marked.setOptions({
  * 原先它是 `useMarkdown()` 里的闭包，每次调用 `useMarkdown()` 都新建一个函数，
  * 于是缓存无处可挂——把它提到模块作用域，缓存才有意义。
  */
-export function renderMarkdown(content: string): string {
+function renderMarkdown(content: string): string {
   try {
     // marked v17+ 默认返回 Promise，但设置 async: false 后可以同步使用
     const result = marked(content)
@@ -65,14 +66,3 @@ export function renderMarkdownCached(content: string): string {
   return html
 }
 
-/** 清空缓存（测试 / 需要回收内存时） */
-export function clearMarkdownCache(): void {
-  cache.clear()
-}
-
-export function useMarkdown() {
-  return {
-    renderMarkdown,
-    renderMarkdownCached
-  }
-}
