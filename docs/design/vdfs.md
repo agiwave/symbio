@@ -44,10 +44,12 @@
               │ composite 组合 │   │ PhysicalFs（磁盘） │
               │ 视图           │   │ 工作目录相对地址    │
               └───────┬───────┘   └───────────────────┘
-                      │ register_vdfs_provider(插件名, provider)
+                      │ register_vdfs_provider(插件名, provider)   ← LLM 链路（CapabilityVisitor）
       ┌───────────────┬─────────────┼─────────────┬───────────────┐
  setting provider  session provider  model provider   …（各模块自持）
 ```
+> 上图只画了 **LLM 链路**的注册关系。系统链路（前端 / 子智能体挂载点穿越）**不经**
+> 此广播：拿到父插件（`Arc<dyn Plugin>`）后直接调 `get_vfs_provider()` 取根，详见 §6.4。
 
 不变量（不可违反）：
 
@@ -143,6 +145,8 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 - 子目录名在注册时由注册方给出：`register_vdfs_provider(目录名, provider)`，
   **约定用插件名**（`PLUGIN_*` 常量）。插件名在宿主内唯一，天然合格，
   无需另立命名机制；
+  （系统链路经 `get_vfs_provider()` 取 provider 时**不带目录名**，目录名由 composite
+  的实例表挂载名提供——二者都不让 provider 自己决定位置，论点一致。）
 - provider 的方法只接收**自身子树内的相对路径**（`""` = 自身目录）；
   全路径 `<子目录>/<rel…>` 由使用方（容器）拼接与回填；
 - 子目录节点由容器合成（`dir_node`：携带子 provider 的自述与访问位），
@@ -155,18 +159,28 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 
 ### 2.5 拓扑只归容器
 
-「谁在哪个子目录」只由**组合容器**知道。容器实现 `VdfsProvider`，把自己聚合出的
-视图注册到 `CapabilityVisitor` 的**单槽位**：
+「谁在哪个子目录」只由**组合容器**知道。容器把聚合出的视图经**两条通道**暴露，
+二者指向同一个 `CompositeVfs` 实例、但服务于不同链路：
 
-- **容器**（`composite`）＝ 唯一持有拓扑的角色：它逐个子插件收集注册项、组装成
-  「包含子目录列表的 provider」，并 `register_vdfs_root(...)`；
-- **门面**（`UnifiedFs`）＝ 只认地址前缀：`<根>` → 虚拟层（容器注册的视图），
-  其余 → 物理层。它**不认识任何子目录清单**，因此「新增资源」不需要改门面；
-- **访问层**（`vdfs` 插件）＝ 拆信封 + 取 `UnifiedFs` + 转发，同样没有拓扑知识；
+- **系统 / 前端链路**（取子插件视图、穿过挂载点委托）：容器实现 core trait
+  `Plugin::get_vfs_provider`（默认 `None`）返回 `self.vdfs`。这是系统链路的**唯一**
+  查询接口——**不经** `CapabilityVisitor`、不驱动任何 `traverse` 广播。
+- **LLM 链路**（LLM 读写挂接）：容器在 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 中把
+  视图登记进 `CapabilityVisitor` 的**单槽位** `register_vdfs_root(...)`，供 `vdfs_*`
+  工具经 `get_vdfs_root` 取根。
+
+拓扑角色划分：
+
+- **容器**（`composite`）＝ 唯一持有拓扑：系统链路经 `child.get_vfs_provider()`
+  逐子插件查询聚合出「包含子目录列表的 provider」，LLM 链路经 `register_vdfs_root` 登记；
+- **门面**（`UnifiedFs`）＝ 只认地址前缀：`<根>` → 虚拟层（容器视图），其余 → 物理层；
+- **访问层**（`vdfs` 插件）＝ 拆信封 + 取 `UnifiedFs` + 转发；
 - **provider**（各插件）＝ 只认自身子树内相对路径。
 
 于是拓扑知识的落点**有且只有一处**（容器），且容器不依赖访问层、访问层与门面
-不依赖任何具体资源——四者可以独立替换（§10.3）。
+不依赖任何具体资源——四者可以独立替换（§10.3）。`CapabilityVisitor` 与
+`Plugin::get_vfs_provider` **不是同一回事**：前者是 LLM 能力挂接通道，后者是
+系统链路的查询接口，二者不可混用（详见 §6）。
 
 ## 3. 地址与节点模型
 
@@ -433,18 +447,32 @@ core 不暴露**）：
 
 ## 6. 注册与收集
 
-### 6.1 provider 注册（各插件 → 容器）
+### 6.1 provider 注册（两条链路，两套通道）
 
-`CapabilityVisitor` 上的方法（均有默认实现，不破坏既有实现方）：
+> ⚠️ **两套发现通道不可混用**：
+> - **LLM 链路**经 `CapabilityVisitor`（`traverse` 广播中注册 / 查询）；
+> - **系统 / 前端链路**经 core trait `Plugin::get_vfs_provider`（直接查询，**不**走 `CapabilityVisitor`、不驱动 `traverse`）。
+
+**LLM 链路**——`CapabilityVisitor` 上的方法（均有默认实现）：
 
 ```rust
 // 目录名 = 使用方选定（约定 = 插件名），provider 自身不含此概念
 async fn register_vdfs_provider(&self, dir: &str, provider: Arc<dyn VdfsProvider>);
 async fn list_vdfs_providers(&self) -> Vec<(String, Arc<dyn VdfsProvider>)>;  // order 升序
-async fn get_vdfs_provider(&self, dir: &str) -> Option<Arc<dyn VdfsProvider>>;
+async fn get_vdfs_provider(&self, dir: &str) -> Option<Arc<dyn VdfsProvider>>; // 按目录名查
+// 容器自身视图登记进单槽位：
+async fn register_vdfs_root(&self, provider: Arc<dyn VdfsProvider>);
+async fn get_vdfs_root(&self) -> Option<Arc<dyn VdfsProvider>>;
 ```
 
-插件在 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支里，**在注册工具的同一处**
+**系统 / 前端链路**——core trait `Plugin`（默认 `None`，资源插件返回 `Some(self)`）：
+
+```rust
+// 系统链路取「本插件自身 VDFS 视图」的唯一接口；无 VDFS 的插件保持默认 None
+fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>>;
+```
+
+LLM 链路：插件在 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支里，**在注册工具的同一处**
 顺带注册自己的资源，目录名用插件名：
 
 ```rust
@@ -455,59 +483,68 @@ if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
 }
 ```
 
+系统链路：资源插件在 `impl Plugin for X` 直接 `return Some(self)`，无需任何遍历或
+注册——容器 `children_of` 与前端 `resolve_fs` 取视图时直接调 `.get_vfs_provider()`。
+
 ### 6.2 根登记（容器 → 系统）
 
-`<根>` 的服务者是**单槽位**，当前由组合容器占据：
+`<根>` 的服务者在**两条链路**上各有一处装配点：
 
-```rust
-async fn register_vdfs_root(&self, provider: Arc<dyn VdfsProvider>);   // 重复注册覆盖
-async fn get_vdfs_root(&self) -> Option<Arc<dyn VdfsProvider>>;        // 无容器时 None
-```
+- **LLM 链路**：`CapabilityVisitor` 的**单槽位** `register_vdfs_root` / `get_vdfs_root`
+  （见 §6.1）。`composite` 在 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播里登记：
+  ```rust
+  if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
+      if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
+          visitor.register_vdfs_root(self.vdfs.clone()).await;   // 装配安排（LLM 链路）
+      }
+  }
+  ```
+- **系统 / 前端链路**：容器实现 `Plugin::get_vfs_provider` 返回 `self.vdfs`，前端
+  `resolve_fs` 直接 `parent.get_vfs_provider().unwrap_or_else(empty_root)` 取根。
+  此路径**不**经过 `CapabilityVisitor`、不驱动 `traverse`。
 
-**这不是「根级 provider」概念**：槽位只是装配点——谁被登记，谁的子树就成为
-`<根>` 之下的内容。composite 可被别的目录包含、子插件也可以是另一个 composite；
-登记本身不改变 composite 的任何行为与代码。`composite` 在**同一次**
-`TRAVERSE_AVAILABLE_TOOLS` 广播里完成登记：
-
-```rust
-if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
-    if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-        visitor.register_vdfs_root(self.vdfs.clone()).await;   // 装配安排
-    }
-}
-```
+**这不是「根级 provider」概念**：槽位 / 查询接口只是装配点——谁被登记 / 返回，
+谁的子树就成为 `<根>` 之下的内容。composite 可被别的目录包含、子插件也可以是另一个
+composite；登记本身不改变 composite 的任何行为与代码（见 §2.5）。
 
 ### 6.3 组合视图：容器如何聚合子插件
 
 容器**本身就是**「包含子目录列表的 provider」（`CompositeVdfs`，无任何中间结构）：
-逐个子插件广播一次收集、每个子插件配一个**独立**收集器：
+逐子插件经 `Plugin::get_vfs_provider()` **查询**（非广播、非 `traverse` 驱动），
+目录名直接取实例表里的挂载名，天然归属该子插件：
 
 ```rust
-for child in children {
-    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
-    let sub = host.fork();
-    sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-    sub.set(CAPABILITY_VISITOR, visitor.clone());
-    child.clone().traverse(String::new(), sub).await?;
-    dirs.extend(visitor.list_vdfs_providers().await);   // 必然属于该子插件
+for (name, child) in children {
+    if let Some(p) = child.get_vfs_provider() {
+        dirs.push((name, p));   // 目录名 = 实例表挂载名，天然归属该子插件
+    }
 }
 ```
 
-一次广播把整棵树收进同一个收集器，就无法区分某个 provider 是谁注册的；
-**逐子插件 + 独立收集器**保证目录名天然归属于注册它的那个子插件。
+（系统链路）容器经各子插件的 `get_vfs_provider()` 查询聚合，逐子插件查询（非广播）
+保证目录名天然归属、且不引入 `traverse` 驱动的副作用。
 **不缓存**——子插件集合由配置与生命周期决定，每次现取才与容器一致。
 
-### 6.4 一次广播的语义，两条消费链路
+### 6.4 两条消费链路，分别走各自通道
 
-**不新增第二条收集通道**。资源与工具、模型服务、系统提示词**共用同一次
-能力广播**：
+**系统链路与 LLM 链路是两条独立的发现通道**，不共用同一次遍历广播：
 
-- **LLM 链路**：会话编排方 `collect_capabilities` → 广播 → 容器登记 `<根>`
-  服务者、各插件注册 provider 进入 `CAPABILITY_VISITOR` → 工具执行时 `tool_ctx`
-  携带该访问器 → `vdfs_*` 工具经 `root_of(visitor)` 取根，交给 `UnifiedFs`。
-- **前端链路**：`vdfs` 插件收到 `vdfs/*` 请求后调 `resolve_fs(parent, ctx)`：
-  `ctx` 无能力管理器时，它从父插件广播**同一次** `traverse(TRAVERSE_AVAILABLE_TOOLS)`，
-  容器在广播中把视图注册进新的收集器，随即取回。
+- **LLM 链路**：会话编排方 `collect_capabilities` → 广播 `traverse(TRAVERSE_AVAILABLE_TOOLS)`
+  → 容器经 `register_vdfs_root` 登记 `<根>` 服务者、各插件经 `register_vdfs_provider`
+  登记自身资源进入 `CAPABILITY_VISITOR` → 工具执行时 `tool_ctx` 携带该访问器 →
+  `vdfs_*` 工具经 `visitor.get_vdfs_root()` 取根，交给 `UnifiedFs`。
+- **系统链路（前端 / 子智能体挂载点穿越）**：`vdfs` 插件 / `agent` 插件拿到父插件
+  （`Arc<dyn Plugin>`）后，直接调 `parent.get_vfs_provider()` 取根，不广播、不依赖
+  `CAPABILITY_VISITOR`。`resolve_fs(parent, ctx)` 在 `ctx` 无能力管理器时即走此通道：
+  `parent.get_vfs_provider().unwrap_or_else(empty_root)`。
+- **子智能体挂载点穿越**：`agent/<id>` 是挂载点，`agent` 插件对 `RelPath::Agent`
+  （首层）与 `RelPath::File`（子路径）均经 `sub_agent(id).get_vfs_provider()` 委托给
+  子 composite 的 `CompositeVfs`，返回的相对地址再用挂载前缀 `agent/<id>` 提回全局路径；
+  `root_hidden` 等可见性过滤由子 composite 的 `list` 统一执行（分形、与系统根同构）。
+
+`Plugin::get_vfs_provider` 默认 `None`（叶子插件 override 为 `Some(self)`，
+`Composite` override 为 `self.vdfs.clone()`）；`CapabilityVisitor` 上的 `get_vdfs_provider`
+（按目录名取、供 LLM 工具）与它是**两套不同接口**，互不替代。
 
 两条链路因此经过**同一个 `UnifiedFs`**（不变量 5）——不存在第二处地址规则。
 取不到根（无组合容器）时虚拟层降级为**空目录**（`EmptyVdfs`）：`<根>` 可列出
@@ -679,13 +716,16 @@ for child in children {
      （`NotImplemented`）。
    - **不需要、也不应该提供自己的位置**（§2.4）——`impl VdfsProvider for X {}`
      即可编译。
-2. 在插件 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支中
-   `register_vdfs_provider(目录名, provider)`；目录名用插件名（`PLUGIN_*`）。
+2. 同时接好两条发现链路（二者独立，不可只接其一）：
+   - **系统链路**：在 `impl Plugin for X` 中 override `get_vfs_provider` 返回
+     `Some(self)`（默认 `None`，不 override 则该模块不会出现在前端 / 子智能体树里）；
+   - **LLM 链路**：在插件 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支中
+     `register_vdfs_provider(目录名, provider)`；目录名用插件名（`PLUGIN_*`）。
 3. 校验写在 `write` 里；呈现需求放在节点的 `ext` + `schema`。
 
 **零改动面**：访问层、门面（`UnifiedFs`）、物理层、前端（导航 / 列表 / 详情）、
-容器（`composite`）都无需改动——容器逐子插件收集，新子目录自动出现在 `<根>`
-之下，LLM 侧 `<根>/<插件名>/…` 自动可寻址。
+容器（`composite`）都无需改动——容器逐子插件经 `get_vfs_provider` 查询，新子目录
+自动出现在 `<根>` 之下，LLM 侧 `<根>/<插件名>/…` 自动可寻址。
 仅当需要一类全新的详情渲染器时才在前端登记一个 ext → 组件映射。
 
 ### 10.2 新增一个容器层
@@ -695,8 +735,9 @@ for child in children {
 
 1. 子容器实现 `VdfsProvider`（可以直接就是另一个 `CompositeVdfs`——composite
    嵌套 composite 时它同样只是普通 provider，没有任何根的概念）；
-2. 子容器在 `traverse`中把该视图
-   `register_vdfs_provider(自己的插件名, 视图)`（成为父容器下的一个子目录），
+2. 子容器在 `impl Plugin` 中 override `get_vfs_provider` 返回 `Some(self.vdfs.clone())`
+   （系统链路发现），并在 `traverse` 中把该视图
+   `register_vdfs_provider(自己的插件名, 视图)`（成为父容器下的一个子目录，LLM 链路），
    或者由装配决定把它登记进 `register_vdfs_root` 槽位。
 
 两种挂法都由既有机制支持；**composite 的代码对二者完全无感**——这正是
@@ -752,8 +793,10 @@ for child in children {
   `plugins/vdfs/protocol.rs`。
 - provider **不得**提供或假设自己的位置（trait 上无 `mount()` / `category()` /
   root 概念）；只接收自身子树内的相对路径。
-- 子目录名**只能**由注册方在 `register_vdfs_provider(dir, …)` 处给出（约定 =
-  插件名）；**不得**出现第二处命名来源。
+- 子目录名**只**由使用方（消费者）给出，**不得**由 provider 自身决定：
+  LLM 链路在 `register_vdfs_provider(dir, …)` 处给出（约定 = 插件名），
+  系统链路由 composite 实例表的挂载名（经 `get_vfs_provider()` 取 provider 时
+  不带名，目录名由容器补）给出；凡这两处以外的「第二处命名来源」**不得**出现。
 - **地址规则只归门面**：`<根>` 前缀判别与两半分流**只允许**出现在
   `UnifiedFs`；访问层、工具、provider、容器都**不得**重复实现地址判别或
   前缀拼接。
@@ -811,15 +854,16 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
   委派（`list` / `stat` / `read` / `write` / `delete` / `mkdir` / `move` /
   `action` / `watch` / `unwatch`）。
   **不缓存**——子插件集合由配置与生命周期决定，每次现取才与容器一致。
-- `children_of` 逐子插件广播 `TRAVERSE_AVAILABLE_TOOLS`（每个子插件独立收集器），
-  汇总为 `(目录名, provider)` 清单（按 `order` 升序）。
+- `children_of` 逐子插件经 `Plugin::get_vfs_provider()` **查询**（系统链路，非广播、
+  不驱动 `traverse`），汇总为 `(目录名, provider)` 清单；目录名 = 实例表挂载名
+  （按 `order` 升序）。
 - 守卫：自身目录与子目录根不可读 / 写 / 删 / 移、`mkdir` 已存在报错、
   跨子目录移动被拒、子节点路径回填树内全路径、事件相对路径补全（§5）。
 - 隐藏属性：合成子目录节点时把子 provider 的 `root_hidden()` 回填进
   `VdfsNode::hidden`，并据此过滤掉不该出现在清单里的子目录（§3.2）；委派回来的
   `list` 结果同样过滤——隐藏是**机制级**属性，不因节点来自哪个 provider 而异。
   `stat` 仍如实报告该属性（隐藏只影响列表，不影响可达性）。当前标为隐藏的是内容
-  仅一份配置文档的目录：`web` / `local` / `gateway`（各自的配置地址
+  仅一份配置文档的目录：`gateway` / `web` / `telegram` / `local` / `work`（各自的配置地址
   `<根>/<插件>/PLUGIN.yml` 照常可寻址，也照常出现在设置页清单里）。
 - 在 `traverse` 中把该视图登记进 `register_vdfs_root` 槽位（§6.2）。
 
@@ -912,9 +956,11 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
   `model` / `mcp` 各有一份 `with_id`——那是该资源的写入语义，不再是跨插件共享原语。
 - **目录自管的类型自己落盘**：agent 目录走 `AgentDirStore`（工作区级 + 全局级
   双层），直接用 `import` / `export` / `delete`，**不经 vdfs_service**；
-  其目录内部（提示词 / 技能 / MCP）以 `<agent id>/<子类别标签>/<相对路径>`
-  寻址，子类别用**人读的标签**（`提示词` / `技能` / `MCP`）而非 kind 作路径段
-  ——与会话内部的「子会话 / 工作目录」同一口径。
+  其根 `agent/<id>` 是一个**挂载点**：钻进它即委托给子 composite 的 `CompositeVfs`
+  （与系统根分形同构），内部资源**递归**寻址为 `agent/<id>/<子目录>/<相对路径>`，
+  子目录名 = 子 composite 实例表的挂载名（即插件名，如 `skill` / `mcp` / `session` /
+  `model` / `setting` / …），由子 composite 的 `root_hidden` 统一决定可见性——
+  **不再**是 v1 那种 `<agent id>/<人读标签(提示词/技能/MCP)>/<相对路径>` 的三级平铺。
 - **变更广播按类型全局持有**：`vdfs::host::notify_change` / `watch_changes` /
   `unwatch_changes`。落盘的写 / 删（`vdfs_service` 三实现内部）与目录自管型 provider
   都调 `notify_change`，使订阅方无需轮询；按 `kind` 而非 provider 实例持有，是因为

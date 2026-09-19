@@ -64,6 +64,12 @@ impl Plugin for SettingPlugin {
         Self::metadata()
     }
 
+    fn get_vfs_provider(
+        self: Arc<Self>,
+    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+        Some(self)
+    }
+
     /// 本插件已无自有路由：分区清单与呈现由 `<根>/setting` 承担
     /// （`setting/list` / `setting/get` 更早已随 VDFS 下线）。
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {

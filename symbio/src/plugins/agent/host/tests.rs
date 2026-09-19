@@ -86,7 +86,7 @@ async fn agent_import_traverse_and_memory() {
     let workdir = dir.path().to_str().unwrap();
 
     // ── 1. 导入（zip → Agent 目录）──
-    let store = AgentDirStore::new(dir.path().join("agent"), Some(workdir));
+    let store = AgentDirStore::new(dir.path().join("agent"));
     let zip_bytes = build_agent_zip("com.symbio.test-fixture", "^2");
     let result = store
         .import(&zip_bytes, false)
@@ -99,7 +99,11 @@ async fn agent_import_traverse_and_memory() {
         .exists());
 
     // ── 2. traverse：整棵插件树并进会话（能力带来源前缀，§8.2）──
-    let plugin = Arc::new(AgentPlugin::new());
+    // 插件作用域到导入目录，使「发现根 == 导入位置」（与生产态 `PLUGIN_DIR` 语义一致）
+    let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
+        &dir.path().join("agent"),
+        PLUGIN_AGENT,
+    )));
     let (ctx, manager) = ctx_with(Some(workdir), Some("com.symbio.test-fixture"));
     plugin
         .clone()
@@ -175,9 +179,8 @@ async fn agent_import_traverse_and_memory() {
 #[tokio::test]
 async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     let dir = tempfile::tempdir().unwrap();
-    let workdir = dir.path().to_str().unwrap();
 
-    let store = AgentDirStore::new(dir.path().join("agent"), Some(workdir));
+    let store = AgentDirStore::new(dir.path().join("agent"));
     // requires.spec = ^9 与宿主主版本 2 不匹配 → 导入即拒绝（规范 §10）
     let zip_bytes = build_agent_zip("com.acme.future", "^9");
     let err = store.import(&zip_bytes, false).unwrap_err();
@@ -312,6 +315,60 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
     );
 }
 
+/// 钻进 v2 子智能体根（`agent/<id>`）应**穿过挂载点**列出子 composite 的根视图，
+/// 因此与父（系统）根完全一致——只显示可见插件，`root_hidden` 的配置型挂载点
+/// （gateway/web/telegram/local/work）不出现在侧边栏。这正是「父只显示可见、
+/// 子却显示全部」这一回归的根因修复：之前 `RelPath::Agent` 直接裸列 agent 目录，
+/// 绕过了 `CompositeVfs` 的 `root_hidden` 过滤。
+#[tokio::test]
+async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
+    use crate::symbio_core::{PluginDir, PLUGIN_AGENT, PLUGIN_DIR};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let agent_root = tmp.path().join("agent");
+    let sub = agent_root.join("reviewer");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        sub.join("manifest.yaml"),
+        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires://n  spec: \"^2\"\n",
+    )
+    .unwrap();
+    std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
+
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
+
+    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_AGENT));
+    ctx.set(AGENT_ID, "reviewer".to_string());
+    ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
+    let vctx = vdfs::vdfs_context(&ctx);
+
+    // 钻进子智能体根：列 `agent/reviewer` 的「下一层」
+    let items = plugin.list(&vctx, "reviewer").await.unwrap();
+    let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+
+    // 1) 穿过挂载点：返回的是子 composite 视图（名字是资源入口，且路径带挂载段
+    //    `reviewer`），而不是裸目录（`AGENTS.md` / `manifest.yaml` / `skill` 目录）。
+    assert!(
+        names.iter().any(|n| matches!(*n, "session" | "mcp" | "skill" | "setting" | "agent")),
+        "子根应经子 composite 列出可见资源入口，实际：{names:?}"
+    );
+    assert!(
+        items.iter().all(|n| n.path.contains("reviewer")),
+        "子根路径应带挂载段 reviewer（证明穿越了挂载点），实际：{:?}",
+        items.iter().map(|n| &n.path).collect::<Vec<_>>()
+    );
+    // 2) 关键回归：`root_hidden` 的配置型挂载点不得出现在侧边栏（与系统根一致）
+    for hidden in ["gateway", "web", "telegram", "local", "work"] {
+        assert!(
+            !names.contains(&hidden),
+            "子根不应列出 root_hidden 的 {hidden}（与系统根一致），实际：{names:?}"
+        );
+    }
+}
+
 /// agent 挂载根**只列装进来的子智能体**，系统自身的指令（`AGENTS.md`）不在此列——
 /// 它是「本 agent 的修改」，入口在设置页，混进列表会被读成某个包。
 #[tokio::test]
@@ -321,7 +378,7 @@ async fn mount_root_lists_only_installed_agents() {
     let agent_root = tmp.path().join("agent");
     std::fs::create_dir_all(&agent_root).unwrap();
 
-    let store = AgentDirStore::new(agent_root.clone(), Some(&workdir));
+    let store = AgentDirStore::new(agent_root.clone());
     store
         .import(&build_agent_zip("com.acme.demo", "^2"), false)
         .unwrap();
@@ -356,7 +413,7 @@ async fn traverse_declares_config_and_instruction_in_settings() {
     // 系统智能体自身的指令：挂在 agent 目录的**父目录**（homedir）
     std::fs::write(tmp.path().join("AGENTS.md"), "你是系统智能体。").unwrap();
 
-    let store = AgentDirStore::new(agent_root.clone(), Some(&workdir));
+    let store = AgentDirStore::new(agent_root.clone());
     store
         .import(&build_agent_zip("com.acme.demo", "^2"), false)
         .unwrap();

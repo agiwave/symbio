@@ -166,6 +166,12 @@ impl Plugin for WorkPlugin {
         Self::metadata()
     }
 
+    fn get_vfs_provider(
+        self: Arc<Self>,
+    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+        Some(self)
+    }
+
     /// 路由入口：**无自有协议**。
     ///
     /// 记忆的读 / 写 / 编辑全部由 VDFS 承接（`<根>/work/AGENTS.md`）——

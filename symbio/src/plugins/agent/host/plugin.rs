@@ -13,17 +13,18 @@
 //!   子智能体态 = `<agentdir>/AGENTS.md`（[`super::memory`]）。两者都归本插件——
 //!   读写面（`<根>/agent/…`）与注入面因此落在同一个所有者上。
 //!
-//! ⚠️ **指令文件不由子树里的插件实例解释**：子树按 agent 目录扫描，里面没有
-//! `agent` 实例（本插件只在系统层存在，否则会自我嵌套）。而本插件恰恰是「认识
-//! Agent 目录」的那个插件——它已经在扫描该目录、装配子树、并把整包内容暴露成 VDFS，
-//! 多读一个 `AGENTS.md` 完全在它的职责内。子树的注册仍经作用域 visitor 加前缀，
-//! 因此与系统侧不冲突（§8.2）。
+//! ⚠️ **指令文件不由子树里的插件实例解释**：子树按 agent 目录扫描，其中 `agent`
+//! 实例只负责「再下一级子 Agent」（`<id>/agent/<sub-id>` 递归，即分形），并不解释
+//! 本目录自身的指令——本目录的 `AGENTS.md` 仍归本插件（见 [`super::memory`]）。而本插件
+//! 恰恰是「认识 Agent 目录」的那个插件：它扫描目录、装配子树、把整包内容暴露成 VDFS、
+//! 并注入对应 `AGENTS.md`，全在职责内。子树的注册经作用域 visitor 加前缀，故与系统侧
+//! 不冲突（§8.2）。
 //!
-//! 能力（技能 / MCP）由 Agent 目录里的插件实例自己解释，**复用宿主已有的对应系统**
+//! 能力（技能 / MCP / …）由 Agent 目录里的插件实例自己解释，**复用宿主已有的对应系统**
 //! （§3.2 第 2 条）——这正是 v1 的失败之处：那时宿主为 agent 目录再写一遍技能与 MCP
-//! 的解析，两条链长期不同步。v2 的最小集合因此只有
-//! `mcp`（工具）+ `skill`（技能）；`work` / `setting` **都不在其中**，理由见
-//! [`SUB_AGENT_PLUGINS`]。
+//! 的解析，两条链长期不同步。v2 的子树因此挂**与父 Agent 同构的默认插件集**（见
+//! [`crate::symbio_core::SUB_AGENT_PLUGINS`]）：仅去掉 `model` / `vdfs` 两个系统级单槽，
+//! 其余（含 `agent` 自身、`setting`、`work`）全部与父树一致——UI 资源入口因此对齐。
 //!
 //! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时不装配任何 Agent，但 **agent_run
 //! （子智能体委托）始终注册**。
@@ -38,9 +39,9 @@ use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
     CapabilityVisitor, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, AGENTS_FILE, AGENT_ID,
-    CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR,
-    PLUGIN_FILE, PLUGIN_WORK, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
+    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, SUB_AGENT_PLUGINS,
+    AGENTS_FILE, AGENT_ID, CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT,
+    PLUGIN_COMPOSITE, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
     TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use async_trait::async_trait;
@@ -92,21 +93,15 @@ pub(crate) const SPEC_V2: &str = "agent-dir/v2";
 /// v1 的规范标识（OAB 约定目录装配形态，见 [`super::migrate`]）
 pub(crate) const SPEC_V1: &str = "oab/v1";
 
-/// 子 Agent 的必需插件清单 —— **只放「能力」**
+/// 子 Agent 的默认插件清单 —— 直接复用 `symbio_core` 的机制级常量。
 ///
-/// 只有解释 Agent 目录里**能力资产**的插件才属于子树；会话编排、模型网关、宿主基础
-/// 设施属于系统 Agent，不在这里。
-///
-/// ⚠️ **`work` 不在此列**：`work` 的作用域是 `ctx[WORKDIR]`，即**工作区**记忆
-/// （`{workdir}/AGENTS.md`）。它的实例一旦挂进子树，作用域只能是父会话的工作区——
-/// 那与系统侧那个实例**同一份文件、同一段内容**，会被注入两次；若把子树的作用域
-/// 改指 Agent 目录（v2 早期做过），它管的又不是工作区信息了，名实不符。
-///
-/// ⚠️ **`setting` 也不在此列**：`setting` 的分工是**设置页的入口**（自有分区 +
-/// 各插件的配置清单），它是「设置」这件事的索引，不是任何内容文件的所有者。
-/// 它在子树里既没有挂载点、也没有可声明的配置（注册会串味，见 `plugins/setting/plugin.rs`），
-/// 于是**无事可做**——而智能体自身的 `AGENTS.md` 归本插件（见模块文档）。
-const SUB_AGENT_PLUGINS: &[&str] = &["mcp", "skill"];
+/// 早期这里写死 `&["mcp","skill"]` 并注释「`work` / `setting` 不在此列」，那基于 v2
+/// 早期的 TWO 个已废弃前提：(1) 子树 `WORKDIR` 曾被指到 Agent 目录，导致 `work` 与系统侧
+/// 注入同一份 `AGENTS.md`（现已改为**继承父会话 WORKDIR**，见 [`Self::forward_to_sub_agent`]
+/// 文档，不再双重注入）；(2) `setting` 被认为在子树里无挂载点（实则 `SubAgentVisitor` 把它
+/// 前缀到 `agent/<id>/setting`，子 Agent 页因此有了设置入口）。现统一收口到
+/// [`crate::symbio_core::SUB_AGENT_PLUGINS`]——父子加载同一默认集，改一处即一致，
+/// 不再在此维护第二份清单。
 
 /// 读 Agent 目录下 `manifest.yaml` 的 `spec` 字段（读不到 / 解析不了 = `None`）
 fn manifest_spec(dir: &std::path::Path) -> Option<String> {
@@ -170,6 +165,19 @@ impl AgentPlugin {
         }
     }
 
+    /// 测试用：把插件作用域到指定目录（等价于生产态由 `PLUGIN_DIR` 告知的目录）。
+    ///
+    /// 仅用于单测——让「导入位置」与「发现根」落在同一目录，验证导入→发现→装配链路。
+    #[cfg(test)]
+    pub fn new_with_dir(dir: PluginDir) -> Self {
+        Self {
+            sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            router: None,
+            config: Arc::new(RwLock::new(AgentConfig::default())),
+            config_file: ConfigFile::new(dir, "智能体设置", config_definition()),
+        }
+    }
+
     /// 生效的条目写入上限（**写入闸门的唯一取值点**）
     pub(crate) async fn item_max_bytes(&self) -> usize {
         self.config.read().await.effective_item_max_bytes()
@@ -220,15 +228,18 @@ impl AgentPlugin {
     ///
     /// 返回 `None` = 该 id 不是 v2 子 Agent（目录不存在 / manifest 不是
     /// `agent-dir/v2`）——调用方据此回退到 legacy 约定目录装配。
-    async fn sub_agent(&self, id: &str, ctx: &Arc<dyn InvokeRequest>) -> Option<Arc<dyn Plugin>> {
+    pub(crate) async fn sub_agent(
+        &self,
+        id: &str,
+        ctx: &Arc<dyn InvokeRequest>,
+    ) -> Option<Arc<dyn Plugin>> {
         if let Some(tree) = self.sub_agents.read().await.get(id) {
             return Some(Arc::clone(tree));
         }
 
-        // 目录经 store 解析：**两级都找**（工作区级覆盖全局级）。只在全局根拼
-        // 路径会让工作区里安装的 Agent 找不到——v1 的挂载逻辑走的就是
-        // store，v2 不能比它少看一层。
-        let store = AgentDirStore::new(self.config_file.dir().dir(), ctx.get(WORKDIR).as_deref());
+        // agent 目录只由本插件自己的目录决定（与 workdir 无关）；嵌套子 Agent 的目录
+        // 由 composite 经 `PLUGIN_DIR` 自动作用域到 `<subtree>/agent`，分形天然正确。
+        let store = AgentDirStore::new(self.config_file.dir().dir());
         let record = store.get(id)?;
         let dir = record.dir.clone();
 
@@ -249,10 +260,6 @@ impl AgentPlugin {
         if manifest_spec(&dir).as_deref() != Some(SPEC_V2) {
             return None;
         }
-
-        // 旧装配留下的 work 副本（宿主曾把子树作用域改指 Agent 目录）：归档它，
-        // 否则它会与 `setting` 把同一份 `<agentdir>/AGENTS.md` 各注入一次。
-        Self::archive_retired_work_tree(&dir);
 
         // 与 `home` 造 `worker` 同形：把目录（子 Agent 的根）与必需插件清单告知
         // 容器，其余交给 composite 扫描装配——子 Agent 与系统 Agent 因此结构相同。
@@ -319,7 +326,7 @@ impl AgentPlugin {
         ctx: &Arc<dyn InvokeRequest>,
         visitor: &Arc<dyn CapabilityVisitor>,
     ) {
-        let store = AgentDirStore::new(self.config_file.dir().dir(), ctx.get(WORKDIR).as_deref());
+        let store = AgentDirStore::new(self.config_file.dir().dir());
         let memory = self.memory_store(&store, id).await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
         let address = crate::symbio_core::vdfs::absolute_addr(ctx, &memory::rel_path(id));
@@ -356,38 +363,6 @@ impl AgentPlugin {
         }
     }
 
-    /// 停用旧装配留在 Agent 目录里的 `work` 副本
-    ///
-    /// v2 早期由宿主把子树 `WORKDIR` 指到 Agent 目录，好让其中的 `work` 实例拥有
-    /// `<agentdir>/AGENTS.md`。那条路已废弃（`work` 只认工作区），但**已安装的
-    /// agent 目录里还躺着**那个被自动补建的 `work/PLUGIN.yml`——不处理的话它会继续
-    /// 被容器扫描加载，于是 `{workdir}/AGENTS.md` 会被系统侧与本子树各注入一次。
-    ///
-    /// 处理方式是**改名而不是删除**：`PLUGIN.yml` → `PLUGIN.yml.disabled`。
-    /// 「没有 `PLUGIN.yml` 的目录不是插件」是容器既有的加载判据
-    /// （见 `symbio_core::plugin_dir`），所以这一步恰好等于卸载，且幂等、可逆——
-    /// 要恢复就把名字改回去。
-    fn archive_retired_work_tree(agent_dir: &std::path::Path) {
-        let manifest = agent_dir.join(PLUGIN_WORK).join(PLUGIN_FILE);
-        if !manifest.exists() {
-            return; // 幂等：已归档，或该 agent 目录从来没有过
-        }
-        let archived = manifest.with_extension("yml.disabled");
-        match std::fs::rename(&manifest, &archived) {
-            Ok(()) => crate::plugin_info!(
-                "agent",
-                "已停用旧 work 副本 `{}`：`work` 只认工作区，智能体的 AGENTS.md 归本插件\
-                 （把文件名改回去即可恢复）",
-                manifest.display()
-            ),
-            Err(e) => crate::plugin_warn!(
-                "agent",
-                "停用旧 work 副本失败（{}）：{e}",
-                manifest.display()
-            ),
-        }
-    }
-
     pub fn metadata() -> PluginMeta {
         PluginMeta::new(PLUGIN_AGENT, "智能体（Agent 目录规范 v2）")
             .with_description(
@@ -408,7 +383,6 @@ impl AgentPlugin {
             return;
         };
 
-        let workdir = ctx.get(WORKDIR);
         let current = ctx
             .get(AGENT_ID)
             .map(|s| s.trim().to_string())
@@ -417,7 +391,7 @@ impl AgentPlugin {
         // 展示顺序号段约定：20 = 智能体（见 session::options 模块文档）
         const ORDER: i32 = 20;
 
-        let store = AgentDirStore::new(self.config_file.dir().dir(), workdir.as_deref());
+        let store = AgentDirStore::new(self.config_file.dir().dir());
         let agent_dirs = store.list();
 
         let mut children: Vec<crate::symbio_core::schemas::options::OptionNode> =
@@ -487,6 +461,12 @@ impl Plugin for AgentPlugin {
         Self::metadata()
     }
 
+    fn get_vfs_provider(
+        self: Arc<Self>,
+    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+        Some(self)
+    }
+
     async fn traverse(
         self: Arc<Self>,
         _path: String,
@@ -526,8 +506,8 @@ impl Plugin for AgentPlugin {
         self.contribute_instruction(&ctx, &tool_visitor).await;
 
         // ── VDFS 挂载点（`<根>/agent`）──
-        // 本插件自身就是 provider：agent 目录由 AgentDirStore 自管目录（工作区级 +
-        // 全局级双层），列 / 读 / 写（整包导入）/ 删 / 导出 直接由
+        // 本插件自身就是 provider：agent 目录由 AgentDirStore 自管目录（本插件自己的
+        // 目录，与 workdir 无关），列 / 读 / 写（整包导入）/ 删 / 导出 直接由
         // `impl VdfsProvider for AgentPlugin` 承载（见 `super::vdfs`）。
         {
             let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
@@ -537,7 +517,7 @@ impl Plugin for AgentPlugin {
         }
 
         // ── agent_run：无条件注册 ──
-        let store = AgentDirStore::new(self.config_file.dir().dir(), workdir.as_deref());
+        let store = AgentDirStore::new(self.config_file.dir().dir());
         tool_visitor
             .register_batch(vec![super::subagent::AgentRunCapability::new(
                 workdir.clone(),

@@ -40,8 +40,8 @@ use crate::symbio_core::event_bus::KIND_VDFS;
 use crate::symbio_core::vdfs::vdfs_context;
 use crate::symbio_core::vdfs_provider::*;
 use crate::symbio_core::{
-    CapabilityVisitor, DefaultToolVisitor, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginPayload, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    CapabilityVisitor, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginPayload,
+    CAPABILITY_VISITOR, WORKDIR,
 };
 use async_trait::async_trait;
 use std::collections::VecDeque;
@@ -96,8 +96,9 @@ pub async fn unified_fs(visitor: &Arc<dyn CapabilityVisitor>) -> DynVdfsProvider
 
 /// 取本次调用的统一文件系统（前端链路入口）。
 ///
-/// `ctx` 已带能力管理器时直接复用（不重复广播）；否则从 `parent` 广播一次，
-/// 让容器把自己的组合视图注册进新的收集器。
+/// - `ctx` 已带能力管理器（LLM 链路）→ 直接用其中的根（`CapabilityVisitor` 收集）；
+/// - 否则（前端链路）→ 经 core 的 `Plugin::get_vfs_provider` **直接取**父插件暴露的
+///   虚拟层根，不广播、不依赖 `CapabilityVisitor`。两条链路拿到的是同一个根实例。
 pub async fn resolve_fs(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn InvokeRequest>,
@@ -106,16 +107,13 @@ pub async fn resolve_fs(
         return unified_fs(&visitor).await;
     }
 
-    let manager: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
-    if let Some(parent) = parent {
-        let sub = ctx.fork();
-        sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-        sub.set(CAPABILITY_VISITOR, manager.clone());
-        if let Err(e) = parent.clone().traverse(String::new(), sub).await {
-            crate::plugin_warn!("vdfs", "resolve_fs: 广播失败，虚拟层降级为空: {e:?}");
-        }
-    }
-    unified_fs(&manager).await
+    // 前端链路：系统 vfs provider 经 `Plugin` 接口直接取（与 LLM 链路的
+    // `CapabilityVisitor` 无关），取不到时降级为空根。
+    let root = match parent {
+        Some(p) => Arc::clone(p).get_vfs_provider().unwrap_or_else(empty_root),
+        None => empty_root(),
+    };
+    Arc::new(UnifiedFs::new(root))
 }
 
 // ==================== 变更投递 ====================
@@ -733,7 +731,9 @@ mod tests {
     use super::super::physical::PhysicalFs;
     use super::*;
     use crate::symbio_core::vdfs_provider::VDFS_KIND_DIR;
-    use crate::symbio_core::{PluginError, PluginMeta, SimpleRequest};
+    use crate::symbio_core::{
+        CapabilityVisitor, DefaultToolVisitor, PluginError, PluginMeta, SimpleRequest,
+    };
     use async_trait::async_trait;
     use serde_json::{json, Value};
     use std::sync::Mutex;
@@ -1498,9 +1498,9 @@ mod tests {
         assert_eq!(data.items.len(), 2);
     }
 
-    /// 无能力管理器 → 从父插件广播，容器在广播中注册根（前端链路）
+    /// 无能力管理器 → 经 `Plugin::get_vfs_provider` 直接取父插件的虚拟层根（前端链路）
     #[tokio::test]
-    async fn resolve_fs_broadcasts_to_parent() {
+    async fn resolve_fs_fetches_root_via_trait_method() {
         struct FakeContainer;
 
         #[async_trait]
@@ -1519,14 +1519,14 @@ mod tests {
             async fn traverse(
                 self: Arc<Self>,
                 _path: String,
-                ctx: Arc<dyn InvokeRequest>,
+                _ctx: Arc<dyn InvokeRequest>,
             ) -> InvokeResponse<PluginPayload> {
-                if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
-                    if let Some(v) = ctx.get(CAPABILITY_VISITOR) {
-                        v.register_vdfs_root(root_with(&Rec::new())).await;
-                    }
-                }
                 Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+            }
+
+            /// 系统链路：直接暴露自己的虚拟层根（与 LLM 链路经 `register_vdfs_root` 收集互不干扰）
+            fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
+                Some(root_with(&Rec::new()))
             }
         }
 

@@ -855,6 +855,12 @@ impl Plugin for ModelPlugin {
         Self::metadata()
     }
 
+    fn get_vfs_provider(
+        self: Arc<Self>,
+    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+        Some(self)
+    }
+
     /// model 已无自有路由：配置的读写在 VDFS 上（`<根>/model/<id>` 的详情表单，
     /// 以及节点动作 `set-default`），跨条目状态写自己的 `<本插件目录>/PLUGIN.yml`。
     async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {

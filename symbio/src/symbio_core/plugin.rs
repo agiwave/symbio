@@ -1,6 +1,7 @@
 //! 插件核心 Trait（上下文注入版）
 
 use crate::symbio_core::SymbioKey;
+use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{lock_read, lock_write, InvokeResponse, PluginPayload};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -246,6 +247,23 @@ pub trait Plugin: Send + Sync + 'static {
         path: String,
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload>;
+
+    /// 取本插件直接暴露的虚拟文件系统 provider（**系统链路 / 文件系统视角**）。
+    ///
+    /// 与 `CapabilityVisitor`（LLM 链路的能力收集，含 `get_vdfs_root`）**无关**：
+    /// 这里是「这个插件自己暴露的 VDFS 视图」的直接查询接口——容器经它把子插件的
+    /// provider 聚合进组合视图，子智能体经它穿过 `agent/<id>` 挂载点。两条链路拿到的
+    /// 是同一个 provider 实例，只是发现通道不同。
+    ///
+    /// 默认 `None`：大多数插件不暴露 VDFS。容器（`Composite`）返回自己的
+    /// `CompositeVdfs`；自身即 provider 的插件（session / model / mcp / skill /
+    /// setting / agent / …）返回 `self`。
+    ///
+    /// ⚠️ 这是 core 查询接口（`Plugin` trait），不引入任何插件间类型耦合——
+    /// 调用方只依赖 `Arc<dyn Plugin>`，绝不依赖某个具体插件类型。
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
+        None
+    }
 }
 
 #[cfg(test)]

@@ -38,26 +38,13 @@ use tokio::sync::RwLock;
 
 /// 系统必备插件：**home 的策略**，随构造交给容器。
 ///
-/// 容器是通用容器（可嵌套另一个容器），不该内置任何清单——「哪些插件必须存在」
-/// 由构造者说了算。清单里的插件即便从未配置过也要有一个可编辑的 `PLUGIN.yml`
-/// （缺失的目录 / 文件由容器补出，缺省配置字段由插件自己的 `Default` 兜底）；
-/// 插件根下**多出来**的目录由容器扫描加载，不在此列。
-pub const SYSTEM_PLUGINS: &[&str] = &[
-    "setting",
-    "event_bus",
-    "model",
-    "session",
-    "local",
-    "web",
-    "mcp",
-    "telegram",
-    "hook",
-    "agent",
-    "skill",
-    "gateway",
-    "vdfs",
-    "work",
-];
+/// 系统（根）Agent 挂载的插件清单。
+///
+/// 直接复用 `symbio_core` 的机制级常量 [`crate::symbio_core::SYSTEM_AGENT_PLUGINS`]
+/// （根 = 子 Agent 默认集 [`crate::symbio_core::SUB_AGENT_PLUGINS`] + 系统级单槽
+/// `model` / `vdfs`）。根比子树多这两个单槽，因为它们由根独占、子树经
+/// `SubAgentVisitor` 丢弃——父子因此「结构一致、能力对齐」，且改一处即同步。
+pub const SYSTEM_PLUGINS: &[&str] = crate::symbio_core::SYSTEM_AGENT_PLUGINS;
 
 /// Home 自己的插件目录 = **系统根** `<homedir>`
 ///

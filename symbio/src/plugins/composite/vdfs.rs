@@ -2,10 +2,14 @@
 //!
 //! ## 职责
 //!
-//! 容器把子插件聚合为一棵目录树：**子插件只要在
-//! `traverse(TRAVERSE_AVAILABLE_TOOLS)` 中注册了 `VdfsProvider`，就以自己给出的
-//! 目录名（约定 = 插件名）成为本目录下的一个子目录**。没有注册的子插件不出现在
-//! 树里，容器也不需要认识任何具体资源。
+//! 容器把子插件聚合为一棵目录树：**子插件只要实现 `Plugin::get_vfs_provider`
+//! （返回自己暴露的 `VdfsProvider`），就以实例表里的挂载名（约定 = 插件名）成为
+//! 本目录下的一个子目录**。未实现该接口的插件不出现在树里，容器也不需要认识任何
+//! 具体资源。
+//!
+//! `get_vfs_provider` 是 **core 的 `Plugin` 查询接口**，与 LLM 链路的
+//! `CapabilityVisitor`（收集 vfs 根供工具使用）无关——系统视角下「这个插件自己
+//! 暴露的 VDFS 视图」由它直接回答，容器与子插件之间因此没有类型耦合。
 //!
 //! 本模块自身实现 [`VdfsProvider`]（没有任何中间结构）：
 //!
@@ -34,14 +38,18 @@
 //!
 //! ## 访问层
 //!
-//! 本视图在容器的 `traverse` 里被登记为 `<根>` 的服务者（`register_vdfs_root`）。
-//! vdfs 插件只取这个登记项再转发，不认识本模块——拓扑知识因此不落在访问层。
+//! 本视图是 `<根>` 的服务者，由两条通道暴露给访问层：
+//! - **LLM 链路**：容器在 `traverse` 里经 `CapabilityVisitor::register_vdfs_root` 登记；
+//! - **系统 / 前端链路**：容器经 `Plugin::get_vfs_provider` 直接返回（见
+//!   `composite.rs` 的 `impl Plugin`），访问层 `resolve_fs` 直接取。
+//!
+//! 两条通道拿到的是同一个 `CompositeVdfs` 实例；拓扑知识因此不落在访问层。
 
 use crate::symbio_core::vdfs::{descend_addr, host_ctx};
 use crate::symbio_core::vdfs_provider::*;
 use crate::symbio_core::{
-    CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor,
-    InvokeRequestExt, Plugin, CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
+    ConfigurableVisitor, DefaultConfigurableVisitor, InvokeRequestExt, Plugin, CONFIG_VISITOR,
+    PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -94,15 +102,25 @@ impl CompositeVdfs {
         Self { instances }
     }
 
-    /// 现场收集：逐个向子插件广播一次能力收集，取回各自注册的 `(目录名, provider)`，
-    /// 按 `order` 升序排序（同序按目录名、插件名兜底，使结果不依赖子插件的枚举顺序）。
+    /// 现场收集：取回各子插件的 `(目录名, provider)`，按 `order` 升序排序（同序按目录名
+    /// 兜底，使结果不依赖子插件的枚举顺序）。
     ///
     /// 不缓存——子插件集合与注册内容由配置与生命周期决定，每次现取才与容器一致。
     ///
     /// 目录名是路径首段的唯一键：**重名时保留排序后首个**并 `warn`。若不处理，
     /// `list("")` 会给出两个同名节点而 `resolve` 只能命中一个——后来者**完全不可达**。
-    /// 因此**先排序、再去重**：胜出者由 `(order, 目录名, 插件名)` 唯一确定，重名是装配
+    /// 因此**先排序、再去重**：胜出者由 `(order, 目录名)` 唯一确定，重名是装配
     /// 错误，必须在日志里可见而不是静默丢弃。
+    ///
+    /// ## 两条收集通道，各管各的
+    ///
+    /// - **VDFS 子目录**：经 core 的 [`Plugin::get_vfs_provider`] 直接查询——这是系统
+    ///   链路的视角，子插件自己暴露的 provider 由它直接回答，目录名 = 子插件在容器实例
+    ///   表里的挂载名（约定 = 插件名）。**不走 `CapabilityVisitor`**（`CapabilityVisitor`
+    ///   是 LLM 链路的能力收集通道，与系统 VDFS 发现无关）。
+    /// - **配置声明**：仍是独立的 `CONFIG_VISITOR` 通道——逐子插件广播一次 `traverse`，
+    ///   子插件把各自的配置文档声明写回本次请求 ctx，被委派的设置插件据此知道「哪些
+    ///   插件有配置文档」。
     async fn children_of(&self, ctx: &VdfsContext) -> VdfsResult<Vec<(String, DynVdfsProvider)>> {
         let host = host_ctx(ctx)?;
         let children: Vec<(String, Arc<dyn Plugin>)> = {
@@ -113,10 +131,8 @@ impl CompositeVdfs {
                 .collect()
         };
 
-        // 可配置声明通道（第三条收集通道）：与 VDFS provider 共用这次广播，但用
-        // **共享收集器**——声明自带目录名，不存在归属歧义，所有子插件注册进同一个。
-        // 收集结果**写回请求 ctx**：同一次请求里稍后被委派的子 provider（如设置插件）
-        // 据此知道「哪些插件有配置文档」，无需自己反查插件目录、也无需硬编码清单。
+        // 可配置声明通道：与 VDFS 无关，仍逐子插件广播一次 `traverse`，但只挂
+        // `CONFIG_VISITOR`——配置声明自带目录名，不存在归属歧义。
         let configs: Arc<dyn ConfigurableVisitor> = match host.get(CONFIG_VISITOR) {
             Some(v) => v,
             None => {
@@ -126,40 +142,38 @@ impl CompositeVdfs {
             }
         };
 
-        // `(注册它的子插件, 目录名, provider)`——带上归属，重名告警才点得出双方
-        let mut collected: Vec<(String, String, DynVdfsProvider)> = Vec::new();
-        for (plugin, child) in children {
-            let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+        // VDFS 子目录：经 `Plugin::get_vfs_provider` 直接取（系统链路，无 CapabilityVisitor）。
+        // 目录名 = 子插件在实例表里的挂载名（约定 = 插件名），与 `resolve` 的首段键一致。
+        let mut collected: Vec<(String, DynVdfsProvider)> = Vec::new();
+        for (name, child) in children {
+            // `get_vfs_provider` 以 `self: Arc<Self>` 消费接收者，故先 clone 再取，
+            // 避免移动 `child` 导致下面 `traverse` 复用失败。
+            if let Some(p) = child.clone().get_vfs_provider() {
+                collected.push((name.clone(), p));
+            }
+            // 配置声明：独立通道，照旧遍历（不改机制）
             let sub = host.fork();
             sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-            sub.set(CAPABILITY_VISITOR, visitor.clone());
             sub.set(CONFIG_VISITOR, configs.clone());
-
             if let Err(e) = child.clone().traverse(String::new(), sub).await {
-                crate::plugin_warn!("composite", "vdfs: 子插件遍历失败，已跳过其子目录: {e:?}");
+                crate::plugin_warn!("composite", "vdfs: 子插件遍历失败，已跳过其配置声明: {e:?}");
             }
-            collected.extend(
-                visitor
-                    .list_vdfs_providers()
-                    .await
-                    .into_iter()
-                    .map(|(dir, p)| (plugin.clone(), dir, p)),
-            );
         }
-        collected.sort_by(|a, b| (a.2.order(), &a.1, &a.0).cmp(&(b.2.order(), &b.1, &b.0)));
+
+        collected.sort_by(|a, b| (a.1.order(), &a.0).cmp(&(b.1.order(), &a.0)));
 
         let mut dirs: Vec<(String, DynVdfsProvider)> = Vec::with_capacity(collected.len());
-        // 目录名 → 已胜出的注册者（仅用于重名告警）
-        let mut owners: HashMap<String, String> = HashMap::new();
-        for (plugin, dir, p) in collected {
-            if let Some(prev) = owners.get(&dir) {
+        // 目录名 → 是否已出现（仅用于重名告警）
+        let mut owners: HashMap<String, ()> = HashMap::new();
+        for (dir, p) in collected {
+            if owners.contains_key(&dir) {
                 crate::plugin_warn!(
                     "composite",
-                    "vdfs: 目录名「{dir}」被 {prev} 与 {plugin} 重复注册，保留 {prev}（{plugin} 不可达）"
+                    "vdfs: 目录名「{dir}」被多个子插件重复注册，保留首个（其余不可达）"
                 );
                 continue;
             }
-            owners.insert(dir.clone(), plugin);
+            owners.insert(dir.clone(), ());
             dirs.push((dir, p));
         }
         Ok(dirs)
@@ -450,7 +464,7 @@ mod tests {
     use super::*;
     use crate::symbio_core::vdfs::vdfs_context;
     use crate::symbio_core::{
-        InvokeRequest, PluginError, PluginMeta, PluginPayload, SimpleRequest,
+        CAPABILITY_VISITOR, InvokeRequest, PluginError, PluginMeta, PluginPayload, SimpleRequest,
     };
 
     /// 只暴露一个 `a.txt` 的 provider；标签 / 顺序 / 隐藏可配，便于断言归属
@@ -522,6 +536,15 @@ mod tests {
             }
             Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
         }
+
+        /// 系统链路：直接暴露自己的 provider（目录名由容器实例表的挂载名给出）
+        fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
+            Some(Arc::new(LeafProvider {
+                label: self.label,
+                order: self.order,
+                hidden: self.hidden,
+            }))
+        }
     }
 
     type InvokeResponse = crate::symbio_core::InvokeResponse<PluginPayload>;
@@ -558,6 +581,11 @@ mod tests {
                 }
             }
             Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+        }
+
+        /// 系统链路：直接暴露给定的 provider（目录名由容器实例表的挂载名给出）
+        fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
+            Some(self.provider.clone())
         }
     }
 
@@ -695,6 +723,13 @@ mod tests {
                 }
                 Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
             }
+
+            // 系统链路：直接暴露 provider（与 LLM 链路经 `register_vdfs_provider` 注册互不冲突）
+            fn get_vfs_provider(
+                self: Arc<Self>,
+            ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+                Some(Arc::new(MixedProvider))
+            }
         }
 
         let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
@@ -735,15 +770,16 @@ mod tests {
         }
     }
 
-    /// 两个子插件注册同一目录名 → 只保留排序后首个，不产生同名节点（后者本不可达）
+    /// 子插件各以**挂载名**作为目录名出现：两个不同挂载名的插件各自一个目录，
+    /// 不合并（目录名唯一性由容器实例表的键保证，不再依赖注册时自报的目录名）。
+    /// 列表顺序按 provider 的 `order` 升序。
     #[tokio::test]
-    async fn duplicate_dir_names_keep_the_first_only() {
-        // 插件名与目录名解耦：两个**不同**插件注册同一个目录名
+    async fn distinct_mount_names_each_get_a_dir() {
         let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
         map.insert(
             "plugin_a".to_string(),
             Arc::new(FakeChild {
-                dir: "same",
+                dir: "a",
                 label: "甲",
                 order: 2,
                 hidden: false,
@@ -752,7 +788,7 @@ mod tests {
         map.insert(
             "plugin_b".to_string(),
             Arc::new(FakeChild {
-                dir: "same",
+                dir: "b",
                 label: "乙",
                 order: 1,
                 hidden: false,
@@ -762,17 +798,15 @@ mod tests {
         let ctx = host_ctx();
 
         let dirs = vdfs.children_of(&ctx).await.unwrap();
-        assert_eq!(dirs.len(), 1, "重名只保留一份，否则会列出两个同名子目录");
-        assert_eq!(dirs[0].0, "same");
-        assert_eq!(
-            dirs[0].1.label(),
-            Some("乙"),
-            "胜出者由 order 决定（1 < 2），不依赖 HashMap 的枚举顺序"
-        );
+        assert_eq!(dirs.len(), 2, "两个不同挂载名 → 两个目录");
+        // 顺序按 provider.order()：plugin_b(1) 先于 plugin_a(2)
+        assert_eq!(dirs[0].0, "plugin_b");
+        assert_eq!(dirs[0].1.label(), Some("乙"));
+        assert_eq!(dirs[1].0, "plugin_a");
+        assert_eq!(dirs[1].1.label(), Some("甲"));
 
         let root = vdfs.list(&ctx, "").await.unwrap();
-        assert_eq!(root.len(), 1);
-        assert_eq!(root[0].name, "same");
+        assert_eq!(root.len(), 2);
     }
 
     /// 子树内的路径被拆回相对路径交给叶子 provider，返回项回填树内全路径
@@ -986,9 +1020,10 @@ mod tests {
         }
     }
 
-    /// 多段名 + 短名同时在册：嵌套 provider 不被外层前缀遮蔽（最长前缀命中）
+    /// 子插件的 provider 经 `Plugin::get_vfs_provider` 直接取回（系统链路），
+    /// 目录名 = 实例表的挂载名；与 LLM 链路经 `CapabilityVisitor` 收集互不干扰。
     #[tokio::test]
-    async fn multisegment_registration_resolves_by_longest_prefix() {
+    async fn sub_provider_fetched_via_trait_method() {
         let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
         map.insert(
             "agent".to_string(),
@@ -997,64 +1032,22 @@ mod tests {
                 provider: Arc::new(EchoProvider { label: "outer" }),
             }),
         );
-        // SubAgentVisitor 前缀化后的注册名（多段）
-        map.insert(
-            "skill".to_string(),
-            Arc::new(ProviderChild {
-                dir: "agent/b1/skill",
-                provider: Arc::new(EchoProvider { label: "inner" }),
-            }),
-        );
         let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
         let ctx = host_ctx();
 
-        // 嵌套 provider：地址首段是 `agent`，但最长前缀命中 `agent/b1/skill`
-        let c = vdfs
-            .read(&ctx, "agent/b1/skill/prompts/f.md")
-            .await
-            .unwrap();
+        // `get_vfs_provider` 直接给出 provider；`children_of` 用挂载名 "agent" 作目录名
+        let dirs = vdfs.children_of(&ctx).await.unwrap();
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0].0, "agent");
+        assert_eq!(dirs[0].1.label(), Some("outer"));
+
+        // 经组合视图读子 provider：父地址续接、相对路径透传
+        let c = vdfs.read(&ctx, "agent/x/f.md").await.unwrap();
         let text = c.text.as_deref().unwrap();
-        assert!(text.starts_with("inner:"), "长名命中: {text}");
+        assert!(text.starts_with("outer:"), "挂载名命中: {text}");
         assert!(
-            text.ends_with("/agent/b1/skill/prompts/f.md"),
+            text.ends_with("/agent/x/f.md"),
             "父地址 + 相对路径 = 完整挂载点地址（根名无关）: {text}"
         );
-
-        // 外层 provider：不经嵌套名的地址仍命中短名
-        let c = vdfs.read(&ctx, "agent/other/f.md").await.unwrap();
-        let text = c.text.as_deref().unwrap();
-        assert!(text.starts_with("outer:"), "短名兜底: {text}");
-
-        // 节点回填：多段目录名直接进树内全路径
-        let items = vdfs.list(&ctx, "agent/b1/skill").await.unwrap();
-        assert_eq!(items[0].path, "agent/b1/skill/a.txt");
-    }
-
-    /// 根清单的呈现：多段名注册的目录**原样出现**（名字含 `/`）。
-    ///
-    /// 这是钉住现状的文档化测试：嵌套 provider 在根清单里目前是平铺的
-    /// 多段名条目（非折叠层级）。展示形态可再议，但**寻址语义**以本文件
-    /// 上一条测试为准，不受呈现影响。
-    #[tokio::test]
-    async fn root_listing_shows_multisegment_names_verbatim() {
-        let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
-        map.insert(
-            "skill".to_string(),
-            Arc::new(ProviderChild {
-                dir: "agent/b1/skill",
-                provider: Arc::new(EchoProvider { label: "inner" }),
-            }),
-        );
-        let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
-        let ctx = host_ctx();
-
-        let names: Vec<String> = vdfs
-            .list(&ctx, "")
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|n| n.name)
-            .collect();
-        assert!(names.contains(&"agent/b1/skill".to_string()), "{names:?}");
     }
 }

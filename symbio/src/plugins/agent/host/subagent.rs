@@ -214,7 +214,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             None => self.workdir.clone(),
         };
         if let Some(aid) = &agent_id {
-            let store = AgentDirStore::new(&self.agent_dir_root, effective_workdir.as_deref());
+            let store = AgentDirStore::new(&self.agent_dir_root);
             if store.get(aid).is_none() {
                 return Err(PluginError::NotFound(format!(
                     "目标智能体 '{aid}' 不存在，无法委托任务。请检查 agent_id 是否正确。"

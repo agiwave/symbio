@@ -3,14 +3,15 @@
 //! ## 目录布局
 //!
 //! ```text
-//! {系统目录}/agent/<id>/                   全局级（= 本插件自己的目录）
-//! {workdir}/.symbio/agent/<id>/            工作区级（同名覆盖全局级）
+//! {系统目录}/agent/<id>/                   本插件自己的目录（= 全局唯一来源）
 //! ```
 //!
-//! 全局级：Agent 统一存放在**本插件自己的目录**下（装配态即 `<homedir>/agent`）。
+//! Agent 统一存放在**本插件自己的目录**下（装配态即 `<homedir>/agent`）。
 //! 该目录由父插件经 `PLUGIN_DIR` 告知（见 [`AgentDirStore::new`]），本模块**不自己拼**
 //! ——系统目录可被「切换系统目录」改变并持久化到 bootstrap，手拼就会与装配态不一致。
-//! 工作区级仅在工作区上下文存在时参与，为按项目安装与测试隔离提供位置。
+//!
+//! **与 workdir / 工作区无关**：agent 目录只由 `homedir` 经 `PLUGIN_DIR` 推出，绝不
+//! 把 workdir 当第二发现根（那是递归与「子 Agent 只看到 Skill/Mcp」的根因）。
 //!
 //! 一个 Agent 就是规范 §4 的一个目录，导入导出均为整目录 zip——**分发的是完整
 //! agent 能力**。
@@ -49,20 +50,17 @@ pub struct AgentDirRecord {
     pub source: AgentDirScope,
 }
 
-/// agent 目录来源层级
+/// agent 目录来源层级（当前仅全局级：本插件自己的目录）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentDirScope {
-    /// `{workdir}/.symbio/agent/`
-    Workspace,
-    /// `{系统目录}/agent/`（本插件自己的目录）
+    /// `{系统目录}/agent/`（本插件自己的目录；与 workdir 无关）
     Global,
 }
 
 impl AgentDirScope {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Workspace => "workspace",
             Self::Global => "global",
         }
     }
@@ -109,9 +107,7 @@ pub fn normalize_item_path(rel: &str) -> Result<String, String> {
 
 /// Agent 目录存储。
 pub struct AgentDirStore {
-    /// 工作区级根（None = 无工作区上下文）
-    workspace_root: Option<PathBuf>,
-    /// 全局根 = **本插件自己的目录**（`<homedir>/agent`）
+    /// 全局根 = **本插件自己的目录**（`<homedir>/agent`，由 `PLUGIN_DIR` 告知）
     global_root: PathBuf,
 }
 
@@ -122,41 +118,17 @@ impl AgentDirStore {
     /// [`PluginDir`]，见 `AgentPlugin::build`），本文件**不得**自己拼
     /// `<homedir>/…/agent`：插件只认父插件告知的目录，这是「插件不认识全局布局」
     /// 这条约束的一部分——手拼就等于把布局知识复制一份，改布局时必然漏改。
-    pub fn new(global_root: impl Into<PathBuf>, workdir: Option<&str>) -> Self {
-        // 两级发现：
-        // - 全局级 = 本插件目录下的 `<id>`（目录由父插件告知，可被「切换系统目录」
-        //   改变并持久化到 bootstrap）—— 这是用户安装 agent 目录的主位置，必须始终被扫描；
-        // - 工作区级 = `{workdir}/.symbio/agent/<id>`（同名时覆盖全局级）。
-        //   工作区层同时为测试提供隔离：测试用 tempdir 作 workdir 时不会污染真实系统目录。
-        let workspace_root = workdir.map(|w| Path::new(w).join(".symbio").join("agent"));
+    ///
+    /// agent 目录只由本插件目录决定，与 workdir / 工作区无关。
+    pub fn new(global_root: impl Into<PathBuf>) -> Self {
         Self {
-            workspace_root,
             global_root: global_root.into(),
         }
     }
 
-    /// 全量 agent 目录列表（当前为单来源：本插件目录下的 `<id>`）。
+    /// 全量 agent 目录列表（唯一来源：本插件目录下的 `<id>`）。
     pub fn list(&self) -> Vec<AgentDirRecord> {
-        let mut records: Vec<AgentDirRecord> = Vec::new();
-        for (scope, root) in [
-            (AgentDirScope::Global, Some(&self.global_root)),
-            (AgentDirScope::Workspace, self.workspace_root.as_ref()),
-        ] {
-            let Some(root) = root else { continue };
-            for entry in Self::scan_root(root) {
-                // 同名去重：工作区级后扫到，覆盖全局级
-                if let Some(existing) = records
-                    .iter_mut()
-                    .find(|r| r.manifest.id == entry.manifest.id)
-                {
-                    if scope == AgentDirScope::Workspace {
-                        *existing = entry;
-                    }
-                } else {
-                    records.push(entry);
-                }
-            }
-        }
+        let mut records: Vec<AgentDirRecord> = Self::scan_root(&self.global_root);
         records.sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
         records
     }
@@ -233,12 +205,8 @@ impl AgentDirStore {
         // §10：版本门槛是**接入前提**，不匹配整包拒收（不静默降级）
         manifest::validate(&manifest).map_err(|e| format!("智能体校验失败（拒绝导入）：{e}"))?;
 
-        // ── 2. 目标目录（工作区级优先；无工作区则全局级）──
-        let root = self
-            .workspace_root
-            .clone()
-            .unwrap_or_else(|| self.global_root.clone());
-        let dest = root.join(&manifest.id);
+        // ── 2. 目标目录（本插件自己的目录，与 workdir 无关）──
+        let dest = self.global_root.join(&manifest.id);
         let replaced = dest.exists();
         if replaced && !replace {
             return Err(format!(
@@ -252,7 +220,7 @@ impl AgentDirStore {
         // 规范化每个 entry 的路径，必须仍位于 dest 内（拒绝 `..` 与绝对路径）。
         let canonical_dest = dest
             .canonicalize()
-            .unwrap_or_else(|_| absolutize(&root, &manifest.id));
+            .unwrap_or_else(|_| dest.clone());
         std::fs::create_dir_all(&dest).map_err(|e| format!("创建目录失败: {e}"))?;
         for i in 0..archive.len() {
             let mut file = archive
@@ -614,14 +582,11 @@ mod tests {
         }
     }
 
-    /// 在工作区级落一个最小 agent 目录（不经 zip：以下用例只关心写入闸门）
+    /// 在本插件目录落一个最小 agent 目录（不经 zip：以下用例只关心写入闸门）
     fn workspace_store_with_agent_dir() -> (tempfile::TempDir, AgentDirStore) {
         let dir = tempfile::TempDir::new().unwrap();
-        let store = AgentDirStore::new(
-            dir.path().join("global-agent"),
-            Some(dir.path().to_str().unwrap()),
-        );
-        let agent_dir = dir.path().join(".symbio/agent/b");
+        let store = AgentDirStore::new(dir.path().join("global-agent"));
+        let agent_dir = dir.path().join("global-agent").join("b");
         std::fs::create_dir_all(agent_dir.join("prompts")).unwrap();
         std::fs::write(
             agent_dir.join("manifest.yaml"),
@@ -660,7 +625,7 @@ mod tests {
     fn memory_lives_in_agent_dir() {
         let (dir, store) = workspace_store_with_agent_dir();
         let path = store.memory_path("b").unwrap();
-        assert_eq!(path, dir.path().join(".symbio/agent/b").join(AGENTS_FILE));
+        assert_eq!(path, dir.path().join("global-agent/b").join(AGENTS_FILE));
         assert_eq!(path.file_name().unwrap(), "AGENTS.md");
         // 不是工作区根的那个 AGENTS.md
         assert_ne!(path, dir.path().join(AGENTS_FILE));

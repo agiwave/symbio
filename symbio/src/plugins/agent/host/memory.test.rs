@@ -11,14 +11,11 @@ use super::*;
 use crate::symbio_core::{VdfsAccess, AGENTS_FILE};
 use tempfile::TempDir;
 
-/// 在工作区级落一个最小 agent_dir（不经 zip：以下用例只关心记忆的落位与作用域）
+/// 在本插件目录落一个最小 agent_dir（不经 zip：以下用例只关心记忆的落位与作用域）
 fn workspace_with_agent_dir() -> (TempDir, AgentDirStore) {
     let dir = TempDir::new().unwrap();
-    let store = AgentDirStore::new(
-        dir.path().join("global-agent"),
-        Some(dir.path().to_str().unwrap()),
-    );
-    let agent_dir = dir.path().join(".symbio/agent/b");
+    let store = AgentDirStore::new(dir.path().join("global-agent"));
+    let agent_dir = dir.path().join("global-agent").join("b");
     std::fs::create_dir_all(agent_dir.join("prompts")).unwrap();
     std::fs::write(
         agent_dir.join("manifest.yaml"),
@@ -51,7 +48,7 @@ fn memory_lives_next_to_the_agent_manifest() {
     assert!(m.has_scope());
     assert_eq!(
         m.path().unwrap(),
-        dir.path().join(".symbio/agent/b/AGENTS.md")
+        dir.path().join("global-agent/b/AGENTS.md")
     );
     assert_eq!(m.file_name(), AGENTS_FILE, "节点名 = 真实文件名");
     // 不是工作区根的那个 AGENTS.md —— 那是 work 插件的作用域

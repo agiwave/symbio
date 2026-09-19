@@ -27,19 +27,24 @@
 > `setting`——但 `setting` 是**设置页的入口**（自有分区 + 各插件配置清单），
 > 不是任何内容文件的所有者。
 
-### 子 Agent 的必需插件清单
+### 子 Agent 的默认插件清单
 
-`mcp`（工具）+ `skill`（技能）——**只放解释能力资产的插件**。
+子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::SUB_AGENT_PLUGINS`）——即系统
+全套插件去掉系统级单槽 `model` / `vfs`，其余（`setting`、`event_bus`、`session`、`local`、
+`web`、`mcp`、`telegram`、`hook`、`agent`、`skill`、`gateway`、`work`）全部与父树一致。
 
-- ⚠️ **`work` 不在其中**：`work` 的作用域是 `ctx[WORKDIR]`，即**工作区**记忆
-  （`{workdir}/AGENTS.md`）。它的实例挂进子树只会与系统侧那个实例读同一份文件、
-  注入同一段内容；v2 早期把子树 `WORKDIR` 覆写成 Agent 目录，那是**错的**——
-  `work` 只负责工作区信息。
-- ⚠️ **`setting` 也不在其中**：它在子树里既没有挂载点、也没有可声明的配置（注册会
-  串味，见 `../setting/plugin.rs`），无事可做。设置入口是**系统层**的事。
+- `work` 在其中：子树 `WORKDIR` **继承父会话**（不再覆写成 Agent 目录），所以 `work` 注入的是
+  工作区记忆，与系统侧读的是同一份语义、但落在子树自己的 `agent/<id>/work` 挂载点，无双重注入。
+- `setting` 在其中：`SubAgentVisitor` 把它前缀到 `agent/<id>/setting`，子 Agent 页因此有了
+  设置入口，与父 Agent 对齐。
+- `agent` 在其中：子 Agent 也能在其目录内再挂子 Agent（`<id>/agent/<sub-id>` 递归）——分形。
+- `model` / `vfs` 不在其中：二者是系统级单槽，归系统 Agent 独占，子树经 `SubAgentVisitor`
+  丢弃对应注册；列在子树里只会构造出无挂载点的空实例。
 
-宿主的 `archive_retired_work_tree` 会把旧装配留下的那个 `<agentdir>/work/PLUGIN.yml`
-改名为 `.disabled`（= 卸载，幂等且可逆）。
+> 历史注：v2 早期宿主把子树 `WORKDIR` 覆写成 Agent 目录，导致 `work` 与系统侧注入同一份
+> `AGENTS.md`，曾用一个 `archive_retired_work_tree` 把旧 `<agentdir>/work/PLUGIN.yml` 改名
+> 卸载。该覆写已废弃（`WORKDIR` 改为继承），双重注入根因消除，`archive_retired_work_tree`
+> 随之退役。
 
 ## 智能体自身的 `AGENTS.md`（两个作用域）
 
@@ -74,7 +79,16 @@
 ## 路由
 
 **agent 插件没有任何自有路由**：`route()` 直接返回 `NotFound` 并指引到 VDFS。
-agent 目录及其内部（提示词 / 技能 / MCP）一律经 `<根>/agent/<id>/<子类别标签>/<相对路径>` 寻址。
+agent 目录的寻址是**挂载点语义**而非平铺三段：
+
+- `agent/<id>` 是挂载点；钻进它即**委托给子 composite 的 `CompositeVfs`**（与系统根
+  分形同构，而非把子智能体资源并集进系统树的三段地址）。
+- 钻进后的清单由子 composite 的 `list("")` 返回自身子目录（session / model / mcp /
+  skill / setting / …，经 `root_hidden` 过滤后的可见项），地址**递归**为
+  `agent/<id>/<子目录>/<相对路径>`，没有固定的「子类别标签」三层。
+- 两条链路要分清：**LLM 链路**的子智能体能力经 `SubAgentVisitor` 加 `agent/<id>/`
+  前缀并集进系统树（前缀可见）；**系统 / 前端链路**走挂载点穿越（`sub_agent(id)`
+  的 `get_vfs_provider()`），返回的相对地址用 `agent/<id>` 提回全局路径。
 
 ## 关联
 

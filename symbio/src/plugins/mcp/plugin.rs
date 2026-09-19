@@ -587,6 +587,12 @@ impl Plugin for McpPlugin {
         Self::metadata()
     }
 
+    fn get_vfs_provider(
+        self: Arc<Self>,
+    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+        Some(self)
+    }
+
     async fn traverse(
         self: Arc<Self>,
         _path: String,

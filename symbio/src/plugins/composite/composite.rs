@@ -300,9 +300,10 @@ impl Plugin for Composite {
         _path: String,
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
-        // 装配安排：容器把自己的 vdfs 视图登记进访问层的单槽位，使其成为
-        // `<根>` 的服务者。这不是「容器是根」——composite 只是恰好包含若干
-        // 子目录的 provider，能否出现在那里取决于装配，不是本模块的属性。
+        // 装配安排：容器把自己的 vdfs 视图登记进访问层的单槽位（LLM 链路用）。
+        // 这不是「容器是根」——composite 只是恰好包含若干子目录的 provider，
+        // 能否出现在那里取决于装配，不是本模块的属性。系统链路取同一个根走的是
+        // `Plugin::get_vfs_provider`（见下），与 `CapabilityVisitor` 无关。
         if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 let root: Arc<dyn VdfsProvider> = self.vdfs.clone();
@@ -333,6 +334,16 @@ impl Plugin for Composite {
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+
+    /// 系统链路：`Composite` 直接暴露自己的组合视图（[`CompositeVdfs`]）。
+    ///
+    /// 容器把子插件的 vfs provider 聚合进它，子智能体的 `agent/<id>` 挂载点也经它
+    /// 往下钻——`agent` 插件拿到子 composite 的 `Arc<dyn Plugin>` 后调本方法即可取回
+    /// 同一个 provider，无需任何类型耦合（见 `plugins/agent/host/vdfs.rs` 的 `sub_vfs`）。
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
+        let root: Arc<dyn VdfsProvider> = self.vdfs.clone();
+        Some(root)
     }
 }
 
