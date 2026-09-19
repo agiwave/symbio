@@ -5,7 +5,7 @@
 
 use super::*;
 
-/// 路径末段才是 id：`.vdfs/skill/<id>.skill` 与裸 `<id>` 同解
+/// 路径末段才是 id：`<根>/skill/<id>.skill` 与裸 `<id>` 同解
 #[test]
 fn id_of_strips_presentation_extension() {
     assert_eq!(id_of("demo"), "demo");

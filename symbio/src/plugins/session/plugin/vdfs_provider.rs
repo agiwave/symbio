@@ -214,7 +214,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 let live = self.live_messages_of(id).await;
                 session_content(&session, live)
             }
-            // 会话记忆（`.vdfs/session/<id>/AGENTS.md`）：正文即文件全文。
+            // 会话记忆（`<根>/session/<id>/AGENTS.md`）：正文即文件全文。
             // 文件不存在 → 空串（不是错误）——「还没写过」是记忆的正常状态。
             VdfsSessionPath::Memory(id) => {
                 self.session_of(id).await?;
@@ -700,7 +700,7 @@ impl SessionPlugin {
         uuid::Uuid::new_v4().to_string()
     }
 
-    /// 会话转写（**含在途消息**）——`.vdfs/session/<id>/消息` 的唯一数据源。
+    /// 会话转写（**含在途消息**）——`<根>/session/<id>/消息` 的唯一数据源。
     ///
     /// 落库转写 ∪ 本轮在途缓冲。之所以要并上后者：流式期间消息**还没落库**
     /// （`persist_messages` 只在每轮结束时写盘），只读存储的话列表在流式期间

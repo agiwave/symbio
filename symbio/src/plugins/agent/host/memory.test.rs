@@ -122,15 +122,15 @@ fn empty_memory_is_not_injected() {
 
     // 文件还不存在
     let fresh = store_of(&bundles, "b");
-    assert_eq!(segment(&fresh, &address("b")).unwrap(), None);
+    assert_eq!(segment(&fresh, "@vfs/agent/b/AGENTS.md").unwrap(), None);
 
     // 只有空白
     fresh.write("  \n\t").unwrap();
-    assert_eq!(segment(&fresh, &address("b")).unwrap(), None);
+    assert_eq!(segment(&fresh, "@vfs/agent/b/AGENTS.md").unwrap(), None);
 
     // bundle 不存在（无作用域）
     let gone = store_of(&bundles, "nope");
-    assert_eq!(segment(&gone, &address("nope")).unwrap(), None);
+    assert_eq!(segment(&gone, "@vfs/agent/nope/AGENTS.md").unwrap(), None);
 }
 
 /// 有内容 → 内核排版：标题 + **真实地址** + 「本智能体私有」+ 写入闸门
@@ -143,9 +143,11 @@ fn segment_carries_title_address_and_gates() {
     let m = store_of(&bundles, "b");
     m.write("该智能体记住：先写测试。").unwrap();
 
-    let seg = segment(&m, &address("b")).unwrap().expect("有内容必注入");
+    let seg = segment(&m, "@vfs/agent/b/AGENTS.md")
+        .unwrap()
+        .expect("有内容必注入");
     assert!(seg.contains(&format!("【{SEGMENT_TITLE}】")), "{seg}");
-    assert!(seg.contains(".vdfs/agent/b/AGENTS.md"), "{seg}");
+    assert!(seg.contains("@vfs/agent/b/AGENTS.md"), "{seg}");
     assert!(
         seg.contains("本智能体私有，与【工作区记忆】相互独立"),
         "同名不同作用域必须点明：{seg}"
@@ -165,7 +167,7 @@ fn segment_truncates_over_the_inject_budget() {
     let m = store(&bundles, "b", 256, 4);
     m.write("0123456789").unwrap();
 
-    let seg = segment(&m, &address("b")).unwrap().unwrap();
+    let seg = segment(&m, "@vfs/agent/b/AGENTS.md").unwrap().unwrap();
     assert!(seg.contains("已截断至 4 字节"), "{seg}");
     assert!(seg.contains("vdfs_read"), "截断必须指路取全文：{seg}");
 }

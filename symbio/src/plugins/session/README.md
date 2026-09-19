@@ -43,7 +43,7 @@ flowchart TD
 会话与压缩系统的全部表现都由会话配置参数控制。配置落在**本插件自己的目录**：
 
 ```text
-{homedir}/session/PLUGIN.yml     本插件的配置（可在 .vdfs/session/PLUGIN.yml 上编辑）
+{homedir}/session/PLUGIN.yml     本插件的配置（可在 <根>/session/PLUGIN.yml 上编辑）
 ```
 
 字段真源是本插件的 `config.rs::SessionConfig`（**定义由配置的拥有者产出**：设置页的表单定义从 `SessionConfig::default()` 读出，不写第二份字面量，避免「面板显示值与实际行为漂移」）。
@@ -83,7 +83,7 @@ session:
   # 6. 水位提醒与主动压缩
   enable_compact_tool: false     # 是否启用 55% Token 水位提醒 (nudge) 注入与 context_compact 主动压缩工具 (默认关闭，须手动开启；关闭后仅保留 70% 自动压缩兜底)
   
-  # 7. 会话记忆（<会话目录>/AGENTS.md，可编辑地址 .vdfs/session/<id>/AGENTS.md）
+  # 7. 会话记忆（<会话目录>/AGENTS.md，可编辑地址 <根>/session/<id>/AGENTS.md）
   memory_max_bytes: 16384        # 单次**写入**的字节上限，超出直接拒绝（不截断、不部分写入）
   memory_inject_max_bytes: 4096  # 每轮**注入**系统提示词的字节上限，超出部分截断并指路 vdfs_read 取全文
 ```
@@ -316,7 +316,7 @@ session:
 
 ```text
 {homedir}/session/<会话 id>/AGENTS.md     记忆本体（与 session.json / messages.json 同目录）
-.vdfs/session/<会话 id>/AGENTS.md                 可编辑地址（模型与用户共用）
+<根>/session/<会话 id>/AGENTS.md                 可编辑地址（模型与用户共用）
 ```
 
 它与转写（`messages.json`）的分工：转写是**流水**（说过什么），会话记忆是**从这个会话里提炼出来的、不许被压缩掉的那几条**。它不是「对话摘要」（那是压缩快照的活），也不是「跨会话的经验」（那该写进工作区或智能体记忆）。
@@ -325,9 +325,9 @@ session:
 
 | 层 | 所有者插件 | 物理落位 | VDFS 地址 |
 |---|---|---|---|
-| 工作区 | work | `{workdir}/AGENTS.md` | `.vdfs/work/AGENTS.md` |
-| **会话** | **session** | **`{会话目录}/AGENTS.md`** | **`.vdfs/session/<id>/AGENTS.md`** |
-| 智能体 | agent | `{bundle 目录}/AGENTS.md` | `.vdfs/agent/<id>/AGENTS.md` |
+| 工作区 | work | `{workdir}/AGENTS.md` | `<根>/work/AGENTS.md` |
+| **会话** | **session** | **`{会话目录}/AGENTS.md`** | **`<根>/session/<id>/AGENTS.md`** |
+| 智能体 | agent | `{bundle 目录}/AGENTS.md` | `<根>/agent/<id>/AGENTS.md` |
 
 三层形态完全一样（一个 UTF-8 文本文件 + 两道容量闸门 + 一行头信息的提示词片段 + 一个 VDFS 读写节点），因此**共用一份内核实现**（`symbio_core::memory`）。各插件只提供「个性」：落位、地址、标题、空内容提示、两道闸门开多大。
 
@@ -366,7 +366,7 @@ session:
 ⚠️ 这里**曾经还有一段** `session-global-instructions`（`{homedir}/AGENTS.md`，只读、无地址、无容量）。
 那是一次越界：会话不是那个文件的所有者——它既不给地址、也不限容，模型改不动它，
 读一遍注入只是把「智能体自身的指令」这件事临时挂在会话上。现已归 `agent` 插件
-（见 `plugins/agent/host/instruction.rs`）：同一份文件现在有地址（`.vdfs/agent/AGENTS.md`）、
+（见 `plugins/agent/host/instruction.rs`）：同一份文件现在有地址（`<根>/agent/AGENTS.md`）、
 有两道闸门、可编辑，于是它**进了内核**（`symbio_core::memory`）。
 判据「内核收『模型能自己改的东西』」因此划的是**形态**，不是名字听起来像不像指令。
 
@@ -375,7 +375,7 @@ session:
 会话记忆挂在**会话节点之下**，与 `消息` / `子会话` / `工作目录` 并列——它本来就是会话的一部分，不另开一条寻址：
 
 ```text
-.vdfs/session/<id>/AGENTS.md     rw    记忆（文件；写受闸门约束）
+<根>/session/<id>/AGENTS.md     rw    记忆（文件；写受闸门约束）
 ```
 
 - `list` 与 `stat` **共用内核产出的同一份形状**，两条链路不会分叉；

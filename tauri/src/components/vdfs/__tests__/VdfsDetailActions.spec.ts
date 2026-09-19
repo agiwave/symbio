@@ -20,7 +20,7 @@ import type { DetailAction, VdfsNode } from '@/schemas/vdfs'
 /** 一个可写资源节点 */
 function node(partial: Partial<VdfsNode> = {}): VdfsNode {
   return {
-    path: '.vdfs/model/p1',
+    path: '@vfs/model/p1',
     name: 'p1',
     title: 'P1',
     kind: 'model',

@@ -18,7 +18,7 @@ use tracing::{info, warn};
 use super::config::GatewayConfig;
 use super::server;
 
-// ==================== 配置文档（`.vdfs/gateway/PLUGIN.yml`） ====================
+// ==================== 配置文档（`<根>/gateway/PLUGIN.yml`） ====================
 
 /// 网关配置的定义 —— **定义由配置的拥有者产出**。
 ///
@@ -79,7 +79,7 @@ fn config_definition() -> DetailDefinition {
 
 pub struct GatewayPlugin {
     config: Arc<RwLock<GatewayConfig>>,
-    /// 配置文件的呈现与校验（`.vdfs/gateway/PLUGIN.yml`）——落盘写的是自己目录里的文件
+    /// 配置文件的呈现与校验（`<根>/gateway/PLUGIN.yml`）——落盘写的是自己目录里的文件
     config_file: ConfigFile,
     /// 父插件（worker composite）弱引用，用于转发请求
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
@@ -209,7 +209,7 @@ impl Plugin for GatewayPlugin {
     }
 }
 
-// ==================== VDFS：配置文档（`.vdfs/gateway/PLUGIN.yml`） ====================
+// ==================== VDFS：配置文档（`<根>/gateway/PLUGIN.yml`） ====================
 
 #[async_trait]
 impl vdfs::VdfsProvider for GatewayPlugin {
@@ -231,7 +231,7 @@ impl vdfs::VdfsProvider for GatewayPlugin {
 
     /// **隐藏**：本挂载点的全部内容就是一份配置文档，没有用户资源可浏览，
     /// 所以它在父目录的列表里不出现（与文件 / 目录的隐藏属性同一件事）。
-    /// 挂载本身照旧——按路径（`.vdfs/gateway/PLUGIN.yml`）仍完全可寻址。
+    /// 挂载本身照旧——按路径（`<根>/gateway/PLUGIN.yml`）仍完全可寻址。
     fn root_hidden(&self) -> bool {
         true
     }

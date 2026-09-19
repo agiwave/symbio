@@ -11,14 +11,14 @@
 //!   （构造时注入），② 把域响应封装成大模型更易消费的形状（行号、ignore 过滤、
 //!   人类可读 `message` …）。
 //!
-//! 工具不认识能力管理器、不认识目录拓扑、不走协议信封——地址规则（`.vdfs`
+//! 工具不认识能力管理器、不认识目录拓扑、不走协议信封——地址规则（`.vdfsv2`
 //! 前缀 = 虚拟，其余 = 磁盘）、两半分流、workdir 透传全部在 [`ToolVdfs`] 背后的
 //! [`UnifiedFs`](super::super::fs::UnifiedFs) 一处，与前端链路（`super::super::host`）
 //! 共用同一份实现，不存在第二套。
 //!
 //! ## 地址规则（实现在 `UnifiedFs`）
 //!
-//! 1. **虚拟目录 `.vdfs`**：系统资源类别统一挂接在此目录之下；`vdfs_list('.vdfs')`
+//! 1. **虚拟目录 `.vdfsv2`**：系统资源类别统一挂接在此目录之下；`vdfs_list('.vdfsv2')`
 //!    即可枚举当前可访问的全部类别；
 //! 2. **其余地址 = 物理磁盘**：相对路径从工作目录开始（`README.md`），绝对路径
 //!    直用（`D:/tmp/a.txt`）。
@@ -60,9 +60,9 @@ pub(crate) fn request_of<T: DeserializeOwned + Default>(ctx: &Arc<dyn InvokeRequ
 
 /// 统一的路径参数说明（所有工具的 schema 共享同一套语义，避免 LLM 误用）
 ///
-/// 与后端统一地址规则同一口径：`.vdfs` 打头 = 系统资源，其余 = 磁盘文件。
+/// 与后端统一地址规则同一口径：`.vdfsv2` 打头 = 系统资源，其余 = 磁盘文件。
 pub const PATH_DESC: &str =
-    "路径（统一文件系统）。磁盘文件：相对路径从工作目录开始，如 'README.md'、'src/main.rs'；'/' 表示工作目录根；绝对路径直用，如 'D:/tmp/a.txt'。系统资源：以 '.vdfs' 打头，列 '.vdfs' 可枚举全部资源类别，'.vdfs/<类别>/...' 深入对应资源（如 '.vdfs/setting/appearance'）。";
+    "路径（统一文件系统）。磁盘文件：相对路径从工作目录开始，如 'README.md'、'src/main.rs'；'/' 表示工作目录根；绝对路径直用，如 'D:/tmp/a.txt'。系统资源：以 '.vdfsv2' 打头，列 '.vdfsv2' 可枚举全部资源类别，'.vdfsv2/<类别>/...' 深入对应资源（如 '.vdfsv2/setting/appearance'）。";
 
 /// 构造工具元数据骨架；子模块在自身 `meta()` 里直接调用，避免重复样板。
 pub fn tool(

@@ -207,7 +207,7 @@ mod tests {
         }
     }
 
-    /// 把替身登记为 **`.vdfs` 的服务者**（工具链路取根的唯一途径），
+    /// 把替身登记为 **`.vdfsv2` 的服务者**（工具链路取根的唯一途径），
     /// 收到的路径一律是树内相对路径（`""`、`<子目录>/…`）。
     async fn tool_with_root(root: Arc<Rec>) -> ToolVdfs {
         let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
@@ -219,24 +219,26 @@ mod tests {
         Arc::new(SimpleRequest::new(None, None))
     }
 
-    /// 虚拟地址：`.vdfs/<子目录>/…` 进虚拟层时剥成树内相对路径 `<子目录>/…`
+    /// 虚拟地址：`.vdfsv2/<子目录>/…` 进虚拟层时剥成树内相对路径 `<子目录>/…`
     #[tokio::test]
     async fn virtual_address_is_routed_to_root() {
         let rec = Rec::new();
         let vdfs = tool_with_root(rec.clone()).await;
-        vdfs.read(&ctx(), ".vdfs/setting/appearance").await.unwrap();
+        vdfs.read(&ctx(), ".vdfsv2/setting/appearance")
+            .await
+            .unwrap();
         assert_eq!(rec.seen(), vec!["setting/appearance"]);
     }
 
-    /// `.vdfs` 本体 = 根目录：列目录进树内口径就是空串
+    /// `.vdfsv2` 本体 = 根目录：列目录进树内口径就是空串
     #[tokio::test]
     async fn virtual_root_lists_through_the_same_root() {
         let rec = Rec::new();
         let vdfs = tool_with_root(rec.clone()).await;
-        vdfs.list(&ctx(), ".vdfs").await.unwrap();
+        vdfs.list(&ctx(), ".vdfsv2").await.unwrap();
         assert_eq!(rec.seen(), vec![""]);
-        // `.vdfs/` 与 `.vdfs` 等价
-        vdfs.list(&ctx(), ".vdfs/").await.unwrap();
+        // `.vdfsv2/` 与 `.vdfsv2` 等价
+        vdfs.list(&ctx(), ".vdfsv2/").await.unwrap();
         assert_eq!(rec.seen(), vec!["", ""]);
     }
 
@@ -300,7 +302,7 @@ mod tests {
         let rec = Rec::new();
         let vdfs = tool_with_root(rec.clone()).await;
         let err = vdfs
-            .move_item(&ctx(), "a.txt", ".vdfs/other/b.txt")
+            .move_item(&ctx(), "a.txt", ".vdfsv2/other/b.txt")
             .await
             .unwrap_err();
         assert!(matches!(err, VdfsError::Invalid(_)), "应为 {err:?}");
@@ -312,7 +314,7 @@ mod tests {
     async fn move_within_virtual_is_forwarded() {
         let rec = Rec::new();
         let vdfs = tool_with_root(rec.clone()).await;
-        vdfs.move_item(&ctx(), ".vdfs/x/a", ".vdfs/x/b")
+        vdfs.move_item(&ctx(), ".vdfsv2/x/a", ".vdfsv2/x/b")
             .await
             .unwrap();
         assert_eq!(rec.seen(), vec!["x/a→x/b"]);
@@ -323,7 +325,7 @@ mod tests {
     async fn traversal_is_rejected_on_both_links() {
         let rec = Rec::new();
         let vdfs = tool_with_root(rec.clone()).await;
-        for bad in ["../../etc/passwd", ".vdfs/../../x"] {
+        for bad in ["../../etc/passwd", ".vdfsv2/../../x"] {
             let err = vdfs.read(&ctx(), bad).await.unwrap_err();
             assert!(matches!(err, VdfsError::Invalid(_)), "{bad} 应被拒");
             assert!(err.to_string().contains("向上穿越"));
@@ -337,14 +339,14 @@ mod tests {
         let rec = Rec::new();
         let vdfs = tool_with_root(rec.clone()).await;
         let r = vdfs
-            .edit(&ctx(), ".vdfs/a.txt", "hello", "world")
+            .edit(&ctx(), ".vdfsv2/a.txt", "hello", "world")
             .await
             .unwrap();
         assert_eq!(r.replaced, 1);
         assert_eq!(rec.seen(), vec!["a.txt", "a.txt"], "先 read 后 write");
 
         let err = vdfs
-            .edit(&ctx(), ".vdfs/a.txt", "nope", "x")
+            .edit(&ctx(), ".vdfsv2/a.txt", "nope", "x")
             .await
             .unwrap_err();
         assert!(matches!(err, VdfsError::Invalid(_)));
@@ -355,8 +357,8 @@ mod tests {
     async fn search_composes_list_walk() {
         let rec = Rec::new();
         let vdfs = tool_with_root(rec.clone()).await;
-        let r = vdfs.search(&ctx(), ".vdfs/x", "*.txt").await.unwrap();
-        assert_eq!(r.results, vec![".vdfs/x/a.txt"], "结果与请求地址同坐标系");
+        let r = vdfs.search(&ctx(), ".vdfsv2/x", "*.txt").await.unwrap();
+        assert_eq!(r.results, vec![".vdfsv2/x/a.txt"], "结果与请求地址同坐标系");
         assert!(!r.truncated);
         assert_eq!(rec.seen(), vec!["x"], "搜索走虚拟层的 list");
     }
@@ -366,7 +368,7 @@ mod tests {
     async fn missing_root_degrades_to_empty_virtual_layer() {
         let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
         let vdfs = ToolVdfs::new(visitor);
-        let items = vdfs.list(&ctx(), ".vdfs").await.unwrap();
+        let items = vdfs.list(&ctx(), ".vdfsv2").await.unwrap();
         assert!(items.is_empty(), "无容器 = 无资源类别，但仍是一棵合法的树");
     }
 }

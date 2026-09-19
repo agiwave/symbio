@@ -33,8 +33,8 @@
 //!
 //! | 模块 | 管哪个作用域 | 地址 |
 //! |---|---|---|
-//! | [`super::memory`] | 子智能体：`<agentdir>/AGENTS.md`（随 bundle 分发） | `.vdfs/agent/<id>/AGENTS.md` |
-//! | 本模块 | 系统智能体：`{homedir}/AGENTS.md`（宿主应用级设置） | `.vdfs/agent/AGENTS.md` |
+//! | [`super::memory`] | 子智能体：`<agentdir>/AGENTS.md`（随 bundle 分发） | `<根>/agent/<id>/AGENTS.md` |
+//! | 本模块 | 系统智能体：`{homedir}/AGENTS.md`（宿主应用级设置） | `<根>/agent/AGENTS.md` |
 //!
 //! 两者共用内核（`symbio_core::memory`）的读写、两道闸门、片段排版与节点形状——
 //! 一份实现，两处调用。
@@ -51,9 +51,12 @@ pub const SEGMENT_NAME: &str = "agent-instructions";
 /// 片段的标题（渲染为 `【全局指令】`）
 pub const SEGMENT_TITLE: &str = "全局指令";
 
-/// 可编辑地址 —— 挂在本插件的挂载根上（与智能体列表并列的**一个文件**）
-pub const ADDRESS: &str = ".vdfs/agent/AGENTS.md";
-
+/// 指令文件挂在**本插件挂载点自身**（相对地址 = 文件名 [`AGENTS_FILE`]，
+/// 与智能体列表并列的一个文件）。
+///
+/// 需要协议级绝对地址的场合（提示词里印给模型的可编辑地址），由调用方经
+/// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
+/// 挂载点叫什么不归本模块。
 /// 指令文件的语义描述（VDFS 节点与插件元数据共用）
 pub const DESCRIPTION: &str =
     "本应用（系统智能体）自身的指令：每轮注入系统提示词，对所有会话生效。";
@@ -91,9 +94,9 @@ pub fn node_spec() -> NodeSpec<'static> {
 
 /// 系统提示词片段：**走内核排版**（地址 + 上限 + 当前 + 正文 + 截断提示）
 ///
-/// 本插件既暴露该地址（`.vdfs/agent/AGENTS.md`），也执行那道写入闸门——
-/// 印出来的数字是真的。
-pub fn segment(store: &MemoryFile) -> Result<Option<String>, String> {
+/// 本插件既暴露该地址（挂载点下的 [`AGENTS_FILE`]，绝对地址由调用方拼好传入），
+/// 也执行那道写入闸门——印出来的数字是真的。
+pub fn segment(store: &MemoryFile, address: &str) -> Result<Option<String>, String> {
     // 空文件 / 不存在 → 整段省略（内核的 `empty_hint` 是「空也要说一句」的用法，
     // 这里不需要：没写过指令时不该每轮都背一段头信息）
     if store.read()?.trim().is_empty() {
@@ -101,7 +104,7 @@ pub fn segment(store: &MemoryFile) -> Result<Option<String>, String> {
     }
     store.segment(&SegmentSpec {
         title: SEGMENT_TITLE,
-        address: ADDRESS,
+        address,
         note: Some("对所有会话生效"),
         empty_hint: "",
     })

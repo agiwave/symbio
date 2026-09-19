@@ -52,13 +52,13 @@ S16–S19 已经把**转写（消息）**整体迁到 VDFS：读走一次 `vdfs/
 一个节点 = 一个地址 = 一份状态。会话域的全部节点：
 
 ```text
-.vdfs/session                                  会话清单（目录）
-.vdfs/session/<sid>                            会话节点        ← 运行态的承载者
-.vdfs/session/<sid>/消息                       转写列表（目录）
-.vdfs/session/<sid>/消息/<mid>                 消息节点（列表项）
-.vdfs/session/<sid>/AGENTS.md                  会话记忆（文件）
-.vdfs/session/<sid>/子会话[/<sub>]             子会话清单 / 子会话节点
-.vdfs/session/<sid>/工作目录[/<rel>]           工作目录树
+<根>/session                                  会话清单（目录）
+<根>/session/<sid>                            会话节点        ← 运行态的承载者
+<根>/session/<sid>/消息                       转写列表（目录）
+<根>/session/<sid>/消息/<mid>                 消息节点（列表项）
+<根>/session/<sid>/AGENTS.md                  会话记忆（文件）
+<根>/session/<sid>/子会话[/<sub>]             子会话清单 / 子会话节点
+<根>/session/<sid>/工作目录[/<rel>]           工作目录树
 ```
 
 消息节点内部再由 `attributes.parent_id` 组织成树——**树是节点的一个属性，
@@ -241,9 +241,9 @@ kind = "vdfs" 变更
       ▼
   sessionRouteOf(path)      ← 纯函数（`schemas/vdfs.ts`）：地址 → 本域目标，可单测
       │
-      ├─ .vdfs/session/<sid>            → sessions.applySessionNode(id, change)
-      ├─ .vdfs/session/<sid>/消息       → transcriptSync.clearTranscript(id)
-      ├─ .vdfs/session/<sid>/消息/<mid> → transcriptSync.applyMessageNode(id, mid, change)
+      ├─ <根>/session/<sid>            → sessions.applySessionNode(id, change)
+      ├─ <根>/session/<sid>/消息       → transcriptSync.clearTranscript(id)
+      ├─ <根>/session/<sid>/消息/<mid> → transcriptSync.applyMessageNode(id, mid, change)
       └─ 其余地址（清单目录 / 子会话 / 工作目录 / 其他资源） → 不是本域的事，跳过
 ```
 
@@ -254,8 +254,8 @@ kind = "vdfs" 变更
 
 | 作用域 | 消费者 | 负责的地址 |
 |---|---|---|
-| `.vdfs/session`，`directChildren` | `stores/sessions.ts` | 会话叶子（清单 + 运行态） |
-| `.vdfs/session`，整棵子树 | `services/vdfsTranscriptSync.ts` | 转写列表与列表项 |
+| `<根>/session`，`directChildren` | `stores/sessions.ts` | 会话叶子（清单 + 运行态） |
+| `<根>/session`，整棵子树 | `services/vdfsTranscriptSync.ts` | 转写列表与列表项 |
 
 两者**互不重叠**：会话叶子只归 store（那是它的状态），转写只归 transcriptSync。
 重叠会让同一条消息被写两次——流式文本逐词叠字，是这条设计要防的那类回归。
@@ -621,5 +621,5 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
 | `kind = "session"` 未整体删除 | subagent 宿主在**进程内**依赖 `Update`（子会话审批透传 + 文本累积）与 `Status idle`（结束判据）。把它改造成订阅 VDFS 变更是一次独立的、可验证的收敛，不塞进本次 |
 | `event_bus/pending/snapshot` 路由保留 | 前端不再调用，但它是网关对外 API 的一部分，删除属另一件事 |
 | 会话节点状态无独立版本号 | 依赖 §4.2 的三条假设。加 `rev` 需要跨进程单调时钟，收益不足以抵消脆弱性——宁可把假设写清楚 |
-| 会话节点 `content` 为空 | `read(.vdfs/session/<sid>)` 仍是整份会话 JSON（历史读入口），`updated` 变更带 `content` 会白白重传整份历史。**因此会话节点的 `updated` 只带 `node`，不带 `content`**——`node` 足以表达状态，正文另有 `消息` 列表承载 |
+| 会话节点 `content` 为空 | `read(<根>/session/<sid>)` 仍是整份会话 JSON（历史读入口），`updated` 变更带 `content` 会白白重传整份历史。**因此会话节点的 `updated` 只带 `node`，不带 `content`**——`node` 足以表达状态，正文另有 `消息` 列表承载 |
 | `attributes.outcome` 是场景字段 | VDFS 只透传（与 `message_count` / `meta_tags` 同一手法），不构成机制新增 |

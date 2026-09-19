@@ -5,7 +5,7 @@
  * 覆盖两条约定：
  *
  * 1. **只有一条变更频道**：会话清单的同步来自 `kind = 'vdfs'` 的
- *    `VdfsChangeEvent`，作用域按**展示地址前缀**分流（`.vdfs/session` 的直接子项
+ *    `VdfsChangeEvent`，作用域按**展示地址前缀**分流（`@vfs/session` 的直接子项
  *    = 会话叶子；转写列表项 / 子会话的变更不进侧栏）。
  * 2. **状态类变更必带节点视图**（`node-state-streaming.md` §8.2）：
  *    - `updated`（含 busy/idle/failed 运行态与标题变更）→ 用**载荷**就地收敛，
@@ -105,7 +105,7 @@ import { startSessionNodeSync, stopSessionNodeSync } from '../sessionNodeSync'
  * `vi.hoisted`：`vi.mock` 工厂先于 import 执行，直接引用顶层 const 会撞 TDZ。
  */
 const { SCHEME } = vi.hoisted(() => ({
-  SCHEME: { mountDir: '.vdfs/session', messagesSeg: '消息' },
+  SCHEME: { mountDir: '@vfs/session', messagesSeg: '消息' },
 }))
 
 /** 投递一条变更（路径就是展示地址） */
@@ -247,7 +247,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: { title: '新对话' } } as never)
 
     emit({
-      path: '.vdfs/session/s1',
+      path: '@vfs/session/s1',
       change: 'updated',
       node: sessionNode({ status: 'working', message_count: 7 }),
     })
@@ -268,7 +268,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: { title: 'T' } } as never)
 
-    emit({ path: '.vdfs/session/s1', change: 'updated' })
+    emit({ path: '@vfs/session/s1', change: 'updated' })
     await flushPromises()
 
     // 载荷缺失意味着后端违反了「状态变更必带节点视图」的不变量；
@@ -283,7 +283,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: {} } as never)
 
     emit({
-      path: '.vdfs/session/s1',
+      path: '@vfs/session/s1',
       change: 'updated',
       node: sessionNode({ status: 'failed', outcome: 'failed', error: '上游 429' }),
     })
@@ -300,7 +300,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'failed', metadata: {} } as never)
     store.setSessionError('s1', '上一轮的错误')
 
-    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
 
     expect(store.getSessionError('s1')).toBeNull()
     expect(store.isSessionFailed('s1')).toBe(false)
@@ -311,33 +311,33 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
 
     // ① 空闲 → 空闲（标题更新等）：不是迁移，不响
-    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'active' }) })
+    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'active' }) })
     expect(chime.playCompletionChime).not.toHaveBeenCalled()
 
     // ② 空闲 → 运行中：是迁移，但不是"结束"，不响
-    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
     expect(chime.playCompletionChime).not.toHaveBeenCalled()
 
     // ③ 运行中 → 空闲（正常结束）：响 completed
     emit({
-      path: '.vdfs/session/s1',
+      path: '@vfs/session/s1',
       change: 'updated',
       node: sessionNode({ status: 'active', outcome: 'completed' }),
     })
     expect(chime.playCompletionChime).toHaveBeenCalledWith('completed', 's1')
 
     // ④ 中止与失败各取自己的音色（结局是状态，不靠"谁先到"区分）
-    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
     emit({
-      path: '.vdfs/session/s1',
+      path: '@vfs/session/s1',
       change: 'updated',
       node: sessionNode({ status: 'active', outcome: 'aborted' }),
     })
     expect(chime.playCompletionChime).toHaveBeenLastCalledWith('aborted', 's1')
 
-    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
     emit({
-      path: '.vdfs/session/s1',
+      path: '@vfs/session/s1',
       change: 'updated',
       node: sessionNode({ status: 'failed', outcome: 'failed', error: 'boom' }),
     })
@@ -348,10 +348,10 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
   it('标题更新（状态未变）不覆盖消息节点派生的活动文字', async () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
-    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
     store.putStatus('s1', { activity: '正在思考…' })
 
-    emit({ path: '.vdfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
+    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
 
     expect(store.getSessionStatus('s1').activity).toBe('正在思考…')
   })
@@ -360,7 +360,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     vi.useFakeTimers()
     try {
       const store = useSessionsStore()
-      emit({ path: '.vdfs/session/newsid', change: 'created' })
+      emit({ path: '@vfs/session/newsid', change: 'created' })
       expect(sessionApi.listSessions).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(800)
       expect(sessionApi.listSessions).toHaveBeenCalledTimes(1)
@@ -374,7 +374,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, metadata: {} } as never)
 
-    emit({ path: '.vdfs/session/s1', change: 'deleted' })
+    emit({ path: '@vfs/session/s1', change: 'deleted' })
 
     expect(store.list).toHaveLength(0)
     expect(sessionApi.listSessions).not.toHaveBeenCalled()
@@ -384,7 +384,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, metadata: {} } as never)
 
-    emit({ path: '.vdfs/session/s1/消息/m1', change: 'appended', delta: '半句' })
+    emit({ path: '@vfs/session/s1/消息/m1', change: 'appended', delta: '半句' })
     await flushPromises()
 
     expect(vdfsApi.statVdfs).not.toHaveBeenCalled()

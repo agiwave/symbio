@@ -101,7 +101,7 @@ function stripComments(txt) {
  * 为什么不能"从第一个 `#[cfg(test)]` 直接截断到文件尾"：仓库里存在
  * **测试模块之后还有生产代码**的文件（如 `model/plugin.rs`：`mod tests` 在中段，
  * `traverse` 里的挂载点注册在其后）——截断会把生产事实一起丢掉
- * （实测踩坑：`model` 的 `.vdfs/model` 挂载点消失）。
+ * （实测踩坑：`model` 的 `<根>/model` 挂载点消失；`<根>` = vdfs 插件声明的挂载根名）
  *
  * 故按**花括号配对**精确剔除模块体，并对字符串字面量做感知（测试代码里
  * `format!("{{}}")` 这类字面量括号会让朴素配对错位）。
@@ -559,16 +559,19 @@ const DYNAMIC_TOOLS = {
 /** 路由按运行期规则分发、无法静态枚举的插件：标注而不是留空 */
 const DYNAMIC_ROUTES = {
   local: "`local/<工具短名>`——按已注册工具名分发（与 §2 的工具清单同一份集合）",
-  vdfs: "`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，13 个操作）",
+  // 操作数从协议源码动态推导（VDFS_OPS 增删时不再漂移）
+  vdfs: `\`vdfs/<操作>\`——按 \`VDFS_OPS\` 校验后分发（见 §3.2，${
+    parseVdfsOps(readFileSync(VDFS_PROTOCOL_FILE, "utf8")).length
+  } 个操作）`,
   composite: "容器：按配置挂载的子插件名分发，运行期动态",
-  agent: "已无自有路由（一律 `NotFound` 并指引到 `.vdfs/agent`）",
+  agent: "已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`）",
   model: "已无自有路由（`execute_turn` 由 session 直连调用）",
 };
 
 const fmtList = (items) => (items.length ? items.map((x) => `\`${x}\``).join(" · ") : "—");
 const fmtMounts = (items) =>
   items.length
-    ? items.map((m) => (m.startsWith("（") ? m : `.vdfs/${m}`)).join(" · ")
+    ? items.map((m) => (m.startsWith("（") ? m : `<根>/${m}`)).join(" · ")
     : "—";
 
 function headSha() {
@@ -630,7 +633,7 @@ function render() {
   L.push(">   目录名才是真正的路由前缀；`PluginMeta` 首参是只写字段，不参与路由。");
   L.push(">   标「（动态）」的是按运行期规则分发、无法静态枚举的。");
   L.push(">   漏项与歧义以 [ROUTES.md](./reference/ROUTES.md) 为准。");
-  L.push("> - **配置文件** = 该插件调用过 `announce_configurable`（配置就是 `.vdfs/<挂载点>/PLUGIN.yml`，");
+  L.push("> - **配置文件** = 该插件调用过 `announce_configurable`（配置就是 `<根>/<挂载点>/PLUGIN.yml`，");
   L.push(">   读写走 `vdfs/read` / `vdfs/write`，**没有配置专用路由**）。");
   L.push("");
 

@@ -317,11 +317,7 @@ fn transcript_window_pages_before_cursor() {
     );
     // 游标可以写成地址形式（`<…>/<id>`），不只是裸 id
     assert_eq!(
-        ids(&transcript_window(
-            &msgs,
-            Some(2),
-            Some(".vdfs/session/s/消息/t3")
-        )),
+        ids(&transcript_window(&msgs, Some(2), Some("x/s/消息/t3"))),
         vec!["t1", "t2"]
     );
     // 游标在第一页之前 ⇒ 空页（自然收敛，不报错）

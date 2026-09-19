@@ -95,7 +95,7 @@ export function resolveVdfsRenderer(node: VdfsNode | null | undefined): VdfsRend
 }
 
 /**
- * `.vdfs` 子目录图标：复用 VDFS 图标注册表（子目录名与资源类别 kind 同名的场景，如
+ * `<根>` 子目录图标：复用 VDFS 图标注册表（子目录名与资源类别 kind 同名的场景，如
  * `setting` / `model` / `session` / `agent` / `skill` / `mcp`）。
  * 未命中返回 undefined（视图回退默认图标）。
  */

@@ -14,7 +14,7 @@
 
 | 数据 | 读入口 | 实时入口 |
 |---|---|---|
-| 会话清单 | `vdfs/list`（`.vdfs/session`，S8 已迁移） | VDFS 事件总线（`kind = "vdfs"`） |
+| 会话清单 | `vdfs/list`（`<根>/session`，S8 已迁移） | VDFS 事件总线（`kind = "vdfs"`） |
 | **会话消息（转写）** | `session/get_messages`（专用协议） | 会话事件总线（`kind = "session"`，`ChatEventType`） |
 
 也就是说：**清单在 VDFS 里，消息不在**。而消息恰恰是会话的主体。
@@ -22,7 +22,7 @@
 命题是：**消息不需要自己的读协议，它就是一张列表**。而流式输出也不是另一种
 模式，它是「列表最后一项的内容被追加」——一种**追加型变更**。
 
-> **S16–S19 完成后**：转写的读入口是 `.vdfs/session/<sid>`（一次 `read` 拿整份
+> **S16–S19 完成后**：转写的读入口是 `<根>/session/<sid>`（一次 `read` 拿整份
 > 历史），实时入口是 `kind = "vdfs"` 的变更。`session/get_messages` 前端不再调用，
 > `kind = "session"` 只承载会话级事件。**两套读链路收敛为一套。**
 
@@ -40,7 +40,7 @@
 | 项可增、可删、可改 | 追加、删除某条及其后、状态迁移 |
 | 顺序与内容分离 | 顺序 = `seq`；内容 = `content` |
 
-所以「会话内部」和「`.vdfs/session` 根目录」在机制上是**同一种东西**，
+所以「会话内部」和「`<根>/session` 根目录」在机制上是**同一种东西**，
 只是层级不同。既然根目录已经是 VDFS 列表，没有理由内层反而不是。
 
 ### 2.2 流式不是模式，是变更
@@ -88,12 +88,12 @@
 ### 3.1 地址空间
 
 ```text
-.vdfs/session/                    会话清单（已有）
-.vdfs/session/<sid>               单个会话（ext = session，点开即聊天工作区）
-.vdfs/session/<sid>/消息          转写列表  ← 新增（l 位）
-.vdfs/session/<sid>/消息/<mid>    单条消息  ← 新增（ext = message，r 位）
-.vdfs/session/<sid>/子会话[/<sub>]  子会话清单 / 单个子会话（已有）
-.vdfs/session/<sid>/工作目录[/<rel>] 工作目录树（已有）
+<根>/session/                    会话清单（已有）
+<根>/session/<sid>               单个会话（ext = session，点开即聊天工作区）
+<根>/session/<sid>/消息          转写列表  ← 新增（l 位）
+<根>/session/<sid>/消息/<mid>    单条消息  ← 新增（ext = message，r 位）
+<根>/session/<sid>/子会话[/<sub>]  子会话清单 / 单个子会话（已有）
+<根>/session/<sid>/工作目录[/<rel>] 工作目录树（已有）
 ```
 
 `消息` 是会话**本体**（转写），因此排在内置子目录的第一位。
@@ -101,7 +101,7 @@
 ### 3.2 列表项的分工：正文进内容，结构进 attributes
 
 ```text
-read(.vdfs/session/<sid>/消息/<mid>)
+read(<根>/session/<sid>/消息/<mid>)
   → VdfsContent::text  = 这条消息的正文（流式追加的正是它）
   → VdfsNode.attributes = { role, type, parent_id, seq, error, meta }
   → VdfsNode.ext        = "message"
@@ -128,7 +128,7 @@ read(.vdfs/session/<sid>/消息/<mid>)
 
 ## 4. 变更语义（实时链路）
 
-订阅地址：`.vdfs/session/<sid>/消息`（或更上层的 `.vdfs/session`）。
+订阅地址：`<根>/session/<sid>/消息`（或更上层的 `<根>/session`）。
 
 | 触发 | 变更 | 载荷 | 消费者 |
 |---|---|---|---|
@@ -176,7 +176,7 @@ read(.vdfs/session/<sid>/消息/<mid>)
 2. `vdfs/write` 的语义是「把这段内容存到那个地址」，而发言的语义是
    「以这段内容为输入，跑一轮编排」。
 
-因此 `write` 在 `.vdfs/session/<sid>/消息`（**列表本身**）上**明确拒绝**（`Forbidden`），
+因此 `write` 在 `<根>/session/<sid>/消息`（**列表本身**）上**明确拒绝**（`Forbidden`），
 `create` 意图在**消息节点**上也一律驳回——新增消息即发言。不是静默降级。
 
 ### 5.2 但改写与删除是普通的节点操作（2026-09-18 收窄）
@@ -214,7 +214,7 @@ read(.vdfs/session/<sid>/消息/<mid>)
 - `plugins/vdfs/host`：`to_change_event` 透传 `delta`；
 - `plugins/vdfs/fs`：`watch` 包装器透传 `delta`（并把路径补成展示口径）；
 - `plugins/composite/vdfs`：`watch` 包装器透传 `delta`（并把路径补成树内全口径）；
-- `plugins/session/plugin`：`.vdfs/session/<sid>/消息[/<mid>]` 的
+- `plugins/session/plugin`：`<根>/session/<sid>/消息[/<mid>]` 的
   `list` / `stat` / `read`；`write` 明确拒绝。
 
 **S16 完成后即可用**：前端能在 VDFS 里浏览任意会话的转写；
@@ -321,7 +321,7 @@ provider 报 "abc/消息/m1" → 容器补成 "session/abc/消息/m1"  ✓
 | `composables/useVdfs.ts` | 识别 `appended`：命中当前详情就**就地拼接**，未命中什么也不做；**都不重拉** |
 | `components/vdfs/VdfsMessageDetail.vue` | `ext = message` 的只读渲染器（正文 + role/type/status/error） |
 | `services/vdfsTranscriptSync.ts` | 转写的 VDFS 实时消费端：`kind = "vdfs"` → store，**逐路径串行** |
-| `stores/sessions.ts` | 读入口改为 VDFS：`readVdfs('.vdfs/session/<sid>')` 一次拿整份历史 |
+| `stores/sessions.ts` | 读入口改为 VDFS：`readVdfs('<根>/session/<sid>')` 一次拿整份历史 |
 
 #### 为什么追加**绝不能**触发重拉
 
@@ -424,7 +424,7 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
 ## 7. 不变量（迁移全程必须成立）
 
 1. **顺序锚点仍是 `seq`**——VDFS 列表序、前端消息表、LLM 上下文三者同源；
-2. **一条消息只有一个地址**：`.vdfs/session/<sid>/消息/<mid>`；
+2. **一条消息只有一个地址**：`<根>/session/<sid>/消息/<mid>`；
 3. **正文只有一个位置**：节点内容。`attributes` 只放结构，不放正文；
 4. **前端与 LLM 恒等**：同一地址、同一份数据、同一组访问位；
 5. **变更只有一个通道**：`kind = "vdfs"`；
@@ -465,7 +465,7 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
 | `appended` 增加了协议面 | 但它是通用能力（任何追加型数据都需要），不是聊天专用后门；且与 `updated` 的区分是**流量与语义双重必要** |
 | 变更信封多了两个可选字段 | `node` / `content` 使 `created` / `updated` **零回读**。若不带，迁移就是净增几十次 IPC/轮次——统一机制的代价不该由热路径承担。字段可选，不填时消费者回退回读 |
 | `message_status` 把 `completed` 与「未标注」都归为 `active` | VDFS 节点只有一套状态词汇，不为场景再造一套。消费端把 `active` 读作 `completed`——两者在渲染上一致（都不是进行中），因此是无害的有损映射 |
-| 会话叶子同时是「文档」与「内部区段之父」 | `.vdfs/session/<sid>` 是叶子（`rw`，内容是整份会话 JSON），其下又挂 `消息` / `子会话` / `工作目录`。这不是矛盾：**叶子是会话本体，区段是它的视图**。好处是整份历史一次 `read` 拿到，省掉专用协议 |
+| 会话叶子同时是「文档」与「内部区段之父」 | `<根>/session/<sid>` 是叶子（`rw`，内容是整份会话 JSON），其下又挂 `消息` / `子会话` / `工作目录`。这不是矛盾：**叶子是会话本体，区段是它的视图**。好处是整份历史一次 `read` 拿到，省掉专用协议 |
 | 在途缓冲与落库转写有重叠窗口 | 每轮结束时落库，随后清空在途缓冲。重叠期内同 id 以在途版本为准且继承 `seq`，因此列表不会出现两份或错序；真正需要警惕的是「清空早于落库」——清空点因此都放在落库之后 |
 | 刷新竞争是**静默**失败 | 见 S18 小节。不会报错、不会崩溃，只会让 UI 少一段字或多一段字。两个消费端各选了一种对策（视图：代际守卫；数据：逐路径串行），没有都不做 |
 | 转写消费端会漏掉"未收到 `created` 就先收到 `appended`" | 此时 `patchMessage` 会造一个只有增量的桩。实际不可达（`created` 与 `appended` 经同一路径的同一条顺序链），但若未来出现别的发布顺序，桩会以"内容不全"的形式暴露而非静默错乱 |

@@ -95,7 +95,7 @@ tauri/                           # 前端
 | web | [plugins/web/README.md](../symbio/src/plugins/web/README.md) | 网页抓取/搜索工具 |
 | home | [plugins/home/README.md](../symbio/src/plugins/home/README.md) | 根插件：持应用级状态（`<homedir>/PLUGIN.yml`），构造 worker(Composite) 并传入必需插件清单 |
 | composite | [plugins/composite/README.md](../symbio/src/plugins/composite/README.md) | 子插件容器：扫描自己的目录（其下一层目录即一个插件）+ 路径合并分发 |
-| work | [plugins/work/README.md](../symbio/src/plugins/work/README.md) | 工作区记忆：注入 `{workdir}/AGENTS.md`，可经 `.vdfs/work` 编辑 |
+| work | [plugins/work/README.md](../symbio/src/plugins/work/README.md) | 工作区记忆：注入 `{workdir}/AGENTS.md`，可经 `<根>/work` 编辑 |
 | gateway | [plugins/gateway/README.md](../symbio/src/plugins/gateway/README.md) | HTTP/WS 入站网关 |
 | setting | [plugins/setting/README.md](../symbio/src/plugins/setting/README.md) | 纯设置入口：自有分区（appearance/about）+ 各插件配置条目（无自有配置） |
 | hook | [plugins/hook/README.md](../symbio/src/plugins/hook/README.md) | 生命周期钩子 |

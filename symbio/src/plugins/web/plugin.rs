@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-// ==================== 配置文档（`.vdfs/web/PLUGIN.yml`） ====================
+// ==================== 配置文档（`<根>/web/PLUGIN.yml`） ====================
 
 /// 网络工具配置的定义 —— **定义由配置的拥有者产出**。
 ///
@@ -55,7 +55,7 @@ fn config_definition() -> DetailDefinition {
 #[derive(Clone)]
 pub struct WebPlugin {
     config: Arc<RwLock<WebConfig>>,
-    /// 配置文件的呈现与校验（`.vdfs/web/PLUGIN.yml`）——落盘写的是本插件自己目录里的文件
+    /// 配置文件的呈现与校验（`<根>/web/PLUGIN.yml`）——落盘写的是本插件自己目录里的文件
     config_file: ConfigFile,
     tool_impls: Arc<Vec<Arc<dyn Capability>>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
@@ -151,14 +151,14 @@ impl Plugin for WebPlugin {
             visitor.register_vdfs_provider(PLUGIN_WEB, me).await;
         }
         // 顺带声明「本插件有一份配置文档」：设置页据此列出本项并指路到
-        // `.vdfs/web/PLUGIN.yml`（标签与配置节点共用同一个来源，见 `ConfigFile`）
+        // `<根>/web/PLUGIN.yml`（标签与配置节点共用同一个来源，见 `ConfigFile`）
         crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
 
-// ==================== VDFS：配置文档（`.vdfs/web/PLUGIN.yml`） ====================
+// ==================== VDFS：配置文档（`<根>/web/PLUGIN.yml`） ====================
 
 #[async_trait]
 impl vdfs::VdfsProvider for WebPlugin {
@@ -180,7 +180,7 @@ impl vdfs::VdfsProvider for WebPlugin {
 
     /// **隐藏**：本挂载点的全部内容就是一份配置文档，没有用户资源可浏览，
     /// 所以它在父目录的列表里不出现（与文件 / 目录的隐藏属性同一件事）。
-    /// 挂载本身照旧——按路径（`.vdfs/web/PLUGIN.yml`）仍完全可寻址。
+    /// 挂载本身照旧——按路径（`<根>/web/PLUGIN.yml`）仍完全可寻址。
     fn root_hidden(&self) -> bool {
         true
     }

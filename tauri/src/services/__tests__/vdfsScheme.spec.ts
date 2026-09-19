@@ -24,7 +24,11 @@ import {
   resetVdfsSessionScheme,
   vdfsSessionScheme,
 } from '../vdfsScheme'
-import { VDFS_EXT_SESSION, VDFS_KIND_MESSAGES, VDFS_ROOT, type VdfsNode } from '@/schemas/vdfs'
+import { VDFS_EXT_SESSION, VDFS_KIND_MESSAGES, type VdfsNode } from '@/schemas/vdfs'
+import { setVdfsRoot } from '@/schemas/vdfsRoot'
+
+// 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
+setVdfsRoot('@vfs')
 
 function node(over: Partial<VdfsNode> & { name: string }): VdfsNode {
   return {
@@ -66,17 +70,18 @@ describe('ensureSessionMountDir：按 new_types 认挂载点', () => {
   })
 
   it('取「声明可新建 ext=session」的那个子节点，而不是按名字', async () => {
-    vdfs.listVdfs.mockResolvedValueOnce({ path: VDFS_ROOT, node: node({ name: '' }), items: rootListing() })
+    vdfs.listVdfs.mockResolvedValueOnce({ path: '@vfs', node: node({ name: '' }), items: rootListing() })
 
     const mountDir = await ensureSessionMountDir()
 
     // 决定性的一点：名字若被改（比如注册成 conversations），这里照样认得出
-    expect(mountDir).toBe('.vdfs/session')
-    expect(vdfs.listVdfs).toHaveBeenCalledWith(VDFS_ROOT)
+    expect(mountDir).toBe('@vfs/session')
+    // 无参调用 = 走 listVdfs 的缺省参数（根锚点 vdfsRoot() = '@vfs'）
+    expect(vdfs.listVdfs).toHaveBeenCalledWith()
   })
 
   it('幂等：第二次不再列目录（带缓存）', async () => {
-    vdfs.listVdfs.mockResolvedValueOnce({ path: VDFS_ROOT, node: node({ name: '' }), items: rootListing() })
+    vdfs.listVdfs.mockResolvedValueOnce({ path: '@vfs', node: node({ name: '' }), items: rootListing() })
 
     await ensureSessionMountDir()
     await ensureSessionMountDir()
@@ -86,7 +91,7 @@ describe('ensureSessionMountDir：按 new_types 认挂载点', () => {
 
   it('认不到挂载点时抛错（宁可报错，也不要订到拼错的地址上）', async () => {
     vdfs.listVdfs.mockResolvedValueOnce({
-      path: VDFS_ROOT,
+      path: '@vfs',
       node: node({ name: '' }),
       items: [node({ name: 'model' })],
     })
@@ -103,46 +108,46 @@ describe('ensureVdfsSessionScheme：按 kind 认转写段', () => {
 
   it('取会话内部 kind = messages 的那个子目录（与子会话 / 工作目录区分开）', async () => {
     vdfs.listVdfs
-      .mockResolvedValueOnce({ path: VDFS_ROOT, node: node({ name: '' }), items: rootListing() })
-      .mockResolvedValueOnce({ path: '.vdfs/session', node: node({ name: 'session' }), items: sessionListing() })
-      .mockResolvedValueOnce({ path: '.vdfs/session/s1', node: node({ name: 's1' }), items: sessionChildren() })
+      .mockResolvedValueOnce({ path: '@vfs', node: node({ name: '' }), items: rootListing() })
+      .mockResolvedValueOnce({ path: '@vfs/session', node: node({ name: 'session' }), items: sessionListing() })
+      .mockResolvedValueOnce({ path: '@vfs/session/s1', node: node({ name: 's1' }), items: sessionChildren() })
 
     const scheme = await ensureVdfsSessionScheme()
 
-    expect(scheme).toEqual({ mountDir: '.vdfs/session', messagesSeg: '消息' })
+    expect(scheme).toEqual({ mountDir: '@vfs/session', messagesSeg: '消息' })
   })
 
   it('展示名变了也认得出（这正是 kind 存在的理由）', async () => {
     vdfs.listVdfs
-      .mockResolvedValueOnce({ path: VDFS_ROOT, node: node({ name: '' }), items: rootListing() })
-      .mockResolvedValueOnce({ path: '.vdfs/session', node: node({ name: 'session' }), items: sessionListing() })
+      .mockResolvedValueOnce({ path: '@vfs', node: node({ name: '' }), items: rootListing() })
+      .mockResolvedValueOnce({ path: '@vfs/session', node: node({ name: 'session' }), items: sessionListing() })
       .mockResolvedValueOnce({
-        path: '.vdfs/session/s1',
+        path: '@vfs/session/s1',
         node: node({ name: 's1' }),
         // 段名换成别的（后端改文案），kind 不变
         items: [node({ name: 'transcript', kind: VDFS_KIND_MESSAGES }), node({ name: '子会话' })],
       })
 
     await expect(ensureVdfsSessionScheme()).resolves.toEqual({
-      mountDir: '.vdfs/session',
+      mountDir: '@vfs/session',
       messagesSeg: 'transcript',
     })
   })
 
   it('零会话时抛错（转写段在会话内部，推导不出来）', async () => {
     vdfs.listVdfs
-      .mockResolvedValueOnce({ path: VDFS_ROOT, node: node({ name: '' }), items: rootListing() })
-      .mockResolvedValueOnce({ path: '.vdfs/session', node: node({ name: 'session' }), items: [] })
+      .mockResolvedValueOnce({ path: '@vfs', node: node({ name: '' }), items: rootListing() })
+      .mockResolvedValueOnce({ path: '@vfs/session', node: node({ name: 'session' }), items: [] })
 
     await expect(ensureVdfsSessionScheme()).rejects.toThrow(/没有任何会话可供推导/)
   })
 
   it('会话内部没有 kind=messages 的子目录时抛错', async () => {
     vdfs.listVdfs
-      .mockResolvedValueOnce({ path: VDFS_ROOT, node: node({ name: '' }), items: rootListing() })
-      .mockResolvedValueOnce({ path: '.vdfs/session', node: node({ name: 'session' }), items: sessionListing() })
+      .mockResolvedValueOnce({ path: '@vfs', node: node({ name: '' }), items: rootListing() })
+      .mockResolvedValueOnce({ path: '@vfs/session', node: node({ name: 'session' }), items: sessionListing() })
       .mockResolvedValueOnce({
-        path: '.vdfs/session/s1',
+        path: '@vfs/session/s1',
         node: node({ name: 's1' }),
         items: [node({ name: '子会话' })],
       })
@@ -157,47 +162,47 @@ describe('地址拼接：后端两种口径都不能拼重', () => {
     vdfs.listVdfs.mockReset()
   })
 
-  it('path 已是全路径时直接用（曾拼成 .vdfs/.vdfs/session ⇒ 读取转写 404）', async () => {
+  it('path 已是全路径时直接用（曾拼成 <根>/<根>/session ⇒ 读取转写 404）', async () => {
     vdfs.listVdfs.mockResolvedValueOnce({
-      path: VDFS_ROOT,
+      path: '@vfs',
       node: node({ name: '' }),
       // 真实口径：根清单里挂载点的 path 就是展示全路径
       items: [
-        node({ name: 'session', path: '.vdfs/session', new_types: [{ ext: VDFS_EXT_SESSION, title: '会话' }] }),
+        node({ name: 'session', path: '@vfs/session', new_types: [{ ext: VDFS_EXT_SESSION, title: '会话' }] }),
       ],
     })
 
-    await expect(ensureSessionMountDir()).resolves.toBe('.vdfs/session')
+    await expect(ensureSessionMountDir()).resolves.toBe('@vfs/session')
   })
 
   it('path 是段名时按父地址拼', async () => {
     vdfs.listVdfs.mockResolvedValueOnce({
-      path: VDFS_ROOT,
+      path: '@vfs',
       node: node({ name: '' }),
       items: [
         node({ name: 'session', path: 'session', new_types: [{ ext: VDFS_EXT_SESSION, title: '会话' }] }),
       ],
     })
 
-    await expect(ensureSessionMountDir()).resolves.toBe('.vdfs/session')
+    await expect(ensureSessionMountDir()).resolves.toBe('@vfs/session')
   })
 
   it('会话节点的 path 是全路径时不再拼挂载目录', async () => {
     vdfs.listVdfs
-      .mockResolvedValueOnce({ path: VDFS_ROOT, node: node({ name: '' }), items: rootListing() })
+      .mockResolvedValueOnce({ path: '@vfs', node: node({ name: '' }), items: rootListing() })
       .mockResolvedValueOnce({
-        path: '.vdfs/session',
+        path: '@vfs/session',
         node: node({ name: 'session' }),
-        items: [node({ name: 's1', path: '.vdfs/session/s1', kind: 'session', ext: VDFS_EXT_SESSION })],
+        items: [node({ name: 's1', path: '@vfs/session/s1', kind: 'session', ext: VDFS_EXT_SESSION })],
       })
-      .mockResolvedValueOnce({ path: '.vdfs/session/s1', node: node({ name: 's1' }), items: sessionChildren() })
+      .mockResolvedValueOnce({ path: '@vfs/session/s1', node: node({ name: 's1' }), items: sessionChildren() })
 
     await expect(ensureVdfsSessionScheme()).resolves.toEqual({
-      mountDir: '.vdfs/session',
+      mountDir: '@vfs/session',
       messagesSeg: '消息',
     })
     // 列会话内部用的是会话自己的全路径，不是把它再挂到挂载目录下
-    expect(vdfs.listVdfs.mock.calls[2][0]).toBe('.vdfs/session/s1')
+    expect(vdfs.listVdfs.mock.calls[2][0]).toBe('@vfs/session/s1')
   })
 })
 
@@ -213,15 +218,15 @@ describe('vdfsSessionScheme：同步读（事件回调用）', () => {
 
   it('两者都就绪后才返回方案', async () => {
     vdfs.listVdfs
-      .mockResolvedValueOnce({ path: VDFS_ROOT, node: node({ name: '' }), items: rootListing() })
-      .mockResolvedValueOnce({ path: '.vdfs/session', node: node({ name: 'session' }), items: sessionListing() })
-      .mockResolvedValueOnce({ path: '.vdfs/session/s1', node: node({ name: 's1' }), items: sessionChildren() })
+      .mockResolvedValueOnce({ path: '@vfs', node: node({ name: '' }), items: rootListing() })
+      .mockResolvedValueOnce({ path: '@vfs/session', node: node({ name: 'session' }), items: sessionListing() })
+      .mockResolvedValueOnce({ path: '@vfs/session/s1', node: node({ name: 's1' }), items: sessionChildren() })
 
     // 只解析挂载目录时，完整方案仍不可用（转写段还不知道）
     await ensureSessionMountDir()
     expect(vdfsSessionScheme()).toBeNull()
 
     await ensureVdfsSessionScheme()
-    expect(vdfsSessionScheme()).toEqual({ mountDir: '.vdfs/session', messagesSeg: '消息' })
+    expect(vdfsSessionScheme()).toEqual({ mountDir: '@vfs/session', messagesSeg: '消息' })
   })
 })

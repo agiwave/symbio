@@ -29,7 +29,7 @@
 
 **状态**：已接受
 
-> **当前状态**：**已实现（现行）**，但资源与配置**不再走 `{plugin}/{action}`**——统一经 `vdfs/*` + `.vdfs/…` 地址（见 ADR-010 / ADR-011）。
+> **当前状态**：**已实现（现行）**，但资源与配置**不再走 `{plugin}/{action}`**——统一经 `vdfs/*` + `<根>/…` 地址（见 ADR-010 / ADR-011）。
 
 **背景**：
 需要一种方式让 LLM 直接调用工具，无需代码生成。
@@ -98,7 +98,7 @@ Model 插件内置 4 套协议适配器 (OpenAI Chat, OpenAI Responses, Anthropi
 
 **状态**：已接受
 
-> **当前状态**：**已演进**。Agent 插件仍是 Bundle 宿主、导入仍走 `.vdfs/agent` 新建类型 `zip`；
+> **当前状态**：**已演进**。Agent 插件仍是 Bundle 宿主、导入仍走 `<根>/agent` 新建类型 `zip`；
 > 但 OAB v1 的**约定目录协议**（`prompts/` `skills/` `mcps/` 由宿主硬编码解释）已被
 > [`agent-dir/v2`](./design/agent-directory-spec.md) 取代——**Agent 就是一棵插件树**：
 > 技能 / MCP 复用宿主既有的 `skill` / `mcp` 插件目录，人格改为根 `AGENTS.md`。
@@ -244,7 +244,7 @@ Agent 认知类型与关系类型经常变化。
 - 需要 `EntityCapabilities` 能力开关区分
 
 **后续（已取代）**：该契约与 `EntityCapabilities` 均已下线——`entities/*` 随
-S11 停止路由，能力开关随 S12 删除。资源访问统一经 VDFS（`.vdfs/<kind>/…`）：
+S11 停止路由，能力开关随 S12 删除。资源访问统一经 VDFS（`<根>/<kind>/…`）：
 能力改由**访问位**、注册表（supports_upload / supports_import）与**声明式动作**
 （`vdfs/action`）表达，前端页面只剩一台三栏工作台。理由（一份页面实例化多类）
 由 VDFS 以更强的方式满足——**一份机制、零类型知识**。
@@ -575,9 +575,9 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
 **决策**：
 **把运行态从事件里拿出来，变成节点的属性**，前端按地址消费节点状态。
 
-- 会话节点 `.vdfs/session/<sid>` 承载 `status`（`working` / `active` / `failed`）+
+- 会话节点 `<根>/session/<sid>` 承载 `status`（`working` / `active` / `failed`）+
   `attributes.outcome`（`completed` / `aborted` / `failed`）+ `attributes.error`；
-- 消息节点 `.vdfs/session/<sid>/消息/<mid>` 承载 `status`
+- 消息节点 `<根>/session/<sid>/消息/<mid>` 承载 `status`
   （`pending` / `streaming` / `waiting_user_action` / `completed` / `failed`）；
 - 状态类变更（`updated`）**必带全量节点视图**，消费端**零回读**；
 - 前端只有 `sessionRouteOf(地址)` 分派，**没有 `switch (event.type)`**；

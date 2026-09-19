@@ -4,9 +4,9 @@
 //! 拓扑上的区别是**这一型把条目内部也放进地址空间**：
 //!
 //! ```text
-//! .vdfs/skill            条目清单（每个条目一个目录节点）
-//! .vdfs/skill/demo       条目内部（SKILL.md / scripts/… 原样可浏览）
-//! .vdfs/skill/demo/SKILL.md
+//! <根>/skill            条目清单（每个条目一个目录节点）
+//! <根>/skill/demo       条目内部（SKILL.md / scripts/… 原样可浏览）
+//! <根>/skill/demo/SKILL.md
 //! ```
 //!
 //! 条目内容仍由**主文件**承载（`read(<id>)` = 读 `<id>/<manifest>`）——主文件名

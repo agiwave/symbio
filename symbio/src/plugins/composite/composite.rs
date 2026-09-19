@@ -23,11 +23,12 @@
 //! 系统根下的 `PLUGIN.yml` 属于 `home`——容器没有配置，不写 manifest。
 
 use super::vdfs::CompositeVdfs;
+use crate::symbio_core::vdfs::{declared_addr_root, join_addr};
 use crate::symbio_core::{
     create_object, has_creator, lock_read, plugins_root, InvokeRequest, InvokeRequestExt,
     InvokeResponse, Plugin, PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest,
     VdfsProvider, CAPABILITY_VISITOR, KEY_PROVIDER, PATH, PLUGIN_COMPOSITE, PLUGIN_DIR,
-    PLUGIN_FILE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_TOOLS,
+    PLUGIN_FILE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
 
 use serde_json::Value;
@@ -278,6 +279,12 @@ impl Plugin for Composite {
             if let Some(plugin) = plugin_opt {
                 let child_ctx = ctx.fork();
                 child_ctx.set(PATH, rest.to_string());
+                // 跨挂载边界的转发：改写子上下文的**当前父地址**（本容器的子插件
+                // 挂在 `<根>/<名字>`；见 `symbio_core::vdfs::address` 的改写规则）
+                child_ctx.set(
+                    VDFS_PARENT_ADDR,
+                    join_addr(declared_addr_root().unwrap_or(""), name),
+                );
                 return plugin.route(child_ctx).await;
             }
         }
@@ -293,7 +300,7 @@ impl Plugin for Composite {
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
         // 装配安排：容器把自己的 vdfs 视图登记进访问层的单槽位，使其成为
-        // `.vdfs` 的服务者。这不是「容器是根」——composite 只是恰好包含若干
+        // `<根>` 的服务者。这不是「容器是根」——composite 只是恰好包含若干
         // 子目录的 provider，能否出现在那里取决于装配，不是本模块的属性。
         if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
@@ -310,8 +317,14 @@ impl Plugin for Composite {
                 .collect()
         };
 
-        for (_name, plugin) in instances {
+        for (name, plugin) in instances {
             let req_ctx = ctx.fork();
+            // 能力收集同样是跨挂载边界的转发：子插件在收集期拼协议级绝对地址
+            // （如提示词片段里的可编辑地址），靠的就是这里的当前父地址
+            req_ctx.set(
+                VDFS_PARENT_ADDR,
+                join_addr(declared_addr_root().unwrap_or(""), &name),
+            );
             let _ = plugin.traverse("".to_string(), req_ctx).await;
         }
 

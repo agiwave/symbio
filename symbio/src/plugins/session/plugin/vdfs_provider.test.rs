@@ -30,7 +30,7 @@ async fn vdfs_self_description_has_no_mount() {
     assert_eq!(p.label(), Some("会话"));
     assert_eq!(p.icon(), Some("session"));
     // 顺序由本 provider 的 order() 自持（**单一真相源**），
-    // 使 `.vdfs` 左栏与详情恒等
+    // 使 `<根>` 左栏与详情恒等
     assert_eq!(p.order(), 1);
     assert_eq!(p.root_access().flags(), "l");
     assert!(!p.root_access().traverse, "会话是叶子，不参与树遍历");
@@ -123,14 +123,14 @@ async fn vdfs_watch_forwards_session_changes() {
     assert!(rx.try_recv().is_err(), "无订阅者时不得投递");
 }
 
-// ==================== 配置文档（`.vdfs/session/PLUGIN.yml`）的 provider 侧 ====================
+// ==================== 配置文档（`<根>/session/PLUGIN.yml`）的 provider 侧 ====================
 //
 // 定义侧的测试（`config_definition` 与 `SessionConfig::default()` 同源）在
 // `plugin.test.rs`；这里只测**经 provider 访问**的行为。
 
 /// 配置文件是 `ext = form` 的可写文档，**但它不在会话清单里**。
 ///
-/// 「清单 = 业务列表」：`.vdfs/session` 下应当只有会话。配置文件进设置菜单走
+/// 「清单 = 业务列表」：`<根>/session` 下应当只有会话。配置文件进设置菜单走
 /// 的是 ConfigurableVisitor 那条通道（`announce_configurable`），不靠清单并列
 /// ——否则列表底部会多出一个「设置」项。可达性不受影响：`stat` / `read` 照常。
 #[tokio::test]
@@ -178,7 +178,7 @@ async fn config_write_validates_before_applying() {
     assert_eq!(p.config.read().await.max_messages, before);
 }
 
-// ==================== 会话记忆（`.vdfs/session/<id>/AGENTS.md`）====================
+// ==================== 会话记忆（`<根>/session/<id>/AGENTS.md`）====================
 
 /// 会话记忆是会话内部的一个**可读写文件**：与三个目录并列、`stat` 与 `list` 同源、
 /// 写后读得回、**不可删除**（与 work / agent 的记忆层同一内核约定）。
@@ -371,7 +371,7 @@ async fn new_session_ids_are_distinct() {
     assert_eq!(ids.len(), 32);
 }
 
-// ==================== 转写区段（`.vdfs/session/<id>/消息`）的三个入口 ====================
+// ==================== 转写区段（`<根>/session/<id>/消息`）的三个入口 ====================
 //
 // 消息的**改写 / 截断 / 清空**曾经各有专用路由（`chat/update_message` /
 // `chat/delete_message` / `chat/clear_messages`），2026-09-18 迁到 VDFS：

@@ -34,13 +34,13 @@ Telegram Bot 集成插件：长轮询收发与"继续会话"交互。
 ## 配置
 
 `bot_token` / `chat_id` / `streaming_enabled` / `poll_enabled` / `allowed_users`
-是**可寻址的配置文件**：`.vdfs/telegram/PLUGIN.yml`（`ext = form`，字段定义随节点
+是**可寻址的配置文件**：`<根>/telegram/PLUGIN.yml`（`ext = form`，字段定义随节点
 `schema` 下发）。读写走 `vdfs/read` / `vdfs/write`，落盘就是本插件写自己目录里的
 那个文件（`ConfigFile::apply`）——不再有 `config/get` / `config/set` 路由，
 也不再经父插件转发。
 
 ```yaml
-# .vdfs/telegram/PLUGIN.yml（顶层扁平键）
+# <根>/telegram/PLUGIN.yml（顶层扁平键）
 bot_token: "123456:ABC-DEF"
 chat_id: "123456789"        # 可选；未指定时按会话推送
 streaming_enabled: true

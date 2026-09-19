@@ -117,7 +117,7 @@ curl -X POST ... -d '{"path": "_root"}'
 2. 检查 YAML 格式 (缩进、冒号后空格)；两个身份字段 `plugin_provider` /
    `plugin_name` 不要写进配置字段里（它们由 `PluginDir` 自动剥离 / 补回）
 3. 确认写入路径对：前端「设置」页点开对应条目，或直接 `vdfs/write`
-   `.vdfs/<插件>/PLUGIN.yml`——两条路写的是**同一个文件**
+   `<根>/<插件>/PLUGIN.yml`——两条路写的是**同一个文件**
 4. 配置改完**不需要重启**（`ConfigFile::apply` 落盘后广播）；只有少数副作用
    （如网关重建监听）由插件自己在写完后处理
 5. 若刚从旧版本升级：旧 `<homedir>/config.yaml` 已一次性迁移并改名

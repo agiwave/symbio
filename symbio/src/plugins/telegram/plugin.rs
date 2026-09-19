@@ -67,7 +67,7 @@ fn config_definition() -> DetailDefinition {
 #[derive(Clone)]
 pub struct TelegramPlugin {
     config: Arc<RwLock<TelegramConfig>>,
-    /// 配置文件的呈现与校验（`.vdfs/telegram/PLUGIN.yml`）
+    /// 配置文件的呈现与校验（`<根>/telegram/PLUGIN.yml`）
     config_file: ConfigFile,
     client: reqwest::Client,
     /// 更新偏移量
@@ -694,7 +694,7 @@ impl TelegramPlugin {
     }
 }
 
-// ==================== VDFS：配置文档（`.vdfs/telegram/PLUGIN.yml`） ====================
+// ==================== VDFS：配置文档（`<根>/telegram/PLUGIN.yml`） ====================
 //
 // 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文件」。
 // 节点形状、定义校验、落盘都在 [`ConfigFile`] 里，这里只做寻址分流。

@@ -93,7 +93,7 @@ const SID = 'abc'
  * 协议夹具：地址方案是运行期数据（列目录认出来），单测不去列目录，直接注入。
  */
 const { SCHEME } = vi.hoisted(() => ({
-  SCHEME: { mountDir: '.vdfs/session', messagesSeg: '消息' },
+  SCHEME: { mountDir: '@vfs/session', messagesSeg: '消息' },
 }))
 
 /** 一条消息节点（后端 `message_node` 的形状：正文在内容里，结构在 attributes） */
@@ -150,11 +150,11 @@ describe('sessionRouteOf（地址 → 本域目标：按地址分派，不按事
   })
 
   it('非会话域路径一律 null（清单 / 子会话 / 工作目录 / 其他资源）', () => {
-    expect(sessionRouteOf(SCHEME, '.vdfs/session')).toBeNull()
-    expect(sessionRouteOf(SCHEME, '.vdfs/session/abc/子会话/sub')).toBeNull()
-    expect(sessionRouteOf(SCHEME, '.vdfs/session/abc/工作目录/a.md')).toBeNull()
-    expect(sessionRouteOf(SCHEME, '.vdfs/model/p1')).toBeNull()
-    expect(sessionRouteOf(SCHEME, '.vdfs/session/abc/消息/m1/deeper')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '@vfs/session')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '@vfs/session/abc/子会话/sub')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '@vfs/session/abc/工作目录/a.md')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '@vfs/model/p1')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '@vfs/session/abc/消息/m1/deeper')).toBeNull()
   })
 })
 
@@ -363,9 +363,9 @@ describe('变更 → store', () => {
 
   it('非转写路径的变更一律不碰 store', async () => {
     const store = useSessionsStore()
-    emit({ path: '.vdfs/session/abc/子会话/sub', change: VDFS_CHANGE_UPDATED, content: 'x' })
-    emit({ path: '.vdfs/session/abc', change: VDFS_CHANGE_UPDATED, content: 'x' })
-    emit({ path: '.vdfs/session', change: VDFS_CHANGE_DELETED })
+    emit({ path: '@vfs/session/abc/子会话/sub', change: VDFS_CHANGE_UPDATED, content: 'x' })
+    emit({ path: '@vfs/session/abc', change: VDFS_CHANGE_UPDATED, content: 'x' })
+    emit({ path: '@vfs/session', change: VDFS_CHANGE_DELETED })
     await drain()
 
     expect(store.getSessionMessages(SID)).toHaveLength(0)

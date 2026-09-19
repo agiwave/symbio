@@ -25,7 +25,7 @@ function def(partial: Partial<DetailDefinition>): DetailDefinition {
 /** 一个可编辑的资源节点（`name` 即父目录内的路径段 = 保存时的 id） */
 function node(partial: Partial<VdfsNode> & { name: string }): VdfsNode {
   return {
-    path: `.vdfs/${partial.name}`,
+    path: `@vfs/${partial.name}`,
     title: partial.name,
     kind: 'mcp',
     status: 'active',
@@ -158,7 +158,7 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
     name: 'b1',
     title: 'B1',
     kind: 'agent',
-    path: '.vdfs/agent/b1',
+    path: '@vfs/agent/b1',
     scope: 'workspace',
     count_prompt: 2,
   })

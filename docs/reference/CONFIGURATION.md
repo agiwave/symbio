@@ -20,7 +20,7 @@
 `plugin_name`（实例名，缺省 = 目录名）——**不参与配置反序列化**，由 `PluginDir` 读写时
 自动剥离 / 补回。加载判据 = 文件存在 + 可解析 + `plugin_provider` 指向已注册的工厂。
 
-**配置的地址**：`.vdfs/<插件>/PLUGIN.yml`（`ext = form`，`rw`，`schema` = 该插件自己的
+**配置的地址**：`<根>/<插件>/PLUGIN.yml`（`ext = form`，`rw`，`schema` = 该插件自己的
 `DetailDefinition`）。读写用的就是 `vdfs/read` / `vdfs/write`——与任何其它资源同一条
 链路，因此前端与 LLM 用同一种方式改配置。**没有第二条配置协议。**
 
@@ -57,7 +57,7 @@ work:
 
 | 数据 | 位置 | 由谁决定 |
 |------|------|----------|
-| **插件配置** | `<homedir>/<插件>/PLUGIN.yml`（系统级插件在 `<homedir>/PLUGIN.yml`） | 配置的**拥有者**自己读写（`ConfigFile`）；地址 `.vdfs/<插件>/PLUGIN.yml`，**没有第二条配置协议** |
+| **插件配置** | `<homedir>/<插件>/PLUGIN.yml`（系统级插件在 `<homedir>/PLUGIN.yml`） | 配置的**拥有者**自己读写（`ConfigFile`）；地址 `<根>/<插件>/PLUGIN.yml`，**没有第二条配置协议** |
 | 插件资源（model / mcp / skill 等） | `<homedir>/<类别>/<id>/<主文件>` | 类别段名 = 插件名（如 `model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`）；由 `symbio/src/providers/vdfs_service/` 的集中实现读写，**不可配置、无第二种后端** |
 | 会话与其消息 | 会话自己的 store（`SessionStore`），非 `plugins/<类别>/<id>/` 资源布局 | 已收为**单一具体类型**：持久会话 = 磁盘 `<根>/<id>/{session.json, messages.json}`，临时会话 = 进程内驻留。`store_kind` / sqlite / memory 后端选型**已删除**（见 ADR-011 及 `session/store/mod.rs` 顶部「它不是什么」）|
 | Agent bundle | bundle 目录（工作区级 + 全局级双层，`BundleStore` 自管） | 工作区切换，不经 `vdfs_service` |
@@ -70,7 +70,7 @@ work:
 
 ## 插件配置
 
-各插件的配置都在**自己目录**的 `PLUGIN.yml` 里；前端「设置」页（`.vdfs/setting`）会把
+各插件的配置都在**自己目录**的 `PLUGIN.yml` 里；前端「设置」页（`<根>/setting`）会把
 它们一并列出，但条目携带的是**各自的真实地址**——点开读写的还是拥有者那份文件，
 设置页只是指路，不代理、不复制。
 
@@ -79,16 +79,16 @@ work:
 
 | 插件 | 配置地址 | 主要键 |
 |---|---|---|
-| `home` | `.vdfs/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
-| `session` | `.vdfs/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `session/config.rs::SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
-| `agent` | `.vdfs/agent/PLUGIN.yml` | `item_max_bytes` / `identity_inject_max_bytes` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `agent/host/config.rs::AgentConfig`） |
-| `work` | `.vdfs/work/PLUGIN.yml` | `memory_enabled` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `work/config.rs::WorkConfig`） |
-| `web` | `.vdfs/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |
-| `local` | `.vdfs/local/PLUGIN.yml` | `shell_enabled` / `file_enabled` / `shell_timeout` |
-| `gateway` | `.vdfs/gateway/PLUGIN.yml` | 见下 |
-| `telegram` | `.vdfs/telegram/PLUGIN.yml` | 见下 |
-| `model` | `.vdfs/model/PLUGIN.yml` | `default_provider_id`（**读宽写窄**：兼容旧形态遗留的 `providers` 明细，迁移后归一） |
-| `mcp` | 无配置文档 | 配置就是它的资源树（`.vdfs/mcp/<id>`） |
+| `home` | `<根>/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
+| `session` | `<根>/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `session/config.rs::SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
+| `agent` | `<根>/agent/PLUGIN.yml` | `item_max_bytes` / `identity_inject_max_bytes` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `agent/host/config.rs::AgentConfig`） |
+| `work` | `<根>/work/PLUGIN.yml` | `memory_enabled` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `work/config.rs::WorkConfig`） |
+| `web` | `<根>/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |
+| `local` | `<根>/local/PLUGIN.yml` | `shell_enabled` / `file_enabled` / `shell_timeout` |
+| `gateway` | `<根>/gateway/PLUGIN.yml` | 见下 |
+| `telegram` | `<根>/telegram/PLUGIN.yml` | 见下 |
+| `model` | `<根>/model/PLUGIN.yml` | `default_provider_id`（**读宽写窄**：兼容旧形态遗留的 `providers` 明细，迁移后归一） |
+| `mcp` | 无配置文档 | 配置就是它的资源树（`<根>/mcp/<id>`） |
 
 ### Model 插件
 
@@ -129,7 +129,7 @@ work:
 ### MCP 插件
 
 **本插件不设配置文档**——配置就是它的资源树：一个 server 一个目录，主文件
-`server.json`（`.vdfs/mcp/<id>`）。
+`server.json`（`<根>/mcp/<id>`）。
 
 ```json
 // ~/.symbio/mcp/filesystem/server.json
@@ -186,7 +186,7 @@ inbound_token: ""
 inbound_readonly: false
 ```
 
-扁平键配置，**整体读写于插件自己的文件**（前端「设置」页点开 `.vdfs/gateway/PLUGIN.yml`
+扁平键配置，**整体读写于插件自己的文件**（前端「设置」页点开 `<根>/gateway/PLUGIN.yml`
 就是这份表单；`vdfs/write` 是整体替换，与其它资源同一条链路）：
 
 | 键 | 默认值 | 说明 |

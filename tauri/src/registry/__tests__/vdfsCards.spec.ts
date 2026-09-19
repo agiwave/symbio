@@ -31,7 +31,7 @@ const FILE = 'rw'
 
 function node(over: Partial<VdfsNode> = {}): VdfsNode {
   return {
-    path: '.vdfs/session/x',
+    path: '@vfs/session/x',
     name: 'x',
     title: 'X',
     kind: 'session',
@@ -119,11 +119,11 @@ describe('cardTagsOf', () => {
   })
 
   it('标签里不含机制字段：访问位 / ext / path / kind 都不出现', () => {
-    const tags = cardTagsOf(node({ access: 'rw', ext: 'form', path: '.vdfs/a/b', kind: 'session' }))
+    const tags = cardTagsOf(node({ access: 'rw', ext: 'form', path: '@vfs/a/b', kind: 'session' }))
     const labels = tags.map((t) => t.label).join('|')
     expect(labels).not.toContain('rw')
     expect(labels).not.toContain('form')
-    expect(labels).not.toContain('.vdfs/a/b')
+    expect(labels).not.toContain('@vfs/a/b')
     expect(labels).not.toContain('session')
   })
 })

@@ -9,12 +9,12 @@
  *
  * | 操作 | 入口 |
  * |---|---|
- * | 列会话清单 | `vdfs/list(.vdfs/session)` |
- * | 读整份转写 | `vdfs/read(.vdfs/session/<id>)` |
- * | 新建会话 | `vdfs/write(.vdfs/session, { create: true })` |
- * | 删除会话 | `vdfs/delete(.vdfs/session/<id>)` |
- * | 改 metadata / 标题 | `vdfs/write(.vdfs/session/<id>)` |
- * | **改写某条消息** | `vdfs/write(.vdfs/session/<id>/消息/<mid>)` |
+ * | 列会话清单 | `vdfs/list(<根>/session)` |
+ * | 读整份转写 | `vdfs/read(<根>/session/<id>)` |
+ * | 新建会话 | `vdfs/write(<根>/session, { create: true })` |
+ * | 删除会话 | `vdfs/delete(<根>/session/<id>)` |
+ * | 改 metadata / 标题 | `vdfs/write(<根>/session/<id>)` |
+ * | **改写某条消息** | `vdfs/write(<根>/session/<id>/消息/<mid>)` |
  * | **删除某条及其后** | `vdfs/action(…/消息/<mid>, "truncate")` |
  * | **清空历史** | `vdfs/action(…/消息, "clear")` |
  *
@@ -49,7 +49,7 @@ export type { SessionListItem } from '../schemas/session_list'
 export type { SessionMetadata } from '../schemas/session_meta'
 
 /**
- * 获取会话列表（VDFS：`.vdfs/session` 的目录内容）
+ * 获取会话列表（VDFS：`<根>/session` 的目录内容）
  *
  * 会话挂载点已把清单所需字段挂在节点上（`message_count` / `metadata` /
  * `meta_tags`，VDFS 只透传场景字段），故这里把节点直接映射为
@@ -96,7 +96,7 @@ export async function listSessions(
 /**
  * 删除会话（连同其全部消息）。
  *
- * **走 VDFS**：`delete(.vdfs/session/<id>)`。后端 provider 的 `delete` 与曾经的
+ * **走 VDFS**：`delete(<根>/session/<id>)`。后端 provider 的 `delete` 与曾经的
  * `session/clear` 路由共用同一份实现（`delete_session_internal`），因此这不是
  * 换一种删除方式，而是**同一个删除**换一个入口——专用路由已退役。
  *
@@ -113,7 +113,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
  * 经 VDFS 读取整份转写（会话叶子的内容是一份 JSON 文档）。
  *
  * 文档形状由后端 `session_content` 决定（`{ id, title, metadata, messages, updated_at }`）；
- * 这里只取 `messages`，其余字段由会话清单节点（`.vdfs/session/<id>`）承载。
+ * 这里只取 `messages`，其余字段由会话清单节点（`<根>/session/<id>`）承载。
  *
  * 放在本文件的理由：**文档形状的知识属于会话域**，不该出现在 store 里——
  * store 只需要 `ChatMessage[]`。读失败（空内容 / 非 JSON）在此就地转成错误，
@@ -149,7 +149,7 @@ export interface DeleteMessageResult {
 /**
  * 清空会话历史消息（保留会话本身 / 工作目录 / 标题等元数据）。
  *
- * **走 VDFS**：`action(.vdfs/session/<id>/消息, "clear")`。
+ * **走 VDFS**：`action(<根>/session/<id>/消息, "clear")`。
  *
  * 为什么是 `action` 而不是 `delete`：`delete` 的语义是**逐节点**的「这一个没了」，
  * 表达不了截断那类集合操作；而转写区段的删除因此统一走动作——**同一个区段的删除
@@ -164,7 +164,7 @@ export async function clearMessages(sessionId: string): Promise<void> {
 /**
  * 删除单条会话消息（连同其之后的所有消息一并删除）。
  *
- * **走 VDFS**：`action(.vdfs/session/<id>/消息/<mid>, "truncate")`。语义是
+ * **走 VDFS**：`action(<根>/session/<id>/消息/<mid>, "truncate")`。语义是
  * 「从这条到列表末尾全没了」（VDFS 变更词汇里的 `truncated`），不是「删这一个」。
  *
  * 目标消息不存在时后端返回空列表且**不发变更**——「什么都没删」不该在 VDFS 上
@@ -188,7 +188,7 @@ export async function deleteMessage(
 /**
  * 更新单条会话消息（手工编辑 / 标错重试等）。
  *
- * **走 VDFS**：`write(.vdfs/session/<id>/消息/<mid>)`，请求体是消息的**字段子集**
+ * **走 VDFS**：`write(<根>/session/<id>/消息/<mid>)`，请求体是消息的**字段子集**
  * （JSON 浅合并，未提供的字段保持不变）。后端 provider 只覆盖补丁里出现的字段。
  *
  * 这不是「发言」：它不触发任何编排，只是对**既有**节点的一次存储改写。新增消息
@@ -207,7 +207,7 @@ export async function updateMessage(
 /**
  * 合并写入会话 metadata（workdir / title / agent_id 等）。
  *
- * **走 VDFS**：`write(.vdfs/session/<id>)`，请求体即
+ * **走 VDFS**：`write(<根>/session/<id>)`，请求体即
  * `{ metadata?, title? }`。后端 provider 的 `write` 对这两个字段实现**浅合并**
  * （未提供的字段保持不变），与 `session/update` 的语义逐字一致——两侧共用同一份
  * 合并实现，因此不存在"两条路径各自漂移"的窗口。

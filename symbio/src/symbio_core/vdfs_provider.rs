@@ -26,7 +26,7 @@
 //!   唯一，天然就是合格的目录名；
 //! - **`composite` 容器**只负责**目录合成**：它把各子插件注册的 provider 按
 //!   注册名铺成一级子目录（`plugins/composite/vdfs.rs`）。它自身不是「根级
-//!   provider」——机制里没有根级 provider 这个概念，`.vdfs` 只是使用方在合成
+//!   provider」——机制里没有根级 provider 这个概念，`<根>` 只是使用方在合成
 //!   视图之上取的展示地址；
 //! - **`vdfs` 插件**取容器注册的根，按 `vdfs/*` 协议分发（前端与 LLM 走同一条
 //!   分发链路，不存在第二套实现）；
@@ -86,7 +86,7 @@ pub const VDFS_KIND_DIR: &str = "dir";
 /// 节点基础类型：文件
 pub const VDFS_KIND_FILE: &str = "file";
 
-/// 场景类型：会话的**转写列表**（`.vdfs/session/<id>/<段>`）。
+/// 场景类型：会话的**转写列表**（`<根>/session/<id>/<段>`）。
 ///
 /// `kind` 是场景可自定义的（会话叶子自己就声明 `kind = "session"`），
 /// 这里给转写列表一个**稳定的 ASCII 语义类型**：它的 `name` / `title` 是
@@ -175,7 +175,7 @@ pub const VDFS_ACTION_CLEAR: &str = "clear";
 /// ## 两条独立的键：`ext` 与 `node_ext`
 ///
 /// [`ext`](Self::ext) 是**呈现扩展名**——地址末段可能带的后缀，provider 用
-/// [`entry::id_of`] 一族按它剥出条目 id（`.vdfs/model/openai-1.model` → `openai-1`）。
+/// [`entry::id_of`] 一族按它剥出条目 id（`<根>/model/openai-1.model` → `openai-1`）。
 /// 它**不**决定详情怎么渲染：配置型资源（`model` / `mcp` / `skill`）落成后统一是
 /// `ext = form`，呈现扩展名只留在地址里。
 ///
@@ -416,7 +416,7 @@ impl<'de> Deserialize<'de> for VdfsAccess {
 /// `kind` 只承载**场景语义**（如 `session` / `model`），不参与机制判定。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsNode {
-    /// 全路径（**展示口径**，如 `.vdfs/session/abc`）；由分发层回填，provider 可留空
+    /// 全路径（**展示口径**，如 `<根>/session/abc`）；由分发层回填，provider 可留空
     #[serde(default)]
     pub path: String,
     /// 唯一标识：父节点内的路径段
@@ -1089,6 +1089,12 @@ pub const VDFS_PARAM_BEFORE: &str = "before";
 pub struct VdfsContext {
     host: Arc<dyn Any + Send + Sync>,
     params: Arc<VdfsParams>,
+    /// **当前父地址**：本 provider 挂载点的绝对地址（由转发方写入）。
+    ///
+    /// provider 收到的地址一律是自身子树内的相对地址；绝大多数操作只需要相对
+    /// 地址。只有少数协议级场合需要全局地址，此时从本字段 + 相对地址拼出。
+    /// 顶层为空串（可诊断的降级：绝对地址退化为根相对地址）。
+    parent_addr: String,
 }
 
 impl VdfsContext {
@@ -1097,7 +1103,20 @@ impl VdfsContext {
         Self {
             host: Arc::new(host),
             params: Arc::new(VdfsParams::new()),
+            parent_addr: String::new(),
         }
+    }
+
+    /// 转发方写入当前父地址（同名覆盖；vdfs 核心协议把操作派发给 provider 的
+    /// 那一跳调用——见 `plugins/composite/vdfs.rs` 的 `dispatch`）
+    pub fn with_parent_addr(mut self, addr: impl Into<String>) -> Self {
+        self.parent_addr = addr.into();
+        self
+    }
+
+    /// 当前父地址（空串 = 未设置，绝对地址随之退化为根相对地址）
+    pub fn parent_addr(&self) -> &str {
+        &self.parent_addr
     }
 
     /// 无宿主状态（纯计算 / 测试场景）

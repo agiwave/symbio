@@ -73,7 +73,7 @@ describe('useGenerationGuard — 键控（快照必须仍是当前的）', () =>
 
   it('读取期间的增量落地 ⇒ 响应过期（追加代际的真实场景）', async () => {
     const g = useGenerationGuard()
-    const path = '.vdfs/session/s1/消息'
+    const path = '@vfs/session/s1/消息'
     let text = 'AB'
     // 发起读取：记下快照
     const read = (async () => {

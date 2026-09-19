@@ -25,7 +25,7 @@
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
  *                      写入：`applySessionNode`（会话节点变更）/ send 的乐观置位
- *                      读取：会话列表项状态展示（`.vdfs/session` 实例）
+ *                      读取：会话列表项状态展示（`<根>/session` 实例）
  */
 
 import { defineStore } from 'pinia'
@@ -42,10 +42,10 @@ import {
   type SessionMetadata
 } from '@/services/session'
 import { writeVdfs } from '@/services/vdfs'
+import { vdfsRoot } from '@/schemas/vdfsRoot'
 import {
   VDFS_CHANGE_CREATED,
   VDFS_CHANGE_DELETED,
-  VDFS_ROOT,
   VDFS_STATUS_FAILED,
   VDFS_STATUS_WORKING,
   chimeKindOfOutcome,
@@ -518,7 +518,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * 「新建」在机制上就是对**目录自身**的一次 `vdfs/write`（见后端
    * `VdfsProvider::write` 的两种目标形态）：id 是 provider 的私有知识，前端不预先
-   * 编造——它只需要知道「建在哪」（`.vdfs/session`），名字由后端给。
+   * 编造——它只需要知道「建在哪」（`<根>/session`），名字由后端给。
    */
   async function createSession(metadata?: Record<string, unknown>): Promise<string> {
     const meta = { created_via: 'ui', ...(metadata ?? {}) } as SessionMetadata
@@ -536,8 +536,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     )
     const id = vdfsBase(resp.path)
     // `vdfsBase` 对空路径返回**虚拟根**这个哨兵，因此空地址既不是 `''` 也不是
-    // 合法 id——必须显式挡掉，否则会插一条 id 为 `.vdfs` 的幽灵会话。
-    if (!id || id === VDFS_ROOT) throw new Error('新建会话未返回地址（provider 未给出新节点路径）')
+    // 合法 id——必须显式挡掉，否则会插一条 id 为 `<根>` 的幽灵会话。
+    if (!id || id === vdfsRoot()) throw new Error('新建会话未返回地址（provider 未给出新节点路径）')
 
     // 2. 立即在本地插入"未持久化"条目（与后端写同一份 meta，保证
     //    ModelChatPanel onMounted 从本地 list.metadata 同步水合时拿得到草稿选择）
@@ -620,7 +620,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   /**
    * 删除会话（连同其全部消息）。
    *
-   * 写入入口是 **VDFS**：`delete(.vdfs/session/<id>)`（`services/session.ts::deleteSession`
+   * 写入入口是 **VDFS**：`delete(<根>/session/<id>)`（`services/session.ts::deleteSession`
    * 只是它的具名包装）。后端 provider 的 `delete` 与曾经的 `session/clear` 路由
    * 共用同一份实现，因此这是一次入口替换，不是第二种删除方式。
    *
@@ -758,8 +758,8 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * ## 读入口是 VDFS，不是专用协议
    *
-   * 转写是**列表**（`.vdfs/session/<id>/消息`），而会话叶子
-   * `.vdfs/session/<id>` 的内容就是整份会话文档（含 `messages`）——因此
+   * 转写是**列表**（`<根>/session/<id>/消息`），而会话叶子
+   * `<根>/session/<id>` 的内容就是整份会话文档（含 `messages`）——因此
    * **一次 `vdfs/read`** 就能拿到全部历史：既省掉一条专用协议，又让前端与
    * LLM 在**同一地址**上读同一份数据（`session/get_messages` 自此不再是
    * 前端的读入口）。

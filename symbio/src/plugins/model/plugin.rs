@@ -442,7 +442,7 @@ impl Default for ModelPlugin {
     }
 }
 
-// ==================== VDFS 挂载点（`.vdfs/model`） ====================
+// ==================== VDFS 挂载点（`<根>/model`） ====================
 //
 // 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
 // 写 / 删 / 动作的语义都在这里表达。
@@ -855,7 +855,7 @@ impl Plugin for ModelPlugin {
         Self::metadata()
     }
 
-    /// model 已无自有路由：配置的读写在 VDFS 上（`.vdfs/model/<id>` 的详情表单，
+    /// model 已无自有路由：配置的读写在 VDFS 上（`<根>/model/<id>` 的详情表单，
     /// 以及节点动作 `set-default`），跨条目状态写自己的 `<本插件目录>/PLUGIN.yml`。
     async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!(
@@ -887,7 +887,7 @@ impl Plugin for ModelPlugin {
         }
 
         if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            // VDFS 挂载点：本插件自身就是 provider（`.vdfs/model`）——
+            // VDFS 挂载点：本插件自身就是 provider（`<根>/model`）——
             // 列 / 读 / 写 / 删 / 动作直接由 `impl VdfsProvider for ModelPlugin` 承载
             let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
             tool_visitor

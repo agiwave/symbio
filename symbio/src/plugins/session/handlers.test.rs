@@ -52,7 +52,7 @@ fn ctx_with(payload: serde_json::Value) -> Arc<dyn InvokeRequest> {
 //
 // 会话 metadata 有**两个**写入入口：
 //   · `session/update` 路由 —— 只有 CLI 用（它需要客户端指定会话 id）
-//   · `vdfs/write(.vdfs/session/<id>)` —— 前端用
+//   · `vdfs/write(<根>/session/<id>)` —— 前端用
 //
 // 两者曾经各写一遍浅合并。分叉的后果是"前端改名生效、CLI 改名不生效"这类**只在
 // 一条路径上出现**的行为差异，而没有任何测试会覆盖两条路径的**一致性**——下面
@@ -117,7 +117,7 @@ async fn session_update_and_vdfs_write_agree_on_metadata() {
 // ==================== 退役路由：不得被加回来 ====================
 
 /// `session/clear` 路由已退役：删除会话的唯一入口是
-/// `vdfs/delete(.vdfs/session/<id>)`。
+/// `vdfs/delete(<根>/session/<id>)`。
 ///
 /// 为什么值得锁：退役一条路由**不会**让任何既有测试变红——调用方全改完了，剩下的
 /// 只是一个不再被解析的字符串。若哪天有人"顺手"把它加回来，同一件事就又有了两个

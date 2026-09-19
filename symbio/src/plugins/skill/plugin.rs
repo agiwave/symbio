@@ -122,7 +122,7 @@ impl SkillPlugin {
     }
 }
 
-// ==================== VDFS 挂载点（`.vdfs/skill`） ====================
+// ==================== VDFS 挂载点（`<根>/skill`） ====================
 //
 // 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
 // 写 / 删 / 动作的语义都在这里表达。
@@ -572,7 +572,7 @@ impl Plugin for SkillPlugin {
                 }
             }
 
-            // VDFS 挂载点：本插件自身就是 provider（`.vdfs/skill`）——
+            // VDFS 挂载点：本插件自身就是 provider（`<根>/skill`）——
             // 列 / 读 / 写 / 删 / 动作直接由 `impl VdfsProvider for SkillPlugin` 承载。
             // 无条件注册——技能清单为空也是合法的挂载点。
             if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {

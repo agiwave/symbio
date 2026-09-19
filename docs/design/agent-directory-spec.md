@@ -384,8 +384,8 @@ Agent，不属于「一个 Agent 会什么」。
 
 | 作用域 | 物理落位 | 可编辑地址 | 片段标题 |
 |---|---|---|---|
-| 系统 Agent（宿主自身） | `{homedir}/AGENTS.md` | `.vdfs/agent/AGENTS.md` | 【全局指令】 |
-| 子 Agent | `<agent dir>/AGENTS.md` | `.vdfs/agent/<id>/AGENTS.md` | 【智能体记忆】 |
+| 系统 Agent（宿主自身） | `{homedir}/AGENTS.md` | `<根>/agent/AGENTS.md` | 【全局指令】 |
+| 子 Agent | `<agent dir>/AGENTS.md` | `<根>/agent/<id>/AGENTS.md` | 【智能体记忆】 |
 
 两条落位都不需要新的上下文键：系统那一份取自**本插件目录的父目录**（容器规则是
 「一层目录 = 一个插件，插件并列在智能体目录下」，本插件在 `<homedir>/agent`）；

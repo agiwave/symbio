@@ -43,6 +43,11 @@ define_string_key!(WorkdirKey, WORKDIR, "workdir");
 define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
 define_string_key!(SessionIdKey, SESSION_ID, "session_id");
 define_string_key!(TraceIdKey, TRACE_ID, "trace_id");
+// 当前父地址：本插件在地址空间中挂载点的绝对地址。与 `WORKDIR` / `SESSION_ID`
+// 同类的**上下文数据**：父插件把请求转发给子插件时（route / traverse）改写它，
+// 子插件在少数需要协议级绝对地址的场合读它拼接（见 `symbio_core::vdfs::address`）。
+// 缺省（顶层请求 / 无 vdfs 装配）为空。
+define_string_key!(VdfsParentAddrKey, VDFS_PARENT_ADDR, "vdfs_parent_addr");
 define_string_key!(ToolCallIdKey, TOOL_CALL_ID, "tool_call_id");
 // 流式工具的结果消息 id：工具据此以该 id 广播 StreamEvent::Update 增量帧，
 // 最终帧由 tool_executor 捕获为工具结果（与 result_msg_id 占位节点同 id 合并）。

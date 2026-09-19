@@ -17,7 +17,7 @@ import type { VdfsNode } from '@/schemas/vdfs'
 
 function messageNode(partial: Partial<VdfsNode> = {}): VdfsNode {
   return {
-    path: '.vdfs/session/abc/消息/m1',
+    path: '@vfs/session/abc/消息/m1',
     name: 'm1',
     title: '助手',
     kind: 'file',

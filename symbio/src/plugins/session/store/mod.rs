@@ -24,7 +24,7 @@
 //!
 //! ## 与 VDFS 的关系
 //!
-//! **对外**，会话早已只有 VDFS 一个入口（`.vdfs/session` 的清单 / `消息` /
+//! **对外**，会话早已只有 VDFS 一个入口（`<根>/session` 的清单 / `消息` /
 //! `子会话` / `工作目录`，见 `super::plugin` 的 `impl VdfsProvider`）；本模块是
 //! 那个 provider 下面的真相源。**对内**，它刻意**不**改用
 //! [`vdfs_service`](crate::providers::vdfs_service) 的三种集中实现，理由是拓扑相反：

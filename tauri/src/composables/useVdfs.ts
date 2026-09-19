@@ -7,7 +7,7 @@
  *
  * ## 绑定模型（控件自包含，见 VdfsWorkbench）
  *
- * 宿主给一个**数据地址**（`addr`，如 `.vdfs` 或 `.vdfs/session/<id>`），本层
+ * 宿主给一个**数据地址**（`addr`，如 `<根>` 或 `<根>/session/<id>`），本层
  * 完成全部数据装配，**不感知浏览器路由**——数据地址与浏览器地址是两个概念：
  *
  * - **左栏导航** = `addr` 的内容（其子目录清单，后端 order 排列）；
@@ -50,10 +50,10 @@ import {
   writeVdfsBinary,
 } from '@/services/vdfs'
 import { subscribe } from '@/services/eventBus'
+import { vdfsRoot } from '@/schemas/vdfsRoot'
 import {
   VDFS_CHANGE_APPENDED,
   VDFS_EVENT_KIND,
-  VDFS_ROOT,
   VDFS_STATUS_ACTIVE,
   actionFileOf,
   isVdfsDir,
@@ -89,7 +89,7 @@ const selectedMemo = new Map<string, string>()
 const VDFS_PAGE_SIZE = 100
 
 export interface UseVdfsOptions {
-  /** 绑定的数据地址（如 `.vdfs` 或 `.vdfs/session/<id>`）；变化 = 整体重载 */
+  /** 绑定的数据地址（如 `<根>` 或 `<根>/session/<id>`）；变化 = 整体重载 */
   addr: Ref<string>
 }
 
@@ -391,7 +391,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   // 判据只用**访问位**与**地址空间**，不涉及任何资源类型：
   // - 可写位 `w` ⇒ 可删除；
   // - 重命名 = 在同一地址空间内移动。只有物理半边（工作目录文件）由文件系统
-  //   provider 承载 `move`；虚拟半边（`.vdfs` 系统资源）的各插件 provider 一律
+  //   provider 承载 `move`；虚拟半边（`<根>` 系统资源）的各插件 provider 一律
   //   没有实现它，给入口只会换来一个必然报错的按钮——故只对物理地址给。
   //
   // 草稿（新建态）两者都不给：还没落盘的东西既无从删除，也无从改名。
@@ -542,7 +542,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   //
   // 当前目录节点声明自己能新建哪些类型（`new_types`）；前端只负责「选类型 +
   // 进入详情页」，不认识任何具体类型——创建语义由 provider 自持。
-  // `.vdfs/session` 这类子目录节点由后端合成时携带其 new_types，因此无需任何
+  // `<根>/session` 这类子目录节点由后端合成时携带其 new_types，因此无需任何
   // 「按目录名回退」的特判。
   //
   // **新建 = 选中一张草稿节点**，与「选中一项」走同一条详情通道：同一个
@@ -702,11 +702,11 @@ export function useVdfs(opts: UseVdfsOptions) {
   watch(
     cwd,
     (next, prev) => {
-      // `.vdfs` 根不在任何 provider 身上、无实时能力；跳过 watch/unwatch，否则后端报
+      // 虚拟根不在任何 provider 身上、无实时能力；跳过 watch/unwatch，否则后端报
       // 「目录不是可操作节点」（见服务器日志 vdfs/watch / vdfs/unwatch 的 ERROR）。
-      if (prev && prev !== VDFS_ROOT && prev !== next) void unwatchVdfs(prev)
+      if (prev && prev !== vdfsRoot() && prev !== next) void unwatchVdfs(prev)
       watched = next
-      if (next !== VDFS_ROOT) void watchVdfs(next)
+      if (next !== vdfsRoot()) void watchVdfs(next)
     },
     { immediate: true }
   )
@@ -717,7 +717,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   onBeforeUnmount(() => {
     unsubBus()
     if (refreshTimer) clearTimeout(refreshTimer)
-    if (watched && watched !== VDFS_ROOT) void unwatchVdfs(watched)
+    if (watched && watched !== vdfsRoot()) void unwatchVdfs(watched)
   })
 
   return {

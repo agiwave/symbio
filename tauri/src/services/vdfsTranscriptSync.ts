@@ -8,7 +8,7 @@
  * （前端那侧的帧类型描述 `ChatEventType` / `ChatEvent` 已随 `services/model.ts`
  * 一并退役——本模块改按**地址**分派后，前端不再需要这条通道的类型。）
  *
- * 现在它只是一张**列表**：地址 `.vdfs/session/<sid>/消息`，每一项是一条消息；
+ * 现在它只是一张**列表**：地址 `<根>/session/<sid>/消息`，每一项是一条消息；
  * 流式输出是列表项的**追加型变更**（`appended`）。于是读路径与实时路径都归
  * VDFS，`kind = "vdfs"` 成为消息的唯一变更通道。
  *
@@ -23,7 +23,7 @@
  * 前端不再需要 `eventBus.replayBuffer` 那套防乱序缓冲。
  * 见 `symbio/src/plugins/session/docs/node-state-streaming.md` §5.1。
  *
- * 会话叶子（`.vdfs/session/<sid>`，即运行态的承载者）由 **store 自己**的
+ * 会话叶子（`<根>/session/<sid>`，即运行态的承载者）由 **store 自己**的
  * 订阅作用域处理（`stores/sessions.ts::applySessionNode`）——清单是它的状态，
  * 就地收敛零回读；本模块只负责转写。
  *

@@ -14,7 +14,7 @@
 
 已扎实的部分（不建议动）：
 
-- 地址口径前后端同源（`.vdfs` 为根），路径代数只有 `schemas/vdfs.ts` 一份；
+- 地址口径前后端同源（`<根>` 为根），路径代数只有 `schemas/vdfs.ts` 一份；
 - `services/vdfs.ts` 是纯机械翻译层，零资源知识；`services/session.ts` 已退化为
   纯 VDFS 门面（238 行，无自有路由表），不是"绕过机制"；
 - `useVdfs.ts` 是唯一数据层，草稿节点 / 有界列表 / 追加型增量 / 订阅绑定都在一处；
@@ -156,7 +156,7 @@ soundSettings store），于是这两个页面变成纯定义，组件归零。
 - **文档漂移**：`vdfs-frontend.md` §2.2 已实现表未含 `VdfsCard` /
   `Workbench` / `VdfsMessageDetail`；§7.1 的 S3 记「消息（转写）不经 VDFS」，
   而现状是消息已在 VDFS 上（`VDFS_EXT_MESSAGE` + `services/vdfsTranscriptSync.ts`
-  + `.vdfs/session/<id>/消息/<mid>`）。§7 是进度档案、按约定不改写，
+  + `<根>/session/<id>/消息/<mid>`）。§7 是进度档案、按约定不改写，
   但建议在 §2.2 补一行现状校正，避免读者以 S3 为准。
 - `VdfsActions.vue` 注释提到的第三类消费方（"自定义渲染器经
   mechanism-actions prop 接收"）目前无实例。

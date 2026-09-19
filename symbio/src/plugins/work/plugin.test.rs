@@ -5,9 +5,10 @@
 //! 重点钉住：**选了工作区才有记忆**（没选工作区时什么都不注入），以及开关关掉
 //! 只影响注入、不影响 VDFS 挂载点。
 
-use super::memory::MEMORY_VDFS_ADDRESS;
 use super::*;
-use crate::symbio_core::{CapabilityVisitor, DefaultToolVisitor, InvokeRequestExt, AGENTS_FILE};
+use crate::symbio_core::{
+    CapabilityVisitor, DefaultToolVisitor, InvokeRequestExt, AGENTS_FILE, VDFS_PARENT_ADDR,
+};
 use tempfile::TempDir;
 
 /// 构造带能力收集器的上下文；`workdir` 为 `None` 即「没选工作区」
@@ -17,6 +18,8 @@ fn ctx(workdir: Option<&str>) -> (Arc<dyn InvokeRequest>, Arc<DefaultToolVisitor
         ctx.set(WORKDIR, w.to_string());
     }
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/work".to_string());
     let visitor = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
@@ -74,7 +77,7 @@ async fn empty_workspace_still_injects_the_empty_hint() {
         "空记忆也要教会模型怎么建立记忆：{}",
         segs[0].1
     );
-    assert!(segs[0].1.contains(MEMORY_VDFS_ADDRESS));
+    assert!(segs[0].1.contains("@vfs/work/AGENTS.md"));
 }
 
 #[tokio::test]
@@ -89,7 +92,7 @@ async fn workspace_memory_is_injected_verbatim() {
     let segs = visitor.list_system_prompts().await;
     assert_eq!(segs.len(), 1);
     assert!(segs[0].1.contains("本仓库用中文提交信息。"));
-    assert!(segs[0].1.contains(MEMORY_VDFS_ADDRESS));
+    assert!(segs[0].1.contains("@vfs/work/AGENTS.md"));
     assert!(segs[0].1.contains("【工作区记忆】"));
 }
 

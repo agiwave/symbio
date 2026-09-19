@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
-// ==================== 配置文档（`.vdfs/local/PLUGIN.yml`） ====================
+// ==================== 配置文档（`<根>/local/PLUGIN.yml`） ====================
 
 /// 本地工具配置的定义 —— **定义由配置的拥有者产出**。
 ///
@@ -187,7 +187,7 @@ impl Capability for SecureToolWrapper {
 #[derive(Clone)]
 pub struct LocalPlugin {
     config: Arc<RwLock<LocalConfig>>,
-    /// 配置文件的呈现与校验（`.vdfs/local/PLUGIN.yml`）——节点形状 / 校验 / 落盘
+    /// 配置文件的呈现与校验（`<根>/local/PLUGIN.yml`）——节点形状 / 校验 / 落盘
     /// 都在它手上，落盘写的是**本插件自己目录里的**文件
     config_file: ConfigFile,
     tool_impls: Arc<Vec<Arc<dyn Capability>>>,
@@ -333,7 +333,7 @@ impl Plugin for LocalPlugin {
     }
 }
 
-// ==================== VDFS：配置文档（`.vdfs/local/PLUGIN.yml`） ====================
+// ==================== VDFS：配置文档（`<根>/local/PLUGIN.yml`） ====================
 //
 // 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文件」。
 // 节点形状、定义校验、落盘都在 [`ConfigFile`] 里，这里只做寻址分流。
@@ -359,7 +359,7 @@ impl vdfs::VdfsProvider for LocalPlugin {
 
     /// **隐藏**：本挂载点的全部内容就是一份配置文档，没有用户资源可浏览，
     /// 所以它在父目录的列表里不出现（与文件 / 目录的隐藏属性同一件事）。
-    /// 挂载本身照旧——按路径（`.vdfs/local/PLUGIN.yml`）仍完全可寻址。
+    /// 挂载本身照旧——按路径（`<根>/local/PLUGIN.yml`）仍完全可寻址。
     fn root_hidden(&self) -> bool {
         true
     }

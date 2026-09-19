@@ -9,6 +9,7 @@ use super::*;
 use crate::plugins::session::test_dir;
 use crate::symbio_core::{
     CapabilityVisitor, DefaultToolVisitor, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
+    VDFS_PARENT_ADDR,
 };
 
 /// 验证 session 存储目录**只**从 HomedirRegistry 派生，不依赖 config；
@@ -102,7 +103,7 @@ fn default_max_tool_rounds_is_effectively_unlimited() {
     );
 }
 
-// ==================== 配置文档（`.vdfs/session/PLUGIN.yml`） ====================
+// ==================== 配置文档（`<根>/session/PLUGIN.yml`） ====================
 
 /// **定义与配置同源**：面板字段的默认值一律来自 `SessionConfig::default()`，
 /// 且 serde 默认值函数与 `Default` impl 不漂移（两处各自书写必然漂移）。
@@ -136,7 +137,7 @@ fn config_definition_defaults_come_from_session_config() {
     );
 }
 
-// ==================== 会话记忆（`.vdfs/session/<id>/AGENTS.md`）====================
+// ==================== 会话记忆（`<根>/session/<id>/AGENTS.md`）====================
 //
 // 机制（读写 / 限容 / 截断 / 排版）已在 `symbio_core::memory.test.rs` 与
 // `session/memory.test.rs` 钉住；这里只测**收集期**这一侧：什么情况下注入、
@@ -149,6 +150,8 @@ fn collect_ctx(session_id: Option<&str>) -> (Arc<dyn InvokeRequest>, Arc<Default
         ctx.set(SESSION_ID, sid.to_string());
     }
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/session".to_string());
     let visitor = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
@@ -226,7 +229,7 @@ async fn empty_memory_still_teaches_where_and_how_big() {
     let seg = memory_segment(&visitor).await.expect("有会话就应注入");
     assert!(seg.contains("【会话记忆】"), "{seg}");
     assert!(
-        seg.contains(&format!(".vdfs/session/{id}/AGENTS.md")),
+        seg.contains(&format!("@vfs/session/{id}/AGENTS.md")),
         "地址必须真实可达：{seg}"
     );
     assert!(

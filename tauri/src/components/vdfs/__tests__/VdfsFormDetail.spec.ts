@@ -20,7 +20,7 @@ import type { DetailAction, DetailDefinition, VdfsNode } from '@/schemas/vdfs'
 
 function formNode(schema: Partial<DetailDefinition>): VdfsNode {
   return {
-    path: '.vdfs/model/p1',
+    path: '@vfs/model/p1',
     name: 'p1',
     title: 'P1',
     kind: 'model',

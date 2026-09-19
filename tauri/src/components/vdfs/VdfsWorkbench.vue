@@ -14,7 +14,7 @@
     呈现方式由宿主决定——通常是 push 一个新地址页（同一控件承接）；
   - **宿主件**：`rail-header`（左上角，如返回键 / logo）、`rail-footer`
     （左下角，如系统目录入口）由宿主注入，控件不关心宿主是谁——首页绑
-    `.vdfs`、会话/智能体内部页绑 `.vdfs/session/<id>`，对控件毫无区别。
+    `<根>`、会话/智能体内部页绑 `<根>/session/<id>`，对控件毫无区别。
 -->
 <template>
   <Workbench
@@ -205,7 +205,7 @@ import {
 } from '@/schemas/vdfs'
 
 const props = defineProps<{
-  /** 绑定的 vdfs 数据地址（如 `.vdfs` 或 `.vdfs/session/<id>`）；变化 = 整体重载 */
+  /** 绑定的 vdfs 数据地址（如 `<根>` 或 `<根>/session/<id>`）；变化 = 整体重载 */
   addr: string
 }>()
 

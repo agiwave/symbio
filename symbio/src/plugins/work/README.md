@@ -11,7 +11,7 @@
 | 交出什么 | 机制 | 缺了会怎样 |
 |---|---|---|
 | 系统提示词片段 | `CapabilityVisitor::register_system_prompt` | 模型不知道记忆存在，等于没有 |
-| VDFS 挂载点 `.vdfs/work` | `CapabilityVisitor::register_vdfs_provider` | 只能读不能改，记忆永远长不大 |
+| VDFS 挂载点 `<根>/work` | `CapabilityVisitor::register_vdfs_provider` | 只能读不能改，记忆永远长不大 |
 
 两者都在 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 这一次广播里交出——与工具、模型服务、其它挂载点共用同一次收集，不新增任何收集通道。
 
@@ -19,7 +19,7 @@
 
 ```text
 {workdir}/AGENTS.md                      记忆本体（行业通行约定，随仓库可版本化）
-.vdfs/work/AGENTS.md                     可编辑地址（模型与用户共用）
+<根>/work/AGENTS.md                     可编辑地址（模型与用户共用）
 {homedir}/work/PLUGIN.yml        本插件配置（两道闸门开多大）
 ```
 
@@ -35,7 +35,7 @@
 
 ## 路由
 
-**无自有路由**：`route()` 直接返回 `NotFound` 并指引到 VDFS。记忆的读 / 写 / 编辑全部由 `.vdfs/work/AGENTS.md` 承接——宿主与模型走同一条链路，不为「记忆」再造一条协议。
+**无自有路由**：`route()` 直接返回 `NotFound` 并指引到 VDFS。记忆的读 / 写 / 编辑全部由 `<根>/work/AGENTS.md` 承接——宿主与模型走同一条链路，不为「记忆」再造一条协议。
 
 记忆**不可删除**（`delete` 恒 `Forbidden`）：删除即丢失全部长期事实，而抹掉之后没有东西能把它找回来。要清空就写入空内容——那是一次可读、可审、可撤销的显式动作。
 

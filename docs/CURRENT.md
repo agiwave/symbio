@@ -13,22 +13,22 @@
 
 | 插件目录 | 注册名 | VDFS 挂载点 | 自有路由（静态可提取） | 实现的核心 trait | 配置文件 | 模块 README |
 |---|---|---|---|---|---|---|
-| `agent` | `agent` | .vdfs/agent · （运行期动态） | （动态）已无自有路由（一律 `NotFound` 并指引到 `.vdfs/agent`） | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
+| `agent` | `agent` | <根>/agent · （运行期动态） | （动态）已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`） | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `composite` | `composite` | — | （动态）容器：按配置挂载的子插件名分发，运行期动态 | `Plugin` · `VdfsProvider` | — | ✓ |
 | `event_bus` | `event_bus` | — | `event_bus/pending/snapshot` · `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
-| `gateway` | `gateway` | .vdfs/gateway | `gateway/status` | `Plugin` | ✓ | ✓ |
+| `gateway` | `gateway` | <根>/gateway | `gateway/status` | `Plugin` | ✓ | ✓ |
 | `home` | `home` | — | `home/get_homedir` · `home/reload` · `work/get_workspace` · `work/set_workspace` | `Plugin` | — | ✓ |
 | `hook` | `hook` | — | `hook/fire` · `hook/list` · `hook/register` | `Plugin` | — | ✓ |
-| `local` | `local` | .vdfs/local | （动态）`local/<工具短名>`——按已注册工具名分发（与 §2 的工具清单同一份集合） | `Capability` · `Plugin` | ✓ | ✓ |
-| `mcp` | `mcp` | .vdfs/mcp | — | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
-| `model` | `model` | .vdfs/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
-| `session` | `session` | .vdfs/session | `session/chat/abort` · `session/chat/send` · `session/get_messages` · `session/update` | `Capability` · `Plugin` | ✓ | ✓ |
-| `setting` | `setting` | .vdfs/setting | — | `Plugin` · `VdfsProvider` | — | ✓ |
-| `skill` | `skill` | .vdfs/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
-| `telegram` | `telegram` | .vdfs/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
-| `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，13 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
-| `web` | `web` | .vdfs/web | — | `Capability` · `Plugin` | ✓ | ✓ |
-| `work` | `work` | .vdfs/work | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
+| `local` | `local` | <根>/local | （动态）`local/<工具短名>`——按已注册工具名分发（与 §2 的工具清单同一份集合） | `Capability` · `Plugin` | ✓ | ✓ |
+| `mcp` | `mcp` | <根>/mcp | — | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `model` | `model` | <根>/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `session` | `session` | <根>/session | `session/chat/abort` · `session/chat/send` · `session/get_messages` · `session/update` | `Capability` · `Plugin` | ✓ | ✓ |
+| `setting` | `setting` | <根>/setting | — | `Plugin` · `VdfsProvider` | — | ✓ |
+| `skill` | `skill` | <根>/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `telegram` | `telegram` | <根>/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
+| `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，14 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `web` | `web` | <根>/web | — | `Capability` · `Plugin` | ✓ | ✓ |
+| `work` | `work` | <根>/work | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
 
 > 读表须知：
 > - **挂载点** = 该插件在 `traverse` 里 `register_vdfs_provider(目录名, provider)` 的目录名；
@@ -39,7 +39,7 @@
 >   目录名才是真正的路由前缀；`PluginMeta` 首参是只写字段，不参与路由。
 >   标「（动态）」的是按运行期规则分发、无法静态枚举的。
 >   漏项与歧义以 [ROUTES.md](./reference/ROUTES.md) 为准。
-> - **配置文件** = 该插件调用过 `announce_configurable`（配置就是 `.vdfs/<挂载点>/PLUGIN.yml`，
+> - **配置文件** = 该插件调用过 `announce_configurable`（配置就是 `<根>/<挂载点>/PLUGIN.yml`，
 >   读写走 `vdfs/read` / `vdfs/write`，**没有配置专用路由**）。
 
 ## 2. LLM 可见工具（`CapabilityMeta.name` 短名 → 贡献插件）
@@ -87,7 +87,7 @@
 
 ### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）
 
-- **前端链路**（13 个，计数有测试锁死）：`vdfs/list` · `vdfs/tree` · `vdfs/stat` · `vdfs/read` · `vdfs/edit` · `vdfs/search` · `vdfs/write` · `vdfs/delete` · `vdfs/mkdir` · `vdfs/move` · `vdfs/watch` · `vdfs/unwatch` · `vdfs/action`
+- **前端链路**（14 个，计数有测试锁死）：`vdfs/root` · `vdfs/list` · `vdfs/tree` · `vdfs/stat` · `vdfs/read` · `vdfs/edit` · `vdfs/search` · `vdfs/write` · `vdfs/delete` · `vdfs/mkdir` · `vdfs/move` · `vdfs/watch` · `vdfs/unwatch` · `vdfs/action`
 - **LLM 工具链路**（10 个）：`vdfs_delete` · `vdfs_edit` · `vdfs_list` · `vdfs_mkdir` · `vdfs_move` · `vdfs_read` · `vdfs_search` · `vdfs_stat` · `vdfs_tree` · `vdfs_write`
   （`watch` / `unwatch` / `action` 不经工具暴露，故两条链路不是一一对应）
 
@@ -106,10 +106,10 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio\src` | 197 文件 / 48991 行 | 53 文件 / 18425 行 |
+| `symbio\src` | 198 文件 / 49254 行 | 53 文件 / 18536 行 |
 | `cli\src` | 4 文件 / 1067 行 | 0 文件 / 78 行 |
 | `tauri\src-tauri\src` | 3 文件 / 347 行 | 0 文件 / 0 行 |
-| `tauri\src` | 92 文件 / 18658 行 | 37 文件 / 6995 行 |
+| `tauri\src` | 93 文件 / 18764 行 | 44 文件 / 8292 行 |
 
 ### 5.2 宿主接缝（前端到底有多大）
 
@@ -120,4 +120,4 @@
 
 ---
 
-> 生成时间：2026-09-19 03:55:55 UTC · 源：`git rev-parse HEAD` = `33d3eec`
+> 生成时间：2026-09-19 06:00:41 UTC · 源：`git rev-parse HEAD` = `f0b864d`

@@ -18,7 +18,14 @@ use serde_json::Value;
 
 // ==================== 协议操作路径 ====================
 
-/// 列目录（一级；`.vdfs` 即资源类别清单）
+/// **进入地址空间**：列出虚拟根——**不给地址**。
+///
+/// 根叫什么归本插件（`fs::VDFS_ADDR_ROOT`），消费方不该知道它。于是需要一个
+/// 「无地址入参」的入口：回包（[`VdfsListResponse`]）里的 `path` 即**根地址**，
+/// 消费方拿到后把它当**运行期数据**持有，之后一律从父地址往下拼（像目录一样），
+/// 不再问根。前端启动期调一次即可。
+pub const VDFS_ROOT: &str = "vdfs/root";
+/// 列目录（一级）
 pub const VDFS_LIST: &str = "vdfs/list";
 /// 树状遍历（递归；节点的 `t` 位控制可遍历性）
 pub const VDFS_TREE: &str = "vdfs/tree";
@@ -47,6 +54,7 @@ pub const VDFS_ACTION: &str = "vdfs/action";
 
 /// 全部 VDFS 操作（宿主据此判定是否为本协议请求）
 pub const VDFS_OPS: &[&str] = &[
+    VDFS_ROOT,
     VDFS_LIST,
     VDFS_TREE,
     VDFS_STAT,
@@ -191,12 +199,13 @@ pub struct VdfsSearchRequest {
 
 // ==================== 响应 ====================
 
-/// `vdfs/list` 响应
+/// `vdfs/list` 响应；`vdfs/root` 复用同一形状——后者的 `path` 就是**根地址**
+/// （调用方没给地址，由宿主填上它自己挂的那个名字）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsListResponse {
-    /// 被列出目录的全路径
+    /// 被列出目录的全路径（`vdfs/root` 时为虚拟根地址）
     pub path: String,
-    /// 目录自身节点（`.vdfs` 时为虚拟根）
+    /// 目录自身节点
     pub node: VdfsNode,
     pub items: Vec<VdfsNode>,
 }
@@ -252,7 +261,7 @@ pub struct VdfsSearchResult {
 /// 总线上的数据变更事件。
 ///
 /// provider 侧的 [`VdfsChange`]只有子树内相对路径；门面（[`super::fs::UnifiedFs`]）
-/// 在投递前把路径补成**对外展示地址**（`.vdfs/<类别>/…` 或工作目录相对地址），
+/// 在投递前把路径补成**对外展示地址**（`.vdfsv2/<类别>/…` 或工作目录相对地址），
 /// 形成本形状后经事件总线下发前端。消费者按 `path` 前缀自行分流、防抖重拉
 /// （`subscribe({ kind: 'vdfs' })`）。
 ///
@@ -290,7 +299,7 @@ mod tests {
 
     #[test]
     fn ops_are_unique_and_prefixed() {
-        assert_eq!(VDFS_OPS.len(), 13, "新增协议操作请同步本计数与文档");
+        assert_eq!(VDFS_OPS.len(), 14, "新增协议操作请同步本计数与文档");
         for op in VDFS_OPS {
             assert!(op.starts_with("vdfs/"), "协议路径必须以 vdfs/ 开头：{op}");
         }

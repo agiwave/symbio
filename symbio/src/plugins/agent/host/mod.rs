@@ -14,7 +14,7 @@
 //! | [`scope`] | `SubAgentVisitor` 代理层：把子树的注册加 `agent/<id>/` 前缀并进系统树（§8.2） |
 //! | [`subagent`] | `agent_run`（子智能体委托）能力 |
 //! | [`detail`] | bundle 概览 / 详情表单的呈现定义 |
-//! | [`vdfs`] | VDFS 挂载点（`.vdfs/agent/…`，本插件直接 `impl VdfsProvider`） |
+//! | [`vdfs`] | VDFS 挂载点（`<根>/agent/…`，本插件直接 `impl VdfsProvider`） |
 //!
 //! **本层没有任何自有协议路由**：bundle 的浏览 / 导入 / 删除 / 导出分别由
 //! `vdfs/list`、`vdfs/write`（二进制）、`vdfs/delete`、节点动作 `export` 承担，

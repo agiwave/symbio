@@ -5,7 +5,7 @@
 //! 列表后做**与原生 `dir_list` 一致的 ignore 过滤**，封装成
 //! `{entries:[{name,type,size,modified}], truncated, count, message}` 形状。
 //!
-//! **虚拟目录 `.vdfs`**：系统资源类别统一挂接在此目录之下；对 `.vdfs` 列目录
+//! **虚拟目录 `.vdfsv2`**：系统资源类别统一挂接在此目录之下；对 `.vdfsv2` 列目录
 //! 即返回当前可访问的全部类别，无需独立工具。
 
 use super::{tool, ToolVdfs};
@@ -34,7 +34,7 @@ impl Capability for ListTool {
     fn meta(&self) -> CapabilityMeta {
         tool(
             "vdfs_list",
-            "列出目录下的直接子项（文件与子目录）。每项返回 name / type（directory|file）/ size / modified；支持 ignore 按名称 glob 过滤（如 ['*.tmp','node_modules']）。与原生 dir_list 一致。系统资源类别挂接在虚拟目录 '.vdfs' 下——列 '.vdfs' 可枚举当前可访问的全部类别（如 setting/session 等），列 '.vdfs/<类别>/...' 深入具体资源。",
+            "列出目录下的直接子项（文件与子目录）。每项返回 name / type（directory|file）/ size / modified；支持 ignore 按名称 glob 过滤（如 ['*.tmp','node_modules']）。与原生 dir_list 一致。系统资源类别挂接在虚拟目录 '.vdfsv2' 下——列 '.vdfsv2' 可枚举当前可访问的全部类别（如 setting/session 等），列 '.vdfsv2/<类别>/...' 深入具体资源。",
             json!({
                 "type": "object",
                 "properties": {
@@ -47,7 +47,7 @@ impl Capability for ListTool {
                 },
                 "required": ["path"]
             }),
-            vec!["{\"path\":\"/\"}", "{\"path\":\".vdfs\"}", "{\"path\":\".\",\"ignore\":[\"target\",\"node_modules\"]}"],
+            vec!["{\"path\":\"/\"}", "{\"path\":\".vdfsv2\"}", "{\"path\":\".\",\"ignore\":[\"target\",\"node_modules\"]}"],
             None,
         )
     }

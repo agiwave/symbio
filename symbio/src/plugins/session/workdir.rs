@@ -1,4 +1,4 @@
-//! 会话工作目录的 VDFS 场景实现（`.vdfs/session/<id>/工作目录/<rel>`）
+//! 会话工作目录的 VDFS 场景实现（`<根>/session/<id>/工作目录/<rel>`）
 //!
 //! 本模块把**会话工作目录**的文件系统层级表达为 VDFS 节点：目录 → 只读
 //! （`l`，可下钻），文件 → 可读写（`rw`）。列 / 读 / 写 / 删四个函数是
@@ -257,7 +257,7 @@ pub struct WorkdirWatchManager {
     ///
     /// 同一份目录树场景只服务 VDFS 机制：文件变化时把容器 id 翻译成 VDFS 路径
     /// 再投递进**会话订阅者共用的那张表**（[`ChangeSubscriptions::notify`]），
-    /// 使 `.vdfs` 页面不必另开一套监听。投递在表内收敛为恰好一次，
+    /// 使 `<根>` 页面不必另开一套监听。投递在表内收敛为恰好一次，
     /// 与前端订阅了几条路径无关。
     vdfs_subs: std::sync::Mutex<Option<Arc<ChangeSubscriptions>>>,
 }
@@ -271,7 +271,7 @@ impl WorkdirWatchManager {
     /// 注入 VDFS 变更订阅表（VDFS provider 构造期调用一次）。
     ///
     /// 未注入时 VDFS 侧不感知（目录树变化仍只发会话频道的粗粒度 `data` 事件）；
-    /// 注入后同一批事件额外投递为 [`VdfsChange`]，`.vdfs` 页面即可实时刷新。
+    /// 注入后同一批事件额外投递为 [`VdfsChange`]，`<根>` 页面即可实时刷新。
     pub fn set_vdfs_subs(&self, subs: Arc<ChangeSubscriptions>) {
         if let Ok(mut slot) = self.vdfs_subs.lock() {
             *slot = Some(subs);

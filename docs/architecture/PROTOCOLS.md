@@ -119,7 +119,7 @@ pub trait InvokeRequest: Send + Sync {
 
 | 键 | 类型 | 用途 |
 |----|------|------|
-| `PATH` | String | 目标路径 (如 `session/chat/send`；资源类走 `vdfs/*` + `.vdfs/…` 地址) |
+| `PATH` | String | 目标路径 (如 `session/chat/send`；资源类走 `vdfs/*` + `<根>/…` 地址) |
 | `PAYLOAD` | Value | 交互载荷数据 |
 | `WORKDIR` | String | 当前工作区根路径 |
 | `SESSION_ID` | String | 会话唯一标识 |

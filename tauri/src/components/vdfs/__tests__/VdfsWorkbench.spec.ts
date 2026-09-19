@@ -62,7 +62,7 @@ const BUNDLE: VdfsNewType = { ext: 'zip', title: '整包', source: 'file' }
 
 function makeNode(name: string): VdfsNode {
   return {
-    path: `.vdfs/session/${name}`,
+    path: `@vfs/session/${name}`,
     name,
     title: name,
     kind: 'session',
@@ -80,7 +80,7 @@ function installStub(opts: { types?: VdfsNewType[]; selected?: VdfsNode | null }
     navItems: computed(() => []),
     selectDir: vi.fn(),
     selectedName: ref<string | null>(null),
-    cwd: ref('.vdfs'),
+    cwd: ref('@vfs'),
     title: computed(() => '资源'),
     items: ref<VdfsNode[]>([]),
     loading: ref(false),
@@ -133,7 +133,7 @@ function actionLabels(w: VueWrapper): string[] {
 }
 
 function bench() {
-  return mount(VdfsWorkbench, { props: { addr: '.vdfs' } })
+  return mount(VdfsWorkbench, { props: { addr: '@vfs' } })
 }
 
 /** header 上的「新建」按钮（title 随类型数变化） */

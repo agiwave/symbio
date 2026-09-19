@@ -21,8 +21,8 @@
 - `{plugin}` - 目标插件 (如 `agent`, `session`, `model`)
 - `{action}` - 具体能力 (如 `chat`, `list`, `status`)
 
-> **资源与配置都不走这条语法**：资源统一经 `vdfs/*`（`.vdfs/…` 寻址），配置就是
-> 资源树里的一个文档（`.vdfs/<插件>/PLUGIN.yml`）。本文件的 `{plugin}/*` 路由只剩
+> **资源与配置都不走这条语法**：资源统一经 `vdfs/*`（`<根>/…` 寻址），配置就是
+> 资源树里的一个文档（`<根>/<插件>/PLUGIN.yml`）。本文件的 `{plugin}/*` 路由只剩
 > 那些**不是资源**的能力（会话编排、模型推理、网关状态…）。
 
 > `worker` 前缀可省略也可显式写出：`session/chat/send` 与 `worker/session/chat/send` 等价
@@ -43,7 +43,7 @@
 > 都已删除）。
 >
 > 配置现在就是一个**普通的可寻址文档**：`<插件目录>/PLUGIN.yml`，对外地址
-> `.vdfs/<插件>/PLUGIN.yml`（`ext = form`）。读写用的就是 `vdfs/read` /
+> `<根>/<插件>/PLUGIN.yml`（`ext = form`）。读写用的就是 `vdfs/read` /
 > `vdfs/write`——与任何其它资源同一条链路、同一套寻址，因此前端与 LLM 用同一种
 > 方式改配置。定义与校验归**配置的拥有者**，默认值从它自己的 `Default` 读出。
 > 见 [design/vdfs.md](../design/vdfs.md) §3.4。
@@ -51,9 +51,9 @@
 ### 资源（VDFS）
 
 资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址
-（`.vdfs/<插件名>/…`，操作
+（`<根>/<插件名>/…`，操作
 `vdfs/list|tree|stat|read|write|mkdir|delete|move|edit|search|watch|unwatch|action`）。
-每个 `.vdfs` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘（需要持久化的那些）
+每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘（需要持久化的那些）
 经 `symbio/src/providers/vdfs_service/`——见 [design/vdfs.md](../design/vdfs.md) §13.4。
 历史上的 `{plugin}/entities/*` 一族端点自 S11 起无任何路由，本文件不再登记。
 
@@ -81,7 +81,7 @@
 
 ### 管理路由（**全部下线**）
 
-> Bundle 的**访问 / 新建 / 删除 / 导出已全部由 VDFS 承担**（`.vdfs/agent/…`）：
+> Bundle 的**访问 / 新建 / 删除 / 导出已全部由 VDFS 承担**（`<根>/agent/…`）：
 > `vdfs/list` / `vdfs/read` / `vdfs/write`（新建类型 `zip`，即整包导入）/
 > `vdfs/delete` / 节点动作 `export`（`vdfs/action`）。
 > 故 `bundle/list|get|upload|delete|preview` 已于 S12 删除、`bundle/export`
@@ -130,12 +130,12 @@
 >
 > | 操作 | 入口 |
 > |---|---|
-> | 列会话清单 | `vdfs/list(.vdfs/session)` |
-> | 读整份转写 | `vdfs/read(.vdfs/session/<id>)` |
-> | 新建会话 | `vdfs/write(.vdfs/session, { create: true })` |
-> | **删除会话** | `vdfs/delete(.vdfs/session/<id>)` |
-> | **改 metadata / 标题** | `vdfs/write(.vdfs/session/<id>)` |
-> | **改写某条消息** | `vdfs/write(.vdfs/session/<id>/消息/<mid>)` |
+> | 列会话清单 | `vdfs/list(<根>/session)` |
+> | 读整份转写 | `vdfs/read(<根>/session/<id>)` |
+> | 新建会话 | `vdfs/write(<根>/session, { create: true })` |
+> | **删除会话** | `vdfs/delete(<根>/session/<id>)` |
+> | **改 metadata / 标题** | `vdfs/write(<根>/session/<id>)` |
+> | **改写某条消息** | `vdfs/write(<根>/session/<id>/消息/<mid>)` |
 > | **删该条及其后** | `vdfs/action(…/消息/<mid>, "truncate")` |
 > | **清空历史** | `vdfs/action(…/消息, "clear")` |
 >
@@ -149,7 +149,7 @@
 > 见 [`symbio/src/plugins/session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md) §5.2。
 >
 > `session/config/get` / `config/set` **已下线**：会话配置在
-> `.vdfs/session/PLUGIN.yml`（`ext = form`），读写走 `vdfs/read` / `vdfs/write`。
+> `<根>/session/PLUGIN.yml`（`ext = form`），读写走 `vdfs/read` / `vdfs/write`。
 
 ### 聊天流程
 
@@ -171,7 +171,7 @@
 > 在会话循环内直连调用，不占路由；配置读写全在 VDFS 上）。本插件不再有路由条目。
 
 历史入口（**均已下线**，列此仅作迁移指引）：`model/chat` 收归 session 直连（改用
-`session/chat/send`）；`model/config/*` 迁到 `.vdfs/model/<id>` 与 `.vdfs/model/PLUGIN.yml`；
+`session/chat/send`）；`model/config/*` 迁到 `<根>/model/<id>` 与 `<根>/model/PLUGIN.yml`；
 `model/status` 改由节点动作 `vdfs/action { action: "test" }` 返回；`model/chat_sync`
 本就是 NotImplemented 占位。
 
@@ -245,7 +245,7 @@
 | `skill/execute` | 按名称执行 Skill（载荷 `{name, args}`） |
 
 > `skill/config/get` / `config/set` **已下线**，且本插件**不设配置文档**——
-> 技能清单与内容不设私有路由：已安装技能经 `.vdfs/skill` 寻址
+> 技能清单与内容不设私有路由：已安装技能经 `<根>/skill` 寻址
 > （一个技能 = 一个目录，主文件 `SKILL.md`，条目内部可下钻）。
 
 ### Skill 结构
@@ -262,7 +262,7 @@ skills/<name>/
 
 > **本插件已无自有路由**：`mcp/config/get` / `config/set` 已下线，且**不设配置文档**
 > ——配置就是它的资源树。Server 清单与详情不设私有路由：注册 / 列举 / 启停 /
-> 连通性自检一律经 `.vdfs/mcp`（一个 server = 一个目录，主文件 `server.json`），
+> 连通性自检一律经 `<根>/mcp`（一个 server = 一个目录，主文件 `server.json`），
 > 「测试连接」是节点动作 `vdfs/action { action: "test" }`。
 
 ### MCP 配置
@@ -290,8 +290,8 @@ mcp_servers:
 | `telegram/stop_listener` | 停止后台监听 |
 | `telegram/status` | 运行状态 |
 
-> `telegram/config/get` / `config/set` **已下线**：本插件挂载 `.vdfs/telegram`，
-> 内容就是一份配置文档 `.vdfs/telegram/PLUGIN.yml`（`ext = form`），读写走
+> `telegram/config/get` / `config/set` **已下线**：本插件挂载 `<根>/telegram`，
+> 内容就是一份配置文档 `<根>/telegram/PLUGIN.yml`（`ext = form`），读写走
 > `vdfs/read` / `vdfs/write`。
 
 ---
@@ -315,7 +315,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 | `gateway/status` | 运行状态（是否启用、协议、监听地址与端口、是否已在监听） |
 
 > `gateway/config/get` / `config/set` **已下线**：配置就是
-> `.vdfs/gateway/PLUGIN.yml`（扁平键 `inbound_*`）。前端「设置」页点开的正是这份
+> `<根>/gateway/PLUGIN.yml`（扁平键 `inbound_*`）。前端「设置」页点开的正是这份
 > 表单；写入走 `vdfs/write` → `ConfigFile::apply` 落盘后，本插件在自己的 `write`
 > 里做副作用（**内部 stop + start 重建监听**）——机制不引入回调抽象。
 >
@@ -333,7 +333,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 > **本插件已无自有路由**：`setting/config/get` / `config/set` 与更早的
 > `setting/list` / `setting/get` 全部下线。
 >
-> 分区清单与取值分别由 `.vdfs/setting` 的 `vdfs/list` / `vdfs/read` 承担。
+> 分区清单与取值分别由 `<根>/setting` 的 `vdfs/list` / `vdfs/read` 承担。
 > 清单 = **各插件交出来的配置条目 + 自有分区**（`appearance` / `about`）：
 > 前者由各插件在 `traverse` 里经 `announce_configurable` 声明，容器用共享收集器
 > 收下并写回请求 ctx（见 [design/vdfs.md](../design/vdfs.md) §13.1）——因此

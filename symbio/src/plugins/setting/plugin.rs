@@ -7,7 +7,7 @@
 //! `route_config` 代理到 `<prefix>/config/get|set`。那是横向耦合的典型——
 //! 同一份配置有两个地址，定义与校验寄居在不是配置拥有者的插件里。
 //!
-//! 配置回到插件目录之后，四个分区各自回到拥有者名下（`.vdfs/<插件>/PLUGIN.yml`），
+//! 配置回到插件目录之后，四个分区各自回到拥有者名下（`<根>/<插件>/PLUGIN.yml`），
 //! 本插件只保留两个**前端自持**的分区：
 //!
 //! - `appearance`（外观）：取值与保存都在前端 store（即时生效），VDFS 侧无数据；
@@ -64,7 +64,7 @@ impl Plugin for SettingPlugin {
         Self::metadata()
     }
 
-    /// 本插件已无自有路由：分区清单与呈现由 `.vdfs/setting` 承担
+    /// 本插件已无自有路由：分区清单与呈现由 `<根>/setting` 承担
     /// （`setting/list` / `setting/get` 更早已随 VDFS 下线）。
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();

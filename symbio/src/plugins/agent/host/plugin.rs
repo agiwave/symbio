@@ -11,7 +11,7 @@
 //!   "没有人格的通用助手"；
 //! - **智能体自身的 `AGENTS.md`**：系统态 = `{homedir}/AGENTS.md`（[`super::instruction`]），
 //!   子智能体态 = `<agentdir>/AGENTS.md`（[`super::memory`]）。两者都归本插件——
-//!   读写面（`.vdfs/agent/…`）与注入面因此落在同一个所有者上。
+//!   读写面（`<根>/agent/…`）与注入面因此落在同一个所有者上。
 //!
 //! ⚠️ **指令文件不由子树里的插件实例解释**：子树按 bundle 目录扫描，里面没有
 //! `agent` 实例（本插件只在系统层存在，否则会自我嵌套）。而本插件恰恰是「认识
@@ -131,7 +131,7 @@ pub struct AgentPlugin {
     router: Option<std::sync::Weak<dyn Plugin>>,
     /// 生效配置（两道容量闸门的取值点）
     config: Arc<RwLock<AgentConfig>>,
-    /// 配置文件的呈现与校验（`.vdfs/agent/PLUGIN.yml`）
+    /// 配置文件的呈现与校验（`<根>/agent/PLUGIN.yml`）
     config_file: ConfigFile,
 }
 
@@ -321,7 +321,9 @@ impl AgentPlugin {
     ) {
         let store = BundleStore::new(self.config_file.dir().dir(), ctx.get(WORKDIR).as_deref());
         let memory = self.memory_store(&store, id).await;
-        match memory::segment(&memory, &memory::address(id)) {
+        // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
+        let address = crate::symbio_core::vdfs::absolute_addr(ctx, &memory::rel_path(id));
+        match memory::segment(&memory, &address) {
             Ok(Some(text)) => {
                 visitor
                     .register_system_prompt(memory::SEGMENT_NAME, text)
@@ -335,9 +337,15 @@ impl AgentPlugin {
     }
 
     /// 在系统层注入**系统智能体自身的** `AGENTS.md`（`{homedir}/AGENTS.md`）。
-    async fn contribute_instruction(&self, visitor: &Arc<dyn CapabilityVisitor>) {
+    async fn contribute_instruction(
+        &self,
+        ctx: &Arc<dyn InvokeRequest>,
+        visitor: &Arc<dyn CapabilityVisitor>,
+    ) {
         let store = self.instruction_store().await;
-        match instruction::segment(&store) {
+        // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
+        let address = crate::symbio_core::vdfs::absolute_addr(ctx, AGENTS_FILE);
+        match instruction::segment(&store, &address) {
             Ok(Some(text)) => {
                 visitor
                     .register_system_prompt(instruction::SEGMENT_NAME, text)
@@ -515,9 +523,9 @@ impl Plugin for AgentPlugin {
 
         // ── 系统智能体自身的指令（`{homedir}/AGENTS.md`）──
         // 与「选不选智能体」无关：它对**所有会话**生效，因此无条件注入。
-        self.contribute_instruction(&tool_visitor).await;
+        self.contribute_instruction(&ctx, &tool_visitor).await;
 
-        // ── VDFS 挂载点（`.vdfs/agent`）──
+        // ── VDFS 挂载点（`<根>/agent`）──
         // 本插件自身就是 provider：bundle 由 BundleStore 自管目录（工作区级 +
         // 全局级双层），列 / 读 / 写（整包导入）/ 删 / 导出 直接由
         // `impl VdfsProvider for AgentPlugin` 承载（见 `super::vdfs`）。
@@ -575,7 +583,7 @@ impl Plugin for AgentPlugin {
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         announce_configurable(&ctx, &self.config_file).await;
 
-        // 系统智能体自身的指令（`.vdfs/agent/AGENTS.md`）也是「本 agent 的修改」，
+        // 系统智能体自身的指令（`<根>/agent/AGENTS.md`）也是「本 agent 的修改」，
         // 因此进**设置**而非 agent 列表：复用挂载根里那份指令节点，按设置列表口径补
         // 真实地址（读写仍落在本插件的 AGENTS.md 上，设置页只列入口、不代管）。
         // 走的是既有 `ConfigurableVisitor` 通道——本插件只是多交一条节点，不动 symbio_core。
@@ -591,13 +599,15 @@ impl Plugin for AgentPlugin {
 
     /// 路由入口：**无自有协议**。
     ///
-    /// bundle 的浏览 / 导入 / 删除 / 导出全部由 VDFS 承接（`.vdfs/agent/…`）：
+    /// bundle 的浏览 / 导入 / 删除 / 导出全部由 VDFS 承接（`<根>/agent/…`）：
     /// `vdfs/list` / `vdfs/write`（二进制 = 导入）/ `vdfs/delete` / 节点动作
     /// `export`。因此这里不再有任何路由——插件只对宿主暴露装配能力。
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
+        // 绝对地址 = 上下文父地址 + 相对地址（协议级指路信息，封装入口统一）
         Err(PluginError::NotFound(format!(
-            "agent 无自有协议路由 `{path}`：bundle 一律经 VDFS 访问（.vdfs/agent/…）"
+            "agent 无自有协议路由 `{path}`：bundle 一律经 VDFS 访问（{}）",
+            crate::symbio_core::vdfs::absolute_addr(&ctx, &format!("{PLUGIN_AGENT}/…"))
         )))
     }
 }

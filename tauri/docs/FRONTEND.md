@@ -23,4 +23,4 @@ Vue 组件 → API 层 (invoke) → route_v2 / route_v2_send / route_v2_close �
 
 - **流式渲染**：会话视图按帧 `kind` 增量渲染（文本增量、工具调用、状态帧）。
 - **会话中断可见性**：遵循"存储层全量 / 会话层不过滤 Failed / 请求视图层附加中断说明"三层分工（见 `../symbio/src/plugins/session/README.md` 与 `../symbio/src/plugins/session/docs/turn-tool-mechanisms.md`）。
-- **VDFS 驱动**：Agent / Model / MCP 等一切资源的管理界面都只有一个协议、一套形状 —— 虚拟文件系统（`vdfs/*`，地址 `.vdfs/<插件名>/…`）。列表项与详情同为 `VdfsNode`，变更事件只有 `kind = 'vdfs'` 一条频道；规范见 `docs/design/vdfs.md`。
+- **VDFS 驱动**：Agent / Model / MCP 等一切资源的管理界面都只有一个协议、一套形状 —— 虚拟文件系统（`vdfs/*`，地址 `<根>/<插件名>/…`）。列表项与详情同为 `VdfsNode`，变更事件只有 `kind = 'vdfs'` 一条频道；规范见 `docs/design/vdfs.md`。

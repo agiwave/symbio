@@ -26,7 +26,7 @@
 | 分形路由唯一入口 | `root.route(ctx)`；入口参数是上下文键值对（`symbio_core/keys.rs`） | 服务只做"请求 → `SimpleRequest`"翻译，业务零改动 |
 | 必需插件清单 | `plugins/home/plugin.rs` 的 `SYSTEM_PLUGINS`，经 ctx 键 `REQUIRED_PLUGINS` 随构造传入 | `gateway` 在清单内，容器据此补目录 / 配置文件并实例化（容器**不内置**任何清单） |
 | 插件构造 | `Composite::build` **扫描自己的目录（系统根）**，逐目录 `create_object`，并把插件自身目录经 `PLUGIN_DIR` 告知它 | 网关的开关就是它自己 `PLUGIN.yml` 里的 `inbound_enabled` |
-| 插件配置 | **没有第二条配置协议**：配置 = 插件目录里的 `PLUGIN.yml`（`.vdfs/gateway/PLUGIN.yml`），读写走 `vdfs/read` / `vdfs/write` | 网关只要把自己的 `ConfigFile` 声明出去即可被设置页与 LLM 同时读写 |
+| 插件配置 | **没有第二条配置协议**：配置 = 插件目录里的 `PLUGIN.yml`（`<根>/gateway/PLUGIN.yml`），读写走 `vdfs/read` / `vdfs/write` | 网关只要把自己的 `ConfigFile` 声明出去即可被设置页与 LLM 同时读写 |
 | 设置页清单 | `ConfigurableVisitor` 收集通道（`symbio_core/configurable.rs`）：插件在 `traverse` 里 `announce_configurable` 一次 | 网关的「开放接口」自动出现在设置页，**前端零改动** |
 | 设置页表单 | 由配置的**拥有者**产出 `DetailDefinition`（作为节点 `schema` 下发） | 网关表单由后端下发定义，前端表单渲染器自动渲染 |
 | 宿主级上下文注册表先例 | `HomedirRegistry`（`symbio_core/homedir.rs`） | 全局弱引用登记表的同款风格（见 §4.1 的 `parent` 转发） |
@@ -75,7 +75,7 @@ home 级路径（`home/*`、`work/*`）由 `Composite`
 | 时机 | 行为 |
 |---|---|
 | `build(ctx)` | 读 config；`inbound_enabled` 且 `inbound_protocol = http` → `spawn` server（保存 `JoinHandle` + `CancellationToken`）；`native` 或关闭则不监听 |
-| 配置写入 | `vdfs/write` `.vdfs/gateway/PLUGIN.yml` → `ConfigFile::apply` 落盘 → 本插件在自己的 `write` 返回后 **stop 旧 server + start 新 server**（端口/开关变更必须重启监听，不能像普通配置那样只改内存） |
+| 配置写入 | `vdfs/write` `<根>/gateway/PLUGIN.yml` → `ConfigFile::apply` 落盘 → 本插件在自己的 `write` 返回后 **stop 旧 server + start 新 server**（端口/开关变更必须重启监听，不能像普通配置那样只改内存） |
 | `home/reload` | 插件实例被重建（worker composite 清空重建），旧实例 `Drop` → cancel token → 端口释放；新实例按新配置启动 |
 | `Drop` | `CancellationToken::cancel()` + `abort` task |
 | 客户端断开 | 连接读写半关闭 → 结束该会话的 pump 任务（**不** abort 后端任务，与 `tauri://destroyed` 行为一致：AI 继续跑完并持久化） |
@@ -177,7 +177,7 @@ GET /api/v1/health  → { "ok": true }
 - **绑定地址**：默认 `127.0.0.1`。绑定非回环地址却未设 `inbound_token` →
   `server::start` 直接返回错误（安全护栏），设置页可见。
 - **token**：`inbound_token` 由用户在设置页填写（`password` 控件）并随配置文件落盘
-  （`.vdfs/gateway/PLUGIN.yml`）；
+  （`<根>/gateway/PLUGIN.yml`）；
   HTTP 走 `Authorization: Bearer <token>`，WS 走 `?token=`；置空即不校验（仅回环允许）。
 - CORS：响应头固定 `Access-Control-Allow-Origin: *`（`OPTIONS` 预检直接放行），
   跨域隔离依赖 token 与绑定地址，不靠 Origin 白名单。

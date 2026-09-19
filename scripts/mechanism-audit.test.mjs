@@ -231,6 +231,15 @@ test('M-007 不误报：数值型 VDFS_* 常量（如分页大小）不是地址
   assert.equal((r.stdout.match(/\[ERROR\] M-007/g) ?? []).length, 0)
 })
 
+test('M-007 不误报：浏览器路由常量（值以 / 开头）不是 vdfs 地址知识', () => {
+  const r = audit({
+    ...CLEAN,
+    'schemas/Browser.ts': `export const VDFS_HOME_PATH = '/vdfs'
+`,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
 // ── 豁免注释 ─────────────────────────────────────────────────────────────
 test('豁免注释要求**非空理由**（空理由视为未豁免）', () => {
   const bad = `<script setup lang="ts">\nconst ok = node.meta.recoverable // mechanism-allow M-001: 已复核，属临时节点判定\n</script>\n`

@@ -50,13 +50,16 @@ import {
   VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_UPDATED,
   VDFS_EXT_MESSAGE,
-  VDFS_ROOT,
   type VdfsChange,
   type VdfsNode,
 } from '@/schemas/vdfs'
+import { setVdfsRoot } from '@/schemas/vdfsRoot'
+
+// 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
+setVdfsRoot('@vfs')
 
 /** 消息列表地址（被测的绑定地址） */
-const MSG_DIR = `${VDFS_ROOT}/session/abc/消息`
+const MSG_DIR = `@vfs/session/abc/消息`
 
 /** 一个 `ext = message` 的列表项（只有 `r`，正文在内容里） */
 function msgNode(id: string, title = id): VdfsNode {
@@ -327,7 +330,7 @@ describe('useVdfs 有界列表（中栏只取最新一页 + 加载更早）', ()
 })
 
 describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同一条详情通道）', () => {
-  const MODEL_DIR = `${VDFS_ROOT}/model`
+  const MODEL_DIR = `@vfs/model`
 
   /** 目录声明的「可新建类型」：`ext` 是呈现扩展名，`node_ext` 才是渲染器键 */
   const MODEL_NEW_TYPE = {

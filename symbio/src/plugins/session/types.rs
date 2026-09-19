@@ -77,7 +77,7 @@ pub fn session_meta_tags(metadata: &serde_json::Value, message_count: usize) -> 
 ///
 /// ## 为什么需要它
 ///
-/// 清单（`.vdfs/session` 的 `list`）必须**不读** `messages.json`（那正是存储拆分
+/// 清单（`<根>/session` 的 `list`）必须**不读** `messages.json`（那正是存储拆分
 /// 的全部收益），而清单要显示的字段——标题 / 条数 / 摘要 / 标签——原本**全是从
 /// 消息算出来的**。所以这些字段在 `save` 时算好、随元数据落盘：它们是可重算的
 /// **投影**，不是第二份真相，计算入口只有 [`SessionSummary::of`] 一个。

@@ -3,8 +3,8 @@
 //! ## 落位与地址
 //!
 //! ```text
-//! <本插件目录>/<会话 id>/AGENTS.md   记忆本体
-//! .vdfs/session/<会话 id>/AGENTS.md               可编辑地址（模型与用户共用）
+//! <本插件目录>/<会话 id>/AGENTS.md     记忆本体
+//! <父地址>/<会话 id>/AGENTS.md      可编辑地址（父地址 = 上下文里的当前父地址）
 //! ```
 //!
 //! 与 `session.json` / `messages.json` 同一目录——它就是这个会话的一部分，
@@ -32,7 +32,7 @@
 //! `ctx[SESSION_ID]` 缺失 / 为空 → 什么都不注入。收集期拿不到会话 id 的广播
 //!（例如设置页的选项收集）不该凭空造一份记忆出来。
 
-use crate::symbio_core::{MemoryFile, SegmentSpec, AGENTS_FILE, PLUGIN_SESSION};
+use crate::symbio_core::{MemoryFile, SegmentSpec, AGENTS_FILE};
 use std::path::PathBuf;
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）
@@ -50,19 +50,13 @@ pub fn memory_path(root: &std::path::Path, session_id: &str) -> PathBuf {
     super::paths::session_dir(root, session_id).join(AGENTS_FILE)
 }
 
-/// 记忆文件的 **VDFS 展示地址**（下发给模型的可编辑地址）。
-///
-/// 会话内部的其它区段（`消息` / `子会话` / `工作目录`）都在同一层级下，
-/// 记忆与它们并列——它本来就是会话的一部分。
-pub fn memory_address(session_id: &str) -> String {
-    format!(".vdfs/{PLUGIN_SESSION}/{session_id}/{AGENTS_FILE}")
-}
-
 /// 记忆在 **provider 子树内**的相对路径（`<id>/AGENTS.md`）。
 ///
-/// 与 [`memory_address`] 同源、只差挂载名前缀：地址的「拼」与「解」必须在一处，
-/// 否则改地址方案时会漏改一边。变更发射（`vdfs_provider`）用它构造
-/// `VdfsChange::path`，与 `list` 返回的节点地址严格一致。
+/// 相对地址是常态：provider 全程只跟相对地址打交道（变更发射用它构造
+/// `VdfsChange::path`，与 `list` 返回的节点地址严格一致）。需要协议级绝对地址
+/// 的场合（提示词里印给模型的可编辑地址），由调用方经
+/// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
+/// 挂载点叫什么不归本插件。
 pub fn memory_rel_path(session_id: &str) -> String {
     format!("{session_id}/{AGENTS_FILE}")
 }
@@ -85,8 +79,8 @@ pub fn store(
 
 /// 条目规格 —— 本层的「个性」只有三样：标题、地址、空内容时说什么。
 ///
-/// `address` 由调用方算好传入（[`memory_address`] 返回 `String`，不能借给
-/// 返回值长期持有）。排版由内核
+/// `address` 是**绝对地址**（调用方经 `absolute_addr` 从上下文父地址拼出，
+/// 返回 `String`，不能借给返回值长期持有）。排版由内核
 /// [`render_segment`](crate::symbio_core::render_segment) 统一决定。
 pub fn segment_spec(address: &str) -> SegmentSpec<'_> {
     SegmentSpec {

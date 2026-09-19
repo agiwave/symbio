@@ -22,7 +22,7 @@
  *   本地 list，并经 `publishVdfsChangedLocal` 以同构载荷即时通知其他页面，
  *   不等事件往返；后端事件随后幂等收敛。
  *
- * 作用域 `directChildren = true`：只看会话叶子（`.vdfs/session/<id>`）——
+ * 作用域 `directChildren = true`：只看会话叶子（`<根>/session/<id>`）——
  * 子会话与转写列表项的变更不进侧栏清单。
  */
 

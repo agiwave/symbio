@@ -1,4 +1,4 @@
-//! VDFS 挂载点（`.vdfs/agent`）—— 本插件**直接实现 `VdfsProvider`**。
+//! VDFS 挂载点（`<根>/agent`）—— 本插件**直接实现 `VdfsProvider`**。
 //!
 //! ## 与其它资源插件的分工差异
 //!
@@ -23,7 +23,7 @@
 //! ## 挂载根只列「装进来的智能体」
 //!
 //! 挂载根清单 = 各 bundle（装进来的子智能体），与 session / model 列表同一口径。
-//! `.vdfs/agent/AGENTS.md` 也挂在这棵树上，但它**不在清单里**——它是**本应用
+//! `<根>/agent/AGENTS.md` 也挂在这棵树上，但它**不在清单里**——它是**本应用
 //! （系统智能体）自身**的指令（`{homedir}/AGENTS.md`，见 [`super::instruction`]），
 //! 属于「本 agent 的修改」，入口在**设置页**（`traverse` 里经 `ConfigurableVisitor`
 //! 注册，读写仍落在本插件的地址上），混在 agent 列表里会被读成某个包。
@@ -31,7 +31,7 @@
 //! 与 bundle 无关的那三个字母 `AGENTS.md` 因此是挂载根下的**保留名**；bundle id 的
 //! 字符集要求首字符是小写字母或数字，不可能与之相撞（§5.1）。
 //!
-//! 外部访问一律走 `.vdfs/agent/…`。
+//! 外部访问一律走 `<根>/agent/…`。
 
 use super::instruction;
 use super::memory;
@@ -224,10 +224,10 @@ impl VdfsProvider for AgentPlugin {
         match parse_rel_path(path) {
             // 挂载根 = **装进来的智能体清单**，一样别的都没有。
             //
-            // 本应用自身的指令（`.vdfs/agent/AGENTS.md`）也挂在这棵树上，但它是
+            // 本应用自身的指令（`<根>/agent/AGENTS.md`）也挂在这棵树上，但它是
             // **本应用自身的设置**，不是装进来的智能体——混在这张列表里会让人
             // 把它读成某个包。它的入口在设置页（见 `super::plugin` 的 `traverse`），
-            // 地址（`.vdfs/agent/AGENTS.md`）照旧可达，只是不在这里列出。
+            // 地址（`<根>/agent/AGENTS.md`）照旧可达，只是不在这里列出。
             RelPath::Root => Ok(store
                 .list()
                 .into_iter()

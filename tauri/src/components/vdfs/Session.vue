@@ -1,9 +1,9 @@
 <!--
   Session — 会话详情（VDFS 下由 `ext = session` 选中，VdfsSessionDetail 薄适配）
 
-  会话在后端就是一个 `VdfsProvider` 提供的节点：清单来自 `.vdfs/session` 的
+  会话在后端就是一个 `VdfsProvider` 提供的节点：清单来自 `<根>/session` 的
   `vdfs/list`（节点自带 message_count / metadata / meta_tags），正文是会话叶子的
-  内容（`.vdfs/session/<id>` 的 `vdfs/read`），删除经 `@delete` 由页面层统一走
+  内容（`<根>/session/<id>` 的 `vdfs/read`），删除经 `@delete` 由页面层统一走
   `vdfs/delete`。本组件只承载会话的"详情差异化"：
 
   - node 有 id（选中态）：聊天工作区 = ChatMainPanel（工作目录的层级浏览不在
@@ -66,7 +66,7 @@ import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 
 const props = defineProps<{
-  /** 会话节点（`.vdfs/session/<id>`）；无 id / 名字 = 新建草稿态 */
+  /** 会话节点（`<根>/session/<id>`）；无 id / 名字 = 新建草稿态 */
   node: VdfsNode | null
   /** 会话自有动作（浏览内部；由 VdfsSessionDetail 声明） */
   actions?: DetailAction[]
@@ -119,7 +119,7 @@ function onAction(a: DetailAction) {
 }
 
 // 机制选中是唯一真相：渲染器挂载/切换（:key 重挂载触发 watch）即选中该会话
-// 会话 id 就是节点名（路径末段：`.vdfs/session/<id>`）
+// 会话 id 就是节点名（路径末段：`<根>/session/<id>`）
 watch(
   () => props.node?.name,
   (id) => {

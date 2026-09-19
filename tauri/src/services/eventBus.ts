@@ -16,7 +16,8 @@
 import { connectPlugin, type Connection, type ConnectEvent } from './plugin'
 import { watchVdfs, unwatchVdfs } from './vdfs'
 import { logger } from '@/utils/logger'
-import { VDFS_EVENT_KIND, VDFS_ROOT, type VdfsChange } from '@/schemas/vdfs'
+import { VDFS_EVENT_KIND, type VdfsChange } from '@/schemas/vdfs'
+import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { EVENT_BUS_SUBSCRIBE } from '@/constants/pluginPaths'
 
 /**
@@ -238,11 +239,11 @@ export function subscribe(
 
 /** 订阅作用域：按展示地址前缀分流（哪一类资源、哪个会话） */
 export interface VdfsChangeScope {
-  /** 资源前缀（如 `.vdfs/session`）；前缀本身与其子树内的变更都算命中 */
+  /** 资源前缀（如 `<根>/session`）；前缀本身与其子树内的变更都算命中 */
   prefix: string
   /**
-   * 只接收前缀的**直接子项**（`.vdfs/session/<id>` 命中，
-   * `.vdfs/session/<id>/消息/<mid>` 不命中）。
+   * 只接收前缀的**直接子项**（`<根>/session/<id>` 命中，
+   * `<根>/session/<id>/消息/<mid>` 不命中）。
    * 缺省 = 整个子树。
    */
   directChildren?: boolean
@@ -303,10 +304,10 @@ export function subscribeVdfsChanged(
   })
 
   // 向后端登记作用域前缀（同一前缀的多个订阅者共享一次登记）。
-  // `.vdfs` 根本身不在任何 provider 身上、无实时能力，登记它会换来后端报错——
+  // `<根>` 根本身不在任何 provider 身上、无实时能力，登记它会换来后端报错——
   // 订根的人只能靠各自拉取，这里与文件浏览器的处理保持一致。
   const watchPath = normPrefix(scope.prefix)
-  if (watchPath && watchPath !== VDFS_ROOT) {
+  if (watchPath && watchPath !== vdfsRoot()) {
     setVdfsWatch(watchPath, 1)
   }
 
@@ -316,7 +317,7 @@ export function subscribeVdfsChanged(
     released = true
     unsub()
     S.localVdfsHandlers.delete(dispatch)
-    if (watchPath && watchPath !== VDFS_ROOT) setVdfsWatch(watchPath, -1)
+    if (watchPath && watchPath !== vdfsRoot()) setVdfsWatch(watchPath, -1)
   }
 }
 

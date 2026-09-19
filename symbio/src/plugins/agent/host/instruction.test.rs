@@ -4,7 +4,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
 //! 内核的机制（读写 / 两道闸门 / 排版形状）由 `symbio_core::memory` 自己测；
-//! 这里钉的是**本层的个性**：目录从哪来、地址写死成什么、空文件怎么降级。
+//! 这里钉的是**本层的个性**：目录从哪来、地址怎么拼出来、空文件怎么降级。
 
 use super::*;
 use crate::symbio_core::VdfsAccess;
@@ -48,10 +48,18 @@ fn empty_instruction_is_not_injected() {
     let tmp = tempfile::TempDir::new().unwrap();
     let m = store(tmp.path(), 1024, 128);
 
-    assert_eq!(segment(&m).unwrap(), None, "没写过 → 不注入");
+    assert_eq!(
+        segment(&m, "@vfs/agent/AGENTS.md").unwrap(),
+        None,
+        "没写过 → 不注入"
+    );
 
     std::fs::write(file_path(tmp.path()), "   \n\t ").unwrap();
-    assert_eq!(segment(&m).unwrap(), None, "只有空白 → 同样不注入");
+    assert_eq!(
+        segment(&m, "@vfs/agent/AGENTS.md").unwrap(),
+        None,
+        "只有空白 → 同样不注入"
+    );
 }
 
 /// 有内容 → 内核排版：标题 + **真实地址** + 上限 + 「对所有会话生效」
@@ -61,9 +69,14 @@ fn segment_carries_title_address_and_gates() {
     let m = store(tmp.path(), 1024, 128);
     m.write("只改必要之处").unwrap();
 
-    let seg = segment(&m).unwrap().expect("有内容必注入");
+    let seg = segment(&m, "@vfs/agent/AGENTS.md")
+        .unwrap()
+        .expect("有内容必注入");
     assert!(seg.contains("【全局指令】"), "{seg}");
-    assert!(seg.contains(ADDRESS), "地址必须真实可达：{seg}");
+    assert!(
+        seg.contains("@vfs/agent/AGENTS.md"),
+        "地址必须真实可达：{seg}"
+    );
     assert!(seg.contains("对所有会话生效"), "{seg}");
     assert!(seg.contains("上限：1024字节"), "{seg}");
     assert!(seg.contains("只改必要之处"), "{seg}");
@@ -76,7 +89,7 @@ fn segment_truncates_over_the_inject_budget() {
     let m = store(tmp.path(), 4096, 4);
     m.write("0123456789").unwrap();
 
-    let seg = segment(&m).unwrap().unwrap();
+    let seg = segment(&m, "@vfs/agent/AGENTS.md").unwrap().unwrap();
     assert!(seg.contains("已截断至 4 字节"), "{seg}");
     assert!(seg.contains("vdfs_read"), "截断必须指路取全文：{seg}");
 }

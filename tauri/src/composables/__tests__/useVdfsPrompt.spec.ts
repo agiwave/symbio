@@ -33,7 +33,7 @@ function type(ext: string, source?: string): VdfsNewType {
 
 function node(name: string): VdfsNode {
   return {
-    path: `.vdfs/mcp/${name}`,
+    path: `@vfs/mcp/${name}`,
     name,
     title: name,
     kind: 'mcp',
@@ -68,7 +68,7 @@ function setup(types: VdfsNewType[], selectedNode: VdfsNode | null = null): Harn
   const p = scope.run(() =>
     useVdfsPrompt({
       creatableTypes: t,
-      cwd: ref('.vdfs/mcp'),
+      cwd: ref('@vfs/mcp'),
       selectedNode: selected,
       saving: ref(false),
       error,

@@ -14,6 +14,11 @@
 use super::*;
 use tempfile::TempDir;
 
+/// 测试用**合成地址**：内核只负责「把调用方给的地址印进片段」，不认识任何地址方案
+/// （虚拟根叫什么、工作目录在哪都不归它）。用一个明显不是真实根名的前缀，
+/// 使「内核里混进了真实的挂载规则」这类回归在测试里必然暴露。
+const ADDR: &str = "@vfs/work/AGENTS.md";
+
 /// 临时目录里的一个记忆文件
 fn file_in(tmp: &TempDir, write_max: usize, inject_max: usize) -> MemoryFile {
     MemoryFile::new(Some(tmp.path().join(AGENTS_FILE)), write_max, inject_max)
@@ -22,7 +27,7 @@ fn file_in(tmp: &TempDir, write_max: usize, inject_max: usize) -> MemoryFile {
 fn spec() -> SegmentSpec<'static> {
     SegmentSpec {
         title: "工作区记忆",
-        address: ".vdfs/work/AGENTS.md",
+        address: ADDR,
         note: None,
         empty_hint: "暂无内容，可写入长期有效的约定",
     }
@@ -178,7 +183,7 @@ fn segment_carries_address_capacity_and_write_discipline() {
     let s = render_segment(&spec(), &body("用户偏好中文回答。", false), 16384);
 
     assert!(s.contains("【工作区记忆】"), "要有一眼认出的标题: {s}");
-    assert!(s.contains(".vdfs/work/AGENTS.md"), "要给出可编辑地址: {s}");
+    assert!(s.contains(ADDR), "要给出可编辑地址: {s}");
     assert!(s.contains("16384"), "要给出写入上限: {s}");
     assert!(s.contains("用户偏好中文回答。"), "正文要原样带上: {s}");
     assert!(s.contains("vdfs_read"), "要给出先读后写的做法: {s}");

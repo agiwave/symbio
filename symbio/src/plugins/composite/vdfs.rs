@@ -22,7 +22,7 @@
 //!
 //! composite 只是一个**恰好包含若干子目录的 provider**——它可以被别的目录包含，
 //! 子插件本身也可以是另一个 composite（嵌套时它同样只是普通 provider）。当前它
-//! 充当整个 `.vdfs` 的服务者，**只是装配时的安排**（使用方把它登记进了
+//! 充当整个 `<根>` 的服务者，**只是装配时的安排**（使用方把它登记进了
 //! `register_vdfs_root` 槽位），不是本模块的属性；本文件不出现任何「根级别」
 //! 的概念与代码。
 //!
@@ -34,10 +34,10 @@
 //!
 //! ## 访问层
 //!
-//! 本视图在容器的 `traverse` 里被登记为 `.vdfs` 的服务者（`register_vdfs_root`）。
+//! 本视图在容器的 `traverse` 里被登记为 `<根>` 的服务者（`register_vdfs_root`）。
 //! vdfs 插件只取这个登记项再转发，不认识本模块——拓扑知识因此不落在访问层。
 
-use crate::symbio_core::vdfs::host_ctx;
+use crate::symbio_core::vdfs::{descend_addr, host_ctx};
 use crate::symbio_core::vdfs_provider::*;
 use crate::symbio_core::{
     CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor,
@@ -233,6 +233,27 @@ impl CompositeVdfs {
         Ok((d.as_str(), p, rel.to_string()))
     }
 
+    /// 派发：解析出（目录名, 子 provider, 子树相对地址），并把 ctx 的**当前父
+    /// 地址**改写为该目录的挂载点——这就是 vdfs 核心协议把相对地址转发给
+    /// provider 的那一跳。
+    ///
+    /// 子 provider 收到的地址仍是子树相对地址（常态）；仅当它需要协议级绝对
+    /// 地址时才取 `ctx.parent_addr()` 拼。改写规则见
+    /// `symbio_core::vdfs::address`：容器自身的父地址（嵌套派发时由上级写入）
+    /// 非空则原地续接，为空则落到静态声明的根。
+    async fn dispatch(
+        &self,
+        ctx: &VdfsContext,
+        dirs: &[(String, DynVdfsProvider)],
+        path: &str,
+    ) -> VdfsResult<(String, VdfsContext, DynVdfsProvider, String)> {
+        let (dir, p, rel) = Self::resolve(dirs, path)?;
+        let sub = ctx
+            .clone()
+            .with_parent_addr(descend_addr(ctx.parent_addr(), dir));
+        Ok((dir.to_string(), sub, p.clone(), rel))
+    }
+
     /// 子目录名清单（报错提示用）
     fn names_hint(dirs: &[(String, DynVdfsProvider)]) -> String {
         if dirs.is_empty() {
@@ -282,9 +303,9 @@ impl VdfsProvider for CompositeVdfs {
                 .filter(|n| !n.hidden)
                 .collect()),
             Some(_) => {
-                let (dir, p, rel) = Self::resolve(&dirs, path)?;
-                let mut items = p.list(ctx, &rel).await?;
-                fill_node_paths(dir, &rel, &mut items);
+                let (dir, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
+                let mut items = p.list(&sub, &rel).await?;
+                fill_node_paths(&dir, &rel, &mut items);
                 // 隐藏属性是**机制级**的：任何子树里被标为 hidden 的子节点都不出现，
                 // 不因它来自哪个 provider 而异。
                 items.retain(|n| !n.hidden);
@@ -298,24 +319,24 @@ impl VdfsProvider for CompositeVdfs {
         let Some((dir, _rel)) = split_first(path) else {
             return Ok(Self::self_node(&dirs));
         };
-        let (_, p, rel) = Self::resolve(&dirs, path)?;
+        let (_, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
         if rel.is_empty() {
-            return Ok(Self::dir_node(dir, p));
+            return Ok(Self::dir_node(dir, &p));
         }
-        let mut n = p.stat(ctx, &rel).await?;
+        let mut n = p.stat(&sub, &rel).await?;
         n.path = path.to_string();
         Ok(n)
     }
 
     async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
         let dirs = self.children_of(ctx).await?;
-        let (_, p, rel) = Self::resolve(&dirs, path)?;
+        let (_, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
         if rel.is_empty() {
             return Err(VdfsError::Forbidden(
                 "目录不是可读文件；请读取其子节点".to_string(),
             ));
         }
-        let mut c = p.read(ctx, &rel).await?;
+        let mut c = p.read(&sub, &rel).await?;
         c.path = Self::fill_path(path, &c.path);
         Ok(c)
     }
@@ -327,12 +348,12 @@ impl VdfsProvider for CompositeVdfs {
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
         let dirs = self.children_of(ctx).await?;
-        let (_, p, rel) = Self::resolve(&dirs, path)?;
+        let (_, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
         // `rel` 为空 = 写在**挂载点目录自身**上。这正是「新建」的机制形态：
         // 使用方只说「建在哪个目录」，不说「叫什么」——名字由 provider 生成
         // （见 `VdfsProvider::write` 的文档）。是否支持由 provider 判定，
         // 容器不做类型特判（与 `action` 对空 `rel` 的处理一致）。
-        let mut r = p.write(ctx, &rel, content).await?;
+        let mut r = p.write(&sub, &rel, content).await?;
         // provider 生成的名字（写在目录自身时）与它回显的相对路径都在这**一次**补齐。
         r.path = Self::fill_path(path, &r.path);
         Ok(r)
@@ -340,26 +361,26 @@ impl VdfsProvider for CompositeVdfs {
 
     async fn delete(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
         let dirs = self.children_of(ctx).await?;
-        let (_, p, rel) = Self::resolve(&dirs, path)?;
+        let (_, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
         if rel.is_empty() {
             return Err(VdfsError::Forbidden("目录不可删除".to_string()));
         }
-        p.delete(ctx, &rel, recursive).await
+        p.delete(&sub, &rel, recursive).await
     }
 
     async fn mkdir(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
         let dirs = self.children_of(ctx).await?;
-        let (_, p, rel) = Self::resolve(&dirs, path)?;
+        let (_, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
         if rel.is_empty() {
             return Err(VdfsError::invalid("目录已存在，无需创建"));
         }
-        p.mkdir(ctx, &rel).await
+        p.mkdir(&sub, &rel).await
     }
 
     async fn move_item(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
         let dirs = self.children_of(ctx).await?;
-        let (from_dir, pf, rf) = Self::resolve(&dirs, from)?;
-        let (to_dir, _, rt) = Self::resolve(&dirs, to)?;
+        let (from_dir, sub, pf, rf) = self.dispatch(ctx, &dirs, from).await?;
+        let (to_dir, _, _, rt) = self.dispatch(ctx, &dirs, to).await?;
         if from_dir != to_dir {
             return Err(VdfsError::invalid(format!(
                 "不支持跨目录移动：{from_dir} → {to_dir}"
@@ -368,7 +389,7 @@ impl VdfsProvider for CompositeVdfs {
         if rf.is_empty() || rt.is_empty() {
             return Err(VdfsError::Forbidden("目录不可移动".to_string()));
         }
-        pf.move_item(ctx, &rf, &rt).await
+        pf.move_item(&sub, &rf, &rt).await
     }
 
     async fn action(
@@ -379,8 +400,8 @@ impl VdfsProvider for CompositeVdfs {
         payload: Option<&Value>,
     ) -> VdfsResult<VdfsActionResult> {
         let dirs = self.children_of(ctx).await?;
-        let (_, p, rel) = Self::resolve(&dirs, path)?;
-        p.action(ctx, &rel, action, payload).await
+        let (_, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
+        p.action(&sub, &rel, action, payload).await
     }
 
     /// 子 provider 报出的相对路径在此补成树内全路径，再交给上层 sink。
@@ -389,17 +410,16 @@ impl VdfsProvider for CompositeVdfs {
     /// 不逐字段重建——新增字段时不会漏转发。
     async fn watch(&self, ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
         let dirs = self.children_of(ctx).await?;
-        let (dir, p, rel) = Self::resolve(&dirs, path)?;
-        let dir = dir.to_string();
+        let (dir, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
         let wrapped: VdfsChangeSink =
             Arc::new(move |c: VdfsChange| sink(c.map_paths(|p| child_path(&dir, p))));
-        p.watch(ctx, &rel, wrapped).await
+        p.watch(&sub, &rel, wrapped).await
     }
 
     async fn unwatch(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
         let dirs = self.children_of(ctx).await?;
-        let (_, p, rel) = Self::resolve(&dirs, path)?;
-        p.unwatch(ctx, &rel).await
+        let (_, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
+        p.unwatch(&sub, &rel).await
     }
 }
 
@@ -851,7 +871,7 @@ mod tests {
     ///
     /// 三个 form 型插件（model / mcp / skill）的 `read` 都把收到的相对路径原样回显
     /// （`VdfsContent::text(path, …)`），因此这条不是假想：漏补前缀，上层就会把它翻译
-    /// 成 `.vdfs/<rel>`——一个并不存在的地址。
+    /// 成 `<根>/<rel>`——一个并不存在的地址。
     #[tokio::test]
     async fn read_content_path_is_prefixed_with_dir() {
         struct EchoPathProvider;

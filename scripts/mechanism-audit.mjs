@@ -287,11 +287,17 @@ const RULES = {
    * 只匹配**值为字符串**的常量：地址段名是字符串，而 `VDFS_PAGE_SIZE = 100`
    * 这类数值常量不是地址知识（它就在 `useVdfs.ts` 里，误报会逼人写豁免注释，
    * 一个靠豁免活着的守卫等于没有守卫）。
+   *
+   * **浏览器路径不判**（值以 `/` 开头）：`schemas/vdfsAddress.ts` 的
+   * `VDFS_HOME_PATH = '/vdfs'` 是 vue-router 的路由前缀——那是路由的承载形式，
+   * 不是 VDFS 数据地址。数据地址要么是 `<根>` 打头的展示地址，要么是裸段名 /
+   * 树内相对路径，**从不以 `/` 开头**（`vdfs.md` §3.1 的 normalize_addr 会剥掉
+   * 首部分隔符，且「不强加前导 `/`」）。
    */
   vdfsConstDef: {
     rule: 'M-007',
     severity: 'error',
-    test: (c) => c.match(/\b(?:const|let|var)\s+(?:VDFS_[A-Z0-9_]+|vdfs[A-Z]\w*)\s*=\s*['"`]/),
+    test: (c) => c.match(/\b(?:const|let|var)\s+(?:VDFS_[A-Z0-9_]+|vdfs[A-Z]\w*)\s*=\s*['"`](?!\/)/),
     message: '地址常量的定义权在 schemas/vdfs.ts —— 此处不得再定义一份（导入使用是允许的）',
   },
 }

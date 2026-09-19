@@ -9,9 +9,9 @@
 
 | 交出什么 | 机制 |
 |---|---|
-| Bundle 资产管理 | `impl VdfsProvider`（`.vdfs/agent`：浏览 / 整包导入 / 导出 / 删除），目录自管（`BundleStore`：工作区级 + 全局级双层） |
+| Bundle 资产管理 | `impl VdfsProvider`（`<根>/agent`：浏览 / 整包导入 / 导出 / 删除），目录自管（`BundleStore`：工作区级 + 全局级双层） |
 | 子树装配 | 会话选定智能体（`ctx[AGENT_ID]`）时构造该目录的插件树并转发能力收集；注册经 `SubAgentVisitor` 加来源前缀（`agent/<id>/…`），与系统树**并集**且不撞名 |
-| 智能体自身的 `AGENTS.md` | `CapabilityVisitor::register_system_prompt`（注入）+ `.vdfs/agent/…`（编辑） |
+| 智能体自身的 `AGENTS.md` | `CapabilityVisitor::register_system_prompt`（注入）+ `<根>/agent/…`（编辑） |
 | 工具贡献 | `traverse(agent/available_tools)` 把 `agent_run`（子智能体委托）加入会话工具集 |
 | 选项贡献 | `traverse(agent/available_options)` 提供会话页的「智能体」选择项 |
 
@@ -45,8 +45,8 @@
 
 ```text
 作用域        物理落位                      可编辑地址
-系统智能体    {homedir}/AGENTS.md          .vdfs/agent/AGENTS.md
-子智能体      <agentdir>/AGENTS.md         .vdfs/agent/<bundle id>/AGENTS.md
+系统智能体    {homedir}/AGENTS.md          <根>/agent/AGENTS.md
+子智能体      <agentdir>/AGENTS.md         <根>/agent/<bundle id>/AGENTS.md
 ```
 
 | | 系统态 | 子智能体态 |
@@ -74,7 +74,7 @@
 ## 路由
 
 **agent 插件没有任何自有路由**：`route()` 直接返回 `NotFound` 并指引到 VDFS。
-bundle 及其内部（提示词 / 技能 / MCP）一律经 `.vdfs/agent/<id>/<子类别标签>/<相对路径>` 寻址。
+bundle 及其内部（提示词 / 技能 / MCP）一律经 `<根>/agent/<id>/<子类别标签>/<相对路径>` 寻址。
 
 ## 关联
 
@@ -83,4 +83,4 @@ bundle 及其内部（提示词 / 技能 / MCP）一律经 `.vdfs/agent/<id>/<�
   `../setting/README.md`（设置入口，**不拥有任何记忆文件**）
 - 记忆内核（各层共用）：`symbio_core::memory`
 - Agent 目录规范：`docs/design/agent-directory-spec.md`
-- VDFS 机制（`.vdfs/agent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/design/vdfs.md` §13.4
+- VDFS 机制（`<根>/agent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/design/vdfs.md` §13.4

@@ -1,9 +1,9 @@
-//! VDFS 挂载点（`.vdfs/work`）—— 本插件**直接实现 `VdfsProvider`**。
+//! VDFS 挂载点（`<根>/work`）—— 本插件**直接实现 `VdfsProvider`**。
 //!
 //! ## 挂载根只有一样东西
 //!
 //! ```text
-//! .vdfs/work/AGENTS.md    工作区记忆（rw；界面与模型共用这一份）
+//! <根>/work/AGENTS.md    工作区记忆（rw；界面与模型共用这一份）
 //! ```
 //!
 //! 物理落位是**工作区根目录的 `AGENTS.md`**（行业通行约定，见 [`super::memory`]

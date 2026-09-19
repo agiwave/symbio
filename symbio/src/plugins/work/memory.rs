@@ -42,12 +42,12 @@
 use crate::symbio_core::{MemoryFile, SegmentSpec, AGENTS_FILE};
 use std::path::{Path, PathBuf};
 
-/// 记忆文件的 **VDFS 展示地址**（下发给模型的可编辑地址）。
+/// 记忆文件挂在**本插件挂载点自身**（相对地址 = 文件名 [`AGENTS_FILE`]）。
 ///
-/// 与其它资源同一口径：展示地址以 `.vdfs` 开头，线路协议仍是 `/…`；
-/// 翻译只发生在 `tauri/src/services/vdfs.ts`。
-pub const MEMORY_VDFS_ADDRESS: &str = ".vdfs/work/AGENTS.md";
-
+/// 相对地址是常态：provider 全程只跟相对地址打交道。需要协议级绝对地址的场合
+/// （提示词里印给模型的可编辑地址），由调用方经
+/// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
+/// 挂载点叫什么不归本插件。
 /// 片段的标题（渲染为 `【工作区记忆】`）
 pub const SEGMENT_TITLE: &str = "工作区记忆";
 
@@ -76,12 +76,13 @@ pub fn store(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: us
 
 /// 片段规格 —— 本层的「个性」只有三样：标题、地址、空内容时说什么。
 ///
+/// `address` 由调用方算好传入（[`address`] 返回 `String`，不能借给返回值长期持有）。
 /// 排版（一行头信息 + 正文 + 空 / 截断提示）由内核
 /// [`render_segment`](crate::symbio_core::render_segment) 统一决定。
-pub fn segment_spec() -> SegmentSpec<'static> {
+pub fn segment_spec(address: &str) -> SegmentSpec<'_> {
     SegmentSpec {
         title: SEGMENT_TITLE,
-        address: MEMORY_VDFS_ADDRESS,
+        address,
         // 工作区记忆没有需要区分的邻居（智能体记忆在它自己的地址下），故不加附加说明
         note: None,
         empty_hint: "暂无内容，可写入本工作区长期有效的约定（偏好、结论、环境事实）",

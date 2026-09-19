@@ -155,7 +155,13 @@ const BASELINE = {
   //   （改子不得回流到父）、锁辅助在毒化后**恢复数据而非二次 panic**。
   //   顺带把 `read_request` 由 `TcpStream` 泛化到 `AsyncRead`——那三道防 DoS 的
   //   闸门此前根本无法被测，只能靠"读代码看起来对"。
-  rustTests: 785,
+  // 765 → 788：VDFS 挂载根名收口（+3，全部在 symbio_core/vdfs/address.rs：
+  //   join_addr 拼接规则 1 例、AddrRootDecl 静态声明可达与归一化 1 例、
+  //   descend_addr 转发跳改写规则 1 例——顶层落到声明根、嵌套原地续接）。
+  //   该批同时把挂载根改名 `.vdfs` → `.vdfsv2` 证明系统与根名无关；
+  //   新机制「当前父地址」＝转发即改写上下文（VDFS_PARENT_ADDR）+ 协议级
+  //   绝对地址经 absolute_addr 拼接，原全局登记槽整体删除。
+  rustTests: 788,
   vitestFiles: 31,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态

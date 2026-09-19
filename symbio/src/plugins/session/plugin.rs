@@ -43,7 +43,7 @@ use tokio::sync::{OnceCell, RwLock};
 /// Session 插件
 pub struct SessionPlugin {
     pub(crate) config: Arc<RwLock<SessionConfig>>,
-    /// 配置文件的呈现与校验（`.vdfs/session/PLUGIN.yml`）——落盘写自己目录里的文件
+    /// 配置文件的呈现与校验（`<根>/session/PLUGIN.yml`）——落盘写自己目录里的文件
     pub(crate) config_file: ConfigFile,
     /// 父插件引用（用于获取工具列表等）
     pub(crate) parent: Option<Weak<dyn Plugin>>,
@@ -74,7 +74,7 @@ impl SessionPlugin {
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: SessionConfig, dir: PluginDir) -> Self {
         // 变更订阅表：provider 自持一份，工作目录监听器共享同一份（见下方注入）
         let change_subs = Arc::new(vdfs::ChangeSubscriptions::default());
-        // 目录树场景同时服务 VDFS：文件变化经**同一张订阅表**转发给 `.vdfs`
+        // 目录树场景同时服务 VDFS：文件变化经**同一张订阅表**转发给 `<根>`
         // 订阅方，VDFS 侧不必另开一套监听（实时链路在机制层合流）。
         let workdir_watches = super::workdir::WorkdirWatchManager::default();
         workdir_watches.set_vdfs_subs(change_subs.clone());
@@ -124,7 +124,7 @@ impl SessionPlugin {
     //
     // `chat/clear_messages` / `chat/delete_message` / `chat/update_message` 是
     // **前端自己发起、自己已在本地收敛**的路由：补丁不需要再下发一遍，但 VDFS
-    // 视图必须同步——否则 `.vdfs/session/<sid>/消息` 会停在旧内容上，而且没有任何
+    // 视图必须同步——否则 `<根>/session/<sid>/消息` 会停在旧内容上，而且没有任何
     // 机制会纠正它（两条链路互不校验）。
     //
     // 因此这三条路由各有一个「只发变更」的入口：与 `emit_message_patch` 的区别
@@ -399,7 +399,7 @@ impl SessionPlugin {
         )))
     }
 
-    // ==================== 会话记忆（`.vdfs/session/<id>/AGENTS.md`）====================
+    // ==================== 会话记忆（`<根>/session/<id>/AGENTS.md`）====================
     //
     // 机制在 `symbio_core::memory`（三层记忆同一份实现），本插件只有「个性」：
     // 落位在会话目录、地址挂在会话节点下、两道闸门取自 [`SessionConfig`]。
@@ -446,7 +446,9 @@ impl SessionPlugin {
         if !store.has_scope() {
             return;
         }
-        let address = super::memory::memory_address(&sid);
+        // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
+        let address =
+            crate::symbio_core::vdfs::absolute_addr(ctx, &super::memory::memory_rel_path(&sid));
         match store.segment(&super::memory::segment_spec(&address)) {
             Ok(Some(segment)) => {
                 visitor
@@ -487,7 +489,7 @@ impl Plugin for SessionPlugin {
             //                 旧形态是「为一次数据追加搭 invoke 信封」，纯开销。
             // - `open`     —— 返回的是**进程内句柄**，而句柄交付早已改由编排器直接塞进
             //                 `chat_ctx`（`SESSION_HANDLE`），不走路由。
-            // - `clear`    —— 删除会话的唯一入口是 `delete(.vdfs/session/<id>)`。
+            // - `clear`    —— 删除会话的唯一入口是 `delete(<根>/session/<id>)`。
             // - `chat/clear_messages`  —— `action(<id>/消息, "clear")`。
             // - `chat/delete_message`  —— `action(<id>/消息/<mid>, "truncate")`。
             // - `chat/update_message`  —— `write(<id>/消息/<mid>)`。
@@ -555,7 +557,7 @@ impl Plugin for SessionPlugin {
             // 注入它）。工作区 `AGENTS.md` 归 work 插件，本会话的 `AGENTS.md` 归本
             // 插件——三层各有一个所有者，见 `symbio_core::memory` 的模块文档。
 
-            // 会话记忆（`.vdfs/session/<id>/AGENTS.md`）：**本会话私有**，可读写、有地址、
+            // 会话记忆（`<根>/session/<id>/AGENTS.md`）：**本会话私有**，可读写、有地址、
             // 有两道容量闸门——因此它归内核那套机制，本插件只负责「落位 + 标题 + 地址」。
             // 作用域闸门在 `contribute_memory` 内一处收口（无 `ctx[SESSION_ID]` 即不注入）。
             self.contribute_memory(&ctx, &visitor).await;
@@ -568,7 +570,7 @@ impl Plugin for SessionPlugin {
 
 crate::submit_object_creator!(PLUGIN_SESSION, SessionPlugin::build, dyn Plugin);
 
-// ==================== 配置文档（`.vdfs/session/PLUGIN.yml`） ====================
+// ==================== 配置文档（`<根>/session/PLUGIN.yml`） ====================
 
 /// 会话配置的定义 —— **定义由配置的拥有者产出**。
 ///
@@ -613,7 +615,7 @@ fn config_definition() -> DetailDefinition {
             DetailField::number(
                 "memory_max_bytes",
                 "记忆写入上限（字节）",
-                "会话记忆（.vdfs/session/<id>/AGENTS.md）单次写入的字节上限，超出会被拒绝",
+                "会话记忆文件（每个会话自己的 `AGENTS.md`）单次写入的字节上限，超出会被拒绝",
                 1.0,
                 1_048_576.0,
                 json!(d.memory_max_bytes),
@@ -634,7 +636,7 @@ fn config_definition() -> DetailDefinition {
 //
 // 会话是 VDFS 的第二个原生 provider：
 //
-// - **根 = 会话清单**：`.vdfs/session` 的目录内容即全部会话；根下可新建「会话」
+// - **根 = 会话清单**：`<根>/session` 的目录内容即全部会话；根下可新建「会话」
 //   （`new_types`），**新建语义完全由本 provider 自持**——id 由 provider 生成、
 //   路径名作标题、经 `create` 写意图区分「新建」与「覆盖」；
 // - **节点 = 单个会话**：`ext = session` → 前端聊天工作区渲染器（同一份详情实现

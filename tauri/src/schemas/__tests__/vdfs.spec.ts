@@ -7,7 +7,6 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  VDFS_ROOT,
   actionFileOf,
   isVdfsDir,
   isVdfsDraft,
@@ -21,6 +20,12 @@ import {
   vdfsParent,
   type VdfsNode,
 } from '../vdfs'
+import { resetVdfsRoot, setVdfsRoot, vdfsRoot } from '../vdfsRoot'
+
+// 合成根：**故意不是**后端当前挂载名——本文件全部断言与根名无关，
+// 后端改挂载名（换成任何值）这里一个字都不用改。
+const ROOT = '@vfs'
+setVdfsRoot(ROOT)
 
 function node(partial: Partial<VdfsNode> & { name: string }): VdfsNode {
   return {
@@ -55,16 +60,17 @@ describe('vdfsAccessOf / isVdfsDir', () => {
 })
 
 describe('isVdfsSystemAddr（地址空间的两个半边）', () => {
-  it('虚拟根自身与 `.vdfs/` 之下都是系统资源地址', () => {
-    expect(isVdfsSystemAddr(VDFS_ROOT)).toBe(true)
-    expect(isVdfsSystemAddr('.vdfs/model/gpt4')).toBe(true)
+  it('虚拟根自身与根之下都是系统资源地址', () => {
+    expect(isVdfsSystemAddr(ROOT)).toBe(true)
+    expect(isVdfsSystemAddr(vdfsRoot())).toBe(true)
+    expect(isVdfsSystemAddr('@vfs/model/gpt4')).toBe(true)
   })
 
   it('工作目录里的物理文件不是系统资源地址（重命名只对物理侧开放）', () => {
     expect(isVdfsSystemAddr('notes/a.md')).toBe(false)
     expect(isVdfsSystemAddr('/tmp/demo.zip')).toBe(false)
-    // 前缀相近但不是系统根：不得按 startsWith('.vdfs') 误判
-    expect(isVdfsSystemAddr('.vdfsx/a')).toBe(false)
+    // 前缀相近但不是系统根：不得按 startsWith(根) 误判
+    expect(isVdfsSystemAddr('@vfsx/a')).toBe(false)
   })
 })
 
@@ -80,7 +86,7 @@ describe('isVdfsDraft（草稿 == 没有路径）', () => {
   })
 
   it('一旦落盘（有非空 path）就不是草稿——名字不是判据', () => {
-    expect(isVdfsDraft({ path: '.vdfs/model/gpt4' })).toBe(false)
+    expect(isVdfsDraft({ path: '@vfs/model/gpt4' })).toBe(false)
     expect(isVdfsDraft({ path: 'notes/a.md' })).toBe(false)
   })
 })
@@ -102,26 +108,26 @@ describe('vdfsExtOf', () => {
   })
 })
 
-describe('路径代数（.vdfs 口径）', () => {
+describe('路径代数（根锚点口径）', () => {
   it('vdfsJoin 规整斜杠', () => {
-    expect(vdfsJoin(VDFS_ROOT, 'setting')).toBe('.vdfs/setting')
-    expect(vdfsJoin('.vdfs/setting', 'local')).toBe('.vdfs/setting/local')
-    expect(vdfsJoin('.vdfs/setting/', '/local/')).toBe('.vdfs/setting/local')
-    expect(vdfsJoin('.vdfs/setting', '')).toBe('.vdfs/setting')
-    expect(vdfsJoin('', 'a')).toBe('.vdfs/a')
+    expect(vdfsJoin(ROOT, 'setting')).toBe(`${ROOT}/setting`)
+    expect(vdfsJoin('@vfs/setting', 'local')).toBe('@vfs/setting/local')
+    expect(vdfsJoin('@vfs/setting/', '/local/')).toBe('@vfs/setting/local')
+    expect(vdfsJoin('@vfs/setting', '')).toBe('@vfs/setting')
+    expect(vdfsJoin('', 'a')).toBe('@vfs/a')
   })
 
   it('vdfsParent 逐级上溯到虚拟根', () => {
-    expect(vdfsParent('.vdfs/setting/local')).toBe('.vdfs/setting')
-    expect(vdfsParent('.vdfs/setting')).toBe(VDFS_ROOT)
-    expect(vdfsParent(VDFS_ROOT)).toBe(VDFS_ROOT)
-    expect(vdfsParent('.vdfs/setting/local/')).toBe('.vdfs/setting')
+    expect(vdfsParent('@vfs/setting/local')).toBe('@vfs/setting')
+    expect(vdfsParent(`${ROOT}/setting`)).toBe(ROOT)
+    expect(vdfsParent(ROOT)).toBe(ROOT)
+    expect(vdfsParent('@vfs/setting/local/')).toBe('@vfs/setting')
   })
 
   it('vdfsBase 取末段名', () => {
-    expect(vdfsBase('.vdfs/setting/local')).toBe('local')
-    expect(vdfsBase('.vdfs/setting/')).toBe('setting')
-    expect(vdfsBase(VDFS_ROOT)).toBe(VDFS_ROOT)
+    expect(vdfsBase('@vfs/setting/local')).toBe('local')
+    expect(vdfsBase('@vfs/setting/')).toBe('setting')
+    expect(vdfsBase(ROOT)).toBe(ROOT)
   })
 })
 
@@ -179,5 +185,19 @@ describe('parseVdfsValidation', () => {
     expect(parseVdfsValidation('端口不合法')).toBeNull()
     expect(parseVdfsValidation('')).toBeNull()
     expect(parseVdfsValidation(undefined)).toBeNull()
+  })
+})
+
+describe('vdfsRoot — 根锚点', () => {
+  it('登记后可读回，且自动归一化尾部分隔符', () => {
+    setVdfsRoot(`${ROOT}/`)
+    expect(vdfsRoot()).toBe(ROOT)
+  })
+
+  it('reset 后退化为空串（无虚拟半）', () => {
+    resetVdfsRoot()
+    expect(vdfsRoot()).toBe('')
+    expect(isVdfsSystemAddr('anything')).toBe(false)
+    setVdfsRoot(ROOT) // 恢复，避免影响其它用例（若拆分文件可删）
   })
 })

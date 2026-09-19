@@ -287,4 +287,4 @@ plugin_name: my_plugin       # 实例名，缺省 = 目录名
 
 > 配置读写走 `symbio_core::plugin_dir` 的 `PluginDir` + `ConfigFile`：插件持有自己的
 > `ConfigFile`，读 / 写**自己**的 `PLUGIN.yml`（`ConfigFile::apply` = 校验 → 落内存 →
-> 落自己的文件 → 广播）。对外地址自动是 `.vdfs/my_plugin/PLUGIN.yml`，无需写任何路由。
+> 落自己的文件 → 广播）。对外地址自动是 `<根>/my_plugin/PLUGIN.yml`，无需写任何路由。

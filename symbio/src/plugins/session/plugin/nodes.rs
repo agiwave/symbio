@@ -114,7 +114,7 @@ impl SessionRuntime {
 /// 而状态迁移恰恰是最频繁的一类变更。
 ///
 /// 状态由 `node` 表达已足够：消费者要的是 `status` / `outcome` / `error` /
-/// `title`，全在节点视图里。正文另有 `.vdfs/session/<id>/消息` 承载。
+/// `title`，全在节点视图里。正文另有 `<根>/session/<id>/消息` 承载。
 pub(crate) fn session_change(id: &str, node: vdfs::VdfsNode) -> vdfs::VdfsChange {
     vdfs::VdfsChange::new(id, vdfs::VDFS_CHANGE_UPDATED).with_node(node)
 }
@@ -282,7 +282,7 @@ fn cursor_id(before: &str) -> Option<&str> {
 
 /// 会话内部：转写列表的路径段（同时是展示名）。
 ///
-/// 转写是**列表**：`.vdfs/session/<id>/消息` 的每一项是一条消息，顺序由
+/// 转写是**列表**：`<根>/session/<id>/消息` 的每一项是一条消息，顺序由
 /// `seq`（唯一权威顺序锚点）决定。流式输出是列表项的**追加型变更**
 /// （`VDFS_CHANGE_APPENDED`），不是另一条协议。
 pub(crate) const SEG_MESSAGES: &str = "消息";
@@ -608,7 +608,7 @@ pub(crate) fn message_of<'a>(
 ///
 /// ## `live` 不是可选装饰
 ///
-/// 会话叶子（`.vdfs/session/<id>`）与转写列表（`<id>/消息`）是**同一份数据的两个
+/// 会话叶子（`<根>/session/<id>`）与转写列表（`<id>/消息`）是**同一份数据的两个
 /// 地址**，必须给出**同一份消息集合**。转写列表经 [`super::vdfs_provider`] 的
 /// `transcript_of` 叠加了在途缓冲，因此叶子也必须叠加——否则「读叶子拿历史」与
 /// 「按变更拼实时」两条路径会在流式期间分叉：叶子少掉**正在跑的那一轮**。

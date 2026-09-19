@@ -7,7 +7,7 @@
 - **Provider 注册**：启动时通过 `traverse` 向 `CAPABILITY_VISITOR` 注册**唯一生效的核心 `ModelProvider`**（trait object，由 `bound_provider::BoundProvider` 实现——持久化配置 `ModelProviderConfig` + 协议适配器绑定）。解析链：会话上下文选定的 provider_id > 默认 Provider > 首个启用的 Provider。
 - **协议适配**：协议契约 `ModelProtocol`（钩子收 `&ModelProviderConfig`）**插件私有**，不对外导出；内置 4 个实现——`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`，统一转换为内部 `model_chat::Request/Response` 事件流（文本、思考、工具调用）。`resolve_protocol_id` 别名表与 `MODEL_PROTOCOL_*` 注册常量同样内化于 `protocols/`。
 - **单轮执行**：`execute_turn` 即单轮"发消息→收流"的完整闭环，不含重试、裁剪、压缩等编排逻辑（这些归 session，见 `session/README.md` 六大策略）。
-- **配置存取**：providers CRUD 与引擎参数（API Key、Base URL 等）都在 `.vdfs/model` 上——条目读写走 `vdfs/read` / `vdfs/write`，字段定义随节点 `schema` 下发。
+- **配置存取**：providers CRUD 与引擎参数（API Key、Base URL 等）都在 `<根>/model` 上——条目读写走 `vdfs/read` / `vdfs/write`，字段定义随节点 `schema` 下发。
 
 ## 明确不做
 
@@ -17,11 +17,11 @@
 
 ## 路由
 
-**无**。model 的全部对外能力都在 VDFS 上（`.vdfs/model`）。持久化分两处：
+**无**。model 的全部对外能力都在 VDFS 上（`<根>/model`）。持久化分两处：
 跨条目状态（`default_provider_id`）写自己的 `plugins/model/PLUGIN.yml`，
 Provider 明细是资源、各存各的 `provider.json`。
 
-模型 provider **不设插件路由**：`.vdfs/model` 挂载点由本插件自己的
+模型 provider **不设插件路由**：`<根>/model` 挂载点由本插件自己的
 `impl VdfsProvider` 提供——落盘走 `providers::vdfs_service::SingleFileVdfs`
 （一个条目 = 一份 `provider.json`，条目内部不外露），清单走 `MemoryVdfs`
 （内存镜像：启动时从磁盘灌入、写盘成功后回灌）。原 `entities/*` / `config/get` /

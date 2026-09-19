@@ -9,7 +9,11 @@
 //! 用户目录。需要真文件的用例一律用 `tempfile` 自建 [`MemoryFile`]。
 
 use super::*;
-use crate::symbio_core::MemoryFile;
+use crate::symbio_core::vdfs::absolute_addr;
+use crate::symbio_core::{
+    InvokeRequest, InvokeRequestExt, MemoryFile, SimpleRequest, PLUGIN_SESSION, VDFS_PARENT_ADDR,
+};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 /// 测试用会话存储根（只算路径，不落盘）
@@ -54,10 +58,20 @@ fn session_id_is_sanitized_before_joining() {
     );
 }
 
-/// 地址与会话内部其它区段并列（记忆本来就是会话的一部分）
+/// 相对地址 + 上下文父地址 = 绝对地址（封装入口 [`absolute_addr`]）
+///
+/// 容器转发时把当前父地址写进上下文；本测试直接设一个合成父地址，
+/// 于是不依赖真实挂载名（换名不必改测试）。
 #[test]
-fn address_is_under_the_session_node() {
-    assert_eq!(memory_address("abc"), ".vdfs/session/abc/AGENTS.md");
+fn address_composes_from_context_parent_and_rel() {
+    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/session".to_string());
+    assert_eq!(memory_rel_path("abc"), "abc/AGENTS.md");
+    assert_eq!(
+        absolute_addr(&ctx, &memory_rel_path("abc")),
+        "@vfs/session/abc/AGENTS.md",
+        "绝对地址 = 上下文父地址 + 相对地址"
+    );
 }
 
 /// 无会话 id = 无作用域（闸门在 [`store`] 一处收口）
@@ -87,11 +101,12 @@ fn scope_carries_the_two_gates_into_the_kernel() {
 /// 条目规格：标题 / 地址 / 区分说明 / 空提示四样都在
 #[test]
 fn segment_spec_is_the_session_layer_personality() {
-    let address = memory_address("abc");
-    let s = segment_spec(&address);
+    // 合成绝对地址（真实值由调用点的 absolute_addr 拼出）
+    let address = "@vfs/session/abc/AGENTS.md";
+    let s = segment_spec(address);
 
     assert_eq!(s.title, "会话记忆");
-    assert_eq!(s.address, ".vdfs/session/abc/AGENTS.md");
+    assert_eq!(s.address, address, "片段地址就是下发给模型的那个可编辑地址");
     assert!(
         s.note
             .unwrap_or_default()
@@ -109,10 +124,10 @@ fn segment_round_trips_through_a_real_file() {
     let m = MemoryFile::new(Some(path), 1024, 256);
     m.write("本会话约定：所有时间用 UTC。").unwrap();
 
-    let address = memory_address("abc");
-    let seg = m.segment(&segment_spec(&address)).unwrap().unwrap();
+    let address = "@vfs/session/abc/AGENTS.md";
+    let seg = m.segment(&segment_spec(address)).unwrap().unwrap();
     assert!(seg.contains("【会话记忆】"), "{seg}");
-    assert!(seg.contains(".vdfs/session/abc/AGENTS.md"), "{seg}");
+    assert!(seg.contains(address), "地址要下发: {seg}");
     assert!(seg.contains("1024"), "上限来自本层配置: {seg}");
     assert!(seg.contains("本会话约定：所有时间用 UTC。"), "{seg}");
     assert!(seg.contains("vdfs_read") && seg.contains("vdfs_write"));

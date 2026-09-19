@@ -40,7 +40,7 @@
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
 use super::store::BundleStore;
-use crate::symbio_core::{MemoryFile, NodeSpec, SegmentSpec, PLUGIN_AGENT};
+use crate::symbio_core::{MemoryFile, NodeSpec, SegmentSpec, AGENTS_FILE, PLUGIN_AGENT};
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）。
 ///
@@ -82,12 +82,14 @@ pub fn node_spec() -> NodeSpec<'static> {
     }
 }
 
-/// 可编辑地址 —— 本插件的整包浏览面（`agent/<id>` 之下那个文件）
-pub fn address(bundle_id: &str) -> String {
-    format!(
-        ".vdfs/{PLUGIN_AGENT}/{bundle_id}/{}",
-        crate::symbio_core::AGENTS_FILE
-    )
+/// 记忆文件在**本插件挂载点之下**的相对路径（`<id>/AGENTS.md`）。
+///
+/// 相对地址是常态：provider 全程只跟相对地址打交道。需要协议级绝对地址的场合
+/// （提示词里印给模型的可编辑地址），由调用方经
+/// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
+/// 挂载点叫什么不归本插件。文件名取 [`AGENTS_FILE`]：不写第二份地址。
+pub fn rel_path(bundle_id: &str) -> String {
+    format!("{bundle_id}/{AGENTS_FILE}")
 }
 
 /// 系统提示词片段：**走内核排版**（地址 + 上限 + 当前 + 正文 + 截断提示）。

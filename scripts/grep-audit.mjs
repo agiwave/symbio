@@ -8,6 +8,7 @@
  *   - S-007:        CHANGELOG 缺关键修复条目（v25-N6 案例）
  *   - S-008:        VdfsNode.status 用裸字面量赋值（词表只有 `VDFS_STATUS_*`）
  *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
+ *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
@@ -290,6 +291,92 @@ for (const [file, lines] of linesOf) {
   })
 }
 if (s009 === 0) ok('S-009 通过：事件 kind 一律取自 KIND_* 常量')
+console.log()
+
+// ── S-010: vdfs 挂载根名不得出现在 vdfs 插件之外 ───────────────────────
+//
+// 根名是 vdfs 插件自己的挂载规则（`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，
+// 全仓唯一的字面量）。历史上它曾以 `.vdfs` 的形态蔓延到全系统——前端路径代数、
+// 提示词地址、十几份文档——导致「改个挂载名」变成全仓手术。现机制已收口：
+// 后端插件经 `AddrRootDecl` 静态声明、父地址经上下文传递（`VDFS_PARENT_ADDR`）、
+// 前端启动期经 `vdfs/root` 拿根地址当运行期数据（`schemas/vdfsRoot`）。
+// 本规则把收口**钉死**：插件之外再出现根名字面量即违规。
+//
+// 判据（按 token 匹配，宁可误报到注释也不放过地址字面量）：
+//   · `.vdfs` 裸名 / `.vdfs/…`（地址） / 带版本后缀的变体（`.vdfsv2`、`.vdfs2`）。
+//     **连字符后缀不判**（`.vdfs-card` 这类 CSS 类名是另一码事），
+//     其它字母数字后缀（`.vdfsx`）同样不判——按形状判根名，不猜意图。
+// 范围：仓内全部 .rs / .ts / .vue / .md（`scripts/` 工具自身除外）。
+// 豁免（写在规则里，逐条留痕）：
+//   · `symbio/src/plugins/vdfs/**` —— 根名的所有者，字面量只允许在这里；
+//   · `docs/CHANGELOG.md`、`docs/archive/**` —— 历史记录不改写，
+//     改写等于伪造当时的代码状态；
+//   · 本文件（审计脚本自己要描述这条规则）。
+// 逐行豁免：`grep-audit-allow S-010: 理由`（本行或紧邻上一行，理由不可为空）。
+console.log('--- S-010: vdfs 挂载根名归属检查 ---')
+
+const S010_TOKEN_RE = /(?<![A-Za-z0-9_.])\.vdfs(?:v?\d+)?(?![A-Za-z0-9_-])/g
+// 理由必须含**至少一个字母 / 数字 / 汉字**：markdown 里 `<!-- ... :   -->` 的
+// 注释终止符 `-->` 不能充当理由（空理由视为未豁免的约定不能被它绕过）。
+const WAIVER_S010_RE = /grep-audit-allow S-010:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
+const S010_EXTS = new Set(['.rs', '.ts', '.vue', '.md'])
+const S010_SKIP_DIRS = new Set(['node_modules', 'target', 'dist', '.git', '.workbuddy', '.workbuddy-ai', '.venv'])
+// 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根
+const S010_ROOT = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+
+function walkS010(dir) {
+  const out = []
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return out
+  }
+  for (const e of entries) {
+    const p = path.join(dir, e.name)
+    if (e.isDirectory()) {
+      if (S010_SKIP_DIRS.has(e.name)) continue
+      out.push(...walkS010(p))
+    } else if (e.isFile() && S010_EXTS.has(path.extname(e.name))) {
+      out.push(p)
+    }
+  }
+  return out
+}
+
+const s010Self = fileURLToPath(import.meta.url)
+const s010Files = walkS010(S010_ROOT).filter((f) => {
+  if (path.resolve(f) === path.resolve(s010Self)) return false
+  const rel = path.relative(S010_ROOT, f).split(path.sep).join('/')
+  if (rel.startsWith('symbio/src/plugins/vdfs/')) return false // 所有者
+  if (rel === 'docs/CHANGELOG.md' || rel.startsWith('docs/archive/')) return false // 历史
+  if (rel.startsWith('cli/target/') || rel.startsWith('tauri/target/')) return false // 构建产物
+  return true
+})
+
+let s010 = 0
+for (const file of s010Files) {
+  let lines
+  try {
+    lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+  } catch {
+    continue
+  }
+  lines.forEach((l, i) => {
+    if (!S010_TOKEN_RE.test(l)) {
+      S010_TOKEN_RE.lastIndex = 0
+      return
+    }
+    S010_TOKEN_RE.lastIndex = 0
+    if (WAIVER_S010_RE.test(l) || (i > 0 && WAIVER_S010_RE.test(lines[i - 1]))) return
+    err(
+      `${disp(file)}:${i + 1}  出现 vdfs 挂载根名字面量；根名只归 vdfs 插件` +
+        `（plugins/vdfs/fs.rs），消费方用运行期数据（后端 VDFS_PARENT_ADDR / 前端 vdfsRoot 锚点）`,
+    )
+    s010++
+  })
+}
+if (s010 === 0) ok('S-010 通过：根名字面量只在 vdfs 插件内')
 console.log()
 
 // ── 汇总 ───────────────────────────────────────────────────────────────

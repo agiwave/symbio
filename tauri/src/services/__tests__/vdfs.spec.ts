@@ -3,7 +3,7 @@
  *
  * S10 新增的统一动作口：「测试连接」这类能力由 provider 自持，前端只转发标识。
  * 本单测锁定两件容易静默漂移的事：
- * 1. 地址与后端同一套口径（`.vdfs` 打头 = 系统资源，原样透传、零翻译）；
+ * 1. 地址与后端同一套口径（根锚点打头 = 系统资源，原样透传、零翻译）；
  * 2. 动作标识与载荷**原样**透传——前端不解释语义，也不擅自补字段。
  */
 
@@ -14,7 +14,11 @@ vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn(), connectPlugin: vi.fn(
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() } }))
 
 import { callPlugin } from '@/services/plugin'
-import { VDFS_ACTION, VDFS_ROOT, VDFS_WRITE, vdfsJoin } from '@/schemas/vdfs'
+import { VDFS_ACTION, VDFS_WRITE, vdfsJoin } from '@/schemas/vdfs'
+import { setVdfsRoot } from '@/schemas/vdfsRoot'
+
+// 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
+setVdfsRoot('@vfs')
 import { arrayBufferToBase64, base64ToBytes, runVdfsAction, writeVdfsBinary } from '../vdfs'
 import { vdfsChangeInScope } from '../eventBus'
 
@@ -32,31 +36,31 @@ describe('runVdfsAction（vdfs/action）', () => {
       ok: true,
       message: '校验通过',
     })
-    const path = vdfsJoin(vdfsJoin(VDFS_ROOT, 'model'), 'openai-gpt4o')
+    const path = vdfsJoin(vdfsJoin('@vfs', 'model'), 'openai-gpt4o')
     const r = await runVdfsAction(path, 'test')
 
     expect(r.ok).toBe(true)
     expect(r.message).toBe('校验通过')
     expect(lastCall().op).toBe(VDFS_ACTION)
     expect(lastCall().payload).toEqual({
-      path: '.vdfs/model/openai-gpt4o',
+      path: '@vfs/model/openai-gpt4o',
       action: 'test',
     })
   })
 
   it('无载荷时不发送 payload 字段（后端按 Option 处理）', async () => {
     vi.mocked(callPlugin).mockResolvedValueOnce({ action: 'test', ok: false, message: '失败' })
-    await runVdfsAction(vdfsJoin(vdfsJoin(VDFS_ROOT, 'mcp'), 'github'), 'test')
+    await runVdfsAction(vdfsJoin(vdfsJoin('@vfs', 'mcp'), 'github'), 'test')
 
-    expect(lastCall().payload).toEqual({ path: '.vdfs/mcp/github', action: 'test' })
+    expect(lastCall().payload).toEqual({ path: '@vfs/mcp/github', action: 'test' })
   })
 
   it('有载荷时原样透传（前端不解释其内容）', async () => {
     vi.mocked(callPlugin).mockResolvedValueOnce({ action: 'test', ok: true, message: 'ok' })
-    await runVdfsAction(vdfsJoin(vdfsJoin(VDFS_ROOT, 'mcp'), 'github'), 'test', { verbose: true })
+    await runVdfsAction(vdfsJoin(vdfsJoin('@vfs', 'mcp'), 'github'), 'test', { verbose: true })
 
     expect(lastCall().payload).toEqual({
-      path: '.vdfs/mcp/github',
+      path: '@vfs/mcp/github',
       action: 'test',
       payload: { verbose: true },
     })
@@ -71,9 +75,9 @@ describe('整包导入（vdfs/write 的二进制通道）', () => {
   })
 
   it('writeVdfsBinary 原样发送 b64（后端据 b64 判定二进制）', async () => {
-    vi.mocked(callPlugin).mockResolvedValueOnce({ path: '.vdfs/skill/demo.zip', created: true })
+    vi.mocked(callPlugin).mockResolvedValueOnce({ path: '@vfs/skill/demo.zip', created: true })
     const r = await writeVdfsBinary(
-      vdfsJoin(vdfsJoin(VDFS_ROOT, 'skill'), 'demo.zip'),
+      vdfsJoin(vdfsJoin('@vfs', 'skill'), 'demo.zip'),
       'UEsDBA==',
       { create: true }
     )
@@ -81,7 +85,7 @@ describe('整包导入（vdfs/write 的二进制通道）', () => {
     expect(r.created).toBe(true)
     expect(lastCall().op).toBe(VDFS_WRITE)
     expect(lastCall().payload).toEqual({
-      path: '.vdfs/skill/demo.zip',
+      path: '@vfs/skill/demo.zip',
       b64: 'UEsDBA==',
       create: true,
     })
@@ -100,7 +104,7 @@ describe('整包导入（vdfs/write 的二进制通道）', () => {
  * 判错的后果是**静默漏事件**（该刷新的不刷新），故直接测谓词本身。
  */
 describe('vdfsChangeInScope（按展示地址前缀分流）', () => {
-  const SESSIONS = vdfsJoin(VDFS_ROOT, 'session')
+  const SESSIONS = vdfsJoin('@vfs', 'session')
 
   it('前缀本身与子树内的变更都算命中', () => {
     expect(vdfsChangeInScope({ prefix: SESSIONS }, SESSIONS)).toBe(true)
@@ -109,8 +113,8 @@ describe('vdfsChangeInScope（按展示地址前缀分流）', () => {
   })
 
   it('别人的路径不算命中（前缀必须整段匹配，不是字符串前缀）', () => {
-    expect(vdfsChangeInScope({ prefix: SESSIONS }, vdfsJoin(VDFS_ROOT, 'model/openai'))).toBe(false)
-    expect(vdfsChangeInScope({ prefix: SESSIONS }, '.vdfs/session-templates/x')).toBe(false)
+    expect(vdfsChangeInScope({ prefix: SESSIONS }, vdfsJoin('@vfs', 'model/openai'))).toBe(false)
+    expect(vdfsChangeInScope({ prefix: SESSIONS }, '@vfs/session-templates/x')).toBe(false)
   })
 
   it('directChildren 只放行直接子项（会话叶子），挡住更深的区段', () => {

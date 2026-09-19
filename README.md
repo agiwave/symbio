@@ -20,7 +20,7 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `session/ch
 ### 你能用它做什么
 
 - **智能体会话**：会话可绑定一个 Agent（一个 Agent = 一个目录，按 [`agent-dir/v2`](./docs/design/agent-directory-spec.md) 装配：根 `AGENTS.md` 人格 + 复用宿主既有的 `skill` / `mcp` 插件子树），由 `session` 统一编排工具调用循环；Agent 还可经 `agent_run` 工具委托子智能体。
-- **统一 LLM 接入**：`model` 插件内置 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini 四类协议适配器（模型资源经 `.vdfs/model` 寻址），支持流式与工具调用；由 `session` 在会话循环中直连调用。
+- **统一 LLM 接入**：`model` 插件内置 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini 四类协议适配器（模型资源经 `<根>/model` 寻址），支持流式与工具调用；由 `session` 在会话循环中直连调用。
 - **工具与集成**：本地 shell / 文件读写、Web 请求与搜索、技能（skill）、MCP server 注册与调用、Telegram 消息通道。
 - **会话与上下文**：`session/` 负责长连接消息持久化、历史裁剪与上下文压缩。
 - **可扩展**：新能力只需实现 `Plugin` 并注册，即可挂入插件树、被 LLM 通过 `traverse("available_tools")` 自动发现。
@@ -46,7 +46,7 @@ Symbio 让你用**路径寻址**的方式调用任意能力（例如 `session/ch
 
 - **分形路由**：用 `/` 分隔的路径定位任意能力，容器与叶子插件接口完全一致。
 - **LLM 原生**：递归收集插件树中的工具定义，深度支持 Function Calling。
-- **VDFS 虚拟文件系统**：资源型插件统一以 `.vdfs/<插件名>` 挂载点对外（挂载点全表见 [CURRENT.md](./docs/CURRENT.md) §1），前端按后端下发的注册表与详情页定义动态渲染。
+- **VDFS 虚拟文件系统**：资源型插件统一以 `<根>/<插件名>` 挂载点对外（挂载点全表见 [CURRENT.md](./docs/CURRENT.md) §1），前端按后端下发的注册表与详情页定义动态渲染。
 - **插件互不可见**：工具、选项与人格片段统一由 `traverse` 收集进 `CapabilityVisitor`；插件之间不直接引用，只依赖 `symbio_core` 的共享契约。
 
 > 分层结构与请求流转图见 [docs/SYSTEM_MAP.md](./docs/SYSTEM_MAP.md)——本文不重复画（手绘树易漂移）。
@@ -74,7 +74,7 @@ npm run tauri dev
 
 ### 导入智能体（Agent 目录 / zip 整包）
 
-智能体以目录整包（zip）形式经插件树导入，无独立二进制入口：导入路径为 `.vdfs/agent` 的**新建类型 `zip`**。示例包见 [`examples/fullstack-dev/`](./examples/fullstack-dev)，包规范见 [Agent 目录规范 v2](./docs/design/agent-directory-spec.md)（取代已归档的 OAB v1 规范）。
+智能体以目录整包（zip）形式经插件树导入，无独立二进制入口：导入路径为 `<根>/agent` 的**新建类型 `zip`**。示例包见 [`examples/fullstack-dev/`](./examples/fullstack-dev)，包规范见 [Agent 目录规范 v2](./docs/design/agent-directory-spec.md)（取代已归档的 OAB v1 规范）。
 
 ### 运行命令行前端（CLI）
 

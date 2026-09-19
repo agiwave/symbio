@@ -204,7 +204,7 @@ impl Default for McpPlugin {
     }
 }
 
-// ==================== VDFS 挂载点（`.vdfs/mcp`） ====================
+// ==================== VDFS 挂载点（`<根>/mcp`） ====================
 //
 // 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
 // 写 / 删 / 动作的语义都在这里表达。
@@ -643,7 +643,7 @@ impl Plugin for McpPlugin {
     }
 
     /// mcp 已无自有路由：每个 MCP Server 都是 VDFS 上的一个可寻址条目
-    /// （`.vdfs/mcp/<name>`，见 `impl VdfsProvider`），配置因此没有第二条入口。
+    /// （`<根>/mcp/<name>`，见 `impl VdfsProvider`），配置因此没有第二条入口。
     async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!(
             "{PLUGIN_MCP} 已无自有路由，请改用 VDFS 地址"

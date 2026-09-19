@@ -25,12 +25,14 @@ export const VDFS_WATCH = 'vdfs/watch'
 export const VDFS_UNWATCH = 'vdfs/unwatch'
 /** 执行节点动作（provider 自持的动词，如「测试连接」） */
 export const VDFS_ACTION = 'vdfs/action'
-
-/** 虚拟根路径（系统资源类别统一挂接在此目录之下）。
+/**
+ * **进入地址空间**：列出虚拟根——**不给地址**（后端 `plugins/vdfs/protocol.rs::VDFS_ROOT`）。
  *
- * 地址规则与后端 [`UnifiedFs`] 同源：`.vdfs` 打头 = 系统资源，其余 = 磁盘文件。
- * 前端与后端共用同一套地址口径，**不存在另一套线路翻译**。 */
-export const VDFS_ROOT = '.vdfs'
+ * 根叫什么归后端 vdfs 插件，前端不该知道它：回包里的 `path` 即根地址，
+ * 由 `services/vdfs.ensureVdfsRoot` 在启动期取回并登记进锚点
+ * （`schemas/vdfsRoot`），此后一律当**运行期数据**从它往下拼。
+ */
+export const VDFS_ROOT_OP = 'vdfs/root'
 
 /** 节点状态：进行中（其余状态词由 provider 自定，前端只做呈现映射） */
 export const VDFS_STATUS_WORKING = 'working'
@@ -140,7 +142,7 @@ export const VDFS_NEW_SOURCE_FILE = 'file'
  * 即可读（文件）。`kind` 只承载场景语义，不得用于能力判定。
  */
 export interface VdfsNode {
-  /** 全路径（`.vdfs/…` 或工作目录相对地址，与后端展示口径一致） */
+  /** 全路径（根锚点打头的虚拟地址，或工作目录相对地址，与后端展示口径一致） */
   path: string
   /** 父节点内的唯一标识（路径段） */
   name: string
@@ -277,7 +279,7 @@ export const VDFS_CHANGE_APPENDED = 'appended'
 export const VDFS_CHANGE_TRUNCATED = 'truncated'
 
 /** 数据变更事件（总线下发的形状；后端 `VdfsChangeEvent`）。
- *  路径即对外展示地址（`.vdfs/…` 或工作目录相对地址），消费方直接比对。
+ *  路径即对外展示地址（根锚点打头的虚拟地址，或工作目录相对地址），消费方直接比对。
  *
  *  ## 载荷按变更类型可选（不是装饰）
  *
@@ -316,13 +318,17 @@ export interface VdfsValidationError {
 // ==================== 路径代数（纯函数，机制级唯一实现） ====================
 //
 // 虚拟路径是 VDFS 的唯一寻址方式；下列函数是全部路径运算的单一来源，
-// 任何模块不得再手写字符串拼接/切分。**口径恒为 `.vdfs`**（§3）。
+// 任何模块不得再手写字符串拼接/切分。**口径恒为「根锚点」**（§3）：根叫什么
+// 由 `schemas/vdfsRoot` 在启动期引导，这里不持有它的字面量。
+
+import { vdfsRoot } from './vdfsRoot'
 
 /** 规整目录段：空 / 根 → 根；否则去尾部斜杠 */
 function normalizeDir(dir: string): string {
-  if (!dir || dir === VDFS_ROOT) return VDFS_ROOT
+  const root = vdfsRoot()
+  if (!dir || dir === root) return root
   const trimmed = dir.replace(/\/+$/, '')
-  return trimmed || VDFS_ROOT
+  return trimmed || root
 }
 
 /** 拼接（父目录 + 单段名；自动规整多余斜杠） */
@@ -351,16 +357,18 @@ export function newFileNameOf(fileName: string, ext: string): string {
 
 /** 父目录（类别根的父 = 虚拟根；虚拟根的父 = 虚拟根） */
 export function vdfsParent(path: string): string {
+  const root = vdfsRoot()
   const p = path.replace(/\/+$/, '')
-  if (!p || p === VDFS_ROOT) return VDFS_ROOT
+  if (!p || p === root) return root
   const i = p.lastIndexOf('/')
-  return i <= 0 ? VDFS_ROOT : p.slice(0, i)
+  return i <= 0 ? root : p.slice(0, i)
 }
 
 /** 末段名（虚拟根 → 虚拟根） */
 export function vdfsBase(path: string): string {
+  const root = vdfsRoot()
   const p = path.replace(/\/+$/, '')
-  if (!p || p === VDFS_ROOT) return VDFS_ROOT
+  if (!p || p === root) return root
   const i = p.lastIndexOf('/')
   return i < 0 ? p : p.slice(i + 1)
 }
@@ -382,16 +390,17 @@ export function isVdfsDir(node: { access?: string } | null | undefined): boolean
 }
 
 /**
- * 是否**系统资源地址**（`.vdfs` 打头）。
+ * 是否**系统资源地址**（根锚点打头）。
  *
- * 地址空间只有两个半边：`.vdfs` 之下是各 provider 挂载的虚拟资源，其余是
- * 工作目录里的物理文件（见 [`VDFS_ROOT`]）。这个划分**是能力差异的来源**：
- * 物理半边由文件系统 provider 承载 `move`（同一地址空间内改名），虚拟半边由
- * 各插件 provider 自持，它们一律没有实现 `move` —— 因此「重命名」入口只对
- * 物理地址给出（见 `useVdfs.mechanismActions`）。
+ * 地址空间只有两个半边：根之下是各 provider 挂载的虚拟资源，其余是
+ * 工作目录里的物理文件。这个划分**是能力差异的来源**：物理半边由文件系统
+ * provider 承载 `move`（同一地址空间内改名），虚拟半边由各插件 provider 自持，
+ * 它们一律没有实现 `move` —— 因此「重命名」入口只对物理地址给出
+ * （见 `useVdfs.mechanismActions`）。
  */
 export function isVdfsSystemAddr(path: string): boolean {
-  return path === VDFS_ROOT || path.startsWith(`${VDFS_ROOT}/`)
+  const root = vdfsRoot()
+  return path === root || path.startsWith(`${root}/`)
 }
 
 /**
@@ -410,9 +419,9 @@ export function isVdfsDraft(node: { path?: string } | null | undefined): boolean
 //
 // 会话在 VDFS 上是「叶子 + 内部区段」：
 //
-//   .vdfs/session/<sid>             会话叶子（ext = session，点开即聊天工作区）
-//   .vdfs/session/<sid>/消息        转写列表（`l`）—— 会话的**本体**
-//   .vdfs/session/<sid>/消息/<mid>  单条消息（ext = message，`r`）
+//   <根>/session/<sid>             会话叶子（ext = session，点开即聊天工作区）
+//   <根>/session/<sid>/消息        转写列表（`l`）—— 会话的**本体**
+//   <根>/session/<sid>/消息/<mid>  单条消息（ext = message，`r`）
 //
 // 两个段名都由后端 provider 决定，**不是前端的知识**：
 // - 挂载段 `session`  —— 后端 `symbio_core::ids::PLUGIN_SESSION`，是 provider 注册时
@@ -435,7 +444,7 @@ export const VDFS_KIND_MESSAGES = 'messages'
 /**
  * 会话地址方案（**运行期数据**）。
  *
- * - `mountDir`    挂载目录地址（如 `.vdfs/session`）
+ * - `mountDir`    挂载目录地址（如 `<根>/session`）
  * - `messagesSeg` 转写列表的段名（展示名，随后端下发）
  *
  * 解析见 `services/vdfsScheme.ensureVdfsSessionScheme()`。之所以是值而不是
@@ -479,14 +488,14 @@ export function vdfsMessageAddr(
  * 因此变更可以丢、可以重放、可以乱序，视图仍然正确。
  *
  * 不是会话域的地址一律返回 `null`（会话清单本身、子会话 / 工作目录区段、
- * `.vdfs/model` 等）——调用方据此跳过，无需自己切字符串。
+ * `<根>/model` 等）——调用方据此跳过，无需自己切字符串。
  */
 export type SessionRoute =
-  /** `.vdfs/session/<sid>`：会话叶子（运行态的承载者） */
+  /** `<根>/session/<sid>`：会话叶子（运行态的承载者） */
   | { target: 'session'; sessionId: string }
-  /** `.vdfs/session/<sid>/消息`：转写列表（整表） */
+  /** `<根>/session/<sid>/消息`：转写列表（整表） */
   | { target: 'messages'; sessionId: string }
-  /** `.vdfs/session/<sid>/消息/<mid>`：单条消息 */
+  /** `<根>/session/<sid>/消息/<mid>`：单条消息 */
   | { target: 'message'; sessionId: string; messageId: string }
 
 /**

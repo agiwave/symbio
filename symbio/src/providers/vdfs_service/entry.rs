@@ -78,7 +78,7 @@ pub fn split_rel(path: &str) -> Option<(&str, &str)> {
 
 /// 路径末段 → 条目 id（去掉 `.<kind>` 呈现扩展名）
 ///
-/// `.vdfs/skill/demo.skill` 与裸 `demo` 同解——呈现扩展名是**前端选渲染器**的
+/// `<根>/skill/demo.skill` 与裸 `demo` 同解——呈现扩展名是**前端选渲染器**的
 /// 键，不是地址的一部分，因此寻址必须先剥掉。历史上这段代码在每个资源插件里
 /// 各有一份，收敛到这里。
 pub fn id_of(path: &str, kind: &str) -> String {

@@ -21,7 +21,7 @@
 | H10 | 每 token 强制同步布局（读 `scrollHeight`） | 布局抖动 |
 | H11 | 整份 `fetchTranscript` | 打开即读全部历史 |
 
-**后端侧**：`vdfs/list .vdfs/session` 曾经要对每个会话读出并解析**含全部消息的**
+**后端侧**：`vdfs/list <根>/session` 曾经要对每个会话读出并解析**含全部消息的**
 `session.json` —— 清单成本 = O(所有会话的全部历史)（见 §11）。
 
 ---
@@ -52,8 +52,8 @@
 ### 4.1 窗口单位 = 根节点（Turn 页），不是消息条数
 
 ```text
-.vdfs/session/<id>/消息            ← 列表（seq 升序，含在途消息）
-.vdfs/session/<id>/消息/<mid>      ← 列表项（正文按需 read）
+<根>/session/<id>/消息            ← 列表（seq 升序，含在途消息）
+<根>/session/<id>/消息/<mid>      ← 列表项（正文按需 read）
 
 一页 = 一段连续的根节点 + 它们的全部子孙
        ┌─ 根 A ─┬ 子 a1 ── 孙 a1x
@@ -134,7 +134,7 @@ vdfs/list { path: "<id>/消息", limit: 30, before: "<id>/消息/<mid>" }
 | 2.5 | 转写树化（复合节点成目录） | 推迟 |
 | 3 | 删除归一 | 推迟 |
 
-另：`.vdfs/session` 清单**只列会话**——插件配置文件不再并列其中（可达性不变，
+另：`<根>/session` 清单**只列会话**——插件配置文件不再并列其中（可达性不变，
 进设置菜单走 ConfigurableVisitor 通道）。
 
 **当前基线**：`cargo test --lib` **528 用例**（原 518）；前端 vitest **18 文件 / 146 用例**。

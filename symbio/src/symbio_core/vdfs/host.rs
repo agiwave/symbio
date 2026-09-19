@@ -85,8 +85,8 @@ pub fn host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn InvokeRequest>> {
 /// ## 为什么不是「每个被订阅路径一个转发任务 + 一条广播」
 ///
 /// 广播源是整棵子树共用的（[`notify_change`] 不按路径分流）。若每个路径各起
-/// 一个任务，两条**重叠**的订阅（会话清单订 `.vdfs/session`、转写订
-/// `.vdfs/session/<id>/消息`）就会把同一条变更投到总线上两次——前端收到重复帧，
+/// 一个任务，两条**重叠**的订阅（会话清单订 `<根>/session`、转写订
+/// `<根>/session/<id>/消息`）就会把同一条变更投到总线上两次——前端收到重复帧，
 /// 流式文本叠字。本表把投递收敛成**恰好一次**：每条变更只投给与之相关的最具体
 /// 的那条订阅，与订阅的条数、重叠方式都无关。
 ///
@@ -117,7 +117,7 @@ pub struct ChangeSubscriptions {
 
 /// 变更路径 `changed` 是否落在订阅路径 `subscribed` 的同一子树内
 ///
-/// 空串是 provider 根（`CompositeVdfs::resolve` 对 `.vdfs/<挂载名>` 给出的 `rel`
+/// 空串是 provider 根（`CompositeVdfs::resolve` 对 `<根>/<挂载名>` 给出的 `rel`
 /// 就是空串），恒命中。
 fn related(subscribed: &str, changed: &str) -> bool {
     subscribed.is_empty()

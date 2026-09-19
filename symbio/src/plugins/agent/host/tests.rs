@@ -13,7 +13,7 @@ use crate::symbio_core::{
     CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor,
     InvokeRequest, InvokeRequestExt, Plugin, PluginDir, SimpleRequest, AGENT_ID,
     CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, PLUGIN_DIR, TRAVERSE_AVAILABLE_TOOLS,
-    WORKDIR,
+    VDFS_PARENT_ADDR, WORKDIR,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -70,6 +70,8 @@ fn ctx_with(
         ctx.set(AGENT_ID, b.to_string());
     }
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
     let manager: Arc<DefaultToolVisitor> = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
@@ -142,7 +144,7 @@ async fn agent_import_traverse_and_memory() {
         "注入内容应来自该 bundle 自己的 AGENTS.md: {injected}"
     );
     assert!(
-        injected.contains(".vdfs/agent/com.symbio.test-fixture/AGENTS.md"),
+        injected.contains("@vfs/agent/com.symbio.test-fixture/AGENTS.md"),
         "片段应指路整包浏览面里的那个地址: {injected}"
     );
 
@@ -260,6 +262,8 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
 
     let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
     ctx.set(AGENT_ID, "reviewer".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
     let manager: Arc<DefaultToolVisitor> = Arc::new(DefaultToolVisitor::new());
@@ -287,7 +291,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
     assert!(injected.contains("你是评审专家"), "{injected}");
     // 地址指向本插件的整包浏览面，且**印出真实写入闸门**（闸门由本插件执行）
     assert!(
-        injected.contains(".vdfs/agent/reviewer/AGENTS.md"),
+        injected.contains("@vfs/agent/reviewer/AGENTS.md"),
         "片段应指路整包浏览面里的地址: {injected}"
     );
     assert!(

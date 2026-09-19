@@ -66,7 +66,7 @@ sequenceDiagram
 
 **排障口诀**：外部调不通 → 先 `GET /api/v1/health`，再查 #2 鉴权与监听地址。
 
-## 通用：资源访问链路（`vdfs/*`，`.vdfs/<子目录>/…`）
+## 通用：资源访问链路（`vdfs/*`，`<根>/<子目录>/…`）
 
 > `{plugin}/entities/*` 已于 S11 下线（协议）；VDFS 收敛期结束后，
 > `EntityProvider` 抽象与 `EntityVdfsAdapter` 一并删除——**每个资源插件
@@ -78,7 +78,7 @@ sequenceDiagram
 | # | 环节 | 代码位置 | 说明 |
 |---|------|---------|------|
 | 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 13 个操作：list / tree / stat / read / write / mkdir / delete / move / edit / search / watch / unwatch / action |
-| 2 | 地址分流 | `plugins/vdfs/fs.rs`（`UnifiedFs`） | `.vdfs` 独占首段 → 虚拟层（容器组合视图）；其余 → 物理层 `physical.rs`（工作目录 / 绝对路径的真实文件） |
+| 2 | 地址分流 | `plugins/vdfs/fs.rs`（`UnifiedFs`） | `<根>` 独占首段 → 虚拟层（容器组合视图）；其余 → 物理层 `physical.rs`（工作目录 / 绝对路径的真实文件） |
 | 3 | 子目录来源 | `plugins/composite/vdfs.rs` 逐子插件收集，委派给各插件自持的 `impl VdfsProvider` | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
 | 4 | **落盘在哪一层** | `providers/vdfs_service`（`DirVdfs` / `SingleFileVdfs` / `MemoryVdfs` + `entry.rs` / `pack.rs`） | 虚拟层再往下的一跳：条目寻址与原子落盘（`<homedir>/<类别>/<id>/<manifest>`）、整包 zip / base64、变更广播。**不在** core 协议层，也**不走** `create_object` 工厂。目录自管的资源（agent bundle 走 `BundleStore`、session 走自己的 `SessionStore`）不进这一层 |
 | 5 | 机制详解 | [design/vdfs.md](../design/vdfs.md)（§11 / §13.4）、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范 |
@@ -103,7 +103,7 @@ sequenceDiagram
 | 外部 HTTP 调用失败 | 链路三 #1/#2（health → 鉴权） |
 | 资源增删查异常 | 通用：资源访问链路（`vdfs/*`）#2/#3/#4 + [design/vdfs.md](../design/vdfs.md) §13.4 + `symbio/src/providers/vdfs_service/` |
 | 错误码含义 | [ERROR_CODES.md]（源：`symbio_core/error.rs`） |
-| 配置不生效 | [CONFIGURATION.md] + `setting` 插件（`.vdfs/setting` 的 `vdfs/list` / `vdfs/read`） |
+| 配置不生效 | [CONFIGURATION.md] + `setting` 插件（`<根>/setting` 的 `vdfs/list` / `vdfs/read`） |
 
 ---
 

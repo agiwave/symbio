@@ -7,7 +7,7 @@
  * 设计：本层只做「地址 → 请求」的机械翻译，不含任何资源类型知识。
  * 全部资源共用同一组函数；新增一类资源无需改动本文件。
  *
- * 地址口径前后端同源：`.vdfs` 打头 = 系统资源，其余 = 磁盘文件
+ * 地址口径前后端同源：根锚点打头 = 系统资源，其余 = 磁盘文件
  * （后端 `UnifiedFs` 一处分流），本层不再做任何地址翻译。
  */
 
@@ -18,11 +18,11 @@ import {
   VDFS_LIST,
   VDFS_MOVE,
   VDFS_READ,
+  VDFS_ROOT_OP,
   VDFS_STAT,
   VDFS_UNWATCH,
   VDFS_WATCH,
   VDFS_WRITE,
-  VDFS_ROOT,
   type VdfsActionResponse,
   type VdfsContent,
   type VdfsDeleteResponse,
@@ -31,6 +31,7 @@ import {
   type VdfsNode,
   type VdfsWriteResponse,
 } from '../schemas/vdfs'
+import { resetVdfsRoot, setVdfsRoot, vdfsRoot, vdfsRootResolved } from '../schemas/vdfsRoot'
 import { logger } from '@/utils/logger'
 
 /** 有界列表的窗口参数：`limit` 条、游标 `before` 之后 */
@@ -40,14 +41,44 @@ export interface VdfsListOptions {
 }
 
 /**
- * 列目录。`path` 缺省 = `.vdfs` 根目录（左栏导航的来源）。
+ * **引导根锚点**（幂等）：调一次 `vdfs/root`，把回包里的根地址登记进
+ * `schemas/vdfsRoot`。这是前端与「根叫什么」的唯一接触点——之后所有模块
+ * 都从锚点读，后端改挂载名前端零改动。
+ *
+ * `main.ts` 在挂载前 `await` 本函数：路由换算（`vdfsAddress`）读锚点，
+ * 必须先于首次导航就绪。失败（无 vdfs 插件 / IPC 断开）不抛错——锚点留空，
+ * 地址代数退化为「无虚拟半」，页面仍可渲染物理半；错误已记日志可诊断。
+ */
+export async function ensureVdfsRoot(): Promise<void> {
+  if (vdfsRootResolved()) return
+  try {
+    // `vdfs/root` 的定义就是「不给地址」：给了也不看，免得出现两套入参
+    const resp = await callPlugin<VdfsListResponse>(VDFS_ROOT_OP, {})
+    if (resp?.path) {
+      setVdfsRoot(resp.path)
+      logger.info('vdfs-service', 'root anchored:', resp.path)
+    } else {
+      logger.error('vdfs-service', 'vdfs/root 未返回根地址，虚拟半不可用')
+    }
+  } catch (err) {
+    logger.error('vdfs-service', 'vdfs/root failed，虚拟半不可用:', err)
+  }
+}
+
+/** 测试用：清掉根锚点 */
+export function resetVdfsRootForTest(): void {
+  resetVdfsRoot()
+}
+
+/**
+ * 列目录。`path` 缺省 = 虚拟根目录（左栏导航的来源）。
  * 失败返回空目录（含最小节点），不抛错——列表页永远可渲染。
  *
  * `opts` 只在给了字段时才发出对应键：**不传参数时请求形状与从前一致**
  * （多一个 `limit: undefined` 也会被序列化成键，改变请求体形状）。
  */
 export async function listVdfs(
-  path = VDFS_ROOT,
+  path = vdfsRoot(),
   opts?: VdfsListOptions
 ): Promise<VdfsListResponse> {
   try {

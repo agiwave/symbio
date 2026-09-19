@@ -34,8 +34,8 @@ onMounted(async () => {
   // 启动转写同步（VDFS 变更 → 会话消息 store）
   //
   // 会话的**全部**实时显示都经这一条频道（`kind = "vdfs"`）：
-  // 消息本体（`.vdfs/session/<sid>/消息/<mid>`）由本模块收敛，
-  // 会话运行态（`.vdfs/session/<sid>`）由 sessions store 自己的订阅作用域收敛。
+  // 消息本体（`<根>/session/<sid>/消息/<mid>`）由本模块收敛，
+  // 会话运行态（`<根>/session/<sid>`）由 sessions store 自己的订阅作用域收敛。
   // 两者按**地址**分流，互不重叠——若消息被两条通道各写一次，流式文本会叠字。
   //
   // 落地目标由本外壳**显式注入**（`vdfsTranscriptSync` 是 service，不认识 Pinia）。

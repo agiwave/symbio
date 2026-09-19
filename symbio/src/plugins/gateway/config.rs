@@ -47,8 +47,8 @@ impl Default for GatewayConfig {
 /// 而无法触发写操作与命令执行。
 ///
 /// **资源一律经 VDFS**（`vdfs/<操作>`）：只读放行其**读操作**——
-/// `list`（`.vdfs` 即资源类别清单）/ `tree` / `stat` / `read` / `search`；
-/// 写操作（`write` / `delete` / `mkdir` / `move` / `edit`）与节点动作
+/// `root`（进入地址空间，拿到资源类别清单）/ `list` / `tree` / `stat` / `read` /
+/// `search`；写操作（`write` / `delete` / `mkdir` / `move` / `edit`）与节点动作
 /// （`action`）不在其列。
 ///
 /// **配置文件是例外**：插件配置可能含凭据（网关访问令牌、搜索服务 API Key），
@@ -62,7 +62,8 @@ pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
     }
     matches!(
         p,
-        "vdfs/list"
+        "vdfs/root"
+            | "vdfs/list"
             | "vdfs/tree"
             | "vdfs/stat"
             | "vdfs/read"
@@ -106,12 +107,15 @@ mod tests {
     #[test]
     fn readonly_allowlist() {
         let none = serde_json::json!({});
-        let at = |addr: &str| serde_json::json!({ "path": addr });
+        // 合成根：只读判定**与根名无关**——它认的是「操作名」与「路径末段是不是
+        // 配置文件」，因此测试不该、也不需要知道真实挂载名。
+        let at = |rel: &str| serde_json::json!({ "path": format!("@vfs/{rel}") });
 
         // 放行：查询类 / VDFS 读操作
         assert!(is_readonly_allowed("vdfs/list", &none));
-        assert!(is_readonly_allowed("vdfs/read", &at(".vdfs/session/abc")));
-        assert!(is_readonly_allowed("vdfs/search", &at(".vdfs/model")));
+        assert!(is_readonly_allowed("vdfs/root", &none));
+        assert!(is_readonly_allowed("vdfs/read", &at("session/abc")));
+        assert!(is_readonly_allowed("vdfs/search", &at("model")));
         assert!(is_readonly_allowed("home/get_homedir", &none));
         assert!(is_readonly_allowed("work/get_workspace", &none));
 
@@ -124,20 +128,11 @@ mod tests {
 
         // 拒绝：读**插件配置文件**——配置可能含凭据（网关访问令牌、
         // 搜索服务 API Key），放行等于只读模式下就能把它们读走
-        assert!(!is_readonly_allowed(
-            "vdfs/read",
-            &at(".vdfs/gateway/PLUGIN.yml")
-        ));
-        assert!(!is_readonly_allowed(
-            "vdfs/read",
-            &at(".vdfs/web/PLUGIN.yml")
-        ));
+        assert!(!is_readonly_allowed("vdfs/read", &at("gateway/PLUGIN.yml")));
+        assert!(!is_readonly_allowed("vdfs/read", &at("web/PLUGIN.yml")));
         // 配置文件的**节点**仍可 stat（节点只有 schema，无正文）
-        assert!(is_readonly_allowed(
-            "vdfs/stat",
-            &at(".vdfs/web/PLUGIN.yml")
-        ));
+        assert!(is_readonly_allowed("vdfs/stat", &at("web/PLUGIN.yml")));
         // 与配置文件无关的读不受影响
-        assert!(is_readonly_allowed("vdfs/read", &at(".vdfs/web")));
+        assert!(is_readonly_allowed("vdfs/read", &at("web")));
     }
 }

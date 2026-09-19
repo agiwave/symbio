@@ -536,7 +536,7 @@ impl Plugin for HomePlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
-            // 资源类别清单由 `vdfs/providers`（`.vdfs` 虚拟根）下发，
+            // 资源类别清单由 `vdfs/providers`（`<根>` 虚拟根）下发，
             // 导航与顺序都在那里。
             "home/reload" => {
                 let req: home_reload::Request = ctx.payload().unwrap_or_default();

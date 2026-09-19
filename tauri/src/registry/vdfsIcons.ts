@@ -2,7 +2,7 @@
  * VDFS 前端图标注册表（纯 UI 映射）—— icon 按 kind（或 kind:ext）登记
  *
  * 分层原则（与 registry/vdfsTypes.ts / vdfsRenderers.ts 同一套）：
- * - 资源的**存在性/能力/寻址/顺序/标签**一律来自 VDFS（`.vdfs` 挂载点与节点），
+ * - 资源的**存在性/能力/寻址/顺序/标签**一律来自 VDFS（`<根>` 挂载点与节点），
  *   前端不硬编码类型清单；
  * - 本模块只维护**前端 UI 专属**的映射：某资源类别的 SVG 图标与动作按钮图标。
  *   后端不参与下发 SVG path。
@@ -18,7 +18,7 @@
  *
  * ## 新增一类资源的两步扩展位
  *
- * 1. 后端：实现 `VdfsProvider` 并挂载 —— `.vdfs/<插件名>` 自动多一个挂载点，
+ * 1. 后端：实现 `VdfsProvider` 并挂载 —— `<根>/<插件名>` 自动多一个挂载点，
  *    导航与能力随之生成；
  * 2. 前端（可选）：`registerVdfsIcon(...)`——未登记的走默认图标（侧栏 /
  *    VdfsCard 各自兜底），详情渲染器未登记时走机制级只读兜底。
@@ -157,7 +157,7 @@ registerVdfsIcon(
   )
 )
 
-// 设置入口的展示图标（左侧导航的挂载点来自 `vdfs/list` 的 `.vdfs` 子目录）
+// 设置入口的展示图标（左侧导航的挂载点来自 `vdfs/list` 的 `<根>` 子目录）
 registerVdfsIcon(
   'setting',
   svgIcon(

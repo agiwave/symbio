@@ -16,7 +16,7 @@
 //!   （`orchestrator/entry.rs` 的 `open_chat_session` + `append_messages`）。
 //! - `open` → 它返回的是**进程内句柄**，而句柄交付早已改由编排器直接塞进
 //!   `chat_ctx`，不走路由。
-//! - `clear`（会话）→ `delete(.vdfs/session/<id>)`。
+//! - `clear`（会话）→ `delete(<根>/session/<id>)`。
 //! - `chat/clear_messages` → `action(<id>/消息, "clear")`。
 //! - `chat/delete_message` → `action(<id>/消息/<mid>, "truncate")`。
 //! - `chat/update_message` → `write(<id>/消息/<mid>)`。
@@ -44,7 +44,7 @@ impl SessionPlugin {
 
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
     ///
-    /// 唯一消费方：`VdfsProvider::delete`（`delete(.vdfs/session/<id>)`）。
+    /// 唯一消费方：`VdfsProvider::delete`（`delete(<根>/session/<id>)`）。
     /// 曾经的 `session/clear` 路由是它的第二个消费方，已退役——两个入口对同一件事
     /// 就是两条会各自漂移的实现，VDFS 侧本来就已经完整具备这个能力。
     pub(crate) async fn delete_session_internal(
@@ -80,7 +80,7 @@ impl SessionPlugin {
 
     /// 合并写入会话 metadata（workdir / title / agent_id 等）。
     ///
-    /// **仅 CLI 使用**。前端走 `VdfsProvider::write`（`vdfs/write(.vdfs/session/<id>)`）
+    /// **仅 CLI 使用**。前端走 `VdfsProvider::write`（`vdfs/write(<根>/session/<id>)`）
     /// ——两条路径共用 `Session::merge_metadata_object`，语义不可能分叉。
     /// 本路由保留的原因：CLI 需要**客户端指定会话 id**（`cli/src/client.rs` 自己
     /// `gen_id` 后 upsert），而 VDFS 新建会话是 provider 生成 id。

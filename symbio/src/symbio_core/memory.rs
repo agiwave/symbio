@@ -4,10 +4,10 @@
 //!
 //! | 层 | 读写面（VDFS 地址） | 注入者 | 物理落位 |
 //! |---|---|---|---|
-//! | 工作区 | work（`.vdfs/work/AGENTS.md`） | work | `{workdir}/AGENTS.md` |
-//! | 会话 | session（`.vdfs/session/<id>/AGENTS.md`） | session | `{会话目录}/AGENTS.md` |
-//! | 系统智能体 | agent（`.vdfs/agent/AGENTS.md`） | agent | `{homedir}/AGENTS.md` |
-//! | 子智能体 | agent（`.vdfs/agent/<id>/AGENTS.md`） | agent | `<agentdir>/AGENTS.md` |
+//! | 工作区 | work（`<根>/work/AGENTS.md`） | work | `{workdir}/AGENTS.md` |
+//! | 会话 | session（`<根>/session/<id>/AGENTS.md`） | session | `{会话目录}/AGENTS.md` |
+//! | 系统智能体 | agent（`<根>/agent/AGENTS.md`） | agent | `{homedir}/AGENTS.md` |
+//! | 子智能体 | agent（`<根>/agent/<id>/AGENTS.md`） | agent | `<agentdir>/AGENTS.md` |
 //!
 //! 各层形态完全一样——**一个 UTF-8 文本文件、两道容量闸门、一行头信息的提示词片段、
 //! 一个 VDFS 读写节点**。几份实现就是几份会各自漂移的口径：「写侧是拒绝还是截断」
@@ -23,7 +23,7 @@
 //!
 //! ⚠️ 这条线划的是**形态**，不是「谁的名字听起来像指令」：`{homedir}/AGENTS.md`
 //! 一度以「只读指令」的身份**不在**内核里（宿主只读它、不给地址、不设容量），
-//! 但它现在有地址（`.vdfs/agent/AGENTS.md`）与两道闸门、在设置页可编辑，
+//! 但它现在有地址（`<根>/agent/AGENTS.md`）与两道闸门、在设置页可编辑，
 //! 于是它**进了内核**。反过来，模型插件注册的人格片段没有地址，就永远不进内核。
 //!
 //! ## 归属：一个作用域只有一个所有者
@@ -36,7 +36,7 @@
 //!
 //! 因此 `{workdir}/AGENTS.md` **只归 work**——session 不再读它，哪怕它叫「指令」；
 //! 两份智能体 `AGENTS.md`（系统态 / 子智能体态）**都归 agent**——它同时给出读写面
-//! （`.vdfs/agent/…`）与注入面，因此印在片段里的地址与闸门都是**它自己会执行**的。
+//! （`<根>/agent/…`）与注入面，因此印在片段里的地址与闸门都是**它自己会执行**的。
 //!
 //! ## 为什么是内核而不是 provider（trait）
 //!
@@ -123,7 +123,7 @@ impl InjectedMemory {
 pub struct SegmentSpec<'a> {
     /// 片段标题，渲染为 `【{title}】`（如「工作区记忆」）
     pub title: &'a str,
-    /// 可编辑地址（如 `.vdfs/work/工作区/AGENTS.md`）——**必须真实可达**
+    /// 可编辑地址（如 `<根>/work/工作区/AGENTS.md`）——**必须真实可达**
     pub address: &'a str,
     /// 附加说明（可选），如「与【工作区记忆】相互独立」
     pub note: Option<&'a str>,
@@ -296,7 +296,7 @@ impl MemoryFile {
 /// 渲染「一行头信息 + 正文」的记忆片段。
 ///
 /// ```text
-/// 【工作区记忆】（地址：.vdfs/work/工作区/AGENTS.md，上限：16384字节，当前：111字节；改写前先 vdfs_read，合并后整篇 vdfs_write）
+/// 【工作区记忆】（地址：<根>/work/工作区/AGENTS.md，上限：16384字节，当前：111字节；改写前先 vdfs_read，合并后整篇 vdfs_write）
 /// <记忆正文>
 /// ```
 ///

@@ -10,6 +10,7 @@ import './styles/markdown.css'
 import App from './App.vue'
 import { useAppearanceStore } from './stores/appearance'
 import { initGatewayTransport } from './services/plugin'
+import { ensureVdfsRoot } from './services/vdfs'
 
 const app = createApp(App)
 
@@ -18,6 +19,12 @@ app.use(router)
 
 // 在挂载前应用已持久化的外观设置（主题 / 字体大小）
 useAppearanceStore().apply()
+
+// 挂载前引导 VDFS 根锚点（`vdfs/root`，见 schemas/vdfsRoot）：路由换算
+// （schemas/vdfsAddress）读它，必须先于首次导航就绪——顶层 await 消除
+// 「深链接直达 /vdfs/… 时锚点未就绪」的窗口。失败不阻断启动（降级为
+// 无虚拟半，services/vdfs 里已记日志）。
+await ensureVdfsRoot()
 
 app.mount('#app')
 

@@ -134,3 +134,87 @@ test('S-009 waiver requires a reason', () => {
   assert.equal(audit(kindSuspect, { waiver: '// grep-audit-allow S-009: reviewed fixture' }).status, 0)
   assert.equal(audit(kindSuspect, { waiver: '// grep-audit-allow S-009:   ' }).status, 1)
 })
+
+// ── S-010：vdfs 挂载根名不得出现在 vdfs 插件之外 ──────────────────────
+// 根名是 vdfs 插件的挂载规则（plugins/vdfs/fs.rs::VDFS_ADDR_ROOT，全仓唯一字面量）。
+// 历史上它曾蔓延到前端与十几份文档，「改个挂载名」变成全仓手术——本规则把收口钉死。
+// S-010 的扫描根与 resolveScope 同策略（cwd 有 symbio/ 即视为仓库树），故用
+// 独立的夹具构造器：按相对路径布文件，直接跑脚本。
+function s010Audit(files) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s010-'))
+  try {
+    // 仓库树标记：S-010 以「cwd 下有 symbio/」判定扫描根，缺了会回落到真实仓库
+    fs.mkdirSync(path.join(root, 'symbio', 'src', 'plugins'), { recursive: true })
+    for (const [rel, content] of Object.entries(files)) {
+      const p = path.join(root, rel)
+      fs.mkdirSync(path.dirname(p), { recursive: true })
+      fs.writeFileSync(p, content)
+    }
+    const env = { ...process.env, NO_COLOR: '1' }
+    delete env.SCOPE
+    return spawnSync(process.execPath, [script], { cwd: root, env, encoding: 'utf8', timeout: 10000 })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
+const S010_SUSPECT_TS = "const x = '.vdfs/session/abc'\n"
+const S010_SUSPECT_MD = '# 指南\n\n会话在 `.vdfs/session` 之下。\n'
+
+test('S-010 fires outside the vdfs plugin (ts / md / rust)', () => {
+  for (const [rel, content] of [
+    ['tauri/src/schemas/x.ts', S010_SUSPECT_TS],
+    ['docs/guides/x.md', S010_SUSPECT_MD],
+    ['symbio/src/plugins/session/memory.rs', 'pub const A: &str = ".vdfs/session";\n'],
+  ]) {
+    const r = s010Audit({ [rel]: content })
+    assert.equal(r.status, 1, rel)
+    assert.match(r.stdout, /S-010/)
+  }
+})
+
+test('S-010 catches stale and suffixed root spellings too', () => {
+  assert.equal(s010Audit({ 'tauri/src/x.ts': "const a = '.vdfsv2'\n" }).status, 1)
+  assert.equal(s010Audit({ 'tauri/src/x.ts': "const b = '.vdfs2/x'\n" }).status, 1)
+})
+
+test('S-010 stays silent inside the vdfs plugin (the owner)', () => {
+  const r = s010Audit({
+    'symbio/src/plugins/vdfs/fs.rs': 'pub const VDFS_ADDR_ROOT: &str = ".vdfsv2";\n',
+    'symbio/src/plugins/vdfs/README.md': '根目录 `.vdfs/session` 说明。\n',
+  })
+  assert.equal(r.status, 0)
+  assert.match(r.stdout, /S-010 通过/)
+})
+
+test('S-010 exempts historical records (CHANGELOG / archive)', () => {
+  const r = s010Audit({
+    'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
+    'docs/CHANGELOG.md': S010_SUSPECT_MD,
+    'docs/archive/old-design.md': S010_SUSPECT_MD,
+  })
+  assert.equal(r.status, 0)
+})
+
+test('S-010 is not fooled by lookalike tokens (browser route / import paths)', () => {
+  const r = s010Audit({
+    'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
+    'tauri/src/x.ts': [
+      "import { vdfsJoin } from '../vdfs'", // 相对导入
+      "import { vdfsRoot } from '@/schemas/vdfsRoot'", // 别名导入
+      "const route = '/vdfs/session'", // 浏览器路由（无前导点）
+    ].join('\n'),
+  })
+  assert.equal(r.status, 0)
+})
+
+test('S-010 waiver requires a reason (same line or the line above)', () => {
+  // 仓库树标记：symbio/src/plugins（同时是其它规则的扫描范围）
+  const mark = { 'symbio/src/plugins/vdfs/fs.rs': '' }
+  const r1 = s010Audit({ ...mark, 'docs/x.md': `<!-- grep-audit-allow S-010: 历史快照示例 -->\n.vdfs/session\n` })
+  assert.equal(r1.status, 0)
+  const r2 = s010Audit({ ...mark, 'docs/x.md': `.vdfs/session <!-- grep-audit-allow S-010: 引用旧文 -->\n` })
+  assert.equal(r2.status, 0)
+  const r3 = s010Audit({ ...mark, 'docs/x.md': `.vdfs/session <!-- grep-audit-allow S-010:   -->\n` })
+  assert.equal(r3.status, 1)
+})

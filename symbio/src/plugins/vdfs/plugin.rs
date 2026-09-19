@@ -14,14 +14,33 @@
 //!
 //! 本插件**不含任何资源语义**，也**不持有拓扑**：不认识会话 / 模型 / 设置，
 //! 不认识挂载点，只认识「根 provider + 全路径」——虚拟根归组合容器所有。
+//!
+//! ## 但**根叫什么**归本插件
+//!
+//! 「拓扑归容器、命名归本插件」是一件事的两半：
+//!
+//! - **根之下有什么** = 容器的注册（`register_vdfs_root` / `register_vdfs_provider`）；
+//! - **根挂在哪个地址上** = 本插件的挂载规则（[`VDFS_ADDR_ROOT`]），经
+//!   [`AddrRootDecl`] **静态声明**——随二进制生效，早于任何插件实例构造，
+//!   容器转发请求时据此改写子上下文的当前父地址（`symbio_core::vdfs::address`）。
+//!
+//! 因此「根改叫什么」只需改 [`VDFS_ADDR_ROOT`] 一行：其它插件的绝对地址一律
+//! 从**上下文里的当前父地址 + 相对地址**拼出（容器在转发点改写），前端用
+//! `vdfs/root` 拿到的**地址数据**，两边都不持有名字。
 
-use super::{host, protocol as p, provider::ToolVdfs, tools};
+use super::{fs::VDFS_ADDR_ROOT, host, protocol as p, provider::ToolVdfs, tools};
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
     PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_VDFS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
+
+// 根名的静态声明：字面量只在本插件内（fs::VDFS_ADDR_ROOT），编译期随二进制
+// 生效——容器的转发点在任何实例构造之前就要用它。
+crate::symbio_core::inventory::submit! {
+    crate::symbio_core::vdfs::AddrRootDecl(VDFS_ADDR_ROOT)
+}
 
 /// VDFS 插件：把**容器注册的 VDFS 根**以一组 `vdfs/*` 操作暴露给前端与 LLM。
 ///
@@ -73,7 +92,7 @@ impl Plugin for VdfsPlugin {
         let parent = self.get_parent().await;
         let fs = host::resolve_fs(parent.as_ref(), &ctx).await;
 
-        // 前端给的是**展示地址**（如 `.vdfs/session/x` 或 `README.md`），门面按前缀
+        // 前端给的是**展示地址**（如 `.vdfsv2/session/x` 或 `README.md`），门面按前缀
         // 分流；运行时状态（workdir）仍要透传，物理层据此解析相对地址。
         let params = host::call_params(&ctx);
 
@@ -140,11 +159,11 @@ mod tests {
     #[tokio::test]
     async fn list_vdfs_root_without_parent_is_empty() {
         let ctx = ctx_with_path("list");
-        ctx.set_payload(serde_json::json!({ "path": ".vdfs" }))
+        ctx.set_payload(serde_json::json!({ "path": ".vdfsv2" }))
             .unwrap();
         let resp = build_plugin().route(ctx).await.unwrap();
         let data = resp.get::<p::VdfsListResponse>().unwrap();
-        assert_eq!(data.path, ".vdfs");
+        assert_eq!(data.path, ".vdfsv2");
         assert!(data.items.is_empty());
     }
 
@@ -152,7 +171,7 @@ mod tests {
     #[tokio::test]
     async fn list_unknown_dir_errors() {
         let ctx = ctx_with_path("list");
-        ctx.set_payload(serde_json::json!({ "path": ".vdfs/nope" }))
+        ctx.set_payload(serde_json::json!({ "path": ".vdfsv2/nope" }))
             .unwrap();
         let err = build_plugin().route(ctx).await.unwrap_err();
         assert!(matches!(err, PluginError::NotFound(_)));

@@ -8,7 +8,7 @@
  * 因此这里验证三件事：
  * 1. 订阅会按作用域前缀登记 watch，取消订阅会摘除；
  * 2. 同一前缀的多个订阅者**共享**一次登记（引用计数），最后一个撤走才 unwatch；
- * 3. 订 `.vdfs` 根不登记（根不在任何 provider 身上，登记只会换来后端报错）。
+ * 3. 订虚拟根不登记（根不在任何 provider 身上，登记只会换来后端报错）。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -19,7 +19,11 @@ vi.mock('@/utils/logger', () => ({
 }))
 
 import { callPlugin } from '@/services/plugin'
-import { VDFS_ROOT, VDFS_UNWATCH, VDFS_WATCH } from '@/schemas/vdfs'
+import { VDFS_UNWATCH, VDFS_WATCH } from '@/schemas/vdfs'
+import { setVdfsRoot } from '@/schemas/vdfsRoot'
+
+// 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
+setVdfsRoot('@vfs')
 import { subscribeVdfsChanged } from '../eventBus'
 
 /** 已发生的 watch / unwatch 登记（按调用顺序） */
@@ -48,23 +52,23 @@ beforeEach(() => {
 
 describe('subscribeVdfsChanged 的后端登记', () => {
   it('订阅即登记作用域前缀，取消订阅即摘除', async () => {
-    const off = subscribeVdfsChanged({ prefix: '.vdfs/session' }, () => {})
+    const off = subscribeVdfsChanged({ prefix: '@vfs/session' }, () => {})
     await settle()
 
-    expect(registrations()).toEqual([{ op: VDFS_WATCH, path: '.vdfs/session' }])
+    expect(registrations()).toEqual([{ op: VDFS_WATCH, path: '@vfs/session' }])
 
     off()
     await settle()
 
     expect(registrations()).toEqual([
-      { op: VDFS_WATCH, path: '.vdfs/session' },
-      { op: VDFS_UNWATCH, path: '.vdfs/session' }
+      { op: VDFS_WATCH, path: '@vfs/session' },
+      { op: VDFS_UNWATCH, path: '@vfs/session' }
     ])
   })
 
   it('同一前缀的多个订阅者共享一次登记，最后一个撤走才 unwatch', async () => {
-    const offA = subscribeVdfsChanged({ prefix: '.vdfs/session' }, () => {})
-    const offB = subscribeVdfsChanged({ prefix: '.vdfs/session' }, () => {})
+    const offA = subscribeVdfsChanged({ prefix: '@vfs/session' }, () => {})
+    const offB = subscribeVdfsChanged({ prefix: '@vfs/session' }, () => {})
     await settle()
 
     expect(registrations().filter((r) => r.op === VDFS_WATCH)).toHaveLength(1)
@@ -80,18 +84,18 @@ describe('subscribeVdfsChanged 的后端登记', () => {
   })
 
   it('不同前缀各自登记，互不影响', async () => {
-    const offList = subscribeVdfsChanged({ prefix: '.vdfs/session', directChildren: true }, () => {})
-    const offOne = subscribeVdfsChanged({ prefix: '.vdfs/session/s1' }, () => {})
+    const offList = subscribeVdfsChanged({ prefix: '@vfs/session', directChildren: true }, () => {})
+    const offOne = subscribeVdfsChanged({ prefix: '@vfs/session/s1' }, () => {})
     await settle()
 
-    expect(registrations().map((r) => r.path)).toEqual(['.vdfs/session', '.vdfs/session/s1'])
+    expect(registrations().map((r) => r.path)).toEqual(['@vfs/session', '@vfs/session/s1'])
 
     offOne()
     await settle()
     expect(registrations()).toEqual([
-      { op: VDFS_WATCH, path: '.vdfs/session' },
-      { op: VDFS_WATCH, path: '.vdfs/session/s1' },
-      { op: VDFS_UNWATCH, path: '.vdfs/session/s1' }
+      { op: VDFS_WATCH, path: '@vfs/session' },
+      { op: VDFS_WATCH, path: '@vfs/session/s1' },
+      { op: VDFS_UNWATCH, path: '@vfs/session/s1' }
     ])
 
     offList()
@@ -100,8 +104,8 @@ describe('subscribeVdfsChanged 的后端登记', () => {
     })
   })
 
-  it('订 `.vdfs` 根不登记（根无实时能力）', async () => {
-    const off = subscribeVdfsChanged({ prefix: VDFS_ROOT }, () => {})
+  it('订虚拟根不登记（根无实时能力）', async () => {
+    const off = subscribeVdfsChanged({ prefix: '@vfs' }, () => {})
     await settle()
     expect(registrations()).toEqual([])
 
@@ -111,7 +115,7 @@ describe('subscribeVdfsChanged 的后端登记', () => {
   })
 
   it('取消订阅可重复调用，登记计数不会被多扣', async () => {
-    const off = subscribeVdfsChanged({ prefix: '.vdfs/session' }, () => {})
+    const off = subscribeVdfsChanged({ prefix: '@vfs/session' }, () => {})
     await settle()
 
     off()

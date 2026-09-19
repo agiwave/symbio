@@ -57,7 +57,7 @@ pub struct ActiveSessionState {
     /// `orchestrator::run_chat_loop_task`），不是第二份拷贝：
     ///
     /// - 前端实时流：补丁逐帧经 `StreamEvent::Update` 下发；
-    /// - VDFS 转写列表：`.vdfs/session/<id>/消息` 把这份缓冲叠加在落库转写之上。
+    /// - VDFS 转写列表：`<根>/session/<id>/消息` 把这份缓冲叠加在落库转写之上。
     ///
     /// 之所以必须共享：**流式期间消息还没落库**（`persist_messages` 只在每轮结束时
     /// 写盘）。若 VDFS 只读存储，列表在流式期间就是空的，`created` / `appended`

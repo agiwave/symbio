@@ -10,7 +10,7 @@
  * 两者都能从数据里认出来，不需要任何字面量：
  * - **挂载目录**：composite 把 `root_new_types()` 挂到了挂载点节点上
  *   （`plugins/composite/vdfs.rs` 的 `dir_node`），会话 provider 声明的是
- *   `VdfsNewType::new(VDFS_EXT_SESSION, …)` ⇒ 列 `.vdfs` 根，找 `new_types`
+ *   `VdfsNewType::new(VDFS_EXT_SESSION, …)` ⇒ 列虚拟根，找 `new_types`
  *   里含 `ext === 'session'` 的子节点即可。
  * - **转写段**：会话内部的子目录里，转写列表的 `kind` 是 `VDFS_KIND_MESSAGES`
  *   （稳定 ASCII 协议词，与展示名解耦）⇒ 列任一会话，找 `kind` 命中的子节点。
@@ -35,10 +35,11 @@ import { listVdfs } from './vdfs'
 import {
   VDFS_EXT_SESSION,
   VDFS_KIND_MESSAGES,
-  VDFS_ROOT,
+  isVdfsSystemAddr,
   vdfsJoin,
   type VdfsSessionScheme,
 } from '@/schemas/vdfs'
+import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { logger } from '@/utils/logger'
 
 const MODULE_TAG = 'vdfs-scheme'
@@ -47,14 +48,14 @@ const MODULE_TAG = 'vdfs-scheme'
  * 节点的**全路径**。
  *
  * 后端两种口径都出现过：挂载点节点给的是段名（`session`，相对于根），
- * 会话节点给的是展示全路径（`.vdfs/session/abc`）。一律按「已是全路径则直接用，
- * 否则按父地址拼」处理——不加这道判断就会拼出 `.vdfs/.vdfs/session/…`
+ * 会话节点给的是展示全路径（`<根>/session/abc`）。一律按「已是全路径则直接用，
+ * 否则按父地址拼」处理——不加这道判断就会拼出 `<根>/<根>/session/…`
  * （真实事故：读取会话转写直接 404）。
  */
 function fullAddr(parent: string, node: { path?: string; name: string }): string {
   const p = node.path
   if (!p) return vdfsJoin(parent, node.name)
-  if (p === VDFS_ROOT || p.startsWith(`${VDFS_ROOT}/`)) return p
+  if (isVdfsSystemAddr(p)) return p
   return vdfsJoin(parent, p)
 }
 
@@ -81,7 +82,7 @@ export function resetVdfsSessionScheme(): void {
  */
 export async function ensureSessionMountDir(): Promise<string> {
   if (cachedMountDir) return cachedMountDir
-  const resp = await listVdfs(VDFS_ROOT)
+  const resp = await listVdfs()
   const hit = (resp.items ?? []).find((n) =>
     (n.new_types ?? []).some((t) => t.ext === VDFS_EXT_SESSION),
   )
@@ -90,11 +91,11 @@ export async function ensureSessionMountDir(): Promise<string> {
     // 挂载点」，也可能是「列目录失败了」。两种都说出来——只报前一种会让人去查
     // 后端注册，而真正的故障在网络 / IPC。
     throw new Error(
-      `会话挂载点未找到：${VDFS_ROOT} 下没有声明可新建 ${VDFS_EXT_SESSION} 的子节点` +
+      `会话挂载点未找到：根目录下没有声明可新建 ${VDFS_EXT_SESSION} 的子节点` +
         `（根清单为空或列目录失败——后者会被 listVdfs 吞成空列表，见 services/vdfs.ts）`,
     )
   }
-  cachedMountDir = fullAddr(VDFS_ROOT, hit)
+  cachedMountDir = fullAddr(vdfsRoot(), hit)
   logger.info(MODULE_TAG, 'mount resolved', cachedMountDir)
   return cachedMountDir
 }

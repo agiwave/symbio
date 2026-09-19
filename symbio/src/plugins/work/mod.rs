@@ -11,7 +11,7 @@
 //! | 交出什么 | 机制 | 缺了会怎样 |
 //! |---|---|---|
 //! | 系统提示词 | `CapabilityVisitor::register_system_prompt` | 模型不知道记忆存在，等于没有 |
-//! | VDFS 挂载点 `.vdfs/work` | `CapabilityVisitor::register_vdfs_provider` | 只能读不能改，记忆永远长不大 |
+//! | VDFS 挂载点 `<根>/work` | `CapabilityVisitor::register_vdfs_provider` | 只能读不能改，记忆永远长不大 |
 //!
 //! 两者都在 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 这一次广播里交出——与工具、模型服务、
 //! VDFS 挂载点、配置声明**共用同一次收集**，不新增任何收集通道。
