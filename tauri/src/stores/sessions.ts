@@ -278,14 +278,8 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     // 同步 status.last_preview（取最后一条 assistant 文本；取不到则不动）
     const preview = previewOf(msg)
-    if (preview !== null) {
-      const snext = { ...sessionStatuses.value }
-      const scur = { ...(snext[sessionId] || { is_waiting_approval: false, last_event_at: 0 }) }
-      scur.last_preview = preview
-      scur.last_event_at = Date.now()
-      snext[sessionId] = scur
-      sessionStatuses.value = snext
-    }
+    // 走统一变更通道：`last_event_at` 由它推进，写入方不手动维护（与其它写点同口径）
+    if (preview !== null) putStatus(sessionId, { last_preview: preview })
   }
 
   /**
@@ -330,7 +324,50 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /**
-   * 更新某 session 的 live status。
+   * 新建一条实时状态的初值。
+   *
+   * `last_event_at` 取**当前时刻**而不是 0：条目一旦存在，`getSessionStaleReason`
+   * 就会按它算「多久没消息了」——初值若是 0，刚建出来的条目会被立刻判成
+   * 「状态已过期 N 分钟」（N 自 Unix 纪元起算），凭空报出「连接已断开」。
+   */
+  function newLiveStatus(): SessionLiveStatus {
+    return { is_waiting_approval: false, last_event_at: Date.now() }
+  }
+
+  /**
+   * 提交一份新的实时状态映射 —— **唯一**写入口（与消息侧的 `commitMessages` 对位）。
+   *
+   * 收口的意义：全仓 `sessionStatuses.value =` 只应出现在这里，于是「谁在写实时
+   * 状态」成为一眼可数的事实，不会再长出第五个、第六个手写 spread-and-assign 的地方。
+   */
+  function commitStatuses(next: Record<string, SessionLiveStatus>): void {
+    sessionStatuses.value = next
+  }
+
+  /**
+   * 对某个会话的实时状态做一次变更并提交 —— **唯一的变更通道**
+   * （与消息侧的 `updateMessages` 对位）。
+   *
+   * 调用方只写「这一步要改什么」；展开 / 合并 / 整体替换三步不必各自重写——
+   * 那三步此前在四处各写一遍，每处都得自己记得「必须换新对象」
+   * （`shallowRef` 原地改不触发更新），漏一次就是界面**悄悄**不刷新。
+   *
+   * `mutate` 返回 `undefined` 表示**不提交**（没有要改的）。缺省状态由
+   * `newLiveStatus()` 给，因此「第一次写某个会话」与「更新已有条目」是同一条路径。
+   */
+  function updateStatus(
+    sessionId: string,
+    mutate: (cur: SessionLiveStatus) => SessionLiveStatus | void,
+  ): void {
+    if (!sessionId) return
+    const cur = sessionStatuses.value[sessionId] ?? newLiveStatus()
+    const next = mutate(cur)
+    if (!next) return
+    commitStatuses({ ...sessionStatuses.value, [sessionId]: next })
+  }
+
+  /**
+   * 更新某 session 的 live status（`updateStatus` 的「浅合并 + 自动时间戳」包装）。
    *
    * ## 行为
    *
@@ -346,18 +383,12 @@ export const useSessionsStore = defineStore('sessions', () => {
    * - `vdfsTranscriptSync`（由消息节点派生活动文字 / 审批角标）
    * - `useChatConnection.send` / `resume` 的乐观置位
    * - `setSessionStatus` 同步 list.status 时
+   * - 消息落地路径写 `last_preview`（取到预览才写）
    */
   function putStatus(sessionId: string, partial: Partial<SessionLiveStatus>) {
-    if (!sessionId) return
-    const next = { ...sessionStatuses.value }
-    const cur = next[sessionId] || {
-      is_waiting_approval: false,
-      last_event_at: 0
-    }
     // 强制覆盖 last_event_at：调用方无需、也不应手动维护这个时间戳
     const { last_event_at: _ignored, ...rest } = partial
-    next[sessionId] = { ...cur, ...rest, last_event_at: Date.now() }
-    sessionStatuses.value = next
+    updateStatus(sessionId, (cur) => ({ ...cur, ...rest, last_event_at: Date.now() }))
   }
 
   /** 读取会话级错误状态（无 Failed Turn 时的兜底错误；null = 无会话级错误） */
@@ -387,7 +418,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     commitMessages(mnext)
     const snext = { ...sessionStatuses.value }
     delete snext[sessionId]
-    sessionStatuses.value = snext
+    commitStatuses(snext)
   }
 
   /**
@@ -410,14 +441,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 「上一轮失败」不在此还原：它是**会话节点**的状态（`status == 'failed'`），
     // 由 `list` 快照 / 节点变更落定——从消息历史反推会造出第二份真相，
     // 且与节点状态可能不一致（历史里有失败 Turn ≠ 会话当前处于失败态）。
-    const prevStatus = sessionStatuses.value[sessionId] ?? {
-      is_waiting_approval: false,
-      last_event_at: Date.now(),
-    }
-    sessionStatuses.value = {
-      ...sessionStatuses.value,
-      [sessionId]: { ...prevStatus, is_waiting_approval: waitingApproval },
-    }
+    // 缺省状态由通道给（`last_event_at` = 当前时刻）——历史里没有状态条目时，
+    // 若写成 0 会被 `getSessionStaleReason` 立刻判成「状态已过期」。
+    updateStatus(sessionId, (cur) => ({ ...cur, is_waiting_approval: waitingApproval }))
   }
 
   /** 读取会话运行模式（默认 interactive） */
@@ -581,8 +607,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 初始化空 messages / status
     const mnext = { ...sessionMessages.value, [id]: {} }
     commitMessages(mnext)
-    const snext = { ...sessionStatuses.value, [id]: { is_waiting_approval: false, last_event_at: Date.now() } }
-    sessionStatuses.value = snext
+    commitStatuses({ ...sessionStatuses.value, [id]: newLiveStatus() })
 
     if (typeof meta.workdir === 'string' && meta.workdir) lastUsedWorkdir.value = meta.workdir
 

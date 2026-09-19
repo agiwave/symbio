@@ -25,7 +25,7 @@
  */
 import { callPlugin, setLastWorkdir } from './plugin'
 import type { Response as ReloadResponse } from '../schemas/home_reload'
-import { logger } from '@/utils/logger'
+import { withFallback } from './fallback'
 import {
   DEFAULT_WORKSPACE,
   HOME_GET_HOMEDIR,
@@ -71,16 +71,15 @@ export interface HomedirInfo {
  * @returns 当前 homedir 信息。后端未启动 / 路由未注册时返回空字符串。
  */
 export async function getHomedirInfo(): Promise<HomedirInfo> {
-  try {
-    const resp = await callPlugin<HomedirInfo>(HOME_GET_HOMEDIR, {})
-    if (resp && resp.homedir) {
-      return resp
-    }
-    return { homedir: '', bootstrap_path: '' }
-  } catch (err) {
-    logger.error('home-service', 'getHomedirInfo failed:', err)
-    return { homedir: '', bootstrap_path: '' }
-  }
+  const empty = (): HomedirInfo => ({ homedir: '', bootstrap_path: '' })
+  return withFallback(
+    async () => {
+      const resp = await callPlugin<HomedirInfo>(HOME_GET_HOMEDIR, {})
+      return resp?.homedir ? resp : empty()
+    },
+    empty,
+    { tag: 'home-service', what: 'getHomedirInfo failed' }
+  )
 }
 
 /**
@@ -107,18 +106,17 @@ export async function switchHomedir(
   homedir: string,
   opts?: { forceNative?: boolean }
 ): Promise<ReloadResponse | null> {
-  try {
-    const resp = await callPlugin<ReloadResponse>(
-      HOME_RELOAD,
-      { homedir },
-      undefined,
-      opts?.forceNative ? { forceNative: true } : undefined
-    )
-    return resp
-  } catch (err) {
-    logger.error('home-service', `switchHomedir(${homedir}) failed:`, err)
-    return null
-  }
+  return withFallback(
+    () =>
+      callPlugin<ReloadResponse>(
+        HOME_RELOAD,
+        { homedir },
+        undefined,
+        opts?.forceNative ? { forceNative: true } : undefined
+      ),
+    () => null,
+    { tag: 'home-service', what: `switchHomedir(${homedir}) failed` }
+  )
 }
 
 // =====================================================================

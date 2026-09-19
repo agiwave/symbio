@@ -44,16 +44,12 @@ import {
   moveVdfs,
   readVdfs,
   runVdfsAction,
-  unwatchVdfs,
-  watchVdfs,
   writeVdfs,
   writeVdfsBinary,
 } from '@/services/vdfs'
-import { subscribe } from '@/services/eventBus'
-import { vdfsRoot } from '@/schemas/vdfsRoot'
+import { subscribeVdfsChanged } from '@/services/eventBus'
 import {
   VDFS_CHANGE_APPENDED,
-  VDFS_EVENT_KIND,
   VDFS_STATUS_ACTIVE,
   actionFileOf,
   isVdfsDir,
@@ -690,34 +686,34 @@ export function useVdfs(opts: UseVdfsOptions) {
     }
   }
 
-  const unsubBus = subscribe({ kind: VDFS_EVENT_KIND }, (busEvent) => {
-    const change = busEvent.data?.data as VdfsChange | undefined
-    if (!change || typeof change.path !== 'string') return
-    onChange(change)
-  })
+  // 订阅范围 = **绑定地址**（含整棵子树）。三件事由 `subscribeVdfsChanged` 一次办妥：
+  // 后端 `vdfs/watch` 登记（引用计数 + 串行链，最后一个订阅者撤走才摘除）、
+  // 总线 `vdfs` 频道、以及**前端本地通道**（`publishVdfsChangedLocal`——会话 store
+  // 的乐观写靠它通知其它页面；从前用裸 `subscribe` 收不到这条通道）。
+  //
+  // 订「绑定地址」而不是「当前目录」：左栏子目录的增删要能刷新导航，而那类变更
+  // 落在 `addr` 上、不在 `cwd` 子树里；`cwd` 只是 `addr` 的子目录，本就在其子树内，
+  // 后端按前缀投递子树变更，因此订 `addr` 覆盖得住。代价是邻目录的变更也会送到
+  // handler，由 `affects` 收窄。
+  //
+  // 「虚拟根不在任何 provider 身上、不该登记 watch」这条知识归 `subscribeVdfsChanged`
+  // 所有（它内部跳过根），本层不再复述。
+  let releaseChanges: (() => void) | null = null
 
-  // 订阅范围与当前目录严格绑定：切换目录时解除旧订阅、登记新订阅。
-  // 后端对无实时能力的 provider 默认 no-op，因此这里无需按 provider 分流。
-  let watched: string | null = null
+  // 绑定地址变化 = 换了一个数据地址：换订阅 + 整体重载（左栏、选中、当前目录）
   watch(
-    cwd,
-    (next, prev) => {
-      // 虚拟根不在任何 provider 身上、无实时能力；跳过 watch/unwatch，否则后端报
-      // 「目录不是可操作节点」（见服务器日志 vdfs/watch / vdfs/unwatch 的 ERROR）。
-      if (prev && prev !== vdfsRoot() && prev !== next) void unwatchVdfs(prev)
-      watched = next
-      if (next !== vdfsRoot()) void watchVdfs(next)
+    addr,
+    () => {
+      releaseChanges?.()
+      releaseChanges = subscribeVdfsChanged({ prefix: addr.value }, onChange)
+      void reload()
     },
     { immediate: true }
   )
 
-  // 绑定地址变化 = 换了一个数据地址：整体重载（左栏、选中、当前目录）
-  watch(addr, () => void reload(), { immediate: true })
-
   onBeforeUnmount(() => {
-    unsubBus()
+    releaseChanges?.()
     if (refreshTimer) clearTimeout(refreshTimer)
-    if (watched && watched !== vdfsRoot()) void unwatchVdfs(watched)
   })
 
   return {

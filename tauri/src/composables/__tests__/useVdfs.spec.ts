@@ -20,17 +20,13 @@ const mocks = vi.hoisted(() => ({
   listVdfs: vi.fn(),
   readVdfs: vi.fn(),
   writeVdfs: vi.fn(),
-  watchVdfs: vi.fn(),
-  unwatchVdfs: vi.fn(),
-  subscribe: vi.fn(),
+  subscribeVdfsChanged: vi.fn(),
 }))
 
 vi.mock('@/services/vdfs', () => ({
   listVdfs: mocks.listVdfs,
   readVdfs: mocks.readVdfs,
   writeVdfs: mocks.writeVdfs,
-  watchVdfs: mocks.watchVdfs,
-  unwatchVdfs: mocks.unwatchVdfs,
   // 以下未被本用例触达，仅为满足模块导入
   arrayBufferToBase64: vi.fn(),
   base64ToBytes: vi.fn(),
@@ -40,7 +36,10 @@ vi.mock('@/services/vdfs', () => ({
   runVdfsAction: vi.fn(),
   writeVdfsBinary: vi.fn(),
 }))
-vi.mock('@/services/eventBus', () => ({ subscribe: mocks.subscribe }))
+// 订阅入口整体替身：`subscribeVdfsChanged` 已把「总线频道 + 后端 watch 登记 +
+// 本地通道」三件事收在一处（它自己由 services/__tests__/eventBusWatch.spec.ts 覆盖），
+// 本用例只关心「收到变更后怎么处理」，因此直接拿到裸 VdfsChange 回调。
+vi.mock('@/services/eventBus', () => ({ subscribeVdfsChanged: mocks.subscribeVdfsChanged }))
 vi.mock('@/utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() },
 }))
@@ -99,20 +98,17 @@ function mountHost(addr: string) {
   return { api, wrapper }
 }
 
-/** 取出 useVdfs 注册到总线上的变更回调（收的是总线信封，不是裸 VdfsChange） */
-function busHandler(): (event: unknown) => void {
-  const calls = mocks.subscribe.mock.calls
+/** 取出 useVdfs 交给订阅入口的变更回调（订阅入口收裸 VdfsChange，总线信封的解包在它内部） */
+function changeHandler(): (change: VdfsChange) => void {
+  const calls = mocks.subscribeVdfsChanged.mock.calls
   const call = calls[calls.length - 1]
-  expect(call, 'useVdfs 必须订阅 vdfs 变更频道').toBeTruthy()
-  return call![1] as (event: unknown) => void
+  expect(call, 'useVdfs 必须订阅 vdfs 变更').toBeTruthy()
+  return call![1] as (change: VdfsChange) => void
 }
 
-/** 按总线下发的真实形状投递一条 VDFS 变更 */
+/** 投递一条 VDFS 变更 */
 function emitChange(change: VdfsChange) {
-  busHandler()({
-    type: 'bus_event',
-    data: { kind: 'vdfs', session_id: null, data: change },
-  })
+  changeHandler()(change)
 }
 
 /** 让 refreshNav / refresh 的 promise 链跑完 */
@@ -130,9 +126,7 @@ beforeEach(() => {
     items: [],
   })
   mocks.readVdfs.mockResolvedValue({ path: '', text: '', binary: false, size: 0 })
-  mocks.watchVdfs.mockResolvedValue(undefined)
-  mocks.unwatchVdfs.mockResolvedValue(undefined)
-  mocks.subscribe.mockReturnValue(() => {})
+  mocks.subscribeVdfsChanged.mockReturnValue(() => {})
 })
 
 describe('useVdfs 消费 appended（流式即列表项的追加）', () => {

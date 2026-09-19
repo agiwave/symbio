@@ -18,6 +18,90 @@
 
 ***
 
+## 2026-09-20: 前端机制化第二轮（续）—— 削减清单 P8–P12 落地
+
+**性质：机制化收敛 ×4 + 一条被门禁否决的提案**。复核报告见
+[design/frontend-mechanization-review-round2.md](./design/frontend-mechanization-review-round2.md) §6 / §3.1。
+
+承接上一条（G7–G9），把该报告 §3 定位的 P8–P12 全部推进完。**四条的预估都偏了**，
+偏法各不相同；本节按"实际发生了什么"记录。
+
+### 1. P8 服务层失败口径：`withFallback`
+
+读 / 列类服务的失败处置原先在 9 处各手写一份 `try/catch → logger → return 兜底`。
+形状相同，但**兜底值的语义并不一致**：有的返"形状合法的空容器"（页面照常渲染），
+有的返 `null`（调用方必须自己分支）——调用方光看签名分不出来。
+
+新增 `services/fallback.ts` 的 `withFallback(op, fallback, log)`：兜底值改为**在调用点
+显式写出**（惰性 thunk），日志级别只在这一处决定。`services/vdfs.ts`（6 处）、
+`home.ts`（2 处）、`options.ts`（1 处）改为其调用方；**写类仍直抛**——写入失败必须
+让用户知道，否则会看到一个"成功"的假象。
+
+`plugin.ts` / `eventBus.ts` 内部另有 catch，但**不适用本原语**：前者是协议违规/清理
+路径（含一处清理后 rethrow），后者是"一个订阅者抛错不拖垮其它订阅者"的隔离。
+
+### 2. P9 `useVdfs` 改用统一订阅入口，顺带修掉两个真缺口
+
+`composables/useVdfs.ts` 原先用裸 `subscribe({kind: VDFS_EVENT_KIND})` + 手写
+`affects` / `watched` / `watch(cwd)` 生命周期。改走 `subscribeVdfsChanged({prefix: addr})` 后：
+
+- **修掉漏收前端本地通道**：会话 store 的乐观写走 `publishVdfsChangedLocal`，
+  而那条通道只投给 `subscribeVdfsChanged` 的注册者——因此"删掉一个会话"此前
+  **不会**让 VDFS 浏览器刷新；
+- **修掉漏 unwatch 的风险**：手写生命周期换成 `eventBus` 已有的引用计数 + 串行链；
+- 订阅前缀由"当前目录"改为"**绑定地址**"（否则左栏子目录的增删刷不了导航）。
+  有意的代价：绑定地址**之上**的祖先变更不再送达本视图——那属于过度刷新而非功能。
+
+### 3. P10 抽 `createSyncLifecycle`，修掉 `sessionNodeSync` 漏 HMR 守卫
+
+两个 VDFS 同步器都持有模块级订阅句柄，`vdfsTranscriptSync` 有 `globalThis` 启动标记
+（HMR 会重置模块级变量 ⇒ 订第二条 ⇒ 同一条变更被处理两遍），`sessionNodeSync` **没有**。
+
+新增 `services/syncLifecycle.ts`（`begin` / `attach` / `end`）把"幂等启动 + 可停 +
+HMR 守卫"收成一处。**刻意不合并**：合并策略（清单 800ms 防抖重拉 vs 转写逐路径
+串行链）与订阅原语（作用域前缀 vs 按地址自行分派）是业务差异，不是重复。
+
+标记在 `attach` 时置位而非 `begin`：启动前那步可能失败的解析（挂载目录 / 地址方案）
+失败后标记必须未置位，否则一次失败会把同步器**永久锁死**。
+
+### 4. P12 `sessionStatuses` 收敛到唯一写通道
+
+实读后修正了报告的判断：`sessionMessages` 侧**早已**收敛（`commitMessages` +
+`updateMessages`，全仓 `sessionMessages.value =` 只有一处），没跟上的是
+`sessionStatuses` 侧——`putStatus` 存在，但另有 4 处手写"展开 → 合并 → 整体替换"。
+
+新增 `newLiveStatus()` / `commitStatuses()` / `updateStatus()`，4 处改为其调用方，
+`sessionStatuses.value =` 同样只剩一处。
+
+**没有潜伏 bug**（4 处手写点的 `last_event_at` 当时都恰好写对了），但**最容易写错的
+就是它**：条目一旦存在，`getSessionStaleReason` 就按 `last_event_at` 算"多久没消息了"，
+初值若写成 0，刚建出的条目会被立刻判成"状态已过期 N 分钟"，界面凭空报"连接已断开"，
+而没有任何测试会失败。故补 4 例回归测试，并做变异检查验证（把初值改回 0，用例确实变红）。
+
+### 5. P11 **不做**：与既有门禁 M-007 冲突
+
+报告提议把 `schemas/vdfs.ts` 的 10 个 VDFS op 并入 `constants/pluginPaths.ts`。
+照做后 `mechanism-audit` 立刻报 10 个 **M-007** 错误——项目**早已**有门禁钉死
+"地址常量的定义权在 `schemas/vdfs.ts`"。且两处登记本是**互不相交**的集合，
+不存在重复定义可删。
+
+**正确动作是让文档与门禁一致**：`pluginPaths.ts` 的文档改为"**控制面**插件路由名的
+唯一登记处"，并写明 VDFS 常量归 `schemas/vdfs.ts`、不要往这搬。本轮 P11 只改注释。
+
+### 验证
+
+`vitest run` **47 文件 / 646 测试**全过（新增 15 例）；`vue-tsc --noEmit` 干净；
+`style-audit` 0 错误 0 警告；`mechanism-audit` 七条规则全过；`grep-audit` 0 错误；
+`protocol-mirror` / `schema` / `dead-code` / `doc-link` / `test-layout` / `plugin-entry`
+审计全过；`gen-current-facts --check` 一致。
+
+生产代码 **+387 / −187（净 +200）**——行数是**涨**的：两个新原语（`fallback.ts`、
+`syncLifecycle.ts`）各自带约六成注释，换来的是一条具名、有文档、有测试的口径。
+**当"单来源"本身需要一个原语时，行数必然上升**，这与第一轮"行数只是副产品"的
+判断并不矛盾。
+
+***
+
 ## 2026-09-20: 前端机制化第二轮 —— 词表单源 / 弹窗外壳收口 / 门禁识别新机制
 
 **性质：机制化收敛 ×3（其中一条同时修掉可访问性缺陷）**。复核报告见

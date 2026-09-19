@@ -24,6 +24,11 @@ import {
 
 export * from './vdfs-form'
 
+// 操作名与地址常量**必须**定义在本文件：`scripts/mechanism-audit.mjs` 的 M-007
+// 禁止在别处再定义一份（导入使用是允许的）。理由是它们是 VDFS **契约**的一部分，
+// 要与下面的响应类型、变更词汇、地址代数同处一个文件——拆开就是把契约拆成两半。
+// 控制面路由（`home/*` / `work/*` / `event_bus/*` / `gateway/*`）不在此列，
+// 它们在 `constants/pluginPaths.ts`。
 export const VDFS_LIST = 'vdfs/list'
 export const VDFS_STAT = 'vdfs/stat'
 export const VDFS_READ = 'vdfs/read'

@@ -122,7 +122,10 @@ ESC + Tab 焦点陷阱 + 打开时自动聚焦，四处共用；`ConfirmDialog` 
 
 ---
 
-## 3. 削减清单（已定位，**未动**，按批次推进）
+## 3. 削减清单（P8–P12）
+
+> **本节的预估已被实施结果修正，实际落点与差异见 §6 / §3.1。**
+> 保留原表是为了留下"当时是怎么判断的"这条痕迹——四处预估都偏了，偏法各不相同。
 
 | # | 动作 | 主要落点 | 预计削减 |
 |---|---|---|---|
@@ -134,6 +137,8 @@ ESC + Tab 焦点陷阱 + 打开时自动聚焦，四处共用；`ConfirmDialog` 
 
 P12 的风险与收益都最高：它是"多路写同一份数据"，而 ADR-015 确立的
 「前端显示由节点状态驱动」正是为了消灭这类竞态。**建议单独一轮、带回归测试做。**
+（实施后发现：`sessionMessages` 侧早已收敛，只剩 `sessionStatuses` 侧没跟上；
+也没有潜伏 bug——见 §6。）
 
 ---
 
@@ -169,22 +174,107 @@ P12 的风险与收益都最高：它是"多路写同一份数据"，而 ADR-015
 
 ## 6. 落实状态
 
-本轮（G7–G9）**同轮完成**；§3 的 P8–P12 未动，留作后续批次。
+**G7–G9** 同轮完成（提交 `d8a9ccf`）；**P8–P12** 在后续一轮完成（本节）。
 
-| # | 状态 | 落点 |
-|---|---|---|
-| G7 | ✅ | `schemas/vdfs.ts` 消息类常量改别名 + `services/vdfsTranscriptSync.ts` 改集合判定 + 两侧同源单测（3 例） |
-| G8 | ✅ | 新增 `components/common/BaseModal.vue`；`ConfirmDialog` / `OptionFormDialog` / `HomedirSwitcher` / `ModelChatPanel` 四处共用；补 `BaseModal.spec.ts`（11 例） |
-| G9 | ✅ | `scripts/style-audit.mjs` 识别 `*-class` 属性值；顺带删除失去定义的 `.confirm-overlay` |
-| P8–P12 | ⏸ 未动 | 见 §3 |
+四条的结论与 §3 的预估**都不同**——预估只看到了"形状相同的代码"，没看到
+"形状相同 ≠ 同一件事"，也没看到既有门禁已经把某条边界钉死了：
 
-改动规模：12 个既有文件 **+262 / −246**，另新增 `BaseModal.vue` 与其单测。
-**行数净变化接近零**——本轮收益不在行数，而在"4 处 → 1 处"的词表收敛、
-4 处弹窗的键盘可访问性，以及门禁对新机制的识别能力。这与第一轮的判断一致：
-**真正的收益是把"多来源"压成"单来源"，行数只是副产品。**
+| # | 状态 | 落点 | 与预估的差异 |
+|---|---|---|---|
+| G7 | ✅ | `schemas/vdfs.ts` 消息类常量改别名 + `services/vdfsTranscriptSync.ts` 改集合判定 + 两侧同源单测（3 例） | — |
+| G8 | ✅ | 新增 `components/common/BaseModal.vue`；四处弹窗共用；补 `BaseModal.spec.ts`（11 例） | — |
+| G9 | ✅ | `scripts/style-audit.mjs` 识别 `*-class` 属性值；顺带删除失去定义的 `.confirm-overlay` | — |
+| P8 | ✅ | 新增 `services/fallback.ts`（`withFallback`）；9 处读/列入口改为其调用方 | 预估 −50 行 → 实际净 **+40 行**（见下） |
+| P9 | ✅ | `composables/useVdfs.ts` 改走 `subscribeVdfsChanged({prefix: addr})` | 预估 −30 行 → 实际净 **−4 行**；**顺带修掉两个真缺口** |
+| P10 | ✅ | 新增 `services/syncLifecycle.ts`；两处 sync 共用其生命周期 | 预估 −80 行 → 实际净 **+50 行**；**修掉 `sessionNodeSync` 漏 HMR 守卫** |
+| P11 | ⛔ **不做**（只改文档） | `constants/pluginPaths.ts` 与 `schemas/vdfs.ts` 的注释 | **与既有门禁 M-007 直接冲突**，见 §3.1 |
+| P12 | ✅ | `stores/sessions.ts` 加 `commitStatuses` / `updateStatus` / `newLiveStatus` + 4 例回归测试 | 「不定（根治竞态）」→ 实际是**结构收敛**，无潜伏 bug |
 
-验证：`vitest run` 45 文件 / 631 通过（起点 44 / 615，净增 16 例）；
-`vue-tsc --noEmit` 干净；`style-audit` 0 错误 0 警告。
+生产代码 **+387 / −187（净 +200）**，其中 164 行是 `fallback.ts` 与 `syncLifecycle.ts`
+两个新原语（注释约占六成）。**行数是涨的，而且这次涨得有道理**：第一轮的结论
+（"真正的收益是把多来源压成单来源，行数只是副产品"）在这里被反过来验证了一次——
+当"单来源"本身需要一个具名、有文档、有测试的原语时，行数必然上升。
+
+### P9 顺带修掉的两个真缺口
+
+1. **`useVdfs` 收不到前端本地通道**。它原先用裸 `subscribe({kind: VDFS_EVENT_KIND})`，
+   只订总线频道；而会话 store 的乐观写走的是 `publishVdfsChangedLocal`
+   （`stores/sessions.ts` 两处）——那条通道只投给 `subscribeVdfsChanged` 的注册者。
+   于是"删掉一个会话"在别的页面**不会**让 VDFS 浏览器刷新。改用统一入口后一并拿到。
+2. **手写 watch/unwatch 生命周期**（`watched` 变量 + `watch(cwd)` + `onBeforeUnmount`）
+   换成了 `eventBus` 已有的**引用计数 + 串行链**实现，漏 unwatch 的风险消失；
+   "虚拟根不登记 watch"这条知识也不再由本层复述。
+
+**一处有意的行为变化**：订阅前缀从"当前目录"改成"**绑定地址**"（否则左栏子目录的
+增删无法刷新导航——那类变更落在 `addr` 上）。代价是**绑定地址之上**的祖先变更
+不再送达本视图（原先 `affects` 会命中）。判断：那属于过度刷新而非功能，
+且"前缀即作用域"是事件总线既有的投递语义，不该为它开例外。
+
+### P10 修掉的一个真缺口：`sessionNodeSync` 没有 HMR 守卫
+
+两个同步器都持有模块级订阅句柄，而 `vdfsTranscriptSync` 有 `globalThis` 标记
+（注释写明了原因：HMR 重置模块级变量 ⇒ 订第二条 ⇒ 同一条变更被处理两遍），
+`sessionNodeSync` **没有**。同一个陷阱、两种命运——这正是"各写一遍"的代价。
+`services/syncLifecycle.ts` 把「幂等启动 / 可停 / HMR 守卫」收成一处后，
+下一个同步器不可能再漏。
+
+**注意这里刻意没有合并的东西**：合并策略（清单是 800ms 防抖重拉、转写是逐路径
+串行链）与订阅原语（清单按作用域前缀、转写按地址自行分派）都**保留差异**——
+它们是业务差异，不是重复。强行统一只会得到一个比两份实现更难读的配置对象。
+
+### P12 的边界：它收敛的是结构，不是竞态
+
+§3 把 P12 描述为"根治竞态"。实读后修正：`sessionMessages` 侧**早已**收敛
+（`commitMessages` + `updateMessages`，全仓 `sessionMessages.value =` 只有一处），
+真正没跟上的是 `sessionStatuses` 侧——`putStatus` 存在，但另有 4 处手写
+"展开 → 合并 → 整体替换"。收敛后 `sessionStatuses.value =` 同样只剩一处。
+
+**没有发现潜伏 bug**：4 处手写点的 `last_event_at` 当时都恰好写对了。但**最容易写错
+的就是它**——条目一旦存在，`getSessionStaleReason` 就按 `last_event_at` 算"多久没消息了"，
+初值若写成 0，刚建出的条目会立刻被判成"状态已过期 N 分钟"（N 自 Unix 纪元起算），
+界面凭空报"连接已断开"，**而没有任何测试会失败**。因此新增 4 例回归测试锁住它，
+并用变异检查验证过：把 `newLiveStatus()` 的初值改回 0，对应用例**确实变红**。
+
+---
+
+## 3.1 一条**不要做**的合并：P11 与门禁 M-007 冲突
+
+§3 的 P11 提议把 `schemas/vdfs.ts` 的 10 个 VDFS op 并入
+`constants/pluginPaths.ts`（理由是后者的文档自称"插件路由名的唯一登记处"）。
+本轮照做后，**`mechanism-audit` 立刻报 10 个 M-007 错误**：
+
+> M-007：地址常量的定义权在 `schemas/vdfs.ts` —— 此处不得再定义一份（导入使用是允许的）
+
+即：**项目早已有一条门禁把这条边界钉死了**，而 P11 的前提（"两处登记应合并"）
+与它直接矛盾。且两处登记本来就是**互不相交**的集合（`pluginPaths.ts` 里没有任何
+`vdfs/*`），不存在重复定义可删——§3 写的"≈20 行"无从谈起。
+
+**正确动作是让文档与门禁一致，而不是让代码迁就文档**：`pluginPaths.ts` 的文档改为
+「**控制面**插件路由名的唯一登记处」，并写明 VDFS 常量归 `schemas/vdfs.ts`、
+由 M-007 钉住、**不要往这搬**；`schemas/vdfs.ts` 的常量处补一句反向指引。
+两层分开的理由是实的：VDFS 常量是**契约**（要与响应类型、变更词汇、地址代数同处
+一个文件），控制面路由是**前端组织的路由表**，不是同一个登记处的两半。
+
+---
+
+## 7. 附录：改动规模与验证
+
+| 指标 | 值 |
+|---|---|
+| 改动文件 | 16（生产 11 / 测试 5），另含 `docs/CURRENT.md` 重生成 |
+| 生产代码 | +387 / −187（净 +200） |
+| 新增原语 | `services/fallback.ts`、`services/syncLifecycle.ts` |
+| 新增测试 | 15 例（`fallback` 5、`syncLifecycle` 6、`sessions` 状态通道 4） |
+
+验证（全部通过）：`vitest run` **47 文件 / 646 测试**；`vue-tsc --noEmit` 干净；
+`style-audit` 0 错误 0 警告；`mechanism-audit` 七条规则全过；`grep-audit` 0 错误；
+`protocol-mirror-audit` / `schema-audit` / `dead-code-audit` / `doc-link-audit` /
+`test-layout-audit` / `plugin-entry-audit` 全过；`gen-current-facts --check` 一致。
+
+> **环境提示**（供后续复核者避坑）：全量 `vitest run` 偶发**整套卡住**，日志末尾是
+> `EPERM: operation not permitted, rename 'C:\Temp\...\ssr\.tmp-...'`。本机 `TMP=C:\Temp`
+> （非标准位置），Vite 的 SSR 模块缓存改名被拒——是**环境**问题而非测试问题
+> （同一套件单独跑必绿，重跑全量也绿）。遇到时先看日志末尾，别信退出码。
 
 ---
 

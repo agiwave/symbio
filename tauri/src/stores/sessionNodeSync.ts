@@ -11,6 +11,9 @@
  *
  * 现在它与 `vdfsTranscriptSync` 同构：由**应用外壳**（`MainLayout`）显式启动，
  * 落地目标（sink）注入进来。于是 store 只有状态与动作，订阅是可启停的独立接线。
+ * 两者的「全局唯一订阅生命周期」（幂等启动 / 可停 / HMR 守卫）共用
+ * `services/syncLifecycle`——**合并策略**（此处防抖重拉、转写处逐路径串行链）
+ * 则各自保留，因为那是业务差异而非重复。
  *
  * ## 清单同步的双模式
  *
@@ -27,6 +30,7 @@
  */
 
 import { subscribeVdfsChanged } from '@/services/eventBus'
+import { createSyncLifecycle } from '@/services/syncLifecycle'
 import { ensureSessionMountDir } from '@/services/vdfsScheme'
 import {
   VDFS_CHANGE_APPENDED,
@@ -47,7 +51,10 @@ export interface SessionNodeSink {
   applySessionNode(id: string, change: VdfsChange): void
 }
 
-let _unsubscribe: (() => void) | null = null
+// 全局唯一订阅的生命周期（幂等启动 / 可停 / **HMR 守卫**）。守卫必须挂 globalThis：
+// 模块热更新会把本模块的模块级变量清空，不守卫就会在 HMR 后订出第二条，
+// 同一次变更被处理两遍（清单表现为重复重拉）。
+const lifecycle = createSyncLifecycle('[session-node-sync]', '__symSessionNodeSyncStarted')
 let _listRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 防抖重拉：created / renamed 等只给地址的变更，用于收敛排序与完整字段 */
@@ -67,10 +74,7 @@ function scheduleListRefresh(sink: SessionNodeSink): void {
  * 与 `startTranscriptSync` 同构：同一个进程只需要一条，重复启动只会打日志。
  */
 export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void> {
-  if (_unsubscribe) {
-    logger.warn('[session-node-sync]', 'already started')
-    return
-  }
+  if (!lifecycle.begin()) return
 
   // 挂载目录是运行期数据（按「可新建 ext=session 的挂载点」认出来），不是常量
   let mountDir: string
@@ -78,31 +82,34 @@ export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void>
     mountDir = await ensureSessionMountDir()
   } catch (err) {
     // 解析不到就不订阅：宁可没有订阅，也不要订到一个拼错的 prefix 上
-    // （那样侧栏会静默不更新，比报错难查）
+    // （那样侧栏会静默不更新，比报错难查）。注意这里**不能**留下启动标记——
+    // 标记在 `attach` 时才置位，正是为了让这次失败不把同步器永久锁死。
     logger.error('[session-node-sync]', '会话挂载目录解析失败，订阅未启动', err)
     return
   }
 
-  _unsubscribe = subscribeVdfsChanged(
-    { prefix: mountDir, directChildren: true },
-    (change) => {
-      // 追加型变更只发生在转写列表项上（由 vdfsTranscriptSync 就地应用 delta），
-      // 与会话清单无关——绝不能让流式的每一帧触发一次重拉。
-      if (change.change === VDFS_CHANGE_APPENDED) return
-      const id = vdfsBase(change.path)
-      if (!id) return
-      if (change.change === VDFS_CHANGE_DELETED) {
-        sink.removeSessionLocal(id)
-        return
-      }
-      if (change.change === VDFS_CHANGE_UPDATED) {
-        sink.applySessionNode(id, change)
-        return
-      }
-      // created / renamed 等：本地乐观插入已覆盖同窗口场景；
-      // 此处防抖重拉，收敛排序与完整字段。
-      scheduleListRefresh(sink)
-    },
+  lifecycle.attach(
+    subscribeVdfsChanged(
+      { prefix: mountDir, directChildren: true },
+      (change) => {
+        // 追加型变更只发生在转写列表项上（由 vdfsTranscriptSync 就地应用 delta），
+        // 与会话清单无关——绝不能让流式的每一帧触发一次重拉。
+        if (change.change === VDFS_CHANGE_APPENDED) return
+        const id = vdfsBase(change.path)
+        if (!id) return
+        if (change.change === VDFS_CHANGE_DELETED) {
+          sink.removeSessionLocal(id)
+          return
+        }
+        if (change.change === VDFS_CHANGE_UPDATED) {
+          sink.applySessionNode(id, change)
+          return
+        }
+        // created / renamed 等：本地乐观插入已覆盖同窗口场景；
+        // 此处防抖重拉，收敛排序与完整字段。
+        scheduleListRefresh(sink)
+      },
+    ),
   )
 }
 
@@ -112,8 +119,5 @@ export function stopSessionNodeSync(): void {
     clearTimeout(_listRefreshTimer)
     _listRefreshTimer = null
   }
-  if (_unsubscribe) {
-    _unsubscribe()
-    _unsubscribe = null
-  }
+  lifecycle.end()
 }

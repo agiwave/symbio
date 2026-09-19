@@ -97,6 +97,7 @@ vi.mock('@/services/vdfsScheme', () => ({
 
 import { useSessionsStore } from '../sessions'
 import { startSessionNodeSync, stopSessionNodeSync } from '../sessionNodeSync'
+import { VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 
 /**
  * 协议夹具：会话挂载目录与转写段是**运行期数据**（列目录认出来）。
@@ -700,5 +701,71 @@ describe('sessions store — 终态丢失后的转写对账', () => {
     await flushPromises()
 
     expect(store.getSessionMessages(SID).map((m) => m.id)).toEqual(['tc1'])
+  })
+})
+
+/**
+ * 实时状态（`sessionStatuses`）的唯一变更通道。
+ *
+ * 收敛前有四处各自手写「展开 → 合并 → 整体替换」，其中最隐蔽的一处是**缺省值**：
+ * 条目一旦存在，`getSessionStaleReason` 就会按 `last_event_at` 算「多久没消息了」，
+ * 若某处把缺省值写成 0，刚建出来的条目会被立刻判成「状态已过期 N 分钟」——
+ * 界面凭空报「连接已断开」，而没有任何测试会失败。
+ * 这组用例锁的正是这些**不会报错的错**。
+ */
+describe('sessions store — 实时状态的唯一变更通道', () => {
+  const SID = 's1'
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    sessionApi.listSessions.mockResolvedValue([])
+  })
+
+  it('putStatus：自动推进 last_event_at，并忽略调用方传入的时间戳', () => {
+    const store = useSessionsStore()
+    const t0 = Date.now()
+
+    store.putStatus(SID, { last_event_at: 0, activity: '处理中…' })
+
+    const st = store.getSessionStatus(SID)
+    expect(st.activity).toBe('处理中…')
+    expect(st.last_event_at, 'last_event_at 由通道统一维护').toBeGreaterThanOrEqual(t0)
+  })
+
+  it('消息落地写 last_preview 时同样推进时间戳（写入方不手动维护它）', () => {
+    const store = useSessionsStore()
+    const t0 = Date.now()
+
+    store.putMessage(SID, {
+      id: 'a1',
+      role: 'assistant',
+      type: 'text',
+      content: '回答',
+    } as never)
+
+    const st = store.getSessionStatus(SID)
+    expect(st.last_preview).toBe('回答')
+    expect(st.last_event_at).toBeGreaterThanOrEqual(t0)
+  })
+
+  it('水合建出的状态条目**不会**被立刻判成过期（初值必须是当前时刻，不是 0）', () => {
+    const store = useSessionsStore()
+    // 空历史：这条路径必须仍然建出条目（否则下面的断言会因「没有条目」而假通过）
+    store.hydrateFromHistory(SID, [])
+
+    expect(store.getSessionStatus(SID).last_event_at).toBeGreaterThan(0)
+    expect(store.getSessionStaleReason(SID)).toBeNull()
+  })
+
+  it('摘掉状态条目（删除会话）后不再报过期，且消息一并清空', () => {
+    const store = useSessionsStore()
+    store.putStatus(SID, { status: VDFS_STATUS_WORKING })
+    expect(store.getSessionStatus(SID).status).toBe(VDFS_STATUS_WORKING)
+
+    store.dropSessionState(SID)
+
+    // 条目没了 ⇒ 回到「从未有过事件」，而不是留下一条 last_event_at 很旧的陈旧状态
+    expect(store.getSessionStaleReason(SID)).toBeNull()
+    expect(store.getSessionMessages(SID)).toEqual([])
   })
 })

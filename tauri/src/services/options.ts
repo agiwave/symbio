@@ -10,7 +10,7 @@
 import { callPlugin } from './plugin'
 import { OPTIONS_LIST } from '@/constants/pluginPaths'
 import type { OptionsRequest, OptionsResponse } from '@/schemas/options'
-import { logger } from '@/utils/logger'
+import { withFallback } from './fallback'
 
 /**
  * 拉取选项列表。
@@ -22,19 +22,19 @@ export async function listOptions(
   sessionId?: string,
   parent?: string
 ): Promise<OptionsResponse> {
-  try {
-    const resp = await callPlugin<OptionsResponse, OptionsRequest>(
-      OPTIONS_LIST,
-      {
-        session_id: sessionId || undefined,
-        parent: parent || undefined,
-      },
-      undefined,
-      sessionId ? { session_id: sessionId } : undefined
-    )
-    return resp ?? { nodes: [] }
-  } catch (err) {
-    logger.error('options-service', 'listOptions failed:', err)
-    return { nodes: [] }
-  }
+  const empty = (): OptionsResponse => ({ nodes: [] })
+  return withFallback(
+    async () =>
+      (await callPlugin<OptionsResponse, OptionsRequest>(
+        OPTIONS_LIST,
+        {
+          session_id: sessionId || undefined,
+          parent: parent || undefined,
+        },
+        undefined,
+        sessionId ? { session_id: sessionId } : undefined
+      )) ?? empty(),
+    empty,
+    { tag: 'options-service', what: 'listOptions failed' }
+  )
 }

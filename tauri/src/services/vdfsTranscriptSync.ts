@@ -62,6 +62,7 @@
  */
 
 import { subscribe as busSubscribe, type BusEvent } from './eventBus'
+import { createSyncLifecycle } from './syncLifecycle'
 import { readVdfs, statVdfs } from './vdfs'
 import { ensureVdfsSessionScheme, vdfsSessionScheme } from './vdfsScheme'
 import {
@@ -111,11 +112,11 @@ export interface TranscriptSink {
 /** 当前注入的落地目标（由 `startTranscriptSync` 设置） */
 let _sink: TranscriptSink | null = null
 
-let _unsubscribe: (() => void) | null = null
-
-// HMR 守卫：模块热更新会重置 `_unsubscribe`，导致二次订阅 → 同一条消息被两个
-// handler 各应用一次（流式文本叠字）。启动标记挂到 globalThis，跨模块重载幂等。
-const _G = globalThis as typeof globalThis & { __symTranscriptSyncStarted?: boolean }
+// 全局唯一订阅的生命周期（幂等启动 / 可停 / HMR 守卫）。守卫必须挂 globalThis：
+// 模块热更新会重置模块级变量，不守卫就会在 HMR 后订出第二条 → 同一条消息被两个
+// handler 各应用一次（流式文本叠字）。这条陷阱与清单同步共有，故收在
+// `services/syncLifecycle`，本模块不再自己维护标记。
+const lifecycle = createSyncLifecycle('[vdfs-transcript]', '__symTranscriptSyncStarted')
 
 /**
  * 节点状态词 → 消息状态词。
@@ -318,11 +319,7 @@ function clearTranscript(sessionId: string): void {
  *   测试可传普通对象）——本模块是 service，不认识 Pinia。
  */
 export function startTranscriptSync(sink: TranscriptSink): void {
-  if (_unsubscribe || _G.__symTranscriptSyncStarted) {
-    logger.warn('[vdfs-transcript]', 'already started')
-    return
-  }
-  _G.__symTranscriptSyncStarted = true
+  if (!lifecycle.begin()) return
   _sink = sink
 
   // 自己也要触发一次解析：本函数在 `refreshList` **之前**启动（见 MainLayout），
@@ -334,42 +331,39 @@ export function startTranscriptSync(sink: TranscriptSink): void {
     logger.warn('[vdfs-transcript]', '地址方案解析未完成（等清单到手后会补一次）', e),
   )
 
-  _unsubscribe = busSubscribe({ kind: VDFS_EVENT_KIND }, (busEvent: BusEvent) => {
-    const change = busEvent.data?.data as VdfsChange | undefined
-    if (!change || typeof change.path !== 'string') return
+  lifecycle.attach(
+    busSubscribe({ kind: VDFS_EVENT_KIND }, (busEvent: BusEvent) => {
+      const change = busEvent.data?.data as VdfsChange | undefined
+      if (!change || typeof change.path !== 'string') return
 
-    // **按地址分派**（唯一入口，纯函数）。会话叶子归 store 自己的作用域，
-    // 这里只认转写；其余地址返回 null，直接跳过。
-    //
-    // 方案未解析完（启动引导窗口）时 `sessionRouteOf` 一律返回 null —— 此时
-    // 也没有任何会话被展示，跳过是安全的；解析完成后自然开始收敛。
-    const route = sessionRouteOf(vdfsSessionScheme(), change.path)
-    if (!route) return
+      // **按地址分派**（唯一入口，纯函数）。会话叶子归 store 自己的作用域，
+      // 这里只认转写；其余地址返回 null，直接跳过。
+      //
+      // 方案未解析完（启动引导窗口）时 `sessionRouteOf` 一律返回 null —— 此时
+      // 也没有任何会话被展示，跳过是安全的；解析完成后自然开始收敛。
+      const route = sessionRouteOf(vdfsSessionScheme(), change.path)
+      if (!route) return
 
-    if (route.target === 'messages') {
-      // 落在 `消息` 目录本身 = 整表清空
-      if (change.change === VDFS_CHANGE_DELETED) {
-        enqueue(change.path, async () => clearTranscript(route.sessionId))
+      if (route.target === 'messages') {
+        // 落在 `消息` 目录本身 = 整表清空
+        if (change.change === VDFS_CHANGE_DELETED) {
+          enqueue(change.path, async () => clearTranscript(route.sessionId))
+        }
+        return
       }
-      return
-    }
-    if (route.target !== 'message') return
+      if (route.target !== 'message') return
 
-    const { sessionId, messageId } = route
-    enqueue(change.path, () => applyChange(change, sessionId, messageId))
-  })
+      const { sessionId, messageId } = route
+      enqueue(change.path, () => applyChange(change, sessionId, messageId))
+    }),
+  )
 
   logger.info('[vdfs-transcript]', 'started')
 }
 
 /** 停止转写同步（一般不需要调用） */
 export function stopTranscriptSync(): void {
-  _G.__symTranscriptSyncStarted = false
+  lifecycle.end()
   _sink = null
-  if (_unsubscribe) {
-    _unsubscribe()
-    _unsubscribe = null
-    logger.info('[vdfs-transcript]', 'stopped')
-  }
   chains.clear()
 }

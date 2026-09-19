@@ -33,6 +33,7 @@ import {
 } from '../schemas/vdfs'
 import { resetVdfsRoot, setVdfsRoot, vdfsRoot, vdfsRootResolved } from '../schemas/vdfsRoot'
 import { logger } from '@/utils/logger'
+import { withFallback } from './fallback'
 
 /** 有界列表的窗口参数：`limit` 条、游标 `before` 之后 */
 export interface VdfsListOptions {
@@ -51,18 +52,20 @@ export interface VdfsListOptions {
  */
 export async function ensureVdfsRoot(): Promise<void> {
   if (vdfsRootResolved()) return
-  try {
-    // `vdfs/root` 的定义就是「不给地址」：给了也不看，免得出现两套入参
-    const resp = await callPlugin<VdfsListResponse>(VDFS_ROOT_OP, {})
-    if (resp?.path) {
-      setVdfsRoot(resp.path)
-      logger.info('vdfs-service', 'root anchored:', resp.path)
-    } else {
-      logger.error('vdfs-service', 'vdfs/root 未返回根地址，虚拟半不可用')
-    }
-  } catch (err) {
-    logger.error('vdfs-service', 'vdfs/root failed，虚拟半不可用:', err)
-  }
+  await withFallback(
+    async () => {
+      // `vdfs/root` 的定义就是「不给地址」：给了也不看，免得出现两套入参
+      const resp = await callPlugin<VdfsListResponse>(VDFS_ROOT_OP, {})
+      if (resp?.path) {
+        setVdfsRoot(resp.path)
+        logger.info('vdfs-service', 'root anchored:', resp.path)
+      } else {
+        logger.error('vdfs-service', 'vdfs/root 未返回根地址，虚拟半不可用')
+      }
+    },
+    () => {},
+    { tag: 'vdfs-service', what: 'vdfs/root failed，虚拟半不可用' }
+  )
 }
 
 /** 测试用：清掉根锚点 */
@@ -218,19 +221,19 @@ export async function moveVdfs(from: string, to: string): Promise<VdfsMoveRespon
  * 两个函数均吞错：无实时能力的 provider 由后端默认 no-op。
  */
 export async function watchVdfs(path: string): Promise<void> {
-  try {
-    await callPlugin(VDFS_WATCH, { path })
-  } catch (err) {
-    logger.debug('vdfs-service', `watchVdfs(${path}) failed:`, err)
-  }
+  await withFallback(() => callPlugin(VDFS_WATCH, { path }), () => {}, {
+    tag: 'vdfs-service',
+    what: `watchVdfs(${path}) failed`,
+    level: 'debug',
+  })
 }
 
 export async function unwatchVdfs(path: string): Promise<void> {
-  try {
-    await callPlugin(VDFS_UNWATCH, { path })
-  } catch (err) {
-    logger.debug('vdfs-service', `unwatchVdfs(${path}) failed:`, err)
-  }
+  await withFallback(() => callPlugin(VDFS_UNWATCH, { path }), () => {}, {
+    tag: 'vdfs-service',
+    what: `unwatchVdfs(${path}) failed`,
+    level: 'debug',
+  })
 }
 
 function emptyNode(path: string): VdfsNode {
