@@ -128,6 +128,49 @@ export function isUnsettledMessageStatus(status?: MessageStatus | null): boolean
   return status === MESSAGE_STATUS_FAILED || status === MESSAGE_STATUS_ABORTED
 }
 
+// ==================== 恢复动作 ====================
+
+/**
+ * 会话恢复动作（后端 `ResumeAction` 的**线格式词**）。
+ *
+ * ## 为什么它也需要一张词表
+ *
+ * 后端 `chat_message.rs` 的单测 `resume_action_wire_words_are_snake_case` 注释里
+ * 已经点名：「前端 `ResumePayload.action` 的字面量必须与它逐字相等」。契约写明了，
+ * 前端这边却只有两处**手写的联合类型**——`useChatConnection` 的载荷定义与
+ * `messageTypes` 的重试分派——谁也不与后端对齐，改一个词就得靠人记得改两处。
+ *
+ * 处置与上面三张词表相同：常量在此、类型由常量数组派生，跨栈一致性交给
+ * `scripts/protocol-mirror-audit.mjs` 的 C 组（后端枚举取值 ↔ 本词表）。
+ */
+
+/** 整轮重试：删除 Failed Turn 及其子树 → 重新走 LLM 请求 */
+export const RESUME_ACTION_RETRY_TURN = 'retry_turn'
+/** **单工具**重试：删除该工具的失败结果 → 用原参数重新执行 */
+export const RESUME_ACTION_RETRY = 'retry'
+/** 工具审批通过：删除 user_prompt → 带 approved=true 重新执行 */
+export const RESUME_ACTION_APPROVE = 'approve'
+/** 工具审批拒绝：删除 user_prompt → 生成拒绝结果 */
+export const RESUME_ACTION_REJECT = 'reject'
+/** 补充参数后重跑工具（与原 args 浅合并） */
+export const RESUME_ACTION_SUPPLY = 'supply'
+/** 回答 `ask_user` 提问 */
+export const RESUME_ACTION_ANSWER = 'answer'
+/** 重跑**这一次压缩**：删除失败压缩节点 → 重新压缩（不动历史） */
+export const RESUME_ACTION_RETRY_COMPACTION = 'retry_compaction'
+
+export const RESUME_ACTIONS = [
+  RESUME_ACTION_RETRY_TURN,
+  RESUME_ACTION_RETRY,
+  RESUME_ACTION_APPROVE,
+  RESUME_ACTION_REJECT,
+  RESUME_ACTION_SUPPLY,
+  RESUME_ACTION_ANSWER,
+  RESUME_ACTION_RETRY_COMPACTION,
+] as const
+
+export type ResumeAction = (typeof RESUME_ACTIONS)[number]
+
 export interface ImageUrl {
   url: string;
   detail?: string;

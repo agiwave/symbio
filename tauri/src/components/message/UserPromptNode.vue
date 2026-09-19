@@ -106,7 +106,12 @@
 
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
-import type { ChatMessage } from '@/schemas/chat_message'
+import {
+  RESUME_ACTION_ANSWER,
+  RESUME_ACTION_APPROVE,
+  RESUME_ACTION_REJECT,
+  type ChatMessage,
+} from '@/schemas/chat_message'
 import {
   MESSAGE_PROMPT_OTHER,
   MESSAGE_REJECT_REASON,
@@ -178,7 +183,7 @@ function submitConfirm(approved: boolean) {
   if (!tcId || !resume) return
   resume({
     targetId: tcId,
-    action: approved ? 'approve' : 'reject',
+    action: approved ? RESUME_ACTION_APPROVE : RESUME_ACTION_REJECT,
     reason: approved ? undefined : MESSAGE_REJECT_REASON,
     targetSessionId: messageParentSessionId(props.node),
   })
@@ -194,7 +199,7 @@ function submitQuestions() {
   }))
   resume({
     targetId: tcId,
-    action: 'answer',
+    action: RESUME_ACTION_ANSWER,
     answer: { answers },
     targetSessionId: messageParentSessionId(props.node),
   })

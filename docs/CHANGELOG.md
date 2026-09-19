@@ -18,6 +18,104 @@
 
 ***
 
+## 2026-09-20: 跨栈契约守卫扩展 + 测试卡死根因修复（ADR-019）
+
+**性质：机制化守卫扩展 ×2 + 一个前端词表缺口 + 一个测试基础设施缺陷**。
+
+承接上一条（P8–P12），把复核报告末尾那节"涉及后端的部分"从**规划**推成**实施**，
+并查清了"前端测试始终卡死"的根因。
+
+### 1. 决策：手工镜像 + 审计守卫，不引入代码生成（ADR-019）
+
+`tauri/src/schemas/` 与 `symbio_core` 之间是手工镜像。两条路摆在面前：生成侧
+（`ts-rs` / `schemars`）与检查侧（扩展 `protocol-mirror-audit`）。**选检查侧**，
+理由写进 `docs/DECISIONS.md` 的 ADR-019：`serde` 在**格式层**已单源、重复只在
+**符号层**；95 处 serde 标注里的 `untagged` / `tag = "type"` /
+`skip_serializing_if` 让机器导出不可靠；既有 `X-001..X-003` 就是"审计镜像"的先例。
+
+同一份 ADR **否决了 G3**（`Appearance.vue` / `About.vue` 去语义）：不变量 4 原文
+**明文允许**前端持有 `ext → 渲染器` 映射，而 `form` / `session` / `message` /
+`text` 同样是 ext → 渲染器，G3 的"唯一特例"前提不成立。
+
+### 2. A 组：常量镜像 3 → 31 条（改为自动发现）
+
+`scripts/protocol-mirror-audit.mjs` 原先**手工登记 3 条**，剩下 28 条无人看守
+（`architecture-health-check-2026-09.md` F-5 已记录该缺口）。改为**自动发现**：
+扫后端两个常量源（`vdfs_provider.rs` / `plugins/vdfs/protocol.rs`）与前端
+`schemas/vdfs.ts`，取同名交集逐条比对——**新增常量即自动进入守卫，不必改脚本**。
+
+- 名字不同的镜像登记在 `ALIASES`（`VDFS_ROOT_OP` ↔ `VDFS_ROOT`、
+  `VDFS_EVENT_KIND` ↔ `KIND_VDFS`）；
+- 前端自持（后端无对应）的常量必须登记在 `LOCAL_ONLY` 并写明理由——**"没登记"会
+  报错**，所以不存在静默漏网；
+- 覆盖：op 10 / 会话状态 2 / ext 8 / action 4 / change 5 / kind 1 / 其他 1。
+
+### 3. C 组：闭集词表（新增）
+
+新增第三组检查：后端 `#[serde(rename_all = "snake_case")]` 的**闭集枚举**取值集合
+↔ 前端词表数组，要求**集合相等**（不比顺序）。四张词表：
+`MessageRole` ↔ `CHAT_ROLES`、`MessageType` ↔ `MESSAGE_TYPES`、
+`MessageStatus` ↔ `MESSAGE_STATUSES`、`ResumeAction` ↔ `RESUME_ACTIONS`。
+
+`rename_all` 声明**本身**也是被检查项——少了它 serde 会用变体名原名，下面那套
+snake_case 转换就会"看起来正确"而实际全错。
+
+回归测试从 9 条扩到 **20 条**，对三组规则各注入真实违规（含"丢 `rename_all`"、
+"词表元素不是常量"、"前端持有后端没有的常量"等）。
+
+### 4. 顺带补掉的前端缺口：`ResumeAction` 词表
+
+后端 `chat_message.rs` 的单测 `resume_action_wire_words_are_snake_case` 注释里
+**早就点名**要求"前端 `ResumePayload.action` 的字面量必须与它逐字相等"，而前端
+只有两处**手写联合类型**（`useChatConnection` 载荷、`messageTypes` 重试分派）。
+现建 `RESUME_ACTIONS` 词表（常量 + 派生类型），5 处生产字面量全部收敛：
+
+- `composables/useChatConnection.ts`：`action: ResumeAction`
+- `registry/messageTypes.ts`：新增 `MessageRetryAction = Extract<ResumeAction, ...>`，
+  3 处 `action:` 改用常量
+- `components/message/UserPromptNode.vue`：approve / reject / answer
+- `components/message/ToolCallNode.vue`：supply
+
+### 5. 修掉"前端测试始终卡死"——根因是配置，不是环境
+
+全量 `vitest run` **跑完不退出**：汇总行已打印、测试全绿，进程却挂着不结束，
+`timeout` 必被触发。此前把它记成"环境问题（`TMP=C:\Temp` 导致 Vite SSR 缓存
+`EPERM`）"——**那个判断是错的**，换干净临时目录后照样挂。
+
+实测（同机、同用例、同命令，只改池类型）：
+
+| 池 | 结果 |
+|---|---|
+| `forks`（vitest 4 默认） | 挂起 |
+| `forks` + `--no-file-parallelism` | 挂起（⇒ 与并发度无关，是池实现本身） |
+| `threads` | **正常退出** |
+
+修法：`tauri/vitest.config.ts` 显式 `pool: 'threads'`（不依赖默认值——默认值随
+vitest 版本变，而"挂不挂"不该由版本决定）。修后全量 **47 文件 / 646 测试，
+exit=0**。
+
+这个故障难发现，是因为它**只影响进程退出、不影响测试结果**：报告一切正常，
+唯一线索是"命令不返回"，很容易被归因成环境抖动。
+
+### 6. 顺带修的符号缺陷
+
+`protocol-mirror-audit.mjs` 的 `✓` / `✗` 曾被编码事故替换成 `?`——红绿都显示 `?`，
+NO_COLOR 下完全无从区分。已修。
+
+（另记一条**未修**的：审计脚本的颜色标记普遍缺 `\x1b`，终端里显示成字面的
+`[31m` / `[32m`。实测 `grep-audit` / `mechanism-audit` / `style-audit` /
+`dead-code-audit` 的输出中不含任何 ANSI 转义。属另一批次。）
+
+### 验证
+
+- `vitest run`：**47 文件 / 646 测试全过，exit=0**（不再挂起）
+- `vue-tsc --noEmit`：干净
+- `protocol-mirror-audit`：A 组 31 条 + B 组 2 项 + C 组 4 张词表，全绿
+- `protocol-mirror-audit.test.mjs`：**20 条回归测试全过**
+- 其余八个审计脚本全过；`gen-current-facts --check` 一致
+
+***
+
 ## 2026-09-20: 前端机制化第二轮（续）—— 削减清单 P8–P12 落地
 
 **性质：机制化收敛 ×4 + 一条被门禁否决的提案**。复核报告见

@@ -28,6 +28,19 @@ export default defineConfig({
   test: {
     // 默认 node 环境覆盖纯逻辑层；DOM 用例按文件标注 happy-dom
     environment: 'node',
+    /**
+     * 池类型：**必须显式写 `threads`**。
+     *
+     * 默认的 `forks`（子进程池）在本机 Windows + Node 22 上**跑完不退出**：
+     * 测试全部通过、汇总行已打印，进程却挂在那里不结束——`timeout` 必被触发。
+     * 现象极具误导性：本地 `npm test` 看起来"卡死"，CI 会一直等到超时，
+     * 而报告里一切正常（这正是它难被发现的原因）。
+     *
+     * 实测同一批用例：`forks` 挂起 / `threads` 正常退出（`--no-file-parallelism`
+     * 也挂，故与并发度无关，是池实现本身）。显式指定而非依赖默认值——默认值
+     * 会随 vitest 版本变，而"挂不挂"不该由版本决定。
+     */
+    pool: 'threads',
     include: ['src/**/*.{test,spec}.ts'],
     // 被测代码与测试同目录（__tests__）或 *.spec.ts 命名
     globals: false,

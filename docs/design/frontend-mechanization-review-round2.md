@@ -5,6 +5,9 @@
 依据：第一轮 [`frontend-mechanization-review.md`](./frontend-mechanization-review.md) 的结论
 （机制主干已成立，缺口在详情渲染器层）+ 本轮对 `schemas/` `services/` `components/` 的逐文件实读
 配套：结构事实以 `docs/CURRENT.md` §3、§5.1 为准，本文件只写判断与待办
+**后续追加**：P8–P12 落地（§6）之后，又完成了「跨栈契约守卫扩展 + ADR-019」——
+即本文末尾那节"涉及后端的部分"从**规划**转为**已实施**；同时查清并修掉了
+「前端测试跑完不退出」的根因（见 §7 后的说明）。
 
 ---
 
@@ -271,31 +274,61 @@ P12 的风险与收益都最高：它是"多路写同一份数据"，而 ADR-015
 `protocol-mirror-audit` / `schema-audit` / `dead-code-audit` / `doc-link-audit` /
 `test-layout-audit` / `plugin-entry-audit` 全过；`gen-current-facts --check` 一致。
 
-> **环境提示**（供后续复核者避坑）：全量 `vitest run` 偶发**整套卡住**，日志末尾是
-> `EPERM: operation not permitted, rename 'C:\Temp\...\ssr\.tmp-...'`。本机 `TMP=C:\Temp`
-> （非标准位置），Vite 的 SSR 模块缓存改名被拒——是**环境**问题而非测试问题
-> （同一套件单独跑必绿，重跑全量也绿）。遇到时先看日志末尾，别信退出码。
+> **测试卡死根因（已修，此前判断是错的）**：全量 `vitest run` 曾**跑完不退出**——
+> 汇总行已打印、测试全绿，进程却挂着，`timeout` 必被触发。本文件早先把它记成
+> "环境问题（`TMP=C:\Temp` 导致 Vite SSR 缓存 `EPERM`）"，**那个判断是错的**：
+> 换成干净临时目录后照样挂。
+>
+> 实测结论（同机、同用例、同命令，只改池类型）：
+>
+> | 池 | 结果 |
+> |---|---|
+> | `forks`（vitest 4 默认） | 挂起 |
+> | `forks` + `--no-file-parallelism` | 挂起（⇒ 与并发度无关，是池实现本身） |
+> | `threads` | **正常退出** |
+>
+> 修法是 `tauri/vitest.config.ts` 显式写 `pool: 'threads'`（不依赖默认值——默认值
+> 随 vitest 版本变，而"挂不挂"不该由版本决定）。修后全量 **47 文件 / 646 测试，
+> exit=0**。
+>
+> 这个故障难发现，是因为它**只影响进程退出、不影响测试结果**：报告一切正常，
+> 只有"命令不返回"这一条线索，于是很容易被归因成环境抖动。
 
 ---
 
-## 附：涉及后端的部分（整体规划，不在本轮实施）
+## 附：涉及后端的部分 —— 已按 ADR-019 规划并实施
 
-`schemas/` 与 Rust 结构体目前是**手工镜像**（如 `chat_message.ts` ↔
-`symbio_core/schemas/session/chat_message.rs` 逐字段对应），
-`scripts/protocol-mirror-audit.mjs` 只覆盖 3 个常量。可自动化的候选：
+`schemas/` 与 Rust 结构体是**手工镜像**（如 `chat_message.ts` ↔
+`symbio_core/schemas/session/chat_message.rs` 逐字段对应）。本节原先把"跨栈重复"
+列成两条路（生成侧 `ts-rs`/`schemars` vs 检查侧扩审计），并判定要先按 ADR 的粒度
+整体规划。
 
-| 数据源 | 可生成的产物 | 规则 |
+**规划已完成并落地**（见 `docs/DECISIONS.md` 的 **ADR-019**）：
+
+| 数据源 | 处置 | 落地形式 |
 |---|---|---|
-| Rust enum + `serde(rename_all = "snake_case")` | `CHAT_ROLES` / `MESSAGE_TYPES` / `MESSAGE_STATUSES` | 枚举取值 → 常量 + 联合类型 |
-| `vdfs_provider.rs` / `protocol.rs` 的 `pub const X: &str` | `VDFS_*` 操作 / 状态 / ext / action 常量 | 常量名与值直取 |
-| 对应 Rust struct | `vdfs-form.ts` / `options.ts` / `session_list.ts` 等接口 | 字段名与类型映射 |
+| `vdfs_provider.rs` / `protocol.rs` 的 `pub const X: &str` | ✅ 纳入守卫（**自动发现**） | A 组：同名交集逐字比对，**3 → 31 条** |
+| Rust enum + `serde(rename_all = "snake_case")` | ✅ 纳入守卫（**集合相等**） | C 组：**4 张词表**（角色 / 类型 / 状态 / 恢复动作） |
+| 对应 Rust struct（字段名与类型映射） | ⛔ 暂不做，**已知缺口** | 生成侧否决；将来若要补，仍走审计（比对字段名集合） |
+| `messageTypes.ts` 文案 / `vdfsCards.ts` 约定 / `vdfs-form.ts` 派生 / 路径代数 | ⛔ **不可生成** | 纯业务判断，必须手写 |
 
-**不可生成**（纯业务判断，必须手写）：`messageTypes.ts` 的文案/折叠/优先级、
-`vdfsCards.ts` 的三条约定、`vdfs-form.ts` 的 `mergeDetailActions` /
-`detailPresetPatch`、`vdfs.ts` 的路径代数、`vdfsAddress.ts`。
+**决策是"审计"而非"生成"**（ADR-019）：`serde` 在**格式层**已单源，重复只在
+**符号层**（Rust 标识符 vs TS 常量名）；且 95 处 serde 标注里的 `untagged` /
+`tag = "type"` / `skip_serializing_if` 让机器导出不可靠。既有 `X-001..X-003`
+正是"审计镜像"的先例——扩展它与既有机制同向，引入生成器则是架构级改动。
 
-**为什么不在本轮做**：引入 `ts-rs` / `schemars` 会改变"契约层是手写的"这一前提——
-它同时影响 ADR（需要新决策记录）、`protocol-mirror-audit` 的定位（从"校验手写镜像"
-变成"校验生成产物未漂移"）、CI（需要把生成步骤接进门禁），以及"前端零资源知识"
-这条不变量的边界。**这是一次架构级改动，应按 ADR 的粒度整体规划后再分步实施**，
-不适合混在机制化收敛批次里顺手做。
+**G3（`Appearance.vue` / `About.vue` 去语义）一并复核并否决**：不变量 4 的原文
+（`vdfs-frontend.md:42-43`）**明文允许**前端持有 `ext → 渲染器` 映射，被禁的是
+「资源类型清单、标签、路径模板、能力开关」。G3 的前提（`appearance` / `about`
+是"唯一 ext 即语义类型名的特例"）不成立——`vdfsRenderers.ts:24-31` 里
+`form` / `session` / `message` / `text` 同样是 ext → 渲染器。
+
+**顺带补掉的真实缺口**（不在原规划内，实施中发现）：
+
+- **`ResumeAction` 的线格式词在前端有两份手写副本**（`useChatConnection` 的载荷
+  联合类型、`messageTypes` 的重试分派），而 Rust 单测
+  `resume_action_wire_words_are_snake_case` 的注释**早就点名要求**"前端
+  `ResumePayload.action` 的字面量必须与它逐字相等"——契约喊了话，前端没接。
+  现已建 `RESUME_ACTIONS` 词表，5 处生产字面量全部收敛到常量。
+- 审计脚本的 `✓` / `✗` 曾被编码事故替换成 `?`（红绿都显示 `?`，且 NO_COLOR 下
+  无从区分），已修。

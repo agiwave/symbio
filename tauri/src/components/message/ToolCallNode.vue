@@ -103,6 +103,7 @@ import {
   MESSAGE_STATUS_STREAMING,
   MESSAGE_TYPE_TEXT,
   MESSAGE_TYPE_TURN,
+  RESUME_ACTION_SUPPLY,
   type ChatMessage,
 } from '@/schemas/chat_message'
 import { RESUME_KEY } from '@/composables/useChatConnection'
@@ -195,7 +196,7 @@ function submitSupply() {
   if (!resume) return
   resume({
     targetId: props.node.id,
-    action: 'supply',
+    action: RESUME_ACTION_SUPPLY,
     args: parsed,
     // 子会话工具调用需路由回子会话（否则 resume 会打到父会话）
     targetSessionId: messageParentSessionId(props.node),

@@ -39,10 +39,14 @@ import {
   MESSAGE_TYPE_TOOL_CALL,
   MESSAGE_TYPE_TURN,
   MESSAGE_TYPE_USER_PROMPT,
+  RESUME_ACTION_RETRY,
+  RESUME_ACTION_RETRY_COMPACTION,
+  RESUME_ACTION_RETRY_TURN,
   type ChatMessage,
   type ChatMessageType,
   type ChatRole,
   type MessageStatus,
+  type ResumeAction,
 } from '@/schemas/chat_message'
 import type { MessagePrompt } from '@/schemas/message_prompt'
 
@@ -252,6 +256,21 @@ export function canRetryCompaction(f: MessageFacets): boolean {
 }
 
 /**
+ * 失败重试只会用到的那三个动作。
+ *
+ * 写成 `Extract<ResumeAction, ...>` 而不是再抄一份字面量联合：抄一份就是多一份
+ * 真相，后端改词时这里会静默失效。用常量去 `Extract` 则两头都受约束——
+ * 常量名拼错是**编译错误**（import 不存在），常量值漂移是 **C 组审计红**
+ * （`protocol-mirror-audit`）。
+ */
+export type MessageRetryAction = Extract<
+  ResumeAction,
+  | typeof RESUME_ACTION_RETRY
+  | typeof RESUME_ACTION_RETRY_TURN
+  | typeof RESUME_ACTION_RETRY_COMPACTION
+>
+
+/**
  * 失败重试的分派结果（resume 的 `action` + `targetId`）。
  *
  * 三个粒度，**粒度由节点类型决定**：
@@ -260,7 +279,7 @@ export function canRetryCompaction(f: MessageFacets): boolean {
  * - `retry_compaction` —— 重跑**这一次压缩**（删除失败压缩节点 → 重新压缩）。
  */
 export interface MessageRetryTarget {
-  action: 'retry' | 'retry_turn' | 'retry_compaction'
+  action: MessageRetryAction
   targetId: string
 }
 
@@ -282,15 +301,15 @@ export function messageRetryTargetOf(
   const type = messageTypeOf(node)
   // 压缩失败 → 压缩粒度（删压缩节点重跑，不动历史）
   if (type === MESSAGE_TYPE_COMPRESSION && isFailedStatus(messageStatusOf(node))) {
-    return { action: 'retry_compaction', targetId: node.id }
+    return { action: RESUME_ACTION_RETRY_COMPACTION, targetId: node.id }
   }
   // 工具调用失败 → 单工具粒度（不动整轮）
   if (type === MESSAGE_TYPE_TOOL_CALL && isFailedStatus(messageStatusOf(node))) {
-    return { action: 'retry', targetId: node.id }
+    return { action: RESUME_ACTION_RETRY, targetId: node.id }
   }
   // 其余（Turn 本身，或 Turn 下的 Text/Reasoning 叶子）→ 整轮粒度，回溯到父 Turn
   return {
-    action: 'retry_turn',
+    action: RESUME_ACTION_RETRY_TURN,
     targetId: type === MESSAGE_TYPE_TURN ? node.id : node.parent_id || node.id,
   }
 }
