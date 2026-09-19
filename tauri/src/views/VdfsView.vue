@@ -34,18 +34,18 @@
   <VdfsWorkbench :key="reloadKey" :addr="addr" @open="onOpen">
     <template #rail-header>
       <!--
-        push 出来的地址页：左上角是**返回按钮**（带文字，不是光秃秃一个图标），
-        且**不显示主 logo**——它是首页的品牌位，跟着 push 进每一层子页面
-        既无意义，也正好占掉返回键该在的位置。
+        页面**最左上角**这一格只有一个主人：首页是主 logo（品牌位），
+        push 出来的地址页是返回键。两者互斥、等高，push 前后该格不跳位。
+
+        返回键做成**整行的导航件**（占满侧栏宽 + 下方一条分隔线），而不是挤在
+        56px 里的描边小胶囊——后者既塞不下「返回」二字，又和一排 40px 图标
+        按钮互相打架。分隔线把它与下面的类别列表分开，读作窗口级的导航件。
       -->
       <button v-if="showBack" class="rail-back" title="返回" aria-label="返回" @click="goBack">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="19" y1="12" x2="5" y2="12" />
-          <polyline points="12 19 5 12 12 5" />
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6" />
         </svg>
-        <span class="rail-back-text">返回</span>
       </button>
-      <!-- 首页：主 logo（正式品牌资源 `assets/logo.svg`，不再是占位字母块） -->
       <div v-else class="logo-area">
         <img :src="logoUrl" alt="Symbio" class="app-logo" />
       </div>
@@ -143,26 +143,29 @@ async function onHomedirReloaded() {
 }
 
 /*
- * push 页的返回按钮：**带文字的按钮**，不是光秃秃一个图标。
+ * 返回按钮：侧栏顶部**整行**的导航件（页面最左上角）。
  *
- * 侧栏只有 56px（`--sidebar-width`），故图标与文字紧凑横排、字号压到 0.7rem；
- * 加一条边框让它读作「按钮」而不是又一个导航项——这正是原实现（一个裸箭头
- * 图标）被读成「图标」的原因。
+ * 与 .logo-area 等高（内容盒 3.5rem + 底部 1px 分隔线），因此首页与 push 页
+ * 切换时左上角这一格不发生位移。
+ *
+ * 三条刻意的取舍：
+ * - **不加边框**：右侧那排图标按钮都是无边框的，单独描边会显得是外来物；
+ *   靠「整行 + 分隔线 + 悬停底色」表达它是窗口级导航件，而非又一个类别图标。
+ * - **不塞文字**：侧栏只有 56px（--sidebar-width），硬塞「返回」只能把字号压到
+ *   不可读，反而更丑。可访问性由 title / aria-label 承担。
+ * - **箭头与类别图标同尺寸（20px）**，避免它比一排导航项更抢眼。
  */
 .rail-back {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.25rem;
-  width: calc(100% - 0.75rem);
-  margin: 0.5rem auto 0;
-  padding: 0.4rem 0;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  width: 100%;
+  height: 3.5rem;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--border-default);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.7rem;
-  font-family: inherit;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
@@ -172,8 +175,8 @@ async function onHomedirReloaded() {
   color: var(--text-primary);
 }
 
-.rail-back-text {
-  white-space: nowrap;
-  line-height: 1;
+.rail-back svg {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 </style>

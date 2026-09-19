@@ -102,8 +102,9 @@ function svgIcon(inner: string): Component {
       render() {
         return h('svg', {
           viewBox: '0 0 24 24',
-          width: 16,
-          height: 16,
+          // **不写死 width/height**：同一张图标会同时出现在侧栏（20px）与列表
+          // 卡片（16px）两个容器里。写死任何一边，另一边就是错的——表现为
+          // 同一排图标大小不一。尺寸一律交给容器 CSS：`.nav-btn svg` / `.card-icon`。
           fill: 'none',
           stroke: 'currentColor',
           'stroke-width': 2,

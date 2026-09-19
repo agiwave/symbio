@@ -161,6 +161,10 @@ const badgeClass = computed(() => `kind-${props.badgeKind}`)
 
 /* 类型图标 */
 .card-icon {
+  /* 列表内图标 16px：图标组件不写死尺寸（见 `registry/vdfsIcons.svgIcon`），
+     由本容器定，与侧栏的 20px 各自成立而互不影响。 */
+  width: 1rem;
+  height: 1rem;
   flex-shrink: 0;
   color: var(--text-secondary);
 }

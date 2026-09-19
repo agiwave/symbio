@@ -37,19 +37,19 @@
           @click="$emit('rail-select', it.key)"
         >
           <component :is="it.icon" v-if="it.icon" />
+          <!-- 未登记图标的**目录**兜底：必须是文件夹，不能是文件——
+               侧栏项一律是目录（`.vdfs` 的挂载点），用文件图标是语义错配。
+               尺寸同样交给 CSS（`.nav-btn svg`）。 -->
           <svg
             v-else
             viewBox="0 0 24 24"
-            width="20"
-            height="20"
             fill="none"
             stroke="currentColor"
-            stroke-width="2"
+            stroke-width="1.75"
             stroke-linecap="round"
             stroke-linejoin="round"
           >
-            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-            <polyline points="13 2 13 9 20 9" />
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
           <span v-if="it.count" class="nav-count">{{ it.count }}</span>
           <span class="nav-label">{{ it.label }}</span>
@@ -178,22 +178,30 @@ defineEmits<{
 .panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.25rem;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border-default);
   flex-shrink: 0;
 }
 
+/* 撑开中间，把右侧动作推到边上；min-width:0 + 省略号防长标题溢出 */
 .panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-secondary);
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-actions {
   display: flex;
   gap: 0.25rem;
+  /* 标题可压缩（flex 1 + 省略号），动作行不参与压缩 */
+  flex-shrink: 0;
 }
 
 .empty-state {
