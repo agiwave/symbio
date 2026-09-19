@@ -505,7 +505,7 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
 
 - `compress_snapshot_inner` 旧逻辑所有失败出口统一 `return None`，调用方只知"失败"不知
   原因。`CompressionFailure` 枚举把出口细分为 `Llm(String)`（带 provider 错误文本）/
-  `InvalidSnapshot` / `NoPayoff`，由包装层经 `CompressionEmitter::finish(node, status, text,
+  `InvalidSnapshot` / `InputOverLimit`，由包装层经 `CompressionEmitter::finish(node, status, text,
   failure_kind)` 写进节点：`error` 装人读原因、`meta.failure_kind` 装机读码（与未执行工具节点
   同一字段约定）。
 - 自动路径的 `auto_compress_process` 改为 `Result<Option<usize>, CompressionFailure>`
@@ -534,6 +534,87 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
 8 位短 ID 约定（`turn::short_id` / `vdfs_service::entry::auto_id`）。会话 ID 是 VDFS 目录名
 （`.symbio/session/<id>`），也是用户可见地址，应一致。改为 `crate::symbio_core::turn::short_id()`
 + 目录碰撞重试（重试仍撞则错误外抛——目录冲突属真异常，不该静默吞）。
+
+### S20.7 —— 三个「静默丢弃」断点（本次）
+
+S20.3~S20.6 修的是**服务端**的状态收敛。本次处理的是同一类病灶在**另外三处**的复发，
+三个症状看起来无关（顺序倒挂 / 重试入口不出现 / 一直转圈），实际都在同一条链上：
+**丢一次就永久错，且没有任何机制会纠正它**。
+
+| # | 症状 | 断点 |
+|---|---|---|
+| ① | 每次压缩后消息顺序倒挂（`mtmae8j2wxam4dhrei`） | `assign_seq` 从 `base` **向上**填号 ⇒ 改写保留区既有序号 |
+| ② | 中止后看不到「重试」入口（重开才有） | 前端状态词表漏了 `aborted` ⇒ 整条状态被静默丢弃 ⇒ 兜底成 `completed` |
+| ③ | 工具已完成，前端一直「运行中」 | 终态补丁丢失（订阅表为空 / 消费循环丢帧）⇒ 前端只做增量收敛，无人纠正 |
+
+| 层 | 改动 |
+|---|---|
+| `symbio_core/.../chat_message.rs` | `assign_seq` 重写：无号项从**相邻的既有序号向外让位**（开头段整体往下、末尾段往上、夹缝用间隙）；既有序号一个都不改 |
+| `session/compression.rs` | 新增 `snapshot_slot_seq`（`保留区首条 seq − 1`）；快照带上槽位序号 |
+| `session/chat_loop/compress.rs`、`session/plugin.rs` | 整表重写后广播 `emit_transcript_rewritten`（逐条 `deleted` + 首条 `created`）——此前压缩完全不发 VDFS 变更 |
+| 前端 `schemas/vdfs.ts` | 补 `VDFS_STATUS_ABORTED`（`MessageStatus::as_str()` 早已产出这个词） |
+| 前端 `services/vdfsTranscriptSync.ts` | `messageStatusOf` 纳入 `aborted`；未知状态词改 `logger.warn` 留痕，不再静默丢弃 |
+| 前端 `stores/sessions.ts` | 新增 `reconcileTranscript`；`applySessionNode` 在 `!nowWorking && hasUnsettledNodes(id)` 处触发 |
+
+**①为什么开头段必须"整体一次算好"**：逐个"向上找空位"会先占用首号本身、把既有序号顶成
+下一个号——这正是"seq 随压缩改变"的直接来源。由"首号是最小号"可知
+`首号 − k … 首号 − 1` 全部落在既有序号之外，故这一段天然不撞号。
+**真正的修法在调用方**：给快照显式指定槽位序号，使新列表**本来就单调**，
+`assign_seq` 于是退化为"只填缺号"——顺序与稳定同时成立。
+
+**②为什么"漏一个状态词"是终态级事故**：`messageStatusOf` 返回 `undefined` 时
+`messageFromNode` 不写 `status`，节点以"无状态"落进 store，而
+`registry/messageTypes::messageStatusOf` 的缺省兜底是 `completed`。
+于是"用户按了停止"被渲染成"正常结束"，重试入口（挂在 `aborted` 终态上）随之消失。
+重新打开会话走叶子 JSON 直读，状态原样保留——所以症状是"重开才有"。
+
+**③为什么自愈用回读而不是就地定稿**：就地标 `completed` 是猜。服务端可能定稿成
+`aborted`（用户中止）或 `failed`，猜错即 ② 的重演。回读拿到的是权威终态。
+**触发判据不是启发式**：节点补丁恒先于会话状态下发（正常收尾「清在途 → 复位
+`is_working` → `emit_session_state`」，中止收尾「`converge_inflight` 广播节点终态
+→ `emit_session_state(aborted)`」——见 `handle_abort` 的顺序注释），
+故会话报"不忙"时服务端每个节点都已是终态且已落库。触发条件只在**有候选**时成立，
+正常运行路径零 IPC。
+
+### S20.8 —— 压缩失败**不得裁剪历史**：失败必须是可见、可重试、可持久化的状态（本次）
+
+S20.6 把压缩失败做成了"可诊断 + 可熔断"，但漏了一处：**输入超限预判分支仍然会本地
+机械截断历史，并且 `return Ok(Some(..))` 回报成功**。于是压缩节点显示
+「已压缩上下文（N → M 条）」`Completed`——没有原因、没有重试入口，历史凭空变短。
+（决策记录见 `docs/DECISIONS.md` ADR-018。）
+
+**触发时机恰恰是"压缩反复失败的终点"**：LLM 请求失败 → 回滚（历史完整）→ 下一轮再
+失败 → 熔断（跳过自动压缩）→ 上下文继续增长 → 越过模型输入上限 → **本地截断**。
+即：**压缩失败的最终代价由历史买单**。
+
+| # | 症状 | 断点 |
+|---|---|---|
+| ① | 压缩放不下就把历史砍短，且节点报"已完成" | 预判分支走 `emergency_tail_compression` 后 `Ok(Some(..))` |
+| ② | 用户看到历史变短却没有任何原因 / 重试入口 | 失败被伪装成成功，且压缩节点**没有**重试粒度 |
+| ③ | 重试无处可发 | `messageRetryTargetOf` 只有 `retry` / `retry_turn` 两种粒度，压缩节点（**根级**）落兜底分支会被后端 `process_retry_turn` 以 NotFound 拒绝 |
+
+| 层 | 改动 |
+|---|---|
+| `session/chat_loop/compress.rs` | 预判命中时**仍跳过 doomed 请求**（只保留这一收益），改为 `Err(CompressionFailure::InputOverLimit { pending, limit })`；`NoPayoff` 变体删除 |
+| `session/compression.rs` | 删除 `emergency_tail_compression`（连同 4 条单测）——"强制裁剪"的唯一实现 |
+| `schemas/session/chat_message.rs`、`session/resume.rs` | 新增 `ResumeAction::RetryCompaction` |
+| `session/chat_loop/compress.rs` | 新增 `retry_compaction`；`auto_compress_process` 的 `force = true` 同时绕过熔断 |
+| 前端 `registry/messageTypes.ts` | 新增 `canRetryCompaction` + 第三种粒度 `retry_compaction`（必须在工具分支**之前**分派） |
+| 前端 `components/message/CompressionNode.vue` | 失败形态走 `MessageErrorBox`（故障红 + 重试），不复用成功态的弱化样式 |
+
+**为什么"重试"必须给，即便当场重试仍会失败**：`input_over_limit` 重试当然还是超限——
+但用户**换一个上下文更大的模型**后，同一次压缩就能成功。按 `failure_kind` 分档
+"聪明地"不给入口，会掐掉这唯一的出路。原因里含"待压缩量 vs 上限"两侧数字，足够
+用户判断要换多大的模型；判断权归用户。
+
+**为什么预判（跳过 doomed 请求）保留、裁剪（丢历史）删除**：两者的收益与代价完全
+不对称。跳过的收益是"不再每轮白等数分钟"——零代价、纯收益；裁剪的收益是"水位立刻
+回落到可工作区间"——代价是**不可逆地丢掉用户的历史**，而且失败还被伪装成成功。
+"压缩放不下"只说明需要更强的模型或更小的输入，不构成"可以静默丢历史"的授权。
+
+**代价（明说）**：历史真的超出模型输入上限且压缩始终失败时，本轮请求会撞 provider 的
+context-length 错误而失败（带原因 + 重试入口），而不是"带着残缺历史继续跑"。
+这是刻意的取舍——可见的失败优于静默的数据损失（ADR-018）。
 
 ### S21 —— 工具调用请求显式化（**本次不做，留待需要时**）
 把 ToolCall 的参数从 `content` 提升为一个真子节点（`type = tool_request`）。
@@ -564,8 +645,10 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
 | 13 | 切回「正在跑」的会话 | 正在跑的那一轮**仍在**（叶子读含在途 + 前端水合不丢弃在途） | §6 S20.3 |
 | 14 | 长会话触发压缩时 | 消息流里出现「上下文压缩」节点：运行中脉动 + 已用秒数，完成后显示"已压缩上下文（X → Y 条）"（此前**完全无提示**，表现为卡死） | §6 S20.4 |
 | 15 | 压缩请求的内容 | 历史以**对话形态**下发（不是 JSON 转储），末尾一条压缩指令 | §6 S20.5 |
-| 16 | 压缩失败 | 节点落到 `Failed`/`Completed(aborted)`，且 `error` + `meta.failure_kind` 写明**原因**（Llm / InvalidSnapshot / NoPayoff）；不再是一句无差别的"压缩未完成"且无 `meta` | §6 S20.6 |
+| 16 | 压缩失败 | 节点落到 `Failed`/`Completed(aborted)`，且 `error` + `meta.failure_kind` 写明**原因**（Llm / InvalidSnapshot / InputOverLimit）；不再是一句无差别的"压缩未完成"且无 `meta` | §6 S20.6 |
 | 17 | 压缩连续失败 | 达阈值后熔断 5 分钟冷却，期间**跳过 LLM 压缩**但仍正常回复（不白等、不阻断）；冷却结束半开重试一次 | §6 S20.6 |
+| 18 | 压缩失败后的历史 | **一条不动**（四种失败出口全部还原为调用前列表）；节点上是错误条 + 原因，不再是"已压缩上下文（N → M 条）"的成功态 | §6 S20.8 |
+| 19 | 压缩失败后重试 | 失败节点上给「重试」入口（resume `retry_compaction`）：删失败节点 → 重新压缩；绕过熔断（用户主动意愿不受冷却约束） | §6 S20.8 |
 
 ---
 
@@ -611,6 +694,28 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
     （§6 S20.6）。
 19. **连续失败要熔断**：只看当前水位不看历史，会让"注定失败的压缩"每轮重试、每次都白等
     一次完整 LLM 往返。达阈值即开闸冷却，冷却期内跳过而非硬扛（§6 S20.6）。
+20. **终态补丁不重放，因此丢失必须能被自愈**：消息状态只经 `kind = "vdfs"` 一条通道
+    下发，而这条通道**不重放**——订阅表为空时 `ChangeSubscriptions::notify` 直接返回
+    （watch 登记是 fire-and-forget 的异步动作），消费循环也会在 `is_working` 翻转时
+    丢掉手上那一帧。因此**前端必须持有"服务端状态正确"之外的第二个判据**：
+    「会话节点报不忙，却仍有消息节点停在非终态 ⇒ 一定丢了一条终态」，据以回读收敛
+    （`stores/sessions.ts::reconcileTranscript`，§6 S20.7）。不得就地猜成 `completed`
+    ——服务端可能定稿成 `aborted` / `failed`，猜错就是"把半截谎报成正常结束"。
+21. **状态词表前后端逐字同源**：后端 `MessageStatus::as_str()` 产出的每一个词，
+    前端 `schemas/vdfs.ts` 都必须登记。漏一个的代价不是"少显示一个标签"，而是
+    **整条状态被静默丢弃**（消费端 `messageStatusOf` 的未知分支），节点以"无状态"
+    落进 store，被缺省兜底成 `completed`——终态被谎报。故未知状态词一律 `logger.warn`
+    留痕，且新增状态词时两侧一起改（§6 S20.7 ②）。
+22. **压缩失败不改动历史**：四种失败出口（LLM 失败 / 快照校验失败 / 输入超限 / 用户
+    中止）全部把消息列表还原为调用前状态，**一条不丢**。历史是用户的资产，"这次压缩
+    放不下"不构成"可以静默丢历史"的授权（§6 S20.8，ADR-018）。
+23. **失败不得伪装成成功**：压缩的输入超限预判只允许"跳过注定失败的请求"，**不得**
+    顺势本地截断并回报 `Ok`——那会让节点显示"已压缩上下文（N → M 条）"，用户既不知道
+    出了事，也没有任何入口可点（§6 S20.8）。
+24. **失败态必须给出路**：压缩失败节点必须同时满足三件事——原因可见（节点正文 +
+    `meta.failure_kind`）、**可重试**（resume `retry_compaction`）、**可持久化**
+    （节点落库，重开仍在）。少了"可重试"，用户唯一的出路（换更大上下文的模型后重试）
+    就断了；重试入口**不按 `failure_kind` 分档**，判断权归用户（§6 S20.8）。
 
 ---
 

@@ -375,6 +375,19 @@ impl CompressionEmitter {
             )
             .await;
     }
+
+    /// 整表重写（L2 语义压缩）后的收敛广播。
+    ///
+    /// 与 [`Self::emit`] 的区别：那条发的是"压缩这一动作本身"的节点，这条发的是
+    /// **转写列表被重写**这件事——被压掉的消息逐条 `deleted`，新的首条（快照）
+    /// `created`。没有它，前端会一直显示压缩前的历史。
+    ///
+    /// 只走 VDFS 变更、不发前端帧：消息通道已归 VDFS 一处（见
+    /// `plugin.rs::emit_message_updated` 的同款说明）。
+    pub async fn emit_rewrite(&self, session_id: &str, dropped: &[String], head: &ChatMessage) {
+        self.plugin
+            .emit_transcript_rewritten(session_id, dropped, head);
+    }
 }
 
 pub struct ChatOrchestrator {

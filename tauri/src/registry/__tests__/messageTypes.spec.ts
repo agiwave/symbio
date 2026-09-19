@@ -39,6 +39,7 @@ import {
   MESSAGE_STATUS_LABELS,
   MESSAGE_TYPE_LABELS,
   agentNameOf,
+  canRetryCompaction,
   canRetryTool,
   canSupplyToolArgs,
   effectiveOpenOf,
@@ -462,6 +463,88 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
     expect(messageRetryTargetOf({ id: 'x1', status: MESSAGE_STATUS_FAILED, parent_id: 't1' })).toEqual(
       { action: 'retry_turn', targetId: 't1' },
     )
+  })
+
+  /**
+   * 压缩失败是**第三种粒度**：删的是压缩节点本身（系统动作），不是响应子树。
+   *
+   * 回归动机：压缩节点是根级节点（无 `parent_id`），若落到"回溯到父 Turn"的兜底
+   * 分支，`target_id` 会是它自己而类型是 `Compression` —— 后端 `process_retry_turn`
+   * 要求 Failed **Turn**，会直接 NotFound 拒绝。所以必须在工具分支之前单独分派。
+   */
+  it('压缩失败 → 压缩粒度（锚点是压缩节点自己，不回退到父 Turn）', () => {
+    expect(
+      messageRetryTargetOf({
+        id: 'cp1',
+        type: MESSAGE_TYPE_COMPRESSION,
+        status: MESSAGE_STATUS_FAILED,
+      }),
+    ).toEqual({ action: 'retry_compaction', targetId: 'cp1' })
+  })
+
+  it('压缩失败即便带了 parent_id 也不回溯（它不是对话轮次的一部分）', () => {
+    expect(
+      messageRetryTargetOf({
+        id: 'cp1',
+        type: MESSAGE_TYPE_COMPRESSION,
+        status: MESSAGE_STATUS_FAILED,
+        parent_id: 't1',
+      }),
+    ).toEqual({ action: 'retry_compaction', targetId: 'cp1' })
+  })
+
+  it('未失败的压缩节点不发重试（成功 / 压缩中都没有入口）', () => {
+    // `as const` 不可省：数组字面量里的字面量类型会被拓宽成 `string`，
+    // 于是 `status` 无法赋给 `MessageStatus`（与下面几处同理）
+    for (const status of [MESSAGE_STATUS_COMPLETED, MESSAGE_STATUS_STREAMING] as const) {
+      expect(
+        messageRetryTargetOf({ id: 'cp1', type: MESSAGE_TYPE_COMPRESSION, status }),
+      ).toEqual({ action: 'retry_turn', targetId: 'cp1' })
+    }
+  })
+})
+
+/**
+ * 压缩失败能否重试 —— 「只要失败就给入口」，不按 `failure_kind` 分档。
+ *
+ * 分档看起来更"聪明"（`input_over_limit` 重试必然再失败），但会掐掉唯一的出路：
+ * 用户换一个上下文更大的模型后，同一次压缩就能成功。失败原因已写在节点正文里，
+ * 由用户判断，不由前端替他决定"别试了"。
+ */
+describe('canRetryCompaction：压缩失败的重试入口', () => {
+  it('压缩 + 失败 → 给入口', () => {
+    expect(
+      canRetryCompaction(
+        facets({ type: MESSAGE_TYPE_COMPRESSION, status: MESSAGE_STATUS_FAILED }),
+      ),
+    ).toBe(true)
+  })
+
+  it('不按 failure_kind 分档：任何原因码都给入口', () => {
+    for (const failureKind of ['llm_error', 'invalid_snapshot', 'input_over_limit']) {
+      expect(
+        canRetryCompaction(
+          facets({ type: MESSAGE_TYPE_COMPRESSION, status: MESSAGE_STATUS_FAILED, failureKind }),
+        ),
+      ).toBe(true)
+    }
+  })
+
+  it('非失败态（压缩中 / 已完成 / 已中止）不给入口', () => {
+    for (const status of [
+      MESSAGE_STATUS_STREAMING,
+      MESSAGE_STATUS_COMPLETED,
+      MESSAGE_STATUS_ABORTED,
+      MESSAGE_STATUS_WAITING_USER_ACTION,
+    ] as const) {
+      expect(canRetryCompaction(facets({ type: MESSAGE_TYPE_COMPRESSION, status }))).toBe(false)
+    }
+  })
+
+  it('非压缩类型不给入口（工具 / Turn 各有自己的重试语义）', () => {
+    for (const type of [MESSAGE_TYPE_TURN, MESSAGE_TYPE_TOOL_CALL, MESSAGE_TYPE_TEXT] as const) {
+      expect(canRetryCompaction(facets({ type, status: MESSAGE_STATUS_FAILED }))).toBe(false)
+    }
   })
 })
 

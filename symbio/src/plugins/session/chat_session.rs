@@ -176,8 +176,7 @@ fn normalize_message_content(msg: ChatMessage) -> Option<ChatMessage> {
 /// 孤儿来源：
 /// - Failed Turn 被 `resume::process_retry_turn` 删除时若子节点未一并清理；
 /// - `persist_failure` 把仅存在于内存的流式子节点直接追加进存储；
-/// - 兜底压缩（[`crate::symbio_core`] 之外的 `compression::emergency_tail_compression`）
-///   按 token 预算切中段时，保留区首条可能是父节点已被截断的 Tool 结果。
+/// - `resume::process_tool_resume_action` 只删子节点、父节点已被其它路径清理。
 ///
 /// 这些节点会被 `flatten_chat_messages` 当成根节点单独发一条 native message，
 /// 其中 tool 结果还会携带一个请求里根本不存在的 `tool_call_id`，Provider 直接报错。
@@ -425,10 +424,13 @@ impl ChatSession for PersistentChatSession {
         let now = now_ms();
         // 回填缺失的 timestamp 与 seq：replace 会整体重写消息列表，若保留 `None`，
         // `get_messages` 只能靠"哨兵 + 稳定排序"兜底，容易打乱"父先于子"的顺序。
-        // seq 按调用方给出的数组顺序递增分配，因此**数组顺序即权威顺序**。
+        // seq 的分配规则见 `assign_seq`：**既有序号一律原样保留**，只补缺号；
+        // `max_seq(旧列表)` 仅作为"新列表全无序号"时的填号起点（整批新节点的场景）。
+        // 因此 L2 压缩（前缀重写）不会改写保留区任何一条消息的 seq——压缩只改变
+        // 列表的**构成**，不改变既有消息的身份锚点。
         let mut messages = backfill_timestamps(messages, now);
         cm::assign_seq(&mut messages, cm::max_seq(&session.messages));
-        // 孤儿存档：`replace_messages` 整体重写消息列表（L2 语义压缩 / 紧急截断 /
+        // 孤儿存档：`replace_messages` 整体重写消息列表（L2 语义压缩 /
         // Streaming 清理），被丢弃消息引用的 L0 `tool_archives/` 存档随之失去引用。
         // 此处**只统计不删除**（审计 A3）：归档的磁盘生命周期由 `tool_result_guard`
         // 的每会话滚动保留（最新 `TOOL_ARCHIVE_KEEP` 个）统一负责，写入路径不再

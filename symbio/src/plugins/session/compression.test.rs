@@ -826,7 +826,10 @@ fn test_build_request_view_nudge_comes_after_skeletonization() {
     assert_eq!(view_text(&view[view.len() - 2]), "new content");
 }
 
-// ── 水位提醒 / 本地兜底压缩（chat_loop 直接调用，审计 §4.2 补测）──────────
+// ── 水位提醒（chat_loop 直接调用，审计 §4.2 补测）──────────────────────────
+//
+// 本文件**不再**有"本地兜底压缩"的测试：`emergency_tail_compression` 已随
+// "压缩失败不得裁剪历史"一并删除（见本文件末节与 `docs/DECISIONS.md` ADR-018）。
 
 /// 长度可预测的中文消息（CJK ≈ 1 token/字 + 8 框架开销）。
 fn cn_msg(text: &str) -> ChatMessage {
@@ -846,88 +849,16 @@ fn test_should_emit_context_nudge_threshold() {
     assert!(!should_emit_context_nudge(&[], 100, 1000));
 }
 
-#[test]
-fn test_emergency_tail_compression_keeps_turn_boundary() {
-    // 每条 ~108 token（100 中文字 + 8 开销），target=60 只容得下最后一条；
-    // 反向累计后起点回退到最近一条 user（轮边界，不切断 tool_call 配对）
-    let msgs = vec![
-        cn_msg(&"早".repeat(100)),
-        cn_msg(&"期".repeat(100)),
-        cn_msg(&"近".repeat(100)),
-    ];
-    let (out, removed) = emergency_tail_compression(&msgs, 60, None);
-    assert_eq!(removed, 2);
-    assert_eq!(out.len(), 2); // 截断说明 + 保留的最近一轮
-    let head = out[0].content.as_ref().unwrap().to_text();
-    assert!(head.contains("CONTEXT TRUNCATED"));
-    assert!(!head.contains("完整历史转存"), "无转存路径时不输出该段");
-    assert_eq!(
-        out[0]
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("compaction"))
-            .and_then(|v| v.as_str()),
-        Some("emergency_tail")
-    );
-    assert_eq!(
-        out[0]
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("removed_messages"))
-            .and_then(|v| v.as_u64()),
-        Some(removed as u64)
-    );
-    assert_eq!(out[1].content.as_ref().unwrap().to_text(), "近".repeat(100));
-}
-
-#[test]
-fn test_emergency_tail_compression_noop_when_within_target() {
-    let msgs = vec![cn_msg("短"), cn_msg("也很短")];
-    let (out, removed) = emergency_tail_compression(&msgs, 100_000, Some("/tmp/t.json"));
-    assert_eq!(removed, 0);
-    assert_eq!(out.len(), msgs.len());
-}
-
-#[test]
-fn test_emergency_tail_compression_carries_transcript_hint() {
-    let msgs = vec![
-        cn_msg(&"早".repeat(100)),
-        cn_msg(&"期".repeat(100)),
-        cn_msg(&"近".repeat(100)),
-    ];
-    let (out, removed) = emergency_tail_compression(&msgs, 60, Some("/abs/transcript.json"));
-    assert_eq!(removed, 2);
-    let head = out[0].content.as_ref().unwrap().to_text();
-    assert!(head.contains("/abs/transcript.json"));
-    assert_eq!(out.len(), msgs.len() - removed + 1);
-}
-
-/// 设计约束固化：末条消息无条件保留；若回退轮边界后起点落到数组末尾
-/// （唯一可能是末条非 user 且自身超出 target），整次兜底放弃（removed=0）。
-/// 这是"宁可发送也不丢当前指令"的保守策略，必须有测试钉住，否则改动时
-/// 容易被无声破坏。
-#[test]
-fn test_emergency_tail_compression_gives_up_when_no_turn_boundary() {
-    // 末条是 assistant（无后续 user 轮）：反向累计保留它后，起点回退时
-    // 越过它直达唯一 user（index 0）→ 回扫落到数组末尾 → 放弃截断
-    let msgs = vec![
-        cn_msg("指令"),
-        ChatMessage {
-            role: Some(MessageRole::Assistant),
-            content: Some(MessageContent::Text("答".repeat(500))),
-            ..Default::default()
-        },
-    ];
-    let (out, removed) = emergency_tail_compression(&msgs, 10, None);
-    assert_eq!(removed, 0);
-    assert_eq!(out.len(), 2);
-}
-
 // ==================== 压缩失败的可诊断性 ====================
 //
 // 回归动机：实测会话 `09d74431` 的两条 failed 压缩节点 `meta` / `error` 全空，
-// 排查者无法判断是「模型请求失败」「模型输出不合法」还是「输入超限兜底无收益」——
+// 排查者无法判断是「模型请求失败」「模型输出不合法」还是「输入超限」——
 // 三种应对完全不同。失败原因必须可机读（kind）且可人读（message）。
+//
+// 另一条硬不变式：**失败不改动历史**。曾经的"输入超限 → 本地机械兜底截断"
+// 会静默丢掉早期历史并回报成功（节点显示"已压缩上下文（N → M 条）"），
+// 用户只看到历史突然变短、后续内容与截断前失联，却拿不到原因也没有重试入口。
+// 该路径已删除，改为如实报错（`InputOverLimit`）——这三条测试钉住它不再回来。
 
 #[test]
 fn failure_kind_is_machine_readable_and_distinct() {
@@ -940,7 +871,14 @@ fn failure_kind_is_machine_readable_and_distinct() {
         CompressionFailure::InvalidSnapshot.kind(),
         "invalid_snapshot"
     );
-    assert_eq!(CompressionFailure::NoPayoff.kind(), "no_payoff");
+    assert_eq!(
+        CompressionFailure::InputOverLimit {
+            pending: 900_000,
+            limit: 128_000
+        }
+        .kind(),
+        "input_over_limit"
+    );
 }
 
 #[test]
@@ -954,9 +892,34 @@ fn failure_message_carries_the_reason() {
     assert!(CompressionFailure::InvalidSnapshot
         .message()
         .contains("已保留完整历史"));
-    assert!(CompressionFailure::NoPayoff
-        .message()
-        .contains("已保留完整历史"));
+    // 输入超限必须给出**两侧的数字**（待压缩量 vs 上限），用户才能判断要换多大的模型
+    let over = CompressionFailure::InputOverLimit {
+        pending: 200_000,
+        limit: 128_000,
+    };
+    let msg = over.message();
+    assert!(msg.contains("200000") && msg.contains("128000"), "{msg}");
+    assert!(msg.contains("已保留完整历史"), "{msg}");
+    // 且必须指向可执行的下一步，而不是只说"失败了"
+    assert!(msg.contains("上下文更大的模型"), "{msg}");
+}
+
+/// 失败路径的硬不变式：**不裁剪历史**。
+///
+/// 这条断言的对象是"不再存在"——`emergency_tail_compression` 已随该路径一并删除。
+/// 用编译期事实（函数不存在）+ 运行期行为（报错而非返回 Ok）双重钉住：
+/// 任何"压缩失败就本地截断"的写法都必须重新引入一个新函数，无法悄悄复活。
+#[test]
+fn compression_failure_never_truncates_history() {
+    use crate::plugins::session::chat_loop::compress::CompressionFailure;
+    // `NoPayoff`（"本地兜底无收益"）这个变体已随兜底路径一起消失：它唯一的语义
+    // 来源就是那次截断尝试。枚举里不再有"以截断为出路"的出口。
+    let over = CompressionFailure::InputOverLimit {
+        pending: 10,
+        limit: 1,
+    };
+    assert_eq!(over.kind(), "input_over_limit");
+    assert!(!over.message().contains("截断"), "{}", over.message());
 }
 
 #[test]

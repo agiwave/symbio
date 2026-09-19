@@ -197,6 +197,21 @@ describe('messageFromNode（结构取 attributes，正文取内容）', () => {
     // 旧数据别名：历史上 completed 与「未标注」都被写成 active，遇到即按已结束处理
     expect(messageFromNode(node({ name: 'm6', status: 'active' }), '').status).toBe('completed')
   })
+
+  /**
+   * `aborted` 必须在状态词表里。
+   *
+   * 漏掉它的代价不是"少一个标签"，而是**整条状态被静默丢弃**：节点以"无状态"
+   * 落进 store，被 `registry/messageTypes` 的缺省兜底成 `completed`——
+   * 于是"用户按了停止"被渲染成"正常结束"，挂在 `aborted` 终态上的**重试入口消失**。
+   * 实测症状正是"中止后看不到重试入口，重新打开会话才有"
+   * （重开走叶子 JSON 直读，状态原样保留）。
+   */
+  it('aborted 是终态词之一，不得被丢弃（丢了就会谎报成 completed）', () => {
+    expect(messageFromNode(node({ name: 't1', status: 'aborted', type: 'turn' }), '').status).toBe(
+      'aborted',
+    )
+  })
 })
 
 describe('变更 → store', () => {

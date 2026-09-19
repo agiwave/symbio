@@ -109,6 +109,25 @@ The structure MUST be as follows:
 </state_snapshot>"#.to_string()
 }
 
+/// 快照接替被压缩内容的**槽位序号**：`保留区首条 seq − 1`。
+///
+/// 为什么不是"新号"（`max_seq + 1`）：快照语义上是**被压掉那段历史的替身**，
+/// 它必须排在保留区**之前**。若给它一个全新的最大号，数组顺序与 `seq` 顺序就
+/// 互相矛盾（快照在数组首、seq 最大），消费者按 `seq` 排序会把历史记忆甩到末尾。
+///
+/// 而给它"槽位号"则让新列表**天然单调**，于是 `assign_seq` 退化为"只补缺号"，
+/// **保留区任何一条消息的 seq 都不会被改写**——这正是"压缩不改变既有序号"的
+/// 落实点（见 `assign_seq` 的稳定性不变式）。
+///
+/// 回退链：保留区首条无 `seq`（存量数据）→ 被压缩区末条的 `seq` → `None`
+/// （两者都没有时交给 `assign_seq` 补号）。
+pub fn snapshot_slot_seq(compressed: &[ChatMessage], keep: &[ChatMessage]) -> Option<i64> {
+    keep.first()
+        .and_then(|m| m.seq)
+        .map(|s| s - 1)
+        .or_else(|| compressed.last().and_then(|m| m.seq))
+}
+
 /// 找到压缩分割点（仅在 User 边界切分，保证保留区从一轮对话的开头开始）。
 ///
 /// 返回值语义：
@@ -607,83 +626,6 @@ pub fn extract_snapshot(text: &str) -> Option<String> {
         return None;
     }
     Some(format!("{OPEN}\n{inner}\n{CLOSE}"))
-}
-
-/// 输入超限死锁的本地机械兜底（**不依赖 LLM**）。
-///
-/// 场景（日志实证）：上下文估算已超 Provider 有效输入上限时，LLM 摘要请求与
-/// 上下文**同源超限**（请求体就携带完整待压缩历史），必然 400（"Input token
-/// exceed the limit"）——每轮重发注定失败的巨型请求，压缩永远无法收敛。
-///
-/// 处理：从尾部按 token 预算机械保留最近上下文；保留起点回退到最近一条 user
-/// 消息（轮边界）——保证保留区 Turn 子树 parent 链完整、且新上下文以 user 开头
-///（多数 provider 的硬要求）。头部插入一条 user 角色的本地说明（告知模型历史
-/// 被截断及转存路径），模型可据此意识到上下文不完整。
-///
-/// 两处护栏（截断无收益时放弃，原样返回）：
-/// - **轮边界回退不得越过数组末尾**：若起点之后根本没有 user（末条是超预算的
-///   assistant 回复 / 工具结果），继续回退会清空整段历史；
-/// - **保留区必须以 user 开头**：否则首条是父节点已被截断的孤儿 Tool 结果，
-///   进请求前会被 `drop_orphan_messages` 剔空。
-///
-/// 返回 `(新消息列表, 被截断条数)`；若无需截断（本就在预算内）原样返回 `(原列表, 0)`。
-pub fn emergency_tail_compression(
-    messages: &[ChatMessage],
-    target_tokens: usize,
-    transcript_hint: Option<&str>,
-) -> (Vec<ChatMessage>, usize) {
-    // 从尾部反向累计；最后一条无条件保留（当前用户指令 / 生成中回复）
-    let mut acc = 0usize;
-    let mut start = messages.len();
-    while start > 0 {
-        let t = estimate_message_tokens(&messages[start - 1]);
-        if acc + t > target_tokens && start < messages.len() {
-            break;
-        }
-        acc += t;
-        start -= 1;
-    }
-    // 保留起点回退到最近一条 user 消息（轮边界）
-    while start < messages.len() && messages[start].role != Some(MessageRole::User) {
-        start += 1;
-    }
-    if start == 0 {
-        return (messages.to_vec(), 0);
-    }
-    // 回退越过了末尾：起点之后没有 user 轮边界，截断会丢掉全部近期上下文
-    if start >= messages.len() {
-        return (messages.to_vec(), 0);
-    }
-    // 保留区必须以 user 开头：否则首条是父节点已丢失的孤儿 Tool 结果，
-    // 进请求前会被 drop_orphan_messages 剔空，等于什么都没保留
-    if messages[start].role != Some(MessageRole::User) {
-        return (messages.to_vec(), 0);
-    }
-    // 注意：即便保留区自身仍超 target（典型：单条巨型消息），截断依然是净收益
-    // ——它把总量降到了可能的最小值，故此处不以 kept_tokens > target 作为放弃条件。
-    let mut note = format!(
-        "[CONTEXT TRUNCATED — 本地兜底压缩]\n早期 {start} 条消息因超出 Provider 输入上限被本地截断（LLM 摘要请求与上下文同源超限，无法执行）。近期上下文如下，请基于其继续任务。"
-    );
-    if let Some(p) = transcript_hint {
-        note.push_str(&format!("\n完整历史转存：{p}"));
-    }
-    let header = ChatMessage {
-        id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
-        content: Some(MessageContent::Text(note)),
-        status: Some(MessageStatus::Completed),
-        meta: Some(serde_json::json!({
-            "compacted": true,
-            "compaction": "emergency_tail",
-            "removed_messages": start,
-        })),
-        ..Default::default()
-    };
-    let mut out = Vec::with_capacity(messages.len() - start + 1);
-    out.push(header);
-    out.extend_from_slice(&messages[start..]);
-    (out, start)
 }
 
 /// `context_compact` 工具名（chat_loop 拦截分发用）。

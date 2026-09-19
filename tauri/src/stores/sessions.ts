@@ -64,6 +64,7 @@ import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/schemas/chat_message'
+import { isInflightMessageStatus } from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
 // 消息转写规则（纯逻辑）：合并 / 水合 / 截断 / 看门狗判据
 import {
@@ -252,16 +253,27 @@ export const useSessionsStore = defineStore('sessions', () => {
     return `状态已过期 ${Math.floor(elapsed / 60000)} 分钟`
   }
 
-  /** 写入或更新一条消息到指定 session（替换整个对象） */
+  /**
+   * 写入或更新一条消息到指定 session（替换整个对象）。
+   *
+   * ## `seq` 的两条规则（顺序锚点不得被写入动作破坏）
+   *
+   * 1. **载荷带 `seq`（后端权威）**：原样采用，并把本地续接游标抬到不低于它——
+   *    游标若落后于已观测到的后端序号，下一条本地消息会被排到它**前面**。
+   * 2. **载荷不带 `seq`**（落库前无序号）：新消息按本地游标接在末尾；
+   *    **已存在的消息保留原序号**。原先一律重新发号，会让任何一次"不带 seq 的
+   *    更新"（状态迁移 / 压缩后重发）把消息顶到列表末尾——顺序因此看起来会乱。
+   */
   function putMessage(sessionId: string, msg: ChatMessage) {
     if (!sessionId || !msg.id) return
     updateMessages(sessionId, (cur) => {
-      // 缺失 seq 时自动补一个单调序号，保证与流式 patch 的 seq 处于同一单调递增序列，
-      // 否则用户消息（仅靠 timestamp ≈ epoch ms）会被排到小整数 seq 的助手节点之后。
-      cur[msg.id] =
-        msg.seq === undefined
-          ? { ...msg, seq: nextSeq(sessionId) }
-          : msg
+      if (typeof msg.seq === 'number') {
+        cur[msg.id] = msg
+        raiseSeqFloor(sessionId, msg.seq)
+        return
+      }
+      const existing = cur[msg.id]
+      cur[msg.id] = { ...msg, seq: existing?.seq ?? nextSeq(sessionId) }
     })
 
     // 同步 status.last_preview（取最后一条 assistant 文本；取不到则不动）
@@ -274,6 +286,19 @@ export const useSessionsStore = defineStore('sessions', () => {
       snext[sessionId] = scur
       sessionStatuses.value = snext
     }
+  }
+
+  /**
+   * 把本地续接游标抬到不低于 `seq`（只升不降）。
+   *
+   * 游标语义是"已分配过的最大序号"，因此收到一个更大的后端序号时必须跟上；
+   * 收到更小的（压缩把序号挪到被压内容的槽位上）则**不动**——那正是"游标在前、
+   * 后端序号在后"的正常情形，压回去只会让后续本地消息撞号。
+   */
+  function raiseSeqFloor(sessionId: string, seq: number) {
+    const cur = sessionSeq.value[sessionId] ?? 0
+    if (seq <= cur) return
+    sessionSeq.value = { ...sessionSeq.value, [sessionId]: seq }
   }
 
   /** 合并 patch 到指定 session 的某条消息（不替换，只覆盖 patch 提供的字段） */
@@ -971,6 +996,77 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 不自己挂监听器，因此可被独立构造与测试。
 
   /**
+   * 转写对账：**终态补丁丢失后的自愈**（会话已空闲却仍有节点停在非终态）。
+   *
+   * ## 它补的是哪条不变量的客户端一半
+   *
+   * 后端有一条硬不变量：**不得有节点停在 `Streaming`**
+   * （`session/docs/node-state-streaming.md` §8.11）——它在服务端由
+   * `process_tool_calls_async` 的批尾收口、`persist_failure`、`converge_inflight`
+   * 三处共同保证，且**落库结果实测干净**。
+   *
+   * 但「服务端状态正确」不等于「前端看到的正确」：消息状态只经
+   * `kind = "vdfs"` 一条通道下发，而这条通道**不重放**——
+   * `ChangeSubscriptions::notify` 在订阅表为空时直接返回（watch 登记是
+   * fire-and-forget 的异步动作），消费循环也会在 `is_working` 翻转时
+   * **丢掉手上那一帧**。任一处丢一次终态补丁，前端就永久停在「运行中」：
+   * 没有任何机制会纠正它，因为前端只做**增量收敛**、从不整表重拉。
+   *
+   * 于是这里给出客户端一半：**会话已空闲却还有非终态节点 ⇒ 一定丢了一条终态**。
+   *
+   * ## 为什么这个判据成立（不是启发式）
+   *
+   * 节点补丁**恒先于**会话状态下发——正常收尾是「清在途 → 复位 `is_working`
+   * → `emit_session_state`」，中止收尾是「`converge_inflight` 广播节点终态
+   * → `emit_session_state(aborted)`」（`handle_abort` 里那条顺序注释写明了
+   * 理由）。因此会话节点报「不忙」时，服务端的每一个节点都已是终态、
+   * 且已写进存储。
+   *
+   * ## 为什么是**回读**而不是就地"标成已完成"
+   *
+   * 就地标 `completed` 是**猜**：服务端可能把它定稿成 `aborted`（用户中止）
+   * 或 `failed`。猜错就把"半截"谎报成"正常结束"，并抹掉重试入口——
+   * 正是 `aborted` 状态漏在状态词表里时踩过的坑。回读拿到的是权威终态，
+   * 一次 IPC 换一个确定的答案。
+   *
+   * ## 为什么回读前后都要再看一眼 `isSessionWorking`
+   *
+   * 回读是异步的，其间用户可能已经发出下一条消息：此时在途节点**重新合法**，
+   * 存储也不再是权威（新一轮还没落库）。丢弃本次结果即可——下一次会话
+   * 转空闲时会重新触发。
+   */
+  async function reconcileTranscript(id: string): Promise<void> {
+    if (!id || isSessionWorking(id)) return
+    let msgs: ChatMessage[]
+    try {
+      msgs = await readSessionTranscript(id)
+    } catch (err) {
+      // 回读失败就保持现状：陈旧副本比"清空转写"好，下一次转空闲会再试
+      logger.warn('[sessions]', `转写对账回读失败，保持现状：${id}`, err)
+      return
+    }
+    if (isSessionWorking(id)) return
+
+    // 丢弃仍停在非终态的本地副本。会话已空闲 ⇒ 服务端不可能还有节点在跑，
+    // 这一份必然是丢补丁留下的陈旧副本；它若真在存储里，下面的快照会把它
+    // 以**权威终态**整条补回来（同一 id）。
+    const cur = sessionMessages.value[id] || {}
+    const stale = Object.values(cur).filter((m) => isInflightMessageStatus(m.status))
+    if (stale.length > 0) {
+      const next = { ...cur }
+      for (const m of stale) delete next[m.id]
+      commitMessages({ ...sessionMessages.value, [id]: next })
+      logger.warn(
+        '[sessions]',
+        `转写对账：会话 ${id} 已空闲但仍有 ${stale.length} 个节点停在非终态，` +
+          `已按存储权威状态重收敛（疑似终态补丁丢失）：${stale.map((m) => m.id).join(', ')}`,
+      )
+    }
+    // 快照（存储）权威：终态、内容、seq 一并落定
+    hydrateFromHistory(id, msgs)
+  }
+
+  /**
    * 应用一条**会话节点**变更（`updated`）：状态 / 结局 / 错误 / 标题就地收敛。
    *
    * ## 零回读（本函数存在的理由）
@@ -1025,6 +1121,21 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (wasWorking && !nowWorking) {
       playCompletionChime(chimeKindOfOutcome(rt.outcome), id)
     }
+
+    // ⑤ 终态丢失的自愈：会话已空闲却仍有节点停在非终态 ⇒ 一定丢了一条终态补丁
+    //    （VDFS 变更不重放，前端只做增量收敛，没人纠正它）。
+    //    判据只在**有候选**时才成立，因此正常运行路径零成本——不满足条件时
+    //    连一次回读都不会发生。
+    if (!nowWorking && hasUnsettledNodes(id)) {
+      void reconcileTranscript(id)
+    }
+  }
+
+  /** 本地是否还有停在非终态的节点（对账的触发条件，零 IPC） */
+  function hasUnsettledNodes(id: string): boolean {
+    const cur = sessionMessages.value[id]
+    if (!cur) return false
+    return Object.values(cur).some((m) => isInflightMessageStatus(m.status))
   }
 
   return {
@@ -1065,6 +1176,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     updateMessage,
     clearMessages,
     persistStuckFailure,
+    reconcileTranscript,
     // 多会话实时状态 helpers
     getSessionMessages,
     getSessionStatus,

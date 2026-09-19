@@ -18,7 +18,128 @@
 
 ***
 
-## 2026-09-18: 修复 Telegram LLM 回复链路 + 新增守卫 E-007
+## 2026-09-20: 压缩失败不再强制裁剪历史 —— 改为可诊断、可重试、可持久化的失败态
+
+**性质：行为修复 ×1（否决一条"静默降级"策略）**。决策记录见
+[DECISIONS.md ADR-018](./DECISIONS.md)。
+
+### 病灶：压缩放不下就本地截断，而且**回报成功**
+
+`session/chat_loop/compress.rs` 的输入超限预判分支命中时执行
+`compression::emergency_tail_compression`——按 token 预算机械砍掉早期历史、插入截断
+说明头，然后 `return Ok(Some(post_tokens))`。于是：
+
+- 压缩节点显示「**已压缩上下文（N → M 条）**」且状态 `Completed`，**没有任何错误信号**；
+- 被砍掉的历史在存储里彻底消失，用户只看到"历史突然变短"；
+- 后续对话与截断前失联（用户原话：「后面会话内容摸不着头脑」），且**没有重试入口**。
+
+而这条路径的触发时机恰恰是"压缩反复失败的终点"：
+压缩 LLM 请求失败 → 回滚（历史完整）→ 下一轮再失败 → 熔断（跳过自动压缩）→
+上下文继续增长 → 越过模型输入上限 → **本地截断**。
+即：**压缩失败的最终代价由历史买单**。
+
+### 修法：失败就如实报错，历史一条不动
+
+| 层 | 改动 |
+|---|---|
+| `session/chat_loop/compress.rs` | 预判命中时**仍跳过 doomed 请求**（只保留这一收益），改为返回 `CompressionFailure::InputOverLimit { pending, limit }`——不再截断。`CompressionFailure` 去掉 `NoPayoff`（它唯一的语义来源就是那次截断尝试） |
+| `session/compression.rs` | 删除 `emergency_tail_compression`（连同 4 条单测）——它是"强制裁剪"的唯一实现，留着就是随时可被复活的第二份真相 |
+| `schemas/session/chat_message.rs` + `session/resume.rs` | 新增 `ResumeAction::RetryCompaction`：删除 Failed 压缩节点 → 重新执行一次压缩（**不动历史**） |
+| `session/chat_loop/compress.rs` | `auto_compress_process` 的 `force = true` 同时**绕过熔断**——熔断约束的是"每轮自动白等一次注定失败的请求"，用户主动重试不该被冷却挡住 |
+| `session/chat_loop/compress.rs` | 新增 `retry_compaction`（重试执行体）：删除旧失败节点 → 重新压缩；无切分点/无收益时补一条 `Completed` 说明节点，避免"节点消失了但什么都没发生" |
+| `tauri/src/registry/messageTypes.ts` | 新增 `canRetryCompaction` 与第三种重试粒度 `retry_compaction`（压缩节点是**根级**节点，落到"回溯父 Turn"兜底会被后端 NotFound 拒绝，必须在工具分支**之前**分派） |
+| `tauri/src/components/message/CompressionNode.vue` | 失败形态走 `MessageErrorBox`（故障红 + 重试入口），**不再**复用成功态的弱化样式（`.compress-note`） |
+| `tauri/src/composables/useChatConnection.ts` | `ResumePayload.action` 补 `retry_compaction` |
+
+### 为什么不按 `failure_kind` 分档给重试入口
+
+`input_over_limit` 当场重试必然再失败，看起来该"聪明地"不给入口。但那会掐掉唯一的
+出路：用户**换一个上下文更大的模型**后，同一次压缩就能成功。原因已写在节点正文里
+（含"待压缩量 vs 上限"两侧数字），由用户判断，不由前端替他决定"别试了"。
+
+### 代价（明说）
+
+不裁剪意味着：当历史真的超出模型输入上限、且压缩始终失败时，**会话会停在错误上**
+（本轮请求撞 provider 的 context-length 错误，带原因 + 重试入口），而不是"带着残缺
+历史继续跑"。这是刻意的取舍——可见的失败优于静默的数据损失。
+
+回归：`CompressionFailure` 的可诊断性测试改写为 3 例（`kind` 可机读且三值互异、
+`message` 带原因与两侧数字、失败消息不含"截断"字样）；前端新增
+`messageRetryTargetOf` 压缩分派 3 例 + `canRetryCompaction` 4 例 +
+`MessageNode` 压缩失败/非失败两形态。
+
+***
+
+## 2026-09-19: 会话顺序锚点（seq）与终态补丁的三处收口
+
+**性质：功能修复 ×3（同源：一条"静默丢弃"链上的三个断点）**。
+
+三个症状看起来无关，实际是**同一条链**上的三个断点——顺序锚点被改写、终态状态词被丢、
+终态补丁丢失后无人纠正。共同病灶是：**丢一次就永久错，且没有任何机制会纠正它**
+（VDFS 变更不重放，前端只做增量收敛）。
+
+### ① `seq` 随压缩改变 —— 消息顺序倒挂（`mtmae8j2wxam4dhrei`）
+
+实测数据定位：压缩前存档 `transcript_*.json` 的保留区 seq 为 `631..642`，压缩后
+`messages.json` 同一批消息变成 `870..881`（快照 `6481e0c7` 拿 `869`）。
+**是后端改的号，不是前端排序错了。**
+
+因果链：`compress_snapshot_inner` 构造 `[快照(无 seq), 保留区(旧低号)]` → `replace_messages`
+→ `assign_seq(base = max_seq(旧列表) = 868)`。旧实现从 `base` 起步**向上**填号，
+于是快照拿到 `base+1`（成了**最大**），保留区因 `existing > cursor` 不成立而被逐个改号。
+
+修法分三处，缺一不可：
+
+| 层 | 改动 |
+|---|---|
+| `symbio_core/.../chat_message.rs` | `assign_seq` 重写：无号项从**相邻的既有序号向外让位**——开头段整体落在首号之前（**往下**）、末尾段接在末号之后（往上）、夹缝用间隙；既有序号**一个都不改** |
+| `session/compression.rs` | 新增 `snapshot_slot_seq`（= `保留区首条 seq − 1`），压缩快照与紧急截断说明头显式带上**槽位序号**，使新列表**本来就单调**，`assign_seq` 退化为"只填缺号" |
+| `session/chat_loop/compress.rs` + `session/plugin.rs` | 整表重写后**广播** `emit_transcript_rewritten`（被压掉的逐条 `deleted` + 新首条 `created`）——此前压缩**完全不发 VDFS 变更**，前端永远停在压缩前的历史 |
+
+**为什么开头段必须"整体一次算好"**：逐个向上找空位会先占用首号本身、把既有序号顶成
+下一个号——这正是"seq 随压缩改变"的直接来源。由"首号是最小号"可知
+`首号 − k … 首号 − 1` 全部落在既有序号之外，故这一段天然不撞号、也不必逐个探测。
+
+### ② 中止后看不到「重试」入口（要重新打开会话才出现）
+
+`MessageStatus::Aborted` 由后端序列化成 `"aborted"`，前端契约层也有
+`MESSAGE_STATUS_ABORTED` / `isAbortedStatus`——**但 `schemas/vdfs.ts` 的状态词表漏了它**，
+于是 `vdfsTranscriptSync::messageStatusOf` 落到 `default: return undefined`，
+**整条状态被静默丢弃**：节点以"无状态"落进 store，而 `registry/messageTypes` 的
+缺省兜底是 `completed` ⇒ 中止的 Turn 被谎报成"正常结束"，重试入口不出现。
+
+重新打开会话之所以能看到：那条路径走叶子 JSON 直读，`aborted` 原样保留。
+
+修法：补 `VDFS_STATUS_ABORTED` 并纳入映射；**未知状态词一律 `logger.warn` 留痕**，
+不再当作"没有状态"——静默丢弃状态等于把终态谎报成 `completed`。
+
+### ③ 工具调用已完成，前端一直显示「运行中」
+
+后端不变量是干净的（落库实测 `216 completed + 1 aborted`，无 `streaming` 残留、无孤儿），
+所以卡住的一定是**前端那份陈旧副本**。而前端确实没有任何纠正机制：
+
+- `ChangeSubscriptions::notify` 在订阅表为空时**直接返回**，而 watch 登记是
+  `subscribeVdfsChanged` 里 fire-and-forget 的异步动作；
+- 消费循环在 `is_working` / `request_id` 翻转时**丢掉手上那一帧**（`consume.rs` 的
+  检查在 `match &frame` **之前**）；
+- 前端只做增量收敛，从不整表重拉。
+
+修法：补上**客户端一半的不变量**——「会话已空闲却仍有节点停在非终态 ⇒ 一定丢了一条终态」。
+`stores/sessions.ts` 新增 `reconcileTranscript`，在 `applySessionNode` 的
+`!nowWorking && hasUnsettledNodes(id)` 处触发：丢弃停在非终态的本地副本，
+再以存储权威回读收敛。
+
+**判据不是启发式**：节点补丁恒先于会话状态下发（正常收尾「清在途 → 复位 `is_working`
+→ `emit_session_state`」，中止收尾「`converge_inflight` 广播节点终态 → `emit_session_state(aborted)`」），
+故会话报"不忙"时服务端每个节点都已是终态且已落库。
+**为什么不就地标 `completed`**：那是猜——服务端可能定稿成 `aborted` / `failed`，
+猜错就把"半截"谎报成"正常结束"并抹掉重试入口（正是 ② 踩过的坑）。
+触发条件只在**有候选**时成立，正常运行路径零 IPC。
+
+回归：后端 `assign_seq` 相关 7 例全绿（含新增 3 例：开头段多个无号项、末尾段接在末号后、
+夹缝容不下时**顺序不变式优先**的显式兜底）。
+
+***
 
 **性质：功能修复 + 新增守卫**。承上一条：上一轮修好了 Telegram 的**地址**
 （`session/chat` → `session/chat/send`），但那条链路**仍然不通**——本轮把功能修通，

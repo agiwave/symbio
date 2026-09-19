@@ -77,6 +77,7 @@ import {
   VDFS_STATUS_PENDING,
   VDFS_STATUS_STREAMING,
   VDFS_STATUS_WAITING_USER_ACTION,
+  VDFS_STATUS_ABORTED,
   sessionRouteOf,
   type VdfsChange,
   type VdfsNode,
@@ -132,11 +133,22 @@ function messageStatusOf(node: VdfsNode): MessageStatus | undefined {
     case VDFS_STATUS_WAITING_USER_ACTION:
     case VDFS_STATUS_COMPLETED:
     case VDFS_STATUS_FAILED:
+    case VDFS_STATUS_ABORTED:
       return node.status
     case VDFS_STATUS_ACTIVE:
       // 旧数据别名：仅用于兼容已落库的历史节点，新节点不会再出现这个值
       return VDFS_STATUS_COMPLETED
     default:
+      // **不得静默丢弃**：状态是本模块承载的全部信息，丢掉它等于让节点以
+      // 「无状态」落进 store——`messageStatusOf`（`registry/messageTypes`）会把
+      // 缺失兜底成 `completed`，于是终态被谎报成"正常结束"。
+      // 实测代价：`aborted` 漏在状态词表里时，中止后的 Turn 显示为已完成，
+      // 重试入口不出现（重新打开会话走叶子 JSON 直读才恢复）。
+      // 因此未知状态词一律**留痕**，而不是当作"没有状态"。
+      logger.warn(
+        '[vdfs-transcript]',
+        `未知的节点状态词，已忽略该条状态（后端新增状态词时前端需同步）：${String(node.status)} @ ${node.path}`,
+      )
       return undefined
   }
 }

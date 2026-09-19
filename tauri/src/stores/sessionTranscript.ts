@@ -74,6 +74,10 @@ export function previewOf(msg: Pick<ChatMessage, 'role' | 'content'>): string | 
  */
 export function mergeMessagePatch(existing: ChatMessage, patch: ChatMessage): ChatMessage {
   const merged: ChatMessage = { ...existing, ...patch }
+  // `seq` 是顺序锚点，且**只由存储分配**：补丁不带它（`null` / `undefined`）时
+  // 不得覆盖已有值。覆盖成 `null` 会让排序回退到 `timestamp`（epoch 毫秒），
+  // 该消息立刻跳到所有小整数 `seq` 的消息之后——顺序倒挂的一种。
+  if (typeof patch.seq !== 'number') merged.seq = existing.seq
   if (patch.content != null) {
     const isFullReplace =
       existing.type === 'tool_call' ||

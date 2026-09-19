@@ -591,7 +591,7 @@ node scripts/grep-audit.mjs && node scripts/style-audit.mjs
 
 | 机制 | 保留理由 |
 |---|---|
-| 压缩四层（L0 守卫 / L1 自动 / L2 主动 / 本地紧急兜底） | 每层对应一种真实故障，合并会造成"超限即死锁"回归 |
+| 压缩四层（L0 守卫 / L1 自动 / L2 主动 / 输入超限预判） | 每层对应一种真实故障。**注意预判层只保留"跳过注定失败的请求"，不再本地截断历史**（该兜底已删除，见 `node-state-streaming.md` §6 S20.8 与 `docs/DECISIONS.md` ADR-018） |
 | `compress_with_snapshot_core` 单一实现 | 被动与主动共用内核已是正确收敛，只缺"判定"收口 |
 | `StopSignal` 幂等 + RAII 兜底 | "一个请求生命周期内 Stop 恰好一次"由生命周期保证，不是人工记忆 |
 | `WorkingGuard` / `AiControlGuard` | panic / 提前 return 下 `is_working` 与 `ai_control_tx` 的收敛保证 |

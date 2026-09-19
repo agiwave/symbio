@@ -11,9 +11,10 @@ use crate::symbio_core::{dir_from_ctx, PLUGIN_SESSION};
 
 /// 被动自动压缩（L1）：阈值判定 → 切分 → 收益护栏 → 交执行内核。
 ///
-/// `force` 为 `compression::should_start_compression` 的公开契约（跳过阈值），
-/// 本路径恒为 `false`（自动压缩必须走阈值）；强制压缩属主动路径，由
-/// `run_context_compact` 承担，不经此处。
+/// `force` 为 `compression::should_start_compression` 的公开契约（跳过阈值）。
+/// 自动路径恒为 `false`（自动压缩必须走阈值）；`true` 只由**用户主动重试**
+/// （`retry_compaction`）传入——此时同时**绕过熔断**：熔断约束的是"每轮自动白等
+/// 一次注定失败的请求"，用户点重试是他的明确意愿，不该被冷却挡住。
 ///
 /// 无 `extra_hints`：自动压缩没有"用户"在环内提供保留提示——`hints` 是
 /// `context_compact` 工具的入参，只在主动路径有意义（见 `compress_with_snapshot_core`）。
@@ -36,15 +37,18 @@ pub(crate) async fn auto_compress_process(
 
     // 自动压缩熔断：连续失败达到阈值后，跳过本次自动压缩——历史已回滚、本轮仍
     // 能正常回复，不必每轮再白等一次注定失败的 LLM 请求（实测会话 `09d74431` 的
-    // 反复失败就是这个形态）。手动 `context_compact` 不受影响，且任一次压缩成功
-    // 都会清零计数（半开冷却期内放行一次重试，让瞬时错误自愈）。
-    if let Some(em) = &orchestrator.compression {
-        if em.state.compression_should_skip().await {
-            plugin_warn!(
-                "session",
-                "自动压缩熔断：连续失败已达阈值，本次跳过（冷却中），历史保持完整"
-            );
-            return Ok(None);
+    // 反复失败就是这个形态）。手动 `context_compact` 与用户主动重试（`force`）
+    // 都不受影响，且任一次压缩成功都会清零计数（半开冷却期内放行一次重试，
+    // 让瞬时错误自愈）。
+    if !force {
+        if let Some(em) = &orchestrator.compression {
+            if em.state.compression_should_skip().await {
+                plugin_warn!(
+                    "session",
+                    "自动压缩熔断：连续失败已达阈值，本次跳过（冷却中），历史保持完整"
+                );
+                return Ok(None);
+            }
         }
     }
 
@@ -110,7 +114,7 @@ pub(crate) async fn auto_compress_process(
 ///
 /// 单一实现约束：被动与主动两条入口**必须**共用本函数，各自只保留调用方特有的
 /// 切分点与呈现语义。两处各维护一份流水线（PreCompact 钩子 → transcript
-/// 转存 → LLM 压缩请求 → 快照校验/纠正重试/降级兜底 → meta 与快照消息构造 →
+/// 转存 → LLM 压缩请求 → 快照校验/纠正重试 → meta 与快照消息构造 →
 /// 保留区拼接落库）会带来行为漂移风险。
 ///
 /// 职责：
@@ -121,8 +125,13 @@ pub(crate) async fn auto_compress_process(
 /// 4. 构造快照消息（meta：compacted/post_tokens/transcript_path/compact_hints/
 ///    protocol_version/prompt_fingerprint）并与保留区拼接，replace_messages 落库。
 ///
-/// 失败语义：**任何失败都不向上冒泡**（回滚到调用前历史后返回 None），由调用方
+/// 失败语义：**任何失败都不向上冒泡**（回滚到调用前历史后返回 Err），由调用方
 /// 决定对外呈现（auto → `Ok(None)` 继续本轮 Turn；manual → 工具结果"压缩失败已回滚"）。
+///
+/// **失败一律不改动历史**：四个出口（LLM 失败 / 快照校验失败 / 输入超限 / 用户中止）
+/// 全部把 `context.messages` 还原为调用前的 `original_messages`。历史是用户的资产，
+/// 不因为"这次压缩没做成"而被丢弃——见 [`CompressionFailure`] 关于 `InputOverLimit`
+/// 的说明（那里曾是唯一的例外，现已移除）。
 ///
 /// `keep_messages`：压缩后原样保留在快照之后的消息（auto = 未压缩尾段；
 /// manual = 当前用户指令 + 进行中 Turn 及之后，保证 Turn 子树 parent 链完整，
@@ -135,8 +144,8 @@ pub(crate) async fn auto_compress_process(
 /// 此前所有失败出口统一返回 `None`，调用方只拿到"失败了"，节点写死一句
 /// "压缩未完成，已保留完整历史"，`error` 与 `meta` 全空。实测会话
 /// `09d74431` 的两条 failed 压缩节点就是这副样子——**无法区分**是 LLM 请求
-/// 失败、模型没输出合法快照、还是本地兜底无收益。用户看到的是同一个结果，
-/// 但三者的应对完全不同（重试 / 换模型 / 手动清理），不可诊断就无法处理。
+/// 失败、模型没输出合法快照、还是待压缩历史超出模型输入上限。用户看到的是同一个
+/// 结果，但三者的应对完全不同（重试 / 换模型 / 手动清理），不可诊断就无法处理。
 ///
 /// 它同时给出两个视图：`message()` 面向用户（进节点 content），
 /// `kind()` 机器可读（进 `meta.failure_kind`，与未执行工具节点同一字段约定）。
@@ -147,8 +156,13 @@ pub(crate) enum CompressionFailure {
     /// 两次尝试都未取得合法 `<state_snapshot>`（模型输出散文 / scratchpad
     /// 泄漏 / 被截断）。
     InvalidSnapshot,
-    /// 摘要请求输入超限，且本地机械兜底也无收益（保留区无法以 user 轮边界开头）。
-    NoPayoff,
+    /// **摘要请求自身**就超出 Provider 有效输入上限（`pending + overhead > limit`）。
+    ///
+    /// 这条路径**不裁剪历史**。曾经的写法是"本地机械兜底截断早期消息"并**回报成功**
+    /// （压缩节点显示"已压缩上下文（N → M 条）"），于是历史凭空变短、后续内容与
+    /// 截断前失联，而用户拿不到任何原因，也没有重试入口——这正是要否决的行为。
+    /// 请求体与上下文同源超限只说明"这次压缩放不下"，不构成"可以静默丢历史"的授权。
+    InputOverLimit { pending: usize, limit: usize },
 }
 
 impl std::fmt::Display for CompressionFailure {
@@ -163,21 +177,24 @@ impl CompressionFailure {
         match self {
             Self::Llm(_) => "llm_error",
             Self::InvalidSnapshot => "invalid_snapshot",
-            Self::NoPayoff => "no_payoff",
+            Self::InputOverLimit { .. } => "input_over_limit",
         }
     }
 
     /// 面向用户的短说明（节点 content）
+    ///
+    /// 三种失败都明示「已保留完整历史」——这是失败路径的**硬不变式**：压缩失败
+    /// 不改变历史，一条消息都不丢。
     pub(crate) fn message(&self) -> String {
         match self {
             Self::Llm(e) => format!("压缩未完成（模型请求失败：{e}），已保留完整历史"),
             Self::InvalidSnapshot => {
                 "压缩未完成（模型未按要求输出摘要），已保留完整历史".to_string()
             }
-            Self::NoPayoff => {
-                "压缩未完成（待压缩内容超出模型输入上限，且本地兜底无收益），已保留完整历史"
-                    .to_string()
-            }
+            Self::InputOverLimit { pending, limit } => format!(
+                "压缩未完成（待压缩历史约 {pending} tokens，已超出模型输入上限 {limit}），\
+                 已保留完整历史。请改用上下文更大的模型后重试，或手动精简会话。"
+            ),
         }
     }
 }
@@ -209,16 +226,22 @@ async fn compress_snapshot_inner(
         storage_root.dir(),
     );
 
-    // ── 输入超限死锁预判（日志实证的恶性循环）──────────────────────────
+    // ── 输入超限预判（跳过注定失败的巨型请求，**但不裁剪历史**）──────────
     // LLM 摘要请求的请求体**就携带完整待压缩历史**——若历史本身已超 Provider
     // 有效输入上限，摘要请求必然 400（"Input token exceed the limit"），
     // 且每轮自动压缩都会重发这条注定失败的巨型请求：压缩永不收敛、每轮开头
-    // 多一段漫长的无响应。预判命中时跳过 doomed 请求，直接本地机械兜底
-    // （尾部保留 + 说明头，不依赖 LLM），让上下文水位立即回落到可工作区间。
+    // 多一段漫长的无响应。预判命中时**跳过这次 doomed 请求**（这是预判的唯一
+    // 收益），然后如实报错。
+    //
+    // 此前这里走的是"本地机械兜底截断"（尾部保留 + 说明头，不依赖 LLM）并
+    // **回报成功**：压缩节点显示"已压缩上下文（N → M 条）"，用户看到的是历史
+    // 突然变短、后续内容与截断前失联，却拿不到原因、也没有重试入口。历史是
+    // 用户的资产，不能因为"压缩放不下"就被静默丢掉——只报错、不动历史，
+    // 由用户决定下一步（换更大上下文的模型后重试 / 手动精简会话）。
     // 请求体的实际内容 = 压缩 system 提示词 + `compression_request`（历史对话 + 末尾指令）。
     //
     // **不含 `keep_messages`**：保留区根本不发往模型，把它算进来只会高估请求体，
-    // 让本可成功的 LLM 摘要被误判成"注定超限"，退化成机械兜底（快照质量显著下降）。
+    // 让本可成功的 LLM 摘要被误判成"注定超限"。
     let overhead_tokens =
         compression::estimate_request_overhead(&compression::get_compression_prompt(), ctx).await;
     let pending_tokens: usize = compression_request
@@ -229,48 +252,19 @@ async fn compress_snapshot_inner(
     if pending_tokens + overhead_tokens > effective_limit {
         plugin_warn!(
             "session",
-            "[Compress] {log_tag}: summary request itself exceeds input limit ({} + {} > {}), \
-             applying local emergency tail compression instead of a doomed LLM call",
+            "[Compress] {log_tag}: summary request itself exceeds input limit ({} + {} > {}); \
+             skipping the doomed LLM call and preserving history intact",
             pending_tokens,
             overhead_tokens,
             effective_limit
         );
-        // 机械兜底目标：压到有效上限的一半（给后续对话留出增长空间，
-        // 避免刚兜底完又立刻越线）
-        let target = effective_limit / 2;
-        let (mut new_messages, removed) = compression::emergency_tail_compression(
-            &original_messages,
-            target,
-            transcript_path.as_deref(),
-        );
-        if removed > 0 {
-            // 与 LLM 快照同款的 meta 指纹（协议版本标记 emergency 路径）
-            if let Some(head) = new_messages.first_mut() {
-                let mut meta = head.meta.clone().unwrap_or_else(|| serde_json::json!({}));
-                meta["protocol_version"] =
-                    serde_json::json!(super::super::compression::COMPRESSION_PROTOCOL_VERSION);
-                head.meta = Some(meta);
-            }
-            context.messages = new_messages;
-            let _ = context
-                .session
-                .replace_messages(context.messages.clone())
-                .await;
-            plugin_info!(
-                "session",
-                "[Compress] {log_tag}: emergency tail compression removed {removed} messages"
-            );
-            // post_tokens 按兜底后的内容水位返回（迟滞比较的读取侧口径）
-            let post_tokens: usize = context
-                .messages
-                .iter()
-                .map(compression::estimate_message_tokens)
-                .sum();
-            return Ok(Some(post_tokens));
-        }
-        // 兜底也无需截断（保留区无法以 user 轮边界开头）——回滚放弃
+        // 历史一条不动（此时 `context.messages` 尚未被替换为压缩请求，赋值只为把
+        // "失败即原样"这条不变式写在代码里，而非依赖上面的时序）
         context.messages = original_messages;
-        return Err(CompressionFailure::NoPayoff);
+        return Err(CompressionFailure::InputOverLimit {
+            pending: pending_tokens + overhead_tokens,
+            limit: effective_limit,
+        });
     }
 
     // 压缩请求的**全部内容**：待压缩历史（正常对话形态）+ 末尾压缩指令。
@@ -395,6 +389,18 @@ async fn compress_snapshot_inner(
     meta["prompt_fingerprint"] =
         serde_json::json!(super::super::compression::compression_prompt_fingerprint());
 
+    // 被压掉的那一段（`original_messages` 的前缀）与快照的**槽位序号**。
+    // 槽位号 = 保留区首条 seq − 1 ⇒ 新列表天然单调，`assign_seq` 只补缺号，
+    // 保留区任何一条消息的 seq 都不会被改写（"压缩不改变既有序号"）。
+    let compressed = {
+        let cut = original_messages
+            .len()
+            .saturating_sub(keep_messages.len())
+            .min(original_messages.len());
+        &original_messages[..cut]
+    };
+    let snapshot_seq = compression::snapshot_slot_seq(compressed, &keep_messages);
+
     let snapshot_message = ChatMessage {
         id: root_id.to_string(),
         // 快照作为压缩后的首条消息，必须是 user 角色（多数 provider 要求对话以 user 开头）
@@ -404,9 +410,20 @@ async fn compress_snapshot_inner(
             "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_display}"
         ))),
         status: Some(MessageStatus::Completed),
+        // 顺序锚点：接替被压缩内容的槽位（**不是**新号，否则历史记忆会被排到末尾）
+        seq: snapshot_seq,
         meta: Some(meta),
         ..Default::default()
     };
+
+    let kept_ids: std::collections::HashSet<&str> =
+        keep_messages.iter().map(|m| m.id.as_str()).collect();
+    let dropped: Vec<String> = original_messages
+        .iter()
+        .filter(|m| !kept_ids.contains(m.id.as_str()))
+        .map(|m| m.id.clone())
+        .collect();
+    let head = snapshot_message.clone();
 
     let mut new_messages = vec![snapshot_message];
     new_messages.extend(keep_messages);
@@ -416,18 +433,46 @@ async fn compress_snapshot_inner(
         .session
         .replace_messages(context.messages.clone())
         .await;
+    // 整表重写 → 广播（否则前端转写停在压缩前：被压掉的消息不消失、快照不出现）
+    emit_transcript_rewrite(orchestrator, context, &dropped, &head).await;
 
     Ok(Some(post_tokens))
+}
+
+/// 整表重写后的**消费者收敛**：逐条 `deleted`（已消失的消息）+ `created`（新首条）。
+///
+/// ## 为什么必须有这一步
+///
+/// 压缩走的是 store 层的 `replace_messages`（`vdfs_provider` 的三条 VDFS 写路由
+/// 在 `replace_messages` 之后都要发变更，压缩这条路径原先漏了）。VDFS 变更流是
+/// 前端转写的**唯一**入口，漏发即前端永久停留在压缩前的列表上：
+/// 被压掉的历史仍在、快照不出现、被改号的消息仍持旧序号——而**没有任何机制会纠正**，
+/// 因为两条链路互不校验（与 `plugin.rs` 消息级变更那三条路由同一个道理）。
+///
+/// 只发 VDFS 变更、不发前端帧：消息通道已归 VDFS 一处（见 `docs/node-state-streaming.md`），
+/// 与 [`super::super::plugin::SessionPlugin::emit_message_updated`] 同款。
+async fn emit_transcript_rewrite(
+    orchestrator: &ChatOrchestrator,
+    context: &SessionContext,
+    dropped: &[String],
+    head: &ChatMessage,
+) {
+    let Some(emitter) = &orchestrator.compression else {
+        // 无发射器 = 无前端场景（单测 / 无订阅者）：压缩照常完成，只是不广播。
+        return;
+    };
+    emitter
+        .emit_rewrite(context.session.session_id(), dropped, head)
+        .await;
 }
 
 /// 压缩内核的**包装层**：只负责「正在压缩」这个会话阶段的置位与清位。
 ///
 /// ## 为什么清位必须收在这一层
 ///
-/// 内核有**六个**出口（成功 / LLM 失败回滚 / 快照校验失败 / 输入超限紧急兜底 /
-/// 兜底亦无收益 / 用户中止），漏掉任何一个，会话就会在回到空闲后仍挂着
-/// "正在压缩上下文"——而且没有任何机制会纠正它（`is_working` 已经归位，
-/// 后续也不会再有压缩相关的变更）。
+/// 内核有**四个**出口（成功 / 输入超限 / LLM 失败（含用户中止）/ 快照校验失败），
+/// 漏掉任何一个，会话就会在回到空闲后仍挂着"正在压缩上下文"——而且没有任何机制
+/// 会纠正它（`is_working` 已经归位，后续也不会再有压缩相关的变更）。
 ///
 /// 置位/清位散落到每个 `return` 前的写法，每加一个出口就要记得补一次，
 /// 正是最容易静默失效的一类结构；收成包装层之后，新增出口自动被覆盖。
@@ -537,7 +582,7 @@ pub(crate) async fn run_context_compact(
     let compression_request = compression::build_compression_request(&history, hints);
 
     // 压缩流水线与被动自动压缩共用同一核心（transcript 转存 → LLM 压缩请求 →
-    // 快照校验/纠正重试/降级兜底 → meta 构造 → 保留区拼接落库）；失败已在核心内
+    // 快照校验/纠正重试 → meta 构造 → 保留区拼接落库）；失败已在核心内
     // 就地回滚，这里只把它翻译为工具结果的 (compressed, before, after) 三元组。
     let post_tokens = compress_with_snapshot_core(
         orchestrator,
@@ -560,6 +605,121 @@ pub(crate) async fn run_context_compact(
         // error），这里只如实反映工具无收益。失败不再冒泡为整轮失败。
         Err(_) => (false, before_tokens, before_tokens),
     }
+}
+
+/// 用户对**失败的压缩节点**发起重试（`ResumeAction::RetryCompaction` 的执行体）。
+///
+/// ## 为什么"重试"是这套失败语义的必要一环
+///
+/// 压缩失败**不改动历史**（失败路径的硬不变式），因此用户看到失败原因之后唯一
+/// 能做的事就是"再试一次"——`input_over_limit` 尤其如此：换一个上下文更大的模型，
+/// 同一次压缩就能成功。没有这个入口，失败节点就只是一个死胡同。
+///
+/// ## 与自动路径的两点差异
+///
+/// 1. **绕过熔断**（`force = true`）：熔断约束的是"每轮自动白等一次注定失败的
+///    请求"，用户点重试是他的明确意愿，不该被冷却挡住；
+/// 2. **删除旧失败节点**：删除-重建（与 `resume.rs` 的其它恢复动作同款）——
+///    重试成功不留旧失败痕迹，重试失败则留下一条新的失败节点。
+///
+/// ## 删除帧走哪条通道
+///
+/// 与工具恢复删除旧子节点同源：发 `StreamEvent::Delete`，由消费循环转译成 VDFS
+/// `deleted` 变更（见 `orchestrator/consume.rs`）。**不能**只删存储——那样前端
+/// 转写会永久留着那个已被删掉的失败节点，且没有任何机制会纠正它。
+pub(crate) async fn retry_compaction(
+    orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn InvokeRequest>,
+    channel: &mut PluginChannel,
+    abort_flag: &Arc<AtomicBool>,
+    session: &Arc<dyn ChatSession>,
+    target_id: &str,
+) -> Result<(), PluginError> {
+    let mut messages = session.get_messages().await?;
+    // 只接受**压缩节点**：重试入口长在压缩失败节点上，目标错位说明前端与存储已经
+    // 不一致——此时按 NotFound 拒绝，比"顺着 target_id 猜一个节点"安全。
+    let found = messages
+        .iter()
+        .any(|m| m.id == target_id && m.msg_type == Some(MessageType::Compression));
+    if !found {
+        return Err(PluginError::NotFound(format!(
+            "未找到压缩节点: {target_id}"
+        )));
+    }
+
+    // 删除旧失败节点必须针对**原始列表**（`get_messages`）：失败节点在
+    // `get_context_messages` 的过滤里本就看不见（它会滤掉 Failed 消息），
+    // 拿过滤视图去删会「删了个空气」，节点反而留在存储里。
+    messages.retain(|m| m.id != target_id);
+    session.replace_messages(messages).await?;
+    let _ = channel
+        .tx
+        .send(PluginFrame::Data(serde_json::json!(
+            session_chat_response::StreamEvent::Delete {
+                message_id: target_id.to_string()
+            }
+        )))
+        .await;
+
+    // 压缩本身则必须跑在与**自动路径完全同一份视图**上：`get_context_messages`
+    // 会做三层清理（滤 Failed / 剔孤儿 / content 归一）并施加轮次窗口，
+    // 用 `get_messages` 的原始列表会让切分点与首次失败时不同，重试的结论
+    // 与首次失败对不上（"换个视图再试一次"不是重试）。
+    let mut context = SessionContext {
+        messages: session.get_context_messages(None).await.unwrap_or_default(),
+        session: session.clone(),
+    };
+    // 请求级固定开销与自动路径同源（压缩提示词 + 工具定义）：口径不一致会让
+    // "是否超限"的预判比自动路径乐观，重试的结论就与首次失败对不上。
+    let overhead_tokens =
+        compression::estimate_request_overhead(&compression::get_compression_prompt(), ctx).await;
+    let outcome = auto_compress_process(
+        orchestrator,
+        &mut context,
+        channel,
+        ctx,
+        abort_flag,
+        overhead_tokens,
+        // force = true：跳过阈值判定并绕过熔断（用户主动重试）
+        true,
+    )
+    .await;
+
+    match &outcome {
+        Ok(Some(_)) => {
+            if let Some(em) = &orchestrator.compression {
+                em.state.compression_record_success().await;
+            }
+        }
+        Ok(None) => {
+            // 无切分点 / 无收益：内核根本没被调用，于是不会产出任何节点。旧节点已经
+            // 删掉了，若就这么返回，用户点"重试"的结果是"节点消失了，什么都没发生"。
+            // 补一条 Completed 说明，让这次点击有交代。
+            if let Some(em) = &orchestrator.compression {
+                let node_id = short_id();
+                em.begin(&node_id).await;
+                let node = em
+                    .finish(
+                        &node_id,
+                        MessageStatus::Completed,
+                        "未触发压缩（当前历史无需压缩）",
+                        None,
+                    )
+                    .await;
+                if let Err(err) = context.session.append_messages(vec![node]).await {
+                    plugin_warn!("session", "[Compress] 重试节点落库失败: {err}");
+                }
+            }
+        }
+        Err(f) => {
+            if let Some(em) = &orchestrator.compression {
+                em.state.compression_record_failure().await;
+            }
+            // 失败节点已由内核落库并广播（含 `meta.failure_kind` + 原因），这里只记日志
+            plugin_warn!("session", "[Compress] 用户重试仍失败: {f}");
+        }
+    }
+    Ok(())
 }
 
 /// 压缩前把完整历史转存为 JSON transcript（best-effort）。

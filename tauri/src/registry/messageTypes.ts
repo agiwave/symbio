@@ -237,14 +237,30 @@ export function canSupplyToolArgs(f: MessageFacets): boolean {
 }
 
 /**
+ * 压缩失败能否**就地重试**（resume action=`retry_compaction`）。
+ *
+ * 压缩失败**不改动历史**（后端失败路径的硬不变式：三种失败出口都在消息里明示
+ * "已保留完整历史"），因此用户看到原因后唯一能做的就是再试一次——`input_over_limit`
+ * 尤其如此：换一个上下文更大的模型后，同一次压缩就能成功。所以**只要失败就给入口**，
+ * 不按 `failure_kind` 分档（分档会让"换模型后重试"这条唯一出路消失）。
+ *
+ * 与 Turn 级重试的区别：Turn 失败删的是响应子树（对话内容），压缩失败删的是
+ * **压缩节点本身**（系统动作），两者不能共用 `retry_turn`。
+ */
+export function canRetryCompaction(f: MessageFacets): boolean {
+  return f.type === MESSAGE_TYPE_COMPRESSION && isFailedStatus(f.status)
+}
+
+/**
  * 失败重试的分派结果（resume 的 `action` + `targetId`）。
  *
- * 只有两个粒度，**粒度由节点类型决定**：
- * - `retry`      —— 只重跑**这一个工具**（删除该工具的失败结果 → 原参数重新执行）；
- * - `retry_turn` —— 重跑**整轮**（删除响应子树 → 重新走 LLM 请求）。
+ * 三个粒度，**粒度由节点类型决定**：
+ * - `retry`            —— 只重跑**这一个工具**（删除该工具的失败结果 → 原参数重新执行）；
+ * - `retry_turn`       —— 重跑**整轮**（删除响应子树 → 重新走 LLM 请求）；
+ * - `retry_compaction` —— 重跑**这一次压缩**（删除失败压缩节点 → 重新压缩）。
  */
 export interface MessageRetryTarget {
-  action: 'retry' | 'retry_turn'
+  action: 'retry' | 'retry_turn' | 'retry_compaction'
   targetId: string
 }
 
@@ -255,11 +271,19 @@ export interface MessageRetryTarget {
  * 抽成纯函数后可直接单测「哪种节点发哪种 action」，也避免「叶子节点要回溯到父 Turn」
  * 这条后端约束被漏掉——后端 `process_retry_turn` 要求 `target_id` 指向 Failed **Turn**，
  * 因此 Text / Reasoning 叶子失败时必须回溯到父 Turn，否则恢复会被拒绝。
+ *
+ * 压缩节点是**根级**节点（无 `parent_id`），若落到"回溯到父 Turn"的兜底分支，
+ * `target_id` 会是它自己而类型是 `Compression` —— 后端会以 NotFound 拒绝。
+ * 因此它必须在工具分支之前单独分派。
  */
 export function messageRetryTargetOf(
   node: Pick<ChatMessage, 'id' | 'type' | 'status' | 'parent_id'>,
 ): MessageRetryTarget {
   const type = messageTypeOf(node)
+  // 压缩失败 → 压缩粒度（删压缩节点重跑，不动历史）
+  if (type === MESSAGE_TYPE_COMPRESSION && isFailedStatus(messageStatusOf(node))) {
+    return { action: 'retry_compaction', targetId: node.id }
+  }
   // 工具调用失败 → 单工具粒度（不动整轮）
   if (type === MESSAGE_TYPE_TOOL_CALL && isFailedStatus(messageStatusOf(node))) {
     return { action: 'retry', targetId: node.id }

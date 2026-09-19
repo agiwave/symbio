@@ -369,6 +369,45 @@ describe('MessageNode：分派器路由与内容形态', () => {
     expect(w.find('.node-tag').text()).toContain('压缩中')
   })
 
+  /**
+   * 压缩**失败**是另一形态：错误条 + 重试入口。
+   *
+   * 回归动机：后端失败路径**一条历史都没动**（三种失败出口的正文都明示"已保留
+   * 完整历史"），失败原因就写在节点正文里。若沿用成功态的弱化样式（`.compress-note`，
+   * opacity 0.75），等于把一个需要用户决策的状态伪装成一行灰字，而且没有重试入口——
+   * 用户唯一的出路（换更大上下文的模型后重试）就断了。
+   */
+  it('压缩失败 → 错误条 + 重试入口，且不再用弱化样式', async () => {
+    const w = mountNode(
+      msg({
+        id: 'cp1',
+        type: 'compression',
+        status: 'failed',
+        content: '压缩未完成（模型请求失败：429 Too Many Requests），已保留完整历史',
+        meta: { failure_kind: 'llm_error' },
+      }),
+    )
+    // 失败原因原样呈现（后端给出的可读文本，前端不加工）
+    expect(w.find('.error-box').exists()).toBe(true)
+    expect(w.find('.error-box').text()).toContain('429 Too Many Requests')
+    // 弱化样式不得出现——失败与成功必须一眼可分
+    expect(w.find('.compress-note').exists()).toBe(false)
+    // 重试入口存在，且发射的是**压缩节点自己的 id**（供 resume retry_compaction）
+    const retry = w.find('.error-box button.retry')
+    expect(retry.exists()).toBe(true)
+    await retry.trigger('click')
+    expect(w.emitted('retry')?.[0]).toEqual(['cp1'])
+  })
+
+  it('压缩进行中 / 已完成 → 仍是弱化的系统动作样式，无错误条无重试', () => {
+    for (const status of ['streaming', 'completed'] as const) {
+      const w = mountNode(msg({ id: 'cp1', type: 'compression', status, content: '压缩上下文' }))
+      expect(w.find('.compress-note').exists()).toBe(true)
+      expect(w.find('.error-box').exists()).toBe(false)
+      expect(w.find('button.retry').exists()).toBe(false)
+    }
+  })
+
   it('用户消息走右对齐气泡，头部是「你」', () => {
     const w = mountNode(msg({ id: 'u1', role: 'user', type: 'text', content: '你好' }))
     expect(w.find('.user-bubble').exists()).toBe(true)

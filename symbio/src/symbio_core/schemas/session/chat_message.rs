@@ -323,44 +323,100 @@ pub fn max_seq(messages: &[ChatMessage]) -> i64 {
     messages.iter().filter_map(|m| m.seq).max().unwrap_or(0)
 }
 
-/// 按切片顺序为消息补发 / **纠正** `seq`，返回分配后的新水位。
+/// 按切片顺序为消息补发 `seq`（只补缺号），返回分配后的新水位。
 ///
-/// # 不变式：`seq` 必须沿数组单调不减
+/// # 两条不变式（顺序与稳定，缺一不可）
 ///
-/// 调用方（`replace_messages`）的契约是「**数组顺序即权威顺序**」。因此 `seq`
-/// 一旦与数组顺序不一致，它就是**错的顺序**，而不是"值得保留的历史值"。
+/// 1. **顺序**：`seq` 沿数组严格递增——调用方（`replace_messages`）的契约是
+///    「数组顺序即权威顺序」，`ordered()` 靠 `seq` 复现它；
+/// 2. **稳定**：**已带 `seq` 的消息一律原样保留**，绝不因为一次整表重写而改号。
 ///
-/// 典型反例（L2 压缩）：新列表是 `[快照, 保留区…]`——快照是新建的（无 seq，
-/// 拿到 `base+1`，成了**最大**），而保留区沿用旧的**低**序号。于是 `ordered()`
-/// 会把快照排到最后：压缩后的历史记忆跑到整段转写末尾，前端表现为消息顺序错乱
-/// （用户消息插进了"更早"的历史里）。这也是"保留原值"这条旧规则的字面后果。
+/// 第 2 条不是可有可无的洁癖：`seq` 是**消费者（前端）手里的顺序锚点**。
+/// 前端在流式阶段就按本地游标给消息排好了序，整表重写若把既有消息改成新号，
+/// 两边就各持一套互不相容的序号——同一条消息在「有后端序号」与「有本地序号」
+/// 两种形态下会排到列表的两个位置，压缩后顺序看起来就乱了。
 ///
-/// 因此已带 `seq` 的消息也要检查：一旦它不大于已分配的水位（即会破坏单调性），
-/// 就按数组顺序重新发号。
+/// # 填号方向：无号项从**相邻的既有序号**向外让位
 ///
-/// # 语义（Lamport 计数器）
+/// `base` 只在**新列表完全没有既有序号**时才用得上（整批新节点的场景，
+/// 接在旧水位之后即可）。只要列表里已经有序号，无号项就按它在数组中的位置
+/// 分三段处理——**每一段都朝"不越过既有序号"的方向让位**：
 ///
-/// - 起点是 `base`（通常是当前会话已有的最大 seq），新值严格 `base+1, base+2, …`；
-/// - **正常路径不会触发任何重排**：数组顺序本就等于 seq 顺序时，既有序号原样保留
-///   （由 `assign_seq_leaves_already_ordered_seqs_untouched` 锁定）——
-///   本函数只在顺序**已经错了**的时候才改写既有序号；
-/// - 由于起点取自"已有最大值"，跨调用、跨进程重启都不会回退或撞号。
+/// | 位置 | 取值 | 理由 |
+/// |---|---|---|
+/// | 开头（压缩快照接替被压掉的历史） | `首号 − k … 首号 − 1`（**往下**） | 往上找会越过首号，快照反而排到保留区**之后** |
+/// | 末尾（本轮在途追加） | `末号 + 1 …`（往上） | 与既有历史接续，不抢前面的号 |
+/// | 夹缝（两个既有序号之间） | `前驱 + 1 …`（往上） | 间隙足够时不会撞上后驱 |
 ///
-/// `base = max_seq(existing)` 需在调用前算好：本批次内已带 seq 的消息不参与递增，
-/// 但它们的 seq 可能大于 base，因此返回"实际达到的最大 seq"作为新水位。
+/// **为什么开头那一段必须整体往下、且一次算好**：逐个"往上找空位"会先占用
+/// 首号本身，把既有序号顶成下一个号——正是"seq 随压缩改变"的直接来源。
+/// 由 `首号` 是最小序号可知 `首号 − k … 首号 − 1` 全部落在既有序号**之外**，
+/// 因此这一段天然不可能撞号，也不需要逐个探测。
+///
+/// 旧实现从 `base` 起向上无条件填号，于是 L2 压缩这种「前缀重写」必然被改号：
+/// 新列表是 `[快照, 保留区…]`，快照无 seq 拿到 `base+1`（成了**最大**），
+/// 保留区沿用旧**低**序号却因 `existing > cursor` 不成立而被逐个改号——
+/// 实测会话 `mtmae8j2wxam4dhrei` 的保留区因此从 `631..642` 被抬到 `870..881`。
+/// 顺序虽然被"修"对了，代价却是整段历史的序号全部重排。
+///
+/// 真正的修法也在调用方：压缩时给快照显式指定**被压缩内容的槽位序号**
+/// （`keep[0].seq - 1`，见 `chat_loop::compress`），使新列表**本来就单调**。
+/// 于是本函数退化为"只填缺号"，既有序号一个不动——顺序与稳定同时成立。
+///
+/// 兜底：夹缝容不下无号项时（`前驱` 与 `后驱` 之间没有空号），按"前驱 + 1"会
+/// 越过 `后驱`，破坏数组顺序。此时**顺序不变式优先**——整表按数组顺序重排
+/// （与旧实现同口径）。该输入在真实路径上不可达（快照在开头、在途追加在末尾），
+/// 但"静默破坏顺序"比"多一次改号"更糟，故显式兜底而不是放任。
 pub fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
+    // 全列表无号（整批新节点）：接在调用方水位之后——`base` 的唯一用途
+    let Some(first) = messages.iter().filter_map(|m| m.seq).min() else {
+        let mut cursor = base;
+        for m in messages.iter_mut() {
+            cursor += 1;
+            m.seq = Some(cursor);
+        }
+        return cursor;
+    };
+
+    // ① 开头连续的无号项：整体落在 `首号` 之前（`首号` 是最小号 ⇒ 必不撞号）
+    let head = messages.iter().take_while(|m| m.seq.is_none()).count();
+    let mut cursor = first - head as i64;
+    for m in messages.iter_mut().take(head) {
+        m.seq = Some(cursor);
+        cursor += 1;
+    }
+
+    // ② 其余无号项：从「前驱 + 1」往上找空位。前驱初始取 `base`，但列表首项
+    //    要么是刚填好的开头段、要么是既有序号，第一轮就会把水位拉到它上面。
+    let mut taken: std::collections::HashSet<i64> = messages.iter().filter_map(|m| m.seq).collect();
     let mut cursor = base;
     for m in messages.iter_mut() {
         match m.seq {
-            // 已带序号且仍大于水位：沿用，并把水位抬到它（正常路径走的都是这支）
-            Some(existing) if existing > cursor => cursor = existing,
-            // 缺号，**或**已带但已破坏单调性：按数组顺序重新发号
-            _ => {
-                cursor += 1;
-                m.seq = Some(cursor);
+            // 既有序号：原样保留（**绝不改号**），并作为新的前驱水位
+            Some(existing) => cursor = existing,
+            None => {
+                let mut candidate = cursor + 1;
+                while taken.contains(&candidate) {
+                    candidate += 1;
+                }
+                m.seq = Some(candidate);
+                taken.insert(candidate);
+                cursor = candidate;
             }
         }
     }
+
+    // ③ 夹缝容不下时的兜底：顺序不变式优先于稳定不变式（数组顺序是权威）
+    if messages.windows(2).any(|w| w[0].seq >= w[1].seq) {
+        let start = first - head as i64;
+        let mut cursor = start - 1;
+        for m in messages.iter_mut() {
+            cursor += 1;
+            m.seq = Some(cursor);
+        }
+        return cursor;
+    }
+
     cursor
 }
 
@@ -372,9 +428,14 @@ pub fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
 /// - `Approve` / `Reject`：confirm 审批的批准/拒绝
 /// - `Supply`：工具执行失败后补充参数重试（合并 args）
 /// - `Answer`：ask_user 提问的答案回填
+/// - `RetryCompaction`：压缩失败重试（删除 Failed 压缩节点，重新执行一次压缩）
 ///
 /// 恢复语义：删除旧消息 → 重新执行 → 生成新的响应子节点。
 /// 对于工具调用场景，ToolCall 父节点 id 保持不变（稳定锚点），仅状态更新。
+///
+/// 线格式为 `snake_case`（见 `#[serde(rename_all)]`），与前端
+/// `composables/useChatConnection.ts::ResumePayload.action` 的字面量逐字相等——
+/// 这条跨栈契约由 `resume_action_wire_words_are_snake_case` 钉住。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ResumeAction {
@@ -390,6 +451,13 @@ pub enum ResumeAction {
     Supply,
     /// 提问回答：删除 user_prompt 子节点，生成答案结果子节点
     Answer,
+    /// 压缩失败重试：删除 Failed 压缩节点，重新执行一次上下文压缩。
+    ///
+    /// `target_id` 指向**压缩节点**（`msg_type = Compression`、`status = Failed`）。
+    /// 语义上属"删除-重建"，与其余恢复动作同款；但**不改动历史**——压缩失败
+    /// 本身从不丢消息（见 `CompressionFailure` 的说明），重试只是再试一次
+    /// LLM 摘要，成功后由快照接替被压缩的那段。
+    RetryCompaction,
 }
 
 /// 会话恢复请求（与 `session_chat::Request.message` 互斥；存在时走 resume 分支）。
@@ -450,12 +518,39 @@ mod tests {
         assert_ne!(MessageStatus::Completed.as_str(), "active");
     }
 
-    /// `assign_seq` 必须让 `seq` 沿数组**单调不减**——数组顺序即权威顺序。
+    /// `ResumeAction` 的**线格式词**是跨栈契约：前端 `ResumePayload.action` 的
+    /// 字面量必须与它逐字相等。
     ///
-    /// 反例（L2 压缩）：新列表是 `[快照(新建、无 seq), 保留区(沿用旧低序号)]`。
-    /// 「已带 seq 的一律保持原值」会让快照拿到 `base+1`（**最大**），而保留区仍是
-    /// 更小的旧序号 ⇒ `ordered()` 把快照排到**最后**：压缩后的历史记忆跑到整段
-    /// 转写末尾，前端表现为消息顺序错乱（用户消息插进了"更早"的历史里）。
+    /// 与 `message_status_word_matches_serde` 同一动机——两侧分叉时编译期与运行期
+    /// 都不报错，只会在运行期表现为「点了重试没反应」（后端 serde 反序列化失败）。
+    /// 因此把全部取值都钉住，而不只是本次新增的那个。
+    #[test]
+    fn resume_action_wire_words_are_snake_case() {
+        let cases = [
+            (ResumeAction::RetryTurn, "retry_turn"),
+            (ResumeAction::Retry, "retry"),
+            (ResumeAction::Approve, "approve"),
+            (ResumeAction::Reject, "reject"),
+            (ResumeAction::Supply, "supply"),
+            (ResumeAction::Answer, "answer"),
+            (ResumeAction::RetryCompaction, "retry_compaction"),
+        ];
+        for (action, word) in cases {
+            assert_eq!(
+                serde_json::to_value(&action).unwrap().as_str(),
+                Some(word),
+                "线格式词与前端字面量分叉：{action:?}"
+            );
+            // 反向：前端发来的字符串必须能解回同一个取值
+            let back: ResumeAction = serde_json::from_value(serde_json::json!(word)).unwrap();
+            assert_eq!(format!("{back:?}"), format!("{action:?}"));
+        }
+    }
+
+    /// 顺序不变式优先：列表顺序已经错了（`existing <= cursor`）时，按数组顺序改号。
+    ///
+    /// 数组顺序是权威（`replace_messages` 的契约），所以这一支仍然保留；但注意它
+    /// **只在顺序确实错了时**才触发——正常路径（顺序本就正确）走的是"只补缺号"。
     #[test]
     fn assign_seq_keeps_array_order_authoritative() {
         let mut msgs = vec![
@@ -475,14 +570,14 @@ mod tests {
                 ..Default::default()
             },
         ];
-        // base = 100：压缩前会话已有的水位
+        // base = 100：压缩前会话已有的水位（本列表已有序号，故不参与填号起点）
         assign_seq(&mut msgs, 100);
-        assert_eq!(msgs[0].seq, Some(101), "快照是数组首元素，必须先于保留区");
         assert!(
             msgs[0].seq.unwrap() < msgs[1].seq.unwrap(),
             "seq 必须沿数组递增，否则 ordered() 会重排数组顺序"
         );
         assert!(msgs[1].seq.unwrap() < msgs[2].seq.unwrap());
+        assert_eq!(msgs[1].seq, Some(95), "顺序本就正确的序号不得被改写");
     }
 
     /// 正常路径**不得**触发重排：数组顺序本就等于 seq 顺序时，既有序号原样保留。
@@ -511,5 +606,141 @@ mod tests {
         assert_eq!(msgs[0].seq, Some(5), "已有序的历史不得被改写");
         assert_eq!(msgs[1].seq, Some(6));
         assert_eq!(msgs[2].seq, Some(7), "缺号者续接水位");
+    }
+
+    /// **压缩契约**：`base` 高于既有序号时，既有序号依然一个都不许动。
+    ///
+    /// 这正是实测会话 `mtmae8j2wxam4dhrei` 的病态：`replace_messages` 传
+    /// `base = max_seq(旧列表)`（868），而新列表是 `[快照(槽位 630), 保留区(631..642)]`。
+    /// 旧实现从 868 起步，把保留区整段抬到 870..881；正确行为是原样保留。
+    #[test]
+    fn assign_seq_never_rewrites_existing_seqs_even_when_base_is_higher() {
+        let mut msgs = vec![
+            ChatMessage {
+                id: "snapshot".into(),
+                // 快照接替被压缩内容的槽位：keep[0].seq - 1
+                seq: Some(630),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "keep1".into(),
+                seq: Some(631),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "keep2".into(),
+                seq: Some(632),
+                ..Default::default()
+            },
+        ];
+        assign_seq(&mut msgs, 868);
+        assert_eq!(msgs[0].seq, Some(630), "快照的槽位序号必须原样保留");
+        assert_eq!(
+            msgs[1].seq,
+            Some(631),
+            "保留区序号必须原样保留（压缩不改号）"
+        );
+        assert_eq!(msgs[2].seq, Some(632));
+    }
+
+    /// 全新列表（无任何既有序号）才使用 `base`：整批新节点接在旧水位之后。
+    #[test]
+    fn assign_seq_uses_base_only_for_fresh_lists() {
+        let mut msgs = vec![
+            ChatMessage {
+                id: "n1".into(),
+                seq: None,
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "n2".into(),
+                seq: None,
+                ..Default::default()
+            },
+        ];
+        assign_seq(&mut msgs, 868);
+        assert_eq!(msgs[0].seq, Some(869));
+        assert_eq!(msgs[1].seq, Some(870));
+    }
+
+    /// 开头段有**多个**无号项时，整段落在首号之前且沿数组递增。
+    ///
+    /// 逐个"往上找空位"会先占用首号本身、把既有序号顶成下一个号；正确做法是
+    /// 整段一次算好（`首号 − k … 首号 − 1`）。
+    #[test]
+    fn assign_seq_places_leading_run_below_first_existing() {
+        let mut msgs = vec![
+            ChatMessage {
+                id: "s1".into(),
+                seq: None,
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "s2".into(),
+                seq: None,
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "keep".into(),
+                seq: Some(95),
+                ..Default::default()
+            },
+        ];
+        assign_seq(&mut msgs, 100);
+        assert_eq!(msgs[0].seq, Some(93));
+        assert_eq!(msgs[1].seq, Some(94));
+        assert_eq!(msgs[2].seq, Some(95), "既有序号不得被开头段顶走");
+    }
+
+    /// 末尾段接在末号之后——本轮在途追加的常规路径。
+    #[test]
+    fn assign_seq_places_trailing_run_after_last_existing() {
+        let mut msgs = vec![
+            ChatMessage {
+                id: "a".into(),
+                seq: Some(5),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "inflight".into(),
+                seq: None,
+                ..Default::default()
+            },
+        ];
+        // base 高于既有序号（= 旧列表水位）：末尾段仍须接在**末号**之后，不得跳到 base
+        assign_seq(&mut msgs, 868);
+        assert_eq!(msgs[0].seq, Some(5));
+        assert_eq!(msgs[1].seq, Some(6));
+    }
+
+    /// 夹缝容不下时**顺序不变式优先**：整表按数组顺序重排（显式兜底，不静默破坏顺序）。
+    ///
+    /// 该输入在真实路径上不可达（快照在开头、在途追加在末尾），但这条断言把
+    /// "宁可多改一次号，也不留下顺序倒挂"这个取舍钉住。
+    #[test]
+    fn assign_seq_falls_back_to_array_order_when_gap_is_full() {
+        let mut msgs = vec![
+            ChatMessage {
+                id: "a".into(),
+                seq: Some(5),
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "mid".into(),
+                seq: None,
+                ..Default::default()
+            },
+            ChatMessage {
+                id: "b".into(),
+                seq: Some(6),
+                ..Default::default()
+            },
+        ];
+        assign_seq(&mut msgs, 0);
+        assert!(
+            msgs.windows(2).all(|w| w[0].seq < w[1].seq),
+            "数组顺序是权威：兜底后必须严格递增，实得 {:?}",
+            msgs.iter().map(|m| m.seq).collect::<Vec<_>>()
+        );
     }
 }

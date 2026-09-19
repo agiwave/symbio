@@ -2,6 +2,7 @@
 //!
 //! 由 `chat_loop::run_chat_loop` 在 turn 循环前调用，处理用户的恢复操作：
 //! - `RetryTurn`：LLM 失败重试（删除 Failed Turn 及其所有子孙节点，重新走 LLM 请求）
+//! - `RetryCompaction`：压缩失败重试（删除 Failed 压缩节点，重新执行一次压缩）
 //! - `Retry` / `Approve` / `Reject` / `Supply` / `Answer`：工具调用恢复
 //!   （删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点）
 //!
@@ -9,7 +10,11 @@
 //!
 //! 所有非普通消息场景都遵循"删除旧消息 → 重新执行 → 生成新消息"的统一模式：
 //! - **RetryTurn**：删除 Failed Turn 及其所有子孙节点 → chat_loop 从 session 重新加载 → LLM 请求
+//! - **RetryCompaction**：删除 Failed 压缩节点 → 重新压缩 → 新压缩节点落库
 //! - **工具调用恢复**：删除旧子节点 → 重新执行工具 → 创建新结果子节点
+//!
+//! **删除-重建不适用于历史本身**：压缩失败从不丢消息（见 `CompressionFailure`），
+//! 重试只是"再试一次 LLM 摘要"，历史一条不动。
 //!
 //! ## 工具调用恢复核心流程
 //!
@@ -55,6 +60,7 @@ pub enum ResumeOutcome {
 ///
 /// 由 `run_chat_loop` 在 turn 循环前调用。根据 `req.action` 分发：
 /// - `RetryTurn`：LLM 失败重试，调用 `process_retry_turn`
+/// - `RetryCompaction`：压缩失败重试，调用 `chat_loop::compress::retry_compaction`
 /// - 其他：工具调用恢复，调用 `process_tool_resume_action`
 ///
 /// `ctx` 应已由 agent chat handler 设置好 `CAPABILITY_VISITOR`。
@@ -68,10 +74,24 @@ pub async fn process_resume(
     session: &Arc<dyn ChatSession>,
     req: ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
-    if matches!(req.action, ResumeAction::RetryTurn) {
-        process_retry_turn(session, channel, &req).await
-    } else {
-        process_tool_resume_action(orchestrator, ctx, channel, abort_flag, session, req).await
+    match req.action {
+        ResumeAction::RetryTurn => process_retry_turn(session, channel, &req).await,
+        // 压缩失败重试：执行体在压缩流水线所在模块（那里才有 `SessionContext`
+        // 与切分/内核的私有面）。完成后一律 `Done`——压缩不是对话轮次，没有
+        // "续写"可言；与其它 resume 出口一样，失败节点（若有）留下等下次 resume。
+        ResumeAction::RetryCompaction => {
+            super::chat_loop::compress::retry_compaction(
+                orchestrator,
+                ctx,
+                channel,
+                abort_flag,
+                session,
+                &req.target_id,
+            )
+            .await?;
+            Ok(ResumeOutcome::Done)
+        }
+        _ => process_tool_resume_action(orchestrator, ctx, channel, abort_flag, session, req).await,
     }
 }
 
@@ -229,6 +249,9 @@ async fn process_tool_resume_action(
 
     let (final_result_text, final_success, new_tc_args) = match req.action {
         ResumeAction::RetryTurn => unreachable!("RetryTurn 已在顶层分发，此处不可达"),
+        ResumeAction::RetryCompaction => {
+            unreachable!("RetryCompaction 已在顶层分发，此处不可达")
+        }
         ResumeAction::Reject => {
             let msg = format!("用户拒绝执行: {}", req.reason.unwrap_or_default());
             (msg, false, None)

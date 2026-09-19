@@ -588,3 +588,117 @@ describe('sessions store — 历史水合是合并，不是整表替换', () => 
     expect(a1.status).toBe('completed')
   })
 })
+
+/**
+ * 转写对账：**终态补丁丢失后的自愈**。
+ *
+ * 消息状态只经 `kind = "vdfs"` 一条通道下发，而这条通道**不重放**
+ * （订阅表为空时 `ChangeSubscriptions::notify` 直接返回，而 watch 登记是
+ * fire-and-forget 的异步动作；消费循环也会在 `is_working` 翻转时丢掉手上那一帧）。
+ * 丢一次终态，前端就永久停在「运行中」——它只做增量收敛，从不整表重拉。
+ *
+ * 判据**不是启发式**：节点补丁恒先于会话状态下发（正常收尾「清在途 → 复位
+ * `is_working` → `emit_session_state`」，中止收尾「`converge_inflight` 广播节点终态
+ * → `emit_session_state(aborted)`」），因此**会话报"不忙"时服务端不可能还有节点
+ * 停在非终态**。据此回读收敛，而不是就地猜成 `completed`（猜错就是把"半截"
+ * 谎报成"正常结束"并抹掉重试入口）。
+ */
+describe('sessions store — 终态丢失后的转写对账', () => {
+  const SID = 's1'
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    captured.scopes.length = 0
+    captured.handlers.length = 0
+    stopSessionNodeSync()
+    vdfsApi.readVdfs.mockReset()
+    vdfsApi.statVdfs.mockReset()
+    startSessionNodeSync(useSessionsStore())
+  })
+
+  it('会话转空闲但本地仍有 streaming 节点 → 回读权威终态收敛', async () => {
+    const store = useSessionsStore()
+    store.putMessage(SID, {
+      id: 'tc1',
+      type: 'tool_call',
+      status: 'streaming',
+      content: '{}',
+    } as never)
+    // 服务端权威：这一条其实被定稿成 aborted（用户中止）。
+    // 就地猜 completed 会把"半截"谎报成"正常结束"，并抹掉重试入口。
+    vdfsApi.readVdfs.mockResolvedValue({
+      text: JSON.stringify({
+        messages: [{ id: 'tc1', type: 'tool_call', seq: 1, status: 'aborted', content: '{}' }],
+      }),
+    })
+
+    emit({
+      path: `@vfs/session/${SID}`,
+      change: 'updated',
+      node: sessionNode({ name: SID, status: 'active' }),
+    })
+    await flushPromises()
+
+    expect(vdfsApi.readVdfs, '必须回读权威状态，而不是就地猜').toHaveBeenCalled()
+    const [tc1] = store.getSessionMessages(SID)
+    expect(tc1.status).toBe('aborted')
+    expect(tc1.seq, 'seq 以快照为准，不沿用本地游标').toBe(1)
+  })
+
+  it('会话转空闲且本地没有非终态节点 → 一次回读都不发（正常路径零成本）', async () => {
+    const store = useSessionsStore()
+    store.putMessage(SID, {
+      id: 'a1',
+      type: 'text',
+      status: 'completed',
+      content: '好了',
+    } as never)
+
+    emit({
+      path: `@vfs/session/${SID}`,
+      change: 'updated',
+      node: sessionNode({ name: SID, status: 'active' }),
+    })
+    await flushPromises()
+
+    expect(vdfsApi.readVdfs).not.toHaveBeenCalled()
+  })
+
+  it('会话仍在运行时不触发对账（在途节点是合法的，不得被当成陈旧副本）', async () => {
+    const store = useSessionsStore()
+    store.putMessage(SID, {
+      id: 'tc1',
+      type: 'tool_call',
+      status: 'streaming',
+    } as never)
+
+    emit({
+      path: `@vfs/session/${SID}`,
+      change: 'updated',
+      node: sessionNode({ name: SID, status: 'working' }),
+    })
+    await flushPromises()
+
+    expect(vdfsApi.readVdfs).not.toHaveBeenCalled()
+    expect(store.getSessionMessages(SID)[0].status).toBe('streaming')
+  })
+
+  it('回读失败 → 保持现状（陈旧副本好过清空转写）', async () => {
+    const store = useSessionsStore()
+    store.putMessage(SID, {
+      id: 'tc1',
+      type: 'tool_call',
+      status: 'streaming',
+    } as never)
+    vdfsApi.readVdfs.mockRejectedValue(new Error('IPC 断了'))
+
+    emit({
+      path: `@vfs/session/${SID}`,
+      change: 'updated',
+      node: sessionNode({ name: SID, status: 'active' }),
+    })
+    await flushPromises()
+
+    expect(store.getSessionMessages(SID).map((m) => m.id)).toEqual(['tc1'])
+  })
+})

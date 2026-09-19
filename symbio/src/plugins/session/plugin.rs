@@ -163,6 +163,40 @@ impl SessionPlugin {
         ));
     }
 
+    /// **整表重写**后的收敛广播：逐条 `deleted`（已消失的消息）+ `created`（新的首条）。
+    ///
+    /// 用于 L2 语义压缩——它经 store 层的 `replace_messages` 整体重写列表，被重写掉
+    /// 的消息在存储里**不复存在**。若不广播，前端转写缓存会永久停留在压缩前
+    /// （消息仍在、快照不出现），且没有任何机制会纠正它。
+    ///
+    /// 语义上是「前缀被替换」而非「从这里到末尾没了」，因此**不能**用 `truncated`
+    /// （那是尾部截断的专用词，落在某条消息上表示"它及其之后全没了"）。
+    /// 逐条 `deleted` 的条数与压缩掉的历史线性相关，但受上下文窗口上界约束
+    /// （一次压缩最多压掉一个窗口的历史），且每条载荷只有一个地址——可接受。
+    pub(crate) fn emit_transcript_rewritten(
+        &self,
+        session_id: &str,
+        dropped: &[String],
+        head: &cm::ChatMessage,
+    ) {
+        for mid in dropped {
+            self.change_subs.notify(&vdfs::VdfsChange::new(
+                message_path(session_id, mid),
+                vdfs::VDFS_CHANGE_DELETED,
+            ));
+        }
+        // 首条（快照）是新节点：`created` 带节点视图 + 内容快照，
+        // 消费者零回读即可把它插到正确位置（其 `seq` 是接替来的槽位号）。
+        self.change_subs.notify(&message_payload(
+            vdfs::VdfsChange::new(
+                message_path(session_id, &head.id),
+                vdfs::VDFS_CHANGE_CREATED,
+            ),
+            session_id,
+            head,
+        ));
+    }
+
     /// 广播一条消息补丁到前端，并**同步发射**对应的 VDFS 变更。
     ///
     /// ## 为什么是一个函数而不是两处调用

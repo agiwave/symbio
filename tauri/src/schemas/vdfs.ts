@@ -56,6 +56,16 @@ export const VDFS_STATUS_WAITING_USER_ACTION = 'waiting_user_action'
  * 是「终态」，二者曾被后端映射成同一个字符串，导致消费端必须把 `active`
  * **猜回** `completed`（一次信息丢失 + 一次猜测还原）。现在状态原样透传。 */
 export const VDFS_STATUS_COMPLETED = 'completed'
+/** 节点状态：**用户主动终止**（消息的终态，根级 Turn 用）。
+ *
+ * 与 `VDFS_STATUS_COMPLETED` / `VDFS_STATUS_FAILED` 并列的**第三个终态**：
+ * 没有跑完（不是 `completed`），也没有出错（不是 `failed`）。它的语义是
+ * **可重试**——前端的重试入口正是挂在这个终态上。
+ *
+ * 后端 `MessageStatus::as_str()` 早已产出这个词；前端漏在状态词表里，
+ * 导致消费端把整条变更的状态**静默丢弃**（见 `vdfsTranscriptSync::messageStatusOf`），
+ * 中止后重试入口不出现。故这里补齐，并让该映射的未知分支改为**显式告警**。 */
+export const VDFS_STATUS_ABORTED = 'aborted'
 
 /** 「运行中」的唯一判据：节点 `status == working`。
  *
