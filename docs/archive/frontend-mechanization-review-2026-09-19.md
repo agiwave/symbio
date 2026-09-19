@@ -361,46 +361,53 @@ lint 和覆盖率该有。以上没有一项是「推倒重来」，全是收敛
 | 12 | ESLint | ✅ | 只做 `no-restricted-imports` 分层 + `vue/no-mutating-props`；修掉 `VdfsActions` 函数与 prop 同名 |
 | 13 | 组件清理 | 部分 | `.node-act` 双份 → 全局 `controls.css`；`provide/inject('resume')` → 类型化 `RESUME_KEY`；`typeClass/statusClass` 判定为不值得抽 |
 
-### 11 的处理：不写文档例外，改成**机械校验的镜像**
+### 11 的最终处理：**两个段名已从前端代码中踢掉**（运行期发现）
 
-`VDFS_SESSION_DIR='session'` / `VDFS_SEG_MESSAGES='消息'` 仍在 `schemas/vdfs.ts`。
-查证后端后的准确结论（**已更正本文件早期版本的一处事实错误**）：
+结论先说：`VDFS_SESSION_DIR` 与 `VDFS_SEG_MESSAGES` **已不存在于前端任何生产代码**。
+地址方案是运行期数据（`services/vdfsScheme.ts`），按数据认出来，不是常量。
 
-- 挂载段名定义在后端 `symbio/src/symbio_core/ids.rs:40`（`PLUGIN_SESSION = "session"`）；
+查证后端后的准确事实（**已更正本文件早期版本的两处错误**）：
+
+- 挂载段名在后端 `symbio/src/symbio_core/ids.rs:40`（`PLUGIN_SESSION = "session"`）；
   转写段名在 `symbio/src/plugins/session/plugin/nodes.rs:288`（`SEG_MESSAGES = "消息"`）。
-  两侧**各只有一个定义点**，前端是它们的镜像。
 - 早期版本称「消息目录节点的 kind 与 name 同名」——**错误**。`VdfsNode::dir(name,
   title, access)`（`vdfs_provider.rs:516`）的第二个参数是 **title**，kind 恒为
-  `VDFS_KIND_DIR`。消息目录是 `name="消息"` / `title="消息"` / `kind="dir"`，
-  与 `子会话` / `工作目录` 无法按 kind 区分。
-- kind 是**场景可自定义**的（会话叶子就是 `n.kind = PLUGIN_SESSION`，`nodes.rs:136`），
-  所以给消息目录一个稳定的 ASCII kind 有现成先例，代价是后端一行 + 协议新增一个词。
-- 会话叶子只挂 `message_count` / `metadata` / `meta_tags` / `outcome` / `error`，
-  **不下发转写地址**。
+  `VDFS_KIND_DIR`。正确的是 name 与 title 同名，消息目录因此与 `子会话` / `工作目录`
+  无法按 kind 区分。
+- 早期版本称「前端无法单方面消除」——**也不成立**。两个段名都能按数据认出来。
 
-为什么**没有**改成运行期发现：地址构造函数目前是**同步纯函数**，`sessionRouteOf`
-更是事件分派的关键路径。改成「先列目录、拿到段名再拼地址」会引入一个今天不存在的
-失效模式（引导未完成时事件被静默丢弃），换来的是少两个字符串常量——不划算。
+**怎么认出来的**（都需要后端配合一处，一共三行）：
 
-因此改为**把「两边必须同源」从散文变成可执行检查**：新增
-`scripts/protocol-mirror-audit.mjs`，校验四组跨栈常量（挂载段、转写段、
-`VDFS_EXT_SESSION`、`VDFS_EXT_MESSAGE`）后端与前端**逐字相等**，任一侧改值/删除
-即以退出码 1 失败；已接入 `gate.mjs` 的 docs 阶段，并附 6 条回归测试
-（含「真仓库当前状态一致」防误报）。
+1. **挂载段**——本来就能认，无需改后端。composite 的 `dir_node()`
+   （`plugins/composite/vdfs.rs:185`）把 `p.root_new_types()` 挂到了挂载点节点上，
+   会话 provider 声明的是 `VdfsNewType::new(VDFS_EXT_SESSION, "会话")`；
+   前端 `VdfsNode` 已有 `new_types` 字段 ⇒ 列 `.vdfs` 根，找 `new_types` 含
+   `ext === 'session'` 的子节点。左栏本来就是 `listVdfs` 动态枚举的
+   （`useVdfs.ts:144`），所以此前 `VDFS_SESSION_DIR` 是**唯一**写死的挂载名。
+2. **转写段**——需要后端给一个稳定标识。kind 是**场景可自定义**的（会话叶子就是
+   `n.kind = PLUGIN_SESSION`，`nodes.rs:136`），故新增
+   `VDFS_KIND_MESSAGES = "messages"`（`vdfs_provider.rs`）并在 `internal_dirs()` 里
+   给转写目录打上（`nodes.rs`）。段名仍是展示名 `消息`，但**标识**交给 kind——
+   段名随文案调整时，消费者按 kind 照样认得出。
 
-按「例外要踢出代码、不要写进文档」的原则，§8 **未添加任何例外条款**。若后续要做
-真正的消除，起点是后端给消息目录一个稳定的 ASCII kind（先例如上），前端改为
-按 `kind` 发现——那时应同时删掉本守卫的 X-002 组。
+**代价（写清楚，它不免费）**：解析要列目录，因此存在一段**引导窗口**——应用刚起来、
+还没拿到会话清单时转写段尚未解析，此间到达的转写变更无法路由（会被跳过）。
+此前写死常量时不存在这个窗口。缓解：`MainLayout` 启动即触发解析，`refreshList`
+拿到会话后补一次，新建会话后再补一次；而引导窗口内没有任何会话被展示。
+另外挂载目录只依赖根清单（零会话也能解析），所以列清单 / 读 / 删 / 改 metadata
+这类只碰会话叶子的操作**不受引导窗口影响**——这也是把它与转写段分开缓存的理由。
 
-#### X-001 的真实可行性（补记）
+**守卫同步改造**（`scripts/protocol-mirror-audit.mjs`）：
 
-会话挂载点**今天就可发现**、无需改后端：composite 的 `dir_node()`
-（`plugins/composite/vdfs.rs:185`）把 `p.root_new_types()` 挂到了挂载点节点上，
-会话 provider 声明的是 `VdfsNewType::new(VDFS_EXT_SESSION, "会话")`。
-前端 VdfsNode 已有 `new_types` 字段 ⇒ 列 `.vdfs` 根、找 `new_types` 含
-`ext === 'session'` 的子节点，其 `name` 即挂载段。左栏本来就是 `listVdfs`
-动态枚举的（`useVdfs.ts:144`），所以 `VDFS_SESSION_DIR` 是**唯一的例外**。
-未做的理由同上：收益是少一个常量，代价是给地址构造加一条引导链。
+- A 组镜像从四组降为三组：段名镜像消失（前端不再持有），新增
+  `VDFS_KIND_MESSAGES` 的跨栈校验；`VDFS_EXT_SESSION` / `VDFS_EXT_MESSAGE` 保留。
+- 新增 **B 组缺席检查**：`VDFS_SESSION_DIR` / `VDFS_SEG_MESSAGES` 不得再出现在
+  前端生产代码里（扫描 85 个文件，排除 `__tests__`——测试持有协议夹具是它的职责）。
+  这是防回归：写死常量一旦悄悄回来，门禁立刻红。
+- 回归测试 9 条，含「写回前端生产代码 ⇒ 红」「写进 __tests__ ⇒ 不红」。
+- 后端侧：`internal_dirs()` 的断言里钉住 `kind == VDFS_KIND_MESSAGES`。
+
+按「例外要踢出代码、不要写进文档」的原则，§8 **未添加任何例外条款**。
 
 ### 更正本文件上一节的判断
 

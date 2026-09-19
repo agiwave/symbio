@@ -63,6 +63,7 @@
 
 import { subscribe as busSubscribe, type BusEvent } from './eventBus'
 import { readVdfs, statVdfs } from './vdfs'
+import { vdfsSessionScheme } from './vdfsScheme'
 import {
   VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_CREATED,
@@ -323,7 +324,10 @@ export function startTranscriptSync(sink: TranscriptSink): void {
 
     // **按地址分派**（唯一入口，纯函数）。会话叶子归 store 自己的作用域，
     // 这里只认转写；其余地址返回 null，直接跳过。
-    const route = sessionRouteOf(change.path)
+    //
+    // 方案未解析完（启动引导窗口）时 `sessionRouteOf` 一律返回 null —— 此时
+    // 也没有任何会话被展示，跳过是安全的；解析完成后自然开始收敛。
+    const route = sessionRouteOf(vdfsSessionScheme(), change.path)
     if (!route) return
 
     if (route.target === 'messages') {

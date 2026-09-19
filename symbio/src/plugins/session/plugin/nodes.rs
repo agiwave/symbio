@@ -439,8 +439,12 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
 /// `list` 与 `stat` 因此共用同一份形状）；它是个**文件**，与三个目录并列——
 /// 记忆本来就是会话的一部分，不该另开一条寻址。
 pub(crate) fn internal_dirs(has_workdir: bool, memory: vdfs::VdfsNode) -> Vec<vdfs::VdfsNode> {
+    // 转写列表：段名 / 标题都是展示名，**标识**由 `kind` 承担（稳定 ASCII 协议词）
+    // ——消费者按 `kind` 发现它，不必把展示名写进自己的地址模板。
+    let mut messages_dir = vdfs::VdfsNode::dir(SEG_MESSAGES, SEG_MESSAGES, vdfs::VdfsAccess::LIST);
+    messages_dir.kind = vdfs::VDFS_KIND_MESSAGES.to_string();
     let mut out = vec![
-        vdfs::VdfsNode::dir(SEG_MESSAGES, SEG_MESSAGES, vdfs::VdfsAccess::LIST),
+        messages_dir,
         vdfs::VdfsNode::dir(
             super::super::workdir::SEG_SUB_SESSIONS,
             super::super::workdir::SEG_SUB_SESSIONS,

@@ -86,6 +86,14 @@ pub const VDFS_KIND_DIR: &str = "dir";
 /// 节点基础类型：文件
 pub const VDFS_KIND_FILE: &str = "file";
 
+/// 场景类型：会话的**转写列表**（`.vdfs/session/<id>/<段>`）。
+///
+/// `kind` 是场景可自定义的（会话叶子自己就声明 `kind = "session"`），
+/// 这里给转写列表一个**稳定的 ASCII 语义类型**：它的 `name` / `title` 是
+/// 面向用户的展示名（可能随语言或文案调整），不能被消费者当成标识来认；
+/// 而 `kind` 是**协议词**——消费者按它发现「哪个子目录是转写」，不必硬编码段名。
+pub const VDFS_KIND_MESSAGES: &str = "messages";
+
 // ==================== 呈现扩展名（约定，宿主可自行扩展） ====================
 //
 // 节点 `ext` 是宿主选择详情呈现方式的键。VDFS 只透传、不解释；

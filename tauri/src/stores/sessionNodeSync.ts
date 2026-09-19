@@ -27,14 +27,12 @@
  */
 
 import { subscribeVdfsChanged } from '@/services/eventBus'
+import { ensureSessionMountDir } from '@/services/vdfsScheme'
 import {
   VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_DELETED,
   VDFS_CHANGE_UPDATED,
-  VDFS_ROOT,
-  VDFS_SESSION_DIR,
   vdfsBase,
-  vdfsJoin,
   type VdfsChange,
 } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
@@ -68,14 +66,25 @@ function scheduleListRefresh(sink: SessionNodeSink): void {
  *
  * 与 `startTranscriptSync` 同构：同一个进程只需要一条，重复启动只会打日志。
  */
-export function startSessionNodeSync(sink: SessionNodeSink): void {
+export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void> {
   if (_unsubscribe) {
     logger.warn('[session-node-sync]', 'already started')
     return
   }
 
+  // 挂载目录是运行期数据（按「可新建 ext=session 的挂载点」认出来），不是常量
+  let mountDir: string
+  try {
+    mountDir = await ensureSessionMountDir()
+  } catch (err) {
+    // 解析不到就不订阅：宁可没有订阅，也不要订到一个拼错的 prefix 上
+    // （那样侧栏会静默不更新，比报错难查）
+    logger.error('[session-node-sync]', '会话挂载目录解析失败，订阅未启动', err)
+    return
+  }
+
   _unsubscribe = subscribeVdfsChanged(
-    { prefix: vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR), directChildren: true },
+    { prefix: mountDir, directChildren: true },
     (change) => {
       // 追加型变更只发生在转写列表项上（由 vdfsTranscriptSync 就地应用 delta），
       // 与会话清单无关——绝不能让流式的每一帧触发一次重拉。

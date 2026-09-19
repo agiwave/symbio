@@ -46,7 +46,6 @@ import {
   VDFS_CHANGE_CREATED,
   VDFS_CHANGE_DELETED,
   VDFS_ROOT,
-  VDFS_SESSION_DIR,
   VDFS_STATUS_FAILED,
   VDFS_STATUS_WORKING,
   chimeKindOfOutcome,
@@ -54,13 +53,13 @@ import {
   isWorkingStatus,
   sessionRuntimeOf,
   vdfsBase,
-  vdfsJoin,
   vdfsSessionAddr,
   type VdfsChange,
   type VdfsNode,
 } from '@/schemas/vdfs'
 import { setLastWorkdir, getLastWorkdir, callPlugin } from '@/services/plugin'
 import { publishVdfsChangedLocal } from '@/services/eventBus'
+import { ensureSessionMountDir, ensureVdfsSessionScheme } from '@/services/vdfsScheme'
 import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
@@ -427,6 +426,14 @@ export const useSessionsStore = defineStore('sessions', () => {
     error.value = null
     try {
       const items = await listSessions()
+      // 清单到手 ⇒ 若有会话，转写段现在推导得出来。补一次解析，关掉「引导窗口」
+      // （方案未就绪时转写变更无法路由）。失败不打断清单刷新——零会话时会失败，
+      // 那正是预期；等新建会话时再补。
+      if (items.length > 0) {
+        void ensureVdfsSessionScheme().catch((e: unknown) =>
+          logger.warn('[sessions]', '转写段解析失败', e),
+        )
+      }
       // 同步 lastUsedWorkdir 与标题缓存（后端 vdfs/list 的 title 已按 display_title
       // 下发：metadata.title 优先，否则从会话内容自动生成——前端不再自行拉消息推导）
       for (const it of items) {
@@ -485,7 +492,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     // 1. 后端生成 id：写会话挂载根 = 「新建一个会话，名字由 provider 定」
     const resp = await writeVdfs(
-      vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR),
+      await ensureSessionMountDir(),
       JSON.stringify({ metadata: meta }),
       { create: true }
     )
@@ -518,7 +525,16 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
     // 后端 created 事件（`vdfs/write` 落库后广播）随后到达，各订阅方幂等收敛
-    publishVdfsChangedLocal({ path: vdfsSessionAddr(id), change: VDFS_CHANGE_CREATED })
+    publishVdfsChangedLocal({
+      path: vdfsSessionAddr(await ensureSessionMountDir(), id),
+      change: VDFS_CHANGE_CREATED,
+    })
+
+    // 新建完就有了会话 ⇒ 转写段现在推导得出来了。补一次解析，把「引导窗口」
+    // （方案未就绪时转写变更无法路由）在第一次发言之前关掉。
+    void ensureVdfsSessionScheme().catch((e: unknown) =>
+      logger.warn('[sessions]', '转写段解析失败（将在下次清单刷新时重试）', e),
+    )
 
     return id
   }
@@ -577,7 +593,10 @@ export const useSessionsStore = defineStore('sessions', () => {
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
     // 后端 deleted 事件随后到达，各订阅方幂等收敛
-    publishVdfsChangedLocal({ path: vdfsSessionAddr(id), change: VDFS_CHANGE_DELETED })
+    publishVdfsChangedLocal({
+      path: vdfsSessionAddr(await ensureSessionMountDir(), id),
+      change: VDFS_CHANGE_DELETED,
+    })
   }
 
   /**

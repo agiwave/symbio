@@ -60,6 +60,13 @@ vi.mock('@/services/plugin', () => ({
 vi.mock('@/utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() },
 }))
+// 地址方案是运行期数据（列目录认出来）。被测模块在事件回调里**同步**读它，
+// 因此注入 getter 而不是 async 解析——这正好也覆盖了「方案已就绪」的正常路径。
+vi.mock('@/services/vdfsScheme', () => ({
+  vdfsSessionScheme: vi.fn(() => SCHEME),
+  ensureSessionMountDir: vi.fn(async () => SCHEME.mountDir),
+  ensureVdfsSessionScheme: vi.fn(async () => SCHEME),
+}))
 
 import { useSessionsStore } from '@/stores/sessions'
 import {
@@ -85,10 +92,17 @@ import {
 
 const SID = 'abc'
 
+/**
+ * 协议夹具：地址方案是运行期数据（列目录认出来），单测不去列目录，直接注入。
+ */
+const { SCHEME } = vi.hoisted(() => ({
+  SCHEME: { mountDir: '.vdfs/session', messagesSeg: '消息' },
+}))
+
 /** 一条消息节点（后端 `message_node` 的形状：正文在内容里，结构在 attributes） */
 function node(partial: Partial<VdfsNode> & { name: string }): VdfsNode {
   return {
-    path: vdfsMessageAddr(SID, partial.name),
+    path: vdfsMessageAddr(SCHEME, SID, partial.name),
     title: '助手',
     kind: 'file',
     status: 'streaming',
@@ -129,9 +143,9 @@ beforeEach(() => {
 
 describe('sessionRouteOf（地址 → 本域目标：按地址分派，不按事件类型）', () => {
   it('会话叶子 / 转写列表 / 单条消息三级可解', () => {
-    expect(sessionRouteOf(vdfsSessionAddr(SID))).toEqual({ target: 'session', sessionId: SID })
-    expect(sessionRouteOf(vdfsMessagesAddr(SID))).toEqual({ target: 'messages', sessionId: SID })
-    expect(sessionRouteOf(vdfsMessageAddr(SID, 'm1'))).toEqual({
+    expect(sessionRouteOf(SCHEME, vdfsSessionAddr(SCHEME.mountDir, SID))).toEqual({ target: 'session', sessionId: SID })
+    expect(sessionRouteOf(SCHEME, vdfsMessagesAddr(SCHEME, SID))).toEqual({ target: 'messages', sessionId: SID })
+    expect(sessionRouteOf(SCHEME, vdfsMessageAddr(SCHEME, SID, 'm1'))).toEqual({
       target: 'message',
       sessionId: SID,
       messageId: 'm1',
@@ -139,11 +153,11 @@ describe('sessionRouteOf（地址 → 本域目标：按地址分派，不按事
   })
 
   it('非会话域路径一律 null（清单 / 子会话 / 工作目录 / 其他资源）', () => {
-    expect(sessionRouteOf('.vdfs/session')).toBeNull()
-    expect(sessionRouteOf('.vdfs/session/abc/子会话/sub')).toBeNull()
-    expect(sessionRouteOf('.vdfs/session/abc/工作目录/a.md')).toBeNull()
-    expect(sessionRouteOf('.vdfs/model/p1')).toBeNull()
-    expect(sessionRouteOf('.vdfs/session/abc/消息/m1/deeper')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '.vdfs/session')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '.vdfs/session/abc/子会话/sub')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '.vdfs/session/abc/工作目录/a.md')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '.vdfs/model/p1')).toBeNull()
+    expect(sessionRouteOf(SCHEME, '.vdfs/session/abc/消息/m1/deeper')).toBeNull()
   })
 })
 
@@ -192,7 +206,7 @@ describe('变更 → store', () => {
   it('created 带载荷：零回读写入整条消息', async () => {
     const store = useSessionsStore()
     emit({
-      path: vdfsMessageAddr(SID, 'm1'),
+      path: vdfsMessageAddr(SCHEME, SID, 'm1'),
       change: VDFS_CHANGE_CREATED,
       node: node({ name: 'm1' }),
       content: '你好',
@@ -209,7 +223,7 @@ describe('变更 → store', () => {
     mocks.statVdfs.mockResolvedValueOnce(node({ name: 'm1' }))
     mocks.readVdfs.mockResolvedValueOnce({ path: '', text: '回读正文', binary: false, size: 12 })
 
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_CREATED })
+    emit({ path: vdfsMessageAddr(SCHEME, SID, 'm1'), change: VDFS_CHANGE_CREATED })
     await drain()
 
     expect(store.getSessionMessages(SID).map((m) => m.content)).toEqual(['回读正文'])
@@ -218,15 +232,15 @@ describe('变更 → store', () => {
   it('appended 就地拼接，零回读（热路径）', async () => {
     const store = useSessionsStore()
     emit({
-      path: vdfsMessageAddr(SID, 'm1'),
+      path: vdfsMessageAddr(SCHEME, SID, 'm1'),
       change: VDFS_CHANGE_CREATED,
       node: node({ name: 'm1' }),
       content: '你好',
     })
     await drain()
 
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_APPENDED, delta: '，世界' })
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_APPENDED, delta: '！' })
+    emit({ path: vdfsMessageAddr(SCHEME, SID, 'm1'), change: VDFS_CHANGE_APPENDED, delta: '，世界' })
+    emit({ path: vdfsMessageAddr(SCHEME, SID, 'm1'), change: VDFS_CHANGE_APPENDED, delta: '！' })
     await drain()
 
     expect(store.getSessionMessages(SID).map((m) => m.content)).toEqual(['你好，世界！'])
@@ -240,9 +254,9 @@ describe('变更 → store', () => {
     mocks.statVdfs.mockResolvedValueOnce(node({ name: 'm1' }))
     mocks.readVdfs.mockReturnValueOnce(inflight.promise)
 
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_CREATED })
+    emit({ path: vdfsMessageAddr(SCHEME, SID, 'm1'), change: VDFS_CHANGE_CREATED })
     // 回读还没回来，增量就到了
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_APPENDED, delta: 'X' })
+    emit({ path: vdfsMessageAddr(SCHEME, SID, 'm1'), change: VDFS_CHANGE_APPENDED, delta: 'X' })
 
     // 旧快照（不含 X）此刻才返回
     inflight.resolve({ path: '', text: 'abc', binary: false, size: 3 })
@@ -257,7 +271,7 @@ describe('变更 → store', () => {
   it('updated 整条替换（状态迁移 / 全量替换）', async () => {
     const store = useSessionsStore()
     emit({
-      path: vdfsMessageAddr(SID, 'm1'),
+      path: vdfsMessageAddr(SCHEME, SID, 'm1'),
       change: VDFS_CHANGE_CREATED,
       node: node({ name: 'm1' }),
       content: '半截',
@@ -265,7 +279,7 @@ describe('变更 → store', () => {
     await drain()
 
     emit({
-      path: vdfsMessageAddr(SID, 'm1'),
+      path: vdfsMessageAddr(SCHEME, SID, 'm1'),
       change: VDFS_CHANGE_UPDATED,
       node: node({ name: 'm1', status: 'failed', error: '上游 429' }),
       content: '半截',
@@ -281,7 +295,7 @@ describe('变更 → store', () => {
     const store = useSessionsStore()
     for (const id of ['m1', 'm2']) {
       emit({
-        path: vdfsMessageAddr(SID, id),
+        path: vdfsMessageAddr(SCHEME, SID, id),
         change: VDFS_CHANGE_CREATED,
         node: node({ name: id, seq: id === 'm1' ? 1 : 2 }),
         content: id,
@@ -293,11 +307,11 @@ describe('变更 → store', () => {
     // 删中间/靠前的节点**不得**连带删掉它之后的节点——工具调用恢复删的是
     // 子树里的旧子节点，后面还有父节点的最终回答。这正是 deleted 与 truncated
     // 必须分开的原因（曾经两者共用 deleted，前端无从分辨）。
-    emit({ path: vdfsMessageAddr(SID, 'm1'), change: VDFS_CHANGE_DELETED })
+    emit({ path: vdfsMessageAddr(SCHEME, SID, 'm1'), change: VDFS_CHANGE_DELETED })
     await drain()
     expect(store.getSessionMessages(SID).map((m) => m.id)).toEqual(['m2'])
 
-    emit({ path: vdfsMessagesAddr(SID), change: VDFS_CHANGE_DELETED })
+    emit({ path: vdfsMessagesAddr(SCHEME, SID), change: VDFS_CHANGE_DELETED })
     await drain()
     expect(store.getSessionMessages(SID)).toHaveLength(0)
   })
@@ -310,7 +324,7 @@ describe('变更 → store', () => {
       ['m3', 3],
     ] as const) {
       emit({
-        path: vdfsMessageAddr(SID, id),
+        path: vdfsMessageAddr(SCHEME, SID, id),
         change: VDFS_CHANGE_CREATED,
         node: node({ name: id, seq }),
         content: id,
@@ -320,7 +334,7 @@ describe('变更 → store', () => {
     expect(store.getSessionMessages(SID)).toHaveLength(3)
 
     // **一条**变更即可收敛整段区间：后端不再逐条通知被删的每一个节点
-    emit({ path: vdfsMessageAddr(SID, 'm2'), change: VDFS_CHANGE_TRUNCATED })
+    emit({ path: vdfsMessageAddr(SCHEME, SID, 'm2'), change: VDFS_CHANGE_TRUNCATED })
     await drain()
 
     expect(
@@ -336,7 +350,7 @@ describe('变更 → store', () => {
       ['m2', 2],
     ] as const) {
       emit({
-        path: vdfsMessageAddr(SID, id),
+        path: vdfsMessageAddr(SCHEME, SID, id),
         change: VDFS_CHANGE_CREATED,
         node: node({ name: id, seq }),
         content: id,
@@ -344,7 +358,7 @@ describe('变更 → store', () => {
     }
     await drain()
 
-    emit({ path: vdfsMessageAddr(SID, '不存在'), change: VDFS_CHANGE_TRUNCATED })
+    emit({ path: vdfsMessageAddr(SCHEME, SID, '不存在'), change: VDFS_CHANGE_TRUNCATED })
     await drain()
 
     expect(store.getSessionMessages(SID).map((m) => m.id)).toEqual(['m1', 'm2'])
@@ -364,7 +378,7 @@ describe('变更 → store', () => {
   it('会话级状态由权威消息派生（等待审批角标 / 活动文字）', async () => {
     const store = useSessionsStore()
     emit({
-      path: vdfsMessageAddr(SID, 'p1'),
+      path: vdfsMessageAddr(SCHEME, SID, 'p1'),
       change: VDFS_CHANGE_CREATED,
       node: node({ name: 'p1', status: 'waiting_user_action', type: 'user_prompt' }),
       content: '',
@@ -374,7 +388,7 @@ describe('变更 → store', () => {
     expect(store.getSessionStatus(SID).activity).toBe('等待审批…')
 
     emit({
-      path: vdfsMessageAddr(SID, 'p1'),
+      path: vdfsMessageAddr(SCHEME, SID, 'p1'),
       change: VDFS_CHANGE_UPDATED,
       node: node({ name: 'p1', status: 'active', type: 'user_prompt' }),
       content: '',

@@ -89,10 +89,25 @@ const chime = vi.hoisted(() => ({ playCompletionChime: vi.fn() }))
 vi.mock('@/services/completionChime', () => ({
   playCompletionChime: chime.playCompletionChime,
 }))
+// 地址方案：注入夹具，避免真去列目录
+vi.mock('@/services/vdfsScheme', () => ({
+  ensureSessionMountDir: vi.fn(async () => SCHEME.mountDir),
+  ensureVdfsSessionScheme: vi.fn(async () => SCHEME),
+  vdfsSessionScheme: vi.fn(() => SCHEME),
+}))
 
 import { useSessionsStore } from '../sessions'
 import { startSessionNodeSync, stopSessionNodeSync } from '../sessionNodeSync'
-import { VDFS_SESSION_DIR, VDFS_ROOT, vdfsJoin } from '@/schemas/vdfs'
+
+/**
+ * 协议夹具：会话挂载目录与转写段是**运行期数据**（列目录认出来）。
+ * 单测不去列目录，直接注入——断言仍把地址钉成字面量。
+ *
+ * `vi.hoisted`：`vi.mock` 工厂先于 import 执行，直接引用顶层 const 会撞 TDZ。
+ */
+const { SCHEME } = vi.hoisted(() => ({
+  SCHEME: { mountDir: '.vdfs/session', messagesSeg: '消息' },
+}))
 
 /** 投递一条变更（路径就是展示地址） */
 function emit(change: Record<string, unknown>) {
@@ -101,7 +116,7 @@ function emit(change: Record<string, unknown>) {
 
 function sessionNode(over: Record<string, unknown> = {}) {
   return {
-    path: `${VDFS_ROOT}/${VDFS_SESSION_DIR}/s1`,
+    path: `${SCHEME.mountDir}/s1`,
     name: 's1',
     title: '解释一下 VDFS 的地址模型',
     kind: 'session',
@@ -139,7 +154,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     expect(id).toBe('s9')
     expect(vdfsApi.writeVdfs).toHaveBeenCalledTimes(1)
     const [path, body, opts] = vdfsApi.writeVdfs.mock.calls[0] as [string, string, { create: boolean }]
-    expect(path).toBe(vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR))
+    expect(path).toBe(SCHEME.mountDir)
     expect(opts).toEqual({ create: true })
     // 目标名不由前端给：会话名字来自首条消息（display_title），此处只带 metadata
     expect(JSON.parse(body)).toEqual({ metadata: expect.objectContaining({ workdir: 'D:/work' }) })
@@ -157,7 +172,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
   it('订阅恰好建立一次，作用域 = 会话叶子的直接子项', () => {
     expect(captured.handlers).toHaveLength(1)
     expect(captured.scopes[0]).toEqual({
-      prefix: vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR),
+      prefix: SCHEME.mountDir,
       directChildren: true,
     })
   })

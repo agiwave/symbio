@@ -43,7 +43,8 @@ onMounted(async () => {
 
   // 会话清单的 VDFS 订阅同样由外壳接线（store 自己不挂监听器），
   // 于是 HMR / 测试不会叠监听器，订阅的启停也看得见。
-  startSessionNodeSync(useSessionsStore())
+  // 现在是 async：订阅前缀（会话挂载目录）要按数据认出来，不是常量。
+  await startSessionNodeSync(useSessionsStore())
 
   // 提示音的设置来源同样由外壳注入（service 不认识 store）：
   // 传的是**取值函数**而非快照，用户改了开关/音量下一声就生效。

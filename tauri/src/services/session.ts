@@ -29,14 +29,12 @@
  */
 
 import { deleteVdfs, listVdfs, readVdfs, runVdfsAction, writeVdfs } from './vdfs'
+import { ensureSessionMountDir, ensureVdfsSessionScheme } from './vdfsScheme'
 import {
   VDFS_ACTION_CLEAR,
   VDFS_ACTION_TRUNCATE,
   VDFS_EXT_SESSION,
-  VDFS_ROOT,
-  VDFS_SESSION_DIR,
   vdfsExtOf,
-  vdfsJoin,
   vdfsMessageAddr,
   vdfsMessagesAddr,
   vdfsSessionAddr,
@@ -78,7 +76,7 @@ export async function listSessions(
 ): Promise<SessionList.SessionListItem[]> {
   // 不传 limit 时**单参调用**——请求形状必须与从前一致（多一个 undefined
   // 实参也会被 `toHaveBeenCalledWith` 认成「多传了一个参数」）
-  const path = vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR)
+  const path = await ensureSessionMountDir()
   const resp =
     limit === undefined ? await listVdfs(path) : await listVdfs(path, { limit })
   return (resp.items || [])
@@ -111,7 +109,7 @@ export async function listSessions(
  * 报错"比"静默成功"更诚实。
  */
 export async function deleteSession(sessionId: string): Promise<void> {
-  await deleteVdfs(vdfsSessionAddr(sessionId))
+  await deleteVdfs(vdfsSessionAddr(await ensureSessionMountDir(), sessionId))
 }
 
 /**
@@ -125,7 +123,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
  * 调用方不必各自写一遍 `JSON.parse` 的 try/catch。
  */
 export async function readSessionTranscript(sessionId: string): Promise<SessionMessage[]> {
-  const addr = vdfsSessionAddr(sessionId)
+  const addr = vdfsSessionAddr(await ensureSessionMountDir(), sessionId)
   const content = await readVdfs(addr)
   const text = content?.text
   if (!text) throw new Error(`读取会话转写失败：${addr}`)
@@ -163,7 +161,7 @@ export interface DeleteMessageResult {
  * 见后端 `symbio_core::vdfs_provider` 的 `VDFS_ACTION_TRUNCATE` 文档。
  */
 export async function clearMessages(sessionId: string): Promise<void> {
-  await runVdfsAction(vdfsMessagesAddr(sessionId), VDFS_ACTION_CLEAR)
+  await runVdfsAction(vdfsMessagesAddr(await ensureVdfsSessionScheme(), sessionId), VDFS_ACTION_CLEAR)
 }
 
 /**
@@ -180,7 +178,7 @@ export async function deleteMessage(
   messageId: string
 ): Promise<DeleteMessageResult> {
   const res = await runVdfsAction(
-    vdfsMessageAddr(sessionId, messageId),
+    vdfsMessageAddr(await ensureVdfsSessionScheme(), sessionId, messageId),
     VDFS_ACTION_TRUNCATE
   )
   return {
@@ -203,7 +201,10 @@ export async function updateMessage(
   sessionId: string,
   message: SessionMessage
 ): Promise<void> {
-  await writeVdfs(vdfsMessageAddr(sessionId, message.id), JSON.stringify(message))
+  await writeVdfs(
+    vdfsMessageAddr(await ensureVdfsSessionScheme(), sessionId, message.id),
+    JSON.stringify(message)
+  )
 }
 
 /**
@@ -224,7 +225,7 @@ export async function updateSession(
   title?: string
 ): Promise<void> {
   await writeVdfs(
-    vdfsSessionAddr(sessionId),
+    vdfsSessionAddr(await ensureSessionMountDir(), sessionId),
     JSON.stringify({ metadata, ...(title ? { title } : {}) })
   )
 }

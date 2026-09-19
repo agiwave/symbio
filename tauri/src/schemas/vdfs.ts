@@ -397,29 +397,59 @@ export function isVdfsDir(node: { access?: string } | null | undefined): boolean
 //   .vdfs/session/<sid>/消息        转写列表（`l`）—— 会话的**本体**
 //   .vdfs/session/<sid>/消息/<mid>  单条消息（ext = message，`r`）
 //
-// 与后端 `plugins/session/plugin.rs` 的 `SEG_MESSAGES` / `message_path` 同源：
-// **地址的「拼」与「解」必须成对**，两边各只有一份实现，改地址方案时漏改一边
-// 会被两侧的单测挡住。
+// 两个段名都由后端 provider 决定，**不是前端的知识**：
+// - 挂载段 `session`  —— 后端 `symbio_core::ids::PLUGIN_SESSION`，是 provider 注册时
+//   自选的挂载名（与 `model` / `skill` 等同族），前端按「挂载点声明可新建
+//   `ext = session`」把它**认出来**；
+// - 转写段 `消息`     —— 后端 `session::plugin::nodes::SEG_MESSAGES`，是 provider 的
+//   私有段名且**同时是展示名**，前端按 `kind = VDFS_KIND_MESSAGES` 认出来。
+//
+// 因此本文件**不持有这两个段名**：地址方案是运行期数据（`VdfsSessionScheme`），
+// 由 `services/vdfsScheme` 解析后作为参数传入。这里是纯函数，拼与解仍然成对
+// ——只是两边的「同一份实现」变成了「同一份数据」。
 
-/** 转写列表的路径段（后端 `session::SEG_MESSAGES`；同时是展示名） */
-export const VDFS_SEG_MESSAGES = '消息'
+/** 转写列表的场景类型（后端 `VDFS_KIND_MESSAGES`）。
+ *
+ * 稳定 ASCII 协议词：**与展示名解耦**——段名可以随文案调整，
+ * `kind` 才是对外承诺的标识。跨栈一致性由 `scripts/protocol-mirror-audit.mjs`
+ * 的 X-002 组校验。 */
+export const VDFS_KIND_MESSAGES = 'messages'
 
-/** 会话清单的挂载名（`.vdfs/session`） */
-export const VDFS_SESSION_DIR = 'session'
-
-/** 单个会话的地址：`.vdfs/session/<id>`（叶子） */
-export function vdfsSessionAddr(sessionId: string): string {
-  return vdfsJoin(vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR), sessionId)
+/**
+ * 会话地址方案（**运行期数据**）。
+ *
+ * - `mountDir`    挂载目录地址（如 `.vdfs/session`）
+ * - `messagesSeg` 转写列表的段名（展示名，随后端下发）
+ *
+ * 解析见 `services/vdfsScheme.ensureVdfsSessionScheme()`。之所以是值而不是
+ * 常量：`schemas/` 不允许反向依赖 `services/`，而这两项是列目录才能拿到的。
+ */
+export interface VdfsSessionScheme {
+  mountDir: string
+  messagesSeg: string
 }
 
-/** 会话转写列表的地址：`.vdfs/session/<id>/消息` */
-export function vdfsMessagesAddr(sessionId: string): string {
-  return vdfsJoin(vdfsSessionAddr(sessionId), VDFS_SEG_MESSAGES)
+/**
+ * 单个会话的地址：`<挂载目录>/<id>`（叶子）。
+ *
+ * 只用到挂载目录——转写段与本地址无关，因此不要求完整方案。
+ */
+export function vdfsSessionAddr(mountDir: string, sessionId: string): string {
+  return vdfsJoin(mountDir, sessionId)
 }
 
-/** 单条消息的地址：`.vdfs/session/<id>/消息/<mid>` */
-export function vdfsMessageAddr(sessionId: string, messageId: string): string {
-  return vdfsJoin(vdfsMessagesAddr(sessionId), messageId)
+/** 会话转写列表的地址：`<挂载目录>/<id>/<转写段>` */
+export function vdfsMessagesAddr(s: VdfsSessionScheme, sessionId: string): string {
+  return vdfsJoin(vdfsSessionAddr(s.mountDir, sessionId), s.messagesSeg)
+}
+
+/** 单条消息的地址：`<mountDir>/<id>/<转写段>/<mid>` */
+export function vdfsMessageAddr(
+  s: VdfsSessionScheme,
+  sessionId: string,
+  messageId: string,
+): string {
+  return vdfsJoin(vdfsMessagesAddr(s, sessionId), messageId)
 }
 
 /**
@@ -442,16 +472,25 @@ export type SessionRoute =
   /** `.vdfs/session/<sid>/消息/<mid>`：单条消息 */
   | { target: 'message'; sessionId: string; messageId: string }
 
-/** 从一条变更路径解出会话域目标（纯函数，可单测） */
-export function sessionRouteOf(path: string): SessionRoute | null {
-  const prefix = `${VDFS_ROOT}/${VDFS_SESSION_DIR}/`
+/**
+ * 从一条变更路径解出会话域目标（纯函数，可单测）。
+ *
+ * @param s 会话地址方案（运行期解析所得；未解析时传 `null` ⇒ 一律返回 `null`，
+ *   即「还不能路由」——调用方据此跳过，不要自己切字符串）
+ */
+export function sessionRouteOf(
+  s: VdfsSessionScheme | null,
+  path: string,
+): SessionRoute | null {
+  if (!s) return null
+  const prefix = `${s.mountDir}/`
   if (!path.startsWith(prefix)) return null
   const segs = path.slice(prefix.length).split('/')
   const sessionId = segs[0]
   if (!sessionId) return null
-  // 会话叶子：`.vdfs/session/<sid>`
+  // 会话叶子：`<mountDir>/<sid>`
   if (segs.length === 1) return { target: 'session', sessionId }
-  if (segs[1] !== VDFS_SEG_MESSAGES) return null
+  if (segs[1] !== s.messagesSeg) return null
   if (segs.length === 2) return { target: 'messages', sessionId }
   if (segs.length === 3 && segs[2]) return { target: 'message', sessionId, messageId: segs[2] }
   return null

@@ -24,6 +24,16 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+/**
+ * 协议夹具：挂载目录 + 转写段（与后端 provider 的现实取值一致）。
+ *
+ * `vi.hoisted` 是必须的：`vi.mock` 的工厂会被提升到 import 之前执行，
+ * 直接引用模块顶层的 `const` 会撞 TDZ。
+ */
+const { SCHEME } = vi.hoisted(() => ({
+  SCHEME: { mountDir: '.vdfs/session', messagesSeg: '消息' },
+}))
+
 // 服务层依赖 Tauri API 与本地存储，这里只测映射逻辑，故整体替身
 vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn() }))
 vi.mock('@/services/vdfs', () => ({
@@ -31,6 +41,13 @@ vi.mock('@/services/vdfs', () => ({
   deleteVdfs: vi.fn(),
   writeVdfs: vi.fn(),
   runVdfsAction: vi.fn(),
+}))
+// 地址方案是**运行期数据**（列目录认出来）；单测不去列目录，直接注入协议夹具。
+// 夹具本身是断言的一部分：它把「删除/写入落在哪个地址」钉成字面量。
+vi.mock('@/services/vdfsScheme', () => ({
+  ensureSessionMountDir: vi.fn(async () => SCHEME.mountDir),
+  ensureVdfsSessionScheme: vi.fn(async () => SCHEME),
+  vdfsSessionScheme: vi.fn(() => SCHEME),
 }))
 
 import { deleteVdfs, listVdfs, runVdfsAction, writeVdfs } from '@/services/vdfs'
@@ -151,13 +168,13 @@ describe('listSessions（.vdfs/session → SessionListItem）', () => {
 
 describe('deleteSession（会话级删除 → vdfs/delete）', () => {
   it('删除会话走 VDFS 地址，而不是旧 session/clear 路由', async () => {
-    vi.mocked(deleteVdfs).mockResolvedValueOnce({ path: vdfsSessionAddr('abc') })
+    vi.mocked(deleteVdfs).mockResolvedValueOnce({ path: vdfsSessionAddr(SCHEME.mountDir, 'abc') })
 
     await deleteSession('abc')
 
-    expect(vi.mocked(deleteVdfs)).toHaveBeenCalledWith(vdfsSessionAddr('abc'))
+    expect(vi.mocked(deleteVdfs)).toHaveBeenCalledWith(vdfsSessionAddr(SCHEME.mountDir, 'abc'))
     // 地址必须**带会话 id**：少了 id 就是删整个会话挂载根（灾难级）
-    expect(vdfsSessionAddr('abc')).toBe('.vdfs/session/abc')
+    expect(vdfsSessionAddr(SCHEME.mountDir, 'abc')).toBe('.vdfs/session/abc')
   })
 
   it('删除失败向上抛（调用方据此回滚本地清单）', async () => {
@@ -169,7 +186,7 @@ describe('deleteSession（会话级删除 → vdfs/delete）', () => {
 describe('updateSession（会话 metadata → vdfs/write）', () => {
   it('metadata 写入走 VDFS 地址，载荷是 { metadata }', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsSessionAddr('abc'),
+      path: vdfsSessionAddr(SCHEME.mountDir, 'abc'),
       created: false,
     })
 
@@ -177,14 +194,14 @@ describe('updateSession（会话 metadata → vdfs/write）', () => {
 
     // 用 lastCall：mock 的 calls 跨用例累积，取 [0] 会读到上一条用例的调用
     const [addr, body] = vi.mocked(writeVdfs).mock.lastCall!
-    expect(addr).toBe(vdfsSessionAddr('abc'))
+    expect(addr).toBe(vdfsSessionAddr(SCHEME.mountDir, 'abc'))
     // 载荷形状必须与后端 provider 的 `write` 约定一致（它只认 metadata / title）
     expect(JSON.parse(body as string)).toEqual({ metadata: { workdir: '/w' } })
   })
 
   it('title 与 metadata 同时给出时同帧写入（后端浅合并，两者互不覆盖）', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsSessionAddr('abc'),
+      path: vdfsSessionAddr(SCHEME.mountDir, 'abc'),
       created: false,
     })
 
@@ -196,7 +213,7 @@ describe('updateSession（会话 metadata → vdfs/write）', () => {
 
   it('不给 title 时**不带**该键（否则后端会把标题清成空）', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsSessionAddr('abc'),
+      path: vdfsSessionAddr(SCHEME.mountDir, 'abc'),
       created: false,
     })
 
@@ -210,7 +227,7 @@ describe('updateSession（会话 metadata → vdfs/write）', () => {
 describe('updateMessage（改写某条消息 → vdfs/write）', () => {
   it('写**单条消息**地址，载荷是消息 JSON', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsMessageAddr('abc', 'm1'),
+      path: vdfsMessageAddr(SCHEME, 'abc', 'm1'),
       created: false,
     })
 
@@ -218,22 +235,22 @@ describe('updateMessage（改写某条消息 → vdfs/write）', () => {
     await updateMessage('abc', patch)
 
     const [addr, body] = vi.mocked(writeVdfs).mock.lastCall!
-    expect(addr).toBe(vdfsMessageAddr('abc', 'm1'))
+    expect(addr).toBe(vdfsMessageAddr(SCHEME, 'abc', 'm1'))
     // 地址必须**指到那一条**：少一层就落到列表上（后端会拒），再少一层就是
     // 会话 metadata（会静默写错地方——那才是最坏的结果）
-    expect(vdfsMessageAddr('abc', 'm1')).toBe('.vdfs/session/abc/消息/m1')
+    expect(vdfsMessageAddr(SCHEME, 'abc', 'm1')).toBe('.vdfs/session/abc/消息/m1')
     expect(JSON.parse(body as string)).toEqual({ id: 'm1', content: '改过的' })
   })
 
   it('地址取自 message.id —— 载荷与地址必须指同一条', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsMessageAddr('abc', 'm7'),
+      path: vdfsMessageAddr(SCHEME, 'abc', 'm7'),
       created: false,
     })
 
     await updateMessage('abc', { id: 'm7' })
 
-    expect(vi.mocked(writeVdfs).mock.lastCall![0]).toBe(vdfsMessageAddr('abc', 'm7'))
+    expect(vi.mocked(writeVdfs).mock.lastCall![0]).toBe(vdfsMessageAddr(SCHEME, 'abc', 'm7'))
   })
 })
 
@@ -249,10 +266,10 @@ describe('deleteMessage（删该条及其后 → action("truncate")）', () => {
     await deleteMessage('abc', 'm2')
 
     expect(vi.mocked(runVdfsAction)).toHaveBeenCalledWith(
-      vdfsMessageAddr('abc', 'm2'),
+      vdfsMessageAddr(SCHEME, 'abc', 'm2'),
       VDFS_ACTION_TRUNCATE
     )
-    expect(vdfsMessageAddr('abc', 'm2')).toBe('.vdfs/session/abc/消息/m2')
+    expect(vdfsMessageAddr(SCHEME, 'abc', 'm2')).toBe('.vdfs/session/abc/消息/m2')
   })
 
   it('回执原样透传：store 靠它做幂等对齐', async () => {
@@ -301,11 +318,11 @@ describe('clearMessages（清空历史 → action("clear")）', () => {
     await clearMessages('abc')
 
     expect(vi.mocked(runVdfsAction)).toHaveBeenCalledWith(
-      vdfsMessagesAddr('abc'),
+      vdfsMessagesAddr(SCHEME, 'abc'),
       VDFS_ACTION_CLEAR
     )
     // 少一层就清到会话本体（元数据 / 标题一并没了），多一层就不是列表
-    expect(vdfsMessagesAddr('abc')).toBe('.vdfs/session/abc/消息')
+    expect(vdfsMessagesAddr(SCHEME, 'abc')).toBe('.vdfs/session/abc/消息')
   })
 
   it('失败向上抛（调用方据此不做本地清空）', async () => {

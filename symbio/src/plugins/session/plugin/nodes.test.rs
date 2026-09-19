@@ -165,6 +165,13 @@ fn vdfs_internal_dirs_conditional() {
     let without = internal_dirs(false, memory());
     assert_eq!(without.len(), 3);
     assert_eq!(without[0].name, SEG_MESSAGES, "转写列表恒在（会话的本体）");
+    // 段名是展示名，标识由 kind 承担：消费者按 kind 发现转写列表，
+    // 不必把展示名写进自己的地址模板（前端镜像守卫 X-002 校验的就是这个词）
+    assert_eq!(
+        without[0].kind,
+        vdfs::VDFS_KIND_MESSAGES,
+        "转写列表的 kind 是稳定协议词，不随展示名变化"
+    );
     assert_eq!(without[1].name, workdir::SEG_SUB_SESSIONS);
     assert_eq!(
         without[2].name,
