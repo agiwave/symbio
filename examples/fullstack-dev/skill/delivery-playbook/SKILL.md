@@ -3,7 +3,7 @@ name: delivery-playbook
 description: 全栈交付流程手册：从需求澄清到上线的检查清单与红线规则
 ---
 
-# 交付流程手册（oab/v1 skill 桥接示例）
+# 交付流程手册
 
 ## 启动检查清单
 

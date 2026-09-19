@@ -4,13 +4,13 @@
 //!
 //! | 字段 | 闸门 | 位置 | 超限行为 |
 //! |---|---|---|---|
-//! | `item_max_bytes` | Agent 目录内文件写入 | [`BundleStore::write_item`](super::store::BundleStore::write_item) | **拒绝** |
+//! | `item_max_bytes` | Agent 目录内文件写入 | [`AgentDirStore::write_item`](super::store::AgentDirStore::write_item) | **拒绝** |
 //! | `memory_max_bytes` | 智能体自身的 `AGENTS.md` 写入 | [`MemoryFile::write`](crate::symbio_core::MemoryFile::write) | **拒绝** |
 //! | `memory_inject_max_bytes` | 智能体自身的 `AGENTS.md` 注入 | [`MemoryFile::inject`](crate::symbio_core::MemoryFile::inject) | **截断** + 告知地址 |
 //!
 //! 「智能体自身的 `AGENTS.md`」有**两个作用域**：系统态 `{homedir}/AGENTS.md`
 //! （对所有会话生效，用户可在设置页编辑）与子智能体态 `<agentdir>/AGENTS.md`
-//! （随 bundle 分发，选中该智能体时生效）——见 [`super::instruction`] /
+//! （随 agent 目录分发，选中该智能体时生效）——见 [`super::instruction`] /
 //! [`super::memory`]。两者是同一类东西（同一种文件、同一套读写与注入语义），
 //! 只是作用域不同，因此**共用一对闸门**；真要分开配时再拆字段，不预先发明这个区分。
 //!

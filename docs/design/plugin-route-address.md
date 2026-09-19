@@ -122,7 +122,7 @@ HTTP 传输文档里那句「路由是运行时分形分发，各插件内部 `m
 
 `AGENT_CHAT = "agent/chat"` 与 `AGENT_CREATE = "agent/create"` **全仓零调用方**，
 而且描述的路径**根本不存在**——`agent` 插件的 `route` 恒返回 `NotFound`
-（bundle 一律经 VDFS 访问），子智能体派生走的是 `session/chat/send`。
+（agent 目录一律经 VDFS 访问），子智能体派生走的是 `session/chat/send`。
 
 `AGENT_CHAT` 的文档还写着「子智能体会话执行入口（仅 `agent_run` 能力内部调用）」
 ——而没有任何代码那样调用。`chat_pipeline.rs` 的注释里留着线索：

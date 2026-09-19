@@ -372,14 +372,14 @@ source = file 的类型（整包导入）：名称来自文件名
 | **S4 其余迁移** | 用一个通用 `EntityVdfsAdapter` 把既有 `EntityProvider` 接成挂载点（`model` / `skill` / `mcp` 可写、`agent` 只读）；外壳左栏切到 `<根>` 根 | 全部资源在 `<根>` 下可见可管；统一实体页按类型逐个退场 |
 | **S5 下线旧协议** | 移除 `entities/*` 路由与前端实体页（`/entities/*` 仅留保兼容重定向），导航完全由 `<根>` 驱动 | 一个协议、一个页面 |
 | **S6 会话内部重建** | 会话内部结构（子会话 / 工作目录树）改由 VDFS 同名目录承载，原容器实体页可替代 | S5 的阻塞解除 |
-| **S7 容器子实体重建** | 通用适配器按 `container_kinds` 支持 `<id>/<子类别>/<条目>`；agent bundle 内部（提示词 / 技能 / MCP）上 VDFS | 容器页最后一处不可替代能力消失 |
+| **S7 容器子实体重建** | 通用适配器按 `container_kinds` 支持 `<id>/<子类别>/<条目>`；agent 目录内部（提示词 / 技能 / MCP）上 VDFS | 容器页最后一处不可替代能力消失 |
 | **S8 会话清单上 VDFS** | 会话节点自带 `message_count` / `metadata` / `meta_tags`；`listSessions()` 改走 `vdfs/list`，`services/entities.ts` 删除 | 前端 `entities/*` 调用点归零 |
 | **S9 导航可见性** | ~~机制层新增 `VdfsProvider::nav_visible()`~~ **已整体撤销**：物理层从 `plugins/local` 迁入 `plugins/vdfs`，本地文件不再是子目录，左栏自然回到「六类资源」，无需可见性标记（**2026-09-15 复核**：改造三之后 `web`/`local`/`gateway` 必须留在树里，改用机制级隐藏属性 `VdfsNode::hidden` + `root_hidden()`，见下） | 左栏 = 六类资源，无按名硬编码（**结果达成，机制未引入**；后来的隐藏属性是「存在但不列」这一独立问题的机制解） |
 | **S10 节点动作** | 新增 `vdfs/action` 操作 + `VdfsProvider::action()`（默认 `NotImplemented`）；适配器把 `test` 接到 `EntityProvider::test_status`；前端把「测试连接」接回 | S5 后丢失的连通性自检回归 |
 | **S11 下线 `entities/*` 协议** | 6 个插件不再路由 `entities/*`，`entities::dispatch` 与其请求/响应、zip 工具一并删除；网关只读白名单改列 `vdfs/*` 读操作 | 对外只剩 VDFS 一个资源协议 |
-| **S12 整包导入** | `VdfsNewType.source`（`file`）+ `EntityProvider::import_zip` 钩子；适配器的二进制 `write` 承接导入（agent 走 `BundleStore::import`），agent 补上 `delete_item` | S5/S11 后丢失的 zip 导入回归，且**不新增协议操作** |
-| **S12 清理** | 注册表去掉 `prefix` / `provider_name` / `compact_list` / `status_indicator` 与 `EntityCapabilities`（改由 `supports_import` 表达）；删协议时代的请求/响应与 `get_item`；`agent/bundle/*` 只留 `bundle/export` | 历史冗余与被替换代码清空 |
-| **S13 整包导出** | `VDFS_ACTION_EXPORT` 节点动作 + `EntityProvider::export_zip` 钩子（默认 `zip_dir`、agent 走 `BundleStore::export`）；结果按「文件载荷」（`filename` + `b64`）回传；`agent/bundle/*` 整个下线 | 导入/导出在 VDFS 内闭环；`agent` 插件零自有路由 |
+| **S12 整包导入** | `VdfsNewType.source`（`file`）+ `EntityProvider::import_zip` 钩子；适配器的二进制 `write` 承接导入（agent 走 `AgentDirStore::import`），agent 补上 `delete_item` | S5/S11 后丢失的 zip 导入回归，且**不新增协议操作** |
+| **S12 清理** | 注册表去掉 `prefix` / `provider_name` / `compact_list` / `status_indicator` 与 `EntityCapabilities`（改由 `supports_import` 表达）；删协议时代的请求/响应与 `get_item`；`agent` 的旧协议路由（已被 VDFS 取代）只保留导出 | 历史冗余与被替换代码清空 |
+| **S13 整包导出** | `VDFS_ACTION_EXPORT` 节点动作 + `EntityProvider::export_zip` 钩子（默认 `zip_dir`、agent 走 `AgentDirStore::export`）；结果按「文件载荷」（`filename` + `b64`）回传；`agent` 的旧协议路由整体下线 | 导入/导出在 VDFS 内闭环；`agent` 插件零自有路由 |
 | **S16 收敛终局（废除实体机制）** | 删 `EntityProvider` trait / `provider_registry()` / `EntityVdfsAdapter`；`model` / `skill` / `agent` 各补一份 `impl VdfsProvider`（与已有的 `session` / `setting` / `mcp` 同构）；`entities.rs` 降为存储原语自由函数 | 后端只剩 VDFS 一套机制；**前端零改动**——挂载名与节点形状不变 |
 | **S17 收敛存储层** | 删 `providers/storage_service` 与 `symbio_core` 的 `EntityStore` / `StorageService` / 存储原语，改为 `providers/vdfs_service` 的三个 `VdfsProvider` 集中实现（单文件 / 目录 / 内存）；`schemas/entities.rs` 收敛为 `DetailDefinition` 表单方言；事件总线只留 `kind = "vdfs"` | 资源存储讲的也是 VDFS 的话；磁盘布局不变，前端只退一个 `entity` 频道订阅 |
 
@@ -447,8 +447,8 @@ source = file 的类型（整包导入）：名称来自文件名
     **最小可用配置**：`model` 取预设首项 + `skip_validation`；`skill` 满足
     `name == id` 且 description ≥ 10 字；`mcp` 给 stdio 骨架（`type` / `command` / `args`）。
   - **可写性双重判定**：`writable()` = 注册表 `supports_upload` **且** provider 有
-    `category()` + `manifest_file()`（EntityStore 型）。bundle 型 `agent`（目录自管、
-    走 BundleStore）因此**自动降级为只读**——避免「声明了可新建但落盘必失败」。
+    `category()` + `manifest_file()`（EntityStore 型）。目录自管型 `agent`（
+    走 `AgentDirStore`）因此**自动降级为只读**——避免「声明了可新建但落盘必失败」。
     `agent` 以**只读挂载**接入：列表 + 详情可用，新建仍走实体页的 zip 上传。
   - **导航顺序单一真相源**：新增 `entities::nav_meta_of(kind)`；`session` / `setting`
     自持 provider 的 `label` / `order` 改为从注册表读（原来硬编码 10 / 60，与注册表的
@@ -511,10 +511,10 @@ source = file 的类型（整包导入）：名称来自文件名
 
 - **S7 容器子实体在 VDFS 上重建**（**已完成**）：把 S6 的会话内部寻址**推广到
   通用适配器**——`EntityVdfsAdapter` 现在按 `container_kinds_for(kind)` 支持
-  `<id>/<子类别>/<条目>` 三级寻址，agent bundle 内部的提示词 / 技能 / MCP
+  `<id>/<子类别>/<条目>` 三级寻址，agent 目录内部的提示词 / 技能 / MCP
   由此在 VDFS 上可见可编辑（原容器页的最后一处不可替代能力）。
 
-  - 路径段用子类别**标签**（与 S6 同口径）；子实体的 `name` 是 bundle 内
+  - 路径段用子类别**标签**（与 S6 同口径）；子实体的 `name` 是 agent 目录内
     相对路径（唯一，可含 `/`），`title` 是 basename（可读）。
   - **新建落位由 `path_hint` 决定**（`prompts/<name>.md` + 文件名 → 实际路径，
     缺省内容取 `default_content`）——路径模板仍是后端唯一真相源，前端零知识。
@@ -604,7 +604,7 @@ source = file 的类型（整包导入）：名称来自文件名
   | 位置 | 处理 |
   | --- | --- |
   | mcp / model / session / setting / skill | 删掉 `route()` 里的 `entities::dispatch` 分支 |
-  | agent | 删掉 `entities/list|detail|get|upload|delete` 五个分支与 `entities_*` 三个处理函数（保留 `bundle/*`） |
+  | agent | 删掉 `entities/list|detail|get|upload|delete` 五个分支与 `entities_*` 三个处理函数（保留 `agent` 的导出路由） |
   | home | 删掉 `entities/providers`（资源类别改由 `<根>` 目录合成下发）及其 `provider_order_override` |
   | `symbio_core/entities.rs` | 删除 `dispatch` 与 7 个 `dispatch_*`、zip 工具、`providers_response*`；保留 `EntityProvider` trait + `entity_write` / `entity_delete`（适配器的唯一依赖） |
   | `schemas/entities.rs` | 删除 `ENTITIES_*` 路径常量与协议请求/响应（保留 `DetailDefinition`、`EntitySummary`、`EntityUploadResponse` / `EntityStatusResponse`） |
@@ -631,26 +631,26 @@ source = file 的类型（整包导入）：名称来自文件名
   | 层 | 内容 |
   | --- | --- |
   | 机制 | `VdfsNewType.source`（`VDFS_NEW_SOURCE_FILE = "file"`）：类型声明「内容取自本地文件」；`VDFS_EXT_ZIP = "zip"` 作为导入类型的扩展名 |
-  | 后端 | `EntityProvider::import_zip(ctx, name, zip)` 钩子，默认实现 `entity_import_zip`（EntityStore 型通用解包，**整目录覆盖**）；agent 重写走 `BundleStore::import`（id 取自包内 manifest，同名替换） |
+  | 后端 | `EntityProvider::import_zip(ctx, name, zip)` 钩子，默认实现 `entity_import_zip`（EntityStore 型通用解包，**整目录覆盖**）；agent 重写走 `AgentDirStore::import`（id 取自包内 manifest，同名替换） |
   | 适配器 | `root_new_types()` 按注册表 `supports_import` 追加 zip 类型；`write` 的**二进制分支**（`b64`）承接导入，只对挂载根下的条目有效，回 provider 给的 id 并广播变更 |
   | 前端 | `source = file` 的类型渲染**文件选择器**（而非命名输入），目标名由 `newFileNameOf(file.name, ext)` 推导；`arrayBufferToBase64` 分块编码后走既有 `writeVdfsBinary` |
 
   - 能力来源改为注册表显式声明：新增 `supports_import`（agent / skill / mcp 为
-    true）。bundle 这类**目录自管**的类型也能导入——不必先有实体目录。
-  - 顺带补上一个静默缺口：agent **没有** `delete_item` 钩子（bundle 不是
-    EntityStore 型），VDFS 删除 bundle 会落到默认实现报 `NotImplemented`；
-    现已重写为 `BundleStore::delete`。
+    true）。目录自管型 `agent` 这类类型也能导入——不必先有实体目录。
+  - 顺带补上一个静默缺口：agent **没有** `delete_item` 钩子（目录自管型
+    EntityStore 型），VDFS 删除 agent 目录会落到默认实现报 `NotImplemented`；
+    现已重写为 `AgentDirStore::delete`。
   - 修掉一个历史缺陷：zip 解包先规范化再判隐藏文件，否则 `./a/b.txt` 会因首段
     `.` 被整条丢弃（原实现顺序相反）。
 
 - **S13 整包导出（导入的逆动作）**（**已完成**）：导入回归后，导出是唯一还没
-  有 VDFS 等价物的动作（`agent/bundle/export` 因它暂留）。它与导入**共用同一
+  有 VDFS 等价物的动作（`agent` 的导出动作因它暂留）。它与导入**共用同一
   个「整包往返」语义**，因此也不新增协议操作——做一个节点动作即可：
 
   | 层 | 内容 |
   | --- | --- |
   | 机制 | `VDFS_ACTION_EXPORT = "export"`：与 `test` 同为 `vdfs/action` 的动词取值 |
-  | 后端 | `EntityProvider::export_zip(ctx, id)` 钩子，默认实现 `entity_export_zip`（`zip_dir` 打包整个实体目录，包内顶层目录 = id，与导入端 `strip_common_root` 配对）；agent 重写走 `BundleStore::export` |
+  | 后端 | `EntityProvider::export_zip(ctx, id)` 钩子，默认实现 `entity_export_zip`（`zip_dir` 打包整个实体目录，包内顶层目录 = id，与导入端 `strip_common_root` 配对）；agent 重写走 `AgentDirStore::export` |
   | 结果形状 | `EntityExport { id, filename, b64 }`——字段名与 `VdfsContent.b64` 同构，作为**文件载荷**随 `VdfsActionResult.data` 回传 |
   | 适配器 | `action()` 按标识分派 `action_test` / `action_export`；导出只对条目有效，先做存在性校验，不支持时透传 `NotImplemented` |
   | 声明 | agent / skill / mcp 的 `detail_definition` 各自声明 `export` 动作（`supports_import` 为真的三类） |
@@ -669,7 +669,7 @@ source = file 的类型（整包导入）：名称来自文件名
   | `EntityProviderInfo` | 删 `prefix` / `provider_name` / `compact_list` / `status_indicator` / `capabilities`，导入能力改由 `supports_import` 表达（agent 的 `supports_upload` 随之修正为 `false`——它本就无法「最小 manifest 新建」） |
   | `EntityProvider` trait | 删无调用方的 `provider_name()` 与 `get_item()`（含 session 的重写） |
   | `schemas/entities.rs` | 删 `EntityCapabilities`（能力模型已换成访问位 + 注册表 + 声明的动作）与协议时代的请求/响应（`EntitiesList*` / `EntityUploadRequest` / `EntityGetRequest` / `EntityDeleteRequest` / `EntityStatusRequest` / `DetailDefinition*`）、`ContainerKindInfo`、`EntitySummary.provider` |
-  | `agent/bundle/*` | 删已被 VDFS 取代的 `list` / `get` / `upload` / `delete` / `preview`，只留尚无等价物的 `export` |
+  | `agent` 旧协议路由 | 删已被 VDFS 取代的列表/读取/上传/删除/预览，只留尚无等价物的导出 |
   | 前端 | `EntityCapabilities` 收敛为表单渲染器真正消费的两项（`mutable` / `test_connection`），并注明它由渲染器按访问位自算、后端不再下发 |
 
 - **S14 三栏唯一化（首页 = `<根>`，浏览内部 = push 页面）**（**已完成**）：

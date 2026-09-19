@@ -8,7 +8,7 @@
 //! ```
 //!
 //! 全局级：Agent 统一存放在**本插件自己的目录**下（装配态即 `<homedir>/agent`）。
-//! 该目录由父插件经 `PLUGIN_DIR` 告知（见 [`BundleStore::new`]），本模块**不自己拼**
+//! 该目录由父插件经 `PLUGIN_DIR` 告知（见 [`AgentDirStore::new`]），本模块**不自己拼**
 //! ——系统目录可被「切换系统目录」改变并持久化到 bootstrap，手拼就会与装配态不一致。
 //! 工作区级仅在工作区上下文存在时参与，为按项目安装与测试隔离提供位置。
 //!
@@ -17,7 +17,7 @@
 //!
 //! ## 职责边界：只管目录，不解释内容
 //!
-//! v1 时代这里**解释** bundle 内部：`prompts/` `skills/` `mcps/` 各有白名单布局，
+//! v1 时代这里**解释** agent 目录内部：`prompts/` `skills/` `mcps/` 各有白名单布局，
 //! 条目按 `priority` 排序、MCP 配置按约定文件名探测……那等于在宿主里重写了一遍
 //! 技能系统与 MCP 客户端的解析，两条链长期不同步（规范 §3.2 第 2 条）。
 //!
@@ -41,25 +41,25 @@ use std::sync::Arc;
 
 /// Agent 在 store 中的记录（清单 + 位置 + 来源）
 #[derive(Debug, Clone)]
-pub struct BundleRecord {
+pub struct AgentDirRecord {
     pub manifest: Arc<AgentManifest>,
-    /// bundle 安装目录（含 manifest 与约定能力目录）
+    /// agent 目录安装目录（含 manifest 与约定能力目录）
     pub dir: PathBuf,
     /// 来源层级（工作区级覆盖同名全局级）
-    pub source: BundleScope,
+    pub source: AgentDirScope,
 }
 
-/// bundle 来源层级
+/// agent 目录来源层级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BundleScope {
+pub enum AgentDirScope {
     /// `{workdir}/.symbio/agent/`
     Workspace,
     /// `{系统目录}/agent/`（本插件自己的目录）
     Global,
 }
 
-impl BundleScope {
+impl AgentDirScope {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Workspace => "workspace",
@@ -79,7 +79,7 @@ pub struct ImportResult {
 
 /// Agent 目录内的一条文件记录（**通用**：不分类、不解释内容）
 ///
-/// v1 的 `BundleItemEntry` 带 `kind`（prompt / skill / mcp）与 `priority`——那是
+/// v1 的 `条目类型` 带 `kind`（prompt / skill / mcp）与 `priority`——那是
 /// 宿主在替能力目录解释语义。v2 里能力由插件实例自己解释（§3.2），这里只回答
 /// 「有哪些文件、多大、是不是目录」。
 #[derive(Debug, Clone, Serialize)]
@@ -107,15 +107,15 @@ pub fn normalize_item_path(rel: &str) -> Result<String, String> {
     Ok(rel.to_string())
 }
 
-/// Bundle Store。
-pub struct BundleStore {
+/// Agent 目录存储。
+pub struct AgentDirStore {
     /// 工作区级根（None = 无工作区上下文）
     workspace_root: Option<PathBuf>,
     /// 全局根 = **本插件自己的目录**（`<homedir>/agent`）
     global_root: PathBuf,
 }
 
-impl BundleStore {
+impl AgentDirStore {
     /// `global_root` = 本插件自己的目录。
     ///
     /// ⚠️ 这个目录**必须由调用方给**（装配态下来自父插件经 `PLUGIN_DIR` 传下的
@@ -125,7 +125,7 @@ impl BundleStore {
     pub fn new(global_root: impl Into<PathBuf>, workdir: Option<&str>) -> Self {
         // 两级发现：
         // - 全局级 = 本插件目录下的 `<id>`（目录由父插件告知，可被「切换系统目录」
-        //   改变并持久化到 bootstrap）—— 这是用户安装 bundle 的主位置，必须始终被扫描；
+        //   改变并持久化到 bootstrap）—— 这是用户安装 agent 目录的主位置，必须始终被扫描；
         // - 工作区级 = `{workdir}/.symbio/agent/<id>`（同名时覆盖全局级）。
         //   工作区层同时为测试提供隔离：测试用 tempdir 作 workdir 时不会污染真实系统目录。
         let workspace_root = workdir.map(|w| Path::new(w).join(".symbio").join("agent"));
@@ -135,12 +135,12 @@ impl BundleStore {
         }
     }
 
-    /// 全量 bundle 列表（当前为单来源：本插件目录下的 `<id>`）。
-    pub fn list(&self) -> Vec<BundleRecord> {
-        let mut records: Vec<BundleRecord> = Vec::new();
+    /// 全量 agent 目录列表（当前为单来源：本插件目录下的 `<id>`）。
+    pub fn list(&self) -> Vec<AgentDirRecord> {
+        let mut records: Vec<AgentDirRecord> = Vec::new();
         for (scope, root) in [
-            (BundleScope::Global, Some(&self.global_root)),
-            (BundleScope::Workspace, self.workspace_root.as_ref()),
+            (AgentDirScope::Global, Some(&self.global_root)),
+            (AgentDirScope::Workspace, self.workspace_root.as_ref()),
         ] {
             let Some(root) = root else { continue };
             for entry in Self::scan_root(root) {
@@ -149,7 +149,7 @@ impl BundleStore {
                     .iter_mut()
                     .find(|r| r.manifest.id == entry.manifest.id)
                 {
-                    if scope == BundleScope::Workspace {
+                    if scope == AgentDirScope::Workspace {
                         *existing = entry;
                     }
                 } else {
@@ -162,11 +162,11 @@ impl BundleStore {
     }
 
     /// 按 id 查找（工作区优先）。
-    pub fn get(&self, bundle_id: &str) -> Option<BundleRecord> {
-        self.list().into_iter().find(|r| r.manifest.id == bundle_id)
+    pub fn get(&self, agent_id: &str) -> Option<AgentDirRecord> {
+        self.list().into_iter().find(|r| r.manifest.id == agent_id)
     }
 
-    fn scan_root(root: &Path) -> Vec<BundleRecord> {
+    fn scan_root(root: &Path) -> Vec<AgentDirRecord> {
         let mut out = Vec::new();
         let Ok(entries) = std::fs::read_dir(root) else {
             return out;
@@ -183,18 +183,18 @@ impl BundleStore {
         out
     }
 
-    /// 从 bundle 目录加载记录（manifest 解析失败 → 跳过该目录并记日志）。
-    pub fn load_record(dir: &Path) -> Option<BundleRecord> {
+    /// 从 agent 目录加载记录（manifest 解析失败 → 跳过该目录并记日志）。
+    pub fn load_record(dir: &Path) -> Option<AgentDirRecord> {
         let manifest = manifest::load(dir)?;
-        Some(BundleRecord {
+        Some(AgentDirRecord {
             manifest: Arc::new(manifest),
             dir: dir.to_path_buf(),
             // source 由调用方（list/get）按根目录归位；此处先占位
-            source: BundleScope::Global,
+            source: AgentDirScope::Global,
         })
     }
 
-    /// 导入（安装）一个 bundle zip。
+    /// 导入（安装）一个 agent 目录zip。
     ///
     /// zip 内 manifest 允许位于根目录或唯一顶层目录下（两种打包习惯都支持）。
     pub fn import(&self, zip_bytes: &[u8], replace: bool) -> Result<ImportResult, String> {
@@ -242,7 +242,7 @@ impl BundleStore {
         let replaced = dest.exists();
         if replaced && !replace {
             return Err(format!(
-                "bundle `{}` 已存在（{}）。携带 replace=true 可覆盖。",
+                "agent 目录`{}` 已存在（{}）。携带 replace=true 可覆盖。",
                 manifest.id,
                 dest.display()
             ));
@@ -290,25 +290,25 @@ impl BundleStore {
     }
 
     /// 导出为 zip 字节（打包下载）。
-    pub fn export(&self, bundle_id: &str) -> Result<Vec<u8>, String> {
+    pub fn export(&self, agent_id: &str) -> Result<Vec<u8>, String> {
         let record = self
-            .get(bundle_id)
-            .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
+            .get(agent_id)
+            .ok_or_else(|| format!("agent 目录`{agent_id}` 不存在"))?;
         let mut buf = std::io::Cursor::new(Vec::new());
         {
             let mut writer = zip::ZipWriter::new(&mut buf);
             let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default();
-            add_dir_to_zip(&mut writer, &record.dir, bundle_id, options)?;
+            add_dir_to_zip(&mut writer, &record.dir, agent_id, options)?;
             writer.finish().map_err(|e| format!("zip 生成失败: {e}"))?;
         }
         Ok(buf.into_inner())
     }
 
-    /// 删除 bundle（仅允许删除磁盘目录；不存在报错）。
-    pub fn delete(&self, bundle_id: &str) -> Result<String, String> {
+    /// 删除 agent 目录（仅允许删除磁盘目录；不存在报错）。
+    pub fn delete(&self, agent_id: &str) -> Result<String, String> {
         let record = self
-            .get(bundle_id)
-            .ok_or_else(|| format!("bundle `{bundle_id}` 不存在"))?;
+            .get(agent_id)
+            .ok_or_else(|| format!("agent 目录`{agent_id}` 不存在"))?;
         std::fs::remove_dir_all(&record.dir)
             .map_err(|e| format!("删除失败（{}）: {e}", record.dir.display()))?;
         Ok(record.dir.display().to_string())
@@ -323,10 +323,10 @@ impl BundleStore {
     /// 列出 Agent 目录（或其子目录）下的条目。
     ///
     /// `rel` 为 `""` 时列根目录；只列一层（子目录以 `is_dir` 标记，可再次进入）。
-    pub fn list_files(&self, bundle_id: &str, rel: &str) -> Result<Vec<FileEntry>, String> {
+    pub fn list_files(&self, agent_id: &str, rel: &str) -> Result<Vec<FileEntry>, String> {
         let record = self
-            .get(bundle_id)
-            .ok_or_else(|| format!("智能体 `{bundle_id}` 不存在"))?;
+            .get(agent_id)
+            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
         let rel = normalize_item_path(rel).unwrap_or_default();
         let dir = absolutize(&record.dir, &rel);
         debug_assert!(dir.starts_with(&record.dir));
@@ -358,10 +358,10 @@ impl BundleStore {
     }
 
     /// 取一条条目的元信息（不存在 / 逃逸 → `Err`）。
-    pub fn stat_item(&self, bundle_id: &str, rel: &str) -> Result<FileEntry, String> {
+    pub fn stat_item(&self, agent_id: &str, rel: &str) -> Result<FileEntry, String> {
         let record = self
-            .get(bundle_id)
-            .ok_or_else(|| format!("智能体 `{bundle_id}` 不存在"))?;
+            .get(agent_id)
+            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
         let rel = normalize_item_path(rel)?;
         let full = absolutize(&record.dir, &rel);
         debug_assert!(full.starts_with(&record.dir));
@@ -374,19 +374,19 @@ impl BundleStore {
     }
 
     /// 条目在磁盘上的绝对路径（沙箱化后；供删除目录用）。
-    pub fn item_path(&self, bundle_id: &str, rel: &str) -> Result<PathBuf, String> {
+    pub fn item_path(&self, agent_id: &str, rel: &str) -> Result<PathBuf, String> {
         let record = self
-            .get(bundle_id)
-            .ok_or_else(|| format!("智能体 `{bundle_id}` 不存在"))?;
+            .get(agent_id)
+            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
         let rel = normalize_item_path(rel)?;
         Ok(absolutize(&record.dir, &rel))
     }
 
     /// 读取 Agent 目录内的文件内容。
-    pub fn read_item(&self, bundle_id: &str, rel_path: &str) -> Result<String, String> {
+    pub fn read_item(&self, agent_id: &str, rel_path: &str) -> Result<String, String> {
         let record = self
-            .get(bundle_id)
-            .ok_or_else(|| format!("智能体 `{bundle_id}` 不存在"))?;
+            .get(agent_id)
+            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
         let rel_path = normalize_item_path(rel_path)?;
         let full = absolutize(&record.dir, &rel_path);
         debug_assert!(full.starts_with(&record.dir));
@@ -401,14 +401,14 @@ impl BundleStore {
     /// （没有任何报错，只表现为智能体行为异常）。拒绝则是一次显式、可重试的失败。
     pub fn write_item(
         &self,
-        bundle_id: &str,
+        agent_id: &str,
         rel_path: &str,
         content: &str,
         max_bytes: usize,
     ) -> Result<(), String> {
         let record = self
-            .get(bundle_id)
-            .ok_or_else(|| format!("智能体 `{bundle_id}` 不存在"))?;
+            .get(agent_id)
+            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
         let rel_path = normalize_item_path(rel_path)?;
         if content.len() > max_bytes {
             return Err(format!(
@@ -428,10 +428,10 @@ impl BundleStore {
     }
 
     /// 删除 Agent 目录内的文件；所在目录因此变空则一并清理。
-    pub fn delete_item(&self, bundle_id: &str, rel_path: &str) -> Result<(), String> {
+    pub fn delete_item(&self, agent_id: &str, rel_path: &str) -> Result<(), String> {
         let record = self
-            .get(bundle_id)
-            .ok_or_else(|| format!("智能体 `{bundle_id}` 不存在"))?;
+            .get(agent_id)
+            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
         let rel_path = normalize_item_path(rel_path)?;
         let full = absolutize(&record.dir, &rel_path);
         debug_assert!(full.starts_with(&record.dir));
@@ -469,25 +469,25 @@ impl BundleStore {
     /// 智能体记忆文件：`<Agent 目录>/AGENTS.md`
     ///
     /// Agent 不存在 → 明确报错（调用方 [`super::memory::store`] 据此构造「无作用域」门面）。
-    pub fn memory_path(&self, bundle_id: &str) -> Result<PathBuf, String> {
+    pub fn memory_path(&self, agent_id: &str) -> Result<PathBuf, String> {
         let record = self
-            .get(bundle_id)
-            .ok_or_else(|| format!("智能体 `{bundle_id}` 不存在"))?;
+            .get(agent_id)
+            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
         Ok(record.dir.join(AGENTS_FILE))
     }
 
-    /// zip entry 名 → bundle 内相对路径。    ///
+    /// zip entry 名 → agent 目录内相对路径。    ///
     /// 支持两种打包布局：根目录直打包（`manifest.yaml`、`providers/...`）与
-    /// 单顶层目录打包（`<bundle_id>/manifest.yaml`、`<bundle_id>/providers/...`）。
+    /// 单顶层目录打包（`<agent_id>/manifest.yaml`、`<agent_id>/providers/...`）。
     /// 返回 `None` 表示跳过（目录项 / 顶层杂项）。
-    fn strip_manifest_root(entry_name: &str, bundle_id: &str) -> Option<String> {
+    fn strip_manifest_root(entry_name: &str, agent_id: &str) -> Option<String> {
         // zip 目录项（以 / 结尾）：不是文件，直接跳过
         if entry_name.ends_with('/') || entry_name.ends_with('\\') {
             return None;
         }
         let normalized = entry_name.replace('\\', "/");
-        // 单顶层目录布局：`<bundle_id>/...` → 剥掉 bundle_id 前缀
-        let prefix = format!("{bundle_id}/");
+        // 单顶层目录布局：`<agent_id>/...` → 剥掉 agent_id 前缀
+        let prefix = format!("{agent_id}/");
         if let Some(rest) = normalized.strip_prefix(prefix.as_str()) {
             if rest.is_empty() {
                 return None;
@@ -507,7 +507,7 @@ fn absolutize(base: &Path, rel: &str) -> PathBuf {
         if seg.is_empty() || seg == "." {
             continue;
         }
-        // `..` 段直接拒绝（不弹出）——防御性：合法 bundle 不应包含
+        // `..` 段直接拒绝（不弹出）——防御性：合法 agent 目录不应包含
         if seg == ".." {
             continue;
         }
@@ -552,30 +552,30 @@ mod tests {
     fn strip_manifest_root_accepts_both_layouts() {
         // 根目录布局
         assert_eq!(
-            BundleStore::strip_manifest_root("providers/persona/provider.yaml", "com.acme.cr"),
+            AgentDirStore::strip_manifest_root("providers/persona/provider.yaml", "com.acme.cr"),
             Some("providers/persona/provider.yaml".into())
         );
         // 单顶层目录布局
         assert_eq!(
-            BundleStore::strip_manifest_root("com.acme.cr/manifest.yaml", "com.acme.cr"),
+            AgentDirStore::strip_manifest_root("com.acme.cr/manifest.yaml", "com.acme.cr"),
             Some("manifest.yaml".into())
         );
-        // 顶层目录名与 bundle_id 无关的杂项文件：原样接受（根目录布局语义；
+        // 顶层目录名与 agent_id 无关的杂项文件：原样接受（根目录布局语义；
         // import 只解析 manifest.yaml，无关文件落盘无害）
         assert_eq!(
-            BundleStore::strip_manifest_root("other/manifest.yaml", "com.acme.cr"),
+            AgentDirStore::strip_manifest_root("other/manifest.yaml", "com.acme.cr"),
             Some("other/manifest.yaml".into())
         );
         // 目录项 → 跳过
         assert_eq!(
-            BundleStore::strip_manifest_root("com.acme.cr/providers/", "com.acme.cr"),
+            AgentDirStore::strip_manifest_root("com.acme.cr/providers/", "com.acme.cr"),
             None
         );
     }
 
     #[test]
     fn absolutize_rejects_traversal_segments() {
-        let base = Path::new("/tmp/bundles/com.acme");
+        let base = Path::new("/tmp/agent_dirs/com.acme");
         let p = absolutize(base, "providers/../../etc/passwd");
         // `..` 段被丢弃，路径仍锁定在 base 内
         assert!(p.starts_with(base));
@@ -614,28 +614,28 @@ mod tests {
         }
     }
 
-    /// 在工作区级落一个最小 bundle（不经 zip：以下用例只关心写入闸门）
-    fn workspace_store_with_bundle() -> (tempfile::TempDir, BundleStore) {
+    /// 在工作区级落一个最小 agent 目录（不经 zip：以下用例只关心写入闸门）
+    fn workspace_store_with_agent_dir() -> (tempfile::TempDir, AgentDirStore) {
         let dir = tempfile::TempDir::new().unwrap();
-        let store = BundleStore::new(
+        let store = AgentDirStore::new(
             dir.path().join("global-agent"),
             Some(dir.path().to_str().unwrap()),
         );
-        let bundle = dir.path().join(".symbio/agent/b");
-        std::fs::create_dir_all(bundle.join("prompts")).unwrap();
+        let agent_dir = dir.path().join(".symbio/agent/b");
+        std::fs::create_dir_all(agent_dir.join("prompts")).unwrap();
         std::fs::write(
-            bundle.join("manifest.yaml"),
+            agent_dir.join("manifest.yaml"),
             "spec: \"oab/v1\"\nid: \"b\"\nname: \"B\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^1\"\n",
         )
         .unwrap();
-        assert!(store.get("b").is_some(), "前置：bundle 应被扫描到");
+        assert!(store.get("b").is_some(), "前置：agent 目录应被扫描到");
         (dir, store)
     }
 
     /// 写入闸门：超限**拒绝**，且不留下半截内容
     #[test]
     fn write_item_rejects_oversized_content_without_touching_the_file() {
-        let (_dir, store) = workspace_store_with_bundle();
+        let (_dir, store) = workspace_store_with_agent_dir();
 
         store
             .write_item("b", "prompts/persona.md", "0123456789", 10)
@@ -652,19 +652,19 @@ mod tests {
         );
     }
 
-    /// 智能体记忆**落位**在 bundle 自己的目录（不是工作区目录），文件名与工作区级同名。
+    /// 智能体记忆**落位**在 agent 目录自己的目录（不是工作区目录），文件名与工作区级同名。
     ///
     /// 读写与两道容量闸门不在这里测——它们已收口到内核，用例在
     /// `agent/host/memory.test.rs`（本模块只回答「记忆文件在哪」）。
     #[test]
-    fn memory_lives_in_the_bundle_dir() {
-        let (dir, store) = workspace_store_with_bundle();
+    fn memory_lives_in_agent_dir() {
+        let (dir, store) = workspace_store_with_agent_dir();
         let path = store.memory_path("b").unwrap();
         assert_eq!(path, dir.path().join(".symbio/agent/b").join(AGENTS_FILE));
         assert_eq!(path.file_name().unwrap(), "AGENTS.md");
         // 不是工作区根的那个 AGENTS.md
         assert_ne!(path, dir.path().join(AGENTS_FILE));
-        // bundle 不存在 → 明确报错（`memory::store` 据此构造「无作用域」门面）
+        // agent 目录不存在 → 明确报错（`memory::store` 据此构造「无作用域」门面）
         assert!(store.memory_path("nope").is_err());
     }
 }

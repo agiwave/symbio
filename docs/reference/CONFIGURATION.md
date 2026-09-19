@@ -13,7 +13,7 @@
 | `~/.symbio/PLUGIN.yml` | 系统级插件（`home`）的配置——工作区与最近记录 |
 | `~/.symbio/<插件>/PLUGIN.yml` | 各插件的配置（`session` / `model` / `web` / `local` / `gateway` / `telegram` …） |
 | `~/.symbio/<插件>/<id>/<主文件>` | 插件资源条目（`model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`…） |
-| `~/.symbio/agents/` | Agent Bundle 存储目录 |
+| `~/.symbio/agents/` | agent 目录存储目录 |
 | `~/.symbio/config.yaml.migrated` | 旧集中式配置的留档（首次迁移后改名，见下） |
 
 `PLUGIN.yml` 是一个 YAML 映射，其中两个**身份字段**——`plugin_provider`（工厂 id）与
@@ -60,7 +60,7 @@ work:
 | **插件配置** | `<homedir>/<插件>/PLUGIN.yml`（系统级插件在 `<homedir>/PLUGIN.yml`） | 配置的**拥有者**自己读写（`ConfigFile`）；地址 `<根>/<插件>/PLUGIN.yml`，**没有第二条配置协议** |
 | 插件资源（model / mcp / skill 等） | `<homedir>/<类别>/<id>/<主文件>` | 类别段名 = 插件名（如 `model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`）；由 `symbio/src/providers/vdfs_service/` 的集中实现读写，**不可配置、无第二种后端** |
 | 会话与其消息 | 会话自己的 store（`SessionStore`），非 `plugins/<类别>/<id>/` 资源布局 | 已收为**单一具体类型**：持久会话 = 磁盘 `<根>/<id>/{session.json, messages.json}`，临时会话 = 进程内驻留。`store_kind` / sqlite / memory 后端选型**已删除**（见 ADR-011 及 `session/store/mod.rs` 顶部「它不是什么」）|
-| Agent bundle | bundle 目录（工作区级 + 全局级双层，`BundleStore` 自管） | 工作区切换，不经 `vdfs_service` |
+| Agent 目录 | agent 目录（工作区级 + 全局级双层，`AgentDirStore` 自管） | 工作区切换，不经 `vdfs_service` |
 | 应用级状态 | `<homedir>/PLUGIN.yml` | homedir 由前端「系统目录」切换（`home/reload`） |
 
 > 换 homedir 即换一切：`<homedir>` 由 `HomedirRegistry` 现取，资源类别根每次解析时

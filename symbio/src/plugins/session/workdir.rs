@@ -9,7 +9,7 @@
 //! 的（工作目录由会话元数据决定），因此归 session 插件，而不是 vdfs 插件。
 //!
 //! 路径安全：节点地址一律为工作目录内的相对路径（`/` 分隔）；拒绝 `..`
-//! 与绝对路径，并在 join 后做前缀校验（双重闸门，与 agent bundle 的
+//! 与绝对路径，并在 join 后做前缀校验（双重闸门，与 agent 目录的
 //! 路径白名单同风格）。
 
 use crate::symbio_core::event_bus::{EventBus, KIND_SESSION};

@@ -302,7 +302,7 @@ size  updated_at  children  binary  hidden  schema  new_types  attributes
 填好再保存」丢掉用户填的每一个字段。唯一例外是**内容为空**（「先建一个，随后再
 填」，如新建会话）：此时由 provider 落一份自己的最小合法内容。
 
-**二进制写入 = 整包导入**：目录型资源（skill / agent bundle…）以新建类型
+**二进制写入 = 整包导入**：目录型资源（skill / agent 目录…）以新建类型
 `ext = zip` + `source = file` 声明「内容来自本地文件」，使用方选文件后走
 `vdfs/write { create: true, b64 }`；provider 把它解释为**导入一个完整目录包**
 （语义自持，VDFS 不解释）。因此导入不额外占一个操作（详见
@@ -910,9 +910,9 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
   操作语义同构、走同一条变更广播频道，消费者分不清也不必分清条目住在哪儿。
 - **「manifest 补齐 id」由各插件自己实现**：编辑链路只回纯字段值（id 由路径承载），
   `model` / `mcp` 各有一份 `with_id`——那是该资源的写入语义，不再是跨插件共享原语。
-- **目录自管的类型自己落盘**：agent bundle 走 `BundleStore`（工作区级 + 全局级
+- **目录自管的类型自己落盘**：agent 目录走 `AgentDirStore`（工作区级 + 全局级
   双层），直接用 `import` / `export` / `delete`，**不经 vdfs_service**；
-  其目录内部（提示词 / 技能 / MCP）以 `<bundle id>/<子类别标签>/<相对路径>`
+  其目录内部（提示词 / 技能 / MCP）以 `<agent id>/<子类别标签>/<相对路径>`
   寻址，子类别用**人读的标签**（`提示词` / `技能` / `MCP`）而非 kind 作路径段
   ——与会话内部的「子会话 / 工作目录」同一口径。
 - **变更广播按类型全局持有**：`vdfs::host::notify_change` / `watch_changes` /

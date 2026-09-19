@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn tool_name_uses_protocol_safe_chars() {
-        // bundle id 允许 `.`（工具名不许，进 function-calling 协议）→ 压成 `_`；
+        // agent id 允许 `.`（工具名不许，进 function-calling 协议）→ 压成 `_`；
         // `-` 在协议允许集内（`[A-Za-z0-9_-]`），保留以维持可读。
         let v = SubAgentVisitor::new(
             Arc::new(crate::symbio_core::DefaultToolVisitor::new()),

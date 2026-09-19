@@ -1,4 +1,4 @@
-//! agent_run —— 委托型工具：把任务交给另一个已安装的 bundle（子智能体）执行。
+//! agent_run —— 委托型工具：把任务交给另一个已安装的 agent 目录（子智能体）执行。
 //!
 //! ## 架构定位：普通工具，零特殊化
 //!
@@ -15,7 +15,7 @@
 //! ## 执行流程（三种调用形态）
 //!
 //! 首次调用（args: `agent_id` / `prompt` / `working_dir?` / `session_id?`）：
-//! 1. 校验目标 bundle 存在、`working_dir` 合法；
+//! 1. 校验目标 agent 目录存在、`working_dir` 合法；
 //! 2. `session/update` 落子会话元数据（`parent_session_id` → 存储归档父会话
 //!    子目录、不进用户会话列表）；
 //! 3. 路由 `session/chat/send`（统一编排入口：collect → traverse 重新装配工具，
@@ -35,7 +35,7 @@
 //! 路由 `session/chat/send` 的 resume 分支到子会话（在子会话内恢复被审批的
 //! 工具），随后同 4-5。父子关系始终由子会话存储元数据承载，无进程内状态。
 
-use super::store::BundleStore;
+use super::store::AgentDirStore;
 use crate::symbio_core::event_bus::{register_subscriber, unregister_subscriber};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
@@ -64,16 +64,16 @@ const META_PROMPT: &str = "prompt";
 /// 子会话元数据键：父会话 id（session 存储归档依据）
 const KEY_PARENT_SESSION_ID: &str = "parent_session_id";
 
-/// agent_run 能力：把任务委托给指定 bundle（子智能体）。
+/// agent_run 能力：把任务委托给指定 agent 目录（子智能体）。
 pub struct AgentRunCapability {
     /// 子会话默认 workdir（构造时解析：父 ctx > 无）
     workdir: Option<String>,
-    /// bundle 存储根 = **本插件自己的目录**（构造时由插件实例传入）
+    /// agent 目录存储根 = **本插件自己的目录**（构造时由插件实例传入）
     ///
-    /// 能力侧同样不认识全局布局：目录由插件给，这里只透传给 [`BundleStore`]。
-    bundle_root: std::path::PathBuf,
-    /// 工具描述中的可用 bundle 清单（供 LLM 选择 agent_id）
-    bundles_brief: String,
+    /// 能力侧同样不认识全局布局：目录由插件给，这里只透传给 [`AgentDirStore`]。
+    agent_dir_root: std::path::PathBuf,
+    /// 工具描述中的可用 agent 清单（供 LLM 选择 agent_id）
+    agent_dirs_brief: String,
     /// 插件间路由入口（composite 容器弱引用，构造时由插件实例捕获）
     router: Option<std::sync::Weak<dyn Plugin>>,
 }
@@ -81,14 +81,14 @@ pub struct AgentRunCapability {
 impl AgentRunCapability {
     pub fn new(
         workdir: Option<String>,
-        bundle_root: std::path::PathBuf,
-        bundles_brief: String,
+        agent_dir_root: std::path::PathBuf,
+        agent_dirs_brief: String,
         router: Option<std::sync::Weak<dyn Plugin>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             workdir,
-            bundle_root,
-            bundles_brief,
+            agent_dir_root,
+            agent_dirs_brief,
             router,
         })
     }
@@ -110,14 +110,14 @@ impl crate::symbio_core::Capability for AgentRunCapability {
                  ## 工作目录\n\n\
                  可选参数 `working_dir` 指定子智能体的工作目录：绝对路径、支持 `~` 展开、\
                  禁止包含 `..`；省略时沿用当前会话的工作目录。",
-                self.bundles_brief
+                self.agent_dirs_brief
             ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "agent_id": {
                         "type": "string",
-                        "description": "可选。要执行的智能体 ID（bundle id，见可用智能体列表）；\
+                        "description": "可选。要执行的智能体 ID（agent id，见可用智能体列表）；\
                                 省略则默认使用当前会话正在使用的智能体"
                     },
                     "prompt": {
@@ -142,7 +142,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             keywords: Vec::new(),
             category: Some(crate::symbio_core::CapabilityCategory::Chat),
             examples: Some(vec![
-                "agent_id='<bundle-id>', prompt='分析这个项目的架构'".to_string()
+                "agent_id='<agent-id>', prompt='分析这个项目的架构'".to_string()
             ]),
         }
     }
@@ -150,7 +150,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
     async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         #[derive(serde::Deserialize, Clone)]
         struct RunRequest {
-            /// 可选：目标智能体 id（bundle id）。省略 → 默认用当前会话的智能体
+            /// 可选：目标智能体 id（agent id）。省略 → 默认用当前会话的智能体
             ///（ctx[AGENT_ID]）；两者皆空 → 子会话以无智能体的纯对话模式运行。
             #[serde(default)]
             agent_id: Option<String>,
@@ -207,14 +207,14 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             .filter(|s| !s.is_empty())
             .or(current_agent);
 
-        // ── 解析有效工作目录（显式参数 > 父会话继承），并校验目标 bundle 存在 ──
-        // 绝不静默降级：bundle 缺失 / working_dir 非法直接报错回传 LLM。
+        // ── 解析有效工作目录（显式参数 > 父会话继承），并校验目标 agent 目录存在 ──
+        // 绝不静默降级：agent 目录缺失 / working_dir 非法直接报错回传 LLM。
         let effective_workdir: Option<String> = match req.working_dir.as_deref() {
             Some(provided) => Some(validate_working_dir(provided)?),
             None => self.workdir.clone(),
         };
         if let Some(aid) = &agent_id {
-            let store = BundleStore::new(&self.bundle_root, effective_workdir.as_deref());
+            let store = AgentDirStore::new(&self.agent_dir_root, effective_workdir.as_deref());
             if store.get(aid).is_none() {
                 return Err(PluginError::NotFound(format!(
                     "目标智能体 '{aid}' 不存在，无法委托任务。请检查 agent_id 是否正确。"
@@ -555,12 +555,12 @@ fn send_frame(chan: &PluginChannel, data: serde_json::Value) -> Result<(), ()> {
     chan.tx.try_send(PluginFrame::Data(data)).map_err(|_| ())
 }
 
-/// 从 BundleStore 摘要生成工具描述中的"可用智能体列表"。
-pub(crate) fn format_bundles_brief(bundles: &[super::store::BundleRecord]) -> String {
-    if bundles.is_empty() {
+/// 从 AgentDirStore 摘要生成工具描述中的"可用智能体列表"。
+pub(crate) fn format_agent_dirs_brief(agent_dirs: &[super::store::AgentDirRecord]) -> String {
+    if agent_dirs.is_empty() {
         return "（暂无可用智能体）".to_string();
     }
-    bundles
+    agent_dirs
         .iter()
         .map(|r| {
             let desc = if r.manifest.description.is_empty() {

@@ -82,7 +82,7 @@ graph TD
 | ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `home`      | **根容器**      | 持**应用级状态**（`<homedir>/PLUGIN.yml`：工作区与最近记录）；构造 `worker` (Composite) 并传入必需插件清单，自身终结 `home/*`、`work/*` |
 | `composite` | **动态容器**     | **扫描自己的目录**（系统根）实例化子插件（目录驱动，不内置任何清单），是"分形"的关键                                                                                              |
-| `agent`     | **智能体域**     | 智能体域唯一所有者：bundle 库（`<根>/agent`）+ 子树装配（`agent/<id>/`，工具前缀 `agent_<id>_`）+ 两作用域 `AGENTS.md`；贡献 `agent_run` 工具 → `plugins/agent/README.md` |
+| `agent`     | **智能体域**     | 智能体域唯一所有者：agent 目录库（`<根>/agent`）+ 子树装配（`agent/<id>/`，工具前缀 `agent_<id>_`）+ 两作用域 `AGENTS.md`；贡献 `agent_run` 工具 → `plugins/agent/README.md` |
 | `session`   | **会话中心**     | 长连接、消息持久化、历史裁剪；**会话编排的唯一入口**（收集工具、组装提示词、直连 model 单轮网关）→ `plugins/session/README.md`（含六大压缩策略）                       |
 | `model`     | **单轮 LLM 网关** | 无状态单轮执行（`execute_turn`）；按上下文注册唯一生效 `ModelProvider`（自含参数与协议适配器）、4 协议适配、配置存取；不含工具执行与会话循环 |
 | `local`     | 本地工具         | `cmd`(Win)/`sh`(Unix) / content_search / todo_write / codebase_search（文件操作已迁 vdfs_*）                      |
@@ -145,7 +145,7 @@ pub trait Plugin: Send + Sync + 'static {
 
 **理由**：
 
-1. **关注点分离**：Agent 负责"智能体资产"（bundle / 子树装配 / 记忆），Session 负责"对话"
+1. **关注点分离**：Agent 负责"智能体资产"（agent 目录 / 子树装配 / 记忆），Session 负责"对话"
 2. **可组合性**：同一 Session 可绑定不同 Agent，或无 Agent 纯工具模式
 3. **可测试性**：Session 可独立于 Agent 测试
 

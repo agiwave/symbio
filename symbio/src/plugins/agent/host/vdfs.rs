@@ -2,7 +2,7 @@
 //!
 //! ## 与其它资源插件的分工差异
 //!
-//! Agent 是**目录自管型**资源：它的落盘由 [`BundleStore`] 负责（工作区级 +
+//! Agent 是**目录自管型**资源：它的落盘由 [`AgentDirStore`] 负责（工作区级 +
 //! 全局级双层、zip-slip 防护、版本硬门槛），**不经 `vdfs_service`**——
 //! `vdfs_service` 的三种拓扑都是「`<本插件目录>/<id>/…`」这一固定落位，
 //! 而 Agent 要同时看见工作目录与系统目录两层，寻址规则本身是 Agent 语义的一部分。
@@ -22,13 +22,13 @@
 //!
 //! ## 挂载根只列「装进来的智能体」
 //!
-//! 挂载根清单 = 各 bundle（装进来的子智能体），与 session / model 列表同一口径。
+//! 挂载根清单 = 各 agent 目录（装进来的子智能体），与 session / model 列表同一口径。
 //! `<根>/agent/AGENTS.md` 也挂在这棵树上，但它**不在清单里**——它是**本应用
 //! （系统智能体）自身**的指令（`{homedir}/AGENTS.md`，见 [`super::instruction`]），
 //! 属于「本 agent 的修改」，入口在**设置页**（`traverse` 里经 `ConfigurableVisitor`
 //! 注册，读写仍落在本插件的地址上），混在 agent 列表里会被读成某个包。
 //!
-//! 与 bundle 无关的那三个字母 `AGENTS.md` 因此是挂载根下的**保留名**；bundle id 的
+//! 与 agent 目录无关的那三个字母 `AGENTS.md` 因此是挂载根下的**保留名**；agent id 的
 //! 字符集要求首字符是小写字母或数字，不可能与之相撞（§5.1）。
 //!
 //! 外部访问一律走 `<根>/agent/…`。
@@ -36,7 +36,7 @@
 use super::instruction;
 use super::memory;
 use super::plugin::AgentPlugin;
-use super::store::{BundleRecord, BundleStore, FileEntry};
+use super::store::{AgentDirRecord, AgentDirStore, FileEntry};
 use crate::providers::vdfs_service;
 use crate::symbio_core::vdfs::{host_ctx, notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
@@ -58,7 +58,7 @@ const LABEL: &str = "智能体";
 #[derive(Debug)]
 enum RelPath<'a> {
     Root,
-    /// 系统智能体自身的指令：挂载根下的 `AGENTS.md`（与 bundle 无关，见模块文档）
+    /// 系统智能体自身的指令：挂载根下的 `AGENTS.md`（与 agent 目录无关，见模块文档）
     Instruction,
     /// Agent 本身（`<id>`）
     Agent {
@@ -80,8 +80,8 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
     if p.is_empty() {
         return RelPath::Root;
     }
-    // 保留名：挂载根下的 `AGENTS.md` 是**本应用自身**的指令，不是名为它的 bundle
-    // （bundle id 首字符必须是小写字母或数字，两者不可能相撞）
+    // 保留名：挂载根下的 `AGENTS.md` 是**本应用自身**的指令，不是名为它的 agent 目录
+    // （agent id 首字符必须是小写字母或数字，两者不可能相撞）
     if p == AGENTS_FILE {
         return RelPath::Instruction;
     }
@@ -101,7 +101,7 @@ fn id_of(path: &str) -> String {
 // ==================== 节点合成 ====================
 
 /// Agent 概览（`read` 与详情表单共用的信息载荷）
-fn bundle_info(r: &BundleRecord, store: &BundleStore) -> serde_json::Value {
+fn agent_dir_info(r: &AgentDirRecord, store: &AgentDirStore) -> serde_json::Value {
     // 「装了哪些能力」由**目录**回答（§4.1：目录里有就表示已安装），而不是
     // 宿主按类别点数——那是 v1 的做法，与真实的能力来源两份真相。
     let capabilities: Vec<String> = store
@@ -112,8 +112,8 @@ fn bundle_info(r: &BundleRecord, store: &BundleStore) -> serde_json::Value {
         .map(|e| e.path)
         .collect();
     serde_json::json!({
-        // config_type = "bundle"：项级图标 / 详情分发的顶层键（VdfsNode attributes flatten）
-        "config_type": "bundle",
+        // config_type = "agent 目录"：项级图标 / 详情分发的顶层键（VdfsNode attributes flatten）
+        "config_type": "agent_dir",
         "version": r.manifest.version,
         "spec": r.manifest.spec,
         "requires_spec": r.manifest.requires.spec,
@@ -127,7 +127,7 @@ fn bundle_info(r: &BundleRecord, store: &BundleStore) -> serde_json::Value {
 ///
 /// Agent 同时是容器（内部可浏览整棵目录），但**有详情定义**，故呈现为表单文件
 /// ——「浏览内部」走 `enter(<id>/…)` 的目录语义，与详情页互不影响。
-fn bundle_node(r: &BundleRecord, store: &BundleStore) -> VdfsNode {
+fn agent_dir_node(r: &AgentDirRecord, store: &AgentDirStore) -> VdfsNode {
     let id = r.manifest.id.clone();
     let title = if r.manifest.name.is_empty() {
         id.clone()
@@ -141,7 +141,7 @@ fn bundle_node(r: &BundleRecord, store: &BundleStore) -> VdfsNode {
     if !r.manifest.description.is_empty() {
         n.description = Some(r.manifest.description.clone());
     }
-    n.attributes = bundle_info(r, store)
+    n.attributes = agent_dir_info(r, store)
         .as_object()
         .cloned()
         .unwrap_or_default();
@@ -167,14 +167,14 @@ fn entry_node(id: &str, e: &FileEntry) -> VdfsNode {
 }
 
 impl AgentPlugin {
-    /// 依请求上下文构造 BundleStore（每次请求独立，与 route 入口一致）
+    /// 依请求上下文构造 AgentDirStore（每次请求独立，与 route 入口一致）
     ///
-    /// bundle 根 = **本插件自己的目录**，取自父插件经 `PLUGIN_DIR` 传下的目录
+    /// agent 目录根 = **本插件自己的目录**，取自父插件经 `PLUGIN_DIR` 传下的目录
     /// （`dir_from_ctx`；缺省退回常规落位）——与 `AgentPlugin::build` 同源，
     /// 这里不另拼一份 `<homedir>/…/agent`。
-    fn store_of(ctx: &Arc<dyn InvokeRequest>) -> BundleStore {
+    fn store_of(ctx: &Arc<dyn InvokeRequest>) -> AgentDirStore {
         let dir = dir_from_ctx(&**ctx, PLUGIN_AGENT);
-        BundleStore::new(dir.dir(), ctx.get(crate::symbio_core::WORKDIR).as_deref())
+        AgentDirStore::new(dir.dir(), ctx.get(crate::symbio_core::WORKDIR).as_deref())
     }
 
     /// 系统智能体自身指令 → VDFS 节点（`list` 与 `stat` 共用同一份形状）
@@ -206,12 +206,12 @@ impl VdfsProvider for AgentPlugin {
         Some(PLUGIN_AGENT)
     }
 
-    /// 根可列举 + 可递归遍历（bundle 内部有子条目）
+    /// 根可列举 + 可递归遍历（agent 目录内部有子条目）
     fn root_access(&self) -> VdfsAccess {
         VdfsAccess::LIST_TRAVERSE
     }
 
-    /// bundle 只能整包导入（没有「先建空壳再填字段」的形态）
+    /// agent 目录只能整包导入（没有「先建空壳再填字段」的形态）
     fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![VdfsNewType::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
             .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
@@ -231,7 +231,7 @@ impl VdfsProvider for AgentPlugin {
             RelPath::Root => Ok(store
                 .list()
                 .into_iter()
-                .map(|r| bundle_node(&r, &store))
+                .map(|r| agent_dir_node(&r, &store))
                 .collect()),
             // 指令是叶子节点
             RelPath::Instruction => Err(VdfsError::invalid(format!(
@@ -301,7 +301,7 @@ impl VdfsProvider for AgentPlugin {
                 let r = store
                     .get(&id)
                     .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}「{id}」")))?;
-                Ok(bundle_node(&r, &store))
+                Ok(agent_dir_node(&r, &store))
             }
             RelPath::Memory { id } => {
                 let id = id_of(id);
@@ -361,7 +361,7 @@ impl VdfsProvider for AgentPlugin {
                 let r = store
                     .get(&id)
                     .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}「{id}」")))?;
-                let text = serde_json::to_string_pretty(&bundle_info(&r, &store))
+                let text = serde_json::to_string_pretty(&agent_dir_info(&r, &store))
                     .map_err(|e| VdfsError::internal(format!("概览序列化失败：{e}")))?;
                 Ok(VdfsContent::text(path, text).with_mime("application/json"))
             }
@@ -537,7 +537,7 @@ impl VdfsProvider for AgentPlugin {
         Ok(())
     }
 
-    /// 节点动作：「导出」把 bundle 打成 zip 随 `data` 回传
+    /// 节点动作：「导出」把 agent 目录打成 zip 随 `data` 回传
     /// （与二进制写入的整包导入互为逆向）
     async fn action(
         &self,
@@ -613,15 +613,15 @@ mod tests {
         ));
     }
 
-    /// 挂载根下的 `AGENTS.md` 是**本应用自身的指令**，不是名为它的 bundle
+    /// 挂载根下的 `AGENTS.md` 是**本应用自身的指令**，不是名为它的 agent 目录
     ///
-    /// 两者不可能相撞：bundle id 的首字符必须是小写字母或数字（§5.1），
+    /// 两者不可能相撞：agent id 的首字符必须是小写字母或数字（§5.1），
     /// 而保留名以大写 `A` 开头。
     #[test]
-    fn root_agents_md_is_the_host_instruction_not_a_bundle() {
+    fn root_agents_md_is_the_host_instruction_not_an_agent_dir() {
         assert!(matches!(parse_rel_path(AGENTS_FILE), RelPath::Instruction));
         assert!(matches!(parse_rel_path("/AGENTS.md"), RelPath::Instruction));
-        // 带子路径时不再命中保留名（那是一条指向不存在条目的普通 bundle 路径）
+        // 带子路径时不再命中保留名（那是一条指向不存在条目的普通 agent 目录路径）
         assert!(matches!(
             parse_rel_path("AGENTS.md/x"),
             RelPath::File { .. }

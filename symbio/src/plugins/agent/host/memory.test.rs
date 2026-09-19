@@ -11,29 +11,29 @@ use super::*;
 use crate::symbio_core::{VdfsAccess, AGENTS_FILE};
 use tempfile::TempDir;
 
-/// 在工作区级落一个最小 bundle（不经 zip：以下用例只关心记忆的落位与作用域）
-fn workspace_with_bundle() -> (TempDir, BundleStore) {
+/// 在工作区级落一个最小 agent_dir（不经 zip：以下用例只关心记忆的落位与作用域）
+fn workspace_with_agent_dir() -> (TempDir, AgentDirStore) {
     let dir = TempDir::new().unwrap();
-    let store = BundleStore::new(
+    let store = AgentDirStore::new(
         dir.path().join("global-agent"),
         Some(dir.path().to_str().unwrap()),
     );
-    let bundle = dir.path().join(".symbio/agent/b");
-    std::fs::create_dir_all(bundle.join("prompts")).unwrap();
+    let agent_dir = dir.path().join(".symbio/agent/b");
+    std::fs::create_dir_all(agent_dir.join("prompts")).unwrap();
     std::fs::write(
-        bundle.join("manifest.yaml"),
+        agent_dir.join("manifest.yaml"),
         "spec: \"oab/v1\"\nid: \"b\"\nname: \"B\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^1\"\n",
     )
     .unwrap();
-    assert!(store.get("b").is_some(), "前置：bundle 应被扫描到");
+    assert!(store.get("b").is_some(), "前置：agent_dir 应被扫描到");
     (dir, store)
 }
 
 /// 按插件**默认配置**构造记忆门面（闸门取值从 `AgentConfig` 读，不写第二份字面量）
-fn store_of(bundles: &BundleStore, id: &str) -> MemoryFile {
+fn store_of(agent_dirs: &AgentDirStore, id: &str) -> MemoryFile {
     let cfg = AgentConfig::default();
     store(
-        bundles,
+        agent_dirs,
         id,
         cfg.effective_memory_max_bytes(),
         cfg.effective_memory_inject_bytes(),
@@ -45,8 +45,8 @@ fn store_of(bundles: &BundleStore, id: &str) -> MemoryFile {
 /// 记忆落在 **Agent 自己的目录**里（不是工作区目录）
 #[test]
 fn memory_lives_next_to_the_agent_manifest() {
-    let (dir, bundles) = workspace_with_bundle();
-    let m = store_of(&bundles, "b");
+    let (dir, agent_dirs) = workspace_with_agent_dir();
+    let m = store_of(&agent_dirs, "b");
 
     assert!(m.has_scope());
     assert_eq!(
@@ -60,9 +60,9 @@ fn memory_lives_next_to_the_agent_manifest() {
 
 /// Agent 不存在 = **无作用域**，是正常状态而不是崩溃（VDFS 据此报 NotFound）
 #[test]
-fn missing_bundle_means_no_scope() {
-    let (_dir, bundles) = workspace_with_bundle();
-    let m = store_of(&bundles, "nope");
+fn missing_agent_dir_means_no_scope() {
+    let (_dir, agent_dirs) = workspace_with_agent_dir();
+    let m = store_of(&agent_dirs, "nope");
 
     assert!(!m.has_scope());
     assert!(m.read().is_err());
@@ -75,8 +75,8 @@ fn missing_bundle_means_no_scope() {
 
 #[test]
 fn memory_roundtrips() {
-    let (_dir, bundles) = workspace_with_bundle();
-    let m = store_of(&bundles, "b");
+    let (_dir, agent_dirs) = workspace_with_agent_dir();
+    let m = store_of(&agent_dirs, "b");
 
     // 还没有记忆 → 空串（不是错误）
     assert_eq!(m.read().unwrap(), "");
@@ -90,8 +90,8 @@ fn memory_roundtrips() {
 
 #[test]
 fn write_gate_is_enforced_by_the_kernel() {
-    let (_dir, bundles) = workspace_with_bundle();
-    let m = store(&bundles, "b", 4, 256);
+    let (_dir, agent_dirs) = workspace_with_agent_dir();
+    let m = store(&agent_dirs, "b", 4, 256);
 
     let err = m.write(&"x".repeat(8)).unwrap_err();
     assert!(err.contains("超出容量上限"), "{err}");
@@ -101,8 +101,8 @@ fn write_gate_is_enforced_by_the_kernel() {
 /// 注入闸门由内核执行：超预算截断，并在片段里指路（片段形状由内核测）
 #[test]
 fn inject_gate_truncates() {
-    let (_dir, bundles) = workspace_with_bundle();
-    let m = store(&bundles, "b", 256, 4);
+    let (_dir, agent_dirs) = workspace_with_agent_dir();
+    let m = store(&agent_dirs, "b", 256, 4);
     m.write("0123456789").unwrap();
 
     let injected = m.inject().unwrap().unwrap();
@@ -118,29 +118,29 @@ fn inject_gate_truncates() {
 /// 空文件 / 不存在 → **整段省略**（静默跳过，不往收集期错误桶里塞东西）
 #[test]
 fn empty_memory_is_not_injected() {
-    let (_dir, bundles) = workspace_with_bundle();
+    let (_dir, agent_dirs) = workspace_with_agent_dir();
 
     // 文件还不存在
-    let fresh = store_of(&bundles, "b");
+    let fresh = store_of(&agent_dirs, "b");
     assert_eq!(segment(&fresh, "@vfs/agent/b/AGENTS.md").unwrap(), None);
 
     // 只有空白
     fresh.write("  \n\t").unwrap();
     assert_eq!(segment(&fresh, "@vfs/agent/b/AGENTS.md").unwrap(), None);
 
-    // bundle 不存在（无作用域）
-    let gone = store_of(&bundles, "nope");
+    // agent_dir 不存在（无作用域）
+    let gone = store_of(&agent_dirs, "nope");
     assert_eq!(segment(&gone, "@vfs/agent/nope/AGENTS.md").unwrap(), None);
 }
 
 /// 有内容 → 内核排版：标题 + **真实地址** + 「本智能体私有」+ 写入闸门
 ///
-/// 地址与闸门都由本插件给出、也由本插件执行（整包浏览面负责 bundle 目录里
+/// 地址与闸门都由本插件给出、也由本插件执行（整包浏览面负责 agent_dir 目录里
 /// 所有文件的写入），所以印出来的数字是真的。
 #[test]
 fn segment_carries_title_address_and_gates() {
-    let (_dir, bundles) = workspace_with_bundle();
-    let m = store_of(&bundles, "b");
+    let (_dir, agent_dirs) = workspace_with_agent_dir();
+    let m = store_of(&agent_dirs, "b");
     m.write("该智能体记住：先写测试。").unwrap();
 
     let seg = segment(&m, "@vfs/agent/b/AGENTS.md")
@@ -163,8 +163,8 @@ fn segment_carries_title_address_and_gates() {
 /// 注入超预算 → 截断并在片段里指路（截断口径取自内核，本层不另写一份）
 #[test]
 fn segment_truncates_over_the_inject_budget() {
-    let (_dir, bundles) = workspace_with_bundle();
-    let m = store(&bundles, "b", 256, 4);
+    let (_dir, agent_dirs) = workspace_with_agent_dir();
+    let m = store(&agent_dirs, "b", 256, 4);
     m.write("0123456789").unwrap();
 
     let seg = segment(&m, "@vfs/agent/b/AGENTS.md").unwrap().unwrap();
@@ -177,8 +177,8 @@ fn segment_truncates_over_the_inject_budget() {
 /// 节点形状由内核决定 —— 与 work / session 两层同源，不在这里手搓一份
 #[test]
 fn node_shape_comes_from_the_kernel() {
-    let (_dir, bundles) = workspace_with_bundle();
-    let m = store_of(&bundles, "b");
+    let (_dir, agent_dirs) = workspace_with_agent_dir();
+    let m = store_of(&agent_dirs, "b");
     m.write("内容").unwrap();
 
     let n = m.node(&node_spec());

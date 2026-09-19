@@ -20,7 +20,7 @@ fn field(key: &str, label: &str, widget: &str) -> DetailField {
     }
 }
 
-/// Agent bundle 只读概览定义（纯静态结构，开销可忽略）
+/// agent 目录只读概览定义（纯静态结构，开销可忽略）
 pub fn agent_detail_definition() -> DetailDefinition {
     DetailDefinition {
         binding: "info".into(),
@@ -60,7 +60,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
         presets: None,
         badges: vec![],
         actions: vec![
-            // 「浏览内部」入口：bundle 内部（提示词 / 技能 / MCP）在 VDFS 上是
+            // 「浏览内部」入口：agent 目录内部（提示词 / 技能 / MCP）在 VDFS 上是
             // 条目同名目录下的子类别（VDFS 容器寻址），
             // 由页面层 `enter(节点路径)` 进入——取代原容器页。
             DetailAction {

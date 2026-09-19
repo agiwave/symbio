@@ -1,0 +1,5 @@
+# 能力插件：技能（agent-dir/v2 §4 / §7.2）
+# 由宿主已有的技能系统接管——本目录不重复实现技能解释逻辑。
+# SKILL.md 按「目录名 == frontmatter name」存放（见 skill 插件 loader）。
+plugin_provider: skill
+plugin_name: skill

@@ -1,22 +1,25 @@
-# OAB Bundle 清单 —— 全栈开发智能体
-# 规范：docs/design/open-agent-bundle-spec.md §4
-# 能力单元无需在本清单登记：prompts/ skills/ mcps/ 目录里「存在即安装」
-# 目录名统一为复数（行业习惯）：prompts（OAB 原生提示词）/ skills（行业 SKILL）/ mcps（行业 MCP）
-spec: "oab/v1"
+# Agent 目录清单 —— 全栈开发智能体（agent-dir/v2）
+#
+# 本目录是一个**自包含的 Agent 目录**：无论从哪装配，内部结构都一样——
+#   - 作为系统根：宿主直接用它装配（system Agent）
+#   - 作为子 Agent：放到 <系统根>/agent/<id>/ 下，由 agent 插件托管
+# 这两种形态下目录内容完全相同（agent-dir/v2 §1.1 的「同构」），
+# 区别只在「谁托管」与「挂载多少插件」。这是分形结构，不是两种格式。
+#
+# 规范：docs/design/agent-directory-spec.md
+# 能力插件无需在本清单登记：mcp/ skill/ 目录里「存在即安装」（§4.1）。
+spec: "agent-dir/v2"
 id: "com.symbio.fullstack-dev"
 name: "全栈开发智能体"
-version: "1.1.0"
-description: "按 OAB 标准分发的全栈开发 agent：需求澄清→架构决策→分层实现→前后端集成→测试交付"
+version: "2.0.0"
+description: "按 agent-dir/v2 装配的全栈开发 Agent：需求澄清→架构决策→分层实现→前后端集成→测试交付"
 authors:
   - "symbio"
-# 接入门槛（规范 §11.2）：要求宿主支持 oab/v1 主版本
+# 接入门槛（§10）：要求宿主支持 agent-dir 主版本 2，否则拒绝接入
 requires:
-  spec: "^1"
-# 声明式权限（规范 §8）：能力单元可用的宿主 API 上限（参考实现仅作提示）
+  spec: "^2"
+# 声明式权限（§5.3，语义沿用 v1）：能力单元可用的宿主 API 上限
 permissions:
-  host_apis:
-    - "host/log"
-    - "host/info"
   network:
     domains: []
   fs:
@@ -24,5 +27,4 @@ permissions:
       - "."
     write: []
   limits:
-    max_tools: 32
     max_prompt_bytes: 65536

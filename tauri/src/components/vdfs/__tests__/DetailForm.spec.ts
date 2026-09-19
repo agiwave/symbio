@@ -154,7 +154,7 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
     })
 
   /** 概览字段是节点顶层的扩展字段（后端 flatten 下发），不是另一份摘要形状 */
-  const bundleNode = node({
+  const agentDirNode = node({
     name: 'b1',
     title: 'B1',
     kind: 'agent',
@@ -165,7 +165,7 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
 
   it('static 字段从节点顶层取值，options 做值→标签映射', () => {
     const w = mount(DetailForm, {
-      props: { definition: infoDef(), node: bundleNode, capabilities: { mutable: true } },
+      props: { definition: infoDef(), node: agentDirNode, capabilities: { mutable: true } },
     })
     expect(w.text()).toContain('工作区级')
     expect(w.text()).toContain('2')
@@ -175,7 +175,7 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
 
   it('open-container 动作携带 payload.kind 上抛，delete 走机制通道', async () => {
     const w = mount(DetailForm, {
-      props: { definition: infoDef(), node: bundleNode, capabilities: { mutable: true } },
+      props: { definition: infoDef(), node: agentDirNode, capabilities: { mutable: true } },
     })
     const buttons = w.findAll('.ea-btn')
     await buttons[0].trigger('click')

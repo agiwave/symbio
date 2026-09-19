@@ -13,14 +13,14 @@
 //!   子智能体态 = `<agentdir>/AGENTS.md`（[`super::memory`]）。两者都归本插件——
 //!   读写面（`<根>/agent/…`）与注入面因此落在同一个所有者上。
 //!
-//! ⚠️ **指令文件不由子树里的插件实例解释**：子树按 bundle 目录扫描，里面没有
+//! ⚠️ **指令文件不由子树里的插件实例解释**：子树按 agent 目录扫描，里面没有
 //! `agent` 实例（本插件只在系统层存在，否则会自我嵌套）。而本插件恰恰是「认识
 //! Agent 目录」的那个插件——它已经在扫描该目录、装配子树、并把整包内容暴露成 VDFS，
 //! 多读一个 `AGENTS.md` 完全在它的职责内。子树的注册仍经作用域 visitor 加前缀，
 //! 因此与系统侧不冲突（§8.2）。
 //!
 //! 能力（技能 / MCP）由 Agent 目录里的插件实例自己解释，**复用宿主已有的对应系统**
-//! （§3.2 第 2 条）——这正是 v1 的失败之处：那时宿主为 bundle 再写一遍技能与 MCP
+//! （§3.2 第 2 条）——这正是 v1 的失败之处：那时宿主为 agent 目录再写一遍技能与 MCP
 //! 的解析，两条链长期不同步。v2 的最小集合因此只有
 //! `mcp`（工具）+ `skill`（技能）；`work` / `setting` **都不在其中**，理由见
 //! [`SUB_AGENT_PLUGINS`]。
@@ -32,7 +32,7 @@ use crate::plugins::agent::host::config::AgentConfig;
 use crate::plugins::agent::host::instruction;
 use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::memory;
-use crate::plugins::agent::host::store::BundleStore;
+use crate::plugins::agent::host::store::AgentDirStore;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{
@@ -57,7 +57,7 @@ fn config_definition() -> DetailDefinition {
             DetailField::number(
                 "item_max_bytes",
                 "条目写入上限（字节）",
-                "bundle 内单个条目文件（提示词 / 技能 / MCP）的写入字节上限，超出会被拒绝",
+                "agent 目录内单个条目文件（提示词 / 技能 / MCP）的写入字节上限，超出会被拒绝",
                 1.0,
                 1_048_576.0,
                 json!(d.item_max_bytes),
@@ -118,7 +118,7 @@ fn manifest_spec(dir: &std::path::Path) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// AgentBundle 插件主结构。
+/// Agent 插件主结构（宿主接入层）。
 pub struct AgentPlugin {
     /// 已构造的子 Agent 插件树（惰性构造 + 缓存，见 [`Self::sub_agent`]）
     sub_agents: tokio::sync::RwLock<std::collections::HashMap<String, Arc<dyn Plugin>>>,
@@ -175,19 +175,19 @@ impl AgentPlugin {
         self.config.read().await.effective_item_max_bytes()
     }
 
-    /// 依 bundle 记录构造记忆门面（**子智能体态记忆的唯一构造点**）。
+    /// 依 agent 目录记录构造记忆门面（**子智能体态记忆的唯一构造点**）。
     ///
-    /// 内核只认「上限是多少」，不关心它从哪个配置来；bundle 不存在 → 无作用域，
+    /// 内核只认「上限是多少」，不关心它从哪个配置来；agent 目录不存在 → 无作用域，
     /// 之后读 / 注入 / 写三条路各自降级，调用点不需要重复判断。
     pub(crate) async fn memory_store(
         &self,
-        bundles: &BundleStore,
-        bundle_id: &str,
+        agent_dirs: &AgentDirStore,
+        agent_id: &str,
     ) -> crate::symbio_core::MemoryFile {
         let cfg = self.config.read().await;
         memory::store(
-            bundles,
-            bundle_id,
+            agent_dirs,
+            agent_id,
             cfg.effective_memory_max_bytes(),
             cfg.effective_memory_inject_bytes(),
         )
@@ -226,9 +226,9 @@ impl AgentPlugin {
         }
 
         // 目录经 store 解析：**两级都找**（工作区级覆盖全局级）。只在全局根拼
-        // 路径会让工作区里安装的 Agent 找不到——v1 的 `attach_bundle` 走的就是
+        // 路径会让工作区里安装的 Agent 找不到——v1 的挂载逻辑走的就是
         // store，v2 不能比它少看一层。
-        let store = BundleStore::new(self.config_file.dir().dir(), ctx.get(WORKDIR).as_deref());
+        let store = AgentDirStore::new(self.config_file.dir().dir(), ctx.get(WORKDIR).as_deref());
         let record = store.get(id)?;
         let dir = record.dir.clone();
 
@@ -293,7 +293,7 @@ impl AgentPlugin {
     ) {
         let sub = ctx.fork();
         sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-        // 子树的自证：它所在的那个 Agent（bundle id）。父 ctx 里通常已有（会话绑定了
+        // 子树的自证：它所在的那个 Agent（agent id）。父 ctx 里通常已有（会话绑定了
         // 这个智能体），这里显式再置一次——装配子树这件事本身就说明了它是谁。
         sub.set(AGENT_ID, id.to_string());
         let scoped: Arc<dyn CapabilityVisitor> =
@@ -311,7 +311,7 @@ impl AgentPlugin {
 
     /// 注入**某个子智能体**自己的 `AGENTS.md`（`<agentdir>/AGENTS.md`）。
     ///
-    /// 空文件 / bundle 不存在 / 读取失败 → 静默跳过——「还没写过」不是故障，
+    /// 空文件 / agent 目录不存在 / 读取失败 → 静默跳过——「还没写过」不是故障，
     /// 不该往收集期错误桶里塞东西。
     async fn contribute_agent_memory(
         &self,
@@ -319,7 +319,7 @@ impl AgentPlugin {
         ctx: &Arc<dyn InvokeRequest>,
         visitor: &Arc<dyn CapabilityVisitor>,
     ) {
-        let store = BundleStore::new(self.config_file.dir().dir(), ctx.get(WORKDIR).as_deref());
+        let store = AgentDirStore::new(self.config_file.dir().dir(), ctx.get(WORKDIR).as_deref());
         let memory = self.memory_store(&store, id).await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
         let address = crate::symbio_core::vdfs::absolute_addr(ctx, &memory::rel_path(id));
@@ -360,7 +360,7 @@ impl AgentPlugin {
     ///
     /// v2 早期由宿主把子树 `WORKDIR` 指到 Agent 目录，好让其中的 `work` 实例拥有
     /// `<agentdir>/AGENTS.md`。那条路已废弃（`work` 只认工作区），但**已安装的
-    /// bundle 目录里还躺着**那个被自动补建的 `work/PLUGIN.yml`——不处理的话它会继续
+    /// agent 目录里还躺着**那个被自动补建的 `work/PLUGIN.yml`——不处理的话它会继续
     /// 被容器扫描加载，于是 `{workdir}/AGENTS.md` 会被系统侧与本子树各注入一次。
     ///
     /// 处理方式是**改名而不是删除**：`PLUGIN.yml` → `PLUGIN.yml.disabled`。
@@ -370,7 +370,7 @@ impl AgentPlugin {
     fn archive_retired_work_tree(agent_dir: &std::path::Path) {
         let manifest = agent_dir.join(PLUGIN_WORK).join(PLUGIN_FILE);
         if !manifest.exists() {
-            return; // 幂等：已归档，或该 bundle 从来没有过
+            return; // 幂等：已归档，或该 agent 目录从来没有过
         }
         let archived = manifest.with_extension("yml.disabled");
         match std::fs::rename(&manifest, &archived) {
@@ -400,7 +400,7 @@ impl AgentPlugin {
 
     /// 参与 `available_options` 收集：贡献「智能体」选择项。
     ///
-    /// 形态：`sub` 节点，子项 = 「不使用 Agent」 + 各可用 bundle；每个子项
+    /// 形态：`sub` 节点，子项 = 「不使用 Agent」 + 各可用 agent 目录；每个子项
     /// 是「会话状态落库」invoke（`metadata.agent_id`），选中即持久化。
     /// 当前选中值由宿主注入的 `ctx[AGENT_ID]` 回填——本插件无需加载会话。
     async fn contribute_options(&self, ctx: &Arc<dyn InvokeRequest>) {
@@ -417,11 +417,11 @@ impl AgentPlugin {
         // 展示顺序号段约定：20 = 智能体（见 session::options 模块文档）
         const ORDER: i32 = 20;
 
-        let store = BundleStore::new(self.config_file.dir().dir(), workdir.as_deref());
-        let bundles = store.list();
+        let store = AgentDirStore::new(self.config_file.dir().dir(), workdir.as_deref());
+        let agent_dirs = store.list();
 
         let mut children: Vec<crate::symbio_core::schemas::options::OptionNode> =
-            Vec::with_capacity(bundles.len() + 1);
+            Vec::with_capacity(agent_dirs.len() + 1);
         children.push(
             crate::symbio_core::schemas::options::OptionNode::session_state(
                 "agent:none",
@@ -439,7 +439,7 @@ impl AgentPlugin {
         } else {
             None
         };
-        for record in &bundles {
+        for record in &agent_dirs {
             let m = &record.manifest;
             if current.as_deref() == Some(m.id.as_str()) {
                 current_label = Some(m.name.clone());
@@ -461,13 +461,13 @@ impl AgentPlugin {
                 .with_order(ORDER)
                 .with_description("选择认知人格（可不选）");
 
-        // 回填当前选中值（值 = agent_id；展示文本 = bundle 名 / 不使用 Agent）
+        // 回填当前选中值（值 = agent_id；展示文本 = agent 目录名 / 不使用 Agent）
         let node = match current_label {
             Some(label) => {
                 let value = current.clone().unwrap_or_default();
                 node.with_value_label(value, label)
             }
-            // 选中的 bundle 已不存在（陈旧 id）：仅展示值本身，前端仍可重选
+            // 选中的 agent 目录已不存在（陈旧 id）：仅展示值本身，前端仍可重选
             None => node.with_value(current.clone().unwrap_or_default()),
         };
 
@@ -506,11 +506,11 @@ impl Plugin for AgentPlugin {
         }
 
         // ── 会话级「智能体选择」复用既有通用机制 ctx[AGENT_ID]（orchestrator
-        // 统一解析：请求显式 > metadata.agent_id）；本插件把它解析为 bundle 实例 id。
+        // 统一解析：请求显式 > metadata.agent_id）；本插件把它解析为 agent 目录实例 id。
         // 注意：agent_run（子智能体委托）**始终注册**，不受"是否选择智能体"影响——
         // 它是会话基础能力：未指定 agent_id 时默认沿用当前会话的智能体，
         // 两者皆空则子会话以无智能体的纯对话模式运行。
-        let bundle_id = ctx
+        let agent_id = ctx
             .get(AGENT_ID)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
@@ -526,7 +526,7 @@ impl Plugin for AgentPlugin {
         self.contribute_instruction(&ctx, &tool_visitor).await;
 
         // ── VDFS 挂载点（`<根>/agent`）──
-        // 本插件自身就是 provider：bundle 由 BundleStore 自管目录（工作区级 +
+        // 本插件自身就是 provider：agent 目录由 AgentDirStore 自管目录（工作区级 +
         // 全局级双层），列 / 读 / 写（整包导入）/ 删 / 导出 直接由
         // `impl VdfsProvider for AgentPlugin` 承载（见 `super::vdfs`）。
         {
@@ -537,29 +537,29 @@ impl Plugin for AgentPlugin {
         }
 
         // ── agent_run：无条件注册 ──
-        let store = BundleStore::new(self.config_file.dir().dir(), workdir.as_deref());
+        let store = AgentDirStore::new(self.config_file.dir().dir(), workdir.as_deref());
         tool_visitor
             .register_batch(vec![super::subagent::AgentRunCapability::new(
                 workdir.clone(),
                 self.config_file.dir().dir().to_path_buf(),
-                super::subagent::format_bundles_brief(&store.list()),
+                super::subagent::format_agent_dirs_brief(&store.list()),
                 self.router.clone(),
             ) as Arc<dyn Capability>])
             .await;
 
         // ── 已选择智能体 → 装配它的能力 ──
-        if let Some(bundle_id) = bundle_id {
-            match self.sub_agent(&bundle_id, &ctx).await {
+        if let Some(agent_id) = agent_id {
+            match self.sub_agent(&agent_id, &ctx).await {
                 // v2：子 Agent 是一棵 composite 插件树，能力经代理层并集进来
                 Some(tree) => {
-                    self.forward_to_sub_agent(&tree, &bundle_id, &ctx, &tool_visitor)
+                    self.forward_to_sub_agent(&tree, &agent_id, &ctx, &tool_visitor)
                         .await
                 }
                 // §10：不匹配必须拒绝接入，且不得静默降级为「无人格的通用助手」。
                 // 迁移（v1 → v2）已在 [`Self::sub_agent`] 里试过；走到这里说明目录
                 // 根本没有合规 manifest，错误信息写明双侧版本。
                 None => {
-                    let dir = self.config_file.dir().dir().join(&bundle_id);
+                    let dir = self.config_file.dir().dir().join(&agent_id);
                     let reason = match manifest::load(&dir) {
                         Some(m) => manifest::validate(&m).unwrap_err(),
                         None => format!(
@@ -573,7 +573,7 @@ impl Plugin for AgentPlugin {
                     report_error(
                         &ctx,
                         PLUGIN_AGENT,
-                        format!("智能体 `{bundle_id}` 拒绝接入：{reason}"),
+                        format!("智能体 `{agent_id}` 拒绝接入：{reason}"),
                     )
                     .await;
                 }
@@ -599,14 +599,14 @@ impl Plugin for AgentPlugin {
 
     /// 路由入口：**无自有协议**。
     ///
-    /// bundle 的浏览 / 导入 / 删除 / 导出全部由 VDFS 承接（`<根>/agent/…`）：
+    /// agent 目录的浏览 / 导入 / 删除 / 导出全部由 VDFS 承接（`<根>/agent/…`）：
     /// `vdfs/list` / `vdfs/write`（二进制 = 导入）/ `vdfs/delete` / 节点动作
     /// `export`。因此这里不再有任何路由——插件只对宿主暴露装配能力。
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         // 绝对地址 = 上下文父地址 + 相对地址（协议级指路信息，封装入口统一）
         Err(PluginError::NotFound(format!(
-            "agent 无自有协议路由 `{path}`：bundle 一律经 VDFS 访问（{}）",
+            "agent 无自有协议路由 `{path}`：agent 目录一律经 VDFS 访问（{}）",
             crate::symbio_core::vdfs::absolute_addr(&ctx, &format!("{PLUGIN_AGENT}/…"))
         )))
     }

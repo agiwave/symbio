@@ -274,7 +274,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 ### 7.3 智能体 / Model（跨插件贡献）
 
 - agent 插件贡献 `sub` 节点：子项 = 「不使用 Agent」（`value = ""`）+ 各可用
-  bundle；当前值由宿主注入的 `ctx[AGENT_ID]` 回填。
+  agent 目录；当前值由宿主注入的 `ctx[AGENT_ID]` 回填。
 - model 插件贡献 `sub` 节点：子项 = 各启用 Provider；无可用 Provider 时仍
   下发**禁用态**节点并给出引导文案（前端零特判）。当前值由 `ctx[PROVIDER_ID]`
   或默认 Provider 回填。

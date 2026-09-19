@@ -716,7 +716,7 @@ S20 把**会话**运行态搬到了节点上，但**工具调用**的运行态�
 
 ### 变更
 - **挂载根 = 装进来的智能体清单**。此前 `.vdfs/agent/AGENTS.md` 排在列表**最前**，
-  用「排最前」来暗示它不是一个包——但列表本身没有语义，读者仍会把它读成某个 bundle。
+  用「排最前」来暗示它不是一个包——但列表本身没有语义，读者仍会把它读成某个 agent 目录。
   现在它整条移出列表，挂载根与 session / model 列表同口径：**只有装进来的东西**。
 - **入口归设置页**：`AgentPlugin::traverse` 经既有 `ConfigurableVisitor` 通道补一条
   节点（`instruction_node()` 改 `path` 后注册），复用挂载根里那份指令节点，
@@ -725,7 +725,7 @@ S20 把**会话**运行态搬到了节点上，但**工具调用**的运行态�
   `traverse` 三处共用同一份形状）。
 
 ### 门禁
-- 新增 `mount_root_lists_only_installed_agents`：断言挂载根只列 bundle，
+- 新增 `mount_root_lists_only_installed_agents`：断言挂载根只列 agent 目录，
   防止「排最前」这种隐式约定日后被重新引入。
 
 ***
@@ -1107,13 +1107,13 @@ reqwest = { version = "0.13.4", default-features = false, features = [
 - **`session` 不再读 `{homedir}/AGENTS.md`**：删掉 `prompt::global_instruction()` 与
   `session-global-instructions` 段。会话不是那个文件的所有者（既不给地址也不限容），
   读一遍注入只是把「智能体自身的指令」临时挂在会话上。
-- **记忆的读写与闸门只在内核**：`BundleStore` 只回答「记忆文件在哪」（`memory_path`），
+- **记忆的读写与闸门只在内核**：`AgentDirStore` 只回答「记忆文件在哪」（`memory_path`），
   不再自带读写与自己的字节闸门；读写、两道闸门、片段排版、节点形状全部来自
   `symbio_core::memory`（与 work / session 同源）。
-- **旧装配清理**：旧 bundle 目录里被自动补建的 `work/PLUGIN.yml` 由
+- **旧装配清理**：旧 agent 目录里被自动补建的 `work/PLUGIN.yml` 由
   `archive_retired_work_tree` 改名为 `PLUGIN.yml.disabled`（= 卸载，幂等且可逆）。
-- **挂载根保留名**：`.vdfs/agent/AGENTS.md` 是本应用自身的指令，不是名为它的 bundle
-  （bundle id 首字符必须是小写字母或数字，不可能相撞）。
+- **挂载根保留名**：`.vdfs/agent/AGENTS.md` 是本应用自身的指令，不是名为它的 agent 目录
+  （agent id 首字符必须是小写字母或数字，不可能相撞）。
 
 规范同步：`docs/design/agent-directory-spec.md` §6.2 从「`work` 实例换作用域」
 改为「所有权判据 + 禁止靠改指作用域实现」，附录 A.1 / A.3 记录新做法。
@@ -1180,9 +1180,9 @@ reqwest = { version = "0.13.4", default-features = false, features = [
 改的不只是路径，更是依赖方向：**插件目录由父插件经 `PLUGIN_DIR` 传入**（`dir_from_ctx`），
 插件实现与注释里都不再出现 `<homedir>/…` 这类硬编码：
 
-- `agent`：`BundleStore::new(global_root, workdir)` —— 根由调用方给（装配态来自
+- `agent`：`AgentDirStore::new(global_root, workdir)` —— 根由调用方给（装配态来自
   `AgentPlugin` 自己的 `PluginDir`），不再自己拼 `HomedirRegistry/…/agent`；
-  `AgentRunCapability` 增加 `bundle_root` 字段透传，工作区级改 `{workdir}/.symbio/agent`。
+  `AgentRunCapability` 增加 `agent_dir_root` 字段透传，工作区级改 `{workdir}/.symbio/agent`。
 - `model` / `mcp` / `skill`：存储根改为本插件自己的目录（`DirVdfs::at` / `SingleFileVdfs::at`），
   不再按插件名反推落位；`skill` 新增 `dir` 字段。
 - `DirVdfs::for_category` **删除**（已无使用者）；`SingleFileVdfs::for_category` 保留但
@@ -1489,7 +1489,7 @@ node scripts/doc-find.mjs 闸门 --limit 30
 |---|---|---|---|
 | 工作区 | **work（新插件）** | `{workdir}/AGENTS.md` | `.vdfs/work/AGENTS.md` |
 | 会话 | session | `{会话目录}/AGENTS.md` | `.vdfs/session/<id>/AGENTS.md` |
-| 智能体 | agent | `{bundle 目录}/AGENTS.md` | `.vdfs/agent/<id>/AGENTS.md` |
+| 智能体 | agent | `{agent 目录}/AGENTS.md` | `.vdfs/agent/<id>/AGENTS.md` |
 
 - **内核** `symbio_core::memory`（`MemoryFile` / `InjectedMemory` / `SegmentSpec` /
   `NodeSpec` / `render_segment`）：读写、两道闸门、片段排版、节点形状。给的是
@@ -1541,15 +1541,15 @@ node scripts/doc-find.mjs 闸门 --limit 30
 ### 4. agent 记忆的**存储**也收口到内核（三层不再有第二份闸门）
 
 前面只统一了 agent 记忆的**渲染**（复用内核 `render_segment`），读写仍走
-`BundleStore::read_memory` / `write_memory`——它自带一份字节闸门与自己的错误文案，
+`AgentDirStore::read_memory` / `write_memory`——它自带一份字节闸门与自己的错误文案，
 与 work / session 两层仍是**第二份口径**。本次收口：
 
-- `BundleStore` 只保留 `memory_path`（回答「记忆文件在哪」），
+- `AgentDirStore` 只保留 `memory_path`（回答「记忆文件在哪」），
   `read_memory` / `write_memory` **删除**——存储层不再持有闸门；
 - 新增 `agent/host/memory.rs`（本层的「个性」：落位 / 地址 / 标题 / 空提示 / 节点规格），
   与 `work/memory.rs`、`session/memory.rs` 回到同一形态；
-- `AgentPlugin::memory_store(bundles, bundle_id)` 成为**记忆的唯一构造点**：作用域
-  （bundle 是否存在）与两道闸门在此一次收口，`vdfs` 的 list / stat / read / write 与
+- `AgentPlugin::memory_store(agent_dirs, agent_id)` 成为**记忆的唯一构造点**：作用域
+  （agent 目录是否存在）与两道闸门在此一次收口，`vdfs` 的 list / stat / read / write 与
   `traverse` 的注入全部复用它；
 - VDFS 记忆节点改由内核 `MemoryFile::node` 产出（`list` 与 `stat` 同源），手搓的
   `memory_node(size)` 删除。**两处顺带对齐**：节点 `title` 由文件名改为「智能体记忆」

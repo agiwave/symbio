@@ -108,7 +108,7 @@ pub const EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 ///
 /// **被本模块删掉的两个常量（2026-09-18）**：`AGENT_CHAT = "agent/chat"` 与
 /// `AGENT_CREATE = "agent/create"`。它们全仓**零调用方**，而且描述的路径**根本不存在**
-/// ——`agent` 插件的 `route` 恒返回 `NotFound`（bundle 一律经 VDFS 访问），
+/// ——`agent` 插件的 `route` 恒返回 `NotFound`（agent 目录一律经 VDFS 访问），
 /// 子智能体派生走的是 [`SESSION_CHAT_SEND`]。
 ///
 /// 留着它们比没有更糟：`AGENT_CHAT` 的文档曾写着「子智能体会话执行入口

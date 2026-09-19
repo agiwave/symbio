@@ -81,10 +81,10 @@
 
 ### 管理路由（**全部下线**）
 
-> Bundle 的**访问 / 新建 / 删除 / 导出已全部由 VDFS 承担**（`<根>/agent/…`）：
+> agent 目录的**访问 / 新建 / 删除 / 导出已全部由 VDFS 承担**（`<根>/agent/…`）：
 > `vdfs/list` / `vdfs/read` / `vdfs/write`（新建类型 `zip`，即整包导入）/
 > `vdfs/delete` / 节点动作 `export`（`vdfs/action`）。
-> 故 `bundle/list|get|upload|delete|preview` 已于 S12 删除、`bundle/export`
+> 故 `agent` 的旧 `list|get|upload|delete|preview` 路由已于 S12 删除、导出动作
 > 于 S13 删除——**agent 插件不再有任何自有协议路由**，`route()` 直接返回
 > `NotFound` 并指引到 VDFS。
 

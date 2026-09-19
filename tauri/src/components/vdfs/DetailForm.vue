@@ -18,7 +18,7 @@
               由页面写回 `vdfs/write`（后端 validate_manifest 兜底）。
   - info    ：只读概览。无保存，static 字段取值优先来自 `values`，
               缺省时取节点顶层的扩展字段，动作仅限 open-container / delete 等
-              机制通道动作（如 agent bundle 概览）。
+              机制通道动作（如 agent 目录概览）。
   - option  ：数据来自外部、保存只交回纯字段值——VDFS 的 `form` 节点
               （VdfsFormDetail 适配）与级联选项表单都走这一形态。
 

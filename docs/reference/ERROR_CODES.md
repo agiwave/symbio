@@ -132,8 +132,8 @@ try {
 |--------|----------|------|
 | `MODEL_AUTH_ERROR` | model | API Key 无效或过期 |
 | `MODEL_RATE_LIMIT` | model | 请求频率超限 |
-| `BUNDLE_VALIDATION` | agent | Bundle manifest 校验失败 |
-| `BUNDLE_NOT_FOUND` | agent | Bundle 实例不存在 |
+| `BUNDLE_VALIDATION` | agent | agent 目录 manifest 校验失败 |
+| `BUNDLE_NOT_FOUND` | agent | agent 目录实例不存在 |
 | `MCP_CONNECTION` | mcp | MCP Server 连接失败 |
 | `TELEGRAM_AUTH` | telegram | Bot Token 无效 |
 

@@ -97,7 +97,7 @@ cargo clippy --lib --tests -- -D warnings
 ├── PLUGIN.yml               # 系统级插件（home）的配置：工作区与最近记录
 ├── plugins/
 │   ├── model/               # 模型资源（<id>/provider.json）+ PLUGIN.yml
-│   ├── agent/               # Agent Bundle 存储
+│   ├── agent/               # agent 目录存储
 │   └── ...                  # 其他插件：配置（PLUGIN.yml）与数据同处一个目录
 ├── agents/                  # Agent 定义文件
 ├── storage/                 # 认知存储 (DirStorage 或 SQLite)

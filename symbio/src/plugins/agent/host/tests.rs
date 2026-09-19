@@ -7,7 +7,7 @@
 //! + 能力插件目录（`skill/` `mcp/` `setting/`），存在即安装，无需在 manifest 里登记。
 
 use super::plugin::AgentPlugin;
-use super::store::BundleStore;
+use super::store::AgentDirStore;
 use crate::symbio_core::{vdfs, vdfs_provider::VdfsProvider};
 use crate::symbio_core::{
     CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor,
@@ -86,7 +86,7 @@ async fn agent_import_traverse_and_memory() {
     let workdir = dir.path().to_str().unwrap();
 
     // ── 1. 导入（zip → Agent 目录）──
-    let store = BundleStore::new(dir.path().join("agent"), Some(workdir));
+    let store = AgentDirStore::new(dir.path().join("agent"), Some(workdir));
     let zip_bytes = build_agent_zip("com.symbio.test-fixture", "^2");
     let result = store
         .import(&zip_bytes, false)
@@ -141,7 +141,7 @@ async fn agent_import_traverse_and_memory() {
         .unwrap();
     assert!(
         injected.contains("你是全栈开发人格"),
-        "注入内容应来自该 bundle 自己的 AGENTS.md: {injected}"
+        "注入内容应来自该 agent 目录自己的 AGENTS.md: {injected}"
     );
     assert!(
         injected.contains("@vfs/agent/com.symbio.test-fixture/AGENTS.md"),
@@ -177,7 +177,7 @@ async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     let dir = tempfile::tempdir().unwrap();
     let workdir = dir.path().to_str().unwrap();
 
-    let store = BundleStore::new(dir.path().join("agent"), Some(workdir));
+    let store = AgentDirStore::new(dir.path().join("agent"), Some(workdir));
     // requires.spec = ^9 与宿主主版本 2 不匹配 → 导入即拒绝（规范 §10）
     let zip_bytes = build_agent_zip("com.acme.future", "^9");
     let err = store.import(&zip_bytes, false).unwrap_err();
@@ -321,7 +321,7 @@ async fn mount_root_lists_only_installed_agents() {
     let agent_root = tmp.path().join("agent");
     std::fs::create_dir_all(&agent_root).unwrap();
 
-    let store = BundleStore::new(agent_root.clone(), Some(&workdir));
+    let store = AgentDirStore::new(agent_root.clone(), Some(&workdir));
     store
         .import(&build_agent_zip("com.acme.demo", "^2"), false)
         .unwrap();
@@ -356,7 +356,7 @@ async fn traverse_declares_config_and_instruction_in_settings() {
     // 系统智能体自身的指令：挂在 agent 目录的**父目录**（homedir）
     std::fs::write(tmp.path().join("AGENTS.md"), "你是系统智能体。").unwrap();
 
-    let store = BundleStore::new(agent_root.clone(), Some(&workdir));
+    let store = AgentDirStore::new(agent_root.clone(), Some(&workdir));
     store
         .import(&build_agent_zip("com.acme.demo", "^2"), false)
         .unwrap();

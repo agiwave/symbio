@@ -58,7 +58,7 @@ registerVdfsRenderer('session', RendererStub)
 const SESSION: VdfsNewType = { ext: 'session', title: '会话' }
 const MODEL: VdfsNewType = { ext: 'model', title: '模型' }
 /** `source = file` 的类型：选文件即完成，不进详情页 */
-const BUNDLE: VdfsNewType = { ext: 'zip', title: '整包', source: 'file' }
+const AGENT_DIR_IMPORT: VdfsNewType = { ext: 'zip', title: '整包', source: 'file' }
 
 function makeNode(name: string): VdfsNode {
   return {
@@ -183,7 +183,7 @@ describe('VdfsWorkbench 提示态：选类型', () => {
 
 describe('VdfsWorkbench 提示态：从本地文件新建', () => {
   it('选中 file 类型 ⇒ 进文件提示态：导入（未选文件时禁用）/ 上一步 / 取消', async () => {
-    installStub({ types: [SESSION, BUNDLE] })
+    installStub({ types: [SESSION, AGENT_DIR_IMPORT] })
     const w = bench()
     await clickNew(w)
     await click(w, '整包')
@@ -194,7 +194,7 @@ describe('VdfsWorkbench 提示态：从本地文件新建', () => {
   })
 
   it('恰好一种类型且是 file 类型 ⇒ 点「新建」直达文件提示态（无类型选择这一步）', async () => {
-    installStub({ types: [BUNDLE] })
+    installStub({ types: [AGENT_DIR_IMPORT] })
     const w = bench()
     await clickNew(w)
 
@@ -202,7 +202,7 @@ describe('VdfsWorkbench 提示态：从本地文件新建', () => {
   })
 
   it('「上一步」回到类型选择；「取消」收起提示', async () => {
-    installStub({ types: [SESSION, BUNDLE] })
+    installStub({ types: [SESSION, AGENT_DIR_IMPORT] })
     const w = bench()
     await clickNew(w)
     await click(w, '整包')

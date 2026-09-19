@@ -102,8 +102,8 @@ pub(crate) async fn handle_list_options(
             if let Some(pid) = meta_str(meta, "provider_id") {
                 collect_ctx.set(crate::symbio_core::PROVIDER_ID, pid);
             }
-            // workdir 是 agent 插件发现「工作区级 bundle」的依据
-            // （BundleStore 两级发现：工作区级 + 全局级），必须一并注入
+            // workdir 是 agent 插件发现「工作区级 agent 目录」的依据
+            // （AgentDirStore 两级发现：工作区级 + 全局级），必须一并注入
             if let Some(wd) = meta_str(meta, "workdir") {
                 collect_ctx.set(WORKDIR, wd);
             }

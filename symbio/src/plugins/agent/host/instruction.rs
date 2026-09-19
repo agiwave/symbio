@@ -33,7 +33,7 @@
 //!
 //! | 模块 | 管哪个作用域 | 地址 |
 //! |---|---|---|
-//! | [`super::memory`] | 子智能体：`<agentdir>/AGENTS.md`（随 bundle 分发） | `<根>/agent/<id>/AGENTS.md` |
+//! | [`super::memory`] | 子智能体：`<agentdir>/AGENTS.md`（随 agent 目录分发） | `<根>/agent/<id>/AGENTS.md` |
 //! | 本模块 | 系统智能体：`{homedir}/AGENTS.md`（宿主应用级设置） | `<根>/agent/AGENTS.md` |
 //!
 //! 两者共用内核（`symbio_core::memory`）的读写、两道闸门、片段排版与节点形状——
@@ -63,7 +63,7 @@ pub const DESCRIPTION: &str =
 
 /// 系统智能体自身目录 = **本插件目录的父目录**（容器的既有装配规则）
 ///
-/// 取不到父目录（理论上不该发生）时退回本插件目录：那样作用域收窄成 bundle 目录，
+/// 取不到父目录（理论上不该发生）时退回本插件目录：那样作用域收窄成 agent 目录，
 /// 也不会写到别的地方去。
 pub fn host_dir(plugin_dir: &Path) -> PathBuf {
     plugin_dir

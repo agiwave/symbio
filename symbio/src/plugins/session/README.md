@@ -327,7 +327,7 @@ session:
 |---|---|---|---|
 | 工作区 | work | `{workdir}/AGENTS.md` | `<根>/work/AGENTS.md` |
 | **会话** | **session** | **`{会话目录}/AGENTS.md`** | **`<根>/session/<id>/AGENTS.md`** |
-| 智能体 | agent | `{bundle 目录}/AGENTS.md` | `<根>/agent/<id>/AGENTS.md` |
+| 智能体 | agent | `{agent 目录}/AGENTS.md` | `<根>/agent/<id>/AGENTS.md` |
 
 三层形态完全一样（一个 UTF-8 文本文件 + 两道容量闸门 + 一行头信息的提示词片段 + 一个 VDFS 读写节点），因此**共用一份内核实现**（`symbio_core::memory`）。各插件只提供「个性」：落位、地址、标题、空内容提示、两道闸门开多大。
 

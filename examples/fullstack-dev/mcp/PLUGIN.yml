@@ -1,0 +1,16 @@
+# 能力插件：MCP server 与工具（agent-dir/v2 §4 / §7.2）
+# 由宿主已有的 MCP 客户端接管——本目录不重新发明工具运行时，也不定义宿主专有执行器。
+# 身份字段 plugin_provider / plugin_name 由装配方据此构造插件实例（附录 A.2）。
+plugin_provider: mcp
+plugin_name: mcp
+
+# 工具声明（authoring 形态）：宿主首次加载会把各 server 明细迁入受管资源，
+# 并从本文件移除该键（见 mcp 插件迁移逻辑）。stdio 形态需 command；http/sse 需 url。
+# 下面的 demo server 仅作格式示例；宿主尚未桥接 MCP 客户端时会记一条告警并跳过
+# （诚实缺位，不静默吞掉）。如不需要 MCP 工具，删掉 servers 块即可。
+servers:
+  demo:
+    command: npx
+    args:
+      - "-y"
+      - "@modelcontextprotocol/server-everything"

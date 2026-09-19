@@ -215,7 +215,7 @@ impl ChangeSubscriptions {
     }
 }
 
-/// 自管变更源的 provider（session / agent bundle）直接持有一份表实例，
+/// 自管变更源的 provider（session / agent 目录）直接持有一份表实例，
 /// 不必经全局注册表；集中式存储的 provider 只有访问层句柄、拿不到 provider
 /// 实例，故按 `kind` 共享一张全局表。两种用法共用同一套投递纪律。
 ///
@@ -236,7 +236,7 @@ fn hub_of(kind: &str) -> Arc<ChangeSubscriptions> {
 /// 广播一次变更（订阅方据此刷新，**非轮询**）。无订阅者时直接返回。
 ///
 /// 由集中式存储实现（`crate::providers::vdfs_service` 的三种拓扑）与目录自管型
-/// provider（agent bundle）在写 / 删成功后调用。
+/// provider（agent 目录）在写 / 删成功后调用。
 pub fn notify_change(kind: &str, path: &str, change: &str) {
     hub_of(kind).notify(&VdfsChange::new(path, change));
 }
