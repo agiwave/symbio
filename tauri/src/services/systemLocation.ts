@@ -123,14 +123,23 @@ export function parseRemoteAddress(input: string): { url: string; key: string } 
   return { url, key }
 }
 
-/** 远端地址格式是否合法（http/https 且含 host） */
+/**
+ * 远端地址格式是否合法（http/https 且含 host）
+ *
+ * ⚠️ 判据说的是**主机名**，不是「主机:端口」：必须先去掉端口再判定。
+ * 此前拿 `localhost:8080` 整体去比 `'localhost'`，于是最常见的开发目标
+ * （本机网关跑在 8080）被误判为非法——带端口的 localhost 进不去。
+ */
 export function isValidRemoteUrl(url: string): boolean {
   if (!/^https?:\/\//i.test(url)) return false
-  const host = url.replace(/^https?:\/\//i, '').split('/')[0].split('?')[0]
+  const hostPort = url.replace(/^https?:\/\//i, '').split('/')[0].split('?')[0]
+  if (!hostPort) return false
+  // 去端口：IPv6 字面量是 `[::1]:8080` 形式，方括号内的冒号不能当端口分隔符
+  const host = hostPort.startsWith('[')
+    ? hostPort.slice(0, hostPort.indexOf(']') + 1)
+    : hostPort.split(':')[0]
   if (!host) return false
-  const isIp = host
-    .split(':')
-    .every((seg) => seg === '' || /^\d+$/.test(seg) || seg.startsWith('['))
+  const isIp = /^\d+(\.\d+){3}$/.test(host) || host.startsWith('[')
   return host === 'localhost' || host.includes('.') || isIp
 }
 
