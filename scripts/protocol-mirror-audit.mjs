@@ -191,6 +191,20 @@ const ENUM_SETS = [
  *
  * `tsLocal` 是前端**自持**的字段（后端不下发、前端自己组装的）——每条必须写明
  * 理由。没登记又对不上的，一律报错：报错信息里给出三条出路（改名 / 登记 / 删掉）。
+ *
+ * ## 新增一条登记的步骤（顺序有语义）
+ *
+ * 1. **先探，再登记**。写个一次性探针复用本文件的 `rustStructFields` /
+ *    `tsInterfaceFields` 逐对比对，确认**差异为 0** 再登记。差异非 0 说明前端已经
+ *    漂移了——那要**先修前端**（或确认这是有意的自持，走 `tsLocal`），而不是把
+ *    红的登记进来。
+ * 2. **登记**。加进 `STRUCT_SETS`，`what` 写人话（报错信息里只出现 `what` 与结构体名，
+ *    不写清用途等于让人回头读源码）。
+ * 3. **同步铺夹具**（`protocol-mirror-audit.test.mjs` 的 `BASE`）。**少铺一对，基线
+ *    就会因「结构体 / 接口不存在」变红**——这是刻意的耦合，保证夹具与本清单不脱节。
+ * 4. **跑门禁**：`node scripts/gate.mjs --only=docs,facts`（它会先跑本脚本自己的回归
+ *    测试，再跑真仓库）。只跑真仓库不够——真仓库全绿只证明"现在没漂"，不证明"漂了
+ *    会红"。
  */
 const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
