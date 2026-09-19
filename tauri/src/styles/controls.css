@@ -84,10 +84,6 @@
   background: var(--surface-selected);
   color: var(--accent);
 }
-.nav-btn.back {
-  margin: 0.5rem auto 0;
-}
-
 /* 计数角标（nav-btn 右上角） */
 .nav-count {
   position: absolute;

@@ -33,22 +33,21 @@
 <template>
   <VdfsWorkbench :key="reloadKey" :addr="addr" @open="onOpen">
     <template #rail-header>
-      <!-- 非首页（push 出来的地址页）：左上角返回键，回 push 来源页 -->
-      <button
-        v-if="showBack"
-        class="nav-btn back"
-        title="返回"
-        aria-label="返回"
-        @click="goBack"
-      >
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <!--
+        push 出来的地址页：左上角是**返回按钮**（带文字，不是光秃秃一个图标），
+        且**不显示主 logo**——它是首页的品牌位，跟着 push 进每一层子页面
+        既无意义，也正好占掉返回键该在的位置。
+      -->
+      <button v-if="showBack" class="rail-back" title="返回" aria-label="返回" @click="goBack">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="19" y1="12" x2="5" y2="12" />
           <polyline points="12 19 5 12 12 5" />
         </svg>
+        <span class="rail-back-text">返回</span>
       </button>
-      <div class="logo-area">
-        <div class="logo" title="Symbio">S</div>
-        <span class="logo-text">Symbio</span>
+      <!-- 首页：主 logo（正式品牌资源 `assets/logo.svg`，不再是占位字母块） -->
+      <div v-else class="logo-area">
+        <img :src="logoUrl" alt="Symbio" class="app-logo" />
       </div>
     </template>
 
@@ -66,6 +65,8 @@ import VdfsWorkbench from '@/components/vdfs/VdfsWorkbench.vue'
 import HomedirEntry from '@/components/common/HomedirEntry.vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { VDFS_ROOT } from '@/schemas/vdfs'
+// 正式品牌资源（与「关于」页同源；此前主窗口用的是一个占位字母块）
+import logoUrl from '../assets/logo.svg'
 
 const route = useRoute()
 const router = useRouter()
@@ -124,35 +125,55 @@ async function onHomedirReloaded() {
 </script>
 
 <style scoped>
-/* logo 区（侧栏 header 插槽内容） */
+/* 首页品牌位：正式 logo 资源（assets/logo.svg，512×512 带圆角底板） */
 .logo-area {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--border-default);
 }
 
-.logo {
+.app-logo {
   width: 2rem;
   height: 2rem;
+  display: block;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+}
+
+/*
+ * push 页的返回按钮：**带文字的按钮**，不是光秃秃一个图标。
+ *
+ * 侧栏只有 56px（`--sidebar-width`），故图标与文字紧凑横排、字号压到 0.7rem；
+ * 加一条边框让它读作「按钮」而不是又一个导航项——这正是原实现（一个裸箭头
+ * 图标）被读成「图标」的原因。
+ */
+.rail-back {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  font-size: 1rem;
-  color: var(--text-on-accent);
-  background: var(--accent);
+  gap: 0.25rem;
+  width: calc(100% - 0.75rem);
+  margin: 0.5rem auto 0;
+  padding: 0.4rem 0;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  flex-shrink: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
-.logo-text {
-  font-size: var(--font-size-md);
-  font-weight: 600;
+.rail-back:hover {
+  background: var(--surface-hover);
   color: var(--text-primary);
+}
+
+.rail-back-text {
   white-space: nowrap;
-  display: none;
+  line-height: 1;
 }
 </style>
