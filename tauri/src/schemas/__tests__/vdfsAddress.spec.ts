@@ -62,6 +62,11 @@ describe('vdfsBrowserPathOf — 数据地址 → 浏览器地址', () => {
     expect(vdfsBrowserPathOf('/etc/passwd')).toBe('/vdfs')
   })
 
+  it('null / undefined 也兜底首页（路由参数可能整体缺失）', () => {
+    expect(vdfsBrowserPathOf(null as unknown as string)).toBe('/vdfs')
+    expect(vdfsBrowserPathOf(undefined as unknown as string)).toBe('/vdfs')
+  })
+
   it('前缀陷阱：.vdfsXXX 不算在 .vdfs 之下', () => {
     expect(vdfsBrowserPathOf('.vdfsomething')).toBe('/vdfs')
     expect(vdfsBrowserPathOf('.vdfs2/session')).toBe('/vdfs')
@@ -85,6 +90,11 @@ describe('isVdfsDeepPage — 是否 push 出来的地址页', () => {
   it('/vdfs/<something> 是深页面', () => {
     expect(isVdfsDeepPage('/vdfs/session')).toBe(true)
     expect(isVdfsDeepPage('/vdfs/session/abc123')).toBe(true)
+  })
+
+  it('路径缺失时不炸、也不算深页面', () => {
+    expect(isVdfsDeepPage(null as unknown as string)).toBe(false)
+    expect(isVdfsDeepPage(undefined as unknown as string)).toBe(false)
   })
 
   it('其他路由都不是深页面', () => {
