@@ -58,13 +58,13 @@
           :key="n.path"
           :title="n.title || n.name"
           :subtitle="n.description"
-          :status="cardStatus(n)"
-          :status-title="cardStatusTitle(n)"
+          :status="cardStatusOf(n)"
+          :status-title="cardStatusTextOf(n)"
           :show-status="Boolean(n.status)"
-          :badge="badgeOf(n)"
+          :badge="cardBadgeOf(n)"
           badge-kind="primary"
-          :tags="tagsOf(n)"
-          :icon="iconOf(n)"
+          :tags="cardTagsOf(n)"
+          :icon="cardIconOf(n)"
           :is-active="selectedId === n.path"
           @click="onItemClick(n)"
         />
@@ -187,16 +187,22 @@ import VdfsCard from '@/components/common/VdfsCard.vue'
 import DetailShell from './DetailShell.vue'
 import { useVdfs } from '@/composables/useVdfs'
 import { useVdfsPrompt } from '@/composables/useVdfsPrompt'
-import { getVdfsRenderer, dirIconOf, resolveVdfsRenderer } from '@/registry/vdfsTypes'
+import { getVdfsRenderer, resolveVdfsRenderer } from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
 import '@/registry/vdfsRenderers'
+// 列表卡片的呈现映射（状态点 / 文案 / 徽标 / 标签 / 图标）
+import {
+  cardBadgeOf,
+  cardIconOf,
+  cardStatusOf,
+  cardStatusTextOf,
+  cardTagsOf,
+} from '@/registry/vdfsCards'
 import {
   isVdfsDir,
   vdfsJoin,
   type VdfsNode,
 } from '@/schemas/vdfs'
-import { getVdfsIcon, getVdfsIconFor } from '@/registry/vdfsIcons'
-import { relativeTime } from '@/utils/time'
 
 const props = defineProps<{
   /** 绑定的 vdfs 数据地址（如 `.vdfs` 或 `.vdfs/session/<id>`）；变化 = 整体重载 */
@@ -374,91 +380,14 @@ async function onCreated(id: string) {
   if (target) void select(target)
 }
 
-// ==================== 列表项展示（机制级，无类型知识） ====================
+// ==================== 列表项展示 ====================
 //
-// **状态点显示与否由节点自己声明**：`status` 为空串（后端的 `VDFS_STATUS_NONE`）
-// = 该资源**没有运行态**（设置分区 / 配置条目这类静态文档），列表因此不画点。
-// 节点 `status` 的缺省值是 `active`，所以「没有点」只可能是后端**显式声明**的
-// 结果，不是前端猜出来的类型知识。
-function cardStatus(n: VdfsNode): 'active' | 'working' | 'disabled' | 'warning' | 'error' | 'muted' {
-  switch (n.status) {
-    case 'working': return 'working'
-    case 'disabled': return 'disabled'
-    case 'error': return 'error'
-    case 'active': return 'active'
-    default: return 'muted'
-  }
-}
-
-/**
- * 状态点的 hover 提示（纯 UI 文案映射）。
- *
- * ⚠️ 节点 `status` 是**后端取值**（`working` / `active` / `disabled` / `error`…），
- * 直接拿来当 tooltip 就是把机制词摆给用户看——与 `ext` 徽标是同一类问题。
- * 这里只做**文案**映射：它不参与任何判据（能力判据只认访问位），也不改变状态点
- * 的颜色语义（颜色仍由 `cardStatus` 决定）。
- *
- * 未知取值返回**空串**：宁可不显示提示，也不要把后端枚举漏出去。
- */
-const STATUS_TEXT: Record<string, string> = {
-  working: '进行中',
-  active: '就绪',
-  disabled: '已停用',
-  error: '出错',
-}
-function cardStatusTitle(n: VdfsNode): string {
-  return STATUS_TEXT[n.status ?? ''] ?? ''
-}
-
-/**
- * 徽标：**只有目录**给徽标（子项数），文件一律不给。
- *
- * 文件原先显示 `n.ext`——那是**渲染器键**（`form` / `session` / `model`），
- * 是「谁来渲染这一项」的机制细节，不是给用户看的类型名。用户要看的是标题、
- * 描述与状态；`ext` 属于实现，列表里不出现。
- */
-function badgeOf(n: VdfsNode): string | undefined {
-  if (!isVdfsDir(n)) return undefined
-  return typeof n.children === 'number' ? String(n.children) : undefined
-}
-
-/**
- * 标签：后端声明的类型特有标签（`meta_tags`，VDFS 只透传）+ 相对时间。
- *
- * ⚠️ **不渲染机制级字段**：访问位（`w` = 可写）是**能力判据**，用来决定「能不能
- * 保存 / 删除 / 新建」，不是给用户看的标签——能力在详情页的动作上自会体现。
- * 同理不显示 `ext` / `path` / `kind` 这类机制字段。
- */
-function tagsOf(n: VdfsNode): Array<{ label: string; kind?: 'muted' | 'primary' }> {
-  const out: Array<{ label: string; kind?: 'muted' | 'primary' }> = []
-  // `meta_tags` 是后端决定的类型特有标签（VDFS 只透传），
-  // 前端原样渲染、不含语义（如会话的工作目录名 / 消息数）
-  const tags = n.meta_tags
-  if (Array.isArray(tags)) {
-    for (const label of tags) {
-      if (typeof label === 'string' && label) out.push({ label, kind: 'muted' })
-    }
-  }
-  const t = relativeTime(n.updated_at)
-  if (t) out.push({ label: t, kind: 'muted' })
-  return out
-}
-
-/**
- * 图标：目录用目录名映射的图标；文件按「kind + 项级扩展名」查项级图标，
- * 再回退 kind 级。全部是纯 UI 映射（VDFS 不下发图标）。
- * 项级标识直接读节点顶层的 `config_type`（后端 flatten 下发），缺省回落节点名。
- */
-function iconOf(n: VdfsNode) {
-  if (isVdfsDir(n)) return dirIconOf(n.name) ?? undefined
-  const ext = typeof n.config_type === 'string' && n.config_type ? n.config_type : n.name
-  return (
-    getVdfsIconFor({ kind: n.kind, config_type: ext }) ??
-    getVdfsIcon(n.kind) ??
-    dirIconOf(n.kind) ??
-    undefined
-  )
-}
+// 卡片上那几个可见元素取什么值（状态点 / 状态文案 / 徽标 / 标签 / 图标），
+// 一律查 `registry/vdfsCards` —— 那五条映射每条都带着「不许回退」的约定，
+// 规则与实现放在同一处才钉得住，也才测得动。本控件不再持有它们的任何一份副本。
+//
+// 注：**状态点画不画**由节点自己声明（`status` 为空串 = 该资源没有运行态），
+// 判据在模板里就是 `:show-status="Boolean(n.status)"`，不进注册表。
 </script>
 
 <style scoped>
