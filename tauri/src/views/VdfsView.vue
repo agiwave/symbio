@@ -64,7 +64,7 @@ import { useRoute, useRouter } from 'vue-router'
 import VdfsWorkbench from '@/components/vdfs/VdfsWorkbench.vue'
 import HomedirEntry from '@/components/common/HomedirEntry.vue'
 import { useSessionsStore } from '@/stores/sessions'
-import { VDFS_ROOT } from '@/schemas/vdfs'
+import { vdfsAddrOf, vdfsBrowserPathOf, isVdfsDeepPage } from '@/schemas/vdfsAddress'
 // 正式品牌资源（与「关于」页同源；此前主窗口用的是一个占位字母块）
 import logoUrl from '../assets/logo.svg'
 
@@ -72,34 +72,26 @@ const route = useRoute()
 const router = useRouter()
 
 // ==================== 数据地址 ↔ 浏览器地址 ====================
+//
+// 换算规则在 `schemas/vdfsAddress`（唯一来源）：路由宿主不该持有第二份，
+// 且那里才测得动（本文件依赖 vue-router / store / 子组件）。
 
 /** 绑定给控件的数据地址：`/vdfs` → `.vdfs`；`/vdfs/<dir…>` → `.vdfs/<dir…>` */
-const addr = computed(() => {
-  const d = route.params.dir
-  const rel = (Array.isArray(d) ? d.join('/') : ((d as string) || '')) as string
-  return rel ? `${VDFS_ROOT}/${rel}` : VDFS_ROOT
-})
-
-/** 数据地址 → 浏览器地址（`.vdfs/<rel>` → `/vdfs/<rel>`；根 → `/vdfs`） */
-function browserPathOf(target: string): string {
-  if (target === VDFS_ROOT) return '/vdfs'
-  if (target.startsWith(`${VDFS_ROOT}/`)) return `/vdfs/${target.slice(VDFS_ROOT.length + 1)}`
-  return '/vdfs'
-}
+const addr = computed(() => vdfsAddrOf(route.params.dir as string | string[] | undefined))
 
 /**
  * 控件请求钻入某目录的数据地址：push 对应的浏览器地址（新地址页，
  * 同一个 VdfsView + 同一个控件承接；返回键回 push 来源页）。
  */
 function onOpen(target: string) {
-  const path = browserPathOf(target)
+  const path = vdfsBrowserPathOf(target)
   if (path !== route.path) void router.push(path)
 }
 
 // ==================== 返回键（非首页地址页，左上角） ====================
 
 /** 首页 = `/vdfs`（数据地址 `.vdfs`）；更深的地址都是 push 出来的页面 */
-const showBack = computed(() => route.path.startsWith('/vdfs/'))
+const showBack = computed(() => isVdfsDeepPage(route.path))
 
 /**
  * 返回 = 回 **push 来源页**（浏览器历史 back），不是父目录——push 之前在哪个
