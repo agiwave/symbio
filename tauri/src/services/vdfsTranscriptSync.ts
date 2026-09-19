@@ -63,7 +63,7 @@
 
 import { subscribe as busSubscribe, type BusEvent } from './eventBus'
 import { readVdfs, statVdfs } from './vdfs'
-import { vdfsSessionScheme } from './vdfsScheme'
+import { ensureVdfsSessionScheme, vdfsSessionScheme } from './vdfsScheme'
 import {
   VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_CREATED,
@@ -317,6 +317,15 @@ export function startTranscriptSync(sink: TranscriptSink): void {
   }
   _G.__symTranscriptSyncStarted = true
   _sink = sink
+
+  // 自己也要触发一次解析：本函数在 `refreshList` **之前**启动（见 MainLayout），
+  // 而 refreshList 才是「有会话 ⇒ 推导得出转写段」的时机。若宿主不跑 refreshList，
+  // 这里不补一次就会永久停在引导窗口里（转写变更一律被跳过）。
+  // 零会话时会失败（转写段推导不出来）——那是预期，随后由 refreshList /
+  // createSession 补上，故只留痕不抛。
+  void ensureVdfsSessionScheme().catch((e: unknown) =>
+    logger.warn('[vdfs-transcript]', '地址方案解析未完成（等清单到手后会补一次）', e),
+  )
 
   _unsubscribe = busSubscribe({ kind: VDFS_EVENT_KIND }, (busEvent: BusEvent) => {
     const change = busEvent.data?.data as VdfsChange | undefined

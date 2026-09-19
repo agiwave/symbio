@@ -97,8 +97,12 @@ export async function ensureSessionMountDir(): Promise<string> {
     (n.new_types ?? []).some((t) => t.ext === VDFS_EXT_SESSION),
   )
   if (!hit) {
+    // 注意：`listVdfs` 失败时是**吞掉异常返回空列表**的，所以这里可能是「真没有
+    // 挂载点」，也可能是「列目录失败了」。两种都说出来——只报前一种会让人去查
+    // 后端注册，而真正的故障在网络 / IPC。
     throw new Error(
-      `会话挂载点未找到：${VDFS_ROOT} 下没有声明可新建 ${VDFS_EXT_SESSION} 的子节点`,
+      `会话挂载点未找到：${VDFS_ROOT} 下没有声明可新建 ${VDFS_EXT_SESSION} 的子节点` +
+        `（根清单为空或列目录失败——后者会被 listVdfs 吞成空列表，见 services/vdfs.ts）`,
     )
   }
   cachedMountDir = fullAddr(VDFS_ROOT, hit)
