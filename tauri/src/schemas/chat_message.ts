@@ -225,13 +225,22 @@ export function messageTextOf(content: MessageContent | undefined | null): strin
   return ''
 }
 
+/**
+ * 会话消息（后端 `symbio_core::schemas::session::chat_message::ChatMessage` 的镜像）。
+ *
+ * **本接口没有 `agent_id` / `prompt` 两个顶层字段**——它们曾在此声明，但后端
+ * `ChatMessage` 从不下发：`agent_id` 在 `meta` 里（见 `registry/messageTypes.agentNameOf`），
+ * `prompt` 在后端是 `#[serde(skip_serializing)]`（内容在 `meta.prompt`）。
+ * 留着它们只会让人以为能从顶层读到。字段与后端的对应由
+ * `scripts/protocol-mirror-audit.mjs` 的 D 组守着。
+ */
 export interface ChatMessage {
   id: string;
   parent_id?: string;
+  /** 树形展开：前端按 `parent_id` 组装的父引用（后端只给扁平列表） */
   parent?: ChatMessage;
   role?: ChatRole;
   type?: ChatMessageType;
-  agent_id?: string;
   name?: string;
   content?: MessageContent;
   status?: MessageStatus;
@@ -239,7 +248,7 @@ export interface ChatMessage {
   error?: string;
   meta?: Record<string, any>;
   timestamp?: number;
-  prompt?: string;
+  /** 树形展开：前端按 `parent_id` 组装的子列表（后端只给扁平列表） */
   children?: ChatMessage[];
   /**
    * 会话内消息的**唯一权威顺序锚点**：后端写入时分配单调自增序号，

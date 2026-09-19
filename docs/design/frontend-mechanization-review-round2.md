@@ -309,7 +309,8 @@ P12 的风险与收益都最高：它是"多路写同一份数据"，而 ADR-015
 |---|---|---|
 | `vdfs_provider.rs` / `protocol.rs` 的 `pub const X: &str` | ✅ 纳入守卫（**自动发现**） | A 组：同名交集逐字比对，**3 → 31 条** |
 | Rust enum + `serde(rename_all = "snake_case")` | ✅ 纳入守卫（**集合相等**） | C 组：**4 张词表**（角色 / 类型 / 状态 / 恢复动作） |
-| 对应 Rust struct（字段名与类型映射） | ⛔ 暂不做，**已知缺口** | 生成侧否决；将来若要补，仍走审计（比对字段名集合） |
+| 对应 Rust struct 的**字段名** | ✅ 纳入守卫 | D 组：**9 对**结构体字段，只查"前端字段能否在后端线格式里找到" |
+| 对应 Rust struct 的**类型映射** | ⛔ 不做 | 正则读不出 `Option<u64>` → `number`，泛型 / 嵌套会失控；收益低于字段名 |
 | `messageTypes.ts` 文案 / `vdfsCards.ts` 约定 / `vdfs-form.ts` 派生 / 路径代数 | ⛔ **不可生成** | 纯业务判断，必须手写 |
 
 **决策是"审计"而非"生成"**（ADR-019）：`serde` 在**格式层**已单源，重复只在
@@ -330,5 +331,9 @@ P12 的风险与收益都最高：它是"多路写同一份数据"，而 ADR-015
   `resume_action_wire_words_are_snake_case` 的注释**早就点名要求**"前端
   `ResumePayload.action` 的字面量必须与它逐字相等"——契约喊了话，前端没接。
   现已建 `RESUME_ACTIONS` 词表，5 处生产字面量全部收敛到常量。
+- **`ChatMessage` 的两个死字段**（`agent_id` / `prompt`）：D 组上线当次抓出。前端
+  单方面声明，后端从不下发——`agent_id` 在 `meta` 里（`agentNameOf` 读 `meta.agent_id`）、
+  `prompt` 在后端是 `#[serde(skip_serializing)]`（内容在 `meta.prompt`）；前端对两者
+  均**零点访问、零构造点**。已删除，并在接口上方留了说明。
 - 审计脚本的 `✓` / `✗` 曾被编码事故替换成 `?`（红绿都显示 `?`，且 NO_COLOR 下
   无从区分），已修。

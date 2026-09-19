@@ -31,10 +31,23 @@
  *   （`ToolCall`），下面那套转换就会「看起来正确」而实际全错——所以声明本身也是
  *   被检查项。
  *
+ * **D. 结构体字段**（前端字段必须能在后端找到）
+ *   A / C 两组守的是**取值**，这一组守**字段名**。后端把 `parent_id` 改名、前端
+ *   还读旧名时，读到的永远是 `undefined`——**编译期不报、运行期不报**，只表现为
+ *   "某个功能悄悄不工作了"。它比常量漂移更难发现，所以要有守卫。
+ *
+ *   只查一个方向：**前端持有的字段必须在后端线格式里存在**（或登记在 `tsLocal`
+ *   作为"前端自持"）。反方向不查——前端不必镜像后端全部字段，多一个字段不构成
+ *   问题，少一个才是。只比字段名不比类型：类型映射正则读不出来，而"改字段名"本就是
+ *   后端最常见的契约变更。
+ *
  * ## 它**不**声称什么
  *
  * 判定基于正则读源码，不是 AST：注释掉的常量同样会命中（缺席检查因此偏严，
  * 这符合它的意图——连注释里都不该教人写回去）。
+ *
+ * D 组不解析 `Option<T>` / 泛型 / 嵌套类型，也不处理结构体级 `rename_all`
+ * （遇到会**报错**而不是默默算错）。
  *
  * ## 用法
  *
@@ -70,14 +83,15 @@ const BAD = '✗'
 
 // ==================== A. 常量镜像 ====================
 
+const VDFS_PROVIDER_RS = 'symbio/src/symbio_core/vdfs_provider.rs'
+const VDFS_PROTOCOL_RS = 'symbio/src/plugins/vdfs/protocol.rs'
+const VDFS_TS = 'tauri/src/schemas/vdfs.ts'
+
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
-const RUST_CONST_FILES = [
-  'symbio/src/symbio_core/vdfs_provider.rs',
-  'symbio/src/plugins/vdfs/protocol.rs',
-]
+const RUST_CONST_FILES = [VDFS_PROVIDER_RS, VDFS_PROTOCOL_RS]
 
 /** 前端常量源 */
-const TS_CONST_FILES = ['tauri/src/schemas/vdfs.ts']
+const TS_CONST_FILES = [VDFS_TS]
 
 /**
  * 名字不同、但确实是同一份协议词的镜像对。
@@ -163,6 +177,69 @@ const ENUM_SETS = [
   },
 ]
 
+// ==================== D. 结构体字段 ====================
+
+/**
+ * 后端**结构体** ↔ 前端**接口**。
+ *
+ * 登记原则：**前端确实镜像了它、且漂移代价高**的才进来。前端不必镜像全部结构体
+ * （很多响应只是取几个字段就用掉了），把没有镜像关系的对塞进来只会制造噪音。
+ *
+ * `tsLocal` 是前端**自持**的字段（后端不下发、前端自己组装的）——每条必须写明
+ * 理由。没登记又对不上的，一律报错：报错信息里给出三条出路（改名 / 登记 / 删掉）。
+ */
+const STRUCT_SETS = [
+  {
+    what: '会话消息',
+    rust: { file: CHAT_MESSAGE_RS, struct: 'ChatMessage' },
+    ts: { file: CHAT_MESSAGE_TS, interface: 'ChatMessage' },
+    tsLocal: {
+      parent: '树形展开：前端按 parent_id 组装的父引用（后端只给扁平列表）',
+      children: '树形展开：前端按 parent_id 组装的子列表（后端只给扁平列表）',
+    },
+  },
+  {
+    what: 'VDFS 节点',
+    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsNode' },
+    ts: { file: VDFS_TS, interface: 'VdfsNode' },
+  },
+  {
+    what: 'VDFS 变更',
+    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsChange' },
+    ts: { file: VDFS_TS, interface: 'VdfsChange' },
+  },
+  {
+    what: 'VDFS 访问位',
+    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsAccess' },
+    ts: { file: VDFS_TS, interface: 'VdfsAccess' },
+  },
+  {
+    what: 'VDFS 节点内容',
+    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsContent' },
+    ts: { file: VDFS_TS, interface: 'VdfsContent' },
+  },
+  {
+    what: 'VDFS 可新建类型',
+    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsNewType' },
+    ts: { file: VDFS_TS, interface: 'VdfsNewType' },
+  },
+  {
+    what: 'VDFS 写入响应',
+    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsWriteResponse' },
+    ts: { file: VDFS_TS, interface: 'VdfsWriteResponse' },
+  },
+  {
+    what: 'VDFS 字段错误',
+    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsFieldError' },
+    ts: { file: VDFS_TS, interface: 'VdfsFieldError' },
+  },
+  {
+    what: 'VDFS 校验错误',
+    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsValidationError' },
+    ts: { file: VDFS_TS, interface: 'VdfsValidationError' },
+  },
+]
+
 // ==================== 提取 ====================
 
 /** 后端：全部 `pub const NAME: &str = "v"`（含 `pub(crate)`） */
@@ -241,18 +318,7 @@ function rustEnumVariants(src, name) {
 function hasRenameAllSnakeCase(src, name) {
   const m = enumHead(src, name)
   if (!m) return false
-  const lines = src.slice(0, m.index).split(/\r?\n/)
-  const attrs = []
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const t = lines[i].trim()
-    if (t === '' || t.startsWith('//')) continue
-    if (t.startsWith('#[')) {
-      attrs.push(t)
-      continue
-    }
-    break
-  }
-  return attrs.some((a) => /rename_all\s*=\s*"snake_case"/.test(a))
+  return declAttrs(src, m.index).some((a) => /rename_all\s*=\s*"snake_case"/.test(a))
 }
 
 /** Rust 变体名 → `serde(rename_all = "snake_case")` 的线格式词 */
@@ -279,6 +345,88 @@ function tsArrayValues(src, name) {
   }
   if (values.length === 0) return { values: null, problem: `词表数组 ${name} 是空的` }
   return { values, problem: null }
+}
+
+/** 声明（enum / struct）**正上方**的连续属性行 */
+function declAttrs(src, idx) {
+  const lines = src.slice(0, idx).split(/\r?\n/)
+  const attrs = []
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = lines[i].trim()
+    if (t === '' || t.startsWith('//')) continue
+    if (t.startsWith('#[')) {
+      attrs.push(t)
+      continue
+    }
+    break
+  }
+  return attrs
+}
+
+/**
+ * 后端结构体的**线格式字段名**。
+ *
+ * 三个 serde 属性会改变"字段名是否出现在 JSON 里"，必须处理：
+ * - `rename = "x"`            → 线格式名是 `x`（如 `msg_type` → `type`）；
+ * - `skip` / `skip_serializing` → **不下发**，字段名不存在。
+ *   注意 `skip_serializing_if` 是**条件**跳过（有值时照发），不算；
+ * - `flatten`                 → 内层 map 的键展开到外层，**字段名本身不存在**
+ *   （如 `VdfsNode::attributes`，前端用索引签名表达同一件事）。
+ *
+ * 结构体级的 `rename_all` 会整体改写字段名，本检查器不处理——**报错**而不是
+ * 默默算错（与 C 组把 `rename_all` 声明本身列为检查项同一立场）。
+ */
+function rustStructFields(src, name) {
+  const m = src.match(new RegExp(`(?:pub|pub\\(crate\\))\\s+struct\\s+${name}\\b`))
+  if (!m) return { fields: null, problem: `后端未找到结构体 ${name}` }
+  if (declAttrs(src, m.index).some((a) => /rename_all\s*=/.test(a))) {
+    return { fields: null, problem: `${name} 用了结构体级 rename_all，本检查器不处理` }
+  }
+  const body = braceBlock(src, m.index)
+  if (body === null) return { fields: null, problem: `${name} 的结构体体解析失败` }
+
+  const out = []
+  let drop = false
+  let rename = null
+  for (const raw of body.split(/\r?\n/)) {
+    const t = raw.trim()
+    if (!t || t.startsWith('//')) continue
+    if (t.startsWith('#[')) {
+      // `\bskip_serializing\b(?!_)` 才不会把 `skip_serializing_if` 误判成跳过
+      if (/\bskip\b|\bskip_serializing\b(?!_)|flatten\b/.test(t)) drop = true
+      const r = t.match(/\brename\s*=\s*"([^"]+)"/)
+      if (r) rename = r[1]
+      continue
+    }
+    const fm = t.match(/^(?:pub\s+)?(\w+)\s*:/)
+    if (!fm) continue
+    if (!drop) out.push(rename ?? fm[1])
+    drop = false
+    rename = null
+  }
+  return { fields: out, problem: null }
+}
+
+/**
+ * 前端接口的字段名。
+ *
+ * 索引签名（`[k: string]: unknown`）与方法签名（`f(): void`）都不匹配字段正则，
+ * 自动跳过——前者正是"其余键 flatten 到顶层"的写法，与后端 `#[serde(flatten)]`
+ * 对位，本就不该当成一个字段。
+ */
+function tsInterfaceFields(src, name) {
+  const m = src.match(new RegExp(`(?:export\\s+)?interface\\s+${name}\\b`))
+  if (!m) return { fields: null, problem: `前端未找到接口 ${name}` }
+  const body = braceBlock(src, m.index)
+  if (body === null) return { fields: null, problem: `${name} 的接口体解析失败` }
+  const out = []
+  for (const raw of body.split(/\r?\n/)) {
+    const t = raw.trim()
+    if (!t || t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) continue
+    const fm = t.match(/^([A-Za-z_$][\w$]*)\??\s*:/)
+    if (fm) out.push(fm[1])
+  }
+  return { fields: out, problem: null }
 }
 
 /**
@@ -461,6 +609,57 @@ for (const e of ENUM_SETS) {
   console.log(dim(`      ${e.rust.file} ↔ ${e.ts.file}`))
 }
 
+// ---------- D ----------
+console.log()
+console.log('--- D. 结构体字段（前端字段必须能在后端找到）---')
+for (const s of STRUCT_SETS) {
+  const rustSrc = readIfExists(s.rust.file)
+  const tsSrc = readIfExists(s.ts.file)
+  const problems = []
+  let rustFields = null
+  let tsFields = null
+
+  if (rustSrc === null) {
+    problems.push(`后端文件不存在：${s.rust.file}`)
+  } else {
+    const got = rustStructFields(rustSrc, s.rust.struct)
+    if (got.problem) problems.push(got.problem)
+    else rustFields = got.fields
+  }
+
+  if (tsSrc === null) {
+    problems.push(`前端文件不存在：${s.ts.file}`)
+  } else {
+    const got = tsInterfaceFields(tsSrc, s.ts.interface)
+    if (got.problem) problems.push(got.problem)
+    else tsFields = got.fields
+  }
+
+  if (rustFields !== null && tsFields !== null) {
+    const rset = new Set(rustFields)
+    const local = s.tsLocal ?? {}
+    const extra = tsFields.filter((f) => !rset.has(f) && !local[f])
+    if (extra.length) problems.push(`前端持有后端不存在的字段：${extra.join(', ')}`)
+  }
+
+  if (problems.length === 0) {
+    const localCount = Object.keys(s.tsLocal ?? {}).length
+    const via = localCount ? dim(`（另含 ${localCount} 个前端自持）`) : ''
+    console.log(
+      `  ${green(OK)} ${s.rust.struct} ↔ ${s.ts.interface} —— ${s.what}` +
+        `（后端 ${rustFields.length} / 前端 ${tsFields.length} 字段）${via}`,
+    )
+    continue
+  }
+
+  errors += problems.length
+  console.log(`  ${red(BAD)} ${s.rust.struct} ↔ ${s.ts.interface} —— ${s.what}`)
+  for (const msg of problems) console.log(`      ${red(msg)}`)
+  console.log(dim(`      ${s.rust.file} ↔ ${s.ts.file}`))
+  console.log(dim('      三条出路：后端换了名字 → 改前端；前端自持 → 登记本对的 tsLocal；'))
+  console.log(dim('      前端压根没用它 → 删掉该字段（类型里的死字段无人看守）。'))
+}
+
 // ---------- 收尾 ----------
 console.log()
 console.log(`Errors: ${errors}`)
@@ -471,7 +670,8 @@ if (errors > 0) {
     yellow(
       '  A 组：前端持有的 VDFS_* 常量必须与后端同名常量逐字相等（改后端就要改前端镜像）。\n' +
         '  B 组：会话地址段不该出现在前端——它们是运行期发现的数据，不是常量。\n' +
-        '  C 组：后端闭集枚举的取值集合必须与前端词表相等（枚举加变体就要加词）。',
+        '  C 组：后端闭集枚举的取值集合必须与前端词表相等（枚举加变体就要加词）。\n' +
+        '  D 组：前端接口的字段必须能在后端结构体里找到（改名会让前端静默读到 undefined）。',
     ),
   )
   process.exit(1)
@@ -480,7 +680,7 @@ if (errors > 0) {
 console.log(
   green(
     `  A 组 ${mirrorCount} 条常量镜像 + B 组 ${ABSENT.length} 项缺席检查 + ` +
-      `C 组 ${ENUM_SETS.length} 张闭集词表，全部一致` +
+      `C 组 ${ENUM_SETS.length} 张闭集词表 + D 组 ${STRUCT_SETS.length} 对结构体字段，全部一致` +
       `（扫描 ${frontendFiles.length} 个前端文件）`,
   ),
 )

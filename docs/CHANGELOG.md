@@ -18,6 +18,76 @@
 
 ***
 
+## 2026-09-20: 跨栈守卫 D 组（结构体字段）+ 删掉 ChatMessage 的两个死字段
+
+承接上一条（A 组常量镜像 / C 组闭集词表），把 ADR-019 里记为「已知缺口」的
+**结构体字段守卫**补上。
+
+### 1. D 组：结构体字段（新增）
+
+后端**结构体** ↔ 前端**接口**的字段名比对，**9 对**：`ChatMessage`、`VdfsNode`、
+`VdfsChange`、`VdfsAccess`、`VdfsContent`、`VdfsNewType`、`VdfsWriteResponse`、
+`VdfsFieldError`、`VdfsValidationError`。
+
+**只查一个方向**：前端持有的字段必须能在后端**线格式**里找到。反方向不查——前端
+不必镜像后端全部字段（如 `ChatMessage.response_id` 前端不用），多一个字段不构成问题，
+少一个才是。只比**字段名**不比类型：类型映射正则读不出来，而"改字段名"本就是后端
+最常见的契约变更。
+
+提取器处理会改变"字段名是否出现在 JSON 里"的 serde 属性：
+
+| 属性 | 处理 |
+|---|---|
+| `rename = "x"` | 线格式名取 `x`（如 `msg_type` → `type`） |
+| `skip` / `skip_serializing` | **不下发**，字段名不存在 |
+| `skip_serializing_if` | **条件**跳过（有值时照发）⇒ **不算**不下发 |
+| `flatten` | 内层 map 的键展开到外层，字段名本身不存在（`VdfsNode::attributes`） |
+
+结构体级 `rename_all` **报错**而不是默默算错（与 C 组把 `rename_all` 声明本身列为
+检查项同一立场）。
+
+### 2. 上线当次抓出的两个死字段（已删）
+
+`ChatMessage` 的 **`agent_id`** 与 **`prompt`**：前端单方面声明，后端从不下发。
+
+- `agent_id` 在 **`meta`** 里（`registry/messageTypes.agentNameOf` 读 `meta.agent_id`）；
+- `prompt` 在后端是 `#[serde(skip_serializing)]`（内容在 `meta.prompt`）。
+
+两处**零点访问、零构造点**——纯幽灵字段。删除后在 `ChatMessage` 上方留了一段说明
+（解释"为什么没有这两个字段"），免得后来者加回来。
+
+**这类字段此前无人看守**：TS interface 里的字段既不是"引用"也不是"定义"，
+`dead-code-audit` 看不见它们。
+
+### 3. 顺带核实：前端选 agent 的链路（与本次删除相关）
+
+删 `ChatMessage.agent_id` 时核实过——**agent 选择不走消息字段**：
+
+1. 选项行（含"智能体"）由**后端下发**（`worker/session/options/list`）；
+2. 点选 → `useSessionOptions.dispatch(action)` → `callPlugin(action.endpoint, action.payload)`；
+   payload 形如 `{ metadata: { agent_id } }`，后端按 `session/update` 的**浅合并**写进
+   `session.metadata`（落库）；前端把同一份 patch **本地镜射**到会话 store；
+3. 发消息时 `CHAT_SEND` **不传** `agent_id`（只带 `session_id` / `message` / `mode` /
+   `risk_level`），后端 orchestrator 从 `session.metadata` 回退取值。
+
+`useSessionOptions.ts` 的"零业务"约定（前端不含 `workdir` / `agent_id` / `risk_level`
+等业务字段名，只搬运 `action.payload` 与 `action.bind`）正是它不该在 `ChatMessage`
+里声明 `agent_id` 的理由。
+
+（另记一条**未使用**的分支：`services/plugin.ts:328` 的 header 通道
+`request.agent_id → metadata[HEAD_AGENT_ID]`，全前端没有生产调用点传它。）
+
+### 验证
+
+- `protocol-mirror-audit`：A 31 + B 2 + C 4 + **D 9 对**，全绿
+- `protocol-mirror-audit.test.mjs`：**30 条**回归测试全过（原 20，新增 10 条 D 组用例，
+  覆盖 rename / skip / skip_serializing_if / flatten / 结构体级 rename_all）
+- `vitest run`：47 文件 / 646 测试全过
+- `vue-tsc --noEmit`：干净
+- 其余八个审计脚本全过；`gen-current-facts --check` 一致
+
+***
+
 ## 2026-09-20: 跨栈契约守卫扩展 + 测试卡死根因修复（ADR-019）
 
 **性质：机制化守卫扩展 ×2 + 一个前端词表缺口 + 一个测试基础设施缺陷**。

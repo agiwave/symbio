@@ -121,9 +121,11 @@ $ node scripts/gate.mjs --only=docs,facts         → 14 / 15，失败项 = gen-
 
 > **当前状态（2026-09-20）：已解决。** A 组从"手工登记 3 条"改为**自动发现**同名
 > `VDFS_*` 常量（**3 → 31 条**），并新增 **C 组闭集词表**（后端
-> `serde(rename_all = "snake_case")` 枚举 ↔ 前端词表数组，4 张）。决策与理由见
-> `docs/DECISIONS.md` **ADR-019**；`protocol-mirror-audit.test.mjs` 的回归测试同步
-> 从 9 条扩到 20 条。下方原文保留作问题描述。
+> `serde(rename_all = "snake_case")` 枚举 ↔ 前端词表数组，4 张）与 **D 组结构体
+> 字段**（9 对，比对字段名；上线当次抓出 `ChatMessage` 的 `agent_id` / `prompt`
+> 两个死字段）。决策与理由见 `docs/DECISIONS.md` **ADR-019**；
+> `protocol-mirror-audit.test.mjs` 的回归测试同步从 9 条扩到 **30 条**。
+> 下方原文保留作问题描述。
 
 `scripts/protocol-mirror-audit.mjs:55-96` 只守 3 对 `kind/ext` + 2 条缺席检查。但前端
 `tauri/src/schemas/vdfs.ts:18-35` 另持有 **10 个 VDFS 操作名的字面量副本**（后端 `VDFS_OPS` 共 14 个，

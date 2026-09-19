@@ -32,6 +32,14 @@ const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.
 const CHAT_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
 const CHAT_TS = 'tauri/src/schemas/chat_message.ts'
 
+/** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
+const rsStruct = (name, ...fields) =>
+  [`pub struct ${name} {`, ...fields.map((f) => `    pub ${f}: String,`), '}'].join('\n')
+
+/** 前端接口（最小形态） */
+const tsIface = (name, ...fields) =>
+  [`export interface ${name} {`, ...fields.map((f) => `  ${f}?: string`), '}'].join('\n')
+
 /** 后端：四张词表对应的闭集枚举（含 `#[default]` 与文档注释，顺带验证解析器跳过它们） */
 const CHAT_RS_SRC = [
   '/// 消息角色',
@@ -67,6 +75,8 @@ const CHAT_RS_SRC = [
   '    Retry,',
   '    Approve,',
   '}',
+  '',
+  rsStruct('ChatMessage', 'id', 'parent_id'),
 ].join('\n')
 
 /** 前端：四张词表（常量 + 由常量数组派生的类型） */
@@ -101,6 +111,8 @@ const CHAT_TS_SRC = [
   '  RESUME_ACTION_RETRY,',
   '  RESUME_ACTION_APPROVE,',
   '] as const',
+  '',
+  tsIface('ChatMessage', 'id', 'parent_id'),
 ].join('\n')
 
 /** 后端常量源之一（A 组的自动发现范围 + `VDFS_ROOT` 别名目标） */
@@ -109,14 +121,23 @@ const PROTOCOL_RS_SRC = [
   'pub const VDFS_LIST: &str = "vdfs/list";',
 ].join('\n')
 
-/** 后端 vdfs_provider（A 组的另一常量源） */
+/** 后端 vdfs_provider（A 组的另一常量源 + D 组 8 对结构体的后端侧） */
 const VDFS_PROVIDER_RS_SRC = [
   'pub const VDFS_KIND_MESSAGES: &str = "messages";',
   'pub const VDFS_EXT_SESSION: &str = "session";',
   'pub const VDFS_EXT_MESSAGE: &str = "message";',
+  '',
+  rsStruct('VdfsNode', 'path', 'name'),
+  rsStruct('VdfsChange', 'path', 'change'),
+  rsStruct('VdfsAccess', 'read', 'write'),
+  rsStruct('VdfsContent', 'path', 'text'),
+  rsStruct('VdfsNewType', 'ext', 'title'),
+  rsStruct('VdfsWriteResponse', 'path', 'created'),
+  rsStruct('VdfsFieldError', 'field', 'message'),
+  rsStruct('VdfsValidationError', 'message', 'fields'),
 ].join('\n')
 
-/** 前端 vdfs.ts：只放后端有对应协议词的常量——多放一个就命中「未登记」检查 */
+/** 前端 vdfs.ts：只放后端有对应协议词 / 字段的——多放一个就命中「未登记」检查 */
 const VDFS_TS_SRC = [
   "export const VDFS_LIST = 'vdfs/list'",
   "export const VDFS_ROOT_OP = 'vdfs/root'",
@@ -124,6 +145,15 @@ const VDFS_TS_SRC = [
   "export const VDFS_KIND_MESSAGES = 'messages'",
   "export const VDFS_EXT_SESSION = 'session'",
   "export const VDFS_EXT_MESSAGE = 'message'",
+  '',
+  tsIface('VdfsNode', 'path', 'name'),
+  tsIface('VdfsChange', 'path', 'change'),
+  tsIface('VdfsAccess', 'read', 'write'),
+  tsIface('VdfsContent', 'path', 'text'),
+  tsIface('VdfsNewType', 'ext', 'title'),
+  tsIface('VdfsWriteResponse', 'path', 'created'),
+  tsIface('VdfsFieldError', 'field', 'message'),
+  tsIface('VdfsValidationError', 'message', 'fields'),
 ].join('\n')
 
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
@@ -173,7 +203,10 @@ function mirror(overrides = {}, extraArgs = []) {
 test('全部一致 → 退出码 0', () => {
   const r = mirror()
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 4 张闭集词表/)
+  assert.match(
+    r.stdout,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 4 张闭集词表 \+ D 组 9 对结构体字段/,
+  )
 })
 
 test('真实仓库当前状态通过（防本守卫在真仓库上误报）', () => {
@@ -364,4 +397,119 @@ test('词表数组被改名 → 变红（不是静默跳过）', () => {
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /未找到词表数组 RESUME_ACTIONS/)
+})
+
+// ==================== D 组：结构体字段 ====================
+
+const VDFS_PROVIDER = 'symbio/src/symbio_core/vdfs_provider.rs'
+
+test('后端结构体字段改名、前端没跟 → 变红', () => {
+  const r = mirror({
+    [CHAT_RS]: CHAT_RS_SRC.replace('pub parent_id: String,', 'pub parent_msg_id: String,'),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端持有后端不存在的字段：parent_id/)
+})
+
+test('前端多出一个字段且未登记 → 变红（不许静默漏网）', () => {
+  const r = mirror({
+    [CHAT_TS]: CHAT_TS_SRC.replace(
+      '  id?: string\n  parent_id?: string\n}',
+      '  id?: string\n  parent_id?: string\n  ghost?: string\n}',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端持有后端不存在的字段：ghost/)
+})
+
+test('前端自持字段（tsLocal 已登记）→ 不红', () => {
+  const r = mirror({
+    [CHAT_TS]: CHAT_TS_SRC.replace(
+      '  id?: string\n  parent_id?: string\n}',
+      '  id?: string\n  parent_id?: string\n  parent?: ChatMessage\n  children?: ChatMessage[]\n}',
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('#[serde(skip_serializing)] 的字段不下发 → 前端持有它即变红', () => {
+  const r = mirror({
+    [CHAT_RS]: CHAT_RS_SRC.replace(
+      '    pub parent_id: String,',
+      '    #[serde(skip_serializing)]\n    pub parent_id: String,',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端持有后端不存在的字段：parent_id/)
+})
+
+test('#[serde(skip_serializing_if)] 是**条件**跳过 → 字段仍下发，不红', () => {
+  const r = mirror({
+    [CHAT_RS]: CHAT_RS_SRC.replace(
+      '    pub parent_id: String,',
+      '    #[serde(skip_serializing_if = "Option::is_none")]\n    pub parent_id: String,',
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('#[serde(flatten)] 的字段名不出现在线格式里 → 前端持有它即变红', () => {
+  const r = mirror({
+    [CHAT_RS]: CHAT_RS_SRC.replace(
+      '    pub parent_id: String,',
+      '    #[serde(flatten)]\n    pub parent_id: String,',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端持有后端不存在的字段：parent_id/)
+})
+
+test('#[serde(rename)] → 比对的是**线格式名**，不是 Rust 字段名', () => {
+  const renamed = VDFS_PROVIDER_RS_SRC.replace(
+    rsStruct('VdfsNode', 'path', 'name'),
+    [
+      'pub struct VdfsNode {',
+      '    pub path: String,',
+      '    #[serde(rename = "n")]',
+      '    pub name: String,',
+      '}',
+    ].join('\n'),
+  )
+  // 前端仍写 `name`，而后端线格式是 `n` ⇒ 红
+  const r = mirror({ [VDFS_PROVIDER]: renamed })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端持有后端不存在的字段：name/)
+
+  // 前端改用线格式名 ⇒ 不红
+  const r2 = mirror({
+    [VDFS_PROVIDER]: renamed,
+    'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC.replace(
+      tsIface('VdfsNode', 'path', 'name'),
+      tsIface('VdfsNode', 'path', 'n'),
+    ),
+  })
+  assert.equal(r2.status, 0, r2.stdout)
+})
+
+test('后端结构体级 rename_all → 报「不支持」而不是默默算错', () => {
+  const r = mirror({
+    [CHAT_RS]: CHAT_RS_SRC.replace(
+      'pub struct ChatMessage {',
+      '#[serde(rename_all = "camelCase")]\npub struct ChatMessage {',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /结构体级 rename_all/)
+})
+
+test('后端结构体不存在 → 变红（不是静默跳过）', () => {
+  const r = mirror({ [CHAT_RS]: 'pub const X: &str = "x";\n' })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /后端未找到结构体 ChatMessage/)
+})
+
+test('前端接口不存在 → 变红（不是静默跳过）', () => {
+  const r = mirror({ [CHAT_TS]: "export const X = 'x'\n" })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端未找到接口 ChatMessage/)
 })
