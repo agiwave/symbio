@@ -25,7 +25,7 @@ use super::model_chat;
 // / 本文件都要用），因此在这里导入一次，而不是各子模块各导一遍。
 use super::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use crate::plugin_debug;
-use crate::symbio_core::event_bus::EventBus;
+use crate::symbio_core::event_bus::{EventBus, KIND_SESSION};
 use crate::symbio_core::schemas::{
     session::chat_message as cm,
     session::{session_chat, session_chat_response},

@@ -138,6 +138,7 @@ pub async fn collect_options(
 mod tests {
     use super::*;
     use crate::symbio_core::schemas::options::{OptionAction, OptionType};
+    use crate::symbio_core::vdfs_provider::VDFS_STATUS_DISABLED;
 
     #[tokio::test]
     async fn register_dedup_and_order() {
@@ -148,7 +149,7 @@ mod tests {
             .await;
         // 同 id 覆盖（保留先注册槽位），order 生效
         let mut over = OptionNode::new("b", "B2", OptionType::Sub).with_order(20);
-        over.status = "disabled".to_string();
+        over.status = VDFS_STATUS_DISABLED.to_string();
         v.register_option(over).await;
 
         let list = v.list_options().await;

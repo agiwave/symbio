@@ -419,7 +419,7 @@ impl ModelPlugin {
                 .with_icon("model")
                 .with_order(ORDER)
                 .with_description("暂无可用 Model，请前往「设置 → 模型」添加")
-                .with_status("disabled")
+                .with_status(VDFS_STATUS_DISABLED)
                 .with_value_label("", "未配置")
         } else {
             let node = OptionNode::sub("model_provider", "Model", children)

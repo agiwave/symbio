@@ -161,7 +161,7 @@ impl SessionPlugin {
 
         // 同时通过 EventBus 转发（供前端单连接订阅使用）
         if let PluginFrame::Data(data) = &frame {
-            EventBus::try_publish("session", Some(&state.request_id_str()), data.clone());
+            EventBus::try_publish(KIND_SESSION, Some(&state.request_id_str()), data.clone());
         }
     }
 }

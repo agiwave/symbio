@@ -31,8 +31,9 @@ use crate::symbio_core::schemas::detail::{
 };
 use crate::symbio_core::schemas::options::{
     OptionAction, OptionDisplay, OptionNode, OptionType, OptionsRequest, OptionsResponse,
-    OPTION_PICK_DIRECTORY, OPTION_STATUS_ACTIVE, OPTION_STATUS_DISABLED,
+    OPTION_PICK_DIRECTORY,
 };
+use crate::symbio_core::vdfs_provider::{VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED};
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, PluginPayload, SESSION_ID, WORKDIR,
 };
@@ -243,11 +244,11 @@ impl SessionPlugin {
                 .map(|v| !v.is_empty())
                 .unwrap_or(false)
         {
-            node.with_status(OPTION_STATUS_DISABLED)
+            node.with_status(VDFS_STATUS_DISABLED)
                 .with_enabled(false)
                 .with_description("当前会话已有对话历史，不能更换工作目录（如需换目录请新建会话）")
         } else {
-            node.with_status(OPTION_STATUS_ACTIVE)
+            node.with_status(VDFS_STATUS_ACTIVE)
                 .with_description("会话的工作目录（决定文件工具的作用范围）")
         }
     }
@@ -403,9 +404,9 @@ impl SessionPlugin {
                 "include_history": include_history,
             })),
             status: if enabled {
-                OPTION_STATUS_ACTIVE.to_string()
+                VDFS_STATUS_ACTIVE.to_string()
             } else {
-                OPTION_STATUS_DISABLED.to_string()
+                VDFS_STATUS_DISABLED.to_string()
             },
             ..OptionNode::new("heartbeat", "心跳任务", OptionType::Form)
         }

@@ -67,7 +67,16 @@ pub const SESSION_CHAT_SEND: &str = "session/chat/send";
 
 /// session/chat/abort — 中止进行中的一轮
 ///
-/// 当前唯一调用方在前端（`tauri/src/constants/pluginPaths.ts::CHAT_ABORT`）。
+/// **唯一调用方不在 Rust 侧**：前端 `tauri/src/constants/pluginPaths.ts::CHAT_ABORT`
+/// （由 `${SESSION_PATH}/chat/abort` 拼出，前缀收敛为 `worker/`；`worker` 可省略，
+/// 故与本常量是同一路由的两种合法写法）。Rust 侧因此没有任何代码引用它，但路径
+/// **真实存在**（session 的 `route` 认 `chat/abort` 臂）——与 `AGENT_CHAT` 那类
+/// 「描述了一条不存在的路由」的幽灵常量不同，故保留。
+///
+/// 保留的代价为零（一个 `&'static str`），收益是「前端认识的后端路由」在后端也有
+/// 一条可检索的登记。这条理由由 `#[allow(dead_code)]` 同行注明，供
+/// `scripts/dead-code-audit.mjs` 识别为**刻意保留**而非漏删。
+#[allow(dead_code)] // dead-code-allow R-001: 唯一调用方在前端 pluginPaths.ts::CHAT_ABORT，路由真实存在
 pub const SESSION_CHAT_ABORT: &str = "session/chat/abort";
 
 /// session/get_messages — 读会话历史（**仅供续会话存在性轻校验**）

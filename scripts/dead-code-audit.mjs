@@ -1,26 +1,39 @@
 #!/usr/bin/env node
 /**
- * 死代码审计（前端 TS/Vue 判定 + Rust 导出级降级提示）
+ * 死代码审计（前端 TS/Vue 判定 + Rust 声明级判定 R-001）
  *
- * 三层判定，尽量零误报：
+ * 四层判定，尽量零误报：
  *  L1 import 依赖图：从入口（index.html→main.ts、测试、.d.ts、构建配置）可达性。
  *  L2 字符串引用兜底：不可达但文件名仍被源码提及 → 降级「疑似」，不自动判死。
  *  L3 schema 契约：schemas/*.ts 若被 route 调用方以类型名引用则视为存活。
- *  L4 Rust 侧：`pub` 声明但全仓（含 cli / tauri / 前端）无任何外部引用
- *     → **降级提示，永不判失败**（Rust 没有 import 依赖图，只能靠名称是否被
- *     提过这种弱判据；`dead_code` lint 对 `pub` 项结构性失明，见该段注释）。
+ *  L4 Rust 侧 **R-001（判定型）**：`pub` 声明但全仓（含 cli / tauri / 前端）
+ *     一次都没被提及。判据是「这个名字在整仓只出现一次（就是声明那行）」——
+ *     `dead_code` lint 对 `pub` 项结构性失明（`symbio_core/mod.rs` 一句
+ *     `pub use error::*` 就能让整批函数被当成对外 API），故需要这条补网。
+ *
+ * 承认通道：确需保留但无 Rust 消费方的（消费方在前端 / 闭集成员），在声明行或
+ * 紧邻其上一行写 `// dead-code-allow R-001: <理由>`；**理由不可为空**（空理由
+ * 视为未承认，与 `grep-audit` / `plugin-entry-audit` 的豁免同一约定）。
  *
  * 用法： node scripts/dead-code-audit.mjs             # 死代码清单（明细只印死代码）
  *        node scripts/dead-code-audit.mjs --verbose   # 附带「未被引用的导出」明细
- * 退出码：发现「确认死代码」时为 1（已接入 gate.mjs 的 docs 阶段，是判定型检查）。
- *         仅**前端文件级**死代码会触发；Rust 与「导出级」发现一律不影响退出码。
+ * 退出码：1 = 有「确认死代码」（前端文件级）或「未承认的 R-001」；
+ *         0 = 通过。两者都在 gate.mjs 的 docs 阶段（判定型）。
+ *
+ * 已知边界：R-001 只抓「整仓一次都没被提过」这一最低风险形态。`pub` 项被**弱引用**
+ * （只在文档 / 注释里被提到，或在运行期被拼名字调用）一律视为存活——宁可漏报。
  */
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative, extname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const ROOT = resolve(__dirname, '..', 'tauri')
+// `--root=` 只为回归测试开的口子：测试在临时目录造一棵最小仓库，好让本脚本的判据
+// 能被「注入真实违规并断言变红」地验证——判定型守卫的教条是「一个只会亮绿灯的
+// 守卫等于没有守卫」，而它腐烂的方式恰恰是「规则写错了所以永远不命中」。
+const rootArg = process.argv.find((a) => a.startsWith('--root='))
+const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..')
+const ROOT = join(REPO_ROOT, 'tauri')
 const SRC = join(ROOT, 'src')
 const EXT = ['.vue', '.ts', '.js', '.tsx', '.mts']
 /** 打印「未被引用的导出」明细（默认只给个数，见文件末段说明） */
@@ -150,17 +163,26 @@ if (VERBOSE) {
 }
 if (!unusedExports) console.log('  （无未被引用的导出）')
 
-// ── Rust 侧：`pub` 声明但全仓无任何外部引用 ──
+// ── Rust 侧 R-001：`pub` 声明但全仓一次都没被提及（**判定型**）──
 //
 // 为什么需要：前端侧有 import 依赖图这张硬网；**Rust 侧一张都没有**。`dead_code`
 // lint 对 `pub` 项结构性失明——`symbio_core/mod.rs` 里一句 `pub use error::*`
 // 就足以让整批函数被当成"对外 API"，于是攒出过一批零调用的 helper（8 个锁/错误
 // 辅助函数，全仓含 cli / tauri 零引用）。
 //
-// 口径与上面的「导出级检查」一致：**名称在别处出现过即视为可能被使用**（保守），
-// 故只作**降级提示、不判失败**——它抓的是"从没被任何人提过"这一最低风险的形态。
-// 作者已显式写下 `#[allow(dead_code)]` 的，视为刻意的保留，不与应用者对抗。
-const REPO = resolve(__dirname, '..')
+// ## 为什么这条能判失败，而 `plugin-entry-audit` 的 `refs=0` 不能
+//
+// 「定义了但没人用」在**路由**上不可判：路径可以在运行期拼（工具名、子插件名），
+// 网关还会把外部 `path` 原样转发给容器 route（见 plugin-entry-audit 头部的两条
+// 理由）。但本规则判的不是运行期字符串，而是**一个静态符号名**——`pub fn foo`
+// 的 `foo` 有没有在仓库任何地方被写过一次，是纯文本事实，没有动态解析的余地。
+//
+// ## 承认通道（唯一出口）
+//
+// 确有必须保留而无 Rust 消费方的（消费方在前端、闭集成员等），在声明行或紧邻其上
+// 一行写 `// dead-code-allow R-001: <理由>`。**理由不可为空**——否则「随手加个
+// 注释就过」会让这条守卫退化成橡皮图章（与 grep-audit / plugin-entry-audit 同一约定）。
+const REPO = REPO_ROOT
 const repoRel = (p) => relative(REPO, p).replace(/\\/g, '/')
 
 const rustSources = []
@@ -195,15 +217,19 @@ const nameCorpus = rustCorpus.concat(read(tsSources))
 const DECL_RE =
   /^pub(?:\([^)]*\))?\s+(?:async\s+)?(?:unsafe\s+)?(fn|struct|enum|trait|const|static|type)\s+([A-Za-z_][A-Za-z0-9_]*)/gm
 
-/** 紧邻其上的属性里是否写了 `#[allow(dead_code)]`（跳过空行与文档注释） */
-function allowedDeadCode(code, idx) {
-  const lines = code.slice(0, idx).split('\n')
-  for (let i = lines.length - 2; i >= 0; i--) {
-    const t = lines[i].trim()
-    if (t === '' || t.startsWith('//')) continue
-    return /#\[allow\([^\]]*dead_code/.test(t)
+/** 承认通道：`// dead-code-allow R-001: <理由>`（理由为空 = 未承认） */
+const WAIVER_RE = /\/\/\s*dead-code-allow\s+(R-\d+)\s*:\s*(\S.*)$/
+
+/**
+ * 取声明的承认理由：看**声明行本身**与紧邻其上 3 行（覆盖 `#[allow(dead_code)]`
+ * 同行注理由、或独立一行注释两种写法）。返回理由字符串；未承认返回 `null`。
+ */
+function waiverReason(lines, declLine) {
+  for (let i = declLine; i >= Math.max(0, declLine - 3); i--) {
+    const hit = lines[i].match(WAIVER_RE)
+    if (hit) return hit[2].trim()
   }
-  return false
+  return null
 }
 
 // 判据：**该名字在全仓只出现过一次**（就是声明那一行）⇒ 没人用过。
@@ -220,27 +246,38 @@ for (const [, code] of nameCorpus) {
 }
 
 const rustUnused = []
+const rustWaived = []
 let rustDecls = 0
 for (const [file, code] of rustCorpus) {
   if (file.endsWith('.test.rs') || basename(file) === 'tests.rs') continue
+  const lines = code.split(/\r?\n/)
   for (const m of code.matchAll(DECL_RE)) {
     const [, kind, name] = m
     rustDecls++
-    if (allowedDeadCode(code, m.index)) continue
-    if ((tokenCount.get(name) ?? 0) <= 1) {
-      rustUnused.push(`${repoRel(file)} :: ${kind} ${name}`)
-    }
+    if ((tokenCount.get(name) ?? 0) > 1) continue
+    // 声明所在行（0 基）：`m.index` 落在 `^` 之后，即行首
+    const declLine = code.slice(0, m.index).split('\n').length - 1
+    const reason = waiverReason(lines, declLine)
+    const where = `${repoRel(file)} :: ${kind} ${name}`
+    if (reason) rustWaived.push(`${where}  ← ${reason}`)
+    else rustUnused.push(where)
   }
 }
 
-console.log(`\n【Rust 导出级检查】（降级提示，不判失败）`)
+console.log(`\n【R-001】Rust 声明级检查（判定型）`)
 console.log(`  扫描 ${rustCorpus.length} 个 .rs · ${rustDecls} 处 pub 声明`)
 if (rustUnused.length) {
-  for (const line of rustUnused) console.log(`  ${line}`)
+  console.log(`  ✗ ${rustUnused.length} 处全仓零引用且未承认：`)
+  for (const line of rustUnused) console.log(`    ${line}`)
+  console.log(`    ↳ 删掉它；确需保留则写 \`// dead-code-allow R-001: 理由\`（理由必填）`)
 } else {
-  console.log('  （无全仓零引用的 pub 声明）')
+  console.log('  ✓ 无全仓零引用的 pub 声明')
+}
+if (rustWaived.length) {
+  console.log(`  · ${rustWaived.length} 处已承认保留（消费方不在 Rust 侧，见各行理由）：`)
+  for (const line of rustWaived) console.log(`    ${line}`)
 }
 
 const lines = dead.reduce((n, f) => n + lineCount(f), 0)
 console.log(`\n合计可移除：${dead.length} 文件 / ${lines} 行`)
-process.exit(dead.length ? 1 : 0)
+process.exit(dead.length || rustUnused.length ? 1 : 0)

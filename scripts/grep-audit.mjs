@@ -6,6 +6,7 @@
  *   - S-002:        std::sync::Mutex 在 async 上下文中持锁跨 await
  *   - S-002-bonus:  业务路径 `let _ = ...await` 吞错
  *   - S-007:        CHANGELOG 缺关键修复条目（v25-N6 案例）
+ *   - S-008:        VdfsNode.status 用裸字面量赋值（词表只有 `VDFS_STATUS_*`）
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
@@ -210,6 +211,51 @@ if (!fs.existsSync(changelog)) {
   if (!head) err(`${disp(changelog)} 无版本/日期标题（## vNN 或 ## YYYY-MM-DD）`)
   else ok(`CHANGELOG 最新标题：${head}`)
 }
+console.log()
+
+// ── S-008: VdfsNode.status 不得用裸字面量 ──────────────────────────────
+//
+// 词表只有一套：`symbio_core::vdfs_provider::VDFS_STATUS_*`（`docs/design/vdfs.md`
+// §3.2）。裸字面量的危险不是拼错（那会立刻看见），而是**改名时不会编译失败**——
+// `status` 是跨进程边界的字符串，改了常量而漏掉字面量，前端只会静默认不出状态。
+//
+// 该词表**曾经**把「以错误结束」从 `error` 改名为 `failed`（理由见
+// `VDFS_STATUS_FAILED` 的文档：与消息层 `MessageStatus::Failed` 同词），而
+// `symbio_core::schemas::options.rs` 里留了一枚 `OPTION_STATUS_ERROR = "error"`
+// 的化石、`mcp` / `skill` / `model` 三个插件各自手写 `"unknown"` / `"active"` /
+// `"disabled"`——共 6 处。三处都**没有任何测试会因此变红**，故立此规则。
+//
+// 判据（只认两处无歧义的位置，宁可漏报）：
+//   · `.status = "<字面量>"`，含 `if` / `match` 分支里写字面量的形态；
+//   · `with_status("<字面量>")`。
+// **不**认结构体字面量的 `status: "…"`——响应信封（`SimpleResponse`）的
+// `status: "success"` 是另一套词表，按位置判会误报，故留作已知边界。
+console.log('--- S-008: VdfsNode.status 字面量检查 ---')
+
+const STATUS_ASSIGN_RE = /\.status\s*=\s*([^;]{0,240});/g
+const STATUS_SETTER_RE = /with_status\(\s*"/
+const WAIVER_S008_RE = /\/\/\s*grep-audit-allow S-008:\s*\S/
+
+let s008 = 0
+for (const [file, lines] of linesOf) {
+  const text = lines.join('\n')
+  for (const m of text.matchAll(STATUS_ASSIGN_RE)) {
+    const rhs = m[1].trim()
+    // 只在「值位置直接是字面量」时判：`= "x"` 或 `= if/match … { "x" … }`
+    const bad = rhs.startsWith('"') || (/^(if|match)\b/.test(rhs) && rhs.includes('"'))
+    if (!bad) continue
+    const ln = text.slice(0, m.index).split('\n').length
+    if (WAIVER_S008_RE.test(lines[ln - 1])) continue
+    err(`${disp(file)}:${ln}  status 用裸字面量赋值；改引 VDFS_STATUS_* 常量（改名才不会静默失效）`)
+    s008++
+  }
+  lines.forEach((l, i) => {
+    if (!STATUS_SETTER_RE.test(l) || WAIVER_S008_RE.test(l)) return
+    err(`${disp(file)}:${i + 1}  with_status 收到裸字面量；改引 VDFS_STATUS_* 常量`)
+    s008++
+  })
+}
+if (s008 === 0) ok('S-008 通过：status 一律取自 VDFS_STATUS_* 常量')
 console.log()
 
 // ── 汇总 ───────────────────────────────────────────────────────────────

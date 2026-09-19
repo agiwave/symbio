@@ -41,6 +41,7 @@
 //! 合并写入 `session.metadata`——后端各解析链（orchestrator / tool_executor）
 //! 已按 metadata 回退取值，因此会话参数无需前端参与。
 
+use crate::symbio_core::vdfs_provider::VDFS_STATUS_ACTIVE;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -54,19 +55,25 @@ pub const OPTIONS_LIST: &str = "options/list";
 /// 前端不持有任何业务字段名。
 pub const SESSION_STATE_ENDPOINT: &str = "worker/session/update";
 
-/// 状态取值约定（与 VDFS 节点 `status` 同一套语义，见 `docs/design/vdfs.md` §3.2）
-pub const OPTION_STATUS_ACTIVE: &str = "active";
-pub const OPTION_STATUS_WORKING: &str = "working";
-pub const OPTION_STATUS_DISABLED: &str = "disabled";
-pub const OPTION_STATUS_ERROR: &str = "error";
-pub const OPTION_STATUS_UNKNOWN: &str = "unknown";
+// 状态取值**不在本模块重新声明** —— 选项节点就是 VDFS 节点，`status` 只有一套
+// 词表：`symbio_core::vdfs_provider::VDFS_STATUS_*`（`docs/design/vdfs.md` §3.2）。
+//
+// 这里曾并列五个 `OPTION_STATUS_*` 镜像常量。它们是同一套语义的第二份真相，而
+// 其中 `OPTION_STATUS_ERROR = "error"` 更落后于 VDFS 侧把该词改名为 `failed`
+// 的那次修订（理由见 `VDFS_STATUS_FAILED`），于是留成一枚「同一概念两个词」的
+// 化石。第二份真相的价值是零，代价是必然漂移——故整批删掉。
 
 /// 机制原生取值原语（闭集）——前端实现的通用取值能力，不含任何业务语义。
 ///
 /// 后端无法唤起原生对话框，故 `invoke` 动作可声明一个原生取值原语：
 /// 前端先取值、写入 `action.bind` 指定的参数路径，再调用 `action.endpoint`。
 pub const OPTION_PICK_DIRECTORY: &str = "directory";
-/// 原生文件选择
+/// 原生文件选择 —— 闭集的第二员。
+///
+/// Rust 侧暂无动作声明它，**消费方在前端**：`useSessionOptions.ts::PICK_FILE`
+/// 实现该原语，其协议类型 `schemas/options.ts` 亦把闭集写成 `'directory' | 'file'`。
+/// 故本常量是**刻意保留**的跨语言契约半边（同 `symbio_core::paths::SESSION_CHAT_ABORT`）。
+#[allow(dead_code)] // dead-code-allow R-001: 闭集成员，消费方在前端 useSessionOptions.ts::PICK_FILE
 pub const OPTION_PICK_FILE: &str = "file";
 
 fn default_true() -> bool {
@@ -147,7 +154,7 @@ pub struct OptionNode {
     pub option_type: OptionType,
     /// 展示顺序（同一宿主下升序；跨插件贡献时必需，保证稳定序）
     pub order: i32,
-    /// 状态（[`OPTION_STATUS_ACTIVE`] 等）
+    /// 状态（取 `symbio_core::vdfs_provider::VDFS_STATUS_*`；语义见 `docs/design/vdfs.md` §3.2）
     pub status: String,
     /// 状态补充说明
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -187,7 +194,7 @@ impl Default for OptionNode {
             description: None,
             option_type: OptionType::Invoke,
             order: 0,
-            status: OPTION_STATUS_ACTIVE.to_string(),
+            status: VDFS_STATUS_ACTIVE.to_string(),
             status_detail: None,
             value: None,
             value_label: None,
@@ -389,7 +396,7 @@ mod tests {
         .unwrap();
         assert!(node.enabled);
         assert_eq!(node.option_type, OptionType::Invoke);
-        assert_eq!(node.status, OPTION_STATUS_ACTIVE);
+        assert_eq!(node.status, VDFS_STATUS_ACTIVE);
     }
 
     #[test]

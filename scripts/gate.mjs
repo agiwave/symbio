@@ -634,6 +634,10 @@ async function stageDocs() {
     'mechanism-audit',
     'plugin-entry-audit',
     'protocol-mirror-audit',
+    // dead-code-audit 的 R-001（Rust 声明级）已从「降级提示」提升为**判定型**，
+    // 故按同一条教条：先把它的回归测试跑起来（注入真实违规断言变红），
+    // 再把脚本本身当门禁——否则「规则写错所以永远不命中」没人会发现。
+    'dead-code-audit',
   ]) {
     const t = await run({
       label: `${name} 回归测试`,

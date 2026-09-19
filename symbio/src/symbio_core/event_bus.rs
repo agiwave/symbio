@@ -18,7 +18,12 @@ use tokio::sync::mpsc;
 /// 每个 sessionId 最多保留的回放事件数
 const PENDING_EVENTS_CAP: usize = 64;
 
-/// 事件类型常量
+/// 事件类型（`kind`）词表 —— 前端按它分发，**发布方一律引本常量，不要写裸字面量**。
+///
+/// 为什么要有它：`kind` 是**跨进程边界的字符串**，改名不会编译失败，只会让前端
+/// 的分发静默失效（与 `symbio_core::paths` 同一类风险）。发布点曾直接写
+/// `"session"` / `"system"`，于是这两个常量声明出来后无人引用——正是
+/// `chat_message.rs` 那段「枚举改名时就会出现不一致」警告的形状。
 pub const KIND_SESSION: &str = "session";
 pub const KIND_SYSTEM: &str = "system";
 
@@ -76,12 +81,6 @@ pub struct SubscribeRequest {
     pub kinds: Option<Vec<String>>,
 }
 
-/// 取消订阅请求
-#[derive(Debug, Clone, Deserialize)]
-pub struct UnsubscribeRequest {
-    pub connection_id: String,
-}
-
 /// 拉取回放事件请求
 #[derive(Debug, Clone, Deserialize)]
 pub struct PendingSnapshotRequest {
@@ -105,11 +104,6 @@ pub fn register_subscriber(connection_id: String, tx: mpsc::Sender<PluginFrame>)
 /// 反注册订阅者（连接断开时调用）
 pub fn unregister_subscriber(connection_id: &str) {
     SUBSCRIBERS.remove(connection_id);
-}
-
-/// 取订阅者发送端（供 `event_bus` 插件在清理任务中使用）
-pub fn subscriber_sender(connection_id: &str) -> Option<mpsc::Sender<PluginFrame>> {
-    SUBSCRIBERS.get(connection_id).map(|e| e.clone())
 }
 
 /// 全局事件总线门面

@@ -218,7 +218,8 @@ use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
     VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_TEST,
-    VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
+    VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
+    VDFS_STATUS_UNKNOWN,
 };
 
 const LABEL: &str = "MCP";
@@ -269,13 +270,13 @@ fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
     n.schema = Some(detail_definition());
     let Some(server) = raw.and_then(|c| serde_json::from_str::<McpServerConfig>(c).ok()) else {
         // 坏条目降级：以 id 呈现、状态未知，但**仍在列表里**（可点开看到原文再修）
-        n.status = "unknown".to_string();
+        n.status = VDFS_STATUS_UNKNOWN.to_string();
         return n;
     };
     n.status = if server.enabled {
-        "active".to_string()
+        VDFS_STATUS_ACTIVE.to_string()
     } else {
-        "disabled".to_string()
+        VDFS_STATUS_DISABLED.to_string()
     };
     n.description = server.command.clone().or_else(|| server.url.clone());
     n.attributes.insert(

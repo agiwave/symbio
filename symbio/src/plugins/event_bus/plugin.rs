@@ -7,9 +7,12 @@
 //!
 //! ## 用法
 //!
+//! `kind` 取 `symbio_core::event_bus::KIND_*` 常量（前端按它分发，裸字面量改名不会
+//! 编译失败）：
+//!
 //! ```ignore
 //! // 在 session 插件中
-//! EventBus::publish("session", Some(&session_id), stream_event_json).await;
+//! EventBus::publish(KIND_SESSION, Some(&session_id), stream_event_json).await;
 //! ```
 //!
 //! `EventBus` 门面是 `symbio_core::event_bus::EventBus`（跨插件共享的核心设施），
@@ -19,7 +22,7 @@
 
 use crate::symbio_core::event_bus::{
     register_subscriber, unregister_subscriber, EventBus, PendingSnapshotRequest,
-    PendingSnapshotResponse, SubscribeRequest,
+    PendingSnapshotResponse, SubscribeRequest, KIND_SYSTEM,
 };
 use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::{
@@ -79,7 +82,7 @@ impl EventBusPlugin {
             .send(PluginFrame::Data(json!({
                 "type": "bus_event",
                 "data": {
-                    "kind": "system",
+                    "kind": KIND_SYSTEM,
                     "session_id": null,
                     "data": {
                         "event": "connected",

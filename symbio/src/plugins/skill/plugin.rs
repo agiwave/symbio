@@ -137,7 +137,7 @@ use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
     VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_EXT_FORM,
-    VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
+    VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE, VDFS_STATUS_ACTIVE,
 };
 
 const LABEL: &str = "技能";
@@ -204,7 +204,7 @@ fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
     n.kind = PLUGIN_SKILL.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = Some(detail_definition());
-    n.status = "active".to_string();
+    n.status = VDFS_STATUS_ACTIVE.to_string();
     let Some(text) = raw else { return n };
 
     // frontmatter 路径：名称 / 摘要

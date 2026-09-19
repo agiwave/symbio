@@ -12,10 +12,10 @@
 //! 与绝对路径，并在 join 后做前缀校验（双重闸门，与 agent bundle 的
 //! 路径白名单同风格）。
 
-use crate::symbio_core::event_bus::EventBus;
+use crate::symbio_core::event_bus::{EventBus, KIND_SESSION};
 use crate::symbio_core::vdfs::{ChangeSubscriptions, VdfsChange};
 use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsNode};
-use crate::symbio_core::{PluginError, PLUGIN_SESSION};
+use crate::symbio_core::PluginError;
 use dashmap::DashMap;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -456,7 +456,7 @@ fn publish_data_event(containers: &DashMap<String, Vec<(String, u64)>>, workdir:
     if let Some(list) = containers.get(workdir) {
         for (container, _) in list.iter() {
             EventBus::try_publish(
-                PLUGIN_SESSION,
+                KIND_SESSION,
                 Some(container),
                 json!({ "type": "data", "workdir": workdir, "path": rel }),
             );

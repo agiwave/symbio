@@ -92,7 +92,8 @@ const CLEAN = {
 test('干净树通过（exit 0）', () => {
   const r = audit(CLEAN)
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /七条规则全部通过/)
+  // 条数不写死：规则表是唯一真相源，脚本从它推导（手写的「七条」加规则时必漂）
+  assert.match(r.stdout, /8 条规则全部通过/)
 })
 
 test('报告段给出每条路由的消费方计数', () => {
@@ -446,4 +447,48 @@ test('提取正确性：`*.test.rs` 里的假 route 不参与臂提取', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /session\s+\[静态分派\]/)
   assert.match(r.stdout, /session\/chat\/send/)
+})
+
+// ── E-008：文档词表必须与代码常量逐字一致 ──────────────────────────────
+//
+// 真实事故的形状：`docs/design/vdfs.md` §3.2 的 status 行一直写 `error`，而代码
+// 已把该词改名为 `failed`（理由见 `vdfs_provider.rs::VDFS_STATUS_FAILED`）——两边
+// 各说各话，没有任何测试因此变红；而人读文档写的代码会照 `error` 写。
+const VOCAB_CORE = {
+  'symbio/src/symbio_core/vdfs_provider.rs':
+    `pub const FOO_ONE: &str = "one";\npub const FOO_TWO: &str = "two";\n`,
+}
+const vocabDoc = (line) => ({ ...CLEAN, ...VOCAB_CORE, 'docs/design/vdfs.md': `${line}\n` })
+
+test('E-008 命中：文档写着代码里已不存在的词', () => {
+  const r = audit(vocabDoc('| `status` | `one` / `legacy` <!-- vocab:FOO_ --> |'))
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /legacy/)
+})
+
+test('E-008 命中：代码新增了词而文档未列出', () => {
+  const r = audit(vocabDoc('| `status` | `one` <!-- vocab:FOO_ --> |'))
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /`two`/)
+})
+
+test('E-008 通过：两侧逐字一致', () => {
+  const r = audit(vocabDoc('| `status` | `one` / `two` <!-- vocab:FOO_ --> |'))
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-008 不误报：反引号里的大写常量名不是取值', () => {
+  const r = audit(vocabDoc('| `status` | `one` / `two`（空串见 `FOO_NONE`）<!-- vocab:FOO_ --> |'))
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-008 不猜：没有 `<!-- vocab:… -->` 标记的行不判', () => {
+  const r = audit(vocabDoc('| `status` | `one` / `legacy` |'))
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-008 命中：标记的前缀在代码里没有同名常量（前缀写错）', () => {
+  const r = audit(vocabDoc('| `status` | `one` <!-- vocab:BAR_ --> |'))
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /BAR_/)
 })

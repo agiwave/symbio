@@ -56,3 +56,53 @@ test('warnings fail only in strict mode', () => {
   assert.equal(audit(source).status, 0)
   assert.equal(audit(source, { strict: true }).status, 2)
 })
+
+// ── S-008：VdfsNode.status 不得用裸字面量 ──────────────────────────────
+// 词表只有 `VDFS_STATUS_*` 一套；裸字面量在改名时不会编译失败（该词表曾把
+// `error` 改名为 `failed`，留下过化石，见 vdfs_provider.rs::VDFS_STATUS_FAILED）。
+const statusSuspect = `fn node_of() -> VdfsNode {
+    let mut n = VdfsNode::file();
+    n.status = "active".to_string(); WAIVER
+    n
+}
+`
+test('S-008 fires on a bare status literal', () => {
+  const r = audit(statusSuspect)
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /sample\.rs:3/)
+})
+test('S-008 fires on a literal inside an if branch', () => {
+  const r = audit(`fn node_of(enabled: bool) -> VdfsNode {
+    let mut n = VdfsNode::file();
+    n.status = if enabled {
+        "active".to_string()
+    } else {
+        "disabled".to_string()
+    };
+    n
+}
+`)
+  assert.equal(r.status, 1)
+})
+test('S-008 fires on with_status receiving a bare literal', () => {
+  const r = audit('fn f() -> OptionNode {\n    OptionNode::new("a", "A").with_status("disabled")\n}\n')
+  assert.equal(r.status, 1)
+})
+test('S-008 stays silent when the word comes from a constant', () => {
+  const r = audit(
+    'fn f() -> VdfsNode {\n    let mut n = VdfsNode::file();\n    n.status = VDFS_STATUS_ACTIVE.to_string();\n    n\n}\n',
+  )
+  assert.equal(r.status, 0)
+})
+test('S-008 does not mistake format! / response envelope for a status word', () => {
+  // 已知边界：`status: "success"`（响应信封）是另一套词表，按位置判会误报，故只认
+  // `.status = ` 与 `with_status(` 两处。`format!` 同样不算字面量赋值。
+  const r = audit(
+    'fn f(k: &str) -> VdfsNode {\n    let mut n = VdfsNode::file();\n    n.status = format!("{k}");\n    n\n}\n',
+  )
+  assert.equal(r.status, 0)
+})
+test('S-008 waiver requires a reason', () => {
+  assert.equal(audit(statusSuspect, { waiver: '// grep-audit-allow S-008: reviewed fixture' }).status, 0)
+  assert.equal(audit(statusSuspect, { waiver: '// grep-audit-allow S-008:   ' }).status, 1)
+})

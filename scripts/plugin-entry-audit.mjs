@@ -30,8 +30,9 @@
  * | E-005 | 引用的路径必须对应到某条真实 `route` 臂                        | 抓「路径写错一截」：`session/chat` 少了 `/send` |
  * | E-006 | **权威清单**（`ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
+ * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  *
- * E-001 ~ E-004 与 E-007 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
+ * E-001 ~ E-004、E-007 与 E-008 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
  * E-005 / E-006 是 **WARNING**（需要「动态命名空间」白名单配合，宁可先报给人看）。
  *
  * 报告段另给一张表：**每条路由 → 消费方计数**。`refs=0` 的行是「定义了但没人用」
@@ -480,6 +481,11 @@ const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 const CODE_ROOTS = ['symbio/src', 'cli/src', 'tauri/src']
 const codeFiles = CODE_ROOTS.flatMap((r) => walk(path.join(repoRoot, r), isCode))
 const consts = buildConstTable(codeFiles)
+// 同名前缀在**两侧可能不是同一套词表**：前端 `@/schemas/vdfs` 另有自己的
+// `VDFS_STATUS_*` 镜像，且它把会话节点透传的 `MessageStatus` 词（`pending` /
+// `streaming` / `waiting_user_action` / `completed`）也算进去，取值集合比 Rust 侧大。
+// E-008 判的是**设计文档与 Rust 契约**是否一致，故只用 Rust 侧的常量：
+const rustConsts = buildConstTable(codeFiles.filter((f) => f.endsWith('.rs')))
 
 /** 解析 `PluginMeta::new` 首参：可能是 `"字面量"` 或常量名 */
 function resolveMeta(raw) {
@@ -751,6 +757,92 @@ for (const abs of ROUTE_AUTHORITY_FILES) {
   }
 }
 
+// ── E-008：文档标了 `<!-- vocab:PREFIX_ -->` 的词表行必须与代码常量逐字一致 ──
+//
+// 为什么需要：词表是**闭集**，而闭集的第二份真相最常驻在文档里。真实事故：
+// `docs/design/vdfs.md` §3.2 的 status 行一直写 `error`，而代码早已把该词改名为
+// `failed`（理由见 `vdfs_provider.rs::VDFS_STATUS_FAILED`）——两边各说各话，没有任何
+// 测试因此变红。而人读文档写的代码会照 `error` 写，于是漂移**从文档流回代码**
+//（`schemas/options.rs` 里那枚 `OPTION_STATUS_ERROR = "error"` 就是这么活下来的）。
+//
+// 为什么要显式标记、而不是猜散文位置：文档是自然语言，靠"这行像在枚举词表"来判
+// 必然误报，而一个只会误报的守卫最后一定会被人用豁免注释喂到失效（E-006 的教训）。
+// 故要求文档在那一行写明 `<!-- vocab:<常量前缀> -->`——**标了才判，没标不猜**。
+//
+// 判据（双向，两侧都静态已知）：
+//   ① **枚举段**里的小写词必须是代码词表成员 → 抓「文档落后于代码的改名/删词」；
+//   ② 代码词表的每个**非空取值**都必须在该行出现 → 抓「代码新增词而文档没跟上」。
+//
+// 什么是「枚举段」：反引号词组成的 `/` 分隔串（`` `a` / `b` / `c` ``）——本仓文档
+// 枚举词表就是这个写法。不这么限定就会把**字段名**（行首的 `status`）和夹在散文里
+// 的常量名一并当成取值（首版实测：`status` 被误判为词表外的词）。
+//
+// 取值只取 **Rust 侧**常量（见上方 `rustConsts` 的说明）：前端 `schemas/vdfs.ts`
+// 有自己的同名前缀镜像且取值更宽，混进来会把文档判成"漏列"。前端的词表自持性由
+// `mechanism-audit` 的 M-007 那条线管（地址常量只能在 `schemas/vdfs.ts` 定义）。
+const VOCAB_MARK_RE = /<!--\s*vocab:\s*([A-Z][A-Z0-9_]*)\s*-->/
+const ENUM_RUN_RE = /`[a-z][a-z0-9_.-]*`(?:\s*\/\s*`[a-z][a-z0-9_.-]*`)+/g
+const ENUM_WORD_RE = /`([^`\n]+)`/g
+const VOCAB_MD_FILES = (() => {
+  const out = []
+  const scan = (dir) => {
+    let ents
+    try {
+      ents = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of ents) {
+      const p = path.join(dir, e.name)
+      // `docs/archive/` 是历史归档（改写即篡改历史，见 doc-link-audit 的同款豁免）
+      if (e.isDirectory()) {
+        if (e.name !== 'archive') scan(p)
+        continue
+      }
+      if (e.name.endsWith('.md')) out.push(p)
+    }
+  }
+  scan(path.join(repoRoot, 'docs'))
+  return out
+})()
+
+for (const abs of VOCAB_MD_FILES) {
+  const lines = fs.readFileSync(abs, 'utf8').split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const mark = lines[i].match(VOCAB_MARK_RE)
+    if (!mark || exempted(lines, i, 'E-008')) continue
+    const prefix = mark[1]
+    const values = [...rustConsts.entries()]
+      .filter(([n, v]) => n.startsWith(prefix) && v !== '')
+      .map(([, v]) => v)
+    if (!values.length) {
+      report(
+        'E-008',
+        'error',
+        rel(abs),
+        i + 1,
+        `词表标记 \`${prefix}\` 在代码里找不到任何同名常量（前缀写错了？）`,
+      )
+      continue
+    }
+    const documented = [...lines[i].matchAll(ENUM_RUN_RE)].flatMap((run) =>
+      [...run[0].matchAll(ENUM_WORD_RE)].map((w) => w[1]),
+    )
+    for (const w of documented.filter((w) => !values.includes(w))) {
+      report(
+        'E-008',
+        'error',
+        rel(abs),
+        i + 1,
+        `文档写着 \`${w}\`，但 \`${prefix}*\` 词表里没有它 —— 文档落后于代码`,
+      )
+    }
+    for (const v of values.filter((v) => !documented.includes(v))) {
+      report('E-008', 'error', rel(abs), i + 1, `代码词表有 \`${v}\`，本行未列出 —— 文档落后于代码`)
+    }
+  }
+}
+
 // ── 报告：路由表 + 消费方 ───────────────────────────────────────────────
 console.log('')
 console.log(dim('── 路由表（绝对地址 → 消费方）─────────────────────────────────'))
@@ -791,6 +883,7 @@ const ruleNames = {
   'E-005': '路径真实存在',
   'E-006': '权威清单前缀合法',
   'E-007': '不按值持有兄弟插件',
+  'E-008': '文档词表 == 代码词表',
 }
 for (const [rule, name] of Object.entries(ruleNames)) {
   const n = hitsByRule.get(rule) ?? 0
@@ -807,5 +900,6 @@ if (warnings > 0 && STRICT) {
   console.log(yellow(`  ${warnings} 个 WARNING（--strict 视为失败）`))
   process.exit(2)
 }
-console.log(green(`  七条规则全部通过${warnings ? `（${warnings} 个 WARNING）` : ''}`))
+// 条数**从规则表推导**，不手写——手写的「七条」在加规则时必然漂成一句谎话
+console.log(green(`  ${Object.keys(ruleNames).length} 条规则全部通过${warnings ? `（${warnings} 个 WARNING）` : ''}`))
 process.exit(0)

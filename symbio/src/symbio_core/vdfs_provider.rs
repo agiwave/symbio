@@ -1368,11 +1368,6 @@ pub trait VdfsProvider: Send + Sync + 'static {
 /// 类型别名：便于使用方在容器里存放 `dyn VdfsProvider`
 pub type DynVdfsProvider = Arc<dyn VdfsProvider>;
 
-/// 便捷：从节点里取回宿主方言的呈现描述
-pub fn node_schema(node: &VdfsNode) -> Option<&Value> {
-    node.schema.as_ref()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
