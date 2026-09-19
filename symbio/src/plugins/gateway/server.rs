@@ -37,6 +37,31 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+/// HTTP 请求头上限（64 KiB）——头是逐字节读的，不设上限时一个只发头不发全的
+/// 连接就能长期占住内存与任务。
+const MAX_HEADER_BYTES: usize = 64 * 1024;
+
+/// HTTP 请求体上限（8 MiB）。
+///
+/// 不设上限时，`Content-Length: 999999999999` 会让服务端一直往内存里读：
+/// 单个请求即可耗尽进程内存。当前默认只绑回环地址，改绑 `0.0.0.0` 后
+/// 就是一个远端 DoS 入口。
+const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+
+/// WebSocket 单帧上限（8 MiB）。
+///
+/// 帧长由客户端给出，`vec![0u8; len]` 会照着这个数**立即分配**——
+/// len = 2^60 足以当场 OOM。
+const MAX_WS_FRAME_BYTES: usize = 8 * 1024 * 1024;
+
+/// 请求解析失败的原因
+enum RequestError {
+    /// 连接关闭 / 报文不完整：静默断开（客户端自己走了，不是错误）
+    Closed,
+    /// 超过大小上限：回 413，让客户端知道原因而不是干等
+    TooLarge(String),
+}
+
 /// 入站服务句柄
 pub struct ServerHandle {
     cancel: CancellationToken,
@@ -169,8 +194,22 @@ async fn handle_conn(
     token: String,
     readonly: bool,
 ) {
-    let Some(req) = read_request(&mut stream).await else {
-        return;
+    let req = match read_request(&mut stream).await {
+        Ok(r) => r,
+        Err(RequestError::Closed) => return,
+        Err(RequestError::TooLarge(what)) => {
+            let b = format!("{{\"error\":\"{what}\"}}").into_bytes();
+            let _ = stream
+                .write_all(&http_response(
+                    413,
+                    "Payload Too Large",
+                    "application/json",
+                    &b,
+                    &cors_headers(),
+                ))
+                .await;
+            return;
+        }
     };
 
     // CORS 预检
@@ -296,29 +335,34 @@ async fn handle_conn(
 
 // ==================== 请求解析 ====================
 
-async fn read_request(stream: &mut TcpStream) -> Option<HttpRequest> {
+async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, RequestError> {
     let mut buf = Vec::new();
     let mut byte = [0u8; 1];
     let header_end = loop {
-        let n = stream.read(&mut byte).await.ok()?;
+        let n = stream
+            .read(&mut byte)
+            .await
+            .map_err(|_| RequestError::Closed)?;
         if n == 0 {
-            return None;
+            return Err(RequestError::Closed);
         }
         buf.push(byte[0]);
         if buf.len() >= 4 && &buf[buf.len() - 4..] == b"\r\n\r\n" {
             break buf.len();
         }
-        if buf.len() > 64 * 1024 {
-            return None;
+        if buf.len() > MAX_HEADER_BYTES {
+            return Err(RequestError::TooLarge(format!(
+                "request headers too large (limit {MAX_HEADER_BYTES} bytes)"
+            )));
         }
     };
     let header_bytes = &buf[..header_end];
     let header_str = String::from_utf8_lossy(header_bytes);
     let mut lines = header_str.split("\r\n");
-    let request_line = lines.next()?;
+    let request_line = lines.next().ok_or(RequestError::Closed)?;
     let mut parts = request_line.split_whitespace();
-    let method = parts.next()?.to_string();
-    let path = parts.next()?.to_string();
+    let method = parts.next().ok_or(RequestError::Closed)?.to_string();
+    let path = parts.next().ok_or(RequestError::Closed)?.to_string();
     let mut headers: HashMap<String, String> = HashMap::new();
     for line in lines {
         if let Some(idx) = line.find(':') {
@@ -332,10 +376,18 @@ async fn read_request(stream: &mut TcpStream) -> Option<HttpRequest> {
         .get("content-length")
         .and_then(|s| s.parse::<usize>().ok())
     {
+        if len > MAX_BODY_BYTES {
+            return Err(RequestError::TooLarge(format!(
+                "request body too large: {len} bytes (limit {MAX_BODY_BYTES})"
+            )));
+        }
         if len > 0 {
             while body.len() < len {
                 let mut chunk = [0u8; 4096];
-                let n = stream.read(&mut chunk).await.ok()?;
+                let n = stream
+                    .read(&mut chunk)
+                    .await
+                    .map_err(|_| RequestError::Closed)?;
                 if n == 0 {
                     break;
                 }
@@ -344,7 +396,7 @@ async fn read_request(stream: &mut TcpStream) -> Option<HttpRequest> {
             body.truncate(len);
         }
     }
-    Some(HttpRequest {
+    Ok(HttpRequest {
         method,
         path,
         headers,
@@ -554,7 +606,14 @@ async fn ws_read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> Option<(u8, Vec<
     } else if len == 127 {
         let mut b = [0u8; 8];
         reader.read_exact(&mut b).await.ok()?;
-        len = u64::from_be_bytes(b) as usize;
+        // u64 → usize：32 位平台上超出 usize 的帧长在这里就被拒（不静默截断）
+        len = usize::try_from(u64::from_be_bytes(b)).ok()?;
+    }
+    // 上限必须在**分配之前**判：`vec![0u8; len]` 会照着帧长立即分配，
+    // len = 2^60 足以当场 OOM——而这个数是客户端完全可控的。
+    if len > MAX_WS_FRAME_BYTES {
+        warn!("[gateway] WebSocket 帧超限（{len} > {MAX_WS_FRAME_BYTES}），断开连接");
+        return None;
     }
     let mut mask = [0u8; 4];
     if masked {

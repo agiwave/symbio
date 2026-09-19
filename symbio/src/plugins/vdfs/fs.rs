@@ -62,12 +62,26 @@ enum Half {
 /// - `"/src/main.rs"` → `"src/main.rs"`（首段分隔符只是分隔，不是文件系统根）
 /// - 含 `..` 段 → [`VdfsError::Invalid`]
 pub fn normalize_addr(raw: &str) -> VdfsResult<String> {
+    // 第一道：按**段**判 `..`，且两种分隔符都算。
+    //
+    // 只按 `/` 分段会被 Windows 形式的 `demo/..\..\escaped` 绕过——`\` 同样是
+    // 路径分隔符，下游 `Path::join` 会照着它解析。规则本体在机制层
+    // [`has_parent_segment`]，此处**复用而非再写一份**：本文件开头的地址规则
+    // 说明早已定下「分段比较」，历史 bug 正是「按字符串前缀 / 单一分隔符代替
+    // 按路径段比较」。
+    if has_parent_segment(raw) {
+        return Err(VdfsError::invalid(format!(
+            "VDFS 地址不允许向上穿越：{raw}"
+        )));
+    }
     let mut segs: Vec<&str> = Vec::new();
     for seg in raw.trim().split('/') {
         let seg = seg.trim();
         if seg.is_empty() || seg == "." {
             continue;
         }
+        // 第二道：覆盖被空白包裹的 `..`（`" .. "`）——逐段 `trim()` 才暴露它，
+        // 上面的 `has_parent_segment` 按原样分段看不到。
         if seg == ".." {
             return Err(VdfsError::invalid(format!(
                 "VDFS 地址不允许向上穿越：{raw}"
@@ -373,9 +387,29 @@ mod tests {
 
     #[test]
     fn traversal_is_rejected() {
-        for bad in ["../x", "a/../b", ".vdfs/../../etc"] {
+        for bad in [
+            "../x",
+            "a/../b",
+            ".vdfs/../../etc",
+            // 反斜杠形式：`\` 也是分隔符，只按 `/` 分段会放行（已实证可逃出条目目录）
+            r"demo/..\..\escaped",
+            r".vdfs/skill/demo/..\..\..\escaped",
+            r"src\..\..\..\Windows",
+            r"..\etc",
+            // 被空白包裹的 `..`：逐段 trim 后才现形
+            " .. ",
+            "a/ .. /b",
+        ] {
             assert!(normalize_addr(bad).is_err(), "应拒绝向上穿越：{bad}");
         }
+    }
+
+    /// 反斜杠包裹的合法名字**不是**穿越，不能被误伤
+    #[test]
+    fn backslash_names_that_are_not_traversal_still_pass() {
+        assert_eq!(normalize_addr(r"a/b.c").unwrap(), r"a/b.c");
+        assert_eq!(normalize_addr("a/..b/c").unwrap(), "a/..b/c");
+        assert_eq!(normalize_addr("a/b..").unwrap(), "a/b..");
     }
 
     #[test]

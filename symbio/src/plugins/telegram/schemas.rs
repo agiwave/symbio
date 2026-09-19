@@ -87,3 +87,70 @@ pub mod telegram_status {
         pub update_offset: i64,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 宽松反序列化必须同时吃下「数字数组」（落盘形态）与「字符串数组」
+    /// （配置 widget 的 list 每行一项）——两种形态都表示同一份用户 ID 列表。
+    #[test]
+    fn allowed_users_accepts_numbers_and_strings() {
+        let c: TelegramConfig =
+            serde_json::from_str(r#"{"bot_token":"t","allowed_users":[1,2,3]}"#).unwrap();
+        assert_eq!(c.allowed_users, vec![1, 2, 3]);
+
+        let c: TelegramConfig =
+            serde_json::from_str(r#"{"bot_token":"t","allowed_users":["10"," 20 ","30"]}"#)
+                .unwrap();
+        assert_eq!(
+            c.allowed_users,
+            vec![10, 20, 30],
+            "字符串项要按 trim 后的整数解析"
+        );
+
+        let c: TelegramConfig =
+            serde_json::from_str(r#"{"bot_token":"t","allowed_users":[1,"2"]}"#).unwrap();
+        assert_eq!(c.allowed_users, vec![1, 2], "同一列表允许混合形态");
+    }
+
+    #[test]
+    fn defaults_apply_when_fields_are_absent() {
+        let c: TelegramConfig = serde_json::from_str(r#"{"bot_token":"t"}"#).unwrap();
+        assert!(c.allowed_users.is_empty());
+        assert!(c.streaming_enabled, "两个开关缺省为 true");
+        assert!(c.poll_enabled);
+        assert!(c.chat_id.is_none());
+    }
+
+    #[test]
+    fn allowed_users_rejects_non_numeric_entries() {
+        for bad in [
+            r#"{"bot_token":"t","allowed_users":["abc"]}"#,
+            r#"{"bot_token":"t","allowed_users":[true]}"#,
+            r#"{"bot_token":"t","allowed_users":[1.5]}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<TelegramConfig>(bad).is_err(),
+                "应拒绝：{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn config_roundtrips_through_json() {
+        let c = TelegramConfig {
+            bot_token: "tok".into(),
+            chat_id: Some("-100".into()),
+            streaming_enabled: false,
+            poll_enabled: true,
+            allowed_users: vec![7],
+        };
+        let back: TelegramConfig =
+            serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.bot_token, "tok");
+        assert_eq!(back.chat_id.as_deref(), Some("-100"));
+        assert!(!back.streaming_enabled);
+        assert_eq!(back.allowed_users, vec![7]);
+    }
+}

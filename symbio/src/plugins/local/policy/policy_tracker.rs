@@ -26,7 +26,8 @@ impl ActionTracker {
         actions.len()
     }
 
-    pub fn _count(&self) -> usize {
+    /// 窗口内的动作数
+    pub fn count(&self) -> usize {
         let mut actions = match self.actions.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
@@ -35,9 +36,15 @@ impl ActionTracker {
         actions.len()
     }
 
-    pub fn is_at_limit(&self, _max_actions: u32) -> bool {
-        // self._count() >= max_actions as usize
-        false
+    /// 当前窗口内动作数是否已达上限；`max_actions == 0` 视为**关闭限流**。
+    ///
+    /// 此前这个方法是恒 `false` 的占位（真实现被注释掉），于是
+    /// `max_actions_per_hour: 100` 从未生效——限流配置形同虚设。
+    pub fn is_at_limit(&self, max_actions: u32) -> bool {
+        if max_actions == 0 {
+            return false;
+        }
+        self.count() >= max_actions as usize
     }
 
     fn cleanup_old_actions(&self, actions: &mut Vec<Instant>) {

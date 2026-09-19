@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
-use super::{ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
+use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
 use crate::symbio_core::{
     get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
 };
@@ -264,18 +264,16 @@ impl ModelProtocol for AnthropicProtocol {
 
     fn parse_response_line(&self, line: &str) -> Vec<ProtocolEvent> {
         let mut evs = Vec::new();
-        if let Some(stripped) = line.strip_prefix("event: ") {
+        if let Some(stripped) = line.strip_prefix("event:") {
             let mut etype = self.current_event_type.lock().unwrap();
             let type_val = stripped.trim().to_string();
             *etype = Some(type_val);
             return evs;
         }
 
-        if !line.starts_with("data: ") {
+        let Some(data) = sse_data(line) else {
             return evs;
-        }
-
-        let data = &line[6..];
+        };
         if let Ok(json) = serde_json::from_str::<Value>(data.trim()) {
             let etype_raw = self.current_event_type.lock().unwrap();
             let mut etype = etype_raw.as_deref().unwrap_or("").to_string();

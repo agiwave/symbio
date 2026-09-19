@@ -255,8 +255,14 @@ async fn save_leaves_no_temp_file_behind() {
 
     let dir = dir_for(tmp.path(), "v2_sess_atomic");
     assert!(dir.join(SESSION_FILE).is_file());
+    let leftovers: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.ends_with(".tmp"))
+        .collect();
     assert!(
-        !dir.join(SESSION_FILE_TMP).exists(),
+        leftovers.is_empty(),
         "rename 后临时文件不该存在"
     );
 }
@@ -480,4 +486,48 @@ async fn hostile_ids_cannot_escape_the_storage_root() {
 
     // 根下只多出归一化后的目录，没有任何名为 `..` / `.` 的条目
     assert!(!tmp.path().join("..").join("escape").exists());
+}
+
+/// 原子写的 tmp 名必须**每次唯一**——固定名会让并发保存交错写同一个 tmp，
+/// 于是 rename 出来的可能是别人写的内容（rename 只保证不写坏，不保证写对人）。
+#[test]
+fn atomic_tmp_paths_are_unique_per_call() {
+    let target = std::path::PathBuf::from("somewhere").join("messages.json");
+    let a = tmp_path_for(&target);
+    let b = tmp_path_for(&target);
+    assert_ne!(a, b, "两次调用必须给出不同 tmp 名");
+    let name = a.file_name().unwrap().to_string_lossy().to_string();
+    assert!(name.starts_with("messages.json."), "应保留目标名前缀：{name}");
+    assert!(name.ends_with(".tmp"), "{name}");
+    assert_eq!(a.parent(), target.parent(), "tmp 必须落在同目录（同盘才能 rename）");
+}
+
+/// 同一会话的并发保存不得互相覆盖（「整份 load → 改 → 整份重写」的丢更新）
+#[tokio::test]
+async fn concurrent_saves_of_one_session_serialize_via_lock() {
+    use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+
+    let tmp = TempDir::new().unwrap();
+    let store = std::sync::Arc::new(SessionStore::new(tmp.path().to_path_buf()));
+
+    let mut tasks = Vec::new();
+    for i in 0..20 {
+        let store = store.clone();
+        tasks.push(tokio::spawn(async move {
+            // 临界区必须包住整段「读 → 改 → 写」；只锁 save 防不住丢更新
+            let _guard = store.lock_writes("v2_sess_conc").await;
+            let mut s = store.load_session("v2_sess_conc").await.unwrap();
+            s.messages.push(ChatMessage {
+                id: format!("conc-{i}"),
+                ..Default::default()
+            });
+            store.save_session(&s).await.unwrap();
+        }));
+    }
+    for t in tasks {
+        t.await.unwrap();
+    }
+
+    let got = store.load_session("v2_sess_conc").await.unwrap();
+    assert_eq!(got.messages.len(), 20, "每条追加都必须留下（无锁时会丢）");
 }

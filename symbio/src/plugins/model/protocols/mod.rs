@@ -61,6 +61,20 @@ pub fn resolve_protocol_id(api_protocol: &str) -> &'static str {
     }
 }
 
+/// 从一行 SSE 文本取出 `data:` 之后的载荷。
+///
+/// 容忍「那个空格在不在」：规范写的是 `data: `，但网关 / 反代在转发时常把空格
+/// 去掉或换成 tab。严格匹配的后果不是报错而是**静默空流**——请求成功、一个字都
+/// 没有，连 `[DONE]` 都匹配不上，排查成本极高。
+///
+/// 行尾的 `\r` 一并去掉：分块边界可能把它留在行里，`serde_json` 会因尾随字符
+/// 解析失败。返回 `None` = 这一行不是数据行（空行 / 注释 / `event:` 等）。
+pub fn sse_data(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("data:")?;
+    let rest = rest.strip_prefix([' ', '\t']).unwrap_or(rest);
+    Some(rest.trim_end())
+}
+
 /// 协议适配钩子 —— model 插件私有契约。
 ///
 /// 钩子签名一律收 `&ModelProviderConfig`（持久化配置 schema），不收
@@ -97,5 +111,48 @@ pub trait ModelProtocol: Send + Sync {
     /// 探测网关真实可用上下文（尽力而为；None = 不可探测，回退配置值）
     async fn query_context_limit(&self, _cfg: &ModelProviderConfig) -> Option<u32> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SSE 载荷解析必须容忍「那个空格在不在」与行尾 `\r`——
+    /// 严格匹配 `"data: "` 的后果不是报错而是**静默空流**（连 `[DONE]` 都匹配不上）。
+    #[test]
+    fn sse_data_tolerates_missing_space_and_trailing_cr() {
+        assert_eq!(sse_data("data: {\"a\":1}"), Some("{\"a\":1}"));
+        assert_eq!(sse_data("data:{\"a\":1}"), Some("{\"a\":1}"));
+        assert_eq!(sse_data("data:\t{\"a\":1}"), Some("{\"a\":1}"));
+        assert_eq!(sse_data("data: {\"a\":1}\r"), Some("{\"a\":1}"));
+        assert_eq!(sse_data("data: [DONE]"), Some("[DONE]"));
+        assert_eq!(sse_data("data:[DONE]"), Some("[DONE]"));
+    }
+
+    /// 非数据行必须仍然返回 None（否则会被当成 JSON 去解析）
+    #[test]
+    fn sse_data_rejects_non_data_lines() {
+        assert_eq!(sse_data("event: message_start"), None);
+        assert_eq!(sse_data(""), None);
+        assert_eq!(sse_data(": keep-alive"), None);
+        assert_eq!(sse_data("{\"error\":1}"), None);
+        assert_eq!(sse_data("data"), None);
+    }
+
+    #[test]
+    fn protocol_aliases_resolve_to_registered_ids() {
+        assert_eq!(resolve_protocol_id("chat"), MODEL_PROTOCOL_OPENAI_CHAT);
+        assert_eq!(
+            resolve_protocol_id("responses"),
+            MODEL_PROTOCOL_OPENAI_RESPONSES
+        );
+        assert_eq!(
+            resolve_protocol_id("anthropic"),
+            MODEL_PROTOCOL_ANTHROPIC_MESSAGES
+        );
+        assert_eq!(resolve_protocol_id("gemini"), MODEL_PROTOCOL_GEMINI_API);
+        // 未识别值兜底 openai_chat
+        assert_eq!(resolve_protocol_id("bogus"), MODEL_PROTOCOL_OPENAI_CHAT);
     }
 }

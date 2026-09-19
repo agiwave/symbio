@@ -18,9 +18,10 @@
 use super::entry;
 use crate::symbio_core::vdfs::host::{notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_CHANGE_CREATED,
-    VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
+    has_parent_segment, VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext,
+    VdfsError, VdfsNewType, VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse,
+    VDFS_ACTION_EXPORT, VDFS_CHANGE_CREATED, VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED,
+    VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -74,6 +75,27 @@ impl DirVdfs {
     /// 条目内某个文件的绝对路径
     pub fn inner_path(&self, id: &str, rel: &str) -> PathBuf {
         self.entry_dir(id).join(rel)
+    }
+
+    /// 条目内相对路径 → 绝对路径，**并校验它不逃出条目目录**。
+    ///
+    /// [`inner_path`](Self::inner_path) 是裸拼接口径：条目 id 由
+    /// [`safe_segment`](entry::safe_segment) 保证安全，但 `rel` 此前**未经任何
+    /// 校验**。虚拟地址只以 `/` 分段，因此合法的 `rel` 必须既不含 `..` 段
+    /// （`\` 也是分隔符，见 [`has_parent_segment`]），也不含 `\`——否则
+    /// Windows 会把 `demo/..\..\escaped.txt` 解析到条目目录之外，而
+    /// [`remove_inner`](Self::remove_inner) 用的是 `remove_dir_all`。
+    ///
+    /// 这是**纵深防御**：访问层的 `plugins::vdfs::fs::normalize_addr` 已拦一道，
+    /// 但 provider 可能经其它访问路径被复用（解包、直接构造），不能假设上游
+    /// 一定校验过。
+    fn checked_inner(&self, id: &str, rel: &str) -> VdfsResult<PathBuf> {
+        if has_parent_segment(rel) || rel.contains('\\') {
+            return Err(VdfsError::invalid(format!(
+                "条目内路径不允许向上穿越或含反斜杠：{rel}"
+            )));
+        }
+        Ok(self.inner_path(id, rel))
     }
 
     // ==================== 条目级原语 ====================
@@ -173,7 +195,7 @@ impl DirVdfs {
 
     /// 列条目内部某个目录（`rel` 为空 = 条目根）；目录在前、各自按名升序
     pub async fn list_inner(&self, id: &str, rel: &str) -> VdfsResult<Vec<VdfsNode>> {
-        let target = self.inner_path(id, rel);
+        let target = self.checked_inner(id, rel)?;
         let mut rd = tokio::fs::read_dir(&target)
             .await
             .map_err(|e| VdfsError::not_found(format!("无法读取目录 {target:?}：{e}")))?;
@@ -201,7 +223,7 @@ impl DirVdfs {
 
     /// 读条目内部某个文件
     pub async fn read_inner(&self, id: &str, rel: &str) -> VdfsResult<VdfsContent> {
-        let path = self.inner_path(id, rel);
+        let path = self.checked_inner(id, rel)?;
         let meta = tokio::fs::metadata(&path)
             .await
             .map_err(|e| VdfsError::not_found(format!("无法读取 {path:?}：{e}")))?;
@@ -231,7 +253,7 @@ impl DirVdfs {
         if rel.is_empty() {
             return self.write_text(id, text).await;
         }
-        let path = self.inner_path(id, rel);
+        let path = self.checked_inner(id, rel)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -262,7 +284,7 @@ impl DirVdfs {
         if rel.is_empty() {
             return self.remove(id).await;
         }
-        let path = self.inner_path(id, rel);
+        let path = self.checked_inner(id, rel)?;
         let meta = tokio::fs::metadata(&path)
             .await
             .map_err(|e| VdfsError::not_found(format!("无法访问 {path:?}：{e}")))?;
@@ -346,7 +368,8 @@ impl VdfsProvider for DirVdfs {
             Some((id, rel)) => {
                 let id = self.id_of(id);
                 let name = rel.rsplit('/').next().unwrap_or(rel).to_string();
-                entry::tree_node(&self.inner_path(&id, rel), &name).await
+                let target = self.checked_inner(&id, rel)?;
+                entry::tree_node(&target, &name).await
             }
         }
     }
@@ -426,7 +449,7 @@ impl VdfsProvider for DirVdfs {
         if rel.is_empty() {
             return self.mkdir_entry(&id).await;
         }
-        let target = self.inner_path(&id, rel);
+        let target = self.checked_inner(&id, rel)?;
         tokio::fs::create_dir_all(&target)
             .await
             .map_err(|e| VdfsError::internal(format!("创建目录失败：{e}")))?;
@@ -626,5 +649,43 @@ mod tests {
         s.write_text("demo", "# y").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert_eq!(seen.lock().unwrap().len(), 1, "unwatch 后不得再收到事件");
+    }
+
+    /// 反斜杠形式的 `..` 不得逃出条目目录——**不依赖访问层**的纵深防御。
+    ///
+    /// 访问层 `normalize_addr` 已拦一道，但 provider 可能经别的访问路径被复用
+    /// （解包、直接构造），因此这条防线必须独立成立。`remove_inner` 用
+    /// `remove_dir_all`，一旦逃逸即可删除任意目录。
+    #[tokio::test]
+    async fn inner_rel_rejects_separator_smuggling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = store_in(tmp.path());
+        let ctx = VdfsContext::empty();
+        s.write_text("demo", "# x").await.unwrap();
+
+        // 哨兵目录放在条目根之外：证明「若没有守卫就真的会够到」
+        let outside = tmp.path().join("vdfs-sentinel");
+        std::fs::create_dir_all(&outside).unwrap();
+
+        for bad in [
+            r"demo/..\..\escaped.txt",
+            r"demo/..\escaped.txt",
+            r"demo/sub\..\..\escaped.txt",
+            r"demo/a\b.txt",
+            r"demo/..\vdfs-sentinel",
+        ] {
+            for r in [
+                s.read(&ctx, bad).await.map(|_| ()),
+                s.write(&ctx, bad, &VdfsContent::text("", "pwned"))
+                    .await
+                    .map(|_| ()),
+                s.delete(&ctx, bad, true).await,
+            ] {
+                assert!(r.is_err(), "反斜杠路径必须被拒绝：{bad}");
+            }
+        }
+
+        assert!(outside.exists(), "哨兵目录不得被穿越删除");
+        assert!(!tmp.path().join("escaped.txt").exists());
     }
 }

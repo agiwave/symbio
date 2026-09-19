@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
-use super::{ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES};
+use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES};
 use crate::symbio_core::{
     get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
 };
@@ -202,10 +202,9 @@ impl ModelProtocol for OpenaiResponsesProtocol {
 
     fn parse_response_line(&self, line: &str) -> Vec<ProtocolEvent> {
         let mut evs = Vec::new();
-        if !line.starts_with("data: ") {
+        let Some(data) = sse_data(line) else {
             return evs;
-        }
-        let data = &line[6..];
+        };
         if data == "[DONE]" {
             return evs;
         }

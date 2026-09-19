@@ -7,6 +7,7 @@
 //! 往返契约：[`zip_dir`] 以条目 id 作**唯一顶层目录**，[`extract_pack`] 端
 //! [`strip_common_root`] 恰好剥掉这一层——导出的包能原样导回。
 
+use crate::symbio_core::vdfs_provider::has_parent_segment;
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
@@ -225,14 +226,9 @@ fn normalize_pack_path(p: &str) -> String {
         .to_string()
 }
 
-/// 路径中是否含 `..` 段——两种分隔符都算，按**段**判定
-///
-/// 协议层的 [`has_parent_segment`](crate::symbio_core::vdfs_provider::has_parent_segment)
-/// 管的是**请求地址**；zip 条目是**包内自带**的路径，不经过那条守卫，
-/// 因此解包侧必须自己判一次。
-fn has_parent_segment(path: &str) -> bool {
-    path.split(['/', '\\']).any(|seg| seg == "..")
-}
+// 解包侧的路径穿越防线复用协议层的 `has_parent_segment`（按**段**判定，`/` 与
+// `\` 都算）：zip 条目是**包内自带**的路径，不经过请求地址那条守卫，所以必须
+// 自己判一次；但**规则本体只该有一份**，这里不再另写实现。
 
 #[cfg(test)]
 mod tests {

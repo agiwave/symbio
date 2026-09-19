@@ -744,6 +744,17 @@ impl SessionPlugin {
     ///
     /// 补丁**不带** `id` 是合法用法：调用方 `write` 时已按地址补齐（见那里的注释），
     /// 因此到这里 `patch.id` 必然等于 `mid`，除非调用方**明确**写了一个别的 id。
+    ///
+    /// ## 为什么不复用 `ChatMessage::apply_patch`
+    ///
+    /// 两者对 `content` 的语义**有意不同**：`apply_patch` 服务于流式增量
+    /// （Text / Reasoning 逐帧**追加**），而本方法的调用方是在 VDFS 上
+    /// **编辑一条已有消息**，期望的是**整体替换**。直接换成 `apply_patch` 会让
+    /// 「改一段话」变成「在原文后面接一段」。要收敛成一份实现，得先给 core 的
+    /// `apply_patch` 加一个"合并模式"参数，而不是在这里改调用点。
+    ///
+    /// （保存走 `replace_messages` 是安全的：其内部的 `assign_seq` 对**已带且单调**
+    /// 的序号是原样沿用的，不会重排既有消息。）
     pub(crate) async fn patch_message(
         &self,
         session_id: &str,

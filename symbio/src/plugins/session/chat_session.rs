@@ -339,6 +339,9 @@ impl ChatSession for PersistentChatSession {
     }
 
     async fn append_messages(&self, messages: Vec<ChatMessage>) -> Result<usize, PluginError> {
+        // 临界区：整段「读 → 改 → 整份写回」必须串行。会话写入是整份覆盖，
+        // 两次并发追加各自读到同一份旧数据、各自写回，后写的会整份覆盖先写的。
+        let _write = self.store.lock_writes(&self.session_id).await;
         let mut session = self.load_session().await?;
         let now = now_ms();
 
@@ -416,6 +419,8 @@ impl ChatSession for PersistentChatSession {
     }
 
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
+        // 临界区：与 append / update 共用同一把 per-session 写锁（整份覆盖语义）
+        let _write = self.store.lock_writes(&self.session_id).await;
         let mut session = self.load_session().await?;
         let now = now_ms();
         // 回填缺失的 timestamp 与 seq：replace 会整体重写消息列表，若保留 `None`，
@@ -462,6 +467,8 @@ impl ChatSession for PersistentChatSession {
     }
 
     async fn update_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
+        // 临界区：与 append / replace 共用同一把 per-session 写锁（读-改-写整段）
+        let _write = self.store.lock_writes(&self.session_id).await;
         let mut session = self.load_session().await?;
         let now = now_ms();
         for patch in messages {

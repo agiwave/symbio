@@ -241,58 +241,167 @@ fn extract_host(url: &str) -> Result<String, PluginError> {
         .ok_or_else(|| PluginError::ValidationError("URL 缺少主机".to_string()))
 }
 
-/// 检查是否为私有或本地主机
+/// 检查是否为私有 / 本地 / 不可路由的主机。
+///
+/// 判据走 **IP 语义**而不是字符串前缀：`127.0.0.1` 是前缀比较唯一认得出的回环地址，
+/// 但 `127.0.0.2`、`0.0.0.0`、`::1`、`::ffff:127.0.0.1` 全都不是它，前缀比较会逐个
+/// 放行——而这些地址指向的正是本机与内网（`169.254.169.254` 是云元数据端点）。
 fn is_private_or_local_host(host: &str) -> bool {
-    if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") {
         return true;
     }
-
-    // 私有 IP 范围
-    if host.starts_with("10.")
-        || host.starts_with("192.168.")
-        || host.starts_with("172.16.")
-        || host.starts_with("172.17.")
-        || host.starts_with("172.18.")
-        || host.starts_with("172.19.")
-        || host.starts_with("172.20.")
-        || host.starts_with("172.21.")
-        || host.starts_with("172.22.")
-        || host.starts_with("172.23.")
-        || host.starts_with("172.24.")
-        || host.starts_with("172.25.")
-        || host.starts_with("172.26.")
-        || host.starts_with("172.27.")
-        || host.starts_with("172.28.")
-        || host.starts_with("172.29.")
-        || host.starts_with("172.30.")
-        || host.starts_with("172.31.")
-        || host.starts_with("169.254.")
-    {
-        return true;
+    match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => match ip {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || v6.is_unique_local() // fc00::/7
+                    || v6.is_unicast_link_local() // fe80::/10
+                    // IPv4-mapped（`::ffff:127.0.0.1`）：按内层 IPv4 判
+                    || v6.to_ipv4_mapped()
+                        .is_some_and(|v4| v4.is_loopback() || v4.is_private() || v4.is_link_local())
+            }
+        },
+        // 不是 IP：内网域名的常见后缀
+        Err(_) => host.ends_with(".local") || host.ends_with(".internal"),
     }
-
-    // 本地域名
-    if host.ends_with(".local") || host.ends_with(".localhost") || host.ends_with(".internal") {
-        return true;
-    }
-
-    false
 }
 
-/// 检查主机是否匹配白名单
+/// 检查主机是否匹配白名单（按**域名标签边界**比较，大小写不敏感）。
+///
+/// 通配项 `*.example.com` 必须等价于「`example.com` 本身 或 以 `.example.com` 结尾」。
+/// 早先用裸 `ends_with("example.com")`，会把 `evil-example.com` 一并放行——与项目在
+/// VDFS 地址规则里记过的教训同源：**按字符串前后缀代替按段比较**。
+///
+/// 原实现另有一处笔误 `host == &suffix[1..]`：`"example.com"[1..]` 是 `"xample.com"`，
+/// 本意应是「裸域名自身」，而这一点已由 `ends_with(".suffix")` 的反面覆盖，故删掉。
 fn host_matches_allowlist(host: &str, allowlist: &[String]) -> bool {
-    for allowed in allowlist {
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    allowlist.iter().any(|allowed| {
+        let allowed = allowed.trim().to_ascii_lowercase();
         if allowed == "*" {
             return true;
         }
-        if let Some(suffix) = allowed.strip_prefix("*.") {
-            if host.ends_with(suffix) || host == &suffix[1..] {
-                return true;
-            }
+        match allowed.strip_prefix("*.") {
+            Some(suffix) => host == suffix || host.ends_with(&format!(".{suffix}")),
+            None => host == allowed,
         }
-        if host == allowed {
-            return true;
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_with_domains(domains: &[&str]) -> HttpRequestTool {
+        HttpRequestTool {
+            allowed_domains: domains.iter().map(|s| s.to_string()).collect(),
+            max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
+            timeout_secs: DEFAULT_TIMEOUT_SECS,
         }
     }
-    false
+
+    /// SSRF 防护必须按 **IP 语义**判，不能按字符串前缀——
+    /// 前缀比较只认得出字面写死的 `127.0.0.1`，其余回环 / 内网形式全部放行。
+    #[test]
+    fn private_and_loopback_hosts_are_blocked() {
+        for bad in [
+            "localhost",
+            "foo.localhost",
+            "127.0.0.1",
+            "127.0.0.2", // 整个 127/8 都是回环
+            "0.0.0.0",
+            "10.1.2.3",
+            "192.168.1.1",
+            "172.16.0.1",
+            "172.31.255.255",
+            "169.254.169.254", // 云元数据端点
+            "::1",
+            "::",
+            "fc00::1",
+            "fe80::1",
+            "::ffff:127.0.0.1", // IPv4-mapped
+            "printer.local",
+            "db.internal",
+        ] {
+            assert!(is_private_or_local_host(bad), "{bad} 应被判为本地/私有");
+        }
+        for ok in [
+            "example.com",
+            "api.github.com",
+            "8.8.8.8",
+            "172.32.0.1", // 172.16/12 之外
+            "2606:4700::1111",
+        ] {
+            assert!(!is_private_or_local_host(ok), "{ok} 不该被判为本地/私有");
+        }
+    }
+
+    /// 通配白名单按**标签边界**匹配：`evil-example.com` 不能被 `*.example.com` 放行
+    #[test]
+    fn wildcard_allowlist_respects_label_boundary() {
+        let allow = |h: &str| host_matches_allowlist(h, &["*.example.com".to_string()]);
+        assert!(allow("example.com"), "裸域名本身应匹配");
+        assert!(allow("api.example.com"));
+        assert!(allow("a.b.example.com"));
+        assert!(!allow("evil-example.com"), "后缀相同但不是子域");
+        assert!(!allow("example.com.evil.net"));
+        assert!(!allow("exampleXcom"));
+    }
+
+    #[test]
+    fn allowlist_is_case_insensitive_and_exact_without_wildcard() {
+        let allow = |h: &str| host_matches_allowlist(h, &["API.GitHub.com".to_string()]);
+        assert!(allow("api.github.com"));
+        assert!(allow("API.github.COM"));
+        assert!(!allow("evil.api.github.com"), "无通配项时只允许精确匹配");
+        assert!(host_matches_allowlist("anything.at.all", &["*".to_string()]));
+    }
+
+    #[test]
+    fn validate_url_rejects_non_http_and_private_targets() {
+        let t = tool_with_domains(&["*"]);
+        assert!(t.validate_url("https://example.com/a").is_ok());
+        for bad in [
+            "",
+            "ftp://example.com",
+            "file:///etc/passwd",
+            "https://exa mple.com",
+            "http://127.0.0.1/admin",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]:8080/",
+        ] {
+            assert!(t.validate_url(bad).is_err(), "应拒绝：{bad}");
+        }
+    }
+
+    #[test]
+    fn validate_url_enforces_allowlist() {
+        let t = tool_with_domains(&["*.example.com"]);
+        assert!(t.validate_url("https://api.example.com/x").is_ok());
+        assert!(t.validate_url("https://evil-example.com/x").is_err());
+        assert!(t.validate_url("https://example.org/x").is_err());
+    }
+
+    #[test]
+    fn validate_method_accepts_known_and_rejects_unknown() {
+        let t = HttpRequestTool::new();
+        for m in ["GET", "post", "Put", "delete", "patch", "head", "options"] {
+            assert!(t.validate_method(m).is_ok(), "{m}");
+        }
+        for bad in ["TRACE", "CONNECT", "", "GETY"] {
+            assert!(t.validate_method(bad).is_err(), "{bad}");
+        }
+    }
 }

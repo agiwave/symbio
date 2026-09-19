@@ -87,9 +87,10 @@ use super::types::{ChatMessage, Session, SessionSummary};
 use crate::plugins::session::paths;
 use crate::symbio_core::PluginError;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use tokio::sync::RwLock;
+use std::sync::Arc;
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 /// 父会话目录内存放子会话的固定子目录名
 const SUB_SESSIONS_DIR: &str = "sessions";
@@ -97,15 +98,9 @@ const SUB_SESSIONS_DIR: &str = "sessions";
 /// 会话主文件名（一个会话目录内的唯一真源）
 const SESSION_FILE: &str = "session.json";
 
-/// 会话主文件的原子写临时文件名
-const SESSION_FILE_TMP: &str = "session.json.tmp";
-
 /// 消息文件名 —— **与元数据分开存放**（见模块头「元数据与消息分文件」）。
 /// 清单只读 `session.json`，**不读**本文件；只有真的要取转写时才读。
 const MESSAGES_FILE: &str = "messages.json";
-
-/// 消息文件的原子写临时文件名
-const MESSAGES_FILE_TMP: &str = "messages.json.tmp";
 
 /// 会话存储：一个具体类型，落盘与不落盘由构造时选定（见模块头）
 pub struct SessionStore {
@@ -113,6 +108,8 @@ pub struct SessionStore {
     base_dir: Option<PathBuf>,
     /// 不落盘时的进程内条目表（落盘型恒空）
     mem: RwLock<BTreeMap<String, Session>>,
+    /// 每会话一把写入锁（见 [`lock_writes`](Self::lock_writes)）
+    write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl SessionStore {
@@ -123,6 +120,7 @@ impl SessionStore {
         Self {
             base_dir: Some(base_dir),
             mem: RwLock::new(BTreeMap::new()),
+            write_locks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -134,7 +132,27 @@ impl SessionStore {
         Self {
             base_dir: None,
             mem: RwLock::new(BTreeMap::new()),
+            write_locks: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// 取得该会话的**写入锁**，串行化「整份 load → 改 → 整份重写」这整段临界区。
+    ///
+    /// 为什么必须包住**整段**而不是只包 `save_session`：会话写入是「读出来、
+    /// 改内存、整份写回去」，两次并发调用会各自读到同一份旧数据、各自写回，
+    /// 后写的把先写的**整个覆盖**。只锁 save 能防文件写坏，但防不住丢更新——
+    /// 而丢更新的后果更隐蔽：消息凭空消失，且磁盘上永远是一个"合法"的文件。
+    ///
+    /// 锁按 id 惰性创建、进程生命周期内不清理：会话数有限，guard 释放后表里
+    /// 留一个空 `Arc` 的成本可忽略。
+    pub async fn lock_writes(&self, session_id: &str) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut map = self.write_locks.lock().await;
+            map.entry(session_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        lock.lock_owned().await
     }
 
     /// 落盘根；`None` = 本实例不落盘
@@ -224,7 +242,6 @@ impl SessionStore {
         let summary = SessionSummary::of(session);
         atomic_write(
             &dir.join(MESSAGES_FILE),
-            &dir.join(MESSAGES_FILE_TMP),
             &MessagesFile {
                 messages: session.messages.clone(),
             },
@@ -232,7 +249,6 @@ impl SessionStore {
         .await?;
         atomic_write(
             &dir.join(SESSION_FILE),
-            &dir.join(SESSION_FILE_TMP),
             &SessionMetaFile::of(&summary),
         )
         .await
@@ -499,17 +515,14 @@ struct MessagesFile {
 ///
 /// 直接 `fs::write`（O_TRUNC + write）在并发保存交错时会留下「短 JSON + 长旧内容
 /// 残留」，产生 trailing characters 损坏；rename 保证磁盘上永远是某一刻的完整版本。
-async fn atomic_write<T: Serialize>(
-    target: &Path,
-    tmp: &Path,
-    value: &T,
-) -> Result<(), PluginError> {
+async fn atomic_write<T: Serialize>(target: &Path, value: &T) -> Result<(), PluginError> {
     let json = serde_json::to_string(value)
         .map_err(|e| PluginError::InternalError(format!("序列化会话文件失败: {e}")))?;
-    tokio::fs::write(tmp, json)
+    let tmp = tmp_path_for(target);
+    tokio::fs::write(&tmp, json)
         .await
         .map_err(|e| PluginError::InternalError(format!("写入会话临时文件失败: {e}")))?;
-    tokio::fs::rename(tmp, target)
+    tokio::fs::rename(&tmp, target)
         .await
         .map_err(|e| PluginError::InternalError(format!("替换会话文件失败: {e}")))
 }
@@ -648,7 +661,6 @@ async fn split_inline_messages(dir: &Path) -> Result<(), PluginError> {
     if !has_split {
         atomic_write(
             &dir.join(MESSAGES_FILE),
-            &dir.join(MESSAGES_FILE_TMP),
             &MessagesFile {
                 messages: messages.clone(),
             },
@@ -666,7 +678,6 @@ async fn split_inline_messages(dir: &Path) -> Result<(), PluginError> {
     });
     atomic_write(
         &dir.join(SESSION_FILE),
-        &dir.join(SESSION_FILE_TMP),
         &SessionMetaFile::of(&summary),
     )
     .await
@@ -675,6 +686,26 @@ async fn split_inline_messages(dir: &Path) -> Result<(), PluginError> {
 /// 清单排序：`updated_at` 降序（两种驻留方式共用同一份，清单顺序不分叉）
 fn sort_summaries_desc(summaries: &mut [SessionSummary]) {
     summaries.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
+}
+
+/// 原子写的临时文件路径：`<目标名>.<pid>.<单调序号>.tmp`
+///
+/// tmp 名**每次唯一**。早先它由调用方传固定名（`messages.json.tmp`），两次并发
+/// 保存会交错写同一个 tmp：A 写完、B 覆盖同一 tmp，A 的 rename 便把 B 的内容放进
+/// A 的目标文件——**rename 的原子性只保证「不写坏」，保证不了「写的是自己那份」**。
+///
+/// 序号取进程内原子计数（同进程两次写必然不同名），`pid` 兼顾多进程
+/// （同一目录被两个实例打开时）。
+fn tmp_path_for(target: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut name = target
+        .file_name()
+        .map(|s| s.to_os_string())
+        .unwrap_or_default();
+    name.push(format!(".{}.{n}.tmp", std::process::id()));
+    target.with_file_name(name)
 }
 
 #[cfg(test)]

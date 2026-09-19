@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::CapabilityMeta;
-use super::{ModelProtocol, MODEL_PROTOCOL_OPENAI_CHAT};
+use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_CHAT};
 use crate::symbio_core::{
     get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
 };
@@ -87,7 +87,7 @@ impl ModelProtocol for OpenaiChatProtocol {
             return evs;
         }
 
-        if !line.starts_with("data: ") {
+        let Some(data) = sse_data(line) else {
             // 记录非 data 行（可能是错误 JSON 或 Keep-alive）
             if line.trim().starts_with('{') {
                 if let Ok(json) = serde_json::from_str::<Value>(line) {
@@ -97,8 +97,7 @@ impl ModelProtocol for OpenaiChatProtocol {
                 }
             }
             return evs;
-        }
-        let data = &line[6..];
+        };
         if data == "[DONE]" {
             return evs;
         }
