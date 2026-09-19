@@ -20,37 +20,15 @@ import {
   messageRenderAsJsonOf,
   messageRenderedOf,
   messageSummaryPreviewOf,
-  messageTextOf,
 } from '../useMessageContent'
 import { MESSAGE_PREVIEW_MAX } from '@/registry/messageTypes'
-import type { MessageContent } from '@/schemas/chat_message'
 
 /**
- * `{ text }` / `{ parts }` 是**历史与变体形状**：不在当前 `MessageContent` 联合类型里，
- * 但后端与旧数据仍可能出现，取值函数必须认。这里用显式断言把它们喂进去，
- * 顺带把「类型之外的形状也要兜住」这件事固定在测试里。
+ * `messageTextOf`（多模态内容 → 纯文本）**不在本文件测**——它在契约层
+ * `schemas/chat_message.ts`，与 `MessageContent` 同处一处（store 与组件都要用，
+ * 放不进这个依赖 Vue 的组合式里）。它的用例见
+ * `schemas/__tests__/chat_message.spec.ts`。
  */
-const asContent = (v: unknown) => v as MessageContent
-
-describe('messageTextOf：三种内容形状', () => {
-  it('字符串直接返回', () => {
-    expect(messageTextOf('hello')).toBe('hello')
-  })
-
-  it('{ text } 取 text', () => {
-    expect(messageTextOf(asContent({ text: 'hi' }))).toBe('hi')
-  })
-
-  it('{ parts } 按顺序拼接各段 text', () => {
-    expect(messageTextOf(asContent({ parts: [{ text: 'a' }, { text: 'b' }] }))).toBe('a\nb')
-  })
-
-  it('缺省 / 未知形状返回空串，而不是 String() 成 [object Object]', () => {
-    expect(messageTextOf(undefined)).toBe('')
-    expect(messageTextOf('')).toBe('')
-    expect(messageTextOf([{ type: 'image_url', image_url: { url: 'x' } }])).toBe('')
-  })
-})
 
 describe('messageErrorTextOf：优先级', () => {
   it('节点 error 字段最权威', () => {

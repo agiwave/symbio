@@ -1,15 +1,30 @@
-import { shallowRef, computed, type ComputedRef } from 'vue'
+import { shallowRef, computed, type ComputedRef, type InjectionKey } from 'vue'
 import { callPlugin } from '@/services/plugin'
-import type { ChatMessage } from '@/schemas/chat_message'
+import { messageTextOf, type ChatMessage } from '@/schemas/chat_message'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
+import { isInProgressMessage } from '@/stores/sessionTranscript'
 import { VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 import { CHAT_SEND, CHAT_ABORT } from '@/constants/pluginPaths'
+import { isWaitingStatus } from '@/registry/messageTypes'
 
 export interface UseChatConnectionOptions {
   sessionId: string
   onSendComplete?: () => void
 }
+
+/**
+ * 「会话恢复」注入键。
+ *
+ * 用它取代 `'resume'` 字符串键：字符串键拼错时 `inject` 静默返回 undefined，
+ * 只能在运行期以一个「点了没反应」的形式暴露；改用 symbol + `InjectionKey`
+ * 后，键名本身是类型的一部分，提供 / 注入两侧的签名由编译器对齐。
+ *
+ * 跨层传递仍用 provide/inject 而非逐层 props：恢复入口在**消息树的任意深度**
+ * （子智能体里的 user_prompt、失败 ToolCall 的重试按钮），逐层透传要把一个
+ * 回调穿过多层与本组件无关的容器。要收敛的是**契约的类型**，不是传递方式。
+ */
+export const RESUME_KEY: InjectionKey<(payload: ResumePayload) => void> = Symbol('chat-resume')
 
 /** 会话恢复载荷（retry_turn/retry/approve/reject/supply/answer 统一接口） */
 export interface ResumePayload {
@@ -119,14 +134,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     function isEmptyContentNode(msg: ChatMessage): boolean {
       const t = msg.type || 'text'
       if (t !== 'text' && t !== 'reasoning') return false
-      const c = msg.content
-      const text =
-        typeof c === 'string'
-          ? c
-          : c && typeof c === 'object' && 'text' in c
-            ? (c as { text: string }).text
-            : ''
-      return !text || text.trim().length === 0
+      // 取值走契约层的唯一实现（多模态内容 → 纯文本），不在此另写一遍形状判定
+      return messageTextOf(msg.content).trim().length === 0
     }
     const isEmptyLeaf = (msg: ChatMessage) =>
       !parentsWithChildren.has(msg.id) && isEmptyContentNode(msg)
@@ -184,7 +193,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const sid = options.sessionId
     if (!sid) return false
     const msgs = store.getSessionMessages(sid)
-    return msgs.some(msg => msg.status === 'waiting_user_action')
+    return msgs.some(msg => isWaitingStatus(msg.status))
   })
 
   async function send(msg: ChatMessage) {
@@ -235,9 +244,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       // 仅当没有任何 streaming/等待消息承载错误时，才落"会话级错误状态"（而非注入错误节点）：
       // 否则助手根级 Turn 会在 bus Error 事件中带上错误，避免"根级节点 + 会话级"重复报错。
       // 错误作为状态（不是消息树里的节点）展示在会话级错误条，许可重试（重新发送最后一条用户消息）。
-      const hasStreaming = store.getSessionMessages(sid).some(
-        m => m.status === 'streaming' || m.status === 'waiting_user_action'
-      )
+      const hasStreaming = store.getSessionMessages(sid).some(isInProgressMessage)
       if (!hasStreaming) {
         store.setSessionError(sid, errText)
       }

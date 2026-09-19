@@ -497,4 +497,16 @@ describe('messageRendererKey：渲染形态分派', () => {
       )
     }
   })
+
+  // 既有的**有意分歧**：图标/标题是「角色优先于类型」，渲染器是「Turn 最先」。
+  // 两者对 `role=user + type=turn` 这种（实际不可达的）组合给出不同答案。
+  // 之所以钉住而不是统一：Turn 节点带 children，必须走分组渲染器，否则整轮内容
+  // 会塌成一条用户气泡；而图标侧让「用户」胜出更符合直觉。统一任何一边都会
+  // 改掉一处既有语义，故保留分歧并在此显式记录——改动它必须是有意的。
+  it('role=user + type=turn：图标按角色、渲染器按 Turn（有意分歧，勿静默统一）', () => {
+    const f = facets({ role: CHAT_ROLE_USER, type: MESSAGE_TYPE_TURN })
+    expect(messageIcon(f)).toBe('👤')
+    expect(messageTitle(f, '助手')).toBe('你')
+    expect(messageRendererKey(f)).toBe('turn')
+  })
 })

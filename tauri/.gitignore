@@ -8,6 +8,8 @@ target/
 # Build outputs
 dist/
 src-tauri/target/
+# 覆盖率产物（`npm run test:coverage` 生成，含 .tmp 中间文件）
+coverage/
 
 # Logs
 *.log

@@ -140,9 +140,10 @@ jobs:
         run: npm ci
 
       - name: Frontend gate
-        # 与本地同一条命令：vue-tsc 类型检查 + vitest。
+        # 与本地同一条命令：vue-tsc 类型检查 + vitest（含覆盖率阈值）+ vite build。
         # ⚠️ 检查项只在 scripts/gate.mjs 里定义一处（不依赖 npx；脚本直接跑
         #    node_modules 里的二进制，避免 CI 上 npx 解析差异）。
+        #    构建此前只在上线打 tag 时才跑 ⇒ 构建错误要等发布才暴露，现已前置到 PR。
         run: node scripts/gate.mjs --only=frontend
         continue-on-error: false
 

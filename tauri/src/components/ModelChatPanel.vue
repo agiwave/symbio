@@ -71,9 +71,15 @@
 
 <script setup lang="ts">
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, provide } from 'vue'
-import { useChatConnection, type ResumePayload } from '@/composables/useChatConnection'
+import { useChatConnection, RESUME_KEY, type ResumePayload } from '@/composables/useChatConnection'
 import { useChatScroll } from '@/composables/useChatScroll'
-import { type ChatMessage, type MessageContent, type ContentPart, type ChatRole } from '@/schemas/chat_message'
+import {
+  type ChatMessage,
+  type MessageContent,
+  type ContentPart,
+  type ChatRole,
+  messageTextOf,
+} from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
@@ -123,7 +129,7 @@ const chat = useChatConnection({
 // parent_session_id 指回子会话）。
 // 智能体 / 模型 / 运行模式 / 风险等级等会话参数由后端按 session.metadata 解析
 // （写入统一经级联选项机制），故此处不再透传任何前端业务选择。
-provide('resume', (payload: ResumePayload) => {
+provide(RESUME_KEY, (payload: ResumePayload) => {
   chat.resume(payload)
 })
 
@@ -269,14 +275,8 @@ async function handleDelete(messageId: string) {
   // 删除前先取出消息：回填空需要其内容
   const msg = sessionsStore.getSessionMessages(props.sessionId).find(m => m.id === messageId)
   const isUserMsg = msg ? messageRoleOf(msg) === CHAT_ROLE_USER : false
-  const content = msg?.content
-  const userText = isUserMsg
-    ? (typeof content === 'string'
-        ? content
-        : (content && typeof content === 'object' && 'text' in content
-            ? (content as { text: string }).text
-            : ''))
-    : ''
+  // 删除前先取出正文（回填空需要其内容）；取值走契约层唯一实现，不在此另写形状判定
+  const userText = isUserMsg ? messageTextOf(msg?.content) : ''
 
   try {
     await sessionsStore.deleteMessage(props.sessionId, messageId)
@@ -297,9 +297,7 @@ function handleEdit(messageId: string) {
   if (!msg) return
   const c = msg.content
   const isJson = typeof c === 'string' && /^[\\[{]/.test(c.trim())
-  const text = typeof c === 'string'
-    ? c
-    : (c && typeof c === 'object' && 'text' in c ? (c as { text: string }).text : '')
+  const text = messageTextOf(c)
   editing.value = { id: messageId, content: text, isJson }
 }
 

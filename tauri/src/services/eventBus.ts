@@ -17,6 +17,7 @@ import { connectPlugin, type Connection, type ConnectEvent } from './plugin'
 import { watchVdfs, unwatchVdfs } from './vdfs'
 import { logger } from '@/utils/logger'
 import { VDFS_EVENT_KIND, VDFS_ROOT, type VdfsChange } from '@/schemas/vdfs'
+import { EVENT_BUS_SUBSCRIBE } from '@/constants/pluginPaths'
 
 /**
  * 从后端 `event_bus` 收到的统一事件结构
@@ -121,7 +122,7 @@ export async function connectEventBus(): Promise<Connection> {
         logger.warn('[event-bus]', 'Close stale connection failed:', e)
       }
     }
-    const conn = await connectPlugin('event_bus/subscribe', {}, handleConnectionEvent, {})
+    const conn = await connectPlugin(EVENT_BUS_SUBSCRIBE, {}, handleConnectionEvent, {})
     S.connection = conn
     S.reconnectDelay = 1000
     logger.info('[event-bus]', 'Event bus connected', conn.connectionId)

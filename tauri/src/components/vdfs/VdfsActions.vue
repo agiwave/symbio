@@ -24,7 +24,7 @@
       :class="[a.style, { 'is-text': !iconOf(a) }]"
       :title="tooltip(a, i)"
       :aria-label="tooltip(a, i)"
-      :disabled="disabled(i)"
+      :disabled="isDisabled(i)"
       @click="$emit('run', a)"
     >
       <!-- 图标按钮：tooltip = 动作名（进行中显示 busy_label） -->
@@ -78,7 +78,7 @@ function tooltip(a: DetailAction, i: number): string {
   return label(a, i)
 }
 
-function disabled(i: number): boolean {
+function isDisabled(i: number): boolean {
   return isBusy(i) || Boolean(props.disabled?.[i])
 }
 </script>

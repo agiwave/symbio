@@ -135,3 +135,27 @@
 .nav-label {
   display: none;
 }
+
+/* 消息节点的微操作按钮（删除 / 重试 / 复制…）。
+   原先在 NodeShell 与 TurnGroupNode 各持一份——scoped 样式无法跨组件共享，
+   注释里写着「改一处需同步另一处」，那正是要消灭的同步成本。
+   收敛到这里（全局）后，两个组件共用同一份定义。 */
+.node-act {
+  border: none;
+  background: rgba(100, 116, 139, 0.1);
+  color: var(--color-chip-fg);
+  border-radius: 0.25rem;
+  width: 1.125rem;
+  height: 1.125rem;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.node-act:hover {
+  background: rgba(239, 68, 68, 0.16);
+  color: var(--danger-fg);
+}

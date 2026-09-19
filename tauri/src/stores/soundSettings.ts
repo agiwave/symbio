@@ -9,11 +9,11 @@
 
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
+// 结束类型 = 会话结局的三个取值（别名而非另写一份，见 schemas/vdfs.ts 的说明）
+import type { CompletionKind } from '@/schemas/vdfs'
+import { DEFAULT_CHIME_VOLUME } from '@/services/completionChime'
 
 const STORAGE_KEY = 'symbio.completion-sound'
-
-/** 会话结束类型（与后端 `attributes.outcome` 的三个取值一一对应） */
-export type CompletionKind = 'completed' | 'aborted' | 'failed'
 
 interface PersistedSoundSettings {
   enabled?: boolean
@@ -30,8 +30,8 @@ export const useSoundSettingsStore = defineStore('soundSettings', () => {
     aborted: true,
     failed: true,
   })
-  /** 音量 0~1 */
-  const volume = ref(0.6)
+  /** 音量 0~1（初值取自 service 的唯一定义，避免两处各写一个数后漂移） */
+  const volume = ref(DEFAULT_CHIME_VOLUME)
 
   // ---- 持久化恢复（惰性单例，仅首次创建 store 时执行一次） ----
   let hydrated = false

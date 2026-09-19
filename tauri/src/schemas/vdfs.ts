@@ -478,6 +478,16 @@ export const OUTCOME_FAILED = 'failed'
 
 export type SessionOutcome = 'completed' | 'aborted' | 'failed'
 
+/**
+ * 结束提示音的类型 —— **就是** `SessionOutcome`（音色由结局决定，故取别名而非另写一份）。
+ *
+ * 用别名的收益是**穷尽性检查**：提示音表是 `Record<CompletionKind, …>`，后端若
+ * 新增一个结局取值，音色表会**编译报错**，逼着人决定它该响什么——比静默落到
+ * 默认音色好。此前这三个取值有三份独立定义（`stores/soundSettings.ts` 一份、
+ * `services/completionChime.ts` 引用它、`Appearance.vue` 里还有一份内联字面量联合）。
+ */
+export type CompletionKind = SessionOutcome
+
 /** 会话运行态（会话节点的三个取值 + 两个场景属性） */
 export interface SessionRuntime {
   /** 节点状态：`working` / `active` / `failed` */
@@ -508,7 +518,7 @@ export function sessionRuntimeOf(node: VdfsNode): SessionRuntime {
 }
 
 /** 结局 → 提示音音色（纯映射；未知结局按正常结束处理） */
-export function chimeKindOfOutcome(outcome?: SessionOutcome): 'completed' | 'aborted' | 'failed' {
+export function chimeKindOfOutcome(outcome?: SessionOutcome): CompletionKind {
   if (outcome === OUTCOME_ABORTED) return 'aborted'
   if (outcome === OUTCOME_FAILED) return 'failed'
   return 'completed'

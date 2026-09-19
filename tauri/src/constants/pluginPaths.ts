@@ -1,11 +1,25 @@
 /**
- * 插件路径常量（统一管理）
+ * 插件路径常量（**前端认识的插件路由名的唯一登记处**）
  *
- * 注意：所有路径都使用 `worker/` 前缀，路由走 worker composite。
- * 历史上有 `session/...`（无前缀）的写法在某些上下文也能工作
- * （session 插件也挂在 home composite 下），但已统一收敛到 worker 路径。
+ * ## 为什么要有这张表
  *
- * 一旦引入新插件或新能力，路径常量要在此处注册，便于全局检索。
+ * 路由名是**后端的地址**，前端本不该持有 —— VDFS 那条链路做到了（前端只认
+ * `.vdfs/<挂载点>/…` 这种由后端下发的地址）。但**控制面**做不到：homedir 切换、
+ * 事件总线订阅、网关出站这些动作没有 VDFS 等价物，前端必须知道它们的路由名。
+ *
+ * 既然必须知道，就让这份知识**可检索**：新增一个插件路由，在此处登记一行，
+ * 全仓据此可查；调用点只引常量，不写字面量。
+ *
+ * ## 前缀口径（容易搞错，写清楚）
+ *
+ * - `worker/` 前缀 = 走 worker composite 的**会话域**路由（session 及它的子能力
+ *   chat / options）。历史上也写过无前缀的 `session/...`（session 插件同时挂在
+ *   home composite 下），已统一收敛到 `worker/`。
+ * - **其余插件按插件名直接寻址**（`home/...` / `work/...` / `event_bus/...` /
+ *   `gateway/...`）：它们挂在 home composite 下，不带 `worker/` 前缀。
+ *   因此「所有路径都用 worker/ 前缀」是**错的**，本文件里两类共存。
+ *
+ * 路由的权威清单（含后端侧）见 `docs/reference/ROUTES.md`。
  */
 
 const W = 'worker' as const
@@ -28,3 +42,38 @@ export const CHAT_ABORT = `${CHAT_PATH}/abort` as const
  */
 export const OPTIONS_PATH = `${SESSION_PATH}/options` as const
 export const OPTIONS_LIST = `${OPTIONS_PATH}/list` as const
+
+// ==================== 事件总线 ====================
+
+/** 事件总线订阅（长连接；`services/eventBus.ts` 用它建流） */
+export const EVENT_BUS_SUBSCRIBE = 'event_bus/subscribe'
+
+// ==================== 系统目录 / 工作区（home 插件） ====================
+
+/** 当前系统目录（homedir）信息 */
+export const HOME_GET_HOMEDIR = 'home/get_homedir'
+/** 切换系统目录并热重载子插件 */
+export const HOME_RELOAD = 'home/reload'
+/** 当前工作区（workdir）详情 */
+export const WORK_GET_WORKSPACE = 'work/get_workspace'
+/** 设置当前工作区 */
+export const WORK_SET_WORKSPACE = 'work/set_workspace'
+
+/**
+ * 后端返回的**默认工作区**。
+ *
+ * 它不代表真实目录，而是后端「还没配过 workdir」时的占位值——
+ * 前端据此**不把它记成最近使用目录**（否则新建会话会默认落到一个不存在的路径）。
+ */
+export const DEFAULT_WORKSPACE = '~/projects'
+
+// ==================== 网关 ====================
+
+/**
+ * 网关插件名。
+ *
+ * 它的特殊之处：`gateway/*` 是**控制面**接口（读写本机网关设置 / 出站协议），
+ * 因此必须始终走本机 native 传输——若跟随当前出站配置走 http，就会去读远端实例的
+ * 网关设置，既看不到本机配置，也切不回 native（死锁）。判定见 `services/plugin.ts`。
+ */
+export const GATEWAY_PATH = 'gateway'

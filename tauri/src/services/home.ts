@@ -26,6 +26,13 @@
 import { callPlugin, setLastWorkdir } from './plugin'
 import type { Response as ReloadResponse } from '../schemas/home_reload'
 import { logger } from '@/utils/logger'
+import {
+  DEFAULT_WORKSPACE,
+  HOME_GET_HOMEDIR,
+  HOME_RELOAD,
+  WORK_GET_WORKSPACE,
+  WORK_SET_WORKSPACE,
+} from '@/constants/pluginPaths'
 
 // 原 schemas/work_get_workspace（仅本模块使用，内联）
 export interface WorkGetWorkspaceResponse {
@@ -65,7 +72,7 @@ export interface HomedirInfo {
  */
 export async function getHomedirInfo(): Promise<HomedirInfo> {
   try {
-    const resp = await callPlugin<HomedirInfo>('home/get_homedir', {})
+    const resp = await callPlugin<HomedirInfo>(HOME_GET_HOMEDIR, {})
     if (resp && resp.homedir) {
       return resp
     }
@@ -102,7 +109,7 @@ export async function switchHomedir(
 ): Promise<ReloadResponse | null> {
   try {
     const resp = await callPlugin<ReloadResponse>(
-      'home/reload',
+      HOME_RELOAD,
       { homedir },
       undefined,
       opts?.forceNative ? { forceNative: true } : undefined
@@ -125,10 +132,10 @@ export async function switchHomedir(
  * 副作用：记录为最近使用目录（`setLastWorkdir`，仅作新建会话默认）。
  */
 export async function getWorkspacePath(): Promise<WorkGetWorkspaceResponse> {
-  const result = await callPlugin<WorkGetWorkspaceResponse>('work/get_workspace', {})
+  const result = await callPlugin<WorkGetWorkspaceResponse>(WORK_GET_WORKSPACE, {})
   if (result) {
     const path = result.workdir || result.expanded_path
-    if (path && path !== '~/projects' && !path.endsWith('/projects')) {
+    if (path && path !== DEFAULT_WORKSPACE && !path.endsWith('/projects')) {
       setLastWorkdir(path)
     }
   }
@@ -141,7 +148,7 @@ export async function getWorkspacePath(): Promise<WorkGetWorkspaceResponse> {
  * 调用 `work/set_workspace` 路由。副作用：记录为最近使用目录。
  */
 export async function setWorkspacePath(path: string): Promise<WorkSetWorkspaceResponse> {
-  const result = await callPlugin<WorkSetWorkspaceResponse>('work/set_workspace', { path })
+  const result = await callPlugin<WorkSetWorkspaceResponse>(WORK_SET_WORKSPACE, { path })
   setLastWorkdir(path)
   return result
 }

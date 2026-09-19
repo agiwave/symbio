@@ -301,24 +301,28 @@ export function promptKindOf(node: Pick<ChatMessage, 'meta'>): 'question' | 'con
 }
 
 // ==================== 状态判定（纯函数，供组件与业务规则共用） ====================
+//
+// 入参放宽到 `null | undefined`（与契约层 `isInflightMessageStatus` /
+// `isUnsettledMessageStatus` 同口径）：`ChatMessage.status` 本身是可选的，
+// 要求调用方先做一次存在性判断，只会把「还没标注状态」当成另一个分支去写。
 
 /** 是否正在产生内容 */
-export function isStreamingStatus(status: MessageStatus): boolean {
+export function isStreamingStatus(status?: MessageStatus | null): boolean {
   return status === MESSAGE_STATUS_STREAMING
 }
 
 /** 是否等待用户响应（审批 / 提问） */
-export function isWaitingStatus(status: MessageStatus): boolean {
+export function isWaitingStatus(status?: MessageStatus | null): boolean {
   return status === MESSAGE_STATUS_WAITING_USER_ACTION
 }
 
 /** 是否以错误结束 */
-export function isFailedStatus(status: MessageStatus): boolean {
+export function isFailedStatus(status?: MessageStatus | null): boolean {
   return status === MESSAGE_STATUS_FAILED
 }
 
 /** 是否用户主动终止 */
-export function isAbortedStatus(status: MessageStatus): boolean {
+export function isAbortedStatus(status?: MessageStatus | null): boolean {
   return status === MESSAGE_STATUS_ABORTED
 }
 
@@ -383,47 +387,197 @@ export function messageStatusLabel(status: string): string {
   return MESSAGE_STATUS_LABELS[status] ?? status
 }
 
+// ==================== 类型 → 呈现（**类型知识的唯一来源**） ====================
+//
+// 这张表回答「这个类型长什么样」，取代原先散在 7 个函数里的 if 链。
+//
+// ## 它修掉的是什么
+//
+// 改造前 `MESSAGE_TYPE_TOOL_CALL` 在 `messageIcon` / `messageTitle` /
+// `messageStatusTag` / `messageHeadModifier` / `messageIsRunningAction` /
+// `messageDefaultOpen` / `messageRendererKey` 里**各出现一次**——新增一个消息类型
+// 要改 7 处，而且没有任何东西保证这 7 处彼此一致（漏一处就是「新类型有图标没标题」）。
+// 现在每个类型只在这里出现一次。
+//
+// ## 表**不表达优先级**——优先级是跨类型的规则
+//
+// 三条跨类型的优先级规则各写在下面取值函数里（各一行，注释说明理由）：
+// 1. `role = user` 覆盖类型（用户消息一律走气泡）；
+// 2. `turn` 覆盖 `role = user`（Turn 永远走分组形态，见 `messageRendererKey`）；
+// 3. 合成请求 / 工具返回是**上下文标记**而非类型（二者只出现在 `type = text` 上，
+//    由 `facetsOf` 保证），因此在查表前先行判定。
+//
+// 规则 1 与 2 的顺序**确实不同**（图标是「角色优先」，渲染器是「Turn 最先」）——
+// 这是既有行为，本次重构原样保留，不合并成单一顺序。
+
+/** 呈现面取值：字面量，或按 facets 现算（如 Turn 的图标分根级 / 子会话） */
+type Facet<T> = T | ((f: MessageFacets, agentName: string) => T)
+
+/**
+ * 一个消息类型的**全部呈现面**。
+ *
+ * 新增一个消息类型 = 填这张表的一行 + 词表加一个取值 + 渲染器注册一行；
+ * 取值函数与渲染组件都不必改。
+ */
+interface TypePresentation {
+  /** 头部图标 */
+  icon: Facet<string>
+  /** 头部标题；Turn 的标题是智能体名（由调用方传入） */
+  title: Facet<string>
+  /** 渲染器标识（详情形态） */
+  renderer: MessageRenderer
+  /**
+   * 头部修饰类：该类型在 CSS 上的专属钩子。
+   * `user` / `sub` 由 role 与 subSession 派生（跨类型），不在此列。
+   */
+  head?: 'tool' | 'reasoning'
+  /** 运行中时驱动标题呼吸动效（「正在进行、内容尚未成形」的行） */
+  thinkingWhenRunning?: boolean
+  /** 动作型节点：默认折叠成单行，运行中靠脉动 + 已用秒数给出信号 */
+  runningAction?: boolean
+  /**
+   * 该类型**自带运行信号**（专属标题或状态标签），因此不再挂「回复中…」小字——
+   * 重复信号只会变成噪音。
+   */
+  ownRunningSignal?: boolean
+  /** 状态标签（折叠态下唯一的运行中信号）；缺省 = 该类型不显示标签 */
+  statusTag?: (f: MessageFacets) => string
+  /** 折叠默认态（`waiting` 与 `role = user` 两个例外由 `messageDefaultOpen` 先行处理） */
+  defaultOpen: (f: MessageFacets) => boolean
+}
+
+/**
+ * 类型 → 呈现。
+ *
+ * 用 `Record<ChatMessageType, …>` 而非 `Record<string, …>`：**漏登记一个类型是
+ * 编译错误，不是运行期兜底**。运行期未知取值（后端先行上线了新 `type`）走
+ * `FALLBACK_PRESENTATION`。
+ */
+const TYPE_PRESENTATION: Record<ChatMessageType, TypePresentation> = {
+  [MESSAGE_TYPE_TEXT]: {
+    icon: '💬',
+    title: (f) => (f.role === CHAT_ROLE_ASSISTANT ? '助手' : '消息'),
+    renderer: 'text',
+    // 正文：助手展开；工具结果 / 子智能体内部文本收起
+    defaultOpen: (f) => f.role !== CHAT_ROLE_TOOL,
+  },
+
+  [MESSAGE_TYPE_REASONING]: {
+    icon: '💭',
+    // 流式中「思考中…」+ 头部动效；完成后「思考」单行
+    title: (f) => (isStreamingStatus(f.status) ? '思考中…' : '思考'),
+    renderer: 'text',
+    head: 'reasoning',
+    thinkingWhenRunning: true,
+    // 有专属标题动效，不挂「回复中…」
+    ownRunningSignal: true,
+    // 思考始终单行
+    defaultOpen: () => false,
+  },
+
+  [MESSAGE_TYPE_TOOL_CALL]: {
+    icon: '🔧',
+    title: (f) => f.name || '工具',
+    renderer: 'tool_call',
+    head: 'tool',
+    thinkingWhenRunning: true,
+    runningAction: true,
+    ownRunningSignal: true,
+    // 折叠态下唯一的运行中信号，必须覆盖**全部非终态**；终态 completed 刻意留空
+    // （绝大多数调用都会成功结束，给每个成功的调用挂「已完成」会把真正需要注意的淹掉）
+    statusTag: (f) => {
+      if (isFailedStatus(f.status)) return '失败'
+      if (isAbortedStatus(f.status)) return '已中止'
+      if (isWaitingStatus(f.status)) return '待确认'
+      if (isStreamingStatus(f.status)) return '运行中'
+      return ''
+    },
+    // 工具卡默认单行；例外：内含待审批（否则审批入口被折叠隐藏）、
+    // 或可恢复失败（会话因该失败暂停，需要操作入口）
+    defaultOpen: (f) => f.hasWaitingChild || f.recoverable,
+  },
+
+  [MESSAGE_TYPE_TURN]: {
+    // 根级助手回合用 AI，子会话（工具「过程」段）用 ↳
+    icon: (f) => (f.subSession ? '↳' : 'AI'),
+    title: (_f, agentName) => agentName,
+    renderer: 'turn',
+    defaultOpen: () => true,
+  },
+
+  [MESSAGE_TYPE_USER_PROMPT]: {
+    icon: '❓',
+    title: (f) => (f.promptKind === 'confirm' ? '工具确认' : '提问'),
+    renderer: 'user_prompt',
+    defaultOpen: () => true,
+  },
+
+  [MESSAGE_TYPE_COMPRESSION]: {
+    icon: '🗜',
+    title: '上下文压缩',
+    renderer: 'compression',
+    // 压缩节点同样默认折叠，标签是唯一信号
+    runningAction: true,
+    ownRunningSignal: true,
+    statusTag: (f) => {
+      if (isFailedStatus(f.status)) return '未完成'
+      if (isAbortedStatus(f.status)) return '已中止'
+      if (isStreamingStatus(f.status)) return '压缩中'
+      return ''
+    },
+    defaultOpen: () => true,
+  },
+}
+
+/**
+ * 未登记类型的兜底呈现：按**正文**呈现，只是渲染器走通用兜底
+ * （不假装它是已知形态）。这样「后端先行上线新 `type`、前端还是旧版」
+ * 不会把会话流渲染成空白。
+ */
+const FALLBACK_PRESENTATION: TypePresentation = {
+  ...TYPE_PRESENTATION[MESSAGE_TYPE_TEXT],
+  renderer: 'fallback',
+}
+
+/** 取类型的呈现面（未知取值 → 兜底） */
+function presentationOf(type: string): TypePresentation {
+  return (
+    (TYPE_PRESENTATION as Record<string, TypePresentation | undefined>)[type] ??
+    FALLBACK_PRESENTATION
+  )
+}
+
+/** 求呈现面取值（字面量直接返回；函数则按 facets 现算） */
+function facetValue<T>(v: Facet<T>, f: MessageFacets, agentName = ''): T {
+  return typeof v === 'function' ? (v as (f: MessageFacets, agentName: string) => T)(f, agentName) : v
+}
+
 // ==================== 头部呈现（图标 / 标题 / 标签 / 修饰类） ====================
 
 /**
  * 头部图标。
  *
- * 判定顺序有语义（与改造前的 if 链逐条对齐）：角色优先于类型，
- * 合成请求节点优先于它自己的 `type = text`。
+ * 优先级（跨类型，各一行）：用户消息 > 合成请求 > 工具返回 > 类型表。
+ * 请求 / 返回只出现在 `type = text` 上（`facetsOf` 保证），故在查表前判定。
  */
 export function messageIcon(f: MessageFacets): string {
   if (f.role === CHAT_ROLE_USER) return '👤'
-  if (f.type === MESSAGE_TYPE_USER_PROMPT) return '❓'
-  if (f.type === MESSAGE_TYPE_COMPRESSION) return '🗜'
   if (f.toolRequest) return '📤'
-  if (f.type === MESSAGE_TYPE_REASONING) return '💭'
-  if (f.type === MESSAGE_TYPE_TOOL_CALL) return '🔧'
-  if (f.type === MESSAGE_TYPE_TURN) return f.subSession ? '↳' : 'AI'
   if (f.toolResult) return '↩'
-  return '💬'
+  return facetValue(presentationOf(f.type).icon, f)
 }
 
 /**
  * 头部标题。
  *
  * `agentName` 由调用方传入（Turn 的标题是「该智能体的名称」，取值逻辑见 `agentNameOf`）。
- * 判定顺序有语义，与改造前的 if 链逐条对齐。
+ * 优先级与 `messageIcon` 同源（用户 > 请求 > 返回 > 类型表）。
  */
 export function messageTitle(f: MessageFacets, agentName: string): string {
   if (f.role === CHAT_ROLE_USER) return '你'
-  if (f.type === MESSAGE_TYPE_USER_PROMPT) {
-    return f.promptKind === 'confirm' ? '工具确认' : '提问'
-  }
-  if (f.type === MESSAGE_TYPE_COMPRESSION) return '上下文压缩'
   if (f.toolRequest) return '请求'
-  // 思考：流式中「思考中…」+ 头部动效；完成后「思考」单行
-  if (f.type === MESSAGE_TYPE_REASONING) {
-    return isStreamingStatus(f.status) ? '思考中…' : '思考'
-  }
-  if (f.type === MESSAGE_TYPE_TOOL_CALL) return f.name || '工具'
-  if (f.type === MESSAGE_TYPE_TURN) return agentName
   if (f.toolResult) return '响应'
-  return f.role === CHAT_ROLE_ASSISTANT ? '助手' : '消息'
+  return facetValue(presentationOf(f.type).title, f, agentName)
 }
 
 /**
@@ -433,20 +587,11 @@ export function messageTitle(f: MessageFacets, agentName: string): string {
  * 因此标签必须覆盖**全部非终态**，留空等于「什么都没发生」。
  * 终态（`completed`）刻意不给标签：绝大多数调用都会成功结束，
  * 给每个成功的调用挂一个「已完成」只会把真正需要注意的状态淹掉。
+ *
+ * 具体文案由各类型在 `TYPE_PRESENTATION.statusTag` 里自持（未声明的类型无标签）。
  */
 export function messageStatusTag(f: MessageFacets): string {
-  if (f.type === MESSAGE_TYPE_COMPRESSION) {
-    if (isFailedStatus(f.status)) return '未完成'
-    if (isAbortedStatus(f.status)) return '已中止'
-    if (isStreamingStatus(f.status)) return '压缩中'
-    return ''
-  }
-  if (f.type !== MESSAGE_TYPE_TOOL_CALL) return ''
-  if (isFailedStatus(f.status)) return '失败'
-  if (isAbortedStatus(f.status)) return '已中止'
-  if (isWaitingStatus(f.status)) return '待确认'
-  if (isStreamingStatus(f.status)) return '运行中'
-  return ''
+  return presentationOf(f.type).statusTag?.(f) ?? ''
 }
 
 /** 状态标签的色调类（`VdfsCard` 风格的语义色） */
@@ -476,13 +621,14 @@ export interface MessageHeadModifier {
 }
 
 export function messageHeadModifier(f: MessageFacets): MessageHeadModifier {
-  const running = isStreamingStatus(f.status)
+  const p = presentationOf(f.type)
   return {
     user: f.role === CHAT_ROLE_USER,
     sub: f.subSession,
-    tool: f.type === MESSAGE_TYPE_TOOL_CALL,
-    reasoning: f.type === MESSAGE_TYPE_REASONING,
-    thinking: (f.type === MESSAGE_TYPE_REASONING || f.type === MESSAGE_TYPE_TOOL_CALL) && running,
+    tool: p.head === 'tool',
+    reasoning: p.head === 'reasoning',
+    // 标题呼吸动效：思考中**与工具执行中**共用——两者都是「正在进行、内容尚未成形」的行
+    thinking: Boolean(p.thinkingWhenRunning) && isStreamingStatus(f.status),
   }
 }
 
@@ -491,27 +637,21 @@ export function messageHeadModifier(f: MessageFacets): MessageHeadModifier {
  *
  * 两者都默认折叠成单行，头部就是用户能看到的全部，因此「正在跑」必须由
  * 这里派生的信号承担（脉动动效 + 已用秒数）——留空等于「什么都没发生」。
+ * 哪些类型算「动作」由 `TYPE_PRESENTATION.runningAction` 声明。
  */
 export function messageIsRunningAction(f: MessageFacets): boolean {
-  return (
-    (f.type === MESSAGE_TYPE_TOOL_CALL || f.type === MESSAGE_TYPE_COMPRESSION) &&
-    isStreamingStatus(f.status)
-  )
+  return Boolean(presentationOf(f.type).runningAction) && isStreamingStatus(f.status)
 }
 
 /**
  * 头部「回复中…」小字是否显示。
  *
  * 只有**正文**流式时才显示：思考有「思考中…」标题、工具有「运行中」标签、
- * 压缩有「压缩中」标签，各自已经给出信号；再挂一个「回复中…」是重复噪音。
+ * 压缩有「压缩中」标签，各自已经给出信号（`ownRunningSignal`）；
+ * 再挂一个「回复中…」是重复噪音。
  */
 export function messageShowsLiveBadge(f: MessageFacets): boolean {
-  return (
-    isStreamingStatus(f.status) &&
-    f.type !== MESSAGE_TYPE_REASONING &&
-    f.type !== MESSAGE_TYPE_TOOL_CALL &&
-    f.type !== MESSAGE_TYPE_COMPRESSION
-  )
+  return isStreamingStatus(f.status) && !presentationOf(f.type).ownRunningSignal
 }
 
 // ==================== 折叠策略 ====================
@@ -532,21 +672,15 @@ export const MESSAGE_PREVIEW_MAX = 80
  * - 正文 → 助手展开；工具结果 / 子智能体内部文本收起
  * - 其余（提问 / 压缩）→ 展开
  *
+ * 前两条是**跨类型**规则（任何类型的待审批 / 用户消息都展开），写在下面；
+ * 其余逐类型的策略在 `TYPE_PRESENTATION.defaultOpen` 里自持。
+ *
  * 用户手动点击后以 `userToggled` 为准（该状态在组件里，不在本函数）。
  */
 export function messageDefaultOpen(f: MessageFacets): boolean {
   if (isWaitingStatus(f.status)) return true
   if (f.role === CHAT_ROLE_USER) return true
-  if (f.type === MESSAGE_TYPE_TOOL_CALL) {
-    if (f.hasWaitingChild) return true
-    if (f.recoverable) return true
-    return false
-  }
-  if (f.type === MESSAGE_TYPE_REASONING) return false
-  // 正文：助手展开；工具结果 / 子智能体内部文本收起
-  if (f.type === MESSAGE_TYPE_TEXT) return f.role !== CHAT_ROLE_TOOL
-  // 其余类型（提问 / 压缩）一律展开
-  return true
+  return presentationOf(f.type).defaultOpen(f)
 }
 
 // ==================== 有效折叠态（含深层级与用户覆盖） ====================
@@ -593,9 +727,11 @@ export function nextOpenOf(
 //
 // 于是「新增一种消息类型」的完整代价是：
 //   1. `MESSAGE_TYPES` 加一个取值（类型与常量同时到位）
-//   2. 本文件 `messageRendererKey` 加一行分派、文案表加一行
+//   2. 本文件 `TYPE_PRESENTATION` 加一行（呈现面全在那一行里）、文案表加一行
 //   3. `messageRenderers.ts` 加一行注册
-// **不再需要改渲染组件里的 if 链**——这正是本次改造要买到的性质。
+// **不再需要改渲染组件里的 if 链，也不必去 7 个取值函数里各补一处**——
+// 这正是本次改造要买到的性质。漏掉第 2 步会**编译报错**（`Record<ChatMessageType, …>`
+// 要求穷尽），而不是运行期静默退化成兜底。
 
 /**
  * 渲染器标识（机制级的呈现形态，不含场景语义）。
@@ -621,17 +757,16 @@ export type MessageRenderer =
  * 判定顺序有语义，与改造前的模板 `v-if` 链逐条对齐：
  * 1. `turn` 最先——任何 Turn 都走分组形态（用户消息若是 Turn 亦如此）；
  * 2. 角色优先于类型——用户消息一律走气泡（`text`），即便它的 `type` 是别的；
- * 3. 其余按类型分派；
+ * 3. 其余按类型分派（`TYPE_PRESENTATION.renderer`）；
  * 4. 未登记取值 → `fallback`（新类型上线时旧前端仍能显示内容）。
+ *
+ * 第 1 条**必须先于**第 2 条，因此 `turn` 在这里显式判一次，不能只靠类型表——
+ * 图标 / 标题那边的顺序恰好相反（角色优先），两处顺序不同是既有行为。
  */
 export function messageRendererKey(f: MessageFacets): MessageRenderer {
   if (f.type === MESSAGE_TYPE_TURN) return 'turn'
   if (f.role === CHAT_ROLE_USER) return 'text'
-  if (f.type === MESSAGE_TYPE_USER_PROMPT) return 'user_prompt'
-  if (f.type === MESSAGE_TYPE_COMPRESSION) return 'compression'
-  if (f.type === MESSAGE_TYPE_TOOL_CALL) return 'tool_call'
-  if (f.type === MESSAGE_TYPE_TEXT || f.type === MESSAGE_TYPE_REASONING) return 'text'
-  return 'fallback'
+  return presentationOf(f.type).renderer
 }
 
 /** 渲染器组件注册表（由 `messageRenderers.ts` 注入；未注册由视图兜底） */

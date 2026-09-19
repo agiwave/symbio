@@ -19,10 +19,13 @@
  */
 
 import {
+  MESSAGE_STATUS_COMPLETED,
+  MESSAGE_STATUS_FAILED,
   MESSAGE_STATUS_STREAMING,
   MESSAGE_STATUS_WAITING_USER_ACTION,
   MESSAGE_TYPE_TURN,
   isInflightMessageStatus,
+  messageTextOf,
   type ChatMessage,
 } from '@/schemas/chat_message'
 
@@ -47,16 +50,9 @@ export function sortTranscript(messages: ChatMessage[]): ChatMessage[] {
  */
 export function previewOf(msg: Pick<ChatMessage, 'role' | 'content'>): string | null {
   if (msg.role !== 'assistant') return null
-  const c = msg.content
-  let text = ''
-  if (typeof c === 'string') {
-    text = c
-  } else if (Array.isArray(c)) {
-    text = c
-      .filter((p) => p?.type === 'text')
-      .map((p) => (p as { text?: string }).text || '')
-      .join('')
-  }
+  // 取值走契约层的唯一实现（`messageTextOf`）：本模块是纯逻辑层，
+  // 不在这里再写一份多模态形状的判定。
+  const text = messageTextOf(msg.content)
   if (!text) return null
   return text.length > PREVIEW_MAX ? text.slice(0, PREVIEW_MAX) + '…' : text
 }
@@ -202,4 +198,44 @@ export function isInProgressMessage(msg: Pick<ChatMessage, 'status'>): boolean {
     msg.status === MESSAGE_STATUS_STREAMING ||
     msg.status === MESSAGE_STATUS_WAITING_USER_ACTION
   )
+}
+
+/**
+ * 看门狗的**定稿计划**：卡在飞行中的一批消息分别该怎么收尾。
+ *
+ * 判定与后端 `persist_failure` 同源（见 `isRootTurn`）：错误只挂在根级 Turn 上，
+ * 其余半截子节点定稿为 `completed` 且**绝不挂 error**——否则同一条错误会刷到
+ * 每条消息上（原始 429 刷屏的根因）。
+ *
+ * 抽成纯函数的理由与同文件其他规则一样：这是「最不能出错、又最难验证」的口径，
+ * 留在 store 的 async 循环里就只能靠造 store 间接测；抽出来可直接断言（见
+ * `__tests__/sessionTranscript.spec.ts`）。store 退化为「按计划执行 + 落库」。
+ */
+export interface StuckFailurePlan {
+  /** 承担错误的根级 Turn（`status = failed` + `error`） */
+  failed: ChatMessage[]
+  /** 进行中的子节点：定稿为 `completed`，结束流式动画，不挂 error */
+  completed: ChatMessage[]
+  /** 是否存在根级 Turn —— false 时调用方降级为「会话级错误」 */
+  rootTurnFailed: boolean
+  /** true 表示没有任何节点需要定稿（调用方可以直接收尾，不必走落库） */
+  empty: boolean
+}
+
+export function stuckFailurePlanOf(
+  messages: ChatMessage[],
+  errorText: string,
+): StuckFailurePlan {
+  const failed: ChatMessage[] = []
+  const completed: ChatMessage[] = []
+  for (const m of messages.filter(isInProgressMessage)) {
+    if (isRootTurn(m)) failed.push({ ...m, status: MESSAGE_STATUS_FAILED, error: errorText })
+    else completed.push({ ...m, status: MESSAGE_STATUS_COMPLETED, error: undefined })
+  }
+  return {
+    failed,
+    completed,
+    rootTurnFailed: failed.length > 0,
+    empty: failed.length === 0 && completed.length === 0,
+  }
 }

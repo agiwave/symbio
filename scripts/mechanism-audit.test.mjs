@@ -52,7 +52,7 @@ const CLEAN = {
 test('干净树通过（exit 0）', () => {
   const r = audit(CLEAN)
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /六条规则全部通过/)
+  assert.match(r.stdout, /七条规则全部通过/)
 })
 
 // ── M-001：组件不得解释后端 meta 字段 ────────────────────────────────────
@@ -209,6 +209,26 @@ test('M-006 不误报：本地 prop 取值 / 内容形状判定 / 非消息域�
   assert.equal(hits, 1, r.stdout)
   assert.match(r.stdout, /Ok\.vue:6/)
   assert.doesNotMatch(r.stdout, /Ok\.vue:5/)
+})
+
+// ── M-007：地址常量只能在 schemas/vdfs.ts 定义 ────────────────────────────
+test('M-007 命中：组件里自己定义一份地址段常量（第二份真相）', () => {
+  const r = audit({
+    ...CLEAN,
+    'composables/Bad.ts': `const VDFS_SESSION_DIR = 'session'\nexport const addr = VDFS_SESSION_DIR\n`,
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /\[ERROR\] M-007 .*composables\/Bad\.ts:1/)
+})
+
+test('M-007 不误报：数值型 VDFS_* 常量（如分页大小）不是地址知识', () => {
+  const r = audit({
+    ...CLEAN,
+    'composables/Ok.ts': `const VDFS_PAGE_SIZE = 100\nexport const n = VDFS_PAGE_SIZE\n`,
+  })
+  assert.equal(r.status, 0, r.stdout)
+  // 只数 `[ERROR]` 行：章节标题与汇总行里也含 "M-007" 字样
+  assert.equal((r.stdout.match(/\[ERROR\] M-007/g) ?? []).length, 0)
 })
 
 // ── 豁免注释 ─────────────────────────────────────────────────────────────

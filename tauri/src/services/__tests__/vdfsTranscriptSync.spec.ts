@@ -123,7 +123,8 @@ beforeEach(() => {
   setActivePinia(createPinia())
   mocks.subscribe.mockReturnValue(() => {})
   stopTranscriptSync()
-  startTranscriptSync()
+  // 落地目标显式注入（本模块是 service，不认识 Pinia；这里注入真实 store 实例）
+  startTranscriptSync(useSessionsStore())
 })
 
 describe('sessionRouteOf（地址 → 本域目标：按地址分派，不按事件类型）', () => {

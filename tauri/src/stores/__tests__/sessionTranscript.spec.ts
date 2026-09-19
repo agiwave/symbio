@@ -16,6 +16,7 @@ import {
   mergeMessagePatch,
   previewOf,
   sortTranscript,
+  stuckFailurePlanOf,
   truncateIdsFrom,
 } from '../sessionTranscript'
 import type { ChatMessage } from '@/schemas/chat_message'
@@ -217,5 +218,46 @@ describe('看门狗判据', () => {
     expect(isInProgressMessage({ status: 'failed' })).toBe(false)
     expect(isInProgressMessage({ status: 'aborted' })).toBe(false)
     expect(isInProgressMessage({})).toBe(false)
+  })
+})
+
+describe('看门狗定稿计划（stuckFailurePlanOf）', () => {
+  it('错误只挂在根级 Turn 上；半截子节点定稿为 completed 且不挂 error', () => {
+    const plan = stuckFailurePlanOf(
+      [
+        msg({ id: 'root', type: 'turn', status: 'streaming' }),
+        msg({ id: 'text', status: 'streaming' }),
+        msg({ id: 'tool', type: 'tool_call', status: 'streaming' }),
+      ],
+      '连接中断',
+    )
+
+    expect(plan.failed.map((m) => m.id)).toEqual(['root'])
+    expect(plan.failed[0].error).toBe('连接中断')
+    expect(plan.completed.map((m) => m.id)).toEqual(['text', 'tool'])
+    // 每条子节点都不挂 error —— 否则同一条错误会刷到每条半截消息上（429 刷屏的根因）
+    expect(plan.completed.every((m) => !m.error)).toBe(true)
+    expect(plan.rootTurnFailed).toBe(true)
+  })
+
+  it('子节点里的 Turn（有父节点）不算根，错误不会落到它身上', () => {
+    const plan = stuckFailurePlanOf(
+      [msg({ id: 'sub', type: 'turn', parent_id: 'root', status: 'streaming' })],
+      '连接中断',
+    )
+    expect(plan.failed).toHaveLength(0)
+    expect(plan.completed.map((m) => m.id)).toEqual(['sub'])
+    // 没有根级 Turn ⇒ 调用方降级为「会话级错误」
+    expect(plan.rootTurnFailed).toBe(false)
+  })
+
+  it('已终态的消息不进计划（只收尾仍在进行中的）', () => {
+    const plan = stuckFailurePlanOf(
+      [msg({ id: 'done', status: 'completed' }), msg({ id: 'old', status: 'failed' })],
+      '连接中断',
+    )
+    expect(plan.empty).toBe(true)
+    expect(plan.failed).toHaveLength(0)
+    expect(plan.completed).toHaveLength(0)
   })
 })

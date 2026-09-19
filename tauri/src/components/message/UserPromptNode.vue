@@ -113,7 +113,7 @@ import {
   type MessagePromptAnswer,
   type MessagePromptQuestion,
 } from '@/schemas/message_prompt'
-import type { ResumePayload } from '@/composables/useChatConnection'
+import { RESUME_KEY } from '@/composables/useChatConnection'
 import {
   isWaitingStatus,
   messageParentSessionId,
@@ -134,7 +134,7 @@ const emit = defineEmits<{
   edit: [messageId: string]
 }>()
 
-const resume = inject<(payload: ResumePayload) => void>('resume')
+const resume = inject(RESUME_KEY)
 
 const prompt = computed(() => promptOf(props.node))
 const questionPrompt = computed(() =>

@@ -14,9 +14,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import {
   playCompletionChime,
+  setChimeSettingsSource,
   _resetChimeForTest,
   CHIME_TONES,
 } from '../completionChime'
+// service 自身不认识 store —— 设置来源在这里注入（生产侧由 MainLayout 注入），
+// 因此「改开关 → 不响」这条链路照旧可测，只是接线权在调用方。
 import { useSoundSettingsStore } from '@/stores/soundSettings'
 
 class FakeAudioContext {
@@ -58,6 +61,15 @@ describe('completionChime', () => {
     _resetChimeForTest()
     FakeAudioContext.starts = 0
     vi.stubGlobal('AudioContext', FakeAudioContext as unknown as typeof AudioContext)
+    setChimeSettingsSource(() => {
+      const s = useSoundSettingsStore()
+      return { enabled: (kind) => s.isKindEnabled(kind), volume: s.volume }
+    })
+  })
+
+  it('未注入设置来源时按「全开 + 默认音量」兜底发声（service 不依赖 store 也自洽）', () => {
+    _resetChimeForTest() // 清空上一用例注入的来源
+    expect(playCompletionChime('completed', 'sess-nosrc')).toBe(true)
   })
 
   it('三种结束类型使用互不相同的音色参数', () => {

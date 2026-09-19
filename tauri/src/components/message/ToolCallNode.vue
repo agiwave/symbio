@@ -105,7 +105,7 @@ import {
   MESSAGE_TYPE_TURN,
   type ChatMessage,
 } from '@/schemas/chat_message'
-import type { ResumePayload } from '@/composables/useChatConnection'
+import { RESUME_KEY } from '@/composables/useChatConnection'
 import { useMessageContent } from '@/composables/useMessageContent'
 import {
   canRetryTool,
@@ -131,7 +131,7 @@ const emit = defineEmits<{
 }>()
 
 /** 会话恢复入口（由 ModelChatPanel 提供）：supply / 子会话路由都走它 */
-const resume = inject<(payload: ResumePayload) => void>('resume')
+const resume = inject(RESUME_KEY)
 
 const children = computed(() => props.node.children || [])
 const isFailed = computed(() => isFailedStatus(props.facets.status))

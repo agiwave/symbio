@@ -16,6 +16,7 @@ import {
   MESSAGE_TYPE_TEXT,
   MESSAGE_TYPE_TOOL_CALL,
   MESSAGE_TYPE_TURN,
+  messageTextOf,
   type ChatMessage,
   type MessageContent,
 } from '@/schemas/chat_message'
@@ -27,26 +28,11 @@ import {
 } from '@/registry/messageTypes'
 
 /**
- * 取出节点正文的**纯文本**。
- *
- * 支持三种内容形状（与后端 `MessageContent` 对齐）：
- * 字符串 / `{ text }` / `{ parts: [{ text }] }`；其余形状返回空串
- * （宁可显示空白，也不把结构化对象 `String()` 成 `[object Object]`）。
+ * 「取正文」本身不在这里实现 —— 它在契约层 `schemas/chat_message.ts::messageTextOf`
+ * （与 `MessageContent` 同处一处）。store 与组件都要取正文，而本文件是**组合式**
+ * （依赖 Vue 与 Markdown 渲染器），放在这里会让 store 为了取一串文本而牵进整张
+ * 渲染依赖图。这里只消费它。
  */
-export function messageTextOf(content: MessageContent | undefined): string {
-  if (!content) return ''
-  if (typeof content === 'string') return content
-  if (typeof content === 'object' && 'text' in content) {
-    const t = (content as { text?: unknown }).text
-    return typeof t === 'string' ? t : ''
-  }
-  if (typeof content === 'object' && 'parts' in content) {
-    const parts = (content as { parts?: Array<{ text?: string }> }).parts
-    if (!Array.isArray(parts)) return ''
-    return parts.map((p) => p?.text || '').join('\n')
-  }
-  return ''
-}
 
 /**
  * 失败原因（面向用户的可读短消息）。

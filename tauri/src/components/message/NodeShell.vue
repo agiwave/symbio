@@ -288,25 +288,6 @@ const runningDuration = computed(() => {
 .msg:hover > .node-head .node-actions {
   display: inline-flex;
 }
-.node-act {
-  border: none;
-  background: rgba(100, 116, 139, 0.1);
-  color: var(--color-chip-fg);
-  border-radius: 0.25rem;
-  width: 1.125rem;
-  height: 1.125rem;
-  font-size: 0.7rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.node-act:hover {
-  background: rgba(239, 68, 68, 0.16);
-  color: var(--danger-fg);
-}
 .node-tag {
   font-size: 0.68rem;
   padding: 0.05rem 0.4rem;

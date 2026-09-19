@@ -17,7 +17,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 
-/** store 在 setup 时订阅一次 vdfs 变更频道；此处捕获作用域与回调以便直接投递事件 */
+/**
+ * 会话清单的订阅由 `startSessionNodeSync(store)` 建立（store 自己不挂监听器）；
+ * 此处捕获作用域与回调以便直接投递事件。
+ */
 const captured = vi.hoisted(() => ({
   scopes: [] as Array<{ prefix: string; directChildren?: boolean }>,
   handlers: [] as Array<(e: unknown) => void>,
@@ -35,26 +38,38 @@ vi.mock('@/services/eventBus', () => ({
   publishVdfsChangedLocal: vi.fn(),
 }))
 
-const sessionApi = vi.hoisted(() => ({
-  listSessions: vi.fn(async () => []),
-  deleteMessage: vi.fn(),
-}))
-vi.mock('@/services/session', () => ({
-  listSessions: sessionApi.listSessions,
-  deleteSession: vi.fn(),
-  createSessionId: () => 'generated-id',
-  updateSession: vi.fn(),
-  clearMessages: vi.fn(),
-  deleteMessage: sessionApi.deleteMessage,
-  updateMessage: vi.fn(),
-}))
-
 const vdfsApi = vi.hoisted(() => ({
   readVdfs: vi.fn(),
   statVdfs: vi.fn(),
   writeVdfs: vi.fn(),
   watchVdfs: vi.fn(async () => {}),
   unwatchVdfs: vi.fn(async () => {}),
+}))
+
+const sessionApi = vi.hoisted(() => ({
+  listSessions: vi.fn(async () => []),
+  deleteMessage: vi.fn(),
+  /**
+   * 读整份转写（门面 `services/session.readSessionTranscript`）。
+   *
+   * 这里复用 `readVdfs` 的桩实现同形状的解析——本文件的用例关心的是
+   * **水合的合并语义**，不是文档解析；解析本身在 session service 那一层。
+   */
+  readSessionTranscript: vi.fn(async (): Promise<unknown[]> => {
+    const c = await vdfsApi.readVdfs()
+    const doc = JSON.parse(c?.text ?? '{}') as { messages?: unknown[] }
+    return Array.isArray(doc.messages) ? doc.messages : []
+  }),
+}))
+vi.mock('@/services/session', () => ({
+  listSessions: sessionApi.listSessions,
+  deleteSession: vi.fn(),
+  createSessionId: () => 'generated-id',
+  updateSession: vi.fn(),
+  readSessionTranscript: sessionApi.readSessionTranscript,
+  clearMessages: vi.fn(),
+  deleteMessage: sessionApi.deleteMessage,
+  updateMessage: vi.fn(),
 }))
 vi.mock('@/services/vdfs', () => ({
   readVdfs: vdfsApi.readVdfs,
@@ -76,6 +91,7 @@ vi.mock('@/services/completionChime', () => ({
 }))
 
 import { useSessionsStore } from '../sessions'
+import { startSessionNodeSync, stopSessionNodeSync } from '../sessionNodeSync'
 import { VDFS_SESSION_DIR, VDFS_ROOT, vdfsJoin } from '@/schemas/vdfs'
 
 /** 投递一条变更（路径就是展示地址） */
@@ -96,10 +112,16 @@ function sessionNode(over: Record<string, unknown> = {}) {
 }
 
 describe('sessions store — VDFS 变更的清单收敛', () => {
+  let store: ReturnType<typeof useSessionsStore>
+
   beforeEach(() => {
     setActivePinia(createPinia())
     captured.scopes.length = 0
     captured.handlers.length = 0
+    // 订阅现在由外壳显式建立（生产侧是 MainLayout）
+    stopSessionNodeSync()
+    store = useSessionsStore()
+    startSessionNodeSync(store)
     sessionApi.listSessions.mockClear()
     chime.playCompletionChime.mockClear()
     vdfsApi.statVdfs.mockReset()
@@ -132,13 +154,26 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     expect(store.list).toHaveLength(0)
   })
 
-  it('store 在 setup 时恰好订阅一次，作用域 = 会话叶子的直接子项', () => {
-    useSessionsStore()
+  it('订阅恰好建立一次，作用域 = 会话叶子的直接子项', () => {
     expect(captured.handlers).toHaveLength(1)
     expect(captured.scopes[0]).toEqual({
       prefix: vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR),
       directChildren: true,
     })
+  })
+
+  it('重复启动不再叠加订阅（幂等）', () => {
+    startSessionNodeSync(store)
+    startSessionNodeSync(store)
+    expect(captured.handlers).toHaveLength(1)
+  })
+
+  it('未启动订阅时 store 是纯状态容器（建 store 不产生任何监听器）', () => {
+    stopSessionNodeSync()
+    captured.handlers.length = 0
+    setActivePinia(createPinia())
+    useSessionsStore()
+    expect(captured.handlers).toHaveLength(0)
   })
 
   it('updated 带节点视图 → 就地落 status / 标题，零回读、零整表重拉', async () => {

@@ -80,9 +80,36 @@ import {
   type VdfsChange,
   type VdfsNode,
 } from '@/schemas/vdfs'
-import { useSessionsStore } from '@/stores/sessions'
-import type { ChatMessage, MessageStatus } from '@/schemas/chat_message'
+import {
+  MESSAGE_TYPE_REASONING,
+  MESSAGE_TYPE_TOOL_CALL,
+  type ChatMessage,
+  type MessageStatus,
+} from '@/schemas/chat_message'
 import { logger } from '@/utils/logger'
+
+/**
+ * 转写落地目标（**依赖倒置**：service 不反向依赖 Pinia store）。
+ *
+ * 本模块是 service，若直接 `import { useSessionsStore }`，就把「UI 状态容器」
+ * 拉进了服务层——service 从此无法脱离 Pinia 使用，测试也得先搭一个 store 实例。
+ * 改为由调用方（应用外壳 `MainLayout`）注入真实 store；测试注入普通对象即可。
+ *
+ * 这里只声明本模块**真正用到**的那几个动作，而不是整个 store 的类型——
+ * 窄接口既说明白「本模块对 store 的全部要求」，也让假实现几行就能写完。
+ */
+export interface TranscriptSink {
+  putMessage(sessionId: string, msg: ChatMessage): void
+  patchMessage(sessionId: string, patch: ChatMessage): void
+  removeMessageById(sessionId: string, messageId: string): void
+  /** 尾部截断：移除该消息**及其之后**的全部（区间由实现方按 `seq` 算） */
+  removeFrom(sessionId: string, messageId: string): void
+  putStatus(sessionId: string, partial: { activity?: string; is_waiting_approval?: boolean }): void
+  getSessionMessages(sessionId: string): ChatMessage[]
+}
+
+/** 当前注入的落地目标（由 `startTranscriptSync` 设置） */
+let _sink: TranscriptSink | null = null
 
 let _unsubscribe: (() => void) | null = null
 
@@ -181,7 +208,8 @@ export async function drain(key?: string): Promise<void> {
  * 回读失败即放弃这一条（不写入半成品），并由日志留痕——比写入残缺结构好。
  */
 async function applyChange(change: VdfsChange, sessionId: string, messageId: string): Promise<void> {
-  const store = useSessionsStore()
+  const store = _sink
+  if (!store) return
 
   if (change.change === VDFS_CHANGE_TRUNCATED) {
     // 尾部截断：「该节点及其后全部」都没了。**由本地算区间**，不等后端把被删的
@@ -242,13 +270,14 @@ async function applyChange(change: VdfsChange, sessionId: string, messageId: str
  * 同一份节点表必然派生出同一份文字（§5.2「派生是纯函数」）。
  */
 function syncActivity(
-  store: ReturnType<typeof useSessionsStore>,
+  store: TranscriptSink,
   sessionId: string,
   msg: ChatMessage,
 ): void {
   if (msg.status === VDFS_STATUS_STREAMING) {
-    if (msg.type === 'reasoning') store.putStatus(sessionId, { activity: '正在思考…' })
-    else if (msg.type === 'tool_call') store.putStatus(sessionId, { activity: `正在调用 ${msg.name || '工具'}…` })
+    if (msg.type === MESSAGE_TYPE_REASONING) store.putStatus(sessionId, { activity: '正在思考…' })
+    else if (msg.type === MESSAGE_TYPE_TOOL_CALL)
+      store.putStatus(sessionId, { activity: `正在调用 ${msg.name || '工具'}…` })
     else store.putStatus(sessionId, { activity: '正在响应…' })
   } else if (msg.status === VDFS_STATUS_WAITING_USER_ACTION) {
     store.putStatus(sessionId, { activity: '等待审批…', is_waiting_approval: true })
@@ -264,7 +293,8 @@ function syncActivity(
 
 /** 清空某会话的转写（`deleted` 落在 `消息` 目录本身） */
 function clearTranscript(sessionId: string): void {
-  const store = useSessionsStore()
+  const store = _sink
+  if (!store) return
   for (const m of store.getSessionMessages(sessionId)) {
     store.removeMessageById(sessionId, m.id)
   }
@@ -275,13 +305,17 @@ function clearTranscript(sessionId: string): void {
  *
  * 全局唯一、跨页面共享：多会话并发时**所有**会话的转写都要落 store，
  * 否则从 A 切到 B 再切回 A 时，A 在后台收到的消息会丢失。
+ *
+ * @param sink 转写落地目标。**必须显式注入**（生产由应用外壳传 `useSessionsStore()`，
+ *   测试可传普通对象）——本模块是 service，不认识 Pinia。
  */
-export function startTranscriptSync(): void {
+export function startTranscriptSync(sink: TranscriptSink): void {
   if (_unsubscribe || _G.__symTranscriptSyncStarted) {
     logger.warn('[vdfs-transcript]', 'already started')
     return
   }
   _G.__symTranscriptSyncStarted = true
+  _sink = sink
 
   _unsubscribe = busSubscribe({ kind: VDFS_EVENT_KIND }, (busEvent: BusEvent) => {
     const change = busEvent.data?.data as VdfsChange | undefined
@@ -311,6 +345,7 @@ export function startTranscriptSync(): void {
 /** 停止转写同步（一般不需要调用） */
 export function stopTranscriptSync(): void {
   _G.__symTranscriptSyncStarted = false
+  _sink = null
   if (_unsubscribe) {
     _unsubscribe()
     _unsubscribe = null

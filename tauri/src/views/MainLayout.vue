@@ -22,8 +22,11 @@
 import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
 import { startTranscriptSync } from '@/services/vdfsTranscriptSync'
+import { startSessionNodeSync } from '@/stores/sessionNodeSync'
+import { setChimeSettingsSource } from '@/services/completionChime'
 import { getWorkspacePath } from '@/services/home'
 import { useSessionsStore } from '@/stores/sessions'
+import { useSoundSettingsStore } from '@/stores/soundSettings'
 import { logger } from '@/utils/logger'
 import Toast from '@/components/common/Toast.vue'
 
@@ -34,7 +37,20 @@ onMounted(async () => {
   // 消息本体（`.vdfs/session/<sid>/消息/<mid>`）由本模块收敛，
   // 会话运行态（`.vdfs/session/<sid>`）由 sessions store 自己的订阅作用域收敛。
   // 两者按**地址**分流，互不重叠——若消息被两条通道各写一次，流式文本会叠字。
-  startTranscriptSync()
+  //
+  // 落地目标由本外壳**显式注入**（`vdfsTranscriptSync` 是 service，不认识 Pinia）。
+  startTranscriptSync(useSessionsStore())
+
+  // 会话清单的 VDFS 订阅同样由外壳接线（store 自己不挂监听器），
+  // 于是 HMR / 测试不会叠监听器，订阅的启停也看得见。
+  startSessionNodeSync(useSessionsStore())
+
+  // 提示音的设置来源同样由外壳注入（service 不认识 store）：
+  // 传的是**取值函数**而非快照，用户改了开关/音量下一声就生效。
+  setChimeSettingsSource(() => {
+    const s = useSoundSettingsStore()
+    return { enabled: (kind) => s.isKindEnabled(kind), volume: s.volume }
+  })
 
   // 恢复全局会话状态：lastWorkdir 供新建会话作默认工作区；
   // sessions store 清单供聊天组件查元数据

@@ -28,7 +28,7 @@
  * 拒绝——`write` 只改**既有**消息，`create` 意图一律驳回。
  */
 
-import { deleteVdfs, listVdfs, runVdfsAction, writeVdfs } from './vdfs'
+import { deleteVdfs, listVdfs, readVdfs, runVdfsAction, writeVdfs } from './vdfs'
 import {
   VDFS_ACTION_CLEAR,
   VDFS_ACTION_TRUNCATE,
@@ -112,6 +112,31 @@ export async function listSessions(
  */
 export async function deleteSession(sessionId: string): Promise<void> {
   await deleteVdfs(vdfsSessionAddr(sessionId))
+}
+
+/**
+ * 经 VDFS 读取整份转写（会话叶子的内容是一份 JSON 文档）。
+ *
+ * 文档形状由后端 `session_content` 决定（`{ id, title, metadata, messages, updated_at }`）；
+ * 这里只取 `messages`，其余字段由会话清单节点（`.vdfs/session/<id>`）承载。
+ *
+ * 放在本文件的理由：**文档形状的知识属于会话域**，不该出现在 store 里——
+ * store 只需要 `ChatMessage[]`。读失败（空内容 / 非 JSON）在此就地转成错误，
+ * 调用方不必各自写一遍 `JSON.parse` 的 try/catch。
+ */
+export async function readSessionTranscript(sessionId: string): Promise<SessionMessage[]> {
+  const addr = vdfsSessionAddr(sessionId)
+  const content = await readVdfs(addr)
+  const text = content?.text
+  if (!text) throw new Error(`读取会话转写失败：${addr}`)
+  let doc: unknown
+  try {
+    doc = JSON.parse(text)
+  } catch (e) {
+    throw new Error(`会话转写不是合法 JSON（${addr}）：${e}`)
+  }
+  const messages = (doc as { messages?: unknown })?.messages
+  return Array.isArray(messages) ? (messages as SessionMessage[]) : []
 }
 
 /**

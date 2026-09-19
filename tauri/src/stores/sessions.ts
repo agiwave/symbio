@@ -34,18 +34,17 @@ import {
   listSessions,
   deleteSession as apiDeleteSession,
   updateSession,
+  readSessionTranscript,
   clearMessages as apiClearMessages,
   deleteMessage as apiDeleteMessage,
   updateMessage as apiUpdateMessage,
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
-import { readVdfs, writeVdfs } from '@/services/vdfs'
+import { writeVdfs } from '@/services/vdfs'
 import {
-  VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_CREATED,
   VDFS_CHANGE_DELETED,
-  VDFS_CHANGE_UPDATED,
   VDFS_ROOT,
   VDFS_SESSION_DIR,
   VDFS_STATUS_FAILED,
@@ -61,7 +60,7 @@ import {
   type VdfsNode,
 } from '@/schemas/vdfs'
 import { setLastWorkdir, getLastWorkdir, callPlugin } from '@/services/plugin'
-import { publishVdfsChangedLocal, subscribeVdfsChanged } from '@/services/eventBus'
+import { publishVdfsChangedLocal } from '@/services/eventBus'
 import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
@@ -70,11 +69,10 @@ import type { ImageAttachment } from '@/types'
 // 消息转写规则（纯逻辑）：合并 / 水合 / 截断 / 看门狗判据
 import {
   hydrateTranscript,
-  isInProgressMessage,
-  isRootTurn,
   mergeMessagePatch,
   previewOf,
   sortTranscript,
+  stuckFailurePlanOf,
   truncateIdsFrom,
 } from './sessionTranscript'
 // 会话实时状态的派生规则（纯逻辑）：清单条目 / 运行态 / 选项回填
@@ -696,7 +694,8 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 让 ChatMainPanel 能显示错误状态 + 提供重试按钮。
    */
   async function loadMessages(id: string): Promise<ChatMessage[]> {
-    const msgs = await fetchTranscript(id)
+    // 读入口是会话域的 VDFS 门面：文档形状的解析不在 store 里
+    const msgs = await readSessionTranscript(id)
     hydrateFromHistory(id, msgs)
     // 同步 list message_count / updated_at
     const idx = list.value.findIndex(s => s.id === id)
@@ -705,28 +704,6 @@ export const useSessionsStore = defineStore('sessions', () => {
       list.value[idx] = { ...list.value[idx], message_count: msgs.length, updated_at: now }
     }
     return getSessionMessages(id)
-  }
-
-  /**
-   * 经 VDFS 读取整份转写（会话叶子的内容是一份 JSON 文档）。
-   *
-   * 文档形状由后端 `session_content` 决定（`{ id, title, metadata, messages, updated_at }`）；
-   * 这里只取 `messages`，其余字段由会话清单节点（`.vdfs/session/<id>`）承载。
-   */
-  async function fetchTranscript(id: string): Promise<ChatMessage[]> {
-    const content = await readVdfs(vdfsSessionAddr(id))
-    const text = content?.text
-    if (!text) {
-      throw new Error(`读取会话转写失败：${vdfsSessionAddr(id)}`)
-    }
-    let doc: unknown
-    try {
-      doc = JSON.parse(text)
-    } catch (e) {
-      throw new Error(`会话转写不是合法 JSON（${vdfsSessionAddr(id)}）：${e}`)
-    }
-    const messages = (doc as { messages?: unknown })?.messages
-    return Array.isArray(messages) ? (messages as ChatMessage[]) : []
   }
 
   /**
@@ -876,37 +853,20 @@ export const useSessionsStore = defineStore('sessions', () => {
     sessionId: string,
     errorText: string
   ): Promise<void> {
-    const msgs = getSessionMessages(sessionId)
-    const stuck = msgs.filter(isInProgressMessage)
-    // 与后端 persist_failure 对齐（"错误是状态、且只由造成中止的根 Turn 承载"）：
-    // 仅把"根级 Turn（msg_type=turn 且 parent_id 为空）"标 Failed + error；
-    // 其余仍在进行中的子节点（text / reasoning / tool_call）定稿为 Completed、
-    // 绝不挂 error，避免把同一条错误刷到每条半截消息上（即原始 429 刷屏的根因）。
-    let rootTurnFailed = false
-    for (const m of stuck) {
-      if (isRootTurn(m)) {
-        const failed: ChatMessage = { ...m, status: 'failed', error: errorText }
-        try {
-          await apiUpdateMessage(sessionId, failed)
-        } catch (e) {
-          logger.warn('[sessions]', 'persistStuckFailure updateMessage 失败', e)
-        }
-        patchMessage(sessionId, { ...failed })
-        rootTurnFailed = true
-      } else {
-        // 进行中的子节点：定稿为 Completed（结束流式动画），不挂 error。
-        const done: ChatMessage = { ...m, status: 'completed', error: undefined }
-        try {
-          await apiUpdateMessage(sessionId, done)
-        } catch (e) {
-          logger.warn('[sessions]', 'persistStuckFailure updateMessage 失败', e)
-        }
-        patchMessage(sessionId, { ...done })
+    // 定稿口径（谁挂 error / 谁定稿为 completed）是纯逻辑，见
+    // `sessionTranscript.stuckFailurePlanOf`——本函数只负责按计划落库与收敛。
+    const plan = stuckFailurePlanOf(getSessionMessages(sessionId), errorText)
+    for (const m of [...plan.failed, ...plan.completed]) {
+      try {
+        await apiUpdateMessage(sessionId, m)
+      } catch (e) {
+        logger.warn('[sessions]', 'persistStuckFailure updateMessage 失败', e)
       }
+      patchMessage(sessionId, { ...m })
     }
     // 没有任何根级 Turn（例如首帧到达前就卡住、连 Turn 都还没创建）：
     // 降级为会话级错误状态（不注入错误节点），保证仍能在 UI 上看到错误并可重试。
-    if (!rootTurnFailed) {
+    if (!plan.rootTurnFailed) {
       setSessionError(sessionId, errorText)
     }
     // 收敛为「以错误结束」这个**状态值**（不再是 `active` + `last_failed` 布尔）。
@@ -932,26 +892,12 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   // ---- helpers ----
 
-  // ===== 会话节点的 VDFS 变更 → 侧栏清单同步（后端消息模式） =====
+  // ===== 会话节点的 VDFS 变更 → 侧栏清单同步 =====
   //
-  // 清单同步双模式约定：
-  // - 后端消息模式（本订阅）：后端增删改节点 → `notify_change`（唯一的 `vdfs` 频道）
-  //   → 此处收敛同步（跨窗口一致的唯一事实源）。载荷是**粗粒度**的（只有 path +
-  //   change，不带快照），所以：deleted 本地即时移除、created 防抖重拉、
-  //   updated 重读该节点。
-  // - 前端模式（乐观更新）：本 store 的 createSession/deleteSession 已直接
-  //   变更本地 list，并经 publishVdfsChangedLocal 以同构载荷即时通知
-  //   其他页面（如工作台清单），不等事件往返；后端事件随后幂等收敛。
-  // 作用域 directChildren = 只看会话叶子节点（`.vdfs/session/<id>`）：子会话
-  // （`.vdfs/session/<id>/子会话/…`）与转写列表项的变更不进侧栏清单。
-  let listRefreshTimer: ReturnType<typeof setTimeout> | null = null
-  function scheduleListRefresh() {
-    if (listRefreshTimer) clearTimeout(listRefreshTimer)
-    listRefreshTimer = setTimeout(() => {
-      listRefreshTimer = null
-      refreshList().catch((err) => logger.warn('[sessions]', '资源变更触发清单刷新失败', err))
-    }, 800)
-  }
+  // 订阅**不在本工厂里**：`stores/sessionNodeSync.ts` 是那条接线，由应用外壳
+  // （`MainLayout`）显式 `startSessionNodeSync(store)` 启动——本 store 只提供
+  // 收敛动作（`applySessionNode` / `removeSessionLocal` / `refreshList`），
+  // 不自己挂监听器，因此可被独立构造与测试。
 
   /**
    * 应用一条**会话节点**变更（`updated`）：状态 / 结局 / 错误 / 标题就地收敛。
@@ -1010,29 +956,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  subscribeVdfsChanged(
-    { prefix: vdfsJoin(VDFS_ROOT, VDFS_SESSION_DIR), directChildren: true },
-    (change) => {
-      // 追加型变更只发生在转写列表项上（由 vdfsTranscriptSync 就地应用 delta），
-      // 与会话清单无关——绝不能让流式的每一帧触发一次重拉。
-      if (change.change === VDFS_CHANGE_APPENDED) return
-      const id = vdfsBase(change.path)
-      if (!id) return
-      if (change.change === VDFS_CHANGE_DELETED) {
-        removeSessionLocal(id)
-        return
-      }
-      if (change.change === VDFS_CHANGE_UPDATED) {
-        // 带载荷的状态迁移（含 busy / idle / 失败）——就地收敛，零回读
-        applySessionNode(id, change)
-        return
-      }
-      // created / renamed 等：本地乐观插入已覆盖同窗口场景；
-      // 此处防抖重拉，收敛排序与完整字段。
-      scheduleListRefresh()
-    }
-  )
-
   return {
     // state
     list,
@@ -1056,6 +979,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     createSession,
     selectSession,
     deleteSession,
+    // 后端 deleted 变更的落地口（与 deleteSession 的乐观移除同一实现，
+    // 见 `sessionNodeSync`：两条路径行为一致）
+    removeSessionLocal,
     setActiveWorkdir,
     getSessionWorkdir,
     rename,

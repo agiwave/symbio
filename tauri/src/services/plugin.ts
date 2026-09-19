@@ -16,6 +16,7 @@ import {
   setCurrentLocation,
   setLocationError,
 } from './systemLocation'
+import { GATEWAY_PATH } from '@/constants/pluginPaths'
 
 // ==================== 1. 协议定义 (与后端 transport.rs 严格对齐) ====================
 
@@ -362,7 +363,8 @@ async function sendRouteRequest(
   // 出站配置若设为 http，会指向远端实例，届时读取/修改「本机网关设置」反而会落到远端，
   // 既看不到本机配置也无法切换回 native。故强制 native，与 initGatewayTransport 启动期读取一致。
   const target = request.path.replace(/^\/+/, '');
-  const isGatewaySelf = target === 'gateway' || target.startsWith('gateway/');
+  // 网关自身 = `gateway` 或 `gateway/…`（插件名见 constants/pluginPaths）
+  const isGatewaySelf = target === GATEWAY_PATH || target.startsWith(`${GATEWAY_PATH}/`);
 
   // 控制面操作（forceNative）一律命中本机后端，避免被当前 outbound 指到远端而陷入死锁。
   const useNative = request.forceNative || isGatewaySelf || !(ob.protocol === 'http' && ob.endpoint);

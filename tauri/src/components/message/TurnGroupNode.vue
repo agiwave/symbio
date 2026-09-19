@@ -121,25 +121,6 @@ const { errorText } = useMessageContent(
 }
 /* 微按钮：与 `NodeShell` 头部操作同一视觉原子。
    两处各自持有样式块（scoped 无法跨组件共享），改一处需同步另一处。 */
-.node-act {
-  border: none;
-  background: rgba(100, 116, 139, 0.1);
-  color: var(--color-chip-fg);
-  border-radius: 0.25rem;
-  width: 1.125rem;
-  height: 1.125rem;
-  font-size: 0.7rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.node-act:hover {
-  background: rgba(239, 68, 68, 0.16);
-  color: var(--danger-fg);
-}
 /* 等待骨架：三点脉动 +「正在思考…」 */
 .turn-pending {
   display: flex;

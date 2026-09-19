@@ -19,6 +19,7 @@
  * | M-004 | `registry/` `schemas/` 不得 import 组件                 | 契约与映射必须能被非视图引用  |
  * | M-005 | `schemas/` 不得依赖 `registry/` `components/` `composables/` | 数据契约零呈现依赖（防环） |
  * | M-006 | 组件不得用字面量比较消息词表                            | 词表只有 `schemas/chat_message` |
+ * | M-007 | 地址常量只能在 `schemas/vdfs.ts` **定义**                | 段名常量不得有第二份真相      |
  *
  * M-004 的例外是 `*Renderers.ts`：那是**刻意**的唯一组件装配点（把渲染器标识绑到
  * 具体组件），否则「新增一种形态只登记一行」就无从谈起。
@@ -273,6 +274,26 @@ const RULES = {
       c.match(new RegExp(`\\.(?:status|role|type)\\s*(?:===|!==)\\s*['"](?:${MESSAGE_VOCAB})['"]`)),
     message: '不得用字面量比较消息词表 —— 用 schemas/chat_message 的常量或 registry/messageTypes 的判定',
   },
+  /**
+   * M-007 地址段常量的**定义权**只在 `schemas/vdfs.ts`
+   *
+   * M-002 只匹配 `.vdfs` 字面量，于是用 `const VDFS_SESSION_DIR = 'session'` +
+   * `vdfsJoin(...)` 拼装的写法能绕过它——那正是 `schemas/vdfs.ts` 现在在做的事，
+   * 且它是**有意的例外**（provider 的段名是私有知识，前端拿到的是常量而非字面量）。
+   *
+   * 例外必须**收口**：同样一份常量若在别处再定义一遍，就退化成第二份真相。
+   * 本规则不禁止使用（导入是允许的），只禁止**定义**。
+   *
+   * 只匹配**值为字符串**的常量：地址段名是字符串，而 `VDFS_PAGE_SIZE = 100`
+   * 这类数值常量不是地址知识（它就在 `useVdfs.ts` 里，误报会逼人写豁免注释，
+   * 一个靠豁免活着的守卫等于没有守卫）。
+   */
+  vdfsConstDef: {
+    rule: 'M-007',
+    severity: 'error',
+    test: (c) => c.match(/\b(?:const|let|var)\s+(?:VDFS_[A-Z0-9_]+|vdfs[A-Z]\w*)\s*=\s*['"`]/),
+    message: '地址常量的定义权在 schemas/vdfs.ts —— 此处不得再定义一份（导入使用是允许的）',
+  },
 }
 
 // ── 主流程 ───────────────────────────────────────────────────────────────
@@ -317,13 +338,31 @@ auditFiles(
 console.log('--- M-005: schemas 不得依赖 registry / components / composables ---')
 auditFiles('tauri/src/schemas', walk(path.join(SRC, 'schemas'), isTs), [RULES.schemaReverseDep])
 
-console.log('--- M-006: 组件不得用字面量比较消息词表 ---')
-auditFiles('tauri/src/components', walk(path.join(SRC, 'components'), isVue), [RULES.vocabLiteral])
+console.log('--- M-006: 组件 / 组合式 / 服务层不得用字面量比较消息词表 ---')
+// 范围必须覆盖 **所有消费消息词表的地方**，而不只是组件：
+// 词表字面量一旦出现在 services/（如把 `status` 翻译成活动文案）或 composables/，
+// 同样会在后端改词表时静默失配，而 `.vue`-only 的扫描看不见它们。
+auditFiles(
+  'tauri/src/components + composables + services',
+  [
+    ...walk(path.join(SRC, 'components'), isVueOrTs),
+    ...walk(path.join(SRC, 'composables'), isTs),
+    ...walk(path.join(SRC, 'services'), isTs),
+  ],
+  [RULES.vocabLiteral],
+)
+
+console.log('--- M-007: 地址常量只能在 schemas/vdfs.ts 定义（不禁止导入使用） ---')
+auditFiles(
+  'tauri/src（不含 schemas/vdfs.ts）',
+  walk(SRC, isVueOrTs).filter((f) => f !== path.join(SRC, 'schemas', 'vdfs.ts')),
+  [RULES.vdfsConstDef],
+)
 
 // ── 汇总 ─────────────────────────────────────────────────────────────────
 console.log()
 console.log('=== 汇总 ===')
-if (hitsByRule.size === 0) console.log(green('  六条规则全部通过'))
+if (hitsByRule.size === 0) console.log(green('  七条规则全部通过'))
 else for (const [rule, n] of [...hitsByRule].sort()) console.log(`  ${rule}: ${n} 处`)
 console.log(`Errors:   ${errors}`)
 console.log(`Warnings: ${warnings}`)

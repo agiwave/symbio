@@ -125,6 +125,49 @@ export type ContentPart =
 
 export type MessageContent = string | ContentPart[];
 
+/**
+ * 从多模态内容里取出**纯文本**（`MessageContent` → `string` 的**唯一**实现）。
+ *
+ * 支持后端实际下发的四种形状：字符串 / `{ text }` / `{ parts: [{ text }] }`
+ * / `ContentPart[]`。非文本分片（图片等）与其余形状一律产出空串——
+ * 宁可显示空白，也不把结构化对象 `String()` 成 `[object Object]`。
+ *
+ * ## 为什么放在契约层
+ *
+ * 它紧挨着 `MessageContent` 定义，因为 store / 组合式 / 组件**都要**取正文。
+ * 放在任一层里，另外两层就只能自己再写一份——此前确实出现过 5 份实现，
+ * 其中 3 份漏掉了 `ContentPart[]` 这一形状，导致纯文本数组被读成空串
+ * （正文凭空消失且无任何报错）。取值规则与它描述的类型必须同处一处。
+ */
+export function messageTextOf(content: MessageContent | undefined | null): string {
+  if (!content) return ''
+  if (typeof content === 'string') return content
+
+  // 数组形态 = 契约里的多模态形状 `ContentPart[]`：只拼文本分片。
+  // `input_text` / `output_text` 是部分 provider 的文本段类型名，一并认下。
+  if (Array.isArray(content)) {
+    return content
+      .filter((p) => {
+        // 类型名按 string 比较：`ContentPart` 的联合里只有 `text` / `image_url`，
+        // 但 provider 变体还会发 `input_text` / `output_text`
+        const t = (p as { type?: string } | undefined)?.type
+        return t === 'text' || t === 'input_text' || t === 'output_text'
+      })
+      .map((p) => (p as { text?: string } | undefined)?.text ?? '')
+      .join('\n')
+  }
+
+  // 对象形态：`{ text }`，或 `{ parts: [{ text }] }`（部分 provider 的容器形状，
+  // 其分片不带 `type` 字段）
+  const obj = content as unknown as Record<string, unknown>
+  if (typeof obj.text === 'string') return obj.text
+  const parts = obj.parts
+  if (Array.isArray(parts)) {
+    return parts.map((p) => (p as { text?: string } | undefined)?.text ?? '').join('\n')
+  }
+  return ''
+}
+
 export interface ChatMessage {
   id: string;
   parent_id?: string;

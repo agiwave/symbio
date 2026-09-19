@@ -23,11 +23,51 @@
  * 一轮结束只响一次。
  */
 
-import { useSoundSettingsStore, type CompletionKind } from '@/stores/soundSettings'
+import type { CompletionKind } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 
 const MODULE_TAG = 'completion-chime'
 const DEDUP_WINDOW_MS = 1500
+
+/**
+ * 默认音量（0~1）。
+ *
+ * `stores/soundSettings` 的初值也取自这里——「默认多响」只应有一个答案，
+ * 两处各写一个数迟早会漂移。
+ */
+export const DEFAULT_CHIME_VOLUME = 0.6
+
+/**
+ * 提示音设置（**依赖倒置**：本模块是 service，不反向依赖 Pinia store）。
+ *
+ * 「该不该响」与「响多大声」由**设置来源**回答，来源由应用外壳（`MainLayout`）
+ * 注入——本模块只管发声，因此可脱离 Pinia 单独测试。
+ */
+export interface ChimeSettings {
+  /** 某类型当前是否应当响铃（总开关 × 分类型开关） */
+  enabled(kind: CompletionKind): boolean
+  /** 音量 0~1 */
+  volume: number
+}
+
+export interface ChimeOptions {
+  /** 试听：绕过设置门控与去重（设置页专用） */
+  force?: boolean
+}
+
+/** 未注入来源时的兜底：全部开启 + 默认音量（保证未接线的场景仍会响） */
+const FALLBACK_SETTINGS: ChimeSettings = { enabled: () => true, volume: DEFAULT_CHIME_VOLUME }
+
+let _settingsSource: () => ChimeSettings = () => FALLBACK_SETTINGS
+
+/**
+ * 注册设置来源（应用外壳调用一次）。
+ *
+ * 传函数而非快照：用户随时可能在设置页改开关与音量，每次发声都要读到最新值。
+ */
+export function setChimeSettingsSource(fn: () => ChimeSettings): void {
+  _settingsSource = fn
+}
 
 /** 音色参数：与 CompletionKind 一一对应（导出供设置 UI 文案与测试断言） */
 export const CHIME_TONES: Record<CompletionKind, { freq: number; freq2?: number; duration: number; type: OscillatorType; gap: number }> = {
@@ -61,10 +101,11 @@ function getCtx(): AudioContext | null {
 /** 去重窗口记录：同一会话一轮结束（可能连发多种终态事件）只响一次 */
 const _recentBy = new Map<string, number>()
 
-/** 供测试注入（清空去重状态与音频上下文缓存） */
+/** 供测试注入（清空去重状态、音频上下文缓存与设置来源） */
 export function _resetChimeForTest(): void {
   _recentBy.clear()
   _ctx = null
+  _settingsSource = () => FALLBACK_SETTINGS
 }
 
 /** 单音播放（osc + gain 包络：attack 短促起音、exponential 衰减收尾，无爆音） */
@@ -100,9 +141,9 @@ function playTone(
 export function playCompletionChime(
   kind: CompletionKind,
   sessionId?: string,
-  opts?: { force?: boolean },
+  opts?: ChimeOptions,
 ): boolean {
-  const settings = useSoundSettingsStore()
+  const settings = _settingsSource()
 
   // 去重：同一会话一轮结束（无论先 Error 后 Abort，还是连续多条 idle）只响一次。
   // 按 sessionId 记录而非 (sessionId, kind)，否则 Abort 紧跟 Error 时会响两声。
@@ -120,7 +161,7 @@ export function playCompletionChime(
   }
 
   // 设置门控：总开关或对应类型被关闭时不响（force 绕过，试听用）
-  if (!opts?.force && !settings.isKindEnabled(kind)) return false
+  if (!opts?.force && !settings.enabled(kind)) return false
 
   const ctx = getCtx()
   if (!ctx) {
