@@ -10,11 +10,12 @@
  *   ⇒ 必须变红。
  * 另有一条跑真实仓库，防本守卫在真仓库上误报。
  *
- * ## 夹具为什么要铺满四张词表
+ * ## 夹具为什么要铺满四张词表 / 全部结构体对
  *
- * `ENUM_SETS` 是脚本里的固定清单（枚举 ↔ 词表的对应关系无法自动推断，只能登记），
- * 所以基线仓库必须把**每一条**都铺出来——少一张，那条就会报「文件/枚举不存在」，
- * 基线测试直接变红。这不是冗余：它同时证明了「夹具与 `ENUM_SETS` 没脱节」。
+ * `ENUM_SETS` 与 `STRUCT_SETS` 都是脚本里的固定清单（枚举 ↔ 词表、结构体 ↔ 接口的
+ * 对应关系无法自动推断，只能登记），所以基线仓库必须把**每一条**都铺出来——少一张
+ * 词表、少一对结构体，那条就会报「文件 / 枚举 / 结构体 / 接口不存在」，基线测试直接
+ * 变红。这不是冗余：它同时证明了「夹具与两份清单没脱节」。
  *
  * 跑法：node --test scripts/protocol-mirror-audit.test.mjs
  */
@@ -31,6 +32,10 @@ const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.
 
 const CHAT_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
 const CHAT_TS = 'tauri/src/schemas/chat_message.ts'
+const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
+const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
+const OPTIONS_RS = 'symbio/src/symbio_core/schemas/options.rs'
+const OPTIONS_TS = 'tauri/src/schemas/options.ts'
 
 /** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
 const rsStruct = (name, ...fields) =>
@@ -156,6 +161,154 @@ const VDFS_TS_SRC = [
   tsIface('VdfsValidationError', 'message', 'fields'),
 ].join('\n')
 
+/**
+ * 后端 detail.rs：D 组 9 对（详情表单宿主方言）的后端侧。
+ *
+ * 真仓库里这些结构体各自带 `#[serde(default)]` 与成片的 `skip_serializing_if`
+ * ——夹具用最小形态即可：D 组比的是**字段名**，`skip_serializing_if` 是条件跳过
+ * （字段仍下发），不改变字段名集合。属性处理本身由下面 D 组的专项用例覆盖。
+ */
+const DETAIL_RS_SRC = [
+  rsStruct('DetailCondition', 'key', 'equals', 'not_equals', 'truthy', 'all'),
+  rsStruct('DetailOption', 'value', 'label'),
+  rsStruct(
+    'DetailField',
+    'key',
+    'label',
+    'description',
+    'required',
+    'widget',
+    'visible_when',
+    'placeholder',
+    'min',
+    'max',
+    'step',
+    'rows',
+    'options',
+    'suggestions',
+    'options_from_preset',
+    'suggestions_from_preset',
+    'full_width',
+    'default',
+  ),
+  rsStruct('DetailSection', 'title', 'collapsed', 'fields'),
+  rsStruct('DetailPreset', 'value', 'label', 'set', 'set_always', 'options'),
+  rsStruct('DetailPresetSpec', 'field', 'fill', 'presets'),
+  rsStruct('DetailBadge', 'when', 'label', 'style'),
+  rsStruct('DetailAction', 'id', 'label', 'style', 'icon', 'when', 'disabled_when', 'payload', 'busy_label'),
+  rsStruct(
+    'DetailDefinition',
+    'binding',
+    'title_from',
+    'title_fallback',
+    'subtitle_from',
+    'name_from',
+    'id_from',
+    'sections',
+    'presets',
+    'badges',
+    'actions',
+  ),
+].join('\n')
+
+/** 前端 vdfs-form.ts：D 组 9 对的前端侧 */
+const FORM_TS_SRC = [
+  tsIface('DetailCondition', 'key', 'equals', 'not_equals', 'truthy', 'all'),
+  tsIface('DetailOption', 'value', 'label'),
+  tsIface(
+    'DetailField',
+    'key',
+    'label',
+    'description',
+    'required',
+    'widget',
+    'visible_when',
+    'placeholder',
+    'min',
+    'max',
+    'step',
+    'rows',
+    'options',
+    'suggestions',
+    'options_from_preset',
+    'suggestions_from_preset',
+    'full_width',
+    'default',
+  ),
+  tsIface('DetailSection', 'title', 'collapsed', 'fields'),
+  tsIface('DetailPreset', 'value', 'label', 'set', 'set_always', 'options'),
+  tsIface('DetailPresetSpec', 'field', 'fill', 'presets'),
+  tsIface('DetailBadge', 'when', 'label', 'style'),
+  tsIface('DetailAction', 'id', 'label', 'style', 'icon', 'when', 'disabled_when', 'payload', 'busy_label'),
+  tsIface(
+    'DetailDefinition',
+    'binding',
+    'title_from',
+    'title_fallback',
+    'subtitle_from',
+    'name_from',
+    'id_from',
+    'sections',
+    'presets',
+    'badges',
+    'actions',
+  ),
+].join('\n')
+
+/** 后端 options.rs：D 组 5 对（级联选项机制）的后端侧 */
+const OPTIONS_RS_SRC = [
+  rsStruct('OptionDisplay', 'show_label'),
+  rsStruct('OptionAction', 'endpoint', 'payload', 'pick', 'bind'),
+  rsStruct(
+    'OptionNode',
+    'id',
+    'label',
+    'icon',
+    'description',
+    'option_type',
+    'order',
+    'status',
+    'status_detail',
+    'value',
+    'value_label',
+    'enabled',
+    'action',
+    'form',
+    'data',
+    'children',
+    'display',
+  ),
+  rsStruct('OptionsRequest', 'session_id', 'parent'),
+  rsStruct('OptionsResponse', 'nodes'),
+].join('\n')
+
+/** 前端 options.ts：D 组 5 对的前端侧 */
+const OPTIONS_TS_SRC = [
+  tsIface('OptionDisplay', 'show_label'),
+  tsIface('OptionAction', 'endpoint', 'payload', 'pick', 'bind'),
+  tsIface(
+    'OptionNode',
+    'id',
+    'label',
+    'icon',
+    'description',
+    'option_type',
+    'order',
+    'status',
+    'status_detail',
+    'value',
+    'value_label',
+    'enabled',
+    'action',
+    'form',
+    'data',
+    'children',
+    'display',
+  ),
+  tsIface('OptionsRequest', 'session_id', 'parent'),
+  tsIface('OptionsResponse', 'nodes'),
+].join('\n')
+
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
 const BASE = {
   'symbio/src/symbio_core/vdfs_provider.rs': VDFS_PROVIDER_RS_SRC,
@@ -164,6 +317,10 @@ const BASE = {
   'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC,
   [CHAT_RS]: CHAT_RS_SRC,
   [CHAT_TS]: CHAT_TS_SRC,
+  [DETAIL_RS]: DETAIL_RS_SRC,
+  [FORM_TS]: FORM_TS_SRC,
+  [OPTIONS_RS]: OPTIONS_RS_SRC,
+  [OPTIONS_TS]: OPTIONS_TS_SRC,
   'tauri/src/services/session.ts': 'export const x = 1\n',
 }
 
@@ -205,7 +362,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 4 张闭集词表 \+ D 组 9 对结构体字段/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 4 张闭集词表 \+ D 组 23 对结构体字段/,
   )
 })
 
@@ -500,6 +657,28 @@ test('后端结构体级 rename_all → 报「不支持」而不是默默算错'
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /结构体级 rename_all/)
+})
+
+test('详情方言：后端 DetailField 字段改名 → 变红（证明这批登记确实在比对）', () => {
+  const r = mirror({
+    [DETAIL_RS]: DETAIL_RS_SRC.replace(
+      '    pub visible_when: String,',
+      '    pub visible_when_x: String,',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端持有后端不存在的字段：visible_when/)
+})
+
+test('选项机制：前端 OptionNode 多出一个字段 → 变红（证明这批登记确实在比对）', () => {
+  const r = mirror({
+    [OPTIONS_TS]: OPTIONS_TS_SRC.replace(
+      '  display?: string\n}',
+      '  display?: string\n  ghost?: string\n}',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端持有后端不存在的字段：ghost/)
 })
 
 test('后端结构体不存在 → 变红（不是静默跳过）', () => {

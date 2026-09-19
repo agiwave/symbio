@@ -2,7 +2,7 @@
 /**
  * protocol-mirror-audit — 跨栈协议常量的**镜像一致性**守卫
  *
- * ## 它守的是什么（三组）
+ * ## 它守的是什么（四组）
  *
  * **A. 常量镜像**（后端与前端必须**逐字相等**）
  *   前端持有的 `VDFS_*` 常量是后端协议词的**副本**——它拿这些词拼地址、认目录、
@@ -185,9 +185,18 @@ const ENUM_SETS = [
  * 登记原则：**前端确实镜像了它、且漂移代价高**的才进来。前端不必镜像全部结构体
  * （很多响应只是取几个字段就用掉了），把没有镜像关系的对塞进来只会制造噪音。
  *
+ * 判据是「前端**逐字段**镜像了它」：字段一个不落地抄了一遍，就说明前端把这套形状
+ * 当成了自己的契约——此时后端改一个字段名，前端读到的就是 `undefined`。反过来，
+ * 前端只挑几个字段用的响应结构不进这里：它本来就该按需取，多抄反而不必。
+ *
  * `tsLocal` 是前端**自持**的字段（后端不下发、前端自己组装的）——每条必须写明
  * 理由。没登记又对不上的，一律报错：报错信息里给出三条出路（改名 / 登记 / 删掉）。
  */
+const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
+const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
+const OPTIONS_RS = 'symbio/src/symbio_core/schemas/options.rs'
+const OPTIONS_TS = 'tauri/src/schemas/options.ts'
+
 const STRUCT_SETS = [
   {
     what: '会话消息',
@@ -237,6 +246,76 @@ const STRUCT_SETS = [
     what: 'VDFS 校验错误',
     rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsValidationError' },
     ts: { file: VDFS_TS, interface: 'VdfsValidationError' },
+  },
+  {
+    what: '详情条件谓词',
+    rust: { file: DETAIL_RS, struct: 'DetailCondition' },
+    ts: { file: FORM_TS, interface: 'DetailCondition' },
+  },
+  {
+    what: '详情选项',
+    rust: { file: DETAIL_RS, struct: 'DetailOption' },
+    ts: { file: FORM_TS, interface: 'DetailOption' },
+  },
+  {
+    what: '详情表单字段',
+    rust: { file: DETAIL_RS, struct: 'DetailField' },
+    ts: { file: FORM_TS, interface: 'DetailField' },
+  },
+  {
+    what: '详情分区',
+    rust: { file: DETAIL_RS, struct: 'DetailSection' },
+    ts: { file: FORM_TS, interface: 'DetailSection' },
+  },
+  {
+    what: '详情预设项',
+    rust: { file: DETAIL_RS, struct: 'DetailPreset' },
+    ts: { file: FORM_TS, interface: 'DetailPreset' },
+  },
+  {
+    what: '详情预设联动',
+    rust: { file: DETAIL_RS, struct: 'DetailPresetSpec' },
+    ts: { file: FORM_TS, interface: 'DetailPresetSpec' },
+  },
+  {
+    what: '详情徽标',
+    rust: { file: DETAIL_RS, struct: 'DetailBadge' },
+    ts: { file: FORM_TS, interface: 'DetailBadge' },
+  },
+  {
+    what: '详情动作',
+    rust: { file: DETAIL_RS, struct: 'DetailAction' },
+    ts: { file: FORM_TS, interface: 'DetailAction' },
+  },
+  {
+    what: '详情页定义',
+    rust: { file: DETAIL_RS, struct: 'DetailDefinition' },
+    ts: { file: FORM_TS, interface: 'DetailDefinition' },
+  },
+  {
+    what: '选项栏显示策略',
+    rust: { file: OPTIONS_RS, struct: 'OptionDisplay' },
+    ts: { file: OPTIONS_TS, interface: 'OptionDisplay' },
+  },
+  {
+    what: '选项动作',
+    rust: { file: OPTIONS_RS, struct: 'OptionAction' },
+    ts: { file: OPTIONS_TS, interface: 'OptionAction' },
+  },
+  {
+    what: '选项节点',
+    rust: { file: OPTIONS_RS, struct: 'OptionNode' },
+    ts: { file: OPTIONS_TS, interface: 'OptionNode' },
+  },
+  {
+    what: '选项列表请求',
+    rust: { file: OPTIONS_RS, struct: 'OptionsRequest' },
+    ts: { file: OPTIONS_TS, interface: 'OptionsRequest' },
+  },
+  {
+    what: '选项列表响应',
+    rust: { file: OPTIONS_RS, struct: 'OptionsResponse' },
+    ts: { file: OPTIONS_TS, interface: 'OptionsResponse' },
   },
 ]
 

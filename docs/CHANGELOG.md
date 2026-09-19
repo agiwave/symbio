@@ -18,6 +18,50 @@
 
 ***
 
+## 2026-09-20: 跨栈守卫 D 组覆盖面扩展（9 → 23 对）
+
+承接上一条（D 组上线，9 对），把**前端逐字段镜像了整套形状**的两批契约纳入守卫。
+
+### 新增登记（14 对，全部零差异）
+
+| 批次 | 后端 | 前端 | 对数 |
+|---|---|---|---|
+| 详情表单宿主方言 | `symbio_core/schemas/detail.rs` | `tauri/src/schemas/vdfs-form.ts` | 9 |
+| 级联选项机制 | `symbio_core/schemas/options.rs` | `tauri/src/schemas/options.ts` | 5 |
+
+详情方言 9 对：`DetailCondition`(5) / `DetailOption`(2) / `DetailField`(**17**) /
+`DetailSection`(3) / `DetailPreset`(5) / `DetailPresetSpec`(3) / `DetailBadge`(3) /
+`DetailAction`(8) / `DetailDefinition`(10)。
+
+选项机制 5 对：`OptionDisplay`(1) / `OptionAction`(4) / `OptionNode`(**16**) /
+`OptionsRequest`(2) / `OptionsResponse`(1)。
+
+**纳入判据是「前端逐字段镜像了它」**：`DetailField` 17 个字段一个不落、
+`OptionNode` 16 个一个不落——前端把这套形状当成了自己的契约，此时后端改一个字段名，
+前端读到的就是 `undefined`。反过来，前端只挑几个字段用的响应结构**不登记**：它本就
+该按需取，多抄反而不必，塞进来只制造噪音。这是与"自动发现全部结构体"相反的取向，
+理由写进了 `STRUCT_SETS` 上方注释。
+
+**探针先验，再落笔**：纳入前用 `tmp/probe-fields2.mjs`（复用守卫的提取器）逐对比对，
+**14 对全部 0 差异** ⇒ 无需改任何前端代码。
+
+### 回归测试同步扩展
+
+`protocol-mirror-audit.test.mjs` 从 **30 → 32 条**：夹具铺满新增的 14 对（基线断言
+`D 组 9 对` → `D 组 23 对`），并加两条**证明新登记确实在比对**的用例——
+`DetailField.visible_when` 后端改名 → 红、`OptionNode` 前端多字段 → 红。少铺一对，
+基线就会因"结构体 / 接口不存在"变红：夹具与清单的耦合是刻意的。
+
+### 验证
+
+- `protocol-mirror-audit`：A 组 31 + B 组 2 + C 组 4 + **D 组 23**，Errors 0
+- `protocol-mirror-audit.test.mjs`：**32/32**
+- `gate.mjs --only=docs,facts`：**15/15**（含各守卫回归测试）
+- `npm test`（vitest）：**47 文件 / 646 测试**，exit=0（卡死修复后保持）
+- `gen-current-facts --check`：一致（127 行）
+
+***
+
 ## 2026-09-20: 跨栈守卫 D 组（结构体字段）+ 删掉 ChatMessage 的两个死字段
 
 承接上一条（A 组常量镜像 / C 组闭集词表），把 ADR-019 里记为「已知缺口」的

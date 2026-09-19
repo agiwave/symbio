@@ -914,6 +914,15 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
   当次就抓出 `ChatMessage` 的两个**死字段**（`agent_id` / `prompt`：后端从不下发、
   前端也零点访问）并删除。**类型声明里的死字段此前无人看守**：TS interface 的字段
   既不是"引用"也不是"定义"，`dead-code-audit` 看不见它们。
+- **D 组的覆盖面按"前端逐字段镜像了它"这一判据推进**：首批 9 对（VDFS 契约 +
+  `ChatMessage`），随后纳入**详情表单宿主方言**（`detail.rs` ↔ `vdfs-form.ts`，9 对：
+  `DetailCondition` / `DetailOption` / `DetailField`(17 字段) / `DetailSection` /
+  `DetailPreset` / `DetailPresetSpec` / `DetailBadge` / `DetailAction` /
+  `DetailDefinition`）与**级联选项机制**（`options.rs` ↔ `options.ts`，5 对：
+  `OptionDisplay` / `OptionAction` / `OptionNode`(16 字段) / `OptionsRequest` /
+  `OptionsResponse`），共 **23 对**。这两批是"前端把整套形状抄了一遍"的典型——
+  `DetailField` 一个字段不落、`OptionNode` 一个字段不落。反过来，前端只挑几个字段
+  用的响应结构**不登记**：它本就该按需取，多抄反而不必，塞进来只制造噪音。
 - **类型映射仍无守卫**（`Option<u64>` ↔ `number` 这类）。它需要一张类型映射表，且
   泛型 / 嵌套会失控；收益也低于字段名——改类型通常伴随改字段名，那已经能被 D 组挡住。
 - **G3 关闭**，不进入实施清单。`Appearance.vue` / `About.vue` 的规模是**呈现层
