@@ -96,16 +96,6 @@ pub(crate) const SPEC_V2: &str = "agent-dir/v2";
 /// v1 的规范标识（OAB 约定目录装配形态，见 [`super::migrate`]）
 pub(crate) const SPEC_V1: &str = "oab/v1";
 
-/// 子 Agent 的默认插件清单 —— 直接复用 `symbio_core` 的机制级常量。
-///
-/// 早期这里写死 `&["mcp","skill"]` 并注释「`work` / `setting` 不在此列」，那基于 v2
-/// 早期的 TWO 个已废弃前提：(1) 子树 `WORKDIR` 曾被指到 Agent 目录，导致 `work` 与系统侧
-/// 注入同一份 `AGENTS.md`（现已改为**继承父会话 WORKDIR**，见 [`Self::forward_to_sub_agent`]
-/// 文档，不再双重注入）；(2) `setting` 被认为在子树里无挂载点（实则 `SubAgentVisitor` 把它
-/// 前缀到 `agent/<id>/setting`，子 Agent 页因此有了设置入口）。现统一收口到
-/// [`crate::symbio_core::SUB_AGENT_PLUGINS`]——父子加载同一默认集，改一处即一致，
-/// 不再在此维护第二份清单。
-
 /// 读 Agent 目录下 `manifest.yaml` 的 `spec` 字段（读不到 / 解析不了 = `None`）
 fn manifest_spec(dir: &std::path::Path) -> Option<String> {
     let text = std::fs::read_to_string(dir.join("manifest.yaml")).ok()?;

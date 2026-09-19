@@ -101,7 +101,7 @@ async fn agent_import_traverse_and_memory() {
     // ── 2. traverse：整棵插件树并进会话（能力带来源前缀，§8.2）──
     // 插件作用域到导入目录，使「发现根 == 导入位置」（与生产态 `PLUGIN_DIR` 语义一致）
     let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
-        &dir.path().join("agent"),
+        dir.path().join("agent"),
         PLUGIN_AGENT,
     )));
     let (ctx, manager) = ctx_with(Some(workdir), Some("com.symbio.test-fixture"));
@@ -484,7 +484,10 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // ① list：列出的是子 composite 的可见入口，路径是**树内相对**（不含根名）
     let listed = plugin.list(&vctx, "reviewer").await.unwrap();
     assert!(
-                !listed.is_empty() && listed.iter().all(|n| !n.path.contains(crate::plugins::vdfs::host::VDFS_ADDR_ROOT)),
+        !listed.is_empty()
+            && listed
+                .iter()
+                .all(|n| !n.path.contains(crate::plugins::vdfs::host::VDFS_ADDR_ROOT)),
         "子根清单应为树内相对路径（根名只在 UnifiedFs 出口补），实际：{:?}",
         listed.iter().map(|n| &n.path).collect::<Vec<_>>()
     );

@@ -433,7 +433,15 @@ function splitRustLines(files) {
   return { impl, test };
 }
 
-/** 一个统计范围：dir 相对仓库根，exts 参与统计的后缀 */
+/**
+ * 一个统计范围：`dir` 相对仓库根，`exts` 参与统计的后缀。
+ *
+ * ⚠️ `dir` 会**原样进生成物**（§5.1 表格首列），故调用方必须给**正斜杠字面量**，
+ * 不得用 `path.join` —— 后者在 Windows 上产出 `symbio\src`、在 Linux 上产出
+ * `symbio/src`，同一份代码在两平台生成出不同内容；CI（Linux）的 `--check`
+ * 因「Windows 提交的生成物 vs Linux 重生成」逐字比对而必红。
+ * 真实文件访问仍走 `path.join`（正斜杠在 Windows 上同样可解析）。
+ */
 function scopeRow(dir, exts) {
   const impl = walkScope(path.join(ROOT, dir), exts, false);
   const test = walkScope(path.join(ROOT, dir), exts, true);
@@ -452,10 +460,10 @@ function scopeRow(dir, exts) {
 
 function scopeRows() {
   return [
-    scopeRow(path.join("symbio", "src"), [".rs"]),
-    scopeRow(path.join("cli", "src"), [".rs"]),
-    scopeRow(path.join("tauri", "src-tauri", "src"), [".rs"]),
-    scopeRow(path.join("tauri", "src"), [".ts", ".vue"]),
+    scopeRow("symbio/src", [".rs"]),
+    scopeRow("cli/src", [".rs"]),
+    scopeRow("tauri/src-tauri/src", [".rs"]),
+    scopeRow("tauri/src", [".ts", ".vue"]),
   ];
 }
 
