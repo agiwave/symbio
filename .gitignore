@@ -12,6 +12,7 @@ symbio/embedding/
 .idea/
 .VSCode*/
 .e2e*/
+tmp/
 
 
 # Build outputs
