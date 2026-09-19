@@ -6,55 +6,52 @@
   - 不阻塞 UI：可关闭、可点遮罩取消
   - 异步：通过 resolve 回调返回用户选择（不阻塞调用栈）
   - 可访问：focus trap、ESC 关闭、aria 属性
+
+  外壳（遮罩 / ESC / 焦点陷阱 / 自动聚焦）已收进 `BaseModal`——本组件只保留
+  **确认框自己的语义**：标题 / 图标 / 消息 / 两个按钮，以及「`loading` 期间
+  拒绝取消」这条业务规则。面板类名 `confirm-dialog` 继续传给 BaseModal，故
+  特化样式与测试的定位方式不变；遮罩改由机制类 `modal-mask` 定位。
 -->
 <template>
-  <Transition name="confirm-fade">
-    <div
-      v-if="visible"
-      class="confirm-overlay"
-      @click.self="onCancel"
-      @keydown="onKeydown"
-    >
-      <div
-        ref="dialogRef"
-        class="confirm-dialog"
-        role="alertdialog"
-        :aria-labelledby="titleId"
-        :aria-describedby="messageId"
-        tabindex="-1"
-      >
-        <header v-if="title" class="confirm-header">
-          <span v-if="icon" class="confirm-icon" :class="iconClass">{{ icon }}</span>
-          <h3 :id="titleId" class="confirm-title">{{ title }}</h3>
-        </header>
-        <div :id="messageId" class="confirm-message">
-          <slot>{{ message }}</slot>
-        </div>
-        <footer class="confirm-footer">
-          <button
-            type="button"
-            class="confirm-btn cancel"
-            :disabled="loading"
-            @click="onCancel"
-          >
-            {{ cancelText }}
-          </button>
-          <button
-            type="button"
-            :class="['confirm-btn', 'primary', danger ? 'danger' : '']"
-            :disabled="loading"
-            @click="onConfirm"
-          >
-            {{ loading ? '处理中…' : confirmText }}
-          </button>
-        </footer>
-      </div>
+  <BaseModal
+    :visible="visible"
+    panel-class="confirm-dialog"
+    role="alertdialog"
+    :labelledby="titleId"
+    :describedby="messageId"
+    @close="onCancel"
+  >
+    <header v-if="title" class="confirm-header">
+      <span v-if="icon" class="confirm-icon" :class="iconClass">{{ icon }}</span>
+      <h3 :id="titleId" class="confirm-title">{{ title }}</h3>
+    </header>
+    <div :id="messageId" class="confirm-message">
+      <slot>{{ message }}</slot>
     </div>
-  </Transition>
+    <footer class="confirm-footer">
+      <button
+        type="button"
+        class="confirm-btn cancel"
+        :disabled="loading"
+        @click="onCancel"
+      >
+        {{ cancelText }}
+      </button>
+      <button
+        type="button"
+        :class="['confirm-btn', 'primary', danger ? 'danger' : '']"
+        :disabled="loading"
+        @click="onConfirm"
+      >
+        {{ loading ? '处理中…' : confirmText }}
+      </button>
+    </footer>
+  </BaseModal>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed } from 'vue'
+import BaseModal from './BaseModal.vue'
 
 interface Props {
   /** 是否可见 */
@@ -100,7 +97,6 @@ const titleId = computed(
 const messageId = computed(
   () => `confirm-msg-${Math.random().toString(36).slice(2, 9)}`
 )
-const dialogRef = ref<HTMLDivElement | null>(null)
 
 const iconClass = computed(() => `kind-${props.iconKind}`)
 
@@ -114,80 +110,18 @@ function onConfirm() {
   if (props.loading) return
   emit('confirm')
 }
-
-/**
- * 焦点陷阱（focus trap）：在对话框内循环 Tab / Shift+Tab，
- * 保证键盘用户不会被焦点"逃出"遮罩层。ESC 走 onCancel。
- */
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    onCancel()
-    return
-  }
-  if (e.key !== 'Tab' || !dialogRef.value) return
-  const focusables = Array.from(
-    dialogRef.value.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )
-  )
-  if (focusables.length === 0) {
-    e.preventDefault()
-    return
-  }
-  const first = focusables[0]
-  const last = focusables[focusables.length - 1]
-  const active = document.activeElement as HTMLElement | null
-  if (e.shiftKey && (active === first || active === dialogRef.value)) {
-    e.preventDefault()
-    last.focus()
-  } else if (!e.shiftKey && active === last) {
-    e.preventDefault()
-    first.focus()
-  }
-}
-
-// 打开时自动聚焦首个可交互元素（焦点陷阱入口）
-watch(
-  () => props.visible,
-  async (v) => {
-    if (v) {
-      await nextTick()
-      const first = dialogRef.value?.querySelector<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )
-      if (first) {
-        first.focus()
-      } else {
-        dialogRef.value?.focus()
-      }
-    }
-  }
-)
 </script>
 
 <style scoped>
-.confirm-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-dialog);
-  padding: var(--space-4);
-}
-
+/* 遮罩与面板的底色 / 圆角 / 阴影 / 层级由 `BaseModal` 统一提供（`.modal-mask` /
+   `.modal-panel`）；这里只写确认框自己的尺寸与边框。 */
 .confirm-dialog {
-  background: var(--surface-overlay);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-2);
   min-width: 20rem;
   max-width: 30rem;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  outline: none;
 }
 
 .confirm-header {
@@ -282,14 +216,5 @@ watch(
 }
 .confirm-btn.cancel:hover:not(:disabled) {
   background: var(--surface-hover);
-}
-
-.confirm-fade-enter-active,
-.confirm-fade-leave-active {
-  transition: opacity 0.18s ease;
-}
-.confirm-fade-enter-from,
-.confirm-fade-leave-to {
-  opacity: 0;
 }
 </style>

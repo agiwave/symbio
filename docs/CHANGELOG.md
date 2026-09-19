@@ -18,6 +18,61 @@
 
 ***
 
+## 2026-09-20: 前端机制化第二轮 —— 词表单源 / 弹窗外壳收口 / 门禁识别新机制
+
+**性质：机制化收敛 ×3（其中一条同时修掉可访问性缺陷）**。复核报告见
+[design/frontend-mechanization-review-round2.md](./design/frontend-mechanization-review-round2.md)。
+
+第一轮复核（`design/frontend-mechanization-review.md`）的缺口全部集中在"详情渲染器层"；
+本轮看它**没看过**的三层——`schemas/` 的契约词表、`services/` 的错误口径、
+以及新机制与门禁的配套。
+
+### 1. 消息状态词表从 4 处收敛到 1 处
+
+`MESSAGE_STATUSES`（`schemas/chat_message.ts`）与 `VDFS_STATUS_*`（`schemas/vdfs.ts`）
+是同一批词的两份字面量，`vdfsTranscriptSync::messageStatusOf` 的 `switch` 与
+`messageTypes` 的文案表再各枚举一遍——**新增一个状态词要改 4 处**。
+
+这个结构已经造成过故障：`aborted` 只补进了一份、`switch` 没跟上，于是整条状态被
+**静默丢弃**，表现为「中止后的 Turn 显示为已完成、重试入口不出现」。
+
+- `schemas/vdfs.ts` 的 6 个消息类常量改为 `MESSAGE_STATUS_*` 的**别名**（值单源，命名不变）；
+- `messageStatusOf` 的 `switch` 改为 `isMessageStatus()` 集合判定（由词表派生），未知词仍留痕；
+- 新增词现在只改 `chat_message.ts` 的相邻两行，两侧同源由单测锁死。
+
+### 2. 抽 `BaseModal`：4 处弹窗外壳收口，顺带修可访问性
+
+`ConfirmDialog` / `OptionFormDialog` / `HomedirSwitcher` / `ModelChatPanel` 的编辑浮层
+各自手写遮罩，而**只有 `ConfirmDialog` 实现了 ESC 与焦点陷阱**——另外三处的键盘用户
+按 ESC 关不掉、Tab 会跑到遮罩背后的页面上。
+
+顺带修掉三处硬编码：`ModelChatPanel` 的遮罩写死 `z-index: 100`（低于其它浮层）
+与 `rgba(0,0,0,0.45)`（不跟随主题）；`HomedirSwitcher` 的遮罩用 `--z-overlay`(1000)
+而非弹窗层的 `--z-dialog`(1500)。
+
+新增 `components/common/BaseModal.vue`（遮罩 + 面板 + ESC + Tab 陷阱 + 打开自动聚焦），
+四处共用；调用方保留各自的语义类（`confirm-dialog` / `ofd-dialog` / `modal` / `edit-box`）。
+实现中发现并修掉一个坑：`watch` 不加 `immediate` 时，**挂载即可见**的弹窗
+（`OptionFormDialog` 恒传 `:visible="true"`）不会自动聚焦——它没有"变化"可触发 watch。
+
+### 3. `style-audit` 识别 `*-class` 属性值
+
+`panel-class="confirm-dialog"` 这类**经 prop 传的类名**不在 `class` 属性里，静态审计
+看不见，新机制一落地就产生 4 个假警告。给模板提取加上 `*-class="a b"` 属性值识别后：
+**0 错误 0 警告**（改动前为 0 错误 / 7 警告）。
+
+这次调整还暴露出一个真问题：`confirm-overlay` 失去样式定义后，审计立刻报「模板中
+使用了未定义的类」——结论正确，遂删除这个已无定义的类名（测试改由 `modal-mask` /
+`confirm-dialog` 定位）。
+
+### 验证
+
+`vitest run` 45 文件 / **631 通过**（起点 44 / 615）；`vue-tsc --noEmit` 干净；
+`style-audit` 0 错误 0 警告。行数净变化接近零（+262 / −246，另新增 BaseModal 与其单测）
+——**收益不在行数，而在「4 处 → 1 处」的词表收敛与弹窗的键盘可访问性**。
+
+***
+
 ## 2026-09-20: 压缩失败不再强制裁剪历史 —— 改为可诊断、可重试、可持久化的失败态
 
 **性质：行为修复 ×1（否决一条"静默降级"策略）**。决策记录见

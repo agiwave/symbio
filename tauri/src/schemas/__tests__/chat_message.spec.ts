@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { messageTextOf } from '../chat_message'
+import { MESSAGE_STATUSES, isMessageStatus, messageTextOf } from '../chat_message'
 import type { MessageContent } from '../chat_message'
 
 /**
@@ -64,5 +64,28 @@ describe('messageTextOf：内容形状', () => {
     expect(messageTextOf('')).toBe('')
     expect(messageTextOf(asContent({ text: 123 }))).toBe('')
     expect(messageTextOf(asContent({ other: 1 }))).toBe('')
+  })
+})
+
+/**
+ * `isMessageStatus`：集合判定**派生自词表**，不是另抄一份列表。
+ *
+ * 它是 `services/vdfsTranscriptSync` 透传节点状态词的唯一判据。这里锁两件事：
+ * 词表里每个取值都判真（派生关系没写反），未知词与非字符串一律判假
+ * （判不住就会让未知词以"有状态"落进 store，或被兜底成 `completed` 而谎报成功）。
+ */
+describe('isMessageStatus：词表派生判定', () => {
+  it('词表的每个取值都判真', () => {
+    for (const s of MESSAGE_STATUSES) expect(isMessageStatus(s)).toBe(true)
+  })
+
+  it('未知词 / 旧别名 / 非字符串 / 空值一律判假', () => {
+    expect(isMessageStatus('paused')).toBe(false)
+    expect(isMessageStatus('active')).toBe(false) // 旧数据别名，不在消息词表内
+    expect(isMessageStatus('')).toBe(false)
+    expect(isMessageStatus(undefined)).toBe(false)
+    expect(isMessageStatus(null)).toBe(false)
+    expect(isMessageStatus(1)).toBe(false)
+    expect(isMessageStatus({ status: 'failed' })).toBe(false)
   })
 })

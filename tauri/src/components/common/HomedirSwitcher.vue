@@ -16,8 +16,7 @@
   对应 schema: tauri/src/schemas/home_reload.ts
 -->
 <template>
-  <div v-if="open" class="modal-mask" @click.self="handleClose">
-    <div class="modal" role="dialog" aria-labelledby="sysdir-title">
+  <BaseModal :visible="open" panel-class="modal" @close="handleClose">
       <header class="modal-header">
         <h3 id="sysdir-title">系统目录</h3>
         <button class="close-btn" @click="handleClose" aria-label="关闭">×</button>
@@ -107,20 +106,22 @@
           {{ busy ? '切换中…' : '切换' }}
         </button>
       </footer>
-    </div>
+  </BaseModal>
 
-    <!-- 二次确认：提示活跃 chat 会话将被关闭 -->
-    <ConfirmDialog
-      :visible="confirmOpen"
-      title="确认切换系统目录？"
-      :message="confirmMessage"
-      confirm-text="切换"
-      cancel-text="取消"
-      :loading="busy"
-      @confirm="handleConfirm"
-      @cancel="confirmOpen = false"
-    />
-  </div>
+  <!-- 二次确认：提示活跃 chat 会话将被关闭。
+       它原本嵌在遮罩内（靠更高的 z-index 盖在上面）；现在与 BaseModal 平级，
+       用 `v-if="open"` 保持「父弹窗关了它也走」的原行为。 -->
+  <ConfirmDialog
+    v-if="open"
+    :visible="confirmOpen"
+    title="确认切换系统目录？"
+    :message="confirmMessage"
+    confirm-text="切换"
+    cancel-text="取消"
+    :loading="busy"
+    @confirm="handleConfirm"
+    @cancel="confirmOpen = false"
+  />
 </template>
 
 <script setup lang="ts">
@@ -142,6 +143,7 @@ import {
 import { reloadGatewayTransport } from '@/services/plugin'
 import { logger } from '@/utils/logger'
 import { useToast } from '@/composables/useToast'
+import BaseModal from './BaseModal.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import type { Response as ReloadResponse } from '@/schemas/home_reload'
 
@@ -315,20 +317,11 @@ function resetFields() {
 </script>
 
 <style scoped>
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-overlay);
-}
+/* 遮罩与面板底色 / 圆角 / 阴影 / 层级由 `BaseModal` 统一提供；这里只写尺寸。
+   顺带修掉一处层级错位：原遮罩用 `--z-overlay`(1000)，低于其它弹窗的
+   `--z-dialog`(1500)，与内嵌确认框的层级关系反直觉。 */
 .modal {
   width: min(38rem, 92vw);
-  background: var(--surface-overlay);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-2);
   display: flex;
   flex-direction: column;
 }

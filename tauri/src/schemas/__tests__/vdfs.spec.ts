@@ -7,6 +7,14 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  VDFS_STATUS_ABORTED,
+  VDFS_STATUS_ACTIVE,
+  VDFS_STATUS_COMPLETED,
+  VDFS_STATUS_FAILED,
+  VDFS_STATUS_PENDING,
+  VDFS_STATUS_STREAMING,
+  VDFS_STATUS_WAITING_USER_ACTION,
+  VDFS_STATUS_WORKING,
   actionFileOf,
   isVdfsDir,
   isVdfsDraft,
@@ -20,6 +28,16 @@ import {
   vdfsParent,
   type VdfsNode,
 } from '../vdfs'
+import {
+  MESSAGE_STATUS_ABORTED,
+  MESSAGE_STATUS_COMPLETED,
+  MESSAGE_STATUS_FAILED,
+  MESSAGE_STATUS_PENDING,
+  MESSAGE_STATUS_STREAMING,
+  MESSAGE_STATUS_WAITING_USER_ACTION,
+  MESSAGE_STATUSES,
+  isMessageStatus,
+} from '../chat_message'
 import { resetVdfsRoot, setVdfsRoot, vdfsRoot } from '../vdfsRoot'
 
 // 合成根：**故意不是**后端当前挂载名——本文件全部断言与根名无关，
@@ -199,5 +217,42 @@ describe('vdfsRoot — 根锚点', () => {
     expect(vdfsRoot()).toBe('')
     expect(isVdfsSystemAddr('anything')).toBe(false)
     setVdfsRoot(ROOT) // 恢复，避免影响其它用例（若拆分文件可删）
+  })
+})
+
+/**
+ * 消息类节点状态词**只有一份定义**（在 `chat_message`），VDFS 侧是别名。
+ *
+ * 这条断言锁的是一个具体的失败模式：状态词表曾有两份，`aborted` 只补进了其中
+ * 一份，消费端 `vdfsTranscriptSync` 于是把整条状态**静默丢弃**——中止后的 Turn
+ * 显示为已完成、重试入口不出现。两份变一份后，"漏改一份"在结构上不再可能；
+ * 但"有人又写了一行字面量"仍可能，所以这里把它钉住。
+ */
+describe('节点状态词：VDFS 侧是 chat_message 的别名', () => {
+  it('消息类 VDFS 常量与消息状态常量**同值**（不是各写一份字面量）', () => {
+    expect(VDFS_STATUS_PENDING).toBe(MESSAGE_STATUS_PENDING)
+    expect(VDFS_STATUS_STREAMING).toBe(MESSAGE_STATUS_STREAMING)
+    expect(VDFS_STATUS_WAITING_USER_ACTION).toBe(MESSAGE_STATUS_WAITING_USER_ACTION)
+    expect(VDFS_STATUS_COMPLETED).toBe(MESSAGE_STATUS_COMPLETED)
+    expect(VDFS_STATUS_FAILED).toBe(MESSAGE_STATUS_FAILED)
+    expect(VDFS_STATUS_ABORTED).toBe(MESSAGE_STATUS_ABORTED)
+  })
+
+  it('VDFS 侧可达的消息状态词集合与词表**完全相等**（漏一个或凭空多一个都红）', () => {
+    const viaVdfs = [
+      VDFS_STATUS_PENDING,
+      VDFS_STATUS_STREAMING,
+      VDFS_STATUS_WAITING_USER_ACTION,
+      VDFS_STATUS_COMPLETED,
+      VDFS_STATUS_FAILED,
+      VDFS_STATUS_ABORTED,
+    ]
+    expect([...viaVdfs].sort()).toEqual([...MESSAGE_STATUSES].sort())
+  })
+
+  it('会话类状态与未知词不属于消息词表（isMessageStatus 拦住它们）', () => {
+    expect(isMessageStatus(VDFS_STATUS_WORKING)).toBe(false)
+    expect(isMessageStatus(VDFS_STATUS_ACTIVE)).toBe(false)
+    expect(isMessageStatus('paused')).toBe(false)
   })
 })

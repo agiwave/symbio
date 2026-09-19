@@ -13,6 +13,15 @@
  * （消费方一律 `import ... from '@/schemas/vdfs'`）。
  */
 
+import {
+  MESSAGE_STATUS_ABORTED,
+  MESSAGE_STATUS_COMPLETED,
+  MESSAGE_STATUS_FAILED,
+  MESSAGE_STATUS_PENDING,
+  MESSAGE_STATUS_STREAMING,
+  MESSAGE_STATUS_WAITING_USER_ACTION,
+} from './chat_message'
+
 export * from './vdfs-form'
 
 export const VDFS_LIST = 'vdfs/list'
@@ -34,38 +43,53 @@ export const VDFS_ACTION = 'vdfs/action'
  */
 export const VDFS_ROOT_OP = 'vdfs/root'
 
-/** 节点状态：进行中（其余状态词由 provider 自定，前端只做呈现映射） */
+/**
+ * 节点状态词。
+ *
+ * **消息类状态（`pending` / `streaming` / `waiting_user_action` / `completed` /
+ * `failed` / `aborted`）的权威定义在 `schemas/chat_message.ts`**——它们本就是消息
+ * 状态词，只是经节点 `status` 承载（后端 `message_status()` 直接把 `MessageStatus`
+ * 的序列化名写成节点 `status`）。此处**只做别名导出**，让 VDFS 侧消费方继续用
+ * `VDFS_STATUS_*` 命名，同时保证值只有一个来源：改一个词的字面量、或新增一个
+ * 消息状态词，**都不需要动本文件**。
+ *
+ * 本文件自己持有的是**会话类**状态（`working` / `active`）：它们不属于消息，
+ * 是长驻会话容器的运行态。
+ */
+/** 会话状态：进行中（其余状态词由 provider 自定，前端只做呈现映射） */
 export const VDFS_STATUS_WORKING = 'working'
-/** 节点状态：空闲 / 正常 */
+/** 会话状态：空闲 / 正常 */
 export const VDFS_STATUS_ACTIVE = 'active'
+
 /** 节点状态：**以错误结束**（消息与会话共用这个词）。
  *
  * 会话用它取代「`active` + `last_failed` 布尔」这种「状态 + 平行标志位」写法：
  * 「上一轮失败了吗」= `status == VDFS_STATUS_FAILED`，一处判定，不会漏读。
  * 见 `symbio/src/plugins/session/docs/node-state-streaming.md` §2.3.1。 */
-export const VDFS_STATUS_FAILED = 'failed'
+export const VDFS_STATUS_FAILED = MESSAGE_STATUS_FAILED
 /** 节点状态：未开始（消息；会话没有这个态——它是长驻容器） */
-export const VDFS_STATUS_PENDING = 'pending'
+export const VDFS_STATUS_PENDING = MESSAGE_STATUS_PENDING
 /** 节点状态：正在产生内容（消息的「运行中」） */
-export const VDFS_STATUS_STREAMING = 'streaming'
+export const VDFS_STATUS_STREAMING = MESSAGE_STATUS_STREAMING
 /** 节点状态：等待用户响应（审批 / 提问） */
-export const VDFS_STATUS_WAITING_USER_ACTION = 'waiting_user_action'
+export const VDFS_STATUS_WAITING_USER_ACTION = MESSAGE_STATUS_WAITING_USER_ACTION
 /** 节点状态：已结束（消息的终态）。
  *
  * **不与 `VDFS_STATUS_ACTIVE` 合并**：`active` 是「无特殊状态」，`completed`
  * 是「终态」，二者曾被后端映射成同一个字符串，导致消费端必须把 `active`
  * **猜回** `completed`（一次信息丢失 + 一次猜测还原）。现在状态原样透传。 */
-export const VDFS_STATUS_COMPLETED = 'completed'
+export const VDFS_STATUS_COMPLETED = MESSAGE_STATUS_COMPLETED
 /** 节点状态：**用户主动终止**（消息的终态，根级 Turn 用）。
  *
  * 与 `VDFS_STATUS_COMPLETED` / `VDFS_STATUS_FAILED` 并列的**第三个终态**：
  * 没有跑完（不是 `completed`），也没有出错（不是 `failed`）。它的语义是
  * **可重试**——前端的重试入口正是挂在这个终态上。
  *
- * 后端 `MessageStatus::as_str()` 早已产出这个词；前端漏在状态词表里，
- * 导致消费端把整条变更的状态**静默丢弃**（见 `vdfsTranscriptSync::messageStatusOf`），
- * 中止后重试入口不出现。故这里补齐，并让该映射的未知分支改为**显式告警**。 */
-export const VDFS_STATUS_ABORTED = 'aborted'
+ * 后端 `MessageStatus::as_str()` 早已产出这个词；前端曾漏在状态词表里，导致
+ * 消费端把整条变更的状态**静默丢弃**（见 `vdfsTranscriptSync::messageStatusOf`），
+ * 中止后重试入口不出现。现在它是 `MESSAGE_STATUS_ABORTED` 的别名——**漏改这件事
+ * 已不可能发生**（词表只有一份），而未知词仍由该映射**显式告警**兜底。 */
+export const VDFS_STATUS_ABORTED = MESSAGE_STATUS_ABORTED
 
 /** 「运行中」的唯一判据：节点 `status == working`。
  *

@@ -31,7 +31,7 @@ function mountDialog(props: Record<string, unknown> = {}, slots: Record<string, 
 
 describe('ConfirmDialog — 显隐与结构', () => {
   it('不可见时整个遮罩不渲染（不是隐藏）', () => {
-    expect(mountDialog({ visible: false }).find('.confirm-overlay').exists()).toBe(false)
+    expect(mountDialog({ visible: false }).find('.modal-mask').exists()).toBe(false)
   })
 
   it('role=alertdialog 且标题/正文都挂上 aria 关联', () => {
@@ -67,7 +67,7 @@ describe('ConfirmDialog — 三条关闭途径', () => {
 
   it('点遮罩（不含对话框本体）→ 取消', async () => {
     const w = mountDialog()
-    await w.find('.confirm-overlay').trigger('click')
+    await w.find('.modal-mask').trigger('click')
     expect(w.emitted('cancel')).toHaveLength(1)
   })
 
@@ -79,7 +79,7 @@ describe('ConfirmDialog — 三条关闭途径', () => {
 
   it('ESC 键 → 取消', async () => {
     const w = mountDialog()
-    await w.find('.confirm-overlay').trigger('keydown', { key: 'Escape' })
+    await w.find('.modal-mask').trigger('keydown', { key: 'Escape' })
     expect(w.emitted('cancel')).toHaveLength(1)
   })
 })
@@ -119,7 +119,7 @@ describe('ConfirmDialog — loading 是硬闸门', () => {
     const w = mountDialog({ loading: true })
     await w.find('.confirm-btn.primary').trigger('click')
     await w.find('.confirm-btn.cancel').trigger('click')
-    await w.find('.confirm-overlay').trigger('keydown', { key: 'Escape' })
+    await w.find('.modal-mask').trigger('keydown', { key: 'Escape' })
     expect(w.emitted('confirm')).toBeUndefined()
     expect(w.emitted('cancel')).toBeUndefined()
   })

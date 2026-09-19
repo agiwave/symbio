@@ -73,11 +73,8 @@ import {
   VDFS_EVENT_KIND,
   VDFS_STATUS_ACTIVE,
   VDFS_STATUS_COMPLETED,
-  VDFS_STATUS_FAILED,
-  VDFS_STATUS_PENDING,
   VDFS_STATUS_STREAMING,
   VDFS_STATUS_WAITING_USER_ACTION,
-  VDFS_STATUS_ABORTED,
   sessionRouteOf,
   type VdfsChange,
   type VdfsNode,
@@ -85,6 +82,7 @@ import {
 import {
   MESSAGE_TYPE_REASONING,
   MESSAGE_TYPE_TOOL_CALL,
+  isMessageStatus,
   type ChatMessage,
   type MessageStatus,
 } from '@/schemas/chat_message'
@@ -125,32 +123,29 @@ const _G = globalThis as typeof globalThis & { __symTranscriptSyncStarted?: bool
  * **原样透传**：后端 `message_status()` 已经把 `MessageStatus` 的序列化名直接写成
  * 节点 `status`，前端不再做任何「读回」式还原。`active` 只作为**旧数据的兜底别名**
  * 保留（历史上 `completed` 与「未标注」都被映射成 `active`），遇到即按已结束处理。
+ *
+ * 判定走 `isMessageStatus`（由消息状态词表派生），**不逐个 `case` 枚举**：
+ * 枚举等于再抄一份词表，而「词表加了、`case` 忘了加」正是本函数当初丢掉
+ * `aborted` 的原因。未知词仍落到下方告警——**留痕，而不是当作没有状态**。
  */
 function messageStatusOf(node: VdfsNode): MessageStatus | undefined {
-  switch (node.status) {
-    case VDFS_STATUS_PENDING:
-    case VDFS_STATUS_STREAMING:
-    case VDFS_STATUS_WAITING_USER_ACTION:
-    case VDFS_STATUS_COMPLETED:
-    case VDFS_STATUS_FAILED:
-    case VDFS_STATUS_ABORTED:
-      return node.status
-    case VDFS_STATUS_ACTIVE:
-      // 旧数据别名：仅用于兼容已落库的历史节点，新节点不会再出现这个值
-      return VDFS_STATUS_COMPLETED
-    default:
-      // **不得静默丢弃**：状态是本模块承载的全部信息，丢掉它等于让节点以
-      // 「无状态」落进 store——`messageStatusOf`（`registry/messageTypes`）会把
-      // 缺失兜底成 `completed`，于是终态被谎报成"正常结束"。
-      // 实测代价：`aborted` 漏在状态词表里时，中止后的 Turn 显示为已完成，
-      // 重试入口不出现（重新打开会话走叶子 JSON 直读才恢复）。
-      // 因此未知状态词一律**留痕**，而不是当作"没有状态"。
-      logger.warn(
-        '[vdfs-transcript]',
-        `未知的节点状态词，已忽略该条状态（后端新增状态词时前端需同步）：${String(node.status)} @ ${node.path}`,
-      )
-      return undefined
-  }
+  // 旧数据别名：仅用于兼容已落库的历史节点，新节点不会再出现这个值
+  if (node.status === VDFS_STATUS_ACTIVE) return VDFS_STATUS_COMPLETED
+
+  // 消息状态原样透传（与词表同源 ⇒ 新增状态词不必回来改这里）
+  if (isMessageStatus(node.status)) return node.status
+
+  // **不得静默丢弃**：状态是本模块承载的全部信息，丢掉它等于让节点以
+  // 「无状态」落进 store——`messageStatusOf`（`registry/messageTypes`）会把
+  // 缺失兜底成 `completed`，于是终态被谎报成"正常结束"。
+  // 实测代价：`aborted` 漏在状态词表里时，中止后的 Turn 显示为已完成，
+  // 重试入口不出现（重新打开会话走叶子 JSON 直读才恢复）。
+  // 因此未知状态词一律**留痕**，而不是当作"没有状态"。
+  logger.warn(
+    '[vdfs-transcript]',
+    `未知的节点状态词，已忽略该条状态（后端新增状态词时前端需同步）：${String(node.status)} @ ${node.path}`,
+  )
+  return undefined
 }
 
 /** 节点视图 + 内容 → 前端 `ChatMessage`（结构取 attributes，正文取内容） */

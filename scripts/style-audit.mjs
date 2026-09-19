@@ -308,6 +308,17 @@ function extractTemplateClassUsages(tpl) {
   for (const m of tpl.matchAll(/(?::|v-bind:)class\s*=\s*'([^']*)'/g)) {
     extractBindingClasses(m[1], used, prefixes);
   }
+  // 组件经 prop 传类名（如 `<BaseModal mask-class="confirm-overlay"
+  // panel-class="confirm-dialog">`）：类名不写在 `class` 属性里，静态扫描原本
+  // 看不见，于是这些 scoped 样式会被误判成"未使用"。`*-class="a b"` 形式的
+  // 属性值同样计入**静态**使用——它们确实会落到元素上（与 Transition 的框架
+  // 生成类不同，不需要 soft 的宽松待遇）。
+  for (const m of tpl.matchAll(/(?<![:\w.$-])[\w-]+-class\s*=\s*"([^"]*)"/g)) {
+    m[1].split(/\s+/).forEach(add);
+  }
+  for (const m of tpl.matchAll(/(?<![:\w.$-])[\w-]+-class\s*=\s*'([^']*)'/g)) {
+    m[1].split(/\s+/).forEach(add);
+  }
   // <Transition name="x"> / <TransitionGroup name="x"> 会自动应用
   // x-enter-active / x-leave-active / x-enter-from / x-enter-to / x-leave-to 系列类。
   // 这些类由 Vue 框架生成，**允许不写样式**（常见只写 4 个、省略 enter-to），

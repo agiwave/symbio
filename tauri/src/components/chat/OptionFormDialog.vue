@@ -12,25 +12,24 @@
 -->
 <template>
   <Teleport to="body">
-    <div class="ofd-overlay" @click.self="$emit('close')">
-      <div class="ofd-dialog">
-        <DetailForm
-          v-if="definition"
-          :definition="definition"
-          :node="null"
-          :values="node.data ?? {}"
-          :capabilities="EMPTY_CAPABILITIES"
-          :saving="saving"
-          @save="onSave"
-          @cancel="$emit('close')"
-        />
-      </div>
-    </div>
+    <BaseModal :visible="true" panel-class="ofd-dialog" @close="$emit('close')">
+      <DetailForm
+        v-if="definition"
+        :definition="definition"
+        :node="null"
+        :values="node.data ?? {}"
+        :capabilities="EMPTY_CAPABILITIES"
+        :saving="saving"
+        @save="onSave"
+        @cancel="$emit('close')"
+      />
+    </BaseModal>
   </Teleport>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import BaseModal from '@/components/common/BaseModal.vue'
 import DetailForm from '@/components/vdfs/DetailForm.vue'
 import type { DetailDefinition } from '@/schemas/vdfs'
 import type { OptionNode } from '@/schemas/options'
@@ -74,16 +73,8 @@ function onSave(values: Record<string, unknown>) {
 </script>
 
 <style scoped>
-.ofd-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-dialog);
-}
-
+/* 遮罩与面板底色 / 圆角 / 阴影 / 层级由 `BaseModal` 统一提供；这里只写尺寸与排布。
+   顺带补上了原先缺的 ESC 关闭与焦点陷阱（此前只有点遮罩能关）。 */
 .ofd-dialog {
   width: 100%;
   max-width: 32rem;
@@ -91,8 +82,5 @@ function onSave(values: Record<string, unknown>) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--surface-overlay);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-2);
 }
 </style>

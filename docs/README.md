@@ -61,6 +61,9 @@ docs/                            # 系统级文档（跨模块）
 │   ├── vdfs-frontend.md                 # VDFS 前端页面规范
 │   ├── agent-directory-spec.md          # agent 插件（智能体域）规范
 │   ├── http-api-transport.md            # Gateway HTTP/WS 传输层设计
+│   ├── frontend-mechanization-review.md         # 前端机制化复核 · 第一轮（一次性报告，非规范）
+│   ├── frontend-mechanization-review-round2.md  # 前端机制化复核 · 第二轮（同上）
+│   ├── architecture-health-check-2026-09.md     # 架构体检 2026-09（同上）
 │   ├── class-diagram.mermaid            # 类图
 │   └── sequence-diagram.mermaid         # 时序图
 ├── CHANGELOG.md                 # 更新日志

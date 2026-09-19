@@ -151,7 +151,7 @@ describe('HomedirSwitcher — 提交前校验', () => {
     // 按钮在非法时已禁用，点它不会触发提交；输入框的回车是另一条入口
     await w.find('#sysdir-input').trigger('keydown.enter')
     expect(w.find('.error').text()).toContain('请输入目标 homedir 路径')
-    expect(w.find('.confirm-overlay').exists()).toBe(false)
+    expect(w.find('.confirm-dialog').exists()).toBe(false)
     expect(hoisted.switchHomedir).not.toHaveBeenCalled()
   })
 
@@ -166,7 +166,7 @@ describe('HomedirSwitcher — 提交前校验', () => {
   it('回车与按钮是同一入口：合法时回车也开确认框', async () => {
     const w = await openSwitcher({ localPath: '/x' })
     await w.find('#sysdir-input').trigger('keydown.enter')
-    expect(w.find('.confirm-overlay').exists()).toBe(true)
+    expect(w.find('.confirm-dialog').exists()).toBe(true)
   })
 })
 

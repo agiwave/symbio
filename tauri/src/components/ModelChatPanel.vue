@@ -15,23 +15,23 @@
       </div>
     </Transition>
 
-    <!-- 编辑单条消息的浮层 -->
-    <Transition name="banner">
-      <div v-if="editing" class="edit-overlay" @click.self="editing = null">
-        <div class="edit-box">
-          <div class="edit-title">编辑消息</div>
-          <textarea
-            v-model="editing.content"
-            class="edit-area"
-            :placeholder="editing.isJson ? 'JSON 内容' : '消息内容'"
-          />
-          <div class="edit-btns">
-            <button class="edit-save" @click="saveEdit">保存</button>
-            <button class="edit-cancel" @click="editing = null">取消</button>
-          </div>
+    <!-- 编辑单条消息的浮层。外壳走 `BaseModal`：ESC 可关、焦点被陷阱锁在框内、
+         遮罩底色与层级走 token（原实现写死 `z-index: 100` + `rgba(0,0,0,0.45)`，
+         层级低于其它浮层且不跟随主题）。 -->
+    <BaseModal :visible="!!editing" panel-class="edit-box" @close="editing = null">
+      <template v-if="editing">
+        <div class="edit-title">编辑消息</div>
+        <textarea
+          v-model="editing.content"
+          class="edit-area"
+          :placeholder="editing.isJson ? 'JSON 内容' : '消息内容'"
+        />
+        <div class="edit-btns">
+          <button class="edit-save" @click="saveEdit">保存</button>
+          <button class="edit-cancel" @click="editing = null">取消</button>
         </div>
-      </div>
-    </Transition>
+      </template>
+    </BaseModal>
 
     <!-- 消息历史区域 -->
     <div class="chat-messages" ref="messagesRef" @scroll="handleScroll">
@@ -487,24 +487,12 @@ watch(
   transform: translateY(-0.5rem);
 }
 
-/* ── 编辑单条消息的浮层（edit-overlay / edit-box …）──────── */
-
-.edit-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+/* ── 编辑单条消息的浮层（edit-box …）────────────────────────
+   遮罩（定位 / 主题化底色 / 层级）与面板底色、圆角、阴影均由 `BaseModal` 提供。 */
 
 .edit-box {
   width: min(34rem, 92vw);
-  background: var(--surface-overlay);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-2);
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
