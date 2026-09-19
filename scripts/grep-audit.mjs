@@ -27,19 +27,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { red, yellow, green } from './color.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
 const cwd = process.cwd()
 
 const STRICT = process.argv.includes('--strict')
-
-// ── 输出配色（非 TTY / NO_COLOR 时自动关闭，CI 日志保持纯净）──────────────
-const useColor = Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined
-const paint = (code) => (s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s)
-const red = paint('0;31')
-const yellow = paint('0;33')
-const green = paint('0;32')
 
 let errors = 0
 let warnings = 0

@@ -62,6 +62,12 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
+// 配色统一走 `color.mjs`。**不要**在这里自己写 `\x1b`：本脚本此前手写了一份，
+// 且把 `\x1b` 写丢了（`[31m` 少了 ESC）⇒ 终端与 CI 日志里显示的是**字面量**
+// `[31m` 而不是红色，而两个回归测试都设了 `NO_COLOR=1`，正好绕过这条分支，
+// 于是「守卫的输出坏了但守卫仍绿」。收成一份实现是唯一能根治这件事的办法。
+import { red, green, yellow, dim } from './color.mjs'
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRepo = path.resolve(scriptDir, '..')
 
@@ -71,12 +77,6 @@ function argValue(name) {
 }
 
 const REPO = argValue('repo') ? path.resolve(argValue('repo')) : defaultRepo
-
-const NO_COLOR = process.env.NO_COLOR === '1'
-const red = (s) => (NO_COLOR ? s : `[31m${s}[0m`)
-const green = (s) => (NO_COLOR ? s : `[32m${s}[0m`)
-const yellow = (s) => (NO_COLOR ? s : `[33m${s}[0m`)
-const dim = (s) => (NO_COLOR ? s : `[2m${s}[0m`)
 
 const OK = '✓'
 const BAD = '✗'

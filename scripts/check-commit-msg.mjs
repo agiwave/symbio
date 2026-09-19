@@ -23,16 +23,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { red, green, yellow } from './color.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
 
 const argv = process.argv.slice(2)
-const useColor = Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined
-const paint = (code) => (s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s)
-const red = paint('0;31')
-const green = paint('0;32')
-const yellow = paint('0;33')
 
 const TYPES = ['feat', 'fix', 'docs', 'refactor', 'chore', 'test', 'perf', 'style']
 const TITLE_RE = new RegExp(`^(${TYPES.join('|')})\\(([^)]+)\\):\\s*(.+)$`)

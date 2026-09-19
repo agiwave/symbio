@@ -23,6 +23,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { dim, cyan, yellow, green, bold } from './color.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
@@ -40,18 +41,8 @@ const EXCLUDED = /(^|[\/\\])(archive|node_modules|target|\.git|\.symbio)(\/|\\|$
 const MD_MAX_BYTES = 2 * 1024 * 1024
 const RS_MAX_BYTES = 1024 * 1024
 
-const useColor = process.stdout.isTTY && !process.env.NO_COLOR
-const paint = (code) => (s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s)
-const C = {
-  dim: paint('2'),
-  cyan: paint('0;36'),
-  yellow: paint('0;33'),
-  green: paint('0;32'),
-  bold: paint('1'),
-}
-
 if (!QUERY) {
-  console.error(C.yellow('用法：node scripts/doc-find.mjs <关键词> [--md|--rs] [--limit=N] [--context=N]'))
+  console.error(yellow('用法：node scripts/doc-find.mjs <关键词> [--md|--rs] [--limit=N] [--context=N]'))
   process.exit(2)
 }
 
@@ -120,7 +111,7 @@ for (const file of walk(repoRoot)) {
     const ctx = []
     if (CONTEXT > 0) {
       for (let k = Math.max(0, i - CONTEXT); k <= Math.min(lines.length - 1, i + CONTEXT); k++) {
-        if (k !== i) ctx.push(`${String(k + 1).padStart(4)}  ${C.dim(lines[k].trimEnd())}`)
+        if (k !== i) ctx.push(`${String(k + 1).padStart(4)}  ${dim(lines[k].trimEnd())}`)
       }
     }
     hits.push({ rel, line: i + 1, text: line.trimEnd(), ctx })
@@ -139,21 +130,21 @@ hits.sort((a, b) => {
 
 const shown = hits.slice(0, LIMIT)
 
-console.log(C.bold(`\n🔍 "${QUERY}" —— 扫过 ${scanned} 个 md / rs 文件，命中 ${hits.length} 处`))
+console.log(bold(`\n🔍 "${QUERY}" —— 扫过 ${scanned} 个 md / rs 文件，命中 ${hits.length} 处`))
 if (!shown.length) {
-  console.log(C.yellow('  无命中。试试更短的词，或去掉 --md / --rs 限制。'))
+  console.log(yellow('  无命中。试试更短的词，或去掉 --md / --rs 限制。'))
 } else {
   let lastFile = null
   for (const h of shown) {
     if (h.rel !== lastFile) {
-      console.log(`\n${C.cyan(h.rel)}`)
+      console.log(`\n${cyan(h.rel)}`)
       lastFile = h.rel
     }
-    console.log(`  ${C.dim(String(h.line).padStart(4))}  ${h.text.trimEnd()}`)
+    console.log(`  ${dim(String(h.line).padStart(4))}  ${h.text.trimEnd()}`)
     for (const c of h.ctx) console.log(`  ${c}`)
   }
   if (hits.length > shown.length) {
-    console.log(C.dim(`\n  … 还有 ${hits.length - shown.length} 处，加 --limit=${hits.length} 看全部`))
+    console.log(dim(`\n  … 还有 ${hits.length - shown.length} 处，加 --limit=${hits.length} 看全部`))
   }
 }
-console.log(C.green('\n提示：知识应写回文档，不要回流进记忆——搜到就顺手更新那一处。\n'))
+console.log(green('\n提示：知识应写回文档，不要回流进记忆——搜到就顺手更新那一处。\n'))

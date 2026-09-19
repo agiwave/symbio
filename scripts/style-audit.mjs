@@ -35,6 +35,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { paint } from './color.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(ROOT, 'tauri', 'src');
@@ -77,11 +78,11 @@ const ALLOW_UNUSED_SCOPED = new Map([
 ]);
 
 // ── 工具 ────────────────────────────────────────────────────────
-const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
-const c = (code, s) => (COLOR ? `\x1b[${code}m${s}\x1b[0m` : s);
-const red = c('31', 'ERROR');
-const yellow = c('33', 'WARN');
-const green = c('32', 'OK');
+// 配色走 `color.mjs`（唯一实现）。这里 `red` / `yellow` / `green` 是**预渲染的
+// 标签串**（'ERROR' / 'WARN' / 'OK' 带色），与本模块的 `paint(code)(s)` 同源。
+const red = paint('31')('ERROR');
+const yellow = paint('33')('WARN');
+const green = paint('32')('OK');
 const rel = (p) => path.relative(ROOT, p).split(path.sep).join('/');
 
 function walk(dir, exts, out = []) {
@@ -600,6 +601,6 @@ for (const e of errors) console.log(`  ${e}`);
 for (const w of warnings) console.log(`  ${w}`);
 
 console.log(
-  `\n${green}结果:${c(0, '')} ${errors.length} 个错误, ${warnings.length} 个警告`,
+  `\n${green}结果:${paint('0')('')} ${errors.length} 个错误, ${warnings.length} 个警告`,
 );
 process.exit(errors.length > 0 || (process.argv.includes('--strict') && warnings.length > 0) ? 1 : 0);

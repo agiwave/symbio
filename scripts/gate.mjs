@@ -68,6 +68,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
@@ -288,13 +289,7 @@ const only = onlyArg ? onlyArg.slice(7).split(',').map((s) => s.trim()) : null
 const skip = skipArg ? skipArg.slice(7).split(',').map((s) => s.trim()) : []
 
 // ── 输出 ───────────────────────────────────────────────────────────────
-const useColor = Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined
-const paint = (code) => (s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s)
-const red = paint('0;31')
-const green = paint('0;32')
-const yellow = paint('0;33')
-const dim = paint('2')
-const bold = paint('1')
+// 配色与 `stripAnsi` 都来自 `color.mjs`（唯一实现）。
 
 const enabled = (id) => (only ? only.includes(id) : true) && !skip.includes(id)
 
@@ -428,10 +423,6 @@ function blockedBySandboxDelete(output) {
 function slug(s) {
   return s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'step'
 }
-
-/** ANSI 转义序列（子进程带颜色输出时，正则会被转义码打断，必须先剥离） */
-const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g
-const stripAnsi = (s) => s.replace(ANSI_RE, '')
 
 /** 从输出里抓一个整数（第一个捕获组） */
 function grabInt(output, re) {
@@ -658,6 +649,12 @@ async function stageDocs() {
     // 故按同一条教条：先把它的回归测试跑起来（注入真实违规断言变红），
     // 再把脚本本身当门禁——否则「规则写错所以永远不命中」没人会发现。
     'dead-code-audit',
+    // `color` 不是审计脚本而是**共享库**（`scripts/color.mjs`），但它带一道守卫：
+    // 「`scripts/` 下除它自己外不得手写 ANSI 转义」。这道守卫值得跑——配色样板曾
+    // 在 6 个脚本里逐字复制，其中 `protocol-mirror-audit` 那份把 `\x1b` 写丢，
+    // 而它的回归测试都设 `NO_COLOR=1`，正好绕过坏掉的分支 ⇒ 谁也没发现。
+    // 故它在下面那个"审计脚本"循环里**没有**对应项，只跑回归测试。
+    'color',
   ]) {
     const t = await run({
       label: `${name} 回归测试`,

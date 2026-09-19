@@ -18,6 +18,69 @@
 
 ***
 
+## 2026-09-20: 配色收口 —— 9 份实现收成 1 份，并修掉守卫自己看不见的那个坏分支
+
+### 1. 事故：守卫的输出坏了，但守卫仍绿
+
+`protocol-mirror-audit.mjs` 手写了一份配色，把 `\x1b` 写丢了：
+
+```js
+const red = (s) => (NO_COLOR ? s : `[31m${s}[0m`)   // ← 少了 \x1b
+```
+
+终端与 CI 日志里显示的是**字面量** `[31m` / `[32m`，而不是红色/绿色。更麻烦的是
+**它自己看不见**：该脚本的两个回归测试都设了 `NO_COLOR=1`，走的正好是**不上色**那条
+分支 ⇒ 坏掉的分支永远不被执行。这类「守卫自己的输出坏了但守卫仍绿」靠加测试是防不住
+的（测试跟着实现一起错），只有把实现收成一份才能根治。
+
+顺带它还有个更实际的影响：它**不看 `isTTY`**（只判 `NO_COLOR === '1'`），所以被
+`gate.mjs` spawn（stdout 是管道）时照样吐转义码，污染门禁日志。
+
+### 2. 收口：新增 `scripts/color.mjs`
+
+同一段样板此前在 **6 个脚本**里逐字复制（`check-commit-msg` / `gate` / `grep-audit` /
+`mechanism-audit` / `plugin-entry-audit` / `test-layout-audit`），另有 2 个写法各异的
+变体（`doc-find` 的对象表、`style-audit` 的预渲染标签）。现全部改为
+`import { red, green, yellow, dim, bold, paint, stripAnsi } from './color.mjs'`。
+
+两条规则写在模块里（不再靠各处自觉）：
+
+- **非 TTY 一律不上色**。输出被管道接走时（`| tail`、CI 日志、被 `gate.mjs` spawn）
+  `isTTY` 为假。这不只是好看：`gate.mjs` 要用正则从子进程输出里抓数字，转义码会把
+  正则**打断**——`stripAnsi` 也因此一并收进模块。
+- **`NO_COLOR` 非空即关闭**（no-color.org 规定：存在且非空，不论取值）。此前 6 份
+  写的是 `=== undefined`，把空串也算成"已设置"；`doc-find` / `style-audit` 写的才是
+  对的。收口后统一为规范写法。
+
+### 3. 守卫：不许再手写转义
+
+`scripts/color.test.mjs`（新增，**8 条**）既测模块本身，也守 `scripts/`：
+
+- 模块在 **TTY / 非 TTY × NO_COLOR 有 / 无** 四种组合下的行为——特别是**上色那条
+  分支**（旧测试从没跑过它）；
+- `scripts/` 下除 `color.mjs` 外**不得手写 ANSI 转义**。三种写法都算违规：真 ESC、
+  `\x1b` 文本、以及**原始事故那种漏了 ESC 的 `[31m`**——第三种不含 `\x1b`，只有
+  专门的 SGR 形状规则能抓到它，故单列一条并配自测。
+
+已接进 `gate.mjs` 的 docs 阶段（回归测试循环）。它在"审计脚本"循环里**没有**对应项
+——`color.mjs` 是库不是工具。
+
+### 4. 更正一条此前的错误记录
+
+上一条 CHANGELOG 曾记「审计脚本的颜色标记**普遍**缺 `\x1b`」并点名 4 个脚本。**那个
+判断是错的**：那 4 个脚本转义齐全，输出里没有 ANSI 只是因为在管道里**正确地关了色**。
+真正的缺陷只有 `protocol-mirror-audit.mjs` 一处。已就地更正。
+
+### 验证
+
+- `color.test.mjs`：**8/8**（含"漏 ESC 的写法必须被检出"的自测）
+- 端到端：强制 `isTTY=true` 跑 `protocol-mirror-audit` → **130 处真 ESC / 0 处字面量
+  `[31m`**（修复前正好相反）
+- `gate.mjs --only=docs,facts`：全通过
+- 9 个迁移脚本逐个冒烟：退出码全 0
+
+***
+
 ## 2026-09-20: 跨栈守卫 D 组覆盖面扩展（9 → 23 对）
 
 承接上一条（D 组上线，9 对），把**前端逐字段镜像了整套形状**的两批契约纳入守卫。
@@ -216,9 +279,12 @@ exit=0**。
 `protocol-mirror-audit.mjs` 的 `✓` / `✗` 曾被编码事故替换成 `?`——红绿都显示 `?`，
 NO_COLOR 下完全无从区分。已修。
 
-（另记一条**未修**的：审计脚本的颜色标记普遍缺 `\x1b`，终端里显示成字面的
-`[31m` / `[32m`。实测 `grep-audit` / `mechanism-audit` / `style-audit` /
-`dead-code-audit` 的输出中不含任何 ANSI 转义。属另一批次。）
+（此处原记「审计脚本的颜色标记**普遍**缺 `\x1b`」并点名 `grep-audit` /
+`mechanism-audit` / `style-audit` / `dead-code-audit`——**那个判断是错的**，已更正。
+实测那 4 个脚本的转义是齐的；它们的输出里之所以"不含 ANSI 转义"，是因为**被管道
+接走**（`| tail`）时 `isTTY` 为假，脚本**正确地关闭了配色**。真正坏掉的只有
+`protocol-mirror-audit.mjs` 一个——它只判 `NO_COLOR === '1'`，不看 `isTTY`。
+见下条「配色收口」。）
 
 ### 验证
 
