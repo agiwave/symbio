@@ -361,22 +361,46 @@ lint 和覆盖率该有。以上没有一项是「推倒重来」，全是收敛
 | 12 | ESLint | ✅ | 只做 `no-restricted-imports` 分层 + `vue/no-mutating-props`；修掉 `VdfsActions` 函数与 prop 同名 |
 | 13 | 组件清理 | 部分 | `.node-act` 双份 → 全局 `controls.css`；`provide/inject('resume')` → 类型化 `RESUME_KEY`；`typeClass/statusClass` 判定为不值得抽 |
 
-### 11 为什么没做（以及为什么不是写一条文档例外）
+### 11 的处理：不写文档例外，改成**机械校验的镜像**
 
 `VDFS_SESSION_DIR='session'` / `VDFS_SEG_MESSAGES='消息'` 仍在 `schemas/vdfs.ts`。
-查证结果：**前端无法单方面消除它**。
+查证后端后的准确结论（**已更正本文件早期版本的一处事实错误**）：
 
-- 段名定义在后端 `symbio/src/plugins/session/plugin/nodes.rs:288`（`SEG_MESSAGES = "消息"`）；
-- 目录节点 `VdfsNode::dir(SEG_MESSAGES, SEG_MESSAGES, …)` **kind 与 name 同名** ⇒
-  前端无论按 name 还是按 kind 去「发现」，都绕不开同一个字面量；
-- 会话叶子节点（`nodes.rs:134-149`）只挂 `message_count` / `metadata` / `meta_tags` /
-  `outcome` / `error`，**不下发任何转写地址**。
+- 挂载段名定义在后端 `symbio/src/symbio_core/ids.rs:40`（`PLUGIN_SESSION = "session"`）；
+  转写段名在 `symbio/src/plugins/session/plugin/nodes.rs:288`（`SEG_MESSAGES = "消息"`）。
+  两侧**各只有一个定义点**，前端是它们的镜像。
+- 早期版本称「消息目录节点的 kind 与 name 同名」——**错误**。`VdfsNode::dir(name,
+  title, access)`（`vdfs_provider.rs:516`）的第二个参数是 **title**，kind 恒为
+  `VDFS_KIND_DIR`。消息目录是 `name="消息"` / `title="消息"` / `kind="dir"`，
+  与 `子会话` / `工作目录` 无法按 kind 区分。
+- kind 是**场景可自定义**的（会话叶子就是 `n.kind = PLUGIN_SESSION`，`nodes.rs:136`），
+  所以给消息目录一个稳定的 ASCII kind 有现成先例，代价是后端一行 + 协议新增一个词。
+- 会话叶子只挂 `message_count` / `metadata` / `meta_tags` / `outcome` / `error`，
+  **不下发转写地址**。
 
-所以「改成运行期数据」在纯前端侧不成立。真正能踢掉它的是后端把地址作为数据下发
-（如会话节点增挂 `transcript_addr`，或给消息目录一个稳定的 ASCII kind），
-那是跨栈改动（Rust + 协议 + 732 条后端基线），不在本轮范围内。
-按「例外要踢出代码、不要写进文档」的原则，§8 的例外条款**没有写**——宁可让它
-继续作为一处已知不一致，也不把它合法化。
+为什么**没有**改成运行期发现：地址构造函数目前是**同步纯函数**，`sessionRouteOf`
+更是事件分派的关键路径。改成「先列目录、拿到段名再拼地址」会引入一个今天不存在的
+失效模式（引导未完成时事件被静默丢弃），换来的是少两个字符串常量——不划算。
+
+因此改为**把「两边必须同源」从散文变成可执行检查**：新增
+`scripts/protocol-mirror-audit.mjs`，校验四组跨栈常量（挂载段、转写段、
+`VDFS_EXT_SESSION`、`VDFS_EXT_MESSAGE`）后端与前端**逐字相等**，任一侧改值/删除
+即以退出码 1 失败；已接入 `gate.mjs` 的 docs 阶段，并附 6 条回归测试
+（含「真仓库当前状态一致」防误报）。
+
+按「例外要踢出代码、不要写进文档」的原则，§8 **未添加任何例外条款**。若后续要做
+真正的消除，起点是后端给消息目录一个稳定的 ASCII kind（先例如上），前端改为
+按 `kind` 发现——那时应同时删掉本守卫的 X-002 组。
+
+#### X-001 的真实可行性（补记）
+
+会话挂载点**今天就可发现**、无需改后端：composite 的 `dir_node()`
+（`plugins/composite/vdfs.rs:185`）把 `p.root_new_types()` 挂到了挂载点节点上，
+会话 provider 声明的是 `VdfsNewType::new(VDFS_EXT_SESSION, "会话")`。
+前端 VdfsNode 已有 `new_types` 字段 ⇒ 列 `.vdfs` 根、找 `new_types` 含
+`ext === 'session'` 的子节点，其 `name` 即挂载段。左栏本来就是 `listVdfs`
+动态枚举的（`useVdfs.ts:144`），所以 `VDFS_SESSION_DIR` 是**唯一的例外**。
+未做的理由同上：收益是少一个常量，代价是给地址构造加一条引导链。
 
 ### 更正本文件上一节的判断
 

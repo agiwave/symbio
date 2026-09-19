@@ -558,7 +558,12 @@ async function stageDocs() {
   // 判定型守卫的**回归测试**必须先跑：一个只会亮绿灯的守卫等于没有守卫，
   // 而它腐烂的方式恰恰是「规则写错了所以永远不命中」——只有注入真实违规
   // 并断言脚本变红，才能把「通过」和「没在工作」区分开。
-  for (const name of ['grep-audit', 'mechanism-audit', 'plugin-entry-audit']) {
+  for (const name of [
+    'grep-audit',
+    'mechanism-audit',
+    'plugin-entry-audit',
+    'protocol-mirror-audit',
+  ]) {
     const t = await run({
       label: `${name} 回归测试`,
       cmd: process.execPath,
@@ -579,6 +584,7 @@ async function stageDocs() {
     'doc-link-audit',
     'test-layout-audit',
     'dead-code-audit',
+    'protocol-mirror-audit',
   ]) {
     const r = await run({
       label: `scripts/${name}.mjs`,
