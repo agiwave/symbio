@@ -35,7 +35,7 @@
 //! - 虚拟层拓扑（容器聚合 + 注册为根）：`plugins/composite/vdfs.rs`
 
 mod fs;
-mod host;
+pub mod host;
 mod physical;
 mod plugin;
 mod protocol;

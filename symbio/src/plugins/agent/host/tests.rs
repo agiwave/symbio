@@ -352,7 +352,9 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     // 1) 穿过挂载点：返回的是子 composite 视图（名字是资源入口，且路径带挂载段
     //    `reviewer`），而不是裸目录（`AGENTS.md` / `manifest.yaml` / `skill` 目录）。
     assert!(
-        names.iter().any(|n| matches!(*n, "session" | "mcp" | "skill" | "setting" | "agent")),
+        names
+            .iter()
+            .any(|n| matches!(*n, "session" | "mcp" | "skill" | "setting" | "agent")),
         "子根应经子 composite 列出可见资源入口，实际：{names:?}"
     );
     assert!(
@@ -440,4 +442,122 @@ async fn traverse_declares_config_and_instruction_in_settings() {
     assert_eq!(instr.path, "agent/AGENTS.md");
     assert_eq!(instr.title, "全局指令");
     assert_eq!(instr.ext.as_deref(), Some("md"));
+}
+/// 子智能体挂载点穿越必须**九操作一致**：`agent/<id>/…` 下的每个操作都交给子
+/// composite，而不是「list / stat / delete 穿了，read / write 没穿」。
+///
+/// 这是 `read` / `write` 绕过挂载点的回归钉：绕过时 `read` 会去读裸 agent 目录里
+/// 的同名物理文件（对只在虚拟视图里存在的路径必然 NotFound），`write` 会**报成功
+/// 却把文件撒进智能体包**。
+///
+/// 断言用的是**数据落点**而不是「有没有报错」：`work` 挂载点在子树里读/写的是父
+/// 会话工作区的记忆文件——看得见落点，才分得清「写了哪儿」。
+#[tokio::test]
+async fn sub_agent_mount_crossing_is_uniform_across_operations() {
+    use crate::symbio_core::vdfs_provider::VdfsError;
+    use crate::symbio_core::{PluginDir, PLUGIN_AGENT, PLUGIN_DIR};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let agent_root = tmp.path().join("agent");
+    let sub = agent_root.join("reviewer");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        sub.join("manifest.yaml"),
+        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
+    )
+    .unwrap();
+    std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
+    // 父会话的工作区记忆：子树 `work` 挂载点读写的就是它
+    std::fs::write(tmp.path().join("AGENTS.md"), "工作区记忆内容").unwrap();
+
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
+    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_AGENT));
+    ctx.set(AGENT_ID, "reviewer".to_string());
+    ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
+    let vctx = vdfs::vdfs_context(&ctx);
+
+    // 物理落点（= 绕过挂载点时会写进去的那个目录）
+    let physical = agent_root.join("reviewer").join("work").join("AGENTS.md");
+
+    // ① list：列出的是子 composite 的可见入口，路径是**树内相对**（不含根名）
+    let listed = plugin.list(&vctx, "reviewer").await.unwrap();
+    assert!(
+                !listed.is_empty() && listed.iter().all(|n| !n.path.contains(crate::plugins::vdfs::host::VDFS_ADDR_ROOT)),
+        "子根清单应为树内相对路径（根名只在 UnifiedFs 出口补），实际：{:?}",
+        listed.iter().map(|n| &n.path).collect::<Vec<_>>()
+    );
+
+    // ② stat / ③ list（子路径）：两者都穿过挂载点
+    plugin.stat(&vctx, "reviewer/work").await.unwrap();
+    plugin.list(&vctx, "reviewer/work").await.unwrap();
+
+    // ④ read：读到的是**子树 provider 的数据**（工作区记忆），不是裸目录里的文件
+    let c = plugin.read(&vctx, "reviewer/work/AGENTS.md").await.unwrap();
+    assert_eq!(
+        c.text.as_deref(),
+        Some("工作区记忆内容"),
+        "read 必须穿过挂载点（读到 work 挂载点的数据），实际：{c:?}"
+    );
+    assert_eq!(c.path, "reviewer/work/AGENTS.md", "路径回填为树内相对地址");
+
+    // ⑤ write：写进子树 provider（工作区记忆），**不得**落进智能体包
+    plugin
+        .write(
+            &vctx,
+            "reviewer/work/AGENTS.md",
+            &crate::symbio_core::vdfs_provider::VdfsContent::text(
+                "reviewer/work/AGENTS.md",
+                "改过的记忆",
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap(),
+        "改过的记忆",
+        "写入应交给子树的 work 挂载点"
+    );
+    assert!(
+        !physical.exists(),
+        "写入不得绕过挂载点落到裸 agent 目录：{}",
+        physical.display()
+    );
+
+    // ⑥ delete：同样穿过挂载点 —— `work` 的记忆不可删除，这条**拒绝**来自子树 provider
+    // （绕过挂载点时会是另一套错误：物理路径不存在）
+    let err = plugin
+        .delete(&vctx, "reviewer/work/AGENTS.md", false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, VdfsError::Forbidden(_)),
+        "删除应交给子树 provider 裁决（记忆不可删除），实际：{err:?}"
+    );
+
+    // ⑦ mkdir：可挂载子树内的新建交给子树裁决。子树里的 provider 目前都不支持在
+    // 自己根下造目录（`NotImplemented`），因此这里**不断言成败**——只钉住外部可观测的
+    // 一点：它不得绕过挂载点、把目录造进裸 agent 目录。
+    let mkdir_on_mount = plugin.mkdir(&vctx, "reviewer/skill/new-dir").await;
+    assert!(
+        !agent_root
+            .join("reviewer")
+            .join("skill")
+            .join("new-dir")
+            .exists(),
+        "mkdir 不得绕过挂载点落到裸 agent 目录，实际：{mkdir_on_mount:?}"
+    );
+    // ⑧ move_item：跨挂载点的判据同样按前缀——不同 `<id>` 之间明确拒绝
+    let cross = plugin
+        .move_item(&vctx, "reviewer/work/a.md", "other/work/a.md")
+        .await;
+    assert!(
+        matches!(cross, Err(VdfsError::Invalid(_))),
+        "跨子智能体移动应被拒，实际：{cross:?}"
+    );
+    // ⑨ 九操作一致性的**判据**收在一处：`sub_vfs` 唯一决定「是否穿过挂载点」，
+    // 各操作只负责把结果交回去——本测试覆盖了 list / stat / read / write / delete 的
+    // 数据落点，以及 mkdir / move 的越界防护（这两者在子树里目前无 provider 实现，
+    // 外部表现与未委托时相同，故只能钉住「不得落到裸目录」）。
 }

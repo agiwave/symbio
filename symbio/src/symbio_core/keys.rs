@@ -175,7 +175,7 @@ pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 
 /// 根（系统）Agent 挂载的**完整**插件清单 —— 父子的唯一真相源（机制级常量）。
 ///
-/// 子 Agent 子树复用 [`SUB_AGENT_PLUGINS`]（本清单去掉系统级单槽 `model` / `vdfs`）。
+/// 子 Agent 子树复用 [`SUB_AGENT_PLUGINS`]（本清单只多一个系统级单槽 `vdfs`）。
 /// 两处都集中在 `symbio_core`，改一处即父子一致，杜绝「两套清单」漂移。
 pub const SYSTEM_AGENT_PLUGINS: &[&str] = &[
     "setting",
@@ -201,14 +201,19 @@ pub const SYSTEM_AGENT_PLUGINS: &[&str] = &[
 /// 作为 `symbio_core` 的唯一真相源；[`SYSTEM_AGENT_PLUGINS`] 直接复用其超集，
 /// 改一处即父子一致。
 ///
-/// ## 与 [`SYSTEM_AGENT_PLUGINS`] 的关系：只差两个系统级单槽
+/// ## 与 [`SYSTEM_AGENT_PLUGINS`] 的关系：只差一个系统级单槽
 ///
-/// 本清单 = 系统完整清单去掉 `model` 与 `vdfs`：
+/// 本清单 = 系统完整清单去掉 `vdfs`：
 ///
 /// - `vdfs`（VDFS 根）是**单槽**注册，归系统 Agent 独占。
 ///   子树里的对应注册经 [`crate::plugins::agent::host::scope::SubAgentVisitor`]
 ///   丢弃（见其模块文档）；若在此列出，只会构造出无挂载点的空实例——既不生效、
 ///   又徒增开销。故子树不重复挂。
+/// - `model` **在列**：子智能体有自己的模型服务——子树会话收集能力时以**子容器**
+///   为 parent（`collect_capabilities(sub_composite, …)`），子树 `model` 实例
+///   注册进**该次收集自己的**管理器，因此子会话用子智能体自己解析的模型。
+///   父（系统）会话收集期，子树的 `model` 注册才经 `SubAgentVisitor` **丢弃**
+///   （单槽，防子树模型劫持父会话——见 scope 模块文档）。
 /// - 其余插件（含 `agent` 自身、`setting`、`work`）都在列：子树因此与父树**结构相同**，
 ///   前端看到的资源入口（含设置入口）与父 Agent 对齐。
 ///
@@ -217,18 +222,18 @@ pub const SYSTEM_AGENT_PLUGINS: &[&str] = &[
 /// 本常量被 `plugins/agent` 的 `sub_agent` 用于构造**每一棵**子树。若某天子 Agent
 /// 也能在其目录内再挂子 Agent（`<id>/agent/<sub-id>` 递归），同一常量 + 同一套构造
 /// 逻辑自动套用——不存在「支持子 Agent 却不支持子 Agent 的子 Agent」的特例：任何一层
-/// 都走同一条机制，且都同样只跳过 `model` / `vdfs` 两个单槽（单槽归系统 Agent，由
+/// 都走同一条机制，且都同样只跳过 `vdfs` 单槽（单槽归系统 Agent，由
 /// `SubAgentVisitor` 在每一层丢弃）。
 pub const SUB_AGENT_PLUGINS: &[&str] = &[
     "setting",   // 设置入口（子 Agent 页同样需要）
     "event_bus", // 事件总线
     "session",   // 会话
-    "model",     // 模型服务
+    "model",     // 模型服务（子智能体自己的模型；子树会话自行解析）
     "local",     // 本地文件
     "web",       // 网络访问
     "mcp",       // 工具
     "telegram",  // 消息渠道
-    "hook",       // 钩子
+    "hook",      // 钩子
     "agent",     // 智能体（含子子 Agent —— 分形）
     "skill",     // 技能
     "gateway",   // 外部 API 网关

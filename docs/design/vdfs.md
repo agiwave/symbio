@@ -465,6 +465,13 @@ async fn register_vdfs_root(&self, provider: Arc<dyn VdfsProvider>);
 async fn get_vdfs_root(&self) -> Option<Arc<dyn VdfsProvider>>;
 ```
 
+> 消费现状（写清楚，防误判）：当前 `vdfs_*` 工具取根**只消费根单槽**
+> （`get_vdfs_root` → `UnifiedFs` 整棵组合视图）；**按名注册的挂载清单**
+> （`list_vdfs_providers` / `get_vdfs_provider`）暂无消费方——它是 **LLM
+> 可控挂载机制的预留面**（子智能体经 `SubAgentVisitor` 在此加 `agent/<id>/`
+> 作用域前缀；将来按作用域 / 白名单裁剪 LLM 可见资源时，消费方接在这组接口上）。
+> **不是死代码，不要删除。**
+
 **系统 / 前端链路**——core trait `Plugin`（默认 `None`，资源插件返回 `Some(self)`）：
 
 ```rust

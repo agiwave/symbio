@@ -42,8 +42,8 @@ use tokio::sync::RwLock;
 ///
 /// 直接复用 `symbio_core` 的机制级常量 [`crate::symbio_core::SYSTEM_AGENT_PLUGINS`]
 /// （根 = 子 Agent 默认集 [`crate::symbio_core::SUB_AGENT_PLUGINS`] + 系统级单槽
-/// `model` / `vdfs`）。根比子树多这两个单槽，因为它们由根独占、子树经
-/// `SubAgentVisitor` 丢弃——父子因此「结构一致、能力对齐」，且改一处即同步。
+/// `vdfs`）。根比子树只多这一个单槽（VDFS 根由根独占，子树经 `SubAgentVisitor`
+/// 丢弃）——父子因此「结构一致、能力对齐」，且改一处即同步。
 pub const SYSTEM_PLUGINS: &[&str] = crate::symbio_core::SYSTEM_AGENT_PLUGINS;
 
 /// Home 自己的插件目录 = **系统根** `<homedir>`

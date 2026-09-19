@@ -172,7 +172,10 @@ const BASELINE = {
   //   新测试：vdfs.rs 2 例（多段名最长前缀命中 + 父地址=完整挂载点；根清单原样
   //   呈现多段名）、composite.rs 3 例（route / traverse 转发链逐级续接、顶层落到
   //   声明根——探针插件断言，根名无关）。
-  rustTests: 793,
+  // 793 → 794：子智能体挂载点穿越九操作一致——read / write 改为经子 composite
+  //   视图（此前 list / stat / delete 穿了、read / write 落到裸 agent 目录），
+  //   新增数据落点回归（列 / 统计 / 读 / 写 / 删 / 建 / 移 + 跨挂载点拒移）。
+  rustTests: 794,
   vitestFiles: 31,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态

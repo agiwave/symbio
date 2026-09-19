@@ -22,7 +22,11 @@ use tokio::sync::RwLock;
 /// - `provider`：当前生效的模型服务（单槽；model 插件按上下文解析出
 ///   唯一生效 Provider 后注册，重复注册覆盖）
 /// - `system_prompts`：系统提示词（按名称保序；**全部**送达模型，不做竞争）
-/// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）
+/// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）。
+///   这是 **LLM 可控挂载机制**的清单（子智能体经 `SubAgentVisitor` 在此加
+///   `agent/<id>/` 作用域前缀，预留按作用域 / 白名单裁剪 LLM 可见资源）；
+///   前端 / 系统链路**不经过它**（走 `Plugin::get_vfs_provider`）。当前
+///   `vdfs_*` 工具取根走 `vdfs_root` 单槽，本清单暂无消费方——**预留，勿删**。
 /// - `vdfs_root`：VDFS 根 provider（单槽；组合容器注册，访问层据此转发）
 pub struct DefaultToolVisitor {
     tools: Arc<RwLock<HashMap<String, Arc<dyn Capability>>>>,

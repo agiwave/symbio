@@ -253,7 +253,7 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
 
     // ==================== VDFS provider（统一文件系统） ====================
 
-    /// 注册一个 VDFS provider。
+    /// 注册一个 VDFS provider（**LLM 可控挂载机制**的注册面）。
     ///
     /// `name` 是**使用方选定的目录名**（组合根下的一级目录名，宿主机内唯一）——
     /// 约定用插件名（`PLUGIN_*` 常量），因为插件名天然唯一。provider 自身**不知道**
@@ -262,6 +262,16 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     /// 与工具 / 模型服务 / 系统提示词**共用同一次 `traverse` 广播**：插件在
     /// `TRAVERSE_AVAILABLE_TOOLS` 分支里注册工具的同时顺带注册 provider，
     /// 会话链路（LLM 工具调用）与前端链路因此拿到同一份集合（含同一批目录名）。
+    ///
+    /// ## 定位：这是「暴露给 LLM 的资源」的可控入口
+    ///
+    /// 前端 / 系统链路经 [`crate::symbio_core::Plugin::get_vfs_provider`] 直接
+    /// 查询（容器聚合），**不经过本通道**；本通道（含 [`Self::list_vdfs_providers`]
+    /// / [`Self::get_vdfs_provider`]）是 **LLM 侧按名可控的挂载清单**——子智能体的
+    /// 注册经 `SubAgentVisitor` 在这里加 `agent/<id>/` 前缀（作用域），将来给 LLM
+    /// 按作用域 / 白名单裁剪可见资源时，消费方接在这组接口上。
+    /// ⚠️ 当前 `vdfs_*` 工具取根走的是根单槽（[`Self::register_vdfs_root`]）；
+    /// 本组接口暂无消费方**不是死代码**，是预留的可控机制——不要删除。
     ///
     /// 默认 no-op —— 不提供资源的实现方无需关心。
     async fn register_vdfs_provider(

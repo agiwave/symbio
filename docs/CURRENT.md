@@ -31,8 +31,11 @@
 | `work` | `work` | <根>/work | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
 
 > 读表须知：
-> - **挂载点** = 该插件在 `traverse` 里 `register_vdfs_provider(目录名, provider)` 的目录名；
->   容器（`composite`）按子插件注册名合成目录树，其自身挂载点是运行期动态。
+> - **挂载点** = 该插件目录名（容器实例表的挂载名，`目录名 = 实例名`）；
+>   插件经 `Plugin::get_vfs_provider` 把自己的视图交给容器（**系统 / 前端链路**，
+>   容器聚合）；**LLM 链路**另经 `CapabilityVisitor::register_vdfs_provider(目录名, provider)`
+>   按名注册（可控挂载机制，预留按作用域裁剪），两条通道目录名同一份。
+>   容器（`composite`）自身即 `<根>` 的服务者，其挂载点是运行期动态。
 >   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。
 > - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，
 >   容器已剥掉首段，故此处补回**插件目录名**——容器按目录名建实例表并按它分发，
@@ -97,7 +100,7 @@
 |---|---|---|
 | 资源型插件条目（agent / model / mcp / skill / setting …） | `<homedir>/<类别>/<id>/<主文件>` | `providers/vdfs_service/` 三型：`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs` |
 | 会话与其消息 | `<homedir>/session/<id>/{session.json,messages.json}` | **单一具体类型** `SessionStore`（持久=磁盘布局 / 临时=进程内驻留）。曾有 `store_kind` × file/sqlite/memory 三后端选型，**已删除** |
-| Agent 目录 | agent 目录（工作区级 + 全局级双层） | `AgentDirStore` 自管，不经 `vdfs_service` |
+| Agent 目录 | `agent/<id>`（工作区级 + 全局级双层） | `AgentDirStore` 自管，不经 `vdfs_service`；虚拟视图以 `<vdfs_root>/agent/<id>` 进入 |
 | 插件配置（含会话配置） | `<homedir>/plugins/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `ConfigFile` 自读写，**无第二种后端、无第二条配置协议** |
 
 ## 5. 规模与宿主接缝
@@ -106,7 +109,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio\src` | 198 文件 / 49280 行 | 53 文件 / 18785 行 |
+| `symbio\src` | 198 文件 / 49589 行 | 53 文件 / 18937 行 |
 | `cli\src` | 4 文件 / 1067 行 | 0 文件 / 78 行 |
 | `tauri\src-tauri\src` | 3 文件 / 347 行 | 0 文件 / 0 行 |
 | `tauri\src` | 93 文件 / 18764 行 | 44 文件 / 8292 行 |
@@ -120,4 +123,4 @@
 
 ---
 
-> 生成时间：2026-09-19 06:38:19 UTC · 源：`git rev-parse HEAD` = `824a17c`
+> 生成时间：2026-09-19 14:01:25 UTC · 源：`git rev-parse HEAD` = `3c20c72`

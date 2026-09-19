@@ -218,9 +218,7 @@ impl AgentDirStore {
 
         // ── 3. zip-slip 防护 + 解压落盘 ──
         // 规范化每个 entry 的路径，必须仍位于 dest 内（拒绝 `..` 与绝对路径）。
-        let canonical_dest = dest
-            .canonicalize()
-            .unwrap_or_else(|_| dest.clone());
+        let canonical_dest = dest.canonicalize().unwrap_or_else(|_| dest.clone());
         std::fs::create_dir_all(&dest).map_err(|e| format!("创建目录失败: {e}"))?;
         for i in 0..archive.len() {
             let mut file = archive

@@ -30,7 +30,7 @@
 ### 子 Agent 的默认插件清单
 
 子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::SUB_AGENT_PLUGINS`）——即系统
-全套插件去掉系统级单槽 `model` / `vfs`，其余（`setting`、`event_bus`、`session`、`local`、
+全套插件去掉系统级单槽 `vdfs`，其余（`setting`、`event_bus`、`session`、`model`、`local`、
 `web`、`mcp`、`telegram`、`hook`、`agent`、`skill`、`gateway`、`work`）全部与父树一致。
 
 - `work` 在其中：子树 `WORKDIR` **继承父会话**（不再覆写成 Agent 目录），所以 `work` 注入的是
@@ -38,7 +38,10 @@
 - `setting` 在其中：`SubAgentVisitor` 把它前缀到 `agent/<id>/setting`，子 Agent 页因此有了
   设置入口，与父 Agent 对齐。
 - `agent` 在其中：子 Agent 也能在其目录内再挂子 Agent（`<id>/agent/<sub-id>` 递归）——分形。
-- `model` / `vfs` 不在其中：二者是系统级单槽，归系统 Agent 独占，子树经 `SubAgentVisitor`
+- `model` 在其中：子智能体有自己的模型服务。子树会话收集能力时以**子容器**为 parent，
+  子树 `model` 实例注册进该次收集自己的管理器——子会话用子智能体自己解析的模型；
+  父会话收集期，这个注册才被 `SubAgentVisitor` 丢弃（单槽，防子树模型劫持父会话）。
+- `vdfs` 不在其中：VDFS 根是系统级单槽，归系统 Agent 独占，子树经 `SubAgentVisitor`
   丢弃对应注册；列在子树里只会构造出无挂载点的空实例。
 
 > 历史注：v2 早期宿主把子树 `WORKDIR` 覆写成 Agent 目录，导致 `work` 与系统侧注入同一份

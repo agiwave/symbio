@@ -142,7 +142,7 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 ///
 /// 所以判据不是「每种删除各配一个值」，而是**「`deleted` 在该地址上仍有歧义的，
 /// 才配自己的值」**——`truncated` 是这种情况，清空不是。会话 provider 的清空
-/// 因此发的是落在 `<id>/消息` 上的 `deleted`（见 `SessionPlugin::
+/// 因此发的是落在 `<条目 id>/消息` 上的 `deleted`（见 `SessionPlugin::
 /// emit_transcript_cleared`）。
 ///
 /// 那为什么后两者仍不做成 `delete`？因为 `delete` 的语义是**逐节点**的：拿它

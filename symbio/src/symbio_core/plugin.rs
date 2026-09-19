@@ -1,7 +1,7 @@
 //! 插件核心 Trait（上下文注入版）
 
-use crate::symbio_core::SymbioKey;
 use crate::symbio_core::vdfs_provider::VdfsProvider;
+use crate::symbio_core::SymbioKey;
 use crate::symbio_core::{lock_read, lock_write, InvokeResponse, PluginPayload};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

@@ -464,7 +464,7 @@ mod tests {
     use super::*;
     use crate::symbio_core::vdfs::vdfs_context;
     use crate::symbio_core::{
-        CAPABILITY_VISITOR, InvokeRequest, PluginError, PluginMeta, PluginPayload, SimpleRequest,
+        InvokeRequest, PluginError, PluginMeta, PluginPayload, SimpleRequest, CAPABILITY_VISITOR,
     };
 
     /// 只暴露一个 `a.txt` 的 provider；标签 / 顺序 / 隐藏可配，便于断言归属

@@ -86,10 +86,25 @@ function stripComments(txt) {
       p = end + 1;
       continue;
     }
-    out += c;
+        out += c;
   }
   return out;
 }
+
+const VDFS_FS_FILE = path.join(PLUGINS_DIR, "vdfs", "fs.rs");
+
+/**
+ * 从 `pub const NAME: &str = "VALUE"` 提取字面量。
+ * 用于生成器**不手写**事实（如 VDFS 根名），保持 CURRENT.md 与真相单源。
+ * 输出到文档时替换为 `<vdfs_root>` 占位（见 S-010：根名字面量只归 vdfs 插件）。
+ */
+function vdfsAddrRoot() {
+  const src = readFileSync(VDFS_FS_FILE, "utf8");
+  const m = src.match(/pub const VDFS_ADDR_ROOT:\s*&str\s*=\s*"([^"]+)"/);
+  if (!m) throw new Error("cannot extract VDFS_ADDR_ROOT from plugins/vdfs/fs.rs");
+  return m[1];
+}
+
 
 /**
  * 去掉 `#[cfg(test)]` 测试模块（`#[cfg(test)] mod tests { … }`）。
@@ -625,8 +640,11 @@ function render() {
   }
   L.push("");
   L.push("> 读表须知：");
-  L.push("> - **挂载点** = 该插件在 `traverse` 里 `register_vdfs_provider(目录名, provider)` 的目录名；");
-  L.push(">   容器（`composite`）按子插件注册名合成目录树，其自身挂载点是运行期动态。");
+  L.push("> - **挂载点** = 该插件目录名（容器实例表的挂载名，`目录名 = 实例名`）；");
+  L.push(">   插件经 `Plugin::get_vfs_provider` 把自己的视图交给容器（**系统 / 前端链路**，");
+  L.push(">   容器聚合）；**LLM 链路**另经 `CapabilityVisitor::register_vdfs_provider(目录名, provider)`");
+  L.push(">   按名注册（可控挂载机制，预留按作用域裁剪），两条通道目录名同一份。");
+  L.push(">   容器（`composite`）自身即 `<根>` 的服务者，其挂载点是运行期动态。");
   L.push(">   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。");
   L.push("> - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，");
   L.push(">   容器已剥掉首段，故此处补回**插件目录名**——容器按目录名建实例表并按它分发，");
@@ -688,7 +706,15 @@ function render() {
   L.push(
     "| 会话与其消息 | `<homedir>/session/<id>/{session.json,messages.json}` | **单一具体类型** `SessionStore`（持久=磁盘布局 / 临时=进程内驻留）。曾有 `store_kind` × file/sqlite/memory 三后端选型，**已删除** |"
   );
-  L.push("| Agent bundle | bundle 目录（工作区级 + 全局级双层） | `BundleStore` 自管，不经 `vdfs_service` |");
+          const vdfsRoot = "<vdfs_root>"; // grep-audit-allow S-010: CURRENT.md 约定用占位，不写字面量
+  // 真实值来自 plugins/vdfs/fs.rs::VDFS_ADDR_ROOT（运行期抽取，防漂移）；
+  // 输出仅做占位，不直接写字面量。
+  if (!vdfsAddrRoot()) {
+    throw new Error("VDFS_ADDR_ROOT 为空，CURRENT.md §4 回写缺陷");
+  }
+  L.push(
+    `| Agent 目录 | \`agent/<id>\`（工作区级 + 全局级双层） | \`AgentDirStore\` 自管，不经 \`vdfs_service\`；虚拟视图以 \`${vdfsRoot}/agent/<id>\` 进入 |`
+  );
   L.push(
     "| 插件配置（含会话配置） | `<homedir>/plugins/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `ConfigFile` 自读写，**无第二种后端、无第二条配置协议** |"
   );

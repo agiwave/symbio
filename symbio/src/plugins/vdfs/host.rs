@@ -34,7 +34,7 @@
 //!
 //! [`UnifiedFs`]: super::fs::UnifiedFs
 
-use super::fs::{normalize_addr, UnifiedFs, VDFS_ADDR_ROOT};
+pub use super::fs::{normalize_addr, UnifiedFs, VDFS_ADDR_ROOT};
 use super::protocol::*;
 use crate::symbio_core::event_bus::KIND_VDFS;
 use crate::symbio_core::vdfs::vdfs_context;

@@ -1,10 +1,10 @@
-//! VDFS 挂载点（`<根>/agent`）—— 本插件**直接实现 `VdfsProvider`**。
+//! VDFS 挂载点（`<挂载点名>/agent`）—— 本插件**直接实现 `VdfsProvider`**。
 //!
 //! ## 与其它资源插件的分工差异
 //!
 //! Agent 是**目录自管型**资源：它的落盘由 [`AgentDirStore`] 负责（工作区级 +
 //! 全局级双层、zip-slip 防护、版本硬门槛），**不经 `vdfs_service`**——
-//! `vdfs_service` 的三种拓扑都是「`<本插件目录>/<id>/…`」这一固定落位，
+//! `vdfs_service` 的三种拓扑都是「`<本插件目录>/<条目 id>/…`」这一固定落位，
 //! 而 Agent 要同时看见工作目录与系统目录两层，寻址规则本身是 Agent 语义的一部分。
 //!
 //! 相同的是**广播**：落盘后一律走 `vdfs::notify_change`，与 `vdfs_service` 三个
@@ -16,15 +16,15 @@
 //! 白名单、新建模板与默认正文——那是宿主在替能力目录解释语义，改一处要改三处，
 //! 且与宿主的技能系统 / MCP 客户端天然不同步。
 //!
-//! v2 直接把 Agent 目录**整棵呈现**：`<id>/<任意相对路径>`。唯一的例外是根下的
+//! v2 直接把 Agent 目录**整棵呈现**：`<条目 id>/<任意相对路径>`。唯一的例外是根下的
 //! `AGENTS.md`（§6 人格与记忆），它走内核的 `MemoryFile::node`（带容量闸门），
 //! 与工作区记忆同一口径。
 //!
 //! ## 挂载根只列「装进来的智能体」
 //!
 //! 挂载根清单 = 各 agent 目录（装进来的子智能体），与 session / model 列表同一口径。
-//! `<根>/agent/AGENTS.md` 也挂在这棵树上，但它**不在清单里**——它是**本应用
-//! （系统智能体）自身**的指令（`{homedir}/AGENTS.md`，见 [`super::instruction`]），
+//! `<挂载点名>/agent/AGENTS.md` 也挂在这棵树上，但它**不在清单里**——它是**本应用
+//! （系统智能体）自身**的指令（目录名由各模块按自身挂载规则决定），
 //! 属于「本 agent 的修改」，入口在**设置页**（`traverse` 里经 `ConfigurableVisitor`
 //! 注册，读写仍落在本插件的地址上），混在 agent 列表里会被读成某个包。
 //!
@@ -38,15 +38,16 @@ use super::memory;
 use super::plugin::AgentPlugin;
 use super::store::{AgentDirRecord, AgentDirStore, FileEntry};
 use crate::providers::vdfs_service;
-use crate::symbio_core::vdfs::{descend_addr, host_ctx, notify_change, unwatch_changes, watch_changes};
+use crate::symbio_core::vdfs::{
+    descend_addr, host_ctx, notify_change, unwatch_changes, watch_changes,
+};
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_CHANGE_CREATED,
-    VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED, VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
+    VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
+    VdfsNewType, VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
+    VDFS_CHANGE_CREATED, VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED, VDFS_EXT_FORM, VDFS_EXT_ZIP,
+    VDFS_NEW_SOURCE_FILE,
 };
-use crate::symbio_core::{
-    dir_from_ctx, InvokeRequest, AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE,
-};
+use crate::symbio_core::{dir_from_ctx, InvokeRequest, AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -64,7 +65,7 @@ enum RelPath<'a> {
     Agent {
         id: &'a str,
     },
-    /// 人格与记忆：`<id>/AGENTS.md`（§6，走内核记忆门面，不是普通文件）
+    /// 人格与记忆：`<条目 id>/AGENTS.md`（§6，走内核记忆门面，不是普通文件）
     Memory {
         id: &'a str,
     },
@@ -98,16 +99,20 @@ fn id_of(path: &str) -> String {
     vdfs_service::entry::id_of(path, PLUGIN_AGENT)
 }
 
-/// 把子 composite 返回的相对地址提升为全局树内路径：`<挂载前缀>/<子相对路径>`。
+/// 把子 composite 返回的**子树相对路径**提升为本插件空间内的路径。
 ///
 /// 与 `composite::child_path` 同义（这里不复用，避免在插件间引入依赖）。子 composite
-/// 内部只认自身子树内的相对地址，不会带 `agent/<id>` 挂载前缀，因此委托方必须补上。
-fn mount_path(prefix: &str, rel: &str) -> String {
-    match (prefix.is_empty(), rel.is_empty()) {
+/// 内部只认自身子树内的相对路径（`work/AGENTS.md`），因此委托方必须补上挂载段。
+///
+/// ⚠️ `mount_rel` 是**树内相对**前缀（本插件空间里的首段，见 `sub_vfs`），不是
+/// 地址空间里的绝对地址——带上根名会拼出 `<根>/<根>/…`（展示地址只在 `UnifiedFs`
+/// 出口翻译一次）。
+fn mount_path(mount_rel: &str, rel: &str) -> String {
+    match (mount_rel.is_empty(), rel.is_empty()) {
         (true, true) => String::new(),
         (true, false) => rel.to_string(),
-        (false, true) => prefix.to_string(),
-        (false, false) => format!("{prefix}/{rel}"),
+        (false, true) => mount_rel.to_string(),
+        (false, false) => format!("{mount_rel}/{rel}"),
     }
 }
 
@@ -165,10 +170,6 @@ fn agent_dir_node(r: &AgentDirRecord, store: &AgentDirStore) -> VdfsNode {
 ///
 /// 节点名 = 目录内相对路径的**末段**（与 `plugins/vdfs/physical.rs` 同款写法）：
 /// 框架经 `fill_node_paths` 用挂载点（`agent`）+ 父地址（`<id>`）重建树内全路径，
-/// 因此这里**绝不能**把 `<id>/<path>` 当名字传进首参——否则会拼出
-/// `agent/<id>/<id>/<path>`，派发时第二段被当成 rel，于是 `stat_item(<id>, "<id>/<path>")`
-/// 找不到（见历史错误日志 `未找到路径「<id>/<id>/mcp」`）。`id` 属于父地址，由框架补，
-/// 本函数不接收它。
 fn entry_node(e: &FileEntry) -> VdfsNode {
     let name = e.path.rsplit('/').next().unwrap_or(&e.path).to_string();
     let mut n = if e.is_dir {
@@ -206,7 +207,7 @@ impl AgentPlugin {
 
     /// 穿过挂载点：取子智能体（`<id>`）的 VDFS 视图。
     ///
-    /// 与文件系统的「`agent/<id>` 是一个挂载点、底下挂的是子 composite 的虚拟
+    /// 与文件系统的「`<挂载点名>/<条目 id>` 是一个挂载点、底下挂的是子 composite 的虚拟
     /// 文件系统」同义——子 composite 与系统根用的是**同一份** `CompositeVfs`，
     /// 因此钻进子智能体后看到的左栏（会话 / 模型 / 智能体 / MCP / 技能 / 设置）
     /// 与父智能体完全一致，且 `mcp`/`skill` 等点进去是各自 provider 的富列表，
@@ -219,9 +220,18 @@ impl AgentPlugin {
     /// 返回 `Err` = 该 `<id>` 不是可装配的 v2 子 Agent（目录缺失 / manifest 非
     /// `agent-dir/v2`）——调用方据此**回退到 raw-dir 行为**（v1 / legacy 约定目录）。
     ///
-    /// 元组第三项 `prefix` 是挂载点的全局树内路径（`agent/<id>` 或嵌套
-    /// `agent/<a>/agent/<b>/<id>`），用于把子 composite 返回的相对地址提升为
-    /// 全局路径——子 composite 内部只认自身子树相对地址，不会带挂载前缀。
+    /// 元组第三项 `mount_rel` 是挂载点的**树内相对前缀**——本插件空间里的首段
+    /// `<id>`，**不含地址空间根名**。子 composite 返回的路径只认自身子树相对地址
+    /// （`work/AGENTS.md`），故由本插件补上挂载段；根字面量只在 `UnifiedFs` 出口统一
+    /// 翻译一次（`to_display`），这里带上就会拼错（展示地址只在 `UnifiedFs`）。
+    ///
+    /// ⚠️ 它与**地址空间里的当前父地址**（`VDFS_PARENT_ADDR`）是两回事：后者含根名
+    /// （地址字面量只由 vdfs 插件自己决定，外部注释里也不写死——见
+    /// `plugins/vdfs/fs.rs` 的 `VDFS_ADDR_ROOT`），供子 provider 计算给模型 / 用户看的
+    /// 展示地址。两者都由本函数给出：前者用于**路径回填**，后者经子上下文传下去。
+    ///
+    /// 分形：`<id>` 只是本级的挂载名，任意层级都一样——子智能体内部的 `agent` 实例
+    /// 再钻一层时，收到的路径本就是它自己空间里的 `<sub-id>/…`。
     async fn sub_vfs(
         &self,
         ctx: &VdfsContext,
@@ -237,12 +247,12 @@ impl AgentPlugin {
             .get_vfs_provider()
             .ok_or_else(|| VdfsError::internal(format!("子智能体「{id}」未暴露 VDFS 根")))?;
 
-        // 挂载点前缀 = 当前父地址续接上 `<id>`（与 composite 的派发改写规则同一份）。
-        // 子 composite 内部再按自身子树相对地址派发，响应原样返回，本插件只负责把
-        // 它的相对地址提升为全局路径（见各操作的 `mount_path` 回填）。
-        let prefix = descend_addr(ctx.parent_addr(), id);
-        let sub_ctx = ctx.clone().with_parent_addr(prefix.clone());
-        Ok((provider, sub_ctx, prefix))
+        // 地址空间：父地址续接 `<id>`（与 composite 派发的改写规则同一份，含根名）。
+        let sub_ctx = ctx
+            .clone()
+            .with_parent_addr(descend_addr(ctx.parent_addr(), id));
+        // 路径回填：树内相对前缀 = 本插件空间里的首段（`<id>`），见上方文档。
+        Ok((provider, sub_ctx, id.to_string()))
     }
 }
 
@@ -301,10 +311,10 @@ impl VdfsProvider for AgentPlugin {
                 // 子根与父（系统）根是同一份 `CompositeVfs`，因此同样按 `root_hidden`
                 // 只显示可见插件（gateway/web/telegram/local/work 等配置型挂载点不会
                 // 出现在侧边栏），父子两侧栏完全一致。
-                if let Ok((p, sub, prefix)) = self.sub_vfs(ctx, &id).await {
+                if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
                     let mut items = p.list(&sub, "").await?;
                     for n in &mut items {
-                        n.path = mount_path(&prefix, &n.path);
+                        n.path = mount_path(&mount_rel, &n.path);
                     }
                     return Ok(items);
                 }
@@ -337,10 +347,10 @@ impl VdfsProvider for AgentPlugin {
             RelPath::File { id, rel } => {
                 let id = id_of(id);
                 // 可挂载的子智能体 → 穿过挂载点，列出子 composite 内对应子树
-                if let Ok((p, sub, prefix)) = self.sub_vfs(ctx, &id).await {
+                if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
                     let mut items = p.list(&sub, rel).await?;
                     for n in &mut items {
-                        n.path = mount_path(&prefix, &n.path);
+                        n.path = mount_path(&mount_rel, &n.path);
                     }
                     return Ok(items);
                 }
@@ -392,9 +402,9 @@ impl VdfsProvider for AgentPlugin {
             RelPath::File { id, rel } => {
                 let id = id_of(id);
                 // 可挂载的子智能体 → 穿过挂载点，stat 子 composite 内对应条目
-                if let Ok((p, sub, prefix)) = self.sub_vfs(ctx, &id).await {
+                if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
                     let mut n = p.stat(&sub, rel).await?;
-                    n.path = mount_path(&prefix, &n.path);
+                    n.path = mount_path(&mount_rel, &n.path);
                     return Ok(n);
                 }
                 let e = store
@@ -421,9 +431,19 @@ impl VdfsProvider for AgentPlugin {
                     .map_err(|e| VdfsError::not_found(format!("读取系统指令失败：{e}")))?;
                 Ok(VdfsContent::text(path, text))
             }
-            // Agent 目录内的文件：直读（沙箱在 store 里）
+            // Agent 目录内的文件 / 子路径
             RelPath::File { id, rel } => {
                 let id = id_of(id);
+                // 可挂载的子智能体 → 穿过挂载点：读的是**子 composite 的视图**
+                // （`<挂载点名>/<条目 id>/work/AGENTS.md` 读的是那个子树里 work 的记忆），
+                // 而不是裸 agent 目录里的同名物理文件。判定按**路径前缀**统一发生，
+                // 不按操作逐个枚举——漏一个操作就会出现「列得出、读不到」。
+                if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
+                    let mut c = p.read(&sub, rel).await?;
+                    c.path = mount_path(&mount_rel, &c.path);
+                    return Ok(c);
+                }
+                // 非可挂载目录（v1 / legacy 约定目录）：直读（沙箱在 store 里）
                 let text = store
                     .read_item(&id, rel)
                     .map_err(|e| VdfsError::not_found(format!("读取失败：{e}")))?;
@@ -546,9 +566,18 @@ impl VdfsProvider for AgentPlugin {
                 etag: None,
             });
         }
-        // Agent 目录内的文件写回（路径沙箱 + 容量闸门都在 store 里）
+        // Agent 目录内的文件 / 子路径写入
         if let RelPath::File { id, rel } = parse_rel_path(path) {
             let id = id_of(id);
+            // 可挂载的子智能体 → 穿过挂载点：写进**子 composite 的视图**。
+            // 这是「报成功却落进裸 agent 目录」那个回归的修复点——绕过挂载点会让
+            // 写入既污染智能体包、又让子 composite 的 provider 完全没参与。
+            if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
+                let mut r = p.write(&sub, rel, content).await?;
+                r.path = mount_path(&mount_rel, &r.path);
+                return Ok(r);
+            }
+            // 非可挂载目录（v1 / legacy 约定目录）：直写（路径沙箱 + 容量闸门在 store 里）
             let text = content.text.as_deref().unwrap_or("");
             let existed = store.stat_item(&id, rel).is_ok();
             let max_bytes = self.item_max_bytes().await;
@@ -600,7 +629,7 @@ impl VdfsProvider for AgentPlugin {
         if let RelPath::File { id, rel } = parse_rel_path(path) {
             let id = id_of(id);
             // 可挂载的子智能体 → 穿过挂载点，删除子 composite 内对应条目
-            if let Ok((p, sub, _prefix)) = self.sub_vfs(ctx, &id).await {
+            if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &id).await {
                 return p.delete(&sub, rel, recursive).await;
             }
             let e = store
@@ -625,15 +654,70 @@ impl VdfsProvider for AgentPlugin {
         Ok(())
     }
 
+    /// 新建目录：**只在可挂载的子智能体内部生效**。
+    ///
+    /// 裸 agent 目录（v1 / legacy）不支持在包内造目录——`AgentDirStore` 本身没有
+    /// 这个能力（目录即配置，见模块文档），保持 trait 默认的 `NotImplemented`。
+    /// 子树则可以：挂载点路径由运行期规则凭借挂载前缀决定，由那个子树的 provider 决定怎么落。
+    async fn mkdir(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
+        if let RelPath::File { id, rel } = parse_rel_path(path) {
+            let id = id_of(id);
+            if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &id).await {
+                return p.mkdir(&sub, rel).await;
+            }
+        }
+        Err(VdfsError::NotImplemented)
+    }
+
+    /// 移动 / 重命名：**只在同一个可挂载的子智能体内部**生效。
+    ///
+    /// 跨挂载点移动没有意义（两侧是不同的 provider，甚至不同的存储），与
+    /// `CompositeVfs::move_item` 拒跨子目录同一口径；裸 agent 目录仍不支持。
+    async fn move_item(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
+        let (
+            RelPath::File {
+                id: from_id,
+                rel: from_rel,
+            },
+            RelPath::File {
+                id: to_id,
+                rel: to_rel,
+            },
+        ) = (parse_rel_path(from), parse_rel_path(to))
+        else {
+            return Err(VdfsError::NotImplemented);
+        };
+        let (from_id, to_id) = (id_of(from_id), id_of(to_id));
+        if from_id != to_id {
+            return Err(VdfsError::invalid(format!(
+                "不支持跨{LABEL}移动：{from} → {to}"
+            )));
+        }
+        if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &from_id).await {
+            return p.move_item(&sub, from_rel, to_rel).await;
+        }
+        Err(VdfsError::NotImplemented)
+    }
+
     /// 节点动作：「导出」把 agent 目录打成 zip 随 `data` 回传
     /// （与二进制写入的整包导入互为逆向）
+    ///
+    /// 条目内部的子路径若落在可挂载的子智能体里，同样穿过挂载点交给该子树
+    /// （动作是 provider 自持的动词，容器/委托方只负责把地址转发到位）。
     async fn action(
         &self,
         ctx: &VdfsContext,
         path: &str,
         action: &str,
-        _payload: Option<&serde_json::Value>,
+        payload: Option<&serde_json::Value>,
     ) -> VdfsResult<VdfsActionResult> {
+        if let RelPath::File { id, rel } = parse_rel_path(path) {
+            let id = id_of(id);
+            if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &id).await {
+                return p.action(&sub, rel, action, payload).await;
+            }
+            return Err(VdfsError::NotImplemented);
+        }
         if action != VDFS_ACTION_EXPORT {
             return Err(VdfsError::NotImplemented);
         }
@@ -659,11 +743,29 @@ impl VdfsProvider for AgentPlugin {
         })
     }
 
-    async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
+    /// 订阅变更：可挂载的子智能体 → 穿过挂载点，把子树 provider 报出的相对路径
+    /// 补上挂载段再交给同一个 sink（子树内部只认自身相对路径）。
+    async fn watch(&self, ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
+        if let RelPath::File { id, rel } = parse_rel_path(path) {
+            let id = id_of(id);
+            if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
+                let wrapped: VdfsChangeSink =
+                    Arc::new(move |c: VdfsChange| sink(c.map_paths(|x| mount_path(&mount_rel, x))));
+                return p.watch(&sub, rel, wrapped).await;
+            }
+        }
         watch_changes(PLUGIN_AGENT, path, sink).await
     }
 
-    async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
+    /// 取消订阅：与 `watch` 同一条判定——**成对**才配对得上计数
+    /// （订阅记在子 provider 名下，漏了这一跳会留下永不释放的订阅）。
+    async fn unwatch(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
+        if let RelPath::File { id, rel } = parse_rel_path(path) {
+            let id = id_of(id);
+            if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &id).await {
+                return p.unwatch(&sub, rel).await;
+            }
+        }
         unwatch_changes(PLUGIN_AGENT, path).await
     }
 }

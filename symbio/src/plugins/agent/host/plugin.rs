@@ -23,8 +23,11 @@
 //! 能力（技能 / MCP / …）由 Agent 目录里的插件实例自己解释，**复用宿主已有的对应系统**
 //! （§3.2 第 2 条）——这正是 v1 的失败之处：那时宿主为 agent 目录再写一遍技能与 MCP
 //! 的解析，两条链长期不同步。v2 的子树因此挂**与父 Agent 同构的默认插件集**（见
-//! [`crate::symbio_core::SUB_AGENT_PLUGINS`]）：仅去掉 `model` / `vdfs` 两个系统级单槽，
-//! 其余（含 `agent` 自身、`setting`、`work`）全部与父树一致——UI 资源入口因此对齐。
+//! [`crate::symbio_core::SUB_AGENT_PLUGINS`]）：仅去掉系统级单槽 `vdfs`（VDFS 根归
+//! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`setting`、`work`）全部与
+//! 父树一致——UI 资源入口因此对齐。`model` 在子树里有实例：子智能体有自己的模型
+//! 服务（子树会话以子容器为 parent 收集，自行解析）；父会话收集期该注册才被
+//! `SubAgentVisitor` 丢弃（单槽防劫持）。
 //!
 //! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时不装配任何 Agent，但 **agent_run
 //! （子智能体委托）始终注册**。
@@ -39,10 +42,10 @@ use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
     CapabilityVisitor, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, SUB_AGENT_PLUGINS,
-    AGENTS_FILE, AGENT_ID, CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT,
-    PLUGIN_COMPOSITE, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
-    TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, AGENTS_FILE, AGENT_ID,
+    CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR,
+    REQUIRED_PLUGINS, SUB_AGENT_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -290,7 +293,8 @@ impl AgentPlugin {
     /// 目录改由 `ctx[AGENT_ID]` 表达：子树因此能说出「我是哪个智能体」。
     ///
     /// 本插件另在这里注入**该智能体自己的 `AGENTS.md`**（`<agentdir>/AGENTS.md`）——
-    /// 子树里没有 `agent` 实例，而认识 Agent 目录的正是本插件（见模块文档）。
+    /// 子树里虽有 `agent` 实例（分形），但它管的是 `<agentdir>/agent/<sub-id>` 一层；
+    /// 认识 `<agentdir>/AGENTS.md`（智能体自身记忆）这一层的只有本插件（见模块文档）。
     async fn forward_to_sub_agent(
         &self,
         tree: &Arc<dyn Plugin>,
