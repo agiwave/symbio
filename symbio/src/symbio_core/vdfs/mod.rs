@@ -64,9 +64,7 @@ pub mod host;
 pub use super::vdfs_provider::*;
 
 // ---- 当前父地址机制（根声明 + 拼接；消费方全在本 crate 内）----
-pub(crate) use address::{
-    absolute_addr, declared_addr_root, descend_addr, join_addr, AddrRootDecl,
-};
+pub(crate) use address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 
 // ---- symbio 桥 ----
 pub use host::{

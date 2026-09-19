@@ -23,7 +23,7 @@
 //! 系统根下的 `PLUGIN.yml` 属于 `home`——容器没有配置，不写 manifest。
 
 use super::vdfs::CompositeVdfs;
-use crate::symbio_core::vdfs::{declared_addr_root, join_addr};
+use crate::symbio_core::vdfs::descend_addr;
 use crate::symbio_core::{
     create_object, has_creator, lock_read, plugins_root, InvokeRequest, InvokeRequestExt,
     InvokeResponse, Plugin, PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest,
@@ -279,11 +279,12 @@ impl Plugin for Composite {
             if let Some(plugin) = plugin_opt {
                 let child_ctx = ctx.fork();
                 child_ctx.set(PATH, rest.to_string());
-                // 跨挂载边界的转发：改写子上下文的**当前父地址**（本容器的子插件
-                // 挂在 `<根>/<名字>`；见 `symbio_core::vdfs::address` 的改写规则）
+                // 跨挂载边界的转发：改写子上下文的**当前父地址**——从 ctx 已携带
+                // 的父地址续接（嵌套容器自动得到 `<根>/…/<名字>` 的完整挂载点；
+                // 见 `symbio_core::vdfs::address` 的改写规则）
                 child_ctx.set(
                     VDFS_PARENT_ADDR,
-                    join_addr(declared_addr_root().unwrap_or(""), name),
+                    descend_addr(&ctx.get(VDFS_PARENT_ADDR).unwrap_or_default(), name),
                 );
                 return plugin.route(child_ctx).await;
             }
@@ -320,14 +321,164 @@ impl Plugin for Composite {
         for (name, plugin) in instances {
             let req_ctx = ctx.fork();
             // 能力收集同样是跨挂载边界的转发：子插件在收集期拼协议级绝对地址
-            // （如提示词片段里的可编辑地址），靠的就是这里的当前父地址
+            // （如提示词片段里的可编辑地址），靠的就是这里的当前父地址。
+            // 从 **ctx 已携带的父地址续接**而非落回系统根——本容器自身可能是
+            // 嵌套装配（如 bundle 子树挂在 `<根>/agent/<id>` 下），落回系统根
+            // 会让子插件收集期拼出与实际挂载不符的地址。
             req_ctx.set(
                 VDFS_PARENT_ADDR,
-                join_addr(declared_addr_root().unwrap_or(""), &name),
+                descend_addr(&ctx.get(VDFS_PARENT_ADDR).unwrap_or_default(), &name),
             );
             let _ = plugin.traverse("".to_string(), req_ctx).await;
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    ///  在本作用域是泛型别名，测试里的 trait impl 需要具体化
+    type InvokeResponse = crate::symbio_core::InvokeResponse<PluginPayload>;
+
+    // ==================== 嵌套容器的父地址转发 ====================
+    //
+    // 容器可嵌套容器（bundle 子树即此形态：外层系统容器 → 内层 bundle 容器
+    // → 内层子插件）。每次跨挂载边界的转发（route / traverse）都必须把
+    // **当前父地址**从 ctx 已携带的值续接下去，子插件拿到的才是完整挂载点。
+
+    /// 探针插件：route / traverse 时把 ctx 的父地址记进共享桶
+    struct Probe {
+        seen_route: Mutex<Vec<String>>,
+        seen_traverse: Mutex<Vec<String>>,
+    }
+
+    impl Probe {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                seen_route: Mutex::new(Vec::new()),
+                seen_traverse: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn routes(&self) -> Vec<String> {
+            self.seen_route.lock().unwrap().clone()
+        }
+
+        fn traverses(&self) -> Vec<String> {
+            self.seen_traverse.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Plugin for Probe {
+        fn meta(&self) -> PluginMeta {
+            PluginMeta::new("probe", "probe")
+        }
+
+        async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse {
+            self.seen_route
+                .lock()
+                .unwrap()
+                .push(ctx.get(VDFS_PARENT_ADDR).unwrap_or_default());
+            Ok(PluginPayload::new(&serde_json::json!({"ok": true})))
+        }
+
+        async fn traverse(
+            self: Arc<Self>,
+            _path: String,
+            ctx: Arc<dyn InvokeRequest>,
+        ) -> InvokeResponse {
+            self.seen_traverse
+                .lock()
+                .unwrap()
+                .push(ctx.get(VDFS_PARENT_ADDR).unwrap_or_default());
+            Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+        }
+    }
+
+    fn plugin_map(
+        entries: Vec<(&str, Arc<dyn Plugin>)>,
+    ) -> Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>> {
+        Arc::new(RwLock::new(
+            entries
+                .into_iter()
+                .map(|(n, p)| (n.to_string(), p))
+                .collect(),
+        ))
+    }
+
+    fn composite_of(entries: Vec<(&str, Arc<dyn Plugin>)>) -> Arc<Composite> {
+        Arc::new(Composite {
+            instances: plugin_map(entries),
+            envs: HashMap::new(),
+            vdfs: Arc::new(CompositeVdfs::new(plugin_map(Vec::new()))),
+        })
+    }
+
+    fn host() -> Arc<dyn InvokeRequest> {
+        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        ctx
+    }
+
+    /// route 转发链：外层容器 → 内层容器 → 探针，父地址逐级续接成完整挂载点
+    #[tokio::test]
+    async fn route_chain_extends_parent_addr_per_level() {
+        let probe = Probe::new();
+        let inner = composite_of(vec![("probe", Arc::clone(&probe) as Arc<dyn Plugin>)]);
+        let outer = composite_of(vec![("inner", Arc::clone(&inner) as Arc<dyn Plugin>)]);
+
+        let ctx = host();
+        ctx.set(PATH, "inner/probe".to_string());
+        ctx.set(VDFS_PARENT_ADDR, "sys-root".to_string());
+        outer.route(ctx).await.unwrap();
+
+        let seen = probe.routes();
+        assert_eq!(seen.len(), 1, "探针恰好被路由一次");
+        assert_eq!(
+            seen[0], "sys-root/inner/probe",
+            "父地址 = 上级父地址 + 逐级目录名（不落回系统根，根名无关）"
+        );
+    }
+
+    /// traverse 转发链：嵌套容器收集能力时同样逐级续接
+    #[tokio::test]
+    async fn traverse_chain_extends_parent_addr_per_level() {
+        let probe = Probe::new();
+        let inner = composite_of(vec![("probe", Arc::clone(&probe) as Arc<dyn Plugin>)]);
+        let outer = composite_of(vec![("inner", Arc::clone(&inner) as Arc<dyn Plugin>)]);
+
+        let ctx = host();
+        ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+        // 模拟外层容器自身挂在 `sys-root` 之下（嵌套装配时上级写入）
+        ctx.set(VDFS_PARENT_ADDR, "sys-root".to_string());
+        outer.traverse(String::new(), ctx).await.unwrap();
+
+        let seen = probe.traverses();
+        assert_eq!(seen.len(), 1, "探针恰好被收集一次");
+        assert_eq!(seen[0], "sys-root/inner/probe", "收集期父地址 = 完整挂载点");
+    }
+
+    /// 顶层数据点：无上级父地址时，子插件落在**静态声明的根**之下
+    /// （不写死具体名字——断言非空且以本容器目录名结尾）
+    #[tokio::test]
+    async fn top_level_container_falls_back_to_declared_root() {
+        let probe = Probe::new();
+        let outer = composite_of(vec![("probe", Arc::clone(&probe) as Arc<dyn Plugin>)]);
+
+        let ctx = host();
+        ctx.set(PATH, "probe".to_string());
+        outer.route(ctx).await.unwrap();
+
+        let seen = probe.routes();
+        assert_eq!(seen.len(), 1);
+        assert!(
+            !seen[0].is_empty() && seen[0].ends_with("/probe"),
+            "顶层 = 声明根 + 子名（根是数据，形态不作假设）: {}",
+            seen[0]
+        );
     }
 }

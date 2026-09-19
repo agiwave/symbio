@@ -161,7 +161,18 @@ const BASELINE = {
   //   该批同时把挂载根改名 `.vdfs` → `.vdfsv2` 证明系统与根名无关；
   //   新机制「当前父地址」＝转发即改写上下文（VDFS_PARENT_ADDR）+ 协议级
   //   绝对地址经 absolute_addr 拼接，原全局登记槽整体删除。
-  rustTests: 788,
+  // 788 → 793：嵌套装配的断点修复与验证（+5，全部在 plugins/composite/）。
+  //   背景：bundle 子树的 provider 经 SubAgentVisitor 以**多段名**（`agent/<id>/<name>`）
+  //   注册进系统容器，但此链路从未被测试——实测发现两处断点并修复：
+  //   1) `CompositeVdfs::resolve` 原按首段全等匹配，多段名永远不可寻址 → 改**最长
+  //      前缀**命中（`agent/b1/skill` 先于 `agent`），空地址守卫语义保留；
+  //   2) `Composite::route` / `Composite::traverse` 原无条件从声明根起算父地址，
+  //      嵌套容器收集期/路由期会拼出与实际挂载不符的地址 → 改 `descend_addr`
+  //      从 ctx 已携带的父地址续接。
+  //   新测试：vdfs.rs 2 例（多段名最长前缀命中 + 父地址=完整挂载点；根清单原样
+  //   呈现多段名）、composite.rs 3 例（route / traverse 转发链逐级续接、顶层落到
+  //   声明根——探针插件断言，根名无关）。
+  rustTests: 793,
   vitestFiles: 31,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态

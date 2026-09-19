@@ -215,22 +215,44 @@ impl CompositeVdfs {
     }
 
     /// 树内路径 → `(子目录名, provider, 相对路径)`；自身目录或无匹配时按错误返回
+    ///
+    /// 目录名匹配**不限定首段**：注册名允许含 `/`（嵌套装配——如 bundle 子树的
+    /// provider 经作用域代理注册成 `agent/<id>/<name>`），因此按**最长前缀**
+    /// 命中：`agent/x/skill` 要先于 `agent` 被尝试，否则嵌套 provider 永远被
+    /// 外层同名前缀遮蔽。注册名之间已由 `children_of` 的重名检测保证唯一，
+    /// 这里只需取最长的那个。
     fn resolve<'a>(
         dirs: &'a [(String, DynVdfsProvider)],
         path: &str,
     ) -> VdfsResult<(&'a str, &'a DynVdfsProvider, String)> {
-        let Some((dir, rel)) = split_first(path) else {
+        // 自身目录不是可操作节点——在多段名匹配之前拦截，错误语义才不混入
+        // 「目录不存在」（它存在，只是没有相对部分可派发）
+        if path.is_empty() {
             return Err(VdfsError::invalid(
                 "目录不是可操作节点，请给出 <子目录>/... 路径",
             ));
-        };
-        let (d, p) = dirs.iter().find(|(name, _)| name == dir).ok_or_else(|| {
+        }
+        let mut best: Option<(&'a str, &'a DynVdfsProvider, String)> = None;
+        for (name, p) in dirs {
+            let rel = if path == name.as_str() {
+                Some(String::new())
+            } else {
+                path.strip_prefix(&format!("{name}/")).map(str::to_string)
+            };
+            if let Some(rel) = rel {
+                let longer = best.as_ref().is_none_or(|(b, _, _)| name.len() > b.len());
+                if longer {
+                    best = Some((name.as_str(), p, rel));
+                }
+            }
+        }
+        best.ok_or_else(|| {
+            let first = split_first(path).map(|(d, _)| d).unwrap_or(path);
             VdfsError::not_found(format!(
-                "目录不存在：{dir}（现有：{}）",
+                "目录不存在：{first}（现有：{}）",
                 Self::names_hint(dirs)
             ))
-        })?;
-        Ok((d.as_str(), p, rel.to_string()))
+        })
     }
 
     /// 派发：解析出（目录名, 子 provider, 子树相对地址），并把 ctx 的**当前父
@@ -930,5 +952,109 @@ mod tests {
             Err(e) => e,
         };
         assert_eq!(err.code(), "INTERNAL_ERROR");
+    }
+
+    // ==================== 嵌套装配：多段注册名 ====================
+    //
+    // bundle 子树里的 provider 经 agent 插件的作用域代理（SubAgentVisitor）
+    // 以 **多段名** 注册进系统容器：`agent/<bundle_id>/<name>`。这里的测试
+    // 用合成多段名模拟该形态，钉住三件事：可寻址（resolve 最长前缀）、
+    // 派发期父地址 = 完整挂载点、根清单的呈现形态。
+
+    /// 回声 provider：`read` 返回 `<标签>:<父地址>/<path>`，同时验证两件事——
+    /// 收到的地址是子树相对路径、上下文父地址已被派发改写为完整挂载点。
+    struct EchoProvider {
+        label: &'static str,
+    }
+
+    #[async_trait]
+    impl VdfsProvider for EchoProvider {
+        fn label(&self) -> Option<&str> {
+            Some(self.label)
+        }
+
+        async fn list(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<Vec<VdfsNode>> {
+            Ok(vec![VdfsNode::file("a.txt", "A", VdfsAccess::READ)])
+        }
+
+        async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
+            let parent = ctx.parent_addr();
+            Ok(VdfsContent::text(
+                "",
+                format!("{}:{parent}/{path}", self.label),
+            ))
+        }
+    }
+
+    /// 多段名 + 短名同时在册：嵌套 provider 不被外层前缀遮蔽（最长前缀命中）
+    #[tokio::test]
+    async fn multisegment_registration_resolves_by_longest_prefix() {
+        let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+        map.insert(
+            "agent".to_string(),
+            Arc::new(ProviderChild {
+                dir: "agent",
+                provider: Arc::new(EchoProvider { label: "outer" }),
+            }),
+        );
+        // SubAgentVisitor 前缀化后的注册名（多段）
+        map.insert(
+            "skill".to_string(),
+            Arc::new(ProviderChild {
+                dir: "agent/b1/skill",
+                provider: Arc::new(EchoProvider { label: "inner" }),
+            }),
+        );
+        let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
+        let ctx = host_ctx();
+
+        // 嵌套 provider：地址首段是 `agent`，但最长前缀命中 `agent/b1/skill`
+        let c = vdfs
+            .read(&ctx, "agent/b1/skill/prompts/f.md")
+            .await
+            .unwrap();
+        let text = c.text.as_deref().unwrap();
+        assert!(text.starts_with("inner:"), "长名命中: {text}");
+        assert!(
+            text.ends_with("/agent/b1/skill/prompts/f.md"),
+            "父地址 + 相对路径 = 完整挂载点地址（根名无关）: {text}"
+        );
+
+        // 外层 provider：不经嵌套名的地址仍命中短名
+        let c = vdfs.read(&ctx, "agent/other/f.md").await.unwrap();
+        let text = c.text.as_deref().unwrap();
+        assert!(text.starts_with("outer:"), "短名兜底: {text}");
+
+        // 节点回填：多段目录名直接进树内全路径
+        let items = vdfs.list(&ctx, "agent/b1/skill").await.unwrap();
+        assert_eq!(items[0].path, "agent/b1/skill/a.txt");
+    }
+
+    /// 根清单的呈现：多段名注册的目录**原样出现**（名字含 `/`）。
+    ///
+    /// 这是钉住现状的文档化测试：嵌套 provider 在根清单里目前是平铺的
+    /// 多段名条目（非折叠层级）。展示形态可再议，但**寻址语义**以本文件
+    /// 上一条测试为准，不受呈现影响。
+    #[tokio::test]
+    async fn root_listing_shows_multisegment_names_verbatim() {
+        let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+        map.insert(
+            "skill".to_string(),
+            Arc::new(ProviderChild {
+                dir: "agent/b1/skill",
+                provider: Arc::new(EchoProvider { label: "inner" }),
+            }),
+        );
+        let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
+        let ctx = host_ctx();
+
+        let names: Vec<String> = vdfs
+            .list(&ctx, "")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.name)
+            .collect();
+        assert!(names.contains(&"agent/b1/skill".to_string()), "{names:?}");
     }
 }
