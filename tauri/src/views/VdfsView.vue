@@ -124,7 +124,7 @@ async function onHomedirReloaded() {
 </script>
 
 <style scoped>
-/* logo 区（NavRail header 插槽内容） */
+/* logo 区（侧栏 header 插槽内容） */
 .logo-area {
   display: flex;
   align-items: center;
@@ -154,9 +154,5 @@ async function onHomedirReloaded() {
   color: var(--text-primary);
   white-space: nowrap;
   display: none;
-}
-
-.nav-btn {
-  position: relative;
 }
 </style>

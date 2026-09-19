@@ -18,6 +18,12 @@
   只交回纯字段值」：预填来自 `values`，保存 emit 纯字段值，由页面写回 `vdfs/write`。
 
   校验仍由 provider 自持（`vdfs/write` 失败带回字段级错误）。
+
+  ## 动作
+
+  本渲染器**不计算机制动作**：重命名 / 删除由页面单点算好后经 `mechanism-actions`
+  传入（DetailShell 负责与定义声明的动作合并、同 id 去重）。定义里声明的
+  `delete` 因此不会和机制兜底的 `delete` 变成两个按钮——那条去重规则只有一份实现。
 -->
 <template>
   <div class="vdfs-form">
@@ -37,6 +43,7 @@
       :values="values"
       :capabilities="capabilities"
       :mechanism-actions="mechanismActions"
+      :mechanism-busy="mechanismBusy"
       :saving="saving"
       :testing="testing"
       @save="(v) => $emit('save', v)"
@@ -51,27 +58,27 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import DetailForm from './DetailForm.vue'
-import type { DetailAction, DetailDefinition, VdfsNode } from '@/schemas/vdfs'
+import type { VdfsRendererProps } from './rendererContract'
 import {
   VDFS_ACTION_EXPORT,
   VDFS_ACTION_TEST,
+  isVdfsDraft,
   vdfsAccessOf,
-  type VdfsFieldError,
+  type DetailDefinition,
 } from '@/schemas/vdfs'
 
-const props = withDefaults(
-  defineProps<{
-    node: VdfsNode
-    /** vdfs/read 的文本按 JSON 解析后的字段值 */
-    data: unknown
-    error?: string
-    fieldErrors?: VdfsFieldError[]
-    saving?: boolean
-    /** 动作执行中的忙态（由页面持有：动作的结果只有页面知道） */
-    testing?: boolean
-  }>(),
-  { error: '', fieldErrors: () => [], saving: false, testing: false }
-)
+const props = withDefaults(defineProps<VdfsRendererProps>(), {
+  // `data` 刻意不给默认值：它的类型是 `unknown`（文本 / 字段对象都可能），
+  // 而 `withDefaults` 只接受工厂函数形式的默认值——给 `null` 会让 `data` 的
+  // 解析类型退化成 `null`。缺省即 `undefined`，`values` 计算属性已把
+  // `undefined` 归一为 `null`（与其余三个渲染器的口径一致）。
+  error: '',
+  fieldErrors: () => [],
+  saving: false,
+  testing: false,
+  mechanismActions: () => [],
+  mechanismBusy: null,
+})
 
 defineEmits<{
   (e: 'save', values: Record<string, unknown>): void
@@ -84,7 +91,7 @@ defineEmits<{
   /**
    * 进入节点内部（容器寻址：`<id>/<子类别>`）。由**详情定义**声明
    * （`open-container` 动作）触发——是否有内部结构是 provider 的知识，
-   * 前端只负责把动作转发给页面层 `enter(node.path)`。
+   * 前端只负责把动作转发给页面层 `browseInto`。
    */
   (e: 'browse'): void
   /** 节点重命名由页面级内联栏承载；此处仅声明以对齐渲染器统一契约 */
@@ -94,19 +101,11 @@ defineEmits<{
 const access = computed(() => vdfsAccessOf(props.node))
 
 /**
- * 草稿节点（机制「新建」态）：**还没有 id / 名字**——它还没落盘。
+ * 草稿节点（机制「新建」态）——判据与页面同源（`schemas/vdfs.isVdfsDraft`）。
  *
- * 判据与 `useVdfs.isDraftNode` 同源（路径为空），此处用 `name` 表达：
- * 对 form 资源两者等价，且 `name` 正是「详情页缺 id」的那一项。
- */
-const isDraft = computed(() => !props.node.name)
-
-/**
- * 草稿态**不成立**的定义动作：它们都以「这个资源已经存在」为前提。
- *
- * 保存本身（`save`）当然保留——草稿的保存就是「新建」。其余动作点下去只会
- * 打到一个不存在的地址上：删除没有目标、测试连接没有配置、浏览内部没有内部、
- * 导出没有内容。
+ * 草稿态**不成立**的定义动作：它们都以「这个资源已经存在」为前提。保存本身
+ * （`save`）当然保留——草稿的保存就是「新建」。其余动作点下去只会打到一个
+ * 不存在的地址上：删除没有目标、测试连接没有配置、浏览内部没有内部、导出没有内容。
  */
 const DRAFT_UNAVAILABLE_ACTIONS = new Set<string>([
   'delete',
@@ -122,6 +121,7 @@ const DRAFT_UNAVAILABLE_ACTIONS = new Set<string>([
  */
 const definition = computed<DetailDefinition>(() => {
   const raw = (props.node.schema ?? {}) as DetailDefinition
+  const draft = isVdfsDraft(props.node)
   return {
     ...raw,
     binding: 'option',
@@ -135,7 +135,7 @@ const definition = computed<DetailDefinition>(() => {
           (a) =>
             a.id === 'open-container' || a.id === VDFS_ACTION_TEST || a.id === VDFS_ACTION_EXPORT
         )
-    )?.filter((a) => !isDraft.value || !DRAFT_UNAVAILABLE_ACTIONS.has(a.id)),
+    )?.filter((a) => !draft || !DRAFT_UNAVAILABLE_ACTIONS.has(a.id)),
   }
 })
 
@@ -159,33 +159,6 @@ const capabilities = computed<Record<string, boolean>>(() => ({
   mutable: access.value.write,
   test_connection: testable.value,
 }))
-
-/**
- * 机制动作注入（与 VdfsSessionDetail 同构）。
- *
- * 能力判据是节点的访问位（`w` = 可写 ⇒ 可删）。删除请求经 `@delete` 回到页面层，
- * 由页面统一走 `vdfs/delete`（`VdfsProvider::delete`），本组件不直接发协议。
- *
- * 说明：`ext = form` 早期只由「设置分区」这类固定清单项使用（增删无语义），
- * 现在 model / skill / mcp / agent 的详情同样落到 form（`schema` 来自 provider 的
- * `detail_definition`），此时删除是有语义的，故按访问位注入。
- */
-const mechanismActions = computed<DetailAction[]>(() => {
-  // 草稿没有可删的东西：机制版「删除」只在已落盘的节点上出现
-  if (!access.value.write || isDraft.value) return []
-  // 不与定义声明的动作重复：model / mcp / skill / agent 的详情定义都自带
-  // `delete`（「删除 Provider」/「删除该 Agent」…），若再注入机制版「删除」，
-  // 同一页会渲染出两个删除按钮。两者语义本就相同（都经 @delete →
-  // `vdfs/delete`），故定义已声明的动作不再注入；定义未声明的资源仍由
-  // 机制兜底提供删除入口（写权限判据不变）。
-  const declared = new Set(
-    ((props.node.schema ?? {}) as DetailDefinition).actions?.map((a) => a.id) ?? []
-  )
-  const mine: DetailAction[] = [
-    { id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' },
-  ]
-  return mine.filter((a) => !declared.has(a.id))
-})
 </script>
 
 <style scoped>

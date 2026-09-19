@@ -16,11 +16,9 @@ import {
   VDFS_ACTION,
   VDFS_DELETE,
   VDFS_LIST,
-  VDFS_MKDIR,
   VDFS_MOVE,
   VDFS_READ,
   VDFS_STAT,
-  VDFS_TREE,
   VDFS_UNWATCH,
   VDFS_WATCH,
   VDFS_WRITE,
@@ -31,7 +29,6 @@ import {
   type VdfsListResponse,
   type VdfsMoveResponse,
   type VdfsNode,
-  type VdfsTreeResponse,
   type VdfsWriteResponse,
 } from '../schemas/vdfs'
 import { logger } from '@/utils/logger'
@@ -63,25 +60,6 @@ export async function listVdfs(
   } catch (err) {
     logger.error('vdfs-service', `listVdfs(${path}) failed:`, err)
     return { path, node: emptyNode(path), items: [] }
-  }
-}
-
-/** 树状遍历（只下钻访问位含 t 的目录） */
-export async function treeVdfs(
-  path: string,
-  opts?: { depth?: number; limit?: number }
-): Promise<VdfsTreeResponse> {
-  try {
-    const resp = await callPlugin<VdfsTreeResponse>(VDFS_TREE, {
-      path,
-      depth: opts?.depth,
-      limit: opts?.limit,
-    })
-    if (!resp) return { path, nodes: [], truncated: false }
-    return resp
-  } catch (err) {
-    logger.error('vdfs-service', `treeVdfs(${path}) failed:`, err)
-    return { path, nodes: [], truncated: false }
   }
 }
 
@@ -197,11 +175,6 @@ export async function runVdfsAction(
     action,
     ...(payload === undefined ? {} : { payload }),
   })
-}
-
-/** 新建目录 */
-export async function mkdirVdfs(path: string): Promise<VdfsWriteResponse> {
-  return callPlugin<VdfsWriteResponse>(VDFS_MKDIR, { path })
 }
 
 /** 移动 / 重命名（同一地址空间内） */

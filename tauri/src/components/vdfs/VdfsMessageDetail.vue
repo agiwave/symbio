@@ -10,6 +10,7 @@
   发言不是一次文件写入，而是一次**动作**（触发一整轮编排：模型调用 → 工具执行
   → 多轮流式落库）。后端对 `消息` 子树上的 `write` 显式拒绝（`Forbidden`），
   因此这里也不给保存 / 重命名 / 删除入口——**写入入口唯一**（聊天协议）。
+  机制动作集也因此不会注入任何东西：消息节点的访问位只有 `r`（无 `w`）。
 
   ## 与 `ext = session` 的分工
 
@@ -20,13 +21,14 @@
   这个视图不需要重读即可跟着长——这正是「流式即列表项的追加」的可视化。
 -->
 <template>
-  <div class="vdfs-message">
-    <header class="msg-head">
+  <DetailShell :mechanism-actions="mechanismActions" :mechanism-busy="mechanismBusy" :error="error">
+    <!-- 头部即「角色 / 类型 / 状态 / 序号」四枚小标，没有标题文本 -->
+    <template #title>
       <span class="role" :class="`role-${roleKey}`">{{ roleText }}</span>
       <span v-if="typeText" class="type">{{ typeText }}</span>
       <span class="status" :class="`status-${node.status}`">{{ statusText }}</span>
       <span v-if="seq !== null" class="seq">#{{ seq }}</span>
-    </header>
+    </template>
 
     <p v-if="node.error" class="msg-error">{{ node.error }}</p>
 
@@ -39,24 +41,17 @@
         <dd>{{ row.value }}</dd>
       </div>
     </dl>
-  </div>
+  </DetailShell>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { VdfsFieldError, VdfsNode } from '@/schemas/vdfs'
+import DetailShell from './DetailShell.vue'
+import type { VdfsRendererProps } from './rendererContract'
 import { MESSAGE_TYPE_TEXT } from '@/schemas/chat_message'
 import { messageRoleLabel, messageStatusLabel, messageTypeLabel } from '@/registry/messageTypes'
 
-// 渲染器统一契约（详见 VdfsTextDetail 同名说明）：
-// `data` 是节点内容（消息正文），`node` 携带结构（attributes）
-const props = defineProps<{
-  node: VdfsNode
-  data?: unknown
-  error?: string
-  fieldErrors?: VdfsFieldError[]
-  saving?: boolean
-}>()
+const props = defineProps<VdfsRendererProps>()
 
 defineEmits<{
   (e: 'save', payload: unknown): void
@@ -103,22 +98,6 @@ const meta = computed(() => {
 </script>
 
 <style scoped>
-.vdfs-message {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0.75rem 1rem;
-  gap: 0.6rem;
-}
-.msg-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-}
 .role {
   font-size: 0.7rem;
   font-weight: var(--font-weight-semibold);
@@ -127,33 +106,41 @@ const meta = computed(() => {
   background: var(--accent-subtle-bg);
   color: var(--accent);
 }
+
 .role-user {
   background: var(--success-subtle-bg);
 }
+
 .role-tool {
   background: var(--surface-sunken);
   color: var(--text-secondary);
 }
+
 .type,
 .seq {
   font-size: 0.68rem;
   color: var(--text-muted);
 }
+
 .status {
   font-size: 0.68rem;
   color: var(--text-muted);
 }
+
 .status-streaming {
   color: var(--accent);
 }
+
 .status-failed {
   color: var(--danger-fg);
 }
+
 .msg-error {
   margin: 0;
   font-size: 0.8rem;
   color: var(--danger-fg);
 }
+
 .msg-body {
   margin: 0;
   font-family: inherit;
@@ -163,27 +150,32 @@ const meta = computed(() => {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
 .msg-empty {
   margin: 0;
   font-size: 0.78rem;
   color: var(--text-muted);
 }
+
 .msg-meta {
   margin: 0;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
+
 .meta-row {
   display: flex;
   gap: 0.75rem;
   font-size: 0.75rem;
 }
+
 .meta-row dt {
   width: 5rem;
   flex-shrink: 0;
   color: var(--text-muted);
 }
+
 .meta-row dd {
   margin: 0;
   color: var(--text-secondary);

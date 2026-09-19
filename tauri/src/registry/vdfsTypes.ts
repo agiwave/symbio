@@ -8,6 +8,7 @@
  */
 
 import type { Component } from 'vue'
+import { createRendererRegistry } from './factory'
 import { getVdfsIcon } from './vdfsIcons'
 import {
   VDFS_EXT_DIR,
@@ -66,18 +67,19 @@ const EXT_RENDERERS: Record<string, VdfsRenderer> = {
   yml: 'text',
 }
 
-/** 渲染器组件注册表（由视图层按需注入；未注册的渲染器由视图兜底） */
-const RENDERER_COMPONENTS: Record<string, Component> = {}
+/**
+ * VDFS 详情域的渲染器注册表（机制来自 `registry/factory`）。
+ *
+ * 「标识 → 组件 + 兜底」这条机制只有一份实现；本文件只声明**本域的两个约定**：
+ * 标识的联合类型（`VdfsRenderer`）与兜底键（`fallback`）。
+ */
+const renderers = createRendererRegistry<VdfsRenderer>('fallback')
 
 /** 为某个渲染器登记组件（UI 资产，与数据契约严格分离） */
-export function registerVdfsRenderer(renderer: VdfsRenderer, component: Component): void {
-  RENDERER_COMPONENTS[renderer] = component
-}
+export const registerVdfsRenderer = renderers.register
 
 /** 取已注册的渲染器组件（未注册返回 undefined） */
-export function getVdfsRenderer(renderer: VdfsRenderer): Component | undefined {
-  return RENDERER_COMPONENTS[renderer]
-}
+export const getVdfsRenderer = renderers.get
 
 /**
  * 解析节点的详情渲染器（**前端选择详情页面的唯一入口**）。

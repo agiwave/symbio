@@ -16,18 +16,23 @@
     `vdfs/write`** 创建并落库——id 由后端生成）。
 
   选中同步：机制选中（:key 重挂载）是唯一真相，watch node.name → store.selectSession。
-  创建经 emit('created') 回到机制页面层。机制动作（删除/浏览内部等）经
-  mechanism-actions prop 注入、由 ChatMainPanel 头部与自身按钮并排渲染——
-  详情页只有专属渲染器/机制化两种形态，机制动作一律在详情页内部渲染，
+  创建经 emit('created') 回到机制页面层。
+
+  动作分两来源（合并与渲染都交给 ChatMainPanel 头部的一处）：
+  - **自有**（`actions`）= 「浏览内部」——进入会话同名目录，纯导航；
+  - **机制**（`mechanismActions`）= 删除，由页面按访问位单点算好注入。
+
+  详情页只有专属渲染器 / 机制化两种形态，机制动作一律在详情页内部渲染，
   页面不得另加外框。
 -->
 <template>
   <div v-if="hasId" class="session-editor">
     <ChatMainPanel
       class="col-chat"
+      :actions="actions"
       :mechanism-actions="mechanismActions"
-      :deleting="deleting"
-      @mech-action="onMechAction"
+      :mechanism-busy="mechanismBusy"
+      @action="onAction"
     />
   </div>
 
@@ -54,7 +59,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import type { DetailAction, VdfsNode } from '@/schemas/vdfs'
+import { isVdfsDraft, type DetailAction, type VdfsNode } from '@/schemas/vdfs'
 import type { ImageAttachment } from '@/types'
 import { useSessionsStore } from '@/stores/sessions'
 import { useToast } from '@/composables/useToast'
@@ -66,12 +71,13 @@ import ChatOptionBar from '@/components/chat/ChatOptionBar.vue'
 const props = defineProps<{
   /** 会话节点（`.vdfs/session/<id>`）；无 id / 名字 = 新建草稿态 */
   node: VdfsNode | null
-  capabilities: Record<string, boolean>
-  /** 机制动作注入（页面单一定义点计算：浏览内部/删除等） */
+  /** 会话自有动作（浏览内部；由 VdfsSessionDetail 声明） */
+  actions?: DetailAction[]
+  /** 机制动作注入（页面单一定义点计算：删除等） */
   mechanismActions?: DetailAction[]
+  /** 正在执行的机制动作 id（驱动其进行中文案） */
+  mechanismBusy?: string | null
   saving?: boolean
-  testing?: boolean
-  deleting?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -90,11 +96,12 @@ const creating = ref(false)
 /**
  * 是否已落盘的会话。
  *
- * **判据 = 有没有 id**（节点名即会话 id）：新建态由机制以「草稿节点」进入
- * （无 path / 无 name），因此「点新建」与「选中一项」走的是同一个渲染器、
- * 同一张详情页——差别只是这一页有没有东西可看。不再需要第二种页面形态。
+ * **判据与页面同源**（`schemas/vdfs.isVdfsDraft`：没有路径 = 还没落盘）：新建态
+ * 由机制以「草稿节点」进入（无 path / 无 name），因此「点新建」与「选中一项」
+ * 走的是同一个渲染器、同一张详情页——差别只是这一页有没有东西可看。
+ * 不再需要第二种页面形态，也不再各写一份「有没有名字」的判据。
  */
-const hasId = computed(() => Boolean(props.node?.name))
+const hasId = computed(() => !isVdfsDraft(props.node))
 
 /**
  * 新建态（懒创建）草稿：输入文本 + 选项行的 metadata 缓冲。
@@ -110,8 +117,8 @@ onMounted(() => {
   void nextTick(() => draftInputRef.value?.textarea?.focus())
 })
 
-/** 机制动作分发（ChatMainPanel 头部按钮 → 机制通道） */
-function onMechAction(a: DetailAction) {
+/** 动作分发（ChatMainPanel 头部按钮 → 页面层机制通道） */
+function onAction(a: DetailAction) {
   if (a.id === 'delete') emit('delete')
   else if (a.id === 'open-container')
     emit('open-container', String((a.payload as Record<string, unknown> | undefined)?.kind ?? ''))

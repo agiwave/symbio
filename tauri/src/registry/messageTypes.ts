@@ -21,6 +21,7 @@
  */
 
 import type { Component } from 'vue'
+import { createRendererRegistry } from './factory'
 import {
   CHAT_ROLE_ASSISTANT,
   CHAT_ROLE_SYSTEM,
@@ -769,18 +770,19 @@ export function messageRendererKey(f: MessageFacets): MessageRenderer {
   return presentationOf(f.type).renderer
 }
 
-/** 渲染器组件注册表（由 `messageRenderers.ts` 注入；未注册由视图兜底） */
-const RENDERER_COMPONENTS: Record<string, Component> = {}
+/**
+ * 消息域的渲染器注册表（机制来自 `registry/factory`）。
+ *
+ * 本文件只声明**本域的两个约定**：标识的联合类型（`MessageRenderer`）与兜底键
+ * （`fallback`）；「标识 → 组件 + 兜底」那套机制不在本文件里再实现一遍。
+ */
+const renderers = createRendererRegistry<MessageRenderer>('fallback')
 
 /** 为某个渲染器登记组件（UI 资产，与数据契约严格分离） */
-export function registerMessageRenderer(renderer: MessageRenderer, component: Component): void {
-  RENDERER_COMPONENTS[renderer] = component
-}
+export const registerMessageRenderer = renderers.register
 
 /** 取已登记的渲染器组件（未登记返回 undefined，调用方负责兜底） */
-export function getMessageRenderer(renderer: MessageRenderer): Component | undefined {
-  return RENDERER_COMPONENTS[renderer]
-}
+export const getMessageRenderer = renderers.get
 
 /**
  * 解析节点该由哪个组件渲染（**前端选择渲染形态的唯一入口**）。
@@ -790,6 +792,6 @@ export function getMessageRenderer(renderer: MessageRenderer): Component | undef
  * `undefined`，由视图层决定如何兜底（正常构建下不会发生）。
  */
 export function resolveMessageRenderer(f: MessageFacets): Component | undefined {
-  return RENDERER_COMPONENTS[messageRendererKey(f)] ?? RENDERER_COMPONENTS['fallback']
+  return renderers.resolve(messageRendererKey(f))
 }
 

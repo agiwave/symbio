@@ -65,16 +65,29 @@
 |---|---|---|
 | `schemas/vdfs.ts` | 数据契约 + 路径代数 | **保留**（扩展） |
 | `services/vdfs.ts` | 路径 → 请求的机械翻译 | **保留**（扩展） |
-| `composables/useVdfs.ts` | 页面逻辑（目录 / 选中 / 详情 / 实时） | **保留**（扩展） |
+| `composables/useVdfs.ts` | 页面逻辑（目录 / 选中 / 详情 / 实时）；**机制动作单点**（`mechanismActions`） | **保留**（扩展） |
 | `registry/vdfsTypes.ts` | `ext → 渲染器标识`（零组件导入） | **保留** |
 | `registry/vdfsRenderers.ts` | `标识 → 组件`（唯一装配点） | **保留** |
-| `components/vdfs/*.vue` | form / text / session / readonly 四个详情渲染器 | **保留** |
+| `registry/messageTypes.ts` / `messageRenderers.ts` | 消息域同构的一对：`facets → 渲染器标识` / `标识 → 组件` | **保留** |
+| `registry/factory.ts` | 「标识 → 组件 + 兜底」注册表机制（上列两域各声明一次，机制只有一份） | **保留** |
+| `registry/vdfsIcons.ts` | 图标映射（`kind` / `kind:ext` → SVG）+ 动作图标 | **保留** |
+| `components/common/Workbench.vue` | **三栏容器（唯一实现）**：左导航 + 中列表 + 右详情（插入槽） | **保留** |
+| `components/common/VdfsCard.vue` | 资源卡片（中栏列表项的呈现件） | **保留** |
+| `components/vdfs/DetailShell.vue` | 详情渲染器公共外壳（标题 + 动作区 + 错误条） | **保留** |
+| `components/vdfs/rendererContract.ts` | 渲染器统一契约（所有渲染器共用的 props 一份接口） | **保留** |
+| `components/vdfs/*.vue` | form / text / session / message / readonly 五个详情渲染器 | **保留** |
 | `components/vdfs/VdfsWorkbench.vue` | **三栏工作台控件（唯一实现）**：绑定数据地址，自取左栏 / 中栏 / 详情（S15 新增） | **保留**（S15 新增） |
 | `views/VdfsView.vue` | 路由宿主：浏览器地址 ↔ 数据地址换算 + 宿主件注入（返回键 / logo / 系统目录） | **保留**（扩展） |
 | `router/index.ts` | `/vdfs/:dir(.*)*`（`MainLayout` 子路由；深链/返回键多级地址） | **保留** |
 
 结论：前端既有改动**方向正确、结构合理**，与目标一致的部分**整体保留**，
 G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
+
+> **现状校正（针对 §7.1 的 S3）**：§7.1 记「消息（转写）不经 VDFS」，那是当时
+> 的形态。**现在消息已在 VDFS 上**——`.vdfs/session/<id>/消息/<mid>`，节点
+> `ext = message`，转写经 `services/vdfsTranscriptSync.ts` 同步，详情由
+> `components/vdfs/VdfsMessageDetail.vue` 呈现。§7 是进度档案、按约定不改写，
+> 但读 §7.1 时请以本条为准。
 
 ### 2.3 与目标的差距
 

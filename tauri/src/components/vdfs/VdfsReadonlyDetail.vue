@@ -4,21 +4,23 @@
   节点没有任何专属渲染器时，退化为「机制级只读视图」：展示节点自身的
   机制字段（路径 / 类型 / 状态 / 访问位 / 大小 / 更新时间）与场景扩展字段。
   这是资源管理器永不空白的原因，也是新增资源在补齐专属渲染器前的可用形态。
+
+  本渲染器**没有自有动作**：能做的只有机制级默认动作（重命名 / 删除，判据在
+  `useVdfs.mechanismActions`），故动作区完全由注入项构成。
 -->
 <template>
-  <div class="vdfs-readonly">
-    <header class="detail-head">
-      <div class="head-title">
-        <h3 class="title">{{ node.title || node.name }}</h3>
-        <span class="kind">{{ node.kind }}</span>
-      </div>
-      <div class="head-actions">
-        <VdfsActions :actions="actions" :busy="busy" @run="onAction" />
-      </div>
-    </header>
+  <DetailShell
+    :title="node.title || node.name"
+    :mechanism-actions="mechanismActions"
+    :mechanism-busy="mechanismBusy"
+    :error="error"
+    @run="onAction"
+  >
+    <template #meta>
+      <span class="kind">{{ node.kind }}</span>
+    </template>
 
     <p v-if="node.description" class="desc">{{ node.description }}</p>
-    <p v-if="error" class="detail-error">{{ error }}</p>
 
     <dl class="meta">
       <div class="meta-row"><dt>路径</dt><dd><code>{{ node.path }}</code></dd></div>
@@ -38,22 +40,17 @@
         </div>
       </dl>
     </div>
-  </div>
+  </DetailShell>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import VdfsActions from './VdfsActions.vue'
-import { vdfsAccessOf, type DetailAction, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
+import DetailShell from './DetailShell.vue'
+import type { VdfsRendererProps } from './rendererContract'
+import { vdfsAccessOf, type DetailAction } from '@/schemas/vdfs'
+import { formatDateTime } from '@/utils/time'
 
-// 渲染器统一契约（详见 VdfsTextDetail 同名说明）
-const props = defineProps<{
-  node: VdfsNode
-  data?: unknown
-  error?: string
-  fieldErrors?: VdfsFieldError[]
-  saving?: boolean
-}>()
+const props = defineProps<VdfsRendererProps>()
 
 const emit = defineEmits<{
   (e: 'save', payload: unknown): void
@@ -62,22 +59,8 @@ const emit = defineEmits<{
 }>()
 
 const access = computed(() => vdfsAccessOf(props.node))
-const writable = computed(() => access.value.write)
 
-/**
- * 动作区与其余详情页共用同一机制实现 `VdfsActions`（本渲染器不自建按钮）。
- * 能力判据是访问位（`w` = 可写 ⇒ 可改名 / 可删）；动作一律回到页面层执行。
- */
-const actions = computed<DetailAction[]>(() =>
-  writable.value
-    ? [
-        { id: 'rename', label: '重命名', style: 'secondary' },
-        { id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' },
-      ]
-    : []
-)
-const busy = computed(() => actions.value.map(() => Boolean(props.saving)))
-
+/** 本渲染器无自有动作：机制动作原样上抛给页面执行 */
 function onAction(a: DetailAction): void {
   if (a.id === 'rename') emit('rename')
   else if (a.id === 'delete') emit('delete')
@@ -93,12 +76,7 @@ const accessText = computed(() => {
   return parts.length ? `（${parts.join(' / ')}）` : '（无）'
 })
 
-const updatedText = computed(() => {
-  const ts = props.node.updated_at
-  if (!ts) return ''
-  const ms = ts < 1e12 ? ts * 1000 : ts
-  return new Date(ms).toLocaleString()
-})
+const updatedText = computed(() => formatDateTime(props.node.updated_at))
 
 /** 场景扩展字段（协议保留字段之外的项，即 flatten 到顶层的 attributes） */
 const RESERVED = new Set([
@@ -116,34 +94,6 @@ const attributes = computed(() =>
 </script>
 
 <style scoped>
-.vdfs-readonly {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0.75rem 1rem;
-  gap: 0.6rem;
-}
-.detail-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-shrink: 0;
-}
-.head-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-}
-.title {
-  margin: 0;
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
-}
 .kind {
   font-size: 0.65rem;
   padding: 0.1rem 0.45rem;
@@ -151,46 +101,43 @@ const attributes = computed(() =>
   background: var(--accent-subtle-bg);
   color: var(--accent);
 }
-.head-actions {
-  display: flex;
-  gap: 0.4rem;
-  flex-shrink: 0;
-}
+
 .desc {
   margin: 0;
   font-size: 0.8rem;
   color: var(--text-secondary);
   line-height: 1.5;
 }
-.detail-error {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--danger-fg);
-}
+
 .meta {
   margin: 0;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
+
 .meta-row {
   display: flex;
   gap: 0.75rem;
   font-size: 0.78rem;
 }
+
 .meta-row dt {
   width: 6.5rem;
   flex-shrink: 0;
   color: var(--text-muted);
 }
+
 .meta-row dd {
   margin: 0;
   color: var(--text-primary);
   word-break: break-all;
 }
+
 .meta-row code {
   font-family: var(--font-mono);
 }
+
 .attrs-title {
   margin: 0 0 0.25rem;
   font-size: 0.75rem;

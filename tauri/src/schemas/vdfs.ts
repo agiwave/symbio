@@ -389,6 +389,31 @@ export function isVdfsDir(node: { access?: string } | null | undefined): boolean
   return vdfsAccessOf(node).list
 }
 
+/**
+ * 是否**系统资源地址**（`.vdfs` 打头）。
+ *
+ * 地址空间只有两个半边：`.vdfs` 之下是各 provider 挂载的虚拟资源，其余是
+ * 工作目录里的物理文件（见 [`VDFS_ROOT`]）。这个划分**是能力差异的来源**：
+ * 物理半边由文件系统 provider 承载 `move`（同一地址空间内改名），虚拟半边由
+ * 各插件 provider 自持，它们一律没有实现 `move` —— 因此「重命名」入口只对
+ * 物理地址给出（见 `useVdfs.mechanismActions`）。
+ */
+export function isVdfsSystemAddr(path: string): boolean {
+  return path === VDFS_ROOT || path.startsWith(`${VDFS_ROOT}/`)
+}
+
+/**
+ * 草稿节点（机制「新建」态）的**唯一判据**：没有路径。
+ *
+ * 草稿还没落盘，于是没有地址、也没有名字——三者说的是同一件事，但只有
+ * `path` 是**定义**（地址唯一标识一个节点），「没有名字」是它的推论。
+ * 此前这条判据在四处各写了一遍（`!node.path` / `!node.name`），当前取值恰好
+ * 等价，靠注释解释而非靠机制保证；收敛到这里后，各处一律引用本函数。
+ */
+export function isVdfsDraft(node: { path?: string } | null | undefined): boolean {
+  return !node?.path
+}
+
 // ==================== 会话转写地址（地址代数的会话特例） ====================
 //
 // 会话在 VDFS 上是「叶子 + 内部区段」：

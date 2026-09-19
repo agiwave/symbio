@@ -133,3 +133,58 @@ export interface DetailDefinition {
   badges?: DetailBadge[]
   actions?: DetailAction[]
 }
+
+// ==================== 动作区装配（机制唯一实现） ====================
+
+/** 动作分组的视觉分隔符（`VdfsActions` 已内置其渲染） */
+export const DETAIL_ACTION_DIVIDER: DetailAction = { id: 'divider', label: '', style: 'divider' }
+
+/**
+ * 把「渲染器自有动作」与「机制动作」装配成一行动作区。
+ *
+ * 动作来自两个来源，职责不同：`own` 随资源形态而变（save / reset / test /
+ * open-container…），由渲染器声明；`mechanism` 是页面对**任何已落盘的可写节点**
+ * 都能做的默认动作（重命名 / 删除），由页面单点算好
+ * （`useVdfs.mechanismActions`）——渲染器不该各算一遍。
+ *
+ * 规则只有两条，因此只有这一份实现：
+ *
+ * 1. 两段之间插一个 `DETAIL_ACTION_DIVIDER`（视觉分组）；
+ * 2. **同 id 时渲染器声明的那一份胜出** —— 渲染器对「这是哪个动作」更具体
+ *    （如后端详情定义给 `delete` 配了更贴切的文案），机制只负责保证它存在。
+ *    于是「定义声明了 delete」与「机制兜底提供 delete」不会渲染成两个按钮。
+ *
+ * 返回的三个数组**等长且按索引对齐**（`VdfsActions` 的入参形状）：自有动作的
+ * 忙态取自调用方给的等长数组；机制动作同时最多只有一个在跑，故按 id 判定。
+ */
+export function mergeDetailActions(
+  own: DetailAction[],
+  mechanism: DetailAction[],
+  ownBusy: boolean[] = [],
+  ownDisabled: boolean[] = [],
+  mechanismBusyId: string | null = null,
+): { actions: DetailAction[]; busy: boolean[]; disabled: boolean[] } {
+  const actions: DetailAction[] = []
+  const busy: boolean[] = []
+  const disabled: boolean[] = []
+  own.forEach((a, i) => {
+    actions.push(a)
+    busy.push(Boolean(ownBusy[i]))
+    disabled.push(Boolean(ownDisabled[i]))
+  })
+  const declared = new Set(own.map((a) => a.id))
+  const extra = mechanism.filter((a) => !declared.has(a.id))
+  if (extra.length) {
+    if (actions.length) {
+      actions.push(DETAIL_ACTION_DIVIDER)
+      busy.push(false)
+      disabled.push(false)
+    }
+    for (const a of extra) {
+      actions.push(a)
+      busy.push(a.id === mechanismBusyId)
+      disabled.push(false)
+    }
+  }
+  return { actions, busy, disabled }
+}

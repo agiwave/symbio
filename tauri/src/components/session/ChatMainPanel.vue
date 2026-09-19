@@ -2,18 +2,33 @@
   <div class="chat-main-panel">
     <header v-if="hasActive" class="chat-header">
       <div class="header-left">
-        <h2 class="session-name">{{ store.activeTitle }}</h2>
-        <span v-if="store.isActiveWorking" class="status-working">● AI 处理中</span>
+        <!-- 内联重命名：原地把标题变成输入框。不用浏览器原生 prompt——
+             它阻塞主线程、样式与主题脱节、且无法做焦点管理。 -->
+        <input
+          v-if="renaming"
+          ref="renameInputRef"
+          v-model="draftTitle"
+          class="rename-input"
+          spellcheck="false"
+          @keyup.enter="submitRename"
+          @keyup.esc="cancelRename"
+          @blur="cancelRename"
+        />
+        <template v-else>
+          <h2 class="session-name">{{ store.activeTitle }}</h2>
+          <span v-if="store.isActiveWorking" class="status-working">● AI 处理中</span>
+        </template>
       </div>
       <div class="header-right">
-        <!-- 机制动作（页面注入：浏览内部/删除等）与自身按钮并排，同构图标风格 -->
+        <!-- 动作区 = 会话自有动作（浏览内部）+ 机制动作（删除），
+             去重合并由机制唯一实现（schemas/vdfs-form.mergeDetailActions） -->
         <VdfsActions
-          v-if="(mechanismActions ?? []).length"
-          :actions="mechanismActions ?? []"
-          :busy="mechBusy"
-          @run="(a) => emit('mech-action', a)"
+          v-if="merged.actions.length"
+          :actions="merged.actions"
+          :busy="merged.busy"
+          @run="(a) => emit('action', a)"
         />
-        <button class="header-btn" title="清空历史" @click="onClearHistory">
+        <button class="header-btn" title="清空历史" @click="confirmClear.visible = true">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 6h18" />
             <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
@@ -22,7 +37,7 @@
             <path d="M14 11v6" />
           </svg>
         </button>
-        <button class="header-btn" title="重命名" @click="onRename">
+        <button class="header-btn" title="重命名" @click="startRename">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
@@ -30,6 +45,19 @@
         </button>
       </div>
     </header>
+
+    <!-- 破坏性操作统一走自定义对话框（不用 window.confirm：同样是阻塞 + 主题脱节） -->
+    <ConfirmDialog
+      v-model:visible="confirmClear.visible"
+      title="清空历史"
+      message="确定要清空当前会话的全部历史消息吗？此操作不可撤销。"
+      confirm-text="清空"
+      icon="⚠"
+      icon-kind="danger"
+      danger
+      :loading="confirmClear.busy"
+      @confirm="onClearHistory"
+    />
 
     <main class="chat-body">
       <template v-if="!hasActive">
@@ -74,29 +102,38 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
 import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
 import VdfsActions from '@/components/vdfs/VdfsActions.vue'
-import type { DetailAction } from '@/schemas/vdfs'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import { mergeDetailActions, type DetailAction } from '@/schemas/vdfs'
 
 const props = defineProps<{
-  /** 机制动作注入（页面单一定义点计算：浏览内部/删除等），与自身按钮并排渲染 */
+  /** 会话自有动作（如「浏览内部」），由 Session ← VdfsSessionDetail 声明 */
+  actions?: DetailAction[]
+  /** 机制动作注入（页面单一定义点计算：删除等），与自身按钮并排渲染 */
   mechanismActions?: DetailAction[]
-  /** 删除进行中（机制删除动作的 busy 状态） */
-  deleting?: boolean
+  /** 正在执行的机制动作 id（驱动其进行中文案） */
+  mechanismBusy?: string | null
 }>()
 
 const emit = defineEmits<{
-  /** 机制动作上抛（Session editor 分发到机制通道：delete / open-container） */
-  (e: 'mech-action', action: DetailAction): void
+  /** 动作上抛（Session 分发到页面层机制通道：delete / open-container） */
+  (e: 'action', action: DetailAction): void
 }>()
 
-/** 机制动作进行中标记（按索引对齐） */
-const mechBusy = computed(() =>
-  (props.mechanismActions ?? []).map((a) => a.id === 'delete' && Boolean(props.deleting))
+/** 动作区 = 自有 + 机制（去重合并与忙态对齐由机制唯一实现） */
+const merged = computed(() =>
+  mergeDetailActions(
+    props.actions ?? [],
+    props.mechanismActions ?? [],
+    [],
+    [],
+    props.mechanismBusy ?? null
+  )
 )
 
 const store = useSessionsStore()
@@ -166,21 +203,47 @@ function dismissError() {
   loadError.value = null
 }
 
-async function onRename() {
+/** 内联重命名（原地编辑标题；不用浏览器原生 prompt） */
+const renaming = ref(false)
+const draftTitle = ref('')
+const renameInputRef = ref<HTMLInputElement | null>(null)
+
+async function startRename() {
   if (!store.activeId) return
-  const newTitle = prompt('新标题', store.activeTitle)
-  if (!newTitle || newTitle.trim() === '') return
-  await store.rename(store.activeId, newTitle.trim())
+  draftTitle.value = store.activeTitle
+  renaming.value = true
+  await nextTick()
+  renameInputRef.value?.select()
 }
 
-/** 清空当前会话的全部历史消息（保留会话本身）。破坏性操作，先确认。 */
+function cancelRename() {
+  renaming.value = false
+}
+
+/** 提交重命名（空标题或与原名相同视为放弃——不做无意义的往返） */
+async function submitRename() {
+  const id = store.activeId
+  if (!id || !renaming.value) return
+  const title = draftTitle.value.trim()
+  renaming.value = false
+  if (!title || title === store.activeTitle) return
+  await store.rename(id, title)
+}
+
+/** 清空历史的确认态（破坏性操作统一走 ConfirmDialog） */
+const confirmClear = reactive({ visible: false, busy: false })
+
+/** 清空当前会话的全部历史消息（保留会话本身） */
 async function onClearHistory() {
   if (!store.activeId) return
-  if (!window.confirm('确定要清空当前会话的全部历史消息吗？此操作不可撤销。')) return
+  confirmClear.busy = true
   try {
     await store.clearMessages(store.activeId)
+    confirmClear.visible = false
   } catch (e) {
     logger.error('ChatMainPanel', '清空历史失败', e)
+  } finally {
+    confirmClear.busy = false
   }
 }
 </script>
@@ -226,6 +289,21 @@ async function onClearHistory() {
 .status-working {
   font-size: 0.75rem;
   color: #22c55e;
+}
+
+/* 内联重命名的输入框（替换标题位；宽度与 .session-name 一致，避免布局跳动） */
+.rename-input {
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--surface-sunken);
+  border: 1px solid var(--accent);
+  border-radius: 0.375rem;
+  padding: 0.15rem 0.5rem;
+  width: 16.25rem;
+  max-width: 100%;
+  outline: none;
 }
 
 .header-right {

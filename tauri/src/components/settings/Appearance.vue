@@ -147,16 +147,12 @@ import { useAppearanceStore, type ThemeMode, type FontSize } from '@/stores/appe
 import { useSoundSettingsStore } from '@/stores/soundSettings'
 import { playCompletionChime } from '@/services/completionChime'
 import SettingsFormShell from './SettingsFormShell.vue'
-import type { VdfsNode } from '@/schemas/vdfs'
+import type { VdfsRendererProps } from '@/components/vdfs/rendererContract'
 
-// VDFS 的 form 渲染器会透传 capabilities/saving/testing/deleting 等编辑器级 props，
-// 本表单不消费它们，禁止落根 DOM（清 fallthrough 污染）。
-defineOptions({ inheritAttrs: false })
-
-defineProps<{
-  /** 当前节点（渲染器统一契约透传；本表单一律自取 store） */
-  node?: VdfsNode | null
-}>()
+// 声明渲染器统一契约的**全量** props：页面恒传 node / data / testing /
+// mechanism-actions…，声明了才不会被透传到根 DOM（不需要 inheritAttrs 兜底）。
+// 本表单一律自取 store，不消费其中任何一项。
+defineProps<VdfsRendererProps>()
 
 const appearance = useAppearanceStore()
 const sound = useSoundSettingsStore()

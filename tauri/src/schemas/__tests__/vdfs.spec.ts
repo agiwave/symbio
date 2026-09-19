@@ -10,6 +10,8 @@ import {
   VDFS_ROOT,
   actionFileOf,
   isVdfsDir,
+  isVdfsDraft,
+  isVdfsSystemAddr,
   newFileNameOf,
   parseVdfsValidation,
   vdfsAccessOf,
@@ -49,6 +51,37 @@ describe('vdfsAccessOf / isVdfsDir', () => {
     // kind 声称是目录但无 l 位 → 仍非目录（先落到变量上以绕开字面量多余属性检查）
     const claimsDir = { access: 'r', kind: 'dir' }
     expect(isVdfsDir(claimsDir)).toBe(false)
+  })
+})
+
+describe('isVdfsSystemAddr（地址空间的两个半边）', () => {
+  it('虚拟根自身与 `.vdfs/` 之下都是系统资源地址', () => {
+    expect(isVdfsSystemAddr(VDFS_ROOT)).toBe(true)
+    expect(isVdfsSystemAddr('.vdfs/model/gpt4')).toBe(true)
+  })
+
+  it('工作目录里的物理文件不是系统资源地址（重命名只对物理侧开放）', () => {
+    expect(isVdfsSystemAddr('notes/a.md')).toBe(false)
+    expect(isVdfsSystemAddr('/tmp/demo.zip')).toBe(false)
+    // 前缀相近但不是系统根：不得按 startsWith('.vdfs') 误判
+    expect(isVdfsSystemAddr('.vdfsx/a')).toBe(false)
+  })
+})
+
+describe('isVdfsDraft（草稿 == 没有路径）', () => {
+  it('没有 path（含空串 / 缺字段）即为草稿', () => {
+    expect(isVdfsDraft({ path: '' })).toBe(true)
+    expect(isVdfsDraft({})).toBe(true)
+  })
+
+  it('null / undefined 也算草稿（调用方不必先判空）', () => {
+    expect(isVdfsDraft(null)).toBe(true)
+    expect(isVdfsDraft(undefined)).toBe(true)
+  })
+
+  it('一旦落盘（有非空 path）就不是草稿——名字不是判据', () => {
+    expect(isVdfsDraft({ path: '.vdfs/model/gpt4' })).toBe(false)
+    expect(isVdfsDraft({ path: 'notes/a.md' })).toBe(false)
   })
 })
 

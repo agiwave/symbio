@@ -136,7 +136,7 @@ const BASELINE = {
   //   经回退验证：去掉消息 `write` 的 id 补齐逻辑，`message_write_accepts_a_patch_without_id`
   //   即红——该例正是首轮跑测试抓出的真实缺陷（`ChatMessage::id` 必填让「字段子集」不成立）。
   rustTests: 732,
-  vitestFiles: 24,
+  vitestFiles: 28,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态
   // 160 → 164：工具调用运行态——「运行中」标签 + 动效点 + 已运行时长、
@@ -184,7 +184,24 @@ const BASELINE = {
   //     含「`ContentPart[]` 曾被读成空串」的回归）、`stuckFailurePlanOf` ×3、
   //     会话节点订阅的启停与幂等 ×2、提示音未注入来源时的兜底 ×1、
   //     `messageRendererKey` 防漏登记 ×1。
-  vitestTests: 319,
+  // 319 → 360（文件 24 → 28）：前端机制化收敛（P1–P7）——
+  //   · P1 三栏拍平：NavRail / VdfsShell 并入 Workbench（删 2 个组件、去死插槽）；
+  //   · P2 公共详情外壳 `DetailShell.vue` + 渲染器统一契约 `rendererContract.ts`
+  //     （此前头注释里的散文契约变成一份接口）；
+  //   · P3 机制动作单点：`useVdfs.mechanismActions` 一处计算，`mergeDetailActions`
+  //     一处装配（同 id 去重 + divider）——那条规则此前在三处各写一遍；
+  //   · P4 注册表工厂化：`registry/factory.ts` 的 `createRendererRegistry` 成为
+  //     「标识 → 组件 + 兜底」的唯一实现，VDFS 域与消息域各声明一次；
+  //   · P5 死代码：`utils/time.ts::formatTime`（零引用但被测试养着）、
+  //     `services/vdfs.ts::mkdirVdfs` / `treeVdfs`（零引用）一并删除；
+  //   · P6/P7 交互收口与时间归一：`window.prompt/confirm` → 机制内联重命名 +
+  //     `ConfirmDialog`；相对/绝对时间各自一处（含秒/毫秒两口径）。
+  //   新增 spec：`schemas/vdfs-form.spec.ts` ×6（mergeDetailActions）、
+  //   `registry/factory.spec.ts` ×6（注册表三动作 + 两域隔离）、
+  //   `components/vdfs/VdfsDetailActions.spec.ts` ×8（三个渲染器的动作装配护栏）、
+  //   `schemas/vdfs.spec.ts` +5（`isVdfsDraft` / `isVdfsSystemAddr`）；
+  //   `VdfsFormDetail.spec.ts` 由「自算去重」改为「传参直通」基线（3 → 3，净零）。
+  vitestTests: 360,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */
@@ -324,6 +341,9 @@ function maybeSandboxDeleteHint(output) {
     yellow('      ⚠ 输出含「批量删除被拦」字样：这是沙箱限制，不是构建/测试失败。'),
   )
   console.log(yellow('        确认方法：在沙箱外跑同一条命令，或先手工清掉 dist/ 与 coverage/。'))
+  console.log(
+    yellow('        只验覆盖率阈值时可绕过这次删除：`vitest run --coverage --coverage.clean=false`'),
+  )
 }
 
 /**
@@ -504,17 +524,20 @@ async function stageFrontend() {
     // 与「用例失败」不是一回事，提示要指对地方（阈值在 vitest.config.ts）。
     const coverageRed = /Coverage for .* does not meet/.test(stripAnsi(vitest.output))
     if (!coverageRed) maybeSandboxDeleteHint(vitest.output)
-    // 沙箱拦截导致的「未判定」：不记失败，但写明（见 blockedBySandboxDelete 的说明）
+    // 沙箱拦截导致的「未判定」：不记失败，但写明（见 blockedBySandboxDelete 的说明）。
+    // **不 return**：本阶段后面还有 vite build / eslint，沙箱只影响覆盖率这一步；
+    // 早退会让那两步连跑都不跑（汇总里根本不出现），把「没检查」伪装成「通过」——
+    // 本文件顶部那条「一个必然红 / 静默跳过的门禁比没有门禁更糟」说的就是这种。
     if (!coverageRed && blockedBySandboxDelete(vitest.output)) {
       record('frontend', 'vitest run --coverage', true, '沙箱拦截批量删除 ⇒ 本步未判定')
-      return
+    } else {
+      const note = vitest.timedOut
+        ? '超时终止'
+        : coverageRed
+          ? '覆盖率低于阈值（见 tauri/vitest.config.ts 的 coverage.thresholds）'
+          : `exit=${vitest.code}, signal=${vitest.signal}`
+      record('frontend', 'vitest run --coverage', false, note)
     }
-    const note = vitest.timedOut
-      ? '超时终止'
-      : coverageRed
-        ? '覆盖率低于阈值（见 tauri/vitest.config.ts 的 coverage.thresholds）'
-        : `exit=${vitest.code}, signal=${vitest.signal}`
-    record('frontend', 'vitest run --coverage', false, note)
   } else if (!enough) {
     record('frontend', 'vitest run --coverage', false, `文件/用例数未达基线或无法解析：${files}/${tests}（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`)
   } else {
@@ -535,11 +558,12 @@ async function stageFrontend() {
   })
   if (!build.ok) console.log(yellow('      ↳ 构建失败：本地复现用 `npm run build`（在 tauri/ 下）'))
   if (!build.ok) maybeSandboxDeleteHint(build.output)
+  // 同样是「只跳过本步」：后面还有 eslint，早退会把它一起吞掉
   if (!build.ok && blockedBySandboxDelete(build.output)) {
     record('frontend', 'vite build', true, '沙箱拦截批量删除 ⇒ 本步未判定')
-    return
+  } else {
+    record('frontend', 'vite build', build.ok)
   }
-  record('frontend', 'vite build', build.ok)
 
   // 分层 lint：`no-restricted-imports` 把 M-003 / M-004 / M-005 与
   // 「service 不认识 store」变成**结构化**判定（正则守卫看不见重导出与动态导入）。

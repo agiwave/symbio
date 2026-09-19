@@ -31,33 +31,31 @@
   不适用本渲染器，各自登记专属组件。
 -->
 <template>
-  <div class="detail-form">
-    <!-- 顶部：标题 + 徽标 + 操作（与专属渲染器的 form-header 同构） -->
-    <header class="form-header">
-      <div class="title-area">
-        <div class="title-block">
-          <div class="title-line">
-            <h2 class="title-text">{{ displayTitle }}</h2>
-            <span v-for="(b, i) in visibleBadges" :key="i" class="badge" :class="b.style">
-              {{ b.label }}
-            </span>
-          </div>
-          <p v-if="subtitleParts.length" class="subtitle">
-            <span v-for="(p, i) in subtitleParts" :key="i" class="subtitle-part">
-              <span v-if="i > 0" class="dot">·</span>{{ p }}
-            </span>
-          </p>
+  <DetailShell
+    :actions="visibleActions"
+    :busy="busyFlags"
+    :disabled="disabledFlags"
+    :mechanism-actions="mechanismActions"
+    :mechanism-busy="mechanismBusy"
+    panel
+    @run="runAction"
+  >
+    <!-- 标题块：标题 + 徽标 + 副标题。比默认的「一行纯标题」复杂，故覆盖 #title 插槽 -->
+    <template #title>
+      <div class="title-block">
+        <div class="title-line">
+          <h2 class="title-text">{{ displayTitle }}</h2>
+          <span v-for="(b, i) in visibleBadges" :key="i" class="badge" :class="b.style">
+            {{ b.label }}
+          </span>
         </div>
+        <p v-if="subtitleParts.length" class="subtitle">
+          <span v-for="(p, i) in subtitleParts" :key="i" class="subtitle-part">
+            <span v-if="i > 0" class="dot">·</span>{{ p }}
+          </span>
+        </p>
       </div>
-      <div v-if="allActions.length" class="header-actions">
-        <VdfsActions
-          :actions="allActions"
-          :busy="busyFlags"
-          :disabled="disabledFlags"
-          @run="runAction"
-        />
-      </div>
-    </header>
+    </template>
 
     <!-- 表单主体：分区（可折叠）+ 字段行 -->
     <div class="form-body">
@@ -163,12 +161,12 @@
         </div>
       </template>
     </div>
-  </div>
+  </DetailShell>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, watch } from 'vue'
-import VdfsActions from './VdfsActions.vue'
+import DetailShell from './DetailShell.vue'
 import type {
   DetailAction,
   DetailBadge,
@@ -190,16 +188,25 @@ const props = withDefaults(
      */
     values?: Record<string, unknown> | null
     capabilities: Record<string, boolean>
-    /** 机制动作注入（页面单一定义点计算：容器入口/测试/删除，
-     *  已排除定义声明过的动作），与定义动作同排渲染于 header-actions */
+    /** 机制动作注入（页面单一定义点计算：重命名 / 删除），与定义动作同排渲染于动作区。
+     *  同 id 时**定义声明的那一份胜出**（去重规则见 schemas/vdfs-form.mergeDetailActions）。 */
     mechanismActions?: DetailAction[]
     saving?: boolean
     testing?: boolean
-    deleting?: boolean
+    /** 正在执行的机制动作 id（`delete` 的忙态来源于此——无论删除由谁声明，
+     *  执行者都是页面的 `vdfs/delete`） */
+    mechanismBusy?: string | null
     /** 新建模式下用于 ID 去重的现有 id 列表 */
     existingIds?: string[]
   }>(),
-  { values: null, mechanismActions: () => [], saving: false, testing: false, deleting: false, existingIds: () => [] }
+  {
+    values: null,
+    mechanismActions: () => [],
+    saving: false,
+    testing: false,
+    mechanismBusy: null,
+    existingIds: () => [],
+  }
 )
 
 const emit = defineEmits<{
@@ -399,24 +406,17 @@ const visibleActions = computed<DetailAction[]>(() =>
   (props.definition.actions ?? []).filter((a) => evalCond(a.when))
 )
 
-/** 完整动作行 = 定义动作（条件求值后）+ 机制动作注入（divider 分隔）。
- *  两段同源不同责：定义动作随定义下发，机制动作由页面单点计算注入。 */
-const allActions = computed<DetailAction[]>(() => {
-  const injected = props.mechanismActions ?? []
-  if (!injected.length) return visibleActions.value
-  if (!visibleActions.value.length) return injected
-  return [
-    ...visibleActions.value,
-    { id: 'divider', label: '', style: 'divider' },
-    ...injected,
-  ]
-})
-
+/**
+ * 定义动作的忙态。
+ *
+ * 删除单独一路：无论「删除」是详情定义声明的还是机制兜底注入的，执行者都是
+ * 页面的 `vdfs/delete`（经 `@delete`），故它的忙态一律取机制动作忙态。
+ * 其余动作（内置 `test`，以及 provider 自持的 VDFS 动作如 `export`）共用
+ * 页面层的单一动作忙态——同一时刻只可能有一个动作在执行。
+ */
 function actionBusy(a: DetailAction): boolean {
   if (a.id === 'save') return props.saving
-  if (a.id === 'delete') return props.deleting
-  // 其余动作（内置 `test`，以及 provider 自持的 VDFS 动作如 `export`）共用
-  // 页面层的单一动作忙态——同一时刻只可能有一个动作在执行
+  if (a.id === 'delete') return props.mechanismBusy === 'delete'
   return props.testing
 }
 
@@ -429,9 +429,10 @@ function actionDisabled(a: DetailAction): boolean {
   return a.disabled_when ? evalCond(a.disabled_when) : false
 }
 
-/** VdfsActions 按索引对齐的进行中/禁用标记 */
-const busyFlags = computed(() => allActions.value.map((a) => actionBusy(a)))
-const disabledFlags = computed(() => allActions.value.map((a) => actionDisabled(a)))
+/** 定义动作的进行中 / 禁用标记（按索引对齐）。
+ *  机制动作的忙态由 `DetailShell` 按 id 判定，不在此列。 */
+const busyFlags = computed(() => visibleActions.value.map((a) => actionBusy(a)))
+const disabledFlags = computed(() => visibleActions.value.map((a) => actionDisabled(a)))
 
 function runAction(a: DetailAction) {
   switch (a.id) {
@@ -643,34 +644,8 @@ watch(
 </script>
 
 <style scoped>
-.detail-form {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-/* ============ 顶部 header：与专属渲染器的 form-header 同构 ============ */
-.form-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--border-default);
-  flex-shrink: 0;
-  gap: 0.75rem;
-  background: var(--surface-panel);
-}
-
-.title-area {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
+/* 标题块 / 徽标 / 副标题：DetailShell 的 header 是「一行」，本表单需要两行
+   （标题行 + 副标题行），故走 #title 插槽自带排版。 */
 .title-block {
   display: flex;
   flex-direction: column;
@@ -720,15 +695,6 @@ watch(
 .badge.default { background: var(--success-bg); color: var(--success-fg); }
 .badge.disabled { background: var(--surface-sunken); color: var(--text-muted); }
 .badge.accent { background: var(--accent-subtle-bg); color: var(--accent); }
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
 
 /* ============ 表单主体 ============ */
 .form-body {

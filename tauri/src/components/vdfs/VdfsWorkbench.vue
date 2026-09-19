@@ -17,191 +17,193 @@
     `.vdfs`、会话/智能体内部页绑 `.vdfs/session/<id>`，对控件毫无区别。
 -->
 <template>
-  <div class="vdfs-workbench">
-    <Workbench
-      :rail-items="navItems"
-      :title="title"
-      :list-width="260"
-      hide-default-new
-      :has-list-content="items.length > 0"
-      :loading="loading"
-      @rail-select="selectDir"
-    >
-      <template #rail-header><slot name="rail-header" /></template>
-      <template #rail-footer><slot name="rail-footer" /></template>
+  <Workbench
+    :rail-items="navItems"
+    :title="title"
+    :has-list-content="items.length > 0"
+    :loading="loading"
+    @rail-select="selectDir"
+  >
+    <template #rail-header><slot name="rail-header" /></template>
+    <template #rail-footer><slot name="rail-footer" /></template>
 
-      <template #header-actions>
-        <!-- 新建（节点声明了可接受的新建类型时可见；类型由后端下发，前端不硬编码） -->
-        <button
-          v-if="canCreate"
-          class="icon-btn"
-          :title="creatableTypes.length > 1 ? '新建（选择类型）' : `新建 ${creatableTypes[0]?.title ?? ''}`"
-          :disabled="loading || saving"
-          @click="startTypedNew"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
-        <button class="icon-btn" title="刷新" :disabled="loading" @click="refresh">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
-            <polyline points="21 3 21 8 16 8" />
-          </svg>
-        </button>
+    <template #header-actions>
+      <!-- 新建（节点声明了可接受的新建类型时可见；类型由后端下发，前端不硬编码） -->
+      <button
+        v-if="canCreate"
+        class="icon-btn"
+        :title="creatableTypes.length > 1 ? '新建（选择类型）' : `新建 ${creatableTypes[0]?.title ?? ''}`"
+        :disabled="loading || saving"
+        @click="startTypedNew"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
+      <button class="icon-btn" title="刷新" :disabled="loading" @click="refresh">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+          <polyline points="21 3 21 8 16 8" />
+        </svg>
+      </button>
+    </template>
+
+    <template #list>
+      <div class="vdfs-list" role="listbox" aria-label="资源列表" @scroll.passive="onListScroll">
+        <!-- 徽标只给目录（子项数）。⚠️ 文件不给徽标：`ext` 是**渲染器键**
+             （`form` / `session` 之类），属机制细节，不该出现在给用户看的列表里。 -->
+        <VdfsCard
+          v-for="n in items"
+          :key="n.path"
+          :title="n.title || n.name"
+          :subtitle="n.description"
+          :status="cardStatus(n)"
+          :status-title="cardStatusTitle(n)"
+          :show-status="Boolean(n.status)"
+          :badge="badgeOf(n)"
+          badge-kind="primary"
+          :tags="tagsOf(n)"
+          :icon="iconOf(n)"
+          :is-active="selectedId === n.path"
+          @click="onItemClick(n)"
+        />
+        <!-- 有界列表的收尾：滚到底自动续页，也留一个显式入口 -->
+        <div v-if="hasMore" class="list-more">
+          <button
+            v-if="!loadingMore"
+            class="more-btn"
+            :disabled="loading"
+            @click="loadMore"
+          >
+            加载更早
+          </button>
+          <span v-else class="more-hint">加载中…</span>
+        </div>
+      </div>
+    </template>
+
+    <template #empty>
+      <!-- 列表加载失败与「目录为空」是两件事：前者必须说出来，否则会被读成「没有数据」 -->
+      <p v-if="loadError" class="prompt-error">{{ loadError }}</p>
+      <template v-else>
+        <p>{{ selectedName ? '此目录为空' : '暂无子目录' }}</p>
+        <p v-if="canCreate" class="hint">点击右上角「新建」添加</p>
+        <p v-else class="hint">该目录由系统管理</p>
       </template>
+    </template>
 
-      <template #list>
-        <div class="vdfs-list" role="listbox" aria-label="资源列表" @scroll.passive="onListScroll">
-          <!-- 徽标只给目录（子项数）。⚠️ 文件不给徽标：`ext` 是**渲染器键**
-               （`form` / `session` 之类），属机制细节，不该出现在给用户看的列表里。 -->
-          <VdfsCard
-            v-for="n in items"
-            :key="n.path"
-            :title="n.title || n.name"
-            :subtitle="n.description"
-            :status="cardStatus(n)"
-            :status-title="cardStatusTitle(n)"
-            :show-status="Boolean(n.status)"
-            :badge="badgeOf(n)"
-            badge-kind="primary"
-            :tags="tagsOf(n)"
-            :icon="iconOf(n)"
-            :is-active="selectedId === n.path"
-            @click="onItemClick(n)"
-          />
-          <!-- 有界列表的收尾：滚到底自动续页，也留一个显式入口 -->
-          <div v-if="hasMore" class="list-more">
+    <template #detail>
+      <!-- 新建：多于一种类型时先选类型。选完**直接进入该类型的详情页**
+           （草稿态：无 id / 名字），与「选中一项」是同一条通道——名字要么在
+           详情页里产生（如会话的首条消息），要么由后端生成。 -->
+      <div v-if="creatingTyped" class="vdfs-prompt">
+        <template v-if="!createType">
+          <h3 class="prompt-title">新建</h3>
+          <p class="prompt-hint">请选择要新建的类型</p>
+          <div class="type-choice-list">
             <button
-              v-if="!loadingMore"
-              class="more-btn"
-              :disabled="loading"
-              @click="loadMore"
+              v-for="t in creatableTypes"
+              :key="t.ext"
+              type="button"
+              class="type-choice-btn"
+              @click="chooseType(t)"
             >
-              加载更早
+              <span class="type-choice-label">{{ t.title || t.ext }}</span>
+              <span class="type-choice-hint">{{ t.ext }}</span>
             </button>
-            <span v-else class="more-hint">加载中…</span>
           </div>
-        </div>
-      </template>
-
-      <template #empty>
-        <!-- 列表加载失败与「目录为空」是两件事：前者必须说出来，否则会被读成「没有数据」 -->
-        <p v-if="loadError" class="prompt-error">{{ loadError }}</p>
-        <template v-else>
-          <p>{{ selectedName ? '此目录为空' : '暂无子目录' }}</p>
-          <p v-if="canCreate" class="hint">点击右上角「新建」添加</p>
-          <p v-else class="hint">该目录由系统管理</p>
-        </template>
-      </template>
-
-      <template #detail>
-        <!-- 新建：多于一种类型时先选类型。选完**直接进入该类型的详情页**
-             （草稿态：无 id / 名字），与「选中一项」是同一条通道——名字要么在
-             详情页里产生（如会话的首条消息），要么由后端生成。 -->
-        <div v-if="creatingTyped" class="vdfs-prompt">
-          <template v-if="!createType">
-            <h3 class="prompt-title">新建</h3>
-            <p class="prompt-hint">请选择要新建的类型</p>
-            <div class="type-choice-list">
-              <button
-                v-for="t in creatableTypes"
-                :key="t.ext"
-                type="button"
-                class="type-choice-btn"
-                @click="chooseType(t)"
-              >
-                <span class="type-choice-label">{{ t.title || t.ext }}</span>
-                <span class="type-choice-hint">{{ t.ext }}</span>
-              </button>
-            </div>
-            <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
-            <div class="prompt-actions">
-              <button class="action-btn secondary" :disabled="saving" @click="cancelTyped">取消</button>
-            </div>
-          </template>
-
-          <!-- 内容来自本地文件（如 zip 整包导入）：内容在打开详情页之前就已齐备，
-               没有「边看边填」的过程，因此选文件即完成（唯一不进详情页的新建形态） -->
-          <template v-else>
-            <h3 class="prompt-title">导入{{ createType.title || createType.ext }}</h3>
-            <input
-              type="file"
-              class="prompt-input"
-              :accept="createType.ext ? `.${createType.ext}` : undefined"
-              @change="onTypedFile"
-            />
-            <p class="prompt-hint">写入地址：<code>{{ typedFilePreview }}</code></p>
-            <p v-if="createType.description" class="prompt-hint">{{ createType.description }}</p>
-            <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
-            <div class="prompt-actions">
-              <button class="action-btn" :disabled="saving || !typedFile" @click="submitTypedFile">
-                {{ saving ? '导入中…' : '导入' }}
-              </button>
-              <button
-                v-if="creatableTypes.length > 1"
-                class="action-btn secondary"
-                :disabled="saving"
-                @click="createType = null"
-              >
-                上一步
-              </button>
-              <button class="action-btn secondary" :disabled="saving" @click="cancelTyped">取消</button>
-            </div>
-          </template>
-        </div>
-
-        <!-- 重命名（内联；同一地址空间内移动） -->
-        <div v-else-if="renaming && selectedNode" class="vdfs-prompt">
-          <h3 class="prompt-title">重命名</h3>
-          <input
-            v-model="draftName"
-            class="prompt-input"
-            spellcheck="false"
-            @keyup.enter="submitRename"
-          />
-          <p class="prompt-hint">
-            由 <code>{{ selectedNode.path }}</code> 移动至
-            <code>{{ renamePreview }}</code>
-          </p>
           <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
           <div class="prompt-actions">
-            <button class="action-btn" :disabled="saving" @click="submitRename">
-              {{ saving ? '处理中…' : '确定' }}
-            </button>
-            <button class="action-btn secondary" :disabled="saving" @click="cancelRename">取消</button>
+            <button class="action-btn secondary" :disabled="saving" @click="cancelTyped">取消</button>
           </div>
-        </div>
+        </template>
 
-        <!-- 详情：渲染器由节点 ext 决定（唯一分发点）。**草稿（新建态）也走这里**
-             ——同一个 ext 用同一个渲染器，因此「点新建」与「选中一项」在交互上
-             没有第二种形态（key 对草稿另取，保证连续新建时重挂载）。 -->
-        <component
-          :is="rendererComp"
-          v-else-if="selectedNode && rendererComp"
-          :key="selectedNode.path || `draft-${draftSeq}`"
-          :node="selectedNode"
-          :data="rendererData"
-          :error="detailError"
-          :field-errors="fieldErrors"
-          :saving="saving"
-          :testing="actionBusy"
-          @save="onSave"
-          @delete="onDelete"
-          @action="onAction"
-          @created="onCreated"
-          @rename="startRename"
-          @browse="browseInto"
+        <!-- 内容来自本地文件（如 zip 整包导入）：内容在打开详情页之前就已齐备，
+             没有「边看边填」的过程，因此选文件即完成（唯一不进详情页的新建形态） -->
+        <template v-else>
+          <h3 class="prompt-title">导入{{ createType.title || createType.ext }}</h3>
+          <input
+            type="file"
+            class="prompt-input"
+            :accept="createType.ext ? `.${createType.ext}` : undefined"
+            @change="onTypedFile"
+          />
+          <p class="prompt-hint">写入地址：<code>{{ typedFilePreview }}</code></p>
+          <p v-if="createType.description" class="prompt-hint">{{ createType.description }}</p>
+          <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
+          <div class="prompt-actions">
+            <button class="action-btn" :disabled="saving || !typedFile" @click="submitTypedFile">
+              {{ saving ? '导入中…' : '导入' }}
+            </button>
+            <button
+              v-if="creatableTypes.length > 1"
+              class="action-btn secondary"
+              :disabled="saving"
+              @click="createType = null"
+            >
+              上一步
+            </button>
+            <button class="action-btn secondary" :disabled="saving" @click="cancelTyped">取消</button>
+          </div>
+        </template>
+      </div>
+
+      <!-- 重命名（内联；同一地址空间内移动） -->
+      <div v-else-if="renaming && selectedNode" class="vdfs-prompt">
+        <h3 class="prompt-title">重命名</h3>
+        <input
+          v-model="draftName"
+          class="prompt-input"
+          spellcheck="false"
+          @keyup.enter="submitRename"
         />
-
-        <div v-else-if="loadingDetail" class="vdfs-placeholder">加载中…</div>
-        <div v-else class="vdfs-placeholder">
-          <p>← 选择一个资源查看/编辑</p>
+        <p class="prompt-hint">
+          由 <code>{{ selectedNode.path }}</code> 移动至
+          <code>{{ renamePreview }}</code>
+        </p>
+        <p v-if="detailError" class="prompt-error">{{ detailError }}</p>
+        <div class="prompt-actions">
+          <button class="action-btn" :disabled="saving" @click="submitRename">
+            {{ saving ? '处理中…' : '确定' }}
+          </button>
+          <button class="action-btn secondary" :disabled="saving" @click="cancelRename">取消</button>
         </div>
-      </template>
-    </Workbench>
-  </div>
+      </div>
+
+      <!-- 详情：渲染器由节点 ext 决定（唯一分发点）。**草稿（新建态）也走这里**
+           ——同一个 ext 用同一个渲染器，因此「点新建」与「选中一项」在交互上
+           没有第二种形态（key 对草稿另取，保证连续新建时重挂载）。
+
+           机制动作（改名 / 删除）由**本控件**算一次后注入所有渲染器：它们是
+           「页面对任何已落盘可写节点都能做的默认动作」，不该由每个渲染器各算一遍
+           （见 useVdfs.mechanismActions）。渲染器只声明**它自己特有**的动作。 -->
+      <component
+        :is="rendererComp"
+        v-else-if="selectedNode && rendererComp"
+        :key="selectedNode.path || `draft-${draftSeq}`"
+        :node="selectedNode"
+        :data="rendererData"
+        :error="detailError"
+        :field-errors="fieldErrors"
+        :saving="saving"
+        :testing="actionBusy"
+        :mechanism-actions="mechanismActions"
+        :mechanism-busy="mechanismBusyId"
+        @save="onSave"
+        @delete="onDelete"
+        @rename="startRename"
+        @action="onAction"
+        @created="onCreated"
+        @browse="browseInto"
+      />
+
+      <div v-else-if="loadingDetail" class="vdfs-placeholder">加载中…</div>
+      <div v-else class="vdfs-placeholder">
+        <p>← 选择一个资源查看/编辑</p>
+      </div>
+    </template>
+  </Workbench>
 </template>
 
 <script setup lang="ts">
@@ -222,6 +224,7 @@ import {
   type VdfsNode,
 } from '@/schemas/vdfs'
 import { getVdfsIcon, getVdfsIconFor } from '@/registry/vdfsIcons'
+import { relativeTime } from '@/utils/time'
 
 const props = defineProps<{
   /** 绑定的 vdfs 数据地址（如 `.vdfs` 或 `.vdfs/session/<id>`）；变化 = 整体重载 */
@@ -257,6 +260,8 @@ const {
   actionBusy,
   detailError,
   fieldErrors,
+  mechanismActions,
+  mechanismBusyId,
   saveFields,
   saveText,
   runAction,
@@ -514,17 +519,6 @@ function tagsOf(n: VdfsNode): Array<{ label: string; kind?: 'muted' | 'primary' 
   return out
 }
 
-function relativeTime(ts?: number): string {
-  if (!ts) return ''
-  const ms = ts < 1e12 ? ts * 1000 : ts
-  const diff = Date.now() - ms
-  if (diff < 0) return ''
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return `${Math.floor(diff / 86_400_000)} 天前`
-}
-
 /**
  * 图标：目录用目录名映射的图标；文件按「kind + 项级扩展名」查项级图标，
  * 再回退 kind 级。全部是纯 UI 映射（VDFS 不下发图标）。
@@ -543,15 +537,6 @@ function iconOf(n: VdfsNode) {
 </script>
 
 <style scoped>
-.vdfs-workbench {
-  display: flex;
-  width: 100%;
-  height: 100vh;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--surface-page);
-}
-
 /* ============== 列表 ============== */
 .vdfs-list {
   flex: 1;

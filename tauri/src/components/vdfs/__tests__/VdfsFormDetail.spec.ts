@@ -1,18 +1,22 @@
 /**
- * VdfsFormDetail — VDFS `form` 渲染器的机制动作注入单测（happy-dom）
+ * VdfsFormDetail — VDFS `form` 渲染器的**传参基线**（happy-dom）
  *
- * 覆盖：机制动作（删除）与详情定义声明动作的**去重**——
- * model / mcp / skill / agent 的定义都自带 `delete`（「删除 Provider」等），
- * 若机制再注入一个「删除」，同页会出现两个删除按钮（重复入口）。
- * 两者语义相同（都经 @delete → vdfs/delete），定义已声明时不再注入；
- * 定义未声明时机制仍兜底提供（写权限判据不变）。
+ * 本渲染器只做两件事：把详情定义适配成 DetailForm 的 `binding: 'option'` 通道，
+ * 并把**页面算好的**机制动作（重命名 / 删除）与取值原样下传。
+ *
+ * 它**不自行判断**机制动作该不该出现——那是页面的单点职责
+ * （`useVdfs.mechanismActions`）；机制动作与定义动作的合并、同 id 去重则归
+ * `mergeDetailActions`（见 `schemas/__tests__/vdfs-form.spec.ts`）。
+ *
+ * 故这里只锁定一条：「谁生产、谁消费，中间这一跳是直通的」——传参不被吞掉、
+ * 不被改写、也不凭空补一个。去重规则若在此处再实现一遍，就又回到 G1 的三份实现。
  */
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VdfsFormDetail from '../VdfsFormDetail.vue'
 import DetailForm from '../DetailForm.vue'
-import type { DetailDefinition, VdfsNode } from '@/schemas/vdfs'
+import type { DetailAction, DetailDefinition, VdfsNode } from '@/schemas/vdfs'
 
 function formNode(schema: Partial<DetailDefinition>): VdfsNode {
   return {
@@ -27,38 +31,30 @@ function formNode(schema: Partial<DetailDefinition>): VdfsNode {
   }
 }
 
-function injectedActions(w: ReturnType<typeof mount>) {
-  return w.findComponent(DetailForm).props('mechanismActions') as Array<{
-    id: string
-  }>
-}
-
-describe('VdfsFormDetail 机制动作注入去重', () => {
-  it('定义已声明 delete → 不再注入机制版「删除」（避免重复按钮）', () => {
+describe('VdfsFormDetail 传参基线（通道适配 + 直通）', () => {
+  it('机制动作与忙态原样下传给 DetailForm，渲染器不做二次判断', () => {
+    const actions: DetailAction[] = [{ id: 'delete', label: '删除', style: 'danger' }]
     const w = mount(VdfsFormDetail, {
       props: {
-        node: formNode({
-          actions: [
-            { id: 'save', label: '保存', style: 'primary' },
-            { id: 'delete', label: '删除 Provider', style: 'icon danger' },
-          ],
-        }),
+        node: formNode({}),
         data: null,
+        mechanismActions: actions,
+        mechanismBusy: 'delete',
       },
     })
-    expect(injectedActions(w).some((a) => a.id === 'delete')).toBe(false)
+
+    const form = w.findComponent(DetailForm)
+    expect(form.props('mechanismActions')).toEqual(actions)
+    expect(form.props('mechanismBusy')).toBe('delete')
   })
 
-  it('定义未声明 delete → 机制仍兜底注入「删除」', () => {
+  it('未注入机制动作时下传空集——渲染器不自带任何机制动作', () => {
     const w = mount(VdfsFormDetail, {
-      props: {
-        node: formNode({
-          actions: [{ id: 'save', label: '保存', style: 'primary' }],
-        }),
-        data: null,
-      },
+      props: { node: formNode({}), data: null },
     })
-    expect(injectedActions(w).some((a) => a.id === 'delete')).toBe(true)
+
+    expect(w.findComponent(DetailForm).props('mechanismActions')).toEqual([])
+    expect(w.findComponent(DetailForm).props('mechanismBusy')).toBeNull()
   })
 
   it('取值显式下传：read 解析结果 → DetailForm 的 values，节点原样 → node', () => {

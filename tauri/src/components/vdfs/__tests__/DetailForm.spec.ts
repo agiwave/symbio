@@ -197,7 +197,8 @@ describe('DetailForm info 绑定：只读概览 + open-container', () => {
         mechanismActions: [
           { id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' },
         ],
-        deleting: true,
+        // 机制动作忙态由页面单点给出（替换旧的 `deleting` 布尔）
+        mechanismBusy: 'delete',
       },
     })
     // 图标优先渲染：tooltip（title）= 动作名 / 进行中 busy_label

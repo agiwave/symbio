@@ -3,20 +3,25 @@
 
   节点的内容经 `vdfs/read` 取回后由本组件承载编辑；保存 emit 纯文本，
   由页面写回 `vdfs/write`。本组件不含任何资源语义，渲染器对所有挂载点通用。
+
+  动作区只有**本渲染器自有**的两项（保存 / 还原）；重命名、删除是机制级默认
+  动作，由页面单点算好后经 `mechanism-actions` 注入，由 DetailShell 合并渲染
+  （渲染器不再自己拼一遍——那曾是同一组动作的第 3、4 份实现）。
 -->
 <template>
-  <div class="vdfs-text">
-    <header class="detail-head">
-      <div class="head-title">
-        <h3 class="title">{{ node.title || node.name }}</h3>
-        <code class="path">{{ node.path }}</code>
-      </div>
-      <div class="head-actions">
-        <VdfsActions :actions="actions" :busy="busy" :disabled="disabledFlags" @run="onAction" />
-      </div>
-    </header>
-
-    <p v-if="error" class="detail-error">{{ error }}</p>
+  <DetailShell
+    :title="node.title || node.name"
+    :actions="actions"
+    :busy="busy"
+    :disabled="disabledFlags"
+    :mechanism-actions="mechanismActions"
+    :mechanism-busy="mechanismBusy"
+    :error="error"
+    @run="onAction"
+  >
+    <template #meta>
+      <code class="path">{{ node.path }}</code>
+    </template>
 
     <div class="editor-wrap">
       <CodeEditor
@@ -27,25 +32,17 @@
         @request-save="save"
       />
     </div>
-  </div>
+  </DetailShell>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import CodeEditor from '@/components/CodeEditor.vue'
-import VdfsActions from './VdfsActions.vue'
-import { vdfsAccessOf, type DetailAction, type VdfsFieldError, type VdfsNode } from '@/schemas/vdfs'
+import DetailShell from './DetailShell.vue'
+import type { VdfsRendererProps } from './rendererContract'
+import { vdfsAccessOf, type DetailAction } from '@/schemas/vdfs'
 
-// 渲染器统一契约（页面按同一组 props/事件装配；未用到的项一并声明，
-// 避免 Vue 把多余的 prop/监听器作为属性透传到根元素）
-const props = defineProps<{
-  node: VdfsNode
-  /** vdfs/read 取回的文本内容 */
-  data: unknown
-  error?: string
-  fieldErrors?: VdfsFieldError[]
-  saving?: boolean
-}>()
+const props = defineProps<VdfsRendererProps>()
 
 const emit = defineEmits<{
   (e: 'save', text: string): void
@@ -58,27 +55,21 @@ const base = computed(() => (typeof props.data === 'string' ? props.data : ''))
 const draft = ref(base.value)
 const dirty = computed(() => draft.value !== base.value)
 
-/**
- * 动作区与其余详情页共用同一机制实现 `VdfsActions`（本渲染器不自建按钮）。
- * 前两项是本渲染器自有的编辑动作；后两项是机制动作（改名 / 删除，回到页面层执行）。
- * `busy` = 进行中（显示 busy_label 并禁用）；`disabledFlags` = 与 saving 无关的禁用条件。
- */
-const actions = computed<DetailAction[]>(() => {
-  const out: DetailAction[] = [
-    { id: 'save', label: '保存', style: 'primary', busy_label: '保存中…' },
-    { id: 'reset', label: '还原', style: 'secondary' },
-  ]
-  if (!readonly.value) {
-    out.push({ id: 'rename', label: '重命名', style: 'secondary' })
-    out.push({ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' })
-  }
-  return out
-})
+/** 本渲染器自有动作（机制动作由页面注入并合并，见 DetailShell） */
+const actions = computed<DetailAction[]>(() => [
+  { id: 'save', label: '保存', style: 'primary', busy_label: '保存中…' },
+  { id: 'reset', label: '还原', style: 'secondary' },
+])
+
+/** 自有动作的进行中标记（按索引对齐；写操作在途时两者都锁） */
 const busy = computed(() => actions.value.map(() => Boolean(props.saving)))
+
+/** 自有动作的禁用条件（保存键在无改动或只读时不可用） */
 const disabledFlags = computed(() =>
   actions.value.map((a) => (a.id === 'save' ? !dirty.value || readonly.value : false))
 )
 
+/** 自有动作就地处理；机制动作（rename / delete）原样上抛给页面 */
 function onAction(a: DetailAction): void {
   if (a.id === 'save') save()
   else if (a.id === 'reset') reset()
@@ -104,37 +95,6 @@ function reset() {
 </script>
 
 <style scoped>
-.vdfs-text {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  padding: 0.75rem 1rem;
-  gap: 0.5rem;
-}
-.detail-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-}
-.head-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-}
-.title {
-  margin: 0;
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .path {
   font-size: 0.68rem;
   font-family: var(--font-mono);
@@ -146,22 +106,14 @@ function reset() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.head-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-shrink: 0;
-}
-.detail-error {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--danger-fg);
-}
+
+/* 编辑区吃掉剩余高度（CodeEditor 自带滚动条），外壳因此不会被撑出滚动 */
 .editor-wrap {
   flex: 1;
   min-height: 14rem;
   display: flex;
 }
+
 .editor-wrap :deep(.code-editor) {
   flex: 1;
   height: 100%;

@@ -57,10 +57,14 @@ import {
   VDFS_STATUS_ACTIVE,
   actionFileOf,
   isVdfsDir,
+  isVdfsDraft,
+  isVdfsSystemAddr,
   newFileNameOf,
   parseVdfsValidation,
+  vdfsAccessOf,
   vdfsJoin,
   vdfsParent,
+  type DetailAction,
   type VdfsChange,
   type VdfsFieldError,
   type VdfsNewType,
@@ -69,7 +73,7 @@ import {
 import { dirIconOf, resolveVdfsRenderer, type VdfsRenderer } from '@/registry/vdfsTypes'
 import { useToast } from '@/composables/useToast'
 import { logger } from '@/utils/logger'
-import type { NavRailItem } from '@/components/common/NavRail.vue'
+import type { WorkbenchRailItem } from '@/components/common/Workbench.vue'
 
 /** 各数据地址的左栏选中记忆（模块级：往返 push / 返回后恢复原选中） */
 const selectedMemo = new Map<string, string>()
@@ -105,7 +109,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   )
 
   /** 左栏导航 = `addr` 的子目录（图标为纯 UI 映射），高亮 = 选中项 */
-  const navItems = computed<NavRailItem[]>(() =>
+  const navItems = computed<WorkbenchRailItem[]>(() =>
     navDirs.value
       .filter(isVdfsDir)
       .map((n) => ({
@@ -152,7 +156,7 @@ export function useVdfs(opts: UseVdfsOptions) {
       const sel = selectedNode.value
       if (
         sel &&
-        !isDraftNode(sel) &&
+        !isVdfsDraft(sel) &&
         !hasMore.value &&
         !items.value.some((n) => n.path === sel.path)
       ) {
@@ -337,7 +341,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     // 草稿（新建态）**没有内容可读**：它还没落盘，路径是空的——去读它只会落到
     // 目录地址上。详情渲染器自己知道怎么呈现「还没有的东西」（表单给默认值、
     // 会话给新建引导），机制只需保证不替它读一个不存在的节点。
-    if (isDraftNode(node)) return
+    if (isVdfsDraft(node)) return
 
     const r = resolveVdfsRenderer(node)
     if (r !== 'form' && r !== 'text' && r !== 'json' && r !== 'markdown' && r !== 'message')
@@ -372,6 +376,45 @@ export function useVdfs(opts: UseVdfsOptions) {
     }
   }
 
+  // ==================== 机制动作（单一定义点） ====================
+  //
+  // 「删除」与「重命名」不是某个资源的私有动作，而是**任何已落盘且可写的节点**
+  // 都能做的默认动作。它们由本层算一次，经控件注入所有详情渲染器；渲染器只声明
+  // 自己特有的动作（save / reset / test / open-container…）。
+  //
+  // 此前这组动作有 4 份实现（form / session / text / readonly 各算一遍，形态还
+  // 有两种），而后端 `detail_definition.actions` 又对同一概念各声明一次——同一件
+  // 事三个来源。收敛到此处后，**存在与否只有一个来源**；渲染器若要用更贴切的
+  // 文案重新声明同名动作，由渲染器声明的那一份胜出（见 DetailShell.mergeActions）。
+  //
+  // 判据只用**访问位**与**地址空间**，不涉及任何资源类型：
+  // - 可写位 `w` ⇒ 可删除；
+  // - 重命名 = 在同一地址空间内移动。只有物理半边（工作目录文件）由文件系统
+  //   provider 承载 `move`；虚拟半边（`.vdfs` 系统资源）的各插件 provider 一律
+  //   没有实现它，给入口只会换来一个必然报错的按钮——故只对物理地址给。
+  //
+  // 草稿（新建态）两者都不给：还没落盘的东西既无从删除，也无从改名。
+
+  /** 页面对当前节点的默认动作集（渲染器自有的动作不在此列） */
+  const mechanismActions = computed<DetailAction[]>(() => {
+    const node = selectedNode.value
+    if (!node || isVdfsDraft(node) || !vdfsAccessOf(node).write) return []
+    const out: DetailAction[] = []
+    if (!isVdfsSystemAddr(node.path)) {
+      out.push({ id: 'rename', label: '重命名', style: 'secondary' })
+    }
+    out.push({ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' })
+    return out
+  })
+
+  /**
+   * 正在执行的机制动作 id（`'delete'` / `'rename'` / null）。
+   *
+   * 只驱动按钮的进行中文案（`busy_label`）与禁用态，不参与任何判据——「有写操作
+   * 在途」那个更宽的概念是 `saving`，它还要锁住列表上的新建 / 刷新按钮。
+   */
+  const mechanismBusyId = ref<string | null>(null)
+
   // ==================== 写入 / 删除 / 新建 ====================
   /** 还原字段级校验错误；非本协议载荷按纯文本展示 */
   function captureError(err: unknown): string {
@@ -398,7 +441,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   async function write(payload: Record<string, unknown> | string): Promise<boolean> {
     const node = selectedNode.value
     if (!node) return false
-    const draft = isDraftNode(node)
+    const draft = isVdfsDraft(node)
     const text = typeof payload === 'string' ? payload : JSON.stringify(payload)
     saving.value = true
     detailError.value = ''
@@ -476,6 +519,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     const node = selectedNode.value
     if (!node) return false
     saving.value = true
+    mechanismBusyId.value = 'delete'
     detailError.value = ''
     try {
       await deleteVdfs(node.path, isVdfsDir(node))
@@ -489,6 +533,7 @@ export function useVdfs(opts: UseVdfsOptions) {
       return false
     } finally {
       saving.value = false
+      mechanismBusyId.value = null
     }
   }
 
@@ -510,7 +555,8 @@ export function useVdfs(opts: UseVdfsOptions) {
   const canCreate = computed(() => creatableTypes.value.length > 0)
 
   /**
-   * 草稿节点 = 「新建」的选中态：**没有 id、也没有名字**。
+   * 草稿节点 = 「新建」的选中态：**没有 id、也没有名字**（判据见
+   * `schemas/vdfs.isVdfsDraft`——没有路径，即还没落盘）。
    *
    * 它只需要两样东西就够渲染出**该类型真实的详情页**：
    *
@@ -537,11 +583,6 @@ export function useVdfs(opts: UseVdfsOptions) {
       // 图标键读 `config_type`（与清单项同源）——纯 UI 映射，草稿照给
       config_type: type.ext,
     }
-  }
-
-  /** 是否草稿节点（判据 = **没有路径**：草稿还没落盘，也就没有地址） */
-  function isDraftNode(node: VdfsNode): boolean {
-    return !node.path
   }
 
   /**
@@ -591,6 +632,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     const trimmed = name.trim()
     if (!node || !trimmed || trimmed === node.name) return false
     saving.value = true
+    mechanismBusyId.value = 'rename'
     detailError.value = ''
     try {
       const to = vdfsJoin(vdfsParent(node.path), trimmed)
@@ -605,6 +647,7 @@ export function useVdfs(opts: UseVdfsOptions) {
       return false
     } finally {
       saving.value = false
+      mechanismBusyId.value = null
     }
   }
 
@@ -707,6 +750,9 @@ export function useVdfs(opts: UseVdfsOptions) {
     detailError,
     fieldErrors,
     clearSelection,
+    // 机制动作（单一定义点，经控件注入所有渲染器）
+    mechanismActions,
+    mechanismBusyId,
     // 操作
     saveFields,
     saveText,
