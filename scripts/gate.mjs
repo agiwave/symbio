@@ -177,7 +177,12 @@ const BASELINE = {
   //   视图（此前 list / stat / delete 穿了、read / write 落到裸 agent 目录），
   //   新增数据落点回归（列 / 统计 / 读 / 写 / 删 / 建 / 移 + 跨挂载点拒移）。
   rustTests: 794,
-  vitestFiles: 31,
+  // 31 → 47：前端半边的棘轮**长期停摆**（详见下方 vitestTests 的说明）。
+  //   与覆盖率阈值不同，**文件数 / 用例数与平台无关**：全仓 `*.spec.ts` 里零
+  //   `skipIf` / `runIf` / `process.platform` 分支，两处 `it.each` 遍历的也都是
+  //   静态常量数组（`ALL_RENDERERS` / `MESSAGE_TYPES`）⇒ 注册数由源码唯一决定。
+  //   所以这一项可以照实测值钉死，不必等 CI。
+  vitestFiles: 47,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态
   // 160 → 164：工具调用运行态——「运行中」标签 + 动效点 + 已运行时长、
@@ -269,7 +274,21 @@ const BASELINE = {
   //     别名层（10 个 `--color-*` 改名到语义令牌，60 处引用）。
   //   注：`--color-chip-*` / `--color-error-*` / `--color-banner-*` 等是**聊天域
   //   令牌**（直接给字面值，与语义令牌并列成组），不属被删的别名层，勿连带删除。
-  vitestTests: 400,
+  // 400 → 661（文件 31 → 47）：**前端半边的棘轮长期停摆**。上面 rustTests 一路
+  //   精细维护到 794，而这一项自「二次复核」定到 400 后再没动过——实测已是 661，
+  //   也就是说**删掉 261 个用例也不会红**（占现有用例的四成）。这与覆盖率阈值
+  //   42.27% → 60.93% 是同一个病：**棘轮一旦没人拧，就成了摆设**。
+  //
+  //   为什么这次可以直接上调（而覆盖率阈值仍留待决策）：**用例数与平台无关**。
+  //   全仓 `*.spec.ts` 零 `skipIf` / `runIf` / `process.platform` 分支；仅有的两处
+  //   `it.each`（`messageRenderers.spec.ts`）遍历的是静态常量数组
+  //   （`ALL_RENDERERS` / `MESSAGE_TYPES`）⇒ 用例数由源码唯一决定，Linux runner
+  //   与本地必然同数。覆盖率则是**分支命中率**，路径处理等平台分支会真的不同，
+  //   故那一项仍须先在 CI 取实测值（见 tauri/vitest.config.ts 的注释）。
+  //
+  //   另补上了缺失的「超过基线 ⇒ 提示更新」——Rust 半边一直有，前端半边没有，
+  //   于是它涨了 261 个用例都没人被告知（**没有提示的棘轮等于没有棘轮**）。
+  vitestTests: 661,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */
@@ -599,8 +618,20 @@ async function stageFrontend() {
   } else if (!enough) {
     record('frontend', 'vitest run --coverage', false, `文件/用例数未达基线或无法解析：${files}/${tests}（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`)
   } else {
-    console.log(dim(`      ${files} 文件 / ${tests} 用例（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`))
-    record('frontend', 'vitest run --coverage', true)
+    // 与 Rust 半边同款提示：**超过基线要说一声**，否则棘轮会像 400 → 661 那样
+    // 悄悄落后（那边一直有这个提示，所以 rustTests 从没掉队；这边没有，于是掉了）。
+    const grew = files > BASELINE.vitestFiles || tests > BASELINE.vitestTests
+    console.log(
+      grew
+        ? yellow(`      ⚠ ${files} 文件 / ${tests} 用例 > 基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}：请更新 scripts/gate.mjs 的 BASELINE.vitestFiles / vitestTests`)
+        : dim(`      ${files} 文件 / ${tests} 用例（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`)
+    )
+    record(
+      'frontend',
+      'vitest run --coverage',
+      true,
+      grew ? `文件/用例数 ${files}/${tests}（基线待更新）` : ''
+    )
   }
 
   // 构建：类型检查过了不代表**打包得过**（打包器自己的错误——循环依赖、动态导入
