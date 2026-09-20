@@ -28,6 +28,22 @@ export const OPTION_TYPES = ['invoke', 'sub', 'form'] as const
 export type OptionType = (typeof OPTION_TYPES)[number]
 
 /**
+ * 机制原生取值原语（`action.pick`）——**跨栈闭集**，唯一定义处。
+ *
+ * 后端 `symbio_core/schemas/options.rs` 用一组 `pub const OPTION_PICK_*: &str`
+ * 表达同一个闭集（不是枚举，故字面即线上取值）。`protocol-mirror-audit` 的 C 组
+ * 按前缀提取后端取值、与本词表逐词比对。
+ *
+ * ⚠️ 这里**曾经**是三份：`useSessionOptions.ts` 里另有两个独立硬编码的同名常量，
+ * 而 Rust 侧的 `#[allow(dead_code)]` 却把理由写成「消费方在前端」——两边没有任何
+ * 引用关系，是第二份真相不是消费方。故把词表收到这里，让守卫能看见它。
+ */
+export const OPTION_PICK_DIRECTORY = 'directory'
+export const OPTION_PICK_FILE = 'file'
+export const OPTION_PICKS = [OPTION_PICK_DIRECTORY, OPTION_PICK_FILE] as const
+export type OptionPick = (typeof OPTION_PICKS)[number]
+
+/**
  * 选项栏（会话输入区下方）显示策略 —— 机制级、由后端声明，前端零写死。
  *
  * - `show_label`：是否在选项栏显示类别标签（label）。缺省 true（现行行为）；
@@ -49,7 +65,7 @@ export interface OptionAction {
   endpoint: string
   payload?: Record<string, unknown>
   /** 机制原生取值原语（后端无法唤起原生对话框） */
-  pick?: 'directory' | 'file'
+  pick?: OptionPick
   /** 动态参数的写入路径（点路径，如 `metadata.workdir`） */
   bind?: string
 }

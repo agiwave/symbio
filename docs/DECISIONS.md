@@ -881,12 +881,19 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
      与前端 `schemas/vdfs.ts`，**取同名交集**——新增常量即自动进入守卫，不必改脚本。
      名字不同的镜像登记在 `ALIASES`；前端自持（后端无对应）的常量必须登记在
      `LOCAL_ONLY` 并写明理由——**"没登记"会报错**，所以不存在静默的漏网。
-   - **C 组**：后端带 `#[serde(rename_all = "…")]` 的**闭集枚举**取值集合 ↔
-     前端词表数组，要求集合相等（不比顺序）。**转换规则按后端声明的取值自动分派**
-     （当前支持 `snake_case` / `lowercase`，遇到别的取值**报错**而不是猜一个）。
-     共 **6 张**（2026-09-20）：`CHAT_ROLES` / `MESSAGE_TYPES` /
+   - **C 组**：后端**闭集的取值集合** ↔ 前端词表数组，要求集合相等（不比顺序）。
+     后端表达闭集有**两种**写法，两种都收：
+     - 带 `#[serde(rename_all = "…")]` 的**枚举** —— **转换规则按后端声明的取值
+       自动分派**（当前支持 `snake_case` / `lowercase`，遇到别的取值**报错**而不是
+       猜一个）；
+     - 一组 `pub const PREFIX_*: &str`（**常量组**）—— 字面即线上取值，按前缀提取。
+
+     共 **7 张**（2026-09-20）：`CHAT_ROLES` / `MESSAGE_TYPES` /
      `MESSAGE_STATUSES` / `RESUME_ACTIONS` / `OPTION_TYPES` /
-     `SESSION_RISK_LEVELS`。
+     `SESSION_RISK_LEVELS` / `OPTION_PICKS`。
+     ⚠️ 只认第一种写法会让第二种长期无人看守：`OPTION_PICK_*` 当初被 Rust 侧的
+     `#[allow(dead_code)]` 登记成「消费方在前端」，而前端那份是**独立硬编码**的
+     第二份抄本（无引用关系）——没有任何守卫比对两边。
      ⚠️ 初版把 `snake_case` **硬编码**成了检查项，于是
      `rename_all = "lowercase"` 的 `RiskLevel` 虽在前端有镜像却长期无人看守——
      「枚举类型对了、属性取值没覆盖到」是**守卫自己的漏**，不是登记的漏。

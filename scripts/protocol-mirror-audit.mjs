@@ -155,10 +155,18 @@ const ABSENT = [
 // ==================== C. 闭集词表 ====================
 
 /**
- * 后端**闭集枚举** ↔ 前端**词表数组**。
+ * 后端**闭集的取值集合** ↔ 前端**词表数组**。
  *
  * 对应关系无法自动推断（`MessageRole` ↔ `CHAT_ROLES` 名字不同），故显式登记；
  * 但登记后**取值**是自动提取比对的——枚举加变体、词表加取值，两边立刻对上账。
+ *
+ * 后端表达闭集有**两种**手段，两种都收：
+ * - `enum` + `#[serde(rename_all = "…")]` —— 按声明的取值转换（见 `CASE_CONVERTERS`）；
+ * - `constPrefix`（一组 `pub const PREFIX_*: &str = "…"`）—— 字面即线上取值。
+ *
+ * 只认第一种会让第二种长期无人看守：当初 `OPTION_PICK_*` 就是这么漏的——它被
+ * 登记成「消费方在前端」，而前端那份其实是**独立硬编码**的第二份抄本，与 Rust
+ * 常量没有任何引用关系（详见 `symbio_core/schemas/options.rs` 的修订说明）。
  */
 const ENUM_SETS = [
   {
@@ -194,6 +202,15 @@ const ENUM_SETS = [
     // 长期无人看守——「枚举类型对了但属性取值没覆盖到」是守卫自己的漏。
     rust: { file: RISK_LEVEL_RS, enum: 'RiskLevel' },
     ts: { file: SESSION_META_TS, array: 'SESSION_RISK_LEVELS' },
+  },
+  {
+    what: '机制原生取值原语',
+    // 后端用 `pub const` 组（不是枚举）表达这个闭集 —— 字面即线上取值，无需转换。
+    // 登记它之前，前端 `useSessionOptions.ts` 里那两个同名常量是**独立硬编码**的
+    // 第二份抄本，而 Rust 侧的 `#[allow(dead_code)]` 却把理由写成「消费方在前端」，
+    // 于是两边各改各的、没有守卫会红。现在前端词表是唯一定义处，本组逐词比对。
+    rust: { file: OPTIONS_RS, constPrefix: 'OPTION_PICK_' },
+    ts: { file: OPTIONS_TS, array: 'OPTION_PICKS' },
   },
 ]
 
@@ -357,6 +374,23 @@ function rustConsts(src) {
   let m
   while ((m = re.exec(src))) out.set(m[1], m[2])
   return out
+}
+
+/**
+ * 后端：按前缀取一组 `pub const PREFIX…: &str = "v"` 的**取值**（不要名字）。
+ *
+ * 与 `rustConsts` 的区别是：A 组比的是「同名常量的值」，这里比的是「一组常量的
+ * 取值集合」——名字对不上无所谓（前端词表本来就叫 `OPTION_PICKS`），要的是集合相等。
+ */
+function rustConstGroup(src, prefix) {
+  const re = new RegExp(
+    `(?:pub|pub\\(crate\\))\\s+const\\s+(${prefix}\\w*)\\s*:\\s*&str\\s*=\\s*"([^"]*)"`,
+    'g',
+  )
+  const out = []
+  let m
+  while ((m = re.exec(src))) out.push(m[2])
+  return out.length > 0 ? out : null
 }
 
 /**
@@ -707,9 +741,12 @@ for (const e of ENUM_SETS) {
   let rustWords = null
   let tsWords = null
 
+  // 后端侧的两种写法：枚举（需按 rename_all 转换）/ 常量组（字面即取值）
+  const rustLabel = e.rust.enum ?? `${e.rust.constPrefix}*`
+
   if (rustSrc === null) {
     problems.push(`后端文件不存在：${e.rust.file}`)
-  } else {
+  } else if (e.rust.enum) {
     const variants = rustEnumVariants(rustSrc, e.rust.enum)
     if (variants === null) {
       problems.push(`后端未找到枚举 ${e.rust.enum}`)
@@ -727,6 +764,12 @@ for (const e of ENUM_SETS) {
         rustWords = variants.map(convert)
       }
     }
+  } else if (e.rust.constPrefix) {
+    const values = rustConstGroup(rustSrc, e.rust.constPrefix)
+    if (values === null) problems.push(`后端未找到常量组 ${e.rust.constPrefix}*`)
+    else rustWords = values
+  } else {
+    problems.push('登记项既没写 enum 也没写 constPrefix —— 无法判断后端取值')
   }
 
   if (tsSrc === null) {
@@ -748,13 +791,13 @@ for (const e of ENUM_SETS) {
 
   if (problems.length === 0) {
     console.log(
-      `  ${green(OK)} ${e.rust.enum} ↔ ${e.ts.array} —— ${e.what}（${rustWords.length} 个取值）`,
+      `  ${green(OK)} ${rustLabel} ↔ ${e.ts.array} —— ${e.what}（${rustWords.length} 个取值）`,
     )
     continue
   }
 
   errors += problems.length
-  console.log(`  ${red(BAD)} ${e.rust.enum} ↔ ${e.ts.array} —— ${e.what}`)
+  console.log(`  ${red(BAD)} ${rustLabel} ↔ ${e.ts.array} —— ${e.what}`)
   for (const msg of problems) console.log(`      ${red(msg)}`)
   console.log(dim(`      ${e.rust.file} ↔ ${e.ts.file}`))
 }
@@ -820,7 +863,7 @@ if (errors > 0) {
     yellow(
       '  A 组：前端持有的 VDFS_* 常量必须与后端同名常量逐字相等（改后端就要改前端镜像）。\n' +
         '  B 组：会话地址段不该出现在前端——它们是运行期发现的数据，不是常量。\n' +
-        '  C 组：后端闭集枚举的取值集合必须与前端词表相等（枚举加变体就要加词）。\n' +
+        '  C 组：后端闭集（枚举或常量组）的取值集合必须与前端词表相等。\n' +
         '  D 组：前端接口的字段必须能在后端结构体里找到（改名会让前端静默读到 undefined）。',
     ),
   )

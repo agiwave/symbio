@@ -70,10 +70,16 @@ pub const SESSION_STATE_ENDPOINT: &str = "worker/session/update";
 pub const OPTION_PICK_DIRECTORY: &str = "directory";
 /// 原生文件选择 —— 闭集的第二员。
 ///
-/// Rust 侧暂无动作声明它，**消费方在前端**：`useSessionOptions.ts::PICK_FILE`
-/// 实现该原语，其协议类型 `schemas/options.ts` 亦把闭集写成 `'directory' | 'file'`。
-/// 故本常量是**刻意保留**的跨语言契约半边（同 `symbio_core::paths::SESSION_CHAT_ABORT`）。
-#[allow(dead_code)] // dead-code-allow R-001: 闭集成员，消费方在前端 useSessionOptions.ts::PICK_FILE
+/// Rust 侧暂无动作声明它。
+///
+/// ⚠️ 它**不是**「消费方在前端」——原注释这么写，而前端那份（`useSessionOptions.ts`::
+/// `PICK_FILE`）其实是与本常量**毫无引用关系**的独立硬编码抄本：两边各改各的，没有
+/// 任何守卫会红。跨栈契约要成立，得有一个守卫真的比对两边（同 `MessageRole` ↔
+/// `CHAT_ROLES` 那种守法），而不是靠注释声称。
+///
+/// 故闭集已收到前端 `schemas/options.ts::OPTION_PICKS` 作唯一定义处，并由
+/// `protocol-mirror-audit` 的 C 组按 `OPTION_PICK_` 前缀提取本组取值、与之逐词比对。
+#[allow(dead_code)] // dead-code-allow R-001: 闭集第二员；取值由 protocol-mirror-audit C 组与前端 OPTION_PICKS 比对
 pub const OPTION_PICK_FILE: &str = "file";
 
 fn default_true() -> bool {

@@ -297,6 +297,10 @@ const OPTIONS_RS_SRC = [
   '',
   // C 组：`OptionType` 是 `snake_case` 闭集
   rsEnum('OptionType', ['Invoke', 'Sub', 'Form']),
+  '',
+  // C 组：`OPTION_PICK_*` 是**常量组**表达的闭集（不是枚举）——字面即线上取值
+  'pub const OPTION_PICK_DIRECTORY: &str = "directory";',
+  'pub const OPTION_PICK_FILE: &str = "file";',
 ].join('\n')
 
 /** 前端 options.ts：D 组 5 对的前端侧 */
@@ -327,6 +331,8 @@ const OPTIONS_TS_SRC = [
   '',
   // C 组：词表用**裸字面量**（这三个词在别处没有按名引用）
   tsArray('OPTION_TYPES', "'invoke'", "'sub'", "'form'"),
+  '',
+  tsArray('OPTION_PICKS', "'directory'", "'file'"),
 ].join('\n')
 
 /** 后端 policy_types.rs：C 组的 `lowercase` 闭集（`RiskLevel`） */
@@ -400,7 +406,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 6 张闭集词表 \+ D 组 23 对结构体字段/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 23 对结构体字段/,
   )
 })
 
@@ -762,4 +768,35 @@ test('前端接口不存在 → 变红（不是静默跳过）', () => {
   const r = mirror({ [CHAT_TS]: "export const X = 'x'\n" })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /前端未找到接口 ChatMessage/)
+})
+
+test('常量组闭集：后端加一个 `OPTION_PICK_*` → 前端词表没跟，变红', () => {
+  // 这正是 `OPTION_PICK_FILE` 当年的处境的镜像：后端有、前端没有，而没有任何守卫会红。
+  const r = mirror({
+    [OPTIONS_RS]: OPTIONS_RS_SRC.replace(
+      'pub const OPTION_PICK_FILE: &str = "file";',
+      'pub const OPTION_PICK_FILE: &str = "file";\npub const OPTION_PICK_ANY: &str = "any";',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端词表缺少：any/)
+})
+
+test('常量组闭集：前端词表多出一个词 → 变红（反向也不许静默）', () => {
+  const r = mirror({
+    [OPTIONS_TS]: OPTIONS_TS_SRC.replace(
+      "export const OPTION_PICKS = ['directory', 'file'] as const",
+      "export const OPTION_PICKS = ['directory', 'file', 'ghost'] as const",
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端词表多出：ghost/)
+})
+
+test('常量组不存在 → 变红（不是静默跳过）', () => {
+  const r = mirror({
+    [OPTIONS_RS]: OPTIONS_RS_SRC.replace(/pub const OPTION_PICK_[A-Z]+: &str = "[a-z]+";/g, ''),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /后端未找到常量组 OPTION_PICK_\*/)
 })

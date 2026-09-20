@@ -18,6 +18,23 @@
 
 ***
 
+## 2026-09-20: `OPTION_PICK_FILE` 的假豁免 —— C 组新增「常量组」写法，跨栈第二份真相纳入守卫
+
+Rust 侧 `OPTION_PICK_FILE` 带一条 `#[allow(dead_code)] // dead-code-allow R-001: 闭集成员，
+**消费方在前端** useSessionOptions.ts::PICK_FILE`。实测前端那份是**独立硬编码**的字面量，
+与 Rust 常量**没有任何引用关系**——它是这个词的第二份抄本，不是消费方；且它不在任何守卫
+登记里（A 组只认 `VDFS_*` 同名常量，C 组只认 `rename_all` 枚举）。**豁免写错理由比不写更糟**：
+不写至少还有人觉得可疑，写了"有消费方"就没人再查。
+
+- **C 组扩展出第二种后端写法**：原先只认「枚举 + `rename_all`」，现在也认
+  **一组 `pub const PREFIX_*: &str`**（按前缀提取取值，字面即线上值）。登记
+  `OPTION_PICK_* ↔ OPTION_PICKS`（C 组 6 → **7 张**）。
+- **前端收成唯一定义处**：`schemas/options.ts` 出 `OPTION_PICKS` 词表 + `OptionPick` 类型，
+  `useSessionOptions.ts` 删掉本地两个常量、改走词表校验；`pick?: 'directory' | 'file'`
+  改用别名。
+- **Rust 侧注释改写为如实描述**（仅注释，不动语义）：原写的"消费方在前端"与"协议类型
+  把闭集写成 `'directory' | 'file'`"两处都不成立，现改为指向前端词表与本守卫的比对关系。
+
 ## 2026-09-20: 复核审计体系与 ADR 自身 —— 找出 8 类值得怀疑的约束，并修正 4 处事实漂移
 
 产出 [`docs/design/guard-and-adr-health-check-2026-09.md`](./design/guard-and-adr-health-check-2026-09.md)。

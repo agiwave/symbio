@@ -30,11 +30,15 @@ import { callPlugin } from '@/services/plugin'
 import { listOptions } from '@/services/options'
 import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
-import type { OptionAction, OptionNode } from '@/schemas/options'
-
-/** 机制原生取值原语（与后端 `OPTION_PICK_*` 对齐） */
-const PICK_DIRECTORY = 'directory'
-const PICK_FILE = 'file'
+import {
+  OPTION_PICK_DIRECTORY,
+  OPTION_PICKS,
+  type OptionAction,
+  type OptionNode,
+  type OptionPick,
+} from '@/schemas/options'
+// 注：`OPTION_PICKS` 既是**运行期校验**的词表（后端下发的值未必守约），也是
+// `protocol-mirror-audit` C 组比对后端 `OPTION_PICK_*` 常量组的那一处取值。
 
 /** 分派结果：`applied` = 本次写入的动态值（原生取值 / 表单值），供调用方做本地回显 */
 export interface OptionDispatchResult {
@@ -82,9 +86,9 @@ function setByPath(root: Record<string, unknown>, path: string, value: unknown) 
 }
 
 /** 唤起原生选择对话框（机制级原语，不含业务语义） */
-async function pickNative(kind: string): Promise<string | null> {
-  const directory = kind === PICK_DIRECTORY
-  if (!directory && kind !== PICK_FILE) return null
+async function pickNative(kind: OptionPick): Promise<string | null> {
+  if (!OPTION_PICKS.includes(kind)) return null
+  const directory = kind === OPTION_PICK_DIRECTORY
   const picked = await open({
     directory,
     multiple: false,
