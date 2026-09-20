@@ -1,4 +1,3 @@
-// Corresponding Frontend: tauri/src/schemas/skill.ts
 use serde::{Deserialize, Serialize};
 
 /// Skill 执行响应

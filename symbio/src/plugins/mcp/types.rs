@@ -1,4 +1,3 @@
-// Corresponding Frontend: tauri/src/protocols/mcp_common.ts
 //!
 //! MCP (Model Context Protocol) 协议层类型定义
 //!

@@ -1,4 +1,3 @@
-// Corresponding Frontend: tauri/src/protocols/shell_execute.ts
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

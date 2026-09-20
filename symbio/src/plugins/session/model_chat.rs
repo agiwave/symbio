@@ -1,4 +1,3 @@
-// Corresponding Frontend: tauri/src/protocols/model_chat.ts
 use crate::symbio_core::schemas::session::chat_message::{ChatMessage, ResumeRequest};
 use serde::{Deserialize, Serialize};
 

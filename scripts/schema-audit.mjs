@@ -168,20 +168,45 @@ for (const [f, names] of itemsByFile) {
   }
 }
 
+/**
+ * 声明处（或其上一行）带 `// dead-code-allow R-001: <理由>` ⇒ **已承认保留**。
+ *
+ * 报告里若不区分，读者会把"刻意保留的跨栈契约半边"当成可以清理的垃圾——而那正是
+ * `dead-code-audit` 的承认通道存在的意义。两个守卫必须说同一句话。
+ */
+function waiverOf(src, name) {
+  const lines = src.split('\n');
+  const decl = new RegExp(`\\b(const|struct|enum|fn|type)\\s+${name}\\b`);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!decl.test(lines[i])) continue;
+    for (const j of [i, i - 1]) {
+      if (j < 0) continue;
+      const m = lines[j].match(/\/\/\s*dead-code-allow\s+R-\d+\s*:\s*(.+?)\s*$/);
+      if (m) return m[1];
+    }
+  }
+  return null;
+}
+
 // 死项：外部无引用，且定义文件内除定义行外也无引用
 const deadItems = [];
 for (const f of backendSchemaFiles) {
+  const src = readFileSync(f, 'utf8');
   for (const { name, kind } of itemsByFile.get(f) ?? []) {
     const users = identFiles.get(name);
     const own = selfOcc.get(name) ?? 1;
-    if ((!users || users.size === 0) && own <= 1) deadItems.push({ file: rel(f), name, kind });
+    if ((!users || users.size === 0) && own <= 1) {
+      deadItems.push({ file: rel(f), name, kind, waiver: waiverOf(src, name) });
+    }
   }
 }
-console.log('--- 死项（全库标识符无引用，可删） ---');
+console.log('--- 死项（全库标识符无引用） ---');
+console.log('    ⚠️ 标注「已承认保留」的**不要删** —— 那是刻意保留的跨栈契约半边；');
+console.log('       其余的才是可清理项。（本表是**报告**，判定型规则是 dead-code-audit 的 R-001）');
 const byFile = new Map();
 for (const d of deadItems) {
   if (!byFile.has(d.file)) byFile.set(d.file, []);
-  byFile.get(d.file).push(`${d.kind} ${d.name}`);
+  byFile.get(d.file).push(`${d.kind} ${d.name}${d.waiver ? `（已承认保留：${d.waiver}）` : ''}`);
 }
 for (const [f, list] of [...byFile].sort()) console.log(`  ${f}\n    ${list.join(', ')}`);
 if (deadItems.length === 0) console.log('  （无）');

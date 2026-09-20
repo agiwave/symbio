@@ -1,4 +1,3 @@
-// Corresponding Frontend: tauri/src/protocols/chat_input.ts
 //
 // 注意：工作区路径 (workdir) 由 PluginMessage.workdir 路由层统一传递，
 // 不在此业务结构体中重复定义。

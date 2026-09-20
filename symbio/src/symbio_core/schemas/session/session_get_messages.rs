@@ -1,4 +1,3 @@
-// Corresponding Frontend: tauri/src/protocols/session_get_messages.ts
 use super::chat_message::ChatMessage;
 use serde::{Deserialize, Serialize};
 

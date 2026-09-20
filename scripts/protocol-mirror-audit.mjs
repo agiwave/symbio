@@ -2,7 +2,7 @@
 /**
  * protocol-mirror-audit — 跨栈协议常量的**镜像一致性**守卫
  *
- * ## 它守的是什么（四组）
+ * ## 它守的是什么（五组）
  *
  * **A. 常量镜像**（后端与前端必须**逐字相等**）
  *   前端持有的 `VDFS_*` 常量是后端协议词的**副本**——它拿这些词拼地址、认目录、
@@ -40,6 +40,15 @@
  *   作为"前端自持"）。反方向不查——前端不必镜像后端全部字段，多一个字段不构成
  *   问题，少一个才是。只比字段名不比类型：类型映射正则读不出来，而"改字段名"本就是
  *   后端最常见的契约变更。
+ *
+ * **E. 跨栈导航头**（`Corresponding Frontend` 必须指向真实文件）
+ *   后端协议文件顶部写 `// Corresponding Frontend: <路径>`，指向它的前端镜像——
+ *   这是**人**在两边之间跳转的入口。它腐烂得很安静：前端改名 / 删除后，头照旧
+ *   指向旧路径，没人会被告知。实测 8 条里 **7 条悬空**，其中 6 条指向
+ *   `tauri/src/protocols/`，而那个目录**从未在版本史里出现过**。
+ *
+ *   约定因此收紧为：**写了就必须指向真实文件；前端没有镜像就别写**——假指针比
+ *   没有更糟（不写只是缺个跳转，写假的会让人以为那边有人在看）。
  *
  * ## 它**不**声称什么
  *
@@ -626,9 +635,23 @@ function walk(dir) {
   return out
 }
 
+/** 后端侧：全部 `*.rs`（E 组扫跨栈导航头用） */
+function walkRs(dir) {
+  const out = []
+  if (!fs.existsSync(dir)) return out
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, e.name)
+    if (e.isDirectory()) out.push(...walkRs(abs))
+    else if (e.name.endsWith('.rs')) out.push(abs)
+  }
+  return out
+}
+
 // ==================== 主流程 ====================
 
 let errors = 0
+let headerCount = 0
+let headerBad = 0
 
 const readIfExists = (relPath) => {
   const abs = path.join(REPO, relPath)
@@ -853,6 +876,51 @@ for (const s of STRUCT_SETS) {
   console.log(dim('      前端压根没用它 → 删掉该字段（类型里的死字段无人看守）。'))
 }
 
+// ==================== E. 跨栈导航头 ====================
+
+/**
+ * `// Corresponding Frontend: <相对仓库根的路径>` 必须指向**真实存在**的文件。
+ *
+ * 这条头是跨栈导航的入口（从后端协议文件跳到它的前端镜像），而它腐烂的方式很安静：
+ * 前端文件改名 / 删除后，头照旧指向旧路径，**没人会被告知**——实测 8 条里 **7 条**
+ * 悬空，其中 6 条指向 `tauri/src/protocols/`，而那个目录**从未在版本史里出现过**
+ * （`git log --diff-filter=A -- 'tauri/src/protocols/*'` 为空）。
+ *
+ * 约定因此收紧为：**写了就必须指向真实文件；前端没有镜像就别写**。写一条假指针
+ * 比不写更糟——不写只是缺个跳转，写假的会让人以为那边有人在看。
+ */
+const HEADER_RE = /^\s*(?:\/\/!|\/\/)\s*Corresponding Frontend:\s*(\S+)\s*$/
+
+// ---------- E 组 ----------
+console.log()
+console.log('E. 跨栈导航头（Corresponding Frontend）')
+{
+  const headers = []
+  for (const file of walkRs(path.join(REPO, 'symbio', 'src'))) {
+    const rel = path.relative(REPO, file).split(path.sep).join('/')
+    const lines = fs.readFileSync(file, 'utf8').split('\n')
+    lines.forEach((line, i) => {
+      const m = line.match(HEADER_RE)
+      if (m) headers.push({ rel, target: m[1], line: i + 1 })
+    })
+  }
+
+  let bad = 0
+  for (const h of headers) {
+    if (fs.existsSync(path.join(REPO, h.target))) {
+      console.log(`  ${green(OK)} ${h.rel}:${h.line} → ${h.target}`)
+    } else {
+      bad += 1
+      errors += 1
+      console.log(`  ${red(BAD)} ${h.rel}:${h.line} → ${h.target}（目标不存在）`)
+      console.log(dim('      前端改名/删除后这条头就悬空了；没有对应镜像就把这行删掉（假指针比没有更糟）。'))
+    }
+  }
+  if (headers.length === 0) console.log(dim('  （没有任何文件声明跨栈对应）'))
+  headerCount = headers.length
+  headerBad = bad
+}
+
 // ---------- 收尾 ----------
 console.log()
 console.log(`Errors: ${errors}`)
@@ -864,7 +932,8 @@ if (errors > 0) {
       '  A 组：前端持有的 VDFS_* 常量必须与后端同名常量逐字相等（改后端就要改前端镜像）。\n' +
         '  B 组：会话地址段不该出现在前端——它们是运行期发现的数据，不是常量。\n' +
         '  C 组：后端闭集（枚举或常量组）的取值集合必须与前端词表相等。\n' +
-        '  D 组：前端接口的字段必须能在后端结构体里找到（改名会让前端静默读到 undefined）。',
+        '  D 组：前端接口的字段必须能在后端结构体里找到（改名会让前端静默读到 undefined）。\n' +
+        '  E 组：Corresponding Frontend 头必须指向真实存在的文件（悬空就删掉那行）。',
     ),
   )
   process.exit(1)
@@ -873,7 +942,8 @@ if (errors > 0) {
 console.log(
   green(
     `  A 组 ${mirrorCount} 条常量镜像 + B 组 ${ABSENT.length} 项缺席检查 + ` +
-      `C 组 ${ENUM_SETS.length} 张闭集词表 + D 组 ${STRUCT_SETS.length} 对结构体字段，全部一致` +
+      `C 组 ${ENUM_SETS.length} 张闭集词表 + D 组 ${STRUCT_SETS.length} 对结构体字段 + ` +
+      `E 组 ${headerCount} 条跨栈导航头，全部一致` +
       `（扫描 ${frontendFiles.length} 个前端文件）`,
   ),
 )

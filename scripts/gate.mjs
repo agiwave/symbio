@@ -176,7 +176,16 @@ const BASELINE = {
   // 793 → 794：子智能体挂载点穿越九操作一致——read / write 改为经子 composite
   //   视图（此前 list / stat / delete 穿了、read / write 落到裸 agent 目录），
   //   新增数据落点回归（列 / 统计 / 读 / 写 / 删 / 建 / 移 + 跨挂载点拒移）。
-  rustTests: 794,
+  // 794 → 797：`c29b69e2`「压缩失败不再裁剪历史」的净增 —— 删掉
+  //   `emergency_tail_compression` 及其单测、`CompressionFailure::NoPayoff`，
+  //   换来 `ResumeAction::RetryCompaction` 与 `retry_compaction` 执行体的用例
+  //   （`plugins/session/compression.test.rs`），净 **+3**。
+  //   ⚠️ 本次顺带核实了「能否直接钉本机实测值」：`symbio/src` 里 5 处
+  //   `#[cfg(target_os = …)]` **全在生产代码上**（`build_command` 的 cmd / sh 分派、
+  //   Windows 不清环境变量、stdio 的 GBK 解码），**没有一处门控 `#[test]`**
+  //   ⇒ 用例数与平台无关，本机值可直接钉。这与**覆盖率**不同——覆盖率是分支命中率，
+  //   会真的随平台变，所以覆盖率阈值不这么钉（见 `tauri/vitest.config.ts`）。
+  rustTests: 797,
   // 31 → 47：前端半边的棘轮**长期停摆**（详见下方 vitestTests 的说明）。
   //   与覆盖率阈值不同，**文件数 / 用例数与平台无关**：全仓 `*.spec.ts` 里零
   //   `skipIf` / `runIf` / `process.platform` 分支，两处 `it.each` 遍历的也都是

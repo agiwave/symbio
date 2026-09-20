@@ -18,6 +18,27 @@
 
 ***
 
+## 2026-09-20: 删掉死项 `SchemaResponse`；并让「Corresponding Frontend」头不再腐烂
+
+### 1. 处置 `schema-audit` 报了很久的死项
+
+`SchemaResponse`（`symbio_core/schemas/common.rs`）全仓零引用，既没删也没豁免，一直挂着——
+它是报告型守卫的产出，而报告没有闭环，挂多久都没人被告知。现已删除 struct 与其 re-export。
+
+顺带让报告变诚实：死项表此前把**已承认保留**的项（`OPTION_PICK_FILE` 带
+`// dead-code-allow R-001:`）与真垃圾混在一起都标成"可删"。现在前者会标注
+「已承认保留：〈理由〉」——两个守卫必须说同一句话。
+
+### 2. 跨栈导航头：**8 条里 7 条指向不存在的文件**
+
+后端协议文件顶部的 `// Corresponding Frontend: <路径>` 是人在两边之间跳转的入口，而它
+腐烂得很安静——实测 **8 条中 7 条悬空**，其中 6 条指向 `tauri/src/protocols/`，而那个目录
+**从未在版本史里出现过**（`git log --diff-filter=A -- 'tauri/src/protocols/*'` 为空）。
+
+- 删掉 7 条悬空头（前端没有镜像就**别写**——写一条假指针比不写更糟：不写只是缺个跳转，
+  写假的会让人以为那边有人在看）；
+- 新增 **E 组**判定：写了就必须指向真实存在的文件。约定由此收紧成可执行的。
+
 ## 2026-09-20: `OPTION_PICK_FILE` 的假豁免 —— C 组新增「常量组」写法，跨栈第二份真相纳入守卫
 
 Rust 侧 `OPTION_PICK_FILE` 带一条 `#[allow(dead_code)] // dead-code-allow R-001: 闭集成员，

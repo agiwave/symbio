@@ -355,7 +355,9 @@ const SESSION_META_TS_SRC = [
 const BASE = {
   'symbio/src/symbio_core/vdfs_provider.rs': VDFS_PROVIDER_RS_SRC,
   'symbio/src/plugins/vdfs/protocol.rs': PROTOCOL_RS_SRC,
-  'symbio/src/symbio_core/event_bus.rs': 'pub const KIND_VDFS: &str = "vdfs";\n',
+  // E 组：这条跨栈导航头指向真实存在的 `tauri/src/schemas/vdfs.ts`
+  'symbio/src/symbio_core/event_bus.rs':
+    '// Corresponding Frontend: tauri/src/schemas/vdfs.ts\npub const KIND_VDFS: &str = "vdfs";\n',
   'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC,
   [CHAT_RS]: CHAT_RS_SRC,
   [CHAT_TS]: CHAT_TS_SRC,
@@ -406,7 +408,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 23 对结构体字段/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 23 对结构体字段 \+ E 组 1 条跨栈导航头/,
   )
 })
 
@@ -799,4 +801,27 @@ test('常量组不存在 → 变红（不是静默跳过）', () => {
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /后端未找到常量组 OPTION_PICK_\*/)
+})
+
+test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条头就悬空了）', () => {
+  const r = mirror({
+    'symbio/src/symbio_core/event_bus.rs':
+      '// Corresponding Frontend: tauri/src/protocols/chat_input.ts\npub const KIND_VDFS: &str = "vdfs";\n',
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /目标不存在/)
+})
+
+test('跨栈导航头指向真实文件 → 不红', () => {
+  const r = mirror()
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /✓ symbio\/src\/symbio_core\/event_bus\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
+})
+
+test('没有任何跨栈导航头 → 不红（没写不违规，写了假指针才违规）', () => {
+  const r = mirror({
+    'symbio/src/symbio_core/event_bus.rs': 'pub const KIND_VDFS: &str = "vdfs";\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /E 组 0 条跨栈导航头/)
 })
