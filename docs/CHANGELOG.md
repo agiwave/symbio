@@ -18,6 +18,55 @@
 
 ***
 
+## 2026-09-20: 复核审计体系与 ADR 自身 —— 找出 8 类值得怀疑的约束，并修正 4 处事实漂移
+
+产出 [`docs/design/guard-and-adr-health-check-2026-09.md`](./design/guard-and-adr-health-check-2026-09.md)。
+复核对象：`scripts/` 下 8 个判定型守卫 + 1 个报告型守卫 + `gate.mjs`，以及
+`docs/DECISIONS.md` 全部 19 条 ADR。判据不是"有没有写"，而是**"写了的约束是否真的能红"**。
+
+### 结构性缺口（最值得怀疑的）
+
+- **`commit-msg` 约束从未生效**：`scripts/git-hooks/commit-msg` 的文件头写着
+  「把『提交格式要求』**从记忆搬进机制**」，`CONTRIBUTING.md:88` 也写了启用步骤，但实测
+  `core.hooksPath` **为空**（`.git/hooks/` 全是 `*.sample`），且 CI 四个作业**没有一个**
+  调用 `check-commit-msg.mjs`。它又被搬回记忆里了——而且比最初更隐蔽，因为文档写着
+  "已机制化"，没人会再怀疑。
+- **「每个判定型守卫都先跑自己的回归测试」——8 个里只做了 5 个**：缺 `style-audit` /
+  `doc-link-audit` / `test-layout-audit`。**缺的恰恰是判定力度最弱的那三个**。
+- **CI 的 `paths` 触发器漏掉 `*.css` / `*.yml` / `*.html`**：`tauri/src/styles/` 下 4 个
+  CSS 文件若被单独修改，**四个作业一个都不跑** ⇒ `style-audit` 的 ERROR 级规则对纯 CSS
+  改动完全不生效。
+- **`test-layout-audit` 对它自己的核心约定零判定**：「测试独立成文件」的违反不构成任何
+  违规（只要内联块在文件末尾就报 `✓ 布局符合约定`）⇒ 这条约定**没有棘轮**。另：它报的
+  「含内联 mod tests 的文件 106」把两类文件混算了——53 个宿主声明（**合规**）+ 53 个真内联。
+- **一条不成立的豁免理由**：`options.rs::OPTION_PICK_FILE` 登记为「消费方在前端
+  `useSessionOptions.ts::PICK_FILE`」，但前端那处是**独立硬编码的字面量**，与 Rust 常量
+  无任何引用关系 ⇒ 它是这个词的**第二份抄本**，不是消费方。且该常量不在任何守卫登记里
+  （A 组只认 `VDFS_*`，C 组只认 `rename_all` 枚举）。豁免写错理由比不写更糟。
+- **`schema-audit` 的产出没有闭环**：报出的死项 `SchemaResponse`（全仓零引用）既没被删、
+  也没登记豁免，就这么一直挂着——报告型守卫只有"崩溃即红"，挂多久都没人被告知。
+
+### 已就地修正的 4 处 ADR 事实漂移（均实测）
+
+| ADR | 原写 | 实测 |
+|---|---|---|
+| ADR-019 | C 组守 `rename_all = "snake_case"`，4 张词表 | 现按声明取值自动分派（`snake_case` / `lowercase`），**6 张** |
+| ADR-010 | 「只剩 `schemas/entities.rs` 里的 `DetailDefinition`」 | 该文件**已不存在**，`DetailDefinition` 现住 `plugins/*/detail.rs` |
+| ADR-012 | 「列表类多列 **7** 个条目名」 | `JSON_DIGEST_MAX_NAMES = 8`（同一次提交引入 ⇒ 是 ADR 笔误） |
+| ADR-017 | session 14340 行 / 29.3%，测试 7044 行 | **14517 行 / 25.3%**，测试 **7021 行** |
+
+另给 ADR-014 的「修订」段加了作废标记——它整段描述的是已退出依赖树的 `tract` 的行为，
+却没有作废标记，读起来与现行约束无法区分。
+
+**顺带核对并确认成立**（避免过度质疑）：ADR-008 的 `store_kind` 确已删除、ADR-009 的
+`Metacognition` 确仍存在、ADR-006 的 3 个 Tauri 命令、ADR-015 的「前端无
+`switch (event.type)`」、ADR-013/016 的 `native-tls` 与 `ort` 现状。
+
+报告里另列了 7 项**判定力度偏弱但有意为之**的规则（如 S-002-bonus 的 27 处 WARN），
+说明为什么**不该**改它们——风险不在"这些规则弱"，而在上面那几条"弱之外还被误以为强"。
+
+***
+
 ## 2026-09-20: 修掉门禁前端半边的棘轮停摆 —— `BASELINE` 用例数 400 → 661，并补上缺失的提示
 
 `scripts/gate.mjs` 的 `BASELINE` 有两半：Rust 半边（`rustTests`）被一路精细维护到

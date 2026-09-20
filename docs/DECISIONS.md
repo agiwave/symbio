@@ -269,9 +269,12 @@ S11 停止路由，能力开关随 S12 删除。资源访问统一经 VDFS（`<�
 `read_entity` / `write_entity`）表达，再由每个插件手翻成 `VdfsNode` / `VdfsContent`。
 现已整层删除，资源存储 = `VdfsProvider` 的三个集中实现（ADR-011）；`entity` 词汇
 在后端清零（`EntitySummary` / `EntityUploadResponse` / `EntityExport` /
-`ENTITY_*` 常量与 `kind = "entity"` 事件频道全部删除），只剩
-`schemas/entities.rs` 里的 `DetailDefinition` 表单方言（它是 VDFS `ext = form` 的
-宿主方言，与「实体」无关）。
+`ENTITY_*` 常量与 `kind = "entity"` 事件频道全部删除）。
+> 更正（2026-09-20 复核）：本段原先写「只剩 `schemas/entities.rs` 里的
+> `DetailDefinition` 表单方言」，**该文件已随 ADR-011 一并删除**；`DetailDefinition`
+> 与整套详情方言现住在各插件自己的 `detail.rs`（`plugins/agent/host/detail.rs` /
+> `plugins/local/plugin.rs` / `plugins/gateway/plugin.rs` …）。它是 VDFS
+> `ext = form` 的宿主方言，与「实体」无关——这一点不变。
 
 ---
 
@@ -373,7 +376,11 @@ ADR-010 删掉了「差异集中在一张 trait」的适配层，但落盘那一
 **后果**：
 - `CURRENT.md` 与手抄清单并存：手抄的（README / ROUTES.md）仍是"速览"，
   但必须注明以生成表为准；两处交叉核对本身构成漂移门禁的一部分。
-- 骨架化摘要变长（48 → 64 token 上限，列表类多列 7 个条目名）：
+- 骨架化摘要变长（48 → 64 token 上限，列表类多列 **8** 个条目名：
+  `SKELETON_DIGEST_TOKEN_CAP = 64` / `JSON_DIGEST_MAX_NAMES = 8`，
+  `plugins/session/context_window.rs`）：
+  > 更正（2026-09-20 复核）：本条原写「7 个条目名」，与代码不符（代码恒为 8，
+  > 两者由同一次提交引入 ⇒ 是 ADR 的笔误，不是后来的改动）。
   每个过期调用多花约 20 token，换来的是少一轮重跑工具的往返——
   这笔交换对"读侧"场景始终是正的。
 - 新增插件 / 工具 / 路由后若忘记重跑生成器，CI `--check` 会失败——
@@ -519,6 +526,12 @@ ADR-013 收敛后，依赖树里**最后一条 C 编译链**是 `onig_sys`（←
 - MSRV 仍 1.91：`node scripts/gate.mjs --only=msrv` 2/2 通过（tract 0.23.7 `rust_version = 1.91`）。
 
 ### 修订（2026-09-18）： tract 加载该模型的两条硬约束
+
+> ⚠️ **本节已作废（2026-09-20 复核标注）**：`tract` 已随
+> [ADR-016](#adr-016-本地嵌入改用-ortonnx-runtime推翻-adr-014-的性能前提并接受它当初拒绝的代价)
+> 彻底退出依赖树，因此本节描述的两条"硬约束"（`with_ignore_value_info(true)`、
+> 不得自建 `SymbolScope`）与那张余弦对照表**都不再是现行约束**，是 `tract-onnx
+> 0.23.7` 的历史行为记录。保留它是为了决策可追溯，**不要据此判断当前实现**。
 
 上线后发现 `LocalEmbeddingService` 初始化失败并静默回退 Noop（`Failed analyse for node #203
 "/Unsqueeze" AddDims`），语义搜索被禁用。排查结论：**模型本身完好**（`onnx.load()` 通过，
@@ -734,8 +747,11 @@ ADR-014 选 `tract-onnx`（纯 Rust）而弃 ORT，理由有三：① 零 C/C++ 
 **状态**：已接受（**带触发条件的延后**）
 
 **背景**：
-`session` 目前 **14340 行实现代码，占 `symbio/src` 生产代码的 29.3%**（源自 2026-09 的
-度量，其余 15 个插件合计 24426 行）。它是 16 个插件里唯一"一个插件 ≈ 一整个应用"的
+`session` 目前 **14517 行实现代码，占 `symbio/src` 生产代码的 25.3%**
+（2026-09-20 复测：生产总计 57426 行。⚠️ 本段原写「14340 行 / 29.3%」，是 2026-09 的
+度量——**session 本身只涨了 1.2%，占比下降是因为其余代码涨得更快**，故"规模债"的
+相对严重程度其实是**减轻**了的）。
+它是 16 个插件里唯一"一个插件 ≈ 一整个应用"的
 存在——会话编排、`chat_loop` 状态机、消息存储、工具执行与审批、VDFS 适配、心跳等
 都在其中。它是与**插件边界划分**最相关的结构债（见 ADR-003「Session 作为编排入口」）。
 
@@ -755,7 +771,9 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
 - **规模本身不是本轮发现的问题的成因**：这一轮修掉的缺陷——路径穿越、shell 白名单旁路、
   会话丢更新、网关无上限、死代码——**没有一个**源于 `session` 体量大，全部已就地修复。
   规模是"可维护性利息"，不是当下的故障源。
-- **`session` 的测试是全仓最厚的**（7044 行，且**全部**在独立 `*.test.rs` 里，内联为 0）。
+- **`session` 的测试是全仓最厚的**（7021 行，2026-09-20 复测；且**全部**在独立
+  `*.test.rs` 里，内联为 0——实测 `plugins/session` 下 `mod tests {` 命中 0，
+  这条仍然成立）。
   此刻大动会同时搬代码与搬测试，把"重构"和"回归"混在一次提交里，反而降低可验证性。
 
 **触发条件（命中任一即应重启此决策，由新 ADR 取代本 ADR）**：
@@ -863,9 +881,15 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
      与前端 `schemas/vdfs.ts`，**取同名交集**——新增常量即自动进入守卫，不必改脚本。
      名字不同的镜像登记在 `ALIASES`；前端自持（后端无对应）的常量必须登记在
      `LOCAL_ONLY` 并写明理由——**"没登记"会报错**，所以不存在静默的漏网。
-   - **C 组**：后端 `#[serde(rename_all = "snake_case")]` **闭集枚举**的取值集合 ↔
-     前端词表数组（`CHAT_ROLES` / `MESSAGE_TYPES` / `MESSAGE_STATUSES` /
-     `RESUME_ACTIONS`），要求集合相等（不比顺序）。
+   - **C 组**：后端带 `#[serde(rename_all = "…")]` 的**闭集枚举**取值集合 ↔
+     前端词表数组，要求集合相等（不比顺序）。**转换规则按后端声明的取值自动分派**
+     （当前支持 `snake_case` / `lowercase`，遇到别的取值**报错**而不是猜一个）。
+     共 **6 张**（2026-09-20）：`CHAT_ROLES` / `MESSAGE_TYPES` /
+     `MESSAGE_STATUSES` / `RESUME_ACTIONS` / `OPTION_TYPES` /
+     `SESSION_RISK_LEVELS`。
+     ⚠️ 初版把 `snake_case` **硬编码**成了检查项，于是
+     `rename_all = "lowercase"` 的 `RiskLevel` 虽在前端有镜像却长期无人看守——
+     「枚举类型对了、属性取值没覆盖到」是**守卫自己的漏**，不是登记的漏。
    - **D 组**：后端**结构体** ↔ 前端**接口**的**字段名**。只查一个方向——**前端
      持有的字段必须能在后端线格式里找到**（或登记在 `tsLocal` 作为"前端自持"）；
      反方向不查，前端不必镜像后端全部字段。只比字段名不比类型（类型映射正则读不出来，
