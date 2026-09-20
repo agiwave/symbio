@@ -240,6 +240,53 @@ ADR-014 的 `### 修订（2026-09-18）` 整段（两条 tract 硬约束 + 一�
 
 ---
 
+## 七、剩下的唯一跨栈盲区：`MessagePromptKind`（涉及后端，待批准后分步实施）
+
+这是全书里唯一一处「**两边都在用、且没有任何守卫比对**」的契约词。
+
+### 现状
+
+| 侧 | 位置 | 写法 |
+|---|---|---|
+| 后端 | `plugins/local/ask_user.rs:47 / :77` | `serde_json::json!({ … "kind": "question" })` |
+| 后端 | `plugins/local/plugin.rs:108` | `serde_json::json!({ … "kind": "confirm" })` |
+| 前端 | `schemas/message_prompt.ts` | `kind: 'confirm'` / `kind: 'question'`（内联联合） |
+| 前端 | `registry/messageTypes.ts:338`、`components/message/UserPromptNode.vue:146 / :148` | 逐词比较 |
+
+后端**根本没有** `MessagePrompt` 类型（`grep 'struct.*Prompt' symbio/src` 为空）——
+这两个词是 `json!` 里裸写的，因此：C 组只认枚举与常量组、D 组只认结构体，
+**两组都看不见它**。后端把 `question` 改成 `ask`，前端的提问卡片会静默不显示，
+而所有守卫仍绿。
+
+### 为什么不用"改成 serde 枚举"
+
+改成枚举意味着要给一个**当前不存在**的类型建模（`MessagePromptConfirm` /
+`MessagePromptQuestions` 两个载荷形状），并把 `json!` 换成结构体序列化——是真正的
+协议层改动，风险与收益不成比例。**不划算**。
+
+### 建议方案：常量组（沿用 C 组已有的第二种写法，零序列化改动）
+
+1. **后端**：在 `symbio_core/schemas/session/chat_message.rs`（`Message*` 契约的现住所）
+   加两个常量，并让那 **3 处 `json!`** 引用它们——**线格式一字不变**：
+   ```rust
+   pub const MESSAGE_PROMPT_QUESTION: &str = "question";
+   pub const MESSAGE_PROMPT_CONFIRM: &str = "confirm";
+   ```
+2. **守卫**：C 组登记 `{ rust: { file: CHAT_MESSAGE_RS, constPrefix: 'MESSAGE_PROMPT_' },
+   ts: { file: MESSAGE_PROMPT_TS, array: 'MESSAGE_PROMPT_KINDS' } }`——
+   该写法本轮已为 `OPTION_PICK_*` 加好，直接复用。
+3. **前端**：`schemas/message_prompt.ts` 出 `MESSAGE_PROMPT_KINDS` 词表，
+   两个 `kind:` 字段改引用其成员类型；`messageTypes.ts` 与 `UserPromptNode.vue`
+   的逐词比较改用词表 / 具名常量。
+
+### 顺带确认了的：不是盲区的
+
+`context_compact`（`turn.rs:209 / :251`）与 `context_nudge`（`compression.rs:608`）
+同样裸写，但前端**没有任何镜像**（`grep "'context_compact'" tauri/src` 为空）
+⇒ 不是跨栈契约，不需要守卫。
+
+---
+
 > **复核边界**：本文的实测数字取自 2026-09-20 的工作树，度量口径已在各处注明
 > （生产代码 = `*.rs` 排除 `*.test.rs` 与 `tests.rs`）。数字会漂移，结论不会。
 > 若将来要复核本文，重跑 `node scripts/gate.mjs --only=docs,facts` 与
