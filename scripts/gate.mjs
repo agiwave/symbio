@@ -459,6 +459,33 @@ function grabInt(output, re) {
 }
 
 /**
+ * 从 `vitest --coverage` 的文本表格里取「All files」行的**行覆盖率**（%）。
+ *
+ * 列序是 `% Stmts | % Branch | % Funcs | % Lines`，故取第 4 组。
+ * 返回 `null` = 没跑出表格（沙箱拦下这一步时就是这样）。
+ */
+function coverageLinesPct(output) {
+  const m = stripAnsi(output).match(
+    /^All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/m,
+  )
+  return m ? Number(m[4]) : null
+}
+
+/**
+ * `tauri/vitest.config.ts` 里 `thresholds.lines` 的当前取值。
+ *
+ * ⚠️ 覆盖率阈值**只在覆盖率低于它时才红**——它太**低**不会有任何提示。于是棘轮会
+ * 像 `BASELINE.vitestTests`（400 → 661）那样悄悄落后：2026-09-20 实测 **62.53%**，
+ * 阈值 40，也就是说删掉两成覆盖都不会有人知道。本函数就是为了补上这半边提示。
+ */
+function coverageThreshold() {
+  const cfg = path.join(frontendDir, 'vitest.config.ts')
+  if (!fs.existsSync(cfg)) return null
+  const m = fs.readFileSync(cfg, 'utf8').match(/thresholds:\s*\{[^}]*?\blines:\s*(\d+)/)
+  return m ? Number(m[1]) : null
+}
+
+/**
  * 把**所有**匹配的捕获组相加。
  *
  * `cargo test --workspace` 会为每个测试目标各打一行 `test result:`，
@@ -600,13 +627,31 @@ async function stageFrontend() {
 
   // 覆盖率与测试同一次运行（阈值写在 `vitest.config.ts`，不达阈值 vitest 自己
   // 以非零码退出）——单独再跑一遍测试没有意义，只是多花一倍时间。
-  const vitest = await run({
+  const vitestArgs = ['run', '--coverage']
+  let vitest = await run({
     label: 'vitest run --coverage',
     cmd: process.execPath,
-    args: [path.join(frontendDir, 'node_modules', 'vitest', 'vitest.mjs'), 'run', '--coverage'],
+    args: [path.join(frontendDir, 'node_modules', 'vitest', 'vitest.mjs'), ...vitestArgs],
     cwd: frontendDir,
     timeoutMs: VITEST_TIMEOUT_MS,
   })
+  // 沙箱拦的是 vitest **开跑前清理 `coverage/`** 那一步（`V8CoverageProvider.clean`
+  // 要 trash 掉整个目录），**不是测试本身**。换 `--coverage.clean=false` 重跑一次即可——
+  // 直接放弃判定会把「没检查」伪装成「通过/跳过」，比多花 15 秒糟得多。
+  if (!vitest.ok && blockedBySandboxDelete(vitest.output)) {
+    console.log(dim('      ↳ 沙箱拦了 coverage/ 的清理 ⇒ 以 --coverage.clean=false 重跑（不跳过本步）'))
+    vitest = await run({
+      label: 'vitest run --coverage（clean=false）',
+      cmd: process.execPath,
+      args: [
+        path.join(frontendDir, 'node_modules', 'vitest', 'vitest.mjs'),
+        ...vitestArgs,
+        '--coverage.clean=false',
+      ],
+      cwd: frontendDir,
+      timeoutMs: VITEST_TIMEOUT_MS,
+    })
+  }
   const files = grabInt(vitest.output, /Test Files\s+(\d+) passed/)
   const tests = grabInt(vitest.output, /Tests\s+(\d+) passed/)
   const enough =
@@ -642,6 +687,20 @@ async function stageFrontend() {
         ? yellow(`      ⚠ ${files} 文件 / ${tests} 用例 > 基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}：请更新 scripts/gate.mjs 的 BASELINE.vitestFiles / vitestTests`)
         : dim(`      ${files} 文件 / ${tests} 用例（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`)
     )
+    // 与「基线落后」同款提示：阈值落后太多也要说一声，否则覆盖率这半边是**静默**的
+    // （它只在低于阈值时红，太高则完全无声）。
+    const pct = coverageLinesPct(vitest.output)
+    const thr = coverageThreshold()
+    if (pct !== null && thr !== null && pct - thr >= 10) {
+      console.log(
+        yellow(
+          `      ⚠ 行覆盖率 ${pct}% 已高出阈值 ${thr}% ${(pct - thr).toFixed(1)} 个点：阈值形同虚设，建议上调` +
+            `（先在 CI 取实测值——本机 Windows 与 Linux runner 的分支覆盖不同）`,
+        ),
+      )
+    } else if (pct !== null) {
+      console.log(dim(`      行覆盖率 ${pct}%${thr === null ? '' : `（阈值 ${thr}%）`}`))
+    }
     record(
       'frontend',
       'vitest run --coverage',
