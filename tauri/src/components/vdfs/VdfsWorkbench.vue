@@ -187,7 +187,7 @@ import VdfsCard from '@/components/common/VdfsCard.vue'
 import DetailShell from './DetailShell.vue'
 import { useVdfs } from '@/composables/useVdfs'
 import { useVdfsPrompt } from '@/composables/useVdfsPrompt'
-import { getVdfsRenderer, resolveVdfsRenderer } from '@/registry/vdfsTypes'
+import { getVdfsRenderer, isTextualRenderer, resolveVdfsRenderer } from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
 import '@/registry/vdfsRenderers'
 // 列表卡片的呈现映射（状态点 / 文案 / 徽标 / 标签 / 图标）
@@ -298,7 +298,7 @@ const rendererComp = computed(() => {
 const rendererData = computed<unknown>(() => {
   const r = renderer.value
   if (r === 'form') return formData.value
-  if (r === 'text' || r === 'json' || r === 'markdown' || r === 'message') return nodeText.value
+  if (isTextualRenderer(r)) return nodeText.value
   return null
 })
 

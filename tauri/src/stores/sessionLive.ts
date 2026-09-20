@@ -58,10 +58,15 @@ export interface SessionLiveStatus {
   outcome?: SessionOutcome
 }
 
-/** 会话运行模式 */
-export type SessionMode = 'auto' | 'interactive'
-/** 会话执行风险等级 */
-export type SessionRiskLevel = 'low' | 'medium' | 'high'
+/** 会话运行模式 / 执行风险等级 —— 定义在 `schemas/session_meta`（唯一定义处），
+ *  此处 import + re-export：既有消费方一直从 `./sessionLive` 取，不必改路径。 */
+import {
+  SESSION_MODES,
+  SESSION_RISK_LEVELS,
+  type SessionMode,
+  type SessionRiskLevel,
+} from '@/schemas/session_meta'
+export type { SessionMode, SessionRiskLevel }
 
 /** 会话节点自述的运行态（`sessionRuntimeOf` 的结果子集） */
 export interface SessionRuntime {
@@ -140,10 +145,11 @@ export function modeRiskBackfillOf(items: SessionListItem[]): {
   for (const it of items) {
     const m = it.metadata
     if (!m) continue
-    if (m.mode === 'auto' || m.mode === 'interactive') modes[it.id] = m.mode
-    if (m.risk_level === 'low' || m.risk_level === 'medium' || m.risk_level === 'high') {
-      risks[it.id] = m.risk_level
-    }
+    // 校验走**契约层的词表**而不是此处手写的字面量枚举：`metadata` 是
+    // `Record<string, any>`，后端回包没有类型兜底，枚举必须只有一处——
+    // 否则「风险等级多一个取值」会在这里被静默丢弃（既不报错也不生效）。
+    if (SESSION_MODES.includes(m.mode)) modes[it.id] = m.mode
+    if (SESSION_RISK_LEVELS.includes(m.risk_level)) risks[it.id] = m.risk_level
   }
   return { modes, risks }
 }

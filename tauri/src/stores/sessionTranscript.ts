@@ -19,10 +19,13 @@
  */
 
 import {
+  CHAT_ROLE_ASSISTANT,
+  CHAT_ROLE_TOOL,
   MESSAGE_STATUS_COMPLETED,
   MESSAGE_STATUS_FAILED,
   MESSAGE_STATUS_STREAMING,
   MESSAGE_STATUS_WAITING_USER_ACTION,
+  MESSAGE_TYPE_TOOL_CALL,
   MESSAGE_TYPE_TURN,
   isInflightMessageStatus,
   messageTextOf,
@@ -49,7 +52,7 @@ export function sortTranscript(messages: ChatMessage[]): ChatMessage[] {
  * （而不是把预览清空：一条工具调用不该把上一句正文的预览抹掉）。
  */
 export function previewOf(msg: Pick<ChatMessage, 'role' | 'content'>): string | null {
-  if (msg.role !== 'assistant') return null
+  if (msg.role !== CHAT_ROLE_ASSISTANT) return null
   // 取值走契约层的唯一实现（`messageTextOf`）：本模块是纯逻辑层，
   // 不在这里再写一份多模态形状的判定。
   const text = messageTextOf(msg.content)
@@ -80,10 +83,10 @@ export function mergeMessagePatch(existing: ChatMessage, patch: ChatMessage): Ch
   if (typeof patch.seq !== 'number') merged.seq = existing.seq
   if (patch.content != null) {
     const isFullReplace =
-      existing.type === 'tool_call' ||
-      patch.type === 'tool_call' ||
-      patch.role === 'tool' ||
-      existing.role === 'tool'
+      existing.type === MESSAGE_TYPE_TOOL_CALL ||
+      patch.type === MESSAGE_TYPE_TOOL_CALL ||
+      patch.role === CHAT_ROLE_TOOL ||
+      existing.role === CHAT_ROLE_TOOL
     if (isFullReplace) {
       merged.content = patch.content
     } else if (typeof patch.content === 'string') {

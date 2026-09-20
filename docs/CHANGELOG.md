@@ -18,6 +18,55 @@
 
 ***
 
+## 2026-09-20: 前端机制化第三轮 —— G10–G14 五项缺口 + C 组扩面到 6 张
+
+`docs/design/frontend-mechanization-review-round2.md` 的 §1 引用过「另有五个已定位但
+**未动**的缺口（G10–G14，见 §3）」，而 §3 是 P8–P12 的削减清单——**那一节从来没写过**，
+`git log -S G10` 只查到这条悬空引用。第三轮把这五个缺口重新实读、逐条核对后补齐并实施。
+教训：**"已定位"不等于"已记录"，判断不落纸就等于没做过。**
+
+### 1. 五项缺口（详见报告 §3.2）
+
+| # | 缺口 | 修法 |
+|---|---|---|
+| G10 | **M-006 的扫描范围漏了 `stores/` 与 `registry/`** | 范围扩到 5 个目录（**76 文件**）；修掉 `sessionTranscript.ts` 4 处、`sessions.ts` 2 处字面量 |
+| G11 | `services/vdfs.ts` 三处读/列入口没走 `withFallback` | 三处改走原语（`listVdfs` 空目录同型兜底、`statVdfs` 降 `debug`、`readVdfs` 保持 `error`）；+5 例测试 |
+| G12 | `MessagePromptKind` 判别式类型在 3 文件重抄 | 单源到 `schemas/message_prompt.ts`；**不**收敛 `promptOf` 的逐词校验（那是运行期枚举的正当位置） |
+| G13 | 文本渲染器子集三份写法 | **发现两份不是同一集合**（读取守卫多一个 `form`）⇒ 给出两个具名谓词；+5 例测试，含"差集恰好是 `form`"断言 |
+| G14 | `SessionMode` / `SessionRiskLevel` 联合在 3 文件重抄 | 词表落到 `schemas/session_meta.ts`，运行期校验改 `includes`（`metadata` 是 `any`，原先"多一个取值会被静默丢弃"） |
+
+**G10 的教训比规则本身更值钱**：门禁的**扫描范围**和它的**规则**一样会漏，而**漏了不会红**
+——规则写错还能被"注入违规看它红不红"的回归测试发现，范围漏了连那个都发现不了（测试
+夹具也铺在那个范围里）。
+
+### 2. C 组扩面：4 → 6 张词表，并修掉两处"守卫自己看不见"
+
+- **`rename_all` 取值改为自动读取**。原先 `snake_case` 是**硬编码**的检查项，于是
+  `#[serde(rename_all = "lowercase")]` 的 `RiskLevel`（前端 `SESSION_RISK_LEVELS` 有镜像）
+  **长期无人看守**。现在读出声明的取值再选转换规则；**不支持的取值直接报错**而非猜。
+- **词表元素允许裸字符串字面量**。原提取器只认"本文件的字符串常量名"，拒掉了
+  `OPTION_TYPES = ['invoke', 'sub', 'form']` 这类只出现一次的词。守卫要的是"取值只有一处"，
+  不是"每个词都有名字"——硬造常量名只会得到一层**无人引用的间接**。
+- 新登记 `OptionType ↔ OPTION_TYPES`、`RiskLevel ↔ SESSION_RISK_LEVELS`。
+
+### 3. 已知缺口（写进注释，本轮**不**修）
+
+`MessagePromptKind` 的后端来源是**裸 JSON 字面量**（`ask_user.rs` 的 `"kind": "question"`、
+`plugin.rs` 的 `"kind": "confirm"`），**不是** serde 枚举 ⇒ C 组看不见它。后端改这两个词
+不会有任何守卫变红。修它需后端改成 serde 枚举或新增一类守卫，属"涉及后端"，按约定须先
+整体规划。
+
+### 4. 验证
+
+- `protocol-mirror-audit`：A 组 31 + B 组 2 + **C 组 6** + D 组 23，Errors 0
+- `protocol-mirror-audit.test.mjs`：**35/35**（30 → 35）
+- `mechanism-audit`：七条规则全过（M-006 覆盖 **76 文件**）
+- `vitest run`：**47 文件 / 661 测试**，exit=0
+- `vue-tsc --noEmit`：干净；`gate --only=frontend`：**4/4**
+- `gen-current-facts --check`：一致（127 行）
+
+***
+
 ## 2026-09-20: 修复前端门禁阶段 —— 补装 `@vitest/coverage-v8`；记下覆盖率棘轮已落后
 
 ### 1. 问题：门禁的前端阶段整体不可用

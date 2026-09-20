@@ -17,8 +17,15 @@
 
 import type { DetailDefinition } from './vdfs'
 
-/** 选项节点类型 */
-export type OptionType = 'invoke' | 'sub' | 'form'
+/**
+ * 选项节点类型（`option_type`）——**跨栈闭集**，唯一定义处。
+ *
+ * 后端 `symbio_core/schemas/options.rs` 的 `OptionType` 枚举以
+ * `#[serde(rename_all = "snake_case")]` 序列化成这三个词。写成词表数组是为了让
+ * `protocol-mirror-audit` 的 C 组能逐词比对（裸字面量联合在运行期不存在，守卫看不见）。
+ */
+export const OPTION_TYPES = ['invoke', 'sub', 'form'] as const
+export type OptionType = (typeof OPTION_TYPES)[number]
 
 /**
  * 选项栏（会话输入区下方）显示策略 —— 机制级、由后端声明，前端零写死。

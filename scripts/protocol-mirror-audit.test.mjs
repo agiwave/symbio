@@ -36,6 +36,8 @@ const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
 const OPTIONS_RS = 'symbio/src/symbio_core/schemas/options.rs'
 const OPTIONS_TS = 'tauri/src/schemas/options.ts'
+const RISK_LEVEL_RS = 'symbio/src/plugins/local/policy/policy_types.rs'
+const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 
 /** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
 const rsStruct = (name, ...fields) =>
@@ -44,6 +46,18 @@ const rsStruct = (name, ...fields) =>
 /** 前端接口（最小形态） */
 const tsIface = (name, ...fields) =>
   [`export interface ${name} {`, ...fields.map((f) => `  ${f}?: string`), '}'].join('\n')
+
+/** 后端闭集枚举。`style` 缺省 `snake_case`（C 组也支持 `lowercase`） */
+const rsEnum = (name, variants, style = 'snake_case') =>
+  [
+    `#[serde(rename_all = "${style}")]`,
+    `pub enum ${name} {`,
+    ...variants.map((v) => `    ${v},`),
+    '}',
+  ].join('\n')
+
+/** 前端词表数组（元素可以是裸字面量，也可以是本文件的字符串常量名） */
+const tsArray = (name, ...items) => `export const ${name} = [${items.join(', ')}] as const`
 
 /** 后端：四张词表对应的闭集枚举（含 `#[default]` 与文档注释，顺带验证解析器跳过它们） */
 const CHAT_RS_SRC = [
@@ -280,6 +294,9 @@ const OPTIONS_RS_SRC = [
   ),
   rsStruct('OptionsRequest', 'session_id', 'parent'),
   rsStruct('OptionsResponse', 'nodes'),
+  '',
+  // C 组：`OptionType` 是 `snake_case` 闭集
+  rsEnum('OptionType', ['Invoke', 'Sub', 'Form']),
 ].join('\n')
 
 /** 前端 options.ts：D 组 5 对的前端侧 */
@@ -307,6 +324,25 @@ const OPTIONS_TS_SRC = [
   ),
   tsIface('OptionsRequest', 'session_id', 'parent'),
   tsIface('OptionsResponse', 'nodes'),
+  '',
+  // C 组：词表用**裸字面量**（这三个词在别处没有按名引用）
+  tsArray('OPTION_TYPES', "'invoke'", "'sub'", "'form'"),
+].join('\n')
+
+/** 后端 policy_types.rs：C 组的 `lowercase` 闭集（`RiskLevel`） */
+const RISK_LEVEL_RS_SRC = [
+  rsEnum('RiskLevel', ['Low', 'Medium', 'High'], 'lowercase'),
+  '',
+  // 同文件另一个 `lowercase` 枚举：前端**没有**镜像它，故不登记（登记了才会红）
+  rsEnum('AutonomyLevel', ['ReadOnly', 'Supervised', 'Full'], 'lowercase'),
+].join('\n')
+
+/** 前端 session_meta.ts：`RiskLevel` 的镜像词表 */
+const SESSION_META_TS_SRC = [
+  tsArray('SESSION_RISK_LEVELS', "'low'", "'medium'", "'high'"),
+  '',
+  // 与 `RiskLevel` 同处的 `SessionMode`：后端**没有**对应枚举，故不进 C 组
+  tsArray('SESSION_MODES', "'auto'", "'interactive'"),
 ].join('\n')
 
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
@@ -321,6 +357,8 @@ const BASE = {
   [FORM_TS]: FORM_TS_SRC,
   [OPTIONS_RS]: OPTIONS_RS_SRC,
   [OPTIONS_TS]: OPTIONS_TS_SRC,
+  [RISK_LEVEL_RS]: RISK_LEVEL_RS_SRC,
+  [SESSION_META_TS]: SESSION_META_TS_SRC,
   'tauri/src/services/session.ts': 'export const x = 1\n',
 }
 
@@ -362,7 +400,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 4 张闭集词表 \+ D 组 23 对结构体字段/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 6 张闭集词表 \+ D 组 23 对结构体字段/,
   )
 })
 
@@ -525,15 +563,48 @@ test('后端枚举丢了 rename_all = "snake_case" → 变红（否则转换会�
   assert.match(r.stdout, /rename_all/)
 })
 
-test('词表数组的元素不是本文件的字符串常量 → 变红', () => {
+test('词表数组的元素既不是常量也不是字面量 → 变红（漏引号的写法）', () => {
   const r = mirror({
     [CHAT_TS]: CHAT_TS_SRC.replace(
       '[CHAT_ROLE_USER, CHAT_ROLE_ASSISTANT]',
-      "[CHAT_ROLE_USER, 'assistant']",
+      '[CHAT_ROLE_USER, SOME_UNDEFINED_THING]',
     ),
   })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /不是本文件里的字符串常量/)
+  assert.match(r.stdout, /既不是本文件的字符串常量，也不是字符串字面量/)
+})
+
+test('词表数组允许**裸字面量**元素（词只出现一次时不必硬造常量名）', () => {
+  const r = mirror({
+    [CHAT_TS]: CHAT_TS_SRC.replace(
+      '[CHAT_ROLE_USER, CHAT_ROLE_ASSISTANT]',
+      "['user', 'assistant']",
+    ),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('`rename_all = "lowercase"` 的枚举也能守（C 组自动按声明取值分派转换）', () => {
+  const r = mirror({
+    [RISK_LEVEL_RS]: RISK_LEVEL_RS_SRC.replace(
+      '    High,',
+      '    High,\n    Critical,',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /RiskLevel/)
+  assert.match(r.stdout, /前端词表缺少：critical/)
+})
+
+test('不支持的 `rename_all` 取值 → 报「不支持」而不是猜一个转换规则', () => {
+  const r = mirror({
+    [RISK_LEVEL_RS]: RISK_LEVEL_RS_SRC.replace(
+      'rename_all = "lowercase"',
+      'rename_all = "camelCase"',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /rename_all = "camelCase" 本检查器不支持/)
 })
 
 test('后端枚举文件被删 → 变红（不是静默跳过）', () => {

@@ -20,6 +20,35 @@
  * + 后端各解析链按 metadata 回退取值。
  * 前端不持有任何业务字段名，详见 `symbio/src/plugins/session/docs/cascading-options-mechanism.md`。
  */
+/**
+ * 执行风险等级阈值（`metadata.risk_level`）。
+ *
+ * **取值即跨栈契约**：后端 `plugins/local/policy/policy_types.rs` 的 `RiskLevel`
+ * 枚举以 `#[serde(rename_all = "lowercase")]` 序列化成这三个词，前端按它比较阈值。
+ *
+ * 写成**词表数组**而不是裸的字面量联合，是为了让它可被守卫比对：裸联合只是类型，
+ * 运行期不存在，`protocol-mirror-audit` 的 C 组（后端闭集枚举 ↔ 前端词表数组）
+ * 看不见它。数组 + `(typeof X)[number]` 是同一条信息的两种形态，不是两份真相。
+ *
+ * ⚠️ 注意 `lowercase` 与 `snake_case` 对多词变体的结果不同（`ReadOnly` → `readonly`
+ * vs `read_only`）；本枚举全是单词，两者恰好一致，但**不要**据此认为可以互换。
+ */
+export const SESSION_RISK_LEVELS = ['low', 'medium', 'high'] as const
+export type SessionRiskLevel = (typeof SESSION_RISK_LEVELS)[number]
+
+/**
+ * 运行模式（`metadata.mode`）：`auto` = 无人值守，`interactive` = 会话流内可交互。
+ *
+ * 后端目前**没有**对应的 Rust 枚举（`metadata.mode` 就是字符串），故它暂不是
+ * 跨栈闭集、不进 C 组；但前端内部的**唯一定义处**仍应在此——先前
+ * `stores/sessionLive.ts` 与 `stores/sessions.ts` 各写了一份同样的联合。
+ *
+ * 同样写成数组：`SessionListItem.metadata` 是 `Record<string, any>`（**未类型化**），
+ * 校验后端回包只能靠运行期的取值枚举，而枚举必须只有一处。
+ */
+export const SESSION_MODES = ['auto', 'interactive'] as const
+export type SessionMode = (typeof SESSION_MODES)[number]
+
 export interface SessionMetadata {
   workdir?: string;
   title?: string;
@@ -27,9 +56,9 @@ export interface SessionMetadata {
   /** 选定的 Model Provider ID（与 agent_id 同级别：随 chat_send 传输 + session.metadata 持久化） */
   provider_id?: string;
   /** 执行风险等级阈值：low / medium / high（与 agent_id 同级别） */
-  risk_level?: 'low' | 'medium' | 'high';
+  risk_level?: SessionRiskLevel;
   /** 运行模式：auto（无人值守）/ interactive（默认，会话流内可交互） */
-  mode?: 'auto' | 'interactive';
+  mode?: SessionMode;
   created_via?: 'ui' | 'api';
   last_message_preview?: string;
   /** 心跳任务配置：会话空闲 interval_seconds 后自动以 prompt 触发一次对话 */

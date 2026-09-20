@@ -33,7 +33,7 @@
   `.node-act` 已从两处收敛为一份。
 
 **本轮找到三个缺口，全部已就地修复**（G7–G9，见 §2）；另有五个已定位但**未动**的缺口
-（G10–G14，见 §3），其中 G10 起属服务层，建议按批次推进。
+（G10–G14）——它们当时只留在判断里没落纸，第三轮已重新实读并逐条实施，见 **§3.2**。
 
 ---
 
@@ -240,6 +240,104 @@ P12 的风险与收益都最高：它是"多路写同一份数据"，而 ADR-015
 
 ---
 
+## 3.2 第三轮：G10–G14（已定位并实施）
+
+> **本节的由来（一条值得记的教训）**：§1 原先写着「另有五个已定位但**未动**的缺口
+> （G10–G14，见 §3）」，而 §3 是 P8–P12 的削减清单、**从来没有这一节**——那五个缺口
+> 只存在于写报告时的判断里，从未落纸，`git log -S G10` 只能查到这一行悬空引用。
+> 第三轮把它们重新实读、逐条核对后补齐在此。**"已定位"不等于"已记录"**；判断不落纸
+> 就等于没做过。
+
+| # | 缺口 | 类别 | 与预估的差异 |
+|---|---|---|---|
+| G10 | **M-006 的扫描范围漏了 `stores/` 与 `registry/`** | 门禁盲区 | 当时没写；实读才发现是**门禁自己**的漏 |
+| G11 | `services/vdfs.ts` 三处读/列入口没走 `withFallback` | 重复错误口径 | 与当时分档一致（P8 的漏网） |
+| G12 | `MessagePromptKind` 判别式**类型**在 3 文件重抄 | 重复词表 | 比预估窄：只收敛类型，见下 |
+| G13 | 文本渲染器子集三份写法 | 重复词表 | **判据与预估相反**：三份里有**两份不是同一个集合** |
+| G14 | `SessionMode` / `SessionRiskLevel` 联合在 3 文件重抄 | 重复词表 | 比预估多一层：`metadata` 是 `any`，枚举只在运行期 |
+
+### G10 M-006 的扫描范围是漏的（门禁自己的缺口）
+
+M-006 的规则没错，但它的 `auditFiles(...)` 只喂了 `components/ + composables/ +
+services/`。于是 `stores/sessionTranscript.ts` 的**四处**字面量比较长期无人看守——
+而该文件**明明已经 import 了 `MESSAGE_STATUS_*` 常量**，同文件两种写法并存。
+
+教训与 G9 同源但更尖锐：**门禁的"扫描范围"和它的"规则"一样会漏，而漏了不会红**。
+规则写错至少还能被"注入违规看它红不红"的回归测试发现；范围漏了连那个都发现不了
+（测试夹具也铺在那个范围里）。
+
+已把范围扩到 `stores/` + `registry/`（76 个文件），并修掉四处。
+
+### G11 三处读/列入口没走 `withFallback`
+
+P8 当时收敛了 9 处，漏了同文件里的 `listVdfs` / `statVdfs` / `readVdfs`——
+而 `ensureVdfsRoot`（同一文件）已经走了原语，所以是"同一文件两种写法"。
+
+三处的**兜底语义并不一致**（空目录 vs `null`），这正是 `withFallback` 的设计前提：
+兜底值在**调用点**写出来，类型系统保证它与成功值同型。日志级别也照原样保留
+（`statVdfs` 的失败是**预期内**的，降为 `debug`——否则日志失去信噪比）。
+
+顺带补了 5 例回归测试：原语化是**行为保持**的重构，而没有测试就证明不了"保持"。
+
+### G12 `MessagePromptKind`：只收敛**类型**，不收敛校验
+
+`'question' | 'confirm'` 作为**类型**在 `registry/messageTypes.ts` 抄了两遍
+（字段类型 + `promptKindOf` 返回类型）。现由 `schemas/message_prompt.ts` 导出
+`MessagePromptKind = MessagePrompt['kind']`，消费点一律引用。
+
+**没有**一并收敛 `promptOf` 里那句 `p.kind !== 'question' && p.kind !== 'confirm'`：
+它验的是 `meta.prompt as MessagePrompt` 这个**转型后的值**，必须逐词判断——
+那里是运行期枚举的正当位置，把它换成词表反而会绕开类型收窄。
+
+⚠️ **并发现一个守卫边界**：后端是以**裸 JSON 字面量**产出这两个词的
+（`plugins/local/ask_user.rs` 的 `"kind": "question"`、`plugins/local/plugin.rs`
+的 `"kind": "confirm"`），**不是** serde 枚举 ⇒ C 组（只认 `rename_all` 枚举）
+**看不见它**。后端改这两个词不会有任何守卫变红。这是**已知缺口**，已写进
+`schemas/message_prompt.ts` 的注释，不要把它当成"已被守住"。
+
+### G13 三份写法里有**两份不是同一个集合**
+
+这是"形状相同 ≠ 同一件事"最干净的一个例子：
+
+| 位置 | 集合 |
+|---|---|
+| `useVdfs` 的追加守卫 | `{text, markdown, json, message}` |
+| `VdfsWorkbench` 的渲染数据 | `{text, markdown, json, message}` |
+| `useVdfs` 的**读取**守卫 | 上面四个 **∪ `{form}`** |
+
+表单的字段值同样取自节点正文（`vdfs/read` 的 `text`，前端 parse 成对象后作为显式
+入参交给渲染器），所以读取守卫多一个 `form`；而**追加**对表单毫无意义。
+
+因此给出**两个**具名谓词（`isTextualRenderer` / `rendererReadsNodeText`）而不是
+硬凑一个。测试里有一条专门断言**两者的差集恰好是 `form`**——泛泛地测两个 `true`
+是测不出这个区别的。
+
+### G14 `metadata` 是 `any`，枚举只活在运行期
+
+`SessionListItem.metadata` 的类型是 `Record<string, any>`（后端回包没有类型兜底）。
+于是"取值校验"只能靠运行期枚举，而枚举必须只有一处——先前
+`stores/sessionLive.ts` 手写 `m.risk_level === 'low' || … === 'medium' || … === 'high'`，
+**风险等级多一个取值时会被静默丢弃**（既不报错也不生效）。
+
+现在词表在 `schemas/session_meta.ts`（`SESSION_RISK_LEVELS` / `SESSION_MODES`），
+校验改为 `includes`。这也让 `risk_level` **可被 C 组守卫**——裸字面量联合在运行期
+不存在，守卫看不见它（详见文末"附"里的 C 组扩面）。
+
+### 3.2.1 规模与验证
+
+| 指标 | 值 |
+|---|---|
+| 生产代码 | 11 文件（`mechanism-audit.mjs` + `protocol-mirror-audit.mjs` + 9 个 `tauri/src` 源文件） |
+| 测试 | 2 文件（`vdfsTypes.spec.ts` +5、`vdfs.spec.ts` +5）；守卫回归 30 → **35** |
+| 新增原语 | 无（本轮全是"收口"与"补漏"，不引入新抽象） |
+
+验证（全部通过）：`protocol-mirror-audit` **A 31 + B 2 + C 6 + D 23，Errors 0**；
+`protocol-mirror-audit.test.mjs` **35/35**；`mechanism-audit` 七条规则全过（M-006 现覆盖
+**76 文件**）；`vitest run` **47 文件 / 661 测试**，exit=0；`vue-tsc --noEmit` 干净；
+`gate --only=frontend` **4/4**。
+
+---
+
 ## 3.1 一条**不要做**的合并：P11 与门禁 M-007 冲突
 
 §3 的 P11 提议把 `schemas/vdfs.ts` 的 10 个 VDFS op 并入
@@ -308,7 +406,7 @@ P12 的风险与收益都最高：它是"多路写同一份数据"，而 ADR-015
 | 数据源 | 处置 | 落地形式 |
 |---|---|---|
 | `vdfs_provider.rs` / `protocol.rs` 的 `pub const X: &str` | ✅ 纳入守卫（**自动发现**） | A 组：同名交集逐字比对，**3 → 31 条** |
-| Rust enum + `serde(rename_all = "snake_case")` | ✅ 纳入守卫（**集合相等**） | C 组：**4 张词表**（角色 / 类型 / 状态 / 恢复动作） |
+| Rust enum + `serde(rename_all = "…")` | ✅ 纳入守卫（**集合相等**） | C 组：**6 张词表**（角色 / 类型 / 状态 / 恢复动作 / 选项节点类型 / 工具风险等级），`snake_case` 与 `lowercase` 都守得住 |
 | 对应 Rust struct 的**字段名** | ✅ 纳入守卫 | D 组：**23 对**结构体字段（VDFS 契约 + `ChatMessage` + 详情方言 9 对 + 选项机制 5 对），只查"前端字段能否在后端线格式里找到" |
 | 对应 Rust struct 的**类型映射** | ⛔ 不做 | 正则读不出 `Option<u64>` → `number`，泛型 / 嵌套会失控；收益低于字段名 |
 | `messageTypes.ts` 文案 / `vdfsCards.ts` 约定 / `vdfs-form.ts` 派生 / 路径代数 | ⛔ **不可生成** | 纯业务判断，必须手写 |
@@ -342,3 +440,14 @@ P12 的风险与收益都最高：它是"多路写同一份数据"，而 ADR-015
   （如 `ChatMessage.response_id`）——它本就该按需取，不构成"第二份真相"。
 - 审计脚本的 `✓` / `✗` 曾被编码事故替换成 `?`（红绿都显示 `?`，且 NO_COLOR 下
   无从区分），已修。
+- **C 组从 4 张扩到 6 张，并修掉两处"守卫自己看不见"的写法**（第三轮，见 §3.2）：
+  - **`rename_all` 的取值改为自动读取**。原先把 `snake_case` **硬编码**成检查项
+    （`hasRenameAllSnakeCase`），于是 `#[serde(rename_all = "lowercase")]` 的枚举
+    （`RiskLevel`）虽然前端有镜像却**无人看守**——"枚举类型对了、属性取值没覆盖到"
+    是守卫自己的漏。现在读出声明的取值再选转换规则（`CASE_CONVERTERS`），**不支持的
+    取值直接报错**而不是猜。
+  - **词表元素允许裸字符串字面量**。原提取器只认"本文件的字符串常量名"，于是
+    `OPTION_TYPES = ['invoke', 'sub', 'form']` 这类**只出现一次**的词被拒。守卫要的是
+    "取值只有一处"，不是"每个词都有名字"——给只出现一次的词硬造常量名，只会得到一层
+    **无人引用的间接**。
+  - 新纳入 `OptionType ↔ OPTION_TYPES`、`RiskLevel ↔ SESSION_RISK_LEVELS` 两张词表。

@@ -45,6 +45,22 @@ export interface MessagePromptQuestions {
 
 export type MessagePrompt = MessagePromptConfirm | MessagePromptQuestions
 
+/**
+ * 待响应载荷的判别式取值（`meta.prompt.kind`）——**唯一定义处**。
+ *
+ * 先前 `registry/messageTypes.ts` 把这个联合重抄了两遍（字段类型 + `promptKindOf`
+ * 返回类型），组件再比较两遍。类型只有一处定义，消费点一律引用本别名。
+ *
+ * ⚠️ **守卫边界**：后端以**裸 JSON 字面量**产出这两个词
+ * （`plugins/local/ask_user.rs` 的 `"kind": "question"`、`plugins/local/plugin.rs`
+ * 的 `"kind": "confirm"`），**不是** serde 枚举 ⇒ `protocol-mirror-audit` 的 C 组
+ * （只认 `#[serde(rename_all)]` 的闭集枚举）**看不见它**。所以后端改这两个词时
+ * 不会有任何守卫变红——这是已知缺口，不是"已被守住"。
+ * 唯一在运行期枚举它们的正当位置是 `messageTypes.ts::promptOf` 的校验
+ * （它验的是 `unknown` 转型后的值，必须逐词判断）。
+ */
+export type MessagePromptKind = MessagePrompt['kind']
+
 /** `Other` 是**约定选项**：勾选后允许自由输入，提交时与普通选项一起上报 */
 export const MESSAGE_PROMPT_OTHER = 'Other'
 

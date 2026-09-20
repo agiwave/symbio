@@ -19,8 +19,9 @@ import { setVdfsRoot } from '@/schemas/vdfsRoot'
 
 // 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
 setVdfsRoot('@vfs')
-import { arrayBufferToBase64, base64ToBytes, runVdfsAction, writeVdfsBinary } from '../vdfs'
+import { arrayBufferToBase64, base64ToBytes, listVdfs, readVdfs, runVdfsAction, statVdfs, writeVdfsBinary } from '../vdfs'
 import { vdfsChangeInScope } from '../eventBus'
+import { logger } from '@/utils/logger'
 
 /** 最近一次插件调用（op + 载荷） */
 function lastCall(): { op: string; payload: Record<string, unknown> } {
@@ -127,5 +128,127 @@ describe('vdfsChangeInScope（按展示地址前缀分流）', () => {
 
   it('尾部斜杠不影响判定', () => {
     expect(vdfsChangeInScope({ prefix: `${SESSIONS}/` }, `${SESSIONS}/abc`)).toBe(true)
+  })
+})
+
+/**
+ * 读 / 列入口的**失败口径**：吞错返兜底（`services/fallback.ts` 的 `withFallback`）。
+ *
+ * 这一组是在把三处手写 `try/catch → logger → 兜底` 收进原语之后补的——原语化是
+ * 行为保持的重构，但**没有测试就证明不了"保持"**：兜底值（空目录 vs `null`）、
+ * 日志级别（error vs debug）都是可陈述的口径，必须逐条钉住。
+ */
+describe('listVdfs / statVdfs / readVdfs 的失败口径', () => {
+  const mocked = vi.mocked(callPlugin)
+  const logError = vi.mocked(logger.error)
+  const logDebug = vi.mocked(logger.debug)
+
+  it('listVdfs 失败 → 形状合法的空目录（页面照常渲染），日志 error', async () => {
+    mocked.mockReset()
+    logError.mockReset()
+    mocked.mockRejectedValueOnce(new Error('ipc down'))
+    const r = await listVdfs(vdfsJoin('@vfs', 'session'))
+    // 关键：不是 null，而是**同型**的空列表——调用方无需分支
+    expect(r).toEqual({
+      path: vdfsJoin('@vfs', 'session'),
+      node: expect.objectContaining({ path: vdfsJoin('@vfs', 'session') }),
+      items: [],
+    })
+    expect(logError).toHaveBeenCalled()
+  })
+
+  it('listVdfs 后端返回 falsy → 同样给空目录（不是把 undefined 透出去）', async () => {
+    mocked.mockReset()
+    mocked.mockResolvedValueOnce(null)
+    const r = await listVdfs(vdfsJoin('@vfs', 'session'))
+    expect(r.items).toEqual([])
+    expect(r.path).toBe(vdfsJoin('@vfs', 'session'))
+  })
+
+  it('listVdfs 成功 → 原样返回（不掺兜底）', async () => {
+    mocked.mockReset()
+    const ok = { path: '/p', node: { path: '/p' }, items: [{ path: '/p/a' }] }
+    mocked.mockResolvedValueOnce(ok)
+    await expect(listVdfs('/p')).resolves.toBe(ok)
+  })
+
+  it('statVdfs 失败 → null，且降为 **debug**（节点不存在是预期内的失败）', async () => {
+    mocked.mockReset()
+    logDebug.mockReset()
+    logError.mockReset()
+    mocked.mockRejectedValueOnce(new Error('not found'))
+    await expect(statVdfs('/nope')).resolves.toBeNull()
+    expect(logDebug).toHaveBeenCalled()
+    // 预期内的失败不得记 error——否则日志失去信噪比，盖住真正的故障
+    expect(logError).not.toHaveBeenCalled()
+  })
+
+  it('readVdfs 失败 → null，日志 error（读不到正文不是预期内的事）', async () => {
+    mocked.mockReset()
+    logError.mockReset()
+    mocked.mockRejectedValueOnce(new Error('boom'))
+    await expect(readVdfs('/p')).resolves.toBeNull()
+    expect(logError).toHaveBeenCalled()
+  })
+})
+
+/**
+ * 读 / 列入口的**失败口径**：吞错返兜底（`services/fallback.ts` 的 `withFallback`）。
+ *
+ * 这一组是在把三处手写 `try/catch → logger → 兜底` 收进原语之后补的——原语化是
+ * 行为保持的重构，但**没有测试就证明不了"保持"**：兜底值（空目录 vs `null`）、
+ * 日志级别（error vs debug）都是可陈述的口径，必须逐条钉住。
+ */
+describe('listVdfs / statVdfs / readVdfs 的失败口径', () => {
+  const mocked = vi.mocked(callPlugin)
+  const logError = vi.mocked(logger.error)
+  const logDebug = vi.mocked(logger.debug)
+
+  it('listVdfs 失败 → 形状合法的空目录（页面照常渲染），日志 error', async () => {
+    mocked.mockReset()
+    logError.mockReset()
+    mocked.mockRejectedValueOnce(new Error('ipc down'))
+    const r = await listVdfs(vdfsJoin('@vfs', 'session'))
+    // 关键：不是 null，而是**同型**的空列表——调用方无需分支
+    expect(r).toEqual({
+      path: vdfsJoin('@vfs', 'session'),
+      node: expect.objectContaining({ path: vdfsJoin('@vfs', 'session') }),
+      items: [],
+    })
+    expect(logError).toHaveBeenCalled()
+  })
+
+  it('listVdfs 后端返回 falsy → 同样给空目录（不是把 undefined 透出去）', async () => {
+    mocked.mockReset()
+    mocked.mockResolvedValueOnce(null)
+    const r = await listVdfs(vdfsJoin('@vfs', 'session'))
+    expect(r.items).toEqual([])
+    expect(r.path).toBe(vdfsJoin('@vfs', 'session'))
+  })
+
+  it('listVdfs 成功 → 原样返回（不掺兜底）', async () => {
+    mocked.mockReset()
+    const ok = { path: '/p', node: { path: '/p' }, items: [{ path: '/p/a' }] }
+    mocked.mockResolvedValueOnce(ok)
+    await expect(listVdfs('/p')).resolves.toBe(ok)
+  })
+
+  it('statVdfs 失败 → null，且降为 **debug**（节点不存在是预期内的失败）', async () => {
+    mocked.mockReset()
+    logDebug.mockReset()
+    logError.mockReset()
+    mocked.mockRejectedValueOnce(new Error('not found'))
+    await expect(statVdfs('/nope')).resolves.toBeNull()
+    expect(logDebug).toHaveBeenCalled()
+    // 预期内的失败不得记 error——否则日志失去信噪比，盖住真正的故障
+    expect(logError).not.toHaveBeenCalled()
+  })
+
+  it('readVdfs 失败 → null，日志 error（读不到正文不是预期内的事）', async () => {
+    mocked.mockReset()
+    logError.mockReset()
+    mocked.mockRejectedValueOnce(new Error('boom'))
+    await expect(readVdfs('/p')).resolves.toBeNull()
+    expect(logError).toHaveBeenCalled()
   })
 })

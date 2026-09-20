@@ -66,7 +66,13 @@ import {
   type VdfsNewType,
   type VdfsNode,
 } from '@/schemas/vdfs'
-import { dirIconOf, resolveVdfsRenderer, type VdfsRenderer } from '@/registry/vdfsTypes'
+import {
+  dirIconOf,
+  isTextualRenderer,
+  rendererReadsNodeText,
+  resolveVdfsRenderer,
+  type VdfsRenderer,
+} from '@/registry/vdfsTypes'
 import { useToast } from '@/composables/useToast'
 import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { logger } from '@/utils/logger'
@@ -283,8 +289,10 @@ export function useVdfs(opts: UseVdfsOptions) {
    */
   const appendGuard = useGenerationGuard()
 
-  /** 详情渲染器里「正文即文本缓冲」的那些（追加可安全拼接）；表单/二进制不在其列 */
-  const TEXTUAL_RENDERERS = new Set(['text', 'markdown', 'json', 'message'])
+  // 详情渲染器里「正文即文本缓冲」的那些（追加可安全拼接）——判定在
+  // `registry/vdfsTypes::isTextualRenderer`（那里也是 `VdfsRenderer` 的定义处）。
+  // 先前这里手写了一份 `new Set([...])`，与另外两处各写一份、且其中一处其实
+  // 不是同一个集合（见该函数的注释）。
 
   /**
    * 就地应用一条追加型变更；返回是否命中**当前打开的详情**。
@@ -298,7 +306,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     const delta = change.delta
     const node = selectedNode.value
     if (!delta || !node || node.path !== change.path) return false
-    if (!TEXTUAL_RENDERERS.has(renderer.value)) return false
+    if (!isTextualRenderer(renderer.value)) return false
     nodeText.value += delta
     appendGuard.advance(node.path)
     return true
@@ -339,7 +347,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     if (isVdfsDraft(node)) return
 
     const r = resolveVdfsRenderer(node)
-    if (r !== 'form' && r !== 'text' && r !== 'json' && r !== 'markdown' && r !== 'message')
+    if (!rendererReadsNodeText(r))
       return
 
     // 读取代次令牌：连点多项时，慢响应不得覆盖新选中项的数据

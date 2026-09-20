@@ -84,37 +84,34 @@ export async function listVdfs(
   path = vdfsRoot(),
   opts?: VdfsListOptions
 ): Promise<VdfsListResponse> {
-  try {
-    const payload: Record<string, unknown> = { path }
-    if (opts?.limit !== undefined) payload.limit = opts.limit
-    if (opts?.before) payload.before = opts.before
-    const resp = await callPlugin<VdfsListResponse>(VDFS_LIST, payload)
-    if (!resp) return { path, node: emptyNode(path), items: [] }
-    return resp
-  } catch (err) {
-    logger.error('vdfs-service', `listVdfs(${path}) failed:`, err)
-    return { path, node: emptyNode(path), items: [] }
-  }
+  const payload: Record<string, unknown> = { path }
+  if (opts?.limit !== undefined) payload.limit = opts.limit
+  if (opts?.before) payload.before = opts.before
+  // 空目录要带上 `path`，故兜底是 thunk（惰性）而非常量
+  const empty = (): VdfsListResponse => ({ path, node: emptyNode(path), items: [] })
+  return withFallback(
+    async () => (await callPlugin<VdfsListResponse>(VDFS_LIST, payload)) ?? empty(),
+    empty,
+    { tag: 'vdfs-service', what: `listVdfs(${path}) failed` }
+  )
 }
 
 /** 读元数据；失败返回 null */
-export async function statVdfs(path: string): Promise<VdfsNode | null> {
-  try {
-    return await callPlugin<VdfsNode>(VDFS_STAT, { path })
-  } catch (err) {
-    logger.debug('vdfs-service', `statVdfs(${path}) failed:`, err)
-    return null
-  }
+export function statVdfs(path: string): Promise<VdfsNode | null> {
+  // 节点不存在是**预期内**的失败（stat 的常规用法就是先探一下），故降为 debug
+  return withFallback(() => callPlugin<VdfsNode>(VDFS_STAT, { path }), () => null, {
+    tag: 'vdfs-service',
+    what: `statVdfs(${path}) failed`,
+    level: 'debug',
+  })
 }
 
 /** 读内容；失败返回 null */
-export async function readVdfs(path: string): Promise<VdfsContent | null> {
-  try {
-    return await callPlugin<VdfsContent>(VDFS_READ, { path })
-  } catch (err) {
-    logger.error('vdfs-service', `readVdfs(${path}) failed:`, err)
-    return null
-  }
+export function readVdfs(path: string): Promise<VdfsContent | null> {
+  return withFallback(() => callPlugin<VdfsContent>(VDFS_READ, { path }), () => null, {
+    tag: 'vdfs-service',
+    what: `readVdfs(${path}) failed`,
+  })
 }
 
 /**

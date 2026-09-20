@@ -48,7 +48,7 @@ import {
   type MessageStatus,
   type ResumeAction,
 } from '@/schemas/chat_message'
-import type { MessagePrompt } from '@/schemas/message_prompt'
+import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 
 // ==================== 节点 → 词表取值（缺省规则） ====================
 
@@ -103,7 +103,7 @@ export interface MessageFacets {
   /** 子会话 Turn（`role = tool` 的 turn）：某工具「过程」段 */
   subSession: boolean
   /** `user_prompt` 的子类（`meta.prompt.kind`） */
-  promptKind?: 'question' | 'confirm'
+  promptKind?: MessagePromptKind
   /** 合成「请求」子节点（`meta.__toolRequest`，前端渲染期提升，不落存储） */
   toolRequest: boolean
   /** 工具返回（`role = tool` + `type = text` + 父节点是 `tool_call`） */
@@ -340,7 +340,7 @@ export function promptOf(node: Pick<ChatMessage, 'meta'>): MessagePrompt | null 
 }
 
 /** 待响应载荷的子形态（供 `messageTitle` 区分「提问」与「工具确认」） */
-export function promptKindOf(node: Pick<ChatMessage, 'meta'>): 'question' | 'confirm' | undefined {
+export function promptKindOf(node: Pick<ChatMessage, 'meta'>): MessagePromptKind | undefined {
   return promptOf(node)?.kind
 }
 

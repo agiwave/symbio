@@ -64,7 +64,11 @@ import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/schemas/chat_message'
-import { isInflightMessageStatus } from '@/schemas/chat_message'
+import {
+  CHAT_ROLE_ASSISTANT,
+  MESSAGE_STATUS_STREAMING,
+  isInflightMessageStatus,
+} from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
 // 消息转写规则（纯逻辑）：合并 / 水合 / 截断 / 看门狗判据
 import {
@@ -150,10 +154,10 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   // 会话运行模式（auto / interactive），按 sessionId 记忆，切换会话不丢
   // 与 agent_id/provider_id/risk_level 同级别：持久化到 session.metadata.mode
-  const sessionModes = ref<Record<string, 'auto' | 'interactive'>>({})
+  const sessionModes = ref<Record<string, SessionMode>>({})
   // 会话执行风险等级（low / medium / high），按 sessionId 记忆，切换会话不丢
   // 与 agent_id/provider_id/mode 同级别：持久化到 session.metadata.risk_level
-  const sessionRiskLevels = ref<Record<string, 'low' | 'medium' | 'high'>>({})
+  const sessionRiskLevels = ref<Record<string, SessionRiskLevel>>({})
 
   // ── 多会话实时状态 ──
   // 每个 session 一份独立的 messages 字典（key: msgId, value: ChatMessage）
@@ -303,8 +307,8 @@ export const useSessionsStore = defineStore('sessions', () => {
       if (!existing) {
         cur[patch.id] = {
           content: '',
-          status: 'streaming',
-          role: 'assistant',
+          status: MESSAGE_STATUS_STREAMING,
+          role: CHAT_ROLE_ASSISTANT,
           timestamp: Date.now(),
           seq: nextSeq(sessionId),
           ...patch

@@ -12,7 +12,9 @@ import { describe, expect, it } from 'vitest'
 import { defineComponent } from 'vue'
 import {
   getVdfsRenderer,
+  isTextualRenderer,
   registerVdfsRenderer,
+  rendererReadsNodeText,
   resolveVdfsRenderer,
 } from '../vdfsTypes'
 import type { VdfsNode } from '@/schemas/vdfs'
@@ -68,5 +70,53 @@ describe('registerVdfsRenderer / getVdfsRenderer', () => {
     expect(getVdfsRenderer('json')).toBeUndefined()
     registerVdfsRenderer('json', Dummy)
     expect(getVdfsRenderer('json')).toBe(Dummy)
+  })
+})
+
+/**
+ * 两个谓词的**边界**必须逐词锁死：它们此前被写了三遍，且其中一遍其实是另一个集合
+ * （`rendererReadsNodeText` ⊃ `isTextualRenderer`）。这类"形状相同但不是同一件事"
+ * 的错误只有把每个渲染器逐条断言才拦得住——泛泛地测两个 `true` 是测不出来的。
+ */
+describe('isTextualRenderer / rendererReadsNodeText', () => {
+  it('isTextualRenderer：正文即文本缓冲的四种（追加可安全拼接）', () => {
+    for (const r of ['text', 'markdown', 'json', 'message'] as const) {
+      expect(isTextualRenderer(r), r).toBe(true)
+    }
+  })
+
+  it('isTextualRenderer：其余一律不是（表单与二进制不可追加）', () => {
+    for (const r of ['dir', 'form', 'session', 'appearance', 'about', 'fallback'] as const) {
+      expect(isTextualRenderer(r), r).toBe(false)
+    }
+  })
+
+  it('rendererReadsNodeText：文本缓冲 ∪ form（表单字段值也取自正文）', () => {
+    for (const r of ['text', 'markdown', 'json', 'message', 'form'] as const) {
+      expect(rendererReadsNodeText(r), r).toBe(true)
+    }
+  })
+
+  it('rendererReadsNodeText：其余各有自己的数据来源，替它们读正文是白读', () => {
+    for (const r of ['dir', 'session', 'appearance', 'about', 'fallback'] as const) {
+      expect(rendererReadsNodeText(r), r).toBe(false)
+    }
+  })
+
+  it('两者的差集**恰好**是 form —— 这正是它们不能合并的原因', () => {
+    const all = [
+      'dir',
+      'form',
+      'session',
+      'message',
+      'markdown',
+      'json',
+      'text',
+      'appearance',
+      'about',
+      'fallback',
+    ] as const
+    const onlyReads = all.filter((r) => rendererReadsNodeText(r) && !isTextualRenderer(r))
+    expect(onlyReads).toEqual(['form'])
   })
 })

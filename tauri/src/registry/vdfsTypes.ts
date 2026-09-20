@@ -46,6 +46,37 @@ export type VdfsRenderer =
   | 'about'
   | 'fallback'
 
+/**
+ * 「正文即**文本缓冲**」的渲染器子集 —— 追加可安全原地拼接，表单与二进制不在其列。
+ *
+ * 先前这个集合被写了三遍，且**其中一遍其实不是同一个集合**：
+ * `useVdfs` 的读取守卫用的是「文本缓冲 ∪ `form`」（表单的字段值也来自正文，
+ * 同样需要读一次），而追加守卫与 `VdfsWorkbench` 用的是纯文本缓冲。
+ * 形状相同不等于同一件事——所以这里给出**两个**具名谓词，而不是硬凑一个。
+ */
+const TEXTUAL_RENDERERS: ReadonlySet<VdfsRenderer> = new Set([
+  'text',
+  'markdown',
+  'json',
+  'message',
+])
+
+/** 该渲染器把节点正文当**文本缓冲**看待（追加可拼接） */
+export function isTextualRenderer(r: VdfsRenderer): boolean {
+  return TEXTUAL_RENDERERS.has(r)
+}
+
+/**
+ * 该渲染器需要**读一次节点正文**才谈得上呈现。
+ *
+ * = 文本缓冲类 ∪ `form`：表单字段值同样取自正文（`vdfs/read` 的 `text`，
+ * 前端 parse 成对象后作为显式入参交给渲染器）。其余（`dir` / `session` /
+ * `appearance` / `about` / `fallback`）各有自己的数据来源，替它们读正文是白读。
+ */
+export function rendererReadsNodeText(r: VdfsRenderer): boolean {
+  return r === 'form' || isTextualRenderer(r)
+}
+
 /** 扩展名 → 渲染器（**唯一的硬编码表**，纯 UI 约定） */
 const EXT_RENDERERS: Record<string, VdfsRenderer> = {
   [VDFS_EXT_FORM]: 'form',

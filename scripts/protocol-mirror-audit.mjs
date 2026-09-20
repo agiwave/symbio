@@ -87,6 +87,15 @@ const VDFS_PROVIDER_RS = 'symbio/src/symbio_core/vdfs_provider.rs'
 const VDFS_PROTOCOL_RS = 'symbio/src/plugins/vdfs/protocol.rs'
 const VDFS_TS = 'tauri/src/schemas/vdfs.ts'
 
+const CHAT_MESSAGE_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
+const CHAT_MESSAGE_TS = 'tauri/src/schemas/chat_message.ts'
+const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
+const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
+const OPTIONS_RS = 'symbio/src/symbio_core/schemas/options.rs'
+const OPTIONS_TS = 'tauri/src/schemas/options.ts'
+const RISK_LEVEL_RS = 'symbio/src/plugins/local/policy/policy_types.rs'
+const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
+
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
 const RUST_CONST_FILES = [VDFS_PROVIDER_RS, VDFS_PROTOCOL_RS]
 
@@ -151,9 +160,6 @@ const ABSENT = [
  * 对应关系无法自动推断（`MessageRole` ↔ `CHAT_ROLES` 名字不同），故显式登记；
  * 但登记后**取值**是自动提取比对的——枚举加变体、词表加取值，两边立刻对上账。
  */
-const CHAT_MESSAGE_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
-const CHAT_MESSAGE_TS = 'tauri/src/schemas/chat_message.ts'
-
 const ENUM_SETS = [
   {
     what: '消息角色',
@@ -174,6 +180,20 @@ const ENUM_SETS = [
     what: '会话恢复动作',
     rust: { file: CHAT_MESSAGE_RS, enum: 'ResumeAction' },
     ts: { file: CHAT_MESSAGE_TS, array: 'RESUME_ACTIONS' },
+  },
+  {
+    what: '选项节点类型',
+    rust: { file: OPTIONS_RS, enum: 'OptionType' },
+    ts: { file: OPTIONS_TS, array: 'OPTION_TYPES' },
+  },
+  {
+    what: '工具风险等级',
+    // ⚠️ 这条是 `rename_all = "lowercase"`（不是 `snake_case`）：本组**自动读取**
+    // 声明的取值并选用对应的转换规则，故两者都能守。此前只认 `snake_case`，
+    // 于是它在前端 `schemas/session_meta.ts` 的镜像（`SESSION_RISK_LEVELS`）
+    // 长期无人看守——「枚举类型对了但属性取值没覆盖到」是守卫自己的漏。
+    rust: { file: RISK_LEVEL_RS, enum: 'RiskLevel' },
+    ts: { file: SESSION_META_TS, array: 'SESSION_RISK_LEVELS' },
   },
 ]
 
@@ -206,11 +226,6 @@ const ENUM_SETS = [
  *    测试，再跑真仓库）。只跑真仓库不够——真仓库全绿只证明"现在没漂"，不证明"漂了
  *    会红"。
  */
-const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
-const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const OPTIONS_RS = 'symbio/src/symbio_core/schemas/options.rs'
-const OPTIONS_TS = 'tauri/src/schemas/options.ts'
-
 const STRUCT_SETS = [
   {
     what: '会话消息',
@@ -403,26 +418,52 @@ function rustEnumVariants(src, name) {
 }
 
 /**
- * 枚举声明**正上方**的连续属性里，是否有 `rename_all = "snake_case"`。
+ * 枚举声明**正上方**的连续属性里，`rename_all` 的取值；没有则 `null`。
  *
  * 从 `enum` 往前逐行收集 `#[...]`，遇到第一个非属性、非空、非注释行即停——
  * 不能只往上看固定字符数，那会跨到上一个枚举的属性上去。
  */
-function hasRenameAllSnakeCase(src, name) {
+function renameAllOf(src, name) {
   const m = enumHead(src, name)
-  if (!m) return false
-  return declAttrs(src, m.index).some((a) => /rename_all\s*=\s*"snake_case"/.test(a))
+  if (!m) return null
+  for (const a of declAttrs(src, m.index)) {
+    const r = a.match(/rename_all\s*=\s*"([^"]+)"/)
+    if (r) return r[1]
+  }
+  return null
 }
 
-/** Rust 变体名 → `serde(rename_all = "snake_case")` 的线格式词 */
-function snakeCase(name) {
-  return name
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .toLowerCase()
+/**
+ * 变体名 → 线格式词，按 `rename_all` 的取值分派。
+ *
+ * 只支持本仓库**实际用到**的两种。其余取值**报错**而不是猜一个转换规则——
+ * 猜错的表现是「看起来正确而实际全错」，那正是这条守卫要防的。
+ *
+ * 注意 `snake_case` 与 `lowercase` 对**多词**变体结果不同（`ReadOnly` →
+ * `read_only` vs `readonly`）；对全单词的枚举两者恰好一致。因为比对的对象是
+ * 前端词表，任何**改变线格式词**的属性改动都会被逐词比对抓出来。
+ */
+const CASE_CONVERTERS = {
+  snake_case: (n) =>
+    n
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .toLowerCase(),
+  lowercase: (n) => n.toLowerCase(),
 }
 
-/** 前端词表数组的**取值**（元素是常量名，到本文件的字面量常量表里解引用） */
+/**
+ * 前端词表数组的**取值**。
+ *
+ * 元素允许两种形态：
+ * - **本文件的字符串常量名**（`CHAT_ROLE_USER`）——适用于「这个词还要在别处按名
+ *   引用」的情形（组件里写 `role === CHAT_ROLE_ASSISTANT`，名字才有价值）；
+ * - **裸字符串字面量**（`'invoke'`）——适用于只在词表里出现一次的词。给这类词
+ *   硬造一个常量名，只会得到一层**无人引用的间接**（守卫要的是"取值只有一处"，
+ *   不是"每个词都有名字"）。
+ *
+ * 两者之外一律报错（如漏了引号的 `invoke`）：那既不是常量也不是字面量，说明写错了。
+ */
 function tsArrayValues(src, name) {
   const m = src.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s*as\\s+const`))
   if (!m) return { values: null, problem: `未找到词表数组 ${name}` }
@@ -431,8 +472,16 @@ function tsArrayValues(src, name) {
   for (const raw of m[1].split(',')) {
     const id = raw.split('//')[0].trim()
     if (!id) continue
+    const lit = id.match(/^'([^']*)'$/)
+    if (lit) {
+      values.push(lit[1])
+      continue
+    }
     if (!consts.has(id)) {
-      return { values: null, problem: `${name} 的元素 ${id} 不是本文件里的字符串常量` }
+      return {
+        values: null,
+        problem: `${name} 的元素 ${id} 既不是本文件的字符串常量，也不是字符串字面量`,
+      }
     }
     values.push(consts.get(id))
   }
@@ -665,9 +714,17 @@ for (const e of ENUM_SETS) {
     if (variants === null) {
       problems.push(`后端未找到枚举 ${e.rust.enum}`)
     } else {
-      rustWords = variants.map(snakeCase)
-      if (!hasRenameAllSnakeCase(rustSrc, e.rust.enum)) {
-        problems.push(`${e.rust.enum} 缺 #[serde(rename_all = "snake_case")]`)
+      const style = renameAllOf(rustSrc, e.rust.enum)
+      const convert = style === null ? null : CASE_CONVERTERS[style]
+      if (style === null) {
+        problems.push(`${e.rust.enum} 缺 #[serde(rename_all = "…")] 声明`)
+      } else if (!convert) {
+        problems.push(
+          `${e.rust.enum} 的 rename_all = "${style}" 本检查器不支持` +
+            `（只支持 ${Object.keys(CASE_CONVERTERS).join(' / ')}）`,
+        )
+      } else {
+        rustWords = variants.map(convert)
       }
     }
   }

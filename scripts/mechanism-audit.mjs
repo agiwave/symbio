@@ -18,7 +18,7 @@
  * | M-003 | 不得直接 `invoke`，一律经 `services/`                   | 出站协议切换只改一处          |
  * | M-004 | `registry/` `schemas/` 不得 import 组件                 | 契约与映射必须能被非视图引用  |
  * | M-005 | `schemas/` 不得依赖 `registry/` `components/` `composables/` | 数据契约零呈现依赖（防环） |
- * | M-006 | 组件不得用字面量比较消息词表                            | 词表只有 `schemas/chat_message` |
+ * | M-006 | 各层不得用字面量比较消息词表（components / composables / services / stores / registry） | 词表只有 `schemas/chat_message` |
  * | M-007 | 地址常量只能在 `schemas/vdfs.ts` **定义**                | 段名常量不得有第二份真相      |
  *
  * M-004 的例外是 `*Renderers.ts`：那是**刻意**的唯一组件装配点（把渲染器标识绑到
@@ -337,16 +337,24 @@ auditFiles(
 console.log('--- M-005: schemas 不得依赖 registry / components / composables ---')
 auditFiles('tauri/src/schemas', walk(path.join(SRC, 'schemas'), isTs), [RULES.schemaReverseDep])
 
-console.log('--- M-006: 组件 / 组合式 / 服务层不得用字面量比较消息词表 ---')
+console.log('--- M-006: 组件 / 组合式 / 服务层 / store / registry 不得用字面量比较消息词表 ---')
 // 范围必须覆盖 **所有消费消息词表的地方**，而不只是组件：
-// 词表字面量一旦出现在 services/（如把 `status` 翻译成活动文案）或 composables/，
-// 同样会在后端改词表时静默失配，而 `.vue`-only 的扫描看不见它们。
+// 词表字面量一旦出现在 services/（如把 `status` 翻译成活动文案）、composables/、
+// stores/（合并补丁、缩略卡预览）或 registry/（判定函数），同样会在后端改词表时
+// 静默失配，而 `.vue`-only 的扫描看不见它们。
+//
+// `stores/` 与 `registry/` 是**后来补上的**：先前只扫前三个目录，于是
+// `stores/sessionTranscript.ts` 的四处字面量比较长期无人看守（其中该文件
+// 明明已经 import 了 `MESSAGE_STATUS_*` 常量——同文件两种写法并存）。
+// 教训：门禁的**扫描范围**和它的**规则**一样会漏，而漏了不会红。
 auditFiles(
-  'tauri/src/components + composables + services',
+  'tauri/src/components + composables + services + stores + registry',
   [
     ...walk(path.join(SRC, 'components'), isVueOrTs),
     ...walk(path.join(SRC, 'composables'), isTs),
     ...walk(path.join(SRC, 'services'), isTs),
+    ...walk(path.join(SRC, 'stores'), isTs),
+    ...walk(path.join(SRC, 'registry'), isTs),
   ],
   [RULES.vocabLiteral],
 )
