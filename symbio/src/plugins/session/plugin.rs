@@ -25,13 +25,11 @@ use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::schemas::session::session_chat_response;
 use crate::symbio_core::vdfs;
 use crate::symbio_core::vdfs_provider::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use crate::symbio_core::{
     dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, MemoryFile, Plugin,
-    PluginDir, PluginError, PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION,
-    SESSION_ID,
+    PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION, SESSION_ID,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -197,33 +195,26 @@ impl SessionPlugin {
         ));
     }
 
-    /// 广播一条消息补丁到前端，并**同步发射**对应的 VDFS 变更。
+    /// 发射一条消息级 VDFS 变更——**消息到达消费者的唯一出口**。
     ///
     /// ## 为什么是一个函数而不是两处调用
     ///
-    /// 消息补丁到达前端有两条入口：流式消费循环（模型 / 工具 / 子会话 / 审批
-    /// 节点的逐帧补丁）与 `persist_failure`（错误或崩溃后由服务端定稿的终态）。
-    /// 它们是两个真实时刻，无法也不该合并成一处调用；但「补丁到前端」与
-    /// 「变更进 VDFS」必须**同生共死**——漏发一次变更，VDFS 列表就与前端
-    /// 流式视图永久不一致（且没有任何机制会纠正它，因为两条链路互不校验）。
+    /// 消息补丁有两条入口：流式消费循环（模型 / 工具 / 子会话 / 审批节点的逐帧
+    /// 补丁）与 `persist_failure` / `converge_inflight`（错误、中止后由服务端定稿
+    /// 的终态）。它们是两个真实时刻，无法也不该合并成一处调用；但「变更进 VDFS」
+    /// 必须**同生共死**——漏发一次变更，VDFS 列表就与服务端存储永久不一致
+    /// （且没有任何机制会纠正它）。因此把出口收成一个函数：入口有两个，出口只有一个。
     ///
-    /// 因此把两件事绑进同一个函数：入口有两个，出口只有一个。
+    /// ## `view` 必须是**合并后的完整消息**
+    ///
+    /// 载荷要能独立成立：`created` / `updated` 附带的节点视图与内容快照若只是
+    /// 半成品，消费者拿到的就是残缺结构（进程内消费者按它折算增量补丁，
+    /// 见 `symbio_core::schemas::session::transcript`）。
+    ///
     /// `existed` / `appended` 由实际合并结果给出，本函数不做二次判断。
-    ///
-    /// ## `patch` 与 `view` 的分工（不可合并成一个参数）
-    ///
-    /// - `patch`：**下发给前端的帧**，保持既有增量语义（前端按 `apply_patch`
-    ///   合并）——换成合并后的完整消息会让前端把整条正文当增量再拼一遍；
-    /// - `view`：**变更载荷的来源**，必须是合并后的完整消息，否则 `created` /
-    ///   `updated` 附带的节点视图与内容快照是半成品，消费者拿到残缺结构。
-    ///
-    /// 两者对 `appended` 而言是同一份内容的不同表述（`patch` 是增量、`view`
-    /// 是合并结果），因此不能用一个参数兼任。
     pub(crate) async fn emit_message_patch(
         &self,
-        state: &Arc<super::active::ActiveSessionState>,
         session_id: &str,
-        patch: cm::ChatMessage,
         view: &cm::ChatMessage,
         existed: bool,
         appended: Option<String>,
@@ -232,13 +223,42 @@ impl SessionPlugin {
         // 调用方零成本。
         self.change_subs
             .notify(&message_change(session_id, view, existed, appended));
-        self.broadcast_frame(
-            state,
-            PluginFrame::Data(json!(session_chat_response::StreamEvent::Update {
-                message: patch,
-            })),
-        )
-        .await;
+    }
+
+    /// 把**存储中**的某条消息广播成一次 VDFS 变更（带权威 `seq`），落库后调用。
+    ///
+    /// ## 它补的是哪个窟窿
+    ///
+    /// 有一条消息**从来没有变更出口**：用户自己在聊天协议里发的那条。它由
+    /// `orchestrator/entry.rs` 直连存储追加（`append_messages`），而那条路径不发
+    /// 任何变更——于是前端手里只有自己的**乐观副本**，而乐观副本的 `seq` 是前端
+    /// 本地游标发的号，**永远拿不到存储分配的那个**。后果不是「少一条消息」，
+    /// 而是**两套序号空间并存**：前端按本地号排，一旦另一些消息（失败定稿 /
+    /// 重试重建 / 压缩重写）拿到存储号，同一条链上就出现「权威号小于本地号」，
+    /// 排序随之错位——刷新（整份回读）才恢复。
+    ///
+    /// ## 为什么读回来再发，而不是把入参那条发出去
+    ///
+    /// `append_messages` 在临界区内给消息补 `seq` 与 `timestamp`（只改它自己的
+    /// 副本），调用方手里那条仍然没有号。**发出去的载荷必须与存储一致**，否则这
+    /// 条变更反而把「没有号」写进前端，等于把问题换个地方发生。因此这里从存储
+    /// 取回权威版本再发（每次用户发言一次读，频率与用户点击同阶）。
+    ///
+    /// 找不到该 id（并发删除等）就静默返回：存储里没有的东西不该被广播。
+    pub(crate) async fn emit_persisted_message(&self, session_id: &str, message_id: &str) {
+        let Ok(chat_session) = self.open_chat_session(session_id).await else {
+            return;
+        };
+        let Ok(messages) = chat_session.get_messages().await else {
+            return;
+        };
+        let Some(stored) = messages.iter().find(|m| m.id == message_id) else {
+            return;
+        };
+        // `existed = true`：这条消息在前端**已经存在**（乐观副本），因此是
+        // 「就地替换成权威版本」（`updated`），不是「多了一个节点」。
+        self.emit_message_patch(session_id, stored, true, None)
+            .await;
     }
 
     pub fn metadata() -> PluginMeta {

@@ -6,6 +6,11 @@
 >
 > 本文回答一个问题：**会话的"正在发生什么"如何只由节点状态表达**，
 > 使前端不再消费任何事件序列，从而**不存在事件顺序问题**。
+>
+> **状态：已完成（S16–S22）。** 会话域只剩 `kind = "vdfs"` 一条实时频道，消费者是前端、
+> 子智能体转播（`agent/host/subagent.rs`）与 CLI（`cli/src/client.rs`）；旧的
+> `kind = "session"` 事件频道（`Status` / `Update` / `Delete` / `Error` / `Abort`）
+> **已整体废除**（§1 的"现状"表是当时的问题清单，不是今天的描述）。
 
 ---
 
@@ -320,12 +325,26 @@ ToolCall 标 `Completed`**——于是前端在执行窗口内没有任何「运
 |---|---|
 | 正常分发 | `tool_executor::process_tool_calls_async` |
 | 恢复执行（approve / retry / supply） | `resume::process_tool_resume_action` |
-| 被 PreToolUse 拦下 / 用户中止 / 交互中断 | `process_tool_calls_async` 末尾统一收口为 `Completed` + `meta.failure_kind = "not_executed"` |
+| 被 PreToolUse 拦下 / 用户中止 / 交互中断 | `process_tool_calls_async` 末尾统一收口：父节点 `Completed` + `meta.failure_kind = "not_executed"`，并由 `not_executed_result` 补一条结果子节点（**成对**，缺一就是「有请求无响应」） |
 
 **"本批每一个 ToolCall 都必须以终态收场"** 由 `process_tool_calls_async` 负责保证：
 调用前广播 `Streaming`，调用后广播终态，未执行的批尾在函数末尾一次性收口。
 漏掉任何一条，前端就会有一个**永远转下去的「运行中」**（比"没有迹象"更糟：
 它把"卡住"伪装成"在跑"）。
+
+#### 不变量：有调用必有结果（终态之外的第二半）
+
+终态只说"这次调用结束了"，而"这次调用的结果"在树里是一条**子节点**——
+前端 `ToolCallNode` 的响应段就按子节点渲染。因此收口同样必须**成对**：
+
+> 每一个 ToolCall 都必须有结果子节点（`role = tool`，`process_tool_calls_async`
+> 的 `tool_messages` 里一条），无论它是执行了、失败了、还是根本没轮到。
+
+只补父节点是一个**静默**的缺口（实测事故）：卡片有请求、没有响应，
+而会话照常往下走；下一轮请求又因为 `flatten_chat_messages` 会为无结果的
+ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得见、用户看不见」，
+没有任何机制会纠正它。因此结果子节点必须在**存储**里成立
+（`not_executed_result`），而不是只在请求视图里成立。
 
 #### `meta.started_at`：把"运行中"从断言变成判据
 
@@ -665,9 +684,11 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
 8. **会话状态词只有三个**：`working` / `active` / `failed`——不为会话造 `pending` /
    `completed`（它没有"未开始"与"已结束"）。
 9. **失败是状态不是标志**：不再有 `last_failed` 布尔。
-10. **事件通道仍在，但不承载显示**：`kind = "session"` 的帧继续发布给**进程内**
-    消费者（`agent/host/subagent.rs` 需要 `Update` 与 `Status idle` 判断子会话结束），
-    前端不再订阅它。
+10. **事件通道已整体废除**：会话域只发 `kind = "vdfs"`——进程内消费者（子智能体转播、
+    CLI）已改订阅 VDFS 变更，而**不是**"前端不订、后端还发"。判断子会话结束改看
+    会话节点的 `status`（不再有 `Status idle` 帧可等），消息增量由
+    `symbio_core::schemas::session::transcript` 从**全量**变更折算出来
+    （两处消费者共用同一份，见该模块文档）。
 11. **ToolCall 的 `streaming` 覆盖执行窗口**：`finalize_assistant_turn` 不得提前定格；
     每个 ToolCall 都必须以终态收场（未执行者收口为 `Completed` +
     `meta.failure_kind = "not_executed"`），不得有节点停在 `Streaming`（§5.3.1）。
@@ -716,6 +737,13 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
     `meta.failure_kind`）、**可重试**（resume `retry_compaction`）、**可持久化**
     （节点落库，重开仍在）。少了"可重试"，用户唯一的出路（换更大上下文的模型后重试）
     就断了；重试入口**不按 `failure_kind` 分档**，判断权归用户（§6 S20.8）。
+25. **有调用必有结果**：ToolCall 的终态补丁与它的**结果子节点**成对出现——
+    执行、失败、被拦下、未轮到、中止，五种收场都要有结果（`not_executed_result`）。
+    只补父节点（#11 满足）是一个**静默**缺口：卡片有请求、没有响应，而请求视图
+    被 `flatten_chat_messages` 的占位兜住 ⇒ 模型看得见、用户看不见。
+    显示层另有一条兜底文案（`registry/messageTypes::missingResultNoteOf`，
+    按父节点自述的 `meta.failure_kind` 给出），服务于修复前落下的历史数据，
+    不是本不变量的替代（§5.3.1）。
 
 ---
 
@@ -723,7 +751,7 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
 
 | 项 | 说明 |
 |---|---|
-| `kind = "session"` 未整体删除 | subagent 宿主在**进程内**依赖 `Update`（子会话审批透传 + 文本累积）与 `Status idle`（结束判据）。把它改造成订阅 VDFS 变更是一次独立的、可验证的收敛，不塞进本次 |
+| ~~`kind = "session"` 未整体删除~~ | **已补完（S22）**：进程内消费者（`agent/host/subagent.rs` 的审批透传 / 文本累积、`cli/src/client.rs` 的渲染与完成判定）已全部改订阅 VDFS 变更，常量 `KIND_SESSION` 随之移除 |
 | `event_bus/pending/snapshot` 路由保留 | 前端不再调用，但它是网关对外 API 的一部分，删除属另一件事 |
 | 会话节点状态无独立版本号 | 依赖 §4.2 的三条假设。加 `rev` 需要跨进程单调时钟，收益不足以抵消脆弱性——宁可把假设写清楚 |
 | 会话节点 `content` 为空 | `read(<根>/session/<sid>)` 仍是整份会话 JSON（历史读入口），`updated` 变更带 `content` 会白白重传整份历史。**因此会话节点的 `updated` 只带 `node`，不带 `content`**——`node` 足以表达状态，正文另有 `消息` 列表承载 |

@@ -270,8 +270,17 @@ export const useSessionsStore = defineStore('sessions', () => {
    */
   function putMessage(sessionId: string, msg: ChatMessage) {
     if (!sessionId || !msg.id) return
+    let seqReplaced = false
     updateMessages(sessionId, (cur) => {
       if (typeof msg.seq === 'number') {
+        const existing = cur[msg.id]
+        // 存储给的号与手里那个**不一致** ⇒ 手里那个是本地游标发的（在途期间）。
+        // 这不是“更新一下号码”那么轻：它意味着**两套序号空间已经分叉**——同一
+        // 条链上既有存储号又有本地号，排序随之可能错位（且只有整份回读能纠正）。
+        // 因此记录下来，等会话转空闲回读一次收敛（见 `reconcileTranscript`）。
+        if (existing && typeof existing.seq === 'number' && existing.seq !== msg.seq) {
+          seqReplaced = true
+        }
         cur[msg.id] = msg
         raiseSeqFloor(sessionId, msg.seq)
         return
@@ -279,6 +288,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       const existing = cur[msg.id]
       cur[msg.id] = { ...msg, seq: existing?.seq ?? nextSeq(sessionId) }
     })
+    if (seqReplaced) markTranscriptDirty(sessionId)
 
     // 同步 status.last_preview（取最后一条 assistant 文本；取不到则不动）
     const preview = previewOf(msg)
@@ -297,6 +307,19 @@ export const useSessionsStore = defineStore('sessions', () => {
     const cur = sessionSeq.value[sessionId] ?? 0
     if (seq <= cur) return
     sessionSeq.value = { ...sessionSeq.value, [sessionId]: seq }
+  }
+
+  /**
+   * 「本地号与存储号已分叉」的待对账标记（会话空闲时回读一次收敛）。
+   *
+   * 与 `is_waiting_approval` 一类**状态**不同，它记的是“当前这份本地转写不可全信”
+   * 这个事实——所以只在触发时置位（在途节点拿到权威号），由 `reconcileTranscript`
+   * 消费后清除，不参与任何渲染判定。
+   */
+  const transcriptDirty = ref<Record<string, boolean>>({})
+
+  function markTranscriptDirty(sessionId: string) {
+    transcriptDirty.value = { ...transcriptDirty.value, [sessionId]: true }
   }
 
   /** 合并 patch 到指定 session 的某条消息（不替换，只覆盖 patch 提供的字段） */
@@ -1071,10 +1094,19 @@ export const useSessionsStore = defineStore('sessions', () => {
       msgs = await readSessionTranscript(id)
     } catch (err) {
       // 回读失败就保持现状：陈旧副本比"清空转写"好，下一次转空闲会再试
+      // （待对账标记**不清**，正是为了让下一次还有机会）
       logger.warn('[sessions]', `转写对账回读失败，保持现状：${id}`, err)
       return
     }
     if (isSessionWorking(id)) return
+
+    // 回读成功 ⇒ 本地转写已重新以存储为权威（含全部 `seq`），待对账标记解除。
+    // 回读期间会话又跑起来了则提前返回——重入的一轮由下一次空闲再收。
+    if (transcriptDirty.value[id]) {
+      const next = { ...transcriptDirty.value }
+      delete next[id]
+      transcriptDirty.value = next
+    }
 
     // 丢弃仍停在非终态的本地副本。会话已空闲 ⇒ 服务端不可能还有节点在跑，
     // 这一份必然是丢补丁留下的陈旧副本；它若真在存储里，下面的快照会把它
@@ -1155,7 +1187,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     //    （VDFS 变更不重放，前端只做增量收敛，没人纠正它）。
     //    判据只在**有候选**时才成立，因此正常运行路径零成本——不满足条件时
     //    连一次回读都不会发生。
-    if (!nowWorking && hasUnsettledNodes(id)) {
+    if (!nowWorking && (hasUnsettledNodes(id) || transcriptDirty.value[id])) {
       void reconcileTranscript(id)
     }
   }

@@ -16,9 +16,11 @@ use std::process::ExitCode;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use args::Command;
-use client::SymbioClient;
+use client::{vdfs_change_of, SymbioClient};
 use render::Renderer;
-use symbio::symbio_core::schemas::session::session_chat_response::StreamEvent;
+use symbio::symbio_core::vdfs_provider::{
+    VDFS_OUTCOME_ABORTED, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
+};
 
 /// CLI 只做「解析 → 启动 → 发送 → 渲染」，业务全在后端插件树里。
 ///
@@ -102,8 +104,15 @@ async fn main() -> ExitCode {
 ///
 /// 心跳机制完全在后端 session 插件内闭环：配置存 `Session.metadata.heartbeat`，
 /// 调度循环随插件树构建启动（15s 扫描各会话的空闲心跳任务）。本进程只需保持
-/// 存活，调度器就会按各会话的空闲节奏自动触发心跳对话；事件总线订阅在
-/// [`SymbioClient::start`] 时已建立，这里消费渲染无人值守轮次的活动，Ctrl+C 退出。
+/// 存活，调度器就会按各会话的空闲节奏自动触发心跳对话；消费无人值守轮次的
+/// 活动即可，Ctrl+C 退出。
+///
+/// ## 订阅面比普通模式宽一级
+///
+/// 心跳可能落在**任何一个**已登记心跳的会话上，而守护进程在启动期不知道将来
+/// 会有哪些——所以闸门开在**会话挂载根**（`<根>/session`）上，而不是某个会话。
+/// 判据仍然是会话节点的运行态：`status` 离开 `working` 即为本轮结束，
+/// 结局从 `attributes` 读（`error` = 失败，`outcome == aborted` = 中止）。
 async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> ExitCode {
     if !args.quiet {
         eprintln!("Symbio CLI（心跳守护模式）");
@@ -121,27 +130,56 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
         eprintln!();
     }
 
-    while let Some(ev) = client.next_bus_event().await {
-        if ev.kind != "session" {
-            continue;
+    let mount = match client.watch_all_sessions().await {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("✖ 订阅会话变更失败: {e}");
+            return ExitCode::FAILURE;
         }
-        let Ok(stream_ev) = serde_json::from_value::<StreamEvent>(ev.data) else {
+    };
+    // 会话级地址 = 挂载根 + **一段**；再深的都是消息节点（不参与运行态汇报）
+    let mount_prefix = format!("{mount}/");
+    // 各会话上一次见到的运行态：只在**迁移**上报。会话叶子的变更也包含标题 /
+    // 元数据写入，逐帧报会把一次心跳刷成十几行。
+    let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    while let Some(ev) = client.next_bus_event().await {
+        let Some(change) = vdfs_change_of(&ev) else {
             continue;
         };
-        let sid = ev.session_id.as_deref().unwrap_or("?");
-        match stream_ev {
-            StreamEvent::Status { status } if status == "working" => {
-                if !args.quiet {
-                    eprintln!("▶ [{sid}] 心跳触发，开始工作");
-                }
+        let Some(node) = change.node.as_ref() else {
+            continue;
+        };
+        let Some(sid) = change.path.strip_prefix(mount_prefix.as_str()) else {
+            continue;
+        };
+        if sid.is_empty() || sid.contains('/') {
+            continue;
+        }
+        if seen.get(sid) == Some(&node.status) {
+            continue;
+        }
+        seen.insert(sid.to_string(), node.status.clone());
+        if args.quiet {
+            continue;
+        }
+
+        match node.status.as_str() {
+            VDFS_STATUS_WORKING => eprintln!("▶ [{sid}] 心跳触发，开始工作"),
+            VDFS_STATUS_FAILED => {
+                let err = node
+                    .attributes
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("本轮以错误结束");
+                eprintln!("✖ [{sid}] {err}");
             }
-            StreamEvent::Status { status } if status == "idle" => {
-                if !args.quiet {
-                    eprintln!("■ [{sid}] 本轮收敛，回到空闲");
-                }
+            _ if node.attributes.get("outcome").and_then(|v| v.as_str())
+                == Some(VDFS_OUTCOME_ABORTED) =>
+            {
+                eprintln!("■ [{sid}] 本轮被中止");
             }
-            StreamEvent::Error { error } => eprintln!("✖ [{sid}] {error}"),
-            _ => {}
+            _ => eprintln!("■ [{sid}] 本轮收敛，回到空闲"),
         }
     }
 

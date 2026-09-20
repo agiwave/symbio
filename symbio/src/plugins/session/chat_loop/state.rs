@@ -365,14 +365,7 @@ impl CompressionEmitter {
 
     async fn emit(&self, node: ChatMessage, existed: bool) {
         self.plugin
-            .emit_message_patch(
-                &self.state,
-                &self.state.session_id,
-                node.clone(),
-                &node,
-                existed,
-                None,
-            )
+            .emit_message_patch(&self.state.session_id, &node, existed, None)
             .await;
     }
 

@@ -94,6 +94,22 @@ pub const VDFS_KIND_FILE: &str = "file";
 /// 而 `kind` 是**协议词**——消费者按它发现「哪个子目录是转写」，不必硬编码段名。
 pub const VDFS_KIND_MESSAGES: &str = "messages";
 
+// ==================== 会话节点属性：上一轮结局（`attributes.outcome`） ====================
+//
+// 会话叶子用 `status` 表达「现在在不在跑」，用 `outcome` 表达「上一轮怎么结束的」。
+// 两者是同一份运行态投影出的两个属性（`SessionRuntime`），所以词表必须住在一起
+// ——消费方（前端、CLI、子智能体转播）读的是同一批字面量，谁都不许自己拼。
+//
+// 与 [`VDFS_STATUS_*`] 同处一处的理由：`outcome` 只在 `status != working` 时有
+// 意义（`working` 时结局作废），两者一起读才构成完整的运行态。
+
+/// 上一轮**正常结束**
+pub const VDFS_OUTCOME_COMPLETED: &str = "completed";
+/// 上一轮**被用户中止**（与 `completed` 区分：提示音音色、收尾文案不同）
+pub const VDFS_OUTCOME_ABORTED: &str = "aborted";
+/// 上一轮**以错误结束**——此时 `attributes.error` 带错误文案
+pub const VDFS_OUTCOME_FAILED: &str = "failed";
+
 // ==================== 呈现扩展名（约定，宿主可自行扩展） ====================
 //
 // 节点 `ext` 是宿主选择详情呈现方式的键。VDFS 只透传、不解释；

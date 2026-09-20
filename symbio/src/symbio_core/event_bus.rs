@@ -25,11 +25,14 @@ const PENDING_EVENTS_CAP: usize = 64;
 /// `"session"` / `"system"`，于是这两个常量声明出来后无人引用——正是
 /// `chat_message.rs` 那段「枚举改名时就会出现不一致」警告的形状。
 ///
-/// **闭集只有一个家**：词表住在这里，哪怕发布方在别的插件（`KIND_SESSION` 由 session
-/// 发、`KIND_VDFS` 由 vdfs 发）。文档见 `docs/architecture/PROTOCOLS.md`
-/// §事件总线频道——那一行带 `<!-- vocab:KIND_ -->` 标记，由 `plugin-entry-audit`
-/// 的 E-008 与代码**双向**比对；「发布点写裸字面量」由 `grep-audit` 的 S-009 拦。
-pub const KIND_SESSION: &str = "session";
+/// **闭集只有一个家**：词表住在这里，哪怕发布方在别的插件（`KIND_VDFS` 由 vdfs 发）。
+/// 文档见 `docs/architecture/PROTOCOLS.md` §事件总线频道——那一行带
+/// `<!-- vocab:KIND_ -->` 标记，由 `plugin-entry-audit` 的 E-008 与代码**双向**比对；
+/// 「发布点写裸字面量」由 `grep-audit` 的 S-009 拦。
+///
+/// 曾经的 `KIND_SESSION`（会话域 `StreamEvent` 频道）已随该频道一并废除：会话状态与
+/// 转写都是 VDFS 节点，走 `KIND_VDFS`（见 `session/docs/node-state-streaming.md`）。
+/// 常量留在词表里只会让「再发一条会话事件」看起来仍然合法。
 pub const KIND_SYSTEM: &str = "system";
 
 /// VDFS 变更频道 —— **资源实时的唯一频道**。

@@ -32,12 +32,15 @@ pub(crate) struct SessionRuntime {
     pub error: Option<String>,
 }
 
-/// 上一轮结局：正常结束
-pub(crate) const OUTCOME_COMPLETED: &str = "completed";
-/// 上一轮结局：用户中止
-pub(crate) const OUTCOME_ABORTED: &str = "aborted";
-/// 上一轮结局：以错误结束
-pub(crate) const OUTCOME_FAILED: &str = "failed";
+/// 上一轮结局的词表：正常结束 / 用户中止 / 以错误结束。
+///
+/// 定义在 `symbio_core`（与节点状态词 [`vdfs::VDFS_STATUS_WORKING`] 同处一处）——
+/// 会话节点 `attributes.outcome` 是**跨前端**的线上契约，进程内消费者（CLI）也要
+/// 按同一批字面量判读，因此这里只重导出，不另立一份。
+pub(crate) use crate::symbio_core::vdfs_provider::{
+    VDFS_OUTCOME_ABORTED as OUTCOME_ABORTED, VDFS_OUTCOME_COMPLETED as OUTCOME_COMPLETED,
+    VDFS_OUTCOME_FAILED as OUTCOME_FAILED,
+};
 
 impl SessionRuntime {
     /// 空闲：没在跑，也没有已知的上一轮结局
@@ -536,6 +539,9 @@ pub(crate) fn message_node(m: &cm::ChatMessage) -> vdfs::VdfsNode {
     for (k, v) in [
         ("role", json!(m.role)),
         ("type", json!(m.msg_type)),
+        // 工具名等**结构字段**：进程内消费者（子会话转播 / CLI）靠它还原消息，
+        // 节点标题里虽也带工具名，但那是展示文案，不可当数据读
+        ("name", json!(m.name)),
         ("parent_id", json!(m.parent_id)),
         ("seq", json!(m.seq)),
         ("error", json!(m.error)),

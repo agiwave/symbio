@@ -12,7 +12,6 @@
 //! 与绝对路径，并在 join 后做前缀校验（双重闸门，与 agent 目录的
 //! 路径白名单同风格）。
 
-use crate::symbio_core::event_bus::{EventBus, KIND_SESSION};
 use crate::symbio_core::vdfs::{ChangeSubscriptions, VdfsChange};
 use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsNode};
 use crate::symbio_core::PluginError;
@@ -232,9 +231,9 @@ pub async fn delete_node(workdir: &str, rel: &str) -> Result<(), PluginError> {
 /// `vdfs/unwatch` 操作对）：每个 workdir 至多一个 [`FsWatcher`]，以
 /// 关注它的容器（会话）引用计数维持——不同会话的工作目录各自监听，共享
 /// 工作目录的多个会话共享同一监听，最后一个订阅方释放后监听停止。
-/// 文件变化时向所有关注该 workdir 的容器发布粗粒度 `data` 事件（§2.4，
-/// kind = 会话、sessionId = 容器 id），驱动前端树视图与详情编辑器按
-/// §3.3 防抖重载。机制层只约定「容器数据已变更」语义，不感知文件细节。
+/// 文件变化时把容器 id 翻译成 VDFS 路径，投进会话订阅者共用的那张变更表
+/// （[`ChangeSubscriptions::notify`]），驱动前端树视图与详情编辑器按 §3.3
+/// 防抖重载。机制层只约定「这个地址变了」语义，不感知文件细节。
 ///
 /// **释放采用世代守卫的延迟释放**：unwatch 经网络在途，可能在快速
 /// 「离开→返回」后晚于新一轮 watch 到达；直接释放会误杀刚重建的订阅
@@ -270,8 +269,9 @@ fn watch_key(workdir: &str, container: &str) -> String {
 impl WorkdirWatchManager {
     /// 注入 VDFS 变更订阅表（VDFS provider 构造期调用一次）。
     ///
-    /// 未注入时 VDFS 侧不感知（目录树变化仍只发会话频道的粗粒度 `data` 事件）；
-    /// 注入后同一批事件额外投递为 [`VdfsChange`]，`<根>` 页面即可实时刷新。
+    /// 未注入时（provider 尚未构造）目录树变化无处可投——VDFS 是工作目录
+    /// 变化的**唯一**实时出口，不再有第二条频道；注入后按容器翻译成
+    /// [`VdfsChange`] 投进去，`<根>` 页面即可实时刷新。
     pub fn set_vdfs_subs(&self, subs: Arc<ChangeSubscriptions>) {
         if let Ok(mut slot) = self.vdfs_subs.lock() {
             *slot = Some(subs);
@@ -315,7 +315,7 @@ impl WorkdirWatchManager {
 
             // 事件合并（尾沿去抖）：notify 对一次构建/工具活动会产生成百上千
             // 事件，逐事件发布会打满事件总线长连接、拖垮前端。每个 workdir
-            // 至多每 COALESCE_WINDOW 发布一条 `data` 事件（首个事件即调度，
+            // 至多每 COALESCE_WINDOW 发布一条 VDFS 变更（首个事件即调度，
             // 窗口内的后续事件合并进去）。
             let should_flush = {
                 let mut st = coalesce.lock().unwrap();
@@ -346,10 +346,8 @@ impl WorkdirWatchManager {
                 if !dirty {
                     return; // 窗口内无后续变化，且首个事件已由调度方发布
                 }
-                publish_data_event(&t_containers, &t_wd, &t_rel);
                 publish_vdfs_change(&t_vdfs, &t_containers, &t_wd, &t_rel);
             });
-            publish_data_event(&containers, &wd, &rel);
             publish_vdfs_change(&vdfs, &containers, &wd, &rel);
         }));
 
@@ -434,7 +432,7 @@ struct CoalesceState {
     dirty: bool,
 }
 
-/// 合并窗口：至多每秒向总线发布一条 `data` 事件
+/// 合并窗口：至多每秒发布一条 VDFS 变更
 const COALESCE_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// 易变目录（构建产物 / 依赖 / 版本库内部）：其变化不作为工作目录数据变更下发
@@ -450,19 +448,6 @@ const VOLATILE_DIRS: &[&str] = &[
     ".next",
     ".cache",
 ];
-
-/// 向所有关注该 workdir 的容器发布粗粒度 `data` 事件（§2.4）
-fn publish_data_event(containers: &DashMap<String, Vec<(String, u64)>>, workdir: &str, rel: &str) {
-    if let Some(list) = containers.get(workdir) {
-        for (container, _) in list.iter() {
-            EventBus::try_publish(
-                KIND_SESSION,
-                Some(container),
-                json!({ "type": "data", "workdir": workdir, "path": rel }),
-            );
-        }
-    }
-}
 
 /// 把目录树事件翻译为 VDFS 变更并投递进订阅表（每个关注该 workdir 的容器一条）。
 ///

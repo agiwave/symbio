@@ -24,22 +24,26 @@
    `HomedirRegistry` 的最高优先级来源（高于 `~/.symbio_bootstrap` 与 `~/.symbio`），
    必须在任何 `HomedirRegistry::get()` 之前设置（插件树构造期就会读它）。
 2. `create_root_plugin().await` 构造整个进程内插件树。
-3. 订阅 `event_bus/subscribe`（`SubscribeRequest { kinds: None }`），一条连接收全部事件。
-4. 起一个 `tokio::spawn` 转发任务，把 `PluginFrame` 解包成 `BusEvent` 塞进 `mpsc::UnboundedReceiver`。
+3. `event_bus/subscribe`（`SubscribeRequest { kinds: None }`）——**收件地址**，一条连接收全部帧。
+4. `vdfs/watch(<根>/session/<sid>)` ——**开闸**。后端只向登记过路径的订阅者投递变更
+   （`ChangeSubscriptions`），因此只做第 3 步是一条永远不响的频道。
+5. 起一个 `tokio::spawn` 转发任务，把 `PluginFrame` 解包成 `BusEvent` 塞进 `mpsc::UnboundedReceiver`。
 
-### 为什么选 `event_bus` 而不是 session 私有通道
+### 为什么经 `event_bus`
 
-后端下行有三条通道：① session 私有长连接（当年经 `session/open` 取通道，该路由已退役）；
-② 全局 `EventBus`（`event_bus/subscribe` 一条连接收全部事件）；③ 前端主动拉取。
+`event_bus` 在本 CLI 里**只是传输层**：它承载的是 `kind = "vdfs"` 的资源变更频道——与
+Tauri 前端完全同一条（前端 `services/vdfsTranscriptSync.ts`）。会话域曾经另有一条
+`kind = "session"` 的事件频道（`Status` / `Update` / `Abort` 帧），已随「状态即节点属性」
+整体废除（见 `symbio/src/plugins/session/docs/node-state-streaming.md`）。
 
-CLI 选 ②：它与「当前打开哪个会话」**解耦** —— 订阅一次即可覆盖之后所有会话，切会话不必
-重建连接。这恰好也是 Tauri 前端会话列表实时更新的同一机制。代价是转发任务里要按
-`session_id` 过滤本会话的事件。
+长连接而不是每会话一条私有通道：它与「当前打开哪个会话」解耦，切会话只需换一个
+`vdfs/watch` 地址，不必重建连接。代价是消费侧按**地址前缀**过滤（不是按 `session_id`
+——帧的业务身份全在 `VdfsChange::path` 里）。
 
 ### 上行：发送一条消息
 
 `ask()` 构造 `session_chat::Request`（User/Text 消息 + `provider_id` / `mode`），经
-`route("session/chat/send", …)` 发送，等响应 `status == "accepted"` 后进入事件循环。
+`route("session/chat/send", …)` 发送，等响应 `status == "accepted"` 后进入变更循环。
 
 `route<T>()` 是通用封装：包 `Arc::new(SimpleRequest::new(None, None))`，设 `PATH` /
 `WORKDIR` / `SESSION_ID` / `payload`（`InvokeRequestExt::set_payload`），再 `.route(ctx)`。
@@ -51,22 +55,28 @@ CLI 选 ②：它与「当前打开哪个会话」**解耦** —— 订阅一次
 （可选）/ `agent_id`（可选）写进会话元数据。这些是后端 `resolve_session_params` 的回退来源：
 会话一旦绑定，后续每次发送都不必重复携带。`/workdir` 等 REPL 内改动后需重新调用一次使其落库。
 
-## 2. 下游事件循环与完成判定
+## 2. 下游变更循环与完成判定
 
-循环 `self.events.recv()`（带 `TURN_TIMEOUT = 900s` 兜底），把 `StreamEvent` 解出来：
+循环 `self.events.recv()`（带 `TURN_TIMEOUT = 900s` 兜底），每帧解成 `VdfsChange` 后按地址分派
+（非 `kind = "vdfs"` 的帧直接跳过）：
 
-| 事件 | 处理 |
+| 地址 | 处理 |
 | --- | --- |
-| `Update { message }` | 交给渲染器增量合并 |
-| `Delete { message_id }` | 渲染器按 id 删除快照 |
-| `Status { status }` | 渲染器更新状态；`status == "idle"` ⇒ 退出循环 |
-| `Error { error }` | 记录业务错误（**不**立即中断，继续等 `idle` 收敛） |
-| `Abort` | 结束循环 |
-| `Connected` / `Disconnected` / `SessionResumed` | 忽略 |
+| `…/session/<sid>`（**会话叶子** = 运行态） | `status == working` ⇒ 提示「处理中」；离开 `working` ⇒ **本轮结束**，退出循环 |
+| `…/session/<sid>/消息/<mid>`（消息节点） | `TranscriptPatchBuilder` 把**全量**变更折算成**增量**补丁，交给渲染器合并 |
 
-完成判定与前端 `sessionBusWatcher` 一致：`Status{idle}` 或 `Abort`。业务错误只记录，仍等
-`idle` 收敛，以免把「还有后续帧」误判成结束。`drain_stale()` 在每轮 `ask` 前清空上一轮残留事件，
-避免旧补丁被重复渲染。
+完成判定是**会话节点自己的 `status`**（不再有 `Status{idle}` 帧可等）。结局从同一次变更的
+`node.attributes` 读：`outcome == aborted` ⇒ 报中止，`status == failed` / `error` 非空 ⇒ 该错误
+作为本轮的返回值（退出码非 0）。
+
+两个细节：
+
+- **折算器为什么必须存在**：VDFS 的 `created` / `updated` 载荷是**全量**（“现在是什么”），
+  而渲染器接的补丁是**增量**（`ChatMessage::apply_patch`）。把全量当增量拼，每来一次
+  `updated` 正文就翻倍（叠字）。折算实现住在 `symbio_core::schemas::session::transcript`，
+  子智能体转播用的是同一份。
+- **节点变更也包含标题 / 元数据写入**，所以运行态提示只在**迁移**上报一次
+  （`last_status`）；`drain_stale()` 在每轮 `ask` 前清空上一轮残留帧，避免旧补丁被重复渲染。
 
 ## 3. 终端渲染器（`render.rs`）
 

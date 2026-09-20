@@ -7,11 +7,14 @@
 //!
 //! ## 为什么本地要维护一份消息快照
 //!
-//! 后端把 `Update` 事件当作**增量补丁**（见 `ChatMessage::apply_patch`）：
-//! Text / Reasoning 的 `content` 是 SSE delta，需累加；`Turn` / `ToolCall`
-//! 则是全量替换；`emit_status` 甚至只带 `{id, status}`（无 role/type）。
-//! 因此渲染必须先把补丁合并成完整消息，再据合并结果决定怎么显示 —— 这与
-//! 前端 `sessionBusWatcher` 的做法逐字同构，保证两端显示一致。
+//! [`Renderer::on_update`] 接的是**增量补丁**（见 `ChatMessage::apply_patch`）：
+//! Text / Reasoning 的 `content` 是「多了什么」，需累加；`Turn` / `ToolCall`
+//! 则是全量替换。因此渲染必须先把补丁合并成完整消息，再据合并结果决定怎么显示。
+//!
+//! 补丁的来源是 **VDFS 变更**：`created` / `updated` 的载荷是**全量**，由
+//! `symbio_core::schemas::session::transcript::TranscriptPatchBuilder` 居中
+//! 折算成增量后才到这里（前端 `services/vdfsTranscriptSync.ts` 是同一份语义的
+//! 另一实现），保证两端显示一致。
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
@@ -19,6 +22,7 @@ use std::io::{self, Write};
 use symbio::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
+use symbio::symbio_core::vdfs_provider::VDFS_STATUS_WORKING;
 
 fn text_of(m: &ChatMessage) -> String {
     m.content
@@ -158,14 +162,21 @@ impl Renderer {
         self.msgs.remove(message_id);
     }
 
+    /// 会话运行态提示。
+    ///
+    /// 入参是**会话节点的状态词**（`VDFS_STATUS_*`），不再是旧事件频道的
+    /// `busy` / `idle` —— 旧的 `other => "· 状态: …"` 兜底也一并删了：节点状态词
+    /// 是闭集，能走到那里的只有未知词，而它不值得占一行——真正需要用户看到的失败
+    /// 已经在 [`Self::on_update`]（消息级）与调用方的结局判定里报过。
+    ///
+    /// **不去重**：「只在新状态上报一次」只有调用方做得到（它是唯一能看到上一帧的
+    /// 地方），重复的 `working` 帧在这层去不掉——这正是它从前会两行“处理中”的原因。
     pub fn on_status(&mut self, status: &str) {
         if self.quiet {
             return;
         }
-        match status {
-            "busy" => write_stderr("… 处理中"),
-            "idle" => {}
-            other => write_stderr(&format!("· 状态: {other}")),
+        if status == VDFS_STATUS_WORKING {
+            write_stderr("… 处理中");
         }
     }
 
@@ -175,6 +186,16 @@ impl Renderer {
 
     /// REPL 用的即时提示（不计入正文）。
     pub fn notice(&self, msg: &str) {
+        if !self.quiet {
+            write_stderr(msg);
+        }
+    }
+
+    /// 告警行（走 stderr，静默模式下不输出）。
+    ///
+    /// 消费端遇到「本该能处理但缺载荷」的变更时据此留痕：静默跳过是事故，
+    /// 而把判断留在调用方就会在每个调用点各写一次 `quiet` 分支。
+    pub fn warn(&self, msg: &str) {
         if !self.quiet {
             write_stderr(msg);
         }

@@ -252,6 +252,11 @@ impl SessionPlugin {
                             .await;
                         return;
                     }
+                    // 用户消息也必须有变更出口：它原先只落库、不发任何 VDFS 变更，
+                    // 于是前端只持有**本地乐观副本**（本地游标发的号），永远拿不到
+                    // 存储分配的权威 `seq`——两套序号空间并存正是「排序偶尔错位、
+                    // 刷新才恢复」的根源（见 `emit_persisted_message` 的文档）。
+                    this_spawn.emit_persisted_message(&sid_spawn, &msg.id).await;
                     // 自动命名：首个用户消息落盘后，尚无标题的会话从内容生成并持久化
                     this_spawn.ensure_auto_title(&sid_spawn).await;
                 }

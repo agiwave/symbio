@@ -16,6 +16,8 @@ import {
   isWorkingStatus,
   type SessionOutcome,
 } from '@/schemas/vdfs'
+import { isBlankContentNode, isInProgressMessage } from './sessionTranscript'
+import type { ChatMessage } from '@/schemas/chat_message'
 import type { SessionListItem } from '@/services/session'
 
 /** 单个 session 的实时状态（用于缩略卡展示） */
@@ -197,6 +199,44 @@ export function titleOf(it: SessionListItem): string {
 export function workdirOf(it: SessionListItem): string | undefined {
   const wd = it.metadata?.workdir
   return typeof wd === 'string' && wd ? wd : undefined
+}
+
+/**
+ * 是否需要在会话流末尾补一条等待提示（三点脉动 +「正在思考…」）。
+ *
+ * ## 它补的是哪个窟窿
+ *
+ * 消息流里的等待提示原先只有**一个**触发点：`TurnGroupNode` 的「Turn 节点已到、
+ * 尚无子节点」。这要求 Turn 节点**先于**任何内容到达前端——而 Turn 节点也是一条
+ * VDFS 变更，而变更**不重放**（`session/docs/node-state-streaming.md` §4.0）。
+ * 一旦这条 `created` 丢了、或比首个子节点晚到，用户看到的就是：点了发送之后
+ * **什么都没有发生**，直到第一个 token 落地。
+ *
+ * 「会话在跑」是**会话节点**的属性（`status === working`），与「Turn 节点到没到」
+ * 是两件事。于是这里给出第二个来源：**会话在跑，而流里没有任何在途节点**。
+ * 两个来源天然互斥——有在途节点时 Turn 骨架必然已显示，于是同一时刻只会出现一条。
+ *
+ * ## 判据为什么要排除「空壳节点」
+ *
+ * 后半句「没有在途节点」不能按 `status` 一眼看过去：流式占位节点（`text` /
+ * `reasoning`，`content` 为空）也是 `streaming`，却**渲染不出任何东西**。把它算作
+ * 「已有内容」，正好在最需要骨架的那个瞬间（Turn 的 `created` 丢了、只到了一个
+ * 空壳）判成「不用补」——用户看到的就是一片空白。因此可见性判据走
+ * `sessionTranscript.isBlankContentNode`，与树构建**同源**（两处只差「是否有子节点」）。
+ *
+ * 纯函数（无响应式、无 store）：这条判定最容易写成「看谁先到」的竞态，
+ * 抽出来才能逐条断言（见 `__tests__/sessionLive.spec.ts`）。
+ *
+ * @param working  会话节点自述是否在处理中
+ * @param messages 该会话本地全部消息（含被渲染层过滤的空内容叶子）
+ */
+export function needsTypingRow(
+  working: boolean,
+  messages: Array<Pick<ChatMessage, 'status' | 'type' | 'content'>>,
+): boolean {
+  if (!working) return false
+  // 「有东西可看」= 有节点在跑**且它能渲染出内容**（空壳不算，见上）
+  return !messages.some((m) => isInProgressMessage(m) && !isBlankContentNode(m))
 }
 
 /** 状态字面量：进入运行中时的活动文字（与 `liveStatusPatchOf` 保持一致） */

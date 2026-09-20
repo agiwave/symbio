@@ -709,6 +709,47 @@ pub(super) fn not_executed_patch(tool_call_id: &str, reason: &str) -> ChatMessag
     }
 }
 
+/// 「工具调用未执行」的**结果子节点**——与 [`not_executed_patch`] 成对使用。
+///
+/// ## 为什么父节点补丁不够（本函数存在的全部理由）
+///
+/// 「这次调用的结果」在树里是一条**子节点**：前端 `ToolCallNode` 的「结果」段按子节点
+/// 渲染（`v-if="resultChildren.length"`）。只补父节点 ⇒ 卡片有请求、**没有响应**——
+/// 用户看到一次调用凭空消失，而会话照常往下走（下一轮照常发请求）。
+///
+/// 更隐蔽的是「模型看得见、用户看不见」：请求视图里有 `flatten_chat_messages` 的占位
+/// 兜底（否则 provider 直接 400），因此**请求包始终合法**，问题只在存储与 UI 上——
+/// 这正是它能长期潜伏而不被任何测试拦住的原因。
+///
+/// 因此「**有调用必有结果**」这条不变量必须在**存储**里成立（本函数写入 `tool_messages`
+/// ⇒ 落库 + 广播 + 进下一轮上下文），而不是只在请求视图里成立。
+///
+/// `reason` 与 [`not_executed_patch`] 同源（成因可区分，事后排查不必靠猜）：
+/// 中止 / 批次跳过。
+///
+/// ## 为什么是 `Completed`
+///
+/// 与其它工具结果同口径：「没跑」不是「跑失败」。`Failed` 结果会被
+/// `get_context_messages` 当失败处理，且前端会在结果节点上再渲染一条 ⚠ 错误条，
+/// 而父节点的交代由 `meta.failure_kind` 承载。
+pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessage {
+    let text = match reason {
+        "aborted" => "本次调用已中止（用户终止），未执行，未产生结果。".to_string(),
+        _ => "本次调用未执行：同一批中排在它之前的工具未正常结束（失败或需要用户处理），\
+              同批剩余调用被一并跳过。需要时请重新发起这一次调用。"
+            .to_string(),
+    };
+    let mut msg = build_tool_message(tool_call_id, &text, Some(false), None);
+    // 与 `record_protocol_failure` 同口径：失败属**信息性**，结果以 Completed
+    // 留在上下文（标 Failed 会被上下文过滤，并让前端多渲染一条 ⚠）。
+    msg.status = Some(MessageStatus::Completed);
+    msg.meta = Some(json!({
+        "success": false,
+        "failure_kind": reason,
+    }));
+    msg
+}
+
 /// 顺序处理一批工具调用，向 channel 广播每个工具的结果，
 /// 并返回 `(tool_messages, parent_updates)`：
 /// - `tool_messages`：工具结果子节点（用于追加到对话历史）
@@ -718,12 +759,17 @@ pub(super) fn not_executed_patch(tool_call_id: &str, reason: &str) -> ChatMessag
 /// 交互模式（interactive）下，若前一个工具产出 user_prompt（待审批/询问）或失败，
 /// 则中止本批剩余工具（用户需逐个处理）；auto 模式不中止，失败结果传 LLM 继续。
 ///
-/// ## 父节点状态的不变量（本函数负责保证）
+/// ## 两条不变量（本函数负责保证）
 ///
-/// **本批每一个工具调用都必须以终态收场**（`Completed` / `WaitingUserAction`）：
-/// 调用前广播 `Streaming`（[`emit_tool_running`]），调用后广播终态；未执行的
-/// （阻塞 / 中止 / 交互中断）在函数末尾统一由 [`not_executed_patch`] 收口。
-/// 漏掉任何一条，前端就会有一个永远转下去的「运行中」。
+/// 1. **本批每一个工具调用都必须以终态收场**（`Completed` / `WaitingUserAction`）：
+///    调用前广播 `Streaming`（[`emit_tool_running`]），调用后广播终态；未执行的
+///    （阻塞 / 中止 / 交互中断）在函数末尾统一由 [`not_executed_patch`] 收口。
+///    漏掉任何一条，前端就会有一个永远转下去的「运行中」。
+/// 2. **每一个工具调用都必须有结果子节点**（`tool_messages` 里一条 role=Tool）——
+///    「结果」在树里是子节点，前端按它渲染响应段。任何一条 return 分支
+///    （参数解析失败 / 未执行 / 中止 / 被钩子拦下）都必须在给出父节点终态的同时
+///    给出结果：只有父状态没有结果，用户看到的就是「调用凭空消失、会话照旧往下走」。
+///    见 [`not_executed_result`]。
 #[allow(clippy::too_many_arguments)]
 pub async fn process_tool_calls_async(
     tool_calls: Vec<ToolCallInfo>,
@@ -1087,6 +1133,19 @@ pub async fn process_tool_calls_async(
         if parent_updates.iter().any(|p| p.id == *id) {
             continue;
         }
+        // **结果子节点 + 父节点补丁，一个都不能少**（顺序与正常路径一致：
+        // 先结果、后父状态）。只发父节点补丁会让卡片有请求、无响应——
+        // 那正是「工具没有响应节点，会话却继续往后」的成因。
+        let result_msg = not_executed_result(id, "not_executed");
+        let _ = channel
+            .tx
+            .send(PluginFrame::Data(
+                serde_json::to_value(session_chat_response::StreamEvent::Update {
+                    message: result_msg.clone(),
+                })
+                .unwrap_or_default(),
+            ))
+            .await;
         let parent_update = not_executed_patch(id, "not_executed");
         let _ = channel
             .tx
@@ -1097,6 +1156,7 @@ pub async fn process_tool_calls_async(
                 .unwrap_or_default(),
             ))
             .await;
+        tool_messages.push(result_msg);
         parent_updates.push(parent_update);
     }
 

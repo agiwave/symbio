@@ -7,18 +7,20 @@
 //!
 //! ## 用法
 //!
-//! `kind` 取 `symbio_core::event_bus::KIND_*` 常量（前端按它分发，裸字面量改名不会
+//! `kind` 取 `symbio_core::event_bus::KIND_*` 常量（消费方按它分发，裸字面量改名不会
 //! 编译失败）：
 //!
 //! ```ignore
-//! // 在 session 插件中
-//! EventBus::publish(KIND_SESSION, Some(&session_id), stream_event_json).await;
+//! // 在 vdfs 宿主中（一切资源的实时变更都走这一条）
+//! EventBus::try_publish(KIND_VDFS, None, change_json);
 //! ```
 //!
 //! `EventBus` 门面是 `symbio_core::event_bus::EventBus`（跨插件共享的核心设施），
 //! 本插件仅负责建立订阅连接、转发 `pending/snapshot` 等 RPC。
 //!
-//! 前端订阅后，根据 `kind` 字段分发到不同模块；`session_id` 决定具体会话。
+//! 订阅方拿到帧后按 `kind` 分派；`session_id` 只是 `system` 握手帧的关联信息，
+//! **业务身份一律在载荷自己的地址里**（VDFS 变更的 `path`）——会话域曾经的
+//! `kind = "session"` 频道已废除，见 `docs/architecture/PROTOCOLS.md` §事件总线频道。
 
 use crate::symbio_core::event_bus::{
     register_subscriber, unregister_subscriber, EventBus, PendingSnapshotRequest,

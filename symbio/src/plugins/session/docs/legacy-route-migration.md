@@ -220,6 +220,12 @@ gm_ctx.set(PATH, "session/get_messages".to_string());
 （`VdfsNode.attributes.message_count` 就是现成的判据，`nodes.rs:141-143`），
 而且能省一次全量读。**但本轮实测后判定：不做。** 三条理由，按硬度排序：
 
+> **后记（S22，2026-09-20）：先例已经出现了，但本节结论不变。**
+> 子智能体转播与 CLI 现在都在**进程内**消费 VDFS——它们读的是**变更**（`vdfs/watch` 登记 +
+> `kind = "vdfs"` 帧 + `symbio_core::vdfs_provider::VdfsChange`，全是 core 类型），
+> 而不是下面说的那种「`vdfs/*` 请求响应的线路信封」。故①的“没有先例”已成历史，而由它推出的
+> 两条代价（插件间编译期依赖 / 硬编码路由串）**一条都没变**——这正是当时“不做”的真正理由。
+
 **① 后端没有「进程内消费 VDFS」的先例，且它被架构刻意挡住。**
 
 VDFS 的**线路信封**（`vdfs/*` 请求响应 + 协议路径常量 `VDFS_STAT` / `VdfsPathRequest`）

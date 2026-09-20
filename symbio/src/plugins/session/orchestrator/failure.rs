@@ -87,7 +87,6 @@ impl SessionPlugin {
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn persist_failure(
         &self,
-        state: &Arc<ActiveSessionState>,
         session_id: &str,
         collected: &Arc<tokio::sync::Mutex<Vec<cm::ChatMessage>>>,
         error: &str,
@@ -255,14 +254,13 @@ impl SessionPlugin {
         //    推送发生在 Error 事件之前（调用方先 persist_failure 再 broadcast_error_with_idle），
         //    Error 事件仅承担 transport 级兜底语义。
         //
-        //    走 `emit_message_patch`（而非直接 `broadcast_frame`）：这几条终态同样是
-        //    **消息补丁**，VDFS 列表必须同步收敛，否则一次失败之后 VDFS 视图会永远
-        //    停在 streaming——`replace_messages` 已把终态写进存储，而列表读的是存储。
+        //    走 `emit_message_patch`：这几条终态同样是**消息变更**，VDFS 列表必须
+        //    同步收敛，否则一次失败之后 VDFS 视图会永远停在 streaming——
+        //    `replace_messages` 已把终态写进存储，而列表读的是存储。
         //    这些消息都已在存储中（`existed = true`），且这里是全量替换终态，
-        //    故一律 `updated`——`patch` 与 `view` 同一条（全量帧本身就是合并结果）。
+        //    故一律 `updated`。
         for m in changed {
-            self.emit_message_patch(state, session_id, m.clone(), &m, true, None)
-                .await;
+            self.emit_message_patch(session_id, &m, true, None).await;
         }
 
         // 7. 本轮在途缓冲随之作废：权威副本已由上面的 `replace_messages` 回到存储，
@@ -379,11 +377,10 @@ impl SessionPlugin {
         );
         let converged = changed.len();
 
-        // 广播：走 `emit_message_patch` 而非直接 `broadcast_frame` —— 这些终态同样是
-        // **消息补丁**，VDFS 列表必须同步收敛（列表读存储 + 在途叠加，而存储已被改写）。
+        // 广播：这些终态同样是**消息变更**，VDFS 列表必须同步收敛
+        // （列表读存储 + 在途叠加，而存储已被改写）。
         for (m, existed) in changed {
-            self.emit_message_patch(state, session_id, m.clone(), &m, existed, None)
-                .await;
+            self.emit_message_patch(session_id, &m, existed, None).await;
         }
 
         // 权威副本已回到存储，在途缓冲作废（与 `persist_failure` 步骤 7 同一理由）。

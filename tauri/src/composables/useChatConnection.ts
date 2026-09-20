@@ -3,7 +3,7 @@ import { callPlugin } from '@/services/plugin'
 import { messageTextOf, type ChatMessage, type ResumeAction } from '@/schemas/chat_message'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
-import { isInProgressMessage } from '@/stores/sessionTranscript'
+import { isBlankContentNode, isInProgressMessage } from '@/stores/sessionTranscript'
 import { VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 import { CHAT_SEND, CHAT_ABORT } from '@/constants/pluginPaths'
 import { isWaitingStatus } from '@/registry/messageTypes'
@@ -155,10 +155,12 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const removed = getRemovedSet()
     const filtered = all.filter(m => !removed.has(m.id))
 
-    // 识别"空内容叶子节点"：流模式下后端会先发一个 content 为空（如 "\n\n"）的
+    // 识别「空内容叶子节点」：流模式下后端会先发一个 content 为空（如 "\n\n"）的
     // Text / Reasoning 节点（例如 reasoning 与 tool_call 之间的占位空节点），
     // 该节点并不持久化，但前端会短暂收到；渲染时直接过滤掉，避免对话流出现空白块。
     // 仅过滤"无子节点"的节点——带子节点的节点是容器（Turn/ToolCall），须保留。
+    // 「空内容」判据走 `sessionTranscript.isBlankContentNode`（唯一实现）：
+    // 等待骨架的兜底判定也要用它，两处不能各写一份。
     const rawChildren: Record<string, ChatMessage[]> = {}
     filtered.forEach(msg => {
       if (msg.parent_id) {
@@ -169,14 +171,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const parentsWithChildren = new Set(
       Object.keys(rawChildren).filter(pid => rawChildren[pid].length > 0),
     )
-    function isEmptyContentNode(msg: ChatMessage): boolean {
-      const t = msg.type || 'text'
-      if (t !== 'text' && t !== 'reasoning') return false
-      // 取值走契约层的唯一实现（多模态内容 → 纯文本），不在此另写一遍形状判定
-      return messageTextOf(msg.content).trim().length === 0
-    }
     const isEmptyLeaf = (msg: ChatMessage) =>
-      !parentsWithChildren.has(msg.id) && isEmptyContentNode(msg)
+      !parentsWithChildren.has(msg.id) && isBlankContentNode(msg)
 
     const visible = filtered.filter(m => !isEmptyLeaf(m))
 

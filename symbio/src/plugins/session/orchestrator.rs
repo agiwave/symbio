@@ -25,7 +25,6 @@ use super::model_chat;
 // / 本文件都要用），因此在这里导入一次，而不是各子模块各导一遍。
 use super::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use crate::plugin_debug;
-use crate::symbio_core::event_bus::{EventBus, KIND_SESSION};
 use crate::symbio_core::schemas::{
     session::chat_message as cm,
     session::{session_chat, session_chat_response},
@@ -183,25 +182,15 @@ impl Drop for WorkingGuard {
                 // （切回会话时能看到上次失败的终态，目标 3）。
                 plugin
                     .persist_failure(
-                        &state,
                         &session_id,
                         &collected,
                         &crash_msg,
                         cm::MessageStatus::Failed,
                     )
                     .await;
-                // 同时向前端广播一条业务级 Error 事件，使 UI 立即显示错误
-                // （否则前端只会收到 idle，那条 streaming 消息会一直显示"回复中…"）。
-                plugin
-                    .broadcast_frame(
-                        &state,
-                        PluginFrame::Data(json!(session_chat_response::StreamEvent::Error {
-                            error: crash_msg.clone()
-                        })),
-                    )
-                    .await;
                 // 运行态收敛为「以错误结束」：`status = failed` + `attributes.error`
-                // 随节点视图一并下发，前端因此不需要"事件 + 启发式"就能显示错误条。
+                // 随节点视图一并下发，前端因此不需要"事件 + 启发式"就能显示错误条；
+                // 这也就是「崩溃后 UI 立即看到错误」的全部机制（没有第二条 Error 事件）。
                 plugin
                     .emit_session_state(
                         &state,

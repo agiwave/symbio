@@ -1,20 +1,5 @@
 <template>
   <div class="model-chat-panel">
-    <!-- 会话级错误条（兜底：无 Failed Turn 节点、但会话整体因错误中止时展示；
-         有 Failed Turn 时错误由根级 Turn 节点承载，不在此重复显示） -->
-    <Transition name="banner">
-      <div v-if="sessionError" class="session-error-banner" role="alert">
-        <span class="banner-icon">⚠</span>
-        <span class="banner-text">{{ sessionError }}</span>
-        <button class="banner-retry" @click="handleSessionRetry">重试</button>
-        <button
-          class="banner-close"
-          @click="sessionsStore.setSessionError(props.sessionId, null)"
-          title="关闭"
-        >×</button>
-      </div>
-    </Transition>
-
     <!-- 编辑单条消息的浮层。外壳走 `BaseModal`：ESC 可关、焦点被陷阱锁在框内、
          遮罩底色与层级走 token（原实现写死 `z-index: 100` + `rgba(0,0,0,0.45)`，
          层级低于其它浮层且不跟随主题）。 -->
@@ -49,6 +34,29 @@
         @delete="handleDelete"
         @edit="handleEdit"
       />
+
+      <!-- 等待提示的**第二个来源**：会话在跑，而流里没有任何在途节点。
+           常规情形下 Turn 节点已到，骨架由 TurnGroupNode 挂在 Turn 组里；
+           这条只在「Turn 节点的变更还没到 / 丢了一次」时兜底——否则用户点完
+           发送会看到「什么都没发生」。两者互斥，不会同时出现两条。 -->
+      <TurnPending v-if="showTyping" />
+
+      <!-- 会话级错误条（兜底：无 Failed Turn 节点、但会话整体因错误中止时展示；
+           有 Failed Turn 时错误由根级 Turn 节点承载，不在此重复显示）。
+
+           位置在**流内末尾**而不是页面顶部：错误是这一轮的结果，它属于会话流的
+           时间轴——挂在流的尾部，用户的视线本来就在那里，重试按钮也就在手边。
+           顶部横幅会把一次“这轮没跑完”的景象抬成“页面级故障”，与刚刚过去的
+           对话脱节（看门狗定稿的失败也走流内，两者观感因此一致）。 -->
+      <MessageErrorBox
+        v-if="sessionError"
+        :text="sessionError"
+        retryable
+        dismissible
+        variant="turn"
+        @retry="handleSessionRetry"
+        @dismiss="sessionsStore.setSessionError(props.sessionId, null)"
+      />
     </div>
 
     <!-- 输入控制区域：输入框 + 选项行由 ChatComposer 唯一装配（不再在此各拼一半） -->
@@ -79,6 +87,7 @@ import {
 import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
+import { needsTypingRow } from '@/stores/sessionLive'
 import { isWorkingStatus } from '@/schemas/vdfs'
 import { CHAT_ROLE_USER } from '@/schemas/chat_message'
 // 消息级判定与业务规则全部来自 registry（本组件不解释消息词表，也不读后端 meta 字段）
@@ -91,6 +100,8 @@ import {
 } from '@/registry/messageTypes'
 
 import MessageNode from './MessageNode.vue'
+import MessageErrorBox from './message/MessageErrorBox.vue'
+import TurnPending from './message/TurnPending.vue'
 import ChatComposer from './chat/ChatComposer.vue'
 
 // Props（多会话缩略窗口架构下，ModelChatPanel 只接收 sessionId）
@@ -142,7 +153,10 @@ const sessionsStore = useSessionsStore()
   //
   // 两个来源：会话节点的 `attributes.error`（服务端权威）与 send / resume 的本地乐观
   // 错误。但**有失败节点时一律不显示**——那时错误由根级 Turn 承载（⚠ + 重试），
-  // 再显示一条会话级横幅就是同一条错误报两遍。
+  // 再显示一条会话级错误就是同一条错误报两遍。
+  //
+  // 呈现位置是**流尾**（模板里紧跟消息列表，与「等待骨架」同排），不是页面顶部：
+  // 它是「这一轮的结果」，属于会话流的时间轴。
   //
   // 这个判定放在**渲染时**（从节点表算出）而不是事件到达时：事件时判定隐含
   // "错误事件到达的那一刻恰好能看到失败节点"，而两条通道的先后无法保证。
@@ -158,6 +172,20 @@ const sessionsStore = useSessionsStore()
       .some((m) => isFailedStatus(messageStatusOf(m)) && !messageIsEphemeral(m))
     return hasFailedNode ? null : err
   })
+
+  /**
+   * 末尾等待提示（**兜底来源**，判定在 `stores/sessionLive.needsTypingRow`）。
+   *
+   * 会话节点说「在跑」（含 send 后的乐观置位）而流里没有任何在途节点
+   * ⇒ Turn 节点的变更还没到或丢了一次，此处补一条骨架，让「已发出」这件事
+   * 立刻可见。常规路径下这个 computed 恒为 false（Turn 骨架负责），零成本。
+   */
+  const showTyping = computed(() =>
+    needsTypingRow(
+      sessionsStore.isSessionWorking(props.sessionId),
+      sessionsStore.getSessionMessages(props.sessionId),
+    ),
+  )
 
   /** 会话级错误重试：重新发送用户最后一条消息（复用其 id 避免乐观消息重复节点）。
    *  仅用于"无 Failed Turn 节点"的兜底错误；有 Failed Turn 时错误由其节点承载、走 handleRetry。 */
@@ -320,7 +348,7 @@ async function saveEdit() {
 // ── 看门狗：会话卡在"处理中"且长时间无业务事件（疑似后台崩溃 / 断流）──
 // 每 15s 检查一次：若运行中（节点 status == working）但已超过阈值时间无事件，则把仍在
 // streaming/waiting 的消息持久化为 Failed —— 直接出现在对话流中（带内联重试按钮），
-// 切回会话仍能看到上次的错误，无需任何顶部 banner。
+// 切回会话仍能看到上次的错误，无需任何页面级提示。
 let watchdogTimer: ReturnType<typeof setInterval> | null = null
 function startWatchdog() {
   stopWatchdog()
@@ -331,7 +359,7 @@ function startWatchdog() {
     if (!isWorkingStatus(status.status)) return
     const reason = sessionsStore.getSessionStaleReason(sid)
     if (!reason) return
-    // 把卡死的消息持久化为 Failed（会出现在对话流中，带内联重试），不再用顶部 banner
+    // 把卡死的消息持久化为 Failed（会出现在对话流中，带内联重试）
     sessionsStore.persistStuckFailure(sid, reason).catch((e) => {
       logger.warn('ModelChatPanel', 'persistStuckFailure 失败', e)
     })
@@ -362,6 +390,13 @@ watch(
     })
   }
 )
+
+// 会话级错误条也要被滚进视野。它**不经过消息提交**（错误是会话状态，不是节点），
+// `transcriptVersion` 因此不会变，上面那个 watcher 管不到它。
+watch(sessionError, (now) => {
+  if (!now) return
+  void nextTick(() => smartScroll())
+})
 </script>
 
 <style scoped>
@@ -415,77 +450,9 @@ watch(
   flex-shrink: 0;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   Error banner（会话级错误条）
-   ═══════════════════════════════════════════════════════════ */
-.banner-icon {
-  font-size: 1rem;
-  flex-shrink: 0;
-}
-
-.banner-text {
-  flex: 1;
-  word-break: break-word;
-}
-
-.banner-close {
-  background: transparent;
-  border: none;
-  color: var(--color-banner-fg);
-  font-size: 1.2rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 0.3rem;
-  border-radius: 0.25rem;
-  flex-shrink: 0;
-}
-
-.banner-close:hover {
-  background: rgba(146, 64, 14, 0.1);
-}
-
-/* 会话级错误条（与 init-error-banner 同视觉语言，但语义不同：
-   它是"错误是状态、不是节点"的兜底展示，仅当无任何 Failed Turn 节点时出现） */
-.session-error-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.85rem;
-  background: var(--color-error-bg);
-  border: 1px solid var(--color-error-border);
-  border-left: 0.1875rem solid var(--color-error-fg);
-  color: var(--color-error-fg);
-  font-size: 0.82rem;
-  flex-shrink: 0;
-}
-
-/* 压缩提示条：与错误条同版式，但走 accent 色系——它不是错误，是"需要多等一会儿"。
-   压缩窗口内没有任何消息节点可渲染，这条横幅是唯一能说明"系统在做事"的东西。 */
-.banner-retry {
-  flex-shrink: 0;
-  background: var(--color-option-bg);
-  border: 1px solid var(--color-error-border);
-  color: var(--color-error-fg);
-  border-radius: 0.375rem;
-  padding: 0.2rem 0.7rem;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.banner-retry:hover {
-  background: var(--color-error-bg);
-}
-
-.banner-enter-active,
-.banner-leave-active {
-  transition: all 0.25s ease;
-}
-
-.banner-enter-from,
-.banner-leave-to {
-  opacity: 0;
-  transform: translateY(-0.5rem);
-}
+/* 注：会话级错误条不再在此处持有样式——它现在与 Turn 组级错误条、工具级错误条
+   共用同一个组件（`message/MessageErrorBox.vue`）。三处各自维护一份 `.error-box`
+   的写法正是它被抽出来要消除的东西（改一处不改另一处不会报错，只会观感不一致）。 */
 
 /* ── 编辑单条消息的浮层（edit-box …）────────────────────────
    遮罩（定位 / 主题化底色 / 层级）与面板底色、圆角、阴影均由 `BaseModal` 提供。 */

@@ -705,6 +705,148 @@ describe('sessions store — 终态丢失后的转写对账', () => {
 })
 
 /**
+ * 存储号与本地号**分叉**之后的收敛。
+ *
+ * `seq` 是唯一的顺序锚点，但它有两套来源：未落库的节点拿到的是**本地游标**发的号
+ * （`nextSeq`），落库后拿到的是**存储**分配的号。两者在正常情况下相等，一旦经过
+ * 截断 / 压缩 / 重试（存储重排了号），本地游标就会超前或落后，同一棵树上于是
+ * 并存两套号——排序随之错位，而刷新（整份回读）才恢复。
+ *
+ * 实测到的景象是「自己刚发的那条跑到最下面去了」：本地号（游标）比存储号大，
+ * 于是用户消息排在所有拿存储号的节点之后。
+ *
+ * 判据是**确定的**（不是启发式）：同一条消息先拿到本地号、后拿到存储号，
+ * 且两个号不同 ⇒ 本地那份转写的号不可全信。但**不回读于此刻**——会话还在跑，
+ * 回读会与在途节点竞争（见 `hydrateTranscript` 的合并语义）；等它转空闲再收，
+ * 复用已有的对账通路（`reconcileTranscript`）。
+ */
+describe('sessions store — 存储号与本地号分叉后的对账', () => {
+  const SID = 's1'
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    captured.scopes.length = 0
+    captured.handlers.length = 0
+    stopSessionNodeSync()
+    vdfsApi.readVdfs.mockReset()
+    vdfsApi.statVdfs.mockReset()
+    startSessionNodeSync(useSessionsStore())
+  })
+
+  /** 把会话节点状态推成「不忙」，触发空闲时的对账判定 */
+  async function goIdle() {
+    emit({
+      path: `@vfs/session/${SID}`,
+      change: 'updated',
+      node: sessionNode({ name: SID, status: 'active' }),
+    })
+    await flushPromises()
+  }
+
+  it('本地号被存储号替换 ⇒ 不在途中回读，转空闲后按存储收敛（顺序恢复）', async () => {
+    const store = useSessionsStore()
+    // 上一轮的产物：存储号 5 / 6，本地游标因此被抬到 6
+    store.hydrateFromHistory(SID, [
+      { id: 'h1', type: 'text', seq: 5, status: 'completed', content: '旧的' },
+      { id: 'h2', type: 'text', seq: 6, status: 'completed', content: '旧的' },
+    ] as never)
+    // 用户发送：本地游标发号 7（此刻存储还没落库）
+    store.putMessage(SID, {
+      id: 'u1',
+      role: 'user',
+      type: 'user_prompt',
+      status: 'completed',
+      content: '问题',
+    } as never)
+    expect(store.getSessionMessages(SID).map((m) => m.id), '此刻它排在末尾').toEqual([
+      'h1',
+      'h2',
+      'u1',
+    ])
+
+    // 会话在跑：状态更新不得顺手触发回读
+    emit({
+      path: `@vfs/session/${SID}`,
+      change: 'updated',
+      node: sessionNode({ name: SID, status: 'working' }),
+    })
+    await flushPromises()
+    expect(vdfsApi.readVdfs, '在途回读会与未落库的节点竞争').not.toHaveBeenCalled()
+
+    // 存储回包：权威号是 4（截断 / 压缩后存储重排过号）⇒ 两套号分叉
+    store.putMessage(SID, {
+      id: 'u1',
+      role: 'user',
+      type: 'user_prompt',
+      seq: 4,
+      status: 'completed',
+      content: '问题',
+    } as never)
+
+    // 存储的权威顺序：u1 在 h1 / h2 **之前**
+    vdfsApi.readVdfs.mockResolvedValue({
+      text: JSON.stringify({
+        messages: [
+          { id: 'u1', type: 'user_prompt', seq: 4, status: 'completed', content: '问题' },
+          { id: 'h1', type: 'text', seq: 5, status: 'completed', content: '旧的' },
+          { id: 'h2', type: 'text', seq: 6, status: 'completed', content: '旧的' },
+        ],
+      }),
+    })
+
+    await goIdle()
+
+    expect(vdfsApi.readVdfs, '分叉必须靠一次回读收敛').toHaveBeenCalled()
+    expect(store.getSessionMessages(SID).map((m) => m.id), '以存储号为锚点重排').toEqual([
+      'u1',
+      'h1',
+      'h2',
+    ])
+  })
+
+  it('权威号与本地号一致 ⇒ 不标记、不回读（正常路径零成本）', async () => {
+    const store = useSessionsStore()
+    store.hydrateFromHistory(SID, [
+      { id: 'h1', type: 'text', seq: 1, status: 'completed', content: '旧的' },
+    ] as never)
+    // 本地游标发号 2，随后存储也说是 2 —— 两套号**没有**分叉
+    store.putMessage(SID, { id: 'u1', type: 'user_prompt', status: 'completed' } as never)
+    store.putMessage(SID, {
+      id: 'u1',
+      type: 'user_prompt',
+      seq: 2,
+      status: 'completed',
+    } as never)
+
+    await goIdle()
+
+    expect(vdfsApi.readVdfs, '每一次轮次结束都回读会让流式对话付 N 次 IPC').not.toHaveBeenCalled()
+  })
+
+  it('回读失败 ⇒ 标记保留，下一次转空闲还试（不静默放弃）', async () => {
+    const store = useSessionsStore()
+    store.putMessage(SID, { id: 'u1', type: 'user_prompt', status: 'completed' } as never)
+    store.putMessage(SID, {
+      id: 'u1',
+      type: 'user_prompt',
+      seq: 9,
+      status: 'completed',
+    } as never)
+    vdfsApi.readVdfs.mockRejectedValueOnce(new Error('IPC 断了'))
+
+    await goIdle()
+    expect(vdfsApi.readVdfs).toHaveBeenCalledTimes(1)
+
+    vdfsApi.readVdfs.mockResolvedValue({
+      text: JSON.stringify({ messages: [{ id: 'u1', type: 'user_prompt', seq: 9, status: 'completed' }] }),
+    })
+    await goIdle()
+
+    expect(vdfsApi.readVdfs, '失败不清标记').toHaveBeenCalledTimes(2)
+  })
+})
+
+/**
  * 实时状态（`sessionStatuses`）的唯一变更通道。
  *
  * 收敛前有四处各自手写「展开 → 合并 → 整体替换」，其中最隐蔽的一处是**缺省值**：

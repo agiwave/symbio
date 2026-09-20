@@ -430,3 +430,49 @@ async fn max_messages_zero_means_unlimited() {
     let ctx = session.get_messages().await.expect("读取存储消息失败");
     assert_eq!(ctx.len(), 5, "max_messages=0 表示不限制");
 }
+
+/// 存储是 `seq` 的**唯一分配者**，且分配的号必须严格递增（Lamport 计数器）。
+///
+/// 这条不变量是「前端只有一套序号空间」的全部前提：前端为尚未落库的节点自己发
+/// 本地号，只有**落库回包**才能把它换成权威号。因此两件事都得成立，且都得钉住：
+///
+/// 1. `get_messages()` 读回来的消息**带 `seq`**——`emit_persisted_message` 发的
+///    就是这份读回来的权威版本（发入参那条等于把「没有号」写进前端）；
+/// 2. 跨次追加**严格递增**：若新消息拿到比已有消息小的号，前端的顺序锚点就会
+///    把新消息排到旧消息之前（“刚发的跑到中间去”）。
+///
+/// 缺少本测试时，`append_messages` 停止补号不会有任何测试失败：前端只是
+/// 「偶尔顺序错乱、刷新才恢复」——正是这类静默退化最难定位。
+#[tokio::test]
+async fn append_messages_assigns_monotonic_authoritative_seq() {
+    let (session, _dir, _tmp) = setup().await;
+
+    session
+        .append_messages(vec![plain_msg("u1")])
+        .await
+        .expect("首次落库失败");
+    let first = session.get_messages().await.expect("读取存储消息失败");
+    let s1 = first
+        .iter()
+        .find(|m| m.id == "u1")
+        .expect("u1 应在存储中")
+        .seq
+        .expect("存储必须为落库消息分配 seq（前端唯一的顺序锚点）");
+
+    session
+        .append_messages(vec![plain_msg("u2")])
+        .await
+        .expect("二次落库失败");
+    let second = session.get_messages().await.expect("读取存储消息失败");
+    let s2 = second
+        .iter()
+        .find(|m| m.id == "u2")
+        .expect("u2 应在存储中")
+        .seq
+        .expect("存储必须为落库消息分配 seq（前端唯一的顺序锚点）");
+
+    assert!(
+        s2 > s1,
+        "追加分配必须严格递增（Lamport 计数器从已有最大 seq 续上）：u2={s2} 应大于 u1={s1}"
+    );
+}

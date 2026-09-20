@@ -566,9 +566,11 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
 
 **状态**：已接受
 
-> **当前状态**：**已实现（现行）**。会话域的全部实时显示经 `kind = "vdfs"` 一条频道，
+> **当前状态**：**已实现（现行，含 S22 补完）**。会话域**只剩** `kind = "vdfs"` 一条实时频道，
 > 按**地址**分派（`schemas/vdfs.ts::sessionRouteOf`）；`services/sessionBusWatcher.ts`
-> 与 `eventBus` 的防乱序缓冲已删除。详见
+> 与 `eventBus` 的防乱序缓冲已删除。进程内消费者（子智能体转播、CLI）同样改订阅 VDFS 变更，
+> 因此 `kind = "session"` 频道已连同 `KIND_SESSION` 常量一并废除（`event_bus` 只剩
+> `system` / `vdfs` 两个频道，退化为纯传输层）。详见
 > [`symbio/src/plugins/session/docs/node-state-streaming.md`](../symbio/src/plugins/session/docs/node-state-streaming.md)。
 
 **背景**：
@@ -616,8 +618,13 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
 - **三条残留假设写进文档**（不假装没有）：总线是单条有序通道；`list` 快照只能把
   `active` 升级为 `working`、不得降级；`appended` 依赖路径级串行。前两条是既有的，
   第三条是增量语义的固有属性。
-- **`kind = "session"` 未整体删除**：进程内消费者（`agent/host/subagent.rs` 的审批透传、
-  文本累积、以 `Status idle` 判定子会话结束）仍依赖它。前端不再订阅。
+- **`kind = "session"` 已整体删除**（S22 补完）：最后两个进程内消费者——`agent/host/subagent.rs`
+  的审批透传 / 文本累积与 `cli/src/client.rs` 的渲染 / 完成判定——都改成「订阅总线 +
+  `vdfs/watch` 登记」后消费 VDFS 变更。这带来一个**共享层新增**：`created` / `updated` 的
+  载荷是**全量**，而消息补丁是**增量**（`ChatMessage::apply_patch`），折算必须只有一处实现，
+  故两种投影落在 `symbio_core::schemas::session::transcript`（进程内消费者唯一可达的共同层）。
+  完成判据也随之从「等 `Status idle` 帧」改为「读会话节点的 `status`」——同一个判据在前端、
+  subagent、CLI 三处首次真正同源。
 - **词汇不合并**：`streaming`（消息）与 `working`（会话）保持两个词。合并会连带改
   `status-*` CSS 类名与 `isWorkingStatus()`，而**漏改 CSS 类名不报错、不失败，只会让
   流式动画静默消失**——正是"体验不得变差"要防的那类回归。

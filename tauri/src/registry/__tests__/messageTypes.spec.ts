@@ -50,6 +50,7 @@ import {
   messageIsHeartbeat,
   messageIsRunningAction,
   messageRendererKey,
+  missingResultNoteOf,
   messageRetryTargetOf,
   messageRoleLabel,
   messageShowsLiveBadge,
@@ -389,6 +390,20 @@ describe('消息级业务规则（纯函数，原先散在渲染组件里）', (
     expect(canSupplyToolArgs(tool({ recoverable: true, failureKind: 'error' }))).toBe(true)
     expect(canSupplyToolArgs(tool({ recoverable: true, failureKind: 'timeout' }))).toBe(false)
     expect(canSupplyToolArgs(tool({ recoverable: true }))).toBe(false)
+  })
+})
+
+describe('missingResultNoteOf：「有请求、无响应」的兑底', () => {
+  it('父节点自述「本批跳过」/「中止」→ 给出文案（历史数据真的没有结果子节点）', () => {
+    expect(missingResultNoteOf({ meta: { failure_kind: 'not_executed' } })).toContain('未执行')
+    expect(missingResultNoteOf({ meta: { failure_kind: 'aborted' } })).toContain('已中止')
+  })
+
+  it('无标记 / 其它终态 → 不编话（宁可留白也不替工具伪造一份结果）', () => {
+    expect(missingResultNoteOf({ meta: {} })).toBeNull()
+    expect(missingResultNoteOf({})).toBeNull()
+    // error：结果子节点由后端写入（错误文本就在里面），兑底会让同一句话出现两次
+    expect(missingResultNoteOf({ meta: { failure_kind: 'error' } })).toBeNull()
   })
 })
 

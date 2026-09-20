@@ -33,14 +33,8 @@ impl SessionPlugin {
     ) {
         let err = error.into();
         crate::plugin_error!("session", "{}", &err);
-        self.persist_failure(
-            state,
-            session_id,
-            collected,
-            &err,
-            cm::MessageStatus::Failed,
-        )
-        .await;
+        self.persist_failure(session_id, collected, &err, cm::MessageStatus::Failed)
+            .await;
         // 本轮无 transcript（loop 未产生任何消息）→ last_message 为空串
         stop.fire(&[]).await;
         self.broadcast_error_with_idle(state, err).await;
@@ -51,7 +45,7 @@ impl SessionPlugin {
     /// 职责：
     /// - 构造 `WorkingGuard`（保障 panic 时 `is_working` 收敛 + 失败持久化）
     /// - 解析 provider（entry 回退链）→ 限流 → 进程内 spawn `run_chat_loop`
-    /// - 接收 sub_channel 帧：Error → 持久化失败 + 广播；Data → 合并收集 + 透传广播
+    /// - 接收 sub_channel 帧：Error → 持久化失败 + 收敛为失败；Data → 合并收集 + 发 VDFS 变更
     /// - 正常结束：清理 `is_working` + 广播 idle
     ///
     /// `chat_ctx` 应已设置好 PATH/SESSION_ID/AGENT_ID/WORKDIR/payload 等所有字段。
@@ -277,7 +271,6 @@ impl SessionPlugin {
                         );
                         crate::plugin_error!("session", "[Consume] {}", &msg);
                         self.persist_failure(
-                            &state,
                             &session_id,
                             &collected_ai_messages,
                             &msg,
@@ -324,9 +317,9 @@ impl SessionPlugin {
                         );
                         // 用户手动中止（run_chat_loop 冒泡的 Err(PluginError::Aborted)，
                         // 错误帧携带 code=ABORTED）：在途 Turn 落库为 Failed + error，
-                        // 前端据此渲染错误条与重试入口；但不广播业务 Error 事件——
-                        // 中止不是错误，Status idle 足以收敛 UI（handle_abort 随后
-                        // 广播的 Abort 事件负责清理流式动画）。
+                        // 前端据此渲染错误条与重试入口；但不收敛为「失败」结局——
+                        // 中止不是错误：会话节点回 `active` + `outcome = aborted`
+                        // （由 handle_abort 收口，流式动画随之停止）。
                         // 旧实现 run_chat_loop 对 Aborted 直接 return Ok(())，在途
                         // Turn 既不落库也无重试入口（刷新即消失的幽灵节点）。
                         // 分派依据为类型化错误码（ErrorCode::Aborted），不再对
@@ -340,7 +333,6 @@ impl SessionPlugin {
                             // 中止**不是**提前收尾出口（不像 watchdog/业务 Error 那样
                             // 自行广播过 idle），因此必须 break 到统一收尾。
                             self.persist_failure(
-                                &state,
                                 &session_id,
                                 &collected_ai_messages,
                                 "用户手动中止了本次回复",
@@ -361,7 +353,6 @@ impl SessionPlugin {
                         // 同时把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
                         // 这样切回会话时能看到上次失败的终态。
                         self.persist_failure(
-                            &state,
                             &session_id,
                             &collected_ai_messages,
                             msg,
@@ -392,9 +383,9 @@ impl SessionPlugin {
                         ) {
                             Ok(session_chat_response::StreamEvent::Update { message }) => {
                                 // 三件事一次算清：是否已存在、追加了什么、合并后的全貌。
-                                // `merged` 是**变更载荷**的来源（`created` / `updated`
-                                // 要带上完整节点视图与内容快照），与下发给前端的
-                                // 增量 `message` 是两回事，不可互相替代。
+                                // `merged`（合并后的完整消息）是**变更载荷**的来源——
+                                // `created` / `updated` 要带上它才能独立成立；
+                                // 上游的增量 `message` 只在合并这一步有用。
                                 let (existed, appended, merged) = {
                                     let mut collected = collected_ai_messages.lock().await;
                                     match collected.iter_mut().find(|m| m.id == message.id) {
@@ -408,15 +399,8 @@ impl SessionPlugin {
                                         }
                                     }
                                 };
-                                self.emit_message_patch(
-                                    &state,
-                                    &session_id,
-                                    message,
-                                    &merged,
-                                    existed,
-                                    appended,
-                                )
-                                .await;
+                                self.emit_message_patch(&session_id, &merged, existed, appended)
+                                    .await;
                             }
                             // 删除帧（工具恢复时删除旧的 pending/failed 子节点）：
                             // 转成 VDFS `deleted` 变更——它同样是**消息级变更**，
@@ -428,9 +412,11 @@ impl SessionPlugin {
                                     vdfs::VDFS_CHANGE_DELETED,
                                 ));
                             }
-                            // 非 Update 帧（Status / Error / Abort / Connected …）
-                            // 不含消息补丁，原样透传。
-                            _ => self.broadcast_frame(&state, frame).await,
+                            // 其余帧（Status / Abort / Connected …）不含消息补丁。
+                            // 会话运行态已由**会话节点**承载（`emit_session_state` 发
+                            // 带节点视图的 VDFS 变更），旧的事件频道已废除——
+                            // 这里不再有任何可投递的东西。
+                            _ => {}
                         }
                     }
                 }
@@ -541,11 +527,6 @@ impl SessionPlugin {
             .converge_inflight(state, &state.request_id_str(), "用户中止")
             .await;
 
-        self.broadcast_frame(
-            state,
-            PluginFrame::Data(json!(session_chat_response::StreamEvent::Abort)),
-        )
-        .await;
         // 运行态收敛为「用户中止」。中止**不是**失败：会话节点的 `outcome` 记
         // `aborted`（提示音据此选音色），而 `status` 回到空闲——用户知道自己按了停止，
         // 再给一个失败角标只是噪音。

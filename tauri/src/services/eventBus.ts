@@ -26,7 +26,8 @@ import { EVENT_BUS_SUBSCRIBE } from '@/constants/pluginPaths'
 export interface BusEvent {
   type: 'bus_event'
   data: {
-    kind: string              // 'session' | 'explorer' | 'system' | ...
+    // 闭集：'vdfs'（资源变更，业务身份在载荷的地址里）| 'system'（总线自身握手）
+    kind: string
     session_id: string | null // 关联到具体会话/工作区
     data: unknown             // 原始业务数据（消费者按 kind 窄化类型）
   }
@@ -174,7 +175,7 @@ export function isEventBusConnected(): boolean {
 /**
  * 订阅事件总线
  *
- * - `filter.kind` 必填（如 'session'）
+ * - `filter.kind` 必填（如 `VDFS_EVENT_KIND`）
  * - `filter.sessionId` 可选（null/undefined 接收所有该 kind 的事件）
  * - 首次订阅时会自动触发总线连接；连接是全局单例
  *

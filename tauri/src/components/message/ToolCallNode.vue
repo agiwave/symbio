@@ -68,6 +68,13 @@
         />
       </div>
 
+      <!-- 无响应兜底（历史数据 / 不守不变量的写入方）：父节点自述「没跑」却没有任何
+           结果子节点时，把这句话显式说出来。留白会让一次调用看起来凭空消失。 -->
+      <div v-if="missingResultNote" class="tool-section missing-result">
+        <span class="mr-icon">↩</span>
+        <span class="mr-text">{{ missingResultNote }}</span>
+      </div>
+
       <!-- 工具级失败：重试此工具（不动 Turn） -->
       <MessageErrorBox
         v-if="isFailed"
@@ -113,6 +120,7 @@ import {
   canSupplyToolArgs,
   isFailedStatus,
   messageParentSessionId,
+  missingResultNoteOf,
   type MessageFacets,
 } from '@/registry/messageTypes'
 import NodeShell from './NodeShell.vue'
@@ -182,6 +190,17 @@ const resultChildren = computed<ChatMessage[]>(() =>
   children.value.filter((c) => c.type !== MESSAGE_TYPE_TURN),
 )
 
+/**
+ * 「有请求、无响应」的兜底文案（`registry` 里的判定，本组件只负责画）。
+ *
+ * 只在**真的没有结果子节点**时给：有子节点就以子节点为准（宁可信真实的，
+ * 也不让兜底文案与真结果并排出现）。判定只看父节点自述的终态，见
+ * `missingResultNoteOf`。
+ */
+const missingResultNote = computed<string | null>(() =>
+  resultChildren.value.length ? null : missingResultNoteOf(props.node),
+)
+
 // ── 补充参数表单 ───────────────────────────────────────────
 const showSupplyForm = ref(false)
 const supplyArgsText = ref('')
@@ -222,6 +241,20 @@ function submitSupply() {
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--text-muted);
+}
+/* 无响应兜底：中性色而非错误色——「没轮到执行」不是故障。 */
+.missing-result {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.mr-icon {
+  flex-shrink: 0;
+}
+.mr-text {
+  word-break: break-word;
 }
 
 /* ── 工具失败补充参数 UI ── */

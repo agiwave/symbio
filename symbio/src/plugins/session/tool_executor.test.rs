@@ -161,12 +161,16 @@ fn args_summary_handles_multibyte_args() {
     assert_eq!(args_summary(&json!({"a": 1}), 200), "{\"a\":1}");
 }
 
-/// S20.1 不变量：**本批每个 ToolCall 都必须以终态收场**。
+/// S20.1 不变量：**本批每个 ToolCall 都必须以终态收场，且必须有结果子节点**。
 ///
 /// 中止（`is_aborted`）时循环在第一个工具之前就 `break`，本批一个都没执行——
 /// 若不收口，这些节点会停在参数流式阶段广播出的 `Streaming` 上：
 /// 前端永远转「运行中」（把"卡住"伪装成"在跑"），重启后还会被
 /// `cleanup_crashed_sessions` 误判为崩溃遗留。
+///
+/// **只补父节点是不够的**（S23 实测事故）：前端 `ToolCallNode` 的「结果」段按**子节点**
+/// 渲染，缺子节点就是「有请求、无响应」，而请求视图那边有 `flatten_chat_messages`
+/// 的占位兜底 ⇒ 模型看得见、用户看不见，于是它长期潜伏。两条断言必须同时在。
 #[tokio::test]
 async fn aborted_batch_terminates_every_tool_call() {
     let (_host, mut plugin_chan) = PluginChannel::pair(64);
@@ -189,7 +193,22 @@ async fn aborted_batch_terminates_every_tool_call() {
     let (msgs, updates) =
         process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
 
-    assert!(msgs.is_empty(), "中止时不应产出任何工具结果子节点");
+    assert_eq!(
+        msgs.len(),
+        2,
+        "未执行的调用同样必须有结果子节点，否则前端卡片有请求、无响应"
+    );
+    for m in &msgs {
+        assert_eq!(m.role, Some(MessageRole::Tool));
+        assert_eq!(m.status, Some(MessageStatus::Completed));
+        assert!(
+            m.content
+                .as_ref()
+                .map(|c| c.to_text().contains("未执行"))
+                .unwrap_or(false),
+            "结果必须说明「没跑」，而不是伪造一份看起来像工具返回的文本"
+        );
+    }
     assert_eq!(updates.len(), 2, "两个未执行的调用都必须收到终态补丁");
     for u in &updates {
         assert_eq!(u.status, Some(MessageStatus::Completed));
@@ -203,6 +222,59 @@ async fn aborted_batch_terminates_every_tool_call() {
         );
         assert!(u.error.is_none(), "未执行不是错误：挂 error 会让前端渲染 ⚠");
     }
+    // 结果子节点必须挂在**它自己那一次调用**上（挂错父节点 = 另一个工具的结果）
+    let parents: Vec<&str> = msgs.iter().filter_map(|m| m.parent_id.as_deref()).collect();
+    assert_eq!(parents, vec!["tc1", "tc2"]);
+}
+
+/// 实测事故（本地会话 `3ea6e4d0`）的机制回归：**交互模式下**前一个工具失败 ⇒
+/// 本批剩余被跳过 ⇒ 跳过的那些同样必须留下结果子节点。
+///
+/// 这条路径是用户报告的现场：4 个 `vdfs_read` 只留下 `failure_kind=not_executed`
+/// 的父节点、没有任何子节点，UI 上表现为「工具没有响应，会话却继续往后」。
+#[tokio::test]
+async fn interactive_break_leaves_result_for_skipped_calls() {
+    let (_host, mut plugin_chan) = PluginChannel::pair(64);
+    let abort = Arc::new(AtomicBool::new(false));
+    // 交互模式 + 无 parent：第一个工具必然以失败告终，触发本批 break
+    let ctx = test_ctx();
+    ctx.set(crate::symbio_core::MODE, "interactive".to_string());
+    let tcs = vec![
+        ToolCallInfo {
+            id: Some("tc1".into()),
+            name: Some("vdfs_read".into()),
+            arguments: json!({ "path": "a" }),
+            parse_error: None,
+        },
+        ToolCallInfo {
+            id: Some("tc2".into()),
+            name: Some("vdfs_read".into()),
+            arguments: json!({ "path": "b" }),
+            parse_error: None,
+        },
+    ];
+
+    let (msgs, updates) = process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, ctx).await;
+
+    assert_eq!(
+        msgs.len(),
+        2,
+        "被跳过的那一次调用必须有其结果子节点（否则前端只有请求、没有响应）"
+    );
+    let skipped = msgs
+        .iter()
+        .find(|m| m.parent_id.as_deref() == Some("tc2"))
+        .expect("tc2 的结果子节点缺失");
+    assert_eq!(skipped.status, Some(MessageStatus::Completed));
+    assert_eq!(
+        skipped
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("failure_kind"))
+            .and_then(|v| v.as_str()),
+        Some("not_executed")
+    );
+    assert_eq!(updates.len(), 2, "两次调用都必须有终态");
 }
 
 /// 未执行的终态必须是 `Completed` 而非 `Failed`。

@@ -18,11 +18,8 @@
       <button class="node-act" title="删除" @click.stop="emit('delete', node.id)">🗑</button>
     </span>
 
-    <!-- ① 等待态 -->
-    <div v-if="isPending" class="turn-pending">
-      <span class="turn-pending-dots"><span /><span /><span /></span>
-      <span class="turn-pending-text">{{ agentName }} 正在思考…</span>
-    </div>
+    <!-- ① 等待态（骨架本体是共享组件：会话级兜底用的是同一份，见 TurnPending.vue） -->
+    <TurnPending v-if="isPending" :text="`${agentName} 正在思考…`" />
 
     <!-- ② 子节点直排 + ③ 组级交代条 -->
     <template v-else>
@@ -64,6 +61,7 @@ import {
 } from '@/registry/messageTypes'
 import MessageChildren from './MessageChildren.vue'
 import MessageErrorBox from './MessageErrorBox.vue'
+import TurnPending from './TurnPending.vue'
 
 const props = defineProps<{
   node: ChatMessage
@@ -121,44 +119,5 @@ const { errorText } = useMessageContent(
 }
 /* 微按钮：与 `NodeShell` 头部操作同一视觉原子。
    两处各自持有样式块（scoped 无法跨组件共享），改一处需同步另一处。 */
-/* 等待骨架：三点脉动 +「正在思考…」 */
-.turn-pending {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.1rem;
-}
-.turn-pending-dots {
-  display: inline-flex;
-  gap: var(--space-1);
-}
-.turn-pending-dots span {
-  width: 0.375rem;
-  height: 0.375rem;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: turn-pulse 1.2s infinite ease-in-out;
-}
-.turn-pending-dots span:nth-child(2) {
-  animation-delay: 0.2s;
-}
-.turn-pending-dots span:nth-child(3) {
-  animation-delay: 0.4s;
-}
-@keyframes turn-pulse {
-  0%,
-  80%,
-  100% {
-    opacity: 0.25;
-    transform: scale(0.85);
-  }
-  40% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-.turn-pending-text {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
+/* 等待骨架的样式在 `TurnPending.vue`（与会话级兜底共用一份）。 */
 </style>

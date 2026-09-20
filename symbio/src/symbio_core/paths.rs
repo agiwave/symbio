@@ -92,6 +92,29 @@ pub const SESSION_GET_MESSAGES: &str = "session/get_messages";
 /// `agent/host/subagent.rs`（登记子会话元数据）。
 pub const SESSION_UPDATE: &str = "session/update";
 
+// ============ VDFS 插件 ============
+/// vdfs/root — **进入地址空间**：取根地址，调用方不给地址。
+///
+/// 调用方：`agent/host/subagent.rs`（取子会话展示地址）、`cli/src/client.rs`
+/// （取当前会话展示地址）。两者都要拼出 `<根>/session/<id>` 才谈得上
+/// [`VDFS_WATCH`]，而**根名只归 vdfs 插件**（`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，
+/// 仓级守卫 S-010 禁止它在别处出现）——消费方一律把它当运行期数据取回。
+pub const VDFS_ROOT: &str = "vdfs/root";
+
+/// vdfs/watch — 订阅一棵地址子树的变更。
+///
+/// 调用方：`agent/host/subagent.rs`（子会话转播）、`cli/src/client.rs`（本轮渲染）。
+/// 后端只向**登记过路径**的订阅者投递变更（`core/vdfs/host::ChangeSubscriptions`），
+/// 因此这是「能收到 VDFS 变更」的前置条件：只订阅全局总线而不登记 watch，
+/// 等于在一条没人开闸的频道上等事件（一条也收不到）。
+pub const VDFS_WATCH: &str = "vdfs/watch";
+
+/// vdfs/unwatch — 取消订阅（与 [`VDFS_WATCH`] 严格配对）。
+///
+/// 引用计数归零才真正摘除，多余一次 `unwatch` 是安全的空操作；
+/// 但**漏掉**它会留下幽灵订阅（后端持续投递、消费者早已不在）。
+pub const VDFS_UNWATCH: &str = "vdfs/unwatch";
+
 // ============ Event Bus 插件 ============
 /// event_bus/subscribe — 建立进程内帧订阅连接
 ///

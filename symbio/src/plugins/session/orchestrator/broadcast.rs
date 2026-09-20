@@ -1,25 +1,25 @@
-//! 广播出口：把"状态收敛 + 帧投递"集中到一处。
+//! 广播出口：把「状态收敛 + 变更投递」集中到一处。
 //!
-//! 三个方法都只做**投递**，不含业务判定：
+//! 只有一个出口，只做**投递**，不含业务判定：
 //! - `emit_session_state`：**会话运行态的唯一出口**——写运行态 → 发带节点视图的
-//!   VDFS 变更（→ 前端）→ 发 `Status` 帧（→ 进程内消费者）；
-//! - `broadcast_error_with_idle`：可恢复错误路径的唯一出口（收敛为"失败"结局
-//!   → Error 帧）；
-//! - `broadcast_frame`：向 EventBus 投递一帧（子会话转播等进程内消费者的出口）。
+//!   VDFS 变更（→ 一切消费者）；
+//! - `broadcast_error_with_idle`：可恢复错误路径的唯一出口（收敛为「失败」结局）。
 //!
 //! ## 为什么运行态要经 VDFS 变更而不是事件
 //!
 //! 见 `session/docs/node-state-streaming.md`：状态是节点的属性，变更携带**全量
 //! 节点视图**，因此幂等、可交换、丢一次不影响正确性；而事件是增量的、有顺序的
-//! （`busy` 与 `idle` 谁先到决定 UI 对错）。前端因此不再订阅 `kind = "session"`。
+//! （`busy` 与 `idle` 谁先到决定 UI 对错）。
 //!
-//! `Status` 帧**仍然发送**：它是给**进程内**消费者的契约
-//! （`agent/host/subagent.rs` 的转播任务以 `Status idle` 判定子会话结束），
-//! 与前端显示无关。前端不订阅该频道，收到也不处理。
+//! ## `kind = "session"` 事件频道已废除
 //!
-//! 可见性：`broadcast_error_with_idle` 被 `consume.rs` 调用，标 `pub(super)`；
-//! `broadcast_frame` / `emit_session_state` 原本即 `pub`（根文件的
-//! `WorkingGuard::drop` 也在调用），保持不变。
+//! 会话域原先还往事件总线发一整套 `StreamEvent` 帧（`Status` / `Error` / `Abort`
+//! / 消息 `Update`），供**进程内**消费者（子智能体转播、CLI）使用。那两个消费者
+//! 现已改订阅 VDFS 变更（`vdfs/watch` + `kind = "vdfs"`），端口随之关闭：
+//! 后端只发 VDFS 一条频道，`event_bus` 退化为「VDFS 变更的传输层」。
+//! 漏掉这条的人会重新长出一条与 VDFS 并行的第二真相——那正是本次要废除的东西。
+//!
+//! 可见性：`broadcast_error_with_idle` 被 `consume.rs` 调用，标 `pub(super)`。
 
 use super::*;
 
@@ -60,25 +60,17 @@ impl SessionStateChange {
             error: None,
         }
     }
-
-    /// 对应的线路状态词（`StreamEvent::Status` 的取值，进程内契约）
-    fn status_word(&self) -> &'static str {
-        match self {
-            SessionStateChange::Working => "busy",
-            SessionStateChange::Finished { .. } => "idle",
-        }
-    }
 }
 
 impl SessionPlugin {
-    /// 集中发送"业务错误 + 状态收敛"：收敛为「失败」结局 → 广播 Error 帧。
+    /// 集中收敛"业务错误 + 状态收敛"：收敛为「失败」结局。
     ///
     /// **目的**：所有可恢复错误路径都必须保证运行态收敛到"不在跑"，
     /// 否则前端会一直显示"AI 处理中"且 30 分钟内无任何信号能清；
     /// 同时后端 `is_working` 不复位会导致后续 resume 请求被 `session_busy` 守卫静默拒绝。
     ///
-    /// 错误的**呈现**不再靠这条帧：它已随会话节点视图（`status = failed` +
-    /// `attributes.error`）下发，`Error` 帧只承担进程内消费者（子会话转播）的语义。
+    /// 错误的**呈现**不是另一条通道：它随会话节点视图（`status = failed` +
+    /// `attributes.error`）下发，与状态走同一个出口——这正是「一处判据」的含义。
     pub(super) async fn broadcast_error_with_idle(
         &self,
         state: &Arc<ActiveSessionState>,
@@ -89,28 +81,20 @@ impl SessionPlugin {
             state,
             SessionStateChange::Finished {
                 outcome: OUTCOME_FAILED,
-                error: Some(err.clone()),
+                error: Some(err),
             },
-        )
-        .await;
-        self.broadcast_frame(
-            state,
-            PluginFrame::Data(json!(session_chat_response::StreamEvent::Error {
-                error: err
-            })),
         )
         .await;
     }
 
     /// 会话运行态变化的**唯一出口**。
     ///
-    /// 三件事，顺序写死：
+    /// 两件事，顺序写死：
     /// 1. **写运行态**——节点视图的数据源（`list` / `stat` / 变更三处因此同源）；
-    /// 2. **发 VDFS 变更**（带节点视图）——前端据此渲染，**零回读**；
-    /// 3. **发 `Status` 帧**——进程内消费者（子会话转播）的结束判据。
+    /// 2. **发 VDFS 变更**（带节点视图）——一切消费者据此渲染，**零回读**。
     ///
     /// 漏掉第 2 步，UI 会永久停在旧状态（角标不转、停止按钮不出现/不消失），
-    /// 且没有任何机制会纠正它——两条链路互不校验。
+    /// 且没有任何机制会纠正它。
     pub async fn emit_session_state(
         &self,
         state: &Arc<ActiveSessionState>,
@@ -134,28 +118,7 @@ impl SessionPlugin {
             }
         }
 
-        // 前端通道：状态是节点属性，变更带全量节点视图 ⇒ 幂等、与顺序无关
+        // **唯一通道**：状态是节点属性，变更带全量节点视图 ⇒ 幂等、与顺序无关
         self.notify_session_state(&id).await;
-
-        // 进程内通道：`Status` 帧仍是子会话转播的结束判据（前端不订阅本频道）
-        self.broadcast_frame(
-            state,
-            PluginFrame::Data(json!(session_chat_response::StreamEvent::Status {
-                status: change.status_word().to_string()
-            })),
-        )
-        .await;
-    }
-
-    /// 向 EventBus 投递一帧（进程内消费者的唯一出口）。
-    ///
-    /// 曾经还维护 `frontends` mpsc 订阅者列表；前端切换到 VDFS 变更体系后
-    /// 该列表从无注册者，属死通路，已移除。EventBus 转发仍保留：子会话转播
-    /// （`agent/host/subagent.rs`）以 `Status idle` / `WaitingUserAction` 帧为契约。
-    pub async fn broadcast_frame(&self, state: &Arc<ActiveSessionState>, frame: PluginFrame) {
-        // 通过 EventBus 转发（供前端单连接订阅 / 子会话转播使用）
-        if let PluginFrame::Data(data) = &frame {
-            EventBus::try_publish(KIND_SESSION, Some(&state.request_id_str()), data.clone());
-        }
     }
 }

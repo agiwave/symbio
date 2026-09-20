@@ -25,6 +25,8 @@ import {
   MESSAGE_STATUS_FAILED,
   MESSAGE_STATUS_STREAMING,
   MESSAGE_STATUS_WAITING_USER_ACTION,
+  MESSAGE_TYPE_REASONING,
+  MESSAGE_TYPE_TEXT,
   MESSAGE_TYPE_TOOL_CALL,
   MESSAGE_TYPE_TURN,
   isInflightMessageStatus,
@@ -205,6 +207,33 @@ export function isInProgressMessage(msg: Pick<ChatMessage, 'status'>): boolean {
     msg.status === MESSAGE_STATUS_STREAMING ||
     msg.status === MESSAGE_STATUS_WAITING_USER_ACTION
   )
+}
+
+/**
+ * 「这条节点自身是不是一个**空壳**」——文字类节点的空内容判据。
+ *
+ * 流模式下后端会先发一个 `content` 为空（如 `"\n\n"`）的 Text / Reasoning 占位
+ * 节点（reasoning 与 tool_call 之间），它**不落库**，但前端会短暂收到。两处需要
+ * 同一条判据，且必须**同源**：
+ *
+ * 1. 树构建（`useChatConnection.messageTree`）：空壳叶子不渲染，否则会话流里
+ *    出现空白块；
+ * 2. 等待骨架的兜底（`sessionLive.needsTypingRow`）：**空壳节点不算「有东西可看」**，
+ *    否则它会把「会话在跑但什么都没显示」这个本该补一条骨架的时刻判成「已有内容」——
+ *    结果正是用户看到的「点完发送，什么都没有发生」。
+ *
+ * 两处分头写一份，就会出现「一处过滤、另一处却把它算作内容」的静默分叉：
+ * 不报错、不被测试拦住，只是偶尔转一下圈。
+ *
+ * 只对 `text` / `reasoning` 判定——`tool_call` 的 `content` 是参数 JSON，即便为空
+ * 也有一张工具卡片要显示（工具名在 `name` 上）；容器类节点（Turn / ToolCall）
+ * 靠子节点呈现，不适用本条。
+ */
+export function isBlankContentNode(msg: Pick<ChatMessage, 'type' | 'content'>): boolean {
+  const t = msg.type || MESSAGE_TYPE_TEXT
+  if (t !== MESSAGE_TYPE_TEXT && t !== MESSAGE_TYPE_REASONING) return false
+  // 取值走契约层的唯一实现（多模态内容 → 纯文本）
+  return messageTextOf(msg.content).trim().length === 0
 }
 
 /**

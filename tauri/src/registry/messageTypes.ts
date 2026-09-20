@@ -316,6 +316,41 @@ export function messageRetryTargetOf(
 
 /** 后端失败类别：可补充参数（其余类别只能原样重试） */
 export const MESSAGE_FAILURE_KIND_ERROR = 'error'
+/** 后端失败类别：本批剩余调用被跳过，实际未执行（见后端 `not_executed_result`） */
+export const MESSAGE_FAILURE_KIND_NOT_EXECUTED = 'not_executed'
+/** 后端失败类别：中止收口（用户终止，工具未跑完） */
+export const MESSAGE_FAILURE_KIND_ABORTED = 'aborted'
+
+/**
+ * 「这一次调用没有结果子节点」时的兜底文案（无则返回 `null`）。
+ *
+ * ## 为什么需要它
+ *
+ * 「工具的结果」在树里是一条**子节点**，`ToolCallNode` 的响应段就按子节点渲染。
+ * 后端原先有一条分支只给父节点补终态、不写结果子节点（本批剩余被跳过的调用），
+ * 于是卡片有请求、无响应，而会话照常往下走——用户看到一次调用凭空消失。
+ * 机制侧已修（后端 `not_executed_result`：有调用必有结果），本函数是**显示层的
+ * 兜底**，服务于：
+ *
+ * - **历史数据**：机制修复前落下的 `not_executed` 节点，存储里真的没有结果子节点；
+ * - 任何未来不守该不变量的写入方（第三方 / 未来重构）——它不报错、不被测试拦住，
+ *   只是静默地少一行字。
+ *
+ * 只认**父节点自述的终态**（`meta.failure_kind`），不猜：
+ * 无标记就不给文案，宁可留白也不凭空替工具编一份结果。
+ * 口径与 `flatten_chat_messages` 的占位同源（那边是给 **LLM** 的兜底，
+ * 两边同一个事实：这次调用没跑）。
+ */
+export function missingResultNoteOf(node: Pick<ChatMessage, 'meta'>): string | null {
+  switch (messageFailureKind(node)) {
+    case MESSAGE_FAILURE_KIND_NOT_EXECUTED:
+      return '本次调用未执行：同一批中排在它之前的工具未正常结束，同批剩余调用被一并跳过。'
+    case MESSAGE_FAILURE_KIND_ABORTED:
+      return '本次调用已中止，未执行。'
+    default:
+      return null
+  }
+}
 
 /** 用户中止的交代文案（中止不是故障，文案与图标都与失败区分开） */
 export const MESSAGE_ABORTED_NOTE = '已中止：本轮被提前终止'
