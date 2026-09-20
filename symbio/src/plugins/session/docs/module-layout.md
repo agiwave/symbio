@@ -297,9 +297,11 @@ re-export 块脚手架；注释行差异 30 条全部是新增模块头，**零�
 - 父模块 `use` 清单中**只被子模块使用**的导入**不会**触发 `unused_imports`
   ——子模块的 glob 导入算作使用（S2/S3 两次验证）。
 
-**遗留（未做，属"零行为变更"之外）**：`plugin.rs` 的 `now_ms()` 与
-`heartbeat.rs` 的 `pub(crate) fn now_ms()` 是**两份等价实现**（前者 `SystemTime`、
-后者 `time::OffsetDateTime`）。合并为一处属行为微调，留待单独提交。
+**遗留（已收口）**：`plugin.rs` 的 `now_ms()` 与 `heartbeat.rs` 的
+`pub(crate) fn now_ms()` 曾是**两份等价实现**（前者 `SystemTime`、后者
+`time::OffsetDateTime`）。已由后续提交 `242ed9e` 收敛为 `symbio_core::clock::now_ms`
+单一实现（见本文 §4.6 归因表末行）；session 侧现无任何 `fn now_ms` 定义，
+19 处调用一律走 `crate::symbio_core::now_ms`。
 
 **全程硬约束**：
 
