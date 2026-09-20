@@ -477,6 +477,13 @@ function sumInt(output, re) {
 
 // ── 阶段 ───────────────────────────────────────────────────────────────
 const results = []
+/**
+ * 记一条判定。
+ *
+ * `pass` 除 `true` / `false` 外还接受 `'skipped'`——**没判定不等于通过**：
+ * 沙箱拦截批量删除时 `vitest --coverage` / `vite build` 会跑不起来，此时记 `true`
+ * 会让汇总出现一颗绿勾配一行小字，读起来仍然像"过了"。跳过要单独一种记号。
+ */
 function record(stage, label, pass, note) {
   results.push({ stage, label, pass, note })
 }
@@ -615,7 +622,7 @@ async function stageFrontend() {
     // 早退会让那两步连跑都不跑（汇总里根本不出现），把「没检查」伪装成「通过」——
     // 本文件顶部那条「一个必然红 / 静默跳过的门禁比没有门禁更糟」说的就是这种。
     if (!coverageRed && blockedBySandboxDelete(vitest.output)) {
-      record('frontend', 'vitest run --coverage', true, '沙箱拦截批量删除 ⇒ 本步未判定')
+      record('frontend', 'vitest run --coverage', 'skipped', '沙箱拦截批量删除 ⇒ 本步未判定')
     } else {
       const note = vitest.timedOut
         ? '超时终止'
@@ -658,7 +665,7 @@ async function stageFrontend() {
   if (!build.ok) maybeSandboxDeleteHint(build.output)
   // 同样是「只跳过本步」：后面还有 eslint，早退会把它一起吞掉
   if (!build.ok && blockedBySandboxDelete(build.output)) {
-    record('frontend', 'vite build', true, '沙箱拦截批量删除 ⇒ 本步未判定')
+    record('frontend', 'vite build', 'skipped', '沙箱拦截批量删除 ⇒ 本步未判定')
   } else {
     record('frontend', 'vite build', build.ok)
   }
@@ -861,15 +868,16 @@ if (enabled('msrv')) await stageMsrv()
 if (enabled('facts')) await stageFacts()
 
 // ── 汇总 ───────────────────────────────────────────────────────────────
-const failed = results.filter((r) => !r.pass)
+const failed = results.filter((r) => r.pass === false)
+const skipped = results.filter((r) => r.pass === 'skipped')
 console.log()
 console.log(bold('══ 汇总 ══'))
 for (const r of results) {
-  const mark = r.pass ? green('✓') : red('✗')
+  const mark = r.pass === true ? green('✓') : r.pass === 'skipped' ? yellow('⊘') : red('✗')
   console.log(`  ${mark} ${r.label}${r.note ? yellow(` — ${r.note}`) : ''}`)
 }
 console.log()
-console.log(`  通过 ${results.length - failed.length} / ${results.length}`)
+console.log(`  通过 ${results.length - failed.length - skipped.length} / ${results.length}${skipped.length ? `（另有 ${skipped.length} 项未判定）` : ''}`)
 
 if (failed.length > 0) {
   console.log(red(`  失败 ${failed.length} 项，逐项日志见 ${path.relative(repoRoot, logDir) || '.'}/`))
