@@ -39,6 +39,39 @@ on:
       - 'scripts/**'
 
 jobs:
+  # 提交信息规范：与本机 `git config core.hooksPath scripts/git-hooks` 同一套判据
+  # （`scripts/check-commit-msg.mjs`）。**只靠本机钩子管不住别人**——钩子是一次性的
+  # 本机配置，谁clone下来忘了设就形同没有；故 CI 这边用 `--range` 把本次引入的
+  # 提交逐个判一遍。判据只有一处（那个脚本），此处不重抄。
+  commit-msg-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # 要比对 base 分支，浅克隆看不到那些提交 ⇒ 必须拉全
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Commit message gate
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="origin/${{ github.event.pull_request.base.ref }}..${{ github.event.pull_request.head.sha }}"
+          else
+            BEFORE="${{ github.event.before }}"
+            # 新建分支 / 首次推送时 before 是全 0 ⇒ 退化为「只判本次推送的那些提交」
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              BEFORE="$(git rev-parse HEAD~1)"
+            fi
+            RANGE="${BEFORE}..HEAD"
+          fi
+          echo "校验范围：$RANGE"
+          node scripts/check-commit-msg.mjs --range "$RANGE"
+
   # Rust代码质量检查
   rust-checks:
     runs-on: ubuntu-latest

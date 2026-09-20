@@ -81,12 +81,21 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 CI（[.github/workflows/ci.yml](./.github/workflows/ci.yml)）跑的是**同一个脚本**
 （`--only=backend --ci --profile=<dev|release>` / `--only=frontend` / `--only=docs,facts`
 / `--only=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链），
-所以本地通过 ≈ CI 通过。提交信息规范由
-`scripts/check-commit-msg.mjs` 判定，本机一次性挂上即可自动生效：
+所以本地通过 ≈ CI 通过。
+
+提交信息规范由 `scripts/check-commit-msg.mjs` 判定，**两处都要接上**：
 
 ```bash
-git config core.hooksPath scripts/git-hooks
+git config core.hooksPath scripts/git-hooks   # 本机：写提交时即时拦
 ```
+
+CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐个判一遍
+（判据只有脚本里那一处，两边不重抄）。
+
+> **只装本机钩子是不够的**：那是一次性的本机配置，谁 clone 下来忘了设就形同没有；
+> 反过来只靠 CI 也不够——要等到推送才会红。2026-09-20 复核时发现两处**都没接上**（钩子
+> 文件在、`CONTRIBUTING` 也写了命令，但 `core.hooksPath` 为空且 CI 从不跑它），
+> 于是这条规范实际上一直靠"提交者记得手动跑一次"维持。
 
 ### 本机操作陷阱（都踩过）
 
