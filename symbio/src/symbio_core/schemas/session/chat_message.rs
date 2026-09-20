@@ -380,10 +380,8 @@ pub fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
 
     // ① 开头连续的无号项：整体落在 `首号` 之前（`首号` 是最小号 ⇒ 必不撞号）
     let head = messages.iter().take_while(|m| m.seq.is_none()).count();
-    let mut cursor = first - head as i64;
-    for m in messages.iter_mut().take(head) {
+    for (cursor, m) in (first - head as i64..).zip(messages.iter_mut().take(head)) {
         m.seq = Some(cursor);
-        cursor += 1;
     }
 
     // ② 其余无号项：从「前驱 + 1」往上找空位。前驱初始取 `base`，但列表首项
