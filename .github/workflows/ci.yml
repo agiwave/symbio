@@ -1,42 +1,40 @@
 name: CI
 
+# ⚠️ **用黑名单（`paths-ignore`）而不是白名单（`paths`）** —— 2026-09-20 改。
+#
+# 原先这里是一份白名单，只列 `*.rs` / `*.ts` / `*.vue` / `Cargo.*` / `package.json` /
+# 工具链文件 / `scripts/**`。它**漏掉了 `*.css` / `*.yml` / `*.html`**：
+# `tauri/src/styles/` 下 4 个 CSS 文件若被单独修改，**四个作业一个都不跑**，
+# 于是 `style-audit` 那条 ERROR 级规则（使用的类必须有定义）对纯 CSS 改动完全不生效。
+#
+# 白名单的隐含假设是"没列进来的文件不影响任何检查"，CSS 这条反例直接证伪了它；
+# 而且这种漏法**不会有任何提示**——CI 安静地绿着。黑名单的代价是"多跑"，
+# 白名单的代价是"漏跑"，而**漏跑的代价远大于多跑**（漏跑时没人知道该跑的没跑）。
+#
+# 已知的代价（接受）：纯文档改动现在也会跑 `rust-checks`（dev + release 两个 profile）。
+# 若 CI 时长成为问题，正确做法是**拆出独立的 docs 工作流**（按 `docs/**` 触发），
+# 而**不是**退回白名单——那只会把漏跑的风险再请回来。
 on:
   push:
     branches: [ main, master ]
-    paths:
-      - '**/*.rs'
-      - '**/*.ts'
-      - '**/*.vue'
-      - 'Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/Cargo.toml'
-      - 'package.json'
-      - '**/package.json'
-      - 'rust-toolchain.toml'
-      - 'rustfmt.toml'
-      - 'clippy.toml'
-      - '.editorconfig'
-      - '.github/workflows/ci.yml'
-      # 检查逻辑本身在 scripts/ 下（gate.mjs 与各审计），改脚本也必须触发 CI
-      - 'scripts/**'
+    paths-ignore:
+      # 构建 / 依赖 / 日志等产出目录。它们目前都未被 git 跟踪（见 .gitignore），
+      # 列出是防御性的：一旦将来被误纳入版本控制，也不会白白触发全量 CI。
+      - '**/node_modules/**'
+      - '**/target/**'
+      - '**/dist/**'
+      - '**/coverage/**'
+      - 'tauri/.vbuild*/**'
+      - '.workbuddy-ai/**'
   pull_request:
     branches: [ main, master ]
-    paths:
-      - '**/*.rs'
-      - '**/*.ts'
-      - '**/*.vue'
-      - 'Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/Cargo.toml'
-      - 'package.json'
-      - '**/package.json'
-      - 'rust-toolchain.toml'
-      - 'rustfmt.toml'
-      - 'clippy.toml'
-      - '.editorconfig'
-      - '.github/workflows/ci.yml'
-      # 检查逻辑本身在 scripts/ 下（gate.mjs 与各审计），改脚本也必须触发 CI
-      - 'scripts/**'
+    paths-ignore:
+      - '**/node_modules/**'
+      - '**/target/**'
+      - '**/dist/**'
+      - '**/coverage/**'
+      - 'tauri/.vbuild*/**'
+      - '.workbuddy-ai/**'
 
 jobs:
   # 提交信息规范：与本机 `git config core.hooksPath scripts/git-hooks` 同一套判据
@@ -60,7 +58,11 @@ jobs:
         run: |
           set -eu
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            RANGE="origin/${{ github.event.pull_request.base.ref }}..${{ github.event.pull_request.head.sha }}"
+            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+            # 显式拉 base：`actions/checkout` 默认只取当前 ref，`origin/<base>` 未必存在。
+            # 用显式 refspec 而不是依赖 remote.origin.fetch 的配置，结果才是确定的。
+            git fetch --no-tags origin "${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+            RANGE="origin/${BASE_BRANCH}..${{ github.event.pull_request.head.sha }}"
           else
             BEFORE="${{ github.event.before }}"
             # 新建分支 / 首次推送时 before 是全 0 ⇒ 退化为「只判本次推送的那些提交」
