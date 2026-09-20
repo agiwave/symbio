@@ -158,8 +158,8 @@ plugin.test.rs           测试（S1 已外置；S3 后按实现文件再拆为 
 ```text
 orchestrator.rs           模块根：装配 + RAII 守卫（AiControlGuard / WorkingGuard）+
                           merge_message_patch + resolve_required_session_id            320
-orchestrator/broadcast.rs 三个广播出口：broadcast_error_with_idle / broadcast_frame /
-                          broadcast_status                                              82
+orchestrator/broadcast.rs 状态出口：emit_session_state（运行态唯一出口）/
+                          broadcast_error_with_idle                                    124
 orchestrator/consume.rs   消费循环：fail_before_loop / run_chat_loop_task(382) /
                           handle_abort                                                 491
 orchestrator/entry.rs     两个 one-off 入口：resolve_session_params /
@@ -179,7 +179,7 @@ orchestrator.test.rs      测试（S1 已外置；5 例全部测根文件的守�
 - **跨子模块**（原本私有 → `pub(super)`）：`broadcast_error_with_idle` /
   `run_chat_loop_task` / `persist_failure`，以及根文件的 `merge_message_patch`。
 - **跨模块**（原本即 `pub`，**保持不动**）：`handle_chat_send_oneoff` /
-  `handle_chat_abort_oneoff` / `broadcast_frame` / `broadcast_status` / `handle_abort`
+  `handle_chat_abort_oneoff` / `emit_session_state` / `handle_abort`
   ——被 `plugin.rs` 路由与 `heartbeat.rs` 调用。本次只做"搬家"，不顺手收窄可见性。
 - 子模块统一 `use super::*;`：父模块的 `use` 清单即子模块的共享导入面。
 - 被搬移代码里的 `super::X::` 需**加深一层**（`consume.rs` 6 处、`entry.rs` 6 处）。
@@ -371,7 +371,7 @@ mod tests;
 | 文件 | 行数 | 内容 |
 |---|---:|---|
 | `orchestrator.rs` | 320 | 装配 + `resolve_required_session_id` + `AiControlGuard` + `WorkingGuard` + `merge_message_patch` + `mod` 声明 |
-| `orchestrator/broadcast.rs` | 82 | `broadcast_error_with_idle` / `broadcast_frame` / `broadcast_status` |
+| `orchestrator/broadcast.rs` | 124 | `emit_session_state` / `SessionStateChange` / `broadcast_error_with_idle` |
 | `orchestrator/consume.rs` | 491 | `fail_before_loop` / `run_chat_loop_task`(382) / `handle_abort` |
 | `orchestrator/entry.rs` | 457 | `resolve_session_params` / `handle_chat_send_oneoff`(298) / `handle_chat_abort_oneoff` / `ensure_auto_title` |
 | `orchestrator/failure.rs` | 242 | `persist_failure`(185) + `subtree_of` |

@@ -13,8 +13,9 @@
 1. **做成插件完全可行，且是更优解**——设置页的配置 UI 是现成机制，前端真的不用动。
 2. **WebSocket 是对的**，它确实是本场景的最优传输。
    但有个必须写进设计的细节：**WebSocket 解决的是"通道"，不解决"信源"**——
-   `session/chat/send` 是 fire-and-forget，AI 增量走的是全局 EventBus 广播。
-   连上 WS 后**必须再发一帧订阅 EventBus** 才收得到流（前端也是这么做的）。详见 §5.3。
+   `session/chat/send` 是 fire-and-forget，AI 增量走的是 VDFS 变更（`kind = "vdfs"`）。
+   连上 WS 后**必须订阅总线 + 对会话地址登记 `vdfs/watch`**（两步缺一不可）才收得到流
+   （前端也是这么做的）。详见 §5.3。
 3. 全部代码集中在**一个插件目录**（`symbio/src/plugins/gateway/`），其余机制全部复用。
 
 ---
@@ -31,7 +32,7 @@
 | 设置页表单 | 由配置的**拥有者**产出 `DetailDefinition`（作为节点 `schema` 下发） | 网关表单由后端下发定义，前端表单渲染器自动渲染 |
 | 宿主级上下文注册表先例 | `HomedirRegistry`（`symbio_core/homedir.rs`） | 全局弱引用登记表的同款风格（见 §4.1 的 `parent` 转发） |
 | 连接管理 | `RouteConnectionManager`（tauri 宿主层，纯 tokio） | 宿主层用它管前端流式连接；网关在 WS 循环内自持连接生命周期 |
-| 事件总线 | `EventBus` + `event_bus/subscribe` | 直接复用（AI 流的信源，见 §5.3） |
+| 事件总线 | `EventBus` + `event_bus/subscribe` + `vdfs/watch` | 直接复用（AI 流的信源 = VDFS 变更，见 §5.3） |
 
 > **2026-09-15 复核**：上表原先列的是 `config/get` / `config/set` 协议、`SETTING_SECTIONS`
 > 分区表与 `load_path` / `save_path`——这三样已随「配置回到插件目录」整体退场。
@@ -125,35 +126,45 @@ WS /api/v1/ws?token=<token>
 服务端内部：首帧 → `build_ctx`（`metadata` 逐键注入上下文）→ `parent.route(ctx)` →
 按 `PluginPayload` 四态分派（见 §4.1）。
 
-### 5.3 ⚠️ AI 流式输出：WebSocket 之后还必须订阅 EventBus
+### 5.3 ⚠️ AI 流式输出：WebSocket 之后还必须订阅 VDFS 变更
 
 **这是本设计最容易被误解的一点，务必注意。**
 
 - `session/chat/send`（`plugins/session/orchestrator.rs::handle_chat_send_oneoff`）是
   **fire-and-forget**：它 `spawn` 后台任务后**立即返回** `{"status":"accepted"}`，
   **不会**返回一个可以读流的 Session 通道。
-- AI 的增量事件由 `run_chat_loop_task` 通过 `EventBus::publish` **广播**给所有订阅者。
-- 前端正是靠启动时建的那条 `event_bus/subscribe` 长连接才看到流式输出。
+- AI 的增量**不是事件**：会话运行态与消息转写都是 VDFS 节点，实时入口是 `kind = "vdfs"`
+  的变更帧（`EventBus::try_publish`，由 vdfs 宿主的 watch sink 发出）。
+- 前端正是靠启动时建的那条 `event_bus/subscribe` 长连接 + 按路径 `vdfs/watch` 登记
+  才看到流式输出。
 
-**因此第三方在连上 WebSocket 后，必须先订阅**（专门用一条连接收事件）：
+**因此第三方在连上 WebSocket 后，必须做两步**（缺一不可）：
 
 ```jsonc
-→ { "metadata": { "path": "event_bus/subscribe" }, "payload": { "kinds": ["session"] } }
+# ① 订阅总线（收件地址）
+→ { "metadata": { "path": "event_bus/subscribe" }, "payload": {} }
 ← { "Data": { "type": "bus_event",
               "data": { "kind": "system", "session_id": null,
                         "data": { "event": "connected", "connection_id": "…" } } } }
+
+# ② 对关心的会话登记 watch（**开闸**：后端只向登记过路径的订阅者投递变更）
+→ { "metadata": { "path": "vdfs/watch" },
+    "payload": { "path": "<vdfs/root 返回的根>/session/<会话id>" } }
 ← { "Data": { "type": "bus_event",
-              "data": { "kind": "session", "session_id": "s_xxx", "data": {…} } } }
+              "data": { "kind": "vdfs", "session_id": null,
+                        "data": { "path": "…/session/<id>", "change": "updated", "node": {…} } } } }
 ```
 
-- 订阅是**全量**的：`SubscribeRequest.kinds` 当前不参与过滤，事件按 `session_id`
-  关联，消费方需自行过滤（前端同款逻辑）。
-- 断线重连可按会话调用 `event_bus/pending/snapshot`（载荷 `{ "session_id": … }`）
-  补拉最近 64 帧（`EventBus::drain_pending`，取走即清空）。
-- 副作用是好事：订阅后能收到**所有**会话的事件（包括前端自己触发的），天然具备"观察者"能力。
+- 只做 ① 是一条永远不响的频道；只做 ② 则没有收件人。会话域**只有这一条**实时频道
+  （旧的 `kind = "session"` 事件频道与 `event_bus/pending/snapshot` 回放均已废除，
+  见 `session/docs/node-state-streaming.md`）。
+- 变更是**幂等全量视图**（状态类带节点视图），丢一帧不会被卡死——重连后读一次
+  `vdfs/stat` / `vdfs/read` 即收敛，无需回放。
+- 订阅 `<根>/session` 挂载根可覆盖所有会话（空相对路径在订阅表里恒命中）。
 
-> 换个说法：**WebSocket 把"通道"问题解决了，但"信源"仍然是 EventBus。**
-> 设计里必须显式包含订阅这一步，否则实现的人会以为连上 WS 发个 chat/send 就能收到流——收不到。
+> 换个说法：**WebSocket 把"通道"问题解决了，但"信源"仍然是 VDFS 变更。**
+> 设计里必须显式包含「订阅 + watch」这两步，否则实现的人会以为连上 WS 发个 chat/send
+> 就能收到流——收不到。
 
 ### 5.4 运维端点
 
@@ -219,16 +230,17 @@ GET /api/v1/health  → { "ok": true }
 # 2) 健康检查
 curl -H "Authorization: Bearer $T" http://127.0.0.1:9231/api/v1/health
 
-# 3) 连 WebSocket：一条连接专门订阅 EventBus
+# 3) 连 WebSocket：订阅总线，再对会话地址登记 watch（两步缺一不可，见 §5.3）
 wscat -c "ws://127.0.0.1:9231/api/v1/ws?token=$T"
-> {"metadata":{"path":"event_bus/subscribe"},"payload":{"kinds":["session"]}}
+> {"metadata":{"path":"event_bus/subscribe"},"payload":{}}
+> {"metadata":{"path":"vdfs/watch"},"payload":{"path":"<根>/session/s_xxx"}}
 
 # 4) 另开一条连接发消息（fire-and-forget）
 curl -H "Authorization: Bearer $T" -X POST http://127.0.0.1:9231/api/v1/invoke \
      -d '{"metadata":{"path":"session/chat/send","session_id":"s_xxx"},"payload":{"message":"你好"}}'
 # → {"type":"Data","data":{"status":"accepted",...}}
 
-# 5) 回到订阅那条 wscat 窗口：应持续收到 kind=session 的 bus_event 帧
+# 5) 回到订阅那条 wscat 窗口：应持续收到 kind=vdfs 的 bus_event 变更帧
 ```
 
 ---

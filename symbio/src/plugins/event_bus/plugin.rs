@@ -3,7 +3,7 @@
 //! 设计目标：
 //! 1. **单连接**：前端只建立一条 `core/event_bus` 长连接，订阅所有事件
 //! 2. **标签分发**：每个事件 frame 都带 `{ kind, session_id, data }` 元数据
-//! 3. **中央路由**：session、explorer 等插件通过 `EventBus::publish` 推送事件
+//! 3. **中央路由**：vdfs 等插件通过 `EventBus::try_publish` 推送事件
 //!
 //! ## 用法
 //!
@@ -16,15 +16,18 @@
 //! ```
 //!
 //! `EventBus` 门面是 `symbio_core::event_bus::EventBus`（跨插件共享的核心设施），
-//! 本插件仅负责建立订阅连接、转发 `pending/snapshot` 等 RPC。
+//! 本插件仅负责建立订阅连接。
 //!
 //! 订阅方拿到帧后按 `kind` 分派；`session_id` 只是 `system` 握手帧的关联信息，
 //! **业务身份一律在载荷自己的地址里**（VDFS 变更的 `path`）——会话域曾经的
 //! `kind = "session"` 频道已废除，见 `docs/architecture/PROTOCOLS.md` §事件总线频道。
+//!
+//! 历史上的 `pending/snapshot` 路由已随会话事件频道一并废除：它缓冲的是按 `session_id`
+//! 灌入的事件帧，而 VDFS 变更的发布方传 `session_id = None`（身份在地址里），缓冲永远
+//! 为空——路由成了恒返回空数组的空壳。
 
 use crate::symbio_core::event_bus::{
-    register_subscriber, unregister_subscriber, EventBus, PendingSnapshotRequest,
-    PendingSnapshotResponse, SubscribeRequest, KIND_SYSTEM,
+    register_subscriber, unregister_subscriber, EventBus, SubscribeRequest, KIND_SYSTEM,
 };
 use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::{
@@ -112,15 +115,6 @@ impl Plugin for EventBusPlugin {
             "subscribe" => {
                 let req: SubscribeRequest = ctx.payload()?;
                 EventBusPlugin::handle_subscribe(ctx, req).await
-            }
-            "pending/snapshot" => {
-                let req: PendingSnapshotRequest = ctx.payload()?;
-                let events = EventBus::drain_pending(&req.session_id);
-                let resp = PendingSnapshotResponse {
-                    session_id: req.session_id,
-                    events,
-                };
-                Ok(PluginPayload::new(&resp))
             }
             "ping" => {
                 let resp = SimpleResponse::success_with_message(format!(

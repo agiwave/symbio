@@ -15,7 +15,7 @@
 |---|---|---|---|---|---|---|
 | `agent` | `agent` | <根>/agent · （运行期动态） | （动态）已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`） | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `composite` | `composite` | — | （动态）容器：按配置挂载的子插件名分发，运行期动态 | `Plugin` · `VdfsProvider` | — | ✓ |
-| `event_bus` | `event_bus` | — | `event_bus/pending/snapshot` · `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
+| `event_bus` | `event_bus` | — | `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
 | `gateway` | `gateway` | <根>/gateway | `gateway/status` | `Plugin` | ✓ | ✓ |
 | `home` | `home` | — | `home/get_homedir` · `home/reload` · `work/get_workspace` · `work/set_workspace` | `Plugin` | — | ✓ |
 | `hook` | `hook` | — | `hook/fire` · `hook/list` · `hook/register` | `Plugin` | — | ✓ |
@@ -109,7 +109,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 199 文件 / 50177 行 | 54 文件 / 19367 行 |
+| `symbio/src` | 199 文件 / 50063 行 | 54 文件 / 19367 行 |
 | `cli/src` | 4 文件 / 1283 行 | 0 文件 / 78 行 |
 | `tauri/src-tauri/src` | 3 文件 / 346 行 | 0 文件 / 0 行 |
 | `tauri/src` | 97 文件 / 19694 行 | 47 文件 / 9357 行 |
@@ -123,4 +123,4 @@
 
 ---
 
-> 生成时间：2026-09-20 08:40:26 UTC · 源：`git rev-parse HEAD` = `54dbcb8`
+> 生成时间：2026-09-20 09:28:32 UTC · 源：`git rev-parse HEAD` = `9ba73f7`

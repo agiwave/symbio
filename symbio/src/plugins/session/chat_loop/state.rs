@@ -269,8 +269,7 @@ impl Drop for StopSignal {
 ///
 /// 压缩 LLM 请求的出帧被刻意静音（`send_compression_request` 用哑 `tx` 接住
 /// 全部流式帧，以免泄漏一个永不 finalize 的空 Turn 骨架）。但本发射器走
-/// `emit_message_patch` → `broadcast_frame` → VDFS 变更订阅，**不经过**
-/// 那条被静音的 turn channel。
+/// `emit_message_patch` → VDFS 变更订阅，**不经过**那条被静音的 turn channel。
 ///
 /// ## 为什么持有插件而不是「一个回调」
 ///

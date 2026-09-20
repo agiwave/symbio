@@ -227,7 +227,7 @@ attributes.error   = "<面向用户的错误短消息>"              // 仅 fail
 | 机制 | 为什么可以删 |
 |---|---|
 | `eventBus.ts` 的 `replayBuffer`（切会话防乱序缓冲） | 它只为「按 `sessionId` 订阅的事件流」服务。会话显示不再订阅事件 ⇒ 没有调用方 |
-| `fetchPendingSnapshot`（`event_bus/pending/snapshot`） | 同上（后端路由保留为对外 API，前端不再调用） |
+| `fetchPendingSnapshot`（`event_bus/pending/snapshot`） | 同上（后端路由与回放缓冲也已一并废除——它的缓冲靠按 `session_id` 灌入的事件帧填充，VDFS 变更发布方传 `session_id = None`，缓冲永远为空） |
 | `sessionBusWatcher` 的 `Status/Abort/Error/Connected/Disconnected` 分支 | 会话态改由会话节点承载 ⇒ 整个模块删除 |
 
 > 「事件可以丢、可以重放、可以乱序」这三句在**状态**上成立，在**增量**上不成立。
@@ -372,7 +372,7 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
 |---|---|
 | `session/plugin/nodes.rs` | `message_status` 不再坍缩 `completed`；新增 `SessionRuntime`（含 `from_state` 单一投影入口）+ `session_node(s, runtime)`（运行态投影到 `status` / `attributes.outcome` / `attributes.error`）+ `session_change` |
 | `session/active.rs` | `ActiveSessionStateInner` 增加 `last_outcome: Option<String>`、`last_error: Option<String>` |
-| `session/orchestrator/broadcast.rs` | `broadcast_status(status)` → `emit_session_state(SessionStateChange)`：写运行态 → 发**带 `node` 载荷**的会话节点 `updated`；不再为前端广播 `Status` 帧（帧仍发，给进程内消费者） |
+| `session/orchestrator/broadcast.rs` | `broadcast_status(status)` → `emit_session_state(SessionStateChange)`：写运行态 → 发**带 `node` 载荷**的会话节点 `updated`；不再广播 `Status` 帧（旧事件频道已随 S22 整体废除） |
 | `session/orchestrator/{consume,entry,orchestrator}.rs` | 全部改调 `emit_session_state` |
 | `session/plugin.rs` | `notify_change` 旁增 `notify_session_state`（带节点视图） |
 | `session/plugin/vdfs_provider.rs` | `is_working(id)` → `session_runtime(id)`（`list` / `stat` / 变更三处同源） |
@@ -478,8 +478,8 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
 | `plugins/model/message_builder.rs` | `flatten_chat_messages` **剔除**压缩节点 |
 | 前端 `components/MessageNode.vue` | 图标 / 标题 / 状态标签 / 正文分支；运行中复用工具调用的脉动动效 + 已用秒数 |
 
-**为什么能在静音窗口里发出去**：`emit_message_patch` → `broadcast_frame` 走
-VDFS 变更订阅，**不经过**被静音的那条 turn channel。
+**为什么能在静音窗口里发出去**：`emit_message_patch` 走 VDFS 变更订阅，
+**不经过**被静音的那条 turn channel。
 所以不是"发不出"，是"从没发过"。
 
 **为什么还要进在途缓冲**：会话叶子 `read` 会叠加在途（`overlay_live`）。不进的话，
@@ -752,7 +752,7 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
 | 项 | 说明 |
 |---|---|
 | ~~`kind = "session"` 未整体删除~~ | **已补完（S22）**：进程内消费者（`agent/host/subagent.rs` 的审批透传 / 文本累积、`cli/src/client.rs` 的渲染与完成判定）已全部改订阅 VDFS 变更，常量 `KIND_SESSION` 随之移除 |
-| `event_bus/pending/snapshot` 路由保留 | 前端不再调用，但它是网关对外 API 的一部分，删除属另一件事 |
+| ~~`event_bus/pending/snapshot` 路由保留~~ | **已补完**：回放缓冲的唯一数据源是按 `session_id` 灌入的事件帧，VDFS 变更发布方传 `session_id = None`，缓冲永远为空——路由与缓冲（`PENDING_EVENTS` / `drain_pending`）已一并删除 |
 | 会话节点状态无独立版本号 | 依赖 §4.2 的三条假设。加 `rev` 需要跨进程单调时钟，收益不足以抵消脆弱性——宁可把假设写清楚 |
 | 会话节点 `content` 为空 | `read(<根>/session/<sid>)` 仍是整份会话 JSON（历史读入口），`updated` 变更带 `content` 会白白重传整份历史。**因此会话节点的 `updated` 只带 `node`，不带 `content`**——`node` 足以表达状态，正文另有 `消息` 列表承载 |
 | `attributes.outcome` 是场景字段 | VDFS 只透传（与 `message_count` / `meta_tags` 同一手法），不构成机制新增 |

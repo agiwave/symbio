@@ -196,7 +196,6 @@ self.handle_chat_send_oneoff(Arc::new(ctx)).await   // 直连方法，不过路�
 | `agent` | 恒 `NotFound` | — | — |
 | `composite` | 运行期动态（子插件名） | — | — |
 | `event_bus` | 静态 | `event_bus/subscribe` | 3 |
-| | | `event_bus/pending/snapshot` | **0** |
 | | | `event_bus/ping` | **0** |
 | `gateway` | 静态 | `gateway/status` | **0** |
 | `home` | 静态 | `home/reload` | 1 |
@@ -231,7 +230,6 @@ self.handle_chat_send_oneoff(Arc::new(ctx)).await   // 直连方法，不过路�
 
 | 路由 | 判断 |
 |---|---|
-| `event_bus/pending/snapshot` | **有意保留**：前端已不再调用（见 `node-state-streaming.md`），但它是**网关对外 API** 的一部分。删它属另一件事。 |
 | `event_bus/ping` | 疑似**未接线**：全仓（含文档）零提及。 |
 | `gateway/status` | 疑似**未接线**：`gateway` 的入站端点（`/api/v1/*`）有真实用户，但这条 `route` 没有。 |
 | `hook/register` · `hook/list` | 疑似**未接线**：钩子目前只有「触发」在用（`hook/fire`），注册走的是别处。 |

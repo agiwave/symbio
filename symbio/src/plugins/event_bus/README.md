@@ -5,10 +5,12 @@
 ## 路由
 
 清单见 `docs/reference/ROUTES.md` §Event Bus 插件（**权威**）：`event_bus/subscribe`、
-`event_bus/ping`、`event_bus/pending/snapshot`。
+`event_bus/ping`。
 
 > `event_bus/publish` **不存在**：本插件是进程内帧广播（VDFS 变更、总线自身握手），
 > 发布方在进程内直接调用 `EventBus`，不经路由。
+> 历史上的 `pending/snapshot` 路由已随会话事件频道一并废除：它的回放缓冲靠按
+> `session_id` 灌入的事件帧填充，VDFS 变更发布方传 `session_id = None`，缓冲永远为空。
 
 ## 机制
 

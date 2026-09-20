@@ -379,10 +379,11 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 |------|------|
 | `event_bus/subscribe` | 订阅事件（连接级 SSE 风格推送） |
 | `event_bus/ping` | 存活探测 |
-| `event_bus/pending/snapshot` | 拉取待消费事件快照 |
 
-> `event_bus/publish` **不存在**：本插件是进程内帧广播（如会话流式增量、
-> VDFS 变更），发布方在进程内直接调用，不经路由。
+> `event_bus/publish` **不存在**：本插件是进程内帧广播（如 VDFS 变更、
+> 总线自身握手），发布方在进程内直接调用，不经路由。
+> 历史上的 `pending/snapshot` 路由已随会话事件频道一并废除（回放缓冲的唯一数据源
+> 是按 `session_id` 灌入的事件帧，VDFS 变更发布方传 `session_id = None`，缓冲永远为空）。
 
 ---
 
