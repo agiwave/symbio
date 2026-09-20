@@ -1,6 +1,6 @@
 //! 会话主循环的**状态与契约**。
 //!
-//! 自 `chat_loop.rs` 原样搬移（拆文件不拆行为）。含会话上下文、请求快照、
+//! 含会话上下文、请求快照、
 //! 单轮状态、闸门判定结果、退出原因，以及编排器与 Stop 信号。
 //!
 //! 可见性：`ChatOrchestrator` / `StopSignal` 是**跨模块契约**（`orchestrator.rs`、
@@ -269,8 +269,8 @@ impl Drop for StopSignal {
 ///
 /// 压缩 LLM 请求的出帧被刻意静音（`send_compression_request` 用哑 `tx` 接住
 /// 全部流式帧，以免泄漏一个永不 finalize 的空 Turn 骨架）。但本发射器走
-/// `emit_message_patch` → `broadcast_frame` → `state.inner.frontends` 与 VDFS
-/// 变更订阅，**不经过**那条被静音的 turn channel。
+/// `emit_message_patch` → `broadcast_frame` → VDFS 变更订阅，**不经过**
+/// 那条被静音的 turn channel。
 ///
 /// ## 为什么持有插件而不是「一个回调」
 ///

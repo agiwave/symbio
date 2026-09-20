@@ -460,7 +460,7 @@ S20.3 修的是「节点已经存在但状态没收敛」。还有一个更靠�
 | 前端 `components/MessageNode.vue` | 图标 / 标题 / 状态标签 / 正文分支；运行中复用工具调用的脉动动效 + 已用秒数 |
 
 **为什么能在静音窗口里发出去**：`emit_message_patch` → `broadcast_frame` 走
-`state.inner.frontends` 与 VDFS 变更订阅，**不经过**被静音的那条 turn channel。
+VDFS 变更订阅，**不经过**被静音的那条 turn channel。
 所以不是"发不出"，是"从没发过"。
 
 **为什么还要进在途缓冲**：会话叶子 `read` 会叠加在途（`overlay_live`）。不进的话，

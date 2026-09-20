@@ -1,14 +1,11 @@
 //! **单轮收尾**：推理产物并入上下文 → 工具分发 → 落库 → 流向判定。
 //!
-//! 自 `chat_loop.rs` 原样搬移（拆文件不拆行为）。
-//!
 //! `close_turn` 是"单轮里发生了什么"的唯一实现；它的出口只有
 //! [`TurnFlow`](super::TurnFlow)，**不做终态收尾**（那是 `finish_turn` 的职责）。
 
 use super::*;
 
-/// 输出被 max_tokens 截断时的**自动续写**上限（批次 D：自 `run_chat_loop` 局部
-/// 提升为模块级常量，供 `close_turn` 使用，取值不变）。
+/// 输出被 max_tokens 截断时的**自动续写**上限。
 const MAX_CONTINUE_ROUNDS: u32 = 3;
 
 /// 推理收尾：定格 assistant 子节点状态 → 校准 token 估算 → 把本轮产出并入上下文。
@@ -64,10 +61,6 @@ pub(crate) async fn settle_reasoning(
 }
 
 /// 本轮收尾阶段：截断续写 / 主动压缩拦截 / 工具分发 / 父节点状态落库 / 停等判定。
-///
-/// 批次 D 自 `run_chat_loop` **原样搬移**（拆函数不拆行为）：语句、注释、广播顺序、
-/// 错误文案与搬移前逐字一致；仅出口由 `return Ok(())`/`continue` 改为 [`TurnFlow`]，
-/// 循环作用域捕获的变量改为 [`TurnState`] / [`TurnRequest`] / [`TurnResult`]。
 ///
 /// **不承担终态收尾**：`fire_stop_hook` 与最终 `persist_messages` 由 [`finish_turn`]
 /// 统一执行（本函数返回 `Finish` 前会把 [`TurnState::last_saved`] 推进到最新，

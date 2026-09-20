@@ -5,7 +5,7 @@
 //!   VDFS 变更（→ 前端）→ 发 `Status` 帧（→ 进程内消费者）；
 //! - `broadcast_error_with_idle`：可恢复错误路径的唯一出口（收敛为"失败"结局
 //!   → Error 帧）；
-//! - `broadcast_frame`：向本会话全部前端订阅者投递一帧，顺带清掉已断开的通道。
+//! - `broadcast_frame`：向 EventBus 投递一帧（子会话转播等进程内消费者的出口）。
 //!
 //! ## 为什么运行态要经 VDFS 变更而不是事件
 //!
@@ -147,19 +147,13 @@ impl SessionPlugin {
         .await;
     }
 
+    /// 向 EventBus 投递一帧（进程内消费者的唯一出口）。
+    ///
+    /// 曾经还维护 `frontends` mpsc 订阅者列表；前端切换到 VDFS 变更体系后
+    /// 该列表从无注册者，属死通路，已移除。EventBus 转发仍保留：子会话转播
+    /// （`agent/host/subagent.rs`）以 `Status idle` / `WaitingUserAction` 帧为契约。
     pub async fn broadcast_frame(&self, state: &Arc<ActiveSessionState>, frame: PluginFrame) {
-        let mut inner = state.inner.write().await;
-        let mut to_remove = Vec::new();
-        for (idx, tx) in inner.frontends.iter().enumerate() {
-            if tx.send(frame.clone()).await.is_err() {
-                to_remove.push(idx);
-            }
-        }
-        for idx in to_remove.into_iter().rev() {
-            inner.frontends.remove(idx);
-        }
-
-        // 同时通过 EventBus 转发（供前端单连接订阅使用）
+        // 通过 EventBus 转发（供前端单连接订阅 / 子会话转播使用）
         if let PluginFrame::Data(data) = &frame {
             EventBus::try_publish(KIND_SESSION, Some(&state.request_id_str()), data.clone());
         }

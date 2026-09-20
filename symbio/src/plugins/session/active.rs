@@ -13,8 +13,6 @@ pub struct ActiveSessionStateInner {
     pub is_working: bool,
     /// 用于向 MODEL 任务发送控制信号 (Abort)
     pub ai_control_tx: Option<mpsc::Sender<PluginFrame>>,
-    /// 允许多个前端订阅同一个会话
-    pub frontends: Vec<mpsc::Sender<PluginFrame>>,
     pub last_content: String,
     pub last_tool_calls: Vec<Value>,
     /// 上一轮交互的**结局**（`completed` / `aborted` / `failed`）。
@@ -86,7 +84,6 @@ impl ActiveSessionState {
             inner: RwLock::new(ActiveSessionStateInner {
                 is_working: false,
                 ai_control_tx: None,
-                frontends: Vec::new(),
                 last_content: String::new(),
                 last_tool_calls: Vec::new(),
                 last_outcome: None,

@@ -27,6 +27,11 @@
  * ALLOW_UNUSED_SCOPED（后端协议词表驱动的修饰类）、ALLOW_RUNTIME_PROPS
  * （运行时由 JS 写入）、ALLOW_UNUSED_PROPS（设计系统成员）。不要为消警告绕过登记。
  *
+ * 用法：
+ *   node scripts/style-audit.mjs                 # 审计 tauri/src
+ *   node scripts/style-audit.mjs --strict        # WARNING 也算失败
+ *   node scripts/style-audit.mjs --root=<dir>    # 换仓库根（回归测试用）
+ *
  * 退出码：0 = 通过；1 = 存在 ERROR（或 --strict 下存在 WARNING）
  *
  * 约定：平台无关（Node.js ESM、零外部依赖、spawnSync 数组传参）。
@@ -37,7 +42,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paint } from './color.mjs';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// `--root=<仓库根>` 供回归测试用：在临时目录里铺夹具再跑，才能证明它会红
+// （与 `mechanism-audit` 同一约定）。
+const rootArg = process.argv.find((a) => a.startsWith('--root='));
+const ROOT = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot;
 const SRC = path.join(ROOT, 'tauri', 'src');
 
 // ── 白名单：允许"定义了但没被静态引用"的类名前缀（多为第三方库钩子）──
@@ -86,6 +95,9 @@ const green = paint('32')('OK');
 const rel = (p) => path.relative(ROOT, p).split(path.sep).join('/');
 
 function walk(dir, exts, out = []) {
+  // 目录不存在是**常态**而非异常：夹具 / 换根的仓库里 `styles/` 或 `assets/`
+  // 完全可能没有。原先直接 `readdirSync` ⇒ 以 ENOENT 崩掉，回归测试无从写起。
+  if (!fs.existsSync(dir)) return out;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) {

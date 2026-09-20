@@ -19,12 +19,15 @@
  *   活文档（其余全部范围）的失效链接照常报。
  *
  * 用法：
- *   node scripts/doc-link-audit.mjs              # 报告全部失效链接
- *   node scripts/doc-link-audit.mjs --strict     # 有失效链接即失败（退出码 1）
+ *   node scripts/doc-link-audit.mjs              # 审计（有失效链接即失败）
+ *   node scripts/doc-link-audit.mjs --root=<dir> # 换仓库根（回归测试用）
  *
  * 退出码：
  *   0 = 无失效链接
- *   1 = --strict 且存在失效链接
+ *   1 = 存在失效链接（**默认即失败**，不再需要 `--strict`
+ *       ——2026-09-20 前它只在 `--strict` 下失败，而门禁从不带该参数 ⇒ 从未真的红过）
+ *
+ * `--strict` 仍被接受（历史参数），现已无额外作用。
  *
  * 与仓库约定一致：纯 Node 实现，不依赖 bash / ripgrep，Windows / macOS / Linux 通用。
  */
@@ -34,9 +37,15 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
-const repoRoot = path.resolve(scriptDir, '..')
+const defaultRoot = path.resolve(scriptDir, '..')
+// `--root=<仓库根>` 供回归测试用：在临时目录里铺夹具再跑，才能证明它会红
+// （与 `mechanism-audit` / `style-audit` 同一约定）。
+const rootArg = process.argv.find((a) => a.startsWith('--root='))
+const repoRoot = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot
 
-const STRICT = process.argv.includes('--strict')
+// `--strict` 是历史参数（曾经"只有加了它才失败"），现已无额外作用：失效链接默认即失败。
+// 保留识别是为了不让旧命令报错，但**不参与判定**——留着参与判定就会有人以为
+// "没加 --strict 所以没拦住"是预期行为。
 
 /** 扫描根（相对 repoRoot）；目录递归，文件直接检查 */
 const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'examples']
@@ -119,4 +128,12 @@ if (bad.length > 0) {
   console.log('\n提示：活文档的失效链接必须修（多为文档移动 / 改名后未更新入链）。')
 }
 
-process.exit(STRICT && bad.length > 0 ? 1 : 0)
+// 失效链接**默认即失败**（原先要 `--strict` 才失败，而门禁从不带它 ⇒ 这条守卫
+// 从未真的红过）。改的理由是这条判定**不是启发式**：目标文件存在或不存在，没有
+// "疑似" 的中间地带，因此不存在"误报逼人写豁免"那条顾虑——那正是
+// `style-audit` 规则 B 与 `grep-audit` S-002-bonus 保持 WARNING 的理由，此处不适用。
+// 豁免只有一处（`docs/archive/`），且是**整体**豁免，不需要逐条留痕。
+if (bad.length > 0) {
+  console.log('\n（失效链接判定为失败：活文档的站内相对链接要么存在、要么不存在，无中间态。）')
+}
+process.exit(bad.length > 0 ? 1 : 0)

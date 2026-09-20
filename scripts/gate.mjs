@@ -671,11 +671,18 @@ async function stageDocs() {
   // 判定型守卫的**回归测试**必须先跑：一个只会亮绿灯的守卫等于没有守卫，
   // 而它腐烂的方式恰恰是「规则写错了所以永远不命中」——只有注入真实违规
   // 并断言脚本变红，才能把「通过」和「没在工作」区分开。
+  // ⚠️ 这张清单必须与下面那个"判定型守卫"循环**逐项对齐**：一个守卫有回归测试，
+  // 才配叫判定型。2026-09-20 复核时发现 8 个判定型守卫里有 3 个（style-audit /
+  // doc-link-audit / test-layout-audit）**从来没有过回归测试**——缺的恰恰是判定
+  // 力度最弱的三个。现已补齐，两处清单都列全。
   for (const name of [
     'grep-audit',
     'mechanism-audit',
     'plugin-entry-audit',
     'protocol-mirror-audit',
+    'style-audit',
+    'doc-link-audit',
+    'test-layout-audit',
     // dead-code-audit 的 R-001（Rust 声明级）已从「降级提示」提升为**判定型**，
     // 故按同一条教条：先把它的回归测试跑起来（注入真实违规断言变红），
     // 再把脚本本身当门禁——否则「规则写错所以永远不命中」没人会发现。

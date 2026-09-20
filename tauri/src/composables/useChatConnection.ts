@@ -114,9 +114,43 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   }
 
   // 从 store 派生 messageTree（按 parent_id 组织成树）
+  //
+  // 流式期间的性能关键：每个 token 都会触发本 computed 重算。若每次都
+  // `{ ...msg }` 新建全部节点对象，keyed v-for 的 props 引用全变，整棵
+  // 消息列表每帧全量重渲染。因此维护一个「上一轮节点」缓存：内容签名
+  // 未变的消息直接复用旧节点对象，Vue 只重渲染真正变化的那一个节点
+  // （通常是流式末端节点）。签名覆盖影响渲染的字段（content/status/
+  // parent/children 身份），会话切换时整体失效。
+  let nodeCacheSession = ''
+  const nodeCache = new Map<string, ChatMessage>()
+  function nodeSignature(
+    msg: ChatMessage,
+    parentId: string | undefined,
+    childIds: string[] | undefined,
+  ): string {
+    return `${msg.status ?? ''}|${parentId ?? ''}|${childIds ? childIds.join(',') : ''}|${messageTextOf(msg.content)}`
+  }
+  function reuseNode(
+    msg: ChatMessage,
+    parentId: string | undefined,
+    childIds: string[] | undefined,
+  ): ChatMessage {
+    const sig = nodeSignature(msg, parentId, childIds)
+    const cached = nodeCache.get(msg.id)
+    if (cached && (cached as { __sig?: string }).__sig === sig) return cached
+    const node: ChatMessage = { ...msg }
+    ;(node as { __sig?: string }).__sig = sig
+    nodeCache.set(msg.id, node)
+    return node
+  }
+
   const messageTree = computed<ChatMessage[]>(() => {
     const sessionId = options.sessionId
     if (!sessionId) return []
+    if (nodeCacheSession !== sessionId) {
+      nodeCacheSession = sessionId
+      nodeCache.clear()
+    }
     const all = store.getSessionMessages(sessionId)
     const removed = getRemovedSet()
     const filtered = all.filter(m => !removed.has(m.id))
@@ -175,15 +209,32 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       })
     })
 
-    const buildNode = (msg: ChatMessage, parent?: ChatMessage): ChatMessage => {
-      const node: ChatMessage = { ...msg }
-      if (parent) node.parent = parent
-      if (childrenMap[node.id]) {
-        node.children = childrenMap[node.id].map(child => buildNode(child, node))
+    const buildNode = (
+      msg: ChatMessage,
+      parentId?: string,
+      childIds?: string[],
+      parentNode?: ChatMessage,
+    ): ChatMessage => {
+      const node = reuseNode(msg, parentId, childIds)
+      // parent 反向引用不在缓存签名里（签名只含 id），每次重挂：
+      // 升为根（父被删）时要清掉旧引用，避免渲染树上溯到已移除的节点
+      if (parentNode) node.parent = parentNode
+      else delete node.parent
+      if (childIds) {
+        node.children = childrenMap[node.id].map(child => {
+          const grandkids = childrenMap[child.id]
+          return buildNode(child, node.id, grandkids ? grandkids.map(c => c.id) : undefined, node)
+        })
+      } else {
+        // 子节点全部消失（被删/被过滤）时清掉旧引用，避免缓存节点渲染幽灵子树
+        delete node.children
       }
       return node
     }
-    return rootMessages.map(msg => buildNode(msg))
+    return rootMessages.map(msg => {
+      const kids = childrenMap[msg.id]
+      return buildNode(msg, undefined, kids ? kids.map(c => c.id) : undefined)
+    })
   })
 
   // 从 store 派生 isLoading / isWaitingApproval

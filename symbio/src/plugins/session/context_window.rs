@@ -126,7 +126,7 @@ const DIGEST_CHAR_PROXY_PER_TOKEN: usize = 2;
 const DIGEST_AFFIX_CHAR_RESERVE: usize = 24;
 
 /// 单个条目的定位名（对象取 name/path/file/title/id，字符串元素直接采用）。
-/// 单名预算 24 token，与旧实现首条目字段口径一致。
+/// 单名预算 24 token，与摘要条目字段口径一致。
 fn entry_name(item: &serde_json::Value) -> Option<String> {
     match item {
         serde_json::Value::String(s) => Some(truncate_tokens(s, 24)),

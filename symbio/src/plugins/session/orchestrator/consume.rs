@@ -6,7 +6,8 @@
 //!   （Error → 持久化失败 + 广播；Data → 合并收集 + 透传广播）→ 正常结束清理；
 //! - `handle_abort`：中止入口（投 Abort 帧 + 等 chat_loop 收敛）。
 //!
-//! ⚠️ **事故敏感区**：帧合并顺序与 `StopSignal` 配对语义本次**逐字未改**。
+//! ⚠️ **事故敏感区**：帧合并顺序与 `StopSignal` 配对语义曾出过事故
+//! （189 个 Turn 被误标 Failed），改动前先读 `docs/DECISIONS.md` 对应条目。
 //!
 //! 可见性：`run_chat_loop_task` 被 `entry.rs` 的 `handle_chat_send_oneoff` 调用，
 //! 故标 `pub(super)`。
