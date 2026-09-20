@@ -18,6 +18,47 @@
 
 ***
 
+## 2026-09-20: 修复前端门禁阶段 —— 补装 `@vitest/coverage-v8`；记下覆盖率棘轮已落后
+
+### 1. 问题：门禁的前端阶段整体不可用
+
+`gate.mjs --only=frontend` 的第二步直接失败：
+
+```
+MISSING DEPENDENCY  Cannot find dependency '@vitest/coverage-v8'
+```
+
+该依赖**早已声明**在 `tauri/package.json` 的 `devDependencies` 与
+`tauri/package-lock.json` 里——只是 `node_modules` 从未同步过完整的一次。后果是
+`vitest run --coverage` 与 `npm run test:coverage` 都跑不了，而 `gate.mjs` 的前端阶段
+第一步就卡在这里。
+
+### 2. 修复
+
+`cd tauri && npm install`（按 lockfile 同步）。就位后：
+
+- `vitest run --coverage`：**exit=0**，47 文件 / 646 测试，行覆盖 **60.93%**（阈值 40）
+- `vite build`：**exit=0**（2.04s）——顺带确认这次安装没有破坏构建
+- `gate.mjs --only=frontend`：**4/4**（`vue-tsc` / `vitest --coverage` / `vite build` /
+  `eslint`；后两者被沙箱拦了清理 `dist/` 的那一步，标记为「未判定」——那是已知的沙箱
+  限制，已用独立 `outDir` 与直接跑命令各自验过）
+
+### 3. 顺带发现：覆盖率棘轮落后约 20 点
+
+`vitest.config.ts` 的注释写的是「实测 42.27% 行覆盖 → 阈值 40」，而 2026-09-20 复测
+已是 **60.93%**。也就是说现在**删掉两成覆盖也不会红**——正是棘轮本该拦住的事。
+
+**未擅自上调**：本机是 Windows，CI 跑 Linux runner，平台分支（路径处理等）的覆盖可能
+不同，本地数字不足以代表 CI。已把过期数字与原因写进配置注释；**上调前需先在 CI 取一次
+实测值**。
+
+### 4. 附：lockfile 的元数据归一化
+
+`npm install` 顺带把 7 处 `"dev": true` 改成 `"devOptional": true`（npm 的口径调整，
+**无实际依赖变化**）。保留——那是 npm 的规范输出，回退只会在下次 install 时再翻一遍。
+
+***
+
 ## 2026-09-20: 配色收口 —— 9 份实现收成 1 份，并修掉守卫自己看不见的那个坏分支
 
 ### 1. 事故：守卫的输出坏了，但守卫仍绿
