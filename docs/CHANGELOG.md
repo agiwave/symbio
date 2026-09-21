@@ -18,6 +18,63 @@
 
 ***
 
+## 2026-09-22: SSE 增量解析下沉到协议层 —— core 不再认识模型协议字段名
+
+**问题**：为了首字延迟，`parse_sse_stream` 在换行到达前会先尝试从**半截 JSON** 里
+挤出正文。这件事原先由 core 内置的启发式解析器代劳——在整行里搜 `"content":"` /
+`"reasoning_content":"` / `"partial_json":"` / `"text":"` / `"arguments":"` 五个字面量。
+三个后果：**加协议要改 core**；core 的 `unescape_partial` 与协议解析器的
+`serde_json` 各实现一遍 JSON 转义（对 `\uXXXX` 处理不同），于是完整行到达时按
+「已发送前缀长度」截断会**吃字**（不报错，只是偶尔少一个字）；缓冲区每增长一次
+就把整行重新解析一遍 ⇒ 单行极长时 **O(行长²)**。
+
+**改动**：
+
+1. **契约拆两个方法**（新增 `symbio_core/sse.rs`）：`SseLineParser::parse_line`
+   （完整行）+ `open_partial_line`（为未结束的行开一个**有状态**的
+   `PartialLineExtractor`，`push` 只吃新增字节）。`open_partial_line` **默认
+   `None`**——「本行不做增量提取」是零成本且正确的降级，不实现增量的协议一行代码
+   都不用写。core **每行只问一次**（答 `None` 就记下、不再重试），收口前那个 O(n²)
+   正是「每块都重问一次」造成的。
+2. **UTF-8 边界对齐写进契约**：新增 `utf8_chunk(buf, from)`，被切断的多字节字符
+   **不消费**、留给下一次 `push`。SSE 分块由 TCP 决定，中文横跨两块是常态；
+   用 `from_utf8_lossy` 会各替换出一个 U+FFFD，而完整行给的是真字符，按前缀截断
+   同样会吃字。
+3. **字段名与转义规则全部留在协议层**：四个协议共用一个逐字节推进的 JSON 结构
+   扫描器（`plugins/model/protocols/partial_json.rs`），协议只实现三个钩子
+   （`begin_string` / `text` / `scalar`），用**键路径全等**判定「这个位置算什么」
+   （数组下标不占位）。`ModelProtocol` 以 `SseLineParser` 为父 trait，
+   `BoundProvider::execute_turn` 直接把协议实例交给 `parse_sse_stream`——
+   core 与协议之间不再有闭包中转。
+4. **core 侧删约 115 行**：`try_parse_partial_sse_line` / `unescape_partial` /
+   `find_id` / `find_name` / `find_idx` 整组消失。core 只负责按 `\n` 切行 →
+   `parse_line` → 按前缀截断去重 → 尾巴交给提取器。
+
+**保住的语义**：`LineProgress` 前缀截断机制不变（只是「增量是完整行的前缀」这条
+不变量改由协议层用**同一套转义规则**保证）；`PARTIAL_LINE_MIN_BYTES = 256` 不变；
+增量路径仍**不产出** `Finish` / `Usage` / `Error` / `ResponseId`（半截 JSON 里这些
+字段不可信）；`[DONE]` / 注释行 / 非 data 行照旧什么都不吐。
+
+**判定原则「宁可漏，不可错」**：全等匹配、下标未知就放弃本次增量。错配的代价是
+前端多出内容且完整行截断会吃正文；不匹配的代价只是失去增量、退回「等换行」。
+
+**架构决策**：见 [DECISIONS.md](./DECISIONS.md) **ADR-022**。结构说明见
+[`session/docs/core-loop.md`](../symbio/src/plugins/session/docs/core-loop.md) §12。
+
+**验收**：`gate.mjs` 32/32；`cargo test --lib` **852 passed / 0 failed**（817 → 852，
++35：`sse.test.rs` +5、`partial_json.test.rs` +8、四个协议各一条「逐字节切分喂进去、
+增量拼出的文本必须等于完整行解析出的文本」的不变量测试 +22）。
+CLI 端到端：本地 mock SSE 构造「**单行 809 字节、逐字节写出**」的响应，四个协议五个
+场景 stdout **逐字节等于期望文本**（625 字符，含原样 UTF-8、被写边界切开的多字节
+字符、`\uXXXX`、代理对、`\"` `\n` `\t` `\\` 转义）；工具参数场景（419 字节 `cmd`
+参数逐字节切分）工具收到 `len=419` 完整参数并正常执行；`--provider LMStudio`
+真实模型冒烟 `EXIT=0`（233 chunks / 62451 bytes，文本 144 + 推理 861 字符）。
+
+**已知取舍**：扫描器对**非法** JSON 转义比 `serde_json` 宽松（原样输出而非整行
+拒绝），分歧只在非法输入上出现（此时完整行路径本就不产出事件）；
+`response.function_call_arguments.delta` 的 `output_index` 若出现在 `delta` 之后，
+本次增量被放弃（真实报文里它在前）。
+
 ## 2026-09-22: 执行期协议收口四批 —— 通道退出执行期，两个接口收成同形
 
 **问题**：执行期（LLM 单轮 / 工具调用）与**跨进程传输**共用同一个 `PluginChannel`。

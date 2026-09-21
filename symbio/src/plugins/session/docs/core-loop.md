@@ -2,11 +2,12 @@
 
 > 状态：**批次 A/B/C 已落地**（`cargo check --tests` 通过）；批次 D（异步工具并发）待授权；
 > **批次 E（执行期出口/信号双原语，§8）、批次 F（工具侧收敛到同一出口，§9）、
-> 批次 G（流式工具接上出口、执行期通道归零，§10）与批次 H（两个执行接口签名统一，§11）
-> 已落地**。
-> 这四批改的是**宿主层与执行层之间的协议**（`PluginChannel` 双职责拆为
+> 批次 G（流式工具接上出口、执行期通道归零，§10）、批次 H（两个执行接口签名统一，§11）
+> 与批次 I（SSE 增量解析下沉到协议层，§12）已落地**。
+> 这五批改的是**宿主层 / 执行层 / 协议层之间的协议**（`PluginChannel` 双职责拆为
 > `EventSink` + `AbortSignal`，工具不再把通道当事件流，执行层不再有帧循环，
-> `Capability::execute` 与 `ModelProvider::execute_turn` 收成同一形状），
+> `Capability::execute` 与 `ModelProvider::execute_turn` 收成同一形状，
+> core 不再认识任何模型协议字段名），
 > 不改本文 §2 的四个收口点，但 §1.1 的 ② 与 §3 代码骨架已按其更新。
 > 代码位置：其后又做了模块拆分（S2），`chat_loop.rs` **2000 → 434 行**，拆出
 > `chat_loop/{state,inputs,turn,compress,io}.rs`（见 [`./module-layout.md`](./module-layout.md) §4.2）。
@@ -1019,6 +1020,126 @@ invoke_capability(cap, ctx)
   交互模式 `ask_user`、自动模式，全部 `EXIT=0`。
 - 用例数**不变**（817）：本批只改签名，`ask_user.test.rs` / `shell.test.rs` 的
   调用形态随签名改写，断言内容与覆盖点逐一保留。
+
+---
+
+## 12. 批次 I：SSE 增量解析下沉到协议层（已落地）
+
+前四批收的是**执行期**（宿主 ↔ 执行 ↔ 工具）。这一批收的是**流解析期**：
+`parse_sse_stream` 里那条「未结束的行也要边收边吐」的路径。
+
+### 12.1 问题：core 里藏着一张协议字段表
+
+为了首字延迟，`parse_sse_stream` 在换行到达之前会先尝试从半截 JSON 里挤出正文。
+这件事原先由 core 内置的启发式解析器（`try_parse_partial_sse_line`）代劳——
+在整行里搜 `"content":"` / `"reasoning_content":"` / `"partial_json":"` /
+`"text":"` / `"arguments":"` 五个字面量。**协议知识泄漏进了 core**，后果有三：
+
+| 后果 | 机制 | 用户可见症状 |
+|---|---|---|
+| 加协议要改 core | 新协议能不能增量，取决于 core 那张表里有没有它的字段名 | 新协议只能等换行（首字延迟变大） |
+| 两条路径两套转义 | core 的 `unescape_partial` 与协议解析器的 `serde_json` 各实现一遍 JSON 转义，对 `\uXXXX` 处理不同 | 完整行到达时按前缀截断会**吃字** |
+| 每块重扫整行 | 缓冲区每增长一次就把整行重新解析一遍 | 单行极长时 O(行长²) |
+
+第二条最隐蔽：它不报错，只是偶尔少一个字。
+
+### 12.2 形状：契约拆成「完整行」与「未结束行」两个方法
+
+新增 [`symbio_core/sse.rs`](../../../symbio_core/sse.rs)：
+
+```text
+trait SseLineParser {
+    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent>;              // 完整行
+    fn open_partial_line(&self, head: &str) -> Option<Box<dyn PartialLineExtractor>>;  // 默认 None
+}
+
+trait PartialLineExtractor {
+    fn push(&mut self, bytes: &str, out: &mut Vec<ProtocolEvent>);       // 只吃**新增**字节
+}
+```
+
+- **默认 `None` 是合法降级**：不实现增量提取的协议一行代码都不用写，
+  代价只是「等换行」——即收口前的行为。
+- `push` 一次可以吐**多个**事件：同一块里可能一个字段收尾紧接下一个字段开头。
+- `open_partial_line` 由 core **每行只问一次**：答 `None` 就记下、本行不再重试。
+  收口前那个 O(n²) 正是「每块都重问一次」造成的。
+
+`utf8_chunk(buf, from)` 把「UTF-8 边界对齐」写进契约：被切断的多字节字符**不消费**，
+留给下一次 `push`。SSE 分块由 TCP 决定，一个中文字符横跨两块是常态；
+若用 `from_utf8_lossy` 各替换出一个 U+FFFD，而完整行给出的是真字符，
+按前缀截断同样会吃字。
+
+core 侧剩下的只有：按 `\n` 切行 → 交给 `parse_line` → 按前缀截断去重
+（`LineProgress`，机制未变）→ 尾巴交给提取器。
+
+### 12.3 协议层：`JsonLineExtractor` + 一行判定
+
+四个协议共用一个**逐字节推进**的 JSON 结构扫描器
+（[`protocols/partial_json.rs`](../../../plugins/model/protocols/partial_json.rs)）。
+它只做两件事：在 JSON 里定位「哪个字符串值」，以及按 JSON 转义规则解码它的增量；
+「那个位置算内容还是推理」由协议实现 `PartialJsonSink` 决定。
+
+判据是**键路径全等**（数组下标不占位）：
+
+```text
+openai_chat      ["choices","delta","content"]                          -> 内容
+                 ["choices","delta","reasoning_content"]                -> 推理
+                 ["choices","delta","tool_calls","function","arguments"]-> 参数(取最内层数组下标)
+openai_responses ["type"] 先观察，再按它决定 ["delta"] 算什么
+anthropic        ["type"] 必须是 content_block_delta，再看 ["delta", ...]
+gemini           ["candidates","content","parts","text"]                -> 内容
+```
+
+`ModelProtocol` 以 `SseLineParser` 为**父 trait**（行解析不属于 model 插件的私有抽象，
+它是「core 定义、协议实现」），于是 `BoundProvider::execute_turn` 直接把协议实例交给
+`parse_sse_stream`——core 与协议之间不再有闭包中转。
+
+### 12.4 本批的账
+
+- **core 删掉约 115 行**：`try_parse_partial_sse_line` / `unescape_partial` /
+  `find_id` / `find_name` / `find_idx` 整组消失；`parse_sse_stream` 的入参从闭包
+  换成 `&dyn SseLineParser`。
+- **协议层新增**：`partial_json.rs`（扫描器 + 三个钩子）、四个协议各一个 sink
+  与 `open_partial_line`，以及 `impl SseLineParser` 块（`parse_response_line`
+  原样搬进去改名 `parse_line`，函数体一字未改）。
+- **每块的工作量从 O(行长) 降到 O(新增字节)**，整行累计 O(行长)。
+- 新增 5 个测试文件、+35 个用例；四个协议各有一条「**逐字节切分喂进去，
+  增量拼出的文本必须等于完整行解析出的文本**」的不变量测试。
+
+### 12.5 保住的语义（未变）
+
+- **前缀截断去重机制不动**：`LineProgress` 仍按字段分别记账，完整行到达时按已发
+  长度截断。本批只是让「增量文本恰好是完整行文本的前缀」这条不变量**由协议层
+  用同一套转义规则**来保证，而不是靠 core 自己猜。
+- **`PARTIAL_LINE_MIN_BYTES = 256` 不动**：短尾巴等下一块补齐即可。
+- **增量路径仍不产出** `Finish` / `Usage` / `Error` / `ResponseId`：半截 JSON 里这些
+  字段的值不可信，它们只走完整行（由 `LineProgress::record` 丢弃非增量事件兜底）。
+- **`[DONE]`、注释行、非 data 行照旧什么都不吐**（扫描器找不到 JSON 起点）。
+- **协议判定「宁可漏，不可错」**：全等匹配、下标未知就放弃本次增量。错配的代价是
+  前端多出内容且完整行截断会吃正文；不匹配的代价只是失去增量。
+
+### 12.6 已知取舍
+
+- 扫描器对**非法 JSON 转义**比 `serde_json` 宽松（原样输出而不是整行拒绝）。
+  分歧只在非法输入上出现，此时完整行路径本就不产出事件——最多是多吐一段无人确认的文本。
+- `response.function_call_arguments.delta` 的 `output_index` 若出现在 `delta` **之后**，
+  本次增量被放弃（退回等换行）。真实报文里它在前。
+- Gemini 的 `[{...},{...}]` **挤在一行**不是真实形状（`[` 与 `]` 各占一行），
+  增量路径对它不产出——与 `parse_line` 的处理面一致。
+
+### 12.7 验证
+
+- `node scripts/gate.mjs` **32 / 32**；`cargo test --lib` **852 passed / 0 failed**
+  （817 → 852，+35）。
+- **CLI 端到端**：本地 mock SSE 服务构造「单行 809 字节、逐字节写出」的响应，
+  五个场景（`openai_chat` 整行 / `openai_chat` 逐字节 / `openai_responses` /
+  `anthropic_messages` / `gemini_api`）的 stdout **逐字节等于期望文本**
+  （625 字符，含原样 UTF-8、被写边界切开的多字节字符、`\uXXXX`、代理对、
+  `\"` `\n` `\t` `\\` 转义）。
+- 工具参数场景：mock 返回一个 419 字节的 `cmd` 参数、逐字节切分，工具收到
+  `len=419` 完整参数并正常执行，收尾 `EXIT=0`。
+- 真实模型冒烟：`--provider LMStudio` 普通对话 `EXIT=0`（233 chunks / 62451 bytes，
+  文本 144 字符 + 推理 861 字符，`finish=Stop`）。
 
 ---
 

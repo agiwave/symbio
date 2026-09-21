@@ -19,10 +19,11 @@ mod context_probe;
 mod gemini_api;
 mod openai_chat;
 mod openai_responses;
+mod partial_json;
 
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
-use crate::symbio_core::{CapabilityMeta, PluginError, ProtocolEvent};
+use crate::symbio_core::{CapabilityMeta, PluginError, SseLineParser};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use serde_json::Value;
@@ -80,8 +81,13 @@ pub fn sse_data(line: &str) -> Option<&str> {
 /// 钩子签名一律收 `&ModelProviderConfig`（持久化配置 schema），不收
 /// `&ModelProvider`（配置 + 协议实例的运行期聚合体）：协议实现只读配置字段，
 /// 与绑定方式解耦。
+///
+/// **行解析不在这里**：它以 `SseLineParser` 为父 trait——core 的
+/// `parse_sse_stream` 只认那个契约（完整行 + 未结束行的增量提取），而它属于
+/// 「core 定义、协议实现」，不是 model 插件的私有抽象。这样 core 不必认识
+/// 任何协议字段名，协议也不必经过 model 插件的中转。
 #[async_trait]
-pub trait ModelProtocol: Send + Sync {
+pub trait ModelProtocol: SseLineParser + Send + Sync {
     /// 请求目标 URL（含路径）
     fn get_api_url(&self, cfg: &ModelProviderConfig) -> String;
 
@@ -96,9 +102,6 @@ pub trait ModelProtocol: Send + Sync {
         messages: &[ChatMessage],
         tools: &[CapabilityMeta],
     ) -> Value;
-
-    /// 解析一行 SSE 数据为协议事件（空行/注释行返回空 Vec）
-    fn parse_response_line(&self, line: &str) -> Vec<ProtocolEvent>;
 
     /// 连通性验证（最小请求探测；默认实现 fail-closed）
     async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {

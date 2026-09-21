@@ -24,6 +24,7 @@ use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
+use crate::symbio_core::sse::{utf8_chunk, PartialLineExtractor, SseLineParser};
 use crate::{plugin_error, plugin_info, plugin_warn};
 use futures::StreamExt;
 use serde_json::Value;
@@ -677,12 +678,64 @@ impl TurnOutput {
 
 // SSE 流解析
 
+/// 未结束的行超过这个长度才尝试增量提取。
+///
+/// 太短时开提取器没有意义（下一块多半就把整行补齐了），反而多付一次字段扫描。
+const PARTIAL_LINE_MIN_BYTES: usize = 256;
+
+/// 当前「未结束行」已经发送给前端的增量长度（按字段分别记）。
+///
+/// ## 为什么必须记账
+///
+/// 同一段文本有两条到达路径：**未结束的行**由协议层的增量提取器边收边吐，
+/// **完整行**由 [`SseLineParser::parse_line`] 一次性给出全量。若不记账，完整行
+/// 到达时会把已经发过的前缀**再发一遍**（前端重复）。因此完整行路径按这里的
+/// 长度截断，而增量路径每发一次就累加一次。
+///
+/// 这套机制成立的前提是：增量路径吐出的文本**恰好是**完整行文本的前缀。
+/// 该不变量由协议层的提取器保证（见 [`crate::symbio_core::sse`]）——它必须
+/// 与协议解析器用**同一套转义规则**，否则按前缀截断会吃字。
+#[derive(Default)]
+struct LineProgress {
+    content: usize,
+    reasoning: usize,
+    tool_args: HashMap<usize, usize>,
+}
+
+impl LineProgress {
+    /// 记一次增量并返回可转发的事件；**非增量类事件一律丢弃**。
+    ///
+    /// 未结束的行里只有「字符串值还在长」这件事是确定的，`finish` / `usage` /
+    /// `error` 这些字段在半截 JSON 里读到的值不可信——等完整行。
+    fn record(&mut self, ev: ProtocolEvent) -> Option<ProtocolEvent> {
+        match ev {
+            ProtocolEvent::ContentDelta(c) => {
+                self.content += c.len();
+                Some(ProtocolEvent::ContentDelta(c))
+            }
+            ProtocolEvent::ReasoningDelta(r) => {
+                self.reasoning += r.len();
+                Some(ProtocolEvent::ReasoningDelta(r))
+            }
+            ProtocolEvent::ToolCallDelta(idx, id, name, Some(a)) => {
+                *self.tool_args.entry(idx).or_insert(0) += a.len();
+                Some(ProtocolEvent::ToolCallDelta(idx, id, name, Some(a)))
+            }
+            _ => None,
+        }
+    }
+}
+
 /// 解析 SSE 字节流为标准化事件并累积成单轮产物。
 ///
-/// `parse_line` 以闭包接收（`Fn(&str) -> Vec<ProtocolEvent>`）而非协议 trait：
-/// 协议差异只体现在「一行 → 事件」的解析一个钩子上，core 无需（也不应）
-/// 感知任何协议抽象——调用方（如 model 插件的 `BoundProvider::execute_turn`）
-/// 直接传 `|line| protocol.parse_response_line(line)`。
+/// `parser` 是**协议层**提供的行解析契约（[`SseLineParser`]）：它既能解析完整行，
+/// 也能为「尚未结束的行」开一个增量提取器。core 只负责按 `\n` 切分、按前缀截断
+/// 去重、把事件交给 `dispatch_and_track`——**不认识任何协议字段名**。
+///
+/// 历史上这里收的是闭包 `Fn(&str) -> Vec<ProtocolEvent>`，增量提取则由 core 内置的
+/// 启发式解析器代劳（硬编码 `"content":"` / `"partial_json":"` 等字段名）。那套写法
+/// 有三重问题：加协议要改 core、增量与完整行两套转义规则（会吃字）、每块重扫整行
+/// （O(n²)）。契约拆成两个方法后，三件事一起解决。
 ///
 /// 流式产出的子节点经 `sink` 实时下发（进程内直连转写唯一写入点）；
 /// 中止只经 `abort` 感知（不再在流循环里排空控制帧）。
@@ -691,7 +744,7 @@ pub async fn parse_sse_stream(
     root_id: &str,
     sink: &EventSink,
     abort: &AbortSignal,
-    parse_line: impl Fn(&str) -> Vec<ProtocolEvent>,
+    parser: &dyn SseLineParser,
 ) -> Result<TurnOutput, String> {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::<u8>::new();
@@ -710,14 +763,18 @@ pub async fn parse_sse_stream(
     let mut chunk_count: u64 = 0;
     let mut total_bytes: u64 = 0;
 
-    // 用于追踪当前行（正在积攒中）已经发送给前端的增量长度，防止重复发送
-    #[derive(Default)]
-    struct LineProgress {
-        content: usize,
-        reasoning: usize,
-        tool_args: HashMap<usize, usize>,
-    }
     let mut progress = LineProgress::default();
+
+    // 当前「未结束的行」的增量提取状态（见 `symbio_core::sse`）。
+    // - `partial`：协议层给的提取器；`None` = 本行没有（尚未开 / 已放弃）
+    // - `partial_gave_up`：本行已问过协议、答案是「不做」——不再重试，
+    //   否则每一块都要把整行重扫一遍，正是收口前那个 O(n²)
+    // - `partial_fed`：已喂给提取器的字节位置（只喂新增部分）
+    let mut partial: Option<Box<dyn PartialLineExtractor>> = None;
+    let mut partial_gave_up = false;
+    let mut partial_fed = 0usize;
+    // 增量提取器产出事件的暂存区（跨块复用，见 ② 处说明）
+    let mut partial_out: Vec<ProtocolEvent> = Vec::new();
 
     loop {
         // 空闲超时包裹：流若中途挂起（连接在、数据停），最多等 STREAM_IDLE_TIMEOUT
@@ -774,89 +831,92 @@ pub async fn parse_sse_stream(
         })?;
         buffer.extend_from_slice(&chunk);
 
-        // 循环处理缓冲区
+        // ① 先把**完整的行**全部消化掉（一块里可能不止一行）
         loop {
-            // 查找换行符
-            let pos = buffer.iter().position(|&b| b == b'\n');
-
-            // 如果找到换行符，或者缓冲区已经累积到足够大（处理超长行）
-            if let Some(p) = pos {
-                let line_bytes = buffer.drain(..p + 1).collect::<Vec<_>>();
-                let line_str = String::from_utf8_lossy(&line_bytes);
-                let trimmed = line_str.trim();
-                if !trimmed.is_empty() {
-                    for mut event in parse_line(trimmed) {
-                        // 扣除已经通过增量模式发送的部分
-                        match event {
-                            ProtocolEvent::ContentDelta(ref mut c) if progress.content > 0 => {
-                                *c = safe_substring(c, progress.content);
-                            }
-                            ProtocolEvent::ReasoningDelta(ref mut r) if progress.reasoning > 0 => {
-                                *r = safe_substring(r, progress.reasoning);
-                            }
-                            ProtocolEvent::ToolCallDelta(idx, _, _, Some(ref mut a)) => {
-                                if let Some(&len) = progress.tool_args.get(&idx) {
-                                    *a = safe_substring(a, len);
-                                }
-                            }
-                            _ => {}
-                        }
-                        dispatch_and_track(
-                            event,
-                            root_id,
-                            sink,
-                            &mut out,
-                            &mut first_content_logged,
-                            started,
-                        )
-                        .await?;
-                    }
-                }
-                // 重置当前行的追踪
-                progress = LineProgress::default();
-            } else if buffer.len() > 256 {
-                // 如果没有换行符但缓冲区较大，尝试“增量提取”
-                let line_str = String::from_utf8_lossy(&buffer);
-                if let Some(event) = try_parse_partial_sse_line(&line_str) {
-                    let mut to_dispatch = None;
+            let Some(p) = buffer.iter().position(|&b| b == b'\n') else {
+                break;
+            };
+            let line_bytes = buffer.drain(..p + 1).collect::<Vec<_>>();
+            let line_str = String::from_utf8_lossy(&line_bytes);
+            let trimmed = line_str.trim();
+            if !trimmed.is_empty() {
+                for mut event in parser.parse_line(trimmed) {
+                    // 扣除已经通过增量模式发送的部分
                     match event {
-                        ProtocolEvent::ContentDelta(c) if c.len() > progress.content => {
-                            let delta = safe_substring(&c, progress.content);
-                            progress.content = c.len();
-                            to_dispatch = Some(ProtocolEvent::ContentDelta(delta));
+                        ProtocolEvent::ContentDelta(ref mut c) if progress.content > 0 => {
+                            *c = safe_substring(c, progress.content);
                         }
-                        ProtocolEvent::ReasoningDelta(r) if r.len() > progress.reasoning => {
-                            let delta = safe_substring(&r, progress.reasoning);
-                            progress.reasoning = r.len();
-                            to_dispatch = Some(ProtocolEvent::ReasoningDelta(delta));
+                        ProtocolEvent::ReasoningDelta(ref mut r) if progress.reasoning > 0 => {
+                            *r = safe_substring(r, progress.reasoning);
                         }
-                        ProtocolEvent::ToolCallDelta(idx, id, name, Some(args)) => {
-                            let last_len = *progress.tool_args.get(&idx).unwrap_or(&0);
-                            if args.len() > last_len {
-                                let delta = safe_substring(&args, last_len);
-                                progress.tool_args.insert(idx, args.len());
-                                to_dispatch =
-                                    Some(ProtocolEvent::ToolCallDelta(idx, id, name, Some(delta)));
+                        ProtocolEvent::ToolCallDelta(idx, _, _, Some(ref mut a)) => {
+                            if let Some(&len) = progress.tool_args.get(&idx) {
+                                *a = safe_substring(a, len);
                             }
                         }
                         _ => {}
                     }
-                    if let Some(ev) = to_dispatch {
-                        dispatch_and_track(
-                            ev,
-                            root_id,
-                            sink,
-                            &mut out,
-                            &mut first_content_logged,
-                            started,
-                        )
-                        .await?;
+                    dispatch_and_track(
+                        event,
+                        root_id,
+                        sink,
+                        &mut out,
+                        &mut first_content_logged,
+                        started,
+                    )
+                    .await?;
+                }
+            }
+            // 换行 ⇒ 本行的增量提取作废、记账归零（下一行重新开始）
+            progress = LineProgress::default();
+            partial = None;
+            partial_gave_up = false;
+            partial_fed = 0;
+        }
+
+        // ② 尾巴（尚未结束的行）：交给协议层的增量提取器边收边吐。
+        //
+        // 只在超过阈值时才尝试——短尾巴等下一块补齐即可，开提取器纯属浪费。
+        if buffer.len() > PARTIAL_LINE_MIN_BYTES {
+            // 复用同一个 `Vec` 接住提取器产出的事件（每块最多几条，但每块都新建
+            // 一个 `Vec` 会在长流上累积成可观的分配量）。
+            let mut events = std::mem::take(&mut partial_out);
+            if let Some(ext) = partial.as_mut() {
+                if buffer.len() > partial_fed {
+                    // 只喂**新增**字节，且不消费被切断的多字节字符
+                    let (tail, consumed) = utf8_chunk(&buffer, partial_fed);
+                    partial_fed = consumed;
+                    ext.push(tail, &mut events);
+                }
+            } else if !partial_gave_up {
+                let (head, consumed) = utf8_chunk(&buffer, 0);
+                match parser.open_partial_line(head) {
+                    // 协议声明本行不做增量提取：记下，本行不再问第二次
+                    None => partial_gave_up = true,
+                    Some(mut ext) => {
+                        // 注意：`head` 可能比 `buffer` 短（尾部多字节字符被切断），
+                        // 消费位必须取 `consumed` 而不是 `buffer.len()`，否则那几个
+                        // 残字节会被永久跳过、字符丢失。
+                        partial_fed = consumed;
+                        ext.push(head, &mut events);
+                        partial = Some(ext);
                     }
                 }
-                break;
-            } else {
-                break;
             }
+            for ev in events.drain(..) {
+                if let Some(ev) = progress.record(ev) {
+                    dispatch_and_track(
+                        ev,
+                        root_id,
+                        sink,
+                        &mut out,
+                        &mut first_content_logged,
+                        started,
+                    )
+                    .await?;
+                }
+            }
+            partial_out = events; // 归还容量
         }
     }
 
@@ -1030,121 +1090,6 @@ async fn dispatch_protocol_event(
         ProtocolEvent::Error(e) => return Err(e),
     }
     Ok(())
-}
-
-// 辅助解析函数（用于超长单行 SSE 增量提取）
-
-/// 尝试从尚未结束（无换行符）的 SSE 行中提取已有的增量内容。
-/// 这是一个“启发式”解析器，主要针对 OpenAI 和 Anthropic 格式。
-pub fn try_parse_partial_sse_line(line: &str) -> Option<ProtocolEvent> {
-    if !line.starts_with("data: ") {
-        return None;
-    }
-
-    // 跳过 OpenAI Responses API 的完成事件，这些事件包含全量 text/content，
-    // 若被当作增量提取会导致回复内容被重复追加。
-    if line.contains("\"type\":\"response.completed\"")
-        || line.contains("\"type\":\"response.output_item.done\"")
-    {
-        return None;
-    }
-
-    // 寻找常见的增量字段
-    let patterns = [
-        ("\"arguments\":\"", "tool_call"),
-        ("\"content\":\"", "content"),
-        ("\"reasoning_content\":\"", "reasoning"),
-        ("\"partial_json\":\"", "tool_call"), // Anthropic
-        ("\"text\":\"", "content"),           // Anthropic
-    ];
-
-    for (pattern, ev_type) in patterns {
-        if let Some(p) = line.find(pattern) {
-            let val_start = p + pattern.len();
-            if line.len() > val_start {
-                let mut raw_val = &line[val_start..];
-
-                // 如果最后是反斜杠，去掉它，因为它可能是一个转义字符的一部分
-                if raw_val.ends_with('\\') {
-                    raw_val = &raw_val[..raw_val.len() - 1];
-                }
-
-                let unescaped = unescape_partial(raw_val);
-
-                return match ev_type {
-                    "tool_call" => {
-                        let prefix = &line[..val_start];
-                        Some(ProtocolEvent::ToolCallDelta(
-                            find_idx(prefix),
-                            find_id(prefix),
-                            find_name(prefix),
-                            Some(unescaped),
-                        ))
-                    }
-                    "content" => Some(ProtocolEvent::ContentDelta(unescaped)),
-                    "reasoning" => Some(ProtocolEvent::ReasoningDelta(unescaped)),
-                    _ => None,
-                };
-            }
-        }
-    }
-    None
-}
-
-fn unescape_partial(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '"' {
-            break;
-        }
-        if c == '\\' {
-            match chars.next() {
-                Some('"') => result.push('"'),
-                Some('n') => result.push('\n'),
-                Some('t') => result.push('\t'),
-                Some('\\') => result.push('\\'),
-                Some(r) => {
-                    result.push('\\');
-                    result.push(r);
-                }
-                None => result.push('\\'),
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
-fn find_id(s: &str) -> Option<String> {
-    s.find("\"id\":\"").and_then(|p| {
-        let start = p + 6;
-        s[start..]
-            .find('"')
-            .map(|end| s[start..start + end].to_string())
-    })
-}
-
-fn find_name(s: &str) -> Option<String> {
-    s.find("\"name\":\"").and_then(|p| {
-        let start = p + 8;
-        s[start..]
-            .find('"')
-            .map(|end| s[start..start + end].to_string())
-    })
-}
-
-fn find_idx(s: &str) -> usize {
-    s.find("\"index\":")
-        .and_then(|p| {
-            let start = p + 8;
-            let end = s[start..]
-                .find(|c: char| !c.is_ascii_digit())
-                .unwrap_or(s[start..].len());
-            s[start..start + end].parse().ok()
-        })
-        .unwrap_or(0)
 }
 
 fn safe_substring(s: &str, start: usize) -> String {

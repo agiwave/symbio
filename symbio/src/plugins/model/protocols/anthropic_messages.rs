@@ -10,9 +10,11 @@ use std::sync::Mutex;
 
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
+use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
+use crate::symbio_core::sse::PartialLineExtractor;
 use crate::symbio_core::{
-    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
+    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
 };
 use tracing::warn;
 
@@ -262,7 +264,42 @@ impl ModelProtocol for AnthropicProtocol {
         req
     }
 
-    fn parse_response_line(&self, line: &str) -> Vec<ProtocolEvent> {
+    async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
+        let api_key = cfg.api_key.clone().unwrap_or_default();
+        let request = json!({
+            "model": cfg.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            // Anthropic 协议要求 max_tokens >= 1，部分兼容网关要求更大，统一用安全值
+            "max_tokens": 16,
+        });
+
+        let response = get_http_client()
+            .post(self.get_api_url(cfg))
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(PluginError::InternalError(format!(
+                "API Error ({status}): {error_text}"
+            )));
+        }
+
+        Ok(())
+    }
+}
+
+// === 行解析（core 契约） ===
+
+impl SseLineParser for AnthropicProtocol {
+    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent> {
         let mut evs = Vec::new();
         if let Some(stripped) = line.strip_prefix("event:") {
             let mut etype = self.current_event_type.lock().unwrap();
@@ -397,35 +434,97 @@ impl ModelProtocol for AnthropicProtocol {
         evs
     }
 
-    async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
-        let api_key = cfg.api_key.clone().unwrap_or_default();
-        let request = json!({
-            "model": cfg.model,
-            "messages": [{"role": "user", "content": "ping"}],
-            // Anthropic 协议要求 max_tokens >= 1，部分兼容网关要求更大，统一用安全值
-            "max_tokens": 16,
-        });
+    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn PartialLineExtractor>> {
+        Some(Box::new(
+            JsonLineExtractor::new(AnthropicPartial::default()),
+        ))
+    }
+}
 
-        let response = get_http_client()
-            .post(self.get_api_url(cfg))
-            .header("x-api-key", api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-            .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
+/// 未结束行的增量提取：只认 `content_block_delta` 事件里 `delta.*` 那几个字段。
+///
+/// 判别方式与 `parse_line` 不同：那里靠 SSE 的 `event:` 行（存在 `self` 上），这里
+/// 只能看 JSON 自带的顶层 `type`——`event:` 是**上一行**，本行的提取器看不到它。
+/// Anthropic 的 `content_block_delta` 数据里必然带 `"type":"content_block_delta"`，
+/// 且 `delta.type` 的取值与字段名一一对应（`text_delta`→`text`、
+/// `thinking_delta`→`thinking`…），所以**按字段名归类**即可，不必读 `delta.type`。
+///
+/// **路径必须与 `parse_line` 读的字段一一对应**，否则前缀截断会重复或吃字。
+#[derive(Default)]
+struct AnthropicPartial {
+    /// 顶层 `type` 的取值（`Observe` 攒出来的）
+    etype: String,
+    observing: bool,
+    kind: Option<AnthropicField>,
+    /// `content_block_delta` 的块下标（工具参数归属）
+    index: Option<usize>,
+}
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(PluginError::InternalError(format!(
-                "API Error ({status}): {error_text}"
-            )));
+enum AnthropicField {
+    Content,
+    Reasoning,
+    ToolArgs(usize),
+}
+
+impl PartialJsonSink for AnthropicPartial {
+    fn begin_string(&mut self, path: &FieldPath<'_>) -> StrAction {
+        self.kind = None;
+        if path.is(&["type"]) {
+            self.etype.clear();
+            self.observing = true;
+            return StrAction::Observe;
         }
+        self.observing = false;
+        // 只有 content_block_delta 会产出增量；别的事件的 `delta` 是别的东西
+        // （例如 `message_delta.delta.stop_reason`），按字段名匹配会误伤。
+        if self.etype != "content_block_delta" {
+            return StrAction::Skip;
+        }
+        self.kind = if path.is(&["delta", "text"]) {
+            Some(AnthropicField::Content)
+        } else if path.is(&["delta", "reasoning_content"])
+            || path.is(&["delta", "thinking"])
+            || path.is(&["delta", "thought"])
+            || path.is(&["delta", "reasoning"])
+        {
+            Some(AnthropicField::Reasoning)
+        } else if path.is(&["delta", "partial_json"]) {
+            // 下标未知就放弃本次增量（退回等换行），绝不用错下标产出事件
+            self.index.map(AnthropicField::ToolArgs)
+        } else {
+            None
+        };
+        if self.kind.is_some() {
+            StrAction::Emit
+        } else {
+            StrAction::Skip
+        }
+    }
 
-        Ok(())
+    fn text(&mut self, t: &str, out: &mut Vec<ProtocolEvent>) {
+        if self.observing {
+            self.etype.push_str(t);
+            return;
+        }
+        match self.kind {
+            Some(AnthropicField::Content) => out.push(ProtocolEvent::ContentDelta(t.to_string())),
+            Some(AnthropicField::Reasoning) => {
+                out.push(ProtocolEvent::ReasoningDelta(t.to_string()))
+            }
+            Some(AnthropicField::ToolArgs(i)) => out.push(ProtocolEvent::ToolCallDelta(
+                i,
+                None,
+                None,
+                Some(t.to_string()),
+            )),
+            None => {}
+        }
+    }
+
+    fn scalar(&mut self, path: &FieldPath<'_>, raw: &str) {
+        if path.is(&["index"]) {
+            self.index = raw.parse().ok();
+        }
     }
 }
 
@@ -436,3 +535,7 @@ fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
 }
 
 crate::submit_object_creator!(MODEL_PROTOCOL_ANTHROPIC_MESSAGES, build, dyn ModelProtocol);
+
+#[cfg(test)]
+#[path = "anthropic_messages.test.rs"]
+mod tests;

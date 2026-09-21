@@ -226,7 +226,11 @@ const BASELINE = {
   //     `symbio_core/exec.test.rs` +1（出口的发射计数——空闲超时判据的前提）、
   //     `tool_executor.test.rs` 换 1 不增减（`pending_from_message` 随流式分支一并
   //     删除，改钉**跨文件契约**：`agent_run` 的待审批载荷必须被编排层认出来）。
-  rustTests: 817,
+  //   · 批次 I +35：新建 `symbio_core/sse.test.rs` +5（UTF-8 边界对齐）、
+  //     `protocols/partial_json.test.rs` +8（路径判定 / 转义解码 / 跨块不变量）、
+  //     四个协议各自的 `.test.rs` +22——每个都逐**字节**切分喂进增量提取器，
+  //     钉死「增量拼出的文本 == 完整行解析出的文本」这条不变量。
+  rustTests: 852,
   // 31 → 47：前端半边的棘轮**长期停摆**（详见下方 vitestTests 的说明）。
   //   与覆盖率阈值不同，**文件数 / 用例数与平台无关**：全仓 `*.spec.ts` 里零
   //   `skipIf` / `runIf` / `process.platform` 分支，两处 `it.each` 遍历的也都是

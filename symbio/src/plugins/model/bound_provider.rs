@@ -20,7 +20,7 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 use crate::symbio_core::turn::{execute_post_with_abort, parse_sse_stream, PostResult, TurnOutput};
-use crate::symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError};
+use crate::symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError, SseLineParser};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -152,12 +152,10 @@ impl ModelProvider for BoundProvider {
             }
         };
 
-        let protocol = Arc::clone(&self.protocol);
-        match parse_sse_stream(response, root_id, sink, abort, move |line| {
-            protocol.parse_response_line(line)
-        })
-        .await
-        {
+        // 行解析契约直接由协议实例提供（`ModelProtocol: SseLineParser`）：
+        // 完整行与「未结束行」的增量提取都在协议层，core 不认识任何字段名。
+        let parser: &dyn SseLineParser = self.protocol.as_ref();
+        match parse_sse_stream(response, root_id, sink, abort, parser).await {
             Err(msg) => {
                 plugin_error!(
                     "model",

@@ -1215,4 +1215,88 @@ ADR-020 的三批（E/F/G）把**数据面**收干净了——通道换成出口
 
 ---
 
+## ADR-022: SSE 增量解析——**契约在 core，字段名在协议层**
+
+**状态**：已接受（批次 I「SSE 增量解析归一」已落地）。
+
+**背景**：
+
+为了首字延迟，`parse_sse_stream` 在换行到达之前会先尝试从半截 JSON 里挤出正文。
+这件事原先由 **core 内置的启发式解析器**（`try_parse_partial_sse_line`）代劳——
+在整行里搜 `"content":"` / `"reasoning_content":"` / `"partial_json":"` /
+`"text":"` / `"arguments":"` 五个字面量。三个后果：
+
+1. **加协议要改 core**：新协议能不能增量，取决于 core 那张表里有没有它的字段名。
+2. **两条路径两套转义**：core 的 `unescape_partial` 与协议解析器的 `serde_json`
+   各实现一遍 JSON 转义，对 `\uXXXX` 的处理不同 ⇒ 「已发送前缀长度」记的是 A 的
+   长度、完整行给的是 B 的文本，按前缀截断会**吃字**。这条最隐蔽：不报错，只是
+   偶尔少一个字。
+3. **每块重扫整行**：缓冲区每增长一次就把整行重新解析一遍 ⇒ 单行极长时 O(行长²)。
+
+**决策**：
+
+1. **契约拆成两个方法**（`symbio_core::sse`）：
+
+   ```text
+   SseLineParser::parse_line(line) -> Vec<ProtocolEvent>                     // 完整行
+   SseLineParser::open_partial_line(head) -> Option<Box<dyn PartialLineExtractor>>
+   PartialLineExtractor::push(bytes, out)                                    // 只吃新增字节
+   ```
+
+   `open_partial_line` **默认返回 `None`**，即「本行不做增量提取」——这是合法且正确
+   的降级（代价只是首字延迟变大），因此不实现增量提取的协议一行代码都不用写。
+2. **`open_partial_line` 每行只问一次**：答 `None` 就记下、本行不再重试。
+   收口前那个 O(n²) 正是「每块都重问一次」造成的。
+3. **UTF-8 边界对齐写进契约**（`utf8_chunk(buf, from) -> (&str, usize)`）：
+   被切断的多字节字符**不消费**，留给下一次 `push`。SSE 分块由 TCP 决定，
+   一个中文字符横跨两块是常态；用 `from_utf8_lossy` 会各替换出一个 U+FFFD，
+   而完整行给出的是真字符，按前缀截断同样会吃字。
+4. **字段名与转义规则全部留在协议层**。四个协议共用一个逐字节推进的 JSON 结构
+   扫描器（`plugins/model/protocols/partial_json.rs`），协议只实现三个钩子
+   （`begin_string` / `text` / `scalar`），用**键路径全等**判定「这个位置算什么」。
+5. **`ModelProtocol` 以 `SseLineParser` 为父 trait**。行解析不是 model 插件的私有
+   抽象——它是「core 定义、协议实现」的契约。于是 `BoundProvider::execute_turn`
+   直接把协议实例交给 `parse_sse_stream`，core 与协议之间不再有闭包中转。
+6. **core 只负责**：按 `\n` 切行 → `parse_line` → 按前缀截断去重（`LineProgress`，
+   机制不变）→ 尾巴交给提取器。core 不再认识任何协议字段名。
+
+**理由**：
+
+- **「增量文本恰好是完整行文本的前缀」这条不变量，必须由同一套转义规则保证**。
+  把它交给协议层，是因为只有协议层同时掌握「字段在哪」与「怎么解码」；
+  让 core 猜字段名，就等于让两处各实现一遍解码。
+- **降级必须是免费的**。`open_partial_line` 默认 `None` 让「不做增量」成为零成本
+  选项，协议作者不必为了「安全」去写一个空实现。
+- **判定用全等而非包含**：错配的代价是把别处的文本当增量吐出去（前端多出内容，
+  且完整行按前缀截断会把正文吃掉）；不匹配的代价只是失去增量、退回「等换行」。
+  **宁可漏，不可错。**
+
+**代价（逐条核实）**：
+
+- core 删约 115 行（`try_parse_partial_sse_line` / `unescape_partial` / `find_id` /
+  `find_name` / `find_idx`）；协议层新增一个扫描器 + 四个 sink。
+- **扫描器必须自己实现 JSON 字符串解码**（`\n` / `\uXXXX` / 代理对），并与
+  `serde_json` 对齐。这是本决策的**主要风险点**，靠两层测试压住：
+  `partial_json.test.rs` 直接比对 `serde_json` 的解码结果；四个协议各有一条
+  「**逐字节切分喂进去，增量拼出的文本必须等于完整行解析出的文本**」的不变量测试。
+- **对非法 JSON 转义比 `serde_json` 宽松**（原样输出而不是整行拒绝）。分歧只在
+  非法输入上出现，此时完整行路径本就不产出事件——最多是多吐一段无人确认的文本。
+- **下标未知就放弃本次增量**：`response.function_call_arguments.delta` 的
+  `output_index`、`content_block_delta` 的 `index` 若尚未出现，本次不提取。
+  用错下标会把参数接到别的工具调用上，比「等换行」糟糕得多。
+
+**后果**：
+
+- `PARTIAL_LINE_MIN_BYTES = 256` 与「增量路径不产出 `Finish` / `Usage` / `Error` /
+  `ResponseId`」两条语义**不变**：半截 JSON 里这些字段的值不可信。
+- `LineProgress` 前缀截断机制**不变**，只是「增量是完整行的前缀」这条不变量
+  改由协议层用同一套转义规则保证。
+- 新增 5 个测试文件、+35 个用例（`cargo test --lib` 817 → 852）。
+- **CLI 端到端**：本地 mock SSE 构造「单行 809 字节、逐字节写出」的响应，
+  四个协议五个场景 stdout **逐字节等于期望文本**；工具参数场景（419 字节 `cmd`
+  参数逐字节切分）工具收到完整参数并正常执行；`--provider LMStudio` 真实模型
+  冒烟 `EXIT=0`。
+
+---
+
 > **维护原则**：每个架构决策必须记录在此，包括背景、决策、理由、后果。

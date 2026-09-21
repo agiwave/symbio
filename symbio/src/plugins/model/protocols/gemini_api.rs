@@ -7,9 +7,11 @@ use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
+use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
+use crate::symbio_core::sse::PartialLineExtractor;
 use crate::symbio_core::{
-    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
+    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
 };
 
 pub struct GeminiProtocol;
@@ -156,67 +158,6 @@ impl ModelProtocol for GeminiProtocol {
         req
     }
 
-    fn parse_response_line(&self, line: &str) -> Vec<ProtocolEvent> {
-        let mut evs = Vec::new();
-        let trimmed = line.trim();
-        // 处理 Gemini 可能的数组包裹格式
-        if trimmed.is_empty() || trimmed == "[" || trimmed == "]" || trimmed == "," {
-            return evs;
-        }
-        let clean = trimmed.strip_prefix(',').unwrap_or(trimmed);
-
-        if let Ok(json) = serde_json::from_str::<Value>(clean) {
-            if let Some(candidates) = json.get("candidates").and_then(|c| c.as_array()) {
-                if let Some(content) = candidates.first().and_then(|c| c.get("content")) {
-                    if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
-                        for part in parts {
-                            if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                                evs.push(ProtocolEvent::ContentDelta(text.into()));
-                            }
-                            if let Some(fc) = part.get("functionCall") {
-                                let name =
-                                    fc.get("name").and_then(|v| v.as_str()).map(|s| s.into());
-                                let args = fc.get("args").map(|v| v.to_string());
-                                // Gemini 每次返回完整调用，因此生成新 ID
-                                evs.push(ProtocolEvent::ToolCallDelta(
-                                    0,
-                                    Some(uuid::Uuid::new_v4().to_string()),
-                                    name,
-                                    args,
-                                ));
-                            }
-                        }
-                    }
-                }
-
-                // 流结束原因（Gemini 叫 finishReason，顶层 candidates[0]）
-                if let Some(fr) = candidates
-                    .first()
-                    .and_then(|c| c.get("finishReason"))
-                    .and_then(|v| v.as_str())
-                {
-                    evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(fr))));
-                }
-            }
-
-            // 用量（Gemini 顶层 usageMetadata）
-            if let Some(um) = json.get("usageMetadata") {
-                let input = um
-                    .get("promptTokenCount")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u32);
-                let output = um
-                    .get("candidatesTokenCount")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u32);
-                if input.is_some() || output.is_some() {
-                    evs.push(ProtocolEvent::Usage(Usage { input, output }));
-                }
-            }
-        }
-        evs
-    }
-
     async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
         let api_key = cfg.api_key.clone().unwrap_or_default();
         let request = json!({
@@ -288,6 +229,98 @@ impl ModelProtocol for GeminiProtocol {
     }
 }
 
+// === 行解析（core 契约） ===
+
+impl SseLineParser for GeminiProtocol {
+    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent> {
+        let mut evs = Vec::new();
+        let trimmed = line.trim();
+        // 处理 Gemini 可能的数组包裹格式
+        if trimmed.is_empty() || trimmed == "[" || trimmed == "]" || trimmed == "," {
+            return evs;
+        }
+        let clean = trimmed.strip_prefix(',').unwrap_or(trimmed);
+
+        if let Ok(json) = serde_json::from_str::<Value>(clean) {
+            if let Some(candidates) = json.get("candidates").and_then(|c| c.as_array()) {
+                if let Some(content) = candidates.first().and_then(|c| c.get("content")) {
+                    if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
+                        for part in parts {
+                            if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                evs.push(ProtocolEvent::ContentDelta(text.into()));
+                            }
+                            if let Some(fc) = part.get("functionCall") {
+                                let name =
+                                    fc.get("name").and_then(|v| v.as_str()).map(|s| s.into());
+                                let args = fc.get("args").map(|v| v.to_string());
+                                // Gemini 每次返回完整调用，因此生成新 ID
+                                evs.push(ProtocolEvent::ToolCallDelta(
+                                    0,
+                                    Some(uuid::Uuid::new_v4().to_string()),
+                                    name,
+                                    args,
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                // 流结束原因（Gemini 叫 finishReason，顶层 candidates[0]）
+                if let Some(fr) = candidates
+                    .first()
+                    .and_then(|c| c.get("finishReason"))
+                    .and_then(|v| v.as_str())
+                {
+                    evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(fr))));
+                }
+            }
+
+            // 用量（Gemini 顶层 usageMetadata）
+            if let Some(um) = json.get("usageMetadata") {
+                let input = um
+                    .get("promptTokenCount")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
+                let output = um
+                    .get("candidatesTokenCount")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
+                if input.is_some() || output.is_some() {
+                    evs.push(ProtocolEvent::Usage(Usage { input, output }));
+                }
+            }
+        }
+        evs
+    }
+
+    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn PartialLineExtractor>> {
+        Some(Box::new(JsonLineExtractor::new(GeminiPartial)))
+    }
+}
+
+/// 未结束行的增量提取：只认 `candidates[0].content.parts[].text`。
+///
+/// Gemini 的 `functionCall.args` 每次都给**完整对象**（见 `parse_line`：它直接
+/// `v.to_string()`），没有「参数在增长」这回事，因此不做增量。
+///
+/// **路径必须与 `parse_line` 读的字段一一对应**，否则前缀截断会重复或吃字。
+#[derive(Default)]
+struct GeminiPartial;
+
+impl PartialJsonSink for GeminiPartial {
+    fn begin_string(&mut self, path: &FieldPath<'_>) -> StrAction {
+        if path.is(&["candidates", "content", "parts", "text"]) {
+            StrAction::Emit
+        } else {
+            StrAction::Skip
+        }
+    }
+
+    fn text(&mut self, t: &str, out: &mut Vec<ProtocolEvent>) {
+        out.push(ProtocolEvent::ContentDelta(t.to_string()));
+    }
+}
+
 // === 注册到通用对象创建机制 ===
 
 fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
@@ -295,3 +328,7 @@ fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
 }
 
 crate::submit_object_creator!(MODEL_PROTOCOL_GEMINI_API, build, dyn ModelProtocol);
+
+#[cfg(test)]
+#[path = "gemini_api.test.rs"]
+mod tests;

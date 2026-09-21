@@ -7,9 +7,11 @@ use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::CapabilityMeta;
+use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_CHAT};
+use crate::symbio_core::sse::PartialLineExtractor;
 use crate::symbio_core::{
-    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
+    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
 };
 
 pub struct OpenaiChatProtocol;
@@ -81,7 +83,47 @@ impl ModelProtocol for OpenaiChatProtocol {
         req
     }
 
-    fn parse_response_line(&self, line: &str) -> Vec<ProtocolEvent> {
+    async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
+        let api_key = cfg.api_key.clone().unwrap_or_default();
+        let request = json!({
+            "model": cfg.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            // 注意：部分 OpenAI 兼容网关（如 GLM）要求 max_tokens > 2，不能设为 1
+            "max_tokens": 256,
+        });
+
+        let response = get_http_client()
+            .post(self.get_api_url(cfg))
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(PluginError::InternalError(format!(
+                "API Error ({status}): {error_text}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// 最大上下文探测：OpenAI 兼容网关（Ollama / LM Studio / vLLM 等）
+    /// 的上报值，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
+    async fn query_context_limit(&self, cfg: &ModelProviderConfig) -> Option<u32> {
+        super::context_probe::probe_openai_compat_context(cfg).await
+    }
+}
+
+// === 行解析（core 契约） ===
+
+impl SseLineParser for OpenaiChatProtocol {
+    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent> {
         let mut evs = Vec::new();
         if line.is_empty() {
             return evs;
@@ -161,40 +203,57 @@ impl ModelProtocol for OpenaiChatProtocol {
         evs
     }
 
-    async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
-        let api_key = cfg.api_key.clone().unwrap_or_default();
-        let request = json!({
-            "model": cfg.model,
-            "messages": [{"role": "user", "content": "ping"}],
-            // 注意：部分 OpenAI 兼容网关（如 GLM）要求 max_tokens > 2，不能设为 1
-            "max_tokens": 256,
-        });
+    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn PartialLineExtractor>> {
+        Some(Box::new(JsonLineExtractor::new(ChatPartial::default())))
+    }
+}
 
-        let response = get_http_client()
-            .post(self.get_api_url(cfg))
-            .header("Authorization", format!("Bearer {api_key}"))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-            .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
+/// 未结束行的增量提取：只认 `choices[0].delta.*` 三个字段。
+///
+/// **路径必须与上面 `parse_line` 读的字段一一对应**：两边不一致的后果不是报错，
+/// 而是「增量吐出的文本不是完整行文本的前缀」——core 按前缀截断时会重复或吃字。
+#[derive(Default)]
+struct ChatPartial {
+    kind: Option<ChatField>,
+}
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(PluginError::InternalError(format!(
-                "API Error ({status}): {error_text}"
-            )));
+enum ChatField {
+    Content,
+    Reasoning,
+    ToolArgs(usize),
+}
+
+impl PartialJsonSink for ChatPartial {
+    fn begin_string(&mut self, path: &FieldPath<'_>) -> StrAction {
+        self.kind = if path.is(&["choices", "delta", "content"]) {
+            Some(ChatField::Content)
+        } else if path.is(&["choices", "delta", "reasoning_content"]) {
+            Some(ChatField::Reasoning)
+        } else if path.is(&["choices", "delta", "tool_calls", "function", "arguments"]) {
+            // 属于第几个工具调用由「最内层数组下标」给出（`tool_calls[N]`）
+            Some(ChatField::ToolArgs(path.array_index.unwrap_or(0)))
+        } else {
+            None
+        };
+        if self.kind.is_some() {
+            StrAction::Emit
+        } else {
+            StrAction::Skip
         }
-
-        Ok(())
     }
 
-    /// 最大上下文探测：OpenAI 兼容网关（Ollama / LM Studio / vLLM 等）
-    /// 的上报值，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
-    async fn query_context_limit(&self, cfg: &ModelProviderConfig) -> Option<u32> {
-        super::context_probe::probe_openai_compat_context(cfg).await
+    fn text(&mut self, t: &str, out: &mut Vec<ProtocolEvent>) {
+        match self.kind {
+            Some(ChatField::Content) => out.push(ProtocolEvent::ContentDelta(t.to_string())),
+            Some(ChatField::Reasoning) => out.push(ProtocolEvent::ReasoningDelta(t.to_string())),
+            Some(ChatField::ToolArgs(i)) => out.push(ProtocolEvent::ToolCallDelta(
+                i,
+                None,
+                None,
+                Some(t.to_string()),
+            )),
+            None => {}
+        }
     }
 }
 
@@ -205,3 +264,7 @@ fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
 }
 
 crate::submit_object_creator!(MODEL_PROTOCOL_OPENAI_CHAT, build, dyn ModelProtocol);
+
+#[cfg(test)]
+#[path = "openai_chat.test.rs"]
+mod tests;

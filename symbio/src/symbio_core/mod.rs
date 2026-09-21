@@ -20,6 +20,7 @@ mod plugin;
 mod plugin_dir;
 pub mod providers;
 pub mod schemas;
+pub mod sse;
 mod text;
 mod tools;
 pub mod transcript_stream;
@@ -64,6 +65,7 @@ pub use plugin_dir::{
     config_file_of, dir_from_ctx, dir_of, plugins_root, ConfigFile, PluginDir, KEY_NAME,
     KEY_PROVIDER, PLUGIN_FILE,
 };
+pub use sse::{PartialLineExtractor, SseLineParser};
 pub use text::{floor_char_boundary, truncate_bytes};
 pub use tools::DefaultToolVisitor;
 pub use transport::{
@@ -71,9 +73,8 @@ pub use transport::{
 };
 pub use turn::{
     build_assistant_messages, build_tool_message, emit_append, emit_update,
-    execute_post_with_abort, get_http_client, parse_sse_stream, short_id,
-    try_parse_partial_sse_line, PostResult, StreamChildIds, ToolCallAccumulator, ToolCallInfo,
-    TurnOutput,
+    execute_post_with_abort, get_http_client, parse_sse_stream, short_id, PostResult,
+    StreamChildIds, ToolCallAccumulator, ToolCallInfo, TurnOutput,
 };
 pub use vdfs::{
     DynVdfsProvider, VdfsAccess, VdfsChange, VdfsContent, VdfsError, VdfsNode, VdfsProvider,

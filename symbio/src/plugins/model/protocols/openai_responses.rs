@@ -7,9 +7,11 @@ use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
+use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES};
+use crate::symbio_core::sse::PartialLineExtractor;
 use crate::symbio_core::{
-    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, Usage,
+    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
 };
 use tracing::debug;
 
@@ -200,7 +202,51 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         req
     }
 
-    fn parse_response_line(&self, line: &str) -> Vec<ProtocolEvent> {
+    /// 连通性验证：Responses API 的最小请求探测。
+    ///
+    /// ping 走独立的轻量请求，而非 `handle_chat_stream` 全量会话路径——
+    /// 与其余三协议保持一致。
+    async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
+        let api_key = cfg.api_key.clone().unwrap_or_default();
+        let request = json!({
+            "model": cfg.model,
+            "input": "ping",
+            // OpenAI 限制 max_output_tokens 最小为 16
+            "max_output_tokens": 16,
+        });
+
+        let response = get_http_client()
+            .post(self.get_api_url(cfg))
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(PluginError::InternalError(format!(
+                "API Error ({status}): {error_text}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// 最大上下文探测：OpenAI 兼容网关（Ollama / LM Studio / vLLM 等）
+    /// 的上报值，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
+    async fn query_context_limit(&self, cfg: &ModelProviderConfig) -> Option<u32> {
+        super::context_probe::probe_openai_compat_context(cfg).await
+    }
+}
+
+// === 行解析（core 契约） ===
+
+impl SseLineParser for OpenaiResponsesProtocol {
+    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent> {
         let mut evs = Vec::new();
         let Some(data) = sse_data(line) else {
             return evs;
@@ -316,44 +362,96 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         evs
     }
 
-    /// 连通性验证：Responses API 的最小请求探测。
-    ///
-    /// ping 走独立的轻量请求，而非 `handle_chat_stream` 全量会话路径——
-    /// 与其余三协议保持一致。
-    async fn ping(&self, cfg: &ModelProviderConfig) -> Result<(), PluginError> {
-        let api_key = cfg.api_key.clone().unwrap_or_default();
-        let request = json!({
-            "model": cfg.model,
-            "input": "ping",
-            // OpenAI 限制 max_output_tokens 最小为 16
-            "max_output_tokens": 16,
-        });
+    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn PartialLineExtractor>> {
+        Some(Box::new(
+            JsonLineExtractor::new(ResponsesPartial::default()),
+        ))
+    }
+}
 
-        let response = get_http_client()
-            .post(self.get_api_url(cfg))
-            .header("Authorization", format!("Bearer {api_key}"))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-            .map_err(|e| PluginError::InternalError(format!("Network error: {e}")))?;
+/// 未结束行的增量提取：本协议的字段名**不区分**内容 / 推理 / 参数——它由顶层
+/// `type` 决定（`response.output_text.delta` / `response.reasoning_text.delta` /
+/// `response.function_call_arguments.delta`），三者都把正文放在同名 `delta` 字段里。
+///
+/// 因此这里先用 [`StrAction::Observe`] 记下顶层 `type`，再据此决定 `delta` 算什么。
+///
+/// **`response.completed` / `response.output_item.done` 必须排除**：它们携带的是
+/// **全量**文本，增量吐出去会让前端重复一遍，而完整行路径对这些事件根本不产出
+/// 文本事件 ⇒ 没有前缀截断来兜底。
+///
+/// **路径必须与 `parse_line` 读的字段一一对应**，否则前缀截断会重复或吃字。
+#[derive(Default)]
+struct ResponsesPartial {
+    /// 顶层 `type` 的取值（`Observe` 攒出来的）
+    etype: String,
+    /// 是否正在攒 `type`
+    observing: bool,
+    kind: Option<ResponsesField>,
+    /// `response.function_call_arguments.delta` 的归属下标
+    output_index: Option<usize>,
+}
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(PluginError::InternalError(format!(
-                "API Error ({status}): {error_text}"
-            )));
+enum ResponsesField {
+    Content,
+    Reasoning,
+    ToolArgs(usize),
+}
+
+impl PartialJsonSink for ResponsesPartial {
+    fn begin_string(&mut self, path: &FieldPath<'_>) -> StrAction {
+        self.kind = None;
+        if path.is(&["type"]) {
+            self.etype.clear();
+            self.observing = true;
+            return StrAction::Observe;
         }
-
-        Ok(())
+        self.observing = false;
+        if path.is(&["delta"]) {
+            self.kind = match self.etype.as_str() {
+                "response.text.delta" | "response.output_text.delta" => {
+                    Some(ResponsesField::Content)
+                }
+                "response.reasoning_text.delta" => Some(ResponsesField::Reasoning),
+                // 下标未知就放弃本次增量（退回等换行），绝不用错下标产出事件
+                "response.function_call_arguments.delta" => {
+                    self.output_index.map(ResponsesField::ToolArgs)
+                }
+                // 全量文本事件：明确不做增量
+                "response.completed" | "response.output_item.done" => None,
+                _ => None,
+            };
+        }
+        if self.kind.is_some() {
+            StrAction::Emit
+        } else {
+            StrAction::Skip
+        }
     }
 
-    /// 最大上下文探测：OpenAI 兼容网关（Ollama / LM Studio / vLLM 等）
-    /// 的上报值，供 session 侧 `min(用户设置, 服务上报)` 收敛使用
-    async fn query_context_limit(&self, cfg: &ModelProviderConfig) -> Option<u32> {
-        super::context_probe::probe_openai_compat_context(cfg).await
+    fn text(&mut self, t: &str, out: &mut Vec<ProtocolEvent>) {
+        if self.observing {
+            self.etype.push_str(t);
+            return;
+        }
+        match self.kind {
+            Some(ResponsesField::Content) => out.push(ProtocolEvent::ContentDelta(t.to_string())),
+            Some(ResponsesField::Reasoning) => {
+                out.push(ProtocolEvent::ReasoningDelta(t.to_string()))
+            }
+            Some(ResponsesField::ToolArgs(i)) => out.push(ProtocolEvent::ToolCallDelta(
+                i,
+                None,
+                None,
+                Some(t.to_string()),
+            )),
+            None => {}
+        }
+    }
+
+    fn scalar(&mut self, path: &FieldPath<'_>, raw: &str) {
+        if path.is(&["output_index"]) {
+            self.output_index = raw.parse().ok();
+        }
     }
 }
 
@@ -364,3 +462,7 @@ fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
 }
 
 crate::submit_object_creator!(MODEL_PROTOCOL_OPENAI_RESPONSES, build, dyn ModelProtocol);
+
+#[cfg(test)]
+#[path = "openai_responses.test.rs"]
+mod tests;
