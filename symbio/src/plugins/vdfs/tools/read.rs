@@ -7,9 +7,7 @@
 //! 直接透传（已含 `b64` / `mime`，供多模态链路消费）。
 
 use super::{tool, ToolVdfs};
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -45,8 +43,13 @@ impl Capability for ReadTool {
         )
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let raw = ctx.payload::<Value>().unwrap_or(Value::Null);
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        let raw = args;
         let path = raw
             .get("path")
             .and_then(|v| v.as_str())
@@ -59,10 +62,10 @@ impl Capability for ReadTool {
 
         // 二进制（图片等）原样透传：VdfsContent 已含 b64 + mime，由多模态链路消费
         if content.binary {
-            return Ok(PluginPayload::new(&content));
+            return Ok(serde_json::to_value(&content)?);
         }
         let Some(text) = content.text else {
-            return Ok(PluginPayload::new(&content));
+            return Ok(serde_json::to_value(&content)?);
         };
 
         // 以下逻辑与原生 read_file 的 execute_inner 完全一致（行号 + 分页）
@@ -93,10 +96,10 @@ impl Capability for ReadTool {
             format!("\n[共 {total} 行]")
         };
 
-        Ok(PluginPayload::new(&json!({
+        Ok(json!({
             "content": format!("{numbered}{summary}"),
             "path": content.path,
             "total_lines": total,
-        })))
+        }))
     }
 }

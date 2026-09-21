@@ -41,11 +41,10 @@ use crate::symbio_core::schemas::session::chat_message::{
 };
 use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
 use crate::symbio_core::turn::short_id;
-use crate::symbio_core::{InvokeRequest, PluginChannel, PluginError, PluginFrame};
+use crate::symbio_core::{AbortSignal, EventSink, InvokeRequest, PluginError};
 use crate::{plugin_error, plugin_info};
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// resume 执行结果：继续 turn 循环 或 退出等下次 resume。
@@ -69,13 +68,13 @@ pub enum ResumeOutcome {
 pub async fn process_resume(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn InvokeRequest>,
-    channel: &mut PluginChannel,
-    abort_flag: &Arc<AtomicBool>,
+    sink: &EventSink,
+    abort: &AbortSignal,
     session: &Arc<dyn ChatSession>,
     req: ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
     match req.action {
-        ResumeAction::RetryTurn => process_retry_turn(session, channel, &req).await,
+        ResumeAction::RetryTurn => process_retry_turn(session, sink, &req).await,
         // 压缩失败重试：执行体在压缩流水线所在模块（那里才有 `SessionContext`
         // 与切分/内核的私有面）。完成后一律 `Done`——压缩不是对话轮次，没有
         // "续写"可言；与其它 resume 出口一样，失败节点（若有）留下等下次 resume。
@@ -83,15 +82,15 @@ pub async fn process_resume(
             super::chat_loop::compress::retry_compaction(
                 orchestrator,
                 ctx,
-                channel,
-                abort_flag,
+                sink,
+                abort,
                 session,
                 &req.target_id,
             )
             .await?;
             Ok(ResumeOutcome::Done)
         }
-        _ => process_tool_resume_action(orchestrator, ctx, channel, abort_flag, session, req).await,
+        _ => process_tool_resume_action(orchestrator, ctx, sink, abort, session, req).await,
     }
 }
 
@@ -110,7 +109,7 @@ pub async fn process_resume(
 /// 在加载 session 历史后自动发起（用户原消息仍在历史中）。
 async fn process_retry_turn(
     session: &Arc<dyn ChatSession>,
-    channel: &mut PluginChannel,
+    sink: &EventSink,
     req: &ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
     // 1. 加载会话消息
@@ -152,12 +151,10 @@ async fn process_retry_turn(
 
     // 6. 广播 Delete 事件（每个被删除的消息）
     for msg in &deleted_messages {
-        let _ = channel
-            .tx
-            .send(PluginFrame::Data(json!(NodeOp::Remove {
-                message_id: msg.id.clone()
-            })))
-            .await;
+        sink.emit(NodeOp::Remove {
+            message_id: msg.id.clone(),
+        })
+        .await;
     }
 
     plugin_info!(
@@ -177,8 +174,8 @@ async fn process_retry_turn(
 async fn process_tool_resume_action(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn InvokeRequest>,
-    channel: &mut PluginChannel,
-    abort_flag: &Arc<AtomicBool>,
+    sink: &EventSink,
+    abort: &AbortSignal,
     session: &Arc<dyn ChatSession>,
     req: ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
@@ -248,12 +245,10 @@ async fn process_tool_resume_action(
                     obj.insert("started_at".into(), json!(crate::symbio_core::now_ms()));
                 }
                 running.meta = Some(meta);
-                let _ = channel
-                    .tx
-                    .send(PluginFrame::Data(json!(NodeOp::Upsert {
-                        message: Box::new(running)
-                    })))
-                    .await;
+                sink.emit(NodeOp::Upsert {
+                    message: Box::new(running),
+                })
+                .await;
             }
             None => {
                 plugin_error!(
@@ -285,14 +280,14 @@ async fn process_tool_resume_action(
                 obj.insert("approved".into(), json!(true));
             }
             let (res, success) =
-                reexecute_tool(orchestrator, ctx, abort_flag, &tool_name, a, &req.target_id).await;
+                reexecute_tool(orchestrator, ctx, abort, &tool_name, a, &req.target_id).await;
             (res, success, None)
         }
         ResumeAction::Retry => {
             let (res, success) = reexecute_tool(
                 orchestrator,
                 ctx,
-                abort_flag,
+                abort,
                 &tool_name,
                 base_args.clone(),
                 &req.target_id,
@@ -312,7 +307,7 @@ async fn process_tool_resume_action(
             let (res, success) = reexecute_tool(
                 orchestrator,
                 ctx,
-                abort_flag,
+                abort,
                 &tool_name,
                 a.clone(),
                 &req.target_id,
@@ -322,7 +317,7 @@ async fn process_tool_resume_action(
         }
     };
 
-    if abort_flag.load(Ordering::Relaxed) {
+    if abort.is_aborted() {
         // 父 ToolCall 在步骤 5 被广播成 `Streaming`（"运行中"）——那是**广播帧**
         // （`Streaming` 是瞬态状态，持久层拒绝落盘，见 `chat_session.rs::
         // ensure_durable_states`），前端此刻显示"运行中"。若在这里直接返回，
@@ -338,12 +333,10 @@ async fn process_tool_resume_action(
                 e
             );
         }
-        let _ = channel
-            .tx
-            .send(PluginFrame::Data(json!(NodeOp::Upsert {
-                message: Box::new(parent_update)
-            })))
-            .await;
+        sink.emit(NodeOp::Upsert {
+            message: Box::new(parent_update),
+        })
+        .await;
         return Ok(ResumeOutcome::Done);
     }
 
@@ -409,24 +402,18 @@ async fn process_tool_resume_action(
     session.replace_messages(messages).await?;
 
     // 10. 广播：Delete 旧子 + Update 新子 + Update 父节点
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(json!(NodeOp::Remove {
-            message_id: old_child_id
-        })))
-        .await;
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(json!(NodeOp::Upsert {
-            message: Box::new(new_child)
-        })))
-        .await;
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(json!(NodeOp::Upsert {
-            message: Box::new(updated_parent)
-        })))
-        .await;
+    sink.emit(NodeOp::Remove {
+        message_id: old_child_id,
+    })
+    .await;
+    sink.emit(NodeOp::Upsert {
+        message: Box::new(new_child),
+    })
+    .await;
+    sink.emit(NodeOp::Upsert {
+        message: Box::new(updated_parent),
+    })
+    .await;
 
     // 11. 成功 → Continue；失败 → Done
     if final_success {
@@ -478,44 +465,37 @@ fn finalize_aborted_parent(
 
 /// 重新执行工具（approve/retry/supply 共用）。
 ///
-/// 构造临时 PluginChannel 调用 `execute_tool_async`，排空对端防止阻塞。
 /// 返回 `(result_text, success)`。
 ///
-/// 使用临时 channel 而非 run_chat_loop 的主 channel，因为 `execute_tool_async` 会以
-/// `result_msg_id` 发送流式更新和完成帧，若用主 channel 会与 `process_tool_resume_action`
-/// 自行构造的 `new_child`（不同 id）产生重复节点。排空丢弃中间更新，由调用方统一
+/// 使用**静默出口**（[`EventSink::silent`]）而非主出口，因为 `execute_tool_async` 会以
+/// `result_msg_id` 发送流式更新和完成事件，若走主出口会与 `process_tool_resume_action`
+/// 自行构造的 `new_child`（不同 id）产生重复节点。丢弃中间更新，由调用方统一
 /// 构造最终结果子节点。
+///
+/// 收口前这里靠「新建一个临时 `PluginChannel` 并起一个 drain 任务排空对端」实现
+/// 静默——那是「出口只能是通道」的产物；现在静默是出口的一种取值，两行代码即达意。
 async fn reexecute_tool(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn InvokeRequest>,
-    abort_flag: &Arc<AtomicBool>,
+    abort: &AbortSignal,
     tool_name: &str,
     args: Value,
     tool_call_id: &str,
 ) -> (String, bool) {
-    let (mut channel, other) = PluginChannel::pair(64);
-
-    // 排空对端 rx，避免 execute_tool_async 发送的流式更新阻塞 channel.tx
-    let mut drain_rx = other.rx;
-    let drain_handle = tokio::spawn(async move { while drain_rx.recv().await.is_some() {} });
-
     let result_msg_id = short_id();
+    let silent = EventSink::silent();
 
     let (res, success, _captured) = execute_tool_async(
         &orchestrator.parent,
         tool_name,
         args,
         tool_call_id,
-        &mut channel,
-        abort_flag,
+        &silent,
+        abort,
         result_msg_id,
         ctx.clone(),
     )
     .await;
-
-    // channel drop 后，drain_rx 收到 None 并退出
-    drop(channel);
-    let _ = drain_handle.await;
 
     (res, success)
 }

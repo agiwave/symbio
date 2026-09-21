@@ -289,3 +289,55 @@ impl SymbioKey for ConfigurableVisitorKey {
     }
 }
 pub const CONFIG_VISITOR: ConfigurableVisitorKey = ConfigurableVisitorKey;
+
+/// 执行期**事件出口** Key —— 第四条进程内通道
+/// （能力 = 可调用对象；选项 = 可展示的数据节点；可配置 = 「我有配置文档」；
+/// 出口 = 「本次调用的可见事件往这里写」，见 `symbio_core::exec`）。
+///
+/// ## 为什么走 `ctx` 而不是给 `Capability::execute` 加参数
+///
+/// `Capability::execute(ctx)` 的入参是**请求信封**（`PATH` / `trace_id` / `payload`
+/// / 会话上下文），不是执行期上下文。出口与中止信号是**执行期**的，与「这次调用
+/// 从哪条路径来」无关：同一个 `shell` 能力既可能被会话编排层调用（有出口），
+/// 也可能被 `route()` 直接调用（无出口 ⇒ 静默）。用 `ctx` 承载，缺席即静默，
+/// **不必为「有没有出口」造第二条调用路径**。
+///
+/// ## 为什么 `parse → None`
+///
+/// 与 [`CAPABILITY_VISITOR`] / [`OPTION_VISITOR`] / [`CONFIG_VISITOR`] 同款：
+/// 进程内专用，没有字符串形态。`parse` 返回 `None` 是**刻意的**——它声明
+/// 「本键不参与任何跨进程/字符串化的往返」，而不是「尚未实现」。
+pub struct EventSinkKey;
+impl SymbioKey for EventSinkKey {
+    type Value = crate::symbio_core::EventSink;
+    fn name(&self) -> &'static str {
+        "event_sink"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "event_sink".to_string()
+    }
+}
+pub const EVENT_SINK: EventSinkKey = EventSinkKey;
+
+/// 执行期**中止信号** Key —— 与 [`EVENT_SINK`] 成对。
+///
+/// 写入者是编排层（发起工具调用前）；读取者是工具实现体。缺席 ⇒ 得到一个
+/// **永不中止**的独立信号（`AbortSignal::new()`）：直接 `route()` 调用没有编排层，
+/// 也就没有中止来源，这是诚实表达而非兜底。
+pub struct AbortSignalKey;
+impl SymbioKey for AbortSignalKey {
+    type Value = crate::symbio_core::AbortSignal;
+    fn name(&self) -> &'static str {
+        "abort_signal"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "abort_signal".to_string()
+    }
+}
+pub const ABORT_SIGNAL: AbortSignalKey = AbortSignalKey;

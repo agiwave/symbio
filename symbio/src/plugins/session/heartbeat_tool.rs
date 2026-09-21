@@ -12,8 +12,7 @@
 use super::plugin::SessionPlugin;
 use super::types::HeartbeatConfig;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
-    PluginPayload, SESSION_ID,
+    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt, PluginError, SESSION_ID,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -87,8 +86,12 @@ impl Capability for HeartbeatTool {
         }
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let args: Value = ctx.payload()?;
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
         let plugin = self
             .plugin
             .upgrade()
@@ -169,7 +172,7 @@ impl Capability for HeartbeatTool {
             }
         };
 
-        Ok(PluginPayload::new(&data))
+        Ok(serde_json::to_value(&data)?)
     }
 }
 

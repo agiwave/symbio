@@ -1,6 +1,13 @@
 # Session 核心循环（LLM × 工具）梳理与收口设计
 
-> 状态：**批次 A/B/C 已落地**（`cargo check --tests` 通过）；批次 D（异步工具并发）待授权
+> 状态：**批次 A/B/C 已落地**（`cargo check --tests` 通过）；批次 D（异步工具并发）待授权；
+> **批次 E（执行期出口/信号双原语，§8）、批次 F（工具侧收敛到同一出口，§9）、
+> 批次 G（流式工具接上出口、执行期通道归零，§10）与批次 H（两个执行接口签名统一，§11）
+> 已落地**。
+> 这四批改的是**宿主层与执行层之间的协议**（`PluginChannel` 双职责拆为
+> `EventSink` + `AbortSignal`，工具不再把通道当事件流，执行层不再有帧循环，
+> `Capability::execute` 与 `ModelProvider::execute_turn` 收成同一形状），
+> 不改本文 §2 的四个收口点，但 §1.1 的 ② 与 §3 代码骨架已按其更新。
 > 代码位置：其后又做了模块拆分（S2），`chat_loop.rs` **2000 → 434 行**，拆出
 > `chat_loop/{state,inputs,turn,compress,io}.rs`（见 [`./module-layout.md`](./module-layout.md) §4.2）。
 > 本文的"文件:行"只作**历史取证**，请按**符号名**检索。
@@ -63,12 +70,13 @@
              collect_capabilities(traverse) → CAPABILITY_VISITOR
              （系统提示词与工具都在这一步收集；本层**不**拼提示词）
              构造 model_chat::Request → run_chat_loop_task
-② 宿主层   run_chat_loop_task                     orchestrator.rs:363
-             WorkingGuard（panic 兜底）/ StopSignal / AiControlGuard
-             provider 解析 + RATE_LIMITER + PluginChannel::pair
+② 宿主层   run_chat_loop_task                     orchestrator/consume.rs
+             WorkingGuard（panic 兜底）/ StopSignal / AbortGuard
+             provider 解析 + RATE_LIMITER
+             EventSink::direct(TranscriptSink) + AbortSignal::new()
              spawn → ③（子任务）
-             消费循环（orchestrator.rs:551）：收帧 → 快照替换 / Append 追加
-               → emit_message_patch / VDFS 变更 / persist_failure
+             select! 三臂：任务结束 / 1800s 看门狗 / 状态被接管（见 §8）
+               → 收尾：定稿在途 / persist_failure / 结局字段
 ③ 循环层   run_chat_loop                          chat_loop.rs:324   ← 本文对象
              + close_turn                         chat_loop.rs:748
              + auto_compress_process              chat_loop.rs:1145
@@ -91,7 +99,7 @@
 | P3 | 计数器初始化：`tool_rounds` / `continuation_count` / `nudged_this_request` | 353–357 |
 | P4 | `open_chat_session`（取 `SESSION_HANDLE`，缺则回退内存会话） | 359 |
 | P5 | fade 参数（`fade_activate_rounds` / `fade_keep_recent_turns`） | 364–365 |
-| P6 | `abort_flag` + `SessionContext` 构造 | 366–372 |
+| P6 | `AbortSignal` + `SessionContext` 构造 | 366–372 |
 | P7 | **resume 处理**（`process_resume`）→ `Continue` / `Done` / `Err` | 385–409 |
 
 **循环体**（`chat_loop.rs:411–730`）
@@ -172,7 +180,7 @@ end loop
 #### 差距 4 · `close_turn` 的 14 个参数是"循环体被机械搬出"的痕迹
 
 `#[allow(clippy::too_many_arguments)]`（chat_loop.rs:747）掩盖了参数全部来自循环作用域
-（`context` / `channel` / `abort_flag` / `tool_rounds` / `last_saved` / `continuation_count` /
+（`context` / `sink` / `abort` / `tool_rounds` / `last_saved` / `continuation_count` /
 `nudged_this_request` …）。这说明它本质仍是循环体的一部分，只是被搬成了函数。
 
 ---
@@ -407,7 +415,8 @@ struct TurnState {
 pub async fn run_chat_loop(
     orchestrator: &ChatOrchestrator,
     ctx: Arc<dyn InvokeRequest>,
-    mut channel: PluginChannel,
+    sink: EventSink,          // 事件唯一出口（见 §8）
+    abort: AbortSignal,       // 中止唯一入口（见 §8）
 ) -> Result<(), PluginError> {
     // ── 前步骤 ①：请求解析与请求级配置快照 ──────────────────────────────
     let mut req: model_chat::Request = ctx.payload()?;
@@ -417,7 +426,7 @@ pub async fn run_chat_loop(
     let session = open_chat_session(&ctx).await;
 
     // ── 前步骤 ③：轮次状态 + 上下文容器 ─────────────────────────────────
-    let mut turn = TurnState { abort_flag: …, ..Default::default() };
+    let mut turn = TurnState { abort: abort.clone(), ..Default::default() };
     let mut single_message = req.single_message.take();
     let mut context = SessionContext { messages: Vec::new(), session };
 
@@ -426,9 +435,9 @@ pub async fn run_chat_loop(
         match resume::process_resume(…).await {
             Ok(ResumeOutcome::Continue) => {}
             Ok(ResumeOutcome::Done) =>
-                return finish_turn(orch, &context, &channel, &turn, TurnExit::ResumeDone).await,
+                return finish_turn(orch, &context, &sink, &turn, TurnExit::ResumeDone).await,
             Err(e) =>
-                return finish_turn(orch, &context, &channel, &turn, TurnExit::Failed(e)).await,
+                return finish_turn(orch, &context, &sink, &turn, TurnExit::Failed(e)).await,
         }
     }
 
@@ -447,34 +456,34 @@ pub async fn run_chat_loop(
         // 步骤 3 · 本轮输入（收口 ②③，唯一准备点）
         //   系统提示词 + 工具在同一函数内、同一时刻收集（同一 CapabilityVisitor）；
         //   派生 overhead（一轮一次）；压缩（apply_compaction）与视图重建亦在其内。
-        let inputs = match prepare_turn_inputs(orch, &ctx, &mut context, &mut channel,
+        let inputs = match prepare_turn_inputs(orch, &ctx, &mut context, &sink,
                                               &mut turn, &turn_req).await {
             Ok(v)            => v,
-            Err(exit)        => return finish_turn(orch, &context, &channel, &turn, exit).await,
+            Err(exit)        => return finish_turn(orch, &context, &sink, &turn, exit).await,
         };
 
         // 步骤 4 · 推理
         let result = orch.provider.execute_turn(&inputs.system_prompt, &inputs.request_view,
                                                &inputs.tools, &inputs.root_id,
-                                               &mut channel, &turn.abort_flag).await;
+                                               &sink, &turn.abort).await;
         let out = match result {
             Err(RetryWithoutContextId) => { /* 清 response_id + 半截 Streaming */ continue; }
             Err(Aborted)               => return finish_turn(…, TurnExit::Aborted).await,
             Err(e)                     => return finish_turn(…, TurnExit::Failed(e)).await,
             Ok(out)                    => out,
         };
-        if turn.abort_flag.load(SeqCst) {
-            return finish_turn(orch, &context, &channel, &turn, TurnExit::Aborted).await;
+        if turn.abort.is_aborted() {
+            return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted).await;
         }
 
         // 步骤 5 · 推理收尾（定格子节点 → 校准估算 → 并入上下文）
-        let result = settle_reasoning(orch, &mut context, &channel, &inputs.root_id, out).await;
+        let result = settle_reasoning(orch, &mut context, &sink, &inputs.root_id, out).await;
 
         // 步骤 6 · 本轮结算 + 下一步判定（收口 ④）
-        match close_turn(orch, ctx.clone(), &mut channel, &mut context,
+        match close_turn(orch, ctx.clone(), &sink, &mut context,
                          &mut turn, result, &turn_req).await {
             TurnFlow::NextTurn        => {}
-            TurnFlow::Finish(exit)    => return finish_turn(orch, &context, &channel, &turn, exit).await,
+            TurnFlow::Finish(exit)    => return finish_turn(orch, &context, &sink, &turn, exit).await,
         }
     }
     // ── 后步骤 ──────────────────────────────────────────────────────────
@@ -594,11 +603,11 @@ node scripts/grep-audit.mjs && node scripts/style-audit.mjs
 | 压缩四层（L0 守卫 / L1 自动 / L2 主动 / 输入超限预判） | 每层对应一种真实故障。**注意预判层只保留"跳过注定失败的请求"，不再本地截断历史**（该兜底已删除，见 `node-state-streaming.md` §6 S20.8 与 `docs/DECISIONS.md` ADR-018） |
 | `compress_with_snapshot_core` 单一实现 | 被动与主动共用内核已是正确收敛，只缺"判定"收口 |
 | `StopSignal` 幂等 + RAII 兜底 | "一个请求生命周期内 Stop 恰好一次"由生命周期保证，不是人工记忆 |
-| `WorkingGuard` / `AiControlGuard` | panic / 提前 return 下 `is_working` 与 `ai_control_tx` 的收敛保证 |
+| `WorkingGuard` / `AbortGuard` | panic / 提前 return 下 `is_working` 与**中止信号登记**的收敛保证（`AbortGuard::disarm` 注销登记**并置位信号**，显式承担历史上「通道 drop ⇒ 中止」的隐式语义，见 §8） |
 | `finalize_assistant_turn` 的 reasoning-only 分支 | 防前端双份文本（真实事故） |
 | Turn 子树完整性守卫（`find_turn_user_split_idx`） | provider 400 的直接防线 |
 | `feedback_estimate` 两条不变式 | 破坏任一条都会静默劣化水位判定 |
-| 消费循环（orchestrator.rs:551）的帧合并与 `persist_failure` 作用域收窄 | 终态落库唯一入口，189-Turn 误回滚事故的修复 |
+| 消费循环（`orchestrator/consume.rs`）的 `select!` 三臂与 `persist_failure` 作用域收窄 | 终态落库唯一入口，189-Turn 误回滚事故的修复 |
 | `tool_executor` 的三级超时与失败信息性语义 | 防挂死 + 失败必须回传模型继续 |
 
 ---
@@ -626,6 +635,390 @@ node scripts/grep-audit.mjs && node scripts/style-audit.mjs
 | 全程 | `cargo test --lib` 用例数 ≥ 528 且 0 failed | ✅ 532 passed / 0 failed（107.55s / 109.93s） |
 | 全程 | `cargo fmt --all -- --check`（改动文件零偏差） | ✅ `chat_loop.rs` / `compression.rs` 零偏差；`plugin.rs` 仅剩 5 处**存量**偏差（见上方 📌） |
 | D | 多工具调用总耗时 ≈ max(单个) 而非 sum；`interactive` 顺序语义回归 | ⏸ 未开始（批次 D 待授权） |
+
+---
+
+## 8. 批次 E：执行期出口/信号双原语（已落地）
+
+> 这一批不动 §2 的四个收口点，改的是**宿主层与执行层之间的协议**：
+> `PluginChannel` 曾经**同时**承担「出（事件）」「入（中止）」两种职责，本批把它拆成
+> 两个语义单一的原语。决策与理由见 [`docs/DECISIONS.md`](../../../../../docs/DECISIONS.md) ADR-019。
+
+### 8.1 原语
+
+| 原语 | 方向 | 形状 | 位置 |
+|---|---|---|---|
+| `EventSink` | 出 | `Direct(Arc<dyn TranscriptWriter>)` \| `Null` | `symbio_core/exec.rs` |
+| `AbortSignal` | 入 | `Arc<AtomicBool>` + `CancellationToken` 合一 | `symbio_core/exec.rs` |
+
+- **`EventSink::Direct`** 直连转写唯一写入点（`TranscriptSink` → `Transcript::apply`），
+  进程内**零 serde**；**`EventSink::Null`** 是「本次调用不产生可见事件」的**类型级**表达
+  （上下文压缩、`resume` 重跑工具用它，取代历史上的「哑通道 + drain task」）。
+- **`AbortSignal::abort()`** 是唯一置位入口，置位即唤醒（`CancellationToken`），
+  因此**不再有任何轮询**——历史上并存的「Abort 帧 / 100ms 标志位轮询 / `cancel_token`」
+  三源收敛为一条。`PluginChannel` 退回**纯跨进程传输**（前端实时面用），不再承担执行期协议。
+
+### 8.2 链路对比
+
+```text
+改造前：parse_sse_stream → emit_append(serde#1) → PluginFrame → 消费循环
+        from_value::<NodeOp>(serde#2) → Transcript::apply → publish_frame(serde#3) → 前端
+
+改造后：parse_sse_stream → sink.emit(NodeOp) → TranscriptSink → Transcript::apply → 前端
+        （后端段两跳纯开销消失；进程内调用不再付进程外的 serde 代价）
+```
+
+### 8.3 宿主层的连带简化
+
+| 项 | 改造前 | 改造后 |
+|---|---|---|
+| 消费循环 | 嵌套双层 `spawn` + `join` + keepalive sender + 每帧 `from_value` 分派 | 一次 `spawn` + `select!` 三臂（任务结束 / 1800s 看门狗 / 状态被接管） |
+| 压缩静默 | 哑 sender + drain task + `mem::replace(rx)` 所有权交换 | `EventSink::silent()` |
+| `resume` 重跑工具静默 | 临时 `PluginChannel::pair(64)` + drain task | `EventSink::silent()` |
+| 中止 | 投 Abort 帧 + 收帧 + 置位标志（三源并存） | `AbortSignal::abort()` 一次调用 |
+| 中止登记 | `ai_control_tx: Option<Sender>` | `abort_signal: Option<AbortSignal>`（`AbortGuard` 管登记） |
+
+**`AbortGuard::disarm` 注销登记时一并 `abort()`**——这是把历史上「通道被 drop ⇒ 对端
+读到关闭 ⇒ 视作中止」这条**隐式**语义显式化。它由测试直接锁定
+（`orchestrator.test.rs::disarm_aborts_the_signal`），不靠读代码。
+
+### 8.4 保住的语义（未变）
+
+- 转写仍只有**一个写入点**；`Warn` 仍是会话级状态（不进转写）——分派规则逐字未变，
+  只是从消费循环搬到了 `TranscriptSink`。
+- 「中止不是失败」：会话结局是 `aborted`（不是 `completed`），在途根 Turn 定稿 `Aborted`
+  （重试入口不消失）。
+- `handle_abort` 的 3s 兜底判据（登记变 `None`）与语义保留。
+- 工具经**自有** `PluginPayload::Session` 通道回传事件的能力完整保留（尚未收敛，见 §9）。
+
+### 8.5 验证
+
+- `node scripts/gate.mjs` **32/32**；`cargo test --lib` **811 passed / 0 failed**。
+- **CLI 端到端**（`--provider LMStudio`，本地模型）：单条流式 / `--repl` 多轮 /
+  工具调用（`vdfs_list` 两轮）/ 流式工具（`cmd`）四场景全部 EXIT=0。
+- 中止路径 CLI 无入口（CLI 只在收到会话节点 `outcome == aborted` 时渲染，不主动发起），
+  改由插件级端到端用例锁定：`orchestrator.test.rs::handle_abort_signals_registered_turn_and_converges`。
+
+---
+
+## 9. 批次 F：工具侧收敛到同一出口（已落地）
+
+> 批次 E 把**出/入两个方向**从通道里拆了出来，但**工具**还没接上去：`shell` /
+> `agent_run` / `ask_user` / 交互审批仍然返回 `PluginPayload::Session`，由
+> `execute_tool_async` 把帧解回来、改 id、再转发一遍。本批把工具接到同一个出口上。
+
+### 9.1 工具怎么拿到出口
+
+出口与中止信号**经 `ctx` 传递**（键 `symbio_core::EVENT_SINK` / `ABORT_SIGNAL`），
+不给 `Capability::execute` 加参数：
+
+```rust
+// 编排层（execute_tool_async）：发起工具前写入
+tool_ctx.set(crate::symbio_core::EVENT_SINK, sink.clone());
+tool_ctx.set(crate::symbio_core::ABORT_SIGNAL, abort.clone());
+
+// 工具侧（只读）：缺席 ⇒ 静默 / 永不中止
+let sink = EventSink::of(&*ctx);      // §11 后：改由分发点装配成 env，工具读 env.sink()
+let abort = AbortSignal::of(&*ctx);   // §11 后：同上，工具读 env.abort()
+```
+
+**为什么走 `ctx` 而不是加参数**（**本批的历史理由，已被 §11 修订**）：`execute(ctx)`
+的入参是**请求信封**（`PATH` / `trace_id` / `payload` / 会话上下文），而出口是
+**执行期**的，与「这次调用从哪条路径来」无关——同一个 `shell` 既可能被编排层调用
+（有出口），也可能被 `route()` 直接调用（无出口 ⇒ 静默）。用 `ctx` 承载就不必为
+「有没有出口」造第二条调用路径。
+
+> **§11 的修订**：这个**目标**（不为「有没有出口」造第二条调用路径）保留，但**手段**
+> 换成了「显式 `env` 参数 + 缺席降级」——因为把出口藏在 `ctx` 里让每个工具都得自己
+> 记键名，且与 `execute_turn` 的显式参数形态分裂。现在工具侧读的是 `env.sink()` /
+> `env.abort()`，装配收口在 `invoke_capability` 一处。
+
+### 9.2 「工具只声明意图，节点归编排层」
+
+`ask_user` 与交互审批（`local/plugin.rs` 的 `confirm_prompt_payload`）**不再构造
+节点**，只返回载荷：
+
+```rust
+Ok(PluginPayload::new(&json!({
+    "content": "需要确认：…",           // 卡片正文
+    "failure_kind": "needs_approval",   // 编排层凭它收口为 WaitingUserAction
+    "prompt": { "kind": "confirm", … }, // 卡片形状由工具决定
+})))
+```
+
+节点由 `process_tool_calls_async` 用 `build_user_prompt_message` 构造
+（`id = result_msg_id`、`parent_id = tool_call_id`）——**本文件是工具结果节点的
+唯一写入者**，普通结果与等待用户都出自它。
+
+**这条规则消灭的是一类 bug，不是一个分支**：历史上工具自造一个随机 id 的节点，
+消费方再改成 `result_msg_id` 重播一遍 ⇒ 同一个逻辑节点在前端有两个 id ⇒ 重复审批卡，
+且 resume 只删得掉一个（后端 messages 仅一份），另一个永远留在前端 store。
+现在 `PendingPrompt` **没有 id 字段**，那类 bug 在类型层面不成立。
+
+### 9.3 `failure_kind` 成为共享闭集
+
+`symbio_core::capability::failure_kind` 收口了这组词（`ERROR` / `NEEDS_APPROVAL` /
+`NEEDS_INTERACTION` / `PERMISSION_DENIED` / `TOOL_UNAVAILABLE`），判据只有一条
+`is_pending()`。此前生产方（`local`）与消费方（`session`）各写各的字面量，
+而编排层里已有一处硬编码判定——加一个「等待用户」的 kind 就会漏改它，
+表现是**交互模式下本批剩余工具照跑**（用户本该逐个处理却收到一堆并发审批）。
+
+它**不是**跨栈闭集（前端无同名常量镜像），因此不进 `protocol-mirror-audit` 的 C 组。
+
+### 9.4 本批的账
+
+| 项 | 变化 |
+|---|---|
+| `local/plugin.rs::emit_confirm_prompt` | 建通道 → 发帧 → drop tx → 返回 rx；**改为** `confirm_prompt_payload`（纯返回值，无 async、无通道） |
+| `local/ask_user.rs::execute` | 同上；删掉 `ChatMessage` / `PluginChannel` / `PluginFrame` / `session_chat_response` 五个导入 |
+| `tool_executor.rs` | `execute_tool_async` 第三返回值 `Option<ChatMessage>` → `Option<PendingPrompt>`；新增 `pending_prompt_from` / `pending_from_message` / `build_user_prompt_message` |
+| 双份审批检查点 | `LocalPlugin::route` 与 `SecureToolWrapper::execute` 两处仍各判一次（属独立问题，本批未合） |
+
+### 9.5 验证
+
+- `node scripts/gate.mjs` **32/32**；`cargo test --lib` **811 passed / 0 failed**。
+- 新增 6 个用例：`pending_prompt_from_only_accepts_the_pending_kinds`（**反面**：
+  信息性 kind 不得判为等待用户，否则自动模式会话永久挂起）、
+  `build_user_prompt_message_uses_the_orchestrator_owned_ids`、
+  `pending_from_message_extracts_payload_not_identity`（`tool_executor.test.rs`）；
+  `interactive_mode_returns_pending_intent_not_a_channel`、
+  `auto_mode_returns_continuable_error_not_pending`、`too_few_options_is_rejected`
+  （新建 `local/ask_user.test.rs`）。
+
+### 9.6 未收敛（已由批次 G 完成）
+
+`shell` 与 `agent_run` 的**流式增量**当时仍走 `PluginPayload::Session`。它们的自造
+复杂度在注释里写着：「executor 是先拿到 Session(rx) 返回值后才开始消费通道，因此
+执行体必须 spawn 到后台，否则输出帧超过通道容量（64）时 pump 阻塞在 send、
+execute() 不返回、executor 不消费 → **死锁**」。→ **§10**：两条工具接上出口后，
+`PluginChannel::pair(64)`、`cancel_token` 克隆、「有 `RESULT_MSG_ID` 才走流式」的
+分支与 `execute_tool_async` 的 `Session` 分支整块消失。
+
+---
+
+## 10. 批次 G：流式工具接上出口，执行期通道归零（已落地）
+
+> 批次 F 把**审批/提问**接到了同一出口，但**流式增量**还没接：`shell` 与 `agent_run`
+> 仍返回 `PluginPayload::Session`，`execute_tool_async` 里还有一整段帧循环在替它们
+> 转发节点。本批是这一系列**最大的一笔删除**。
+
+### 10.1 两条流式工具的改法
+
+**`shell`（单进程内自足）**：pump 任务直接写出口，执行体不再 spawn。
+
+| 收口前 | 现在 |
+|---|---|
+| `Capability::execute` 判 `RESULT_MSG_ID`/`TOOL_CALL_ID` 是否齐备 → 分流「流式 / 非流式」两条路径 | **一条路径**：`env.sink()` / `env.abort()` / `SnapshotTarget::from_ctx` 三个读取，缺席即降级（§11 前读的是 `EventSink::of` / `AbortSignal::of`，等价） |
+| 执行体 `tokio::spawn` 到后台（否则通道满 ⇒ 死锁） | 直接 `await`（出口没有背压） |
+| 增量走 `tx.send(PluginFrame::Data(NodeOp…))`，`send` 失败置 `consumer_gone` | `sink.emit(NodeOp::Upsert{…})`；**没有**「消费端还在吗」这种判断——没有可关闭的通道 |
+| 末尾发哨兵帧 `{"content": full}` | `Ok(Response{exit_code, output, risk_level})`——返回值就是结果 |
+| `execute_inner`（非流式等待式路径） | 删除 |
+
+`SnapshotTarget`（`msg_id` + `tool_call_id` **同行**）承载「增量快照的节点身份」，
+由编排层提供；**缺席 = 直连调用**（`route()`，如 MCP 网关）⇒ 不发增量。工具不得
+自造节点身份——与 §9.2 同一条规则。
+
+**`agent_run`（子会话转播）**：转播桥成为「子会话 → 父视图」的**唯一翻译点**。
+
+收口前翻译散在**两处**——转播桥原样转发节点，`tool_executor` 再对每一帧做二次分派
+（`user` 角色过滤、`parent_id` 锚定、`Assistant → Tool` 角色改写、`Reset`/`Warn` 丢弃）。
+两处翻译 ⇒ 规则会漂移；而且执行层必须为「工具可以返回事件流」这件事付出整段帧循环
+的代价。现在翻译只剩转播桥一处，出口下游只做落地。
+
+转播桥的返回值从「帧」变成具名结局：
+
+```rust
+enum RelayOutcome {
+    Done(String),                             // 子会话跑完，最终答复
+    Pending { text, prompt, failure_kind },   // 待用户动作（只给载荷，不给节点）
+    Failed(String),                           // 子会话以错误结束
+}
+```
+
+`Pending` 与批次 F 的规则同源：**工具只声明意图**。子会话冒泡的审批节点**不落出口**，
+只把 `text` / `prompt`（本工具的续跑参数）/ `failure_kind` 回传——节点由
+`process_tool_calls_async` 以统一 id 构造。若这里也落一个（子会话自己的 id），
+批次 F 刚消灭的「同一逻辑节点两个 id」会从这个入口重新长回来。
+
+### 10.2 顺带修掉的语义回退：总时长上限 → 空闲上限
+
+`agent_run` 收口前经通道回传，**逃过了** `execute_tool_async` 的 600s 总时长上限
+（它落在 180s 空闲上限的那条循环里）。接上出口后它被内联等待，就会被总时长误杀——
+一个跑十几分钟但**一直在发事件**的子智能体，与一个真的挂死的工具，在「总时长」
+这一维上完全同形。
+
+因此本批把判据换成**出口的发射计数**（`EventSinkProgress`，挂在出口上——出口本来
+就是「工具还活着」的唯一证据源，因为工具唯一的出方向动作就是 `emit`）：
+
+```rust
+let progress = sink.progress();
+let mut seen = progress.emitted();
+loop {
+    tokio::select! { biased;
+        r = &mut route_fut => break r,               // 工具已返回 ⇒ 立即采纳
+        _ = wait_tool_abort(abort) => return …,      // 用户中止
+        _ = sleep(IDLE) => {
+            let now = progress.emitted();
+            if now != seen { seen = now; continue; } // 有进展 ⇒ 重新计时
+            return …挂死…
+        }
+    }
+}
+```
+
+于是同一个数字覆盖两种情形，且**不再需要为长任务开特例**：不发事件的工具
+（`web_search` / MCP / `codebase_search`…）读数恒为 0，退化为「总时长上限」——
+与历史口径一致；会发事件的工具只在**真的沉默** 600s 后被杀。历史并存的两个魔法数
+（600s 总时长 + 180s 流式空闲）收成一个。
+
+### 10.3 本批的账
+
+| 项 | 变化 |
+|---|---|
+| `tool_executor.rs::execute_tool_async` | **删除 `PluginPayload::Session` 分支**（含 ~150 行 `NodeOp` 转发块、`user` 角色过滤、`parent_id` 锚定、`Assistant→Tool` 改写、`Reset`/`Warn` 分派）；删 `TOOL_STREAM_IDLE_TIMEOUT_SECS` / `emit_tool_update` / `pending_from_message` |
+| `local/shell.rs` | 删 `execute_inner`、`PluginChannel`/`PluginFrame`/`mpsc`/`CancellationToken` 导入、`consumer_gone` 标志、哨兵帧、后台 `spawn`；新增 `SnapshotTarget` |
+| `agent/host/subagent.rs` | 删 `PluginChannel::pair(512)`、`send_frame`、错误帧转播、`META_PROMPT`；转播桥改签名（`sink` + `abort` + `tool_call_id`）并返回 `RelayOutcome`；新增 `abort.cancelled()` 臂（出口没有「对端关闭」这种隐式中止信号） |
+| `symbio_core/exec.rs` | 新增 `EventSinkProgress`（出口的发射计数），`EventSink::Direct` 携带它 |
+| `local/shell.rs` 测试 | 拆到 `local/shell.test.rs`（内联 `mod tests` 棘轮 **53 → 52**） |
+
+### 10.4 保住的语义（未变）
+
+- **增量是累积全量快照**（`role=tool` + `status=Streaming`），节流 120ms；
+- **子会话节点锚定**：顶层节点 `parent_id → tool_call_id`、`Assistant → Tool`；
+- **子会话的 `user` 消息不透传**（内容已见于 ToolCall 请求参数，且临时 `role=user`
+  节点会在前端获得必然失败的"编辑"入口）；
+- **子会话的 `Reset` / `Warn` 不透传**（作用域不同；且出口的 `Direct` 实现会把 `Warn`
+  分派到**本会话**节点上——透传等于把子会话告警记到父会话头上）；
+- **待审批的优先级**：错误 > 待审批 > 文本。
+
+### 10.5 验证
+
+- `node scripts/gate.mjs` **32/32**；`cargo test --lib` **817 passed / 0 failed**。
+- CLI 端到端（`--provider LMStudio`，`.symbio/model/LMstudio`）：普通流式对话、
+  交互模式 `cmd` 流式、交互模式 `ask_user`、自动模式 `ask_user`，全部 `EXIT=0`。
+- 新增用例：`local/shell.test.rs` **9 个**（pump 三态：有身份成帧 / 无身份不发 /
+  静默不发；execute 四态：Data 返回 / 直连静默 / 大量输出不阻塞 / 参数非法报错；
+  ctx 读取口径两态）、`exec.test.rs::sink_progress_counts_every_emit`、
+  `tool_executor.test.rs::subagent_pending_payload_is_recognized_as_pending_intent`
+  （**跨文件契约**：`agent_run` 的待审批载荷必须被编排层认出来——两边各自演化时
+  这条契约最容易静默断掉，表现是审批卡直接消失且不报错）。
+
+### 10.6 收口后的链路
+
+工具执行不再有任何「帧」的概念（**§11 后签名已换成 `(args, env, ctx)`**，
+下图是批次 G 收口时的形态）：
+
+```
+工具 execute(ctx)
+  ├─ 读 ctx：EVENT_SINK / ABORT_SIGNAL / (RESULT_MSG_ID, TOOL_CALL_ID)
+  ├─ sink.emit(NodeOp) ─────────────► 转写唯一写入点（进程内，零 serde）
+  └─ 返回 PluginPayload::Data ──────► execute_tool_async
+                                        └─ 结果节点 / 父终态（唯一写入者）
+```
+
+批次 H（§11）之后同一张图变成：
+
+```
+invoke_capability(cap, ctx)                 ← 唯一「拆信封」点
+  ├─ args = ctx.payload::<Value>() ?? Null
+  ├─ env  = ExecEnv::from_request(&*ctx)    ← 出口 + 中止，缺席 ⇒ 静默 / 永不中止
+  └─ cap.execute(args, &env, ctx)
+        ├─ 读 ctx：RESULT_MSG_ID / TOOL_CALL_ID / WORKDIR…（只读真正需要的）
+        ├─ env.sink().emit(NodeOp) ───► 转写唯一写入点（进程内，零 serde）
+        └─ 返回 Value ────────────────► PluginPayload::Data
+                                          └─ execute_tool_async
+                                               └─ 结果节点 / 父终态（唯一写入者）
+```
+
+`PluginPayload::Session` 剩下的用途**只有跨进程**：`session/stream`（前端实时面）、
+`event_bus/subscribe`、vdfs 网关、CLI/前端客户端。执行期与它再无关系。
+
+---
+
+## 11. 批次 H：两个执行接口签名统一（已落地）
+
+### 11.1 问题：数据面统一了，控制面没有
+
+E/F/G 三批把**数据面**（通道 → 出口/信号）收干净了，但**签名**没动：
+
+| | `Capability::execute`（改前） | `ModelProvider::execute_turn`（改前） |
+|---|---|---|
+| 出口/中止怎么到 | 藏在 `ctx` 的两个无名键里 | **显式参数** `sink` / `abort` |
+| 参数怎么到 | `ctx.payload::<Value>()?`（无类型，各工具自读） | 显式类型化参数 |
+| 返回值 | `PluginPayload`（4 变体，工具只用 `Data`） | `TurnOutput`（类型化） |
+| 信封 | `ctx` 把「路由信封」与「执行期上下文」混在一个键值袋 | 无 |
+
+后果是**每个工具都得记住「我该读哪些键」**：`ctx.payload()` 拿参数、
+`ctx.get(EVENT_SINK)` 拿出口、`ctx.get(ABORT_SIGNAL)` 拿中止、`ctx.get(WORKDIR)`
+拿工作目录——这四件事混在同一个袋子里，看不出哪两个是执行期必备、哪两个是可选上下文。
+而且「同一个执行期概念有两种到达方式」（一处经 ctx、一处经显式参数），
+新人改一处必然漏另一处。
+
+### 11.2 形状：`ExecEnv` 具名化，两个接口同形
+
+新增 [`ExecEnv { sink, abort }`](../../../symbio_core/exec.rs)——「一次带中止的流式执行」
+的**出/入两个方向**，两处共用：
+
+```text
+Capability::execute(args, env, ctx)      -> Result<Value, PluginError>
+ModelProvider::execute_turn(inputs, env) -> Result<TurnOutput, PluginError>
+```
+
+差别只剩 `ctx`，而这是**真实差异**：工具是**被路由、被注册**的（要转发
+`session/chat/send`、要解析 VDFS 挂载），所以还需要信封；模型执行不被路由，
+也就没有信封。不强行抹平。
+
+### 11.3 唯一「拆信封」的地方
+
+`invoke_capability(cap, ctx)`（`symbio_core/capability.rs`）是**唯一**把
+`Result<Value, _>` 装回 `PluginPayload` 的地方。所有分发路径都必须经它：
+
+- `DefaultToolVisitor::invoke`（`symbio_core/tools.rs`）
+- `LocalPlugin::route` 的工具分支（`local/plugin.rs`）
+- `WebPlugin::route` 的工具分支（`web/plugin.rs`）
+- 装饰器 `PrefixedCapability`（`agent/host/scope.rs`）与 `SecureToolWrapper`
+  （`local/plugin.rs`）**不拆不装**，`(args, env, ctx)` 原样透传
+
+```text
+invoke_capability(cap, ctx)
+  ├─ args = ctx.payload::<Value>().unwrap_or(Value::Null)
+  ├─ env  = ExecEnv::from_request(&*ctx)   // 缺席 ⇒ 静默 / 永不中止
+  └─ cap.execute(args, &env, ctx).map(PluginPayload::new)
+```
+
+参数缺席（信封里没有 payload）⇒ `Value::Null`：与收口前各工具自己的
+`unwrap_or(Value::Null)` 口径逐字一致，仍由工具自己给出「缺少必填参数」的报错。
+
+### 11.4 本批的账
+
+- **24 个 `impl Capability` 换签名**：其中 2 个用 `env`（`shell` / `agent_run`
+  会发增量），22 个 `_env`（不发射，前缀即文档）；`ctx` 只在真正需要的工具里保留
+  （VDFS 工具用它调 provider、`agent_run` 读会话身份、`ask_user` 读 `MODE`）。
+- **删掉的重复**：`confirm_prompt_payload` 的返回从 `InvokeResponse<PluginPayload>`
+  收成 `Result<Value, _>`；`execute_skill` 同理；`PluginPayload::new(&json!{...})`
+  这个包装在 24 个工具里**逐处消失**。
+- **`subagent.rs` 改读 `args` 而非 `ctx.payload()`**：它原先是「签名换了但体内还回读
+  信封」的唯一残留——正是本批要消灭的那种耦合。
+- **`execute_turn` 参数 7 → 6**，两处 `#[allow(clippy::too_many_arguments)]` 随之删除
+  （阈值 7，已不再触发）。
+
+### 11.5 保住的语义（未变）
+
+- `route()` 直连调用仍然**自然静默**：`ExecEnv::from_request` 在没有 `EVENT_SINK`
+  时给出 `Null` 出口、在没有 `ABORT_SIGNAL` 时给出永不中止的信号——与历史一致。
+- 工具仍然**不构造节点身份**：`failure_kind` + `prompt` 载荷的契约逐字不变，
+  节点归 `tool_executor`（§9.2）。
+- 压缩路径仍然**出口静默**：`run_compression_llm` 改为收 `env`，调用方给
+  `ExecEnv::new(EventSink::silent(), abort)`——「内部请求不产生可见事件」仍是
+  类型上的选择。
+
+### 11.6 验证
+
+- `node scripts/gate.mjs` **32 / 32**；`cargo test --lib` **817 passed / 0 failed**。
+- CLI 端到端（`--provider LMStudio`，4 场景）：普通流式对话、交互模式 `cmd`、
+  交互模式 `ask_user`、自动模式，全部 `EXIT=0`。
+- 用例数**不变**（817）：本批只改签名，`ask_user.test.rs` / `shell.test.rs` 的
+  调用形态随签名改写，断言内容与覆盖点逐一保留。
 
 ---
 

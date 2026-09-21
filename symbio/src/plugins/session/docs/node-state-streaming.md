@@ -466,17 +466,21 @@ S20~S20.2 都假设「节点状态会自己走到终态」。本次处理两个*
 1. **在途消息不可见**：assistant 侧节点**每轮结束**才落库（`chat_loop::persist_messages`），
    而会话叶子 `read` 只序列化存储 ⇒ 前端 `loadMessages`（读叶子）在流式期间看不到
    正在跑的那一轮；切走再切回，在途消息凭空消失。
-2. **中止后节点停在「运行中」**：非流式工具执行（`PluginPayload::Data` 分支）是一次
-   `await`，不轮询通道也不看 `abort_flag`；`handle_abort` 的 3s 兜底一旦触发就会强制
-   `is_working = false`，消费循环下一帧因 `!is_working` **直接 `break`，跳过
-   `persist_failure`** ⇒ 工具节点永远停在 `Streaming`。这正是「终止后还显示运行中」。
+2. **中止后节点停在「运行中」**：非流式工具执行（`PluginPayload::Data` 分支）原本是一次
+   裸 `await`，既不轮询通道也不看中止标志；`handle_abort` 的 3s 兜底一旦触发就会强制
+   `is_working = false`，而当时"下一帧"才是循环的唯一醒来时机 ⇒ 消费循环因 `!is_working`
+   **直接 `break`，跳过 `persist_failure`** ⇒ 工具节点永远停在 `Streaming`。
+   这正是「终止后还显示运行中」。
+   （S20.3 由 `wait_tool_abort` 补上第三个出口；批次 E 起该函数收敛为一行
+   `abort.cancelled().await`，消费循环亦不再"按帧醒来"——见
+   [core-loop.md](./core-loop.md) §8。）
 
 | 层 | 改动 |
 |---|---|
 | `session/orchestrator/failure.rs` | 新增 `is_inflight`（在途集合的**唯一**定义）与 `converge_inflight`：收敛**在途缓冲**中尚未落库的非终态节点，定稿并广播补丁，**幂等**（存储由写入不变量保证只有终态，无需扫描） |
 | `session/orchestrator/consume.rs` | 循环出口记 `exit_state`：中止出口发 `aborted`（此前一律 `completed`，与 `handle_abort` 抢同一个字段，收敛靠 3s 轮询的时序侥幸） |
 | `session/orchestrator/consume.rs` | `handle_abort` 复位 `is_working` 后**自己**调 `converge_inflight`——中止路径自己的收口责任，不等 chat_loop |
-| `session/tool_executor.rs` | 新增 `wait_tool_abort`：`route_fut` 与它 `select!`，让**非流式**工具也能被中止（abort 帧 / 取消令牌 / 已置位三条来源） |
+| `session/tool_executor.rs` | 新增 `wait_tool_abort`：`route_fut` 与它 `select!`，让**非流式**工具也能被中止（当时的三条来源——abort 帧 / 取消令牌 / 已置位标志——批次 E 起归一为共享的 `AbortSignal`） |
 | `session/resume.rs` | 重跑工具时中止：父 ToolCall 已落库且置 `Streaming`，返回前用 `not_executed_patch(.., "aborted")` 就地定稿并广播 |
 | `session/plugin/nodes.rs` | `session_content` 叠加 `live`（与 `transcript_of` 同源的 `overlay_live`）——叶子与转写列表必须是同一份消息集合 |
 | `session/plugin/vdfs_provider.rs` | 叶子 `read`（含子会话）取 `live_messages_of`；子会话叠加**它自己**的在途缓冲，不是父会话的 |
@@ -496,7 +500,9 @@ S20~S20.2 都假设「节点状态会自己走到终态」。本次处理两个*
 
 **为什么 `wait_tool_abort` 忽略通道关闭**：对端消失（chat_loop 已返回）不是中止信号。
 把它当中止会让**每一次正常收尾**都变成"用户中止"，于是正常完成的会话被报成
-`aborted`、提示音选错音色。这条曾写错并被回退测试抓到
+`aborted`、提示音选错音色。这条曾写错并被回退测试抓到。
+（批次 E 起这条已无实现可误读：`wait_tool_abort(abort)` 只等 `abort.cancelled()`，
+**没有通道可关闭**，因此"对端消失"与"用户中止"在类型层面就是两件事。）
 （`tool_executor.test.rs::wait_tool_abort_ignores_closed_channel`）。
 
 ### S20.4 —— 压缩作为消息流中的节点（本次）

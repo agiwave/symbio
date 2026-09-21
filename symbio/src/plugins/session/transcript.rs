@@ -121,16 +121,6 @@ impl Transcript {
         self.nodes.values().cloned().collect()
     }
 
-    /// 在途图是否为空。
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
-    }
-
-    /// 在途节点数量。
-    pub fn len(&self) -> usize {
-        self.nodes.len()
-    }
-
     /// 取单个在途节点。
     pub fn get(&self, id: &str) -> Option<cm::ChatMessage> {
         self.nodes.get(id).cloned()

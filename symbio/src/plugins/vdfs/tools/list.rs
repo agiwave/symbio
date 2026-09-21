@@ -9,9 +9,7 @@
 //! 即返回当前可访问的全部类别，无需独立工具。
 
 use super::{tool, ToolVdfs};
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -52,8 +50,13 @@ impl Capability for ListTool {
         )
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let raw = ctx.payload::<Value>().unwrap_or(Value::Null);
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        let raw = args;
         let path = raw
             .get("path")
             .and_then(|v| v.as_str())
@@ -112,11 +115,11 @@ impl Capability for ListTool {
             format!("已列举 {} 个条目。", entries.len())
         };
 
-        Ok(PluginPayload::new(&json!({
+        Ok(json!({
             "entries": entries,
             "truncated": truncated,
             "count": entries.len(),
             "message": message,
-        })))
+        }))
     }
 }

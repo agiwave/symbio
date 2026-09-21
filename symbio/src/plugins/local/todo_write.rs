@@ -5,8 +5,8 @@
 
 use super::policy::SecurityPolicy;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
-    PluginPayload, AGENT_ID, SESSION_ID, WORKDIR,
+    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt, InvokeResponse,
+    PluginError, AGENT_ID, SESSION_ID, WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -162,8 +162,12 @@ impl Capability for TodoWriteTool {
         }
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let args: Value = ctx.payload()?;
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
         let session = ctx.get(SESSION_ID).unwrap_or_default();
         let wd = ctx.get(WORKDIR).unwrap_or_default();
         let aid = ctx.get(AGENT_ID).unwrap_or_default();
@@ -173,6 +177,6 @@ impl Capability for TodoWriteTool {
             session
         };
         let data = self.execute_inner(&args, &key).await?;
-        Ok(PluginPayload::new(&data))
+        Ok(serde_json::to_value(&data)?)
     }
 }

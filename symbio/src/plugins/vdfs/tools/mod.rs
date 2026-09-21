@@ -40,22 +40,20 @@ pub mod stat;
 pub mod tree;
 pub mod write;
 
-use crate::symbio_core::{
-    Capability, CapabilityCategory, CapabilityMeta, InvokeRequest, InvokeRequestExt,
-    ToolContextRetention,
-};
+use crate::symbio_core::{Capability, CapabilityCategory, CapabilityMeta, ToolContextRetention};
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use std::sync::Arc;
 
 /// 工具链路的封装 provider（地址翻译 + 按挂载名直调，见 `super::super::provider`）
 pub use super::provider::ToolVdfs;
 
-/// 读取请求载荷为具体请求类型（缺省容忍空载荷）
-pub(crate) fn request_of<T: DeserializeOwned + Default>(ctx: &Arc<dyn InvokeRequest>) -> T {
-    ctx.payload::<serde_json::Value>()
-        .ok()
-        .and_then(|v| serde_json::from_value::<T>(v).ok())
-        .unwrap_or_default()
+/// 把**已拆好的调用参数**解析为具体请求类型（缺省容忍空载荷）。
+///
+/// 参数由 `symbio_core::invoke_capability` 从信封拆出后作为入参给出，
+/// 因此这里不再自己回读 `ctx.payload()`——「拆信封」只有一处。
+pub(crate) fn request_of<T: DeserializeOwned + Default>(args: &Value) -> T {
+    serde_json::from_value::<T>(args.clone()).unwrap_or_default()
 }
 
 /// 统一的路径参数说明（所有工具的 schema 共享同一套语义，避免 LLM 误用）
@@ -108,7 +106,9 @@ pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<Arc<dyn Capability>> {
 mod tests {
     use super::*;
     use crate::symbio_core::vdfs_provider::VDFS_PARAM_WORKDIR;
-    use crate::symbio_core::{DefaultToolVisitor, SimpleRequest, WORKDIR};
+    use crate::symbio_core::{
+        DefaultToolVisitor, InvokeRequest, InvokeRequestExt, SimpleRequest, WORKDIR,
+    };
 
     /// workdir 由宿主 ctx 翻译成 provider 参数；缺省时不带该键
     ///

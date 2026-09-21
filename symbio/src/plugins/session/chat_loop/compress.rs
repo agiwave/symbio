@@ -19,9 +19,8 @@ use crate::symbio_core::{dir_from_ctx, PLUGIN_SESSION};
 pub(crate) async fn auto_compress_process(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    channel: &mut PluginChannel,
     ctx: &Arc<dyn InvokeRequest>,
-    abort_flag: &Arc<AtomicBool>,
+    abort: &AbortSignal,
     overhead_tokens: usize,
     force: bool,
 ) -> Result<Option<usize>, CompressionFailure> {
@@ -80,9 +79,8 @@ pub(crate) async fn auto_compress_process(
     let post_tokens = compress_with_snapshot_core(
         orchestrator,
         context,
-        channel,
         ctx,
-        abort_flag,
+        abort,
         compression_request,
         history_to_keep,
         // 自动路径无用户保留提示（hints 只在主动路径有来源）
@@ -199,9 +197,8 @@ impl CompressionFailure {
 async fn compress_snapshot_inner(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    channel: &mut PluginChannel,
     ctx: &Arc<dyn InvokeRequest>,
-    abort_flag: &Arc<AtomicBool>,
+    abort: &AbortSignal,
     compression_request: Vec<ChatMessage>,
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
@@ -276,8 +273,7 @@ async fn compress_snapshot_inner(
         &compression_prompt,
         &context.messages,
         &root_id,
-        channel,
-        abort_flag,
+        abort,
     )
     .await
     {
@@ -331,8 +327,7 @@ async fn compress_snapshot_inner(
             &compression_prompt,
             &context.messages,
             &short_id(),
-            channel,
-            abort_flag,
+            abort,
         )
         .await;
         if let Ok(s) = retry {
@@ -476,9 +471,8 @@ async fn emit_transcript_rewrite(
 async fn compress_with_snapshot_core(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    channel: &mut PluginChannel,
     ctx: &Arc<dyn InvokeRequest>,
-    abort_flag: &Arc<AtomicBool>,
+    abort: &AbortSignal,
     compression_request: Vec<ChatMessage>,
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
@@ -493,9 +487,8 @@ async fn compress_with_snapshot_core(
     let result = compress_snapshot_inner(
         orchestrator,
         context,
-        channel,
         ctx,
-        abort_flag,
+        abort,
         compression_request,
         keep_messages,
         extra_hints,
@@ -553,9 +546,8 @@ fn summary_text(m: &ChatMessage) -> String {
 pub(crate) async fn run_context_compact(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    channel: &mut PluginChannel,
     ctx: &Arc<dyn InvokeRequest>,
-    abort_flag: &Arc<AtomicBool>,
+    abort: &AbortSignal,
     split_user_idx: usize,
     hints: Option<&str>,
 ) -> (bool, usize, usize) {
@@ -583,9 +575,8 @@ pub(crate) async fn run_context_compact(
     let post_tokens = compress_with_snapshot_core(
         orchestrator,
         context,
-        channel,
         ctx,
-        abort_flag,
+        abort,
         compression_request,
         keep_messages,
         hints,
@@ -626,8 +617,8 @@ pub(crate) async fn run_context_compact(
 pub(crate) async fn retry_compaction(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn InvokeRequest>,
-    channel: &mut PluginChannel,
-    abort_flag: &Arc<AtomicBool>,
+    sink: &EventSink,
+    abort: &AbortSignal,
     session: &Arc<dyn ChatSession>,
     target_id: &str,
 ) -> Result<(), PluginError> {
@@ -648,14 +639,10 @@ pub(crate) async fn retry_compaction(
     // 拿过滤视图去删会「删了个空气」，节点反而留在存储里。
     messages.retain(|m| m.id != target_id);
     session.replace_messages(messages).await?;
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(serde_json::json!(
-            session_chat_response::NodeOp::Remove {
-                message_id: target_id.to_string()
-            }
-        )))
-        .await;
+    sink.emit(session_chat_response::NodeOp::Remove {
+        message_id: target_id.to_string(),
+    })
+    .await;
 
     // 压缩本身则必须跑在与**自动路径完全同一份视图**上：`get_context_messages`
     // 会做三层清理（滤 Failed / 剔孤儿 / content 归一）并施加轮次窗口，
@@ -672,9 +659,8 @@ pub(crate) async fn retry_compaction(
     let outcome = auto_compress_process(
         orchestrator,
         &mut context,
-        channel,
         ctx,
-        abort_flag,
+        abort,
         overhead_tokens,
         // force = true：跳过阈值判定并绕过熔断（用户主动重试）
         true,
@@ -749,31 +735,23 @@ async fn send_compression_request(
     system_prompt: &str,
     messages: &[ChatMessage],
     root_id: &str,
-    channel: &mut PluginChannel,
-    abort_flag: &Arc<AtomicBool>,
+    abort: &AbortSignal,
 ) -> Result<ChatMessage, PluginError> {
-    // 压缩是**内部 LLM 请求**，不是对话轮次：其流式帧（Turn 起始 / 思考 / 正文 delta）
+    // 压缩是**内部 LLM 请求**，不是对话轮次：其流式事件（Turn 起始 / 思考 / 正文 delta）
     // 绝不能进入对话流——否则前端会多出一个永远停在"正在思考…"的空 Turn（压缩请求
     // 从不 finalize，快照也只落库不广播），且随每次自动压缩/主动压缩逐个累积。
     // 长会话才会触发压缩，因此该泄漏只在长任务后复现，极易误判为渲染层问题。
     //
-    // 通道隔离的不对称设计：
-    // - **tx（出帧）完全静默**：哑 sender + drain task，压缩 delta 一律丢弃（编译期
-    //   不可泄漏——本函数内所有 emit 都走 muted.tx）；
-    // - **rx（入帧）临时移交真实主通道**：用户停止时 Abort 帧只会进入主通道队列，
-    //   而消费循环此刻正 await 在压缩请求上——若 rx 也是哑的，Abort 永远收不到，
-    //   压缩请求将无视中止跑完整整轮 LLM 流；哑 rx 也不能立即关闭，否则会被
-    //   误判 Aborted，导致每轮重试巨型压缩请求。压缩结束后 rx 归还主通道。
-    let (mute_tx, mut mute_rx) = tokio::sync::mpsc::channel::<PluginFrame>(64);
-    tokio::spawn(async move { while mute_rx.recv().await.is_some() {} });
-    let dummy_rx = tokio::sync::mpsc::channel::<PluginFrame>(1).1;
-    // 出栈时通过 mem::replace 归还真实 rx（下方统一在请求结束后归还）
-    let real_rx = std::mem::replace(&mut channel.rx, dummy_rx);
-    let mut muted = PluginChannel {
-        tx: mute_tx,
-        rx: real_rx,
-        cancel_token: tokio_util::sync::CancellationToken::new(),
-    };
+    // 收口前这里靠**通道隔离的不对称设计**实现：tx 换成哑 sender + drain task
+    // （出帧静默），rx 临时与主通道对调（入帧收真实 Abort）——因为当时「出口」
+    // 只能是通道，「静默」只能靠换掉通道的一半来伪造。
+    //
+    // 现在静默是**出口的一种取值**（[`EventSink::silent`]），而中止走**共享的
+    // [`AbortSignal`]**——压缩请求与对话轮次拿到的是同一个信号，用户停止时立即
+    // 感知，不需要「把 rx 临时移交主通道」这种所有权交换。整个 hack（含两个
+    // `mem::replace` 与一个 drain task）因此消失，且「压缩绝不产生可见事件」
+    // 从运行期约定变成类型上的选择。
+    let sink = EventSink::silent();
 
     // 压缩请求窗口日志：此窗口内出帧静默、消费循环收不到任何流式帧，
     // 若无日志，长压缩请求表现为"整段时间无任何输出"（用户视角的卡死）。
@@ -791,8 +769,7 @@ async fn send_compression_request(
         system_prompt,
         messages,
         root_id,
-        &mut muted,
-        abort_flag,
+        &ExecEnv::new(sink.clone(), abort.clone()),
     )
     .await;
 
@@ -815,38 +792,34 @@ async fn send_compression_request(
         }
     }
 
-    // 无论成败，立即把真实 rx 归还主通道（Abort 帧的消费权交还消费循环）
-    let dummy_rx = tokio::sync::mpsc::channel::<PluginFrame>(1).1;
-    channel.rx = std::mem::replace(&mut muted.rx, dummy_rx);
-
     result
 }
 
-/// 压缩摘要的实际 LLM 调用：出帧全部静默（muted.tx），入帧收真实主通道 Abort。
+/// 压缩摘要的实际 LLM 调用：出口静默，中止走共享信号。
 ///
 /// 注意：这里**绝不发射 Turn 帧**（不发 emit_streaming_start）。压缩是内部请求、
-/// 不是对话轮次——Turn 帧在哑通道上是纯死代码；若误走主通道则会在前端留下永远
-/// "正在思考…"的空 Turn 骨架（每轮压缩尝试累积一个）。不设 Turn 帧调用点，
-/// 使"内部请求泄漏可见帧"这一类问题在结构上不可能发生。
+/// 不是对话轮次——若误走真实出口会在前端留下永远"正在思考…"的空 Turn 骨架
+/// （每轮压缩尝试累积一个）。出口由调用方给定为 [`EventSink::silent`]，
+/// 使"内部请求泄漏可见事件"这一类问题在结构上不可能发生。
 async fn run_compression_llm(
     orchestrator: &ChatOrchestrator,
     system_prompt: &str,
     messages: &[ChatMessage],
     root_id: &str,
-    muted: &mut PluginChannel,
-    abort_flag: &Arc<AtomicBool>,
+    env: &ExecEnv,
 ) -> Result<ChatMessage, PluginError> {
     use crate::symbio_core::schemas::session::chat_message::MessageContent;
 
+    let abort = env.abort();
+
     // 压缩路径与对话轮次共用同一模型契约：provider.execute_turn（tools 为空）。
-    // 出帧仍全部静默（muted.tx），入帧收真实主通道 Abort；
-    // 协议细节（请求构造 / 重试 / SSE 解析）由 model 插件实现承担。
+    // 出口静默、中止共享；协议细节（请求构造 / 重试 / SSE 解析）由 model 插件实现承担。
     let out = orchestrator
         .provider
-        .execute_turn(system_prompt, messages, &[], root_id, muted, abort_flag)
+        .execute_turn(system_prompt, messages, &[], root_id, env)
         .await?;
 
-    if abort_flag.load(Ordering::SeqCst) {
+    if abort.is_aborted() {
         return Err(PluginError::Aborted);
     }
 

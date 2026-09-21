@@ -7,15 +7,11 @@ use super::{
     shell::ShellTool, todo_write::TodoWriteTool,
 };
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
-use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
-};
-use crate::symbio_core::schemas::session::session_chat_response;
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    dir_from_ctx, Capability, CapabilityMeta, ConfigFile, InvokeRequest, InvokeRequestExt,
-    InvokeResponse, Plugin, PluginChannel, PluginDir, PluginError, PluginFrame, PluginMeta,
-    PluginPayload, PLUGIN_FILE, PLUGIN_LOCAL,
+    dir_from_ctx, Capability, CapabilityMeta, ConfigFile, ExecEnv, InvokeRequest, InvokeRequestExt,
+    InvokeResponse, Plugin, PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE,
+    PLUGIN_LOCAL,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -72,61 +68,47 @@ fn risk_level_from_ctx(ctx: &Arc<dyn InvokeRequest>) -> RiskLevel {
         .unwrap_or(RiskLevel::Medium)
 }
 
-/// 构造一个 confirm 类型的 `user_prompt` 节点，并通过 Session 通道广播。
-/// 调用方据此结束本轮，会话进入 AwaitingInput(user)；用户批准后新一轮重跑本工具。
-async fn emit_confirm_prompt(
+/// 构造 confirm 类型 prompt 的**返回值**（不构造节点、不发事件）。
+///
+/// 职责边界：工具只回答「需要用户确认什么」——`prompt` 载荷 + `failure_kind`。
+/// **user_prompt 节点由编排层构造**（`session/tool_executor.rs`）：它才拥有
+/// `result_msg_id`（节点身份）与父 ToolCall 的终态，是「工具结果节点」的唯一写入者。
+///
+/// 历史上这里是「建通道 → 发一个 Upsert 帧 → drop tx → 返回 rx」，由消费方
+/// 解回来、改 id、重新播一遍——于是同一个逻辑节点在前端有两个 id（原 id 与
+/// `result_msg_id`），审批 UI 重复、resume 只删得掉一个。现在这条路径不存在了。
+fn confirm_prompt_payload(
     tool_name: &str,
     tool_description: &str,
     args: &Value,
     risk_level: &str,
     mode: &str,
-) -> InvokeResponse<PluginPayload> {
+) -> Result<Value, PluginError> {
     // 自动模式：无人值守，不产确认卡，直接返回友好错误让 LLM 继续（不阻塞）。
     // failure_kind=permission_denied 标记，前端可据此渲染（虽然不产节点，仅信息性）。
     if mode == "auto" {
-        return Ok(PluginPayload::new(&json!({
+        return Ok(json!({
             "error": format!(
                 "权限不足：工具 {} 需要用户审批（风险等级 {}），但当前为自动模式，无人可授权。请勿反复重试——请改用手动方式完成，或提示用户切换到交互模式以授权后重试。",
                 tool_name, risk_level
             ),
             "success": false,
-            "failure_kind": "permission_denied",
-        })));
+            "failure_kind": crate::symbio_core::failure_kind::PERMISSION_DENIED,
+        }));
     }
-    let (tx_side, rx_side) = PluginChannel::pair(16);
-    let node = ChatMessage {
-        id: uuid::Uuid::new_v4().to_string(),
-        parent_id: None,
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::UserPrompt),
-        content: Some(MessageContent::Text(format!(
-            "需要确认：{tool_description}"
-        ))),
-        status: Some(MessageStatus::WaitingUserAction),
-        meta: Some(json!({
-            "prompt": {
-                "kind": "confirm",
-                "tool_name": tool_name,
-                "args": args.clone(),
-                "risk_level": risk_level,
-                "description": tool_description,
-            },
-            // failure_kind=needs_approval：前端据此渲染"批准 / 拒绝"按钮（与错误盒统一）
-            "failure_kind": "needs_approval"
-        })),
-        ..Default::default()
-    };
-    let _ = tx_side
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                message: Box::new(node),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
-    drop(tx_side);
-    Ok(PluginPayload::Session(rx_side))
+    Ok(json!({
+        "content": format!("需要确认：{tool_description}"),
+        "success": false,
+        // 编排层凭此标记把本轮收口为「等待用户动作」并构造 user_prompt 节点。
+        "failure_kind": crate::symbio_core::failure_kind::NEEDS_APPROVAL,
+        "prompt": {
+            "kind": "confirm",
+            "tool_name": tool_name,
+            "args": args.clone(),
+            "risk_level": risk_level,
+            "description": tool_description,
+        },
+    }))
 }
 
 pub struct SecureToolWrapper {
@@ -150,8 +132,12 @@ impl Capability for SecureToolWrapper {
         self.inner.name()
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let args: Value = ctx.payload()?;
+    async fn execute(
+        &self,
+        args: Value,
+        env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
         let tool_name = self.inner.name();
         let tool_risk_level = self.security.get_tool_risk_level(&tool_name, Some(&args));
 
@@ -172,17 +158,17 @@ impl Capability for SecureToolWrapper {
         if needs_approval {
             // 产出 confirm 类型 user_prompt 节点（交互模式），或自动模式返回友好错误
             let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
-            return emit_confirm_prompt(
+            return confirm_prompt_payload(
                 &tool_name,
                 &self.inner.meta().description,
                 &args,
                 &format!("{final_risk_level:?}").to_lowercase(),
                 &mode,
-            )
-            .await;
+            );
         }
 
-        self.inner.execute(ctx).await
+        // 装饰器只加一道审批闸门，执行期环境与信封原样透传。
+        self.inner.execute(args, env, ctx).await
     }
 }
 
@@ -297,17 +283,19 @@ impl Plugin for LocalPlugin {
             if needs_approval {
                 // 产出 confirm 类型 user_prompt 节点（交互模式），或自动模式返回友好错误
                 let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
-                return emit_confirm_prompt(
+                return confirm_prompt_payload(
                     &path,
                     "工具执行",
                     &payload,
                     &format!("{final_risk_level:?}").to_lowercase(),
                     &mode,
                 )
-                .await;
+                .map(|value| PluginPayload::new(&value));
             }
 
-            return tool.execute(ctx).await;
+            // 信封 ↔ 结果换算收口在 `invoke_capability`：本处与
+            // `CapabilityVisitor::invoke` 走同一条拆信封路径。
+            return crate::symbio_core::invoke_capability(tool.as_ref(), ctx).await;
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }

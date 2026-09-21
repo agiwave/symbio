@@ -84,12 +84,12 @@ fn remove_reset_and_persisted_evict() {
     tr.apply(NodeOp::Remove {
         message_id: "b".into(),
     });
-    assert!(tr.is_empty());
+    assert!(tr.snapshot().is_empty());
     tr.apply(NodeOp::Upsert {
         message: Box::new(text_msg("c", MessageStatus::Streaming, "3")),
     });
     tr.apply(NodeOp::Reset);
-    assert!(tr.is_empty(), "Reset 清空在途图");
+    assert!(tr.snapshot().is_empty(), "Reset 清空在途图");
 }
 
 /// 线上格式：NodeEvent 序列化稳定（前端契约）。

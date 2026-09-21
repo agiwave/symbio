@@ -91,8 +91,17 @@ async fn route(
 
 **返回**：
 - `Ok(PluginPayload::Data(...))` - 一次性数据
-- `Ok(PluginPayload::Session(channel))` - 流式会话
+- `Ok(PluginPayload::Session(channel))` - 流式会话（**跨进程传输**）
 - `Err(PluginError)` - 错误
+
+> ⚠️ **`Session` 是传输原语，不是「事件流」的通用答案**。它用于**跨进程**场景
+> （前端实时面 / CLI / gateway）。**执行期**（`Capability::execute` 被会话编排层调用）
+> 不要用它回传事件：出口与中止由**执行期环境** `ExecEnv` 承载，作为 `execute` 的
+> 显式参数给出（`env.sink()` / `env.abort()`），事件直接 `sink.emit(NodeOp)`。
+> 工具侧不再自己读信封里的键——`ExecEnv` 由分发点 `symbio_core::invoke_capability`
+> 从 `ctx` 装配（缺席 ⇒ 静默 / 永不中止，故 `route()` 直连调用照常可用）。
+> 理由与代价见 [ADR-020](../DECISIONS.md)、[ADR-021](../DECISIONS.md) 与
+> [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §9、§11。
 
 ### traverse()
 

@@ -5,11 +5,9 @@
 //! （如 `src/main.rs`），与其余工具的入参口径一致。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeResponse, PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -44,8 +42,13 @@ impl Capability for TreeTool {
         )
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let req: super::super::protocol::VdfsTreeRequest = request_of(&ctx);
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        let req: super::super::protocol::VdfsTreeRequest = request_of(&args);
         let depth_limit = req.depth.unwrap_or(3); // 0 = 不限
         let count_limit = req.limit.unwrap_or(500).max(1) as usize;
 
@@ -94,12 +97,12 @@ impl Capability for TreeTool {
             }
         }
 
-        Ok(PluginPayload::new(
+        Ok(serde_json::to_value(
             &super::super::protocol::VdfsTreeResponse {
                 path: req.path,
                 nodes: out,
                 truncated,
             },
-        ))
+        )?)
     }
 }

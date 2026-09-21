@@ -6,8 +6,8 @@
 use super::policy::SecurityPolicy;
 use super::system::validate_params;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
-    PluginPayload,
+    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt, InvokeResponse,
+    PluginError,
 };
 use async_trait::async_trait;
 use bstr::ByteSlice;
@@ -460,8 +460,12 @@ impl Capability for ContentSearchTool {
         }
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let args: Value = ctx.payload()?;
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
         let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
         })?;
@@ -471,6 +475,6 @@ impl Capability for ContentSearchTool {
             ));
         }
         let data = self.execute_inner(&args, &workdir_str).await?;
-        Ok(PluginPayload::new(&data))
+        Ok(serde_json::to_value(&data)?)
     }
 }

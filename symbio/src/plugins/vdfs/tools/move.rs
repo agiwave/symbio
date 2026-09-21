@@ -4,11 +4,9 @@
 //! 「访问文件系统」改为调用封装 provider 的 `move_item`。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeResponse, PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// 移动 / 重命名工具（框架原生 `Capability`）
@@ -41,16 +39,21 @@ impl Capability for MoveTool {
         )
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let req: super::super::protocol::VdfsMoveRequest = request_of(&ctx);
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        let req: super::super::protocol::VdfsMoveRequest = request_of(&args);
         self.provider.move_item(&ctx, &req.from, &req.to).await?;
 
         let message = format!("已将 {} 移动 / 重命名为 {}", req.from, req.to);
-        Ok(PluginPayload::new(&json!({
+        Ok(json!({
             "success": true,
             "from": req.from,
             "to": req.to,
             "message": message,
-        })))
+        }))
     }
 }

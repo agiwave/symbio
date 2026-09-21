@@ -20,9 +20,8 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 use crate::symbio_core::turn::{execute_post_with_abort, parse_sse_stream, PostResult, TurnOutput};
-use crate::symbio_core::{CapabilityMeta, ModelProvider, PluginChannel, PluginError};
+use crate::symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError};
 use async_trait::async_trait;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use super::model_providers::ModelProviderConfig;
@@ -74,16 +73,17 @@ impl ModelProvider for BoundProvider {
     ///
     /// 实现对所有协议通用：协议差异已被 `ModelProtocol` 的钩子吸收，
     /// 故无需（也不可）按协议覆写。
-    #[allow(clippy::too_many_arguments)]
     async fn execute_turn(
         &self,
         system_prompt: &str,
         messages: &[ChatMessage],
         tools: &[CapabilityMeta],
         root_id: &str,
-        channel: &mut PluginChannel,
-        abort_flag: &Arc<AtomicBool>,
+        env: &ExecEnv,
     ) -> Result<TurnOutput, PluginError> {
+        // 执行期环境（出口 + 中止）由调用方一次给全，协议层只管自己的流。
+        let sink = env.sink();
+        let abort = env.abort();
         // ①「LLM 请求发起」日志：每轮请求的起点打点，含模型、消息数、工具数。
         // 后续所有阶段日志（受理/首包/首条内容/结束）均以本条为锚点串联成完整轨迹。
         let turn_started = std::time::Instant::now();
@@ -103,8 +103,7 @@ impl ModelProvider for BoundProvider {
             &self.protocol.get_api_url(&self.cfg),
             self.protocol.get_headers(&self.cfg),
             &body,
-            channel,
-            abort_flag,
+            abort,
         )
         .await
         {
@@ -154,7 +153,7 @@ impl ModelProvider for BoundProvider {
         };
 
         let protocol = Arc::clone(&self.protocol);
-        match parse_sse_stream(response, root_id, channel, abort_flag, move |line| {
+        match parse_sse_stream(response, root_id, sink, abort, move |line| {
             protocol.parse_response_line(line)
         })
         .await

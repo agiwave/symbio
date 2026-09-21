@@ -31,10 +31,11 @@
 
 use crate::symbio_core::vdfs::VdfsProvider;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityVisitor, InvokeRequest, InvokeResponse, ModelProvider,
-    PluginPayload,
+    Capability, CapabilityMeta, CapabilityVisitor, ExecEnv, InvokeRequest, InvokeResponse,
+    ModelProvider, PluginError, PluginPayload,
 };
 use async_trait::async_trait;
+use serde_json::Value;
 use std::sync::Arc;
 
 /// 子 Agent 插件树的注册代理
@@ -90,8 +91,14 @@ impl Capability for PrefixedCapability {
         meta
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        self.inner.execute(ctx).await
+    async fn execute(
+        &self,
+        args: Value,
+        env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        // 装饰器只改名字，执行期环境与信封原样透传（不拆不装）。
+        self.inner.execute(args, env, ctx).await
     }
 }
 

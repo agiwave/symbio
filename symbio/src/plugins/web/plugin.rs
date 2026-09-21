@@ -130,7 +130,7 @@ impl Plugin for WebPlugin {
         }
 
         if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
-            return tool.execute(ctx).await;
+            return crate::symbio_core::invoke_capability(tool.as_ref(), ctx).await;
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }

@@ -18,14 +18,11 @@
 //! - 上下文窗口等参数经 trait 方法自含地暴露（`max_context_tokens` /
 //!   `effective_context_tokens`）。
 
-use crate::symbio_core::CapabilityMeta;
+use crate::symbio_core::{CapabilityMeta, ExecEnv, PluginError};
 use async_trait::async_trait;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 
 use super::turn::TurnOutput;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
-use crate::symbio_core::{PluginChannel, PluginError};
 
 /// 流结束原因（由各协议的 `finish_reason` / `stop_reason` / `finishReason` 归一化）
 ///
@@ -136,14 +133,16 @@ pub trait ModelProvider: Send + Sync {
     /// `Err` / `RateLimited` / `Ok`）与 SSE 解析由实现体提供，使任何
     /// `ModelProvider` 实例都自带完整的「请求-解析」能力，会话引擎无需再
     /// 依赖 model 插件内部实现。
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// `env` 与 [`crate::symbio_core::Capability::execute`] 共用同一类型
+    /// （[`ExecEnv`]）：两者都是「一次带中止的流式执行」——出方向写事件、
+    /// 入方向读中止。模型执行不被路由，因此没有 `ctx` 入参。
     async fn execute_turn(
         &self,
         system_prompt: &str,
         messages: &[ChatMessage],
         tools: &[CapabilityMeta],
         root_id: &str,
-        channel: &mut PluginChannel,
-        abort_flag: &Arc<AtomicBool>,
+        env: &ExecEnv,
     ) -> Result<TurnOutput, PluginError>;
 }

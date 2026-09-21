@@ -1,9 +1,6 @@
 use super::skill_response::SkillResponse;
 use crate::plugins::skill::types::Skill;
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
-    PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -34,7 +31,7 @@ impl SkillExecuteTool {
             .collect()
     }
 
-    fn execute_skill(&self, args: Value) -> InvokeResponse<PluginPayload> {
+    fn execute_skill(&self, args: Value) -> Result<Value, PluginError> {
         let name = args
             .get("name")
             .and_then(|v| v.as_str())
@@ -77,14 +74,14 @@ impl SkillExecuteTool {
             skill.body
         );
 
-        Ok(PluginPayload::new(&SkillResponse {
+        Ok(serde_json::to_value(&SkillResponse {
             name: skill.name,
             body: instructions,
             allowed_tools: skill.allowed_tools,
             model: skill.model,
             base_dir,
             args: Some(skill_args),
-        }))
+        })?)
     }
 }
 
@@ -124,8 +121,12 @@ impl Capability for SkillExecuteTool {
         }
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let args: Value = ctx.payload()?;
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        _ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
         self.execute_skill(args)
     }
 }

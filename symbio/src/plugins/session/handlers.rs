@@ -27,9 +27,7 @@
 
 use super::chat_session::{ChatSession, PersistentChatSession};
 use super::plugin::SessionPlugin;
-use crate::symbio_core::schemas::session::{
-    session_chat_response, session_get_messages, session_update,
-};
+use crate::symbio_core::schemas::session::{session_get_messages, session_update};
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt};
 use crate::symbio_core::{InvokeResponse, PluginError};
 use serde_json::{json, Value};
@@ -56,13 +54,10 @@ impl SessionPlugin {
         // 删除前先 abort 该会话的活跃任务
         let state = self.active_mgr.get_or_create(session_id).await;
         {
+            // 置位即中止（无帧、无 await）：与 `handle_abort` 走同一个原语。
             let mut inner = state.inner.write().await;
-            if let Some(tx) = inner.ai_control_tx.take() {
-                let _ = tx
-                    .send(crate::symbio_core::PluginFrame::Data(json!(
-                        session_chat_response::ControlSignal::Abort
-                    )))
-                    .await;
+            if let Some(signal) = inner.abort_signal.take() {
+                signal.abort();
             }
         }
         // 清理活跃条目

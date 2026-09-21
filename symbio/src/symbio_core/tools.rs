@@ -7,8 +7,8 @@
 //! 因此 `DefaultToolVisitor` 必须作为共享设施定义在 core，不得放进任何插件的私有模块。
 
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityVisitor, InvokeRequest, InvokeResponse, ModelProvider,
-    PluginError, PluginPayload, VdfsProvider,
+    invoke_capability, Capability, CapabilityMeta, CapabilityVisitor, InvokeRequest,
+    InvokeResponse, ModelProvider, PluginError, PluginPayload, VdfsProvider,
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -78,7 +78,7 @@ impl CapabilityVisitor for DefaultToolVisitor {
         };
 
         match tool {
-            Some(tool) => tool.execute(ctx).await,
+            Some(tool) => invoke_capability(tool.as_ref(), ctx).await,
             None => Err(PluginError::NotFound(format!("Tool not found: {name}"))),
         }
     }
@@ -149,9 +149,8 @@ mod tests {
     use super::*;
     use crate::symbio_core::schemas::session::chat_message::ChatMessage;
     use crate::symbio_core::turn::TurnOutput;
-    use crate::symbio_core::{CapabilityMeta, PluginChannel, PluginError};
+    use crate::symbio_core::{CapabilityMeta, ExecEnv, PluginError};
     use async_trait::async_trait;
-    use std::sync::atomic::AtomicBool;
 
     /// 最小模型服务桩：实现纯 trait 契约，仅用于验证注册存储语义，不发起真实请求
     struct MockProvider {
@@ -186,8 +185,7 @@ mod tests {
             _messages: &[ChatMessage],
             _tools: &[CapabilityMeta],
             _root_id: &str,
-            _channel: &mut PluginChannel,
-            _abort_flag: &Arc<AtomicBool>,
+            _env: &ExecEnv,
         ) -> Result<TurnOutput, PluginError> {
             Err(PluginError::InternalError("mock".to_string()))
         }

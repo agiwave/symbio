@@ -218,7 +218,15 @@ const BASELINE = {
   //     整条替换 / Remove·Reset·persisted / 违例帧不占 seq / 线格式带 `op` 标签）、
   //     `symbio_core/turn.rs` +2（跨轮复用 wire id 必须得到不同节点 id / 只有首个
   //     参数分片需要快照）、`nodes.test.rs` +1（`name` 序列化为节点 id 而非工具名）。
-  rustTests: 801,
+  // 801 → 817（批次 E/F/G：执行期出口/信号双原语 → 工具侧收敛 → 流式工具接上出口）：
+  //   · 批次 F +6：`tool_executor.test.rs` +3（pending 闭集**反面**用例 /
+  //     编排层 id / 载荷不承载身份）、新建 `local/ask_user.test.rs` +3；
+  //   · 批次 G +6（净）：新建 `local/shell.test.rs` +9（pump 三态 / execute 四态 /
+  //     ctx 读取口径两态）**取代**原 4 个「消费通道」用例（−4）、
+  //     `symbio_core/exec.test.rs` +1（出口的发射计数——空闲超时判据的前提）、
+  //     `tool_executor.test.rs` 换 1 不增减（`pending_from_message` 随流式分支一并
+  //     删除，改钉**跨文件契约**：`agent_run` 的待审批载荷必须被编排层认出来）。
+  rustTests: 817,
   // 31 → 47：前端半边的棘轮**长期停摆**（详见下方 vitestTests 的说明）。
   //   与覆盖率阈值不同，**文件数 / 用例数与平台无关**：全仓 `*.spec.ts` 里零
   //   `skipIf` / `runIf` / `process.platform` 分支，两处 `it.each` 遍历的也都是

@@ -6,11 +6,9 @@
 //! 形状（message 为结果列表 + 总计 + 截断提示）。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeResponse, PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 const MAX_RESULTS: usize = 1000;
@@ -45,8 +43,13 @@ impl Capability for SearchTool {
         )
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let req: super::super::protocol::VdfsSearchRequest = request_of(&ctx);
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        let req: super::super::protocol::VdfsSearchRequest = request_of(&args);
         let data = self.provider.search(&ctx, &req.path, &req.pattern).await?;
 
         let mut results = data.results;
@@ -69,10 +72,10 @@ impl Capability for SearchTool {
             msg
         };
 
-        Ok(PluginPayload::new(&json!({
+        Ok(json!({
             "results": results,
             "truncated": truncated,
             "message": message,
-        })))
+        }))
     }
 }

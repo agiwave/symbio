@@ -5,7 +5,6 @@
 
 use super::*;
 use crate::symbio_core::SimpleRequest;
-use std::sync::atomic::AtomicBool;
 
 fn test_ctx() -> Arc<dyn InvokeRequest> {
     Arc::new(SimpleRequest::new(None, None))
@@ -16,8 +15,8 @@ fn test_ctx() -> Arc<dyn InvokeRequest> {
 /// 节点不会成为"无结果 tool_call"（下轮请求 400）。
 #[tokio::test]
 async fn missing_tool_call_id_is_recorded_as_failure() {
-    let (_host, mut plugin_chan) = PluginChannel::pair(64);
-    let abort = Arc::new(AtomicBool::new(false));
+    let sink = EventSink::silent();
+    let abort = AbortSignal::new();
     let tcs = vec![ToolCallInfo {
         id: None,
         wire_id: None,
@@ -27,7 +26,7 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx(), &[]).await;
+        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[]).await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
     assert_eq!(msgs[0].role, Some(MessageRole::Tool));
@@ -57,8 +56,8 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
 /// 空串 id 与缺失同等对待（"不合法"）。
 #[tokio::test]
 async fn empty_tool_call_id_is_recorded_as_failure() {
-    let (_host, mut plugin_chan) = PluginChannel::pair(64);
-    let abort = Arc::new(AtomicBool::new(false));
+    let sink = EventSink::silent();
+    let abort = AbortSignal::new();
     let tcs = vec![ToolCallInfo {
         id: Some(String::new()),
         wire_id: None,
@@ -68,7 +67,7 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx(), &[]).await;
+        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[]).await;
 
     assert_eq!(msgs.len(), 1);
     assert_eq!(updates.len(), 1);
@@ -77,8 +76,8 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
 /// 工具名缺失/非法 → 同样作为失败处理（结果挂到已知 id 上，结构完整）。
 #[tokio::test]
 async fn missing_tool_name_is_recorded_as_failure() {
-    let (_host, mut plugin_chan) = PluginChannel::pair(64);
-    let abort = Arc::new(AtomicBool::new(false));
+    let sink = EventSink::silent();
+    let abort = AbortSignal::new();
     let tcs = vec![ToolCallInfo {
         id: Some("tc-known".into()),
         wire_id: None,
@@ -88,7 +87,7 @@ async fn missing_tool_name_is_recorded_as_failure() {
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx(), &[]).await;
+        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[]).await;
 
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-known"));
@@ -101,8 +100,8 @@ async fn missing_tool_name_is_recorded_as_failure() {
 /// 而非静默以 `{}` 执行（那会让模型看到「缺少必填参数」后原样重试）。
 #[tokio::test]
 async fn unparseable_arguments_are_refused_not_executed() {
-    let (_host, mut plugin_chan) = PluginChannel::pair(64);
-    let abort = Arc::new(AtomicBool::new(false));
+    let sink = EventSink::silent();
+    let abort = AbortSignal::new();
     let tcs = vec![ToolCallInfo {
         id: Some("tc-broken".into()),
         wire_id: None,
@@ -112,7 +111,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx(), &[]).await;
+        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[]).await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
     assert_eq!(msgs[0].role, Some(MessageRole::Tool));
@@ -192,8 +191,9 @@ fn tc_context(ids: &[&str]) -> Vec<ChatMessage> {
 /// 的占位兜底 ⇒ 模型看得见、用户看不见，于是它长期潜伏。两条断言必须同时在。
 #[tokio::test]
 async fn aborted_batch_terminates_every_tool_call() {
-    let (_host, mut plugin_chan) = PluginChannel::pair(64);
-    let abort = Arc::new(AtomicBool::new(true)); // 已中止：本批一个都不执行
+    let sink = EventSink::silent();
+    let abort = AbortSignal::new();
+    abort.abort(); // 已中止：本批一个都不执行
     let tcs = vec![
         ToolCallInfo {
             id: Some("tc1".into()),
@@ -214,7 +214,7 @@ async fn aborted_batch_terminates_every_tool_call() {
     let (msgs, updates) = process_tool_calls_async(
         tcs,
         &None,
-        &mut plugin_chan,
+        &sink,
         &abort,
         test_ctx(),
         &tc_context(&["tc1", "tc2"]),
@@ -266,8 +266,8 @@ async fn aborted_batch_terminates_every_tool_call() {
 /// 的父节点、没有任何子节点，UI 上表现为「工具没有响应，会话却继续往后」。
 #[tokio::test]
 async fn interactive_break_leaves_result_for_skipped_calls() {
-    let (_host, mut plugin_chan) = PluginChannel::pair(64);
-    let abort = Arc::new(AtomicBool::new(false));
+    let sink = EventSink::silent();
+    let abort = AbortSignal::new();
     // 交互模式 + 无 parent：第一个工具必然以失败告终，触发本批 break
     let ctx = test_ctx();
     ctx.set(crate::symbio_core::MODE, "interactive".to_string());
@@ -288,15 +288,9 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         },
     ];
 
-    let (msgs, updates) = process_tool_calls_async(
-        tcs,
-        &None,
-        &mut plugin_chan,
-        &abort,
-        ctx,
-        &tc_context(&["tc1", "tc2"]),
-    )
-    .await;
+    let (msgs, updates) =
+        process_tool_calls_async(tcs, &None, &sink, &abort, ctx, &tc_context(&["tc1", "tc2"]))
+            .await;
 
     assert_eq!(
         msgs.len(),
@@ -360,101 +354,149 @@ fn not_executed_patch_is_completed_not_failed() {
 
 // ==================== 工具执行期间的中止感知 ====================
 
-/// `handle_abort` 投递的正是这条帧：主通道上的 `{"type":"abort"}`。
+/// 中止置位 → 等待立即结束。
 ///
 /// 非流式工具（`read_file` / `web_search` / MCP / `codebase_search` …，即绝大多数
 /// 工具）在执行期间是**单次 await**，没有任何帧可观测。若不与中止信号 select，
 /// 用户按下停止后工具照跑（最长硬超时 600s），整个 Turn 继续推进——用户以为停了，
-/// 其实没停。这条测试锁定「中止帧能让等待立即结束」。
+/// 其实没停。
+///
+/// 收口前这条语义由「`handle_abort` 往通道投一帧 `{"type":"abort"}`」承载，
+/// 因此测试要造帧、造通道、还要覆盖 cancel_token 与「通道关闭不算中止」两条边界。
+/// 现在中止只有一个原语（[`AbortSignal`]），一个用例即可锁死契约。
 #[tokio::test]
-async fn wait_tool_abort_returns_on_abort_frame() {
-    let (host, mut plugin_chan) = PluginChannel::pair(64);
-    let aborted = AtomicBool::new(false);
+async fn wait_tool_abort_returns_when_signalled() {
+    let abort = AbortSignal::new();
+    let waiter = abort.clone();
 
-    host.tx
-        .send(PluginFrame::Data(json!({ "type": "abort" })))
+    let handle = tokio::spawn(async move { wait_tool_abort(&waiter).await });
+
+    abort.abort();
+    tokio::time::timeout(std::time::Duration::from_secs(2), handle)
         .await
-        .unwrap();
-
-    tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        wait_tool_abort(&mut plugin_chan, &aborted),
-    )
-    .await
-    .expect("中止帧到达后应立即返回，而不是继续等工具");
-    assert!(aborted.load(Ordering::Relaxed), "返回时必须置位中止标志");
+        .expect("中止置位后应立即返回，而不是继续等工具")
+        .expect("等待任务不应 panic");
 }
 
-/// 已置位的标志（上游已判定）→ 不必等任何帧。
+/// 已置位的信号（上游已判定）→ 立即返回，不挂起。
 #[tokio::test]
 async fn wait_tool_abort_returns_immediately_when_already_aborted() {
-    let (_host, mut plugin_chan) = PluginChannel::pair(64);
-    let aborted = AtomicBool::new(true);
+    let abort = AbortSignal::new();
+    abort.abort();
     tokio::time::timeout(
         std::time::Duration::from_millis(200),
-        wait_tool_abort(&mut plugin_chan, &aborted),
+        wait_tool_abort(&abort),
     )
     .await
-    .expect("标志已置位时应立即返回");
+    .expect("信号已置位时应立即返回");
 }
 
-/// `cancel_token` 取消（会话销毁 / 消费循环超时兜底）→ 同样视为中止。
-#[tokio::test]
-async fn wait_tool_abort_returns_on_cancelled_token() {
-    let (host, mut plugin_chan) = PluginChannel::pair(64);
-    let aborted = AtomicBool::new(false);
-    host.cancel_token.cancel();
-
-    tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        wait_tool_abort(&mut plugin_chan, &aborted),
-    )
-    .await
-    .expect("cancel_token 取消后应立即返回");
-    assert!(aborted.load(Ordering::Relaxed));
-}
-
-/// **通道关闭 ≠ 中止**——回归测试。
+/// **未被中止就不得返回**——回归测试。
 ///
-/// 消费循环消失（会话正常收尾 / 被丢弃）会让 `rx.recv()` 返回 `None`。把 `None`
-/// 直接当成中止返回，会在会话正常收尾时把**仍在跑**的工具误报为"被用户中止"，
-/// 并让 `select!` 立刻 drop 掉工具 future。正确行为是：此后只保留
-/// `is_aborted` / `cancel_token` 两条来源继续等。
+/// 这是「工具照跑但用户以为停了」的反面：若等待函数在没有任何中止来源时提前返回，
+/// `select!` 会立刻 drop 掉仍在运行的工具 future，把它误报成「被用户中止」。
+/// 收口前这条由「通道关闭不算中止」的用例守着；现在通道不在执行期了，
+/// 契约变成更直接的一句：**只有 `abort()` 能让它返回**。
 #[tokio::test]
-async fn wait_tool_abort_ignores_closed_channel() {
-    let (host, mut plugin_chan) = PluginChannel::pair(64);
-    let aborted = AtomicBool::new(false);
-    drop(host); // 对端消失 → rx 关闭
-
+async fn wait_tool_abort_stays_pending_without_signal() {
+    let abort = AbortSignal::new();
     let r = tokio::time::timeout(
         std::time::Duration::from_millis(300),
-        wait_tool_abort(&mut plugin_chan, &aborted),
+        wait_tool_abort(&abort),
     )
     .await;
     assert!(
         r.is_err(),
-        "通道关闭被误判成了中止：正在跑的工具会被无故丢弃并报成「用户中止」"
+        "无中止来源时提前返回：正在跑的工具会被无故丢弃并报成「用户中止」"
     );
-    assert!(!aborted.load(Ordering::Relaxed), "通道关闭不得置位中止标志");
+    assert!(!abort.is_aborted(), "未中止时信号不得被置位");
 }
 
-/// 非 abort 的业务帧不得被当成中止。
-#[tokio::test]
-async fn wait_tool_abort_ignores_other_frames() {
-    let (host, mut plugin_chan) = PluginChannel::pair(64);
-    let aborted = AtomicBool::new(false);
-    host.tx
-        .send(PluginFrame::Data(
-            json!({ "type": "status", "status": "idle" }),
-        ))
-        .await
-        .unwrap();
+// ── 工具结果的「等待用户」意图 ────────────────────────────────────────────────
+//
+// 契约：**工具只声明意图与载荷，节点归编排层构造**。工具曾经自建 Session 通道、
+// 发一个随机 id 的节点，由消费方解回来改 id 再重播一次——同一个逻辑节点因此有两个
+// id，前端出现重复审批卡，且 resume 只删得掉一个。
 
-    let r = tokio::time::timeout(
-        std::time::Duration::from_millis(300),
-        wait_tool_abort(&mut plugin_chan, &aborted),
-    )
-    .await;
-    assert!(r.is_err(), "普通帧不是中止信号");
-    assert!(!aborted.load(Ordering::Relaxed));
+/// `failure_kind` 是**控制流**判据，因此只认闭集里的两个 pending 取值。
+///
+/// 反面同样重要：`error` / `permission_denied` / `tool_unavailable` 都是**信息性**
+/// 标记。把它们当成「等待用户」会让自动模式下**无人可授权**的工具把会话永久挂起
+/// ——本该让 LLM 换条路继续，却变成等一个永远不会来的回答。
+#[test]
+fn pending_prompt_from_only_accepts_the_pending_kinds() {
+    for kind in ["needs_approval", "needs_interaction"] {
+        let data = json!({
+            "content": "需要确认：执行 cmd",
+            "prompt": { "kind": "confirm" },
+            "failure_kind": kind,
+        });
+        let p = pending_prompt_from(&data).unwrap_or_else(|| panic!("{kind} 应判为等待用户"));
+        assert_eq!(p.failure_kind, kind);
+        assert_eq!(p.text, "需要确认：执行 cmd");
+        assert_eq!(p.prompt["kind"], json!("confirm"));
+    }
+
+    for kind in ["error", "permission_denied", "tool_unavailable"] {
+        let data = json!({ "content": "x", "failure_kind": kind });
+        assert!(
+            pending_prompt_from(&data).is_none(),
+            "{kind} 是信息性标记，不得收口为等待用户（会让会话永久挂起）"
+        );
+    }
+
+    // 没有 failure_kind ⇒ 普通结果
+    assert!(pending_prompt_from(&json!({ "content": "ok" })).is_none());
+}
+
+/// user_prompt 节点的身份归编排层：`id = result_msg_id`、`parent_id = tool_call_id`。
+///
+/// 这两个 id 正是「同一逻辑节点两个 id」事故的正反面。工具侧现在**拿不到**它们
+/// （[`PendingPrompt`] 里没有 id 字段），所以那类 bug 在类型层面不成立。
+#[test]
+fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
+    let pending = PendingPrompt {
+        text: "请回答问题以继续".into(),
+        prompt: json!({ "kind": "question", "questions": [] }),
+        failure_kind: crate::symbio_core::failure_kind::NEEDS_INTERACTION.into(),
+    };
+    let msg = build_user_prompt_message("res-1", "tc-1", &pending);
+
+    assert_eq!(msg.id, "res-1", "节点 id 必须是结果占位节点 id，不是新造的");
+    assert_eq!(
+        msg.parent_id.as_deref(),
+        Some("tc-1"),
+        "必须锚在发起它的 ToolCall 下"
+    );
+    assert_eq!(msg.msg_type, Some(MessageType::UserPrompt));
+    assert_eq!(msg.status, Some(MessageStatus::WaitingUserAction));
+    assert_eq!(msg.role, Some(MessageRole::Tool));
+
+    let meta = msg.meta.expect("user_prompt 必须带 meta");
+    assert_eq!(meta["failure_kind"], json!("needs_interaction"));
+    assert_eq!(meta["prompt"]["kind"], json!("question"));
+}
+
+/// **跨工具契约**：`agent_run` 把子会话审批转成载荷回传时，本层必须认出它。
+///
+/// 两个文件各自演化时这条契约最容易静默断掉：工具改了字段名，编排层就再也识别
+/// 不出「待用户动作」，审批卡直接消失（且不报错）。形状与
+/// `agent/host/subagent.rs::RelayOutcome::Pending` 的序列化逐字对应。
+#[test]
+fn subagent_pending_payload_is_recognized_as_pending_intent() {
+    let payload = json!({
+        "content": "需要确认：删除文件",
+        "success": false,
+        "failure_kind": crate::symbio_core::failure_kind::NEEDS_APPROVAL,
+        "prompt": { "tool_name": "agent_run", "args": { "session_id": "child-1" } },
+    });
+    let p = pending_prompt_from(&payload).expect("子会话待审批载荷必须被识别");
+
+    assert_eq!(p.text, "需要确认：删除文件");
+    assert_eq!(p.prompt["tool_name"], json!("agent_run"));
+    assert_eq!(
+        p.failure_kind,
+        crate::symbio_core::failure_kind::NEEDS_APPROVAL
+    );
+    // 载荷里没有身份字段 ⇒ [`PendingPrompt`] 无法承载悬空引用（类型层面成立）
 }

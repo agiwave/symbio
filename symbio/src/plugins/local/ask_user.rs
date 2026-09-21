@@ -1,23 +1,21 @@
 //! 询问用户工具 - 实现 Capability（对应 Trae 的 AskUserQuestion）
 //!
 //! 支持单问题（question）或批量问题（questions[]，1~4 个，对齐 Trae）。
-//! 后端通过 `Session` 通道广播一个 `user_prompt` 消息节点（status = WaitingUserAction），
-//! 编排层在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通 `user` 消息
-//! （`meta.responds_to` 指向本节点）回填后，新一轮会重跑本工具并拿到答案。
-//! options 自动补充 "Other" 选项。
 //!
-//! 与 `local` 的 confirm 流程是**同一机制的两种问法**（见 `plugin.rs::emit_confirm_prompt`）：
-//! confirm 问「是否允许执行某工具」，本工具问「请回答问题」；两者产出的节点形状一致，
+//! **本工具不构造节点**：它只返回 `failure_kind = needs_interaction` 加 `prompt` 载荷，
+//! 由编排层（`session/tool_executor.rs`）构造 `user_prompt` 节点
+//! （status = WaitingUserAction，id = 工具结果占位节点 id）并将会话置于
+//! `AwaitingInput(user)`；用户答案以一条普通 `user` 消息（`meta.responds_to` 指向该节点）
+//! 回填后，新一轮会重跑本工具并拿到答案。options 自动补充 "Other" 选项。
+//!
+//! 与 `local` 的 confirm 流程是**同一机制的两种问法**
+//! （见 `plugin.rs::confirm_prompt_payload`）：confirm 问「是否允许执行某工具」，
+//! 本工具问「请回答问题」；两者返回的载荷形状一致（`prompt` + `failure_kind`），
 //! 前端的提问卡与回答回填链路共用。自动模式（`mode == "auto"`）下不产节点，
 //! 返回 `tool_unavailable` 让 LLM 自行继续，避免无人值守时阻塞。
 
 use crate::symbio_core::{
-    schemas::session::chat_message::{
-        ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
-    },
-    schemas::session::session_chat_response,
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginChannel,
-    PluginFrame, PluginPayload,
+    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt, PluginError,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -210,9 +208,12 @@ impl Capability for AskUserTool {
         }
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let args: Value = ctx.payload()?;
-
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
         let prompt = match self.build_prompt_payload(&args) {
             Ok(p) => p,
             Err(e) => {
@@ -226,40 +227,30 @@ impl Capability for AskUserTool {
         // - interactive：会话流中渲染提问卡（user_prompt 节点），等待用户回答。
         let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
         if mode == "auto" {
-            return Ok(PluginPayload::new(&json!({
+            return Ok(json!({
                 "error": "当前为自动模式，不支持交互式提问（ask_user 不可用）。请基于已有上下文自行决策并继续，或提示用户切换到交互模式以获取交互提问能力。",
                 "success": false,
-                "failure_kind": "tool_unavailable",
-            })));
+                "failure_kind": crate::symbio_core::failure_kind::TOOL_UNAVAILABLE,
+            }));
         }
 
-        // 通过 Session 通道广播一个 user_prompt 节点（parent_id = None，由 tool_executor 锚定到 tool_call_id）
-        let (tx_side, rx_side) = PluginChannel::pair(16);
-        let node = ChatMessage {
-            id: uuid::Uuid::new_v4().to_string(),
-            parent_id: None,
-            role: Some(MessageRole::Tool),
-            msg_type: Some(MessageType::UserPrompt),
-            content: Some(MessageContent::Text("请回答问题以继续".to_string())),
-            status: Some(MessageStatus::WaitingUserAction),
-            meta: Some(json!({
-                "prompt": prompt,
-                // failure_kind=needs_interaction：前端据此渲染"填表提交"按钮（与错误盒统一）
-                "failure_kind": "needs_interaction"
-            })),
-            ..Default::default()
-        };
-        let _ = tx_side
-            .tx
-            .send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                    message: Box::new(node),
-                })
-                .unwrap_or_default(),
-            ))
-            .await;
-        // 关闭发送侧，工具执行结束（编排层据此结束本轮并进入 AwaitingInput）
-        drop(tx_side);
-        Ok(PluginPayload::Session(rx_side))
+        // 只回答「要问用户什么」——`prompt` 载荷 + `failure_kind`。
+        // **user_prompt 节点由编排层构造**（`session/tool_executor.rs`）：它拥有
+        // `result_msg_id`（节点身份）与父 ToolCall 终态，是工具结果节点的唯一写入者。
+        //
+        // 历史上这里建一条 Session 通道、发一个 Upsert 帧、drop tx 再返回 rx，
+        // 由消费方解回来、把 parent_id 锚到 tool_call_id、改 id 后重新播一遍——
+        // 同一个逻辑节点因此有两个 id，审批 UI 重复且 resume 只删得掉一个。
+        Ok(json!({
+            "content": "请回答问题以继续",
+            "success": false,
+            // 编排层凭此标记把本轮收口为「等待用户动作」并构造 user_prompt 节点。
+            "failure_kind": crate::symbio_core::failure_kind::NEEDS_INTERACTION,
+            "prompt": prompt,
+        }))
     }
 }
+
+#[cfg(test)]
+#[path = "ask_user.test.rs"]
+mod tests;

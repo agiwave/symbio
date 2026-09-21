@@ -5,7 +5,6 @@
 
 use super::*;
 use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
-use crate::symbio_core::PluginChannel;
 
 /// 向在途转写图注入一个节点（测试辅助：等价于旧的 live_messages.push）。
 async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage) {
@@ -14,43 +13,38 @@ async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage
     });
 }
 
-/// 造一个已登记 `ai_control_tx` 的会话状态（模拟消费循环入口的登记）。
-async fn armed_state() -> Arc<ActiveSessionState> {
+/// 造一个已登记中止信号的会话状态（模拟消费循环入口的登记）。
+async fn armed_state() -> (Arc<ActiveSessionState>, AbortSignal) {
     let state = Arc::new(ActiveSessionState::with_session_id("s1".into()));
-    let (host_chan, _ai_chan) = PluginChannel::pair(4);
-    state.inner.write().await.ai_control_tx = Some(host_chan.tx.clone());
-    state
+    let signal = AbortSignal::new();
+    state.inner.write().await.abort_signal = Some(signal.clone());
+    (state, signal)
 }
 
 async fn is_registered(state: &Arc<ActiveSessionState>) -> bool {
-    state.inner.read().await.ai_control_tx.is_some()
+    state.inner.read().await.abort_signal.is_some()
 }
 
-/// 回归（watchdog 与 `stop_session` 竞态）：消费循环**提前 return** 时，
-/// 控制通道登记必须随之注销。
+/// 回归（watchdog 与 `stop_session` 竞态）：Turn 任务**提前 return** 时，
+/// 中止信号登记必须随之注销。
 ///
-/// 历史缺陷：业务 Error 帧与 1800s 消费超时两处出口写作 `return`，跳过了
-/// 循环之后的 `ai_control_tx = None` 清理，留下指向已关闭通道的陈旧 sender。
-/// `handle_abort` 以「登记是否为 `None`」作为子任务是否仍在运行的唯一判据，
-/// 判据从此永久为假 → abort 必然空等 3s 兜底，且 Abort 帧投进死通道被丢弃。
+/// 历史缺陷：业务错误与 1800s 消费超时两处出口写作 `return`，跳过了循环之后的
+/// 清理块，留下陈旧登记。`handle_abort` 以「登记是否为 `None`」作为子任务是否
+/// 仍在运行的唯一判据，判据从此永久为假 → abort 必然空等 3s 兜底。
 #[tokio::test]
-async fn early_return_still_unregisters_ai_control_tx() {
-    let state = armed_state().await;
-    assert!(is_registered(&state).await, "前置：入口已登记控制通道");
+async fn early_return_still_unregisters_abort_signal() {
+    let (state, signal) = armed_state().await;
+    assert!(is_registered(&state).await, "前置：入口已登记中止信号");
 
     // 模拟提前出口：守卫存活期间函数直接 return（正常路径先显式 disarm）
-    async fn early_return(mut guard: AiControlGuard) {
+    async fn early_return(mut guard: AbortGuard) {
         guard.disarm().await;
     }
-    early_return(AiControlGuard {
-        state: state.clone(),
-        armed: true,
-    })
-    .await;
+    early_return(AbortGuard::register(state.clone(), signal).await).await;
 
     assert!(
         !is_registered(&state).await,
-        "提前 return 后 ai_control_tx 应已注销，否则 handle_abort 会空等 3s 兜底"
+        "提前 return 后中止信号应已注销，否则 handle_abort 会空等 3s 兜底"
     );
 }
 
@@ -58,12 +52,9 @@ async fn early_return_still_unregisters_ai_control_tx() {
 /// 清理块，`Drop` 也必须兜住清理——这是"新增出口忘记清理"不再静默通过的保证。
 #[tokio::test]
 async fn guard_drop_unregisters_even_without_explicit_disarm() {
-    let state = armed_state().await;
+    let (state, signal) = armed_state().await;
     {
-        let _guard = AiControlGuard {
-            state: state.clone(),
-            armed: true,
-        };
+        let _guard = AbortGuard::register(state.clone(), signal).await;
         // 故意不调用 disarm：离开作用域应由 Drop 清理
     }
     assert!(
@@ -73,25 +64,41 @@ async fn guard_drop_unregisters_even_without_explicit_disarm() {
 }
 
 /// 幂等性：`disarm` 之后 Drop 不得再做二次清理——否则会误伤后续轮次
-/// 新登记的控制通道（消费循环与 resume 复用同一 `ActiveSessionState`）。
+/// 新登记的中止信号（消费循环与 resume 复用同一 `ActiveSessionState`）。
 #[tokio::test]
 async fn disarmed_guard_does_not_clobber_next_turn_registration() {
-    let state = armed_state().await;
-    let mut guard = AiControlGuard {
-        state: state.clone(),
-        armed: true,
-    };
+    let (state, signal) = armed_state().await;
+    let mut guard = AbortGuard::register(state.clone(), signal).await;
     guard.disarm().await;
 
-    // 模拟下一轮：新的控制通道登记进来
-    let (host_chan, _ai_chan) = PluginChannel::pair(4);
-    state.inner.write().await.ai_control_tx = Some(host_chan.tx.clone());
+    // 模拟下一轮：新的中止信号登记进来
+    let next = AbortSignal::new();
+    state.inner.write().await.abort_signal = Some(next.clone());
 
     drop(guard); // 已 disarm 的旧守卫离开作用域
 
     assert!(
         is_registered(&state).await,
         "旧守卫的 Drop 误清了新一轮的登记：新一轮 abort 将失去中止能力"
+    );
+}
+
+/// 注销即置位：守卫离开作用域后，本 Turn 的中止信号必须已置位。
+///
+/// 这是收口前「消费循环 drop 掉通道 ⇒ 执行方在 `wait_for_abort_signal` 里读到
+/// 通道关闭而中止」那条隐式语义的显式化。丢掉它会静默退化：看门狗/让位出口
+/// 之后，卡在 await 里的 chat_loop 再也没人叫停。
+#[tokio::test]
+async fn disarm_aborts_the_signal() {
+    let (state, signal) = armed_state().await;
+    let mut guard = AbortGuard::register(state.clone(), signal.clone()).await;
+    assert!(!signal.is_aborted(), "前置：尚未中止");
+
+    guard.disarm().await;
+
+    assert!(
+        signal.is_aborted(),
+        "注销必须同时置位：否则执行方永远不会感知「发起方已不再等待」"
     );
 }
 
@@ -241,7 +248,7 @@ async fn converge_inflight_finalizes_live_buffer_nodes() {
     assert_eq!(status_of("orphan"), None, "父节点不存在的孤儿不得写入存储");
 
     assert!(
-        state.transcript.lock().await.is_empty(),
+        state.transcript.lock().await.snapshot().is_empty(),
         "权威副本已回到存储，在途缓冲必须作废——否则陈旧副本会继续参与叠加"
     );
 }
@@ -312,6 +319,71 @@ async fn converge_inflight_is_idempotent() {
         p.converge_inflight(&state, sid, "用户中止").await,
         0,
         "第二次必须是空操作：否则每次中止都会对同一批节点重复广播"
+    );
+}
+
+/// 中止入口的**端到端**契约（本次「通道 → 信号」改造的唯一对外行为面）。
+///
+/// 收口前 `handle_abort` 往执行期通道投一帧 `ControlSignal::Abort`，执行方在
+/// `select!` 里收帧后自行置位标志；现在它直接置位**同一个** [`AbortSignal`] 对象。
+/// 外部可观察的结果必须逐条一致，本用例逐条锁定：
+/// 置位信号 → 注销登记 → 复位工作态 → 结局为 `aborted` → 在途根 Turn 定稿 `Aborted`。
+#[tokio::test]
+async fn handle_abort_signals_registered_turn_and_converges() {
+    let (_dir, p) = fixture();
+    let sid = "s-abort-entry";
+    p.get_store()
+        .await
+        .unwrap()
+        .save_session(&Session::new(sid))
+        .await
+        .unwrap();
+
+    let state = Arc::new(ActiveSessionState::with_session_id(sid.into()));
+    let signal = AbortSignal::new();
+    {
+        let mut inner = state.inner.write().await;
+        inner.abort_signal = Some(signal.clone());
+        inner.is_working = true;
+    }
+    push_inflight(&state, turn_node("turn-live", cm::MessageStatus::Streaming)).await;
+
+    // 模拟执行方（chat_loop）收敛后由 AbortGuard 注销登记——否则 handle_abort
+    // 会走满 3s 兜底（那也是合法路径，只是慢）。
+    let state_for_guard = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        state_for_guard.inner.write().await.abort_signal = None;
+    });
+
+    p.handle_abort(&state).await;
+
+    assert!(
+        signal.is_aborted(),
+        "中止必须置位在途 Turn 的信号——执行方唯一的中止感知来源"
+    );
+    {
+        let inner = state.inner.read().await;
+        assert!(
+            inner.abort_signal.is_none(),
+            "登记必须注销：handle_abort 凭它判定 chat_loop 已收敛"
+        );
+        assert!(!inner.is_working, "中止后必须收敛为空闲");
+        assert_eq!(
+            inner.last_outcome.as_deref(),
+            Some(OUTCOME_ABORTED),
+            "结局必须是 aborted：坍缩成 completed 会让前端把中止当成正常完成"
+        );
+    }
+
+    let chat = p.open_chat_session(sid).await.unwrap();
+    let msgs = chat.get_messages().await.unwrap();
+    assert_eq!(
+        msgs.iter()
+            .find(|m| m.id == "turn-live")
+            .and_then(|m| m.status.clone()),
+        Some(cm::MessageStatus::Aborted),
+        "在途根 Turn 必须定稿为 Aborted——前端的重试入口挂在它上面"
     );
 }
 

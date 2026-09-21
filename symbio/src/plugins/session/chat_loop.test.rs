@@ -19,8 +19,12 @@ fn req(max_tool_rounds: Option<usize>) -> TurnRequest {
 }
 
 fn state(tool_rounds: usize, in_flight: &[&str], aborted: bool) -> TurnState {
+    let abort = AbortSignal::new();
+    if aborted {
+        abort.abort();
+    }
     TurnState {
-        abort_flag: Arc::new(AtomicBool::new(aborted)),
+        abort,
         tool_rounds,
         in_flight_tools: in_flight.iter().map(|s| s.to_string()).collect(),
         ..Default::default()

@@ -8,11 +8,12 @@
 //!
 //! | 文件 | 职责 |
 //! |---|---|
-//! | 本文件 | 装配 + RAII 守卫（`AiControlGuard` / `WorkingGuard`）+ `resolve_required_session_id` |
+//! | 本文件 | 装配 + RAII 守卫（`AbortGuard` / `WorkingGuard`）+ `resolve_required_session_id` |
 //! | [`broadcast`] | 三个广播出口：错误 + 收敛 / 帧投递 / 忙闲状态 |
 //! | [`consume`] | 消费循环：`fail_before_loop` / `run_chat_loop_task` / `handle_abort` |
 //! | [`entry`] | 两个 one-off 入口：`chat/send` / `chat/abort` + `ensure_auto_title` |
 //! | [`failure`] | 失败降级持久化：`persist_failure` + `subtree_of` |
+//! | [`sink`] | 执行期事件出口（`TranscriptSink`）：直连转写唯一写入点 |
 //!
 //! `impl SessionPlugin` 按职责分块分散在子模块（Rust 允许多个 inherent impl，
 //! 方法声明顺序无语义）。
@@ -30,8 +31,8 @@ use crate::symbio_core::schemas::{
     session::{session_chat, session_chat_response},
 };
 use crate::symbio_core::{
-    take_errors, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel,
-    PluginError, PluginFrame, PluginPayload, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
+    take_errors, AbortSignal, EventSink, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
+    PluginError, PluginPayload, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use broadcast::SessionStateChange;
 use serde_json::json;
@@ -68,48 +69,70 @@ pub(crate) fn resolve_required_session_id(
     }
 }
 
-/// `ai_control_tx` 登记守卫：保证消费循环的**任何**出口都会清走登记的控制通道
-/// sender——正常路径显式 `disarm`，panic unwind 由 `Drop` 兜底。
+/// 中止信号登记守卫：保证 Turn 任务的**任何**出口都会注销登记的中止信号——
+/// 正常路径显式 `disarm`，panic unwind 由 `Drop` 兜底。
 ///
 /// ## 为什么需要它
 ///
-/// `handle_abort` 以「`ai_control_tx` 是否为 `None`」作为 chat_loop 子任务是否
-/// 仍在运行的**唯一**判据。历史上消费循环有两处提前出口（业务 Error 帧、
-/// 1800s 消费超时）写作 `return`，直接跳过了循环之后的清理块，留下指向已关闭
-/// 通道的陈旧 sender——判据从此永久为假：abort 必然空等 3s 才走兜底复位，
-/// 且 Abort 帧投进死通道被静默丢弃（前端收不到中止确认）。
+/// `handle_abort` 以「`abort_signal` 是否为 `None`」作为 chat_loop 子任务是否
+/// 仍在运行的**唯一**判据。历史上这个位置登记的是一个通道 sender，而消费循环有
+/// 两处提前出口（业务错误、1800s 消费超时）写作 `return`，直接跳过了循环之后的
+/// 清理块，留下指向已关闭通道的陈旧 sender——判据从此永久为假：abort 必然空等
+/// 3s 才走兜底复位，且 Abort 帧投进死通道被静默丢弃（前端收不到中止确认）。
 ///
 /// 登记与注销收拢进同一对象后，"新增出口忘记清理"不再能静默通过：`Drop` 保证
 /// 至少有一次清理必然发生，也不依赖后续维护者记住"新增出口必须穿过清理块"这条
 /// 隐性契约。与 [`WorkingGuard`] 同型（后者兜 `is_working`）。
-struct AiControlGuard {
+///
+/// ## 注销时一并置位
+///
+/// 注销意味着「发起方不再等待这个 Turn 了」。收口前这条语义由「消费循环 drop 掉
+/// 通道 ⇒ 执行方在 `wait_for_abort_signal` 里读到通道关闭」隐式承担；现在通道不在
+/// 执行期了，改为在注销时**显式** `abort()`——语义不变，意图显形。
+/// （对已结束的 Turn 置位是幂等的空动作。）
+struct AbortGuard {
     state: Arc<ActiveSessionState>,
+    signal: AbortSignal,
     /// `false` 表示已清理，Drop 成为 no-op（正常路径走 `disarm` 同步清理，
     /// 避免多一次 spawn 调度延迟）。
     armed: bool,
 }
 
-impl AiControlGuard {
+impl AbortGuard {
+    /// 登记中止信号：`handle_abort` 凭此找到在途 Turn。
+    async fn register(state: Arc<ActiveSessionState>, signal: AbortSignal) -> Self {
+        state.inner.write().await.abort_signal = Some(signal.clone());
+        Self {
+            state,
+            signal,
+            armed: true,
+        }
+    }
+
     async fn disarm(&mut self) {
-        self.state.inner.write().await.ai_control_tx = None;
+        let mut inner = self.state.inner.write().await;
+        inner.abort_signal = None;
+        drop(inner);
+        self.signal.abort();
         self.armed = false;
     }
 }
 
-impl Drop for AiControlGuard {
+impl Drop for AbortGuard {
     fn drop(&mut self) {
         if !self.armed {
             return;
         }
         // Drop 中不能 await：优先 `try_write` 就地同步清理（写锁持有期极短，
         // 几乎总能拿到）；确实取不到才退回 detached spawn（与 WorkingGuard 同型）。
+        self.signal.abort();
         if let Ok(mut inner) = self.state.inner.try_write() {
-            inner.ai_control_tx = None;
+            inner.abort_signal = None;
             return;
         }
         let state = self.state.clone();
         tokio::spawn(async move {
-            state.inner.write().await.ai_control_tx = None;
+            state.inner.write().await.abort_signal = None;
         });
     }
 }
@@ -209,6 +232,7 @@ mod broadcast;
 mod consume;
 mod entry;
 mod failure;
+mod sink;
 
 #[cfg(test)]
 #[path = "orchestrator.test.rs"]

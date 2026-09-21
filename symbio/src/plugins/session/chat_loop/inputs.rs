@@ -110,7 +110,7 @@ pub(crate) async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn InvokeRequest>,
     context: &mut SessionContext,
-    channel: &mut PluginChannel,
+    sink: &EventSink,
     turn: &mut TurnState,
     req: &TurnRequest,
 ) -> Result<TurnInputs, TurnExit> {
@@ -133,20 +133,12 @@ pub(crate) async fn prepare_turn_inputs(
     }
 
     // ── ③ 压缩（收口 ③：自动语义压缩 + 水位提醒，唯一响应点）───────────────
-    let inject_nudge = apply_compaction(
-        orchestrator,
-        ctx,
-        context,
-        channel,
-        turn,
-        req,
-        overhead_tokens,
-    )
-    .await?;
+    let inject_nudge =
+        apply_compaction(orchestrator, ctx, context, turn, req, overhead_tokens).await?;
 
     // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
     let root_id: String = short_id();
-    emit_streaming_start(channel, &root_id, Some(turn.tool_rounds)).await;
+    emit_streaming_start(sink, &root_id, Some(turn.tool_rounds)).await;
 
     // ── ⑤ 请求视图（唯一入口 build_request_view）──────────────────────────
     // 在存储视图之上叠加四项**不落库**的裁剪，全部只作用于本次 execute_turn 的
@@ -208,7 +200,6 @@ pub(crate) async fn apply_compaction(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn InvokeRequest>,
     context: &mut SessionContext,
-    channel: &mut PluginChannel,
     turn: &mut TurnState,
     req: &TurnRequest,
     overhead_tokens: usize,
@@ -218,9 +209,8 @@ pub(crate) async fn apply_compaction(
         match auto_compress_process(
             orchestrator,
             context,
-            channel,
             ctx,
-            &turn.abort_flag,
+            &turn.abort,
             overhead_tokens,
             false,
         )

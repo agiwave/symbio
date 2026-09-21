@@ -34,8 +34,8 @@
 use super::policy::SecurityPolicy;
 use crate::symbio_core::providers::EmbeddingService;
 use crate::symbio_core::{
-    create_object, Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    PluginError, PluginPayload, SimpleRequest, EMBEDDING_LOCAL,
+    create_object, Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt,
+    InvokeResponse, PluginError, SimpleRequest, EMBEDDING_LOCAL,
 };
 use async_trait::async_trait;
 use grep::regex::RegexMatcherBuilder;
@@ -845,8 +845,12 @@ impl Capability for CodebaseSearchTool {
         }
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let args: Value = ctx.payload()?;
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
         let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
         })?;
@@ -856,7 +860,7 @@ impl Capability for CodebaseSearchTool {
             ));
         }
         let data = self.execute_inner(&args, &workdir_str).await?;
-        Ok(PluginPayload::new(&data))
+        Ok(serde_json::to_value(&data)?)
     }
 }
 

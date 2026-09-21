@@ -23,47 +23,15 @@ use crate::symbio_core::{
     InvokeRequestExt,
 };
 use crate::symbio_core::{
-    InvokeRequest, Plugin, PluginChannel, PluginError, PluginFrame, PluginPayload, HOOK_FIRE,
+    AbortSignal, EventSink, InvokeRequest, Plugin, PluginError, PluginPayload, HOOK_FIRE,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 
 // 工具结果提取
-
-/// 广播工具结果子节点（**完整消息**，消费端按 id 整条替换）。
-async fn emit_tool_update(
-    channel: &PluginChannel,
-    msg_id: &str,
-    tool_call_id: &str,
-    full: String,
-    status: MessageStatus,
-) {
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                message: Box::new(ChatMessage {
-                    id: msg_id.to_string(),
-                    parent_id: Some(tool_call_id.to_string()),
-                    role: Some(MessageRole::Tool),
-                    msg_type: Some(MessageType::Text),
-                    content: Some(MessageContent::Text(full)),
-                    status: Some(status),
-                    ..Default::default()
-                }),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
-}
-
-/// 工具流式接收的空闲超时（秒）：超过该时长未收到任何新帧则判定工具挂死，
-/// 返回错误结果而非无限挂起（防卡死兜底之一）。
-pub const TOOL_STREAM_IDLE_TIMEOUT_SECS: u64 = 180;
 
 /// 参数摘要：截断到 max_chars，用于日志打印（避免超长参数刷屏）。
 ///
@@ -138,81 +106,108 @@ pub async fn fire_hook(
 
 /// 等待「用户中止」信号（工具执行期间）。
 ///
-/// 三条来源与 `symbio_core::turn::wait_for_abort_signal` 同源，不另立口径：
-/// 1. `is_aborted` 已被置位（上游已判定，或本函数自己刚置的）；
-/// 2. 主通道收到 abort 帧——`handle_abort` 投递的正是它；
-/// 3. `cancel_token` 被取消（会话销毁 / 消费循环超时兜底）。
+/// 只有一个来源：[`AbortSignal`]。它由编排层创建、经 `ctx` 注入（键
+/// `symbio_core::ABORT_SIGNAL`），因此本函数不必再分辨「abort 帧 / 取消令牌 /
+/// 已置位标志」——`abort()` 一次调用同时置位与唤醒。
 ///
-/// 非 abort 的帧一律**忽略**：工具执行期间主通道不应有业务帧（业务帧走的是
-/// 反方向——chat_loop 发往消费循环），`wait_for_abort_signal` 对 LLM POST
-/// 也是同一处理。
-///
-/// **通道关闭不算中止**：它只说明对端（消费循环）已消失，此后只保留
-/// `is_aborted` / `cancel_token` 两条来源继续等。把它当中止会在会话正常收尾时
-/// 把仍在跑的工具误报成"被用户中止"。
+/// **「对端消失」不是中止**：历史上主通道关闭曾被当作中止，于是**每一次正常收尾**
+/// 都变成"用户中止"，正常完成的会话被报成 `aborted`、提示音选错音色（该 bug 曾
+/// 真实发生过）。现在这条无从误读：没有通道可关闭，「没人会中止我」与「用户中止了」
+/// 在类型层面就是两件事。
 ///
 /// **返回即意味着放弃工具**：调用方用 `select!` 包着它，因此工具 future 会被
 /// drop。这与既有的硬超时分支语义一致（那条路同样是 drop），不引入新的副作用
 /// 类别；代价是工具可能留下半完成的副作用——但「用户按下停止」本就要求尽快放手，
 /// 而让它继续跑完 600s 才是更坏的选择。
-async fn wait_tool_abort(channel: &mut PluginChannel, is_aborted: &AtomicBool) {
-    if is_aborted.load(Ordering::Relaxed) {
-        return;
+async fn wait_tool_abort(abort: &AbortSignal) {
+    abort.cancelled().await;
+}
+
+/// 一次工具调用以「等待用户动作」结束时的载荷。
+///
+/// 工具只声明**意图与内容**（`failure_kind` + `prompt`），**不构造节点**：
+/// user_prompt 节点的身份是 `result_msg_id`，而那个 id 由编排层持有
+/// （占位节点也是它建的）。让工具去猜 id 正是历史上「同一逻辑节点两个 id」
+/// 的成因——前端出现重复审批卡，resume 只删得掉一个，另一个永远不消失。
+#[derive(Debug, Clone)]
+pub struct PendingPrompt {
+    /// 节点正文（审批卡 / 提问卡显示的那句话）
+    pub text: String,
+    /// 写进 `meta.prompt` 的载荷——卡片形状由**工具**决定（审批卡 / 提问卡不同）
+    pub prompt: Value,
+    /// [`crate::symbio_core::failure_kind`] 里的 pending 取值
+    pub failure_kind: String,
+}
+
+/// 从工具返回的 `Data` 里读出「需要用户动作」的意图。
+///
+/// 判据是 `failure_kind` 这个**约定字段**（[`failure_kind::is_pending`]），
+/// 不是靠猜 JSON 形状——`extract_result` 那种"从任意 JSON 里找 content/output"
+/// 的启发式可以接受（结果文本本就没有契约），但**控制流**不能建立在启发式上。
+fn pending_prompt_from(data: &Value) -> Option<PendingPrompt> {
+    let kind = data.get("failure_kind").and_then(|v| v.as_str())?;
+    if !crate::symbio_core::failure_kind::is_pending(kind) {
+        return None;
     }
-    let cancel = channel.cancel_token.clone();
-    let mut rx_alive = true;
-    loop {
-        if rx_alive {
-            tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
-                _ = cancel.cancelled() => {
-                    is_aborted.store(true, Ordering::Relaxed);
-                    return;
-                }
-                frame = channel.rx.recv() => match frame {
-                    Some(PluginFrame::Data(m))
-                        if m.get("type").and_then(|v| v.as_str()) == Some("abort") =>
-                    {
-                        is_aborted.store(true, Ordering::Relaxed);
-                        return;
-                    }
-                    Some(_) => {}
-                    None => rx_alive = false,
-                },
-            }
-        } else {
-            tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
-                _ = cancel.cancelled() => {
-                    is_aborted.store(true, Ordering::Relaxed);
-                    return;
-                }
-            }
-        }
-        if is_aborted.load(Ordering::Relaxed) {
-            return;
-        }
+    Some(PendingPrompt {
+        text: data
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("需要用户操作")
+            .to_string(),
+        prompt: data.get("prompt").cloned().unwrap_or(Value::Null),
+        failure_kind: kind.to_string(),
+    })
+}
+
+/// 由载荷构造 user_prompt 节点（`WaitingUserAction`）。
+///
+/// **本文件是工具结果节点的唯一写入者**：普通结果（`build_tool_message`）与
+/// 等待用户（本函数）都出自这里，两者共享同一套 id 约定
+/// （`id = result_msg_id`、`parent_id = tool_call_id`）。
+fn build_user_prompt_message(
+    result_msg_id: &str,
+    tool_call_id: &str,
+    pending: &PendingPrompt,
+) -> ChatMessage {
+    ChatMessage {
+        id: result_msg_id.to_string(),
+        parent_id: Some(tool_call_id.to_string()),
+        role: Some(MessageRole::Tool),
+        msg_type: Some(MessageType::UserPrompt),
+        content: Some(MessageContent::Text(pending.text.clone())),
+        status: Some(MessageStatus::WaitingUserAction),
+        meta: Some(json!({
+            "prompt": pending.prompt,
+            "failure_kind": pending.failure_kind,
+        })),
+        ..Default::default()
     }
 }
 
 /// 执行单个工具调用（不阻塞等待用户）。
 ///
-/// 返回 `(result_text, success)`。
+/// 返回 `(result_text, success, pending)`：
+/// - `result_text` / `success`：回传给 LLM 的结果（失败属信息性，照样回传）；
+/// - `pending`：`Some` ⇒ 本轮结束于「等待用户动作」（审批 / 提问）。工具只给
+///   **载荷**，节点由调用方构造（见 [`PendingPrompt`]）。
 ///
-/// 若工具因需要用户确认而产出 `user_prompt`（WaitingUserAction）节点，
-/// 该节点已作为普通工具结果通过 `channel` 广播，本函数返回其提示文本，
-/// `success=true`（让编排层知道本轮已正常结束于 pending，而非失败）。
+/// 事件出口（流式增量）经 `ctx` 的 `symbio_core::EVENT_SINK` 注入：工具把增量
+/// 直接写到出口，本函数**不再有流式分支**——历史上工具可以返回
+/// `PluginPayload::Session` 当事件流，于是本函数要解包帧、做子会话转播的二次
+/// 分派、捕获冒泡的审批节点。那是跨进程传输原语被当作进程内事件流用（见
+/// `symbio_core::exec` 模块头），现在返回值只有「工具结果」一种含义。
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_tool_async(
     parent: &Option<Arc<dyn Plugin>>,
     tool_name: &str,
     args: Value,
     tool_call_id: &str,
-    channel: &mut PluginChannel,
-    is_aborted: &AtomicBool,
+    sink: &EventSink,
+    abort: &AbortSignal,
     result_msg_id: String,
     ctx: Arc<dyn InvokeRequest>,
-) -> (String, bool, Option<ChatMessage>) {
+) -> (String, bool, Option<PendingPrompt>) {
     let started_at = std::time::Instant::now();
     plugin_info!(
         "session",
@@ -239,12 +234,16 @@ pub async fn execute_tool_async(
     // 流式工具（如 shell）据此 id 广播增量帧：与 result_msg_id 占位节点同 id，
     // 前端按 role=tool 全量替换合并；最终哨兵帧被捕获为工具结果。
     tool_ctx.set(crate::symbio_core::RESULT_MSG_ID, result_msg_id.clone());
+    // 执行期双原语注入 —— 工具「把事件写到哪」与「如何感知中止」的唯一来源。
+    // 有了它，工具不必再用返回值里的 `PluginPayload::Session` 当事件流
+    // （那是跨进程传输原语，见 `symbio_core::exec` 模块头）。
+    tool_ctx.set(crate::symbio_core::EVENT_SINK, sink.clone());
+    tool_ctx.set(crate::symbio_core::ABORT_SIGNAL, abort.clone());
 
-    // 工具执行硬超时：防止某个工具插件内部挂死（如子进程永不退出、管道断裂）
-    // 把整个消费循环永久卡住。非流式路径 route() 是单次 await，无任何帧可观测，
-    // 一旦挂死既无日志也无退出——必须在此兜底。
-    const TOOL_EXEC_HARD_TIMEOUT_SECS: u64 = 600; // 10 分钟
-    let route_fut: std::pin::Pin<
+    // 工具调用的发起（三条形态：ToolManager 命中 / ToolManager 未命中回落 route /
+    // 无 ToolManager 直接 route）。包成 `Box<dyn Future>` 是为了下面那个
+    // 「轮询 + 空闲判定」的循环能重复借用同一份 future。
+    let mut route_fut: std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<crate::symbio_core::PluginPayload, PluginError>>
                 + Send,
@@ -277,52 +276,72 @@ pub async fn execute_tool_async(
         Box::pin(async move { p2.route(tool_ctx2).await })
     };
 
-    // 中止感知：**非流式**工具（`read_file` / `web_search` / MCP / `codebase_search`
-    // …，即绝大多数工具）在这里是一次**单次 await**，期间没有任何帧可观测。若不与
+    // 工具执行兜底超时：**空闲**上限（不是总时长上限）——「有进展就不算挂死」。
+    //
+    // 进展的判据是**出口的发射计数**：工具唯一的出方向动作就是 `emit`，因此
+    // 「计数在涨」等价于「它还在干活」（流式命令的逐行快照、子智能体的过程节点…）。
+    // 单次 await、从不发事件的工具（`web_search` / MCP / `codebase_search`…）
+    // 读数恒为 0，于是退化为「总时长上限」——与历史口径一致。
+    //
+    // 为什么必须是空闲而不是总时长：`agent_run` 委托一轮可以跑十几分钟，而它
+    // **一直在发事件**。总时长上限会把它与「真的挂死的工具」一并误杀——两者在
+    // 「总时长」这一维上完全同形，只有「是否仍在发射」能把它们分开。
+    const TOOL_EXEC_IDLE_TIMEOUT_SECS: u64 = 600; // 10 分钟无任何进展
+    let progress = sink.progress();
+    let mut seen_emits = progress.emitted();
+
+    // 中止感知：工具在这里是一次 await，期间执行层看不到任何中间状态。若不与
     // 中止信号 select，用户按下停止后会连锁发生三件事：
-    //   1. 工具照跑（最长硬超时 600s），整个 Turn 继续推进——用户以为停了，其实没停；
+    //   1. 工具照跑（最长到空闲超时），整个 Turn 继续推进——用户以为停了，其实没停；
     //   2. `handle_abort` 的 3s 兜底把 `is_working` 复位，消费循环在下一帧醒来时
     //      因 `!is_working` 直接 break，**跳过 `persist_failure`**，于是工具节点
     //      永远停在 `Streaming`（违反 `docs/node-state-streaming.md` §8.11）；
     //   3. 工具返回后的 `Completed` 补丁被那个已 break 的消费循环丢弃，前端收不到。
-    // 因此「中止」必须是与「工具返回」「硬超时」并列的第三个出口。
-    let route_result = tokio::select! {
-        r = tokio::time::timeout(
-            std::time::Duration::from_secs(TOOL_EXEC_HARD_TIMEOUT_SECS),
-            route_fut,
-        ) => match r {
-            Ok(r) => r,
-            Err(_) => {
+    // 因此「中止」必须是与「工具返回」「空闲超时」并列的第三个出口。
+    //
+    // 优先级用 `biased` 固定：工具已返回 ⇒ 立刻采纳（哪怕同时到点）；其次是中止；
+    // 最后才是空闲判定——否则一个刚好在到点瞬间返回的工具会被误判成挂死。
+    let route_result = loop {
+        tokio::select! {
+            biased;
+            r = &mut route_fut => break r,
+            _ = wait_tool_abort(abort) => {
+                plugin_warn!(
+                    "session",
+                    "[Tool] 执行期间被用户中止: {} (耗时 {}ms, call_id={})",
+                    tool_name,
+                    started_at.elapsed().as_millis(),
+                    tool_call_id
+                );
+                return (
+                    format!("Error: 工具 {} 被用户中止，未返回结果", tool_name),
+                    false,
+                    None,
+                );
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(TOOL_EXEC_IDLE_TIMEOUT_SECS)) => {
+                let now = progress.emitted();
+                if now != seen_emits {
+                    // 有进展（工具在发事件）→ 重新计时，不算挂死
+                    seen_emits = now;
+                    continue;
+                }
                 plugin_error!(
                     "session",
                     format!(
-                        "[Tool] 执行硬超时 ({}s): {}，已中断。call_id={}",
-                        TOOL_EXEC_HARD_TIMEOUT_SECS, tool_name, tool_call_id
+                        "[Tool] 执行空闲超时 ({}s 无任何进展): {}，已中断。call_id={}",
+                        TOOL_EXEC_IDLE_TIMEOUT_SECS, tool_name, tool_call_id
                     )
                 );
                 return (
                     format!(
-                        "Error: 工具 {} 执行超过 {} 秒未返回，已强制中断（疑似挂死）",
-                        tool_name, TOOL_EXEC_HARD_TIMEOUT_SECS
+                        "Error: 工具 {} 已 {} 秒无任何进展，已强制中断（疑似挂死）",
+                        tool_name, TOOL_EXEC_IDLE_TIMEOUT_SECS
                     ),
                     false,
                     None,
                 );
             }
-        },
-        _ = wait_tool_abort(channel, is_aborted) => {
-            plugin_warn!(
-                "session",
-                "[Tool] 执行期间被用户中止: {} (耗时 {}ms, call_id={})",
-                tool_name,
-                started_at.elapsed().as_millis(),
-                tool_call_id
-            );
-            return (
-                format!("Error: 工具 {} 被用户中止，未返回结果", tool_name),
-                false,
-                None,
-            );
         }
     };
 
@@ -343,258 +362,24 @@ pub async fn execute_tool_async(
                 //     data
                 // );
 
-                // 直接返回结果（需要确认/询问的工具已自行产出 user_prompt 节点）
+                // 工具只声明意图：`failure_kind` 落在 pending 闭集里 ⇒ 本轮结束于
+                // 等待用户动作，节点由调用方构造（工具不碰 id）。
+                let pending = pending_prompt_from(&data);
                 let res = extract_result(&data);
                 plugin_info!(
                     "session",
-                    "[Tool] 正常结束: {} (耗时 {}ms, 结果长度 {})",
+                    "[Tool] 正常结束: {} (耗时 {}ms, 结果长度 {}, pending={})",
                     tool_name,
                     started_at.elapsed().as_millis(),
-                    res.len()
+                    res.len(),
+                    pending
+                        .as_ref()
+                        .map(|p| p.failure_kind.as_str())
+                        .unwrap_or("-")
                 );
-                (res, true, None)
+                (res, true, pending)
             }
 
-            // ── 流式响应 ──────────────────────────────────────────────────────
-            PluginPayload::Session(mut tool_chan) => {
-                plugin_info!(
-                    "session",
-                    "[Tool] STREAMING execution started: {}",
-                    tool_name
-                );
-                let mut full = String::new();
-                // 捕获工具广播的 user_prompt(WaitingUserAction) 节点，作为本轮"待用户响应"结果返回
-                let mut captured_prompt: Option<ChatMessage> = None;
-                let mut last_frame_at = std::time::Instant::now();
-                let mut frame_count: usize = 0;
-
-                loop {
-                    // 空闲超时：工具流超过 TOOL_STREAM_IDLE_TIMEOUT_SECS 无任何新帧
-                    // 判定为挂死（如子进程 hang、管道断裂），显式报错退出而非无限等待。
-                    let frame = match tokio::time::timeout(
-                        std::time::Duration::from_secs(TOOL_STREAM_IDLE_TIMEOUT_SECS),
-                        tool_chan.rx.recv(),
-                    )
-                    .await
-                    {
-                        Ok(f) => f,
-                        Err(_) => {
-                            plugin_error!(
-                                "session",
-                                format!(
-                                    "[Tool] 流式执行空闲超时 ({}s 无新帧): {}，已中断。call_id={}",
-                                    TOOL_STREAM_IDLE_TIMEOUT_SECS, tool_name, tool_call_id
-                                )
-                            );
-                            return (
-                                format!(
-                                    "Error: 工具流式执行超过 {} 秒无输出，已强制中断（疑似挂死）",
-                                    TOOL_STREAM_IDLE_TIMEOUT_SECS
-                                ),
-                                false,
-                                None,
-                            );
-                        }
-                    };
-                    let Some(frame) = frame else {
-                        // 发送端全部关闭：工具正常结束（run.rs drop 了 tx）
-                        break;
-                    };
-                    frame_count += 1;
-                    if last_frame_at.elapsed().as_secs() >= 30 {
-                        plugin_warn!(
-                            "session",
-                            "[Tool] 流式帧间隔过长: {} 距上一帧 {}s（帧 #{}, call_id={}）",
-                            tool_name,
-                            last_frame_at.elapsed().as_secs(),
-                            frame_count,
-                            tool_call_id
-                        );
-                    }
-                    last_frame_at = std::time::Instant::now();
-                    if is_aborted.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    if channel.cancel_token.is_cancelled() {
-                        is_aborted.store(true, Ordering::Relaxed)
-                    }
-                    while let Ok(f) = channel.rx.try_recv() {
-                        match f {
-                            PluginFrame::Data(m)
-                                if matches!(
-                                    serde_json::from_value::<session_chat_response::ControlSignal>(
-                                        m.clone()
-                                    ),
-                                    Ok(session_chat_response::ControlSignal::Abort)
-                                ) =>
-                            {
-                                is_aborted.store(true, Ordering::Relaxed)
-                            }
-                            _ => {}
-                        }
-                    }
-                    if is_aborted.load(Ordering::Relaxed) {
-                        break;
-                    }
-
-                    match frame {
-                        PluginFrame::Data(d) => {
-                            // 嵌套消息状态变更（任何工具执行的流式产出，如子会话转播）
-                            if let Ok(event) =
-                                serde_json::from_value::<session_chat_response::NodeOp>(d.clone())
-                            {
-                                match event {
-                                    session_chat_response::NodeOp::Upsert { mut message } => {
-                                        // 子会话的委托 prompt（user 消息）不透传：
-                                        // 其内容已可见于 ToolCall 的请求参数（args.prompt），
-                                        // 且 role=user 的临时节点会在前端获得"编辑"入口
-                                        //（该 id 不在父会话存储中，操作必然失败）。
-                                        if message.role == Some(MessageRole::User) {
-                                            continue;
-                                        }
-                                        // Tool execution message handling:
-                                        // - Root messages (no parent_id) get their parent_id set to tool_call_id
-                                        // - All other messages are passed through as-is
-                                        // - This maintains the internal hierarchy while anchoring to the tool call
-                                        if message.parent_id.is_none() {
-                                            // 子 agent 会话的顶层响应节点（原 parent_id=None）锚定到
-                                            // ToolCall 之下；其角色应为 Tool（工具响应）而非 Assistant，
-                                            // 以符合分型结构 ToolCall(Assistant) → Turn(Tool)，并能被
-                                            // flatten 的 find_tool_result 正确识别。
-                                            message.parent_id = Some(tool_call_id.to_string());
-                                            if message.role == Some(MessageRole::Assistant) {
-                                                message.role = Some(MessageRole::Tool);
-                                            }
-                                        }
-                                        // 捕获工具广播的 user_prompt(WaitingUserAction) 节点，
-                                        // 作为本轮"待用户响应"结果落库。
-                                        if message.msg_type == Some(MessageType::UserPrompt)
-                                            && message.status
-                                                == Some(MessageStatus::WaitingUserAction)
-                                        {
-                                            let mut node = (*message).clone();
-                                            node.parent_id = Some(tool_call_id.to_string());
-                                            node.role = Some(MessageRole::Tool);
-                                            captured_prompt = Some(node);
-                                            // 不转发到 channel —— process_tool_calls_async 会以统一 id
-                                            //（result_msg_id）重新广播该节点。若此处也转发，前端会收到
-                                            // 两个不同 id 但同 parent_id 的 user_prompt 节点，导致：
-                                            //  1) 重复的审批 UI；
-                                            //  2) resume 时后端只删一个（后端 messages 仅一份），
-                                            //     另一个残留在前端 store，审批 UI 永不消失。
-                                            continue;
-                                        }
-                                        // 其余消息：parent_id 已指向正确父节点，透传
-                                        let _ = channel
-                                            .tx
-                                            .send(PluginFrame::Data(
-                                                serde_json::to_value(
-                                                    session_chat_response::NodeOp::Upsert {
-                                                        message,
-                                                    },
-                                                )
-                                                .unwrap_or_default(),
-                                            ))
-                                            .await;
-                                    }
-                                    // 子树内的节点删除（工具恢复/压缩清理）原样转译：
-                                    // 该节点在父会话视图里同样要消失。
-                                    session_chat_response::NodeOp::Remove { message_id } => {
-                                        let _ = channel
-                                            .tx
-                                            .send(PluginFrame::Data(
-                                                serde_json::to_value(
-                                                    session_chat_response::NodeOp::Remove {
-                                                        message_id,
-                                                    },
-                                                )
-                                                .unwrap_or_default(),
-                                            ))
-                                            .await;
-                                    }
-                                    // 子树内的流式追加（子会话正文/思考 delta）原样转译：
-                                    // 消息 id 不变（该节点此前已随锚定后的 Upsert 转发过），
-                                    // 追加语义在父视图里同样成立。
-                                    session_chat_response::NodeOp::Append { message_id, delta } => {
-                                        let _ = channel
-                                            .tx
-                                            .send(PluginFrame::Data(
-                                                serde_json::to_value(
-                                                    session_chat_response::NodeOp::Append {
-                                                        message_id,
-                                                        delta,
-                                                    },
-                                                )
-                                                .unwrap_or_default(),
-                                            ))
-                                            .await;
-                                    }
-                                    // 子会话的会话级告警不进入父会话（作用域不同），仅留痕。
-                                    session_chat_response::NodeOp::Warn { warning } => {
-                                        plugin_warn!(
-                                            "session",
-                                            "[Tool] 子会话告警（不上报父会话）：{:?}",
-                                            warning
-                                        );
-                                    }
-                                    // 子会话的转写 Reset 是**子会话级**操作（清空其整个在途图），
-                                    // 父视图无法按子树重置——透传会误清父会话自身的在途节点。
-                                    // 忽略并留痕：父视图的收敛依赖工具轮结束后的落库回执。
-                                    session_chat_response::NodeOp::Reset => {
-                                        plugin_warn!(
-                                            "session",
-                                            "[Tool] 子会话转写 Reset（会话级，不透传父视图），已忽略"
-                                        );
-                                    }
-                                }
-                            } else if let Some(text) = d.get("content").and_then(|v| v.as_str()) {
-                                // Plain content frame (final result sentinel from run.rs)
-                                full = text.to_string();
-                            }
-                        }
-                        PluginFrame::Error(e, _) => {
-                            plugin_error!(
-                                "session",
-                                format!(
-                                    "[Tool] STREAM Error: {} (耗时 {}ms)",
-                                    e,
-                                    started_at.elapsed().as_millis()
-                                )
-                            );
-                            return (format!("Error: {e}"), false, None);
-                        }
-                    }
-                }
-                if is_aborted.load(Ordering::Relaxed) {
-                    plugin_warn!(
-                        "session",
-                        "[Tool] 流式执行被中止（abort）: {} (耗时 {}ms, 帧数 {}, 已累积长度 {})",
-                        tool_name,
-                        started_at.elapsed().as_millis(),
-                        frame_count,
-                        full.len()
-                    );
-                } else {
-                    plugin_info!(
-                        "session",
-                        "[Tool] 流式正常结束: {} (耗时 {}ms, 帧数 {}, 结果长度 {})",
-                        tool_name,
-                        started_at.elapsed().as_millis(),
-                        frame_count,
-                        full.len()
-                    );
-                }
-                // Mark the result message as completed (携带实际累积结果 full)
-                emit_tool_update(
-                    channel,
-                    &result_msg_id,
-                    tool_call_id,
-                    full.clone(),
-                    MessageStatus::Completed,
-                )
-                .await;
-                (full, true, captured_prompt)
-            }
             _ => ("Error: Unexpected payload type".into(), false, None),
         },
         Err(e) => {
@@ -623,7 +408,7 @@ pub async fn execute_tool_async(
 ///
 /// 两条消息分别加入 tool_messages / parent_updates，由调用方统一持久化。
 async fn record_protocol_failure(
-    channel: &mut PluginChannel,
+    sink: &EventSink,
     tool_call_id: &str,
     error_text: &str,
     tool_messages: &mut Vec<ChatMessage>,
@@ -641,15 +426,10 @@ async fn record_protocol_failure(
     // 过滤，导致"孤儿 tool 结果"使下一轮 LLM 请求非法）。
     tool_msg.status = Some(MessageStatus::Completed);
 
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                message: Box::new(tool_msg.clone()),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
+    sink.emit(session_chat_response::NodeOp::Upsert {
+        message: Box::new(tool_msg.clone()),
+    })
+    .await;
 
     // 父 ToolCall 终态——**完整快照**，两种情形：
     // - id 合法但 name/参数非法：ToolCallDelta 已广播过完整节点（在权威转写里），
@@ -683,15 +463,10 @@ async fn record_protocol_failure(
             ..Default::default()
         },
     };
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                message: Box::new(parent_update.clone()),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
+    sink.emit(session_chat_response::NodeOp::Upsert {
+        message: Box::new(parent_update.clone()),
+    })
+    .await;
 
     plugin_info!(
         "session",
@@ -720,11 +495,7 @@ async fn record_protocol_failure(
 /// 同时写入 `meta.started_at`（毫秒）：前端据此显示"已运行 47s"——「运行中」是断言，
 /// 时长才是**判据**，用户靠它区分"还在跑"与"卡住了"。用节点属性承载而不是前端
 /// 自己计时，切会话/重连后时长仍然连续（前端计时会从零重来）。
-async fn emit_tool_running(
-    channel: &PluginChannel,
-    context_messages: &[ChatMessage],
-    tool_call_id: &str,
-) {
+async fn emit_tool_running(sink: &EventSink, context_messages: &[ChatMessage], tool_call_id: &str) {
     // 完整快照：从权威转写取父 ToolCall 副本（id / 父子关系 / name / 参数都在），
     // 应用「运行中」状态与 meta.started_at 后整条广播。找不到 = 协议违例
     // （ToolCallDelta 必然先广播过完整节点），报错并跳过——不造半截节点。
@@ -743,15 +514,10 @@ async fn emit_tool_running(
         obj.insert("started_at".into(), json!(crate::symbio_core::now_ms()));
     }
     running.meta = Some(meta);
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                message: Box::new(running),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
+    sink.emit(session_chat_response::NodeOp::Upsert {
+        message: Box::new(running),
+    })
+    .await;
 }
 
 /// 把父 ToolCall 的**完整副本**定稿为终态并广播。
@@ -762,7 +528,7 @@ async fn emit_tool_running(
 /// 父状态帧，结果子节点照常给出。返回值是已广播的完整消息，调用方把它
 /// 收进 `parent_updates` 供内存镜像同步与落库（整条替换，非补丁合并）。
 async fn emit_parent_finalized(
-    channel: &PluginChannel,
+    sink: &EventSink,
     context_messages: &[ChatMessage],
     tool_call_id: &str,
     status: MessageStatus,
@@ -791,15 +557,10 @@ async fn emit_parent_finalized(
     }
     full.meta = Some(meta);
     full.error = error;
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                message: Box::new(full.clone()),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
+    sink.emit(session_chat_response::NodeOp::Upsert {
+        message: Box::new(full.clone()),
+    })
+    .await;
     Some(full)
 }
 
@@ -900,8 +661,8 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessa
 pub async fn process_tool_calls_async(
     tool_calls: Vec<ToolCallInfo>,
     parent: &Option<Arc<dyn Plugin>>,
-    channel: &mut PluginChannel,
-    is_aborted: &Arc<AtomicBool>,
+    sink: &EventSink,
+    abort: &AbortSignal,
     ctx: Arc<dyn InvokeRequest>,
     context_messages: &[ChatMessage],
 ) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
@@ -932,7 +693,7 @@ pub async fn process_tool_calls_async(
         .collect();
 
     for tc in tool_calls {
-        if is_aborted.load(Ordering::Relaxed) {
+        if abort.is_aborted() {
             break;
         }
         // 交互模式下，前一个工具待审批/失败 → 中止本批剩余（用户需逐个处理）
@@ -946,7 +707,9 @@ pub async fn process_tool_calls_async(
                             .and_then(|m| m.get("failure_kind"))
                             .and_then(|v| v.as_str())
                             .map(|k| {
-                                k == "error" || k == "needs_approval" || k == "needs_interaction"
+                                // pending 两种 + error 都算「本批剩余不要继续跑」
+                                crate::symbio_core::failure_kind::is_pending(k)
+                                    || k == crate::symbio_core::failure_kind::ERROR
                             })
                             .unwrap_or(false)
                 })
@@ -971,7 +734,7 @@ pub async fn process_tool_calls_async(
                     "Protocol Error: Tool call ID missing/invalid, recording as failed tool call"
                 );
                 record_protocol_failure(
-                    channel,
+                    sink,
                     &short_id(),
                     "模型未返回有效的工具调用 ID（协议错误）",
                     &mut tool_messages,
@@ -993,7 +756,7 @@ pub async fn process_tool_calls_async(
                     )
                 );
                 record_protocol_failure(
-                    channel,
+                    sink,
                     &id,
                     "模型未返回有效的工具名称（协议错误）",
                     &mut tool_messages,
@@ -1017,7 +780,7 @@ pub async fn process_tool_calls_async(
                 "Protocol Error: Tool call arguments JSON parse failed, refusing to execute. ID: {id}, name: {name}"
             );
             record_protocol_failure(
-                channel,
+                sink,
                 &id,
                 &format!(
                     "工具参数 JSON 解析失败（可能被长度上限截断），本次调用未执行。\
@@ -1064,7 +827,7 @@ pub async fn process_tool_calls_async(
             // 被钩子拦下 → 父节点同样必须收敛（此前只推了结果子节点，父节点
             // 靠 `finalize_assistant_turn` 的 Completed 兜着；那条兜底已移除）。
             if let Some(parent_update) = emit_parent_finalized(
-                channel,
+                sink,
                 context_messages,
                 &id,
                 MessageStatus::Completed,
@@ -1081,15 +844,15 @@ pub async fn process_tool_calls_async(
         // 工具即将真正执行 → 父 ToolCall 置「运行中」。这是整段执行窗口的**唯一**
         // 运行中信号来源，必须紧贴 `execute_tool_async` 之前（`finalize_assistant_turn`
         // 已不再在参数流结束时提前定格）。
-        emit_tool_running(channel, context_messages, &id).await;
+        emit_tool_running(sink, context_messages, &id).await;
 
         let (res, success, mut pending_user_prompt) = execute_tool_async(
             parent,
             &name,
             tc.arguments.clone(),
             &id,
-            channel,
-            is_aborted,
+            sink,
+            abort,
             result_msg_id.clone(),
             ctx.clone(),
         )
@@ -1113,11 +876,11 @@ pub async fn process_tool_calls_async(
         )
         .await;
 
-        // 若本轮工具产出了 user_prompt(WaitingUserAction) 节点，则用它作为 tool 结果
-        // （携带 meta.prompt 与 WaitingUserAction 状态，供编排层结束本轮并等待用户输入）。
-        let mut tool_msg = if let Some(mut prompt) = pending_user_prompt.take() {
-            prompt.id = result_msg_id.clone();
-            prompt
+        // 工具以「等待用户动作」结束时，**节点在这里构造**：本函数是工具结果节点的
+        // 唯一写入者（它持有 `result_msg_id` 与父 ToolCall 的终态）。工具只给载荷
+        // （`PendingPrompt`），因此不存在"工具造一个节点、这里再造一个"的双 id 问题。
+        let mut tool_msg = if let Some(pending) = pending_user_prompt.take() {
+            build_user_prompt_message(&result_msg_id, &id, &pending)
         } else {
             // L0 守卫：超长工具结果存档 + head/tail 摘要，避免单条撑爆上下文窗口
             // （对应"单次工具调用内容太长"的压缩诉求；物理字节上限不再是唯一防线）。
@@ -1162,22 +925,17 @@ pub async fn process_tool_calls_async(
                 .as_ref()
                 .and_then(|m| m.get("failure_kind"))
                 .and_then(|v| v.as_str())
-                .unwrap_or("needs_approval")
+                .unwrap_or(crate::symbio_core::failure_kind::NEEDS_APPROVAL)
                 .to_string();
 
-            let _ = channel
-                .tx
-                .send(PluginFrame::Data(
-                    serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                        message: Box::new(tool_msg.clone()),
-                    })
-                    .unwrap_or_default(),
-                ))
-                .await;
+            sink.emit(session_chat_response::NodeOp::Upsert {
+                message: Box::new(tool_msg.clone()),
+            })
+            .await;
 
             // 父 ToolCall 置 WaitingUserAction（完整快照；meta.failure_kind 供 resume 提取）
             if let Some(parent_update) = emit_parent_finalized(
-                channel,
+                sink,
                 context_messages,
                 &id,
                 MessageStatus::WaitingUserAction,
@@ -1194,15 +952,10 @@ pub async fn process_tool_calls_async(
         } else {
             // 广播工具结果子节点（**完整消息**，与落库的 `tool_msg` 同一形态——
             // meta 一并带全：截断标记 / 存档路径不再只活在存储里）。
-            let _ = channel
-                .tx
-                .send(PluginFrame::Data(
-                    serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                        message: Box::new(tool_msg.clone()),
-                    })
-                    .unwrap_or_default(),
-                ))
-                .await;
+            sink.emit(session_chat_response::NodeOp::Upsert {
+                message: Box::new(tool_msg.clone()),
+            })
+            .await;
 
             // 标记父节点最终状态（完整快照）：
             // - 成功 => Completed
@@ -1224,8 +977,7 @@ pub async fn process_tool_calls_async(
                 )
             };
             if let Some(parent_update) =
-                emit_parent_finalized(channel, context_messages, &id, status, meta_extra, error)
-                    .await
+                emit_parent_finalized(sink, context_messages, &id, status, meta_extra, error).await
             {
                 parent_updates.push(parent_update);
             }
@@ -1246,17 +998,12 @@ pub async fn process_tool_calls_async(
         // 先结果、后父状态）。只发父节点补丁会让卡片有请求、无响应——
         // 那正是「工具没有响应节点，会话却继续往后」的成因。
         let result_msg = not_executed_result(id, "not_executed");
-        let _ = channel
-            .tx
-            .send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                    message: Box::new(result_msg.clone()),
-                })
-                .unwrap_or_default(),
-            ))
-            .await;
+        sink.emit(session_chat_response::NodeOp::Upsert {
+            message: Box::new(result_msg.clone()),
+        })
+        .await;
         if let Some(parent_update) = emit_parent_finalized(
-            channel,
+            sink,
             context_messages,
             id,
             MessageStatus::Completed,

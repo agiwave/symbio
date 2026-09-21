@@ -1,4 +1,7 @@
-use crate::symbio_core::{InvokeRequest, InvokeResponse, ModelProvider, PluginPayload};
+use crate::symbio_core::{
+    ExecEnv, InvokeRequest, InvokeRequestExt, InvokeResponse, ModelProvider, PluginError,
+    PluginPayload,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -182,10 +185,85 @@ pub trait Capability: Send + Sync + 'static {
         self.meta().name
     }
 
-    /// 执行能力调用
+    /// 执行能力调用。
     ///
-    /// 参数通过 `ctx` 中的 payload 传递（使用 `InvokeRequestExt::payload()` 获取）
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload>;
+    /// 三个入参各有一义，不再混在同一个键值袋里：
+    /// - `args`：**模型给的参数**（工具调用参数 / 直接调用的 payload）；
+    /// - `env`：**执行期环境**（出口 + 中止）——与 `ModelProvider::execute_turn`
+    ///   共用同一类型，见 [`ExecEnv`]；
+    /// - `ctx`：**请求信封**——只有需要转发（`agent_run` 路由 `session/chat/send`、
+    ///   MCP 网关、VDFS 挂载解析）或读会话上下文（`WORKDIR` / `RISK_LEVEL`…）的
+    ///   工具才碰它。
+    ///
+    /// 返回**工具结果本身**（任意 JSON），不再经 `PluginPayload` 那层多态载荷：
+    /// 工具从来只用 `Data` 一个变体，其余三个（`Empty` / `Native` / `Session`）
+    /// 是路由层的形态，与工具无关。信封 ↔ 结果的换算收口在 [`invoke_capability`]。
+    async fn execute(
+        &self,
+        args: Value,
+        env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError>;
+}
+
+/// 把请求信封拆成 `(args, env, ctx)` 调用能力，再把结果装回信封。
+///
+/// ## 这是唯一「拆信封」的地方
+///
+/// 所有分发路径（`CapabilityVisitor::invoke` / `Plugin::route` 的工具分支 /
+/// 装饰器）都必须经这里，否则「工具怎么写」与「信封长什么样」会重新耦合——
+/// 而耦合的表现就是每个工具各写一份 `ctx.payload::<Value>().unwrap_or(...)`
+/// 与各读一次 `EVENT_SINK` / `ABORT_SIGNAL`。
+///
+/// 参数缺席（信封里没有 payload）⇒ `Value::Null`：与收口前各工具自己的
+/// `unwrap_or(Value::Null)` 口径一致，由工具自己给出「缺少必填参数」的报错。
+pub async fn invoke_capability(
+    cap: &dyn Capability,
+    ctx: Arc<dyn InvokeRequest>,
+) -> InvokeResponse<PluginPayload> {
+    let args = ctx.payload::<Value>().unwrap_or(Value::Null);
+    let env = ExecEnv::from_request(&*ctx);
+    cap.execute(args, &env, ctx)
+        .await
+        .map(|value| PluginPayload::new(&value))
+}
+
+/// 工具结果里的 `failure_kind` 闭集 —— 「本轮结束于等待用户动作」的两种形态。
+///
+/// ## 为什么需要共享常量
+///
+/// 这些词是**工具（生产方）与编排层（消费方）之间的约定**，而两者分属不同插件
+/// （`local` / `session`），互相不可见，只能经 `symbio_core` 共享。写成字面量会
+/// 立刻分裂：编排层里已有一处硬编码判定
+/// （`k == "error" || k == "needs_approval" || k == "needs_interaction"`），
+/// 再加一个「等待用户」的 kind 就得记得同步改它——忘掉的表现是**交互模式下本批
+/// 剩余工具照跑**，即用户本该逐个处理却收到一堆并发审批。
+///
+/// ## 为什么不是枚举
+///
+/// `failure_kind` 落在消息 `meta`（JSON）里，与 `error` 这类**信息性**取值同一个
+/// 字段。它是给渲染层看的字符串，不是 Rust 侧的判别联合；强行枚举会把「信息性
+/// 标记」升级成「必须穷举的状态」。真正的判据只有一条，见 [`is_pending`]。
+pub mod failure_kind {
+    /// 工具失败（信息性：错误结果回传 LLM 继续，不暂停会话）
+    pub const ERROR: &str = "error";
+    /// 需要用户**审批**（交互模式）——本轮收口为 `WaitingUserAction`
+    pub const NEEDS_APPROVAL: &str = "needs_approval";
+    /// 需要用户**回答**（`ask_user`）——本轮收口为 `WaitingUserAction`
+    pub const NEEDS_INTERACTION: &str = "needs_interaction";
+    /// 权限不足且无人可授权（自动模式）——**不**收口为等待，让 LLM 改走别的路
+    pub const PERMISSION_DENIED: &str = "permission_denied";
+    /// 工具当前不可用（自动模式）——同上
+    pub const TOOL_UNAVAILABLE: &str = "tool_unavailable";
+
+    /// 是否表示「本轮结束于等待用户动作」。
+    ///
+    /// 编排层凭这**一个**判据决定：构造 user_prompt 节点 + 把父 ToolCall 收口为
+    /// `WaitingUserAction`。工具侧只声明意图（返回该 kind + `prompt` 载荷），
+    /// 不构造节点——节点身份（`result_msg_id`）归编排层。
+    pub fn is_pending(kind: &str) -> bool {
+        matches!(kind, NEEDS_APPROVAL | NEEDS_INTERACTION)
+    }
 }
 
 #[async_trait]

@@ -2,8 +2,7 @@
 
 use super::web_config::WebConfig;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginError,
-    PluginPayload,
+    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeResponse, PluginError,
 };
 use async_trait::async_trait;
 use regex::Regex;
@@ -340,10 +339,14 @@ impl Capability for WebSearchTool {
         }
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let args: Value = ctx.payload()?;
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        _ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
         let data = self.execute_inner(&args).await?;
-        Ok(PluginPayload::new(&data))
+        Ok(serde_json::to_value(&data)?)
     }
 }
 

@@ -47,13 +47,3 @@ pub enum NodeOp {
     /// 落在会话节点属性上，前端按节点状态渲染，不依赖"恰好收到这一帧"。
     Warn { warning: Option<String> },
 }
-
-/// 进程内控制信号（`chat/abort` → 运行中的单轮流），与数据帧走同一控制通道。
-///
-/// 这不是前端协议：中断运行中的流是控制面职责；对前端的呈现（在途节点收敛为
-/// `aborted` / 会话 `outcome = aborted`）由编排器以**节点状态**广播。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "signal", rename_all = "snake_case")]
-pub enum ControlSignal {
-    Abort,
-}

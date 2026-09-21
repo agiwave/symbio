@@ -62,8 +62,8 @@ use crate::symbio_core::turn::{
 };
 use crate::symbio_core::FinishReason;
 use crate::symbio_core::{
-    CapabilityMeta, InvokeRequest, InvokeRequestExt, ModelProvider, Plugin, PluginChannel,
-    PluginError, PluginFrame, Usage,
+    AbortSignal, CapabilityMeta, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt,
+    ModelProvider, Plugin, PluginError, Usage,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -77,7 +77,8 @@ use crate::symbio_core::schemas::session::session_chat_response;
 pub async fn run_chat_loop(
     orchestrator: &ChatOrchestrator,
     ctx: Arc<dyn InvokeRequest>,
-    mut channel: PluginChannel,
+    sink: EventSink,
+    abort: AbortSignal,
 ) -> Result<(), PluginError> {
     // ── 前步骤 ①：请求解析与请求级配置快照 ─────────────────────────────────
     let mut req: model_chat::Request = ctx.payload()?;
@@ -98,7 +99,7 @@ pub async fn run_chat_loop(
 
     // ── 前步骤 ③：轮次状态 + 上下文容器 ───────────────────────────────────
     let mut turn = TurnState {
-        abort_flag: Arc::new(AtomicBool::new(false)),
+        abort: abort.clone(),
         ..Default::default()
     };
     let mut single_message = req.single_message.take();
@@ -122,8 +123,8 @@ pub async fn run_chat_loop(
         match crate::plugins::session::resume::process_resume(
             orchestrator,
             &ctx,
-            &mut channel,
-            &turn.abort_flag,
+            &sink,
+            &turn.abort,
             &context.session,
             tr,
         )
@@ -133,18 +134,12 @@ pub async fn run_chat_loop(
                 // 成功：turn 循环会从 session 加载含新工具结果的历史
             }
             Ok(crate::plugins::session::resume::ResumeOutcome::Done) => {
-                return finish_turn(
-                    orchestrator,
-                    &context,
-                    &channel,
-                    &turn,
-                    TurnExit::ResumeDone,
-                )
-                .await;
+                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::ResumeDone)
+                    .await;
             }
             Err(e) => {
                 plugin_warn!("session", "[Resume] process_resume failed: {}", e);
-                return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Failed(e))
+                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Failed(e))
                     .await;
             }
         }
@@ -199,11 +194,11 @@ pub async fn run_chat_loop(
                     "[Gate] 在途工具未全部产出结果（{} 个），本轮不唤醒",
                     turn.in_flight_tools.len()
                 );
-                return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Completed)
+                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Completed)
                     .await;
             }
             Gate::Exit(exit) => {
-                return finish_turn(orchestrator, &context, &channel, &turn, exit).await
+                return finish_turn(orchestrator, &context, &sink, &turn, exit).await
             }
         }
 
@@ -222,7 +217,7 @@ pub async fn run_chat_loop(
             orchestrator,
             &ctx,
             &mut context,
-            &mut channel,
+            &sink,
             &mut turn,
             &turn_req,
         )
@@ -230,7 +225,7 @@ pub async fn run_chat_loop(
         {
             Ok(inputs) => inputs,
             Err(exit) => {
-                return finish_turn(orchestrator, &context, &channel, &turn, exit).await;
+                return finish_turn(orchestrator, &context, &sink, &turn, exit).await;
             }
         };
 
@@ -241,11 +236,13 @@ pub async fn run_chat_loop(
         // 冒泡 Err(Aborted) → 消费循环 ABORTED 分支 → persist_failure 把本轮
         // Turn 收尾为 Failed + "用户手动中止了本次回复"（错误条 + 重试入口），
         // 不会波及上一轮已成功的 Turn（persist_failure 按 failing_turn 子树收窄）。
-        if turn.abort_flag.load(Ordering::SeqCst) {
-            return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Aborted).await;
+        if turn.abort.is_aborted() {
+            return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
         }
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
+        // 执行期环境一次给全：出口（可见流）+ 中止（本轮信号）。
+        let env = ExecEnv::new(sink.clone(), turn.abort.clone());
         let result = orchestrator
             .provider
             .execute_turn(
@@ -253,8 +250,7 @@ pub async fn run_chat_loop(
                 &inputs.request_view,
                 &inputs.tools,
                 &inputs.root_id,
-                &mut channel,
-                &turn.abort_flag,
+                &env,
             )
             .await;
 
@@ -277,15 +273,10 @@ pub async fn run_chat_loop(
                     .iter()
                     .filter(|m| m.status == Some(MessageStatus::Streaming))
                 {
-                    let _ = channel
-                        .tx
-                        .send(PluginFrame::Data(
-                            serde_json::to_value(session_chat_response::NodeOp::Remove {
-                                message_id: m.id.clone(),
-                            })
-                            .unwrap_or_default(),
-                        ))
-                        .await;
+                    sink.emit(session_chat_response::NodeOp::Remove {
+                        message_id: m.id.clone(),
+                    })
+                    .await;
                 }
                 context
                     .messages
@@ -302,34 +293,33 @@ pub async fn run_chat_loop(
                 // 后走 persist_failure —— 在途 Turn 持久化为 Failed + error，前端
                 // 可渲染错误条与重试入口；若在此直接返回 Ok，在途 Turn 不落库，
                 // 刷新即消失且无重试入口。
-                return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Aborted)
-                    .await;
+                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
             }
             Err(e) => {
                 plugin_warn!("session", "send_request failed: {e}");
-                return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Failed(e))
+                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Failed(e))
                     .await;
             }
             Ok(out) => out,
         };
 
-        if turn.abort_flag.load(Ordering::SeqCst) {
+        if turn.abort.is_aborted() {
             // 与 Err(PluginError::Aborted) 分支同理：请求结束后才置位的 abort 标志
             // 同样向上冒泡，由消费循环统一收尾（在途 Turn → Failed + error + 可重试）。
             // 仅 send_request 之后的 abort 冒泡；turn 循环顶部的边界检查点不冒泡——
             // 上一轮已定稿落库，冒泡会把成功的 Turn 误回滚为 Failed。
-            return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Aborted).await;
+            return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
         }
 
         // ── 步骤 5：推理收尾（定稿内容子节点 → 校准估算 → 并入上下文）────────
         let result =
-            settle_reasoning(orchestrator, &mut context, &channel, &inputs.root_id, out).await;
+            settle_reasoning(orchestrator, &mut context, &sink, &inputs.root_id, out).await;
 
         // ── 步骤 6：本轮结算 + 下一步判定（子树在此收敛）────────────────────
         let flow = close_turn(
             orchestrator,
             ctx.clone(),
-            &mut channel,
+            &sink,
             &mut context,
             &mut turn,
             result,
@@ -341,12 +331,12 @@ pub async fn run_chat_loop(
         // Turn 是组合节点，终态必须跟随子树；`close_turn` 归来即子树收敛
         // （ToolCall 已由执行方定格、结果子节点已就位）。发出的就是**即将落库的
         // 那条节点**，因此实时帧与存储按同一取值收敛。详见 [`finalize_turn_root`]。
-        finalize_turn_root(&channel, &context, &inputs.root_id).await;
+        finalize_turn_root(&sink, &context, &inputs.root_id).await;
 
         match flow {
             TurnFlow::NextTurn => {}
             TurnFlow::Finish(exit) => {
-                return finish_turn(orchestrator, &context, &channel, &turn, exit).await
+                return finish_turn(orchestrator, &context, &sink, &turn, exit).await
             }
         }
     }
@@ -401,7 +391,7 @@ fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate {
     // 循环顶部的中止检查点**不冒泡** `Err(Aborted)`：上一轮 Turn 已定稿落库，
     // 冒泡会让消费循环的 `persist_failure` 把成功的 Turn 误回滚为 Failed。
     // 推理前后（在途 Turn 尚未定稿）的中止才走 [`TurnExit::Aborted`]。
-    if turn.abort_flag.load(Ordering::SeqCst) {
+    if turn.abort.is_aborted() {
         return Gate::Exit(TurnExit::AbortedAtBoundary);
     }
 
@@ -420,27 +410,22 @@ fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate {
 async fn finish_turn(
     orchestrator: &ChatOrchestrator,
     context: &SessionContext,
-    channel: &PluginChannel,
+    sink: &EventSink,
     turn: &TurnState,
     exit: TurnExit,
 ) -> Result<(), PluginError> {
     // 软上限：先落一条会话级告警状态再退出，绝不静默（文案唯一出处）。
     if let TurnExit::MaxToolRounds { max } = &exit {
-        let _ = channel
-            .tx
-            .send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::NodeOp::Warn {
-                    warning: Some(format!(
-                        "已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"
-                    )),
-                })
-                .unwrap_or_default(),
-            ))
-            .await;
+        sink.emit(session_chat_response::NodeOp::Warn {
+            warning: Some(format!(
+                "已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"
+            )),
+        })
+        .await;
     }
 
     // 增量落库（锚点已对齐时为空切片，天然 no-op）。
-    persist_messages(context, turn.last_saved, channel).await;
+    persist_messages(context, turn.last_saved, sink).await;
 
     // Stop 钩子（幂等）：resume 出口发生在主循环之前，此时尚无消息列表
     // （收口前该分支即传空切片），其余出口一律携带当前消息列表。

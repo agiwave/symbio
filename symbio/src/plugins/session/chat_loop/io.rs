@@ -4,16 +4,11 @@
 
 use super::*;
 
-pub(crate) async fn broadcast_message_update(channel: &PluginChannel, message: ChatMessage) {
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                message: Box::new(message),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
+pub(crate) async fn broadcast_message_update(sink: &EventSink, message: ChatMessage) {
+    sink.emit(session_chat_response::NodeOp::Upsert {
+        message: Box::new(message),
+    })
+    .await;
 }
 
 /// 封根 Turn：广播本轮组合节点的终态（**唯一**发射点）。
@@ -28,22 +23,18 @@ pub(crate) async fn broadcast_message_update(channel: &PluginChannel, message: C
 /// `persist_messages` 即将落库的那份），不是手拼的半截快照：
 /// `upsert` 的契约是"完整快照整条替换"，半截快照会把先前帧写下的场景字段抹掉。
 /// 节点不在转写里 = 本轮根本没建立过（异常路径），静默返回。
-pub(crate) async fn finalize_turn_root(
-    channel: &PluginChannel,
-    context: &SessionContext,
-    root_id: &str,
-) {
+pub(crate) async fn finalize_turn_root(sink: &EventSink, context: &SessionContext, root_id: &str) {
     let Some(mut node) = context.messages.iter().find(|m| m.id == root_id).cloned() else {
         return;
     };
     node.status = Some(MessageStatus::Completed);
-    broadcast_message_update(channel, node).await;
+    broadcast_message_update(sink, node).await;
 }
 
 pub(crate) async fn persist_messages(
     context: &SessionContext,
     last_saved: usize,
-    channel: &PluginChannel,
+    sink: &EventSink,
 ) {
     let new_messages = &context.messages[last_saved..];
     if new_messages.is_empty() {
@@ -56,12 +47,7 @@ pub(crate) async fn persist_messages(
         // 会话节点 `attributes.warning`，前端按状态渲染；新一轮请求开始时清除。
         let msg = format!("消息持久化失败（消息仍在内存中）: {}", e);
         plugin_warn!("session", "[Session] {}", msg);
-        let _ = channel
-            .tx
-            .send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::NodeOp::Warn { warning: Some(msg) })
-                    .unwrap_or_default(),
-            ))
+        sink.emit(session_chat_response::NodeOp::Warn { warning: Some(msg) })
             .await;
     }
 }
@@ -108,32 +94,21 @@ pub(crate) async fn fire_user_prompt_submit_hook(
     .await;
 }
 
-pub(crate) async fn emit_streaming_start(
-    channel: &mut PluginChannel,
-    root_id: &str,
-    turn: Option<usize>,
-) {
+pub(crate) async fn emit_streaming_start(sink: &EventSink, root_id: &str, turn: Option<usize>) {
     let meta = turn.map(|t| serde_json::json!({"turn": t}));
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                message: Box::new(ChatMessage {
-                    id: root_id.to_string(),
-                    // Turn 是根级节点，与 User 互为兄弟（请求/响应由 MessageRole 区分）
-                    parent_id: None,
-                    role: Some(
-                        crate::symbio_core::schemas::session::chat_message::MessageRole::Assistant,
-                    ),
-                    msg_type: Some(MessageType::Turn),
-                    status: Some(MessageStatus::Streaming),
-                    meta,
-                    ..Default::default()
-                }),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
+    sink.emit(session_chat_response::NodeOp::Upsert {
+        message: Box::new(ChatMessage {
+            id: root_id.to_string(),
+            // Turn 是根级节点，与 User 互为兄弟（请求/响应由 MessageRole 区分）
+            parent_id: None,
+            role: Some(crate::symbio_core::schemas::session::chat_message::MessageRole::Assistant),
+            msg_type: Some(MessageType::Turn),
+            status: Some(MessageStatus::Streaming),
+            meta,
+            ..Default::default()
+        }),
+    })
+    .await;
 }
 
 /// 触发 Stop 钩子（委托给 [`StopSignal`]，幂等；上下文已在信号创建时绑定）。

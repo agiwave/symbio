@@ -5,11 +5,9 @@
 //! 后封装成原生 `write_file` 的 `{success, path, created}` 形状。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeResponse, PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// 写入文件工具（框架原生 `Capability`）
@@ -43,8 +41,13 @@ impl Capability for WriteTool {
         )
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let req: super::super::protocol::VdfsWriteRequest = request_of(&ctx);
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        let req: super::super::protocol::VdfsWriteRequest = request_of(&args);
         let content = req.to_content();
         let data = self.provider.write(&ctx, &req.path, &content).await?;
 
@@ -53,11 +56,11 @@ impl Capability for WriteTool {
         } else {
             format!("已覆盖文件 {}", req.path)
         };
-        Ok(PluginPayload::new(&json!({
+        Ok(json!({
             "success": true,
             "path": req.path,
             "created": data.created,
             "message": message,
-        })))
+        }))
     }
 }

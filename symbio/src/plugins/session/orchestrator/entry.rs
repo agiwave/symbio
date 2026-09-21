@@ -145,10 +145,10 @@ impl SessionPlugin {
         }
         // message 分支：若上一轮仍在运行，先收敛旧 turn 再开新一轮。
         // 「新消息覆盖旧请求」是产品意图，但绝不能让两个 turn 并发运行——
-        // 旧任务的收尾路径会复位 is_working、清空 ai_control_tx 与
+        // 旧任务的收尾路径会复位 is_working、注销中止信号登记与
         // live_messages，与新任务的启动/收尾产生竞态（前端状态错乱、
         // abort 信号丢失、转写重复）。handle_abort 已具备完整收敛语义
-        // （Abort 帧 → 3s 兜底 → 节点收口），复用即可串行化同一会话的 turn。
+        // （置位中止信号 → 3s 兜底 → 节点收口），复用即可串行化同一会话的 turn。
         if state.inner.read().await.is_working {
             self.handle_abort(&state).await;
         }

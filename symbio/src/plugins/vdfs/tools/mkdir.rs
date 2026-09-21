@@ -4,11 +4,9 @@
 //! 「访问文件系统」改为调用封装 provider 的 `mkdir`。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeResponse, PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// 新建目录工具（框架原生 `Capability`）
@@ -40,15 +38,20 @@ impl Capability for MkdirTool {
         )
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let req: super::super::protocol::VdfsPathRequest = request_of(&ctx);
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        let req: super::super::protocol::VdfsPathRequest = request_of(&args);
         self.provider.mkdir(&ctx, &req.path).await?;
 
         let message = format!("已创建目录 {}", req.path);
-        Ok(PluginPayload::new(&json!({
+        Ok(json!({
             "success": true,
             "path": req.path,
             "message": message,
-        })))
+        }))
     }
 }

@@ -18,6 +18,61 @@
 
 ***
 
+## 2026-09-22: 执行期协议收口四批 —— 通道退出执行期，两个接口收成同形
+
+**问题**：执行期（LLM 单轮 / 工具调用）与**跨进程传输**共用同一个 `PluginChannel`。
+两端始终在同进程同 spawn 里，却要付 serde 装箱 → 解帧 → 再分派的往返代价；
+更糟的是「工具用通道当事件流」——`shell` / `agent_run` / `ask_user` / 交互审批把节点
+塞进帧里回传，`tool_executor` 再解回来、改 id、重播一遍。这套机制同时带来：同一个
+逻辑节点有两个 id（审批 UI 重复、resume 只删得掉一个）、执行体必须 `spawn` 到后台
+（否则输出帧超过通道容量 64 就死锁）、以及「出口」与「中止」两种语义压在一个通道上
+导致的三条并存中止路径。
+
+**四批改动**（每批独立可交付，逐批跑门禁 + CLI 端到端）：
+
+1. **出口/信号双原语**：`PluginChannel` 拆为 `EventSink`（出：进程内直连转写唯一
+   写入点，零 serde）+ `AbortSignal`（入：`Arc<AtomicBool>` + `CancellationToken`
+   合一，`abort()` 置位即唤醒，无轮询）。`PluginChannel` 退回纯跨进程传输。
+   连带删掉压缩路径的哑通道 hack、`resume` 的临时通道 + drain、消费循环的嵌套
+   spawn + keepalive sender。
+2. **工具侧收敛**：`ask_user` 与交互审批从「返回通道」改为「返回意图载荷」
+   （`failure_kind` + `prompt`），节点统一由 `tool_executor` 构造（`id = result_msg_id`）。
+   `failure_kind` 收口为 `symbio_core::capability::failure_kind` 共享闭集，判据只有
+   `is_pending()`——此前生产方与消费方各写各的字面量，加一个 pending kind 就会漏改
+   编排层那处硬编码判定。
+3. **流式工具接上出口**：`shell` / `agent_run` 的增量改走 `EventSink`，删除
+   `execute_tool_async` 里约 150 行的 `NodeOp` 转发块（解帧 / 过滤 user 角色 /
+   锚 `parent_id` / `Assistant→Tool` 改写 / 丢 `Reset`·`Warn`）。`agent_run` 的结局
+   从「帧」变成具名 `RelayOutcome{Done|Pending|Failed}`，翻译只剩转播桥一处。
+   **总时长上限 → 空闲上限**：新增 `EventSinkProgress`（出口上的发射计数）使
+   「有进展就不算挂死」可判定，历史并存的两个魔法数（600s 总时长 + 180s 流式空闲）
+   收成一个；顺带修掉一处语义回退（`agent_run` 过去经通道回传、逃过了总时长上限，
+   接上出口后会被误杀）。
+4. **两个执行接口收成同形**：新增 `ExecEnv{sink, abort}`，`Capability::execute(args,
+   env, ctx) -> Result<Value, _>` 与 `ModelProvider::execute_turn(inputs, env)` 共用它。
+   新增 `invoke_capability(cap, ctx)` 作为**唯一「拆信封」点**（`args = payload ?? Null`、
+   `env = from_request(ctx)`、结果装回 `PluginPayload`）；三个分发路径必须经它，
+   装饰器（`PrefixedCapability` / `SecureToolWrapper`）不拆不装、原样透传。
+   24 个 `impl Capability` 换签名，删掉 24 处 `PluginPayload::new(&json!{...})` 包装。
+
+**保住的语义**（逐条核实）：转写仍只有一个写入点；`Warn` 仍是会话级状态、不进转写；
+`route()` 直连调用仍**自然静默**（`ExecEnv::from_request` 缺席 ⇒ `Null` 出口 /
+永不中止）；工具仍不构造节点身份；压缩路径仍出口静默（现在是类型上的选择）。
+
+**架构决策**：见 [DECISIONS.md](./DECISIONS.md) ADR-020（前三批）与 ADR-021（第四批，
+显式记录它推翻了 ADR-020 决策 7 的**手段**、保留其目标）。结构说明见
+[`session/docs/core-loop.md`](../symbio/src/plugins/session/docs/core-loop.md) §8–§11。
+
+**验收**：`gate.mjs` 32/32；`cargo test --lib` 817 passed / 0 failed；CLI 端到端
+（`--provider LMStudio`）7 场景全 `EXIT=0`——普通流式对话 / 交互模式 `cmd` 流式工具 /
+交互模式 `ask_user` / 自动模式 `ask_user` 降级 / 工具参数校验失败 / `vdfs_read` /
+`agent_run` 子会话转播。
+
+**已知局限（非本批引入，未修）**：CLI 把 `risk_level` 硬编码为 `medium`，而工具风险表
+默认全为 `medium` ⇒ `needs_approval` 分支在 CLI 端不可达（该分支语义由 `ask_user`
+经 CLI 覆盖 + `tool_executor.test.rs` 的跨文件契约用例锁定）；`vdfs_*` / `web` 工具
+不经审批闸门（`SecureToolWrapper` 只包装 `local` 插件的工具）。
+
 ## 2026-09-20: 工具调用必有响应 —— 补上「未执行」那一半
 
 **现象**：工具调用卡片只有请求、没有响应（`ToolCallNode` 的响应段按**子节点**渲染），

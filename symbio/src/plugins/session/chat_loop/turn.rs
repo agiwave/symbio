@@ -15,7 +15,7 @@ const MAX_CONTINUE_ROUNDS: u32 = 3;
 pub(crate) async fn settle_reasoning(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    channel: &PluginChannel,
+    sink: &EventSink,
     root_id: &str,
     mut out: TurnOutput,
 ) -> TurnResult {
@@ -29,7 +29,7 @@ pub(crate) async fn settle_reasoning(
     let rrid = out.reasoning_child_id.clone();
 
     orchestrator
-        .finalize_assistant_turn(root_id, &out, &tools_done, channel)
+        .finalize_assistant_turn(root_id, &out, &tools_done, sink)
         .await;
 
     // 用 provider 返回的真实用量滚动校准 token 估算。
@@ -68,7 +68,7 @@ pub(crate) async fn settle_reasoning(
 pub(crate) async fn close_turn(
     orchestrator: &ChatOrchestrator,
     ctx: Arc<dyn InvokeRequest>,
-    channel: &mut PluginChannel,
+    sink: &EventSink,
     context: &mut SessionContext,
     turn: &mut TurnState,
     result: TurnResult,
@@ -96,36 +96,31 @@ pub(crate) async fn close_turn(
                     turn.continuation_count,
                     MAX_CONTINUE_ROUNDS
                 );
-                persist_messages(context, turn.last_saved, channel).await;
+                persist_messages(context, turn.last_saved, sink).await;
                 turn.last_saved = context.messages.len();
                 return TurnFlow::NextTurn;
             }
             // 续写次数耗尽：明确告知，绝不静默结束（会话级告警状态，随下一轮请求清除）。
-            let _ = channel.tx.send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::NodeOp::Warn {
-                    warning: Some(format!(
-                        "输出因达到长度上限而中断（已自动续写 {} 次仍超出）。请提高单次输出预算或缩小任务范围。",
-                        MAX_CONTINUE_ROUNDS
-                    )),
-                })
-                .unwrap_or_default(),
-            )).await;
+            sink.emit(session_chat_response::NodeOp::Warn {
+                warning: Some(format!(
+    "输出因达到长度上限而中断（已自动续写 {} 次仍超出）。请提高单次输出预算或缩小任务范围。",
+    MAX_CONTINUE_ROUNDS
+    )),
+            })
+            .await;
         } else if finish.is_length() && had_tool {
             // 工具调用参数 JSON 被长度截断：参数残破无法通过续写修复，
             // 该次调用已丢弃 → 明确报错而非静默结束（会话级告警状态）。
-            let _ = channel.tx.send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::NodeOp::Warn {
-                    warning: Some("输出在工具调用参数中途达到长度上限而中断。请提高单次输出预算，或把大任务拆小后重试。".to_string()),
-                })
-                .unwrap_or_default(),
-            )).await;
+            sink.emit(session_chat_response::NodeOp::Warn {
+    warning: Some("输出在工具调用参数中途达到长度上限而中断。请提高单次输出预算，或把大任务拆小后重试。".to_string()),
+    }).await;
         }
         plugin_info!(
             "session",
             "--- TURN END (正常收尾，无工具调用) --- finish={:?}",
             finish
         );
-        persist_messages(context, turn.last_saved, channel).await;
+        persist_messages(context, turn.last_saved, sink).await;
         turn.last_saved = context.messages.len();
         return TurnFlow::Finish(TurnExit::Completed);
     }
@@ -168,9 +163,8 @@ pub(crate) async fn close_turn(
             let (ok, before_t, after_t) = run_context_compact(
                 orchestrator,
                 context,
-                channel,
                 &ctx,
-                &turn.abort_flag,
+                &turn.abort,
                 split_user_idx,
                 hints.as_deref(),
             )
@@ -214,7 +208,7 @@ pub(crate) async fn close_turn(
                 // 与普通工具结果的处理保持一致，避免孤儿 Failed 节点
                 tool_msg.status = Some(MessageStatus::Completed);
             }
-            broadcast_message_update(channel, tool_msg.clone()).await;
+            broadcast_message_update(sink, tool_msg.clone()).await;
             // 父节点终态：从权威转写取完整副本应用终态（找不到 = 协议违例，跳过）。
             if let Some(mut parent) = context.messages.iter().find(|m| m.id == call_id).cloned() {
                 parent.status = Some(MessageStatus::Completed);
@@ -228,7 +222,7 @@ pub(crate) async fn close_turn(
                     }
                 }
                 parent.meta = Some(meta);
-                broadcast_message_update(channel, parent.clone()).await;
+                broadcast_message_update(sink, parent.clone()).await;
                 parent_updates.push(parent);
             } else {
                 plugin_error!(
@@ -250,7 +244,7 @@ pub(crate) async fn close_turn(
                     None,
                 );
                 tool_msg.status = Some(MessageStatus::Completed);
-                broadcast_message_update(channel, tool_msg.clone()).await;
+                broadcast_message_update(sink, tool_msg.clone()).await;
                 if let Some(mut parent) = context.messages.iter().find(|m| m.id == *cid).cloned() {
                     parent.status = Some(MessageStatus::Completed);
                     let mut meta = parent.meta.clone().unwrap_or_else(|| serde_json::json!({}));
@@ -260,7 +254,7 @@ pub(crate) async fn close_turn(
                         obj.insert("skipped".into(), serde_json::json!(true));
                     }
                     parent.meta = Some(meta);
-                    broadcast_message_update(channel, parent.clone()).await;
+                    broadcast_message_update(sink, parent.clone()).await;
                     parent_updates.push(parent);
                 } else {
                     plugin_error!(
@@ -283,8 +277,8 @@ pub(crate) async fn close_turn(
     let (other_results, other_parent_updates) = process_tool_calls_async(
         other_calls,
         &orchestrator.parent,
-        channel,
-        &turn.abort_flag,
+        sink,
+        &turn.abort,
         ctx.clone(),
         &context.messages,
     )
@@ -306,7 +300,7 @@ pub(crate) async fn close_turn(
         }
     }
 
-    persist_messages(context, turn.last_saved, channel).await;
+    persist_messages(context, turn.last_saved, sink).await;
     turn.last_saved = context.messages.len();
 
     // 检测工具待用户恢复 → 退出本轮：

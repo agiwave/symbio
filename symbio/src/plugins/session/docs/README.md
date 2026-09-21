@@ -14,7 +14,7 @@
 
 | 文档 | 状态 | 一句话 |
 |---|---|---|
-| [core-loop.md](./core-loop.md) | 现行设计（批次 A/B/C 已落地，D 待授权） | LLM × 工具会话主循环的结构与四个收口点（`gate_turn` / `prepare_turn_inputs` / `apply_compaction` / `finish_turn`） |
+| [core-loop.md](./core-loop.md) | 现行设计（批次 A/B/C 已落地，D 待授权；**批次 E 已落地**） | LLM × 工具会话主循环的结构与四个收口点（`gate_turn` / `prepare_turn_inputs` / `apply_compaction` / `finish_turn`）；§8 记执行期出口/信号双原语（`EventSink` + `AbortSignal`） |
 | [module-layout.md](./module-layout.md) | 现行（S1–S4 已落地） | 插件模块分工评审：单文件过长问题、目标目录结构、S1–S4 执行顺序与验收、可见性口径 |
 | [context-compression-design.md](./context-compression-design.md) | 现行设计总览 | 上下文压缩 L0–L6 分层机制、优先取舍、不变量（实现细节见 `../README.md`） |
 | [turn-tool-mechanisms.md](./turn-tool-mechanisms.md) | 现行机制 | 工具失败如何回传（信息性、不中断循环）、Turn 终态如何定 |

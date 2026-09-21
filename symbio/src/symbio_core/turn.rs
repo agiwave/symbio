@@ -4,23 +4,30 @@
 //! 统一实现与 model/session 双侧共同使用）：
 //! - HTTP 客户端单例 + 支持中止的 POST 重试机器（`execute_post_with_abort` → 五态 `PostResult`）
 //! - SSE 流解析与协议事件累积（`parse_sse_stream` → `TurnOutput`），流式子节点经
-//!   `session_chat_response::NodeOp::Upsert` 帧实时下发
+//!   [`EventSink`] 实时下发
 //! - 工具调用增量累积（`ToolCallAccumulator`）
 //! - 消息构造家族（`short_id`/`StreamChildIds`/`build_assistant_messages`/`build_tool_message`）：
 //!   `TurnOutput::into_messages` 与 `ToolCallAccumulator` 直接依赖它，
 //!   孤儿规则要求定义与使用同处 core
+//!
+//! ## 执行期只与两个原语打交道（不再与通道打交道）
+//!
+//! 本模块的所有函数只依赖 [`EventSink`]（出：节点事件）与 [`AbortSignal`]
+//! （入：中止），**不再接受 `PluginChannel`**。历史上两者都压在同一个通道上，
+//! 进程内调用因此要付 serde 装箱 + 反序列化的往返代价；现在「去哪」与
+//! 「怎么中止」分别由两个语义单一的原语承担，`PluginChannel` 退回纯跨进程传输
+//! （见 `symbio_core::exec` 的模块文档）。
 
+use crate::symbio_core::exec::{AbortSignal, EventSink};
 use crate::symbio_core::model_provider::{FinishReason, ProtocolEvent, Usage};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
-use crate::symbio_core::schemas::session::session_chat_response::{ControlSignal, NodeOp};
-use crate::symbio_core::{PluginChannel, PluginFrame};
+use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
 use crate::{plugin_error, plugin_info, plugin_warn};
 use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tracing::warn;
 
@@ -48,110 +55,38 @@ pub fn get_http_client() -> &'static reqwest::Client {
     })
 }
 
-// 通道辅助
+// 执行期出口与中止（唯一两个原语）
 
-/// 统一发送消息更新帧到消费循环（`Upsert` = 完整消息快照，接收端按 id 整条替换）。
-pub async fn emit_update(channel: &PluginChannel, msg: ChatMessage) {
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(NodeOp::Upsert {
-                message: Box::new(msg),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
+/// 统一发送消息更新事件（`Upsert` = 完整消息快照，接收端按 id 整条替换）。
+pub async fn emit_update(sink: &EventSink, msg: ChatMessage) {
+    sink.emit(NodeOp::Upsert {
+        message: Box::new(msg),
+    })
+    .await;
 }
 
-/// 发送流式追加帧：`delta` 追加到已存在消息的 Text 内容尾部。
+/// 发送流式追加事件：`delta` 追加到已存在消息的 Text 内容尾部。
 ///
 /// 窄载荷（O(delta)）——正文流式每帧都走这里，整条重发会是 O(n²)。
 /// 目标消息必须已由 [`emit_update`] 创建；对未知 id 追加是协议违例，
-/// 消费循环会报错丢弃，而不是静默造一个幽灵节点。状态迁移不走这里：
+/// 唯一写入点会报错丢弃，而不是静默造一个幽灵节点。状态迁移不走这里：
 /// 那是完整快照（[`emit_update`]）的职责，帧面只有一种含义。
-pub async fn emit_append(channel: &PluginChannel, message_id: &str, delta: &str) {
-    let _ = channel
-        .tx
-        .send(PluginFrame::Data(
-            serde_json::to_value(NodeOp::Append {
-                message_id: message_id.to_string(),
-                delta: delta.to_string(),
-            })
-            .unwrap_or_default(),
-        ))
-        .await;
+pub async fn emit_append(sink: &EventSink, message_id: &str, delta: &str) {
+    sink.emit(NodeOp::Append {
+        message_id: message_id.to_string(),
+        delta: delta.to_string(),
+    })
+    .await;
 }
 
-// 控制信号处理
-
-/// 处理单个控制帧。返回 `true` 表示收到中断信号（同时置位 `abort_flag`，
-/// 让不经过本函数返回值的轮询路径也能感知中断）。
-fn handle_signal_frame(frame: PluginFrame, abort_flag: &AtomicBool) -> bool {
-    let is_abort = match frame {
-        PluginFrame::Data(ref m) => matches!(
-            serde_json::from_value::<ControlSignal>(m.clone()),
-            Ok(ControlSignal::Abort)
-        ),
-        _ => false,
-    };
-    if is_abort {
-        abort_flag.store(true, Ordering::SeqCst);
-    }
-    is_abort
-}
-
-/// 排空当前挂起的控制帧（非阻塞）。
-fn drain_pending_signals(channel: &mut PluginChannel, abort_flag: &AtomicBool) {
-    while let Ok(frame) = channel.rx.try_recv() {
-        if handle_signal_frame(frame, abort_flag) {
-            break;
-        }
-    }
-}
-
-/// 持续轮询直至中断（阻塞，用于 select!）。
-async fn wait_for_abort_signal(channel: &mut PluginChannel, abort_flag: &AtomicBool) {
-    // 检查标志位
-    if abort_flag.load(Ordering::SeqCst) {
-        return;
-    }
-
-    // 中止感知有两条独立通道，任一触发即返回：
-    // 1. rx 收到显式 Abort 帧（消费循环转发的 transport 信号）；
-    // 2. abort_flag 被外部置位——**这是内部请求（如上下文压缩）唯一的中止感知路径**：
-    //    压缩请求挂在静默哑通道上（rx 永无帧），用户停止时 Abort 帧堆在主通道、
-    //    消费循环正 await 在压缩请求上无暇收取，只有共享的 abort_flag 会被置位。
-    //    因此这里必须轮询标志位，否则压缩请求在用户中止后仍会跑完整整轮 LLM 流。
-    let flag = abort_flag;
-    loop {
-        tokio::select! {
-            _ = async {
-                while !flag.load(Ordering::SeqCst) {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-            } => {
-                return;
-            }
-            // 第三条中止感知路径：通道被强制取消（消费循环超时兜底 / 会话销毁）。
-            // 缺失此分支时，POST 等待会无视 cancel_token 继续挂起。
-            _ = channel.cancel_token.cancelled() => {
-                return;
-            }
-            frame = channel.rx.recv() => match frame {
-                Some(frame) => {
-                    if handle_signal_frame(frame, abort_flag) {
-                        return;
-                    }
-                    if abort_flag.load(Ordering::SeqCst) {
-                        return;
-                    }
-                }
-                None => {
-                    return;
-                }
-            }
-        }
-    }
+/// 等到中止（`abort` 已置位则立即返回）。
+///
+/// 收口前这里是一个 `select!` 三臂：100ms 轮询标志位 | 通道取消 | 收 Abort 帧。
+/// 现在只剩一条——[`AbortSignal::abort`] 置位的同时就唤醒等待者，**无需轮询**；
+/// 而「通道关闭 ⇒ 中止」的语义改由发起方在退出时显式调用 `abort()` 承担
+/// （隐式的 sender drop 换成一次命名调用，行为不变、意图更清楚）。
+async fn wait_for_abort_signal(abort: &AbortSignal) {
+    abort.cancelled().await;
 }
 
 // HTTP 请求（支持自动重试）
@@ -189,16 +124,10 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::time::
 }
 
 /// 退避等待期间持续响应中止信号，避免 abort 必须等满整个退避窗口。
-async fn sleep_with_abort(d: std::time::Duration, abort_flag: &AtomicBool) {
-    let step = std::time::Duration::from_millis(100);
-    let mut elapsed = std::time::Duration::ZERO;
-    while elapsed < d {
-        if abort_flag.load(Ordering::SeqCst) {
-            return;
-        }
-        let remain = d - elapsed;
-        tokio::time::sleep(remain.min(step)).await;
-        elapsed += remain.min(step);
+async fn sleep_with_abort(d: std::time::Duration, abort: &AbortSignal) {
+    tokio::select! {
+        _ = tokio::time::sleep(d) => {}
+        _ = abort.cancelled() => {}
     }
 }
 
@@ -206,8 +135,7 @@ pub async fn execute_post_with_abort(
     url: &str,
     headers: reqwest::header::HeaderMap,
     body: &Value,
-    channel: &mut PluginChannel,
-    abort_flag: &AtomicBool,
+    abort: &AbortSignal,
 ) -> PostResult {
     // 限流/瞬时 5xx/网络抖动：有界重试 + 指数退避，避免一次瞬时错误就中断整轮对话。
     // 重试在同一 turn 内进行（复用同一个 root_id），不会额外产生 Turn/文本节点，
@@ -229,7 +157,7 @@ pub async fn execute_post_with_abort(
     let mut attempt: u32 = 0;
 
     loop {
-        if abort_flag.load(Ordering::SeqCst) {
+        if abort.is_aborted() {
             return PostResult::Aborted;
         }
 
@@ -237,7 +165,7 @@ pub async fn execute_post_with_abort(
             res = get_http_client().post(url).headers(headers.clone()).json(body).send() => {
                 res
             },
-            _ = wait_for_abort_signal(channel, abort_flag) => {
+            _ = wait_for_abort_signal(abort) => {
                 return PostResult::Aborted;
             }
         };
@@ -256,7 +184,7 @@ pub async fn execute_post_with_abort(
                         MAX_RETRIES,
                         delay
                     );
-                    sleep_with_abort(delay, abort_flag).await;
+                    sleep_with_abort(delay, abort).await;
                     continue;
                 }
                 return PostResult::Err(format!("网络传输失败: {e}"));
@@ -264,7 +192,7 @@ pub async fn execute_post_with_abort(
             Ok(r) => r,
         };
 
-        if abort_flag.load(Ordering::SeqCst) {
+        if abort.is_aborted() {
             plugin_info!(
                 "model",
                 "[LLM] 请求在等待响应阶段被中止 (耗时 {:?})",
@@ -306,7 +234,7 @@ pub async fn execute_post_with_abort(
                 MAX_RETRIES,
                 delay
             );
-            sleep_with_abort(delay, abort_flag).await;
+            sleep_with_abort(delay, abort).await;
             continue;
         }
 
@@ -755,11 +683,14 @@ impl TurnOutput {
 /// 协议差异只体现在「一行 → 事件」的解析一个钩子上，core 无需（也不应）
 /// 感知任何协议抽象——调用方（如 model 插件的 `BoundProvider::execute_turn`）
 /// 直接传 `|line| protocol.parse_response_line(line)`。
+///
+/// 流式产出的子节点经 `sink` 实时下发（进程内直连转写唯一写入点）；
+/// 中止只经 `abort` 感知（不再在流循环里排空控制帧）。
 pub async fn parse_sse_stream(
     response: reqwest::Response,
     root_id: &str,
-    channel: &mut PluginChannel,
-    abort_flag: &AtomicBool,
+    sink: &EventSink,
+    abort: &AbortSignal,
     parse_line: impl Fn(&str) -> Vec<ProtocolEvent>,
 ) -> Result<TurnOutput, String> {
     let mut stream = response.bytes_stream();
@@ -820,8 +751,7 @@ pub async fn parse_sse_stream(
         chunk_count += 1;
         total_bytes += chunk.as_ref().map(|c| c.len()).unwrap_or(0) as u64;
 
-        drain_pending_signals(channel, abort_flag);
-        if abort_flag.load(Ordering::SeqCst) {
+        if abort.is_aborted() {
             plugin_info!(
                 "model",
                 "[LLM] 流式响应被中止 (已收 {} chunks / {} bytes, 耗时 {:?})",
@@ -874,7 +804,7 @@ pub async fn parse_sse_stream(
                         dispatch_and_track(
                             event,
                             root_id,
-                            channel,
+                            sink,
                             &mut out,
                             &mut first_content_logged,
                             started,
@@ -915,7 +845,7 @@ pub async fn parse_sse_stream(
                         dispatch_and_track(
                             ev,
                             root_id,
-                            channel,
+                            sink,
                             &mut out,
                             &mut first_content_logged,
                             started,
@@ -932,7 +862,7 @@ pub async fn parse_sse_stream(
 
     // ③ 流结束日志：正常结束 / 中止 / 空流，均带统计信息。
     // 若此处之后长时间无下文（工具执行/下一轮请求），可据此定位卡死发生在「流结束后」阶段。
-    if abort_flag.load(Ordering::SeqCst) {
+    if abort.is_aborted() {
         // 中止已在上方记录，此处不重复。
     } else if out.text.is_empty()
         && out.reasoning.is_empty()
@@ -969,7 +899,7 @@ pub async fn parse_sse_stream(
 async fn dispatch_and_track(
     ev: ProtocolEvent,
     root_id: &str,
-    channel: &PluginChannel,
+    sink: &EventSink,
     out: &mut TurnOutput,
     first_content_logged: &mut bool,
     started: std::time::Instant,
@@ -991,13 +921,13 @@ async fn dispatch_and_track(
             );
         }
     }
-    dispatch_protocol_event(ev, root_id, channel, out).await
+    dispatch_protocol_event(ev, root_id, sink, out).await
 }
 
 async fn dispatch_protocol_event(
     ev: ProtocolEvent,
     root_id: &str,
-    channel: &PluginChannel,
+    sink: &EventSink,
     out: &mut TurnOutput,
 ) -> Result<(), String> {
     match ev {
@@ -1013,7 +943,7 @@ async fn dispatch_protocol_event(
             if out.response_text_child_id.is_empty() {
                 out.response_text_child_id = short_id();
                 emit_update(
-                    channel,
+                    sink,
                     ChatMessage {
                         id: out.response_text_child_id.clone(),
                         parent_id: Some(root_id.into()),
@@ -1026,7 +956,7 @@ async fn dispatch_protocol_event(
                 )
                 .await;
             } else {
-                emit_append(channel, &out.response_text_child_id, &c).await;
+                emit_append(sink, &out.response_text_child_id, &c).await;
             }
         }
         ProtocolEvent::ReasoningDelta(r) => {
@@ -1038,7 +968,7 @@ async fn dispatch_protocol_event(
             if out.reasoning_child_id.is_empty() {
                 out.reasoning_child_id = short_id();
                 emit_update(
-                    channel,
+                    sink,
                     ChatMessage {
                         id: out.reasoning_child_id.clone(),
                         parent_id: Some(root_id.into()),
@@ -1051,7 +981,7 @@ async fn dispatch_protocol_event(
                 )
                 .await;
             } else {
-                emit_append(channel, &out.reasoning_child_id, &r).await;
+                emit_append(sink, &out.reasoning_child_id, &r).await;
             }
         }
         ProtocolEvent::ToolCallDelta(idx, id, name, args) => {
@@ -1066,7 +996,7 @@ async fn dispatch_protocol_event(
             // - 纯参数增长 → 窄追加（`Append`，O(delta)），接收端尾部拼接。
             if snapshot_required {
                 emit_update(
-                    channel,
+                    sink,
                     ChatMessage {
                         id: tc_id.clone(),
                         parent_id: Some(root_id.into()),
@@ -1081,7 +1011,7 @@ async fn dispatch_protocol_event(
                 )
                 .await;
             } else if let Some(delta) = args.as_deref().filter(|d| !d.is_empty()) {
-                emit_append(channel, &tc_id, delta).await;
+                emit_append(sink, &tc_id, delta).await;
             }
         }
         ProtocolEvent::ResponseId(id) => out.response_id = Some(id),

@@ -7,6 +7,7 @@ mod configurable;
 pub(crate) mod creator;
 mod error;
 pub mod event_bus;
+pub mod exec;
 mod homedir;
 mod ids;
 mod keys;
@@ -38,13 +39,18 @@ pub use option::{
 };
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 pub use capability::{
-    Capability, CapabilityCategory, CapabilityMeta, CapabilityVisitor, ToolContextRetention,
+    invoke_capability, Capability, CapabilityCategory, CapabilityMeta, CapabilityVisitor,
+    ToolContextRetention,
 };
+// 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
+// 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
+pub use capability::failure_kind;
 pub use clock::now_ms;
 pub use configurable::{
     announce_configurable, entry_of, ConfigurableVisitor, DefaultConfigurableVisitor,
 };
 pub use error::*;
+pub use exec::{AbortSignal, EventSink, EventSinkProgress, ExecEnv, TranscriptWriter};
 // 锁辅助函数**刻意不走 `pub use error::*`**（见 `error.rs::lock_read` 的说明）：
 // 显式 `pub(crate)` 导入，既让全 crate 可用，又保留 `dead_code` 的可见性。
 pub(crate) use error::{lock_read, lock_write};

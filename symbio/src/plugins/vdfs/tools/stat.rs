@@ -3,11 +3,9 @@
 //! 无面向 LLM 的专属封装：把封装 provider 的 `stat` 结果（`VdfsNode`）透传给大模型。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeResponse, PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// 读取元数据工具（框架原生 `Capability`）
@@ -39,9 +37,14 @@ impl Capability for StatTool {
         )
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let req: super::super::protocol::VdfsPathRequest = request_of(&ctx);
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        let req: super::super::protocol::VdfsPathRequest = request_of(&args);
         let node = self.provider.stat(&ctx, &req.path).await?;
-        Ok(PluginPayload::new(&node))
+        Ok(serde_json::to_value(&node)?)
     }
 }

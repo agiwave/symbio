@@ -1,8 +1,8 @@
-use crate::symbio_core::PluginFrame;
+use crate::symbio_core::AbortSignal;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock};
 
 /// 全局请求 ID 生成器
 pub static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -10,8 +10,15 @@ pub static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 /// 会话内部状态 (封装为单个锁定对象以保证原子性)
 pub struct ActiveSessionStateInner {
     pub is_working: bool,
-    /// 用于向 MODEL 任务发送控制信号 (Abort)
-    pub ai_control_tx: Option<mpsc::Sender<PluginFrame>>,
+    /// 在途 Turn 的中止信号（登记后 `handle_abort` 直接置位，无需投帧）。
+    ///
+    /// 收口前这里是 `Option<mpsc::Sender<PluginFrame>>`——中止只能靠「往执行期
+    /// 通道投一帧 `ControlSignal::Abort`」，执行方在 `select!` 里收帧再置位标志。
+    /// 现在登记的就是那个信号本身：置位即生效、置位即唤醒（无轮询、无帧）。
+    ///
+    /// `None` 的双重含义与收口前一致：既表示「当前没有在途 Turn」，也是
+    /// `handle_abort` 判断 chat_loop 是否已收敛的判据。
+    pub abort_signal: Option<AbortSignal>,
     pub last_content: String,
     pub last_tool_calls: Vec<Value>,
     /// 上一轮交互的**结局**（`completed` / `aborted` / `failed`）。
@@ -86,7 +93,7 @@ impl ActiveSessionState {
             session_id: session_id.clone(),
             inner: RwLock::new(ActiveSessionStateInner {
                 is_working: false,
-                ai_control_tx: None,
+                abort_signal: None,
                 last_content: String::new(),
                 last_tool_calls: Vec::new(),
                 last_outcome: None,

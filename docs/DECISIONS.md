@@ -984,4 +984,235 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
 
 ---
 
+## ADR-020: 执行期与传输层**分离**——`EventSink`（出）+ `AbortSignal`（入）取代 `PluginChannel` 的双职责
+
+**状态**：已接受（第一批「双原语」与第二批「工具侧收敛」均已落地；`shell` / `agent_run`
+的流式增量仍待接入）
+
+> **当前状态**：**已实现（现行）**。原语在 `symbio/src/symbio_core/exec.rs`
+> （`EventSink` / `AbortSignal` / `TranscriptWriter`），生产实现
+> `session/orchestrator/sink.rs::TranscriptSink`；`ControlSignal` 协议面已删除；
+> 消费循环改写为 `orchestrator/consume.rs` 的 `spawn + select!` 三臂。
+> 机制细节见 [`symbio/src/plugins/session/docs/core-loop.md`](../symbio/src/plugins/session/docs/core-loop.md)
+> §8（双原语）与 §9（工具侧收敛）。
+> 门禁 32/32、`cargo test --lib` 811 passed、CLI 端到端四场景通过。
+
+**背景**：
+
+一次会话请求的流式链路曾有 **8 跳**，其中两跳是纯开销：
+
+```text
+parse_sse_stream → emit_append(serde #1) → PluginFrame → 消费循环
+  → from_value::<NodeOp>(serde #2) → Transcript::apply → publish_frame(serde #3) → 前端
+```
+
+根因是 `PluginChannel` **一个类型承担了两种语义**：
+
+| 职责 | 具体表现 |
+|---|---|
+| **出**（事件） | `serde_json::to_value(NodeOp)` → `PluginFrame::Data` → 通道 → 消费循环 `from_value::<NodeOp>` 再解回来 |
+| **入**（中止） | Abort 帧 + `abort_flag` 的 100ms 轮询 + `cancel_token`，**三源并存** |
+
+代价不只是两次 serde。由它派生出四类结构性冗余：
+
+1. **同进程调用付进程外代价**。`provider.execute_turn` 与 `tool.execute` 的两端
+   **始终同进程同 spawn**（`bound_provider.rs`），却按跨进程协议编解码。
+2. **「静默」只能靠所有权手术**。上下文压缩需要「本次调用不产生可见事件」，
+   历史做法是造哑 sender + 把 rx 与主通道 `mem::replace` 对调 + 起 drain task
+   排空。`resume.rs` 重跑工具同理。**这是把「不说话」表达成了「换一根管子」**。
+3. **中止的三种来源各有各的竞态**。投帧可能因对端已退出而丢失；轮询有 100ms
+   延迟；`cancel_token` 与 `abort_flag` 可能不一致。`handle_abort` 因此必须
+   准备 3s 兜底。
+4. **消费循环被迫「按帧醒来」**。它必须持续 `recv` 才能感知中止与状态变化，
+   于是「任务结束 / 看门狗 / 被接管」三种结局只能靠嵌套双层 `spawn` + `join` +
+   keepalive sender 拼出来。
+
+**决策**：
+
+1. **执行期与传输层分离**，各用语义单一的原语：
+
+   | 原语 | 方向 | 形状 | 用在哪 |
+   |---|---|---|---|
+   | `EventSink` | 出 | `Direct(Arc<dyn TranscriptWriter>)` \| `Null` | 执行期（LLM 单轮 / 工具调用） |
+   | `AbortSignal` | 入 | `Arc<AtomicBool>` + `CancellationToken` 合一 | 执行期 |
+   | `PluginChannel` | 双向 | `{tx, rx, cancel_token}` | **退回纯跨进程传输**（前端实时面） |
+
+2. **`abort()` 是唯一置位入口**，置位即唤醒（`CancellationToken`）。中止**不再有帧、
+   不再有轮询、不再有第二个来源**。
+3. **`EventSink::Null` 是「本次调用不产生可见事件」的类型级表达**，取代哑通道 + drain task。
+4. **删除 `ControlSignal` 协议面**（三源合一后无消费方；前端本无镜像）。
+5. **消费循环退化为纯生命周期管理**：一次 `spawn` + `select!` 三臂
+   （任务结束 / 1800s 看门狗 / 状态被接管），不再收帧、不再解码、不再分派。
+6. **`AbortGuard::disarm` 注销登记时一并 `abort()`**，把历史上「通道被 drop ⇒
+   对端读到关闭 ⇒ 视作中止」这条隐式语义**显式化**，并由测试锁定
+   （`orchestrator.test.rs::disarm_aborts_the_signal`）。
+
+**理由**：
+
+- **进程内调用不该付进程外的代价**。这是判断的支点：既然两端同进程同 spawn，
+  直接调 `TranscriptWriter::apply` 就是正确形状，`serde` 只是历史包袱。
+- **「不说话」应当是类型选择，不是所有权交换**。`EventSink::Null` 让压缩路径
+  「绝不产生可见事件」成为**编译器可检查**的性质，而哑通道方案里它只是一个
+  运行期约定——任何人误用 `tx` 都能捅穿。
+- **中止的复杂度来自「多源」，不是来自「中止」**。三源合一的收益不只是少两段代码，
+  而是**消除了一整类竞态**：不再存在「帧丢了但标志位没置」这种状态组合。
+- **`EventSink` 认识 `NodeOp`，但不认识 `Transcript`**。转写抽象成
+  `TranscriptWriter` 后，`symbio_core` 不必知道会话存储的存在，而「转写只有
+  一个写入点」这条不变量仍由类型保证。
+
+**后果**：
+
+- **后端两跳 serde 消失**：`parse_sse_stream → sink.emit(NodeOp) → TranscriptSink
+  → Transcript::apply`。日志里不再有每帧 `from_value` 的往返。
+- **`ControlSignal` 从 8 处引用归零**；`PluginChannel` 不再承担执行期协议。
+- **三处结构性冗余消失**：压缩的哑通道 hack、`resume` 的临时通道 + drain、
+  消费循环的嵌套 spawn + keepalive sender。
+- **`AbortGuard` 成为中止登记的唯一管理者**，`ActiveSessionState.ai_control_tx`
+  → `abort_signal`。`handle_abort` 的 3s 兜底判据（登记变 `None`）与语义不变。
+- **保住的语义**：转写唯一写入点；`Warn` 归会话级状态不进转写；「中止不是失败」
+  （结局 `aborted` 而非 `completed`，在途根 Turn 定稿 `Aborted`，重试入口不消失）；
+  工具经**自有** `PluginPayload::Session` 通道回传事件的能力完整保留。
+- **未收敛的残留（下一批）**：`shell` 与 `agent_run` 的**流式增量**仍把
+  `PluginPayload::Session` 当事件流用，由 `tool_executor` 解码后**再转发**进
+  `sink`（含 user 角色过滤、`parent_id` 锚定、`user_prompt` 捕获）。它们的自造
+  复杂度写在注释里：执行体必须 `spawn` 到后台，否则输出帧超过通道容量（64）时
+  pump 阻塞在 send 而 executor 尚未开始消费 ⇒ **死锁**。接上出口后这段连同
+  `PluginChannel::pair(64)`、`cancel_token` 克隆可一并删除。
+
+**第二批（工具侧收敛，已落地）**：
+
+7. **工具的执行期原语经 `ctx` 传递，不给 `Capability::execute` 加参数**。
+   `execute(ctx)` 的入参是**请求信封**（`PATH` / `trace_id` / `payload` / 会话上下文），
+   而出口是**执行期**的，与「这次调用从哪条路径来」无关——同一个 `shell` 既可能被
+   编排层调用（有出口），也可能被 `route()` 直接调用（无出口 ⇒ 静默）。用 `ctx`
+   承载（键 `EVENT_SINK` / `ABORT_SIGNAL`，`SymbioKey` 与 `CAPABILITY_VISITOR` 同款、
+   `parse → None` 声明「进程内专用」）就不必为「有没有出口」造第二条调用路径。
+8. **工具只声明意图与载荷，节点归编排层构造**。`ask_user` 与交互审批返回
+   `Data{failure_kind, prompt}`，节点由 `process_tool_calls_async` 用
+   `build_user_prompt_message` 构造（`id = result_msg_id`、`parent_id = tool_call_id`）。
+   `PendingPrompt` **没有 id 字段**，因此「同一逻辑节点两个 id」在类型层面不成立。
+9. **`failure_kind` 收口为共享闭集**（`symbio_core::capability::failure_kind`），
+   判据只有 `is_pending()`。此前生产方与消费方各写各的字面量，编排层另有一处
+   硬编码判定——加一个 pending kind 就会漏改它，表现是交互模式下本批剩余工具照跑。
+
+**第三批（流式工具接上出口，已落地）**：
+
+10. **`shell` / `agent_run` 的流式增量走出口，不走自建通道**。收口前它们是
+    `PluginPayload::Session` 的最后两个消费者，`tool_executor` 里为此存在一整段
+    「解帧 → 过滤 user 角色 → 把 `parent_id` 锚到 `tool_call_id` → `Assistant` 改
+    `Tool` → 丢弃 `Reset`/`Warn` → 捕获冒泡审批节点」的二次分派（≈150 行）。
+    这是**跨进程传输原语被当作进程内事件流**用。接上出口后翻译只剩
+    `subagent::stream_relay_bridge` 一处，`execute_tool_async` 的返回值只有
+    「工具结果」一种含义。
+11. **`agent_run` 的结局具名化**：通道帧（最终文本哨兵帧 / 错误帧 / 节点冒泡）
+    → `RelayOutcome { Done | Pending{text,prompt,failure_kind} | Failed }`。
+12. **总时长上限 → 空闲上限**。`EventSinkProgress`（出口上的发射计数）使
+    「有进展就不算挂死」可判定：不发事件的工具读数恒 0 ⇒ 退化为总时长口径
+    （与历史一致）；会发事件的工具只在真的沉默 600s 后被杀。历史并存的两个
+    魔法数（600s 总时长 + 180s 流式空闲）收成一个，长任务不再需要开特例。
+    顺带修掉一处**语义回退**：`agent_run` 过去经通道回传、逃过了总时长上限，
+    接上出口后被内联等待就会被误杀。
+
+- **新增一条不可回退的约束**：`EventSink::Direct` 的写入者必须**只**经
+  `TranscriptSink::apply` 落转写；任何绕过它的直接 `Transcript::apply` 调用都会
+  破坏「唯一写入点」。
+- **CLI 端到端成为本批的验收手段**（`--provider LMStudio`）：单条流式 / `--repl`
+  多轮 / 工具调用（两轮）/ 流式工具四场景。中止路径 CLI 无入口（CLI 只在收到
+  会话节点 `outcome == aborted` 时渲染，不主动发起），故由插件级端到端用例
+  `handle_abort_signals_registered_turn_and_converges` 逐条锁定对外契约。
+
+---
+
+## ADR-021: 两个执行接口**同形**——`ExecEnv` 具名化，拆信封收口到一处
+
+**状态**：已接受（第四批「签名统一」已落地）。**本 ADR 部分推翻 ADR-020 的决策 7**
+（见「被推翻的决定」）。
+
+**背景**：
+
+ADR-020 的三批（E/F/G）把**数据面**收干净了——通道换成出口/信号，工具不再把
+通道当事件流。但**签名（控制面）**没动，于是同一个「执行期」概念有两种到达方式：
+
+| | `Capability::execute`（改前） | `ModelProvider::execute_turn`（改前） |
+|---|---|---|
+| 出口/中止怎么到 | 藏在 `ctx` 的两个无名键里 | **显式参数** `sink` / `abort` |
+| 参数怎么到 | `ctx.payload::<Value>()?`（无类型，各工具自读） | 显式类型化参数 |
+| 返回值 | `PluginPayload`（4 变体，工具只用 `Data`） | `TurnOutput`（类型化） |
+| 信封 | `ctx` 把「路由信封」与「执行期上下文」混在一个键值袋 | 无 |
+
+代价是**每个工具都得记住「我该读哪些键」**：参数、出口、中止、工作目录四件事
+混在同一个袋子里，看不出哪两个是执行期必备、哪两个是可选上下文。改一处漏另一处
+是必然的（本批就抓到 `subagent.rs` 这个残留：签名换了、体内还回读 `ctx.payload()`）。
+
+**决策**：
+
+1. **新增具名类型 `ExecEnv { sink, abort }`**（`symbio_core::exec`），表示
+   「一次带中止的流式执行」的出/入两个方向。两个接口共用它，于是同形：
+
+   ```text
+   Capability::execute(args, env, ctx)      -> Result<Value, PluginError>
+   ModelProvider::execute_turn(inputs, env) -> Result<TurnOutput, PluginError>
+   ```
+
+2. **差别只剩 `ctx`，且这是真实差异**：工具是**被路由、被注册**的（要转发
+   `session/chat/send`、要解析 VDFS 挂载、要读会话身份），所以还需要信封；
+   模型执行不被路由，也就没有信封。不强行抹平。
+3. **`Capability::execute` 返回 `Result<Value, _>`**，不再经 `PluginPayload` 那层
+   多态载荷——工具从来只用 `Data` 一个变体，其余三个（`Empty` / `Native` /
+   `Session`）是**路由层**的形态，与工具无关。
+4. **`invoke_capability(cap, ctx)` 是唯一「拆信封」的地方**：`args = payload ??
+   Null`、`env = ExecEnv::from_request(ctx)`、结果装回 `PluginPayload`。
+   `DefaultToolVisitor::invoke`、`LocalPlugin::route` 与 `WebPlugin::route` 的工具
+   分支都必须经它；装饰器（`PrefixedCapability` / `SecureToolWrapper`）**不拆不装**，
+   `(args, env, ctx)` 原样透传。
+5. **`ExecEnv::from_request` 的缺席语义照搬 ADR-020**：没有 `EVENT_SINK` ⇒
+   `Null` 出口，没有 `ABORT_SIGNAL` ⇒ 永不中止。因此 `route()` 直连调用仍然
+   **自然静默**，「有没有出口」仍不需要第二条调用路径。
+
+**理由**：
+
+- **「统一」的判据是调用方能否只看签名就正确调用**。两个接口都变成「输入 + 环境」，
+  执行期环境从一个类型取，不再一处显式参数、一处键值袋。
+- **拆信封只该有一处**。多态载荷（`PluginPayload`）是路由层的形态，工具不该为它
+  付代价；把它收进一个 helper 后，「工具怎么写」与「信封长什么样」重新解耦。
+- **保留 `ctx` 是承认真实差异**，不是妥协。硬把 `ctx` 也塞进 `ExecEnv` 会把
+  「这次调用从哪条路径来」与「这次调用要怎么跑」重新混成一团——正是本 ADR 要修的毛病。
+
+**代价（逐条核实）**：
+
+- **24 个 `impl Capability` 换签名**：2 个用 `env`（`shell` / `agent_run` 会发增量），
+  22 个 `_env`（不发射；前缀即文档）。`ctx` 只在真正需要的工具里保留。
+- **签名从 1 参变 3 参**：对「只读一个参数」的工具是净增两行。这是**刻意的**——
+  执行期环境是接口的一部分，不该因为它今天没人用就从签名里消失（消失的表现是
+  下次有人要发增量时又去 `ctx.get(EVENT_SINK)`）。
+- **`#[allow(clippy::too_many_arguments)]` 的账**：`execute_turn` 参数 7 → 6，
+  `bound_provider.rs` 与 `model_provider.rs` 两处 allow 删除（阈值 7，已不触发）。
+
+**被推翻的决定**：
+
+- **ADR-020 决策 7「工具的执行期原语经 `ctx` 传递，不给 `Capability::execute` 加参数」
+  ——推翻。** 它当时要解决的问题是「不为『有没有出口』造第二条调用路径」，这个目标
+  **仍然成立且已由 `ExecEnv::from_request` 的缺席降级保住**；但它选的手段（把出口
+  藏在 `ctx` 里）代价是每个工具自己记键名，且与 `execute_turn` 的显式参数形态分裂。
+  本 ADR 用「显式参数 + 缺席降级」同时满足两个目标，因此推翻其手段、保留其目标。
+- ADR-020 决策 7 的其余内容（`EVENT_SINK` / `ABORT_SIGNAL` 两个 `SymbioKey`）**仍然
+  有效**：它们仍是信封承载出口/中止的键，只是读侧从「每个工具各读一次」收口到
+  `ExecEnv::from_request` 一处。
+
+**后果**：
+
+- `PluginPayload::new(&json!{...})` 这个包装在 24 个工具里逐处消失；
+  `confirm_prompt_payload` / `execute_skill` 的返回从 `InvokeResponse<PluginPayload>`
+  收成 `Result<Value, _>`。
+- **CLI 端到端**（`--provider LMStudio`）7 个场景：普通流式对话 / 交互模式 `cmd`
+  流式工具 / 交互模式 `ask_user`（编排层构造 `waiting_user_action`）/ 自动模式
+  `ask_user`（`tool_unavailable` 继续）/ 参数校验失败（`Err` 经 `invoke_capability`
+  收敛）/ `vdfs_read`（非流式工具）/ `agent_run`（子会话转播 + `RelayOutcome`）。
+- **已知的 CLI 局限（非本批引入）**：CLI 把 `risk_level` 硬编码为 `medium`，而
+  工具风险表默认全为 `medium`，故 `needs_approval` 分支**在 CLI 端不可达**；
+  该分支的收口语义由 `ask_user`（同为 `is_pending` 闭集）经 CLI 覆盖，加上
+  `tool_executor.test.rs` 的跨文件契约用例锁定。
+
+---
+
 > **维护原则**：每个架构决策必须记录在此，包括背景、决策、理由、后果。

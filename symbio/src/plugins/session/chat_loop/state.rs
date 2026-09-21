@@ -72,8 +72,11 @@ impl TurnRequest {
 /// 穿进 `close_turn`；现在收成一个结构体，主循环与阶段函数共享同一份状态。
 #[derive(Default)]
 pub(crate) struct TurnState {
-    /// 用户中止标志（`provider.execute_turn` 与工具执行共享同一份）
-    pub(crate) abort_flag: Arc<AtomicBool>,
+    /// 用户中止信号（`provider.execute_turn` 与工具执行共享同一份）。
+    ///
+    /// 收口前是一个裸 `Arc<AtomicBool>`，外部置位要靠「往执行期通道投 Abort 帧」；
+    /// 现在是 [`AbortSignal`]——置位与唤醒是同一个动作，不再需要帧与轮询。
+    pub(crate) abort: AbortSignal,
     /// 已完成的工具轮次（跨轮累加；软上限判定与 fade 判定都读它）
     pub(crate) tool_rounds: usize,
     /// 长度截断自动续写次数（跨轮累加）
@@ -402,7 +405,7 @@ impl ChatOrchestrator {
         root_id: &str,
         out: &TurnOutput,
         tools: &[ToolCallInfo],
-        channel: &PluginChannel,
+        sink: &EventSink,
     ) {
         if out.is_reasoning_only(tools.len()) {
             // reasoning-only：模型只产生了 reasoning，没有独立的文本回复。
@@ -421,7 +424,7 @@ impl ChatOrchestrator {
                 // 完整快照：与 build_assistant_messages 落库形态一致
                 //（id / 父子关系 / 内容 / 状态一次给全），消费端按 id 整条替换。
                 emit_update(
-                    channel,
+                    sink,
                     ChatMessage {
                         id: out.reasoning_child_id.clone(),
                         parent_id: Some(root_id.into()),
@@ -440,7 +443,7 @@ impl ChatOrchestrator {
                     out.response_text_child_id.clone()
                 };
                 emit_update(
-                    channel,
+                    sink,
                     ChatMessage {
                         id: resp_id,
                         parent_id: Some(root_id.into()),
@@ -462,7 +465,7 @@ impl ChatOrchestrator {
         // Mark reasoning child as completed
         if !out.reasoning.is_empty() && !out.reasoning_child_id.is_empty() {
             emit_update(
-                channel,
+                sink,
                 ChatMessage {
                     id: out.reasoning_child_id.clone(),
                     parent_id: Some(root_id.into()),
@@ -479,7 +482,7 @@ impl ChatOrchestrator {
         // Mark response text child as completed (exists if there was text content)
         if !out.text.is_empty() && !out.response_text_child_id.is_empty() {
             emit_update(
-                channel,
+                sink,
                 ChatMessage {
                     id: out.response_text_child_id.clone(),
                     parent_id: Some(root_id.into()),

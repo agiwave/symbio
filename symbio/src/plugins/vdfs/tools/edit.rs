@@ -5,11 +5,9 @@
 //! 拿到 `VdfsEditResponse` 后封装成原生 `file_edit` 的 `{success, message}` 形状。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{
-    Capability, CapabilityMeta, InvokeRequest, InvokeResponse, PluginPayload,
-};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// 编辑文件工具（框架原生 `Capability`）
@@ -43,8 +41,13 @@ impl Capability for EditTool {
         )
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let req: super::super::protocol::VdfsEditRequest = request_of(&ctx);
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
+        let req: super::super::protocol::VdfsEditRequest = request_of(&args);
         let data = self
             .provider
             .edit(&ctx, &req.path, &req.old_string, &req.new_string)
@@ -57,9 +60,9 @@ impl Capability for EditTool {
             _ => format!("已编辑 {}: 替换了 {} 处", req.path, data.replaced),
         };
 
-        Ok(PluginPayload::new(&json!({
+        Ok(json!({
             "success": true,
             "message": message,
-        })))
+        }))
     }
 }

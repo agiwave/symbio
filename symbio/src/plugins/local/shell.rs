@@ -12,17 +12,25 @@
 //!
 //! ## 流式输出
 //!
-//! 会话上下文携带 `RESULT_MSG_ID` + `TOOL_CALL_ID` 时走流式路径：
+//! 只有一条执行路径（不再有「流式 / 非流式」两条）：
 //! - `spawn` 子进程，stdout/stderr 各由一个 pump 任务按行读取；
-//! - 每行到达后向 `PluginChannel` 广播 `NodeOp::Upsert` 帧
+//! - 每行到达后向**执行期出口** `sink` 发 `NodeOp::Upsert`
 //!   （`role=tool` + `status=Streaming`，**累积全量快照**——对应协议里 `upsert`
 //!   的「按 id 整条替换」语义，消费端不做任何合并）；
-//! - 进程结束后发送哨兵帧 `{"content": <full>}`，由 tool_executor 捕获为
-//!   工具最终结果（对齐 run.rs 哨兵协议）；
-//! - 中止（cancel_token）/超时（SHELL_TIMEOUT_SECS）时 kill 子进程并收尸。
+//! - 进程结束后把完整输出作为 `Data` 返回，由 `tool_executor` 定稿为工具结果；
+//! - 中止（`AbortSignal`）/超时（`SHELL_TIMEOUT_SECS`）时 kill 子进程并收尸。
 //!
-//! 非流式回退（无 RESULT_MSG_ID 的直连调用，如 MCP 网关）：走 `cmd.output()`
-//! 等待式行为。
+//! ## 为什么这里曾经很复杂
+//!
+//! 出口曾是「返回值里的 `PluginPayload::Session` 通道」——于是执行体**必须**
+//! `spawn` 到后台：executor 要先拿到 `Session(rx)` 才会开始消费，而 `execute()`
+//! 不返回就没人消费；输出超过通道容量（64 帧）时 pump 阻塞在 `send`、`execute()`
+//! 永不返回 ⇒ **死锁**。出口改成 `ctx` 注入的 `EventSink` 后，`emit` 不会阻塞在
+//! 无界背压上，「先返回还是先执行」这个顺序问题连同通道容量、`cancel_token`
+//! 克隆、「send 失败 ⇒ 消费端已消失」标志一起消失。
+//!
+//! 出口缺席（`route()` 直连调用，如 MCP 网关）⇒ `EventSink::of` 给 `Null`：
+//! 同一份代码照跑，只是不发增量。
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::system::{decode_output, validate_params};
 use crate::symbio_core::{
@@ -30,8 +38,8 @@ use crate::symbio_core::{
         ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
     },
     schemas::session::session_chat_response,
-    Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse, PluginChannel,
-    PluginError, PluginFrame, PluginPayload,
+    AbortSignal, Capability, CapabilityMeta, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt,
+    PluginError,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -39,19 +47,50 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 const SHELL_TIMEOUT_SECS: u64 = 3600;
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
 /// 流式快照帧的节流间隔：避免高频输出（如 ping/大文件 cat）打爆通道与前端
 const STREAM_EMIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(120);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
     pub exit_code: Option<i32>,
     pub output: String,
     pub risk_level: String,
+}
+
+/// 增量快照的**节点身份**（编排层提供）。
+///
+/// 两个 id 必须同行：`msg_id` 是编排层为本次调用预留的结果节点（占位节点也是它建的），
+/// `tool_call_id` 是父 ToolCall。工具自己猜 id 正是历史上「同一逻辑节点两个 id」的成因，
+/// 因此这里只接受编排层给的一对值。
+///
+/// **缺席 = 直连调用**（`route()`，如 MCP 网关）：没有占位节点，也就不发增量快照——
+/// 与 [`EventSink::Null`] 是同一件事的两个面（都由「编排层是否在场」决定）。
+#[derive(Debug, Clone)]
+struct SnapshotTarget {
+    msg_id: String,
+    tool_call_id: String,
+}
+
+impl SnapshotTarget {
+    /// 从 ctx 读；任一 id 缺失 ⇒ `None`。
+    fn from_ctx(ctx: &dyn InvokeRequest) -> Option<Self> {
+        let msg_id = ctx
+            .get(crate::symbio_core::RESULT_MSG_ID)
+            .unwrap_or_default();
+        let tool_call_id = ctx
+            .get(crate::symbio_core::TOOL_CALL_ID)
+            .unwrap_or_default();
+        if msg_id.is_empty() || tool_call_id.is_empty() {
+            return None;
+        }
+        Some(Self {
+            msg_id,
+            tool_call_id,
+        })
+    }
 }
 
 /// 获取当前操作系统信息
@@ -165,87 +204,25 @@ impl ShellTool {
         cmd
     }
 
-    /// 非流式执行（等待式，供无会话上下文的直连调用回退使用）
-    async fn execute_inner(
-        &self,
-        args: Value,
-        workdir: &str,
-        threshold: RiskLevel,
-    ) -> Result<Value, PluginError> {
-        let (command, risk) = self.prepare(&args, threshold)?;
-
-        // 获取工作区目录
-        let workspace_dir = std::path::PathBuf::from(shellexpand::tilde(workdir).to_string());
-
-        let mut cmd = Self::build_command(&command);
-        cmd.current_dir(&*workspace_dir);
-
-        // Windows 不清理环境变量（需要 PATH 等）
-        #[cfg(not(target_os = "windows"))]
-        {
-            const SAFE_ENV_VARS: &[&str] =
-                &["PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TERM"];
-            cmd.env_clear();
-            for var in SAFE_ENV_VARS {
-                if let Ok(val) = std::env::var(var) {
-                    cmd.env(var, val);
-                }
-            }
-        }
-
-        // 执行命令（带超时）
-        let result =
-            tokio::time::timeout(Duration::from_secs(SHELL_TIMEOUT_SECS), cmd.output()).await;
-
-        match result {
-            Ok(Ok(output)) => {
-                let mut stdout = decode_output(&output.stdout);
-                let stderr = decode_output(&output.stderr);
-
-                // 截断输出（必须落在字符边界：命令输出常含中文，
-                // String::truncate 直接切在多字节字符内部会 panic）
-                if stdout.len() > MAX_OUTPUT_BYTES {
-                    stdout.truncate(crate::symbio_core::floor_char_boundary(
-                        &stdout,
-                        MAX_OUTPUT_BYTES,
-                    ));
-                    stdout.push_str("\n... [输出已截断]");
-                }
-
-                let full_output = compose_output(&stdout, &stderr);
-
-                Ok(serde_json::to_value(Response {
-                    exit_code: output.status.code(),
-                    output: full_output,
-                    risk_level: risk_level_str(&risk),
-                })
-                .unwrap_or_default())
-            }
-            Ok(Err(e)) => Err(PluginError::InternalError(format!("命令执行失败: {e}"))),
-            Err(_) => Err(PluginError::InternalError(format!(
-                "命令超时 ({SHELL_TIMEOUT_SECS}秒)"
-            ))),
-        }
-    }
-
-    /// 流式执行：spawn 子进程并按行广播增量快照帧，结束时发送哨兵帧。
+    /// 执行命令：spawn 子进程、按行广播增量快照、返回完整输出。
     ///
-    /// - `tx`：会话通道发送侧（executor 从配对的 rx 消费）
-    /// - `result_msg_id`：结果消息 id（与 executor 预广播的占位节点同 id，前端按 id 合并）
-    /// - `tool_call_id`：父 ToolCall 节点 id（流式帧锚定其下）
-    /// - `cancel`：中止信号（tool_executor abort 时 cancel，pump/主循环随之退出）
+    /// - `sink`：执行期出口（缺席时是 `Null`，同一份代码不发增量）
+    /// - `abort`：中止信号；`abort()` 置位即 kill 子进程
+    /// - `target`：增量快照的节点身份（编排层提供，可能为空——直连调用没有占位节点）
+    ///
+    /// 返回 [`Response`]（`exit_code` / `output` / `risk_level`），由
+    /// `execute_tool_async` 经 `extract_result` 取 `output` 回传 LLM。
     #[allow(clippy::too_many_arguments)]
     async fn execute_streaming(
         &self,
-        args: Value,
+        args: &Value,
         workdir: &str,
         threshold: RiskLevel,
-        tx: mpsc::Sender<PluginFrame>,
-        result_msg_id: String,
-        tool_call_id: String,
-        cancel: CancellationToken,
-    ) -> Result<(), PluginError> {
-        let (command, _risk) = self.prepare(&args, threshold)?;
+        sink: &EventSink,
+        abort: &AbortSignal,
+        target: Option<&SnapshotTarget>,
+    ) -> Result<Response, PluginError> {
+        let (command, risk) = self.prepare(args, threshold)?;
 
         let workspace_dir = std::path::PathBuf::from(shellexpand::tilde(workdir).to_string());
 
@@ -278,9 +255,6 @@ impl ShellTool {
         // 共享累积缓冲（stdout 在前，stderr 以 [stderr] 段缀尾——与非流式输出格式一致）
         let stdout_acc: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
         let stderr_acc: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
-        // 消费端消失标志：executor abort / 提前 drop rx 时 pump 的 send 会失败，
-        // 据此在主循环 kill 子进程，避免孤儿进程继续运行。
-        let consumer_gone = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let mut pump_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
         if let Some(out) = stdout {
@@ -289,11 +263,9 @@ impl ShellTool {
                 stdout_acc.clone(),
                 stderr_acc.clone(),
                 false,
-                tx.clone(),
-                result_msg_id.clone(),
-                tool_call_id.clone(),
-                cancel.clone(),
-                consumer_gone.clone(),
+                sink.clone(),
+                abort.clone(),
+                target.cloned(),
             ));
         }
         if let Some(err) = stderr {
@@ -302,11 +274,9 @@ impl ShellTool {
                 stderr_acc.clone(),
                 stdout_acc.clone(),
                 true,
-                tx.clone(),
-                result_msg_id.clone(),
-                tool_call_id.clone(),
-                cancel.clone(),
-                consumer_gone.clone(),
+                sink.clone(),
+                abort.clone(),
+                target.cloned(),
             ));
         }
 
@@ -321,13 +291,9 @@ impl ShellTool {
             _ = tokio::time::sleep(Duration::from_secs(SHELL_TIMEOUT_SECS)) => {
                 let _ = child.kill().await;
             }
-            _ = cancel.cancelled() => {
+            _ = abort.cancelled() => {
                 let _ = child.kill().await;
             }
-        }
-        // 消费端已消失（abort/提前断开）→ kill 子进程，避免孤儿进程
-        if consumer_gone.load(std::sync::atomic::Ordering::Relaxed) {
-            let _ = child.kill().await;
         }
         // 收尾：确保 pump 全部退出 + 子进程被回收（kill 后管道关闭，pump 很快 EOF）。
         // 注意：select 分支可能已消费部分 JoinHandle（await 返回 Ready），
@@ -340,7 +306,8 @@ impl ShellTool {
         }
         let status = child.wait().await;
 
-        // 最终哨兵帧：tool_executor 捕获 {"content": ...} 作为工具结果
+        // 完整输出即**返回值**——不再需要"哨兵帧"：执行期没有帧面可言
+        //（出口只承载增量快照，终态由 `tool_executor` 定稿）。
         let stdout_text = stdout_acc.lock().unwrap().clone();
         let stderr_text = stderr_acc.lock().unwrap().clone();
         let mut full = compose_output(&stdout_text, &stderr_text);
@@ -361,28 +328,29 @@ impl ShellTool {
         };
         full.push_str(&exit_note);
 
-        let _ = tx.send(PluginFrame::Data(json!({ "content": full }))).await;
-        // 关闭发送侧 → executor 的 recv() 返回 None → 流式循环结束
-        drop(tx);
-        Ok(())
+        Ok(Response {
+            exit_code: status.as_ref().ok().and_then(|s| s.code()),
+            output: full,
+            risk_level: risk_level_str(&risk),
+        })
     }
 }
 
-/// 按行读取管道，累积到共享缓冲并节流广播累积快照帧。
+/// 按行读取管道，累积到共享缓冲并节流广播累积快照。
 ///
 /// `own`/`other`：本管道/对侧管道的累积缓冲（is_stderr=false 时 own=stdout）。
-/// `consumer_gone`：send 失败（消费端 abort/断开）时置位并退出。
+/// `sink`：执行期出口；`Null` 时同一份代码只是不发增量（`emit` 是 no-op），
+/// 因此这里**没有**「消费端是否还在」的判断——没有可关闭的通道，也就没有
+/// 「send 失败」这种信号。
 #[allow(clippy::too_many_arguments)]
 fn pump_lines<R>(
     reader: R,
     own: Arc<Mutex<String>>,
     other: Arc<Mutex<String>>,
     is_stderr: bool,
-    tx: mpsc::Sender<PluginFrame>,
-    msg_id: String,
-    tool_call_id: String,
-    cancel: CancellationToken,
-    consumer_gone: Arc<std::sync::atomic::AtomicBool>,
+    sink: EventSink,
+    abort: AbortSignal,
+    target: Option<SnapshotTarget>,
 ) -> tokio::task::JoinHandle<()>
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -395,7 +363,7 @@ where
             buf.clear();
             let n = tokio::select! {
                 biased;
-                _ = cancel.cancelled() => break,
+                _ = abort.cancelled() => break,
                 r = reader.read_until(b'\n', &mut buf) => r,
             };
             match n {
@@ -417,6 +385,9 @@ where
                     // 节流广播累积快照（全量内容，前端 role=tool 全量替换）
                     if last_emit.elapsed() >= STREAM_EMIT_INTERVAL {
                         last_emit = tokio::time::Instant::now();
+                        let Some(target) = target.as_ref() else {
+                            continue;
+                        };
                         let snapshot = {
                             let (a, b) = if is_stderr {
                                 (other.lock().unwrap(), own.lock().unwrap())
@@ -425,28 +396,18 @@ where
                             };
                             compose_output(&a, &b)
                         };
-                        let node = ChatMessage {
-                            id: msg_id.clone(),
-                            parent_id: Some(tool_call_id.clone()),
-                            role: Some(MessageRole::Tool),
-                            msg_type: Some(MessageType::Text),
-                            content: Some(MessageContent::Text(snapshot)),
-                            status: Some(MessageStatus::Streaming),
-                            ..Default::default()
-                        };
-                        let sent = tx
-                            .send(PluginFrame::Data(
-                                serde_json::to_value(session_chat_response::NodeOp::Upsert {
-                                    message: Box::new(node),
-                                })
-                                .unwrap_or_default(),
-                            ))
-                            .await;
-                        if sent.is_err() {
-                            // 消费端已消失（executor abort / rx 提前 drop）
-                            consumer_gone.store(true, std::sync::atomic::Ordering::Relaxed);
-                            break;
-                        }
+                        sink.emit(session_chat_response::NodeOp::Upsert {
+                            message: Box::new(ChatMessage {
+                                id: target.msg_id.clone(),
+                                parent_id: Some(target.tool_call_id.clone()),
+                                role: Some(MessageRole::Tool),
+                                msg_type: Some(MessageType::Text),
+                                content: Some(MessageContent::Text(snapshot)),
+                                status: Some(MessageStatus::Streaming),
+                                ..Default::default()
+                            }),
+                        })
+                        .await;
                     }
                 }
             }
@@ -501,8 +462,12 @@ impl Capability for ShellTool {
         }
     }
 
-    async fn execute(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
-        let args: Value = ctx.payload()?;
+    async fn execute(
+        &self,
+        args: Value,
+        _env: &ExecEnv,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> Result<Value, PluginError> {
         let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
         })?;
@@ -521,184 +486,27 @@ impl Capability for ShellTool {
             })
             .unwrap_or(RiskLevel::Medium);
 
-        // 会话上下文携带 RESULT_MSG_ID + TOOL_CALL_ID → 流式路径。
-        // 注意：executor 是先拿到 Session(rx) 返回值后才开始消费通道，
-        // 因此执行体必须 spawn 到后台，否则输出帧超过通道容量（64）时
-        // pump 阻塞在 send、execute() 不返回、executor 不消费 → 死锁。
-        let result_msg_id = ctx
-            .get(crate::symbio_core::RESULT_MSG_ID)
-            .unwrap_or_default();
-        let tool_call_id = ctx
-            .get(crate::symbio_core::TOOL_CALL_ID)
-            .unwrap_or_default();
-        if !result_msg_id.is_empty() && !tool_call_id.is_empty() {
-            let (tx_side, rx_side) = PluginChannel::pair(64);
-            let cancel = rx_side.cancel_token.clone();
-            let this = self.clone();
-            let workdir = workdir_str.clone();
-            tokio::spawn(async move {
-                if let Err(e) = this
-                    .execute_streaming(
-                        args,
-                        &workdir,
-                        threshold,
-                        tx_side.tx.clone(),
-                        result_msg_id,
-                        tool_call_id,
-                        cancel,
-                    )
-                    .await
-                {
-                    // 失败也发哨兵帧，让 executor 的 full 收敛为错误信息
-                    //（否则 recv() 直接返回 None，工具结果为空串）
-                    let _ = tx_side
-                        .tx
-                        .send(PluginFrame::Data(json!({
-                            "content": format!("Error: {e}")
-                        })))
-                        .await;
-                }
-                // tx drop → executor 的 recv() 返回 None → 流式循环结束
-            });
-            // cancel_token 与 rx_side 共享：executor 侧 abort 时可 cancel pump
-            return Ok(PluginPayload::Session(rx_side));
-        }
+        // 执行期双原语 + 快照身份，全部由编排层经 ctx 注入；**缺席即降级**：
+        // `EventSink::Null`（不发增量）、永不中止的信号、`None` 快照身份。
+        // 于是「会话里跑」与「被 route() 直连调用」共用同一条代码路径——
+        // 不再有第二条分支、不再需要后台 spawn（没有通道容量可阻塞）。
+        let sink = EventSink::of(&*ctx);
+        let abort = AbortSignal::of(&*ctx);
+        let target = SnapshotTarget::from_ctx(&*ctx);
 
-        let result = self.execute_inner(args, &workdir_str, threshold).await?;
-        Ok(PluginPayload::new(&result))
+        let resp = self
+            .execute_streaming(
+                &args,
+                &workdir_str,
+                threshold,
+                &sink,
+                &abort,
+                target.as_ref(),
+            )
+            .await?;
+        Ok(serde_json::to_value(&resp)?)
     }
 }
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::symbio_core::SimpleRequest;
-    use std::sync::Arc as StdArc;
-
-    /// 构造带流式上下文（RESULT_MSG_ID/TOOL_CALL_ID/WORKDIR）的测试请求
-    fn make_streaming_ctx(command: &str) -> StdArc<dyn InvokeRequest> {
-        let req = SimpleRequest::new(None, None);
-        req.set(crate::symbio_core::WORKDIR, ".".to_string());
-        req.set(crate::symbio_core::RESULT_MSG_ID, "res-1".to_string());
-        req.set(crate::symbio_core::TOOL_CALL_ID, "tc-1".to_string());
-        // payload 以原生 JSON 存储：typed PAYLOAD 键带 deprecated 标记，用 set_raw 规避告警
-        req.set_raw(
-            "payload",
-            StdArc::new(json!({ "command": command, "approved": true })),
-        );
-        Arc::new(req)
-    }
-
-    /// 从通道消费直到哨兵帧，返回 (流式快照帧列表, 最终全文)
-    async fn drain_channel(rx: &mut mpsc::Receiver<PluginFrame>) -> (Vec<String>, String) {
-        let mut snapshots = Vec::new();
-        let mut full = String::new();
-        while let Some(frame) = rx.recv().await {
-            match frame {
-                PluginFrame::Data(d) => {
-                    if let Ok(session_chat_response::NodeOp::Upsert { message }) =
-                        serde_json::from_value::<session_chat_response::NodeOp>(d.clone())
-                    {
-                        if let Some(MessageContent::Text(t)) = message.content {
-                            snapshots.push(t);
-                        }
-                    } else if let Some(text) = d.get("content").and_then(|v| v.as_str()) {
-                        full = text.to_string();
-                    }
-                }
-                PluginFrame::Error(e, _) => panic!("unexpected error frame: {e}"),
-            }
-        }
-        (snapshots, full)
-    }
-
-    #[tokio::test]
-    async fn streaming_echo_emits_snapshots_and_sentinel() {
-        let tool = ShellTool::new(Arc::new(SecurityPolicy::default()));
-        let ctx = make_streaming_ctx("echo hello_stream");
-
-        let payload = tool.execute(ctx).await.unwrap();
-        let PluginPayload::Session(mut chan) = payload else {
-            panic!("expected Session payload for streaming path");
-        };
-
-        let (snapshots, full) = drain_channel(&mut chan.rx).await;
-        // 哨兵帧必须携带完整输出
-        assert!(
-            full.contains("hello_stream"),
-            "sentinel missing output: {full}"
-        );
-        assert!(
-            full.contains("[exit code: 0]"),
-            "sentinel missing exit code: {full}"
-        );
-        // 至少一个流式快照（echo 输出一行，节流间隔 120ms 内可能合并，但 ≥0 帧均合法；
-        // 关键约束是哨兵帧存在且全量）
-        let _ = snapshots;
-    }
-
-    #[tokio::test]
-    async fn streaming_missing_command_arg_returns_error_sentinel() {
-        let tool = ShellTool::new(Arc::new(SecurityPolicy::default()));
-        let req = SimpleRequest::new(None, None);
-        req.set(crate::symbio_core::WORKDIR, ".".to_string());
-        req.set(crate::symbio_core::RESULT_MSG_ID, "res-1".to_string());
-        req.set(crate::symbio_core::TOOL_CALL_ID, "tc-1".to_string());
-        req.set_raw("payload", StdArc::new(json!({ "command": "" })));
-
-        let payload = tool.execute(Arc::new(req)).await.unwrap();
-        let PluginPayload::Session(mut chan) = payload else {
-            panic!("expected Session payload for streaming path");
-        };
-
-        let (snapshots, full) = drain_channel(&mut chan.rx).await;
-        assert!(snapshots.is_empty(), "no snapshot expected on error");
-        assert!(
-            full.starts_with("Error:"),
-            "error sentinel expected, got: {full}"
-        );
-    }
-
-    #[tokio::test]
-    async fn non_streaming_fallback_without_result_msg_id() {
-        let tool = ShellTool::new(Arc::new(SecurityPolicy::default()));
-        let req = SimpleRequest::new(None, None);
-        req.set(crate::symbio_core::WORKDIR, ".".to_string());
-        req.set_raw(
-            "payload",
-            StdArc::new(json!({ "command": "echo hello_fallback", "approved": true })),
-        );
-
-        let payload = tool.execute(Arc::new(req)).await.unwrap();
-        let PluginPayload::Data(v) = payload else {
-            panic!("expected Data payload for non-streaming path");
-        };
-        let v = v.serialize().unwrap();
-        assert!(v["output"].as_str().unwrap().contains("hello_fallback"));
-        assert_eq!(v["exit_code"].as_i64(), Some(0));
-    }
-
-    #[tokio::test]
-    async fn streaming_many_lines_do_not_deadlock() {
-        // 回归：execute() 必须先返回 Session（spawn 后台执行），
-        // 否则输出帧超过通道容量（64）时会死锁（pump 阻塞在 send）。
-        let tool = ShellTool::new(Arc::new(SecurityPolicy::default()));
-        let ctx = make_streaming_ctx("echo line1 & echo line2 & echo line3 & echo line4");
-
-        let payload = tool.execute(ctx).await.unwrap();
-        let PluginPayload::Session(mut chan) = payload else {
-            panic!("expected Session payload");
-        };
-
-        let (snapshots, full) = drain_channel(&mut chan.rx).await;
-        assert!(
-            full.contains("line1"),
-            "sentinel must contain all lines: {full}"
-        );
-        assert!(
-            full.contains("line4"),
-            "sentinel must contain all lines: {full}"
-        );
-        let _ = snapshots;
-    }
-}
+#[path = "shell.test.rs"]
+mod tests;

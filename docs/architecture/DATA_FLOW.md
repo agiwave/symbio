@@ -48,10 +48,17 @@ sequenceDiagram
 | 1 | 入口 | `symbio/src/plugins/session/plugin.rs` | **会话编排权归 session**（见 `chat_pipeline.rs` 头注释） |
 | 2 | 能力收集 | `symbio/src/plugins/session/chat_pipeline.rs` | session 调 `collect_capabilities` → `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播收工具；**agent 仅当 `ctx[AGENT_ID]` 存在时贡献**（不选 agent 的会话照常运行）；收集期错误通道（`report_error` / `take_errors`）在 `symbio_core/capability_error.rs` |
 | 3 | 默认能力 | `symbio_core/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
-| 4 | 模型调用 | `symbio/src/plugins/model/plugin.rs` | 4 协议适配：OpenAI / Anthropic / Gemini / Ollama |
-| 5 | 工具循环 | `model` 内 tool loop | 工具实现方：`local` / `web` / `telegram` 等 |
+| 4 | 模型调用（单轮） | `symbio/src/plugins/model/bound_provider.rs` | `execute_turn` = **一次** LLM 调用：4 协议适配（OpenAI / Anthropic / Gemini / Ollama）+ SSE 解析 + 事件出口。`model` **不做轮次循环** |
+| 5 | 工具循环（轮次） | `symbio/src/plugins/session/chat_loop.rs`（`close_turn` → `process_tool_calls_async`） | 「LLM → 工具 → LLM」的循环归 **session**（`gate_turn` / `close_turn` 判定下一步）。工具实现方：`local` / `web` / `vdfs` / `mcp` / `skill` / `telegram` / `agent` 等 |
 | 6 | 前端显示 | `symbio_core/event_bus.rs` + `plugins/event_bus/` → `kind = "vdfs"` 变更 | **显示只由节点状态驱动**：会话运行态是会话节点的属性（`status` + `attributes.outcome`/`.error`），转写是消息节点的列表——两者都经 VDFS 变更带**节点视图/增量**下发，前端按**地址**分派（`sessionRouteOf`），不按事件类型、不依赖到达顺序。见 [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) |
 | 7 | 会话持久化 | `plugins/session/`（存储层） | 帧格式见 [PROTOCOLS.md]「AI 会话流式规范」 |
+
+> **执行期的两个原语**（[ADR-020](../DECISIONS.md#adr-020-执行期与传输层分离eventsink出-abortsignal入取代-pluginchannel-的双职责)）：
+> 执行层（LLM 单轮 / 工具调用）与宿主层之间**不走 `PluginChannel`**——出方向是
+> `EventSink`（`Direct` 进程内直连转写唯一写入点 / `Null` 静默），入方向是
+> `AbortSignal`（`abort()` 置位即唤醒，无帧、无轮询）。`PluginChannel` 只承担
+> **跨进程传输**（前端实时面 `PluginPayload::Session`）。排障时：**帧通道里没有
+> 中止帧**，中止只有一个入口 `AbortSignal::abort()`。
 
 **排障口诀**：不出字 → 查 #4 协议适配与 provider 配置；工具不触发 → 查 #2 收集结果与 #5 循环；**状态不刷新** → 查 #6：会话节点 `updated` 是否带 `node` 载荷（不变量），以及前端订阅作用域是否覆盖该地址；状态不动而消息正常 → 多半是 `emit_session_state` 漏调（它是运行态的**唯一出口**）。
 
