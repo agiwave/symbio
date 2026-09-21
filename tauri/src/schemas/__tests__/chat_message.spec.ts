@@ -70,7 +70,7 @@ describe('messageTextOf：内容形状', () => {
 /**
  * `isMessageStatus`：集合判定**派生自词表**，不是另抄一份列表。
  *
- * 它是 `services/vdfsTranscriptSync` 透传节点状态词的唯一判据。这里锁两件事：
+ * 它是 `services/transcriptStream` 透传节点状态词的唯一判据。这里锁两件事：
  * 词表里每个取值都判真（派生关系没写反），未知词与非字符串一律判假
  * （判不住就会让未知词以"有状态"落进 store，或被兜底成 `completed` 而谎报成功）。
  */

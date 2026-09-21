@@ -2,7 +2,7 @@
  * 会话转写规则 —— 纯函数单测（node 环境）
  *
  * 这几条规则原先只能通过「造一个 Pinia store + 喂一串 patch」间接验证，
- * 而它们恰恰是**出错代价最高**的部分：合并判错 → 内容重复拼接或倒退；
+ * 而它们恰恰是**出错代价最高**的部分：增量落点判错 → 内容重复拼接或倒退；
  * 水合判错 → 在途节点消失（lost update）或幽灵节点复活；
  * 截断判错 → 列表尾部残留后端已不存在的节点，且没有任何机制会纠正它。
  */
@@ -10,13 +10,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   PREVIEW_MAX,
+  appendContent,
   hydrateTranscript,
   isInProgressMessage,
   isRootTurn,
-  mergeMessagePatch,
   previewOf,
   sortTranscript,
-  stuckFailurePlanOf,
   truncateIdsFrom,
 } from '../sessionTranscript'
 import type { ChatMessage } from '@/schemas/chat_message'
@@ -77,57 +76,38 @@ describe('previewOf：缩略卡预览', () => {
   })
 })
 
-describe('mergeMessagePatch：流式合并语义', () => {
-  it('正文 / 思考的字符串内容**追加**（增量 token）', () => {
-    const merged = mergeMessagePatch(msg({ id: 'x', content: '你好' }), { id: 'x', content: '世界' })
-    expect(merged.content).toBe('你好世界')
+describe('appendContent：`append` 操作的唯一内容落点', () => {
+  it('把增量拼到正文尾部', () => {
+    const out = appendContent(msg({ id: 'x', content: '你好' }), '世界')
+    expect(out.content).toBe('你好世界')
   })
 
-  it('tool_call 与 role=tool 的内容**整条替换**（流式帧是全量重发）', () => {
-    const tc = mergeMessagePatch(
-      msg({ id: 'tc', type: 'tool_call', content: '{"a"' }),
-      { id: 'tc', content: '{"a":1}' },
-    )
-    expect(tc.content).toBe('{"a":1}')
-
-    const tool = mergeMessagePatch(
-      msg({ id: 'r', role: 'tool', content: '{"partial"' }),
-      { id: 'r', content: '{"full":true}' },
-    )
-    expect(tool.content).toBe('{"full":true}')
+  it('工具**参数**帧同样追加（参数是窄增量，不是全量重发）', () => {
+    const out = appendContent(msg({ id: 'tc', type: 'tool_call', content: '{"a' }), '":1}')
+    expect(out.content).toBe('{"a":1}')
   })
 
-  it('补丁不带 content 键时**不清空**已有内容（终态状态补发场景）', () => {
-    const merged = mergeMessagePatch(msg({ id: 'x', content: '参数' }), {
-      id: 'x',
-      status: 'completed',
-    })
-    expect(merged.content).toBe('参数')
-    expect(merged.status).toBe('completed')
+  it('role=tool 的**工具响应**同样追加（响应被覆盖成空的回归）', () => {
+    // 回归：`mergeMessagePatch` 曾把 `role=tool` 判为"流式帧全量重发"因而整条替换。
+    // 后端透传子会话的 `Append`（逐片响应），前端于是只剩最后一片——
+    // 表现为"工具卡片有请求、响应是空的"。语义只由协议操作给出，不看角色。
+    const out = appendContent(msg({ id: 'r', role: 'tool', content: '共有 ' }), '10 个文件')
+    expect(out.content).toBe('共有 10 个文件')
   })
 
-  it('显式传 `content: undefined` 会清空——这是对象展开的语义，调用方别这么写', () => {
-    // `{ ...existing, ...patch }` 对**存在但为 undefined** 的键会覆盖成 undefined，
-    // 随后的 `patch.content != null` 判定救不回来。这不是本函数的额外规则，
-    // 而是 JS 展开语义；把边界钉在这里，免得下次有人以为"传 undefined 等于不传"。
-    // 正确做法：构造补丁时**省略**该键（如上一条用例）。
-    const cleared = mergeMessagePatch(msg({ id: 'x', content: '参数' }), {
-      id: 'x',
-      content: undefined,
-    })
-    expect(cleared.content).toBeUndefined()
+  it('多模态正文经契约层取值（不静默丢成空串）', () => {
+    const out = appendContent(msg({ id: 'x', content: [{ type: 'text', text: '看这张' }] }), '图')
+    expect(out.content).toBe('看这张图')
   })
 
-  it('meta 浅合并：只覆盖补丁带来的键，保留其余', () => {
-    const merged = mergeMessagePatch(
-      msg({ id: 'x', meta: { a: 1, b: 2 } }),
-      { id: 'x', meta: { b: 9, c: 3 } },
-    )
-    expect(merged.meta).toEqual({ a: 1, b: 9, c: 3 })
+  it('不改动入参（返回新对象）', () => {
+    const before = msg({ id: 'x', content: 'a' })
+    appendContent(before, 'b')
+    expect(before.content).toBe('a')
   })
 })
 
-describe('hydrateTranscript：快照与本地在途节点的合并', () => {
+describe('hydrateTranscript：快照即权威，整表装载', () => {
   it('快照里的节点整条替换（含状态与 seq）', () => {
     const { map } = hydrateTranscript(
       [msg({ id: 'a', content: '历史', seq: 5, status: 'completed' })],
@@ -138,16 +118,13 @@ describe('hydrateTranscript：快照与本地在途节点的合并', () => {
     expect(map.a.seq).toBe(5)
   })
 
-  it('本地在途节点保留并**重新分配 seq**（本地游标可能小于快照最大 seq）', () => {
-    const { map, lastSeq } = hydrateTranscript(
+  it('本地副本不参与装载（权威在存储；在途节点由增量通道继续收敛）', () => {
+    const { map } = hydrateTranscript(
       [msg({ id: 'a', seq: 100 })],
       { b: msg({ id: 'b', status: 'streaming', content: '在途' }) },
     )
-    expect(map.b).toBeDefined()
-    expect(map.b.content).toBe('在途')
-    // 关键：不能沿用本地的小游标（否则在途节点会排到历史之前）
-    expect(map.b.seq).toBeGreaterThan(100)
-    expect(lastSeq).toBe(map.b.seq)
+    expect(map.b).toBeUndefined()
+    expect(map.a.seq).toBe(100)
   })
 
   it('本地终态且不在快照里的节点被丢弃（幽灵节点不复活）', () => {
@@ -156,7 +133,7 @@ describe('hydrateTranscript：快照与本地在途节点的合并', () => {
       pending: msg({ id: 'pending', status: 'streaming', content: '在途' }),
     })
     expect(map.ghost).toBeUndefined()
-    expect(map.pending).toBeDefined()
+    expect(map.pending).toBeUndefined()
   })
 
   it('缺 seq 的旧数据按数组顺序排在已有 seq 之后', () => {
@@ -204,7 +181,7 @@ describe('truncateIdsFrom：「目标 + 其后全部」', () => {
   })
 })
 
-describe('看门狗判据', () => {
+describe('在途节点判据', () => {
   it('根级 Turn = type=turn 且无父节点（唯一允许挂 error 的节点）', () => {
     expect(isRootTurn({ type: 'turn' })).toBe(true)
     expect(isRootTurn({ type: 'turn', parent_id: 'p' })).toBe(false)
@@ -218,46 +195,5 @@ describe('看门狗判据', () => {
     expect(isInProgressMessage({ status: 'failed' })).toBe(false)
     expect(isInProgressMessage({ status: 'aborted' })).toBe(false)
     expect(isInProgressMessage({})).toBe(false)
-  })
-})
-
-describe('看门狗定稿计划（stuckFailurePlanOf）', () => {
-  it('错误只挂在根级 Turn 上；半截子节点定稿为 completed 且不挂 error', () => {
-    const plan = stuckFailurePlanOf(
-      [
-        msg({ id: 'root', type: 'turn', status: 'streaming' }),
-        msg({ id: 'text', status: 'streaming' }),
-        msg({ id: 'tool', type: 'tool_call', status: 'streaming' }),
-      ],
-      '连接中断',
-    )
-
-    expect(plan.failed.map((m) => m.id)).toEqual(['root'])
-    expect(plan.failed[0].error).toBe('连接中断')
-    expect(plan.completed.map((m) => m.id)).toEqual(['text', 'tool'])
-    // 每条子节点都不挂 error —— 否则同一条错误会刷到每条半截消息上（429 刷屏的根因）
-    expect(plan.completed.every((m) => !m.error)).toBe(true)
-    expect(plan.rootTurnFailed).toBe(true)
-  })
-
-  it('子节点里的 Turn（有父节点）不算根，错误不会落到它身上', () => {
-    const plan = stuckFailurePlanOf(
-      [msg({ id: 'sub', type: 'turn', parent_id: 'root', status: 'streaming' })],
-      '连接中断',
-    )
-    expect(plan.failed).toHaveLength(0)
-    expect(plan.completed.map((m) => m.id)).toEqual(['sub'])
-    // 没有根级 Turn ⇒ 调用方降级为「会话级错误」
-    expect(plan.rootTurnFailed).toBe(false)
-  })
-
-  it('已终态的消息不进计划（只收尾仍在进行中的）', () => {
-    const plan = stuckFailurePlanOf(
-      [msg({ id: 'done', status: 'completed' }), msg({ id: 'old', status: 'failed' })],
-      '连接中断',
-    )
-    expect(plan.empty).toBe(true)
-    expect(plan.failed).toHaveLength(0)
-    expect(plan.completed).toHaveLength(0)
   })
 })

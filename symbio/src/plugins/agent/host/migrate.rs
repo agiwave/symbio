@@ -7,18 +7,31 @@
 //! | `prompts/<n>.md` | 根 `AGENTS.md` | 按 `priority` 升序拼接，剥离 frontmatter |
 //! | `skills/<n>/` | `skill/<n>/` | 整个目录搬过去（v2 由 `skill` 插件实例承载） |
 //! | `mcps/<n>.yaml` | `mcp/<n>/server.json` | 转成 `mcp` 插件的持久化格式 |
-//! | `manifest.yaml` | `manifest.yaml` | 只把 `spec` 改成 `agent-dir/v2` |
+//! | `manifest.yaml` | `manifest.yaml` | `spec` **与** `requires.spec` 一起升到 v2 |
 //! | 其它（`assets/` `tools/` `tests/`） | 原样保留 | v2 不规定，宿主也不解释 |
 //!
 //! ## 幂等
 //!
-//! 每一步都**先检查目标是否已存在**，存在即跳过。因此可以重复执行，也可以对
-//! 已经半迁移的目录补完。已不是 v1 的目录直接返回 `Ok(false)`（什么都不做）。
+//! 每一步都**先检查目标是否已存在**，存在即跳过，因此对同一目录重复执行是安全的
+//! （已完成的部分不会重做）。
+//!
+//! 入口判据是 `spec == "oab/v1"`，且**只认这个判据**：`spec` 已是 `agent-dir/v2` 的
+//! 目录一律直接返回 `Ok(false)`——本迁移不去"补"一个已经声称自己是 v2 的目录。
+//! （历史上 `spec` 与 `requires.spec` 分头写导致过半迁移产物，那个 bug 已在本文件
+//! 内修掉：两者现在同行升级，见下。）
 //!
 //! ⚠️ 这是**原地改写用户数据**。调用方（[`super::plugin::AgentPlugin::sub_agent`]）
 //! 只在目录确实是 v1 时才调用它，且失败时**不阻断**——宁可让该 Agent 以旧方式
 //! 加载，也不要在半迁移状态下继续。
+//!
+//! ## 为什么 `requires.spec` 必须同行升级（§10 + §12）
+//!
+//! `spec` 是「本目录遵循哪个格式版本」，`requires.spec` 是「我能跑在哪个主版本的
+//! 宿主上」（§10 的接入门槛）。v1 目录的 `requires.spec` 必然写着 `^1`；若迁移只改
+//! `spec`，产物就是「格式声明 v2、兼容门槛仍要 v1」的自相矛盾清单——`manifest::validate`
+//! 必然按 §10 拒绝它，**迁移出来的目录一行都跑不起来**。两者同行才能自洽。
 
+use super::manifest::SPEC_MAJOR;
 use super::plugin::{SPEC_V1, SPEC_V2};
 use crate::symbio_core::AGENTS_FILE;
 use std::path::Path;
@@ -53,7 +66,13 @@ fn read_spec(path: &Path) -> Option<String> {
     value.get("spec")?.as_str().map(|s| s.to_string())
 }
 
-/// 只改 `spec` 字段，其余原样保留（解析成 Value 再序列化，注释会丢）
+/// 把协议版本写全：`spec` **与** `requires.spec` 一起升到 v2。
+///
+/// 两者是同一件事的两面——`spec` 说「本目录是 v2 格式」，`requires.spec` 说「我要跑在
+/// v2 宿主上」（§10）。只改前者会留下一个必然被 `manifest::validate` 拒绝的清单
+/// （详见模块文档「为什么 `requires.spec` 必须同行升级」）。
+///
+/// 其余字段原样保留（解析成 Value 再序列化，注释会丢）。
 fn write_spec(path: &Path) -> Result<bool, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let mut value: serde_yaml_ng::Value =
@@ -61,10 +80,19 @@ fn write_spec(path: &Path) -> Result<bool, String> {
     let Some(map) = value.as_mapping_mut() else {
         return Err("manifest 不是一个映射".to_string());
     };
-    map.insert(
-        serde_yaml_ng::Value::String("spec".to_string()),
-        serde_yaml_ng::Value::String(SPEC_V2.to_string()),
-    );
+    let key = |s: &str| serde_yaml_ng::Value::String(s.to_string());
+    map.insert(key("spec"), key(SPEC_V2));
+
+    // `requires.spec` := `^<宿主主版本>`。`requires` 缺失 / 不是映射 → 补一个空映射
+    // （迁移后的目录本来就是 v2 目录，不声明门槛就等于不可加载，不是"尊重原样"）。
+    let mut requires: serde_yaml_ng::Mapping = map
+        .iter()
+        .find(|(k, _)| k.as_str() == Some("requires"))
+        .and_then(|(_, v)| v.as_mapping().cloned())
+        .unwrap_or_default();
+    requires.insert(key("spec"), key(&format!("^{SPEC_MAJOR}")));
+    map.insert(key("requires"), serde_yaml_ng::Value::Mapping(requires));
+
     let out = serde_yaml_ng::to_string(&value).map_err(|e| e.to_string())?;
     std::fs::write(path, out).map_err(|e| e.to_string())?;
     Ok(true)
@@ -233,6 +261,7 @@ fn migrate_mcps(dir: &Path) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::agent::host::manifest;
     use std::path::PathBuf;
 
     fn v1_dir(tmp: &Path, id: &str) -> PathBuf {
@@ -274,6 +303,15 @@ mod tests {
         assert_eq!(
             read_spec(&d.join("manifest.yaml")).as_deref(),
             Some(SPEC_V2)
+        );
+
+        // 兼容门槛同步升到 v2 —— 只改 spec 会得到被 §10 拒绝的清单（本用例即回归守卫）。
+        let m = manifest::load(&d).unwrap();
+        assert_eq!(m.requires.spec, format!("^{SPEC_MAJOR}"));
+        assert!(
+            manifest::validate(&m).is_ok(),
+            "迁移产物必须能过 §10 接入门槛：{:?}",
+            manifest::validate(&m)
         );
         // prompts → 根 AGENTS.md（frontmatter 已剥离）
         assert_eq!(

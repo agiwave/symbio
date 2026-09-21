@@ -5,6 +5,9 @@
 use super::*;
 // trait 方法（list/stat/read/write/delete/watch/unwatch）需 trait 在作用域内才可解析
 use crate::symbio_core::vdfs_provider::VdfsProvider;
+// 地址构造辅助：只被本测试用，故不经 `plugin.rs` 的共享面转出（那里会让
+// `unused_imports` 误报——它看不见「仅经 glob 链使用」的再导出）。
+use crate::plugins::session::plugin::nodes::{message_dir_path, message_path};
 // 每例独占存储根；guard 在插件之后释放，失败时也会清理。
 fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     let dir = tempfile::tempdir().unwrap();
@@ -74,7 +77,7 @@ async fn vdfs_stat_session_is_dir_view_with_list_shape() {
     assert!(n.is_dir(), "被当目录访问时的视图");
 
     // 同源判据：与清单节点逐字段一致（不是另写一份「目录版」形状）
-    let listed = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
+    let listed = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
     assert_eq!(n.status, listed.status);
     assert_eq!(n.ext, listed.ext);
     assert_eq!(n.updated_at, listed.updated_at);
@@ -376,11 +379,19 @@ async fn new_session_ids_are_distinct() {
 // 消息的**改写 / 截断 / 清空**曾经各有专用路由（`chat/update_message` /
 // `chat/delete_message` / `chat/clear_messages`），2026-09-18 迁到 VDFS：
 //
-// | 操作 | 入口 | 变更 |
+// | 操作 | 入口 | 落到转写流上的变更 |
 // |---|---|---|
-// | 改写某条 | `write(<id>/消息/<mid>)` | 该消息上 `updated` |
-// | 删该条及其后 | `action(<id>/消息/<mid>, "truncate")` | 起始消息上 `truncated` |
-// | 清空历史 | `action(<id>/消息, "clear")` | **列表目录**上 `deleted` |
+// | 改写某条 | `write(<id>/消息/<mid>)` | 该消息一条 `upsert`（整条替换） |
+// | 删该条及其后 | `action(<id>/消息/<mid>, "truncate")` | 一条 `reset` + 回执带被删 id |
+// | 清空历史 | `action(<id>/消息, "clear")` | 一条 `reset` |
+//
+// 「变更」这一列说的是 `session/stream` 的 `NodeOp`（消息变更的**唯一**通道，
+// 见 `symbio_core::transcript_stream`），**不是** VDFS 变更：消息域已不往 VDFS
+// 变更面发任何东西，旧的三条变更形状（消息上 `updated` / 起始消息上 `truncated` /
+// 列表目录上 `deleted`）随之不存在。断言面因此从"VDFS 变更值"换成"转写流的帧"
+// （`subscribe_stream` / `drain_stream_frames`）：截断与清空三例各自钉住
+// 「发了几帧、是哪一种操作」——这正是新机制真正要守的边界（区间删除**一条**帧，
+// 不是 N 条；什么都没删**一条都不发**）。
 //
 // 本段锁定这三条路径的**对外行为**，并盯住三条不该被打破的边界：
 // `create` 意图（新增消息 = 发言，入口只有聊天协议）、`delete`（逐节点语义，
@@ -414,17 +425,39 @@ async fn transcript_ids(p: &SessionPlugin, id: &str) -> Vec<String> {
         .collect()
 }
 
-/// 订阅某会话的变更，返回接收端（订阅是同步登记的，因此返回时已生效）。
-async fn subscribe(
-    p: &SessionPlugin,
+/// 挂一条转写流（`session/stream`）订阅，返回连接 id 与接收端。
+///
+/// 订阅表是**进程级**的（`transcript_stream::STREAM_SUBS`），而用例并行跑：
+/// - 连接 id 必须**全进程唯一**——`unique_id` 是恒等的，拿它拼连接 id 会让并行
+///   用例互相覆盖订阅（后注册者赢，前者一帧都收不到）；
+/// - 因此断言一律按 `session_id` 过滤：本通道会收到同进程其它用例发布的帧。
+fn subscribe_stream() -> (
+    String,
+    tokio::sync::mpsc::Receiver<crate::symbio_core::PluginFrame>,
+) {
+    let conn = format!("test-{}", uuid::Uuid::new_v4());
+    // 容量给足：本用例最多一帧，溢出的唯一含义是"通道满" → 触发 resync 摘除。
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    crate::symbio_core::transcript_stream::register_transcript_subscriber(conn.clone(), tx);
+    (conn, rx)
+}
+
+/// 取走该会话**已到达**的转写帧（非本会话的忽略：订阅表是共享的）。
+fn drain_stream_frames(
+    rx: &mut tokio::sync::mpsc::Receiver<crate::symbio_core::PluginFrame>,
     id: &str,
-) -> tokio::sync::mpsc::UnboundedReceiver<vdfs::VdfsChange> {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
-    let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
-        let _ = tx.send(c);
-    });
-    p.watch(&vctx(), id, sink).await.unwrap();
-    rx
+) -> Vec<serde_json::Value> {
+    let mut got = Vec::new();
+    while let Ok(crate::symbio_core::PluginFrame::Data(v)) = rx.try_recv() {
+        let owned = v
+            .get("data")
+            .and_then(|d| d.get("session_id"))
+            .and_then(|s| s.as_str());
+        if owned == Some(id) {
+            got.push(v);
+        }
+    }
+    got
 }
 
 /// 改写单条消息：只覆盖补丁里**提供**的字段，未提供的原样保留。
@@ -641,6 +674,7 @@ async fn truncate_removes_the_target_and_everything_after() {
     let (_dir, p) = fixture();
     let id = unique_id("msg-truncate");
     seed_messages(&p, &id, &["一", "二", "三", "四"]).await;
+    let (conn, mut rx) = subscribe_stream();
 
     let r = p
         .action(
@@ -662,41 +696,27 @@ async fn truncate_removes_the_target_and_everything_after() {
         vec!["m0"],
         "只剩目标之前的那条"
     );
+
+    let frames = drain_stream_frames(&mut rx, &id);
+    assert_eq!(frames.len(), 1, "区间删除用**一条**帧表达，不是 N 条");
+    assert_eq!(
+        frames[0]["data"]["op"].as_str(),
+        Some("reset"),
+        "区间删除＝让消费端把本地转写整份重读"
+    );
+    crate::symbio_core::transcript_stream::unregister_transcript_subscriber(&conn);
 }
 
-/// 截断的变更：**一条** `truncated` 落在起始消息地址上，不是 N 条 `deleted`。
-#[tokio::test]
-async fn truncate_notifies_once_on_the_starting_message() {
-    let (_dir, p) = fixture();
-    let id = unique_id("msg-truncate-notify");
-    seed_messages(&p, &id, &["一", "二", "三"]).await;
-    let mut rx = subscribe(&p, &id).await;
-
-    p.action(
-        &vctx(),
-        &message_path(&id, "m1"),
-        vdfs::VDFS_ACTION_TRUNCATE,
-        None,
-    )
-    .await
-    .unwrap();
-
-    let got = rx.recv().await.expect("截断应投递一条变更");
-    assert_eq!(got.path, message_path(&id, "m1"), "落在起始消息上");
-    assert_eq!(got.change, vdfs::VDFS_CHANGE_TRUNCATED);
-    assert!(rx.try_recv().is_err(), "区间用一条变更表达，不得逐条下发");
-}
-
-/// 截断一个**不存在**的目标：回执是空列表，且**不发任何变更**。
+/// 截断一个**不存在**的目标：回执是空列表，列表一条不动，且**一条帧都不发**。
 ///
-/// 「什么都没删」不该在 VDFS 上留下痕迹——发了 `truncated` 会让消费者从一条
-/// 并不存在的节点起截断，把整个列表清空。
+/// 「什么都没删」是**结果**不是错误，也不该在转写上留下痕迹——一条 `reset` 会让
+/// 消费端把本地转写整份作废重读。
 #[tokio::test]
 async fn truncate_of_missing_target_changes_nothing() {
     let (_dir, p) = fixture();
     let id = unique_id("msg-truncate-miss");
     seed_messages(&p, &id, &["一", "二"]).await;
-    let mut rx = subscribe(&p, &id).await;
+    let (conn, mut rx) = subscribe_stream();
 
     let r = p
         .action(
@@ -710,7 +730,11 @@ async fn truncate_of_missing_target_changes_nothing() {
     assert!(r.ok, "目标不存在是**结果**，不是错误");
     assert_eq!(r.data, Some(json!([])), "回执是空列表");
     assert_eq!(transcript_ids(&p, &id).await, vec!["m0", "m1"], "列表未动");
-    assert!(rx.try_recv().is_err(), "什么都没删 ⇒ 不发变更");
+    assert!(
+        drain_stream_frames(&mut rx, &id).is_empty(),
+        "什么都没删 ⇒ 一条帧都不发"
+    );
+    crate::symbio_core::transcript_stream::unregister_transcript_subscriber(&conn);
 }
 
 /// 清空：消息全没了，**会话本体保留**（id / metadata / 工作目录）。
@@ -719,6 +743,7 @@ async fn clear_empties_the_transcript_but_keeps_the_session() {
     let (_dir, p) = fixture();
     let id = unique_id("msg-clear");
     seed_messages(&p, &id, &["一", "二", "三"]).await;
+    let (conn, mut rx) = subscribe_stream();
 
     let r = p
         .action(
@@ -732,34 +757,14 @@ async fn clear_empties_the_transcript_but_keeps_the_session() {
     assert!(r.ok);
     assert!(transcript_ids(&p, &id).await.is_empty(), "列表应清空");
 
+    let frames = drain_stream_frames(&mut rx, &id);
+    assert_eq!(frames.len(), 1, "清空用**一条**帧表达，不是逐条 remove");
+    assert_eq!(frames[0]["data"]["op"].as_str(), Some("reset"));
+    crate::symbio_core::transcript_stream::unregister_transcript_subscriber(&conn);
+
     // 会话本体还在（清空不是删除会话）
     let n = p.stat(&vctx(), &id).await.unwrap();
     assert_eq!(n.name, id);
-}
-
-/// 清空的变更：落在**列表目录**上的 `deleted`（目录没了 ⇒ 条目都没了）。
-///
-/// 这正是「清空不必自造一个变更值」的依据：同一个 `deleted`，靠**地址**区分
-/// 语义——落在目录上时只有一种读法，没有歧义可消。
-#[tokio::test]
-async fn clear_notifies_with_deleted_on_the_list_directory() {
-    let (_dir, p) = fixture();
-    let id = unique_id("msg-clear-notify");
-    seed_messages(&p, &id, &["一", "二"]).await;
-    let mut rx = subscribe(&p, &id).await;
-
-    p.action(
-        &vctx(),
-        &message_dir_path(&id),
-        vdfs::VDFS_ACTION_CLEAR,
-        None,
-    )
-    .await
-    .unwrap();
-
-    let got = rx.recv().await.expect("清空应投递一条变更");
-    assert_eq!(got.path, message_dir_path(&id), "落在列表目录上");
-    assert_eq!(got.change, vdfs::VDFS_CHANGE_DELETED);
 }
 
 /// 动作不认识、或动作放错地址：`NotImplemented`（消费方据此**不给出入口**），

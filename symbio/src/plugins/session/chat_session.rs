@@ -48,14 +48,6 @@ pub trait ChatSession: Send + Sync + 'static {
 
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError>;
 
-    /// 按 id 就地更新已存在的消息（**增量合并**，调用 [`ChatMessage::apply_patch`]）。
-    /// 不存在的 id 静默跳过。用于工具恢复时更新 ToolCall 父节点状态。
-    ///
-    /// 注意：绝不可实现为"整条覆盖"。调用方普遍只传局部补丁（如仅 `id` + `meta`），
-    /// 整条覆盖会把 `role` / `msg_type` / `content` / `timestamp` 抹成 `None`，
-    /// 进而让下一轮请求体出现 `"content": null` 被 Provider 拒绝。
-    async fn update_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError>;
-
     fn session_id(&self) -> &str;
 
     fn line_threshold(&self) -> usize;
@@ -338,6 +330,8 @@ impl ChatSession for PersistentChatSession {
     }
 
     async fn append_messages(&self, messages: Vec<ChatMessage>) -> Result<usize, PluginError> {
+        // 持久层写入不变量（见 `ensure_durable_states`）：瞬态状态不得落盘
+        ensure_durable_states(&messages, "append_messages")?;
         // 临界区：整段「读 → 改 → 整份写回」必须串行。会话写入是整份覆盖，
         // 两次并发追加各自读到同一份旧数据、各自写回，后写的会整份覆盖先写的。
         let _write = self.store.lock_writes(&self.session_id).await;
@@ -418,6 +412,8 @@ impl ChatSession for PersistentChatSession {
     }
 
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
+        // 持久层写入不变量（见 `ensure_durable_states`）：瞬态状态不得落盘
+        ensure_durable_states(&messages, "replace_messages")?;
         // 临界区：与 append / update 共用同一把 per-session 写锁（整份覆盖语义）
         let _write = self.store.lock_writes(&self.session_id).await;
         let mut session = self.load_session().await?;
@@ -468,23 +464,6 @@ impl ChatSession for PersistentChatSession {
         self.save_session(&session).await
     }
 
-    async fn update_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
-        // 临界区：与 append / replace 共用同一把 per-session 写锁（读-改-写整段）
-        let _write = self.store.lock_writes(&self.session_id).await;
-        let mut session = self.load_session().await?;
-        let now = now_ms();
-        for patch in messages {
-            if let Some(existing) = session.messages.iter_mut().find(|m| m.id == patch.id) {
-                // 增量合并（非整条覆盖）：只更新 patch 中显式携带的字段。
-                // 整条覆盖会把 role/type/content/timestamp 抹成 None，导致请求体出现
-                // `"content": null` 被 Provider 以 invalid_request_error 拒绝。
-                existing.apply_patch(&patch);
-            }
-        }
-        session.updated_at = now;
-        self.save_session(&session).await
-    }
-
     fn session_id(&self) -> &str {
         &self.session_id
     }
@@ -504,6 +483,31 @@ impl ChatSession for PersistentChatSession {
     fn fade_keep_recent_turns(&self) -> usize {
         self.cfg_or_default().fade_keep_recent_turns
     }
+}
+
+/// 持久层**写入不变量**：`Streaming` 是瞬态状态，只存在于在途缓冲（`live_messages`）
+/// 与广播通道（VDFS 变更帧），**永不落盘**。
+///
+/// 持久层允许的状态域 = 终态集合：`completed` / `failed` / `aborted` /
+/// `waiting_user_action`（`None` / `Pending` 等未标注按已结束处理，见
+/// `plugin/nodes.rs::message_status`）。崩溃恢复因此不需要任何修复器：
+/// 磁盘上只有终态，「上次没跑完的轮次」压根不在存储里，自然不会残留
+/// 永久转圈的节点（`WaitingUserAction` 是合法的可恢复状态，保留）。
+///
+/// 违反即**程序错误**——某个写入点把瞬态状态当成了可持久化状态。在写入当场报错，
+/// 让错误指向真实肇事者；而不是落盘之后靠启动期清理器静默改写（修复器存在的
+/// 每一天，都在给新的违例写入点发通行证）。
+fn ensure_durable_states(messages: &[cm::ChatMessage], op: &str) -> Result<(), PluginError> {
+    for m in messages {
+        if m.status == Some(cm::MessageStatus::Streaming) {
+            return Err(PluginError::InternalError(format!(
+                "{op}: 消息 {} 携带瞬态状态 `streaming`，持久层只接受终态；\
+                 瞬态状态应经在途缓冲与广播通道下发，不得写入存储",
+                m.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// 写入期工具链物理裁剪（原 `context.rs` 并入，体检备注 audit-5）。

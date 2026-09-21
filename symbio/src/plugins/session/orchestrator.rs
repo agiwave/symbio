@@ -8,7 +8,7 @@
 //!
 //! | 文件 | 职责 |
 //! |---|---|
-//! | 本文件 | 装配 + RAII 守卫（`AiControlGuard` / `WorkingGuard`）+ `merge_message_patch` + `resolve_required_session_id` |
+//! | 本文件 | 装配 + RAII 守卫（`AiControlGuard` / `WorkingGuard`）+ `resolve_required_session_id` |
 //! | [`broadcast`] | 三个广播出口：错误 + 收敛 / 帧投递 / 忙闲状态 |
 //! | [`consume`] | 消费循环：`fail_before_loop` / `run_chat_loop_task` / `handle_abort` |
 //! | [`entry`] | 两个 one-off 入口：`chat/send` / `chat/abort` + `ensure_auto_title` |
@@ -29,7 +29,6 @@ use crate::symbio_core::schemas::{
     session::chat_message as cm,
     session::{session_chat, session_chat_response},
 };
-use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     take_errors, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel,
     PluginError, PluginFrame, PluginPayload, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
@@ -135,7 +134,7 @@ impl Drop for AiControlGuard {
 struct WorkingGuard {
     state: Arc<ActiveSessionState>,
     plugin: Arc<SessionPlugin>,
-    collected: Arc<tokio::sync::Mutex<Vec<cm::ChatMessage>>>,
+    collected: Arc<tokio::sync::Mutex<crate::plugins::session::transcript::Transcript>>,
     /// 真实会话 id：`persist_failure` 需要它来定位并写入存储。
     /// 注意：绝不能传 `request_id` 的字符串——那是请求序号（如 "42"），
     /// 会令 `open_chat_session` 找不到会话而提前返回，导致崩溃失败永不落库。
@@ -203,122 +202,6 @@ impl Drop for WorkingGuard {
             });
         }
     }
-}
-
-/// Merge a `StreamEvent::Update` patch into an already-collected message.
-///
-/// Mirrors the front-end `handleChatEvent` semantics:
-/// - `content` is **delta-appended** for `Text` / `Reasoning` (matches the SSE
-///   incremental stream); for `ToolCall` (and ContentPart arrays) the new content
-///   is a full replacement.
-/// - `status`, `role`, `msg_type`, `name`, `timestamp`, `parent_id` are replaced
-///   whenever present in the patch.
-/// - `meta` is shallow-merged (existing + new keys).
-///
-/// This is what guarantees that a session whose stream was observed by the
-/// backend will be persisted with its final status (e.g. `Completed` /
-/// `WaitingUserAction`), instead of being frozen at the first `Streaming` frame.
-///
-/// # 返回值 = 被追加的那段文本
-///
-/// `Some(delta)` 表示本次合并是**尾部追加**（正是 `appended` 变更的语义），
-/// 且 `delta` 就是追加进去的那一段；`None` 表示全量替换或未触及内容。
-///
-/// **为什么由本函数回报，而不是让调用方另行判断**：变更类型（`appended` vs
-/// `updated`）必须与合并方式**逐字一致**——若这里按追加合并、那里判成全量，
-/// 消费者按 `delta` 拼接就会得到错误内容。让唯一决定合并方式的地方顺带说出
-/// 它是哪种方式，这种漂移在结构上就不可能发生。
-pub(super) fn merge_message_patch(
-    existing: &mut cm::ChatMessage,
-    patch: &cm::ChatMessage,
-) -> Option<String> {
-    if let Some(role) = &patch.role {
-        existing.role = Some(role.clone());
-    }
-    if let Some(t) = &patch.msg_type {
-        existing.msg_type = Some(t.clone());
-    }
-    if let Some(n) = &patch.name {
-        existing.name = Some(n.clone());
-    }
-    if let Some(p) = &patch.parent_id {
-        existing.parent_id = Some(p.clone());
-    }
-    if let Some(s) = &patch.status {
-        existing.status = Some(s.clone());
-    }
-    if let Some(ts) = patch.timestamp {
-        existing.timestamp = Some(ts);
-    }
-    if let Some(rid) = &patch.response_id {
-        existing.response_id = Some(rid.clone());
-    }
-
-    // 本次合并追加进去的文本（`Some` = 追加型，正是 `appended` 变更的载荷）
-    let mut appended: Option<String> = None;
-
-    if let Some(new_content) = &patch.content {
-        // 工具流式帧（role=Tool，如 shell 的增量输出）与前端 sessions.ts 的
-        // 合并语义保持一致：全量替换，而非 SSE delta 追加。
-        if matches!(&patch.role, Some(cm::MessageRole::Tool)) {
-            existing.content = Some(new_content.clone());
-        } else {
-            match existing.msg_type {
-                Some(cm::MessageType::ToolCall) => {
-                    // Tool-call args are emitted as full JSON in each frame
-                    existing.content = Some(new_content.clone());
-                }
-                Some(cm::MessageType::Text) | Some(cm::MessageType::Reasoning) => {
-                    // SSE delta: append
-                    match (&mut existing.content, new_content) {
-                        (Some(existing_c), cm::MessageContent::Text(new_text)) => {
-                            if let cm::MessageContent::Text(buf) = existing_c {
-                                buf.push_str(new_text);
-                                appended = Some(new_text.clone());
-                            } else {
-                                // Type mismatch (rare) — fall back to replacement
-                                *existing_c = cm::MessageContent::Text(new_text.clone());
-                            }
-                        }
-                        (None, cm::MessageContent::Text(new_text)) => {
-                            existing.content = Some(cm::MessageContent::Text(new_text.clone()));
-                            // 首次写入也是追加：节点此前无正文，尾部多出来的就是全部
-                            appended = Some(new_text.clone());
-                        }
-                        _ => {
-                            // Parts arrays or type mismatch — replace
-                            existing.content = Some(new_content.clone());
-                        }
-                    }
-                }
-                _ => {
-                    // Turn / unknown: full replace
-                    existing.content = Some(new_content.clone());
-                }
-            }
-        }
-    }
-
-    if let Some(new_meta) = &patch.meta {
-        match &mut existing.meta {
-            Some(existing_meta_obj) => {
-                if let (Some(existing_obj), Some(new_obj)) =
-                    (existing_meta_obj.as_object_mut(), new_meta.as_object())
-                {
-                    for (k, v) in new_obj {
-                        existing_obj.insert(k.clone(), v.clone());
-                    }
-                } else {
-                    existing.meta = Some(new_meta.clone());
-                }
-            }
-            None => {
-                existing.meta = Some(new_meta.clone());
-            }
-        }
-    }
-
-    appended
 }
 
 // 子模块：`impl SessionPlugin` 按职责分块（Rust 允许多个 inherent impl，方法声明顺序无语义）。

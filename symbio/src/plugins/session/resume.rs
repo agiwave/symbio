@@ -21,9 +21,9 @@
 //! 1. 从会话存储加载消息，定位 ToolCall 父节点 + 待恢复子节点
 //! 2. 提取 tool_name / base_args
 //! 3. 根据 action 执行：approve/retry/supply 调用 `execute_tool_async`；reject/answer 直接生成结果
-//! 4. 删除旧子节点（广播 `StreamEvent::Delete`）
-//! 5. 创建新 Text 结果子节点（广播 `StreamEvent::Update`）
-//! 6. 更新 ToolCall 父节点状态（广播 `StreamEvent::Update`）
+//! 4. 删除旧子节点（广播 `NodeOp::Remove`）
+//! 5. 创建新 Text 结果子节点（广播 `NodeOp::Upsert`）
+//! 6. 更新 ToolCall 父节点状态（广播 `NodeOp::Upsert`）
 //! 7. 持久化（`replace_messages`）
 //! 8. 成功 → `ResumeOutcome::Continue`（turn 循环续写）；失败 → `ResumeOutcome::Done`（退出等下次 resume）
 //!
@@ -34,12 +34,12 @@
 
 use super::chat_loop::ChatOrchestrator;
 use super::chat_session::ChatSession;
-use super::tool_executor::{execute_tool_async, not_executed_patch};
+use super::tool_executor::{apply_not_executed, execute_tool_async};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
-use crate::symbio_core::schemas::session::session_chat_response::StreamEvent;
+use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
 use crate::symbio_core::turn::short_id;
 use crate::symbio_core::{InvokeRequest, PluginChannel, PluginError, PluginFrame};
 use crate::{plugin_error, plugin_info};
@@ -154,7 +154,7 @@ async fn process_retry_turn(
     for msg in &deleted_messages {
         let _ = channel
             .tx
-            .send(PluginFrame::Data(json!(StreamEvent::Delete {
+            .send(PluginFrame::Data(json!(NodeOp::Remove {
                 message_id: msg.id.clone()
             })))
             .await;
@@ -230,21 +230,39 @@ async fn process_tool_resume_action(
     // `meta.started_at` 与 `emit_tool_running` 同源：前端据此显示"已运行 47s"。
     //
     // reject / answer 不执行工具（就地生成结果），下发"运行中"只会闪一帧，故排除。
+    //
+    // 完整快照：从存储转写取父 ToolCall 副本应用「运行中」，整条广播。
+    // `messages` 本身**不动**（`Streaming` 是瞬态状态，持久层拒绝落盘——见
+    // `chat_session.rs::ensure_durable_states`）；存储里的父节点保持恢复前的
+    // 终态，直到步骤 9 以真正的终态整条替换。
     if matches!(
         &req.action,
         ResumeAction::Approve | ResumeAction::Retry | ResumeAction::Supply
     ) {
-        let _ = channel
-            .tx
-            .send(PluginFrame::Data(json!(StreamEvent::Update {
-                message: ChatMessage {
-                    id: req.target_id.clone(),
-                    status: Some(MessageStatus::Streaming),
-                    meta: Some(json!({ "started_at": crate::symbio_core::now_ms() })),
-                    ..Default::default()
-                },
-            })))
-            .await;
+        match messages.iter().find(|m| m.id == req.target_id) {
+            Some(tc) => {
+                let mut running = tc.clone();
+                running.status = Some(MessageStatus::Streaming);
+                let mut meta = running.meta.clone().unwrap_or_else(|| json!({}));
+                if let Some(obj) = meta.as_object_mut() {
+                    obj.insert("started_at".into(), json!(crate::symbio_core::now_ms()));
+                }
+                running.meta = Some(meta);
+                let _ = channel
+                    .tx
+                    .send(PluginFrame::Data(json!(NodeOp::Upsert {
+                        message: Box::new(running)
+                    })))
+                    .await;
+            }
+            None => {
+                plugin_error!(
+                    "session",
+                    "[Resume] 运行态广播: 转写中不存在工具调用 {}（协议违例），跳过",
+                    req.target_id
+                );
+            }
+        }
     }
 
     let (final_result_text, final_success, new_tc_args) = match req.action {
@@ -305,9 +323,12 @@ async fn process_tool_resume_action(
     };
 
     if abort_flag.load(Ordering::Relaxed) {
-        // 父 ToolCall 在步骤 5 已被置 `Streaming`（"运行中"），而且**已经落库**
-        // ——它不是流式节点，没有任何后续机制会再碰它。若在这里直接返回，前端
-        // 就会永远显示"运行中"（违反 `docs/node-state-streaming.md` §8.11）。
+        // 父 ToolCall 在步骤 5 被广播成 `Streaming`（"运行中"）——那是**广播帧**
+        // （`Streaming` 是瞬态状态，持久层拒绝落盘，见 `chat_session.rs::
+        // ensure_durable_states`），前端此刻显示"运行中"。若在这里直接返回，
+        // 广播层没有任何后续机制会再碰它，前端就永远显示"运行中"
+        // （违反 `docs/node-state-streaming.md` §8.11）。存储里的父节点仍是
+        // 恢复前的终态（Failed），故此处落库的收口补丁同样是终态。
         plugin_info!("session", "[Resume] aborted during tool re-execution");
         let parent_update = finalize_aborted_parent(&mut messages, tc_idx, &req.target_id);
         if let Err(e) = session.replace_messages(messages).await {
@@ -319,8 +340,8 @@ async fn process_tool_resume_action(
         }
         let _ = channel
             .tx
-            .send(PluginFrame::Data(json!(StreamEvent::Update {
-                message: parent_update
+            .send(PluginFrame::Data(json!(NodeOp::Upsert {
+                message: Box::new(parent_update)
             })))
             .await;
         return Ok(ResumeOutcome::Done);
@@ -390,20 +411,20 @@ async fn process_tool_resume_action(
     // 10. 广播：Delete 旧子 + Update 新子 + Update 父节点
     let _ = channel
         .tx
-        .send(PluginFrame::Data(json!(StreamEvent::Delete {
+        .send(PluginFrame::Data(json!(NodeOp::Remove {
             message_id: old_child_id
         })))
         .await;
     let _ = channel
         .tx
-        .send(PluginFrame::Data(json!(StreamEvent::Update {
-            message: new_child
+        .send(PluginFrame::Data(json!(NodeOp::Upsert {
+            message: Box::new(new_child)
         })))
         .await;
     let _ = channel
         .tx
-        .send(PluginFrame::Data(json!(StreamEvent::Update {
-            message: updated_parent
+        .send(PluginFrame::Data(json!(NodeOp::Upsert {
+            message: Box::new(updated_parent)
         })))
         .await;
 
@@ -425,17 +446,19 @@ async fn process_tool_resume_action(
     }
 }
 
-/// 中止收口：把父 ToolCall 从 `Streaming` 就地定稿，返回应广播的补丁。
+/// 中止收口：把父 ToolCall 从 `Streaming` 就地定稿，返回**完整快照**供广播。
 ///
 /// ## 为什么必须做
 ///
-/// 步骤 5 在真正重跑工具**之前**就把父节点置为 `Streaming` 并**落库**（这是
-/// 有意的：否则用户点下「批准执行」后画面毫无变化）。但它同时也把「收口」的
-/// 责任交给了后续流程——一旦中途返回，那个节点就永久停在"运行中"。中止正是
-/// 这样一条中途返回的路径（`docs/node-state-streaming.md` §8.11：
-/// 不得有节点停在 `Streaming`）。
+/// 步骤 5 在真正重跑工具**之前**就把父节点广播成 `Streaming`（这是有意的：
+/// 否则用户点下「批准执行」后画面毫无变化）。`Streaming` 是瞬态状态——只经
+/// 广播通道下发，存储里仍是恢复前的 `Failed` 终态（持久层写入不变量见
+/// `chat_session.rs::ensure_durable_states`）。但它同时把「收口」的责任交给了
+/// 后续流程——一旦中途返回，**广播层**没有任何机制会再碰它，前端就永久停在
+/// "运行中"。中止正是这样一条中途返回的路径
+/// （`docs/node-state-streaming.md` §8.11：不得有节点停在 `Streaming`）。
 ///
-/// ## 为什么复用 `not_executed_patch`
+/// ## 为什么复用 `apply_not_executed`
 ///
 /// 中止是「没执行完」，不是「执行失败」，因此与未执行工具同一口径：
 /// `Completed` + `meta.failure_kind`，**不挂 error**。挂 error 会让前端在父节点上
@@ -444,14 +467,13 @@ async fn process_tool_resume_action(
 fn finalize_aborted_parent(
     messages: &mut [ChatMessage],
     tc_idx: usize,
-    tool_call_id: &str,
+    _tool_call_id: &str,
 ) -> ChatMessage {
-    let patch = not_executed_patch(tool_call_id, "aborted");
-    if let Some(tc) = messages.get_mut(tc_idx) {
-        tc.status = patch.status.clone();
-        tc.meta = patch.meta.clone();
-    }
-    patch
+    let tc = messages
+        .get_mut(tc_idx)
+        .expect("步骤 2 已校验过 tc_idx 有效");
+    apply_not_executed(tc, "aborted");
+    tc.clone()
 }
 
 /// 重新执行工具（approve/retry/supply 共用）。

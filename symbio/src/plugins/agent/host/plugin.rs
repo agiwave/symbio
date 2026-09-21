@@ -277,10 +277,20 @@ impl AgentPlugin {
     /// 注册经 [`super::scope::SubAgentVisitor`] 代理（加来源前缀），因此与系统树的
     /// 同名注册**不冲突**，两份都生效——并集，且结果与遍历顺序无关。
     ///
+    /// ## 跨作用域必须改写上下文（与 `VDFS_PARENT_ADDR` 同理）
+    ///
     /// ⚠️ **不再改指 `WORKDIR`**：v2 早期为了让子树里的 `work` 拥有 `<agentdir>/AGENTS.md`，
     /// 这里把 `WORKDIR` 覆写成了 Agent 目录——那是错的（`work` 只负责工作区信息，见
-    /// [`SUB_AGENT_PLUGINS`]）。子树的 `WORKDIR` 现在与父会话一致（继承），智能体自身
-    /// 目录改由 `ctx[AGENT_ID]` 表达：子树因此能说出「我是哪个智能体」。
+    /// [`SUB_AGENT_PLUGINS`]）。子树的 `WORKDIR` 现在与父会话一致（继承）。
+    ///
+    /// ⚠️ **`AGENT_ID` 必须清空**：它是**会话级「选中的智能体」**，只由**拥有该 id 的
+    /// 那个 store 的实例**解析（系统根实例的 store = `{homedir}/agent`）。子树里的
+    /// `agent` 实例（分形，见模块文档）用同一个键表达**它自己**那一层的选中
+    /// （`<agentdir>/agent/<sub-id>`）；父 id 落进它的作用域会被当成「我这一层的选中」
+    /// 去查 `<agentdir>/agent/<父id>`——必然查不到，于是按 §10 报「拒绝接入」，把整轮
+    /// 能力收集打断（子树明明装好了，却被一个**本不属于该作用域**的 id 判死）。
+    /// 故此处显式清空 = 「本作用域无选中」。委托子智能体不走本键，走 `agent_run`
+    /// 的显式 `agent_id` 参数（它按自己的 store 解析）。
     ///
     /// 本插件另在这里注入**该智能体自己的 `AGENTS.md`**（`<agentdir>/AGENTS.md`）——
     /// 子树里虽有 `agent` 实例（分形），但它管的是 `<agentdir>/agent/<sub-id>` 一层；
@@ -294,9 +304,9 @@ impl AgentPlugin {
     ) {
         let sub = ctx.fork();
         sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-        // 子树的自证：它所在的那个 Agent（agent id）。父 ctx 里通常已有（会话绑定了
-        // 这个智能体），这里显式再置一次——装配子树这件事本身就说明了它是谁。
-        sub.set(AGENT_ID, id.to_string());
+        // 清空而非继承：父作用域的选中 id 由**父**的 store 解析；带进来只会被本层的
+        // `agent` 实例当成自己的子目录选择（见上方文档）。
+        sub.set(AGENT_ID, String::new());
         let scoped: Arc<dyn CapabilityVisitor> =
             Arc::new(super::scope::SubAgentVisitor::new(Arc::clone(visitor), id));
         sub.set(CAPABILITY_VISITOR, scoped.clone());

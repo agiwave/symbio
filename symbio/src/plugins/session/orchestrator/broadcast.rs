@@ -29,13 +29,17 @@ use super::*;
 /// "`busy` 还带着上次的错误"这种非法组合存在，而它的表现是**静默的**——
 /// 前端会同时显示"处理中"和"上次失败"。
 pub enum SessionStateChange {
-    /// 新一轮开始（上一轮的结局随之作废）
+    /// 新一轮开始（上一轮的结局随之作废，上一轮的告警随之清除）
     Working,
     /// 一轮结束：正常 / 用户中止 / 以错误结束
     Finished {
         outcome: &'static str,
         error: Option<String>,
     },
+    /// 会话级告警（可恢复）：只写 `attributes.warning`，**不改变运行态**。
+    /// `Some(text)` 设置，`None` 清除。与 `Finished.error`（失败终态）的分界：
+    /// 告警期间会话照常运行（持久化失败 / 长度截断 / 工具轮次上限）。
+    Warning(Option<String>),
 }
 
 impl SessionStateChange {
@@ -106,14 +110,19 @@ impl SessionPlugin {
             match &change {
                 SessionStateChange::Working => {
                     inner.is_working = true;
-                    // 新一轮开始：上一轮的结局作废，否则失败角标会残留
+                    // 新一轮开始：上一轮的结局与告警一并作废，否则失败角标/告警条会残留
                     inner.last_outcome = None;
                     inner.last_error = None;
+                    inner.last_warning = None;
                 }
                 SessionStateChange::Finished { outcome, error } => {
                     inner.is_working = false;
                     inner.last_outcome = Some((*outcome).to_string());
                     inner.last_error = error.clone();
+                }
+                // 告警只改自己的属性：is_working / 结局原样保留
+                SessionStateChange::Warning(w) => {
+                    inner.last_warning = w.clone();
                 }
             }
         }

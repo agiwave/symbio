@@ -14,9 +14,9 @@
 //!
 //! 会话上下文携带 `RESULT_MSG_ID` + `TOOL_CALL_ID` 时走流式路径：
 //! - `spawn` 子进程，stdout/stderr 各由一个 pump 任务按行读取；
-//! - 每行到达后向 `PluginChannel` 广播 `StreamEvent::Update` 帧
-//!   （`role=tool` + `status=Streaming`，**累积全量快照**——前端对 tool 消息
-//!   为全量替换合并语义，与 orchestrator 的 merge_message_patch 一致）；
+//! - 每行到达后向 `PluginChannel` 广播 `NodeOp::Upsert` 帧
+//!   （`role=tool` + `status=Streaming`，**累积全量快照**——对应协议里 `upsert`
+//!   的「按 id 整条替换」语义，消费端不做任何合并）；
 //! - 进程结束后发送哨兵帧 `{"content": <full>}`，由 tool_executor 捕获为
 //!   工具最终结果（对齐 run.rs 哨兵协议）；
 //! - 中止（cancel_token）/超时（SHELL_TIMEOUT_SECS）时 kill 子进程并收尸。
@@ -436,8 +436,8 @@ where
                         };
                         let sent = tx
                             .send(PluginFrame::Data(
-                                serde_json::to_value(session_chat_response::StreamEvent::Update {
-                                    message: node,
+                                serde_json::to_value(session_chat_response::NodeOp::Upsert {
+                                    message: Box::new(node),
                                 })
                                 .unwrap_or_default(),
                             ))
@@ -596,8 +596,8 @@ mod tests {
         while let Some(frame) = rx.recv().await {
             match frame {
                 PluginFrame::Data(d) => {
-                    if let Ok(session_chat_response::StreamEvent::Update { message }) =
-                        serde_json::from_value::<session_chat_response::StreamEvent>(d.clone())
+                    if let Ok(session_chat_response::NodeOp::Upsert { message }) =
+                        serde_json::from_value::<session_chat_response::NodeOp>(d.clone())
                     {
                         if let Some(MessageContent::Text(t)) = message.content {
                             snapshots.push(t);

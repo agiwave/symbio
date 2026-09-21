@@ -16,7 +16,7 @@ use std::process::ExitCode;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use args::Command;
-use client::{vdfs_change_of, SymbioClient};
+use client::{Frame, SymbioClient};
 use render::Renderer;
 use symbio::symbio_core::vdfs_provider::{
     VDFS_OUTCOME_ABORTED, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
@@ -143,8 +143,10 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
     // 元数据写入，逐帧报会把一次心跳刷成十几行。
     let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
-    while let Some(ev) = client.next_bus_event().await {
-        let Some(change) = vdfs_change_of(&ev) else {
+    while let Some(frame) = client.next_frame().await {
+        // 守护模式只关心会话运行态；转写帧（消息实时面）在此丢弃
+        // ——但必须取走，否则会把转写流通道塞满。
+        let Frame::Node(change) = frame else {
             continue;
         };
         let Some(node) = change.node.as_ref() else {

@@ -88,7 +88,6 @@ import type { ImageAttachment } from '@/types'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { needsTypingRow } from '@/stores/sessionLive'
-import { isWorkingStatus } from '@/schemas/vdfs'
 import { CHAT_ROLE_USER } from '@/schemas/chat_message'
 // 消息级判定与业务规则全部来自 registry（本组件不解释消息词表，也不读后端 meta 字段）
 import {
@@ -103,6 +102,7 @@ import MessageNode from './MessageNode.vue'
 import MessageErrorBox from './message/MessageErrorBox.vue'
 import TurnPending from './message/TurnPending.vue'
 import ChatComposer from './chat/ChatComposer.vue'
+import BaseModal from './common/BaseModal.vue'
 
 // Props（多会话缩略窗口架构下，ModelChatPanel 只接收 sessionId）
 const props = defineProps<{
@@ -206,8 +206,6 @@ const sessionsStore = useSessionsStore()
   // --- 方法 ---
 onMounted(() => {
   nextTick(() => scrollToBottom())
-  // 启动看门狗：检测"卡在处理中但长时间无事件"的会话（目标 2 系统保障）
-  startWatchdog()
 
   // 懒创建闭环：新建会话流程中排队的首条消息（文本 + 可选图片附件；
   // 用户在"新建详情"输入、创建完成后经机制选中切到本会话），挂载即注入并发送。
@@ -221,7 +219,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  stopWatchdog()
   if (scrollRaf !== null) {
     cancelAnimationFrame(scrollRaf)
     scrollRaf = null
@@ -343,33 +340,6 @@ async function saveEdit() {
   } as ChatMessage)
   editing.value = null
   nextTick(() => scrollToBottom())
-}
-
-// ── 看门狗：会话卡在"处理中"且长时间无业务事件（疑似后台崩溃 / 断流）──
-// 每 15s 检查一次：若运行中（节点 status == working）但已超过阈值时间无事件，则把仍在
-// streaming/waiting 的消息持久化为 Failed —— 直接出现在对话流中（带内联重试按钮），
-// 切回会话仍能看到上次的错误，无需任何页面级提示。
-let watchdogTimer: ReturnType<typeof setInterval> | null = null
-function startWatchdog() {
-  stopWatchdog()
-  watchdogTimer = setInterval(() => {
-    const sid = props.sessionId
-    if (!sid) return
-    const status = sessionsStore.getSessionStatus(sid)
-    if (!isWorkingStatus(status.status)) return
-    const reason = sessionsStore.getSessionStaleReason(sid)
-    if (!reason) return
-    // 把卡死的消息持久化为 Failed（会出现在对话流中，带内联重试）
-    sessionsStore.persistStuckFailure(sid, reason).catch((e) => {
-      logger.warn('ModelChatPanel', 'persistStuckFailure 失败', e)
-    })
-  }, 15000)
-}
-function stopWatchdog() {
-  if (watchdogTimer !== null) {
-    clearInterval(watchdogTimer)
-    watchdogTimer = null
-  }
 }
 
 // 智能滚动 —— **只 watch 版本号**，不 deep watch 消息树。

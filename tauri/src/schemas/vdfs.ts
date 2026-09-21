@@ -91,7 +91,7 @@ export const VDFS_STATUS_COMPLETED = MESSAGE_STATUS_COMPLETED
  * **可重试**——前端的重试入口正是挂在这个终态上。
  *
  * 后端 `MessageStatus::as_str()` 早已产出这个词；前端曾漏在状态词表里，导致
- * 消费端把整条变更的状态**静默丢弃**（见 `vdfsTranscriptSync::messageStatusOf`），
+ * 消费端把整条变更的状态**静默丢弃**（当时消费端的 `messageStatusOf` 未做透传），
  * 中止后重试入口不出现。现在它是 `MESSAGE_STATUS_ABORTED` 的别名——**漏改这件事
  * 已不可能发生**（词表只有一份），而未知词仍由该映射**显式告警**兜底。 */
 export const VDFS_STATUS_ABORTED = MESSAGE_STATUS_ABORTED
@@ -592,7 +592,7 @@ export type SessionOutcome = 'completed' | 'aborted' | 'failed'
  */
 export type CompletionKind = SessionOutcome
 
-/** 会话运行态（会话节点的三个取值 + 两个场景属性） */
+/** 会话运行态（会话节点的三个取值 + 三个场景属性） */
 export interface SessionRuntime {
   /** 节点状态：`working` / `active` / `failed` */
   status: string
@@ -600,24 +600,32 @@ export interface SessionRuntime {
   outcome?: SessionOutcome
   /** 面向用户的错误短消息（仅 `failed` 时存在） */
   error?: string
+  /** 会话级告警（可恢复；新一轮开始时后端清除，此处随之回落 null） */
+  warning?: string
 }
 
 /**
  * 从节点视图读出会话运行态（纯函数：缺字段即缺省，**不做推断**）。
  *
- * `error` 取节点自述的 `attributes.error`——它覆盖「错误发生在任何消息节点
- * 创建之前」这一类（能力收集失败 / provider 解析失败 / transport 级失败），
- * 此时没有任何失败节点可承载错误。
+ * `error` / `warning` 取节点自述的 `attributes.error` / `attributes.warning`——
+ * 它们覆盖「状态发生在任何消息节点创建之前」这一类（能力收集失败 / provider
+ * 解析失败 / transport 级失败 / 持久化失败），此时没有任何失败节点可承载它。
+ *
+ * **漏读一个属性的代价不是"少显示一条"，而是整条状态被静默丢弃**：后端
+ * `SessionStateChange` 写进节点、前端却读不出来，UI 永远看不到它，且不报错。
+ * 三个属性（`outcome` / `error` / `warning`）都必须在此落地。
  */
 export function sessionRuntimeOf(node: VdfsNode): SessionRuntime {
   const attrs = node as unknown as Record<string, unknown>
   const outcome = attrs.outcome
   const error = attrs.error
+  const warning = attrs.warning
   const rt: SessionRuntime = { status: node.status }
   if (outcome === OUTCOME_COMPLETED || outcome === OUTCOME_ABORTED || outcome === OUTCOME_FAILED) {
     rt.outcome = outcome
   }
   if (typeof error === 'string' && error) rt.error = error
+  if (typeof warning === 'string' && warning) rt.warning = warning
   return rt
 }
 

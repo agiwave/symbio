@@ -20,13 +20,14 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
     let abort = Arc::new(AtomicBool::new(false));
     let tcs = vec![ToolCallInfo {
         id: None,
+        wire_id: None,
         name: Some("vdfs_list".into()),
         arguments: json!({ "path": "." }),
         parse_error: None,
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
+        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx(), &[]).await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
     assert_eq!(msgs[0].role, Some(MessageRole::Tool));
@@ -60,13 +61,14 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
     let abort = Arc::new(AtomicBool::new(false));
     let tcs = vec![ToolCallInfo {
         id: Some(String::new()),
+        wire_id: None,
         name: Some("vdfs_list".into()),
         arguments: json!({}),
         parse_error: None,
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
+        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx(), &[]).await;
 
     assert_eq!(msgs.len(), 1);
     assert_eq!(updates.len(), 1);
@@ -79,13 +81,14 @@ async fn missing_tool_name_is_recorded_as_failure() {
     let abort = Arc::new(AtomicBool::new(false));
     let tcs = vec![ToolCallInfo {
         id: Some("tc-known".into()),
+        wire_id: None,
         name: Some(String::new()),
         arguments: json!({}),
         parse_error: None,
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
+        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx(), &[]).await;
 
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-known"));
@@ -102,13 +105,14 @@ async fn unparseable_arguments_are_refused_not_executed() {
     let abort = Arc::new(AtomicBool::new(false));
     let tcs = vec![ToolCallInfo {
         id: Some("tc-broken".into()),
+        wire_id: None,
         name: Some("cmd".into()),
         arguments: json!({}),
         parse_error: Some(r#"{"command": "cargo test"#.into()),
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
+        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx(), &[]).await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
     assert_eq!(msgs[0].role, Some(MessageRole::Tool));
@@ -161,12 +165,27 @@ fn args_summary_handles_multibyte_args() {
     assert_eq!(args_summary(&json!({"a": 1}), 200), "{\"a\":1}");
 }
 
+/// 造两个已广播的 ToolCall 父节点（模拟 settle_reasoning 之后的权威转写形态——
+/// ToolCallDelta 必然先广播过完整节点，`context.messages` 里一定有它们）。
+fn tc_context(ids: &[&str]) -> Vec<ChatMessage> {
+    ids.iter()
+        .map(|id| ChatMessage {
+            id: (*id).into(),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::ToolCall),
+            name: Some("vdfs_list".into()),
+            status: Some(MessageStatus::Streaming),
+            ..Default::default()
+        })
+        .collect()
+}
+
 /// S20.1 不变量：**本批每个 ToolCall 都必须以终态收场，且必须有结果子节点**。
 ///
 /// 中止（`is_aborted`）时循环在第一个工具之前就 `break`，本批一个都没执行——
 /// 若不收口，这些节点会停在参数流式阶段广播出的 `Streaming` 上：
-/// 前端永远转「运行中」（把"卡住"伪装成"在跑"），重启后还会被
-/// `cleanup_crashed_sessions` 误判为崩溃遗留。
+/// 前端永远转「运行中」（把"卡住"伪装成"在跑"）。`Streaming` 是瞬态状态
+/// （只广播、不落盘），停在 Streaming 是**广播层**的收口缺口，不是持久层问题。
 ///
 /// **只补父节点是不够的**（S23 实测事故）：前端 `ToolCallNode` 的「结果」段按**子节点**
 /// 渲染，缺子节点就是「有请求、无响应」，而请求视图那边有 `flatten_chat_messages`
@@ -178,20 +197,29 @@ async fn aborted_batch_terminates_every_tool_call() {
     let tcs = vec![
         ToolCallInfo {
             id: Some("tc1".into()),
+            wire_id: None,
             name: Some("vdfs_list".into()),
             arguments: json!({ "path": "." }),
             parse_error: None,
         },
         ToolCallInfo {
             id: Some("tc2".into()),
+            wire_id: None,
             name: Some("vdfs_list".into()),
             arguments: json!({ "path": "." }),
             parse_error: None,
         },
     ];
 
-    let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, test_ctx()).await;
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &mut plugin_chan,
+        &abort,
+        test_ctx(),
+        &tc_context(&["tc1", "tc2"]),
+    )
+    .await;
 
     assert_eq!(
         msgs.len(),
@@ -209,8 +237,12 @@ async fn aborted_batch_terminates_every_tool_call() {
             "结果必须说明「没跑」，而不是伪造一份看起来像工具返回的文本"
         );
     }
-    assert_eq!(updates.len(), 2, "两个未执行的调用都必须收到终态补丁");
-    for u in &updates {
+    assert_eq!(updates.len(), 2, "两个未执行的调用都必须收到终态快照");
+    for (u, id) in updates.iter().zip(["tc1", "tc2"]) {
+        // 完整快照语义：id / role / type 保留，终态字段如实应用
+        assert_eq!(u.id, id, "快照必须对应它自己的调用");
+        assert_eq!(u.role, Some(MessageRole::Assistant), "完整快照保留节点身份");
+        assert_eq!(u.msg_type, Some(MessageType::ToolCall));
         assert_eq!(u.status, Some(MessageStatus::Completed));
         assert_eq!(
             u.meta
@@ -242,19 +274,29 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
     let tcs = vec![
         ToolCallInfo {
             id: Some("tc1".into()),
+            wire_id: None,
             name: Some("vdfs_read".into()),
             arguments: json!({ "path": "a" }),
             parse_error: None,
         },
         ToolCallInfo {
             id: Some("tc2".into()),
+            wire_id: None,
             name: Some("vdfs_read".into()),
             arguments: json!({ "path": "b" }),
             parse_error: None,
         },
     ];
 
-    let (msgs, updates) = process_tool_calls_async(tcs, &None, &mut plugin_chan, &abort, ctx).await;
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &mut plugin_chan,
+        &abort,
+        ctx,
+        &tc_context(&["tc1", "tc2"]),
+    )
+    .await;
 
     assert_eq!(
         msgs.len(),
@@ -284,8 +326,15 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
 /// 差异由 `meta.failure_kind` 承载。
 #[test]
 fn not_executed_patch_is_completed_not_failed() {
-    let p = not_executed_patch("tc1", "not_executed");
-    assert_eq!(p.id, "tc1");
+    // 完整副本 + 就地应用终态（发射端从权威转写取副本后调用）
+    let mut p = ChatMessage {
+        id: "tc1".into(),
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::ToolCall),
+        ..Default::default()
+    };
+    apply_not_executed(&mut p, "not_executed");
+    assert_eq!(p.id, "tc1", "整条替换语义下 id 必须保持");
     assert_eq!(p.status, Some(MessageStatus::Completed));
     assert!(p.error.is_none());
     assert_eq!(
@@ -298,11 +347,13 @@ fn not_executed_patch_is_completed_not_failed() {
     );
     // 成因可区分：「被钩子拦下」与「批次没轮到」不是同一件事，
     // 共用一个标记会让事后排查只能靠猜。
+    let mut blocked = ChatMessage {
+        id: "tc1".into(),
+        ..Default::default()
+    };
+    apply_not_executed(&mut blocked, "blocked");
     assert_eq!(
-        not_executed_patch("tc1", "blocked")
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("failure_kind")),
+        blocked.meta.as_ref().and_then(|m| m.get("failure_kind")),
         Some(&json!("blocked"))
     );
 }

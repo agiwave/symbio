@@ -149,12 +149,7 @@ class ProtocolEnforcer {
       if (d && typeof d === 'object' && 'type' in d && 'data' in d) {
         return { type: d.type, data: d.data };
       }
-      // 场景 2: 兼容桥接期存量格式 { success: true, data: ... }
-      if (d && typeof d === 'object' && 'success' in d && 'data' in d) {
-        logger.debug('Protocol', `${path} unwrapping legacy success/data wrapper`);
-        return { type: 'legacy_response', data: d.data };
-      }
-      // 场景 3: 裸数据帧 (视作 type=message)
+      // 场景 2: 裸数据帧 (视作 type=message)
       return { type: 'message', data: d };
     }
     if ('Error' in frame) return { type: 'error', data: frame.Error[0] };

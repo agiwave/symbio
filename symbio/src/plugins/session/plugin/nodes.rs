@@ -5,7 +5,7 @@
 //!   [`message_dir_path`] / [`message_path`] / [`internal_dirs`] / [`title_from_new_path`]
 //! - **节点构造**：[`session_node`] / [`message_node`] / [`transcript_window`] /
 //!   [`window_params`] / `MAX_PARENT_STEPS` / `cursor_id`
-//! - **消息投影**：[`message_change`] / [`message_payload`] / `message_label` /
+//! - **消息投影**：`message_label` /
 //!   `message_status` / `message_preview` / [`message_text`] / [`ordered`] /
 //!   [`overlay_live`] / [`message_of`] / [`session_content`]
 //!
@@ -30,6 +30,9 @@ pub(crate) struct SessionRuntime {
     pub outcome: Option<String>,
     /// 上一轮的错误短消息（仅 `outcome == failed` 时有意义）
     pub error: Option<String>,
+    /// 会话级告警（可恢复）：持久化失败 / 长度截断 / 工具轮次上限。
+    /// 与 `error` 的分界：告警不改变运行态，会话照常运行；新一轮开始即清除。
+    pub warning: Option<String>,
 }
 
 /// 上一轮结局的词表：正常结束 / 用户中止 / 以错误结束。
@@ -44,25 +47,28 @@ pub(crate) use crate::symbio_core::vdfs_provider::{
 
 impl SessionRuntime {
     /// 空闲：没在跑，也没有已知的上一轮结局
-    pub(crate) fn idle() -> Self {
+    pub(crate) fn idle(warning: Option<String>) -> Self {
         Self {
             working: false,
             outcome: None,
             error: None,
+            warning,
         }
     }
 
-    /// 运行中：新一轮开始，上一轮的结局随之作废（否则失败角标会残留）
+    /// 运行中：新一轮开始，上一轮的结局与告警随之作废（否则失败角标/告警条会残留）
     pub(crate) fn working() -> Self {
         Self {
             working: true,
             outcome: None,
             error: None,
+            warning: None,
         }
     }
 
-    /// 由上一轮结局构造（`failed` 时带错误文案）
-    pub(crate) fn finished(outcome: &str, error: Option<String>) -> Self {
+    /// 由上一轮结局构造（`failed` 时带错误文案；告警原样保留——
+    /// 「以告警收尾的一轮」在结束后仍应能看到那条告警）
+    pub(crate) fn finished(outcome: &str, error: Option<String>, warning: Option<String>) -> Self {
         Self {
             working: false,
             outcome: Some(outcome.to_string()),
@@ -71,10 +77,11 @@ impl SessionRuntime {
             } else {
                 None
             },
+            warning,
         }
     }
 
-    /// 从活跃会话状态（`is_working` + 结局 + 错误）投影运行态。
+    /// 从活跃会话状态（`is_working` + 结局 + 错误 + 告警）投影运行态。
     ///
     /// **唯一入口**：把「运行中时结局一律作废」这条规则收在一处——否则
     /// 「正在跑却带着上次错误」这种非法组合会在每个调用点各拼一次，而它的
@@ -83,13 +90,14 @@ impl SessionRuntime {
         working: bool,
         outcome: Option<String>,
         error: Option<String>,
+        warning: Option<String>,
     ) -> Self {
         if working {
             return Self::working();
         }
         match outcome.as_deref() {
-            Some(o) => Self::finished(o, error),
-            None => Self::idle(),
+            Some(o) => Self::finished(o, error, warning),
+            None => Self::idle(warning),
         }
     }
 
@@ -157,6 +165,9 @@ pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> vdfs::Vdf
     }
     if let Some(error) = &rt.error {
         let _ = n.attributes.insert("error".to_string(), json!(error));
+    }
+    if let Some(warning) = &rt.warning {
+        let _ = n.attributes.insert("warning".to_string(), json!(warning));
     }
     n
 }
@@ -293,6 +304,8 @@ pub(crate) const SEG_MESSAGES: &str = "消息";
 /// 转写列表本身的 provider 子树内路径（`<id>/消息`）。
 ///
 /// 与 [`message_path`] 同源：列表与列表项是同一地址方案的两级。
+// 仅测试构造寻址字符串使用（生产路径由分发层按 list 节点补全）。
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn message_dir_path(session_id: &str) -> String {
     format!("{session_id}/{SEG_MESSAGES}")
 }
@@ -300,73 +313,11 @@ pub(crate) fn message_dir_path(session_id: &str) -> String {
 /// 单条消息的 provider 子树内路径（`<id>/消息/<mid>`）。
 ///
 /// 与 [`parse_session_path`] 互逆，因此与它同处——地址的「拼」与「解」必须同源，
-/// 分开写就会在改地址方案时漏改一边。变更发射（[`message_change`]）用它构造
-/// `VdfsChange::path`，与 `list` 返回的节点地址严格一致；编排层的删除帧
-/// （`orchestrator` 的消费循环）也用它——**同一条消息只有一个地址**，
-/// 不能一处拼一种。
+/// 分开写就会在改地址方案时漏改一边。生产路径由分发层按 `list` 返回的节点
+/// 补全展示地址；本函数供测试与文档锁定地址方案（测试用它寻址，不写裸字面量）。
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn message_path(session_id: &str, mid: &str) -> String {
     format!("{session_id}/{SEG_MESSAGES}/{mid}")
-}
-
-/// 一条消息补丁 → VDFS 变更。
-///
-/// 规则见 `docs/vdfs-session-messages.md` §4：
-///
-/// | 补丁形状 | 变更 | 载荷 |
-/// |---|---|---|
-/// | 新 `id`（此前未出现） | `created` | 节点视图 + 内容快照 |
-/// | 尾部追加了 `delta` | `appended` | **仅** `delta` |
-/// | 其余（状态迁移 / 全量替换） | `updated` | 节点视图 + 内容快照 |
-///
-/// `existed` 与 `appended` 都来自实际合并结果（`orchestrator::merge_message_patch`
-/// 的返回值），本函数**不做任何再判断**——它只把既成事实翻译成变更词汇。
-/// 判据若在这里重算一遍，就有可能与合并方式不一致：合并按追加、这里判成替换，
-/// 消费者按 `delta` 拼接就会得到错误内容。
-///
-/// `msg` 必须是**合并后的完整消息**（不是补丁）——载荷要能独立成立，
-/// 消费者拿到它就不必再回读。
-pub(crate) fn message_change(
-    session_id: &str,
-    msg: &cm::ChatMessage,
-    existed: bool,
-    appended: Option<String>,
-) -> vdfs::VdfsChange {
-    let path = message_path(session_id, &msg.id);
-    if !existed {
-        return message_payload(
-            vdfs::VdfsChange::new(path, vdfs::VDFS_CHANGE_CREATED),
-            session_id,
-            msg,
-        );
-    }
-    match appended.filter(|d| !d.is_empty()) {
-        // 追加走**窄载荷**：这一路每帧都发，多挂一个字就是 O(n²)。
-        Some(delta) => vdfs::VdfsChange::appended(path, delta),
-        None => message_payload(
-            vdfs::VdfsChange::new(path, vdfs::VDFS_CHANGE_UPDATED),
-            session_id,
-            msg,
-        ),
-    }
-}
-
-/// 给 `created` / `updated` 变更挂上**节点视图 + 内容快照**。
-///
-/// 这两类变更每轮只有寥寥数次，把「变成了什么」一并带上，消费者就不必
-/// 为了填一条消息再跑 `stat` + `read` 两个来回——VDFS 承载会话转写因此
-/// 不比既有的专用消息通道更贵。
-///
-/// `appended` **不走这里**：它每帧都发，载荷必须保持只有增量。
-pub(crate) fn message_payload(
-    change: vdfs::VdfsChange,
-    session_id: &str,
-    msg: &cm::ChatMessage,
-) -> vdfs::VdfsChange {
-    // 节点路径填成 provider 子树内相对路径，由分发层（`fs` / `composite` 的
-    // watch 包装）经 `map_paths` 补成展示地址——与 `list` 返回的节点同口径。
-    let mut node = message_node(msg);
-    node.path = message_path(session_id, &msg.id);
-    change.with_node(node).with_content(message_text(msg))
 }
 
 /// 会话挂载点内的路径解析结果
@@ -540,9 +491,17 @@ pub(crate) fn message_node(m: &cm::ChatMessage) -> vdfs::VdfsNode {
         ("role", json!(m.role)),
         ("type", json!(m.msg_type)),
         // 工具名等**结构字段**：进程内消费者（子会话转播 / CLI）靠它还原消息，
-        // 节点标题里虽也带工具名，但那是展示文案，不可当数据读
-        ("name", json!(m.name)),
+        // 节点标题里虽也带工具名，但那是展示文案，不可当数据读。
+        //
+        // ⚠️ 键名必须是 `tool_name` 而不是 `name`：`VdfsNode` 结构体自身的
+        // `name` 字段承载**节点 id**，而 attributes 经 `#[serde(flatten)]`
+        // 序列化到顶层——同名键会让 attributes 的值覆盖结构体的 id
+        // （文本 / Turn / Reasoning 节点的工具名是 `null`，序列化后节点 id
+        // 变成 null，前端按 `node.name` 寻址的整条实时链路随之瘫痪）。
+        ("tool_name", json!(m.name)),
         ("parent_id", json!(m.parent_id)),
+        // ToolCall 的 wire id（provider 原始 tool_call_id；节点 id 才是本节点的地址）
+        ("tool_call_id", json!(m.tool_call_id)),
         ("seq", json!(m.seq)),
         ("error", json!(m.error)),
     ] {

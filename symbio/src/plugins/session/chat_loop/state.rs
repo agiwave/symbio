@@ -287,9 +287,9 @@ impl CompressionEmitter {
         Self { plugin, state }
     }
 
-    /// 插入「正在压缩」节点：进在途缓冲 + 广播。
+    /// 插入「正在压缩」节点：进在途图 + 发布（经 Transcript 唯一入口）。
     ///
-    /// 进在途缓冲是必要的：会话叶子 `read` 会叠加在途（见 `overlay_live`），
+    /// 进在途图是必要的：会话叶子 `read` 会叠加在途（见 `overlay_live`），
     /// 因此压缩期间切走再切回，这个节点仍然可见——否则用户切回来只看到「什么
     /// 都没有」，又变回最初那个"卡死"观感。
     pub async fn begin(&self, node_id: &str) {
@@ -301,17 +301,21 @@ impl CompressionEmitter {
             content: Some(MessageContent::Text("正在压缩上下文…".to_string())),
             ..Default::default()
         };
-        self.state.live_messages.lock().await.push(node.clone());
-        self.emit(node, false).await;
+        self.state
+            .transcript
+            .lock()
+            .await
+            .apply(session_chat_response::NodeOp::Upsert {
+                message: Box::new(node),
+            });
     }
 
-    /// 定稿节点并使其离开在途缓冲，返回终态副本供调用方落库。
+    /// 定稿节点并使其离开在途图，返回终态副本供调用方落库。
     ///
-    /// 在途缓冲里找不到该 id 时（例如前端是在压缩开始之后才连上的）**照样构造
-    /// 并广播**——终态必须到达，否则那个 `Streaming` 节点会永远留在前端转圈。
+    /// 在途图里找不到该 id 时（例如前端是在压缩开始之后才连上的）**照样构造
+    /// 并发布**——终态必须到达，否则那个 `Streaming` 节点会永远留在前端转圈。
     ///
-    /// `failure_kind`：失败原因码（写进 `meta.failure_kind`）。必须在**广播之前**
-    /// 设好——本方法先 `emit` 再返回，事后改 meta 前端拿到的是没有原因码的那份。
+    /// `failure_kind`：失败原因码（写进 `meta.failure_kind`）。
     pub async fn finish(
         &self,
         node_id: &str,
@@ -320,65 +324,40 @@ impl CompressionEmitter {
         failure_kind: Option<&str>,
     ) -> ChatMessage {
         let node = {
-            let mut live = self.state.live_messages.lock().await;
-            match live.iter_mut().find(|m| m.id == node_id) {
-                Some(existing) => {
-                    existing.status = Some(status.clone());
-                    existing.content = Some(MessageContent::Text(text.to_string()));
-                    if let Some(kind) = failure_kind {
-                        let mut meta = existing
-                            .meta
-                            .clone()
-                            .unwrap_or_else(|| serde_json::json!({}));
-                        meta["failure_kind"] = serde_json::json!(kind);
-                        existing.meta = Some(meta);
-                    }
-                    existing.clone()
-                }
-                None => {
-                    let mut node = ChatMessage {
-                        id: node_id.to_string(),
-                        role: Some(MessageRole::Assistant),
-                        msg_type: Some(MessageType::Compression),
-                        status: Some(status.clone()),
-                        content: Some(MessageContent::Text(text.to_string())),
-                        ..Default::default()
-                    };
-                    if let Some(kind) = failure_kind {
-                        node.meta = Some(serde_json::json!({ "failure_kind": kind }));
-                    }
-                    node
-                }
+            let mut tr = self.state.transcript.lock().await;
+            let mut node = tr.get(node_id).unwrap_or_else(|| ChatMessage {
+                id: node_id.to_string(),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Compression),
+                ..Default::default()
+            });
+            node.status = Some(status.clone());
+            node.content = Some(MessageContent::Text(text.to_string()));
+            if let Some(kind) = failure_kind {
+                let mut meta = node.meta.take().unwrap_or_else(|| serde_json::json!({}));
+                meta["failure_kind"] = serde_json::json!(kind);
+                node.meta = Some(meta);
             }
+            // 发布终态快照 + 落库回执：权威副本即将由调用方落库，
+            // 在途副本必须作废（否则同一条消息以「存储 + 在途」两种形态参与叠加）。
+            tr.apply(session_chat_response::NodeOp::Upsert {
+                message: Box::new(node.clone()),
+            });
+            tr.persisted(std::slice::from_ref(&node.id));
+            node
         };
-        // 权威副本即将由调用方落库，在途副本必须作废：否则同一条消息会以
-        // 「存储一份 + 在途一份」两种形态参与叠加。
-        self.state
-            .live_messages
-            .lock()
-            .await
-            .retain(|m| m.id != node_id);
-        self.emit(node.clone(), true).await;
         node
     }
 
-    async fn emit(&self, node: ChatMessage, existed: bool) {
-        self.plugin
-            .emit_message_patch(&self.state.session_id, &node, existed, None)
-            .await;
-    }
-
-    /// 整表重写（L2 语义压缩）后的收敛广播。
+    /// 整表重写（L2 语义压缩）后的收敛发布。
     ///
-    /// 与 [`Self::emit`] 的区别：那条发的是"压缩这一动作本身"的节点，这条发的是
-    /// **转写列表被重写**这件事——被压掉的消息逐条 `deleted`，新的首条（快照）
-    /// `created`。没有它，前端会一直显示压缩前的历史。
-    ///
-    /// 只走 VDFS 变更、不发前端帧：消息通道已归 VDFS 一处（见
-    /// `plugin.rs::emit_message_updated` 的同款说明）。
+    /// 与上面两个方法的区别：它们发布的是"压缩这一动作本身"的节点，这条发的是
+    /// **转写列表被重写**这件事——被压掉的消息逐条 Remove，新的首条（快照）
+    /// Upsert。没有它，前端会一直显示压缩前的历史。
     pub async fn emit_rewrite(&self, session_id: &str, dropped: &[String], head: &ChatMessage) {
         self.plugin
-            .emit_transcript_rewritten(session_id, dropped, head);
+            .emit_transcript_rewritten(session_id, dropped, head)
+            .await;
     }
 }
 
@@ -439,10 +418,19 @@ impl ChatOrchestrator {
             // 此处仅将其与根 Turn 标记 Completed 即可。仅当流式期间因故未建立 Reasoning 节点时，
             // 才补发一个 Text 节点兜底（此时不存在 Reasoning 节点，不会造成重复）。
             if !out.reasoning_child_id.is_empty() {
-                emit_status(
+                // 完整快照：与 build_assistant_messages 落库形态一致
+                //（id / 父子关系 / 内容 / 状态一次给全），消费端按 id 整条替换。
+                emit_update(
                     channel,
-                    out.reasoning_child_id.clone(),
-                    MessageStatus::Completed,
+                    ChatMessage {
+                        id: out.reasoning_child_id.clone(),
+                        parent_id: Some(root_id.into()),
+                        role: Some(MessageRole::Assistant),
+                        msg_type: Some(MessageType::Reasoning),
+                        content: Some(MessageContent::Text(out.reasoning.clone())),
+                        status: Some(MessageStatus::Completed),
+                        ..Default::default()
+                    },
                 )
                 .await;
             } else {
@@ -465,26 +453,42 @@ impl ChatOrchestrator {
                 )
                 .await;
             }
-            emit_status(channel, root_id.into(), MessageStatus::Completed).await;
+            // 根 Turn 的终态**不在此发出**：Turn 是组合节点（仅分组，无正文），
+            // 终态必须晚于子树——而本轮的 ToolCall 要到 `close_turn` 里才执行完。
+            // 唯一发射点是 `run_chat_loop` 的 `finalize_turn_root`（本轮收尾点）。
             return;
         }
 
         // Mark reasoning child as completed
         if !out.reasoning.is_empty() && !out.reasoning_child_id.is_empty() {
-            emit_status(
+            emit_update(
                 channel,
-                out.reasoning_child_id.clone(),
-                MessageStatus::Completed,
+                ChatMessage {
+                    id: out.reasoning_child_id.clone(),
+                    parent_id: Some(root_id.into()),
+                    role: Some(MessageRole::Assistant),
+                    msg_type: Some(MessageType::Reasoning),
+                    content: Some(MessageContent::Text(out.reasoning.clone())),
+                    status: Some(MessageStatus::Completed),
+                    ..Default::default()
+                },
             )
             .await;
         }
 
         // Mark response text child as completed (exists if there was text content)
         if !out.text.is_empty() && !out.response_text_child_id.is_empty() {
-            emit_status(
+            emit_update(
                 channel,
-                out.response_text_child_id.clone(),
-                MessageStatus::Completed,
+                ChatMessage {
+                    id: out.response_text_child_id.clone(),
+                    parent_id: Some(root_id.into()),
+                    role: Some(MessageRole::Assistant),
+                    msg_type: Some(MessageType::Text),
+                    content: Some(MessageContent::Text(out.text.clone())),
+                    status: Some(MessageStatus::Completed),
+                    ..Default::default()
+                },
             )
             .await;
         }
@@ -505,8 +509,17 @@ impl ChatOrchestrator {
         // 状态机见 `docs/node-state-streaming.md` §2.2；
         // 「每个 ToolCall 必然到达终态」这条不变量由上面两处负责保证。
 
-        // Mark the root Turn node as completed
-        emit_status(channel, root_id.into(), MessageStatus::Completed).await;
+        // 根 Turn 的终态**不在此发出**。
+        //
+        // LLM 流结束只说明「模型这一轮说完了」，不说明「这一轮结束了」：Turn 是
+        // **组合节点**（仅分组、无正文），它的终态必须**跟随子树**——而本轮的
+        // ToolCall 此时连执行都还没开始（执行在 `close_turn` 内，含整个执行窗口）。
+        // 若在此标 `Completed`，树上就会出现"容器已完成、其中的工具调用仍在运行"
+        // 这种自相矛盾的形状（实测抓包 seq 5 早于 seq 6–8 即此）。
+        //
+        // 唯一的发射点是 `run_chat_loop` 在 `close_turn` 返回之后的
+        // [`finalize_turn_root`]：那一刻子树才真正收敛，且发出的正是**即将落库的
+        // 那条节点**——live 与 storage 按同一取值收敛。
     }
 }
 

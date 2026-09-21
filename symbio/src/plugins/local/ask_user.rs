@@ -252,8 +252,10 @@ impl Capability for AskUserTool {
         let _ = tx_side
             .tx
             .send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::StreamEvent::Update { message: node })
-                    .unwrap_or_default(),
+                serde_json::to_value(session_chat_response::NodeOp::Upsert {
+                    message: Box::new(node),
+                })
+                .unwrap_or_default(),
             ))
             .await;
         // 关闭发送侧，工具执行结束（编排层据此结束本轮并进入 AwaitingInput）

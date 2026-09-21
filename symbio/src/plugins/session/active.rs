@@ -1,4 +1,3 @@
-use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::PluginFrame;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -30,6 +29,12 @@ pub struct ActiveSessionStateInner {
     /// 只能挂在会话节点上——原先是前端一个平行状态（`sessionErrors`），
     /// 现在它是节点的属性（`attributes.error`）。
     pub last_error: Option<String>,
+    /// 会话级告警（可恢复，面向用户）：持久化失败 / 长度截断 / 工具轮次上限。
+    ///
+    /// 它是**状态**不是事件：由 `NodeOp::Warn` 帧写入、随会话节点
+    /// `attributes.warning` 下发，前端按状态渲染；新一轮请求开始（`Working`）时清除。
+    /// 与 `last_error`（失败终态）不同：告警不改变运行态，会话照常运行。
+    pub last_warning: Option<String>,
     /// 连续自动压缩失败次数（仅自动路径计数；主动 `context_compact` 不计）。
     ///
     /// 熔断依据：LLM 压缩是**整段历史的完整请求**，失败一次就是数分钟的注定浪费。
@@ -47,22 +52,20 @@ pub struct ActiveSessionState {
     /// 会话 ID 字符串（用于 EventBus 标签）
     pub session_id: String,
     pub inner: RwLock<ActiveSessionStateInner>,
-    /// 本轮**在途**（尚未落库）的消息缓冲。
+    /// 会话**转写**（在途图 + 单调 seq + 实时发布）。
     ///
     /// ## 一份数据，两个视图
     ///
-    /// 这与消费循环里收集流式补丁的那个缓冲是**同一个 `Arc`**（见
-    /// `orchestrator::run_chat_loop_task`），不是第二份拷贝：
+    /// 这是消费循环里唯一写入的那个 Transcript（见 `transcript.rs`），不是第二份拷贝：
     ///
-    /// - 前端实时流：补丁逐帧经 `StreamEvent::Update` 下发；
-    /// - VDFS 转写列表：`<根>/session/<id>/消息` 把这份缓冲叠加在落库转写之上。
+    /// - 前端实时流：`NodeOp` 逐帧经 `apply` 分配 seq 后发布到转写流订阅者；
+    /// - VDFS 转写列表：`<根>/session/<id>/消息` 把在途图叠加在落库转写之上。
     ///
     /// 之所以必须共享：**流式期间消息还没落库**（`persist_messages` 只在每轮结束时
-    /// 写盘）。若 VDFS 只读存储，列表在流式期间就是空的，`created` / `appended`
-    /// 事件到达时消费者去 `list` 会一无所获——「转写即列表」当场失效。
+    /// 写盘）。若 VDFS 只读存储，列表在流式期间就是空的。
     ///
     /// 生命周期：每轮开始时清空（防上一轮残留），本轮落库后清空（防与落库版本重复）。
-    pub live_messages: Arc<Mutex<Vec<cm::ChatMessage>>>,
+    pub transcript: Arc<Mutex<super::transcript::Transcript>>,
 }
 
 impl Default for ActiveSessionState {
@@ -80,7 +83,7 @@ impl ActiveSessionState {
     pub fn with_session_id(session_id: String) -> Self {
         Self {
             request_id: AtomicU64::new(0),
-            session_id,
+            session_id: session_id.clone(),
             inner: RwLock::new(ActiveSessionStateInner {
                 is_working: false,
                 ai_control_tx: None,
@@ -88,10 +91,11 @@ impl ActiveSessionState {
                 last_tool_calls: Vec::new(),
                 last_outcome: None,
                 last_error: None,
+                last_warning: None,
                 auto_compress_failures: 0,
                 auto_compress_circuit_opened_at: None,
             }),
-            live_messages: Arc::new(Mutex::new(Vec::new())),
+            transcript: Arc::new(Mutex::new(super::transcript::Transcript::new(session_id))),
         }
     }
 

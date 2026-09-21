@@ -546,16 +546,19 @@ impl vdfs::VdfsProvider for SessionPlugin {
     ///
     /// | 路径 | 动作 | 语义 | 变更 | `data` |
     /// |---|---|---|---|---|
-    /// | `<id>/消息/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 该节点上 `truncated` | 被删 id 列表 |
-    /// | `<id>/消息` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 列表目录上 `deleted` | 无 |
+    /// | `<id>/消息/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 转写流一条 `reset` | 被删 id 列表 |
+    /// | `<id>/消息` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 转写流一条 `reset` | 无 |
     ///
-    /// 清空为什么复用 `deleted` 而不是自造一个值：见 [`VDFS_ACTION_TRUNCATE`]
-    /// 的文档——`deleted` 落在**列表目录**这个地址上时没有第二种读法，地址已把
-    /// 语义定死；只有「从这里删到末尾」这种 `deleted` 表达不了的集合操作才需要
-    /// 自己的变更值。
+    /// ## 变更为什么落在转写流上，而不是 VDFS 变更
+    ///
+    /// 消息的变更面只有一条通道（`session/stream` 的 `NodeOp`，见
+    /// `symbio_core::transcript_stream`）；VDFS 侧只剩会话节点运行态与记忆文件。
+    /// 两种集合操作都发 `NodeOp::Reset`——被删条数上不封顶，逐条 `remove` 会让
+    /// 一次「清空历史」变成一场大面积通知，而消费端本来只需要知道"本地那份别信了"。
+    /// **权威的被删 id 列表走回执 `data`**：调用方据此幂等对齐，不依赖任何推送。
     ///
     /// 为什么是动作而不是 `delete`：见 [`VDFS_ACTION_TRUNCATE`] 的文档
-    /// （三种删除语义各有一个变更值，不共用一个动词）。
+    /// （`delete` 是**逐节点**语义，表达不了"删一个节点却删掉了它后面所有"）。
     ///
     /// 其它路径 / 未实现的动作一律 [`VdfsError::NotImplemented`]——消费方据此
     /// 不给出入口，而不是收到一个"成功但什么都没做"。
@@ -718,7 +721,7 @@ impl SessionPlugin {
     async fn live_messages_of(&self, id: &str) -> Vec<cm::ChatMessage> {
         let active = self.active_mgr.sessions.read().await;
         match active.get(id) {
-            Some(st) => st.live_messages.lock().await.clone(),
+            Some(st) => st.transcript.lock().await.snapshot(),
             None => Vec::new(),
         }
     }
@@ -745,13 +748,12 @@ impl SessionPlugin {
     /// 补丁**不带** `id` 是合法用法：调用方 `write` 时已按地址补齐（见那里的注释），
     /// 因此到这里 `patch.id` 必然等于 `mid`，除非调用方**明确**写了一个别的 id。
     ///
-    /// ## 为什么不复用 `ChatMessage::apply_patch`
+    /// ## `content` 是**整体替换**，不是追加
     ///
-    /// 两者对 `content` 的语义**有意不同**：`apply_patch` 服务于流式增量
-    /// （Text / Reasoning 逐帧**追加**），而本方法的调用方是在 VDFS 上
-    /// **编辑一条已有消息**，期望的是**整体替换**。直接换成 `apply_patch` 会让
-    /// 「改一段话」变成「在原文后面接一段」。要收敛成一份实现，得先给 core 的
-    /// `apply_patch` 加一个"合并模式"参数，而不是在这里改调用点。
+    /// 本方法的调用方是在 VDFS 上**编辑一条已有消息**，期望的是整体替换。
+    /// 流式逐帧累积走的是另一条路（`NodeOp::Upsert` 发完整快照、
+    /// `NodeOp::Append` 发明示的窄增量），两者在**协议层**就已分开，
+    /// 因此这里不需要任何「合并模式」开关。
     ///
     /// （保存走 `replace_messages` 是安全的：其内部的 `assign_seq` 对**已带且单调**
     /// 的序号是原样沿用的，不会重排既有消息。）
@@ -830,8 +832,14 @@ impl SessionPlugin {
 
         let updated = existing.clone();
         chat_session.replace_messages(messages).await?;
-        // 变更：把合并后的**完整消息**作为载荷发出（消费者零回读）
-        self.emit_message_updated(session_id, &updated);
+        // 变更：把合并后的**完整消息**作为快照发布（消费端按 id 整条替换，零回读）
+        self.transcript_apply(
+            session_id,
+            NodeOp::Upsert {
+                message: Box::new(updated.clone()),
+            },
+        )
+        .await;
         Ok(updated)
     }
 
@@ -861,11 +869,12 @@ impl SessionPlugin {
         };
 
         chat_session.replace_messages(messages).await?;
-        // 变更：**一条** `truncated`（落在目标消息地址上），不是 N 条 `deleted`。
-        // 语义是"从这里到列表末尾全没了"，消费者按自己的顺序取区间即可——它不需要
-        // 收到被删的每一条，前端也因此不必等一场"大面积通知"。
+        // 变更：转写的**尾部区间**没了。消息变更只在 `session/stream` 上表达，
+        // 而那里没有承载"从这里到末尾"的增量形态——所以发 `NodeOp::Reset`，
+        // 消费端整份重读。回执里的 `deleted_ids` 是权威列表：调用方据此幂等
+        // 对齐本地视图，不必等一场"大面积通知"。
         if !deleted_ids.is_empty() {
-            self.emit_transcript_truncated(session_id, mid);
+            self.emit_transcript_reset(session_id).await;
         }
         Ok(deleted_ids)
     }
@@ -877,8 +886,10 @@ impl SessionPlugin {
     pub(crate) async fn clear_messages(&self, session_id: &str) -> Result<(), PluginError> {
         let chat_session = self.open_chat_session(session_id).await?;
         chat_session.replace_messages(Vec::new()).await?;
-        // 变更：列表整体失效（前端已在本地收敛，故只发变更、不发前端帧）
-        self.emit_transcript_cleared(session_id);
+        // 变更：转写整份作废——`NodeOp::Reset`（"清空并从存储整份重读"）。
+        // 被清掉的条数上不封顶，逐条 `remove` 会让一次「清空历史」变成一场大面积
+        // 通知；消费端需要知道的只是"本地那份别信了"。
+        self.emit_transcript_reset(session_id).await;
         Ok(())
     }
 
@@ -902,7 +913,7 @@ impl SessionPlugin {
     pub(crate) async fn session_runtime(&self, id: &str) -> SessionRuntime {
         let active = self.active_mgr.sessions.read().await;
         let Some(st) = active.get(id) else {
-            return SessionRuntime::idle();
+            return SessionRuntime::idle(None);
         };
         // `try_read` 失败（正被写者持有）时按"运行中"回答：运行态的写入都是
         // 瞬时操作，读不到就说明此刻正在变更——宁可多报一次运行中（前端会
@@ -915,6 +926,7 @@ impl SessionPlugin {
             inner.is_working,
             inner.last_outcome.clone(),
             inner.last_error.clone(),
+            inner.last_warning.clone(),
         )
     }
 
@@ -930,10 +942,11 @@ impl SessionPlugin {
                             inner.is_working,
                             inner.last_outcome.clone(),
                             inner.last_error.clone(),
+                            inner.last_warning.clone(),
                         ),
                         Err(_) => SessionRuntime::working(),
                     },
-                    None => SessionRuntime::idle(),
+                    None => SessionRuntime::idle(None),
                 };
                 session_node(s, &rt)
             })

@@ -74,6 +74,7 @@ impl From<NativeMessage> for ChatMessage {
             response_id: msg.response_id,
             prompt: msg.prompt,
             error: None,
+            tool_call_id: None,
         }
     }
 }

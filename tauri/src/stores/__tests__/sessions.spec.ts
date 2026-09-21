@@ -505,16 +505,14 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
 })
 
 /**
- * `hydrateFromHistory` 的**合并语义**（不是整表替换）。
+ * `hydrateFromHistory` 的**快照直载语义**（快照即权威）。
  *
- * 它接收的是「一次 IPC 往返之前」的快照，取回期间流式补丁仍在写入 store。
- * 整表替换会把这些**更新的**补丁覆盖掉（经典 lost update），而它们不会被重发
- * ——表现是消息内容倒退若干 token，或整条在途节点凭空消失，也就是
- * 「Turn 运行中切走再切回，正在跑的那一轮不见了」。
- *
- * 规则：快照权威；快照里没有的本地节点**仅当仍在飞行中**才保留。
+ * 转写的权威副本在存储：`loadMessages` 以此整表装载，增量由
+ * `vdfsTranscriptSync` 持续收敛——装载与增量消费是同一条数据链路的
+ * 两个入口，不存在需要"合并"的两个真相来源。旧合并语义（保留本地在途节点）
+ * 已删除：那是双数据源混写的补丁层。
  */
-describe('sessions store — 历史水合是合并，不是整表替换', () => {
+describe('sessions store — 历史水合是快照直载', () => {
   const SID = 's1'
   const snapshot = (messages: unknown[]) => {
     vdfsApi.readVdfs.mockResolvedValue({ text: JSON.stringify({ messages }) })
@@ -527,7 +525,7 @@ describe('sessions store — 历史水合是合并，不是整表替换', () => 
     sessionApi.listSessions.mockResolvedValue([])
   })
 
-  it('快照里没有的在途节点必须保留（正在跑的那一轮不能凭空消失）', async () => {
+  it('快照即权威：本地不在快照里的节点不保留（在途节点由增量通道继续收敛）', async () => {
     const store = useSessionsStore()
     store.hydrateFromHistory(SID, [
       { id: 'u1', role: 'user', type: 'user_prompt', seq: 1, content: '问题' },
@@ -542,24 +540,7 @@ describe('sessions store — 历史水合是合并，不是整表替换', () => 
     snapshot([{ id: 'u1', role: 'user', type: 'user_prompt', seq: 1, content: '问题' }])
     await store.loadMessages(SID)
 
-    const msgs = store.getSessionMessages(SID)
-    expect(msgs.map((m) => m.id)).toEqual(['u1', 'turn-live'])
-    expect(msgs[1].status).toBe('streaming')
-    expect(msgs[1].content).toBe('半截')
-  })
-
-  it('保留的在途节点重排到历史之后（本地 seq 游标可能小于快照最大值）', async () => {
-    const store = useSessionsStore()
-    // 本地游标从 0 起 ⇒ 这条在途节点拿到 seq = 1，远小于快照里的 5/6
-    store.putMessage(SID, { id: 'live', type: 'text', status: 'streaming' } as never)
-
-    snapshot([
-      { id: 'h1', type: 'text', seq: 5 },
-      { id: 'h2', type: 'text', seq: 6 },
-    ])
-    await store.loadMessages(SID)
-
-    expect(ids(store), '沿用旧 seq 会让在途节点排到历史之前').toEqual(['h1', 'h2', 'live'])
+    expect(ids(store)).toEqual(['u1'])
   })
 
   it('终态且不在快照里的本地节点被丢弃（被删除的陈旧副本不得复活）', async () => {
@@ -591,20 +572,14 @@ describe('sessions store — 历史水合是合并，不是整表替换', () => 
 })
 
 /**
- * 转写对账：**终态补丁丢失后的自愈**。
+ * 会话节点状态收敛：**零回读**。
  *
- * 消息状态只经 `kind = "vdfs"` 一条通道下发，而这条通道**不重放**
- * （订阅表为空时 `ChangeSubscriptions::notify` 直接返回，而 watch 登记是
- * fire-and-forget 的异步动作；消费循环也会在 `is_working` 翻转时丢掉手上那一帧）。
- * 丢一次终态，前端就永久停在「运行中」——它只做增量收敛，从不整表重拉。
- *
- * 判据**不是启发式**：节点补丁恒先于会话状态下发（正常收尾「清在途 → 复位
- * `is_working` → `emit_session_state`」，中止收尾「`converge_inflight` 广播节点终态
- * → `emit_session_state(aborted)`」），因此**会话报"不忙"时服务端不可能还有节点
- * 停在非终态**。据此回读收敛，而不是就地猜成 `completed`（猜错就是把"半截"
- * 谎报成"正常结束"并抹掉重试入口）。
+ * 旧机制里有「终态丢失自愈」（对账回读）——那是对「变更通道不重放」的补丁层，
+ * 已整体删除。现在唯一的数据链路是：会话节点状态由变更载荷就地收敛；
+ * 消息终态由后端保证落库，本地陈旧副本在下次快照直载（切换会话 / 重开）时纠正。
+ * 因此任何状态下都不回读——状态迁移是幂等的，后端权威节点视图会持续覆盖。
  */
-describe('sessions store — 终态丢失后的转写对账', () => {
+describe('sessions store — 会话节点状态收敛（零回读）', () => {
   const SID = 's1'
 
   beforeEach(() => {
@@ -617,7 +592,7 @@ describe('sessions store — 终态丢失后的转写对账', () => {
     startSessionNodeSync(useSessionsStore())
   })
 
-  it('会话转空闲但本地仍有 streaming 节点 → 回读权威终态收敛', async () => {
+  it('会话转空闲（含本地仍有 streaming 节点）→ 不回读，状态由载荷就地落定', async () => {
     const store = useSessionsStore()
     store.putMessage(SID, {
       id: 'tc1',
@@ -625,13 +600,6 @@ describe('sessions store — 终态丢失后的转写对账', () => {
       status: 'streaming',
       content: '{}',
     } as never)
-    // 服务端权威：这一条其实被定稿成 aborted（用户中止）。
-    // 就地猜 completed 会把"半截"谎报成"正常结束"，并抹掉重试入口。
-    vdfsApi.readVdfs.mockResolvedValue({
-      text: JSON.stringify({
-        messages: [{ id: 'tc1', type: 'tool_call', seq: 1, status: 'aborted', content: '{}' }],
-      }),
-    })
 
     emit({
       path: `@vfs/session/${SID}`,
@@ -640,32 +608,10 @@ describe('sessions store — 终态丢失后的转写对账', () => {
     })
     await flushPromises()
 
-    expect(vdfsApi.readVdfs, '必须回读权威状态，而不是就地猜').toHaveBeenCalled()
-    const [tc1] = store.getSessionMessages(SID)
-    expect(tc1.status).toBe('aborted')
-    expect(tc1.seq, 'seq 以快照为准，不沿用本地游标').toBe(1)
+    expect(vdfsApi.readVdfs, '状态收敛零回读：对账自愈已删除').not.toHaveBeenCalled()
   })
 
-  it('会话转空闲且本地没有非终态节点 → 一次回读都不发（正常路径零成本）', async () => {
-    const store = useSessionsStore()
-    store.putMessage(SID, {
-      id: 'a1',
-      type: 'text',
-      status: 'completed',
-      content: '好了',
-    } as never)
-
-    emit({
-      path: `@vfs/session/${SID}`,
-      change: 'updated',
-      node: sessionNode({ name: SID, status: 'active' }),
-    })
-    await flushPromises()
-
-    expect(vdfsApi.readVdfs).not.toHaveBeenCalled()
-  })
-
-  it('会话仍在运行时不触发对账（在途节点是合法的，不得被当成陈旧副本）', async () => {
+  it('会话仍在运行时同样零回读（在途节点是合法的）', async () => {
     const store = useSessionsStore()
     store.putMessage(SID, {
       id: 'tc1',
@@ -683,44 +629,16 @@ describe('sessions store — 终态丢失后的转写对账', () => {
     expect(vdfsApi.readVdfs).not.toHaveBeenCalled()
     expect(store.getSessionMessages(SID)[0].status).toBe('streaming')
   })
-
-  it('回读失败 → 保持现状（陈旧副本好过清空转写）', async () => {
-    const store = useSessionsStore()
-    store.putMessage(SID, {
-      id: 'tc1',
-      type: 'tool_call',
-      status: 'streaming',
-    } as never)
-    vdfsApi.readVdfs.mockRejectedValue(new Error('IPC 断了'))
-
-    emit({
-      path: `@vfs/session/${SID}`,
-      change: 'updated',
-      node: sessionNode({ name: SID, status: 'active' }),
-    })
-    await flushPromises()
-
-    expect(store.getSessionMessages(SID).map((m) => m.id)).toEqual(['tc1'])
-  })
 })
 
 /**
- * 存储号与本地号**分叉**之后的收敛。
+ * 存储号与本地号的关系：**权威号就地落定，不回读**。
  *
  * `seq` 是唯一的顺序锚点，但它有两套来源：未落库的节点拿到的是**本地游标**发的号
- * （`nextSeq`），落库后拿到的是**存储**分配的号。两者在正常情况下相等，一旦经过
- * 截断 / 压缩 / 重试（存储重排了号），本地游标就会超前或落后，同一棵树上于是
- * 并存两套号——排序随之错位，而刷新（整份回读）才恢复。
- *
- * 实测到的景象是「自己刚发的那条跑到最下面去了」：本地号（游标）比存储号大，
- * 于是用户消息排在所有拿存储号的节点之后。
- *
- * 判据是**确定的**（不是启发式）：同一条消息先拿到本地号、后拿到存储号，
- * 且两个号不同 ⇒ 本地那份转写的号不可全信。但**不回读于此刻**——会话还在跑，
- * 回读会与在途节点竞争（见 `hydrateTranscript` 的合并语义）；等它转空闲再收，
- * 复用已有的对账通路（`reconcileTranscript`）。
+ * （`nextSeq`），落库后拿到的是**存储**分配的号。存储回包携带的权威号直接覆盖本地号
+ * （幂等更新），顺序随之自动恢复——旧的「分叉标记 + 转空闲回读」是对账补丁，已删除。
  */
-describe('sessions store — 存储号与本地号分叉后的对账', () => {
+describe('sessions store — 存储号就地落定，不回读', () => {
   const SID = 's1'
 
   beforeEach(() => {
@@ -733,7 +651,7 @@ describe('sessions store — 存储号与本地号分叉后的对账', () => {
     startSessionNodeSync(useSessionsStore())
   })
 
-  /** 把会话节点状态推成「不忙」，触发空闲时的对账判定 */
+  /** 把会话节点状态推成「不忙」 */
   async function goIdle() {
     emit({
       path: `@vfs/session/${SID}`,
@@ -743,7 +661,7 @@ describe('sessions store — 存储号与本地号分叉后的对账', () => {
     await flushPromises()
   }
 
-  it('本地号被存储号替换 ⇒ 不在途中回读，转空闲后按存储收敛（顺序恢复）', async () => {
+  it('本地号被存储号替换 ⇒ 就地覆盖（顺序随权威号恢复），不回读', async () => {
     const store = useSessionsStore()
     // 上一轮的产物：存储号 5 / 6，本地游标因此被抬到 6
     store.hydrateFromHistory(SID, [
@@ -764,16 +682,7 @@ describe('sessions store — 存储号与本地号分叉后的对账', () => {
       'u1',
     ])
 
-    // 会话在跑：状态更新不得顺手触发回读
-    emit({
-      path: `@vfs/session/${SID}`,
-      change: 'updated',
-      node: sessionNode({ name: SID, status: 'working' }),
-    })
-    await flushPromises()
-    expect(vdfsApi.readVdfs, '在途回读会与未落库的节点竞争').not.toHaveBeenCalled()
-
-    // 存储回包：权威号是 4（截断 / 压缩后存储重排过号）⇒ 两套号分叉
+    // 存储回包：权威号是 4（截断 / 压缩后存储重排过号）⇒ 就地覆盖本地号
     store.putMessage(SID, {
       id: 'u1',
       role: 'user',
@@ -783,33 +692,23 @@ describe('sessions store — 存储号与本地号分叉后的对账', () => {
       content: '问题',
     } as never)
 
-    // 存储的权威顺序：u1 在 h1 / h2 **之前**
-    vdfsApi.readVdfs.mockResolvedValue({
-      text: JSON.stringify({
-        messages: [
-          { id: 'u1', type: 'user_prompt', seq: 4, status: 'completed', content: '问题' },
-          { id: 'h1', type: 'text', seq: 5, status: 'completed', content: '旧的' },
-          { id: 'h2', type: 'text', seq: 6, status: 'completed', content: '旧的' },
-        ],
-      }),
-    })
-
-    await goIdle()
-
-    expect(vdfsApi.readVdfs, '分叉必须靠一次回读收敛').toHaveBeenCalled()
     expect(store.getSessionMessages(SID).map((m) => m.id), '以存储号为锚点重排').toEqual([
       'u1',
       'h1',
       'h2',
     ])
+
+    // 转空闲：零回读（对账已删除）
+    await goIdle()
+    expect(vdfsApi.readVdfs).not.toHaveBeenCalled()
   })
 
-  it('权威号与本地号一致 ⇒ 不标记、不回读（正常路径零成本）', async () => {
+  it('权威号与本地号一致 ⇒ 无变化（幂等）', async () => {
     const store = useSessionsStore()
     store.hydrateFromHistory(SID, [
       { id: 'h1', type: 'text', seq: 1, status: 'completed', content: '旧的' },
     ] as never)
-    // 本地游标发号 2，随后存储也说是 2 —— 两套号**没有**分叉
+    // 本地游标发号 2，随后存储也说是 2 —— 两套号没有分叉
     store.putMessage(SID, { id: 'u1', type: 'user_prompt', status: 'completed' } as never)
     store.putMessage(SID, {
       id: 'u1',
@@ -818,31 +717,10 @@ describe('sessions store — 存储号与本地号分叉后的对账', () => {
       status: 'completed',
     } as never)
 
-    await goIdle()
-
-    expect(vdfsApi.readVdfs, '每一次轮次结束都回读会让流式对话付 N 次 IPC').not.toHaveBeenCalled()
-  })
-
-  it('回读失败 ⇒ 标记保留，下一次转空闲还试（不静默放弃）', async () => {
-    const store = useSessionsStore()
-    store.putMessage(SID, { id: 'u1', type: 'user_prompt', status: 'completed' } as never)
-    store.putMessage(SID, {
-      id: 'u1',
-      type: 'user_prompt',
-      seq: 9,
-      status: 'completed',
-    } as never)
-    vdfsApi.readVdfs.mockRejectedValueOnce(new Error('IPC 断了'))
+    expect(store.getSessionMessages(SID).map((m) => m.id)).toEqual(['h1', 'u1'])
 
     await goIdle()
-    expect(vdfsApi.readVdfs).toHaveBeenCalledTimes(1)
-
-    vdfsApi.readVdfs.mockResolvedValue({
-      text: JSON.stringify({ messages: [{ id: 'u1', type: 'user_prompt', seq: 9, status: 'completed' }] }),
-    })
-    await goIdle()
-
-    expect(vdfsApi.readVdfs, '失败不清标记').toHaveBeenCalledTimes(2)
+    expect(vdfsApi.readVdfs).not.toHaveBeenCalled()
   })
 })
 

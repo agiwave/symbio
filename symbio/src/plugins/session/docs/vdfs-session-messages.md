@@ -29,6 +29,16 @@
 > **S22 续**：当时剩下的一小块——`kind = "session"` 上的会话级事件（`Status` / `Error` /
 > `Abort`）——也已废除（会话运行态即会话节点，见 `node-state-streaming.md`）。
 > 会话域实时只余 `kind = "vdfs"` 一条频道。
+>
+> **S23 续（消息实时面改为单条转写流）**：消息的实时出口不再是 VDFS 变更，而是
+> `worker/session/stream` 一条转写流——载荷是 `NodeOp`（`upsert` / `append` / `remove` /
+> `reset` / `warn`）+ 会话内单调 `seq`（见 `symbio_core/transcript_stream.rs` 与
+> `services/transcriptStream.ts`）。因此本文中一切「实时 = `kind = "vdfs"` 的
+> `created` / `appended` / `updated`」的描述（§2.2 引的 `ChatMessage::apply_patch`、
+> §S17 的 `merge_message_patch`、§4 的补丁形状对照表）**描述的是当时的模型**——
+> 那两个函数**已删除**，消息不再走 VDFS 变更；保留下来是为了记录推导过程。
+> **读面不受影响**：`read(<根>/session/<sid>)` 仍是一次拿整份历史，§2.1 的地址
+> 与 §3.4 的 `seq` 对账**仍然有效**。
 
 ---
 
@@ -294,7 +304,7 @@ LLM 能通过 `vdfs_read` 在**同一地址空间**里读会话历史——
 #### 发射点：不是 `broadcast_message_update`，而是**消费循环**
 
 原计划把翻译挂在 `chat_loop::broadcast_message_update` 上。实施时发现这个判断
-**不成立**：那个函数只是**众多**发射点之一。写 `StreamEvent::Update` 到前端的
+**不成立**：那个函数只是**众多**发射点之一。写 `MessageChange::Upsert` 增量帧的
 地方至少有——`turn.rs::emit_update`（模型流式，3 处）、`chat_loop`（4 处）、
 `tool_executor`（8 处）、`resume.rs`（恢复重写）、`ask_user`、`local/shell`
 （工具输出流）、`agent/host/subagent`（子会话转发）。挂在其中任何一个上，
@@ -343,7 +353,7 @@ LLM 能通过 `vdfs_read` 在**同一地址空间**里读会话历史——
 因此 `ActiveSessionState` 增加 `live_messages`：**与消费循环收集流式补丁的那个
 缓冲是同一个 `Arc`**（不是第二份拷贝）。一份数据、两个视图：
 
-- 前端实时流：逐帧 `StreamEvent::Update`；
+- 前端实时流：逐帧 `MessageChange::Upsert`；
 - VDFS 转写列表：`transcript_of(id)` = 落库转写 ∪ 在途缓冲。
 
 合并规则：同 id 时在途版本胜出（它更新），但 **`seq` 从落库版本继承**——顺序锚点
@@ -482,7 +492,7 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
 - 前端死文件 `schemas/session_get_messages.ts` 删除（`getSessionMessages` 包装器
   失效后它失去唯一引用）；`session/get_messages` **后端路由保留**——它仍被
   `agent/host/subagent.rs` 用来读父会话历史。
-- **删除也必须发变更**：`resume.rs` 的 `StreamEvent::Delete` 由消费循环转成
+- **删除也必须发变更**：`resume.rs` 的 `MessageChange::Remove` 由消费循环转成
   VDFS `deleted`（消费循环是全部补丁的唯一收口，删除帧同样经过它）——这是
   **逐节点**删除（删一棵子树，后面的消息留着）；
   `chat/clear_messages` / `chat/update_message` 两条**前端自发起、已在本地收敛**的
@@ -490,6 +500,45 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
   `emit_transcript_truncated`，发的是 **`truncated`**——因为它的语义是「目标及其后
   全部」，一条就够，不必按被删节点数发 N 条。
   漏掉任何一条，VDFS 视图都会残留一个已不存在的节点且永不纠正。
+
+---
+
+### S23 —— 协议去补丁化（`Upsert` = 完整快照，追加 = 显式帧）（已完成）
+
+S17 建立的「合并 + 翻译」机制在验证期暴露了它的结构性缺陷：**补丁语义本身就是
+缺陷**。`Upsert` 帧里装的是残缺 `ChatMessage`（content 只有增量、status 只带状态），
+消费端要靠四套各自为政的合并实现猜发射端意图——schema 层 `ChatMessage::apply_patch`、
+编排层 `merge_message_patch`、存储层 `update_messages` 的合并、前端
+`mergeMessagePatch`。content 是追加还是替换、meta 是合并还是清空，全靠 role/type
+隐式推断；「None 是不碰还是清空」这类歧义直接造成过线上缺陷（`name` 键冲突、
+幽灵节点伪造）。四套语义只要一套漂移，表现就是**静默**的显示错乱。
+
+**裁决：通道上只有显式操作，没有补丁。** 每个帧变元只有一种含义，接收端只做
+帧面动作、不做解释：
+
+| 帧 | 含义 | 消费动作 |
+|---|---|---|
+| `Upsert { message }` | **完整消息快照** | 按 id 整条替换（不存在则创建） |
+| `Append { message_id, delta }` | 往已存在消息的 Text 尾部追加 | 缓冲追加 → VDFS `appended` 窄载荷 |
+| `Remove` / `Warn` | 删除 / 会话级告警 | （不变） |
+
+发射端纪律：**读-改-写发生在状态所有者处**。状态迁移帧从权威转写取完整副本
+→ 应用终态 → 整条广播（`emit_parent_finalized` / `emit_tool_running` /
+`finalize_assistant_turn`）；正文流式首帧是完整快照、后续 delta 走 `Append`
+窄帧（O(delta)，与 S17 的流量论证一致）。merge 语义在**存储层**也不复存在：
+`update_messages` 整个删除（父节点终态随 `persist_messages` 落库，镜像同步是
+整条替换），`ChatMessage::apply_patch`、`merge_message_patch` 一并删除。
+
+协议违例（对未知 id 追加 / 终态帧找不到父节点）现在**当场报错丢弃**，
+不再静默造幽灵节点或假装无事发生——暴露问题，不掩盖问题。
+
+附带修正（同一错误假设的产物，一并清除）：
+
+- `converge_inflight` 删除「扫存储」分支——持久层写入不变量保证存储只有终态，
+  「存储里的在途节点」不存在（历史分支还把 status=None 的普通消息误判为在途）；
+- 工具结果子节点的广播直接用落库的 `tool_msg`（截断标记 / 存档路径不再只活在存储里）；
+- 协议失败（模型没给出调用 id）的兜底父节点改为**完整** ToolCall 终态节点并补入
+  转写落库——结果子节点不再悬空。
 
 ---
 
@@ -509,8 +558,10 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
    而两条链路互不校验，不会有人发现；
 9. **在途消息可读**：`list` / `stat` / `read` 看到的转写 = 落库 ∪ 在途。
    在途缓冲与消费循环收集的是**同一个 `Arc`**——不是两份需要同步的拷贝；
-10. **变更判据不重算**：`appended` 与否由 `merge_message_patch` 的返回值决定，
-    不在翻译层另判一次。
+10. **变更判据不重算**：`appended` 与否由**帧面**决定——`Append` 帧译为
+    `appended`，`Upsert` 帧译为 `created` / `updated`（按在途缓冲里是否已存在），
+    不在翻译层另判一次。（S23 之前由 `merge_message_patch` 的返回值决定，
+    该函数已随补丁语义一并删除。）
 11. **删除也发变更**：消息级删除（`resume` 的 `Delete` 帧、`action("truncate")` /
     `action("clear")`）同样产生 VDFS 变更，否则列表会残留已不存在的节点。
 12. **`deleted` 有歧义才配自己的值**：`deleted` = 「**这一个**节点没了」（与顺序无关）；

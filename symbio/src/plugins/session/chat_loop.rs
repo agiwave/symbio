@@ -10,8 +10,9 @@
 //!   步骤2 gate_turn            ← 启动条件 + 退出条件（唯一判定点）
 //!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 压缩 + 请求视图（唯一收集点）
 //!   步骤4 execute_turn         ← LLM 调用
-//!   步骤5 settle_reasoning     ← 推理产物并入上下文
-//!   步骤6 close_turn           ← 工具分发 + 落库 + 流向判定
+//!   步骤5 settle_reasoning     ← 推理产物并入上下文（定稿内容子节点）
+//!   步骤6 close_turn           ← 工具分发 + 落库 + 流向判定（子树在此收敛）
+//!   步骤7 finalize_turn_root   ← 封根 Turn（组合节点终态跟随子树）
 //! end loop
 //! 后步骤 无（循环只能由 return 离开，全部经 finish_turn 收尾）
 //! ```
@@ -41,14 +42,15 @@ pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal};
 pub(crate) use self::compress::{auto_compress_process, run_context_compact};
 pub(crate) use self::inputs::prepare_turn_inputs;
 pub(crate) use self::io::{
-    broadcast_message_update, emit_streaming_start, fire_stop_hook, fire_user_prompt_submit_hook,
-    open_chat_session, persist_messages,
+    broadcast_message_update, emit_streaming_start, finalize_turn_root, fire_stop_hook,
+    fire_user_prompt_submit_hook, open_chat_session, persist_messages,
 };
 pub(crate) use self::state::{Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState};
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 
 use super::chat_session::{ChatSession, PersistentChatSession, SESSION_HANDLE};
 use super::model_chat;
+use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
@@ -56,7 +58,7 @@ use crate::symbio_core::schemas::{
     HookEvent,
 };
 use crate::symbio_core::turn::{
-    build_tool_message, emit_status, emit_update, short_id, ToolCallInfo, TurnOutput,
+    build_tool_message, emit_update, short_id, ToolCallInfo, TurnOutput,
 };
 use crate::symbio_core::FinishReason;
 use crate::symbio_core::{
@@ -243,6 +245,7 @@ pub async fn run_chat_loop(
             return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Aborted).await;
         }
 
+        // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
         let result = orchestrator
             .provider
             .execute_turn(
@@ -264,6 +267,26 @@ pub async fn run_chat_loop(
                 // 避免下轮 get_context_messages 加载到半截消息污染 LLM 上下文。
                 // RetryWithoutContextId 表示 LLM 提供商返回的 context_id 无效（会话不存在），
                 // 本轮流式产出的 Streaming 节点都是无效半截响应，应直接删除而非保留为 Failed 终态。
+                //
+                // 删除是**状态变更**：对每个被废弃的节点发 `NodeOp::Remove`，
+                // 消费循环转成 VDFS `deleted` 变更，前端据此移除视图——取代原先
+                // 被消费循环静默丢弃的 `StreamEvent::Abort` 事件帧（那正是
+                // "Reason 块不结束 / 半截节点永远挂着流式动画"的根因）。
+                for m in context
+                    .messages
+                    .iter()
+                    .filter(|m| m.status == Some(MessageStatus::Streaming))
+                {
+                    let _ = channel
+                        .tx
+                        .send(PluginFrame::Data(
+                            serde_json::to_value(session_chat_response::NodeOp::Remove {
+                                message_id: m.id.clone(),
+                            })
+                            .unwrap_or_default(),
+                        ))
+                        .await;
+                }
                 context
                     .messages
                     .retain(|m| m.status != Some(MessageStatus::Streaming));
@@ -298,12 +321,12 @@ pub async fn run_chat_loop(
             return finish_turn(orchestrator, &context, &channel, &turn, TurnExit::Aborted).await;
         }
 
-        // ── 步骤 3：推理收尾（定格子节点 → 校准估算 → 并入上下文）────────────
+        // ── 步骤 5：推理收尾（定稿内容子节点 → 校准估算 → 并入上下文）────────
         let result =
             settle_reasoning(orchestrator, &mut context, &channel, &inputs.root_id, out).await;
 
-        // ── 步骤 4：本轮结算 + 下一步判定 ───────────────────────────────────
-        match close_turn(
+        // ── 步骤 6：本轮结算 + 下一步判定（子树在此收敛）────────────────────
+        let flow = close_turn(
             orchestrator,
             ctx.clone(),
             &mut channel,
@@ -312,8 +335,15 @@ pub async fn run_chat_loop(
             result,
             &turn_req,
         )
-        .await
-        {
+        .await;
+
+        // ── 步骤 7：封根 Turn（子树收敛之后，全流程唯一一处）──────────────────
+        // Turn 是组合节点，终态必须跟随子树；`close_turn` 归来即子树收敛
+        // （ToolCall 已由执行方定格、结果子节点已就位）。发出的就是**即将落库的
+        // 那条节点**，因此实时帧与存储按同一取值收敛。详见 [`finalize_turn_root`]。
+        finalize_turn_root(&channel, &context, &inputs.root_id).await;
+
+        match flow {
             TurnFlow::NextTurn => {}
             TurnFlow::Finish(exit) => {
                 return finish_turn(orchestrator, &context, &channel, &turn, exit).await
@@ -394,13 +424,15 @@ async fn finish_turn(
     turn: &TurnState,
     exit: TurnExit,
 ) -> Result<(), PluginError> {
-    // 软上限：先广播明确提示再退出，绝不静默（文案唯一出处）。
+    // 软上限：先落一条会话级告警状态再退出，绝不静默（文案唯一出处）。
     if let TurnExit::MaxToolRounds { max } = &exit {
         let _ = channel
             .tx
             .send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::StreamEvent::Error {
-                    error: format!("已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"),
+                serde_json::to_value(session_chat_response::NodeOp::Warn {
+                    warning: Some(format!(
+                        "已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"
+                    )),
                 })
                 .unwrap_or_default(),
             ))

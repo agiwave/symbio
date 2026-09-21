@@ -6,6 +6,51 @@ use super::*;
 // 目录树场景模块的区段常量（`SEG_SUB_SESSIONS` / `SEG_WORKDIR`）
 use crate::plugins::session::workdir;
 
+/// 消息节点序列化后 `node.name` 必须仍是**节点 id**。
+///
+/// 钉住一次真实事故：attributes 的工具名原先用 `name` 作键，与 `VdfsNode`
+/// 结构体自身的 `name` 字段（= 节点 id）在 `#[serde(flatten)]` 序列化下同名冲突
+/// ——序列化产物出现两个 `"name"` 键，后者（attributes 的 `null`）覆盖前者，
+/// 前端按 `node.name` 寻址的整条实时链路瘫痪（created / updated 全被丢弃，
+/// 只剩 appended 增量撑起无类型的幽灵节点）。工具名改用 `tool_name` 后，
+/// 这条测试保证「id 不被覆盖 + 工具名仍在」两个事实同时成立。
+#[test]
+fn message_node_serialized_name_is_node_id_not_tool_name() {
+    let m = cm::ChatMessage {
+        id: "nodeid123".into(),
+        role: Some(cm::MessageRole::Assistant),
+        msg_type: Some(cm::MessageType::Text),
+        status: Some(cm::MessageStatus::Streaming),
+        content: Some(cm::MessageContent::Text("你好".into())),
+        parent_id: Some("turn1".into()),
+        // 文本节点没有工具名 → `m.name = None`（正是事故现场的节点形状）
+        ..Default::default()
+    };
+    let v: serde_json::Value = serde_json::to_value(message_node(&m)).unwrap();
+
+    // JSON 层（前端 / 任何 JSON 消费者的视角）：attributes 的 null 不得覆盖节点 id
+    assert_eq!(
+        v["name"],
+        serde_json::json!("nodeid123"),
+        "attributes 键与结构体字段同名会在 flatten 序列化时覆盖节点 id"
+    );
+    assert_eq!(v["parent_id"], serde_json::json!("turn1"));
+
+    // 工具名单独走 `tool_name` 键：None 序列化为 null，不碰 `name`
+    assert_eq!(v["tool_name"], serde_json::Value::Null);
+
+    // 带 工具名 的节点（ToolCall）：tool_name 就位，id 仍是节点 id
+    let tc = cm::ChatMessage {
+        id: "tc456".into(),
+        msg_type: Some(cm::MessageType::ToolCall),
+        name: Some("local/ls".into()),
+        ..Default::default()
+    };
+    let v = serde_json::to_value(message_node(&tc)).unwrap();
+    assert_eq!(v["name"], serde_json::json!("tc456"));
+    assert_eq!(v["tool_name"], serde_json::json!("local/ls"));
+}
+
 /// 新建标题：路径名去掉 `.session` 扩展名；空名回落「新对话」
 #[test]
 fn title_from_new_path_strips_session_ext() {
@@ -23,7 +68,7 @@ fn session_node_carries_renderer_ext_and_presentation() {
     let mut s = Session::new("abc");
     s.updated_at = 1_700_000_000_000;
 
-    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
+    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
     assert_eq!(idle.name, "abc");
     assert_eq!(idle.effective_ext().as_deref(), Some("session"));
     assert_eq!(idle.kind, PLUGIN_SESSION);
@@ -49,7 +94,7 @@ fn session_node_projects_runtime_state() {
 
     let failed = session_node(
         &SessionSummary::of(&s),
-        &SessionRuntime::finished(OUTCOME_FAILED, Some("上游 502".to_string())),
+        &SessionRuntime::finished(OUTCOME_FAILED, Some("上游 502".to_string()), None),
     );
     assert_eq!(failed.status, vdfs::VDFS_STATUS_FAILED);
     assert_eq!(failed.attributes.get("outcome"), Some(&json!("failed")));
@@ -57,13 +102,13 @@ fn session_node_projects_runtime_state() {
 
     let aborted = session_node(
         &SessionSummary::of(&s),
-        &SessionRuntime::finished(OUTCOME_ABORTED, None),
+        &SessionRuntime::finished(OUTCOME_ABORTED, None, None),
     );
     assert_eq!(aborted.status, vdfs::VDFS_STATUS_ACTIVE, "中止不是失败");
     assert_eq!(aborted.attributes.get("outcome"), Some(&json!("aborted")));
     assert_eq!(aborted.attributes.get("error"), None, "中止不带错误文案");
 
-    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
+    let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
     assert_eq!(idle.status, vdfs::VDFS_STATUS_ACTIVE);
     assert_eq!(
         idle.attributes.get("outcome"),
@@ -391,52 +436,6 @@ fn overlay_live_keeps_seq_from_stored() {
     assert_eq!(message_text(&merged[0]), "增量");
 }
 
-/// 补丁 → 变更的映射：新 id 是 `created`，有增量是 `appended`，其余 `updated`。
-///
-/// 同时钉住**载荷宽度**：`created` / `updated` 带节点视图与内容快照（冷路径免回读），
-/// `appended` **只**带增量（热路径逐帧，多一个字段就是 O(n²)）。
-#[test]
-fn message_change_maps_patch_to_change_kind() {
-    let mut patch = msg("m1", None);
-    patch.content = Some(cm::MessageContent::Text("正文".into()));
-
-    // 新 id
-    let c = message_change("abc", &patch, false, None);
-    assert_eq!(c.change, vdfs::VDFS_CHANGE_CREATED);
-    assert_eq!(c.path, "abc/消息/m1", "变更地址与 list 的节点地址同源");
-    assert!(c.delta.is_none());
-    // 载荷：结构（attributes）与正文各自就位，消费者无需回读
-    assert_eq!(
-        c.node.as_ref().map(|n| n.path.as_str()),
-        Some("abc/消息/m1"),
-        "载荷节点的路径与事件路径同口径（分发层据此补前缀）"
-    );
-    assert_eq!(
-        c.node.as_ref().and_then(|n| n.effective_ext()),
-        Some(vdfs::VDFS_EXT_MESSAGE.to_string())
-    );
-    assert_eq!(c.content.as_deref(), Some("正文"));
-
-    // 已有 id + 增量 → appended（只带 delta，不带节点视图 / 内容快照）
-    let c = message_change("abc", &patch, true, Some("追加".into()));
-    assert_eq!(c.change, vdfs::VDFS_CHANGE_APPENDED);
-    assert_eq!(c.delta.as_deref(), Some("追加"));
-    assert!(
-        c.node.is_none() && c.content.is_none(),
-        "追加是热路径：载荷必须保持只有增量"
-    );
-
-    // 已有 id、无增量（状态迁移 / 全量替换）→ updated（同样带全量载荷）
-    let c = message_change("abc", &patch, true, None);
-    assert_eq!(c.change, vdfs::VDFS_CHANGE_UPDATED);
-    assert!(c.delta.is_none());
-    assert!(c.node.is_some() && c.content.is_some());
-
-    // 空增量不算追加（避免发一条什么都不带的 appended 让消费者空转）
-    let c = message_change("abc", &patch, true, Some(String::new()));
-    assert_eq!(c.change, vdfs::VDFS_CHANGE_UPDATED);
-}
-
 /// 地址的「拼」与「解」互逆——改地址方案时漏改一边会被这条挡住
 #[test]
 fn message_path_round_trips_through_parser() {
@@ -462,7 +461,7 @@ fn vdfs_session_node_carries_list_fields() {
     s.updated_at = 1_700_000_000;
     s.metadata = json!({ "workdir": "/tmp/proj/demo", "title": "T" });
 
-    let n = session_node(&SessionSummary::of(&s), &SessionRuntime::idle());
+    let n = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
     assert_eq!(n.attributes.get("message_count"), Some(&json!(0)));
     assert_eq!(
         n.attributes.get("metadata").and_then(|v| v.get("workdir")),
@@ -488,7 +487,7 @@ fn vdfs_session_node_carries_list_fields() {
     assert_eq!(
         session_node(
             &SessionSummary::of(&s),
-            &SessionRuntime::finished(OUTCOME_FAILED, Some("boom".into()))
+            &SessionRuntime::finished(OUTCOME_FAILED, Some("boom".into()), None)
         )
         .status,
         vdfs::VDFS_STATUS_FAILED,
@@ -498,7 +497,7 @@ fn vdfs_session_node_carries_list_fields() {
     assert_eq!(
         session_node(
             &SessionSummary::of(&s),
-            &SessionRuntime::finished(OUTCOME_COMPLETED, None)
+            &SessionRuntime::finished(OUTCOME_COMPLETED, None, None)
         )
         .status,
         vdfs::VDFS_STATUS_ACTIVE

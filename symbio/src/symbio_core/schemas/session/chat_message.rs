@@ -220,102 +220,22 @@ pub struct ChatMessage {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_id: Option<String>,
-}
 
-impl ChatMessage {
-    /// 把 `patch` 合并进 `self`（**增量语义**，与前端 `handleChatEvent` 对齐）。
+    /// ToolCall 节点的 **wire id**（LLM provider 返回的 `tool_call_id`）。
     ///
-    /// # 为什么必须合并而不是整条覆盖
+    /// ## 为什么节点 id 不能直接用它
     ///
-    /// 调用方常常只构造"局部补丁"（例如 `ChatMessage { id, meta, ..Default::default() }`，
-    /// 只为给一个 ToolCall 打 `recoverable` 标记）。若存储层用 `*existing = patch` 整条覆盖，
-    /// 该消息的 `role` / `msg_type` / `content` / `name` / `timestamp` 会被一并抹成 `None`：
-    ///   · 前端渲染丢失类型与内容（节点退化成空壳）；
-    ///   · 下一轮 `flatten_chat_messages` 把它转成一条 `role` 缺失、`content` 缺失的
-    ///     native message，请求体里出现 `"content": null`，Provider 侧 untagged enum
-    ///     `MessageContent` 反序列化失败 → 整个会话被一条 400 卡死。
-    /// 因此这里统一规定：`None` 表示"不修改该字段"，`Some` 才覆盖。
+    /// 许多 OpenAI 兼容网关**跨轮复用** `call_0` / `call_xxx` 这类短 id。而消息
+    /// id 在三处被当作**唯一键**：VDFS 地址（`<sid>/消息/<mid>`）、前端 store
+    /// （按 id 的 map）、消费循环的在途合并。wire id 直接当节点 id 会让下一轮
+    /// 的同 id 工具调用更新到上一轮的老节点（后端 `Vec` 存储不撞，刷新后"自愈"
+    /// ——正是"后端正常、前端显示混乱"的根源）。
     ///
-    /// # 合并规则
-    ///
-    /// - `content`：`Text` / `Reasoning` 走 **增量追加**（SSE delta 语义）；
-    ///   `ToolCall` 与 `Parts` 走 **全量替换**（每帧都是完整参数/内容）。
-    /// - `meta`：浅合并（同键以 patch 为准）。
-    /// - 其余字段：`Some` 覆盖，`None` 保留原值。
-    /// - `error`：显式区分"清空"——只有 patch 携带 `error` 字段时才生效，
-    ///   由于 `Option<String>` 无法区分"不修改"和"清空"，约定 `Some(String::new())` 表示清空。
-    pub fn apply_patch(&mut self, patch: &ChatMessage) {
-        if let Some(role) = &patch.role {
-            self.role = Some(role.clone());
-        }
-        if let Some(t) = &patch.msg_type {
-            self.msg_type = Some(t.clone());
-        }
-        if let Some(n) = &patch.name {
-            self.name = Some(n.clone());
-        }
-        if let Some(p) = &patch.parent_id {
-            self.parent_id = Some(p.clone());
-        }
-        if let Some(s) = &patch.status {
-            self.status = Some(s.clone());
-        }
-        if let Some(ts) = patch.timestamp {
-            self.timestamp = Some(ts);
-        }
-        // seq 是顺序锚点，只能由存储层在写入时分配；补丁里不带就表示"保持不变"。
-        if let Some(s) = patch.seq {
-            self.seq = Some(s);
-        }
-        if let Some(rid) = &patch.response_id {
-            self.response_id = Some(rid.clone());
-        }
-        if patch.prompt.is_some() {
-            self.prompt = patch.prompt.clone();
-        }
-        if let Some(e) = &patch.error {
-            // Some("") 语义为"清空错误原因"
-            self.error = if e.is_empty() { None } else { Some(e.clone()) };
-        }
-
-        if let Some(new_content) = &patch.content {
-            match self.msg_type {
-                Some(MessageType::ToolCall) => {
-                    // 工具调用参数是每帧全量的 JSON
-                    self.content = Some(new_content.clone());
-                }
-                Some(MessageType::Text) | Some(MessageType::Reasoning) => {
-                    match (&mut self.content, new_content) {
-                        (Some(existing), MessageContent::Text(new_text)) => match existing {
-                            MessageContent::Text(buf) => buf.push_str(new_text),
-                            other => *other = MessageContent::Text(new_text.clone()),
-                        },
-                        (None, MessageContent::Text(new_text)) => {
-                            self.content = Some(MessageContent::Text(new_text.clone()));
-                        }
-                        _ => self.content = Some(new_content.clone()),
-                    }
-                }
-                _ => self.content = Some(new_content.clone()),
-            }
-        }
-
-        if let Some(new_meta) = &patch.meta {
-            match &mut self.meta {
-                Some(existing) => {
-                    if let (Some(dst), Some(src)) = (existing.as_object_mut(), new_meta.as_object())
-                    {
-                        for (k, v) in src {
-                            dst.insert(k.clone(), v.clone());
-                        }
-                    } else {
-                        self.meta = Some(new_meta.clone());
-                    }
-                }
-                None => self.meta = Some(new_meta.clone()),
-            }
-        }
-    }
+    /// 因此 ToolCall 节点 id 在**诞生时**分配（会话内唯一），provider 的原始 id
+    /// 存放在本字段，仅在构建 LLM 请求包时使用（部分协议要求回传原值，如
+    /// OpenAI Responses 的 `call_id` 链）。历史数据无此字段：请求构建回退节点 id。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 /// 取一批消息中已有的最大 `seq`，作为后续分配的起点（Lamport 计数器的当前水位）。

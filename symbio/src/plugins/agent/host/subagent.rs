@@ -20,8 +20,8 @@
 //!    子目录、不进用户会话列表）；
 //! 3. 路由 `session/chat/send`（统一编排入口：collect → traverse 重新装配工具，
 //!    子会话与顶层会话走同一条链路）；
-//! 4. 订阅 EventBus，把子会话事件流转播到工具输出通道（父会话 UI 锚定到
-//!    本工具调用之下）；
+//! 4. 订阅子会话的两条实时通道（`session/stream` 消息流 + 会话节点 VDFS 运行态），
+//!    把子会话过程转播到工具输出通道（父会话 UI 锚定到本工具调用之下）；
 //! 5. 子会话完成（idle 无待审批）→ 工具结果 = 最终文本（末尾附
 //!    `[subagent_session_id]`，供 LLM 后续续会话）；等待审批 →
 //!    user_prompt 冒泡（覆写 `meta.prompt` 为本工具续跑参数）→ 工具以待审批结束。
@@ -42,10 +42,12 @@ use crate::symbio_core::schemas::session::chat_message::{
     ResumeRequest,
 };
 use crate::symbio_core::schemas::session::session_chat;
-use crate::symbio_core::schemas::session::session_chat_response::StreamEvent;
+use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
 use crate::symbio_core::schemas::session::session_get_messages;
 use crate::symbio_core::schemas::session::session_update;
-use crate::symbio_core::schemas::session::transcript::{PatchOutcome, TranscriptPatchBuilder};
+use crate::symbio_core::transcript_stream::{
+    register_transcript_subscriber, unregister_transcript_subscriber, NodeEvent,
+};
 use crate::symbio_core::vdfs_provider::{VdfsChange, VDFS_STATUS_WORKING};
 use crate::symbio_core::{
     InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel, PluginError,
@@ -54,7 +56,7 @@ use crate::symbio_core::{
     VDFS_UNWATCH, VDFS_WATCH,
 };
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // ── 本工具的身份与 meta 键约定（续跑参数承载于审批节点的 meta.prompt.args）──
@@ -107,8 +109,9 @@ impl crate::symbio_core::Capability for AgentRunCapability {
                 "将任务委托给一个独立的子智能体会话：在其独立会话中执行任务，\
                  完成后返回其最终答复；子智能体拥有自己的提示词与工具集。\n\n\
                  ## 智能体选择\n\n\
-                 `agent_id` 可选：省略时默认使用当前会话正在使用的智能体；\
-                 若当前会话也未绑定智能体，则子会话以无智能体的纯对话模式运行。\n\n\
+                 `agent_id` 可选：省略时默认使用当前会话正在使用的智能体\
+                 （当它落在本插件目录下的可用列表里时）；\
+                 否则子会话以无智能体的纯对话模式运行。\n\n\
                  ## 可用智能体列表\n\n{}\n\n\
                  ## 工作目录\n\n\
                  可选参数 `working_dir` 指定子智能体的工作目录：绝对路径、支持 `~` 展开、\
@@ -199,10 +202,21 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             })?;
 
         // ── 解析目标智能体：显式参数 > 当前会话绑定的智能体 > None（纯对话子会话）──
+        //
+        // ⚠️ **默认值必须在本作用域的 store 里可解释**（与 `forward_to_sub_agent`
+        // 清空 `AGENT_ID` 是同一条规则：跨作用域不继承「选中」）。
+        // 本能力的 store 是 `<本插件目录>/agent`：
+        //  - 系统实例的 store = `{homedir}/agent`，与会话选中的 agent **同域** ⇒ 默认照常生效；
+        //  - 子树实例（分形）的 store = `<agentdir>/agent`，而 `ctx[AGENT_ID]` 是**外层**
+        //    作用域的选中 ⇒ 拿它当默认必然查不到，令 LLM 收到一条它从未传过的 id 的报错。
+        // 故默认值先过一遍**本作用域**的 store：不在我的目录里 ⇒ 我这一层没有默认。
+        // **显式** `agent_id` 不受此限 —— 那是调用方的指令，仍在下面照旧对照 store 校验。
+        let store = AgentDirStore::new(&self.agent_dir_root);
         let current_agent = ctx
             .get(crate::symbio_core::AGENT_ID)
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+            .filter(|s| !s.is_empty())
+            .filter(|id| store.get(id).is_some());
         let agent_id: Option<String> = req
             .agent_id
             .clone()
@@ -217,7 +231,6 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             None => self.workdir.clone(),
         };
         if let Some(aid) = &agent_id {
-            let store = AgentDirStore::new(&self.agent_dir_root);
             if store.get(aid).is_none() {
                 return Err(PluginError::NotFound(format!(
                     "目标智能体 '{aid}' 不存在，无法委托任务。请检查 agent_id 是否正确。"
@@ -289,25 +302,32 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             }
         };
 
-        // ── 订阅子会话的 VDFS 变更（先于 chat/send，避免丢首帧）──
+        // ── 订阅子会话的两条实时通道（先于 chat/send，避免丢首帧）──
         //
-        // 两步缺一不可，顺序也有意义：
-        // ① 订阅事件总线的 `kind = "vdfs"` 频道（收件地址）；
-        // ② 向子会话叶子登记 `vdfs/watch`（**开闸**）——后端只向登记过路径的
-        //    订阅者投递变更（`core/vdfs/host::ChangeSubscriptions`），
-        //    只做 ① 的话是一条永远不响的频道。
+        // 与 CLI / 前端**同构**（见 `cli/src/client.rs` 顶部「下行通道：两条，各归其域」）：
+        // ① 消息实时面：`session/stream` 转写流（全会话广播，按 `session_id` 过滤）；
+        // ② 会话运行态：事件总线 `kind = "vdfs"` + `vdfs/watch <会话地址>`**开闸**
+        //    ——会话节点的 `status` / `attributes.outcome`·`error` 是**本轮结束的
+        //    唯一判据**（一轮里根 Turn 会多次定格，只有会话节点离开 `working`
+        //    才是整轮结束）。
         //
-        // 会话域**只有这一条**实时频道：旧的 `kind = "session"` 事件帧已废除
-        // （见 `session/docs/node-state-streaming.md`），因此这里不再解析
-        // `StreamEvent` 补丁，而是消费 VDFS 变更并折算回增量补丁。
+        // 消息**不再**经 VDFS 变更（那是转写流之前的旁路，已废除）：转写流带流内
+        // 单调 seq 与显式操作，消费端无需再从全量载荷里猜「追加还是替换」。
         let (bus_tx, bus_rx) = tokio::sync::mpsc::channel::<PluginFrame>(1024);
         let conn_id = format!("agent-run-{child_session_id}");
         register_subscriber(conn_id.clone(), bus_tx);
+
+        // ① 消息实时面：转写流订阅（与 event_bus 同为进程内全局注册表，
+        //    见 `symbio_core::transcript_stream`——消费方含 session 自身、本转播桥与 CLI）。
+        let (stream_tx, stream_rx) = tokio::sync::mpsc::channel::<PluginFrame>(4096);
+        let stream_conn_id = format!("agent-run-stream-{child_session_id}");
+        register_transcript_subscriber(stream_conn_id.clone(), stream_tx);
 
         let transcript_addr = match session_vdfs_addr(&parent, &ctx, &child_session_id).await {
             Ok(addr) => addr,
             Err(e) => {
                 unregister_subscriber(&conn_id);
+                unregister_transcript_subscriber(&stream_conn_id);
                 return Err(e);
             }
         };
@@ -334,6 +354,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             // 委托失败：清理订阅与 watch，错误直接作为工具结果回传
             vdfs_watch(&parent, &ctx, &transcript_addr, false).await;
             unregister_subscriber(&conn_id);
+            unregister_transcript_subscriber(&stream_conn_id);
             return Err(e);
         }
 
@@ -341,8 +362,10 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         let (output_chan, my_side) = PluginChannel::pair(512);
         tokio::spawn(stream_relay_bridge(
             bus_rx,
+            stream_rx,
             my_side,
             conn_id,
+            stream_conn_id,
             transcript_addr,
             child_session_id,
             agent_id,
@@ -409,11 +432,14 @@ async fn validate_subsession_exists(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 子会话地址解析与 VDFS 订阅
+// 子会话地址解析与运行态订阅
 // ---------------------------------------------------------------------
-// 会话域的实时通道只有一条：`kind = "vdfs"` 的变更。后端只向**登记过路径**
-// 的订阅者投递（`ChangeSubscriptions`），因此「订阅总线 + 登记 watch」是
-// 一对不可拆的动作，两者都由这里收口。
+// 子会话有两条实时通道，各归其域（与 `cli/src/client.rs` 顶部注释同构）：
+// - **消息实时面**：`session/stream` 转写流——由 [`stream_relay_bridge`] 直接
+//   注册消费（全局注册表，见 `symbio_core::transcript_stream`）；
+// - **会话运行态**：`kind = "vdfs"` 的变更 + 登记 `vdfs/watch <会话地址>`。
+//   后端只向**登记过路径**的订阅者投递（`ChangeSubscriptions`），因此
+//   「订阅总线 + 登记 watch」是一对不可拆的动作，两者都由这里收口。
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// 子会话在 VDFS 上的**展示地址**（`<根>/session/<sid>`）。
@@ -488,140 +514,204 @@ fn vdfs_change_of(frame: &PluginFrame) -> Option<VdfsChange> {
     serde_json::from_value::<VdfsChange>(bus.get("data")?.clone()).ok()
 }
 
-/// 变更转播任务。
+/// 转写流帧 → [`NodeEvent`]；非本流帧返回 `None`。
 ///
-/// - 消费 `kind = "vdfs"` 的帧，按**地址前缀**过滤出本工具的子会话；
-/// - 会话叶子（`path == 会话地址`）承载**运行态**：`status != working` 即本轮
-///   结束（`attributes.error` 非空 = 以错误结束）；
-/// - 消息节点：折算成**增量补丁**（[`TranscriptPatchBuilder`]）转发到工具输出
-///   通道——父会话 UI 因此把子会话过程锚定到工具调用之下；
-/// - 审批透传：子会话的 `user_prompt(WaitingUserAction)` 覆写 `meta.prompt`
+/// 信封形状与 CLI `transcript_frame_of` 逐字对应（由 `transcript_stream::publish_frame`
+/// 产出）：`{type:"transcript_event", data:{session_id, seq, op}}`。背压标记
+/// `transcript_resync` 无载荷，此处换算不出事件 → `None`（由 [`is_resync`] 单独留痕）。
+fn node_event_of(frame: &PluginFrame) -> Option<NodeEvent> {
+    let PluginFrame::Data(v) = frame else {
+        return None;
+    };
+    if v.get("type").and_then(Value::as_str) != Some("transcript_event") {
+        return None;
+    }
+    serde_json::from_value::<NodeEvent>(v.get("data")?.clone()).ok()
+}
+
+/// 是否为转写流**背压标记**（`transcript_resync`）：后端明示本连接曾漏帧。
+fn is_resync(frame: &PluginFrame) -> bool {
+    matches!(frame, PluginFrame::Data(v) if v.get("type").and_then(Value::as_str) == Some("transcript_resync"))
+}
+
+/// 子会话转播任务：把子会话的两条实时通道汇入工具输出通道。
+///
+/// ## 两条通道各司其职（与 `cli/src/client.rs::ask` 同构）
+///
+/// - **消息实时面**（`session/stream`）：`NodeOp` 是显式操作（`upsert` 全量替换 /
+///   `append` 尾部追加 / `remove` 删除），**原样转译**到工具输出通道——父会话 UI
+///   因此把子会话过程锚定到工具调用之下。这里不做任何折算：全量当增量拼的
+///   「折算器」正是 S23 废除的那类补丁机制，消费端只该按操作语义落地。
+/// - **会话运行态**（`kind = "vdfs"`，`path == 会话地址`）：`status != working`
+///   即本轮结束（`attributes.error` 非空 = 以错误结束）——这是**收尾的唯一判据**
+///   （一轮里根 Turn 会多次定格，只有会话节点离开 `working` 才是整轮结束）。
+///   更深地址是消息的 VDFS **历史投影**（落库写入），实时面已归转写流，忽略。
+///
+/// ## 其余职责
+///
+/// - **审批透传**：子会话的 `user_prompt(WaitingUserAction)` 覆写 `meta.prompt`
 ///   为本工具续跑参数后转发——tool_executor 将其捕获为本轮"待用户响应"结果，
 ///   父会话进入普通工具审批等待；
-/// - 收尾时发 `{"content": final}`（最终答复 = 最后一条**已完成**的助手正文）
-///   并摘除订阅。等待审批时 execute_tool_async 以捕获的 user_prompt 结束本轮
+/// - **收尾**：发 `{"content": final}`（最终答复 = 最后一条**已完成**的助手正文）
+///   并摘除两条订阅。等待审批时 tool_executor 以捕获的 user_prompt 结束本轮
 ///   （普通机制）；正常完成时以最终文本结束（父会话 LLM 拿到结果自然继续）。
 #[allow(clippy::too_many_arguments)]
 async fn stream_relay_bridge(
     mut bus_rx: tokio::sync::mpsc::Receiver<PluginFrame>,
+    mut stream_rx: tokio::sync::mpsc::Receiver<PluginFrame>,
     out_chan: PluginChannel,
     conn_id: String,
+    stream_conn_id: String,
     transcript_addr: String,
     child_session_id: String,
     agent_id: Option<String>,
     router: Arc<dyn Plugin>,
     invoke_ctx: Arc<dyn InvokeRequest>,
 ) {
-    // VDFS 变更 → 增量补丁的折算器。它同时维护**合并视图**，因此正文与状态
-    // 都从它取，不再另记一份 accumulator——同一份数据的两种说法就是漂移的来源。
-    let mut patches = TranscriptPatchBuilder::default();
-    // 正文消息的出现顺序 + 哪些已到终态：最终结果取「最后一条**已完成**的
-    // 助手正文」而非「最后处理到的文本」——流式片段或子 agent 的内部独白
-    // 不能被误当成最终答案。
+    // 助手正文累积（按消息 id）：`Upsert` 整条替换、`Append` 追加尾部。最终结果取
+    // 「最后一条**已完成**的助手正文」而非「最后处理到的文本」——流式片段或子
+    // agent 的内部独白不能被误当成最终答案。转写流已是显式操作，这里只需极简
+    // 累积，不再需要把全量变更折算成增量的折算器（`TranscriptPatchBuilder` 已删）。
+    let mut text_by_id: HashMap<String, String> = HashMap::new();
     let mut text_order: Vec<String> = Vec::new();
     let mut completed_ids: HashSet<String> = HashSet::new();
     let mut final_result = String::new();
     let mut relay_error: Option<String> = None;
-    let prefix = format!("{transcript_addr}/");
+    // 转写流订阅可能先于会话节点关闭；关了就停轮询它，避免 `recv()` 立即返回
+    // `None` 造成空转。会话节点仍是收尾判据。
+    let mut stream_open = true;
 
-    while let Some(frame) = bus_rx.recv().await {
-        let Some(change) = vdfs_change_of(&frame) else {
-            continue;
-        };
-        if change.path != transcript_addr && !change.path.starts_with(prefix.as_str()) {
-            continue;
-        }
-
-        // ── 会话叶子：运行态 ──
-        if change.path == transcript_addr {
-            let Some(node) = change.node.as_ref() else {
-                continue;
-            };
-            if node.status != VDFS_STATUS_WORKING {
-                if let Some(err) = node.attributes.get("error").and_then(Value::as_str) {
-                    relay_error = Some(err.to_string());
-                    let fwd = serde_json::to_value(StreamEvent::Error {
-                        error: err.to_string(),
-                    })
-                    .unwrap_or_default();
-                    let _ = send_frame(&out_chan, fwd);
+    loop {
+        tokio::select! {
+            // ── 会话运行态：本轮结束的唯一判据 ──
+            maybe = bus_rx.recv() => {
+                let Some(frame) = maybe else { break };
+                let Some(change) = vdfs_change_of(&frame) else { continue };
+                // 只认会话叶子：更深地址是消息的 VDFS 历史投影（落库写入），
+                // 实时面已归转写流——误当实时帧转发会与转写流重复投递同一份消息。
+                if change.path != transcript_addr {
+                    continue;
                 }
-                break;
-            }
-            continue;
-        }
-
-        // ── 消息节点：折算成增量补丁 ──
-        let patch = match patches.apply(&change) {
-            PatchOutcome::Patch(p) => p,
-            PatchOutcome::Nothing => continue,
-            PatchOutcome::MissingPayload => {
-                crate::plugin_warn!(
-                    "agent",
-                    "agent_run 转播：VDFS 变更缺节点视图，已跳过（{}）",
-                    change.path
-                );
-                continue;
-            }
-        };
-        // 结构字段取自**合并视图**：`appended` 只带增量，没有角色 / 类型 / 状态。
-        let (role, msg_type, status) = match patches.last_message(&patch.id) {
-            Some(m) => (m.role.clone(), m.msg_type.clone(), m.status.clone()),
-            None => (None, None, None),
-        };
-
-        // ── 审批透传：子会话内工具需要用户审批 ──
-        // 覆写 meta.prompt 为本工具的续跑参数（session/resume 重执行 agent_run
-        // 时据此续跑子会话）；其余 meta 原样保留（failure_kind 等驱动前端审批 UI）。
-        // 透传后继续等收尾帧：子会话本轮很快以 `status != working` 结束。
-        if msg_type == Some(MessageType::UserPrompt)
-            && status == Some(MessageStatus::WaitingUserAction)
-        {
-            let mut bubble = patch.clone();
-            let obj = bubble
-                .meta
-                .get_or_insert_with(|| json!({}))
-                .as_object_mut()
-                .expect("meta 保证为 object");
-            obj.insert(
-                META_PROMPT.to_string(),
-                json!({
-                    "tool_name": NAME,
-                    "args": {
-                        "agent_id": agent_id,
-                        "session_id": child_session_id,
-                        "target_id": patch.id,
+                let Some(node) = change.node.as_ref() else { continue };
+                if node.status != VDFS_STATUS_WORKING {
+                    if let Some(err) = node.attributes.get("error").and_then(Value::as_str) {
+                        relay_error = Some(err.to_string());
+                        // 子会话以错误结束：经通道的**类型化错误帧**上报——执行侧
+                        // （tool_executor）的 `PluginFrame::Error` 出口据此产出失败的
+                        // 工具结果。错误本身仍是子会话节点的持久状态，这里只是转播。
+                        let _ = out_chan
+                            .tx
+                            .send(PluginFrame::Error(err.to_string(), None))
+                            .await;
                     }
-                }),
-            );
-            let fwd =
-                serde_json::to_value(StreamEvent::Update { message: bubble }).unwrap_or_default();
-            if send_frame(&out_chan, fwd).is_err() {
-                break;
+                    break;
+                }
             }
-            continue;
-        }
 
-        // ── 累积助手正文（按消息 id 分桶）──
-        if role == Some(MessageRole::Assistant)
-            && matches!(msg_type, Some(MessageType::Text) | None)
-            && !text_order.contains(&patch.id)
-        {
-            text_order.push(patch.id.clone());
-        }
-        if matches!(
-            status,
-            Some(MessageStatus::Completed)
-                | Some(MessageStatus::Failed)
-                | Some(MessageStatus::Aborted)
-        ) {
-            let _ = completed_ids.insert(patch.id.clone());
-        }
+            // ── 消息实时面：显式操作原样转译 ──
+            maybe = stream_rx.recv(), if stream_open => {
+                let Some(frame) = maybe else {
+                    // 订阅被摘除（连接断开）：不再轮询本路，等会话节点收尾。
+                    stream_open = false;
+                    continue;
+                };
+                let Some(event) = node_event_of(&frame) else {
+                    if is_resync(&frame) {
+                        crate::plugin_warn!(
+                            "agent",
+                            "agent_run 转播：转写流背压重同步（子会话 {child_session_id}），本轮过程可能不完整"
+                        );
+                    }
+                    continue;
+                };
+                // 转写流是**全会话广播**，只转播本工具的子会话。
+                if event.session_id != child_session_id {
+                    continue;
+                }
 
-        let fwd = serde_json::to_value(StreamEvent::Update { message: patch }).unwrap_or_default();
-        if send_frame(&out_chan, fwd).is_err() {
-            // 工具通道已关闭（父会话被中止/重试）：停止转播
-            break;
+                match &event.op {
+                    NodeOp::Upsert { message } => {
+                        // ── 审批透传：子会话内工具需要用户审批 ──
+                        // 覆写 meta.prompt 为本工具的续跑参数（session/resume 重执行
+                        // agent_run 时据此续跑子会话）；其余 meta 原样保留
+                        //（failure_kind 等驱动前端审批 UI）。透传后继续等收尾帧：
+                        // 子会话本轮很快以 `status != working` 结束。
+                        if message.msg_type == Some(MessageType::UserPrompt)
+                            && message.status == Some(MessageStatus::WaitingUserAction)
+                        {
+                            let mut bubble = message.as_ref().clone();
+                            let obj = bubble
+                                .meta
+                                .get_or_insert_with(|| json!({}))
+                                .as_object_mut()
+                                .expect("meta 保证为 object");
+                            obj.insert(
+                                META_PROMPT.to_string(),
+                                json!({
+                                    "tool_name": NAME,
+                                    "args": {
+                                        "agent_id": agent_id,
+                                        "session_id": child_session_id,
+                                        "target_id": bubble.id,
+                                    }
+                                }),
+                            );
+                            let fwd = serde_json::to_value(NodeOp::Upsert { message: Box::new(bubble) })
+                                .unwrap_or_default();
+                            if send_frame(&out_chan, fwd).await.is_err() {
+                                break;
+                            }
+                            continue;
+                        }
+
+                        // 助手正文：Upsert 是完整快照 → 整条替换累积。
+                        if message.role == Some(MessageRole::Assistant)
+                            && matches!(message.msg_type, Some(MessageType::Text) | None)
+                        {
+                            if !text_by_id.contains_key(&message.id) {
+                                text_order.push(message.id.clone());
+                            }
+                            text_by_id.insert(
+                                message.id.clone(),
+                                message
+                                    .content
+                                    .as_ref()
+                                    .map(MessageContent::to_text)
+                                    .unwrap_or_default(),
+                            );
+                        }
+                        if matches!(
+                            message.status,
+                            Some(MessageStatus::Completed)
+                                | Some(MessageStatus::Failed)
+                                | Some(MessageStatus::Aborted)
+                        ) {
+                            completed_ids.insert(message.id.clone());
+                        }
+                    }
+                    // 流式尾部增量：累积到本地正文副本（转发本身原样进行）。
+                    NodeOp::Append { message_id, delta } => {
+                        if let Some(buf) = text_by_id.get_mut(message_id) {
+                            buf.push_str(delta);
+                        }
+                    }
+                    NodeOp::Remove { message_id } => {
+                        text_by_id.remove(message_id);
+                        text_order.retain(|id| id != message_id);
+                        completed_ids.remove(message_id);
+                    }
+                    // Reset / Warn 原样转发、不做特判：tool_executor 侧对子会话
+                    // Reset 会忽略（父视图无法按子树重置，透传会误清父会话自身的
+                    // 在途节点）、对 Warn 只留痕——两边都不需要这里先筛一道。
+                    NodeOp::Reset | NodeOp::Warn { .. } => {}
+                }
+
+                let fwd = serde_json::to_value(&event.op).unwrap_or_default();
+                if send_frame(&out_chan, fwd).await.is_err() {
+                    // 工具通道已关闭（父会话被中止/重试）：停止转播
+                    break;
+                }
+            }
         }
     }
 
@@ -634,11 +724,7 @@ async fn stream_relay_bridge(
         .find(|id| completed_ids.contains(*id))
         .or(text_order.last())
     {
-        final_result = patches
-            .last_message(id)
-            .and_then(|m| m.content.as_ref())
-            .map(MessageContent::to_text)
-            .unwrap_or_default();
+        final_result = text_by_id.get(id).cloned().unwrap_or_default();
     }
     if final_result.is_empty() {
         final_result = "（子智能体已结束，未产生文本输出）".to_string();
@@ -647,9 +733,10 @@ async fn stream_relay_bridge(
     // 审批中断时本 content 会被 tool_executor 以捕获的 user_prompt 替代，无副作用。
     final_result.push_str(&format!("\n\n[subagent_session_id: {child_session_id}]"));
 
-    // 摘除订阅（与 `vdfs/watch` 配对；引用计数归零才真正摘掉）
+    // 摘除两条订阅（与注册严格配对；vdfs/watch 引用计数归零才真正摘掉）
     vdfs_watch(&router, &invoke_ctx, &transcript_addr, false).await;
     unregister_subscriber(&conn_id);
+    unregister_transcript_subscriber(&stream_conn_id);
 
     let _ = out_chan
         .tx
@@ -658,9 +745,9 @@ async fn stream_relay_bridge(
     drop(out_chan);
 }
 
-/// 发送帧到工具输出通道；对端关闭返回 Err。
-fn send_frame(chan: &PluginChannel, data: serde_json::Value) -> Result<(), ()> {
-    chan.tx.try_send(PluginFrame::Data(data)).map_err(|_| ())
+/// 发送帧到工具输出通道；对端关闭返回 Err（满则等待，不静默丢弃）。
+async fn send_frame(chan: &PluginChannel, data: serde_json::Value) -> Result<(), ()> {
+    chan.tx.send(PluginFrame::Data(data)).await.map_err(|_| ())
 }
 
 /// 从 AgentDirStore 摘要生成工具描述中的"可用智能体列表"。

@@ -201,13 +201,38 @@ const BASELINE = {
   // 806 → 807：S23——「工具调用没有响应节点」的不对称收口。`tool_executor.test.rs`
   //   新增一例**交互模式跳过**的回归（前一个工具失败 ⇒ 本批剩余被跳过 ⇒ 被跳过者
   //   同样必须有结果子节点），+1；既有的「中止批」那例改为同时断言结果子节点。
-  rustTests: 807,
+  // 807 → 801：S23 去补丁化——**删掉的实现带走了它的证词**，净 −6
+  //   （13 个测试属性删除 − 7 个新增，逐名核对与实测用例数一致）：
+  //   · `schemas/session/transcript.test.rs` −8：`TranscriptPatchBuilder` 整层废除
+  //     （把"全量变更"折算成"增量补丁"的居中层），那 8 例断言的正是这条折算链
+  //     （`created` 出整段正文 / `appended` 只出 delta / `updated` 未变不带 content …）；
+  //   · `orchestrator.test.rs` −2（`merge_reports_appended_delta_for_streamed_text`
+  //     / `merge_reports_no_delta_for_full_replacement`）、`nodes.test.rs` −1
+  //     （`message_change_maps_patch_to_change_kind`）：同属被删的补丁折算层；
+  //   · `plugin/vdfs_provider.test.rs` −2：消息域不再往 VDFS 变更面发任何东西，
+  //     原先经 `watch` 订阅断言"截断＝一条 `truncated`""清空＝列表目录 `deleted`"
+  //     的两例失去主语——**同一断言已改订阅转写流重写**（该文件新增
+  //     `subscribe_stream` / `drain_stream_frames`，钉"区间删除一条帧不是 N 条"
+  //     "什么都没删一条都不发"），故这 −2 不构成覆盖缺口；
+  //   · 新增 7：`session/transcript.rs` +4（`NodeOp` 的图语义：Append 累积 / Upsert
+  //     整条替换 / Remove·Reset·persisted / 违例帧不占 seq / 线格式带 `op` 标签）、
+  //     `symbio_core/turn.rs` +2（跨轮复用 wire id 必须得到不同节点 id / 只有首个
+  //     参数分片需要快照）、`nodes.test.rs` +1（`name` 序列化为节点 id 而非工具名）。
+  rustTests: 801,
   // 31 → 47：前端半边的棘轮**长期停摆**（详见下方 vitestTests 的说明）。
   //   与覆盖率阈值不同，**文件数 / 用例数与平台无关**：全仓 `*.spec.ts` 里零
   //   `skipIf` / `runIf` / `process.platform` 分支，两处 `it.each` 遍历的也都是
   //   静态常量数组（`ALL_RENDERERS` / `MESSAGE_TYPES`）⇒ 注册数由源码唯一决定。
   //   所以这一项可以照实测值钉死，不必等 CI。
-  vitestFiles: 47,
+  // 47 → 46：S23 去补丁化删掉两个 spec 文件、新增一个。
+  //   删除：`services/__tests__/syncLifecycle.spec.ts`（6 例）与
+  //   `services/__tests__/vdfsTranscriptSync.spec.ts`（15 例）——它们测的
+  //   `syncLifecycle.ts` / `vdfsTranscriptSync.ts` 两个生产模块同时被删
+  //   （"把 VDFS 变更折成消息补丁"的前端半边，与后端 `TranscriptPatchBuilder` 是
+  //   同一语义的两份实现）。新增：`services/__tests__/toolRoundLiveFrames.spec.ts`
+  //   （9 例，一轮请求里的实时帧序列——`NodeOp` 直达 store 的新链路）。
+  //   净 −1 个文件。
+  vitestFiles: 46,
   // 156 → 160：S20——`sessionRouteOf` 地址分派、节点载荷就地收敛（零回读）、
   //   状态迁移驱动的提示音、`failed` 作为独立会话状态
   // 160 → 164：工具调用运行态——「运行中」标签 + 动效点 + 已运行时长、
@@ -320,7 +345,23 @@ const BASELINE = {
   //   转空闲回读收敛 / **号相同则一次回读都不发**（防止把正常轮次变成 N 次 IPC）/
   //   回读失败不静默放弃）+ 无响应兜底文案两例（`messageTypes.spec.ts`：
   //   `not_executed`/`aborted` 给文案，无标记 / `error` 一律留白）。
-  vitestTests: 672,
+  // 672 → 658（净 −14，逐文件核对一致）：删 6 + 15（上面两个被删模块的 spec）
+  //   − 新增 9（`toolRoundLiveFrames`）− 既有文件改写净 2
+  //   （`vdfs.spec` +4 / `streamFlow.spec` +1 / `sessionTranscript.spec` −3 /
+  //   `sessions.spec` −4 / `chat_message.spec` 0）。
+  //   既有文件里的减项**不是删断言，是断言换了主语**：它们钉的是"本地号被存储号
+  //   替换 ⇒ 回读权威收敛""快照里没有的在途节点必须保留""在途节点重排到历史之后"
+  //   这类**回读 + 在途合并**分支——去补丁化后这些分支连同它们的实现一起消失，
+  //   用例改写为"快照即权威：本地不在快照里的节点不保留""就地覆盖，不回读"。
+  //   与 rustTests 同理：掉的是**被删实现**的用例。
+  // 658 → 661（+3）：**渲染层回归**——`streamFlow.spec.ts` 新增三例，钉住
+  //   「已有子节点的正文 / 思考增长必须进 DOM」。此前**所有**用例都只断言 store
+  //   里的消息（`getSessionMessages`），于是 `messageTree` 的节点复用签名只看
+  //   「自身字段 + 直接子节点 id」这个缺陷完全逃得过测试网：store 里累加正确、
+  //   界面永不刷新（用户实测：append 始终不显示，正文结束后才突然完整）。
+  //   这也解释了本项此前为何能一边「全绿」一边漏掉整条实时链路——
+  //   断言的主语（store）与用户看见的东西（DOM）不是同一个。
+  vitestTests: 661,
 }
 
 /** vitest 前台最长等待（毫秒）——超时即 kill 并失败 */

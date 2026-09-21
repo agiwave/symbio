@@ -21,6 +21,7 @@ import {
   isVdfsSystemAddr,
   newFileNameOf,
   parseVdfsValidation,
+  sessionRuntimeOf,
   vdfsAccessOf,
   vdfsBase,
   vdfsExtOf,
@@ -254,5 +255,47 @@ describe('节点状态词：VDFS 侧是 chat_message 的别名', () => {
     expect(isMessageStatus(VDFS_STATUS_WORKING)).toBe(false)
     expect(isMessageStatus(VDFS_STATUS_ACTIVE)).toBe(false)
     expect(isMessageStatus('paused')).toBe(false)
+  })
+})
+
+/**
+ * `sessionRuntimeOf`：会话节点 → 运行态。
+ *
+ * 后端把运行态当作**节点属性**下发（`SessionStateChange` 写 `attributes.outcome`
+ * / `error` / `warning`），前端必须**逐个读出来**。漏读一个的代价不是"少显示一条"，
+ * 而是整条状态被**静默丢弃**——UI 永远看不到它，且不报错（`warning` 恰好就被漏过：
+ * 后端一直在写，`SessionRuntime` 里没有这个字段，类型检查才发现）。
+ */
+describe('sessionRuntimeOf：三个场景属性都必须落地', () => {
+  it('状态直通；无场景属性时只有 status', () => {
+    expect(sessionRuntimeOf(node({ name: 's', status: 'active' }))).toEqual({ status: 'active' })
+  })
+
+  it('outcome 只在三取值内落地（未知值不推断）', () => {
+    expect(sessionRuntimeOf({ ...node({ name: 's' }), outcome: 'aborted' }).outcome).toBe('aborted')
+    expect(sessionRuntimeOf({ ...node({ name: 's' }), outcome: 'failed' }).outcome).toBe('failed')
+    expect(sessionRuntimeOf({ ...node({ name: 's' }), outcome: 'weird' }).outcome).toBeUndefined()
+  })
+
+  it('error 与 warning 各自独立落地（错误 ≠ 告警）', () => {
+    const failed = sessionRuntimeOf({
+      ...node({ name: 's', status: 'failed' }),
+      error: '能力收集失败',
+    })
+    expect(failed.error).toBe('能力收集失败')
+    expect(failed.warning).toBeUndefined()
+
+    const warned = sessionRuntimeOf({
+      ...node({ name: 's', status: 'working' }),
+      warning: '消息持久化失败（消息仍在内存中）',
+    })
+    expect(warned.warning).toBe('消息持久化失败（消息仍在内存中）')
+    expect(warned.error).toBeUndefined()
+  })
+
+  it('空串视为缺省（不得让一个空告警占住"有待处理状态"的判定）', () => {
+    const rt = sessionRuntimeOf({ ...node({ name: 's' }), error: '', warning: '' })
+    expect(rt.error).toBeUndefined()
+    expect(rt.warning).toBeUndefined()
   })
 })

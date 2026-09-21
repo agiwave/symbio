@@ -106,7 +106,10 @@
 | 1 | `Plugin` trait 实现 | `route` 分发 / `traverse`（能力收集）/ 生命周期 |
 | 2 | `VdfsProvider` 实现 | 会话节点树：`list` / `stat` / `read` / `write` / `delete` / `watch` |
 | 3 | VDFS 节点构造辅助 | `session_node` / `parse_session_path` / `VdfsSessionPath` / `internal_dirs` / `message_node` / `message_label` / `ordered` / `overlay_live` / `transcript_window` / `cursor_id` / …（**25 个函数**） |
-| 4 | 会话实体杂务 | `cleanup_crashed_sessions` / `now_ms` / `title_from_new_path` / `config_definition` |
+| 4 | 会话实体杂务 | `now_ms` / `title_from_new_path` / `config_definition` |
+
+（`cleanup_crashed_sessions` 已删除：持久层写入不变量 `ensure_durable_states`
+拒绝瞬态状态落盘后，磁盘上只存在终态，崩溃恢复不再需要修复器。）
 
 ### P4 · `orchestrator.rs` 三个巨函数
 
@@ -177,7 +180,8 @@ orchestrator.test.rs      测试（S1 已外置；5 例全部测根文件的守�
 ⚠️ 可见性（实测口径）：
 
 - **跨子模块**（原本私有 → `pub(super)`）：`broadcast_error_with_idle` /
-  `run_chat_loop_task` / `persist_failure`，以及根文件的 `merge_message_patch`。
+  `run_chat_loop_task` / `persist_failure`。（根文件的 `merge_message_patch`
+  已随协议去补丁化删除，见 `vdfs-session-messages.md` §6 S23。）
 - **跨模块**（原本即 `pub`，**保持不动**）：`handle_chat_send_oneoff` /
   `handle_chat_abort_oneoff` / `emit_session_state` / `handle_abort`
   ——被 `plugin.rs` 路由与 `heartbeat.rs` 调用。本次只做"搬家"，不顺手收窄可见性。
@@ -372,7 +376,7 @@ mod tests;
 
 | 文件 | 行数 | 内容 |
 |---|---:|---|
-| `orchestrator.rs` | 320 | 装配 + `resolve_required_session_id` + `AiControlGuard` + `WorkingGuard` + `merge_message_patch` + `mod` 声明 |
+| `orchestrator.rs` | 320 | 装配 + `resolve_required_session_id` + `AiControlGuard` + `WorkingGuard` + `mod` 声明 |
 | `orchestrator/broadcast.rs` | 124 | `emit_session_state` / `SessionStateChange` / `broadcast_error_with_idle` |
 | `orchestrator/consume.rs` | 491 | `fail_before_loop` / `run_chat_loop_task`(382) / `handle_abort` |
 | `orchestrator/entry.rs` | 457 | `resolve_session_params` / `handle_chat_send_oneoff`(298) / `handle_chat_abort_oneoff` / `ensure_auto_title` |

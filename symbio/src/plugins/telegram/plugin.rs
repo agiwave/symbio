@@ -528,12 +528,10 @@ impl TelegramPlugin {
                                 while let Some(frame) = chan.rx.recv().await {
                                     match frame {
                                         PluginFrame::Data(data) => {
-                                            if let Ok(
-                                                session_chat_response::StreamEvent::Update {
-                                                    message,
-                                                },
-                                            ) = serde_json::from_value::<
-                                                session_chat_response::StreamEvent,
+                                            if let Ok(session_chat_response::NodeOp::Upsert {
+                                                message,
+                                            }) = serde_json::from_value::<
+                                                session_chat_response::NodeOp,
                                             >(
                                                 data
                                             ) {

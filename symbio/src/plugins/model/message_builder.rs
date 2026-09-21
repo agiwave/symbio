@@ -34,7 +34,7 @@ const RETAINED_RECENT_REASONING: usize = 2;
 /// 扁平化规则：
 /// - `Turn` → 父 `assistant` native message（聚合 Reasoning / Text / tool_calls）
 /// - `ToolCall` → 从其自身 `content` 读 args 拼入父 `assistant.tool_calls`
-/// - 响应结果 `Text`(`Tool`) → 独立的 `role=tool` native message（tool_call_id = ToolCall id）
+/// - 响应结果 `Text`(`Tool`) → 独立的 `role=tool` native message（tool_call_id = ToolCall 的 wire id）
 /// - `User` / `System` 等 → 原样输出
 /// - 失败 `Turn`（status=Failed）：半截输出照常聚合，并附加中断说明段落；
 ///   无结果的 `ToolCall` 合成占位 tool 结果、失败的工具结果推导 `success=false`
@@ -47,6 +47,24 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
             children.entry(pid).or_default().push(m);
         }
     }
+
+    // 节点 id → wire id（provider 原始 tool_call_id）映射。
+    //
+    // ToolCall 节点 id 与 wire id 分离后（节点 id 会话内唯一，wire id 可能被
+    // 网关跨轮复用），请求包必须回传 provider 认识的 wire id——部分协议要求
+    // `tool_call_id` 与其签发值逐字一致（如 OpenAI Responses 的 call_id 链）。
+    // 历史数据无 `tool_call_id` 字段 → 回退节点 id（旧数据里两者本就是同一个值）。
+    let wire_id_of = |m: &ChatMessage| -> String {
+        m.tool_call_id
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| m.id.clone())
+    };
+    let wire_ids: HashMap<&str, String> = messages
+        .iter()
+        .filter(|m| m.msg_type == Some(MessageType::ToolCall))
+        .map(|m| (m.id.as_str(), wire_id_of(m)))
+        .collect();
 
     let is_root = |m: &ChatMessage| -> bool {
         m.parent_id
@@ -161,7 +179,12 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                 let args: serde_json::Value = serde_json::from_str(&args_val)
                                     .unwrap_or(serde_json::json!({}));
                                 let tc = ToolCall {
-                                    id: Some(child.id.clone()),
+                                    id: Some(
+                                        wire_ids
+                                            .get(child.id.as_str())
+                                            .cloned()
+                                            .unwrap_or_else(|| child.id.clone()),
+                                    ),
                                     kind: Some("function".to_string()),
                                     name: child.name.clone().unwrap_or_default(),
                                     arguments: args,
@@ -176,7 +199,8 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                     Some(res) => {
                                         let mut tool_native: NativeMessage = res.clone().into();
                                         tool_native.role = MessageRole::Tool;
-                                        tool_native.tool_call_id = Some(child.id.clone());
+                                        tool_native.tool_call_id =
+                                            wire_ids.get(child.id.as_str()).cloned();
                                         // 失败的工具结果推导 success=false：触发 Anthropic
                                         // tool_result 的 is_error=true，工具失败信息才能被
                                         // 模型感知；跨轮工具失败必须可见，不得被过滤丢失
@@ -194,7 +218,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                         let tool_name = child.name.clone().unwrap_or_default();
                                         tool_results.push(NativeMessage {
                                             role: MessageRole::Tool,
-                                            tool_call_id: Some(child.id.clone()),
+                                            tool_call_id: wire_ids.get(child.id.as_str()).cloned(),
                                             content: Some(MessageContent::Text(format!(
                                                 "[工具 {tool_name} 的执行被中断，未产生结果。]"
                                             ))),
@@ -243,7 +267,12 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                 // User / System 等根级内容节点
                 let mut native: NativeMessage = m.clone().into();
                 if native.role == MessageRole::Tool {
-                    native.tool_call_id = m.parent_id.clone();
+                    // tool_call_id 用父 ToolCall 的 wire id（历史数据回退节点 id）
+                    native.tool_call_id = m
+                        .parent_id
+                        .as_deref()
+                        .and_then(|pid| wire_ids.get(pid).cloned())
+                        .or_else(|| m.parent_id.clone());
                 }
                 result.push(native);
             }
@@ -355,6 +384,7 @@ mod tests {
     fn tool_call(name: &str) -> ToolCallInfo {
         ToolCallInfo {
             id: Some("tc-1".to_string()),
+            wire_id: None,
             name: Some(name.to_string()),
             arguments: serde_json::json!({ "k": "v" }),
             parse_error: None,

@@ -27,7 +27,7 @@ impl SessionPlugin {
         &self,
         state: &Arc<ActiveSessionState>,
         session_id: &str,
-        collected: &Arc<tokio::sync::Mutex<Vec<cm::ChatMessage>>>,
+        collected: &Arc<tokio::sync::Mutex<crate::plugins::session::transcript::Transcript>>,
         stop: &super::super::chat_loop::StopSignal,
         error: impl Into<String>,
     ) {
@@ -63,11 +63,11 @@ impl SessionPlugin {
             "[Session] Turn 任务启动：session={session_id}, rid={rid}, provider={:?}",
             provider_id
         );
-        // 在途转写缓冲**取自会话状态本身**（不是新建第二份）：VDFS 转写列表
-        // 因此能在流式期间读到本轮消息，而不必等 `persist_messages` 落库。
-        // 开始前清空——上一轮的收尾已清过一次，这里再清一次是防 panic 残留。
-        let collected_ai_messages = state.live_messages.clone();
-        collected_ai_messages.lock().await.clear();
+        // 会话转写**取自会话状态本身**（不是新建第二份）：VDFS 转写列表的在途
+        // 叠加与实时流读的是同一个 `Transcript`。开始前清空在途图——上一轮的
+        // 收尾已清过一次，这里再清一次是防 panic 残留。
+        let transcript = state.transcript.clone();
+        transcript.lock().await.clear();
 
         let stop = Arc::new(super::super::chat_loop::StopSignal::new(
             Some(parent.clone()),
@@ -79,7 +79,7 @@ impl SessionPlugin {
         let mut guard = WorkingGuard {
             state: state.clone(),
             plugin: self.clone(),
-            collected: collected_ai_messages.clone(),
+            collected: transcript.clone(),
             session_id: session_id.clone(),
             stop: stop.clone(),
             done: false,
@@ -94,7 +94,7 @@ impl SessionPlugin {
                 self.fail_before_loop(
                     &state,
                     &session_id,
-                    &collected_ai_messages,
+                    &transcript,
                     &stop,
                     "CAPABILITY_VISITOR 不可用，无法解析 Model Provider".to_string(),
                 )
@@ -115,7 +115,7 @@ impl SessionPlugin {
                 self.fail_before_loop(
                     &state,
                     &session_id,
-                    &collected_ai_messages,
+                    &transcript,
                     &stop,
                     format!("未找到可用的 Model Provider（requested={provider_id:?}）"),
                 )
@@ -272,7 +272,7 @@ impl SessionPlugin {
                         crate::plugin_error!("session", "[Consume] {}", &msg);
                         self.persist_failure(
                             &session_id,
-                            &collected_ai_messages,
+                            &transcript,
                             &msg,
                             cm::MessageStatus::Failed,
                         )
@@ -334,7 +334,7 @@ impl SessionPlugin {
                             // 自行广播过 idle），因此必须 break 到统一收尾。
                             self.persist_failure(
                                 &session_id,
-                                &collected_ai_messages,
+                                &transcript,
                                 "用户手动中止了本次回复",
                                 // 中止**不是**失败：不挂 error 文案，也不该给一个 ⚠ 角标
                                 // ——用户是自己按的停止。但它是**可重试**的终态：
@@ -354,7 +354,7 @@ impl SessionPlugin {
                         // 这样切回会话时能看到上次失败的终态。
                         self.persist_failure(
                             &session_id,
-                            &collected_ai_messages,
+                            &transcript,
                             msg,
                             cm::MessageStatus::Failed,
                         )
@@ -371,52 +371,31 @@ impl SessionPlugin {
                         return;
                     }
                     PluginFrame::Data(data) => {
-                        // 收集 Model 响应消息：StreamEvent::Update 增量合并，
-                        // 确保持久化的终态反映最后已知状态（而非首个 Streaming 帧）。
-                        //
-                        // 选此处做「合并 + 广播」的收口，而非某个 `emit_update`
-                        // 调用点：本循环是**全部**补丁（模型流式、工具执行、嵌套子
-                        // 会话、审批节点、恢复重写）汇入前端的必经之路——上游有多少
-                        // 个发射点都无所谓，到这里只剩一个。`session_id` 也在作用域内。
-                        match serde_json::from_value::<session_chat_response::StreamEvent>(
-                            data.clone(),
-                        ) {
-                            Ok(session_chat_response::StreamEvent::Update { message }) => {
-                                // 三件事一次算清：是否已存在、追加了什么、合并后的全貌。
-                                // `merged`（合并后的完整消息）是**变更载荷**的来源——
-                                // `created` / `updated` 要带上它才能独立成立；
-                                // 上游的增量 `message` 只在合并这一步有用。
-                                let (existed, appended, merged) = {
-                                    let mut collected = collected_ai_messages.lock().await;
-                                    match collected.iter_mut().find(|m| m.id == message.id) {
-                                        Some(existing) => {
-                                            let delta = merge_message_patch(existing, &message);
-                                            (true, delta, existing.clone())
-                                        }
-                                        None => {
-                                            collected.push(message.clone());
-                                            (false, None, message.clone())
-                                        }
-                                    }
-                                };
-                                self.emit_message_patch(&session_id, &merged, existed, appended)
-                                    .await;
+                        // 转写收口：本循环是**全部**消息级操作（模型流式、工具执行、
+                        // 嵌套子会话、审批节点、恢复重写）的唯一汇入点——上游有多少
+                        // 个发射点都无所谓，到这里只剩一个。`Transcript::apply` 在
+                        // 唯一写入点完成四件事：内存图更新 → seq 分配 → 一行核心日志
+                        // → 发布到转写流订阅者。帧面只有显式操作、没有补丁。
+                        match serde_json::from_value::<session_chat_response::NodeOp>(data.clone())
+                        {
+                            // 会话级告警（持久化失败 / 长度截断 / 工具轮次上限）：
+                            // 直通会话节点 `attributes.warning`（VDFS watch 域，状态非事件）。
+                            Ok(session_chat_response::NodeOp::Warn { warning }) => {
+                                self.emit_session_state(
+                                    &state,
+                                    SessionStateChange::Warning(warning),
+                                )
+                                .await;
                             }
-                            // 删除帧（工具恢复时删除旧的 pending/failed 子节点）：
-                            // 转成 VDFS `deleted` 变更——它同样是**消息级变更**，
-                            // 必须与 `created` / `updated` / `appended` 走同一条通道，
-                            // 否则 VDFS 列表会残留一个已被删掉的节点（且永不纠正）。
-                            Ok(session_chat_response::StreamEvent::Delete { message_id }) => {
-                                self.change_subs.notify(&vdfs::VdfsChange::new(
-                                    super::super::plugin::message_path(&session_id, &message_id),
-                                    vdfs::VDFS_CHANGE_DELETED,
-                                ));
+                            Ok(op) => {
+                                transcript.lock().await.apply(op);
                             }
-                            // 其余帧（Status / Abort / Connected …）不含消息补丁。
-                            // 会话运行态已由**会话节点**承载（`emit_session_state` 发
-                            // 带节点视图的 VDFS 变更），旧的事件频道已废除——
-                            // 这里不再有任何可投递的东西。
-                            _ => {}
+                            Err(e) => {
+                                crate::plugin_warn!(
+                                    "session",
+                                    "[Consume] 无法解析的数据帧（已忽略）：{e}"
+                                );
+                            }
                         }
                     }
                 }
@@ -428,9 +407,9 @@ impl SessionPlugin {
 
         // NOTE: Model 响应消息**不在这里再次持久化**。
         // `chat_loop::persist_messages` 已在每轮结束时把完整 `into_messages` 写到存储。
-        // 这里 `collected_ai_messages` 仅用于向前端广播实时流式事件。
+        // 这里 `transcript` 仅用于向前端广播实时流式事件。
         {
-            let ai_msgs = collected_ai_messages.lock().await;
+            let ai_msgs = transcript.lock().await;
             if !ai_msgs.is_empty() {
                 crate::plugin_info!(
                     "session",
@@ -448,7 +427,7 @@ impl SessionPlugin {
         // 在途缓冲此刻可以清空：通道关闭意味着 `run_chat_loop` 已返回，而
         // `chat_loop::persist_messages` 在返回前就已把本轮消息落库——转写的
         // 权威副本已经回到存储，继续叠加在途副本只会让同一条消息出现两次。
-        collected_ai_messages.lock().await.clear();
+        transcript.lock().await.clear();
         {
             let mut inner = state.inner.write().await;
             if inner.is_working {
@@ -465,7 +444,11 @@ impl SessionPlugin {
         let abort_sent = {
             let inner = state.inner.read().await;
             if let Some(tx) = inner.ai_control_tx.as_ref() {
-                let _ = tx.send(PluginFrame::Data(json!({ "type": "abort" }))).await;
+                let _ = tx
+                    .send(PluginFrame::Data(json!(
+                        session_chat_response::ControlSignal::Abort
+                    )))
+                    .await;
                 true
             } else {
                 false

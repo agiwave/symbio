@@ -66,7 +66,7 @@ export interface UseChatConnectionReturn {
  * ## 设计（重要变化）
  *
  * - **所有状态写入由全局消费端负责**，本 composable 不订阅任何通道：
- *   消息与转写走 `services/vdfsTranscriptSync`（`kind = "vdfs"` 变更），
+ *   消息与转写走 `services/transcriptStream`（`session/stream` 转写流），
  *   会话运行态走 `stores/sessions.ts::applySessionNode`（同一个频道的会话叶子地址）。
  *   本 composable 只在**发起动作**时做乐观置位（随后被节点状态覆盖）。
  * - 组件订阅此 hook 只是为了：
@@ -117,25 +117,53 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   //
   // 流式期间的性能关键：每个 token 都会触发本 computed 重算。若每次都
   // `{ ...msg }` 新建全部节点对象，keyed v-for 的 props 引用全变，整棵
-  // 消息列表每帧全量重渲染。因此维护一个「上一轮节点」缓存：内容签名
-  // 未变的消息直接复用旧节点对象，Vue 只重渲染真正变化的那一个节点
-  // （通常是流式末端节点）。签名覆盖影响渲染的字段（content/status/
-  // parent/children 身份），会话切换时整体失效。
+  // 消息列表每帧全量重渲染。因此维护一个「上一轮节点」缓存：**子树**未变的
+  // 消息直接复用旧节点对象，Vue 只重渲染真正变化的那一条路径。
+  //
+  // ## 签名必须覆盖**整棵子树**，而不是「自身字段 + 直接子节点 id」
+  //
+  // 复用节点对象的唯一目的，是让下一次 v-for 的 `:node` 保持**同一个引用**：
+  // 引用不变 ⇒ Vue 判定 props 未变 ⇒ 整个组件子树跳过更新
+  // （`hasPropsChanged`）。这条优化成立的**前提**是「引用不变 ⇒ 渲染结果不变」，
+  // 而渲染结果取决于**整棵子树**——容器节点（Turn / ToolCall）自身无正文，
+  // 它画出来的每一块内容都在子节点里。
+  //
+  // 旧签名只覆盖自身字段与直接子 id（`childIds.join(',')`），于是「**已有**子节点的
+  // 正文增长」不改变任何祖先的签名：祖先对象原样复用 → Vue 跳过整棵子树 →
+  // 增量**永远进不了 DOM**。界面只在「结构变化（新增/删除子节点）或状态迁移」
+  // 那一刻跳一下，把此前积攒的内容一次补齐——实测症状正是
+  // 「流式期间正文/思考不动，正文结束后突然完整；手动刷新也完整」。
+  //
+  // `append` 窄帧（正文 / 思考 / 工具参数 / 工具响应增长的唯一通道）恰恰只改
+  // 叶子内容，不碰任何容器字段，因此这条缺陷会命中**每一帧**。
+  //
+  // 所以签名按子树归纳：自身字段 + 每个子节点的签名（子节点签名同样含它自己的
+  // 子树）。任一后代变化 ⇒ 沿途祖先签名变化 ⇒ 这条路径换新对象 ⇒ 只重渲染这条
+  // 路径；其余子树引用不变，照旧跳过（优化不丢）。会话切换时整体失效。
   let nodeCacheSession = ''
   const nodeCache = new Map<string, ChatMessage>()
   function nodeSignature(
     msg: ChatMessage,
     parentId: string | undefined,
-    childIds: string[] | undefined,
+    children: ChatMessage[] | undefined,
   ): string {
-    return `${msg.status ?? ''}|${parentId ?? ''}|${childIds ? childIds.join(',') : ''}|${messageTextOf(msg.content)}`
+    // type / name 必须进签名：同一条消息在流式过程中可能出现 type 迁移
+    // （reasoning → text）或工具名补全，漏掉它们会让缓存的旧节点对象
+    // 被复用，渲染器按旧 type 分派（Reason 块不渲染 / 工具名缺失）。
+    // id 也在签名里：子节点签名以其 id 打头，「换成一个同内容的子节点」同样
+    // 必须使祖先签名变化（否则被换掉的子节点在界面上永远不出现）。
+    const own = `${msg.id}|${msg.type ?? ''}|${msg.name ?? ''}|${msg.status ?? ''}|${parentId ?? ''}|${messageTextOf(msg.content)}`
+    const sub = children
+      ? children.map((child) => (child as { __sig?: string }).__sig ?? '').join(',')
+      : ''
+    return `${own}#${sub}`
   }
   function reuseNode(
     msg: ChatMessage,
     parentId: string | undefined,
-    childIds: string[] | undefined,
+    children: ChatMessage[] | undefined,
   ): ChatMessage {
-    const sig = nodeSignature(msg, parentId, childIds)
+    const sig = nodeSignature(msg, parentId, children)
     const cached = nodeCache.get(msg.id)
     if (cached && (cached as { __sig?: string }).__sig === sig) return cached
     const node: ChatMessage = { ...msg }
@@ -205,32 +233,32 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       })
     })
 
+    // **先建子树、再定自身**：自身的签名要覆盖子节点的签名（见 `nodeSignature`），
+    // 所以子节点必须先构造出来。
     const buildNode = (
       msg: ChatMessage,
       parentId?: string,
-      childIds?: string[],
       parentNode?: ChatMessage,
     ): ChatMessage => {
-      const node = reuseNode(msg, parentId, childIds)
-      // parent 反向引用不在缓存签名里（签名只含 id），每次重挂：
+      const kids = childrenMap[msg.id]
+      const children = kids ? kids.map((child) => buildNode(child, msg.id)) : undefined
+      const node = reuseNode(msg, parentId, children)
+      // parent 反向引用不参与缓存签名（签名只含自身与子树），每次重挂：
       // 升为根（父被删）时要清掉旧引用，避免渲染树上溯到已移除的节点
       if (parentNode) node.parent = parentNode
       else delete node.parent
-      if (childIds) {
-        node.children = childrenMap[node.id].map(child => {
-          const grandkids = childrenMap[child.id]
-          return buildNode(child, node.id, grandkids ? grandkids.map(c => c.id) : undefined, node)
-        })
+      if (children) {
+        node.children = children
+        // 子节点的 parent 指回本节点：本节点可能是**新造**的对象（子树有变化），
+        // 旧的反向引用必须换掉，否则子节点上溯到的是上一轮的祖先。
+        for (const child of children) child.parent = node
       } else {
         // 子节点全部消失（被删/被过滤）时清掉旧引用，避免缓存节点渲染幽灵子树
         delete node.children
       }
       return node
     }
-    return rootMessages.map(msg => {
-      const kids = childrenMap[msg.id]
-      return buildNode(msg, undefined, kids ? kids.map(c => c.id) : undefined)
-    })
+    return rootMessages.map((msg) => buildNode(msg))
   })
 
   // 从 store 派生 isLoading / isWaitingApproval
@@ -331,8 +359,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    *   （**不动历史**：压缩失败从不丢消息，重试只是再试一次 LLM 摘要）
    * - retry/approve/reject/supply/answer：删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点
    *
-   * 前端不在此处构造新消息——后端经 VDFS 广播变更：`deleted`（删旧节点）+
-   * `updated` / `appended`（写新节点 + 父节点状态更新），由 `vdfsTranscriptSync`
+   * 前端不在此处构造新消息——后端经转写流广播：`remove`（删旧节点）+
+   * `upsert` / `append`（写新节点 + 父节点状态更新），由 `transcriptStream`
    * 与 `sessions.applySessionNode` 就地收敛。
    *
    * 会话参数：智能体 / 模型 provider 由后端 `resolve_session_params` 从

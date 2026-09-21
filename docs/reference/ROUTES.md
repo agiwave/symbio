@@ -106,8 +106,17 @@
 |------|------|----------|
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
+| `session/stream` | 订阅会话转写**实时流**（每条 `NodeEvent` = `session_id` + 单调 `seq` + 显式 `NodeOp`） | `Session` |
 | `session/get_messages` | 获取对话历史（**仅 `agent_run` 的续会话存在性校验**用） | `Data` |
 | `session/update` | 合并写入会话 metadata（**仅 CLI**） | `Data` |
+
+> **消息的实时面走 `session/stream`，历史面走 VDFS**（2026-09-21）：消息曾寄生在
+> `kind = "vdfs"` 的资源变更频道上，那条路没有流内序号（丢帧不可检测）、载荷是全量而
+> 消费端要增量（必须猜「追加还是替换」）。现在 `Transcript`（session 插件内的唯一写入点）
+> 给每帧分配单调 `seq` 并以 `NodeOp`（`upsert` / `append` / `remove` / `reset` / `warn`）
+> 广播；背压时投 **resync 标记**而不是静默丢帧（见 `symbio_core::transcript_stream`）。
+> 消费端：前端 `services/transcriptStream.ts`、CLI `cli/src/client.rs`。
+> 落库转写与 `消息` 目录投影（`vdfs/read` / `vdfs/list` / `vdfs/action`）不受影响。
 
 > **`session/append`、`session/open`、三条消息路由与 `session/heartbeat/trigger` 已退役**（2026-09-18）：
 > - `append` —— 消息追加的唯一入口是聊天协议（`chat/send`），而编排自身的落库走引擎直连

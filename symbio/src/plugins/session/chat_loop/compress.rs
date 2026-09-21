@@ -620,7 +620,7 @@ pub(crate) async fn run_context_compact(
 ///
 /// ## 删除帧走哪条通道
 ///
-/// 与工具恢复删除旧子节点同源：发 `StreamEvent::Delete`，由消费循环转译成 VDFS
+/// 与工具恢复删除旧子节点同源：发 `NodeOp::Remove`，由消费循环转译成 VDFS
 /// `deleted` 变更（见 `orchestrator/consume.rs`）。**不能**只删存储——那样前端
 /// 转写会永久留着那个已被删掉的失败节点，且没有任何机制会纠正它。
 pub(crate) async fn retry_compaction(
@@ -651,7 +651,7 @@ pub(crate) async fn retry_compaction(
     let _ = channel
         .tx
         .send(PluginFrame::Data(serde_json::json!(
-            session_chat_response::StreamEvent::Delete {
+            session_chat_response::NodeOp::Remove {
                 message_id: target_id.to_string()
             }
         )))

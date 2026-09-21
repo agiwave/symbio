@@ -21,7 +21,7 @@
  * - `list`           : SessionListItem[]（来自后端 list + 本地状态镜像合并）
  * - `activeId`       : 当前"详细窗口"展示的会话
  * - `sessionMessages`: 实时 messages map，key 是 sessionId，value 是 `{msgId: ChatMessage}`
- *                      写入：`vdfsTranscriptSync`（VDFS 变更）与 loadMessages
+ *                      写入：`transcriptStream`（`session/stream` 转写流）与 loadMessages
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
  *                      写入：`applySessionNode`（会话节点变更）/ send 的乐观置位
@@ -46,7 +46,6 @@ import { vdfsRoot } from '@/schemas/vdfsRoot'
 import {
   VDFS_CHANGE_CREATED,
   VDFS_CHANGE_DELETED,
-  VDFS_STATUS_FAILED,
   VDFS_STATUS_WORKING,
   chimeKindOfOutcome,
   isFailedStatus,
@@ -64,19 +63,13 @@ import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
 import type { ChatMessage } from '@/schemas/chat_message'
-import {
-  CHAT_ROLE_ASSISTANT,
-  MESSAGE_STATUS_STREAMING,
-  isInflightMessageStatus,
-} from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
-// 消息转写规则（纯逻辑）：合并 / 水合 / 截断 / 看门狗判据
+// 消息转写规则（纯逻辑）：增量追加 / 水合 / 截断
 import {
+  appendContent,
   hydrateTranscript,
-  mergeMessagePatch,
   previewOf,
   sortTranscript,
-  stuckFailurePlanOf,
   truncateIdsFrom,
 } from './sessionTranscript'
 // 会话实时状态的派生规则（纯逻辑）：清单条目 / 运行态 / 选项回填
@@ -270,17 +263,8 @@ export const useSessionsStore = defineStore('sessions', () => {
    */
   function putMessage(sessionId: string, msg: ChatMessage) {
     if (!sessionId || !msg.id) return
-    let seqReplaced = false
     updateMessages(sessionId, (cur) => {
       if (typeof msg.seq === 'number') {
-        const existing = cur[msg.id]
-        // 存储给的号与手里那个**不一致** ⇒ 手里那个是本地游标发的（在途期间）。
-        // 这不是“更新一下号码”那么轻：它意味着**两套序号空间已经分叉**——同一
-        // 条链上既有存储号又有本地号，排序随之可能错位（且只有整份回读能纠正）。
-        // 因此记录下来，等会话转空闲回读一次收敛（见 `reconcileTranscript`）。
-        if (existing && typeof existing.seq === 'number' && existing.seq !== msg.seq) {
-          seqReplaced = true
-        }
         cur[msg.id] = msg
         raiseSeqFloor(sessionId, msg.seq)
         return
@@ -288,7 +272,6 @@ export const useSessionsStore = defineStore('sessions', () => {
       const existing = cur[msg.id]
       cur[msg.id] = { ...msg, seq: existing?.seq ?? nextSeq(sessionId) }
     })
-    if (seqReplaced) markTranscriptDirty(sessionId)
 
     // 同步 status.last_preview（取最后一条 assistant 文本；取不到则不动）
     const preview = previewOf(msg)
@@ -310,36 +293,30 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /**
-   * 「本地号与存储号已分叉」的待对账标记（会话空闲时回读一次收敛）。
+   * 追加一段流式增量到指定消息的正文尾部（协议 `append` 操作的落地）。
    *
-   * 与 `is_waiting_approval` 一类**状态**不同，它记的是“当前这份本地转写不可全信”
-   * 这个事实——所以只在触发时置位（在途节点拿到权威号），由 `reconcileTranscript`
-   * 消费后清除，不参与任何渲染判定。
+   * 与 [`putMessage`]（`upsert` 的落地，整条替换）**一一对应协议操作**：
+   * 落地动作由帧的操作给出，store 不再从节点 `type` / `role` 推断"这帧该追加还是
+   * 该替换"。后者曾把流式工具响应的增量当成全量重发，正文被最后一片覆盖
+   * （详见 `sessionTranscript.appendContent` 的说明）。
+   *
+   * 只对**已存在**的消息生效：`append` 的前提是它的 `upsert` 已到达（后端对同一
+   * id 先发快照再发增量）。增量到达而节点不存在 = 协议违例——留痕并丢弃，
+   * **绝不**就地伪造一条无 type / 无 parent 的占位节点：伪造节点没有渲染器语义、
+   * 没有归属，收不到终态就会永远挂在"运行中"，那是"补丁掩盖问题"的典型。
    */
-  const transcriptDirty = ref<Record<string, boolean>>({})
-
-  function markTranscriptDirty(sessionId: string) {
-    transcriptDirty.value = { ...transcriptDirty.value, [sessionId]: true }
-  }
-
-  /** 合并 patch 到指定 session 的某条消息（不替换，只覆盖 patch 提供的字段） */
-  function patchMessage(sessionId: string, patch: ChatMessage) {
-    if (!sessionId || !patch.id) return
+  function appendMessage(sessionId: string, messageId: string, delta: string) {
+    if (!sessionId || !messageId || !delta) return
     updateMessages(sessionId, (cur) => {
-      const existing = cur[patch.id]
+      const existing = cur[messageId]
       if (!existing) {
-        cur[patch.id] = {
-          content: '',
-          status: MESSAGE_STATUS_STREAMING,
-          role: CHAT_ROLE_ASSISTANT,
-          timestamp: Date.now(),
-          seq: nextSeq(sessionId),
-          ...patch
-        }
-      } else {
-        // 合并语义见 `sessionTranscript.mergeMessagePatch`（追加 vs 整条替换）
-        cur[patch.id] = mergeMessagePatch(existing, patch)
+        logger.warn(
+          'sessions',
+          `[appendMessage] 增量到达时节点不存在（upsert 丢失，协议违例，已丢弃）：${messageId}`,
+        )
+        return
       }
+      cur[messageId] = appendContent(existing, delta)
     })
   }
 
@@ -407,7 +384,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * ## 调用方
    *
    * - `applySessionNode`（会话节点状态迁移）
-   * - `vdfsTranscriptSync`（由消息节点派生活动文字 / 审批角标）
+   * - `transcriptStream`（由消息节点派生活动文字 / 审批角标）
    * - `useChatConnection.send` / `resume` 的乐观置位
    * - `setSessionStatus` 同步 list.status 时
    * - 消息落地路径写 `last_preview`（取到预览才写）
@@ -436,6 +413,22 @@ export const useSessionsStore = defineStore('sessions', () => {
   function setSessionError(sessionId: string, err: string | null) {
     if (!sessionId) return
     sessionErrors.value = { ...sessionErrors.value, [sessionId]: err ?? null }
+  }
+
+  // 会话级告警状态（"告警是状态，不是事件"原则的前端落地）：
+  // 来源唯一——会话节点的 `attributes.warning`（后端 `MessageChange::Warn` 写入，
+  // 持久化失败 / 长度截断 / 工具轮次上限等**可恢复**提示；新一轮开始时后端清除）。
+  // 与 `sessionErrors`（失败终态）互斥并存：告警不改变运行态，会话照常运行。
+  const sessionWarnings = shallowRef<Record<string, string | null>>({})
+
+  /** 读取会话级告警（null = 无告警） */
+  function getSessionWarning(sessionId: string): string | null {
+    return sessionWarnings.value[sessionId] ?? null
+  }
+  /** 设置/清除会话级告警（null 清除；权威来源是节点属性，见 `applySessionNode`） */
+  function setSessionWarning(sessionId: string, warning: string | null) {
+    if (!sessionId) return
+    sessionWarnings.value = { ...sessionWarnings.value, [sessionId]: warning ?? null }
   }
 
   /** 清空某个 session 的实时状态（删除时调用） */
@@ -841,7 +834,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * LLM 在**同一地址**上读同一份数据（`session/get_messages` 自此不再是
    * 前端的读入口）。
    *
-   * 增量由 `services/vdfsTranscriptSync` 从 `kind = "vdfs"` 变更补上——本函数
+   * 增量由 `services/transcriptStream`（`session/stream` 转写流）补上——本函数
    * 只负责整份替换（切换会话 / 显式刷新）。
    *
    * 修复（CHAT_FLOW_ANALYSIS E-13）：失败时**抛出错误**而不是 swallow，
@@ -955,7 +948,11 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   /**
    * 更新单条会话消息（手工编辑 / 标错重试等）。
-   * - 先 patch 前端局部状态
+   *
+   * 调用方传的是**完整消息**（`{ ...msg, content: 新正文 }`），因此本地落地就是
+   * 一次快照应用——与协议 `upsert` 同一条路径（[`putMessage`]），不再有第二种
+   * 合并语义。
+   * - 先应用前端局部状态
    * - 再调用后端 `chat/update_message` 持久化
    */
   async function updateMessage(
@@ -963,7 +960,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     message: ChatMessage
   ): Promise<void> {
     if (!message.id) return
-    patchMessage(sessionId, message)
+    putMessage(sessionId, message)
     try {
       await apiUpdateMessage(sessionId, message)
     } catch (e) {
@@ -990,44 +987,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     syncMessageCount(sessionId)
   }
 
-  /**
-   * 看门狗触发：把一个"卡在 working 状态但长时间无事件"的会话
-   * 标记为失败，并持久化，使切换会话后仍能看到上次错误（目标 3）。
-   *
-   * 找到所有仍为 streaming / waiting_user_action 的消息，标记 Failed + error，
-   * 调用后端 updateMessage 持久化，并复位 working 状态。
-   */
-  async function persistStuckFailure(
-    sessionId: string,
-    errorText: string
-  ): Promise<void> {
-    // 定稿口径（谁挂 error / 谁定稿为 completed）是纯逻辑，见
-    // `sessionTranscript.stuckFailurePlanOf`——本函数只负责按计划落库与收敛。
-    const plan = stuckFailurePlanOf(getSessionMessages(sessionId), errorText)
-    for (const m of [...plan.failed, ...plan.completed]) {
-      try {
-        await apiUpdateMessage(sessionId, m)
-      } catch (e) {
-        logger.warn('[sessions]', 'persistStuckFailure updateMessage 失败', e)
-      }
-      patchMessage(sessionId, { ...m })
-    }
-    // 没有任何根级 Turn（例如首帧到达前就卡住、连 Turn 都还没创建）：
-    // 降级为会话级错误状态（不注入错误节点），保证仍能在 UI 上看到错误并可重试。
-    if (!plan.rootTurnFailed) {
-      setSessionError(sessionId, errorText)
-    }
-    // 收敛为「以错误结束」这个**状态值**（不再是 `active` + `last_failed` 布尔）。
-    // 后端随后的权威节点视图会覆盖这里——本次是本地看门狗的乐观收尾，
-    // 与后端 `emit_session_state(Finished{failed})` 语义一致，故不会互相打架。
-    putStatus(sessionId, {
-      status: VDFS_STATUS_FAILED,
-      activity: '错误',
-      outcome: 'failed'
-    })
-    setSessionStatus(sessionId, VDFS_STATUS_FAILED)
-  }
-
   /** 同步 list 中某会话的 message_count / updated_at（删除 / 清空后调用） */
   function syncMessageCount(sessionId: string) {
     const idx = list.value.findIndex((s) => s.id === sessionId)
@@ -1048,87 +1007,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 不自己挂监听器，因此可被独立构造与测试。
 
   /**
-   * 转写对账：**终态补丁丢失后的自愈**（会话已空闲却仍有节点停在非终态）。
-   *
-   * ## 它补的是哪条不变量的客户端一半
-   *
-   * 后端有一条硬不变量：**不得有节点停在 `Streaming`**
-   * （`session/docs/node-state-streaming.md` §8.11）——它在服务端由
-   * `process_tool_calls_async` 的批尾收口、`persist_failure`、`converge_inflight`
-   * 三处共同保证，且**落库结果实测干净**。
-   *
-   * 但「服务端状态正确」不等于「前端看到的正确」：消息状态只经
-   * `kind = "vdfs"` 一条通道下发，而这条通道**不重放**——
-   * `ChangeSubscriptions::notify` 在订阅表为空时直接返回（watch 登记是
-   * fire-and-forget 的异步动作），消费循环也会在 `is_working` 翻转时
-   * **丢掉手上那一帧**。任一处丢一次终态补丁，前端就永久停在「运行中」：
-   * 没有任何机制会纠正它，因为前端只做**增量收敛**、从不整表重拉。
-   *
-   * 于是这里给出客户端一半：**会话已空闲却还有非终态节点 ⇒ 一定丢了一条终态**。
-   *
-   * ## 为什么这个判据成立（不是启发式）
-   *
-   * 节点补丁**恒先于**会话状态下发——正常收尾是「清在途 → 复位 `is_working`
-   * → `emit_session_state`」，中止收尾是「`converge_inflight` 广播节点终态
-   * → `emit_session_state(aborted)`」（`handle_abort` 里那条顺序注释写明了
-   * 理由）。因此会话节点报「不忙」时，服务端的每一个节点都已是终态、
-   * 且已写进存储。
-   *
-   * ## 为什么是**回读**而不是就地"标成已完成"
-   *
-   * 就地标 `completed` 是**猜**：服务端可能把它定稿成 `aborted`（用户中止）
-   * 或 `failed`。猜错就把"半截"谎报成"正常结束"，并抹掉重试入口——
-   * 正是 `aborted` 状态漏在状态词表里时踩过的坑。回读拿到的是权威终态，
-   * 一次 IPC 换一个确定的答案。
-   *
-   * ## 为什么回读前后都要再看一眼 `isSessionWorking`
-   *
-   * 回读是异步的，其间用户可能已经发出下一条消息：此时在途节点**重新合法**，
-   * 存储也不再是权威（新一轮还没落库）。丢弃本次结果即可——下一次会话
-   * 转空闲时会重新触发。
-   */
-  async function reconcileTranscript(id: string): Promise<void> {
-    if (!id || isSessionWorking(id)) return
-    let msgs: ChatMessage[]
-    try {
-      msgs = await readSessionTranscript(id)
-    } catch (err) {
-      // 回读失败就保持现状：陈旧副本比"清空转写"好，下一次转空闲会再试
-      // （待对账标记**不清**，正是为了让下一次还有机会）
-      logger.warn('[sessions]', `转写对账回读失败，保持现状：${id}`, err)
-      return
-    }
-    if (isSessionWorking(id)) return
-
-    // 回读成功 ⇒ 本地转写已重新以存储为权威（含全部 `seq`），待对账标记解除。
-    // 回读期间会话又跑起来了则提前返回——重入的一轮由下一次空闲再收。
-    if (transcriptDirty.value[id]) {
-      const next = { ...transcriptDirty.value }
-      delete next[id]
-      transcriptDirty.value = next
-    }
-
-    // 丢弃仍停在非终态的本地副本。会话已空闲 ⇒ 服务端不可能还有节点在跑，
-    // 这一份必然是丢补丁留下的陈旧副本；它若真在存储里，下面的快照会把它
-    // 以**权威终态**整条补回来（同一 id）。
-    const cur = sessionMessages.value[id] || {}
-    const stale = Object.values(cur).filter((m) => isInflightMessageStatus(m.status))
-    if (stale.length > 0) {
-      const next = { ...cur }
-      for (const m of stale) delete next[m.id]
-      commitMessages({ ...sessionMessages.value, [id]: next })
-      logger.warn(
-        '[sessions]',
-        `转写对账：会话 ${id} 已空闲但仍有 ${stale.length} 个节点停在非终态，` +
-          `已按存储权威状态重收敛（疑似终态补丁丢失）：${stale.map((m) => m.id).join(', ')}`,
-      )
-    }
-    // 快照（存储）权威：终态、内容、seq 一并落定
-    hydrateFromHistory(id, msgs)
-  }
-
-  /**
-   * 应用一条**会话节点**变更（`updated`）：状态 / 结局 / 错误 / 标题就地收敛。
+   * 应用一条**会话节点**变更（`updated`）：状态 / 结局 / 错误 / 告警 / 标题就地收敛。
    *
    * ## 零回读（本函数存在的理由）
    *
@@ -1174,29 +1053,15 @@ export const useSessionsStore = defineStore('sessions', () => {
     // ② 运行态镜像：节点状态 / 结局直通；activity 只在迁移时改写（见 liveStatusPatchOf）
     putStatus(id, liveStatusPatchOf(rt, wasWorking, nowWorking))
 
-    // ③ 会话级错误 = 节点属性（覆盖「错误发生在任何消息节点创建之前」的场景）。
-    //    新一轮开始（working）时节点不带 error ⇒ 自动清空上一轮的错误。
+    // ③ 会话级错误 / 告警 = 节点属性（覆盖「错误发生在任何消息节点创建之前」的场景）。
+    //    新一轮开始（working）时节点不带 error / warning ⇒ 自动清空上一轮的残留。
     setSessionError(id, rt.error ?? null)
+    setSessionWarning(id, rt.warning ?? null)
 
     // ④ 提示音：状态迁移 + 结局选音色
     if (wasWorking && !nowWorking) {
       playCompletionChime(chimeKindOfOutcome(rt.outcome), id)
     }
-
-    // ⑤ 终态丢失的自愈：会话已空闲却仍有节点停在非终态 ⇒ 一定丢了一条终态补丁
-    //    （VDFS 变更不重放，前端只做增量收敛，没人纠正它）。
-    //    判据只在**有候选**时才成立，因此正常运行路径零成本——不满足条件时
-    //    连一次回读都不会发生。
-    if (!nowWorking && (hasUnsettledNodes(id) || transcriptDirty.value[id])) {
-      void reconcileTranscript(id)
-    }
-  }
-
-  /** 本地是否还有停在非终态的节点（对账的触发条件，零 IPC） */
-  function hasUnsettledNodes(id: string): boolean {
-    const cur = sessionMessages.value[id]
-    if (!cur) return false
-    return Object.values(cur).some((m) => isInflightMessageStatus(m.status))
   }
 
   return {
@@ -1232,22 +1097,22 @@ export const useSessionsStore = defineStore('sessions', () => {
     isSessionWorking,
     isSessionFailed,
     loadMessages,
-    // 历史管理（删除 / 编辑 / 清空 / 卡死持久化）
+    // 历史管理（删除 / 编辑 / 清空）
     deleteMessage,
     updateMessage,
     clearMessages,
-    persistStuckFailure,
-    reconcileTranscript,
     // 多会话实时状态 helpers
     getSessionMessages,
     getSessionStatus,
     getSessionStaleReason,
     putMessage,
-    patchMessage,
+    appendMessage,
     putStatus,
     applySessionNode,
     getSessionError,
     setSessionError,
+    getSessionWarning,
+    setSessionWarning,
     dropSessionState,
     hydrateFromHistory,
     removeMessageById,

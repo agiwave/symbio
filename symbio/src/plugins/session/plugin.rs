@@ -25,11 +25,16 @@ use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
+use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
+use crate::symbio_core::transcript_stream::{
+    register_transcript_subscriber, unregister_transcript_subscriber,
+};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::vdfs_provider::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use crate::symbio_core::{
     dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, MemoryFile, Plugin,
-    PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION, SESSION_ID,
+    PluginChannel, PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION,
+    SESSION_ID,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -118,131 +123,77 @@ impl SessionPlugin {
         self.change_subs.notify(&session_change(id, node));
     }
 
-    // ==================== 消息级变更（不经前端补丁通道的那三条路由）====================
+    // ==================== 转写发布（实时流的唯一出口）====================
     //
-    // `chat/clear_messages` / `chat/delete_message` / `chat/update_message` 是
-    // **前端自己发起、自己已在本地收敛**的路由：补丁不需要再下发一遍，但 VDFS
-    // 视图必须同步——否则 `<根>/session/<sid>/消息` 会停在旧内容上，而且没有任何
-    // 机制会纠正它（两条链路互不校验）。
+    // 一切消息级变更（压缩节点 / 前端 CRUD 动作 / 用户消息定稿 / 失败与中止的
+    // 终态收敛）都经 `Transcript::apply` 发布——内存图、seq、核心日志、发布在
+    // 同一个函数里完成。VDFS 转写列表的在途叠加读的是同一份内存图，
+    // 「存储一份 + 在途一份」两种表示从此同源。
     //
-    // 因此这三条路由各有一个「只发变更」的入口：与 `emit_message_patch` 的区别
-    // 只在**不发前端帧**，发射规则（载荷宽度、地址拼法）完全同源。
+    // 运行中的轮次另有唯一的常规写入者：消费循环（`orchestrator::consume`）把
+    // 通道上的 `NodeOp` 喂给同一个 `Transcript`——上游有多少个发射点都无所谓，
+    // 到写入点只剩一个。
 
-    /// 从某条消息起**截断到列表末尾** → `truncated`（一条，而不是 N 条 `deleted`）。
-    ///
-    /// 这是本插件发出的**唯一**一种消息级删除变更。另一种删除语义（`deleted`：
-    /// 「**这一个**节点没了」）来自工具调用恢复流程，由消费循环直接从
-    /// `StreamEvent::Delete` 转译（见 `orchestrator::consume`）——那是按子树
-    /// 逐节点删，与「从这里到末尾」不是同一件事，因此不共用入口。
-    ///
-    /// 逐节点下发截断的代价：删一条早期消息会连带删掉上百条，变更数会与历史
-    /// 长度线性相关。见 [`vdfs::VDFS_CHANGE_TRUNCATED`] 的说明。
-    pub(crate) fn emit_transcript_truncated(&self, session_id: &str, mid: &str) {
-        self.change_subs.notify(&vdfs::VdfsChange::new(
-            message_path(session_id, mid),
-            vdfs::VDFS_CHANGE_TRUNCATED,
-        ));
+    /// 向会话转写发布一个节点操作（唯一出口）。
+    pub(crate) async fn transcript_apply(&self, session_id: &str, op: NodeOp) {
+        let state = self.active_mgr.get_or_create(session_id).await;
+        state.transcript.lock().await.apply(op);
     }
 
-    /// 清空整份转写 → 落在 `消息` 目录本身上的 `deleted`（消费者清空列表）
-    pub(crate) fn emit_transcript_cleared(&self, session_id: &str) {
-        self.change_subs.notify(&vdfs::VdfsChange::new(
-            message_dir_path(session_id),
-            vdfs::VDFS_CHANGE_DELETED,
-        ));
+    /// 向会话转写发布一批节点操作（同一把锁内顺序应用，保持发布顺序）。
+    pub(crate) async fn transcript_apply_all(&self, session_id: &str, ops: Vec<NodeOp>) {
+        let state = self.active_mgr.get_or_create(session_id).await;
+        let mut tr = state.transcript.lock().await;
+        for op in ops {
+            tr.apply(op);
+        }
     }
 
-    /// 就地改写单条消息 → `updated`（带节点视图 + 内容快照）
-    pub(crate) fn emit_message_updated(&self, session_id: &str, msg: &cm::ChatMessage) {
-        self.change_subs.notify(&message_payload(
-            vdfs::VdfsChange::new(message_path(session_id, &msg.id), vdfs::VDFS_CHANGE_UPDATED),
-            session_id,
-            msg,
-        ));
+    /// 转写被截断 / 清空：发 [`NodeOp::Reset`]，消费端清空本地转写并从存储整份重读。
+    ///
+    /// 「从某条消息起截断到末尾」「整表清空」都是**范围删除**，逐节点下发
+    /// 的条数与历史长度线性相关——消费端本来就有「整份重读」这条唯一恢复
+    /// 路径，范围删除直接走它，不为一次性动作发明第三种帧。
+    pub(crate) async fn emit_transcript_reset(&self, session_id: &str) {
+        self.transcript_apply(session_id, NodeOp::Reset).await;
     }
 
-    /// **整表重写**后的收敛广播：逐条 `deleted`（已消失的消息）+ `created`（新的首条）。
+    /// **整表重写**（L2 语义压缩）后的收敛：被压掉的消息逐条 [`NodeOp::Remove`]，
+    /// 新的首条快照 [`NodeOp::Upsert`]。
     ///
-    /// 用于 L2 语义压缩——它经 store 层的 `replace_messages` 整体重写列表，被重写掉
-    /// 的消息在存储里**不复存在**。若不广播，前端转写缓存会永久停留在压缩前
-    /// （消息仍在、快照不出现），且没有任何机制会纠正它。
-    ///
-    /// 语义上是「前缀被替换」而非「从这里到末尾没了」，因此**不能**用 `truncated`
-    /// （那是尾部截断的专用词，落在某条消息上表示"它及其之后全没了"）。
-    /// 逐条 `deleted` 的条数与压缩掉的历史线性相关，但受上下文窗口上界约束
-    /// （一次压缩最多压掉一个窗口的历史），且每条载荷只有一个地址——可接受。
-    pub(crate) fn emit_transcript_rewritten(
+    /// 语义上是「前缀被替换」而非「从这里到末尾没了」，因此不用 `Reset`
+    /// （那会强迫消费端整份重读）；逐条删除的条数受上下文窗口上界约束，可接受。
+    pub(crate) async fn emit_transcript_rewritten(
         &self,
         session_id: &str,
         dropped: &[String],
         head: &cm::ChatMessage,
     ) {
-        for mid in dropped {
-            self.change_subs.notify(&vdfs::VdfsChange::new(
-                message_path(session_id, mid),
-                vdfs::VDFS_CHANGE_DELETED,
-            ));
-        }
-        // 首条（快照）是新节点：`created` 带节点视图 + 内容快照，
-        // 消费者零回读即可把它插到正确位置（其 `seq` 是接替来的槽位号）。
-        self.change_subs.notify(&message_payload(
-            vdfs::VdfsChange::new(
-                message_path(session_id, &head.id),
-                vdfs::VDFS_CHANGE_CREATED,
-            ),
-            session_id,
-            head,
-        ));
+        let mut ops: Vec<NodeOp> = dropped
+            .iter()
+            .map(|mid| NodeOp::Remove {
+                message_id: mid.clone(),
+            })
+            .collect();
+        ops.push(NodeOp::Upsert {
+            message: Box::new(head.clone()),
+        });
+        self.transcript_apply_all(session_id, ops).await;
     }
 
-    /// 发射一条消息级 VDFS 变更——**消息到达消费者的唯一出口**。
-    ///
-    /// ## 为什么是一个函数而不是两处调用
-    ///
-    /// 消息补丁有两条入口：流式消费循环（模型 / 工具 / 子会话 / 审批节点的逐帧
-    /// 补丁）与 `persist_failure` / `converge_inflight`（错误、中止后由服务端定稿
-    /// 的终态）。它们是两个真实时刻，无法也不该合并成一处调用；但「变更进 VDFS」
-    /// 必须**同生共死**——漏发一次变更，VDFS 列表就与服务端存储永久不一致
-    /// （且没有任何机制会纠正它）。因此把出口收成一个函数：入口有两个，出口只有一个。
-    ///
-    /// ## `view` 必须是**合并后的完整消息**
-    ///
-    /// 载荷要能独立成立：`created` / `updated` 附带的节点视图与内容快照若只是
-    /// 半成品，消费者拿到的就是残缺结构（进程内消费者按它折算增量补丁，
-    /// 见 `symbio_core::schemas::session::transcript`）。
-    ///
-    /// `existed` / `appended` 由实际合并结果给出，本函数不做二次判断。
-    pub(crate) async fn emit_message_patch(
-        &self,
-        session_id: &str,
-        view: &cm::ChatMessage,
-        existed: bool,
-        appended: Option<String>,
-    ) {
-        // 无订阅者时静默丢弃（订阅表语义），因此这条发射对不关心 VDFS 的
-        // 调用方零成本。
-        self.change_subs
-            .notify(&message_change(session_id, view, existed, appended));
-    }
-
-    /// 把**存储中**的某条消息广播成一次 VDFS 变更（带权威 `seq`），落库后调用。
+    /// 把**存储中**的某条消息发布成一次完整快照，落库后调用。
     ///
     /// ## 它补的是哪个窟窿
     ///
-    /// 有一条消息**从来没有变更出口**：用户自己在聊天协议里发的那条。它由
-    /// `orchestrator/entry.rs` 直连存储追加（`append_messages`），而那条路径不发
-    /// 任何变更——于是前端手里只有自己的**乐观副本**，而乐观副本的 `seq` 是前端
-    /// 本地游标发的号，**永远拿不到存储分配的那个**。后果不是「少一条消息」，
-    /// 而是**两套序号空间并存**：前端按本地号排，一旦另一些消息（失败定稿 /
-    /// 重试重建 / 压缩重写）拿到存储号，同一条链上就出现「权威号小于本地号」，
-    /// 排序随之错位——刷新（整份回读）才恢复。
+    /// 有一条消息**从来没有实时出口**：用户自己在聊天协议里发的那条。它由
+    /// `orchestrator/entry.rs` 直连存储追加（`append_messages`）——前端手里只有
+    /// 自己的**乐观副本**，其 `seq` 是本地游标发的号，永远拿不到存储分配的那个。
     ///
     /// ## 为什么读回来再发，而不是把入参那条发出去
     ///
     /// `append_messages` 在临界区内给消息补 `seq` 与 `timestamp`（只改它自己的
-    /// 副本），调用方手里那条仍然没有号。**发出去的载荷必须与存储一致**，否则这
-    /// 条变更反而把「没有号」写进前端，等于把问题换个地方发生。因此这里从存储
-    /// 取回权威版本再发（每次用户发言一次读，频率与用户点击同阶）。
+    /// 副本），调用方手里那条仍然没有号。**发出去的载荷必须与存储一致**。
+    /// 因此这里从存储取回权威版本再发（每次用户发言一次读，频率与用户点击同阶）。
     ///
     /// 找不到该 id（并发删除等）就静默返回：存储里没有的东西不该被广播。
     pub(crate) async fn emit_persisted_message(&self, session_id: &str, message_id: &str) {
@@ -255,10 +206,38 @@ impl SessionPlugin {
         let Some(stored) = messages.iter().find(|m| m.id == message_id) else {
             return;
         };
-        // `existed = true`：这条消息在前端**已经存在**（乐观副本），因此是
-        // 「就地替换成权威版本」（`updated`），不是「多了一个节点」。
-        self.emit_message_patch(session_id, stored, true, None)
-            .await;
+        self.transcript_apply(
+            session_id,
+            NodeOp::Upsert {
+                message: Box::new(stored.clone()),
+            },
+        )
+        .await;
+    }
+
+    /// `session/stream`：建立**转写流**订阅连接（消息实时面的唯一通道）。
+    ///
+    /// 返回 `PluginPayload::Session` 通道——传输泵逐帧转发到消费端
+    /// （前端 / CLI / 子会话转播桥）。帧两类：
+    /// - `transcript_event`：[`NodeEvent`]（归属会话 + 单调 seq + 显式操作）；
+    /// - `transcript_resync`：背压标记——通道曾满，消费端必须清空本地转写并
+    ///   从存储整份重读（唯一恢复路径，见 `transcript_stream` 模块文档）。
+    async fn handle_stream_subscribe(
+        &self,
+        _ctx: Arc<dyn InvokeRequest>,
+    ) -> InvokeResponse<PluginPayload> {
+        // 容量 4096 帧：满 = 慢消费者 → 订阅被摘除 + resync 标记（见 `transcript_stream`）。
+        let (peer, mine) = PluginChannel::pair(4096);
+        let connection_id = uuid::Uuid::new_v4().to_string();
+        register_transcript_subscriber(connection_id.clone(), mine.tx.clone());
+        // 连接断开（cancel_token 触发）时反注册；订阅表还会在发送端关闭时
+        // 静默摘除（publish_frame 的 `gone` 路径），双保险。
+        let conn_id = connection_id.clone();
+        tokio::spawn(async move {
+            mine.cancel_token.cancelled().await;
+            unregister_transcript_subscriber(&conn_id);
+        });
+        Ok(PluginPayload::Session(peer))
     }
 
     pub fn metadata() -> PluginMeta {
@@ -292,73 +271,9 @@ impl SessionPlugin {
             handle.spawn(async move {
                 scheduler.run_heartbeat_loop().await;
             });
-
-            // 启动清理：把上次崩溃中断的 Streaming 消息标 Failed。
-            // WaitingUserAction 节点不清理（合法的待恢复状态，重启后用户仍可 resume）。
-            let cleaner = plugin.clone();
-            handle.spawn(async move {
-                cleaner.cleanup_crashed_sessions().await;
-            });
         }
 
         plugin
-    }
-
-    /// 启动清理：扫描所有 session，把 `Streaming` 状态的消息标 `Failed`。
-    ///
-    /// 触发场景：后端崩溃/重启后，上次未完成的 chat_loop 留下了 Streaming 状态的消息。
-    /// 这些消息需要收敛为 Failed 终态，使切回会话时能看到上次中断的错误。
-    ///
-    /// **不清理** `WaitingUserAction` 节点——它们是合法的待恢复状态（工具需审批/补充），
-    /// 重启后用户仍可 resume。
-    pub(crate) async fn cleanup_crashed_sessions(&self) {
-        let sessions = match self.list_sessions().await {
-            Ok(s) => s,
-            Err(e) => {
-                crate::plugin_warn!(
-                    "session",
-                    "cleanup_crashed_sessions: list_sessions 失败: {}",
-                    e
-                );
-                return;
-            }
-        };
-
-        for session in sessions {
-            let chat_session = match self.open_chat_session(&session.id).await {
-                Ok(cs) => cs,
-                Err(_) => continue,
-            };
-            let mut msgs = match chat_session.get_messages().await {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-
-            let mut updates = Vec::new();
-            for m in msgs.iter_mut() {
-                if m.status == Some(cm::MessageStatus::Streaming) {
-                    m.status = Some(cm::MessageStatus::Failed);
-                    m.error = Some("会话因重启中断".to_string());
-                    updates.push(m.clone());
-                }
-            }
-
-            if !updates.is_empty() {
-                crate::plugin_info!(
-                    "session",
-                    "cleanup_crashed_sessions: 会话 {} 清理 {} 条 Streaming 消息",
-                    session.id,
-                    updates.len()
-                );
-                if let Err(e) = chat_session.update_messages(updates).await {
-                    crate::plugin_warn!(
-                        "session",
-                        "cleanup_crashed_sessions: update_messages 失败: {}",
-                        e
-                    );
-                }
-            }
-        }
     }
 
     /// 获取父插件引用
@@ -536,6 +451,9 @@ impl Plugin for SessionPlugin {
         let data = match path {
             "chat/send" => return self.handle_chat_send_oneoff(ctx).await,
             "chat/abort" => return self.handle_chat_abort_oneoff(ctx).await,
+            // 转写流订阅：消息**实时面**的唯一通道（NodeEvent，seq 单调、满即踢）。
+            // 历史面（落库转写 / `消息` 目录投影）仍走 VDFS 读。
+            "stream" => return self.handle_stream_subscribe(ctx).await,
             "get_messages" => self.invoke_get_messages(ctx.clone()).await?,
             "update" => self.invoke_update(ctx.clone()).await?,
             // ==================== 本表只留「不是数据 CRUD」的路由 ====================
@@ -712,11 +630,10 @@ mod vdfs_provider;
 // 模块内共享面：`nodes` / `vdfs_provider` 经 `use super::*;` 取用，测试（`plugin.test.rs`）亦同。
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
-    internal_dirs, message_change, message_dir_path, message_node, message_of, message_path,
-    message_payload, message_text, ordered, overlay_live, parse_session_path, session_change,
-    session_content, session_node, title_from_new_path, transcript_window, window_params,
-    SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED,
-    SEG_MESSAGES,
+    internal_dirs, message_node, message_of, message_text, ordered, overlay_live,
+    parse_session_path, session_change, session_content, session_node, title_from_new_path,
+    transcript_window, window_params, SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED,
+    OUTCOME_COMPLETED, OUTCOME_FAILED, SEG_MESSAGES,
 };
 
 #[cfg(test)]

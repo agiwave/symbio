@@ -353,11 +353,15 @@ Agent，不属于「一个 Agent 会什么」。
 | `prompts/<n>.md` | 根 `AGENTS.md` | 多份合并为一份；`priority` 不再需要 |
 | `skills/<n>/SKILL.md` | `skill/` 插件目录 | 技能由宿主的技能系统接管 |
 | `mcps/<n>.yaml` | `mcp/` 插件目录 | MCP 声明由宿主的 MCP 客户端接管 |
-| `manifest.yaml` | `manifest.yaml` | `spec` 改为 `"agent-dir/v2"`，其余字段不变 |
+| `manifest.yaml` | `manifest.yaml` | `spec` **与** `requires.spec` 一并升到 `agent-dir/v2`，其余字段不变 |
 | `assets/` | 保留 | 不变 |
 
 宿主**可以**提供一次性迁移：把 v1 bundle 的三个约定目录转成对应的插件目录，
 `prompts/` 各片段按原 `priority` 升序拼接后写入根 `AGENTS.md`。
+
+> ⚠️ `requires.spec` **必须**与 `spec` 同行升级：它是 §10 的接入门槛，v1 目录写着
+> `^1`。只改 `spec` 会产出「格式是 v2、门槛仍要 v1」的自相矛盾清单——迁出来的
+> 目录会被 §10 拒绝，迁移等于白做。
 
 ---
 

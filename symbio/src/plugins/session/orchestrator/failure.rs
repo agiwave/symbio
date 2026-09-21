@@ -88,21 +88,20 @@ impl SessionPlugin {
     pub(super) async fn persist_failure(
         &self,
         session_id: &str,
-        collected: &Arc<tokio::sync::Mutex<Vec<cm::ChatMessage>>>,
+        transcript: &Arc<tokio::sync::Mutex<crate::plugins::session::transcript::Transcript>>,
         error: &str,
         terminal: cm::MessageStatus,
     ) {
         // 1. 定位失败 Turn。
-        //    `collected` 为空表示错误发生在任何 Turn 节点创建之前（例如能力收集失败、
+        //    在途图为空表示错误发生在任何 Turn 节点创建之前（例如能力收集失败、
         //    Model 插件路由直接报错）——此时没有任何节点可降级，错误属于会话级，
         //    由调用方广播的 Error 事件承载，这里直接返回。
-        let failing_turn_id = {
-            let c = collected.lock().await;
-            c.iter()
-                .rev()
-                .find(|m| m.msg_type == Some(cm::MessageType::Turn) && m.parent_id.is_none())
-                .map(|m| m.id.clone())
-        };
+        let mut mirror = transcript.lock().await.snapshot();
+        let failing_turn_id = mirror
+            .iter()
+            .rev()
+            .find(|m| m.msg_type == Some(cm::MessageType::Turn) && m.parent_id.is_none())
+            .map(|m| m.id.clone());
         let failing_turn_id = match failing_turn_id {
             Some(id) => id,
             None => {
@@ -119,12 +118,9 @@ impl SessionPlugin {
         //    历史轮次的消息不在此列：它们已由 Model 插件按自己的规则落库，session 层
         //    不应再拿流式快照去"补写"一份——否则同一个 Turn 下会出现两份内容相同的
         //    文本节点（流式 id 与落库 id 不一致时的典型表现）。
-        let subtree_ids = {
-            let c = collected.lock().await;
-            subtree_of(&c, &failing_turn_id)
-        };
+        let subtree_ids = subtree_of(&mirror, &failing_turn_id);
 
-        // 3. 在本任务的内存镜像里定稿失败 Turn 的子树。
+        // 3. 在转写镜像里定稿失败 Turn 的子树。
         //
         //    关键修复（原始 Bug：错误刷屏 + 工具节点出现服务器错误）：
         //    - 失败 Turn（根级）：Failed + error，这是前端唯一渲染 ⚠ 错误条 + 重试入口的节点。
@@ -132,24 +128,21 @@ impl SessionPlugin {
         //      (None / Streaming / Pending) 定稿为 Completed，**绝不挂 error**。
         //      理由：工具调用在本地执行、不请求 LLM 服务器，不可能产生「API 错误」；
         //      把同一个 429 刷到每条文本/工具节点既不符合逻辑，又造成错误刷屏。
-        {
-            let mut c = collected.lock().await;
-            for m in c.iter_mut() {
-                if !subtree_ids.contains(&m.id) {
-                    continue;
-                }
-                if m.id == failing_turn_id {
-                    m.status = Some(terminal.clone());
-                    // 中止不挂 error：它是用户自己的操作，不是故障；前端按状态渲染
-                    // 「已中止」，不需要一条错误文案来凑。
-                    m.error = (terminal == cm::MessageStatus::Failed).then(|| error.to_string());
-                } else if matches!(
-                    m.status,
-                    None | Some(cm::MessageStatus::Streaming) | Some(cm::MessageStatus::Pending)
-                ) {
-                    m.status = Some(cm::MessageStatus::Completed);
-                    m.error = None;
-                }
+        for m in mirror.iter_mut() {
+            if !subtree_ids.contains(&m.id) {
+                continue;
+            }
+            if m.id == failing_turn_id {
+                m.status = Some(terminal.clone());
+                // 中止不挂 error：它是用户自己的操作，不是故障；前端按状态渲染
+                // 「已中止」，不需要一条错误文案来凑。
+                m.error = (terminal == cm::MessageStatus::Failed).then(|| error.to_string());
+            } else if matches!(
+                m.status,
+                None | Some(cm::MessageStatus::Streaming) | Some(cm::MessageStatus::Pending)
+            ) {
+                m.status = Some(cm::MessageStatus::Completed);
+                m.error = None;
             }
         }
 
@@ -174,8 +167,7 @@ impl SessionPlugin {
         let mut changed: Vec<cm::ChatMessage> = Vec::new();
 
         // 5. 合并失败 Turn 的子树（作用域外的一律跳过：保持存储中已有的终态）。
-        let c = collected.lock().await;
-        for cm_msg in c.iter() {
+        for cm_msg in &mirror {
             if !subtree_ids.contains(&cm_msg.id) {
                 continue;
             }
@@ -212,7 +204,7 @@ impl SessionPlugin {
                     // 已 Completed/Failed 的节点：原样保留，不改动、不广播。
                 }
                 None => {
-                    // collected 中存在但存储里没有的消息（崩溃时刚流式出来、尚未落库）。
+                    // 在途图中存在但存储里没有的消息（崩溃时刚流式出来、尚未落库）。
                     // - 失败 Turn 本身：补写为 Failed + error（承载重试入口）；
                     // - 子节点：定稿为 Completed 后补写，**丢弃父节点缺失的孤儿**
                     //   （避免写入无父的悬空节点污染前端渲染）。
@@ -242,30 +234,28 @@ impl SessionPlugin {
                 }
             }
         }
-        drop(c);
 
         if let Err(e) = chat_session.replace_messages(all).await {
             crate::plugin_error!("session", "persist_failure: replace_messages failed: {}", e);
         }
 
-        // 6. 仅广播本次状态真正变化的消息（服务端权威终态，前端只信服务端）：
+        // 6. 仅发布本次状态真正变化的消息（服务端权威终态，前端只信服务端）：
         //    - 根 Turn 的 Failed + error → 错误条 + 重试入口；
         //    - 子节点的 Completed → 结束前端流式动画（不再渲染 ⚠）。
         //    推送发生在 Error 事件之前（调用方先 persist_failure 再 broadcast_error_with_idle），
         //    Error 事件仅承担 transport 级兜底语义。
-        //
-        //    走 `emit_message_patch`：这几条终态同样是**消息变更**，VDFS 列表必须
-        //    同步收敛，否则一次失败之后 VDFS 视图会永远停在 streaming——
-        //    `replace_messages` 已把终态写进存储，而列表读的是存储。
-        //    这些消息都已在存储中（`existed = true`），且这里是全量替换终态，
-        //    故一律 `updated`。
         for m in changed {
-            self.emit_message_patch(session_id, &m, true, None).await;
+            transcript
+                .lock()
+                .await
+                .apply(session_chat_response::NodeOp::Upsert {
+                    message: Box::new(m),
+                });
         }
 
-        // 7. 本轮在途缓冲随之作废：权威副本已由上面的 `replace_messages` 回到存储，
-        //    继续叠加只会让同一条消息在 VDFS 列表里出现两次。
-        collected.lock().await.clear();
+        // 7. 本轮在途图随之作废：权威副本已由上面的 `replace_messages` 回到存储，
+        //    继续叠加只会让同一条消息在转写列表里出现两次。
+        transcript.lock().await.clear();
     }
 
     /// 中止收口：把该会话**仍在飞行中的消息节点**定稿，使「用户按下停止」与
@@ -290,13 +280,12 @@ impl SessionPlugin {
     /// 因此中止路径**自己**承担收口责任，不依赖 chat_loop 是否已退出：这是个
     /// 「谁宣称状态、谁负责收口」的划分，不是补丁。
     ///
-    /// ## 两个数据源都要看
+    /// ## 只看在途缓冲
     ///
-    /// - **存储**：`resume` 重跑工具时父 ToolCall 被直接 `replace_messages` 落库
-    ///   （`resume.rs` 步骤 5），从不出现在在途缓冲里；
-    /// - **在途缓冲**（`state.live_messages`）：流式节点的常规位置。
-    ///
-    /// 只扫其中一个，另一个场景的中止就会漏收。
+    /// 存储不需要扫描：持久层写入不变量（`chat_session.rs::ensure_durable_states`）
+    /// 拒绝任何瞬态状态落盘，`Streaming` 只经广播通道存在——「存储里的在途节点」
+    /// 按设计就不可能出现在。在途缓冲（`state.live_messages`）是唯一可能停在
+    /// 瞬态状态的地方，也是本函数唯一的收敛对象。
     pub(super) async fn converge_inflight(
         &self,
         state: &Arc<ActiveSessionState>,
@@ -317,23 +306,12 @@ impl SessionPlugin {
                 return 0;
             }
         };
-        let live = state.live_messages.lock().await.clone();
+        let live = state.transcript.lock().await.snapshot();
 
-        // `(节点, 存储里是否已存在)` —— `existed` 是 VDFS 变更类型的唯一判据
-        // （`created` 与 `updated` 的区别），必须由这里如实报出。
-        let mut changed: Vec<(cm::ChatMessage, bool)> = Vec::new();
-
-        // ① 存储中仍在飞行的节点
-        for m in all.iter_mut() {
-            if is_inflight(&m.status) {
-                m.status = Some(abort_terminal_of(m));
-                m.error = None;
-                changed.push((m.clone(), true));
-            }
-        }
-
-        // ② 在途缓冲里**尚未落库**的节点：补写，前提是父节点存在
+        // 在途缓冲里**尚未落库**的节点：补写，前提是父节点存在
         //    （与 `persist_failure` 同一孤儿规则——写入无父的悬空节点会污染前端渲染）。
+        // 存储侧无需扫描：写入不变量保证存储只有终态（见上 doc）。
+        let mut changed: Vec<cm::ChatMessage> = Vec::new();
         for l in &live {
             if !is_inflight(&l.status) || all.iter().any(|m| m.id == l.id) {
                 continue;
@@ -350,13 +328,13 @@ impl SessionPlugin {
             new.status = Some(abort_terminal_of(l));
             new.error = None;
             all.push(new.clone());
-            changed.push((new, false));
+            changed.push(new);
         }
 
         if changed.is_empty() {
-            // 在途缓冲仍要作废：本轮要么已由 `persist_failure` 收口（权威副本已在
+            // 在途图仍要作废：本轮要么已由 `persist_failure` 收口（权威副本已在
             // 存储里），要么根本没有在途节点。留着只会让陈旧副本继续参与叠加。
-            state.live_messages.lock().await.clear();
+            state.transcript.lock().await.clear();
             return 0;
         }
 
@@ -378,13 +356,20 @@ impl SessionPlugin {
         let converged = changed.len();
 
         // 广播：这些终态同样是**消息变更**，VDFS 列表必须同步收敛
-        // （列表读存储 + 在途叠加，而存储已被改写）。
-        for (m, existed) in changed {
-            self.emit_message_patch(session_id, &m, existed, None).await;
+        // （列表读存储 + 在途叠加，而存储已被改写）。这些都是本次新落库的
+        // 节点，以 `created` 报出——VDFS 列表里它们此前不存在。
+        for m in changed {
+            state
+                .transcript
+                .lock()
+                .await
+                .apply(session_chat_response::NodeOp::Upsert {
+                    message: Box::new(m),
+                });
         }
 
-        // 权威副本已回到存储，在途缓冲作废（与 `persist_failure` 步骤 7 同一理由）。
-        state.live_messages.lock().await.clear();
+        // 权威副本已回到存储，在途图作废（与 `persist_failure` 步骤 7 同一理由）。
+        state.transcript.lock().await.clear();
         converged
     }
 }

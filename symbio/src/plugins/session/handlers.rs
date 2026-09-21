@@ -27,7 +27,9 @@
 
 use super::chat_session::{ChatSession, PersistentChatSession};
 use super::plugin::SessionPlugin;
-use crate::symbio_core::schemas::session::{session_get_messages, session_update};
+use crate::symbio_core::schemas::session::{
+    session_chat_response, session_get_messages, session_update,
+};
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt};
 use crate::symbio_core::{InvokeResponse, PluginError};
 use serde_json::{json, Value};
@@ -57,9 +59,9 @@ impl SessionPlugin {
             let mut inner = state.inner.write().await;
             if let Some(tx) = inner.ai_control_tx.take() {
                 let _ = tx
-                    .send(crate::symbio_core::PluginFrame::Data(json!({
-                        "type": "abort",
-                    })))
+                    .send(crate::symbio_core::PluginFrame::Data(json!(
+                        session_chat_response::ControlSignal::Abort
+                    )))
                     .await;
             }
         }

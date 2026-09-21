@@ -46,6 +46,15 @@ export const CHAT_SEND = `${CHAT_PATH}/send` as const
 export const CHAT_ABORT = `${CHAT_PATH}/abort` as const
 
 /**
+ * 会话**转写实时流**（消息的唯一实时通道）。
+ *
+ * 长连接订阅：后端按 `NodeEvent`（`session_id` + 流内单调 `seq` + 显式操作）逐帧
+ * 下发在途转写；历史面（落库转写 / `消息` 目录投影）仍走 VDFS 读。
+ * 消费端 `services/transcriptStream.ts`；服务端 `plugins/session/plugin.rs::handle_stream_subscribe`。
+ */
+export const SESSION_STREAM = `${SESSION_PATH}/stream` as const
+
+/**
  * 级联选项机制（选项宿主 = session 插件）。
  *
  * 根选项列表与子层共用一个端点（`parent` 参数区分），与 VDFS

@@ -7,7 +7,8 @@
 //! 完整单轮行为（`execute_turn` 五态机、`effective_context_tokens` 收敛）由本
 //! 类型实现，`TurnOutput` → `PluginError` 的映射固定为：
 //! - `Aborted` → `PluginError::Aborted`；
-//! - `RetryWithoutContextId` → `plugin_warn!` + `emit_abort` + 同名错误；
+//! - `RetryWithoutContextId` → `plugin_warn!` + 同名错误（半截流由 chat_loop 重试分支以
+//!   `NodeOp::Remove` 状态变更清除）；
 //! - `Err(msg)` → `PluginError::InternalError`；
 //! - `RateLimited(msg)` → `PluginError::RateLimited`；
 //! - `Ok(resp)` → `parse_sse_stream`（`Err` → `PluginError::StreamError`）。
@@ -18,9 +19,7 @@ use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
-use crate::symbio_core::turn::{
-    emit_abort, execute_post_with_abort, parse_sse_stream, PostResult, TurnOutput,
-};
+use crate::symbio_core::turn::{execute_post_with_abort, parse_sse_stream, PostResult, TurnOutput};
 use crate::symbio_core::{CapabilityMeta, ModelProvider, PluginChannel, PluginError};
 use async_trait::async_trait;
 use std::sync::atomic::AtomicBool;
@@ -123,7 +122,9 @@ impl ModelProvider for BoundProvider {
                     "[LLM] Response context lost (400). Retrying turn without response_ids... (耗时 {:?})",
                     turn_started.elapsed()
                 );
-                emit_abort(channel).await;
+                // 半截流的清除不在本层：返回错误后由 chat_loop 的重试分支对被废弃的
+                // Streaming 节点逐条发 `NodeOp::Remove`（状态变更，前端据此
+                // 移除视图），不再依赖已废除的一次性 Abort 事件帧。
                 return Err(PluginError::RetryWithoutContextId);
             }
             PostResult::Err(msg) => {

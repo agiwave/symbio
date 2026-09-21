@@ -100,23 +100,22 @@ pub(crate) async fn close_turn(
                 turn.last_saved = context.messages.len();
                 return TurnFlow::NextTurn;
             }
-            // 续写次数耗尽：明确告知，绝不静默结束。
+            // 续写次数耗尽：明确告知，绝不静默结束（会话级告警状态，随下一轮请求清除）。
             let _ = channel.tx.send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::StreamEvent::Error {
-                    error: format!(
+                serde_json::to_value(session_chat_response::NodeOp::Warn {
+                    warning: Some(format!(
                         "输出因达到长度上限而中断（已自动续写 {} 次仍超出）。请提高单次输出预算或缩小任务范围。",
                         MAX_CONTINUE_ROUNDS
-                    ),
+                    )),
                 })
                 .unwrap_or_default(),
             )).await;
         } else if finish.is_length() && had_tool {
             // 工具调用参数 JSON 被长度截断：参数残破无法通过续写修复，
-            // 该次调用已丢弃 → 明确报错而非静默结束。
+            // 该次调用已丢弃 → 明确报错而非静默结束（会话级告警状态）。
             let _ = channel.tx.send(PluginFrame::Data(
-                serde_json::to_value(session_chat_response::StreamEvent::Error {
-                    error: "输出在工具调用参数中途达到长度上限而中断。请提高单次输出预算，或把大任务拆小后重试。"
-                        .to_string(),
+                serde_json::to_value(session_chat_response::NodeOp::Warn {
+                    warning: Some("输出在工具调用参数中途达到长度上限而中断。请提高单次输出预算，或把大任务拆小后重试。".to_string()),
                 })
                 .unwrap_or_default(),
             )).await;
@@ -206,14 +205,9 @@ pub(crate) async fn close_turn(
                  Continue the task."
                     .to_string()
             };
-            let mut meta = serde_json::json!({ "success": ok, "kind": "context_compact" });
-            if ok {
-                meta["before_tokens"] = serde_json::json!(before_t);
-                meta["after_tokens"] = serde_json::json!(after_t);
-            }
             // 标准工具广播模式（与 process_tool_calls_async 一致）：
             // 前端实时可见 context_compact 的结果子节点与父节点状态——
-            // 先广播 Tool 结果子节点，再广播父 ToolCall 状态补丁。
+            // 先广播 Tool 结果子节点，再广播父 ToolCall 的完整终态快照。
             let mut tool_msg = build_tool_message(&call_id, &result_text, Some(ok), None);
             if !ok {
                 // 失败属信息性：结果以 Completed 定格（父节点同为 Completed），
@@ -221,14 +215,28 @@ pub(crate) async fn close_turn(
                 tool_msg.status = Some(MessageStatus::Completed);
             }
             broadcast_message_update(channel, tool_msg.clone()).await;
-            let parent_update = ChatMessage {
-                id: call_id.clone(),
-                status: Some(MessageStatus::Completed),
-                meta: Some(meta),
-                ..Default::default()
-            };
-            broadcast_message_update(channel, parent_update.clone()).await;
-            parent_updates.push(parent_update);
+            // 父节点终态：从权威转写取完整副本应用终态（找不到 = 协议违例，跳过）。
+            if let Some(mut parent) = context.messages.iter().find(|m| m.id == call_id).cloned() {
+                parent.status = Some(MessageStatus::Completed);
+                let mut meta = parent.meta.clone().unwrap_or_else(|| serde_json::json!({}));
+                if let Some(obj) = meta.as_object_mut() {
+                    obj.insert("success".into(), serde_json::json!(ok));
+                    obj.insert("kind".into(), serde_json::json!("context_compact"));
+                    if ok {
+                        obj.insert("before_tokens".into(), serde_json::json!(before_t));
+                        obj.insert("after_tokens".into(), serde_json::json!(after_t));
+                    }
+                }
+                parent.meta = Some(meta);
+                broadcast_message_update(channel, parent.clone()).await;
+                parent_updates.push(parent);
+            } else {
+                plugin_error!(
+                    "session",
+                    "[Compress] 转写中不存在工具调用 {}（协议违例），跳过父状态广播",
+                    call_id
+                );
+            }
             tool_results.push(tool_msg);
         }
         // 同批多余的 compact 调用：直接标记跳过
@@ -243,18 +251,24 @@ pub(crate) async fn close_turn(
                 );
                 tool_msg.status = Some(MessageStatus::Completed);
                 broadcast_message_update(channel, tool_msg.clone()).await;
-                let parent_update = ChatMessage {
-                    id: cid.clone(),
-                    status: Some(MessageStatus::Completed),
-                    meta: Some(serde_json::json!({
-                        "success": false,
-                        "kind": "context_compact",
-                        "skipped": true
-                    })),
-                    ..Default::default()
-                };
-                broadcast_message_update(channel, parent_update.clone()).await;
-                parent_updates.push(parent_update);
+                if let Some(mut parent) = context.messages.iter().find(|m| m.id == *cid).cloned() {
+                    parent.status = Some(MessageStatus::Completed);
+                    let mut meta = parent.meta.clone().unwrap_or_else(|| serde_json::json!({}));
+                    if let Some(obj) = meta.as_object_mut() {
+                        obj.insert("success".into(), serde_json::json!(false));
+                        obj.insert("kind".into(), serde_json::json!("context_compact"));
+                        obj.insert("skipped".into(), serde_json::json!(true));
+                    }
+                    parent.meta = Some(meta);
+                    broadcast_message_update(channel, parent.clone()).await;
+                    parent_updates.push(parent);
+                } else {
+                    plugin_error!(
+                        "session",
+                        "[Compress] 转写中不存在工具调用 {}（协议违例），跳过父状态广播",
+                        cid
+                    );
+                }
                 tool_results.push(tool_msg);
             }
         }
@@ -272,6 +286,7 @@ pub(crate) async fn close_turn(
         channel,
         &turn.abort_flag,
         ctx.clone(),
+        &context.messages,
     )
     .await;
     turn.in_flight_tools.clear();
@@ -279,29 +294,15 @@ pub(crate) async fn close_turn(
     parent_updates.extend(other_parent_updates);
     context.messages.extend(tool_results.clone());
 
-    // 持久化 ToolCall 父节点状态更新（解决父节点状态不持久化问题）。
-    // append_messages 是 push-only 无法更新已存在消息，故显式调用 update_messages。
-    if !parent_updates.is_empty() {
-        // 同步到 context.messages 内存镜像
-        for patch in &parent_updates {
-            if let Some(msg) = context.messages.iter_mut().find(|m| m.id == patch.id) {
-                if let Some(s) = &patch.status {
-                    msg.status = Some(s.clone());
-                }
-                if let Some(m) = &patch.meta {
-                    msg.meta = Some(m.clone());
-                }
-                if let Some(e) = &patch.error {
-                    msg.error = Some(e.clone());
-                }
-            }
-        }
-        if let Err(e) = context
-            .session
-            .update_messages(parent_updates.clone())
-            .await
-        {
-            plugin_warn!("session", "[Session] 父节点状态持久化失败: {}", e);
+    // 父节点终态同步进 context.messages 内存镜像——**整条替换**（广播出去的
+    // `parent_updates` 本就是完整快照）。id 不存在的（协议失败兜底父节点，
+    // 从未广播过）补入转写，使其随下方的 persist_messages 落库，结果子节点
+    // 不会悬空。落库由 persist_messages 统一承担（append 范围覆盖本轮全部
+    // 新节点，父节点的终态已在镜像里），不再需要 update_messages 补写。
+    for full in &parent_updates {
+        match context.messages.iter_mut().find(|m| m.id == full.id) {
+            Some(msg) => *msg = full.clone(),
+            None => context.messages.push(full.clone()),
         }
     }
 

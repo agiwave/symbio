@@ -20,9 +20,10 @@
 与**同一份协议**，因此本 CLI 的引入**没有改动 `symbio/` 的任何一行代码，也没有动协议**。
 
 - 上行：`SimpleRequest` 装上下文 → `root.route(ctx)`（`Arc<dyn Plugin>` 进程内直连）
-- 下行：订阅 **event_bus**（一条连接收全部会话事件），把 `StreamEvent` 渲染到终端。
-  选 event_bus 而不是 session 私有通道，是因为它与"当前打开哪个会话"解耦 ——
-  订阅一次，之后切会话不必重建连接。
+- 下行：**两条连接，各归其域**——消息实时面订阅 **`session/stream`**（`NodeEvent`：
+  `session_id` + 流内单调 `seq` + 显式 `NodeOp`，按操作直接落地到终端视图）；会话运行态
+  订阅 **event_bus**（`kind = "vdfs"` 的变更帧，承载会话节点的 `status` / `outcome`）。
+  两条都与「当前打开哪个会话」解耦 —— 订阅一次，之后切会话不必重建连接。
 
 ## 📚 文档
 

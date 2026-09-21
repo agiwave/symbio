@@ -67,7 +67,7 @@
              WorkingGuard（panic 兜底）/ StopSignal / AiControlGuard
              provider 解析 + RATE_LIMITER + PluginChannel::pair
              spawn → ③（子任务）
-             消费循环（orchestrator.rs:551）：收帧 → merge_message_patch
+             消费循环（orchestrator.rs:551）：收帧 → 快照替换 / Append 追加
                → emit_message_patch / VDFS 变更 / persist_failure
 ③ 循环层   run_chat_loop                          chat_loop.rs:324   ← 本文对象
              + close_turn                         chat_loop.rs:748
@@ -132,7 +132,7 @@
 | 无工具 | `persist_messages` + `fire_stop_hook` → **出口 ⑨** | 805–812 |
 | 有工具 | `context_compact` 拦截分流（**压缩入口 ②**） | 821–942 |
 | 有工具 | `process_tool_calls_async`（**串行阻塞**，tool_executor.rs:590） | 944–951 |
-| 有工具 | 父节点状态 `update_messages` | 958–980 |
+| 有工具 | 父节点终态快照同步进内存镜像（整条替换，随 persist 落库） | 958–980 |
 | 有工具 | `persist_messages` | 982 |
 | 有工具 | `needs_user_action` → `fire_stop_hook` → **出口 ⑩** | 988–1004 |
 | 有工具 | `tool_rounds += 1` → `NextTurn` | 1008–1015 |
@@ -540,7 +540,7 @@ loop {
      保证"没有悬空 ToolCall"这一不变式；
   3. `TOOL_STREAM_IDLE_TIMEOUT_SECS`（180s）与 `TOOL_EXEC_HARD_TIMEOUT_SECS`（600s）
      两级超时，避免单个工具挂死导致 `WaitForTools` 永不满足；
-  4. 父节点状态补丁（`parent_updates` → `update_messages`）与结果子节点的写入顺序。
+  4. 父节点终态快照（`parent_updates` 整条替换进内存镜像）与结果子节点的写入顺序。
 
 > 建议：级别 2 单独一个批次，且先在 `auto` 模式上启用，`interactive` 保持串行。
 > 若只想要"结构清晰"而不想动执行模型，**只做级别 1** 也能拿到第 1、2、4 条的全部收益。

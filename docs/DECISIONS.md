@@ -625,6 +625,13 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
   故两种投影落在 `symbio_core::schemas::session::transcript`（进程内消费者唯一可达的共同层）。
   完成判据也随之从「等 `Status idle` 帧」改为「读会话节点的 `status`」——同一个判据在前端、
   subagent、CLI 三处首次真正同源。
+  > **后记（S23 续，2026-09-21）：本条措辞已被后续两步取代。**
+  > ① 消息的实时面不再是 VDFS 变更，而是 `session/stream` 转写流（`NodeOp` 显式操作
+  > ＋ 会话内单调 `seq`）——「全量 vs 增量」的折算问题随之消失，
+  > `symbio_core::schemas::session::transcript`（逆投影 + `TranscriptPatchBuilder`）
+  > **已删除**。② `agent/host/subagent.rs` 的转播桥也已改订转写流（消息）＋ VDFS
+  > （仅会话运行态）；`cli/src/client.rs` 早已如此。**「读会话节点 `status` 判本轮结束」**
+  > 这条结论不变，仍是三处同源。
 - **词汇不合并**：`streaming`（消息）与 `working`（会话）保持两个词。合并会连带改
   `status-*` CSS 类名与 `isWorkingStatus()`，而**漏改 CSS 类名不报错、不失败，只会让
   流式动画静默消失**——正是"体验不得变差"要防的那类回归。

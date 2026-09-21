@@ -7,10 +7,25 @@
 > 本文回答一个问题：**会话的"正在发生什么"如何只由节点状态表达**，
 > 使前端不再消费任何事件序列，从而**不存在事件顺序问题**。
 >
-> **状态：已完成（S16–S22）。** 会话域只剩 `kind = "vdfs"` 一条实时频道，消费者是前端、
-> 子智能体转播（`agent/host/subagent.rs`）与 CLI（`cli/src/client.rs`）；旧的
-> `kind = "session"` 事件频道（`Status` / `Update` / `Delete` / `Error` / `Abort`）
-> **已整体废除**（§1 的"现状"表是当时的问题清单，不是今天的描述）。
+> **状态：S16–S22 已完成；S23 续（消息实时面改为单条转写流）。**
+>
+> - **读面**（历史）走 VDFS：`read(<根>/session/<sid>)` 一次拿整份历史，地址与 §2.1 一致。
+> - **实时面**（消息）是 `worker/session/stream` **一条流**，载荷是 `NodeOp`
+>   （`upsert` / `append` / `remove` / `reset` / `warn`）+ 会话内单调 `seq`，
+>   由 `symbio_core::transcript_stream` 发布；消费者是前端
+>   （`services/transcriptStream.ts`）、子智能体转播（`agent/host/subagent.rs`）
+>   与 CLI（`cli/src/client.rs`）。**旧的 `kind = "session"` 事件频道
+>   （`Status` / `Update` / `Delete` / `Error` / `Abort`）已整体废除。**
+> - **会话运行态**仍走 VDFS（会话**叶子节点**，消费者 `stores/sessionNodeSync.ts`）。
+>
+> ⚠️ **§3.2 / §4 / §5 描述的是 S16–S22 的「VDFS 变更」模型**（`created` / `appended` /
+> `updated` / `deleted` / `truncated`，消费端 `services/vdfsTranscriptSync.ts`）。
+> 那个文件**已被删除**，消息不再走 VDFS 变更——这几节保留为**设计推导的历史记录**，
+> 实时面的权威描述在 `symbio_core/transcript_stream.rs` 与
+> `services/transcriptStream.ts` 的模块文档里。**仍然有效**的是：§2（节点分类 / 状态机）、
+> §5.3（工具调用三段式）、§6 的 S20–S23 各阶段、§7（体验清单）、§8（不变量）。
+>
+> §1 的"现状"表同样是当时的问题清单，不是今天的描述。
 
 ---
 
@@ -274,7 +289,7 @@ kind = "vdfs" 变更
 | 会话卡片状态点 | 会话节点 `status` |
 | 会话卡片"上次失败" | 会话节点 `status == 'failed'` |
 | 会话卡片"等待审批" | **派生**：转写中存在 `status == 'waiting_user_action'` 的节点（纯函数，不是事件） |
-| 活动文字（"正在思考…"） | **派生**：最近变化的节点的 `status` + `type` + `name` |
+| 活动文字（"正在思考…"） | **派生**：最近变化的节点的 `status` + `type` + `tool_name`（工具名的 attributes 键**不能**叫 `name`——那与 `VdfsNode.name`（节点 id）在 flatten 序列化下同名冲突，见 `message_node` 注释） |
 | 消息块外观（流式动画 / ⚠ / 骨架） | 消息节点 `status` |
 | 提示音 | 会话节点 `working → 非 working` 的**迁移** + `attributes.outcome` |
 | 错误条 | 失败节点（有则用节点）；无失败节点时用会话节点 `attributes.error` |
@@ -294,6 +309,12 @@ kind = "vdfs" 变更
 
 `meta.__toolRequest` 保留为**渲染标记**（表示"这是一个由内容提升出来的请求视图"），
 但它**不再是状态来源**——状态一律读 ToolCall 节点。
+
+**请求那段的内容是窄增量下发的**：ToolCall 的参数与正文 / 思考**同构**——首帧
+（身份字段出现：新节点 / 首次定名）是完整快照，其后每片参数只发 `append`。
+此前实现是"每片参数全量重发"，代价有两处：线材开销随参数长度 **O(n²)** 增长；
+消费端则被诱导去按"`tool_call` 的帧都是全量"猜语义——那条猜测一旦蔓延到
+`role = tool`，就会把工具响应**真正的增量**也当成全量替换（详见 §8 #27）。
 
 ### 5.3.1 ToolCall 的 `streaming` 覆盖「参数流式 + 执行」两段（S20.1）
 
@@ -362,6 +383,29 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
 > `Completed` 到达时把活动文字清空，执行窗口内因此也是空的。运行态跨越执行窗口后，
 > 活动文字（`正在调用 <name>…`）与节点标签自然同步，无需额外接线。
 
+### 5.3.2 组合节点的终态**跟随子树**（Turn 与 ToolCall 同一条规则）
+
+`turn` 与 `tool_call` 都是**组合节点**（自身无正文，只负责分组），因此共用一条规则：
+
+> **组合节点的终态不得早于它的子树。**
+
+对 ToolCall，这条规则落在 §5.3.1——终态只由执行方给出（"参数齐了" ≠ "调用结束了"）。
+对**根 Turn**，它落在**收尾点**：
+
+| 层 | 位置 |
+|---|---|
+| `chat_loop.rs` | `close_turn` 返回之后调用 `finalize_turn_root` —— 全流程**唯一**一处 |
+| `chat_loop/io.rs` | `finalize_turn_root`：从权威转写取那条节点 → 改状态 → 广播 |
+
+它此前在 `finalize_assistant_turn`（LLM 流结束那一刻）发出，比子树早了整整一个
+**执行窗口**：实测抓包里「Turn 已完成」出现在「工具开始执行」之前（seq 5 < seq 6），
+树上于是出现"容器已经完成、其中的工具调用仍在运行"这种自相矛盾的形状。
+
+**发出的就是即将落库的那条节点**（`build_assistant_messages` 的产物，与
+`persist_messages` 同源），因此**实时帧与存储按同一取值收敛**，不需要第二套
+"终态"构造逻辑。（副作用：实时流里那条快照不带流式占位期的 `meta.turn`——
+存储本来也没有它，两边一致。）
+
 ---
 
 ## 6. 迁移阶段
@@ -404,7 +448,7 @@ S20/S20.1 处理的是「状态怎么到节点上」，本次处理一个一直�
 | 层 | 改动 |
 |---|---|
 | `symbio_core/vdfs_provider.rs` | 新增 `VDFS_CHANGE_TRUNCATED`：`path` 所指节点**及其之后全部**已移除 |
-| `session/plugin.rs` | `emit_message_deleted`（逐条）**删除**，改为 `emit_transcript_truncated`（一条）；逐节点删除的唯一来源是 `resume` 的 `StreamEvent::Delete`（消费循环直接转译） |
+| `session/plugin.rs` | `emit_message_deleted`（逐条）**删除**，改为 `emit_transcript_truncated`（一条）；逐节点删除的唯一来源是 `resume` 的 `MessageChange::Remove`（消费循环直接转译） |
 | `session/handlers.rs` | `invoke_delete_message` 由「逐条发 `deleted`」改为「发一条 `truncated`」；目标不存在时不发任何变更 |
 | 前端 `schemas/vdfs.ts` | 补 `VDFS_CHANGE_TRUNCATED` |
 | 前端 `stores/sessions.ts` | 新增 `removeFrom`（按 `seq` 取「该节点及其后」）；`deleteMessage` 改为**本地先行级联** + 失败回滚 + 用权威 `deleted_ids` 幂等对齐；`removeMessageById` 的存在性检查提到对象展开之前 |
@@ -429,7 +473,7 @@ S20~S20.2 都假设「节点状态会自己走到终态」。本次处理两个*
 
 | 层 | 改动 |
 |---|---|
-| `session/orchestrator/failure.rs` | 新增 `is_inflight`（在途集合的**唯一**定义）与 `converge_inflight`：扫**存储 + 在途缓冲**两个数据源，非终态定稿 `Completed` 并广播补丁，**幂等** |
+| `session/orchestrator/failure.rs` | 新增 `is_inflight`（在途集合的**唯一**定义）与 `converge_inflight`：收敛**在途缓冲**中尚未落库的非终态节点，定稿并广播补丁，**幂等**（存储由写入不变量保证只有终态，无需扫描） |
 | `session/orchestrator/consume.rs` | 循环出口记 `exit_state`：中止出口发 `aborted`（此前一律 `completed`，与 `handle_abort` 抢同一个字段，收敛靠 3s 轮询的时序侥幸） |
 | `session/orchestrator/consume.rs` | `handle_abort` 复位 `is_working` 后**自己**调 `converge_inflight`——中止路径自己的收口责任，不等 chat_loop |
 | `session/tool_executor.rs` | 新增 `wait_tool_abort`：`route_fut` 与它 `select!`，让**非流式**工具也能被中止（abort 帧 / 取消令牌 / 已置位三条来源） |
@@ -444,9 +488,11 @@ S20~S20.2 都假设「节点状态会自己走到终态」。本次处理两个*
 永远转下去的「运行中」，而它**不报错、只会一直转**——因此这个集合由测试直接锁定
 （`orchestrator.test.rs::inflight_set_covers_..`），不靠读代码。
 
-**为什么 `converge_inflight` 要扫两个数据源**：存储侧覆盖 `resume` 重跑工具时**已落库**
-的父 ToolCall（它从不出现在在途缓冲里）；在途侧覆盖尚未落库的流式节点。只扫一个，
-另一个场景的中止就会漏收。
+**为什么 `converge_inflight` 只看在途缓冲**：`Streaming` 是瞬态状态，持久层写入不变量
+（`ensure_durable_states`）拒绝它落盘——「存储里的在途节点」按设计不存在。在途缓冲是
+唯一可能停在瞬态状态的地方。（历史上这里扫过存储 + 在途两个数据源，那是围绕
+「resume 会把 `Streaming` 落库」这一错误假设的补丁；该假设已随写入不变量的建立被推翻，
+扫描分支连同其测试造数一并删除。）
 
 **为什么 `wait_tool_abort` 忽略通道关闭**：对端消失（chat_loop 已返回）不是中止信号。
 把它当中止会让**每一次正常收尾**都变成"用户中止"，于是正常完成的会话被报成
@@ -684,11 +730,13 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
 8. **会话状态词只有三个**：`working` / `active` / `failed`——不为会话造 `pending` /
    `completed`（它没有"未开始"与"已结束"）。
 9. **失败是状态不是标志**：不再有 `last_failed` 布尔。
-10. **事件通道已整体废除**：会话域只发 `kind = "vdfs"`——进程内消费者（子智能体转播、
-    CLI）已改订阅 VDFS 变更，而**不是**"前端不订、后端还发"。判断子会话结束改看
-    会话节点的 `status`（不再有 `Status idle` 帧可等），消息增量由
-    `symbio_core::schemas::session::transcript` 从**全量**变更折算出来
-    （两处消费者共用同一份，见该模块文档）。
+10. **会话实时面两条通道，各归其域**：消息走 `session/stream` 转写流（`NodeOp` 显式
+    操作 ＋ 会话内单调 `seq`，见 `symbio_core::transcript_stream`），会话运行态走
+    `kind = "vdfs"` 的会话节点变更；旧事件频道（`kind = "session"`）已整体废除
+    ——**而不是**"前端不订、后端还发"。判断「本轮 / 子会话结束」看会话节点的
+    `status`（不再有 `Status idle` 帧可等），**不是**根 Turn 的终态（一轮里它会多次
+    定格）。前端（`services/transcriptStream.ts`）、CLI（`cli/src/client.rs`）与
+    子智能体转播（`agent/host/subagent.rs`）三处消费者都订阅这两条。
 11. **ToolCall 的 `streaming` 覆盖执行窗口**：`finalize_assistant_turn` 不得提前定格；
     每个 ToolCall 都必须以终态收场（未执行者收口为 `Completed` +
     `meta.failure_kind = "not_executed"`），不得有节点停在 `Streaming`（§5.3.1）。
@@ -715,13 +763,14 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
     （§6 S20.6）。
 19. **连续失败要熔断**：只看当前水位不看历史，会让"注定失败的压缩"每轮重试、每次都白等
     一次完整 LLM 往返。达阈值即开闸冷却，冷却期内跳过而非硬扛（§6 S20.6）。
-20. **终态补丁不重放，因此丢失必须能被自愈**：消息状态只经 `kind = "vdfs"` 一条通道
-    下发，而这条通道**不重放**——订阅表为空时 `ChangeSubscriptions::notify` 直接返回
-    （watch 登记是 fire-and-forget 的异步动作），消费循环也会在 `is_working` 翻转时
-    丢掉手上那一帧。因此**前端必须持有"服务端状态正确"之外的第二个判据**：
-    「会话节点报不忙，却仍有消息节点停在非终态 ⇒ 一定丢了一条终态」，据以回读收敛
-    （`stores/sessions.ts::reconcileTranscript`，§6 S20.7）。不得就地猜成 `completed`
-    ——服务端可能定稿成 `aborted` / `failed`，猜错就是"把半截谎报成正常结束"。
+20. **丢了怎么自愈，两条通道各有承诺**：消息流（`session/stream`）带会话内单调 `seq`
+    ——跳号即**已知有损**，恢复路径是整份重读（后端还会主动补发 resync 标记），
+    重读源是 VDFS 读面、权威且无需补帧（`services/transcriptStream.ts`，与后端
+    `transcript_stream::publish_frame` 的背压策略成对）。会话运行态（`kind = "vdfs"`）
+    则**不重放**——订阅表为空时 `ChangeSubscriptions::notify` 直接返回（watch 登记是
+    fire-and-forget 的异步动作）。因此消费端不得把"没收到终态"就地把节点猜成
+    `completed`——服务端可能定稿成 `aborted` / `failed`，猜错就是"把半截谎报成
+    正常结束"。
 21. **状态词表前后端逐字同源**：后端 `MessageStatus::as_str()` 产出的每一个词，
     前端 `schemas/vdfs.ts` 都必须登记。漏一个的代价不是"少显示一个标签"，而是
     **整条状态被静默丢弃**（消费端 `messageStatusOf` 的未知分支），节点以"无状态"
@@ -744,6 +793,21 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
     显示层另有一条兜底文案（`registry/messageTypes::missingResultNoteOf`，
     按父节点自述的 `meta.failure_kind` 给出），服务于修复前落下的历史数据，
     不是本不变量的替代（§5.3.1）。
+26. **组合节点的终态跟随子树**：`turn` / `tool_call` 的终态不得早于它的子树。
+    ToolCall 由执行方定格（#11）；根 Turn 由 `finalize_turn_root` 在 `close_turn`
+    返回之后定格，**全流程唯一一处**（§5.3.2）。它在此之前于
+    `finalize_assistant_turn`（LLM 流结束那一刻）发出，比子树早一整个执行窗口。
+    发出的节点与 `persist_messages` 落库的是**同一份**，因此实时帧与存储按同一
+    取值收敛，不需要第二套"终态"构造逻辑。
+27. **帧语义只由操作给出，不由节点类型反推**：`upsert` = 完整快照整条替换，
+    `append` = 尾部追加。`append` 对正文 / 思考 / **工具参数** / **工具响应**一律
+    成立（后端唯一发射点是 `turn.rs::emit_append`；工具参数与 Text / Reasoning
+    同构，工具响应经 `tool_executor` 透传子会话的 `Append`）。
+    消费端按 `type` / `role` 猜"该追加还是该替换"是错误来源：实测曾把
+    `role = tool` 的流式响应当成全量重发，正文被**最后一片**覆盖——工具卡片
+    有请求、响应是空的。落地动作与协议操作**一一对应**
+    （`transcriptStream` 的 `sink.upsert` / `sink.append`），中间不得再插一层
+    "合并"。
 
 ---
 

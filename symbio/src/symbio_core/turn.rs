@@ -4,7 +4,7 @@
 //! 统一实现与 model/session 双侧共同使用）：
 //! - HTTP 客户端单例 + 支持中止的 POST 重试机器（`execute_post_with_abort` → 五态 `PostResult`）
 //! - SSE 流解析与协议事件累积（`parse_sse_stream` → `TurnOutput`），流式子节点经
-//!   `session_chat_response::StreamEvent::Update` 帧实时下发
+//!   `session_chat_response::NodeOp::Upsert` 帧实时下发
 //! - 工具调用增量累积（`ToolCallAccumulator`）
 //! - 消息构造家族（`short_id`/`StreamChildIds`/`build_assistant_messages`/`build_tool_message`）：
 //!   `TurnOutput::into_messages` 与 `ToolCallAccumulator` 直接依赖它，
@@ -14,7 +14,7 @@ use crate::symbio_core::model_provider::{FinishReason, ProtocolEvent, Usage};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
-use crate::symbio_core::schemas::session::session_chat_response;
+use crate::symbio_core::schemas::session::session_chat_response::{ControlSignal, NodeOp};
 use crate::symbio_core::{PluginChannel, PluginFrame};
 use crate::{plugin_error, plugin_info, plugin_warn};
 use futures::StreamExt;
@@ -50,51 +50,54 @@ pub fn get_http_client() -> &'static reqwest::Client {
 
 // 通道辅助
 
-/// 统一发送消息更新事件到前端。
+/// 统一发送消息更新帧到消费循环（`Upsert` = 完整消息快照，接收端按 id 整条替换）。
 pub async fn emit_update(channel: &PluginChannel, msg: ChatMessage) {
     let _ = channel
         .tx
         .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::StreamEvent::Update { message: msg })
-                .unwrap_or_default(),
+            serde_json::to_value(NodeOp::Upsert {
+                message: Box::new(msg),
+            })
+            .unwrap_or_default(),
         ))
         .await;
 }
 
-/// 发送简化的状态更新（仅包含 ID 和 Status）。
-pub async fn emit_status(channel: &PluginChannel, id: String, status: MessageStatus) {
-    emit_update(
-        channel,
-        ChatMessage {
-            id,
-            status: Some(status),
-            ..Default::default()
-        },
-    )
-    .await;
-}
-
-/// 发送中止帧（`PostResult::RetryWithoutContextId` 路径使用：通知前端停止流式渲染）。
-pub async fn emit_abort(channel: &PluginChannel) {
+/// 发送流式追加帧：`delta` 追加到已存在消息的 Text 内容尾部。
+///
+/// 窄载荷（O(delta)）——正文流式每帧都走这里，整条重发会是 O(n²)。
+/// 目标消息必须已由 [`emit_update`] 创建；对未知 id 追加是协议违例，
+/// 消费循环会报错丢弃，而不是静默造一个幽灵节点。状态迁移不走这里：
+/// 那是完整快照（[`emit_update`]）的职责，帧面只有一种含义。
+pub async fn emit_append(channel: &PluginChannel, message_id: &str, delta: &str) {
     let _ = channel
         .tx
         .send(PluginFrame::Data(
-            serde_json::to_value(session_chat_response::StreamEvent::Abort {}).unwrap_or_default(),
+            serde_json::to_value(NodeOp::Append {
+                message_id: message_id.to_string(),
+                delta: delta.to_string(),
+            })
+            .unwrap_or_default(),
         ))
         .await;
 }
 
 // 控制信号处理
 
-/// 处理单个控制帧。返回 `true` 表示收到中断信号。
+/// 处理单个控制帧。返回 `true` 表示收到中断信号（同时置位 `abort_flag`，
+/// 让不经过本函数返回值的轮询路径也能感知中断）。
 fn handle_signal_frame(frame: PluginFrame, abort_flag: &AtomicBool) -> bool {
-    match frame {
-        PluginFrame::Data(ref m) if m.get("type").and_then(|v| v.as_str()) == Some("abort") => {
-            abort_flag.store(true, Ordering::SeqCst);
-            true
-        }
+    let is_abort = match frame {
+        PluginFrame::Data(ref m) => matches!(
+            serde_json::from_value::<ControlSignal>(m.clone()),
+            Ok(ControlSignal::Abort)
+        ),
         _ => false,
+    };
+    if is_abort {
+        abort_flag.store(true, Ordering::SeqCst);
     }
+    is_abort
 }
 
 /// 排空当前挂起的控制帧（非阻塞）。
@@ -341,7 +344,15 @@ pub async fn execute_post_with_abort(
 
 #[derive(Debug, Default, Clone)]
 struct AccumulatedToolCall {
+    /// provider 原始 `tool_call_id`（wire id）。供应商未返回（或全空白）时为 `None`，
+    /// 此时请求构建回退用节点 id。
     id: Option<String>,
+    /// 消息节点 id：**首个增量到达时分配**，会话内唯一。
+    ///
+    /// 许多 OpenAI 兼容网关**跨轮复用** `call_0` / `call_xxx` 这类短 id；若直接把
+    /// wire id 当节点 id，第二轮的同 id 工具调用会更新到第一轮的老节点（后端
+    /// `Vec` 存储不撞、前端按 id 的 map 撞——"后端正常、前端显示混乱"的根源）。
+    node_id: String,
     name: Option<String>,
     arguments: String,
 }
@@ -349,7 +360,11 @@ struct AccumulatedToolCall {
 /// Tool call information
 #[derive(Debug, Clone)]
 pub struct ToolCallInfo {
+    /// 消息节点 id（会话内唯一）：流式帧 / 落库 / 工具结果锚定都用它。
     pub id: Option<String>,
+    /// provider 原始 `tool_call_id`（wire id）。`None` = 供应商未提供，
+    /// 请求构建回退节点 id（历史上节点 id 就是 wire id，旧数据天然成立）。
+    pub wire_id: Option<String>,
     pub name: Option<String>,
     pub arguments: Value,
     /// 参数 JSON **非空且解析失败**时的原始文本；其余情况为 `None`。
@@ -374,15 +389,38 @@ pub struct ToolCallAccumulator {
 }
 
 impl ToolCallAccumulator {
-    /// Process a tool call delta from the API and return (tool_call_id, accumulated_args, name).
+    /// Process a tool call delta from the API.
+    ///
+    /// 返回 `(node_id, wire_id, accumulated_args, name, snapshot_required)`：
+    /// - `node_id`：消息节点 id（**首个增量分配，会话内唯一**）——流式帧与落库都用它；
+    /// - `wire_id`：provider 的原始 tool_call_id（未提供时等于 `node_id`）——
+    ///   仅在构建 LLM 请求包时使用；
+    /// - `accumulated_args`：**迄今累积**的参数 JSON；
+    /// - `name`：工具名（空串增量不覆盖已定名）；
+    /// - `snapshot_required`：本次增量是否改动了节点的**身份字段**（新建节点 / 首次定名）。
+    ///   是 → 调用方必须发**完整快照**（`Upsert`，身份与内容一次给全）；
+    ///   否 → 只是正文增长，调用方发**窄追加**（`Append`，O(delta)）。
+    ///
+    /// 这条划分与 Text / Reasoning 子节点**同构**：帧面只有两种语义——「整条替换」与
+    /// 「尾部追加」——由覆盖方式决定，而不是由接收端去猜。
     pub fn process_delta(
         &mut self,
         index: usize,
         id: Option<&str>,
         name: Option<&str>,
         args_delta: Option<&str>,
-    ) -> (String, String, Option<String>) {
+    ) -> (String, String, String, Option<String>, bool) {
         let entry = self.calls.entry(index).or_default();
+
+        // 节点 id 在诞生时确定并写入 entry：流式广播、落库（build_assistant_messages）、
+        // 执行（process_tool_calls_async）三处使用同一节点 id。
+        let is_new_node = entry.node_id.is_empty();
+        if is_new_node {
+            entry.node_id = short_id();
+        }
+        // 新建节点必须发快照（接收端尚无此节点）；首次定名亦然——身份字段
+        // （name / tool_call_id / 父子）只随快照下发，之后的增量只带参数片段。
+        let mut snapshot_required = is_new_node;
 
         // 仅接受非空 id/name：
         // 部分 OpenAI 兼容网关（如实测 apinex qwen-3.8-max）只在首个增量携带合法 id，
@@ -392,24 +430,31 @@ impl ToolCallAccumulator {
             entry.id = Some(id.to_string());
         }
         if let Some(name) = name.filter(|s| !s.trim().is_empty()) {
+            if entry.name.is_none() {
+                snapshot_required = true;
+            }
             entry.name = Some(name.to_string());
         }
 
-        // 供应商始终未返回 id（缺失或全为空串）时，主动分配一个短 GUID 作为工具调用 id。
-        // 该 id 在首个增量即确定并写入 entry，保证流式广播、落库（build_assistant_messages）
-        // 与执行（process_tool_calls_async）三处使用同一 id。
-        if entry.id.is_none() {
-            entry.id = Some(short_id());
-        }
+        let node_id = entry.node_id.clone();
+        // 供应商始终未返回 id（缺失或全为空串）时，wire id 回退为节点 id——
+        // 请求包里的 tool_call 与 tool 结果引用同一节点 id，依然自洽。
+        let wire_id = entry
+            .id
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| node_id.clone());
 
         if let Some(delta) = args_delta {
             entry.arguments.push_str(delta);
         }
 
         (
-            entry.id.clone().unwrap_or_default(),
+            node_id,
+            wire_id,
             entry.arguments.clone(),
             entry.name.clone(),
+            snapshot_required,
         )
     }
 
@@ -423,21 +468,19 @@ impl ToolCallAccumulator {
 
     /// Get the list of completed tool calls.
     ///
-    /// 保证返回的每个 ToolCallInfo.id 均为非空：正常情况下 process_delta 已在首个增量
-    /// 确定 id，此处为幂等兜底——重复调用返回相同 id，**绝不**重新随机生成
+    /// 保证返回的每个 ToolCallInfo.id（节点 id）均为非空：正常情况下 process_delta
+    /// 已在首个增量确定，此处为幂等兜底——重复调用返回相同 id，**绝不**重新随机生成
     /// （chat_loop 与 into_messages 会各取一次，两次结果不一致会使工具结果子节点变孤儿）。
     pub fn get_completed(&mut self) -> Vec<ToolCallInfo> {
         self.calls
             .values_mut()
             .map(|call| {
-                if call
-                    .id
-                    .as_ref()
-                    .map(|s| s.trim().is_empty())
-                    .unwrap_or(true)
-                {
-                    call.id = Some(short_id());
+                if call.node_id.is_empty() {
+                    call.node_id = short_id();
                 }
+                let node_id = call.node_id.clone();
+                // wire id：供应商提供了合法 id 才携带；否则 None（请求构建回退节点 id）
+                let wire_id = call.id.clone().filter(|s| !s.trim().is_empty());
                 // 参数解析：区分三种情况，**绝不**把解析失败伪装成空参数。
                 //  - 空串/纯空白：无参工具的合法形态（`from_str("")` 必失败），视为 `{}`；
                 //  - 合法 JSON：照常使用；
@@ -461,7 +504,8 @@ impl ToolCallAccumulator {
                     }
                 };
                 ToolCallInfo {
-                    id: call.id.clone(),
+                    id: Some(node_id),
+                    wire_id,
                     name: call.name.clone(),
                     arguments: args,
                     parse_error,
@@ -587,7 +631,8 @@ pub fn build_assistant_messages(
     }
 
     // ── ToolCall 消息（parent_id=turn_id，组合节点）──────────────────────
-    // ToolCall 组合节点自身携带请求参数（content = JSON 文本），不设独立的请求子节点
+    // ToolCall 组合节点自身携带请求参数（content = JSON 文本），不设独立的请求子节点。
+    // `id` 是节点 id（与流式帧一致），provider 的 wire id 存 `tool_call_id`。
     for tc in tool_calls {
         let tc_id = tc.id.clone().unwrap_or_else(short_id);
         // 解析失败时落库**残破原文**而非占位 `{}`：存储层保真，事后能看出模型
@@ -605,6 +650,7 @@ pub fn build_assistant_messages(
             content: Some(MessageContent::Text(args_text)),
             status: Some(MessageStatus::Completed),
             timestamp: Some(timestamp),
+            tool_call_id: tc.wire_id.clone(),
             ..Default::default()
         });
     }
@@ -961,24 +1007,27 @@ async fn dispatch_protocol_event(
                 return Ok(());
             }
             out.text.push_str(&c);
-            // Each content delta gets its own short ID (for stream updates, the ID stays consistent
-            // so the frontend can merge deltas)
+            // 首个增量：发**完整快照**创建正文子节点（id 此后保持一致）；
+            // 后续增量：显式 Append 窄帧，消费循环按 id 追加——不重发整条，
+            // 也不需要消费端从「补丁形状」里猜这是追加还是替换。
             if out.response_text_child_id.is_empty() {
                 out.response_text_child_id = short_id();
+                emit_update(
+                    channel,
+                    ChatMessage {
+                        id: out.response_text_child_id.clone(),
+                        parent_id: Some(root_id.into()),
+                        role: Some(MessageRole::Assistant),
+                        msg_type: Some(MessageType::Text),
+                        content: Some(MessageContent::Text(out.text.clone())),
+                        status: Some(MessageStatus::Streaming),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            } else {
+                emit_append(channel, &out.response_text_child_id, &c).await;
             }
-            emit_update(
-                channel,
-                ChatMessage {
-                    id: out.response_text_child_id.clone(),
-                    parent_id: Some(root_id.into()),
-                    role: Some(MessageRole::Assistant),
-                    msg_type: Some(MessageType::Text),
-                    content: Some(MessageContent::Text(c)),
-                    status: Some(MessageStatus::Streaming),
-                    ..Default::default()
-                },
-            )
-            .await;
         }
         ProtocolEvent::ReasoningDelta(r) => {
             // Filter out truly empty content, but preserve newlines for markdown formatting
@@ -988,45 +1037,52 @@ async fn dispatch_protocol_event(
             out.reasoning.push_str(&r);
             if out.reasoning_child_id.is_empty() {
                 out.reasoning_child_id = short_id();
+                emit_update(
+                    channel,
+                    ChatMessage {
+                        id: out.reasoning_child_id.clone(),
+                        parent_id: Some(root_id.into()),
+                        role: Some(MessageRole::Assistant),
+                        msg_type: Some(MessageType::Reasoning),
+                        content: Some(MessageContent::Text(out.reasoning.clone())),
+                        status: Some(MessageStatus::Streaming),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            } else {
+                emit_append(channel, &out.reasoning_child_id, &r).await;
             }
-            emit_update(
-                channel,
-                ChatMessage {
-                    id: out.reasoning_child_id.clone(),
-                    parent_id: Some(root_id.into()),
-                    role: Some(MessageRole::Assistant),
-                    msg_type: Some(MessageType::Reasoning),
-                    content: Some(MessageContent::Text(r)),
-                    status: Some(MessageStatus::Streaming),
-                    ..Default::default()
-                },
-            )
-            .await;
         }
         ProtocolEvent::ToolCallDelta(idx, id, name, args) => {
-            let (tc_id, full_args, full_name) = out.tool_accumulator.process_delta(
-                idx,
-                id.as_deref(),
-                name.as_deref(),
-                args.as_deref(),
-            );
+            let (tc_id, wire_id, full_args, full_name, snapshot_required) = out
+                .tool_accumulator
+                .process_delta(idx, id.as_deref(), name.as_deref(), args.as_deref());
 
-            // ToolCall 组合节点：自身 content 携带累积的全量请求参数（每次 delta 幂等全量重发，
-            // 前端按 tool_call 类型全量替换，最终保证参数完整）；不设独立的请求子节点
-            emit_update(
-                channel,
-                ChatMessage {
-                    id: tc_id.clone(),
-                    parent_id: Some(root_id.into()),
-                    role: Some(MessageRole::Assistant),
-                    msg_type: Some(MessageType::ToolCall),
-                    name: full_name,
-                    content: Some(MessageContent::Text(full_args)),
-                    status: Some(MessageStatus::Streaming),
-                    ..Default::default()
-                },
-            )
-            .await;
+            // ToolCall 组合节点：自身 content 即**请求参数**（不设独立的请求子节点，
+            // 见 `docs/node-state-streaming.md` §2.2）。两条路径与 Text / Reasoning
+            // **同构**——帧面只有两种语义，由覆盖方式决定，接收端不做类型推断：
+            // - 身份字段变化（新建节点 / 首次定名）→ 完整快照（`Upsert`）；
+            // - 纯参数增长 → 窄追加（`Append`，O(delta)），接收端尾部拼接。
+            if snapshot_required {
+                emit_update(
+                    channel,
+                    ChatMessage {
+                        id: tc_id.clone(),
+                        parent_id: Some(root_id.into()),
+                        role: Some(MessageRole::Assistant),
+                        msg_type: Some(MessageType::ToolCall),
+                        name: full_name,
+                        content: Some(MessageContent::Text(full_args)),
+                        status: Some(MessageStatus::Streaming),
+                        tool_call_id: Some(wire_id),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            } else if let Some(delta) = args.as_deref().filter(|d| !d.is_empty()) {
+                emit_append(channel, &tc_id, delta).await;
+            }
         }
         ProtocolEvent::ResponseId(id) => out.response_id = Some(id),
         ProtocolEvent::Finish(f) => out.finish = f,
@@ -1179,40 +1235,55 @@ mod tool_call_tests {
 
     /// apinex qwen-3.8-max 网关的真实行为：
     /// 首个增量携带合法 id，后续增量重复发送 `id:""`。
-    /// 空串不得覆盖合法 id——否则最终得到 Some("")，工具调用被误判为
-    /// id 缺失而跳过，落库的 ToolCall 节点 id 为空串且无结果子节点。
+    /// 空串不得覆盖合法 wire id——否则最终得到 Some("")，工具调用被误判为
+    /// id 缺失而跳过，落库的 ToolCall 节点无结果子节点。
+    /// 节点 id 与 wire id 分离：节点 id 稳定，wire id 保留 provider 原值。
     #[test]
     fn empty_id_delta_does_not_overwrite_real_id() {
         let mut acc = ToolCallAccumulator::default();
-        let (id1, _, _) = acc.process_delta(
+        let (node1, wire1, _, _, snapshot1) = acc.process_delta(
             0,
             Some("call_8f3a59f5f8e14258a427e432"),
             Some("get_weather"),
             Some(""),
         );
-        assert_eq!(id1, "call_8f3a59f5f8e14258a427e432");
+        assert!(snapshot1, "首个增量必须要求完整快照（接收端尚无此节点）");
+        assert_eq!(wire1, "call_8f3a59f5f8e14258a427e432");
+        assert!(!node1.is_empty());
+        assert_ne!(node1, wire1, "节点 id 是本地分配的，不等于 wire id");
 
         // 后续增量：id:""（该网关的真实行为）
-        let (id2, args, _) = acc.process_delta(0, Some(""), None, Some("{\"city\": \"Paris\"}"));
-        assert_eq!(id2, "call_8f3a59f5f8e14258a427e432");
+        let (node2, wire2, args, _, snapshot2) =
+            acc.process_delta(0, Some(""), None, Some("{\"city\": \"Paris\"}"));
+        assert!(
+            !snapshot2,
+            "后续增量未改身份字段 ⇒ 只需窄追加（Append），不得整条重发"
+        );
+        assert_eq!(node2, node1, "节点 id 在同一调用内稳定");
+        assert_eq!(wire2, "call_8f3a59f5f8e14258a427e432");
         assert_eq!(args, "{\"city\": \"Paris\"}");
 
         let done = acc.get_completed();
         assert_eq!(done.len(), 1);
-        assert_eq!(done[0].id.as_deref(), Some("call_8f3a59f5f8e14258a427e432"));
+        assert_eq!(done[0].id.as_deref(), Some(node1.as_str()));
+        assert_eq!(
+            done[0].wire_id.as_deref(),
+            Some("call_8f3a59f5f8e14258a427e432")
+        );
         assert_eq!(done[0].name.as_deref(), Some("get_weather"));
     }
 
-    /// 供应商始终未返回 id 时，必须主动分配短 GUID 作为工具调用 id。
-    /// 流式返回值与 get_completed 结果必须一致，且重复取值幂等
-    /// （chat_loop 与 into_messages 各取一次，两次结果不一致会使结果子节点变孤儿）。
+    /// 供应商始终未返回 id 时，节点 id 在首个增量即确定（流式/落库/执行三处一致，
+    /// 且重复取值幂等——chat_loop 与 into_messages 各取一次，不一致会使结果子节点
+    /// 变孤儿）；wire id 为 None，请求构建回退节点 id。
     #[test]
     fn missing_id_gets_stable_generated_guid() {
         let mut acc = ToolCallAccumulator::default();
-        let (stream_id, _, _) =
+        let (stream_id, wire, _, _, _) =
             acc.process_delta(0, None, Some("vdfs_list"), Some("{\"path\": \".\"}"));
-        assert!(!stream_id.is_empty(), "流式期间即应有非空 id");
+        assert!(!stream_id.is_empty(), "流式期间即应有非空节点 id");
         assert_ne!(stream_id, "tc-0", "不得再使用 index 占位符");
+        assert_eq!(wire, stream_id, "无 wire id 时回退为节点 id");
 
         let done1 = acc.get_completed();
         let done2 = acc.get_completed();
@@ -1220,7 +1291,11 @@ mod tool_call_tests {
         assert_eq!(
             done2[0].id.as_deref(),
             Some(stream_id.as_str()),
-            "重复调用 get_completed 必须返回同一 id"
+            "重复调用 get_completed 必须返回同一节点 id"
+        );
+        assert!(
+            done1[0].wire_id.is_none(),
+            "供应商未提供 id ⇒ wire_id 为 None"
         );
     }
 
@@ -1228,8 +1303,8 @@ mod tool_call_tests {
     #[test]
     fn whitespace_id_treated_as_missing() {
         let mut acc = ToolCallAccumulator::default();
-        let (id, _, _) = acc.process_delta(0, Some("   "), None, Some("{}"));
-        assert!(!id.trim().is_empty());
+        let (node_id, _, _, _, _) = acc.process_delta(0, Some("   "), None, Some("{}"));
+        assert!(!node_id.trim().is_empty());
     }
 
     /// 空串 name 不得覆盖首个增量的合法 name（与 id 同理）。
@@ -1240,11 +1315,11 @@ mod tool_call_tests {
         acc.process_delta(0, Some(""), Some(""), Some("{}"));
 
         let done = acc.get_completed();
-        assert_eq!(done[0].id.as_deref(), Some("call_x"));
+        assert_eq!(done[0].wire_id.as_deref(), Some("call_x"));
         assert_eq!(done[0].name.as_deref(), Some("cmd.exe"));
     }
 
-    /// 多个并行工具调用（不同 index）互不干扰，各自持有独立 id。
+    /// 多个并行工具调用（不同 index）互不干扰，各自持有独立的节点 id 与 wire id。
     #[test]
     fn parallel_tool_calls_keep_separate_ids() {
         let mut acc = ToolCallAccumulator::default();
@@ -1253,8 +1328,25 @@ mod tool_call_tests {
 
         let mut done = acc.get_completed();
         done.sort_by(|a, b| a.id.cmp(&b.id));
-        assert_eq!(done[0].id.as_deref(), Some("call_a"));
-        assert_eq!(done[1].id.as_deref(), Some("call_b"));
+        let wire_ids: Vec<_> = done.iter().filter_map(|t| t.wire_id.clone()).collect();
+        assert!(wire_ids.contains(&"call_a".to_string()));
+        assert!(wire_ids.contains(&"call_b".to_string()));
+        let node_ids: Vec<_> = done.iter().filter_map(|t| t.id.clone()).collect();
+        assert_ne!(node_ids[0], node_ids[1], "节点 id 互不相同");
+    }
+
+    /// 回归（本次迁移的根因之一）：跨轮复用同一 provider id 的两个累积器
+    /// （模拟同一会话的两轮 LLM 请求）必须产生**不同的节点 id**——否则第二轮
+    /// 的工具调用会更新到第一轮的老节点。
+    #[test]
+    fn reused_wire_id_across_turns_yields_distinct_node_ids() {
+        let mut turn1 = ToolCallAccumulator::default();
+        let (node1, _, _, _, _) = turn1.process_delta(0, Some("call_0"), Some("f"), Some("{}"));
+        let mut turn2 = ToolCallAccumulator::default();
+        let (node2, wire2, _, _, _) = turn2.process_delta(0, Some("call_0"), Some("f"), Some("{}"));
+
+        assert_eq!(wire2, "call_0");
+        assert_ne!(node1, node2, "跨轮同 wire id 必须产生不同节点 id");
     }
 
     /// 空串/纯空白参数是无参工具的合法形态（`from_str("")` 必失败）：
@@ -1305,6 +1397,26 @@ mod tool_call_tests {
             Some(raw),
             "必须保留残破原文"
         );
+    }
+
+    /// 参数分片：**只有首个增量**要求完整快照，其后每一片都只要求窄追加。
+    ///
+    /// 这是「ToolCall 请求参数与 Text / Reasoning 同构」的协议契约——帧面只有
+    /// 「整条替换」与「尾部追加」两种语义，接收端不必按节点类型去猜。
+    #[test]
+    fn only_first_args_fragment_requires_snapshot() {
+        let mut acc = ToolCallAccumulator::default();
+        let (_, _, args1, _, snap1) =
+            acc.process_delta(0, Some("call_s"), Some("vdfs_read"), Some("{\"pa"));
+        let (_, _, args2, _, snap2) = acc.process_delta(0, None, None, Some("th\": \".\"}"));
+        let (_, _, args3, _, snap3) = acc.process_delta(0, None, None, Some(""));
+
+        assert!(snap1, "首片建节点 ⇒ 完整快照");
+        assert!(!snap2, "第二片仅为参数增长 ⇒ 窄追加");
+        assert!(!snap3, "空片不改动任何东西 ⇒ 窄追加（调用方跳过）");
+        assert_eq!(args1, "{\"pa");
+        assert_eq!(args2, "{\"path\": \".\"}");
+        assert_eq!(args3, args2, "空片不改变累积值");
     }
 }
 

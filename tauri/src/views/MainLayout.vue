@@ -21,7 +21,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
-import { startTranscriptSync } from '@/services/vdfsTranscriptSync'
+import { startTranscriptStream } from '@/services/transcriptStream'
 import { startSessionNodeSync } from '@/stores/sessionNodeSync'
 import { setChimeSettingsSource } from '@/services/completionChime'
 import { getWorkspacePath } from '@/services/home'
@@ -31,20 +31,30 @@ import { logger } from '@/utils/logger'
 import Toast from '@/components/common/Toast.vue'
 
 onMounted(async () => {
-  // 启动转写同步（VDFS 变更 → 会话消息 store）
+  // 启动**转写实时流**（`worker/session/stream` → 会话消息 store）
   //
-  // 会话的**全部**实时显示都经这一条频道（`kind = "vdfs"`）：
-  // 消息本体（`<根>/session/<sid>/消息/<mid>`）由本模块收敛，
-  // 会话运行态（`<根>/session/<sid>`）由 sessions store 自己的订阅作用域收敛。
-  // 两者按**地址**分流，互不重叠——若消息被两条通道各写一次，流式文本会叠字。
+  // 消息本体的全部实时显示只经这一条流（`NodeEvent`：upsert / append / remove /
+  // reset）。会话运行态（`<根>/session/<sid>` 叶子）仍走 VDFS 变更，由
+  // `startSessionNodeSync` 收敛——两者分工明确，同一份真相不会被写两次。
   //
-  // 落地目标由本外壳**显式注入**（`vdfsTranscriptSync` 是 service，不认识 Pinia）。
-  startTranscriptSync(useSessionsStore())
+  // 落地目标由本外壳**显式注入**（`transcriptStream` 是 service，不认识 Pinia）；
+  // 每个动作对应**一个**协议操作，store 方法即它的落地（`reset`/缺口走 loadMessages
+  // 整份重读）。`upsert` 与 `append` 是两个不同的落地口——不共用一条"合并"实现，
+  // 否则就得从节点类型反推语义（曾把流式工具响应覆盖成空）。
+  const sessions = useSessionsStore()
+  void startTranscriptStream({
+    upsert: (sid, msg) => sessions.putMessage(sid, msg),
+    append: (sid, id, delta) => sessions.appendMessage(sid, id, delta),
+    remove: (sid, id) => sessions.removeMessageById(sid, id),
+    reload: async (sid) => {
+      await sessions.loadMessages(sid)
+    },
+  })
 
   // 会话清单的 VDFS 订阅同样由外壳接线（store 自己不挂监听器），
   // 于是 HMR / 测试不会叠监听器，订阅的启停也看得见。
   // 现在是 async：订阅前缀（会话挂载目录）要按数据认出来，不是常量。
-  await startSessionNodeSync(useSessionsStore())
+  await startSessionNodeSync(sessions)
 
   // 提示音的设置来源同样由外壳注入（service 不认识 store）：
   // 传的是**取值函数**而非快照，用户改了开关/音量下一声就生效。
