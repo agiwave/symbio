@@ -48,6 +48,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 | `once` | 场景只消费一次（适合「第 N 轮才调工具」的编排） |
 | `chunks` + `chunkDelayMs` | 正文分片逐帧吐出（流式逼真） |
 | `toolCalls` | 先吐 `tool_calls` delta（参数分两片流式），再吐正文 |
+| `reasoning` | 正文前输出 `reasoning_content` SSE 分片（驱动 reasoning 节点） |
 | `status` ≥ 400 | HTTP 故障注入 |
 
 ## 用例与不变量
@@ -60,6 +61,11 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 | T4 | `t4-multi-turn` | 多轮会话：第二轮请求携带第一轮历史 |
 | T5 | `t5-llm-http-error` | LLM HTTP 500：失败收敛，存储中无停在 streaming/pending 的节点 |
 | T6 | `t6-mcp-tool-error` | MCP 工具 JSON-RPC 错误：错误结果回灌，会话照常收敛（auto 模式） |
+| T7 | `t7-abort-convergence` | 中止收敛：REPL 长驻 + gateway HTTP invoke 中止 → `vdfs/stat` 读 `outcome=aborted`，节点终态化 |
+| T8 | `t8-compression` | 压缩水位触发：`max_context_tokens` 调小 → 摘要请求 → 快照落库 → 历史归并 |
+| T9 | `t9-ws-stream` | gateway WS `session/stream` 帧序：Start 快照 + Append 增量；离线订阅补发完整快照 |
+| T10 | `t10-node-protocol` | 节点状态机全景：Turn/Reasoning/Text/ToolCall 三态协议（append 必先 upsert、终态收敛、无孤儿） |
+| T11 | `t11-compression-node` | 压缩节点协议：`msg_type=compression` 消息节点、两态流、位置契约、失败 `failure_kind` |
 
 每个用例共享的不变量断言（`assertTranscriptInvariants`）：
 

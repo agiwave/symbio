@@ -90,6 +90,10 @@ function chunkOf(id, model, delta, finish = null, usage = null) {
 
 /** 把场景编译成 [delta, finish] 事件序列（不区分 stream/非 stream，最后统一折算）。 */
 function* buildEvents(scenario, model, requestId) {
+  // ⓪ 思考（reasoning_content，真实模型在正文之前输出）
+  for (const piece of scenario.reasoning ?? []) {
+    yield chunkOf(requestId, model, { reasoning_content: piece });
+  }
   // ① 工具调用（先于正文，与真实模型行为一致）
   for (const [i, tc] of (scenario.toolCalls ?? []).entries()) {
     const argsStr = typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments ?? {});

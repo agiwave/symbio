@@ -18,6 +18,40 @@
 
 ***
 
+## 2026-09-22: e2e 用例扩展至 11 个：压缩节点协议、WS 流式协议、节点状态机全景
+
+**问题**：e2e 框架（T1–T7）钉住了文本流、工具回路、失败收敛等基础契约，但三类
+**实时过程显示**关键契约没有回归覆盖：① 压缩（S20.4）在实时流上的节点形态；
+② gateway WS `session/stream` 帧序（前端同构边界，此前无任何 e2e 观察）；
+③ Reasoning/Text/ToolCall/Turn 四类节点的「开始 → 增量 → 终态」状态机。
+另：mock LLM 不支持 `reasoning_content`，T10 无法驱动 reasoning 节点。
+
+**改动**：
+
+1. **T8 压缩水位触发**（`e2e/cases/t8-compression.mjs`）：`max_context_tokens=12000`
+   （实测校准：系统 overhead ≈ 4513 tokens，70% 水位 × 12000 = 8400 可稳定越过）+
+   每轮超大回复，钉住：压缩请求形状、`<state_snapshot>` 回答被接受、历史归并后
+   第二轮请求携带摘要。
+
+2. **T9 gateway WS 流式**（`e2e/cases/t9-ws-stream.mjs`）：REPL 长驻 + WS 订阅
+   `session/stream` + HTTP invoke 发消息。钉住帧序契约：**首块随 Start 快照下发，
+   Append 只含后续增量**（最终正文 = Start 内容 + Σ Append）；离线订阅补发完整快照。
+
+3. **T10 节点协议全景**（`e2e/cases/t10-node-protocol.mjs`）：四类节点状态机探针——
+   append 必先有 upsert、start+Σappend == 终态、无非终态残留、Turn 终态晚于全部
+   子节点、ToolCall 必有 role=tool 结果子节点、reasoning 节点独立于正文流式。
+
+4. **T11 压缩节点协议**（`e2e/cases/t11-compression-node.mjs`）：压缩是**消息节点**
+   （`msg_type=compression`）而非会话横幅——首帧 streaming + 非空正文、终态收敛、
+   位置在用户消息之后 Turn 之前、失败带 `failure_kind`、重写发 remove + 快照 upsert。
+
+5. **mock-llm 支持 `reasoning` 场景**：正文前输出 `reasoning_content` SSE 分片，
+   驱动 reasoning 节点链路。
+
+6. **CI 新增 `e2e-check` job**：发现式运行全部用例（清单不维护，新增即纳入）。
+
+**验证**：`node e2e/run-tests.mjs` 11/11 全绿（约 13s）。
+
 ## 2026-09-22: 工具调用协议封闭 + 端到端照出两个 MCP 真 bug
 
 **问题**：工具调用协议里三处**隐式约定**——① 工具名的线上形态靠
