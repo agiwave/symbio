@@ -461,3 +461,81 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
     expect(w.find('.tag-elapsed').text()).toMatch(/^\d+s$/)
   })
 })
+
+/**
+ * 渲染层回归：**收起态单行摘要在流式中跟末端走**（走马灯），定稿后回到开头（摘要）。
+ *
+ * 收起态的摘要是**静态一行**：内容取自哪一端，决定了这一行在流式期间会不会动。
+ * 取开头则整条流式过程中它**一个字都不变**——用户看不到「还在长」还是「卡住了」，
+ * 也永远追不上早已流过去的正文/思考，观感就是"折叠起来一直是开头那句"。
+ *
+ * 两条约定必须同时成立（缺一即为半成品）：
+ * 1. 文本取**末端**（最新）、并把 `liveEdge` 一并交给渲染器；
+ * 2. 渲染器据此在**左端**裁剪（`.node-preview.live`）——只改文本不改裁剪方向，
+ *    可见区里剩下的是**中间**那一段，最新内容照样被右端省略号吃掉。
+ */
+describe('渲染层回归：收起态摘要在流式中显示最新内容', () => {
+  const Panel = defineComponent({
+    props: { sessionId: { type: String, required: true } },
+    setup(props) {
+      const chat = useChatConnection({ sessionId: props.sessionId })
+      return () =>
+        chat.messageTree.value.map((n) => h(MessageNode, { node: n, depth: 0, key: n.id }))
+    },
+  })
+
+  /** 超过摘要上限：两端截断结果必然不同，才有"取哪一端"可言 */
+  const OPEN = '开头：先看协议；'
+  const CLOSE = '末尾：结论已定。'
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    seq = 0
+    stopTranscriptStream()
+    void startTranscriptStream(storeSink())
+  })
+
+  it('思考（始终单行）流式中跟着末端走，定稿后回到开头', async () => {
+    const w = mount(Panel, { props: { sessionId: SID } })
+    applyNodeEvent(frame(turn('T1')))
+    applyNodeEvent(frame(reasoning('R1', 'T1', OPEN + '甲'.repeat(80))))
+    await nextTick()
+
+    // 流式增量：摘要必须跟着长，且显示的是**新到的那一段**
+    applyNodeEvent(append('R1', CLOSE))
+    await nextTick()
+    const live = w.find('.type-reasoning .node-preview')
+    expect(live.exists(), '思考默认单行，摘要必须存在').toBe(true)
+    expect(live.classes(), '流式中必须在左端裁剪（最新内容才留在可见区）').toContain('live')
+    expect(live.text(), '流式中必须能看到最新内容').toContain(CLOSE)
+    expect(live.text(), '流式中不该还停在开头那句').not.toContain(OPEN)
+
+    // 定稿：内容不再变，摘要回到开头（概述），裁剪方向也随之回到右端
+    applyNodeEvent(frame({ id: 'R1', status: 'completed' }))
+    await nextTick()
+    const settled = w.find('.type-reasoning .node-preview')
+    expect(settled.classes(), '定稿后不再左端裁剪').not.toContain('live')
+    expect(settled.text(), '定稿后的摘要是概述（开头）').toContain(OPEN)
+    expect(settled.text()).not.toContain(CLOSE)
+  })
+
+  it('工具行（默认单行）运行中的参数摘要同样跟末端走', async () => {
+    const w = mount(Panel, { props: { sessionId: SID } })
+    applyNodeEvent(frame(turn('T1')))
+    applyNodeEvent(frame(toolCall('TC1', 'T1', 'write_file', '{"path":"/a/b.rs","body":"')))
+    await nextTick()
+    applyNodeEvent(append('TC1', '甲'.repeat(80) + '"}'))
+    await nextTick()
+
+    const preview = w.find('.type-tool_call .node-preview')
+    expect(preview.classes(), '运行中的工具行同样在左端裁剪').toContain('live')
+    expect(preview.text(), '参数已流到本地 ⇒ 收起态就该看到最新一段').toContain('"}')
+
+    // 工具执行结束：内容定稿 → 回到开头（`{"path":...` 才是这次调用的身份）
+    applyNodeEvent(frame({ id: 'TC1', status: 'completed' }))
+    await nextTick()
+    const settled = w.find('.type-tool_call .node-preview')
+    expect(settled.classes()).not.toContain('live')
+    expect(settled.text()).toContain('"path"')
+  })
+})

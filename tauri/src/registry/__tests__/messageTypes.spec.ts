@@ -19,6 +19,8 @@ import {
   MESSAGE_STATUS_ABORTED,
   MESSAGE_STATUS_COMPLETED,
   MESSAGE_STATUS_FAILED,
+  MESSAGE_STATUS_PENDING,
+  MESSAGE_STATUS_REMOVED,
   MESSAGE_STATUS_STREAMING,
   MESSAGE_STATUS_WAITING_USER_ACTION,
   MESSAGE_TYPES,
@@ -49,6 +51,7 @@ import {
   messageIcon,
   messageIsHeartbeat,
   messageIsRunningAction,
+  messagePreviewFollowsLiveEdge,
   messageRendererKey,
   missingResultNoteOf,
   messageRetryTargetOf,
@@ -298,6 +301,38 @@ describe('折叠策略', () => {
     const f = facets({ type: MESSAGE_TYPE_TEXT })
     expect(effectiveOpenOf(f, 0, false, true)).toBe(true)
     expect(nextOpenOf(f, 0, false, true)).toBe(false)
+  })
+})
+
+describe('messagePreviewFollowsLiveEdge：收起态摘要取哪一端', () => {
+  it('只有「正在产生内容」才跟随末端；其余状态（含排队 / 等待响应 / 终态）取开头', () => {
+    expect(messagePreviewFollowsLiveEdge(facets({ status: MESSAGE_STATUS_STREAMING }))).toBe(true)
+    // 排队中还没有内容、等待响应时内容不会自己长、终态内容已不变——都不该跟着走
+    const nonLive = [
+      MESSAGE_STATUS_PENDING,
+      MESSAGE_STATUS_WAITING_USER_ACTION,
+      MESSAGE_STATUS_COMPLETED,
+      MESSAGE_STATUS_ABORTED,
+      MESSAGE_STATUS_FAILED,
+      MESSAGE_STATUS_REMOVED,
+    ] as const
+    for (const status of nonLive) {
+      expect(messagePreviewFollowsLiveEdge(facets({ status })), `状态 ${status} 不应取末端`).toBe(
+        false,
+      )
+    }
+  })
+
+  it('判定只看状态，与节点类型无关（思考 / 工具调用同样适用）', () => {
+    const types = [MESSAGE_TYPE_REASONING, MESSAGE_TYPE_TOOL_CALL, MESSAGE_TYPE_TEXT] as const
+    for (const type of types) {
+      expect(messagePreviewFollowsLiveEdge(facets({ type, status: MESSAGE_STATUS_STREAMING }))).toBe(
+        true,
+      )
+      expect(messagePreviewFollowsLiveEdge(facets({ type, status: MESSAGE_STATUS_COMPLETED }))).toBe(
+        false,
+      )
+    }
   })
 })
 

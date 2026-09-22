@@ -21,8 +21,16 @@
       <span class="node-icon">{{ icon }}</span>
       <span class="node-title">{{ title }}</span>
       <span v-if="isHeartbeat" class="node-heartbeat" title="系统心跳任务自动发送">♥ 心跳</span>
-      <!-- 收起态展示单行摘要（深层级 / 子步骤默认收起时，让用户无需展开即知内容） -->
-      <span v-if="!effectiveOpen && summaryPreview" class="node-preview">{{ summaryPreview }}</span>
+      <!-- 收起态展示单行摘要（深层级 / 子步骤默认收起时，让用户无需展开即知内容）。
+           裁哪一端由文本取自哪一端决定：流式中取的是**末端**（走马灯），
+           因此必须裁**左端**，最新的字才会留在可见区（见下方 .node-preview）。 -->
+      <span
+        v-if="!effectiveOpen && summaryPreview.text"
+        class="node-preview"
+        :class="{ live: summaryPreview.liveEdge }"
+      >
+        <span class="node-preview-text">{{ summaryPreview.text }}</span>
+      </span>
       <span v-if="statusTag" class="node-tag" :class="tagClass">
         <span v-if="isRunningAction" class="tag-dots"><span /><span /><span /></span>{{ statusTag
         }}<span v-if="isRunningAction && runningDuration" class="tag-elapsed">{{ runningDuration }}</span>
@@ -257,15 +265,36 @@ const runningDuration = computed(() => {
 .node-head.sub .node-title {
   color: var(--color-chip-sub-fg);
 }
-/* 收起态单行摘要（标题之后、状态标签之前，省略号截断） */
+/* 收起态单行摘要（标题之后、状态标签之前）。
+   裁哪一端由文本取自哪一端决定（两者由 `useMessageContent` 一起给出）：
+   摘要态裁**右端**（尾部省略号），流式态裁**左端**（最新的字留在可见区）。 */
 .node-preview {
   flex: 1;
   min-width: 0;
+  display: flex;
   font-size: 0.74rem;
   color: var(--text-muted);
   overflow: hidden;
+}
+.node-preview-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 流式（live edge）：文字整行铺开并**溢出容器左缘**，由 `.node-preview` 的
+   `overflow: hidden` 裁掉——只有 `flex-end` + 不可收缩的子项才能把溢出留在左侧
+   （`text-align: right` 与 `direction: rtl` 都不行：前者对 nowrap 溢出无效，
+   后者会按 bidi 规则重排引号 / 括号 / 路径里的标点）。
+   `margin-right: auto` 负责"短内容不跑偏"：正剩余空间先被自动外边距吸收，
+   于是文字仍然贴左缘；只有真的溢出（剩余空间为负）时才轮到 `flex-end` 生效。 */
+.node-preview.live {
+  justify-content: flex-end;
+}
+.node-preview.live .node-preview-text {
+  flex: 0 0 auto;
+  margin-right: auto;
 }
 .node-live {
   font-size: 0.72rem;

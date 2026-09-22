@@ -24,6 +24,7 @@ import {
   MESSAGE_FAILURE_NOTE,
   MESSAGE_PREVIEW_MAX,
   isFailedStatus,
+  messagePreviewFollowsLiveEdge,
   type MessageFacets,
 } from '@/registry/messageTypes'
 
@@ -118,10 +119,23 @@ export function messageRenderAsJsonOf(
 }
 
 /**
+ * 收起态单行摘要 —— **文本** + **取的是哪一端**。
+ *
+ * 两者必须一起返回：文本取自哪一端，渲染器就得往**哪一端**裁（`NodeShell` 的
+ * `.node-preview`）。分开传递会出现「取末端、却仍按右端省略」的错配——可见区里
+ * 剩下的是**中间**那一段，最新内容反而被裁掉，等于取了没取。
+ */
+export interface MessageSummaryPreview {
+  /** 单行文本（空白已折叠；超长按端截断并加省略号） */
+  text: string
+  /** 文本取自**内容末端**（流式中）⇒ 渲染器必须在**左端**裁剪 */
+  liveEdge: boolean
+}
+
+/**
  * 收起态的单行摘要。
  *
- * 分组节点（Turn / 工具调用）优先取**首个文本或思考子节点**的内容——容器自身
- * 通常没有正文。
+ * 分组节点（工具调用）优先取**首个文本或思考子节点**的内容——容器自身通常没有正文。
  *
  * 但取不到这样的子节点时**回落节点自身正文**，不能直接留白：`ToolCall` 的
  * **请求参数就存在它自己的 `content` 里**（参数不分独立子节点，见
@@ -130,9 +144,15 @@ export function messageRenderAsJsonOf(
  * 已经逐帧流到本地，界面上却要等到结果子节点到达才第一次显示文字，看起来就像
  * 「工具调用要等跑完才显示」。
  *
- * 用于深层级 / 子步骤默认收起时让用户无需展开即知概要。
+ * 取**哪一端**由 `liveEdge` 决定（判据见 `registry::messagePreviewFollowsLiveEdge`）：
+ * 流式中取末端（这一行是走马灯，最新的内容才是用户要看的），定稿后取开头（摘要）。
+ * 截断时省略号落在**被截掉的那一端**，不伪装成"内容从这里开始/到这里结束"。
  */
-export function messageSummaryPreviewOf(node: ChatMessage, grouped: boolean): string {
+export function messageSummaryPreviewOf(
+  node: ChatMessage,
+  grouped: boolean,
+  liveEdge: boolean,
+): MessageSummaryPreview {
   let source = ''
   if (grouped) {
     const first = (node.children || []).find(
@@ -143,8 +163,14 @@ export function messageSummaryPreviewOf(node: ChatMessage, grouped: boolean): st
     source = messageTextOf(node.content)
   }
   const raw = source.replace(/\s+/g, ' ').trim()
-  if (!raw) return ''
-  return raw.length > MESSAGE_PREVIEW_MAX ? raw.slice(0, MESSAGE_PREVIEW_MAX) + '…' : raw
+  if (!raw) return { text: '', liveEdge }
+  if (raw.length <= MESSAGE_PREVIEW_MAX) return { text: raw, liveEdge }
+  return {
+    text: liveEdge
+      ? '…' + raw.slice(-MESSAGE_PREVIEW_MAX)
+      : raw.slice(0, MESSAGE_PREVIEW_MAX) + '…',
+    liveEdge,
+  }
 }
 
 /** 组合式封装：跟随节点与 facets 变化的呈现结果 */
@@ -154,7 +180,7 @@ export interface MessageContentView {
   rendered: ComputedRef<string>
   renderAsJson: ComputedRef<boolean>
   errorText: ComputedRef<string>
-  summaryPreview: ComputedRef<string>
+  summaryPreview: ComputedRef<MessageSummaryPreview>
 }
 
 export function useMessageContent(
@@ -177,6 +203,7 @@ export function useMessageContent(
     return messageSummaryPreviewOf(
       getNode(),
       f.type === MESSAGE_TYPE_TURN || f.type === MESSAGE_TYPE_TOOL_CALL,
+      messagePreviewFollowsLiveEdge(f),
     )
   })
   return { text, highlighted, rendered, renderAsJson, errorText, summaryPreview }

@@ -744,6 +744,27 @@ export const DEEP_COLLAPSE_LEVEL = 3
 export const MESSAGE_PREVIEW_MAX = 80
 
 /**
+ * 收起态单行摘要取内容的**哪一端**：流式中取末端（最新），定稿后取开头（摘要）。
+ *
+ * 「这一行是什么」在两种状态下**是两件事**：
+ *
+ * - **流式中**，它是这条节点的走马灯。内容每帧都在长，只有跟着末端走这一行才会动；
+ *   取开头等于把这行字钉死在最早那几个字上——界面上既看不出「还在长」还是「卡住了」，
+ *   也永远追不上正文/思考已经流到的地方（用户看到的正是"折叠起来一直是开头那句"）。
+ * - **定稿后**，内容不再变，这一行的职责变回**摘要**——开头才是概述
+ *   （工具参数 JSON 尤其如此：取末端只剩一个 `}`）。
+ *
+ * 判据只取**协议字段**（`status`），不嗅探内容形态：流式中的 JSON 尚未闭合，
+ * 按内容判「是不是 JSON」会在某一片恰好闭合时突然换端，比不换更乱。
+ *
+ * 与 `useMessageContent::messageSummaryPreviewOf` 的 `liveEdge` 参数是同一件事的
+ * 两个半场——那边决定取哪一端，`NodeShell` 据此决定往哪一端裁（见其 `.node-preview`）。
+ */
+export function messagePreviewFollowsLiveEdge(f: MessageFacets): boolean {
+  return isStreamingStatus(f.status)
+}
+
+/**
  * 折叠默认态（对齐行业智能体会话流）。
  *
  * - 待审批 / 用户消息 → 展开（用户需要看到并操作）

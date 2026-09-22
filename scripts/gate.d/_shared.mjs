@@ -31,10 +31,12 @@ import { stripAnsi } from '../color.mjs'
  */
 export const BASELINE = {
   rustTests: 901,
-  // 46 spec 文件 / 661 用例。文件数与用例数均与平台无关（全仓 spec 零平台分支、
+  // 46 spec 文件 / 661 → 672 用例。文件数与用例数均与平台无关（全仓 spec 零平台分支、
   // it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
+  // 672：收起态摘要跟「流式末端」走——`messagePreviewFollowsLiveEdge` 判据用例（2）+
+  //      摘要取端（末端 / 开头 / 短内容 / 空内容，4）+ 渲染层两条（思考、工具行）。
   vitestFiles: 46,
-  vitestTests: 661,
+  vitestTests: 672,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

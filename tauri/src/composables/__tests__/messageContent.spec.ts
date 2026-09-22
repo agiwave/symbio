@@ -95,8 +95,8 @@ describe('收起态单行摘要', () => {
         { id: 'x', type: 'text' as const, content: '正文' },
       ],
     }
-    expect(messageSummaryPreviewOf(node, true)).toBe('想了什么')
-    expect(messageSummaryPreviewOf(node, false)).toBe('{"args":1}')
+    expect(messageSummaryPreviewOf(node, true, false).text).toBe('想了什么')
+    expect(messageSummaryPreviewOf(node, false, false).text).toBe('{"args":1}')
   })
 
   it('分组节点**尚无 text/reasoning 子节点**时回落到自身正文（运行中工具的请求参数）', () => {
@@ -104,26 +104,77 @@ describe('收起态单行摘要', () => {
     // text/reasoning 子节点。此处分组分支若只看子节点，运行中的工具行会一片空白
     // ——参数已逐帧流到本地，界面却要等结果到达才第一次显示文字。
     const running = { id: 'tc', content: '{"path":"a.rs"}', children: [] }
-    expect(messageSummaryPreviewOf(running, true)).toBe('{"path":"a.rs"}')
+    expect(messageSummaryPreviewOf(running, true, true).text).toBe('{"path":"a.rs"}')
     // 子节点到达后仍以子节点为准（结果预览优先）
     const settled = {
       id: 'tc',
       content: '{"path":"a.rs"}',
       children: [{ id: 'res', type: 'text' as const, content: '文件内容' }],
     }
-    expect(messageSummaryPreviewOf(settled, true)).toBe('文件内容')
+    expect(messageSummaryPreviewOf(settled, true, false).text).toBe('文件内容')
   })
 
   it('空白折叠成单空格；超长按上限截断并加省略号', () => {
-    expect(messageSummaryPreviewOf({ id: 'x', content: '  a\n\n  b  ' }, false)).toBe('a b')
+    expect(messageSummaryPreviewOf({ id: 'x', content: '  a\n\n  b  ' }, false, false).text).toBe(
+      'a b',
+    )
     const long = 'x'.repeat(MESSAGE_PREVIEW_MAX + 50)
-    const out = messageSummaryPreviewOf({ id: 'x', content: long }, false)
+    const out = messageSummaryPreviewOf({ id: 'x', content: long }, false, false).text
     expect(out.length).toBe(MESSAGE_PREVIEW_MAX + 1)
     expect(out.endsWith('…')).toBe(true)
   })
 
   it('无内容返回空串（头部据此不显示摘要）', () => {
-    expect(messageSummaryPreviewOf({ id: 'x' }, false)).toBe('')
+    expect(messageSummaryPreviewOf({ id: 'x' }, false, false).text).toBe('')
+  })
+})
+
+/**
+ * 摘要取**哪一端**：流式中取末端（这一行是走马灯），定稿后取开头（摘要）。
+ *
+ * 两种状态截断的是**相反**的一端，且返回值里的 `liveEdge` 必须与文本取自哪一端一致
+ * ——渲染器据此决定往哪一端裁（`NodeShell` 的 `.node-preview`）。错配的后果是
+ * 可见区里剩下**中间**那一段：取了末端却被右端省略，最新内容反而被裁掉。
+ */
+describe('收起态摘要取哪一端', () => {
+  const OPEN = '开头：先看协议；'
+  const CLOSE = '末尾：结论已定。'
+  const FILLER = '甲'.repeat(MESSAGE_PREVIEW_MAX)
+  const content = OPEN + FILLER + CLOSE
+
+  it('流式中（liveEdge）取**末端**：省略号在开头，最新的内容必须在', () => {
+    const p = messageSummaryPreviewOf({ id: 'x', content }, false, true)
+    expect(p.liveEdge).toBe(true)
+    expect(p.text.startsWith('…'), '末端截断必须前置省略号（它是半截话，不是开头）').toBe(true)
+    expect(p.text).toContain(CLOSE)
+    expect(p.text, '流式中不该出现开头那句话').not.toContain(OPEN)
+    expect(p.text.length).toBe(MESSAGE_PREVIEW_MAX + 1)
+  })
+
+  it('定稿后取**开头**：省略号在末尾，且不含末端内容', () => {
+    const p = messageSummaryPreviewOf({ id: 'x', content }, false, false)
+    expect(p.liveEdge).toBe(false)
+    expect(p.text.endsWith('…')).toBe(true)
+    expect(p.text).toContain(OPEN)
+    expect(p.text, '定稿后的摘要是概述，不该出现末端').not.toContain(CLOSE)
+    expect(p.text.length).toBe(MESSAGE_PREVIEW_MAX + 1)
+  })
+
+  it('内容不超上限时两端取到的是同一串（无省略号，也不改写内容）', () => {
+    const short = '短内容'
+    expect(messageSummaryPreviewOf({ id: 'x', content: short }, false, true)).toEqual({
+      text: short,
+      liveEdge: true,
+    })
+    expect(messageSummaryPreviewOf({ id: 'x', content: short }, false, false)).toEqual({
+      text: short,
+      liveEdge: false,
+    })
+  })
+
+  it('空内容返回空串，`liveEdge` 原样透传（渲染器仍需知道往哪端裁）', () => {
+    expect(messageSummaryPreviewOf({ id: 'x' }, false, true)).toEqual({ text: '', liveEdge: true })
+    expect(messageSummaryPreviewOf({ id: 'x' }, false, false)).toEqual({ text: '', liveEdge: false })
   })
 })
 
