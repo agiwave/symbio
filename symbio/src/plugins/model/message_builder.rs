@@ -170,14 +170,23 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                 native.content = child.content.clone();
                             }
                             Some(MessageType::ToolCall) => {
-                                // 请求参数直接来自 ToolCall 节点自身的 content（JSON 文本）
-                                let args_val = child
+                                // 请求参数直接来自 ToolCall 节点自身的 content（JSON 文本）。
+                                // 该文本在落库时（turn.rs:645）已由 `tc.arguments.to_string()`
+                                // 规范化——即 serde_json 输出，故 re-parse 再 re-serialize 幂等。
+                                // 因此**以字符串原样透传**：下游 types.rs 的 `is_string()` 快路径
+                                // 会直接发出这段文本，省掉一次 Value 物化 + re-serialize（评审 §3.2）。
+                                // 仅当文本非法时才回退 `{}`，与原 `from_str().unwrap_or({})` 行为完全一致
+                                // （落库时 broken 原文会带 parse_error，正常路径不会走到这里）。
+                                let args_text = child
                                     .content
                                     .as_ref()
                                     .map(|c| c.to_text())
                                     .unwrap_or_default();
-                                let args: serde_json::Value = serde_json::from_str(&args_val)
-                                    .unwrap_or(serde_json::json!({}));
+                                let args: serde_json::Value =
+                                    match serde_json::from_str::<serde_json::Value>(&args_text) {
+                                        Ok(_) => serde_json::Value::String(args_text),
+                                        Err(_) => serde_json::json!({}),
+                                    };
                                 let tc = ToolCall {
                                     id: Some(
                                         wire_ids
@@ -389,6 +398,53 @@ mod tests {
             arguments: serde_json::json!({ "k": "v" }),
             parse_error: None,
         }
+    }
+
+    /// 用例（评审 §3.2）：ToolCall 节点 content 已是规范化 JSON 文本（落库时
+    /// `tc.arguments.to_string()` 产出），flatten 必须**以字符串原样透传**，
+    /// 让下游 types.rs 走 `is_string()` 快路径、省一次 re-serialize。
+    /// 同时钉死「不会把合法参数静默改成 `{}`」——这是改动前的行为保真要求。
+    #[test]
+    fn tool_call_args_passthrough_as_string_without_reserialize() {
+        // ToolCall 必须挂在根级 Turn（assistant）之下才会被聚合成 tool_calls。
+        let turn = ChatMessage {
+            id: TURN_ID.to_string(),
+            parent_id: None,
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::Turn),
+            status: Some(MessageStatus::Completed),
+            ..Default::default()
+        };
+
+        let tc = ChatMessage {
+            id: "tc-1".to_string(),
+            parent_id: Some(TURN_ID.to_string()),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::ToolCall),
+            name: Some("echo".to_string()),
+            content: Some(MessageContent::Text(
+                r#"{"text":"mock 回显内容"}"#.to_string(),
+            )),
+            status: Some(MessageStatus::Completed),
+            ..Default::default()
+        };
+
+        let native = flatten_chat_messages(&[turn, tc]);
+        let tool_calls = native
+            .iter()
+            .find_map(|m| m.tool_calls.as_ref())
+            .expect("应聚合出 tool_calls");
+        let call = tool_calls.first().expect("应有一个 tool_call");
+
+        assert!(
+            call.arguments.is_string(),
+            "arguments 应为字符串透传（评审 §3.2），而非重新物化的 Value 对象"
+        );
+        assert_eq!(
+            call.arguments.as_str().unwrap(),
+            r#"{"text":"mock 回显内容"}"#,
+            "落库文本应原样透传给 LLM 请求，不得被 re-serialize 改动"
+        );
     }
 
     /// 用例 A（回归：storage factor≈2 重复）
