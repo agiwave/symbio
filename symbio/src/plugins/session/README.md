@@ -400,3 +400,33 @@ session:
 | **请求视图层动态剪裁** | `tool_context_window` + fade/nudge | `build_request_view` 每轮请求前 | ① 内容节点淡化（每轮无条件）→ ② >40 轮激活老旧工具结果淡化（保留最近 12 轮）→ ③ 窗口（15）外工具明细骨架化为带语义摘要 + 取回指引的占位符（配对保留，声明 `context_retention` 的工具最新 N 次豁免窗口）→ ④ 55% 水位提醒；全部不落库幂等 | `plugins/session/compression.rs`<br>`plugins/session/context_window.rs` |
 
 通过这套精心设计的**六维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + L2 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求视图层（`build_request_view` 内容淡化/工具淡化/骨架化/水位提醒，不落库幂等）→ 语义压缩层（`auto_compress` 语义合并）"四层递进的上下文治理链路（"何时落库"判据见第 3 节决策表），实现了高保真度的会话还原、高度清爽的本地数据持久化，并在大模型面前维持了极低 Token 开销与绝对安全的行为控制屏障。
+
+---
+
+## 六、 工具结果字段约定（跨插件契约）
+
+> **目标**：让「工具返回任意 JSON → 压成一段给模型看的文本」这一**必要适配**不再隐式——加一个工具不必读 `extract_result` 源码才知道自己该返回哪个字段。
+
+工具可以返回任意 JSON（`shell` 给 `output`、`vdfs_read` 给 `VdfsContent`、`ask_user` 给 `content` + `prompt`、`todo_write` / `content_search` 同理），而模型只消费**一段文本**。这层「任意形状 → 文本」的压缩是**必要的**，不是失误；失误在于它曾**没有写下来**，加一个工具就得读源码才知道写哪个字段名。
+
+**唯一消费方**：[`tool_executor::extract_result`](./tool_executor.rs)（字段名有常量 `RESULT_CONTENT = "content"` / `RESULT_OUTPUT = "output"`，判定顺序由 [`tool_executor.test.rs`](./tool_executor.test.rs) 钉死——改顺序 = 改契约）。判定顺序（**先命中者胜**，而非「存在即取」）：
+
+| 序号 | 判据 | 结果 |
+|---|---|---|
+| 1 | `content` 是字符串 | 它本身 |
+| 2 | `output` 是字符串 | 它本身 |
+| 3 | `success` 是布尔 | `true` → 整包 JSON；`false` → `Error: {error}` |
+| 4 | 顶层就是字符串 | 它本身 |
+| 5 | 以上都不是 | 整包 JSON |
+
+**生产方 → 字段**一览（写哪个字段由各工具自己的文档注释声明，与消费方解耦——这是**自觉保留**的张力，不是疏漏）：
+
+| 工具 | 返回字段 | 备注 |
+|---|---|---|
+| `shell`（命令类） | `output` | 命令 stdout/stderr 合并文本 |
+| `content_search` | `output` | 搜索结果文本 |
+| `vdfs_read` | `content`（`VdfsContent`） | 文件内容；「不给 id」的 `{"content":"..."}` 亦合法 |
+| `ask_user` | `content` + `success:false` + `failure_kind` + `prompt` | 编排层凭 `failure_kind=NEEDS_INTERACTION` 收口为「等待用户动作」并构造 `user_prompt` 节点（结果节点唯一写入者在 `tool_executor`） |
+| `todo_write` | `content` | 清单状态文本 |
+
+> **控制流不得建立在这套字段上**：需要「本轮结束于等待用户动作」这类判断时，用 `failure_kind` 约定字段（见上表 `ask_user`），不要靠猜 JSON 形状——`extract_result` 只负责「取出可读文本」，不承载控制语义。
