@@ -449,24 +449,34 @@ async fn read_one_jsonrpc_line<R: tokio::io::AsyncBufRead + Unpin>(
 
 /// 解码一行字节到字符串
 ///
-/// Windows 平台优先尝试 GBK（兼容部分中文 MCP server），失败回退 UTF-8。
-/// 其他平台直接 UTF-8。
+/// MCP 规范：stdio 传输是 UTF-8。因此**先按 UTF-8 严格校验**，合法即原样采用；
+/// 仅当字节流不是合法 UTF-8 时才回退 GBK（兼容个别在 Windows 上按系统 ANSI
+/// 编码输出的中文 MCP server）。
+///
+/// 顺序不能反过来：GBK 几乎能「无错」解码任何 UTF-8 字节流（`has_errors`
+/// 对规范 server 的非 ASCII 内容几乎不触发），先 GBK 会把所有规范 server 的
+/// 中文内容静默变成乱码再喂给模型 —— e2e（`e2e/mock-mcp.mjs`）已实测复现。
+/// 两种编码的有效字节流几乎不相交，所以「先严格 UTF-8、失败再 GBK」是可靠的。
 fn decode_line(bytes: &[u8]) -> String {
     if bytes.is_empty() {
         return String::new();
     }
-    #[cfg(target_os = "windows")]
-    {
-        let (res, _, has_errors) = encoding_rs::GBK.decode(bytes);
-        if !has_errors {
-            return res.to_string();
+    let trim = |s: String| s.trim_end_matches('\n').trim_end_matches('\r').to_string();
+    match std::str::from_utf8(bytes) {
+        Ok(s) => trim(s.to_string()),
+        #[cfg(target_os = "windows")]
+        Err(_) => {
+            let (res, _, has_errors) = encoding_rs::GBK.decode(bytes);
+            if has_errors {
+                // 两种编码都解不出来：退回 UTF-8 丢替换符，至少 ASCII 结构可读
+                trim(String::from_utf8_lossy(bytes).into_owned())
+            } else {
+                trim(res.to_string())
+            }
         }
+        #[cfg(not(target_os = "windows"))]
+        Err(_) => trim(String::from_utf8_lossy(bytes).into_owned()),
     }
-    let _ = STDIO_READ_TIMEOUT; // suppress dead_code on non-windows
-    String::from_utf8_lossy(bytes)
-        .trim_end_matches('\n')
-        .trim_end_matches('\r')
-        .to_string()
 }
 
 #[cfg(test)]
