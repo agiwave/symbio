@@ -162,9 +162,9 @@ fn node_event_wire_shape_is_a_message() {
 fn consecutive_deltas_on_one_node_collapse_into_a_single_line() {
     let mut c = DeltaLogCoalescer::default();
     // seq 4/5/6 三帧，字符 8+1+2
-    assert_eq!(c.feed(&delta_msg("a", "12345678"), 4), (None, true));
-    assert_eq!(c.feed(&delta_msg("a", "x"), 5), (None, true));
-    assert_eq!(c.feed(&delta_msg("a", "yz"), 6), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "12345678"), 4, true), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "x"), 5, true), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "yz"), 6, true), (None, true));
     // 显式冲刷
     let line = c.flush().expect("待合并的 run 应被冲刷");
     assert_eq!(line, "[T#4..6] a - Update 3 帧 / +11c");
@@ -175,10 +175,10 @@ fn consecutive_deltas_on_one_node_collapse_into_a_single_line() {
 #[test]
 fn switching_node_flushes_the_previous_run() {
     let mut c = DeltaLogCoalescer::default();
-    assert_eq!(c.feed(&delta_msg("a", "123"), 1), (None, true));
-    assert_eq!(c.feed(&delta_msg("a", "45"), 2), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "123"), 1, true), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "45"), 2, true), (None, true));
     // 换 id：冲刷 a 的 run，b 自己开一段
-    let (flushed, absorbed) = c.feed(&delta_msg("b", "6"), 3);
+    let (flushed, absorbed) = c.feed(&delta_msg("b", "6"), 3, true);
     assert_eq!(flushed.as_deref(), Some("[T#1..2] a - Update 2 帧 / +5c"));
     assert!(absorbed, "纯增量帧总会被并入");
     assert_eq!(c.flush().as_deref(), Some("[T#3] b - Update +1c"));
@@ -188,21 +188,103 @@ fn switching_node_flushes_the_previous_run() {
 #[test]
 fn a_non_delta_frame_flushes_the_run() {
     let mut c = DeltaLogCoalescer::default();
-    assert_eq!(c.feed(&delta_msg("a", "12"), 1), (None, true));
-    assert_eq!(c.feed(&delta_msg("a", "34"), 2), (None, true));
-    // 终态帧（content、带 status）：冲刷统计行，自身不并入
-    let (flushed, absorbed) = c.feed(&text_msg("a", MessageStatus::Completed, "1234"), 3);
+    assert_eq!(c.feed(&delta_msg("a", "12"), 1, true), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "34"), 2, true), (None, true));
+    // 终态帧（content、带 status）：冲刷统计行，自身不并入。
+    // 它的 `foldable` 传什么都不影响结论——非纯增量帧本就不可能被并入。
+    let (flushed, absorbed) = c.feed(&text_msg("a", MessageStatus::Completed, "1234"), 3, true);
     assert_eq!(flushed.as_deref(), Some("[T#1..2] a - Update 2 帧 / +4c"));
     assert!(!absorbed, "带状态的帧要打自己的行");
     assert_eq!(c.flush(), None, "非纯增量帧不留待合并状态");
+}
+
+/// **骨架帧不可折**：即便它恰好是纯增量（节点首帧的一种可能形态——`apply` 明确
+/// 允许"未知 id 的增量帧自给自足"），也必须留下自己的一行。
+///
+/// 否则时间线会缺掉"某节点何时出现、拿到几号 `seq`"这个起点——那正是折行要保住
+/// 的骨架。`foldable` 由调用方按级别给出（骨架 → `false`），本用例钉住这条边界。
+#[test]
+fn a_skeleton_frame_is_never_folded() {
+    let mut c = DeltaLogCoalescer::default();
+    let (flushed, absorbed) = c.feed(&delta_msg("a", "abc"), 1, false);
+    assert_eq!(flushed, None, "没有上一段可冲刷");
+    assert!(!absorbed, "骨架帧必须留下自己的一行");
+    assert_eq!(c.flush(), None, "骨架帧不留待合并状态");
+
+    // 折行段中途插进一帧骨架（终态）：统计行先冲刷，骨架帧自己留行。
+    assert_eq!(c.feed(&delta_msg("a", "de"), 2, true), (None, true));
+    let (flushed, absorbed) = c.feed(&text_msg("a", MessageStatus::Completed, "abcde"), 3, false);
+    assert_eq!(flushed.as_deref(), Some("[T#2] a - Update +2c"));
+    assert!(!absorbed);
 }
 
 /// 单帧 run 的形状与折行前**逐字相同**（只有一帧时日志形态不变）。
 #[test]
 fn a_single_frame_run_renders_exactly_like_before() {
     let mut c = DeltaLogCoalescer::default();
-    assert_eq!(c.feed(&delta_msg("a", "abc"), 7), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "abc"), 7, true), (None, true));
     assert_eq!(c.flush().as_deref(), Some("[T#7] a - Update +3c"));
+}
+
+// ============================================================================
+// 帧日志分级（`FrameLogLevel` / `frame_log_of` / `render_frame_line`）
+//
+// 日志分两级后，"哪些帧常看、哪些帧要开 `--verbose` 才看"就不再是散在各处的
+// 措辞，而是一条可断言的函数。下面这组用例钉住那条分界线本身。
+// ============================================================================
+
+/// 相位与级别的分界：**骨架** = 出现 / 等待用户 / 终态，**细节** = 其余。
+#[test]
+fn frame_log_splits_skeleton_from_detail() {
+    use FrameLogLevel::{Detail, Skeleton};
+    let some = Some;
+
+    // 出现：不论带不带状态，首帧都是骨架（"某节点何时出现"必须在默认输出里）
+    assert_eq!(frame_log_of(false, None), ("Start", Skeleton));
+    assert_eq!(
+        frame_log_of(false, some(&MessageStatus::Streaming)),
+        ("Start", Skeleton)
+    );
+    // 等待用户：节点还在，但**要人做事**——必须可见
+    assert_eq!(
+        frame_log_of(true, some(&MessageStatus::WaitingUserAction)),
+        ("Wait", Skeleton)
+    );
+    // 终态：增长停止
+    for st in [
+        MessageStatus::Completed,
+        MessageStatus::Failed,
+        MessageStatus::Aborted,
+    ] {
+        assert_eq!(
+            frame_log_of(true, Some(&st)),
+            ("End", Skeleton),
+            "{st:?} 是终态，进骨架"
+        );
+    }
+    // 其余（`pending → streaming` 的迁移、正文替换、仅 `meta` / 身份变更）都是细节
+    assert_eq!(
+        frame_log_of(true, some(&MessageStatus::Pending)),
+        ("Update", Detail)
+    );
+    assert_eq!(
+        frame_log_of(true, some(&MessageStatus::Streaming)),
+        ("Update", Detail)
+    );
+    assert_eq!(frame_log_of(true, None), ("Update", Detail));
+}
+
+/// 一行里不落尾随空格——日志要能直接复制、能整齐对齐。
+#[test]
+fn render_frame_line_is_trimmed() {
+    assert_eq!(
+        render_frame_line(7, "abc", "completed", ""),
+        "[T#7] abc completed"
+    );
+    assert_eq!(
+        render_frame_line(7, "abc", "completed", "Start =12c"),
+        "[T#7] abc completed Start =12c"
+    );
 }
 
 /// 折行**不改 seq、不改图**：同一串帧在带折行器的转写下，seq 与节点内容必须与

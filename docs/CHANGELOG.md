@@ -18,6 +18,38 @@
 
 ***
 
+## 2026-09-22: 转写帧日志分级（骨架进 INFO，细节沉 DEBUG）
+
+**问题**：批次 K 的折行把「一次流式回复几百行」降到几行，但**剩下的行并非同等重要**：
+`Update` 帧（`pending → streaming` 的迁移、正文替换、仅 `meta` 变更）与折行统计行只是
+过程量，而人真正要读的是**骨架**——什么节点出现了、什么时候结束、什么时候停下等人。
+它们此前与骨架平级地混在 `INFO` 里。
+
+**改动**（`plugins/session/transcript.rs`，只动日志）：
+
+1. **`FrameLogLevel` 两级**：`Skeleton`（进 `INFO`）/ `Detail`（进 `DEBUG`），判据是
+   相位（`frame_log_of`，机械判别）——`Start`（节点首现）/ `Wait`（迁到
+   `waiting_user_action`）/ `End`（迁到 `completed` / `failed` / `aborted` / `removed`）
+   是骨架，其余是细节。折行统计行同为细节。
+2. **折行只对细节开放**：`DeltaLogCoalescer::feed` 新增 `foldable` 参数，骨架帧一律
+   各自留行。**首帧尤其不能折**——`apply` 明确允许「未知 id 的增量帧自给自足」，故
+   首帧可能恰好是纯增量；它一旦被折行吞掉，时间线就缺掉一个节点的**起点与 `seq`**。
+3. **`waiting_user_action` 从「被当作终态」改为独立骨架相位 `Wait`**：它既不是结束
+   （用户回完节点还会继续长），也绝不该沉进 `DEBUG`——**要人做事**的时刻必须默认可见。
+   原先按「非 `streaming` / `pending` 即终态」判别，会把 `Wait` 印成 `End`。
+4. **行尾不再落空格**：`render_frame_line` 在无描述时不留尾随空格（可复制、可对齐）。
+5. 原按字符串判终态的 `is_terminal(&str)` 删除，改由 `MessageStatus` 枚举直接匹配——
+   状态词改名时不会静默错判。
+
+**验证**：同一场景（推理 + 正文 + 工具调用 + 收尾，两轮）CLI stderr 转写帧行
+**默认 47 行里占 14 行（全是骨架）**；`SYMBIO_LOG=debug` 69 行 / 19 帧行，多出的
+5 行正是 `Update` 与折行统计。`seq` 分配、帧发布、前端实时面**一个字节都没变**
+（不变量 #28）。新增用例 `a_skeleton_frame_is_never_folded`、
+`frame_log_splits_skeleton_from_detail`、`render_frame_line_is_trimmed`
+（前两条已验证**修复前失败**）。
+
+***
+
 ## 2026-09-22: 控制台日志降噪（含一处真实缺陷）与工具调用流式渲染修复
 
 **问题**：一次普通工具轮（文本 + 工具调用 + 收尾，两个 turn）在 CLI 上产生约 **70 行**

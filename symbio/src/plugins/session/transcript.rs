@@ -6,11 +6,14 @@
 //!   完成，没有任何旁路。
 //! - **单调 seq**：每发布一帧 seq +1。消费端检测到缺口 = 丢帧当场可见，
 //!   唯一恢复路径是清空本地转写并从存储整份重读。
-//! - **核心日志**：每帧一行，即时间线本身——故障排查从"全栈考古"变成"读时间线"。
-//!   **但连续的、同一节点的纯流式增量（帧带 `delta`、无状态迁移）折成一行**
-//!   （见 [`DeltaLogCoalescer`]）：一次流式回复有几百个增量帧，逐帧一行会把时间线
-//!   淹成噪声（实测一段 200 字回复 = 580 行 `+Nc`，占该轮 stderr 的 93%）。折行
-//!   **只作用于日志**——seq 照旧逐帧分配、帧照旧逐帧发布，实时链路一个字节都不变。
+//! - **核心日志**：分**骨架**与**细节**两级（见 [`FrameLogLevel`]）。骨架 = 节点
+//!   出现 / 终态 / 等待用户 / 删除，进 `INFO`——"什么出现了、什么时候结束"一眼看完；
+//!   细节 = `Update` 帧与纯增量的折行统计，进 `DEBUG`（`--verbose` 或
+//!   `SYMBIO_LOG=debug` 放开）。细节里的**连续同节点纯增量**（帧带 `delta`、无状态
+//!   迁移）再被 [`DeltaLogCoalescer`] 折成一行统计：一次流式回复有几百个增量帧，
+//!   逐帧一行会把时间线淹成噪声（实测一段 200 字回复 = 580 行 `+Nc`，占该轮 stderr
+//!   的 93%）。分级与折行**只作用于日志**——seq 照旧逐帧分配、帧照旧逐帧发布，
+//!   实时链路一个字节都不变（不变量 #28）。
 //! - **显式背压**：见 `symbio_core::transcript_stream`（满即踢 → 泵 EOF → 整份重读）。
 //!
 //! ## 与 VDFS 的边界
@@ -21,7 +24,7 @@
 
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::transcript_stream::{publish_frame, NodeEvent};
-use crate::{plugin_error, plugin_info};
+use crate::{plugin_debug, plugin_error, plugin_info};
 use indexmap::IndexMap;
 
 /// 会话转写：内存图（在途视图）+ 单调 seq + 发布。
@@ -43,8 +46,7 @@ pub struct Transcript {
 ///
 /// 一次流式回复的增量帧数由模型决定，实测几百帧（`+1c` / `+2c` / `+7c` …）。
 /// 逐帧一行的结果是**时间线被同一件事填满**——而它们本就是一件事：某个节点在增长。
-/// 折行后一次回复的日志从几百行降到个位数，`Start` / `End` / `Removed` 这些
-/// 真正的状态迁移才重新可见。
+/// 折行后一次回复的增量日志从几百行降到个位数，骨架帧才重新可见。
 ///
 /// ## 边界：只折日志
 ///
@@ -53,10 +55,14 @@ pub struct Transcript {
 ///
 /// ## 折行规则
 ///
-/// - 相邻帧**同 `message.id`** 且都是**纯增量**（`delta` 有、`status` 无）→ 并入本 run，
-///   不产出日志行；
-/// - 换 id、或该帧带了状态迁移 / 全量正文（非纯增量）→ 冲刷本 run；
+/// - 相邻帧**同 `message.id`**、都是**纯增量**（`delta` 有、`status` 无）、**且允许
+///   折行**（`foldable`）→ 并入本 run，不产出日志行；
+/// - 换 id、或该帧带了状态迁移 / 全量正文（非纯增量）、或**不被允许折行** → 冲刷本 run；
 /// - 显式 `flush`（`persisted` / `clear`）也冲刷。
+///
+/// `foldable` 由调用方给出，它恒等于"这一帧是 [`FrameLogLevel::Detail`]"——**骨架帧
+/// 一律不可折**（§10 的"状态帧不折"）。首帧尤其重要：即便它恰好是纯增量，"某节点
+/// 何时出现"这条骨架也必须留下，否则时间线会缺掉一个节点的起点。
 ///
 /// 单帧 run 渲染成与折行前**逐字相同**的行（`[T#7] id - Update +3c`），
 /// 保证"只有一帧"这种常见情形下日志形态不变；多帧才用带区间与统计的形状。
@@ -78,13 +84,20 @@ struct DeltaRun {
 impl DeltaLogCoalescer {
     /// 喂一帧。返回 `(需立刻打出的上一段统计行, 本帧是否被并入)`。
     ///
-    /// - 本帧是**纯增量**（带 `delta`、无 `status`）且与本 run 同 id → 并入，`(None, true)`；
-    /// - 本帧是纯增量但换了 id → 冲刷上一段，并为新 id 开新 run，`(flushed, true)`；
-    /// - 本帧非纯增量（状态迁移 / 全量正文 / 仅身份）→ 冲刷上一段，本帧**不**并入，
-    ///   `(flushed, false)`——它自己的日志行由调用方照常打印。
-    pub(crate) fn feed(&mut self, msg: &cm::ChatMessage, seq: u64) -> (Option<String>, bool) {
+    /// `foldable`：本帧**是否允许折行**（骨架帧为 `false`，见结构体文档）。
+    ///
+    /// - 本帧是**纯增量**且 `foldable`、与本 run 同 id → 并入，`(None, true)`；
+    /// - 本帧是纯增量且 `foldable` 但换了 id → 冲刷上一段，并为新 id 开新 run，`(flushed, true)`；
+    /// - 其余（非纯增量 / 骨架帧）→ 冲刷上一段，本帧**不**并入，`(flushed, false)`——
+    ///   它自己的日志行由调用方照常打印。
+    pub(crate) fn feed(
+        &mut self,
+        msg: &cm::ChatMessage,
+        seq: u64,
+        foldable: bool,
+    ) -> (Option<String>, bool) {
         let chars = match (&msg.delta, &msg.status) {
-            (Some(d), None) => d.chars().count(),
+            (Some(d), None) if foldable => d.chars().count(),
             _ => return (self.flush(), false),
         };
         if let Some(run) = self.run.as_mut() {
@@ -135,6 +148,66 @@ impl DeltaRun {
     }
 }
 
+/// 核心日志的两级：**骨架**（`INFO`）与**细节**（`DEBUG`）。
+///
+/// 一条时间线只有骨架值得常看；其余都是"怎么长起来的"过程量，需要时再放开。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrameLogLevel {
+    /// **关键节点**：节点出现 / 终态 / 等待用户 / 删除。进 `INFO`，且**不可折行**。
+    Skeleton,
+    /// **过程细节**：`Update` 帧（`pending → streaming`、正文替换、仅 `meta` 变更）与
+    /// 纯增量的折行统计。进 `DEBUG`；其中的纯增量帧可被折行器并入。
+    Detail,
+}
+
+/// 一帧的日志规格（`apply` 判好、`emit` 执行——`emit` 不再反推语义）。
+struct FrameLog {
+    level: FrameLogLevel,
+    /// 一行的正文描述：`<相位> [<正文形态>]`；可能被折行的帧传空串（不被读取）。
+    detail: String,
+}
+
+/// 帧在日志里的**相位与级别**（机械判别，只用于日志）。
+///
+/// | 相位 | 条件 | 级别 |
+/// |---|---|---|
+/// | `Start` | 节点在帧前不在内存图中 | 骨架 |
+/// | `Wait` | 迁到 `waiting_user_action` | 骨架（**要人介入，必须可见**） |
+/// | `End` | 迁到任一终态词 | 骨架 |
+/// | `Update` | 其余（含 `pending → streaming`、正文替换、仅 `meta` 变更） | 细节 |
+///
+/// `Removed` 实际走 [`Transcript::apply`] 的早退分支、到不了这里；把它留在 `End` 一组
+/// 是为了让"终态词"这个集合在本函数内**完整**——漏掉一个终态词就会把它错判成过程量。
+fn frame_log_of(
+    existed: bool,
+    status: Option<&cm::MessageStatus>,
+) -> (&'static str, FrameLogLevel) {
+    if !existed {
+        return ("Start", FrameLogLevel::Skeleton);
+    }
+    match status {
+        Some(cm::MessageStatus::WaitingUserAction) => ("Wait", FrameLogLevel::Skeleton),
+        Some(
+            cm::MessageStatus::Completed
+            | cm::MessageStatus::Failed
+            | cm::MessageStatus::Aborted
+            | cm::MessageStatus::Removed,
+        ) => ("End", FrameLogLevel::Skeleton),
+        _ => ("Update", FrameLogLevel::Detail),
+    }
+}
+
+/// 渲染一行核心日志：`[T#<seq>] <id> <status> [<detail>]`。
+///
+/// 无 `detail` 时不落尾随空格——日志要能直接复制粘贴、能整齐对齐。
+fn render_frame_line(seq: u64, id: &str, status: &str, detail: &str) -> String {
+    if detail.is_empty() {
+        format!("[T#{seq}] {id} {status}")
+    } else {
+        format!("[T#{seq}] {id} {status} {detail}")
+    }
+}
+
 impl Transcript {
     pub fn new(session_id: String) -> Self {
         Self {
@@ -182,7 +255,13 @@ impl Transcript {
                 .shift_remove(&message_id)
                 .map(|n| n.name.unwrap_or_else(|| n.id.clone()))
                 .unwrap_or_else(|| "（不在途）".into());
-            self.emit(msg, detail);
+            self.emit(
+                msg,
+                FrameLog {
+                    level: FrameLogLevel::Skeleton,
+                    detail,
+                },
+            );
             return;
         }
 
@@ -241,32 +320,31 @@ impl Transcript {
             node.content = Some(content.clone());
         }
 
-        // 纯增量帧会被折行器并入（`emit` 里省略自己的行），其 `detail` 不被读取——
-        // 跳过构造，免得每个 token 白做一次 `format!`。
-        let detail = if msg.delta.is_some() && msg.status.is_none() {
-            String::new()
-        } else {
-            // 日志相位：出现（首帧建占位）/ 更新 / 终态（机械判别，仅用于日志）。
-            let phase = match (existed, msg.status.as_ref().map(|s| s.as_str())) {
-                (false, _) => "Start",
-                (true, Some(s)) if is_terminal(s) => "End",
-                _ => "Update",
-            };
-            // `detail` **不重复 status**（它已单独成列），只描述正文形态：
-            // `+Nc` 增量 / `=Nc` 全量 / 空（仅状态或仅身份）。`delta` 与 `content`
-            // 同帧已在前面拒绝，故二者不会同时出现。
-            let detail = match (&msg.delta, &msg.content) {
-                (Some(d), _) => format!("+{}c", d.chars().count()),
-                (None, Some(c)) => format!("={}c", c.len()),
-                (None, None) => String::new(),
-            };
-            if detail.is_empty() {
-                phase.to_string()
+        // 日志相位与级别（机械判别，只用于日志）：出现 / 终态 / 等待用户是**骨架**，
+        // 其余是**细节**。
+        let (phase, level) = frame_log_of(existed, msg.status.as_ref());
+        // 细节里的纯增量帧会被折行器并入（`emit` 里不留自己的行），其 `detail` 不被
+        // 读取——跳过构造，免得每个 token 白做一次 `format!`（骨架帧绝不跳过：首帧
+        // 即使恰好是纯增量也要报出它的正文形态）。
+        let detail =
+            if level == FrameLogLevel::Detail && msg.delta.is_some() && msg.status.is_none() {
+                String::new()
             } else {
-                format!("{phase} {detail}")
-            }
-        };
-        self.emit(msg, detail);
+                // `detail` **不重复 status**（它已单独成列），只描述正文形态：
+                // `+Nc` 增量 / `=Nc` 全量 / 空（仅状态或仅身份）。`delta` 与 `content`
+                // 同帧已在前面拒绝，故二者不会同时出现。
+                let shape = match (&msg.delta, &msg.content) {
+                    (Some(d), _) => format!("+{}c", d.chars().count()),
+                    (None, Some(c)) => format!("={}c", c.len()),
+                    (None, None) => String::new(),
+                };
+                if shape.is_empty() {
+                    phase.to_string()
+                } else {
+                    format!("{phase} {shape}")
+                }
+            };
+        self.emit(msg, FrameLog { level, detail });
     }
 
     /// 落库回执：权威副本已写入存储，把节点从内存图移除（不发布）。
@@ -275,7 +353,7 @@ impl Transcript {
     pub fn persisted(&mut self, ids: &[String]) {
         // 落库 = 该节点的增长段结束，把待合并的增量 run 收尾。
         if let Some(line) = self.delta_log.flush() {
-            plugin_info!("session", "{line}");
+            plugin_debug!("session", "{line}");
         }
         for id in ids {
             self.nodes.shift_remove(id);
@@ -298,7 +376,7 @@ impl Transcript {
     /// 也是最后一段增量日志不至于被吞掉的保证（`clear` 在轮次起止各调一次）。
     pub fn clear(&mut self) {
         if let Some(line) = self.delta_log.flush() {
-            plugin_info!("session", "{line}");
+            plugin_debug!("session", "{line}");
         }
         self.nodes.clear();
     }
@@ -308,24 +386,33 @@ impl Transcript {
     /// ## 日志与发布在这里分岔（唯一一处）
     ///
     /// `seq` 分配与 `publish_frame` **逐帧无例外**——它们是协议与数据面。
-    /// 只有**日志**会被 [`DeltaLogCoalescer`] 折行：连续同节点的纯流式增量合并成
-    /// 一行统计（`[T#4..583] id - Update 580 帧 / +1234c`）。折行前后的可观测差异
-    /// **只有 stderr 的行数**。
+    /// 只有**日志**分两级：**骨架**（[`FrameLogLevel::Skeleton`]）各自留一行进 `INFO`；
+    /// **细节**（[`FrameLogLevel::Detail`]）进 `DEBUG`，其中的纯增量帧再被
+    /// [`DeltaLogCoalescer`] 折成一行为统计（`[T#4..583] id - Update 580 帧 / +1234c`）。
+    /// 分级与折行前后的可观测差异**只有 stderr 的行数**（不变量 #28）。
     ///
     /// 被并入的纯增量帧其 `detail` 不被读取（调用方传空串即可）。
-    fn emit(&mut self, message: cm::ChatMessage, detail: String) {
+    fn emit(&mut self, message: cm::ChatMessage, log: FrameLog) {
         self.seq += 1;
         let seq = self.seq;
 
         // 折行器先吃这一帧：可能冲刷出上一段纯增量的统计行。
-        let (flushed, absorbed) = self.delta_log.feed(&message, seq);
+        // **折行只对细节开放**——骨架帧（出现 / 终态 / 等待用户 / 删除）必须各自留行，
+        // 它们正是折行要保住的东西。
+        let (flushed, absorbed) =
+            self.delta_log
+                .feed(&message, seq, log.level == FrameLogLevel::Detail);
         if let Some(line) = flushed {
-            plugin_info!("session", "{line}");
+            plugin_debug!("session", "{line}");
         }
         // 被并入的纯增量帧不产生自己的行；其余帧照常打印（带 status 列与 detail）。
         if !absorbed {
             let status = message.status.as_ref().map(|s| s.as_str()).unwrap_or("-");
-            plugin_info!("session", "[T#{seq}] {} {status} {detail}", message.id);
+            let line = render_frame_line(seq, &message.id, status, &log.detail);
+            match log.level {
+                FrameLogLevel::Skeleton => plugin_info!("session", "{line}"),
+                FrameLogLevel::Detail => plugin_debug!("session", "{line}"),
+            }
         }
 
         publish_frame(&NodeEvent {
@@ -334,11 +421,6 @@ impl Transcript {
             message,
         });
     }
-}
-
-/// 终态判定（日志用）：Streaming / Pending 之外的已落状态词。
-fn is_terminal(status: &str) -> bool {
-    !matches!(status, "streaming" | "pending")
 }
 
 #[cfg(test)]

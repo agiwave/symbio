@@ -12,6 +12,9 @@ import { stripAnsi } from '../color.mjs'
 /**
  * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
  *
+ * 901：转写帧日志分级——`FrameLogLevel`（骨架 INFO / 细节 DEBUG）与
+ *      `frame_log_of` 的相位判据，折行器新增 `foldable`（骨架帧与首帧不可折）。
+ *      新增「骨架帧不可折」「相位分界」「行尾不落空格」用例（3）。
  * 898：控制台日志降噪——新增 `logger` 级别闸门用例（2）与 telegram 配置「缺键不是错误」
  *      用例（2）。闸门：无 subscriber 路径默认 INFO，debug 静默（`--verbose` / `SYMBIO_LOG`
  *      放开）；telegram 结构级 `#[serde(default)]` 使「只有身份键的 PLUGIN.yml」解析为默认值
@@ -27,7 +30,7 @@ import { stripAnsi } from '../color.mjs'
  *      extract_result 判定顺序。逐批明细见 docs/CHANGELOG.md 的对应条目。
  */
 export const BASELINE = {
-  rustTests: 898,
+  rustTests: 901,
   // 46 spec 文件 / 661 用例。文件数与用例数均与平台无关（全仓 spec 零平台分支、
   // it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
   vitestFiles: 46,
