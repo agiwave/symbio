@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { yellow } from '../color.mjs'
-import { BASELINE, grabInt, sumInt } from './_shared.mjs'
+import { BASELINE, autoWork, grabInt, sumInt } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -17,9 +17,13 @@ export default {
     const tasks = []
     if (!fs.existsSync(path.join(backendDir, 'Cargo.toml'))) return tasks
 
-    if (ctx.fix) {
-      tasks.push({ label: 'cargo fmt --all（--fix）', cmd: 'cargo', args: ['fmt', '--all'], cwd: backendDir })
-    }
+    // 格式化是**门禁自己做的事**，不是判它「有没有做过」——见 `_shared.autoWork`。
+    // 放在最前：后面所有检查都跑在格式化后的代码上，避免「先报 clippy 再格式化」
+    // 这种让人以为要改两遍的顺序。
+    tasks.push({
+      label: 'cargo fmt --all（自动格式化）',
+      run: (c) => autoWork(c, { label: 'cargo fmt --all', cmd: 'cargo', args: ['fmt', '--all'], cwd: backendDir }),
+    })
     tasks.push({ label: 'cargo check --tests', cmd: 'cargo', args: ['check', '--tests'], cwd: backendDir })
 
     const testArgs = ctx.ci ? ['test', '--workspace'] : ['test', '--lib']
@@ -68,13 +72,6 @@ export default {
       args: ['clippy', '--all-targets', '--', '-D', 'warnings'],
       cwd: backendDir,
     })
-    tasks.push({
-      label: 'cargo fmt --all -- --check',
-      cmd: 'cargo',
-      args: ['fmt', '--all', '--', '--check'],
-      cwd: backendDir,
-      when: () => !ctx.fix,
-    })
     if (ctx.profile) {
       tasks.push({
         label: `cargo build --profile ${ctx.profile}`,
@@ -86,13 +83,13 @@ export default {
 
     // cli/ 是独立 workspace（仓库根没有 Cargo.toml）：存在就一并检查。
     if (fs.existsSync(path.join(cliDir, 'Cargo.toml'))) {
-      if (ctx.fix) {
-        tasks.push({ label: 'cli: cargo fmt --all（--fix）', cmd: 'cargo', args: ['fmt', '--all'], cwd: cliDir })
-      }
+      tasks.push({
+        label: 'cli: cargo fmt --all（自动格式化）',
+        run: (c) => autoWork(c, { label: 'cli: cargo fmt --all', cmd: 'cargo', args: ['fmt', '--all'], cwd: cliDir }),
+      })
       for (const [label, args] of [
         ['cli: cargo check --tests', ['check', '--tests']],
         ['cli: cargo clippy --all-targets -- -D warnings', ['clippy', '--all-targets', '--', '-D', 'warnings']],
-        ['cli: cargo fmt --all -- --check', ['fmt', '--all', '--', '--check']],
       ]) {
         tasks.push({ label, cmd: 'cargo', args, cwd: cliDir })
       }

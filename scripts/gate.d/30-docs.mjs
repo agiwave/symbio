@@ -19,8 +19,12 @@ const GUARDS = [
   'test-layout-audit',
   'dead-code-audit',
 ]
-// `color` 不是审计脚本而是共享库，但带一道「scripts/ 下不得手写 ANSI」守卫，只跑回归测试。
-const TEST_ONLY = ['color']
+// 不是审计脚本，而是共享库 / 门禁原语，只跑回归测试：
+//   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；
+//   - `gate.d/_shared` 的 `autoWork` 是「自动执行的工作」原语。它的失效方式
+//     与守卫同源且更隐蔽：**看起来在修、其实没把修复带进提交**——本地跑一次门禁
+//     完全看不出来（文件确实被格式化了），只在「修复前就已脏/已暂存」时暴露。
+const TEST_ONLY = ['color', 'gate.d/_shared']
 // 报告型：只防崩溃（退出码恒 0，判定需人工复核），走日志不刷屏。
 const REPORT_ONLY = ['schema-audit']
 

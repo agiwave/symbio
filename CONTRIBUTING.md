@@ -60,13 +60,23 @@ symbio/
 node scripts/gate.mjs                 # 全量
 node scripts/gate.mjs --only=frontend # 单阶段（也有 --skip=）
 node scripts/gate.mjs --only=msrv     # 用 rust-version 声明的最低工具链真跑一次 check
-node scripts/gate.mjs --fix           # 先自动格式化 / 重生成，再检查
 node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 ```
 
 覆盖：Rust 编译 / 单测 / clippy / rustfmt、TypeScript 类型检查、vitest、静态审计、
-**MSRV 实编译校验**、事实文件一致性。完整输出落 `.workbuddy-ai/gate-logs/`；通过数低于基线
+**MSRV 实编译校验**、事实文件生成。完整输出落 `.workbuddy-ai/gate-logs/`；通过数低于基线
 会报错、高于基线提示更新 `BASELINE`。
+
+**格式化与事实文件由门禁自己做完，不用你动手。** `cargo fmt` 与 `gen-current-facts` 是
+确定性的机械变换（函数，不是判断），所以门禁**直接执行**它们：命令跑成功即通过，命令本身
+报错才不通过；本地还会把改写的文件**当场暂存**，使修复与本次提交是同一份内容。在 CI 里
+（`--ci`）门禁不能提交，因此「执行后仍有差异」只能报红——那是唯一能保住不变量的信号，
+出现时在本地跑一次门禁再提交即可。
+
+⚠️ **上面这条「CI 判红」完全依赖 `--ci`**，而漏写 `--ci` 不会报错、不会变慢、本地也复现不出来
+——它只会把这一步退化成「修复完静默放过漂移」，即一个只亮绿灯的检查项。所以 CI 里凡是
+跑到了自动执行阶段（`backend` 的 fmt、`facts`）的调用**必须**带 `--ci`；回归测试
+`scripts/gate.d/_shared.test.mjs` 会断言这一点。
 
 MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）并写独立 target
 （`.workbuddy-ai/msrv-target/`），所以**不会**动日常构建缓存；本机没装该工具链时跳过并提示
@@ -79,9 +89,10 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
 CI（[.github/workflows/ci.yml](./.github/workflows/ci.yml)）跑的是**同一个脚本**
-（`--only=backend --ci --profile=<dev|release>` / `--only=frontend` / `--only=docs,facts`
+（`--only=backend --ci --profile=<dev|release>` / `--only=frontend` / `--only=docs,facts --ci`
 / `--only=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链），
-所以本地通过 ≈ CI 通过。
+所以本地通过 ≈ CI 通过。注意后两个 `--ci` 不是可选项：`backend` 含 `cargo fmt`、
+`docs,facts` 含事实文件生成，两者都是门禁**自动执行**的工作，少了 `--ci` 就没有判红手段。
 
 提交信息规范由 `scripts/check-commit-msg.mjs` 判定，**两处都要接上**：
 

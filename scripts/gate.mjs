@@ -13,17 +13,27 @@
  *   { label, when: (ctx) => bool, ... }                          条件不满足记 skipped
  * 结果取值：true / false / 'skipped' / { ok, note }
  *
- * ctx：{ repoRoot, scriptDir, logDir, fix, ci, profile, run(o), log(name, text) }
+ * ctx：{ repoRoot, scriptDir, logDir, ci, profile, run(o), log(name, text) }
  *   run(o) 执行命令：实时逐行转发（echo: filtered|all|none）+ 全文落日志 + 只信退出码。
  *
  * 参数：
  *   node scripts/gate.mjs                       全量
  *   node scripts/gate.mjs --only=id1,id2        只跑指定阶段
  *   node scripts/gate.mjs --skip=id1,id2        跳过指定阶段
- *   node scripts/gate.mjs --fix                 允许任务执行自动修复动作
  *   node scripts/gate.mjs --ci                  CI 对齐模式（语义由任务模块自行解释）
  *   node scripts/gate.mjs --profile=<p>         附加构建档位（语义由任务模块自行解释）
  *   node scripts/gate.mjs --list                只列出阶段与任务，不执行
+ *
+ * ## 判定 vs 执行：门禁会**做掉**确定性的机械工作
+ *
+ * 格式化（`cargo fmt`）与事实文件生成（`gen-current-facts`）是**函数**不是判断，
+ * 对同一份输入永远给同一个输出。把它们写成「检查你有没有跑过」等于让门禁因为
+ * **人忘了按一次按钮**而红——报的不是代码有问题，是流程有问题。因此它们由门禁
+ * **自动执行**：命令跑成功即通过，命令本身报错才不通过；本地还会把改写的文件
+ * **当场暂存**，使修复与本次提交是同一份内容。见 `gate.d/_shared.autoWork`。
+ *
+ * （`--fix` 这个开关已删除：它当时的作用就是「允许跑那两个修复动作」，
+ * 而它们现在无条件执行。留一个没有任何效果的开关比没有更糟。）
  */
 
 import fs from 'node:fs'
@@ -42,7 +52,6 @@ const valOf = (p) => {
   const a = argv.find((x) => x.startsWith(p))
   return a ? a.slice(p.length).trim() : null
 }
-const FIX = hasFlag('--fix')
 const CI = hasFlag('--ci')
 const profile = valOf('--profile=')
 const only = valOf('--only=') ? valOf('--only=').split(',').map((s) => s.trim()).filter(Boolean) : null
@@ -117,7 +126,6 @@ const ctx = {
   repoRoot,
   scriptDir,
   logDir,
-  fix: FIX,
   ci: CI,
   profile,
   run,
@@ -183,7 +191,15 @@ if (listOnly) {
 
 console.log(bold('══ 门禁 ══'))
 console.log(dim(`  仓库根：${repoRoot}`))
-console.log(dim(`  模式：${FIX ? '--fix（允许自动修复）' : '只读检查'}${CI ? ' · --ci' : ''}${profile ? ` · --profile=${profile}` : ''}`))
+console.log(
+  dim(
+    `  模式：${
+      CI
+        ? '--ci（不能提交 ⇒ 自动执行后有差异即报红）'
+        : '本地（自动执行 fmt / 事实文件生成，并把改写当场暂存）'
+    }${profile ? ` · --profile=${profile}` : ''}`,
+  ),
+)
 console.log(dim(`  阶段：${stages.filter((s) => enabled(s.id)).map((s) => s.id).join(' → ')}`))
 console.log(dim(`  完整日志：${path.relative(repoRoot, logDir) || '.'}/`))
 

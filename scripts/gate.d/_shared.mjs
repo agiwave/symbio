@@ -7,7 +7,9 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { stripAnsi } from '../color.mjs'
+import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
+import { stripAnsi, yellow } from '../color.mjs'
 
 /**
  * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
@@ -168,4 +170,117 @@ export function cliBinaryPath(repoRoot) {
 
 export function cliBinaryExists(repoRoot) {
   return fs.existsSync(cliBinaryPath(repoRoot))
+}
+
+// ==================== 「自动执行的工作」（不是检查项） ====================
+
+/**
+ * `git status --porcelain` → 脏路径集合（含已暂存与未暂存）。
+ *
+ * 只取路径，不区分状态：本模块关心的是「这个路径的内容在修复前后有没有变」。
+ *
+ * 用 `-z`（NUL 分隔）而非默认的行分隔：默认输出会把非 ASCII 路径**转义**成
+ * `"\346\226\207.md"`（`core.quotepath=true` 是默认值），那样的串既读不了文件
+ * （`contentHashes` 拿到 null），也不能直接喂给 `git add`（暂存失败）。
+ * `-z` 下路径原样给出、不加引号，这两处一并消失。
+ */
+function dirtyPaths(repoRoot) {
+  const r = spawnSync('git', ['status', '--porcelain', '-z'], { cwd: repoRoot, encoding: 'utf8' })
+  const out = new Set()
+  if (r.status !== 0) return out
+  const tokens = r.stdout.split('\0')
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (!t) continue
+    // 形如 `XY path`；重命名/复制时**紧随其后还有一个「旧路径」token**，跳过它。
+    const xy = t.slice(0, 2)
+    out.add(t.slice(3))
+    if (xy[0] === 'R' || xy[0] === 'C' || xy[1] === 'R' || xy[1] === 'C') i++
+  }
+  return out
+}
+
+/** 工作区内容的哈希（文件不存在 → null）。用于判定「修复是否真的改写了它」。 */
+function contentHashes(repoRoot, paths) {
+  const m = new Map()
+  for (const p of paths) {
+    try {
+      m.set(p, createHash('sha256').update(fs.readFileSync(path.join(repoRoot, p))).digest('hex'))
+    } catch {
+      m.set(p, null)
+    }
+  }
+  return m
+}
+
+/**
+ * 把一件**确定性的机械工作**交给门禁自己做完，而不是判它「有没有做过」。
+ *
+ * ## 为什么不判「有没有做过」
+ *
+ * 格式化与事实文件生成是**函数**，不是判断：`fmt(code) → code'`、`gen(code) → facts`
+ * 对同一份输入永远给同一个输出。把它们写成 `--check` 等于让门禁因为
+ * **人忘了按一次按钮**而红——它报的不是代码有问题，是流程有问题。而修复动作
+ * 完全确定、零风险，没有任何理由等人来按。
+ *
+ * ## 语义
+ *
+ * - 命令**跑成功** ⇒ 通过（`ok: true`）。产物被改写不算失败，那是它该做的事。
+ * - 命令**本身报错** ⇒ 不通过（真失败：工具坏了 / 输入不可解析）。
+ * - 本地：被改写的路径**当场暂存**，使修复与「本次提交」是同一份内容。
+ * - CI：CI 不能提交，所以「跑完仍有差异」只能报红——那是唯一能保住不变量的信号。
+ *
+ * ⚠️ **「CI 报红」靠 `ctx.ci`，而 `ctx.ci` 来自 `--ci`。** 调用本原语的任务
+ * （`10-backend` 的两处 fmt、`60-facts` 的生成）必须在 CI 侧被以 `--ci` 调用，
+ * 否则会退化成「自动修复 + 暂存」而**静默放过漂移**——一个只亮绿灯的检查项。
+ * 回归测试里有一条专门断言 `.github/workflows/ci.yml` 的对应步骤传了 `--ci`。
+ *
+ * ## 怎么认出「被修复改写的路径」（⚠️ 这里错过一次）
+ *
+ * 第一版按「修复前干净、修复后变脏」判定，**方向反了**：日常流程是
+ * 「改文件 → `git add` → 提交」，所以修复前就已脏（甚至已暂存）才是**常态**，
+ * 而那样会漏掉它们 ⇒ 提交里留下**未格式化**的那一版。
+ *
+ * 正确判据是**内容哈希**：修复前给所有脏路径记哈希，修复后重算，
+ * 哈希变了就是被改写过（无论它此前是干净、已暂存、还是已有未提交改动）。
+ * 只比较脏路径即可——干净路径修复后若变脏，它自然进入「修复后」这一侧。
+ *
+ * 这样「修复前就脏、修复没碰」的路径**不会被暂存**：门禁没有立场替人决定
+ * 「那些改动该不该进本次提交」（`commit.mjs` 的模型是「先 git add 你要的，
+ * 再提交索引」）。
+ */
+export async function autoWork(ctx, { label, cmd, args = [], cwd }) {
+  const before = dirtyPaths(ctx.repoRoot)
+  const beforeHash = contentHashes(ctx.repoRoot, before)
+
+  const r = await ctx.run({ label, cmd, args, cwd })
+  if (!r.ok) {
+    return {
+      ok: false,
+      note: r.timedOut ? '超时终止' : `exit=${r.code}${r.signal ? `, ${r.signal}` : ''}`,
+    }
+  }
+
+  const after = dirtyPaths(ctx.repoRoot)
+  const afterHash = contentHashes(ctx.repoRoot, after)
+  const touched = [...after].filter(
+    (p) => !before.has(p) || beforeHash.get(p) !== afterHash.get(p),
+  )
+
+  if (touched.length === 0) return { ok: true }
+
+  const shown = touched.slice(0, 5).join('、') + (touched.length > 5 ? ` 等 ${touched.length} 个` : '')
+  if (ctx.ci) {
+    return {
+      ok: false,
+      note: `已执行但有 ${touched.length} 处差异（${shown}）—— CI 无法提交，请在本地跑一次门禁（会自动修复并暂存）`,
+    }
+  }
+
+  const add = spawnSync('git', ['add', '--', ...touched], { cwd: ctx.repoRoot, encoding: 'utf8' })
+  if (add.status !== 0) {
+    return { ok: false, note: `已修复 ${touched.length} 个文件但暂存失败：${(add.stderr || '').trim()}` }
+  }
+  console.log(yellow(`      ⚠ 门禁已自动修复并暂存 ${touched.length} 个文件：${shown}`))
+  return { ok: true, note: `自动修复 ${touched.length} 个文件（已暂存）` }
 }

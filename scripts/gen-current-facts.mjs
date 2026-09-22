@@ -618,7 +618,7 @@ function render() {
   L.push("# Symbio 当前事实表（自动生成）");
   L.push("");
   L.push("> ⚠️ **本文件由 `scripts/gen-current-facts.mjs` 从代码提取生成，请勿手改。**");
-  L.push("> 改了代码就重跑 `node scripts/gen-current-facts.mjs`；CI 跑 `--check` 防漂移。");
+  L.push("> 改了代码不用手动重跑——门禁会**自动重新生成并暂存**（见 `scripts/gate.d/60-facts.mjs`）。");
   L.push(">");
   L.push("> 本表回答「**现在是什么**」（结构；代码投影，不会漂移）；");
   L.push("> 「**为什么这样设计**」看 [DECISIONS.md](./DECISIONS.md)；");
@@ -782,6 +782,23 @@ function render() {
 
 // ================= 入口 =================
 
+// 溯源行（`> 生成时间：… UTC · 源：git rev-parse HEAD = …`）**不参与**「内容变没变」的判定。
+//
+// 它是随运行时间（以及当前 HEAD）变的。若让它决定写不写，本脚本就**不是函数**了：
+// 同一份代码，每次运行都产出一份不同的文件。后果不只是噪音——
+// 门禁把这个脚本当**确定性的机械工作**自动执行（`gate.d/_shared.autoWork`），
+// 比对的是**内容哈希**：于是每次门禁都会报「修复了 1 个文件」，
+// 而 CI 无法提交、只能判红，**红的原因是时间戳，不是漂移**。
+//
+// 所以：代码派生内容没变 ⇒ **整份沿用已有文件**（连同它原来的溯源行），
+// 使「同输入 ⇒ 同输出」逐字节成立。溯源行因此表示的是
+// 「**内容最后一次真正变化**是在何时、基于哪个 commit」，比「最后一次运行时间」更有意义。
+const stripStamp = (s) =>
+  s
+    .split("\n")
+    .filter((l) => !l.startsWith("> 生成时间："))
+    .join("\n");
+
 const content = render();
 const isCheck = process.argv.includes("--check");
 
@@ -791,17 +808,17 @@ if (isCheck) {
     process.exit(1);
   }
   // 生成时间行随时间变化，比对时剔除；其余任何差异都是真漂移
-  const strip = (s) =>
-    s
-      .split("\n")
-      .filter((l) => !l.startsWith("> 生成时间："))
-      .join("\n");
-  if (strip(readFileSync(OUT, "utf8")) !== strip(content)) {
+  if (stripStamp(readFileSync(OUT, "utf8")) !== stripStamp(content)) {
     console.error("❌ docs/CURRENT.md 与代码漂移——重新运行 `node scripts/gen-current-facts.mjs`");
     process.exit(1);
   }
   console.log(`✅ docs/CURRENT.md 与代码一致（${content.split("\n").length} 行）`);
 } else {
-  writeFileSync(OUT, content, "utf8");
-  console.log(`✅ 已生成 docs/CURRENT.md（${content.split("\n").length} 行）`);
+  const existing = existsSync(OUT) ? readFileSync(OUT, "utf8") : null;
+  if (existing !== null && stripStamp(existing) === stripStamp(content)) {
+    console.log(`✅ docs/CURRENT.md 已是最新（${content.split("\n").length} 行，未改写）`);
+  } else {
+    writeFileSync(OUT, content, "utf8");
+    console.log(`✅ 已生成 docs/CURRENT.md（${content.split("\n").length} 行）`);
+  }
 }

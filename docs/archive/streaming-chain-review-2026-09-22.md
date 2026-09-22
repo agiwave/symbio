@@ -486,6 +486,11 @@ function updateMessages(sessionId, mutate) {
 > 剩下的只有测试构造）。它们是真正的死字段，删除属"信封瘦身"，
 > 但会动 `docs/design/vdfs.md` 的对外形状与 `useVdfs.ts` 的 `appended` 分支
 > （同样已无生产者）——值得单开一批，与 F 无关。
+>
+> → **已由批次 G 完成**（2026-09-22）：三个无生产者的**变更取值**
+> （`renamed` / `appended` / `truncated`）与四个**载荷字段**一并删除，
+> 判据立为「一个取值（或载荷字段）必须有生产性生产者」。
+> 见 `docs/CHANGELOG.md` 的「变更词汇表收窄为闭集」条目。
 
 **E（会话运行态并入转写流）—— 原判定：「收益真实但本轮不值得」**
 

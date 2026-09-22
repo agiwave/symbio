@@ -240,7 +240,12 @@ jobs:
         # doc-link-audit（已豁免 docs/archive/）、test-layout-audit、dead-code-audit，
         # 外加报告型 schema-audit；facts 阶段是 docs/CURRENT.md 漂移门禁——事实表由代码
         # 提取生成，改了插件 / 挂载点 / 工具 / 路由就必须重新生成并提交。
-        run: node scripts/gate.mjs --only=docs,facts
+        #
+        # ⚠️ `--ci` 是必需的，不是装饰：facts（以及 backend 的 fmt）已改为**门禁自己执行**
+        # 的确定性机械工作，本地跑会「自动修复 + 暂存」，而 CI 无法提交、只能判红。
+        # 少了 `--ci`，这一步就退化成「修复完静默放过漂移」——一个只亮绿灯的检查项。
+        # 回归测试 scripts/gate.d/_shared.test.mjs 断言了这一行必须带 `--ci`。
+        run: node scripts/gate.mjs --only=docs,facts --ci
         continue-on-error: false
 
       - name: Check for obvious documentation issues

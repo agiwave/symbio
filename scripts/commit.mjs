@@ -13,8 +13,10 @@
  *
  * 流程：
  *   1. 前置检查：不在变基/合并冲突中、有暂存或可暂存的改动
- *   2. 跑门禁（node scripts/gate.mjs，可用 --only/--skip/--fix/--ci 透传），
- *      除非 --no-gate；门禁失败即中止，不产出提交
+ *   2. 跑门禁（node scripts/gate.mjs，可用 --only/--skip/--ci 透传），
+ *      除非 --no-gate；门禁失败即中止，不产出提交。
+ *      门禁会自动执行 fmt / 事实文件生成并**当场暂存**其产物，所以它之后
+ *      要重读索引（本脚本在第 2 步做这件事）。
  *   3. 按仓库规范生成提交消息临时文件：
  *      标题 `<type>(<scope>): <中文标题>` + 编号分节 + 「门禁：」段（附门禁汇总摘要）
  *      写好后本地校验一次（check-commit-msg --file），校验不过视为脚本 bug，直接失败
@@ -50,7 +52,7 @@ const TITLE = valOf('--title=')
 const SECTIONS = argv
   .filter((x) => x.startsWith('--section='))
   .map((x) => x.slice('--section='.length))
-const GATE_ARGS = argv.filter((x) => x.startsWith('--only=') || x.startsWith('--skip=') || x === '--fix' || x === '--ci')
+const GATE_ARGS = argv.filter((x) => x.startsWith('--only=') || x.startsWith('--skip=') || x === '--ci')
 
 function sh(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { cwd: repoRoot, encoding: 'utf8', shell: false, ...opts })
@@ -124,8 +126,18 @@ if (DRY_RUN) {
 
 // ---------- 收集消息素材 ----------
 console.log(bold('══ 第 2 步 · 提交消息 ══'))
-const unstaged = status.out.split('\n').filter(Boolean).length
-console.log(dim(`  暂存 ${staged ? staged.split('\n').length : 0} 个文件；工作区共 ${unstaged} 处改动（未暂存的不会进本次提交）`))
+// ⚠️ 索引在门禁前后会变：门禁把 `cargo fmt` / 事实文件生成这类**确定性机械工作**
+// 自己做完并**当场暂存**（见 `gate.d/_shared.autoWork`）。所以这里必须**重新读**，
+// 不能沿用开头那份快照——那份是在门禁之前取的。
+// （提交内容本身一直是对的：最后一步 `git commit -F` 用的是**活索引**；错的只是显示。）
+const stagedNow = sh('git', ['diff', '--cached', '--name-only']).out
+const workNow = sh('git', ['status', '--porcelain']).out
+const stagedCount = stagedNow ? stagedNow.split('\n').filter(Boolean).length : 0
+const workCount = workNow ? workNow.split('\n').filter(Boolean).length : 0
+if (!DRY_RUN && stagedCount === 0) {
+  die('门禁跑完后索引为空 —— 没有可提交的内容（门禁的自动修复也没产生暂存项）')
+}
+console.log(dim(`  暂存 ${stagedCount} 个文件；工作区共 ${workCount} 处改动（未暂存的不会进本次提交）`))
 
 const type = TYPE ?? (await prompt('type', { def: 'chore', choices: ['feat', 'fix', 'docs', 'refactor', 'chore', 'test', 'perf', 'style'] }))
 const scope = SCOPE ?? (await prompt('scope', { def: await guessScope() }))

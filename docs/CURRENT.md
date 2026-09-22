@@ -1,7 +1,7 @@
 # Symbio 当前事实表（自动生成）
 
 > ⚠️ **本文件由 `scripts/gen-current-facts.mjs` 从代码提取生成，请勿手改。**
-> 改了代码就重跑 `node scripts/gen-current-facts.mjs`；CI 跑 `--check` 防漂移。
+> 改了代码不用手动重跑——门禁会**自动重新生成并暂存**（见 `scripts/gate.d/60-facts.mjs`）。
 >
 > 本表回答「**现在是什么**」（结构；代码投影，不会漂移）；
 > 「**为什么这样设计**」看 [DECISIONS.md](./DECISIONS.md)；
@@ -123,4 +123,4 @@
 
 ---
 
-> 生成时间：2026-09-22 12:18:13 UTC · 源：`git rev-parse HEAD` = `a442fd8`
+> 生成时间：2026-09-22 12:48:29 UTC · 源：`git rev-parse HEAD` = `8969ec2`
