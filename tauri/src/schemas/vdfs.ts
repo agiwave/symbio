@@ -537,50 +537,6 @@ export function vdfsMessageAddr(
   return vdfsJoin(vdfsMessagesAddr(s, sessionId), messageId)
 }
 
-/**
- * 会话域地址 → 本域目标（**按地址分派**的唯一实现）。
- *
- * ## 为什么是「按地址」而不是「按事件类型」
- *
- * 事件流的分派必须写成 `switch (event.type)`，而每个分支都隐含「之前发生过什么」
- * ——顺序一变就错。地址分派不记录历史：每个地址只认**自己那份状态**，
- * 因此变更可以丢、可以重放、可以乱序，视图仍然正确。
- *
- * 不是会话域的地址一律返回 `null`（会话清单本身、子会话 / 工作目录区段、
- * `<根>/model` 等）——调用方据此跳过，无需自己切字符串。
- */
-export type SessionRoute =
-  /** `<根>/session/<sid>`：会话叶子（运行态的承载者） */
-  | { target: 'session'; sessionId: string }
-  /** `<根>/session/<sid>/消息`：转写列表（整表） */
-  | { target: 'messages'; sessionId: string }
-  /** `<根>/session/<sid>/消息/<mid>`：单条消息 */
-  | { target: 'message'; sessionId: string; messageId: string }
-
-/**
- * 从一条变更路径解出会话域目标（纯函数，可单测）。
- *
- * @param s 会话地址方案（运行期解析所得；未解析时传 `null` ⇒ 一律返回 `null`，
- *   即「还不能路由」——调用方据此跳过，不要自己切字符串）
- */
-export function sessionRouteOf(
-  s: VdfsSessionScheme | null,
-  path: string,
-): SessionRoute | null {
-  if (!s) return null
-  const prefix = `${s.mountDir}/`
-  if (!path.startsWith(prefix)) return null
-  const segs = path.slice(prefix.length).split('/')
-  const sessionId = segs[0]
-  if (!sessionId) return null
-  // 会话叶子：`<mountDir>/<sid>`
-  if (segs.length === 1) return { target: 'session', sessionId }
-  if (segs[1] !== s.messagesSeg) return null
-  if (segs.length === 2) return { target: 'messages', sessionId }
-  if (segs.length === 3 && segs[2]) return { target: 'message', sessionId, messageId: segs[2] }
-  return null
-}
-
 // ==================== 会话运行态（会话节点的场景属性） ====================
 //
 // 会话「忙不忙 / 上一轮怎么结束的」是**会话节点的属性**，不是事件：

@@ -65,10 +65,11 @@ export interface UseChatConnectionReturn {
  *
  * ## 设计（重要变化）
  *
- * - **所有状态写入由全局消费端负责**，本 composable 不订阅任何通道：
- *   消息与转写走 `services/transcriptStream`（`session/stream` 转写流），
- *   会话运行态走 `stores/sessions.ts::applySessionNode`（同一个频道的会话叶子地址）。
- *   本 composable 只在**发起动作**时做乐观置位（随后被节点状态覆盖）。
+ * - **所有状态写入由全局消费端负责**，本 composable 不订阅任何通道：消息与会话
+ *   运行态都走 `services/transcriptStream`（`session/stream` 转写流——两种帧共用
+ *   一个 `seq` 计数器），落地口是 `stores/sessions.ts`（`applyTranscriptMessages` /
+ *   `applySessionState`）。本 composable 只在**发起动作**时做乐观置位
+ *   （随后被节点状态覆盖）。
  * - 组件订阅此 hook 只是为了：
  *   1. 拿到 `send` / `abort` 两个 one-off 命令
  *   2. 拿到派生自 store 的 `isLoading` / `isWaitingApproval` 给 UI
@@ -375,9 +376,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    *   （**不动历史**：压缩失败从不丢消息，重试只是再试一次 LLM 摘要）
    * - retry/approve/reject/supply/answer：删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点
    *
-   * 前端不在此处构造新消息——后端经转写流广播：`remove`（删旧节点）+
-   * `upsert` / `append`（写新节点 + 父节点状态更新），由 `transcriptStream`
-   * 与 `sessions.applySessionNode` 就地收敛。
+   * 前端不在此处构造新消息——后端经转写流广播（帧语义全在字段上：
+   * `status = removed` 删旧节点，`content` / `delta` 写新节点与父节点状态），
+   * 由 `transcriptStream` 与 `sessions.applyTranscriptMessages` 就地收敛。
    *
    * 会话参数：智能体 / 模型 provider 由后端 `resolve_session_params` 从
    * `session.metadata` 回退解析；`mode` / `risk_level` 从会话记忆（metadata 的本地镜像）

@@ -690,7 +690,7 @@ for (name, child) in children {
   | 取值 | 语义 | 载荷 | 消费者动作 |
   |---|---|---|---|
   | `created` | 多了一个节点 | 可带 `node` / `content` | 列表插入一项（或重拉该目录） |
-  | `updated` | 节点变了，**内容全量** | 可带 `node` / `content` | 就地替换（或重读该节点） |
+  | `updated` | 节点变了，**内容全量** | 可带 `node` / `content`（**当前无生产性生产者**，见下方注） | 就地替换（或重读该节点） |
   | `appended` | 节点**尾部多了 `delta`**，增量 | `delta` | 拼接 `delta`，**不重读** |
   | `deleted` | 节点没了 | — | 列表移除一项 |
   | `renamed` | 节点换了地址 | `to` | 改键（`to` = 新地址） |
@@ -704,6 +704,15 @@ for (name, child) in children {
   - `created` / `updated` 每轮只有寥寥数次，provider **可以**把节点视图
     （`node`）与内容快照（`content`）一并带上，消费者因此无需 `stat` + `read`
     两个来回。载荷**可选**：不填时消费者回退到回读，因此这是纯增益扩展。
+  - ⚠️ **这三类可选载荷目前都没有生产性生产者**：`VdfsChange::with_node` /
+    `with_content` / `appended` 只在测试里被调用，生产路径一律走
+    `vdfs::host::notify_change(kind, path, change)` 的三元组构造（即 `change`
+    词汇表里 `updated` 那行注记所指的「下方注」）。也就是说「免一次回读」的
+    增益**能力已经具备、但尚未启用**——真要用起来，得先有 provider 在 `watch`
+    里填。会话运行态曾是 `updated` + `node` 的唯一使用者，批次 E 起已改走
+    `session/stream` 转写流（理由与落点见
+    [node-state-streaming.md](../../symbio/src/plugins/session/docs/node-state-streaming.md) §11.4：
+    快照的来源必须**有序或幂等**，而 VDFS 是一条独立无序通道）。
   - 逐字段重建 `VdfsChange` 是**错的**——转发层新增字段时会漏（且无编译错误）。
     使用方一律用 `VdfsChange::map_paths` 一次覆盖全部路径（含 `node` 载荷内的路径）。
 - **禁止轮询、禁止私有刷新通道**。`created` / `updated` / `deleted` 这类

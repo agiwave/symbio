@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageType};
+use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsNode};
 use std::sync::Arc;
 
 /// 造一帧带唯一 `session_id` 的事件。
@@ -117,4 +118,60 @@ fn resync_marker_is_not_an_event_but_is_recognised() {
     let frame = resync_marker();
     assert!(event_of(&frame).is_none(), "背压标记无载荷，解不出事件");
     assert!(is_resync(&frame), "背压标记必须被 is_resync 认出");
+}
+
+/// 会话运行态帧的线上形状 = 同一个信封、**不同的判别值**。
+///
+/// 与消息帧走**同一个扇出**（`fan_out`），这正是"共用一个 `seq` 空间"的落点：
+/// 两条帧若能各走一条通道，顺序保证就没了。
+#[tokio::test]
+async fn session_state_frame_is_an_envelope_that_decodes_back_to_the_node() {
+    let sid = format!("test-session-frame-{}", uuid::Uuid::new_v4());
+    let (tx, mut rx) = mpsc::channel(512);
+    let conn = format!("{sid}-c");
+    register_transcript_subscriber(conn.clone(), tx);
+
+    let mut node = VdfsNode::file("s1", "s1", VdfsAccess::READ_WRITE);
+    node.status = "working".to_string();
+    publish_session_state(&SessionStateEvent {
+        session_id: sid.clone(),
+        seq: 7,
+        node,
+    });
+
+    let frame = take_frame(&mut rx, &sid).expect("应收到帧");
+    let PluginFrame::Data(v) = &frame else {
+        panic!("转写流帧必须是 Data 帧");
+    };
+    assert_eq!(v["type"], SESSION_TYPE, "判别值必须与常量同源");
+
+    let decoded = session_state_of(&frame).expect("信封必须能解回 SessionStateEvent");
+    assert_eq!(decoded.session_id, sid);
+    assert_eq!(decoded.seq, 7, "运行态帧的 seq 就是它的帧序号");
+    assert_eq!(decoded.node.status, "working");
+    assert!(!is_resync(&frame), "运行态帧不是背压标记");
+
+    unregister_transcript_subscriber(&conn);
+}
+
+/// 两种帧**不可互相混淆**——消费端必须按 `type` 分派。
+///
+/// 「解不出 `NodeEvent` 就当状态帧」这种推断是错的：一旦有第三种帧，
+/// 分派就退化成猜。两个解包入口各自只认自己的判别值。
+#[test]
+fn the_two_frame_kinds_are_not_confusable() {
+    let event = encode(EVENT_TYPE, &event_for("s-x")).expect("消息帧应能编码");
+    let state = encode(
+        SESSION_TYPE,
+        &SessionStateEvent {
+            session_id: "s-x".to_string(),
+            seq: 1,
+            node: VdfsNode::file("s-x", "s-x", VdfsAccess::READ_WRITE),
+        },
+    )
+    .expect("运行态帧应能编码");
+
+    assert!(event_of(&event).is_some() && session_state_of(&event).is_none());
+    assert!(session_state_of(&state).is_some() && event_of(&state).is_none());
+    assert!(!is_resync(&event) && !is_resync(&state));
 }

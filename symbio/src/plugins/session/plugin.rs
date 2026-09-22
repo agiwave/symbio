@@ -95,31 +95,37 @@ impl SessionPlugin {
     /// 广播一次会话变更（VDFS 实时链路的数据源）。
     ///
     /// 无订阅者时直接返回；`path` 是 provider 子树内的相对路径（= 会话 id）。
+    ///
+    /// ## 它现在**只**承载粗粒度信号
+    ///
+    /// 会话叶子上的变更分两半，各有一个出口，**不重叠**：
+    ///
+    /// | 一半 | 出口 | 粒度 |
+    /// |---|---|---|
+    /// | 运行态（本轮 `working` / 终态 / 警告 / 结局） | 转写流（`orchestrator::emit_session_state` → `Transcript::emit_session_state`） | 带全量节点视图，**与消息共用 `seq` 空间** |
+    /// | 资源（创建 / 删除 / 改名 / 标题 / metadata） | 本函数 | 只报"变了" |
+    ///
+    /// 运行态之所以不能留在这里：它必须与它那一轮的消息**共用 `seq` 空间**，
+    /// 否则「会话报不忙」推不出「本轮消息节点都已收到终态帧」——两条独立通道的
+    /// 到达顺序只是调度巧合（见 `transcript_stream::SessionStateEvent`）。
+    ///
+    /// 资源那一半之所以能留在这里：它发生在**没有在途轮次**时，拿不到 `seq`
+    /// （唯一分配点在 `Transcript`，而此刻没有活跃转写）——**结构性理由，不是遗留**。
+    /// 也因此本函数**不带节点视图**：会话叶子的节点快照只有两个来源，转写流
+    /// （有序、权威）与 `list` / `stat`（回读）——不再有第三条无序通道上的快照
+    /// 与它们竞争（旧写法在 `updated` 上挂 `node`，消费端一旦照单应用 `status`，
+    /// 一次迟到的改名就会把运行态**回退**成它自己那一刻的旧值）。
     pub(crate) fn notify_change(&self, id: &str, change: &str) {
         self.change_subs.notify(&vdfs::VdfsChange::new(id, change));
     }
 
-    /// 广播一次**会话运行态**变更：带节点视图的 `updated`。
+    /// 会话节点的**全量视图**——`list` / `stat` 与转写流的运行态帧共用这一个构造点。
     ///
-    /// ## 与 `notify_change` 的分工
-    ///
-    /// `notify_change` 是**粗粒度**的（只报"变了"），消费者必须回读 `vdfs/stat`
-    /// 才知道变成了什么——对标题一类低频变化足够。运行态不同：它是最需要即时的
-    /// 路径（角标 / 停止按钮 / 提示音都挂在这上面），一次状态迁移配一次回读
-    /// 会让"开始处理"到 UI 反映之间多一个往返。因此这里把节点视图**一并带上**。
-    ///
-    /// 这是会话状态下发给前端的**唯一出口**（`session/docs/node-state-streaming.md`
-    /// §8.6）：任何改动运行态的地方都必须经它，否则 UI 会永久停在旧状态，
-    /// 而两条链路互不校验、不会有人发现。
-    ///
-    /// 会话不存在（如刚被删）时静默返回：变更无处可挂，删除本身另有 `deleted`。
-    pub(crate) async fn notify_session_state(&self, id: &str) {
-        let Ok(session) = self.session_of(id).await else {
-            return;
-        };
+    /// `None` = 会话不存在（如刚被删）：变更无处可挂。
+    pub(crate) async fn session_node_of(&self, id: &str) -> Option<vdfs::VdfsNode> {
+        let session = self.session_of(id).await.ok()?;
         let rt = self.session_runtime(id).await;
-        let node = session_node(&SessionSummary::of(&session), &rt);
-        self.change_subs.notify(&session_change(id, node));
+        Some(session_node(&SessionSummary::of(&session), &rt))
     }
 
     // ==================== 转写发布（实时流的唯一出口）====================
@@ -209,11 +215,13 @@ impl SessionPlugin {
             .await;
     }
 
-    /// `session/stream`：建立**转写流**订阅连接（消息实时面的唯一通道）。
+    /// `session/stream`：建立**转写流**订阅连接（会话实时面的唯一通道）。
     ///
     /// 返回 `PluginPayload::Session` 通道——传输泵逐帧转发到消费端
-    /// （前端 / CLI / 子会话转播桥）。帧两类：
-    /// - `transcript_event`：[`NodeEvent`]（归属会话 + 单调 seq + 显式操作）；
+    /// （前端 / CLI / 子会话转播桥）。帧三类：
+    /// - `transcript_event`：[`NodeEvent`]（归属会话 + 单调 seq + 一条 `ChatMessage`）；
+    /// - `transcript_session`：会话**运行态**帧（同一个 seq 计数器 + 会话节点全量视图），
+    ///   因此「会话报不忙」与「本轮消息已全部落地」是同一个序号空间里的先后关系；
     /// - `transcript_resync`：背压标记——通道曾满，消费端必须清空本地转写并
     ///   从存储整份重读（唯一恢复路径，见 `transcript_stream` 模块文档）。
     async fn handle_stream_subscribe(
@@ -625,9 +633,9 @@ mod vdfs_provider;
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
     internal_dirs, message_node, message_of, message_text, ordered, overlay_live,
-    parse_session_path, session_change, session_content, session_node, title_from_new_path,
-    transcript_window, window_params, SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED,
-    OUTCOME_COMPLETED, OUTCOME_FAILED, SEG_MESSAGES,
+    parse_session_path, session_content, session_node, title_from_new_path, transcript_window,
+    window_params, SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED,
+    OUTCOME_FAILED, SEG_MESSAGES,
 };
 
 #[cfg(test)]

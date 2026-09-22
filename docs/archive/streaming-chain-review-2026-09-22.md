@@ -19,8 +19,8 @@
 
 ### 0.1 落地状态（2026-09-22 更新）
 
-本轮按 §7 的顺序实际落地了 A–D 四批，外加两处评审中未列出的缺陷。逐项见下表；
-**E、F 两批的处置与理由**见 §7.1。
+本轮按 §7 的顺序实际落地了 A–D 四批，外加两处评审中未列出的缺陷；
+**E 已在后续批次落地**（见下），**F 的处置与理由**见 §7.1。逐项见下表。
 
 | 批次 | 内容 | 状态 | 关键落点 |
 |---|---|---|---|
@@ -34,11 +34,13 @@
 | — | §4.7 `kinds` 死字段 | ✅ 已删除（未实现，见下） | `symbio_core/event_bus.rs::SubscribeRequest` |
 | — | §4.8 `PROTOCOLS.md` 命名约定过时 | ✅ 已修正 | `docs/architecture/PROTOCOLS.md` |
 | — | §4.5 `Native` 载荷两种传输处置不一致 | ✅ 已统一（改为两侧一致报错） | `tauri/src-tauri/src/commands.rs` |
-| **E** | 会话运行态并入转写流、删第二条实时通道 | ⏸ 未做，理由见 §7.1 | — |
-| **F** | 传输容器统一（响应恒为 `PluginMessageWire`） | ⏸ 未做，理由见 §7.1 | — |
+| **E** | 会话运行态并入转写流、删第二条实时通道 | ✅ 已落地（含 VDFS 侧不再携带节点快照） | `transcript_stream::{SessionStateEvent,publish_session_state}` / `transcript.rs::emit_session_state` / `transcriptStream.ts`（`advanceSeq` 两种帧共用）/ `sessions.ts::applySessionState`；规范见 `node-state-streaming.md` §11 |
+| **F** | 传输容器统一（响应恒为 `PluginMessageWire`） | ⏸ 未做，理由见 §7.1（**维持原判定**：那条不对称是有意的；两条子项已二次复核，均不成立） | **F 域内唯一真缺陷已修**：`docs/design/http-api-transport.md` §5.3 对外接入指南在 E 之后与实现不符（还在教人订阅 VDFS 看流式），已整段改写 |
 
 **验证**：`cargo test --lib` 908 通过 ｜ 前端 683 通过（46 文件）+ `vue-tsc` 干净 ｜
 e2e 11/11 通过（**用重新构建的 `cli/target/release` 二进制**，不是门禁里那个陈旧产物）。
+（**E 落地后**：915 通过 ｜ 687 通过 ｜ e2e 11/11，T9 另增「两种帧共用一个 `seq` 空间」
+与「收尾帧 seq > 全部消息帧 seq」两条断言。）
 
 ---
 
@@ -470,7 +472,22 @@ function updateMessages(sessionId, mutate) {
 
 ### 7.1 A–D 已落地；E、F 为何未做（附理由，便于下次接手）
 
-**E（会话运行态并入转写流）—— 未做，判定为「收益真实但本轮不值得」**
+> **更新（后续批次）**：**E 已落地**。下面这段"为何未做"保留为**决策记录**——
+> 它列出的三条代价（改三端消费者、动 §8 #28 的边界、清单同步要拆）当时都成立，
+> 只是权衡的结论在"要的是真正的收益"这一条指令下翻转了。落地结果见
+> `node-state-streaming.md` §11，实际改动比预估**更大**也**更干净**：
+> VDFS 侧顺带不再携带会话节点快照（那条通道上的快照会与有序通道的状态竞争），
+> 于是前端反而**净删**了一套机制（宽限复查 + 整份回读）。
+>
+> **F 维持未做**，理由见本节末尾——那条不对称是有意的（对外契约 vs 内部统一）。
+>
+> 另记一笔后续可做的（本次 E 顺带发现，未做）：`VdfsChange` 的 `node` / `content` /
+> `delta` 三个载荷字段在**生产代码里已无任何生产者**（E 删掉 `session_change` 之后，
+> 剩下的只有测试构造）。它们是真正的死字段，删除属"信封瘦身"，
+> 但会动 `docs/design/vdfs.md` 的对外形状与 `useVdfs.ts` 的 `appended` 分支
+> （同样已无生产者）——值得单开一批，与 F 无关。
+
+**E（会话运行态并入转写流）—— 原判定：「收益真实但本轮不值得」**
 
 建议本身成立，但落地要同时改动**三端消费者 + 一个不变量**：
 
@@ -505,6 +522,25 @@ function updateMessages(sessionId, mutate) {
 **结论**：这条「不对称」是**有意的不对称**（对外契约 vs 内部统一），
 不构成缺陷。已在本节留痕，避免下次重复提出。
 
+**F 的两条子项逐条复核（2026-09-22 二次确认，结论未变）**
+
+- **「协议信封瘦身」（§5.3）**：两条建议**都**不成立。
+  ①「把帧信封的 `type` 判别改成 `#[serde(tag = "t")]`，一层替代两层」——那两层是
+  **运输层**（`PluginFrame` 的 `Data` / `Error`）与**协议层**（`{type, data}`）。
+  要压成一层就得让运输层认识 `transcript_event` / `transcript_session` / `transcript_resync`
+  这些**协议**判别值，即反向耦合（运输层本该与业务无关）。
+  ②「短键名」——收益被 C 批的合帧窗口摊薄（合帧降的是 IPC 事件数，不是字节数；
+  而字节数的绝对值在 30~100 token/s 下只有 4~12 KB/s），代价是日志与抓包不可读。
+  **更值得做的那条（批处理）已经在 C 批做了**——评审自己也是这么排序的。
+- **「传输容器统一」**：见上，破坏性变更换一行归一化，**不做**。
+
+**F 域里唯一真正该改的是文档，已改**：`docs/design/http-api-transport.md` §5.3
+（**第三方接入指南**）在 E 落地后已经**与实现不符**——它还在教外部调用方「订阅
+`event_bus/subscribe` + `vdfs/watch` 看流式输出」。实际上流式信源自 E 起是
+`session/stream` 的 Session 通道，VDFS 只剩会话**资源**变更。该节已整段改写
+（含新旧对照与历史说明）。这条比 F 原本的任何一项都重要：它是对外契约的**错**，
+而不只是不统一。
+
 `Native` 的处置不一致（同属 §4.5）**已修**——那是真正的语义分叉，且零生产者，
 改动无风险。
 
@@ -512,12 +548,20 @@ function updateMessages(sessionId, mutate) {
 
 ## 附：本次评审确认的事实（供后续引用）
 
+> **S25 复核**：下列事实写于评审当时；标 ⚠️ 的几条**已被后续批次改变**，以行内注记为准。
+
 - 实时面**两条通道**：`worker/session/stream`（转写流）+ `event_bus/subscribe`（`kind=vdfs`）。两者都是 `PluginChannel` + `mpsc` + `DashMap` 订阅表，属机制复用而非双写。
+  ⚠️ **S25 起实时面只剩一条**：会话运行态并入 `session/stream`（两种帧、一个 `seq` 空间）；
+  `kind = "vdfs"` 只承载**资源**变更。见 `node-state-streaming.md` §11。
 - 旧 `kind="session"` 事件频道、`replayBuffer`、`event_bus/pending/snapshot` **已整体废除**，确认无残留。
 - `services/vdfsTranscriptSync.ts`、`services/sessionBusWatcher.ts` **已删除**（仅存于 `docs/archive/`）。
 - `schemas/vdfs.ts` 的 `sessionRouteOf` **当前生产代码零调用**（仅单测引用）；实际分派走 `session_id` 与地址前缀。
+  ⚠️ **S25 已删除**：按地址分派是「消息走 VDFS」时代的解法，消息与运行态都改走转写流后它再无调用方，
+  连同 `SessionRoute` 类型一并移除（`architecture-health-check-2026-09.md` F-7 的其中一项据此结清）。
 - 后端每帧 **2 次 serde 遍历 + 逐订阅者深拷贝**（`transcript_stream.rs:96-128`）。
+  ⚠️ **D 批已修**：`PluginFrame::Data(Arc<Value>)` + 一次序列化，扇出零深拷贝。
 - `PluginChannel.cancel_token` 全仓**从未被 `cancel()`**。
+  ⚠️ **B 批已修**：`route_connection.rs` / `commands.rs` 已接线，连接断开即触发反注册。
 - `ChatMessage` 的可选字段均带 `skip_serializing_if = "Option::is_none"`（`schemas/session/chat_message.rs`），delta 帧本身是瘦的——开销在信封而非消息体。
 
 ---

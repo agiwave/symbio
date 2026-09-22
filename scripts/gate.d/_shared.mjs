@@ -35,20 +35,34 @@ import { stripAnsi } from '../color.mjs'
  *      extract_result 判定顺序。逐批明细见 docs/CHANGELOG.md 的对应条目。
  */
 export const BASELINE = {
+  // 915：批次 E（会话运行态并入转写流）的**核心不变量**——两种帧共用一个 `seq` 计数器
+  //      是「会话不忙 ⇒ 本轮已终态」的全部依据，因此它必须有测试锚点，而不是靠读代码：
+  //      `session_state_frames_share_the_message_seq_counter`（取号）、
+  //      `session_state_frame_does_not_touch_the_message_graph`（不碰消息图）、
+  //      `session_state_frame_is_an_envelope_that_decodes_back_to_the_node`（信封往返）、
+  //      `the_two_frame_kinds_are_not_confusable`（按 type 分派，不靠猜）。
+  //      −1：`session_change`（带节点视图的 VDFS `updated`）已删除 ⇒ 其单测随之删除。
   // 912：帧解包收敛到 `symbio_core` 的公共入口（`transcript_stream::event_of` /
   //      `is_resync`、`vdfs_provider::vdfs_change_of`）后补的契约用例——
   //      `vdfs_change_of` 三条（解信封 / 拒异 kind / 非 Data 帧不 panic）+
   //      背压标记一条（`event_of` 解不出、`is_resync` 认出）。
-  rustTests: 912,
-  // 46 spec 文件 / 661 → 683 用例。文件数与用例数均与平台无关（全仓 spec 零平台分支、
-  // it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
+  rustTests: 915,
+  // 46 spec 文件 / 661 → 683 → 687 用例。文件数与用例数均与平台无关（全仓 spec 零平台
+  // 分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
+  // 687：批次 E——转写流的会话运行态帧协议用例（7）：到达时**先冲刷**同会话待落地帧 /
+  //      按会话冲刷（别的会话留在队列）/ 两种帧共用一个游标不触发跳号 / 运行态帧跳号同样
+  //      重读 / 重复帧丢弃 / 缺节点视图仍推进水位 / 未接线不抛错；
+  //      `sessions` store 的运行态收敛用例（5）：就地落 status 与标题零回读 / `failed`
+  //      独立成态 / 新一轮清空上一轮 error / 提示音只在迁移上响 / 状态未变不覆盖 activity；
+  //      以及 VDFS 侧新增两条（`updated` 防抖重拉、`updated` **不改运行态**）。
+  //      −4：`reconcileTranscript` 的触发端用例（宽限复查整条机制已删除）。
   // 683：`sessions` store 补 `reconcileTranscript` 的触发端用例（4）——宽限期内不动作 /
   //      仍不收敛才回读 / 已收敛不回读 / 未发生 `working → 非 working` 迁移不安排；
   //      以及转写流合帧的提交批量化用例（3）。
   // 672：收起态摘要跟「流式末端」走——`messagePreviewFollowsLiveEdge` 判据用例（2）+
   //      摘要取端（末端 / 开头 / 短内容 / 空内容，4）+ 渲染层两条（思考、工具行）。
   vitestFiles: 46,
-  vitestTests: 683,
+  vitestTests: 687,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

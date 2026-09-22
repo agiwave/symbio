@@ -11,15 +11,28 @@
  *
  * 现在它与 `transcriptStream` 同构：由**应用外壳**（`MainLayout`）显式启动，
  * 落地目标（sink）注入进来。于是 store 只有状态与动作，订阅是可启停的独立接线。
- * 启动即「先停旧订阅再挂新的」（进程内天然单订阅，无需额外守卫标记）；
- * **合并策略**（此处防抖重拉、转写处逐路径串行链）则各自保留，因为那是业务差异而非重复。
+ * 启动即「先停旧订阅再挂新的」（进程内天然单订阅，无需额外守卫标记）。
+ *
+ * ## 它负责什么，不负责什么
+ *
+ * | 会话叶子上变的东西 | 通道 | 收敛方式 |
+ * |---|---|---|
+ * | **运行态**（`working` / 终态 / 结局 / 警告 / 错误） | 转写流 `transcript_session` | `sessions.applySessionState`（零回读） |
+ * | **资源**（创建 / 删除 / 改名 / 标题 / metadata） | 本模块的 VDFS 订阅 | `deleted` 即时移除，其余防抖重拉清单 |
+ *
+ * ## 为什么这里的变更**不带节点快照**
+ *
+ * 会话叶子的节点快照只有两个来源，都**有序或幂等**：转写流的运行态帧（与消息共用
+ * `seq` 空间 ⇒ 保序）与 `list` / `stat` 回读。VDFS 变更是一条**独立的无序通道**——
+ * 在它上面捎带快照，一次迟到的改名就会把运行态**回退**成它自己那一刻的旧值
+ * （自动命名发生在轮次中，快照说 `working`，而转写流早已报 `finished`）。
+ * 所以运行态不在这条链路上，这里只做"资源变了"的收敛：重拉清单。
  *
  * ## 清单同步的双模式
  *
- * - **后端消息模式**（本订阅）：后端增删改节点 → `notify_change`（唯一的 `vdfs`
- *   频道）→ 此处收敛（跨窗口一致的唯一事实源）。载荷是粗粒度的（只有 path +
- *   change，不带快照），所以：`deleted` 本地即时移除、`created` 防抖重拉、
- *   `updated` 交给 sink 用**载荷**就地收敛。
+ * - **后端消息模式**（本订阅）：后端增删改会话叶子 → `notify_change`（唯一的 `vdfs`
+ *   频道）→ 此处收敛（跨窗口一致的唯一事实源）。载荷是**粗粒度**的（只有 path +
+ *   change），所以 `deleted` 本地即时移除、其余防抖重拉。
  * - **前端模式**（乐观更新）：store 的 `createSession` / `deleteSession` 已直接改
  *   本地 list，并经 `publishVdfsChangedLocal` 以同构载荷即时通知其他页面，
  *   不等事件往返；后端事件随后幂等收敛。
@@ -33,26 +46,22 @@ import { ensureSessionMountDir } from '@/services/vdfsScheme'
 import {
   VDFS_CHANGE_APPENDED,
   VDFS_CHANGE_DELETED,
-  VDFS_CHANGE_UPDATED,
   vdfsBase,
-  type VdfsChange,
 } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 
 /** 变更的落地目标（由外壳注入真实 store；本模块不认识 Pinia） */
 export interface SessionNodeSink {
-  /** 整表重拉（created / renamed 等粗粒度变更的收敛口） */
+  /** 整表重拉（created / updated / renamed 等粗粒度变更的收敛口） */
   refreshList(): void | Promise<void>
   /** 本地即时移除（deleted） */
   removeSessionLocal(id: string): void
-  /** 带载荷的状态迁移就地收敛（updated，零回读） */
-  applySessionNode(id: string, change: VdfsChange): void
 }
 
 let _unsubscribe: (() => void) | null = null
 let _listRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 防抖重拉：created / renamed 等只给地址的变更，用于收敛排序与完整字段 */
+/** 防抖重拉：只给地址的粗粒度变更（created / updated / renamed），用于收敛排序与完整字段 */
 function scheduleListRefresh(sink: SessionNodeSink): void {
   if (_listRefreshTimer) clearTimeout(_listRefreshTimer)
   _listRefreshTimer = setTimeout(() => {
@@ -106,16 +115,13 @@ export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void>
         sink.removeSessionLocal(id)
         return
       }
-      if (change.change === VDFS_CHANGE_UPDATED) {
-        sink.applySessionNode(id, change)
-        return
-      }
-      // created / renamed 等：本地乐观插入已覆盖同窗口场景；
-      // 此处防抖重拉，收敛排序与完整字段。
+      // created / updated / renamed：本地乐观更新已覆盖同窗口场景；
+      // 此处防抖重拉，收敛排序、标题与完整字段（**不看载荷**——它不带节点快照，
+      // 见模块文档「为什么这里的变更不带节点快照」）。
       scheduleListRefresh(sink)
     },
-    // 重同步：后端通道曾满，本端可能漏了会话节点的状态迁移（如 `working → active`）。
-    // 漏掉终态会让侧栏永远停在「运行中」——而清单是幂等全量视图，整表重拉即权威收敛。
+    // 重同步：后端通道曾满，本端可能漏了会话叶子的资源变更（漏掉 `deleted` 会让
+    // 侧栏留下一个已经不存在的会话）。清单是幂等全量视图，整表重拉即权威收敛。
     () => scheduleListRefresh(sink),
   )
 }

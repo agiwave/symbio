@@ -31,23 +31,31 @@ import { logger } from '@/utils/logger'
 import Toast from '@/components/common/Toast.vue'
 
 onMounted(async () => {
-  // 启动**转写实时流**（`worker/session/stream` → 会话消息 store）
+  // 启动**转写实时流**（`worker/session/stream` → 会话 store）
   //
-  // 消息本体的全部实时显示只经这一条流（`NodeEvent`：帧 = 一条 `ChatMessage`，
-  // 语义全在字段上——delta 追加 / content 替换 / status=removed 移除）。会话运行态
-  // （`<根>/session/<sid>` 叶子）仍走 VDFS 变更，由 `startSessionNodeSync` 收敛——
-  // 两者分工明确，同一份真相不会被写两次。
+  // 实时面的全部内容只经这一条流，两种帧共用一个 `seq` 计数器：
+  // `transcript_event` 帧 = 一条 `ChatMessage`（语义全在字段上——delta 追加 /
+  // content 替换 / status=removed 移除）；`transcript_session` 帧 = 会话节点的
+  // 全量视图（运行态 / 结局 / 错误 / 告警）。
+  //
+  // 会话运行态之所以也在这条流上，是因为它必须与它那一轮的消息**共用 `seq` 空间**：
+  // 于是「会话报不忙」到达时，本轮全部终态帧必然已落地——一条结构性保证，取代了
+  // 原先"两条通道各有一个泵任务、到达顺序靠调度巧合"的假设。资源变更（创建 / 删除 /
+  // 改名 / 标题）仍走 VDFS，由 `startSessionNodeSync` 收敛——那里**不携带节点快照**，
+  // 快照只有本流（有序）与 `list` / `stat` 回读两个来源。
   //
   // 落地目标由本外壳**显式注入**（`transcriptStream` 是 service，不认识 Pinia）；
-  // 只有两个动作：应用**一批**消息帧、整份重读（序号缺口 / resync 走 loadMessages）。
-  // 「帧该做什么」由落地目标按字段判定，不再按操作分派到不同的落地口。
+  // 三个动作：应用**一批**消息帧、应用一帧会话运行态、整份重读（序号缺口 / resync
+  // 走 loadMessages）。「帧该做什么」由落地目标按字段判定，不按操作分派到不同的落地口。
   //
-  // 收的是**一批**而不是一条：`transcriptStream` 把 ~48ms 窗口内的帧按会话攒批，
+  // 消息收的是**一批**而不是一条：`transcriptStream` 把 ~48ms 窗口内的帧按会话攒批，
   // 一批只做一次 store 提交与一次消息树重建——逐帧提交的代价是 O(历史条数 × 帧数)，
   // 长会话下那才是端到端的主要热点（帧的 `seq` 语义不变，逐帧仍过缺口检测）。
+  // 运行态帧**不等窗口**：它到达时先把同会话待落地的消息帧冲掉，再交付节点视图。
   const sessions = useSessionsStore()
   void startTranscriptStream({
     messages: (sid, msgs) => sessions.applyTranscriptMessages(sid, msgs),
+    applySessionState: (sid, node) => sessions.applySessionState(sid, node),
     reload: async (sid) => {
       await sessions.loadMessages(sid)
     },

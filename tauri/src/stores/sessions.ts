@@ -8,13 +8,18 @@
  * - 中间主区 = 详细窗口：单一 activeId 详细渲染（与现有行为一致）
  * - 所有数据（历史 + 流式）都写入 store，组件**只读** — 消除切换赛跑
  *
- * ## 状态来自节点，不来自事件
+ * ## 状态来自节点，也来自**一条**通道
  *
  * 会话的运行态是**会话节点的属性**（`status` + `attributes.outcome` / `.error`），
- * 经 `kind = "vdfs"` 的 `updated` 变更**带载荷**下发（零回读）。因此本 store
- * 不再订阅 `kind = "session"` 事件通道，也不再需要「防乱序」缓冲——状态是幂等
- * 的全量视图，变更可丢、可重放、可乱序。见
- * `symbio/src/plugins/session/docs/node-state-streaming.md`。
+ * 经转写流的 `transcript_session` 帧**带全量节点视图**下发（零回读）。因此本 store
+ * 不再订阅 `kind = "session"` 事件通道，也不再需要「防乱序」缓冲——状态是幂等的
+ * 全量视图，变更可丢、可重放。
+ *
+ * 为什么运行态**只能**从转写流来：它必须与它那一轮的消息共用 `seq` 空间，否则
+ * 「会话报不忙」推不出「本轮消息终态帧都已到达」。VDFS 变更通道**不携带会话节点
+ * 快照**——一条无序通道上的快照会与有序通道上的状态竞争，一次迟到的改名就能把
+ * 运行态回退（详见 `services/transcriptStream.ts` 的模块文档）。
+ * 规范见 `symbio/src/plugins/session/docs/node-state-streaming.md`。
  *
  * ## 关键状态
  *
@@ -24,7 +29,7 @@
  *                      写入：`transcriptStream`（`session/stream` 转写流）与 loadMessages
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
- *                      写入：`applySessionNode`（会话节点变更）/ send 的乐观置位
+ *                      写入：`applySessionState`（转写流的运行态帧）/ send 的乐观置位
  *                      读取：会话列表项状态展示（`<根>/session` 实例）
  */
 
@@ -53,12 +58,10 @@ import {
   sessionRuntimeOf,
   vdfsBase,
   vdfsSessionAddr,
-  type VdfsChange,
   type VdfsNode,
 } from '@/schemas/vdfs'
 import { setLastWorkdir, getLastWorkdir, callPlugin } from '@/services/plugin'
 import { publishVdfsChangedLocal } from '@/services/eventBus'
-import { reconcileTranscript } from '@/services/transcriptStream'
 import { ensureSessionMountDir, ensureVdfsSessionScheme } from '@/services/vdfsScheme'
 import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
@@ -72,7 +75,6 @@ import type { ImageAttachment } from '@/types'
 import {
   appendContent,
   hydrateTranscript,
-  isInProgressMessage,
   previewOf,
   sortTranscript,
   truncateIdsFrom,
@@ -96,29 +98,6 @@ import {
 export type { SessionLiveStatus } from './sessionLive'
 
 /** 单个 session 的实时状态（用于缩略卡展示）—— 定义见 `./sessionLive`，此处仅经上方 re-export 暴露 */
-
-/**
- * `reconcileTranscript` 的**宽限期**（毫秒）。
- *
- * 会话离开 `working` 时先等这么久再复查本地转写，仍不收敛才整份回读。
- *
- * 为什么不立刻回读：会话运行态走 VDFS 变更、消息走转写流，两条通道的到达顺序
- * **没有机制保证**（见 `services/transcriptStream.ts::reconcileTranscript`）。
- * 正常收尾时消息终态帧往往只比会话状态帧晚到一两个 IPC 往返，立刻回读会把
- * 「本来马上就到」的情况也变成一次整份重读——每轮一次全量转写读取，代价远大于收益。
- * 300ms 是「一个回合的传输抖动」与「用户能察觉的卡顿」之间的折中。
- */
-const RECONCILE_GRACE_MS = 300
-
-/**
- * 会话 → 待执行的收敛复查定时器（`globalThis` 单例，理由同 `transcriptStream`：
- * Vite HMR 重载模块后旧定时器仍会触发，收敛到 globalThis 才不会丢引用）。
- */
-const _RG = globalThis as typeof globalThis & {
-  __symReconcileTimers?: Map<string, ReturnType<typeof setTimeout>>
-}
-const reconcileTimers: Map<string, ReturnType<typeof setTimeout>> =
-  _RG.__symReconcileTimers ?? (_RG.__symReconcileTimers = new Map())
 
 export const useSessionsStore = defineStore('sessions', () => {
   // 列表（来自后端 list + 本地状态镜像）
@@ -478,7 +457,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * ## 调用方
    *
-   * - `applySessionNode`（会话节点状态迁移）
+   * - `applySessionState`（会话节点状态迁移）
    * - `transcriptStream`（由消息节点派生活动文字 / 审批角标）
    * - `useChatConnection.send` / `resume` 的乐观置位
    * - `setSessionStatus` 同步 list.status 时
@@ -498,7 +477,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 设置/清除会话级错误状态。
    *
    * 两个来源，后者覆盖前者（服务端权威）：
-   * - **节点属性**：`applySessionNode` 取会话节点的 `attributes.error`
+   * - **节点属性**：`applySessionState` 取会话节点的 `attributes.error`
    *   （覆盖"错误发生在任何消息节点创建之前"的场景）；
    * - **本地乐观**：`useChatConnection` 在 send / resume 请求本身失败时落一条
    *   （此时后端可能还没产生任何节点）。
@@ -520,7 +499,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   function getSessionWarning(sessionId: string): string | null {
     return sessionWarnings.value[sessionId] ?? null
   }
-  /** 设置/清除会话级告警（null 清除；权威来源是节点属性，见 `applySessionNode`） */
+  /** 设置/清除会话级告警（null 清除；权威来源是节点属性，见 `applySessionState`） */
   function setSessionWarning(sessionId: string, warning: string | null) {
     if (!sessionId) return
     sessionWarnings.value = { ...sessionWarnings.value, [sessionId]: warning ?? null }
@@ -1077,61 +1056,28 @@ export const useSessionsStore = defineStore('sessions', () => {
   //
   // 订阅**不在本工厂里**：`stores/sessionNodeSync.ts` 是那条接线，由应用外壳
   // （`MainLayout`）显式 `startSessionNodeSync(store)` 启动——本 store 只提供
-  // 收敛动作（`applySessionNode` / `removeSessionLocal` / `refreshList`），
-  // 不自己挂监听器，因此可被独立构造与测试。
+  // 收敛动作（`removeSessionLocal` / `refreshList`），不自己挂监听器，
+  // 因此可被独立构造与测试。
+  //
+  // **运行态不在这条链路上**：它走转写流（`transcriptStream` → `applySessionState`）。
+  // VDFS 那条通道只报"会话叶子上的资源变了"（创建 / 删除 / 改名 / 标题），
+  // 消费端重拉清单或就地移除——不携带节点快照。
 
   /**
-   * 安排一次转写收敛复查（`reconcileTranscript` 的触发端）。
-   *
-   * ## 它在补哪个洞
-   *
-   * 会话运行态（`kind = "vdfs"`）与消息转写（`session/stream`）走**两条独立通道**，
-   * 各有自己的 `mpsc` 与泵任务，**到达顺序没有机制保证**。因此「会话已离开
-   * `working`」**推不出**「本轮的消息终态帧都已到达」——后者只是发送端的调用顺序，
-   * 跨通道传递后不成立。
-   *
-   * 症状：某个节点永远停在 `streaming`（前端显示"运行中"，且 `isInProgressMessage`
-   * 会让下一次发送把它当成"已有在途节点"），而**没有任何机制会纠正**。
-   *
-   * ## 为什么先等一个宽限期
-   *
-   * 正常收尾时终态帧通常只晚到一两个 IPC 往返，立刻回读会把常态也变成整份重读。
-   * 因此先挂 `RECONCILE_GRACE_MS`，到点**再查一次**——仍然有非终态节点才回读。
-   * 这样代价被限定在「真的没收敛」的罕见情形上。
-   *
-   * 判定用 `isInProgressMessage`（`streaming` / `waiting_user_action`）：它不把
-   * **不带 `status` 的节点**（用户消息）算作在途，否则每轮都会误触发。
-   */
-  function scheduleReconcileTranscript(id: string): void {
-    const prev = reconcileTimers.get(id)
-    if (prev) clearTimeout(prev)
-    reconcileTimers.set(
-      id,
-      setTimeout(() => {
-        reconcileTimers.delete(id)
-        if (!getSessionMessages(id).some(isInProgressMessage)) return
-        logger.warn(
-          '[sessions]',
-          `会话 ${id} 已离开运行态，但本地转写仍有非终态节点（跨通道乱序或终态帧缺失），整份回读收敛`,
-        )
-        reconcileTranscript(id)
-      }, RECONCILE_GRACE_MS),
-    )
-  }
-
-  /**
-   * 应用一条**会话节点**变更（`updated`）：状态 / 结局 / 错误 / 告警 / 标题就地收敛。
+   * 应用一帧**会话运行态**（转写流的 `transcript_session`，全量节点视图，幂等）：
+   * 状态 / 结局 / 错误 / 告警 / 标题就地收敛。
    *
    * ## 零回读（本函数存在的理由）
    *
-   * 后端在会话节点的 `updated` 变更上附带**全量节点视图**
-   * （`change.node`），所以这里**不需要**再发一次 `vdfs/stat`。
+   * 帧里带的是**全量节点视图**，所以这里**不需要**再发一次 `vdfs/stat`。
    * 一次状态迁移一次 IPC 恰恰是最不该省的那一步——状态迁移是最需要即时的路径。
    *
-   * 因此 `node` 缺失时**不做回读兜底**，只记一条 warn 并放弃：
-   * 那意味着后端违反了「状态变更必带节点视图」这条不变量
-   * （`node-state-streaming.md` §8.2），静默回读只会把它掩盖成"看起来能用"。
-   * 真丢了一次也不要紧——下一次 `list` 快照会收敛，因为状态是幂等的。
+   * ## 为什么可以断言「这一帧到达时本轮转写已完整」
+   *
+   * 它与消息帧**共用 `seq` 空间**，且调用方（`transcriptStream`）在交付本帧前
+   * 已把同会话的待落地消息帧全部落地。因此「会话离开 `working`」是一条**结构性
+   * 结论**，不是调度巧合——上一版正是靠一条 300ms 宽限复查在兜这个缺口，现在
+   * 那个缺口不存在了。
    *
    * ## 状态迁移是唯一驱动提示音的东西
    *
@@ -1140,16 +1086,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 迁移判定放在 store 是因为**上一状态只有这里有**——它本来就是节点表的一部分，
    * 不是"上一条事件"。
    */
-  function applySessionNode(id: string, change: VdfsChange): void {
-    const node: VdfsNode | undefined = change.node
-    if (!node) {
-      logger.warn(
-        '[sessions]',
-        `会话节点变更未携带节点视图，已忽略（后端违反「状态变更必带载荷」不变量）：${change.path}`,
-      )
-      return
-    }
-
+  function applySessionState(id: string, node: VdfsNode): void {
     const rt = sessionRuntimeOf(node)
     const prev = sessionStatuses.value[id]
     const wasWorking = isWorkingStatus(prev?.status)
@@ -1174,9 +1111,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     // ④ 提示音：状态迁移 + 结局选音色
     if (wasWorking && !nowWorking) {
       playCompletionChime(chimeKindOfOutcome(rt.outcome), id)
-      // ⑤ 顺序假设的自愈网：会话离开运行态 ≠ 消息终态帧已到（两条通道无顺序保证）。
-      //    宽限期后复查，仍停在非终态才整份回读（见 scheduleReconcileTranscript）。
-      scheduleReconcileTranscript(id)
     }
   }
 
@@ -1224,7 +1158,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     applyTranscriptMessage,
     applyTranscriptMessages,
     putStatus,
-    applySessionNode,
+    applySessionState,
     getSessionError,
     setSessionError,
     getSessionWarning,

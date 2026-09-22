@@ -117,23 +117,6 @@ fn session_node_projects_runtime_state() {
     );
 }
 
-/// 运行态变更**带节点视图、不带内容**。
-///
-/// 会话节点的 `content` 是整份会话 JSON；若每次状态迁移都带上它，
-/// 一次「开始处理」就要重传整份转写——而状态迁移是最频繁的一类变更。
-#[test]
-fn session_change_carries_node_but_not_content() {
-    let mut s = Session::new("abc");
-    s.updated_at = 1_700_000_000;
-    let node = session_node(&SessionSummary::of(&s), &SessionRuntime::working());
-    let c = session_change("abc", node);
-    assert_eq!(c.path, "abc", "provider 子树内口径，挂载名由容器补");
-    assert_eq!(c.change, vdfs::VDFS_CHANGE_UPDATED);
-    assert!(c.node.is_some(), "状态由节点视图表达");
-    assert!(c.content.is_none(), "不得捎带整份会话正文");
-    assert!(c.delta.is_none(), "状态变更不是追加");
-}
-
 /// 会话内部寻址（S6/S16）：`<id>` / `<id>/AGENTS.md` / `<id>/消息[/<mid>]` /
 /// `<id>/子会话[/<sub>]` / `<id>/工作目录[/<rel>]`。
 /// 未知区段与越界层级一律 NotFound——不给半通不通的路径留口子。

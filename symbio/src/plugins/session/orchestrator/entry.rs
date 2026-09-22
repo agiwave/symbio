@@ -555,10 +555,11 @@ impl SessionPlugin {
             return;
         }
 
-        // 标题变更 = 该会话节点的一次 `updated`，**带节点视图**：前端清单项与
-        // 聊天头部标题因此一次变更即收敛，不必再回读 `vdfs/stat`
+        // 标题变更 = 该会话节点的一次资源 `updated`（粗粒度）：消费方重拉清单即收敛
         // （自动命名与手动改名走同一条链路，不因发起者不同而分流）。
-        self.notify_session_state(session_id).await;
+        // 不带节点视图：会话叶子的节点快照只有转写流（有序）与 `list` / `stat`（回读）
+        // 两个来源，见 `plugin::notify_change`。
+        self.notify_change(session_id, crate::symbio_core::vdfs::VDFS_CHANGE_UPDATED);
     }
 }
 

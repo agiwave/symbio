@@ -98,8 +98,9 @@ export type MessageStatus = (typeof MESSAGE_STATUSES)[number]
  *
  * 存在的理由：消费方要「把后端下发的状态词原样透传、只拦未知值」，而逐个
  * `case` 枚举等于又抄一份词表——**词表加了取值而 `case` 忘了加**，那条变更就
- * 会被当成"未知状态"丢掉。实测代价见 `services/vdfsTranscriptSync`：
- * `aborted` 曾因此让中止后的 Turn 显示为已完成，重试入口不出现。
+ * 会被当成"未知状态"丢掉。实测代价见 `services/transcriptStream`（当时叫
+ * `vdfsTranscriptSync`）：`aborted` 曾因此让中止后的 Turn 显示为已完成，
+ * 重试入口不出现。
  *
  * 判定与词表同源，故**新增一个状态词不需要改这里**。
  */

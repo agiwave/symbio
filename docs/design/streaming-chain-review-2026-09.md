@@ -16,6 +16,15 @@
 > 独立通道。本文对 `NodeOp` 的论述（§0 结论摘要、§3.2 等）请对照
 > [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md)
 > §6 阅读；评审结论中被 S24 吸收的部分（如告警下沉）已落地。
+>
+> **后记（S25 / 批次 E）：** 本文 §「问题清单」里关于 `reconcileTranscript` 的几条
+> （第 33 行的文档漂移、§4.2 一带「前端没有 `reconcileTranscript`」的推断）**已随批次 E
+> 失效**：会话运行态并入 `session/stream` 转写流、与消息帧共用同一个 `seq` 空间之后，
+> 「会话不忙 ⇒ 本轮消息已全部落地」成了结构性保证，那张自愈网连同它的
+> `applySessionNode` 触发点一并删除；`sessionRouteOf`（按地址分派的实现）也因再无
+> 调用方而删除。**本文的结论「跨通道顺序假设是 P0」因此是被正面解决的**，而不是被
+> 兜住的——这正是那份自愈网当初要掩盖的问题。详见
+> [`docs/archive/streaming-chain-review-2026-09-22.md`](../archive/streaming-chain-review-2026-09-22.md) §7.1。
 
 ---
 

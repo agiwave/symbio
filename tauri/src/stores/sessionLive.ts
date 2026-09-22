@@ -37,8 +37,8 @@ export interface SessionLiveStatus {
    * 最近一次"状态写入"的本地时间（毫秒）。
    *
    * 注意：
-   * - 写入来源是**节点状态**，不是事件：会话节点的 VDFS 变更（`applySessionNode`）
-   *   与消息节点的变更（`transcriptStream`），以及 send / resume 的乐观置位。
+   * - 写入来源是**节点状态**，不是事件：转写流的两类帧（消息帧与
+   *   `transcript_session` 运行态帧，共用 `seq` 空间），以及 send / resume 的乐观置位。
    * - `putStatus` 内部每次都会**自动更新**此字段（避免漏写）；
    *   `applyTranscriptMessage` 只在产生 assistant 文本预览时同步更新。
    * - 若需判断"状态是否过期"，请使用 `getSessionStaleReason()` 而不是直接读此字段。
@@ -207,14 +207,15 @@ export function workdirOf(it: SessionListItem): string | undefined {
  * ## 它补的是哪个窟窿
  *
  * 消息流里的等待提示原先只有**一个**触发点：`TurnGroupNode` 的「Turn 节点已到、
- * 尚无子节点」。这要求 Turn 节点**先于**任何内容到达前端——而 Turn 节点也是一条
- * VDFS 变更，而变更**不重放**（`session/docs/node-state-streaming.md` §4.0）。
- * 一旦这条 `created` 丢了、或比首个子节点晚到，用户看到的就是：点了发送之后
- * **什么都没有发生**，直到第一个 token 落地。
+ * 尚无子节点」。这要求 Turn 节点**先于**任何内容到达前端——而两者是同一会话里
+ * 相邻的两帧（转写流，批次 E 起还共用同一个 `seq` 空间），首帧丢失只会靠
+ * **跳号 ⇒ 整份重读**补回来，中间那段空窗期没有任何东西可看。
+ * 于是用户看到的就是：点了发送之后**什么都没有发生**，直到重读落地或第一个 token 到达。
  *
  * 「会话在跑」是**会话节点**的属性（`status === working`），与「Turn 节点到没到」
  * 是两件事。于是这里给出第二个来源：**会话在跑，而流里没有任何在途节点**。
  * 两个来源天然互斥——有在途节点时 Turn 骨架必然已显示，于是同一时刻只会出现一条。
+ * （它是**兜底**，不是主路径：主路径是 Turn 节点自己把骨架画出来。）
  *
  * ## 判据为什么要排除「空壳节点」
  *

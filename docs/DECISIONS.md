@@ -566,12 +566,16 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
 
 **状态**：已接受
 
-> **当前状态**：**已实现（现行，含 S22 补完）**。会话域**只剩** `kind = "vdfs"` 一条实时频道，
-> 按**地址**分派（`schemas/vdfs.ts::sessionRouteOf`）；`services/sessionBusWatcher.ts`
-> 与 `eventBus` 的防乱序缓冲已删除。进程内消费者（子智能体转播、CLI）同样改订阅 VDFS 变更，
-> 因此 `kind = "session"` 频道已连同 `KIND_SESSION` 常量一并废除（`event_bus` 只剩
-> `system` / `vdfs` 两个频道，退化为纯传输层）。详见
-> [`symbio/src/plugins/session/docs/node-state-streaming.md`](../symbio/src/plugins/session/docs/node-state-streaming.md)。
+> **当前状态**：**已实现（现行，含 S22 补完；S25 调整了传输载体）**。会话域的实时面
+> 收在 `session/stream` **一条**转写流上（`PluginPayload::Session`，不是 `event_bus`）：
+> 消息帧与运行态帧**共用同一个 `seq` 空间** ⇒ 顺序由结构保证。`kind = "vdfs"` 频道
+> 仍在，但只承载会话**资源**变更（创建 / 删除 / 改名 / 标题 / metadata），收敛方式为
+> 幂等重拉。`services/sessionBusWatcher.ts`、`eventBus` 的防乱序缓冲、以及「按地址分派」
+> 的实现（`schemas/vdfs.ts::sessionRouteOf`）均已删除——**本 ADR 的结论（显示由节点
+> 状态驱动）不变，改的只是节点状态怎么送到前端**。进程内消费者（子智能体转播、CLI）
+> 同样改订阅这条流，因此 `kind = "session"` 频道已连同 `KIND_SESSION` 常量一并废除
+> （`event_bus` 只剩 `system` / `vdfs` 两个频道，退化为纯传输层）。详见
+> [`symbio/src/plugins/session/docs/node-state-streaming.md`](../symbio/src/plugins/session/docs/node-state-streaming.md) §5.1 与 §11。
 
 **背景**：
 会话的实时显示原先基于**事件流**：`kind = "session"` 上发 `Status{busy|idle}` / `Abort` /

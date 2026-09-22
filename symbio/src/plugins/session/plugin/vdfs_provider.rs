@@ -474,8 +474,10 @@ impl vdfs::VdfsProvider for SessionPlugin {
         self.save_session(&session)
             .await
             .map_err(vdfs::from_plugin_error)?;
-        // 带节点视图：标题 / 元数据的变更就地收敛（消费方零回读）
-        self.notify_session_state(path).await;
+        // 资源变更（标题 / metadata）走粗粒度信号：消费方重拉清单收敛。
+        // 不带节点视图——会话叶子的节点快照只有转写流（有序）与 `list` / `stat`
+        // （回读）两个来源，见 `plugin::notify_change`。
+        self.notify_change(path, vdfs::VDFS_CHANGE_UPDATED);
         Ok(vdfs::VdfsWriteResponse {
             path: path.to_string(),
             created: false,

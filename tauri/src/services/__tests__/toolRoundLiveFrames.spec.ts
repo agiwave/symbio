@@ -59,6 +59,7 @@ vi.mock('@/utils/logger', () => ({
 import { useSessionsStore } from '@/stores/sessions'
 import {
   applyNodeEvent,
+  applySessionStateFrame,
   flushPendingFrames,
   handleStreamFrame,
   startTranscriptStream,
@@ -87,6 +88,7 @@ function storeSink(): TranscriptStreamSink {
   const store = useSessionsStore()
   return {
     messages: (sid, ms) => store.applyTranscriptMessages(sid, ms),
+    applySessionState: (sid, node) => store.applySessionState(sid, node),
     reload: async (sid) => {
       await store.loadMessages(sid)
     },
@@ -99,16 +101,22 @@ function spySink() {
   const reloaded: string[] = []
   /** 每一次 `messages` 调用 = 一次提交（合帧的收益就落在这个长度上） */
   const batches: Array<{ sid: string; ids: string[] }> = []
+  /** 会话运行态帧的落地（`{ sid, status }`，按到达顺序） */
+  const states: Array<{ sid: string; status: string }> = []
   const sink: TranscriptStreamSink = {
     messages: (sid, ms) => {
       batches.push({ sid, ids: ms.map((m) => m.id) })
       for (const m of ms) calls.push(`message:${sid}:${m.id}`)
     },
+    applySessionState: (sid, node) => {
+      states.push({ sid, status: node.status ?? '' })
+      calls.push(`session:${sid}:${node.status ?? ''}`)
+    },
     reload: (sid) => {
       reloaded.push(sid)
     },
   }
-  return { sink, calls, reloaded, batches }
+  return { sink, calls, reloaded, batches, states }
 }
 
 beforeEach(() => {
@@ -343,6 +351,119 @@ describe('顺序判定与恢复（丢帧可检测）', () => {
     feed({ session_id: 'a', seq: 2, message: { id: 'm3' } })
     expect(spy.calls).toEqual(['message:a:m1', 'message:b:m2', 'message:a:m3'])
     expect(spy.reloaded).toEqual([])
+  })
+})
+
+/**
+ * 会话运行态帧（`transcript_session`）—— 它与消息帧**共用一个 `seq` 空间**。
+ *
+ * 这一组钉住的是**那条结构性保证**：运行态帧到达时，同会话里 `seq` 更小的消息帧
+ * 必然已在本地队列中，因此本层**先冲刷它们**再交付节点视图。落地目标据此可以断言
+ * 「本轮转写已完整」——原先这条推理不成立（运行态走 VDFS、消息走本流，两条通道
+ * 的到达顺序只是调度巧合），上层被迫挂宽限复查兜底。
+ *
+ * 同时钉住"共用一个计数器"的两个直接后果：混合到达不触发跳号；运行态帧的跳号
+ * 同样触发整份重读。
+ */
+describe('会话运行态帧（与消息帧共用一个 seq 空间）', () => {
+  /** 与 `sessionNodeSync` 无关：这里只要一个形状合法的节点视图 */
+  const node = (status: string) => ({ path: `${SID}`, name: SID, status }) as never
+
+  function wire(sink: TranscriptStreamSink): void {
+    void startTranscriptStream(sink)
+  }
+
+  it('到达时**先**冲刷同会话的待落地消息帧，再交付节点视图', () => {
+    const spy = spySink()
+    wire(spy.sink)
+
+    // 两条消息帧进了合帧窗口，尚未提交
+    applyNodeEvent({ session_id: SID, seq: 1, message: { id: 'm1' } })
+    applyNodeEvent({ session_id: SID, seq: 2, message: { id: 'm1', delta: 'x' } })
+    expect(spy.batches, '未到窗口：还在队列里').toEqual([])
+
+    // 运行态帧到达（seq 更大 ⇒ 上面两条必然已到）
+    applySessionStateFrame({ session_id: SID, seq: 3, node: node('active') })
+
+    // 顺序就是保证本身：消息先落地，然后才是"会话不忙"
+    expect(spy.calls).toEqual(['message:sess1:m1', 'message:sess1:m1', 'session:sess1:active'])
+    expect(spy.batches, '冲刷是**按会话**的：只落地这一个会话').toEqual([
+      { sid: SID, ids: ['m1', 'm1'] },
+    ])
+    expect(spy.reloaded).toEqual([])
+  })
+
+  it('按会话冲刷：别的会话的待落地帧留在队列里', () => {
+    const spy = spySink()
+    wire(spy.sink)
+
+    applyNodeEvent({ session_id: 'a', seq: 1, message: { id: 'ma' } })
+    applyNodeEvent({ session_id: 'b', seq: 1, message: { id: 'mb' } })
+    applySessionStateFrame({ session_id: 'a', seq: 2, node: node('active') })
+
+    expect(spy.batches).toEqual([{ sid: 'a', ids: ['ma'] }])
+    // b 仍在队列里：运行态帧只对**它自己那个会话**给出"已完整"
+    flushPendingFrames()
+    expect(spy.batches).toEqual([
+      { sid: 'a', ids: ['ma'] },
+      { sid: 'b', ids: ['mb'] },
+    ])
+  })
+
+  it('两种帧共用一个游标：混合到达不触发跳号', () => {
+    const spy = spySink()
+    wire(spy.sink)
+
+    applySessionStateFrame({ session_id: SID, seq: 1, node: node('working') })
+    applyNodeEvent({ session_id: SID, seq: 2, message: { id: 'm1' } })
+    applySessionStateFrame({ session_id: SID, seq: 3, node: node('active') })
+
+    expect(spy.reloaded, '共用一个计数器 ⇒ 不存在"另一条流的号"').toEqual([])
+    expect(spy.calls).toEqual(['session:sess1:working', 'message:sess1:m1', 'session:sess1:active'])
+  })
+
+  it('运行态帧的跳号同样触发整份重读，且本帧不落地', () => {
+    const spy = spySink()
+    wire(spy.sink)
+
+    applySessionStateFrame({ session_id: SID, seq: 1, node: node('working') })
+    applyNodeEvent({ session_id: SID, seq: 2, message: { id: 'm1' } })
+    // 3 丢了：运行态帧带 4 到达 ⇒ 与消息帧**同一条恢复路径**（同一段 `advanceSeq`）
+    applySessionStateFrame({ session_id: SID, seq: 4, node: node('active') })
+
+    expect(spy.calls, '跳号帧本身不落地').toEqual(['session:sess1:working'])
+    expect(spy.batches, '重读前丢弃待落地帧（理由同消息帧的跳号分支）').toEqual([])
+    expect(spy.reloaded).toEqual([SID])
+  })
+
+  it('重复的运行态帧被丢弃（状态是幂等的，重复应用只会重复副作用）', () => {
+    const spy = spySink()
+    wire(spy.sink)
+
+    applySessionStateFrame({ session_id: SID, seq: 1, node: node('working') })
+    applySessionStateFrame({ session_id: SID, seq: 1, node: node('working') })
+
+    expect(spy.calls).toEqual(['session:sess1:working'])
+    expect(spy.reloaded).toEqual([])
+  })
+
+  it('未携带节点视图 → 丢弃并留痕，但**水位照常推进**（不制造假跳号）', () => {
+    const spy = spySink()
+    wire(spy.sink)
+
+    applySessionStateFrame({ session_id: SID, seq: 1, node: undefined as never })
+    // 载荷不合法不等于"这一帧没占号"：下一帧若被误判跳号，就会白跑一次整份重读
+    applyNodeEvent({ session_id: SID, seq: 2, message: { id: 'm1' } })
+    flushPendingFrames()
+
+    expect(spy.calls).toEqual(['message:sess1:m1'])
+    expect(spy.reloaded).toEqual([])
+  })
+
+  it('未接线时运行态帧被丢弃（无落地目标，不抛错）', () => {
+    expect(() =>
+      handleStreamFrame({ type: 'transcript_session', data: { session_id: SID, seq: 1, node: node('active') } }),
+    ).not.toThrow()
   })
 })
 

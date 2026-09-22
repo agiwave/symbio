@@ -6,6 +6,7 @@ use super::*;
 use crate::symbio_core::schemas::session::chat_message::{
     MessageContent, MessageRole, MessageStatus, MessageType,
 };
+use crate::symbio_core::vdfs_provider::{VDFS_STATUS_ACTIVE, VDFS_STATUS_WORKING};
 
 /// 一条带正文的完整消息（`content` = 整条替换）。
 fn text_msg(id: &str, status: MessageStatus, text: &str) -> cm::ChatMessage {
@@ -26,6 +27,17 @@ fn delta_msg(id: &str, delta: &str) -> cm::ChatMessage {
         delta: Some(delta.to_string()),
         ..Default::default()
     }
+}
+
+/// 一个形状合法的**会话节点视图**（运行态帧的载荷）。
+fn state_node(status: &str) -> VdfsNode {
+    let mut n = VdfsNode::file(
+        "s1",
+        "s1",
+        crate::symbio_core::vdfs_provider::VdfsAccess::READ_WRITE,
+    );
+    n.status = status.to_string();
+    n
 }
 
 /// 删除帧。
@@ -344,5 +356,45 @@ fn clear_and_persisted_flush_the_trailing_run() {
         tr.delta_log.flush(),
         None,
         "persisted（落库回执）应冲刷最后一段"
+    );
+}
+
+/// 会话运行态帧与消息帧**共用同一个 `seq` 计数器**——批次 E 的全部机制。
+///
+/// 这条断言看起来平凡（"多占一个号"），但它就是「会话不忙 ⇒ 本轮节点已终态」
+/// 的**唯一**依据：消费端读到的 `seq` 必须等于「这一帧在流里的位置」。
+/// 若运行态帧另起一个计数器、或干脆不占号，那条推理立刻失效——
+/// 而失效方式是**静默的**（少一次终态收敛，没有任何报错，只有 UI 一直转）。
+#[test]
+fn session_state_frames_share_the_message_seq_counter() {
+    let mut tr = Transcript::new("s1".into());
+    tr.apply(text_msg("a", MessageStatus::Streaming, "你"));
+    tr.emit_session_state(state_node(VDFS_STATUS_WORKING));
+    tr.apply(delta_msg("a", "好"));
+    tr.emit_session_state(state_node(VDFS_STATUS_ACTIVE));
+
+    assert_eq!(
+        tr.seq, 4,
+        "2 条消息 + 2 条运行态 = 4：运行态帧必须从消息帧那个计数器取号"
+    );
+}
+
+/// 运行态帧**不碰消息图**：它只取号 + 发布，图上一条消息都不动。
+///
+/// 反过来的写法（把运行态也塞进 `apply`）会让「一条消息」这个帧语义失守：
+/// 消费端将面对两种形状的 `message`，正是 S24 收掉操作枚举时要根除的东西。
+#[test]
+fn session_state_frame_does_not_touch_the_message_graph() {
+    let mut tr = Transcript::new("s1".into());
+    tr.apply(text_msg("a", MessageStatus::Completed, "你好"));
+    let before = tr.snapshot().len();
+
+    tr.emit_session_state(state_node(VDFS_STATUS_ACTIVE));
+
+    assert_eq!(tr.snapshot().len(), before, "运行态帧不得往消息图里加节点");
+    assert_eq!(
+        tr.get("a").and_then(|m| m.status),
+        Some(MessageStatus::Completed),
+        "既有节点的状态也不得被运行态帧改写（状态只有一个来源）"
     );
 }

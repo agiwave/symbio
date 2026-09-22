@@ -18,6 +18,91 @@
 
 ***
 
+## 2026-09-22: 会话运行态并入转写流 —— 删掉第二条实时通道，把「不忙 ⇒ 已终态」变成结构保证（批次 E）
+
+**问题**：实时面有**两条通道**——消息走 `worker/session/stream`（`transcript_stream`
+的 `mpsc`，容量 2048），会话运行态走 `kind = "vdfs"`（`event_bus` 的 `mpsc`，容量
+4096），各有独立泵任务。于是「会话报不忙」**推不出**「本轮消息节点都已收到终态帧」
+——两者只是两个任务的调度顺序。失败症状是**静默**的：某个节点永远停在 `streaming`
+（前端显示"运行中"，下一次发送还会把它当成"已有在途节点"），而没有任何机制会纠正。
+此前靠一张兜底网（`reconcileTranscript`：宽限 300ms 复查，仍不收敛就整份回读）压住，
+但那是症状治疗——每轮收尾挂一个定时器，真的乱序时每轮一次全量转写读取。
+
+**改动**：让运行态帧与它那一轮的消息**从同一个计数器取号、走同一条流**。
+`seq` 的唯一分配点是 `Transcript`，因此运行态帧必须在那里取号：
+
+```
+Transcript::emit(msg)                → seq = n    → publish_frame
+Transcript::emit_session_state(node) → seq = n+1  → publish_session_state
+```
+
+两者走**同一个扇出**（同一张订阅表、同一条 `mpsc`），于是「单通道保序 + `seq` 严格
+递增」直接给出：**读到 `status != working` 的那一帧 ⇒ 所有 `seq` 更小的帧（含本轮
+全部终态帧）都已在其之前被应用**。这是传输层的保证，不是发送端的调用顺序——
+兜底网随之**整体删除**（不是被更强的网替代，而是它要补的缺口不再存在）。
+
+**顺带收掉的一处陷阱**：VDFS 侧**不再携带会话节点快照**。`notify_session_state`
+（带 `node` 的 `updated`）删除，三处资源变更调用点改走 `notify_change` 的粗粒度信号。
+理由是**快照的来源必须有序或幂等**：转写流（有序）与 `list` / `stat`（幂等回读）都满足，
+VDFS 变更是一条独立无序通道——在它上面捎带快照，消费端一旦照单应用 `status`，
+一次**迟到的改名**就能把运行态回退（自动命名发生在轮次中，快照说 `working`，
+而转写流早已报 `finished` ⇒ 角标永远转）。这不是"留着但别读那个字段"，而是直接删除：
+一个"看起来权威、实际必须忽略"的字段正是本仓库反复否决的那类陷阱。
+（至此 `VdfsChange.node` / `.content` / `.delta` 在**生产代码里已无任何生产者**，
+只剩测试构造。已在 `symbio_core/vdfs_provider.rs` 的 `VdfsChange` 文档与
+`docs/design/vdfs.md` 的词汇表**明写**这一点——一个「看起来权威、实际必须忽略」的
+能力留在文档里同样危险。删除属"信封瘦身"，会动 `docs/design/vdfs.md` 的对外形状与
+`useVdfs.ts` 的 `appended` 分支（同样已无生产者），**值得单开一批**，与 F 无关。）
+
+**改动落点**：
+
+| 层 | 改动 |
+|---|---|
+| `symbio_core/transcript_stream.rs` | 新增 `SessionStateEvent` / `SESSION_TYPE` / `session_state_of` / `publish_session_state`；`encode` 与 `fan_out` 与消息帧共用 |
+| `session/transcript.rs` | 新增 `Transcript::emit_session_state(node)`——从消息帧那个计数器取号 |
+| `session/orchestrator/broadcast.rs` | 第 2 步由"发 VDFS 变更"改为"发转写流帧"；先取节点视图（会话已删则静默返回） |
+| `session/plugin.rs` | 新增 `session_node_of`（节点视图的单一构造点）；删除 `notify_session_state` |
+| `session/plugin/nodes.rs` | 删除 `session_change`（连带其单测） |
+| 前端 `services/transcriptStream.ts` | 新增 `transcript_session` 分派；`advanceSeq` 为**两种帧共用**的缺口检测；`flushPendingFrames(sessionId?)` 支持按会话冲刷；删除 `reconcileTranscript` |
+| 前端 `stores/sessions.ts` | `applySessionNode(id, change)` → `applySessionState(id, node)`；删除 `RECONCILE_GRACE_MS` / `reconcileTimers` / `scheduleReconcileTranscript` |
+| 前端 `stores/sessionNodeSync.ts` | 只留粗粒度收敛（`deleted` 即时移除，其余防抖重拉） |
+| CLI `client.rs` / `main.rs` | `Frame` 改为 `Transcript` / `Session` / `Resync`；删 event_bus 订阅与整套 watch 簿记；消息与运行态共用一个 `advance_seq` |
+| `agent/host/subagent.rs` | 删 `bus_rx` / `register_subscriber` / 两个 watch 地址；`stream_relay_bridge` 11 参 → 9 参 |
+
+**前端的顺序细节**：运行态帧**不走合帧窗口**（批次 C 的 48ms）。它到达时先
+`flushPendingFrames(sid)` 再交付节点视图——同会话里 `seq` 更小的消息帧必然已在本地
+队列中，让运行态帧等满一个窗口等于人为制造「后端已报空闲、本地转写仍非终态」的窗口。
+攒批省下的一次提交，远不值这条结构性保证。（冲刷是**按会话**的。）
+
+**收尾（同一批次，随 E 一并提交）**：
+
+- **删除按地址分派的死实现**：`schemas/vdfs.ts` 的 `sessionRouteOf` + `SessionRoute`
+  类型。它是「消息走 `kind = "vdfs"`」时代的解法（把变更地址解成
+  `session` / `messages` / `message` 三种目标），消息与运行态都改走转写流之后
+  **生产代码零调用、测试零引用**——`architecture-health-check-2026-09.md` 的 F-7
+  早就把它列为死导出。留着它等于把一套**已废除的模型**留在库里等人重新采用。
+- **修正对外接入指南**：`docs/design/http-api-transport.md` §5.3 是**第三方接入指南**，
+  在 E 之后已经与实现不符——它还在教外部调用方「订阅 `event_bus/subscribe` +
+  `vdfs/watch` 看流式输出」。实际流式信源自 E 起是 `session/stream` 的 Session 通道，
+  VDFS 只剩会话**资源**变更。该节整段改写（含帧样例、`seq` 语义、新旧对照）。
+  这比 F 批原本的任何一项都重要：它是对外契约的**错**，而不只是不统一。
+- **文档现状校正**：`node-state-streaming.md` §5.1（前端消费模型整节重写：
+  两条输入、一条保序一条幂等）、§4.3（S25 后记）、`vdfs-session-messages.md`（S25 续）、
+  `DECISIONS.md` ADR-015 的「当前状态」块、`vdfs_provider.rs` 的 `VdfsChange` 文档
+  （补「三类可选载荷当前无生产性生产者」）、`docs/design/vdfs.md`（同一条脚注，
+  并让词汇表里那句「见下方注」真正指得到）、`DATA_FLOW.md` / `vdfs-frontend.md` /
+  `streaming-chain-review-2026-09.md` 的过时表述。
+- **F 批二次复核，维持未做**：见 `docs/archive/streaming-chain-review-2026-09-22.md` §7.1
+  ——两条子项（信封改单层 tag / 短键名）逐条否决：前者要让**运输层**认识**协议层**的
+  判别值（反向耦合），后者收益被 C 批合帧摊薄且牺牲日志可读性；「更值得做的那条」
+  （批处理）C 批已做。
+
+**验证**：`cargo test --lib` 915（+4 / −1）｜前端 vitest 687（46 文件）+ `vue-tsc` 干净｜
+e2e 11/11（T9 新增断言：两种帧混在一起 `seq` 逐帧 +1，且**收尾帧的 `seq` 大于本轮
+全部消息帧**）。
+
+***
+
 ## 2026-09-22: 提交脚本的前置检查看错了对象 —— 工作区脏而索引为空时会白跑一遍门禁
 
 **问题**：`scripts/commit.mjs` 的前置检查是 `if (!status.out) die('没有可提交的改动')`，

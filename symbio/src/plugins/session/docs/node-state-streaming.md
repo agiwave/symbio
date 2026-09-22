@@ -7,28 +7,35 @@
 > 本文回答一个问题：**会话的"正在发生什么"如何只由节点状态表达**，
 > 使前端不再消费任何事件序列，从而**不存在事件顺序问题**。
 >
-> **状态：S16–S22 已完成；S23 消息实时面改为单条转写流；S24 帧收成「一条消息」。**
+> **状态：S16–S22 已完成；S23 消息实时面改为单条转写流；S24 帧收成「一条消息」；
+> S25 会话运行态并入同一条流（批次 E）。**
 > 另有 **§10（批次 K）**：转写核心日志的**分级与折行**——**骨架**（出现 / 终态 /
 > 等待用户 / 删除）进 `INFO`，**细节**（`Update` 帧与其纯增量的折行统计）进 `DEBUG`；
 > 只动日志，`seq` 与发布仍逐帧（不变量 #28）。
 >
 > - **读面**（历史）走 VDFS：`read(<根>/session/<sid>)` 一次拿整份历史，地址与 §2.1 一致。
-> - **实时面**（消息）是 `worker/session/stream` **一条流**，**每帧就是一条
->   `ChatMessage`**（`{ session_id, seq, message }`）+ 会话内单调 `seq`，由
->   `symbio_core::transcript_stream` 发布；消费者是前端
+> - **实时面**是 `worker/session/stream` **一条流**，两种帧**共用一个 `seq` 计数器**：
+>   - `transcript_event`：**每帧就是一条 `ChatMessage`**（`{ session_id, seq, message }`）。
+>     **帧里没有独立的操作枚举**——`delta` 追加 / `content` 整条替换 /
+>     `status = removed` 就地移除 / 其余字段合并，语义全在字段上（S24 收掉了 S23 的
+>     `NodeOp` / `NodeChange`）。
+>   - `transcript_session`：**会话节点的全量视图**（`{ session_id, seq, node }`，S25）。
+>   由 `symbio_core::transcript_stream` 发布；消费者是前端
 >   （`services/transcriptStream.ts`）、子智能体转播（`agent/host/subagent.rs`）
->   与 CLI（`cli/src/client.rs`）。**帧里没有独立的操作枚举**——`delta` 追加 /
->   `content` 整条替换 / `status = removed` 就地移除 / 其余字段合并，语义全在字段上
->   （S24 收掉了 S23 的 `NodeOp` / `NodeChange`）。**旧的 `kind = "session"` 事件频道
+>   与 CLI（`cli/src/client.rs`）。**旧的 `kind = "session"` 事件频道
 >   （`Status` / `Update` / `Delete` / `Error` / `Abort`）已整体废除。**
-> - **会话运行态**仍走 VDFS（会话**叶子节点**，消费者 `stores/sessionNodeSync.ts`）。
+> - **会话运行态**也在这条流上（S25）：它必须与它那一轮的消息**共用 `seq` 空间**，
+>   否则「会话不忙 ⇒ 本轮节点已终态」不成立。**VDFS 变更通道只承载资源信号**
+>   （创建 / 删除 / 改名 / 标题），**不携带会话节点快照**——快照只有两个来源：
+>   这条流（有序）与 `list` / `stat`（回读）。
 >
-> ⚠️ **§3.2 / §4 / §5 描述的是 S16–S22 的「VDFS 变更」模型**（`created` / `appended` /
-> `updated` / `deleted` / `truncated`，消费端 `services/vdfsTranscriptSync.ts`）。
-> 那个文件**已被删除**，消息不再走 VDFS 变更——这几节保留为**设计推导的历史记录**，
-> 实时面的权威描述在 `symbio_core/transcript_stream.rs` 与
-> `services/transcriptStream.ts` 的模块文档里。**仍然有效**的是：§2（节点分类 / 状态机）、
-> §5.3（工具调用三段式）、§6 的 S20–S24 各阶段、§7（体验清单）、§8（不变量）。
+> ⚠️ **§3.1 / §3.2 / §4 / §5 描述的是 S16–S22 的「VDFS 变更」模型**（`created` /
+> `appended` / `updated` / `deleted` / `truncated`，消费端
+> `services/vdfsTranscriptSync.ts`）。那个文件**已被删除**，消息不再走 VDFS 变更，
+> 会话运行态也不再走（S25）——这几节保留为**设计推导的历史记录**，实时面的权威描述
+> 在 `symbio_core/transcript_stream.rs` 与 `services/transcriptStream.ts` 的模块文档里。
+> **仍然有效**的是：§2（节点分类 / 状态机）、§5.3（工具调用三段式）、§6 的 S20–S25
+> 各阶段、§7（体验清单）、§8（不变量）、§11（批次 E）。
 >
 > §1 的"现状"表同样是当时的问题清单，不是今天的描述。
 
@@ -254,38 +261,61 @@ attributes.error   = "<面向用户的错误短消息>"              // 仅 fail
 > 因此 `appended` 的顺序链（`vdfsTranscriptSync::enqueue`）**保留**——它是增量语义的
 > 固有属性，不是顺序假设的残留。删的是「全局状态顺序」这一类依赖。
 
+> **S25 后记（批次 E）**：本节描述的「同一地址上的变更串成顺序链」是 S20–S24 的
+> 形态——那时消息仍走 `kind = "vdfs"` 的 `appended` 增量，`vdfsTranscriptSync`
+> 是它的消费端。批次 E 把会话域实时面整体收进 `session/stream` 一条流之后：
+> **前端不再有增量帧**（`transcript_event` 带的是整条 `ChatMessage`），
+> `vdfsTranscriptSync` 与其 `enqueue` 顺序链、`VDFS_CHANGE_APPENDED` 分支一并
+> 不复存在；VDFS 上只剩**资源**的粗粒度变更，收敛方式统一为防抖重拉清单
+> （幂等 ⇒ 无序无害）。**结论不变的部分**：`appended` 的顺序链仍是增量语义的
+> 固有属性——只是会话域现在没有增量了，这条结论由其他追加型资源（日志等）继承。
+
 ---
 
 ## 5. 前端消费模型
 
-### 5.1 按**地址**分派，不按事件类型
+### 5.1 两条输入：一条**保序**，一条**幂等**
+
+S25（批次 E）之后前端只有两个输入：
 
 ```text
-kind = "vdfs" 变更
+session/stream（转写流：单通道、会话内单调 seq）
       │
       ▼
-  sessionRouteOf(path)      ← 纯函数（`schemas/vdfs.ts`）：地址 → 本域目标，可单测
+  handleStreamFrame(frame)          ← `services/transcriptStream.ts`
       │
-      ├─ <根>/session/<sid>            → sessions.applySessionNode(id, change)
-      ├─ <根>/session/<sid>/消息       → transcriptSync.clearTranscript(id)
-      ├─ <根>/session/<sid>/消息/<mid> → transcriptSync.applyMessageNode(id, mid, change)
-      └─ 其余地址（清单目录 / 子会话 / 工作目录 / 其他资源） → 不是本域的事，跳过
+      ├─ type = transcript_event   → 消息帧：进合帧窗口 → sink.applyMessageBatch
+      ├─ type = transcript_session → 运行态帧：先 flushPendingFrames(sid)
+      │                              → sink.applySessionState(sid, node)
+      └─ type = transcript_resync  → 背压标记：丢本地缓存、整份回读
+
+kind = "vdfs" 变更（**独立无序通道**）
+      │
+      ▼
+  subscribeVdfsChanged({ prefix: <根>/session, directChildren: true })
+      │                              ← `stores/sessionNodeSync.ts`
+      ├─ deleted                    → sink.removeSessionLocal(id)   （即时）
+      └─ created / updated / renamed → 防抖重拉清单                  （800ms）
 ```
 
-**没有 `switch (event.type)`**——那是"按事件分派"，顺序敏感；
-这里是"按地址分派"，每个地址只认自己的状态。
+**为什么不再需要「按地址分派」**：那一套（`sessionRouteOf`：地址 → `session` /
+`messages` / `message` 三种目标）是消息走 `kind = "vdfs"` 时的解法——它让消费端
+**不依赖顺序**。批次 E 换了个解法：两种帧都携带**全量节点视图**、共用**同一个
+`seq` 空间**、走**同一条通道** ⇒ 顺序由结构保证，状态本身幂等，消费端同样不必
+记历史。（`sessionRouteOf` 因此再无调用方，S25 一并删除。）
 
-实现上落在**两个订阅作用域**（`eventBus.subscribeVdfsChanged`）：
+这条换法只对**状态**成立：增量帧（`appended`）不可能不依赖顺序。所以会话域
+现在**没有增量帧**——消息帧带的是整条 `ChatMessage`（`delta` 由接收端累加，
+`content` 整条替换）。热路径的代价从「解地址」变成「多带一点载荷」，换掉的
+是一条跨通道顺序假设。
 
-| 作用域 | 消费者 | 负责的地址 |
-|---|---|---|
-| `<根>/session`，`directChildren` | `stores/sessions.ts` | 会话叶子（清单 + 运行态） |
-| `<根>/session`，整棵子树 | `services/vdfsTranscriptSync.ts` | 转写列表与列表项 |
+VDFS 那条通道上剩下的是**资源**变更（创建 / 删除 / 改名 / 标题 / metadata），
+它们发生在**没有在途轮次**时，拿不到 `seq`，因此必须留在这里；收敛方式统一为
+**重拉清单**（幂等 ⇒ 无序无害），`updated` 的载荷不再被解读（见
+`stores/sessionNodeSync.ts` 模块文档「为什么这里的变更不带节点快照」）。
 
-两者**互不重叠**：会话叶子只归 store（那是它的状态），转写只归 transcriptSync。
-重叠会让同一条消息被写两次——流式文本逐词叠字，是这条设计要防的那类回归。
-「一个消费端」指的是**一套分派规则**（`sessionRouteOf` + 作用域判定），
-而不是"只能有一个订阅者"。
+两个消费者**互不重叠**：会话叶子的**运行态**只归转写流的运行态帧，**资源**只归
+VDFS 订阅，**转写**只归转写流。重叠会让同一份状态被写两次。
 
 ### 5.2 状态 → 视图，不做推断
 
@@ -421,12 +451,12 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
 |---|---|
 | `session/plugin/nodes.rs` | `message_status` 不再坍缩 `completed`；新增 `SessionRuntime`（含 `from_state` 单一投影入口）+ `session_node(s, runtime)`（运行态投影到 `status` / `attributes.outcome` / `attributes.error`）+ `session_change` |
 | `session/active.rs` | `ActiveSessionStateInner` 增加 `last_outcome: Option<String>`、`last_error: Option<String>` |
-| `session/orchestrator/broadcast.rs` | `broadcast_status(status)` → `emit_session_state(SessionStateChange)`：写运行态 → 发**带 `node` 载荷**的会话节点 `updated`；不再广播 `Status` 帧（旧事件频道已随 S22 整体废除） |
+| `session/orchestrator/broadcast.rs` | `broadcast_status(status)` → `emit_session_state(SessionStateChange)`：写运行态 → 发**带 `node` 载荷**的会话节点 `updated`；不再广播 `Status` 帧（旧事件频道已随 S22 整体废除）。**S25 起第 2 步改走转写流，见 §11** |
 | `session/orchestrator/{consume,entry,orchestrator}.rs` | 全部改调 `emit_session_state` |
-| `session/plugin.rs` | `notify_change` 旁增 `notify_session_state`（带节点视图） |
+| `session/plugin.rs` | `notify_change` 旁增 `notify_session_state`（带节点视图）。**S25 起删除**：VDFS 侧只剩 `notify_change` 的粗粒度信号 |
 | `session/plugin/vdfs_provider.rs` | `is_working(id)` → `session_runtime(id)`（`list` / `stat` / 变更三处同源） |
 | 前端 `schemas/vdfs.ts` | 补状态词常量；`parseTranscriptPath` → `sessionRouteOf`（含会话叶子）；新增 `sessionRuntimeOf` / `chimeKindOfOutcome` |
-| 前端 `stores/sessions.ts` | `syncSessionNode`（回读）→ `applySessionNode`（**零回读**）：状态 / 结局 / 标题 / 错误就地收敛，状态迁移触发提示音；`last_failed` 布尔删除 |
+| 前端 `stores/sessions.ts` | `syncSessionNode`（回读）→ `applySessionNode`（**零回读**）：状态 / 结局 / 标题 / 错误就地收敛，状态迁移触发提示音；`last_failed` 布尔删除。**S25 起改名 `applySessionState` 并改由转写流驱动，见 §11** |
 | 前端 `services/vdfsTranscriptSync.ts` | 分派改 `sessionRouteOf`；`messageStatusOf` 不再把 `active` 猜回 `completed`（仅作旧数据别名） |
 | 前端 `components/ModelChatPanel.vue` | 错误条改由**节点表派生**（有失败节点则隐藏），不再在事件到达时判定 |
 | 前端 `services/sessionBusWatcher.ts` | **删除**（连同 `MainLayout.vue` 的接线） |
@@ -652,6 +682,14 @@ S20.3~S20.6 修的是**服务端**的状态收敛。本次处理的是同一类�
 故会话报"不忙"时服务端每个节点都已是终态且已落库。触发条件只在**有候选**时成立，
 正常运行路径零 IPC。
 
+> **S25 起这条判据从「跨通道的调用顺序」升级为「结构性保证」**：会话运行态帧与
+> 消息帧共用同一个 `seq` 计数器、走同一条 `mpsc`，因此「读到 `status != working`
+> 的帧」⇒「所有 `seq` 更小的帧都已在它之前应用」不再是发送端的调用顺序，
+> 而是**传输层给出的保证**。前端那条宽限复查（300ms）与整份回读随之**整体删除**
+> （§11）——不是被更强的网替代，而是它要补的那个缺口不再存在。
+> 上面这段「节点补丁恒先于会话状态下发」的**服务端**顺序要求仍然有效：
+> 它保证的是"会话报不忙时节点已终态"，与通道无关。
+
 ### S20.8 —— 压缩失败**不得裁剪历史**：失败必须是可见、可重试、可持久化的状态（本次）
 
 S20.6 把压缩失败做成了"可诊断 + 可熔断"，但漏了一处：**输入超限预判分支仍然会本地
@@ -772,13 +810,19 @@ S23 把消息实时面从「VDFS 变更」收成一条转写流，但帧仍带�
 8. **会话状态词只有三个**：`working` / `active` / `failed`——不为会话造 `pending` /
    `completed`（它没有"未开始"与"已结束"）。
 9. **失败是状态不是标志**：不再有 `last_failed` 布尔。
-10. **会话实时面两条通道，各归其域**：消息走 `session/stream` 转写流（**帧 = 一条消息**
-    ＋会话内单调 `seq`，见 `symbio_core::transcript_stream`），会话运行态走
-    `kind = "vdfs"` 的会话节点变更；旧事件频道（`kind = "session"`）已整体废除
-    ——**而不是**"前端不订、后端还发"。判断「本轮 / 子会话结束」看会话节点的
-    `status`（不再有 `Status idle` 帧可等），**不是**根 Turn 的终态（一轮里它会多次
-    定格）。前端（`services/transcriptStream.ts`）、CLI（`cli/src/client.rs`）与
-    子智能体转播（`agent/host/subagent.rs`）三处消费者都订阅这两条。
+10. **实时面一条流、一个 `seq` 空间**（S25 起）：消息（`transcript_event`）与会话运行态
+    （`transcript_session`）都走 `session/stream` 转写流，且**从同一个计数器取号**
+    （`Transcript::emit` / `Transcript::emit_session_state`，`seq` 的唯一分配点）。
+    因此「会话报不忙 ⇒ 本轮消息终态帧都已落地」是**结构性保证**，不是调度巧合
+    ——这正是 S20.7 ③ 那条自愈网（宽限复查 + 整份回读）得以删除的理由。
+    **VDFS 变更通道只承载资源信号**（创建 / 删除 / 改名 / 标题 / metadata），
+    且**不携带会话节点快照**：一条无序通道上的快照会与有序通道上的状态竞争
+    （一次迟到的自动命名就能把运行态回退成它自己那一刻的旧值）。
+    判断「本轮 / 子会话结束」看会话节点的 `status`（不再有 `Status idle` 帧可等），
+    **不是**根 Turn 的终态（一轮里它会多次定格）。旧事件频道（`kind = "session"`）
+    已整体废除——**而不是**"前端不订、后端还发"。前端
+    （`services/transcriptStream.ts`）、CLI（`cli/src/client.rs`）与子智能体转播
+    （`agent/host/subagent.rs`）三处消费者都订阅这条流。
 11. **ToolCall 的 `streaming` 覆盖执行窗口**：`finalize_assistant_turn` 不得提前定格；
     每个 ToolCall 都必须以终态收场（未执行者收口为 `Completed` +
     `meta.failure_kind = "not_executed"`），不得有节点停在 `Streaming`（§5.3.1）。
@@ -855,6 +899,10 @@ S23 把消息实时面从「VDFS 变更」收成一条转写流，但帧仍带�
     还是 `DEBUG`，`DeltaLogCoalescer` 只决定"要不要打这一行、打成什么样"（§10）。
     分级与折行是**可观测性**的取舍，不是协议的取舍——任何让 `seq` 跳号或让某帧
     不发布的"优化"都会破坏消费端的缺口检测（§4.1）。
+    **S25 起这条边界的单位从「每条消息帧」扩到「每一帧」**：会话运行态帧同样在
+    `Transcript` 里取号并发布（`emit_session_state`），且与消息帧走**同一个扇出**。
+    理由不是对称好看，而是不变量 #10 那条推理**要求** `seq` 等于"帧在流里的位置"
+    ——运行态帧若另起计数器或不占号，它就不再是一个可用的顺序锚点。
     骨架帧（出现 / 终态 / 等待用户 / 删除）**一律不可折行**：折行要保住的就是它们。
     首帧尤其不能折——`apply` 明确允许"未知 id 的增量帧自给自足"（§8 的帧自给自足），
     故首帧可能恰好是纯增量；它一旦被吞掉，时间线就缺掉一个节点的起点与 `seq`。
@@ -988,3 +1036,127 @@ S23 把消息实时面从「VDFS 变更」收成一条转写流，但帧仍带�
 
 骨架一眼看完：**谁出现、谁结束、`seq` 怎么排**。`INFO` 与 `DEBUG` 的差别**只在
 stderr 的行数**——`seq` 分配、帧发布、前端实时面一个字节都没变（不变量 #28）。
+
+---
+
+## 11. 批次 E：会话运行态并入转写流（已落地）
+
+### 11.1 问题：一条**推不出来**的结论
+
+S20 把会话运行态搬到了会话节点上，从此状态是幂等的全量视图、可丢可重放——这一半是
+对的。但它与消息走的是**两条通道**：运行态走 `kind = "vdfs"`（`event_bus` 的
+`mpsc`，容量 4096），消息走 `session/stream`（`transcript_stream` 的 `mpsc`，容量
+2048），各有一个泵任务。
+
+于是「会话报不忙」**推不出**「本轮消息节点都已收到终态帧」——两者只是两个独立任务
+的调度顺序，没有任何机制保证。失败症状是**静默**的：某个节点永远停在 `streaming`
+（前端显示"运行中"，下一次发送还会把它当成"已有在途节点"），而没有任何机制会纠正。
+
+S20.7 ③ 给它挂了一张兜底网（宽限 300ms 复查 + 仍不收敛就整份回读）。网是对的，
+但它是**症状治疗**：它把"无声失效"降级为"一次可观测的额外读取"，代价是**每轮
+收尾都要挂一个定时器**，且在真的乱序时每轮一次全量转写读取。
+
+### 11.2 改法：把结论变成结构
+
+> 让运行态帧与它那一轮的消息**从同一个计数器取号、走同一条流**。
+
+`seq` 的唯一分配点是 `Transcript`（`self.seq += 1`，`clear()` 也不复位 ⇒ 会话内
+跨轮单调）。运行态帧因此必须**在 `Transcript` 里取号**：
+
+```text
+Transcript::emit(msg)              → seq = n   → publish_frame
+Transcript::emit_session_state(node) → seq = n+1 → publish_session_state
+```
+
+两者走**同一个 `fan_out`**（同一个 `subs` 表、同一个 `mpsc`），于是单通道保序 +
+`seq` 严格递增直接给出：
+
+> 读到 `status != working` 的这一帧 ⇒ 所有 `seq` 更小的帧（含本轮全部终态帧）
+> **都已在其之前被应用**。
+
+这是**传输层的保证**，不是发送端的调用顺序。兜底网随之**整体删除**——不是被更强
+的网替代，而是它要补的那个缺口不再存在。
+
+### 11.3 为什么资源变更**留**在 VDFS（不是遗留）
+
+运行态帧需要 `seq`，而 `seq` 只在 `Transcript` 里分配。创建 / 删除 / 改名 / 标题 /
+metadata 覆盖这些变更**发生在没有在途轮次的时候**——此刻没有活跃转写可依附，
+拿不到号。这是**结构性理由**，不是"还没来得及搬"。
+
+因此分工是：
+
+| 会话叶子上变的东西 | 通道 | 粒度 |
+|---|---|---|
+| 运行态（`working` / 终态 / 结局 / 警告 / 错误） | 转写流 `transcript_session` | 带**全量节点视图**，与消息共用 `seq` |
+| 资源（创建 / 删除 / 改名 / 标题 / metadata） | VDFS `notify_change` | 只报"变了" |
+
+### 11.4 关键的一条：VDFS 侧**不再携带会话节点快照**
+
+`notify_session_state`（带 `node` 的 `updated`）**删除**，三处调用点改走
+`notify_change` 的粗粒度信号；`session_change()` 连同它的单测一并删除。
+
+理由是**快照的来源必须有序或幂等**：
+
+- 转写流的运行态帧——有序（同一个 `seq` 空间）；
+- `list` / `stat`——幂等回读。
+
+VDFS 变更是一条**独立的无序通道**。在它上面捎带快照，消费端一旦照单应用 `status`，
+一次**迟到的改名**就能把运行态**回退**：自动命名发生在轮次中，那一帧的快照说
+`working`，而转写流早已报 `finished` ⇒ 角标永远转。
+
+这不是假想：它正是"两条通道都携带同一份状态"的必然结果，只是原先两条通道**都**是
+VDFS（同一条有序通道），所以没暴露。把运行态搬到转写流之后，**任何**留在 VDFS 上的
+快照都会立刻变成跨通道竞争源。故一并删除，而不是"留着但消费端别读 `status`"
+——后者是一个"看起来权威、实际必须忽略"的字段，正是本仓库反复否决的那类陷阱。
+
+### 11.5 改动落点
+
+| 层 | 改动 |
+|---|---|
+| `symbio_core/transcript_stream.rs` | 新增 `SessionStateEvent` / `SESSION_TYPE` / `session_state_of` / `publish_session_state`；`encode` + `fan_out` 与消息帧共用 |
+| `session/transcript.rs` | 新增 `Transcript::emit_session_state(node)`——**从消息帧那个计数器取号** |
+| `session/orchestrator/broadcast.rs` | `emit_session_state` 第 2 步由"发 VDFS 变更"改为"发转写流帧"；先取节点视图（会话已删则静默返回） |
+| `session/plugin.rs` | 新增 `session_node_of`（节点视图的单一构造点）；**删除** `notify_session_state` |
+| `session/{handlers,orchestrator/entry,plugin/vdfs_provider}.rs` | 三处资源变更改走 `notify_change` |
+| `session/plugin/nodes.rs` | **删除** `session_change`（`VdfsChange.node` 至此再无生产性生产者） |
+| 前端 `services/transcriptStream.ts` | 新增 `transcript_session` 分派 + `advanceSeq`（**两种帧共用**的缺口检测）；`flushPendingFrames(sessionId?)` 支持**按会话冲刷**；**删除** `reconcileTranscript` |
+| 前端 `stores/sessions.ts` | `applySessionNode(id, change)` → `applySessionState(id, node)`；**删除** `RECONCILE_GRACE_MS` / `reconcileTimers` / `scheduleReconcileTranscript` |
+| 前端 `stores/sessionNodeSync.ts` | 只留 `deleted` / `created` / `renamed` / `updated` 的**粗粒度**收敛（后三者统一为防抖重拉） |
+| CLI `client.rs` / `main.rs` | `Frame` 改为 `Transcript` / `Session` / `Resync`；删 event_bus 订阅与整套 watch 簿记；消息与运行态**共用一个 `advance_seq`** |
+| `agent/host/subagent.rs` | 删 `bus_rx` / `register_subscriber` / 两个 watch 地址；`stream_relay_bridge` 11 参 → 9 参 |
+
+### 11.6 前端的顺序细节：运行态帧**不走合帧窗口**
+
+合帧（批次 C，48ms）是**纯性能**机制：把窗口内的**消息帧**攒成一批，一次 store 提交
++ 一次消息树重建。
+
+运行态帧**不参与合帧**：它到达时先 `flushPendingFrames(sid)` 再交付节点视图。理由
+不是"状态帧更急"，而是**顺序**——它与消息共用一个 `seq` 空间，同会话里 `seq` 更小的
+消息帧必然已在本地队列中；让运行态帧等满一个窗口，等于人为制造一段「后端已报空闲、
+本地转写却还是非终态」的窗口，而那正是上层过去要靠宽限复查去兜的东西。攒批省下的
+一次提交，远不值这条结构性保证。
+
+（冲刷是**按会话**的：运行态帧只对**它自己那个会话**给出"本轮已完整"，别的会话的
+待落地帧留在队列里。）
+
+### 11.7 验证
+
+- `cargo test --lib`：+4（`session_state_frames_share_the_message_seq_counter`、
+  `session_state_frame_does_not_touch_the_message_graph`、
+  `session_state_frame_is_an_envelope_that_decodes_back_to_the_node`、
+  `the_two_frame_kinds_are_not_confusable`），−1（`session_change` 已删除）；
+- 前端 vitest：+7 条运行态帧协议用例（含"到达时先冲刷同会话待落地帧"、
+  "两种帧共用一个游标不触发跳号"、"缺节点视图仍推进水位"），−4 条自愈网用例；
+- e2e 三处用例按 `type === 'transcript_event'` **过滤**，新帧类型对它们不可见
+  ——零破坏；另补一条观察 `transcript_session` 的断言（见 `e2e/cases/`）。
+
+### 11.8 代价与边界（明说）
+
+- **运行态帧只在有活跃轮次时发出**。这是设计的一部分（`seq` 只在这里分配），
+  不是缺陷：没有在途轮次时状态本来就不变（`active` 是稳态，`failed` 由上一轮
+  收尾时的那一帧给出）。
+- 重连后漏掉的运行态帧**不补发**——与消息帧同一条恢复路径（跳号 ⇒ 整份重读），
+  且 `list` 快照本就含权威 `status`（`refreshList` 的"只升不降"规则仍在）。
+- 快照仍然**不带**会话正文（`content`）：`read(<根>/session/<sid>)` 才是历史读入口。
+  §9 的那条取舍原样保留，只是载体从"VDFS `updated` 的 `node`"换成了"转写流的
+  `transcript_session`"。

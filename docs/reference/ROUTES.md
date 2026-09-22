@@ -106,17 +106,25 @@
 |------|------|----------|
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
-| `session/stream` | 订阅会话转写**实时流**（每条消息帧 = `session_id` + 单调 `seq` + 一条 `ChatMessage`） | `Session` |
+| `session/stream` | 订阅会话**实时面**（一条流、两种帧：`transcript_event` = `session_id` + 单调 `seq` + 一条 `ChatMessage`；`transcript_session` = `session_id` + 同一 `seq` + 会话节点全量视图） | `Session` |
 | `session/get_messages` | 获取对话历史（**仅 `agent_run` 的续会话存在性校验**用） | `Data` |
 | `session/update` | 合并写入会话 metadata（**仅 CLI**） | `Data` |
 
-> **消息的实时面走 `session/stream`，历史面走 VDFS**（2026-09-21）：消息曾寄生在
-> `kind = "vdfs"` 的资源变更频道上，那条路没有流内序号（丢帧不可检测）、载荷是全量而
-> 消费端要增量（必须猜「追加还是替换」）。现在 `Transcript`（session 插件内的唯一写入点）
-> 给每帧分配单调 `seq` 并把帧本身作为一条 `ChatMessage` 广播（帧携带 `content` = 整条替换，
-> 携带 `delta` = 尾部追加；删除是 `status = removed` 的状态迁移，见
-> `symbio/src/plugins/session/docs/node-state-streaming.md` §6 / S24）；背压时投 **resync 标记**而不是静默丢帧（见 `symbio_core::transcript_stream`）。
-> 消费端：前端 `services/transcriptStream.ts`、CLI `cli/src/client.rs`。
+> **实时面走 `session/stream`，历史面走 VDFS**（2026-09-21；2026-09-22 起运行态并入同一条流）：
+> 消息曾寄生在 `kind = "vdfs"` 的资源变更频道上，那条路没有流内序号（丢帧不可检测）、
+> 载荷是全量而消费端要增量（必须猜「追加还是替换」）。现在 `Transcript`（session 插件内的
+> 唯一写入点）给每帧分配单调 `seq` 并把帧本身作为一条 `ChatMessage` 广播（帧携带
+> `content` = 整条替换，携带 `delta` = 尾部追加；删除是 `status = removed` 的状态迁移，
+> 见 `symbio/src/plugins/session/docs/node-state-streaming.md` §6 / S24）；背压时投
+> **resync 标记**而不是静默丢帧（见 `symbio_core::transcript_stream`）。
+>
+> **会话运行态也在这一条流上**（S25 / 批次 E）：`transcript_session` 帧带会话节点的
+> **全量视图**，且与消息帧**共用同一个 `seq` 计数器**——因此「会话报不忙」到达时，
+> 本轮全部消息终态帧必然已在其之前落地（单通道保序 + 序号严格递增）。
+> VDFS 的 `vdfs/watch` 只剩**资源**变更（创建 / 删除 / 改名 / 标题），且**不携带节点快照**
+> （快照只有两个来源：这条流与 `vdfs/stat` 回读）。
+> 消费端：前端 `services/transcriptStream.ts`、CLI `cli/src/client.rs`、
+> 子智能体转播 `agent/host/subagent.rs`。
 > 落库转写与 `消息` 目录投影（`vdfs/read` / `vdfs/list` / `vdfs/action`）不受影响。
 
 > **`session/append`、`session/open`、三条消息路由与 `session/heartbeat/trigger` 已退役**（2026-09-18）：

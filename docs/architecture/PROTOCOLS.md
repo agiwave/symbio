@@ -246,13 +246,17 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 | `kind` | 发布方 | 消费方 |
 |--------|--------|--------|
 | `system` | 总线插件自身（`event_bus/subscribe` 的 `connected` 握手） | 前端订阅连接 |
-| `vdfs` | vdfs 宿主的变更投递（`plugins/vdfs/host.rs`） | **全部实时消费方**：前端（`services/vdfsTranscriptSync.ts`）、子智能体转播（`agent/host/subagent.rs`）、CLI——都按**地址**分派，不依赖事件到达顺序 |
+| `vdfs` | vdfs 宿主的变更投递（`plugins/vdfs/host.rs`） | **资源**的实时消费方：前端（`composables/useVdfs.ts` 通用浏览器、`stores/sessionNodeSync.ts` 会话清单）——都按**地址**分派，不依赖事件到达顺序 |
 
 > 曾经的 `session` 频道（会话域 `StreamEvent`：`Status` / `Update` / `Abort`）**已整体废除**：
-> 会话运行态是会话节点的属性（`status` + `attributes.outcome` / `.error`）、转写是消息节点，
-> 两者都走 `vdfs`（见 [`symbio/src/plugins/session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md)）。
-> 于是 `event_bus` 退化为**纯传输层**（不再认识任何业务频道语义），剩下的两个频道也都不
-> 承载需要顺序保证的状态。
+> 会话运行态是会话节点的属性（`status` + `attributes.outcome` / `.error`）、转写是消息节点。
+> 于是 `event_bus` 退化为**纯传输层**（不再认识任何业务频道语义）。
+>
+> ⚠️ **会话域的实时面不在这里**：它走 `session/stream` 转写流（`PluginPayload::Session`
+> 通道，不是 `bus_event`），两种帧共用一个单调 `seq`——**因为「会话不忙 ⇒ 本轮消息已终态」
+> 这条推理需要顺序保证，而无序总线给不了**。VDFS 频道只剩会话叶子的**资源**变更
+> （创建 / 删除 / 改名 / 标题），且不携带节点快照。见
+> [`symbio/src/plugins/session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) §11。
 
 > 资源变更**不另设频道**：一切资源的生命周期与状态变化都是 VDFS 变更，统一走 `vdfs`；
 > 历史上并存的 `entity` 频道已随实体机制废除。

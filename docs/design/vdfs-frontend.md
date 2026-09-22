@@ -83,10 +83,12 @@
 结论：前端既有改动**方向正确、结构合理**，与目标一致的部分**整体保留**，
 G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 
-> **现状校正（针对 §7.1 的 S3）**：§7.1 记「消息（转写）不经 VDFS」，那是当时
-> 的形态。**现在消息已在 VDFS 上**——`<根>/session/<id>/消息/<mid>`，节点
-> `ext = message`，转写经 `services/vdfsTranscriptSync.ts` 同步，详情由
-> `components/vdfs/VdfsMessageDetail.vue` 呈现。§7 是进度档案、按约定不改写，
+> **现状校正（针对 §7.1 的 S3，含 S25 更新）**：§7.1 记「消息（转写）不经 VDFS」，
+> 那是当时的形态。后来消息**读面**迁到了 VDFS——`<根>/session/<id>/消息/<mid>`，
+> 节点 `ext = message`，详情由 `components/vdfs/VdfsMessageDetail.vue` 呈现。
+> **但实时面在 S25（批次 E）又移出了 VDFS**：消息帧与会话运行态帧现在走
+> `session/stream` 一条转写流（`services/transcriptStream.ts`），与消息帧共用同一个
+> `seq` 空间；`kind = "vdfs"` 只剩会话**资源**变更。§7 是进度档案、按约定不改写，
 > 但读 §7.1 时请以本条为准。
 
 ### 2.3 与目标的差距

@@ -116,20 +116,6 @@ impl SessionRuntime {
     }
 }
 
-/// 会话运行态 → VDFS 变更（**带节点视图，不带内容**）。
-///
-/// ## 为什么只带 `node`、不带 `content`
-///
-/// 会话节点的 `content` 是**整份会话 JSON**（历史读入口，见 [`session_content`]）。
-/// 若每次状态迁移都把它一并下发，一次「开始处理」就要重传整份转写——
-/// 而状态迁移恰恰是最频繁的一类变更。
-///
-/// 状态由 `node` 表达已足够：消费者要的是 `status` / `outcome` / `error` /
-/// `title`，全在节点视图里。正文另有 `<根>/session/<id>/消息` 承载。
-pub(crate) fn session_change(id: &str, node: vdfs::VdfsNode) -> vdfs::VdfsChange {
-    vdfs::VdfsChange::new(id, vdfs::VDFS_CHANGE_UPDATED).with_node(node)
-}
-
 /// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）。
 ///
 /// 入参是 [`SessionSummary`] 而非 `Session`——**清单路径根本不持有消息**，

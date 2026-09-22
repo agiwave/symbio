@@ -23,7 +23,10 @@
 //! VDFS watch（低频、非突发，且与会话清单共用同一订阅）。
 
 use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::transcript_stream::{publish_frame, NodeEvent};
+use crate::symbio_core::transcript_stream::{
+    publish_frame, publish_session_state, NodeEvent, SessionStateEvent,
+};
+use crate::symbio_core::vdfs::VdfsNode;
 use crate::{plugin_debug, plugin_error, plugin_info};
 use indexmap::IndexMap;
 
@@ -419,6 +422,35 @@ impl Transcript {
             session_id: self.session_id.clone(),
             seq,
             message,
+        });
+    }
+
+    /// 发布一帧**会话运行态**——与消息帧**共用同一个 `seq` 计数器**。
+    ///
+    /// ## 为什么 seq 分配必须留在这里
+    ///
+    /// 「会话不忙 ⇒ 本轮消息节点都已终态」要成立，靠的是「同一个 `seq` 空间 +
+    /// 单通道保序」：消费端读到 `status != working` 的那一帧时，所有 `seq` 更小的
+    /// 帧（含本轮全部终态帧）必然已在它之前落地。因此运行态帧**必须**从
+    /// [`Self::emit`] 用的那个计数器取号——若另起一个计数器，这条推理立刻失效。
+    ///
+    /// 于是「`seq` 只在 `Transcript` 里分配」这条规则**不变**（不变量 #28 的边界
+    /// 从「每条消息帧」扩到「每一帧」）：任何发布出去的帧都在这里取号。
+    ///
+    /// 调用时机由编排层保证：正常收尾在「清在途 → 复位 `is_working`」之后、
+    /// 中止收尾在 `converge_inflight` 之后——两者都在本轮**最后一条**消息帧之后。
+    pub fn emit_session_state(&mut self, node: VdfsNode) {
+        self.seq += 1;
+        let seq = self.seq;
+        plugin_info!(
+            "session",
+            "[帧 {seq}] <session> - {} 会话运行态",
+            node.status
+        );
+        publish_session_state(&SessionStateEvent {
+            session_id: self.session_id.clone(),
+            seq,
+            node,
         });
     }
 }

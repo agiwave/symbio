@@ -932,11 +932,22 @@ pub const VDFS_CHANGE_TRUNCATED: &str = "truncated";
 ///
 /// 设计要点：**热路径窄、冷路径全**。流式追加每帧只多一小段（`delta`），
 /// 若把整节点挂在每帧上，流量会退化成 O(n²)；而 `created` / `updated` 每轮
-/// 只有寥寥数次，把节点视图一并带上就能免掉消费者的回读——这正是既有
-/// `kind = "session"` 消息通道在做的事，VDFS 承载它即可，不必让消费者退步。
+/// 只有寥寥数次，把节点视图一并带上就能免掉消费者的回读。
 ///
 /// 载荷**可选**：provider 可以选择不填（消费者回退到 `stat` / `read`），
 /// 因此这是纯增益扩展，不构成对实现的强制。
+///
+/// ## 这三类载荷**当前都没有生产性生产者**
+///
+/// [`Self::with_node`] / [`Self::with_content`] / [`Self::appended`] 目前只在测试
+/// 里被调用；生产路径一律走 [`crate::symbio_core::vdfs::host::notify_change`] 的
+/// 三元组构造。即「免一次回读」的**能力已具备、尚未启用**——要用起来得先有
+/// provider 在自己的 `watch` 里填。
+///
+/// 会话运行态曾是 `updated` + `node` 的唯一使用者，批次 E 起已改走
+/// `session/stream` 转写流（见 `session/docs/node-state-streaming.md` §11.4）：
+/// **快照的来源必须有序或幂等**，而 VDFS 是一条独立无序通道，其上的节点快照会
+/// 与有序通道的状态竞争（一次迟到的自动命名就能把运行态回退）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsChange {
     /// 变更节点在本 provider 子树内的相对路径

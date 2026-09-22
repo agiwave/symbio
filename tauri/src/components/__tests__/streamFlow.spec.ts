@@ -74,6 +74,7 @@ function storeSink(): TranscriptStreamSink {
   const store = useSessionsStore()
   return {
     messages: (sid, ms) => store.applyTranscriptMessages(sid, ms),
+    applySessionState: (sid, node) => store.applySessionState(sid, node),
     reload: async (sid) => {
       await store.loadMessages(sid)
     },

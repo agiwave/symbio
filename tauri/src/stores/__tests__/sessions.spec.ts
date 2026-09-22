@@ -1,17 +1,16 @@
 // @vitest-environment happy-dom
 /**
- * sessions store —— VDFS 变更驱动的会话清单收敛
+ * sessions store —— 清单收敛（VDFS）与运行态收敛（转写流）
  *
- * 覆盖两条约定：
+ * 覆盖两条**互不重叠**的约定：
  *
- * 1. **只有一条变更频道**：会话清单的同步来自 `kind = 'vdfs'` 的
- *    `VdfsChangeEvent`，作用域按**展示地址前缀**分流（`@vfs/session` 的直接子项
- *    = 会话叶子；转写列表项 / 子会话的变更不进侧栏）。
- * 2. **状态类变更必带节点视图**（`node-state-streaming.md` §8.2）：
- *    - `updated`（含 busy/idle/failed 运行态与标题变更）→ 用**载荷**就地收敛，
- *      **零回读**、零整表重拉；
- *    - `created` → 防抖重拉收敛排序与完整字段；
- *    - `deleted` → 本地即时移除。
+ * 1. **清单只认 VDFS 的粗粒度信号**：作用域按**展示地址前缀**分流（`@vfs/session`
+ *    的直接子项 = 会话叶子；转写列表项 / 子会话的变更不进侧栏）。
+ *    - `updated` / `created` → 防抖重拉清单（**不看载荷**：这条通道不带节点快照）；
+ *    - `deleted` → 本地即时移除；
+ *    - 且 `updated` **不得**改运行态（快照只有有序来源，见 `sessionNodeSync` 文档）。
+ * 2. **运行态只认转写流的运行态帧**（`applySessionState`）：状态 / 结局 / 错误 /
+ *    告警 / 提示音全在这里收敛，**零回读、零整表重拉**。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
@@ -89,14 +88,6 @@ vi.mock('@/services/completionChime', () => ({
   playCompletionChime: chime.playCompletionChime,
 }))
 
-// 转写收敛回读是**另一条通道**的动作（`transcriptStream` 私有 pending 队列 + sink.reload）。
-// 这里只断言"在正确的时机被调用"，回读本身的行为在 transcriptStream 的用例里覆盖。
-// 另外它顺带隔离了 `transcriptStream` 对 `./plugin` 的依赖（本文件的 plugin mock 不含
-// `connectPlugin`）。
-const streamApi = vi.hoisted(() => ({ reconcileTranscript: vi.fn() }))
-vi.mock('@/services/transcriptStream', () => ({
-  reconcileTranscript: streamApi.reconcileTranscript,
-}))
 // 地址方案：注入夹具，避免真去列目录
 vi.mock('@/services/vdfsScheme', () => ({
   ensureSessionMountDir: vi.fn(async () => SCHEME.mountDir),
@@ -251,119 +242,40 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     expect(captured.handlers).toHaveLength(0)
   })
 
-  it('updated 带节点视图 → 就地落 status / 标题，零回读、零整表重拉', async () => {
-    const store = useSessionsStore()
-    store.titles['s1'] = '新对话'
-    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: { title: '新对话' } } as never)
+  it('updated → 防抖重拉清单（载荷不看：这条通道不带节点快照）', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = useSessionsStore()
+      store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
 
-    emit({
-      path: '@vfs/session/s1',
-      change: 'updated',
-      node: sessionNode({ status: 'working', message_count: 7 }),
-    })
-    await flushPromises()
+      emit({ path: '@vfs/session/s1', change: 'updated' })
+      // 本地乐观改名已覆盖同窗口场景；跨窗口靠重拉收敛，不必每条变更一次 IPC
+      expect(sessionApi.listSessions).not.toHaveBeenCalled()
 
-    // 状态是**节点属性**，随载荷送达 ⇒ 不必也不能回读
-    expect(vdfsApi.statVdfs, '状态类变更带载荷：不得回读').not.toHaveBeenCalled()
-    expect(store.list[0].status).toBe('working')
-    expect(store.list[0].message_count).toBe(7)
-    expect(store.isSessionWorking('s1')).toBe(true)
-    // 标题也随节点自述就地更新，不因为一次变更把整张清单重拉一遍
-    expect(store.titles['s1']).toBe('解释一下 VDFS 的地址模型')
-    expect(store.list[0].metadata?.title).toBe('解释一下 VDFS 的地址模型')
-    expect(sessionApi.listSessions).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(800)
+      expect(sessionApi.listSessions).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('updated 未带节点视图 → 忽略并留痕（不做静默回读兜底）', async () => {
-    const store = useSessionsStore()
-    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: { title: 'T' } } as never)
-
-    emit({ path: '@vfs/session/s1', change: 'updated' })
-    await flushPromises()
-
-    // 载荷缺失意味着后端违反了「状态变更必带节点视图」的不变量；
-    // 回读兜底会把它掩盖成"看起来能用"，所以这里既不改状态也不回读。
-    expect(vdfsApi.statVdfs).not.toHaveBeenCalled()
-    expect(store.list[0].status).toBe('working')
-    expect(sessionApi.listSessions).not.toHaveBeenCalled()
-  })
-
-  it('failed 是独立的会话状态，不是 active + 布尔标志', async () => {
+  it('updated **不**改运行态：状态只有一个来源（转写流的运行态帧）', async () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: {} } as never)
+    store.putStatus('s1', { status: 'working' })
 
+    // 一次迟到的资源变更（如自动命名）不得把运行态打回它自己那一刻的旧值——
+    // 这正是"快照只有有序来源"这条规则要防的（见 sessionNodeSync 模块文档）。
     emit({
       path: '@vfs/session/s1',
       change: 'updated',
-      node: sessionNode({ status: 'failed', outcome: 'failed', error: '上游 429' }),
+      node: sessionNode({ status: 'active', title: '自动命名' }),
     })
+    await flushPromises()
 
-    expect(store.getSessionStatus('s1').status).toBe('failed')
-    expect(store.isSessionFailed('s1')).toBe(true)
-    expect(store.isSessionWorking('s1')).toBe(false)
-    // 会话级错误是**节点属性**（覆盖"错误发生在任何消息节点创建之前"的场景）
-    expect(store.getSessionError('s1')).toBe('上游 429')
-  })
-
-  it('新一轮开始（working）时节点不带 error ⇒ 上一轮错误自动清空', async () => {
-    const store = useSessionsStore()
-    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'failed', metadata: {} } as never)
-    store.setSessionError('s1', '上一轮的错误')
-
-    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
-
-    expect(store.getSessionError('s1')).toBeNull()
-    expect(store.isSessionFailed('s1')).toBe(false)
-  })
-
-  it('提示音只在 working → 非 working 的**迁移**上响，音色取 outcome', async () => {
-    const store = useSessionsStore()
-    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
-
-    // ① 空闲 → 空闲（标题更新等）：不是迁移，不响
-    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'active' }) })
-    expect(chime.playCompletionChime).not.toHaveBeenCalled()
-
-    // ② 空闲 → 运行中：是迁移，但不是"结束"，不响
-    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
-    expect(chime.playCompletionChime).not.toHaveBeenCalled()
-
-    // ③ 运行中 → 空闲（正常结束）：响 completed
-    emit({
-      path: '@vfs/session/s1',
-      change: 'updated',
-      node: sessionNode({ status: 'active', outcome: 'completed' }),
-    })
-    expect(chime.playCompletionChime).toHaveBeenCalledWith('completed', 's1')
-
-    // ④ 中止与失败各取自己的音色（结局是状态，不靠"谁先到"区分）
-    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
-    emit({
-      path: '@vfs/session/s1',
-      change: 'updated',
-      node: sessionNode({ status: 'active', outcome: 'aborted' }),
-    })
-    expect(chime.playCompletionChime).toHaveBeenLastCalledWith('aborted', 's1')
-
-    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
-    emit({
-      path: '@vfs/session/s1',
-      change: 'updated',
-      node: sessionNode({ status: 'failed', outcome: 'failed', error: 'boom' }),
-    })
-    expect(chime.playCompletionChime).toHaveBeenLastCalledWith('failed', 's1')
-    expect(chime.playCompletionChime).toHaveBeenCalledTimes(3)
-  })
-
-  it('标题更新（状态未变）不覆盖消息节点派生的活动文字', async () => {
-    const store = useSessionsStore()
-    store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
-    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
-    store.putStatus('s1', { activity: '正在思考…' })
-
-    emit({ path: '@vfs/session/s1', change: 'updated', node: sessionNode({ status: 'working' }) })
-
-    expect(store.getSessionStatus('s1').activity).toBe('正在思考…')
+    expect(store.getSessionStatus('s1').status).toBe('working')
+    expect(store.list[0].status).toBe('working')
+    expect(vdfsApi.statVdfs).not.toHaveBeenCalled()
   })
 
   it('created → 防抖重拉清单（收敛排序与完整字段）', async () => {
@@ -517,7 +429,7 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
  * `hydrateFromHistory` 的**快照直载语义**（快照即权威）。
  *
  * 转写的权威副本在存储：`loadMessages` 以此整表装载，增量由
- * `vdfsTranscriptSync` 持续收敛——装载与增量消费是同一条数据链路的
+ * `transcriptStream` 持续收敛——装载与增量消费是同一条数据链路的
  * 两个入口，不存在需要"合并"的两个真相来源。旧合并语义（保留本地在途节点）
  * 已删除：那是双数据源混写的补丁层。
  */
@@ -800,20 +712,15 @@ describe('sessions store — 实时状态的唯一变更通道', () => {
 })
 
 /**
- * `reconcileTranscript` —— 「会话离开运行态 ⇒ 本轮消息已全部终态」这条**跨通道**
- * 顺序假设的自愈网。
+ * 会话运行态 —— 唯一的来源是转写流的 `transcript_session` 帧
+ * （落地口 `applySessionState`，全量节点视图 ⇒ 零回读）。
  *
- * 会话运行态走 VDFS 变更、消息走转写流，两条通道各有 `mpsc` 与泵任务，**到达顺序
- * 没有机制保证**。所以「离开 working」推不出「终态帧已到」；本地若仍有停在
- * `streaming` 的节点，前端会永久显示"运行中"，且 `isInProgressMessage` 会让下一次
- * 发送把它当成"已有在途节点"。
- *
- * 这里钉住四条：**宽限期内不动作**、**仍不收敛才回读**、**已收敛不回读**、
- * **不带 status 的节点不算在途**。
+ * 这一组用例原先挂在 VDFS 的 `updated` 上，并额外钉住一条**跨通道**顺序假设的
+ * 自愈网（宽限复查 + 整份回读）。批次 E 把运行态并进转写流、与消息共用 `seq`
+ * 空间之后，那条假设成为结构性保证，自愈网连同它的用例一并删除；留下的用例
+ * 改从**新的落地口**驱动，覆盖的语义一条没少。
  */
-describe('sessions store — reconcileTranscript（跨通道顺序假设的自愈网）', () => {
-  /** 与 `sessions.ts::RECONCILE_GRACE_MS` 同值；用例只关心"到点前/到点后" */
-  const GRACE = 300
+describe('sessions store — 会话运行态（转写流的运行态帧）', () => {
   const SID = 's1'
 
   let store: ReturnType<typeof useSessionsStore>
@@ -824,89 +731,85 @@ describe('sessions store — reconcileTranscript（跨通道顺序假设的自�
     captured.handlers.length = 0
     stopSessionNodeSync()
     store = useSessionsStore()
-    startSessionNodeSync(store)
-    streamApi.reconcileTranscript.mockClear()
+    store.list.push({ id: SID, message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
+    chime.playCompletionChime.mockClear()
     vdfsApi.readVdfs.mockResolvedValue({ text: '{"messages":[]}' })
   })
 
-  const goWorking = () =>
-    emit({
-      path: `${SCHEME.mountDir}/${SID}`,
-      change: 'updated',
-      node: sessionNode({ status: VDFS_STATUS_WORKING }),
-    })
-  const goIdle = () =>
-    emit({
-      path: `${SCHEME.mountDir}/${SID}`,
-      change: 'updated',
-      node: sessionNode({ status: 'active' }),
-    })
+  it('节点视图就地落 status / 标题 / 计数，零回读、零整表重拉', () => {
+    store.titles[SID] = '新对话'
+    store.list[0] = { ...store.list[0], metadata: { title: '新对话' } }
 
-  /** 往本地转写塞一条消息（走生产同一条落地口） */
-  function putMessage(over: Record<string, unknown>) {
-    store.applyTranscriptMessages(SID, [
-      { id: 'm1', type: 'text', role: 'assistant', ...over } as never,
-    ])
-  }
+    store.applySessionState(SID, sessionNode({ status: 'working', message_count: 7 }) as never)
 
-  it('离开运行态后本地转写仍停在非终态 → 宽限期**到点后**才整份回读', () => {
-    vi.useFakeTimers()
-    try {
-      goWorking()
-      putMessage({ status: 'streaming', content: '半句' })
-      goIdle()
-
-      // 宽限期内不动作：正常收尾时终态帧往往只晚到一两个 IPC 往返，
-      // 立刻回读会把常态也变成一次整份重读。
-      vi.advanceTimersByTime(GRACE - 1)
-      expect(streamApi.reconcileTranscript).not.toHaveBeenCalled()
-
-      vi.advanceTimersByTime(1)
-      expect(streamApi.reconcileTranscript).toHaveBeenCalledWith(SID)
-    } finally {
-      vi.useRealTimers()
-    }
+    // 状态是**节点属性**，随帧送达 ⇒ 不必也不能回读
+    expect(vdfsApi.statVdfs, '运行态帧带全量视图：不得回读').not.toHaveBeenCalled()
+    expect(store.list[0].status).toBe('working')
+    expect(store.list[0].message_count).toBe(7)
+    expect(store.isSessionWorking(SID)).toBe(true)
+    // 标题也随节点自述就地更新，不因为一次状态迁移把整张清单重拉一遍
+    expect(store.titles[SID]).toBe('解释一下 VDFS 的地址模型')
+    expect(store.list[0].metadata?.title).toBe('解释一下 VDFS 的地址模型')
+    expect(sessionApi.listSessions).not.toHaveBeenCalled()
   })
 
-  it('离开运行态且转写已收敛 → 不产生多余回读', () => {
-    vi.useFakeTimers()
-    try {
-      goWorking()
-      putMessage({ status: 'completed', content: '整句' })
-      goIdle()
+  it('failed 是独立的会话状态，不是 active + 布尔标志', () => {
+    store.applySessionState(
+      SID,
+      sessionNode({ status: 'failed', outcome: 'failed', error: '上游 429' }) as never,
+    )
 
-      vi.advanceTimersByTime(GRACE)
-      expect(streamApi.reconcileTranscript).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(store.getSessionStatus(SID).status).toBe('failed')
+    expect(store.isSessionFailed(SID)).toBe(true)
+    expect(store.isSessionWorking(SID)).toBe(false)
+    // 会话级错误是**节点属性**（覆盖"错误发生在任何消息节点创建之前"的场景）
+    expect(store.getSessionError(SID)).toBe('上游 429')
   })
 
-  it('不带 status 的节点（用户消息）不算「在途」，不触发回读', () => {
-    vi.useFakeTimers()
-    try {
-      goWorking()
-      putMessage({ id: 'u1', role: 'user', content: '问题' })
-      goIdle()
+  it('新一轮开始（working）时节点不带 error ⇒ 上一轮错误自动清空', () => {
+    store.list[0] = { ...store.list[0], status: 'failed' }
+    store.setSessionError(SID, '上一轮的错误')
 
-      vi.advanceTimersByTime(GRACE)
-      expect(streamApi.reconcileTranscript).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
+    store.applySessionState(SID, sessionNode({ status: 'working' }) as never)
+
+    expect(store.getSessionError(SID)).toBeNull()
+    expect(store.isSessionFailed(SID)).toBe(false)
   })
 
-  it('未发生 working → 非 working 迁移时不安排复查', () => {
-    vi.useFakeTimers()
-    try {
-      // 从未 working（直接 active）：不是"一轮结束"，不该触发收敛
-      putMessage({ status: 'streaming', content: '半句' })
-      goIdle()
+  it('提示音只在 working → 非 working 的**迁移**上响，音色取 outcome', () => {
+    // ① 空闲 → 空闲：不是迁移，不响
+    store.applySessionState(SID, sessionNode({ status: 'active' }) as never)
+    expect(chime.playCompletionChime).not.toHaveBeenCalled()
 
-      vi.advanceTimersByTime(GRACE)
-      expect(streamApi.reconcileTranscript).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
+    // ② 空闲 → 运行中：是迁移，但不是"结束"，不响
+    store.applySessionState(SID, sessionNode({ status: 'working' }) as never)
+    expect(chime.playCompletionChime).not.toHaveBeenCalled()
+
+    // ③ 运行中 → 空闲（正常结束）：响 completed
+    store.applySessionState(SID, sessionNode({ status: 'active', outcome: 'completed' }) as never)
+    expect(chime.playCompletionChime).toHaveBeenCalledWith('completed', SID)
+
+    // ④ 中止与失败各取自己的音色（结局是状态，不靠"谁先到"区分）
+    store.applySessionState(SID, sessionNode({ status: 'working' }) as never)
+    store.applySessionState(SID, sessionNode({ status: 'active', outcome: 'aborted' }) as never)
+    expect(chime.playCompletionChime).toHaveBeenLastCalledWith('aborted', SID)
+
+    store.applySessionState(SID, sessionNode({ status: 'working' }) as never)
+    store.applySessionState(
+      SID,
+      sessionNode({ status: 'failed', outcome: 'failed', error: 'boom' }) as never,
+    )
+    expect(chime.playCompletionChime).toHaveBeenLastCalledWith('failed', SID)
+    expect(chime.playCompletionChime).toHaveBeenCalledTimes(3)
+  })
+
+  it('状态未变时不覆盖消息节点派生的活动文字', () => {
+    store.applySessionState(SID, sessionNode({ status: 'working' }) as never)
+    store.putStatus(SID, { activity: '正在思考…' })
+
+    // 同状态重复到达（如一轮里的多条运行态帧）：activity 原样保留
+    store.applySessionState(SID, sessionNode({ status: 'working' }) as never)
+
+    expect(store.getSessionStatus(SID).activity).toBe('正在思考…')
   })
 })

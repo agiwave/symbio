@@ -85,8 +85,44 @@ pub struct NodeEvent {
     pub message: ChatMessage,
 }
 
+/// 一帧**会话运行态**（与会话内消息帧**共用同一个 `seq` 空间**）。
+///
+/// ## 为什么它必须在这条流上
+///
+/// 会话运行态原先走 VDFS 变更流（`kind = "vdfs"`），与消息走两条独立的
+/// `mpsc` + 两条独立泵任务。于是「会话报不忙」**推不出**「本轮消息节点都已收到
+/// 终态帧」——到达顺序只靠两个泵任务的调度巧合（两条通道缓冲区大小都不同：
+/// 4096 vs 2048）。前端因此被迫挂一张宽限期复查的兜底网（`reconcileTranscript`）。
+///
+/// 挪到同一条流、共用同一个 `seq` 计数器之后，这条假设变成**保证**：
+/// 单条 `mpsc` 保序，`seq` 严格递增，因此「读到 `status != working` 的这一帧」
+/// ⇒ 「所有 `seq` 更小的帧（含本轮全部终态帧）都已在它之前被应用」。
+/// 兜底网随之删除——不是被更强的网替代，而是它要补的那个缺口不再存在。
+///
+/// ## 载荷为什么是全量节点视图
+///
+/// 与消息帧「语义全在字段上」同源：帧**自给自足**、**幂等**。消费端不必知道
+/// 「什么变了」，只按「现在是什么」收敛（`status` / `attributes.outcome` /
+/// `.error` / `.warning`），因此重发、乱序重放都不会把状态带歪。
+///
+/// 与 VDFS 侧的分工：**运行态**（本轮 `working` / `finished` / 警告）走这里；
+/// **会话节点自身的资源变更**（`created` / `deleted` / `renamed` / 标题与
+/// metadata 覆盖）仍走 VDFS——它们发生在没有在途轮次的时候，**没有 transcript
+/// 可以分配 `seq`**（`seq` 的唯一分配点是 `Transcript`，见 `transcript.rs`）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionStateEvent {
+    pub session_id: String,
+    /// 与消息帧**同一个计数器**发出的帧序号（这正是本类型存在的意义）。
+    pub seq: u64,
+    /// 会话节点的**全量视图**（`status` + `attributes.{outcome,error,warning}`）。
+    pub node: crate::symbio_core::vdfs::VdfsNode,
+}
+
 /// 数据帧的 `type` 判别值（信封顶层）。
 pub const EVENT_TYPE: &str = "transcript_event";
+
+/// 会话运行态帧的 `type` 判别值（信封顶层）。
+pub const SESSION_TYPE: &str = "transcript_session";
 
 /// 背压标记帧的 `type` 判别值（信封顶层）。
 pub const RESYNC_TYPE: &str = "transcript_resync";
@@ -118,6 +154,15 @@ fn payload_of<'a>(frame: &'a PluginFrame, type_tag: &str) -> Option<&'a Value> {
 pub fn event_of(frame: &PluginFrame) -> Option<NodeEvent> {
     // 借用 `&Value` 反序列化：帧是热路径，不为此克隆整棵载荷树。
     NodeEvent::deserialize(payload_of(frame, EVENT_TYPE)?).ok()
+}
+
+/// **会话运行态唯一的解包入口**（与 [`event_of`] 并列，同一套信封规则）。
+///
+/// 判别值不同（[`SESSION_TYPE`]）但形状规则完全一致——因此复用同一个
+/// [`payload_of`]。消费端必须**按 `type` 分派**，不能靠「解不出 `NodeEvent`
+/// 就是状态帧」这种推断：那样一旦有第三种帧，分派就退化成猜。
+pub fn session_state_of(frame: &PluginFrame) -> Option<SessionStateEvent> {
+    SessionStateEvent::deserialize(payload_of(frame, SESSION_TYPE)?).ok()
 }
 
 /// 是否为转写流**背压标记**（[`RESYNC_TYPE`]）：后端明示本连接曾漏帧。
@@ -155,21 +200,44 @@ fn envelope(type_tag: &str, data: Value) -> PluginFrame {
     PluginFrame::data(Value::Object(map))
 }
 
-/// 向全部订阅者发布一帧转写事件。
+/// 序列化载荷并包成信封；序列化失败返回 `None`（调用方丢弃该帧）。
+///
+/// 三种帧（消息 / 会话运行态 / 背压标记）共用这一个出口——「一次序列化」
+/// 是出帧路径的硬要求，不该由每个发布函数各自实现一遍。
+fn encode<T: Serialize>(type_tag: &str, payload: &T) -> Option<PluginFrame> {
+    match serde_json::to_value(payload) {
+        Ok(v) => Some(envelope(type_tag, v)),
+        Err(e) => {
+            crate::plugin_error!("session", "[Stream] 帧序列化失败（帧丢弃）：{}", e);
+            None
+        }
+    }
+}
+
+/// 向全部订阅者发布一帧转写事件（消息帧）。
 ///
 /// 出帧路径上只有**一次**序列化，扇出时只做引用计数自增（见 `PluginFrame` 的说明）。
 pub fn publish_frame(event: &NodeEvent) {
-    let data = match serde_json::to_value(event) {
-        Ok(v) => v,
-        Err(e) => {
-            crate::plugin_error!("session", "[Stream] 事件序列化失败（帧丢弃）：{}", e);
-            return;
-        }
-    };
-    let frame = envelope(EVENT_TYPE, data);
+    if let Some(frame) = encode(EVENT_TYPE, event) {
+        fan_out(frame);
+    }
+}
 
-    // 先收集再处理（DashMap 迭代期不删除）。满 = 慢消费者 → 踢入 resync 流程；
-    // 已关闭 = 消费者走了 → 静默摘除。
+/// 向全部订阅者发布一帧**会话运行态**（见 [`SessionStateEvent`]）。
+///
+/// 与 [`publish_frame`] 是同一条流、同一个扇出：**顺序与 `seq` 空间因此共享**，
+/// 这正是「会话不忙 ⇒ 本轮节点已终态」得以成立的全部机制。
+pub fn publish_session_state(event: &SessionStateEvent) {
+    if let Some(frame) = encode(SESSION_TYPE, event) {
+        fan_out(frame);
+    }
+}
+
+/// 把一帧交给全部订阅者。
+///
+/// 先收集再处理（DashMap 迭代期不删除）。满 = 慢消费者 → 踢入 resync 流程；
+/// 已关闭 = 消费者走了 → 静默摘除。
+fn fan_out(frame: PluginFrame) {
     let mut full: Vec<(String, mpsc::Sender<PluginFrame>)> = Vec::new();
     let mut gone: Vec<String> = Vec::new();
     for entry in STREAM_SUBS.iter() {

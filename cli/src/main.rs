@@ -123,10 +123,12 @@ async fn main() -> ExitCode {
 /// 存活，调度器就会按各会话的空闲节奏自动触发心跳对话；消费无人值守轮次的
 /// 活动即可，Ctrl+C 退出。
 ///
-/// ## 订阅面比普通模式宽一级
+/// ## 为什么不需要「开闸」
 ///
 /// 心跳可能落在**任何一个**已登记心跳的会话上，而守护进程在启动期不知道将来
-/// 会有哪些——所以闸门开在**会话挂载根**（`<根>/session`）上，而不是某个会话。
+/// 会有哪些。转写流是**全会话广播**（帧里带 `session_id`），一次订阅天然覆盖
+/// 全部会话——原先那套「订阅会话挂载根 `<根>/session`」的机制因此整体消失。
+///
 /// 判据仍然是会话节点的运行态：`status` 离开 `working` 即为本轮结束，
 /// 结局从 `attributes` 读（`error` = 失败，`outcome == aborted` = 中止）。
 async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> ExitCode {
@@ -146,34 +148,22 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
         eprintln!();
     }
 
-    let mount = match client.watch_all_sessions().await {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("✖ 订阅会话变更失败: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    // 会话级地址 = 挂载根 + **一段**；再深的都是消息节点（不参与运行态汇报）
-    let mount_prefix = format!("{mount}/");
-    // 各会话上一次见到的运行态：只在**迁移**上报。会话叶子的变更也包含标题 /
-    // 元数据写入，逐帧报会把一次心跳刷成十几行。
+    // 会话运行态与消息同流（共用 `seq` 空间），帧里**直接带 `session_id`**——
+    // 因此不再需要「订阅会话挂载根 + 从 VDFS 路径里剥前缀」，也不再需要
+    // `vdfs/watch` 开闸（那套机制存在的唯一理由就是把运行态投到本连接上）。
+    //
+    // 各会话上一次见到的运行态：只在**迁移**上报。运行态帧也可能因告警等原因
+    // 重复下发同一份视图，逐帧报会把一次心跳刷成十几行。
     let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     while let Some(frame) = client.next_frame().await {
-        // 守护模式只关心会话运行态；转写帧（消息实时面）在此丢弃
+        // 守护模式只关心会话运行态；转写帧（消息）在此丢弃
         // ——但必须取走，否则会把转写流通道塞满。
-        let Frame::Node(change) = frame else {
+        let Frame::Session(state) = frame else {
             continue;
         };
-        let Some(node) = change.node.as_ref() else {
-            continue;
-        };
-        let Some(sid) = change.path.strip_prefix(mount_prefix.as_str()) else {
-            continue;
-        };
-        if sid.is_empty() || sid.contains('/') {
-            continue;
-        }
+        let sid = state.session_id.as_str();
+        let node = &state.node;
         if seen.get(sid) == Some(&node.status) {
             continue;
         }
@@ -202,7 +192,7 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
     }
 
     if !args.quiet {
-        eprintln!("事件总线已关闭，守护退出。");
+        eprintln!("转写流已关闭，守护退出。");
     }
     ExitCode::SUCCESS
 }

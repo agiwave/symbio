@@ -66,18 +66,31 @@ export default defineCase('T9 gateway WS 流式：session/stream 消息帧序与
     });
     ws.send(JSON.stringify({ metadata: { path: 'session/stream' }, payload: {} }));
 
-    // ② 收集消息帧（发消息前订阅，不漏首帧）。
-    // 信封：PluginFrame::Data({ type: 'transcript_event', data: NodeEvent })，
-    // NodeEvent = { session_id, seq, message } —— 协议没有独立的操作字段，
-    // 帧携带什么（content / delta / status）就变更什么。
+    // ② 收集实时帧（发消息前订阅，不漏首帧）。
+    // 实时面**一条流、两种帧**，信封都是 `PluginFrame::Data({ type, data })`：
+    //   - `transcript_event`   → `{ session_id, seq, message }`（消息；协议没有独立的
+    //     操作字段，帧携带什么（content / delta / status）就变更什么）
+    //   - `transcript_session` → `{ session_id, seq, node }`（会话运行态的全量视图）
+    // 两者**从同一个计数器取号**（后端 `Transcript::emit` / `emit_session_state`）
+    // ——这正是「会话报不忙 ⇒ 本轮消息终态帧都已落地」的全部依据，下面 ⑨ 直接验它。
     /** @type {Array<{seq:number, session_id:string, message:any}>} */
     const ops = [];
+    /** @type {Array<{seq:number, session_id:string, node:any}>} */
+    const states = [];
+    /** 全部帧的 seq（两种帧混在一起，用于验证共用一个序号空间） */
+    const allSeqs = [];
     let wsClosed = false;
     ws.on('message', (data) => {
       try {
         const frame = JSON.parse(data.toString());
-        const ev = frame?.Data?.type === 'transcript_event' ? frame.Data.data : null;
-        if (ev?.message) ops.push(ev);
+        const type = frame?.Data?.type;
+        if (type === 'transcript_event' && frame.Data.data?.message) {
+          ops.push(frame.Data.data);
+          allSeqs.push(frame.Data.data.seq);
+        } else if (type === 'transcript_session' && frame.Data.data?.node) {
+          states.push(frame.Data.data);
+          allSeqs.push(frame.Data.data.seq);
+        }
       } catch { /* 忽略非 JSON 帧 */ }
     });
     ws.on('close', () => { wsClosed = true; });
@@ -105,6 +118,13 @@ export default defineCase('T9 gateway WS 流式：session/stream 消息帧序与
         ),
       { what: '流式帧收敛（assistant completed）', timeoutMs: 20_000 },
     );
+
+    // ④' 再等**会话收尾那一帧**（离开 working）。它是本轮实时面的最后一帧，
+    //     也是下面 ⑨ 那条结构性断言的锚点——不等它就关连接会偶发漏掉它。
+    await waitFor(() => states.some((s) => s.node?.status !== 'working'), {
+      what: '会话运行态收尾帧（离开 working）',
+      timeoutMs: 20_000,
+    });
     ws.close();
 
     // ⑤ 帧序契约：同一 assistant 正文节点的「首帧 → delta* → 终态帧」形态
@@ -146,6 +166,42 @@ export default defineCase('T9 gateway WS 流式：session/stream 消息帧序与
       '',
     );
     assertEq(rebuilt, '第一第二第三第四完成', '首帧正文 + delta 拼接应等于模型产出的完整正文');
+
+    // ⑨ 会话运行态帧：与消息帧**共用同一个 `seq` 空间**（批次 E 的结构性保证）
+    //
+    // 这条断言是 E 批存在的全部理由：只要运行态帧与消息帧共用一个计数器 + 走同一条
+    // `mpsc`，「读到 `status != working` 的那一帧」就**必然**意味着「所有 `seq` 更小
+    // 的帧（含本轮全部消息终态帧）都已在其之前被应用」。
+    // 若哪天有人把运行态帧挪回另一条通道、或另起一个计数器，这里立刻变红。
+    //
+    // 注意**不**断言"观察到进入 working"：`session/stream` 的握手没有 ack
+    // （`handle_stream_subscribe` 直接返回通道），因此订阅生效前发出的帧本端收不到
+    // ——而 `working` 恰好是本轮第一帧。这是既有的握手特性，与本批无关；
+    // 下面两条断言都与它无关（一个只看连续性，一个只看收尾帧的位置）。
+    assert(states.length > 0, '会话运行态必须出现在转写流上（不得另走一条通道）');
+    assert(
+      states.every((s) => s.session_id === 'e2e-t9'),
+      '运行态帧同样携带会话归属',
+    );
+    const idle = states.filter((s) => s.node?.status !== 'working');
+    assert(idle.length > 0, '应观察到会话离开 working（收尾那一帧）');
+
+    // 两种帧混在一起也必须严格递增、无缺口（共用一个计数器）
+    for (let i = 1; i < allSeqs.length; i++) {
+      assertEq(
+        allSeqs[i],
+        allSeqs[i - 1] + 1,
+        `两种帧共用一个序号空间：应逐帧 +1（${allSeqs[i - 1]} -> ${allSeqs[i]}）`,
+      );
+    }
+
+    // **核心断言**：收尾那一帧（离开 working）的 seq 大于本轮**全部**消息帧
+    const lastMsgSeq = Math.max(...ops.map((o) => o.seq));
+    assert(
+      idle[0].seq > lastMsgSeq,
+      `会话报"不忙"的那一帧必须排在全部消息帧之后（idle seq=${idle[0].seq} > 末条消息 seq=${lastMsgSeq}）` +
+        '——否则「不忙 ⇒ 本轮已终态」推不出来',
+    );
 
     assert(!wsClosed || ops.length > 0, 'WS 在会话期间不应被服务端提前关闭');
   } finally {
