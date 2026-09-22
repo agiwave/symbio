@@ -116,6 +116,61 @@ pub struct SecureToolWrapper {
     security: Arc<SecurityPolicy>,
 }
 
+/// 审批闸门：判定本次工具调用是否需要用户审批，需要则给出**载荷**。
+///
+/// 返回 `Ok(Some(payload))` ⇒ 本次调用不执行，等用户审批；`Ok(None)` ⇒ 放行。
+///
+/// ## 为什么收成一处
+///
+/// 同一套判定曾以两份几乎逐字相同的代码存在：
+/// [`LocalPlugin::route`]（工具经插件路由进来）与
+/// [`SecureToolWrapper::execute`]（工具经能力注册表进来）各写一份。
+///
+/// 两条入口都**真实存在**——`route` 是注册表未命中时的回落路径，`wrapper` 是
+/// 注册表路径——所以闸门确实要在两处把守，但**判定逻辑**只该有一份。
+/// 两份并存的漂移不是假设，已经发生了：`description` 不一致（`route` 传
+/// 字面量 `"工具执行"`，`wrapper` 传工具真实描述），同一个工具走不同入口，
+/// 用户看到的审批卡文案不一样。
+///
+/// 因此：**闸门判两次，判定写一次**。
+fn approval_gate(
+    security: &SecurityPolicy,
+    ctx: &Arc<dyn InvokeRequest>,
+    tool_name: &str,
+    tool_description: &str,
+    args: &Value,
+) -> Result<Option<Value>, PluginError> {
+    let tool_risk_level = security.get_tool_risk_level(tool_name, Some(args));
+
+    // 用户已在审批卡上批准 → 参数里带 `approved: true`，本轮直接放行。
+    let is_approved = args
+        .get("approved")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // per-session 风险等级阈值：从 ctx[RISK_LEVEL] 读出（与 agent_id/provider_id/mode 同级别）
+    let threshold = risk_level_from_ctx(ctx);
+
+    let (suggested_approval, final_risk_level) =
+        security.check_tool_approval_needed(tool_name, tool_risk_level, threshold);
+
+    // 放行条件：策略没建议审批，或本次调用已带过批准
+    if !suggested_approval || is_approved {
+        return Ok(None);
+    }
+
+    // 产出 confirm 类型 user_prompt 节点（交互模式），或自动模式返回友好错误
+    let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
+    confirm_prompt_payload(
+        tool_name,
+        tool_description,
+        args,
+        &format!("{final_risk_level:?}").to_lowercase(),
+        &mode,
+    )
+    .map(Some)
+}
+
 impl SecureToolWrapper {
     pub fn new(inner: Arc<dyn Capability>, security: Arc<SecurityPolicy>) -> Self {
         Self { inner, security }
@@ -138,33 +193,11 @@ impl Capability for SecureToolWrapper {
         env: &ExecEnv,
         ctx: Arc<dyn InvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let tool_name = self.inner.name();
-        let tool_risk_level = self.security.get_tool_risk_level(&tool_name, Some(&args));
-
-        let is_approved = args
-            .get("approved")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        // per-session 风险等级阈值：从 ctx[RISK_LEVEL] 读出（与 agent_id/provider_id/mode 同级别）
-        let threshold = risk_level_from_ctx(&ctx);
-
-        let (suggested_approval, final_risk_level) =
-            self.security
-                .check_tool_approval_needed(&tool_name, tool_risk_level, threshold);
-
-        let needs_approval = suggested_approval && !is_approved;
-
-        if needs_approval {
-            // 产出 confirm 类型 user_prompt 节点（交互模式），或自动模式返回友好错误
-            let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
-            return confirm_prompt_payload(
-                &tool_name,
-                &self.inner.meta().description,
-                &args,
-                &format!("{final_risk_level:?}").to_lowercase(),
-                &mode,
-            );
+        let meta = self.inner.meta();
+        if let Some(payload) =
+            approval_gate(&self.security, &ctx, &meta.name, &meta.description, &args)?
+        {
+            return Ok(payload);
         }
 
         // 装饰器只加一道审批闸门，执行期环境与信封原样透传。
@@ -264,33 +297,15 @@ impl Plugin for LocalPlugin {
 
         let payload = ctx.payload::<serde_json::Value>()?;
         if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
-            let tool_risk_level = self.security.get_tool_risk_level(&path, Some(&payload));
-
-            let is_approved = payload
-                .get("approved")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-
-            // per-session 风险等级阈值：从 ctx[RISK_LEVEL] 读出（与 agent_id/provider_id/mode 同级别）
-            let threshold = risk_level_from_ctx(&ctx);
-
-            let (suggested_approval, final_risk_level) =
-                self.security
-                    .check_tool_approval_needed(&path, tool_risk_level, threshold);
-
-            let needs_approval = suggested_approval && !is_approved;
-
-            if needs_approval {
-                // 产出 confirm 类型 user_prompt 节点（交互模式），或自动模式返回友好错误
-                let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
-                return confirm_prompt_payload(
-                    &path,
-                    "工具执行",
-                    &payload,
-                    &format!("{final_risk_level:?}").to_lowercase(),
-                    &mode,
-                )
-                .map(|value| PluginPayload::new(&value));
+            // 审批闸门与 `SecureToolWrapper::execute` 共用同一份判定
+            // （见 [`approval_gate`]）——两条入口都真实存在，但判定只写一次。
+            // 描述取**工具真实描述**，与 wrapper 路径一致：此前这里传字面量
+            // `"工具执行"`，同一个工具走不同入口会得到不同的审批卡文案。
+            let meta = tool.meta();
+            if let Some(payload) =
+                approval_gate(&self.security, &ctx, &path, &meta.description, &payload)?
+            {
+                return Ok(PluginPayload::new(&payload));
             }
 
             // 信封 ↔ 结果换算收口在 `invoke_capability`：本处与

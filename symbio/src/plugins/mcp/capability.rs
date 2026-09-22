@@ -24,7 +24,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use super::manager::McpManager;
-use super::types::McpTool;
+use super::types::{McpTool, McpToolCallResponse};
 
 /// 单个 MCP 工具的 `Capability` 包装
 pub struct McpToolCapability {
@@ -95,7 +95,24 @@ impl Capability for McpToolCapability {
             )
             .await
             .map_err(PluginError::InternalError)?;
-        Ok(serde_json::to_value(&result)?)
+
+        // 把 MCP 的**内容块形状**压平成本插件内的一步，再以工具结果的通用形状
+        // 交出（`{"content": <文本>}`）。
+        //
+        // 为什么压平放在这里而不是会话层：`content` 是**内容块数组**（`text` /
+        // `image` / `resource`），那是 MCP 自己的协议形状；会话层只认工具结果的
+        // 通用字段名（`content` 为字符串）。跨插件约定越窄越好——把 MCP 的形状
+        // 外泄出去，会话层就得为每个外部协议长一个分支。
+        let call_result: McpToolCallResponse =
+            serde_json::from_value(result.clone()).unwrap_or_default();
+        let text = call_result.text();
+        let mut out = serde_json::json!({ "content": text });
+        // 结构化结果（规范可选）一并带上：会话层按 `content` 取正文，
+        // 其余字段留在存储里供排查。
+        if let Some(structured) = call_result.structured_content {
+            out["structured_content"] = structured;
+        }
+        Ok(out)
     }
 }
 

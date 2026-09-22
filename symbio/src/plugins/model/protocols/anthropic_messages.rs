@@ -13,6 +13,7 @@ use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRo
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
 use crate::symbio_core::sse::PartialLineExtractor;
+use crate::symbio_core::tool_name::to_wire;
 use crate::symbio_core::{
     get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
 };
@@ -255,7 +256,7 @@ impl ModelProtocol for AnthropicProtocol {
             req["tools"] = json!(tools
                 .iter()
                 .map(|t| json!({
-                    "name": t.name.replace("/", "__"),
+                    "name": to_wire(&t.name),
                     "description": t.description_for_llm(),
                     "input_schema": t.input_schema
                 }))

@@ -2,13 +2,16 @@
 
 > 状态：**批次 A/B/C 已落地**（`cargo check --tests` 通过）；批次 D（异步工具并发）待授权；
 > **批次 E（执行期出口/信号双原语，§8）、批次 F（工具侧收敛到同一出口，§9）、
-> 批次 G（流式工具接上出口、执行期通道归零，§10）、批次 H（两个执行接口签名统一，§11）
-> 与批次 I（SSE 增量解析下沉到协议层，§12）已落地**。
-> 这五批改的是**宿主层 / 执行层 / 协议层之间的协议**（`PluginChannel` 双职责拆为
+> 批次 G（流式工具接上出口、执行期通道归零，§10）、批次 H（两个执行接口签名统一，§11）、
+> 批次 I（SSE 增量解析下沉到协议层，§12）与批次 J（工具调用协议封闭，§13）已落地**。
+> 这六批改的是**宿主层 / 执行层 / 协议层之间的协议**（`PluginChannel` 双职责拆为
 > `EventSink` + `AbortSignal`，工具不再把通道当事件流，执行层不再有帧循环，
 > `Capability::execute` 与 `ModelProvider::execute_turn` 收成同一形状，
-> core 不再认识任何模型协议字段名），
+> core 不再认识任何模型协议字段名，工具名的线上形态收成一对具名函数），
 > 不改本文 §2 的四个收口点，但 §1.1 的 ② 与 §3 代码骨架已按其更新。
+> 批次 J 的**端到端验证顺带照出并修复了两个 MCP 真 bug**（协议字段名漏 camelCase
+> 映射 ⇒ 工具一个都注册不上；`CallToolResult` 按信封建模 ⇒ 结果永远是 `null`），
+> 详见 §13.5.1。
 > 代码位置：其后又做了模块拆分（S2），`chat_loop.rs` **2000 → 434 行**，拆出
 > `chat_loop/{state,inputs,turn,compress,io}.rs`（见 [`./module-layout.md`](./module-layout.md) §4.2）。
 > 本文的"文件:行"只作**历史取证**，请按**符号名**检索。
@@ -1140,6 +1143,206 @@ gemini           ["candidates","content","parts","text"]                -> 内�
   `len=419` 完整参数并正常执行，收尾 `EXIT=0`。
 - 真实模型冒烟：`--provider LMStudio` 普通对话 `EXIT=0`（233 chunks / 62451 bytes，
   文本 144 字符 + 推理 861 字符，`finish=Stop`）。
+
+---
+
+## 13. 批次 J：工具调用协议封闭（已落地）
+
+> 批次 I 封的是**模型 → 我们**这一半（SSE 字段名）。本批封的是**我们 → 模型**这一半：
+> 工具名怎么发出去、怎么认回来，以及工具结果怎么读。三件事，一个共同点——
+> 它们都曾是**约定俗成**：靠 `replace`、靠字段名巧合、靠两份逐字相同的代码。
+
+### 13.1 三处「隐式约定」
+
+| # | 位置 | 收口前 | 问题 |
+|---|---|---|---|
+| 1 | 工具名线上形态 | 出方向 `replace("/", "__")` ×9 处（4 协议 + `types.rs`）、入方向 `replace("__", "/")` ×1 | 见 §13.2 |
+| 2 | 工具结果读取 | `extract_result` 逐级猜 `content` → `output` → `success`/`error` → 原样 | 判定顺序没写下来；`local/shell.rs` 的注释却引用着 `session` 的私有函数 |
+| 3 | 审批检查点 | `LocalPlugin::route` 与 `SecureToolWrapper::execute` 各写一份 | 两份已漂移：`description` 一个是字面量 `"工具执行"`、一个是工具真实描述 |
+
+### 13.2 名字的线上形态：投影 + 查表，不反演
+
+**事实核对（先查再断）**：今天注册的能力名**没有一个含 `/`**——实有名字是
+`vdfs_read` / `shell` / `ask_user` / `todo_write` / `codebase_search` /
+`web_search` / `http_request` / `heartbeat` / `agent_run` /
+`mcp.<server>.<tool>`（MCP 带**点**）/ `agent_<safe_id>_<tool>`。
+
+于是那对 `replace` 的真实状况是：
+
+- `replace("/", "__")` —— **空转**（没有名字含 `/`）；
+- 而真正违反协议字符集的是 MCP 的 `.`（OpenAI / Anthropic 只接受
+  `[A-Za-z0-9_-]`），它**没被处理**，就这样送给了模型；
+- `replace("__", "/")` —— 反演，只在「名字里的 `__` 一定是 `/` 变的」时成立。
+  名字里本来有 `__` 时它**错得没有声音**：解析到一个不存在的工具，
+  报错信息还指着另一个名字。
+
+**新形状**（`symbio_core/tool_name.rs`）：
+
+```rust
+pub fn to_wire(canonical: &str) -> String            // 字符集之外的字符一律 → "__"
+pub fn resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a str>) -> Option<&'a str>
+```
+
+- 出方向：**一个具名函数**，9 处调用点收成同一份字符集定义；
+- 入方向：**查注册表**（`visitor.list_capability()` 的名字集合），不反演。
+  **字面名优先**——`mcp__fs__read` 既可能是 `mcp.fs.read` 的线上形态、也可能
+  本身就是这个名字，只有集合能回答，而字面相等者赢，歧义有确定答案；
+- 解析失败 → **不猜**，按原样交给路由，由它给出诚实的 `NotFound`。
+  反演猜错会调起**另一个工具**，那比报错坏得多。
+
+顺带修掉的：命中判据从 `has_capability(线上名)` 改为「解析成功」——
+前者按线上名查表，带非法字符的名字**永远查不到**，于是明明注册过也要白走一遍
+`route` 回落。
+
+**为什么在 core**（core 准入规则是**依赖方数量**）：`to_wire` 被 `model` 插件
+（4 个协议的请求序列化）依赖，`resolve` 被 `session` 插件依赖，两者是同一份契约的
+两半（改一半不改另一半就是静默错位）。名字由 `model` 发出、由 `session` 认回，
+两个插件互相不可见，core 是唯一共同可见处——与 §12 的 `SseLineParser` 同构：
+**契约在 core，字段名与实现留在拥有它的层**。
+
+### 13.3 工具结果：顺序即约定
+
+`extract_result` **留在 `session/tool_executor.rs`**（唯一消费方是它自己），
+但判定顺序被写成契约（模块文档的表 + 两个字段名常量 + 10 个用例钉住）：
+
+```
+content 是字符串 → output 是字符串 → success 是布尔 → 顶层是字符串 → 整包 JSON
+```
+
+- 「**先命中者胜**」而不是「取第一个存在的键」：`{"content":[1,2],"output":"x"}`
+  里 `content` 存在但不是字符串 ⇒ 继续走到 `output`；按「存在即取」会把数组
+  原样丢给模型。
+- 「结果文本本就没有契约」这条**仍然成立**（工具返回任意 JSON，模型只消费一段
+  文本，这层适配是必要的）——失误只在于它曾是隐式的。
+- **控制流不得建立在这里**：要判「等待用户动作」用
+  `symbio_core::failure_kind` 这个约定字段，不猜形状（§9.3）。
+
+### 13.4 审批闸门：判两次，写一次
+
+两条入口都真实存在（`route` 是注册表未命中的回落路径，`wrapper` 是注册表路径），
+所以闸门确实要在两处把守；但**判定逻辑**收成一个 `approval_gate`，
+两处各三行。漂移修掉：`route` 不再传字面量 `"工具执行"`，改传工具真实描述——
+同一个工具走不同入口，审批卡文案现在一致。
+
+### 13.5 已知缺陷（本批**未**修，留待独立决策）
+
+- **Gemini `functionResponse.name` 填的是 `tool_call_id`**（规范要求填函数名）。
+  修它要把工具名带到 `role=Tool` 的消息上（`build_tool_message` 目前把
+  `ChatMessage.name` 留空），是一次独立的协议改动，不夹带在本批。
+  该处的 `replace` 也不再保留——工具调用 id 不是能力名，对它做线上形态换算无意义。
+- **MCP 工具名在前端显示为 `mcp__server__tool`**（线上形态）。已核对前端**没有**
+  任何按 `mcp.` 前缀的判断（`tauri/src` 无匹配），所以只影响显示、不影响逻辑。
+  要显示回原名需在前端持一份映射，属独立问题。
+- **线上名投影不单射**（`a.b` 与 `a__b` 都得到 `a__b`）。由 `resolve` 的字面优先
+  消解；真出现两个能力名撞同一线上名时，**后一个不可达**——今天不存在这种组合。
+
+### 13.5.1 端到端途中**发现并修复**的两个 MCP 真 bug
+
+这两个 bug 都不是本批改造引入的，是**本批的端到端验证把它们照出来的**——
+它们的共同形态是「**整条链路静默失效**」：不报错、不崩、只是什么都不发生。
+
+**bug 1：MCP 工具一个都注册不上（协议字段名大小写）**
+
+MCP 2025-06-18 规范用 camelCase（`protocolVersion` / `serverInfo` /
+`inputSchema` / `nextCursor` / `readOnlyHint` / `isError`），而 Rust 侧结构体
+是 snake_case，**没有 `#[serde(rename_all = "camelCase")]`** ⇒ `initialize`
+响应解析失败（`missing field 'protocol_version'`）⇒ `discover_tools` 报错 ⇒
+该 server 的工具**一个都不注册**。
+
+表象是「配了 MCP server，工具列表里却什么都没有」，而错误只经 `tracing::warn!`
+输出（**CLI 不显示**），排查成本极高。
+
+*定位手法*：让 mock MCP server 自己写日志（`fs.appendFileSync` 记 spawn 与收到的
+每个 method），看到**只收到 `initialize`、`tools/list` 根本没发出**；再给 5 个协议
+类型补 `rename_all`，立刻全通。*决定性实验*：先把 mock 改成 snake_case（链路即通）
+再改回 camelCase（修复后仍通），反证字段名是唯一根因。
+
+*修复*：`mcp/types.rs` 给 `McpInitializeResponse` / `McpServerInfo` /
+`ListToolsResult` / `McpTool` / `ToolAnnotations` / `McpToolCallResponse` 补
+`rename_all = "camelCase"`（`McpTool.description` 另加 `#[serde(default)]`，
+规范里它可选）。顺带删掉 `McpError`——它是 `JsonRpcError` 的**遗留重复定义**，
+此前只被 `McpToolCallResponse.error` 引用。
+
+**bug 2：MCP 工具结果永远是字符串 `"null"`**
+
+`McpToolCallResponse` 按 **JSON-RPC 信封**建模（`{result, error, isError}`，
+三个字段全可选），却拿 **`CallToolResult` 载荷**（`{content, isError}`）去反序列化它。
+全可选 ⇒ 「解析成功」⇒ 返回 `Value::Null` ⇒ 正文永远渲染成字符串 `"null"`，
+**且不报任何错**。
+
+*定位手法*：dump 模型收到的第二次请求体，`role=tool` 的 content 是字符串 `'null'`。
+
+*修复*：`McpToolCallResponse` 重新建模为规范载荷
+（`content` / `structuredContent` / `isError`）+ `text()` 压平方法；
+`stdio.rs` / `http.rs` 只借它读 `isError`（信封层的 `error` 已在上方处理），
+其余原样返回；`capability.rs::execute` 负责把内容块压平成
+`{"content": <文本>}` 再交出——**跨插件约定保持最窄**，会话层不需要认识
+MCP 的「内容块数组」形状。
+
+### 13.6 本批的账
+
+| 项 | 变化 |
+|---|---|
+| 出方向名字换算 | 9 处 `replace("/", "__")` → 1 个 `tool_name::to_wire`（并顺带覆盖 `.` 等非法字符） |
+| 入方向名字解析 | `replace("__", "/")` → 查注册表 `tool_name::resolve`（字面优先，失败不猜） |
+| 命中判据 | `visitor.has_capability(线上名)` → 「解析成功」 |
+| 审批判定 | 2 份逐字相同（且已漂移）→ 1 个 `approval_gate` |
+| 新增 core 内容 | 仅 `tool_name`（**两个模块**依赖，含依赖方对照表）；工具结果读取器**故意不进 core** |
+| MCP 协议字段名 | 6 个类型补 camelCase 映射；删 `McpError` 重复定义 |
+| MCP 工具结果 | 从「按信封解析 ⇒ 永远是 `null`」→「按载荷解析 ⇒ 正文真实回流」 |
+
+### 13.7 验证
+
+- `node scripts/gate.mjs` **32 / 32**；`cargo test --lib` **881 passed / 0 failed**
+  （852 → 881，+29：`tool_name.test.rs` +8、`tool_executor.test.rs` +10、
+  `mcp/types.test.rs` +11——6 个 camelCase 映射 + 5 个 `CallToolResult` 载荷语义）。
+- **CLI 端到端**：见 §13.8。
+
+### 13.8 端到端（已跑通）
+
+手法与 §12.7 同款：**真实 CLI + 本地 mock**，`--homedir .symbio`。
+三个 mock 场景 + 两条真实模型冒烟，全部 `EXIT=0`。
+
+**场景 A · `mock-mcp-wire`（本批核心证据）**
+
+模型回调用**线上名** `mcp__mocksrv__echo`（带点能力名的投影）：
+
+```
+[session INFO] [Tool] 请求发起: mcp__mocksrv__echo args={"text":"hello"}
+[session INFO] [Tool] Using ToolManager for: mcp__mocksrv__echo (能力名 mcp.mocksrv.echo)
+[session INFO] [Tool] 正常结束: mcp__mocksrv__echo (耗时 94ms, 结果长度 14, pending=-)
+```
+
+- **`to_wire` 侧**：mock 侧审计每次请求的工具名——`工具名 21 个，全部落在
+  `[A-Za-z0-9_-]` 内`，列表含 `mcp__mocksrv__echo`。
+- **`resolve` 侧**：`(能力名 mcp.mocksrv.echo)` 这一行就是**线上名认回带点能力名**
+  的硬证据。
+- **结果正文**（bug 2 修复的证据）：dump 模型收到的第二次请求体 ——
+  `assistant.tool_call name=mcp__mocksrv__echo` → `role=tool content="mcp-echo:hello"`。
+  修复前这里是字符串 `"null"`，`结果长度` 是 4；现在是 14。
+
+**场景 B · `mock-tool-unknown`（失败要诚实）**
+
+```
+[session WARN] [Tool] 名字 nope__such_tool 不在能力注册表里（线上名解析失败），按原样路由
+[session ERROR] [Tool] ROUTE Error: 插件未找到：… 'nope__such_tool' 无法识别或子插件未挂载
+```
+
+stdout `未知工具已收场`，`EXIT=0`——**不猜、不崩**，会话正常收场。
+
+**场景 C · `mock-chat-split`（批次 I 回归）**
+
+SSE 行被逐字节切开（一行 809 字节、`SPLIT_CHUNK=1`），stdout 与 mock 导出的
+期望文本**逐字节一致**（627 字符，含原样 UTF-8 中文、`\uXXXX` 转义、代理对 emoji
+`😀`、`\t`、`\"`）。仅差一个结尾换行（`-q` 模式补的）。
+
+**真实模型冒烟 · `.symbio/model/LMstudio`（`google/gemma-4-e2b`）**
+
+- 内置工具：`请用 shell 工具执行 echo symbio-e2e-ok` →
+  `[Tool] Using ToolManager for: cmd (能力名 cmd)`，结果长度 30，模型正确复述输出。
+- **MCP 工具（走真实模型）**：`请调用 mcp__mocksrv__echo，text 传 symbio-mcp-ok` →
+  `结果长度 22`，模型回答 `它返回的内容是：mcp-echo:symbio-mcp-ok`。
+  即**模型自己使用线上名调用、正文正确回流**——两个 MCP bug 的修复在真实模型上确证。
 
 ---
 

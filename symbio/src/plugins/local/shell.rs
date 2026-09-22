@@ -210,8 +210,10 @@ impl ShellTool {
     /// - `abort`：中止信号；`abort()` 置位即 kill 子进程
     /// - `target`：增量快照的节点身份（编排层提供，可能为空——直连调用没有占位节点）
     ///
-    /// 返回 [`Response`]（`exit_code` / `output` / `risk_level`），由
-    /// `execute_tool_async` 经 `extract_result` 取 `output` 回传 LLM。
+    /// 返回 [`Response`]（`exit_code` / `output` / `risk_level`）。
+    ///
+    /// `output` 这个**字段名是约定**：编排层按它取正文回传 LLM
+    /// （读取侧在 `session/tool_executor.rs::extract_result`）。改名等于改约定。
     #[allow(clippy::too_many_arguments)]
     async fn execute_streaming(
         &self,

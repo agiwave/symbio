@@ -22,6 +22,7 @@ pub mod providers;
 pub mod schemas;
 pub mod sse;
 mod text;
+pub mod tool_name;
 mod tools;
 pub mod transcript_stream;
 mod transport;

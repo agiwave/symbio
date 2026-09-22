@@ -137,3 +137,149 @@ fn filter_valid_tool_names_edge_cases() {
     assert_eq!(v.len(), 2);
     assert_eq!(n, 0);
 }
+
+// ============================================================================
+// MCP 报文字段名映射（camelCase ↔ snake_case）
+// ============================================================================
+//
+// 这组用例钉的是**协议字段名**。漏掉映射不会编译失败、不会 panic，只会让
+// 反序列化在运行期返回 Err——而那个 Err 经 `tracing::warn!` 输出，CLI 看不见。
+// 曾经的全部后果：`initialize` 解析失败 ⇒ `tools/list` 根本不发出 ⇒
+// 配了 MCP server 却一个工具都注册不上。
+//
+// 因此这里的输入**必须逐字取自 MCP 2025-06-18 规范**（camelCase），
+// 不得为了方便改成 snake_case——那正是让这个 bug 长期潜伏的原因。
+
+/// 规范形状的 `initialize` 响应（原文照抄规范示例）
+const INITIALIZE_CAMEL: &str = r#"{
+  "protocolVersion": "2025-06-18",
+  "capabilities": { "tools": { "listChanged": true } },
+  "serverInfo": { "name": "mock", "version": "1.0.0" },
+  "instructions": "用 echo 工具回显"
+}"#;
+
+#[test]
+fn initialize_response_parses_the_spec_camel_case_shape() {
+    let r: McpInitializeResponse = serde_json::from_str(INITIALIZE_CAMEL).unwrap();
+    assert_eq!(r.protocol_version, "2025-06-18");
+    assert_eq!(r.server_info.name, "mock");
+    assert_eq!(r.server_info.version.as_deref(), Some("1.0.0"));
+    assert_eq!(
+        r.capabilities.tools.as_ref().map(|t| t.list_changed),
+        Some(true)
+    );
+    assert_eq!(r.instructions.as_deref(), Some("用 echo 工具回显"));
+}
+
+#[test]
+fn initialize_response_requires_protocol_version_in_camel_case() {
+    // 反面：只有 snake_case 时**必须**失败——证明映射真的在起作用，
+    // 而不是「两种写法恰好都能过」
+    let snake = r#"{"protocol_version":"2025-06-18","server_info":{"name":"mock"}}"#;
+    assert!(serde_json::from_str::<McpInitializeResponse>(snake).is_err());
+}
+
+/// 规范形状的 `tools/list` 响应
+const TOOLS_LIST_CAMEL: &str = r#"{
+  "tools": [
+    {
+      "name": "echo",
+      "description": "回显",
+      "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } } },
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "title": "Echo" }
+    },
+    { "name": "bare", "inputSchema": { "type": "object" } }
+  ],
+  "nextCursor": "page2"
+}"#;
+
+#[test]
+fn tools_list_parses_the_spec_camel_case_shape() {
+    let r: ListToolsResult = serde_json::from_str(TOOLS_LIST_CAMEL).unwrap();
+    assert_eq!(r.tools.len(), 2);
+    assert_eq!(r.tools[0].name, "echo");
+    assert_eq!(r.tools[0].description, "回显");
+    assert_eq!(r.tools[0].input_schema["type"], "object");
+    // 分页游标也是 camelCase——漏了它翻页永远停在第一页（且不报错）
+    assert_eq!(r.next_cursor.as_deref(), Some("page2"));
+}
+
+#[test]
+fn tool_description_is_optional() {
+    // 规范里 description 可选；缺它不得把整份 tools/list 拖垮
+    let r: ListToolsResult = serde_json::from_str(TOOLS_LIST_CAMEL).unwrap();
+    assert_eq!(r.tools[1].name, "bare");
+    assert_eq!(r.tools[1].description, "");
+}
+
+#[test]
+fn tool_annotations_use_camel_case() {
+    let r: ListToolsResult = serde_json::from_str(TOOLS_LIST_CAMEL).unwrap();
+    let a = r.tools[0]
+        .annotations
+        .as_ref()
+        .expect("annotations 应被解析");
+    assert!(a.read_only_hint);
+    assert!(!a.destructive_hint);
+    assert_eq!(a.title.as_deref(), Some("Echo"));
+}
+
+#[test]
+fn tool_call_response_is_error_uses_camel_case() {
+    let r: McpToolCallResponse =
+        serde_json::from_str(r#"{"content":[{"type":"text","text":"x"}],"isError":true}"#).unwrap();
+    assert_eq!(r.is_error, Some(true));
+    assert_eq!(r.text(), "x");
+}
+
+// ---- 以下是 `tools/call` 的**载荷**语义 -------------------------------------
+//
+// 曾经这里按 JSON-RPC **信封**（`{result, error, isError}`）建模，却拿
+// `CallToolResult` **载荷**（`{content, isError}`）去反序列化：三个字段全可选，
+// 于是"解析成功"、内容是 `Value::Null`、正文永远渲染成字符串 `"null"`，且全程
+// 不报错。下面这组用例把"读的是载荷"这件事钉死。
+
+#[test]
+fn call_tool_result_reads_the_payload_not_the_envelope() {
+    // 规范 `CallToolResult` 载荷（逐字取自 MCP 规范示例形状）
+    let r: McpToolCallResponse =
+        serde_json::from_str(r#"{"content":[{"type":"text","text":"mcp-echo:hello"}]}"#).unwrap();
+    assert_eq!(r.text(), "mcp-echo:hello");
+    assert_eq!(r.is_error, None);
+}
+
+#[test]
+fn call_tool_result_text_joins_multiple_blocks() {
+    let r: McpToolCallResponse = serde_json::from_str(
+        r#"{"content":[{"type":"text","text":"a"},{"type":"text","text":"b"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(r.text(), "a\nb");
+}
+
+#[test]
+fn call_tool_result_text_keeps_non_text_blocks_as_json() {
+    // 非 text 块（image / resource / audio）不丢——原样保留 JSON 交给上层判断
+    let r: McpToolCallResponse = serde_json::from_str(
+        r#"{"content":[{"type":"image","data":"AA==","mimeType":"image/png"}]}"#,
+    )
+    .unwrap();
+    assert!(r.text().contains("\"image\""));
+    assert!(r.text().contains("image/png"));
+}
+
+#[test]
+fn call_tool_result_falls_back_to_structured_content() {
+    // content 为空时退到 structuredContent，而不是交白卷
+    let r: McpToolCallResponse =
+        serde_json::from_str(r#"{"content":[],"structuredContent":{"total":3}}"#).unwrap();
+    assert_eq!(r.text(), r#"{"total":3}"#);
+}
+
+#[test]
+fn call_tool_result_empty_is_empty_not_null() {
+    // 空结果渲染成 ""，绝不能是 "null"
+    let r: McpToolCallResponse = serde_json::from_str("{}").unwrap();
+    assert_eq!(r.text(), "");
+    assert!(!r.text().contains("null"));
+}

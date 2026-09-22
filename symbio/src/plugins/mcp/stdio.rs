@@ -177,32 +177,19 @@ impl McpManager {
             .result
             .ok_or_else(|| "tools/call response missing result".to_string())?;
 
-        // 优先按 McpToolCallResponse 解析
-        if let Ok(tool_response) = serde_json::from_value::<McpToolCallResponse>(result.clone()) {
-            if let Some(error) = tool_response.error {
-                return Err(format!(
-                    "Tool call error: {} - {}{}",
-                    error.code,
-                    error.message,
-                    error
-                        .data
-                        .as_ref()
-                        .map(|d| format!(" ({d})"))
-                        .unwrap_or_default()
-                ));
-            }
-            // tool 自身标记的失败（isError=true）
-            if tool_response.is_error == Some(true) {
-                let r = tool_response.result.unwrap_or(Value::Null);
-                let msg = r
-                    .as_str()
-                    .map(String::from)
-                    .unwrap_or_else(|| r.to_string());
-                return Err(format!("Tool returned error: {msg}"));
-            }
-            return Ok(tool_response.result.unwrap_or(Value::Null));
+        // `result` **就是**规范里的 `CallToolResult`（`{content, isError, …}`），
+        // 不是 JSON-RPC 信封——信封层（`error`）已在上方处理过。
+        // 这里只借它读 `isError`：工具**自己**声明失败时转成 Err，
+        // 否则模型会把失败当成功结果继续往下推理。
+        //
+        // 曾经这里按信封建模，于是 `{content, isError}` 反序列化「成功」
+        // 却把内容全丢（三个字段都可选），返回 `Value::Null`——工具白跑，
+        // 模型收到字符串 `"null"`，且全程无报错。见 `McpToolCallResponse` 文档。
+        let call_result: McpToolCallResponse =
+            serde_json::from_value(result.clone()).unwrap_or_default();
+        if call_result.is_error == Some(true) {
+            return Err(format!("Tool returned error: {}", call_result.text()));
         }
-        // 否则直接返回原始 result
         Ok(result)
     }
 }

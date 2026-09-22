@@ -48,12 +48,58 @@ fn args_summary(args: &Value, max_chars: usize) -> String {
     }
 }
 
+/// 工具结果里「给模型看的正文」字段名（[`extract_result`] 的第 1 条判据）。
+pub const RESULT_CONTENT: &str = "content";
+/// 命令类工具的结果正文字段名（`shell` 等；[`extract_result`] 的第 2 条判据）。
+pub const RESULT_OUTPUT: &str = "output";
+
 /// 从工具返回的 JSON 数据中提取可读的文本结果。
+///
+/// ## 判定顺序（**先命中者胜**，顺序即约定）
+///
+/// | 序号 | 判据 | 结果 |
+/// |---|---|---|
+/// | 1 | `content` 是字符串 | 它本身 |
+/// | 2 | `output` 是字符串 | 它本身 |
+/// | 3 | `success` 是布尔 | `true` → 整包 JSON；`false` → `Error: {error}` |
+/// | 4 | 顶层就是字符串 | 它本身 |
+/// | 5 | 以上都不是 | 整包 JSON |
+///
+/// 「先命中者胜」而不是「取第一个存在的键」：`{"content": [1,2], "output": "x"}`
+/// 里 `content` 存在但不是字符串 ⇒ 第 1 条不成立，继续走到 `output`。
+/// 若按「存在即取」，数组会被原样丢给模型。
+///
+/// ## 为什么是「猜字段」而不是「强类型结果」
+///
+/// 这里必须说清楚，否则下一轮很容易把它当遗留脏东西顺手「修」掉：
+///
+/// **结果文本本就没有契约**——工具可以返回任意 JSON（`shell` 给 `output`、
+/// `vdfs_read` 给 `VdfsContent`、`ask_user` 给 `content` + `prompt`），而模型只
+/// 消费**一段文本**。这层「把任意形状压成一段文本」的适配是**必要**的，不是失误。
+///
+/// 失误在于它曾是**隐式**的：判定顺序没写下来，加一个工具就得读源码才知道自己
+/// 该返回哪个字段名。现在顺序即约定、字段名有常量、顺序有测试钉住。
+///
+/// ## 为什么不放 `symbio_core`
+///
+/// 本函数的**唯一**消费方就是本文件（生产方是各插件里的工具，它们只需要知道
+/// 「写 `output` / `content`」这一个事实，不需要这段代码）。按 core 的准入规则
+/// ——「只被一个模块依赖的内容不进 core」——它就该留在本模块。
+///
+/// 因此「工具结果字段名」这条跨插件约定**只能以文档与常量形式存在**：
+/// 生产方（`local/shell.rs` 等）在自己的文档注释里声明自己写哪个字段，
+/// 消费方在这里声明自己读哪个字段。这条张力是**自觉保留**的，不是疏漏——
+/// 把它升成 core 里的共享类型，是用架构纯度换掉一个不存在的问题。
+///
+/// ## 控制流不得建立在这里
+///
+/// 需要「本轮结束于等待用户动作」这类判断时，用 [`crate::symbio_core::failure_kind`]
+/// 这个**约定字段**（见 [`pending_prompt_from`]），不要靠猜 JSON 形状。
 pub fn extract_result(data: &Value) -> String {
-    if let Some(content) = data.get("content").and_then(|v| v.as_str()) {
+    if let Some(content) = data.get(RESULT_CONTENT).and_then(|v| v.as_str()) {
         return content.to_string();
     }
-    if let Some(output) = data.get("output").and_then(|v| v.as_str()) {
+    if let Some(output) = data.get(RESULT_OUTPUT).and_then(|v| v.as_str()) {
         return output.to_string();
     }
     if let Some(success) = data.get("success").and_then(|s| s.as_bool()) {
@@ -142,8 +188,9 @@ pub struct PendingPrompt {
 /// 从工具返回的 `Data` 里读出「需要用户动作」的意图。
 ///
 /// 判据是 `failure_kind` 这个**约定字段**（[`failure_kind::is_pending`]），
-/// 不是靠猜 JSON 形状——`extract_result` 那种"从任意 JSON 里找 content/output"
-/// 的启发式可以接受（结果文本本就没有契约），但**控制流**不能建立在启发式上。
+/// 不是靠猜 JSON 形状——[`extract_result`] 那种"从任意 JSON 里找 content/output"
+/// 的启发式可以接受（**结果文本本就没有契约**，见其文档），但**控制流**不能建立
+/// 在启发式上。
 fn pending_prompt_from(data: &Value) -> Option<PendingPrompt> {
     let kind = data.get("failure_kind").and_then(|v| v.as_str())?;
     if !crate::symbio_core::failure_kind::is_pending(kind) {
@@ -216,11 +263,49 @@ pub async fn execute_tool_async(
         args_summary(&args, 200)
     );
 
-    let invoke_name = tool_name.replace("__", "/");
     let p = match parent {
         Some(p) => p,
         None => return ("Error: No parent plugin".into(), false, None),
     };
+
+    // 入方向：模型给的**线上名** → 能力名。
+    //
+    // 判据是「注册表里谁映射到这个名字」，**不是**「把名字反演回去」：
+    // `mcp__fs__read` 既可能是 `mcp.fs.read` 的线上形态，也可能本身就是
+    // `mcp__fs__read`——字符串分不出这两种，集合可以。
+    //
+    // 收口前这里是 `tool_name.replace("__", "/")`：那条反演只在「名字里的 `__`
+    // 一定是非法字符变的」时才成立，而它错得没有声音——解析到一个不存在的工具，
+    // 报错信息还指着另一个名字。
+    //
+    // 投影函数（`tool_name::to_wire`）在 core，因为**两个模块**依赖它：model 侧
+    // 4 个协议要把名字发出去，本处要把它认回来。而「认回来」这一步（下面的
+    // 解析）只有本模块需要，故留在本模块，不上 trait、不进 core。
+    let tool_visitor = ctx.get(crate::symbio_core::CAPABILITY_VISITOR);
+    let known_names: Vec<String> = match tool_visitor.as_ref() {
+        Some(v) => v
+            .list_capability()
+            .await
+            .into_iter()
+            .map(|m| m.name)
+            .collect(),
+        None => Vec::new(),
+    };
+    let resolved_name =
+        crate::symbio_core::tool_name::resolve(tool_name, known_names.iter().map(String::as_str))
+            .map(str::to_string);
+    // 解析失败**不猜**：按原样交给路由，由它给出诚实的 NotFound。
+    // 反演猜错会调起**另一个工具**，那比报错坏得多。
+    let invoke_name = resolved_name
+        .clone()
+        .unwrap_or_else(|| tool_name.to_string());
+    if resolved_name.is_none() && tool_visitor.is_some() {
+        plugin_warn!(
+            "session",
+            "[Tool] 名字 {} 不在能力注册表里（线上名解析失败），按原样路由",
+            tool_name
+        );
+    }
 
     let session_id = ctx.get(crate::symbio_core::SESSION_ID).unwrap_or_default();
     let agent_id = ctx.get(crate::symbio_core::AGENT_ID).unwrap_or_default();
@@ -240,22 +325,31 @@ pub async fn execute_tool_async(
     tool_ctx.set(crate::symbio_core::EVENT_SINK, sink.clone());
     tool_ctx.set(crate::symbio_core::ABORT_SIGNAL, abort.clone());
 
-    // 工具调用的发起（三条形态：ToolManager 命中 / ToolManager 未命中回落 route /
+    // 工具调用的发起（三条形态：ToolManager 命中 / 未命中回落 route /
     // 无 ToolManager 直接 route）。包成 `Box<dyn Future>` 是为了下面那个
     // 「轮询 + 空闲判定」的循环能重复借用同一份 future。
+    //
+    // 「命中」的判据是**解析成功**（名字在注册表里），不再是
+    // `has_capability(线上名)`——后者按线上名查表，带非法字符的名字永远查不到，
+    // 于是明明注册过也要走一遍 route 回落。
     let mut route_fut: std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<crate::symbio_core::PluginPayload, PluginError>>
                 + Send,
         >,
-    > = if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-        if tool_visitor.has_capability(tool_name).await {
-            plugin_info!("session", "[Tool] Using ToolManager for: {}", tool_name);
+    > = if let Some(tool_visitor) = tool_visitor {
+        if resolved_name.is_some() {
+            plugin_info!(
+                "session",
+                "[Tool] Using ToolManager for: {} (能力名 {})",
+                tool_name,
+                invoke_name
+            );
             let _ = tool_ctx.set_payload(args.clone());
             let visitor = tool_visitor.clone();
             let tool_ctx2 = tool_ctx.clone();
-            let tool_name2 = tool_name.to_string();
-            Box::pin(async move { visitor.invoke(&tool_name2, tool_ctx2.clone()).await })
+            let canonical = invoke_name.clone();
+            Box::pin(async move { visitor.invoke(&canonical, tool_ctx2.clone()).await })
         } else {
             plugin_info!(
                 "session",

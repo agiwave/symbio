@@ -52,7 +52,12 @@ impl std::fmt::Display for RequestId {
 ///
 /// agent 可以根据这些注解做安全决策：例如不调用 destructiveHint=true 的工具
 /// 在自动批处理时。
+///
+/// `rename_all = "camelCase"`：MCP 报文用 camelCase（`readOnlyHint`…），
+/// 而 Rust 侧是 snake_case。**协议类型必须显式声明这层映射**——漏一处，
+/// 反序列化就在运行期静默失败（见 `McpInitializeResponse` 的注释）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolAnnotations {
     #[serde(default, skip_serializing_if = "is_false")]
     pub read_only_hint: bool,
@@ -72,8 +77,12 @@ fn is_false(b: &bool) -> bool {
 
 /// MCP 工具定义
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct McpTool {
     pub name: String,
+    /// 规范里 `description` 是**可选**的（工具可以没有描述）——
+    /// 缺 `default` 会让「没写描述的工具」把整个 `tools/list` 拖垮。
+    #[serde(default)]
     pub description: String,
     pub input_schema: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,35 +114,82 @@ pub fn validate_tool_name(name: &str) -> Result<(), String> {
 
 /// `tools/list` 响应（支持分页）
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ListToolsResult {
     pub tools: Vec<McpTool>,
     #[serde(default)]
     pub next_cursor: Option<String>,
 }
 
-/// MCP 工具调用响应
-#[derive(Debug, Clone, Deserialize)]
+/// `tools/call` 的**结果载荷**（规范里的 `CallToolResult`）。
+///
+/// ## ⚠ 这**不是** JSON-RPC 信封
+///
+/// 信封由 [`JsonRpcResponse`] 承载（`{result, error}`）；调用方拿到的
+/// `response.result` **已经**是这一层。曾经这里按信封建模
+/// （`{result, error, isError}`），于是拿 `{content, isError}` 去反序列化它：
+/// 三个字段全部可选 ⇒ 「解析成功」⇒ 返回
+/// `tool_response.result.unwrap_or(Value::Null)` ⇒ **结果被静默换成 `null`**。
+///
+/// 实测后果（批次 J 的端到端）：MCP 工具确实被调用了（mock server 收到
+/// `tools/call`），但喂给模型的结果正文是字符串 `"null"`——工具白跑，
+/// 模型拿着空结果继续推理。全程无任何报错。
+///
+/// 教训：**协议类型宁可让字段缺失时报错，也不要全字段可选**——全可选的结构
+/// 会把「形状不匹配」变成「解析成功但内容为空」，而后者无法从日志看出来。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct McpToolCallResponse {
+    /// 内容块列表（`text` / `image` / `resource` …）
     #[serde(default)]
-    pub result: Option<serde_json::Value>,
+    pub content: Vec<serde_json::Value>,
+    /// 结构化结果（规范可选字段）
     #[serde(default)]
-    pub error: Option<McpError>,
-    /// MCP 2025-06-18 规范：tool 自身标记的失败（区别于 protocol error）
-    #[serde(default, rename = "isError")]
+    pub structured_content: Option<serde_json::Value>,
+    /// 工具**自身**标记的失败（区别于 protocol error）
+    #[serde(default)]
     pub is_error: Option<bool>,
 }
 
-/// MCP 错误（含 data 字段，符合 JSON-RPC 2.0）
-#[derive(Debug, Clone, Deserialize)]
-pub struct McpError {
-    pub code: i32,
-    pub message: String,
-    #[serde(default)]
-    pub data: Option<serde_json::Value>,
+impl McpToolCallResponse {
+    /// 把内容块压成一段文本：`text` 块取 `text`，其余块保留其 JSON 表示。
+    ///
+    /// 压平发生在 **MCP 插件内**（调用点），不外泄给会话层——「内容块数组」
+    /// 是 MCP 自己的形状，会话层只认工具结果的通用字段名。
+    pub fn text(&self) -> String {
+        if self.content.is_empty() {
+            return self
+                .structured_content
+                .as_ref()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+        }
+        self.content
+            .iter()
+            .map(|block| match block.get("text").and_then(|v| v.as_str()) {
+                Some(t) => t.to_string(),
+                None => block.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 /// MCP 初始化响应
+///
+/// ## `rename_all` 不是装饰：漏了它，MCP 整条链路静默失效
+///
+/// MCP 2025-06-18 规范用 camelCase（`protocolVersion` / `serverInfo`），
+/// 而 Rust 字段是 snake_case。**没有这行映射时**，`initialize` 的响应解析必然
+/// 失败（`missing field 'protocol_version'`）→ `discover_tools` 报错 →
+/// 该 server 的工具一个都注册不上。而失败发生在 `initialize` 阶段、
+/// 错误只经 `tracing::warn!` 输出（CLI 不显示），因此表象是
+/// 「配置了 MCP server，工具列表里却什么都没有」——排查成本极高。
+///
+/// 已在真实链路验证：修复前 mock server 只收到 `initialize`，`tools/list`
+/// 根本没发出（见 `symbio/src/plugins/mcp/docs/` 与批次 J 的端到端记录）。
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct McpInitializeResponse {
     pub protocol_version: String,
     pub server_info: McpServerInfo,
@@ -169,6 +225,7 @@ pub struct ToolsCapability {
 
 /// MCP 服务器信息
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct McpServerInfo {
     pub name: String,
     #[serde(default)]

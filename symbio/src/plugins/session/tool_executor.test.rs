@@ -10,6 +10,91 @@ fn test_ctx() -> Arc<dyn InvokeRequest> {
     Arc::new(SimpleRequest::new(None, None))
 }
 
+// ==================== extract_result：判定顺序即约定 ====================
+//
+// 这组用例的作用是**钉住判定顺序**——它现在是 `extract_result` 文档里的表，
+// 不再是「读源码才知道」的实现细节。顺序变了这里会红。
+
+#[test]
+fn content_wins_over_output() {
+    // 1 优先于 2：两个都在时取 content
+    assert_eq!(
+        extract_result(&json!({"content": "正文", "output": "命令输出"})),
+        "正文"
+    );
+}
+
+#[test]
+fn output_is_read_when_content_absent() {
+    // `shell` 的返回形状（字段名约定见 `local/shell.rs::execute_streaming`）
+    assert_eq!(extract_result(&json!({"output": "ls 结果"})), "ls 结果");
+}
+
+#[test]
+fn success_true_falls_back_to_the_whole_payload() {
+    // 3：既无 content 也无 output、但 success=true → 整包 JSON
+    // （形状不透明时宁可把结构给模型看，也不要凭空造一段文本）
+    assert_eq!(
+        extract_result(&json!({"success": true, "n": 3})),
+        r#"{"n":3,"success":true}"#
+    );
+}
+
+#[test]
+fn success_false_renders_the_error_field() {
+    assert_eq!(
+        extract_result(&json!({"success": false, "error": "权限不足"})),
+        "Error: 权限不足"
+    );
+}
+
+#[test]
+fn success_false_without_error_says_unknown() {
+    assert_eq!(
+        extract_result(&json!({"success": false})),
+        "Error: unknown error"
+    );
+}
+
+#[test]
+fn bare_string_is_taken_as_is() {
+    assert_eq!(extract_result(&json!("直接给一段文本")), "直接给一段文本");
+}
+
+#[test]
+fn opaque_payload_is_stringified() {
+    // 5：兜底——形状完全不认识时整包 JSON（含 `VdfsContent` 这类结构体序列化）
+    assert_eq!(
+        extract_result(&json!({"path": "a.txt", "lines": 12})),
+        r#"{"lines":12,"path":"a.txt"}"#
+    );
+    assert_eq!(extract_result(&json!(null)), "null");
+    assert_eq!(extract_result(&json!(42)), "42");
+}
+
+#[test]
+fn non_string_content_does_not_hijack_the_read() {
+    // `content` 不是字符串 ⇒ 第 1 条不成立，继续往下走（不是「命中即返回」）。
+    // 这是顺序判定与「取第一个存在的键」的分水岭：后者会把数组
+    // 原样丢给模型。
+    assert_eq!(
+        extract_result(&json!({"content": [1, 2], "output": "真正的输出"})),
+        "真正的输出"
+    );
+}
+
+#[test]
+fn empty_content_string_is_a_hit() {
+    // 空串是**合法**的正文（工具确实没有内容可说），不跳到 output
+    assert_eq!(extract_result(&json!({"content": "", "output": "x"})), "");
+}
+
+#[test]
+fn result_field_constants_match_the_documented_order() {
+    // 常量与文档表里的字段名一致（改常量就得改文档，反之亦然）
+    assert_eq!((RESULT_CONTENT, RESULT_OUTPUT), ("content", "output"));
+}
+
 /// 需求 2 回归：工具调用 id 缺失/非法时不得跳过，必须作为工具调用失败处理——
 /// 生成错误结果子节点（喂回 LLM）+ 父节点失败补丁，保证已落库的 ToolCall
 /// 节点不会成为"无结果 tool_call"（下轮请求 400）。

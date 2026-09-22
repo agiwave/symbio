@@ -230,7 +230,15 @@ const BASELINE = {
   //     `protocols/partial_json.test.rs` +8（路径判定 / 转义解码 / 跨块不变量）、
   //     四个协议各自的 `.test.rs` +22——每个都逐**字节**切分喂进增量提取器，
   //     钉死「增量拼出的文本 == 完整行解析出的文本」这条不变量。
-  rustTests: 852,
+  //   · 批次 J +18：新建 `symbio_core/tool_name.test.rs` +8（线上名投影与
+  //     注册表解析：字面名优先、往返、幂等）、`session/tool_executor.test.rs`
+  //     +10（`extract_result` 的判定顺序——顺序即约定，改序即红）。
+  //   · 批次 J 端到端途中 +11（`mcp/types.test.rs`）：跑 CLI 真实链路时发现
+  //     MCP 两处**真 bug**，补的是回归网——+6 协议字段名 camelCase 映射
+  //     （`initialize` / `tools/list` / `annotations` / `isError`，漏一个就整条
+  //     链路静默失效）、+5 `CallToolResult` **载荷**语义（读的是载荷不是
+  //     JSON-RPC 信封；空结果渲染成 "" 而非 "null"）。
+  rustTests: 881,
   // 31 → 47：前端半边的棘轮**长期停摆**（详见下方 vitestTests 的说明）。
   //   与覆盖率阈值不同，**文件数 / 用例数与平台无关**：全仓 `*.spec.ts` 里零
   //   `skipIf` / `runIf` / `process.platform` 分支，两处 `it.each` 遍历的也都是

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, ContentPart, MessageContent, MessageRole,
 };
+use crate::symbio_core::tool_name::to_wire;
 pub use crate::symbio_core::CapabilityMeta;
 
 /// 工具调用定义
@@ -182,7 +183,8 @@ impl NativeMessage {
         }
 
         if let Some(ref tool_calls) = self.tool_calls {
-            // 转换工具调用格式，将工具名称中的 / 替换为 __
+            // 工具名转线上形态（`/` `.` 等协议不允许的字符 → `__`，见
+            // `symbio_core::tool_name`）
             let api_tool_calls: Vec<serde_json::Value> = tool_calls
                 .iter()
                 .map(|tc| {
@@ -196,7 +198,7 @@ impl NativeMessage {
                         "id": tc.id,
                         "type": tc.kind.as_ref().unwrap_or(&"function".to_string()),
                         "function": {
-                            "name": tc.name.replace("/", "__"),
+                            "name": to_wire(&tc.name),
                             "arguments": args_str
                         }
                     })
@@ -250,10 +252,7 @@ impl NativeMessage {
                 let mut item = serde_json::Map::new();
                 item.insert("type".to_string(), serde_json::json!("function_call"));
                 item.insert("status".to_string(), serde_json::json!("completed"));
-                item.insert(
-                    "name".to_string(),
-                    serde_json::json!(tc.name.replace("/", "__")),
-                );
+                item.insert("name".to_string(), serde_json::json!(to_wire(&tc.name)));
                 item.insert(
                     "call_id".to_string(),
                     serde_json::json!(tc.id.as_ref().cloned().unwrap_or_default()),

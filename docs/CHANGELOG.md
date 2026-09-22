@@ -18,6 +18,69 @@
 
 ***
 
+## 2026-09-22: 工具调用协议封闭 + 端到端照出两个 MCP 真 bug
+
+**问题**：工具调用协议里三处**隐式约定**——① 工具名的线上形态靠
+`tool_name.replace("__", "/")` 反演、出方向靠 `replace("/", "__")` 正演；
+② 工具结果正文靠 `extract_result` 逐级猜字段；③ 审批检查点在
+`LocalPlugin::route` 与 `SecureToolWrapper::execute` 各写一份（且已漂移）。
+外加：跑端到端时**顺带发现两个 MCP 真 bug**，形态都是「整条链路静默失效」。
+
+**改动**：
+
+1. **名字的线上形态收成一对具名函数**（新增 `symbio_core/tool_name.rs`，
+   core 准入按 ADR-023 核对依赖方）：
+   - 出方向 `to_wire`（唯一换算处）取代 9 处 `replace("/", "__")`。事实核对
+     发现那 9 处**全是空转**——今天注册的能力名没有一个含 `/`；而真正违反
+     function-calling 字符集（`[A-Za-z0-9_-]`）的是 **MCP 名字里的点**
+     （`mcp.<server>.<tool>`），旧写法不管它。`to_wire` 把字符集外一律映成 `__`。
+   - 入方向 `resolve` **查注册表**（字面名优先），取代字符串反演。反演只在
+     「名字里的 `__` 一定是 `/` 变的」时成立，名字本身含 `__` 时错得**没有声音**。
+     失败返回 `None` 且**不猜**——按原样路由并 `plugin_warn!` 一条诊断。
+   - 两者是**同一契约的两半**（`model` 插件出、`session` 插件认），所以进 core；
+     模块文档写明依赖方对照表 + 反面例子。
+2. **工具结果读取升级为契约**：`extract_result` **留在** `session/tool_executor.rs`
+   （唯一消费方，不进 core），但把判定顺序写成文档表 + 两个字段名常量
+   （`RESULT_CONTENT` / `RESULT_OUTPUT`），并补 10 个用例钉死顺序。控制流仍只允许
+   建立在 `failure_kind` 共享闭集上，**不得**建立在这个字段读取器上。
+3. **审批闸门「判两次、写一次」**：两份逐字相同的判定收成一个 `approval_gate`，
+   两条入口各调一次（`route` 是注册表未命中的回落路径，`wrapper` 是注册表路径，
+   都真实存在）。顺带修掉已发生的漂移：`route` 不再传字面量 `"工具执行"`，
+   改传工具真实描述，两条入口的审批卡文案一致。
+4. **MCP bug 1：工具一个都注册不上**。MCP 2025-06-18 规范用 camelCase
+   （`protocolVersion` / `serverInfo` / `inputSchema` / `nextCursor` /
+   `readOnlyHint` / `isError`），而 Rust 结构体是 snake_case 且**没有
+   `rename_all`** ⇒ `initialize` 响应解析失败 ⇒ `tools/list` 根本不发出 ⇒
+   配了 server 却零工具，错误只经 `tracing::warn!` 输出（CLI 不显示）。
+   修：6 个协议类型补 `#[serde(rename_all = "camelCase")]`（`McpTool.description`
+   另加 `#[serde(default)]`，规范里可选）；顺带删掉 `McpError`——它是
+   `JsonRpcError` 的遗留重复定义。
+5. **MCP bug 2：工具结果永远是字符串 `"null"`**。`McpToolCallResponse` 按
+   **JSON-RPC 信封**（`{result, error, isError}`，全字段可选）建模，却拿
+   **`CallToolResult` 载荷**（`{content, isError}`）去反序列化它 ⇒「解析成功」⇒
+   返回 `Value::Null` ⇒ 正文全丢且不报错。修：重新建模为规范载荷
+   （`content` / `structuredContent` / `isError`）+ `text()` 压平方法；
+   `stdio.rs` / `http.rs` 只借它读 `isError`，其余原样返回；`capability.rs::execute`
+   把内容块压平成 `{"content": <文本>}` 再交出（跨插件约定保持最窄）。
+
+**验证**：
+
+- `node scripts/gate.mjs` **32 / 32**；`cargo test --lib` **881 passed / 0 failed**
+  （852 → 881，+29）。
+- **CLI 端到端**（真实 CLI + 本地 mock，`EXIT=0`）：
+  - `mock-mcp-wire`：mock 侧审计「工具名 21 个，全部落在 `[A-Za-z0-9_-]` 内」；
+    CLI 打出 `Using ToolManager for: mcp__mocksrv__echo (能力名 mcp.mocksrv.echo)`
+    ——**线上名认回带点能力名**；dump 模型收到的第二次请求体，`role=tool` 正文是
+    `"mcp-echo:hello"`（修复前是 `"null"`，`结果长度` 4 → 14）。
+  - `mock-tool-unknown`：`名字 nope__such_tool 不在能力注册表里（线上名解析失败），
+    按原样路由` → 诚实 `NotFound`，会话不崩。
+  - `mock-chat-split`：SSE 行被逐字节切开，stdout 与期望文本逐字节一致（批次 I 回归）。
+- **真实模型冒烟**（`.symbio/model/LMstudio`，`google/gemma-4-e2b`）：内置 `cmd`
+  工具正常；**MCP 工具**由模型自己用线上名 `mcp__mocksrv__echo` 调用，返回
+  `mcp-echo:symbio-mcp-ok`（22 字符）并被正确复述。
+
+***
+
 ## 2026-09-22: SSE 增量解析下沉到协议层 —— core 不再认识模型协议字段名
 
 **问题**：为了首字延迟，`parse_sse_stream` 在换行到达前会先尝试从**半截 JSON** 里

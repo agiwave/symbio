@@ -280,29 +280,12 @@ impl super::manager::McpManager {
             .result
             .ok_or_else(|| "tools/call response missing result".to_string())?;
 
-        // 优先按 McpToolCallResponse 解析（isError 等）
-        if let Ok(tool_response) = serde_json::from_value::<McpToolCallResponse>(result.clone()) {
-            if let Some(error) = tool_response.error {
-                return Err(format!(
-                    "Tool error: {} - {}{}",
-                    error.code,
-                    error.message,
-                    error
-                        .data
-                        .as_ref()
-                        .map(|d| format!(" ({d})"))
-                        .unwrap_or_default()
-                ));
-            }
-            if tool_response.is_error == Some(true) {
-                let r = tool_response.result.unwrap_or(Value::Null);
-                let msg = r
-                    .as_str()
-                    .map(String::from)
-                    .unwrap_or_else(|| r.to_string());
-                return Err(format!("Tool returned error: {msg}"));
-            }
-            return Ok(tool_response.result.unwrap_or(Value::Null));
+        // 同 `stdio.rs`：`result` 是规范里的 `CallToolResult`，不是信封。
+        // 只借它读 `isError`，其余原样返回（细节见 `McpToolCallResponse` 文档）。
+        let call_result: McpToolCallResponse =
+            serde_json::from_value(result.clone()).unwrap_or_default();
+        if call_result.is_error == Some(true) {
+            return Err(format!("Tool returned error: {}", call_result.text()));
         }
         Ok(result)
     }
