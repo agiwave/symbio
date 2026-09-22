@@ -89,6 +89,21 @@ if (merging) die('正处于合并冲突中，先解决冲突再提交')
 
 if (!status.out) die('没有可提交的改动')
 
+// 本次提交只包含**索引**里的内容（最后一步是 `git commit -F`，不带 `-a`）。
+// 上面那条判据看的是**工作区**：工作区脏而索引为空时它会放行，于是白跑一遍
+// 门禁（几分钟），再在最后一步被 git 用「no changes added to commit」拒掉
+// ——那条报错指不到真正的原因（真实原因在第一步之前就已知了）。
+const staged = sh('git', ['diff', '--cached', '--name-only']).out
+if (!DRY_RUN && !staged) {
+  die(
+    [
+      '索引为空 —— 没有可提交的内容（本脚本不替你暂存，只提交索引里的内容）',
+      `  工作区有 ${status.out.split('\n').filter(Boolean).length} 处改动，但一处都没暂存。`,
+      '  先 git add 需要的文件（注意别把不相关的改动一起带上），再重跑。',
+    ].join('\n'),
+  )
+}
+
 // ---------- 门禁 ----------
 let gateSummary = '门禁：本次跳过（--dry-run 预览，未执行）'
 if (DRY_RUN) {
@@ -109,8 +124,7 @@ if (DRY_RUN) {
 
 // ---------- 收集消息素材 ----------
 console.log(bold('══ 第 2 步 · 提交消息 ══'))
-const staged = sh('git', ['diff', '--cached', '--name-only']).out
-const unstaged = status.out.split('\n').filter((l) => !l.startsWith('#')).length
+const unstaged = status.out.split('\n').filter(Boolean).length
 console.log(dim(`  暂存 ${staged ? staged.split('\n').length : 0} 个文件；工作区共 ${unstaged} 处改动（未暂存的不会进本次提交）`))
 
 const type = TYPE ?? (await prompt('type', { def: 'chore', choices: ['feat', 'fix', 'docs', 'refactor', 'chore', 'test', 'perf', 'style'] }))
