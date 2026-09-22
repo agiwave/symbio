@@ -8,6 +8,8 @@
 > 使前端不再消费任何事件序列，从而**不存在事件顺序问题**。
 >
 > **状态：S16–S22 已完成；S23 续（消息实时面改为单条转写流）。**
+> 另有 **§10（批次 K）**：转写核心日志的 `Append` 折行——只折日志，`seq` 与发布
+> 仍逐帧（不变量 #28）。
 >
 > - **读面**（历史）走 VDFS：`read(<根>/session/<sid>)` 一次拿整份历史，地址与 §2.1 一致。
 > - **实时面**（消息）是 `worker/session/stream` **一条流**，载荷是 `NodeOp`
@@ -814,6 +816,10 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
     有请求、响应是空的。落地动作与协议操作**一一对应**
     （`transcriptStream` 的 `sink.upsert` / `sink.append`），中间不得再插一层
     "合并"。
+28. **`seq` 与发布逐帧，只有日志可折行**：`Transcript::emit` 对每一帧都分配 `seq`
+    并 `publish_frame`，**无例外**；`AppendLogCoalescer` 只决定"要不要打这一行、
+    打成什么样"（§10）。折行是**可观测性**的取舍，不是协议的取舍——任何让 `seq`
+    跳号或让某帧不发布的"优化"都会破坏消费端的缺口检测（§4.1）。
 
 ---
 
@@ -826,3 +832,63 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
 | 会话节点状态无独立版本号 | 依赖 §4.2 的三条假设。加 `rev` 需要跨进程单调时钟，收益不足以抵消脆弱性——宁可把假设写清楚 |
 | 会话节点 `content` 为空 | `read(<根>/session/<sid>)` 仍是整份会话 JSON（历史读入口），`updated` 变更带 `content` 会白白重传整份历史。**因此会话节点的 `updated` 只带 `node`，不带 `content`**——`node` 足以表达状态，正文另有 `消息` 列表承载 |
 | `attributes.outcome` 是场景字段 | VDFS 只透传（与 `message_count` / `meta_tags` 同一手法），不构成机制新增 |
+| 核心日志的 Append 折行 | 折行后**逐帧粒度**的日志消失（只剩区间与统计）。代价是"某一帧长什么样"不再直接可见；换来的是时间线重新可读（§10）。需要逐帧细节时按 `seq` 区间去转写流里取，不靠日志 |
+
+---
+
+## 10. 批次 K：核心日志折行（已落地）
+
+### 10.1 问题：时间线被同一件事填满
+
+`Transcript::emit` 的注释原本写着「每帧一行，即时间线本身」。这句话对
+`Upsert` / `Remove` / `Reset` 成立，对 `Append` 不成立——`Append` 是**流式增量**，
+一次回复的帧数由模型决定。
+
+实测（`--provider LMStudio`，一段约 200 字回复）：
+
+| | stderr 总行数 | 帧日志行数 | 其中 `Append` |
+|---|---|---|---|
+| 折行前 | **622** | 587 | **580** |
+| 折行后 | **44** | 9 | 2（区间统计） |
+
+即 93% 的日志是 `[T#N Append] <id> - +1c` 这类行。要在这 580 行里找"工具什么时候
+开始跑的"需要 `grep`，而时间线本该一眼看完。
+
+### 10.2 改法：只折日志，不碰协议
+
+新增 `AppendLogCoalescer`（`transcript.rs`）：相邻的、**同 `message_id`** 的
+`Append` 并入同一个 run，不产出日志行；换 id、换操作、或显式冲刷
+（`persisted` / `clear` / `Warn`）时，把 run 渲染成**一行**。
+
+```text
+单帧（与折行前逐字相同）      [T#7 Append] a - +3c
+多帧（带区间 / 帧数 / 累计字符）[T#4..473 Append] a - 470 帧 / +470c
+```
+
+`seq` 分配与 `publish_frame` **一行代码都没动**——折行器只被 `emit` 用于决定日志。
+
+### 10.3 折行后的时间线（同一场景）
+
+```text
+[T#1 Upsert] u… Start
+[T#2 Upsert] 8d8c16bb streaming Start
+[T#3 Upsert] ed59707c streaming Start        ← 推理节点
+[T#4..328 Append] ed59707c - 325 帧 / +1536c
+[T#329 Upsert] e8f0b51b streaming Start      ← 正文节点
+[T#330..611 Append] e8f0b51b - 282 帧 / +479c
+[T#612 Upsert] ed59707c completed End
+[T#613 Upsert] e8f0b51b completed End
+[T#614 Upsert] 8d8c16bb completed End
+```
+
+结构一眼可见：两个内容节点各自增长了多少、谁先谁后、`seq` 如何分配。
+
+### 10.4 验证
+
+- `cargo test --lib` **887 passed / 0 failed**（881 → 887，+6）；
+  其中 `coalescing_does_not_touch_seq_or_the_graph` 专门钉住"折行没碰 `seq` 与图"
+  这条边界——它才是这次改动的真正风险所在。
+- **CLI 端到端（确定性）**：`mock-chat-split` 场景（单行 809 字节、逐字节写出）
+  stdout 与期望文本**逐字节一致**（627 字符）；470 个增量帧折成 1 行
+  `[T#4..473 Append] … 470 帧 / +470c`，`seq` 连续无缺口。
+- 真实模型冒烟（`--provider LMStudio`）：`EXIT=0`，输出完整。

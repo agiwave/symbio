@@ -12,12 +12,13 @@ import { stripAnsi } from '../color.mjs'
 /**
  * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
  *
- * 881：v1→v2 迁移 + 节点状态流 S20~S23 + 压缩消息流化 + 中止收口终态化 + 协议
+ * 887：v1→v2 迁移 + 节点状态流 S20~S23 + 压缩消息流化 + 中止收口终态化 + 协议
  *      增量提取器逐字节回归 + tool_name 线上名投影 + MCP camelCase/载荷语义网 +
- *      extract_result 判定顺序。逐批明细见 docs/CHANGELOG.md 的对应条目。
+ *      extract_result 判定顺序 + **转写核心日志的 `Append` 折行**（+6）。
+ *      逐批明细见 docs/CHANGELOG.md 的对应条目。
  */
 export const BASELINE = {
-  rustTests: 881,
+  rustTests: 887,
   // 46 spec 文件 / 661 用例。文件数与用例数均与平台无关（全仓 spec 零平台分支、
   // it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
   vitestFiles: 46,
