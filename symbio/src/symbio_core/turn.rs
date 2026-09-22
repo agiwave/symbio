@@ -193,16 +193,37 @@ pub fn endpoint_label(url: &str) -> String {
         .unwrap_or_else(|| url.to_string())
 }
 
+/// 发出一次（可重试的）LLM 请求。
+///
+/// ## `body` 是**已序列化的字节**，不是 `Value`
+///
+/// 收 `&[u8]` 而不是 `&Value`，是为了让「一次序列化」这件事**在结构上成立**：
+/// `.json(value)` 会在 reqwest 内部 `serde_json::to_vec` 一遍，而它位于**重试循环内**
+/// （最多 `1 + MAX_RETRIES` 次发送）——同一份请求体被反复序列化，重试越多浪费越多，
+/// 而重试恰恰发生在网络/服务端已经不健康的时候。
+///
+/// 现在由调用方序列化一次（它同时要用那份字节量出日志里的「体量」），
+/// 重试只复用同一份 buffer（`to_vec()` 是一次 memcpy，比序列化便宜两个数量级）。
 pub async fn execute_post_with_abort(
     url: &str,
     headers: reqwest::header::HeaderMap,
-    body: &Value,
+    body: &[u8],
     abort: &AbortSignal,
 ) -> PostResult {
     // 限流/瞬时 5xx/网络抖动：有界重试 + 指数退避，避免一次瞬时错误就中断整轮对话。
     // 重试在同一 turn 内进行（复用同一个 root_id），不会额外产生 Turn/文本节点，
     // 因此不会造成"错误刷屏"。重试耗尽才向上返回错误，由上层停止并展示重试入口。
     const MAX_RETRIES: u32 = 4;
+    // Content-Type 的**真源是各协议适配器的 `get_headers`**（四个适配器都设了
+    // `application/json`）。`.body(bytes)` 不像 `.json()` 那样会自己补，所以这里
+    // 兜一次底——只为防后来的适配器漏掉，当前四条路径都不会走到。
+    let mut headers = headers;
+    if !headers.contains_key(reqwest::header::CONTENT_TYPE) {
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("application/json"),
+        );
+    }
     let started = std::time::Instant::now();
     // 「请求发起」锚点不在这里：它由调用方（`model::bound_provider::execute_turn`）
     // 在**请求体构建之后**统一打一条，便于在同一条里同时给出模型/规模/端点/体量。
@@ -216,7 +237,7 @@ pub async fn execute_post_with_abort(
         }
 
         let result = tokio::select! {
-            res = get_http_client().post(url).headers(headers.clone()).json(body).send() => {
+            res = get_http_client().post(url).headers(headers.clone()).body(body.to_vec()).send() => {
                 res
             },
             _ = wait_for_abort_signal(abort) => {

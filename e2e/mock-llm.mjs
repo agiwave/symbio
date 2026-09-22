@@ -147,7 +147,7 @@ const server = http.createServer(async (req, res) => {
     for await (const part of req) body += part;
     let parsed = {};
     try { parsed = JSON.parse(body); } catch { /* 容错：空体 */ }
-    requests.push({ at: Date.now(), path: url.pathname, body: parsed });
+    requests.push({ at: Date.now(), path: url.pathname, body: parsed, contentType: req.headers['content-type'] ?? null });
 
     const { scenario } = pickScenario(parsed);
     const model = parsed.model ?? 'mock-model';

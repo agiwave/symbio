@@ -97,9 +97,23 @@ impl ModelProvider for BoundProvider {
         let body = self
             .protocol
             .prepare_request(&self.cfg, system_prompt, messages, tools);
-        // 体量需再序列化一次才能量出（POST 时 reqwest 内部还会序列化一次；
-        // 请求体在 20KB 量级，这点开销可忽略，换来「实际发出多少字节」这一硬指标）。
-        let body_bytes = serde_json::to_vec(&body).map(|v| v.len()).unwrap_or(0);
+        // 请求体**只序列化一次**：这一份字节既用来记日志里的「体量」，也用来实际发送。
+        //
+        // 此前这里是 `to_vec(&body).map(|v| v.len())`——**只为了量出字节数**，序列化出的
+        // 那份立即丢弃；而 `execute_post_with_abort` 里的 `.json(body)` 又要再序列化一遍。
+        // 更糟的是 `.json()` 位于**重试循环内**（首次 1 次 + 最多 `MAX_RETRIES` 次重试），
+        // 所以最坏是同一份请求体被序列化 **6 次**，而必要的是 1 次。原注释
+        // 「这点开销可忽略」少算了重试这一项，且重试恰恰发生在网络/服务端已经不健康时。
+        //
+        // 顺带：日志里的「体量」现在**必然等于**实际发出的字节数——此前它只是
+        // 「两份各自序列化出来的东西理论上应该相同」。
+        let body_bytes = match serde_json::to_vec(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                plugin_error!("model", "[LLM] 请求体序列化失败：{}", e);
+                return Err(PluginError::InternalError(format!("请求体序列化失败: {e}")));
+            }
+        };
         plugin_info!(
             "model",
             "[LLM] 请求发起 {} (model={}, msgs={}, tools={}, root={}, body={} bytes)",
@@ -108,13 +122,13 @@ impl ModelProvider for BoundProvider {
             messages.len(),
             tools.len(),
             root_id,
-            body_bytes
+            body_bytes.len()
         );
 
         let response = match execute_post_with_abort(
             &self.protocol.get_api_url(&self.cfg),
             self.protocol.get_headers(&self.cfg),
-            &body,
+            &body_bytes,
             abort,
         )
         .await
