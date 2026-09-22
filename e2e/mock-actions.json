@@ -1,0 +1,17 @@
+{
+  "tools": [
+    {
+      "name": "echo",
+      "description": "回显输入文本（mock）",
+      "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] }
+    },
+    {
+      "name": "add",
+      "description": "两个数相加（mock）",
+      "inputSchema": { "type": "object", "properties": { "a": { "type": "number" }, "b": { "type": "number" } }, "required": ["a", "b"] }
+    }
+  ],
+  "onCall": {
+    "add": { "error": "mock 注入的工具执行失败" }
+  }
+}

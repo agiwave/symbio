@@ -104,7 +104,7 @@ impl GatewayPlugin {
         // 启动期若已启用入站服务，则拉起监听（配置变更后由 VDFS 写入路径重建）
         let arc2 = arc.clone();
         tokio::spawn(async move {
-            arc2.start_server().await;
+            arc2.start_server_logged().await;
         });
         arc
     }
@@ -128,15 +128,16 @@ impl GatewayPlugin {
         self.parent.read().await.as_ref().and_then(|w| w.upgrade())
     }
 
-    /// 按当前配置启动入站服务（仅 http 协议且 enabled 时监听端口）
-    pub async fn start_server(&self) {
+    /// 按当前配置启动入站服务（仅 http 协议且 enabled 时监听端口）。
+    /// 失败经返回值上交，由调用方决定呈现方式（CLI 无 tracing subscriber，
+    /// `warn!` 在那里不可见——见 [`Self::start_server_logged`]）。
+    pub async fn start_server(&self) -> Result<(), String> {
         let cfg = self.config.read().await.clone();
         if !cfg.inbound_enabled || cfg.inbound_protocol != "http" {
-            return;
+            return Ok(());
         }
         let Some(parent) = self.get_parent().await else {
-            warn!("[gateway] 父插件不可用，无法启动入站服务");
-            return;
+            return Err("父插件不可用，无法启动入站服务".to_string());
         };
         match server::start(&cfg, parent).await {
             Ok(Some(handle)) => {
@@ -145,9 +146,22 @@ impl GatewayPlugin {
                     "[gateway] 入站服务已启动"
                 );
                 *self.server.write().await = Some(handle);
+                Ok(())
             }
-            Ok(None) => {}
-            Err(e) => warn!(error = %e, "[gateway] 入站服务启动失败"),
+            Ok(None) => Ok(()),
+            Err(e) => {
+                warn!(error = %e, "[gateway] 入站服务启动失败");
+                Err(e)
+            }
+        }
+    }
+
+    /// 启动入站服务并让失败在**无 tracing subscriber** 的宿主（CLI）里也可见：
+    /// 构造期 fire-and-forget spawn 里的错误原先只进 `warn!`，被静默丢弃——
+    /// 端口被占/绑定失败时调用方只看到「网关没起来」却无从归因。
+    pub async fn start_server_logged(&self) {
+        if let Err(e) = self.start_server().await {
+            crate::plugin_warn!("gateway", "入站服务启动失败：{e}");
         }
     }
 
@@ -162,7 +176,7 @@ impl GatewayPlugin {
     /// 应用配置变更：先停再启（端口/开关/协议变更必须重建监听）
     async fn apply_config(&self) {
         self.stop_server().await;
-        self.start_server().await;
+        self.start_server_logged().await;
     }
 }
 

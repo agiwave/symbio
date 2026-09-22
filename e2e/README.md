@@ -1,0 +1,97 @@
+# e2e 测试环境（CLI 模式）
+
+以 `cli/`（进程内直连插件树）为被测前端，mock 与测试脚本全部为 Node `.mjs`，
+Rust 侧只构建 CLI 二进制。mock 与被测系统之间走**真实边界**：
+HTTP/SSE（LLM）、stdio/JSON-RPC（MCP）、磁盘（homedir）。
+
+## 组件
+
+| 文件 | 作用 |
+|---|---|
+| `mock-llm.mjs` | OpenAI Chat 兼容 Mock LLM：SSE 流式、场景编排（`match`/`afterTool`/`once`/`chunks`/故障注入）、请求记录 `GET /_requests` |
+| `mock-mcp.mjs` | stdio JSON-RPC Mock MCP server：规范握手、可编排工具与错误/断连、调用记录 `--record` |
+| `mock-actions.json` | mock-mcp 行为脚本示例（T6：`add` 返回 JSON-RPC 错误） |
+| `helpers.mjs` | 夹具与断言库：临时 homedir、mock 进程编排、CLI 运行器、`defineCase`、共享不变量断言 |
+| `cases/*.mjs` | **测试用例（每用例一文件）** |
+| `cases/_selfrun.mjs` | 用例自执行引导（`_` 前缀 = 共享材料，不当作用例） |
+| `run-tests.mjs` | runner：发现式加载 `cases/`，每用例独立子进程运行 |
+
+## 运行
+
+```bash
+cd cli && cargo build --release       # 被测系统（门控会自动检测/构建）
+node e2e/run-tests.mjs                # 全量
+node e2e/run-tests.mjs t2             # 按名称过滤
+node e2e/cases/t5-llm-http-error.mjs  # 单独跑一个用例（文件可直接执行）
+E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
+```
+
+每个用例独立临时 homedir + 独立 mock 实例（端口自动分配，18080 起），
+进程结束自动清理；runner 层面每个用例再套一层独立子进程，互不拖垮。
+
+## 新增一个用例
+
+1. 新建 `cases/t7-<名字>.mjs`（`t<数字>` 前缀保证排序稳定）；
+2. 首行 `import './_selfrun.mjs';`（自执行引导）；
+3. `export default defineCase('T7 描述', async () => { ... })`，
+   断言用 `helpers.mjs` 的 `assert` / `assertEq` / `assertTranscriptInvariants`。
+
+没有清单要登记：`run-tests.mjs` 与门控（`scripts/gate.d/40-e2e.mjs`）都按
+目录**发现式**加载，保存即生效。
+
+## 场景编排（mock-llm）
+
+| 字段 | 语义 |
+|---|---|
+| `match` | 对最后一条 user 消息做子串匹配 |
+| `afterTool` | 只匹配「工具结果回灌轮」（最后一条消息 role=tool）；**不带它**的场景只匹配用户轮，防止工具循环 |
+| `once` | 场景只消费一次（适合「第 N 轮才调工具」的编排） |
+| `chunks` + `chunkDelayMs` | 正文分片逐帧吐出（流式逼真） |
+| `toolCalls` | 先吐 `tool_calls` delta（参数分两片流式），再吐正文 |
+| `status` ≥ 400 | HTTP 故障注入 |
+
+## 用例与不变量
+
+| 用例 | 文件 | 验证 |
+|---|---|---|
+| T1 | `t1-text-stream` | SSE 分片 → stdout 拼接；转写落盘（turn/text 节点、status=completed）；请求含内置工具清单 |
+| T2 | `t2-mcp-tool-roundtrip` | MCP stdio 工具回路：tool_calls → mock-mcp 执行（记录核对）→ 结果回灌 → 收尾；转写成对 |
+| T3 | `t3-vdfs-write` | 内置 `vdfs_write`：文件真实写入工作目录 |
+| T4 | `t4-multi-turn` | 多轮会话：第二轮请求携带第一轮历史 |
+| T5 | `t5-llm-http-error` | LLM HTTP 500：失败收敛，存储中无停在 streaming/pending 的节点 |
+| T6 | `t6-mcp-tool-error` | MCP 工具 JSON-RPC 错误：错误结果回灌，会话照常收敛（auto 模式） |
+
+每个用例共享的不变量断言（`assertTranscriptInvariants`）：
+
+- `seq` 严格递增、消息 id 唯一；
+- 每个 `tool_call` 必有 `role=tool` 结果子节点（「有请求必有响应」）；
+- 失败路径不得留非终态节点（无「永远运行中」）。
+
+## 门控接入
+
+e2e 是 `scripts/gate.mjs` 的一个阶段（`scripts/gate.d/40-e2e.mjs`）：
+
+```bash
+node scripts/gate.mjs --only=e2e      # 只跑 e2e 阶段（含按需构建 CLI）
+node scripts/gate.mjs                 # 全量门禁（e2e 在静态审计之后）
+```
+
+用例清单不在门控里维护——与 runner 同一套发现逻辑，新增用例文件自动纳入。
+
+## 提交
+
+提交相关工作（门禁 → 生成合规消息 → git commit → 清理临时文件）收在一条命令里：
+
+```bash
+node scripts/commit.mjs               # 交互式
+node scripts/commit.mjs --dry-run --yes --type=feat --scope=e2e --title="..."   # 预览消息
+node scripts/commit.mjs --no-gate     # 紧急热修跳过门禁（自担风险）
+```
+
+## 首个战果
+
+T2 首轮即抓到一个单测覆盖不到的真 bug：
+`mcp/stdio.rs::decode_line` 在 Windows 上先按 GBK 解码，导致规范 UTF-8
+MCP server 的全部非 ASCII 内容**静默乱码**后回灌给模型（GBK 几乎能无错
+解码任何 UTF-8 字节，「失败回退」的注释是虚构的）。已改为先严格校验
+UTF-8、仅非法时回退 GBK（见该函数文档）。
