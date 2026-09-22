@@ -189,6 +189,40 @@ jobs:
           npm pkg get name version > /dev/null
         working-directory: tauri
 
+  # 端到端回归：构建 CLI 二进制后，按 e2e/cases/ 发现式运行全部用例
+  # （CLI × mock LLM（OpenAI 兼容 SSE）× mock MCP（stdio JSON-RPC）× 临时 homedir）。
+  # 用例清单不在这里也不在 gate.d/40-e2e.mjs 里维护——新增 e2e/cases/*.mjs 即自动纳入。
+  # 需要系统库：mock 与被测 CLI 都是本地回环 HTTP，无外部依赖；OpenSSL 同 rust-checks。
+  e2e-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install Linux system libs (OpenSSL)
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cli/target
+          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: E2E gate
+        # 与本地同一条命令；--ci 强制重建 CLI 二进制（runner 无缓存二进制）
+        run: node scripts/gate.mjs --only=e2e --ci
+        continue-on-error: false
+
   # 文档和配置验证
   docs-validation:
     runs-on: ubuntu-latest
