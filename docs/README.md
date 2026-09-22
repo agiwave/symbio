@@ -65,6 +65,7 @@ docs/                            # 系统级文档（跨模块）
 │   ├── frontend-mechanization-review-round2.md  # 前端机制化复核 · 第二轮（同上）
 │   ├── architecture-health-check-2026-09.md     # 架构体检 2026-09（同上）
 │   ├── streaming-chain-review-2026-09.md         # 流式链路评审 · 第一轮（同上）
+│   ├── streaming-chain-review-round2-2026-09-22.md # 全链路评审 · 第二轮（同上）
 │   ├── class-diagram.mermaid            # 类图
 │   └── sequence-diagram.mermaid         # 时序图
 └── archive/                     # 历史归档（仅供参考；含 implementation-logs/、proj/）
