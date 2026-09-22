@@ -10,7 +10,9 @@
  * 用途：拦截常见异步/同步错误模式，防止 v27-v28 修复过的 bug 复发
  *   - S-002:        std::sync::Mutex 在 async 上下文中持锁跨 await
  *   - S-002-bonus:  业务路径 `let _ = ...await` 吞错
- *   - S-007:        CHANGELOG 缺关键修复条目（v25-N6 案例）
+ *   - S-007:        （已废除）CHANGELOG 维护检查 —— 仓库不再维护 `docs/CHANGELOG.md`，
+ *                   变更历史以 `git log` 为准（比手抄的一份文件更准确）。
+ *                   **编号保留空缺，不补号**（见上文）。
  *   - S-008:        VdfsNode.status 用裸字面量赋值（词表只有 `VDFS_STATUS_*`）
  *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
@@ -190,29 +192,18 @@ if (suspects.length > 0) {
 }
 console.log()
 
-// ── S-007: CHANGELOG 维护检查 ──────────────────────────────────────────
-console.log('--- S-007: CHANGELOG 维护检查 ---')
-
-// 约定（见 CONTRIBUTING.md「提交规范」）：对外可见的变更统一记入**仓库级**
-// `docs/CHANGELOG.md`。agent 插件自身的 `docs/` 树（含其插件级 CHANGELOG）
-// 已在 OAB 简化时并入 `docs/design/open-agent-bundle-spec.md`，不再单独维护。
-// 因此：scope 下若仍有插件级 CHANGELOG 则优先检查它，否则回退到仓库级。
-// 标题格式按实际约定放宽为 `## vNN` 或 `## YYYY-MM-DD`。
-const scopedChangelog = path.join(scopeAbs, 'docs', 'CHANGELOG.md')
-const changelog = fs.existsSync(scopedChangelog)
-  ? scopedChangelog
-  : path.join(repoRoot, 'docs', 'CHANGELOG.md')
-if (!fs.existsSync(changelog)) {
-  err(`${disp(changelog)} 不存在`)
-} else {
-  const head = fs
-    .readFileSync(changelog, 'utf8')
-    .split(/\r?\n/)
-    .find((l) => /^## (v\d+|\d{4}-\d{2}-\d{2})/.test(l))
-  if (!head) err(`${disp(changelog)} 无版本/日期标题（## vNN 或 ## YYYY-MM-DD）`)
-  else ok(`CHANGELOG 最新标题：${head}`)
-}
-console.log()
+// ── S-007: CHANGELOG 维护检查 —— **已废除** ────────────────────────────
+//
+// 原规则：要求 `docs/CHANGELOG.md` 存在且有 `## vNN` / `## YYYY-MM-DD` 标题。
+// 废除理由：git 本身**就是**变更历史，且比手抄的一份文件更准确——不会漏、
+// 不会与代码漂移、也不必维护第二份同样的信息。那份文件涨到 4384 行之后，
+// 作为「当前状态」的参考资料几乎只剩噪音（检索成本高、上下文开销大），
+// 而它承载的历史在 `git log` 里一条不少。
+//
+// 替代：提交信息。本仓库的提交消息本就有严格格式（`<type>(<scope>): 标题`
+// + 编号分节 + 「门禁：」段，见 `scripts/check-commit-msg.mjs`），
+// 它比一条 CHANGELOG 条目更结构化，且**与代码同一次提交**，不可能漂移。
+// 编号保留空缺（`S-007` 不再补号），见本文件头部说明。
 
 // ── S-008: VdfsNode.status 不得用裸字面量 ──────────────────────────────
 //
@@ -308,7 +299,7 @@ console.log()
 // 范围：仓内全部 .rs / .ts / .vue / .md（`scripts/` 工具自身除外）。
 // 豁免（写在规则里，逐条留痕）：
 //   · `symbio/src/plugins/vdfs/**` —— 根名的所有者，字面量只允许在这里；
-//   · `docs/CHANGELOG.md`、`docs/archive/**` —— 历史记录不改写，
+//   · `docs/archive/**` —— 历史记录不改写，
 //     改写等于伪造当时的代码状态；
 //   · 本文件（审计脚本自己要描述这条规则）。
 // 逐行豁免：`grep-audit-allow S-010: 理由`（本行或紧邻上一行，理由不可为空）。
@@ -348,7 +339,7 @@ const s010Files = walkS010(S010_ROOT).filter((f) => {
   if (path.resolve(f) === path.resolve(s010Self)) return false
   const rel = path.relative(S010_ROOT, f).split(path.sep).join('/')
   if (rel.startsWith('symbio/src/plugins/vdfs/')) return false // 所有者
-  if (rel === 'docs/CHANGELOG.md' || rel.startsWith('docs/archive/')) return false // 历史
+  if (rel.startsWith('docs/archive/')) return false // 历史
   if (rel.startsWith('cli/target/') || rel.startsWith('tauri/target/')) return false // 构建产物
   return true
 })

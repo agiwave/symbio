@@ -116,7 +116,7 @@ symbio/
 | **开发** | [插件开发](docs/guides/PLUGIN_DEVELOPMENT.md) · [排障](docs/guides/TROUBLESHOOTING.md) · [贡献指南](CONTRIBUTING.md) |
 | **设计** | [VDFS 规范](docs/design/vdfs.md) · [上下文压缩分层](symbio/src/plugins/session/docs/context-compression-design.md) · [Agent 目录规范 v2](docs/design/agent-directory-spec.md) |
 | **CLI** | [cli/README.md](cli/README.md) · [架构](cli/docs/architecture.md) · [构建](cli/docs/building.md) · [用法](cli/docs/usage.md) |
-| **变更** | [更新日志](docs/CHANGELOG.md) · [历史归档](docs/archive/) |
+| **变更** | 变更历史 = `git log`（本仓库不另维护变更日志，理由见 [贡献指南](CONTRIBUTING.md)）· [历史归档](docs/archive/) |
 
 > 每个插件与前端都维护自己的 `README.md`，详见 [文档中心 · 模块文档地图](docs/README.md#模块文档地图)。
 

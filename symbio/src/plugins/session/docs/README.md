@@ -33,7 +33,7 @@
 
 - **要改核心循环** → [`core-loop.md`](./core-loop.md) → [`../README.md`](../README.md) 六大策略 → [`module-layout.md`](./module-layout.md) 找文件落点
 - **要改压缩** → [`context-compression-design.md`](./context-compression-design.md)（分层与不变量）→ [`../README.md`](../README.md)（阈值与函数）
-- **要查历史为什么这么改** → 已归档的两份审计（见上表下方的归档说明），以及 [`docs/CHANGELOG.md`](../../../../../docs/CHANGELOG.md)
+- **要查历史为什么这么改** → 已归档的两份审计（见上表下方的归档说明），以及 `git log --grep=<词>` / `git log -S<符号>`（本仓库不另维护变更日志）
 - **要动前端转写/会话列表** → [`perf.md`](./perf.md) → [`vdfs-session-messages.md`](./vdfs-session-messages.md)
 
 ## 约定

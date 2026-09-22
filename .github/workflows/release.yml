@@ -63,9 +63,10 @@ jobs:
         working-directory: symbio
 
       - name: Run project audit
-        # S-002 异步锁 / S-007 CHANGELOG / I-014 硬编码等审计
+        # S-002 异步锁 / S-008 词表裸字面量 / I-014 硬编码等审计
+        # （S-007 原为 CHANGELOG 维护检查，已随「不维护变更日志」一并废除）
         # grep-audit.mjs 为纯 Node 实现，不依赖 ripgrep；
-        # 原 .sh 版在本步骤因 runner 未装 rg 而空跑并误报 CHANGELOG 错误。
+        # 原 .sh 版在本步骤因 runner 未装 rg 而空跑并误报。
         run: node scripts/grep-audit.mjs
 
       - name: Docs facts drift gate (docs/CURRENT.md)

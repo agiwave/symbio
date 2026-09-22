@@ -438,7 +438,10 @@ fn generated_files_are_not_indexed() {
     // 正常文件不受影响 —— 别把闸门开成"只留 .rs"
     assert!(is_source_file(Path::new("symbio/src/lib.rs")));
     assert!(is_source_file(Path::new("tauri/src/stores/sessions.ts")));
-    assert!(is_source_file(Path::new("docs/CHANGELOG.md")));
+    // 这里原用 `docs/CHANGELOG.md` 当「.md 也是源文件」的例子；仓库已不维护变更日志
+    // （变更历史即 `git log`）且该文件已删除，换成仍在的文档，避免留一个指向
+    // 不存在文件的例子。
+    assert!(is_source_file(Path::new("docs/DECISIONS.md")));
     assert!(is_source_file(Path::new("tauri/package.json"))); // 非 lock 的 json 仍要
     assert!(is_source_file(Path::new("examples/x.yaml")));
 }

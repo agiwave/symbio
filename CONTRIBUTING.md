@@ -195,7 +195,14 @@ mod tests;
 4. 若插件**可配置**（要出现在设置页）：在 `home` 的 `ensure_defaults` 加插件名、在 `setting` 的
    `SETTING_SECTIONS` 加 `(id, 中文名)`、并在该插件自己的 `detail_definition()` 加返回 `config_definition(...)` 的分支。
 5. 若插件要出现在前端：在 `tauri/src/constants/pluginPaths.ts` 添加路由常量，`tauri/src/services/` 下加对应 TS 客户端。
-6. 在 `docs/CHANGELOG.md` 追加条目。文档按**唯一来源**更新：**新增路由只在 [ROUTES.md](./docs/reference/ROUTES.md) 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 CONFIGURATION.md、错误码进 ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/gen-current-facts.mjs`。
+6. 文档按**唯一来源**更新：**新增路由只在 [ROUTES.md](./docs/reference/ROUTES.md) 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 CONFIGURATION.md、错误码进 ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/gen-current-facts.mjs`。
+
+> **变更历史就是 `git log`，本仓库不再维护 `CHANGELOG.md`。**
+> git 记录**就是**变更历史，且比手抄的一份文件更准确——不会漏、不会与代码漂移，
+> 也不必维护第二份同样的信息。提交信息本身已足够结构化（见上文「提交规范」：
+> `<type>(<scope>): <中文标题>` + 编号分节 + 「门禁：」段），且**与代码同一次提交**，
+> 不可能漂移。要查「某次改动为什么」：`git log --grep=<词>` / `git log -S<符号>`；
+> 要查「某条机制写在哪」：`node scripts/doc-find.mjs <词>`。
 
 完整教程见 [docs/guides/PLUGIN_DEVELOPMENT.md](./docs/guides/PLUGIN_DEVELOPMENT.md)。
 
@@ -213,7 +220,8 @@ mod tests;
    scope 例：`agent` / `tauri/services` / `docs`。
 3. 推送后通过 PR 提交，CI 必须全绿。
 4. 至少 1 位 maintainer 审阅通过后可合入。
-5. 涉及架构变更的 PR 必须在 `docs/CHANGELOG.md` 添加条目。
+5. 涉及架构变更的 PR：决策本身写进 [DECISIONS.md](./docs/DECISIONS.md)（一条 ADR），
+   「改了什么 / 为什么」写在提交信息里。**不另维护变更日志**（见上文第 5 节的说明框）。
 
 ---
 

@@ -34,7 +34,8 @@ import { stripAnsi, yellow } from '../color.mjs'
  *      判据等用例（含一处 `state_frame` → `message_frame` 回归修复的锁定用例）。
  * 881：v1→v2 迁移 + 节点状态流 S20~S23 + 压缩消息流化 + 中止收口终态化 + 协议
  *      增量提取器逐字节回归 + tool_name 线上名投影 + MCP camelCase/载荷语义网 +
- *      extract_result 判定顺序。逐批明细见 docs/CHANGELOG.md 的对应条目。
+ *      extract_result 判定顺序。逐批明细见对应提交（`git log --grep=<批次/主题>`；
+ *      本仓库不维护变更日志，变更历史即提交历史）。
  */
 export const BASELINE = {
   // 915：批次 E（会话运行态并入转写流）的**核心不变量**——两种帧共用一个 `seq` 计数器
@@ -55,7 +56,8 @@ export const BASELINE = {
   //      从「载荷怎么映射」变成「词汇表是闭集」——后者才是这次收窄要锁的东西。
   rustTests: 915,
   // 46 spec 文件 / 661 → 683 → 687 → 689 用例。文件数与用例数均与平台无关（全仓 spec
-  // 零平台分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
+  // 零平台分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见对应提交
+  // （`git log --grep=<批次/主题>`；本仓库不维护变更日志，变更历史即提交历史）。
   // 689：批次 G——前端侧收窄 `VdfsChange`（删四个载荷字段与 `appended` / `truncated`
   //      两个取值）。`useVdfs` 那 4 条 `appended` 用例换成 4 条**变更收敛**用例（三个
   //      取值同走重拉 / 影响判定收窄 / 已废除取值不再被静默吞掉）；`schemas` 侧新增

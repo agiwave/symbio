@@ -64,10 +64,11 @@ docs/                            # 系统级文档（跨模块）
 │   ├── frontend-mechanization-review.md         # 前端机制化复核 · 第一轮（一次性报告，非规范）
 │   ├── frontend-mechanization-review-round2.md  # 前端机制化复核 · 第二轮（同上）
 │   ├── architecture-health-check-2026-09.md     # 架构体检 2026-09（同上）
+│   ├── streaming-chain-review-2026-09.md         # 流式链路评审 · 第一轮（同上）
 │   ├── class-diagram.mermaid            # 类图
 │   └── sequence-diagram.mermaid         # 时序图
-├── CHANGELOG.md                 # 更新日志
 └── archive/                     # 历史归档（仅供参考；含 implementation-logs/、proj/）
+                                 #  注：变更历史以 `git log` 为准，本仓库**不维护 CHANGELOG**
                                  #  已废止机制与旧规范：entity-management-mechanism.md /
                                  #  entity-provider-mechanism.md / open-agent-bundle-spec.md /
                                  #  vdfs-review.md / frontend-ui-ux-*.md

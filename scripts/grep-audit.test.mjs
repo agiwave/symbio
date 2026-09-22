@@ -187,10 +187,11 @@ test('S-010 stays silent inside the vdfs plugin (the owner)', () => {
   assert.match(r.stdout, /S-010 通过/)
 })
 
-test('S-010 exempts historical records (CHANGELOG / archive)', () => {
+test('S-010 exempts historical records (archive)', () => {
+  // `docs/CHANGELOG.md` 曾与 archive 并列豁免；该机制已废除（变更历史以 `git log` 为准），
+  // 文件也随之删除，故这里只保留 archive 这一条豁免。
   const r = s010Audit({
     'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
-    'docs/CHANGELOG.md': S010_SUSPECT_MD,
     'docs/archive/old-design.md': S010_SUSPECT_MD,
   })
   assert.equal(r.status, 0)

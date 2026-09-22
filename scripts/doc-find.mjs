@@ -120,13 +120,10 @@ for (const file of walk(repoRoot)) {
   if (hits.length >= LIMIT * 4) break
 }
 
-// 排序：CHANGELOG 靠后（它是历史，不是「现在是什么」），其余按路径
-hits.sort((a, b) => {
-  const aCh = a.rel.includes('CHANGELOG') ? 1 : 0
-  const bCh = b.rel.includes('CHANGELOG') ? 1 : 0
-  if (aCh !== bCh) return aCh - bCh
-  return a.rel.localeCompare(b.rel) || a.line - b.line
-})
+// 排序：按路径（再按行号）。
+// 此前有一条「CHANGELOG 靠后（它是历史，不是『现在是什么』）」的特例——
+// 仓库已不维护 CHANGELOG（变更历史以 `git log` 为准），该特例随之删除。
+hits.sort((a, b) => a.rel.localeCompare(b.rel) || a.line - b.line)
 
 const shown = hits.slice(0, LIMIT)
 

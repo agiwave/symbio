@@ -201,7 +201,7 @@ Agent 认知数据需要持久化。
 
 **状态**：已接受
 
-> **当前状态**：**未落地 / 已回退**。CU（认知单元）+ `prop` 驱动的认知层已从代码中移除——无 `seed_cus.jsonl`、无认知单元解析；`ids.rs` 也已无本 ADR 的常量残留（原「Agent 能力 id」区的 `CAPABILITY_AGENT_COGNITION` / `_CHAT` / `_IDENTITY` / `_CREATE` 四个悬空常量于 2026-09-17 随 OAB v1 装配实现一并清理，见 CHANGELOG 同日）。现存的只有 `CapabilityCategory::Metacognition` 一个分类枚举值。
+> **当前状态**：**未落地 / 已回退**。CU（认知单元）+ `prop` 驱动的认知层已从代码中移除——无 `seed_cus.jsonl`、无认知单元解析；`ids.rs` 也已无本 ADR 的常量残留（原「Agent 能力 id」区的 `CAPABILITY_AGENT_COGNITION` / `_CHAT` / `_IDENTITY` / `_CREATE` 四个悬空常量于 2026-09-17 随 OAB v1 装配实现一并清理，见同日提交）。现存的只有 `CapabilityCategory::Metacognition` 一个分类枚举值。
 
 **背景**：
 Agent 认知类型与关系类型经常变化。
@@ -350,7 +350,7 @@ ADR-010 删掉了「差异集中在一张 trait」的适配层，但落盘那一
    `count=23 first[name=.editorconfig]` 一个条目，模型无法据此判断"目录里有没有
    我要找的东西"，只能逐轮重跑工具（每次核对 1-3 轮往返）。
 2. **没有"读侧事实表"**——ADR 全在论证"为什么"，README/ROUTES 这类手抄清单
-   会漂移（实测漂移 6 处，见 CHANGELOG 2026-09-16 第一批）；
+   会漂移（实测漂移 6 处，见 2026-09-16 第一批提交）；
    "现在是什么"只能从代码反推。
 3. **核对不划算就会放弃核对**——验证成本线性上升而收益递减时，模型会自动
    切换成"停止验证、退回文档口径"，并用自信语气包装未验证结论。
