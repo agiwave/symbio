@@ -14,26 +14,59 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 // 1. 统一交互帧
+//
+// ## 载荷为什么是 `Arc<Value>` 而不是 `Value`
+//
+// 本帧在**扇出**时逐订阅者克隆：`event_bus::try_publish` 与
+// `transcript_stream::publish_frame` 都对订阅表里的每个 `tx` 做一次 `frame.clone()`。
+// 载荷是 `Value` 时，这个克隆是**整棵 JSON 树的深拷贝**——订阅者越多、消息越长，
+// 出帧路径上的纯拷贝开销越大（一次回复可达上百帧 × 每个订阅者一份）。
+//
+// 换成 `Arc<Value>` 后：克隆 = 一次引用计数自增；载荷只有一份，所有订阅者共享。
+// 语义完全不变（`Arc<Value>` 通过 `Deref` 就是 `&Value`，序列化结果与 `Value` 逐字节相同），
+// 变的是**谁付拷贝的钱**——从「每个订阅者各付一次」变成「一次都不付」。
+//
+// 代价：`Arc<T>: Deserialize` 需要 serde 的 `rc` feature（已在 `Cargo.toml` 开启）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PluginFrame {
     /// 业务数据负载
-    Data(Value),
+    Data(Arc<Value>),
     /// 异常报告 (错误信息, 详细数据)
     Error(String, Option<Value>),
 }
 
 impl PluginFrame {
+    /// 用 `Value` 构造一个 `Data` 帧。
+    ///
+    /// 这是 `Data` 帧**唯一推荐的构造入口**：`Data` 的载荷类型是 `Arc<Value>`，
+    /// 直接写变体就得在每个调用点各写一遍 `Arc::new`（且容易漏）。
+    pub fn data(value: Value) -> Self {
+        Self::Data(Arc::new(value))
+    }
+
+    /// 取出 `Data` 帧的载荷引用（非 `Data` 帧返回 `None`）。
+    pub fn value(&self) -> Option<&Value> {
+        match self {
+            PluginFrame::Data(v) => Some(v),
+            PluginFrame::Error(_, _) => None,
+        }
+    }
+
     pub fn into_value(self) -> Value {
         match self {
-            PluginFrame::Data(v) => v,
+            // 独占时直接解包（零拷贝）；仍有其它持有者才退化为深拷贝。
+            PluginFrame::Data(v) => Arc::try_unwrap(v).unwrap_or_else(|shared| (*shared).clone()),
             _ => serde_json::json!({}),
         }
     }
 
-    /// 尝试将 Data 帧解析为指定的业务事件模型
-    pub fn try_into_event<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
+    /// 尝试将 Data 帧解析为指定的业务事件模型。
+    ///
+    /// **不克隆载荷**：用 `&Value` 自身的 `Deserializer` 实现（与
+    /// `serde_json::from_value` 走同一条路径，只是不要求所有权）。
+    pub fn try_into_event<T: DeserializeOwned>(&self) -> Result<T, String> {
         match self {
-            PluginFrame::Data(v) => serde_json::from_value::<T>(v.clone())
+            PluginFrame::Data(v) => T::deserialize(v.as_ref())
                 .map_err(|e| format!("Failed to deserialize frame data: {e}")),
             PluginFrame::Error(msg, _) => Err(format!("Cannot deserialize Error frame: {msg}")),
         }

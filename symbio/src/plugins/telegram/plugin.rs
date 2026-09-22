@@ -2,6 +2,7 @@ use super::schemas::{telegram_send, telegram_status};
 use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
+use crate::symbio_core::transcript_stream::event_of;
 use crate::symbio_core::vdfs;
 use crate::symbio_core::InvokeRequestExt;
 use crate::symbio_core::{
@@ -529,36 +530,41 @@ impl TelegramPlugin {
                             }
                             PluginPayload::Session(mut chan) => {
                                 while let Some(frame) = chan.rx.recv().await {
-                                    match frame {
-                                        PluginFrame::Data(data) => {
-                                            // 转写流帧：`{session_id, seq, message}`。
-                                            // 正文有两种上线形态，各自落地：
-                                            // - `delta`（增量）：追加——流式正文的全部来源；
-                                            // - `content`（整条替换）：只在**该节点首次出现**
-                                            //   的帧上采用（如"只有推理没有正文"的兜底 Text
-                                            //   节点），否则会把已经追加过的同一段再来一遍。
-                                            if let Ok(event) = serde_json::from_value::<
-                                                crate::symbio_core::transcript_stream::NodeEvent,
-                                            >(
-                                                data
-                                            ) {
-                                                let m = event.message;
-                                                if let Some(delta) = &m.delta {
-                                                    full_text.push_str(delta);
-                                                } else if let Some(content) = &m.content {
-                                                    let first_seen =
-                                                        seen_text_ids.insert(m.id.clone());
-                                                    if first_seen
-                                                        && m.role == Some(MessageRole::Assistant)
-                                                    {
-                                                        full_text.push_str(&content.to_text());
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        PluginFrame::Error(e, _) => {
-                                            tracing::error!("LLM Error: {}", e);
-                                            break;
+                                    if let PluginFrame::Error(e, _) = &frame {
+                                        tracing::error!("LLM Error: {}", e);
+                                        break;
+                                    }
+
+                                    // 转写流帧是**信封**：
+                                    // `{type:"transcript_event", data:{session_id, seq, message}}`。
+                                    //
+                                    // ⚠️ 曾经这里直接 `from_value::<NodeEvent>(data)`，
+                                    // 而 `NodeEvent` 的顶层字段是 `session_id`/`seq`/`message`
+                                    // ——信封的顶层却是 `type`/`data`，于是**每一帧都反序列化
+                                    // 失败**：`full_text` 恒为空，Telegram 侧每条消息都回
+                                    // 「无响应」。
+                                    //
+                                    // 现在拆信封一律走 [`event_of`]（信封形状的**唯一**实现）。
+                                    // 当时出错的原因正是这段逻辑有三份手写副本，而这是漏了
+                                    // 一层的那份——收敛成一处之后，这类错不可能再单点发生。
+                                    let Some(event) = event_of(&frame) else {
+                                        // 背压标记（`transcript_resync`）与其它非事件帧：
+                                        // 不是错误，只是没内容可收。
+                                        continue;
+                                    };
+
+                                    // 正文有两种上线形态，各自落地：
+                                    // - `delta`（增量）：追加——流式正文的全部来源；
+                                    // - `content`（整条替换）：只在**该节点首次出现**
+                                    //   的帧上采用（如"只有推理没有正文"的兜底 Text
+                                    //   节点），否则会把已经追加过的同一段再来一遍。
+                                    let m = event.message;
+                                    if let Some(delta) = &m.delta {
+                                        full_text.push_str(delta);
+                                    } else if let Some(content) = &m.content {
+                                        let first_seen = seen_text_ids.insert(m.id.clone());
+                                        if first_seen && m.role == Some(MessageRole::Assistant) {
+                                            full_text.push_str(&content.to_text());
                                         }
                                     }
                                 }

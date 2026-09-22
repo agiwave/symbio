@@ -129,6 +129,11 @@ const ALIASES = [
     rust: { file: 'symbio/src/symbio_core/event_bus.rs', name: 'KIND_VDFS' },
     what: 'VDFS 变更的总线频道名',
   },
+  {
+    ts: 'VDFS_BUS_RESYNC',
+    rust: { file: 'symbio/src/symbio_core/event_bus.rs', name: 'RESYNC_MARKER_TYPE' },
+    what: '总线背压指令：通道曾满，消费端请重读作用域（不是一条变更）',
+  },
 ]
 
 /**

@@ -114,5 +114,8 @@ export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void>
       // 此处防抖重拉，收敛排序与完整字段。
       scheduleListRefresh(sink)
     },
+    // 重同步：后端通道曾满，本端可能漏了会话节点的状态迁移（如 `working → active`）。
+    // 漏掉终态会让侧栏永远停在「运行中」——而清单是幂等全量视图，整表重拉即权威收敛。
+    () => scheduleListRefresh(sink),
   )
 }

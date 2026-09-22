@@ -38,7 +38,7 @@
 //! 工具），随后同 4-5。父子关系始终由子会话存储元数据承载，无进程内状态。
 
 use super::store::AgentDirStore;
-use crate::symbio_core::event_bus::{register_subscriber, unregister_subscriber, KIND_VDFS};
+use crate::symbio_core::event_bus::{register_subscriber, unregister_subscriber};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
@@ -47,9 +47,9 @@ use crate::symbio_core::schemas::session::session_chat;
 use crate::symbio_core::schemas::session::session_get_messages;
 use crate::symbio_core::schemas::session::session_update;
 use crate::symbio_core::transcript_stream::{
-    register_transcript_subscriber, unregister_transcript_subscriber, NodeEvent,
+    event_of, is_resync, register_transcript_subscriber, unregister_transcript_subscriber,
 };
-use crate::symbio_core::vdfs_provider::{VdfsChange, VDFS_STATUS_WORKING};
+use crate::symbio_core::vdfs_provider::{vdfs_change_of, VDFS_STATUS_WORKING};
 use crate::symbio_core::{
     AbortSignal, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt, Plugin, PluginError,
     PluginFrame, PluginPayload, MODE, PATH, PLUGIN_SESSION, PROVIDER_ID, RISK_LEVEL,
@@ -556,41 +556,9 @@ async fn vdfs_watch(
     }
 }
 
-/// 事件总线帧 → VDFS 变更（非 `kind = "vdfs"` 的帧返回 `None`）。
-///
-/// 信封形状是 `{type:"bus_event", data:{kind, session_id, data}}`。`VdfsChange`
-/// 是 core 类型，两个进程内消费者（本文件与 CLI）都按它读——vdfs 插件的线路
-/// 信封刻意留在插件内部（`session/docs/legacy-route-migration.md` §3.4）。
-fn vdfs_change_of(frame: &PluginFrame) -> Option<VdfsChange> {
-    let PluginFrame::Data(envelope) = frame else {
-        return None;
-    };
-    let bus = envelope.get("data")?;
-    if bus.get("kind").and_then(Value::as_str) != Some(KIND_VDFS) {
-        return None;
-    }
-    serde_json::from_value::<VdfsChange>(bus.get("data")?.clone()).ok()
-}
-
-/// 转写流帧 → [`NodeEvent`]；非本流帧返回 `None`。
-///
-/// 信封形状与 CLI `transcript_frame_of` 逐字对应（由 `transcript_stream::publish_frame`
-/// 产出）：`{type:"transcript_event", data:{session_id, seq, op}}`。背压标记
-/// `transcript_resync` 无载荷，此处换算不出事件 → `None`（由 [`is_resync`] 单独留痕）。
-fn node_event_of(frame: &PluginFrame) -> Option<NodeEvent> {
-    let PluginFrame::Data(v) = frame else {
-        return None;
-    };
-    if v.get("type").and_then(Value::as_str) != Some("transcript_event") {
-        return None;
-    }
-    serde_json::from_value::<NodeEvent>(v.get("data")?.clone()).ok()
-}
-
-/// 是否为转写流**背压标记**（`transcript_resync`）：后端明示本连接曾漏帧。
-fn is_resync(frame: &PluginFrame) -> bool {
-    matches!(frame, PluginFrame::Data(v) if v.get("type").and_then(Value::as_str) == Some("transcript_resync"))
-}
+// 两条实时通道的**解包**不在这里：`vdfs_change_of` / `event_of` / `is_resync`
+// 一律走 `symbio_core` 的公共入口（信封形状是跨模块契约，本文件曾是三份手写
+// 副本之一）。这里只留「解出来之后怎么用」。
 
 /// 子会话转播任务：把子会话的两条实时通道汇入**执行期出口**。
 ///
@@ -683,7 +651,7 @@ async fn stream_relay_bridge(
                     stream_open = false;
                     continue;
                 };
-                let Some(event) = node_event_of(&frame) else {
+                let Some(event) = event_of(&frame) else {
                     if is_resync(&frame) {
                         crate::plugin_warn!(
                             "agent",

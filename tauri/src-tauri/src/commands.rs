@@ -80,12 +80,16 @@ pub async fn route_v2(
             })
         }
         PluginPayload::Session(chan) => {
+            // 连接的取消令牌：**只用于订阅表收口**（会话/总线插件的反注册任务在等它），
+            // 不用于中止业务任务——会话中止走 `session/chat/abort` + AbortSignal。
+            // 见 `route_connection::RouteConnection::cancel` 的说明。
+            let cancel = chan.cancel_token.clone();
             // 注册连接: 优先使用前端指定的 ID (client_id) 避免握手竞态丢失首帧
             let conn_id = if let Some(id) = client_id {
-                rm.register_fixed(id.clone(), chan.tx).await;
+                rm.register_fixed(id.clone(), chan.tx, cancel.clone()).await;
                 id
             } else {
-                rm.register(chan.tx).await
+                rm.register(chan.tx, cancel.clone()).await
             };
             let event_name = format!("route/{conn_id}");
 
@@ -98,7 +102,12 @@ pub async fn route_v2(
                         warn!(conn_id = %conn_id_clone, error = %e, "Emit error to frontend");
                     }
                 }
-                
+
+                // EOF：通道已关，订阅该收口了。取消是**幂等**的，与
+                // `remove_connection` 的取消重复无害；这里补一次是为了覆盖
+                // 「前端没调 close 就消失」的路径。
+                cancel.cancel();
+
                 // EOF 通知前端 (channel drop)
                 let _ = app.emit(&format!("{event_name}/eof"), ());
             });
@@ -109,11 +118,17 @@ pub async fn route_v2(
             })
         }
         PluginPayload::Native(_) => {
-            info!(trace_id = %trace_id, path = %path, "Native payload returned, skipping for FFI");
-            Ok(PluginMessageWire {
-                metadata,
-                payload: Value::Null,
-            })
+            // 与 gateway 的处置**保持一致**：`Native` 是「仅限进程内透传」的载荷，
+            // 跨传输边界（IPC / HTTP / WS）时没有任何可序列化形态。
+            //
+            // 曾经这里静默返回 `payload: null`，而 gateway 明确报错——同一个载荷在
+            // 两种传输下语义不同，前端只能把"后端返回了不可序列化的东西"当成
+            // "后端返回了空"。报错才有坐标：调用方立刻知道选错了返回类型。
+            //
+            // 现状：全仓**没有任何路由构造 `Native`**（只有两个消费端在防御性处理），
+            // 所以这条改动不改变任何可达路径的行为。
+            error!(trace_id = %trace_id, path = %path, "Native payload cannot cross a transport boundary");
+            Err("该路径返回进程内原生对象，不支持跨传输调用".to_string())
         }
         PluginPayload::Empty => {
             Ok(PluginMessageWire {

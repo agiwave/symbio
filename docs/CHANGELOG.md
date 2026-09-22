@@ -18,6 +18,95 @@
 
 ***
 
+## 2026-09-22: 帧解包收敛到唯一入口 —— 三份手写副本合并，并修掉 Telegram「永远回无响应」
+
+**问题**：转写流帧是**信封**（`{type:"transcript_event", data:{session_id, seq, message}}`），
+而「拆信封 → 取 `data` → 反序列化」这段逻辑在**三个地方各手写了一份**
+（`cli/client.rs`、`plugins/agent/host/subagent.rs`、`plugins/telegram/plugin.rs`）。
+其中 Telegram 那份漏了一层——直接 `from_value::<NodeEvent>(整个信封)`，
+而 `NodeEvent` 的顶层字段是 `session_id`/`seq`/`message`、信封顶层是 `type`/`data`，
+于是**每一帧都反序列化失败**；`if let Ok(..)` 又把错误吞掉，表现为
+「Telegram 机器人永远只回『无响应』」，且没有任何日志。
+
+同类的生产者侧副本：`plugins/event_bus/plugin.rs` 的 `connected` 帧自己拼
+`json!({type:"bus_event", …})`，与 `event_bus::build_envelope` 是同一形状的两份实现。
+
+**改动**：
+
+1. **解包收成 `symbio_core` 的两个公共入口**，且**住在产出信封的模块里**——
+   形状改了编译器在入口先响，而不是等某个消费端静默失效：
+   - `transcript_stream::event_of(&PluginFrame) -> Option<NodeEvent>`（与 `publish_frame` 同模块）
+   - `vdfs_provider::vdfs_change_of(&PluginFrame) -> Option<VdfsChange>`（与 `VdfsChange` 同模块）
+2. **背压标记要有独立判别函数** `transcript_stream::is_resync`：不能靠「事件解不出来」
+   隐式识别，否则标记帧会被当成「一个解不出来的事件」静默忽略，漏帧告警就此消失。
+3. **判别值收成常量** `transcript_stream::{EVENT_TYPE, RESYNC_TYPE}`——原先三处各写
+   裸字面量，就是三个独立的漂移点。
+4. **生产者侧一并收敛**：`event_bus::build_envelope` 改 `pub`，`event_bus` 插件的
+   `connected` 帧改为调用它。信封形状从此**一处构建、一处解包**。
+5. 三处消费方（CLI / subagent / telegram）删除本地副本，改为调用公共入口。
+
+**验证**：新增契约用例 4 条——`vdfs_change_of` 三条（解信封 / 拒异 `kind` /
+非 `Data` 帧不 panic）+ 背压标记一条（`event_of` 解不出、`is_resync` 认出）。
+**信封在测试里手搓、不调 `build_envelope`**：测试必须独立于产帧方钉形状，
+否则两边一起漂移时测试仍然是绿的——这正是本次事故能长期存活的原因。
+`cargo test --lib` 908 → 912；e2e 11/11（**重建 release 二进制后**跑的）。
+
+***
+
+## 2026-09-22: 实时面帧成本与背压语义四批改进（A–D）
+
+**问题**（一次链路评审查出，四处都是「机制上说得通、实现上不对等」）：
+
+1. **`event_bus` 满通道静默丢帧 + 静默摘除订阅**——与 `transcript_stream` 的
+   「投 resync 标记、绝不静默丢」策略不对等。实时面两条通道的投递保证强度不一致，
+   而消费端会**假定两条都可靠**。
+2. **`PluginChannel.cancel_token` 是死代码**——字段存在、从不触发，于是连接超时清理
+   只摘表不通知转发泵。
+3. **前端每帧落地 O(N)**——每条转写帧都触发一次全量 `updateMessages` 与整表重算。
+4. **出帧路径上同一份数据走两遍 serde + 逐订阅者深拷贝**——`json!($expr)` 展开为
+   `to_value(&$expr).unwrap()`，对 `Value` 载荷会**再完整遍历一遍**；扇出时每个订阅者
+   各拿一份整树深拷贝。
+
+**改动**：
+
+1. **`try_publish` 区分 `Closed` 与 `Full`**（`symbio_core/event_bus.rs`）：
+   `Closed` = 消费者走了 → 摘除；`Full` = 慢消费者 → **保留订阅** + 限流告警（5s 一次）
+   + 补送 resync 标记（20 × 100ms 重试）。前端 `eventBus.ts` 新增 `resyncHandlers`，
+   在派发循环**之前**截断标记；`sessionNodeSync` / `useVdfs` 接整表重拉。
+2. **`cancel_token` 真正接线**（`tauri/src-tauri/src/route_connection.rs` + `commands.rs`）：
+   注册时带上 token，三处清理路径（`remove_connection` / `remove_all` / 超时）都
+   `cancel()`；转发泵 EOF 后补一次 `cancel()`。顺带删掉 `plugin.ts` 的 `actualId`
+   死分支（改为显式契约断言）。
+3. **前端合帧**（`services/transcriptStream.ts`）：窗口 `FLUSH_INTERVAL_MS = 48`
+   （60Hz 下 3 帧；`16ms` 等于没合——见下表），`sink.message` → `sink.messages`，
+   store 侧 `applyTranscriptMessages` 一次 `updateMessages` 落地整批。
+
+   | 帧率 | `W=16ms` | `W=48ms` |
+   |---|---|---|
+   | 20/s | 1.0× | 1.0× |
+   | 50/s | 1.0× | 2.4× |
+   | 100/s | 1.6× | 4.8× |
+
+4. **出帧一次序列化 + `Arc` 扇出**：`PluginFrame::Data(Value)` → `Data(Arc<Value>)`
+   （克隆 = 引用计数自增），`transcript_stream::envelope` / `event_bus::build_envelope`
+   改手搓 `Map` + **move**（遍历 2 → 1）。消费端四处改借用反序列化（`T::deserialize(v)`）。
+   需要 serde 的 `rc` feature（`Arc<T>: Deserialize` 是 opt-in 的）。
+5. **补上跨通道顺序假设的自愈网**：会话运行态与消息走两条独立泵，「会话不忙」推不出
+   「消息已全部终态」。`sessions.ts` 在 `working → 非 working` 迁移后起 300ms 宽限定时器，
+   复查本地仍有非终态节点才 `reconcileTranscript` 整份回读（已收敛则不回读）。
+6. **协议收尾**：`SubscribeRequest.kinds` 删除（零生产者 + `kind` 是闭集，按路径过滤
+   已由 `vdfs/watch` 实现）；`Native` 载荷两种传输改为**一致报错**（原先 Tauri 侧静默
+   返回 `null`）；`PROTOCOLS.md` 命名约定修正（全程 `snake_case`，唯一例外在
+   `plugins/mcp/types.rs`）。
+
+**验证**：`cargo test --lib` 908；前端 vitest 683（46 文件）+ `vue-tsc` 干净；
+`clippy -D warnings` / `fmt --check` 干净；门禁 8 项审计回归通过；e2e 11/11。
+另修掉两个**测试侧**问题：`t10-node-protocol` 的 50% 概率红（停止判据改为「静默收敛」：
+无未终态节点 **且** 连续 600ms 无新帧——原判据在**第一轮**就满足，`ws.close()` 砍掉了
+第二轮的尾巴）；`event_bus` 单测的进程级订阅表并行串扰（文件内一把 tokio `Mutex` 串行化）。
+
+***
+
 ## 2026-09-22: 收起态单行摘要跟「最新内容」走（流式取末端，定稿取开头）
 
 **问题**：会话流里**默认收起**的节点（思考 / 工具调用）与深层级节点，收起态只有一行摘要，

@@ -13,6 +13,19 @@ use tracing::{debug, info, warn};
 pub struct RouteConnection {
     pub tx: mpsc::Sender<PluginFrame>,
     pub last_active: Instant,
+    /// 该连接所持 `PluginChannel` 的取消令牌。
+    ///
+    /// ## 它只用来收口**订阅表**，绝不用来中止业务任务
+    ///
+    /// 会话与总线插件各自 spawn 了一个「等它触发后反注册订阅」的任务
+    /// （`plugins/session/plugin.rs`、`plugins/event_bus/plugin.rs`）。若不触发，
+    /// 那些任务永不执行——订阅表就只能靠「下一次发布时探测 `tx.is_closed()`」兜底，
+    /// 而那要求**之后还有发布**；没有发布就一直留着。
+    ///
+    /// 会话主循环的中止走**另一条路**（`session/chat/abort` 路由 + `AbortSignal`），
+    /// 与本令牌无关。因此关闭前端连接**不会**中止正在跑的那一轮对话——
+    /// 这正是 `route_v2_close` 想要的语义（后端任务独立于前端连接继续运行）。
+    pub cancel: CancellationToken,
 }
 
 /// 分形路由连接管理器
@@ -61,7 +74,10 @@ impl RouteConnectionManager {
                         timeout_secs = timeout.as_secs(),
                         "Connection timed out, removing"
                     );
-                    guard.remove(&id); // Drop tx naturally causes EOF
+                    // Drop tx naturally causes EOF；取消令牌让订阅表同步收口
+                    if let Some(conn) = guard.remove(&id) {
+                        conn.cancel.cancel();
+                    }
                 }
             }
 
@@ -73,9 +89,10 @@ impl RouteConnectionManager {
     pub async fn register(
         &self,
         tx: mpsc::Sender<PluginFrame>,
+        cancel: CancellationToken,
     ) -> String {
         let id = format!("route_conn_{}", self.next_id.fetch_add(1, Ordering::Relaxed));
-        self.register_fixed(id.clone(), tx).await;
+        self.register_fixed(id.clone(), tx, cancel).await;
         id
     }
 
@@ -84,6 +101,7 @@ impl RouteConnectionManager {
         &self,
         id: String,
         tx: mpsc::Sender<PluginFrame>,
+        cancel: CancellationToken,
     ) {
         let mut guard = self.connections.write().await;
         info!(conn_id = %id, "Registering connection");
@@ -92,6 +110,7 @@ impl RouteConnectionManager {
             RouteConnection {
                 tx,
                 last_active: Instant::now(),
+                cancel,
             },
         );
     }
@@ -107,15 +126,27 @@ impl RouteConnectionManager {
         }
     }
 
-
+    /// 摘除连接并**取消其订阅令牌**（订阅表因此确定性地收口，不等下一次发布）。
+    ///
+    /// 「不中止业务任务」的语义不变：本方法只碰订阅令牌，不碰会话的 `AbortSignal`。
     pub async fn remove_connection(&self, id: &str) {
-        info!(conn_id = %id, "Removing connection (without cancelling)");
-        self.connections.write().await.remove(id);
+        let removed = self.connections.write().await.remove(id);
+        match removed {
+            Some(conn) => {
+                info!(conn_id = %id, "Removing connection");
+                conn.cancel.cancel();
+            }
+            None => debug!(conn_id = %id, "Connection already gone"),
+        }
     }
 
     pub async fn remove_all(&self) {
-        info!("Removing all connections (without cancelling)");
-        self.connections.write().await.clear();
+        let drained: Vec<(String, RouteConnection)> =
+            self.connections.write().await.drain().collect();
+        info!(count = drained.len(), "Removing all connections");
+        for (_, conn) in drained {
+            conn.cancel.cancel();
+        }
     }
 }
 

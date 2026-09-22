@@ -443,10 +443,13 @@ fn subscribe_stream() -> (
 }
 
 /// 取走该会话**已到达**的转写帧（非本会话的忽略：订阅表是共享的）。
+///
+/// 返回 `Arc<Value>` 而非 `Value`：帧的载荷就是 `Arc<Value>`（见 `PluginFrame`），
+/// 直接搬走引用即可，不必为断言再深拷贝一遍。
 fn drain_stream_frames(
     rx: &mut tokio::sync::mpsc::Receiver<crate::symbio_core::PluginFrame>,
     id: &str,
-) -> Vec<serde_json::Value> {
+) -> Vec<std::sync::Arc<serde_json::Value>> {
     let mut got = Vec::new();
     while let Ok(crate::symbio_core::PluginFrame::Data(v)) = rx.try_recv() {
         let owned = v

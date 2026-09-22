@@ -12,6 +12,11 @@ import { stripAnsi } from '../color.mjs'
 /**
  * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
  *
+ * 908：流式链路评审 A–D 批的回归锚点——`event_bus` 满通道语义（不摘除订阅 /
+ *      `Closed` 才摘除 / resync 标记形状 / 满通道后标记必达）与**扇出不复制载荷**
+ *      （`PluginPayload::Data(Arc<Value>)` 的 `Arc::ptr_eq` 断言），外加
+ *      `transcript_stream` 的扇出共享与信封可解回事件。逐条见
+ *      `docs/archive/streaming-chain-review-2026-09-22.md` §0.1。
  * 901：转写帧日志分级——`FrameLogLevel`（骨架 INFO / 细节 DEBUG）与
  *      `frame_log_of` 的相位判据，折行器新增 `foldable`（骨架帧与首帧不可折）。
  *      新增「骨架帧不可折」「相位分界」「行尾不落空格」用例（3）。
@@ -30,13 +35,20 @@ import { stripAnsi } from '../color.mjs'
  *      extract_result 判定顺序。逐批明细见 docs/CHANGELOG.md 的对应条目。
  */
 export const BASELINE = {
-  rustTests: 901,
-  // 46 spec 文件 / 661 → 672 用例。文件数与用例数均与平台无关（全仓 spec 零平台分支、
+  // 912：帧解包收敛到 `symbio_core` 的公共入口（`transcript_stream::event_of` /
+  //      `is_resync`、`vdfs_provider::vdfs_change_of`）后补的契约用例——
+  //      `vdfs_change_of` 三条（解信封 / 拒异 kind / 非 Data 帧不 panic）+
+  //      背压标记一条（`event_of` 解不出、`is_resync` 认出）。
+  rustTests: 912,
+  // 46 spec 文件 / 661 → 683 用例。文件数与用例数均与平台无关（全仓 spec 零平台分支、
   // it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
+  // 683：`sessions` store 补 `reconcileTranscript` 的触发端用例（4）——宽限期内不动作 /
+  //      仍不收敛才回读 / 已收敛不回读 / 未发生 `working → 非 working` 迁移不安排；
+  //      以及转写流合帧的提交批量化用例（3）。
   // 672：收起态摘要跟「流式末端」走——`messagePreviewFollowsLiveEdge` 判据用例（2）+
   //      摘要取端（末端 / 开头 / 短内容 / 空内容，4）+ 渲染层两条（思考、工具行）。
   vitestFiles: 46,
-  vitestTests: 672,
+  vitestTests: 683,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

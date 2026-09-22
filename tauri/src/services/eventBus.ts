@@ -16,7 +16,7 @@
 import { connectPlugin, type Connection, type ConnectEvent } from './plugin'
 import { watchVdfs, unwatchVdfs } from './vdfs'
 import { logger } from '@/utils/logger'
-import { VDFS_EVENT_KIND, type VdfsChange } from '@/schemas/vdfs'
+import { VDFS_BUS_RESYNC, VDFS_EVENT_KIND, type VdfsChange } from '@/schemas/vdfs'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { EVENT_BUS_SUBSCRIBE } from '@/constants/pluginPaths'
 
@@ -70,6 +70,15 @@ interface EventBusState {
   /** 前端模式：页面间本地通知注册表（资源变更，与后端事件同构） */
   localVdfsHandlers: Set<(change: VdfsChange) => void>
   /**
+   * 后端明示「你可能漏了变更」时（通道曾满）要执行的重读动作。
+   *
+   * 为什么需要它：本频道**没有序号**，丢帧本身不可检测。后端在通道满时会丢帧但
+   * 保留订阅，并补送一条 resync 指令（`VDFS_BUS_RESYNC`）——这是消费端唯一能知道
+   * 「我刚才漏了东西」的途径。登记了本动作的作用域会整份重读，未登记者靠
+   * 下一次变更或用户导航自愈（幂等全量视图下这是安全的，只是慢一点）。
+   */
+  resyncHandlers: Set<() => void>
+  /**
    * 已向后端登记的路径 → 引用计数。
    *
    * 后端 `vdfs/watch` 是按路径引用计数的（`ChangeSubscriptions`），前端必须
@@ -96,6 +105,7 @@ const S: EventBusState = _G.__symEventBusState ?? (_G.__symEventBusState = {
   reconnectTimer: null,
   reconnectDelay: 1000,
   localVdfsHandlers: new Set(),
+  resyncHandlers: new Set(),
   vdfsWatchCounts: new Map(),
   vdfsWatchChain: new Map()
 })
@@ -288,7 +298,8 @@ export function vdfsChangeInScope(scope: VdfsChangeScope, path: string): boolean
  */
 export function subscribeVdfsChanged(
   scope: VdfsChangeScope,
-  handler: (change: VdfsChange) => void
+  handler: (change: VdfsChange) => void,
+  onResync?: () => void
 ): () => void {
   const dispatch = (change: VdfsChange) => {
     if (!change || typeof change.path !== 'string') return
@@ -298,6 +309,8 @@ export function subscribeVdfsChanged(
 
   // 前端模式通道：注册进本地注册表（publishVdfsChangedLocal 的投递目标）
   S.localVdfsHandlers.add(dispatch)
+  // 后端「你漏了变更」指令的落地：由调用方决定怎么重读自己的作用域
+  if (onResync) S.resyncHandlers.add(onResync)
 
   // 后端消息通道：订阅事件总线的 vdfs 频道
   const unsub = subscribe({ kind: VDFS_EVENT_KIND }, (busEvent) => {
@@ -318,6 +331,7 @@ export function subscribeVdfsChanged(
     released = true
     unsub()
     S.localVdfsHandlers.delete(dispatch)
+    if (onResync) S.resyncHandlers.delete(onResync)
     if (watchPath && watchPath !== vdfsRoot()) setVdfsWatch(watchPath, -1)
   }
 }
@@ -394,6 +408,24 @@ function handleConnectionEvent(event: ConnectEvent): void {
 
     const { kind, session_id } = busEvent.data
     if (!kind) return
+
+    // 重同步指令先于订阅者派发处理掉。
+    //
+    // 它**不是一条变更**（没有 `path`），若放它进派发循环，消费者会把它当成
+    // 「一条形状不对的变更」——`subscribeVdfsChanged` 的 `dispatch` 恰好会忽略它，
+    // 但裸 `subscribe` 的消费者不会。因此在这里一次性截断，语义边界才清晰。
+    const payload = busEvent.data.data as { type?: string } | null | undefined
+    if (payload?.type === VDFS_BUS_RESYNC) {
+      logger.warn('[event-bus]', '收到 vdfs 重同步指令（后端通道曾满），重读全部已登记作用域')
+      for (const cb of S.resyncHandlers) {
+        try {
+          cb()
+        } catch (e) {
+          logger.error('[event-bus]', 'resync handler 执行失败:', e)
+        }
+      }
+      return
+    }
 
     for (const sub of S.subscribers) {
       if (sub.filter.kind !== kind) continue

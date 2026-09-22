@@ -58,6 +58,7 @@ import {
 } from '@/schemas/vdfs'
 import { setLastWorkdir, getLastWorkdir, callPlugin } from '@/services/plugin'
 import { publishVdfsChangedLocal } from '@/services/eventBus'
+import { reconcileTranscript } from '@/services/transcriptStream'
 import { ensureSessionMountDir, ensureVdfsSessionScheme } from '@/services/vdfsScheme'
 import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
@@ -71,6 +72,7 @@ import type { ImageAttachment } from '@/types'
 import {
   appendContent,
   hydrateTranscript,
+  isInProgressMessage,
   previewOf,
   sortTranscript,
   truncateIdsFrom,
@@ -94,6 +96,29 @@ import {
 export type { SessionLiveStatus } from './sessionLive'
 
 /** 单个 session 的实时状态（用于缩略卡展示）—— 定义见 `./sessionLive`，此处仅经上方 re-export 暴露 */
+
+/**
+ * `reconcileTranscript` 的**宽限期**（毫秒）。
+ *
+ * 会话离开 `working` 时先等这么久再复查本地转写，仍不收敛才整份回读。
+ *
+ * 为什么不立刻回读：会话运行态走 VDFS 变更、消息走转写流，两条通道的到达顺序
+ * **没有机制保证**（见 `services/transcriptStream.ts::reconcileTranscript`）。
+ * 正常收尾时消息终态帧往往只比会话状态帧晚到一两个 IPC 往返，立刻回读会把
+ * 「本来马上就到」的情况也变成一次整份重读——每轮一次全量转写读取，代价远大于收益。
+ * 300ms 是「一个回合的传输抖动」与「用户能察觉的卡顿」之间的折中。
+ */
+const RECONCILE_GRACE_MS = 300
+
+/**
+ * 会话 → 待执行的收敛复查定时器（`globalThis` 单例，理由同 `transcriptStream`：
+ * Vite HMR 重载模块后旧定时器仍会触发，收敛到 globalThis 才不会丢引用）。
+ */
+const _RG = globalThis as typeof globalThis & {
+  __symReconcileTimers?: Map<string, ReturnType<typeof setTimeout>>
+}
+const reconcileTimers: Map<string, ReturnType<typeof setTimeout>> =
+  _RG.__symReconcileTimers ?? (_RG.__symReconcileTimers = new Map())
 
 export const useSessionsStore = defineStore('sessions', () => {
   // 列表（来自后端 list + 本地状态镜像）
@@ -254,8 +279,12 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /**
-   * 应用一帧消息到本地转写图 —— **唯一**的消息落地口（后端 `Transcript::apply`
+   * 应用**一批**消息帧到本地转写图 —— **唯一**的消息落地口（后端 `Transcript::apply`
    * 的前端镜像）。转写实时流、乐观本地回显、编辑消息都走这一条路径。
+   *
+   * 单条帧也走这里（传长度 1 的数组，见 `applyTranscriptMessage`）。批处理的收益
+   * 落在**提交次数**上：一批 N 帧只做**一次**字典拷贝与**一次**版本号推进，
+   * 于是视图侧只重建一次消息树。而每帧的语义仍**逐条**应用，顺序与单帧时完全一致。
    *
    * ## 帧就是一整条消息，语义全在字段上
    *
@@ -274,7 +303,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * ## 协议违例：同帧既带增量又带完整正文
    *
    * 该拼接还是该替换？语义不可判定，报错丢弃——与后端写入点（`Transcript::apply`）
-   * 同一条判据，报错留痕便于定位协议漂移。
+   * 同一条判据，报错留痕便于定位协议漂移。**只丢这一帧**，同批其余帧照常应用。
    *
    * ## `seq` 的两条规则（顺序锚点不得被写入动作破坏）
    *
@@ -284,64 +313,93 @@ export const useSessionsStore = defineStore('sessions', () => {
    *    **已存在的节点保留原序号**——否则任何一次"不带 seq 的更新"（状态迁移 /
    *    压缩后重发）都会把消息顶到列表末尾。
    */
-  function applyTranscriptMessage(sessionId: string, message: ChatMessage): void {
-    if (!sessionId || !message.id) return
+  function applyTranscriptMessages(sessionId: string, messages: ChatMessage[]): void {
+    if (!sessionId || messages.length === 0) return
 
-    // 协议违例：增量/全量语义互斥——同帧携带即不可判定，报错丢弃（不落图、不占 seq）。
-    if (message.delta != null && message.content != null) {
-      logger.error(
-        'sessions',
-        `[applyTranscriptMessage] 协议违例：节点 ${message.id} 同帧携带 delta 与 content（增量/全量语义互斥），帧丢弃`,
-      )
-      return
-    }
-
-    // 删除：`status = removed` ⇒ 就地移除该节点（协议里没有 remove 操作）。
-    if (message.status === MESSAGE_STATUS_REMOVED) {
-      removeMessageById(sessionId, message.id)
-      return
-    }
-
-    let merged: ChatMessage | null = null
-    updateMessages(sessionId, (cur) => {
-      // 帧自给自足：未知 id 用帧内信息建占位。`existing` 只读、不就地改
-      // （浅 ref 原地改不触发更新），所有变更都写进这份新副本。
-      let node: ChatMessage = { ...(cur[message.id] ?? { id: message.id }) }
-
-      // 身份字段：有则合并（首帧建立身份；重复携带以最后到达为准）。
-      if (message.parent_id != null) node.parent_id = message.parent_id
-      if (message.role != null) node.role = message.role
-      if (message.type != null) node.type = message.type
-      if (message.name != null) node.name = message.name
-      if (message.tool_call_id != null) node.tool_call_id = message.tool_call_id
-      if (message.meta != null) node.meta = message.meta
-      // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。
-      if (message.seq != null) node.seq = message.seq
-      if (message.timestamp != null) node.timestamp = message.timestamp
-      // 状态迁移。
-      if (message.status != null) node.status = message.status
-      // 错误信息：有则覆盖（不清除——清除走"非 Failed 的终态帧"）。
-      if (message.error != null) node.error = message.error
-      // 正文：增量追加 / 完整替换，互斥（违例已在上面拒绝）。
-      // 图里只留**累积后的 `content`**：`delta` 是传输形态，不是节点形态。
-      // 追加规则走纯逻辑层唯一实现（`appendContent`），store 只负责状态落地。
-      if (message.delta != null) {
-        node = appendContent(node, message.delta)
-      } else if (message.content != null) {
-        node.content = message.content
+    // 先剔除必然无副作用的帧（协议违例）；全被剔除时不提交，
+    // 免得为一批错误帧白拷贝整份字典、白推一次版本号。
+    const effective: ChatMessage[] = []
+    for (const message of messages) {
+      if (!message.id) continue
+      if (message.delta != null && message.content != null) {
+        logger.error(
+          'sessions',
+          `[applyTranscriptMessages] 协议违例：节点 ${message.id} 同帧携带 delta 与 content（增量/全量语义互斥），帧丢弃`,
+        )
+        continue
       }
-      // 顺序锚点：帧未带权威号 ⇒ 新节点按本地游标接在末尾（已存在者保留原号）。
-      if (typeof node.seq !== 'number') node.seq = nextSeq(sessionId)
+      effective.push(message)
+    }
+    if (effective.length === 0) return
 
-      cur[message.id] = node
-      merged = node
-      if (typeof node.seq === 'number') raiseSeqFloor(sessionId, node.seq)
+    // 全是空操作时不提交：`updateMessages` 会白拷贝整份字典并推一次版本号，
+    // 而「删除一个本地不存在的节点」正是幂等收口的常见路径（截断删除会连带
+    // 发出一串这样的帧）。判据逐帧独立，故 [新建 X, 删除 X] 这种同批组合仍会提交。
+    const cur0 = sessionMessages.value[sessionId]
+    const actionable = effective.some(
+      (m) => m.status !== MESSAGE_STATUS_REMOVED || Boolean(cur0?.[m.id]),
+    )
+    if (!actionable) return
+
+    let lastMerged: ChatMessage | null = null
+    updateMessages(sessionId, (cur) => {
+      for (const message of effective) {
+        // 删除：`status = removed` ⇒ 就地移除该节点（协议里没有 remove 操作）。
+        // 不存在时静默跳过——幂等收口的常见路径，不值得为它推一次版本号。
+        if (message.status === MESSAGE_STATUS_REMOVED) {
+          delete cur[message.id]
+          continue
+        }
+
+        // 帧自给自足：未知 id 用帧内信息建占位。`existing` 只读、不就地改
+        // （浅 ref 原地改不触发更新），所有变更都写进这份新副本。
+        let node: ChatMessage = { ...(cur[message.id] ?? { id: message.id }) }
+
+        // 身份字段：有则合并（首帧建立身份；重复携带以最后到达为准）。
+        if (message.parent_id != null) node.parent_id = message.parent_id
+        if (message.role != null) node.role = message.role
+        if (message.type != null) node.type = message.type
+        if (message.name != null) node.name = message.name
+        if (message.tool_call_id != null) node.tool_call_id = message.tool_call_id
+        if (message.meta != null) node.meta = message.meta
+        // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。
+        if (message.seq != null) node.seq = message.seq
+        if (message.timestamp != null) node.timestamp = message.timestamp
+        // 状态迁移。
+        if (message.status != null) node.status = message.status
+        // 错误信息：有则覆盖（不清除——清除走"非 Failed 的终态帧"）。
+        if (message.error != null) node.error = message.error
+        // 正文：增量追加 / 完整替换，互斥（违例已在上面拒绝）。
+        // 图里只留**累积后的 `content`**：`delta` 是传输形态，不是节点形态。
+        // 追加规则走纯逻辑层唯一实现（`appendContent`），store 只负责状态落地。
+        if (message.delta != null) {
+          node = appendContent(node, message.delta)
+        } else if (message.content != null) {
+          node.content = message.content
+        }
+        // 顺序锚点：帧未带权威号 ⇒ 新节点按本地游标接在末尾（已存在者保留原号）。
+        if (typeof node.seq !== 'number') node.seq = nextSeq(sessionId)
+
+        cur[message.id] = node
+        lastMerged = node
+        if (typeof node.seq === 'number') raiseSeqFloor(sessionId, node.seq)
+      }
     })
 
     // 同步 status.last_preview（取合并后的 assistant 文本；取不到则不动）
-    const preview = merged ? previewOf(merged) : null
+    const preview = lastMerged ? previewOf(lastMerged) : null
     // 走统一变更通道：`last_event_at` 由它推进，写入方不手动维护（与其它写点同口径）
     if (preview !== null) putStatus(sessionId, { last_preview: preview })
+  }
+
+  /**
+   * 应用**一条**消息帧（单帧入口；语义与批处理完全一致，只是批长为 1）。
+   *
+   * 保留它是因为相当多调用点是单帧语义（乐观回显、编辑回写），
+   * 让它们不必自己包数组。落地实现只有 `applyTranscriptMessages` 一处。
+   */
+  function applyTranscriptMessage(sessionId: string, message: ChatMessage): void {
+    applyTranscriptMessages(sessionId, [message])
   }
 
   /**
@@ -940,26 +998,6 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /**
-   * 从前端局部状态中精确移除单条消息（仅本地，不调用后端）。
-   *
-   * 是帧应用（[`applyTranscriptMessage`]）里 `status = removed` 分支的落地，也与
-   * `removeFrom` 分工明确：本函数只删**这一个**节点、与顺序无关——正是「单节点删除」
-   * 与「从某条起截断」两种语义的分界。
-   *
-   * 不触发 message_count 同步：新子节点会立即顶上，总数应保持不变。
-   */
-  function removeMessageById(sessionId: string, messageId: string) {
-    if (!sessionId || !messageId) return
-    const cur = sessionMessages.value[sessionId]
-    // 存在性检查放在任何对象展开**之前**：截断删除会连带引发一串针对已删节点的
-    // 冗余通知，每一次都白拷贝两份对象就太亏了（这是幂等收口的常见路径）。
-    if (!cur || !cur[messageId]) return
-    updateMessages(sessionId, (c) => {
-      delete c[messageId]
-    })
-  }
-
-  /**
    * 删除单条会话消息（连同其后续所有消息）。
    *
    * 前端**自己**做这段级联（`removeFrom`，判据与后端同源），而不是等后端把被删的
@@ -1043,6 +1081,45 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 不自己挂监听器，因此可被独立构造与测试。
 
   /**
+   * 安排一次转写收敛复查（`reconcileTranscript` 的触发端）。
+   *
+   * ## 它在补哪个洞
+   *
+   * 会话运行态（`kind = "vdfs"`）与消息转写（`session/stream`）走**两条独立通道**，
+   * 各有自己的 `mpsc` 与泵任务，**到达顺序没有机制保证**。因此「会话已离开
+   * `working`」**推不出**「本轮的消息终态帧都已到达」——后者只是发送端的调用顺序，
+   * 跨通道传递后不成立。
+   *
+   * 症状：某个节点永远停在 `streaming`（前端显示"运行中"，且 `isInProgressMessage`
+   * 会让下一次发送把它当成"已有在途节点"），而**没有任何机制会纠正**。
+   *
+   * ## 为什么先等一个宽限期
+   *
+   * 正常收尾时终态帧通常只晚到一两个 IPC 往返，立刻回读会把常态也变成整份重读。
+   * 因此先挂 `RECONCILE_GRACE_MS`，到点**再查一次**——仍然有非终态节点才回读。
+   * 这样代价被限定在「真的没收敛」的罕见情形上。
+   *
+   * 判定用 `isInProgressMessage`（`streaming` / `waiting_user_action`）：它不把
+   * **不带 `status` 的节点**（用户消息）算作在途，否则每轮都会误触发。
+   */
+  function scheduleReconcileTranscript(id: string): void {
+    const prev = reconcileTimers.get(id)
+    if (prev) clearTimeout(prev)
+    reconcileTimers.set(
+      id,
+      setTimeout(() => {
+        reconcileTimers.delete(id)
+        if (!getSessionMessages(id).some(isInProgressMessage)) return
+        logger.warn(
+          '[sessions]',
+          `会话 ${id} 已离开运行态，但本地转写仍有非终态节点（跨通道乱序或终态帧缺失），整份回读收敛`,
+        )
+        reconcileTranscript(id)
+      }, RECONCILE_GRACE_MS),
+    )
+  }
+
+  /**
    * 应用一条**会话节点**变更（`updated`）：状态 / 结局 / 错误 / 告警 / 标题就地收敛。
    *
    * ## 零回读（本函数存在的理由）
@@ -1097,6 +1174,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     // ④ 提示音：状态迁移 + 结局选音色
     if (wasWorking && !nowWorking) {
       playCompletionChime(chimeKindOfOutcome(rt.outcome), id)
+      // ⑤ 顺序假设的自愈网：会话离开运行态 ≠ 消息终态帧已到（两条通道无顺序保证）。
+      //    宽限期后复查，仍停在非终态才整份回读（见 scheduleReconcileTranscript）。
+      scheduleReconcileTranscript(id)
     }
   }
 
@@ -1142,6 +1222,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     getSessionStatus,
     getSessionStaleReason,
     applyTranscriptMessage,
+    applyTranscriptMessages,
     putStatus,
     applySessionNode,
     getSessionError,

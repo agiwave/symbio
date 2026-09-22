@@ -39,11 +39,15 @@ onMounted(async () => {
   // 两者分工明确，同一份真相不会被写两次。
   //
   // 落地目标由本外壳**显式注入**（`transcriptStream` 是 service，不认识 Pinia）；
-  // 只有两个动作：应用一条消息帧、整份重读（`reset` / 序号缺口走 loadMessages）。
+  // 只有两个动作：应用**一批**消息帧、整份重读（序号缺口 / resync 走 loadMessages）。
   // 「帧该做什么」由落地目标按字段判定，不再按操作分派到不同的落地口。
+  //
+  // 收的是**一批**而不是一条：`transcriptStream` 把 ~48ms 窗口内的帧按会话攒批，
+  // 一批只做一次 store 提交与一次消息树重建——逐帧提交的代价是 O(历史条数 × 帧数)，
+  // 长会话下那才是端到端的主要热点（帧的 `seq` 语义不变，逐帧仍过缺口检测）。
   const sessions = useSessionsStore()
   void startTranscriptStream({
-    message: (sid, msg) => sessions.applyTranscriptMessage(sid, msg),
+    messages: (sid, msgs) => sessions.applyTranscriptMessages(sid, msgs),
     reload: async (sid) => {
       await sessions.loadMessages(sid)
     },

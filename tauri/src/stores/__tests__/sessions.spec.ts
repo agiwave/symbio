@@ -88,6 +88,15 @@ const chime = vi.hoisted(() => ({ playCompletionChime: vi.fn() }))
 vi.mock('@/services/completionChime', () => ({
   playCompletionChime: chime.playCompletionChime,
 }))
+
+// 转写收敛回读是**另一条通道**的动作（`transcriptStream` 私有 pending 队列 + sink.reload）。
+// 这里只断言"在正确的时机被调用"，回读本身的行为在 transcriptStream 的用例里覆盖。
+// 另外它顺带隔离了 `transcriptStream` 对 `./plugin` 的依赖（本文件的 plugin mock 不含
+// `connectPlugin`）。
+const streamApi = vi.hoisted(() => ({ reconcileTranscript: vi.fn() }))
+vi.mock('@/services/transcriptStream', () => ({
+  reconcileTranscript: streamApi.reconcileTranscript,
+}))
 // 地址方案：注入夹具，避免真去列目录
 vi.mock('@/services/vdfsScheme', () => ({
   ensureSessionMountDir: vi.fn(async () => SCHEME.mountDir),
@@ -787,5 +796,117 @@ describe('sessions store — 实时状态的唯一变更通道', () => {
     // 条目没了 ⇒ 回到「从未有过事件」，而不是留下一条 last_event_at 很旧的陈旧状态
     expect(store.getSessionStaleReason(SID)).toBeNull()
     expect(store.getSessionMessages(SID)).toEqual([])
+  })
+})
+
+/**
+ * `reconcileTranscript` —— 「会话离开运行态 ⇒ 本轮消息已全部终态」这条**跨通道**
+ * 顺序假设的自愈网。
+ *
+ * 会话运行态走 VDFS 变更、消息走转写流，两条通道各有 `mpsc` 与泵任务，**到达顺序
+ * 没有机制保证**。所以「离开 working」推不出「终态帧已到」；本地若仍有停在
+ * `streaming` 的节点，前端会永久显示"运行中"，且 `isInProgressMessage` 会让下一次
+ * 发送把它当成"已有在途节点"。
+ *
+ * 这里钉住四条：**宽限期内不动作**、**仍不收敛才回读**、**已收敛不回读**、
+ * **不带 status 的节点不算在途**。
+ */
+describe('sessions store — reconcileTranscript（跨通道顺序假设的自愈网）', () => {
+  /** 与 `sessions.ts::RECONCILE_GRACE_MS` 同值；用例只关心"到点前/到点后" */
+  const GRACE = 300
+  const SID = 's1'
+
+  let store: ReturnType<typeof useSessionsStore>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    captured.scopes.length = 0
+    captured.handlers.length = 0
+    stopSessionNodeSync()
+    store = useSessionsStore()
+    startSessionNodeSync(store)
+    streamApi.reconcileTranscript.mockClear()
+    vdfsApi.readVdfs.mockResolvedValue({ text: '{"messages":[]}' })
+  })
+
+  const goWorking = () =>
+    emit({
+      path: `${SCHEME.mountDir}/${SID}`,
+      change: 'updated',
+      node: sessionNode({ status: VDFS_STATUS_WORKING }),
+    })
+  const goIdle = () =>
+    emit({
+      path: `${SCHEME.mountDir}/${SID}`,
+      change: 'updated',
+      node: sessionNode({ status: 'active' }),
+    })
+
+  /** 往本地转写塞一条消息（走生产同一条落地口） */
+  function putMessage(over: Record<string, unknown>) {
+    store.applyTranscriptMessages(SID, [
+      { id: 'm1', type: 'text', role: 'assistant', ...over } as never,
+    ])
+  }
+
+  it('离开运行态后本地转写仍停在非终态 → 宽限期**到点后**才整份回读', () => {
+    vi.useFakeTimers()
+    try {
+      goWorking()
+      putMessage({ status: 'streaming', content: '半句' })
+      goIdle()
+
+      // 宽限期内不动作：正常收尾时终态帧往往只晚到一两个 IPC 往返，
+      // 立刻回读会把常态也变成一次整份重读。
+      vi.advanceTimersByTime(GRACE - 1)
+      expect(streamApi.reconcileTranscript).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(1)
+      expect(streamApi.reconcileTranscript).toHaveBeenCalledWith(SID)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('离开运行态且转写已收敛 → 不产生多余回读', () => {
+    vi.useFakeTimers()
+    try {
+      goWorking()
+      putMessage({ status: 'completed', content: '整句' })
+      goIdle()
+
+      vi.advanceTimersByTime(GRACE)
+      expect(streamApi.reconcileTranscript).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('不带 status 的节点（用户消息）不算「在途」，不触发回读', () => {
+    vi.useFakeTimers()
+    try {
+      goWorking()
+      putMessage({ id: 'u1', role: 'user', content: '问题' })
+      goIdle()
+
+      vi.advanceTimersByTime(GRACE)
+      expect(streamApi.reconcileTranscript).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('未发生 working → 非 working 迁移时不安排复查', () => {
+    vi.useFakeTimers()
+    try {
+      // 从未 working（直接 active）：不是"一轮结束"，不该触发收敛
+      putMessage({ status: 'streaming', content: '半句' })
+      goIdle()
+
+      vi.advanceTimersByTime(GRACE)
+      expect(streamApi.reconcileTranscript).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

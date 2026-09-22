@@ -42,15 +42,15 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use symbio::init::create_root_plugin;
-use symbio::symbio_core::event_bus::{SubscribeRequest, KIND_VDFS};
+use symbio::symbio_core::event_bus::SubscribeRequest;
 use symbio::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use symbio::symbio_core::schemas::session::session_chat;
 use symbio::symbio_core::schemas::session::session_update;
-use symbio::symbio_core::transcript_stream::NodeEvent;
+use symbio::symbio_core::transcript_stream::{event_of, is_resync, NodeEvent};
 use symbio::symbio_core::vdfs_provider::{
-    VdfsChange, VDFS_OUTCOME_ABORTED, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
+    vdfs_change_of, VdfsChange, VDFS_OUTCOME_ABORTED, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
 };
 use symbio::symbio_core::{
     InvokeRequestExt, Plugin, PluginFrame, PluginPayload, SimpleRequest, EVENT_BUS_SUBSCRIBE, PATH,
@@ -96,40 +96,27 @@ pub enum Frame {
 
 /// 事件总线帧 → `Frame::Node`；非 `kind = "vdfs"` 的帧返回 `None`。
 ///
+/// 信封拆解交给 [`vdfs_change_of`]——形状（`{type:"bus_event", data:{kind, session_id, data}}`）
+/// 是跨模块契约，本文件与 `plugins/agent/host/subagent.rs` 曾各手写一份。
+///
 /// 信封里的 `session_id` 是死字段——会话身份在 VDFS 变更的**地址**里
 /// （`VdfsChange::path`），而 vdfs 插件发帧时本来就不填它
-/// （`plugins/vdfs/host.rs::event_bus_sink`）。
-///
-/// `VdfsChange` 是 core 类型：进程内消费者（`plugins/agent/host/subagent.rs`
-/// 与这里）都按它读，而 vdfs 插件的线路信封刻意留在插件内部。
+/// （`plugins/vdfs/host.rs::event_bus_sink`）。本函数因此**不按会话过滤**：
+/// 过滤发生在下游（`ask` 用 `session_addr` 判 scope）。
 fn node_frame_of(frame: PluginFrame) -> Option<Frame> {
-    let PluginFrame::Data(v) = frame else {
-        return None;
-    };
-    let inner = v.get("data")?;
-    if inner.get("kind")?.as_str()? != KIND_VDFS {
-        return None;
-    }
-    serde_json::from_value::<VdfsChange>(inner.get("data")?.clone())
-        .ok()
-        .map(|change| Frame::Node(Box::new(change)))
+    vdfs_change_of(&frame).map(|change| Frame::Node(Box::new(change)))
 }
 
 /// 转写流帧 → [`Frame`]；非本流帧返回 `None`。
 ///
-/// 按信封的 `type` 分派（与后端 `transcript_stream::publish_frame` 逐字对应）：
-/// 数据帧 `transcript_event` 解出 [`NodeEvent`]，背压帧 `transcript_resync` 无载荷。
+/// 拆解交给 [`event_of`] / [`is_resync`]（与后端 `transcript_stream::publish_frame`
+/// 是同一个模块，形状改了那边先响）。两者顺序不可颠倒：`event_of` 对背压帧
+/// 必然返回 `None`，得靠 `is_resync` 把它认出来。
 fn transcript_frame_of(frame: PluginFrame) -> Option<Frame> {
-    let PluginFrame::Data(v) = frame else {
-        return None;
-    };
-    match v.get("type")?.as_str()? {
-        "transcript_event" => serde_json::from_value::<NodeEvent>(v.get("data")?.clone())
-            .ok()
-            .map(|ev| Frame::Transcript(Box::new(ev))),
-        "transcript_resync" => Some(Frame::Resync),
-        _ => None,
+    if let Some(ev) = event_of(&frame) {
+        return Some(Frame::Transcript(Box::new(ev)));
     }
+    is_resync(&frame).then_some(Frame::Resync)
 }
 
 pub struct SymbioClient {
@@ -175,7 +162,7 @@ impl SymbioClient {
         //    路径取 `symbio_core::paths` 常量——调用侧不写字面量（见该模块「地址规则」）。
         let ctx = Arc::new(SimpleRequest::new(None, None));
         ctx.set(PATH, EVENT_BUS_SUBSCRIBE.to_string());
-        ctx.set_payload(SubscribeRequest { kinds: None })
+        ctx.set_payload(SubscribeRequest {})
             .map_err(|e| format!("设置订阅载荷失败: {e}"))?;
         let mut bus = match Arc::clone(&root)
             .route(ctx)

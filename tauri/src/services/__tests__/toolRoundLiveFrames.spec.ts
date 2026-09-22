@@ -59,6 +59,7 @@ vi.mock('@/utils/logger', () => ({
 import { useSessionsStore } from '@/stores/sessions'
 import {
   applyNodeEvent,
+  flushPendingFrames,
   handleStreamFrame,
   startTranscriptStream,
   stopTranscriptStream,
@@ -81,11 +82,11 @@ function ev(message: ChatMessage): NodeEvent {
   return { session_id: SID, seq, message }
 }
 
-/** 与 `MainLayout` 的接线**逐字一致**：帧 → store 动作 */
+/** 与 `MainLayout` 的接线**逐字一致**：一批帧 → store 动作 */
 function storeSink(): TranscriptStreamSink {
   const store = useSessionsStore()
   return {
-    message: (sid, m) => store.applyTranscriptMessage(sid, m),
+    messages: (sid, ms) => store.applyTranscriptMessages(sid, ms),
     reload: async (sid) => {
       await store.loadMessages(sid)
     },
@@ -96,13 +97,18 @@ function storeSink(): TranscriptStreamSink {
 function spySink() {
   const calls: string[] = []
   const reloaded: string[] = []
+  /** 每一次 `messages` 调用 = 一次提交（合帧的收益就落在这个长度上） */
+  const batches: Array<{ sid: string; ids: string[] }> = []
   const sink: TranscriptStreamSink = {
-    message: (sid, m: ChatMessage) => calls.push(`message:${sid}:${m.id}`),
+    messages: (sid, ms) => {
+      batches.push({ sid, ids: ms.map((m) => m.id) })
+      for (const m of ms) calls.push(`message:${sid}:${m.id}`)
+    },
     reload: (sid) => {
       reloaded.push(sid)
     },
   }
-  return { sink, calls, reloaded }
+  return { sink, calls, reloaded, batches }
 }
 
 beforeEach(() => {
@@ -121,7 +127,11 @@ describe('工具轮实时帧序列 → store 终态', () => {
     expect(mocks.connectPlugin.mock.calls[0]?.[0], '必须订阅会话转写流').toBe(SESSION_STREAM)
     const onFrame = mocks.connectPlugin.mock.calls[0]?.[2] as (e: unknown) => void
     expect(onFrame, 'startTranscriptStream 必须注册帧回调').toBeTruthy()
-    const emit = (e: NodeEvent) => onFrame({ type: 'transcript_event', data: e })
+    const emit = (e: NodeEvent) => {
+      onFrame({ type: 'transcript_event', data: e })
+      // 合帧是**提交批量化**（性能），不是语义变化：测试按帧断言，故每帧后立即冲刷。
+      flushPendingFrames()
+    }
 
     // ── 1. Turn root（emit_streaming_start：streaming + meta.turn）──
     emit(ev({ id: TURN, role: 'assistant', type: 'turn', status: 'streaming', meta: { turn: 0 } }))
@@ -222,7 +232,11 @@ describe('工具轮实时帧序列 → store 终态', () => {
   it('流式工具响应：增量追加到 role=tool 节点（不得被覆盖成最后一片）', async () => {
     await startTranscriptStream(storeSink())
     const onFrame = mocks.connectPlugin.mock.calls[0]?.[2] as (e: unknown) => void
-    const emit = (e: NodeEvent) => onFrame({ type: 'transcript_event', data: e })
+    const emit = (e: NodeEvent) => {
+      onFrame({ type: 'transcript_event', data: e })
+      // 合帧是**提交批量化**（性能），不是语义变化：测试按帧断言，故每帧后立即冲刷。
+      flushPendingFrames()
+    }
 
     // ToolCall 已成形（调用子智能体的工具）
     emit(ev({
@@ -262,6 +276,17 @@ describe('顺序判定与恢复（丢帧可检测）', () => {
     void startTranscriptStream(sink)
   }
 
+  /**
+   * 驱动一帧并**立即落地**。
+   *
+   * `transcriptStream` 在生产里把 ~48ms 窗口内的帧攒批提交（性能优化，不改帧语义）；
+   * 本块按帧断言，故每帧后显式冲刷，等价于「窗口 = 0」。
+   */
+  function feed(e: NodeEvent): void {
+    applyNodeEvent(e)
+    flushPendingFrames()
+  }
+
   it('未接线时帧被丢弃（无落地目标，不抛错）', () => {
     expect(() =>
       handleStreamFrame({
@@ -274,9 +299,9 @@ describe('顺序判定与恢复（丢帧可检测）', () => {
   it('跳号 = 已知有损：本帧不落地，改为整份重读', () => {
     const spy = spySink()
     wire(spy.sink)
-    applyNodeEvent({ session_id: SID, seq: 1, message: { id: 'm1' } })
+    feed({ session_id: SID, seq: 1, message: { id: 'm1' } })
     // 2 丢了：3 到达时必须整份重读，而不是把 3 补上去（缺的一帧不可凭空补）
-    applyNodeEvent({ session_id: SID, seq: 3, message: { id: 'm3' } })
+    feed({ session_id: SID, seq: 3, message: { id: 'm3' } })
     expect(spy.calls).toEqual(['message:sess1:m1'])
     expect(spy.reloaded, '跳号必须触发整份重读').toEqual([SID])
   })
@@ -284,9 +309,9 @@ describe('顺序判定与恢复（丢帧可检测）', () => {
   it('重复帧（seq 不大于已应用序号）丢弃——增量重复应用会叠字', () => {
     const spy = spySink()
     wire(spy.sink)
-    applyNodeEvent({ session_id: SID, seq: 1, message: { id: 'm1' } })
-    applyNodeEvent({ session_id: SID, seq: 1, message: { id: 'm1' } })
-    applyNodeEvent({ session_id: SID, seq: 1, message: { id: 'm1', delta: 'x' } })
+    feed({ session_id: SID, seq: 1, message: { id: 'm1' } })
+    feed({ session_id: SID, seq: 1, message: { id: 'm1' } })
+    feed({ session_id: SID, seq: 1, message: { id: 'm1', delta: 'x' } })
     expect(spy.calls).toEqual(['message:sess1:m1'])
     expect(spy.reloaded).toEqual([])
   })
@@ -294,9 +319,9 @@ describe('顺序判定与恢复（丢帧可检测）', () => {
   it('删除 = 状态迁移为 removed（帧照常落地，由 store 就地移除）', () => {
     const spy = spySink()
     wire(spy.sink)
-    applyNodeEvent({ session_id: SID, seq: 1, message: { id: 'm1' } })
+    feed({ session_id: SID, seq: 1, message: { id: 'm1' } })
     // 协议里没有 remove 操作：删除就是一帧 `status=removed` 的消息
-    applyNodeEvent({ session_id: SID, seq: 2, message: { id: 'm9', status: 'removed' } })
+    feed({ session_id: SID, seq: 2, message: { id: 'm9', status: 'removed' } })
     expect(spy.calls).toEqual(['message:sess1:m1', 'message:sess1:m9'])
     expect(spy.reloaded).toEqual([])
   })
@@ -304,8 +329,8 @@ describe('顺序判定与恢复（丢帧可检测）', () => {
   it('resync 标记：整份重读全部已知会话', () => {
     const spy = spySink()
     wire(spy.sink)
-    applyNodeEvent({ session_id: 'a', seq: 1, message: { id: 'm' } })
-    applyNodeEvent({ session_id: 'b', seq: 1, message: { id: 'm' } })
+    feed({ session_id: 'a', seq: 1, message: { id: 'm' } })
+    feed({ session_id: 'b', seq: 1, message: { id: 'm' } })
     handleStreamFrame({ type: 'transcript_resync', data: null })
     expect([...spy.reloaded].sort()).toEqual(['a', 'b'])
   })
@@ -313,10 +338,110 @@ describe('顺序判定与恢复（丢帧可检测）', () => {
   it('多会话各自独立的序号游标（互不干扰）', () => {
     const spy = spySink()
     wire(spy.sink)
-    applyNodeEvent({ session_id: 'a', seq: 1, message: { id: 'm1' } })
-    applyNodeEvent({ session_id: 'b', seq: 7, message: { id: 'm2' } })
-    applyNodeEvent({ session_id: 'a', seq: 2, message: { id: 'm3' } })
+    feed({ session_id: 'a', seq: 1, message: { id: 'm1' } })
+    feed({ session_id: 'b', seq: 7, message: { id: 'm2' } })
+    feed({ session_id: 'a', seq: 2, message: { id: 'm3' } })
     expect(spy.calls).toEqual(['message:a:m1', 'message:b:m2', 'message:a:m3'])
     expect(spy.reloaded).toEqual([])
+  })
+})
+
+/**
+ * 合帧：把窗口内的帧攒成**一次** sink 提交。
+ *
+ * 这是纯性能机制（把「每帧一次 O(历史条数) 提交」收成「每窗口一次」），
+ * 因此测试要钉住的恰恰是**它没有改变帧语义**：帧仍逐条按序落地、`seq` 仍逐帧判定、
+ * 重读前仍会丢弃待落地帧。
+ */
+describe('合帧（提交批量化，不改变帧语义）', () => {
+  it('未到窗口不提交；冲刷后同会话的帧合成一次提交且顺序不变', () => {
+    const spy = spySink()
+    void startTranscriptStream(spy.sink)
+
+    applyNodeEvent({ session_id: SID, seq: 1, message: { id: 'm1' } })
+    applyNodeEvent({ session_id: SID, seq: 2, message: { id: 'm1', delta: 'a' } })
+    applyNodeEvent({ session_id: SID, seq: 3, message: { id: 'm1', delta: 'b' } })
+    expect(spy.batches.length, '未到合帧窗口不得提交').toBe(0)
+
+    flushPendingFrames()
+    expect(spy.batches, '三帧 → 一次提交，且保持到达顺序').toEqual([
+      { sid: SID, ids: ['m1', 'm1', 'm1'] },
+    ])
+  })
+
+  it('按会话分批：不同会话各自成批（互不合并）', () => {
+    const spy = spySink()
+    void startTranscriptStream(spy.sink)
+
+    applyNodeEvent({ session_id: 'a', seq: 1, message: { id: 'm1' } })
+    applyNodeEvent({ session_id: 'b', seq: 1, message: { id: 'm2' } })
+    applyNodeEvent({ session_id: 'a', seq: 2, message: { id: 'm3' } })
+    flushPendingFrames()
+
+    expect(spy.batches).toEqual([
+      { sid: 'a', ids: ['m1', 'm3'] },
+      { sid: 'b', ids: ['m2'] },
+    ])
+  })
+
+  it('跳号时**丢弃**待落地帧：权威快照已包含它们，再应用就是重复追加', () => {
+    const spy = spySink()
+    void startTranscriptStream(spy.sink)
+
+    applyNodeEvent({ session_id: SID, seq: 1, message: { id: 'm1' } })
+    applyNodeEvent({ session_id: SID, seq: 2, message: { id: 'm1', delta: 'x' } })
+    // 3 丢了：到达的是 5 ⇒ 整份重读，且上面那两条待落地帧必须一并丢弃
+    applyNodeEvent({ session_id: SID, seq: 5, message: { id: 'm5' } })
+
+    expect(spy.batches, '跳号前的待落地帧不得再落地').toEqual([])
+    expect(spy.reloaded, '跳号必须触发整份重读').toEqual([SID])
+  })
+
+  it('resync 标记同样丢弃待落地帧', () => {
+    const spy = spySink()
+    void startTranscriptStream(spy.sink)
+
+    applyNodeEvent({ session_id: SID, seq: 1, message: { id: 'm1' } })
+    handleStreamFrame({ type: 'transcript_resync', data: null })
+
+    expect(spy.batches).toEqual([])
+    expect(spy.reloaded).toEqual([SID])
+  })
+})
+
+describe('合帧落到 store：一批只推一次版本号', () => {
+  it('一批 3 帧 → 版本号只 +1，且正文逐条拼出', () => {
+    const store = useSessionsStore()
+    const v0 = store.transcriptVersion
+
+    store.applyTranscriptMessages(SID, [
+      { id: 'm1', role: 'assistant', type: 'text', content: 'a' },
+      { id: 'm1', delta: 'b' },
+      { id: 'm1', delta: 'c' },
+    ])
+
+    expect(store.transcriptVersion, '一批只提交一次（否则视图要重建 N 次树）').toBe(v0 + 1)
+    expect(store.getSessionMessages(SID).find((m) => m.id === 'm1')?.content).toBe('abc')
+  })
+
+  it('单帧入口与批量入口语义一致（单帧只是批长为 1）', () => {
+    const store = useSessionsStore()
+    const v0 = store.transcriptVersion
+
+    store.applyTranscriptMessage(SID, { id: 'x1', role: 'assistant', type: 'text', content: 'hi' })
+    expect(store.transcriptVersion).toBe(v0 + 1)
+    expect(store.getSessionMessages(SID).find((m) => m.id === 'x1')?.content).toBe('hi')
+  })
+
+  it('一批里全是「删除不存在的节点」时不提交（幂等收口不白拷贝）', () => {
+    const store = useSessionsStore()
+    const v0 = store.transcriptVersion
+
+    store.applyTranscriptMessages(SID, [
+      { id: 'nope1', status: 'removed' },
+      { id: 'nope2', status: 'removed' },
+    ])
+
+    expect(store.transcriptVersion, '无操作的一批不得推进版本号').toBe(v0)
   })
 })

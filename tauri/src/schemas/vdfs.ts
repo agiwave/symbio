@@ -326,6 +326,17 @@ export const VDFS_CHANGE_APPENDED = 'appended'
  *  末尾」在载荷上完全一样（只能靠外部知识去猜），且删一条早期消息要发 N 条变更。 */
 export const VDFS_CHANGE_TRUNCATED = 'truncated'
 
+/** **重同步指令**：后端通道曾满，消费端可能漏了变更，请按自己的作用域重读。
+ *
+ *  与上表几个 `VDFS_CHANGE_*` **不是一类东西**：那些描述「一条变更」，本值是一条
+ *  **指令**（后端 `symbio_core::event_bus::RESYNC_MARKER_TYPE`）。
+ *
+ *  它刻意**不带 `path`**——消费端的作用域判定要求 `path` 是字符串，因此本指令会
+ *  被既有消费者自然忽略，只在显式登记了重读动作的地方生效（`subscribeVdfsChanged`
+ *  的 `onResync`）。这与转写流的 `transcript_resync` 同构：都是「别猜漏了哪一段，
+ *  按作用域整份重读」。 */
+export const VDFS_BUS_RESYNC = 'resync'
+
 /** 数据变更事件（总线下发的形状；后端 `VdfsChangeEvent`）。
  *  路径即对外展示地址（根锚点打头的虚拟地址，或工作目录相对地址），消费方直接比对。
  *

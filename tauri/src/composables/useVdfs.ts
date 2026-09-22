@@ -713,7 +713,11 @@ export function useVdfs(opts: UseVdfsOptions) {
     addr,
     () => {
       releaseChanges?.()
-      releaseChanges = subscribeVdfsChanged({ prefix: addr.value }, onChange)
+      releaseChanges = subscribeVdfsChanged({ prefix: addr.value }, onChange, () =>
+        // 重同步：后端通道曾满，本端可能漏了增删改。整份重载本地址（含左栏与当前目录）
+        // ——本页是通用资源浏览器，没有比「按绑定地址重读」更权威的收敛方式。
+        void reload()
+      )
       void reload()
     },
     { immediate: true }

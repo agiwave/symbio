@@ -19,7 +19,11 @@ unused_variables = "warn"
 dead_code = "warn"
 
 [dependencies]
-serde = { version = "1.0.229", features = ["derive"] }
+# `rc` feature：`PluginFrame::Data` 的载荷是 `Arc<Value>`（见 transport.rs 的说明），
+# 而 `Arc<T>: Deserialize` 在 serde 里是 opt-in 的。开启后 `PluginFrame` 才能继续
+# `derive(Deserialize)`——Tauri 命令参数与 gateway 的 WS 入帧都依赖它。
+# 副作用仅限「反序列化 `Rc/Arc` 不保留共享身份」，本仓从不依赖该身份。
+serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["full"] }
 futures = "0.3.34"

@@ -26,6 +26,7 @@ use crate::symbio_core::PluginFrame;
 use crate::{plugin_info, plugin_warn};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::LazyLock;
 use tokio::sync::mpsc;
 
@@ -84,15 +85,79 @@ pub struct NodeEvent {
     pub message: ChatMessage,
 }
 
+/// 数据帧的 `type` 判别值（信封顶层）。
+pub const EVENT_TYPE: &str = "transcript_event";
+
+/// 背压标记帧的 `type` 判别值（信封顶层）。
+pub const RESYNC_TYPE: &str = "transcript_resync";
+
+/// 取信封载荷：本帧须是数据帧且 `type == type_tag`，返回其 `data` 字段。
+fn payload_of<'a>(frame: &'a PluginFrame, type_tag: &str) -> Option<&'a Value> {
+    let PluginFrame::Data(v) = frame else {
+        return None;
+    };
+    if v.get("type").and_then(Value::as_str) != Some(type_tag) {
+        return None;
+    }
+    v.get("data")
+}
+
+/// **转写事件唯一的解包入口**——CLI、agent 转播桥、telegram 都走这里。
+///
+/// ## 为什么它必须是唯一的
+///
+/// 「拆信封 → 取 `data` → 反序列化」这段逻辑曾经在三个地方各手写一份
+/// （`cli/src/client.rs`、`plugins/agent/host/subagent.rs`、`plugins/telegram/plugin.rs`），
+/// 而 telegram 那份漏了一层——它把**信封**当事件解（`from_value::<NodeEvent>(信封)`），
+/// 于是每一帧都反序列化失败、`if let Ok` 把错误吞掉、正文恒为空，
+/// 表现为「每条回复都回『无响应』」。
+///
+/// 信封形状是跨模块契约：副本数 ≥2 时，其中一份出错只是时间问题。所以这里
+/// 只留一份实现，且它住在**产出信封的模块**里（`publish_frame` 的邻居）——
+/// 形状改了，编译器会在这里先响。
+pub fn event_of(frame: &PluginFrame) -> Option<NodeEvent> {
+    // 借用 `&Value` 反序列化：帧是热路径，不为此克隆整棵载荷树。
+    NodeEvent::deserialize(payload_of(frame, EVENT_TYPE)?).ok()
+}
+
+/// 是否为转写流**背压标记**（[`RESYNC_TYPE`]）：后端明示本连接曾漏帧。
+///
+/// 标记无载荷，[`event_of`] 对它必然返回 `None`——两者要分开判，否则
+/// 「收到标记」会被当成「收到一个解不出来的事件」而被静默忽略。
+pub fn is_resync(frame: &PluginFrame) -> bool {
+    matches!(frame, PluginFrame::Data(v)
+        if v.get("type").and_then(Value::as_str) == Some(RESYNC_TYPE))
+}
+
 /// resync 标记帧：消费端收到即清空本地转写并从存储整份重读（唯一恢复路径）。
 ///
 /// 与数据帧用同一信封（`{type, data}`）——消费端按 `type` 分派，不必猜形状：
 /// 缺 `data` 会落到 transport 的「裸数据帧」分支，类型判定随即失效。
 fn resync_marker() -> PluginFrame {
-    PluginFrame::Data(serde_json::json!({ "type": "transcript_resync", "data": null }))
+    PluginFrame::data(serde_json::json!({ "type": RESYNC_TYPE, "data": null }))
+}
+
+/// 把「信封字段 + 载荷」组装成一帧，**载荷按所有权搬入**。
+///
+/// ## 为什么不用 `json!({ "type": ..., "data": data })`
+///
+/// `json!` 对**表达式**参数展开成 `serde_json::to_value(&expr).unwrap()`——于是
+/// `data: Value` 会被 serde 完整遍历一遍再重建一棵新树。也就是说：
+/// 「先 `to_value(event)`，再 `json!` 包一层」= **同一份数据走两遍 serde**，
+/// 出帧路径上白白多一次整树分配 + 拷贝。
+///
+/// 这里改为直接建 `Map` 并把 `Value` **移动**进去：遍历次数从 2 降到 1，
+/// 且那唯一一次遍历（`NodeEvent` → `Value`）是省不掉的。
+fn envelope(type_tag: &str, data: Value) -> PluginFrame {
+    let mut map = serde_json::Map::with_capacity(2);
+    map.insert("type".to_string(), Value::String(type_tag.to_string()));
+    map.insert("data".to_string(), data);
+    PluginFrame::data(Value::Object(map))
 }
 
 /// 向全部订阅者发布一帧转写事件。
+///
+/// 出帧路径上只有**一次**序列化，扇出时只做引用计数自增（见 `PluginFrame` 的说明）。
 pub fn publish_frame(event: &NodeEvent) {
     let data = match serde_json::to_value(event) {
         Ok(v) => v,
@@ -101,10 +166,7 @@ pub fn publish_frame(event: &NodeEvent) {
             return;
         }
     };
-    let frame = PluginFrame::Data(serde_json::json!({
-        "type": "transcript_event",
-        "data": data,
-    }));
+    let frame = envelope(EVENT_TYPE, data);
 
     // 先收集再处理（DashMap 迭代期不删除）。满 = 慢消费者 → 踢入 resync 流程；
     // 已关闭 = 消费者走了 → 静默摘除。
@@ -165,3 +227,7 @@ async fn deliver_resync(id: String, tx: mpsc::Sender<PluginFrame>) {
         RESYNC_RETRY * RESYNC_RETRY_INTERVAL.as_millis() as usize
     );
 }
+
+#[cfg(test)]
+#[path = "transcript_stream.test.rs"]
+mod tests;

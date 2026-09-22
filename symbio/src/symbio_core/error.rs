@@ -245,7 +245,7 @@ mod tests {
         let frame = PluginFrame::Error("x".into(), Some(serde_json::json!({"code": "FUTURE"})));
         assert_eq!(frame.error_code(), None);
         assert_eq!(PluginFrame::Error("x".into(), None).error_code(), None);
-        assert_eq!(PluginFrame::Data(serde_json::json!(1)).error_code(), None);
+        assert_eq!(PluginFrame::data(serde_json::json!(1)).error_code(), None);
     }
 
     /// `is_abort` 谓词与错误码保持一致。

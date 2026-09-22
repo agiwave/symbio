@@ -8,11 +8,23 @@
 //! `plugins::event_bus` 模块。
 
 use crate::symbio_core::PluginFrame;
+use crate::{plugin_info, plugin_warn};
 use dashmap::DashMap;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+
+/// resync 标记重试次数 × 间隔（20 × 100ms = 2s）——与 `transcript_stream` 同量级。
+const RESYNC_RETRY: usize = 20;
+const RESYNC_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+
+/// 同一订阅者的「消费过慢」告警限流窗口。
+///
+/// 慢消费者会**持续**满通道，每次投递都告警会把日志刷爆；而这条告警的价值在于
+/// 「有这件事」，不在于「发生了多少次」。5s 一次足以定位。
+const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 
 /// 事件类型（`kind`）词表 —— **发布方一律引本常量，不要写裸字面量**。
 ///
@@ -48,13 +60,32 @@ pub const KIND_VDFS: &str = "vdfs";
 static SUBSCRIBERS: LazyLock<DashMap<String, mpsc::Sender<PluginFrame>>> =
     LazyLock::new(DashMap::new);
 
-/// 订阅请求
-#[derive(Debug, Clone, Deserialize)]
-pub struct SubscribeRequest {
-    /// 可选：限定只接收某些 kind 的事件（如 ["vdfs"]）
-    #[serde(default)]
-    pub kinds: Option<Vec<String>>,
-}
+/// 「消费过慢」告警的上次告警时刻（限流用；订阅注销时一并清理）。
+static SLOW_WARNED_AT: LazyLock<DashMap<String, Instant>> = LazyLock::new(DashMap::new);
+
+/// 正在补送 resync 标记的订阅者集合（防止慢消费者反复触发补送任务）。
+static RESYNC_INFLIGHT: LazyLock<DashMap<String, ()>> = LazyLock::new(DashMap::new);
+
+/// 订阅请求。
+///
+/// ## 为什么是空结构体（不是遗漏）
+///
+/// 这里原本有一个 `kinds: Option<Vec<String>>`（「限定只接收某些 kind 的事件」），
+/// 但**没有任何生产者发它**：前端 `eventBus.ts` 传 `{}`、CLI 传 `kinds: None`；
+/// 而后端也只是 `let _ = _req.kinds;` 把它丢掉。一个「看起来能用、实际被静默忽略」
+/// 的字段比没有更危险——下一个人会以为服务端过滤已生效，再去查「为什么事件还是
+/// 全量到达」。故整字段删除。
+///
+/// 空结构体 `Deserialize` 会**忽略一切未知字段**，因此旧客户端发
+/// `{"kinds":["vdfs"]}` 仍然成功（只是没有过滤效果），前后兼容。
+///
+/// ## 若将来真要做服务端过滤
+///
+/// `kind` 是**闭集**（`KIND_SYSTEM` / `KIND_VDFS`，见本模块词表），按它过滤省不了
+/// 多少流量。真正省流量的那一维是**路径**，而它已经实现了——`vdfs/watch` 的登记表
+/// 决定哪些变更进总线（未登记的路径根本不会走到这里）。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SubscribeRequest {}
 
 /// 注册一个订阅者发送端（由 `event_bus` 插件在建立连接时调用）
 pub fn register_subscriber(connection_id: String, tx: mpsc::Sender<PluginFrame>) {
@@ -64,6 +95,8 @@ pub fn register_subscriber(connection_id: String, tx: mpsc::Sender<PluginFrame>)
 /// 反注册订阅者（连接断开时调用）
 pub fn unregister_subscriber(connection_id: &str) {
     SUBSCRIBERS.remove(connection_id);
+    SLOW_WARNED_AT.remove(connection_id);
+    RESYNC_INFLIGHT.remove(connection_id);
 }
 
 /// 全局事件总线门面
@@ -79,19 +112,47 @@ impl EventBus {
     /// - `kind`: 事件类型（如 `KIND_VDFS`）
     /// - `session_id`: 可选，关联到具体会话（VDFS 变更不填，身份在载荷的地址里）
     /// - `data`: 原始业务数据（任意 JSON）
+    ///
+    /// ## 慢消费者的处置：丢帧，但**绝不摘除订阅**
+    ///
+    /// 通道满（`TrySendError::Full`）与对端已断开（`TrySendError::Closed`）是**两件
+    /// 不同的事**，处置也必须不同：
+    ///
+    /// | 情形 | 处置 | 依据 |
+    /// |---|---|---|
+    /// | `Closed` | 摘除订阅 | 消费者走了，留着只泄漏 |
+    /// | `Full` | **保留订阅** + 限流告警 + 补送 resync 标记 | 丢一帧可由「下一次变更 / 快照重读」自愈；摘除是**永久失联** |
+    ///
+    /// 这条区分是必须的，因为本频道的载荷（VDFS 变更）是**幂等全量节点视图**：
+    /// 丢一帧的代价只是「少一次状态更新」，而摘除订阅的代价是「此后一条都收不到，
+    /// 且前端拿不到任何信号」——Tauri 连接仍然活着，不会触发 `disconnected`，
+    /// 前端因此**永远不知道自己在收空气**。两者严重性不对称，故不能一并处理。
+    ///
+    /// （历史上这里把 `Full` 与 `Closed` 合并成一句 `is_err()` 并静默摘除，
+    /// 且不写日志。`transcript_stream` 当初正是作为这条缺陷的机制级纠正而写的；
+    /// 本次把同一条纠正补到本频道。）
     pub fn try_publish(kind: &str, session_id: Option<&str>, data: Value) {
-        let envelope = build_envelope(kind, session_id, &data);
-        let frame = PluginFrame::Data(envelope);
+        // 载荷按**所有权**搬进信封（零拷贝），整个信封只分配两个小 Map：
+        // 出帧路径上因此**没有任何整树遍历**，见 `build_envelope`。
+        let frame = PluginFrame::data(build_envelope(kind, session_id, data));
 
-        let mut to_remove: Vec<String> = Vec::new();
+        // 先收集再处理（DashMap 迭代期不删除）。
+        let mut gone: Vec<String> = Vec::new();
+        let mut full: Vec<(String, mpsc::Sender<PluginFrame>)> = Vec::new();
         for entry in SUBSCRIBERS.iter() {
             let (id, tx) = (entry.key(), entry.value());
-            if tx.is_closed() || tx.try_send(frame.clone()).is_err() {
-                to_remove.push(id.clone());
+            if tx.is_closed() {
+                gone.push(id.clone());
+            } else if let Err(mpsc::error::TrySendError::Full(_)) = tx.try_send(frame.clone()) {
+                full.push((id.clone(), tx.clone()));
             }
         }
-        for id in to_remove {
-            SUBSCRIBERS.remove(&id);
+        for id in gone {
+            unregister_subscriber(&id);
+        }
+        for (id, tx) in full {
+            warn_slow_once(&id);
+            schedule_resync(kind, id, tx);
         }
     }
 
@@ -101,14 +162,111 @@ impl EventBus {
     }
 }
 
-/// 构建事件信封
-fn build_envelope(kind: &str, session_id: Option<&str>, data: &Value) -> Value {
-    json!({
+/// 构建事件信封 `{type:"bus_event", data:{kind, session_id, data}}`。
+///
+/// **信封形状的唯一构建入口**：投帧方一律走这里，不要手搓同形状的 `json!`
+/// ——`plugins/event_bus/plugin.rs` 的 `connected` 帧曾自己拼过一份，形状漂移
+/// 时不会有任何编译错误。`vdfs_provider::vdfs_change_of` 是它的解包对偶。
+///
+/// ## 为什么手搓 `Map` 而不用 `json!`
+///
+/// `json!` 对**表达式**参数展开成 `serde_json::to_value(&expr).unwrap()`。
+/// 若写成 `json!({ "data": { ..., "data": data } })`，那份 `data` 会被 serde
+/// **完整遍历一遍再重建**——出帧路径上凭空多一次整树分配 + 拷贝。
+/// 直接建 `Map` 并把 `Value` 移动进去则零遍历、零拷贝。
+pub fn build_envelope(kind: &str, session_id: Option<&str>, data: Value) -> Value {
+    let mut inner = Map::with_capacity(3);
+    inner.insert("kind".to_string(), Value::String(kind.to_string()));
+    inner.insert(
+        "session_id".to_string(),
+        match session_id {
+            Some(s) => Value::String(s.to_string()),
+            None => Value::Null,
+        },
+    );
+    inner.insert("data".to_string(), data);
+
+    let mut outer = Map::with_capacity(2);
+    outer.insert("type".to_string(), Value::String("bus_event".to_string()));
+    outer.insert("data".to_string(), Value::Object(inner));
+    Value::Object(outer)
+}
+
+/// resync 标记的判别值（消费端按 `data.data.type` 识别）。
+///
+/// 与 `transcript_stream` 的 `transcript_resync` 同构：都是「你可能漏了帧，
+/// 请按自己的作用域重读」的指令。这里**不改用 `VdfsChange` 的形状**——那是
+/// 「一条变更」，而这是「一类指令」。消费端现有的作用域判定
+/// （`vdfsChangeInScope` 要求 `path` 是字符串）会自然忽略它，因此新增这条指令
+/// **不会**污染既有消费者的输入。
+pub const RESYNC_MARKER_TYPE: &str = "resync";
+
+/// 构造 resync 标记帧（`kind` 与触发它的频道一致）。
+fn resync_marker(kind: &str) -> PluginFrame {
+    PluginFrame::data(json!({
         "type": "bus_event",
         "data": {
             "kind": kind,
-            "session_id": session_id,
-            "data": data,
+            "session_id": null,
+            "data": { "type": RESYNC_MARKER_TYPE },
         }
-    })
+    }))
 }
+
+/// 「消费过慢」告警（按订阅者限流）。
+fn warn_slow_once(id: &str) {
+    let now = Instant::now();
+    let should_warn = match SLOW_WARNED_AT.get(id) {
+        Some(last) => now.duration_since(*last) >= SLOW_WARN_THROTTLE,
+        None => true,
+    };
+    if should_warn {
+        SLOW_WARNED_AT.insert(id.to_string(), now);
+        plugin_warn!(
+            "event_bus",
+            "[Bus] 订阅者 {id} 消费过慢（通道满）：本帧已丢弃，但**订阅保留**并补送 resync 标记——消费端重读作用域后自愈"
+        );
+    }
+}
+
+/// 补送 resync 标记（fire-and-forget，同一订阅者同时只跑一个补送任务）。
+///
+/// **无论补送成功与否都不摘除订阅**——这是与 `transcript_stream` 的有意差异：
+/// 转写流有单调 `seq`，摘除后消费端能靠跳号自愈；本频道没有序号，摘除即永久失联。
+/// 因此这里宁可让一个卡死的订阅者留在表里（每次变更限流告警一次，可观测），
+/// 也不做那个不可逆的动作。
+fn schedule_resync(kind: &str, id: String, tx: mpsc::Sender<PluginFrame>) {
+    if RESYNC_INFLIGHT.contains_key(&id) {
+        return;
+    }
+    // 同步上下文（如单测）没有运行时：不 spawn，靠「下一次变更 / 快照重读」自愈。
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    RESYNC_INFLIGHT.insert(id.clone(), ());
+    let kind = kind.to_string();
+    handle.spawn(async move {
+        let marker = resync_marker(&kind);
+        for attempt in 0..RESYNC_RETRY {
+            match tx.try_send(marker.clone()) {
+                Ok(()) => {
+                    plugin_info!(
+                        "event_bus",
+                        "[Bus] 订阅者 {id} resync 标记已送达（第 {} 次尝试）：消费端将重读作用域",
+                        attempt + 1
+                    );
+                    break;
+                }
+                Err(mpsc::error::TrySendError::Full(_)) if attempt + 1 < RESYNC_RETRY => {
+                    tokio::time::sleep(RESYNC_RETRY_INTERVAL).await;
+                }
+                Err(_) => break,
+            }
+        }
+        RESYNC_INFLIGHT.remove(&id);
+    });
+}
+
+#[cfg(test)]
+#[path = "event_bus.test.rs"]
+mod tests;

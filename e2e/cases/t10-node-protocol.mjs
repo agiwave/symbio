@@ -110,15 +110,41 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     );
     assert(send.status === 200, `chat/send 应受理（${send.status}）`);
 
-    // ③ 等整轮收敛：根 Turn 到达终态
-    const turnDone = () =>
-      ops.some((o) => o.message?.type === 'turn' && TERMINAL.has(o.message?.status));
-    await waitFor(turnDone, { what: '根 Turn 到达终态', timeoutMs: 30_000 });
-    // 给尾部帧（工具结果子节点 / 会话运行态）一点落地时间
+    // ③ 等转写流**静默收敛**：没有任何节点停在非终态，且连续 `QUIET_MS` 没有新帧。
+    //
+    // ⚠️ 判据不能是「任一 Turn 到达终态」：本用例是**两轮**对话（第一轮调工具、
+    // 结果回灌后再来一轮），第一轮的 Turn 到终态时第二轮才刚开始——按那个条件
+    // `ws.close()` 会砍掉第二轮的尾巴，于是 ⑫「进入过非终态的节点都收在终态」
+    // 随机变红（实测 8 次跑 4 次失败，因为 `waitFor` 是 100ms 轮询：
+    // 轮询间隔内到达的第二轮帧进了 `ops`，而它的终态帧没进）。
+    //
+    // 静默窗口同时解决「瞬时空闲」：两轮之间的空隙里 `unsettled` 也可能为空，
+    // 要求「连续无新帧」才不会在那里提前收网。
+    const QUIET_MS = 600
+    /** 已出现过、但最后一帧状态不是终态的节点 id */
+    function unsettledIds() {
+      const entered = new Set()
+      const last = new Map()
+      for (const o of ops) {
+        const m = o.message
+        if (!m?.id || m.status == null) continue
+        if (!TERMINAL.has(m.status)) entered.add(m.id)
+        last.set(m.id, m.status)
+      }
+      return [...entered].filter((id) => !TERMINAL.has(last.get(id)))
+    }
+    let lastLen = -1
+    let quietSince = Date.now()
     await waitFor(
-      () => ops.some((o) => o.message?.role === 'tool'),
-      { what: '工具结果子节点出现在流上', timeoutMs: 8_000 },
-    ).catch(() => { /* 由下方断言给出结论 */ });
+      () => {
+        if (ops.length !== lastLen) {
+          lastLen = ops.length
+          quietSince = Date.now()
+        }
+        return unsettledIds().length === 0 && Date.now() - quietSince >= QUIET_MS
+      },
+      { what: '转写流静默收敛（无未终态节点 + 连续无新帧）', timeoutMs: 30_000 },
+    )
     ws.close();
 
     // ── 时间线（失败时打印，定位到帧） ──

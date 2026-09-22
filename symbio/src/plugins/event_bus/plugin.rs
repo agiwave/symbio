@@ -27,7 +27,8 @@
 //! 为空——路由成了恒返回空数组的空壳。
 
 use crate::symbio_core::event_bus::{
-    register_subscriber, unregister_subscriber, EventBus, SubscribeRequest, KIND_SYSTEM,
+    build_envelope, register_subscriber, unregister_subscriber, EventBus, SubscribeRequest,
+    KIND_SYSTEM,
 };
 use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::{
@@ -64,9 +65,6 @@ impl EventBusPlugin {
     ) -> InvokeResponse<PluginPayload> {
         let (peer, mine) = PluginChannel::pair(2048);
 
-        // 预留：基于 _req.kinds 过滤事件（暂未实现，所有事件都推送）
-        let _ = _req.kinds;
-
         // 注册到全局表
         let connection_id = Uuid::new_v4().to_string();
         register_subscriber(connection_id.clone(), mine.tx.clone());
@@ -81,20 +79,20 @@ impl EventBusPlugin {
             unregister_subscriber(&conn_id_for_cleanup);
         });
 
-        // 立即推送一个 connected 事件
+        // 立即推送一个 connected 事件。
+        //
+        // 信封走 `build_envelope`（形状的唯一构建入口），不自己拼 `json!`：
+        // 手拼的那份在形状漂移时不会有任何编译错误。
         let _ = mine
             .tx
-            .send(PluginFrame::Data(json!({
-                "type": "bus_event",
-                "data": {
-                    "kind": KIND_SYSTEM,
-                    "session_id": null,
-                    "data": {
-                        "event": "connected",
-                        "connection_id": connection_id,
-                    }
-                }
-            })))
+            .send(PluginFrame::data(build_envelope(
+                KIND_SYSTEM,
+                None,
+                json!({
+                    "event": "connected",
+                    "connection_id": connection_id,
+                }),
+            )))
             .await;
 
         Ok(PluginPayload::Session(peer))

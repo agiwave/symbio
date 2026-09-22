@@ -437,17 +437,25 @@ async fn dispatch_once(
         PluginPayload::Empty => Ok(PluginPayloadWire::Data(Value::Null)),
         PluginPayload::Native(_) => Err("该路径返回进程内原生对象，不支持跨传输调用".to_string()),
         PluginPayload::Session(mut chan) => {
-            // 消费到 EOF，保留最后一帧；永不 EOF 的订阅由超时兜底
-            let mut last = Value::Null;
+            // 消费到 EOF，保留最后一帧；永不 EOF 的订阅由超时兜底。
+            //
+            // 保留 `Arc` 而不是每帧 `(*v).clone()`：后者是整棵 JSON 树的深拷贝，
+            // 在一个「只关心最后一帧」的循环里付 N 次深拷贝毫无意义。
+            let mut last: Option<Arc<Value>> = None;
             loop {
                 match tokio::time::timeout(Duration::from_secs(30), chan.rx.recv()).await {
-                    Ok(Some(PluginFrame::Data(v))) => last = v,
+                    Ok(Some(PluginFrame::Data(v))) => last = Some(v),
                     Ok(Some(PluginFrame::Error(m, _))) => return Err(m),
                     Ok(None) => break,
                     Err(_) => break,
                 }
             }
-            Ok(PluginPayloadWire::Data(last))
+            let value = match last {
+                // 独占时直接解包（零拷贝）；仍被别处持有才退化为深拷贝。
+                Some(a) => Arc::try_unwrap(a).unwrap_or_else(|shared| (*shared).clone()),
+                None => Value::Null,
+            };
+            Ok(PluginPayloadWire::Data(value))
         }
     }
 }
@@ -571,7 +579,7 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
         }
         Ok(PluginPayload::Data(d)) => {
             let value = d.serialize().unwrap_or(Value::Null);
-            let frame = PluginFrame::Data(value);
+            let frame = PluginFrame::data(value);
             let text = serde_json::to_string(&frame).unwrap_or_default();
             let _ = ws_send_text(&mut write_half, &text).await;
             let _ = write_half.shutdown().await;

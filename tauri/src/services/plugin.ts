@@ -409,26 +409,25 @@ async function nativeTransport(
     const payload = response.payload as PluginPayloadWire;
 
     if (payload && payload.type === 'Connection') {
-      const actualId = payload.data;
-
-      // 处理后端强制修改 Session ID 的情况 (无缝切换监听器)
-      if (actualId !== sessionId) {
-        const oldUnlisten = currentUnlisten;
-        const oldEofUnlisten = currentEofUnlisten;
-        currentUnlisten = await listen<any>(`route/${actualId}`, (event) => {
-          try {
-            const frame = ProtocolEnforcer.validate(event.payload, request.path);
-            onFrame?.(frame);
-          } catch (err) {
-            logger.error('Protocol', `Critical Violation in ${request.path}`, err);
-          }
-        });
-        currentEofUnlisten = await listen<any>(`route/${actualId}/eof`, () => {
-          onEof?.();
-        });
-        oldUnlisten?.(); // 启动新监听后再销毁旧监听，确保数据帧不丢失
-        oldEofUnlisten?.();
-        return { response, connection: new Connection(actualId, request.path, currentUnlisten, currentEofUnlisten) };
+      // ## 契约：`conn_id` 恒等于 `clientId`
+      //
+      // 后端 `route_v2` 在收到 `clientId` 时**恒**用它作为 conn_id
+      // （`tauri/src-tauri/src/commands.rs` 的 `register_fixed`），而本函数恒传
+      // `clientId: sessionId`。因此事件名与**预注册**的监听器必然一致——这正是
+      // 「先 listen 再 invoke」能消除握手竞态的原因。
+      //
+      // 历史上这里有一段「后端可能改 id ⇒ 重新 listen 并迁移监听器」的补救分支，
+      // 它**不可达**。留着它的危害不是浪费几行代码，而是掩盖真实缺口：若后端将来
+      // 真改了 id，预注册的监听器会挂在旧事件名上，**切换窗口内的帧静默丢失且不报错**。
+      // 故删除该分支，把契约写成断言——破坏契约时当场报错，而不是安静地收空气。
+      if (payload.data !== sessionId) {
+        currentUnlisten?.();
+        currentEofUnlisten?.();
+        throw new Error(
+          `[Protocol Error] route_v2 返回的 conn_id (${payload.data}) 与 clientId ` +
+            `(${sessionId}) 不一致。前端已在 clientId 上预注册监听器，后端改 id 会导致` +
+            `帧静默丢失。请检查后端 register_fixed 契约（${request.path}）。`,
+        );
       }
 
       return { response, connection: new Connection(sessionId, request.path, currentUnlisten, currentEofUnlisten) };

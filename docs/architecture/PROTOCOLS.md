@@ -271,7 +271,14 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 | `mcp_*.rs` | MCP 配置 |
 | `memory_*.rs` | 记忆操作 |
 
-所有结构都派生 `Serialize` / `Deserialize`，命名遵循 `snake_case`（Rust）↔ `camelCase`（host 转换）约定。
+所有结构都派生 `Serialize` / `Deserialize`，命名**全程 `snake_case`**——线上键名与 Rust 字段名逐字相同，**没有任何 host 侧的 `camelCase` 转换**。
+
+唯一的例外是 `plugins/mcp/types.rs`：那里镜像的是 MCP 的**外部规范报文**
+（`readOnlyHint` 等），camelCase 由规范规定，故用 `#[serde(rename_all = "camelCase")]`
+显式声明（全仓仅此 7 处）。
+
+> 这条曾经写作「`snake_case`（Rust）↔ `camelCase`（host 转换）」，与事实不符：
+> 按它去写代码，会造出一份「前端按 camelCase 读、后端按 snake_case 发」的静默错位。
 
 ---
 

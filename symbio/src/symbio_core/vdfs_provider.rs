@@ -1030,6 +1030,41 @@ impl VdfsChange {
     }
 }
 
+// ==================== 总线帧解包（信封契约的唯一实现） ====================
+
+/// **VDFS 变更唯一的解包入口**——CLI 与 agent 转播桥都走这里。
+///
+/// 输入是 `event_bus` 投递的一帧，信封形状由
+/// `event_bus::build_envelope` 定义：
+///
+/// ```text
+/// { type: "bus_event", data: { kind, session_id, data: <VdfsChange> } }
+/// ```
+///
+/// 因此判定分两步：外层 `type == "bus_event"`（`event_bus` 的约定），内层
+/// `kind == KIND_VDFS`（本域关心的事件类型）。任一不符 → `None`
+/// （帧不是给本域消费的，属正常情况，不是错误）。
+///
+/// ## 为什么它必须住在这里
+///
+/// 「拆信封 → 取 `data` → 反序列化」曾经在 CLI 与 `agent/host/subagent.rs`
+/// 各手写一份。信封形状是跨模块契约，副本数 ≥2 时其中一份漂移只是时间问题
+/// （转写流那边已经实际发生过一次，见 `transcript_stream::event_of` 的说明）。
+/// 本函数与 [`VdfsChange`] 同模块：**形状改了，这里先响**。
+///
+/// 借用 `&Value` 反序列化，**不克隆载荷**——帧是热路径，每帧一份整树深拷贝很贵。
+pub fn vdfs_change_of(frame: &crate::symbio_core::PluginFrame) -> Option<VdfsChange> {
+    use crate::symbio_core::PluginFrame;
+    let PluginFrame::Data(v) = frame else {
+        return None;
+    };
+    let bus = v.get("data")?;
+    if bus.get("kind").and_then(Value::as_str) != Some(crate::symbio_core::event_bus::KIND_VDFS) {
+        return None;
+    }
+    VdfsChange::deserialize(bus.get("data")?).ok()
+}
+
 // ==================== 路径判定（地址契约的唯一实现） ====================
 //
 // 下面三个函数是**地址规则**的实现，因此归本模块所有：任何按路径段比较、
@@ -1406,6 +1441,46 @@ pub type DynVdfsProvider = Arc<dyn VdfsProvider>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **信封契约**：`vdfs_change_of` 必须能解出 `event_bus` 产出的帧。
+    ///
+    /// 信封在测试里**手搓**（不调 `event_bus::build_envelope`）：它是跨模块契约，
+    /// 测试要独立于产帧方来钉形状——产帧方改了形状而这里没跟着改，本用例必须红。
+    /// 这正是 telegram 侧那次事故的形态（产帧方与解帧方各写一份，漂移无人发现）。
+    #[test]
+    fn vdfs_change_of_unwraps_the_bus_envelope() {
+        let frame = crate::symbio_core::PluginFrame::data(serde_json::json!({
+            "type": "bus_event",
+            "data": {
+                "kind": "vdfs",
+                "session_id": null,
+                "data": { "path": "a.md", "change": "updated" }
+            }
+        }));
+        let change = vdfs_change_of(&frame).expect("应能解出 VdfsChange");
+        assert_eq!(change.path, "a.md");
+        assert_eq!(change.change, "updated");
+    }
+
+    /// 非 `kind = "vdfs"` 的帧返回 `None`——不是错误，只是不归本域消费。
+    #[test]
+    fn vdfs_change_of_rejects_other_kinds() {
+        let frame = crate::symbio_core::PluginFrame::data(serde_json::json!({
+            "type": "bus_event",
+            "data": { "kind": "system", "session_id": null, "data": {} }
+        }));
+        assert!(vdfs_change_of(&frame).is_none());
+    }
+
+    /// 非 `Data` 帧（`Error`）返回 `None` 而**不 panic**。
+    ///
+    /// `Error` 的载荷是 `Option<Value>` 且不是信封；「先解 `Data`，其余一律 `None`」
+    /// 是这条路径的安全前提。
+    #[test]
+    fn vdfs_change_of_handles_non_data_frames() {
+        let err = crate::symbio_core::PluginFrame::Error("boom".to_string(), None);
+        assert!(vdfs_change_of(&err).is_none());
+    }
 
     #[test]
     fn access_flags_roundtrip() {
