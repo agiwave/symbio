@@ -148,24 +148,23 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 /// ## 为什么「截断 / 清空」是动作而不是 `delete`
 ///
 /// [`VdfsProvider::delete`] 的全局语义是「**这一个**节点没了」，对应
-/// [`VDFS_CHANGE_DELETED`]。
+/// [`VDFS_CHANGE_DELETED`]——它是**逐节点**的。拿它表达「删一个节点却删掉了它
+/// 后面所有」会成为一条**没人能预期的默认行为**；而拿 `cascade: bool` 之类的
+/// 附加位区分，则让「是哪种删除」变成两个字段必须一起读。动作是 provider 自持的
+/// 动词，正好承载这类**集合操作**：VDFS 只透传，不解释。
 ///
-/// - 「从这里到末尾全没了」需要**自己的**变更值 [`VDFS_CHANGE_TRUNCATED`]：
-///   若按 `deleted` 逐条下发，消费者既分不清「删这一个」与「从这里删到末尾」，
-///   代价也随被删条数线性增长（见该常量的文档）。
-/// - 「整个列表空了」**不需要**新值：它落在**列表目录**这个地址上，`deleted`
-///   在此处只有一种读法（目录没了 ⇒ 里面的条目都没了），地址本身已把语义定死。
+/// ## 区间删除**不发** VDFS 变更
 ///
-/// 所以判据不是「每种删除各配一个值」，而是**「`deleted` 在该地址上仍有歧义的，
-/// 才配自己的值」**——`truncated` 是这种情况，清空不是。会话 provider 的清空
-/// 因此发的是落在 `<条目 id>/消息` 上的 `deleted`（见 `SessionPlugin::
-/// emit_transcript_cleared`）。
+/// 逐条下发 `deleted` 的代价随被删条数线性增长（删一条早期消息要发上百条变更），
+/// 而「删这一段」在 `deleted` 的载荷上与「删这一个」完全不可区分。因此这类操作的
+/// 实时通知走**该资源自己的有序流**——会话消息是转写流上的 `status = removed` 帧
+/// （见 `session/plugin/vdfs_provider.rs::truncate_messages` / `clear_messages`）。
 ///
-/// 那为什么后两者仍不做成 `delete`？因为 `delete` 的语义是**逐节点**的：拿它
-/// 表达「删一个节点却删掉了它后面所有」会成为一条**没人能预期的默认行为**；
-/// 而拿 `cascade: bool` 之类的附加位区分，则让「是哪种删除」变成两个字段必须
-/// 一起读。动作是 provider 自持的动词，正好承载这类**集合操作**：VDFS 只透传，
-/// 不解释。
+/// **VDFS 侧一条变更也不发**：`kind = "vdfs"` 是**资源**（节点）变更的通道，
+/// 不是列表内容的通道。清空同理——它落在列表目录上，但**不发** `deleted`。
+///
+/// 回执里的被删 id 列表（随 [`VdfsActionResult::data`]）是**权威**列表：
+/// 调用方据此幂等对齐本地视图，不依赖推送。
 pub const VDFS_ACTION_TEST: &str = "test";
 /// 节点动作标识：**导出**（打包下载；与「新建类型 `zip`」的导入互为逆向）
 pub const VDFS_ACTION_EXPORT: &str = "export";
@@ -880,38 +879,40 @@ impl VdfsError {
 }
 
 // ==================== 变更通知 ====================
+//
+// ## 词汇表**只有三个取值**，判据是「有没有生产性生产者」
+//
+// `created` / `updated` / `deleted`——它们描述的是**资源**（节点）层面的变化：
+// 多了一个、变了一个、没了一个。全部生产性调用点都在这里（`grep -rn
+// "notify_change("`），且一律走 `VdfsChange::new(path, change)` 的**三元组**形式，
+// **不带任何载荷**。
+//
+// 曾经还有 `renamed` / `appended` / `truncated` 三个取值，连同 `VdfsChange` 上的
+// `to` / `delta` / `node` / `content` 四个可选载荷字段。它们**全部**是
+// `a12e09f`（会话消息整体迁移至 VDFS 体系，S16–S19）为「消息寄生在 VDFS 变更
+// 频道上」而建的，而那套模型已在 S23–S25 拆完：
+//
+// | 曾经的取值 | 当年的用途 | 现在由谁承载 |
+// |---|---|---|
+// | `appended` + `delta` | 消息正文逐帧追加（热路径，零回读） | 转写流 `session/stream` 的 `ChatMessage.delta` 帧 |
+// | `truncated` | 「删某条及其之后」（区间语义，避免逐条下发） | 转写流的 `status = removed` 帧 |
+// | `renamed` + `to` | 节点换地址 | **无**（没有任何 provider 生产它） |
+// | `node` / `content` | `created` / `updated` 捎带快照，免一次 `stat` + `read` | **无**（没有任何 provider 填它） |
+//
+// 删除它们的判据不是「现在没人用」，而是**「一个变更取值（或载荷字段）必须有
+// 生产性生产者，否则它不是词汇的一部分」**。留着三种后果，都是本仓库反复否决的
+// 那类陷阱：
+//
+// 1. **规范文档会撒谎**——`docs/design/vdfs.md` 曾把「载荷按变更类型可选」写成
+//    设计的读回避免机制，而实际上每个消费者都在回读；
+// 2. **消费端会长出永不执行的死分支**——前端曾为 `appended` / `renamed` 各写一套；
+// 3. **它会诱导错误设计**——「流式追加挂到资源变更频道上」正是被拆掉两次的那个
+//    方案（无流内序号、载荷全量而消费端要猜增量）。追加型资源现在有更好的形态：
+//    自己的有序流（见 `symbio_core::transcript_stream`）。
 
 pub const VDFS_CHANGE_CREATED: &str = "created";
 pub const VDFS_CHANGE_UPDATED: &str = "updated";
 pub const VDFS_CHANGE_DELETED: &str = "deleted";
-pub const VDFS_CHANGE_RENAMED: &str = "renamed";
-/// **追加型**变更：节点内容尾部新增了一段（携带 [`VdfsChange::delta`]）。
-///
-/// 与 `updated` 的区别是**增量的**：`updated` 是「这个节点变了，请重读」，
-/// `appended` 是「这个节点尾部多了这些字，直接用」。列表型 provider 用它承载
-/// 流式输出——一条消息的正文不断追加，消费者无需为每个片段重读整条消息。
-pub const VDFS_CHANGE_APPENDED: &str = "appended";
-
-/// **尾部截断**变更：`path` 所指节点**及其之后的全部兄弟**都已被移除。
-///
-/// ## 为什么不能复用 `deleted`
-///
-/// `deleted` 的语义是「**这一个**节点没了」，消费者据此移除一项即可，与顺序无关
-/// ——这正是它作为通用变更类型该有的样子（重试一轮时删掉它的子树、恢复工具调用时
-/// 删掉旧的结果子节点，都是这种**逐节点**删除）。
-///
-/// 而「删除某条消息，其后的消息一并删除」是另一种语义：它描述的是**列表尾部的一段
-/// 区间**，而不是若干个独立节点。若仍用 `deleted` 逐条下发，会同时坏掉两件事：
-///
-/// 1. **消费者无从分辨**——收到的每一条都长得一样，「删这一个」与「从这里删到末尾」
-///    在载荷上完全不可区分，只能靠外部知识去猜；
-/// 2. **代价随被删数量线性增长**——删一条早期消息要发 N 条变更，N 可达上百。
-///
-/// 因此把它拆成一个**独立的变更类型**，而不是在 `deleted` 上挂一个 `cascade` 布尔：
-/// 「是哪种删除」只有一个取值处（`change` 本身），不会出现两个字段必须一起读才正确
-/// 的写法。消费者侧也不需要预知任何上下文——按自己的列表顺序取「该节点及其后」即可，
-/// 与它是怎么被删的无关。
-pub const VDFS_CHANGE_TRUNCATED: &str = "truncated";
 
 /// 数据变更事件（**provider 视角**）。
 ///
@@ -919,60 +920,40 @@ pub const VDFS_CHANGE_TRUNCATED: &str = "truncated";
 /// provider 子树内的**相对路径**，与其 `list` / `stat` 等的路径坐标系一致；
 /// 使用方（分发层）投递时补上挂载名、拼成全路径后转发给消费者。
 ///
-/// ## 载荷是**按变更类型可选**的，不是可有可无的装饰
+/// ## 形状就是「哪里 + 怎么变」，**没有载荷**
 ///
-/// 消费者要知道「变成了什么」，而 `path` + `change` 只说「哪里、怎么变」。
-/// 三种获取方式对应三种成本：
+/// 它只说「**哪里、怎么变**」；「变成了什么」由消费者回读（`stat` / `read`）。
+/// 回读是**幂等**的，而载荷不是——这正是本类型不带载荷的原因，见下方「为什么
+/// 没有载荷字段」。
 ///
-/// | 变更 | 载荷 | 消费者动作 | 额外往返 |
-/// |---|---|---|---|
-/// | `appended` | [`Self::delta`] | 尾部拼接 | **0**（热路径，逐帧） |
-/// | `created` / `updated` | [`Self::node`]（+ [`Self::content`]） | 就地插入 / 替换 | **0** |
-/// | 未带载荷 | — | 回退：`stat` + `read` | 1–2 |
+/// 词汇表只有三个取值：`created` / `updated` / `deleted`（判据与历史见模块级
+/// 的「变更通知」小节）。三者一律由 [`crate::symbio_core::vdfs::host::notify_change`]
+/// 以 [`Self::new`] 构造，**没有别的构造入口**。
 ///
-/// 设计要点：**热路径窄、冷路径全**。流式追加每帧只多一小段（`delta`），
-/// 若把整节点挂在每帧上，流量会退化成 O(n²)；而 `created` / `updated` 每轮
-/// 只有寥寥数次，把节点视图一并带上就能免掉消费者的回读。
+/// ## 为什么**没有**载荷字段（`to` / `delta` / `node` / `content`）
 ///
-/// 载荷**可选**：provider 可以选择不填（消费者回退到 `stat` / `read`），
-/// 因此这是纯增益扩展，不构成对实现的强制。
+/// 这四个字段曾存在，且都**没有生产性生产者**（只有测试构造），已删除。删它们
+/// 不只是"清理死代码"，而是删掉一条**被拆过两次的错误设计路径**：
 ///
-/// ## 这三类载荷**当前都没有生产性生产者**
+/// - **`delta`（增量载荷）**：把「流式追加」挂到**资源变更**频道上。这条路有两个
+///   结构性缺陷——频道没有流内序号（丢帧不可检测），而载荷是全量/增量的混合
+///   （消费端必须猜「这次是追加还是替换」）。追加型资源现在有自己的有序流：
+///   `symbio_core::transcript_stream`（带 `seq` + resync 标记）。
+/// - **`node` / `content`（快照载荷）**：看似"免一次回读"的纯增益，实则是**把快照
+///   放在一条独立无序通道上**。快照的来源必须**有序或幂等**——VDFS 变更两者都不
+///   是，于是"一次迟到的自动命名把运行态回退"这类事故在结构上可能发生（批次 E
+///   正是这么修掉的）。会话运行态曾是它的唯一使用者。
+/// - **`to`（重命名目标）**：没有任何 provider 生产 `renamed`。
 ///
-/// [`Self::with_node`] / [`Self::with_content`] / [`Self::appended`] 目前只在测试
-/// 里被调用；生产路径一律走 [`crate::symbio_core::vdfs::host::notify_change`] 的
-/// 三元组构造。即「免一次回读」的**能力已具备、尚未启用**——要用起来得先有
-/// provider 在自己的 `watch` 里填。
-///
-/// 会话运行态曾是 `updated` + `node` 的唯一使用者，批次 E 起已改走
-/// `session/stream` 转写流（见 `session/docs/node-state-streaming.md` §11.4）：
-/// **快照的来源必须有序或幂等**，而 VDFS 是一条独立无序通道，其上的节点快照会
-/// 与有序通道的状态竞争（一次迟到的自动命名就能把运行态回退）。
+/// 判据是**「一个载荷字段必须有生产性生产者」**，与词汇表取值同一条。真需要
+/// 「免回读」时，正确的形态是让消费者读**幂等的**那一侧（`list` / `stat`），
+/// 而不是让事件携带一份可能过期的快照。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsChange {
     /// 变更节点在本 provider 子树内的相对路径
     pub path: String,
-    /// 变更类型（`created` / `updated` / `deleted` / `renamed` / `appended` / `truncated`）
+    /// 变更类型（`created` / `updated` / `deleted`）
     pub change: String,
-    /// 重命名时的目标路径（同样为本子树内相对路径）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to: Option<String>,
-    /// 追加型变更（`appended`）的**增量文本**；其余变更为 `None`。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delta: Option<String>,
-    /// **节点视图**（`created` / `updated` 的载荷）：变更后该节点的元数据。
-    ///
-    /// 消费者据此免掉一次 `stat`——结构（`name` / `attributes` / `status` / `ext`）
-    /// 直接可用。`None` = 未附带，消费者需自行 `stat`。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node: Option<VdfsNode>,
-    /// **内容快照**（`created` / `updated` 的载荷）：变更后该节点的正文。
-    ///
-    /// 与 [`Self::delta`] 的区别是**全量 vs 增量**：本字段是「现在是什么」，
-    /// `delta` 是「多了什么」。两者不会同时出现。
-    /// `None` = 未附带，消费者需自行 `read`。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
 }
 
 impl VdfsChange {
@@ -980,63 +961,19 @@ impl VdfsChange {
         Self {
             path: path.into(),
             change: change.into(),
-            to: None,
-            delta: None,
-            node: None,
-            content: None,
         }
     }
 
-    pub fn renamed(from: impl Into<String>, to: impl Into<String>) -> Self {
-        Self {
-            path: from.into(),
-            change: VDFS_CHANGE_RENAMED.to_string(),
-            to: Some(to.into()),
-            delta: None,
-            node: None,
-            content: None,
-        }
-    }
-
-    /// 追加型变更：`path` 节点尾部新增了 `delta` 这段文本。
-    pub fn appended(path: impl Into<String>, delta: impl Into<String>) -> Self {
-        Self {
-            path: path.into(),
-            change: VDFS_CHANGE_APPENDED.to_string(),
-            to: None,
-            delta: Some(delta.into()),
-            node: None,
-            content: None,
-        }
-    }
-
-    /// 附带**节点视图**（免掉消费者的 `stat`）
-    pub fn with_node(mut self, node: VdfsNode) -> Self {
-        self.node = Some(node);
-        self
-    }
-
-    /// 附带**内容快照**（免掉消费者的 `read`）
-    pub fn with_content(mut self, content: impl Into<String>) -> Self {
-        self.content = Some(content.into());
-        self
-    }
-
-    /// 用 `f` 重写事件里**全部**路径（`path` / `to` / `node.path`）。
+    /// 用 `f` 重写事件里的路径。
     ///
     /// 使用方（分发层）补挂载前缀时调用它——**而不是逐字段重建** `VdfsChange`：
     /// 逐字段重建会在新增字段时被漏掉（新字段静默丢在转发层，且没有任何编译
     /// 错误提示）。把「路径都要翻译」收进一个函数，漏翻译在结构上不可能发生。
     ///
-    /// 空路径不动（`node.path` 常为空 = provider 未填，此时以 `path` 为准）。
+    /// 目前只有 `path` 一个字段，看起来"直接赋值就够了"——**保留这个函数正是
+    /// 为了让那句话继续成立**：以后真加了路径型字段，翻译点已经在这里。
     pub fn map_paths(mut self, f: impl Fn(&str) -> String) -> Self {
         self.path = f(&self.path);
-        self.to = self.to.take().map(|t| f(&t));
-        if let Some(node) = self.node.as_mut() {
-            if !node.path.is_empty() {
-                node.path = f(&node.path);
-            }
-        }
         self
     }
 }
@@ -1631,72 +1568,50 @@ mod tests {
     #[test]
     fn change_constructors_are_mount_free() {
         // provider 只报子树内相对路径，不含挂载名
-        let c = VdfsChange::renamed("a", "b");
-        assert_eq!(c.change, VDFS_CHANGE_RENAMED);
-        assert_eq!(c.path, "a");
-        assert_eq!(c.to.as_deref(), Some("b"));
-
         let c = VdfsChange::new("sub/x.md", VDFS_CHANGE_UPDATED);
         assert_eq!(c.path, "sub/x.md");
-        assert!(c.to.is_none());
-
-        // 追加型变更必须携带增量——消费者不得据此触发重读
-        let c = VdfsChange::appended("sub/x.md", "尾部新增");
-        assert_eq!(c.change, VDFS_CHANGE_APPENDED);
-        assert_eq!(c.delta.as_deref(), Some("尾部新增"));
-        assert!(VdfsChange::new("a", VDFS_CHANGE_UPDATED).delta.is_none());
-    }
-
-    /// 载荷按变更类型可选：`appended` 只带增量（热路径窄），
-    /// `created` / `updated` 可带节点视图 + 内容快照（冷路径免回读）。
-    #[test]
-    fn change_payload_is_kind_scoped() {
-        // 默认构造不带任何载荷——provider 不填也能工作（消费者回退 stat/read）
-        let bare = VdfsChange::new("a", VDFS_CHANGE_CREATED);
-        assert!(bare.node.is_none() && bare.content.is_none());
-
-        let node = VdfsNode::file("m1", "助手", VdfsAccess::READ);
-        let c = VdfsChange::new("消息/m1", VDFS_CHANGE_CREATED)
-            .with_node(node)
-            .with_content("你好");
-        assert_eq!(c.node.as_ref().map(|n| n.name.as_str()), Some("m1"));
-        assert_eq!(c.content.as_deref(), Some("你好"));
-        // 全量快照与增量是两个字段，不同时出现
-        assert!(c.delta.is_none());
-
-        // 追加型**只**带增量：逐帧载荷不得随正文变宽（否则退化成 O(n²)）
-        let a = VdfsChange::appended("消息/m1", "世界");
-        assert!(a.node.is_none() && a.content.is_none() && a.delta.is_some());
-
-        // 空载荷字段不序列化（保持既有线上形状不变）
-        let v = serde_json::to_value(VdfsChange::new("a", VDFS_CHANGE_UPDATED)).unwrap();
-        assert!(v.get("delta").is_none() && v.get("node").is_none() && v.get("content").is_none());
-    }
-
-    /// `map_paths` 一次覆盖事件里**全部**路径——使用方补前缀不必逐字段重建。
-    #[test]
-    fn map_paths_covers_every_path_in_the_event() {
-        let node = VdfsNode::file("m1", "助手", VdfsAccess::READ).with_path("abc/消息/m1");
-        let c = VdfsChange::renamed("abc/消息/m1", "abc/消息/m2")
-            .with_node(node)
-            .with_content("正文")
-            .map_paths(|p| format!("session/{p}"));
-
-        assert_eq!(c.path, "session/abc/消息/m1");
-        assert_eq!(c.to.as_deref(), Some("session/abc/消息/m2"));
+        assert_eq!(c.change, VDFS_CHANGE_UPDATED);
+        // 补挂载前缀由使用方做，事件本身不知道自己挂在哪
         assert_eq!(
-            c.node.as_ref().map(|n| n.path.as_str()),
-            Some("session/abc/消息/m1")
+            c.map_paths(|p| format!("session/{p}")).path,
+            "session/sub/x.md"
         );
-        // 载荷本身不是路径，不参与翻译
-        assert_eq!(c.content.as_deref(), Some("正文"));
-        assert_eq!(c.change, VDFS_CHANGE_RENAMED);
+    }
 
-        // 节点路径为空（provider 未填）时不动——以事件的 `path` 为准
-        let c = VdfsChange::new("a", VDFS_CHANGE_UPDATED)
-            .with_node(VdfsNode::file("m1", "m1", VdfsAccess::READ))
+    /// 词汇表只有三个取值，且**线上形状恰好两个键**——没有载荷字段。
+    ///
+    /// 这条断言锁的是一个具体的失败模式：`VdfsChange` 曾带 `to` / `delta` /
+    /// `node` / `content` 四个可选载荷字段（全部无生产性生产者），以及
+    /// `renamed` / `appended` / `truncated` 三个无生产者的取值。它们是为
+    /// 「消息寄生在 VDFS 变更频道上」而建的，那套模型已于 S23–S25 拆完。
+    ///
+    /// 判据：**一个变更取值（或载荷字段）必须有生产性生产者**，否则它不是词汇的
+    /// 一部分。这条测试是那条判据的机械守卫——加字段会让它红。
+    #[test]
+    fn change_carries_no_payload_and_the_vocabulary_is_closed() {
+        let v = serde_json::to_value(VdfsChange::new("a", VDFS_CHANGE_UPDATED)).unwrap();
+        let obj = v.as_object().expect("变更事件序列化成对象");
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["change", "path"], "线上形状必须恰好是 path + change");
+
+        let all = [
+            VDFS_CHANGE_CREATED,
+            VDFS_CHANGE_UPDATED,
+            VDFS_CHANGE_DELETED,
+        ];
+        let uniq: std::collections::HashSet<&str> = all.iter().copied().collect();
+        assert_eq!(uniq.len(), all.len(), "三个取值必须互不相同");
+    }
+
+    /// `map_paths` 是路径翻译的**唯一入口**——使用方补前缀不必逐字段重建。
+    #[test]
+    fn map_paths_is_the_single_translation_point() {
+        let c = VdfsChange::new("abc/消息/m1", VDFS_CHANGE_DELETED)
             .map_paths(|p| format!("session/{p}"));
-        assert_eq!(c.node.as_ref().map(|n| n.path.as_str()), Some(""));
+        assert_eq!(c.path, "session/abc/消息/m1");
+        // 非路径字段原样保留（`change` 不参与翻译）
+        assert_eq!(c.change, VDFS_CHANGE_DELETED);
     }
 
     /// `..` 判定按**路径段**，与分隔符无关。

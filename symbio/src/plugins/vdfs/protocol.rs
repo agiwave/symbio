@@ -265,32 +265,20 @@ pub struct VdfsSearchResult {
 /// 形成本形状后经事件总线下发前端。消费者按 `path` 前缀自行分流、防抖重拉
 /// （`subscribe({ kind: 'vdfs' })`）。
 ///
+/// ## 形状与 provider 侧**逐字一致**：只有「哪里 + 怎么变」
+///
+/// 它**没有载荷字段**（曾经的 `to` / `delta` / `node` / `content` 已随那套
+/// 「消息寄生 VDFS」的模型一并删除，理由见 [`VdfsChange`] 的文档）。
+/// 前端形状见 `tauri/src/schemas/vdfs.ts::VdfsChange`，两侧由
+/// `scripts/protocol-mirror-audit.mjs` 校验。
+///
 /// [`VdfsChange`]: crate::symbio_core::vdfs_provider::VdfsChange
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsChangeEvent {
     /// 发生变更的节点全路径（对外展示口径）
     pub path: String,
-    /// 变更类型（`created` / `updated` / `deleted` / `renamed` / `appended`）
+    /// 变更类型（`created` / `updated` / `deleted`）
     pub change: String,
-    /// 重命名时的目标全路径
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to: Option<String>,
-    /// **追加型变更**（`appended`）携带的增量文本；其余变更为 `None`。
-    ///
-    /// 「追加」是列表项内容尾部新增一段——消费者据此增量应用，无需重读整个节点。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delta: Option<String>,
-    /// **节点视图**（`created` / `updated` 可携带）：变更后该节点的元数据。
-    ///
-    /// 消费者据此免掉一次 `stat`；`None` = provider 未附带，消费者自行回读。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node: Option<VdfsNode>,
-    /// **内容快照**（`created` / `updated` 可携带）：变更后该节点的正文。
-    ///
-    /// 与 `delta` 的区别是**全量 vs 增量**，两者不会同时出现；
-    /// `None` = provider 未附带，消费者自行 `read`。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
 }
 
 #[cfg(test)]

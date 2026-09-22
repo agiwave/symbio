@@ -587,8 +587,8 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     .map_err(|e| vdfs::VdfsError::internal(format!("截断回执序列化失败：{e}")))?;
                 let message = if deleted_ids.is_empty() {
                     // 目标不存在 ⇒ 什么都没删。这是**结果**不是错误，但也不发变更
-                    // ——「什么都没删」不该在 VDFS 上留下痕迹（发了 `truncated`
-                    // 会让消费者从一条并不存在的节点起截断，把整个列表清空）。
+                    // ——「什么都没删」不该留下痕迹：发一条「从 <mid> 起截断」的
+                    // 通知会让消费者从一条并不存在的节点起截断，把整个列表清空。
                     format!("目标消息不存在，未做任何修改：{mid}")
                 } else {
                     format!("已从 {mid} 起截断 {} 条消息", deleted_ids.len())

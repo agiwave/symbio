@@ -283,8 +283,12 @@ fn cursor_id(before: &str) -> Option<&str> {
 /// 会话内部：转写列表的路径段（同时是展示名）。
 ///
 /// 转写是**列表**：`<根>/session/<id>/消息` 的每一项是一条消息，顺序由
-/// `seq`（唯一权威顺序锚点）决定。流式输出是列表项的**追加型变更**
-/// （`VDFS_CHANGE_APPENDED`），不是另一条协议。
+/// `seq`（唯一权威顺序锚点）决定。这个地址只服务**读面**（一次 `read` 拿整份
+/// 历史）与**写面**（`vdfs/action` 的截断 / 清空）。
+///
+/// **实时面不在这里**：消息帧走 `session/stream` 转写流（与运行态共用同一个
+/// `seq` 空间），VDFS 侧一条消息变更也不发——`kind = "vdfs"` 是**资源**变更的
+/// 通道，不是列表内容的通道。见 `node-state-streaming.md` §11。
 pub(crate) const SEG_MESSAGES: &str = "消息";
 
 /// 转写列表本身的 provider 子树内路径（`<id>/消息`）。

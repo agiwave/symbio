@@ -670,9 +670,9 @@ for (name, child) in children {
   `…/abc/消息/m1` 两条订阅之下，只投给路径更长的那条。这里的「一次」指的是
   **总线上的一次发布**——sink 的职责是把变更发进 `kind = "vdfs"` 频道，前端各消费者
   再按自己的作用域前缀过滤（订 `<根>/session` 的清单同样收得到 `…/session/abc/消息/m1`）。
-  因此收敛为一条不会让任何人漏收，反而避免了同一变更被发布两次：转写的 `appended`
-  若到两遍就是**叠字**。（表按 `kind` 全局持有，是因为同一 provider 每次 `traverse`
-  都会新构造，按实例持有会让订阅与投递配不上对。）
+  因此收敛为一条不会让任何人漏收，反而避免了同一变更被发布两次。（表按 `kind`
+  全局持有，是因为同一 provider 每次 `traverse` 都会新构造，按实例持有会让订阅
+  与投递配不上对。）
 - 宿主侧投递分两跳，**各补一次它那层才知道的信息**：
   1. **容器**（`CompositeVdfs::watch`）把 provider 的相对路径**补成树内全路径**
      （`<子目录>/<rel>`）后交给上层 sink；
@@ -681,44 +681,50 @@ for (name, child) in children {
      （`kind = "vdfs"`，无会话关联、不入回放缓冲）。
 
   前端 `subscribe({ kind: 'vdfs' })` 按 `path` 前缀自行分流、防抖重拉。
-- **`vdfs::host::notify_change(kind, path, change)` 只报三元组，不携带载荷**：它是
-  provider 侧唯一的广播入口，带不带 `node` / `content` 由 provider 自己的 `watch`
-  决定——**带载荷的增益投递只存在于 provider 自己实现的 `watch` 里**（下表 `created`
-  / `updated` 的可选载荷即由此补上）。经 `notify_change` 进来的变更，消费者只能防抖重拉。
+- **`vdfs::host::notify_change(kind, path, change)` 只报三元组，不携带载荷**——
+  而且**类型上就没有载荷字段可带**：`VdfsChange` 的形状恰好是 `path` + `change`
+  两个键（前端 `VdfsChange` 与之逐字一致，由 `scripts/protocol-mirror-audit.mjs`
+  校验）。经 `notify_change` 进来的变更，消费者只能防抖重拉。
 - **变更词汇**（`VdfsChange::change`，取值唯一，无场景自定义）：
 
-  | 取值 | 语义 | 载荷 | 消费者动作 |
-  |---|---|---|---|
-  | `created` | 多了一个节点 | 可带 `node` / `content` | 列表插入一项（或重拉该目录） |
-  | `updated` | 节点变了，**内容全量** | 可带 `node` / `content`（**当前无生产性生产者**，见下方注） | 就地替换（或重读该节点） |
-  | `appended` | 节点**尾部多了 `delta`**，增量 | `delta` | 拼接 `delta`，**不重读** |
-  | `deleted` | 节点没了 | — | 列表移除一项 |
-  | `renamed` | 节点换了地址 | `to` | 改键（`to` = 新地址） |
+  | 取值 | 语义 | 消费者动作 |
+  |---|---|---|
+  | `created` | 多了一个节点 | 列表插入一项（或重拉该目录） |
+  | `updated` | 节点变了，**内容全量** | 就地替换（或重读该节点） |
+  | `deleted` | 节点没了 | 列表移除一项 |
 
-  **载荷是「按变更类型可选」的，不是可有可无的装饰**：事件只说「哪里、怎么变」，
-  「变成了什么」按类型附在载荷上——热路径窄、冷路径全。
+  **判据：一个变更取值（或载荷字段）必须有生产性生产者，否则它不是词汇的一部分。**
+  这条不是"洁癖"，它挡住三种具体后果（都是本仓库反复否决过的那类陷阱）：
+  规范文档会撒谎、消费端会长出永不执行的死分支、以及它会**诱导错误设计**。
 
-  - `appended` 的载荷是 `delta`（增量文本），消费者**不得**借此触发重读——这正是
-    它与 `updated` 的全部区别。它每帧都发，载荷必须保持只有增量：任何追加型数据
-    （日志、转写、生成中的文档）若一律用 `updated` + 重读，流量是 O(n²)。
-  - `created` / `updated` 每轮只有寥寥数次，provider **可以**把节点视图
-    （`node`）与内容快照（`content`）一并带上，消费者因此无需 `stat` + `read`
-    两个来回。载荷**可选**：不填时消费者回退到回读，因此这是纯增益扩展。
-  - ⚠️ **这三类可选载荷目前都没有生产性生产者**：`VdfsChange::with_node` /
-    `with_content` / `appended` 只在测试里被调用，生产路径一律走
-    `vdfs::host::notify_change(kind, path, change)` 的三元组构造（即 `change`
-    词汇表里 `updated` 那行注记所指的「下方注」）。也就是说「免一次回读」的
-    增益**能力已经具备、但尚未启用**——真要用起来，得先有 provider 在 `watch`
-    里填。会话运行态曾是 `updated` + `node` 的唯一使用者，批次 E 起已改走
-    `session/stream` 转写流（理由与落点见
-    [node-state-streaming.md](../../symbio/src/plugins/session/docs/node-state-streaming.md) §11.4：
-    快照的来源必须**有序或幂等**，而 VDFS 是一条独立无序通道）。
-  - 逐字段重建 `VdfsChange` 是**错的**——转发层新增字段时会漏（且无编译错误）。
-    使用方一律用 `VdfsChange::map_paths` 一次覆盖全部路径（含 `node` 载荷内的路径）。
+  曾经还有三个取值与四个载荷字段（`renamed` / `appended` / `truncated`，
+  `to` / `delta` / `node` / `content`），**全部**是「消息寄生在 VDFS 变更频道上」
+  （S16–S19）留下的，而那套模型已在 S23–S25 拆完：
+
+  | 曾经的取值 / 字段 | 当年的用途 | 现在由谁承载 |
+  |---|---|---|
+  | `appended` + `delta` | 消息正文逐帧追加（热路径，零回读） | 转写流 `session/stream` 的 `ChatMessage.delta` 帧 |
+  | `truncated` | 「删某条及其之后」（区间语义，避免逐条下发） | 转写流的 `status = removed` 帧 |
+  | `renamed` + `to` | 节点换地址 | **无**（没有任何 provider 生产它） |
+  | `node` / `content` | `created` / `updated` 捎带快照，免一次 `stat` + `read` | **无**（没有任何 provider 填它） |
+
+  两条当时的教训值得留下，因为它们解释了「为什么不做成载荷」：
+
+  - **热路径与冷路径的区别不足以支撑载荷**。`appended` 的设想是对的（逐帧只带
+    增量，否则 O(n²)），但它需要的是**一条有序流**（有流内序号、有背压恢复），
+    而不是在资源变更频道上挂一个 `delta` 字段——后者丢帧不可检测，且消费端要猜
+    「这次是追加还是替换」。追加型资源现在有自己的有序流：`symbio_core::transcript_stream`。
+  - **快照的来源必须有序或幂等**。`node` / `content` 看似"免一次回读"的纯增益，
+    实则是把快照放在一条**独立无序通道**上——一次迟到的自动命名就能把运行态
+    **回退**。会话运行态曾是它的唯一使用者，批次 E 起改走转写流（见
+    [node-state-streaming.md](../../symbio/src/plugins/session/docs/node-state-streaming.md) §11.4）。
+    真需要「免回读」时，正确形态是让消费者读**幂等的**那一侧（`list` / `stat`）。
+  - `map_paths` 仍是路径翻译的**唯一入口**（见 [ADR-015](../DECISIONS.md)）：
+    使用方补挂载前缀时一律调它，不逐字段重建——后者会在新增路径字段时静默漏翻。
+    目前只有 `path` 一个字段，但保留这个函数正是为了让这句话继续成立。
 - **禁止轮询、禁止私有刷新通道**。`created` / `updated` / `deleted` 这类
-  粗粒度变更由消费者防抖重拉收敛；`appended` 必须就地增量应用。
-  消费端需自行处理「增量与刷新响应竞争」的情形（见
-  [vdfs-session-messages.md](../../symbio/src/plugins/session/docs/vdfs-session-messages.md) §S18）。
+  粗粒度变更由消费者防抖重拉收敛——重拉是**幂等**的，因此无序、可丢、可重放都无害。
+  列表**内容**的实时面不属于本通道（见上表：它有自己的有序流）。
 
 ## 10. 扩展指引
 

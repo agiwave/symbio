@@ -1,15 +1,18 @@
 // @vitest-environment happy-dom
 /**
- * useVdfs —— **追加型变更**（`VDFS_CHANGE_APPENDED`）的消费单测
+ * useVdfs —— **VDFS 变更的消费单测**（路径过滤 + 重拉收敛）
  *
- * 锁定 S18 的两件事，都是"错了也不报错、只悄悄少一段字"的类型：
+ * 锁定的是「错了也不报错、只是静默不收敛 / 静默重拉」的那类问题：
  *
- * 1. `appended` **就地拼接、不重拉**——这是它与 `updated` 的分野；若误走
- *    `scheduleRefresh()`，流式期间会变成每帧一次全目录重拉（O(n²) 流量），
- *    而且重拉回来的快照还可能比本地旧。
- * 2. **刷新代际守卫**：在途 `read` 响应不得覆盖已应用的增量。缺了它，
- *    `append("def")` 之后到达的旧快照会把正文打回 `"abc"`，下一次 append
- *    再拼上去就成了 `"abcghi"` —— 静默损坏。
+ * 1. **影响判定**：变更路径落在当前目录自身 / 祖先 / 子树内才重拉——收窄错了
+ *    表现为「邻目录改一下，本页刷一次」；放宽错了表现为「本页的东西变了却不更新」。
+ * 2. **词汇表是闭集且没有特殊分支**：变更只有 `created` / `updated` / `deleted`
+ *    三个取值、且**不带载荷**（见 `schemas/vdfs.VdfsChange`），因此一律走同一条
+ *    重拉路径。曾经 `appended` 有一条「就地拼接、不重拉」的快速路径（防 O(n²)
+ *    流量），而它没有任何生产者——现在**任何取值都不该被静默吞掉**。
+ *
+ * 一个已删除的场景留作记录：从前还有「刷新代际守卫」（在途 `read` 的旧快照不得
+ * 覆盖已应用的增量）。它随 `delta` 一起消失——没有本地增量，就没有可被覆盖的东西。
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -46,7 +49,8 @@ vi.mock('@/utils/logger', () => ({
 
 import { useVdfs } from '../useVdfs'
 import {
-  VDFS_CHANGE_APPENDED,
+  VDFS_CHANGE_CREATED,
+  VDFS_CHANGE_DELETED,
   VDFS_CHANGE_UPDATED,
   VDFS_EXT_MESSAGE,
   type VdfsChange,
@@ -74,15 +78,6 @@ function msgNode(id: string, title = id): VdfsNode {
     type: 'text',
     seq: 1,
   }
-}
-
-/** 手动可控的 Promise（模拟"在途"的 read 响应） */
-function deferred<T>() {
-  let resolve!: (v: T) => void
-  const promise = new Promise<T>((r) => {
-    resolve = r
-  })
-  return { promise, resolve }
 }
 
 /** 挂一个宿主组件，让 useVdfs 有组件实例（onBeforeUnmount / watch 需要） */
@@ -129,104 +124,8 @@ beforeEach(() => {
   mocks.subscribeVdfsChanged.mockReturnValue(() => {})
 })
 
-describe('useVdfs 消费 appended（流式即列表项的追加）', () => {
-  it('命中当前详情：就地拼接正文，且不触发任何重拉', async () => {
-    const { api, wrapper } = mountHost(MSG_DIR)
-    await settle()
-
-    // 打开一条消息（正文来自 read）
-    const node = msgNode('m1')
-    mocks.readVdfs.mockResolvedValueOnce({
-      path: node.path,
-      text: '你好',
-      binary: false,
-      size: 6,
-    })
-    await api.select(node)
-    await settle()
-    expect(api.nodeText.value).toBe('你好')
-
-    const listCalls = mocks.listVdfs.mock.calls.length
-
-    // 追加两帧
-    emitChange({ path: node.path, change: VDFS_CHANGE_APPENDED, delta: '，世界' })
-    emitChange({ path: node.path, change: VDFS_CHANGE_APPENDED, delta: '！' })
-    await settle()
-
-    expect(api.nodeText.value).toBe('你好，世界！')
-    expect(
-      mocks.listVdfs.mock.calls.length,
-      '追加不得触发重拉：它是增量语义，重拉就是 O(n²)',
-    ).toBe(listCalls)
-    expect(mocks.readVdfs.mock.calls.length, '追加不得触发重读').toBe(1)
-
-    wrapper.unmount()
-  })
-
-  it('未命中当前详情：不拼接、也不重拉（尾部追加不影响列表结构与预览首行）', async () => {
-    const { api, wrapper } = mountHost(MSG_DIR)
-    await settle()
-
-    const node = msgNode('m1')
-    mocks.readVdfs.mockResolvedValueOnce({
-      path: node.path,
-      text: '你好',
-      binary: false,
-      size: 6,
-    })
-    await api.select(node)
-    await settle()
-
-    const listCalls = mocks.listVdfs.mock.calls.length
-    emitChange({ path: `${MSG_DIR}/other`, change: VDFS_CHANGE_APPENDED, delta: '别处的增量' })
-    await settle()
-
-    expect(api.nodeText.value).toBe('你好')
-    expect(mocks.listVdfs.mock.calls.length).toBe(listCalls)
-
-    wrapper.unmount()
-  })
-
-  it('刷新代际守卫：在途 read 的旧快照不得覆盖已应用的增量', async () => {
-    const { api, wrapper } = mountHost(MSG_DIR)
-    await settle()
-
-    const node = msgNode('m1')
-
-    // 第一次读取：拿到基线 "abc"
-    mocks.readVdfs.mockResolvedValueOnce({
-      path: node.path,
-      text: 'abc',
-      binary: false,
-      size: 3,
-    })
-    await api.select(node)
-    await settle()
-    expect(api.nodeText.value).toBe('abc')
-
-    // 第二次读取挂起（模拟在途），期间追加落地
-    const inflight = deferred<{ path: string; text: string; binary: boolean; size: number }>()
-    mocks.readVdfs.mockReturnValueOnce(inflight.promise)
-    const selecting = api.select(node)
-
-    emitChange({ path: node.path, change: VDFS_CHANGE_APPENDED, delta: 'def' })
-    expect(api.nodeText.value, '追加应立即可见').toBe('abcdef')
-
-    // 旧快照此刻才到达：必须被丢弃
-    inflight.resolve({ path: node.path, text: 'abc', binary: false, size: 3 })
-    await selecting
-    await settle()
-
-    expect(api.nodeText.value, '旧快照覆盖了增量 → 后续 append 会拼出损坏文本').toBe('abcdef')
-
-    // 再追加一帧：仍是正确拼接（而不是 "abc" + "ghi"）
-    emitChange({ path: node.path, change: VDFS_CHANGE_APPENDED, delta: 'ghi' })
-    expect(api.nodeText.value).toBe('abcdefghi')
-
-    wrapper.unmount()
-  })
-
-  it('非追加变更仍走重拉（updated 是「请重读」）', async () => {
+describe('useVdfs 消费 VDFS 变更（词汇闭集、无载荷 ⇒ 一律重拉收敛）', () => {
+  it('影响当前目录的变更触发重拉（updated = 「这个节点变了，请重读」）', async () => {
     vi.useFakeTimers()
     try {
       const { wrapper } = mountHost(MSG_DIR)
@@ -239,6 +138,80 @@ describe('useVdfs 消费 appended（流式即列表项的追加）', () => {
       expect(mocks.listVdfs.mock.calls.length, 'updated 必须触发重拉收敛').toBeGreaterThan(
         listCalls,
       )
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('created 与 deleted 走**同一条**收敛路径（三个取值没有分叉）', async () => {
+    for (const change of [VDFS_CHANGE_CREATED, VDFS_CHANGE_DELETED]) {
+      vi.resetAllMocks()
+      mocks.listVdfs.mockResolvedValue({
+        path: MSG_DIR,
+        node: { ...msgNode('__dir'), access: 'l', ext: undefined },
+        items: [],
+      })
+      mocks.readVdfs.mockResolvedValue({ path: '', text: '', binary: false, size: 0 })
+      mocks.subscribeVdfsChanged.mockReturnValue(() => {})
+
+      vi.useFakeTimers()
+      try {
+        const { wrapper } = mountHost(MSG_DIR)
+        await settle()
+        const listCalls = mocks.listVdfs.mock.calls.length
+
+        emitChange({ path: `${MSG_DIR}/m9`, change })
+        await vi.advanceTimersByTimeAsync(500)
+
+        expect(
+          mocks.listVdfs.mock.calls.length,
+          `${change} 必须触发重拉（没有就地增删的快速路径）`,
+        ).toBeGreaterThan(listCalls)
+        wrapper.unmount()
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  })
+
+  it('不影响当前目录的变更**不**重拉（邻目录改一下，本页不该刷）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { wrapper } = mountHost(MSG_DIR)
+      await settle()
+      const listCalls = mocks.listVdfs.mock.calls.length
+
+      // 同一会话的**兄弟目录**：既不是 MSG_DIR 自身，也不在其子树内
+      emitChange({ path: `@vfs/session/abc/其它/m1`, change: VDFS_CHANGE_UPDATED })
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(mocks.listVdfs.mock.calls.length, 'affects() 收窄失效会让全应用互相刷').toBe(
+        listCalls,
+      )
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('已废除的取值不再有特殊分支：投一条 `appended` 也走通用重拉（不再被静默吞掉）', async () => {
+    // 这条是**负向契约**，锁住本次收窄：`appended` 曾有一条「到此为止、就地拼接、
+    // 不重拉」的提前返回。若有人把它加回词汇表却不给生产者，这里会提醒他
+    // 「消费端要么处理它，要么它根本不该存在」——而不是像从前那样静默吞掉。
+    vi.useFakeTimers()
+    try {
+      const { wrapper } = mountHost(MSG_DIR)
+      await settle()
+      const listCalls = mocks.listVdfs.mock.calls.length
+
+      emitChange({ path: `${MSG_DIR}/m1`, change: 'appended' })
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(
+        mocks.listVdfs.mock.calls.length,
+        '未知取值不得被静默吞掉：它必须落到通用重拉上',
+      ).toBeGreaterThan(listCalls)
       wrapper.unmount()
     } finally {
       vi.useRealTimers()

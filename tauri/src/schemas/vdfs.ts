@@ -307,24 +307,19 @@ export interface VdfsMoveResponse {
   to: string
 }
 
-/** 变更类型
+/**
+ * 变更类型——**闭集，恰好三个**。
  *
- *  后端还会发 `renamed`——前端不区分它（无专用常量），按通用变更走重拉即可。 */
+ * 与后端 `symbio_core::vdfs_provider` 的 `VDFS_CHANGE_*` 一一对应，跨栈一致性由
+ * `scripts/protocol-mirror-audit.mjs` 校验。
+ *
+ * 曾有 `renamed` / `appended` / `truncated` 三个取值，全部**没有生产性生产者**
+ * （没有一条真实路径会发出它们），已随载荷字段一并删除。判据与理由见
+ * `VdfsChange` 的文档。
+ */
 export const VDFS_CHANGE_CREATED = 'created'
 export const VDFS_CHANGE_UPDATED = 'updated'
 export const VDFS_CHANGE_DELETED = 'deleted'
-/** **追加型**变更：节点内容尾部新增了一段（携带 `delta`）。
- *  与 `updated` 的区别是增量的——消费者直接拼接，无需重读整个节点。
- *  列表型数据的流式输出（如会话转写里一条正在生成的消息）走这一种。 */
-export const VDFS_CHANGE_APPENDED = 'appended'
-/** **尾部截断**变更：`path` 所指节点**及其之后的全部兄弟**都已被移除。
- *
- *  与 `deleted`（「**这一个**节点没了」，移除一项即可、与顺序无关）是两种语义：
- *  本变更描述的是列表尾部的一段**区间**，消费者要按自己的顺序取「该节点及其后」。
- *
- *  分开的理由是**可分辨**与**代价**：逐条下发截断时，「删这一个」与「从这里删到
- *  末尾」在载荷上完全一样（只能靠外部知识去猜），且删一条早期消息要发 N 条变更。 */
-export const VDFS_CHANGE_TRUNCATED = 'truncated'
 
 /** **重同步指令**：后端通道曾满，消费端可能漏了变更，请按自己的作用域重读。
  *
@@ -340,27 +335,33 @@ export const VDFS_BUS_RESYNC = 'resync'
 /** 数据变更事件（总线下发的形状；后端 `VdfsChangeEvent`）。
  *  路径即对外展示地址（根锚点打头的虚拟地址，或工作目录相对地址），消费方直接比对。
  *
- *  ## 载荷按变更类型可选（不是装饰）
+ *  ## 两个字段就是全部——**没有载荷**
  *
- *  事件只说「哪里、怎么变」；「变成了什么」按类型附在下面两个字段上：
+ *  这不是「暂时没带」，而是**类型上不存在**。立的判据是：
  *
- *  | 变更 | 载荷 | 消费者动作 | 额外往返 |
- *  |---|---|---|---|
- *  | `appended` | `delta` | 尾部拼接 | **0**（热路径，逐帧） |
- *  | `created` / `updated` | `node`（+ `content`） | 就地插入 / 替换 | **0** |
- *  | 未带载荷 | — | 回退 `stat` + `read` | 1–2 |
+ *  > 一个变更取值（或一个载荷字段）必须有**生产性生产者**，否则它不是词汇的一部分，
+ *  > 只是别人误以为它存在的理由。
  *
- *  `delta`（多了什么）与 `content`（现在是什么）语义互斥，不会同时出现。 */
+ *  历史上这里曾有 `to` / `delta` / `node` / `content` 四个可选载荷，它们对应的
+ *  生产者是「消息寄生 VDFS」时代的 `appended` + `delta`。那条链在 S23–S25 拆完之后
+ *  一个生产者也不剩——留着它们只会让消费端写出**永远不执行**的 `if (change.delta)`，
+ *  并且让「这条通道到底会不会给我正文」变成一个要靠读实现才能回答的问题。
+ *
+ *  因此消费端一律**重读**：`created` / `updated` 防抖重拉清单，`deleted` 就地移除。
+ *  流式增量走**转写流**（`transcript_event`），不走这里——那条通道单通道保序，
+ *  这条不是（见 `stores/sessionNodeSync.ts` 的模块文档）。
+ *
+ *  ## 「区间删除」为什么也不在这里
+ *
+ *  它是唯一看起来该留个取值的东西（删一条消息要连带删掉其后全部）。它走**动作**
+ *  （`VDFS_ACTION_TRUNCATE` / `VDFS_ACTION_CLEAR`）而不是变更：动作的回执能带回
+ *  被删 id 列表，变更带不回；且逐条下发 `deleted` 的代价随条数线性增长，而
+ *  「删这一段」与「删这一个」在 `deleted` 上完全不可区分。**VDFS 侧一条变更都不发**，
+ *  实时通知走该资源自己的有序流（会话消息是转写流上的 `status = removed` 帧）。
+ *  权威理由见后端 `symbio_core::vdfs_provider` 的 `VDFS_ACTION_TRUNCATE` 文档。 */
 export interface VdfsChange {
   path: string
   change: string
-  to?: string
-  /** 追加型变更（`VDFS_CHANGE_APPENDED`）携带的**增量文本**；其余变更为 undefined */
-  delta?: string
-  /** **节点视图**（`created` / `updated` 可携带）：变更后该节点的元数据 */
-  node?: VdfsNode
-  /** **内容快照**（`created` / `updated` 可携带）：变更后该节点的正文 */
-  content?: string
 }
 
 /** 字段级校验错误（provider 自持校验的产物） */

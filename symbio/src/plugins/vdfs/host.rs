@@ -126,10 +126,6 @@ fn to_change_event(change: &VdfsChange) -> VdfsChangeEvent {
     VdfsChangeEvent {
         path: change.path.clone(),
         change: change.change.clone(),
-        to: change.to.clone(),
-        delta: change.delta.clone(),
-        node: change.node.clone(),
-        content: change.content.clone(),
     }
 }
 
@@ -1409,40 +1405,29 @@ mod tests {
             VDFS_CHANGE_UPDATED,
         ));
         assert_eq!(e.path, ".vdfsv2/mem/sub/x.md");
-        assert!(e.to.is_none());
-
-        let r = to_change_event(&VdfsChange::renamed(
-            ".vdfsv2/mem/a.txt",
-            ".vdfsv2/mem/b.txt",
-        ));
-        assert_eq!(r.change, VDFS_CHANGE_RENAMED);
-        assert_eq!(r.path, ".vdfsv2/mem/a.txt");
-        assert_eq!(r.to.as_deref(), Some(".vdfsv2/mem/b.txt"));
+        assert_eq!(e.change, VDFS_CHANGE_UPDATED);
 
         // 物理半的地址原样保留
         let n = to_change_event(&VdfsChange::new("README.md", VDFS_CHANGE_CREATED));
         assert_eq!(n.path, "README.md");
     }
 
-    /// 变更载荷（节点视图 / 内容快照 / 增量）原样过信封——本层不解释也不裁剪
+    /// 信封形状**恰好两个键**——本层不解释、不裁剪、也不新增字段。
+    ///
+    /// 载荷字段（`to` / `delta` / `node` / `content`）已随「消息寄生 VDFS」那套
+    /// 模型删除（见 `symbio_core::vdfs_provider::VdfsChange` 的文档）。这条测试是
+    /// 那条边界的机械守卫：谁再给事件加字段，这里先红。
     #[test]
-    fn change_event_passes_payload_through() {
-        use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsNode};
-
-        let node =
-            VdfsNode::file("m1", "助手", VdfsAccess::READ).with_path(".vdfsv2/session/abc/消息/m1");
-        let e = to_change_event(
-            &VdfsChange::new(".vdfsv2/session/abc/消息/m1", VDFS_CHANGE_UPDATED)
-                .with_node(node)
-                .with_content("正文"),
-        );
-        assert_eq!(e.node.as_ref().map(|n| n.name.as_str()), Some("m1"));
-        assert_eq!(e.content.as_deref(), Some("正文"));
-        assert!(e.delta.is_none(), "全量与增量是两个字段，不同时出现");
-
-        let a = to_change_event(&VdfsChange::appended(".vdfsv2/session/abc/消息/m1", "增量"));
-        assert_eq!(a.delta.as_deref(), Some("增量"));
-        assert!(a.node.is_none() && a.content.is_none());
+    fn change_event_wire_shape_is_exactly_path_and_change() {
+        let v = serde_json::to_value(to_change_event(&VdfsChange::new(
+            ".vdfsv2/session/abc",
+            VDFS_CHANGE_DELETED,
+        )))
+        .unwrap();
+        let obj = v.as_object().expect("变更事件序列化成对象");
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["change", "path"]);
     }
 
     // ==================== 根解析 ====================

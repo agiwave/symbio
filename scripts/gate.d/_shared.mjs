@@ -46,9 +46,18 @@ export const BASELINE = {
   //      `is_resync`、`vdfs_provider::vdfs_change_of`）后补的契约用例——
   //      `vdfs_change_of` 三条（解信封 / 拒异 kind / 非 Data 帧不 panic）+
   //      背压标记一条（`event_of` 解不出、`is_resync` 认出）。
+  // 915：批次 G（变更词汇收窄）**净增 0**——删掉「载荷按类型可选」的用例，换成三条
+  //      **形状守卫**（`change_carries_no_payload_and_the_vocabulary_is_closed`：
+  //      线上形状恰好 `["change","path"]`；`map_paths_is_the_single_translation_point`；
+  //      `change_event_wire_shape_is_exactly_path_and_change`）。数量相抵，但断言的性质
+  //      从「载荷怎么映射」变成「词汇表是闭集」——后者才是这次收窄要锁的东西。
   rustTests: 915,
-  // 46 spec 文件 / 661 → 683 → 687 用例。文件数与用例数均与平台无关（全仓 spec 零平台
-  // 分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
+  // 46 spec 文件 / 661 → 683 → 687 → 689 用例。文件数与用例数均与平台无关（全仓 spec
+  // 零平台分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
+  // 689：批次 G——前端侧收窄 `VdfsChange`（删四个载荷字段与 `appended` / `truncated`
+  //      两个取值）。`useVdfs` 那 4 条 `appended` 用例换成 4 条**变更收敛**用例（三个
+  //      取值同走重拉 / 影响判定收窄 / 已废除取值不再被静默吞掉）；`schemas` 侧新增
+  //      「导出的 `VDFS_CHANGE_*` 恰好三个」闭集断言 + 「`RESYNC` 不并进变更词汇」。
   // 687：批次 E——转写流的会话运行态帧协议用例（7）：到达时**先冲刷**同会话待落地帧 /
   //      按会话冲刷（别的会话留在队列）/ 两种帧共用一个游标不触发跳号 / 运行态帧跳号同样
   //      重读 / 重复帧丢弃 / 缺节点视图仍推进水位 / 未接线不抛错；
@@ -62,7 +71,7 @@ export const BASELINE = {
   // 672：收起态摘要跟「流式末端」走——`messagePreviewFollowsLiveEdge` 判据用例（2）+
   //      摘要取端（末端 / 开头 / 短内容 / 空内容，4）+ 渲染层两条（思考、工具行）。
   vitestFiles: 46,
-  vitestTests: 687,
+  vitestTests: 689,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

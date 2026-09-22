@@ -47,12 +47,16 @@ export type VdfsRenderer =
   | 'fallback'
 
 /**
- * 「正文即**文本缓冲**」的渲染器子集 —— 追加可安全原地拼接，表单与二进制不在其列。
+ * 「正文即**文本缓冲**」的渲染器子集 —— 正文原样呈现（不 parse 成结构），
+ * 表单与二进制不在其列。
  *
- * 先前这个集合被写了三遍，且**其中一遍其实不是同一个集合**：
+ * 这个集合曾被写了三遍，且**其中一遍其实不是同一个集合**：
  * `useVdfs` 的读取守卫用的是「文本缓冲 ∪ `form`」（表单的字段值也来自正文，
- * 同样需要读一次），而追加守卫与 `VdfsWorkbench` 用的是纯文本缓冲。
+ * 同样需要读一次），而 `VdfsWorkbench` 用的是纯文本缓冲。
  * 形状相同不等于同一件事——所以这里给出**两个**具名谓词，而不是硬凑一个。
+ *
+ * （原先还有第三处：追加守卫。它随 `appended` 变更一起删除——变更不再带增量
+ * 载荷，没有本地增量会被在途 `read` 的旧快照覆盖。）
  */
 const TEXTUAL_RENDERERS: ReadonlySet<VdfsRenderer> = new Set([
   'text',
@@ -61,7 +65,7 @@ const TEXTUAL_RENDERERS: ReadonlySet<VdfsRenderer> = new Set([
   'message',
 ])
 
-/** 该渲染器把节点正文当**文本缓冲**看待（追加可拼接） */
+/** 该渲染器把节点正文当**文本缓冲**看待（原样呈现，不 parse） */
 export function isTextualRenderer(r: VdfsRenderer): boolean {
   return TEXTUAL_RENDERERS.has(r)
 }
@@ -83,7 +87,7 @@ const EXT_RENDERERS: Record<string, VdfsRenderer> = {
   [VDFS_EXT_SESSION]: 'session',
   // 消息是**只读列表项**（访问位只有 `r`）：专用只读视图按 `attributes` 展示
   // 角色 / 类型 / 状态 / 错误，正文取节点内容——与「正文在内容、结构在 attributes」
-  // 的分工一一对应。它是文本缓冲，因此流式追加可原地拼接（见 useVdfs.applyAppend）。
+  // 的分工一一对应。正文是文本缓冲，由 `useVdfs` 的一次 `read` 填充。
   [VDFS_EXT_MESSAGE]: 'message',
   [VDFS_EXT_MARKDOWN]: 'markdown',
   [VDFS_EXT_JSON]: 'json',

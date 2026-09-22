@@ -30,6 +30,10 @@ import {
   vdfsParent,
   type VdfsNode,
 } from '../vdfs'
+// 命名空间导入：用于「导出的常量集合恰好是这些」这类**闭集**断言
+// （见文件末尾的「变更词汇表」describe）。它不能只靠类型检查表达——
+// 多导出一个人家看不见的常量，类型系统不会报错。
+import * as vdfsModule from '../vdfs'
 import {
   MESSAGE_STATUS_ABORTED,
   MESSAGE_STATUS_COMPLETED,
@@ -302,5 +306,37 @@ describe('sessionRuntimeOf：三个场景属性都必须落地', () => {
     const rt = sessionRuntimeOf({ ...node({ name: 's' }), error: '', warning: '' })
     expect(rt.error).toBeUndefined()
     expect(rt.warning).toBeUndefined()
+  })
+})
+
+describe('变更词汇表：**闭集**，恰好三个取值', () => {
+  /**
+   * 这条断言锁的是**判据**本身，不是某个具体取值：
+   *
+   * > 一个变更取值（或一个载荷字段）必须有**生产性生产者**，否则它不是词汇的
+   * > 一部分，只是别人误以为它存在的理由。
+   *
+   * 曾经这里有 6 个：`renamed` / `appended` / `truncated` 三个取值没有任何真实
+   * 生产者（源自「消息寄生 VDFS」时代），却足以让消费端写出永远不执行的
+   * `if (change.delta)`、并让「这条通道会不会给我正文」变成要读实现才能回答的问题。
+   * 它们已删除——本断言保证下一个想加回来的人**必须同时给出生产者**，否则红。
+   */
+  it('导出的 VDFS_CHANGE_* 恰好是 created / updated / deleted 三个', () => {
+    const names = Object.keys(vdfsModule)
+      .filter((k) => k.startsWith('VDFS_CHANGE_'))
+      .sort()
+    expect(names).toEqual(['VDFS_CHANGE_CREATED', 'VDFS_CHANGE_DELETED', 'VDFS_CHANGE_UPDATED'])
+    // 三个取值的**字面量**也要锁：改了值就是改协议（后端有同名常量，跨栈由
+    // scripts/protocol-mirror-audit.mjs 校验）
+    expect(
+      names.map((n) => (vdfsModule as unknown as Record<string, string>)[n]).sort(),
+    ).toEqual(['created', 'deleted', 'updated'])
+  })
+
+  it('重同步指令与变更取值**不是一类**：它是指令，且刻意不带 path', () => {
+    // 若把 RESYNC 也算进 VDFS_CHANGE_* 前缀，上面的闭集断言会红——
+    // 这条测试反过来锁住「它没被并进去」。
+    expect(vdfsModule.VDFS_BUS_RESYNC).toBe('resync')
+    expect(vdfsModule.VDFS_BUS_RESYNC.startsWith('VDFS_CHANGE_')).toBe(false)
   })
 })

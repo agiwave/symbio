@@ -83,13 +83,19 @@
 结论：前端既有改动**方向正确、结构合理**，与目标一致的部分**整体保留**，
 G1–G3 三处差距已按 §3–§6 补齐（见 §7.1 的 S1）。
 
-> **现状校正（针对 §7.1 的 S3，含 S25 更新）**：§7.1 记「消息（转写）不经 VDFS」，
+> **现状校正（针对 §7.1 的 S3，含 S25 / 批次 G 更新）**：§7.1 记「消息（转写）不经 VDFS」，
 > 那是当时的形态。后来消息**读面**迁到了 VDFS——`<根>/session/<id>/消息/<mid>`，
 > 节点 `ext = message`，详情由 `components/vdfs/VdfsMessageDetail.vue` 呈现。
 > **但实时面在 S25（批次 E）又移出了 VDFS**：消息帧与会话运行态帧现在走
 > `session/stream` 一条转写流（`services/transcriptStream.ts`），与消息帧共用同一个
 > `seq` 空间；`kind = "vdfs"` 只剩会话**资源**变更。§7 是进度档案、按约定不改写，
 > 但读 §7.1 时请以本条为准。
+>
+> **批次 G 补一条直接后果**：`VdfsMessageDetail.vue` 是**只读视角、不随流式增长**——
+> 它的正文来自一次 `vdfs/read`，而消息节点**不产生 VDFS 变更**（会话 provider 的
+> `notify_change` 全部落在会话叶子上）。这不是遗漏：`kind = "vdfs"` 是独立的无序
+> 通道，往上面捎带正文快照会让迟到的帧把正文回退（批次 E 从运行态上拆掉的正是这类
+> 问题）。要看流式增长，用 `ext = session` 的聊天工作区（它消费转写流）。
 
 ### 2.3 与目标的差距
 
@@ -756,10 +762,10 @@ source = file 的类型（整包导入）：名称来自文件名
     `plugins/vdfs/*`（协议 / 访问层 / 物理层）**本次零改动**。
   - **前端连带改动**（唯一一处）：`services/eventBus.ts` 的 `KIND_ENTITY` 与实体
     生命周期 / 状态分支退场，清单与状态角标一律订阅 `kind = 'vdfs'`。
-  - **明确代价**：`notify_change` 只报 `(kind, path, change)` 三元组、**不携带
-    `node` / `content` 载荷**（扩展它等于改 core 协议，本次刻意不做）。因此
-    `created` / `updated` / `deleted` 在前端**只能防抖重拉**；带载荷的增益投递
-    只存在于 provider 自己实现的 `watch` 里（如会话消息的 `appended` + `delta`）。
+  - **明确代价**：`notify_change` 只报 `(kind, path, change)`、**不携带载荷**。因此
+    `created` / `updated` / `deleted` 在前端**只能防抖重拉**；`VdfsChange` 的类型上
+    也不存在 `to` / `delta` / `node` / `content` 四个字段（**批次 G 已删除**——它们
+    从没有任何生产性生产者，留着只会让消费端写出永远不执行的 `if (change.delta)`）。
     状态角标同理：收到该节点的一次 `updated` 后重读 `vdfs/stat`。
 
 ---

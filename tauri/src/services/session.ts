@@ -153,8 +153,11 @@ export interface DeleteMessageResult {
  *
  * 为什么是 `action` 而不是 `delete`：`delete` 的语义是**逐节点**的「这一个没了」，
  * 表达不了截断那类集合操作；而转写区段的删除因此统一走动作——**同一个区段的删除
- * 只有一种入口形态**，使用者不必记「哪种删除走哪个入口」。变更上，清空发的是
- * 落在**列表目录**上的 `deleted`（目录没了 ⇒ 条目都没了，无歧义），
+ * 只有一种入口形态**，使用者不必记「哪种删除走哪个入口」。
+ *
+ * **变更上一条也不发**：逐条下发 `deleted` 的代价随被删条数线性增长，而「删这一段」
+ * 与「删这一个」在 `deleted` 上完全不可区分。实时通知走该资源**自己的有序流**——
+ * 会话消息是转写流上的 `status = removed` 帧；回执里的 `deleted_ids` 才是权威列表。
  * 见后端 `symbio_core::vdfs_provider` 的 `VDFS_ACTION_TRUNCATE` 文档。
  */
 export async function clearMessages(sessionId: string): Promise<void> {
@@ -165,7 +168,8 @@ export async function clearMessages(sessionId: string): Promise<void> {
  * 删除单条会话消息（连同其之后的所有消息一并删除）。
  *
  * **走 VDFS**：`action(<根>/session/<id>/消息/<mid>, "truncate")`。语义是
- * 「从这条到列表末尾全没了」（VDFS 变更词汇里的 `truncated`），不是「删这一个」。
+ * 「从这条到列表末尾全没了」，不是「删这一个」——VDFS 的变更词汇里**没有**对应
+ * 取值，这类操作一条变更都不发（理由见 `clearMessages`）。
  *
  * 目标消息不存在时后端返回空列表且**不发变更**——「什么都没删」不该在 VDFS 上
  * 留下痕迹。回执照常返回，调用方的幂等对齐因此是空操作。

@@ -233,20 +233,20 @@ export function subscribe(
 // ===== 资源变更：唯一的变更频道 + 按路径前缀分流 =====
 //
 // VDFS 是唯一的资源协议，后端只发 `kind = VDFS_EVENT_KIND` 一条频道，载荷是
-// `VdfsChangeEvent { path, change, to?, delta?, node?, content? }`（`schemas/vdfs.ts`）。
+// `VdfsChangeEvent { path, change }`（`schemas/vdfs.ts`）。
 // 「这条变更属于哪一类资源 / 哪一个会话」由**展示地址前缀**表达，不再靠第二条频道。
 //
-// 载荷宽度**按变更频率分配**（不是装饰）：
+// ## 它**不带载荷**，因此消费端一律重读
 //
-// | 变更 | 载荷 | 消费者动作 |
-// |---|---|---|
-// | `appended` | 仅 `delta` | 就地拼接，**零回读**（流式热路径，逐帧） |
-// | `created` / `updated` | `node`（+ `content`） | 就地插入 / 替换，**零回读** |
-// | 未带载荷 | — | 回退 `stat` + `read`（通用消费端的降级） |
+// 变更只说「哪里、怎么变」（`created` / `updated` / `deleted` 三个取值），
+// 「变成了什么」一概回读。这里曾有过一张「按变更频率分配载荷宽度」的表
+// （`appended` → 仅 `delta` 零回读；`created` / `updated` → `node` 零回读），
+// 那些载荷字段**没有任何生产性生产者**，已整体删除——留着它们只会让消费端写出
+// 永远不执行的 `if (change.delta)`。判据见 `schemas/vdfs.VdfsChange`。
 //
-// 「状态类变更必带节点视图」是一条**不变量**（会话域）：状态迁移是最需要即时的
-// 路径，让它回读一次 `stat` 等于把延迟加在最痛的地方。
-// 见 `symbio/src/plugins/session/docs/node-state-streaming.md` §3.2 / §8.2。
+// 这条通道是**独立的无序通道**：所以任何需要「先到者赢」的状态都不要挂在它上面。
+// 会话运行态、消息正文这些顺序敏感的实时面走**转写流**（`session/stream`，
+// 单通道保序 + 会话内单调 `seq`）——批次 E 做的正是把运行态从这条通道搬到那条。
 
 /** 订阅作用域：按展示地址前缀分流（哪一类资源、哪个会话） */
 export interface VdfsChangeScope {

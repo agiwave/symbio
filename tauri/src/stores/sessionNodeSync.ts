@@ -31,8 +31,9 @@
  * ## 清单同步的双模式
  *
  * - **后端消息模式**（本订阅）：后端增删改会话叶子 → `notify_change`（唯一的 `vdfs`
- *   频道）→ 此处收敛（跨窗口一致的唯一事实源）。载荷是**粗粒度**的（只有 path +
- *   change），所以 `deleted` 本地即时移除、其余防抖重拉。
+ *   频道）→ 此处收敛（跨窗口一致的唯一事实源）。变更只有 `path` + `change` 两个
+ *   字段（**没有载荷**，见 `schemas/vdfs.VdfsChange`），所以 `deleted` 本地即时
+ *   移除、其余防抖重拉。
  * - **前端模式**（乐观更新）：store 的 `createSession` / `deleteSession` 已直接改
  *   本地 list，并经 `publishVdfsChangedLocal` 以同构载荷即时通知其他页面，
  *   不等事件往返；后端事件随后幂等收敛。
@@ -43,16 +44,12 @@
 
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import { ensureSessionMountDir } from '@/services/vdfsScheme'
-import {
-  VDFS_CHANGE_APPENDED,
-  VDFS_CHANGE_DELETED,
-  vdfsBase,
-} from '@/schemas/vdfs'
+import { VDFS_CHANGE_DELETED, vdfsBase } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 
 /** 变更的落地目标（由外壳注入真实 store；本模块不认识 Pinia） */
 export interface SessionNodeSink {
-  /** 整表重拉（created / updated / renamed 等粗粒度变更的收敛口） */
+  /** 整表重拉（`created` / `updated` 的收敛口） */
   refreshList(): void | Promise<void>
   /** 本地即时移除（deleted） */
   removeSessionLocal(id: string): void
@@ -61,7 +58,7 @@ export interface SessionNodeSink {
 let _unsubscribe: (() => void) | null = null
 let _listRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 防抖重拉：只给地址的粗粒度变更（created / updated / renamed），用于收敛排序与完整字段 */
+/** 防抖重拉：只给地址的粗粒度变更（`created` / `updated`），用于收敛排序与完整字段 */
 function scheduleListRefresh(sink: SessionNodeSink): void {
   if (_listRefreshTimer) clearTimeout(_listRefreshTimer)
   _listRefreshTimer = setTimeout(() => {
@@ -106,18 +103,15 @@ export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void>
   _unsubscribe = subscribeVdfsChanged(
     { prefix: mountDir, directChildren: true },
     (change) => {
-      // 追加型变更只发生在转写列表项上（由 transcriptStream 就地应用 delta），
-      // 与会话清单无关——绝不能让流式的每一帧触发一次重拉。
-      if (change.change === VDFS_CHANGE_APPENDED) return
       const id = vdfsBase(change.path)
       if (!id) return
       if (change.change === VDFS_CHANGE_DELETED) {
         sink.removeSessionLocal(id)
         return
       }
-      // created / updated / renamed：本地乐观更新已覆盖同窗口场景；
-      // 此处防抖重拉，收敛排序、标题与完整字段（**不看载荷**——它不带节点快照，
-      // 见模块文档「为什么这里的变更不带节点快照」）。
+      // created / updated：本地乐观更新已覆盖同窗口场景；
+      // 此处防抖重拉，收敛排序、标题与完整字段（**不看载荷**——它只有 path +
+      // change 两个字段，见 `schemas/vdfs.VdfsChange`）。
       scheduleListRefresh(sink)
     },
     // 重同步：后端通道曾满，本端可能漏了会话叶子的资源变更（漏掉 `deleted` 会让

@@ -556,20 +556,20 @@ mod tests {
                 sink: VdfsChangeSink,
             ) -> VdfsResult<()> {
                 sink(VdfsChange::new("session/abc", VDFS_CHANGE_UPDATED));
-                sink(VdfsChange::renamed("session/old", "session/new"));
+                sink(VdfsChange::new("session/old", VDFS_CHANGE_DELETED));
                 Ok(())
             }
         }
         let f = UnifiedFs::with_physical(Arc::new(W) as DynVdfsProvider, P::new());
-        // 捕获到的变更三元组（path / change / to）
-        type Captured = Arc<std::sync::Mutex<Vec<(String, String, Option<String>)>>>;
+        // 捕获到的变更二元组（path / change）
+        type Captured = Arc<std::sync::Mutex<Vec<(String, String)>>>;
         let got: Captured = Arc::new(std::sync::Mutex::new(Vec::new()));
         let out = got.clone();
         f.watch(
             &VdfsContext::empty(),
             ".vdfsv2/session",
             Arc::new(move |c: VdfsChange| {
-                out.lock().unwrap().push((c.path, c.change, c.to)); // grep-audit-allow S-002: temporary guard drops at this semicolon; await is outside the callback
+                out.lock().unwrap().push((c.path, c.change)); // grep-audit-allow S-002: temporary guard drops at this semicolon; await is outside the callback
             }),
         )
         .await
@@ -581,12 +581,17 @@ mod tests {
             events[0],
             (
                 ".vdfsv2/session/abc".to_string(),
-                VDFS_CHANGE_UPDATED.to_string(),
-                None
+                VDFS_CHANGE_UPDATED.to_string()
             )
         );
-        assert_eq!(events[1].0, ".vdfsv2/session/old");
-        assert_eq!(events[1].2.as_deref(), Some(".vdfsv2/session/new"));
+        // 兄弟子树的变更同样补上挂载前缀——坐标系始终只有一个
+        assert_eq!(
+            events[1],
+            (
+                ".vdfsv2/session/old".to_string(),
+                VDFS_CHANGE_DELETED.to_string()
+            )
+        );
     }
 
     /// 未知操作地址（穿越）在分流阶段就失败，不会两半都试一遍

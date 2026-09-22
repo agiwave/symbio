@@ -17,8 +17,14 @@
   - `session`（会话叶子）：聊天工作区，可发言；
   - `message`（列表项）：这条消息本身的只读视图，LLM 与前端读到的是同一份。
 
-  正文随 `appended` 变更就地增长（见 `useVdfs.applyAppend`），因此流式期间
-  这个视图不需要重读即可跟着长——这正是「流式即列表项的追加」的可视化。
+  正文来自一次 `vdfs/read`。**本视图不随流式增长**：实时面是转写流
+  （`session/stream`），由 `ext = session` 的聊天工作区消费；这里是同一份数据的
+  **只读视角**，重选（或该节点发生 VDFS 变更）即重读。
+
+  为什么不给消息节点发 VDFS 变更让它跟着长：`kind = "vdfs"` 是一条**独立的无序
+  通道**，在它上面捎带正文快照，一次迟到的帧就会把正文回退——正是批次 E 从会话
+  运行态上拆掉的那类问题。真要做，也该让本视图直接消费转写流，而不是往这条通道
+  加载荷（见 `schemas/vdfs.VdfsChange` 的「两个字段就是全部」）。
 -->
 <template>
   <DetailShell :mechanism-actions="mechanismActions" :mechanism-busy="mechanismBusy" :error="error">
@@ -59,7 +65,7 @@ defineEmits<{
   (e: 'rename'): void
 }>()
 
-/** 正文（追加型变更就地拼进这个缓冲） */
+/** 正文（由 `useVdfs` 的一次 `vdfs/read` 填充；本视图不做增量拼接） */
 const body = computed(() => (typeof props.data === 'string' ? props.data : ''))
 
 /** `attributes.role`（VDFS 只透传，渲染器自行取用） */

@@ -18,6 +18,74 @@
 
 ***
 
+## 2026-09-22: 变更词汇表收窄为**闭集** —— 删掉三个没有生产者的取值与四个载荷字段（批次 G）
+
+**问题**：E 批收尾时留了一句待办——`VdfsChange` 的 `to` / `delta` / `node` / `content`
+四个可选载荷与 `renamed` / `appended` / `truncated` 三个变更取值，在**生产代码里已无
+任何生产者**，只剩测试在构造它们。当时的处置是「在文档里明写这一点」，因为删除要动
+对外形状（`docs/design/vdfs.md` 的词汇表）与前端 `useVdfs.ts` 的 `appended` 分支。
+
+留着的代价不是「多几个字节」，而是**消费端会写出永远不执行的代码**：`useVdfs.ts` 有
+一整条 `appended` 快速路径（就地拼接 + 一个键控代际守卫，防「在途重读覆盖已应用的
+增量」），`sessionNodeSync.ts` 有一条 `appended` 提前返回，前端词汇表里还有
+`VDFS_CHANGE_TRUNCATED` 这种**只有定义、连消费者都没有**的常量。更糟的是它让
+「这条通道到底会不会给我正文」变成必须读实现才能回答的问题——而答案是「永远不会」。
+
+**判据（本次立）**：
+
+> 一个变更取值（或一个载荷字段）必须有**生产性生产者**，否则它不是词汇的一部分，
+> 只是别人误以为它存在的理由。
+
+按此逐条核对 HEAD 树：`VDFS_CHANGE_{RENAMED,APPENDED,TRUNCATED}` 的全部出现点只有
+常量定义、文档注释、测试构造、前端消费分支——**零生产调用点**；所有真实的
+`notify_change` / `sink(...)` 一律走 `VdfsChange::new(path, change)` 三元组形式。
+（来源是「消息寄生 VDFS」时代的 `appended` + `delta`，S23–S25 拆完后一个不剩。）
+
+**改动落点**：
+
+| 层 | 改动 |
+|---|---|
+| `symbio_core/vdfs_provider.rs` | `VdfsChange` 收窄为 `{ path, change }`；删四个字段与 `renamed` / `appended` / `with_node` / `with_content` 四个构造器；删三个变更常量；`map_paths` 简化为只重写 `path` |
+| `plugins/vdfs/protocol.rs` | `VdfsChangeEvent` 同步收窄（跨栈形状逐字一致，由 `protocol-mirror-audit.mjs` 校验） |
+| `plugins/vdfs/host.rs` | `to_change_event` 只映射两个字段 |
+| 前端 `schemas/vdfs.ts` | 删 `VDFS_CHANGE_APPENDED` / `VDFS_CHANGE_TRUNCATED` 与四个字段；词汇表注释改写为「闭集，恰好三个」 |
+| 前端 `composables/useVdfs.ts` | 删 `applyAppend` + `APPENDED` 分支 + `appendGuard`（连带 `select` 里的代际检查与 `isTextualRenderer` 导入）——**变更不再有快速路径，一律重拉收敛** |
+| 前端 `stores/sessionNodeSync.ts` | 删 `APPENDED` 提前返回 |
+| `docs/design/vdfs.md` | 词汇表 5 行 → 3 行；删「载荷按变更类型可选」整段；加判据与历史对照表 |
+
+**顺带修正三处错误描述**（都是「把已死的能力当成现状」）：
+
+- `services/session.ts` 的 `clearMessages` / `deleteMessage` 注释说「清空发的是落在列表
+  目录上的 `deleted`」「截断是 VDFS 变更词汇里的 `truncated`」——**两者都不发变更**。
+  区间删除走**动作**（`VDFS_ACTION_TRUNCATE` / `_CLEAR`）：回执能带回被删 id 列表，
+  变更带不回；逐条下发 `deleted` 的代价随条数线性增长，且「删这一段」与「删这一个」
+  在 `deleted` 上完全不可区分。实时通知走该资源**自己的有序流**（会话消息是转写流上的
+  `status = removed` 帧）。这条已写进 `VDFS_ACTION_TRUNCATE` 的文档。
+- `components/vdfs/VdfsMessageDetail.vue` 说「正文随 `appended` 变更就地增长」——
+  **本视图从不增长**：消息节点不产生 VDFS 变更（会话 provider 的 `notify_change`
+  全部落在会话叶子上），正文只来自一次 `vdfs/read`。这不是遗漏：`kind = "vdfs"` 是
+  独立无序通道，往上面捎带正文快照会让迟到的帧把正文回退——正是 E 从运行态上拆掉的
+  那类问题。真要做，也该让本视图直接消费转写流。
+- `services/eventBus.ts` 里那张「载荷宽度按变更频率分配」的表（`appended` → 仅 `delta`
+  零回读…）——表描述的能力已不存在，换成「不带载荷 ⇒ 一律重读」＋「这条是无序通道，
+  顺序敏感的实时面走转写流」。
+
+**新增守卫**（`rustTests` 净增 0、`vitestTests` +2，但锁的**性质**变了——从「载荷怎么
+映射」变成「词汇表是闭集」）：
+
+- `change_carries_no_payload_and_the_vocabulary_is_closed`——线上形状恰好 `["change","path"]`；
+- `map_paths_is_the_single_translation_point`——路径重写只有一处；
+- `change_event_wire_shape_is_exactly_path_and_change`——总线形状逐字一致；
+- 前端 `schemas/__tests__/vdfs.spec.ts`——导出的 `VDFS_CHANGE_*` **恰好三个**（多一个就红），
+  且 `VDFS_BUS_RESYNC` 不在其列（它是**指令**，不是变更）；
+- 前端 `composables/__tests__/useVdfs.spec.ts`——原 4 条 `appended` 用例换成 4 条**收敛**
+  用例：三个取值同走重拉 / 影响判定收窄（邻目录变更不刷本页）/ 已废除的取值**不再被
+  静默吞掉**（投一条 `appended` 会落到通用重拉上）。
+
+**验证**：`cargo test --lib` 915（净增 0）｜前端 vitest 689（46 文件）+ `vue-tsc` 干净。
+
+***
+
 ## 2026-09-22: 会话运行态并入转写流 —— 删掉第二条实时通道，把「不忙 ⇒ 已终态」变成结构保证（批次 E）
 
 **问题**：实时面有**两条通道**——消息走 `worker/session/stream`（`transcript_stream`
@@ -53,6 +121,7 @@ VDFS 变更是一条独立无序通道——在它上面捎带快照，消费端
 `docs/design/vdfs.md` 的词汇表**明写**这一点——一个「看起来权威、实际必须忽略」的
 能力留在文档里同样危险。删除属"信封瘦身"，会动 `docs/design/vdfs.md` 的对外形状与
 `useVdfs.ts` 的 `appended` 分支（同样已无生产者），**值得单开一批**，与 F 无关。）
+→ **已由批次 G 完成**（见上方 2026-09-22 的「变更词汇表收窄为闭集」条目）。
 
 **改动落点**：
 
