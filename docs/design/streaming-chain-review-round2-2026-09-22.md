@@ -320,3 +320,16 @@ server 崩溃不影响下一轮、无需连接池与心跳。这个权衡在**�
 让日志里的字节数和重试复用同一份 buffer（§3.1）。
 其余五项都是「现在做不划算、但值得留痕」：工具支链的进程生命周期与形状契约各占一条。
 没有发现会改变行为的缺陷。**
+
+---
+
+## 6. 修复进展（2026-09-22）
+
+| 评审项 | 处置 | 提交 / 位置 |
+|---|---|---|
+| §3.1 请求体只序列化一次 | ✅ 已修复：`execute_post_with_abort` 收 `&[u8]`，`bound_provider` 一次 `to_vec` 量日志 + 传字节，重试复用同一份 buffer；`turn.rs` 兜底 `Content-Type`；新增 e2e `t12-content-type` 钉死 chat/completions 必带 `Content-Type` | `40f6547` |
+| §3.2 工具参数 JSON↔Value 往返 | ✅ 已修复：`flatten` 对落库规范化文本以 `Value::String` 透传，下游 `types.rs` `is_string()` 快路径省一次 re-serialize（行为逐字节等价，仅省 CPU）；单测 `tool_call_args_passthrough_as_string_without_reserialize` 钉死 | `770a9ea` |
+| §3.3 MCP stdio `tools/list` | ℹ️ 已实现：`discover_tools` 已有 `tools_cache`（TTL + 陈旧 fallback + 配置变更 `invalidate_discover_cache`），评审写于该缓存落地之前；**调用仍每次 spawn 进程属有意设计**（评审明言「除非 MCP 工具真的进入高频路径，否则不动长连接」） | `symbio/src/plugins/mcp/manager.rs` |
+| §3.4 每轮整份重读历史 | ⏭️ 有意设计，不改：存储为权威，方向是「`persist_messages` 直接吃增量」而非去掉重读 | — |
+| §3.5 工具结果形状约定 | ✅ 已文档化：`extract_result` 判据表 + 常量 + 测试本就钉死顺序；新增 `session/README`「六、工具结果字段约定（跨插件契约）」集中生产方→字段映射 | `eab4887` |
+| §3.6 转写流无服务端会话过滤 | ⏭️ 过早优化，跳过：订阅者典型为 1，现在做属过度设计 | — |
