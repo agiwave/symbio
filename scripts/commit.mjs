@@ -160,6 +160,35 @@ async function guessScope() {
 
 // ---------- 生成消息文件 ----------
 const msgPath = path.join(repoRoot, '.git', `COMMIT_MSG_${process.pid}.txt`)
+
+/**
+ * 删除提交消息临时文件，**永不抛**，且**以文件真的没了为准**。
+ *
+ * 为什么不直接 `fs.rmSync`：本机（沙箱）注入了 safe-delete 垫片，它可能
+ * ① 在「本回合删除数超过阈值」时**抛异常**，或 ② 把删除转交回收站/代理进程后
+ * 就返回。两种情况下 `rmSync` 都「成功返回」而文件**仍在**——所以这里删完必须
+ * 回查一次 `existsSync`，不能把「没抛异常」当成「删掉了」。
+ *
+ * 返回是否真的删掉了（false = 已尽力，留了条警告；文件在 `.git/` 下，不进 status）。
+ */
+function cleanupMsg(p) {
+  let note = null
+  try {
+    fs.rmSync(p, { force: true })
+  } catch (e) {
+    note = e?.message ?? String(e)
+  }
+  const gone = !fs.existsSync(p)
+  if (!gone) {
+    console.log(
+      yellow(
+        `  ⚠ 临时消息文件仍在（${path.basename(p)}）${note ? `：${note}` : '：rmSync 未抛错但文件未消失'}`,
+      ),
+    )
+  }
+  return gone
+}
+
 const gateSection = [
   '门禁：',
   `- ${gateSummary}`,
@@ -182,7 +211,7 @@ fs.writeFileSync(msgPath, msg, 'utf8')
 // 自校验：消息必须过仓库自己的规范检查（不过即脚本 bug）
 const chk = sh(process.execPath, [path.join(scriptDir, 'check-commit-msg.mjs'), '--file', msgPath])
 if (chk.status !== 0) {
-  fs.rmSync(msgPath, { force: true })
+  cleanupMsg(msgPath)
   die(`生成的消息未通过规范校验（脚本 bug，请反馈）：\n${chk.out}\n${chk.err}`)
 }
 console.log(green('  ✓ 提交消息已生成并通过规范自校验'))
@@ -190,14 +219,19 @@ console.log(green('  ✓ 提交消息已生成并通过规范自校验'))
 if (DRY_RUN) {
   console.log(dim('  ── 消息预览（--dry-run，未提交）──'))
   console.log(msg)
-  fs.rmSync(msgPath, { force: true })
+  cleanupMsg(msgPath)
   process.exit(0)
 }
 
 // ---------- 提交 ----------
 console.log(bold('══ 第 3 步 · 提交 ══'))
 const commit = sh('git', ['commit', '-F', msgPath], { maxBuffer: 16 * 1024 * 1024 })
-fs.rmSync(msgPath, { force: true })
+// 先判结果、再清理：**清理失败绝不允许掩盖提交结果**。
+// 这里曾是 `git commit` 之后紧跟一句裸 `fs.rmSync`，而它可能抛（沙箱的
+// safe-delete 垫片会在"本回合删除数超阈值"时拒绝删除）——于是脚本带着栈回溯
+// 退出，用户看到的是失败，而**提交其实已经建好了**。不可逆动作之后的任何一步
+// 都不该能改写"它到底成没成"这个结论。
+const cleaned = cleanupMsg(msgPath)
 if (commit.status !== 0) die(`git commit 失败：\n${commit.err || commit.out}`)
 
-console.log(green(`✓ 已提交 ${commit.out.split('\n')[0]}${os.EOL}  （未 push；消息文件已清理）`))
+console.log(green(`✓ 已提交 ${commit.out.split('\n')[0]}${os.EOL}  （未 push；消息文件${cleaned ? '已清理' : '清理失败，见上方警告'}）`))
