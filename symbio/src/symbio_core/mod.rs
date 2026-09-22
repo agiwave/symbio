@@ -73,9 +73,10 @@ pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };
 pub use turn::{
-    build_assistant_messages, build_tool_message, emit_append, emit_update,
-    execute_post_with_abort, get_http_client, parse_sse_stream, short_id, PostResult,
-    StreamChildIds, ToolCallAccumulator, ToolCallInfo, TurnOutput,
+    build_assistant_messages, build_tool_message, emit_delta, emit_message, emit_removed,
+    emit_state, execute_post_with_abort, get_http_client, parse_sse_stream, removed_frame,
+    short_id, state_frame, PostResult, StreamChildIds, ToolCallAccumulator, ToolCallInfo,
+    TurnOutput,
 };
 pub use vdfs::{
     DynVdfsProvider, VdfsAccess, VdfsChange, VdfsContent, VdfsError, VdfsNode, VdfsProvider,

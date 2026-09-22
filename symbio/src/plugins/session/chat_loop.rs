@@ -42,8 +42,8 @@ pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal};
 pub(crate) use self::compress::{auto_compress_process, run_context_compact};
 pub(crate) use self::inputs::prepare_turn_inputs;
 pub(crate) use self::io::{
-    broadcast_message_update, emit_streaming_start, finalize_turn_root, fire_stop_hook,
-    fire_user_prompt_submit_hook, open_chat_session, persist_messages,
+    emit_streaming_start, finalize_turn_root, fire_stop_hook, fire_user_prompt_submit_hook,
+    open_chat_session, persist_messages,
 };
 pub(crate) use self::state::{Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState};
 pub(crate) use self::turn::{close_turn, settle_reasoning};
@@ -58,7 +58,7 @@ use crate::symbio_core::schemas::{
     HookEvent,
 };
 use crate::symbio_core::turn::{
-    build_tool_message, emit_update, short_id, ToolCallInfo, TurnOutput,
+    build_tool_message, emit_message, emit_removed, emit_state, short_id, ToolCallInfo, TurnOutput,
 };
 use crate::symbio_core::FinishReason;
 use crate::symbio_core::{
@@ -72,7 +72,6 @@ use std::sync::Arc;
 use super::compression;
 use super::config::SessionConfig;
 use super::tool_executor::{fire_hook, process_tool_calls_async};
-use crate::symbio_core::schemas::session::session_chat_response;
 
 pub async fn run_chat_loop(
     orchestrator: &ChatOrchestrator,
@@ -264,19 +263,16 @@ pub async fn run_chat_loop(
                 // RetryWithoutContextId 表示 LLM 提供商返回的 context_id 无效（会话不存在），
                 // 本轮流式产出的 Streaming 节点都是无效半截响应，应直接删除而非保留为 Failed 终态。
                 //
-                // 删除是**状态变更**：对每个被废弃的节点发 `NodeOp::Remove`，
-                // 消费循环转成 VDFS `deleted` 变更，前端据此移除视图——取代原先
-                // 被消费循环静默丢弃的 `StreamEvent::Abort` 事件帧（那正是
-                // "Reason 块不结束 / 半截节点永远挂着流式动画"的根因）。
+                // 删除是**状态迁移**（`removed`）：对每个被废弃的节点发一条删除帧，
+                // 接收端据此就地移除视图——取代原先被消费循环静默丢弃的
+                // `StreamEvent::Abort` 事件帧（那正是"Reason 块不结束 /
+                // 半截节点永远挂着流式动画"的根因）。
                 for m in context
                     .messages
                     .iter()
                     .filter(|m| m.status == Some(MessageStatus::Streaming))
                 {
-                    sink.emit(session_chat_response::NodeOp::Remove {
-                        message_id: m.id.clone(),
-                    })
-                    .await;
+                    emit_removed(&sink, &m.id).await;
                 }
                 context
                     .messages
@@ -416,11 +412,9 @@ async fn finish_turn(
 ) -> Result<(), PluginError> {
     // 软上限：先落一条会话级告警状态再退出，绝不静默（文案唯一出处）。
     if let TurnExit::MaxToolRounds { max } = &exit {
-        sink.emit(session_chat_response::NodeOp::Warn {
-            warning: Some(format!(
-                "已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"
-            )),
-        })
+        sink.warn(Some(format!(
+            "已达到本轮工具调用上限（{max}）。如需继续，请再次发送消息。"
+        )))
         .await;
     }
 

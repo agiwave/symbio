@@ -63,9 +63,9 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 | T6 | `t6-mcp-tool-error` | MCP 工具 JSON-RPC 错误：错误结果回灌，会话照常收敛（auto 模式） |
 | T7 | `t7-abort-convergence` | 中止收敛：REPL 长驻 + gateway HTTP invoke 中止 → `vdfs/stat` 读 `outcome=aborted`，节点终态化 |
 | T8 | `t8-compression` | 压缩水位触发：`max_context_tokens` 调小 → 摘要请求 → 快照落库 → 历史归并 |
-| T9 | `t9-ws-stream` | gateway WS `session/stream` 帧序：Start 快照 + Append 增量；离线订阅补发完整快照 |
-| T10 | `t10-node-protocol` | 节点状态机全景：Turn/Reasoning/Text/ToolCall 三态协议（append 必先 upsert、终态收敛、无孤儿） |
-| T11 | `t11-compression-node` | 压缩节点协议：`msg_type=compression` 消息节点、两态流、位置契约、失败 `failure_kind` |
+| T9 | `t9-ws-stream` | gateway WS `session/stream` 帧序：首帧（身份 + 首段正文）+ `delta` 增量 + 终态帧；增量拼接 == 完整正文 |
+| T10 | `t10-node-protocol` | 节点状态机全景：Turn/Reasoning/Text/ToolCall 三态协议（`delta` 必先有身份帧、终态收敛、无孤儿） |
+| T11 | `t11-compression-node` | 压缩节点协议：`msg_type=compression` 消息节点、两态流（终态带结果正文）、位置契约、失败 `failure_kind` |
 
 每个用例共享的不变量断言（`assertTranscriptInvariants`）：
 

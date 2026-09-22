@@ -38,7 +38,7 @@ pub struct ActiveSessionStateInner {
     pub last_error: Option<String>,
     /// 会话级告警（可恢复，面向用户）：持久化失败 / 长度截断 / 工具轮次上限。
     ///
-    /// 它是**状态**不是事件：由 `NodeOp::Warn` 帧写入、随会话节点
+    /// 它是**状态**不是事件：由出口的告警通道（`EventSink::warn`）写入、随会话节点
     /// `attributes.warning` 下发，前端按状态渲染；新一轮请求开始（`Working`）时清除。
     /// 与 `last_error`（失败终态）不同：告警不改变运行态，会话照常运行。
     pub last_warning: Option<String>,
@@ -65,7 +65,7 @@ pub struct ActiveSessionState {
     ///
     /// 这是消费循环里唯一写入的那个 Transcript（见 `transcript.rs`），不是第二份拷贝：
     ///
-    /// - 前端实时流：`NodeOp` 逐帧经 `apply` 分配 seq 后发布到转写流订阅者；
+    /// - 前端实时流：消息帧逐帧经 `apply` 分配 seq 后发布到转写流订阅者；
     /// - VDFS 转写列表：`<根>/session/<id>/消息` 把在途图叠加在落库转写之上。
     ///
     /// 之所以必须共享：**流式期间消息还没落库**（`persist_messages` 只在每轮结束时

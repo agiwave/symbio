@@ -12,7 +12,7 @@
 //! 与 Tauri 前端**同构**（前端 `services/transcriptStream.ts` + `stores/sessionNodeSync.ts`）：
 //!
 //! ```text
-//! ① 消息实时面  session/stream            一条流、按会话归属、单调 seq、显式操作（NodeOp）
+//! ① 消息实时面  session/stream            一条流、按会话归属、单调 seq、帧即一条消息
 //! ② 会话运行态  event_bus + vdfs/watch    会话节点自身（status / attributes.outcome·error）
 //! ```
 //!
@@ -47,7 +47,6 @@ use symbio::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use symbio::symbio_core::schemas::session::session_chat;
-use symbio::symbio_core::schemas::session::session_chat_response::NodeOp;
 use symbio::symbio_core::schemas::session::session_update;
 use symbio::symbio_core::transcript_stream::NodeEvent;
 use symbio::symbio_core::vdfs_provider::{
@@ -81,15 +80,17 @@ fn gen_id(prefix: &str) -> String {
 /// 只面对一个 `Frame`，不必 `select!`、也不必知道它来自哪条连接。
 pub enum Frame {
     /// 一条转写事件（消息实时面，`session/stream`）。
-    Transcript(NodeEvent),
+    ///
+    /// 载荷装箱：`NodeEvent` 内联着整条 `ChatMessage`（约 300 字节），而本枚举经
+    /// `mpsc` 逐帧搬运——装箱后枚举固定在一个指针量级，代价是每帧一次分配
+    /// （相比该帧已走过的 JSON 反序列化，可忽略）。
+    Transcript(Box<NodeEvent>),
     /// 转写流背压标记：后端明示「你可能漏了帧」。唯一恢复路径是整份重读，
     /// 而 CLI 只做流式输出（已打印的正文不可回收）——留痕即可。
     Resync,
     /// 会话节点运行态变更（VDFS watch 域）。
     ///
-    /// 载荷装箱：`VdfsChange` 内联着节点视图（约 400 字节），而同一枚举的
-    /// `Transcript` 是**每 token 一帧**的热路径。装箱后每帧固定 80 字节量级，
-    /// 代价只是低频运行态帧上的一次分配。
+    /// 同上装箱：`VdfsChange` 内联着节点视图（约 400 字节）。
     Node(Box<VdfsChange>),
 }
 
@@ -125,7 +126,7 @@ fn transcript_frame_of(frame: PluginFrame) -> Option<Frame> {
     match v.get("type")?.as_str()? {
         "transcript_event" => serde_json::from_value::<NodeEvent>(v.get("data")?.clone())
             .ok()
-            .map(Frame::Transcript),
+            .map(|ev| Frame::Transcript(Box::new(ev))),
         "transcript_resync" => Some(Frame::Resync),
         _ => None,
     }
@@ -375,8 +376,8 @@ impl SymbioClient {
     ///
     /// ## 两类帧各司其职
     ///
-    /// - [`Frame::Transcript`]（消息实时面）：显式操作直接交渲染器——正文在
-    ///   `upsert` / `append` 里增量输出，不需要任何折算。
+    /// - [`Frame::Transcript`]（消息实时面）：一帧就是一条消息，正文按**字段语义**
+    ///   交渲染器——`delta` 追加、`content` 整条替换，不需要任何折算。
     /// - [`Frame::Node`]（会话运行态）：**本轮结束的唯一判据**，见下。
     ///
     /// ## 为什么结束判据只能看会话节点
@@ -437,7 +438,7 @@ impl SymbioClient {
             };
 
             match frame {
-                // ── 消息实时面：显式操作，直接落地 ──
+                // ── 消息实时面：一帧一条消息，直接落地 ──
                 Frame::Transcript(ev) => {
                     // 转写流是**全会话广播**，本进程只渲染当前会话
                     if ev.session_id != self.session_id {
@@ -456,15 +457,10 @@ impl SymbioClient {
                     }
                     last_seq = Some(ev.seq);
 
-                    match ev.op {
-                        NodeOp::Upsert { message } => r.on_upsert(&message),
-                        NodeOp::Append { message_id, delta } => r.on_append(&message_id, &delta),
-                        NodeOp::Remove { message_id } => r.on_remove(&message_id),
-                        // reset 后正文需整份重读，而 CLI 不落消息树：本地快照作废即可。
-                        NodeOp::Reset => r.warn("⚠ 转写被截断，本轮流式输出已作废"),
-                        // 会话级告警走会话节点（VDFS watch 域），不经转写流。
-                        NodeOp::Warn { .. } => {}
-                    }
+                    // 一帧就是一条消息：`delta` 追加 / `content` 整条替换 /
+                    // `status = removed` 删除，全在 `on_message` 里按字段落地。
+                    // 会话级告警不在这条流上（走会话节点，VDFS watch 域）。
+                    r.on_message(&ev.message);
                 }
                 // 后端明示「你可能漏了帧」：无历史可重读，只能留痕。
                 Frame::Resync => {

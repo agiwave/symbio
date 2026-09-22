@@ -39,6 +39,12 @@
 > 那两个函数**已删除**，消息不再走 VDFS 变更；保留下来是为了记录推导过程。
 > **读面不受影响**：`read(<根>/session/<sid>)` 仍是一次拿整份历史，§2.1 的地址
 > 与 §3.4 的 `seq` 对账**仍然有效**。
+>
+> **S24 续（帧收成一条消息）**：`NodeOp` / `NodeChange` **已删除**——转写流每帧的载荷
+> 就是一条 `ChatMessage` 本身（`delta` 追加 / `content` 整条替换 / `status = removed`
+> 删除），会话级告警下沉为 `TranscriptWriter::warn` 的独立通道。上段提到的
+> `upsert` / `append` / `reset` / `warn` 变体随之消失，映射关系见
+> `node-state-streaming.md` §6。
 
 ---
 

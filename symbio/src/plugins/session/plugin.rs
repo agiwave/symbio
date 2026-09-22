@@ -25,7 +25,6 @@ use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
 use crate::symbio_core::transcript_stream::{
     register_transcript_subscriber, unregister_transcript_subscriber,
 };
@@ -131,54 +130,47 @@ impl SessionPlugin {
     // 「存储一份 + 在途一份」两种表示从此同源。
     //
     // 运行中的轮次另有唯一的常规写入者：消费循环（`orchestrator::consume`）把
-    // 通道上的 `NodeOp` 喂给同一个 `Transcript`——上游有多少个发射点都无所谓，
+    // 通道上的消息喂给同一个 `Transcript`——上游有多少个发射点都无所谓，
     // 到写入点只剩一个。
 
-    /// 向会话转写发布一个节点操作（唯一出口）。
-    pub(crate) async fn transcript_apply(&self, session_id: &str, op: NodeOp) {
+    /// 向会话转写发布一条消息帧（唯一出口）。
+    pub(crate) async fn transcript_apply(&self, session_id: &str, message: cm::ChatMessage) {
         let state = self.active_mgr.get_or_create(session_id).await;
-        state.transcript.lock().await.apply(op);
+        state.transcript.lock().await.apply(message);
     }
 
-    /// 向会话转写发布一批节点操作（同一把锁内顺序应用，保持发布顺序）。
-    pub(crate) async fn transcript_apply_all(&self, session_id: &str, ops: Vec<NodeOp>) {
+    /// 向会话转写发布一批消息帧（同一把锁内顺序应用，保持发布顺序）。
+    pub(crate) async fn transcript_apply_all(
+        &self,
+        session_id: &str,
+        messages: Vec<cm::ChatMessage>,
+    ) {
         let state = self.active_mgr.get_or_create(session_id).await;
         let mut tr = state.transcript.lock().await;
-        for op in ops {
-            tr.apply(op);
+        for message in messages {
+            tr.apply(message);
         }
     }
 
-    /// 转写被截断 / 清空：发 [`NodeOp::Reset`]，消费端清空本地转写并从存储整份重读。
+    /// **整表重写**（L2 语义压缩）后的收敛：被压掉的消息逐条删除帧，
+    /// 新的首条快照作为一条**完整消息**下发（`content` = 整条替换）。
     ///
-    /// 「从某条消息起截断到末尾」「整表清空」都是**范围删除**，逐节点下发
-    /// 的条数与历史长度线性相关——消费端本来就有「整份重读」这条唯一恢复
-    /// 路径，范围删除直接走它，不为一次性动作发明第三种帧。
-    pub(crate) async fn emit_transcript_reset(&self, session_id: &str) {
-        self.transcript_apply(session_id, NodeOp::Reset).await;
-    }
-
-    /// **整表重写**（L2 语义压缩）后的收敛：被压掉的消息逐条 [`NodeOp::Remove`]，
-    /// 新的首条快照 [`NodeOp::Upsert`]。
-    ///
-    /// 语义上是「前缀被替换」而非「从这里到末尾没了」，因此不用 `Reset`
-    /// （那会强迫消费端整份重读）；逐条删除的条数受上下文窗口上界约束，可接受。
+    /// 逐条删除帧是元数据（id + 状态，每条几十字节），条数受上下文窗口上界
+    /// 约束——比「清空 + 整份重读」便宜得多：保留的消息不再重传。协议里也没有
+    /// 「清空重读」这种形态（消费端要重读只有一条路：自己发现序号缺口）。
     pub(crate) async fn emit_transcript_rewritten(
         &self,
         session_id: &str,
         dropped: &[String],
         head: &cm::ChatMessage,
     ) {
-        let mut ops: Vec<NodeOp> = dropped
+        let mut frames: Vec<cm::ChatMessage> = dropped
             .iter()
-            .map(|mid| NodeOp::Remove {
-                message_id: mid.clone(),
-            })
+            .map(|mid| crate::symbio_core::turn::removed_frame(mid))
             .collect();
-        ops.push(NodeOp::Upsert {
-            message: Box::new(head.clone()),
-        });
-        self.transcript_apply_all(session_id, ops).await;
+        // 新的首条（压缩快照）：一条完整消息（身份 + 正文 + 终态同帧）。
+        frames.push(crate::symbio_core::turn::message_frame(head));
+        self.transcript_apply_all(session_id, frames).await;
     }
 
     /// 把**存储中**的某条消息发布成一次完整快照，落库后调用。
@@ -206,13 +198,15 @@ impl SessionPlugin {
         let Some(stored) = messages.iter().find(|m| m.id == message_id) else {
             return;
         };
-        self.transcript_apply(
-            session_id,
-            NodeOp::Upsert {
-                message: Box::new(stored.clone()),
-            },
-        )
-        .await;
+        // 用户消息此前只存在于前端的乐观副本；此帧是**存储权威版本**的完整消息
+        // （身份 + 正文 + 存储分配的 `seq` / `timestamp` + 终态）。
+        //
+        // 正文以 `content`（整条替换）而非 `delta` 下发，正是为了这里：持有乐观
+        // 副本的消费端**替换**成权威正文，而不是往自己那份后面再拼一遍。
+        // 这也是 `delta` / `content` 两个字段必须分开的原因——同一个消费端既可能
+        // 需要追加（流式），也可能需要替换（权威副本对齐），而帧必须自证是哪一种。
+        self.transcript_apply(session_id, crate::symbio_core::turn::message_frame(stored))
+            .await;
     }
 
     /// `session/stream`：建立**转写流**订阅连接（消息实时面的唯一通道）。

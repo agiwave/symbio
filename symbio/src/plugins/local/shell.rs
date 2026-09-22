@@ -14,9 +14,9 @@
 //!
 //! 只有一条执行路径（不再有「流式 / 非流式」两条）：
 //! - `spawn` 子进程，stdout/stderr 各由一个 pump 任务按行读取；
-//! - 每行到达后向**执行期出口** `sink` 发 `NodeOp::Upsert`
-//!   （`role=tool` + `status=Streaming`，**累积全量快照**——对应协议里 `upsert`
-//!   的「按 id 整条替换」语义，消费端不做任何合并）；
+//! - 每行到达后向**执行期出口** `sink` 发一条**消息帧**（`ChatMessage`）：
+//!   `role=tool` + `status=Streaming`，正文以 `delta`（尾部追加）承载；
+//!   非后缀增长（stdout/stderr 交替、转义序列回退）时改用 `content`（整条替换）；
 //! - 进程结束后把完整输出作为 `Data` 返回，由 `tool_executor` 定稿为工具结果；
 //! - 中止（`AbortSignal`）/超时（`SHELL_TIMEOUT_SECS`）时 kill 子进程并收尸。
 //!
@@ -37,7 +37,6 @@ use crate::symbio_core::{
     schemas::session::chat_message::{
         ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
     },
-    schemas::session::session_chat_response,
     AbortSignal, Capability, CapabilityMeta, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt,
     PluginError,
 };
@@ -361,6 +360,9 @@ where
         let mut reader = BufReader::new(reader);
         let mut buf: Vec<u8> = Vec::new();
         let mut last_emit = tokio::time::Instant::now() - STREAM_EMIT_INTERVAL;
+        // 已发送内容跟踪（delta 切分依据）：sent_prefix + sent_len = 已广播的累积文本。
+        let mut sent_prefix: Vec<u8> = Vec::new();
+        let mut sent_len: usize = 0;
         loop {
             buf.clear();
             let n = tokio::select! {
@@ -384,7 +386,11 @@ where
                             }
                         }
                     }
-                    // 节流广播累积快照（全量内容，前端 role=tool 全量替换）
+                    // 节流广播：只发**新增增量**（`delta` = 尾部追加语义）。
+                    // 全量重发会把同一内容传多次——`content` 只留给「正文被改写」那一种情形。
+                    // stdout 与 stderr 交替增长时新文本未必是累积文本的后缀（如 stderr
+                    // 段整体前移）：此时改用 `content`（整条替换）对齐——消费端永远不需要
+                    // 面对「拼接还是替换」的歧义，帧自己说清了是哪一种。
                     if last_emit.elapsed() >= STREAM_EMIT_INTERVAL {
                         last_emit = tokio::time::Instant::now();
                         let Some(target) = target.as_ref() else {
@@ -398,18 +404,44 @@ where
                             };
                             compose_output(&a, &b)
                         };
-                        sink.emit(session_chat_response::NodeOp::Upsert {
-                            message: Box::new(ChatMessage {
+                        let delta = if snapshot.len() > sent_len
+                            && snapshot.as_bytes().starts_with(&sent_prefix)
+                        {
+                            snapshot[sent_len..].to_string()
+                        } else {
+                            // 非后缀增长：正文被改写（转义序列回退等）——用一条
+                            // `content`（整条替换）帧对齐：`delta` 只表达"追加"，
+                            // 表达不了"这一段被换掉了"，而节点本身还在（不该用
+                            // 删除帧宣告它没了）。
+                            sink.emit(ChatMessage {
                                 id: target.msg_id.clone(),
                                 parent_id: Some(target.tool_call_id.clone()),
                                 role: Some(MessageRole::Tool),
                                 msg_type: Some(MessageType::Text),
-                                content: Some(MessageContent::Text(snapshot)),
                                 status: Some(MessageStatus::Streaming),
+                                content: Some(MessageContent::Text(snapshot.clone())),
                                 ..Default::default()
-                            }),
+                            })
+                            .await;
+                            sent_len = snapshot.len();
+                            sent_prefix = snapshot.into_bytes();
+                            continue;
+                        };
+                        if delta.is_empty() {
+                            continue;
+                        }
+                        sink.emit(ChatMessage {
+                            id: target.msg_id.clone(),
+                            parent_id: Some(target.tool_call_id.clone()),
+                            role: Some(MessageRole::Tool),
+                            msg_type: Some(MessageType::Text),
+                            status: Some(MessageStatus::Streaming),
+                            delta: Some(delta),
+                            ..Default::default()
                         })
                         .await;
+                        sent_len = snapshot.len();
+                        sent_prefix = snapshot.into_bytes();
                     }
                 }
             }

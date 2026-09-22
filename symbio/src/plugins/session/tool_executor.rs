@@ -10,7 +10,9 @@
 //!   （chat_loop）在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
-use crate::symbio_core::turn::{build_tool_message, short_id, ToolCallInfo};
+use crate::symbio_core::turn::{
+    build_tool_message, emit_message, emit_state, short_id, ToolCallInfo,
+};
 use crate::symbio_core::{dir_from_ctx, PLUGIN_SESSION};
 use crate::symbio_core::{
     schemas::{
@@ -18,7 +20,6 @@ use crate::symbio_core::{
         session::chat_message::{
             ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
         },
-        session::session_chat_response,
     },
     InvokeRequestExt,
 };
@@ -520,10 +521,7 @@ async fn record_protocol_failure(
     // 过滤，导致"孤儿 tool 结果"使下一轮 LLM 请求非法）。
     tool_msg.status = Some(MessageStatus::Completed);
 
-    sink.emit(session_chat_response::NodeOp::Upsert {
-        message: Box::new(tool_msg.clone()),
-    })
-    .await;
+    emit_message(sink, tool_msg.clone()).await;
 
     // 父 ToolCall 终态——**完整快照**，两种情形：
     // - id 合法但 name/参数非法：ToolCallDelta 已广播过完整节点（在权威转写里），
@@ -557,10 +555,7 @@ async fn record_protocol_failure(
             ..Default::default()
         },
     };
-    sink.emit(session_chat_response::NodeOp::Upsert {
-        message: Box::new(parent_update.clone()),
-    })
-    .await;
+    emit_state(sink, parent_update.clone()).await;
 
     plugin_info!(
         "session",
@@ -608,10 +603,7 @@ async fn emit_tool_running(sink: &EventSink, context_messages: &[ChatMessage], t
         obj.insert("started_at".into(), json!(crate::symbio_core::now_ms()));
     }
     running.meta = Some(meta);
-    sink.emit(session_chat_response::NodeOp::Upsert {
-        message: Box::new(running),
-    })
-    .await;
+    emit_state(sink, running).await;
 }
 
 /// 把父 ToolCall 的**完整副本**定稿为终态并广播。
@@ -651,10 +643,9 @@ async fn emit_parent_finalized(
     }
     full.meta = Some(meta);
     full.error = error;
-    sink.emit(session_chat_response::NodeOp::Upsert {
-        message: Box::new(full.clone()),
-    })
-    .await;
+    // 终态帧只带状态 / 元数据 / 错误，**不带正文**：ToolCall 的参数正文已在
+    // 流式阶段以 delta 逐帧上线。
+    emit_state(sink, full.clone()).await;
     Some(full)
 }
 
@@ -1022,10 +1013,7 @@ pub async fn process_tool_calls_async(
                 .unwrap_or(crate::symbio_core::failure_kind::NEEDS_APPROVAL)
                 .to_string();
 
-            sink.emit(session_chat_response::NodeOp::Upsert {
-                message: Box::new(tool_msg.clone()),
-            })
-            .await;
+            emit_message(sink, tool_msg.clone()).await;
 
             // 父 ToolCall 置 WaitingUserAction（完整快照；meta.failure_kind 供 resume 提取）
             if let Some(parent_update) = emit_parent_finalized(
@@ -1044,12 +1032,9 @@ pub async fn process_tool_calls_async(
                 parent_updates.push(parent_update);
             }
         } else {
-            // 广播工具结果子节点（**完整消息**，与落库的 `tool_msg` 同一形态——
-            // meta 一并带全：截断标记 / 存档路径不再只活在存储里）。
-            sink.emit(session_chat_response::NodeOp::Upsert {
-                message: Box::new(tool_msg.clone()),
-            })
-            .await;
+            // 广播工具结果子节点：**一次性节点单帧完成**——内容以 delta 首次传输，
+            // 与状态、meta 同帧（meta 一并带全：截断标记 / 存档路径不再只活在存储里）。
+            emit_message(sink, tool_msg.clone()).await;
 
             // 标记父节点最终状态（完整快照）：
             // - 成功 => Completed
@@ -1092,10 +1077,7 @@ pub async fn process_tool_calls_async(
         // 先结果、后父状态）。只发父节点补丁会让卡片有请求、无响应——
         // 那正是「工具没有响应节点，会话却继续往后」的成因。
         let result_msg = not_executed_result(id, "not_executed");
-        sink.emit(session_chat_response::NodeOp::Upsert {
-            message: Box::new(result_msg.clone()),
-        })
-        .await;
+        emit_message(sink, result_msg.clone()).await;
         if let Some(parent_update) = emit_parent_finalized(
             sink,
             context_messages,

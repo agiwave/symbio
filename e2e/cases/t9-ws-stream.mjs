@@ -3,10 +3,10 @@ import './_selfrun.mjs';
 //
 // `WS /api/v1/ws` 是 Tauri 前端「会话/流式」的真实等价物：连接后第一帧发
 // `PluginMessageWire`（与 route_v2 同线格式），后端返回会话通道后双向转发
-// `PluginFrame`。本用例在**这条通道上**订阅 `session/stream`（NodeOp 帧流），
+// `PluginFrame`。本用例在**这条通道上**订阅 `session/stream`（消息帧流），
 // 然后经 HTTP 边界发起对话，验证过程显示的核心契约：
-// - 帧序呈现「Upsert(Start) → Append*（流式增量）→ Upsert(End)」的形态；
-// - Append 只落在同一条消息上，按到达顺序拼接 == 最终正文（增量不丢不重）；
+// - 帧的形态是「首帧（身份 + 首段正文）→ delta*（窄增量）→ 终态帧（仅状态）」；
+// - `delta` 只落在同一条消息上，按到达顺序拼接 == 最终正文（增量不丢不重）；
 // - stream 帧带 session_id 归属（广播语义下前端可按会话过滤）。
 // 相对 cases/：上两层即仓库根（ws 依赖来自 tauri 前端的 node_modules）
 import WebSocket from '../../tauri/node_modules/ws/index.js';
@@ -25,7 +25,7 @@ import {
   PROVIDER_ID,
 } from '../helpers.mjs';
 
-export default defineCase('T9 gateway WS 流式：session/stream NodeOp 帧序与增量拼接契约', async () => {
+export default defineCase('T9 gateway WS 流式：session/stream 消息帧序与增量拼接契约', async () => {
   const llm = await new MockLlm([
     {
       id: 'flow',
@@ -66,17 +66,18 @@ export default defineCase('T9 gateway WS 流式：session/stream NodeOp 帧序�
     });
     ws.send(JSON.stringify({ metadata: { path: 'session/stream' }, payload: {} }));
 
-    // ② 收集 NodeOp 帧（发消息前订阅，不漏 Start）。
+    // ② 收集消息帧（发消息前订阅，不漏首帧）。
     // 信封：PluginFrame::Data({ type: 'transcript_event', data: NodeEvent })，
-    // NodeEvent = { session_id, seq, ...NodeOp }（tag 字段 op，snake_case）
-    /** @type {Array<{op:string, seq:number, session_id:string, [k:string]:any}>} */
+    // NodeEvent = { session_id, seq, message } —— 协议没有独立的操作字段，
+    // 帧携带什么（content / delta / status）就变更什么。
+    /** @type {Array<{seq:number, session_id:string, message:any}>} */
     const ops = [];
     let wsClosed = false;
     ws.on('message', (data) => {
       try {
         const frame = JSON.parse(data.toString());
         const ev = frame?.Data?.type === 'transcript_event' ? frame.Data.data : null;
-        if (ev?.op) ops.push(ev);
+        if (ev?.message) ops.push(ev);
       } catch { /* 忽略非 JSON 帧 */ }
     });
     ws.on('close', () => { wsClosed = true; });
@@ -98,7 +99,6 @@ export default defineCase('T9 gateway WS 流式：session/stream NodeOp 帧序�
       () =>
         ops.some(
           (o) =>
-            o.op === 'upsert' &&
             o.message?.role === 'assistant' &&
             o.message?.type === 'text' &&
             o.message?.status === 'completed',
@@ -107,17 +107,22 @@ export default defineCase('T9 gateway WS 流式：session/stream NodeOp 帧序�
     );
     ws.close();
 
-    // ⑤ 帧序契约：同一 assistant 消息的 Start → Append* → End 形态
-    const flowOps = ops.filter(
-      (o) =>
-        (o.op === 'upsert' && o.message?.role === 'assistant') || o.op === 'append',
-    );
+    // ⑤ 帧序契约：同一 assistant 正文节点的「首帧 → delta* → 终态帧」形态
     // 正文子节点（type=text）承担流式内容；turn 节点是骨架
-    const firstText = flowOps.find((o) => o.op === 'upsert' && o.message?.type === 'text');
-    assert(!!firstText, '帧流应含正文的 Upsert（Start 快照）');
+    const firstText = ops.find((o) => o.message?.role === 'assistant' && o.message?.type === 'text');
+    assert(!!firstText, '帧流应含正文节点的首帧（身份 + 首段正文）');
     const targetId = firstText.message.id;
-    const appends = flowOps.filter((o) => o.op === 'append' && o.message_id === targetId);
-    assert(appends.length >= 3, `应有流式 Append 增量（实际 ${appends.length}）`);
+    const frames = ops.filter((o) => o.message?.id === targetId);
+    assertEq(frames[0]?.seq, firstText.seq, '首帧应是该节点在流上的第一帧');
+    assertEq(frames[0].message.status, 'streaming', '首帧状态应为 streaming');
+    assert(frames[0].message.content != null, '首帧应带首段正文（content）');
+    const deltas = frames.filter((o) => o.message.delta != null);
+    assert(deltas.length >= 3, `应有流式 delta 增量（实际 ${deltas.length}）`);
+    assertEq(
+      frames[frames.length - 1].message.status,
+      'completed',
+      '末帧应为终态帧（status=completed）',
+    );
 
     // ⑥ 单调 seq：同一流的帧序号严格递增（缺口即 resync 的前提）
     const seqs = ops.map((o) => o.seq);
@@ -129,15 +134,18 @@ export default defineCase('T9 gateway WS 流式：session/stream NodeOp 帧序�
     assert(ops.every((o) => o.session_id === 'e2e-t9'), '流帧应携带会话归属');
 
     // ⑧ 增量拼接 == 最终正文：不丢不重。
-    // 首个分片随 Start 快照下发（content 非空），Append 只携带后续增量——
-    // 最终正文 = Start 快照内容 + Appends 按序拼接
-    const finalMsg = ops.find(
-      (o) =>
-        o.op === 'upsert' && o.message?.id === targetId && o.message?.status === 'completed',
-    )?.message;
-    assert(!!finalMsg, '流结束应有正文 completed 终态快照');
-    const streamed = String(firstText.message.content ?? '') + appends.map((o) => o.delta).join('');
-    assertEq(finalMsg.content, streamed, 'Start 内容 + Append 拼接应等于最终正文');
+    // 首个分片随首帧下发（content 非空），其余分片是 delta；终态帧只带状态、不带正文，
+    // 因此**最终正文 = 首帧 content + 全部 delta 按序拼接**（与前端落地口径同源）。
+    const rebuilt = frames.reduce(
+      (acc, o) =>
+        o.message.content != null
+          ? String(o.message.content)
+          : o.message.delta != null
+            ? acc + String(o.message.delta)
+            : acc,
+      '',
+    );
+    assertEq(rebuilt, '第一第二第三第四完成', '首帧正文 + delta 拼接应等于模型产出的完整正文');
 
     assert(!wsClosed || ops.length > 0, 'WS 在会话期间不应被服务端提前关闭');
   } finally {
@@ -146,3 +154,4 @@ export default defineCase('T9 gateway WS 流式：session/stream NodeOp 帧序�
     cleanupHomedir(hd);
   }
 });
+

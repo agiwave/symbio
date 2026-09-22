@@ -632,6 +632,10 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
   > **已删除**。② `agent/host/subagent.rs` 的转播桥也已改订转写流（消息）＋ VDFS
   > （仅会话运行态）；`cli/src/client.rs` 早已如此。**「读会话节点 `status` 判本轮结束」**
   > 这条结论不变，仍是三处同源。
+  > **再后记（S24 续）：** 上述 `NodeOp` 也已删除——转写流每帧的载荷直接就是一条
+  > `ChatMessage`（`delta` 追加 / `content` 整条替换 / `status = removed` 删除），会话级
+  > 告警下沉为 `TranscriptWriter::warn` 独立通道。见
+  > `symbio/src/plugins/session/docs/node-state-streaming.md` §6。
 - **词汇不合并**：`streaming`（消息）与 `working`（会话）保持两个词。合并会连带改
   `status-*` CSS 类名与 `isWorkingStatus()`，而**漏改 CSS 类名不报错、不失败，只会让
   流式动画静默消失**——正是"体验不得变差"要防的那类回归。
@@ -1056,13 +1060,13 @@ parse_sse_stream → emit_append(serde #1) → PluginFrame → 消费循环
   运行期约定——任何人误用 `tx` 都能捅穿。
 - **中止的复杂度来自「多源」，不是来自「中止」**。三源合一的收益不只是少两段代码，
   而是**消除了一整类竞态**：不再存在「帧丢了但标志位没置」这种状态组合。
-- **`EventSink` 认识 `NodeOp`，但不认识 `Transcript`**。转写抽象成
+- **`EventSink` 认识 `ChatMessage`，但不认识 `Transcript`**。转写抽象成
   `TranscriptWriter` 后，`symbio_core` 不必知道会话存储的存在，而「转写只有
   一个写入点」这条不变量仍由类型保证。
 
 **后果**：
 
-- **后端两跳 serde 消失**：`parse_sse_stream → sink.emit(NodeOp) → TranscriptSink
+- **后端两跳 serde 消失**：`parse_sse_stream → sink.apply(message) → TranscriptSink
   → Transcript::apply`。日志里不再有每帧 `from_value` 的往返。
 - **`ControlSignal` 从 8 处引用归零**；`PluginChannel` 不再承担执行期协议。
 - **三处结构性冗余消失**：压缩的哑通道 hack、`resume` 的临时通道 + drain、

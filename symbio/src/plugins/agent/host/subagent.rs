@@ -44,7 +44,6 @@ use crate::symbio_core::schemas::session::chat_message::{
     ResumeRequest,
 };
 use crate::symbio_core::schemas::session::session_chat;
-use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
 use crate::symbio_core::schemas::session::session_get_messages;
 use crate::symbio_core::schemas::session::session_update;
 use crate::symbio_core::transcript_stream::{
@@ -597,10 +596,10 @@ fn is_resync(frame: &PluginFrame) -> bool {
 ///
 /// ## 两条通道各司其职（与 `cli/src/client.rs::ask` 同构）
 ///
-/// - **消息实时面**（`session/stream`）：`NodeOp` 是显式操作（`upsert` 全量替换 /
-///   `append` 尾部追加 / `remove` 删除），原样落到出口——父会话 UI 因此把子会话
-///   过程锚定到工具调用之下。这里不做任何折算：全量当增量拼的「折算器」正是
-///   S23 废除的那类补丁机制，消费端只该按操作语义落地。
+/// - **消息实时面**（`session/stream`）：帧就是一条消息（`delta` 增量 /
+///   `content` 整条替换 / `status` 状态迁移含 `removed` 删除），只改写锚点后
+///   原样落到出口——父会话 UI 因此把子会话过程锚定到工具调用之下。**不做任何
+///   折算**：帧的字段语义在哪一端都一样。
 /// - **会话运行态**（`kind = "vdfs"`，`path == 会话地址`）：`status != working`
 ///   即本轮结束（`attributes.error` 非空 = 以错误结束）——这是**收尾的唯一判据**
 ///   （一轮里根 Turn 会多次定格，只有会话节点离开 `working` 才是整轮结束）。
@@ -698,138 +697,98 @@ async fn stream_relay_bridge(
                     continue;
                 }
 
-                match &event.op {
-                    NodeOp::Upsert { message } => {
-                        // 子会话的委托 prompt（user 消息）不透传：其内容已可见于
-                        // ToolCall 的请求参数（args.prompt），且 role=user 的临时
-                        // 节点会在前端获得"编辑"入口（该 id 不在父会话存储中，
-                        // 操作必然失败）。
-                        if message.role == Some(MessageRole::User) {
-                            continue;
-                        }
+                // 删除帧优先于锚定处理：本地索引与父视图同步移除——身份改写、
+                // 正文累积对已删节点没有意义。
+                if event.message.status == Some(MessageStatus::Removed) {
+                    let id = &event.message.id;
+                    text_by_id.remove(id);
+                    text_order.retain(|x| x != id);
+                    completed_ids.remove(id);
+                    // 删除按 id 生效（不依赖父子锚点），原样转发。
+                    sink.emit(event.message.clone()).await;
+                    continue;
+                }
 
-                        // 助手正文：Upsert 是完整快照 → 整条替换累积。
-                        // **在锚定之前**累积：锚定会把顶层节点的角色改写成 Tool，
-                        // 而"最终答复"的判据是助手正文。
-                        if message.role == Some(MessageRole::Assistant)
-                            && matches!(message.msg_type, Some(MessageType::Text) | None)
-                        {
-                            if !text_by_id.contains_key(&message.id) {
-                                text_order.push(message.id.clone());
-                            }
-                            text_by_id.insert(
-                                message.id.clone(),
-                                message
-                                    .content
-                                    .as_ref()
-                                    .map(MessageContent::to_text)
-                                    .unwrap_or_default(),
-                            );
-                        }
-                        if matches!(
-                            message.status,
-                            Some(MessageStatus::Completed)
-                                | Some(MessageStatus::Failed)
-                                | Some(MessageStatus::Aborted)
-                        ) {
-                            completed_ids.insert(message.id.clone());
-                        }
+                let message = &event.message;
+                // 子会话的委托 prompt（user 消息）不透传：其内容已可见于
+                // ToolCall 的请求参数（args.prompt），且 role=user 的临时
+                // 节点会在前端获得"编辑"入口（该 id 不在父会话存储中，
+                // 操作必然失败）。
+                if message.role == Some(MessageRole::User) {
+                    continue;
+                }
 
-                        // ── 审批/提问冒泡：转成**载荷**，不落节点 ──
-                        // `prompt.args` 是本工具的续跑参数（`session/resume`
-                        // 重执行 agent_run 时据此续跑子会话）；`failure_kind`
-                        // 原样带上（驱动前端审批 UI）。
-                        if message.msg_type == Some(MessageType::UserPrompt)
-                            && message.status == Some(MessageStatus::WaitingUserAction)
-                        {
-                            pending = Some(RelayOutcome::Pending {
-                                text: message
-                                    .content
-                                    .as_ref()
-                                    .map(MessageContent::to_text)
-                                    .unwrap_or_default(),
-                                prompt: json!({
-                                    "tool_name": NAME,
-                                    "args": {
-                                        "agent_id": agent_id,
-                                        "session_id": child_session_id,
-                                        "target_id": message.id,
-                                    }
-                                }),
-                                failure_kind: message
-                                    .meta
-                                    .as_ref()
-                                    .and_then(|m| m.get("failure_kind"))
-                                    .and_then(Value::as_str)
-                                    .unwrap_or(crate::symbio_core::failure_kind::NEEDS_APPROVAL)
-                                    .to_string(),
-                            });
-                            continue;
-                        }
-
-                        // ── 锚定到父 ToolCall 之下 ──
-                        // 子会话的顶层响应节点原 `parent_id = None`，锚定到本工具
-                        // 调用之下；其角色改为 Tool（工具响应）而非 Assistant，
-                        // 以符合分型结构 ToolCall(Assistant) → Turn(Tool)，
-                        // 并能被 flatten 的 find_tool_result 正确识别。
-                        let mut anchored = message.as_ref().clone();
-                        if anchored.parent_id.is_none() {
-                            anchored.parent_id = Some(tool_call_id.clone());
-                            if anchored.role == Some(MessageRole::Assistant) {
-                                anchored.role = Some(MessageRole::Tool);
-                            }
-                        }
-                        sink.emit(NodeOp::Upsert {
-                            message: Box::new(anchored),
-                        })
-                        .await;
+                // 助手正文：**在锚定之前**累积——锚定会把顶层节点的角色改写成
+                // Tool，而"最终答复"的判据是助手正文。
+                if message.role == Some(MessageRole::Assistant)
+                    && matches!(message.msg_type, Some(MessageType::Text) | None)
+                {
+                    if !text_by_id.contains_key(&message.id) {
+                        text_order.push(message.id.clone());
                     }
-
-                    // 流式尾部增量：累积到本地正文副本（落地本身原样进行）。
-                    NodeOp::Append { message_id, delta } => {
-                        if let Some(buf) = text_by_id.get_mut(message_id) {
-                            buf.push_str(delta);
-                        }
-                        sink.emit(NodeOp::Append {
-                            message_id: message_id.clone(),
-                            delta: delta.clone(),
-                        })
-                        .await;
-                    }
-
-                    // 子树内的节点删除（工具恢复/压缩清理）原样转译：
-                    // 该节点在父会话视图里同样要消失。
-                    NodeOp::Remove { message_id } => {
-                        text_by_id.remove(message_id);
-                        text_order.retain(|id| id != message_id);
-                        completed_ids.remove(message_id);
-                        sink.emit(NodeOp::Remove {
-                            message_id: message_id.clone(),
-                        })
-                        .await;
-                    }
-
-                    // ── 两条**不透传**的会话级操作 ──
-                    // - `Reset`：子会话级操作（清空其整个在途图），父视图无法按子树
-                    //   重置——透传会误清父会话自身的在途节点；父视图的收敛依赖
-                    //   工具轮结束后的落库回执。
-                    // - `Warn`：告警域是会话级（VDFS watch 域），子会话的告警不属于
-                    //   父会话；且出口的 `Direct` 实现会把 `Warn` 分派到**本会话**的
-                    //   节点上——透传等于把子会话的告警记到父会话头上。
-                    NodeOp::Reset => {
-                        crate::plugin_warn!(
-                            "agent",
-                            "[agent_run] 子会话转写 Reset（会话级，不透传父视图），已忽略"
-                        );
-                    }
-                    NodeOp::Warn { warning } => {
-                        crate::plugin_warn!(
-                            "agent",
-                            "[agent_run] 子会话告警（不上报父会话）：{:?}",
-                            warning
-                        );
+                    let buf = text_by_id.entry(message.id.clone()).or_default();
+                    if let Some(d) = &message.delta {
+                        // 增量：追加（与父会话消费端同一语义）
+                        buf.push_str(d);
+                    } else if let Some(c) = &message.content {
+                        // 完整正文：整条替换（同一条消息的两种上线形态）
+                        *buf = c.to_text();
                     }
                 }
+                if matches!(
+                    message.status,
+                    Some(MessageStatus::Completed)
+                        | Some(MessageStatus::Failed)
+                        | Some(MessageStatus::Aborted)
+                ) {
+                    completed_ids.insert(message.id.clone());
+                }
+
+                // ── 审批/提问冒泡：转成**载荷**，不落节点 ──
+                // `prompt.args` 是本工具的续跑参数（`session/resume`
+                // 重执行 agent_run 时据此续跑子会话）；`failure_kind`
+                // 原样带上（驱动前端审批 UI）。
+                if message.msg_type == Some(MessageType::UserPrompt)
+                    && message.status == Some(MessageStatus::WaitingUserAction)
+                {
+                    pending = Some(RelayOutcome::Pending {
+                        text: text_by_id.get(&message.id).cloned().unwrap_or_default(),
+                        prompt: json!({
+                            "tool_name": NAME,
+                            "args": {
+                                "agent_id": agent_id,
+                                "session_id": child_session_id,
+                                "target_id": message.id,
+                            }
+                        }),
+                        failure_kind: message
+                            .meta
+                            .as_ref()
+                            .and_then(|m| m.get("failure_kind"))
+                            .and_then(Value::as_str)
+                            .unwrap_or(crate::symbio_core::failure_kind::NEEDS_APPROVAL)
+                            .to_string(),
+                    });
+                    continue;
+                }
+
+                // ── 锚定到父 ToolCall 之下 ──
+                // 子会话的顶层响应节点原 `parent_id = None`，锚定到本工具
+                // 调用之下；其角色改为 Tool（工具响应）而非 Assistant，
+                // 以符合分型结构 ToolCall(Assistant) → Turn(Tool)，
+                // 并能被 flatten 的 find_tool_result 正确识别。
+                let mut anchored = message.clone();
+                if anchored.parent_id.is_none() {
+                    anchored.parent_id = Some(tool_call_id.clone());
+                    if anchored.role == Some(MessageRole::Assistant) {
+                        anchored.role = Some(MessageRole::Tool);
+                    }
+                }
+                sink.emit(anchored).await;
+
+                // 帧原样转发（只改写锚点，不改语义）：`delta` 仍是 `delta`、
+                // `content` 仍是 `content`——父会话的唯一写入点按同一套字段语义
+                // 落地，转播不做任何折算。
             }
         }
     }

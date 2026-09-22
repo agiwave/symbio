@@ -76,7 +76,7 @@ describe('previewOf：缩略卡预览', () => {
   })
 })
 
-describe('appendContent：`append` 操作的唯一内容落点', () => {
+describe('appendContent：帧携带 `delta` 时的唯一内容落点', () => {
   it('把增量拼到正文尾部', () => {
     const out = appendContent(msg({ id: 'x', content: '你好' }), '世界')
     expect(out.content).toBe('你好世界')
@@ -89,8 +89,8 @@ describe('appendContent：`append` 操作的唯一内容落点', () => {
 
   it('role=tool 的**工具响应**同样追加（响应被覆盖成空的回归）', () => {
     // 回归：`mergeMessagePatch` 曾把 `role=tool` 判为"流式帧全量重发"因而整条替换。
-    // 后端透传子会话的 `Append`（逐片响应），前端于是只剩最后一片——
-    // 表现为"工具卡片有请求、响应是空的"。语义只由协议操作给出，不看角色。
+    // 后端透传子会话的 `delta`（逐片响应），前端于是只剩最后一片——
+    // 表现为"工具卡片有请求、响应是空的"。语义只由帧字段给出，不看角色。
     const out = appendContent(msg({ id: 'r', role: 'tool', content: '共有 ' }), '10 个文件')
     expect(out.content).toBe('共有 10 个文件')
   })

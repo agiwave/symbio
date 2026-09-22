@@ -668,7 +668,7 @@ node scripts/grep-audit.mjs && node scripts/style-audit.mjs
 改造前：parse_sse_stream → emit_append(serde#1) → PluginFrame → 消费循环
         from_value::<NodeOp>(serde#2) → Transcript::apply → publish_frame(serde#3) → 前端
 
-改造后：parse_sse_stream → sink.emit(NodeOp) → TranscriptSink → Transcript::apply → 前端
+改造后：parse_sse_stream → sink.apply(message) → TranscriptSink → Transcript::apply → 前端
         （后端段两跳纯开销消失；进程内调用不再付进程外的 serde 代价）
 ```
 
@@ -814,7 +814,7 @@ execute() 不返回、executor 不消费 → **死锁**」。→ **§10**：两�
 |---|---|
 | `Capability::execute` 判 `RESULT_MSG_ID`/`TOOL_CALL_ID` 是否齐备 → 分流「流式 / 非流式」两条路径 | **一条路径**：`env.sink()` / `env.abort()` / `SnapshotTarget::from_ctx` 三个读取，缺席即降级（§11 前读的是 `EventSink::of` / `AbortSignal::of`，等价） |
 | 执行体 `tokio::spawn` 到后台（否则通道满 ⇒ 死锁） | 直接 `await`（出口没有背压） |
-| 增量走 `tx.send(PluginFrame::Data(NodeOp…))`，`send` 失败置 `consumer_gone` | `sink.emit(NodeOp::Upsert{…})`；**没有**「消费端还在吗」这种判断——没有可关闭的通道 |
+| 增量走 `tx.send(PluginFrame::Data(NodeOp…))`，`send` 失败置 `consumer_gone` | `sink.apply(message)`（一条 `ChatMessage`）；**没有**「消费端还在吗」这种判断——没有可关闭的通道 |
 | 末尾发哨兵帧 `{"content": full}` | `Ok(Response{exit_code, output, risk_level})`——返回值就是结果 |
 | `execute_inner`（非流式等待式路径） | 删除 |
 
@@ -915,7 +915,7 @@ loop {
 ```
 工具 execute(ctx)
   ├─ 读 ctx：EVENT_SINK / ABORT_SIGNAL / (RESULT_MSG_ID, TOOL_CALL_ID)
-  ├─ sink.emit(NodeOp) ─────────────► 转写唯一写入点（进程内，零 serde）
+  ├─ sink.apply(message) ───────────► 转写唯一写入点（进程内，零 serde）
   └─ 返回 PluginPayload::Data ──────► execute_tool_async
                                         └─ 结果节点 / 父终态（唯一写入者）
 ```
@@ -928,7 +928,7 @@ invoke_capability(cap, ctx)                 ← 唯一「拆信封」点
   ├─ env  = ExecEnv::from_request(&*ctx)    ← 出口 + 中止，缺席 ⇒ 静默 / 永不中止
   └─ cap.execute(args, &env, ctx)
         ├─ 读 ctx：RESULT_MSG_ID / TOOL_CALL_ID / WORKDIR…（只读真正需要的）
-        ├─ env.sink().emit(NodeOp) ───► 转写唯一写入点（进程内，零 serde）
+        ├─ env.sink().apply(message) ─► 转写唯一写入点（进程内，零 serde）
         └─ 返回 Value ────────────────► PluginPayload::Data
                                           └─ execute_tool_async
                                                └─ 结果节点 / 父终态（唯一写入者）

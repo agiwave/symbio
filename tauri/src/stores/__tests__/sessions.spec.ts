@@ -530,7 +530,7 @@ describe('sessions store — 历史水合是快照直载', () => {
     store.hydrateFromHistory(SID, [
       { id: 'u1', role: 'user', type: 'user_prompt', seq: 1, content: '问题' },
     ] as never)
-    store.putMessage(SID, {
+    store.applyTranscriptMessage(SID, {
       id: 'turn-live',
       type: 'turn',
       status: 'streaming',
@@ -545,7 +545,7 @@ describe('sessions store — 历史水合是快照直载', () => {
 
   it('终态且不在快照里的本地节点被丢弃（被删除的陈旧副本不得复活）', async () => {
     const store = useSessionsStore()
-    store.putMessage(SID, { id: 'ghost', type: 'text', status: 'completed' } as never)
+    store.applyTranscriptMessage(SID, { id: 'ghost', type: 'text', status: 'completed' } as never)
 
     snapshot([{ id: 'h1', type: 'text', seq: 1 }])
     await store.loadMessages(SID)
@@ -555,7 +555,7 @@ describe('sessions store — 历史水合是快照直载', () => {
 
   it('快照里的节点整条替换：内容与状态都以快照为准', async () => {
     const store = useSessionsStore()
-    store.putMessage(SID, {
+    store.applyTranscriptMessage(SID, {
       id: 'a1',
       type: 'text',
       status: 'streaming',
@@ -594,7 +594,7 @@ describe('sessions store — 会话节点状态收敛（零回读）', () => {
 
   it('会话转空闲（含本地仍有 streaming 节点）→ 不回读，状态由载荷就地落定', async () => {
     const store = useSessionsStore()
-    store.putMessage(SID, {
+    store.applyTranscriptMessage(SID, {
       id: 'tc1',
       type: 'tool_call',
       status: 'streaming',
@@ -613,7 +613,7 @@ describe('sessions store — 会话节点状态收敛（零回读）', () => {
 
   it('会话仍在运行时同样零回读（在途节点是合法的）', async () => {
     const store = useSessionsStore()
-    store.putMessage(SID, {
+    store.applyTranscriptMessage(SID, {
       id: 'tc1',
       type: 'tool_call',
       status: 'streaming',
@@ -669,7 +669,7 @@ describe('sessions store — 存储号就地落定，不回读', () => {
       { id: 'h2', type: 'text', seq: 6, status: 'completed', content: '旧的' },
     ] as never)
     // 用户发送：本地游标发号 7（此刻存储还没落库）
-    store.putMessage(SID, {
+    store.applyTranscriptMessage(SID, {
       id: 'u1',
       role: 'user',
       type: 'user_prompt',
@@ -683,7 +683,7 @@ describe('sessions store — 存储号就地落定，不回读', () => {
     ])
 
     // 存储回包：权威号是 4（截断 / 压缩后存储重排过号）⇒ 就地覆盖本地号
-    store.putMessage(SID, {
+    store.applyTranscriptMessage(SID, {
       id: 'u1',
       role: 'user',
       type: 'user_prompt',
@@ -709,8 +709,8 @@ describe('sessions store — 存储号就地落定，不回读', () => {
       { id: 'h1', type: 'text', seq: 1, status: 'completed', content: '旧的' },
     ] as never)
     // 本地游标发号 2，随后存储也说是 2 —— 两套号没有分叉
-    store.putMessage(SID, { id: 'u1', type: 'user_prompt', status: 'completed' } as never)
-    store.putMessage(SID, {
+    store.applyTranscriptMessage(SID, { id: 'u1', type: 'user_prompt', status: 'completed' } as never)
+    store.applyTranscriptMessage(SID, {
       id: 'u1',
       type: 'user_prompt',
       seq: 2,
@@ -756,7 +756,7 @@ describe('sessions store — 实时状态的唯一变更通道', () => {
     const store = useSessionsStore()
     const t0 = Date.now()
 
-    store.putMessage(SID, {
+    store.applyTranscriptMessage(SID, {
       id: 'a1',
       role: 'assistant',
       type: 'text',

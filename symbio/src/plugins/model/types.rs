@@ -66,6 +66,8 @@ impl From<NativeMessage> for ChatMessage {
 
             name: None,
             content: msg.content,
+            // 增量是帧的形态（只在出方向的转写帧上），不是消息的形态。
+            delta: None,
             status: Some(
                 crate::symbio_core::schemas::session::chat_message::MessageStatus::Completed,
             ),

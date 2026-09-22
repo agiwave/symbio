@@ -55,7 +55,7 @@ function makeStore(over: Record<string, unknown> = {}) {
   return {
     getSessionMessages: vi.fn(() => [] as ChatMessage[]),
     isSessionWorking: vi.fn(() => false),
-    putMessage: vi.fn(),
+    applyTranscriptMessage: vi.fn(),
     putStatus: vi.fn(),
     setSessionError: vi.fn(),
     setSessionStatus: vi.fn(),
@@ -144,7 +144,7 @@ describe('messageTree — 从 store 派生', () => {
     c.removeMessage('a')
     expect(c.messageTree.value.map((m) => m.id)).toEqual(['b'])
     // store 未被动过：不写一个删除语义到权威状态里
-    expect(hoisted.store.putMessage).not.toHaveBeenCalled()
+    expect(hoisted.store.applyTranscriptMessage).not.toHaveBeenCalled()
   })
 
   it('按会话隔离：另一会话的删除不影响本会话', () => {
@@ -200,7 +200,7 @@ describe('send — 出站与乐观置位', () => {
   it('乐观置位：先写消息、置 working、清会话级错误', async () => {
     const c = useChatConnection({ sessionId: 's1' })
     await c.send(msg({ id: 'u1' }))
-    expect(hoisted.store.putMessage).toHaveBeenCalledWith('s1', expect.objectContaining({ id: 'u1' }))
+    expect(hoisted.store.applyTranscriptMessage).toHaveBeenCalledWith('s1', expect.objectContaining({ id: 'u1' }))
     expect(hoisted.store.putStatus).toHaveBeenCalledWith(
       's1',
       expect.objectContaining({ status: VDFS_STATUS_WORKING }),
@@ -212,7 +212,7 @@ describe('send — 出站与乐观置位', () => {
   it('无 id 的消息不做乐观写入（没有可锚定的节点）', async () => {
     const c = useChatConnection({ sessionId: 's1' })
     await c.send({ content: 'x' } as ChatMessage)
-    expect(hoisted.store.putMessage).not.toHaveBeenCalled()
+    expect(hoisted.store.applyTranscriptMessage).not.toHaveBeenCalled()
   })
 
   it('失败 → 置 failed；无在途消息时落会话级错误', async () => {

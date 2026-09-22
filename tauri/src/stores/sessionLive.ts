@@ -40,7 +40,7 @@ export interface SessionLiveStatus {
    * - 写入来源是**节点状态**，不是事件：会话节点的 VDFS 变更（`applySessionNode`）
    *   与消息节点的变更（`transcriptStream`），以及 send / resume 的乐观置位。
    * - `putStatus` 内部每次都会**自动更新**此字段（避免漏写）；
-   *   `putMessage` 只在产生 assistant 文本预览时同步更新。
+   *   `applyTranscriptMessage` 只在产生 assistant 文本预览时同步更新。
    * - 若需判断"状态是否过期"，请使用 `getSessionStaleReason()` 而不是直接读此字段。
    */
   last_event_at: number

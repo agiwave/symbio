@@ -611,9 +611,9 @@ pub(crate) async fn run_context_compact(
 ///
 /// ## 删除帧走哪条通道
 ///
-/// 与工具恢复删除旧子节点同源：发 `NodeOp::Remove`，由消费循环转译成 VDFS
-/// `deleted` 变更（见 `orchestrator/consume.rs`）。**不能**只删存储——那样前端
-/// 转写会永久留着那个已被删掉的失败节点，且没有任何机制会纠正它。
+/// 与工具恢复删除旧子节点同源：发一条删除帧（`status = removed`）。**不能**
+/// 只删存储——那样前端转写会永久留着那个已被删掉的失败节点，且没有任何机制
+/// 会纠正它。
 pub(crate) async fn retry_compaction(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn InvokeRequest>,
@@ -639,10 +639,8 @@ pub(crate) async fn retry_compaction(
     // 拿过滤视图去删会「删了个空气」，节点反而留在存储里。
     messages.retain(|m| m.id != target_id);
     session.replace_messages(messages).await?;
-    sink.emit(session_chat_response::NodeOp::Remove {
-        message_id: target_id.to_string(),
-    })
-    .await;
+    // 删除帧走转写流：`status = removed` 一次状态迁移。
+    emit_removed(sink, target_id).await;
 
     // 压缩本身则必须跑在与**自动路径完全同一份视图**上：`get_context_messages`
     // 会做三层清理（滤 Failed / 剔孤儿 / content 归一）并施加轮次窗口，

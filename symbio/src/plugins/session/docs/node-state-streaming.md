@@ -7,14 +7,16 @@
 > 本文回答一个问题：**会话的"正在发生什么"如何只由节点状态表达**，
 > 使前端不再消费任何事件序列，从而**不存在事件顺序问题**。
 >
-> **状态：S16–S22 已完成；S23 续（消息实时面改为单条转写流）。**
+> **状态：S16–S22 已完成；S23 消息实时面改为单条转写流；S24 帧收成「一条消息」。**
 >
 > - **读面**（历史）走 VDFS：`read(<根>/session/<sid>)` 一次拿整份历史，地址与 §2.1 一致。
-> - **实时面**（消息）是 `worker/session/stream` **一条流**，载荷是 `NodeOp`
->   （`upsert` / `append` / `remove` / `reset` / `warn`）+ 会话内单调 `seq`，
->   由 `symbio_core::transcript_stream` 发布；消费者是前端
+> - **实时面**（消息）是 `worker/session/stream` **一条流**，**每帧就是一条
+>   `ChatMessage`**（`{ session_id, seq, message }`）+ 会话内单调 `seq`，由
+>   `symbio_core::transcript_stream` 发布；消费者是前端
 >   （`services/transcriptStream.ts`）、子智能体转播（`agent/host/subagent.rs`）
->   与 CLI（`cli/src/client.rs`）。**旧的 `kind = "session"` 事件频道
+>   与 CLI（`cli/src/client.rs`）。**帧里没有独立的操作枚举**——`delta` 追加 /
+>   `content` 整条替换 / `status = removed` 就地移除 / 其余字段合并，语义全在字段上
+>   （S24 收掉了 S23 的 `NodeOp` / `NodeChange`）。**旧的 `kind = "session"` 事件频道
 >   （`Status` / `Update` / `Delete` / `Error` / `Abort`）已整体废除。**
 > - **会话运行态**仍走 VDFS（会话**叶子节点**，消费者 `stores/sessionNodeSync.ts`）。
 >
@@ -23,7 +25,7 @@
 > 那个文件**已被删除**，消息不再走 VDFS 变更——这几节保留为**设计推导的历史记录**，
 > 实时面的权威描述在 `symbio_core/transcript_stream.rs` 与
 > `services/transcriptStream.ts` 的模块文档里。**仍然有效**的是：§2（节点分类 / 状态机）、
-> §5.3（工具调用三段式）、§6 的 S20–S23 各阶段、§7（体验清单）、§8（不变量）。
+> §5.3（工具调用三段式）、§6 的 S20–S24 各阶段、§7（体验清单）、§8（不变量）。
 >
 > §1 的"现状"表同样是当时的问题清单，不是今天的描述。
 
@@ -693,6 +695,37 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
 而收益只是"地址更纯"——§2.2 已论证：请求就是 ToolCall 的**内容**，
 两个地址会让同一份参数存两处。**记录在案，避免下一个人重新论证一遍。**
 
+### S24 —— 消息帧收成「一条消息」（本次）
+
+S23 把消息实时面从「VDFS 变更」收成一条转写流，但帧仍带一层**显式操作枚举**
+（`NodeOp`：`upsert` / `append` / `remove` / `reset` / `warn`）。本次把这一层删掉：
+**帧就是一条 `ChatMessage`**（`NodeEvent = { session_id, seq, message }`），语义全在字段上——
+`delta` 追加 / `content` 整条替换 / `status = removed` 就地移除 / 其余字段合并。
+
+| 帧里有什么 | 接收端动作 | 原 `NodeOp` |
+|---|---|---|
+| `delta` | 追加到该节点正文尾部 | `Append` |
+| `content` | 整条替换该节点正文（幂等） | `Upsert`（正文部分） |
+| `status = removed` | 就地移除该节点 | `Remove` |
+| `status`（其余） / `error` | 状态迁移 | `Upsert`（状态部分） |
+| 身份字段 / `meta` / `seq` / `timestamp` | 有则合并 | `Upsert`（身份部分） |
+
+**为什么能删**：操作枚举只是同一条消息的**字段子集**的另一种编码。收掉之后，
+「消息现在是什么样」只有一个来源——消费端不必把两套结构对齐，也不必从帧的形状
+推断「该拼接还是该替换」（`delta` / `content` **互斥**，同帧携带即协议违例：后端
+写入点 `Transcript::apply` 与前端落地 `applyTranscriptMessage` 用同一条判据报错丢弃）。
+
+**`reset` / `warn` 的去处**：
+- `reset`（清空重读）**不存在于协议**——消费端要重读只有一条路：自己发现序号缺口
+  （或收到后端的 resync 标记）。
+- `warn`（会话级告警）**不是消息**：它下沉为 `TranscriptWriter::warn(Option<String>)`
+  的独立通道，落在会话节点（VDFS watch 域）上，不再占一帧转写流。
+
+**一条必须记住的边界**：状态帧（`state_frame`）会**剥掉正文**，因此它只适用于
+「正文已由 `delta` 逐帧上线过」的节点；正文**尚未上线**的节点（一次性节点 / 结果
+正文首次到达，如压缩节点的终态）必须用**完整消息帧**（`message_frame`），否则消费端
+只拿到状态、永远停在占位文案上——S20.4 的压缩结果文本踩过这个坑（`CompressionEmitter::finish`）。
+
 ---
 
 ## 7. 验收：用户体验等价清单
@@ -736,8 +769,8 @@ context-length 错误而失败（带原因 + 重试入口），而不是"带着�
 8. **会话状态词只有三个**：`working` / `active` / `failed`——不为会话造 `pending` /
    `completed`（它没有"未开始"与"已结束"）。
 9. **失败是状态不是标志**：不再有 `last_failed` 布尔。
-10. **会话实时面两条通道，各归其域**：消息走 `session/stream` 转写流（`NodeOp` 显式
-    操作 ＋ 会话内单调 `seq`，见 `symbio_core::transcript_stream`），会话运行态走
+10. **会话实时面两条通道，各归其域**：消息走 `session/stream` 转写流（**帧 = 一条消息**
+    ＋会话内单调 `seq`，见 `symbio_core::transcript_stream`），会话运行态走
     `kind = "vdfs"` 的会话节点变更；旧事件频道（`kind = "session"`）已整体废除
     ——**而不是**"前端不订、后端还发"。判断「本轮 / 子会话结束」看会话节点的
     `status`（不再有 `Status idle` 帧可等），**不是**根 Turn 的终态（一轮里它会多次

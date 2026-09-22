@@ -72,6 +72,14 @@ export const MESSAGE_STATUS_COMPLETED = 'completed'
 export const MESSAGE_STATUS_ABORTED = 'aborted'
 /** 终态：以错误结束 */
 export const MESSAGE_STATUS_FAILED = 'failed'
+/**
+ * 终态：节点已被删除（**就地移除，不可重试**）。
+ *
+ * 协议里没有 `remove` 操作——删除就是一次状态迁移，与出现、增长、完成同走一条
+ * 消息帧。落到本状态的帧在接收端**就地移除**该节点（从本地视图消失），不产生
+ * 任何「清空重读」。根因见后端 `symbio_core::schemas::session::chat_message::MessageStatus::Removed`。
+ */
+export const MESSAGE_STATUS_REMOVED = 'removed'
 
 export const MESSAGE_STATUSES = [
   MESSAGE_STATUS_PENDING,
@@ -80,6 +88,7 @@ export const MESSAGE_STATUSES = [
   MESSAGE_STATUS_COMPLETED,
   MESSAGE_STATUS_ABORTED,
   MESSAGE_STATUS_FAILED,
+  MESSAGE_STATUS_REMOVED,
 ] as const
 
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number]
@@ -242,7 +251,35 @@ export interface ChatMessage {
   role?: ChatRole;
   type?: ChatMessageType;
   name?: string;
+  /**
+   * ToolCall 节点的 **wire id**（LLM provider 返回的 `tool_call_id`）。
+   *
+   * 节点 `id` 在诞生时分配（会话内唯一），provider 的原始 id 存这里，仅在构建
+   * LLM 请求时回传（部分协议要求原值）。历史数据可能无此字段。
+   */
+  tool_call_id?: string;
   content?: MessageContent;
+  /**
+   * 流式**增量**：本帧新到达的那一段正文，追加到本地该节点正文尾部。
+   *
+   * ## 与 `content` 互斥，语义由字段本身给出
+   *
+   * 一帧里两者**绝不同时出现**——同帧携带即协议违例，后端唯一写入点
+   * （`Transcript::apply`）报错丢弃，前端落地（`sessions.applyTranscriptMessage`）
+   * 用同一条判据拒绝。因此消费端永远不必从帧的形状推断「该拼接还是该替换」：
+   *
+   * | 字段 | 语义 |
+   * |---|---|
+   * | `delta` | 追加到正文尾部（O(delta) 窄帧）——流式热路径 |
+   * | `content` | **整条替换**该节点正文（幂等）——一次性节点完整体 / 编辑后的新正文 |
+   *
+   * ## 为什么不落存储
+   *
+   * 增量是**不完整的片段**，不是消息的形态：它只在出方向的帧上存在，存储里只有
+   * `content`（图内累积的正文）。后端 `chat_session::ensure_durable_states` 在写入点
+   * 直接拒绝携带 `delta` 的消息——「delta 永不落盘」是持久层的不变量，不是发射方的自律。
+   */
+  delta?: string;
   status?: MessageStatus;
   /** 失败原因（面向用户的可读短消息），仅当 status === 'failed' 时存在 */
   error?: string;

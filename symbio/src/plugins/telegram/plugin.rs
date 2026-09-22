@@ -8,7 +8,7 @@ use crate::symbio_core::{
     dir_from_ctx,
     schemas::{
         common,
-        session::{session_chat, session_chat_response},
+        session::{chat_message::MessageRole, session_chat, session_chat_response},
     },
     CapabilityMeta, ConfigFile, InvokeRequest, InvokeResponse, Plugin, PluginDir, PluginError,
     PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM, SESSION_CHAT_SEND,
@@ -509,6 +509,9 @@ impl TelegramPlugin {
                 match router.route(sub_ctx).await {
                     Ok(payload) => {
                         let mut full_text = String::new();
+                        // 已采纳过 `content` 的节点 id（见下方帧处理：整条替换只在首帧采纳）
+                        let mut seen_text_ids: std::collections::HashSet<String> =
+                            std::collections::HashSet::new();
                         match payload {
                             PluginPayload::Data(_) => {
                                 if let Ok(chat_resp) =
@@ -528,20 +531,29 @@ impl TelegramPlugin {
                                 while let Some(frame) = chan.rx.recv().await {
                                     match frame {
                                         PluginFrame::Data(data) => {
-                                            if let Ok(session_chat_response::NodeOp::Upsert {
-                                                message,
-                                            }) = serde_json::from_value::<
-                                                session_chat_response::NodeOp,
+                                            // 转写流帧：`{session_id, seq, message}`。
+                                            // 正文有两种上线形态，各自落地：
+                                            // - `delta`（增量）：追加——流式正文的全部来源；
+                                            // - `content`（整条替换）：只在**该节点首次出现**
+                                            //   的帧上采用（如"只有推理没有正文"的兜底 Text
+                                            //   节点），否则会把已经追加过的同一段再来一遍。
+                                            if let Ok(event) = serde_json::from_value::<
+                                                crate::symbio_core::transcript_stream::NodeEvent,
                                             >(
                                                 data
                                             ) {
-                                                full_text.push_str(
-                                                    &message
-                                                        .content
-                                                        .as_ref()
-                                                        .map(|c| c.to_text())
-                                                        .unwrap_or_default(),
-                                                );
+                                                let m = event.message;
+                                                if let Some(delta) = &m.delta {
+                                                    full_text.push_str(delta);
+                                                } else if let Some(content) = &m.content {
+                                                    let first_seen =
+                                                        seen_text_ids.insert(m.id.clone());
+                                                    if first_seen
+                                                        && m.role == Some(MessageRole::Assistant)
+                                                    {
+                                                        full_text.push_str(&content.to_text());
+                                                    }
+                                                }
                                             }
                                         }
                                         PluginFrame::Error(e, _) => {

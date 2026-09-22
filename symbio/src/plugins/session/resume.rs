@@ -21,9 +21,9 @@
 //! 1. 从会话存储加载消息，定位 ToolCall 父节点 + 待恢复子节点
 //! 2. 提取 tool_name / base_args
 //! 3. 根据 action 执行：approve/retry/supply 调用 `execute_tool_async`；reject/answer 直接生成结果
-//! 4. 删除旧子节点（广播 `NodeOp::Remove`）
-//! 5. 创建新 Text 结果子节点（广播 `NodeOp::Upsert`）
-//! 6. 更新 ToolCall 父节点状态（广播 `NodeOp::Upsert`）
+//! 4. 删除旧子节点（广播删除帧：`status = removed`）
+//! 5. 创建新 Text 结果子节点（广播完整消息：正文首次上线）
+//! 6. 更新 ToolCall 父节点状态（广播完整消息：args 正文可能已被 supply 改写）
 //! 7. 持久化（`replace_messages`）
 //! 8. 成功 → `ResumeOutcome::Continue`（turn 循环续写）；失败 → `ResumeOutcome::Done`（退出等下次 resume）
 //!
@@ -39,8 +39,7 @@ use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
-use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
-use crate::symbio_core::turn::short_id;
+use crate::symbio_core::turn::{emit_message, emit_removed, emit_state, short_id};
 use crate::symbio_core::{AbortSignal, EventSink, InvokeRequest, PluginError};
 use crate::{plugin_error, plugin_info};
 use serde_json::{json, Value};
@@ -149,12 +148,9 @@ async fn process_retry_turn(
     // 5. 持久化
     session.replace_messages(messages).await?;
 
-    // 6. 广播 Delete 事件（每个被删除的消息）
+    // 6. 广播删除（每个被删除的消息一条 `status = removed` 的删除帧）
     for msg in &deleted_messages {
-        sink.emit(NodeOp::Remove {
-            message_id: msg.id.clone(),
-        })
-        .await;
+        emit_removed(sink, &msg.id).await;
     }
 
     plugin_info!(
@@ -245,10 +241,7 @@ async fn process_tool_resume_action(
                     obj.insert("started_at".into(), json!(crate::symbio_core::now_ms()));
                 }
                 running.meta = Some(meta);
-                sink.emit(NodeOp::Upsert {
-                    message: Box::new(running),
-                })
-                .await;
+                emit_state(sink, running).await;
             }
             None => {
                 plugin_error!(
@@ -333,10 +326,7 @@ async fn process_tool_resume_action(
                 e
             );
         }
-        sink.emit(NodeOp::Upsert {
-            message: Box::new(parent_update),
-        })
-        .await;
+        emit_state(sink, parent_update).await;
         return Ok(ResumeOutcome::Done);
     }
 
@@ -401,19 +391,11 @@ async fn process_tool_resume_action(
     // 9. 持久化（replace_messages：删除旧子 + 新增新子 + 更新父节点）
     session.replace_messages(messages).await?;
 
-    // 10. 广播：Delete 旧子 + Update 新子 + Update 父节点
-    sink.emit(NodeOp::Remove {
-        message_id: old_child_id,
-    })
-    .await;
-    sink.emit(NodeOp::Upsert {
-        message: Box::new(new_child),
-    })
-    .await;
-    sink.emit(NodeOp::Upsert {
-        message: Box::new(updated_parent),
-    })
-    .await;
+    // 10. 广播：旧子删除（`status = removed`）+ 新子完整消息（正文首次上线）
+    //     + 父节点完整消息（supply 可能改写了它的 args 正文 ⇒ 整条替换）
+    emit_removed(sink, &old_child_id).await;
+    emit_message(sink, new_child).await;
+    emit_message(sink, updated_parent).await;
 
     // 11. 成功 → Continue；失败 → Done
     if final_success {

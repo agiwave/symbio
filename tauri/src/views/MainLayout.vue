@@ -33,19 +33,17 @@ import Toast from '@/components/common/Toast.vue'
 onMounted(async () => {
   // 启动**转写实时流**（`worker/session/stream` → 会话消息 store）
   //
-  // 消息本体的全部实时显示只经这一条流（`NodeEvent`：upsert / append / remove /
-  // reset）。会话运行态（`<根>/session/<sid>` 叶子）仍走 VDFS 变更，由
-  // `startSessionNodeSync` 收敛——两者分工明确，同一份真相不会被写两次。
+  // 消息本体的全部实时显示只经这一条流（`NodeEvent`：帧 = 一条 `ChatMessage`，
+  // 语义全在字段上——delta 追加 / content 替换 / status=removed 移除）。会话运行态
+  // （`<根>/session/<sid>` 叶子）仍走 VDFS 变更，由 `startSessionNodeSync` 收敛——
+  // 两者分工明确，同一份真相不会被写两次。
   //
   // 落地目标由本外壳**显式注入**（`transcriptStream` 是 service，不认识 Pinia）；
-  // 每个动作对应**一个**协议操作，store 方法即它的落地（`reset`/缺口走 loadMessages
-  // 整份重读）。`upsert` 与 `append` 是两个不同的落地口——不共用一条"合并"实现，
-  // 否则就得从节点类型反推语义（曾把流式工具响应覆盖成空）。
+  // 只有两个动作：应用一条消息帧、整份重读（`reset` / 序号缺口走 loadMessages）。
+  // 「帧该做什么」由落地目标按字段判定，不再按操作分派到不同的落地口。
   const sessions = useSessionsStore()
   void startTranscriptStream({
-    upsert: (sid, msg) => sessions.putMessage(sid, msg),
-    append: (sid, id, delta) => sessions.appendMessage(sid, id, delta),
-    remove: (sid, id) => sessions.removeMessageById(sid, id),
+    message: (sid, msg) => sessions.applyTranscriptMessage(sid, msg),
     reload: async (sid) => {
       await sessions.loadMessages(sid)
     },

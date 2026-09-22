@@ -296,21 +296,15 @@ impl CompressionEmitter {
     /// 因此压缩期间切走再切回，这个节点仍然可见——否则用户切回来只看到「什么
     /// 都没有」，又变回最初那个"卡死"观感。
     pub async fn begin(&self, node_id: &str) {
-        let node = ChatMessage {
+        // 一条完整消息：身份 + 状态 + 占位正文一帧到位。
+        self.state.transcript.lock().await.apply(ChatMessage {
             id: node_id.to_string(),
             role: Some(MessageRole::Assistant),
             msg_type: Some(MessageType::Compression),
             status: Some(MessageStatus::Streaming),
             content: Some(MessageContent::Text("正在压缩上下文…".to_string())),
             ..Default::default()
-        };
-        self.state
-            .transcript
-            .lock()
-            .await
-            .apply(session_chat_response::NodeOp::Upsert {
-                message: Box::new(node),
-            });
+        });
     }
 
     /// 定稿节点并使其离开在途图，返回终态副本供调用方落库。
@@ -341,11 +335,15 @@ impl CompressionEmitter {
                 meta["failure_kind"] = serde_json::json!(kind);
                 node.meta = Some(meta);
             }
-            // 发布终态快照 + 落库回执：权威副本即将由调用方落库，
+            // 发布终态 + 落库回执：权威副本即将由调用方落库，
             // 在途副本必须作废（否则同一条消息以「存储 + 在途」两种形态参与叠加）。
-            tr.apply(session_chat_response::NodeOp::Upsert {
-                message: Box::new(node.clone()),
-            });
+            //
+            // **完整消息帧**（不是状态帧）：本节点的正文从未经 `delta` 上线过——
+            // `begin` 发的是一句占位（"正在压缩上下文…"），这里的正文（"已压缩
+            // N → M 条"）是**首次也是唯一**一次上线。用状态帧剥掉正文，前端会一直
+            // 停在占位文案上，直到重开会话才从存储读到结果（实测回归）。
+            // 状态帧只适用于「正文已由 delta 逐帧上线」的节点。
+            tr.apply(crate::symbio_core::turn::message_frame(&node));
             tr.persisted(std::slice::from_ref(&node.id));
             node
         };
@@ -421,9 +419,8 @@ impl ChatOrchestrator {
             // 此处仅将其与根 Turn 标记 Completed 即可。仅当流式期间因故未建立 Reasoning 节点时，
             // 才补发一个 Text 节点兜底（此时不存在 Reasoning 节点，不会造成重复）。
             if !out.reasoning_child_id.is_empty() {
-                // 完整快照：与 build_assistant_messages 落库形态一致
-                //（id / 父子关系 / 内容 / 状态一次给全），消费端按 id 整条替换。
-                emit_update(
+                // 该节点已由 ReasoningDelta 逐帧上线过正文，这里只迁状态。
+                emit_state(
                     sink,
                     ChatMessage {
                         id: out.reasoning_child_id.clone(),
@@ -442,7 +439,9 @@ impl ChatOrchestrator {
                 } else {
                     out.response_text_child_id.clone()
                 };
-                emit_update(
+                // 兜底路径：这个 Text 节点是**新建**的（reasoning-only 时没有正文
+                // 子节点），正文必须随帧上线 ⇒ 完整消息帧。
+                emit_message(
                     sink,
                     ChatMessage {
                         id: resp_id,
@@ -464,7 +463,7 @@ impl ChatOrchestrator {
 
         // Mark reasoning child as completed
         if !out.reasoning.is_empty() && !out.reasoning_child_id.is_empty() {
-            emit_update(
+            emit_state(
                 sink,
                 ChatMessage {
                     id: out.reasoning_child_id.clone(),
@@ -481,7 +480,7 @@ impl ChatOrchestrator {
 
         // Mark response text child as completed (exists if there was text content)
         if !out.text.is_empty() && !out.response_text_child_id.is_empty() {
-            emit_update(
+            emit_state(
                 sink,
                 ChatMessage {
                     id: out.response_text_child_id.clone(),

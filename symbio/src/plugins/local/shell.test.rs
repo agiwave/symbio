@@ -3,25 +3,24 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）。
 //!
 //! 出口是 `EventSink`，因此断言方式从「消费通道里的帧」变成「读记录型写入点里的
-//! `NodeOp`」——**不再需要构造通道**，也就不再有「谁先返回」的顺序问题。
+//! 消息帧」——**不再需要构造通道**，也就不再有「谁先返回」的顺序问题。
 
 use super::*;
-use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
 use crate::symbio_core::{SimpleRequest, TranscriptWriter};
 
-/// 记录型写入点：把所有 `NodeOp` 收进 `Vec`。
+/// 记录型写入点：把所有消息帧收进 `Vec`。
 struct RecordingWriter {
-    ops: Arc<std::sync::Mutex<Vec<NodeOp>>>,
+    ops: Arc<std::sync::Mutex<Vec<ChatMessage>>>,
 }
 
 #[async_trait]
 impl TranscriptWriter for RecordingWriter {
-    async fn apply(&self, op: NodeOp) {
-        self.ops.lock().unwrap().push(op);
+    async fn apply(&self, message: ChatMessage) {
+        self.ops.lock().unwrap().push(message);
     }
 }
 
-fn recording_sink() -> (EventSink, Arc<std::sync::Mutex<Vec<NodeOp>>>) {
+fn recording_sink() -> (EventSink, Arc<std::sync::Mutex<Vec<ChatMessage>>>) {
     let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
     (
         EventSink::direct(Arc::new(RecordingWriter { ops: ops.clone() })),
@@ -51,16 +50,21 @@ fn make_ctx(
     Arc::new(req)
 }
 
-/// 断言一组操作全是「按编排层 id 写的流式快照」。
-fn assert_all_snapshots_use_orchestrator_ids(ops: &[NodeOp], msg_id: &str, tool_call_id: &str) {
-    for op in ops {
-        let NodeOp::Upsert { message } = op else {
-            panic!("出口只承载 Upsert 快照，收到 {op:?}");
-        };
-        assert_eq!(message.id, msg_id, "快照 id 必须是编排层预留的结果节点 id");
+/// 断言一组帧全是「按编排层 id 写的流式帧」。
+fn assert_all_snapshots_use_orchestrator_ids(
+    ops: &[ChatMessage],
+    msg_id: &str,
+    tool_call_id: &str,
+) {
+    for message in ops {
+        assert_eq!(message.id, msg_id, "帧 id 必须是编排层预留的结果节点 id");
         assert_eq!(message.parent_id.as_deref(), Some(tool_call_id));
         assert_eq!(message.role, Some(MessageRole::Tool));
         assert_eq!(message.status, Some(MessageStatus::Streaming));
+        assert!(
+            message.delta.is_some() || message.content.is_some(),
+            "每一帧都得带上这一段正文（delta 增量 / content 整条替换）"
+        );
     }
 }
 
@@ -73,7 +77,7 @@ async fn exec(tool: &ShellTool, ctx: Arc<dyn InvokeRequest>) -> Result<Value, Pl
     tool.execute(args, &env, ctx).await
 }
 
-// ── pump：增量快照的唯一产生点 ────────────────────────────────────────
+// ── pump：增量帧的唯一产生点 ────────────────────────────────────────
 
 /// 首行必然成帧（节流窗口在循环外被预置为「已过期」），且帧携带编排层给的 id。
 #[tokio::test]
@@ -98,12 +102,10 @@ async fn pump_emits_snapshot_with_orchestrator_ids() {
     let ops = ops.lock().unwrap();
     assert_eq!(ops.len(), 1, "首行必须立即成帧");
     assert_all_snapshots_use_orchestrator_ids(&ops, "res-1", "tc-1");
-    let NodeOp::Upsert { message } = &ops[0] else {
-        unreachable!()
-    };
-    assert!(
-        matches!(&message.content, Some(MessageContent::Text(t)) if t == "hello\n"),
-        "快照是**累积全量**，首帧即首行"
+    assert_eq!(
+        ops[0].delta.as_deref(),
+        Some("hello\n"),
+        "首帧即首行：增量帧携带的就是这一段新正文"
     );
 }
 

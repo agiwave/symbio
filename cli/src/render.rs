@@ -5,26 +5,23 @@
 //! - **stdout**：只放模型产出的正文（非交互模式下可直接 `| 下游程序`）。
 //! - **stderr**：进度、工具调用、错误、日志 —— 可整体 `2>/dev/null` 静音。
 //!
-//! ## 输入是显式操作，不再是增量补丁
+//! ## 输入是**消息帧**
 //!
-//! 渲染器直接消费后端的 [`NodeOp`]（经 `session/stream` 下发，见
-//! `symbio_core::transcript_stream`）：
+//! 渲染器直接消费后端下发的 [`ChatMessage`] 帧（经 `session/stream`，见
+//! `symbio_core::transcript_stream`）。一帧就是一条消息，语义全在字段上：
 //!
-//! | 操作 | 载荷 | 渲染动作 |
-//! | --- | --- | --- |
-//! | `upsert` | **完整消息快照** | 整条替换本地快照，只输出比已打印部分多出来的正文 |
-//! | `append` | 仅 `delta` | 追加进本地快照并**直接输出**（流式热路径，O(delta)） |
-//! | `remove` | `message_id` | 删掉本地快照（工具恢复会先删旧子节点再重建） |
-//! | `reset` | — | 本地快照作废（已打印的正文不可回收） |
-//! | `warn` | — | 会话级状态，经**会话节点**下发，不在此处理 |
+//! | 帧里有什么 | 渲染动作 |
+//! | --- | --- |
+//! | `delta` | 身份/状态合并进本地快照；正文累加并**直接输出**（流式热路径，O(delta)） |
+//! | `content` | 整条替换本地快照；只把**比已输出更长的尾部**打出来（重写无法回收，留痕） |
+//! | `status = removed` | 删掉本地快照（工具恢复会先删旧子节点再重建） |
 //!
 //! ## 为什么仍然要维护一份本地快照
 //!
-//! `append` 把增量累积进快照，随后收尾的 `upsert`（全量）与快照做差分，才能
-//! 算出「还没打印过的那一段」。这层差分是终端增量输出必需的，但它只依赖
-//! **同一条消息的先后两帧**——不再依赖任何 VDFS 回读，也不再需要
-//! `TranscriptPatchBuilder` 那种「把全量变更折算成补丁」的居中层。
-
+//! `delta` 把增量累积进快照；身份字段（`msg_type` / `role` / `name`）决定「这帧
+//! 该不该回显」。这层合并只依赖帧自身与本地快照——不依赖任何 VDFS 回读，
+//! 也不需要旧协议那种「全量帧差分」的居中层：`delta` 本身就是要打印的新增正文。
+//!
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
@@ -32,13 +29,6 @@ use symbio::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use symbio::symbio_core::vdfs_provider::VDFS_STATUS_WORKING;
-
-fn text_of(m: &ChatMessage) -> String {
-    m.content
-        .as_ref()
-        .map(MessageContent::to_text)
-        .unwrap_or_default()
-}
 
 fn write_stdout(s: &str) {
     let mut out = io::stdout().lock();
@@ -91,24 +81,82 @@ impl Renderer {
         }
     }
 
-    /// 完整快照（`NodeOp::Upsert`）：整条替换本地快照，只输出新增正文。
-    pub fn on_upsert(&mut self, snapshot: &ChatMessage) {
-        if snapshot.id.is_empty() {
+    /// 一条消息帧：身份/状态合并进本地快照，正文按**字段语义**落地后回显。
+    ///
+    /// - `delta` = 追加：这一段就是新到达的正文，直接打印（流式热路径）；
+    /// - `content` = 整条替换：只打印「比已输出更长的尾部」——终端的已输出内容
+    ///   收不回来，正文被改写时留痕而不是假装没发生过；
+    /// - `status = removed` = 删除：丢本地快照。
+    ///
+    /// 是否回显由 [`Self::render`] 按 `msg_type` / `role` 判定（工具结果与参数
+    /// 都不回显）。目标未知时就地建占位快照（帧自给自足）。
+    pub fn on_message(&mut self, message: &ChatMessage) {
+        if message.id.is_empty() {
+            return;
+        }
+        // 删除帧：本 CLI 不做消息树持久渲染，丢快照即可。
+        if message.status == Some(MessageStatus::Removed) {
+            self.msgs.remove(&message.id);
             return;
         }
 
-        // 先合并再渲染：解构出决策所需的全部信息，尽早结束对 self.msgs 的借用。
+        let mut rewritten_to = None;
         let (delta, mtype, role, failed, error, name) = {
-            let merged = self.msgs.entry(snapshot.id.clone()).or_default();
-            let before = text_of(merged);
-            *merged = snapshot.clone();
-            let after = text_of(merged);
-            // 正常路径下 `append` 已把增量累积进快照，收尾快照与之相同 → delta 为空。
-            // 后端若直接给全量（未经 append），strip_prefix 失败即整段输出，不会丢字。
-            let delta = match after.strip_prefix(before.as_str()) {
-                Some(rest) => rest.to_string(),
-                None => after,
-            };
+            let merged = self.msgs.entry(message.id.clone()).or_default();
+            // 身份字段：有则覆盖（首帧建立身份；重复携带以最后到达为准）。
+            if message.parent_id.is_some() {
+                merged.parent_id = message.parent_id.clone();
+            }
+            if message.role.is_some() {
+                merged.role = message.role.clone();
+            }
+            if message.msg_type.is_some() {
+                merged.msg_type = message.msg_type.clone();
+            }
+            if message.name.is_some() {
+                merged.name = message.name.clone();
+            }
+            if message.tool_call_id.is_some() {
+                merged.tool_call_id = message.tool_call_id.clone();
+            }
+            if message.meta.is_some() {
+                merged.meta = message.meta.clone();
+            }
+            if message.seq.is_some() {
+                merged.seq = message.seq;
+            }
+            if message.timestamp.is_some() {
+                merged.timestamp = message.timestamp;
+            }
+            if message.status.is_some() {
+                merged.status = message.status.clone();
+            }
+            if message.error.is_some() {
+                merged.error = message.error.clone();
+            }
+
+            let mut delta = String::new();
+            if let Some(d) = &message.delta {
+                // 增量：追加到快照尾部，并原样打印
+                match merged.content.as_mut() {
+                    Some(MessageContent::Text(buf)) => buf.push_str(d),
+                    _ => merged.content = Some(MessageContent::Text(d.clone())),
+                }
+                delta = d.clone();
+            } else if let Some(content) = &message.content {
+                // 完整正文：整条替换快照；只有"比已输出更长"的部分能打印
+                let prev = merged
+                    .content
+                    .as_ref()
+                    .map(MessageContent::to_text)
+                    .unwrap_or_default();
+                let next = content.to_text();
+                delta = next.strip_prefix(&prev).unwrap_or_default().to_string();
+                if delta.is_empty() && next != prev {
+                    rewritten_to = Some(next.clone());
+                }
+                merged.content = Some(content.clone());
+            }
             (
                 delta,
                 merged.msg_type.clone().unwrap_or_default(),
@@ -119,38 +167,14 @@ impl Renderer {
             )
         };
 
-        self.render(&snapshot.id, mtype, role, delta, name);
-        self.announce_failure(&snapshot.id, failed, error);
-    }
-
-    /// 流式增量（`NodeOp::Append`）：累积进本地快照并直接输出。
-    ///
-    /// **追加的目标不止正文**：工具参数（与 Text / Reasoning 同构）与工具响应
-    /// （`tool_executor` 透传子会话的 `Append`）同样走这里。因此不能假定"增量即正文"
-    /// ——是否输出由 [`Self::render`] 按 `msg_type` / `role` 判定（工具结果与参数
-    /// 都不回显）。目标未知（连 `upsert` 都没收到过）时就地建快照，避免漏字。
-    pub fn on_append(&mut self, message_id: &str, delta: &str) {
-        if message_id.is_empty() || delta.is_empty() {
-            return;
+        self.render(&message.id, mtype, role, delta, name);
+        if let Some(next) = rewritten_to {
+            self.warn(&format!(
+                "⚠ 正文被重写（{} 字符），终端已输出的部分无法回收",
+                next.chars().count()
+            ));
         }
-        let (mtype, role) = {
-            let merged = self.msgs.entry(message_id.to_string()).or_default();
-            match merged.content.as_mut() {
-                Some(MessageContent::Text(buf)) => buf.push_str(delta),
-                _ => merged.content = Some(MessageContent::Text(delta.to_string())),
-            }
-            (
-                merged.msg_type.clone().unwrap_or_default(),
-                merged.role.clone(),
-            )
-        };
-
-        self.render(message_id, mtype, role, delta.to_string(), None);
-    }
-
-    /// 后端精确删除某条消息（工具恢复时清理旧子节点）——本 CLI 不做消息树持久渲染，只丢快照。
-    pub fn on_remove(&mut self, message_id: &str) {
-        self.msgs.remove(message_id);
+        self.announce_failure(&message.id, failed, error);
     }
 
     /// 正文与工具播报的统一呈现：按 `msg_type` / `role` 决定回显什么。
@@ -226,7 +250,7 @@ impl Renderer {
     /// 入参是**会话节点的状态词**（`VDFS_STATUS_*`），由会话节点承载（VDFS watch 域），
     /// 不再是旧事件频道的 `busy` / `idle` —— 旧的 `other => "· 状态: …"` 兜底也一并
     /// 删了：节点状态词是闭集，能走到那里的只有未知词，而它不值得占一行——真正需要
-    /// 用户看到的失败已经在 [`Self::on_upsert`]（消息级）与调用方的结局判定里报过。
+    /// 用户看到的失败已经在 [`Self::on_message`]（消息级）与调用方的结局判定里报过。
     ///
     /// **不去重**：「只在新状态上报一次」只有调用方做得到（它是唯一能看到上一帧的
     /// 地方），重复的 `working` 帧在这层去不掉——这正是它从前会两行“处理中”的原因。

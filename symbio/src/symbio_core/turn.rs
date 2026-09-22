@@ -23,7 +23,6 @@ use crate::symbio_core::model_provider::{FinishReason, ProtocolEvent, Usage};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
-use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
 use crate::symbio_core::sse::{utf8_chunk, PartialLineExtractor, SseLineParser};
 use crate::{plugin_error, plugin_info, plugin_warn};
 use futures::StreamExt;
@@ -58,26 +57,77 @@ pub fn get_http_client() -> &'static reqwest::Client {
 
 // 执行期出口与中止（唯一两个原语）
 
-/// 统一发送消息更新事件（`Upsert` = 完整消息快照，接收端按 id 整条替换）。
-pub async fn emit_update(sink: &EventSink, msg: ChatMessage) {
-    sink.emit(NodeOp::Upsert {
-        message: Box::new(msg),
+/// 发送一条**完整消息**（`content` = 整条替换，幂等）。
+///
+/// 用在正文对接收端是**新的权威副本**的帧上：一次性节点（工具结果 / 用户消息
+/// 回填）的单帧完成、存储回执、压缩快照。流式节点的正文已由 [`emit_delta`]
+/// 逐帧传过，它的终态走 [`emit_converge`]，不在这里重发。
+pub async fn emit_message(sink: &EventSink, msg: ChatMessage) {
+    sink.emit(message_frame(&msg)).await;
+}
+
+/// 由一条完整消息派生**消息帧**（`content` = 整条替换）：缺省补 `completed`。
+///
+/// 直接写转写（`Transcript::apply`，不经出口）的发布路径也用它——「完整消息必然
+/// 带状态」这条约定只在这里实现一次。
+pub fn message_frame(m: &ChatMessage) -> ChatMessage {
+    let mut frame = m.clone();
+    if frame.status.is_none() {
+        frame.status = Some(MessageStatus::Completed);
+    }
+    frame
+}
+
+/// 发送一帧**增量**：`delta` 追加到目标节点正文尾部（流式热路径，O(delta)）。
+///
+/// 目标未知时写入点用帧内信息建占位（帧自给自足，不依赖任何先行帧）。
+pub async fn emit_delta(sink: &EventSink, message_id: &str, delta: &str) {
+    sink.emit(ChatMessage {
+        id: message_id.to_string(),
+        delta: Some(delta.to_string()),
+        ..Default::default()
     })
     .await;
 }
 
-/// 发送流式追加事件：`delta` 追加到已存在消息的 Text 内容尾部。
+/// 发送一帧**状态**：身份 + 状态 + 元数据 + 错误，**不带正文**。
 ///
-/// 窄载荷（O(delta)）——正文流式每帧都走这里，整条重发会是 O(n²)。
-/// 目标消息必须已由 [`emit_update`] 创建；对未知 id 追加是协议违例，
-/// 唯一写入点会报错丢弃，而不是静默造一个幽灵节点。状态迁移不走这里：
-/// 那是完整快照（[`emit_update`]）的职责，帧面只有一种含义。
-pub async fn emit_append(sink: &EventSink, message_id: &str, delta: &str) {
-    sink.emit(NodeOp::Append {
-        message_id: message_id.to_string(),
-        delta: delta.to_string(),
-    })
-    .await;
+/// 流式节点的正文已由 [`emit_delta`] 逐帧上线，这里再带一次只是把同一段文字
+/// 二次传输（且会把权威副本的完整正文重新发一遍）。`content` / `delta` 一律
+/// 剥掉，免得调用方传了一条「内容齐全的副本」就顺手把它送上热路径。
+pub async fn emit_state(sink: &EventSink, msg: ChatMessage) {
+    sink.emit(state_frame(&msg)).await;
+}
+
+/// 发送一帧**删除**：`status = removed`。
+///
+/// 协议里没有 `remove` 操作——删除就是一次状态迁移，与出现、增长、完成同走
+/// 一条消息帧，接收端据此就地移除节点。
+pub async fn emit_removed(sink: &EventSink, message_id: &str) {
+    sink.emit(removed_frame(message_id)).await;
+}
+
+/// 由一条完整消息派生**状态帧**：身份 + 状态 + 元数据 + 错误，**不带正文**。
+///
+/// 直接写转写（`Transcript::apply`，不经出口）的收口路径也用它——那些节点的
+/// 正文早已由 `delta` 逐帧上线，重发一遍只是把同一段文字二次传输。
+pub fn state_frame(m: &ChatMessage) -> ChatMessage {
+    let mut frame = m.clone();
+    frame.content = None;
+    frame.delta = None;
+    if frame.status.is_none() {
+        frame.status = Some(MessageStatus::Completed);
+    }
+    frame
+}
+
+/// 删除帧：`status = removed`（发射方与收口路径的唯一构造点，避免各写一份）。
+pub fn removed_frame(message_id: &str) -> ChatMessage {
+    ChatMessage {
+        id: message_id.to_string(),
+        status: Some(MessageStatus::Removed),
+        ..Default::default()
+    }
 }
 
 /// 等到中止（`abort` 已置位则立即返回）。
@@ -1002,7 +1052,7 @@ async fn dispatch_protocol_event(
             // 也不需要消费端从「补丁形状」里猜这是追加还是替换。
             if out.response_text_child_id.is_empty() {
                 out.response_text_child_id = short_id();
-                emit_update(
+                emit_message(
                     sink,
                     ChatMessage {
                         id: out.response_text_child_id.clone(),
@@ -1016,7 +1066,7 @@ async fn dispatch_protocol_event(
                 )
                 .await;
             } else {
-                emit_append(sink, &out.response_text_child_id, &c).await;
+                emit_delta(sink, &out.response_text_child_id, &c).await;
             }
         }
         ProtocolEvent::ReasoningDelta(r) => {
@@ -1027,7 +1077,7 @@ async fn dispatch_protocol_event(
             out.reasoning.push_str(&r);
             if out.reasoning_child_id.is_empty() {
                 out.reasoning_child_id = short_id();
-                emit_update(
+                emit_message(
                     sink,
                     ChatMessage {
                         id: out.reasoning_child_id.clone(),
@@ -1041,7 +1091,7 @@ async fn dispatch_protocol_event(
                 )
                 .await;
             } else {
-                emit_append(sink, &out.reasoning_child_id, &r).await;
+                emit_delta(sink, &out.reasoning_child_id, &r).await;
             }
         }
         ProtocolEvent::ToolCallDelta(idx, id, name, args) => {
@@ -1055,7 +1105,7 @@ async fn dispatch_protocol_event(
             // - 身份字段变化（新建节点 / 首次定名）→ 完整快照（`Upsert`）；
             // - 纯参数增长 → 窄追加（`Append`，O(delta)），接收端尾部拼接。
             if snapshot_required {
-                emit_update(
+                emit_message(
                     sink,
                     ChatMessage {
                         id: tc_id.clone(),
@@ -1071,7 +1121,7 @@ async fn dispatch_protocol_event(
                 )
                 .await;
             } else if let Some(delta) = args.as_deref().filter(|d| !d.is_empty()) {
-                emit_append(sink, &tc_id, delta).await;
+                emit_delta(sink, &tc_id, delta).await;
             }
         }
         ProtocolEvent::ResponseId(id) => out.response_id = Some(id),

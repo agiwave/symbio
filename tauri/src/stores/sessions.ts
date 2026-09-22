@@ -62,9 +62,12 @@ import { ensureSessionMountDir, ensureVdfsSessionScheme } from '@/services/vdfsS
 import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
 import { CHAT_ABORT } from '@/constants/pluginPaths'
-import type { ChatMessage } from '@/schemas/chat_message'
+import {
+  MESSAGE_STATUS_REMOVED,
+  type ChatMessage,
+} from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
-// 消息转写规则（纯逻辑）：增量追加 / 水合 / 截断
+// 消息转写规则（纯逻辑）：增量追加 / 水合 / 预览 / 排序 / 截断
 import {
   appendContent,
   hydrateTranscript,
@@ -251,30 +254,92 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /**
-   * 写入或更新一条消息到指定 session（替换整个对象）。
+   * 应用一帧消息到本地转写图 —— **唯一**的消息落地口（后端 `Transcript::apply`
+   * 的前端镜像）。转写实时流、乐观本地回显、编辑消息都走这一条路径。
+   *
+   * ## 帧就是一整条消息，语义全在字段上
+   *
+   * | 帧里有什么 | 本地发生什么 |
+   * |---|---|
+   * | `delta` | 追加到该节点正文尾部（该内容的首次传输） |
+   * | `content` | 整条替换该节点正文（幂等） |
+   * | `status = removed` | 就地移除该节点 |
+   * | `status`（其余） / `error` | 状态迁移 |
+   * | 身份字段 / `meta` / `seq` / `timestamp` | 有则合并（发射端持有当前完整值） |
+   *
+   * 未知 id 用帧内信息建占位再合并——**帧自给自足**，不依赖任何先行帧。这正是旧
+   * 协议「`append` 要求目标已存在」那条特例被删除的原因：帧自己带着建立它所需的
+   * 一切，无需再从节点 `type` / `role` 反推「该追加还是该替换」。
+   *
+   * ## 协议违例：同帧既带增量又带完整正文
+   *
+   * 该拼接还是该替换？语义不可判定，报错丢弃——与后端写入点（`Transcript::apply`）
+   * 同一条判据，报错留痕便于定位协议漂移。
    *
    * ## `seq` 的两条规则（顺序锚点不得被写入动作破坏）
    *
    * 1. **载荷带 `seq`（后端权威）**：原样采用，并把本地续接游标抬到不低于它——
-   *    游标若落后于已观测到的后端序号，下一条本地消息会被排到它**前面**。
-   * 2. **载荷不带 `seq`**（落库前无序号）：新消息按本地游标接在末尾；
-   *    **已存在的消息保留原序号**。原先一律重新发号，会让任何一次"不带 seq 的
-   *    更新"（状态迁移 / 压缩后重发）把消息顶到列表末尾——顺序因此看起来会乱。
+   *    游标若落后于已观测到的后端序号，下一条本地消息会被排到它**前面**；
+   * 2. **载荷不带 `seq`**（落库前无序号）：新节点按本地游标接在末尾；
+   *    **已存在的节点保留原序号**——否则任何一次"不带 seq 的更新"（状态迁移 /
+   *    压缩后重发）都会把消息顶到列表末尾。
    */
-  function putMessage(sessionId: string, msg: ChatMessage) {
-    if (!sessionId || !msg.id) return
+  function applyTranscriptMessage(sessionId: string, message: ChatMessage): void {
+    if (!sessionId || !message.id) return
+
+    // 协议违例：增量/全量语义互斥——同帧携带即不可判定，报错丢弃（不落图、不占 seq）。
+    if (message.delta != null && message.content != null) {
+      logger.error(
+        'sessions',
+        `[applyTranscriptMessage] 协议违例：节点 ${message.id} 同帧携带 delta 与 content（增量/全量语义互斥），帧丢弃`,
+      )
+      return
+    }
+
+    // 删除：`status = removed` ⇒ 就地移除该节点（协议里没有 remove 操作）。
+    if (message.status === MESSAGE_STATUS_REMOVED) {
+      removeMessageById(sessionId, message.id)
+      return
+    }
+
+    let merged: ChatMessage | null = null
     updateMessages(sessionId, (cur) => {
-      if (typeof msg.seq === 'number') {
-        cur[msg.id] = msg
-        raiseSeqFloor(sessionId, msg.seq)
-        return
+      // 帧自给自足：未知 id 用帧内信息建占位。`existing` 只读、不就地改
+      // （浅 ref 原地改不触发更新），所有变更都写进这份新副本。
+      let node: ChatMessage = { ...(cur[message.id] ?? { id: message.id }) }
+
+      // 身份字段：有则合并（首帧建立身份；重复携带以最后到达为准）。
+      if (message.parent_id != null) node.parent_id = message.parent_id
+      if (message.role != null) node.role = message.role
+      if (message.type != null) node.type = message.type
+      if (message.name != null) node.name = message.name
+      if (message.tool_call_id != null) node.tool_call_id = message.tool_call_id
+      if (message.meta != null) node.meta = message.meta
+      // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。
+      if (message.seq != null) node.seq = message.seq
+      if (message.timestamp != null) node.timestamp = message.timestamp
+      // 状态迁移。
+      if (message.status != null) node.status = message.status
+      // 错误信息：有则覆盖（不清除——清除走"非 Failed 的终态帧"）。
+      if (message.error != null) node.error = message.error
+      // 正文：增量追加 / 完整替换，互斥（违例已在上面拒绝）。
+      // 图里只留**累积后的 `content`**：`delta` 是传输形态，不是节点形态。
+      // 追加规则走纯逻辑层唯一实现（`appendContent`），store 只负责状态落地。
+      if (message.delta != null) {
+        node = appendContent(node, message.delta)
+      } else if (message.content != null) {
+        node.content = message.content
       }
-      const existing = cur[msg.id]
-      cur[msg.id] = { ...msg, seq: existing?.seq ?? nextSeq(sessionId) }
+      // 顺序锚点：帧未带权威号 ⇒ 新节点按本地游标接在末尾（已存在者保留原号）。
+      if (typeof node.seq !== 'number') node.seq = nextSeq(sessionId)
+
+      cur[message.id] = node
+      merged = node
+      if (typeof node.seq === 'number') raiseSeqFloor(sessionId, node.seq)
     })
 
-    // 同步 status.last_preview（取最后一条 assistant 文本；取不到则不动）
-    const preview = previewOf(msg)
+    // 同步 status.last_preview（取合并后的 assistant 文本；取不到则不动）
+    const preview = merged ? previewOf(merged) : null
     // 走统一变更通道：`last_event_at` 由它推进，写入方不手动维护（与其它写点同口径）
     if (preview !== null) putStatus(sessionId, { last_preview: preview })
   }
@@ -290,34 +355,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     const cur = sessionSeq.value[sessionId] ?? 0
     if (seq <= cur) return
     sessionSeq.value = { ...sessionSeq.value, [sessionId]: seq }
-  }
-
-  /**
-   * 追加一段流式增量到指定消息的正文尾部（协议 `append` 操作的落地）。
-   *
-   * 与 [`putMessage`]（`upsert` 的落地，整条替换）**一一对应协议操作**：
-   * 落地动作由帧的操作给出，store 不再从节点 `type` / `role` 推断"这帧该追加还是
-   * 该替换"。后者曾把流式工具响应的增量当成全量重发，正文被最后一片覆盖
-   * （详见 `sessionTranscript.appendContent` 的说明）。
-   *
-   * 只对**已存在**的消息生效：`append` 的前提是它的 `upsert` 已到达（后端对同一
-   * id 先发快照再发增量）。增量到达而节点不存在 = 协议违例——留痕并丢弃，
-   * **绝不**就地伪造一条无 type / 无 parent 的占位节点：伪造节点没有渲染器语义、
-   * 没有归属，收不到终态就会永远挂在"运行中"，那是"补丁掩盖问题"的典型。
-   */
-  function appendMessage(sessionId: string, messageId: string, delta: string) {
-    if (!sessionId || !messageId || !delta) return
-    updateMessages(sessionId, (cur) => {
-      const existing = cur[messageId]
-      if (!existing) {
-        logger.warn(
-          'sessions',
-          `[appendMessage] 增量到达时节点不存在（upsert 丢失，协议违例，已丢弃）：${messageId}`,
-        )
-        return
-      }
-      cur[messageId] = appendContent(existing, delta)
-    })
   }
 
   function nextSeq(sessionId: string): number {
@@ -905,10 +942,9 @@ export const useSessionsStore = defineStore('sessions', () => {
   /**
    * 从前端局部状态中精确移除单条消息（仅本地，不调用后端）。
    *
-   * 用于**逐节点**删除：工具调用恢复时后端广播 `deleted`，前端删掉旧的
-   * pending/failed 子节点（随后会广播新的 `updated` / `created` 写入新子节点）。
-   * 与 `removeFrom` 的区别是它只删**这一个**节点，与顺序无关——正是 `deleted`
-   * 与 `truncated` 两种变更语义的分界。
+   * 是帧应用（[`applyTranscriptMessage`]）里 `status = removed` 分支的落地，也与
+   * `removeFrom` 分工明确：本函数只删**这一个**节点、与顺序无关——正是「单节点删除」
+   * 与「从某条起截断」两种语义的分界。
    *
    * 不触发 message_count 同步：新子节点会立即顶上，总数应保持不变。
    */
@@ -950,8 +986,8 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 更新单条会话消息（手工编辑 / 标错重试等）。
    *
    * 调用方传的是**完整消息**（`{ ...msg, content: 新正文 }`），因此本地落地就是
-   * 一次快照应用——与协议 `upsert` 同一条路径（[`putMessage`]），不再有第二种
-   * 合并语义。
+   * 一次帧应用——与转写实时流同一条路径（[`applyTranscriptMessage`]），不再有
+   * 第二种合并语义。
    * - 先应用前端局部状态
    * - 再调用后端 `chat/update_message` 持久化
    */
@@ -960,7 +996,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     message: ChatMessage
   ): Promise<void> {
     if (!message.id) return
-    putMessage(sessionId, message)
+    applyTranscriptMessage(sessionId, message)
     try {
       await apiUpdateMessage(sessionId, message)
     } catch (e) {
@@ -1105,8 +1141,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     getSessionMessages,
     getSessionStatus,
     getSessionStaleReason,
-    putMessage,
-    appendMessage,
+    applyTranscriptMessage,
     putStatus,
     applySessionNode,
     getSessionError,
@@ -1115,7 +1150,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     setSessionWarning,
     dropSessionState,
     hydrateFromHistory,
-    removeMessageById,
     removeFrom,
     // 运行模式（auto / interactive）：写入统一走级联选项机制（metadata 补丁），
     // store 只提供读取 + 本地镜射，避免第二条写入路径。

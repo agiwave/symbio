@@ -381,17 +381,17 @@ async fn new_session_ids_are_distinct() {
 //
 // | 操作 | 入口 | 落到转写流上的变更 |
 // |---|---|---|
-// | 改写某条 | `write(<id>/消息/<mid>)` | 该消息一条 `upsert`（整条替换） |
-// | 删该条及其后 | `action(<id>/消息/<mid>, "truncate")` | 一条 `reset` + 回执带被删 id |
-// | 清空历史 | `action(<id>/消息, "clear")` | 一条 `reset` |
+// | 改写某条 | `write(<id>/消息/<mid>)` | 该消息**一条完整消息帧**（`content` 整条替换） |
+// | 删该条及其后 | `action(<id>/消息/<mid>, "truncate")` | 被删的各一条**删除帧**（`status = removed`）+ 回执带被删 id |
+// | 清空历史 | `action(<id>/消息, "clear")` | 每条一条**删除帧** |
 //
-// 「变更」这一列说的是 `session/stream` 的 `NodeOp`（消息变更的**唯一**通道，
+// 「变更」这一列说的是 `session/stream` 上的消息帧（消息变更的**唯一**通道，
 // 见 `symbio_core::transcript_stream`），**不是** VDFS 变更：消息域已不往 VDFS
 // 变更面发任何东西，旧的三条变更形状（消息上 `updated` / 起始消息上 `truncated` /
 // 列表目录上 `deleted`）随之不存在。断言面因此从"VDFS 变更值"换成"转写流的帧"
 // （`subscribe_stream` / `drain_stream_frames`）：截断与清空三例各自钉住
-// 「发了几帧、是哪一种操作」——这正是新机制真正要守的边界（区间删除**一条**帧，
-// 不是 N 条；什么都没删**一条都不发**）。
+// 「发了几帧、每帧说了什么」——这正是新机制真正要守的边界（删除**逐条**下发，
+// 消费端不必整份重读；什么都没删**一条都不发**）。
 //
 // 本段锁定这三条路径的**对外行为**，并盯住三条不该被打破的边界：
 // `create` 意图（新增消息 = 发言，入口只有聊天协议）、`delete`（逐节点语义，
@@ -698,12 +698,15 @@ async fn truncate_removes_the_target_and_everything_after() {
     );
 
     let frames = drain_stream_frames(&mut rx, &id);
-    assert_eq!(frames.len(), 1, "区间删除用**一条**帧表达，不是 N 条");
-    assert_eq!(
-        frames[0]["data"]["op"].as_str(),
-        Some("reset"),
-        "区间删除＝让消费端把本地转写整份重读"
-    );
+    assert_eq!(frames.len(), 3, "被删的三条各发一条删除帧");
+    for (frame, expect) in frames.iter().zip(["m1", "m2", "m3"]) {
+        assert_eq!(frame["data"]["message"]["id"].as_str(), Some(expect));
+        assert_eq!(
+            frame["data"]["message"]["status"].as_str(),
+            Some("removed"),
+            "删除＝一次状态迁移，不是独立的操作字段"
+        );
+    }
     crate::symbio_core::transcript_stream::unregister_transcript_subscriber(&conn);
 }
 
@@ -758,8 +761,13 @@ async fn clear_empties_the_transcript_but_keeps_the_session() {
     assert!(transcript_ids(&p, &id).await.is_empty(), "列表应清空");
 
     let frames = drain_stream_frames(&mut rx, &id);
-    assert_eq!(frames.len(), 1, "清空用**一条**帧表达，不是逐条 remove");
-    assert_eq!(frames[0]["data"]["op"].as_str(), Some("reset"));
+    assert_eq!(frames.len(), 3, "清空＝逐条删除帧");
+    assert!(
+        frames
+            .iter()
+            .all(|f| f["data"]["message"]["status"].as_str() == Some("removed")),
+        "每一帧都是删除状态迁移"
+    );
     crate::symbio_core::transcript_stream::unregister_transcript_subscriber(&conn);
 
     // 会话本体还在（清空不是删除会话）

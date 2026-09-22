@@ -1,40 +1,36 @@
 /**
  * transcriptStream — 会话转写的**实时流**消费端（消息的唯一实时通道）
  *
- * ## 它替换了什么
+ * ## 协议：帧就是一整条消息
  *
- * 消息实时面曾经寄生在 VDFS 变更频道上（`kind = "vdfs"` 的 `VdfsChange`，
- * 由已删除的 `vdfsTranscriptSync` 消费）。那条路有两个结构性问题：
+ * 实时面是**一条流**（`worker/session/stream`），每帧是后端 `NodeEvent`：
+ * `{ session_id, seq, message }`——`message` 是一条与存储同构的 `ChatMessage`。
  *
- * 1. **补丁语义**：`created` / `updated` / `appended` 只带部分字段与节点视图，
- *    消费端要自己判定「追加还是替换」，判定错就是叠字或倒退；
- * 2. **无序号**：VDFS 变更没有流内序号，丢一帧**不可检测**——用户看到的
- *    「工具一直进行中、刷新即愈」正是这一类。
+ * 协议**没有独立的操作枚举**：帧携带什么字段，本地图就变更什么——
  *
- * 现在实时面是**一条流**（`worker/session/stream`），每帧是后端
- * `NodeEvent`：`{ session_id, seq, op }`。
+ * | 帧里的字段 | 本地动作 |
+ * |---|---|
+ * | `delta` | 追加到该节点正文尾部（**该内容的首次传输**） |
+ * | `content` | 整条替换该节点正文（幂等） |
+ * | `status = removed` | 就地移除该节点 |
+ * | `status`（其余） / `error` | 状态迁移 |
+ * | `parent_id` / `role` / `type` / `name` / `tool_call_id` / `meta` / `seq` / `timestamp` | 有则合并（发射端持有当前完整值） |
  *
- * | 操作 | 载荷 | 本地动作 |
- * |---|---|---|
- * | `upsert` | **完整消息快照** | 按 id 整条替换（不存在则创建） |
- * | `append` | 仅 `delta` | 追加到目标节点正文尾部（窄载荷，热路径逐帧；对正文 / 思考 / 工具参数 / 工具响应一律成立） |
- * | `remove` | `message_id` | 删掉这一个节点 |
- * | `reset` | — | 清空本地转写并**从存储整份重读** |
- * | `warn` | `warning` | 不在此处理（会话级状态，落在会话节点上） |
+ * `delta` 与 `content` **互斥**：同帧携带即协议违例，后端写入点与前端落地都报错
+ * 丢弃。前端因此永远不需要面对「拼接还是替换」的歧义。
  *
  * ## 为什么不需要「逐路径串行链」
  *
- * 旧实现必须把同一路径的变更串成顺序链：`created` 在补丁形态下需要一次异步
- * `stat` + `read` 回读，而回读与紧随的 `appended` 竞争就会丢内容。
- * 现在每帧**自带完整事实**（快照或增量），应用是同步的，链自然消失。
+ * 每帧**自带所需事实**（增量或状态），应用是同步的，链不存在。
  *
  * ## 丢帧可检测（本模块的核心不变量）
  *
- * `seq` 在会话内单调递增，因此「跳号」是可判定的：跳号即**已知有损**，
- * 消费端整份重读（`reload`）。重读源是 VDFS 读面（会话文档 = 存储 + 在途叠加），
- * 它本身就是权威——所以恢复路径不需要补帧、不需要缓存，也不依赖任何一帧的送达。
- * 这一点与后端 `transcript_stream::publish_frame` 的背压策略是一对：
- * 后端满通道时摘除订阅并投 resync 标记，前端收不到标记也能靠跳号自愈。
+ * `seq` 在会话内单调递增（**帧序号**，与会话内排序锚点 `message.seq` 是两回事），
+ * 因此「跳号」是可判定的：跳号即**已知有损**，消费端整份重读（`reload`）。重读源
+ * 是 VDFS 读面（会话文档 = 存储 + 在途叠加），它本身就是权威——所以恢复路径不需要
+ * 补帧、不需要缓存，也不依赖任何一帧的送达。这一点与后端
+ * `transcript_stream::publish_frame` 的背压策略是一对：后端满通道时摘除订阅并投
+ * resync 标记，前端收不到标记也能靠跳号自愈。
  *
  * ## 单订阅、跨页面
  *
@@ -51,39 +47,29 @@ import { logger } from '@/utils/logger'
 /**
  * 一帧转写事件（与后端 `NodeEvent` 同构）。
  *
- * `op` 是后端 `NodeOp` 的 serde 内部标签（`#[serde(tag = "op")]`），
- * 其余字段按 `op` 各自成立——这正是「显式操作」与「补丁」的分界：
- * 载荷形状由操作决定，消费端不做「字段有没有来」的推断。
+ * `message` 嵌套而非平铺：外层 `seq` 是**帧序号**、内层 `message.seq` 是**存储序号**，
+ * 两个语义不同的 `seq` 平铺会撞进同一个 JSON 键。
  */
 export interface NodeEvent {
   session_id: string
-  /** 流内**单调递增**序号（会话内唯一权威的帧顺序锚点） */
+  /** 流内**单调递增**帧序号（会话内唯一权威的帧顺序锚点） */
   seq: number
-  op: 'upsert' | 'append' | 'remove' | 'reset' | 'warn'
-  /** `upsert`：完整消息快照 */
-  message?: ChatMessage
-  /** `append` / `remove`：目标消息 id */
-  message_id?: string
-  /** `append`：追加的增量 */
-  delta?: string
-  /** `warn`：会话级告警（`null` = 清除） */
-  warning?: string | null
+  /** 消息本身。它是**帧的全部载荷**——没有任何独立的操作字段。 */
+  message: ChatMessage
 }
 
 /**
  * 转写落地目标（**依赖倒置**：service 不反向依赖 Pinia store）。
  *
- * 每个方法对应一个协议操作，一一对应、不做二次解释——store 侧的落地由
- * 应用外壳注入（`MainLayout` 传 `useSessionsStore()`），测试传普通对象即可。
+ * 只有两个动作：**应用一条消息帧**、**整份重读**。前者是后端的
+ * `Transcript::apply` 在前端的镜像（delta 追加 / content 替换 / removed 移除 /
+ * 其余字段合并），落地由应用外壳注入（`MainLayout` 传 `useSessionsStore()`），
+ * 测试传普通对象即可。
  */
 export interface TranscriptStreamSink {
-  /** 完整快照：按 id 整条替换 */
-  upsert(sessionId: string, message: ChatMessage): void
-  /** 增量：追加到目标消息正文尾部 */
-  append(sessionId: string, messageId: string, delta: string): void
-  /** 删掉这一个节点 */
-  remove(sessionId: string, messageId: string): void
-  /** `reset` / 序号缺口：清空本地转写并从存储整份重读 */
+  /** 应用一条消息帧（帧语义全在字段上，本方法不做二次解释） */
+  message(sessionId: string, message: ChatMessage): void
+  /** 序号缺口 / resync：清空本地转写并从存储整份重读 */
   reload(sessionId: string): void | Promise<void>
 }
 
@@ -125,8 +111,8 @@ const S: StreamState = _G.__symTranscriptStreamState ?? (_G.__symTranscriptStrea
 /**
  * 处理一帧流事件（连接回调与单测共用同一入口）。
  *
- * 分派按**帧类型**（信封的 `type`），而操作语义按 `op`——两者都是闭集，
- * 没有需要推断的形状。
+ * 分派只按**帧类型**（信封的 `type`）：`transcript_event` 应用消息、
+ * `transcript_resync` 整份重读。没有需要推断的形状。
  */
 export function handleStreamFrame(event: ConnectEvent): void {
   if (event.type === FRAME_EVENT) {
@@ -147,11 +133,11 @@ export function handleStreamFrame(event: ConnectEvent): void {
 }
 
 /**
- * 应用一条转写事件（顺序判定 → 操作落地）。
+ * 应用一条转写事件（顺序判定 → 消息落地）。
  *
  * **顺序判定**（丢帧可检测的落点）：
  * - `seq == last + 1`：连续，正常应用；
- * - `seq <= last`：重复帧（重连窗口内可能重发），丢弃——重复应用 `append` 会叠字；
+ * - `seq <= last`：重复帧（重连窗口内可能重发），丢弃——重复应用增量会叠字；
  * - `seq > last + 1`：**跳号 = 已知有损**，整份重读并丢弃本帧
  *   （重读拿到的是当前权威状态，已包含本帧的效力）。
  */
@@ -159,7 +145,7 @@ export function applyNodeEvent(ev: NodeEvent): void {
   const sink = S.sink
   if (!sink) return
   const sid = ev.session_id
-  if (!sid || typeof ev.seq !== 'number' || !ev.op) return
+  if (!sid || typeof ev.seq !== 'number' || !ev.message) return
 
   const last = S.lastSeq.get(sid)
   if (last !== undefined) {
@@ -178,37 +164,9 @@ export function applyNodeEvent(ev: NodeEvent): void {
   }
   S.lastSeq.set(sid, ev.seq)
 
-  switch (ev.op) {
-    case 'upsert':
-      // 完整快照：整条替换。store 侧按 id 覆盖，不存在则创建。
-      if (ev.message) sink.upsert(sid, ev.message)
-      return
-    case 'append':
-      // 增量只带 delta，目标可以是**任何**正文仍在增长的节点：正文 / 思考 /
-      // 工具调用参数（后端 `emit_append` 与 Text / Reasoning 同构）/ 工具响应
-      // （`tool_executor` 透传子会话的 `Append`）。协议不在这里按节点类型分档。
-      // 目标缺失 = 协议违例（`upsert` 必先于 `append`）——交给 store 留痕并丢弃。
-      if (ev.message_id && typeof ev.delta === 'string') {
-        sink.append(sid, ev.message_id, ev.delta)
-      }
-      return
-    case 'remove':
-      if (ev.message_id) sink.remove(sid, ev.message_id)
-      return
-    case 'reset':
-      // 转写被截断 / 压缩重写：本地整份作废，从存储重读。
-      S.lastSeq.delete(sid)
-      void Promise.resolve(sink.reload(sid)).catch((err: unknown) =>
-        logger.warn('[transcript-stream]', `重读转写失败：${sid}`, err),
-      )
-      return
-    case 'warn':
-      // 会话级告警落在**会话节点**上（`sessionNodeSync` 已按节点状态收敛），
-      // 在消息层再写一次就是同一份真相的第二种写法。
-      return
-    default:
-      logger.warn('[transcript-stream]', `未知的转写操作，已忽略：${String(ev.op)}`)
-  }
+  // 帧就是一整条消息：语义全在字段上（delta 追加 / content 替换 / removed 移除 /
+  // 其余合并），不存在需要分派的操作——把「该做什么」交给落地目标按字段判定。
+  sink.message(sid, ev.message)
 }
 
 /** 整份重读所有已知在途会话（resync 标记 / 重连后调用） */

@@ -6,12 +6,13 @@
  * 目的：复现"长会话流模式下 Reason 块不结束 / 后续内容显示进 Reason / Turn 不显示"
  * 的纯前端可见结果，并作为修复的回归锚。
  *
- * 帧按**协议词汇**驱动（`NodeOp`：`upsert` 完整快照 / `append` 增量），与
- * `MainLayout` 的真实接线同路（`transcriptStream` → store）。
+ * 帧按**新协议**驱动（帧 = 一条 `ChatMessage`，语义全在字段上：`delta` 追加 /
+ * `content` 替换 / `status=removed` 移除 / 其余字段合并），与 `MainLayout` 的真实
+ * 接线同路（`transcriptStream` → store）。
  *
- * 注意 `upsert` 是**整条替换**（协议 S23 无补丁语义）：状态迁移帧同样必须是
- * **完整消息**——只带 `status` 的部分帧会把 `type` / `parent_id` 一并抹掉，
- * 节点随即失去渲染语义（这正是旧「补丁」路径的病根）。
+ * 注意**不再有整条替换的 `upsert`**：状态迁移帧只带身份 + 状态（与后端
+ * `state_frame` 同构），落地是**合并**——这正是要锚定的新语义（旧协议下这种部分帧
+ * 会把 `type` / `parent_id` 一并抹掉，节点随即失去渲染语义）。
  */
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -44,24 +45,23 @@ const SID = 's1'
 /** 帧序号：后端单调计数器（跳号会被判为丢帧，测试里逐帧递增） */
 let seq = 0
 
-/** 造一条 `upsert`（完整消息快照）——创建与状态迁移用的是同一种帧 */
-function upsert(message: ChatMessage): NodeEvent {
+/** 造一帧：载荷就是一条 `ChatMessage`（帧自给自足） */
+function frame(message: ChatMessage): NodeEvent {
   seq += 1
-  return { session_id: SID, seq, op: 'upsert', message }
+  return { session_id: SID, seq, message }
 }
 
+/** 造一帧**增量**（流式热路径）：只带 `delta`，追加到目标节点正文尾部 */
 function append(messageId: string, delta: string): NodeEvent {
   seq += 1
-  return { session_id: SID, seq, op: 'append', message_id: messageId, delta }
+  return { session_id: SID, seq, message: { id: messageId, delta } }
 }
 
 /** 与 `MainLayout` 的接线逐字一致 */
 function storeSink(): TranscriptStreamSink {
   const store = useSessionsStore()
   return {
-    upsert: (sid, m) => store.putMessage(sid, m),
-    append: (sid, id, delta) => store.appendMessage(sid, id, delta),
-    remove: (sid, id) => store.removeMessageById(sid, id),
+    message: (sid, m) => store.applyTranscriptMessage(sid, m),
     reload: async (sid) => {
       await store.loadMessages(sid)
     },
@@ -97,9 +97,14 @@ function toolCall(
 ): ChatMessage {
   return { id, parent_id: parent, role: 'assistant', type: 'tool_call', name, status, content: args }
 }
-/** 终态帧：完整消息 + 新状态（**不是**只带 status 的部分帧） */
+/**
+ * 状态帧：只带身份 + 状态，**不带正文**（与后端 `state_frame` 同构）。
+ *
+ * 旧协议下这种部分帧会把 `type` / `parent_id` / `content` 一并抹掉；新协议下是
+ * **合并**——这里刻意用最小帧，正是要钉住「状态迁移不吞身份与正文」这条不变式。
+ */
 function settled(m: ChatMessage, status: ChatMessage['status'] = 'completed'): ChatMessage {
-  return { ...m, status }
+  return { id: m.id, status }
 }
 
 /** 复刻 useChatConnection.messageTree（同源逻辑，锚定其行为） */
@@ -169,28 +174,28 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     const r1 = reasoning('r1', 'T1', '想法')
     const x1 = text('x1', 'T1', '正文')
     const tc1 = toolCall('tc1', 'T1', 'read_file', '{"path":"a.rs"}')
-    feed(upsert(t1))
-    feed(upsert(r1))
-    feed(upsert(settled(r1)))
-    feed(upsert(x1))
-    feed(upsert(settled(x1)))
-    feed(upsert(tc1))
+    feed(frame(t1))
+    feed(frame(r1))
+    feed(frame(settled(r1)))
+    feed(frame(x1))
+    feed(frame(settled(x1)))
+    feed(frame(tc1))
 
     // ── 工具结果 + Turn1 完成（后端 finalize 顺序：先子节点后根）──
-    feed(upsert({ id: 'res1', parent_id: 'tc1', role: 'tool', type: 'text', status: 'completed', content: '"ok"' }))
-    feed(upsert(settled(tc1)))
-    feed(upsert(settled(t1)))
+    feed(frame({ id: 'res1', parent_id: 'tc1', role: 'tool', type: 'text', status: 'completed', content: '"ok"' }))
+    feed(frame(settled(tc1)))
+    feed(frame(settled(t1)))
 
     // ── Turn 2：纯文本收尾 ──
     const t2 = turn('T2')
     const r2 = reasoning('r2', 'T2', '再想')
     const x2 = text('x2', 'T2', '结论')
-    feed(upsert(t2))
-    feed(upsert(r2))
-    feed(upsert(settled(r2)))
-    feed(upsert(x2))
-    feed(upsert(settled(x2)))
-    feed(upsert(settled(t2)))
+    feed(frame(t2))
+    feed(frame(r2))
+    feed(frame(settled(r2)))
+    feed(frame(x2))
+    feed(frame(settled(x2)))
+    feed(frame(settled(t2)))
 
     const store = useSessionsStore()
     const tree = buildTree(store.getSessionMessages(SID))
@@ -206,8 +211,8 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
   })
 
   it('流式中途（Reasoning streaming）：骨架消失、思考单行显示「思考中…」', () => {
-    applyNodeEvent(upsert(turn('T1')))
-    applyNodeEvent(upsert(reasoning('r1', 'T1', '部分思考')))
+    applyNodeEvent(frame(turn('T1')))
+    applyNodeEvent(frame(reasoning('r1', 'T1', '部分思考')))
 
     const store = useSessionsStore()
     const tree = buildTree(store.getSessionMessages(SID))
@@ -220,9 +225,9 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     expect(head.text()).toContain('思考中')
   })
 
-  it('增量帧（append）拼进正文——流式热路径', () => {
-    applyNodeEvent(upsert(turn('T1')))
-    applyNodeEvent(upsert(text('x1', 'T1', '第一段')))
+  it('增量帧（delta）拼进正文——流式热路径', () => {
+    applyNodeEvent(frame(turn('T1')))
+    applyNodeEvent(frame(text('x1', 'T1', '第一段')))
     applyNodeEvent(append('x1', '，第二段'))
 
     const store = useSessionsStore()
@@ -230,16 +235,30 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     expect(msg?.content, '增量必须逐步拼出完整正文').toBe('第一段，第二段')
   })
 
+  it('状态帧不吞身份与正文（合并语义）', () => {
+    applyNodeEvent(frame(turn('T1')))
+    applyNodeEvent(frame(text('x1', 'T1', '正文')))
+    // 只带 id + status 的最小状态帧：type / parent_id / content 都必须原样保留
+    applyNodeEvent(frame(settled({ id: 'x1' })))
+
+    const store = useSessionsStore()
+    const msg = store.getSessionMessages(SID).find((m) => m.id === 'x1')
+    expect(msg?.status).toBe('completed')
+    expect(msg?.type, '状态帧不得抹掉节点类型').toBe('text')
+    expect(msg?.parent_id, '状态帧不得抹掉归属').toBe('T1')
+    expect(msg?.content, '状态帧不得抹掉正文').toBe('正文')
+  })
+
   it('空 Turn 未收帧（等待 LLM 首 token）：骨架存在且属于当前轮', () => {
     // 上一轮已完成
     const t0 = turn('T0')
     const x0 = text('x0', 'T0', '上轮')
-    applyNodeEvent(upsert(t0))
-    applyNodeEvent(upsert(x0))
-    applyNodeEvent(upsert(settled(x0)))
-    applyNodeEvent(upsert(settled(t0)))
+    applyNodeEvent(frame(t0))
+    applyNodeEvent(frame(x0))
+    applyNodeEvent(frame(settled(x0)))
+    applyNodeEvent(frame(settled(t0)))
     // 新一轮 Turn 已广播、尚无子节点
-    applyNodeEvent(upsert(turn('T1')))
+    applyNodeEvent(frame(turn('T1')))
 
     const store = useSessionsStore()
     const tree = buildTree(store.getSessionMessages(SID))
@@ -254,14 +273,14 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
  * 上面那些用例只断言 store 里的消息（`getSessionMessages`），因此
  * `messageTree` 的节点复用签名若只看「自身字段 + 直接子节点 id」，这个缺陷
  * 完全逃得过测试网：store 里内容是对的，界面却停在旧内容。用户实测症状正是
- * 「append 始终不刷新；正文结束后（根 Turn 状态迁移那一刻）才突然完整」。
+ * 「增量始终不刷新；正文结束后（根 Turn 状态迁移那一刻）才突然完整」。
  *
  * 根因是**渲染失效口径不完整**：容器的渲染结果全部来自子树（Turn / ToolCall
  * 自身无正文），所以「已有子节点的正文增长」也必须使祖先的节点对象换新；
  * 否则 `:node` 引用不变 ⇒ Vue 判定 props 未变 ⇒ 整棵子树跳过更新。
  * 下面用**真实 composable + 真实渲染**（挂载方式与 `ModelChatPanel` 同构）钉住。
  */
-describe('渲染层回归：append 增量必须进 DOM（不只进 store）', () => {
+describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
   /** 与 `ModelChatPanel` 的消费方式同构：`messageTree` → `MessageNode` v-for */
   const Panel = defineComponent({
     props: { sessionId: { type: String, required: true } },
@@ -279,11 +298,11 @@ describe('渲染层回归：append 增量必须进 DOM（不只进 store）', ()
     void startTranscriptStream(storeSink())
   })
 
-  it('父容器（Turn）已有子节点时，子节点的 append 必须重渲染', async () => {
+  it('父容器（Turn）已有子节点时，子节点的增量必须重渲染', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyNodeEvent(upsert({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' }))
+    applyNodeEvent(frame({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' }))
     applyNodeEvent(
-      upsert({
+      frame({
         id: 'X1',
         parent_id: 'T1',
         role: 'assistant',
@@ -308,9 +327,9 @@ describe('渲染层回归：append 增量必须进 DOM（不只进 store）', ()
 
   it('思考（Reasoning）是独立节点，其增量同样必须重渲染', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyNodeEvent(upsert({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' }))
+    applyNodeEvent(frame({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' }))
     applyNodeEvent(
-      upsert({
+      frame({
         id: 'R1',
         parent_id: 'T1',
         role: 'assistant',
@@ -330,9 +349,9 @@ describe('渲染层回归：append 增量必须进 DOM（不只进 store）', ()
 
   it('子节点终态（状态迁移）必须立刻反映，不等祖先的结构变化', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyNodeEvent(upsert({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' }))
+    applyNodeEvent(frame({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' }))
     applyNodeEvent(
-      upsert({
+      frame({
         id: 'R1',
         parent_id: 'T1',
         role: 'assistant',
@@ -343,17 +362,10 @@ describe('渲染层回归：append 增量必须进 DOM（不只进 store）', ()
     )
     await nextTick()
     expect(w.text()).toContain('思考中')
-    applyNodeEvent(
-      upsert({
-        id: 'R1',
-        parent_id: 'T1',
-        role: 'assistant',
-        type: 'reasoning',
-        status: 'completed',
-        content: '思考内容',
-      }),
-    )
+    // 最小状态帧（后端 `state_frame` 同构）：不带正文，落地是合并
+    applyNodeEvent(frame({ id: 'R1', status: 'completed' }))
     await nextTick()
     expect(w.text(), '定稿后不再显示「思考中」').not.toContain('思考中')
+    expect(w.text(), '状态帧不得把思考正文抹掉').toContain('思考内容')
   })
 })

@@ -280,9 +280,11 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const sid = options.sessionId
     logger.info('useChatConnection', `[${sid}] Sending message`)
 
-    // 立即把用户消息写入会话 store（乐观更新，避免后端首帧覆盖不到）
+    // 立即把用户消息写入会话 store（乐观更新，避免后端首帧覆盖不到）。
+    // 落地走与转写实时流**同一条**帧应用路径（`applyTranscriptMessage`）——
+    // 乐观回显与流式帧是同一个动作：把一条消息合并进本地图。
     if (outgoing.id) {
-      store.putMessage(sid, outgoing)
+      store.applyTranscriptMessage(sid, outgoing)
     }
     // 立即置为 working（让 UI 立即反映 send 已经发出）；
     // 同时清空会话级错误：新一轮交互开始，上一次失败不再"最新"。

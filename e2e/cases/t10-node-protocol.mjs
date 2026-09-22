@@ -2,13 +2,17 @@
 // 「开始 → 流增量 → 结束」三态在**实时流**上是否成立。
 import './_selfrun.mjs';
 //
-// 与 T9 同在 gateway WS 边界上观察（`session/stream` 的 NodeOp 帧流），但断言
+// 与 T9 同在 gateway WS 边界上观察（`session/stream` 的消息帧流），但断言
 // 从「正文拼接」升级为「每个节点类型的状态机」：
+//
+// 帧协议：**帧 = 一条 `ChatMessage`**（`{ session_id, seq, message }`），
+// 语义全在字段上（`delta` 追加 / `content` 替换 / `status=removed` 移除 /
+// 其余字段合并）——没有独立的操作枚举。
 //
 // | 断言 | 意图 |
 // |---|---|
-// | append 必先有 upsert | 增量不得落在未知节点上（协议违例会在后端被丢弃） |
-// | start + Σappend == 终态 content | 增量不丢不重，终态是增量的收敛而不是另一份数 |
+// | delta 必先有身份帧 | 增量不得落在未经身份建立的节点上（否则前端没有渲染语义） |
+// | 首帧 content + Σdelta == 该节点正文 | 增量不丢不重，终态不含正文也不影响收敛 |
 // | 每个非终态节点都到达终态 | 前端不会留下永远转圈的「运行中」 |
 // | Turn 终态晚于全部子节点终态 | 组合节点终态跟随子树（§5.3.2） |
 // | ToolCall 有 role=tool 结果子节点 | 「有请求必有响应」（前端响应段的唯一数据来源） |
@@ -84,13 +88,13 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     });
     ws.send(JSON.stringify({ metadata: { path: 'session/stream' }, payload: {} }));
 
-    /** @type {Array<{op:string, seq:number, session_id:string, [k:string]:any}>} */
+    /** @type {Array<{seq:number, session_id:string, message:any}>} */
     const ops = [];
     ws.on('message', (data) => {
       try {
         const frame = JSON.parse(data.toString());
         const ev = frame?.Data?.type === 'transcript_event' ? frame.Data.data : null;
-        if (ev?.op) ops.push(ev);
+        if (ev?.message) ops.push(ev);
       } catch { /* 忽略非 JSON 帧 */ }
     });
 
@@ -108,11 +112,11 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
 
     // ③ 等整轮收敛：根 Turn 到达终态
     const turnDone = () =>
-      ops.some((o) => o.op === 'upsert' && o.message?.type === 'turn' && TERMINAL.has(o.message?.status));
+      ops.some((o) => o.message?.type === 'turn' && TERMINAL.has(o.message?.status));
     await waitFor(turnDone, { what: '根 Turn 到达终态', timeoutMs: 30_000 });
     // 给尾部帧（工具结果子节点 / 会话运行态）一点落地时间
     await waitFor(
-      () => ops.some((o) => o.op === 'upsert' && o.message?.role === 'tool'),
+      () => ops.some((o) => o.message?.role === 'tool'),
       { what: '工具结果子节点出现在流上', timeoutMs: 8_000 },
     ).catch(() => { /* 由下方断言给出结论 */ });
     ws.close();
@@ -120,9 +124,10 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     // ── 时间线（失败时打印，定位到帧） ──
     const timeline = ops.map(
       (o) =>
-        `#${o.seq} ${o.op}${o.message ? ` [${o.message.type ?? '-'}/${o.message.role ?? '-'}/${o.message.status ?? '-'}] ${String(o.message.id ?? '').slice(0, 8)}` : ''}${
-          o.delta != null ? ` +${JSON.stringify(o.delta).slice(0, 20)}` : ''
-        }${o.message_id ? ` ->${String(o.message_id).slice(0, 8)}` : ''}`,
+        `#${o.seq} [${o.message?.type ?? '-'}/${o.message?.role ?? '-'}/${o.message?.status ?? '-'}] ` +
+        `${String(o.message?.id ?? '').slice(0, 8)}` +
+        `${o.message?.delta != null ? ` +${JSON.stringify(o.message.delta).slice(0, 20)}` : ''}` +
+        `${o.message?.content != null ? ` =${JSON.stringify(o.message.content).slice(0, 20)}` : ''}`,
     );
 
     // ④ seq 严格递增（单调 seq 是「丢帧可检测」的唯一前提）
@@ -131,31 +136,38 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     }
     assert(ops.every((o) => o.session_id === 'e2e-t10'), '流帧应携带会话归属');
 
-    // ⑤ append 必先有 upsert（对未知 id 追加是协议违例，后端会丢弃该帧 → 丢字）
-    const seen = new Set();
+    // ⑤ delta 必先有身份帧（对未经身份建立的节点追加 = 前端拿不到渲染语义）
+    const established = new Set();
     for (const o of ops) {
-      if (o.op === 'upsert' && o.message?.id) seen.add(o.message.id);
-      if (o.op === 'append') {
+      const m = o.message;
+      if (!m?.id) continue;
+      if (m.type != null) established.add(m.id);
+      if (m.delta != null) {
         assert(
-          seen.has(o.message_id),
-          `append 落在尚未 upsert 的节点 ${o.message_id}（协议违例）\n时间线:\n${timeline.join('\n')}`,
+          established.has(m.id),
+          `delta 落在尚未建立身份的节点 ${String(m.id).slice(0, 8)}（协议违例）\n时间线:\n${timeline.join('\n')}`,
         );
       }
-      if (o.op === 'remove') seen.delete(o.message_id);
+      if (m.status === 'removed') established.delete(m.id);
     }
 
-    // ⑥ 逐节点重建：start 快照 + Σappend == 终态 content
+    // ⑥ 逐节点重建：末帧 = 该节点在流上的最后一帧；正文 = 首帧 content + Σdelta
+    //（`content` 是整条替换，`delta` 是尾部追加，二者互斥——与前端落地同源）
     /** @type {Map<string, any>} */
     const nodes = new Map();
     for (const o of ops) {
-      if (o.op === 'upsert' && o.message?.id) nodes.set(o.message.id, o.message);
+      if (o.message?.id) nodes.set(o.message.id, o.message);
     }
+    const framesFor = (id) => ops.filter((o) => o.message?.id === id);
     const rebuild = (id) => {
-      const frames = ops.filter((o) => (o.op === 'upsert' && o.message?.id === id) || (o.op === 'append' && o.message_id === id));
-      const start = frames.find((o) => o.op === 'upsert');
+      const frames = framesFor(id);
+      const start = frames.find((o) => o.message.content != null);
       if (!start) return null;
-      let text = String(start.message.content ?? '');
-      for (const f of frames) if (f.op === 'append') text += f.delta;
+      let text = '';
+      for (const f of frames) {
+        if (f.message.content != null) text = String(f.message.content);
+        else if (f.message.delta != null) text += String(f.message.delta);
+      }
       return { start, final: frames[frames.length - 1], text };
     };
 
@@ -165,19 +177,23 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     const rb = rebuild(reasonNode.id);
     assertEq(rb.start.message.status, 'streaming', `reasoning 首帧应为 streaming（节点 ${rb.start.message.id}）`);
     assert(
-      ops.some((o) => o.op === 'append' && o.message_id === rb.start.message.id),
+      ops.some((o) => o.message?.id === rb.start.message.id && o.message?.delta != null),
       'reasoning 应有流式增量帧',
     );
     assertEq(rb.final.message.status, 'completed', 'reasoning 终态应为 completed');
-    assertEq(rb.text, '先分析一下', 'reasoning 增量拼接应等于终态内容');
+    assertEq(rb.text, '先分析一下', 'reasoning 增量拼接应等于完整内容');
 
     // ⑧ Text 节点（正文，role=assistant）
     const textNode = [...nodes.values()].find((m) => m.type === 'text' && m.role === 'assistant');
     assert(textNode, `流上应有 assistant text 节点\n时间线:\n${timeline.join('\n')}`);
     const tb = rebuild(textNode.id);
     assertEq(tb.start.message.status, 'streaming', `text 首帧应为 streaming（节点 ${tb.start.message.id}）`);
-    assert(ops.filter((o) => o.op === 'append' && o.message_id === tb.start.message.id).length >= 2, 'text 应有多片流式增量');
+    assert(
+      framesFor(tb.start.message.id).filter((o) => o.message.delta != null).length >= 2,
+      'text 应有多片流式增量',
+    );
     assertEq(tb.final.message.status, 'completed', 'text 终态应为 completed');
+    assertEq(tb.text, '正文甲正文乙正文丙', 'text 增量拼接应等于完整正文');
 
     // ⑨ ToolCall 节点：参数流式 → 执行窗口（started_at）→ 终态
     const tcNode = [...nodes.values()].find((m) => m.type === 'tool_call');
@@ -185,14 +201,18 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     const cb = rebuild(tcNode.id);
     assertEq(cb.start.message.status, 'streaming', 'tool_call 首帧应为 streaming');
     assert(cb.start.message.name === 'vdfs_write', `tool_call 应带工具名（实际 ${cb.start.message.name}）`);
-    // 参数增量：首帧之后应有 append（参数分两片）
+    // 参数增量：首帧之后应有 delta（参数分片）
     assert(
-      ops.some((o) => o.op === 'append' && o.message_id === cb.start.message.id),
+      ops.some((o) => o.message?.id === cb.start.message.id && o.message?.delta != null),
       'tool_call 参数应有窄增量（不得每片全量重发）',
+    );
+    assert(
+      cb.text.includes('t10.md'),
+      `tool_call 参数增量应拼出完整 JSON（实得 ${JSON.stringify(cb.text)}）`,
     );
     // 执行窗口：终态之前应有一帧带 meta.started_at（否则前端在长工具上无任何「运行中」判据）
     const runningFrame = ops.find(
-      (o) => o.op === 'upsert' && o.message?.id === cb.start.message.id && o.message?.meta?.started_at != null,
+      (o) => o.message?.id === cb.start.message.id && o.message?.meta?.started_at != null,
     );
     assert(
       runningFrame,
@@ -205,13 +225,13 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     assert(turnNode, '流上应有 turn 组合节点');
     const turnTerminalSeq = Math.max(
       ...ops
-        .filter((o) => o.op === 'upsert' && o.message?.id === turnNode.id && TERMINAL.has(o.message?.status))
+        .filter((o) => o.message?.id === turnNode.id && TERMINAL.has(o.message?.status))
         .map((o) => o.seq),
     );
     for (const id of [reasonNode.id, textNode.id, tcNode.id]) {
       const childTerminalSeq = Math.max(
         ...ops
-          .filter((o) => o.op === 'upsert' && o.message?.id === id && TERMINAL.has(o.message?.status))
+          .filter((o) => o.message?.id === id && TERMINAL.has(o.message?.status))
           .map((o) => o.seq),
       );
       assert(
@@ -230,14 +250,14 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     // ⑫ 凡是进入过非终态的节点，都必须以终态收场（不留永远转圈的「运行中」）。
     //
     // 判据是「进入过非终态」而不是「全部节点都必须有终态」：用户消息不参与状态机
-    // （后端 `emit_persisted_message` 发的是存储副本，不带 status），这是**已知
+    // （后端 `emit_persisted_message` 发的是存储副本，落点即终态），这是**已知
     // 的协议空洞**（见评审记录），不在此把它钉成不变量。
     for (const [id] of nodes) {
-      const frames = ops.filter((o) => o.op === 'upsert' && o.message?.id === id);
-      // 从不带 status 的节点（用户消息）不参与状态机，跳过
+      const frames = framesFor(id);
+      // 从不带 status 的帧组成（纯 delta / content 帧）不参与状态机，跳过
       if (frames.every((f) => f.message?.status == null)) continue;
-      if (!frames.some((f) => !TERMINAL.has(f.message?.status))) continue;
-      const last = frames[frames.length - 1].message?.status;
+      if (!frames.some((f) => f.message?.status != null && !TERMINAL.has(f.message.status))) continue;
+      const last = frames.filter((f) => f.message?.status != null).pop()?.message?.status;
       assert(
         TERMINAL.has(last),
         `节点 ${String(id).slice(0, 8)}（${frames[0].message?.type}）进入过非终态却收在 ${last}\n时间线:\n${timeline.join('\n')}`,

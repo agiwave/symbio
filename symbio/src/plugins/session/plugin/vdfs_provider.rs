@@ -546,16 +546,18 @@ impl vdfs::VdfsProvider for SessionPlugin {
     ///
     /// | 路径 | 动作 | 语义 | 变更 | `data` |
     /// |---|---|---|---|---|
-    /// | `<id>/消息/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 转写流一条 `reset` | 被删 id 列表 |
-    /// | `<id>/消息` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 转写流一条 `reset` | 无 |
+    /// | `<id>/消息/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 转写流逐条删除帧（`status = removed`） | 被删 id 列表 |
+    /// | `<id>/消息` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 转写流逐条删除帧 | 无 |
     ///
     /// ## 变更为什么落在转写流上，而不是 VDFS 变更
     ///
-    /// 消息的变更面只有一条通道（`session/stream` 的 `NodeOp`，见
+    /// 消息的变更面只有一条通道（`session/stream` 的消息帧，见
     /// `symbio_core::transcript_stream`）；VDFS 侧只剩会话节点运行态与记忆文件。
-    /// 两种集合操作都发 `NodeOp::Reset`——被删条数上不封顶，逐条 `remove` 会让
-    /// 一次「清空历史」变成一场大面积通知，而消费端本来只需要知道"本地那份别信了"。
-    /// **权威的被删 id 列表走回执 `data`**：调用方据此幂等对齐，不依赖任何推送。
+    /// 两种集合操作都逐条发删除帧——删除帧是**元数据**
+    /// （id + 状态，每条几十字节），而一次 `reset`（清空 + 从存储整份重读）
+    /// 会把所有**保留的**消息都重传一遍：对「删几条」这个动作，逐条通知
+    /// 恰恰是更便宜的形态。**权威的被删 id 列表走回执 `data`**：调用方据此
+    /// 幂等对齐，不依赖任何推送。
     ///
     /// 为什么是动作而不是 `delete`：见 [`VDFS_ACTION_TRUNCATE`] 的文档
     /// （`delete` 是**逐节点**语义，表达不了"删一个节点却删掉了它后面所有"）。
@@ -751,8 +753,8 @@ impl SessionPlugin {
     /// ## `content` 是**整体替换**，不是追加
     ///
     /// 本方法的调用方是在 VDFS 上**编辑一条已有消息**，期望的是整体替换。
-    /// 流式逐帧累积走的是另一条路（`NodeOp::Upsert` 发完整快照、
-    /// `NodeOp::Append` 发明示的窄增量），两者在**协议层**就已分开，
+    /// 流式逐帧累积走的是另一条路（帧上的 `delta` 窄增量），两者在**协议层**
+    /// 就已分开，
     /// 因此这里不需要任何「合并模式」开关。
     ///
     /// （保存走 `replace_messages` 是安全的：其内部的 `assign_seq` 对**已带且单调**
@@ -832,12 +834,11 @@ impl SessionPlugin {
 
         let updated = existing.clone();
         chat_session.replace_messages(messages).await?;
-        // 变更：把合并后的**完整消息**作为快照发布（消费端按 id 整条替换，零回读）
+        // 变更：一条**完整消息**帧——`content` 的语义是整条替换，正是"这次编辑"
+        // 要说的事（不需要先删再建：删除帧表达的是"这个节点没了"，而编辑后它还在）。
         self.transcript_apply(
             session_id,
-            NodeOp::Upsert {
-                message: Box::new(updated.clone()),
-            },
+            crate::symbio_core::turn::message_frame(&updated),
         )
         .await;
         Ok(updated)
@@ -869,12 +870,16 @@ impl SessionPlugin {
         };
 
         chat_session.replace_messages(messages).await?;
-        // 变更：转写的**尾部区间**没了。消息变更只在 `session/stream` 上表达，
-        // 而那里没有承载"从这里到末尾"的增量形态——所以发 `NodeOp::Reset`，
-        // 消费端整份重读。回执里的 `deleted_ids` 是权威列表：调用方据此幂等
-        // 对齐本地视图，不必等一场"大面积通知"。
+        // 变更：转写的**尾部区间**没了——逐条删除帧（`status = removed`）。协议里
+        // 没有「清空重读」这种形态，而让消费端整份重读会把**保留的**消息也重传
+        // 一遍：对"删掉若干条"这个动作，逐条通知恰好是更便宜的形态。回执里的
+        // `deleted_ids` 是权威列表：调用方据此幂等对齐本地视图，不依赖推送。
         if !deleted_ids.is_empty() {
-            self.emit_transcript_reset(session_id).await;
+            let frames: Vec<cm::ChatMessage> = deleted_ids
+                .iter()
+                .map(|id| crate::symbio_core::turn::removed_frame(id))
+                .collect();
+            self.transcript_apply_all(session_id, frames).await;
         }
         Ok(deleted_ids)
     }
@@ -885,11 +890,20 @@ impl SessionPlugin {
     /// 空，会话本体 / 元数据 / 工作目录 / 标题继续存在。UI 的「清空历史」走此路径。
     pub(crate) async fn clear_messages(&self, session_id: &str) -> Result<(), PluginError> {
         let chat_session = self.open_chat_session(session_id).await?;
+        // 先取 id 再清空（清空后读回的是空列表，顺序反了就删无可发）。
+        let ids: Vec<String> = chat_session
+            .get_messages()
+            .await?
+            .iter()
+            .map(|m| m.id.clone())
+            .collect();
         chat_session.replace_messages(Vec::new()).await?;
-        // 变更：转写整份作废——`NodeOp::Reset`（"清空并从存储整份重读"）。
-        // 被清掉的条数上不封顶，逐条 `remove` 会让一次「清空历史」变成一场大面积
-        // 通知；消费端需要知道的只是"本地那份别信了"。
-        self.emit_transcript_reset(session_id).await;
+        // 变更：清空 = 逐条删除帧（理由见 truncate：清空重读会连保留的一起重传）。
+        let frames: Vec<cm::ChatMessage> = ids
+            .iter()
+            .map(|id| crate::symbio_core::turn::removed_frame(id))
+            .collect();
+        self.transcript_apply_all(session_id, frames).await;
         Ok(())
     }
 

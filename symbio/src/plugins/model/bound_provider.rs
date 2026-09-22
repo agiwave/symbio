@@ -8,7 +8,7 @@
 //! 类型实现，`TurnOutput` → `PluginError` 的映射固定为：
 //! - `Aborted` → `PluginError::Aborted`；
 //! - `RetryWithoutContextId` → `plugin_warn!` + 同名错误（半截流由 chat_loop 重试分支以
-//!   `NodeOp::Remove` 状态变更清除）；
+//!   `status = removed` 的删除帧清除）；
 //! - `Err(msg)` → `PluginError::InternalError`；
 //! - `RateLimited(msg)` → `PluginError::RateLimited`；
 //! - `Ok(resp)` → `parse_sse_stream`（`Err` → `PluginError::StreamError`）。
@@ -122,7 +122,7 @@ impl ModelProvider for BoundProvider {
                     turn_started.elapsed()
                 );
                 // 半截流的清除不在本层：返回错误后由 chat_loop 的重试分支对被废弃的
-                // Streaming 节点逐条发 `NodeOp::Remove`（状态变更，前端据此
+                // Streaming 节点逐条发 `Change(status=removed)`（状态迁移，前端据此
                 // 移除视图），不再依赖已废除的一次性 Abort 事件帧。
                 return Err(PluginError::RetryWithoutContextId);
             }

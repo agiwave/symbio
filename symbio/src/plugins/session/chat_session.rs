@@ -506,6 +506,16 @@ fn ensure_durable_states(messages: &[cm::ChatMessage], op: &str) -> Result<(), P
                 m.id
             )));
         }
+        // 增量是**不完整的片段**：它是帧的形态，不是消息的形态。存储里只有
+        // `content`（累积后的正文），一条带 `delta` 的消息落盘意味着某处把
+        // 「这一段」当成了「全部」——存进去的就是半截消息。
+        if m.delta.is_some() {
+            return Err(PluginError::InternalError(format!(
+                "{op}: 消息 {} 携带流式增量 `delta`，持久层只接受完整正文；\
+                 增量只存在于出方向的帧上，累积后的正文应写入 `content`",
+                m.id
+            )));
+        }
     }
     Ok(())
 }

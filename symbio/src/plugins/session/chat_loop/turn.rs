@@ -101,19 +101,20 @@ pub(crate) async fn close_turn(
                 return TurnFlow::NextTurn;
             }
             // 续写次数耗尽：明确告知，绝不静默结束（会话级告警状态，随下一轮请求清除）。
-            sink.emit(session_chat_response::NodeOp::Warn {
-                warning: Some(format!(
-    "输出因达到长度上限而中断（已自动续写 {} 次仍超出）。请提高单次输出预算或缩小任务范围。",
-    MAX_CONTINUE_ROUNDS
-    )),
-            })
+            sink.warn(Some(format!(
+                "输出因达到长度上限而中断（已自动续写 {} 次仍超出）。请提高单次输出预算或缩小任务范围。",
+                MAX_CONTINUE_ROUNDS
+            )))
             .await;
         } else if finish.is_length() && had_tool {
             // 工具调用参数 JSON 被长度截断：参数残破无法通过续写修复，
             // 该次调用已丢弃 → 明确报错而非静默结束（会话级告警状态）。
-            sink.emit(session_chat_response::NodeOp::Warn {
-    warning: Some("输出在工具调用参数中途达到长度上限而中断。请提高单次输出预算，或把大任务拆小后重试。".to_string()),
-    }).await;
+            sink
+                .warn(Some(
+                    "输出在工具调用参数中途达到长度上限而中断。请提高单次输出预算，或把大任务拆小后重试。"
+                        .to_string(),
+                ))
+                .await;
         }
         plugin_info!(
             "session",
@@ -208,7 +209,7 @@ pub(crate) async fn close_turn(
                 // 与普通工具结果的处理保持一致，避免孤儿 Failed 节点
                 tool_msg.status = Some(MessageStatus::Completed);
             }
-            broadcast_message_update(sink, tool_msg.clone()).await;
+            emit_message(sink, tool_msg.clone()).await;
             // 父节点终态：从权威转写取完整副本应用终态（找不到 = 协议违例，跳过）。
             if let Some(mut parent) = context.messages.iter().find(|m| m.id == call_id).cloned() {
                 parent.status = Some(MessageStatus::Completed);
@@ -222,7 +223,7 @@ pub(crate) async fn close_turn(
                     }
                 }
                 parent.meta = Some(meta);
-                broadcast_message_update(sink, parent.clone()).await;
+                emit_state(sink, parent.clone()).await;
                 parent_updates.push(parent);
             } else {
                 plugin_error!(
@@ -244,7 +245,7 @@ pub(crate) async fn close_turn(
                     None,
                 );
                 tool_msg.status = Some(MessageStatus::Completed);
-                broadcast_message_update(sink, tool_msg.clone()).await;
+                emit_message(sink, tool_msg.clone()).await;
                 if let Some(mut parent) = context.messages.iter().find(|m| m.id == *cid).cloned() {
                     parent.status = Some(MessageStatus::Completed);
                     let mut meta = parent.meta.clone().unwrap_or_else(|| serde_json::json!({}));
@@ -254,7 +255,7 @@ pub(crate) async fn close_turn(
                         obj.insert("skipped".into(), serde_json::json!(true));
                     }
                     parent.meta = Some(meta);
-                    broadcast_message_update(sink, parent.clone()).await;
+                    emit_state(sink, parent.clone()).await;
                     parent_updates.push(parent);
                 } else {
                     plugin_error!(

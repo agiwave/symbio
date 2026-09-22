@@ -68,6 +68,12 @@ pub enum MessageStatus {
     /// 缺的只是前端一个「这个终态可以重试」的判据。
     Aborted,
     Failed,
+    /// 节点已被删除（**终态，不可重试**）。
+    ///
+    /// 协议里没有 `remove` 操作——删除就是一次状态迁移，与出现、增长、完成
+    /// 同走一帧。落在此状态的帧在接收端**就地移除**该节点（从本地视图消失），
+    /// 不产生任何「清空重读」。
+    Removed,
 }
 
 impl MessageStatus {
@@ -89,6 +95,7 @@ impl MessageStatus {
             MessageStatus::Completed => "completed",
             MessageStatus::Aborted => "aborted",
             MessageStatus::Failed => "failed",
+            MessageStatus::Removed => "removed",
         }
     }
 }
@@ -186,6 +193,31 @@ pub struct ChatMessage {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<MessageContent>,
+
+    /// 流式**增量**：本帧新到达的那一段正文，追加到接收端该节点正文尾部。
+    ///
+    /// ## 与 `content` 互斥，语义由字段本身给出
+    ///
+    /// 一帧里两者**绝不同时出现**——同帧携带即协议违例，唯一写入点
+    /// （[`crate::plugins::session::transcript::Transcript::apply`]）报错丢弃。
+    /// 消费端因此永远不必从帧的形状里推断「该拼接还是该替换」：
+    ///
+    /// | 字段 | 语义 | 用在哪 |
+    /// |---|---|---|
+    /// | `delta` | 追加到正文尾部（O(delta) 窄帧） | 流式热路径：正文 / 推理 / 工具参数逐片 |
+    /// | `content` | **整条替换**该节点正文（幂等） | 一次性节点的完整体、存储回执的权威副本、编辑后的新正文 |
+    ///
+    /// ## 为什么不落存储
+    ///
+    /// 增量是**不完整的片段**，不是消息的形态：它只在出方向的帧上存在，
+    /// 存储里只有 `content`（图内累积的正文）。改名的同一份结构因此承载两件事：
+    /// - 帧方向：`delta` 是「这一段」；
+    /// - 存储方向：`content` 是「全部」。
+    ///
+    /// 「delta 永不落盘」不是发射方的自律，而是持久层的不变量——
+    /// `chat_session::ensure_durable_states` 在写入点直接拒绝携带 `delta` 的消息。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<MessageStatus>,

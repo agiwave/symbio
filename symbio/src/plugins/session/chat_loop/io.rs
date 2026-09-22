@@ -4,13 +4,6 @@
 
 use super::*;
 
-pub(crate) async fn broadcast_message_update(sink: &EventSink, message: ChatMessage) {
-    sink.emit(session_chat_response::NodeOp::Upsert {
-        message: Box::new(message),
-    })
-    .await;
-}
-
 /// 封根 Turn：广播本轮组合节点的终态（**唯一**发射点）。
 ///
 /// 调用位置固定在 `close_turn` 返回之后——Turn 是组合节点（仅分组、无正文），
@@ -20,15 +13,16 @@ pub(crate) async fn broadcast_message_update(sink: &EventSink, message: ChatMess
 /// 工具调用仍在运行"。
 ///
 /// 发的是**权威转写里的那条节点**（`build_assistant_messages` 的产物，也是
-/// `persist_messages` 即将落库的那份），不是手拼的半截快照：
-/// `upsert` 的契约是"完整快照整条替换"，半截快照会把先前帧写下的场景字段抹掉。
+/// `persist_messages` 即将落库的那份），不是手拼的半截快照：帧里带的身份、`meta`
+/// 与状态就是权威副本上那份，手拼会漏掉先前帧写下的场景字段。
 /// 节点不在转写里 = 本轮根本没建立过（异常路径），静默返回。
 pub(crate) async fn finalize_turn_root(sink: &EventSink, context: &SessionContext, root_id: &str) {
     let Some(mut node) = context.messages.iter().find(|m| m.id == root_id).cloned() else {
         return;
     };
     node.status = Some(MessageStatus::Completed);
-    broadcast_message_update(sink, node).await;
+    // Turn 是组合节点（仅分组、无正文）⇒ 状态帧。
+    emit_state(sink, node).await;
 }
 
 pub(crate) async fn persist_messages(
@@ -47,8 +41,8 @@ pub(crate) async fn persist_messages(
         // 会话节点 `attributes.warning`，前端按状态渲染；新一轮请求开始时清除。
         let msg = format!("消息持久化失败（消息仍在内存中）: {}", e);
         plugin_warn!("session", "[Session] {}", msg);
-        sink.emit(session_chat_response::NodeOp::Warn { warning: Some(msg) })
-            .await;
+        // 告警是会话节点状态（VDFS watch 域），经出口的告警通道下发，不是消息帧。
+        sink.warn(Some(msg)).await;
     }
 }
 
@@ -96,17 +90,16 @@ pub(crate) async fn fire_user_prompt_submit_hook(
 
 pub(crate) async fn emit_streaming_start(sink: &EventSink, root_id: &str, turn: Option<usize>) {
     let meta = turn.map(|t| serde_json::json!({"turn": t}));
-    sink.emit(session_chat_response::NodeOp::Upsert {
-        message: Box::new(ChatMessage {
-            id: root_id.to_string(),
-            // Turn 是根级节点，与 User 互为兄弟（请求/响应由 MessageRole 区分）
-            parent_id: None,
-            role: Some(crate::symbio_core::schemas::session::chat_message::MessageRole::Assistant),
-            msg_type: Some(MessageType::Turn),
-            status: Some(MessageStatus::Streaming),
-            meta,
-            ..Default::default()
-        }),
+    // Turn 组合节点无正文：身份 + 状态一帧到位。
+    sink.emit(ChatMessage {
+        id: root_id.to_string(),
+        // Turn 是根级节点，与 User 互为兄弟（请求/响应由 MessageRole 区分）
+        parent_id: None,
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::Turn),
+        status: Some(MessageStatus::Streaming),
+        meta,
+        ..Default::default()
     })
     .await;
 }

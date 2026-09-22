@@ -6,7 +6,9 @@
 use super::super::config::SessionConfig;
 use super::super::store::SessionStore;
 use super::super::types::Session;
-use super::{prune_historical_tool_calls, ChatSession, PersistentChatSession};
+use super::{
+    ensure_durable_states, prune_historical_tool_calls, ChatSession, PersistentChatSession,
+};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
@@ -475,4 +477,24 @@ async fn append_messages_assigns_monotonic_authoritative_seq() {
         s2 > s1,
         "追加分配必须严格递增（Lamport 计数器从已有最大 seq 续上）：u2={s2} 应大于 u1={s1}"
     );
+}
+
+/// 持久层不变量：**增量不得落盘**。
+///
+/// `delta` 是帧的形态（"这一段"），不是消息的形态（"全部"）。放行它落库就等于把
+/// 半截消息写进历史；而正文只落在 `content`（图内累积后的结果），所以一条带
+/// `delta` 的待落库消息必定意味着某处把增量当成了全部。
+#[test]
+fn durable_layer_rejects_stream_delta() {
+    let mut with_delta = plain_msg("m1");
+    with_delta.delta = Some("半截".into());
+    let err = ensure_durable_states(&[with_delta], "append_messages")
+        .expect_err("必须拒绝携带 delta 的消息");
+    assert!(
+        err.to_string().contains("delta"),
+        "错误信息要指明是 delta：{err}"
+    );
+
+    // 同一条消息去掉 delta（正文落在 content）后必须放行
+    assert!(ensure_durable_states(&[plain_msg("m1")], "append_messages").is_ok());
 }

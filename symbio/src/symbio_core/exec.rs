@@ -14,8 +14,11 @@
 //!
 //! ## 拆成两个语义单一的原语
 //!
-//! - [`EventSink`]（出）：生产者只做一件事——`emit(NodeOp)`。去哪由实现决定：
-//!   进程内直连**转写唯一写入点**（零 serde），内部请求走 [`EventSink::Null`]。
+//! - [`EventSink`]（出）：生产者只做两件事——`emit(ChatMessage)`（消息图变更，
+//!   帧**就是一条消息**：`delta` 追加 / `content` 整条替换 / `status` 状态迁移）
+//!   与 `warn(Option<String>)`（会话级告警，落在会话节点状态，不是消息帧）。
+//!   去哪由实现决定：进程内直连**转写唯一写入点**（零 serde），内部请求走
+//!   [`EventSink::Null`]。
 //! - [`AbortSignal`]（入）：把历史上三条并存的中止感知路径（显式 Abort 帧 /
 //!   共享 `abort_flag` 轮询 / 通道取消）**收敛成一条**，且不再需要轮询——
 //!   `abort()` 置位的同时唤醒所有等待者。
@@ -27,14 +30,14 @@
 //!
 //! - 转写仍然只有**一个写入点**（[`TranscriptWriter::apply`] 的实现体是
 //!   `Transcript::apply`），事件只是换了条路抵达它；
-//! - `Warn` 仍是**会话级状态**（VDFS watch 域），由出口实现分派到会话节点、
-//!   不进转写——与历史上消费循环的分派规则逐字一致；
+//! - 告警仍是**会话级状态**（VDFS watch 域），走出口的 [`EventSink::warn`]
+//!   通道分派到会话节点、不进转写——消息帧与会话状态两个域不混流；
 //! - 中止只有一个置位入口 [`AbortSignal::abort`]，读侧只有 [`AbortSignal::is_aborted`]
 //!   与 [`AbortSignal::cancelled`]——不再有第二条「标志位之外的中止来源」。
 
 use crate::symbio_core::keys::{ABORT_SIGNAL, EVENT_SINK};
 use crate::symbio_core::plugin::{InvokeRequest, InvokeRequestExt};
-use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
+use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -43,12 +46,19 @@ use tokio_util::sync::CancellationToken;
 /// 转写唯一写入点的抽象。
 ///
 /// `symbio_core` 不认识 `Transcript`（它在 session 插件里），因此只约定这个最小面；
-/// 生产实现是 session 插件的 `TranscriptSink`——它内部调用 `Transcript::apply`
-/// 并对 `Warn` 做会话级分派。
+/// 生产实现是 session 插件的 `TranscriptSink`——`apply` 内部调用
+/// `Transcript::apply`，`warn` 路由到会话状态出口。
 #[async_trait]
 pub trait TranscriptWriter: Send + Sync + 'static {
-    /// 消费一个节点操作。实现体必须保证：同一会话内按调用顺序生效。
-    async fn apply(&self, op: NodeOp);
+    /// 消费一条消息帧。实现体必须保证：同一会话内按调用顺序生效。
+    async fn apply(&self, message: ChatMessage);
+
+    /// 会话级告警（可恢复）：`Some(text)` 设置 / `None` 清除。
+    ///
+    /// 告警是**会话节点状态**（VDFS watch 域），不是消息流上的帧——它与消息
+    /// 分属两个域，所以不在 [`TranscriptWriter::apply`] 的载荷里。默认实现忽略：
+    /// 不感知会话状态的出口（测试 / 转播桥）没有可落的去处。
+    async fn warn(&self, _warning: Option<String>) {}
 }
 
 /// 出口的**进度观测点**：与出口共享的发射计数（单调不减）。
@@ -134,17 +144,27 @@ impl EventSink {
         }
     }
 
-    /// 送出一次节点操作。
+    /// 送出一条消息帧。
     ///
-    /// 这是执行期**唯一**的出方向动作：状态迁移发完整快照（`Upsert`）、
-    /// 正文增长发窄追加（`Append`）、清除发 `Remove`、清空发 `Reset`。
-    /// 帧面语义只由操作本身给出，接收端不做类型推断。
-    pub async fn emit(&self, op: NodeOp) {
+    /// 这是执行期**唯一**的出方向动作：节点出现 / 内容增长（`delta`）/
+    /// 整条替换（`content`）/ 状态迁移（含 `removed` 即删除）都只是一条
+    /// [`ChatMessage`] 的不同字段，帧面语义由字段本身给出，接收端不做类型推断。
+    pub async fn emit(&self, message: ChatMessage) {
         match self {
             EventSink::Direct(writer, progress) => {
                 progress.bump();
-                writer.apply(op).await
+                writer.apply(message).await
             }
+            EventSink::Null => {}
+        }
+    }
+
+    /// 会话级告警：**不是** `emit(…)` —— 告警是会话节点状态，
+    /// 与消息分属两个域。生产实现（`TranscriptSink`）路由到
+    /// `emit_session_state(Warning)`；静默出口忽略。
+    pub async fn warn(&self, warning: Option<String>) {
+        match self {
+            EventSink::Direct(writer, _) => writer.warn(warning).await,
             EventSink::Null => {}
         }
     }

@@ -21,6 +21,7 @@
 //! 放在 `symbio_core`（而非 session 插件）与 `event_bus` 同理：插件互不可见，
 //! 订阅方包括 session 自身（发布）、agent 转播桥与 CLI（消费）。
 
+use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 use crate::symbio_core::PluginFrame;
 use crate::{plugin_info, plugin_warn};
 use dashmap::DashMap;
@@ -58,13 +59,29 @@ pub fn unregister_transcript_subscriber(connection_id: &str) {
     }
 }
 
-/// 一帧转写事件（线上格式）：`session_id` 归属 + 流内单调 `seq` + 显式操作。
+/// 一帧转写事件（线上格式）：`session_id` 归属 + 流内单调 `seq` + 消息本身。
+///
+/// ## 载荷就是一条消息，不是一层「操作」
+///
+/// 帧里没有独立的操作枚举：**帧携带什么，消息图就变更什么**——
+///
+/// | 帧里的字段 | 接收端动作 |
+/// |---|---|
+/// | `delta` | 追加到该节点正文尾部 |
+/// | `content` | 整条替换该节点正文（幂等） |
+/// | `status` | 状态迁移（`removed` = 就地移除） |
+/// | `parent_id` / `role` / `type` / `name` / `tool_call_id` | 身份合并（有则覆盖） |
+/// | `meta` / `seq` / `timestamp` | 覆盖（发射端持有当前完整值） |
+///
+/// 于是「消息现在是什么样」只有一个来源，消费端不需要把两套结构对齐。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeEvent {
     pub session_id: String,
+    /// 流内**帧序号**：单调递增，缺口即丢帧（与会话内排序锚点 `message.seq` 是两回事）。
     pub seq: u64,
-    #[serde(flatten)]
-    pub op: crate::symbio_core::schemas::session::session_chat_response::NodeOp,
+    /// 消息本身。嵌套而非平铺：外层 `seq` 是帧序号、内层 `message.seq` 是存储序号，
+    /// 平铺会让两个语义不同的 `seq` 撞进同一个 JSON 键。
+    pub message: ChatMessage,
 }
 
 /// resync 标记帧：消费端收到即清空本地转写并从存储整份重读（唯一恢复路径）。

@@ -18,6 +18,7 @@ import {
   MESSAGE_STATUS_COMPLETED,
   MESSAGE_STATUS_FAILED,
   MESSAGE_STATUS_PENDING,
+  MESSAGE_STATUS_REMOVED,
   MESSAGE_STATUS_STREAMING,
   MESSAGE_STATUS_WAITING_USER_ACTION,
 } from './chat_message'
@@ -95,6 +96,14 @@ export const VDFS_STATUS_COMPLETED = MESSAGE_STATUS_COMPLETED
  * 中止后重试入口不出现。现在它是 `MESSAGE_STATUS_ABORTED` 的别名——**漏改这件事
  * 已不可能发生**（词表只有一份），而未知词仍由该映射**显式告警**兜底。 */
 export const VDFS_STATUS_ABORTED = MESSAGE_STATUS_ABORTED
+/** 节点状态：**已被删除**（消息；会话没有这个态——它是长驻容器）。
+ *
+ * 删除在协议里是一次状态迁移（没有 `remove` 操作），与出现 / 增长 / 完成同走一帧。
+ * 落到这个状态的帧在接收端**就地移除**该节点；VDFS 节点投影是 `MessageStatus`
+ * 的**全量**映射（`nodes.rs::message_status` 直接取 `as_str()`），故本词同样是
+ * 该全集的成员——不给它别名就等于让「消息状态词表」与「VDFS 可达词」分叉，
+ * 正是下面 `vdfs.spec.ts` 那条集合相等断言要拦住的。 */
+export const VDFS_STATUS_REMOVED = MESSAGE_STATUS_REMOVED
 
 /** 「运行中」的唯一判据：节点 `status == working`。
  *

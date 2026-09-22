@@ -25,7 +25,7 @@
    必须在任何 `HomedirRegistry::get()` 之前设置（插件树构造期就会读它）。
 2. `create_root_plugin().await` 构造整个进程内插件树。
 3. **两条下行连接**（各归其域，见下节）：
-   - `session/stream` —— **消息实时面**。一条流、显式操作（`NodeOp`）、流内单调 `seq`、
+   - `session/stream` —— **消息实时面**。一条流、每帧一条 `ChatMessage`、流内单调 `seq`、
      按帧里的 `session_id` 归属；后端**广播**给全部订阅者。
    - `event_bus/subscribe`（`SubscribeRequest { kinds: None }`）+ `vdfs/watch(<根>/session/<sid>)`
      —— **会话运行态**。前者是收件地址、后者是开闸；后端只向登记过路径的订阅者投递变更
@@ -75,7 +75,7 @@
 
 | 帧 | 来源 | 处理 |
 | --- | --- | --- |
-| `Frame::Transcript` | `session/stream` | 过滤掉非当前会话；`seq <= last` 丢弃（重复帧），跳号则告警留痕；随后按 `NodeOp` 直接落地：`upsert` ⇒ `on_upsert`、`append` ⇒ `on_append`、`remove` ⇒ `on_remove`、`reset` ⇒ 快照作废 |
+| `Frame::Transcript` | `session/stream` | 过滤掉非当前会话；`seq <= last` 丢弃（重复帧），跳号则告警留痕；随后把帧作为一条 `ChatMessage` 直接落地（`on_message`）：`delta` ⇒ 追加、`content` ⇒ 整条替换、`status = removed` ⇒ 丢快照 |
 | `Frame::Resync` | `session/stream` | 后端的背压标记（通道曾满）。CLI 无历史可重读，告警留痕 |
 | `Frame::Node` | `event_bus` + `vdfs/watch` | **会话叶子**（`path == 会话地址`）承载运行态：`status == working` ⇒ 提示「处理中」；离开 `working` ⇒ **本轮结束**，退出循环。比会话叶子更深的 VDFS 变更已不再是实时面，忽略 |
 
@@ -101,9 +101,9 @@
 | **stdout** | 模型正文 + 交互提示符（可直接管道给下游程序） |
 | **stderr** | 进度、工具调用、错误、插件日志（可整体 `2>/dev/null` 静音） |
 
-渲染器直接消费 `NodeOp`，不再有补丁合并：`on_append` 把裸增量累积进本地快照并**直接输出**
-（流式热路径，O(delta)）；`on_upsert` 用全量快照整条替换，与快照做差分算出「还没打印过的
-那一段」（收尾帧通常为空，后端若直接给全量则整段输出，不丢字）；`on_remove` 丢快照。
+渲染器直接消费消息帧，不再有补丁合并：帧带 `delta` 时把裸增量累积进本地快照并**直接输出**
+（流式热路径，O(delta)）；帧带 `content` 时用全量正文整条替换快照，与已输出内容做差分算出
+「还没打印过的那一段」（改写发生时留痕而非重印整段）；`status = removed` 丢快照。
 
 只把**模型 Text** 写 stdout，Reasoning 仅在 `--verbose` 时落 stderr，ToolCall 在 stderr 一次性
 announce。刻意抑制 User/Tool/System 角色回声，保持 stdout 纯净。`wrote_text` 标记是否有正文输出

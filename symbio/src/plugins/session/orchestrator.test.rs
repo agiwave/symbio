@@ -4,13 +4,10 @@
 //! `orchestrator.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::symbio_core::schemas::session::session_chat_response::NodeOp;
 
-/// 向在途转写图注入一个节点（测试辅助：等价于旧的 live_messages.push）。
+/// 向在途转写图注入一条消息（测试辅助：等价于旧的 live_messages.push）。
 async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage) {
-    state.transcript.lock().await.apply(NodeOp::Upsert {
-        message: Box::new(message),
-    });
+    state.transcript.lock().await.apply(message);
 }
 
 /// 造一个已登记中止信号的会话状态（模拟消费循环入口的登记）。
