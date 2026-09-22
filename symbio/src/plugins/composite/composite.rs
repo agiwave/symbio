@@ -242,7 +242,10 @@ impl Composite {
         let sub_context = Arc::new(SimpleRequest::child_of(ctx, Some(composite_weak.clone())));
         sub_context.set(PLUGIN_DIR, dir);
 
-        crate::plugin_info!("composite", "正在构造子插件 {name} -> {provider}");
+        // 装配细节走 debug：每个子插件一行，十几个插件连成一串纯机械噪声，
+        // 用户视角「启动刷屏」的主要来源。需要排查装配问题时 `--verbose` /
+        // `SYMBIO_LOG=debug` 即可看到全量。
+        crate::plugin_debug!("composite", "正在构造子插件 {name} -> {provider}");
         if let Some(plugin_instance) = create_object::<dyn Plugin>(provider, sub_context) {
             composite.add_instance_sync(name.to_string(), plugin_instance);
         } else {

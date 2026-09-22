@@ -219,7 +219,7 @@ pub(crate) async fn apply_compaction(
             Ok(Some(history_count)) => {
                 plugin_info!(
                     "session",
-                    "Context compressed: {} messages -> 1 message",
+                    "[Compress] 上下文已压缩：{} 条消息 → 1 条摘要",
                     history_count
                 );
                 turn.last_saved = context.messages.len();
@@ -229,7 +229,7 @@ pub(crate) async fn apply_compaction(
             // 本轮仍应正常回复用户。失败原因已写入压缩节点（meta.failure_kind +
             // error），连续失败会触发熔断（跳过后续自动压缩）。
             Err(e) => {
-                plugin_warn!("session", "auto_compress_process failed: {e}");
+                plugin_warn!("session", "[Compress] 自动压缩失败: {e}");
             }
         }
     }

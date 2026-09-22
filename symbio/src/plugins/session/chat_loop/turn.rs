@@ -92,7 +92,7 @@ pub(crate) async fn close_turn(
                 turn.continuation_count += 1;
                 plugin_info!(
                     "session",
-                    "finish=Length，自动续写 ({}/{})",
+                    "[Turn] finish=Length，自动续写 ({}/{})",
                     turn.continuation_count,
                     MAX_CONTINUE_ROUNDS
                 );
@@ -118,7 +118,7 @@ pub(crate) async fn close_turn(
         }
         plugin_info!(
             "session",
-            "--- TURN END (正常收尾，无工具调用) --- finish={:?}",
+            "[Turn] 结束（正常收尾，无工具调用）finish={:?}",
             finish
         );
         persist_messages(context, turn.last_saved, sink).await;
@@ -321,7 +321,11 @@ pub(crate) async fn close_turn(
         // 合法 tool 结果喂回 LLM，loop 不中断），不存在「Failed 父节点等待
         // 恢复」的场景；
         // user_prompt(WaitingUserAction) 驱动的暂停走 approve/reject/answer 恢复。
-        plugin_info!("session", "工具待用户恢复（mode={}），退出本轮", mode);
+        plugin_info!(
+            "session",
+            "[Turn] 工具待用户恢复（mode={}），退出本轮",
+            mode
+        );
         return TurnFlow::Finish(TurnExit::Completed);
     }
 
@@ -330,7 +334,7 @@ pub(crate) async fn close_turn(
     turn.tool_rounds += 1;
     plugin_info!(
         "session",
-        "--- TURN {} DONE (工具轮结束，进入下一轮) --- 工具调用 {} 个",
+        "[Turn] 第 {} 轮结束（工具轮，进入下一轮），工具调用 {} 个",
         turn.tool_rounds - 1,
         tool_results.len()
     );

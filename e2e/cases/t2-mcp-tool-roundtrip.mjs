@@ -41,6 +41,11 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
     assert(r.stdout.includes('工具调用完成，回显成功'), `stdout 应为收尾正文（实际: ${JSON.stringify(r.stdout)}）`);
     assert(r.stderr.includes('调用工具'), `stderr 应播报工具调用（实际: ${r.stderr.slice(0, 400)}）`);
 
+    // 配置只加载一次：build 的异步预热与首次请求都经 `ensure_loaded`（互斥 + 完成标志），
+    // 「预热直调 load_from_storage」会让两条入口各加载一次——两次磁盘读 + 两行重复日志。
+    const loadLines = r.stderr.split('\n').filter((l) => l.includes('加载了') && l.includes('MCP Server'));
+    assertEq(loadLines.length, 1, `MCP 配置应只加载一次（实际 ${loadLines.length} 行: ${loadLines.join(' | ')}）`);
+
     // mock-mcp 真被 spawn 且执行了调用
     const record = readFileSyncSafe(join(hd.homedir, 'mcp-record.ndjson'));
     const calls = record.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.kind === 'call');

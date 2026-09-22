@@ -12,6 +12,10 @@ import { stripAnsi } from '../color.mjs'
 /**
  * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
  *
+ * 898：控制台日志降噪——新增 `logger` 级别闸门用例（2）与 telegram 配置「缺键不是错误」
+ *      用例（2）。闸门：无 subscriber 路径默认 INFO，debug 静默（`--verbose` / `SYMBIO_LOG`
+ *      放开）；telegram 结构级 `#[serde(default)]` 使「只有身份键的 PLUGIN.yml」解析为默认值
+ *      而非 Err（此前每次启动一条假 WARN）。
  * 894：S24 收口——转写流帧收成一条 `ChatMessage`：删除 `NodeOp` / `NodeChange`，
  *      `delta`（增量，与 `content` 互斥）与 `status = removed`（删除状态迁移）落到
  *      `ChatMessage` 上，告警下沉为 `TranscriptWriter::warn`；转写核心日志的「纯增量」
@@ -23,7 +27,7 @@ import { stripAnsi } from '../color.mjs'
  *      extract_result 判定顺序。逐批明细见 docs/CHANGELOG.md 的对应条目。
  */
 export const BASELINE = {
-  rustTests: 894,
+  rustTests: 898,
   // 46 spec 文件 / 661 用例。文件数与用例数均与平台无关（全仓 spec 零平台分支、
   // it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
   vitestFiles: 46,

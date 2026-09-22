@@ -89,7 +89,7 @@ pub async fn run_chat_loop(
 
     plugin_info!(
         "session",
-        ">>> NEW SESSION START (Protocol: {:?})",
+        "[Session] 新会话开始（协议 {:?}）",
         orchestrator.provider.api_protocol()
     );
 
@@ -201,12 +201,14 @@ pub async fn run_chat_loop(
             }
         }
 
+        // 轮次起点。历史上这一行带 `tools={}` 一栏，但实参恒为字面量 `0`——此处
+        // 尚未决定本轮用哪些工具，输出「tools=0」会被读成「没有工具」，属误导，
+        // 故移除；工具使用情况由后续 `[Tool]` 行报告。
         plugin_info!(
             "session",
-            "--- TURN {} START --- (msgs={}, tools={})",
+            "[Turn] 第 {} 轮开始 (msgs={})",
             turn.tool_rounds,
-            context.messages.len(),
-            0
+            context.messages.len()
         );
 
         // ── 步骤 3：本轮输入准备（收口 ②，唯一准备点）────────────────────────
@@ -292,7 +294,7 @@ pub async fn run_chat_loop(
                 return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
             }
             Err(e) => {
-                plugin_warn!("session", "send_request failed: {e}");
+                plugin_warn!("session", "[Session] 发送请求失败: {e}");
                 return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Failed(e))
                     .await;
             }

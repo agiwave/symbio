@@ -182,6 +182,17 @@ async fn sleep_with_abort(d: std::time::Duration, abort: &AbortSignal) {
     }
 }
 
+/// 日志用的端点标签：`host/path`（不含查询串）。
+///
+/// 只取「主机 + 路径」——排查时关心的是**打到了哪个端点**；完整 URL 会带上无意义的
+/// 查询串，也可能包含 token 类参数（不该进日志）。解析失败时原样返回，绝不吞掉信息。
+pub fn endpoint_label(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .map(|u| format!("{}{}", u.host_str().unwrap_or("?"), u.path()))
+        .unwrap_or_else(|| url.to_string())
+}
+
 pub async fn execute_post_with_abort(
     url: &str,
     headers: reqwest::header::HeaderMap,
@@ -193,18 +204,10 @@ pub async fn execute_post_with_abort(
     // 因此不会造成"错误刷屏"。重试耗尽才向上返回错误，由上层停止并展示重试入口。
     const MAX_RETRIES: u32 = 4;
     let started = std::time::Instant::now();
-    let body_len = serde_json::to_vec(body).map(|v| v.len()).unwrap_or(0);
-    let host = reqwest::Url::parse(url)
-        .ok()
-        .map(|u| format!("{}{}", u.host_str().unwrap_or("?"), u.path()))
-        .unwrap_or_else(|| url.to_string());
-    // ① 请求发起日志：此后若卡死，可确定卡在「已发出 POST、未收到响应头」阶段。
-    plugin_info!(
-        "model",
-        "[LLM] 请求发起 POST {} (body {} bytes)",
-        host,
-        body_len
-    );
+    // 「请求发起」锚点不在这里：它由调用方（`model::bound_provider::execute_turn`）
+    // 在**请求体构建之后**统一打一条，便于在同一条里同时给出模型/规模/端点/体量。
+    // 这里的进程起点紧随其后，仍在「等待响应头」之前，故阶段定位语义不变
+    // （见下方 `parse_sse_stream` 的阶段对照表）。
     let mut attempt: u32 = 0;
 
     loop {
@@ -804,6 +807,8 @@ pub async fn parse_sse_stream(
     // 让每轮 SSE 流在控制台留下完整轨迹：何时建立、首字节何时到达、首条内容
     // 何时产出、正常/异常如何结束。若卡死，可从最后一条日志精确定位阶段：
     //   有「请求发起」无「响应头」     → 卡在 POST 等待（网关/网络）；
+    //                                    「请求发起」由调用方在构建请求体后打出，
+    //                                    「响应头到达」在下方 `PostResult::Ok` 前打出。
     //   有「响应头」无「首个数据块」   → 卡在 SSE 建立后无数据（provider 挂起）；
     //   有「首个数据块」无「首条内容」 → 收到字节但协议解析无内容事件（协议异常）；
     //   有「首条内容」后长时间静默     → 流中途挂起 → 由 STREAM_IDLE_TIMEOUT 兜底报错。
@@ -851,7 +856,7 @@ pub async fn parse_sse_stream(
             first_chunk_at = Some(std::time::Instant::now());
             plugin_info!(
                 "model",
-                "[LLM] 首个数据块到达 (TTFB {:?})",
+                "[LLM] 首个数据块到达 (首字节延迟 {:?})",
                 first_chunk_at.unwrap().duration_since(started)
             );
         }
@@ -1025,7 +1030,7 @@ async fn dispatch_and_track(
             *first_content_logged = true;
             plugin_info!(
                 "model",
-                "[LLM] 收到第一条消息（{}内容，自请求发起 {:?}）",
+                "[LLM] 收到第一条消息（{}内容，自流建立 {:?}）",
                 kind,
                 started.elapsed()
             );

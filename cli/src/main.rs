@@ -51,6 +51,22 @@ async fn main() -> ExitCode {
         Command::Run(a) => *a,
     };
 
+    // 插件日志级别：默认 INFO。`--verbose` 放开到 DEBUG；`SYMBIO_LOG=<级别>` 可显式覆盖。
+    //
+    // 这里必须显式设置，因为本进程**不装 tracing subscriber**（见上方说明），
+    // 插件日志宏退回 `eprintln!` 的那条路径没有过滤器——级别闸门是它唯一的过滤手段。
+    // 不设时 debug 会无条件打到 stderr，把「正在构造子插件 …」这类启动细节刷屏。
+    let log_level = std::env::var("SYMBIO_LOG")
+        .ok()
+        .as_deref()
+        .and_then(symbio::symbio_core::parse_level)
+        .unwrap_or(if args.verbose {
+            symbio::symbio_core::LEVEL_DEBUG
+        } else {
+            symbio::symbio_core::LEVEL_INFO
+        });
+    symbio::symbio_core::set_min_level(log_level);
+
     // 系统目录下没有任何模型条目时给出明确提示：此时插件树会退回内置默认值，
     // 通常表现为「没有任何可用 Provider」，属于最常见的一次性配置问题。
     //

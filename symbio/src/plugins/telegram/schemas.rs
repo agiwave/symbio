@@ -3,7 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 /// Telegram configuration - Single Source of Truth
+///
+/// `#[serde(default)]`（结构级）：**配置文件存在但未声明全部键**时按字段默认值补齐，
+/// 而不是反序列化失败。这是常态而非异常——新建的 `PLUGIN.yml` 只有身份键，
+/// `bot_token` 为空即「未启用」（`api_url()` 据此返回 `None`）。缺了这层默认，
+/// 每次启动都会打一条「读取自身配置失败，改用默认值」的 WARN，把正常状态报成故障。
+/// 只有 YAML 语法错误 / 类型不符这类**真正**的损坏才会走 `Err` 分支。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TelegramConfig {
     pub bot_token: String,
     pub chat_id: Option<String>,
@@ -152,5 +159,44 @@ mod tests {
         assert_eq!(back.chat_id.as_deref(), Some("-100"));
         assert!(!back.streaming_enabled);
         assert_eq!(back.allowed_users, vec![7]);
+    }
+
+    /// 容器会为「必需插件」补建一份只含**身份键**的 `PLUGIN.yml`
+    /// （`plugin_provider` / `plugin_name`），业务键此时都还没写。
+    /// 结构级 `#[serde(default)]` 让这份「最正常的初始状态」解析成功，而不是被
+    /// 当成「配置损坏」打 WARN 再回落默认值（否则每次启动一条假告警）。
+    #[test]
+    fn identity_only_manifest_falls_back_to_defaults() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = crate::symbio_core::PluginDir::at(tmp.path().join("telegram"), "telegram");
+        dir.ensure_manifest().unwrap();
+
+        let cfg = dir
+            .load::<TelegramConfig>()
+            .expect("缺业务键不应报错（否则启动时打假告警）")
+            .expect("目录已有身份键，应视为「存在配置」而非「没有配置」");
+
+        assert_eq!(cfg.bot_token, "", "未配置的 token 为空串，即「未启用」");
+        assert_eq!(cfg.chat_id, None);
+        assert!(cfg.streaming_enabled && cfg.poll_enabled, "开关取默认 true");
+        assert!(cfg.allowed_users.is_empty());
+    }
+
+    /// `#[serde(default)]` 只兜「缺键」，不掩「类型不符」——真损坏必须仍报错。
+    #[test]
+    fn wrong_type_still_errors() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = crate::symbio_core::PluginDir::at(tmp.path().join("telegram"), "telegram");
+        dir.ensure_manifest().unwrap();
+        std::fs::write(
+            dir.config_path(),
+            "plugin_provider: telegram\nplugin_name: telegram\nbot_token: {a: 1}\n",
+        )
+        .unwrap();
+
+        assert!(
+            dir.load::<TelegramConfig>().is_err(),
+            "类型不符属真损坏，不得被默认值静默吞掉"
+        );
     }
 }

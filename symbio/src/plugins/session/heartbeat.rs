@@ -73,7 +73,7 @@ impl SessionPlugin {
 
         crate::plugin_info!(
             "session",
-            "心跳调度器已启动（扫描间隔 {}s）",
+            "[Heartbeat] 调度器已启动（扫描间隔 {}s）",
             HEARTBEAT_TICK_SECS
         );
 
@@ -83,7 +83,7 @@ impl SessionPlugin {
             let sessions = match self.list_sessions().await {
                 Ok(s) => s,
                 Err(e) => {
-                    crate::plugin_warn!("session", "心跳调度器：list_sessions 失败: {}", e);
+                    crate::plugin_warn!("session", "[Heartbeat] list_sessions 失败: {}", e);
                     continue;
                 }
             };
@@ -181,13 +181,13 @@ impl SessionPlugin {
         // 跨插件 PATH）」。地址规则见 `symbio_core::paths` 模块文档。
         ctx.set(SESSION_ID, session_id.to_string());
         if let Err(e) = ctx.set_payload(req) {
-            crate::plugin_error!("session", "心跳触发失败：无法设置 payload: {}", e);
+            crate::plugin_error!("session", "[Heartbeat] 触发失败：无法设置 payload: {}", e);
             return;
         }
 
         crate::plugin_info!(
             "session",
-            "触发会话 {} 的心跳任务（include_history={}）",
+            "[Heartbeat] 触发会话 {} 的心跳任务（include_history={}）",
             session_id,
             hb.include_history
         );
@@ -197,7 +197,7 @@ impl SessionPlugin {
         if let Err(e) = self.handle_chat_send_oneoff(Arc::new(ctx)).await {
             crate::plugin_error!(
                 "session",
-                "心跳触发失败：handle_chat_send_oneoff 返回错误: {}",
+                "[Heartbeat] 触发失败：handle_chat_send_oneoff 返回错误: {}",
                 e
             );
         }

@@ -19,7 +19,9 @@ use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
-use crate::symbio_core::turn::{execute_post_with_abort, parse_sse_stream, PostResult, TurnOutput};
+use crate::symbio_core::turn::{
+    endpoint_label, execute_post_with_abort, parse_sse_stream, PostResult, TurnOutput,
+};
 use crate::symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError, SseLineParser};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -84,20 +86,30 @@ impl ModelProvider for BoundProvider {
         // 执行期环境（出口 + 中止）由调用方一次给全，协议层只管自己的流。
         let sink = env.sink();
         let abort = env.abort();
-        // ①「LLM 请求发起」日志：每轮请求的起点打点，含模型、消息数、工具数。
-        // 后续所有阶段日志（受理/首包/首条内容/结束）均以本条为锚点串联成完整轨迹。
+        // ①「LLM 请求发起」日志：**每轮请求唯一的起点锚点**。后续所有阶段日志
+        // （响应头 / 首字节 / 首条内容 / 流结束）都以它为准串联成完整轨迹。
+        //
+        // 位置在**请求体构建之后**：这样一条日志即可同时承载「规模」与「出口」——
+        // 模型、消息数、工具数、根节点，加上实际端点与报文体量。此前这些信息被拆成
+        // 相邻两条同名「请求发起」（一条在此、一条在 `execute_post_with_abort` 内），
+        // 每次请求刷两行、语义重复，故合并为这一条。
         let turn_started = std::time::Instant::now();
-        plugin_info!(
-            "model",
-            "[LLM] 请求发起 (model={}, msgs={}, tools={}, root={})",
-            self.cfg.model,
-            messages.len(),
-            tools.len(),
-            root_id
-        );
         let body = self
             .protocol
             .prepare_request(&self.cfg, system_prompt, messages, tools);
+        // 体量需再序列化一次才能量出（POST 时 reqwest 内部还会序列化一次；
+        // 请求体在 20KB 量级，这点开销可忽略，换来「实际发出多少字节」这一硬指标）。
+        let body_bytes = serde_json::to_vec(&body).map(|v| v.len()).unwrap_or(0);
+        plugin_info!(
+            "model",
+            "[LLM] 请求发起 {} (model={}, msgs={}, tools={}, root={}, body={} bytes)",
+            endpoint_label(&self.protocol.get_api_url(&self.cfg)),
+            self.cfg.model,
+            messages.len(),
+            tools.len(),
+            root_id,
+            body_bytes
+        );
 
         let response = match execute_post_with_abort(
             &self.protocol.get_api_url(&self.cfg),

@@ -401,7 +401,7 @@ impl SessionPlugin {
                     break;
                 }
                 if std::time::Instant::now() >= deadline {
-                    crate::plugin_warn!("session", "abort: 中止信号未在 3s 内注销，强制收敛");
+                    crate::plugin_warn!("session", "[Abort] 中止信号未在 3s 内注销，强制收敛");
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;

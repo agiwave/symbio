@@ -69,12 +69,18 @@ impl McpPlugin {
 
         let plugin = Arc::new(McpPlugin::new(config, dir));
 
-        // 启动后异步触发：从存储加载（并触发首启动数据迁移）
+        // 启动后异步预热：从存储加载（并触发首启动数据迁移）。
+        //
+        // 走 `ensure_loaded` 而非直调 `load_from_storage`：两者是**同一份工作的两条入口**，
+        // 直接调用会各加载一次——两次磁盘读、两条「加载了 N 个 MCP Server」（本插件
+        // 每次请求都会 `ensure_loaded`，与这里预热时序竞争，日志里就出现重复行）。
+        // `ensure_loaded` 用「互斥 + 完成标志」把两条入口串成一次：先到者加载并置位，
+        // 后到者等在锁上、醒来见标志已置位即返回。
         let plugin_weak = Arc::downgrade(&plugin);
         let ctx_clone = ctx.clone();
         tokio::spawn(async move {
             if let Some(mcp) = plugin_weak.upgrade() {
-                mcp.load_from_storage(&ctx_clone).await;
+                mcp.ensure_loaded(&ctx_clone).await;
             }
         });
 

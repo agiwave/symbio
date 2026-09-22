@@ -18,6 +18,56 @@
 
 ***
 
+## 2026-09-22: 控制台日志降噪（含一处真实缺陷）与工具调用流式渲染修复
+
+**问题**：一次普通工具轮（文本 + 工具调用 + 收尾，两个 turn）在 CLI 上产生约 **70 行**
+stderr，其中真正承载信息的不到一半。逐项定位到五类噪声 + 一处工具调用「跑完才显示」
+的前端渲染失效。
+
+**改动**：
+
+1. **日志级别闸门（缺陷，非风格问题）**：插件日志宏在**没有 tracing subscriber** 时退回
+   `eprintln!` ——这条路径**没有任何过滤器**，`plugin_debug!` 会**无条件**打到 stderr。
+   CLI 刻意不装 subscriber（避免日志混进 stdout 的模型正文），于是启动期十几行机械细节
+   必然刷屏，且无法关闭。现在 `MIN_LEVEL` 闸门（默认 INFO）**只作用于这条路径**：
+   debug 静默；`--verbose` 或 `SYMBIO_LOG=<级别>` 放开；装了 subscriber 时过滤仍归
+   `EnvFilter`，App 行为不变。
+2. **`[model] 请求发起` 两行合一**：`bound_provider::execute_turn` 与
+   `turn::execute_post_with_abort` 各打一条**同名**日志，每次请求刷两行。合并为一条
+   （位置移到请求体构建之后），同一条即给出 端点 + 模型 + msgs/tools + root + 报文体量；
+   `turn.rs` 内那条、以及仅为它而存在的 `body_len` / `host` 计算一并删除（顺带省掉每次
+   请求一次多余的 JSON 序列化）。另修正两处**度量口径写错**的文案：`TTFB` → 「首字节延迟」、
+   `自请求发起` → 「自流建立」——两者都是从**流建立**起算，而非从请求发出起算。
+3. **composite 子插件构造日志降为 debug**：每插件一行、十几行连成串，是「启动刷屏」的
+   主要来源；排查装配问题时 `--verbose` 可见全量。
+4. **telegram 假告警**：容器会为每个必需插件补建一份只含**身份键**的 `PLUGIN.yml`，
+   `bot_token` 此时未声明 → 反序列化失败 → 插件把「尚未配置」报成「配置损坏」，
+   每次启动一条 WARN。`TelegramConfig` 加**结构级 `#[serde(default)]`**：缺键按字段默认值
+   补齐（`bot_token` 空即「未启用」，本就是最正常的初始状态）；只有 YAML 语法错误 /
+   类型不符这类**真损坏**才走 `Err`。
+5. **mcp 配置重复加载**：`build` 的异步预热直调 `load_from_storage`，与请求入口的
+   `ensure_loaded` 各加载一次——两次磁盘读 + 两行重复日志。预热改走 `ensure_loaded`
+   （互斥 + 完成标志），两条入口收敛成一次。
+6. **会话生命周期日志前缀统一**：`>>> NEW SESSION START` / `--- TURN 0 START ---` /
+   `Processing batch of ...` / `workdir watch stopped` / `Context compressed: ...` 等
+   装饰性写法与英文散句，统一为 `[Tag] 中文短句`（`[Session]` / `[Turn]` / `[Tool]` /
+   `[Compress]` / `[Heartbeat]` / `[Workdir]` / `[Abort]`）。约定与其**适用边界**
+   （仅当一个插件有多个阶段时才需要标签）写入 `logger.rs` 模块文档。
+   `[Turn] 第 N 轮开始` 顺带删掉恒为字面量 `0` 的 `tools=` 一栏（误导为「没有工具」）。
+7. **前端「工具调用要等跑完才显示」**：后端实测**是**流式的（`tool_call` 帧在 +170ms 首现，
+   参数经 `delta` 逐帧到达），问题在两处渲染失效——① 节点复用签名漏了 `meta` / `error`，
+   后端单发的 `meta.started_at` 状态帧因「签名未变」被跳过更新，永远进不了 DOM
+   （`recoverable` / `failure_kind` / `prompt` / `success` 同理）；② 收起态单行摘要只取
+   text/reasoning **子节点**，而 `ToolCall` 的参数存在**自身 `content`**，结果子节点到达前
+   整行空白——看起来就像「跑完才显示」。
+
+**验证**：`cargo test --workspace` **898 通过 / 0 失败**（基线同步上调）；`npx vitest run`
+**664 通过 / 46 spec**；`vue-tsc --noEmit` 与 eslint 通过；e2e **11/11**（T2 新增
+「MCP 配置只加载一次」断言）。同一场景 stderr **70 → 48 行**（−31%），且剩余行全部带
+统一标签。新增用例均验证过**修复前失败、修复后通过**。
+
+***
+
 ## 2026-09-22: 转写流帧收成一条 ChatMessage（S24）
 
 **问题**：消息实时面（`session/stream`）的帧上原本套着一层独立的「显式操作」枚举

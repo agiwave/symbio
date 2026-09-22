@@ -763,7 +763,7 @@ pub async fn process_tool_calls_async(
 
     plugin_info!(
         "session",
-        "Processing batch of {} tool calls (mode={})...",
+        "[Tool] 处理 {} 个工具调用（mode={}）",
         tool_calls.len(),
         mode
     );
@@ -816,7 +816,7 @@ pub async fn process_tool_calls_async(
             _ => {
                 plugin_error!(
                     "session",
-                    "Protocol Error: Tool call ID missing/invalid, recording as failed tool call"
+                    "[Tool] 协议错误：工具调用 ID 缺失/非法，记为失败调用"
                 );
                 record_protocol_failure(
                     sink,
@@ -862,7 +862,7 @@ pub async fn process_tool_calls_async(
             let truncated = raw.chars().count() > 400;
             plugin_error!(
                 "session",
-                "Protocol Error: Tool call arguments JSON parse failed, refusing to execute. ID: {id}, name: {name}"
+                "[Tool] 协议错误：工具调用参数 JSON 解析失败，拒绝执行。ID: {id}, name: {name}"
             );
             record_protocol_failure(
                 sink,

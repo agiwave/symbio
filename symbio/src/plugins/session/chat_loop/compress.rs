@@ -42,7 +42,7 @@ pub(crate) async fn auto_compress_process(
             if em.state.compression_should_skip().await {
                 plugin_warn!(
                     "session",
-                    "自动压缩熔断：连续失败已达阈值，本次跳过（冷却中），历史保持完整"
+                    "[Compress] 自动压缩熔断：连续失败已达阈值，本次跳过（冷却中），历史保持完整"
                 );
                 return Ok(None);
             }
@@ -293,8 +293,9 @@ async fn compress_snapshot_inner(
         //   本次回复"（前端错误条 + 重试入口）；
         // - RateLimited / 其他 → 消费循环非中止分支 → Failed + 错误原因。
         Err(e) => {
-            plugin_warn!("session",
-                "[Compress] {log_tag} compression failed ({}), falling back to uncompressed context",
+            plugin_warn!(
+                "session",
+                "[Compress] {log_tag} 压缩失败 ({})，回退到未压缩上下文",
                 e
             );
             context.messages = original_messages;
@@ -340,7 +341,7 @@ async fn compress_snapshot_inner(
         // 两次均未得到有效快照：保留原历史，禁止把未验证散文升级为唯一记忆。
         plugin_warn!(
             "session",
-            "[Compress] {log_tag}: invalid snapshot after retry; preserving history"
+            "[Compress] {log_tag}: 重试后快照仍无效，保留原历史"
         );
         context.messages = original_messages;
         return Err(CompressionFailure::InvalidSnapshot);

@@ -355,7 +355,7 @@ impl WorkdirWatchManager {
         let root = PathBuf::from(workdir);
         tokio::spawn(async move {
             if let Err(e) = w.start(root).await {
-                crate::plugin_error!("session", format!("workdir watch error: {e}"));
+                crate::plugin_error!("session", format!("[Workdir] 监听出错: {e}"));
             }
         });
         self.watchers.insert(workdir.to_string(), watcher);
@@ -406,7 +406,7 @@ impl WorkdirWatchManager {
             if still_empty {
                 containers.remove(&wd);
                 if let Some((_, watcher)) = watchers.remove(&wd) {
-                    crate::plugin_info!("session", "workdir watch stopped: {wd}");
+                    crate::plugin_info!("session", "[Workdir] 监听已停止: {wd}");
                     drop(watcher);
                 }
             }
