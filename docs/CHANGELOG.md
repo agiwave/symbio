@@ -18,6 +18,48 @@
 
 ***
 
+## 2026-09-22: 发送方向会话读取合并 —— 一次请求不再读 8 遍整份会话
+
+**问题**：给 `load_session` 加临时探针实测（真实 CLI，一次无工具调用的请求）
+显示**单次请求 8 次 `load_session`**。而 `load_session` 每次都把 **meta 与消息
+两个文件**整份读出——即使调用方只需要 `metadata` 里的一个字符串。其中四处读的是
+**同一份元数据**：`resolve_session_params`（mode / risk_level / provider_id）、
+workdir 解析、`agent_id` 解析、`ensure_auto_title`。
+
+分四次读不只是浪费 I/O，还**可能取到不一致的组合**：workdir 取自并发改动前、
+agent_id 取自改动后，本请求内的字段于是互相矛盾。
+
+**改动**（`orchestrator/entry.rs`）：
+
+1. 新增 `SessionSnapshot`：`resolve_session_params` 的返回值带上**本请求唯一一次**
+   会话读取，后面所有元数据回退都从这一份读。
+   - `workdir`：从 `params.meta_str("workdir")` 取，不再另外读一遍；
+   - `agent_id`：**提前到派发前**解析（原在派发任务内），从同一份快照取；
+   - `ensure_auto_title`：快照里**已有标题**就整趟跳过——该函数的常见分支是
+     "读一遍会话 → 发现已有标题 → 原样返回"，全部工作量就是那次读取。
+2. **等价性论证**（写进代码注释）：三个字段在本请求内不会被本请求改写
+   （`append_messages` 只改 `messages`，`ensure_auto_title` 只写 `metadata.title`），
+   因此派发前读与派发内读取值等价；反过来共用一份快照**更一致**。
+3. `has_title` 的判据与 `ensure_auto_title` 内部的提前返回**逐字对齐**
+   （`!s.trim().is_empty()`），由用例钉住——判错了就是"跳过 → 实际从未命名"
+   这种静默丢命名。
+
+**验证**：
+
+- `node scripts/gate.mjs` **32 / 32**；`cargo test --lib` **891 passed / 0 failed**
+  （887 → 891，+4，新建 `orchestrator/entry.test.rs`）。
+- 探针实测：新建会话 **8 → 7**（`agent_id` 那次省掉）；已有标题的会话
+  **8 → 6**（`agent_id` + `ensure_auto_title` 两次都省掉）；`EXIT=0`、输出完整。
+- 反向验证：`ensure_auto_title` 在新建会话上**仍会执行**（它要用刚落库的用户消息
+  派生标题），续会话时能跳过即证明上一次命名成功。
+
+**没省掉的（明确记账）**：`emit_persisted_message` 为拿存储分配的权威 `seq`、
+把整份消息读出来只为找一条——要省它得改 `ChatSession::append_messages` 的返回值，
+牵动 trait 与全部实现，不夹带在本批。两处写路径的读-改-写与每轮上下文读取
+**本就不该省**。
+
+***
+
 ## 2026-09-22: 转写核心日志折行 —— 时间线重新可读
 
 **问题**：`Transcript::emit` 的设计意图是「每帧一行，即时间线本身」，但 `Append`

@@ -3,7 +3,9 @@
 > 状态：**批次 A/B/C 已落地**（`cargo check --tests` 通过）；批次 D（异步工具并发）待授权；
 > **批次 E（执行期出口/信号双原语，§8）、批次 F（工具侧收敛到同一出口，§9）、
 > 批次 G（流式工具接上出口、执行期通道归零，§10）、批次 H（两个执行接口签名统一，§11）、
-> 批次 I（SSE 增量解析下沉到协议层，§12）与批次 J（工具调用协议封闭，§13）已落地**。
+> 批次 I（SSE 增量解析下沉到协议层，§12）与批次 J（工具调用协议封闭，§13）已落地**；
+> 其后又做了批次 K（转写核心日志折行，见 `node-state-streaming.md` §10）与
+> 批次 L（发送方向会话读取合并，§14）。
 > 这六批改的是**宿主层 / 执行层 / 协议层之间的协议**（`PluginChannel` 双职责拆为
 > `EventSink` + `AbortSignal`，工具不再把通道当事件流，执行层不再有帧循环，
 > `Capability::execute` 与 `ModelProvider::execute_turn` 收成同一形状，
@@ -1343,6 +1345,78 @@ SSE 行被逐字节切开（一行 809 字节、`SPLIT_CHUNK=1`），stdout 与 
 - **MCP 工具（走真实模型）**：`请调用 mcp__mocksrv__echo，text 传 symbio-mcp-ok` →
   `结果长度 22`，模型回答 `它返回的内容是：mcp-echo:symbio-mcp-ok`。
   即**模型自己使用线上名调用、正文正确回流**——两个 MCP bug 的修复在真实模型上确证。
+
+## 14. 批次 L：发送方向的会话读取合并（已落地）
+
+改的是 §1.1 的 **① 装配层**（`handle_chat_send_oneoff`）。
+
+### 14.1 问题：一次请求读 8 次整份会话
+
+给 `load_session` 加临时探针实测（真实 CLI + LMStudio，一次无工具调用的请求）：
+
+| 读取点 | 读什么 | 次数 |
+|---|---|---|
+| `resolve_session_params` | `metadata` 的 mode / risk_level / provider_id | 1 |
+| workdir 解析 | `metadata.workdir` | 1（`ctx[WORKDIR]` 缺失时） |
+| `agent_id` 解析 | `metadata.agent_id` | 1 |
+| `ensure_auto_title` | `metadata.title` + `messages` | 1 |
+| `emit_persisted_message` | `messages`（只为找**一条**刚落库的消息） | 1 |
+| `append_messages`（用户消息落库） | `messages`（读-改-写，必需） | 1 |
+| `get_context_messages`（每轮） | `messages`（必需） | 1 |
+| `persist_messages`（收尾落库） | `messages`（读-改-写，必需） | 1 |
+
+前四个读的是**同一份元数据**，却各触发一次 `get_or_create_session`；而
+`load_session` 每次都把 **meta 与消息两个文件整份读出**——即使调用方只需要
+`metadata` 里的一个字符串。
+
+### 14.2 改法：请求级会话快照
+
+新增 `SessionSnapshot`（`orchestrator/entry.rs`）：`resolve_session_params` 的
+返回值带上**本请求唯一一次**会话读取，后面所有元数据回退都从这一份读。
+
+- `workdir`：从 `params.meta_str("workdir")` 取，不再另外读；
+- `agent_id`：**提前到派发前**解析（原在派发任务内），从同一份快照取；
+- `ensure_auto_title`：快照里**已有标题**就整趟跳过（该函数的常见分支是
+  "读一遍会话 → 发现已有标题 → 原样返回"，全部工作量就是那次读取）。
+
+### 14.3 为什么安全（等价性论证）
+
+三个字段在本请求内**不会被本请求改写**——`append_messages` 只改 `messages`，
+`ensure_auto_title` 只写 `metadata.title`。因此派发前读一次与派发内读一次，
+取值等价。
+
+反过来，**共用一份快照比读三次更一致**：分三次读就可能取到被并发改动改写过的
+不同版本（workdir 取自改动前、agent_id 取自改动后）。
+
+`has_title` 的判据与 `ensure_auto_title` 内部的提前返回**逐字对齐**
+（`!s.trim().is_empty()`），由用例 `has_title_matches_the_ensure_auto_title_criterion`
+钉住——判错了就是"快照说已有标题 → 跳过 → 实际从未命名"这种静默丢命名。
+
+### 14.4 省掉了什么 / 没省掉什么（诚实记账）
+
+| | 新建会话 | 已有标题的会话 |
+|---|---|---|
+| 改前 | 8 | 8 |
+| 改后 | **7** | **6** |
+
+- 省掉：`agent_id` 那次读取（两种场景都省）；已有标题时 `ensure_auto_title`
+  那次也省；`ctx[WORKDIR]` 缺失时 workdir 那次也省。
+- **没省**：`ensure_auto_title` 在**新建会话**上仍要读一次——它要用刚落库的
+  用户消息派生标题，读是必需的（跳过只会让会话永远没有标题）。
+- **没省**：`emit_persisted_message` 那次——它为拿存储分配的权威 `seq`，
+  把整份消息读出来只为找一条。要省它得改 `ChatSession::append_messages` 的
+  返回值（让它把落库后的消息带回），牵动 trait 与全部实现，**不夹带在本批**。
+- **不该省**：三处 `messages` 读取（两处写路径的读-改-写、一处每轮上下文）——
+  它们必须在各自的时刻取最新值。
+
+### 14.5 验证
+
+- `node scripts/gate.mjs` **32 / 32**；`cargo test --lib` **891 passed / 0 failed**
+  （887 → 891，+4，新建 `orchestrator/entry.test.rs`）。
+- **CLI 端到端**（探针实测，同一提示词）：新建会话 8 → 7；已有标题的会话
+  **8 → 6**；两种场景 `EXIT=0`、输出完整。
+- 反向验证：改动期间 `ensure_auto_title` 仍在新建会话上执行，会话**确实被命名**
+  （续会话时已能跳过即证明上一次命名成功）。
 
 ---
 
