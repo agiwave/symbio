@@ -97,8 +97,24 @@ export function readMsrv(dir) {
 }
 
 /** 检测 cli 是否已有 release 构建（e2e 阶段的前置条件） */
-export function cliBinaryExists(repoRoot) {
-  return fs.existsSync(
-    path.join(repoRoot, 'cli', 'target', 'release', `symbio-cli${process.platform === 'win32' ? '.exe' : ''}`),
+/**
+ * CLI release 二进制的**唯一**路径算出处。
+ *
+ * ⚠️ 不是 `cli/target/`：`cli/.cargo/config.toml` 把 `target-dir` 指到
+ * `../symbio/target`（刻意共享 symbio 已预热的依赖缓存，离线环境下没有第二次
+ * 机会重新编译全部 C 依赖）。因此 `cli/target/` **永远不存在**，按它找会让
+ * 「二进制缺失 ⇒ 每次都重建」与「e2e 拿不到二进制 ⇒ 全用例失败」同时发生。
+ */
+export function cliBinaryPath(repoRoot) {
+  return path.join(
+    repoRoot,
+    'symbio',
+    'target',
+    'release',
+    `symbio-cli${process.platform === 'win32' ? '.exe' : ''}`,
   )
+}
+
+export function cliBinaryExists(repoRoot) {
+  return fs.existsSync(cliBinaryPath(repoRoot))
 }

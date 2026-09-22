@@ -14,8 +14,12 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const E2E_ROOT = resolve(HERE, '..');
-export const CLI_EXE = join(
-  E2E_ROOT, 'cli', 'target', 'release',
+// ⚠️ 不是 `cli/target/`：`cli/.cargo/config.toml` 把 `target-dir` 指到
+// `../symbio/target`（刻意共享 symbio 已预热的依赖缓存），所以 `cli/target/`
+// **永远不存在**——按它找会让全部用例以「退出码 -1、stderr 为空」失败，
+// 且看不出是路径问题。与 `scripts/gate.d/_shared.mjs::cliBinaryPath` 同源。
+export const CLI_EXE = process.env.E2E_CLI_EXE || join(
+  E2E_ROOT, 'symbio', 'target', 'release',
   `symbio-cli${process.platform === 'win32' ? '.exe' : ''}`,
 );
 export const MOCK_LLM = join(HERE, 'mock-llm.mjs');
@@ -167,6 +171,15 @@ export function cleanupHomedir(hd) {
  * 返回 { code, stdout, stderr }；stdout = 模型正文，stderr = 进度/工具/错误。
  */
 export function runCli({ homedir, workdir, message, provider = null, session = null, mode = 'auto', timeoutMs = 120_000, stdinText = null }) {
+  // 二进制缺失要**当场说清楚**：否则表现为 `code = -1` + 空 stderr，
+  // 与"CLI 崩了"无法区分，得翻源码才知道是路径写错了。
+  if (!existsSync(CLI_EXE)) {
+    throw new Error(
+      `CLI 二进制不存在：${CLI_EXE}\n` +
+        `先构建：node cli/scripts/build-cli.mjs（release 用 cargo build --release）；\n` +
+        `或经 E2E_CLI_EXE 指向既有二进制。`,
+    )
+  }
   const argv = [CLI_EXE, '--homedir', homedir, '--workdir', workdir, '--mode', mode];
   if (message != null) argv.push('-m', message);
   if (provider) argv.push('--provider', provider);
