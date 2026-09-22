@@ -149,3 +149,118 @@ fn node_event_wire_shape_is_a_message() {
     assert!(full["message"]["delta"].is_null());
     assert_eq!(full["message"]["content"], "全部");
 }
+
+// ============================================================================
+// 日志折行（`DeltaLogCoalescer`）
+//
+// 折行**只影响日志**：seq 分配与帧发布逐帧不变。下面这组用例一半在钉折行本身，
+// 一半在钉「折行没有碰到 seq 与图」这条边界——后者才是真正的风险所在。
+// ============================================================================
+
+/// 连续同 id 的纯增量折成一行：带 seq 区间、帧数、累计字符数。
+#[test]
+fn consecutive_deltas_on_one_node_collapse_into_a_single_line() {
+    let mut c = DeltaLogCoalescer::default();
+    // seq 4/5/6 三帧，字符 8+1+2
+    assert_eq!(c.feed(&delta_msg("a", "12345678"), 4), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "x"), 5), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "yz"), 6), (None, true));
+    // 显式冲刷
+    let line = c.flush().expect("待合并的 run 应被冲刷");
+    assert_eq!(line, "[T#4..6] a - Update 3 帧 / +11c");
+    assert_eq!(c.flush(), None, "冲刷是幂等的，不重复产出");
+}
+
+/// 换 id 立即冲刷上一段，并为新 id 开新 run。
+#[test]
+fn switching_node_flushes_the_previous_run() {
+    let mut c = DeltaLogCoalescer::default();
+    assert_eq!(c.feed(&delta_msg("a", "123"), 1), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "45"), 2), (None, true));
+    // 换 id：冲刷 a 的 run，b 自己开一段
+    let (flushed, absorbed) = c.feed(&delta_msg("b", "6"), 3);
+    assert_eq!(flushed.as_deref(), Some("[T#1..2] a - Update 2 帧 / +5c"));
+    assert!(absorbed, "纯增量帧总会被并入");
+    assert_eq!(c.flush().as_deref(), Some("[T#3] b - Update +1c"));
+}
+
+/// 非纯增量帧冲刷待合并的 run，且**自身不被并入**（它的行必须排在统计行之后）。
+#[test]
+fn a_non_delta_frame_flushes_the_run() {
+    let mut c = DeltaLogCoalescer::default();
+    assert_eq!(c.feed(&delta_msg("a", "12"), 1), (None, true));
+    assert_eq!(c.feed(&delta_msg("a", "34"), 2), (None, true));
+    // 终态帧（content、带 status）：冲刷统计行，自身不并入
+    let (flushed, absorbed) = c.feed(&text_msg("a", MessageStatus::Completed, "1234"), 3);
+    assert_eq!(flushed.as_deref(), Some("[T#1..2] a - Update 2 帧 / +4c"));
+    assert!(!absorbed, "带状态的帧要打自己的行");
+    assert_eq!(c.flush(), None, "非纯增量帧不留待合并状态");
+}
+
+/// 单帧 run 的形状与折行前**逐字相同**（只有一帧时日志形态不变）。
+#[test]
+fn a_single_frame_run_renders_exactly_like_before() {
+    let mut c = DeltaLogCoalescer::default();
+    assert_eq!(c.feed(&delta_msg("a", "abc"), 7), (None, true));
+    assert_eq!(c.flush().as_deref(), Some("[T#7] a - Update +3c"));
+}
+
+/// 折行**不改 seq、不改图**：同一串帧在带折行器的转写下，seq 与节点内容必须与
+/// 「逐帧发布」这一事实一致。
+///
+/// 这条是折行改动的真正风险边界——它把"日志优化"与"协议"分开。
+#[test]
+fn coalescing_does_not_touch_seq_or_the_graph() {
+    let frames: Vec<cm::ChatMessage> = vec![
+        text_msg("a", MessageStatus::Streaming, ""),
+        delta_msg("a", "你"),
+        delta_msg("a", "好"),
+        delta_msg("a", "世界"),
+        text_msg("a", MessageStatus::Completed, "你好世界"),
+        text_msg("b", MessageStatus::Streaming, ""),
+        delta_msg("b", "!"),
+        removed_msg("b"),
+    ];
+
+    let mut tr = Transcript::new("s1".into());
+    for f in frames {
+        tr.apply(f);
+    }
+
+    // 8 帧全部发布 ⇒ seq = 8（折行没有吞掉任何一帧的号）
+    assert_eq!(tr.seq, 8, "折行不得影响 seq 分配");
+    assert_eq!(tr.snapshot().len(), 1, "b 已被删除，在途图只剩 a");
+    match tr.get("a").unwrap().content {
+        Some(MessageContent::Text(ref t)) => {
+            assert_eq!(t, "你好世界", "content 帧整条替换")
+        }
+        _ => panic!("应为 Text"),
+    }
+    // 折行器在轮次收尾已被冲刷干净，不留残留状态
+    assert_eq!(
+        tr.delta_log.flush(),
+        None,
+        "apply 走完后不应残留待合并的 run"
+    );
+}
+
+/// `clear` 与 `persisted` 都是冲刷点：最后一段增量不会被吞掉。
+#[test]
+fn clear_and_persisted_flush_the_trailing_run() {
+    let mut tr = Transcript::new("s1".into());
+    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(delta_msg("a", "abc"));
+    tr.apply(delta_msg("a", "de"));
+    // clear 之后不得残留（轮次边界）
+    tr.clear();
+    assert_eq!(tr.delta_log.flush(), None, "clear 应冲刷最后一段");
+
+    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(delta_msg("a", "xy"));
+    tr.persisted(&["a".to_string()]);
+    assert_eq!(
+        tr.delta_log.flush(),
+        None,
+        "persisted（落库回执）应冲刷最后一段"
+    );
+}

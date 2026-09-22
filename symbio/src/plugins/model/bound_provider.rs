@@ -122,8 +122,8 @@ impl ModelProvider for BoundProvider {
                     turn_started.elapsed()
                 );
                 // 半截流的清除不在本层：返回错误后由 chat_loop 的重试分支对被废弃的
-                // Streaming 节点逐条发 `Change(status=removed)`（状态迁移，前端据此
-                // 移除视图），不再依赖已废除的一次性 Abort 事件帧。
+                // Streaming 节点逐条发**删除帧**（`status = removed` 的状态迁移，前端
+                // 据此移除视图），不再依赖已废除的一次性 Abort 事件帧。
                 return Err(PluginError::RetryWithoutContextId);
             }
             PostResult::Err(msg) => {

@@ -36,7 +36,7 @@ export default {
     tasks.push({
       label: 'cli: cargo build --release',
       when: () => ctx.ci || !cliBinaryExists(repoRoot),
-      skipNote: '已有 release 二进制（删除 cli/target 或 --ci 可强制重建）',
+      skipNote: '已有 release 二进制（删除 symbio/target/release 或 cli/target/release 或 --ci 可强制重建）',
       cmd: 'cargo',
       args: ['build', '--release'],
       cwd: cliDir,

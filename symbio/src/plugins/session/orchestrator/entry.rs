@@ -10,12 +10,76 @@
 //! 可见性：`handle_chat_send_oneoff` / `handle_chat_abort_oneoff` 被 `plugin.rs`
 //! 的路由与 `heartbeat.rs` 跨模块调用（原本即 `pub`）。
 
+use super::super::types::Session;
 use super::*;
+
+/// 一次 `chat/send` 的**请求级会话快照**：本请求唯一一次会话读取的结果，
+/// 加上从它解析出的 `provider_id`。
+///
+/// ## 为什么收成一份
+///
+/// 收口前，`provider_id`（`resolve_session_params`）、`workdir`（第 5 步）、
+/// `agent_id`（派发任务内）**各触发一次 `get_or_create_session`**。实测单次请求
+/// **8–11 次 `load_session`**，而 `load_session` 每次都把 meta 与消息**两个文件**
+/// 整份读出——这三处读的却是**同一份元数据**。
+///
+/// 共用一份快照不只是省 I/O，还让本请求内各字段**互相一致**：分三次读就可能取到
+/// 被并发改动改写过的不同版本（例如 workdir 取自改动前、agent_id 取自改动后）。
+///
+/// ## 为什么能在派发前一次性读完
+///
+/// 这三个字段在本请求内**不会被本请求改写**：`append_messages` 只改 `messages`，
+/// `ensure_auto_title` 只写 `metadata.title`。因此派发前读一次与派发内读一次，
+/// 对这三个字段取值等价。
+///
+/// ## `mode` / `risk_level` 不在这里
+///
+/// 它们由 `resolve_session_params` **只** `set` 进 ctx（下游经 `ctx.fork()` 继承），
+/// 调用方不需要它们——此前在调用点以 `_mode` / `_risk_level` 绑定即已说明这一点。
+/// 把无人读取的字段留在结构里只是让"它有用"的错觉代替事实。
+struct SessionSnapshot {
+    provider_id: Option<String>,
+    /// 元数据回退的**唯一数据源**（workdir 与 agent_id 都从这一份读）。
+    ///
+    /// 保留 `Result` 而不是 `Option`：读取**失败**与读取成功但**字段缺失**是两件事，
+    /// 两处的处置也不同——
+    /// - `workdir` 无处可退 ⇒ 必须报错并收场，且要区分「未绑定工作目录」与「读取失败」；
+    /// - `agent_id` 只降级（回退不可用不影响显式携带 agent_id 的请求），记一条 warn 即可。
+    session: Result<Session, PluginError>,
+}
+
+impl SessionSnapshot {
+    /// 从共享快照读一个字符串型元数据字段。读取失败与字段缺失都给 `None`。
+    fn meta_str(&self, key: &str) -> Option<String> {
+        self.session
+            .as_ref()
+            .ok()?
+            .metadata
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
+
+    /// 快照里**已经有标题**吗（`ensure_auto_title` 的提前返回判据）。
+    ///
+    /// `ensure_auto_title` 进门第一件事就是读一遍会话、发现已有标题、原样返回——
+    /// 也就是说"已有标题"这个最常见分支的全部工作量就是**一次整份读取**。
+    /// 而这本快照已经知道答案，于是调用方可以直接跳过整趟。
+    ///
+    /// 判据取自快照是安全的：`append_messages` 只改 `messages`，不会抹掉标题；
+    /// 快照说"没标题"时本函数返回 `false`，仍会照原样走一趟（此时确实需要
+    /// 重新读——要用刚落库的用户消息去派生标题）。
+    fn has_title(&self) -> bool {
+        self.meta_str("title")
+            .map(|t| !t.trim().is_empty())
+            .unwrap_or(false)
+    }
+}
 
 impl SessionPlugin {
     // ============ One-off 模式（统一事件总线场景）============
 
-    /// 统一解析会话参数（mode / risk_level / provider_id）。
+    /// 统一解析**元数据派生**的会话参数（mode / risk_level / provider_id）。
     ///
     /// 解析链（三者完全对称）：`req` 字段 > `session.metadata` > 默认值。
     /// - mode: 默认 `auto`
@@ -23,16 +87,19 @@ impl SessionPlugin {
     /// - provider_id: 默认 `none`（Model 插件使用默认 Provider）
     ///
     /// 解析结果同时 `set` 到 `ctx`，供下游 `chat_loop` / `continuation` 通过 `ctx.fork()` 继承。
-    /// 返回 `(mode, risk_level, provider_id)` 供调用方构造 `model_chat::Request` 时使用。
+    ///
+    /// 返回值额外带上**本次会话读取的结果**（[`SessionSnapshot::session`]）——它是本请求
+    /// 内元数据回退的**唯一数据源**，另两处回退（workdir / agent_id）都从这一份读。
+    /// 详见该字段的文档。
     async fn resolve_session_params(
         &self,
         ctx: &Arc<dyn InvokeRequest>,
         session_id: &str,
         req: &session_chat::Request,
-    ) -> (String, String, Option<String>) {
-        // 只调用一次 get_or_create_session，复用 session 对象取三个回退值
-        let session = self.get_or_create_session(session_id).await.ok();
-        let meta = session.as_ref().and_then(|s| s.metadata.as_object());
+    ) -> SessionSnapshot {
+        // 本请求**唯一一次**会话读取：三个回退值 + 下面两处回退共用这一份。
+        let session = self.get_or_create_session(session_id).await;
+        let meta = session.as_ref().ok().and_then(|s| s.metadata.as_object());
 
         let mode = req
             .mode
@@ -75,7 +142,10 @@ impl SessionPlugin {
             ctx.set(PROVIDER_ID, pid.clone());
         }
 
-        (mode, risk_level, provider_id)
+        SessionSnapshot {
+            provider_id,
+            session,
+        }
     }
 
     /// one-off 统一聊天入口（send + resume 共用）。
@@ -105,9 +175,11 @@ impl SessionPlugin {
         // 1. 统一 session_id 解析与校验（头 → 请求体 → 报错，见 resolve_required_session_id）
         let session_id = resolve_required_session_id(&ctx, req.session_id.as_deref())?;
 
-        // 2. 统一参数解析（mode/risk_level/provider_id）—— send 和 resume 共用
-        let (_mode, _risk_level, provider_id) =
-            self.resolve_session_params(&ctx, &session_id, &req).await;
+        // 2. 统一参数解析（mode/risk_level/provider_id）—— send 和 resume 共用。
+        //    返回值带着**本请求唯一一次**会话读取，下面 workdir / agent_id 的回退
+        //    都从这一份读（见 `SessionSnapshot` 的文档）。
+        let params = self.resolve_session_params(&ctx, &session_id, &req).await;
+        let provider_id = params.provider_id.clone();
 
         let state = self.active_mgr.get_or_create(&session_id).await;
         let parent = self
@@ -154,28 +226,20 @@ impl SessionPlugin {
         }
 
         // 5. workdir 解析（ctx.workdir > session.metadata.workdir）—— send 和 resume 共用
+        //
+        //    回退值取自 `params.session`（第 2 步那一次读取），**不再另外读一遍会话**：
+        //    两步之间没有任何写入，读第二次只是重放同一份数据。
         let workdir = match ctx.get(WORKDIR) {
             Some(w) if !w.is_empty() => w,
-            _ => match self.get_or_create_session(&session_id).await {
-                Ok(s) => match s
-                    .metadata
-                    .get("workdir")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                {
-                    Some(w) if !w.is_empty() => w,
-                    _ => {
-                        let msg = "会话未绑定工作目录，且上下文未提供".to_string();
-                        crate::plugin_error!("session", &msg);
-                        self.broadcast_error_with_idle(&state, msg).await;
-                        return Ok(PluginPayload::new(&json!({
-                            "status": "accepted",
-                            "session_id": session_id
-                        })));
-                    }
-                },
-                Err(e) => {
-                    let msg = format!("读取会话元数据失败: {}", e);
+            _ => match params.meta_str("workdir").filter(|w| !w.is_empty()) {
+                Some(w) => w,
+                None => {
+                    // 区分两种"拿不到"：读取失败 vs 读取成功但字段缺失。
+                    // 文案逐字不变——它们是用户可见的诊断。
+                    let msg = match &params.session {
+                        Err(e) => format!("读取会话元数据失败: {}", e),
+                        Ok(_) => "会话未绑定工作目录，且上下文未提供".to_string(),
+                    };
                     crate::plugin_error!("session", &msg);
                     self.broadcast_error_with_idle(&state, msg).await;
                     return Ok(PluginPayload::new(&json!({
@@ -196,6 +260,42 @@ impl SessionPlugin {
             inner.last_tool_calls.clear();
         }
 
+        // ── agent_id 解析（可选）──
+        // 优先级：请求显式指定 > 会话元数据绑定；两者皆缺 → 未选择智能体，
+        // 会话以"纯工具模式"运行（agent 插件不贡献任何工具，其余插件不受影响）。
+        //
+        // 回退值取自 `params.session`，与 workdir 共用那一次读取。原先这一步在
+        // 派发任务**内**再读一遍会话；而本请求内 `append_messages` 只改 `messages`、
+        // `ensure_auto_title` 只写 `metadata.title`，都不碰 `agent_id` ⇒ 派发前读与
+        // 派发内读取值等价，提前到此处即可省掉那一次整份读取。
+        let agent_id = match req
+            .agent_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(id) => Some(id.to_string()),
+            None => match &params.session {
+                Ok(s) => s
+                    .metadata
+                    .get("agent_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+                Err(e) => {
+                    // 元数据读取失败只影响"回退不可用"：按未选择处理并记日志，
+                    // 不阻断会话（显式携带 agent_id 的请求不受影响）。
+                    crate::plugin_warn!(
+                        "session",
+                        "读取会话元数据失败（agent_id 回退不可用）: {}",
+                        e
+                    );
+                    None
+                }
+            },
+        };
+
         // 7. spawn 统一任务（send 和 resume 共用 run_chat_loop_task）
         let parent_spawn = Arc::clone(&parent);
         let state_spawn = Arc::clone(&state);
@@ -204,7 +304,8 @@ impl SessionPlugin {
         let w_clone = workdir.clone();
         let ctx_spawn = ctx.fork();
         let pid_clone = provider_id.clone();
-        let agent_id_from_req = req.agent_id.clone();
+        let agent_id_spawn = agent_id.clone();
+        let has_title_spawn = params.has_title();
         let include_history = req.include_history;
         let resume_spawn = resume;
         let user_msg_spawn = user_msg;
@@ -257,36 +358,17 @@ impl SessionPlugin {
                     // 存储分配的权威 `seq`——两套序号空间并存正是「排序偶尔错位、
                     // 刷新才恢复」的根源（见 `emit_persisted_message` 的文档）。
                     this_spawn.emit_persisted_message(&sid_spawn, &msg.id).await;
-                    // 自动命名：首个用户消息落盘后，尚无标题的会话从内容生成并持久化
-                    this_spawn.ensure_auto_title(&sid_spawn).await;
+                    // 自动命名：首个用户消息落盘后，尚无标题的会话从内容生成并持久化。
+                    // 快照里已有标题 ⇒ 整趟跳过（`ensure_auto_title` 此时唯一的动作
+                    // 是"读一遍会话 → 发现已有标题 → 返回"，见 `SessionSnapshot::has_title`）。
+                    if !has_title_spawn {
+                        this_spawn.ensure_auto_title(&sid_spawn).await;
+                    }
                 }
             }
 
-            // ── agent_id 解析（可选）──
-            // 优先级：请求显式指定 > 会话元数据绑定；两者皆缺 → 未选择智能体，
-            // 会话以"纯工具模式"运行（agent 插件不贡献任何工具，其余插件不受影响）。
-            let agent_id = if let Some(id) = agent_id_from_req.filter(|s| !s.trim().is_empty()) {
-                Some(id)
-            } else {
-                match this_spawn.get_or_create_session(&sid_spawn).await {
-                    Ok(s) => s
-                        .metadata
-                        .get("agent_id")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty()),
-                    Err(e) => {
-                        // 元数据读取失败只影响"回退不可用"：按未选择处理并记日志，
-                        // 不阻断会话（显式携带 agent_id 的请求不受影响）。
-                        crate::plugin_warn!(
-                            "session",
-                            "读取会话元数据失败（agent_id 回退不可用）: {}",
-                            e
-                        );
-                        None
-                    }
-                }
-            };
+            // agent_id 已在派发前解析（与 workdir 共用那一次会话读取），此处直接用。
+            let agent_id = agent_id_spawn;
             let session_cfg = this_spawn.config.read().await.clone();
 
             // ── 会话编排核心：收集全部插件的工具（统一 traverse 机制）──
@@ -479,3 +561,7 @@ impl SessionPlugin {
         self.notify_session_state(session_id).await;
     }
 }
+
+#[cfg(test)]
+#[path = "entry.test.rs"]
+mod tests;

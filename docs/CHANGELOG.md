@@ -18,6 +18,38 @@
 
 ***
 
+## 2026-09-22: 转写流帧收成一条 ChatMessage（S24）
+
+**问题**：消息实时面（`session/stream`）的帧上原本套着一层独立的「显式操作」枚举
+（`NodeOp`：`upsert` / `append` / `remove` / `reset` / `warn`；S23 后收成单个 `Change`
+变元）。这层枚举里的字段（`message_id` / `delta` / `status` / 身份）**全是 `ChatMessage`
+已有的**——于是消费端要维护两套解析与两套合并规则，"这条消息现在是什么样"与
+"这帧说了什么"成了两份需要人工对齐的数据。
+
+**改动**：
+
+1. **帧就是一条 `ChatMessage`**：删除 `NodeOp` / `NodeChange`。落地动作只由字段给出——
+   `delta` 追加、`content` 整条替换、`status = removed` 就地移除、其余字段合并；
+   未知 id 用帧内信息建占位（帧自给自足）。
+2. **`ChatMessage.delta`**（新增）：增量字段，与 `content`（整条替换）**互斥**；
+   **上线但不落存储**（不完整的内容不持久化）。同帧携带两者是**协议违例**，写入点报错
+   丢弃（不发布、不占 `seq`，以免污染消费端的缺口检测）；`ensure_durable_states`
+   直接拒绝携带 `delta` 的消息。
+3. **删除 = 状态迁移 `MessageStatus::Removed`**（新增枚举值）：接收端就地移除；协议里
+   不再有 `remove` / `reset` 操作，「清空重读」由逐条删除表达。
+4. **告警下沉**：旧 `Warn` 变元移除——会话级告警改走 `TranscriptWriter::warn` 独立通道
+   （会话节点 VDFS watch 域），不再混在消息流里，也不再需要一个「死变元」占位。
+5. 前端 `sessions.applyTranscriptMessage` 成为后端 `Transcript::apply` 的镜像；
+   CLI `render.on_message` 按字段语义落地；e2e T9/T10/T11 迁移到新协议。
+6. **修复一处回归**：压缩节点终态原本发**状态帧**（`state_frame` 会剥掉正文），但该节点
+   正文从未经 `delta` 上线——前端于是停在占位文案直到重开会话。改为发完整消息帧
+   （`message_frame`），并在 T11 加断言钉住「终态应带结果正文」。
+
+**验证**：`node scripts/gate.mjs` 全绿；`cargo test --lib` 与前端 vitest 均通过
+（数值见 `scripts/gate.d/_shared.mjs` 基线）；e2e 11/11；跨栈镜像审计等门禁回归通过。
+
+***
+
 ## 2026-09-22: e2e 用例扩展至 11 个：压缩节点协议、WS 流式协议、节点状态机全景
 
 **问题**：e2e 框架（T1–T7）钉住了文本流、工具回路、失败收敛等基础契约，但三类
@@ -51,6 +83,81 @@
 6. **CI 新增 `e2e-check` job**：发现式运行全部用例（清单不维护，新增即纳入）。
 
 **验证**：`node e2e/run-tests.mjs` 11/11 全绿（约 13s）。
+
+***
+
+## 2026-09-22: 发送方向会话读取合并 —— 一次请求不再读 8 遍整份会话
+
+**问题**：给 `load_session` 加临时探针实测（真实 CLI，一次无工具调用的请求）
+显示**单次请求 8 次 `load_session`**。而 `load_session` 每次都把 **meta 与消息
+两个文件**整份读出——即使调用方只需要 `metadata` 里的一个字符串。其中四处读的是
+**同一份元数据**：`resolve_session_params`（mode / risk_level / provider_id）、
+workdir 解析、`agent_id` 解析、`ensure_auto_title`。
+
+分四次读不只是浪费 I/O，还**可能取到不一致的组合**：workdir 取自并发改动前、
+agent_id 取自改动后，本请求内的字段于是互相矛盾。
+
+**改动**（`orchestrator/entry.rs`）：
+
+1. 新增 `SessionSnapshot`：`resolve_session_params` 的返回值带上**本请求唯一一次**
+   会话读取，后面所有元数据回退都从这一份读。
+   - `workdir`：从 `params.meta_str("workdir")` 取，不再另外读一遍；
+   - `agent_id`：**提前到派发前**解析（原在派发任务内），从同一份快照取；
+   - `ensure_auto_title`：快照里**已有标题**就整趟跳过——该函数的常见分支是
+     "读一遍会话 → 发现已有标题 → 原样返回"，全部工作量就是那次读取。
+2. **等价性论证**（写进代码注释）：三个字段在本请求内不会被本请求改写
+   （`append_messages` 只改 `messages`，`ensure_auto_title` 只写 `metadata.title`），
+   因此派发前读与派发内读取值等价；反过来共用一份快照**更一致**。
+3. `has_title` 的判据与 `ensure_auto_title` 内部的提前返回**逐字对齐**
+   （`!s.trim().is_empty()`），由用例钉住——判错了就是"跳过 → 实际从未命名"
+   这种静默丢命名。
+
+**验证**：
+
+- `node scripts/gate.mjs` **32 / 32**；`cargo test --lib` **891 passed / 0 failed**
+  （887 → 891，+4，新建 `orchestrator/entry.test.rs`）。
+- 探针实测：新建会话 **8 → 7**（`agent_id` 那次省掉）；已有标题的会话
+  **8 → 6**（`agent_id` + `ensure_auto_title` 两次都省掉）；`EXIT=0`、输出完整。
+- 反向验证：`ensure_auto_title` 在新建会话上**仍会执行**（它要用刚落库的用户消息
+  派生标题），续会话时能跳过即证明上一次命名成功。
+
+**没省掉的（明确记账）**：`emit_persisted_message` 为拿存储分配的权威 `seq`、
+把整份消息读出来只为找一条——要省它得改 `ChatSession::append_messages` 的返回值，
+牵动 trait 与全部实现，不夹带在本批。两处写路径的读-改-写与每轮上下文读取
+**本就不该省**。
+
+***
+
+## 2026-09-22: 转写核心日志折行 —— 时间线重新可读
+
+**问题**：`Transcript::emit` 的设计意图是「每帧一行，即时间线本身」，但**纯流式增量**
+（帧带 `delta`、无状态迁移）是**逐 token** 产生的，一次回复的帧数由模型决定。实测一段
+约 200 字的回复产生 **580 行** `[T#N] <id> - Update +1c`，占该轮 stderr 的 **93%**
+（622 行里 587 行是帧日志）——时间线被同一件事填满，"工具什么时候开始跑的"要靠 `grep`
+才找得到。
+
+**改动**：
+
+1. 新增 `DeltaLogCoalescer`（`session/transcript.rs`）：相邻的、**同 `message.id`** 的
+   **纯增量**帧并入同一个 run，不逐帧产出日志行；换 id、该帧带了状态迁移 / 全量正文、
+   或显式冲刷（`persisted` / `clear`）时把 run 渲染成一行。状态帧（`Start` / `End` /
+   `Removed`）**一律不折**——它们才是时间线上的骨架。
+   - 单帧：`[T#7] a - Update +3c`（与折行前**逐字相同**）
+   - 多帧：`[T#4..473] a - Update 470 帧 / +470c`（带 seq 区间 / 帧数 / 累计字符）
+2. **`seq` 分配与 `publish_frame` 一行未动**——折行器只被 `emit` 用于决定日志。
+   这是本次改动的唯一风险边界，已由不变量 #28 与
+   `coalescing_does_not_touch_seq_or_the_graph` 用例钉住。
+3. 与 S24 的关系：折行器最初按 `NodeOp::Append` 认帧；S24 删除操作枚举后**改为按字段
+   认帧**（`delta` 有、`status` 无即纯增量），折行语义与边界不变。
+
+**验证**：
+
+- `node scripts/gate.mjs` 全绿；`cargo test --lib` 通过数见 `scripts/gate.d/_shared.mjs`。
+- 实测：stderr **622 → 44 行**，帧日志 **587 → 9 行**。折行后的时间线一眼可见结构。
+- **CLI 端到端（确定性）**：`mock-chat-split` 场景（单行逐字节写出）stdout 与期望文本
+  **逐字节一致**；数百个增量帧折成 1 行，`seq` 连续无缺口。
+
+***
 
 ## 2026-09-22: 工具调用协议封闭 + 端到端照出两个 MCP 真 bug
 

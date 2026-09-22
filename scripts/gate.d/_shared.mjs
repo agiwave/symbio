@@ -12,17 +12,18 @@ import { stripAnsi } from '../color.mjs'
 /**
  * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
  *
- * 884：S24 收口——转写流帧收成一条 `ChatMessage`：删除 `NodeOp` / `NodeChange`，
+ * 894：S24 收口——转写流帧收成一条 `ChatMessage`：删除 `NodeOp` / `NodeChange`，
  *      `delta`（增量，与 `content` 互斥）与 `status = removed`（删除状态迁移）落到
- *      `ChatMessage` 上，告警下沉为 `TranscriptWriter::warn`；相应新增/重排了
- *      消息合并、删除帧、压缩终态、转写往返等用例（含一处 `state_frame` → `message_frame`
- *      回归修复的锁定用例）。
+ *      `ChatMessage` 上，告警下沉为 `TranscriptWriter::warn`；转写核心日志的「纯增量」
+ *      折行（`DeltaLogCoalescer`）与请求级会话快照的回退判据一并落地。相应新增/重排了
+ *      消息合并、删除帧、压缩终态、转写往返、折行边界（`seq`/图不受影响）、快照回退
+ *      判据等用例（含一处 `state_frame` → `message_frame` 回归修复的锁定用例）。
  * 881：v1→v2 迁移 + 节点状态流 S20~S23 + 压缩消息流化 + 中止收口终态化 + 协议
  *      增量提取器逐字节回归 + tool_name 线上名投影 + MCP camelCase/载荷语义网 +
  *      extract_result 判定顺序。逐批明细见 docs/CHANGELOG.md 的对应条目。
  */
 export const BASELINE = {
-  rustTests: 884,
+  rustTests: 894,
   // 46 spec 文件 / 661 用例。文件数与用例数均与平台无关（全仓 spec 零平台分支、
   // it.each 只遍历静态常量数组），照实测值钉死；逐批明细见 docs/CHANGELOG.md。
   vitestFiles: 46,
@@ -100,8 +101,27 @@ export function readMsrv(dir) {
 }
 
 /** 检测 cli 是否已有 release 构建（e2e 阶段的前置条件） */
+/**
+ * CLI release 二进制的**唯一**路径算出处。
+ *
+ * ⚠️ 产物落在哪个 target 目录**取决于本机 `cli/.cargo/config.toml`**——它被
+ * `cli/.gitignore` 忽略（内容是机器相关的绝对路径），作用是把 `build.target-dir`
+ * 指到 `../symbio/target` 以共享 symbio 已预热的依赖缓存（离线环境下没有第二次
+ * 机会重新编译全部 C 依赖）。**因此不能写死任一位置**：有该配置时产物在
+ * `symbio/target/`，没有时在 `cli/target/`——两个候选都探，取实际存在者。
+ *
+ * 写死单一位置会让「二进制找不到 ⇒ 每次都判定缺失」与「e2e 拿不到二进制 ⇒ 全用例
+ * 失败（且失败形态是 -1 + 空 stderr，与崩溃无法区分）」同时发生。
+ */
+export function cliBinaryPath(repoRoot) {
+  const exe = `symbio-cli${process.platform === 'win32' ? '.exe' : ''}`
+  const candidates = [
+    path.join(repoRoot, 'symbio', 'target', 'release', exe),
+    path.join(repoRoot, 'cli', 'target', 'release', exe),
+  ]
+  return candidates.find((p) => fs.existsSync(p)) ?? candidates[0]
+}
+
 export function cliBinaryExists(repoRoot) {
-  return fs.existsSync(
-    path.join(repoRoot, 'cli', 'target', 'release', `symbio-cli${process.platform === 'win32' ? '.exe' : ''}`),
-  )
+  return fs.existsSync(cliBinaryPath(repoRoot))
 }
