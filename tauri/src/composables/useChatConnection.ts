@@ -152,7 +152,21 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // 被复用，渲染器按旧 type 分派（Reason 块不渲染 / 工具名缺失）。
     // id 也在签名里：子节点签名以其 id 打头，「换成一个同内容的子节点」同样
     // 必须使祖先签名变化（否则被换掉的子节点在界面上永远不出现）。
-    const own = `${msg.id}|${msg.type ?? ''}|${msg.name ?? ''}|${msg.status ?? ''}|${parentId ?? ''}|${messageTextOf(msg.content)}`
+    //
+    // `meta` / `error` 同样必须进签名——**它们都会改变渲染结果**，而帧可以
+    // 「只改这两者、不动其它字段」：
+    // - `meta.started_at`（工具开始执行那一刻写入）：它只随一条状态帧到达，
+    //   该帧不改内容也不改状态 ⇒ 签名不变 ⇒ 缓存节点被复用 ⇒ 前端读到的
+    //   `meta` 仍是旧值 ⇒ **「运行中 12s」的秒数永远不出现**（工具行只显示
+    //   「运行中」，用户无从判断是还在跑还是卡住了），直到下一次真实内容变化
+    //   才补上——那时工具往往已经结束；
+    // - `meta.recoverable` / `failure_kind` / `prompt` / `success`：分别决定
+    //   重试入口、兜底文案、待响应表单、结果成败，同样都由「只改 meta」的帧
+    //   下发；
+    // - `error`：失败原因文本。
+    // meta 是后端 flatten 出来的浅 JSON，序列化成本远低于一次错误的全量重渲染。
+    const meta = msg.meta === undefined ? '' : JSON.stringify(msg.meta)
+    const own = `${msg.id}|${msg.type ?? ''}|${msg.name ?? ''}|${msg.status ?? ''}|${parentId ?? ''}|${messageTextOf(msg.content)}|${msg.error ?? ''}|${meta}`
     const sub = children
       ? children.map((child) => (child as { __sig?: string }).__sig ?? '').join(',')
       : ''

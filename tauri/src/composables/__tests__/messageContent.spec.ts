@@ -99,6 +99,21 @@ describe('收起态单行摘要', () => {
     expect(messageSummaryPreviewOf(node, false)).toBe('{"args":1}')
   })
 
+  it('分组节点**尚无 text/reasoning 子节点**时回落到自身正文（运行中工具的请求参数）', () => {
+    // ToolCall 的参数就存在自身 content 里，且结果子节点到达之前它没有任何
+    // text/reasoning 子节点。此处分组分支若只看子节点，运行中的工具行会一片空白
+    // ——参数已逐帧流到本地，界面却要等结果到达才第一次显示文字。
+    const running = { id: 'tc', content: '{"path":"a.rs"}', children: [] }
+    expect(messageSummaryPreviewOf(running, true)).toBe('{"path":"a.rs"}')
+    // 子节点到达后仍以子节点为准（结果预览优先）
+    const settled = {
+      id: 'tc',
+      content: '{"path":"a.rs"}',
+      children: [{ id: 'res', type: 'text' as const, content: '文件内容' }],
+    }
+    expect(messageSummaryPreviewOf(settled, true)).toBe('文件内容')
+  })
+
   it('空白折叠成单空格；超长按上限截断并加省略号', () => {
     expect(messageSummaryPreviewOf({ id: 'x', content: '  a\n\n  b  ' }, false)).toBe('a b')
     const long = 'x'.repeat(MESSAGE_PREVIEW_MAX + 50)

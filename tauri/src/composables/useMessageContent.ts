@@ -120,8 +120,17 @@ export function messageRenderAsJsonOf(
 /**
  * 收起态的单行摘要。
  *
- * 分组节点（Turn / 工具调用）取**首个文本或思考子节点**的内容——容器自身没有正文；
- * 其余节点取自身正文。用于深层级 / 子步骤默认收起时让用户无需展开即知概要。
+ * 分组节点（Turn / 工具调用）优先取**首个文本或思考子节点**的内容——容器自身
+ * 通常没有正文。
+ *
+ * 但取不到这样的子节点时**回落节点自身正文**，不能直接留白：`ToolCall` 的
+ * **请求参数就存在它自己的 `content` 里**（参数不分独立子节点，见
+ * `ToolCallNode.vue` 文件头），而它在收到工具结果之前**没有任何 text/reasoning
+ * 子节点**。若分组分支只看子节点，"运行中的工具行"就会是一片空白——参数明明
+ * 已经逐帧流到本地，界面上却要等到结果子节点到达才第一次显示文字，看起来就像
+ * 「工具调用要等跑完才显示」。
+ *
+ * 用于深层级 / 子步骤默认收起时让用户无需展开即知概要。
  */
 export function messageSummaryPreviewOf(node: ChatMessage, grouped: boolean): string {
   let source = ''
@@ -129,7 +138,7 @@ export function messageSummaryPreviewOf(node: ChatMessage, grouped: boolean): st
     const first = (node.children || []).find(
       (c) => c.type === MESSAGE_TYPE_TEXT || c.type === MESSAGE_TYPE_REASONING,
     )
-    source = messageTextOf(first?.content)
+    source = messageTextOf(first?.content) || messageTextOf(node.content)
   } else {
     source = messageTextOf(node.content)
   }

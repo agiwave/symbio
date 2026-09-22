@@ -369,3 +369,95 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
     expect(w.text(), '状态帧不得把思考正文抹掉').toContain('思考内容')
   })
 })
+
+/**
+ * 渲染层回归：**工具调用**的可见性（对照 e2e 实测帧序列）。
+ *
+ * e2e 抓到的真实帧序（相对时刻，mock `chunkDelayMs: 400`）：
+ *
+ * ```
+ * +168ms  turn        streaming            ← Turn 根
+ * +170ms  tool_call   streaming content="" ← 工具调用节点首帧（名字已知，参数尚无）
+ * +570ms  delta       {"text":"m           ← 参数窄增量
+ * +984ms  delta       ock 回显内容"}       ← 参数窄增量（至此参数完整）
+ * +1798ms tool_call   streaming meta.started_at ← **只改 meta 的状态帧**
+ * +1838ms tool result completed            ← 结果子节点
+ * +1838ms tool_call   completed
+ * ```
+ *
+ * 三条钉住的约定：
+ * 1. 工具行**在首帧即出现**（不等参数、不等执行完）——这是"流模式"的直接体现；
+ * 2. 运行中参数**在收起态就能看到**（`ToolCall` 的参数在自身 content 里，回落自身
+ *    正文作单行摘要）——否则运行中一行空白，看起来像"跑完才显示"；
+ * 3. **只改 `meta` 的帧必须进 DOM**（`started_at` ⇒ 「运行中 5s」的秒数）——
+ *    节点复用签名若不含 `meta`，"还在跑"与"卡死了"就无从区分。
+ */
+describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测帧序）', () => {
+  const Panel = defineComponent({
+    props: { sessionId: { type: String, required: true } },
+    setup(props) {
+      const chat = useChatConnection({ sessionId: props.sessionId })
+      return () =>
+        chat.messageTree.value.map((n) => h(MessageNode, { node: n, depth: 0, key: n.id }))
+    },
+  })
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    seq = 0
+    stopTranscriptStream()
+    void startTranscriptStream(storeSink())
+  })
+
+  it('工具行在首帧即出现，参数增量在收起态可见（不等执行完）', async () => {
+    const w = mount(Panel, { props: { sessionId: SID } })
+    applyNodeEvent(frame({ id: 'U1', role: 'user', type: 'text', content: '调用工具' }))
+    applyNodeEvent(frame(turn('T1')))
+    await nextTick()
+    expect(w.findAll('.turn-pending').length, '尚无子节点 → 等待骨架').toBe(1)
+
+    // 首帧：名字已知、参数为空
+    applyNodeEvent(frame(toolCall('TC1', 'T1', 'mcp__mockserv__echo', '')))
+    await nextTick()
+    expect(w.findAll('.type-tool_call').length, '工具行必须在首帧就出现').toBe(1)
+    expect(w.text()).toContain('mcp__mockserv__echo')
+    expect(w.findAll('.turn-pending').length, '有子节点后骨架消失').toBe(0)
+
+    // 参数窄增量：收起态的单行摘要必须跟着长
+    applyNodeEvent(append('TC1', '{"text":"m'))
+    await nextTick()
+    applyNodeEvent(append('TC1', 'ock 回显内容"}'))
+    await nextTick()
+    expect(
+      w.find('.type-tool_call .node-preview').text(),
+      '运行中参数必须可见（否则看起来像"跑完才显示"）',
+    ).toContain('mock 回显内容')
+  })
+
+  it('只改 meta 的状态帧必须进 DOM（运行中秒数）', async () => {
+    const w = mount(Panel, { props: { sessionId: SID } })
+    applyNodeEvent(frame(turn('T1')))
+    applyNodeEvent(frame(toolCall('TC1', 'T1', 'read_file', '{"path":"a.rs"}')))
+    await nextTick()
+    expect(w.find('.tag-elapsed').exists(), '尚无 started_at → 不编一个时长').toBe(false)
+
+    // 后端在"工具开始执行那一刻"单独发一条**只带 meta** 的帧
+    applyNodeEvent(
+      frame({
+        id: 'TC1',
+        parent_id: 'T1',
+        role: 'assistant',
+        type: 'tool_call',
+        name: 'read_file',
+        status: 'streaming',
+        meta: { started_at: Date.now() - 5000 },
+      } as ChatMessage),
+    )
+    await nextTick()
+    expect(
+      w.find('.tag-elapsed').exists(),
+      'meta 不进签名 ⇒ 缓存节点被复用 ⇒ 这个秒数永远不会出现',
+    ).toBe(true)
+    expect(w.find('.tag-elapsed').text()).toMatch(/^\d+s$/)
+  })
+})
