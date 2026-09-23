@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * 流式端到端复现测试：真实 store → 转写流收敛 → 树构建（复刻
+ * 流式端到端复现测试：真实 store → 实时变更收敛 → 树构建（复刻
  * useChatConnection.messageTree 的分形逻辑）→ MessageNode 渲染。
  *
  * 目的：复现"长会话流模式下 Reason 块不结束 / 后续内容显示进 Reason / Turn 不显示"

@@ -23,7 +23,7 @@
 //!
 //! 同一件事**逐帧 / 逐次**重复的日志（流式增量、每帧状态、每轮扫描）默认沉到 `DEBUG`，
 //! `INFO` 只留**骨架**——开始、结束、异常、等待人介入。参照 `session` 的转写核心日志
-//! （`plugins/session/docs/node-state-streaming.md` §10.5）：同一场景默认输出 14 行、
+//! （`plugins/session/docs/node-state-streaming.md` §10.4）：同一场景默认输出 14 行、
 //! `debug` 19 行，多出来的正是过程量。
 //!
 //! ## 级别与过滤

@@ -628,39 +628,21 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
 - **三条残留假设写进文档**（不假装没有）：总线是单条有序通道；`list` 快照只能把
   `active` 升级为 `working`、不得降级；`appended` 依赖路径级串行。前两条是既有的，
   第三条是增量语义的固有属性。
-  > **后记（批次 G，2026-09-22）：第三条已不成立。** `appended` 这个取值连同它的
-  > `delta` 载荷**已删除**（无生产性生产者），路径级串行的前提随之消失。剩下两条里，
-  > 第一条也不再是承载**顺序敏感状态**的通道——运行态与消息都改走转写流（见本 ADR
-  > 的「当前状态」），`kind = "vdfs"` 只剩幂等重拉类的资源变更。
-  > **再后记（S26 / ADR-025，2026-09-23）：第三条**又**成立了**——`delta` 随消息域
-  > 回到 `updated` 上，而它依赖的正是**路径级串行**（同一文件的内容只由单写入者追加）。
-  > 第二条（`list` 快照只升不降）也随之**不再需要**：运行态与消息都是 VDFS 变更，
-  > 快照一律靠**回读**（幂等、永远最新），不再有「快照 vs 流」的竞争。
-  > 第一条（单条有序通道）仍是事实描述，但**不再是任何推理的前提**——顺序是节点属性。
-- **`kind = "session"` 已整体删除**（S22 补完）：最后两个进程内消费者——`agent/host/subagent.rs`
+  > **后记（2026-09-23，ADR-025 之后）：三条的现状——** 第三条（增量载荷依赖路径级
+  > 串行）**成立**：`delta` 回到变更载荷上，依赖的正是**路径级串行**（同一文件的内容
+  > 只由单写入者追加）。第二条（`list` 快照只升不降）**不再需要**：快照一律靠**回读**
+  > （幂等、永远最新），不再有「快照 vs 流」的竞争。第一条（单条有序通道）仍是事实
+  > 描述，但**不再是任何推理的前提**——顺序是节点属性。
+- **`kind = "session"` 已整体删除**（S22 补完）：进程内消费者——`agent/host/subagent.rs`
   的审批透传 / 文本累积与 `cli/src/client.rs` 的渲染 / 完成判定——都改成「订阅总线 +
-  `vdfs/watch` 登记」后消费 VDFS 变更。这带来一个**共享层新增**：`created` / `updated` 的
-  载荷是**全量**，而消息补丁是**增量**（`ChatMessage::apply_patch`），折算必须只有一处实现，
-  故两种投影落在 `symbio_core::schemas::session::transcript`（进程内消费者唯一可达的共同层）。
-  完成判据也随之从「等 `Status idle` 帧」改为「读会话节点的 `status`」——同一个判据在前端、
-  subagent、CLI 三处首次真正同源。
-  > **后记（S23 续，2026-09-21）：本条措辞已被后续两步取代。**
-  > ① 消息的实时面不再是 VDFS 变更，而是 `session/stream` 转写流（`NodeOp` 显式操作
-  > ＋ 会话内单调 `seq`）——「全量 vs 增量」的折算问题随之消失，
-  > `symbio_core::schemas::session::transcript`（逆投影 + `TranscriptPatchBuilder`）
-  > **已删除**。② `agent/host/subagent.rs` 的转播桥也已改订转写流（消息）＋ VDFS
-  > （仅会话运行态）；`cli/src/client.rs` 早已如此。**「读会话节点 `status` 判本轮结束」**
-  > 这条结论不变，仍是三处同源。
-  > **再后记（S24 续）：** 上述 `NodeOp` 也已删除——转写流每帧的载荷直接就是一条
-  > `ChatMessage`（`delta` 追加 / `content` 整条替换 / `status = removed` 删除），会话级
-  > 告警下沉为 `TranscriptWriter::warn` 独立通道。见
-  > `symbio/src/plugins/session/docs/node-state-streaming.md` §6。
-  > **三后记（S26 / ADR-025，2026-09-23）：这条又被反转回去了。** 消息的实时面**回到**
-  > VDFS 变更（`updated` + `delta`），`session/stream` 与 `symbio_core::transcript_stream`
-  > 退役。① 中删除的 `transcript` 折算层**没有回来**——因为形态变了：不再是「全量快照
-  > vs 增量补丁」需要折算，而是「`delta` = 尾部追加 / 无 `delta` = 回读」，**不需要折算**。
-  > ② 转播桥回到 `event_bus` + `vdfs/watch`。**「读会话节点 `status` 判本轮结束」这条
-  > 结论依旧不变**（三处同源），只是它现在走 VDFS 变更。
+  `vdfs/watch` 登记」后消费 VDFS 变更。完成判据也随之从「等 `Status idle` 帧」改为
+  「读会话节点的 `status`」——同一个判据在前端、subagent、CLI 三处首次真正同源。
+  > **后记（2026-09-23）：** 消息的实时面中途曾改走 `session/stream` 转写流，并在那里
+  > 引出过一个折算层 `symbio_core::schemas::session::transcript`（全量视图与增量补丁
+  > 折成一种形态）。**该形态已按 ADR-025 整体撤销**——转写流与折算层均已删除，消息与
+  > 运行态同走 `kind = "vdfs"`，按载荷形状（`delta` 追加 / `content` 替换 / 无载荷回读）
+  > 落地，**不需要折算**。上面两条结论（`kind = "session"` 的处置、「读会话节点
+  > `status` 判本轮结束」）都不变。
 - **词汇不合并**：`streaming`（消息）与 `working`（会话）保持两个词。合并会连带改
   `status-*` CSS 类名与 `isWorkingStatus()`，而**漏改 CSS 类名不报错、不失败，只会让
   流式动画静默消失**——正是"体验不得变差"要防的那类回归。
@@ -1031,7 +1013,7 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
 > `session/orchestrator/sink.rs::TranscriptSink`；`ControlSignal` 协议面已删除；
 > 消费循环改写为 `orchestrator/consume.rs` 的 `spawn + select!` 三臂。
 > 机制细节见 [`symbio/src/plugins/session/docs/core-loop.md`](../symbio/src/plugins/session/docs/core-loop.md)
-> §8（双原语）与 §9（工具侧收敛）。
+> §6（双原语）与 §7（工具侧收敛）。
 > 门禁 32/32、`cargo test --lib` 811 passed、CLI 端到端四场景通过。
 
 **背景**：
@@ -1637,7 +1619,7 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
 落在多处文档，已一并纠正——`docs/design/vdfs.md` §9、`vdfs_provider.rs` 的「变更通知」、
 `docs/reference/ROUTES.md`、`docs/design/http-api-transport.md` §5.3、
 `docs/architecture/PROTOCOLS.md` / `DATA_FLOW.md`、`docs/design/vdfs-frontend.md`、
-`session/docs/node-state-streaming.md`（§8 不变量 #10/#20、§11.7）、
+`session/docs/node-state-streaming.md`（§8 不变量 #10 / #20）、
 `session/docs/vdfs-session-messages.md`（S26 续）、`session/docs/core-loop.md`、
 `docs/archive/legacy-route-migration.md`、`cli/docs/architecture.md`、`cli/src/client.rs`
 模块文档、`VdfsMessageDetail.vue` 头注释，以及两份评审文档的**后记**。

@@ -557,11 +557,11 @@ impl vdfs::VdfsProvider for SessionPlugin {
                  如需清空，请向 `{}` 写入空内容。",
                 crate::symbio_core::AGENTS_FILE
             ))),
-            // 转写区段（列表与单条）**不可 delete**：它的两种删除语义各有自己的动作，
-            // 而 `delete` 的全局语义是「**这一个**节点没了」（→ `deleted` 变更）。
-            // 「从这里到末尾全没了」是 `truncated`（落在起始消息上）、「整个列表空了」
-            // 是 `deleted`（落在列表目录上）——动作不共用一个动词，
-            // 见 `VDFS_ACTION_TRUNCATE` 的文档。
+            // 转写区段（列表与单条）**不可 delete**：`delete` 的全局语义是
+            // 「**这一个**节点没了」，而转写有两种**集合**删除语义，各有自己的动作：
+            // 「从这里到末尾全没了」是 [`VDFS_ACTION_TRUNCATE`]（落在起始消息上）、
+            // 「整个列表空了」是 [`VDFS_ACTION_CLEAR`]（落在列表目录上）。
+            // 动作不共用一个动词——理由见 `VDFS_ACTION_TRUNCATE` 的文档。
             VdfsSessionPath::Messages { .. } => Err(vdfs::VdfsError::Forbidden(format!(
                 "转写区段不可 delete：清空列表请用 action(\"{clear}\")，\
                  删除某条及其之后请用 action(\"{truncate}\")：{path}",
@@ -578,20 +578,19 @@ impl vdfs::VdfsProvider for SessionPlugin {
     ///
     /// | 路径 | 动作 | 语义 | 变更 | `data` |
     /// |---|---|---|---|---|
-    /// | `<id>/message/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 逐条 `deleted` | 被删 id 列表 |
-    /// | `<id>/message` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 逐条 `deleted` | 无 |
+    /// | `<id>/message/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 逐条移除帧 | 被删 id 列表 |
+    /// | `<id>/message` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 逐条移除帧 | 无 |
     ///
-    /// ## 为什么是**逐条**下发，而不是「列表目录一条 `deleted`」
+    /// ## 为什么是**逐条**下发，而不是「列表目录整份重读」
     ///
-    /// 删除帧是**元数据**（路径 + 取值，每条几十字节），而「清空 + 从存储整份重读」
+    /// 移除帧是**元数据**（路径 + 状态，每条几十字节），而「清空 + 从存储整份重读」
     /// 会把所有**保留的**消息都重传一遍：对「删几条」这个动作，逐条通知恰恰是
     /// 更便宜的形态。**权威的被删 id 列表走回执 `data`**：调用方据此幂等对齐，
     /// 不依赖任何推送。
     ///
-    /// 变更落在 VDFS 上（`<sid>/message/<mid>` 的 `deleted`），与消息流式
-    /// （`updated` + `delta`）、会话运行态（`<sid>` 的 `updated`）**同一条通道**
-    /// ——ADR-025：`session/stream` 转写流已退役，实时面与历史面是同一条
-    /// `vdfs/watch`。
+    /// 移除帧走的是与流式增量、会话运行态**同一条通道**（`vdfs/watch` 登记的那张
+    /// 订阅表）：移除的表达是 `ChatMessage.status = removed` 的载荷，落在被删消息
+    /// **自身的地址**上——信封上没有 `deleted` 这个取值可用，也不需要它。
     ///
     /// 为什么是动作而不是 `delete`：见 [`VDFS_ACTION_TRUNCATE`] 的文档
     /// （`delete` 是**逐节点**语义，表达不了"删一个节点却删掉了它后面所有"）。

@@ -1,15 +1,15 @@
 // @vitest-environment happy-dom
 /**
- * sessions store —— 清单收敛（VDFS）与运行态收敛（转写流）
+ * sessions store —— 清单收敛与运行态收敛
  *
  * 覆盖两条**互不重叠**的约定：
  *
- * 1. **清单只认 VDFS 的粗粒度信号**：作用域按**展示地址前缀**分流（`@vfs/session`
+ * 1. **清单只认无载荷的资源信号**：作用域按**展示地址前缀**分流（`@vfs/session`
  *    的直接子项 = 会话叶子；转写列表项 / 子会话的变更不进侧栏）。
- *    - `updated` / `created` → 防抖重拉清单（**不看载荷**：这条通道不带节点快照）；
- *    - `deleted` → 本地即时移除；
- *    - 且 `updated` **不得**改运行态（快照只有有序来源，见 `sessionNodeSync` 文档）。
- * 2. **运行态只认转写流的运行态帧**（`applySessionState`）：状态 / 结局 / 错误 /
+ *    - 有地址、无载荷 → 防抖重拉清单（**不看载荷**：这条通道不带节点快照）；
+ *    - 回读 `stat` 得 `NotFound` → 本地即时移除；
+ *    - 且资源信号**不得**改运行态（快照只有有序来源，见 `sessionNodeSync` 文档）。
+ * 2. **运行态只认带全量视图的节点帧**（`applySessionState`）：状态 / 结局 / 错误 /
  *    告警 / 提示音全在这里收敛，**零回读、零整表重拉**。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
@@ -705,15 +705,12 @@ describe('sessions store — 实时状态的唯一变更通道', () => {
 })
 
 /**
- * 会话运行态 —— 唯一的来源是转写流的 `transcript_session` 帧
+ * 会话运行态 —— 唯一来源是**会话节点的变更帧**
  * （落地口 `applySessionState`，全量节点视图 ⇒ 零回读）。
  *
- * 这一组用例原先挂在 VDFS 的 `updated` 上，并额外钉住一条**跨通道**顺序假设的
- * 自愈网（宽限复查 + 整份回读）。批次 E 把运行态并进转写流、与消息共用 `seq`
- * 空间之后，那条假设成为结构性保证，自愈网连同它的用例一并删除；留下的用例
- * 改从**新的落地口**驱动，覆盖的语义一条没少。
+ * 同一批变更还挂在 `sessionNodeSync` 上做防抖重拉清单；两条收敛路径幂等且同源。
  */
-describe('sessions store — 会话运行态（转写流的运行态帧）', () => {
+describe('sessions store — 会话运行态（节点视图帧）', () => {
   const SID = 's1'
 
   let store: ReturnType<typeof useSessionsStore>

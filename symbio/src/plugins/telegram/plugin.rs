@@ -510,10 +510,8 @@ impl TelegramPlugin {
                         // （`session_chat::Response`，已含本轮定稿后的完整正文），
                         // 没有第二个分支可写——因此是 `if let` 而不是单臂 `match`。
                         //
-                        // ⚠️ 这里**曾经**还有一个 `PluginPayload::Session` 分支：它从
-                        // 转写流（`session/stream`）逐帧收 `delta` 拼出正文。该分支是
-                        // **死代码**，而那条转写流已于 2026-09-23 随 ADR-025 退役
-                        // （会话实时面迁回 VDFS 变更），故整段删除。
+                        // ⚠️ 实时增量**不经由本回包下发**——它走 `event_bus` 的
+                        // `vdfs` 频道，协议上没有第二个分支，故这里只能是 `if let`。
                         if let PluginPayload::Data(_) = payload {
                             if let Ok(chat_resp) = payload.get::<session_chat::Response>() {
                                 full_text.push_str(

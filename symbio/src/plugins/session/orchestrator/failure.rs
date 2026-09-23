@@ -273,7 +273,7 @@ impl SessionPlugin {
     /// 直接 `break`（`!is_working`），**跳过 `persist_failure`**；而工具节点早已被
     /// `emit_tool_running` 置为 `Streaming` 并广播出去。结果：会话显示「已中止」，
     /// 节点显示「运行中」，且没有任何机制会纠正它——违反
-    /// `session/docs/node-state-streaming.md` §8.11「不得有节点停在 Streaming」。
+    /// `session/docs/node-state-streaming.md` §8 #11「不得有节点停在 Streaming」。
     ///
     /// 因此中止路径**自己**承担收口责任，不依赖 chat_loop 是否已退出：这是个
     /// 「谁宣称状态、谁负责收口」的划分，不是补丁。

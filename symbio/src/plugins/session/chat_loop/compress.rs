@@ -640,7 +640,7 @@ pub(crate) async fn retry_compaction(
     // 拿过滤视图去删会「删了个空气」，节点反而留在存储里。
     messages.retain(|m| m.id != target_id);
     session.replace_messages(messages).await?;
-    // 删除帧走转写流：`status = removed` 一次状态迁移。
+    // 删除帧：`status = removed`，一次状态迁移。
     emit_removed(sink, target_id).await;
 
     // 压缩本身则必须跑在与**自动路径完全同一份视图**上：`get_context_messages`

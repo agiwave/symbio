@@ -217,7 +217,8 @@ async fn process_tool_resume_action(
     //
     // 会**真正重跑工具**的三个 action（approve / retry / supply）先把父 ToolCall
     // 置「运行中」再执行——与 `process_tool_calls_async` 同一条规则：ToolCall 节点
-    // 覆盖整段执行窗口，而不是"参数齐了就结束"（`docs/node-state-streaming.md` §2.2）。
+    // 覆盖整段执行窗口，而不是"参数齐了就结束"
+    // （`docs/node-state-streaming.md` §5.3.1）。
     // 否则用户点下「批准执行」后画面毫无变化，直到结果突然出现，无法判断是否在跑。
     //
     // `meta.started_at` 与 `emit_tool_running` 同源：前端据此显示"已运行 47s"。
@@ -315,7 +316,7 @@ async fn process_tool_resume_action(
         // （`Streaming` 是瞬态状态，持久层拒绝落盘，见 `chat_session.rs::
         // ensure_durable_states`），前端此刻显示"运行中"。若在这里直接返回，
         // 广播层没有任何后续机制会再碰它，前端就永远显示"运行中"
-        // （违反 `docs/node-state-streaming.md` §8.11）。存储里的父节点仍是
+        // （违反 `docs/node-state-streaming.md` §8 #11）。存储里的父节点仍是
         // 恢复前的终态（Failed），故此处落库的收口补丁同样是终态。
         plugin_info!("session", "[Resume] aborted during tool re-execution");
         let parent_update = finalize_aborted_parent(&mut messages, tc_idx, &req.target_id);
@@ -425,7 +426,7 @@ async fn process_tool_resume_action(
 /// `chat_session.rs::ensure_durable_states`）。但它同时把「收口」的责任交给了
 /// 后续流程——一旦中途返回，**广播层**没有任何机制会再碰它，前端就永久停在
 /// "运行中"。中止正是这样一条中途返回的路径
-/// （`docs/node-state-streaming.md` §8.11：不得有节点停在 `Streaming`）。
+/// （`docs/node-state-streaming.md` §8 #11：不得有节点停在 `Streaming`）。
 ///
 /// ## 为什么复用 `apply_not_executed`
 ///

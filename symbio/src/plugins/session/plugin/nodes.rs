@@ -125,7 +125,7 @@ impl SessionRuntime {
 ///
 /// 另在 `attributes` 上挂载会话清单所需字段（`message_count` / `metadata` /
 /// `meta_tags`）——它们是**场景数据**，VDFS 只透传；会话清单由此可直接用
-/// `vdfs/list` 一次取全（见 S8）。
+/// `vdfs/list` 一次取全。
 ///
 /// 运行态由 [`SessionRuntime`] 投影：`status` 是运行态本身，`outcome` / `error`
 /// 是它的两个场景属性（消费者据此选提示音音色、渲染会话级错误条）。
@@ -282,8 +282,8 @@ fn cursor_id(before: &str) -> Option<&str> {
 // 命令行、日志与文件名，不受编码 / 输入法 / 大小写折叠的影响。标识由 `kind`
 // 承担（见 [`messages_dir_node`]），消费者按 `kind` 发现一段，不把段名写进模板。
 //
-// 该寻址取代原「容器页」——同一批能力改由 VDFS 承载，机制侧零新增概念；
-// 场景实现仍复用 `workdir` 与子会话清单，VDFS 是这些能力的唯一入口。
+// 场景实现复用 `workdir` 与子会话清单——VDFS 是这些能力的**唯一入口**，不再有
+// 并行的「容器页」路由。
 
 /// 会话内部：转写列表的**路径段**（ASCII，进地址）。
 ///
@@ -291,12 +291,10 @@ fn cursor_id(before: &str) -> Option<&str> {
 /// `seq`（唯一权威顺序锚点）决定。这个地址只服务**读面**（一次 `read` 拿整份
 /// 历史）与**写面**（`vdfs/action` 的截断 / 清空）。
 ///
-/// **实时面也在这里**（ADR-025）：一条消息的流式 = 它**自己那个地址**上的
-/// `delta` 增量（落点是 `<id>/message/<mid>` 这个节点，不是本目录——目录只承载
-/// 列表）。此前实时面挪出过 VDFS（`session/stream` 转写流），理由是「VDFS 变更
-/// 没有流内序号」——那是把**数据的属性**（`ChatMessage.seq` = 消息在文件夹里的位置）
-/// 当成了**传输的属性**。转写流已于 2026-09-23 退役，见
-/// `docs/archive/session-realtime-vdfs-watch.md`。
+/// **实时面不在这个目录上**：一条消息的流式 = 它**自己那个地址**
+/// （`<id>/message/<mid>`）上的 `delta` 增量，目录只承载列表。把实时面挂在目录上
+/// 会让 `path` 的含义随帧类型漂移，且无法推广到第二类集合——理由见
+/// `docs/DECISIONS.md` 的 ADR-025 追记。
 pub(crate) const SEG_MESSAGES: &str = "message";
 
 /// 转写列表的**展示名**（`title`）。**只影响 UI**，不参与寻址。
@@ -462,17 +460,13 @@ fn message_label(m: &cm::ChatMessage) -> String {
 
 /// 消息状态词——**就是 `MessageStatus` 自己的状态词**（[`cm::MessageStatus::as_str`]）。
 ///
-/// ## 为什么不再做映射
+/// ## 为什么是原样透传
 ///
-/// 原先这里把 `Completed` 与「未标注」**都**映射成 VDFS 的常规状态词 `active`，
-/// 理由是「节点状态只有一套词汇表，不为场景再造一套」。方向是对的，做法错了：
-/// 它把**两个不同的状态**合并成同一个字符串，于是消费端必须把 `active`
-/// **猜回** `completed`（`vdfsTranscriptSync::messageStatusOf`）——一次信息丢失
-/// 加一次还原，任何一端改口径都会静默错。
-///
-/// 现在改为**原样透传**：`pending` / `streaming` / `waiting_user_action` /
-/// `completed` / `failed` 就是节点状态词。会话节点的 `active`（空闲）与消息的
-/// `completed`（已结束）因此不再撞名——它们本来就是两件事。
+/// 节点状态只有一套词汇表，不为场景再造一套。**映射**在这里是有害的：把
+/// `Completed` 与「未标注」都映射成 VDFS 的常规状态词 `active`，等于让消费端必须把
+/// `active` **猜回** `completed`——一次信息丢失加一次还原，任何一端改口径都会静默错。
+/// 原样透传后，会话节点的 `active`（空闲）与消息的 `completed`（已结束）不再撞名，
+/// 它们本来就是两件事。
 fn message_status(m: &cm::ChatMessage) -> &'static str {
     match m.status.as_ref() {
         Some(s) => s.as_str(),
@@ -532,10 +526,11 @@ pub(crate) fn message_node(m: &cm::ChatMessage) -> vdfs::VdfsNode {
 ///
 /// ## 为什么需要它
 ///
-/// VDFS 变更**不带载荷**（ADR-025 定下的形状只有 `path` + `change` + 可选 `delta`），
-/// 因此「拿到一条 `updated`、要还原成消息」的消费端（如 agent 转播桥）只能
-/// `stat` + `read`。把「解」写在「拼」旁边，是为了让 `attributes` 增字段时
-/// 不可能只改一边——与 [`message_path`] / [`parse_session_path`] 同款纪律。
+/// VDFS 变更**只在热路径上带载荷**：消息帧的 `data` 就是那条 `ChatMessage`
+/// （`delta` / `content` / `status`），而资源信号是**无载荷**的。因此「拿到一条
+/// 无载荷变更、要还原成消息」的消费端（如 agent 转播桥）只能 `stat` + `read`。
+/// 把「解」写在「拼」旁边，是为了让 `attributes` 增字段时不可能只改一边——
+/// 与 [`message_path`] / [`parse_session_path`] 同款纪律。
 ///
 /// `None` = 节点状态词不在 [`cm::MessageStatus`] 的词表里（正常不该发生；
 /// 发生即两侧已分叉，宁可丢这一条也不要造出一个状态错误的消息）。
@@ -586,8 +581,15 @@ pub(crate) fn message_text(m: &cm::ChatMessage) -> String {
 ///
 /// 稳定排序：缺 `seq` 的（本轮**在途**消息——存储尚未写入、因而还没分配 `seq`）
 /// 排在最后并保持原有相对顺序，恰好落在「最新的消息在末尾」，不会被排到历史之前。
+///
+/// 快路径：存储本就按 `seq` 追加写入，`overlay_live` 也不改动既有顺序，因此
+/// **已有序是常态**——此时排序是纯开销（`O(n log n)` 次比较 + 一次可能的整体重排），
+/// 而转写的每次读取（`list` / `read` / `stat` 单条）都要过这里。
 pub(crate) fn ordered(mut msgs: Vec<cm::ChatMessage>) -> Vec<cm::ChatMessage> {
-    msgs.sort_by_key(|m| m.seq.unwrap_or(i64::MAX));
+    let key = |m: &cm::ChatMessage| m.seq.unwrap_or(i64::MAX);
+    if !msgs.is_sorted_by_key(key) {
+        msgs.sort_by_key(key);
+    }
     msgs
 }
 
@@ -634,10 +636,8 @@ pub(crate) fn message_of<'a>(
 /// 「按变更拼实时」两条路径会在流式期间分叉：叶子少掉**正在跑的那一轮**。
 ///
 /// 这不是理论风险：前端 `loadMessages` 走的正是叶子（`fetchTranscript` →
-/// `readVdfs(vdfsSessionAddr(id))`）。`session/get_messages` 专用协议已于 2026-09-23
-/// 整体退役——最后一个后端消费方（子会话存在性校验）也改走本接口的 `stat`。
-/// 只读存储的话，Turn 运行中切走再切回就会看到「正在跑的消息凭空消失」，
-/// 直到 `persist_messages` 在每轮结束时落库为止。
+/// `readVdfs(vdfsSessionAddr(id))`）。只读存储的话，Turn 运行中切走再切回就会看到
+/// 「正在跑的消息凭空消失」，直到 `persist_messages` 在每轮结束时落库为止。
 pub(crate) fn session_content(
     session: &super::super::types::Session,
     live: Vec<cm::ChatMessage>,
@@ -664,16 +664,12 @@ pub(crate) fn session_content(
 /// 的注释，以及 [`vdfs::VdfsProvider::write`] 的「两种目标形态」表
 /// （具名节点 + 不存在 ⇒ **就地创建**；只有目录自身才「名字由 provider 生成」）。
 ///
-/// 会话曾经是唯一例外：无论有没有名字都自己生成 id，把名字只当标题，于是
-/// 「写到的地址」与「建出来的地址」是两个地方。2026-09-23 随 `session/update`
-/// 退役一并对齐——CLI 需要「客户端指定会话 id」，而地址就是那个指定处。
-///
 /// ## 为什么不剥 `.session` 后缀
 ///
 /// 会话寻址里扩展名**从来不是**地址的一部分，也**从来不被剥除**：
 /// `Session(id)` 直接把末段当 id 用（`parse_session_path` → `session_of`）。
 /// 只在这里剥会造出「同一个 id 有两种写法、其中一种只在新建时成立」的怪状态，
-/// 比不剥更糟。要统一剥除是另一件事——`parse_session_path` 全链一起改，不在本轮。
+/// 比不剥更糟。
 pub(crate) fn session_id_from_new_path(path: &str) -> Option<String> {
     let base = path.rsplit('/').next().unwrap_or(path).trim();
     if base.is_empty() {

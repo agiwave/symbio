@@ -397,7 +397,7 @@ pub async fn execute_tool_async(
     //   1. 工具照跑（最长到空闲超时），整个 Turn 继续推进——用户以为停了，其实没停；
     //   2. `handle_abort` 的 3s 兜底把 `is_working` 复位，消费循环在下一帧醒来时
     //      因 `!is_working` 直接 break，**跳过 `persist_failure`**，于是工具节点
-    //      永远停在 `Streaming`（违反 `docs/node-state-streaming.md` §8.11）；
+    //      永远停在 `Streaming`（违反 `docs/node-state-streaming.md` §8 #11）；
     //   3. 工具返回后的 `Completed` 补丁被那个已 break 的消费循环丢弃，前端收不到。
     // 因此「中止」必须是与「工具返回」「空闲超时」并列的第三个出口。
     //
@@ -584,7 +584,7 @@ async fn record_protocol_failure(
 /// 「运行中」迹象：参数流完画面静止，直到结果突然出现——用户无法判断
 /// 是"还在跑"还是"卡死了"。
 ///
-/// 状态机（`docs/node-state-streaming.md` §2.2）：
+/// 状态机（`docs/node-state-streaming.md` §2.3）：
 /// `pending → streaming（参数流式 + 执行）→ waiting_user_action → completed / failed`。
 /// 因此 `Streaming` 在这里**不是**"正在接收流"，而是"这次调用正在跑"。
 ///

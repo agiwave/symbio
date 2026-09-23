@@ -82,8 +82,8 @@ pub const SESSION_CHAT_ABORT: &str = "session/chat/abort";
 // ============ VDFS 插件 ============
 /// vdfs/root — **进入地址空间**：取根地址，调用方不给地址。
 ///
-/// **Rust 侧无调用方**（S22 后 CLI 的运行态改走 `session/stream` 转写流，那处调用已删）；
-/// 唯一调用方在前端：`tauri/src/schemas/vdfs.ts::VDFS_ROOT`（启动期取根当运行期数据，
+/// 调用方：Rust 侧 `agent/host/subagent.rs`（拼 Run 的 VDFS 根地址）、前端
+/// `tauri/src/schemas/vdfs.ts::VDFS_ROOT`（启动期取根当运行期数据，
 /// `services/vdfsScheme.ts` 据此拼会话地址）。保留登记的理由与 [`SESSION_CHAT_ABORT`] 相同
 /// ——「前端认识的后端路由」在后端也应有一条可检索的常量；且**根名只归 vdfs 插件**
 /// （`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，仓级守卫 S-010 禁止它在别处出现），
@@ -93,8 +93,7 @@ pub const VDFS_ROOT: &str = "vdfs/root";
 
 /// vdfs/watch — 订阅一棵地址子树的变更。
 ///
-/// **Rust 侧无调用方**：S22 起 CLI 与子智能体的运行态/资源通知都改走 `session/stream`
-/// 转写流（`cli/src/client.rs` 顶部记录了那次删除）。调用方在前端：
+/// 调用方：`agent/host/subagent.rs`（Run 转播登记）与前端
 /// `tauri/src/schemas/vdfs.ts::VDFS_WATCH` + `services/vdfs.ts`（本轮渲染）。
 /// 后端只向**登记过路径**的订阅者投递变更（`core/vdfs/host::ChangeSubscriptions`），
 /// 因此这是「能收到 VDFS 变更」的前置条件：只订阅全局总线而不登记 watch，
@@ -112,8 +111,7 @@ pub const VDFS_UNWATCH: &str = "vdfs/unwatch";
 // ============ Event Bus 插件 ============
 /// event_bus/subscribe — 建立进程内帧订阅连接
 ///
-/// 调用方有两处：Rust 侧 `cli/src/client.rs`（S27 起 CLI 又订阅它了——会话实时面
-/// 迁回 `event_bus` 的 `vdfs` 频道），以及前端
+/// 调用方有两处：Rust 侧 `cli/src/client.rs`（订阅 `vdfs` 频道），以及前端
 /// `tauri/src/constants/pluginPaths.ts::EVENT_BUS_SUBSCRIBE` + `services/eventBus.ts`
 /// ——两边都拿 `PluginFrame::Data` 收会话帧。
 pub const EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";

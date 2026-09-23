@@ -3,8 +3,12 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
 //!
 //! 投递的观测方式：给 `Transcript` 一张带 sink 的 `ChangeSubscriptions`，sink 把
-//! 每条变更收进数组。断言的是**投递出去的形状**（`path` = 消息目录、
+//! 每条变更收进数组。断言的是**投递出去的形状**（`path` = 那条消息节点自身的地址、
 //! `data` = 那条 `ChatMessage`），而不是内部字段——形状才是线上契约。
+//!
+//! ⚠️ 投递有**合帧窗口**（[`DELIVER_WINDOW_MS`]）：相邻的同节点纯增量会并成一帧。
+//! 因此断言「条数」的用例要么显式 `flush_pending`，要么让边界帧（终态 / 删除）
+//! 把窗口顶出去；断言「正文」的用例则与窗口无关（合帧逐字等价）。
 
 use super::*;
 use crate::symbio_core::schemas::session::chat_message::{
@@ -221,13 +225,13 @@ fn inflight_seq_sorts_after_all_stored_messages() {
     assert_eq!(ids, vec!["old", "new"], "在途消息排在历史之后");
 }
 
-/// 线上格式：`path`（消息**目录**）+ `data`（那条 `ChatMessage`）。
+/// 线上格式：`path`（**被变更节点自身**的地址）+ `data`（那条 `ChatMessage`）。
 ///
 /// 语义全在 `data` 的字段上：`delta` 追加 / `content` 替换 / `status = removed`
 /// 移除——不从类型反推，信封没有操作枚举。首帧发图里合并后的**全量**副本，
 /// 消费端零回读即得完整基线。
 #[test]
-fn message_change_wire_shape_is_path_dir_and_message_payload() {
+fn message_change_wire_shape_is_node_address_and_message_payload() {
     let (mut tr, seen) = transcript();
     // ① 首见：全量帧（正文基线）
     tr.apply(text_msg("a", MessageStatus::Streaming, ""));
@@ -289,8 +293,8 @@ fn a_first_frame_carrying_delta_is_delivered_as_full_copy() {
 // ============================================================================
 // 日志折行（`DeltaLogCoalescer`）
 //
-// 折行**只影响日志**：帧号与投递逐帧不变。下面这组用例一半在钉折行本身，
-// 一半在钉「折行没有碰到投递与图」这条边界——后者才是真正的风险所在。
+// 折行**只影响日志**：帧号不变，也不参与投递。下面这组用例一半在钉折行本身，
+// 一半在钉「折行没有碰到图与正文」这条边界。
 // ============================================================================
 
 /// 连续同 id 的纯增量折成一行：带帧号区间、帧数、累计字符数。
@@ -422,12 +426,13 @@ fn render_frame_line_is_trimmed() {
     );
 }
 
-/// 折行**不改投递、不改图**：同一串帧在带折行器的转写下，投递条数与节点内容
-/// 必须与「逐帧投递」这一事实一致。
+/// 两类合并（日志折行 + 投递合帧）都**不改图、不丢正文**。
 ///
-/// 这条是折行改动的真正风险边界——它把"日志优化"与"数据面"分开。
+/// 这是合并改动的真正风险边界：折行是日志的统计，合帧是载荷的合并，两者都不能
+/// 让正文少一个字符，也不能碰内存图。**帧号照逐帧计**——日志的时间线不因合帧
+/// 而变短，那正是「一次回复有几百帧」这个事实要留下的地方。
 #[test]
-fn coalescing_does_not_touch_delivery_or_the_graph() {
+fn coalescing_keeps_the_graph_and_loses_no_text() {
     let frames: Vec<cm::ChatMessage> = vec![
         text_msg("a", MessageStatus::Streaming, ""),
         delta_msg("a", "你"),
@@ -444,9 +449,8 @@ fn coalescing_does_not_touch_delivery_or_the_graph() {
         tr.apply(f);
     }
 
-    // 8 帧全部投递 ⇒ 帧号 = 8（折行没有吞掉任何一帧）
-    assert_eq!(tr.frame_no, 8, "折行不得影响投递");
-    assert_eq!(seen_of(&seen).len(), 8, "折行不得吞掉变更");
+    // 8 个合法帧 ⇒ 帧号 8（合帧不得影响日志的帧计数）
+    assert_eq!(tr.frame_no, 8, "合帧不得影响帧号");
     assert_eq!(tr.snapshot().len(), 1, "b 已被删除，在途图只剩 a");
     match tr.get("a").unwrap().content {
         Some(MessageContent::Text(ref t)) => {
@@ -454,15 +458,113 @@ fn coalescing_does_not_touch_delivery_or_the_graph() {
         }
         _ => panic!("应为 Text"),
     }
-    // 折行器在轮次收尾已被冲刷干净，不留残留状态
+
+    // 正文不丢：把节点 a 的增量帧按投递顺序拼起来，必须恰好是它的完整正文
+    //（窗口可能因调度被切成多段，因此这里断言**累积值**而不是投递条数）
+    let appended: String = seen_of(&seen)
+        .iter()
+        .filter(|c| c.path == message_path("s1", "a"))
+        .filter_map(|c| Some(c.data.as_ref()?.get("delta")?.as_str()?.to_string()))
+        .collect();
+    assert_eq!(appended, "你好世界", "合帧后正文仍逐字完整");
+    assert!(
+        seen_of(&seen).len() <= 8,
+        "投递条数只可能少于帧数（合帧），不可能多出来"
+    );
+
+    // 折行器与投递窗口都不留残留状态
     assert_eq!(
         tr.delta_log.flush(),
         None,
         "apply 走完后不应残留待合并的 run"
     );
+    assert!(tr.pending.is_none(), "apply 走完后不应残留待投递的增量");
 }
 
-/// `clear` 与 `persisted` 都是冲刷点：最后一段增量不会被吞掉。
+/// **投递合帧**：相邻的同节点纯增量合成一帧，正文逐字等价。
+///
+/// 合帧是投递层的优化（协议里没有它的位置）：线上形状仍是 `{id, delta}`，
+/// 消费端无从、也无需知道这一帧由几帧并成。
+#[test]
+fn consecutive_pure_deltas_on_one_node_are_merged_into_a_single_frame() {
+    let (mut tr, seen) = transcript();
+    // 首帧是全量副本（带 content），不进窗口
+    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(delta_msg("a", "你"));
+    tr.apply(delta_msg("a", "好"));
+    tr.apply(delta_msg("a", "世界"));
+    // 窗口尚未过期 ⇒ 三帧仍在待投递状态（事件本身按帧号进了日志）
+    assert_eq!(tr.frame_no, 4, "帧号照逐帧计");
+    assert_eq!(seen_of(&seen).len(), 1, "只有首帧出去了");
+
+    // 终态帧（非纯增量）冲刷窗口：增量先出，终态后出
+    tr.apply(text_msg("a", MessageStatus::Completed, "你好世界"));
+    let d = seen_of(&seen);
+    assert_eq!(d.len(), 3, "首帧 + 合并后的增量帧 + 终态帧");
+    assert_eq!(d[1].path, message_path("s1", "a"));
+    assert_eq!(
+        d[1].data.as_ref().unwrap()["delta"],
+        "你好世界",
+        "三帧增量并成一帧，正文逐字不丢"
+    );
+    assert_eq!(d[2].data.as_ref().unwrap()["content"], "你好世界");
+}
+
+/// **换节点立即开新窗口**：合并只在「同一个文件的一段连续增长」内部发生。
+///
+/// 两个节点都先建立（首帧是全量副本、必然立刻发，不进窗口），之后才交错送增量
+/// ——这样断言到的才是「换节点冲刷窗口」这条规则本身。
+#[test]
+fn switching_node_starts_a_new_window() {
+    let (mut tr, seen) = transcript();
+    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("b", MessageStatus::Streaming, ""));
+    tr.apply(delta_msg("a", "A1"));
+    // 换 id ⇒ 冲刷 a 的窗口，b 自己开一个
+    tr.apply(delta_msg("b", "B1"));
+    tr.apply(delta_msg("b", "B2"));
+    // 显式冲刷，免得断言依赖真实时钟（窗口本身有独立用例）
+    tr.flush_pending();
+
+    let deltas: Vec<(String, String)> = seen_of(&seen)
+        .iter()
+        .filter_map(|c| {
+            let v = c.data.as_ref()?;
+            let delta = v.get("delta")?.as_str()?.to_string();
+            Some((v.get("id")?.as_str()?.to_string(), delta))
+        })
+        .collect();
+    assert_eq!(
+        deltas,
+        vec![
+            ("a".to_string(), "A1".to_string()),
+            ("b".to_string(), "B1B2".to_string()),
+        ],
+        "a 的窗口在换节点时被冲刷，b 的两帧合为一帧"
+    );
+}
+
+/// 运行态帧**排在待投递的增量之后**：先收敛为「本轮结束」再补正文，前端会把
+/// 活动角标与正文的先后搞反（`sessionNodeSync` 在 `working → 非 working` 时就清角标）。
+#[test]
+fn session_state_flushes_pending_delta_first() {
+    let (mut tr, seen) = transcript();
+    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(delta_msg("a", "尾段"));
+    tr.emit_session_state(None);
+
+    let d = seen_of(&seen);
+    assert_eq!(d.len(), 3, "首帧 + 冲刷出的增量帧 + 运行态帧");
+    assert_eq!(
+        d[1].data.as_ref().unwrap()["delta"],
+        "尾段",
+        "增量必须先出，且必须在运行态之前"
+    );
+    assert_eq!(d[2].path, "s1", "运行态帧落在会话叶子上");
+    assert!(tr.pending.is_none(), "运行态帧冲刷掉待投递窗口");
+}
+
+/// `clear` 与 `persisted` 都是冲刷点：最后一段增量不会被吞掉（日志与投递两侧）。
 #[test]
 fn clear_and_persisted_flush_the_trailing_run() {
     let (mut tr, _seen) = transcript();
@@ -472,6 +574,7 @@ fn clear_and_persisted_flush_the_trailing_run() {
     // clear 之后不得残留（轮次边界）
     tr.clear();
     assert_eq!(tr.delta_log.flush(), None, "clear 应冲刷最后一段");
+    assert!(tr.pending.is_none(), "clear 应冲刷待投递窗口");
 
     tr.apply(text_msg("a", MessageStatus::Streaming, ""));
     tr.apply(delta_msg("a", "xy"));
@@ -481,6 +584,7 @@ fn clear_and_persisted_flush_the_trailing_run() {
         None,
         "persisted（落库回执）应冲刷最后一段"
     );
+    assert!(tr.pending.is_none(), "persisted 应冲刷待投递窗口");
 }
 
 /// 会话运行态与消息走**同一张订阅表**（ADR-025 的实时面与历史面合流）。

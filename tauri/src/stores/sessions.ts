@@ -11,14 +11,15 @@
  * ## 状态来自节点，也来自**一条**通道
  *
  * 会话的运行态是**会话节点的属性**（`status` + `attributes.outcome` / `.error`），
- * 经转写流的 `transcript_session` 帧**带全量节点视图**下发（零回读）。因此本 store
- * 不再订阅 `kind = "session"` 事件通道，也不再需要「防乱序」缓冲——状态是幂等的
- * 全量视图，变更可丢、可重放。
+ * 随 `<根>/session/<sid>` 上的变更**带全量节点视图**下发（`data` = `VdfsNode`，
+ * 与 `stat` 同一构造点），消费端零回读就地落定。因此本 store 不订阅任何事件通道、
+ * 也不需要「防乱序」缓冲——状态是幂等的全量视图，变更可丢、可重放。
  *
- * 为什么运行态**只能**从转写流来：它必须与它那一轮的消息共用 `seq` 空间，否则
- * 「会话报不忙」推不出「本轮消息终态帧都已到达」。VDFS 变更通道**不携带会话节点
- * 快照**——一条无序通道上的快照会与有序通道上的状态竞争，一次迟到的改名就能把
- * 运行态回退（详见 `stores/sessionTranscriptSync.ts` 的模块文档）。
+ * 会话域只有一条实时通道（`event_bus` 的 `vdfs` 频道）。订阅与收敛不在本文件：
+ * 会话节点归 `stores/sessionNodeSync.ts`、消息项归 `stores/sessionTranscriptSync.ts`，
+ * 由应用外壳（`MainLayout`）显式启动；本 store 只提供状态与收敛动作，
+ * 因此可被独立构造与测试。
+ *
  * 规范见 `symbio/src/plugins/session/docs/node-state-streaming.md`。
  *
  * ## 关键状态
@@ -29,7 +30,7 @@
  *                      写入：`sessionTranscriptSync`（VDFS 变更消费端）与 loadMessages
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
- *                      写入：`applySessionState`（转写流的运行态帧）/ send 的乐观置位
+ *                      写入：`applySessionState`（节点视图帧）/ send 的乐观置位
  *                      读取：会话列表项状态展示（`<根>/session` 实例）
  */
 
@@ -1078,7 +1079,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   // （`sessionNodeSync`）对同一批变更做防抖重拉——两条收敛路径幂等且同源。
 
   /**
-   * 应用一帧**会话运行态**（转写流的 `transcript_session`，全量节点视图，幂等）：
+   * 应用一帧**会话运行态**（带全量节点视图，幂等）：
    * 状态 / 结局 / 错误 / 告警 / 标题就地收敛。
    *
    * ## 零回读（本函数存在的理由）

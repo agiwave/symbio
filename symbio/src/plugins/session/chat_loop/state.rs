@@ -508,7 +508,7 @@ impl ChatOrchestrator {
         //   执行后 `Completed` / `WaitingUserAction`；未执行的批尾统一收口）
         // - 恢复执行：`resume::process_tool_resume_action`（approve/retry/supply）
         //
-        // 状态机见 `docs/node-state-streaming.md` §2.2；
+        // 状态机见 `docs/node-state-streaming.md` §2.3；
         // 「每个 ToolCall 必然到达终态」这条不变量由上面两处负责保证。
 
         // 根 Turn 的终态**不在此发出**。

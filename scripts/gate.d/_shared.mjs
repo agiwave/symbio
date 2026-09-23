@@ -93,7 +93,14 @@ export const BASELINE = {
   //      背景：`CompressionEmitter::finish` 把在途节点原样交给落库，存储水位被抬进
   //      在途号段，两个计数器在同一区间各自递增 ⇒ 撞号（同一会话里用户消息与压缩
   //      节点各持 `1099511627781`，e2e T8 的「seq 严格递增」当场失败）。
-  rustTests: 919,
+  // 924：会话实时投递合帧 + `ChangeSubscriptions::notify` 语义澄清（2026-09-23）
+  //      ——实测 924。**+4 用例**为本批新增：`session/transcript.test.rs` 三条
+  //      （相邻同节点纯增量合成一帧 / 切换节点即开新窗口 / 运行态帧先冲出待投增量）
+  //      + `symbio_core/vdfs/host.rs` 一条（**无关键订阅**一条都收不到）；
+  //      两处改名不计数（`coalescing_…_loses_no_text`、`…_is_node_address_…`）。
+  //      余下 1 格是上批**基线滞后**：HEAD 实测 920、基线记 919（同 `916 → 925`
+  //      那次漏改的口径）。
+  rustTests: 924,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -183,8 +190,18 @@ export const BASELINE = {
   //      两条用例分别钉住两个方向：「本目录还不认识的直接子项 ⇒ 必重拉」与
   //      「进入列表后 ⇒ 后续帧零重拉」。后一条是防退化的锚点：少了它，一次流式
   //      会话会变成几十次白拉的 `vdfs/list`（这正是当初加那条豁免要防的东西）。
-  vitestFiles: 49,
-  vitestTests: 725,
+  // 50 文件 / 727：重连自愈的回归锚（2026-09-23）——`vitestFiles` 49 → **50**、
+  //      `vitestTests` 725 → **727**（`+1 文件 / +2 用例`：新增
+  //      `services/__tests__/eventBusReconnect.spec.ts`）。
+  //      锁的是「断开期间的帧」这条**唯一没有自愈路径**的缺口：后端见 `is_closed`
+  //      摘订阅、帧静默丢弃，且订阅已不在表里 ⇒ 没人能补 resync。两条用例分别钉住
+  //      「重连补、首连不补」（首连白重读是纯浪费）与「一个重读处理器抛错不得吃掉
+  //      后面的作用域」（整份重读是唯一一层恢复机制，漏一半等于没恢复）。
+  //      配套加了 `_resetEventBusForTest()`：状态挂在 `globalThis` 上会**跨 spec
+  //      文件存活**，不复位就会读到别处留下的 `everConnected = true`，把首连误判成
+  //      重连——该用例正是靠这个复位才可重复。
+  vitestFiles: 50,
+  vitestTests: 727,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

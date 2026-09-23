@@ -219,8 +219,11 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     const tb = rebuild(textNode.id);
     assertEq(tb.start.data.status, 'streaming', `text 首帧应为 streaming（节点 ${textNode.id}）`);
     assert(
-      framesFor(textNode.id).filter((f) => f.data?.delta != null).length >= 2,
-      'text 应有多片流式增量',
+      // 不相对于**源分片数**断言：投递会把相邻的同节点纯增量合成一帧
+      // （`DELIVER_WINDOW_MS`），帧数因此可能少于分片数。这里要守的是
+      // 「增量是窄追加、不是每片全量重发」——有 `delta` 且拼接结果正确即已覆盖。
+      framesFor(textNode.id).some((f) => f.data?.delta != null),
+      'text 应有流式增量帧（窄追加，而非每片全量重发）',
     );
     assertEq(tb.final.data.status, 'completed', 'text 终态应为 completed');
     assertEq(tb.text, '正文甲正文乙正文丙', 'text 增量拼接应等于完整正文');

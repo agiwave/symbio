@@ -565,17 +565,14 @@ async fn new_session_ids_are_distinct() {
 //
 // | 操作 | 入口 | 落到 VDFS 变更上的形状 |
 // |---|---|---|
-// | 改写某条 | `write(<id>/message/<mid>)` | 该消息一条 `updated`（**不带** `delta` ⇒ 消费端回读） |
-// | 删该条及其后 | `action(<id>/message/<mid>, "truncate")` | 被删的各一条 `deleted` + 回执带被删 id |
-// | 清空历史 | `action(<id>/message, "clear")` | 每条一条 `deleted` |
+// | 改写某条 | `write(<id>/message/<mid>)` | 该消息一条变更（**不带**载荷 ⇒ 消费端回读） |
+// | 删该条及其后 | `action(<id>/message/<mid>, "truncate")` | 被删的各一条移除帧 + 回执带被删 id |
+// | 清空历史 | `action(<id>/message, "clear")` | 每条一条移除帧 |
 //
-// 「变更」这一列 2026-09-23 起重新指回 **VDFS 变更**（ADR-025）：消息域的实时面与
-// 历史面合流为同一条 `vdfs/watch`，`session/stream` 转写流随之退役。旧的三条变更
-// 形状（消息上 `updated` / 起始消息上 `truncated` / 列表目录上 `deleted`）里，
-// 「截断」不再是变更的一个取值——它是**动作**（`vdfs/action`），落在存储上是
-// 「逐条 `deleted`」。断言面因此是「投递了几条变更、每条说了什么」
-// （`watch_changes`）：截断与清空三例各自钉住这正是新机制真正要守的边界
-// （删除**逐条**下发，消费端不必整份重读；什么都没删**一条都不发**）。
+// 消息域的实时面与历史面合流为同一条 `vdfs/watch`（ADR-025）。断言面是
+// 「投递了几条变更、每条说了什么」（`watch_changes`）：截断与清空三例各自钉住
+// 这正是当前机制要守的边界（删除**逐条**下发，消费端不必整份重读；
+// 什么都没删**一条都不发**）。
 //
 // 本段锁定这三条路径的**对外行为**，并盯住三条不该被打破的边界：
 // `create` 意图（新增消息 = 发言，入口只有聊天协议）、`delete`（逐节点语义，
@@ -614,10 +611,10 @@ async fn transcript_ids(p: &SessionPlugin, id: &str) -> Vec<String> {
 /// 收的是 **provider 子树内的相对路径**（`<id>/message/<mid>`）——门面补挂载前缀是
 /// 分发层的事，不在这里发生（见 `VdfsChange` 的文档）。
 ///
-/// 与旧版「订阅 `session/stream`」相比有两点，都是**变简单**：
+/// 与「订阅进程级全局总线再过滤」相比有两点，都是**变简单**：
 /// - 订阅表是**本插件实例**的（`SessionPlugin::change_subs`），不是进程级全局表，
 ///   因此不必按 `session_id` 过滤——并行用例互不干扰；
-/// - 收的是 `VdfsChange`（`path` + `change` + 可选 `delta`），不必拆信封，也不必
+/// - 收的是 `VdfsChange`（`path` + 可选 `data`），不必拆信封，也不必
 ///   为「通道满 → resync」准备容量。
 fn watch_changes(p: &SessionPlugin) -> std::sync::Arc<std::sync::Mutex<Vec<VdfsChange>>> {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));

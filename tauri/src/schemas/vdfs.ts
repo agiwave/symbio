@@ -344,13 +344,12 @@ export const VDFS_BUS_RESYNC = 'resync'
  *  随帧类型漂移（资源信号是节点自身、消息是它所在的目录），消费端必须**反推地址**
  *  才能回读，且这种寻址**推广不到第二类集合**。
  *
- *  ## 历史
+ *  ## 为什么没有操作枚举
  *
- *  S16–S25 曾有 `created` / `updated` / `deleted` 操作枚举 + `delta` 字段
- *  （`created`/`deleted` 带 `delta` 是协议违例）。S27 起操作枚举整个退役：
  *  「资源层面发生了什么」与「业务数据变成了什么」是同一件事的两种说法，而消费端
- *  真正消费的只有后者——消息的删除由 `ChatMessage.status = removed` 承载
- *  （消息词汇本就有它），资源删除由「载荷缺失 + 回读 `NotFound`」表达。
+ *  真正消费的只有后者——保留枚举只会让每个消费端都背上一次「枚举 → 分派」的翻译。
+ *  消息的删除由 `ChatMessage.status = removed` 承载（消息词汇本就有它），资源删除
+ *  由「载荷缺失 + 回读 `NotFound`」表达。
  */
 export interface VdfsChange {
   /** **被变更节点自身**的地址（集合项形状 `<sid>/<集合段>/<项 id>`，身份即末段） */

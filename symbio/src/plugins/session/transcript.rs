@@ -18,8 +18,13 @@
 //!   `SYMBIO_LOG=debug` 放开）。细节里的**连续同节点纯增量**（帧带 `delta`、无状态
 //!   迁移）再被 [`DeltaLogCoalescer`] 折成一行统计：一次流式回复有几百个增量帧，
 //!   逐帧一行会把时间线淹成噪声（实测一段 200 字回复 = 580 行 `+Nc`，占该轮 stderr
-//!   的 93%）。分级与折行**只作用于日志**——变更照旧逐帧投递，实时链路一个字节都不变。
+//!   的 93%）。分级与折行**只作用于日志**。
 //!   日志的 `[T#n]` 用的是**帧计数器**（`frame_no`，只进日志、不下发），与位置序号无关。
+//! - **投递合帧**：相邻的**同节点纯增量**在 [`DELIVER_WINDOW_MS`] 的窗口内合成一帧
+//!   再投（见 [`Transcript::deliver`]）。语义逐字等价（正文一个字符不多不少），
+//!   但一次流式回复的出帧数降到约 1/6——那几百帧本来是显示刷新率吃不下、
+//!   只有 IPC 成本没有信息量的东西。日志的折行与投递的合帧是**两件事**：
+//!   前者按帧序折叠成统计行，后者按时间窗口合并载荷，触发条件不同，因此不共用一个结构。
 //!
 //! ## 与 VDFS 的边界
 //!
@@ -41,6 +46,28 @@ use crate::symbio_core::vdfs::{ChangeSubscriptions, VdfsChange};
 use crate::{plugin_debug, plugin_error, plugin_info};
 use indexmap::IndexMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// 投递合帧窗口（毫秒）——相邻的**同节点纯增量**在此窗口内合成一帧（见
+/// [`Transcript::deliver`]）。
+///
+/// 取 50ms ⇒ 稳态约 20 帧/秒。判据是**感知阈值**而不是链路能力：流式文本在
+/// 20 次/秒以上的更新率下已经看不出分块，而模型侧的帧率是它的几十倍
+/// （实测一段 200 字回复 ≈ 580 帧）。比它更短的窗口省不下多少帧，更长则会
+/// 让「打字机」变顿。前端另有 48ms 的落地窗口（`sessionTranscriptSync`），
+/// 两者叠加后一次回复的后端 IPC 帧数降到约 1/6。
+pub(crate) const DELIVER_WINDOW_MS: u64 = 50;
+
+/// 一个正在累积的**投递窗口**：窗口内若干个同节点纯增量已被并进 `frame.delta`。
+///
+/// `frame` 的线上形状与单帧**逐字一致**（`id` + `delta`），消费端无从、也无需
+/// 知道它被合过——合帧是投递层的优化，不是协议的一部分。
+struct PendingDelta {
+    frame: cm::ChatMessage,
+    /// 窗口起点（本窗口第一帧到达的时刻）。窗口过期由**每一帧到达时**检查，
+    /// 因此不需要后台定时器。
+    started: Instant,
+}
 
 /// 在途消息**位置序号**的起点。
 ///
@@ -54,20 +81,18 @@ use std::sync::Arc;
 ///
 /// # 「在途号 / 存储号」是两个独立递增的计数器，共存的前提只有一条
 ///
-/// **在途号永不落库**。曾经不是：`CompressionEmitter::finish` 把在途节点原样交给
-/// `append_messages` 落库，而那条路径看到 `seq` 已经是 `Some`，就把它当**权威号**
-/// 存了下来。存储水位因此被抬进在途号段，此后两个计数器在同一数值区间里各自递增，
-/// **必然撞号**——实测同一会话里「本轮用户消息」与「压缩节点」各持
-/// `1099511627781`，`assertTranscriptInvariants` 的「seq 严格递增」当场失败。
+/// **在途号永不落库**。一旦某个在途号被当成权威号存了下来，存储水位就被抬进在途
+/// 号段，此后两个计数器在同一数值区间里各自递增、**必然撞号**——实测同一会话里
+/// 「本轮用户消息」与「压缩节点」各持同一个在途号，
+/// `assertTranscriptInvariants` 的「seq 严格递增」当场失败。
 ///
-/// 修法有两半，缺一不可：
+/// 因此有两半，缺一不可：
 ///
 /// 1. **存储边界拒收在途号**（见 [`is_inflight_seq`]，落实在 `chat_session` 的两条
 ///    写入路径上）——这是机制：任何调用点都不必"记得"先清号，漏掉也不会再泄漏；
-/// 2. **本值抬到 `1 << 50`**：泄漏已经发生过的存量会话，其存储水位停在旧号段
-///    （约 `1 << 40`）。若在途号仍从 `1 << 40` 起，在途号会**排在那些存量号之前**
-///    （「最新的消息在末尾」当场失效）。抬高一个量级后，存量水位与新在途号段重新
-///    分离；而 `1 << 50` ≈ 1.1e15，真实序号在物理上追不上它。
+/// 2. **本值取 `1 << 50`**：泄漏发生过的存量会话，其存储水位停在旧的号段。若新
+///    在途号仍从那一段起，它会**排在那些存量号之前**（「最新的消息在末尾」当场
+///    失效）。抬高之后两段重新分离，而 `1 << 50` ≈ 1.1e15，真实序号追不上它。
 pub(crate) const INFLIGHT_SEQ_BASE: i64 = 1 << 50;
 
 /// 这个 `seq` 是否是**在途占位号**（而非存储分配的权威号）。
@@ -102,6 +127,8 @@ pub struct Transcript {
     /// 变更投递表——**必须是 session provider 的那一份**（不是全局 `hub_of`）：
     /// `vdfs/watch` 登记的是那张表，投到别处等于没人收到。
     changes: Arc<ChangeSubscriptions>,
+    /// 待投递的**纯增量窗口**（见 [`Self::deliver`]）。
+    pending: Option<PendingDelta>,
     /// 日志合并器（**只影响日志**，不参与序号与投递）。
     delta_log: DeltaLogCoalescer,
 }
@@ -116,8 +143,11 @@ pub struct Transcript {
 ///
 /// ## 边界：只折日志
 ///
-/// `seq` 是**协议**（消费端按它检测丢帧），发布是**数据面**。两者都必须逐帧进行，
-/// 因此本结构体只被 `Transcript::emit` 用于"要不要打这一行、打成什么样"。
+/// 本结构体只被 `Transcript::emit` 用于"要不要打这一行、打成什么样"——它不认识
+/// 载荷，也不参与投递。**投递侧的合帧是另一个机制**（[`Transcript::deliver`]，
+/// 按时间窗口合并载荷）：两者要保住的东西不同——日志要保住"一次增长有多少帧、
+/// 多少字符"这个**过程量**（所以按帧序折叠、并记录首末帧号），投递要保住
+/// "正文一个字符不少"这个**正确性**（所以按时间窗口合并、与帧序无关）。
 ///
 /// ## 折行规则
 ///
@@ -291,6 +321,7 @@ impl Transcript {
             frame_no: 0,
             nodes: IndexMap::new(),
             changes,
+            pending: None,
             delta_log: DeltaLogCoalescer::default(),
         }
     }
@@ -317,8 +348,8 @@ impl Transcript {
     ///
     /// ## 协议违例：同帧既带增量又带完整正文
     ///
-    /// 该拼接还是该替换？语义不可判定，报错丢弃：不发布、不占 seq——发布出去的
-    /// 帧严格连续，消费端的缺口检测因此不被违例帧污染。
+    /// 该拼接还是该替换？语义不可判定，报错丢弃：不发布、不占在途号——不让一个
+    /// 语义不可判定的帧进内存图，也不让它上实时面。
     pub fn apply(&mut self, msg: cm::ChatMessage) {
         if msg.delta.is_some() && msg.content.is_some() {
             plugin_error!(
@@ -331,9 +362,8 @@ impl Transcript {
 
         let message_id = msg.id.clone();
 
-        // 删除：不落图，就地广播该状态帧（帧照常占号，「删了什么」在时间线上可追溯）。
-        // `status = removed` 是消息词汇里的**删除语义**——信封上没有 deleted 取值，
-        // 删除就是一条带 removed 状态载荷的变更。
+        // 删除：不落图，就地广播该状态帧（帧照常占日志号，「删了什么」在时间线上可追溯）。
+        // 删除的线上表达就是这条带 `removed` 状态的帧本身（消息词汇本就有这个状态）。
         if msg.status == Some(cm::MessageStatus::Removed) {
             let detail = self
                 .nodes
@@ -441,7 +471,7 @@ impl Transcript {
                     format!("{phase} {shape}")
                 }
             };
-        // 信封没有操作枚举（S27）：「首次出现还是更新」不单独成字段——帧自给自足
+        // 信封没有操作枚举：「首次出现还是更新」不单独成字段——帧自给自足
         // （身份 / 正文 / 状态都在 `data` 里），消费端按字段落地，不需要分派键。
         //
         // **首帧发全量**：未知 id 上的窄增量（`{id, delta}`）会让消费端拿不到正文
@@ -456,10 +486,11 @@ impl Transcript {
     ///
     /// 存储是唯一权威；图里只留**在途**节点（VDFS 转写列表的叠加来源）。
     pub fn persisted(&mut self, ids: &[String]) {
-        // 落库 = 该节点的增长段结束，把待合并的增量 run 收尾。
+        // 落库 = 该节点的增长段结束：把待合并的增量 run 与待投递的增量窗口都收尾。
         if let Some(line) = self.delta_log.flush() {
             plugin_debug!("session", "{line}");
         }
+        self.flush_pending();
         for id in ids {
             self.nodes.shift_remove(id);
         }
@@ -477,26 +508,26 @@ impl Transcript {
 
     /// 清空在途图（轮次收尾：权威副本已全部落库）。
     ///
-    /// 顺带冲刷待合并的增量 run——轮次边界是"这一段增长结束了"的最强信号，
-    /// 也是最后一段增量日志不至于被吞掉的保证（`clear` 在轮次起止各调一次）。
+    /// 顺带冲刷待合并的增量 run 与待投递的增量窗口——轮次边界是"这一段增长结束了"
+    /// 的最强信号，也是最后一段增量不至于被吞掉的保证（`clear` 在轮次起止各调一次）。
     pub fn clear(&mut self) {
         if let Some(line) = self.delta_log.flush() {
             plugin_debug!("session", "{line}");
         }
+        self.flush_pending();
         self.nodes.clear();
     }
 
-    /// 打一行核心日志、投递一条 VDFS 变更。`frame_no` 在被投递的每一帧上 +1。
+    /// 打一行核心日志、投递一条 VDFS 变更。`frame_no` 在每一帧上 +1。
     ///
-    /// ## 日志与投递在这里分岔（唯一一处）
+    /// ## 这里分岔成两件事（唯一一处）
     ///
-    /// **投递逐帧无例外**——它是数据面：一帧增量就是一次「正文尾部追加了这些字符」，
-    /// 丢了就永久少一段。只有**日志**分两级：**骨架**（[`FrameLogLevel::Skeleton`]）
-    /// 各自留一行进 `INFO`；**细节**（[`FrameLogLevel::Detail`]）进 `DEBUG`，其中的
-    /// 纯增量帧再被 [`DeltaLogCoalescer`] 折成一行为统计
-    /// （`[T#4..583] id - Update 580 帧 / +1234c`）。
+    /// | 出口 | 规则 |
+    /// |---|---|
+    /// | 日志 | 分两级：**骨架**（[`FrameLogLevel::Skeleton`]）各自留一行进 `INFO`；**细节**（[`FrameLogLevel::Detail`]）进 `DEBUG`，其中纯增量帧再被 [`DeltaLogCoalescer`] 折成一行统计（`[T#4..583] id - Update 580 帧 / +1234c`） |
+    /// | 投递 | 纯增量进**合帧窗口**（[`Self::deliver`]），其余立刻发 |
     ///
-    /// 被并入的纯增量帧其 `detail` 不被读取（调用方传空串即可）。
+    /// 被并入日志的纯增量帧其 `detail` 不被读取（调用方传空串即可）。
     ///
     /// ## 投递的形状：`<sid>/message/<mid>` 上 `data = ChatMessage`
     ///
@@ -506,11 +537,6 @@ impl Transcript {
     /// 后续还会有任务列表、请求队列……），因此地址形状统一为
     /// `<sid>/<集合段>/<项 id>`——机制不认识任何一类集合，新增一类集合不需要
     /// 在信封上新增概念，也不需要消费端学一条新的「身份在哪」的规则。
-    ///
-    /// 早先这里发的是**目录**（`<sid>/message`）并把身份交给 `data.id`：那样一来
-    /// `path` 的含义随帧类型漂移（资源信号是节点自身、消息是它所在的目录），
-    /// 消费端于是必须**反推地址**（拿 `data.id` 拼回 `<sid>/message/<mid>`）才能回读，
-    /// 而「目录 + 载荷里的 id」这种寻址也无法推广到第二类集合。
     ///
     /// `data` 就是**帧本身**（与内存图收到的同一条 `ChatMessage`，其 `id` 与路径
     /// 末段是同一个身份）：`delta` 有 ⇒ 尾部追加、`content` 有 ⇒ 整条替换、
@@ -541,6 +567,92 @@ impl Transcript {
             }
         }
 
+        self.deliver(message);
+    }
+
+    /// 投递一帧：**相邻的同节点纯增量在 [`DELIVER_WINDOW_MS`] 内合成一帧**。
+    ///
+    /// ## 为什么可以合
+    ///
+    /// 信封没有操作枚举：一帧增量的语义就是「这条节点的正文尾部追加了这些字符」，
+    /// 消费端按字段落地。两帧相邻同节点的纯增量（`delta` 有、`content` 与 `status`
+    /// 都无）合并成一帧后**语义逐字等价**——正文一个字符不多不少。顺序也不是风险：
+    /// `ChatMessage.seq` 是**节点属性**（不是投递属性），到达顺序本来就不参与排序。
+    ///
+    /// ## 为什么要合
+    ///
+    /// 一次流式回复的帧数由模型决定（实测一段 200 字回复 ≈ 580 帧），而每帧的成本
+    /// 与帧数成正比：遍历订阅表、克隆整帧、序列化成信封、跨 JS 桥、前端反序列化。
+    /// 60Hz 的显示刷新率本身就吃不下逐帧投递——多出来的帧不产生任何用户可见的
+    /// 信息，只把 IPC 打满。窗口取值的理由见 [`DELIVER_WINDOW_MS`]。
+    ///
+    /// ## 什么形状**必然**立刻发（不进窗口）
+    ///
+    /// 首帧（图里合并后的**全量副本**，消费端的基线）、状态迁移、删除、整条替换
+    /// ——它们都带 `content` 或 `status`，天然不满足「纯增量」。**换节点**（`id`
+    /// 不同）也立刻冲刷：合并只在同一个文件的一段连续增长内部发生。
+    ///
+    /// ## 窗口过期不需要后台任务
+    ///
+    /// 每收到一帧先看窗口是否已过 [`DELIVER_WINDOW_MS`]，过了就冲刷。因此最坏情形是
+    /// 「一段增长的最后一帧晚于窗口到达」——而一段增长的两个端点（首帧与终态帧）
+    /// 都不进窗口，所以没有内容会被无限期扣住。
+    ///
+    /// ## 顺序不能反：非纯增量帧必须先冲刷再发
+    ///
+    /// 待投递的增量是**更早**的正文。若先发终态帧、后发增量，消费端会看到
+    /// 「这条消息已结束」之后正文又长了一截（前端据此判定的运行态已经收敛）。
+    fn deliver(&mut self, mut message: cm::ChatMessage) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.started.elapsed() >= Duration::from_millis(DELIVER_WINDOW_MS))
+        {
+            self.flush_pending();
+        }
+
+        // 「纯增量」= 可合帧的唯一形状（其余立刻发，见上方表）
+        let delta = if message.content.is_none() && message.status.is_none() {
+            message.delta.take()
+        } else {
+            None
+        };
+        let Some(delta) = delta else {
+            self.flush_pending();
+            self.publish(message);
+            return;
+        };
+
+        // 同窗口 + 同节点 ⇒ 并入（正文等价）；否则冲刷旧窗口，为新节点开窗口。
+        // 待投递帧恒为纯增量形状（只有本函数写 `pending`，而它只收纯增量）。
+        if let Some(buf) = self
+            .pending
+            .as_mut()
+            .filter(|p| p.frame.id == message.id)
+            .and_then(|p| p.frame.delta.as_mut())
+        {
+            buf.push_str(&delta);
+            return;
+        }
+        self.flush_pending();
+        message.delta = Some(delta);
+        self.pending = Some(PendingDelta {
+            frame: message,
+            started: Instant::now(),
+        });
+    }
+
+    /// 冲刷待投递的增量窗口（`persisted` / `clear` / `emit_session_state` 与
+    /// 非纯增量帧都经它，保证「更早的正文先出」）。
+    fn flush_pending(&mut self) {
+        let Some(p) = self.pending.take() else {
+            return;
+        };
+        self.publish(p.frame);
+    }
+
+    /// 变更投递的**唯一出口**（`changes.notify` 只在这里被调用）。
+    fn publish(&self, message: cm::ChatMessage) {
         self.changes.notify(&VdfsChange::with_data(
             message_path(&self.session_id, &message.id),
             &message,
@@ -563,8 +675,15 @@ impl Transcript {
     ///
     /// 调用时机由编排层保证：正常收尾在「清在途 → 复位 `is_working`」之后、
     /// 中止收尾在 `converge_inflight` 之后——两者都在本轮**最后一条**消息帧之后。
+    ///
+    /// ## 必须先冲刷待投递的增量
+    ///
+    /// 它是本轮**更早**的正文，而本条变更说的是「这一轮结束了」。顺序反了，
+    /// 前端会先收敛为已空闲、再补上一截正文（`sessionNodeSync` 在
+    /// `working → 非 working` 迁移时就会清掉活动角标，节点却还在长）。
     pub fn emit_session_state(&mut self, node: Option<crate::symbio_core::vdfs::VdfsNode>) {
         self.frame_no += 1;
+        self.flush_pending();
         match &node {
             Some(n) => plugin_info!(
                 "session",

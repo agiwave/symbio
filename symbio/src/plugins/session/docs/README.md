@@ -14,13 +14,13 @@
 
 | 文档 | 状态 | 一句话 |
 |---|---|---|
-| [core-loop.md](./core-loop.md) | 现行设计（批次 A/B/C 已落地，D 待授权；**批次 E 已落地**） | LLM × 工具会话主循环的结构与四个收口点（`gate_turn` / `prepare_turn_inputs` / `apply_compaction` / `finish_turn`）；§8 记执行期出口/信号双原语（`EventSink` + `AbortSignal`） |
-| [module-layout.md](./module-layout.md) | 现行（S1–S4 已落地） | 插件模块分工评审：单文件过长问题、目标目录结构、S1–S4 执行顺序与验收、可见性口径 |
+| [core-loop.md](./core-loop.md) | 现行设计 | LLM × 工具会话主循环的结构与四个收口点（`gate_turn` / `prepare_turn_inputs` / `apply_compaction` / `finish_turn`）；§6 记执行期出口/信号双原语（`EventSink` + `AbortSignal`） |
+| [module-layout.md](./module-layout.md) | 现行（分工与落点） | 插件模块分工评审：单文件过长问题、目标目录结构、S1–S4 执行顺序与验收、可见性口径 |
 | [context-compression-design.md](./context-compression-design.md) | 现行设计总览 | 上下文压缩 L0–L6 分层机制、优先取舍、不变量（实现细节见 `../README.md`） |
 | [turn-tool-mechanisms.md](./turn-tool-mechanisms.md) | 现行机制 | 工具失败如何回传（信息性、不中断循环）、Turn 终态如何定 |
 | [heartbeat-mechanism.md](./heartbeat-mechanism.md) | 现行设计 | 会话空闲心跳：调度语义、设置工具、CLI 守护模式、homedir 传导 |
 | [perf.md](./perf.md) | 现行设计 | 会话/转写的前端性能设计 + 存储拆分（元数据与消息分文件，清单慢的根因解药） |
-| [vdfs-session-messages.md](./vdfs-session-messages.md) | 现行设计（S16–S19 已完成） | 会话消息的 VDFS 化：转写即列表、流式即追加；地址与节点形状、变更语义、迁移路线 |
+| [vdfs-session-messages.md](./vdfs-session-messages.md) | 现行设计 | 会话消息的 VDFS 化：转写即列表、流式即追加；地址与节点形状、变更语义、不变量 |
 | [session-options.md](./session-options.md) | 现行规范（2026-09-23 旧机制下线） | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走 core 的 `OptionVisitor` |
 
 > **已归档的过程产物**（一次性审计 / 迁移记录，进 `docs/archive/`）：

@@ -22,7 +22,7 @@ fn tc(id: &str, status: MessageStatus) -> ChatMessage {
 /// `Streaming`（有意为之——否则用户点「批准执行」后画面毫无变化；那是广播帧，
 /// 持久层拒绝瞬态落盘），而中止路径曾经直接 `return Ok(Done)`。那个节点既不是
 /// 流式节点、也不会再被任何后续流程碰，于是前端**永远**显示"运行中"
-/// （违反 `docs/node-state-streaming.md` §8.11）。
+/// （违反 `docs/node-state-streaming.md` §8 #11）。
 #[test]
 fn aborted_resume_finalizes_parent_tool_call() {
     let mut messages = vec![

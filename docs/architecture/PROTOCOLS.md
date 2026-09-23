@@ -86,7 +86,7 @@ pub struct PluginChannel {
 > （[ADR-020](../DECISIONS.md)）。执行层（LLM 单轮 / 工具调用）与宿主层之间不走通道：
 > 出方向是 `EventSink`（进程内直连转写 / `Null` 静默），入方向是 `AbortSignal`
 > （`abort()` 置位即唤醒）。**因此帧里不存在中止帧**——排障时不要到通道里找中止。
-> 机制见 [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §8。
+> 机制见 [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §6。
 
 ### 通道生命周期
 

@@ -63,7 +63,7 @@ impl EventBusPlugin {
         _ctx: Arc<dyn InvokeRequest>,
         _req: SubscribeRequest,
     ) -> InvokeResponse<PluginPayload> {
-        // 容量与 `session/stream` 对等（4096）。
+        // 容量 4096。
         //
         // 这条频道承载**全部**实时面：消息正文的逐帧增量（`VdfsChange.delta`，热路径）
         // 与会话 / 资源变更（低频）共用它。原先的 2048 是「只有资源变更」时的取值，

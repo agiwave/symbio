@@ -376,7 +376,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    *   （**不动历史**：压缩失败从不丢消息，重试只是再试一次 LLM 摘要）
    * - retry/approve/reject/supply/answer：删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点
    *
-   * 前端不在此处构造新消息——后端经转写流广播（帧语义全在字段上：
+   * 前端不在此处构造新消息——后端经 `vdfs` 频道广播（帧语义全在字段上：
    * `status = removed` 删旧节点，`content` / `delta` 写新节点与父节点状态），
    * 由 `sessionTranscriptSync` 与 `sessions.applyTranscriptMessages` 就地收敛。
    *

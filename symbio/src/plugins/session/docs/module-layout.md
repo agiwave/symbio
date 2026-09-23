@@ -1,9 +1,9 @@
 # Session 插件模块分工评审
 
-> 状态：**评审 + 执行方案**（S1/S2/S3/S4 + 测试扁平化**全部落地**）
+> 状态：**现行**（分工与落点）；§4 记落地过程
 > 触发：`chat_loop.rs` 达 2400 行，已到"不该再往单文件里加东西"的程度
-> 范围：`symbio/src/plugins/session/`（27 个 .rs，合计 16647 行；**S1 后**生产 12419 + 测试 4313）
-> 相关：`./core-loop.md`（核心循环收口，同批次完成）
+> 范围：`symbio/src/plugins/session/`
+> 相关：`./core-loop.md`（核心循环收口）
 
 ---
 
@@ -181,7 +181,7 @@ orchestrator.test.rs      测试（S1 已外置；5 例全部测根文件的守�
 
 - **跨子模块**（原本私有 → `pub(super)`）：`broadcast_error_with_idle` /
   `run_chat_loop_task` / `persist_failure`。（根文件的 `merge_message_patch`
-  已随协议去补丁化删除，见 `vdfs-session-messages.md` §6 S23。）
+  已不存在——消息帧按载荷形状落地，没有补丁合并层。）
 - **跨模块**（原本即 `pub`，**保持不动**）：`handle_chat_send_oneoff` /
   `handle_chat_abort_oneoff` / `emit_session_state` / `handle_abort`
   ——被 `plugin.rs` 路由与 `heartbeat.rs` 调用。本次只做"搬家"，不顺手收窄可见性。
@@ -418,4 +418,4 @@ mod tests;
 - **不动 `store/`**（`mod.rs` 形态，测试与 `mod.rs` 同级，已是正确形态）。
 - **不动 `close_turn`(286) / `compress_with_snapshot_core`(230) 的内部结构**——
   它们是"单一实现"约束的落点，拆开会让两条压缩入口各自维护流水线（见
-  `./core-loop.md` §6）。
+  `./core-loop.md` §5）。

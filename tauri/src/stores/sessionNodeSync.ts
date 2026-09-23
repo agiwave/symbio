@@ -27,15 +27,15 @@
  *
  * ## 载荷怎么用：视图帧就地落定，无载荷回读分辨
  *
- * 信封没有操作枚举（S27），分派只看载荷形状。运行态帧随 `data` 带节点视图
+ * 信封没有操作枚举，分派只看载荷形状。运行态帧随 `data` 带节点视图
  * （后端与 `stat` 同一构造点构造，不是缓存副本）⇒ 直接落地，一次状态迁移
  * **零 IPC**。资源信号是**无载荷**变更——它们不携带视图，回读 `stat` 分辨
  * 删除与否；运行态不会被一条迟到的改名信号打回旧值（信号上根本没有状态可打，
  * 回读的 `message_count` / `updated_at` 又取自落库的会话摘要，一轮进行中会落后）。
  *
- * **回读只服务于删除判定**：会话转写订阅（`sessionTranscriptSync`）此前在同一个
- * `<sid>` 上另发一次 `stat` 做同一件事——同一路径同一时刻的两次 IPC，已删掉
- * （会话节点归本模块，转写模块只认集合项）。
+ * **回读只服务于删除判定**：会话转写订阅（`sessionTranscriptSync`）在同一个
+ * `<sid>` 上另发一次 `stat` 做同一件事是多余的——同一路径同一时刻的两次 IPC。
+ * 会话节点归本模块，转写模块只认集合项。
  *
  * ## 清单同步的双模式
  *
@@ -67,7 +67,7 @@ export interface SessionNodeSink {
 let _unsubscribe: (() => void) | null = null
 let _listRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 防抖重拉：只给地址的粗粒度变更（`created` / `updated`），用于收敛排序与完整字段 */
+/** 防抖重拉：只给地址的无载荷资源变更，用于收敛排序与完整字段 */
 function scheduleListRefresh(sink: SessionNodeSink): void {
   if (_listRefreshTimer) clearTimeout(_listRefreshTimer)
   _listRefreshTimer = setTimeout(() => {
@@ -114,7 +114,7 @@ export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void>
     (change) => {
       const id = vdfsBase(change.path)
       if (!id) return
-      // 信封没有操作枚举（S27），语义按载荷形状分派：
+      // 信封没有操作枚举，语义按载荷形状分派：
       //
       // ① `data` = 全量节点视图（与 `stat` 同源构造）⇒ **零回读**就地落定
       //    状态 / 标题 / 计数——运行态是最需要即时的路径，一次状态迁移一次 IPC
@@ -138,8 +138,8 @@ export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void>
         )
       scheduleListRefresh(sink)
     },
-    // 重同步：后端通道曾满，本端可能漏了会话叶子的资源变更（漏掉 `deleted` 会让
-    // 侧栏留下一个已经不存在的会话）。清单是幂等全量视图，整表重拉即权威收敛。
+    // 重同步：后端通道曾满 / 连接曾断开，本端可能漏了会话节点的资源变更（漏掉删除
+    // 信号会让侧栏留下一个已经不存在的会话）。清单是幂等全量视图，整表重拉即权威收敛。
     () => scheduleListRefresh(sink),
   )
 }

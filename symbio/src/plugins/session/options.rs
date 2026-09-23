@@ -57,7 +57,7 @@ impl SessionPlugin {
     /// 只声明**有哪些字段**，**不带当前值**——值随节点 `attributes.metadata`
     /// 下发（设计文档 §3.2）。因此本函数与「是哪个会话」无关：可在会话清单里
     /// 算一次、给每一项复用（清单一次取全是既有取向，见
-    /// `session/docs/vdfs-session-messages.md` S8）。
+    /// `session/docs/vdfs-session-messages.md`）。
     ///
     /// 返回 `(order, field)`：`order` 只给收集层排序用，不下发。
     pub(crate) fn session_option_fields(&self) -> Vec<(i32, DetailField)> {

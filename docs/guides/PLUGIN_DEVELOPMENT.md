@@ -102,7 +102,7 @@ async fn route(
 > 工具侧不再自己读信封里的键——`ExecEnv` 由分发点 `symbio_core::invoke_capability`
 > 从 `ctx` 装配（缺席 ⇒ 静默 / 永不中止，故 `route()` 直连调用照常可用）。
 > 理由与代价见 [ADR-020](../DECISIONS.md)、[ADR-021](../DECISIONS.md) 与
-> [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §9、§11。
+> [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §7、§9。
 
 ### traverse()
 

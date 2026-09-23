@@ -23,8 +23,8 @@
 //!   共享 `abort_flag` 轮询 / 通道取消）**收敛成一条**，且不再需要轮询——
 //!   `abort()` 置位的同时唤醒所有等待者。
 //!
-//! 于是 `PluginChannel` 退回它本来的定位：**跨进程传输**（前端 `session/stream`
-//! 与 `event_bus/subscribe` 走 `PluginPayload::Session`），不再承担执行期协议。
+//! 于是 `PluginChannel` 退回它本来的定位：**跨进程传输**（前端经
+//! `event_bus/subscribe` 收帧，走 `PluginPayload::Session`），不再承担执行期协议。
 //!
 //! ## 不变量（改动时不得破坏）
 //!

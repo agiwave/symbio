@@ -7,8 +7,8 @@
 //! 2. **错误翻译**：[`VdfsError`] ↔ [`PluginError`] 双向映射；
 //! 3. **变更广播**：挂载点写 / 删后 [`notify_change`]，`watch` 经
 //!    [`watch_changes`] 订阅后转发——前端因此无需轮询（**非**轮询实现）。
-//!    转发由 [`ChangeSubscriptions`] 统一收敛：**重叠订阅不会重复投递**
-//!    （每条变更只投给最具体的那条相关订阅），同一路径的多位订阅者
+//!    转发由 [`ChangeSubscriptions`] 统一收敛：**一条变更只会出总线一次**
+//!    （命中多条相关订阅时也只调用一个投递器），同一路径的多位订阅者
 //!    按引用计数配对 `watch` / `unwatch`。
 //!
 //! ## 为什么只有这些
@@ -82,20 +82,25 @@ pub fn host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn InvokeRequest>> {
 
 /// 被订阅路径 → 引用计数 + 投递器；变更**同步**投递，不经后台任务。
 ///
-/// ## 为什么不是「每个被订阅路径一个转发任务 + 一条广播」
+/// ## 为什么「一条变更只出总线一次」是必须的
 ///
-/// 广播源是整棵子树共用的（[`notify_change`] 不按路径分流）。若每个路径各起
-/// 一个任务，两条**重叠**的订阅（会话清单订 `<根>/session`、转写订
-/// `<根>/session/<id>/message`）就会把同一条变更投到总线上两次——前端收到重复帧，
-/// 流式文本叠字。本表把投递收敛成**恰好一次**：每条变更只投给与之相关的最具体
-/// 的那条订阅，与订阅的条数、重叠方式都无关。
+/// 广播源是整棵子树共用的（[`notify_change`] 不按路径分流），而投递的终点是**一个
+/// 全局广播出口**（`plugins/vdfs/host.rs::event_bus_sink` → `EventBus::try_publish`
+/// 推给全部前端连接）。因此两条**重叠**的订阅（会话清单订 `<根>/session`、转写订
+/// `<根>/session/<id>/message`）若各投一次，同一条变更就会在总线上出现两次——
+/// 前端把它当两条变更各落地一次，流式正文当场叠字。
+///
+/// 所以本表把投递收敛成**恰好一次**：命中多条相关订阅时只调用**一个**投递器。
+/// 至于是哪一个，机制上**无所谓**（本表里的投递器行为相同）；取最长匹配只是让
+/// 「同一输入给同一输出」，好让诊断与测试可复现。这与订阅的条数、重叠方式无关。
 ///
 /// ## 为什么是同步投递而不是「广播通道 + 转发任务」
 ///
 /// `tokio::sync::broadcast` 会**静默丢帧**（通道满时慢消费者收到 `Lagged`），
-/// 而转写的 `appended` 增量**不可丢**——丢一帧，前端就永久少一段正文，且没有
-/// 任何机制会纠正（两条链路互不校验）。同步投递没有缓冲，也就不存在丢帧；
-/// 投递器只做「转成总线事件并 publish」，是非阻塞的，持锁调用也不会死锁。
+/// 而转写的 `delta` 增量**不可丢**——丢一帧，前端就永久少一段正文。同步投递没有
+/// 缓冲，也就不存在丢帧；投递器只做「转成总线事件并 publish」，是非阻塞的，
+/// 持锁调用也不会死锁。（背压由下游 `EventBus::try_publish` 负责：通道满时丢帧
+/// 但**保留订阅**并补送 resync 指令，见 `symbio_core::event_bus`。）
 ///
 /// ## 「相关」= 同一子树（自身 / 祖先 / 后代）
 ///
@@ -171,8 +176,14 @@ impl ChangeSubscriptions {
         }
     }
 
-    /// 投递一条变更：只给**最具体**的那条相关订阅（最长匹配），因此重叠订阅
-    /// 不会收到重复帧。无订阅者时直接返回。
+    /// 投递一条变更：**恰好一次**。
+    ///
+    /// 命中多条相关订阅时只调用一个投递器——**不是**「挑最具体的那个消费者」，
+    /// 而是「这条变更只能出总线一次」：本表里的投递器都是同一个广播出口，
+    /// 多调一次就是同一条变更在总线上出现两次（前端会各落地一次，流式正文叠字）。
+    ///
+    /// 取最长匹配只为**确定性**（同一输入永远给同一输出，诊断与测试可复现），
+    /// 不代表路径更具体的那条订阅「更该收到」。无订阅者时直接返回。
     pub fn notify(&self, change: &VdfsChange) {
         let subs = self.by_path.lock().unwrap();
         if subs.is_empty() {
@@ -241,10 +252,10 @@ fn hub_of(kind: &str) -> Arc<ChangeSubscriptions> {
 /// **它只发无载荷变更**（`VdfsChange::bare`）——绝大多数资源信号长这样。带业务
 /// 载荷的变更（消息帧 / 节点视图）由**生产者直接经它已持有的订阅表**投递：
 /// `ChangeSubscriptions::notify(&VdfsChange::with_data(path, data))`，见
-/// `session::transcript::Transcript::emit`。曾有过一个对称的
-/// `notify_change_with_data` 门面，但**没有任何生产者**（带载荷的只有会话域，
-/// 而它拿的是订阅表本身），S27 收口时随 R-001 一并删除——留一个没人调用的
-/// 「能力」比没有更糟：文档会照着它写，读者会以为存在第二条投递路径。
+/// `session::transcript::Transcript::publish`。这里**刻意不提供**对称的
+/// `notify_change_with_data` 门面：它没有生产者（带载荷的只有会话域，而会话域
+/// 拿的是订阅表本身），而留一个没人调用的「能力」比没有更糟——文档会照着它写，
+/// 读者会以为存在第二条投递路径。
 pub fn notify_change(kind: &str, path: &str) {
     hub_of(kind).notify(&VdfsChange::bare(path));
 }
@@ -343,8 +354,12 @@ mod tests {
         assert!(!subs.has_subscribers());
     }
 
-    /// **重叠订阅不重复投递**：会话清单订根、转写订其子树，
-    /// 一条消息变更只到达最具体的那条订阅 ⇒ 前端不会叠字。
+    /// **一条变更恰好出总线一次**：会话清单订根、转写订其子树，一条消息变更
+    /// 只会被投递一次（**不论落到哪一位订阅者**）⇒ 前端不会收到重复帧而叠字。
+    ///
+    /// 断言的是**总次数**而不是「谁收到了」：投递器行为相同，选哪一个是确定性的
+    /// 实现细节，不是契约。把契约写成「窄的那条收到」会让下一个人以为
+    /// 订阅路径的**具体程度**有语义——它没有。
     #[tokio::test]
     async fn overlapping_subscriptions_deliver_once() {
         let subs = ChangeSubscriptions::default();
@@ -365,8 +380,40 @@ mod tests {
         subs.notify(&VdfsChange::bare("abc/message/m1"));
         subs.notify(&VdfsChange::bare("xyz"));
 
-        assert_eq!(narrow.lock().unwrap().as_slice(), ["abc/message/m1"]);
-        assert_eq!(broad.lock().unwrap().as_slice(), ["xyz"]);
+        let hits: Vec<String> = broad
+            .lock()
+            .unwrap()
+            .iter()
+            .chain(narrow.lock().unwrap().iter())
+            .cloned()
+            .collect();
+        assert_eq!(
+            hits.iter().filter(|p| *p == "abc/message/m1").count(),
+            1,
+            "两条订阅都相关，但这条变更只能投递一次"
+        );
+        assert_eq!(
+            hits.iter().filter(|p| *p == "xyz").count(),
+            1,
+            "只与根订阅相关，也必须恰好一次"
+        );
+    }
+
+    /// 无相关订阅者时 `notify` 不投递（连通配的窄订阅也不该收到远亲变更）
+    #[tokio::test]
+    async fn unrelated_subscription_gets_nothing() {
+        let subs = ChangeSubscriptions::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        {
+            let s = seen.clone();
+            subs.watch(
+                "abc/message",
+                Arc::new(move |c: VdfsChange| s.lock().unwrap().push(c.path)),
+            );
+        }
+        // `xyz` 与 `abc/message` 既不同支也不是祖先：不相关
+        subs.notify(&VdfsChange::bare("xyz"));
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     /// 无订阅者时 `notify` 直接返回（不遍历、不投递）

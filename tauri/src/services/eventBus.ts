@@ -70,14 +70,28 @@ interface EventBusState {
   /** 前端模式：页面间本地通知注册表（资源变更，与后端事件同构） */
   localVdfsHandlers: Set<(change: VdfsChange) => void>
   /**
-   * 后端明示「你可能漏了变更」时（通道曾满）要执行的重读动作。
+   * 后端明示「你可能漏了变更」时（通道曾满），或**本端重连成功**后要执行的重读动作。
    *
-   * 为什么需要它：本频道**没有序号**，丢帧本身不可检测。后端在通道满时会丢帧但
-   * 保留订阅，并补送一条 resync 指令（`VDFS_BUS_RESYNC`）——这是消费端唯一能知道
-   * 「我刚才漏了东西」的途径。登记了本动作的作用域会整份重读，未登记者靠
-   * 下一次变更或用户导航自愈（幂等全量视图下这是安全的，只是慢一点）。
+   * 为什么需要它：本频道**没有序号**，丢帧本身不可检测。已知的丢帧有两处，都由
+   * 本集合兜底：
+   *
+   * - **通道满**：后端丢帧但保留订阅，并补送一条 resync 指令
+   *   （`VDFS_BUS_RESYNC`）——这是消费端唯一能知道「我刚才漏了东西」的信道指令；
+   * - **连接断开期间**：后端 `try_publish` 见 `is_closed` 会摘除订阅，帧被静默
+   *   丢弃，且**不补 resync**（订阅已经不在表里，没人知道该通知谁）。因此重连
+   *   成功那一刻必须由**本端**补一次重读——否则断开期间的变更永久丢失，而且
+   *   丢在中段的增量会破坏「本地正文恒为真值前缀」这个前提，守卫不会纠正它，
+   *   只会一直错到用户切走再切回。
+   *
+   * 登记了本动作的作用域会整份重读，未登记者靠下一次变更或用户导航自愈
+   * （幂等全量视图下这是安全的，只是慢一点）。
    */
   resyncHandlers: Set<() => void>
+  /**
+   * 是否**曾经**成功连接过。重连（`false → true` 之外的后续连接）才需要补重读：
+   * 首次连接时各作用域还没有「本地视图可能落后」这回事，白重读一次只是浪费。
+   */
+  everConnected: boolean
   /**
    * 已向后端登记的路径 → 引用计数。
    *
@@ -106,10 +120,31 @@ const S: EventBusState = _G.__symEventBusState ?? (_G.__symEventBusState = {
   reconnectDelay: 1000,
   localVdfsHandlers: new Set(),
   resyncHandlers: new Set(),
+  everConnected: false,
   vdfsWatchCounts: new Map(),
   vdfsWatchChain: new Map()
 })
+// HMR：模块重载后复用旧 state 对象，后加的字段可能不存在——补齐而不是让它变成 undefined
+S.everConnected ??= false
 const _maxReconnectDelay = 30000
+
+/**
+ * 测试专用：把总线状态复位（连接 / 重连判定 / 订阅与登记表）。
+ *
+ * 状态挂在 `globalThis` 上（HMR 复用），因此**跨 spec 文件也会存活**——「首连不补
+ * 重读」这类断言必须从一个干净的初始态出发，否则会读到上一个文件留下的
+ * `everConnected = true`，把首连误判成重连。
+ */
+export function _resetEventBusForTest(): void {
+  S.connection = null
+  S.connectionPromise = null
+  S.everConnected = false
+  S.subscribers.clear()
+  S.localVdfsHandlers.clear()
+  S.resyncHandlers.clear()
+  S.vdfsWatchCounts.clear()
+  S.vdfsWatchChain.clear()
+}
 
 /**
  * 启动（幂等）事件总线连接
@@ -135,9 +170,20 @@ export async function connectEventBus(): Promise<Connection> {
       }
     }
     const conn = await connectPlugin(EVENT_BUS_SUBSCRIBE, {}, handleConnectionEvent, {})
+    // 重连判定必须在赋值之前取：`handleConnectionEvent` 在断开时已把
+    // `S.connection` 置空，事后看是分不出「首连」与「重连」的。
+    const isReconnect = S.everConnected
     S.connection = conn
+    S.everConnected = true
     S.reconnectDelay = 1000
     logger.info('[event-bus]', 'Event bus connected', conn.connectionId)
+
+    // 重连成功 ⇒ 断开期间的变更已经丢光了（后端见 `is_closed` 摘掉了订阅，
+    // 帧被静默丢弃且不补 resync——订阅不在表里，没人知道该通知谁）。这里由本端
+    // 补一次重读。**只对重连做**：首连时各作用域还没有「本地视图可能落后」这回事。
+    if (isReconnect) {
+      fireResync('重连成功')
+    }
 
     // 监听 disconnect 事件以便触发重连
     // （connectPlugin 会在 onEvent('disconnected') 时调用）
@@ -365,6 +411,24 @@ export function publishVdfsChangedLocal(change: VdfsChange): void {
 
 // ===== 内部 =====
 
+/**
+ * 触发全部已登记作用域的重读。
+ *
+ * `reason` 只进日志：它是两个触发点（后端指令 / 本端重连）在下游的同一条动作，
+ * 但**发现者不同**——写到日志里，排查时才知道「这一轮重读是谁要求的」。
+ */
+function fireResync(reason: string): void {
+  if (S.resyncHandlers.size === 0) return
+  logger.warn('[event-bus]', `vdfs 重同步（${reason}）：重读全部已登记作用域`)
+  for (const cb of S.resyncHandlers) {
+    try {
+      cb()
+    } catch (e) {
+      logger.error('[event-bus]', 'resync handler 执行失败:', e)
+    }
+  }
+}
+
 function handleConnectionEvent(event: ConnectEvent): void {
   // 1. 断开/错误：清理连接并触发重连
   if (event.type === 'disconnected' || event.type === 'error') {
@@ -393,14 +457,7 @@ function handleConnectionEvent(event: ConnectEvent): void {
     // 但裸 `subscribe` 的消费者不会。因此在这里一次性截断，语义边界才清晰。
     const payload = busEvent.data.data as { type?: string } | null | undefined
     if (payload?.type === VDFS_BUS_RESYNC) {
-      logger.warn('[event-bus]', '收到 vdfs 重同步指令（后端通道曾满），重读全部已登记作用域')
-      for (const cb of S.resyncHandlers) {
-        try {
-          cb()
-        } catch (e) {
-          logger.error('[event-bus]', 'resync handler 执行失败:', e)
-        }
-      }
+      fireResync('后端通道曾满')
       return
     }
 
