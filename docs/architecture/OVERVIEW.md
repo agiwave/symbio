@@ -44,44 +44,16 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 
 ## 核心 Trait 与路由
 
-### `Plugin` Trait（V3.0 上下文注入版）
-
-```rust
-#[async_trait]
-pub trait Plugin: Send + Sync + 'static {
-    fn meta(&self) -> PluginMeta;
-
-    /// 分形路由入口
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>)
-        -> InvokeResponse<PluginPayload>;
-
-    /// 分形遍历（用于工具发现 / 全树诊断）
-    async fn traverse(self: Arc<Self>, path: String, ctx: Arc<dyn InvokeRequest>)
-        -> InvokeResponse<PluginPayload>;
-}
-```
-
-- `ctx: Arc<dyn InvokeRequest>` 是上下文对象，按需提取 `PATH` / `PAYLOAD` / `WORKDIR` / `SESSION_ID` 等
-- 容器类插件在 `route()` 内按 `PATH` 剥离当前层级前缀，转发给子插件
-- `_root` 等特殊路径可用于查询当前节点的拓扑
-
-### 路由寻址逻辑
-
-1. **检查路径**：容器插件收到 `route` 时，先判断 `PATH` 是否是自己的指令；若是则本地处理
-2. **递归路由**：若包含子级前缀，剥离当前层级后转发给对应子插件
-3. **叶子执行**：叶子插件在 `route("xxx", …)` 内完成业务
-4. **内省**：`_root` 等特殊路径返回当前节点子插件拓扑
+`Plugin` trait、帧 / 载荷 / 通道的**线上形状**以 [PROTOCOLS.md](./PROTOCOLS.md) 为准；
+绝对地址 vs 相对臂的**地址规则**见 [design/plugin-route-address.md](../design/plugin-route-address.md)。
+本节只保留一句契约：**容器与叶子实现同一 `Plugin` trait，寻址全凭路径字符串，
+容器在 `route()` 里剥离当前层级后转发**；签名与规则表不在此复制。
 
 ## 关键设计决策 → 见 DECISIONS.md
 
 「为什么用 `inventory` 静态注册」「为什么 Session 是唯一编排入口」「为什么 Model 支持多协议」
 这类问题的答案**只在 [DECISIONS.md](../DECISIONS.md) 各一条 ADR 里**（ADR-007 / ADR-003 / ADR-004），
 本文不复述——复述就会在下次改动时漏掉一处。
-
-## 文档体系约定（下沉原则）
-
-见 [docs/README.md](../README.md) §文档下沉原则与 §文档职责边界——系统级文档只留跨模块内容与引用，
-模块细节、单条决策、变更历史各有自己的 owner，本文件不复述。
 
 ---
 

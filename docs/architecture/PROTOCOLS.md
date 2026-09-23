@@ -4,17 +4,9 @@
 
 ## 帧协议 (PluginFrame)
 
-沿 `PluginChannel` 发送的最小消息单位。
-
-```rust
-pub enum PluginFrame {
-    /// 业务数据载荷
-    Data(serde_json::Value),
-    /// 错误 (message, details)
-    /// details 约定含 { "code": "ERR_CODE" }
-    Error(String, Option<serde_json::Value>),
-}
-```
+沿 `PluginChannel` 发送的最小消息单位，是 **2 态穷尽枚举**（定义在 `symbio_core`）：
+`Data(serde_json::Value)` 或 `Error(message, details)`，其中 `details` 约定含
+`{ "code": "ERR_CODE" }`（错误码见 [ERROR_CODES.md](../reference/ERROR_CODES.md)）。
 
 ### 帧类型
 
@@ -23,30 +15,12 @@ pub enum PluginFrame {
 | `Data` | 正常业务数据 | `{"type": "text_delta", "content": "Hello"}` |
 | `Error` | 执行异常 | `("API key missing", Some({"code": "CONFIG_ERROR"}))` |
 
-### 辅助方法
-
-```rust
-// Data 帧转 Value，其他返回 Value::Null
-frame.into_value()
-
-// 尝试把 Data 帧反序列化为指定事件模型
-frame.try_into_event::<T>()
-```
-
 ---
 
 ## 载荷协议 (PluginPayload)
 
-`route()` 和 `traverse()` 的返回类型。
-
-```rust
-pub enum PluginPayload {
-    Empty,                              // 空返回
-    Data(SerializeData),                // 类型化数据
-    Native(Arc<dyn Any + Send + Sync>), // 进程内原生接口
-    Session(PluginChannel),             // 全双工流式会话
-}
-```
+`route()` 和 `traverse()` 的返回类型，是 **4 态穷尽枚举**（定义在 `symbio_core`，
+变体名即下表左列）：
 
 ### 载荷类型
 
@@ -57,36 +31,19 @@ pub enum PluginPayload {
 | `Native` | 进程内原生接口 | 不序列化，直接 downcast |
 | `Session` | 长连接流式会话 | 返回 channel，后续用帧通信 |
 
-### 构造与访问
-
-```rust
-// 构造
-PluginPayload::new(&value)           // 自动推断类型
-PluginPayload::Session(channel)      // 显式创建会话
-
-// 访问
-payload.get::<T>()                   // 类型化访问 (进程内零拷贝)
-payload.serialize()                  // 强制 JSON (跨进程)
-```
+> **构造与访问的签名以代码为准**：`PluginPayload::new` 自动推断载荷类型、
+> `payload.get::<T>()` 进程内零拷贝 downcast、`payload.serialize()` 强制 JSON。
 
 ---
 
 ## 通道协议 (PluginChannel)
 
-全双工流式会话的底层通道。
+全双工流式会话的底层通道（收发两端各持一个 `mpsc` 端，定义在 `symbio_core`）。
 
-```rust
-pub struct PluginChannel {
-    pub tx: mpsc::Sender<PluginFrame>,   // 发送端 (后端 → 前端)
-    pub rx: mpsc::Receiver<PluginFrame>, // 接收端 (前端 → 后端)
-}
-```
-
-> **职责边界：`PluginChannel` 只管跨进程传输，不承担执行期协议**
-> （[ADR-020](../DECISIONS.md)）。执行层（LLM 单轮 / 工具调用）与宿主层之间不走通道：
-> 出方向是 `EventSink`（进程内直连转写 / `Null` 静默），入方向是 `AbortSignal`
-> （`abort()` 置位即唤醒）。**因此帧里不存在中止帧**——排障时不要到通道里找中止。
-> 机制见 [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §6。
+> **职责边界：`PluginChannel` 只管跨进程传输，不承担执行期协议。**
+> 执行层（LLM 单轮 / 工具调用）与宿主层之间的出口 / 入口是 `EventSink` / `AbortSignal`
+> （[ADR-020](../DECISIONS.md)；机制见 [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §6）——
+> 因此**帧里不存在中止帧**。本文件不复述该分离。
 
 ### 通道生命周期
 
@@ -109,17 +66,7 @@ let (my_channel, peer_channel) = PluginChannel::pair(64);
 
 ## 路由上下文 (InvokeRequest)
 
-请求的上下文注入接口。
-
-```rust
-#[async_trait]
-pub trait InvokeRequest: Send + Sync {
-    fn get(&self, key: &str) -> Option<String>;
-    fn config(&self) -> Option<serde_json::Value>;
-    fn payload(&self) -> Result<serde_json::Value, PluginError>;
-    fn fork(&self) -> Arc<dyn InvokeRequest>;
-}
-```
+请求的上下文注入接口（trait 定义在 core，签名以代码为准）。标准键：
 
 ### 标准上下文键
 
@@ -192,11 +139,8 @@ pub enum PluginPayloadWire {
 
 ### Tauri Commands
 
-| Command | 用途 | 输入 | 输出 |
-|---------|------|------|------|
-| `route_v2` | 发起路由请求 | `PluginMessageWire` | `PluginMessageWire` |
-| `route_v2_send` | 向会话发送帧 | `connection_id, PluginFrame` | `()` |
-| `route_v2_close` | 关闭连接 | `connection_id` | `()` |
+宿主命令面（3 个：`route_v2` / `route_v2_send` / `route_v2_close`）**以
+[CURRENT.md](../CURRENT.md) §5 为准**（自动生成）——本文不抄一份会漂移的副本。
 
 ### 流式会话建立
 
@@ -304,16 +248,6 @@ SingleFileVdfs, MemoryVdfs}`。套一层 `dyn` 工厂只会把一次构造换成
 2. 调用 `submit_object_creator!` 注册工厂
 3. 若要随系统启动，把插件名加进 `home::SYSTEM_PLUGINS`
 3. 在配置里挂载
-
----
-
-## 文档映射约定
-
-- **数据结构以代码为准**：跨端结构的定义在 `symbio_core/schemas/`，本文件不复制字段清单
-  （抄一份必然漂移；要看字段就读 Rust 定义或它的 `//!` 头注释）。
-- **机制与取舍**：复杂机制的规范见 [docs/design/](../design/)（如 VDFS 机制规范
-  [vdfs.md](../design/vdfs.md)）；模块内部机制见各模块 `README.md`（下沉原则，见
-  [docs/README.md](../README.md)）。
 
 ---
 

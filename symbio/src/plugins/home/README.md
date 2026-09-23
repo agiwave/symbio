@@ -14,11 +14,8 @@
 
 ## 路由
 
-| Path | 说明 |
-|------|------|
-| `home/get_homedir` | 当前系统目录（homedir）与 bootstrap 路径 |
-| `home/reload` | 热重载：切换 homedir（可选）+ 重建全部子插件 |
-| `work/*` | 工作区级指令（`set_workspace` / `get_workspace`） |
+`home/*` 与 `work/*` 由本插件自身终结；其余路径剥离首段后转发给 `worker`。
+**完整清单以 [ROUTES.md](../../../../docs/reference/ROUTES.md) §Home 插件为准**——本 README 不抄路由表。
 
 > 资源类别清单不设终结路由：`<根>` 自身的 `vdfs/list` 就是子目录清单
 > （由组合容器逐子插件收集，见 `../composite/README.md` 与 `docs/design/vdfs.md` §2.5）。

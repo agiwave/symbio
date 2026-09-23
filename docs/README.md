@@ -13,7 +13,7 @@
 文档是**下沉**的，所以「某条约定写在哪」要靠检索而不是靠记：
 `node scripts/doc-find.mjs <关键词>` 会同时搜 `*.md` 与源码里的 `//!` / `///`
 （相当一部分机制就写在模块文档注释里，如 `symbio_core::memory`）。
-**知识只写一处，且写在文档里**——不要以摘要形式复制到别处，复制必然漂移。
+**知识只写一处**——不要以摘要形式复制到别处，复制必然漂移。
 
 示例：会话上下文压缩的 L0-L6 分层总览在 [session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md)，各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md)——**会话相关的一切文档都在 `symbio/src/plugins/session/docs/` 内**；系统级目录只保留跨模块规范（如 [design/vdfs.md](./design/vdfs.md)）。
 
@@ -36,6 +36,8 @@
 | 模块深度设计与不变量 | 该模块 `docs/` | — |
 | 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史**（见下） |
 | 一次性评审 / 迁移记录 / 体检报告 | `docs/archive/` | 活文档不保留过程日志 |
+
+**变更时只改 owner 那一处**：结构事实重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁）；跨模块架构改 [OVERVIEW.md](./architecture/OVERVIEW.md) + [SYSTEM_MAP.md](./SYSTEM_MAP.md) 各自己那一层；常见问题进 [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md)。
 
 ### 两条硬规则
 
@@ -66,53 +68,19 @@
 | 查「某条约定写在哪」 | `node scripts/doc-find.mjs <词>`（全仓 md + Rust 文档注释检索） |
 | 看某个插件/前端的职责与机制 | 各模块 `README.md`（见下方模块文档地图） |
 
-## 文档结构
+## 文档放在哪
 
-```
-docs/                            # 系统级文档（跨模块）
-├── README.md                    # 本文档 (入口)
-├── CURRENT.md                   # 当前事实表（scripts/gen-current-facts.mjs 自动生成，勿手改）
-├── SYSTEM_MAP.md                # 系统地图 (一图胜千言)
-├── DECISIONS.md                 # 架构决策记录 (ADRs)
-├── architecture/                # 架构文档
-│   ├── OVERVIEW.md              # 架构总览
-│   ├── DATA_FLOW.md             # 数据流与调用链（排障地图）
-│   └── PROTOCOLS.md             # 协议规范
-├── reference/                   # 参考文档
-│   ├── ROUTES.md                # 路由参考
-│   ├── ERROR_CODES.md           # 错误码参考
-│   └── CONFIGURATION.md         # 配置参考
-├── guides/                      # 操作指南
-│   ├── QUICK_START.md           # 快速上手
-│   ├── PLUGIN_DEVELOPMENT.md    # 插件开发
-│   └── TROUBLESHOOTING.md       # 故障排查
-├── design/                      # 现行设计规范（只写跨层取舍与不变量；**只放规范**）
-│   ├── vdfs.md                          # VDFS 机制规范（权威；资源存储见 §11 / §13.4）
-│   ├── vdfs-frontend.md                 # VDFS 前端页面规范
-│   ├── agent-directory-spec.md          # agent 插件（智能体域）规范
-│   ├── http-api-transport.md            # Gateway HTTP/WS 传输层设计
-│   ├── class-diagram.mermaid            # 类图
-│   └── sequence-diagram.mermaid         # 时序图
-└── archive/                     # 历史归档（仅供参考）
-                                 #  注：变更历史以 `git log` 为准，本仓库**不维护 CHANGELOG**
-                                 #  **内容清单以目录为准**（`ls docs/archive/`）——不在此抄一份
-                                 #  会漂移的副本。含：已废止的旧机制 / 旧规范、一次性评审与体检
-                                 #  报告、已落地的实施方案、已完成的迁移记录；
-                                 #  另有 implementation-logs/ · proj/ · ideas/ 三个子目录
+**目录清单以文件系统为准**（`ls docs/`、`ls docs/archive/`）——本文不抄一份会漂移的副本。各目录的定位：
 
-symbio/src/plugins/<plugin>/     # 模块级文档（就近原则）
-├── README.md                    # 插件职责与内部机制，**不复制路由表**（指向 ROUTES.md）
-│                                #  （16 个插件全覆盖）
-└── docs/                        # 可选：该模块的**现行**深度设计 / 性能文档
-                                 #  例：session/docs/（核心循环、压缩设计、心跳、
-                                 #  模块分工、性能、会话选项、VDFS 会话消息……）
-                                 #  ⚠️ 模块目录同样受「归档」约束：一次性评审 / 迁移记录 /
-                                 #  体检报告一律 `git mv` 进 docs/archive/，不留在活目录
-
-tauri/                           # 前端
-├── README.md                    # 前端入口
-└── docs/FRONTEND.md             # 前端架构与视图清单
-```
+| 位置 | 放什么 |
+|------|--------|
+| `docs/`（本目录） | 系统级跨模块文档；`CURRENT.md` 自动生成、勿手改 |
+| `docs/architecture/` | 架构总览 / 协议形状 / 排障链路 |
+| `docs/reference/` | 路由 / 错误码 / 配置的权威参考页 |
+| `docs/guides/` | 上手 / 插件开发 / 排障 |
+| `docs/design/` | 跨层设计规范（VDFS、agent 目录、HTTP 传输…）；**只放规范** |
+| `docs/archive/` | 历史归档：已废止的旧机制 / 旧规范、一次性评审与体检、已落地的实施方案与迁移；**变更历史以 `git log` 为准，本仓库不维护 CHANGELOG** |
+| 模块目录 | `symbio/src/plugins/<plugin>/README.md`（+ 可选 `docs/`）、`tauri/`、`cli/`——就近放置，受同一「过程文档必须归档」约束 |
 
 ## 模块文档地图
 
@@ -136,47 +104,4 @@ tauri/                           # 前端
 | telegram | [plugins/telegram/README.md](../symbio/src/plugins/telegram/README.md) | Telegram 通道接入 |
 | tauri 前端 | [tauri/README.md](../tauri/README.md) → [docs/FRONTEND.md](../tauri/docs/FRONTEND.md) | Vue3 + Tauri2 桌面前端 |
 
-## 文档原则
-
-1. **真实**：文档必须与代码同步，过时文档比无文档更危险
-2. **精简**：每个文档聚焦一个主题，避免重复
-3. **准确**：代码示例必须可执行，接口签名必须与代码一致
-4. **唯一来源**：每个知识点只有一个权威文档（模块机制以模块内文档为准）
-
-## 维护规则
-
-| 变更类型 | 需要更新的**唯一**位置 |
-|----------|----------------|
-| 新增路由 | **只在 `ROUTES.md` 登记**（模块 `README.md` 不复制路由表，只写机制并指向 `ROUTES.md`） |
-| 新增错误码 | `ERROR_CODES.md` |
-| 新增配置项 | `CONFIGURATION.md` |
-| 插件 / 挂载点 / 工具 / 存储布局变更 | 重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁；`CURRENT.md` 不手改） |
-| 模块内部机制变更 | 该模块 `README.md`（系统级文档不复制细节） |
-| 跨模块架构变更 | `OVERVIEW.md` + `SYSTEM_MAP.md` 各改自己那一层 |
-| 决策变更（选了 A、否决了 B） | `DECISIONS.md` 增一条 ADR，其它文档只引用编号 |
-| 协议变更 | `PROTOCOLS.md` |
-| 历史实施记录 / 已完成的迁移 | 只进 `archive/`，现行文档不保留过程日志 |
-| 常见问题 | `TROUBLESHOOTING.md` |
-| 「改了什么」 | 提交信息 + `git log`——**不改任何文档** |
-
-## 阅读路径
-
-### 新手入门
-1. [QUICK_START.md](./guides/QUICK_START.md) - 跑通第一个场景
-2. [SYSTEM_MAP.md](./SYSTEM_MAP.md) - 了解系统全貌
-3. [OVERVIEW.md](./architecture/OVERVIEW.md) - 理解设计哲学
-
-### 开发者
-1. [PROTOCOLS.md](./architecture/PROTOCOLS.md) - 理解核心协议
-2. [ROUTES.md](./reference/ROUTES.md) - 查找可用路由
-3. 目标模块 `README.md` - 理解模块内部机制
-4. [PLUGIN_DEVELOPMENT.md](./guides/PLUGIN_DEVELOPMENT.md) - 开发新插件
-
-### 维护者
-1. [DECISIONS.md](./DECISIONS.md) - 理解历史决策
-2. [ERROR_CODES.md](./reference/ERROR_CODES.md) - 处理错误
-3. [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) - 排查问题
-
----
-
-> **维护原则**：本文档是文档体系的入口，任何结构性变更必须先更新此文件。
+> **维护原则**：本文是文档体系的入口；结构性变更（新增/删除目录、职责改属）先改此文件。单条事实的增改只动它的 owner，不必回头改本文。

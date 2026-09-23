@@ -79,10 +79,9 @@
 
 **不可删除**：要清空就写入空内容（两个作用域同一约定）。
 
-## 路由
+## 寻址（无自有路由，权威登记见 [ROUTES.md](../../../../docs/reference/ROUTES.md) §Agent 插件）
 
-**agent 插件没有任何自有路由**：`route()` 直接返回 `NotFound` 并指引到 VDFS。
-agent 目录的寻址是**挂载点语义**而非平铺三段：
+agent 目录的寻址是**挂载点语义**而非平铺三段（`route()` 直接返回 `NotFound` 并指引到 VDFS）：
 
 - `agent/<id>` 是挂载点；钻进它即**委托给子 composite 的 `CompositeVfs`**（与系统根
   分形同构，而非把子智能体资源并集进系统树的三段地址）。

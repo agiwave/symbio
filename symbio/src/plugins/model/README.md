@@ -17,17 +17,14 @@
 
 ## 路由
 
-**无**。model 的全部对外能力都在 VDFS 上（`<根>/model`）。持久化分两处：
-跨条目状态（`default_provider_id`）写自己的 `plugins/model/PLUGIN.yml`，
-Provider 明细是资源、各存各的 `provider.json`。
+**无**（权威登记见 [ROUTES.md](../../../../docs/reference/ROUTES.md) §Model 插件）。model 的全部对外能力
+都在 VDFS 上（`<根>/model`）。持久化分两处：跨条目状态（`default_provider_id`）写自己的
+`plugins/model/PLUGIN.yml`，Provider 明细是资源、各存各的 `provider.json`。
 
-模型 provider **不设插件路由**：`<根>/model` 挂载点由本插件自己的
-`impl VdfsProvider` 提供——落盘走 `providers::vdfs_service::SingleFileVdfs`
-（一个条目 = 一份 `provider.json`，条目内部不外露），清单走 `MemoryVdfs`
-（内存镜像：启动时从磁盘灌入、写盘成功后回灌）。原 `entities/*` / `config/get` /
-`config/set` / `config/schema` / `status` / `chat_sync` 路由均已下线——字段定义改由
-`detail_definition` 随 VDFS 节点 `schema` 下发，连通性自检改由节点动作
-`vdfs/action { action: "test" }`。
+模型 provider **不设插件路由**：`<根>/model` 挂载点由本插件自己的 `impl VdfsProvider`
+提供——落盘走 `providers::vdfs_service::SingleFileVdfs`（一个条目 = 一份 `provider.json`，
+条目内部不外露），清单走 `MemoryVdfs`（内存镜像：启动时从磁盘灌入、写盘成功后回灌）。
+字段定义随 VDFS 节点 `schema` 下发，连通性自检走节点动作 `vdfs/action { action: "test" }`。
 
 ## 关联
 

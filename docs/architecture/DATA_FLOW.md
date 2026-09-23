@@ -53,12 +53,9 @@ sequenceDiagram
 | 6 | 前端显示 | `event_bus` 的 `KIND_VDFS` 变更（消费端先 `vdfs/watch` 登记） | **显示只由节点状态驱动**：消息是 `<根>/session/<id>/message/<mid>` 这个**文件**，会话运行态是会话节点（`<根>/session/<id>`）的 `status`——两者都是 VDFS 变更。`updated` 带 `delta` = 尾部追加（零回读）；无 `delta` = 回读。顺序是**节点属性**（`ChatMessage.seq`），与到达顺序无关。见 [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) §5.1 与 §11 |
 | 7 | 会话持久化 | `plugins/session/`（存储层） | 帧格式见 [PROTOCOLS.md]「AI 会话流式规范」 |
 
-> **执行期的两个原语**（[ADR-020](../DECISIONS.md#adr-020-执行期与传输层分离eventsink出-abortsignal入取代-pluginchannel-的双职责)）：
-> 执行层（LLM 单轮 / 工具调用）与宿主层之间**不走 `PluginChannel`**——出方向是
-> `EventSink`（`Direct` 进程内直连转写唯一写入点 / `Null` 静默），入方向是
-> `AbortSignal`（`abort()` 置位即唤醒，无帧、无轮询）。`PluginChannel` 只承担
-> **跨进程传输**（前端实时面 `PluginPayload::Session`）。排障时：**帧通道里没有
-> 中止帧**，中止只有一个入口 `AbortSignal::abort()`。
+> **执行期的两个原语**（`EventSink` 出 / `AbortSignal` 入）由 [ADR-020](../DECISIONS.md#adr-020-执行期与传输层分离eventsink出-abortsignal入取代-pluginchannel-的双职责) 定义、
+> 机制在 [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §6——本文件不复述。
+> 排障要点只有一条：执行期**不走 `PluginChannel`**、通道里**没有中止帧**，中止只有一个入口 `AbortSignal::abort()`。
 
 **排障口诀**：不出字 → 查 #4 协议适配与 provider 配置；工具不触发 → 查 #2 收集结果与 #5 循环；**状态不刷新** → 查 #6：`emit_session_state` 是否被调（运行态的**唯一出口**），以及前端对 `<根>/session/<id>` 的 `updated` 变更是否在收敛（运行态的**唯一通道**）；状态不动而消息正常 → 同上，多半是唯一出口漏调。
 

@@ -22,32 +22,13 @@
 ## 两条链路，同一批 provider
 
 前端与 LLM 消费**同一批**注册的挂载 provider，因此不存在「前端支持而 LLM 不支持」的资源；
-差异只在呈现——前端拿域响应原样渲染，工具在 `execute` 内封装。
+差异只在呈现——前端拿域响应原样渲染，工具在 `execute` 内封装。工具集是操作的**子集**
+（`watch` / `unwatch` / `action` 不经 LLM 工具暴露：实时订阅归宿主前端，动作由详情
+`actions` 声明后按需触发）。
 
-| Path（前端） | 说明 |
-|------|------|
-| `vdfs/list` | 列目录（可带 `limit` / `before` 有界分页） |
-| `vdfs/tree` | 子树快照 |
-| `vdfs/stat` | 单节点详情（访问位 + 呈现字段） |
-| `vdfs/read` | 读内容 |
-| `vdfs/write` | 写内容 / 创建（`create:true`） |
-| `vdfs/delete` | 删除 |
-| `vdfs/mkdir` | 建目录 |
-| `vdfs/move` | 移动 / 重命名 |
-| `vdfs/edit` | 局部编辑 |
-| `vdfs/search` | 内容搜索 |
-| `vdfs/watch` · `vdfs/unwatch` | 订阅 / 退订路径变更 |
-| `vdfs/action` | 透传节点声明的动作 `(路径, 标识, 载荷)` |
-
-共 **13 个操作**（`protocol.rs::VDFS_OPS`，计数有测试锁死）。
-
-| Tool（LLM） | 对应操作 |
-|------|------|
-| `vdfs_list` · `vdfs_tree` · `vdfs_stat` · `vdfs_read` · `vdfs_edit` · `vdfs_search` · `vdfs_write` · `vdfs_delete` · `vdfs_mkdir` · `vdfs_move` | 各对应同名操作 |
-
-工具集是操作的**子集**（10 个）：`watch` / `unwatch` / `action` 不经 LLM 工具暴露
-（实时订阅归宿主前端，动作由详情 `actions` 声明后按需触发）。工具集完整性由
-`tools/mod.rs` 的 `tools_cover_all_ops` 测试锁死。
+**操作与工具清单以 [docs/CURRENT.md](../../../../docs/CURRENT.md) §3 为准**（操作闭集
+`protocol.rs::VDFS_OPS` 有测试锁计数；工具集完整性由 `tools/mod.rs` 的
+`tools_cover_all_ops` 测试锁死）——本 README 不抄那份会漂移的清单。
 
 ## 模块分工
 

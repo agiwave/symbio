@@ -5,7 +5,7 @@
 
 ## 路由
 
-**无**。本插件是无状态 provider，`route` 恒 `NotFound`。
+**无**（权威登记见 [ROUTES.md](../../../../docs/reference/ROUTES.md) §Setting 插件）。本插件是无状态 provider，`route` 恒 `NotFound`。
 
 ## 清单 = 各插件交出来的配置条目 + 自有分区
 
