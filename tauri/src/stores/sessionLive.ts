@@ -11,11 +11,7 @@
  * 映射可以逐条断言（见 `__tests__/sessionLive.spec.ts`）。
  */
 
-import {
-  VDFS_STATUS_WORKING,
-  isWorkingStatus,
-  type SessionOutcome,
-} from '@/schemas/vdfs'
+import { isWorkingStatus, type SessionOutcome } from '@/schemas/vdfs'
 import { isBlankContentNode, isInProgressMessage } from './sessionTranscript'
 import type { ChatMessage } from '@/schemas/chat_message'
 import type { SessionListItem } from '@/services/session'
@@ -242,5 +238,3 @@ export function needsTypingRow(
 
 /** 状态字面量：进入运行中时的活动文字（与 `liveStatusPatchOf` 保持一致） */
 export const ACTIVITY_WORKING = '处理中…'
-/** 状态字面量：运行中的节点状态值 */
-export const STATUS_WORKING = VDFS_STATUS_WORKING

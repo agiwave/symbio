@@ -31,7 +31,7 @@ import {
   type VdfsNode,
   type VdfsWriteResponse,
 } from '../schemas/vdfs'
-import { resetVdfsRoot, setVdfsRoot, vdfsRoot, vdfsRootResolved } from '../schemas/vdfsRoot'
+import { setVdfsRoot, vdfsRoot, vdfsRootResolved } from '../schemas/vdfsRoot'
 import { logger } from '@/utils/logger'
 import { withFallback } from './fallback'
 // 回读理由是**词表**，不是本层的服务——从它的独立模块取，消费方也走同一处
@@ -88,11 +88,6 @@ export async function ensureVdfsRoot(): Promise<void> {
     () => {},
     { tag: 'vdfs-service', what: 'vdfs/root failed，虚拟半不可用' }
   )
-}
-
-/** 测试用：清掉根锚点 */
-export function resetVdfsRootForTest(): void {
-  resetVdfsRoot()
 }
 
 /**

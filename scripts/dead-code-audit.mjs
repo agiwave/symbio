@@ -136,32 +136,81 @@ if (suspicious.length) {
 }
 
 // ── 未使用的导出（死代码的细粒度形式）──
-// 属**降级提示**：本检查对「仅在本文件内按类型用」「经 barrel 再导出」都会命中，
-// 故默认只给个数，明细加 `--verbose` 才打印——否则每次门禁刷 50+ 行噪音。
+//
+// ## 判据：**「无人用」必须含定义文件自己**
+//
+// 原先只统计**其他文件**的引用（`g !== f`），于是「定义在本文件、也在本文件里用」
+// 的导出全被报了出来 —— 实测 89 条里抽查的每一条都是这一类：
+// `UseVdfsOptions` 是同文件里 `useVdfs()` 的形参类型、`messageTypeOf` 在同文件里
+// 被调两次、`HEAD_WORKDIR` 在同文件里被读写、`OUTCOME_*` 在同文件里被比较……
+// 那不是保守，是**报告在说假话**：它把健康的导出报成可清理的垃圾，读报告的人
+// 会顺着去"修"本来没坏的东西（`schema-audit` 的前端那一半踩的是同一个坑，
+// 同一条判据已在那边修过一次 —— 两处必须说同一句话）。
+//
+// 计数含声明行本身，故「只出现一次」= 只在这里声明、无人使用。
+//
+// ## 已知边界（写清楚，免得把绿灯当证明）
+//
+// 按**标识符文本**判，不是 AST。因此「经 barrel 再导出后由别处使用」仍可能命中
+// （`export * from './x'` 里不出现名字）——这类要靠人看一眼，故仍标**降级提示**：
+// 打印个数，`--verbose` 才出明细（否则每次门禁刷几十行噪音，而噪音会教人忽略它）。
 console.log(`\n【导出级检查】`)
+
+/**
+ * 承认通道：声明行（或紧邻上一行）带 `// dead-code-allow R-001: <理由>` ⇒ 已承认保留。
+ * 与 Rust 侧 R-001 是**同一条约定**（理由不可为空）——两个守卫必须说同一句话，
+ * 否则「在 Rust 那边承认了、前端这边还报着」会让人再查一遍。
+ */
+function waiverOf(code, name) {
+  const lines = code.split('\n')
+  const decl = new RegExp(
+    `^[ \\t]*export\\s+(?:const|function|async\\s+function|class|interface|type|enum)\\s+${name.replace(/\$/g, '\\$')}\\b`,
+  )
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!decl.test(lines[i])) continue
+    for (const j of [i, i - 1]) {
+      if (j < 0) continue
+      const m = lines[j].match(/\/\/\s*dead-code-allow\s+R-\d+\s*:\s*(.+?)\s*$/)
+      if (m) return m[1]
+    }
+  }
+  return null
+}
+
 const unusedList = []
 for (const f of reachable) {
   if (isTest(f) || f.endsWith('.d.ts')) continue
   const code = readFileSync(f, 'utf8')
+  // ⚠️ 正则**锚定行首**。不锚定时，注释里举例说明的写法也会被当成真导出——
+  // `factory.ts` 的文档里就有一句「解构出去单独导出（`export const registerX = …`）」，
+  // 于是 `registerX` 被报成死导出，而它**根本不存在**。实测：不锚定 433 个名字、
+  // 锚定 432 个，差额恰好就是那一个注释里的假导出。
   const names = [
-    ...[...code.matchAll(/export\s+(?:const|function|async\s+function|class|interface|type|enum)\s+([A-Za-z0-9_$]+)/g)].map((m) => m[1]),
+    ...[...code.matchAll(/^[ \t]*export\s+(?:const|function|async\s+function|class|interface|type|enum)\s+([A-Za-z0-9_$]+)/gm)].map((m) => m[1]),
   ]
   if (!names.length) continue
   const dir = rel(f)
   for (const n of names) {
-    // 同名标识符在其它任何文件中出现即视为可能被使用（保守）
     const re = new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`)
-    const used = corpus.some(([g, c]) => g !== f && re.test(c))
-    if (!used) unusedList.push(`${dir} :: ${n}`)
+    // 别的文件用过 ⇒ 活；否则再看**定义文件自己**用过没（声明行本身算 1 次）
+    if (corpus.some(([g, c]) => g !== f && re.test(c))) continue
+    // ⚠️ 计数必须用**全局**正则：非全局的 `match()` 只返回首个匹配，
+    // `.length` 恒为 1（无捕获组时），于是「出现过几次」永远算成 1 —— 这条
+    // 判据会静默失效、89 条一条都筛不掉，而输出看起来毫无异常。
+    const selfOcc = (code.match(new RegExp(re.source, 'g')) ?? []).length
+    if (selfOcc > 1) continue
+    unusedList.push({ dir, name: n, waiver: waiverOf(code, n) })
   }
 }
 const unusedExports = unusedList.length
 if (VERBOSE) {
-  for (const line of unusedList) console.log(`  ${line}`)
+  for (const u of unusedList) {
+    console.log(`  ${u.dir} :: ${u.name}${u.waiver ? `（已承认保留：${u.waiver}）` : ''}`)
+  }
 } else if (unusedExports) {
-  console.log(`  ${unusedExports} 个导出未被其他文件引用（降级提示，不判失败；--verbose 看明细）`)
+  console.log(`  ${unusedExports} 个导出**全库无人用**（含定义文件自身；降级提示，不判失败；--verbose 看明细）`)
 }
-if (!unusedExports) console.log('  （无未被引用的导出）')
+if (!unusedExports) console.log('  （无全库无人用的导出）')
 
 // ── Rust 侧 R-001：`pub` 声明但全仓一次都没被提及（**判定型**）──
 //

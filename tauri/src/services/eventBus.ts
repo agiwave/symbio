@@ -156,33 +156,6 @@ export async function connectEventBus(): Promise<Connection> {
 }
 
 /**
- * 主动断开事件总线
- */
-export async function disconnectEventBus(): Promise<void> {
-  if (S.reconnectTimer) {
-    clearTimeout(S.reconnectTimer)
-    S.reconnectTimer = null
-  }
-  if (S.connection) {
-    try {
-      await S.connection.close()
-    } catch (e) {
-      logger.warn('[event-bus]', 'Disconnect error:', e)
-    }
-    S.connection = null
-  }
-  S.connectionPromise = null
-  S.subscribers.clear()
-}
-
-/**
- * 当前连接状态
- */
-export function isEventBusConnected(): boolean {
-  return !!(S.connection && S.connection.isConnected)
-}
-
-/**
  * 订阅事件总线
  *
  * - `filter.kind` 必填（如 `VDFS_EVENT_KIND`）

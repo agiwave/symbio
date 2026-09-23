@@ -463,6 +463,3 @@ export function resetSessionTranscriptSyncForTest(): void {
   S.mountDir = ''
   S.messagesSeg = ''
 }
-
-// 供测试断言内部代际（不进生产路径）
-export const __internals = { deltaGenOf, messageAddr }

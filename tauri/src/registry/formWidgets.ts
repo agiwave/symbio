@@ -86,7 +86,7 @@ export interface FormWidgetSpec {
 const identity = (v: unknown): unknown => v ?? ''
 
 /** widget 名 → 行为（**唯一的硬编码表**，纯 UI 约定） */
-const WIDGET_SPECS: Record<string, FormWidgetSpec> = {
+const WIDGET_SPECS: Record<FormWidget, FormWidgetSpec> = {
   text: { tag: 'input', initial: '', toEdit: identity, fromEdit: identity, fullWidth: false, readonly: false, inputType: 'text' },
   password: {
     tag: 'input', initial: '', toEdit: identity, fromEdit: identity,
@@ -121,9 +121,17 @@ const WIDGET_SPECS: Record<string, FormWidgetSpec> = {
 /** 未登记 widget 名的回落（与消息域 / VDFS 域同一条兜底约定） */
 const FALLBACK: FormWidgetSpec = WIDGET_SPECS.text!
 
-/** 查表；未登记回落 `text`（页面永不空白） */
+/**
+ * 查表；未登记回落 `text`（页面永不空白）。
+ *
+ * 表类型是 `Record<FormWidget, …>`（**不是** `Record<string, …>`）：那样
+ * 「新增一种 widget」必须在此加一行，否则类型检查直接报缺键——词表从
+ * 「一句注释里的联合类型」变成**被编译器守着**的东西。这与消息域 / VDFS 域
+ * 「未登记 → 兜底」同一条约定并不冲突：入参仍是后端下发的**字符串**，
+ * 收窄只是为了让索引合法，未登记的键运行期取不到值 ⇒ 落到 `FALLBACK`。
+ */
 export function widgetSpecOf(widget: string | undefined): FormWidgetSpec {
-  return (widget && WIDGET_SPECS[widget]) || FALLBACK
+  return (widget && WIDGET_SPECS[widget as FormWidget]) || FALLBACK
 }
 
 /** 编辑态初始值（字段 `default` 优先，否则取 widget 的） */
