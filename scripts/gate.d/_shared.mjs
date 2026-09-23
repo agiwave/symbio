@@ -94,6 +94,18 @@ export const BASELINE = {
   //      在途号段，两个计数器在同一区间各自递增 ⇒ 撞号（同一会话里用户消息与压缩
   //      节点各持 `1099511627781`，e2e T8 的「seq 严格递增」当场失败）。
   rustTests: 919,
+  /**
+   * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
+   *
+   * 为什么单独立一格：`symbio` 与 `cli` 是**两个独立 workspace**，`cargo test`
+   * 在 `symbio/` 下跑不到 `cli/` 的测试。而门禁此前只对 cli 做了
+   * `cargo check --tests` + `clippy --all-targets` —— 两者都**只编译不执行**，
+   * 于是 `cli/src/args.rs` 里那 8 条参数解析用例**从来没有被任何门禁跑过**：
+   * 它们可以一直失败而门禁全绿。这正是本仓反复栽的那类坑（「漏跑的代价远大于多跑」，
+   * 见 `.github/workflows/ci.yml` 把白名单改成黑名单那段），只是这次漏的是**执行**。
+   * 8 = 2026-09-23 实测（`cd cli && cargo test`）。
+   */
+  cliRustTests: 8,
   // 47 spec 文件 / 661 → 683 → 687 → 689 → 724 → 726 用例。文件数与用例数均与平台无关（全仓 spec
   // 零平台分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见对应提交
   // （`git log --grep=<批次/主题>`；本仓库不维护变更日志，变更历史即提交历史）。
@@ -197,6 +209,56 @@ export function sumInt(output, re) {
     found = true
   }
   return found ? total : null
+}
+
+/**
+ * `cargo test` + **通过数棘轮**（`symbio` 与 `cli` 共用）。
+ *
+ * 抽成共享函数而不是各写一遍：`symbio` 与 `cli` 是**两个独立 workspace**
+ * （仓库根没有 `Cargo.toml`），而「跑测试并比对通过数基线」这件事必须对两者是
+ * **同一套判据**——各写一份的结果是两边各自演化，最后变成两条不同的规范
+ * （`check-commit-msg.mjs` 把「单条」与「一段范围」抽成同一个 `validate()` 就是为此）。
+ *
+ * 棘轮语义（与 `BASELINE` 头部的说明一致）：
+ * - 低于基线 ⇒ **失败**（有测试被删，或有测试失败而退出码没反映出来）；
+ * - 高于基线 ⇒ 通过，但打印提示要求同步基线（那是刻意要人看一眼的地方）；
+ * - 解析不到通过数 ⇒ 通过但标注 —— 宁可漏报，也不因为**解析**失败把门禁变红。
+ *
+ * 自定义任务而非声明式命令：同一次运行既判退出码又解析通过数，
+ * 避免为了拿输出再跑一遍测试。
+ */
+export function cargoTestRatchet(ctx, { label, cwd, args, baseline, baselineName }) {
+  return {
+    label,
+    run: async () => {
+      const r = await ctx.run({ label, cmd: 'cargo', args, cwd })
+      if (!r.ok) {
+        const note = r.timedOut ? '超时终止' : `exit=${r.code}${r.signal ? `, ${r.signal}` : ''}`
+        return { ok: false, note }
+      }
+      if (ctx.ci) {
+        // CI 跑全量（含集成测试）：每个测试目标各打一行 ⇒ 求和；数字仅作信息展示
+        const total = sumInt(r.output, /test result: ok\. (\d+) passed/)
+        if (total !== null) console.log(`      ${total} passed（--workspace 全量；只信退出码）`)
+        return { ok: true }
+      }
+      const passed = grabInt(r.output, /test result: ok\. (\d+) passed/)
+      if (passed === null) return { ok: true, note: '未能解析通过数' }
+      if (passed < baseline) {
+        return { ok: false, note: `通过数 ${passed} < 基线 ${baseline}（有测试被删或失败）` }
+      }
+      if (passed > baseline) {
+        console.log(
+          yellow(
+            `      ⚠ 通过数 ${passed} > 基线 ${baseline}：请更新 scripts/gate.d/_shared.mjs 的 BASELINE.${baselineName}`,
+          ),
+        )
+        return { ok: true, note: `通过数 ${passed}（基线待更新）` }
+      }
+      console.log(`      ${passed} passed（基线 ${baseline}）`)
+      return { ok: true }
+    },
+  }
 }
 
 /** vitest --coverage 表格里「All files」行的行覆盖率（第 4 列，%） */

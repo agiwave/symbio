@@ -14,7 +14,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { autoWork } from './_shared.mjs'
+import { autoWork, cargoTestRatchet } from './_shared.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
 
@@ -193,4 +193,54 @@ test('ci.yml 里包含 facts 阶段的 gate 调用必须传 --ci', () => {
   for (const l of factsCalls) {
     assert.match(l, /--ci/, `facts 阶段必须传 --ci，否则漂移会静默通过：${l.trim()}`)
   }
+})
+
+// ── cargoTestRatchet：两个独立 workspace 共用的「跑测试 + 通过数棘轮」 ──────
+//
+// 抽成共享函数就是为了让 `symbio` 与 `cli` 是**同一套判据**，所以这里钉的是
+// **判据本身**，不是某一侧的调用：三条分支（低于 / 等于 / 高于基线）加上两条
+// 退化路径（解析不到 / 命令失败）。其中「解析不到不判红」尤其要钉住——那是
+// 刻意的：宁可漏报，也不因为**解析**失败把门禁变红（必然红的门禁比没有门禁更糟）。
+const fakeCtx = (output, { ci = false, ok = true } = {}) => ({
+  ci,
+  run: async () => ({ ok, output, code: ok ? 0 : 1, timedOut: false }),
+})
+const ratchet = (output, opts, baseline = 10) =>
+  cargoTestRatchet(fakeCtx(output, opts), {
+    label: 'cargo test',
+    cwd: '.',
+    args: ['test'],
+    baseline,
+    baselineName: 'rustTests',
+  })
+
+test('cargoTestRatchet：通过数等于基线 ⇒ 通过且无 note', async () => {
+  const r = await ratchet('test result: ok. 10 passed; 0 failed').run()
+  assert.equal(r.ok, true)
+  assert.equal(r.note, undefined)
+})
+test('cargoTestRatchet：通过数低于基线 ⇒ 判红（有测试被删或失败）', async () => {
+  const r = await ratchet('test result: ok. 9 passed; 0 failed').run()
+  assert.equal(r.ok, false)
+  assert.match(r.note, /9 < 基线 10/)
+})
+test('cargoTestRatchet：通过数高于基线 ⇒ 通过但提示同步基线', async () => {
+  const r = await ratchet('test result: ok. 11 passed; 0 failed').run()
+  assert.equal(r.ok, true)
+  assert.match(r.note, /基线待更新/)
+})
+test('cargoTestRatchet：解析不到通过数 ⇒ 通过并标注，不因解析失败判红', async () => {
+  const r = await ratchet('no summary here').run()
+  assert.equal(r.ok, true)
+  assert.match(r.note, /未能解析/)
+})
+test('cargoTestRatchet：命令失败 ⇒ 判红并带退出码', async () => {
+  const r = await ratchet('', { ok: false }).run()
+  assert.equal(r.ok, false)
+  assert.match(r.note, /exit=1/)
+})
+test('cargoTestRatchet：CI 下只信退出码，不比对基线（1 个通过也过）', async () => {
+  const r = await ratchet('test result: ok. 1 passed; 0 failed', { ci: true }).run()
+  assert.equal(r.ok, true)
+  assert.equal(r.note, undefined)
 })
