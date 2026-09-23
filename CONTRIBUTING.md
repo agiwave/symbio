@@ -123,6 +123,26 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
   写入时把 `\n` 转成了 CRLF，rustfmt 会**逐文件**报 `Incorrect newline style` 并以
   非零码退出，症状是「fmt 门禁突然挂了但代码没变」。
 - ⚠️ vitest 4 的 `toBe(v, 'msg')` 只收 1 个参数（写两个参数静默失效）。
+- ⚠️⚠️ **e2e 门禁「已有二进制就跳过重建」⇒ 改完 Rust / CLI 源码必须自己重建，否则你在测过期产物**。
+  `40-e2e.mjs` 的构建条件是 `when: () => ctx.ci || !cliBinaryExists(repoRoot)`：本机只要
+  `symbio/target/release/symbio-cli.exe` 在，整步就跳过（汇总里显示 `⊘ 已有 release 二进制`）。
+  症状是**断言失败的方式与眼前的源码矛盾**——源码里明明有的字段，运行时是 `undefined`。
+  这时**先怀疑产物，不要怀疑源码**。正解：`cd cli && cargo build --release`
+  （**必须在 `cli/` 下跑**：仓库根没有 `Cargo.toml`，而 `cli/.cargo/config.toml` 把 target-dir
+  指向 `../symbio/target`）；想一次性判掉这一步就用 `node scripts/gate.mjs --ci`。
+- ⚠️ **「棘轮」（单向基线）不止 `gate.mjs` 里那一处**，`scripts/` 下多个审计脚本各自带一个常量，
+  且方向**不统一**，别记反：
+  - `gate.d/_shared.mjs` 的 `BASELINE.rustTests` / `vitestFiles` / `vitestTests` 是**地板**——
+    实际值**低于**基线直接**报红**（「有测试被删或失败」），**高于**基线只打黄字让你上调。
+  - `test-layout-audit.mjs` 的 `INLINE_TEST_BASELINE` 是**天花板**——实际值**高于**基线**报红**
+    （「新增内联测试不被接受」），**低于**基线只打黄字让你下调。
+  两者共同点是：**漏了只打黄字，`gate.mjs` 仍然是绿的** ⇒ 「门禁通过」不等于收工。删代码、
+  删文件、拆测试文件之后，请**逐个复跑** `scripts/*-audit.mjs` 并读它的警告；改常量时**在常量旁
+  写明日期与原因**（`git log -S<常量名>` 能查到历次调整的判据）。
+- ⚠️ **本仓库的提交会被自动推送到远端**（`origin` = GitHub）：`git commit` 之后
+  `origin/main` 立即前移（reflog 记 `update by push`），推送方**不是** `scripts/commit.mjs`
+  （它明确不 push），而是本机环境侧的同步。含义是**没有「先提交错了再 amend」的余地**——
+  提交前必须真的确认内容无误，amend 只会再造一段分叉的远端历史。
 - ⚠️ `.workbuddy-ai/` 被 gitignore：**不要提交、不要删除**。仓库另有 `.workbuddy/`（旧 harness 遗留）——以 `.workbuddy-ai/` 为准。
 
 ---

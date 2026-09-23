@@ -19,12 +19,20 @@ HTTP/SSE（LLM）、stdio/JSON-RPC（MCP）、磁盘（homedir）。
 ## 运行
 
 ```bash
-cd cli && cargo build --release       # 被测系统（门控会自动检测/构建）
+cd cli && cargo build --release       # 被测系统（见下方 ⚠️，改了源码就必须自己重建）
 node e2e/run-tests.mjs                # 全量
 node e2e/run-tests.mjs t2             # 按名称过滤
 node e2e/cases/t5-llm-http-error.mjs  # 单独跑一个用例（文件可直接执行）
 E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 ```
+
+> ⚠️ **「门控会自动检测/构建」只在你还没构建过时成立**。`40-e2e.mjs` 的构建条件是
+> `when: () => ctx.ci || !cliBinaryExists(repoRoot)`——二进制**已存在就整步跳过**（汇总里
+> 显示 `⊘ 已有 release 二进制`）。所以**改了 Rust / CLI 源码之后必须自己重跑上面第一条**，
+> 否则 e2e 会静默地测**过期产物**，症状是「断言失败的方式与眼前的源码矛盾」。
+> 构建必须在 `cli/` 下跑（根目录没有 `Cargo.toml`；`cli/.cargo/config.toml` 把 target-dir
+> 指向 `../symbio/target`，二进制落在 `symbio/target/release/symbio-cli.exe`）。
+> 用 `node scripts/gate.mjs --ci` 可强制重建。
 
 每个用例独立临时 homedir + 独立 mock 实例（端口自动分配，18080 起），
 进程结束自动清理；runner 层面每个用例再套一层独立子进程，互不拖垮。
