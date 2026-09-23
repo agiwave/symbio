@@ -569,7 +569,8 @@ pub(crate) fn message_of<'a>(
 /// 「按变更拼实时」两条路径会在流式期间分叉：叶子少掉**正在跑的那一轮**。
 ///
 /// 这不是理论风险：前端 `loadMessages` 走的正是叶子（`fetchTranscript` →
-/// `readVdfs(vdfsSessionAddr(id))`），而 `session/get_messages` 已不再是前端读入口。
+/// `readVdfs(vdfsSessionAddr(id))`）。`session/get_messages` 专用协议已于 2026-09-23
+/// 整体退役——最后一个后端消费方（子会话存在性校验）也改走本接口的 `stat`。
 /// 只读存储的话，Turn 运行中切走再切回就会看到「正在跑的消息凭空消失」，
 /// 直到 `persist_messages` 在每轮结束时落库为止。
 pub(crate) fn session_content(

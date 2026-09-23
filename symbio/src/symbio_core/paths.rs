@@ -79,13 +79,6 @@ pub const SESSION_CHAT_SEND: &str = "session/chat/send";
 #[allow(dead_code)] // dead-code-allow R-001: 唯一调用方在前端 pluginPaths.ts::CHAT_ABORT，路由真实存在
 pub const SESSION_CHAT_ABORT: &str = "session/chat/abort";
 
-/// session/get_messages — 读会话历史（**仅供续会话存在性轻校验**）
-///
-/// 唯一调用方 `agent/host/subagent.rs::validate_subsession_exists`。
-/// 它不是「会话的读接口」——读历史走 `vdfs/read`，见
-/// `plugins/session/docs/legacy-route-migration.md` §3.4。
-pub const SESSION_GET_MESSAGES: &str = "session/get_messages";
-
 /// session/update — 合并写入会话 metadata（**仅供 CLI 与子会话登记**）
 ///
 /// 调用方：`cli/src/client.rs`（`--session <ID>` 语义）、
@@ -95,30 +88,41 @@ pub const SESSION_UPDATE: &str = "session/update";
 // ============ VDFS 插件 ============
 /// vdfs/root — **进入地址空间**：取根地址，调用方不给地址。
 ///
-/// 调用方：`agent/host/subagent.rs`（取子会话展示地址）、`cli/src/client.rs`
-/// （取当前会话展示地址）。两者都要拼出 `<根>/session/<id>` 才谈得上
-/// [`VDFS_WATCH`]，而**根名只归 vdfs 插件**（`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，
-/// 仓级守卫 S-010 禁止它在别处出现）——消费方一律把它当运行期数据取回。
+/// **Rust 侧无调用方**（S22 后 CLI 的运行态改走 `session/stream` 转写流，那处调用已删）；
+/// 唯一调用方在前端：`tauri/src/schemas/vdfs.ts::VDFS_ROOT`（启动期取根当运行期数据，
+/// `services/vdfsScheme.ts` 据此拼会话地址）。保留登记的理由与 [`SESSION_CHAT_ABORT`] 相同
+/// ——「前端认识的后端路由」在后端也应有一条可检索的常量；且**根名只归 vdfs 插件**
+/// （`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，仓级守卫 S-010 禁止它在别处出现），
+/// 故消费方一律取运行期值、不写字面量。
+#[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfsScheme.ts，路由真实存在
 pub const VDFS_ROOT: &str = "vdfs/root";
 
 /// vdfs/watch — 订阅一棵地址子树的变更。
 ///
-/// 调用方：`agent/host/subagent.rs`（子会话转播）、`cli/src/client.rs`（本轮渲染）。
+/// **Rust 侧无调用方**：S22 起 CLI 与子智能体的运行态/资源通知都改走 `session/stream`
+/// 转写流（`cli/src/client.rs` 顶部记录了那次删除）。调用方在前端：
+/// `tauri/src/schemas/vdfs.ts::VDFS_WATCH` + `services/vdfs.ts`（本轮渲染）。
 /// 后端只向**登记过路径**的订阅者投递变更（`core/vdfs/host::ChangeSubscriptions`），
 /// 因此这是「能收到 VDFS 变更」的前置条件：只订阅全局总线而不登记 watch，
 /// 等于在一条没人开闸的频道上等事件（一条也收不到）。
+#[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfs.ts，路由真实存在
 pub const VDFS_WATCH: &str = "vdfs/watch";
 
 /// vdfs/unwatch — 取消订阅（与 [`VDFS_WATCH`] 严格配对）。
 ///
 /// 引用计数归零才真正摘除，多余一次 `unwatch` 是安全的空操作；
 /// 但**漏掉**它会留下幽灵订阅（后端持续投递、消费者早已不在）。
+#[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfs.ts，路由真实存在
 pub const VDFS_UNWATCH: &str = "vdfs/unwatch";
 
 // ============ Event Bus 插件 ============
 /// event_bus/subscribe — 建立进程内帧订阅连接
 ///
-/// 唯一调用方 `cli/src/client.rs::start`：拿 `PluginPayload::Session(c)` 当事件通道。
+/// **Rust 侧无调用方**：S22 起 CLI 不再订阅 event_bus（会话实时面只剩 `session/stream`
+/// 一条转写流，`event_bus` 对它只剩「传输层」）。调用方在前端：
+/// `tauri/src/constants/pluginPaths.ts::EVENT_BUS_SUBSCRIBE` + `services/eventBus.ts`
+/// ——拿 `PluginFrame::Data` 收会话帧。
+#[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 pluginPaths.ts + services/eventBus.ts，路由真实存在
 pub const EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 
 // ============ Hook 插件 ============

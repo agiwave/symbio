@@ -502,7 +502,8 @@ fn vdfs_session_content_is_json() {
 /// 会话内容必须**叠加在途消息**，与转写列表同源。
 ///
 /// 前端 `loadMessages` 读的是叶子（`fetchTranscript` → `readVdfs(vdfsSessionAddr)`），
-/// 不是 `session/get_messages`。若叶子只序列化存储，Turn 运行中切走再切回就会
+/// 不是专用读协议（`session/get_messages` 已于 2026-09-23 退役）。若叶子只序列化存储，
+/// Turn 运行中切走再切回就会
 /// 看不到正在跑的那一轮——它在 `persist_messages` 落库之前只存在于在途缓冲里。
 #[test]
 fn vdfs_session_content_overlays_live_messages() {

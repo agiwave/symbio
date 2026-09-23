@@ -68,7 +68,6 @@ pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
             | "vdfs/stat"
             | "vdfs/read"
             | "vdfs/search"
-            | "session/get_messages"
             | "home/get_homedir"
             | "work/get_workspace"
     )

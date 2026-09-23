@@ -99,8 +99,8 @@ WS 走 `?token=<token>`；令牌为空表示不校验（仅允许回环绑定，
 
 ```http
 POST /api/v1/invoke
-{ "metadata": { "path": "session/get_messages", "session_id": "s_xxx", "trace_id": "..." },
-  "payload":  { "session_id": "s_xxx" } }
+{ "metadata": { "path": "vdfs/read", "session_id": "s_xxx", "trace_id": "..." },
+  "payload":  { "path": "<根>/session/s_xxx" } }
 ```
 
 → `200` + `PluginPayloadWire`：`{ "type": "Data", "data": {...} }`

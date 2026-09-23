@@ -210,7 +210,6 @@ self.handle_chat_send_oneoff(Arc::new(ctx)).await   // 直连方法，不过路�
 | `model` | 恒 `NotFound` | — | — |
 | `session` | 静态 | `session/chat/send` | 9 |
 | | | `session/chat/abort` | 5 |
-| | | `session/get_messages` | 4 |
 | | | `session/update` | 9 |
 | `setting` | 恒 `NotFound` | — | — |
 | `skill` | 静态 | `skill/execute` | **0** |

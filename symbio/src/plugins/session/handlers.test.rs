@@ -148,7 +148,8 @@ async fn session_clear_route_is_retired() {
     }
 }
 
-/// 2026-09-18 迁往 VDFS 的五条会话路由**不得被加回来**。
+/// 已退役的会话路由**不得被加回来**：2026-09-18 迁往 VDFS 的五条 + 2026-09-23 的
+/// `get_messages`（存在性校验改走进程内 VDFS 纯接口 `get_vfs_provider` + `stat`）。
 ///
 /// 每条路径现在都有一个 VDFS 入口（映射见 `docs/legacy-route-migration.md`）。
 /// 与 `session/clear` 同理：退役不会让任何既有测试变红，因此需要一条**正向**的
@@ -170,6 +171,10 @@ async fn migrated_session_routes_stay_retired() {
             "vdfs/action(<sid>/消息/<mid>, \"truncate\")",
         ),
         ("chat/clear_messages", "vdfs/action(<sid>/消息, \"clear\")"),
+        (
+            "get_messages",
+            "进程内 vdfs/stat（get_vfs_provider + stat(<挂载名>/<sid>)）",
+        ),
     ] {
         let ctx = ctx_with(json!({ "session_id": "s1" }));
         ctx.set(crate::symbio_core::PATH, path.to_string());

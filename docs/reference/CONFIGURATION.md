@@ -200,7 +200,7 @@ inbound_readonly: false
 
 > 出站配置（前端连向何处）不在这里——连接目标由前端"系统目录"切换器统一管理（localStorage 为权威），经 `initGatewayTransport` 决定 native / http 出站。
 >
-> 只读白名单（精确匹配）：`vdfs/list`、`vdfs/tree`、`vdfs/stat`、`vdfs/read`、`vdfs/search`、`session/get_messages`、`home/get_homedir`、`work/get_workspace`。资源一律经 VDFS，故放行的是它的**读操作**——`vdfs/write` / `delete` / `mkdir` / `move` / `edit` 与节点动作 `vdfs/action` 都不在列；早已下线的 `entities/*` 也不再放行。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
+> 只读白名单（精确匹配）：`vdfs/list`、`vdfs/tree`、`vdfs/stat`、`vdfs/read`、`vdfs/search`、`home/get_homedir`、`work/get_workspace`。资源一律经 VDFS，故放行的是它的**读操作**——`vdfs/write` / `delete` / `mkdir` / `move` / `edit` 与节点动作 `vdfs/action` 都不在列；早已下线的 `entities/*` 也不再放行。设计定位是**兜底而非完整安全边界**：即便令牌泄露到可信内网，也只能读取而无法触发写操作与命令执行。
 >
 > **配置文件本身不在白名单内**：`vdfs/read` 只要地址落在任一插件的 `PLUGIN.yml` 上就一律拒绝（`reads_config_document`）——配置可能含凭据（网关访问令牌、搜索服务 API Key），放行等于只读模式下就能把它们读走。网关自身的 `gateway/*` 接口也恒走 native（前端不经 HTTP 访问本插件）。
 

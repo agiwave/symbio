@@ -1,11 +1,10 @@
-//! SessionPlugin 里**仅剩的两个** invoke 路由的实现体，加上两个非路由的内部函数。
+//! SessionPlugin 里**仅剩的一个** invoke 路由的实现体，加上两个非路由的内部函数。
 //!
 //! 路由层在 `plugin.rs`（`Plugin::route`）。本文件已经收缩到只剩四件事，
 //! 因为会话与消息的增删改查**全部**经 VDFS 地址完成了：
 //!
 //! | 函数 | 性质 | 为什么还在这里 |
 //! |---|---|---|
-//! | `invoke_get_messages` | 路由 `get_messages` | 跨插件**进程内**读（`agent_run` 的续会话存在性校验）。VDFS 线路信封刻意留在 vdfs 插件内部，所以它迁不过去——见 `docs/legacy-route-migration.md` §3.4 |
 //! | `invoke_update` | 路由 `update` | 仅 CLI：它需要**客户端指定会话 id**，而 VDFS 新建是 provider 生成 id——见同文 §3.5 |
 //! | `delete_session_internal` | **非路由** | `VdfsProvider::delete` 的内部实现（唯一消费方） |
 //! | `open_session_handle` | **非路由** | 编排器构造会话引擎句柄（`SESSION_HANDLE`）用 |
@@ -20,6 +19,9 @@
 //! - `chat/clear_messages` → `action(<id>/消息, "clear")`。
 //! - `chat/delete_message` → `action(<id>/消息/<mid>, "truncate")`。
 //! - `chat/update_message` → `write(<id>/消息/<mid>)`。
+//! - `get_messages` → 子会话**存在性校验**改走进程内 VDFS 纯接口
+//!   （`Plugin::get_vfs_provider()` + `stat(<挂载名>/<sid>)`，见同文 §3.4.1）
+//!   ——它当时也不是「会话的读接口」，读历史一直是 `vdfs/read`。
 //!
 //! 后三者的实现搬到了 `plugin/vdfs_provider.rs`（`patch_message` /
 //! `truncate_messages` / `clear_messages`）——**搬移不是重写**：同一个操作只有
@@ -27,21 +29,13 @@
 
 use super::chat_session::{ChatSession, PersistentChatSession};
 use super::plugin::SessionPlugin;
-use crate::symbio_core::schemas::session::{session_get_messages, session_update};
+use crate::symbio_core::schemas::session::session_update;
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt};
 use crate::symbio_core::{InvokeResponse, PluginError};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
 impl SessionPlugin {
-    pub async fn invoke_get_messages(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
-        let req: session_get_messages::Request = ctx.payload()?;
-        let chat_session = self.open_chat_session(&req.session_id).await?;
-        let messages = chat_session.get_messages().await?;
-
-        Ok(serde_json::to_value(session_get_messages::Response { messages }).unwrap_or_default())
-    }
-
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
     ///
     /// 唯一消费方：`VdfsProvider::delete`（`delete(<根>/session/<id>)`）。

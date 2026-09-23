@@ -456,7 +456,6 @@ impl Plugin for SessionPlugin {
             // 转写流订阅：消息**实时面**的唯一通道（NodeEvent，seq 单调、满即踢）。
             // 历史面（落库转写 / `消息` 目录投影）仍走 VDFS 读。
             "stream" => return self.handle_stream_subscribe(ctx).await,
-            "get_messages" => self.invoke_get_messages(ctx.clone()).await?,
             "update" => self.invoke_update(ctx.clone()).await?,
             // ==================== 本表只留「不是数据 CRUD」的路由 ====================
             //
@@ -479,11 +478,13 @@ impl Plugin for SessionPlugin {
             //                 ——心跳的实质就是往会话发一轮提示词。留着它等于给同一件事
             //                 两个入口，且按钮那个还绕开了对话本身。
             //                 见 `options.rs::heartbeat_option` 的说明。
+            // - `get_messages`  —— 存在性校验改走**进程内 VDFS 纯接口**
+            //                 （`Plugin::get_vfs_provider()` + `stat(<挂载名>/<sid>)`）：
+            //                 「在不在」是资源问题，不该为它占一条会话专用读协议，
+            //                 也不必读回整份历史。见同文 §3.4.1。
             //
-            // 剩下两条 + `get_messages` + `update` 都不是 CRUD：前两条是**编排 / 控制**，
-            // 后两条各有一个「非 VDFS 能表达」的理由
-            // （`get_messages`：跨插件进程内读，见 `docs/legacy-route-migration.md` §3.4；
-            //   `update`：CLI 需要客户端指定会话 id，见同文 §3.5）。
+            // 剩下的都不是 CRUD：前两条是**编排 / 控制**，`update` 有一个「非 VDFS
+            // 能表达」的理由（CLI 需要客户端指定会话 id，见同文 §3.5）。
             //
             // 级联选项机制：会话是选项宿主，根选项列表在全项目收集后一次下发
             // （子层经 payload.parent 懒加载，与 vdfs/list 的 parent 懒加载同构）

@@ -107,7 +107,6 @@
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
 | `session/stream` | 订阅会话**实时面**（一条流、两种帧：`transcript_event` = `session_id` + 单调 `seq` + 一条 `ChatMessage`；`transcript_session` = `session_id` + 同一 `seq` + 会话节点全量视图） | `Session` |
-| `session/get_messages` | 获取对话历史（**仅 `agent_run` 的续会话存在性校验**用） | `Data` |
 | `session/update` | 合并写入会话 metadata（**仅 CLI**） | `Data` |
 
 > **实时面走 `session/stream`，历史面走 VDFS**（2026-09-21；2026-09-22 起运行态并入同一条流）：
@@ -140,6 +139,10 @@
 >   「立即心跳」按钮，而那个按钮的作用与「在输入框里直接发一条消息」完全重复
 >   （心跳的实质就是往会话发一轮提示词）。心跳机制本身（配置、后台调度器、LLM 侧
 >   `heartbeat` 工具的 `set`/`get`/`cancel`）未受影响。
+> - **`get_messages`**（2026-09-23）—— 它唯一的消费方是 `agent_run` 的**续会话存在性校验**，
+>   而「在不在」是资源层的问题、该由 VDFS 回答：现在走**进程内纯接口探测**
+>   （`Plugin::get_vfs_provider()` → `stat("<挂载名>/<会话id>")`，判 `attributes.message_count`），
+>   既不再为回答「在不在」读回整份历史，也不再占一条协议。
 >
 > 审计与迁移记录见
 > [`symbio/src/plugins/session/docs/legacy-route-migration.md`](../../symbio/src/plugins/session/docs/legacy-route-migration.md)。
@@ -340,7 +343,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 > `gateway/*` 自身接口**恒走 native**（前端不经 HTTP 访问本插件）。前端出站分发（native / http）由「系统目录」切换器管理，不再由 gateway 配置驱动。
 
 安全：非回环地址需 `inbound_token` 鉴权（回环地址免鉴权）；`inbound_readonly` 开启后仅放行只读白名单
-（`vdfs/list|tree|stat|read|search`、`session/get_messages`、`home/get_homedir`、
+（`vdfs/list|tree|stat|read|search`、`home/get_homedir`、
 `work/get_workspace`；`gateway/*` 显式排除，且 `vdfs/read` 只要落在任何插件的
 `PLUGIN.yml` 上就拒绝——配置可能含凭据），详见 [CONFIGURATION.md](CONFIGURATION.md)。
 

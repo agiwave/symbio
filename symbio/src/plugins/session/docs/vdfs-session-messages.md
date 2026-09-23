@@ -26,6 +26,14 @@
 > 历史），实时入口是 `kind = "vdfs"` 的变更。`session/get_messages` 前端不再调用。
 > **两套读链路收敛为一套。**
 >
+> **S26 续（2026-09-23）：这条协议整体退役。** 它剩下的唯一消费方是后端 `agent_run`
+> 的**续会话存在性校验**——而「会话在不在」同样是 VDFS 的事：现在走**进程内纯接口探测**
+> （`Plugin::get_vfs_provider()` → `stat("<挂载名>/<sid>")`，判 `attributes.message_count`），
+> 既不再为回答「在不在」读回整份历史，也不再占一条路由。会话域至此只剩四条：
+> `chat/send`（发言 / 编排）· `chat/abort`（控制）· `stream`（实时面）·
+> `update`（CLI 的「客户端指定 id」）。见
+> [legacy-route-migration.md](./legacy-route-migration.md) §3.4.1。
+>
 > **S22 续**：当时剩下的一小块——`kind = "session"` 上的会话级事件（`Status` / `Error` /
 > `Abort`）——也已废除（会话运行态即会话节点，见 `node-state-streaming.md`）。
 > 会话域实时只余 `kind = "vdfs"` 一条频道。
@@ -505,8 +513,9 @@ t3  收到 appended "ghi"        → 盲目拼接成 "abcghi"      ← 静默损
   一律防抖重拉；带载荷的增益投递只存在于 provider 自己实现的 `watch` 里
   （消息转写的 `appended` + `delta` 就是它）。
 - 前端死文件 `schemas/session_get_messages.ts` 删除（`getSessionMessages` 包装器
-  失效后它失去唯一引用）；`session/get_messages` **后端路由保留**——它仍被
-  `agent/host/subagent.rs` 用来读父会话历史。
+  失效后它失去唯一引用）；`session/get_messages` 后端路由**当时**保留——它还被
+  `agent/host/subagent.rs` 当作续会话存在性探针。**2026-09-23 该路由已整体退役**
+  （探针改走进程内 VDFS 纯接口 `stat`，见本文 §1 的 S26 注记）。
 - **删除也必须发变更**：`resume.rs` 的 `MessageChange::Remove` 由消费循环转成
   VDFS `deleted`（消费循环是全部补丁的唯一收口，删除帧同样经过它）——这是
   **逐节点**删除（删一棵子树，后面的消息留着）；

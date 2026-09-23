@@ -43,17 +43,17 @@ use crate::symbio_core::schemas::session::chat_message::{
     ResumeRequest,
 };
 use crate::symbio_core::schemas::session::session_chat;
-use crate::symbio_core::schemas::session::session_get_messages;
 use crate::symbio_core::schemas::session::session_update;
 use crate::symbio_core::transcript_stream::{
     event_of, is_resync, register_transcript_subscriber, session_state_of,
     unregister_transcript_subscriber,
 };
+use crate::symbio_core::vdfs::{vdfs_context, VdfsError};
 use crate::symbio_core::vdfs_provider::VDFS_STATUS_WORKING;
 use crate::symbio_core::{
     AbortSignal, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt, Plugin, PluginError,
-    PluginFrame, PluginPayload, MODE, PATH, PROVIDER_ID, RISK_LEVEL, SESSION_CHAT_SEND,
-    SESSION_GET_MESSAGES, SESSION_ID, SESSION_UPDATE, TOOL_CALL_ID,
+    PluginFrame, MODE, PATH, PLUGIN_SESSION, PROVIDER_ID, RISK_LEVEL, SESSION_CHAT_SEND,
+    SESSION_ID, SESSION_UPDATE, TOOL_CALL_ID,
 };
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -434,28 +434,49 @@ fn validate_working_dir(provided: &str) -> Result<String, PluginError> {
     Ok(expanded.to_string_lossy().to_string())
 }
 
-/// 续会话存在性轻校验：委托会话首条即用户消息，消息列表为空即"不存在"。
+/// 续会话存在性轻校验：该会话必须在**本作用域**的会话存储里、且有消息记录。
 ///
 /// `PersistentChatSession` 是惰性句柄（`session/open` 永远成功），无法直接探测
 /// 文件存在性；该校验防止 LLM 拼错 session_id 时 `get_or_create_session`
 /// 静默创建出一个顶层孤儿会话。
+///
+/// ## 探针为什么走 VDFS 纯接口（而不是一条专用协议）
+///
+/// 会话的**唯一**读入口是 VDFS（`read(<根>/session/<sid>)`），存在性因此也该由
+/// 同一层回答。曾用的 `session/get_messages` 专用路由为了回答「在不在」而读回
+/// 整份历史，已于 2026-09-23 退役——它当时也不是「会话的读接口」，
+/// 见 `session/docs/legacy-route-migration.md` §3.4.1。
+///
+/// 取的是**本作用域容器**的 VDFS 视图（[`Plugin::get_vfs_provider`]——core 的查询
+/// 接口）：容器把子插件按**实例名**列为子目录，而 `route` 分发用的是同一个键，
+/// 因此 `session/<sid>` 命中的正是 `session/chat/send` 将要写入的那个会话插件实例
+/// ——子智能体分形子树里同样成立。用到的 `vdfs_context` / `VdfsProvider` / `VdfsNode`
+/// 全在 `symbio_core`：线路形状（`vdfs/*` 的信封）不进本文件，也不新增插件间依赖。
 async fn validate_subsession_exists(
     parent: Arc<dyn Plugin>,
     ctx: &Arc<dyn InvokeRequest>,
     session_id: &str,
 ) -> Result<(), PluginError> {
-    let gm_ctx = ctx.fork();
-    gm_ctx.set(PATH, SESSION_GET_MESSAGES.to_string());
-    let _ = gm_ctx.set_payload(session_get_messages::Request {
-        session_id: session_id.to_string(),
-    });
-    let payload = parent.route(gm_ctx).await?;
-    let exists = match &payload {
-        PluginPayload::Data(data) => data
-            .downcast_ref::<session_get_messages::Response>()
-            .map(|r| !r.messages.is_empty())
-            .unwrap_or(false),
-        _ => false,
+    let provider = parent.get_vfs_provider().ok_or_else(|| {
+        PluginError::InternalError(
+            "agent_run 无法取得本作用域的 VDFS 视图（容器未暴露 provider）".to_string(),
+        )
+    })?;
+    let addr = format!("{PLUGIN_SESSION}/{session_id}");
+    let exists = match provider.stat(&vdfs_context(ctx), &addr).await {
+        // 节点存在且已有消息 ⇒ 续会话合法。`message_count` 由会话 provider 投影
+        // （落库 ∪ 在途），与「消息列表非空」是同一判据。
+        Ok(node) => {
+            node.attributes
+                .get("message_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                > 0
+        }
+        // 只把「节点不存在」读作「会话不存在」；存储故障等照实上抛——
+        // 否则一次 IO 抖动会被讲成「LLM 编造了 id」。
+        Err(VdfsError::NotFound(_)) => false,
+        Err(e) => return Err(e.into()),
     };
     if !exists {
         return Err(PluginError::NotFound(format!(

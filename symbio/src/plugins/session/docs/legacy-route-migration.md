@@ -39,20 +39,22 @@
 | **B ✅已删** | `session/chat/update_message` | → `vdfs/write(<sid>/消息/<mid>)` | 唯一消费方是前端（`stores/sessions.ts:836`）；**纯存储改写，不触发编排** |
 | **B ✅已删** | `session/chat/delete_message` | → `vdfs/action(<sid>/消息/<mid>, "truncate")` | 同上（`stores/sessions.ts:816`）；`action` 的返回载荷**能保住 `deleted_ids` 回执** |
 | **B ✅已删** | `session/chat/clear_messages` | → `vdfs/action(<sid>/消息, "clear")` | 同上（`stores/sessions.ts:855`）；与截断同走**动作**——同一区段的删除只有一种入口形态（见 §3.3） |
-| **B 不做** | `session/get_messages` | **不改**（替换路径的耦合比它更重） | 唯一消费方 `agent/host/subagent.rs:364`。看起来该换 `vdfs/stat`，但**后端没有进程内 VDFS 消费的先例**，且 `vdfs/*` 线路信封刻意留在 vdfs 插件内部——见 §3.4 |
+| **B ✅已删** | `session/get_messages` | → **进程内 VDFS 纯接口探测**（`stat("<挂载名>/<sid>")`） | 唯一消费方 `agent/host/subagent.rs::validate_subsession_exists`。当初判「不改」的两条硬化理由（后端拿不到 root provider / 线路信封留在 vdfs 插件内）**已被现成 API 化解**——见 §3.4.1（2026-09-23） |
 | **B 待定** | `session/update` | 迁 `vdfs/write` 需先改 CLI | 唯一消费方 `cli/src/client.rs:205`。上一轮判定「**不是纯收益**」（要动 `--session <ID>` 语义或扩 VDFS create）——见 §3.5 |
 | **C 保留** | `session/chat/abort` | 不可迁 | 控制信号，不是数据变更 |
 | **C 保留** | `session/options/list` | 不可迁 | 级联选项收集，不是会话 CRUD |
 | **C 保留** | `session/heartbeat/trigger` | 不可迁 | 心跳调度入口，不是会话 CRUD |
 | **D 可评估** | `session/chat/send` | **§5 的否决只覆盖 `vdfs/write`，不覆盖 `vdfs/action`** | 见 §4——三条可核对的反证表明它协议层就是触发器 |
 
-**A 档 + B 档「可迁」三项均已落地**（路由表 11 → 6 条）。剩下的 6 条是：
-`chat/send`（D，待评估）· `chat/abort` · `get_messages`（§3.4，保留）· `update`（§3.5，待定）
-· `options/list` · `heartbeat/trigger`。
+**A 档 + B 档「可迁」四项均已落地**（本文所记的那批路由 11 → 5 条；其后
+`heartbeat/trigger` 又按「能力整体取消」退役、`stream` 随转写流新增）。会话域的**当前**五条是：
+`chat/send`（D，待评估）· `chat/abort` · `stream` · `update`（§3.5，待定）· `options/list`。
+`get_messages` 于 2026-09-23 按 §3.4 的「正确归宿」退役——但走的是**现成的纯接口**
+（不占协议、不依赖线路信封），见 §3.4.1。
 
 **消息的增删改查将全部经 VDFS 地址完成**——这是本轮的实质目标：
 `update` / `delete` / `clear` 三条走 VDFS 后，消息域只剩**读**一条（`vdfs/read`，早已 VDFS 化）
-与**发言**一条（`chat/send`，动作语义）。剩下的 6 条里没有一条是「消息或会话的 CRUD」。
+与**发言**一条（`chat/send`，动作语义）。剩下的 5 条里没有一条是「消息或会话的 CRUD」。
 
 ---
 
@@ -221,7 +223,7 @@ CLI 侧的注释（`cli/src/client.rs:12`）说「需先 `session/open` 拿通�
 若清空走 `delete`，使用者就得记「哪种删除走哪个入口」——而两者本就是同一段代码的
 两个相邻分支。代价是回执从 `{path}` 变成 `VdfsActionResult`，但清空不需要载荷，无损失。
 
-### 3.4 `session/get_messages` —— **不改**（本轮实测后的改判）
+### 3.4 `session/get_messages` —— **已于 2026-09-23 退役**（本节保留当时的推导与改判）
 
 唯一消费方 `agent/host/subagent.rs:358-383` 用它做**子会话存在性校验**：
 
@@ -271,12 +273,34 @@ VDFS 的**线路信封**（`vdfs/*` 请求响应 + 协议路径常量 `VDFS_STAT
 架构级选择之一。对比 B 档其余三项（`update` / `delete` / `clear`）：那三项的 VDFS 侧
 **只差 provider 的一个分支**，地址、节点、变更词汇全都现成，所以是纯收益。这一项不是。
 
-**⇒ 结论：`session/get_messages` 保留，gateway 只读白名单里的它一并保留。**
+**⇒ 当时的结论：`session/get_messages` 保留，gateway 只读白名单里的它一并保留。**
+（该结论随后被推翻——不是推翻理由，而是理由已被现成 API 化解，见下。）
 
-**它的正确归宿**（不是本轮该做的）：若哪天真要让**所有**插件都能在进程内读 VDFS，
-那应该是一个**独立的架构决定**——把线路信封下沉到 `symbio_core::schemas::vdfs`，
-或给 core 一个 VDFS 访问门面。做完那个决定，这一条自然跟着走。
-**为一个调用点提前做那个决定，是把小问题换成大问题。**
+### 3.4.1 2026-09-23 落地：不必做那个「独立架构决定」，用现成的纯接口
+
+当初判「不做」的每一条硬化理由，今天都能**直接核对代码**地化解——既不需要下沉线路信封，
+也不需要新造 core 门面：
+
+| 当时的顾虑 | 实际 |
+|---|---|
+| 后端拿不到 root provider（`get_vdfs_root` 挂在「每次 collect 现造」的 visitor 上） | 容器自己就是 `Plugin`，`Plugin::get_vfs_provider()`（core 的查询接口）**直接给出它的 VDFS 视图**（`CompositeVdfs`）——纯接口，与 root 槽位无关 |
+| 走 VDFS 就得依赖 `plugins/vdfs/protocol.rs` 的线路信封（插件 → 插件编译期依赖）或硬编码路由串 | 探测**不经线路**：`VdfsProvider::stat(&vdfs_context(ctx), "session/<sid>")`。用到的 `vdfs_context` / `VdfsProvider` / `VdfsNode` 全在 `symbio_core` |
+| 要读回整份历史（专用路由的副作用） | `stat` 只回节点：`attributes.message_count` 就是「有没有消息」的现成判据——顺带省掉一次全量读 |
+
+作用域正确性**由机制保证**：容器把子插件按**实例名**列为 VDFS 子目录
+（`composite/vdfs.rs::children_of`），而 `route` 分发用的也是同一个键
+（`composite.rs::parse_path` + `instances.get(name)`），因此 `session/<sid>` 命中的
+正是 `session/chat/send` 将要写入的那个会话插件实例——子智能体分形子树里同样成立。
+
+于是 `agent/host/subagent.rs::validate_subsession_exists` 从「走一条专用协议」变成
+「一次纯接口 `stat`」（只把 `NotFound` 读作「不存在」，其余错误照实上抛）。随之删除：
+路由臂 `get_messages`、`invoke_get_messages`、`session_get_messages.rs` schema 与
+`SESSION_GET_MESSAGES` 常量，以及 gateway 只读白名单里的那一项。
+防回归沿用既有形态：`handlers.test.rs::migrated_session_routes_stay_retired` 里加了这一条。
+
+**「正确归宿」仍未做，但现在只是可选优化**：把线路信封下沉 `symbio_core::schemas::vdfs`、
+或给 core 一个统一的 VDFS 访问门面，收益是「所有消费方用同一套门面」——
+而不再是「某一条路由能不能删」。为一个调用点提前做那个决定，仍然是把小问题换成大问题。
 
 ### 3.5 `session/update` —— 上一轮判定「不是纯收益」，本轮维持
 
@@ -461,8 +485,8 @@ provider 只回答「这个地址能不能写」，不回答「谁在写」。
 
 **恒久保留**（它们本来就该在，只是不该被路由暴露）：
 `open_session_handle` / `open_chat_session`（各有真实调用方）、`delete_session_internal`
-（VDFS `delete` 的内部实现）、`invoke_get_messages`（§3.4 改判为保留）、
-`invoke_update`（CLI，§3.5）、`session_get_messages.rs` / `session_update.rs` 两个 schema。
+（VDFS `delete` 的内部实现）、`invoke_update`（CLI，§3.5）、`session_update.rs` schema。
+（`invoke_get_messages` 与 `session_get_messages.rs` 曾在此列——2026-09-23 已随 §3.4.1 退役。）
 
 > S1/S2 完成后 `handlers.rs` 从 315 行降到约 280 行；S4–S6 完成后会降到约 90 行
 > ——只剩 `invoke_get_messages` / `invoke_update` / `delete_session_internal` /
