@@ -45,6 +45,7 @@
 //!
 //! 两条通道拿到的是同一个 `CompositeVdfs` 实例；拓扑知识因此不落在访问层。
 
+use super::composite::broadcast_collect;
 use crate::symbio_core::vdfs::{descend_addr, host_ctx};
 use crate::symbio_core::vdfs_provider::*;
 use crate::symbio_core::{
@@ -155,9 +156,7 @@ impl CompositeVdfs {
             let sub = host.fork();
             sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
             sub.set(CONFIG_VISITOR, configs.clone());
-            if let Err(e) = child.clone().traverse(String::new(), sub).await {
-                crate::plugin_warn!("composite", "vdfs: 子插件遍历失败，已跳过其配置声明: {e:?}");
-            }
+            broadcast_collect(child.clone(), sub, &format!("{name} 的配置声明")).await;
         }
 
         collected.sort_by(|a, b| (a.1.order(), &a.0).cmp(&(b.1.order(), &a.0)));

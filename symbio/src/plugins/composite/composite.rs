@@ -262,6 +262,40 @@ impl Composite {
 
 crate::submit_object_creator!(PLUGIN_COMPOSITE, Composite::build, dyn Plugin);
 
+/// 向子插件**广播**一次收集；只有**真失败**才留痕。
+///
+/// 收集是广播（契约见 `symbio_core/option.rs`）：宿主对每个子插件发一次问，由插件
+/// 按 `ctx[PATH]` 自己决定贡不贡献。**不参与**的插件回答
+/// `NotFound("未知遍历路径: …")`，那是它的正常答复，不是失败——每个子插件都 warn
+/// 一次会把真正的失败埋进噪音里（启动期实测：同一条消息每个子插件各来两遍）。
+///
+/// 真正的收集期失败另有**专门通道**：`capability_error.rs` 的 `report_error` /
+/// `take_errors`（session 编排方在收集结束后统一裁决）。拿 `traverse` 的返回值当
+/// 失败信号，是把「路由层的回答」误当成「收集层的结果」——这两层不该由同一个
+/// `Err` 表达。
+///
+/// 能力收集与配置声明两处共用它，是为了让这条判据**只写一次**：分散成两处时，
+/// 第三处出现时最容易照抄错的那一半。
+pub(crate) async fn broadcast_collect(
+    plugin: Arc<dyn Plugin>,
+    ctx: Arc<dyn InvokeRequest>,
+    who: &str,
+) {
+    match plugin.traverse(String::new(), ctx).await {
+        Ok(_) => {}
+        Err(e) if collect_declined(&e) => {}
+        Err(e) => crate::plugin_warn!("composite", "收集 {who} 失败：{e}"),
+    }
+}
+
+/// 这个错误是否只是「本插件**不参与**这次收集」。
+///
+/// 抽成函数是为了让这条判据**可被测试钉住**：它正是「启动期每个子插件刷一条
+/// WARN」的根因判断，埋在 `broadcast_collect` 里就只能靠人记得。
+pub(crate) fn collect_declined(e: &PluginError) -> bool {
+    matches!(e, PluginError::NotFound(_))
+}
+
 #[async_trait::async_trait]
 impl Plugin for Composite {
     fn meta(&self) -> PluginMeta {
@@ -333,13 +367,9 @@ impl Plugin for Composite {
                 VDFS_PARENT_ADDR,
                 descend_addr(&ctx.get(VDFS_PARENT_ADDR).unwrap_or_default(), &name),
             );
-            // 收集期的 `Err` **必须留痕**。返回值本来就丢（收集结果由子插件自己写进
-            // `CAPABILITY_VISITOR` / 它自己的 vfs 视图），但错误不能一起丢：`Err`
-            // 意味着**这个子插件的能力整个没收集到**——静默吞掉就是「插件少了一半
-            // 能力」却不报警，而收集期恰恰没有任何别的信号会暴露它。
-            if let Err(e) = plugin.traverse("".to_string(), req_ctx).await {
-                crate::plugin_warn!("composite", "子插件能力收集失败 {name}：{e}");
-            }
+            // 收集是广播：不参与的插件回答 `NotFound`，那不是失败。判据与理由在
+            // `broadcast_collect` 里，两处收集共用同一份，避免各写一半。
+            broadcast_collect(plugin, req_ctx, &name).await;
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
@@ -480,6 +510,26 @@ mod tests {
         let seen = probe.traverses();
         assert_eq!(seen.len(), 1, "探针恰好被收集一次");
         assert_eq!(seen[0], "sys-root/inner/probe", "收集期父地址 = 完整挂载点");
+    }
+
+    /// 收集是**广播**：不参与的插件回答 `NotFound`，那是「我不贡献」，不是失败。
+    ///
+    /// 判反的代价（实测）：启动期每个子插件各刷两遍
+    /// 「子插件能力收集失败 …：未知遍历路径: available_options」，真正的失败
+    /// 反而被噪音埋掉。故这条判据单独成函数、单独钉住。
+    #[test]
+    fn collect_declines_are_not_failures() {
+        assert!(
+            collect_declined(&PluginError::NotFound(
+                "未知遍历路径: available_options".to_string()
+            )),
+            "不认识这个收集端点 = 不参与，不该报警"
+        );
+        assert!(
+            !collect_declined(&PluginError::InternalError("配置读不出来".to_string())),
+            "参与了却炸了 = 真失败，必须留痕"
+        );
+        assert!(!collect_declined(&PluginError::Timeout), "超时同理：真失败");
     }
 
     /// 顶层数据点：无上级父地址时，子插件落在**静态声明的根**之下
