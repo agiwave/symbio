@@ -911,7 +911,7 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
 **31 个**后端协议词的副本（10 个 op、2 个会话状态、8 个 ext、4 个 action、
 5 个 change、1 个 kind、1 个"新资源默认 ext"）。剩下 28 条无人看守——后端重命名
 `vdfs/list` 或某个状态词时，前端会静默失效而**所有守卫仍绿**
-（`docs/design/architecture-health-check-2026-09.md` F-5 已记录）。
+（`docs/archive/architecture-health-check-2026-09.md` F-5 已记录）。
 
 同一份复核还提出 **G3**：`components/appearance/Appearance.vue`（250 行）与
 `About.vue`（75 行）由前端自持，被判为"违反不变量 4（前端零资源知识）"。
@@ -1487,7 +1487,7 @@ model / agent / skill / mcp / setting 分区都走这条。
 `attributes`。写断言读 `node.attributes.metadata` 会得到 `undefined`。
 
 **详细记录**：取舍与实施注记见
-[`design/session-options-unification.md`](./design/session-options-unification.md)；
+[`archive/session-options-unification.md`](./archive/session-options-unification.md)；
 现行规范见 `symbio/src/plugins/session/docs/session-options.md`。
 
 ---
@@ -1629,7 +1629,7 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
   消息不产生 VDFS 变更，现在产生了。
 
 **详细记录（实施设计）**：
-[`design/session-realtime-vdfs-watch.md`](./design/session-realtime-vdfs-watch.md)
+[`archive/session-realtime-vdfs-watch.md`](./archive/session-realtime-vdfs-watch.md)
 ——含「现行消息流的六条设计」逐条出处、读与流的协调规则（`appendGuard` 加回）、
 `Transcript.seq` 的语义变更（帧序号 → 位置序号分配器）、逐文件改动清单与同批约束。
 

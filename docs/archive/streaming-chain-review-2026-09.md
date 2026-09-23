@@ -26,7 +26,7 @@
 > `applySessionNode` 触发点一并删除；`sessionRouteOf`（按地址分派的实现）也因再无
 > 调用方而删除。**本文的结论「跨通道顺序假设是 P0」因此是被正面解决的**，而不是被
 > 兜住的——这正是那份自愈网当初要掩盖的问题。详见
-> [`docs/archive/streaming-chain-review-2026-09-22.md`](../archive/streaming-chain-review-2026-09-22.md) §7.1。
+> [`streaming-chain-review-2026-09-22.md`](./streaming-chain-review-2026-09-22.md) §7.1。
 >
 > **再后记（S26 / ADR-025，2026-09-23）：上一条的「结构性保证」本身也被判定为不必要的。**
 > 实时面**迁回 VDFS 变更**（`updated` + `delta`），`session/stream` 与

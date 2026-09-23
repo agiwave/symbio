@@ -7,7 +7,7 @@
 //! 智能体 / Model）。本模块声明其中**会话自有**的四项；其余由贡献方在自己的
 //! `traverse(available_options)` 分支注册（agent → 智能体、model → Model）。
 //!
-//! ## 三条通路（`docs/design/session-options-unification.md` §3.2）
+//! ## 三条通路（`docs/archive/session-options-unification.md` §3.2）
 //!
 //! ```text
 //! 定义   <根>/session/<id> → node.schema               = DetailDefinition { binding: "option", … }

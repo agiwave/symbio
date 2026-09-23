@@ -383,7 +383,7 @@ impl AgentPlugin {
     ///
     /// **不回填当前值**：「值 → 标签」由 `field.options` 承担，前端查表即得；当前值
     /// 来自会话 `metadata.agent_id`。因此这里既不读 `ctx[AGENT_ID]`，也不算
-    /// `current_label`（见 `docs/design/session-options-unification.md` §6）。
+    /// `current_label`（见 `docs/archive/session-options-unification.md` §6）。
     async fn contribute_options(&self, ctx: &Arc<dyn InvokeRequest>) {
         let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) else {
             return;

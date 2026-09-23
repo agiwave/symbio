@@ -83,6 +83,52 @@ test('docs/archive/ 整体豁免 → 其中的失效链接不判（改写归档�
   assert.match(r.stdout, /豁免/)
 })
 
+// ── D-002：过程文档必须归档 ────────────────────────────────────────────
+// 归档是动作，能保持住的才是机制。这组用例钉住「它真的会红」——包括**豁免必须有理由**，
+// 否则加一行注释就能把规则绕成橡皮图章。
+const REVIEW_DOC = '# 某系统评审\n\n> **文档类型：评审（一次性结论，不是规范）**\n\n正文。\n'
+const IMPLEMENTED_DOC = '# 某改动实施方案\n\n状态：**已实施**（S1–S6 全部落地）\n\n正文。\n'
+
+test('D-002：评审类文档留在 docs/design/ → 失败', () => {
+  const r = audit({ 'docs/design/review.md': REVIEW_DOC })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /docs\/design\/review\.md/)
+})
+
+test('D-002：已落地的实施方案留在活跃目录 → 失败', () => {
+  const r = audit({ 'docs/design/plan.md': IMPLEMENTED_DOC })
+  assert.equal(r.status, 1)
+})
+
+test('D-002：同样的内容放进 docs/archive/ → 通过', () => {
+  const r = audit({
+    'docs/archive/review.md': REVIEW_DOC,
+    'docs/archive/plan.md': IMPLEMENTED_DOC,
+  })
+  assert.equal(r.status, 0)
+  assert.match(r.stdout, /应归档 0 篇/)
+})
+
+test('D-002：现行规范不误报（「状态：现行规范」不是过程文档）', () => {
+  const r = audit({
+    'docs/design/vdfs.md': '# VDFS 规范\n\n状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）\n',
+  })
+  assert.equal(r.status, 0)
+})
+
+test('D-002：豁免必须带理由，空理由视为未豁免', () => {
+  const withReason = `<!-- doc-link-allow D-002: 本文是现行规范，「评审」指代码评审流程 -->\n${REVIEW_DOC}`
+  assert.equal(audit({ 'docs/design/kept.md': withReason }).status, 0)
+
+  const emptyReason = `<!-- doc-link-allow D-002:    -->\n${REVIEW_DOC}`
+  assert.equal(audit({ 'docs/design/kept.md': emptyReason }).status, 1, '空理由不算豁免')
+})
+
+test('D-002：豁免写在第 15 行之后无效（只看头部自述）', () => {
+  const late = `${REVIEW_DOC}\n${'填充行\n'.repeat(20)}<!-- doc-link-allow D-002: 理由 -->\n`
+  assert.equal(audit({ 'docs/design/late.md': late }).status, 1)
+})
+
 // ── 空树 ────────────────────────────────────────────────────────────────
 test('空树通过（守卫不是空转即红）', () => {
   assert.equal(audit({}).status, 0)

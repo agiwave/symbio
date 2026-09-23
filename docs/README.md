@@ -56,18 +56,11 @@ docs/                            # 系统级文档（跨模块）
 │   ├── QUICK_START.md           # 快速上手
 │   ├── PLUGIN_DEVELOPMENT.md    # 插件开发
 │   └── TROUBLESHOOTING.md       # 故障排查
-├── design/                      # 现行设计规范（只写跨层取舍与不变量）
+├── design/                      # 现行设计规范（只写跨层取舍与不变量；**只放规范**）
 │   ├── vdfs.md                          # VDFS 机制规范（权威；资源存储见 §11 / §13.4）
 │   ├── vdfs-frontend.md                 # VDFS 前端页面规范
 │   ├── agent-directory-spec.md          # agent 插件（智能体域）规范
-│   ├── session-options-unification.md   # 会话选项的 schema 化（已实施，2026-09-23）
-│   ├── session-realtime-vdfs-watch.md   # 会话实时面迁回 VDFS watch（实施设计，见 ADR-025）
 │   ├── http-api-transport.md            # Gateway HTTP/WS 传输层设计
-│   ├── frontend-mechanization-review.md         # 前端机制化复核 · 第一轮（一次性报告，非规范）
-│   ├── frontend-mechanization-review-round2.md  # 前端机制化复核 · 第二轮（同上）
-│   ├── architecture-health-check-2026-09.md     # 架构体检 2026-09（同上）
-│   ├── streaming-chain-review-2026-09.md         # 流式链路评审 · 第一轮（同上）
-│   ├── streaming-chain-review-round2-2026-09-22.md # 全链路评审 · 第二轮（同上）
 │   ├── class-diagram.mermaid            # 类图
 │   └── sequence-diagram.mermaid         # 时序图
 └── archive/                     # 历史归档（仅供参考；含 implementation-logs/、proj/）
@@ -75,6 +68,13 @@ docs/                            # 系统级文档（跨模块）
                                  #  已废止机制与旧规范：entity-management-mechanism.md /
                                  #  entity-provider-mechanism.md / open-agent-bundle-spec.md /
                                  #  vdfs-review.md / frontend-ui-ux-*.md
+                                 #  一次性评审 / 体检 / 已落地的实施方案（2026-09-23 归档）：
+                                 #  architecture-health-check-2026-09.md /
+                                 #  frontend-mechanization-review.md（-round2）/
+                                 #  streaming-chain-review-2026-09.md（-round2-2026-09-22）/
+                                 #  guard-and-adr-health-check-2026-09.md /
+                                 #  session-options-unification.md /
+                                 #  session-realtime-vdfs-watch.md
 
 symbio/src/plugins/<plugin>/     # 模块级文档（就近原则）
 ├── README.md                    # 插件职责与内部机制，**不复制路由表**（指向 ROUTES.md）

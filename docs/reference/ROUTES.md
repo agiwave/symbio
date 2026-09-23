@@ -172,7 +172,7 @@
 >   `node.schema` / `new_types[].schema` 下发，值走 `node.attributes.metadata`，
 >   写走 `vdfs/write(<根>/session/<id>, {"metadata": …})`。同一件事曾有两条下发通道
 >   （`OptionNode` 节点协议 vs `DetailDefinition` 方言），而没有任何守卫会因
->   「两边说的不一样」变红。见 `docs/design/session-options-unification.md` 与
+>   「两边说的不一样」变红。见 `docs/archive/session-options-unification.md` 与
 >   [`session-options.md`](../../symbio/src/plugins/session/docs/session-options.md)。
 >
 >   > **本表的历史缺项**：`session/options/list` **从未登记在本表**（它不在

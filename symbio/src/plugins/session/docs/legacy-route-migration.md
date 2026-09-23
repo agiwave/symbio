@@ -433,7 +433,7 @@ CLI 会话 id 格式不变（仍是 `cli<时间戳>`）、e2e 里 8 个按 id �
 **已整条下线**：路由与 `handle_list_options`、`schemas/options.rs`、`OptionVisitor`
 的旧产物槽、agent/model 的旧节点分支、前端 `services/options.ts` 一族全部删除。
 现行规范见 [session-options.md](./session-options.md)，完整账目见
-`docs/design/session-options-unification.md`。
+`docs/archive/session-options-unification.md`。
 
 > **判据补记**：`heartbeat/trigger`（§5.1）也是被同一条「存在判据」改判的——
 > 「能不能迁」之外还要问「该不该有」。`options/list` 是这条判据的第二个受害者。

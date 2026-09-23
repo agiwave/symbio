@@ -296,7 +296,7 @@ fn cursor_id(before: &str) -> Option<&str> {
 /// 列表）。此前实时面挪出过 VDFS（`session/stream` 转写流），理由是「VDFS 变更
 /// 没有流内序号」——那是把**数据的属性**（`ChatMessage.seq` = 消息在文件夹里的位置）
 /// 当成了**传输的属性**。转写流已于 2026-09-23 退役，见
-/// `docs/design/session-realtime-vdfs-watch.md`。
+/// `docs/archive/session-realtime-vdfs-watch.md`。
 pub(crate) const SEG_MESSAGES: &str = "message";
 
 /// 转写列表的**展示名**（`title`）。**只影响 UI**，不参与寻址。

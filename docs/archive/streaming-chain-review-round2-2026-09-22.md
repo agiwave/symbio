@@ -16,7 +16,7 @@
 >
 > **与前面两份的关系**：
 > [`design/streaming-chain-review-2026-09.md`](./streaming-chain-review-2026-09.md)（第一轮）
-> 与 [`archive/streaming-chain-review-2026-09-22.md`](../archive/streaming-chain-review-2026-09-22.md)
+> 与 [`streaming-chain-review-2026-09-22.md`](./streaming-chain-review-2026-09-22.md)
 > 驱动了 **A–G 七批**落地（满通道语义、cancel_token、前端合帧、一次序列化 + `Arc` 扇出、
 > 会话运行态并入转写流、`VdfsChange` 收窄为闭集）。本文在 **E/F/G 之后的新基线**上重做，
 > 已落地的项不再重复提出；被判定为「有意的不对称」的项在 §4 二次复核。

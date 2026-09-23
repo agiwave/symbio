@@ -16,7 +16,7 @@
   本组件与 `useSessionOptionBar` 组成选项栏的**全部前端实现**：不含任何具体业务
   选项（工作目录 / 智能体 / Model / 风险等级… 全部由后端在定义里声明）。
 
-  定义与值的来源（三条通路，见 `docs/design/session-options-unification.md` §3.2）：
+  定义与值的来源（三条通路，见 `docs/archive/session-options-unification.md` §3.2）：
   - 定义：`<根>/session/<id>` 的 `node.schema`（已落盘）/ `new_types[session].schema`（草稿）；
   - 值：节点 `attributes.metadata`（键 = 字段 key）；
   - 落库：`vdfs/write(<根>/session/<id>, {"metadata": {<key>: <值>}})`。

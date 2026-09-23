@@ -358,7 +358,7 @@ impl ModelPlugin {
     /// Provider**（请求显式 > 默认）——这一步的解析链只有后端知道
     /// （`providers.default_provider_id`），故由后端把结论写进定义：会话 metadata
     /// 里没有 `provider_id` 时，前端按 `default` 显示生效的那个（见
-    /// `docs/design/session-options-unification.md` §6）。
+    /// `docs/archive/session-options-unification.md` §6）。
     ///
     /// **不回填当前值**：值来自会话 `metadata.provider_id`，这里只声明候选与缺省。
     async fn contribute_options(&self, ctx: &Arc<dyn InvokeRequest>) {

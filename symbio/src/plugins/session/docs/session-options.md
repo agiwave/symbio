@@ -9,7 +9,7 @@
 `tauri/src/schemas/vdfs-form.ts`（前端方言 + 条件求值 / 紧凑取值规则）、
 `tauri/src/composables/useSessionOptionBar.ts` + `tauri/src/components/chat/ChatOptionBar.vue`
 （前端唯一实现）、
-`docs/design/session-options-unification.md`（本规范的**来由与迁移账**）
+`docs/archive/session-options-unification.md`（本规范的**来由与迁移账**）
 
 > 本文件只写**规范与机制**。具体选项（工作目录、智能体、模型、运行模式、
 > 风险等级、心跳任务……）一律属于**范例**（§9），不是机制的组成部分；
@@ -317,4 +317,4 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 
 **为什么必须下线**：同一件事有两条下发通道，而没有任何守卫会因「两边说的不一样」
 变红。迁移期靠「同一次广播喂两套产物」维持一致，那只是权宜——真正的解药是删掉
-其中一套。完整账目见 `docs/design/session-options-unification.md`。
+其中一套。完整账目见 `docs/archive/session-options-unification.md`。

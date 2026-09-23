@@ -11,7 +11,7 @@
  *
  *   本组**自动发现**：扫后端两个常量源 + 前端 `schemas/vdfs.ts`，取同名交集逐条
  *   比对。新增一个常量即自动进入守卫——**不需要改本脚本**。此前是手工登记 3 条，
- *   剩下 26 条无人看守（`docs/design/architecture-health-check-2026-09.md` F-5）。
+ *   剩下 26 条无人看守（`docs/archive/architecture-health-check-2026-09.md` F-5）。
  *   名字不同的镜像登记在 `ALIASES`；前端自持（后端无对应）的常量必须登记在
  *   `LOCAL_ONLY` 并写明理由——**"没登记"会报错**，所以不会有静默的漏网。
  *
@@ -180,7 +180,7 @@ const ABSENT = [
  * 登记成「消费方在前端」，而前端那份其实是**独立硬编码**的第二份抄本，与 Rust
  * 常量没有任何引用关系（那套机制已于 2026-09-23 整体下线，闭集迁到
  * `detail.rs::DETAIL_PICK_*` ↔ `vdfs-form.ts::DETAIL_PICKS`；账目见
- * `docs/design/session-options-unification.md`）。
+ * `docs/archive/session-options-unification.md`）。
  */
 const ENUM_SETS = [
   {

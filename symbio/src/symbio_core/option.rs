@@ -22,7 +22,7 @@
 //! 各只有一份实现与一个校验器。这里曾经并列一套 `OptionNode`（自带 `option_type`
 //! / `action` / `children` / `display` 的独立节点类型）与 `options/list` 端点，
 //! 已于 2026-09-23 随「会话选项 schema 化」整体下线
-//! （`docs/design/session-options-unification.md` §9 S4）。
+//! （`docs/archive/session-options-unification.md` §9 S4）。
 //!
 //! ## 为什么不复用 CapabilityVisitor
 //!
@@ -112,7 +112,7 @@ impl OptionVisitor for DefaultOptionVisitor {
 /// 表）的定位依据，贡献插件据此算出**候选集**。
 ///
 /// ⚠️ 「当前选中值」**不在**这里回填：值随会话节点 `attributes.metadata` 下发，
-/// 定义只声明「有哪些字段与候选」（`docs/design/session-options-unification.md`
+/// 定义只声明「有哪些字段与候选」（`docs/archive/session-options-unification.md`
 /// §3.2 / §6）。所以宿主不需要为回填值而注入会话状态。
 ///
 /// 失败降级语义与 `collect_capabilities`（`plugins/session/chat_pipeline.rs`）一致：

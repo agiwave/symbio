@@ -428,7 +428,7 @@ impl Plugin for SessionPlugin {
             // `vdfs/watch`。它是唯一一条「因为问题不存在而退役」的路由——它存在的
             // 三条理由（需要流内序号 / 需要背压恢复 / 需要免回读）逐条失效，
             // 而「顺序是节点属性而非投递属性」这一条纠正同时推翻了它与它的前身。
-            // 详见 `docs/design/session-realtime-vdfs-watch.md`。
+            // 详见 `docs/archive/session-realtime-vdfs-watch.md`。
             // ==================== 本表只留「不是数据 CRUD」的路由 ====================
             //
             // 会话与消息的增删改查**全部**经 VDFS 地址完成（`vdfs/list|read|write|
@@ -459,7 +459,7 @@ impl Plugin for SessionPlugin {
             //                 `node.schema` / `new_types[].schema` 下发，值走
             //                 `node.attributes.metadata`，写走 `vdfs/write`。
             //                 同一件事两条下发通道，而守卫不会因为「两边说的不一样」
-            //                 变红。见 `docs/design/session-options-unification.md`。
+            //                 变红。见 `docs/archive/session-options-unification.md`。
             // - `update`   —— **会话 metadata 的写入入口收敛为 `vdfs/write`**
             //                 （2026-09-23）：它唯一比 VDFS 多出来的东西是「客户端
             //                 指定会话 id」，而 VDFS 对**具名目标 + 不存在**的约定

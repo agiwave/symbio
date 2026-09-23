@@ -62,6 +62,66 @@ const EXEMPT_DIRS = ['docs/archive/']
 /** 递归时跳过的目录名（构建产物 / 依赖 / 版本库） */
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.venv'])
 
+// ==================== D-002：过程文档必须归档 ====================
+/**
+ * 归档是**动作**，能保持住的才是机制。
+ *
+ * `docs/README.md` 早写明「历史实施记录一律进 `archive/`，现行文档只描述当前行为」，
+ * 但它只是一句话，没有任何东西检查——于是 2026-09-23 前的 `docs/design/` 里躺着
+ * 8 篇自述「一次性复核报告」「文档类型：评审」「实施前的方案（已全部落地）」的过程文档，
+ * 活跃文档 9,662 行里有约 2,200 行是**第 N 轮的评审与整改记录**。
+ *
+ * 代价不是"文档多"，而是**每次重构都要回头改历史**：实测 `356ba9d`（79 文件）与
+ * `c54158b`（81 文件）各改了 13 / 14 个文档文件，其中一部分改的正是这类记录。
+ * 它们描述的是"当时怎么想的"，与现状一致既不必要、又不可能——因为现状已经变了。
+ *
+ * 判据：文档**头部自述**为一次性 / 评审 / 审计 / 已落地实施方案 ⇒ 必须在 `archive/` 下。
+ * 用「自述」而不是文件名匹配：文件名（`-review-` / `-health-check-`）是约定，会漂移；
+ * 而这批文档**每一篇都在开头写明了自己的类型**，读它们自己写的话比猜文件名准。
+ *
+ * 豁免：头部（前 `DOCTYPE_HEAD_LINES` 行）写 `<!-- doc-link-allow D-002: 理由 -->`，
+ * 理由不可为空（与 `grep-audit` / `dead-code-audit` 同一条约定）。
+ */
+const DOCTYPE_HEAD_LINES = 15
+// ⚠️ 中文后面**不能**用 `\b`：JS 的 `\b` 是 ASCII 语义，汉字不算 word char，
+// 于是 `评审\b` 在「评审（一次性结论…）」里永远不匹配（`审` 与 `（` 之间无 ASCII 边界）。
+// 这条不去掉，整条规则会静默失效——输出照样是「应归档 0 篇」，看着像一切正常。
+const PROCESS_MARKERS = [
+  /文档类型[:：]\s*(?:评审|审计)/,
+  /文档类型[:：]\s*设计（实施前的方案）/,
+  /状态[:：]\s*一次性(?:复核报告|评估记录|审计记录|结论)?/,
+  /状态[:：]\s*\*{0,2}已实施\*{0,2}/,
+  /一次性(?:复核报告|评估记录|审计记录)/,
+  /本文件是\*{0,2}一次性审计记录\*{0,2}/,
+]
+const WAIVER_D002_RE = /<!--\s*doc-link-allow\s+D-002\s*:\s*(\S.*?)\s*-->/
+
+/** 头部自述为过程文档则返回命中的正则，否则 null */
+function processDocMarker(text) {
+  const head = text.split('\n').slice(0, DOCTYPE_HEAD_LINES).join('\n')
+  if (WAIVER_D002_RE.test(head)) return null
+  return PROCESS_MARKERS.find((re) => re.test(head)) ?? null
+}
+
+/** 递归 docs/ 下的 .md（目录不存在 ⇒ 空数组） */
+function walkDocs(dir, out = []) {
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return out
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name)) continue
+      walkDocs(path.join(dir, entry.name), out)
+    } else if (entry.name.endsWith('.md')) {
+      out.push(path.join(dir, entry.name))
+    }
+  }
+  return out
+}
+
 // 形如 [文字](目标)；目标里的括号不常见，按非贪婪取到第一个右括号
 const LINK = /\[[^\]]*\]\(([^)]+)\)/g
 
@@ -119,6 +179,17 @@ for (const rel of ROOT_FILES) {
   if (fs.existsSync(file)) check(file)
 }
 
+// ---- D-002：过程文档是否滞留在活跃目录 ----
+const misplaced = []
+let docsScanned = 0
+for (const file of walkDocs(path.join(repoRoot, 'docs'))) {
+  const rel = path.relative(repoRoot, file).split(path.sep).join('/')
+  if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) continue
+  docsScanned += 1
+  const marker = processDocMarker(fs.readFileSync(file, 'utf8'))
+  if (marker) misplaced.push({ rel, why: marker.source })
+}
+
 const exemptNote = skippedFiles > 0 ? `（豁免 docs/archive/ 下 ${skippedFiles} 个文件）` : ''
 console.log(`扫描相对链接 ${total} 条，失效 ${bad.length} 条${exemptNote}`)
 for (const { from, to } of bad) {
@@ -136,4 +207,15 @@ if (bad.length > 0) {
 if (bad.length > 0) {
   console.log('\n（失效链接判定为失败：活文档的站内相对链接要么存在、要么不存在，无中间态。）')
 }
-process.exit(bad.length > 0 ? 1 : 0)
+
+console.log(`D-002 过程文档归档：扫描 ${docsScanned} 个活跃文档，应归档 ${misplaced.length} 篇`)
+for (const { rel, why } of misplaced) {
+  console.log(`  ✗ ${rel}  自述命中 /${why}/`)
+}
+if (misplaced.length > 0) {
+  console.log('\n提示：过程文档（一次性评审 / 体检 / 已落地的实施方案）请 `git mv` 到 docs/archive/。')
+  console.log('      它们记录的是「当时怎么想的」，与现状一致既不必要也不可能——而每次重构')
+  console.log('      回头改历史，正是「改一个功能要动十几个文档」的一部分来源。')
+}
+
+process.exit(bad.length > 0 || misplaced.length > 0 ? 1 : 0)
