@@ -11,6 +11,9 @@
  *    parent 不可见的悬挂节点升为根（不丢消息）。
  * 2. **乐观置位**：send 立刻置 working 并清会话级错误——这是「零回读」的前提，
  *    随后由后端节点状态覆盖。
+ * 2b. **不做乐观回显**：发言只是往会话收件箱写一条（后端 `<sid>/inbox`），落库
+ *    发生在"被消费那一刻"。前端抢先生成节点会让"已发出"与"已处理"在界面上
+ *    无法区分，因此 "消息出现在流里" 只能由后端的权威帧说了算。
  * 3. **失败收敛**：send 失败置 failed；仅当**没有在途消息**承载错误时才落会话级
  *    错误（否则根级节点与会话级会重复报错）。
  * 4. **跨会话保护**：resume 的目标是别的会话时，**不动本会话状态**
@@ -197,22 +200,24 @@ describe('send — 出站与乐观置位', () => {
     expect((call.ctx as Record<string, unknown>).workdir).toBe('/work')
   })
 
-  it('乐观置位：先写消息、置 working、清会话级错误', async () => {
+  it('乐观置位：置 working + 清会话级错误，但**不写消息**', async () => {
     const c = useChatConnection({ sessionId: 's1' })
     await c.send(msg({ id: 'u1' }))
-    expect(hoisted.store.applyTranscriptMessage).toHaveBeenCalledWith('s1', expect.objectContaining({ id: 'u1' }))
     expect(hoisted.store.putStatus).toHaveBeenCalledWith(
       's1',
       expect.objectContaining({ status: VDFS_STATUS_WORKING }),
     )
     expect(hoisted.store.setSessionError).toHaveBeenCalledWith('s1', null)
     expect(hoisted.store.setSessionStatus).toHaveBeenCalledWith('s1', VDFS_STATUS_WORKING)
+    // 发言只是入队：消息何时出现在流里由**后端消费**决定（权威帧），前端不抢先生成
+    expect(hoisted.store.applyTranscriptMessage).not.toHaveBeenCalled()
   })
 
-  it('无 id 的消息不做乐观写入（没有可锚定的节点）', async () => {
+  it('客户端 id 随请求带给后端（后端入队沿用它 ⇒ 权威帧与这条同 id，不会出现两条）', async () => {
     const c = useChatConnection({ sessionId: 's1' })
-    await c.send({ content: 'x' } as ChatMessage)
-    expect(hoisted.store.applyTranscriptMessage).not.toHaveBeenCalled()
+    await c.send(msg({ id: 'u1' }))
+    const p = hoisted.calls[0].payload as Record<string, unknown>
+    expect((p.message as ChatMessage).id).toBe('u1')
   })
 
   it('失败 → 置 failed；无在途消息时落会话级错误', async () => {

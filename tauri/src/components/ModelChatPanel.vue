@@ -201,11 +201,17 @@ const optionScope = computed<Record<string, unknown>>(() => ({
   })
 
   /**
-   * 末尾等待提示（**兜底来源**，判定在 `stores/sessionLive.needsTypingRow`）。
+   * 末尾等待提示（判定在 `stores/sessionLive.needsTypingRow`）。
    *
    * 会话节点说「在跑」（含 send 后的乐观置位）而流里没有任何在途节点
-   * ⇒ Turn 节点的变更还没到或丢了一次，此处补一条骨架，让「已发出」这件事
-   * 立刻可见。常规路径下这个 computed 恒为 false（Turn 骨架负责），零成本。
+   * ⇒ Turn 节点的变更还没到，此处补一条骨架。
+   *
+   * ## 它在**发出后那一瞬**是常态，不是兜底
+   *
+   * 发言只是往会话收件箱写一条（见 `useChatConnection.send`），消息要等后端空闲时
+   * 取出、落库、才发权威帧。因此"已置 working 而流里还没有自己的消息"是**预期**
+   * 状态——用户看到的是"已发出，等待处理"。随后 Turn 骨架（或用户消息帧本身）
+   * 到达，本行自然消失。
    */
   const showTyping = computed(() =>
     needsTypingRow(
@@ -214,7 +220,10 @@ const optionScope = computed<Record<string, unknown>>(() => ({
     ),
   )
 
-  /** 会话级错误重试：重新发送用户最后一条消息（复用其 id 避免乐观消息重复节点）。
+  /** 会话级错误重试：重新发送用户最后一条消息。
+   *
+   *  复用原 user 消息 id：这是"同一条消息重发"而不是新增一条，后端落库回包也
+   *  带这个 id（前端按 id 合并，不会出现两份）。
    *  仅用于"无 Failed Turn 节点"的兜底错误；有 Failed Turn 时错误由其节点承载、走 handleRetry。 */
   function handleSessionRetry() {
     const msgs = sessionsStore.getSessionMessages(props.sessionId)

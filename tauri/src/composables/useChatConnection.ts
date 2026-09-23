@@ -53,7 +53,12 @@ export interface UseChatConnectionReturn {
   isConnected: ComputedRef<boolean>
   messageTree: ComputedRef<ChatMessage[]>
   /** 发送一条消息。会话参数（智能体 / 模型 / 模式 / 风险等级）由后端按
-   *  `session.metadata` 解析——选择动作统一经会话选项栏落库，故此处不透传。 */
+   *  `session.metadata` 解析——选择动作统一经会话选项栏落库，故此处不透传。
+   *
+   *  ⚠️ 它是**入队**：后端把这条消息写进会话收件箱（`<sid>/inbox`），由空间自己
+   *  在空闲时取出才落库。因此调用返回 ≠ 消息已进流——它出现在消息列表里，是
+   *  后端消费后发权威帧那一刻（前端不做乐观回显，见 `send` 实现）。
+   *  等待期间的反馈是 working 状态（空白流 + working ⇒ 补一条等待骨架）。 */
   send: (message: ChatMessage) => void
   abort: () => void
   removeMessage: (messageId: string) => void
@@ -295,12 +300,18 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const sid = options.sessionId
     logger.info('useChatConnection', `[${sid}] Sending message`)
 
-    // 立即把用户消息写入会话 store（乐观更新，避免后端首帧覆盖不到）。
-    // 落地走与转写实时流**同一条**帧应用路径（`applyTranscriptMessage`）——
-    // 乐观回显与流式帧是同一个动作：把一条消息合并进本地图。
-    if (outgoing.id) {
-      store.applyTranscriptMessage(sid, outgoing)
-    }
+    // ⚠️ **不做乐观回显**（与从前相反，见下）。
+    //
+    // 发言 = 往会话**收件箱**写一条（后端 `<sid>/inbox` 集合），落库发生在
+    // "被消费那一刻"：空间空闲时取出 → 追加存储 → 发一条权威帧。因此前端
+    // **不抢先生成节点**——「消息出现在流里」就是"它已被处理"的唯一可观测证据，
+    // 抢先画一条会让"已发出"与"已处理"在界面上无法区分（排队的消息看起来
+    // 已经发完了）。等待期间的可视反馈由下面的 working 乐观置位给
+    // （空白流 + working ⇒ `sessionLive.needsTypingRow` 会补一条等待骨架）。
+    //
+    // `outgoing.id` 仍随请求带给后端：`enqueue` 沿用客户端 id，因此后端消费时
+    // 发出的**权威帧**与这条消息同 id（前端按 id 合并，不会出现两条）。
+    //
     // 立即置为 working（让 UI 立即反映 send 已经发出）；
     // 同时清空会话级错误：新一轮交互开始，上一次失败不再"最新"。
     // 这是**乐观置位**，随后会被后端会话节点的权威状态覆盖（零回读）。
