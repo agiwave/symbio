@@ -31,8 +31,17 @@ pub async fn route_v2(
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
-    
-    info!(trace_id = %trace_id, path = %path, "Start routing");
+
+    // 调用**来源**（诊断键，不是协议键）。`trace_id` 只能把同一条链的几次请求
+    // 串起来，回答不了「谁发的、为什么发」——而同一个路由名常有多个调用方
+    // （如 `vdfs/stat` 既是「实时面缺基线补读」也是「资源信号分辨删除」）。
+    // 缺省 `-`：**恒打这个字段**，好让「有没有来源」本身可判、日志行形状稳定。
+    let origin = request.metadata.get("origin")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-")
+        .to_string();
+
+    info!(trace_id = %trace_id, origin = %origin, path = %path, "Start routing");
 
     // 创建插件上下文 (模拟 from_message 行为)
     let mut extensions = std::collections::HashMap::new();

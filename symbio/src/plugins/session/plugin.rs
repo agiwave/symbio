@@ -107,6 +107,14 @@ impl SessionPlugin {
     /// 消费方本来就按「重拉清单」处理；捎带快照只会让每个消费端都背一次
     /// 「逐字段合并」的成本。运行态走 `emit_session_state`，那里的视图是
     /// 「调用那一刻」从权威源构造的（与 `stat` 同源），不存在过期副本。
+    ///
+    /// ## 消费端怎么处理无载荷帧
+    ///
+    /// 「重拉清单」是**清单类**消费端（前端侧栏 / 会话 store）的做法；只关心
+    /// **运行态**的消费端（CLI / 心跳守护）不需要回读——运行态变更恒带视图，
+    /// 因此无载荷对它就等于「与本轮无关」，直接丢弃即可。判据是**用途**，不是
+    /// 「无载荷」本身（CLI 侧原有一段"无载荷就回读 `stat` 分辨"的代码，实测
+    /// 那笔请求永远改变不了结论，已删——见 `cli/src/client.rs` 的说明）。
     pub(crate) fn notify_change(&self, id: &str) {
         self.change_subs.notify(&vdfs::VdfsChange::bare(id));
     }
@@ -433,9 +441,9 @@ impl Plugin for SessionPlugin {
             // - `open`     —— 返回的是**进程内句柄**，而句柄交付早已改由编排器直接塞进
             //                 `chat_ctx`（`SESSION_HANDLE`），不走路由。
             // - `clear`    —— 删除会话的唯一入口是 `delete(<根>/session/<id>)`。
-            // - `chat/clear_messages`  —— `action(<id>/消息, "clear")`。
-            // - `chat/delete_message`  —— `action(<id>/消息/<mid>, "truncate")`。
-            // - `chat/update_message`  —— `write(<id>/消息/<mid>)`。
+            // - `chat/clear_messages`  —— `action(<id>/message, "clear")`。
+            // - `chat/delete_message`  —— `action(<id>/message/<mid>, "truncate")`。
+            // - `chat/update_message`  —— `write(<id>/message/<mid>)`。
             // - `heartbeat/trigger`    —— **不是迁到 VDFS，而是能力整体取消**：它唯一的
             //                 入口是选项面板上的「立即心跳」按钮（`invoke` 型选项），
             //                 而那个按钮的作用与「在输入框里直接发一条消息」完全重复
@@ -604,10 +612,10 @@ mod vdfs_provider;
 // 模块内共享面：`nodes` / `vdfs_provider` 经 `use super::*;` 取用，测试（`plugin.test.rs`）亦同。
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
-    internal_dirs, message_dir_path, message_node, message_of, message_of_node, message_text,
-    ordered, overlay_live, parse_session_path, session_content, session_id_from_new_path,
-    session_node, transcript_window, window_params, SessionRuntime, VdfsSessionPath,
-    OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED, SEG_MESSAGES,
+    internal_dirs, message_node, message_of, message_of_node, message_path, message_text,
+    messages_dir_node, ordered, overlay_live, parse_session_path, session_content,
+    session_id_from_new_path, session_node, transcript_window, window_params, SessionRuntime,
+    VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED, SEG_MESSAGES,
 };
 
 #[cfg(test)]

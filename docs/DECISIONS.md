@@ -602,7 +602,7 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
 
 - 会话节点 `<根>/session/<sid>` 承载 `status`（`working` / `active` / `failed`）+
   `attributes.outcome`（`completed` / `aborted` / `failed`）+ `attributes.error`；
-- 消息节点 `<根>/session/<sid>/消息/<mid>` 承载 `status`
+- 消息节点 `<根>/session/<sid>/message/<mid>` 承载 `status`
   （`pending` / `streaming` / `waiting_user_action` / `completed` / `failed`）；
 - 状态类变更（`updated`）**必带全量节点视图**，消费端**零回读**；
 - 前端只有 `sessionRouteOf(地址)` 分派，**没有 `switch (event.type)`**；
@@ -1502,13 +1502,13 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
 但一律以**文件系统的语境**访问。会话转写在这个语境里本来就有唯一自然形态：
 
 ```
-<根>/session/<id>/消息            一个文件夹
-<根>/session/<id>/消息/<mid>      一个文件（一条消息）
+<根>/session/<id>/message            一个文件夹
+<根>/session/<id>/message/<mid>      一个文件（一条消息）
 流式输出                          该文件的内容在增长
 ```
 
 这套形态**数据面早已落地**：`transcript_of` 返回「落库转写 ∪ 本轮在途缓冲」，
-`read(<id>/消息/<mid>)` 拿到的是**已含增量**的正文，`list` 按 `ChatMessage.seq`
+`read(<id>/message/<mid>)` 拿到的是**已含增量**的正文，`list` 按 `ChatMessage.seq`
 排序（`ordered()` 的注释写着「`seq` 是唯一权威顺序锚点」）。
 
 **但通知面走偏了**，且偏了两次：
@@ -1651,12 +1651,17 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
 描述的「资源层面发生了什么」，与载荷描述的「业务数据变成了什么」是同一件事的
 两种说法，而消费端真正消费的只有后者。最终形态：
 
-- **信封 = `{path, data?}`**：`data` 是该路径的业务载荷（消息目录上是
-  `ChatMessage`、会话叶子 `<sid>` 上是 `VdfsNode`），缺失 = 无载荷（回读收敛）。
+- **信封 = `{path, data?}`**：`data` 是该路径的业务载荷（消息节点上是
+  `ChatMessage`、会话节点 `<sid>` 上是 `VdfsNode`），缺失 = 无载荷（回读收敛）。
   `delta` 回到它本来的位置——**`ChatMessage.delta` 字段本身**，不再是信封上的副本。
-- **`path` = 变更文件所在的目录**：消息的落点是 `<sid>/消息`，对象身份
-  （`ChatMessage.id` / `VdfsNode.name`）在 `data` 里，不在路径上。无载荷变更的
-  `path` 是节点自身地址（那时它是唯一定位符）。
+- **`path` 恒为被变更节点自身的地址**（S27 收口同日定稿）：集合项的地址形状统一为
+  `<sid>/<集合段>/<项 id>`，消息的落点是 `<sid>/message/<mid>`，身份就是末段。
+  会话是**容器**，其下是若干**并列的集合**（消息 / 子会话 / 记忆 / 工作目录，后续还会
+  有任务列表、请求队列……），所以机制不认识任何一类集合——新增一类集合只需在
+  `internal_dirs` 里声明一个段，信封与消费端都不动。
+  初版发的是**目录**（`<sid>/message`）而把身份交给 `data.id`，两处代价在收口时暴露：
+  ① `path` 的含义随帧类型漂移（资源信号是节点自身、消息是它所在的目录），消费端必须
+  **反推地址**才能回读；② 「目录 + 载荷里的 id」无法推广到第二类集合。
 - **删除的表达**：资源域 = 「载荷缺失 + 回读 `NotFound`」（删掉的节点本就没有
   视图可带，恰好不需要一个 `deleted` 类型）；消息域 = `ChatMessage.status =
   removed`（消息词汇本就有它）。

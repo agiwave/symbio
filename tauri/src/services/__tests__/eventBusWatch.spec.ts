@@ -141,10 +141,10 @@ describe('subscribeVdfsChanged 的后端登记', () => {
 describe('带 delta 的变更照常派发', () => {
   it('delta 不被当作形状异常丢弃，且原样到达消费者', () => {
     const seen: VdfsChange[] = []
-    const off = subscribeVdfsChanged({ prefix: '@vfs/session/s1/消息' }, (c) => seen.push(c))
+    const off = subscribeVdfsChanged({ prefix: '@vfs/session/s1/message' }, (c) => seen.push(c))
 
     publishVdfsChangedLocal({
-      path: '@vfs/session/s1/消息',
+      path: '@vfs/session/s1/message',
       data: { id: 'm1', delta: '片段' }
     })
 
@@ -155,10 +155,10 @@ describe('带 delta 的变更照常派发', () => {
   })
 
   it('作用域判定只看 path，与是否带 delta 无关', () => {
-    const scope = { prefix: '@vfs/session/s1/消息' }
-    expect(vdfsChangeInScope(scope, '@vfs/session/s1/消息/m1')).toBe(true)
+    const scope = { prefix: '@vfs/session/s1/message' }
+    expect(vdfsChangeInScope(scope, '@vfs/session/s1/message/m1')).toBe(true)
     expect(vdfsChangeInScope(scope, '@vfs/session/s1')).toBe(false)
     // 带 delta 的变更走的是同一个判定入口（path 决定一切）
-    expect(vdfsChangeInScope(scope, '@vfs/session/s1/消息/m2')).toBe(true)
+    expect(vdfsChangeInScope(scope, '@vfs/session/s1/message/m2')).toBe(true)
   })
 })

@@ -649,8 +649,8 @@ for (name, child) in children {
   （首段），不补被订阅的整条路径。两处若都做前缀处理就会重复拼接：
 
   ```text
-  watch("session/abc/消息") → 容器拆出 dir="session"、rel="abc/消息"
-  provider 报 "abc/消息/m1" → 容器补成 "session/abc/消息/m1"  ✓
+  watch("session/abc/message") → 容器拆出 dir="session"、rel="abc/message"
+  provider 报 "abc/message/m1" → 容器补成 "session/abc/message/m1"  ✓
   provider 若报 "m1"       → 容器补成 "session/m1"          ✗
   ```
 
@@ -667,9 +667,9 @@ for (name, child) in children {
   同步投递的另一半收益是**顺序确定**：变更点返回即投递完成，不存在「已落盘但尚未
   转发」的中间态。
 - **重叠订阅按「最具体者优先」恰好一次**：同一条变更若同时落在 `…/abc` 与
-  `…/abc/消息/m1` 两条订阅之下，只投给路径更长的那条。这里的「一次」指的是
+  `…/abc/message/m1` 两条订阅之下，只投给路径更长的那条。这里的「一次」指的是
   **总线上的一次发布**——sink 的职责是把变更发进 `kind = "vdfs"` 频道，前端各消费者
-  再按自己的作用域前缀过滤（订 `<根>/session` 的清单同样收得到 `…/session/abc/消息/m1`）。
+  再按自己的作用域前缀过滤（订 `<根>/session` 的清单同样收得到 `…/session/abc/message/m1`）。
   因此收敛为一条不会让任何人漏收，反而避免了同一变更被发布两次。（表按 `kind`
   全局持有，是因为同一 provider 每次 `traverse` 都会新构造，按实例持有会让订阅
   与投递配不上对。）
@@ -685,9 +685,13 @@ for (name, child) in children {
   前端 `subscribe({ kind: 'vdfs' })` 按 `path` 前缀与**载荷形状**自行分流：
   `data` 含 `delta` 的消息帧**就地追加**（零回读），`data` 为节点视图的运行态帧
   就地落定，无载荷变更防抖重拉。
-- **`notify_change(kind, path)` 发无载荷变更**（绝大多数资源信号长这样）；
-  需要携带业务载荷时走 `notify_change_with_data(kind, path, data)`——带载荷是
-  一个**显式动作**，不是默认行为。
+- **`notify_change(kind, path)` 只发无载荷变更**（绝大多数资源信号长这样）。
+  带业务载荷的变更由**生产者直接经它已持有的订阅表**投递
+  （`ChangeSubscriptions::notify(&VdfsChange::with_data(path, data))`，
+  见 `session::transcript::Transcript::emit`）——带载荷是一个**显式动作**，
+  不是默认行为。曾有过一个对称的门面 `notify_change_with_data`，但它**没有任何
+  生产者**（带载荷的只有会话域，而它拿的就是订阅表本身），S27 收口时删除：
+  留一个没人调用的「能力」比没有更糟——文档会照着它写。
 - **变更词汇：信封没有操作枚举**（S27）——形状是 `path` + 可选 `data`，
   语义全在 `data` 的字段上：
 
@@ -699,9 +703,15 @@ for (name, child) in children {
   | `VdfsNode` | 会话运行态（`emit_session_state`，与 `stat` 同源构造） | 全量节点视图就地落定，零回读 |
   | 缺失 | 全部资源信号（`notify_change`） | 「这条路径变了」——回读 / 重拉（幂等）；资源删除回读 `NotFound` 即删除 |
 
-  **`path` 是变更文件所在的目录**：消息的落点是 `<sid>/消息` 这一个目录，具体是
-  哪条消息由 **`data.id`** 回答——对象身份（`ChatMessage.id` / `VdfsNode.name`）
-  在载荷里，不在路径上。无载荷变更的 `path` 是节点自身地址（那时它是唯一定位符）。
+  **`path` 恒为被变更节点自身的地址。** 会话是**容器**，其下是若干**并列的集合**
+  （消息 / 子会话 / 记忆 / 工作目录，后续还会有任务列表、请求队列……），因此集合项
+  的地址形状统一为 `<sid>/<集合段>/<项 id>`——消息的落点是 `<sid>/message/<mid>` 这个
+  **节点**，`path` 的末段就是它的身份（与 `data.id` 是同一个事实，以地址为准）。
+  早先这里发的是**目录**（`<sid>/message`）而把身份交给 `data.id`：那样 `path` 的含义
+  随帧类型漂移（资源信号是节点自身、消息是它所在的目录），消费端于是必须**反推地址**
+  才能回读，而「目录 + 载荷里的 id」这种寻址也**无法推广到第二类集合**——每加一类
+  集合都要在信封上新增概念、每个消费端都要学一条新的「身份在哪」的规则。
+  无载荷变更的 `path` 同样是节点自身地址。
   这与 `ChatMessage` 帧同源（`delta` 有 ⇒ 尾部追加、`content` 有 ⇒ 整条替换，
   **语义由字段本身给出**，不从类型反推）。
 

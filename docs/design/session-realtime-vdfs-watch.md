@@ -6,10 +6,28 @@
 > `symbio_core/vdfs_provider.rs` 的「变更通知」小节。
 > 本文只回答「**怎么改、改哪些文件、哪一步不能拆**」。
 >
-> **实施状态（2026-09-23）**：机制层**已落地**（`VdfsChange.delta` /
-> `VdfsChange::with_delta` / `notify_change_with` / `VdfsChangeEvent.delta` /
-> 前端 `schemas/vdfs.ts` / 事件总线通道 4096）；**生产者、消费端、退役三段尚未切换**，
-> 且它们**必须同批**（见 §5）。
+> **实施状态（2026-09-23）**：**全部落地**——机制层（`VdfsChange` 信封）、生产者
+> （`Transcript::emit` / `emit_session_state` / 转播桥）、消费端（前端三个 store 订阅 +
+> `useVdfs` + CLI `client.rs`）、退役三段（`transcript_stream` / `session/stream` 路由 /
+> `services/transcriptStream.ts`）均已切换。
+>
+> **追记：`e2e/` 那一行（§7 表格）当时漏了。** 三个抓包用例（T9 / T10 / T11）仍在向
+> 已退役的 `session/stream` 订阅——那条路由不再存在，于是它们**零帧可收**：T9/T11 表现为
+> 超时，T10 表现为「流上没有 reasoning 节点」。症状像"模型没产出内容"，实际是订阅接在
+> 一条死路由上。现已按本节设计迁移：共用
+> `helpers.subscribeSessionRealtime`（`event_bus/subscribe` + `vdfs/watch` 两步，
+> watch 的是**父目录** `<根>/session` 而非 `<根>/session/<sid>`——订阅一次覆盖所有会话，
+> 且会话尚不存在时父目录一定在），断言改用**到达序**（单一 FIFO）而非逐帧 `seq`。
+>
+> **本文写于实施前，两处与最终形态不同，读时以 `design/vdfs.md` §9 与 ADR-025 追记为准：**
+>
+> 1. **信封没有操作枚举**（本文 §2 表里的 `created` / `updated` / `deleted` 已整个退役）：
+>    语义全在 `data` 的字段上——`delta` 追加 / `content` 替换 / `status = removed` 移除。
+> 2. **`path` 恒为被变更节点自身的地址**（本文 §2 的地址图已经是对的）：
+>    消息的落点是 `<sid>/message/<mid>` 这个**节点**，身份即末段。会话是**容器**，其下是
+>    若干**并列的集合**（消息 / 子会话 / 记忆 / 工作目录，后续还会有任务列表、请求队列……），
+>    集合项形状统一为 `<sid>/<集合段>/<项 id>`。**曾一度实现成「落点 = 消息目录
+>    `<sid>/message` + 身份在 `data.id`」**，收口时改回本文的原设计——理由见 ADR-025 追记。
 
 ---
 
@@ -30,7 +48,7 @@
 **两个不同的 `seq`**（这是本方案最容易搞错的地方）：
 
 - `NodeEvent.seq` = **帧序号**（投递保证，缺口检测用）——**随本次迁移消失**；
-- `ChatMessage.seq` = **消息在 `<sid>/消息` 这个文件夹里的位置**（排序锚点）——**保留**。
+- `ChatMessage.seq` = **消息在 `<sid>/message` 这个文件夹里的位置**（排序锚点）——**保留**。
 
 把两者混为一谈，正是「顺序＝投递属性」这个历史性理解错误的化石。
 
@@ -48,7 +66,7 @@
 
 ```
 <根>/session/<sid>                    会话节点   ── 运行态 = 它的 status
-<根>/session/<sid>/消息/<mid>          消息文件   ── 流式 = 它内容的增长
+<根>/session/<sid>/message/<mid>          消息文件   ── 流式 = 它内容的增长
 ```
 
 | `change` | `delta` | 消费端动作 |
@@ -85,7 +103,7 @@
 
 ### 3.2 路径与「谁来补前缀」
 
-- `Transcript` 产出的是 **provider 子树内的相对路径**：`<sid>/消息/<mid>`、`<sid>`。
+- `Transcript` 产出的是 **provider 子树内的相对路径**：`<sid>/message/<mid>`、`<sid>`。
 - 补成展示地址（`<根>/session/...`）由**门面**做，机制已存在：`VdfsChange::map_paths`
   （`composite/vdfs.rs` / `vdfs/fs.rs` / `agent/host/vdfs.rs` 三处包装各调一次）。
   **本方案不改它**——这正是 `map_paths` 是「唯一翻译点」的意义：新增 `delta` 字段
@@ -129,7 +147,7 @@
 |---|---|
 | `tauri/src/services/transcriptStream.ts` | **删除**（合帧窗口 / 缺口检测 / `reconcileTranscript` 的替代者一并消失） |
 | `tauri/src/services/eventBus.ts` | 无需改（`subscribeVdfsChanged` 已就绪，`delta` 随 `VdfsChange` 到达） |
-| **新增** `tauri/src/stores/sessionTranscriptSync.ts` | 按 §3.1 的规则把变更落到 store：`<sid>` ⇒ 运行态回读 → `applySessionState`；`<sid>/消息/<mid>` ⇒ `created` 插占位 + 回读身份 / `updated`+`delta` 就地追加（带 `appendGuard`）/ `updated` 无 `delta` 回读 / `deleted` 就地移除 |
+| **新增** `tauri/src/stores/sessionTranscriptSync.ts` | 按 §3.1 的规则把变更落到 store：`<sid>` ⇒ 运行态回读 → `applySessionState`；`<sid>/message/<mid>` ⇒ `created` 插占位 + 回读身份 / `updated`+`delta` 就地追加（带 `appendGuard`）/ `updated` 无 `delta` 回读 / `deleted` 就地移除 |
 | `tauri/src/stores/sessions.ts` | 落地口 `applyTranscriptMessages` **保留**（调用方换成上面那个）；`applySessionState` 的零回读前提消失（改为回读 `stat` 收敛） |
 | `tauri/src/composables/useVdfs.ts` | **加回** `applyAppend` + `appendGuard`（消息详情随 `delta` 就地增长） |
 | `tauri/src/views/MainLayout.vue` | 启动函数换成 `startSessionTranscriptSync` |

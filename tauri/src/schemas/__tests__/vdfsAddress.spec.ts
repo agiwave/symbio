@@ -37,7 +37,7 @@ describe('vdfsAddrOf — 路由参数 → 数据地址', () => {
 
   it('多级数组（:dir(.*)* 的实际形态）', () => {
     expect(vdfsAddrOf(['session', 'abc123'])).toBe('@vfs/session/abc123')
-    expect(vdfsAddrOf(['session', 'abc123', '工作目录'])).toBe('@vfs/session/abc123/工作目录')
+    expect(vdfsAddrOf(['session', 'abc123', 'workdir'])).toBe('@vfs/session/abc123/workdir')
   })
 
   it('空段不产生空路径段（尾部空串被丢弃）', () => {
@@ -57,7 +57,7 @@ describe('vdfsBrowserPathOf — 数据地址 → 浏览器地址', () => {
 
   it('根之下 → /vdfs/<rel>（多级原样保留）', () => {
     expect(vdfsBrowserPathOf('@vfs/session')).toBe('/vdfs/session')
-    expect(vdfsBrowserPathOf('@vfs/session/abc123/工作目录')).toBe('/vdfs/session/abc123/工作目录')
+    expect(vdfsBrowserPathOf('@vfs/session/abc123/workdir')).toBe('/vdfs/session/abc123/workdir')
   })
 
   it('非 VDFS 地址一律兜底首页（不把外来地址拼进 URL）', () => {

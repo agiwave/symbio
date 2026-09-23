@@ -2,7 +2,7 @@
   VdfsMessageDetail — VDFS `message` 渲染器（单条对话消息 = **转写列表的一项**）
 
   这是「转写即列表」在前端的落点：一条消息是一个普通节点，地址是
-  `<根>/session/<sid>/消息/<mid>`；正文在**内容**里（`data`），结构在
+  `<根>/session/<sid>/message/<mid>`；正文在**内容**里（`data`），结构在
   `attributes` 里（role / type / parent_id / seq / error / meta）。
 
   ## 为什么是只读的
@@ -18,7 +18,7 @@
   - `message`（列表项）：这条消息本身的视图，LLM 与前端读到的是同一份。
 
   正文初值来自一次 `vdfs/read`，此后**随 `updated` + `delta` 就地增长**——这正是
-  「流式即文件追加」的可视化：消息是 `<根>/session/<sid>/消息` 这个文件夹里的一个
+  「流式即文件追加」的可视化：消息是 `<根>/session/<sid>/message` 这个文件夹里的一个
   **文件**，流式输出是它的内容在增长（ADR-025）。
 
   ## 曾经写在这里的两条反向说明（已作废）

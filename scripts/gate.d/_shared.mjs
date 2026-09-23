@@ -77,7 +77,23 @@ export const BASELINE = {
   //            契约搬到 `write_merges_metadata_shallowly`
   //        -3  `symbio_core/schemas/options.rs`（整文件删除）——旧 `OptionNode` 产物用例
   //      合计 +9。删的是机制不是覆盖：新产物那侧由上面几条接管。
-  rustTests: 925,
+  // 916：S27（变更信封 = `{path, data?}`，操作枚举退役）——**净 −9**（925 → 916）。
+  //      `transcript_stream` 退役删掉它那批帧协议用例；`delta` 从 `updated` 的
+  //      可选字段变成 `ChatMessage.delta` 字段本身，随「按类型分派」一起消失的用例
+  //      由 VDFS 变更通道的新用例接替（信封构造守卫 / 首帧全量副本 / removed 状态帧 /
+  //      运行态随节点视图）。⚠️ 上一批（356ba9d）在提交信息里写了「916 通过」、
+  //      也加了上面那条 S27 注记，却**忘了把这里的数字从 925 改下来**——棘轮基线
+  //      只增不减，漏改就是门禁常红（同一批还漏了 `vitestFiles` / `vitestTests`）。
+  // 919：S27 收口补齐（2026-09-23）——**+3 用例**（916 → 919），全部围绕「在途号
+  //      永不落库」这条不变式（它是两个独立递增的计数器能共存的前提）：
+  //      ① `transcript.test.rs`：`is_inflight_seq` 的号段边界（含「存量泄漏水位仍是
+  //         权威号」——这正是 `INFLIGHT_SEQ_BASE` 从 `1 << 40` 抬到 `1 << 50` 的理由）；
+  //      ② `chat_session.test.rs`：`append_messages` 摘掉在途占位号并重新分配；
+  //      ③ 同文件：`replace_messages` 同样摘号，且**既有序号一个不动**。
+  //      背景：`CompressionEmitter::finish` 把在途节点原样交给落库，存储水位被抬进
+  //      在途号段，两个计数器在同一区间各自递增 ⇒ 撞号（同一会话里用户消息与压缩
+  //      节点各持 `1099511627781`，e2e T8 的「seq 严格递增」当场失败）。
+  rustTests: 919,
   // 47 spec 文件 / 661 → 683 → 687 → 689 → 724 → 726 用例。文件数与用例数均与平台无关（全仓 spec
   // 零平台分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见对应提交
   // （`git log --grep=<批次/主题>`；本仓库不维护变更日志，变更历史即提交历史）。
@@ -119,8 +135,44 @@ export const BASELINE = {
   //      以及转写流合帧的提交批量化用例（3）。
   // 672：收起态摘要跟「流式末端」走——`messagePreviewFollowsLiveEdge` 判据用例（2）+
   //      摘要取端（末端 / 开头 / 短内容 / 空内容，4）+ 渲染层两条（思考、工具行）。
-  vitestFiles: 47,
-  vitestTests: 726,
+  // 48 文件 / 724：S27 收口（2026-09-23）——`vitestFiles` 47 → **48**、`vitestTests`
+  //      726 → **723**。三条修正一次说清（上一批 356ba9d 只改了 Rust 那侧的注记，
+  //      前端这两个数**一个都没改**，于是门禁从那天起就红着）：
+  //      ① `+1 文件`：新增 `stores/__tests__/sessionTranscriptSync.spec.ts`；
+  //      ② `−3 用例`：`delta` 从 `updated` 的可选字段变成 `ChatMessage.delta` 字段本身，
+  //         随「按类型分派」一起作废的用例由**信封形状**用例接替（会话节点归
+  //         `sessionNodeSync` / 身份取自地址末段 / 全量帧零回读 / 状态帧零回读）；
+  //      ③ `+1 用例`（本轮）：`useVdfs` 补「带全量正文的载荷帧**不**触发重拉」与
+  //         「孙辈变更**不**重拉当前目录」——后者是这次请求风暴的直接回归锚点
+  //         （`affects` 原先把「任意后代」判成「影响我」）。原「非 delta 载荷走通用
+  //         重拉」那条把错行为钉死了，已改写而非删除。
+  // 49 文件 / 723：回读理由进路由留痕（2026-09-23，origin）——`vitestFiles`
+  //      48 → **49**、`vitestTests` 724 → **723**。四笔一次说清：
+  //      ① `+1 文件 / +3 用例`：新增 `services/__tests__/pluginEnvelope.spec.ts`
+  //         ——**信封**层的守卫。原先没有任何用例断言「送上 IPC 的 metadata 里
+  //         有什么」，于是 `buildMetadata` 里那段 `origin` 被删掉也不会红：
+  //         机制照旧「实现」着，日志里只是永远少一个字段。三条分别钉住
+  //         「给了理由必带 `origin`」/「没给理由一个键都不多」/「来源与路由正交」。
+  //      ② `−5 用例`：`services/__tests__/vdfs.spec.ts` 里 `describe('listVdfs /
+  //         statVdfs / readVdfs 的失败口径')` **整段（含文档注释）逐字重复了两遍**
+  //         ——同一组断言跑两次。删掉第二份，覆盖不减（第一份原样保留）。
+  //      ③ `+1 用例`：`sessionTranscriptSync` 补「Turn 组合节点（本身无正文）⇒
+  //         零回读」——这是**每轮会话白跑一对 `stat` + `read`** 的回归锚点。
+  //      ④ 其余为断言改形：三个回读动词的首参从「路径」变成「理由」
+  //         （`READBACK_REASON` 的必填形参），既有断言跟着往后挪一位并**顺便
+  //         钉住理由**（`missing-baseline` / `resource-signal` / `list-refresh` /
+  //         `bootstrap` / `vdfs-browser`）。
+  // 49 文件 / 725：`useVdfs`「带正文 ⇒ 不重拉」的豁免补上边界（2026-09-23）
+  //      ——`vitestTests` 723 → **725**（`vitestFiles` 不变：改的是既有 spec，
+  //      没有新增文件）。原规则默认了「被改的节点**已经在列表里**」，而新建出来的
+  //      那一项首帧就带正文（写入即带内容 / 流式首帧即增量），于是它**永远不出现在
+  //      中栏**，要等某次无关的刷新顺手带出来。补的判据是「列表里有没有这条路径」，
+  //      **不问帧里带的是 `delta` 还是 `content`**——帧形状是协议的实现细节。
+  //      两条用例分别钉住两个方向：「本目录还不认识的直接子项 ⇒ 必重拉」与
+  //      「进入列表后 ⇒ 后续帧零重拉」。后一条是防退化的锚点：少了它，一次流式
+  //      会话会变成几十次白拉的 `vdfs/list`（这正是当初加那条豁免要防的东西）。
+  vitestFiles: 49,
+  vitestTests: 725,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000
@@ -193,31 +245,9 @@ export function readMsrv(dir) {
   return parts.join('.')
 }
 
-/** 检测 cli 是否已有 release 构建（e2e 阶段的前置条件） */
-/**
- * CLI release 二进制的**唯一**路径算出处。
- *
- * ⚠️ 产物落在哪个 target 目录**取决于本机 `cli/.cargo/config.toml`**——它被
- * `cli/.gitignore` 忽略（内容是机器相关的绝对路径），作用是把 `build.target-dir`
- * 指到 `../symbio/target` 以共享 symbio 已预热的依赖缓存（离线环境下没有第二次
- * 机会重新编译全部 C 依赖）。**因此不能写死任一位置**：有该配置时产物在
- * `symbio/target/`，没有时在 `cli/target/`——两个候选都探，取实际存在者。
- *
- * 写死单一位置会让「二进制找不到 ⇒ 每次都判定缺失」与「e2e 拿不到二进制 ⇒ 全用例
- * 失败（且失败形态是 -1 + 空 stderr，与崩溃无法区分）」同时发生。
- */
-export function cliBinaryPath(repoRoot) {
-  const exe = `symbio-cli${process.platform === 'win32' ? '.exe' : ''}`
-  const candidates = [
-    path.join(repoRoot, 'symbio', 'target', 'release', exe),
-    path.join(repoRoot, 'cli', 'target', 'release', exe),
-  ]
-  return candidates.find((p) => fs.existsSync(p)) ?? candidates[0]
-}
-
-export function cliBinaryExists(repoRoot) {
-  return fs.existsSync(cliBinaryPath(repoRoot))
-}
+// CLI release 二进制的路径与新鲜度判定**不在这里**——统一在
+// `scripts/cli-binary.mjs`（门禁与 e2e 共用的唯一真相）。曾经这里只有
+// 「文件在不在」两个函数，而「在」不等于「对应当前源码」，于是过期产物被一直用下去。
 
 // ==================== 「自动执行的工作」（不是检查项） ====================
 

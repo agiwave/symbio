@@ -14,7 +14,7 @@
 > 只动日志，`seq` 与发布仍逐帧（不变量 #28）。
 >
 > - **读面**（历史）走 VDFS：`read(<根>/session/<sid>)` 一次拿整份历史，地址与 §2.1 一致。
-> - **实时面也走 VDFS 变更**：消息**是** `<根>/session/<sid>/消息` 这个**文件夹**里的
+> - **实时面也走 VDFS 变更**：消息**是** `<根>/session/<sid>/message` 这个**文件夹**里的
 >   **文件**，流式输出是该文件内容的**增长**；会话运行态是会话节点（`<根>/session/<sid>`）
 >   的 `status`。两者都是 `kind = "vdfs"` 上的变更：
 >
@@ -96,11 +96,11 @@ S16–S19 已经把**转写（消息）**整体迁到 VDFS：读走一次 `vdfs/
 ```text
 <根>/session                                  会话清单（目录）
 <根>/session/<sid>                            会话节点        ← 运行态的承载者
-<根>/session/<sid>/消息                       转写列表（目录）
-<根>/session/<sid>/消息/<mid>                 消息节点（列表项）
+<根>/session/<sid>/message                       转写列表（目录）
+<根>/session/<sid>/message/<mid>                 消息节点（列表项）
 <根>/session/<sid>/AGENTS.md                  会话记忆（文件）
-<根>/session/<sid>/子会话[/<sub>]             子会话清单 / 子会话节点
-<根>/session/<sid>/工作目录[/<rel>]           工作目录树
+<根>/session/<sid>/subsession[/<sub>]             子会话清单 / 子会话节点
+<根>/session/<sid>/workdir[/<rel>]           工作目录树
 ```
 
 消息节点内部再由 `attributes.parent_id` 组织成树——**树是节点的一个属性，
@@ -120,7 +120,7 @@ S16–S19 已经把**转写（消息）**整体迁到 VDFS：读走一次 `vdfs/
 | └ 响应 Response | `message` | `text` / `turn` | 视内容 | `pending` → `streaming` → `completed` / `failed` |
 | 用户应答 UserPrompt | `message` | `user_prompt` | 否 | `waiting_user_action` → `completed` |
 
-**工具调用的「请求 + 响应」不需要两个地址**：`read(.../消息/<tc-id>)` 取到的正文
+**工具调用的「请求 + 响应」不需要两个地址**：`read(.../message/<tc-id>)` 取到的正文
 **就是请求体**（参数 JSON），它的**子节点就是响应**。这与 LLM 协议同构
 （`tool_calls[].function.arguments` + `tool` 角色消息），也与既有存储同构。
 把请求另立一个地址会立刻产生"同一份参数存两处"，那才是真的坏设计。
@@ -844,7 +844,7 @@ S23 把消息实时面从「VDFS 变更」收成一条转写流，但帧仍带�
    `completed`（它没有"未开始"与"已结束"）。
 9. **失败是状态不是标志**：不再有 `last_failed` 布尔。
 10. **实时面走 VDFS 变更，两条事实各是一个节点**（S26 / ADR-025）：消息**是**
-    `<根>/session/<sid>/消息/<mid>` 这个**文件**（流式 = 它的内容增长，`updated` + `delta`），
+    `<根>/session/<sid>/message/<mid>` 这个**文件**（流式 = 它的内容增长，`updated` + `delta`），
     会话运行态是会话节点（`<根>/session/<sid>`）的 `status`（`updated`，无 `delta` ⇒ 回读）。
     **顺序是节点属性**（`ChatMessage.seq`），与到达顺序无关——两个并行工具的变更**混着到**、
     后生成的**先到**，显示都正确，因为每条变更都指向一个明确的 `path`。

@@ -351,6 +351,12 @@ impl ChatSession for PersistentChatSession {
             if chat_msg.timestamp.unwrap_or(0) == 0 {
                 chat_msg.timestamp = Some(now);
             }
+            // 存储边界：**在途占位号一律摘掉**，交给下面统一分配（见
+            // `transcript::INFLIGHT_SEQ_BASE`）。不摘的后果是静默的：存储水位被抬进
+            // 在途号段，此后存储计数器与在途计数器在同一区间各自递增 ⇒ 撞号。
+            if chat_msg.seq.is_some_and(super::transcript::is_inflight_seq) {
+                chat_msg.seq = None;
+            }
             if chat_msg.seq.is_none() {
                 seq_cursor += 1;
                 chat_msg.seq = Some(seq_cursor);
@@ -425,6 +431,15 @@ impl ChatSession for PersistentChatSession {
         // 因此 L2 压缩（前缀重写）不会改写保留区任何一条消息的 seq——压缩只改变
         // 列表的**构成**，不改变既有消息的身份锚点。
         let mut messages = backfill_timestamps(messages, now);
+        // 存储边界：在途占位号**必须在 `assign_seq` 之前**摘掉——`assign_seq` 对
+        // 既有序号是"原样保留"，放它进去就等于把在途号当成权威号写进存储
+        // （`converge_inflight` 的补写路径正是带在途号进来的）。见
+        // `transcript::INFLIGHT_SEQ_BASE`。
+        for m in messages.iter_mut() {
+            if m.seq.is_some_and(super::transcript::is_inflight_seq) {
+                m.seq = None;
+            }
+        }
         cm::assign_seq(&mut messages, cm::max_seq(&session.messages));
         // 孤儿存档：`replace_messages` 整体重写消息列表（L2 语义压缩 /
         // Streaming 清理），被丢弃消息引用的 L0 `tool_archives/` 存档随之失去引用。

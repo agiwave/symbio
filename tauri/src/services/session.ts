@@ -14,9 +14,9 @@
  * | 新建会话 | `vdfs/write(<根>/session, { create: true })` |
  * | 删除会话 | `vdfs/delete(<根>/session/<id>)` |
  * | 改 metadata / 标题 | `vdfs/write(<根>/session/<id>)` |
- * | **改写某条消息** | `vdfs/write(<根>/session/<id>/消息/<mid>)` |
- * | **删除某条及其后** | `vdfs/action(…/消息/<mid>, "truncate")` |
- * | **清空历史** | `vdfs/action(…/消息, "clear")` |
+ * | **改写某条消息** | `vdfs/write(<根>/session/<id>/message/<mid>)` |
+ * | **删除某条及其后** | `vdfs/action(…/message/<mid>, "truncate")` |
+ * | **清空历史** | `vdfs/action(…/message, "clear")` |
  *
  * 本文件保留的只是**地址拼接 + 形状适配**（把 VDFS 域响应映射成 store 习惯的
  * 形状），没有任何协议知识——新增一种会话操作**不需要**在这里加路由。
@@ -29,6 +29,7 @@
  */
 
 import { deleteVdfs, listVdfs, readVdfs, runVdfsAction, writeVdfs } from './vdfs'
+import { READBACK_REASON } from './readback'
 import { ensureSessionMountDir, ensureVdfsSessionScheme } from './vdfsScheme'
 import {
   VDFS_ACTION_CLEAR,
@@ -75,7 +76,9 @@ export async function listSessions(
   // 实参也会被 `toHaveBeenCalledWith` 认成「多传了一个参数」）
   const path = await ensureSessionMountDir()
   const resp =
-    limit === undefined ? await listVdfs(path) : await listVdfs(path, { limit })
+    limit === undefined
+      ? await listVdfs(READBACK_REASON.LIST_REFRESH, path)
+      : await listVdfs(READBACK_REASON.LIST_REFRESH, path, { limit })
   return (resp.items || [])
     .filter((n) => vdfsExtOf(n) === VDFS_EXT_SESSION)
     .map((n) => {
@@ -123,7 +126,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
  */
 export async function readSessionTranscript(sessionId: string): Promise<SessionMessage[]> {
   const addr = vdfsSessionAddr(await ensureSessionMountDir(), sessionId)
-  const content = await readVdfs(addr)
+  const content = await readVdfs(READBACK_REASON.TRANSCRIPT_LOAD, addr)
   const text = content?.text
   if (!text) throw new Error(`读取会话转写失败：${addr}`)
   let doc: unknown
@@ -151,7 +154,7 @@ export interface DeleteMessageResult {
 /**
  * 清空会话历史消息（保留会话本身 / 工作目录 / 标题等元数据）。
  *
- * **走 VDFS**：`action(<根>/session/<id>/消息, "clear")`。
+ * **走 VDFS**：`action(<根>/session/<id>/message, "clear")`。
  *
  * 为什么是 `action` 而不是 `delete`：`delete` 的语义是**逐节点**的「这一个没了」，
  * 表达不了截断那类集合操作；而转写区段的删除因此统一走动作——**同一个区段的删除
@@ -169,7 +172,7 @@ export async function clearMessages(sessionId: string): Promise<void> {
 /**
  * 删除单条会话消息（连同其之后的所有消息一并删除）。
  *
- * **走 VDFS**：`action(<根>/session/<id>/消息/<mid>, "truncate")`。语义是
+ * **走 VDFS**：`action(<根>/session/<id>/message/<mid>, "truncate")`。语义是
  * 「从这条到列表末尾全没了」，不是「删这一个」——VDFS 的变更词汇里**没有**对应
  * 取值，这类操作一条变更都不发（理由见 `clearMessages`）。
  *
@@ -197,7 +200,7 @@ export async function deleteMessage(
 /**
  * 更新单条会话消息（手工编辑 / 标错重试等）。
  *
- * **走 VDFS**：`write(<根>/session/<id>/消息/<mid>)`，请求体是消息的**字段子集**
+ * **走 VDFS**：`write(<根>/session/<id>/message/<mid>)`，请求体是消息的**字段子集**
  * （JSON 浅合并，未提供的字段保持不变）。后端 provider 只覆盖补丁里出现的字段。
  *
  * 这不是「发言」：它不触发任何编排，只是对**既有**节点的一次存储改写。新增消息

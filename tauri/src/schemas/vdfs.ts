@@ -329,13 +329,20 @@ export const VDFS_BUS_RESYNC = 'resync'
  *  | `data` 形状 | 生产者 | 消费端动作 |
  *  |---|---|---|
  *  | `ChatMessage`（含 `delta`） | 消息域（`Transcript::apply`） | **按字段落地，零回读**：`delta` 追加 / `content` 替换 / `status = removed` 移除 |
- *  | `ChatMessage`（全量） | 同上（首帧发合并后的全量副本） | 就地建立 / 替换该消息 |
+ *  | `ChatMessage`（全量） | 同上（首帧发合并后的全量副本） | **零回读**就地替换该消息 |
+ *  | `ChatMessage`（只有状态） | 同上（`state_frame` 剥掉了正文） | 本地已有 ⇒ 零回读迁移状态；身份未知 ⇒ 回读补基线 |
  *  | `VdfsNode` | 会话运行态（`emit_session_state`） | 就地收敛节点状态，零回读 |
  *  | 缺失 | 全部资源信号（`notify_change`） | 回读 / 重拉（幂等）；对资源删除，回读 `NotFound` 即删除 |
  *
- *  **path 的含义**：变更文件所在的**目录**（消息的落点是 `<sid>/消息` 这个目录），
- *  具体是哪条消息由 **`data.id`** 回答——对象身份在载荷里，不在路径上。
- *  无载荷变更的 `path` 是节点自身地址（那时它是唯一定位符）。
+ *  **path 的含义**：**恒为被变更节点自身的地址**。会话是**容器**，其下是若干**并列的
+ *  集合**（消息 / 子会话 / 记忆 / 工作目录，后续还会有任务列表、请求队列……），因此
+ *  集合项的地址形状统一为 `<sid>/<集合段>/<项 id>`——消息的落点是 `<sid>/message/<mid>`
+ *  这个节点，**身份就是地址末段**（与 `data.id` 是同一个事实，以地址为准）。
+ *  无载荷变更的 `path` 同样是节点自身地址。
+ *
+ *  早先这里发的是**目录**（`<sid>/message`）而把身份交给 `data.id`：那样 `path` 的含义
+ *  随帧类型漂移（资源信号是节点自身、消息是它所在的目录），消费端必须**反推地址**
+ *  才能回读，且这种寻址**推广不到第二类集合**。
  *
  *  ## 历史
  *
@@ -346,7 +353,7 @@ export const VDFS_BUS_RESYNC = 'resync'
  *  （消息词汇本就有它），资源删除由「载荷缺失 + 回读 `NotFound`」表达。
  */
 export interface VdfsChange {
-  /** 变更文件所在的目录（对外展示口径）；无载荷时是节点自身地址 */
+  /** **被变更节点自身**的地址（集合项形状 `<sid>/<集合段>/<项 id>`，身份即末段） */
   path: string
   /** 业务载荷（`ChatMessage` / `VdfsNode` 的 JSON）；缺失 = 无载荷（回读收敛） */
   data?: unknown
@@ -468,8 +475,8 @@ export function isVdfsDraft(node: { path?: string } | null | undefined): boolean
 // 会话在 VDFS 上是「叶子 + 内部区段」：
 //
 //   <根>/session/<sid>             会话叶子（ext = session，点开即聊天工作区）
-//   <根>/session/<sid>/消息        转写列表（`l`）—— 会话的**本体**
-//   <根>/session/<sid>/消息/<mid>  单条消息（ext = message，`r`）
+//   <根>/session/<sid>/message        转写列表（`l`）—— 会话的**本体**
+//   <根>/session/<sid>/message/<mid>  单条消息（ext = message，`r`）
 //
 // 两个段名都由后端 provider 决定，**不是前端的知识**：
 // - 挂载段 `session`  —— 后端 `symbio_core::ids::PLUGIN_SESSION`，是 provider 注册时

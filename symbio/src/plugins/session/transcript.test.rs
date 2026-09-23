@@ -123,7 +123,11 @@ fn delta_for_unknown_id_creates_placeholder() {
     // 首帧发**全量副本**（图里已合并完毕）：消费端零回读即得完整基线
     let delivered = seen_of(&seen);
     assert_eq!(delivered.len(), 1);
-    assert_eq!(delivered[0].path, message_dir_path("s1"), "落点是消息目录");
+    assert_eq!(
+        delivered[0].path,
+        message_path("s1", "ghost"),
+        "落点是那条消息节点自身的地址"
+    );
     let v = delivered[0].data.as_ref().expect("带载荷");
     assert!(v.get("delta").is_none(), "首帧不携带 delta");
     assert_eq!(v["content"], "片段", "载荷是合并后的全量正文");
@@ -148,7 +152,11 @@ fn removed_and_persisted_evict() {
     assert_eq!(tr.frame_no, 3);
     let delivered = seen_of(&seen);
     let last = delivered.last().unwrap();
-    assert_eq!(last.path, message_dir_path("s1"), "落点是消息目录");
+    assert_eq!(
+        last.path,
+        message_path("s1", "b"),
+        "落点是那条消息节点自身的地址"
+    );
     let v = last.data.as_ref().expect("带载荷");
     assert_eq!(
         v["status"], "removed",
@@ -232,10 +240,10 @@ fn message_change_wire_shape_is_path_dir_and_message_payload() {
 
     let d = seen_of(&seen);
     assert_eq!(d.len(), 4);
-    let dir = message_dir_path("s1");
+    let addr = message_path("s1", "a");
     assert!(
-        d.iter().all(|c| c.path == dir),
-        "落点是消息目录；具体是哪条消息由 data.id 回答"
+        d.iter().all(|c| c.path == addr),
+        "落点恒为**被变更节点自身**的地址（同一条消息的四帧共用它）"
     );
     let v0 = d[0].data.as_ref().expect("①带载荷");
     assert_eq!(v0["id"], "a");
@@ -478,7 +486,7 @@ fn clear_and_persisted_flush_the_trailing_run() {
 /// 会话运行态与消息走**同一张订阅表**（ADR-025 的实时面与历史面合流）。
 ///
 /// 挂载点是会话叶子 `<sid>` 本身（`data` = 全量节点视图，与 `stat` 同源），
-/// 与消息的 `<sid>/消息` 目录在同一棵地址树上——消费端一张 `vdfs/watch`
+/// 与消息的 `<sid>/message` 目录在同一棵地址树上——消费端一张 `vdfs/watch`
 /// 覆盖两者。
 #[test]
 fn session_state_change_lands_on_the_session_leaf() {
@@ -526,4 +534,24 @@ fn session_state_frame_does_not_touch_the_message_graph() {
         Some(MessageStatus::Completed),
         "既有节点的状态也不得被运行态改写（状态只有一个来源）"
     );
+}
+
+/// 在途号与存储号是**两个互不相交的号段**，判据是纯号段比较。
+///
+/// 它是存储边界的守卫（`chat_session` 的两条写入路径用它摘号），所以边界值本身
+/// 就是契约：`base - 1` 仍是权威号、`base` 是第一个在途号。
+#[test]
+fn is_inflight_seq_splits_authoritative_and_inflight_ranges() {
+    assert!(!is_inflight_seq(0), "0 是合法的「尚未分配」水位");
+    assert!(
+        !is_inflight_seq(INFLIGHT_SEQ_BASE - 1),
+        "在途号段下界之前必须是权威号（存储号是「第几条消息」量级）"
+    );
+    assert!(is_inflight_seq(INFLIGHT_SEQ_BASE), "下界本身是第一个在途号");
+    assert!(is_inflight_seq(INFLIGHT_SEQ_BASE + 1));
+
+    // 存量会话被泄漏抬高的水位（旧号段 `1 << 40`）必须仍被判为**权威号**：
+    // 它已经躺在存储里，边界再把它当在途号摘掉就等于改写既有消息的顺序锚点。
+    // 这也是 `INFLIGHT_SEQ_BASE` 必须抬到 `1 << 50` 的原因。
+    assert!(!is_inflight_seq(1 << 40), "存量泄漏水位是已落库的权威号");
 }

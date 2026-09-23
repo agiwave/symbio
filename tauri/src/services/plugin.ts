@@ -31,6 +31,27 @@ export const HEAD_SESSION_ID = "session_id";
 export const HEAD_TRACE_ID = "trace_id";
 
 /**
+ * 调用**来源**（诊断键，不是协议键）。
+ *
+ * ## 它解决什么
+ *
+ * `trace_id` 只回答「哪几次请求属于同一条链」，不回答「谁发的、为什么发」。
+ * 于是「一轮会话里出现多次 `vdfs/stat`，正常吗」这类问题**只能从时间戳反推**：
+ * 同一个路由名有好几个调用方（实时面缺基线 / 资源信号分辨删除 / 清单刷新 /
+ * 引导解析……），留痕里却一字不差。反推既慢又容易推错。
+ *
+ * `origin` 把来源与理由变成**随请求走的事实**：`Start routing` 那一行直接给出
+ * 「谁、因为什么」。这是它唯一的用途——后端不读它做任何决策，缺省即 `-`。
+ *
+ * ## 取值是闭集，且由**类型**保证
+ *
+ * 回读类动词（`listVdfs` / `statVdfs` / `readVdfs`）的来源取自
+ * `services/vdfs.ts` 的 `READBACK_REASON`，并作为**必填形参**——漏填是编译错误，
+ * 不是「记得写」。其余路由把来源放进 [`PluginOptions.origin`]。
+ */
+export const HEAD_ORIGIN = "origin";
+
+/**
  * 统一消息结构 (V2.7)
  */
 export interface PluginMessage {
@@ -290,6 +311,11 @@ export interface PluginOptions {
   session_id?: string;
   metadata?: any;
   /**
+   * 调用来源（诊断键，见 [`HEAD_ORIGIN`]）。进 `metadata.origin`，由
+   * `Start routing` 留痕打出。缺省不写这个键——**不给来源时信封形状与从前逐字节一致**。
+   */
+  origin?: string;
+  /**
    * 强制走原生 Tauri IPC 传输（native），绕过出站 http。
    * 控制面操作（切换系统目录、读写本机网关配置等）必须命中本机后端，
    * 不能被当前 outbound 指到远端，否则会出现「切到远端后无法切回」的死锁。
@@ -322,6 +348,12 @@ function buildMetadata(request: SendRouteOptions): Record<string, string> {
 
   if (request.agent_id) {
     metadata[HEAD_AGENT_ID] = request.agent_id;
+  }
+
+  // 来源键**只在给了来源时**才写：没给就与从前的信封逐字节一致，
+  // 免得每条路由都多带一个恒为空的字段（那会让「有没有来源」不可判）。
+  if (request.origin) {
+    metadata[HEAD_ORIGIN] = request.origin;
   }
 
   if (request.metadata) {

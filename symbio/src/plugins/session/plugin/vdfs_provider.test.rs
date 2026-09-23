@@ -558,16 +558,16 @@ async fn new_session_ids_are_distinct() {
     assert_eq!(ids.len(), 32);
 }
 
-// ==================== 转写区段（`<根>/session/<id>/消息`）的三个入口 ====================
+// ==================== 转写区段（`<根>/session/<id>/message`）的三个入口 ====================
 //
 // 消息的**改写 / 截断 / 清空**曾经各有专用路由（`chat/update_message` /
 // `chat/delete_message` / `chat/clear_messages`），2026-09-18 迁到 VDFS：
 //
 // | 操作 | 入口 | 落到 VDFS 变更上的形状 |
 // |---|---|---|
-// | 改写某条 | `write(<id>/消息/<mid>)` | 该消息一条 `updated`（**不带** `delta` ⇒ 消费端回读） |
-// | 删该条及其后 | `action(<id>/消息/<mid>, "truncate")` | 被删的各一条 `deleted` + 回执带被删 id |
-// | 清空历史 | `action(<id>/消息, "clear")` | 每条一条 `deleted` |
+// | 改写某条 | `write(<id>/message/<mid>)` | 该消息一条 `updated`（**不带** `delta` ⇒ 消费端回读） |
+// | 删该条及其后 | `action(<id>/message/<mid>, "truncate")` | 被删的各一条 `deleted` + 回执带被删 id |
+// | 清空历史 | `action(<id>/message, "clear")` | 每条一条 `deleted` |
 //
 // 「变更」这一列 2026-09-23 起重新指回 **VDFS 变更**（ADR-025）：消息域的实时面与
 // 历史面合流为同一条 `vdfs/watch`，`session/stream` 转写流随之退役。旧的三条变更
@@ -611,7 +611,7 @@ async fn transcript_ids(p: &SessionPlugin, id: &str) -> Vec<String> {
 
 /// 在本插件的变更表上挂一个收件盒（收 `VdfsChange`）。
 ///
-/// 收的是 **provider 子树内的相对路径**（`<id>/消息/<mid>`）——门面补挂载前缀是
+/// 收的是 **provider 子树内的相对路径**（`<id>/message/<mid>`）——门面补挂载前缀是
 /// 分发层的事，不在这里发生（见 `VdfsChange` 的文档）。
 ///
 /// 与旧版「订阅 `session/stream`」相比有两点，都是**变简单**：
@@ -661,8 +661,13 @@ async fn truncate_removes_the_target_and_everything_after() {
     let changes = seen.lock().unwrap().clone();
     assert_eq!(changes.len(), 3, "被删的三条各发一条删除帧");
     for (c, expect) in changes.iter().zip(["m1", "m2", "m3"]) {
-        // 落点是消息**目录**，身份在载荷 data.id；删除语义在 data.status = removed
-        assert_eq!(c.path, message_dir_path(&id));
+        // 落点是那条消息**节点自身**的地址（`<sid>/message/<mid>`），身份即末段；
+        // 删除语义在 data.status = removed
+        assert_eq!(
+            c.path,
+            message_path(&id, expect),
+            "落点恒为被变更节点自身的地址"
+        );
         let v = c.data.as_ref().expect("删除帧带 removed 状态载荷");
         assert_eq!(v["id"], expect, "删除**逐条**下发");
         assert_eq!(v["status"], "removed");

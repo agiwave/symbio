@@ -112,11 +112,10 @@ pub const VDFS_UNWATCH: &str = "vdfs/unwatch";
 // ============ Event Bus 插件 ============
 /// event_bus/subscribe — 建立进程内帧订阅连接
 ///
-/// **Rust 侧无调用方**：S22 起 CLI 不再订阅 event_bus（会话实时面只剩 `session/stream`
-/// 一条转写流，`event_bus` 对它只剩「传输层」）。调用方在前端：
+/// 调用方有两处：Rust 侧 `cli/src/client.rs`（S27 起 CLI 又订阅它了——会话实时面
+/// 迁回 `event_bus` 的 `vdfs` 频道），以及前端
 /// `tauri/src/constants/pluginPaths.ts::EVENT_BUS_SUBSCRIBE` + `services/eventBus.ts`
-/// ——拿 `PluginFrame::Data` 收会话帧。
-#[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 pluginPaths.ts + services/eventBus.ts，路由真实存在
+/// ——两边都拿 `PluginFrame::Data` 收会话帧。
 pub const EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 
 // ============ Hook 插件 ============

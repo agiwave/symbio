@@ -8,7 +8,7 @@
 
   - node 有 id（选中态）：聊天工作区 = ChatMainPanel（工作目录的层级浏览不在
     详情页——经机制动作「浏览内部」进入会话同名目录
-    `<id>/工作目录[/<rel>]`，与子会话并列，见 docs/design/vdfs.md）；
+    `<id>/workdir[/<rel>]`，与子会话并列，见 docs/design/vdfs.md）；
   - node 无 id（机制「新建」态 = **草稿节点**，见 `useVdfs.startNew`）：新建会话
     引导——输入区与现有会话完全一致（`ChatComposer` 草稿态：目录/Agent/模型/模式/
     风险等级/心跳均可选，由会话选项栏（后端随节点下发定义）渲染，暂存于机制内部的 metadata 缓冲，

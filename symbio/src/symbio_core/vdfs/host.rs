@@ -86,7 +86,7 @@ pub fn host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn InvokeRequest>> {
 ///
 /// 广播源是整棵子树共用的（[`notify_change`] 不按路径分流）。若每个路径各起
 /// 一个任务，两条**重叠**的订阅（会话清单订 `<根>/session`、转写订
-/// `<根>/session/<id>/消息`）就会把同一条变更投到总线上两次——前端收到重复帧，
+/// `<根>/session/<id>/message`）就会把同一条变更投到总线上两次——前端收到重复帧，
 /// 流式文本叠字。本表把投递收敛成**恰好一次**：每条变更只投给与之相关的最具体
 /// 的那条订阅，与订阅的条数、重叠方式都无关。
 ///
@@ -237,17 +237,16 @@ fn hub_of(kind: &str) -> Arc<ChangeSubscriptions> {
 ///
 /// 由集中式存储实现（`crate::providers::vdfs_service` 的三种拓扑）与目录自管型
 /// provider（agent 目录）在写 / 删成功后调用。
+///
+/// **它只发无载荷变更**（`VdfsChange::bare`）——绝大多数资源信号长这样。带业务
+/// 载荷的变更（消息帧 / 节点视图）由**生产者直接经它已持有的订阅表**投递：
+/// `ChangeSubscriptions::notify(&VdfsChange::with_data(path, data))`，见
+/// `session::transcript::Transcript::emit`。曾有过一个对称的
+/// `notify_change_with_data` 门面，但**没有任何生产者**（带载荷的只有会话域，
+/// 而它拿的是订阅表本身），S27 收口时随 R-001 一并删除——留一个没人调用的
+/// 「能力」比没有更糟：文档会照着它写，读者会以为存在第二条投递路径。
 pub fn notify_change(kind: &str, path: &str) {
     hub_of(kind).notify(&VdfsChange::bare(path));
-}
-
-/// 广播一次**带业务载荷**的变更：`data` 是该路径当前的业务数据
-/// （消息帧 / 节点视图，由生产者按自己的词汇序列化——见 [`VdfsChange::with_data`]）。
-///
-/// 与 [`notify_change`] 分开而不是合并成一条，是为了让「绝大多数变更不携带载荷」
-/// 这件事在调用点上一眼可见：带载荷是一个**显式动作**，不是默认行为。
-pub fn notify_change_with_data(kind: &str, path: &str, data: impl serde::Serialize) {
-    hub_of(kind).notify(&VdfsChange::with_data(path, data));
 }
 
 /// 订阅某挂载点的变更（`VdfsProvider::watch` 的实现体）；变化发生时调用 `sink`。
@@ -359,14 +358,14 @@ mod tests {
             );
             let n = narrow.clone();
             subs.watch(
-                "abc/消息",
+                "abc/message",
                 Arc::new(move |c: VdfsChange| n.lock().unwrap().push(c.path)),
             );
         }
-        subs.notify(&VdfsChange::bare("abc/消息/m1"));
+        subs.notify(&VdfsChange::bare("abc/message/m1"));
         subs.notify(&VdfsChange::bare("xyz"));
 
-        assert_eq!(narrow.lock().unwrap().as_slice(), ["abc/消息/m1"]);
+        assert_eq!(narrow.lock().unwrap().as_slice(), ["abc/message/m1"]);
         assert_eq!(broad.lock().unwrap().as_slice(), ["xyz"]);
     }
 

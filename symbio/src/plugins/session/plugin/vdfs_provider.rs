@@ -167,11 +167,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 // 只需存在性校验，不必取全量转写。
                 None => {
                     self.session_of(id).await?;
-                    Ok(vdfs::VdfsNode::dir(
-                        SEG_MESSAGES,
-                        SEG_MESSAGES,
-                        vdfs::VdfsAccess::LIST,
-                    ))
+                    Ok(messages_dir_node())
                 }
                 Some(mid) => Ok(message_node(message_of(
                     &self.transcript_of(id).await?,
@@ -180,11 +176,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
             },
             VdfsSessionPath::SubSessions(id) => {
                 self.session_of(id).await?;
-                Ok(vdfs::VdfsNode::dir(
-                    super::super::workdir::SEG_SUB_SESSIONS,
-                    super::super::workdir::SEG_SUB_SESSIONS,
-                    vdfs::VdfsAccess::LIST,
-                ))
+                Ok(super::super::workdir::sub_sessions_dir_node())
             }
             VdfsSessionPath::SubSession { id, sub } => {
                 let session = self.sub_session_of(id, sub).await?;
@@ -196,11 +188,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
             VdfsSessionPath::Workdir { id, rel } => {
                 let workdir = self.workdir_of(id).await?;
                 if rel.is_empty() {
-                    return Ok(vdfs::VdfsNode::dir(
-                        super::super::workdir::SEG_WORKDIR,
-                        super::super::workdir::SEG_WORKDIR,
-                        vdfs::VdfsAccess::LIST,
-                    ));
+                    return Ok(super::super::workdir::workdir_dir_node());
                 }
                 super::super::workdir::read_node(&workdir, rel)
                     .await
@@ -269,7 +257,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
         }
     }
 
-    /// 写入：`create` → 新建会话；`<id>/消息/<mid>` → 改写该条消息；否则 → 合并会话
+    /// 写入：`create` → 新建会话；`<id>/message/<mid>` → 改写该条消息；否则 → 合并会话
     /// metadata（`session/update` 语义）。
     ///
     /// 覆盖分支的浅合并与 `session/update` 路由**共用**
@@ -278,11 +266,11 @@ impl vdfs::VdfsProvider for SessionPlugin {
     ///
     /// ## 消息节点可写，但**转写列表不可写**（这条区分是刻意的）
     ///
-    /// - `write(<id>/消息/<mid>)` —— 改**既有**消息的字段。它不是一次发言：不触发
+    /// - `write(<id>/message/<mid>)` —— 改**既有**消息的字段。它不是一次发言：不触发
     ///   任何编排，只是对既有节点的一次存储改写，与会话 metadata 的写入同类
     ///   （两者都只是"把内容存到那个地址"）。地址语义在这里完全成立：消息节点的
     ///   内容就是这条消息。
-    /// - `write(<id>/消息)` —— **拒绝**。往列表里放一条新消息 = 发言 = 一次**动作**
+    /// - `write(<id>/message)` —— **拒绝**。往列表里放一条新消息 = 发言 = 一次**动作**
     ///   （触发一整轮编排：模型调用 → 工具执行 → 流式落库），不是一次写入。
     ///   入口仍然只有聊天协议一处。
     /// - `create` 意图在消息路径上**一律拒绝**：新建消息就是发言，静默接受会把
@@ -590,8 +578,8 @@ impl vdfs::VdfsProvider for SessionPlugin {
     ///
     /// | 路径 | 动作 | 语义 | 变更 | `data` |
     /// |---|---|---|---|---|
-    /// | `<id>/消息/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 逐条 `deleted` | 被删 id 列表 |
-    /// | `<id>/消息` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 逐条 `deleted` | 无 |
+    /// | `<id>/message/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 逐条 `deleted` | 被删 id 列表 |
+    /// | `<id>/message` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 逐条 `deleted` | 无 |
     ///
     /// ## 为什么是**逐条**下发，而不是「列表目录一条 `deleted`」
     ///
@@ -600,7 +588,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
     /// 更便宜的形态。**权威的被删 id 列表走回执 `data`**：调用方据此幂等对齐，
     /// 不依赖任何推送。
     ///
-    /// 变更落在 VDFS 上（`<sid>/消息/<mid>` 的 `deleted`），与消息流式
+    /// 变更落在 VDFS 上（`<sid>/message/<mid>` 的 `deleted`），与消息流式
     /// （`updated` + `delta`）、会话运行态（`<sid>` 的 `updated`）**同一条通道**
     /// ——ADR-025：`session/stream` 转写流已退役，实时面与历史面是同一条
     /// `vdfs/watch`。
@@ -668,7 +656,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
     /// ## 路径不在这里收敛（容易看错，特此写明）
     ///
     /// 表里的路径与投递出的路径都是 **provider 根口径**（与 `list` / `stat`
-    /// 同一坐标系：`<id>`、`<id>/消息/<mid>`），本方法**原样登记**、不做任何
+    /// 同一坐标系：`<id>`、`<id>/message/<mid>`），本方法**原样登记**、不做任何
     /// 前缀处理。
     ///
     /// 看起来「应该」把它收敛成相对被订阅 `path` 的路径，但那样反而会错：
@@ -678,8 +666,8 @@ impl vdfs::VdfsProvider for SessionPlugin {
     /// 容器补上挂载名后才是树内全路径：
     ///
     /// ```text
-    /// watch("session/abc/消息") → dir = "session", rel = "abc/消息"
-    /// provider 报 "abc/消息/m1" → 容器补成 "session/abc/消息/m1"  ✓
+    /// watch("session/abc/message") → dir = "session", rel = "abc/message"
+    /// provider 报 "abc/message/m1" → 容器补成 "session/abc/message/m1"  ✓
     /// 若这里先剥成 "m1"        → 容器补成 "session/m1"          ✗
     /// ```
     ///
@@ -754,7 +742,7 @@ impl SessionPlugin {
         uuid::Uuid::new_v4().to_string()
     }
 
-    /// 会话转写（**含在途消息**）——`<根>/session/<id>/消息` 的唯一数据源。
+    /// 会话转写（**含在途消息**）——`<根>/session/<id>/message` 的唯一数据源。
     ///
     /// 落库转写 ∪ 本轮在途缓冲。之所以要并上后者：流式期间消息**还没落库**
     /// （`persist_messages` 只在每轮结束时写盘），只读存储的话列表在流式期间
@@ -779,7 +767,7 @@ impl SessionPlugin {
 
     // ==================== 消息的三个变更操作（VDFS 入口的实现） ====================
     //
-    // 这三个方法是 `write(<id>/消息/<mid>)` / `action(truncate)` /
+    // 这三个方法是 `write(<id>/message/<mid>)` / `action(truncate)` /
     // `action(clear)` 的**唯一实现**。它们曾经各有一个专用路由
     // （`chat/update_message` / `chat/delete_message` / `chat/clear_messages`），
     // 逻辑就在那三个 invoke 里——迁到 VDFS 时整体搬过来，不是重写一遍：
@@ -788,7 +776,7 @@ impl SessionPlugin {
     // 三者的**变更发射都在这里**（不留给调用方）：漏发任何一条，VDFS 视图都会
     // 残留一个已不存在的节点且永不纠正。
 
-    /// 改写单条消息（`write(<id>/消息/<mid>)` 的实现）。
+    /// 改写单条消息（`write(<id>/message/<mid>)` 的实现）。
     ///
     /// 按**地址**定位（`mid` 即消息 id），只覆盖补丁里**提供**的字段
     /// （content / status / error / meta 等），未提供的保持不变。
@@ -893,7 +881,7 @@ impl SessionPlugin {
         Ok(updated)
     }
 
-    /// 从某条消息起截断（`action(<id>/消息/<mid>, "truncate")` 的实现）。
+    /// 从某条消息起截断（`action(<id>/message/<mid>, "truncate")` 的实现）。
     ///
     /// 消息列表已按时间 / 顺序排好序，因此只需按列表顺序定位目标，然后把
     /// 「它及其之后的所有消息」整段 `drain` 掉——无需任何 `parent_id` 级联逻辑。
@@ -933,7 +921,7 @@ impl SessionPlugin {
         Ok(deleted_ids)
     }
 
-    /// 清空会话消息（`action(<id>/消息, "clear")` 的实现）。
+    /// 清空会话消息（`action(<id>/message, "clear")` 的实现）。
     ///
     /// 与 `delete(<id>)`（删除整个会话）不同：这里只把 `session.messages` 整体替换为
     /// 空，会话本体 / 元数据 / 工作目录 / 标题继续存在。UI 的「清空历史」走此路径。

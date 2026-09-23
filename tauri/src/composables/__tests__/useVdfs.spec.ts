@@ -4,12 +4,20 @@
  *
  * 锁定的是「错了也不报错、只是静默不收敛 / 静默重拉」的那类问题：
  *
- * 1. **影响判定**：变更路径落在当前目录自身 / 祖先 / 子树内才重拉——收窄错了
- *    表现为「邻目录改一下，本页刷一次」；放宽错了表现为「本页的东西变了却不更新」。
- * 2. **词汇表是闭集且没有特殊分支**：变更只有 `created` / `updated` / `deleted`
- *    三个取值、且**不带载荷**（见 `schemas/vdfs.VdfsChange`），因此一律走同一条
- *    重拉路径。曾经 `appended` 有一条「就地拼接、不重拉」的快速路径（防 O(n²)
- *    流量），而它没有任何生产者——现在**任何取值都不该被静默吞掉**。
+ * 1. **影响判定**：变更路径落在当前目录自身 / **直接子项** / 祖先才重拉——收窄
+ *    错了表现为「本页的东西变了却不更新」；放宽错了表现为「邻目录改一下，本页
+ *    刷一次」，而「任意后代都算命中」更糟：会话转写逐帧变更在 `<sid>/message/<mid>`
+ *    这一层，会让每一帧都挂一次防抖刷新，一次会话几十次白拉的 `vdfs/list`。
+ * 2. **带正文的载荷就地落地、不重拉**：`delta` 追加、`content` 整条替换——两者
+ *    都只改一个节点的**内容**，不改变任何节点的存在与顺序，列表也不内联正文。
+ *    载荷自给自足（S27 收口：`path` 恒为被变更节点自身的地址），落到通用重拉上
+ *    正好抵消载荷存在的意义。
+ *    ⚠️ 这条豁免的前提是**该节点已经在列表里**——新建出来的那一项首帧就带正文，
+ *    若一并豁免，新条目会**永远不出现在中栏**。两条用例分别钉住这两个方向
+ *    （已知项零重拉 / 未知直接子项必重拉），它们是同一条规则的两半。
+ * 3. **其余变更一律重拉收敛**：信封没有操作枚举，资源信号无载荷 ⇒ 回读 / 重拉。
+ *    曾经 `appended` 有一条「就地拼接、不重拉」的快速路径，而它没有任何生产者
+ *    ——现在**任何取值都不该被静默吞掉**。
  *
  * 一个已删除的场景留作记录：从前还有「刷新代际守卫」（在途 `read` 的旧快照不得
  * 覆盖已应用的增量）。它随 `delta` 一起消失——没有本地增量，就没有可被覆盖的东西。
@@ -54,12 +62,14 @@ import {
   type VdfsNode,
 } from '@/schemas/vdfs'
 import { setVdfsRoot } from '@/schemas/vdfsRoot'
+// 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
+import { READBACK_REASON } from '@/services/readback'
 
 // 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
 setVdfsRoot('@vfs')
 
 /** 消息列表地址（被测的绑定地址） */
-const MSG_DIR = `@vfs/session/abc/消息`
+const MSG_DIR = `@vfs/session/abc/message`
 
 /** 一个 `ext = message` 的列表项（只有 `r`，正文在内容里） */
 function msgNode(id: string, title = id): VdfsNode {
@@ -75,6 +85,15 @@ function msgNode(id: string, title = id): VdfsNode {
     type: 'text',
     seq: 1,
   }
+}
+
+/** 让目录返回指定的条目（缺省空列表由 `beforeEach` 给） */
+function listReturns(items: VdfsNode[]) {
+  mocks.listVdfs.mockResolvedValue({
+    path: MSG_DIR,
+    node: { ...msgNode('__dir'), access: 'l', ext: undefined },
+    items,
+  })
 }
 
 /** 挂一个宿主组件，让 useVdfs 有组件实例（onBeforeUnmount / watch 需要） */
@@ -181,11 +200,12 @@ describe('useVdfs 消费 VDFS 变更（信封没有操作枚举、非 delta 载�
     }
   })
 
-  it('带 delta 的载荷帧**不**触发重拉（就地追加语义，防 O(n²) 刷新）', async () => {
+  it('带 delta 的载荷帧**不**触发重拉（该项已在列表里 ⇒ 就地追加语义，防 O(n²) 刷新）', async () => {
     // 流式正文的每一帧都带 `data.delta`——若它们落到通用重拉上，等于给每一帧
     // 挂一次防抖刷新，正好抵消增量帧存在的意义。
     vi.useFakeTimers()
     try {
+      listReturns([msgNode('m1')])
       const { wrapper } = mountHost(MSG_DIR)
       await settle()
       const listCalls = mocks.listVdfs.mock.calls.length
@@ -200,9 +220,13 @@ describe('useVdfs 消费 VDFS 变更（信封没有操作枚举、非 delta 载�
     }
   })
 
-  it('非 delta 载荷（全量帧 / 节点视图）走通用重拉', async () => {
+  it('带全量正文的载荷帧**不**触发重拉（该项已在列表里 ⇒ 载荷自给自足，就地整条替换）', async () => {
+    // 首帧发的就是图里合并后的全量副本——它与 `delta` 一样只改一个节点的**内容**，
+    // 不改变任何节点的存在与顺序，列表也不内联正文。让它落到通用重拉上，等于
+    // 每收到一条消息的全量帧就白拉一次目录。
     vi.useFakeTimers()
     try {
+      listReturns([msgNode('m1')])
       const { wrapper } = mountHost(MSG_DIR)
       await settle()
       const listCalls = mocks.listVdfs.mock.calls.length
@@ -210,10 +234,75 @@ describe('useVdfs 消费 VDFS 变更（信封没有操作枚举、非 delta 载�
       emitChange({ path: `${MSG_DIR}/m1`, data: { id: 'm1', content: '全量' } })
       await vi.advanceTimersByTimeAsync(500)
 
+      expect(mocks.listVdfs.mock.calls.length, '全量帧不得触发目录重拉').toBe(listCalls)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('当前目录里**新出现**的子项即使首帧就带正文也必须重拉（否则新条目永不出现）', async () => {
+    // 这是上面两条豁免的边界，也是它们的代价所在：新建出来的一项，首帧就是带正文的
+    // （写入即带内容 / 流式首帧即增量），而它**还不在列表里**。若一并按「带正文 ⇒
+    // 不重拉」处理，中栏会一直缺这一条，直到某次无关的刷新顺手把它带出来。
+    //
+    // 判据是「列表里有没有这条路径」，与帧里带的是 `delta` 还是 `content` 无关
+    // ——两个方向各钉一条，才是这条规则的完整形状。
+    vi.useFakeTimers()
+    try {
+      const { wrapper } = mountHost(MSG_DIR)
+      await settle()
+      const listCalls = mocks.listVdfs.mock.calls.length
+
+      emitChange({ path: `${MSG_DIR}/m9`, data: { id: 'm9', delta: '新消息的第一段' } })
+      await vi.advanceTimersByTimeAsync(500)
+
       expect(
         mocks.listVdfs.mock.calls.length,
-        '不带 delta 的载荷帧必须触发重拉',
+        '本目录还不认识的直接子项 ⇒ 条目集合变了 ⇒ 必须重拉',
       ).toBeGreaterThan(listCalls)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('新子项进入列表后，它的后续帧不再重拉（代价是「每新增一条一次」，不是「每帧一次」）', async () => {
+    // 上一条若退化成「带正文的子项帧都重拉」，一次流式会话就是几十次白拉。这里钉住
+    // 收敛：一旦该项出现在列表里，后续增量帧立刻回到零重拉。
+    vi.useFakeTimers()
+    try {
+      listReturns([msgNode('m9')])
+      const { wrapper } = mountHost(MSG_DIR)
+      await settle()
+      const listCalls = mocks.listVdfs.mock.calls.length
+
+      emitChange({ path: `${MSG_DIR}/m9`, data: { id: 'm9', delta: '第二段' } })
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(mocks.listVdfs.mock.calls.length, '已在列表里的项 ⇒ 增量帧零重拉').toBe(listCalls)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('孙辈的变更**不**重拉当前目录（affects 只认自身 / 直接子项 / 祖先）', async () => {
+    // 会话转写是在 `<sid>/message/<mid>` 这一层逐帧变更的，而浏览器常停在
+    // `<根>/session` 或 `<根>`——「任意后代都算命中」会让每一条消息帧都挂一次
+    // 防抖刷新，一次会话下来就是几十次白跑的 `vdfs/list`。
+    vi.useFakeTimers()
+    try {
+      // 绑到会话清单目录，当前目录 = 它自身（mock 的 list 无子目录）
+      const { wrapper } = mountHost('@vfs/session')
+      await settle()
+      const listCalls = mocks.listVdfs.mock.calls.length
+
+      // 孙辈（三层之下）的**资源信号**：既不改变本目录的条目集合，也不在直接子项里
+      emitChange({ path: `@vfs/session/abc/message/m1` })
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(mocks.listVdfs.mock.calls.length, '孙辈变更不得重拉本目录').toBe(listCalls)
       wrapper.unmount()
     } finally {
       vi.useRealTimers()
@@ -227,14 +316,6 @@ describe('useVdfs 有界列表（中栏只取最新一页 + 加载更早）', ()
     return Array.from({ length: n }, (_, i) => msgNode('m' + (from + i)))
   }
 
-  function listReturns(items: VdfsNode[]) {
-    mocks.listVdfs.mockResolvedValue({
-      path: MSG_DIR,
-      node: { ...msgNode('__dir'), access: 'l', ext: undefined },
-      items,
-    })
-  }
-
   it('首屏只取最新一页（带 limit）', async () => {
     listReturns(page(0, 100))
     const { api, wrapper } = mountHost(MSG_DIR)
@@ -243,7 +324,9 @@ describe('useVdfs 有界列表（中栏只取最新一页 + 加载更早）', ()
     expect(api.items.value).toHaveLength(100)
     expect(api.hasMore.value, '满页 ⇒ 可能还有更早的').toBe(true)
     // 目录刷新那一次带窗口参数；左栏导航那次不带（导航项本来就少）
-    expect(mocks.listVdfs).toHaveBeenLastCalledWith(MSG_DIR, { limit: 100 })
+    expect(mocks.listVdfs).toHaveBeenLastCalledWith(READBACK_REASON.VDFS_BROWSER, MSG_DIR, {
+      limit: 100,
+    })
 
     wrapper.unmount()
   })
@@ -268,7 +351,7 @@ describe('useVdfs 有界列表（中栏只取最新一页 + 加载更早）', ()
     await api.loadMore()
     await settle()
 
-    expect(mocks.listVdfs).toHaveBeenLastCalledWith(MSG_DIR, {
+    expect(mocks.listVdfs).toHaveBeenLastCalledWith(READBACK_REASON.VDFS_BROWSER, MSG_DIR, {
       limit: 100,
       before: 'm99',
     })

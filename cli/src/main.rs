@@ -148,9 +148,10 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
         eprintln!();
     }
 
-    // 会话运行态走 `vdfs` 频道：落点 = 会话叶子 `<根>/session/<sid>`，
-    // `data` = 全量节点视图（与 stat 同源构造）；缺失 ⇒ 回读 stat 分辨删除。
+    // 会话运行态走 `vdfs` 频道：落点 = 会话节点自身 `<根>/session/<sid>`，
+    // `data` = 全量节点视图（与 stat 同源构造）；缺失 ⇒ 回读 stat 分辨。
     // 归属从 `path` 剥出——订阅一次覆盖所有会话，切会话不必重连。
+    // 守护模式要观察**全部**会话，故 `scope = None`（不按会话过滤）。
     //
     // 各会话上一次见到的运行态：只在**迁移**上报。运行态帧也可能因告警等原因
     // 重复下发同一份视图，逐帧报会把一次心跳刷成十几行。
@@ -162,7 +163,7 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
         let Frame::Change(change) = frame else {
             continue;
         };
-        let Some((sid, node)) = client.session_state_of_change(&change).await else {
+        let Some((sid, node)) = client.session_state_of_change(&change, None).await else {
             continue;
         };
         if seen.get(&sid) == Some(&node.status) {

@@ -1,4 +1,4 @@
-//! 会话工作目录的 VDFS 场景实现（`<根>/session/<id>/工作目录/<rel>`）
+//! 会话工作目录的 VDFS 场景实现（`<根>/session/<id>/workdir/<rel>`）
 //!
 //! 本模块把**会话工作目录**的文件系统层级表达为 VDFS 节点：目录 → 只读
 //! （`l`，可下钻），文件 → 可读写（`rw`）。列 / 读 / 写 / 删四个函数是
@@ -29,10 +29,36 @@ pub const TREE_KIND: &str = "dir";
 /// 子类别的项级图标分发键（前端 `registry/vdfsIcons` 按 `config_type` 取图）
 const ATTR_CONFIG_TYPE: &str = "config_type";
 
-/// 会话内部：子会话清单的路径段（同时是展示名）
-pub const SEG_SUB_SESSIONS: &str = "子会话";
-/// 会话内部：工作目录树的路径段（同时是展示名）
-pub const SEG_WORKDIR: &str = "工作目录";
+/// 会话内部：子会话清单的**路径段**（ASCII，进地址）
+pub const SEG_SUB_SESSIONS: &str = "subsession";
+/// 会话内部：子会话清单的**展示名**（`title`）。**只影响 UI**，不参与寻址。
+pub const TITLE_SUB_SESSIONS: &str = "子会话";
+/// 会话内部：工作目录树的**路径段**（ASCII，进地址）
+pub const SEG_WORKDIR: &str = "workdir";
+/// 会话内部：工作目录树的**展示名**（`title`）。**只影响 UI**，不参与寻址。
+pub const TITLE_WORKDIR: &str = "工作目录";
+
+/// 子会话清单目录节点（`list` 与 `stat` 共用同一份形状）。
+///
+/// **路径段一律 ASCII，中文只出现在 `title` 上**：地址要能安全地进 URL、命令行、
+/// 日志与文件名，不受编码 / 输入法影响。段名与展示名的配对因此与段本身同处——
+/// 新增一类集合不必在两处同步改字符串。
+pub fn sub_sessions_dir_node() -> crate::symbio_core::vdfs::VdfsNode {
+    crate::symbio_core::vdfs::VdfsNode::dir(
+        SEG_SUB_SESSIONS,
+        TITLE_SUB_SESSIONS,
+        crate::symbio_core::vdfs::VdfsAccess::LIST,
+    )
+}
+
+/// 工作目录树根节点（`list` 与 `stat` 共用同一份形状）。理由同上。
+pub fn workdir_dir_node() -> crate::symbio_core::vdfs::VdfsNode {
+    crate::symbio_core::vdfs::VdfsNode::dir(
+        SEG_WORKDIR,
+        TITLE_WORKDIR,
+        crate::symbio_core::vdfs::VdfsAccess::LIST,
+    )
+}
 
 /// 从会话元数据取工作目录（缺失/为空 = 该会话无 tree 数据）
 pub fn workdir_of(session: &Session) -> Option<String> {
@@ -451,7 +477,7 @@ const VOLATILE_DIRS: &[&str] = &[
 
 /// 把目录树事件翻译为 VDFS 变更并投递进订阅表（每个关注该 workdir 的容器一条）。
 ///
-/// 路径是 VDFS 口径：`<容器 id>/工作目录[/<相对路径>]`——与 VDFS provider
+/// 路径是 VDFS 口径：`<容器 id>/workdir[/<相对路径>]`——与 VDFS provider
 /// 的路径解析严格同一套（见 `SessionPlugin` 的 `parse_session_path`）。
 ///
 /// 为什么要按容器逐条枚举：多个会话可以共享同一个工作目录，订阅表按路径前缀

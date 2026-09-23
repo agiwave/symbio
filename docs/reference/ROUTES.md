@@ -114,10 +114,11 @@
 
 > **实时面已迁回，迁移已落地**（ADR-025，2026-09-23；S27 收口）。`session/stream` 路由
 > **已删除**（上表不再列它），实时面走 `event_bus` 的 `vdfs` 频道：信封 `{path, data?}`
-> （操作枚举整个退役——消息的落点是**目录** `<sid>/消息`，`data` 就是那条 `ChatMessage`，
-> 身份在 `data.id`；运行态落在会话叶子 `<sid>`，`data` = 全量节点视图；资源信号无载荷，
-> 回读收敛）。实时面与历史面**同一条**
-> `vdfs/watch`，不再分家：消息是 `<根>/session/<id>/消息` 这个**文件夹**里的**文件**，
+> （操作枚举整个退役——**`path` 恒为被变更节点自身的地址**，会话是容器、其下是若干并列
+> 的集合，集合项形状统一为 `<sid>/<集合段>/<项 id>`：消息的落点是 `<sid>/message/<mid>`，
+> `data` 就是那条 `ChatMessage`，**身份在地址末段**；运行态落在会话节点 `<sid>`，
+> `data` = 全量节点视图；资源信号无载荷，回读收敛）。实时面与历史面**同一条**
+> `vdfs/watch`，不再分家：消息是 `<根>/session/<id>/message` 这个**文件夹**里的**文件**，
 > 流式输出是该文件内容的增长。
 >
 > 本条此前写的是「实时面走 `session/stream`，历史面走 VDFS」，给出的两条理由是
@@ -201,9 +202,9 @@
 > | 新建 / 打开**具名**会话（id 由调用方给） | `vdfs/write(<根>/session/<id>, { create: true })`——不存在则就地创建，已存在则浅合并 metadata |
 > | **删除会话** | `vdfs/delete(<根>/session/<id>)` |
 > | **改 metadata / 标题** | `vdfs/write(<根>/session/<id>)` |
-> | **改写某条消息** | `vdfs/write(<根>/session/<id>/消息/<mid>)` |
-> | **删该条及其后** | `vdfs/action(…/消息/<mid>, "truncate")` |
-> | **清空历史** | `vdfs/action(…/消息, "clear")` |
+> | **改写某条消息** | `vdfs/write(<根>/session/<id>/message/<mid>)` |
+> | **删该条及其后** | `vdfs/action(…/message/<mid>, "truncate")` |
+> | **清空历史** | `vdfs/action(…/message, "clear")` |
 >
 > `session/clear` **已退役**（与 `vdfs/delete` 共用 `delete_session_internal`）；
 > `session/update` **已退役**（2026-09-23）——CLI 的「客户端指定会话 id」由

@@ -279,7 +279,7 @@ function onListScroll(e: Event) {
 /**
  * 详情「浏览内部」/ open-container：钻入容器目录的数据地址
  * （emit `open`）。会话节点本身是**叶子**（点击 = 聊天详情，语义不变）；
- * 其内部结构挂在**同名目录路径**之下（`<id>/子会话`、`<id>/工作目录`）。
+ * 其内部结构挂在**同名目录路径**之下（`<id>/subsession`、`<id>/workdir`）。
  */
 function browseInto() {
   const n = selectedNode.value

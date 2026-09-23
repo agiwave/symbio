@@ -14,25 +14,37 @@ HTTP/SSE（LLM）、stdio/JSON-RPC（MCP）、磁盘（homedir）。
 | `helpers.mjs` | 夹具与断言库：临时 homedir、mock 进程编排、CLI 运行器、`defineCase`、共享不变量断言 |
 | `cases/*.mjs` | **测试用例（每用例一文件）** |
 | `cases/_selfrun.mjs` | 用例自执行引导（`_` 前缀 = 共享材料，不当作用例） |
-| `run-tests.mjs` | runner：发现式加载 `cases/`，每用例独立子进程运行 |
+| `run-tests.mjs` | runner：发现式加载 `cases/`，每用例独立子进程运行；开跑前确保被测二进制对应当前源码 |
 
 ## 运行
 
 ```bash
-cd cli && cargo build --release       # 被测系统（见下方 ⚠️，改了源码就必须自己重建）
-node e2e/run-tests.mjs                # 全量
+node e2e/run-tests.mjs                # 全量（被测二进制由机制保证最新，见下）
 node e2e/run-tests.mjs t2             # 按名称过滤
 node e2e/cases/t5-llm-http-error.mjs  # 单独跑一个用例（文件可直接执行）
 E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 ```
 
-> ⚠️ **「门控会自动检测/构建」只在你还没构建过时成立**。`40-e2e.mjs` 的构建条件是
-> `when: () => ctx.ci || !cliBinaryExists(repoRoot)`——二进制**已存在就整步跳过**（汇总里
-> 显示 `⊘ 已有 release 二进制`）。所以**改了 Rust / CLI 源码之后必须自己重跑上面第一条**，
-> 否则 e2e 会静默地测**过期产物**，症状是「断言失败的方式与眼前的源码矛盾」。
-> 构建必须在 `cli/` 下跑（根目录没有 `Cargo.toml`；`cli/.cargo/config.toml` 把 target-dir
-> 指向 `../symbio/target`，二进制落在 `symbio/target/release/symbio-cli.exe`）。
-> 用 `node scripts/gate.mjs --ci` 可强制重建。
+**被测二进制不需要你记得重建**：`scripts/cli-binary.mjs` 是这条知识的唯一真相
+（门禁与 e2e 共用）。判据是**内容指纹**——`cli/src` + `symbio/src` 的全部源码与
+两个 crate 的清单算一个 sha256，构建成功后写成构建戳（`.symbio-cli.build-stamp`，
+与二进制同目录）。使用前比对：戳一致就直接用；不一致就 `cargo build --release`
+（cargo 自己判增量，源码没真变时 0.3 s 结束）再写戳。
+
+为什么不能用「文件在不在」当判据：曾经就是这么写的，于是本机那份过期 exe 被一直
+用下去，e2e 的失败形态与**眼前的源码直接矛盾**（源码里明明有的字段，运行时是
+`undefined`），排查方向被引到源码上——而真因只是产物旧。二进制是构建产物的函数，
+产物比输入旧就是不可信的。
+
+构建必须在 `cli/` 下跑（仓库根没有 `Cargo.toml`；`cli/.cargo/config.toml` 会把
+target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/symbio-cli.exe`）。
+机制按「两个候选取最新的那份」解析，所以两种布局都对。手工 `cargo build --release`
+也可以，代价只是下次使用时会多跑一次 cargo（戳没更新）。
+
+`E2E_CLI_EXE=<path>` 指向外部二进制会**绕过**新鲜度判定——外部产物无法用本仓源码
+指纹衡量，这是知情选择。
+
+诊断当前状态：`node scripts/cli-binary.mjs --check`（不构建，只判；不可信则退出码 1）。
 
 每个用例独立临时 homedir + 独立 mock 实例（端口自动分配，18080 起），
 进程结束自动清理；runner 层面每个用例再套一层独立子进程，互不拖垮。
@@ -71,11 +83,12 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 | T6 | `t6-mcp-tool-error` | MCP 工具 JSON-RPC 错误：错误结果回灌，会话照常收敛（auto 模式） |
 | T7 | `t7-abort-convergence` | 中止收敛：REPL 长驻 + gateway HTTP invoke 中止 → `vdfs/stat` 读 `outcome=aborted`，节点终态化 |
 | T8 | `t8-compression` | 压缩水位触发：`max_context_tokens` 调小 → 摘要请求 → 快照落库 → 历史归并 |
-| T9 | `t9-ws-stream` | gateway WS `session/stream` 帧序：首帧（身份 + 首段正文）+ `delta` 增量 + 终态帧；增量拼接 == 完整正文 |
-| T10 | `t10-node-protocol` | 节点状态机全景：Turn/Reasoning/Text/ToolCall 三态协议（`delta` 必先有身份帧、终态收敛、无孤儿） |
-| T11 | `t11-compression-node` | 压缩节点协议：`msg_type=compression` 消息节点、两态流（终态带结果正文）、位置契约、失败 `failure_kind` |
+| T9 | `t9-ws-stream` | gateway WS 实时面（`event_bus` 的 `vdfs` 频道 + `vdfs/watch` 登记）：变更非空（两步订阅缺一不可）、首帧全量 + 窄 `delta`、增量拼接 == 完整正文、同一节点 `seq` 逐帧相同、会话收尾帧到达晚于全部消息帧 |
+| T10 | `t10-node-protocol` | 节点状态机全景：Turn/Reasoning/Text/ToolCall 三态协议（`delta` 必先有身份帧、终态收敛、无孤儿）；先后按**到达序**判（单一 FIFO） |
+| T11 | `t11-compression-node` | 压缩节点协议：`msg_type=compression` 消息节点、两态流（终态带结果正文）、位置契约（早于所属 Turn）、失败 `failure_kind`、重写 `removed` + 快照收敛 |
 | T12 | `t12-content-type` | LLM POST 必须带 `Content-Type: application/json`（`&[u8]` + `.body()` 不会自动补） |
 | T13 | `t13-session-options` | 会话选项 schema 化：定义挂 `new_types[].schema` 与清单项 `schema`（逐字节相同）、值随节点 `metadata` 回读、`vdfs/write` 浅合并落库、`stat` 不带定义、重启后仍在 |
+| T14 | `t14-no-redundant-vdfs` | **会话期间零回读**：一轮会话的路由留痕里不得出现 `vdfs/stat` / `vdfs/read` / `vdfs/list`——变更必须自带载荷（节点视图 / 正文 / 目录清单） |
 
 每个用例共享的不变量断言（`assertTranscriptInvariants`）：
 
@@ -88,7 +101,7 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 e2e 是 `scripts/gate.mjs` 的一个阶段（`scripts/gate.d/40-e2e.mjs`）：
 
 ```bash
-node scripts/gate.mjs --only=e2e      # 只跑 e2e 阶段（含按需构建 CLI）
+node scripts/gate.mjs --only=e2e      # 只跑 e2e 阶段（先按源码指纹确保二进制最新）
 node scripts/gate.mjs                 # 全量门禁（e2e 在静态审计之后）
 ```
 

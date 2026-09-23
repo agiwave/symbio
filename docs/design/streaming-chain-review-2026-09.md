@@ -4,7 +4,9 @@
 > 本文记录对「大模型服务 → 前端」整条流式链路的一次系统评审，含**实测验证**、**发现的问题**
 > 与**优化建议**。规范本身仍以
 > [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md)
-> 与 [`symbio_core/transcript_stream.rs`](../../symbio/src/symbio_core/transcript_stream.rs) 为准。
+> 与 `symbio_core/transcript_stream.rs`（**该模块已于 2026-09-23 随 ADR-025 退役**，
+> 会话实时面迁回 VDFS 变更——现行规范见 [`design/vdfs.md`](./vdfs.md) §9 与
+> `symbio_core/vdfs_provider.rs` 的「变更通知」小节）为准。
 >
 > 评审方式：读代码 + 在 **gateway WS 边界**（与 Tauri IPC 同线格式）抓 `session/stream`
 > 的 `NodeEvent` 全帧流，逐节点类型核对「开始 / 流增量 / 结束」三态。

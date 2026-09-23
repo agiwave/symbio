@@ -313,7 +313,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         // 开闸，**两步缺一不可**（只订阅 = 永不响的频道；只 watch = 没有收件人）。
         // 会话域的实时面**只有这一条**（ADR-025）：
         //
-        // - 消息流式 = `<sid>/消息/<mid>` 的 `updated` + `delta`；
+        // - 消息流式 = `<sid>/message/<mid>` 的 `updated` + `delta`；
         // - 会话运行态 = `<sid>` 的 `updated`——**本轮结束的唯一判据**（一轮里根
         //   Turn 会多次定格，只有会话节点离开 `working` 才是整轮结束）。
         //
@@ -545,6 +545,19 @@ async fn register_subsession(
 // 实时面的**解包**不在这里：`vdfs_change_of` 走 `symbio_core` 的公共入口
 // （信封形状是跨模块契约，本文件曾是三份手写副本之一）。这里只留「解出来之后怎么用」。
 
+/// 一条变更是否落在**某条消息节点自身**的地址上（`<sid>/message/<mid>`）。
+///
+/// 判据是**地址形状**，不是「路径等于某个目录」：会话容器的统一形状是
+/// `<sid>/<集合段>/<项 id>`，本桥只认「消息」这一段的**项**——集合目录本身
+/// （`<sid>/message`）、更深的层级、以及别的集合段（记忆 / 工作目录 / 子会话）
+/// 都不认。这样新增一类集合时，本桥的判据不需要改。
+fn is_message_item_addr(msg_prefix: &str, path: &str) -> bool {
+    match path.strip_prefix(msg_prefix) {
+        Some(rest) => !rest.is_empty() && !rest.contains('/'),
+        None => false,
+    }
+}
+
 /// 转播桥的入参。
 ///
 /// 成组而不是 11 个位置参数：参数表里有一半是「同一件事的两半」（`session_addr`
@@ -573,17 +586,17 @@ struct RelayBridge {
 ///
 /// ## 一条通道，两类地址（与 `cli/src/client.rs` 同构）
 ///
-/// 会话域的实时面只有一条（ADR-025）：
+/// 会话域的实时面只有一条（ADR-025），落点恒为**被变更节点自身的地址**：
 ///
-/// - `<sid>` = **会话运行态**——本轮结束的唯一判据（一轮里根 Turn 会多次定格，
-///   只有会话节点离开 `working` 才是整轮结束）。变更随 `data` 带全量节点视图
-///   （与 `stat` 同源构造）⇒ 零回读；无载荷 ⇒ 回读兜底。
-/// - `<sid>/消息`（**目录**）= **消息**——`data` 就是那条 `ChatMessage`，身份在
-///   `data.id`，语义在字段上：`delta` 追加 / `content` 替换 / `status = removed`
-///   移除。全量帧自给自足；窄增量帧撞上未知身份 ⇒ 回读基线。
+/// - `<sid>` = **会话运行态**（容器节点）——本轮结束的唯一判据（一轮里根 Turn 会
+///   多次定格，只有会话节点离开 `working` 才是整轮结束）。变更随 `data` 带全量节点
+///   视图（与 `stat` 同源构造）⇒ 零回读；无载荷 ⇒ 回读兜底。
+/// - `<sid>/<集合段>/<项 id>` = **集合项**，对消息即 `<sid>/message/<mid>`——`data`
+///   就是那条 `ChatMessage`，语义在字段上：`delta` 追加 / `content` 替换 /
+///   `status = removed` 移除。全量帧自给自足；窄增量帧撞上未知身份 ⇒ 回读基线。
 ///
 /// 于是本桥的读策略是**按字段省**：`delta` 且该 id 已知 ⇒ 一次 I/O 都不做
-/// （流式正文的绝大多数帧走这里）；全量帧 ⇒ 直接用载荷；仅未知身份的窄增量
+/// （流式正文的绝大多数帧走这里）；全量帧 ⇒ 直接用载荷；仅「无正文且身份未知」
 /// ⇒ `stat` + `read`。
 ///
 /// ## 与「顺序」的关系
@@ -618,9 +631,11 @@ async fn relay_bridge(b: RelayBridge, sink: EventSink, abort: AbortSignal) -> Re
         agent_id,
         tool_call_id,
     } = b;
-    // 消息变更的落点：信封的 `path` 是消息**目录**（`<sid>/消息`），具体是哪条
-    // 消息由载荷 `data.id` 回答——对象身份在 `data` 里，不在路径上。
-    let msg_dir = format!("{session_addr}/{SEG_MESSAGES}");
+    // 消息变更的落点：信封的 `path` 恒为**那条消息节点自身**的地址
+    // （`<sid>/message/<mid>`）。会话是容器、其下是并列的集合，因此本桥按**地址形状**
+    // 认人（`<session_addr>/<集合段>/<项 id>`），而不是「目录 + 载荷里的 id」——
+    // 后者要求消费端把地址反推回来，且无法推广到第二类集合（任务 / 请求队列）。
+    let msg_prefix = format!("{session_addr}/{SEG_MESSAGES}/");
 
     // 助手正文累积（按消息 id）：最终结果取「最后一条**已完成**的助手正文」而非
     // 「最后处理到的文本」——流式片段或子 agent 的内部独白不能被误当成最终答案。
@@ -672,9 +687,11 @@ async fn relay_bridge(b: RelayBridge, sink: EventSink, abort: AbortSignal) -> Re
                     continue;
                 }
 
-                // ② 消息变更：落点在消息**目录**上（记忆 / 工作目录 / 别的会话 /
-                // 深层地址一律不认）；`data` 缺失 ⇒ 无载荷，回读收敛不归本桥管。
-                if change.path != msg_dir {
+                // ② 消息变更：落点是那条消息**节点自身**的地址
+                // （`<session_addr>/message/<mid>`）——集合目录本身、记忆 / 工作目录 /
+                // 子会话 / 别的会话 / 更深层级一律不认；`data` 缺失 ⇒ 无载荷，
+                // 回读收敛不归本桥管。
+                if !is_message_item_addr(&msg_prefix, &change.path) {
                     continue;
                 }
                 let Some(data) = change.data else { continue };
@@ -896,7 +913,7 @@ async fn session_vdfs_addr(
 ///
 /// 订阅**只需一个地址**（会话叶子）：`ChangeSubscriptions::notify` 的「相关」判定
 /// 是同一子树（自身 / 祖先 / 后代），因此 `<sid>` 的订阅天然覆盖
-/// `<sid>/消息/<mid>`——一条 `vdfs/watch` 同时收运行态与消息。
+/// `<sid>/message/<mid>`——一条 `vdfs/watch` 同时收运行态与消息。
 async fn vdfs_watch(
     parent: &Arc<dyn Plugin>,
     ctx: &Arc<dyn InvokeRequest>,

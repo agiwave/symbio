@@ -15,9 +15,9 @@
 //! - `open` → 它返回的是**进程内句柄**，而句柄交付早已改由编排器直接塞进
 //!   `chat_ctx`，不走路由。
 //! - `clear`（会话）→ `delete(<根>/session/<id>)`。
-//! - `chat/clear_messages` → `action(<id>/消息, "clear")`。
-//! - `chat/delete_message` → `action(<id>/消息/<mid>, "truncate")`。
-//! - `chat/update_message` → `write(<id>/消息/<mid>)`。
+//! - `chat/clear_messages` → `action(<id>/message, "clear")`。
+//! - `chat/delete_message` → `action(<id>/message/<mid>, "truncate")`。
+//! - `chat/update_message` → `write(<id>/message/<mid>)`。
 //! - `get_messages` → 子会话**存在性校验**改走进程内 VDFS 纯接口
 //!   （`Plugin::get_vfs_provider()` + `stat(<挂载名>/<sid>)`，见同文 §3.4.1）
 //!   ——它当时也不是「会话的读接口」，读历史一直是 `vdfs/read`。
@@ -63,7 +63,7 @@ impl SessionPlugin {
 
         // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：
         // 前端据此把该会话从清单移除。session/clear 与 VDFS 删除两条删除路径共用此处。
-        // 作用域按**路径前缀**分流（子会话落在 `<sid>/子会话/…` 之下），因此这里
+        // 作用域按**路径前缀**分流（子会话落在 `<sid>/subsession/…` 之下），因此这里
         // 不再需要实体时代的 `parent_id` 载荷——也不必为发事件多读一次盘。
         self.notify_change(session_id);
 

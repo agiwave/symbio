@@ -50,7 +50,7 @@ sequenceDiagram
 | 3 | 默认能力 | `symbio_core/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
 | 4 | 模型调用（单轮） | `symbio/src/plugins/model/bound_provider.rs` | `execute_turn` = **一次** LLM 调用：4 协议适配（OpenAI / Anthropic / Gemini / Ollama）+ SSE 解析 + 事件出口。`model` **不做轮次循环** |
 | 5 | 工具循环（轮次） | `symbio/src/plugins/session/chat_loop.rs`（`close_turn` → `process_tool_calls_async`） | 「LLM → 工具 → LLM」的循环归 **session**（`gate_turn` / `close_turn` 判定下一步）。工具实现方：`local` / `web` / `vdfs` / `mcp` / `skill` / `telegram` / `agent` 等 |
-| 6 | 前端显示 | `event_bus` 的 `KIND_VDFS` 变更（消费端先 `vdfs/watch` 登记） | **显示只由节点状态驱动**：消息是 `<根>/session/<id>/消息/<mid>` 这个**文件**，会话运行态是会话节点（`<根>/session/<id>`）的 `status`——两者都是 VDFS 变更。`updated` 带 `delta` = 尾部追加（零回读）；无 `delta` = 回读。顺序是**节点属性**（`ChatMessage.seq`），与到达顺序无关。见 [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) §5.1 与 §11 |
+| 6 | 前端显示 | `event_bus` 的 `KIND_VDFS` 变更（消费端先 `vdfs/watch` 登记） | **显示只由节点状态驱动**：消息是 `<根>/session/<id>/message/<mid>` 这个**文件**，会话运行态是会话节点（`<根>/session/<id>`）的 `status`——两者都是 VDFS 变更。`updated` 带 `delta` = 尾部追加（零回读）；无 `delta` = 回读。顺序是**节点属性**（`ChatMessage.seq`），与到达顺序无关。见 [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) §5.1 与 §11 |
 | 7 | 会话持久化 | `plugins/session/`（存储层） | 帧格式见 [PROTOCOLS.md]「AI 会话流式规范」 |
 
 > **执行期的两个原语**（[ADR-020](../DECISIONS.md#adr-020-执行期与传输层分离eventsink出-abortsignal入取代-pluginchannel-的双职责)）：
@@ -96,6 +96,9 @@ sequenceDiagram
 ## 全链路追踪
 
 - `trace_id` 贯穿 Wire 协议（见 [PROTOCOLS.md]），日志排查时先对齐 trace_id。
+- `trace_id` 只把同一条链的请求串起来；**「谁发的、为什么发」看 `origin`**——
+  回读类路由（`vdfs/list` / `stat` / `read`）的来源取值是闭集，对照表见
+  [TROUBLESHOOTING.md](../guides/TROUBLESHOOTING.md) 的「追踪请求链」。
 - 日志位置与级别见 [CONFIGURATION.md](../reference/CONFIGURATION.md)。
 
 ## 排障锚点速查

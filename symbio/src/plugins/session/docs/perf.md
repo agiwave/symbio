@@ -52,8 +52,8 @@
 ### 4.1 窗口单位 = 根节点（Turn 页），不是消息条数
 
 ```text
-<根>/session/<id>/消息            ← 列表（seq 升序，含在途消息）
-<根>/session/<id>/消息/<mid>      ← 列表项（正文按需 read）
+<根>/session/<id>/message            ← 列表（seq 升序，含在途消息）
+<根>/session/<id>/message/<mid>      ← 列表项（正文按需 read）
 
 一页 = 一段连续的根节点 + 它们的全部子孙
        ┌─ 根 A ─┬ 子 a1 ── 孙 a1x
@@ -74,7 +74,7 @@
 ### 4.2 协议
 
 ```text
-vdfs/list { path: "<id>/消息", limit: 30, before: "<id>/消息/<mid>" }
+vdfs/list { path: "<id>/message", limit: 30, before: "<id>/message/<mid>" }
 ```
 
 - `before` = **已持有的最老列表项的地址**（游标是地址，不是页码）；返回它**之前**的一页。

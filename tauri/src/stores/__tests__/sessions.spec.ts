@@ -98,6 +98,8 @@ vi.mock('@/services/vdfsScheme', () => ({
 import { useSessionsStore } from '../sessions'
 import { startSessionNodeSync, stopSessionNodeSync } from '../sessionNodeSync'
 import { VDFS_STATUS_WORKING } from '@/schemas/vdfs'
+// 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
+import { READBACK_REASON } from '@/services/readback'
 
 /**
  * 协议夹具：会话挂载目录与转写段是**运行期数据**（列目录认出来）。
@@ -106,7 +108,7 @@ import { VDFS_STATUS_WORKING } from '@/schemas/vdfs'
  * `vi.hoisted`：`vi.mock` 工厂先于 import 执行，直接引用顶层 const 会撞 TDZ。
  */
 const { SCHEME } = vi.hoisted(() => ({
-  SCHEME: { mountDir: '@vfs/session', messagesSeg: '消息' },
+  SCHEME: { mountDir: '@vfs/session', messagesSeg: 'message' },
 }))
 
 /** 投递一条变更（路径就是展示地址） */
@@ -250,8 +252,12 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
       store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
 
       emit({ path: '@vfs/session/s1' })
-      // 信封没有操作枚举（S27）：先回读 stat 分辨删除与否（NotFound ⇒ 本地即时移除）
-      expect(vdfsApi.statVdfs).toHaveBeenCalledWith('@vfs/session/s1')
+      // 信封没有操作枚举（S27）：先回读 stat 分辨删除与否（NotFound ⇒ 本地即时移除）；
+      // 理由随请求进 `metadata.origin`，路由留痕据此可判「这一次读是为什么」
+      expect(vdfsApi.statVdfs).toHaveBeenCalledWith(
+        READBACK_REASON.RESOURCE_SIGNAL,
+        '@vfs/session/s1'
+      )
       expect(sessionApi.listSessions).not.toHaveBeenCalled()
 
       await vi.advanceTimersByTimeAsync(800)
@@ -305,7 +311,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, metadata: {} } as never)
 
-    emit({ path: '@vfs/session/s1/消息', data: { id: 'm1', delta: '半句' } })
+    emit({ path: '@vfs/session/s1/message', data: { id: 'm1', delta: '半句' } })
     await flushPromises()
 
     expect(vdfsApi.statVdfs).not.toHaveBeenCalled()

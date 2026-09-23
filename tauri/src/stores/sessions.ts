@@ -916,7 +916,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * ## 读入口是 VDFS，不是专用协议
    *
-   * 转写是**列表**（`<根>/session/<id>/消息`），而会话叶子
+   * 转写是**列表**（`<根>/session/<id>/message`），而会话叶子
    * `<根>/session/<id>` 的内容就是整份会话文档（含 `messages`）——因此
    * **一次 `vdfs/read`** 就能拿到全部历史：既省掉一条专用协议，又让前端与
    * LLM 在**同一地址**上读同一份数据（`session/get_messages` 自此不再是

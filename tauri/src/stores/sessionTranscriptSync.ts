@@ -1,52 +1,59 @@
 /**
  * sessionTranscriptSync — 会话**实时面**的消费端（ADR-025：实时面走 VDFS 变更）
  *
- * ## 一条通道，两类地址
+ * ## 一条通道，地址即身份
  *
  * 会话域的实时面只有一条（`event_bus` 的 `vdfs` 频道 + `vdfs/watch` 登记，
- * 由 `subscribeVdfsChanged` 一次办妥）。变更的**地址**区分两类内容：
+ * 由 `subscribeVdfsChanged` 一次办妥）。**会话是容器，其下是若干并列的集合**
+ * （消息 / 子会话 / 记忆 / 工作目录，后续还会有任务列表、请求队列……），因此
+ * 地址形状统一为 `<sid>/<集合段>/<项 id>`，**身份就是地址末段**——路径与身份
+ * 是同一个事实，消费端不必再从载荷里反推地址：
  *
- * | 地址 | 语义 | 消费动作 |
- * |---|---|---|
- * | `<根>/session/<sid>` | 会话节点变更（运行态 / 资源） | `stat` 回读节点 → `applySessionState` |
- * | `<根>/session/<sid>/<消息段>/<mid>` | 一条消息 | 见下表 |
+ * | 地址 | 归属 |
+ * |---|---|
+ * | `<根>/session/<sid>` | 会话节点自身（运行态 / 资源）→ `stores/sessionNodeSync` |
+ * | `<根>/session/<sid>/<集合段>/<项 id>` | 集合项；`<集合段>` 是消息段时归**本模块** |
  *
- * 消息变更的取值集合仍是 `created` / `updated` / `deleted` 三个，**没有操作枚举**——
- * `delta` 的有无就是全部语义：
+ * 载荷是**帧本身**（与后端内存图收到的同一条 `ChatMessage`），语义全在字段上，
+ * **没有操作枚举**：
  *
- * | `change` | `delta` | 动作 |
- * |---|---|---|
- * | `deleted` | — | 就地移除（`status = removed` 帧走同一条落地路径） |
- * | 任意 | 有，且 id 已知 | **零回读**：`{ id, delta }` 直接落地（流式正文的绝大多数帧） |
- * | 任意 | 有，id 未知 | 先落增量（占位），再回读身份（见下） |
- * | `created` / `updated` | 无 | 回读（`stat` + `read`）拿身份与正文基线 |
+ * | `status` | `delta` | `content` | 动作 |
+ * |---|---|---|---|
+ * | `removed` | — | — | 就地移除（队列里该 id 的待落地增量一并丢弃） |
+ * | — | 有 | — | **零回读**追加（流式正文的绝大多数帧）；id 未知才回读补身份 |
+ * | — | — | 有 | **零回读**整条替换——首帧发的是图里**合并后的全量副本** |
+ * | — | — | — | 状态帧（`state_frame` 剥掉了正文）：本地已有 ⇒ **零回读**只迁移状态；身份未知才回读补基线 |
  *
- * ## 读与流的协调（`delta` 与 `read` 打架怎么办）
+ * 「零回读」不是省事的乐观：后端在**发帧那一刻**就把节点合并完毕，帧里的
+ * 身份 / 正文 / 状态与 `stat` + `read` 同源。放着载荷不用、再发两个 IPC 去问
+ * 一遍，等于把同一次状态迁移从 1 帧变成 1 帧 + 2 请求。
  *
- * `delta` 是**唯一**的正文增量来源；`read` 只供**身份**与**基线**。规则
- * （与设计文档 §3.1 逐字一致）：
+ * ## 回读：只在**本端缺基线**时发生
  *
- * - **订阅时已在列表里的节点**：回读的 `content` 是**基线**，此后 `delta` 追加；
- * - **新节点**：`created` 时插入占位 → 回读身份。**若回读期间有 `delta` 落地，
- *   丢弃回读的 `content`、只取身份**——内容只追加，本地增量**总是**真值的
- *   前缀，而回读快照可能落后；
- * - **丢失**：`event_bus` 满通道 → resync 指令 → **整份重读**，此时接受回读的
- *   `content` 并重置基线。
+ * `delta` 是流式正文的增量来源，`read` 只供**身份**与**基线**。两种情形本端
+ * 拿不到基线，才回读（`stat` + `read`）：
  *
- * 这条规则不是新发明的：批次 G 删掉的 `appendGuard` 就是它（「读取前记下该路径
- * 已应用过几次追加，响应回来若这个数变了 → 丢弃该响应」）。本次把它加回
- * （`useVdfs` 里是**详情视图**的那一份，本文件是**转写列表**的这一份——两个
- * 作废时机不同的守卫必须是两个实例，共用一个会互相误伤）。
+ * - **窄增量 + 身份未知**：`{ id, delta }` 没有身份，增量先落地（占位）再回读；
+ * - **状态帧 + 身份未知**：`state_frame` 剥掉了正文，本地没有该节点 ⇒ 只有回读
+ *   才能拿到正文基线。
+ *
+ * 一旦回读在飞，`deltaGen` 就是它的作废基准：读取窗口内本端正文又变过（增量
+ * 落地 / 全量替换落地）⇒ **丢弃回读的 `content`、只取身份**——本地正文**总是**
+ * 真值的前缀，而回读快照可能落后。这条规则不是新发明的：批次 G 删掉的
+ * `appendGuard` 就是它（「读取前记下该路径已应用过几次追加，响应回来若这个数
+ * 变了 → 丢弃该响应」）。本次把它加回（`useVdfs` 里是**详情视图**的那一份，
+ * 本文件是**转写列表**的这一份——两个作废时机不同的守卫必须是两个实例，共用
+ * 一个会互相误伤）。
  *
  * **为什么不能靠「谁新谁赢」**：两个字符串都是真值的前缀，长的那个不一定更接近
- * ——必须按「本地已应用了几个增量」这个**代际**判，而不是比长度。
+ * ——必须按「本地正文被写过几次」这个**代际**判，而不是比长度。
  *
- * ## 「未知 id + delta」的次序
+ * 唯一接受回读 `content` 的场景是「代际未变」——此时快照包含队列里该 id 的
+ * 全部待落地增量（它们都发生在读取发起**之前**），落地全量后必须**丢弃**队列
+ * 增量，否则就是重复追加。
  *
- * 增量**先落地**（`applyTranscriptMessages` 对未知 id 自建占位），回读**后发**。
- * 回读返回时按代际判：期间有增量落地 → 丢弃 `content`、只取身份（本地已有
- * 增量链）；期间没有 → 接受 `content` 并**丢弃队列里该 id 的待落地增量**——
- * 它们都发生在回读发起之前，已包含在快照里，再应用就是重复追加。
+ * 整份重读（`resync`）是另一条路：`event_bus` 满通道 ⇒ 后端补送 resync 标记
+ * ⇒ 按见过的会话 `reload`，权威快照直接替换本地转写。
  *
  * ## 合帧：为什么增量要攒一小会儿再落地
  *
@@ -64,9 +71,11 @@
 
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import { statVdfs, readVdfs } from '@/services/vdfs'
+import { READBACK_REASON, type ReadbackReason } from '@/services/readback'
 import { ensureVdfsSessionScheme } from '@/services/vdfsScheme'
 import { type VdfsChange, type VdfsNode } from '@/schemas/vdfs'
 import {
+  MESSAGE_STATUS_REMOVED,
   MESSAGE_TYPE_TOOL_CALL,
   MESSAGE_TYPE_TURN,
   type ChatMessage,
@@ -79,12 +88,10 @@ import { logger } from '@/utils/logger'
  * 生产由应用外壳传 `useSessionsStore()`，测试传普通对象即可。
  */
 export interface TranscriptSyncSink {
-  /** 该会话的本地转写图里是否已有这条消息（决定 `delta` 走零回读还是回读） */
+  /** 该会话的本地转写图里是否已有这条消息（决定要不要回读补基线） */
   hasMessage(sessionId: string, messageId: string): boolean
   /** 应用一批消息帧（语义与后端 `Transcript::apply` 的前端镜像一致） */
   applyTranscriptMessages(sessionId: string, messages: ChatMessage[]): void
-  /** 应用一帧会话运行态（`stat` 回读的全量节点视图，幂等） */
-  applySessionState(sessionId: string, node: VdfsNode): void
   /** resync：按会话整份重读（权威快照替换本地转写） */
   reload(sessionId: string): void | Promise<void>
 }
@@ -101,10 +108,10 @@ interface SyncState {
   /** 会话 → 待落地的增量帧（保持到达顺序；flush 时按会话一次提交） */
   pending: Map<string, ChatMessage[]>
   flushTimer: ReturnType<typeof setTimeout> | null
-  /**
-   * 消息路径 → 本地已应用的增量**代际**（`appendGuard` 的记法）。
-   * 每应用一条增量 +1；回读发起时记下起点，返回时比对。
-   */
+/**
+ * 消息路径 → 本地**正文写入代际**（`appendGuard` 的记法）。
+ * 增量落地、全量替换落地各 +1；回读发起时记下起点，返回时比对。
+ */
   deltaGen: Map<string, number>
   /** 收到过消息变更的会话（resync 时按它整份重读） */
   seenSessions: Set<string>
@@ -232,21 +239,31 @@ function messageOfNode(node: VdfsNode, text: string): ChatMessage | null {
   return out
 }
 
-/** 回读一条消息节点（`stat` + `read`）并按代际规则落地。 */
-async function readMessage(sid: string, mid: string): Promise<void> {
+/**
+ * 回读一条消息节点（`stat` + `read`）并按代际规则落地。
+ *
+ * `reason` 是**为什么**回读（`MISSING_BASELINE` / `IDENTITY_UNKNOWN`）——它随两次
+ * 请求进路由留痕，于是「这一轮为什么多读了一次」在日志里直接可读，不必从时间戳
+ * 反推。它由调用点给定而不是本函数推断：两种触发在代码里就分得清（下面 ② / ⑤），
+ * 到了这里只剩一个动作。
+ */
+async function readMessage(sid: string, mid: string, reason: ReadbackReason): Promise<void> {
   const sink = S.sink
   if (!sink) return
   const addr = messageAddr(sid, mid)
-  // 追加代际快照：读取期间若有增量落地，本地内容比这次响应新 → 丢弃 content
+  // 正文写入代际快照：读取期间若本端正文又变过（增量 / 全量），本地比这次响应新
   const gen = deltaGenOf(addr)
   try {
-    const [node, content] = await Promise.all([statVdfs(addr), readVdfs(addr)])
-    if (!node) return // 已删（或会话没了）：删除另有 deleted 变更兜底
+    const [node, content] = await Promise.all([
+      statVdfs(reason, addr),
+      readVdfs(reason, addr),
+    ])
+    if (!node) return // 已删（或会话没了）：删除另有 `status = removed` 帧兜底
     const changed = deltaGenOf(addr) !== gen
     const text = content?.text ?? ''
 
     if (changed) {
-      // 读取期间有增量落地：只取身份，不取 content（本地增量链是真值前缀）。
+      // 读取窗口内有正文落地：只取身份，不取 content（本地正文是真值前缀）。
       const identity = messageOfNode(node, '')
       if (!identity) {
         logger.warn('[transcript-sync]', `消息节点状态词不可识别，丢弃：${addr}`)
@@ -280,26 +297,11 @@ function dropQueuedDelta(sid: string, mid: string): void {
   else S.pending.set(sid, rest)
 }
 
-/** 回读会话节点并落地运行态（变更不带快照——`stat` 永远最新且幂等） */
-async function readSessionState(sid: string): Promise<void> {
-  const sink = S.sink
-  if (!sink) return
-  const addr = `${S.mountDir}/${sid}`
-  try {
-    const node = await statVdfs(addr)
-    // 会话已删（`deleted` 由 sessionNodeSync 收敛）：本条无事可做
-    if (!node) return
-    sink.applySessionState(sid, node)
-  } catch (err) {
-    logger.warn('[transcript-sync]', `回读会话节点失败：${addr}`, err)
-  }
-}
-
 /**
  * 处理一条变更（订阅回调与单测共用同一入口）。
  *
- * 分派只按**地址形状**（会话叶子 vs 消息项）与**字段**（`delta` 的有无），
- * 没有需要推断的操作枚举。
+ * 分派只按**地址形状**（集合项 vs 别的东西）与**字段**（`status` / `delta` /
+ * `content` 的有无），没有需要推断的操作枚举。
  */
 export function handleVdfsChange(change: VdfsChange): void {
   const sink = S.sink
@@ -307,62 +309,92 @@ export function handleVdfsChange(change: VdfsChange): void {
   const path = change.path
   if (!path || !path.startsWith(`${S.mountDir}/`)) return
 
-  // ① 会话叶子：`<mountDir>/<sid>`（恰一段）。信封没有操作枚举（S27）——
-  //    `data` 是全量节点视图（与 stat 同源构造）时零回读就地收敛；无载荷
-  //    （资源信号 / 删除）回读兜底（节点已删时 stat 得 null，静默返回）。
+  // 地址形状：`<mountDir>/<sid>/<集合段>/<项 id>`（恰三段）才是**集合项**。
+  // 本模块只认**消息**这一类集合（`segs[1] === messagesSeg`）：
+  // - `<sid>`（一段）= 会话节点自身，归 `sessionNodeSync`（它按 directChildren
+  //   订阅，收到的正是这一段）；
+  // - `<sid>/<集合段>`（两段）= 集合目录，列表的收敛走各自的列表刷新，不是逐项
+  //   实时面的职责；
+  // - 其余集合段（子会话 / 记忆 / 工作目录，以及后续的任务列表、请求队列……）
+  //   各有各的消费端——本模块不认识它们，也不该假装认识。
   const rel = path.slice(S.mountDir.length + 1)
   const segs = rel.split('/')
-  if (segs.length === 1) {
-    const sid = segs[0]
-    if (!sid) return
-    const view = change.data
-    if (view != null && typeof view === 'object') {
-      sink.applySessionState(sid, view as VdfsNode)
-      return
-    }
-    void readSessionState(sid)
-    return
-  }
-
-  // ② 消息目录：`<mountDir>/<sid>/<消息段>`（恰两段）。信封的 `path` 是消息
-  //    所在的**目录**，载荷 `data` 就是那条 `ChatMessage`——身份在 `data.id`，
-  //    语义在字段上。其余（记忆 / 工作目录 / 更深层级 / 无载荷）不认。
-  if (segs.length !== 2 || segs[1] !== S.messagesSeg) return
+  if (segs.length !== 3 || segs[1] !== S.messagesSeg) return
   const sid = segs[0]
-  if (!sid) return
-  S.seenSessions.add(sid)
-  const msg = change.data as
-    | { id?: unknown; delta?: unknown; status?: unknown }
-    | null
-    | undefined
-  if (!msg || typeof msg.id !== 'string' || !msg.id) return
-  const mid = msg.id
+  const mid = segs[2]
+  if (!sid || !mid) return
 
-  // 删除：`status = removed`（消息词汇的删除语义——信封上没有 deleted 取值）
-  if (msg.status === 'removed') {
+  const payload = change.data as Partial<ChatMessage> | null | undefined
+  if (payload == null || typeof payload !== 'object') return
+  // **地址即身份**（末段），载荷的 `id` 只是同一个事实的复述。以地址为准落地，
+  // 于是「载荷漏了 id」不再丢帧；两者不一致是生产端的 bug，喊出来但不丢帧。
+  if (payload.id !== undefined && payload.id !== mid) {
+    logger.warn('[transcript-sync]', `帧身份与地址不一致（按地址落地）：${path}`)
+  }
+  const msg: ChatMessage = payload.id === mid ? (payload as ChatMessage) : { ...payload, id: mid }
+  S.seenSessions.add(sid)
+
+  // ① 删除：`status = removed`（消息词汇的删除语义——信封上没有 deleted 取值）。
+  //    立即落地，不等合帧窗口：删除后本地不该再多出正文。
+  if (msg.status === MESSAGE_STATUS_REMOVED) {
     dropQueuedDelta(sid, mid)
     try {
-      sink.applyTranscriptMessages(sid, [{ id: mid, status: 'removed' }])
+      sink.applyTranscriptMessages(sid, [msg])
     } catch (err) {
       logger.error('[transcript-sync]', `删除落地失败：${sid}/${mid}`, err)
     }
     return
   }
 
-  // 纯增量 + 身份已知 ⇒ **零回读**（流式正文的绝大多数帧）
+  // ② 增量帧：窄载荷（只有 `delta`），流式正文的主干道。
   const addr = messageAddr(sid, mid)
   if (typeof msg.delta === 'string') {
-    // 代际先于落地推进：回读的判定基准是「落地了几条」，与是否合帧无关
+    // 代际先于落地推进：回读的判定基准是「正文被写过几次」，与是否合帧无关
     S.deltaGen.set(addr, deltaGenOf(addr) + 1)
     enqueueDelta(sid, mid, msg.delta)
     if (sink.hasMessage(sid, mid)) return
     // 身份未知：增量先落（占位），回读补身份——返回时按代际决定取不取 content
-    void readMessage(sid, mid)
+    void readMessage(sid, mid, READBACK_REASON.IDENTITY_UNKNOWN)
     return
   }
 
-  // 全量帧（首帧 / content 替换 / 状态迁移）：回读完整记录（幂等收敛）
-  void readMessage(sid, mid)
+  // ③ 全量帧：载荷自带正文 ⇒ **零回读**就地落地。
+  //    首帧（后端发图里合并后的全量副本）与 `content` 整条替换都走这里。载荷是
+  //    权威全文，队列里该 id 的待落地增量必然被它包含 ⇒ 一并丢弃，否则重复追加。
+  //    代际照常推进：若此刻有回读在飞，它拿到的快照可能比这份全量旧。
+  if (msg.content != null) {
+    S.deltaGen.set(addr, deltaGenOf(addr) + 1)
+    dropQueuedDelta(sid, mid)
+    sink.applyTranscriptMessages(sid, [msg])
+    return
+  }
+
+  // ④ 状态帧（`state_frame` 剥掉了正文）：本地已有该节点 ⇒ 正文就是权威的
+  //    前缀，逐字段合并只迁移状态（`applyTranscriptMessages` 不碰没带的字段），
+  //    **零回读**。
+  if (sink.hasMessage(sid, mid)) {
+    sink.applyTranscriptMessages(sid, [msg])
+    return
+  }
+
+  // ⑤ 本端缺基线（状态帧 + 身份未知）：回读补齐身份与正文。
+  //
+  // **例外：Turn 是组合节点，从来没有正文。** 后端两处都写死了这一点
+  // （`emit_streaming_start`：「Turn 组合节点无正文」；`message_text`：Turn /
+  // ToolCall「组合节点，本身无正文」，`vdfs/read` 给它的是**整条消息的 JSON
+  // 视图**——而这一帧本身就是同一条消息的序列化，字段一个不少）。于是「回读
+  // 补正文」在这类节点上**取不到任何新信息**：`stat` + `read` 两次 IPC 换来一份
+  // 帧里已有的东西。
+  //
+  // 判据是**节点类型**，不是帧的形状——同一形状的状态帧落在 Text 节点上时，
+  // 回读确实能补回本端漏掉的正文，那一次是必要的。这也正是每轮会话都会多出
+  // 一对 `vdfs/stat` + `vdfs/read` 的成因（Turn 根节点的首帧就是「无正文」）。
+  if (msg.type === MESSAGE_TYPE_TURN) {
+    sink.applyTranscriptMessages(sid, [msg])
+    return
+  }
+
+  void readMessage(sid, mid, READBACK_REASON.MISSING_BASELINE)
 }
 
 /**

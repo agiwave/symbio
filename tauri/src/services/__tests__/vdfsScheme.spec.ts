@@ -26,6 +26,8 @@ import {
 } from '../vdfsScheme'
 import { VDFS_EXT_SESSION, VDFS_KIND_MESSAGES, type VdfsNode } from '@/schemas/vdfs'
 import { setVdfsRoot } from '@/schemas/vdfsRoot'
+// 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
+import { READBACK_REASON } from '../readback'
 
 // 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
 setVdfsRoot('@vfs')
@@ -54,12 +56,12 @@ function sessionListing() {
   return [node({ name: 's1', kind: 'session', ext: VDFS_EXT_SESSION })]
 }
 
-/** 会话内部：转写列表靠 `kind` 认，与「子会话」「工作目录」并列 */
+/** 会话内部：转写列表靠 `kind` 认，与 `subsession` / `workdir` 并列 */
 function sessionChildren() {
   return [
-    node({ name: '消息', kind: VDFS_KIND_MESSAGES }),
-    node({ name: '子会话', kind: 'dir' }),
-    node({ name: '工作目录', kind: 'dir' }),
+    node({ name: 'message', kind: VDFS_KIND_MESSAGES }),
+    node({ name: 'subsession', kind: 'dir' }),
+    node({ name: 'workdir', kind: 'dir' }),
   ]
 }
 
@@ -76,8 +78,8 @@ describe('ensureSessionMountDir：按 new_types 认挂载点', () => {
 
     // 决定性的一点：名字若被改（比如注册成 conversations），这里照样认得出
     expect(mountDir).toBe('@vfs/session')
-    // 无参调用 = 走 listVdfs 的缺省参数（根锚点 vdfsRoot() = '@vfs'）
-    expect(vdfs.listVdfs).toHaveBeenCalledWith()
+    // 只给理由、不给路径 = 走 listVdfs 的缺省参数（根锚点 vdfsRoot() = '@vfs'）
+    expect(vdfs.listVdfs).toHaveBeenCalledWith(READBACK_REASON.BOOTSTRAP)
   })
 
   it('幂等：第二次不再列目录（带缓存）', async () => {
@@ -114,7 +116,7 @@ describe('ensureVdfsSessionScheme：按 kind 认转写段', () => {
 
     const scheme = await ensureVdfsSessionScheme()
 
-    expect(scheme).toEqual({ mountDir: '@vfs/session', messagesSeg: '消息' })
+    expect(scheme).toEqual({ mountDir: '@vfs/session', messagesSeg: 'message' })
   })
 
   it('展示名变了也认得出（这正是 kind 存在的理由）', async () => {
@@ -125,7 +127,7 @@ describe('ensureVdfsSessionScheme：按 kind 认转写段', () => {
         path: '@vfs/session/s1',
         node: node({ name: 's1' }),
         // 段名换成别的（后端改文案），kind 不变
-        items: [node({ name: 'transcript', kind: VDFS_KIND_MESSAGES }), node({ name: '子会话' })],
+        items: [node({ name: 'transcript', kind: VDFS_KIND_MESSAGES }), node({ name: 'subsession' })],
       })
 
     await expect(ensureVdfsSessionScheme()).resolves.toEqual({
@@ -149,7 +151,7 @@ describe('ensureVdfsSessionScheme：按 kind 认转写段', () => {
       .mockResolvedValueOnce({
         path: '@vfs/session/s1',
         node: node({ name: 's1' }),
-        items: [node({ name: '子会话' })],
+        items: [node({ name: 'subsession' })],
       })
 
     await expect(ensureVdfsSessionScheme()).rejects.toThrow(/没有 kind=messages/)
@@ -199,10 +201,10 @@ describe('地址拼接：后端两种口径都不能拼重', () => {
 
     await expect(ensureVdfsSessionScheme()).resolves.toEqual({
       mountDir: '@vfs/session',
-      messagesSeg: '消息',
+      messagesSeg: 'message',
     })
     // 列会话内部用的是会话自己的全路径，不是把它再挂到挂载目录下
-    expect(vdfs.listVdfs.mock.calls[2][0]).toBe('@vfs/session/s1')
+    expect(vdfs.listVdfs.mock.calls[2][1]).toBe('@vfs/session/s1')
   })
 })
 
@@ -227,6 +229,6 @@ describe('vdfsSessionScheme：同步读（事件回调用）', () => {
     expect(vdfsSessionScheme()).toBeNull()
 
     await ensureVdfsSessionScheme()
-    expect(vdfsSessionScheme()).toEqual({ mountDir: '@vfs/session', messagesSeg: '消息' })
+    expect(vdfsSessionScheme()).toEqual({ mountDir: '@vfs/session', messagesSeg: 'message' })
   })
 })

@@ -14,8 +14,10 @@ import { readdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { red, green, yellow, dim, bold } from '../scripts/color.mjs';
+import { ensureCliBinary } from '../scripts/cli-binary.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(here, '..');
 
 // ---------- 子进程自执行：`node cases/xxx.mjs` 直接跑该用例 ----------
 // 用例文件被 import 时只做定义（defineCase 不执行）；直接运行时走这里。
@@ -45,6 +47,20 @@ async function main() {
   }
 
   console.log(bold(`══ e2e（${cases.length} 个用例）══`));
+
+  // 被测系统先就位：判据是**内容指纹**（产物是否对应当前源码），不是「文件在不在」。
+  // 放在这里而不是每个子进程里：重建只做一次，且输出看得见——子进程里静默重建
+  // 会让人以为「怎么跑了 40 秒」。
+  if (!process.env.E2E_CLI_EXE) {
+    try {
+      const st = ensureCliBinary(repoRoot, { log: (m) => console.log(dim(`  [cli-binary] ${m}`)) });
+      console.log(dim(`  被测二进制：${st.binaryPath}${st.rebuilt ? '（已重建）' : ''}`));
+    } catch (e) {
+      console.log(red(`  ✗ ${String(e.message ?? e)}`));
+      process.exit(1);
+    }
+  }
+
   let pass = 0;
   const failures = [];
   for (const c of cases) {

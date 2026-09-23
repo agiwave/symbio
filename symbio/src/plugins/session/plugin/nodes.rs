@@ -274,45 +274,70 @@ fn cursor_id(before: &str) -> Option<&str> {
 //
 //   <id>                  → 会话叶子（聊天详情）
 //   <id>/AGENTS.md         → 会话记忆（**单个文件**，读写；见 `super::super::memory`）
-//   <id>/消息[/<mid>]      → 转写列表 / 单条消息（**列表项**）
-//   <id>/子会话[/<sub>]    → 子会话清单 / 单个子会话（查看 · 删除）
-//   <id>/工作目录[/<rel>]  → 工作目录树（文件可查看 / 编辑）
+//   <id>/message[/<mid>]   → 转写列表 / 单条消息（**列表项**）
+//   <id>/subsession[/<sub>]→ 子会话清单 / 单个子会话（查看 · 删除）
+//   <id>/workdir[/<rel>]   → 工作目录树（文件可查看 / 编辑）
+//
+// **路径段一律 ASCII，中文只出现在 `title`（展示名）上**：地址要能安全地进 URL、
+// 命令行、日志与文件名，不受编码 / 输入法 / 大小写折叠的影响。标识由 `kind`
+// 承担（见 [`messages_dir_node`]），消费者按 `kind` 发现一段，不把段名写进模板。
 //
 // 该寻址取代原「容器页」——同一批能力改由 VDFS 承载，机制侧零新增概念；
 // 场景实现仍复用 `workdir` 与子会话清单，VDFS 是这些能力的唯一入口。
 
-/// 会话内部：转写列表的路径段（同时是展示名）。
+/// 会话内部：转写列表的**路径段**（ASCII，进地址）。
 ///
-/// 转写是**列表**：`<根>/session/<id>/消息` 的每一项是一条消息，顺序由
+/// 转写是**列表**：`<根>/session/<id>/message` 的每一项是一条消息，顺序由
 /// `seq`（唯一权威顺序锚点）决定。这个地址只服务**读面**（一次 `read` 拿整份
 /// 历史）与**写面**（`vdfs/action` 的截断 / 清空）。
 ///
-/// **实时面也在这里**（ADR-025）：一条消息的流式 = 这个地址上文件的 `updated` +
-/// `delta`。此前实时面挪出过 VDFS（`session/stream` 转写流），理由是「VDFS 变更
+/// **实时面也在这里**（ADR-025）：一条消息的流式 = 它**自己那个地址**上的
+/// `delta` 增量（落点是 `<id>/message/<mid>` 这个节点，不是本目录——目录只承载
+/// 列表）。此前实时面挪出过 VDFS（`session/stream` 转写流），理由是「VDFS 变更
 /// 没有流内序号」——那是把**数据的属性**（`ChatMessage.seq` = 消息在文件夹里的位置）
 /// 当成了**传输的属性**。转写流已于 2026-09-23 退役，见
 /// `docs/design/session-realtime-vdfs-watch.md`。
-pub(crate) const SEG_MESSAGES: &str = "消息";
+pub(crate) const SEG_MESSAGES: &str = "message";
 
-/// 转写列表本身的 provider 子树内路径（`<id>/消息`）。
+/// 转写列表的**展示名**（`title`）。**只影响 UI**，不参与寻址。
+pub(crate) const TITLE_MESSAGES: &str = "消息";
+
+/// 转写列表目录节点（`list` 与 `stat` 共用同一份形状）。
+///
+/// `name` = 路径段（[`SEG_MESSAGES`]，ASCII）、`title` = 展示名（[`TITLE_MESSAGES`]）。
+/// `kind` 承担对外标识：消费者按它发现这一段，不必把段名写进自己的地址模板
+/// （见 `tauri/src/services/vdfsScheme.ts::resolveMessagesSeg`）。
+pub(crate) fn messages_dir_node() -> vdfs::VdfsNode {
+    let mut node = vdfs::VdfsNode::dir(SEG_MESSAGES, TITLE_MESSAGES, vdfs::VdfsAccess::LIST);
+    node.kind = vdfs::VDFS_KIND_MESSAGES.to_string();
+    node
+}
+
+/// 转写列表本身的 provider 子树内路径（`<id>/message`）。
 ///
 /// 与 [`message_path`] 同源：列表与列表项是同一地址方案的两级。
-// 仅测试构造寻址字符串使用（生产路径由分发层按 list 节点补全）。
+///
+/// **它不再是变更的落点**：变更落在**节点自身**（[`message_path`]），目录只服务
+/// `list` 与 `action`（截断 / 清空）。因此本函数只剩测试与文档在用。
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn message_dir_path(session_id: &str) -> String {
     format!("{session_id}/{SEG_MESSAGES}")
 }
 
-/// 单条消息的 provider 子树内路径（`<id>/消息/<mid>`）。
+/// 单条消息的 provider 子树内路径（`<id>/message/<mid>`）。
 ///
 /// 与 [`parse_session_path`] 互逆，因此与它同处——地址的「拼」与「解」必须同源，
-/// 分开写就会在改地址方案时漏改一边。生产路径由分发层按 `list` 返回的节点
-/// 补全展示地址（`<sid>/消息/<mid>`）。
+/// 分开写就会在改地址方案时漏改一边。
 ///
-/// 库代码的**读路径**经 `parse_session_path` 解析地址，不再主动拼它；库内已无
-/// 调用（实时面的落点改为消息目录，见 [`message_dir_path`]），保留它是给测试
-/// 与文档当**地址方案**的引用——单条消息的历史面地址仍是这个形状。
-#[allow(dead_code)] // 库内无调用者；地址方案的单一拼法，测试与文档引用
+/// ## 它现在同时是**变更的落点**
+///
+/// 信封的 `path` 恒为**被变更节点自身的地址**（见 `Transcript::emit`）：消息的
+/// 实时面与历史面因此共用这一个形状，消费端拿到的 `path` 就是它能直接 `read` /
+/// `stat` 的地址——不需要「拿载荷里的 id 反推地址」。
+///
+/// 会话是**容器**，其下是若干并列的**集合**（消息 / 子会话 / 记忆 / 工作目录，
+/// 后续还会有任务列表、请求队列……）：`<sid>/<集合段>/<项 id>` 是统一形状，
+/// 新增一类集合只需在 [`internal_dirs`] 里声明一个段，机制与消费端的判据都不变。
 pub(crate) fn message_path(session_id: &str, mid: &str) -> String {
     format!("{session_id}/{SEG_MESSAGES}/{mid}")
 }
@@ -325,13 +350,13 @@ pub(crate) enum VdfsSessionPath<'a> {
     Session(&'a str),
     /// `<id>/AGENTS.md`：会话记忆（**单个文件**，可读写）
     Memory(&'a str),
-    /// `<id>/消息[/<mid>]`：转写列表 / 单条消息；`mid` 空 = 列表本身
+    /// `<id>/message[/<mid>]`：转写列表 / 单条消息；`mid` 空 = 列表本身
     Messages { id: &'a str, mid: Option<&'a str> },
-    /// `<id>/子会话`：子会话清单
+    /// `<id>/subsession`：子会话清单
     SubSessions(&'a str),
-    /// `<id>/子会话/<sub>`：单个子会话
+    /// `<id>/subsession/<sub>`：单个子会话
     SubSession { id: &'a str, sub: &'a str },
-    /// `<id>/工作目录[/<rel>]`：工作目录树；`rel` 空 = 工作目录根
+    /// `<id>/workdir[/<rel>]`：工作目录树；`rel` 空 = 工作目录根
     Workdir { id: &'a str, rel: &'a str },
 }
 
@@ -389,26 +414,19 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
 /// `memory` 由调用方构造好传入（形状由内核 [`MemoryFile::node`] 产出，
 /// `list` 与 `stat` 因此共用同一份形状）；它是个**文件**，与三个目录并列——
 /// 记忆本来就是会话的一部分，不该另开一条寻址。
+///
+/// 三个目录节点各由**自己的段所属模块**构造（[`messages_dir_node`] /
+/// `workdir::sub_sessions_dir_node` / `workdir::workdir_dir_node`）：段名（ASCII，
+/// 进地址）与展示名（中文，只进 UI）的配对因此与段本身同处，新增一类集合只需
+/// 在这里多一项，不必在两处同步改字符串。
 pub(crate) fn internal_dirs(has_workdir: bool, memory: vdfs::VdfsNode) -> Vec<vdfs::VdfsNode> {
-    // 转写列表：段名 / 标题都是展示名，**标识**由 `kind` 承担（稳定 ASCII 协议词）
-    // ——消费者按 `kind` 发现它，不必把展示名写进自己的地址模板。
-    let mut messages_dir = vdfs::VdfsNode::dir(SEG_MESSAGES, SEG_MESSAGES, vdfs::VdfsAccess::LIST);
-    messages_dir.kind = vdfs::VDFS_KIND_MESSAGES.to_string();
     let mut out = vec![
-        messages_dir,
-        vdfs::VdfsNode::dir(
-            super::super::workdir::SEG_SUB_SESSIONS,
-            super::super::workdir::SEG_SUB_SESSIONS,
-            vdfs::VdfsAccess::LIST,
-        ),
+        messages_dir_node(),
+        super::super::workdir::sub_sessions_dir_node(),
         memory,
     ];
     if has_workdir {
-        out.push(vdfs::VdfsNode::dir(
-            super::super::workdir::SEG_WORKDIR,
-            super::super::workdir::SEG_WORKDIR,
-            vdfs::VdfsAccess::LIST,
-        ));
+        out.push(super::super::workdir::workdir_dir_node());
     }
     out
 }
@@ -610,7 +628,7 @@ pub(crate) fn message_of<'a>(
 ///
 /// ## `live` 不是可选装饰
 ///
-/// 会话叶子（`<根>/session/<id>`）与转写列表（`<id>/消息`）是**同一份数据的两个
+/// 会话叶子（`<根>/session/<id>`）与转写列表（`<id>/message`）是**同一份数据的两个
 /// 地址**，必须给出**同一份消息集合**。转写列表经 [`super::vdfs_provider`] 的
 /// `transcript_of` 叠加了在途缓冲，因此叶子也必须叠加——否则「读叶子拿历史」与
 /// 「按变更拼实时」两条路径会在流式期间分叉：叶子少掉**正在跑的那一轮**。

@@ -26,6 +26,66 @@ INFO trace_id=abc123 path=session/chat/send Start routing
 DEBUG trace_id=abc123 path=session/chat/send Routing finished
 ```
 
+**`trace_id` 只回答「哪几次请求属于同一条链」，不回答「谁发的、为什么发」**——
+而同一个路由名常有多个调用方。例如一轮会话里出现两次 `vdfs/stat`：一次是
+「实时面缺基线补读」，一次是「无载荷资源信号分辨删除」，留痕里一字不差，
+只能从时间戳反推。
+
+因此回读类请求（`vdfs/list` / `stat` / `read`）还带一个**来源**，取值是闭集
+（`services/readback.ts` 的 `READBACK_REASON`），由前端**必填**给出：
+
+```
+INFO trace_id=abc123 origin=missing-baseline path=vdfs/stat Start routing
+INFO trace_id=abc123 origin=vdfs-browser path=vdfs/list Start routing
+```
+
+| `origin` | 含义 | 正常频次 |
+|---|---|---|
+| `bootstrap` | 引导：解析根锚点 / 挂载点 / 转写段 | 启动期各一次，之后走缓存 |
+| `missing-baseline` | 实时面缺基线：状态帧到达，本端没有该节点 | 偶发（首帧丢失 / 订阅晚于节点出现） |
+| `identity-unknown` | 实时面身份未知：窄增量帧到达，本端没有该节点 | 偶发 |
+| `resource-signal` | 无载荷的会话节点变更（自动命名 / metadata / 删除） | 每次自动命名一次 |
+| `list-refresh` | 会话清单整表重拉 | 打开界面 / 资源变更后的防抖收敛 |
+| `vdfs-browser` | VDFS 浏览器的导航 / 分页 / 选中 / 手动刷新 | 用户动作；浏览器停在被写入的目录时随变更收敛 |
+| `transcript-load` | 打开会话时读整份转写 | 每次打开会话一次 |
+
+缺省打 `-`：**没给来源就说明调用方不是回读类动词**，这也是一条信息。判定口径
+是「一轮里同一个 `origin` 出现几次」而不是「出现了几次 `vdfs/stat`」——前者才
+对得上设计意图。
+
+### 先确认「这段日志由哪份源码产出」，再去读代码
+
+日志里出现一条当前源码中**不存在**的行（或反过来，某条新加的日志始终不出现）时，
+第一反应往往是去源码里找「是不是没接上」——而真相可能是**跑的是过期产物**，排查
+方向从第一步就错了。所以这一步要**先做**。
+
+壳启动时会把自己的**构建指纹**打进日志首行：
+
+```
+INFO symbio_tauri: Symbio shell starting build=6ea35239b585b180… version="0.1.13"
+```
+
+与当前源码的指纹一比即知：
+
+```bash
+node scripts/tauri-binary.mjs --print    # 当前源码的指纹
+node scripts/tauri-binary.mjs --check    # 本机产物是否对应当前源码（不可信则退出码 1）
+```
+
+| 日志里的 `build` | 结论 |
+|---|---|
+| 与 `--print` **一致** | 日志确实来自眼前这份源码，可以放心去读代码 |
+| 与 `--print` **不一致** | 先重建再复现，别在过期产物上找原因 |
+| `unknown` | 产物没带构建戳（打包分发、或直接用 `cargo build`）⇒ **来源不可判断**，请用 `npm run tauri dev` 重新构建后复现 |
+
+指纹覆盖壳自身的源码 / 权限集 / 清单，以及**整棵 `symbio/src` 插件树**——壳把它
+编译进去，插件那几类日志（`[session INFO]` / `[model INFO]` / `[Tool]`）正是从那里
+来的。`tauri/src`（前端）**不在**其中：dev 下它由 Vite 现服、release 下由同一条命令
+先行构建，所以「前端新不新鲜」不是这个指纹回答的问题。
+
+戳写在产物旁边（`tauri/src-tauri/target/<profile>/`），由 `npm run tauri dev|build`
+的 `before*Command` 在**构建前**写入。判据与实现见 `scripts/tauri-binary.mjs`。
+
 ---
 
 ## 编译问题

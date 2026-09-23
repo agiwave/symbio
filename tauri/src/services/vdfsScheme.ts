@@ -32,6 +32,7 @@
  */
 
 import { listVdfs } from './vdfs'
+import { READBACK_REASON } from './readback'
 import {
   VDFS_EXT_SESSION,
   VDFS_KIND_MESSAGES,
@@ -82,7 +83,7 @@ export function resetVdfsSessionScheme(): void {
  */
 export async function ensureSessionMountDir(): Promise<string> {
   if (cachedMountDir) return cachedMountDir
-  const resp = await listVdfs()
+  const resp = await listVdfs(READBACK_REASON.BOOTSTRAP)
   const hit = (resp.items ?? []).find((n) =>
     (n.new_types ?? []).some((t) => t.ext === VDFS_EXT_SESSION),
   )
@@ -120,13 +121,13 @@ export async function ensureVdfsSessionScheme(): Promise<VdfsSessionScheme> {
  * 承诺的标识。这也是后端给这个目录显式声明 kind 的唯一理由。
  */
 async function resolveMessagesSeg(mountDir: string): Promise<string> {
-  const sessions = (await listVdfs(mountDir)).items ?? []
+  const sessions = (await listVdfs(READBACK_REASON.BOOTSTRAP, mountDir)).items ?? []
   const first = sessions.find((n) => n.ext === VDFS_EXT_SESSION)
   if (!first) {
     throw new Error(`转写段未解析：${mountDir} 下没有任何会话可供推导`)
   }
   const sessionPath = fullAddr(mountDir, first)
-  const children = (await listVdfs(sessionPath)).items ?? []
+  const children = (await listVdfs(READBACK_REASON.BOOTSTRAP, sessionPath)).items ?? []
   const hit = children.find((n) => n.kind === VDFS_KIND_MESSAGES)
   if (!hit) {
     throw new Error(`转写段未找到：${sessionPath} 下没有 kind=${VDFS_KIND_MESSAGES} 的子节点`)

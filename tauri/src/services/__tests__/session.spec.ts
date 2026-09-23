@@ -15,9 +15,9 @@
  * |---|---|
  * | 删除会话 | `vdfs/delete(<根>/session/<id>)` |
  * | 改 metadata / 标题 | `vdfs/write(<根>/session/<id>)` |
- * | 改写某条消息 | `vdfs/write(…/消息/<mid>)` |
- * | 删该条及其后 | `vdfs/action(…/消息/<mid>, "truncate")` |
- * | 清空历史 | `vdfs/action(…/消息, "clear")` |
+ * | 改写某条消息 | `vdfs/write(…/message/<mid>)` |
+ * | 删该条及其后 | `vdfs/action(…/message/<mid>, "truncate")` |
+ * | 清空历史 | `vdfs/action(…/message, "clear")` |
  *
  * 若哪天有人把路由改回去，这里会红。断言**地址**而不只是"调用了某个函数"：
  * 地址拼错（比如少了会话 id）在真实环境里表现为删错会话，是灾难级的。
@@ -32,7 +32,7 @@ import { describe, expect, it, vi } from 'vitest'
  * 直接引用模块顶层的 `const` 会撞 TDZ。
  */
 const { SCHEME } = vi.hoisted(() => ({
-  SCHEME: { mountDir: '@vfs/session', messagesSeg: '消息' },
+  SCHEME: { mountDir: '@vfs/session', messagesSeg: 'message' },
 }))
 
 // 服务层依赖 Tauri API 与本地存储，这里只测映射逻辑，故整体替身
@@ -52,6 +52,8 @@ vi.mock('@/services/vdfsScheme', () => ({
 }))
 
 import { deleteVdfs, listVdfs, runVdfsAction, writeVdfs } from '@/services/vdfs'
+// 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
+import { READBACK_REASON } from '../readback'
 import {
   VDFS_ACTION_CLEAR,
   VDFS_ACTION_TRUNCATE,
@@ -111,7 +113,10 @@ describe('listSessions（<根>/session → SessionListItem）', () => {
 
     const out = await listSessions()
 
-    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(vdfsJoin('@vfs', 'session'))
+    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(
+      READBACK_REASON.LIST_REFRESH,
+      vdfsJoin('@vfs', 'session')
+    )
     expect(out).toHaveLength(1)
     expect(out[0]).toMatchObject({
       id: 'abc',
@@ -147,13 +152,18 @@ describe('listSessions（<根>/session → SessionListItem）', () => {
   it('只有显式传 limit 才带窗口参数；不传时请求形状不变', async () => {
     mockList([])
     await listSessions()
-    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(vdfsJoin('@vfs', 'session'))
+    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(
+      READBACK_REASON.LIST_REFRESH,
+      vdfsJoin('@vfs', 'session')
+    )
 
     mockList([])
     await listSessions(50)
-    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(vdfsJoin('@vfs', 'session'), {
-      limit: 50,
-    })
+    expect(vi.mocked(listVdfs)).toHaveBeenCalledWith(
+      READBACK_REASON.LIST_REFRESH,
+      vdfsJoin('@vfs', 'session'),
+      { limit: 50 }
+    )
   })
 
   it('挂载根下与资源并列的配置文件不进清单（按 ext 判据，不按名字特判）', async () => {
@@ -242,7 +252,7 @@ describe('updateMessage（改写某条消息 → vdfs/write）', () => {
     expect(addr).toBe(vdfsMessageAddr(SCHEME, 'abc', 'm1'))
     // 地址必须**指到那一条**：少一层就落到列表上（后端会拒），再少一层就是
     // 会话 metadata（会静默写错地方——那才是最坏的结果）
-    expect(vdfsMessageAddr(SCHEME, 'abc', 'm1')).toBe('@vfs/session/abc/消息/m1')
+    expect(vdfsMessageAddr(SCHEME, 'abc', 'm1')).toBe('@vfs/session/abc/message/m1')
     expect(JSON.parse(body as string)).toEqual({ id: 'm1', content: '改过的' })
   })
 
@@ -273,7 +283,7 @@ describe('deleteMessage（删该条及其后 → action("truncate")）', () => {
       vdfsMessageAddr(SCHEME, 'abc', 'm2'),
       VDFS_ACTION_TRUNCATE
     )
-    expect(vdfsMessageAddr(SCHEME, 'abc', 'm2')).toBe('@vfs/session/abc/消息/m2')
+    expect(vdfsMessageAddr(SCHEME, 'abc', 'm2')).toBe('@vfs/session/abc/message/m2')
   })
 
   it('回执原样透传：store 靠它做幂等对齐', async () => {
@@ -326,7 +336,7 @@ describe('clearMessages（清空历史 → action("clear")）', () => {
       VDFS_ACTION_CLEAR
     )
     // 少一层就清到会话本体（元数据 / 标题一并没了），多一层就不是列表
-    expect(vdfsMessagesAddr(SCHEME, 'abc')).toBe('@vfs/session/abc/消息')
+    expect(vdfsMessagesAddr(SCHEME, 'abc')).toBe('@vfs/session/abc/message')
   })
 
   it('失败向上抛（调用方据此不做本地清空）', async () => {

@@ -238,10 +238,12 @@ export function subscribe(
 //
 // ## 信封没有操作枚举（S27）：`{path, data?}`，语义全在 `data` 的字段上
 //
-// `path` 是变更文件所在的**目录**（消息的落点是 `<sid>/消息`），具体是哪条消息由
-// `data.id` 回答——对象身份在载荷里，不在路径上。`data` 是业务载荷：消息目录上
+// `path` **恒为被变更节点自身的地址**：会话是容器，其下是若干并列的集合（消息 /
+// 子会话 / 记忆 / 工作目录，后续还会有任务列表、请求队列……），集合项的形状统一为
+// `<sid>/<集合段>/<项 id>`——消息的落点是 `<sid>/message/<mid>` 这个节点，**身份
+// 就是地址末段**（与 `data.id` 同一事实，以地址为准）。`data` 是业务载荷：消息帧上
 // 是 `ChatMessage`（`delta` 追加 / `content` 替换 / `status = removed` 移除）、
-// 会话叶子上是 `VdfsNode` 全量视图；缺失 = 无载荷，回读收敛（资源删除回读
+// 会话节点上是 `VdfsNode` 全量视图；缺失 = 无载荷，回读收敛（资源删除回读
 // `NotFound` 即删除）。这里曾有过 `created` / `updated` / `deleted` 操作枚举与
 // 一张「按变更频率分配载荷宽度」的表，全部**没有生产性生产者**（或与载荷语义
 // 重复），S27 整体退役——判据见 `schemas/vdfs.VdfsChange`。
@@ -256,7 +258,7 @@ export interface VdfsChangeScope {
   prefix: string
   /**
    * 只接收前缀的**直接子项**（`<根>/session/<id>` 命中，
-   * `<根>/session/<id>/消息/<mid>` 不命中）。
+   * `<根>/session/<id>/message/<mid>` 不命中）。
    * 缺省 = 整个子树。
    */
   directChildren?: boolean

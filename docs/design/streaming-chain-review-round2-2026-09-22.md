@@ -1,7 +1,7 @@
 # 全链路评审 · 第二轮（2026-09-22）：大模型服务 / 工具 → 前端
 
 > **文档类型：评审（一次性结论，不是规范）**
-> 规范本身仍以 [`symbio_core/transcript_stream.rs`](../../symbio/src/symbio_core/transcript_stream.rs)、
+> 规范本身仍以 `symbio_core/transcript_stream.rs`（**已删除**，见下方后记 ②）、
 > [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md)
 > 与 [`design/vdfs.md`](./vdfs.md) 为准。本文只记录**某一时刻的观察与判断**。
 >

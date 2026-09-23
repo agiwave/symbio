@@ -1,21 +1,35 @@
-// T9 gateway WebSocket 流式：前端同构边界上验证实时过程显示链路。
+// T9 gateway WS 实时面：前端同构边界上的「变更帧序 + 增量拼接」契约。
 import './_selfrun.mjs';
 //
-// `WS /api/v1/ws` 是 Tauri 前端「会话/流式」的真实等价物：连接后第一帧发
-// `PluginMessageWire`（与 route_v2 同线格式），后端返回会话通道后双向转发
-// `PluginFrame`。本用例在**这条通道上**订阅 `session/stream`（消息帧流），
-// 然后经 HTTP 边界发起对话，验证过程显示的核心契约：
-// - 帧的形态是「首帧（身份 + 首段正文）→ delta*（窄增量）→ 终态帧（仅状态）」；
-// - `delta` 只落在同一条消息上，按到达顺序拼接 == 最终正文（增量不丢不重）；
-// - stream 帧带 session_id 归属（广播语义下前端可按会话过滤）。
+// `WS /api/v1/ws` 是 Tauri 前端「会话实时面」的真实等价物：首帧发
+// `PluginMessageWire`（与 route_v2 同线格式），此后这条连接只承载该频道的帧。
+//
+// ## 实时面**只有一条通道**（S27 / ADR-025）
+//
+// 订阅是**两步**，缺一不可（见 `helpers.subscribeSessionRealtime` 的文档）：
+//   ① `event_bus/subscribe` → 总线广播口（收 `kind = "vdfs"` 的帧）；
+//   ② `vdfs/watch`          → 把 sink 登记进 provider 的变更表（**谁来 publish**）。
+//
+// 变更信封**没有操作枚举**：形状恒为 `{ path, data? }`，语义全在 `data` 的字段上
+// （`delta` 追加 / `content` 替换 / `status = removed` 移除）。
+//
+// | 断言 | 意图 |
+// |---|---|
+// | 变更非空 | 「两步订阅」任缺一步 ⇒ 零变更（不报错、不断连，最像"模型没产出"） |
+// | 首帧全量 + 后续窄 delta | 增量不得落在没有基线的节点上 |
+// | 首帧 content + Σdelta == 完整正文 | 增量不丢不重 |
+// | 同一节点的 `seq` 逐帧相同 | `seq` 是**节点属性**（位置），不是投递序号 |
+// | 全部变更 `path` 在会话作用域内 | 广播语义下消费端按地址归属 |
+// | 离开 working 的会话帧**到达晚于**全部消息帧 | 「不忙 ⇒ 本轮已终态」的唯一依据 |
+//
 // 相对 cases/：上两层即仓库根（ws 依赖来自 tauri 前端的 node_modules）
-import WebSocket from '../../tauri/node_modules/ws/index.js';
-
 import {
   MockLlm,
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
+  subscribeSessionRealtime,
+  SEG_MESSAGES,
   waitFor,
   assert,
   assertEq,
@@ -23,9 +37,13 @@ import {
   nextPort,
   providerConfig,
   PROVIDER_ID,
+  readMessagesJson,
+  assertTranscriptInvariants,
 } from '../helpers.mjs';
 
-export default defineCase('T9 gateway WS 流式：session/stream 消息帧序与增量拼接契约', async () => {
+const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
+
+export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量拼接契约', async () => {
   const llm = await new MockLlm([
     {
       id: 'flow',
@@ -55,47 +73,14 @@ export default defineCase('T9 gateway WS 流式：session/stream 消息帧序与
     provider: PROVIDER_ID,
     gatewayPort: GATEWAY_PORT,
   });
+  let rt = null;
   try {
     await cli.waitGatewayReady();
 
-    // ① 在前端同构边界上订阅消息实时面：首帧 = PluginMessageWire
-    const ws = new WebSocket(`ws://127.0.0.1:${GATEWAY_PORT}/api/v1/ws`);
-    await new Promise((res, rej) => {
-      ws.once('open', res);
-      ws.once('error', rej);
-    });
-    ws.send(JSON.stringify({ metadata: { path: 'session/stream' }, payload: {} }));
+    // ① 订阅实时面（**发消息之前**，不漏首帧）
+    rt = await subscribeSessionRealtime(cli, { sessionId: 'e2e-t9', gatewayPort: GATEWAY_PORT });
 
-    // ② 收集实时帧（发消息前订阅，不漏首帧）。
-    // 实时面**一条流、两种帧**，信封都是 `PluginFrame::Data({ type, data })`：
-    //   - `transcript_event`   → `{ session_id, seq, message }`（消息；协议没有独立的
-    //     操作字段，帧携带什么（content / delta / status）就变更什么）
-    //   - `transcript_session` → `{ session_id, seq, node }`（会话运行态的全量视图）
-    // 两者**从同一个计数器取号**（后端 `Transcript::emit` / `emit_session_state`）
-    // ——这正是「会话报不忙 ⇒ 本轮消息终态帧都已落地」的全部依据，下面 ⑨ 直接验它。
-    /** @type {Array<{seq:number, session_id:string, message:any}>} */
-    const ops = [];
-    /** @type {Array<{seq:number, session_id:string, node:any}>} */
-    const states = [];
-    /** 全部帧的 seq（两种帧混在一起，用于验证共用一个序号空间） */
-    const allSeqs = [];
-    let wsClosed = false;
-    ws.on('message', (data) => {
-      try {
-        const frame = JSON.parse(data.toString());
-        const type = frame?.Data?.type;
-        if (type === 'transcript_event' && frame.Data.data?.message) {
-          ops.push(frame.Data.data);
-          allSeqs.push(frame.Data.data.seq);
-        } else if (type === 'transcript_session' && frame.Data.data?.node) {
-          states.push(frame.Data.data);
-          allSeqs.push(frame.Data.data.seq);
-        }
-      } catch { /* 忽略非 JSON 帧 */ }
-    });
-    ws.on('close', () => { wsClosed = true; });
-
-    // ③ 经 HTTP 边界发起对话（会话目标挂在 metadata.session_id）
+    // ② 经 HTTP 边界发起对话（会话目标挂在 metadata.session_id）
     const send = await cli.invoke(
       'session/chat/send',
       {
@@ -107,107 +92,113 @@ export default defineCase('T9 gateway WS 流式：session/stream 消息帧序与
     );
     assert(send.status === 200, `chat/send 应受理（${send.status}: ${JSON.stringify(send.body)?.slice(0, 150)}）`);
 
-    // ④ 等待流收敛：出现 assistant 正文完成帧
-    await waitFor(
-      () =>
-        ops.some(
-          (o) =>
-            o.message?.role === 'assistant' &&
-            o.message?.type === 'text' &&
-            o.message?.status === 'completed',
-        ),
-      { what: '流式帧收敛（assistant completed）', timeoutMs: 20_000 },
-    );
+    // ③ 等正文收敛（assistant text 到达终态）
+    const isDone = () =>
+      rt.messages().some((m) => m.data?.type === 'text' && m.data?.role === 'assistant' && TERMINAL.has(m.data?.status));
+    await waitFor(isDone, { what: '实时面收敛（assistant text 终态）', timeoutMs: 20_000 });
 
-    // ④' 再等**会话收尾那一帧**（离开 working）。它是本轮实时面的最后一帧，
-    //     也是下面 ⑨ 那条结构性断言的锚点——不等它就关连接会偶发漏掉它。
-    await waitFor(() => states.some((s) => s.node?.status !== 'working'), {
+    // ④ 再等**会话收尾那一帧**（离开 working）。它是本轮实时面的最后一帧，
+    //    也是 ⑧ 那条结构性断言的锚点——不等它就关连接会偶发漏掉它。
+    await waitFor(() => rt.sessionNode() != null && rt.sessionNode()?.status !== 'working', {
       what: '会话运行态收尾帧（离开 working）',
       timeoutMs: 20_000,
     });
-    ws.close();
 
-    // ⑤ 帧序契约：同一 assistant 正文节点的「首帧 → delta* → 终态帧」形态
-    // 正文子节点（type=text）承担流式内容；turn 节点是骨架
-    const firstText = ops.find((o) => o.message?.role === 'assistant' && o.message?.type === 'text');
-    assert(!!firstText, '帧流应含正文节点的首帧（身份 + 首段正文）');
-    const targetId = firstText.message.id;
-    const frames = ops.filter((o) => o.message?.id === targetId);
-    assertEq(frames[0]?.seq, firstText.seq, '首帧应是该节点在流上的第一帧');
-    assertEq(frames[0].message.status, 'streaming', '首帧状态应为 streaming');
-    assert(frames[0].message.content != null, '首帧应带首段正文（content）');
-    const deltas = frames.filter((o) => o.message.delta != null);
-    assert(deltas.length >= 3, `应有流式 delta 增量（实际 ${deltas.length}）`);
-    assertEq(
-      frames[frames.length - 1].message.status,
-      'completed',
-      '末帧应为终态帧（status=completed）',
+    const changes = rt.changes;
+    const msgs = rt.messages();
+    const timeline = changes.map(
+      (c, i) =>
+        `#${i} ${c.path.slice(rt.scope.length + 1) || '<会话>'} ` +
+        `[${c.data?.type ?? '-'}/${c.data?.role ?? '-'}/${c.data?.status ?? '-'}]` +
+        `${c.data?.delta != null ? ` +${JSON.stringify(c.data.delta)}` : ''}` +
+        `${c.data?.content != null ? ` =${JSON.stringify(c.data.content).slice(0, 20)}` : ''}`,
     );
 
-    // ⑥ 单调 seq：同一流的帧序号严格递增（缺口即 resync 的前提）
-    const seqs = ops.map((o) => o.seq);
-    for (let i = 1; i < seqs.length; i++) {
-      assert(seqs[i] > seqs[i - 1], `seq 应严格递增（${seqs[i - 1]} -> ${seqs[i]}）`);
-    }
+    // ⑤ 「两步订阅」缺一不可：任缺一步 ⇒ 一条变更都收不到。
+    //    这条断言的存在本身就是诊断——零变更时最像"模型没有产出内容"。
+    assert(
+      changes.length > 0,
+      `实时面应收到变更（两步订阅：event_bus/subscribe + vdfs/watch）\n` +
+        `作用域外的路径 ${rt.outOfScope.length} 条、时间线:\n${timeline.join('\n')}`,
+    );
 
-    // ⑦ 归属：帧带 session_id（广播语义下前端按会话过滤）
-    assert(ops.every((o) => o.session_id === 'e2e-t9'), '流帧应携带会话归属');
+    // ⑥ 归属：变更落点即地址，消息是 `<会话>/message/<mid>`
+    assert(
+      msgs.length > 0,
+      `应有消息节点的变更（落点 <会话>/${SEG_MESSAGES}/<mid>）\n时间线:\n${timeline.join('\n')}`,
+    );
+    assert(
+      changes.every((c) => c.path === rt.scope || c.path.startsWith(`${rt.scope}/`)),
+      '全部变更都应落在会话作用域内（广播语义下消费端按地址归属）',
+    );
 
-    // ⑧ 增量拼接 == 最终正文：不丢不重。
-    // 首个分片随首帧下发（content 非空），其余分片是 delta；终态帧只带状态、不带正文，
-    // 因此**最终正文 = 首帧 content + 全部 delta 按序拼接**（与前端落地口径同源）。
+    // ⑦ 帧形态：同一正文节点的「首帧全量（身份 + 正文）→ 窄增量*」
+    const firstText = msgs.find((m) => m.data?.type === 'text' && m.data?.role === 'assistant');
+    assert(!!firstText, `应含正文节点的首帧（身份 + 首段正文）\n时间线:\n${timeline.join('\n')}`);
+    const frames = rt.framesOf(firstText.mid);
+    const head = frames[0].data;
+    assertEq(head.status, 'streaming', '首帧状态应为 streaming');
+    assertEq(head.type, 'text', '首帧应带节点身份（type）——增量不得落在没有身份的节点上');
+    assert(head.content != null, '首帧应带正文（content，全量）');
+    const deltas = frames.filter((f) => f.data?.delta != null);
+    assert(deltas.length >= 3, `应有流式 delta 增量（实际 ${deltas.length}）`);
+    assert(
+      frames[frames.length - 1].data?.status === 'completed',
+      `末帧应为终态（实际 ${frames[frames.length - 1].data?.status}）`,
+    );
+
+    // ⑧ `seq` 是**节点属性**（位置序号），不是投递序号：同一节点的每一帧都是同一个值。
+    //    曾经 `seq` 是逐帧递增的流内序号，于是"顺序"成了投递属性——到达顺序一变
+    //    （两条通道、乱序合并）就要靠补丁纠正。S27 后顺序由**单一订阅 FIFO** 给出。
+    const seqsOfNode = frames.map((f) => f.data?.seq).filter((s) => s != null);
+    assert(
+      seqsOfNode.length > 0,
+      `正文节点的帧应带位置序号 seq\n时间线:\n${timeline.join('\n')}`,
+    );
+    assert(
+      new Set(seqsOfNode).size === 1,
+      `同一节点的 seq 必须逐帧相同（位置不变，变的是正文）：实得 ${JSON.stringify(seqsOfNode)}`,
+    );
+
+    // ⑨ 增量拼接 == 完整正文：不丢不重。
+    //    首个分片随首帧以 `content` 下发（全量），其余分片是 `delta`；终态帧只带状态。
     const rebuilt = frames.reduce(
-      (acc, o) =>
-        o.message.content != null
-          ? String(o.message.content)
-          : o.message.delta != null
-            ? acc + String(o.message.delta)
+      (acc, f) =>
+        f.data?.content != null
+          ? String(f.data.content)
+          : f.data?.delta != null
+            ? acc + String(f.data.delta)
             : acc,
       '',
     );
     assertEq(rebuilt, '第一第二第三第四完成', '首帧正文 + delta 拼接应等于模型产出的完整正文');
 
-    // ⑨ 会话运行态帧：与消息帧**共用同一个 `seq` 空间**（批次 E 的结构性保证）
+    // ⑩ **核心断言**：会话报"不忙"的那一帧必须**到达晚于**本轮全部消息帧。
     //
-    // 这条断言是 E 批存在的全部理由：只要运行态帧与消息帧共用一个计数器 + 走同一条
-    // `mpsc`，「读到 `status != working` 的那一帧」就**必然**意味着「所有 `seq` 更小
-    // 的帧（含本轮全部消息终态帧）都已在其之前被应用」。
-    // 若哪天有人把运行态帧挪回另一条通道、或另起一个计数器，这里立刻变红。
-    //
-    // 注意**不**断言"观察到进入 working"：`session/stream` 的握手没有 ack
-    // （`handle_stream_subscribe` 直接返回通道），因此订阅生效前发出的帧本端收不到
-    // ——而 `working` 恰好是本轮第一帧。这是既有的握手特性，与本批无关；
-    // 下面两条断言都与它无关（一个只看连续性，一个只看收尾帧的位置）。
-    assert(states.length > 0, '会话运行态必须出现在转写流上（不得另走一条通道）');
+    // 后端在「清在途 → 复位 is_working」**之后**才发运行态帧，而两者走同一条订阅
+    // （单一 FIFO），因此「读到 status != working」蕴含「本轮全部消息帧都已在其之前
+    // 到达」。若哪天有人把运行态挪回另一条通道，或让消息绕开这条订阅，这里立刻变红。
+    const lastMsgArrival = Math.max(...msgs.map((m) => m.arrival));
+    // 取**最后一次**离开 working：订阅发生在发消息之前，因此第一帧是**空闲初始态**
+    // （arrival 0）——它当然早于全部消息帧，不能用 `find` 取第一个。
+    const idleArrival = changes
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.path === rt.scope && c.data?.status !== 'working')
+      .map(({ i }) => i)
+      .pop();
+    assert(idleArrival != null, '应观察到会话离开 working（收尾那一帧）');
     assert(
-      states.every((s) => s.session_id === 'e2e-t9'),
-      '运行态帧同样携带会话归属',
-    );
-    const idle = states.filter((s) => s.node?.status !== 'working');
-    assert(idle.length > 0, '应观察到会话离开 working（收尾那一帧）');
-
-    // 两种帧混在一起也必须严格递增、无缺口（共用一个计数器）
-    for (let i = 1; i < allSeqs.length; i++) {
-      assertEq(
-        allSeqs[i],
-        allSeqs[i - 1] + 1,
-        `两种帧共用一个序号空间：应逐帧 +1（${allSeqs[i - 1]} -> ${allSeqs[i]}）`,
-      );
-    }
-
-    // **核心断言**：收尾那一帧（离开 working）的 seq 大于本轮**全部**消息帧
-    const lastMsgSeq = Math.max(...ops.map((o) => o.seq));
-    assert(
-      idle[0].seq > lastMsgSeq,
-      `会话报"不忙"的那一帧必须排在全部消息帧之后（idle seq=${idle[0].seq} > 末条消息 seq=${lastMsgSeq}）` +
+      idleArrival > lastMsgArrival,
+      `会话报"不忙"的那一帧必须排在全部消息帧之后（idle@${idleArrival} > 末条消息@${lastMsgArrival}）` +
         '——否则「不忙 ⇒ 本轮已终态」推不出来',
     );
 
-    assert(!wsClosed || ops.length > 0, 'WS 在会话期间不应被服务端提前关闭');
+    // ⑪ 落盘同源：实时面与存储是同一份事实
+    assertTranscriptInvariants(readMessagesJson(hd.homedir, 'e2e-t9'), 'T9');
   } finally {
+    rt?.close();
     cli.stop();
     llm.stop();
     cleanupHomedir(hd);
   }
 });
-

@@ -148,17 +148,19 @@ WS /api/v1/ws?token=<token>
 → { "metadata": { "path": "vdfs/watch" }, "payload": { "path": "<根>/session/<id>" } }
 // 此后该连接逐帧下发 PluginFrame::Data：
 ← { "Data": { "type": "bus_event", "data": { "kind": "vdfs", "session_id": null,
-      "data": { "path": "<根>/session/<id>/消息", "data": { "id": "m1", "content": "第一" } } } } }
+      "data": { "path": "<根>/session/<id>/message/m1", "data": { "id": "m1", "content": "第一" } } } } }
 ← { "Data": { "type": "bus_event", "data": { "kind": "vdfs", "session_id": null,
-      "data": { "path": "<根>/session/<id>/消息", "data": { "id": "m1", "delta": "第二" } } } } }
+      "data": { "path": "<根>/session/<id>/message/m1", "data": { "id": "m1", "delta": "第二" } } } } }
 ← { "Data": { "type": "bus_event", "data": { "kind": "vdfs", "session_id": null,
       "data": { "path": "<根>/session/<id>", "data": { "…": "全量节点视图" } } } } }   // 运行态：随载荷落定
 ```
 
-- **信封没有操作枚举**（S27）：形状 `{path, data?}`。消息帧的 `path` 是消息
-  **目录**，`data` 就是那条 `ChatMessage`——身份在 `data.id`，`delta` ⇒ **尾部追加**
-  （零回读）、`content` ⇒ 整条替换、`status = removed` ⇒ 就地移除；运行态帧的
-  `data` 是全量节点视图，就地落定。
+- **信封没有操作枚举**（S27）：形状 `{path, data?}`。**`path` 恒为被变更节点自身的
+  地址**——会话是容器，其下是若干并列的集合（消息 / 子会话 / 记忆 / 工作目录……），
+  集合项的形状统一为 `<sid>/<集合段>/<项 id>`，消息帧的落点就是 `<sid>/message/<mid>`
+  这个节点，**身份在地址末段**（与 `data.id` 同一事实）。`data` 就是那条 `ChatMessage`：
+  `delta` ⇒ **尾部追加**（零回读）、`content` ⇒ 整条替换、`status = removed` ⇒ 就地
+  移除；运行态帧落在会话节点 `<sid>` 上，`data` 是全量节点视图，就地落定。
 - **无载荷变更** ⇒ 回读 / 重拉（`vdfs/read` 拿到的是**已含增量**的正文）；
   资源删除回读 `stat` 得 `NotFound` 即删除。
 - **不要按到达顺序拼**：每条变更都带 `path`，节点**自带位置**（`ChatMessage.seq`）。

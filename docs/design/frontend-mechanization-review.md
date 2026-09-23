@@ -156,7 +156,7 @@ soundSettings store），于是这两个页面变成纯定义，组件归零。
 - **文档漂移**：`vdfs-frontend.md` §2.2 已实现表未含 `VdfsCard` /
   `Workbench` / `VdfsMessageDetail`；§7.1 的 S3 记「消息（转写）不经 VDFS」，
   而现状是消息已在 VDFS 上（`VDFS_EXT_MESSAGE` + `services/vdfsTranscriptSync.ts`
-  + `<根>/session/<id>/消息/<mid>`）。§7 是进度档案、按约定不改写，
+  + `<根>/session/<id>/message/<mid>`）。§7 是进度档案、按约定不改写，
   但建议在 §2.2 补一行现状校正，避免读者以 S3 为准。
 - `VdfsActions.vue` 注释提到的第三类消费方（"自定义渲染器经
   mechanism-actions prop 接收"）目前无实例。

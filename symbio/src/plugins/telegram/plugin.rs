@@ -506,27 +506,25 @@ impl TelegramPlugin {
                 match router.route(sub_ctx).await {
                     Ok(payload) => {
                         let mut full_text = String::new();
-                        match payload {
-                            PluginPayload::Data(_) => {
-                                if let Ok(chat_resp) = payload.get::<session_chat::Response>() {
-                                    full_text.push_str(
-                                        &chat_resp
-                                            .message
-                                            .content
-                                            .as_ref()
-                                            .map(|c| c.to_text())
-                                            .unwrap_or_default(),
-                                    );
-                                }
+                        // `session/chat/send` 的返回值**恒为** `PluginPayload::Data`
+                        // （`session_chat::Response`，已含本轮定稿后的完整正文），
+                        // 没有第二个分支可写——因此是 `if let` 而不是单臂 `match`。
+                        //
+                        // ⚠️ 这里**曾经**还有一个 `PluginPayload::Session` 分支：它从
+                        // 转写流（`session/stream`）逐帧收 `delta` 拼出正文。该分支是
+                        // **死代码**，而那条转写流已于 2026-09-23 随 ADR-025 退役
+                        // （会话实时面迁回 VDFS 变更），故整段删除。
+                        if let PluginPayload::Data(_) = payload {
+                            if let Ok(chat_resp) = payload.get::<session_chat::Response>() {
+                                full_text.push_str(
+                                    &chat_resp
+                                        .message
+                                        .content
+                                        .as_ref()
+                                        .map(|c| c.to_text())
+                                        .unwrap_or_default(),
+                                );
                             }
-                            // ⚠️ 这里**曾经**还有一个 `PluginPayload::Session` 分支：
-                            // 它从转写流（`session/stream`）逐帧收 `delta` 拼出正文。
-                            // 该分支是**死代码**——`session/chat/send` 的返回值恒为
-                            // `PluginPayload::Data`（`session_chat::Response`，已含
-                            // 本轮定稿后的完整正文），从不返回通道。而那条转写流已于
-                            // 2026-09-23 随 ADR-025 退役（会话实时面迁回 VDFS 变更），
-                            // 这个分支连「将来可能活」都不再成立，故整段删除。
-                            _ => {}
                         }
 
                         if full_text.is_empty() {

@@ -883,7 +883,7 @@ impl VdfsError {
 // ## 信封**没有操作枚举**：`{path, data?}`，语义全在 `data` 的字段上
 //
 // 信封只回答「**哪条路径、带来了什么**」：`data` 是该路径的**业务载荷**——
-// 路径是消息项（`<id>/消息/<mid>`）时它是 `ChatMessage`（`delta` 有 ⇒ 尾部追加、
+// 路径是消息项（`<id>/message/<mid>`）时它是 `ChatMessage`（`delta` 有 ⇒ 尾部追加、
 // `content` 有 ⇒ 整条替换、`status = removed` ⇒ 就地移除，语义由字段本身给出，
 // 不从类型反推）；路径是会话叶子且带视图时它是 `VdfsNode`（全量节点视图，幂等）。
 // `data` 缺失 = 「变了，但本变更不携带载荷」——消费端按需回读；对**资源域**的
@@ -1628,16 +1628,16 @@ mod tests {
     /// `map_paths` 是路径翻译的**唯一入口**——使用方补前缀不必逐字段重建。
     #[test]
     fn map_paths_is_the_single_translation_point() {
-        let c = VdfsChange::bare("abc/消息/m1").map_paths(|p| format!("session/{p}"));
-        assert_eq!(c.path, "session/abc/消息/m1");
+        let c = VdfsChange::bare("abc/message/m1").map_paths(|p| format!("session/{p}"));
+        assert_eq!(c.path, "session/abc/message/m1");
         assert!(c.data.is_none());
         // `data` 是**载荷**不是路径，翻译必须原样带过——逐字段重建会把它丢掉
         let d = VdfsChange::with_data(
-            "abc/消息/m1",
+            "abc/message/m1",
             serde_json::json!({ "id": "m1", "delta": "片段" }),
         )
         .map_paths(|p| format!("session/{p}"));
-        assert_eq!(d.path, "session/abc/消息/m1");
+        assert_eq!(d.path, "session/abc/message/m1");
         assert_eq!(d.data.as_ref().unwrap()["delta"], "片段");
     }
 

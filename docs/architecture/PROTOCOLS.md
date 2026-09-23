@@ -179,7 +179,7 @@ pub struct CapabilityMeta {
 ```rust
 // 请求
 pub struct PluginMessageWire {
-    pub metadata: serde_json::Value,  // { path, trace_id, ... }
+    pub metadata: serde_json::Value,  // { path, trace_id, origin?, ... }
     pub payload: serde_json::Value,   // 业务数据
 }
 
@@ -252,7 +252,7 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 > 会话运行态是会话节点的属性（`status` + `attributes.outcome` / `.error`）、转写是消息节点。
 > 于是 `event_bus` 退化为**纯传输层**（不再认识任何业务频道语义）。
 >
-> **会话域的实时面也在这里**（ADR-025，2026-09-23）：消息是 `<根>/session/<id>/消息` 这个
+> **会话域的实时面也在这里**（ADR-025，2026-09-23）：消息是 `<根>/session/<id>/message` 这个
 > 文件夹里的**文件**，会话运行态是会话节点（`<根>/session/<id>`）的 `status`——两者都是
 > **VDFS 变更**，都走 `kind = "vdfs"`。本条此前写的是「实时面走 `session/stream` 转写流，
 > **因为「会话不忙 ⇒ 本轮消息已终态」这条推理需要顺序保证，而无序总线给不了**」——

@@ -33,7 +33,7 @@
 //!   `messages/`、`tool_archives/`、`transcripts/`、`sessions/` 会原样成为对外
 //!   地址——把物理布局当公共契约。而会话要求 `<id>` 是叶子、内部只以人读语义段
 //!   呈现（与 agent 目录的 `提示词` / `技能` / `MCP` 同一口径，规范 §13.4）。
-//! - 条目也不是文件字节：`<id>/消息/<mid>` 是从整份 `Session` 派生的视图，
+//! - 条目也不是文件字节：`<id>/message/<mid>` 是从整份 `Session` 派生的视图，
 //!   `append` / `replace` / `update` 的 seq 分配与剔孤儿是会话专有的写入语义
 //!   （在 `super::chat_session`）。
 //!

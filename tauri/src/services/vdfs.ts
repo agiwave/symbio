@@ -34,11 +34,33 @@ import {
 import { resetVdfsRoot, setVdfsRoot, vdfsRoot, vdfsRootResolved } from '../schemas/vdfsRoot'
 import { logger } from '@/utils/logger'
 import { withFallback } from './fallback'
+// 回读理由是**词表**，不是本层的服务——从它的独立模块取，消费方也走同一处
+// （见 `services/readback.ts` 的「为什么单独成一个模块」）。
+import type { ReadbackReason } from './readback'
 
 /** 有界列表的窗口参数：`limit` 条、游标 `before` 之后 */
 export interface VdfsListOptions {
   limit?: number
   before?: string
+}
+
+/**
+ * 三个回读动词共用的调用口——把**理由**放进 `metadata.origin`。
+ *
+ * 走的是 [`callPlugin`] 这一条既有出口（**不是第二套实现**）：超时、握手、错误
+ * 口径全部复用，因此「带理由的调用」与「不带理由的调用」不可能行为分叉。
+ *
+ * 超时显式给出是因为它在 `callPlugin` 的形参里排在 options 之前——写死一个与
+ * 缺省值相同的数，好过让调用方以为这里换了一套超时。
+ */
+const READBACK_TIMEOUT_MS = 30_000
+
+function callReadback<TOutput>(
+  reason: ReadbackReason,
+  path: string,
+  input: unknown
+): Promise<TOutput> {
+  return callPlugin<TOutput>(path, input, READBACK_TIMEOUT_MS, { origin: reason })
 }
 
 /**
@@ -81,6 +103,7 @@ export function resetVdfsRootForTest(): void {
  * （多一个 `limit: undefined` 也会被序列化成键，改变请求体形状）。
  */
 export async function listVdfs(
+  reason: ReadbackReason,
   path = vdfsRoot(),
   opts?: VdfsListOptions
 ): Promise<VdfsListResponse> {
@@ -90,25 +113,25 @@ export async function listVdfs(
   // 空目录要带上 `path`，故兜底是 thunk（惰性）而非常量
   const empty = (): VdfsListResponse => ({ path, node: emptyNode(path), items: [] })
   return withFallback(
-    async () => (await callPlugin<VdfsListResponse>(VDFS_LIST, payload)) ?? empty(),
+    async () => (await callReadback<VdfsListResponse>(reason, VDFS_LIST, payload)) ?? empty(),
     empty,
     { tag: 'vdfs-service', what: `listVdfs(${path}) failed` }
   )
 }
 
-/** 读元数据；失败返回 null */
-export function statVdfs(path: string): Promise<VdfsNode | null> {
+/** 读元数据；失败返回 null。`reason` 见 [`READBACK_REASON`]（必填，进路由留痕）。 */
+export function statVdfs(reason: ReadbackReason, path: string): Promise<VdfsNode | null> {
   // 节点不存在是**预期内**的失败（stat 的常规用法就是先探一下），故降为 debug
-  return withFallback(() => callPlugin<VdfsNode>(VDFS_STAT, { path }), () => null, {
+  return withFallback(() => callReadback<VdfsNode>(reason, VDFS_STAT, { path }), () => null, {
     tag: 'vdfs-service',
     what: `statVdfs(${path}) failed`,
     level: 'debug',
   })
 }
 
-/** 读内容；失败返回 null */
-export function readVdfs(path: string): Promise<VdfsContent | null> {
-  return withFallback(() => callPlugin<VdfsContent>(VDFS_READ, { path }), () => null, {
+/** 读内容；失败返回 null。`reason` 见 [`READBACK_REASON`]（必填，进路由留痕）。 */
+export function readVdfs(reason: ReadbackReason, path: string): Promise<VdfsContent | null> {
+  return withFallback(() => callReadback<VdfsContent>(reason, VDFS_READ, { path }), () => null, {
     tag: 'vdfs-service',
     what: `readVdfs(${path}) failed`,
   })

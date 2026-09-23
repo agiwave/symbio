@@ -65,7 +65,7 @@
 >
 > **S26 续（实时面迁回 VDFS，ADR-025，2026-09-23）：上一段的结论被反转，本文的原始命题
 > 重新成立。** 消息的实时出口**回到** `kind = "vdfs"`：消息**就是**
-> `<根>/session/<sid>/消息/<mid>` 这个**文件**，流式输出是该文件内容的**增长**——
+> `<根>/session/<sid>/message/<mid>` 这个**文件**，流式输出是该文件内容的**增长**——
 > 发 `updated` + `delta`（`delta` 有 ⇒ 尾部追加；无 ⇒ 回读）。会话运行态是会话节点
 > （`<根>/session/<sid>`）的 `status`，同样走 `updated`。`session/stream` 与
 > `symbio_core::transcript_stream` 一并退役。
@@ -146,10 +146,10 @@
 ```text
 <根>/session/                    会话清单（已有）
 <根>/session/<sid>               单个会话（ext = session，点开即聊天工作区）
-<根>/session/<sid>/消息          转写列表  ← 新增（l 位）
-<根>/session/<sid>/消息/<mid>    单条消息  ← 新增（ext = message，r 位）
-<根>/session/<sid>/子会话[/<sub>]  子会话清单 / 单个子会话（已有）
-<根>/session/<sid>/工作目录[/<rel>] 工作目录树（已有）
+<根>/session/<sid>/message          转写列表  ← 新增（l 位）
+<根>/session/<sid>/message/<mid>    单条消息  ← 新增（ext = message，r 位）
+<根>/session/<sid>/subsession[/<sub>]  子会话清单 / 单个子会话（已有）
+<根>/session/<sid>/workdir[/<rel>] 工作目录树（已有）
 ```
 
 `消息` 是会话**本体**（转写），因此排在内置子目录的第一位。
@@ -157,7 +157,7 @@
 ### 3.2 列表项的分工：正文进内容，结构进 attributes
 
 ```text
-read(<根>/session/<sid>/消息/<mid>)
+read(<根>/session/<sid>/message/<mid>)
   → VdfsContent::text  = 这条消息的正文（流式追加的正是它）
   → VdfsNode.attributes = { role, type, parent_id, seq, error, meta }
   → VdfsNode.ext        = "message"
@@ -221,7 +221,7 @@ read(<根>/session/<sid>/消息/<mid>)
 
 ## 4. 变更语义（实时链路）
 
-订阅地址：`<根>/session/<sid>/消息`（或更上层的 `<根>/session`）。
+订阅地址：`<根>/session/<sid>/message`（或更上层的 `<根>/session`）。
 
 | 触发 | 变更 | 载荷 | 消费者 |
 |---|---|---|---|
@@ -231,7 +231,7 @@ read(<根>/session/<sid>/消息/<mid>)
 | 落库回包（含用户发言） | `updated` | `node` + `content` | 就地替换成权威版本（**零回读**）；权威 `seq` 由此换入（§3.4） |
 | 工具恢复：删旧子节点 | `deleted` | — | 移除**这一项**（与顺序无关） |
 | 删除某条及其后 | `truncated` | — | 按 `seq` 取「该节点及其后」移除（**一条**变更） |
-| 清空转写 | `deleted` | `path = …/消息` | 清空列表 |
+| 清空转写 | `deleted` | `path = …/message` | 清空列表 |
 
 **整表重写（L2 语义压缩）也必须发变更。** 压缩把旧历史蒸馏成快照、新列表变成
 `[快照, 保留区…]`——这是**列表构成**的改变，不是某一条消息的状态迁移。它由
@@ -296,7 +296,7 @@ read(<根>/session/<sid>/消息/<mid>)
 2. `vdfs/write` 的语义是「把这段内容存到那个地址」，而发言的语义是
    「以这段内容为输入，跑一轮编排」。
 
-因此 `write` 在 `<根>/session/<sid>/消息`（**列表本身**）上**明确拒绝**（`Forbidden`），
+因此 `write` 在 `<根>/session/<sid>/message`（**列表本身**）上**明确拒绝**（`Forbidden`），
 `create` 意图在**消息节点**上也一律驳回——新增消息即发言。不是静默降级。
 
 ### 5.2 但改写与删除是普通的节点操作（2026-09-18 收窄）
@@ -307,9 +307,9 @@ read(<根>/session/<sid>/消息/<mid>)
 | 操作 | 是不是「发言」 | 入口 |
 |---|---|---|
 | **新增**一条消息 | 是（触发一整轮编排） | 聊天协议（唯一） |
-| **改写**既有消息的字段 | **不是**（纯存储改写，不触发任何编排） | `write(<sid>/消息/<mid>)` |
-| **删**该条及其后 | 不是 | `action(<sid>/消息/<mid>, "truncate")` |
-| **清空**历史 | 不是 | `action(<sid>/消息, "clear")` |
+| **改写**既有消息的字段 | **不是**（纯存储改写，不触发任何编排） | `write(<sid>/message/<mid>)` |
+| **删**该条及其后 | 不是 | `action(<sid>/message/<mid>, "truncate")` |
+| **清空**历史 | 不是 | `action(<sid>/message, "clear")` |
 
 判据是**「触发不触发编排」**，不是「碰不碰消息」。改写一条消息与改会话标题在机制上是
 同一类事——都是「把内容存到那个地址」，地址语义完全成立。
@@ -334,7 +334,7 @@ read(<根>/session/<sid>/消息/<mid>)
 - `plugins/vdfs/host`：`to_change_event` 透传 `delta`；
 - `plugins/vdfs/fs`：`watch` 包装器透传 `delta`（并把路径补成展示口径）；
 - `plugins/composite/vdfs`：`watch` 包装器透传 `delta`（并把路径补成树内全口径）；
-- `plugins/session/plugin`：`<根>/session/<sid>/消息[/<mid>]` 的
+- `plugins/session/plugin`：`<根>/session/<sid>/message[/<mid>]` 的
   `list` / `stat` / `read`；`write` 明确拒绝。
 
 **S16 完成后即可用**：前端能在 VDFS 里浏览任意会话的转写；
@@ -408,16 +408,16 @@ LLM 能通过 `vdfs_read` 在**同一地址空间**里读会话历史——
 #### 一处「看起来是 bug、查下来不是」的记录：`watch` 的路径口径
 
 实现时一度认定 `SessionPlugin::watch` 有缺陷：它忽略被订阅的 `path`，把广播源里
-provider 根口径的路径（`abc/消息/m1`）原样转发，看起来会被容器再补一遍前缀、
-拼成 `session/abc/消息/abc/消息/m1`。
+provider 根口径的路径（`abc/message/m1`）原样转发，看起来会被容器再补一遍前缀、
+拼成 `session/abc/message/abc/message/m1`。
 
 **核对后确认不是缺陷。** 关键在于容器的回填只补**挂载名（首段）**，不补被订阅的
 整条路径——`CompositeVdfs::watch` 把 `(dir, rel)` 拆开：`rel` 传给 provider，
 回填时只加 `dir`：
 
 ```text
-watch("session/abc/消息") → dir = "session", rel = "abc/消息"
-provider 报 "abc/消息/m1" → 容器补成 "session/abc/消息/m1"  ✓
+watch("session/abc/message") → dir = "session", rel = "abc/message"
+provider 报 "abc/message/m1" → 容器补成 "session/abc/message/m1"  ✓
 若先剥成 "m1"            → 容器补成 "session/m1"          ✗
 ```
 
@@ -588,7 +588,7 @@ S17 建立的「合并 + 翻译」机制在验证期暴露了它的结构性缺�
 ## 7. 不变量（迁移全程必须成立）
 
 1. **顺序锚点仍是 `seq`**——VDFS 列表序、前端消息表、LLM 上下文三者同源；
-2. **一条消息只有一个地址**：`<根>/session/<sid>/消息/<mid>`；
+2. **一条消息只有一个地址**：`<根>/session/<sid>/message/<mid>`；
 3. **正文只有一个位置**：节点内容。`attributes` 只放结构，不放正文；
 4. **前端与 LLM 恒等**：同一地址、同一份数据、同一组访问位；
 5. **变更只有一个通道**：`kind = "vdfs"`；

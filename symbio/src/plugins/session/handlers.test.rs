@@ -4,7 +4,7 @@
 //!
 //! 本文件曾有「级联删除的变更语义」三例，测的是 `invoke_delete_message`。那条路由
 //! （连同实现与 schema）已于 2026-09-18 退役，消息删除改走
-//! `action(<id>/消息/<mid>, "truncate")`——**契约随实现一起搬到了**
+//! `action(<id>/message/<mid>, "truncate")`——**契约随实现一起搬到了**
 //! `plugin/vdfs_provider.test.rs`：
 //!
 //! | 原用例锁定的契约 | 现位置 |
@@ -110,12 +110,15 @@ async fn migrated_session_routes_stay_retired() {
         ("append", "open_chat_session + append_messages"),
         // 无消费方，整条链路（路由 + 实现 + schema）已删
         ("open", "（无替代：本就不需要）"),
-        ("chat/update_message", "vdfs/write(<sid>/消息/<mid>)"),
+        ("chat/update_message", "vdfs/write(<sid>/message/<mid>)"),
         (
             "chat/delete_message",
-            "vdfs/action(<sid>/消息/<mid>, \"truncate\")",
+            "vdfs/action(<sid>/message/<mid>, \"truncate\")",
         ),
-        ("chat/clear_messages", "vdfs/action(<sid>/消息, \"clear\")"),
+        (
+            "chat/clear_messages",
+            "vdfs/action(<sid>/message, \"clear\")",
+        ),
         (
             "get_messages",
             "进程内 vdfs/stat（get_vfs_provider + stat(<挂载名>/<sid>)）",

@@ -479,6 +479,115 @@ async fn append_messages_assigns_monotonic_authoritative_seq() {
     );
 }
 
+/// 存储边界：**在途占位号不得落库**（事故现场见 `transcript::INFLIGHT_SEQ_BASE`）。
+///
+/// `CompressionEmitter::finish` 交给 `append_messages` 的是**在途图里的节点**——
+/// 它的 `seq` 已被 `Transcript::apply` 填成在途号。存储若把它当权威号存下，存储
+/// 水位就被抬进在途号段；此后存储计数器与在途计数器在同一数值区间各自递增，
+/// **必然撞号**：实测同一会话里「本轮用户消息」与「压缩节点」各持 `1099511627781`，
+/// `assertTranscriptInvariants` 的「seq 严格递增」当场失败。
+///
+/// 断言的是**从存储读回来的号**——边界只对"落盘的是什么"负责。
+#[tokio::test]
+async fn append_messages_replaces_inflight_placeholder_seq() {
+    let (session, _dir, _tmp) = setup().await;
+    let inflight = super::super::transcript::INFLIGHT_SEQ_BASE;
+
+    session
+        .append_messages(vec![plain_msg("u1")])
+        .await
+        .expect("首次落库失败");
+    let s1 = session.get_messages().await.unwrap()[0]
+        .seq
+        .expect("存储必须分配 seq");
+
+    // 模拟压缩节点：带着在途号进来（这正是 `finish` 的返回形态）
+    let mut compact = plain_msg("compact1");
+    compact.seq = Some(inflight + 7);
+    session
+        .append_messages(vec![compact])
+        .await
+        .expect("在途节点落库失败");
+
+    let stored = session.get_messages().await.expect("读取存储消息失败");
+    let s2 = stored
+        .iter()
+        .find(|m| m.id == "compact1")
+        .expect("compact1 应在存储中")
+        .seq
+        .expect("存储必须分配 seq");
+    assert!(
+        s2 < inflight,
+        "在途号不得落库：compact1 落库后仍是 {s2}（在途号段从 {inflight} 起）"
+    );
+    assert!(s2 > s1, "落库号必须严格递增：u1={s1} → compact1={s2}");
+
+    // 撞号的另一半：紧接其后的真实追加必须继续往上，而不是撞回同一个号
+    session
+        .append_messages(vec![plain_msg("u2")])
+        .await
+        .expect("后续落库失败");
+    let stored = session.get_messages().await.expect("读取存储消息失败");
+    let s3 = stored
+        .iter()
+        .find(|m| m.id == "u2")
+        .expect("u2 应在存储中")
+        .seq
+        .expect("存储必须分配 seq");
+    assert!(s3 > s2, "后续追加必须继续递增：compact1={s2} → u2={s3}");
+}
+
+/// 存储边界（整表重写）：在途号同样不得落库，且必须在 `assign_seq` **之前**摘掉。
+///
+/// `assign_seq` 对既有序号是"原样保留"（稳定不变式），所以放进去就等于把在途号
+/// 当成权威号写进存储。真实路径：`converge_inflight` 把在途图里尚未落库的节点
+/// `clone()` 后追加到存储列表尾部再 `replace_messages`——那些节点带的正是在途号。
+///
+/// 同时钉住另一半：**既有的权威号一个都不许改**（否则前端手里的顺序锚点会错位）。
+#[tokio::test]
+async fn replace_messages_replaces_inflight_placeholder_seq() {
+    let (session, _dir, _tmp) = setup().await;
+    let inflight = super::super::transcript::INFLIGHT_SEQ_BASE;
+
+    session
+        .append_messages(vec![plain_msg("u1")])
+        .await
+        .expect("首次落库失败");
+    let base = session.get_messages().await.unwrap()[0]
+        .seq
+        .expect("存储必须分配 seq");
+
+    let mut kept = plain_msg("u1");
+    kept.seq = Some(base);
+    let mut live = plain_msg("turn1");
+    live.seq = Some(inflight + 3);
+    session
+        .replace_messages(vec![kept, live])
+        .await
+        .expect("整表重写失败");
+
+    let stored = session.get_messages().await.expect("读取存储消息失败");
+    let seq_of = |id: &str| {
+        stored
+            .iter()
+            .find(|m| m.id == id)
+            .unwrap_or_else(|| panic!("{id} 应在存储中"))
+            .seq
+            .expect("存储必须分配 seq")
+    };
+    assert_eq!(seq_of("u1"), base, "既有序号必须原样保留（稳定不变式）");
+    assert!(
+        seq_of("turn1") < inflight,
+        "在途号不得落库：turn1 落库后仍是 {}",
+        seq_of("turn1")
+    );
+    assert!(
+        seq_of("turn1") > base,
+        "在途节点应接在末尾：base={base}，turn1={}",
+        seq_of("turn1")
+    );
+}
+
 /// 持久层不变量：**增量不得落盘**。
 ///
 /// `delta` 是帧的形态（"这一段"），不是消息的形态（"全部"）。放行它落库就等于把

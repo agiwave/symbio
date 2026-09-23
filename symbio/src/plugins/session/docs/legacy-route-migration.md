@@ -36,9 +36,9 @@
 |---|---|---|---|
 | **A ✅已删** | `session/append` | **整条链路死**（路由 + 实现 + schema） | 全仓仅 `plugin.rs:478` 一处引用。实现看似被 `entry.rs:232` 内部调用，但那处是**绕路由的内部调用**（为一次纯数据操作搭 invoke 信封），改直连后实现一并变死——见 §2.1 |
 | **A ✅已删** | `session/open` | **路由 + 实现 + schema 全死** | 路由无调用方；`open_session_handle` 的真实调用方 `entry.rs:291` 是**直连 Rust 方法**。CLI 的通道来自 `event_bus/subscribe`（`cli/src/client.rs:113-121`），**不是** `session/open`——`client.rs:12` 那句注释是过期的 |
-| **B ✅已删** | `session/chat/update_message` | → `vdfs/write(<sid>/消息/<mid>)` | 唯一消费方是前端（`stores/sessions.ts:836`）；**纯存储改写，不触发编排** |
-| **B ✅已删** | `session/chat/delete_message` | → `vdfs/action(<sid>/消息/<mid>, "truncate")` | 同上（`stores/sessions.ts:816`）；`action` 的返回载荷**能保住 `deleted_ids` 回执** |
-| **B ✅已删** | `session/chat/clear_messages` | → `vdfs/action(<sid>/消息, "clear")` | 同上（`stores/sessions.ts:855`）；与截断同走**动作**——同一区段的删除只有一种入口形态（见 §3.3） |
+| **B ✅已删** | `session/chat/update_message` | → `vdfs/write(<sid>/message/<mid>)` | 唯一消费方是前端（`stores/sessions.ts:836`）；**纯存储改写，不触发编排** |
+| **B ✅已删** | `session/chat/delete_message` | → `vdfs/action(<sid>/message/<mid>, "truncate")` | 同上（`stores/sessions.ts:816`）；`action` 的返回载荷**能保住 `deleted_ids` 回执** |
+| **B ✅已删** | `session/chat/clear_messages` | → `vdfs/action(<sid>/message, "clear")` | 同上（`stores/sessions.ts:855`）；与截断同走**动作**——同一区段的删除只有一种入口形态（见 §3.3） |
 | **B ✅已删** | `session/get_messages` | → **进程内 VDFS 纯接口探测**（`stat("<挂载名>/<sid>")`） | 唯一消费方 `agent/host/subagent.rs::validate_subsession_exists`。当初判「不改」的两条硬化理由（后端拿不到 root provider / 线路信封留在 vdfs 插件内）**已被现成 API 化解**——见 §3.4.1（2026-09-23） |
 | ~~**B 待定**~~ **已下线** | `session/update` | ~~迁 `vdfs/write` 需先改 CLI~~ **理由已消失** | 唯一消费方 `cli/src/client.rs`。前两轮判「**不是纯收益**」（要动 `--session <ID>` 语义或扩 VDFS create，且 CLI 会话 id 会变格式）——**2026-09-23 改判并整条下线**：那条「扩 VDFS create」被证明不是扩张而是**对齐**（会话 provider 是唯一违反「有名字时 id 来自地址」的 provider），于是 `--session <ID>` 语义与 id 格式都**不必动**。见 §3.5 |
 | **C 保留** | `session/chat/abort` | 不可迁 | 控制信号，不是数据变更 |
@@ -174,7 +174,7 @@ CLI 侧的注释（`cli/src/client.rs:12`）说「需先 `session/open` 拿通�
 后三条就是**对已有节点的一次改写/删除**，与「改会话标题」在机制上是同一类事——
 而「改会话标题」早就迁到 `vdfs/write` 了（`services/session.ts:203-212`）。
 
-**当前的不对称因此是明显的**：消息**读**走 VDFS（`<根>/session/<sid>/消息/<mid>`），
+**当前的不对称因此是明显的**：消息**读**走 VDFS（`<根>/session/<sid>/message/<mid>`），
 消息**写**走三条专用路由——同一个地址，两个方向两套协议。这正是「同一件事的两条路径」。
 
 ### 3.2 迁移的落地成本极低（因为 VDFS 侧只差两个分支）
@@ -196,9 +196,9 @@ CLI 侧的注释（`cli/src/client.rs:12`）说「需先 `session/open` 拿通�
 
 | 旧路由 | 新入口 | 语义 | 变更 | 回执 |
 |---|---|---|---|---|
-| `chat/update_message` | `write(<sid>/消息/<mid>)`，body = 消息字段补丁 | 按**地址**定位，**只覆盖提供的字段**（与 `invoke_update_message` 逐字一致） | `updated`（带 `node` + `content`，零回读） | `{path, created}` |
-| `chat/delete_message` | `action(<sid>/消息/<mid>, "truncate")` | 「该节点及其之后全部没了」 | **起始消息**上 `truncated`（只给区间起点） | **`VdfsActionResult` 可带载荷** → 保住 `deleted_ids` |
-| `chat/clear_messages` | `action(<sid>/消息, "clear")` | 列表清空，会话本体 / 元数据 / 工作目录保留 | **列表目录**上 `deleted` | `VdfsActionResult`（无载荷） |
+| `chat/update_message` | `write(<sid>/message/<mid>)`，body = 消息字段补丁 | 按**地址**定位，**只覆盖提供的字段**（与 `invoke_update_message` 逐字一致） | `updated`（带 `node` + `content`，零回读） | `{path, created}` |
+| `chat/delete_message` | `action(<sid>/message/<mid>, "truncate")` | 「该节点及其之后全部没了」 | **起始消息**上 `truncated`（只给区间起点） | **`VdfsActionResult` 可带载荷** → 保住 `deleted_ids` |
+| `chat/clear_messages` | `action(<sid>/message, "clear")` | 列表清空，会话本体 / 元数据 / 工作目录保留 | **列表目录**上 `deleted` | `VdfsActionResult`（无载荷） |
 
 补丁的 `id` 由**地址**补齐——`{"content":"…"}` 是合法补丁。`ChatMessage::id` 在结构里
 是必填字段（它同时是存储层主键），不在反序列化前补上，不带 `id` 的补丁会**先一步**被拒，
@@ -221,7 +221,7 @@ CLI 侧的注释（`cli/src/client.rs:12`）说「需先 `session/open` 拿通�
 `(节点路径, 动作标识, 载荷)`、不解释语义（`symbio_core/vdfs_provider.rs:1293-1310`）。
 「从这里截断」是一个动作，不是一个删除。前端已有 `runVdfsAction` 封装（`services/vdfs.ts:190`）。
 
-**为什么清空也跟着走 `action`**（原计划是 `delete(<sid>/消息, recursive)`）：
+**为什么清空也跟着走 `action`**（原计划是 `delete(<sid>/message, recursive)`）：
 
 清空**本可以**走 `delete`——`deleted` 落在**列表目录**这个地址上只有一种读法
 （目录没了 ⇒ 里面的条目都没了），语义没有歧义，也不必为它新造一个变更值。这正是不设
@@ -394,7 +394,7 @@ CLI 会话 id 格式不变（仍是 `cli<时间戳>`）、e2e 里 8 个按 id �
 3. **流式已完全走 VDFS**（S17–S19），前端不再依赖 send 的响应通道。
 
 而 `send` 的形状恰好就是 action 的形状：`(节点路径, 动作标识, 载荷)` —— 地址是
-`<根>/session/<sid>/消息`，动作是「发言」，载荷是那一条用户消息。
+`<根>/session/<sid>/message`，动作是「发言」，载荷是那一条用户消息。
 
 **但 `send` 不等于「添加消息」**（这决定了它不能收敛成 `write`）：
 
@@ -574,9 +574,9 @@ provider 只回答「这个地址能不能写」，不回答「谁在写」。
 
 | 调用点 | 现在 | 迁移后 |
 |---|---|---|
-| `ModelChatPanel.vue:282` → `deleteMessage` | `session/chat/delete_message` | `vdfs/action(<sid>/消息/<mid>, "truncate")` |
-| `ModelChatPanel.vue:316` → `updateMessage` | `session/chat/update_message` | `vdfs/write(<sid>/消息/<mid>)` |
-| `ChatMainPanel.vue:181` → `clearMessages` | `session/chat/clear_messages` | `vdfs/action(<sid>/消息, "clear")` |
+| `ModelChatPanel.vue:282` → `deleteMessage` | `session/chat/delete_message` | `vdfs/action(<sid>/message/<mid>, "truncate")` |
+| `ModelChatPanel.vue:316` → `updateMessage` | `session/chat/update_message` | `vdfs/write(<sid>/message/<mid>)` |
+| `ChatMainPanel.vue:181` → `clearMessages` | `session/chat/clear_messages` | `vdfs/action(<sid>/message, "clear")` |
 
 store 层签名不变（`stores/sessions.ts:816/836/855`），只换内部实现——
 **组件零改动**。这正是「机制化」的收益：特殊逻辑集中在 `services/session.ts` 一处，

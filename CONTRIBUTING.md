@@ -78,6 +78,24 @@ node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 跑到了自动执行阶段（`backend` 的 fmt、`facts`）的调用**必须**带 `--ci`；回归测试
 `scripts/gate.d/_shared.test.mjs` 会断言这一点。
 
+**e2e 的被测二进制同理：不用你记得重建，也不靠文档提醒。** 判据在
+`scripts/cli-binary.mjs`（门禁与 e2e 共用的唯一真相），是**内容指纹**而非「文件在不在」：
+`cli/src` + `symbio/src` 的全部源码与两个 crate 的清单算一个 sha256，构建成功后写成构建戳；
+使用前比对，不一致就先 `cargo build --release`（cargo 自己判增量）再写戳，`--check` 只判不建。
+「文件在就算新鲜」这个判据曾经存在过，代价是一份过期 exe 被一直用下去，e2e 报出**与眼前源码
+直接矛盾**的断言失败（源码里明明有的字段，运行时是 `undefined`），排查方向被引到源码上。
+
+**壳（Tauri）那一侧同理，而且更贵。** 它不会报错，只会让**日志**看起来来自当前源码：于是
+「日志里有一条源码中不存在的行」会被当成「代码没接上」，去读一遍代码。机制在
+`scripts/tauri-binary.mjs`，指纹覆盖壳自身的源码 / 权限集 / 清单 + **整棵 `symbio/src`
+插件树**（壳把它编译进去，插件日志正是从那里来的）。`npm run tauri dev|build` 会在构建**前**
+把指纹写成构建戳（`before*Command` → `npm run stamp:dev|release`），壳启动时读**自己旁边**
+那个戳并打进日志首行。于是任何一段日志自带「我是谁」，与 `node scripts/tauri-binary.mjs
+--print` 一比即知是否同源；`--check` 则回答「本机产物对不对得上当前源码」。
+⚠️ 戳是**构建前**写的声明，所以判据里还有一条「产物不得比戳更旧」——构建失败时旧产物会留在
+原处而戳已指向新输入，那正是「把过期产物当最新」。配套地，输入未变时戳**不重写**，否则每次
+「什么都不用重建」的构建都会变成一次假警报。
+
 MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）并写独立 target
 （`.workbuddy-ai/msrv-target/`），所以**不会**动日常构建缓存；本机没装该工具链时跳过并提示
 （`rustup toolchain install 1.91.0`），CI 的 `msrv-check` job 装好后一定会真跑。
@@ -123,13 +141,6 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
   写入时把 `\n` 转成了 CRLF，rustfmt 会**逐文件**报 `Incorrect newline style` 并以
   非零码退出，症状是「fmt 门禁突然挂了但代码没变」。
 - ⚠️ vitest 4 的 `toBe(v, 'msg')` 只收 1 个参数（写两个参数静默失效）。
-- ⚠️⚠️ **e2e 门禁「已有二进制就跳过重建」⇒ 改完 Rust / CLI 源码必须自己重建，否则你在测过期产物**。
-  `40-e2e.mjs` 的构建条件是 `when: () => ctx.ci || !cliBinaryExists(repoRoot)`：本机只要
-  `symbio/target/release/symbio-cli.exe` 在，整步就跳过（汇总里显示 `⊘ 已有 release 二进制`）。
-  症状是**断言失败的方式与眼前的源码矛盾**——源码里明明有的字段，运行时是 `undefined`。
-  这时**先怀疑产物，不要怀疑源码**。正解：`cd cli && cargo build --release`
-  （**必须在 `cli/` 下跑**：仓库根没有 `Cargo.toml`，而 `cli/.cargo/config.toml` 把 target-dir
-  指向 `../symbio/target`）；想一次性判掉这一步就用 `node scripts/gate.mjs --ci`。
 - ⚠️ **「棘轮」（单向基线）不止 `gate.mjs` 里那一处**，`scripts/` 下多个审计脚本各自带一个常量，
   且方向**不统一**，别记反：
   - `gate.d/_shared.mjs` 的 `BASELINE.rustTests` / `vitestFiles` / `vitestTests` 是**地板**——

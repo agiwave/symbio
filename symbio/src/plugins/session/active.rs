@@ -68,7 +68,7 @@ pub struct ActiveSessionState {
     ///
     /// - 实时面：每条变更（`created` / `updated` + `delta` / `deleted`）经
     ///   `apply` 投到 VDFS 变更订阅表——一张表、一条 `vdfs/watch`；
-    /// - VDFS 转写列表：`<根>/session/<id>/消息` 把在途图叠加在落库转写之上。
+    /// - VDFS 转写列表：`<根>/session/<id>/message` 把在途图叠加在落库转写之上。
     ///
     /// 之所以必须共享：**流式期间消息还没落库**（`persist_messages` 只在每轮结束时
     /// 写盘）。若 VDFS 只读存储，列表在流式期间就是空的。

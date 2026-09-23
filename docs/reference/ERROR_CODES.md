@@ -160,6 +160,10 @@ INFO trace_id=abc123 path=session/chat/send Start routing
 DEBUG trace_id=abc123 path=session/chat/send Routing finished
 ```
 
+回读类路由（`vdfs/list` / `stat` / `read`）另有 `origin`——`trace_id` 串链，
+`origin` 说明**谁、为什么**（闭集，对照表见
+[TROUBLESHOOTING.md](../guides/TROUBLESHOOTING.md) 的「追踪请求链」）。
+
 ---
 
 > **维护原则**：新增错误码必须在此文档登记，并说明触发条件与处理建议。

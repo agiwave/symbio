@@ -102,7 +102,7 @@ impl MessageStatus {
     /// [`Self::as_str`] 的逆：状态词 → 枚举。未知词返回 `None`。
     ///
     /// 存在的理由与 `as_str` 是同一条的另一半：VDFS 变更**不带载荷**（ADR-025），
-    /// 消费端拿到 `<sid>/消息/<mid>` 的 `updated` 后只能回读**节点**
+    /// 消费端拿到 `<sid>/message/<mid>` 的 `updated` 后只能回读**节点**
     /// （`stat`），而节点上承载状态的是那个**词**。把它解析回枚举若在每个消费端
     /// 各手写一次 match，词表就又有了第二份定义。
     pub fn of(word: &str) -> Option<Self> {
@@ -277,7 +277,7 @@ pub struct ChatMessage {
     /// ## 为什么节点 id 不能直接用它
     ///
     /// 许多 OpenAI 兼容网关**跨轮复用** `call_0` / `call_xxx` 这类短 id。而消息
-    /// id 在三处被当作**唯一键**：VDFS 地址（`<sid>/消息/<mid>`）、前端 store
+    /// id 在三处被当作**唯一键**：VDFS 地址（`<sid>/message/<mid>`）、前端 store
     /// （按 id 的 map）、消费循环的在途合并。wire id 直接当节点 id 会让下一轮
     /// 的同 id 工具调用更新到上一轮的老节点（后端 `Vec` 存储不撞，刷新后"自愈"
     /// ——正是"后端正常、前端显示混乱"的根源）。

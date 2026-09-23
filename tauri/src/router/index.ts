@@ -14,7 +14,7 @@ const router = createRouter({
         // （push 出来的，如会话内部）。两者都是同一个 VdfsView：它把浏览器地址
         // 换算成**数据地址**（`<根>` / `<根>/<dir…>`）绑定给唯一的三栏控件
         // VdfsWorkbench——数据地址与浏览器地址是两个概念，路由只做承载。
-        // :dir 可选 = `<根>` 之下的相对路径（可多级，如 /vdfs/session/<id>/工作目录），
+        // :dir 可选 = `<根>` 之下的相对路径（可多级，如 /vdfs/session/<id>/workdir），
         // 深链与「浏览内部」push 出来的地址页都由本路由承接。
         { path: 'vdfs/:dir(.*)*', name: 'vdfs', component: VdfsView },
         // 旧地址的兼容 redirect（书签 / 深链）：指向同名挂载的 VDFS 页。

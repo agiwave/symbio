@@ -33,15 +33,20 @@ import Toast from '@/components/common/Toast.vue'
 onMounted(async () => {
   // 启动**会话转写同步**（VDFS 变更 → 会话 store；ADR-025）
   //
-  // 实时面的全部内容只经一条通道（`event_bus` 的 `vdfs` 频道 + `vdfs/watch` 登记），
-  // 两类地址共用它：`<sid>` = 会话节点（运行态 / 资源，`stat` 回读收敛）；
-  // `<sid>/消息/<mid>` = 一条消息（`delta` 有 ⇒ 零回读追加，无 ⇒ 回读身份与基线，
-  // `deleted` ⇒ 就地移除）。语义全在字段上，没有操作枚举——顺序是**节点属性**
-  // （`ChatMessage.seq`），到达顺序与显示顺序无关。
+  // 实时面的全部内容只经一条通道（`event_bus` 的 `vdfs` 频道 + `vdfs/watch` 登记）。
+  // 会话是容器，其下是若干并列的集合（消息 / 子会话 / 记忆 / 工作目录，后续还有
+  // 任务列表、请求队列……），地址形状统一为 `<sid>/<集合段>/<项 id>`，**身份就是
+  // 地址末段**。两类地址各有归属：`<sid>` = 会话节点自身（运行态 / 资源，归
+  // `sessionNodeSync`）；`<sid>/message/<mid>` = 一条消息（归这里）。
+  //
+  // 消息帧的语义全在字段上，没有操作枚举——顺序是**节点属性**（`ChatMessage.seq`），
+  // 到达顺序与显示顺序无关。载荷就是帧本身：`delta` 有 ⇒ 零回读追加、`content` 有
+  // ⇒ 零回读整条替换、只有 `status` ⇒ 本地已有就零回读迁移状态、`removed` ⇒ 就地
+  // 移除；只有「本端缺基线」（身份未知）才回读 `stat` + `read`。
   //
   // 落地目标由本外壳**显式注入**（本模块不认识 Pinia）：判「本地有没有这条消息」
-  // （决定增量走零回读还是回读）、应用一批消息帧、应用一帧会话运行态、
-  // 整份重读（resync / 回读失败走 loadMessages）。
+  // （决定要不要回读补基线）、应用一批消息帧、整份重读（resync / 回读失败走
+  // loadMessages）。
   //
   // 增量收的是**一批**而不是一条：同步层把 ~48ms 窗口内的增量帧按会话攒批，
   // 一批只做一次 store 提交与一次消息树重建——逐帧提交的代价是 O(历史条数 × 帧数)，
@@ -50,7 +55,6 @@ onMounted(async () => {
   void startSessionTranscriptSync({
     hasMessage: (sid, mid) => sessions.hasMessage(sid, mid),
     applyTranscriptMessages: (sid, msgs) => sessions.applyTranscriptMessages(sid, msgs),
-    applySessionState: (sid, node) => sessions.applySessionState(sid, node),
     reload: async (sid) => {
       await sessions.loadMessages(sid)
     },

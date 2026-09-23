@@ -130,8 +130,8 @@ fn session_node_projects_runtime_state() {
     );
 }
 
-/// 会话内部寻址（S6/S16）：`<id>` / `<id>/AGENTS.md` / `<id>/消息[/<mid>]` /
-/// `<id>/子会话[/<sub>]` / `<id>/工作目录[/<rel>]`。
+/// 会话内部寻址（S6/S16）：`<id>` / `<id>/AGENTS.md` / `<id>/message[/<mid>]` /
+/// `<id>/subsession[/<sub>]` / `<id>/workdir[/<rel>]`。
 /// 未知区段与越界层级一律 NotFound——不给半通不通的路径留口子。
 #[test]
 fn vdfs_internal_path_parsing() {
@@ -150,36 +150,36 @@ fn vdfs_internal_path_parsing() {
     );
     // 转写列表：目录本身与列表项两级
     assert!(matches!(
-        parse_session_path("abc/消息").unwrap(),
+        parse_session_path("abc/message").unwrap(),
         Messages {
             id: "abc",
             mid: None
         }
     ));
     assert!(matches!(
-        parse_session_path("abc/消息/m1").unwrap(),
+        parse_session_path("abc/message/m1").unwrap(),
         Messages {
             id: "abc",
             mid: Some("m1")
         }
     ));
     assert!(matches!(
-        parse_session_path("abc/子会话").unwrap(),
+        parse_session_path("abc/subsession").unwrap(),
         SubSessions("abc")
     ));
     assert!(matches!(
-        parse_session_path("abc/子会话/s1").unwrap(),
+        parse_session_path("abc/subsession/s1").unwrap(),
         SubSession {
             id: "abc",
             sub: "s1"
         }
     ));
     assert!(matches!(
-        parse_session_path("abc/工作目录").unwrap(),
+        parse_session_path("abc/workdir").unwrap(),
         Workdir { id: "abc", rel: "" }
     ));
     assert!(matches!(
-        parse_session_path("abc/工作目录/src/lib.rs").unwrap(),
+        parse_session_path("abc/workdir/src/lib.rs").unwrap(),
         Workdir {
             id: "abc",
             rel: "src/lib.rs"
@@ -187,8 +187,8 @@ fn vdfs_internal_path_parsing() {
     ));
     // 未知区段、列表项越界层级 → NotFound
     assert!(parse_session_path("abc/nope").is_err());
-    assert!(parse_session_path("abc/消息/m1/deeper").is_err());
-    assert!(parse_session_path("abc/子会话/s1/deeper").is_err());
+    assert!(parse_session_path("abc/message/m1/deeper").is_err());
+    assert!(parse_session_path("abc/subsession/s1/deeper").is_err());
 }
 
 /// 会话内部的虚拟子项：转写列表与子会话恒在，记忆是**文件**且恒在，
@@ -206,12 +206,17 @@ fn vdfs_internal_dirs_conditional() {
     let without = internal_dirs(false, memory());
     assert_eq!(without.len(), 3);
     assert_eq!(without[0].name, SEG_MESSAGES, "转写列表恒在（会话的本体）");
-    // 段名是展示名，标识由 kind 承担：消费者按 kind 发现转写列表，
-    // 不必把展示名写进自己的地址模板（前端镜像守卫 X-002 校验的就是这个词）
+    assert_eq!(
+        without[0].name, "message",
+        "路径段一律 ASCII（地址要能安全地进 URL / 命令行 / 日志）"
+    );
+    assert_eq!(without[0].title, TITLE_MESSAGES, "展示名才是中文");
+    // 段名与展示名不是一回事，**标识**由 kind 承担：消费者按 kind 发现转写列表，
+    // 不必把段名写进自己的地址模板（前端镜像守卫 X-002 校验的就是这个词）
     assert_eq!(
         without[0].kind,
         vdfs::VDFS_KIND_MESSAGES,
-        "转写列表的 kind 是稳定协议词，不随展示名变化"
+        "转写列表的 kind 是稳定协议词，不随段名 / 展示名变化"
     );
     assert_eq!(without[1].name, workdir::SEG_SUB_SESSIONS);
     assert_eq!(
@@ -358,7 +363,7 @@ fn transcript_window_pages_before_cursor() {
     );
     // 游标可以写成地址形式（`<…>/<id>`），不只是裸 id
     assert_eq!(
-        ids(&transcript_window(&msgs, Some(2), Some("x/s/消息/t3"))),
+        ids(&transcript_window(&msgs, Some(2), Some("x/s/message/t3"))),
         vec!["t1", "t2"]
     );
     // 游标在第一页之前 ⇒ 空页（自然收敛，不报错）
@@ -436,7 +441,7 @@ fn overlay_live_keeps_seq_from_stored() {
 #[test]
 fn message_path_round_trips_through_parser() {
     let p = message_path("abc", "m1");
-    assert_eq!(p, "abc/消息/m1");
+    assert_eq!(p, "abc/message/m1");
     assert!(matches!(
         parse_session_path(&p).unwrap(),
         VdfsSessionPath::Messages {

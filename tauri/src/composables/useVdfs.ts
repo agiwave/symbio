@@ -16,12 +16,14 @@
  *   （钻入由控件 emit `open`，宿主决定呈现方式，通常是 push 新地址页）；
  * - **选中节点**（`selectedNode`）：详情来源，按 `ext` 解析渲染器；
  * - **选中记忆**：同一数据地址的左栏选中项会被记住（往返 push / 返回后恢复）；
- * - **实时**：订阅总线 `vdfs` 频道，受影响的目录防抖刷新（非轮询）。
- *   变更只有 `created` / `updated` / `deleted` 三个取值；`updated` 上的可选
- *   `delta` 说「尾部多了这些字」（流式正文，就地拼接、不重拉——见 `applyAppend`），
- *   其余一律重拉收敛（见 `schemas/vdfs.VdfsChange`）。
- *   转写列表的消息增量由 `stores/sessionTranscriptSync` 消费；本页只顺带消费
- *   「正打开的详情恰是一条流式消息」的场景。
+ * - **实时**：订阅总线 `vdfs` 频道，受影响的目录防抖刷新（非轮询）。信封没有
+ *   操作枚举，语义全在载荷的字段上：
+ *   - 带**正文**的（`delta` 增量 / `content` 整条替换）只改一个节点的内容，
+ *     就地落地、**不重拉目录**——命中当前详情才动手（见 `applyAppend` /
+ *     `applyReplace`）。转写列表的消息增量由 `stores/sessionTranscriptSync`
+ *     消费；本页只顺带消费「正打开的详情恰是一条流式消息」的场景。
+ *   - 其余（资源信号 / 状态帧）重拉收敛，但只在变更**真的影响本目录的条目集合**
+ *     时才拉（见 `affects`：自身 / 直接子项 / 祖先）。
  *
  * ## UI 约定（S11）
  *
@@ -50,6 +52,7 @@ import {
   writeVdfs,
   writeVdfsBinary,
 } from '@/services/vdfs'
+import { READBACK_REASON } from '@/services/readback'
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import {
   VDFS_STATUS_ACTIVE,
@@ -150,7 +153,9 @@ export function useVdfs(opts: UseVdfsOptions) {
     loading.value = true
     loadError.value = ''
     try {
-      const resp = await listVdfs(cwd.value, { limit: VDFS_PAGE_SIZE })
+      const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, cwd.value, {
+        limit: VDFS_PAGE_SIZE,
+      })
       items.value = resp.items
       cwdNode.value = resp.node
       hasMore.value = resp.items.length >= VDFS_PAGE_SIZE
@@ -191,7 +196,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     if (!last) return
     loadingMore.value = true
     try {
-      const resp = await listVdfs(cwd.value, {
+      const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, cwd.value, {
         limit: VDFS_PAGE_SIZE,
         before: last.name,
       })
@@ -212,7 +217,7 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 选中变化时内部已就地刷新当前目录（返回值告知调用方免重复刷）。
    */
   async function refreshNav(): Promise<boolean> {
-    const resp = await listVdfs(addr.value)
+    const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, addr.value)
     navDirs.value = resp.items
     const names = resp.items.filter(isVdfsDir).map((n) => n.name)
     const want = selectedMemo.get(addr.value)
@@ -300,10 +305,10 @@ export function useVdfs(opts: UseVdfsOptions) {
   /**
    * 就地应用一条**带增量的**变更；返回是否命中**当前打开的详情**。
    *
-   * 命中即拼接，且**不触发刷新**——这正是「`updated` 带 `delta`」与不带之分：
-   * 前者说「尾部多了这些字」，后者说「这个节点变了，请重读」。
-   * 未命中当前详情时什么也不做：列表项的结构（`created` / `deleted`）与
-   * 预览首行都不受尾部追加影响，为它重拉整目录是纯粹的浪费。
+   * `delta` 有 ⇒ 尾部追加。命中即拼接，且**不触发刷新**——载荷存在就是为了
+   * 让消费端零回读：它只说「尾部多了这些字」，列表项的结构与预览首行都不受
+   * 尾部追加影响，为它重拉整目录是纯粹的浪费（流式正文逐帧到达，那会变成
+   * O(n²) 的 `vdfs/list` 流量）。
    */
   function applyAppend(change: VdfsChange): boolean {
     // S27：载荷在 `data` 上——消息帧是 `{id, delta}` 窄载荷；无载荷或载荷里
@@ -314,6 +319,27 @@ export function useVdfs(opts: UseVdfsOptions) {
     if (!delta || !node || node.path !== change.path) return false
     if (!isTextualRenderer(renderer.value)) return false
     nodeText.value += delta
+    appendGuard.advance(node.path)
+    return true
+  }
+
+  /**
+   * 就地应用一条**带全量正文的**变更；返回是否命中**当前打开的详情**。
+   *
+   * `content` 有 ⇒ 整条替换（后端首帧发的就是图里合并后的全量副本）。与
+   * `applyAppend` 同一条道理：它只改一个节点的**内容**，不改变任何节点的存在
+   * 与顺序，列表也不内联正文——所以同样不该重拉目录。
+   *
+   * 只有**纯文本缓冲**能就地替换；`form` 渲染器要从正文 parse 出字段值（那是
+   * `select` 的活），故返回 `false` 由调用方走一次详情重读。
+   */
+  function applyReplace(change: VdfsChange): boolean {
+    const data = change.data as { content?: unknown } | null | undefined
+    const content = data?.content
+    const node = selectedNode.value
+    if (typeof content !== 'string' || !node || node.path !== change.path) return false
+    if (!isTextualRenderer(renderer.value)) return false
+    nodeText.value = content
     appendGuard.advance(node.path)
     return true
   }
@@ -361,7 +387,7 @@ export function useVdfs(opts: UseVdfsOptions) {
     const gen = appendGuard.revision(node.path)
     loadingDetail.value = true
     try {
-      const content = await readVdfs(node.path)
+      const content = await readVdfs(READBACK_REASON.VDFS_BROWSER, node.path)
       if (detailGuard.revision() !== token) return
       if (appendGuard.revision(node.path) !== gen) return
       if (!content) {
@@ -662,12 +688,14 @@ export function useVdfs(opts: UseVdfsOptions) {
   }
 
   // ==================== 实时（总线 vdfs 频道，非轮询） ====================
-  // 变更影响当前目录（自身 / 祖先 / 子树内）才刷新；绑定地址一层的变化
-  //（左栏子目录增删）顺带重拉导航。其余变更防抖重拉当前目录收敛。
+  // 变更影响当前目录**的条目集合**才刷新；绑定地址一层的变化（左栏子目录增删）
+  // 顺带重拉导航。其余变更防抖重拉当前目录收敛。
   //
-  // **带增量的变更是唯一的例外**：它就地拼接、不重拉（见 `applyAppend`）。
-  // 其余取值不带载荷，「就地插入」这类零回读路径一条都没有，任何取值都走
-  // 下面同一条收敛路径。
+  // **带正文的变更是唯一的例外**：`delta` 就地拼接、`content` 就地替换，两者都
+  // **不重拉**（见 `applyAppend` / `applyReplace`）。它们不改变任何节点的存在与
+  // 顺序，也不改变列表项（列表不内联正文）——让它们走下面的通用分支，等于给流式
+  // 每一帧都挂一次防抖刷新（一次会话下来就是几十次白跑的 `vdfs/list`），正好抵消
+  // 载荷存在的意义。
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   function scheduleRefresh(delay = 400) {
     if (refreshTimer) clearTimeout(refreshTimer)
@@ -679,22 +707,67 @@ export function useVdfs(opts: UseVdfsOptions) {
     }, delay)
   }
 
-  /** 是否影响某目录：变更路径是它自身 / 它的祖先 / 它子树内的成员 */
+  /**
+   * 是否影响某目录**的条目集合**：变更路径是它自身 / 它的**直接**子项 / 它的祖先。
+   *
+   * 判据是「这次变更会不会改变该目录的列表」——只有**直接子项**的增删改会。
+   * 更深的层级（孙辈及以下）不改变本目录的条目集合，为它重拉整目录纯属浪费：
+   * 会话转写是在 `<sid>/message/<mid>` 这一层逐帧变更的，而浏览器常停在
+   * `<根>/session` 或 `<根>`——「任意后代都算命中」会让每一条消息帧都挂一次
+   * 防抖刷新。
+   *
+   * 祖先命中保留原语义：祖先节点变了，本目录节点的视图（`cwdNode`）与它在
+   * 兄弟间的排序可能跟着变，而本目录自身的路径与条目不变。
+   */
   function affects(dir: string, changePath: string): boolean {
-    return changePath === dir || dir.startsWith(`${changePath}/`) || changePath.startsWith(`${dir}/`)
+    return changePath === dir || vdfsParent(changePath) === dir || dir.startsWith(`${changePath}/`)
+  }
+
+  /**
+   * 带正文的变更里，若命中的是一条**本目录还不认识的直接子项**，说明条目集合真的
+   * 变了 ⇒ 重拉。
+   *
+   * 带正文的帧一律不重拉，是为流式逐帧省流量（见 `applyAppend` 的说明）；但那条
+   * 豁免默认了一个前提——**被改的节点已经在列表里**。新建出来的那一项不满足这个
+   * 前提：它的首帧就是带正文的（写入即带内容 / 流式首帧即增量），此时不重拉会让
+   * 新条目**永远不出现在中栏**，要等下一次无关的刷新才补上。
+   *
+   * 判据只用「列表里有没有这条路径」，**不问帧里带的是 `delta` 还是 `content`**
+   * ——帧形状是协议的实现细节，「条目集合有没有变」才是本层要知道的事。
+   *
+   * 代价被两件事夹住：① 只对**直接子项**生效（孙辈的流式帧照旧不打扰本目录）；
+   * ② 一旦该项进入列表就不再命中（同一条消息的后续帧不会再拉）。合起来是
+   * 「每新增一条最多多拉一次」，而不是「每帧一次」。
+   */
+  function refreshIfUnknownChild(changePath: string) {
+    if (vdfsParent(changePath) !== cwd.value) return
+    if (items.value.some((n) => n.path === changePath)) return
+    scheduleRefresh()
   }
 
   /** 数据变更回调（路径过滤在 handler 内，订阅恒定一条） */
   function onChange(change: VdfsChange) {
-    // 带增量的变更**到此为止**：命中当前详情就就地拼接，未命中就什么也不做。
-    // 它不改变任何节点的存在与顺序，也不改变预览首行——因此既不该重拉目录，
-    // 也不该重拉左栏导航。让它走下面的通用分支，等于给流式每一帧都挂一次
-    // 防抖刷新（O(n²) 流量），正好抵消 `delta` 存在的意义。
-    const data = change.data as { delta?: unknown } | null | undefined
+    const data = change.data as { delta?: unknown; content?: unknown } | null | undefined
+
+    // ① 带增量的变更：命中当前详情就就地拼接，未命中就什么也不做。
     if (typeof data?.delta === 'string') {
       applyAppend(change)
+      refreshIfUnknownChild(change.path)
       return
     }
+
+    // ② 带全量正文的变更（首帧发的就是合并后的全量副本）：命中当前详情就就地
+    //    替换，同样不重拉目录。命中当前详情但渲染器不吃纯文本（`form` 要从正文
+    //    parse 字段值）⇒ 只重读这一条，仍不重拉目录。
+    if (data != null && typeof data === 'object' && data.content != null) {
+      const sel = selectedNode.value
+      if (!applyReplace(change) && sel && sel.path === change.path) void select(sel)
+      refreshIfUnknownChild(change.path)
+      return
+    }
+
+    // ③ 其余变更（资源信号 / 只有状态的消息帧）：只有真的影响本目录的条目集合
+    //    才重拉。
     if (affects(cwd.value, change.path)) scheduleRefresh()
     // 绑定地址一层（左栏子目录增删）→ 导航跟着变
     if (change.path === addr.value || vdfsParent(change.path) === addr.value) {
