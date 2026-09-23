@@ -54,7 +54,10 @@ export const BASELINE = {
   //      线上形状恰好 `["change","path"]`；`map_paths_is_the_single_translation_point`；
   //      `change_event_wire_shape_is_exactly_path_and_change`）。数量相抵，但断言的性质
   //      从「载荷怎么映射」变成「词汇表是闭集」——后者才是这次收窄要锁的东西。
-  rustTests: 915,
+  // 916：`770a9ea`（工具调用参数以字符串透传）补的单测
+  //      `tool_call_args_passthrough_as_string_without_reserialize`——该次提交只跑了
+  //      `cargo test --lib message_builder`，基线因此滞后一格；本轮门禁全量实测 916 对齐。
+  rustTests: 916,
   // 46 spec 文件 / 661 → 683 → 687 → 689 用例。文件数与用例数均与平台无关（全仓 spec
   // 零平台分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见对应提交
   // （`git log --grep=<批次/主题>`；本仓库不维护变更日志，变更历史即提交历史）。

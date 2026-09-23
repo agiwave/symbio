@@ -9,7 +9,7 @@ use crate::symbio_core::{
     dir_from_ctx,
     schemas::{
         common,
-        session::{chat_message::MessageRole, session_chat, session_chat_response},
+        session::{chat_message::MessageRole, session_chat},
     },
     CapabilityMeta, ConfigFile, InvokeRequest, InvokeResponse, Plugin, PluginDir, PluginError,
     PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM, SESSION_CHAT_SEND,
@@ -515,9 +515,7 @@ impl TelegramPlugin {
                             std::collections::HashSet::new();
                         match payload {
                             PluginPayload::Data(_) => {
-                                if let Ok(chat_resp) =
-                                    payload.get::<session_chat_response::Response>()
-                                {
+                                if let Ok(chat_resp) = payload.get::<session_chat::Response>() {
                                     full_text.push_str(
                                         &chat_resp
                                             .message
