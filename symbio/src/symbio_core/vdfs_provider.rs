@@ -63,6 +63,14 @@ pub const VDFS_KIND_FILE: &str = "file";
 /// 而 `kind` 是**协议词**——消费者按它发现「哪个子目录是转写」，不必硬编码段名。
 pub const VDFS_KIND_MESSAGES: &str = "messages";
 
+/// 场景类型：会话的**收件箱**（`<根>/session/<id>/inbox`）。
+///
+/// 与 [`VDFS_KIND_MESSAGES`] 同一手法：`name` / `title` 是展示名，`kind` 是协议词。
+/// 收件箱里的一条是**还没被消费的用户消息**，因此条目的 `ext` 沿用
+/// [`VDFS_EXT_MESSAGE`]（它就是一条消息），靠 `kind` 与会话转写里的消息区分开：
+/// 一个是"待发"，一个是"已发生"。
+pub const VDFS_KIND_INBOX: &str = "inbox";
+
 // ==================== 会话节点属性：上一轮结局（`attributes.outcome`） ====================
 //
 // 会话叶子用 `status` 表达「现在在不在跑」，用 `outcome` 表达「上一轮怎么结束的」。

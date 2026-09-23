@@ -100,7 +100,12 @@ export const BASELINE = {
   //      两处改名不计数（`coalescing_…_loses_no_text`、`…_is_node_address_…`）。
   //      余下 1 格是上批**基线滞后**：HEAD 实测 920、基线记 919（同 `916 → 925`
   //      那次漏改的口径）。
-  rustTests: 924,
+  // 930：会话收件箱（`<sid>/inbox` 集合 + 空间自驱动消费者，2026-09-24）
+  //      ——实测 930。**+6 用例**为本批新增：`session/inbox.test.rs` 四条
+  //      （FIFO 顺序与地址身份 / 两种取消的分界 / **忙则排队** / 请求参数与 workdir
+  //      随条目带走）+ `plugin/nodes.test.rs` 两条（收件箱写入的两种形状判别 /
+  //      条目节点与消息节点同源）；另有两条既有用例随 `internal_dirs` 多一段而改数值。
+  rustTests: 930,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

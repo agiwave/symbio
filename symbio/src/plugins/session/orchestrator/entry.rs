@@ -148,25 +148,89 @@ impl SessionPlugin {
         }
     }
 
-    /// one-off 统一聊天入口（send + resume 共用）。
+    /// **发送入口**：把用户消息**入队**，恢复（`resume`）走直连。
     ///
-    /// 两种情况互斥，统一走同一路径，区别仅在构造 `model_chat::Request` 时：
+    /// ## 为什么入队而不是直接跑
+    ///
+    /// `chat/send` 曾经把「接收消息」与「跑一轮」写在一起，于是"谁来跑一轮"这件事
+    /// 只能由**调用方**回答——子智能体空间没有调用方，它的消息就没有入口。现在
+    /// 消息统一落在会话的收件箱里，由**空间自己**消费（见 `inbox` 模块与 ADR-026）：
+    /// 本函数因此只是「入队」的一层薄包装，不再持有编排。
+    ///
+    /// ## 为什么 `resume` 不入队
+    ///
+    /// 恢复（重试 / 审批 / 补充）不是一条新消息，而是对**已有轮次**的操作：它必须
+    /// 落在当时那条消息上。入队会让它排在一堆新消息之后——等到它被消费时，候选
+    /// 早已被后续轮次改写，恢复的语义当场失效。
+    ///
+    /// ## 为什么互斥校验在这里
+    ///
+    /// 「`message` 与 `resume` 二选一」是**入口**的规矩（两个分支从这里分流），
+    /// 不是某一分支的内部约束；放在入口，两个分支各自就不必再校验一遍。
+    ///
+    /// 响应立刻返回（`accepted`），流式事件由 VDFS 变更推送。
+    pub async fn handle_chat_send_oneoff(
+        self: Arc<Self>,
+        ctx: Arc<dyn InvokeRequest>,
+    ) -> InvokeResponse<PluginPayload> {
+        let req: session_chat::Request = ctx.payload()?;
+        let session_id = resolve_required_session_id(&ctx, req.session_id.as_deref())?;
+
+        // 历史上只校验"至少有一个"，两者同时提供时并不报错：用户消息被追加进存储，
+        // 却不作为本轮驱动输入（仅因 load_history=true 才间接可见），属静默的语义分裂。
+        // 现显式拒绝，让调用方二选一。
+        if req.resume.is_none() && req.message.is_none() {
+            return Err(PluginError::ValidationError(
+                "必须提供 message 或 resume".into(),
+            ));
+        }
+        if req.resume.is_some() && req.message.is_some() {
+            return Err(PluginError::ValidationError(
+                "message 与 resume 互斥，不能同时提供".into(),
+            ));
+        }
+
+        let Some(message) = req.message.clone() else {
+            // resume 分支：直连（恢复不是"一条用户消息"）
+            return self.clone().start_turn(ctx).await;
+        };
+
+        // 请求级参数随条目带走：`session_id` / `message` / `resume` 已各有归宿
+        // （地址 / 条目自身 / 不走收件箱），剩下的正是本次运行的选项。
+        let params = session_chat::Request {
+            session_id: None,
+            message: None,
+            resume: None,
+            ..req
+        };
+        self.enqueue_inbox(&session_id, None, message, params, ctx.get(WORKDIR))
+            .await;
+        Ok(PluginPayload::new(&json!({
+            "status": "accepted",
+            "session_id": session_id
+        })))
+    }
+
+    /// **执行一轮**：`chat/send` 的 resume 分支与收件箱消费者共用（唯一实现）。
+    ///
+    /// 两种输入互斥，区别只在构造 `model_chat::Request` 时：
     /// - `req.message` 存在 → 追加用户消息，`single_message=Some(msg)`，从 root 会话流开始
     /// - `req.resume` 存在 → 不追加消息，`resume=Some(req)`，由 `run_chat_loop`
     ///   在 turn 循环前处理（删除旧消息 → 重新执行 → 创建新子节点）
     ///
-    /// ## 会话编排权归 session（重构要点）
+    /// ## 会话编排权归 session
     ///
-    /// 本方法是**会话的唯一编排入口**，不再把请求转交给 agent 插件：
+    /// 本方法是**一轮执行的唯一实现**，不把请求转交给 agent 插件：
     /// 1. `agent_id` **可选**——未选择智能体的会话以"纯工具模式"照常运行
     /// 2. 自行经 `collect_capabilities` 广播 `traverse` 收集全部插件的工具
     ///    （local / web / mcp / skill / agent… 全部同一机制，agent 仅在
     ///    `ctx[AGENT_ID]` 存在时贡献智能体工具与人格）
-    /// 3. 组装与智能体无关的基础提示词（`AGENTS.md` 全局 / 工作区指令）
+    /// 3. 基础提示词不在这里拼——各层指令与记忆由插件在收集期注册
     /// 4. 直接路由 `model/chat`
     ///
-    /// 响应立刻返回，流式事件由 bus 推送。
-    pub async fn handle_chat_send_oneoff(
+    /// 入口处的互斥校验不在这里重复（见 `handle_chat_send_oneoff`），此处只剩
+    /// 与"真的开跑"有关的准备：参数解析、忙碌守卫、工作目录、能力收集、派发。
+    pub(crate) async fn start_turn(
         self: Arc<Self>,
         ctx: Arc<dyn InvokeRequest>,
     ) -> InvokeResponse<PluginPayload> {
@@ -190,23 +254,12 @@ impl SessionPlugin {
         let resume = req.resume.clone();
         let user_msg = req.message.clone();
 
-        // 4. 分支校验 + is_working 守卫
-        // 两种情况互斥：历史上只校验"至少有一个"，两者同时提供时并不报错，而是
-        // 把 message 追加进存储、同时按 resume 分支发起请求 —— 用户消息落盘却
-        // 不作为本轮驱动输入（仅因 load_history=true 才间接可见），属静默的语义分裂。
-        // 现显式拒绝，让调用方二选一。
-        if resume.is_none() && user_msg.is_none() {
-            return Err(PluginError::ValidationError(
-                "必须提供 message 或 resume".into(),
-            ));
-        }
-        if resume.is_some() && user_msg.is_some() {
-            return Err(PluginError::ValidationError(
-                "message 与 resume 互斥，不能同时提供".into(),
-            ));
-        }
+        // 4. is_working 守卫（互斥校验已在入口完成）
+        //
+        // `resume` 分支忙碌时**拒绝**（避免并发 resume 竞争）；`message` 分支不必
+        // 在这里等——它由收件箱消费者在会话空闲时才取出，忙碌时自然排在队里
+        // （FIFO，不抢占）。
         if resume.is_some() {
-            // Resume 分支：is_working 守卫（忙碌时拒绝，避免并发 resume 竞争）
             let inner = state.inner.read().await;
             if inner.is_working {
                 return Ok(PluginPayload::new(&json!({
@@ -215,12 +268,15 @@ impl SessionPlugin {
                 })));
             }
         }
-        // message 分支：若上一轮仍在运行，先收敛旧 turn 再开新一轮。
-        // 「新消息覆盖旧请求」是产品意图，但绝不能让两个 turn 并发运行——
-        // 旧任务的收尾路径会复位 is_working、注销中止信号登记与
-        // live_messages，与新任务的启动/收尾产生竞态（前端状态错乱、
-        // abort 信号丢失、转写重复）。handle_abort 已具备完整收敛语义
-        // （置位中止信号 → 3s 兜底 → 节点收口），复用即可串行化同一会话的 turn。
+        // 兜底串行化：**同一会话绝不并发两个 turn**。
+        //
+        // 正常路径上这里不会命中——`message` 分支由收件箱消费者在空闲时取出、
+        // `resume` 分支上面刚拒绝过忙碌会话。但直连路径（心跳、以及"检查空闲"
+        // 与"置 is_working"之间那个窗口内抢进的调用方）仍可能撞上：撞上时先收敛
+        // 旧 turn 再开新一轮。不能让两者重叠——旧任务的收尾会复位 `is_working`、
+        // 注销中止信号登记与 live_messages，与新任务的启动/收尾产生竞态
+        // （前端状态错乱、abort 信号丢失、转写重复）。`handle_abort` 已具备完整
+        // 收敛语义（置位中止信号 → 3s 兜底 → 节点收口），复用即可。
         if state.inner.read().await.is_working {
             self.handle_abort(&state).await;
         }

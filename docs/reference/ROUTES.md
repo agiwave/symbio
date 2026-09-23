@@ -109,10 +109,15 @@
 | 改写某条消息 | `vdfs/write(<根>/session/<id>/message/<mid>)` |
 | 删该条及其后 | `vdfs/action(…/message/<mid>, "truncate")` |
 | 清空历史 | `vdfs/action(…/message, "clear")` |
+| 列待消费的用户消息（收件箱） | `vdfs/list(<根>/session/<id>/inbox)` |
+| **发一条用户消息 / 取消一条排队中的消息** | `vdfs/write(…/inbox[/<iid>])` / `vdfs/delete(…/inbox/<iid>)` |
+| 清空待消费队列 | `vdfs/action(…/inbox, "clear")` |
 
-> **发言仍只有聊天协议一处**（`chat/send`）：新增消息会触发一整轮编排，不是一次写入；
-> 而**改写与删除**是普通的 VDFS 节点操作——判据是「触发不触发编排」，不是「碰不碰消息」。
-> 机制细节见 [`session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md)。
+> **一条用户消息只有一个入口**：`chat/send` 就是「往收件箱写一条」（它不再自己起一轮），
+> 因此子智能体空间这类**没有调用方**的会话也能被驱动——写它的收件箱即可。
+> 新增消息触发一整轮编排（在空间空闲时由空间自己消费）；而**改写与删除**是普通的 VDFS
+> 节点操作——判据是「触发不触发编排」，不是「碰不碰消息」。两者都在
+> [`session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md)。
 
 ### 聊天流程
 

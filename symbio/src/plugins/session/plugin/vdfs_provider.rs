@@ -99,6 +99,19 @@ impl vdfs::VdfsProvider for SessionPlugin {
             VdfsSessionPath::Messages { mid: Some(_), .. } => Err(vdfs::VdfsError::not_found(
                 format!("消息是列表项，没有子项：{path}"),
             )),
+            // 收件箱：**待消费**的用户消息（已消费的那些在转写里，不在这）
+            VdfsSessionPath::Inbox { id, iid: None } => {
+                self.session_of(id).await?;
+                Ok(self
+                    .inbox_items(id)
+                    .await
+                    .iter()
+                    .map(inbox_item_node)
+                    .collect())
+            }
+            VdfsSessionPath::Inbox { iid: Some(_), .. } => Err(vdfs::VdfsError::not_found(
+                format!("收件箱条目是列表项，没有子项：{path}"),
+            )),
             VdfsSessionPath::SubSessions(id) => {
                 self.session_of(id).await?;
                 let store = self.get_store().await.map_err(vdfs::from_plugin_error)?;
@@ -174,6 +187,24 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     mid,
                 )?)),
             },
+            // 收件箱目录：形状与 `list` 同源；条目：队列里那一条（出队即消失）
+            VdfsSessionPath::Inbox { id, iid: None } => {
+                self.session_of(id).await?;
+                Ok(inbox_dir_node())
+            }
+            VdfsSessionPath::Inbox { id, iid: Some(iid) } => {
+                self.session_of(id).await?;
+                self.inbox_items(id)
+                    .await
+                    .iter()
+                    .find(|i| i.id == iid)
+                    .map(inbox_item_node)
+                    .ok_or_else(|| {
+                        vdfs::VdfsError::not_found(format!(
+                            "收件箱里没有待消费条目：{iid}（已出队的那条在转写里）"
+                        ))
+                    })
+            }
             VdfsSessionPath::SubSessions(id) => {
                 self.session_of(id).await?;
                 Ok(super::super::workdir::sub_sessions_dir_node())
@@ -235,6 +266,21 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     "",
                     message_text(message_of(&msgs, mid)?),
                 ))
+            }
+            // 收件箱条目：正文就是那条待发消息（与消息节点同一投影口径，
+            // 它就是一条消息——差的只是"还没被消费"）
+            VdfsSessionPath::Inbox { id, iid: Some(iid) } => {
+                self.session_of(id).await?;
+                let message = self
+                    .inbox_items(id)
+                    .await
+                    .iter()
+                    .find(|i| i.id == iid)
+                    .map(|i| i.message.clone())
+                    .ok_or_else(|| {
+                        vdfs::VdfsError::not_found(format!("收件箱里没有待消费条目：{iid}"))
+                    })?;
+                Ok(vdfs::VdfsContent::text("", message_text(&message)))
             }
             VdfsSessionPath::SubSession { id, sub } => {
                 let session = self.sub_session_of(id, sub).await?;
@@ -321,6 +367,46 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 return Ok(vdfs::VdfsWriteResponse {
                     path: path.to_string(),
                     created: !existed,
+                    etag: None,
+                });
+            }
+            // 收件箱：**写即入队**（`<id>/inbox` 与 `<id>/inbox/<iid>` 同义）。
+            //
+            // ## 为什么这里不存在"发言不是一次写入"那个叉
+            //
+            // 转写列表（`<id>/message`）拒绝写入，因为"往列表里放一条"= 发言 =
+            // 一次**动作**；而收件箱要表达的不是"跑一轮"，而是"把这条消息交给
+            // 这个空间"——它本来就是一次写入，跑不跑、何时跑由空间自己决定
+            // （见 `inbox` 模块）。两个地址因此一个只读、一个可写，这不是不对称，
+            // 而是它们本来在说两件事。
+            //
+            // `create` 在这里**没有区分度**：两种形态都是新建一条队列项，因此既不
+            // 要求也不拒绝——回执统一 `created: true`（它确实是一条新条目）。
+            VdfsSessionPath::Inbox { id, iid } => {
+                if content.binary {
+                    return Err(vdfs::VdfsError::invalid(
+                        "收件箱条目是文本（ChatMessage 字段子集或纯文本），不接受二进制内容",
+                    ));
+                }
+                // 存在性校验：会话不在，就没有"它的收件箱"可写
+                self.session_of(id).await?;
+                let raw = content.text.as_deref().unwrap_or("");
+                let message = parse_inbox_message(raw)?;
+                let item = self
+                    .enqueue_inbox(
+                        id,
+                        iid.map(str::to_string),
+                        message,
+                        session_chat::Request::default(),
+                        None,
+                    )
+                    .await;
+                // 回执的 `path` 是**条目自身的地址**（不是请求的那个）：
+                // 写目录自身时 id 由 provider 生成，调用方只能从回执得知它落成了什么
+                // （与新建会话回执返回生成的 id 同一手法）。
+                return Ok(vdfs::VdfsWriteResponse {
+                    path: inbox_item_path(id, &item.id),
+                    created: true,
                     etag: None,
                 });
             }
@@ -557,6 +643,25 @@ impl vdfs::VdfsProvider for SessionPlugin {
                  如需清空，请向 `{}` 写入空内容。",
                 crate::symbio_core::AGENTS_FILE
             ))),
+            // 收件箱条目：**取消排队**（尚未被消费的那条）。
+            //
+            // 找不到就是"已出队"（它已经变成一条真消息了）或本来就没有——两种
+            // 都报 `NotFound`：`delete` 的语义是"这条队列项没了"，不能报成成功。
+            VdfsSessionPath::Inbox { id, iid: Some(iid) } => {
+                self.session_of(id).await?;
+                if self.cancel_inbox_item(id, iid).await {
+                    Ok(())
+                } else {
+                    Err(vdfs::VdfsError::not_found(format!(
+                        "收件箱里没有待消费条目 {iid}\
+                         （已出队的那条已是会话里的消息，中止请走 chat/abort）：{path}"
+                    )))
+                }
+            }
+            VdfsSessionPath::Inbox { iid: None, .. } => Err(vdfs::VdfsError::Forbidden(format!(
+                "收件箱不可整体删除：清空待消费队列请用 action(\"{clear}\")：{path}",
+                clear = vdfs::VDFS_ACTION_CLEAR,
+            ))),
             // 转写区段（列表与单条）**不可 delete**：`delete` 的全局语义是
             // 「**这一个**节点没了」，而转写有两种**集合**删除语义，各有自己的动作：
             // 「从这里到末尾全没了」是 [`VDFS_ACTION_TRUNCATE`]（落在起始消息上）、
@@ -640,6 +745,18 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     ok: true,
                     message: "已清空会话历史（会话本身与元数据保留）".to_string(),
                     data: None,
+                })
+            }
+            // 收件箱的 `clear`：**只取消还没被消费的**。已出队的那条已经是会话里的
+            // 消息，中止它走 `chat/abort`（与删除条目同款分界）。
+            VdfsSessionPath::Inbox { id, iid: None } if action == vdfs::VDFS_ACTION_CLEAR => {
+                self.session_of(id).await?;
+                let ids = self.clear_inbox(id).await;
+                Ok(vdfs::VdfsActionResult {
+                    action: action.to_string(),
+                    ok: true,
+                    message: format!("已取消 {} 条待消费消息", ids.len()),
+                    data: Some(json!(ids)),
                 })
             }
             _ => Err(vdfs::VdfsError::NotImplemented),

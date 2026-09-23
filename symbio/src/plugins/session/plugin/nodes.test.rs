@@ -163,6 +163,21 @@ fn vdfs_internal_path_parsing() {
             mid: Some("m1")
         }
     ));
+    // 收件箱：目录本身与列表项两级，与会话内部其它集合同构
+    assert!(matches!(
+        parse_session_path("abc/inbox").unwrap(),
+        Inbox {
+            id: "abc",
+            iid: None
+        }
+    ));
+    assert!(matches!(
+        parse_session_path("abc/inbox/i1").unwrap(),
+        Inbox {
+            id: "abc",
+            iid: Some("i1")
+        }
+    ));
     assert!(matches!(
         parse_session_path("abc/subsession").unwrap(),
         SubSessions("abc")
@@ -188,10 +203,68 @@ fn vdfs_internal_path_parsing() {
     // 未知区段、列表项越界层级 → NotFound
     assert!(parse_session_path("abc/nope").is_err());
     assert!(parse_session_path("abc/message/m1/deeper").is_err());
+    assert!(parse_session_path("abc/inbox/i1/deeper").is_err());
     assert!(parse_session_path("abc/subsession/s1/deeper").is_err());
 }
 
-/// 会话内部的虚拟子项：转写列表与子会话恒在，记忆是**文件**且恒在，
+/// 收件箱写入正文的两种形状：以 `{` 起头 = 结构化字段子集；其余 = 纯文本。
+///
+/// 判据必须**只由首字符**决定：改回"能不能解析成 JSON"，一个手滑的 `{content}`
+/// 就会被当成正文静默发出去（调用方以为自己在写结构化字段）。
+#[test]
+fn parse_inbox_message_distinguishes_shape_by_first_char() {
+    // 纯文本：整段就是正文，角色 / 类型 / 状态都是"待发用户消息"
+    let m = parse_inbox_message("帮我看一下这个 bug").unwrap();
+    assert_eq!(m.content.unwrap().to_text(), "帮我看一下这个 bug");
+    assert_eq!(m.role, Some(cm::MessageRole::User));
+    assert_eq!(m.msg_type, Some(cm::MessageType::Text));
+    assert_eq!(m.status, Some(cm::MessageStatus::Completed));
+
+    // 结构化：字段子集直接用，缺省项照补
+    let m = parse_inbox_message(r#"{"content":"结构化正文","role":"user"}"#).unwrap();
+    assert_eq!(m.content.unwrap().to_text(), "结构化正文");
+    assert_eq!(m.msg_type, Some(cm::MessageType::Text), "未给的字段走缺省");
+    assert_eq!(m.id, "", "`id` 缺省是空串占位——身份由地址 / 入队统一落定");
+    // 写体给了 id 就先用它（地址若也给，则以地址为准——见 `enqueue_inbox`）
+    let m = parse_inbox_message(r#"{"id":"from-body","content":"x"}"#).unwrap();
+    assert_eq!(m.id, "from-body");
+
+    // 声明了 JSON 就必须是合法 JSON 对象——不静默降级成"把这串当正文"
+    assert!(parse_inbox_message(r#"{"content":}"#).is_err());
+    assert!(parse_inbox_message("{不是 JSON对象}").is_err());
+}
+
+/// 收件箱条目：节点形状与消息节点同源，只靠 `kind` 与摘要前缀区分"待发 / 已发生"。
+#[test]
+fn inbox_item_node_reuses_message_shape() {
+    let item = crate::plugins::session::active::InboxItem {
+        id: "i1".into(),
+        message: cm::ChatMessage {
+            id: "i1".into(),
+            role: Some(cm::MessageRole::User),
+            msg_type: Some(cm::MessageType::Text),
+            content: Some(cm::MessageContent::Text("待发的这句话".into())),
+            status: Some(cm::MessageStatus::Completed),
+            timestamp: Some(1_700_000_000_000),
+            ..Default::default()
+        },
+        params: Default::default(),
+        workdir: None,
+    };
+    let n = inbox_item_node(&item);
+    assert_eq!(n.name, "i1", "条目 id 就是地址末段");
+    assert_eq!(n.kind, vdfs::VDFS_KIND_INBOX);
+    assert_eq!(
+        n.effective_ext().as_deref(),
+        Some("message"),
+        "它就是一条消息"
+    );
+    assert_eq!(n.title, "用户");
+    assert_eq!(n.description.as_deref(), Some("待消费 · 待发的这句话"));
+    assert_eq!(n.updated_at, Some(1_700_000_000_000));
+}
+
+/// 会话内部的虚拟子项：转写列表、收件箱与子会话恒在，记忆是**文件**且恒在，
 /// 工作目录按会话是否声明 workdir 出现。
 #[test]
 fn vdfs_internal_dirs_conditional() {
@@ -204,7 +277,7 @@ fn vdfs_internal_dirs_conditional() {
     };
 
     let without = internal_dirs(false, memory());
-    assert_eq!(without.len(), 3);
+    assert_eq!(without.len(), 4);
     assert_eq!(without[0].name, SEG_MESSAGES, "转写列表恒在（会话的本体）");
     assert_eq!(
         without[0].name, "message",
@@ -218,24 +291,31 @@ fn vdfs_internal_dirs_conditional() {
         vdfs::VDFS_KIND_MESSAGES,
         "转写列表的 kind 是稳定协议词，不随段名 / 展示名变化"
     );
-    assert_eq!(without[1].name, workdir::SEG_SUB_SESSIONS);
+    assert_eq!(without[1].name, SEG_INBOX, "收件箱恒在（消息的入队面）");
+    assert_eq!(without[1].title, TITLE_INBOX, "展示名才是中文");
     assert_eq!(
-        without[2].name,
+        without[1].kind,
+        vdfs::VDFS_KIND_INBOX,
+        "收件箱的 kind 是稳定协议词（与会话转写消息区分开）"
+    );
+    assert_eq!(without[2].name, workdir::SEG_SUB_SESSIONS);
+    assert_eq!(
+        without[3].name,
         crate::symbio_core::AGENTS_FILE,
         "记忆恒在——它本来就是会话的一部分"
     );
-    assert!(!without[2].is_dir(), "记忆是文件，不是目录");
-    assert!(without[2].access.write, "记忆可写（模型与用户共用这一份）");
+    assert!(!without[3].is_dir(), "记忆是文件，不是目录");
+    assert!(without[3].access.write, "记忆可写（模型与用户共用这一份）");
     assert!(
-        without[..2].iter().all(|n| n.is_dir() && !n.access.write),
-        "两个目录区段都是只读目录"
+        without[..3].iter().all(|n| n.is_dir() && !n.access.write),
+        "三个目录区段都是只读目录"
     );
 
     let with = internal_dirs(true, memory());
-    assert_eq!(with.len(), 4);
-    assert_eq!(with[3].name, workdir::SEG_WORKDIR);
+    assert_eq!(with.len(), 5);
+    assert_eq!(with[4].name, workdir::SEG_WORKDIR);
     assert!(
-        with[3].is_dir() && !with[3].access.write,
+        with[4].is_dir() && !with[4].access.write,
         "工作目录是只读目录（不提供新建）"
     );
 }

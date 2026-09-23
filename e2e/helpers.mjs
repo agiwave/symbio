@@ -428,6 +428,47 @@ export function readMessagesJson(homedir, sid) {
   return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')).messages : null;
 }
 
+/**
+ * 子智能体空间里的会话目录：`<homedir>/agent/<agentId>/session/<sid>`。
+ *
+ * 子 Agent 目录是**一棵与系统树同构的 composite 子树**（根 = `<homedir>/agent/<id>`），
+ * 子树里的插件目录因此是 `<根>/<插件名>`——子会话与父会话**不是同一个 store**，
+ * 这是「子智能体在自己的空间里跑完整会话」的落盘判据。
+ */
+export function agentSessionDir(homedir, agentId, sid) {
+  return join(homedir, 'agent', agentId, 'session', sid);
+}
+
+/** 读子智能体空间里某会话的消息（文件不存在 ⇒ `null`，与 `readMessagesJson` 同形） */
+export function readAgentMessagesJson(homedir, agentId, sid) {
+  const p = join(agentSessionDir(homedir, agentId, sid), 'messages.json');
+  return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')).messages : null;
+}
+
+/**
+ * 造一个 v2 子智能体目录：`<homedir>/agent/<id>/{manifest.yaml,AGENTS.md,model/<provider>/provider.json}`。
+ *
+ * 三件东西各自有主，缺一不可：
+ * - `manifest.yaml` 声明 `agent-dir/v2`（不合规即**拒绝接入**，§10）；
+ * - `AGENTS.md` 是**这个智能体自己**的指令层（子树里 `agent` 实例的宿主目录
+ *   就是 agent 目录，因此它会给本空间的会话注入这一段）；
+ * - `model/<id>/provider.json`——子树的 `model` 插件读**自己的目录**，
+ *   「子智能体有自己的模型服务」因此不是声明，而是必须落在这个包里的事实。
+ */
+export function makeAgentDir(homedir, { id, name = id, persona = '', providerId, providerPort }) {
+  const dir = join(homedir, 'agent', id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'manifest.yaml'),
+    `spec: "agent-dir/v2"\nid: "${id}"\nname: "${name}"\nversion: "1.0.0"\nrequires:\n  spec: "^2"\n`,
+  );
+  writeFileSync(join(dir, 'AGENTS.md'), persona);
+  const pdir = join(dir, 'model', providerId);
+  mkdirSync(pdir, { recursive: true });
+  writeFileSync(join(pdir, 'provider.json'), JSON.stringify(providerConfig(providerPort)));
+  return dir;
+}
+
 // ---------- 文件辅助 ----------
 export function readFileSyncSafe(path) {
   try {

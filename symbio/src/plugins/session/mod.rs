@@ -10,6 +10,7 @@ mod context_window;
 mod handlers;
 mod heartbeat;
 mod heartbeat_tool;
+mod inbox;
 mod memory;
 mod model_chat;
 mod options;

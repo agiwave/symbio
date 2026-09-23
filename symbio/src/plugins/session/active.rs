@@ -1,12 +1,51 @@
+use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
 use crate::symbio_core::vdfs::ChangeSubscriptions;
 use crate::symbio_core::AbortSignal;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
 use tokio::sync::{Mutex, RwLock};
 
 /// 全局请求 ID 生成器
 pub static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// 收件箱里的一条**待消费请求**——用户消息的入队形态。
+///
+/// ## 它不是一条已在转写里的消息
+///
+/// 条目存在期间，这条消息**还没有落库**（也不该落库：它还没被消费）。被消费时
+/// 才由统一的发送链路追加进存储，随即出现在转写里。于是「收件箱」与「转写」是
+/// 同一批消息的**前后两态**，不是两份需要对齐的数据。
+///
+/// ## 为什么把请求拆成 `message` + `params` 两半
+///
+/// 入队必须与直连发送**信息等价**，否则「经由收件箱发送」会悄悄丢掉本次运行的
+/// 请求级参数（`mode` / `risk_level` / `agent_id` / `provider_id` / `include_history`）
+/// ——这种丢失是静默的，只在行为上表现为"选项不生效"。
+///
+/// 于是 `params` 就是请求里**与"哪条消息发给哪个会话"无关**的那一半：
+/// `session_id` 由地址给出（`<sid>/inbox`），`message` 就是 [`Self::message`]，
+/// `resume` 恒为 `None`（恢复不是"一条用户消息"，它不走收件箱）。三者都不在
+/// `params` 里——同一件事只有一个位置，避免两处各存一份而要互相校验。
+///
+/// ## 为什么**不存**发起者的请求上下文
+///
+/// 消费者自己造一个干净上下文（只带目标会话 id 与工作目录），不复用发起者的
+/// `Arc<dyn InvokeRequest>`：发起者的头里带着**它自己**的 `SESSION_ID`，而跨空间
+/// 写入（父会话 → 子智能体空间）时那个 id 与目标会话**不是同一个**——沿用它会
+/// 让消费者把消息投到发起者的会话上。工作目录因此单独存一份（它确实是本次请求的
+/// 信息，且不能从目标会话的 metadata 必然推出）。
+#[derive(Clone)]
+pub struct InboxItem {
+    /// 条目 id = VDFS 地址末段 = 这条用户消息的 `ChatMessage.id`
+    pub id: String,
+    /// 待消费的用户消息
+    pub message: cm::ChatMessage,
+    /// 请求级参数（见上：不含 `session_id` / `message` / `resume`）
+    pub params: session_chat::Request,
+    /// 发起者给出的工作目录（请求级，优先于会话 metadata 的回退值）
+    pub workdir: Option<String>,
+}
 
 /// 会话内部状态 (封装为单个锁定对象以保证原子性)
 pub struct ActiveSessionStateInner {
@@ -52,6 +91,13 @@ pub struct ActiveSessionStateInner {
     pub auto_compress_failures: u32,
     /// 熔断开闸时刻（`None` = 未开闸）。用于冷却判断。
     pub auto_compress_circuit_opened_at: Option<std::time::Instant>,
+    /// **收件箱**：待消费的用户请求队列（FIFO）。
+    ///
+    /// 它是「用户消息」的唯一入队形态（见 [`InboxItem`]），也是 VDFS 集合
+    /// `<sid>/inbox` 的数据源。条目**出队即消失**：被消费时消息由统一发送链路
+    /// 落库并出现在转写里，队列里因此只留"还没轮到"的那些——
+    /// 「正在处理的那条」在转写里，不在队列里（取消它走中止，不走删条目）。
+    pub inbox: VecDeque<InboxItem>,
 }
 
 /// 会话状态锚点
@@ -106,6 +152,7 @@ impl ActiveSessionState {
                 last_warning: None,
                 auto_compress_failures: 0,
                 auto_compress_circuit_opened_at: None,
+                inbox: VecDeque::new(),
             }),
             transcript: Arc::new(Mutex::new(super::transcript::Transcript::new(
                 session_id,

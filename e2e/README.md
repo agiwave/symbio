@@ -89,6 +89,7 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 | T12 | `t12-content-type` | LLM POST 必须带 `Content-Type: application/json`（`&[u8]` + `.body()` 不会自动补） |
 | T13 | `t13-session-options` | 会话选项 schema 化：定义挂 `new_types[].schema` 与清单项 `schema`（逐字节相同）、值随节点 `metadata` 回读、`vdfs/write` 浅合并落库、`stat` 不带定义、重启后仍在 |
 | T14 | `t14-no-redundant-vdfs` | **会话期间零回读**：一轮会话的路由留痕里不得出现 `vdfs/stat` / `vdfs/read` / `vdfs/list`——变更必须自带载荷（节点视图 / 正文 / 目录清单） |
+| T15 | `t15-subagent-inbox` | 子智能体空间**自驱动**：往 `<根>/agent/<id>/session/<sid>/inbox` 写即发消息（无调用方）；空间自己消费成完会话（FIFO、忙则排队、排队中可取消）；子空间带自己的 `AGENTS.md` 与自己的模型服务 |
 
 每个用例共享的不变量断言（`assertTranscriptInvariants`）：
 

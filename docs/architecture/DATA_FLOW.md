@@ -45,7 +45,7 @@ sequenceDiagram
 
 | # | 环节 | 代码位置 | 说明 |
 |---|------|---------|------|
-| 1 | 入口 | `symbio/src/plugins/session/plugin.rs` | **会话编排权归 session**（见 `chat_pipeline.rs` 头注释） |
+| 1 | 入口 | `symbio/src/plugins/session/plugin.rs` | 用户消息 = **`vdfs/write(<根>/session/<id>/inbox)`**；`chat/send` 只是它的薄包装（写即入队，空间自己消费，见 `session/inbox.rs` 与 ADR-026）。**会话编排权归 session**（见 `chat_pipeline.rs` 头注释） |
 | 2 | 能力收集 | `symbio/src/plugins/session/chat_pipeline.rs` | session 调 `collect_capabilities` → `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播收工具；**agent 仅当 `ctx[AGENT_ID]` 存在时贡献**（不选 agent 的会话照常运行）；收集期错误通道（`report_error` / `take_errors`）在 `symbio_core/capability_error.rs` |
 | 3 | 默认能力 | `symbio_core/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
 | 4 | 模型调用（单轮） | `symbio/src/plugins/model/bound_provider.rs` | `execute_turn` = **一次** LLM 调用：4 协议适配（OpenAI / Anthropic / Gemini / Ollama）+ SSE 解析 + 事件出口。`model` **不做轮次循环** |
@@ -57,7 +57,7 @@ sequenceDiagram
 > 机制在 [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §6——本文件不复述。
 > 排障要点只有一条：执行期**不走 `PluginChannel`**、通道里**没有中止帧**，中止只有一个入口 `AbortSignal::abort()`。
 
-**排障口诀**：不出字 → 查 #4 协议适配与 provider 配置；工具不触发 → 查 #2 收集结果与 #5 循环；**状态不刷新** → 查 #6：`emit_session_state` 是否被调（运行态的**唯一出口**），以及前端对 `<根>/session/<id>` 的 `updated` 变更是否在收敛（运行态的**唯一通道**）；状态不动而消息正常 → 同上，多半是唯一出口漏调。
+**排障口诀**：不出字 → 查 #4 协议适配与 provider 配置；工具不触发 → 查 #2 收集结果与 #5 循环；**写进了却不跑** → 查 #1 的收件箱是否被消费（`vdfs/list(…/inbox)` 还有待消费项 + 会话不在 `working` ⇒ 该会话没有可用工作目录或消费者未起）；**状态不刷新** → 查 #6：`emit_session_state` 是否被调（运行态的**唯一出口**），以及前端对 `<根>/session/<id>` 的 `updated` 变更是否在收敛（运行态的**唯一通道**）；状态不动而消息正常 → 同上，多半是唯一出口漏调。
 
 ## 链路三：HTTP/WS 入站（gateway 插件）
 

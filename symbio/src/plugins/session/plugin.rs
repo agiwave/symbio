@@ -23,7 +23,7 @@ use super::chat_session::ChatSession;
 pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
-use crate::symbio_core::schemas::session::chat_message as cm;
+use crate::symbio_core::schemas::session::{chat_message as cm, session_chat};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::vdfs_provider::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use crate::symbio_core::{
@@ -62,6 +62,9 @@ pub struct SessionPlugin {
     /// 用 `Arc` 而非内联值：工作目录监听器（后台任务）也要投递进同一批订阅者，
     /// 需要共享所有权。
     pub(crate) change_subs: Arc<vdfs::ChangeSubscriptions>,
+    /// 收件箱唤醒：入队时置位，常驻消费者据此醒来取件（见 `inbox` 模块）。
+    /// 它是**唤醒**不是队列——队列本身在 `ActiveSessionStateInner::inbox`。
+    pub(crate) inbox_wake: tokio::sync::Notify,
 }
 
 use super::store::SessionStore;
@@ -86,6 +89,7 @@ impl SessionPlugin {
             heartbeat_state: Arc::new(RwLock::new(HashMap::new())),
             workdir_watches,
             change_subs,
+            inbox_wake: tokio::sync::Notify::new(),
         }
     }
 
@@ -238,6 +242,10 @@ impl SessionPlugin {
                 scheduler.run_heartbeat_loop().await;
             });
         }
+
+        // 收件箱消费者（后台常驻，见 `inbox` 模块）：与心跳同处构造点，
+        // 因此**早于任何写入**——"谁来消费第一次写入"不依赖装配顺序。
+        plugin.clone().spawn_inbox_consumer();
 
         plugin
     }
@@ -612,11 +620,15 @@ mod vdfs_provider;
 // 模块内共享面：`nodes` / `vdfs_provider` 经 `use super::*;` 取用，测试（`plugin.test.rs`）亦同。
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
-    internal_dirs, message_node, message_of, message_of_node, message_path, message_text,
-    messages_dir_node, ordered, overlay_live, parse_session_path, session_content,
-    session_id_from_new_path, session_node, transcript_window, window_params, SessionRuntime,
-    VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED, SEG_MESSAGES,
+    inbox_dir_node, inbox_item_node, inbox_item_path, internal_dirs, message_node, message_of,
+    message_of_node, message_path, message_text, messages_dir_node, ordered, overlay_live,
+    parse_inbox_message, parse_session_path, session_content, session_id_from_new_path,
+    session_node, transcript_window, window_params, SessionRuntime, VdfsSessionPath,
+    OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED, SEG_MESSAGES,
 };
+
+// 收件箱条目类型：`nodes` / `vdfs_provider` / `inbox` 经 `use super::*;` 取用
+pub(crate) use super::active::InboxItem;
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

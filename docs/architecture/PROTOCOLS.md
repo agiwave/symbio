@@ -163,10 +163,18 @@ pub enum PluginPayloadWire {
 
 ## AI 会话流式规范
 
-1. **建立会话**：发起 `route("session/chat/send", payload)`，后端返回 `PluginPayload::Session(channel)`
-2. **握手响应**：host 从 `channel.tx` 接收首批帧 (典型为 `Data` 携带 `session_meta`)
-3. **流式推送**：后端持续推送 `PluginFrame::Data` 帧，包含增量文本、思考过程、工具调用进度
-4. **终止信号**：任务结束时发送最后一帧 `Data` 携带 `done: true`，或在错误时发送 `Error(msg, details)`
+**没有会话专用流协议**：发言 = `vdfs/write(<根>/session/<id>/inbox)`（`chat/send` 是它的
+薄包装），输出 = `kind = "vdfs"` 的变更（消息落在 `<id>/message/<mid>`、运行态落在
+`<id>`），两端都只需既有的 VDFS 能力：
+
+1. **发一条消息**：`vdfs/write(<根>/session/<id>/inbox, text)` —— 写即入队，响应立刻返回；
+2. **看输出**：`event_bus/subscribe` + `vdfs/watch(<根>/session/<id>)`（两步缺一不可，见
+   `e2e/cases/t9-ws-stream.mjs`）——首帧带全量、后续带窄 `delta`，顺序由节点属性 `seq` 决定；
+3. **终止判据**：会话节点 `status` 离开 `working`（结局在 `attributes.outcome` / `error`），
+   它必然排在**本轮全部消息帧之后**（同一 FIFO）。
+
+> 机制与不变量见 [`session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md)；
+> 旧形态（`PluginPayload::Session(channel)` + `PluginFrame::Data(done)`）已随 ADR-025 退役。
 
 ---
 

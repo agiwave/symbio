@@ -2,10 +2,11 @@
 //!
 //! 三组**纯函数**，都不持有 `self`：
 //! - **路径模型**：[`VdfsSessionPath`] / [`parse_session_path`] / [`SEG_MESSAGES`] /
-//!   [`message_dir_path`] / [`message_path`] / [`internal_dirs`] /
-//!   [`session_id_from_new_path`]
-//! - **节点构造**：[`session_node`] / [`message_node`] / [`transcript_window`] /
-//!   [`window_params`] / `MAX_PARENT_STEPS` / `cursor_id`
+//!   [`SEG_INBOX`] / [`message_dir_path`] / [`message_path`] / [`inbox_item_path`] /
+//!   [`internal_dirs`] / [`session_id_from_new_path`]
+//! - **节点构造**：[`session_node`] / [`message_node`] / [`inbox_dir_node`] /
+//!   [`inbox_item_node`] / [`transcript_window`] / [`window_params`] /
+//!   `MAX_PARENT_STEPS` / `cursor_id`
 //! - **消息投影**：`message_label` /
 //!   `message_status` / `message_preview` / [`message_text`] / [`ordered`] /
 //!   [`overlay_live`] / [`message_of`] / [`session_content`]
@@ -275,6 +276,7 @@ fn cursor_id(before: &str) -> Option<&str> {
 //   <id>                  → 会话叶子（聊天详情）
 //   <id>/AGENTS.md         → 会话记忆（**单个文件**，读写；见 `super::super::memory`）
 //   <id>/message[/<mid>]   → 转写列表 / 单条消息（**列表项**）
+//   <id>/inbox[/<iid>]     → 收件箱（待消费用户消息，写即入队）
 //   <id>/subsession[/<sub>]→ 子会话清单 / 单个子会话（查看 · 删除）
 //   <id>/workdir[/<rel>]   → 工作目录树（文件可查看 / 编辑）
 //
@@ -322,6 +324,101 @@ pub(crate) fn message_dir_path(session_id: &str) -> String {
     format!("{session_id}/{SEG_MESSAGES}")
 }
 
+/// 会话内部：**收件箱**的路径段（ASCII，进地址）。
+///
+/// 收件箱是**待消费的用户消息队列**：往里写一条 = 入队，被消费（跑一轮）时消息
+/// 才落库进转写。因此它同时是「跨空间发消息」的入口——子智能体空间没有调用方
+/// 替它调 `chat/send`，它的会话由自己消费这个队列而自驱动（见 ADR-026）。
+///
+/// 与会话内部其它集合同构：`<sid>/<集合段>/<项 id>`，身份就是末段。
+pub(crate) const SEG_INBOX: &str = "inbox";
+
+/// 收件箱的**展示名**（`title`）。只影响 UI，不参与寻址。
+pub(crate) const TITLE_INBOX: &str = "收件箱";
+
+/// 收件箱目录节点（`list` 与 `stat` 共用同一份形状）
+pub(crate) fn inbox_dir_node() -> vdfs::VdfsNode {
+    let mut node = vdfs::VdfsNode::dir(SEG_INBOX, TITLE_INBOX, vdfs::VdfsAccess::LIST);
+    node.kind = vdfs::VDFS_KIND_INBOX.to_string();
+    node
+}
+
+/// 单条收件箱条目（`<sid>/inbox/<iid>`）的 provider 子树内路径
+pub(crate) fn inbox_item_path(session_id: &str, iid: &str) -> String {
+    format!("{session_id}/{SEG_INBOX}/{iid}")
+}
+
+/// 收件箱写入的**正文** → 一条待消费的用户消息。
+///
+/// ## 两种形状，判别式只有一条
+///
+/// - **以 `{` 起头** ⇒ 它声明自己是 JSON 对象 —— 必须解析成 [`cm::ChatMessage`]
+///   的**字段子集**，解析失败即报错（不静默降级成"把这串 JSON 当正文"）；
+/// - **其余** ⇒ 整段正文就是消息文本（发一条消息的自然写法）。
+///
+/// 判据取"以 `{` 开头"而不是"能不能解析成 JSON"：后者会让一个手滑的
+/// `{content}` 被当成正文静默发出去，而调用方以为自己在写结构化字段。
+///
+/// 缺省全由消息自身的约定补：`role` = `user`、`type` = `text`、`status` =
+/// `completed`（它是一条**待发**消息，不是流式中的消息）。`id` 缺失时补**空串
+/// 占位**，由 [`SessionPlugin::enqueue_inbox`] 落到真正的条目 id 上——身份有三个
+/// 来源（地址末段 > 写体里的 `id` > provider 生成），判别收在一处，不在这里各判一次。
+pub(crate) fn parse_inbox_message(raw: &str) -> vdfs::VdfsResult<cm::ChatMessage> {
+    let body = raw.trim();
+    if !body.starts_with('{') {
+        return Ok(cm::ChatMessage {
+            role: Some(cm::MessageRole::User),
+            msg_type: Some(cm::MessageType::Text),
+            content: Some(cm::MessageContent::Text(raw.to_string())),
+            status: Some(cm::MessageStatus::Completed),
+            timestamp: Some(crate::symbio_core::now_ms()),
+            ..Default::default()
+        });
+    }
+    let mut value: Value = serde_json::from_str(body).map_err(|e| {
+        vdfs::VdfsError::invalid(format!(
+            "收件箱条目需要合法 JSON（ChatMessage 字段子集）：{e}"
+        ))
+    })?;
+    let Some(obj) = value.as_object_mut() else {
+        return Err(vdfs::VdfsError::invalid(
+            "收件箱条目需要 JSON 对象（ChatMessage 字段子集）",
+        ));
+    };
+    // `id` 在 `ChatMessage` 里是必填字段，但**身份由地址给**：缺它时补一个空串
+    // 占位，由 `enqueue_inbox` 统一落到条目 id 上——不这样做，最自然的那份
+    // 写体（`{"content":"..."}`）会先一步被 serde 拒掉，而调用方被迫把地址里
+    // 已有的信息再抄一遍（与消息补丁的处理同源，见 `vdfs_provider` 的 `write`）。
+    obj.entry("id".to_string())
+        .or_insert_with(|| Value::String(String::new()));
+    let mut message: cm::ChatMessage = serde_json::from_value(value).map_err(|e| {
+        vdfs::VdfsError::invalid(format!(
+            "收件箱条目需要合法 JSON（ChatMessage 字段子集）：{e}"
+        ))
+    })?;
+    // 缺省补齐（见上：只补"不补就不可用"的那三个，不覆盖来者指定的值）
+    message.role.get_or_insert(cm::MessageRole::User);
+    message.msg_type.get_or_insert(cm::MessageType::Text);
+    message.status = Some(cm::MessageStatus::Completed);
+    Ok(message)
+}
+
+/// 收件箱条目 → VDFS 节点。
+///
+/// 形状**就是消息节点的形状**（[`message_node`]）：条目本来就是一条用户消息，
+/// 再造一套"待发消息"的字段只会让同一件事有两种读法。差别只有两处，且都在
+/// `kind` / 说明上——`kind = inbox` 让消费者分清"待发"与"已发生"，摘要前缀
+/// 让列表里一眼看出这条还没被消费。
+pub(crate) fn inbox_item_node(item: &InboxItem) -> vdfs::VdfsNode {
+    let mut n = message_node(&item.message);
+    n.kind = vdfs::VDFS_KIND_INBOX.to_string();
+    n.description = Some(match n.description {
+        Some(d) => format!("待消费 · {d}"),
+        None => "待消费".to_string(),
+    });
+    n
+}
+
 /// 单条消息的 provider 子树内路径（`<id>/message/<mid>`）。
 ///
 /// 与 [`parse_session_path`] 互逆，因此与它同处——地址的「拼」与「解」必须同源，
@@ -350,6 +447,8 @@ pub(crate) enum VdfsSessionPath<'a> {
     Memory(&'a str),
     /// `<id>/message[/<mid>]`：转写列表 / 单条消息；`mid` 空 = 列表本身
     Messages { id: &'a str, mid: Option<&'a str> },
+    /// `<id>/inbox[/<iid>]`：收件箱（待消费的用户消息）/ 单条待消费消息
+    Inbox { id: &'a str, iid: Option<&'a str> },
     /// `<id>/subsession`：子会话清单
     SubSessions(&'a str),
     /// `<id>/subsession/<sub>`：单个子会话
@@ -390,6 +489,15 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
                 "消息是列表项，没有更深层级：{path}"
             ))),
         },
+        SEG_INBOX => match sub {
+            None => Ok(VdfsSessionPath::Inbox { id, iid: None }),
+            Some(iid) if !iid.is_empty() && !iid.contains('/') => {
+                Ok(VdfsSessionPath::Inbox { id, iid: Some(iid) })
+            }
+            Some(_) => Err(vdfs::VdfsError::not_found(format!(
+                "收件箱条目是列表项，没有更深层级：{path}"
+            ))),
+        },
         super::super::workdir::SEG_SUB_SESSIONS => match sub {
             None => Ok(VdfsSessionPath::SubSessions(id)),
             Some(sub) if !sub.is_empty() && !sub.contains('/') => {
@@ -410,16 +518,17 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
 /// 会话内部的虚拟子项（工作目录按会话是否声明 workdir 决定是否出现）。
 ///
 /// `memory` 由调用方构造好传入（形状由内核 [`MemoryFile::node`] 产出，
-/// `list` 与 `stat` 因此共用同一份形状）；它是个**文件**，与三个目录并列——
+/// `list` 与 `stat` 因此共用同一份形状）；它是个**文件**，与各目录并列——
 /// 记忆本来就是会话的一部分，不该另开一条寻址。
 ///
-/// 三个目录节点各由**自己的段所属模块**构造（[`messages_dir_node`] /
-/// `workdir::sub_sessions_dir_node` / `workdir::workdir_dir_node`）：段名（ASCII，
-/// 进地址）与展示名（中文，只进 UI）的配对因此与段本身同处，新增一类集合只需
-/// 在这里多一项，不必在两处同步改字符串。
+/// 每个目录节点各由**自己的段所属模块**构造（[`messages_dir_node`] /
+/// [`inbox_dir_node`] / `workdir::sub_sessions_dir_node` / `workdir::workdir_dir_node`）：
+/// 段名（ASCII，进地址）与展示名（中文，只进 UI）的配对因此与段本身同处，
+/// 新增一类集合只需在这里多一项，不必在两处同步改字符串。
 pub(crate) fn internal_dirs(has_workdir: bool, memory: vdfs::VdfsNode) -> Vec<vdfs::VdfsNode> {
     let mut out = vec![
         messages_dir_node(),
+        inbox_dir_node(),
         super::super::workdir::sub_sessions_dir_node(),
         memory,
     ];

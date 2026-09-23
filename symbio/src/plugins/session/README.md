@@ -15,8 +15,8 @@ Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是
 
 ```mermaid
 flowchart TD
-    User([1. 用户发起 Chat 请求]) --> SessionChat[Session 插件 - chat 路由]
-    SessionChat --> SaveUser[2. 保存/追加用户消息]
+    User([1. 用户消息：chat/send 或写 <sid>/inbox]) --> SessionChat[Session 插件 - chat 路由]
+    SessionChat --> SaveUser[2. 入队收件箱 → 空间自己消费<br>空闲时取队首 → 保存/追加用户消息]
     SaveUser --> LoadHistory[3. 加载历史上下文<br>get_context_messages 轮次窗口对齐]
     LoadHistory --> BuildPrompt[4. 解析系统提示词<br>收集各插件注册的段<br>人格/记忆/指令]
 
