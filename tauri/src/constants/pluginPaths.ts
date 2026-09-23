@@ -24,7 +24,7 @@
  * ## 前缀口径（容易搞错，写清楚）
  *
  * - `worker/` 前缀 = 走 worker composite 的**会话域**路由（session 及它的子能力
- *   chat / options）。历史上也写过无前缀的 `session/...`（session 插件同时挂在
+ *   chat / stream）。历史上也写过无前缀的 `session/...`（session 插件同时挂在
  *   home composite 下），已统一收敛到 `worker/`。
  * - **其余插件按插件名直接寻址**（`home/...` / `work/...` / `event_bus/...` /
  *   `gateway/...`）：它们挂在 home composite 下，不带 `worker/` 前缀。
@@ -53,15 +53,6 @@ export const CHAT_ABORT = `${CHAT_PATH}/abort` as const
  * 消费端 `services/transcriptStream.ts`；服务端 `plugins/session/plugin.rs::handle_stream_subscribe`。
  */
 export const SESSION_STREAM = `${SESSION_PATH}/stream` as const
-
-/**
- * 级联选项机制（选项宿主 = session 插件）。
- *
- * 根选项列表与子层共用一个端点（`parent` 参数区分），与 VDFS
- * `vdfs/list` 的树懒加载同构。
- */
-export const OPTIONS_PATH = `${SESSION_PATH}/options` as const
-export const OPTIONS_LIST = `${OPTIONS_PATH}/list` as const
 
 // ==================== 事件总线 ====================
 

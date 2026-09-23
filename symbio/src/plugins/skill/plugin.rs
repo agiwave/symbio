@@ -298,7 +298,7 @@ impl VdfsProvider for SkillPlugin {
     /// `ext = skill` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
     /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义（草稿详情页据此
     /// 渲染出与落成后同一张表单）。
-    fn root_new_types(&self) -> Vec<VdfsNewType> {
+    async fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![
             VdfsNewType::new(PLUGIN_SKILL, LABEL)
                 .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))

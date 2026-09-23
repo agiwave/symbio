@@ -13,9 +13,9 @@ use super::*;
 /// - `node_ext` = 落成后的渲染器键（漏了它，草稿详情页落到 `fallback` 兜底，
 ///   而不是同一张表单）；
 /// - `schema`    = 表单定义（没有它，`form` 渲染器渲染不出任何字段）。
-#[test]
-fn new_type_declares_the_landing_detail() {
-    let types = McpPlugin::default().root_new_types();
+#[tokio::test]
+async fn new_type_declares_the_landing_detail() {
+    let types = McpPlugin::default().root_new_types().await;
     let form = types
         .iter()
         .find(|t| t.ext == PLUGIN_MCP)

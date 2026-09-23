@@ -13,12 +13,17 @@
 
   ## 两种模式只差一个 `sessionId`
 
-  - **有 `sessionId`**（已落盘会话）：选项行的写入直达后端，值由后端回读权威值；
+  - **有 `sessionId`**（已落盘会话）：选项行的写入直达后端（`vdfs/write` 会话
+    `metadata`），值由调用方经 `values` 传入（节点 `attributes.metadata`）；
   - **无 `sessionId`**（新建草稿态）：选项行的选择缓冲在机制内部，随「创建会话」
     一并作为 metadata 补丁写入（`getDraftMetadata()` 取用）。
 
-  两种模式的差别对输入框不存在，故本组件不为此分叉：只把 `sessionId` 透传下去，
-  缓冲语义由 `ChatOptionBar` / `useSessionOptions` 自己按「有没有会话」决定。
+  两种模式的差别对输入框不存在，故本组件不为此分叉：只把 `sessionId` / `definition`
+  / `values` / `scope` 原样透传下去，缓冲语义由 `ChatOptionBar` /
+  `useSessionOptionBar` 自己按「有没有会话」决定。
+
+  定义与值都不在这里回读：**定义随节点下发**，谁手上有那个会话的节点，谁负责传
+  （见 `definition` prop 的说明）。
 
   ## 暴露面
 
@@ -44,7 +49,13 @@
       :autofocus="autofocus"
       @submit="$emit('submit')"
     />
-    <ChatOptionBar ref="optionsRef" :session-id="sessionId" />
+    <ChatOptionBar
+      ref="optionsRef"
+      :session-id="sessionId"
+      :definition="definition"
+      :values="values"
+      :scope="scope"
+    />
   </div>
 </template>
 
@@ -53,6 +64,7 @@ import { ref } from 'vue'
 import ChatInputArea from './ChatInputArea.vue'
 import ChatOptionBar from './ChatOptionBar.vue'
 import type { ImageAttachment } from '@/types'
+import type { DetailDefinition } from '@/schemas/vdfs'
 
 withDefaults(
   defineProps<{
@@ -60,10 +72,29 @@ withDefaults(
     isLoading?: boolean
     /** 当前会话 id；缺省 = 草稿态（选项缓冲于机制内部，随创建写入） */
     sessionId?: string
+    /**
+     * 选项定义（会话节点 `schema` / `new_types[session].schema`）。
+     *
+     * 定义**随节点下发**，故由调用方透传而不是在本组件里回读：会话详情页拿的是
+     * `props.node.schema`，与会话树解耦的面板（`ModelChatPanel`）拿的是 store 会话
+     * 清单里那一项的 `schema`——两处都是「它手上那个会话的节点」。
+     */
+    definition?: DetailDefinition | null
+    /** 字段当前值（节点 `attributes.metadata`）；缺省 = 全按定义缺省值显示 */
+    values?: Record<string, unknown> | null
+    /** 条件求值的额外键（节点 `attributes`，如 `message_count`） */
+    scope?: Record<string, unknown> | null
     /** 挂载即聚焦输入框 */
     autofocus?: boolean
   }>(),
-  { isLoading: false, sessionId: undefined, autofocus: false }
+  {
+    isLoading: false,
+    sessionId: undefined,
+    definition: null,
+    values: null,
+    scope: null,
+    autofocus: false,
+  }
 )
 
 defineEmits<{ (e: 'submit'): void }>()

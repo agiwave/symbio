@@ -22,28 +22,52 @@
 
 // ==================== 详情页定义（definition-driven detail） ====================
 
+/**
+ * 机制原生取值原语（`DetailField.pick`）——**跨栈闭集**，唯一定义处。
+ *
+ * 后端 `symbio_core/schemas/detail.rs` 用一组 `pub const DETAIL_PICK_*: &str`
+ * 表达同一个闭集（不是枚举，故字面即线上取值）。`protocol-mirror-audit` 的 C 组
+ * 按前缀提取后端取值、与本词表逐词比对。
+ *
+ * 语义：后端唤不起原生对话框，故字段可声明一个原语，由前端取值后写入该字段。
+ */
+export const DETAIL_PICK_DIRECTORY = 'directory'
+export const DETAIL_PICK_FILE = 'file'
+export const DETAIL_PICKS = [DETAIL_PICK_DIRECTORY, DETAIL_PICK_FILE] as const
+export type DetailPick = (typeof DETAIL_PICKS)[number]
+
 /** 条件谓词（徽标/动作显隐、字段条件显隐 visible_when）。`all` 存在时为 AND 组合 */
 export interface DetailCondition {
-  /** 求值键：表单字段名，或特殊键 is_existing / is_default / cap.<name> */
-  key: string
+  /**
+   * 求值键：表单字段名，或特殊键 is_existing / is_default / cap.<name>。
+   *
+   * 可缺席：`all` 组合条件自己不带键（后端 `DetailCondition.key` 是
+   * `#[serde(default)]` 的 `String`，组合条件下缺省为空串且从不被读取）。
+   * 叶子条件则必须给出 `key`。
+   */
+  key?: string
   equals?: unknown
   not_equals?: unknown
   truthy?: boolean
   all?: DetailCondition[]
 }
 
-/** select 选项 */
+/** select 选项 / 值-标签对 */
 export interface DetailOption {
   value: string
   label: string
+  /** 候选项说明（紧凑渲染形态在候选菜单里显示的一行解释） */
+  description?: string
 }
 
 /**
- * 表单字段定义。widget ∈ text|password|number|select|textarea|toggle|datalist|list|map|static
+ * 表单字段定义。widget ∈ text|password|number|select|textarea|toggle|datalist|list|map|static|path|form
  * 结构化 widget 表单模型约定（渲染器与后端 validate_manifest 两侧一致）：
  * - list：字符串数组，编辑态每行一项
  * - map：字符串键值对，编辑态每行 KEY=VALUE
  * - static：只读展示（info 绑定），options 可作值→标签映射
+ * - path：单行文本 + 原生选择入口（配 `pick`）
+ * - form：结构化子对象，形状由 `form` 子定义描述
  */
 export interface DetailField {
   key: string
@@ -51,19 +75,47 @@ export interface DetailField {
   description?: string
   required?: boolean
   widget: string
+  /** 图标名（纯 UI 映射；缺省不显示图标） */
+  icon?: string
   /** 条件显隐（不满足时整行不渲染） */
   visible_when?: DetailCondition
+  /** 禁用条件：成立才禁用（缺省 = 不禁用）。与 DetailAction.disabled_when 同义 */
+  disabled_when?: DetailCondition
+  /** 机制原生取值原语（闭集 DETAIL_PICKS） */
+  pick?: DetailPick
   placeholder?: string
   min?: number
   max?: number
   step?: number
   rows?: number
+  /**
+   * 候选项（`widget = "select"` 时渲染为候选菜单）。
+   *
+   * 对**没有候选菜单**的 widget（`path` / `form`），它退化为一张**值→标签表**：
+   * 紧凑渲染形态（选项栏）按它把当前值压成一句话（规则见 `compactFieldText`）。
+   * 例：`path` 字段给 `{value: "", label: "未选择目录"}` 以表达「未设置」，
+   * `form` 字段给 `{value: "true", label: "已开启"}` 以表达子对象的开关态。
+   */
   options?: DetailOption[]
   suggestions?: string[]
   options_from_preset?: boolean
   suggestions_from_preset?: boolean
   full_width?: boolean
+  /**
+   * 字段缺省值（未设置时用）。
+   *
+   * `widget = "form"` 时它是**子对象的缺省值**（一个对象），与纵向表单
+   * `widgetInitialOf` 的语义一致——紧凑选项栏据此显示摘要，子表单据此预填。
+   */
   default?: unknown
+  /**
+   * widget = 'form'：本字段值是结构化子对象，由这份子定义描述其字段。
+   *
+   * 紧凑渲染形态（会话选项栏）显示摘要的取值规则由 `compactFieldText` 实现：
+   * 按子定义的 `title_from` 链取一个代表值 ⇒ 本字段 `options` 非空时按
+   * 「值→标签」查表（`String(代表值)` 匹配）⇒ 仍无则回落 `label`。
+   */
+  form?: DetailDefinition
 }
 
 /** 分区（可折叠） */
@@ -132,6 +184,99 @@ export interface DetailDefinition {
   presets?: DetailPresetSpec
   badges?: DetailBadge[]
   actions?: DetailAction[]
+}
+
+// ==================== 条件求值（机制唯一实现） ====================
+//
+// 「条件是否成立」原先长在 `DetailForm.vue` 里（`evalCond` / `looseEq` 两个局部
+// 函数）。选项栏（`ChatOptionBar`）同样要判 `disabled_when`——「工作目录已锁定」
+// 就是它。规则若各写一份，同一条 `disabled_when` 在纵向表单与紧凑选项栏里会给出
+// 不同答案，而这种分歧没有任何守卫会红。故下沉为纯函数：**规则在这里，作用域在
+// 调用方**（纵向表单的求值键来自表单模型，选项栏的来自「节点属性 + 字段值」）。
+
+/** 宽松相等（`equals` / `not_equals` 用）：先比引用，再比 JSON 形状 */
+export function looseDetailEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a == null || b == null) return a == null && b == null
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 条件求值。`valueOf` 提供「求值键 → 值」（作用域由调用方决定）。
+ *
+ * 缺省 `true` 是**为 `when` / `visible_when` 的「缺省即显示」服务**的——
+ * 因此判「禁用」时不可写成 `!evalDetailCondition(...)`：那会把「无条件」与
+ * 「条件成立」两种相反情形都解释成不禁用（见 `DetailForm` 的 `fieldDisabled`）。
+ */
+export function evalDetailCondition(
+  c: DetailCondition | null | undefined,
+  valueOf: (key: string) => unknown,
+): boolean {
+  if (!c) return true
+  if (c.all?.length) return c.all.every((sub) => evalDetailCondition(sub, valueOf))
+  // 叶子条件：`key` 缺席（后端缺省空串）⇒ 取不到任何值，比较器按常规语义判（
+  // 缺省 `true` 是刻意的——见上文「缺省即显示」的说明）。
+  const v = valueOf(c.key ?? '')
+  if (c.equals !== undefined && !looseDetailEqual(v, c.equals)) return false
+  if (c.not_equals !== undefined && looseDetailEqual(v, c.not_equals)) return false
+  if (c.truthy !== undefined && Boolean(v) !== c.truthy) return false
+  return true
+}
+
+// ==================== 紧凑渲染形态（选项栏）的取值规则 ====================
+//
+// `DetailDefinition` 有两种渲染形态：纵向表单（`DetailForm`）与紧凑选项栏
+// （`ChatOptionBar`）。后者每个字段只占一个按钮，故必须把「当前值」压成一句话。
+// 这条规则与 `DetailField.form` 的文档是同一件事，实现收在这里（纯函数，可脱离
+// 组件单测），组件只做「取文本 → 渲染」。
+
+/** 路径末段（`widget = "path"` 的展示格式；与后端 `basename` 语义一致） */
+export function basenameOf(p: string): string {
+  return p.replace(/\\/g, '/').split('/').filter(Boolean).pop() || p
+}
+
+/** 「值 → 标签」查表（`options` 里 `String(value)` 相等的第一项） */
+export function detailOptionLabel(f: DetailField, v: unknown): string | undefined {
+  return f.options?.find((o) => o.value === String(v))?.label
+}
+
+/**
+ * 结构化子对象的**代表值**：按子定义 `title_from` 链在子对象里取第一个非空值。
+ *
+ * 链上取不到（如 `title_from` 指向布尔而子对象缺该键）时返回 `undefined`——
+ * 调用方据此回落，而不是把「取不到」当成一个值。
+ */
+export function formRepresentative(f: DetailField, value: unknown): unknown {
+  if (!value || typeof value !== 'object') return undefined
+  for (const key of f.form?.title_from ?? []) {
+    const v = (value as Record<string, unknown>)[key]
+    if (v !== undefined && v !== null && v !== '') return v
+  }
+  return undefined
+}
+
+/**
+ * 选项栏按钮文本（紧凑形态的**唯一**取值规则）。
+ *
+ * 1. **生效值** = 当前值 ?? 字段 `default`（未设置时按定义缺省显示；与候选选中态
+ *    同源，否则会出现「按钮写着中风险、菜单里一个都没勾」）；
+ * 2. `widget = "form"` 先按子定义 `title_from` 取代表值，其余 widget 直接用生效值；
+ * 3. 代表值为空 ⇒ 查 `options` 里 `value = ""` 的项（如「未选择目录」）⇒ 回落
+ *    字段 `label`；
+ * 4. `widget = "path"` 取路径末段；其余按 `options` 查表，
+ *    查不到时原样显示值（对象则回落 `label`，避免把整棵子树印在按钮上）。
+ */
+export function compactFieldText(f: DetailField, value: unknown): string {
+  const src = value ?? f.default
+  const rep = f.widget === 'form' ? formRepresentative(f, src) : src
+  if (rep == null || rep === '') return detailOptionLabel(f, '') ?? f.label
+  if (f.widget === 'path') return basenameOf(String(rep))
+  if (typeof rep === 'object') return detailOptionLabel(f, rep) ?? f.label
+  return detailOptionLabel(f, rep) ?? String(rep)
 }
 
 // ==================== 动作区装配（机制唯一实现） ====================

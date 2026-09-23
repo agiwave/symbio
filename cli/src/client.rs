@@ -46,7 +46,6 @@ use symbio::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use symbio::symbio_core::schemas::session::session_chat;
-use symbio::symbio_core::schemas::session::session_update;
 use symbio::symbio_core::transcript_stream::{
     event_of, is_resync, session_state_of, NodeEvent, SessionStateEvent,
 };
@@ -153,6 +152,8 @@ pub struct SymbioClient {
     pub mode: String,
     /// 可选 Agent 绑定
     pub agent: Option<String>,
+    /// VDFS 根地址（启动期经 `vdfs/root` 取回；会话地址从它往下拼）
+    root_addr: String,
 }
 
 impl SymbioClient {
@@ -213,7 +214,7 @@ impl SymbioClient {
         let workdir = workdir.to_string_lossy().to_string();
         let session_id = session.unwrap_or_else(|| gen_id("cli"));
 
-        let client = Self {
+        let mut client = Self {
             root,
             events,
             session_id,
@@ -221,9 +222,24 @@ impl SymbioClient {
             provider,
             mode,
             agent,
+            root_addr: String::new(),
         };
+        // 会话初始化要往 `<根>/session/<id>` 写，因此先把根地址取回来。
+        // 根叫什么**归 vdfs 插件**（`fs::VDFS_ADDR_ROOT`），使用方不写死——
+        // 与前端同款：启动期问一次，之后一律从父地址往下拼。
+        client.root_addr = client.fetch_root_addr().await?;
         client.ensure_session().await?;
         Ok(client)
+    }
+
+    /// 取 VDFS 根地址（`vdfs/root` 是唯一「不给地址」的入口）。
+    async fn fetch_root_addr(&self) -> Result<String, String> {
+        let resp = self.route("vdfs/root", json!({}), None).await?;
+        resp.get("path")
+            .and_then(Value::as_str)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| format!("vdfs/root 未返回根地址：{resp}"))
     }
 
     /// 路由一次调用。`payload` 走进程内强类型通道（零拷贝），
@@ -256,6 +272,22 @@ impl SymbioClient {
     /// 这些字段是后端 `resolve_session_params` 的回退来源：会话一旦绑定，
     /// 后续每次发送都不必重复携带（前端也正是这么做的）。
     /// `--workdir` 等 REPL 内改动后需重新调用一次使其落库。
+    ///
+    /// ## 一次 `vdfs/write` 就是 upsert（旧 `session/update` 的全部职责）
+    ///
+    /// 写的是**具名目标** `<根>/session/<id>` 且带 `create` 意图，而 VDFS 对这两件事
+    /// 的约定正好覆盖旧路由的两种情形（见 `VdfsProvider::write` 的 `create` 位表）：
+    ///
+    /// - 目标不存在 ⇒ **就地创建**，地址末段就是会话 id —— 这正是 CLI 需要的
+    ///   「客户端指定会话 id」；
+    /// - 目标已存在 ⇒ 覆盖（浅合并 metadata），`created = false`。
+    ///
+    /// 因此「新建会话」与「改元数据」是**同一次调用**，不需要先 `stat` 再决定
+    /// 写还是建——那条多出来的往返（以及随之而来的竞态）正是旧路由存在的理由，
+    /// 现在由 VDFS 的通用语义承担，专用路由已整体退役。
+    ///
+    /// `switch_session` 因此也不必区分「切到已有」与「切到新的」：改完 id 重新调用
+    /// 本方法即可（`/session <ID>` 与 `--session <ID>` 都是「打开或新建」）。
     pub async fn ensure_session(&self) -> Result<(), String> {
         let mut metadata = serde_json::Map::new();
         metadata.insert("workdir".to_string(), json!(self.workdir));
@@ -268,16 +300,30 @@ impl SymbioClient {
             metadata.insert("agent_id".to_string(), json!(a));
         }
 
-        let req = session_update::Request {
-            session_id: self.session_id.clone(),
-            metadata: Value::Object(metadata),
-            title: None,
-        };
+        let addr = format!(
+            "{}/session/{}",
+            self.root_addr.trim_end_matches('/'),
+            self.session_id
+        );
         let resp = self
-            .route("session/update", req, Some(&self.session_id))
+            .route(
+                "vdfs/write",
+                json!({
+                    "path": addr,
+                    "create": true,
+                    // 内容体是会话写入的两种字段之一（`metadata` / `title`）——
+                    // 与前端选项栏、后端 provider 同一种信封形状
+                    "text": json!({ "metadata": Value::Object(metadata) }).to_string(),
+                }),
+                None,
+            )
             .await?;
-        if resp.get("success").and_then(Value::as_bool) != Some(true) {
-            return Err(format!("会话初始化未成功: {resp}"));
+        // 失败经数据载荷回传（`{"error": …}`），不表现为传输错误——照实报出来，
+        // 否则会退化成「响应解析失败」这种看不出原因的消息。
+        if let Some(err) = resp.get("error").and_then(Value::as_str) {
+            if !err.is_empty() {
+                return Err(format!("会话初始化未成功: {err}"));
+            }
         }
         Ok(())
     }

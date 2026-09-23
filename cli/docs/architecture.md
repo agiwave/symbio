@@ -65,9 +65,16 @@
 
 ### 会话元数据落库
 
-`ensure_session()` 写 `session/update`，把 `workdir` / `mode` / `risk_level` / `provider_id`
-（可选）/ `agent_id`（可选）写进会话元数据。这些是后端 `resolve_session_params` 的回退来源：
+`ensure_session()` 走一次 **`vdfs/write(<根>/session/<id>, {create:true, metadata})`**，
+把 `workdir` / `mode` / `risk_level` / `provider_id`（可选）/ `agent_id`（可选）
+写进会话元数据。这些是后端 `resolve_session_params` 的回退来源：
 会话一旦绑定，后续每次发送都不必重复携带。`/workdir` 等 REPL 内改动后需重新调用一次使其落库。
+
+**一次调用即 upsert**：写的是**具名目标**（`<id>` 就是客户端指定的会话 id）且带
+`create` 意图——目标不存在则**就地创建**、已存在则浅合并 metadata
+（见 `VdfsProvider::write` 的 `create` 位表）。旧的 `session/update` 专用路由
+已于 2026-09-23 退役：它唯一多出来的能力就是这个，而 VDFS 的通用语义本就覆盖它。
+根地址在启动期经 `vdfs/root` 取回（`root_addr`），不写死。
 
 ## 2. 下游帧循环与完成判定
 

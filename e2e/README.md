@@ -66,6 +66,8 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 | T9 | `t9-ws-stream` | gateway WS `session/stream` 帧序：首帧（身份 + 首段正文）+ `delta` 增量 + 终态帧；增量拼接 == 完整正文 |
 | T10 | `t10-node-protocol` | 节点状态机全景：Turn/Reasoning/Text/ToolCall 三态协议（`delta` 必先有身份帧、终态收敛、无孤儿） |
 | T11 | `t11-compression-node` | 压缩节点协议：`msg_type=compression` 消息节点、两态流（终态带结果正文）、位置契约、失败 `failure_kind` |
+| T12 | `t12-content-type` | LLM POST 必须带 `Content-Type: application/json`（`&[u8]` + `.body()` 不会自动补） |
+| T13 | `t13-session-options` | 会话选项 schema 化：定义挂 `new_types[].schema` 与清单项 `schema`（逐字节相同）、值随节点 `metadata` 回读、`vdfs/write` 浅合并落库、`stat` 不带定义、重启后仍在 |
 
 每个用例共享的不变量断言（`assertTranscriptInvariants`）：
 

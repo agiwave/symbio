@@ -67,6 +67,9 @@
         v-model:attached-images="attachedImages"
         :is-loading="isLoading"
         :session-id="props.sessionId"
+        :definition="optionDefinition"
+        :values="optionValues"
+        :scope="optionScope"
         @submit="handleSendOrAbort"
       />
     </div>
@@ -85,6 +88,7 @@ import {
   messageTextOf,
 } from '@/schemas/chat_message'
 import type { ImageAttachment } from '@/types'
+import type { DetailDefinition } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { needsTypingRow } from '@/stores/sessionLive'
@@ -137,7 +141,7 @@ const chat = useChatConnection({
 // targetSessionId 用于子会话工具调用的恢复路由（子智能体的 user_prompt 通过
 // parent_session_id 指回子会话）。
 // 智能体 / 模型 / 运行模式 / 风险等级等会话参数由后端按 session.metadata 解析
-// （写入统一经级联选项机制），故此处不再透传任何前端业务选择。
+// （写入统一经会话选项栏落库），故此处不再透传任何前端业务选择。
 provide(RESUME_KEY, (payload: ResumePayload) => {
   chat.resume(payload)
 })
@@ -147,6 +151,29 @@ const messageTree = chat.messageTree
 
 // 全局 store 引用：错误状态兜底 / 消息计数
 const sessionsStore = useSessionsStore()
+
+// --- 会话选项栏的三个入参（定义 / 值 / 条件作用域） ---
+//
+// 本面板与会话树**解耦**（只有 `sessionId`），拿不到会话节点；而选项的**定义**
+// 随节点下发（`node.schema`）。两端在 store 的会话清单里相遇：清单来自
+// `<根>/session` 的 `vdfs/list`，每项都带着自己的 `schema` 与 `metadata`
+// （见 `services/session.listSessions`）。于是这里零额外请求就能拿全三样东西。
+const optionItem = computed(() => sessionsStore.list.find((s) => s.id === props.sessionId) ?? null)
+
+/** 选项定义（后端产出，前端不解释内容） */
+const optionDefinition = computed<DetailDefinition | null>(
+  () => (optionItem.value?.schema as DetailDefinition | undefined) ?? null
+)
+
+/** 当前字段值 = 会话 metadata（键 = 定义里的字段 key） */
+const optionValues = computed<Record<string, unknown>>(
+  () => (optionItem.value?.metadata ?? {}) as Record<string, unknown>,
+)
+
+/** 条件作用域里的节点级事实（如「已有历史」= `message_count ≠ 0`） */
+const optionScope = computed<Record<string, unknown>>(() => ({
+  message_count: optionItem.value?.message_count,
+}))
 
 // --- 计算属性 ---
   // 会话级错误条（"错误是状态、不是节点"的兜底展示）。

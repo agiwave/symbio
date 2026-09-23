@@ -303,7 +303,7 @@ mod tests {
     async fn sections_are_leaves_without_new_types() {
         let p = SettingPlugin;
         assert_eq!(p.root_access(), VdfsAccess::LIST);
-        assert!(p.root_new_types().is_empty());
+        assert!(p.root_new_types().await.is_empty());
 
         let s = p.stat(&vctx(), "appearance").await.unwrap();
         assert!(!s.is_dir(), "分区是叶子文档");

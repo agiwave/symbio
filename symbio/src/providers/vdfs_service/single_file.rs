@@ -198,7 +198,7 @@ impl VdfsProvider for SingleFileVdfs {
         VdfsAccess::LIST
     }
 
-    fn root_new_types(&self) -> Vec<crate::symbio_core::vdfs_provider::VdfsNewType> {
+    async fn root_new_types(&self) -> Vec<crate::symbio_core::vdfs_provider::VdfsNewType> {
         use crate::symbio_core::vdfs_provider::VdfsNewType;
         vec![VdfsNewType::new(VDFS_EXT_ZIP, format!("{}包", self.label))
             .with_description("导入整包（.zip）——整目录覆盖同名条目")

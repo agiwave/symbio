@@ -411,6 +411,12 @@ P8 当时收敛了 9 处，漏了同文件里的 `listVdfs` / `statVdfs` / `read
 | 对应 Rust struct 的**类型映射** | ⛔ 不做 | 正则读不出 `Option<u64>` → `number`，泛型 / 嵌套会失控；收益低于字段名 |
 | `messageTypes.ts` 文案 / `vdfsCards.ts` 约定 / `vdfs-form.ts` 派生 / 路径代数 | ⛔ **不可生成** | 纯业务判断，必须手写 |
 
+> **后续修订（2026-09-23）**：上表的 C / D 组条目数是**当时**的实测值。
+> 会话选项机制 schema 化下线后，C 组撤除「选项节点类型」并新增「详情方言取值原语」
+> （`DETAIL_PICK_*` ↔ `DETAIL_PICKS`）⇒ 仍 **6 张**但成分不同；D 组撤除选项机制 5 对
+> ⇒ **18 对**。**数字以 `scripts/protocol-mirror-audit.mjs` 的 `ENUM_SETS` /
+> `STRUCT_SETS` 长度为准**，本报告不追着改（它是一次性复核，不是事实表）。
+
 **决策是"审计"而非"生成"**（ADR-019）：`serde` 在**格式层**已单源，重复只在
 **符号层**（Rust 标识符 vs TS 常量名）；且 95 处 serde 标注里的 `untagged` /
 `tag = "type"` / `skip_serializing_if` 让机器导出不可靠。既有 `X-001..X-003`

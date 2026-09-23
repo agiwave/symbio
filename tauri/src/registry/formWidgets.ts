@@ -44,6 +44,8 @@ export type FormWidget =
   | 'select'
   | 'toggle'
   | 'static'
+  | 'path'
+  | 'form'
 
 /**
  * 呈现组 —— 模板真正分派的东西。
@@ -52,9 +54,11 @@ export type FormWidget =
  * - `toggle`   复选框
  * - `select`   下拉
  * - `textarea` 多行文本（textarea / list / map 共用）
- * - `input`    单行输入（text / password / number / datalist 共用）
+ * - `input`    单行输入（text / password / number / datalist / path 共用）
+ * - `form`     结构化子对象：值是一个对象，形状由字段 `form` 子定义描述
+ *              （渲染为「摘要 + 打开子表单」，见 `DetailForm`）
  */
-export type FormWidgetTag = 'static' | 'toggle' | 'select' | 'textarea' | 'input'
+export type FormWidgetTag = 'static' | 'toggle' | 'select' | 'textarea' | 'input' | 'form'
 
 export interface FormWidgetSpec {
   tag: FormWidgetTag
@@ -108,6 +112,10 @@ const WIDGET_SPECS: Record<string, FormWidgetSpec> = {
   select: { tag: 'select', initial: '', toEdit: identity, fromEdit: identity, fullWidth: false, readonly: false },
   toggle: { tag: 'toggle', initial: false, toEdit: identity, fromEdit: identity, fullWidth: false, readonly: false },
   static: { tag: 'static', initial: '', toEdit: identity, fromEdit: identity, fullWidth: false, readonly: true },
+  // 路径：单行文本 + 原生选择入口（入口由字段 `pick` 声明，见 schemas/vdfs-form）
+  path: { tag: 'input', initial: '', toEdit: identity, fromEdit: identity, fullWidth: false, readonly: false, inputType: 'text' },
+  // 结构化子对象：编辑态与存储态都是对象，由字段 `form` 子定义描述形状
+  form: { tag: 'form', initial: {}, toEdit: identity, fromEdit: identity, fullWidth: true, readonly: false },
 }
 
 /** 未登记 widget 名的回落（与消息域 / VDFS 域同一条兜底约定） */

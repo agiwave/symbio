@@ -89,6 +89,8 @@ export async function listSessions(
         // 直接透传节点状态，不在边界上压缩成布尔（否则 error / disabled 会丢）
         status: n.status,
         metadata: v.metadata ?? {},
+        // 选项定义随节点下发（`node.schema`）；清单一次取全，面板零回读
+        schema: v.schema,
       }
     })
 }
@@ -213,12 +215,14 @@ export async function updateMessage(
  *
  * **走 VDFS**：`write(<根>/session/<id>)`，请求体即
  * `{ metadata?, title? }`。后端 provider 的 `write` 对这两个字段实现**浅合并**
- * （未提供的字段保持不变），与 `session/update` 的语义逐字一致——两侧共用同一份
- * 合并实现，因此不存在"两条路径各自漂移"的窗口。
+ * （未提供的字段保持不变）——`Session::merge_metadata_object` 是这件事的**唯一**
+ * 实现，因此不存在"两条路径各自漂移"的窗口。
  *
- * `session/update` 路由**仍保留**，但只服务 CLI：它需要**客户端指定会话 id**
- * （`cli/src/client.rs` 自己 `gen_id` 后 upsert），而 VDFS 新建会话是
- * provider 生成 id（id 是存储细节，不属于使用方的知识）。
+ * 曾经的 `session/update` 路由**已于 2026-09-23 退役**：它唯一多出来的能力是
+ * 「客户端指定会话 id」，而 VDFS 对**具名目标 + `create`** 的约定本来就是
+ * 「不存在则就地创建、名字即身份」——CLI 因此改走
+ * `vdfs/write(<根>/session/<id>, {create:true, metadata})`，一次调用即 upsert。
+ * 会话与消息的增删改查现在**全部**在 VDFS 上。
  */
 export async function updateSession(
   sessionId: string,

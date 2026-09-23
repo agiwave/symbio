@@ -756,7 +756,8 @@ for (const abs of ROUTE_AUTHORITY_FILES) {
 // `docs/design/vdfs.md` §3.2 的 status 行一直写 `error`，而代码早已把该词改名为
 // `failed`（理由见 `vdfs_provider.rs::VDFS_STATUS_FAILED`）——两边各说各话，没有任何
 // 测试因此变红。而人读文档写的代码会照 `error` 写，于是漂移**从文档流回代码**
-//（`schemas/options.rs` 里那枚 `OPTION_STATUS_ERROR = "error"` 就是这么活下来的）。
+//（`schemas/options.rs` 里那枚 `OPTION_STATUS_ERROR = "error"` 就是这么活下来的；
+// 该文件已于 2026-09-23 随会话选项 schema 化删除，但这条例子的教训与文件无关）。
 //
 // 为什么要显式标记、而不是猜散文位置：文档是自然语言，靠"这行像在枚举词表"来判
 // 必然误报，而一个只会误报的守卫最后一定会被人用豁免注释喂到失效（E-006 的教训）。

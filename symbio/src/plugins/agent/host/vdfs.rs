@@ -280,7 +280,7 @@ impl VdfsProvider for AgentPlugin {
     }
 
     /// agent 目录只能整包导入（没有「先建空壳再填字段」的形态）
-    fn root_new_types(&self) -> Vec<VdfsNewType> {
+    async fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![VdfsNewType::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
             .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
             .with_source(VDFS_NEW_SOURCE_FILE)]

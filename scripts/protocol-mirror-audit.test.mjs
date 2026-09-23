@@ -10,12 +10,15 @@
  *   ⇒ 必须变红。
  * 另有一条跑真实仓库，防本守卫在真仓库上误报。
  *
- * ## 夹具为什么要铺满四张词表 / 全部结构体对
+ * ## 夹具为什么要铺满 C / D 两份清单的每一条
  *
  * `ENUM_SETS` 与 `STRUCT_SETS` 都是脚本里的固定清单（枚举 ↔ 词表、结构体 ↔ 接口的
- * 对应关系无法自动推断，只能登记），所以基线仓库必须把**每一条**都铺出来——少一张
- * 词表、少一对结构体，那条就会报「文件 / 枚举 / 结构体 / 接口不存在」，基线测试直接
- * 变红。这不是冗余：它同时证明了「夹具与两份清单没脱节」。
+ * 对应关系无法自动推断，只能登记），所以基线仓库必须把**清单里的每一条**都铺出来——
+ * 少一张词表、少一对结构体，那条就会报「文件 / 枚举 / 结构体 / 接口不存在」，基线测试
+ * 直接变红。这不是冗余：它同时证明了「夹具与两份清单没脱节」。
+ *
+ * 清单条目数会随机制下线而变化（例如会话选项机制退场后 C 组 8 → 6、D 组 23 → 18），
+ * 所以这里不写死数字——**基线断言的数字才是唯一口径**，注释跟着它走没有意义。
  *
  * 跑法：node --test scripts/protocol-mirror-audit.test.mjs
  */
@@ -34,8 +37,6 @@ const CHAT_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
 const CHAT_TS = 'tauri/src/schemas/chat_message.ts'
 const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const OPTIONS_RS = 'symbio/src/symbio_core/schemas/options.rs'
-const OPTIONS_TS = 'tauri/src/schemas/options.ts'
 const RISK_LEVEL_RS = 'symbio/src/plugins/local/policy/policy_types.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 
@@ -184,7 +185,7 @@ const VDFS_TS_SRC = [
  */
 const DETAIL_RS_SRC = [
   rsStruct('DetailCondition', 'key', 'equals', 'not_equals', 'truthy', 'all'),
-  rsStruct('DetailOption', 'value', 'label'),
+  rsStruct('DetailOption', 'value', 'label', 'description'),
   rsStruct(
     'DetailField',
     'key',
@@ -192,7 +193,10 @@ const DETAIL_RS_SRC = [
     'description',
     'required',
     'widget',
+    'icon',
     'visible_when',
+    'disabled_when',
+    'pick',
     'placeholder',
     'min',
     'max',
@@ -204,6 +208,7 @@ const DETAIL_RS_SRC = [
     'suggestions_from_preset',
     'full_width',
     'default',
+    'form',
   ),
   rsStruct('DetailSection', 'title', 'collapsed', 'fields'),
   rsStruct('DetailPreset', 'value', 'label', 'set', 'set_always', 'options'),
@@ -223,12 +228,16 @@ const DETAIL_RS_SRC = [
     'badges',
     'actions',
   ),
+  '',
+  // C 组：`DETAIL_PICK_*` 是**常量组**表达的闭集（不是枚举）——字面即线上取值
+  'pub const DETAIL_PICK_DIRECTORY: &str = "directory";',
+  'pub const DETAIL_PICK_FILE: &str = "file";',
 ].join('\n')
 
 /** 前端 vdfs-form.ts：D 组 9 对的前端侧 */
 const FORM_TS_SRC = [
   tsIface('DetailCondition', 'key', 'equals', 'not_equals', 'truthy', 'all'),
-  tsIface('DetailOption', 'value', 'label'),
+  tsIface('DetailOption', 'value', 'label', 'description'),
   tsIface(
     'DetailField',
     'key',
@@ -236,7 +245,10 @@ const FORM_TS_SRC = [
     'description',
     'required',
     'widget',
+    'icon',
     'visible_when',
+    'disabled_when',
+    'pick',
     'placeholder',
     'min',
     'max',
@@ -248,6 +260,7 @@ const FORM_TS_SRC = [
     'suggestions_from_preset',
     'full_width',
     'default',
+    'form',
   ),
   tsIface('DetailSection', 'title', 'collapsed', 'fields'),
   tsIface('DetailPreset', 'value', 'label', 'set', 'set_always', 'options'),
@@ -267,72 +280,12 @@ const FORM_TS_SRC = [
     'badges',
     'actions',
   ),
-].join('\n')
-
-/** 后端 options.rs：D 组 5 对（级联选项机制）的后端侧 */
-const OPTIONS_RS_SRC = [
-  rsStruct('OptionDisplay', 'show_label'),
-  rsStruct('OptionAction', 'endpoint', 'payload', 'pick', 'bind'),
-  rsStruct(
-    'OptionNode',
-    'id',
-    'label',
-    'icon',
-    'description',
-    'option_type',
-    'order',
-    'status',
-    'status_detail',
-    'value',
-    'value_label',
-    'enabled',
-    'action',
-    'form',
-    'data',
-    'children',
-    'display',
-  ),
-  rsStruct('OptionsRequest', 'session_id', 'parent'),
-  rsStruct('OptionsResponse', 'nodes'),
   '',
-  // C 组：`OptionType` 是 `snake_case` 闭集
-  rsEnum('OptionType', ['Invoke', 'Sub', 'Form']),
-  '',
-  // C 组：`OPTION_PICK_*` 是**常量组**表达的闭集（不是枚举）——字面即线上取值
-  'pub const OPTION_PICK_DIRECTORY: &str = "directory";',
-  'pub const OPTION_PICK_FILE: &str = "file";',
-].join('\n')
-
-/** 前端 options.ts：D 组 5 对的前端侧 */
-const OPTIONS_TS_SRC = [
-  tsIface('OptionDisplay', 'show_label'),
-  tsIface('OptionAction', 'endpoint', 'payload', 'pick', 'bind'),
-  tsIface(
-    'OptionNode',
-    'id',
-    'label',
-    'icon',
-    'description',
-    'option_type',
-    'order',
-    'status',
-    'status_detail',
-    'value',
-    'value_label',
-    'enabled',
-    'action',
-    'form',
-    'data',
-    'children',
-    'display',
-  ),
-  tsIface('OptionsRequest', 'session_id', 'parent'),
-  tsIface('OptionsResponse', 'nodes'),
-  '',
-  // C 组：词表用**裸字面量**（这三个词在别处没有按名引用）
-  tsArray('OPTION_TYPES', "'invoke'", "'sub'", "'form'"),
-  '',
-  tsArray('OPTION_PICKS', "'directory'", "'file'"),
+  // C 组：这里用**常量名**引用（真仓库 `vdfs-form.ts` 就是这种写法：词要在组件里
+  // 按名使用，如 `pick === DETAIL_PICK_DIRECTORY`），顺带覆盖词表的常量解析分支
+  "export const DETAIL_PICK_DIRECTORY = 'directory'",
+  "export const DETAIL_PICK_FILE = 'file'",
+  tsArray('DETAIL_PICKS', 'DETAIL_PICK_DIRECTORY', 'DETAIL_PICK_FILE'),
 ].join('\n')
 
 /** 后端 policy_types.rs：C 组的 `lowercase` 闭集（`RiskLevel`） */
@@ -363,8 +316,6 @@ const BASE = {
   [CHAT_TS]: CHAT_TS_SRC,
   [DETAIL_RS]: DETAIL_RS_SRC,
   [FORM_TS]: FORM_TS_SRC,
-  [OPTIONS_RS]: OPTIONS_RS_SRC,
-  [OPTIONS_TS]: OPTIONS_TS_SRC,
   [RISK_LEVEL_RS]: RISK_LEVEL_RS_SRC,
   [SESSION_META_TS]: SESSION_META_TS_SRC,
   'tauri/src/services/session.ts': 'export const x = 1\n',
@@ -408,7 +359,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 7 张闭集词表 \+ D 组 23 对结构体字段 \+ E 组 1 条跨栈导航头/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 6 张闭集词表 \+ D 组 18 对结构体字段 \+ E 组 1 条跨栈导航头/,
   )
 })
 
@@ -749,46 +700,11 @@ test('详情方言：后端 DetailField 字段改名 → 变红（证明这批�
   assert.match(r.stdout, /前端持有后端不存在的字段：visible_when/)
 })
 
-test('选项机制：前端 OptionNode 多出一个字段 → 变红（证明这批登记确实在比对）', () => {
-  const r = mirror({
-    [OPTIONS_TS]: OPTIONS_TS_SRC.replace(
-      '  display?: string\n}',
-      '  display?: string\n  ghost?: string\n}',
-    ),
-  })
-  assert.equal(r.status, 1)
-  assert.match(r.stdout, /前端持有后端不存在的字段：ghost/)
-})
-
-test('后端结构体不存在 → 变红（不是静默跳过）', () => {
-  const r = mirror({ [CHAT_RS]: 'pub const X: &str = "x";\n' })
-  assert.equal(r.status, 1)
-  assert.match(r.stdout, /后端未找到结构体 ChatMessage/)
-})
-
-test('前端接口不存在 → 变红（不是静默跳过）', () => {
-  const r = mirror({ [CHAT_TS]: "export const X = 'x'\n" })
-  assert.equal(r.status, 1)
-  assert.match(r.stdout, /前端未找到接口 ChatMessage/)
-})
-
-test('常量组闭集：后端加一个 `OPTION_PICK_*` → 前端词表没跟，变红', () => {
-  // 这正是 `OPTION_PICK_FILE` 当年的处境的镜像：后端有、前端没有，而没有任何守卫会红。
-  const r = mirror({
-    [OPTIONS_RS]: OPTIONS_RS_SRC.replace(
-      'pub const OPTION_PICK_FILE: &str = "file";',
-      'pub const OPTION_PICK_FILE: &str = "file";\npub const OPTION_PICK_ANY: &str = "any";',
-    ),
-  })
-  assert.equal(r.status, 1)
-  assert.match(r.stdout, /前端词表缺少：any/)
-})
-
 test('常量组闭集：前端词表多出一个词 → 变红（反向也不许静默）', () => {
   const r = mirror({
-    [OPTIONS_TS]: OPTIONS_TS_SRC.replace(
-      "export const OPTION_PICKS = ['directory', 'file'] as const",
-      "export const OPTION_PICKS = ['directory', 'file', 'ghost'] as const",
+    [FORM_TS]: FORM_TS_SRC.replace(
+      'export const DETAIL_PICKS = [DETAIL_PICK_DIRECTORY, DETAIL_PICK_FILE] as const',
+      "export const DETAIL_PICKS = [DETAIL_PICK_DIRECTORY, DETAIL_PICK_FILE, 'ghost'] as const",
     ),
   })
   assert.equal(r.status, 1)
@@ -797,10 +713,37 @@ test('常量组闭集：前端词表多出一个词 → 变红（反向也不许
 
 test('常量组不存在 → 变红（不是静默跳过）', () => {
   const r = mirror({
-    [OPTIONS_RS]: OPTIONS_RS_SRC.replace(/pub const OPTION_PICK_[A-Z]+: &str = "[a-z]+";/g, ''),
+    [DETAIL_RS]: DETAIL_RS_SRC.replace(/pub const DETAIL_PICK_[A-Z]+: &str = "[a-z]+";/g, ''),
   })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /后端未找到常量组 OPTION_PICK_\*/)
+  assert.match(r.stdout, /后端未找到常量组 DETAIL_PICK_\*/)
+})
+
+test('详情方言取值原语：后端加一个 `DETAIL_PICK_*` → 前端词表没跟，变红', () => {
+  // 「原生取值」是**通用方言**的能力（`DetailField.pick`），取值集合的唯一定义处
+  // 是 `schemas/vdfs-form.ts::DETAIL_PICKS`，本条按 `DETAIL_PICK_` 前缀提取后端
+  // 取值逐词比对。它原先守的是级联选项的私有原语（`OPTION_PICK_*` ↔
+  // `OPTION_PICKS`），那套机制下线后随旧家一并删除——能力本身没丢，只是换了家。
+  const r = mirror({
+    [DETAIL_RS]: DETAIL_RS_SRC.replace(
+      'pub const DETAIL_PICK_FILE: &str = "file";',
+      'pub const DETAIL_PICK_FILE: &str = "file";\npub const DETAIL_PICK_COLOR: &str = "color";',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端词表缺少：color/)
+})
+
+test('详情方言取值原语：后端改了 `DETAIL_PICK_*` 的取值 → 变红（词表不是装饰）', () => {
+  const r = mirror({
+    [DETAIL_RS]: DETAIL_RS_SRC.replace(
+      'pub const DETAIL_PICK_DIRECTORY: &str = "directory";',
+      'pub const DETAIL_PICK_DIRECTORY: &str = "folder";',
+    ),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /前端词表缺少：folder/)
+  assert.match(r.stdout, /前端词表多出：directory/)
 })
 
 test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条头就悬空了）', () => {

@@ -37,7 +37,7 @@ use crate::plugins::agent::host::instruction;
 use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::memory;
 use crate::plugins::agent::host::store::AgentDirStore;
-use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::vdfs_provider::VdfsProvider;
 use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
@@ -377,20 +377,17 @@ impl AgentPlugin {
             .with_version("0.1.0")
     }
 
-    /// 参与 `available_options` 收集：贡献「智能体」选择项。
+    /// 参与 `available_options` 收集：贡献「智能体」字段。
     ///
-    /// 形态：`sub` 节点，子项 = 「不使用 Agent」 + 各可用 agent 目录；每个子项
-    /// 是「会话状态落库」invoke（`metadata.agent_id`），选中即持久化。
-    /// 当前选中值由宿主注入的 `ctx[AGENT_ID]` 回填——本插件无需加载会话。
+    /// 候选 = 「不使用 Agent」 + 各可用 agent 目录（值 = `agent_id`，空串 = 显式解绑）。
+    ///
+    /// **不回填当前值**：「值 → 标签」由 `field.options` 承担，前端查表即得；当前值
+    /// 来自会话 `metadata.agent_id`。因此这里既不读 `ctx[AGENT_ID]`，也不算
+    /// `current_label`（见 `docs/design/session-options-unification.md` §6）。
     async fn contribute_options(&self, ctx: &Arc<dyn InvokeRequest>) {
         let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) else {
             return;
         };
-
-        let current = ctx
-            .get(AGENT_ID)
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
 
         // 展示顺序号段约定：20 = 智能体（见 session::options 模块文档）
         const ORDER: i32 = 20;
@@ -398,58 +395,41 @@ impl AgentPlugin {
         let store = AgentDirStore::new(self.config_file.dir().dir());
         let agent_dirs = store.list();
 
-        let mut children: Vec<crate::symbio_core::schemas::options::OptionNode> =
-            Vec::with_capacity(agent_dirs.len() + 1);
-        children.push(
-            crate::symbio_core::schemas::options::OptionNode::session_state(
-                "agent:none",
-                "不使用 Agent",
-                // 空串 = 显式解绑（后端 orchestrator 对空值按「未选择」处理，
-                // 与 metadata 缺省同语义），亦使子项 value 与父节点 value 可直接比较
-                "agent_id",
-                serde_json::json!(""),
-            )
-            .with_description("纯工具模式：直接与 Model 对话，可用文件/搜索等基础工具"),
-        );
+        visitor
+            .register_option_field(ORDER, agent_field(&agent_dirs))
+            .await;
+    }
+}
 
-        let mut current_label: Option<String> = if current.is_none() {
-            Some("不使用 Agent".to_string())
-        } else {
-            None
-        };
-        for record in &agent_dirs {
-            let m = &record.manifest;
-            if current.as_deref() == Some(m.id.as_str()) {
-                current_label = Some(m.name.clone());
-            }
-            children.push(
-                crate::symbio_core::schemas::options::OptionNode::session_state(
-                    format!("agent:{}", m.id),
-                    m.name.clone(),
-                    "agent_id",
-                    serde_json::json!(m.id),
-                )
-                .with_description(m.description.clone()),
-            );
+/// 「智能体」选项的字段声明（`node.schema` 用）。
+///
+/// 候选 = 「不使用 Agent」（空串 = 显式解绑，后端 orchestrator 对空值按「未选择」
+/// 处理）+ 各可用 agent 目录。`default` 也取空串：会话 metadata 里没有
+/// `agent_id` 时，前端按 `default` 显示「不使用 Agent」。
+fn agent_field(agent_dirs: &[crate::plugins::agent::host::store::AgentDirRecord]) -> DetailField {
+    let mut options = vec![DetailOption {
+        value: String::new(),
+        label: "不使用 Agent".to_string(),
+        description: Some("纯工具模式：直接与 Model 对话，可用文件/搜索等基础工具".to_string()),
+    }];
+    options.extend(agent_dirs.iter().map(|record| {
+        let m = &record.manifest;
+        DetailOption {
+            value: m.id.clone(),
+            label: m.name.clone(),
+            description: (!m.description.is_empty()).then(|| m.description.clone()),
         }
+    }));
 
-        let node =
-            crate::symbio_core::schemas::options::OptionNode::sub("agent", "智能体", children)
-                .with_icon("agent")
-                .with_order(ORDER)
-                .with_description("选择认知人格（可不选）");
-
-        // 回填当前选中值（值 = agent_id；展示文本 = agent 目录名 / 不使用 Agent）
-        let node = match current_label {
-            Some(label) => {
-                let value = current.clone().unwrap_or_default();
-                node.with_value_label(value, label)
-            }
-            // 选中的 agent 目录已不存在（陈旧 id）：仅展示值本身，前端仍可重选
-            None => node.with_value(current.clone().unwrap_or_default()),
-        };
-
-        visitor.register_option(node).await;
+    DetailField {
+        key: "agent_id".to_string(),
+        label: "智能体".to_string(),
+        description: Some("选择认知人格（可不选）".to_string()),
+        widget: "select".to_string(),
+        icon: Some("agent".to_string()),
+        default: Some(serde_json::json!("")),
+        options,
+        ..Default::default()
     }
 }
 

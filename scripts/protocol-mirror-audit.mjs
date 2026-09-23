@@ -100,8 +100,6 @@ const CHAT_MESSAGE_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
 const CHAT_MESSAGE_TS = 'tauri/src/schemas/chat_message.ts'
 const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const OPTIONS_RS = 'symbio/src/symbio_core/schemas/options.rs'
-const OPTIONS_TS = 'tauri/src/schemas/options.ts'
 const RISK_LEVEL_RS = 'symbio/src/plugins/local/policy/policy_types.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 
@@ -180,7 +178,9 @@ const ABSENT = [
  *
  * 只认第一种会让第二种长期无人看守：当初 `OPTION_PICK_*` 就是这么漏的——它被
  * 登记成「消费方在前端」，而前端那份其实是**独立硬编码**的第二份抄本，与 Rust
- * 常量没有任何引用关系（详见 `symbio_core/schemas/options.rs` 的修订说明）。
+ * 常量没有任何引用关系（那套机制已于 2026-09-23 整体下线，闭集迁到
+ * `detail.rs::DETAIL_PICK_*` ↔ `vdfs-form.ts::DETAIL_PICKS`；账目见
+ * `docs/design/session-options-unification.md`）。
  */
 const ENUM_SETS = [
   {
@@ -204,11 +204,6 @@ const ENUM_SETS = [
     ts: { file: CHAT_MESSAGE_TS, array: 'RESUME_ACTIONS' },
   },
   {
-    what: '选项节点类型',
-    rust: { file: OPTIONS_RS, enum: 'OptionType' },
-    ts: { file: OPTIONS_TS, array: 'OPTION_TYPES' },
-  },
-  {
     what: '工具风险等级',
     // ⚠️ 这条是 `rename_all = "lowercase"`（不是 `snake_case`）：本组**自动读取**
     // 声明的取值并选用对应的转换规则，故两者都能守。此前只认 `snake_case`，
@@ -218,13 +213,13 @@ const ENUM_SETS = [
     ts: { file: SESSION_META_TS, array: 'SESSION_RISK_LEVELS' },
   },
   {
-    what: '机制原生取值原语',
-    // 后端用 `pub const` 组（不是枚举）表达这个闭集 —— 字面即线上取值，无需转换。
-    // 登记它之前，前端 `useSessionOptions.ts` 里那两个同名常量是**独立硬编码**的
-    // 第二份抄本，而 Rust 侧的 `#[allow(dead_code)]` 却把理由写成「消费方在前端」，
-    // 于是两边各改各的、没有守卫会红。现在前端词表是唯一定义处，本组逐词比对。
-    rust: { file: OPTIONS_RS, constPrefix: 'OPTION_PICK_' },
-    ts: { file: OPTIONS_TS, array: 'OPTION_PICKS' },
+    what: '机制原生取值原语（详情表单）',
+    // S1 把「原生取值」从级联选项体系搬进了**通用方言**：`pick` 现在是任何详情
+    // 表单字段都能声明的能力（`DetailField::pick`），不再是选项专属。取值集合的
+    // 唯一定义处随之迁到 `schemas/vdfs-form.ts::DETAIL_PICKS`，本条按 `DETAIL_PICK_`
+    // 前缀提取后端取值逐词比对。
+    rust: { file: DETAIL_RS, constPrefix: 'DETAIL_PICK_' },
+    ts: { file: FORM_TS, array: 'DETAIL_PICKS' },
   },
 ]
 
@@ -352,31 +347,6 @@ const STRUCT_SETS = [
     rust: { file: DETAIL_RS, struct: 'DetailDefinition' },
     ts: { file: FORM_TS, interface: 'DetailDefinition' },
   },
-  {
-    what: '选项栏显示策略',
-    rust: { file: OPTIONS_RS, struct: 'OptionDisplay' },
-    ts: { file: OPTIONS_TS, interface: 'OptionDisplay' },
-  },
-  {
-    what: '选项动作',
-    rust: { file: OPTIONS_RS, struct: 'OptionAction' },
-    ts: { file: OPTIONS_TS, interface: 'OptionAction' },
-  },
-  {
-    what: '选项节点',
-    rust: { file: OPTIONS_RS, struct: 'OptionNode' },
-    ts: { file: OPTIONS_TS, interface: 'OptionNode' },
-  },
-  {
-    what: '选项列表请求',
-    rust: { file: OPTIONS_RS, struct: 'OptionsRequest' },
-    ts: { file: OPTIONS_TS, interface: 'OptionsRequest' },
-  },
-  {
-    what: '选项列表响应',
-    rust: { file: OPTIONS_RS, struct: 'OptionsResponse' },
-    ts: { file: OPTIONS_TS, interface: 'OptionsResponse' },
-  },
 ]
 
 // ==================== 提取 ====================
@@ -394,7 +364,8 @@ function rustConsts(src) {
  * 后端：按前缀取一组 `pub const PREFIX…: &str = "v"` 的**取值**（不要名字）。
  *
  * 与 `rustConsts` 的区别是：A 组比的是「同名常量的值」，这里比的是「一组常量的
- * 取值集合」——名字对不上无所谓（前端词表本来就叫 `OPTION_PICKS`），要的是集合相等。
+ * 取值集合」——名字对不上无所谓（前端词表本来就不与后端常量同名，如
+ * `DETAIL_PICK_*` ↔ `DETAIL_PICKS`），要的是集合相等。
  */
 function rustConstGroup(src, prefix) {
   const re = new RegExp(

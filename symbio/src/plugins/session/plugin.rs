@@ -23,7 +23,6 @@ use super::chat_session::ChatSession;
 pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
-use crate::symbio_core::schemas::options::OPTIONS_LIST;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::transcript_stream::{
     register_transcript_subscriber, unregister_transcript_subscriber,
@@ -450,13 +449,16 @@ impl Plugin for SessionPlugin {
 
         // 会话存储已迁移到 <本插件目录>/ 全局目录，session/* 系列接口
         // 不再依赖 ctx.workdir；ctx.workdir 仅在 chat 路径和需要 Model 路由时使用。
-        let data = match path {
+        //
+        // 每个分支都**自己返回**（`match` 的值不再被使用）：本表已经没有
+        // 「算出一份 Data 载荷再统一包信封」的路径了——会话与消息的数据面
+        // 全在 VDFS 上，这里只剩编排 / 控制。
+        match path {
             "chat/send" => return self.handle_chat_send_oneoff(ctx).await,
             "chat/abort" => return self.handle_chat_abort_oneoff(ctx).await,
             // 转写流订阅：消息**实时面**的唯一通道（NodeEvent，seq 单调、满即踢）。
             // 历史面（落库转写 / `消息` 目录投影）仍走 VDFS 读。
             "stream" => return self.handle_stream_subscribe(ctx).await,
-            "update" => self.invoke_update(ctx.clone()).await?,
             // ==================== 本表只留「不是数据 CRUD」的路由 ====================
             //
             // 会话与消息的增删改查**全部**经 VDFS 地址完成（`vdfs/list|read|write|
@@ -482,17 +484,24 @@ impl Plugin for SessionPlugin {
             //                 （`Plugin::get_vfs_provider()` + `stat(<挂载名>/<sid>)`）：
             //                 「在不在」是资源问题，不该为它占一条会话专用读协议，
             //                 也不必读回整份历史。见同文 §3.4.1。
+            // - `options/list` —— **选项机制整体下线**（2026-09-23）：选项不再是
+            //                 独立的节点协议，而是会话配置表单的字段，随
+            //                 `node.schema` / `new_types[].schema` 下发，值走
+            //                 `node.attributes.metadata`，写走 `vdfs/write`。
+            //                 同一件事两条下发通道，而守卫不会因为「两边说的不一样」
+            //                 变红。见 `docs/design/session-options-unification.md`。
+            // - `update`   —— **会话 metadata 的写入入口收敛为 `vdfs/write`**
+            //                 （2026-09-23）：它唯一比 VDFS 多出来的东西是「客户端
+            //                 指定会话 id」，而 VDFS 对**具名目标 + 不存在**的约定
+            //                 就是「就地创建，名字即身份」（见 `VdfsProvider::write`
+            //                 的 `create` 位表）——那条理由因此消失。CLI 改走
+            //                 `vdfs/write(<根>/session/<id>, {create:true, metadata})`，
+            //                 一次调用同时覆盖新建与改元数据。见
+            //                 `session/docs/legacy-route-migration.md` §3.5。
             //
-            // 剩下的都不是 CRUD：前两条是**编排 / 控制**，`update` 有一个「非 VDFS
-            // 能表达」的理由（CLI 需要客户端指定会话 id，见同文 §3.5）。
-            //
-            // 级联选项机制：会话是选项宿主，根选项列表在全项目收集后一次下发
-            // （子层经 payload.parent 懒加载，与 vdfs/list 的 parent 懒加载同构）
-            OPTIONS_LIST => return super::options::handle_list_options(self.as_ref(), ctx).await,
+            // 剩下的都不是 CRUD：前两条是**编排 / 控制**。
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
-        };
-
-        Ok(PluginPayload::new(&data))
+        }
     }
 
     async fn traverse(
@@ -507,9 +516,9 @@ impl Plugin for SessionPlugin {
             == crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS
         {
             if let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) {
-                visitor
-                    .register_batch(self.build_option_nodes(&ctx).await)
-                    .await;
+                for (order, field) in self.session_option_fields() {
+                    visitor.register_option_field(order, field).await;
+                }
             }
         }
         // 能力收集（available_tools）：session 贡献一个内聚工具——心跳设置。
@@ -634,7 +643,7 @@ mod vdfs_provider;
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
     internal_dirs, message_node, message_of, message_text, ordered, overlay_live,
-    parse_session_path, session_content, session_node, title_from_new_path, transcript_window,
+    parse_session_path, session_content, session_id_from_new_path, session_node, transcript_window,
     window_params, SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED,
     OUTCOME_FAILED, SEG_MESSAGES,
 };

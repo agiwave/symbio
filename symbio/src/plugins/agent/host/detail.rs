@@ -40,10 +40,12 @@ pub fn agent_detail_definition() -> DetailDefinition {
                             DetailOption {
                                 value: "workspace".into(),
                                 label: "工作区级（<本插件目录>）".into(),
+                                description: None,
                             },
                             DetailOption {
                                 value: "global".into(),
                                 label: "全局级（系统目录）".into(),
+                                description: None,
                             },
                         ],
                         ..field("scope", "来源层级", "static")

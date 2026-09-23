@@ -8,7 +8,8 @@
  *
  * 另锁定**全部五个写入落点**——它们曾经各有专用路由（`session/clear` /
  * `session/update` / `chat/update_message` / `chat/delete_message` /
- * `chat/clear_messages`），2026-09-18 起全部并入 VDFS：
+ * `chat/clear_messages`），2026-09-18 起全部并入 VDFS（`session/update`
+ * 于 2026-09-23 最后一条退役，会话与消息的 CRUD 至此全在 VDFS 上）：
  *
  * | 操作 | 落点 |
  * |---|---|

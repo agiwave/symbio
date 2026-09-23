@@ -1,42 +1,44 @@
-//! 会话页选项机制 —— 宿主端点与会话自有选项
+//! 会话选项 —— 宿主端点与会话自有选项的**字段声明**
 //!
 //! ## 角色
 //!
-//! session 插件是**选项宿主**：会话页输入区下方的根选项列表由本插件在
-//! `options/list` 端点下发。下发的节点来自两处，合流后一次响应：
+//! session 插件是**选项宿主**：会话页输入区下方的选项栏与会话详情页的可修改项
+//! 是**同一批字段**（工作目录 / 执行风险 / 运行模式 / 心跳任务 + 各插件贡献的
+//! 智能体 / Model）。本模块声明其中**会话自有**的四项；其余由贡献方在自己的
+//! `traverse(available_options)` 分支注册（agent → 智能体、model → Model）。
 //!
-//! 1. **全项目收集**（`collect_options` + `Plugin::traverse`）——agent 插件
-//!    贡献「智能体」、model 插件贡献「Model」等；
-//! 2. **宿主自有**——工作目录 / 运行模式 / 风险等级 / 心跳任务：这四类
-//!    选项的状态就在会话自身（`session.metadata`），由本插件在 `traverse`
-//!    参与 `available_options` 时直接构造（与其它插件同构，走同一注册通道）。
+//! ## 三条通路（`docs/design/session-options-unification.md` §3.2）
 //!
-//! ## 状态落库
+//! ```text
+//! 定义   <根>/session/<id> → node.schema               = DetailDefinition { binding: "option", … }
+//!        <根>/session      → new_types[session].schema = 同一份
+//! 当前值 <根>/session/<id> → node.attributes.metadata  （键 = 定义里的字段 key）
+//! 落库   vdfs/write(<根>/session/<id>, {"metadata": {<字段 key>: <值>}})
+//! ```
 //!
-//! 所有状态型选项的选择动作统一指向 [`SESSION_STATE_ENDPOINT`]
-//! （`worker/session/update`），把值合并写入 `session.metadata`。后端各解析链
-//! （`orchestrator::resolve_session_params` / `tool_executor`）已按 metadata
-//! 回退取值，因此**前端不需要知道任何业务字段名**——这正是「前端零业务代码」
-//! 的关键：选项的展示、选择、落库全部由后端声明，前端只做通用渲染与转发。
+//! 定义只声明「有哪些字段、候选有哪些、什么条件禁用」——**不带当前值**，
+//! 因此与「是哪个会话」无关：可在会话清单里算一次、给每一项复用。
+//!
+//! ⚠️ 这里曾经并行一条 `options/list` 通道（`OptionNode` 节点协议，带
+//! `action.endpoint` / `action.bind` 点路径 / `display` 显示策略），已于
+//! 2026-09-23 整体下线：同一件事有两条下发通道，而守卫不会因为「两边说的
+//! 不一样」变红。
 //!
 //! ## order 约定（跨插件协调，禁止插件间直接依赖）
 //!
 //! 插件之间不可见，故 order 采用**号段约定**（各自定义本地常量）：
 //! `10` 工作目录 / `20` 智能体 / `30` Model / `40` 风险等级 / `50` 运行模式 /
 //! `60` 心跳任务；新增贡献方取空闲号段。
+//!
+//! 号段只用于**收集层排序**，不下发：前端收到的是已排好序的字段数组
+//! （见 `symbio_core::option::OptionVisitor::register_option_field`）。
 
 use super::plugin::SessionPlugin;
 use crate::symbio_core::schemas::detail::{
-    DetailAction, DetailDefinition, DetailField, DetailSection,
+    DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
+    DETAIL_PICK_DIRECTORY,
 };
-use crate::symbio_core::schemas::options::{
-    OptionAction, OptionDisplay, OptionNode, OptionType, OptionsRequest, OptionsResponse,
-    OPTION_PICK_DIRECTORY,
-};
-use crate::symbio_core::vdfs_provider::{VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED};
-use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, PluginPayload, SESSION_ID, WORKDIR,
-};
+use crate::symbio_core::InvokeRequest;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -49,374 +51,283 @@ const ORDER_HEARTBEAT: i32 = 60;
 /// 心跳任务默认空闲间隔（秒），与前端历史默认值一致
 const DEFAULT_HEARTBEAT_INTERVAL: i64 = 300;
 
-/// 取非空去空白字符串
-fn non_empty(s: &Option<String>) -> Option<&str> {
-    s.as_deref().map(str::trim).filter(|s| !s.is_empty())
-}
-
-/// 路径末段（工作目录展示名；与前端 basename 语义一致）
-fn basename(p: &str) -> String {
-    p.trim_end_matches(['/', '\\'])
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(p)
-        .to_string()
-}
-
-/// 从 metadata 取字符串字段（去空白）
-fn meta_str(metadata: &Value, key: &str) -> Option<String> {
-    metadata
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
-
-/// `options/list` —— 选项列表（根层 / 子层由 `parent` 区分）。
-///
-/// 根层：把会话当前状态注入收集上下文，广播全项目收集选项，返回节点列表；
-/// 子层（`parent` 非空）：在**同一份收集结果**中定位该节点并返回其子项
-/// （懒加载与 VDFS `vdfs/list` 的 `parent` 同构，单一通道）。
-pub(crate) async fn handle_list_options(
-    plugin: &SessionPlugin,
-    ctx: Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
-    let req = ctx.payload::<OptionsRequest>().ok().unwrap_or_default();
-
-    let session_id = non_empty(&req.session_id)
-        .map(str::to_string)
-        .or_else(|| ctx.get(SESSION_ID).filter(|s| !s.trim().is_empty()));
-
-    // 收集上下文：会话标识是各贡献插件回填「当前选中值」的依据
-    // （agent 插件读 AGENT_ID / model 插件读 PROVIDER_ID，均由本插件从会话
-    //  metadata 注入——贡献方无需自行加载会话，保持插件间零耦合）
-    let collect_ctx = ctx.fork();
-    if let Some(sid) = &session_id {
-        collect_ctx.set(SESSION_ID, sid.clone());
-        if let Ok(session) = plugin.get_or_create_session(sid).await {
-            let meta = &session.metadata;
-            if let Some(aid) = meta_str(meta, "agent_id") {
-                collect_ctx.set(crate::symbio_core::AGENT_ID, aid);
-            }
-            if let Some(pid) = meta_str(meta, "provider_id") {
-                collect_ctx.set(crate::symbio_core::PROVIDER_ID, pid);
-            }
-            // workdir 是 agent 插件发现「工作区级 agent 目录」的依据
-            // （AgentDirStore 两级发现：工作区级 + 全局级），必须一并注入
-            if let Some(wd) = meta_str(meta, "workdir") {
-                collect_ctx.set(WORKDIR, wd);
-            }
-        }
-    }
-
-    let parent_plugin = plugin.get_parent();
-    let visitor = crate::symbio_core::collect_options(parent_plugin.as_ref(), &collect_ctx).await;
-    let mut nodes = visitor.list_options().await;
-
-    if let Some(parent_id) = non_empty(&req.parent).map(str::to_string) {
-        nodes = find_node(&nodes, &parent_id)
-            .map(|n| n.children.clone())
-            .unwrap_or_default();
-    } else {
-        // 根层 = 会话输入区下方的选项栏：统一应用紧凑显示策略（机制级、由后端声明）。
-        // 仅「图标 + 当前值」，类别标签移入悬停提示，压缩横向空间。贡献方可在节点上
-        // 显式 `with_display(true)` 覆盖，恢复「图标 + 类别标签 + 当前值」双段渲染。
-        // 子层（级联菜单内）不应用——选择时类别标签是必要信息。
-        apply_chat_bar_display_defaults(&mut nodes);
-    }
-
-    // 选项宿主的统一注入：任一选项（含各插件贡献的）都在会话作用域内执行，
-    // 宿主为每个 action.payload 补上 `session_id`，贡献方无需感知会话标识
-    // （与 callPlugin 的路由上下文同源，属机制级而非业务级）。
-    if let Some(sid) = &session_id {
-        inject_session_scope(&mut nodes, sid);
-    }
-
-    Ok(PluginPayload::new(&OptionsResponse { nodes }))
-}
-
-/// 选项栏（会话输入区下方）统一显示策略：根选项默认仅显示「图标 + 当前值」
-/// （紧凑模式），类别标签移入悬停提示。
-///
-/// 仅当贡献方未在节点上显式声明 `display` 时回落此默认值——贡献方可用
-/// `OptionNode::with_display(true)` 覆盖，恢复「图标 + 类别标签 + 当前值」。
-/// 调用方须仅在根层（选项栏）调用，子层（级联菜单内）保持类别标签。
-fn apply_chat_bar_display_defaults(nodes: &mut [OptionNode]) {
-    for node in nodes.iter_mut() {
-        if node.display.is_none() {
-            node.display = Some(OptionDisplay { show_label: false });
-        }
-    }
-}
-
-/// 为节点树中每个选项动作注入会话作用域（`session_id`）。
-///
-/// 仅注入对象/缺省载荷（标量或数组载荷保持原样，避免破坏自定义契约）；
-/// 载荷中已显式声明 `session_id` 的以贡献方为准。
-fn inject_session_scope(nodes: &mut [OptionNode], session_id: &str) {
-    for node in nodes.iter_mut() {
-        if let Some(action) = node.action.as_mut() {
-            if action.payload.is_null() || action.payload.is_object() {
-                if !action.payload.is_object() {
-                    action.payload = json!({});
-                }
-                if action
-                    .payload
-                    .get("session_id")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().is_empty())
-                    .unwrap_or(true)
-                {
-                    action.payload["session_id"] = json!(session_id);
-                }
-            }
-        }
-        inject_session_scope(&mut node.children, session_id);
-    }
-}
-
-/// 在节点树中按 id 定位（深度优先）
-fn find_node<'a>(nodes: &'a [OptionNode], id: &str) -> Option<&'a OptionNode> {
-    for n in nodes {
-        if n.id == id {
-            return Some(n);
-        }
-        if let Some(found) = find_node(&n.children, id) {
-            return Some(found);
-        }
-    }
-    None
-}
-
 impl SessionPlugin {
-    /// 参与 `available_options` 收集：构造会话自有选项节点。
+    /// 会话自有选项的**字段声明**（供 `node.schema` 下发）。
     ///
-    /// 有会话上下文时从 `session.metadata` 回填「当前选中值」；无会话
-    /// （新建草稿态）时全部按**默认值**下发——使选项行在会话真正创建前即可
-    /// 完整渲染，草稿选择由前端通用缓冲持有，创建时统一写入 metadata。
-    pub(crate) async fn build_option_nodes(&self, ctx: &Arc<dyn InvokeRequest>) -> Vec<OptionNode> {
-        let (meta, has_messages) = match ctx.get(SESSION_ID).filter(|s| !s.trim().is_empty()) {
-            Some(session_id) => match self.get_or_create_session(&session_id).await {
-                Ok(session) => {
-                    let has_messages = !session.messages.is_empty();
-                    (session.metadata, has_messages)
-                }
-                Err(_) => (Value::Null, false),
-            },
-            None => (Value::Null, false),
-        };
-
+    /// 只声明**有哪些字段**，**不带当前值**——值随节点 `attributes.metadata`
+    /// 下发（设计文档 §3.2）。因此本函数与「是哪个会话」无关：可在会话清单里
+    /// 算一次、给每一项复用（清单一次取全是既有取向，见
+    /// `session/docs/vdfs-session-messages.md` S8）。
+    ///
+    /// 返回 `(order, field)`：`order` 只给收集层排序用，不下发。
+    pub(crate) fn session_option_fields(&self) -> Vec<(i32, DetailField)> {
         vec![
-            self.workdir_option(meta_str(&meta, "workdir"), has_messages),
-            self.risk_option(meta_str(&meta, "risk_level")),
-            self.mode_option(meta_str(&meta, "mode")),
-            self.heartbeat_option(meta.get("heartbeat").cloned()),
+            (ORDER_WORKDIR, workdir_field()),
+            (ORDER_RISK, risk_field()),
+            (ORDER_MODE, mode_field()),
+            (ORDER_HEARTBEAT, heartbeat_field()),
         ]
     }
 
-    /// 工作目录：机制原生取值原语（`pick = directory`）→ 写回 metadata.workdir
+    /// 会话的**选项定义**（`binding = "option"`）——选项栏与会话详情页共用同一份。
     ///
-    /// 已绑定目录且**已有对话历史**时置为只读（`enabled = false`）：不同目录的
-    /// 上下文混在一起会干扰模型，故须新建会话才能换目录（原前端锁语义上提为后端声明）。
-    fn workdir_option(&self, workdir: Option<String>, has_messages: bool) -> OptionNode {
-        let node = OptionNode::invoke(
-            "workdir",
-            "工作目录",
-            OptionAction {
-                pick: Some(OPTION_PICK_DIRECTORY.to_string()),
-                ..OptionAction::session_state_bind("metadata.workdir")
-            },
-        )
-        .with_icon("folder")
-        .with_order(ORDER_WORKDIR);
-
-        let node = match workdir {
-            Some(wd) => node.with_value_label(&wd, basename(&wd)),
-            // 尚未绑定：仍可点击（选择目录），展示为未设置
-            None => node.with_value_label("", "未选择目录"),
-        };
-
-        if has_messages
-            && node
-                .value
-                .as_deref()
-                .map(|v| !v.is_empty())
-                .unwrap_or(false)
-        {
-            node.with_status(VDFS_STATUS_DISABLED)
-                .with_enabled(false)
-                .with_description("当前会话已有对话历史，不能更换工作目录（如需换目录请新建会话）")
-        } else {
-            node.with_status(VDFS_STATUS_ACTIVE)
-                .with_description("会话的工作目录（决定文件工具的作用范围）")
-        }
-    }
-
-    /// 执行风险等级：low / medium / high 三档子选项
-    fn risk_option(&self, current: Option<String>) -> OptionNode {
-        let cur = current.unwrap_or_else(|| "medium".to_string());
-        let children = vec![
-            OptionNode::session_state("risk_level:low", "低风险", "risk_level", json!("low"))
-                .with_description("仅自动执行低风险工具；中/高风险需审批"),
-            OptionNode::session_state("risk_level:medium", "中风险", "risk_level", json!("medium"))
-                .with_description("中风险及以下自动执行；高风险需审批"),
-            OptionNode::session_state("risk_level:high", "高风险", "risk_level", json!("high"))
-                .with_description("所有工具自动执行（含高风险）"),
-        ];
-        let label = match cur.as_str() {
-            "low" => "低风险",
-            "high" => "高风险",
-            _ => "中风险",
-        };
-        OptionNode::sub("risk_level", "执行风险", children)
-            .with_icon("risk")
-            .with_order(ORDER_RISK)
-            .with_value_label(&cur, label)
-            .with_description("低于该等级的工具需用户审批")
-    }
-
-    /// 运行模式：interactive / auto 两档子选项
-    fn mode_option(&self, current: Option<String>) -> OptionNode {
-        let cur = current.unwrap_or_else(|| "interactive".to_string());
-        let children = vec![
-            OptionNode::session_state("mode:interactive", "交互", "mode", json!("interactive"))
-                .with_description("需审批/需交互的工具在会话流中显示卡片，等待用户响应"),
-            OptionNode::session_state("mode:auto", "自动", "mode", json!("auto"))
-                .with_description("无人值守：工具失败返回友好错误让模型自行继续"),
-        ];
-        let label = if cur == "auto" { "自动" } else { "交互" };
-        OptionNode::sub("mode", "运行模式", children)
-            .with_icon("run-mode")
-            .with_order(ORDER_MODE)
-            .with_value_label(&cur, label)
-            .with_description("工具失败时是否阻塞模型继续")
-    }
-
-    /// 心跳任务：自动化表单（复用详情表单方言 [`DetailDefinition`]）。
+    /// 载体有两处，内容同一份（一处真相、两处投递）：已落盘会话挂
+    /// [`VdfsNode::schema`](crate::symbio_core::vdfs_provider::VdfsNode::schema)，
+    /// 新建草稿挂 `VdfsNewType::schema`。
     ///
-    /// `enabled` 开关与三项**基础设置**（空闲间隔 / 任务提示词 / 携带历史）
-    /// **恒可见**：基础设置不使用 `visible_when` 门控——未启用时用户同样能
-    /// 看到并可预先填写，开关与参数一次保存即生效（`option` 绑定保存全部字段，
-    /// 关闭开关也不会丢失已填参数）。
+    /// ## 为什么不需要请求上下文
     ///
-    /// 「立即执行一次」**已取消**（2026-09-18）：它原是一个 `invoke` 类型的独立
-    /// 命令选项（图标 `play`，点了直接调 `session/heartbeat/trigger`），但它的作用
-    /// 与「在输入框里直接发一条消息」完全重复——心跳的实质就是往会话发一轮提示词，
-    /// 用户想立刻做一次，直接在输入框发即可。留着它等于给同一件事两个入口，
-    /// 且按钮那个还绕开了对话本身。
-    fn heartbeat_option(&self, raw: Option<Value>) -> OptionNode {
-        let enabled = raw
-            .as_ref()
-            .and_then(|v| v.get("enabled"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let interval = raw
-            .as_ref()
-            .and_then(|v| v.get("interval_seconds"))
-            .and_then(|v| v.as_i64())
-            .filter(|v| *v > 0)
-            .unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
-        let prompt = raw
-            .as_ref()
-            .and_then(|v| v.get("prompt"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let include_history = raw
-            .as_ref()
-            .and_then(|v| v.get("include_history"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-
-        let definition = DetailDefinition {
-            // option 绑定：预填自节点 data、保存回节点 action（与 VDFS 详情表单同一方言）
+    /// 定义只声明「有哪些字段与候选」，值与「是哪个会话」都不在这里
+    /// （设计文档 §6）——所以这里用一个**空的请求上下文**收集，且这正是它相对
+    /// 旧形态的关键简化：同一份定义在「新建草稿」与「已落盘会话」两个载体上
+    /// 逐字节相同，`default` 也始终表示「后端的缺省回落」而非当前值。
+    ///
+    /// 收集走 `available_options` 广播（各贡献方在同一契约下注册字段）。收集失败
+    /// 时按机制约定降级为**空定义**（选项栏退化为不显示），不阻断会话页。
+    ///
+    /// ⚠️ 每次调用都会广播一次全项目收集——候选项（agent 目录 / provider 表）是
+    /// 运行期数据，故不做缓存；若将来成为热点，正确的做法是在**机制层**给
+    /// `VdfsProvider` 加「自述可缓存」的通用开关，而不是给会话开特例。
+    pub(crate) async fn build_option_definition(&self) -> DetailDefinition {
+        let ctx: Arc<dyn InvokeRequest> =
+            Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+        let parent = self.get_parent();
+        let visitor = crate::symbio_core::collect_options(parent.as_ref(), &ctx).await;
+        DetailDefinition {
+            // 「值来自外部（节点 metadata），提交只回纯字段值」——与心跳表单同一绑定
             binding: "option".to_string(),
-            title_fallback: Some("心跳任务".to_string()),
+            title_fallback: Some("会话选项".to_string()),
             sections: vec![DetailSection {
                 title: None,
                 collapsed: false,
-                fields: vec![
-                    DetailField {
-                        key: "enabled".to_string(),
-                        label: "启用心跳任务".to_string(),
-                        description: Some(
-                            "开启后，会话空闲达到设定间隔会自动以「任务提示词」触发一次对话；\
-                             正在工作中的会话不会触发"
-                                .to_string(),
-                        ),
-                        widget: "toggle".to_string(),
-                        ..Default::default()
-                    },
-                    // 以下三项为「基础设置」：**恒可见**（不随启用开关显隐）——
-                    // 关闭心跳时也允许预先填写，开启后一次保存即生效。
-                    DetailField {
-                        key: "interval_seconds".to_string(),
-                        label: "空闲间隔（秒）".to_string(),
-                        description: Some("会话无活动多久后自动触发".to_string()),
-                        widget: "number".to_string(),
-                        min: Some(10.0),
-                        step: Some(10.0),
-                        ..Default::default()
-                    },
-                    DetailField {
-                        key: "prompt".to_string(),
-                        label: "任务提示词".to_string(),
-                        description: Some("每次心跳自动发送给 AI 的内容".to_string()),
-                        placeholder: Some(
-                            "例如：检查当前工作目录的待办，主动推进一项不依赖用户输入的小任务。"
-                                .to_string(),
-                        ),
-                        widget: "textarea".to_string(),
-                        rows: Some(4),
-                        full_width: true,
-                        ..Default::default()
-                    },
-                    DetailField {
-                        key: "include_history".to_string(),
-                        label: "携带历史会话信息".to_string(),
-                        description: Some(
-                            "关闭后，心跳触发时不带历史上下文（以全新上下文执行）".to_string(),
-                        ),
-                        widget: "toggle".to_string(),
-                        default: Some(json!(true)),
-                        ..Default::default()
-                    },
-                ],
-            }],
-            actions: vec![DetailAction {
-                id: "save".to_string(),
-                label: "保存".to_string(),
-                style: "primary".to_string(),
-                ..Default::default()
+                fields: visitor.list_option_fields().await,
             }],
             ..Default::default()
-        };
-
-        OptionNode {
-            form: Some(definition),
-            // 表单字段值写入 metadata.heartbeat（bind 点路径）
-            action: Some(OptionAction::session_state_bind("metadata.heartbeat")),
-            data: Some(json!({
-                "enabled": enabled,
-                "interval_seconds": interval,
-                "prompt": prompt,
-                "include_history": include_history,
-            })),
-            status: if enabled {
-                VDFS_STATUS_ACTIVE.to_string()
-            } else {
-                VDFS_STATUS_DISABLED.to_string()
-            },
-            ..OptionNode::new("heartbeat", "心跳任务", OptionType::Form)
         }
-        .with_icon("heartbeat")
-        .with_order(ORDER_HEARTBEAT)
-        .with_value_label(
-            if enabled { "on" } else { "off" },
-            if enabled { "已开启" } else { "未开启" },
-        )
-        .with_description("会话空闲时自动触发一次对话（定时任务）")
+    }
+}
+
+// ==================== 字段声明（`node.schema`） ====================
+//
+// 全是**纯函数、与会话无关**（可在会话清单里算一次、给每一项复用）：
+// 这里只说「字段叫什么、候选有哪些、什么条件禁用」，值不在这里。
+
+/// 造一个候选项（`value → label`，可带一行说明）
+fn option(value: &str, label: &str, description: &str) -> DetailOption {
+    DetailOption {
+        value: value.to_string(),
+        label: label.to_string(),
+        description: (!description.is_empty()).then(|| description.to_string()),
+    }
+}
+
+/// 工作目录：机制原生取值原语（`pick = directory`）→ 写回 `metadata.workdir`。
+///
+/// 锁定条件由**声明**给出（`disabled_when`），不由 Rust 算成一个布尔：
+/// 「已绑定目录**且**已有对话历史」⇒ 不能更换（不同目录的上下文混在一起会干扰
+/// 模型）。两个条件都要——只看「有历史」会把「有历史但从未绑定目录」的会话也锁上，
+/// 那本来是可以选的。
+///
+/// 条件求值的作用域是 `{ ...node.attributes, ...字段值 }`（设计文档 §3.5）：
+/// `message_count` 来自节点，`workdir` 来自字段自身。
+///
+/// ⚠️ 「有历史」写成 `truthy: true` 而**不是** `not_equals: 0`：草稿节点没有任何
+/// 属性，`message_count` 缺席。`truthy` 对缺席键求值为 `false`（= 没有历史，可
+/// 自由选择），而 `not_equals: 0` 对缺席键求值为 `true`（= 有历史）——那会让
+/// **新建会话时工作目录一上来就锁死**。`truthy` 同时覆盖 `0`（无历史）与非 `0`。
+///
+/// `options` 在这里当**值→标签表**用（`path` 没有候选菜单）：未设置时按钮显示
+/// 「未选择目录」，而不是把字段名印上去——紧凑渲染形态的取值规则见
+/// [`DetailField::options`] 与前端 `schemas/vdfs-form.compactFieldText`。
+fn workdir_field() -> DetailField {
+    DetailField {
+        key: "workdir".to_string(),
+        label: "工作目录".to_string(),
+        // 一句话覆盖两种状态：未锁定时前一句是全部；锁定时按钮变灰，这里就是原因
+        description: Some(
+            "会话的工作目录（决定文件工具的作用范围）；已有对话历史后不可更换\
+             （如需换目录请新建会话）"
+                .to_string(),
+        ),
+        widget: "path".to_string(),
+        icon: Some("folder".to_string()),
+        pick: Some(DETAIL_PICK_DIRECTORY.to_string()),
+        options: vec![option("", "未选择目录", "")],
+        disabled_when: Some(DetailCondition {
+            all: vec![
+                DetailCondition {
+                    key: "message_count".to_string(),
+                    truthy: Some(true),
+                    ..Default::default()
+                },
+                DetailCondition {
+                    key: "workdir".to_string(),
+                    truthy: Some(true),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// 执行风险等级：low / medium / high 三档候选
+fn risk_field() -> DetailField {
+    DetailField {
+        key: "risk_level".to_string(),
+        label: "执行风险".to_string(),
+        description: Some("低于该等级的工具需用户审批".to_string()),
+        widget: "select".to_string(),
+        icon: Some("risk".to_string()),
+        default: Some(json!("medium")),
+        options: vec![
+            option("low", "低风险", "仅自动执行低风险工具；中/高风险需审批"),
+            option("medium", "中风险", "中风险及以下自动执行；高风险需审批"),
+            option("high", "高风险", "所有工具自动执行（含高风险）"),
+        ],
+        ..Default::default()
+    }
+}
+
+/// 运行模式：interactive / auto 两档候选
+fn mode_field() -> DetailField {
+    DetailField {
+        key: "mode".to_string(),
+        label: "运行模式".to_string(),
+        description: Some("工具失败时是否阻塞模型继续".to_string()),
+        widget: "select".to_string(),
+        icon: Some("run-mode".to_string()),
+        default: Some(json!("interactive")),
+        options: vec![
+            option(
+                "interactive",
+                "交互",
+                "需审批/需交互的工具在会话流中显示卡片，等待用户响应",
+            ),
+            option(
+                "auto",
+                "自动",
+                "无人值守：工具失败返回友好错误让模型自行继续",
+            ),
+        ],
+        ..Default::default()
+    }
+}
+
+/// 心跳任务的**缺省配置**（未启用 / 300 秒 / 空提示词 / 携带历史）。
+///
+/// 它是 [`heartbeat_field`] 的 `default`（`form` widget 的子对象缺省值）：
+/// 未配置过心跳的会话因此显示「未开启」而不是把字段名印在按钮上，子表单也据此预填。
+fn heartbeat_defaults() -> Value {
+    json!({
+        "enabled": false,
+        "interval_seconds": DEFAULT_HEARTBEAT_INTERVAL,
+        "prompt": "",
+        "include_history": true,
+    })
+}
+
+/// 心跳任务：结构化子对象字段（`widget = "form"`），子定义见 [`heartbeat_definition`]。
+///
+/// `options` 在这里当**值→标签表**用：紧凑渲染形态取子定义的 `title_from`
+/// （`enabled`）作代表值，再查这张表得到「已开启 / 未开启」（见
+/// [`DetailField::form`] 的说明）。`default` 是子对象的缺省配置。
+fn heartbeat_field() -> DetailField {
+    DetailField {
+        key: "heartbeat".to_string(),
+        label: "心跳任务".to_string(),
+        description: Some("会话空闲时自动触发一次对话（定时任务）".to_string()),
+        widget: "form".to_string(),
+        icon: Some("heartbeat".to_string()),
+        options: vec![option("true", "已开启", ""), option("false", "未开启", "")],
+        default: Some(heartbeat_defaults()),
+        form: Some(Box::new(heartbeat_definition())),
+        ..Default::default()
+    }
+}
+
+/// 心跳任务的**子定义**（结构化子对象的字段表）。
+///
+/// `enabled` 开关与三项**基础设置**（空闲间隔 / 任务提示词 / 携带历史）
+/// **恒可见**：基础设置不使用 `visible_when` 门控——未启用时用户同样能
+/// 看到并可预先填写，开关与参数一次保存即生效（`option` 绑定保存全部字段，
+/// 关闭开关也不会丢失已填参数）。
+///
+/// `title_from` 指向 `enabled`：紧凑渲染形态据此取「一句话摘要」的代表值。
+/// 纵向表单渲染器不受影响——它的 `title_from` 只认字符串/数字，布尔会被跳过、
+/// 回落到 `title_fallback`（「心跳任务」）。
+///
+/// 「立即执行一次」**已取消**（2026-09-18）：它原是一个独立命令选项（图标
+/// `play`，点了直接调 `session/heartbeat/trigger`），但它的作用与「在输入框里
+/// 直接发一条消息」完全重复——心跳的实质就是往会话发一轮提示词，用户想立刻
+/// 做一次，直接在输入框发即可。留着它等于给同一件事两个入口，且按钮那个还
+/// 绕开了对话本身。
+fn heartbeat_definition() -> DetailDefinition {
+    DetailDefinition {
+        // option 绑定：预填自节点 metadata、保存回 VDFS 写通道（与 VDFS 详情表单同一方言）
+        binding: "option".to_string(),
+        title_from: vec!["enabled".to_string()],
+        title_fallback: Some("心跳任务".to_string()),
+        sections: vec![DetailSection {
+            title: None,
+            collapsed: false,
+            fields: vec![
+                DetailField {
+                    key: "enabled".to_string(),
+                    label: "启用心跳任务".to_string(),
+                    description: Some(
+                        "开启后，会话空闲达到设定间隔会自动以「任务提示词」触发一次对话；\
+                         正在工作中的会话不会触发"
+                            .to_string(),
+                    ),
+                    widget: "toggle".to_string(),
+                    ..Default::default()
+                },
+                // 以下三项为「基础设置」：**恒可见**（不随启用开关显隐）——
+                // 关闭心跳时也允许预先填写，开启后一次保存即生效。
+                DetailField {
+                    key: "interval_seconds".to_string(),
+                    label: "空闲间隔（秒）".to_string(),
+                    description: Some("会话无活动多久后自动触发".to_string()),
+                    widget: "number".to_string(),
+                    default: Some(json!(DEFAULT_HEARTBEAT_INTERVAL)),
+                    min: Some(10.0),
+                    step: Some(10.0),
+                    ..Default::default()
+                },
+                DetailField {
+                    key: "prompt".to_string(),
+                    label: "任务提示词".to_string(),
+                    description: Some("每次心跳自动发送给 AI 的内容".to_string()),
+                    placeholder: Some(
+                        "例如：检查当前工作目录的待办，主动推进一项不依赖用户输入的小任务。"
+                            .to_string(),
+                    ),
+                    widget: "textarea".to_string(),
+                    rows: Some(4),
+                    full_width: true,
+                    ..Default::default()
+                },
+                DetailField {
+                    key: "include_history".to_string(),
+                    label: "携带历史会话信息".to_string(),
+                    description: Some(
+                        "关闭后，心跳触发时不带历史上下文（以全新上下文执行）".to_string(),
+                    ),
+                    widget: "toggle".to_string(),
+                    default: Some(json!(true)),
+                    ..Default::default()
+                },
+            ],
+        }],
+        actions: vec![DetailAction {
+            id: "save".to_string(),
+            label: "保存".to_string(),
+            style: "primary".to_string(),
+            ..Default::default()
+        }],
+        ..Default::default()
     }
 }
 

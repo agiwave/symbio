@@ -134,9 +134,9 @@ async fn list_comes_from_the_memory_mirror() {
 /// - `node_ext` = 落成后的渲染器键（漏了它，草稿详情页落到 `fallback` 兜底，
 ///   而不是同一张表单）；
 /// - `schema`    = 表单定义（没有它，`form` 渲染器渲染不出任何字段）。
-#[test]
-fn new_type_declares_the_landing_detail() {
-    let types = ModelPlugin::default().root_new_types();
+#[tokio::test]
+async fn new_type_declares_the_landing_detail() {
+    let types = ModelPlugin::default().root_new_types().await;
     assert_eq!(types.len(), 1, "model 不支持整包导入");
     let t = &types[0];
     assert_eq!(t.ext, PLUGIN_MODEL, "呈现扩展名不变：id_of 仍按它剥后缀");

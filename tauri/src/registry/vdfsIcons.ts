@@ -4,8 +4,8 @@
  * 分层原则（与 registry/vdfsTypes.ts / vdfsRenderers.ts 同一套）：
  * - 资源的**存在性/能力/寻址/顺序/标签**一律来自 VDFS（`<根>` 挂载点与节点），
  *   前端不硬编码类型清单；
- * - 本模块只维护**前端 UI 专属**的映射：某资源类别的 SVG 图标与动作按钮图标。
- *   后端不参与下发 SVG path。
+ * - 本模块只维护**前端 UI 专属**的映射：某资源类别的 SVG 图标、动作按钮图标，
+ *   以及详情**字段**的 emoji 图标（后端不参与下发 SVG path / emoji）。
  *
  * 详情渲染器的登记不在这里 —— 那是 `registry/vdfsRenderers.ts`（标识 → 组件）。
  *
@@ -86,6 +86,41 @@ const ACTION_ICONS: Record<string, string> = {
 /** 动作图标 SVG path（icon 名优先于动作 id；无映射返回 undefined → 文字按钮） */
 export function getActionIcon(action: { icon?: string; id: string }): string | undefined {
   return (action.icon && ACTION_ICONS[action.icon]) || ACTION_ICONS[action.id]
+}
+
+// ============ 详情字段图标（emoji 映射，纯 UI 资产） ============
+//
+// 与上面的 SVG 图标同一分层定位：**后端下发图标名，前端负责把名字映射为具体
+// 视觉**。后端不参与下发 emoji/SVG。
+//
+// 为什么是 emoji 而不是 SVG：字段图标出现在**紧凑选项栏**（会话输入区下方那一排
+// 小按钮）里，那里从第一版起就是 emoji 语言，换成线条图标是视觉回归。
+//
+// 这份表原先住在 `registry/optionIcons.ts`（选项机制的专属文件）。机制下线后
+// 「图标名 → 视觉」仍要有唯一一处，故并入本文件——`registry/optionIcons.ts` 删除，
+// 取值一字未改。
+//
+// 未登记的图标名回落默认图标；字段仍可正常渲染（只是图标为通用形），
+// 因此新增贡献方无需改动本文件。
+
+/** 字段图标名 → 视觉（emoji） */
+const FIELD_ICONS: Record<string, string> = {
+  folder: '📁',
+  agent: '🎭',
+  model: '🧠',
+  risk: '🎯',
+  'run-mode': '💬',
+  heartbeat: '⏰',
+  play: '▶',
+}
+
+/** 未登记字段图标名的回落 */
+export const DEFAULT_FIELD_ICON = '⚙'
+
+/** 解析字段图标名（未知回落默认图标） */
+export function fieldIcon(name?: string): string {
+  if (!name) return DEFAULT_FIELD_ICON
+  return FIELD_ICONS[name] ?? DEFAULT_FIELD_ICON
 }
 
 // ============ 内置登记 ============

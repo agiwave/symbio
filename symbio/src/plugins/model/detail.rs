@@ -294,6 +294,7 @@ fn opt(value: &str, label: &str) -> DetailOption {
     DetailOption {
         value: value.into(),
         label: label.into(),
+        description: None,
     }
 }
 

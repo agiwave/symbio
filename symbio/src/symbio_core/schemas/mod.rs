@@ -1,7 +1,6 @@
 pub mod common;
 pub mod detail;
 pub mod hook;
-pub mod options;
 pub mod session;
 
 pub use common::SuccessResponse;

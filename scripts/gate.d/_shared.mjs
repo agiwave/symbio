@@ -57,10 +57,37 @@ export const BASELINE = {
   // 916：`770a9ea`（工具调用参数以字符串透传）补的单测
   //      `tool_call_args_passthrough_as_string_without_reserialize`——该次提交只跑了
   //      `cargo test --lib message_builder`，基线因此滞后一格；本轮门禁全量实测 916 对齐。
-  rustTests: 916,
-  // 46 spec 文件 / 661 → 683 → 687 → 689 用例。文件数与用例数均与平台无关（全仓 spec
+  // 925：会话选项并入详情方言 + `session/update` 退役（2026-09-23）——**净 +9**
+  //      （916 → 925）。逐文件核对（`git diff HEAD -- symbio/` 数 `#[test]` /
+  //      `#[tokio::test]`，含新建的侧车文件），不是估算：
+  //        +4  `plugins/local/policy/policy_tracker.test.rs`（新建）——限流窗口
+  //            `checked_sub` 下溢修复的用例（`window_longer_than_clock_origin_…`）
+  //        +4  `plugins/session/plugin/vdfs_provider.test.rs`——1 条属 S2
+  //            （`session_list_carries_the_option_definition`），3 条属 S6
+  //            （具名新建地址末段即 id / 命中已存在则覆盖 / 覆盖分支浅合并）
+  //        +3  `plugins/session/options.test.rs`——产物换成 `DetailField` 后的锚点
+  //            （字段 key 就是解析链读的 metadata 键；心跳子表单缺省值与子对象同源）
+  //        +2  `symbio_core/schemas/detail.rs`——`DETAIL_PICKS` 与方言补充
+  //        -1  `plugins/session/handlers.test.rs`——「两条路径一致性」随路由退役删除，
+  //            契约搬到 `write_merges_metadata_shallowly`
+  //        -3  `symbio_core/schemas/options.rs`（整文件删除）——旧 `OptionNode` 产物用例
+  //      合计 +9。删的是机制不是覆盖：新产物那侧由上面几条接管。
+  rustTests: 925,
+  // 47 spec 文件 / 661 → 683 → 687 → 689 → 724 用例。文件数与用例数均与平台无关（全仓 spec
   // 零平台分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见对应提交
   // （`git log --grep=<批次/主题>`；本仓库不维护变更日志，变更历史即提交历史）。
+  // 724：会话选项 schema 化（S1–S4，2026-09-23）——**+1 文件 / +35 用例**。
+  //      新增 `ChatOptionBar.spec.ts`（21 条）：按 `DetailField.widget` 分派
+  //      （`select` 菜单与选中态 / `path` 原生取值含 `disabled_when` / `form` 子表单 /
+  //      `toggle` 就地翻转）、草稿态缓冲与即时回显、落库失败只提示不吞错；
+  //      并用**虚构字段名** `alpha` / `beta` / `gamma` 反向钉住「前端零业务字段名」。
+  //      另在 `vdfs-form.spec.ts` 补 `evalDetailCondition`（含「缺席键上 `truthy` 与
+  //      `not_equals: 0` 结论相反」这条最容易踩的坑）与 `compactFieldText`（紧凑形态的
+  //      取值规则）两组纯函数用例；`ChatComposer.spec.ts` 扩桩件 props 并加「选项定义
+  //      与值由父组件给，本组件不回读」2 条。
+  //      ⚠️ 旧机制的 4 个源文件（`services/options.ts` / `schemas/options.ts` /
+  //      `composables/useSessionOptions.ts` / `registry/optionIcons.ts`）**都没有 spec**
+  //      ——这正是「前端零业务」的反面教材：那份 `OPTION_PICKS` 是硬编码抄本，无人看守。
   // 689：批次 G——前端侧收窄 `VdfsChange`（删四个载荷字段与 `appended` / `truncated`
   //      两个取值）。`useVdfs` 那 4 条 `appended` 用例换成 4 条**变更收敛**用例（三个
   //      取值同走重拉 / 影响判定收窄 / 已废除取值不再被静默吞掉）；`schemas` 侧新增
@@ -77,8 +104,8 @@ export const BASELINE = {
   //      以及转写流合帧的提交批量化用例（3）。
   // 672：收起态摘要跟「流式末端」走——`messagePreviewFollowsLiveEdge` 判据用例（2）+
   //      摘要取端（末端 / 开头 / 短内容 / 空内容，4）+ 渲染层两条（思考、工具行）。
-  vitestFiles: 46,
-  vitestTests: 689,
+  vitestFiles: 47,
+  vitestTests: 724,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

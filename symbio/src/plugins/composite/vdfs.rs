@@ -195,7 +195,7 @@ impl CompositeVdfs {
     }
 
     /// 子目录节点（`<dir>`）——合成的目录节点，携带子 provider 的自述
-    fn dir_node(dir: &str, p: &DynVdfsProvider) -> VdfsNode {
+    async fn dir_node(dir: &str, p: &DynVdfsProvider) -> VdfsNode {
         let mut n = VdfsNode::dir(
             dir.to_string(),
             p.label().unwrap_or(dir).to_string(),
@@ -204,7 +204,7 @@ impl CompositeVdfs {
         n.path = dir.to_string();
         n.status = p.root_status().to_string();
         n.description = p.description().map(str::to_string);
-        n.new_types = p.root_new_types();
+        n.new_types = p.root_new_types().await;
         // 子目录节点：它的隐藏属性来自子 provider 的根声明
         n.hidden = p.root_hidden();
         n
@@ -333,11 +333,13 @@ impl VdfsProvider for CompositeVdfs {
             // 自身目录：子目录清单（合成，无需子 provider 参与）。
             // **隐藏属性在这里生效**：`hidden` 的子目录不出现在清单里，
             // 但仍留在 `dirs` 中——目录本身照旧存在，按路径照常可寻址（见 `resolve`）。
-            None => Ok(dirs
-                .iter()
-                .map(|(d, p)| Self::dir_node(d, p))
-                .filter(|n| !n.hidden)
-                .collect()),
+            None => {
+                let mut out = Vec::with_capacity(dirs.len());
+                for (d, p) in &dirs {
+                    out.push(Self::dir_node(d, p).await);
+                }
+                Ok(out.into_iter().filter(|n| !n.hidden).collect())
+            }
             Some(_) => {
                 let (dir, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
                 let mut items = p.list(&sub, &rel).await?;
@@ -357,7 +359,7 @@ impl VdfsProvider for CompositeVdfs {
         };
         let (_, sub, p, rel) = self.dispatch(ctx, &dirs, path).await?;
         if rel.is_empty() {
-            return Ok(Self::dir_node(dir, &p));
+            return Ok(Self::dir_node(dir, &p).await);
         }
         let mut n = p.stat(&sub, &rel).await?;
         n.path = path.to_string();

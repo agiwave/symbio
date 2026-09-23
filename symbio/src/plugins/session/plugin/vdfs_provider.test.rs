@@ -39,10 +39,21 @@ async fn vdfs_self_description_has_no_mount() {
     assert!(!p.root_access().traverse, "会话是叶子，不参与树遍历");
 
     // 根下可新建「会话」——类型清单即「新建」入口的唯一依据
-    let types = p.root_new_types();
+    let types = p.root_new_types().await;
     assert_eq!(types.len(), 1);
     assert_eq!(types[0].ext, vdfs::VDFS_EXT_SESSION);
     assert_eq!(types[0].title, "会话");
+    // 草稿节点与落成后走**同一个渲染器**（`ext = session`，不是通用表单），
+    // 故不声明 `node_ext`：新建会话直接进会话详情页
+    assert!(types[0].node_ext.is_none());
+
+    // 新建会话是**草稿态**：会话还不存在，没有节点可挂 `schema`，故定义挂在**类型**上
+    // ——选项行在会话创建前就要完整渲染（草稿选择随 `create` 一次写入 metadata）。
+    // 本 fixture 未装配容器 ⇒ 收集不到任何贡献方 ⇒ 字段表为空；但定义本身**不缺席**
+    // （缺席会让前端把「草稿态」误当成「没有选项」）。
+    let schema = types[0].schema.as_ref().expect("新建类型必须带选项定义");
+    assert_eq!(schema["binding"], serde_json::json!("option"));
+    assert_eq!(schema["sections"][0]["fields"], serde_json::json!([]));
 }
 
 // 根目录已隔离，id 只需在本例内稳定。
@@ -166,6 +177,178 @@ async fn config_document_is_reachable_but_not_a_session_list_item() {
     // 文档没有子项，也不可删除
     assert!(p.list(&vctx(), PLUGIN_FILE).await.is_err());
     assert!(p.delete(&vctx(), PLUGIN_FILE, false).await.is_err());
+}
+
+/// 会话清单里的每一项都带**选项定义**（`schema`）——前端零额外请求即可渲染选项栏
+/// （旧形态要一次 `options/list`）。
+///
+/// 定义与「是哪个会话」无关（值走 `attributes.metadata`），故清单里逐项挂的是
+/// **同一份**；设计文档 §7 已量化这份重复（~2 KB/项）并接受它，换来的正是
+/// 「清单一次取全」。
+#[tokio::test]
+async fn session_list_carries_the_option_definition() {
+    let (_dir, p) = fixture();
+    let created = p
+        .write(&vctx(), "", &vdfs::VdfsContent::text("", "").with_create())
+        .await
+        .unwrap();
+    assert!(created.created);
+    let id = created.path;
+
+    let items = p.list(&vctx(), "").await.unwrap();
+    let node = items
+        .iter()
+        .find(|n| n.name == id)
+        .expect("清单里有这个会话");
+
+    let schema = node.schema.as_ref().expect("会话节点必须带选项定义");
+    assert_eq!(schema["binding"], serde_json::json!("option"));
+    assert_eq!(
+        schema["title_fallback"],
+        serde_json::json!("会话选项"),
+        "定义要能自述——它是 `node.schema` 上唯一的呈现契约"
+    );
+    // 本 fixture 未装配容器 ⇒ 收集不到贡献方 ⇒ 字段表为空；生产路径由容器广播出
+    // 工作目录 / 智能体 / Model / 风险 / 模式 / 心跳 六项
+    assert_eq!(schema["sections"][0]["fields"], serde_json::json!([]));
+
+    // 当前值走 `attributes.metadata`（新形态的值载体）：写一次 metadata，
+    // 清单节点上立刻能看到——「定义 + 值 + 落库」三条通路因此都在 VDFS 上闭环，
+    // 不需要第二套协议（旧形态要 `options/list` + `session/update` 各一条，两条都已退役）
+    p.write(
+        &vctx(),
+        &id,
+        &vdfs::VdfsContent::text("", r#"{"metadata":{"risk_level":"high"}}"#),
+    )
+    .await
+    .unwrap();
+    let items = p.list(&vctx(), "").await.unwrap();
+    let node = items.iter().find(|n| n.name == id).expect("会话还在");
+    assert_eq!(
+        node.attributes["metadata"]["risk_level"],
+        serde_json::json!("high"),
+        "写入的 metadata 必须原样出现在节点 attributes 上"
+    );
+}
+
+// ==================== 新建语义：id 从哪来 ====================
+//
+// 「**有名字**时 id 来自地址（使用方给），**没名字**时 id 由 provider 生成」是
+// VDFS 的通用规则（`vdfs_service::entry::id_of` 的注释、`VdfsProvider::write`
+// 的「两种目标形态」表）。会话曾经是唯一例外——无论有没有名字都自己生成 id、
+// 把名字只当标题。2026-09-23 对齐，下面三例把三条契约钉住。
+
+/// 具名新建：**就地创建**，地址末段即会话 id。
+///
+/// 这是 CLI 的「客户端指定会话 id」得以走 `vdfs/write` 的全部依据
+/// （旧 `session/update` 路由唯一的独有能力）。
+#[tokio::test]
+async fn named_create_uses_the_address_as_the_session_id() {
+    let (_dir, p) = fixture();
+    let r = p
+        .write(
+            &vctx(),
+            "cli-abc",
+            &vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/w"}}"#).with_create(),
+        )
+        .await
+        .unwrap();
+    assert!(r.created, "具名目标不存在 ⇒ 就地创建");
+    assert_eq!(r.path, "cli-abc", "新建的地址就是使用方写的那一个");
+
+    let s = p.session_of("cli-abc").await.unwrap();
+    assert_eq!(s.id, "cli-abc");
+    assert_eq!(s.metadata["workdir"], serde_json::json!("/w"));
+    assert!(
+        s.metadata.get("title").is_none(),
+        "名字是**身份**不是标题：把 id 抄成标题会让 `--session cli18f3a2` 污染侧栏"
+    );
+    assert_eq!(s.display_title(), "新对话", "无标题 ⇒ 仍由首条消息派生");
+}
+
+/// 具名目标**已存在** + `create` ⇒ 覆盖（浅合并），**不重复创建**。
+///
+/// 锁的是 `create` 位的定义：「只回答**不存在时**怎么办」。CLI 的 `ensure_session`
+/// 因此是**一次**调用同时覆盖「新建」与「改元数据」——旧路由的 upsert 整条落在这里。
+#[tokio::test]
+async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
+    let (_dir, p) = fixture();
+    let first = p
+        .write(
+            &vctx(),
+            "keep",
+            &vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/old","agent_id":"a"}}"#)
+                .with_create(),
+        )
+        .await
+        .unwrap();
+    assert!(first.created);
+
+    let again = p
+        .write(
+            &vctx(),
+            "keep",
+            &vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/new"}}"#).with_create(),
+        )
+        .await
+        .unwrap();
+    assert!(!again.created, "已存在 ⇒ 覆盖，不是再建一个");
+    assert_eq!(again.path, "keep");
+
+    let s = p.session_of("keep").await.unwrap();
+    assert_eq!(
+        s.metadata["workdir"],
+        serde_json::json!("/new"),
+        "提供的键被覆盖"
+    );
+    assert_eq!(
+        s.metadata["agent_id"],
+        serde_json::json!("a"),
+        "未提供的键保持不变（浅合并）"
+    );
+    assert_eq!(
+        p.list(&vctx(), "").await.unwrap().len(),
+        1,
+        "不该造出第二个会话"
+    );
+}
+
+/// 覆盖分支：metadata 浅合并 + 显式 `title` 写进 `metadata.title`。
+///
+/// 原 `handlers.test.rs::session_update_and_vdfs_write_agree_on_metadata` 的契约
+/// （两条写入路径产出逐字相同的 metadata）随 `session/update` 退役失去意义——
+/// 只剩一条路径，分歧在结构上写不出来。契约本身搬来这里继续守着。
+#[tokio::test]
+async fn write_merges_metadata_shallowly() {
+    let (_dir, p) = fixture();
+    p.write(
+        &vctx(),
+        "s1",
+        &vdfs::VdfsContent::text(
+            "",
+            r#"{"metadata":{"workdir":"/old","agent_id":"keep-me"}}"#,
+        )
+        .with_create(),
+    )
+    .await
+    .unwrap();
+    p.write(
+        &vctx(),
+        "s1",
+        &vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/new"},"title":"改名"}"#),
+    )
+    .await
+    .unwrap();
+
+    let s = p.session_of("s1").await.unwrap();
+    assert_eq!(s.metadata["workdir"], serde_json::json!("/new"));
+    assert_eq!(
+        s.metadata["agent_id"],
+        serde_json::json!("keep-me"),
+        "未提到的键保持不变"
+    );
+    assert_eq!(s.metadata["title"], serde_json::json!("改名"));
+    assert_eq!(s.display_title(), "改名");
 }
 
 /// 配置写入：校验先于一切（字段级错误），坏值不会改动内存

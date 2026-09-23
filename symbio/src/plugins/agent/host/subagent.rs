@@ -43,17 +43,16 @@ use crate::symbio_core::schemas::session::chat_message::{
     ResumeRequest,
 };
 use crate::symbio_core::schemas::session::session_chat;
-use crate::symbio_core::schemas::session::session_update;
 use crate::symbio_core::transcript_stream::{
     event_of, is_resync, register_transcript_subscriber, session_state_of,
     unregister_transcript_subscriber,
 };
 use crate::symbio_core::vdfs::{vdfs_context, VdfsError};
-use crate::symbio_core::vdfs_provider::VDFS_STATUS_WORKING;
+use crate::symbio_core::vdfs_provider::{VdfsContent, VDFS_STATUS_WORKING};
 use crate::symbio_core::{
     AbortSignal, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt, Plugin, PluginError,
     PluginFrame, MODE, PATH, PLUGIN_SESSION, PROVIDER_ID, RISK_LEVEL, SESSION_CHAT_SEND,
-    SESSION_ID, SESSION_UPDATE, TOOL_CALL_ID,
+    SESSION_ID, TOOL_CALL_ID,
 };
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -288,19 +287,19 @@ impl crate::symbio_core::Capability for AgentRunCapability {
                 // （父会话目录的 sessions/ 子目录）与列表过滤依据；
                 // `agent_id` / `workdir` 供 chat 编排回退链与详情展示。
                 let sid = uuid::Uuid::new_v4().to_string();
-                let upd_ctx = ctx.fork();
-                upd_ctx.set(PATH, SESSION_UPDATE.to_string());
-                let _ = upd_ctx.set_payload(session_update::Request {
-                    session_id: sid.clone(),
-                    metadata: json!({
+                if let Err(e) = register_subsession(
+                    parent.clone(),
+                    &ctx,
+                    &sid,
+                    &json!({
                         KEY_PARENT_SESSION_ID: parent_session_id,
                         "agent_id": agent_id,
                         "workdir": effective_workdir,
                         "title": format!("↳ {}", agent_id.as_deref().unwrap_or("子智能体")),
                     }),
-                    title: None,
-                });
-                if let Err(e) = parent.clone().route(upd_ctx).await {
+                )
+                .await
+                {
                     crate::plugin_warn!("agent", "登记子会话元数据失败（不影响委托执行）: {}", e);
                 }
                 (sid, None, Some(user_message()))
@@ -484,6 +483,45 @@ async fn validate_subsession_exists(
              请省略 session_id 参数以新开一个委托会话。"
         )));
     }
+    Ok(())
+}
+
+/// 登记子会话：经**进程内 VDFS 纯接口**在 `<挂载名>/<sid>` 上写一次。
+///
+/// 带 `create` 意图 ⇒ 不存在则**就地创建**，且地址末段就是会话 id
+/// （[`VdfsProvider::write`] 的「两种目标形态」表）——子会话 id 因此仍由本文件
+/// 决定（它是 uuid，会出现在 `agent_run` 的 `session_id` 参数里）。
+///
+/// ## 为什么不再 `route` 一条路由
+///
+/// 这里曾经 `fork` 一个 ctx、把 `PATH` 设成 `session/update` 再 `route` 回去。
+/// 那条专用路由已于 2026-09-23 退役：它只是「写会话 metadata」的第二份实现，
+/// 而 VDFS 的 `write` 本来就覆盖这件事（同一个 provider、同一份浅合并）。
+/// 绕路由还为一次纯数据写入白搭了一层 invoke 信封。
+///
+/// 取 provider 的方式与 [`validate_subsession_exists`] 同款（先例在那里）：
+/// 本作用域容器的 VDFS 视图里，`session` 就是 `session/chat/send` 将要写入的
+/// 那个插件实例，子智能体分形子树里同样成立。
+async fn register_subsession(
+    parent: Arc<dyn Plugin>,
+    ctx: &Arc<dyn InvokeRequest>,
+    session_id: &str,
+    metadata: &Value,
+) -> Result<(), PluginError> {
+    let provider = parent.get_vfs_provider().ok_or_else(|| {
+        PluginError::InternalError(
+            "agent_run 无法取得本作用域的 VDFS 视图（容器未暴露 provider）".to_string(),
+        )
+    })?;
+    let addr = format!("{PLUGIN_SESSION}/{session_id}");
+    let body = json!({ "metadata": metadata }).to_string();
+    provider
+        .write(
+            &vdfs_context(ctx),
+            &addr,
+            &VdfsContent::text("", body).with_create(),
+        )
+        .await?;
     Ok(())
 }
 

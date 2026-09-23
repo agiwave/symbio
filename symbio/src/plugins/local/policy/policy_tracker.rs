@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// 滑动窗口动作追踪器
 #[derive(Debug)]
@@ -47,13 +47,28 @@ impl ActionTracker {
         self.count() >= max_actions as usize
     }
 
+    /// 清掉窗口外的记录，只留窗口内的。
+    ///
+    /// ## `checked_sub` 失败是**正常分支**，不是异常
+    ///
+    /// `Instant` 的基准点**没有保证**（Rust 只承诺单调，不承诺起点），而窗口
+    /// （默认 3600 秒）完全可能比「从基准点到此刻的时长」还长。此时窗口下界落在
+    /// 时钟基准**之前**，语义上就是**没有一条记录算旧**——全部保留。
+    ///
+    /// ⚠️ 曾经的写法是 `.unwrap_or_else(Instant::now)`，即把「下溢」当成「窗口从此刻
+    /// 开始」：一旦触发，cutoff 变成此刻，`retain` 把**全部记录**清空 ⇒ `count()` 恒为
+    /// 0 ⇒ 限流**静默失效**（配置看着生效，实际从不拦）。它的触发条件是「时钟基准到
+    /// 此刻的时长 < 窗口」，因此只在特定机器 / 特定启动时长下出现——本仓库的
+    /// `test_rate_limit_is_enforced` 就因此在系统启动不足 1 小时时变红，看起来像 flaky。
     fn cleanup_old_actions(&self, actions: &mut Vec<Instant>) {
-        let cutoff = Instant::now()
-            .checked_sub(std::time::Duration::from_secs(self.window_secs))
-            .unwrap_or_else(Instant::now);
-        actions.retain(|t| *t > cutoff);
+        let cutoff = Instant::now().checked_sub(Duration::from_secs(self.window_secs));
+        actions.retain(|t| cutoff.is_none_or(|c| *t > c));
     }
 }
+
+#[cfg(test)]
+#[path = "policy_tracker.test.rs"]
+mod tests;
 
 impl Default for ActionTracker {
     fn default() -> Self {

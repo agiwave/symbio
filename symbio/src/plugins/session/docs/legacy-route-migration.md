@@ -40,21 +40,22 @@
 | **B ✅已删** | `session/chat/delete_message` | → `vdfs/action(<sid>/消息/<mid>, "truncate")` | 同上（`stores/sessions.ts:816`）；`action` 的返回载荷**能保住 `deleted_ids` 回执** |
 | **B ✅已删** | `session/chat/clear_messages` | → `vdfs/action(<sid>/消息, "clear")` | 同上（`stores/sessions.ts:855`）；与截断同走**动作**——同一区段的删除只有一种入口形态（见 §3.3） |
 | **B ✅已删** | `session/get_messages` | → **进程内 VDFS 纯接口探测**（`stat("<挂载名>/<sid>")`） | 唯一消费方 `agent/host/subagent.rs::validate_subsession_exists`。当初判「不改」的两条硬化理由（后端拿不到 root provider / 线路信封留在 vdfs 插件内）**已被现成 API 化解**——见 §3.4.1（2026-09-23） |
-| **B 待定** | `session/update` | 迁 `vdfs/write` 需先改 CLI | 唯一消费方 `cli/src/client.rs:205`。上一轮判定「**不是纯收益**」（要动 `--session <ID>` 语义或扩 VDFS create）——见 §3.5 |
+| ~~**B 待定**~~ **已下线** | `session/update` | ~~迁 `vdfs/write` 需先改 CLI~~ **理由已消失** | 唯一消费方 `cli/src/client.rs`。前两轮判「**不是纯收益**」（要动 `--session <ID>` 语义或扩 VDFS create，且 CLI 会话 id 会变格式）——**2026-09-23 改判并整条下线**：那条「扩 VDFS create」被证明不是扩张而是**对齐**（会话 provider 是唯一违反「有名字时 id 来自地址」的 provider），于是 `--session <ID>` 语义与 id 格式都**不必动**。见 §3.5 |
 | **C 保留** | `session/chat/abort` | 不可迁 | 控制信号，不是数据变更 |
-| **C 保留** | `session/options/list` | 不可迁 | 级联选项收集，不是会话 CRUD |
 | **C 保留** | `session/heartbeat/trigger` | 不可迁 | 心跳调度入口，不是会话 CRUD |
 | **D 可评估** | `session/chat/send` | **§5 的否决只覆盖 `vdfs/write`，不覆盖 `vdfs/action`** | 见 §4——三条可核对的反证表明它协议层就是触发器 |
+| ~~**C 保留**~~ **已下线** | `session/options/list` | ~~不可迁~~ **不是「不可迁」，是「不该存在」** | 当初判 C 档的理由（「级联选项收集，不是会话 CRUD」）回答的是「能不能迁」，没问「该不该有第二条下发通道」。**2026-09-23 改判并整条下线**：选项 = 会话配置表单的字段，定义随 `node.schema` 下发、值走 `attributes.metadata`、写走 `vdfs/write`。见 §5 |
 
 **A 档 + B 档「可迁」四项均已落地**（本文所记的那批路由 11 → 5 条；其后
-`heartbeat/trigger` 又按「能力整体取消」退役、`stream` 随转写流新增）。会话域的**当前**五条是：
-`chat/send`（D，待评估）· `chat/abort` · `stream` · `update`（§3.5，待定）· `options/list`。
+`heartbeat/trigger` 又按「能力整体取消」退役、`stream` 随转写流新增，
+`options/list` 与 `update` 于 2026-09-23 先后下线）。会话域的**当前**三条是：
+`chat/send`（D，待评估）· `chat/abort` · `stream`。
 `get_messages` 于 2026-09-23 按 §3.4 的「正确归宿」退役——但走的是**现成的纯接口**
 （不占协议、不依赖线路信封），见 §3.4.1。
 
-**消息的增删改查将全部经 VDFS 地址完成**——这是本轮的实质目标：
+**消息与会话的增删改查已全部经 VDFS 地址完成**——本轮的实质目标达成：
 `update` / `delete` / `clear` 三条走 VDFS 后，消息域只剩**读**一条（`vdfs/read`，早已 VDFS 化）
-与**发言**一条（`chat/send`，动作语义）。剩下的 5 条里没有一条是「消息或会话的 CRUD」。
+与**发言**一条（`chat/send`，动作语义）。剩下的 3 条里没有一条是「消息或会话的 CRUD」。
 
 ---
 
@@ -302,28 +303,72 @@ VDFS 的**线路信封**（`vdfs/*` 请求响应 + 协议路径常量 `VDFS_STAT
 或给 core 一个统一的 VDFS 访问门面，收益是「所有消费方用同一套门面」——
 而不再是「某一条路由能不能删」。为一个调用点提前做那个决定，仍然是把小问题换成大问题。
 
-### 3.5 `session/update` —— 上一轮判定「不是纯收益」，本轮维持
+### 3.5 `session/update` —— 前两轮判「不是纯收益」，2026-09-23 **改判并整条下线**
 
-`handlers.rs:220-225` 写的保留理由是：
+`handlers.rs` 写的保留理由是：
 
 > CLI 需要**客户端指定会话 id**（`cli/src/client.rs` 自己 `gen_id` 后 upsert），
 > 而 VDFS 新建会话是 provider 生成 id。
 
-核对 CLI 实际用法（`cli/src/client.rs:187-211`）：`ensure_session` 用 `gen_id("cli")`
-生成 id，然后调 `session/update` **upsert**。它承担两件事：新建（id 客户端生成）、
-改元数据（`/workdir`、`/provider`、`/session <ID>` 后重新落库，与 `vdfs/write` 完全同义）。
+核对 CLI 实际用法：`ensure_session` 用 `gen_id("cli")` 生成 id，然后调
+`session/update` **upsert**。它承担两件事：新建（id 客户端生成）、
+改元数据（`/workdir`、`/provider`、`/session <ID>` 后重新落库）。
 
-**理论上的迁移方式**：新建走 `vdfs/write(root, {create:true})` 并用**返回的** id
-（`VdfsWriteResponse.path`），已有会话走 `vdfs/write(<sid>)`。顺带还消灭一个坑——
-`/session <拼错的 ID>` 现在是**静默造出一个新会话**，改后当场报 `NotFound`。
+**前两轮的理论迁移方式**是「新建走 `vdfs/write(root, {create:true})` 并用**返回的** id，
+已有会话走 `vdfs/write(<sid>)`」。于是判定为**不是纯收益**：它要动 `--session <ID>` 的
+语义（用户给的名字不再生效）或扩 VDFS create，而且 CLI 会话 id 会从 `cli<时间戳>`
+变成 provider 的短 GUID——**用户可见的行为变化**，不只是内部重构。收益（消灭最后一条
+会话级写路由 + 修掉「`/session <拼错的 ID>` 静默造孤儿会话」）与代价都真实，取舍权交给用户。
 
-**上一轮已判定这不是纯收益**（见 `.workbuddy-ai/memory/2026-09-18.md`）：
-它要动 `--session <ID>` 的语义或扩 VDFS create，而且 CLI 会话 id 会从 `cli-<随机>`
-变成 provider 的短 GUID——**这是用户可见的行为变化**，不只是内部重构。
+> **2026-09-23 补记（会话选项 schema 化之后）**：本路由的**前端调用方已归零**。
+> 旧形态下状态型选项经 `SESSION_STATE_ENDPOINT = worker/session/update` 落库，
+> 那是它在前端的唯一用途；选项改用 `vdfs/write(<根>/session/<id>, {"metadata": …})`
+> 之后，`tauri/src/services/session.ts::updateSession` 已直接走 VDFS 写通道。
+> **当前唯一消费方只剩 CLI**。
 
-**本轮结论：维持上一轮判定。** 它不进 B 档的推荐清单，列为**独立决策项**：
-收益是「消灭最后一条会话级写路由 + 修掉静默创建孤儿会话」，代价是 CLI 会话 id 格式变化。
-两者都真实，取舍权交给用户。
+#### 2026-09-23 改判：那条「扩 VDFS create」不是扩张，是**对齐**
+
+用户拍板退役后重新核对，发现前两轮把两条路**混为一谈**了——它们都叫「扩 VDFS create」，
+但性质完全不同：
+
+| 备选 | 是什么 | 结论 |
+|---|---|---|
+| **给 VDFS 的 create 请求加一个 `id` 字段** | 真·扩张协议：多一个「id 归使用方」的旁路 | 否决——与「id 是存储细节」的原则直接冲突，且只有会话需要 |
+| **让会话 provider 遵守 VDFS 已有的具名新建语义** | 合规化：什么都不加，只是不再例外 | **采纳** |
+
+依据是仓库**已有的**两份规范，都不是新发明的规则：
+
+- `symbio_core/vdfs_provider.rs::VdfsProvider::write` 的「两种目标形态」表：
+  **具名节点 + 不存在 ⇒ 就地创建**；只有**目录自身**才「名字由 provider 生成」。
+  同一份文档还写着「⚠️ 具名 + 目标不存在时不要一律报 `NotFound`：使用方要的是
+  『给了名字就写得进去』——配置型资源的地址**就是它的身份**（`model` / `mcp` / `skill`
+  皆如此）」。
+- `providers/vdfs_service/entry.rs::id_of` / `auto_id` 的注释：
+  「**有名字**时 id 来自地址（使用方给），**没名字**时 id 由这里生成（provider 给）」。
+
+**会话 provider 是唯一例外**：它无论有没有名字都自己生成 id，把名字只当标题
+（`title_from_new_path`），于是「写到的地址」与「建出来的地址」是两个地方。
+对齐之后：
+
+- `vdfs/write(<根>/session/<id>, {create:true, metadata})` —— **不存在则就地创建、
+  已存在则浅合并 metadata**，一次调用即 upsert，正是旧路由的全部职责；
+- 具名目标的名字是**身份**，不再兼作标题（拿 `cli18f3a2` 当标题只会污染侧栏）；
+  标题仍由 `display_title` 从首条消息派生，或由调用方显式给 `title`。
+
+**于是代价全部消失**：`--session <ID>` 语义不变（id 仍由客户端指定）、
+CLI 会话 id 格式不变（仍是 `cli<时间戳>`）、e2e 里 8 个按 id 读落盘会话的用例一行不改。
+唯一的行为变化是「写具名地址 + `create`」在目标已存在时由「再造一个」变成「覆盖」——
+那是 `create` 位的定义本身（只回答「不存在时怎么办」），仓库内没有依赖旧行为的调用方
+（前端新建一律写挂载根、不给名字）。
+
+**遗留**：`/session <拼错的 ID>` 仍是**静默创建**（具名新建合法），未改成报 `NotFound`
+——那属于 REPL 的交互取舍，不是路由退役的副作用；要改是独立决定。
+
+**删除面**（本轮落地）：`plugin.rs` 的路由臂、`handlers.rs::invoke_update`、
+`SESSION_UPDATE` 常量、`schemas/session/session_update.rs` schema，
+以及两处调用点改为 VDFS（CLI 走 `vdfs/write`，子会话登记走进程内纯接口
+`register_subsession`）。防回归沿用既有形态：
+`handlers.test.rs::migrated_session_routes_stay_retired` 里加了 `update` 一条。
 
 ---
 
@@ -363,7 +408,27 @@ VDFS 的**线路信封**（`vdfs/*` 请求响应 + 协议路径常量 `VDFS_STAT
 | 路由 | 保留理由 |
 |---|---|
 | `chat/abort` | 控制信号（中断正在跑的一轮），不是对数据的变更。VDFS 的 13 个操作里没有「中断」这一格。 |
-| `options/list` | 级联选项**收集**（各层经 `OptionVisitor` 汇流），是遍历期机制，与会话数据无关。 |
+
+### 5.0 `options/list` 的改判（2026-09-23，已下线）
+
+它曾是 C 档的第二条，理由写的是「级联选项**收集**（各层经 `OptionVisitor` 汇流），
+是遍历期机制，与会话数据无关」。这条理由**本身没错**，但它回答的是「能不能迁 VDFS」——
+而这条路由的真问题是**「该不该有第二条下发通道」**。
+
+会话选项（工作目录 / 智能体 / Model / 运行模式 / 风险等级 / 心跳）本来就是
+**会话配置表单的字段**，与模型 / 智能体 / SKILL 的新建表单是同一种东西。别的资源
+早就用「列表项自带 `schema`」下发定义，只有会话另开了一套节点协议
+（`OptionNode` + `action.endpoint` + `action.bind` 点路径 + `display` 策略），
+于是同一件事有两份形状、两条通道——而**没有任何守卫会因「两边说的不一样」变红**。
+
+迁移期靠「同一次广播喂两套产物」维持一致，那只是权宜；解药是删掉其中一套。
+**已整条下线**：路由与 `handle_list_options`、`schemas/options.rs`、`OptionVisitor`
+的旧产物槽、agent/model 的旧节点分支、前端 `services/options.ts` 一族全部删除。
+现行规范见 [session-options.md](./session-options.md)，完整账目见
+`docs/design/session-options-unification.md`。
+
+> **判据补记**：`heartbeat/trigger`（§5.1）也是被同一条「存在判据」改判的——
+> 「能不能迁」之外还要问「该不该有」。`options/list` 是这条判据的第二个受害者。
 
 ---
 
@@ -386,7 +451,7 @@ VDFS 的**线路信封**（`vdfs/*` 请求响应 + 协议路径常量 `VDFS_STAT
 于是它的存在意义只剩「让用户不用打字就能发那条消息」，而代价是：
 - 同一件事有**两个入口**（输入框 / 按钮），两者行为一旦分叉（例如按钮不看会话是否忙、
   或按钮用的提示词与当前编辑中的不一致）就是一类难以察觉的 bug；
-- 它是一个 `invoke` 型选项，要占一份 `OptionNode` 的构造、门控与前端渲染路径，
+- 它是一个独立的命令型选项，要占一份声明、门控与前端渲染路径，
   却不为系统带来任何输入框做不到的能力。
 
 **它不是「没用」，而是「重复」**——所以处理方式是删掉，而不是保留。
@@ -485,12 +550,17 @@ provider 只回答「这个地址能不能写」，不回答「谁在写」。
 
 **恒久保留**（它们本来就该在，只是不该被路由暴露）：
 `open_session_handle` / `open_chat_session`（各有真实调用方）、`delete_session_internal`
-（VDFS `delete` 的内部实现）、`invoke_update`（CLI，§3.5）、`session_update.rs` schema。
-（`invoke_get_messages` 与 `session_get_messages.rs` 曾在此列——2026-09-23 已随 §3.4.1 退役。）
+（VDFS `delete` 的内部实现）。
+（`invoke_get_messages` 与 `session_get_messages.rs` 曾在此列——2026-09-23 已随 §3.4.1 退役；
+`invoke_update` 与 `session_update.rs` 曾在此列——同日随 §3.5 改判退役。）
 
 > S1/S2 完成后 `handlers.rs` 从 315 行降到约 280 行；S4–S6 完成后会降到约 90 行
 > ——只剩 `invoke_get_messages` / `invoke_update` / `delete_session_internal` /
 > `open_session_handle` 四个函数。
+>
+> **实际收口（2026-09-23）**：`handlers.rs` 只剩 **2 个函数**
+> （`delete_session_internal` / `open_session_handle`）——`invoke_get_messages` 与
+> `invoke_update` 各自退役后，本文件已不含任何 invoke 路由实现体。
 
 ### 8.2 前端调用点（不改行为，只改传输）
 

@@ -35,7 +35,7 @@ async fn root_node_leaves_its_name_to_the_caller() {
     assert_eq!(root.name, "", "provider 不知道自己被挂在哪里");
     assert!(root.is_dir());
     assert_eq!(root.access, VdfsAccess::LIST_TRAVERSE);
-    assert!(p.root_new_types().is_empty(), "根下不可新建");
+    assert!(p.root_new_types().await.is_empty(), "根下不可新建");
 }
 
 #[tokio::test]

@@ -107,7 +107,11 @@
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
 | `session/stream` | 订阅会话**实时面**（一条流、两种帧：`transcript_event` = `session_id` + 单调 `seq` + 一条 `ChatMessage`；`transcript_session` = `session_id` + 同一 `seq` + 会话节点全量视图） | `Session` |
-| `session/update` | 合并写入会话 metadata（**仅 CLI**） | `Data` |
+
+> **本表只剩「不是数据 CRUD」的两条**（2026-09-23）：会话与消息的增删改查**全部**
+> 经 VDFS 地址完成，`chat/send` 与 `chat/abort` 是编排 / 控制，不是数据操作。
+> 退役记录见下文，映射表见
+> [`legacy-route-migration.md`](../../symbio/src/plugins/session/docs/legacy-route-migration.md)。
 
 > **实时面走 `session/stream`，历史面走 VDFS**（2026-09-21；2026-09-22 起运行态并入同一条流）：
 > 消息曾寄生在 `kind = "vdfs"` 的资源变更频道上，那条路没有流内序号（丢帧不可检测）、
@@ -143,6 +147,27 @@
 >   而「在不在」是资源层的问题、该由 VDFS 回答：现在走**进程内纯接口探测**
 >   （`Plugin::get_vfs_provider()` → `stat("<挂载名>/<会话id>")`，判 `attributes.message_count`），
 >   既不再为回答「在不在」读回整份历史，也不再占一条协议。
+> - **`options/list`**（2026-09-23）—— **不是迁移，是机制整体下线**：会话选项就是
+>   **会话配置表单的字段**，与模型 / 智能体 / SKILL 的新建表单同源。定义改随
+>   `node.schema` / `new_types[].schema` 下发，值走 `node.attributes.metadata`，
+>   写走 `vdfs/write(<根>/session/<id>, {"metadata": …})`。同一件事曾有两条下发通道
+>   （`OptionNode` 节点协议 vs `DetailDefinition` 方言），而没有任何守卫会因
+>   「两边说的不一样」变红。见 `docs/design/session-options-unification.md` 与
+>   [`session-options.md`](../../symbio/src/plugins/session/docs/session-options.md)。
+>
+>   > **本表的历史缺项**：`session/options/list` **从未登记在本表**（它不在
+>   > 「会话管理」表里），因此这次下线在本文只体现为这条说明。E-006 只校验
+>   > 「前缀合法性」——「漏登记」是这份人工清单的固有风险，故此处显式补记。
+> - **`update`**（2026-09-23）—— **会话 metadata 的写入入口收敛为 `vdfs/write`**。
+>   它唯一比 VDFS 多出来的东西是「**客户端指定会话 id**」（CLI 自己 `gen_id` 后
+>   upsert），而 VDFS 对**具名目标 + 不存在**的约定本来就是「**就地创建**，
+>   名字即身份」（`VdfsProvider::write` 的 `create` 位表；`vdfs_service::entry::id_of`
+>   同义）——那条理由因此消失，会话 provider 一并对齐了这个通用规则（此前它无论
+>   有无名字都自己生成 id、把名字只当标题，于是「写到的地址」与「建出来的地址」
+>   是两个地方）。CLI 现在写
+>   `vdfs/write(<根>/session/<id>, {"create": true, "text": {"metadata": …}})`
+>   ——一次调用同时覆盖「新建」与「改元数据」，正是旧路由的 upsert 语义。
+>   消费方：`cli/src/client.rs::ensure_session`、`agent/host/subagent.rs::register_subsession`。
 >
 > 审计与迁移记录见
 > [`symbio/src/plugins/session/docs/legacy-route-migration.md`](../../symbio/src/plugins/session/docs/legacy-route-migration.md)。
@@ -153,17 +178,19 @@
 > |---|---|
 > | 列会话清单 | `vdfs/list(<根>/session)` |
 > | 读整份转写 | `vdfs/read(<根>/session/<id>)` |
-> | 新建会话 | `vdfs/write(<根>/session, { create: true })` |
+> | 新建会话（id 由后端生成） | `vdfs/write(<根>/session, { create: true })` |
+> | 新建 / 打开**具名**会话（id 由调用方给） | `vdfs/write(<根>/session/<id>, { create: true })`——不存在则就地创建，已存在则浅合并 metadata |
 > | **删除会话** | `vdfs/delete(<根>/session/<id>)` |
 > | **改 metadata / 标题** | `vdfs/write(<根>/session/<id>)` |
 > | **改写某条消息** | `vdfs/write(<根>/session/<id>/消息/<mid>)` |
 > | **删该条及其后** | `vdfs/action(…/消息/<mid>, "truncate")` |
 > | **清空历史** | `vdfs/action(…/消息, "clear")` |
 >
-> `session/clear` **已退役**（与 `vdfs/delete` 共用 `delete_session_internal`）。
-> `session/update` 保留但只有 CLI 用——它需要**客户端指定会话 id**，而 VDFS 新建
-> 是 provider 生成 id。两者的 metadata 浅合并已收敛到同一份实现
-> （`Session::merge_metadata_object`），因此不会漂移。
+> `session/clear` **已退役**（与 `vdfs/delete` 共用 `delete_session_internal`）；
+> `session/update` **已退役**（2026-09-23）——CLI 的「客户端指定会话 id」由
+> **具名新建**承担：`vdfs/write(<根>/session/<id>, {"create": true, …})`
+> 不存在则就地创建、已存在则浅合并 metadata，一次调用即 upsert。
+> `Session::merge_metadata_object` 因此只剩一个调用方，语义不可能漂移。
 >
 > **发言仍只有聊天协议一处**（`chat/send`）：新增消息会触发一整轮编排，不是一次写入。
 > 但**改写与删除**是普通的 VDFS 节点操作——判据是「触发不触发编排」，不是「碰不碰消息」。

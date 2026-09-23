@@ -1,11 +1,10 @@
-//! SessionPlugin 里**仅剩的一个** invoke 路由的实现体，加上两个非路由的内部函数。
+//! SessionPlugin 里**仅剩的两个非路由内部函数**。
 //!
-//! 路由层在 `plugin.rs`（`Plugin::route`）。本文件已经收缩到只剩四件事，
+//! 路由层在 `plugin.rs`（`Plugin::route`）。本文件已经收缩到只剩两件事，
 //! 因为会话与消息的增删改查**全部**经 VDFS 地址完成了：
 //!
 //! | 函数 | 性质 | 为什么还在这里 |
 //! |---|---|---|
-//! | `invoke_update` | 路由 `update` | 仅 CLI：它需要**客户端指定会话 id**，而 VDFS 新建是 provider 生成 id——见同文 §3.5 |
 //! | `delete_session_internal` | **非路由** | `VdfsProvider::delete` 的内部实现（唯一消费方） |
 //! | `open_session_handle` | **非路由** | 编排器构造会话引擎句柄（`SESSION_HANDLE`）用 |
 //!
@@ -22,6 +21,11 @@
 //! - `get_messages` → 子会话**存在性校验**改走进程内 VDFS 纯接口
 //!   （`Plugin::get_vfs_provider()` + `stat(<挂载名>/<sid>)`，见同文 §3.4.1）
 //!   ——它当时也不是「会话的读接口」，读历史一直是 `vdfs/read`。
+//! - `update` → `write(<根>/session/<id>, {create:true, metadata})`。它唯一比
+//!   VDFS 多出来的东西是「客户端指定会话 id」，而 VDFS 对**具名目标 + 不存在**
+//!   的约定就是「就地创建、名字即身份」——那条理由随会话 provider 对齐 VDFS
+//!   新建语义而消失（2026-09-23，见同文 §3.5）。`merge_metadata_object` 因此
+//!   只剩一个调用方，语义不可能分叉。
 //!
 //! 后三者的实现搬到了 `plugin/vdfs_provider.rs`（`patch_message` /
 //! `truncate_messages` / `clear_messages`）——**搬移不是重写**：同一个操作只有
@@ -29,10 +33,7 @@
 
 use super::chat_session::{ChatSession, PersistentChatSession};
 use super::plugin::SessionPlugin;
-use crate::symbio_core::schemas::session::session_update;
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt};
-use crate::symbio_core::{InvokeResponse, PluginError};
-use serde_json::{json, Value};
+use crate::symbio_core::PluginError;
 use std::sync::Arc;
 
 impl SessionPlugin {
@@ -67,57 +68,6 @@ impl SessionPlugin {
         self.notify_change(session_id, crate::symbio_core::vdfs::VDFS_CHANGE_DELETED);
 
         Ok(())
-    }
-
-    /// 合并写入会话 metadata（workdir / title / agent_id 等）。
-    ///
-    /// **仅 CLI 使用**。前端走 `VdfsProvider::write`（`vdfs/write(<根>/session/<id>)`）
-    /// ——两条路径共用 `Session::merge_metadata_object`，语义不可能分叉。
-    /// 本路由保留的原因：CLI 需要**客户端指定会话 id**（`cli/src/client.rs` 自己
-    /// `gen_id` 后 upsert），而 VDFS 新建会话是 provider 生成 id。
-    pub async fn invoke_update(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
-        let req: session_update::Request = ctx.payload()?;
-
-        let mut session = self.get_or_create_session(&req.session_id).await?;
-
-        // 新建判定：get_or_create 未命中已存会话时返回全新空会话
-        // （无消息、metadata 为空对象）。用于区分 created / updated 生命周期事件。
-        let is_new = session.messages.is_empty()
-            && session
-                .metadata
-                .as_object()
-                .map(|o| o.is_empty())
-                .unwrap_or(true);
-
-        // 合并 metadata + title —— 与 VDFS `write` 同一份实现（见该方法文档）
-        session.merge_metadata_object(&json!({
-            "metadata": req.metadata,
-            "title": req.title,
-        }));
-
-        session.updated_at = crate::symbio_core::now_ms();
-        self.save_session(&session).await?;
-
-        // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：
-        // 会话叶子上的**资源**变更一律走粗粒度信号，消费方重拉清单收敛。
-        // 运行态不在这里——它走转写流（见 `plugin::notify_change` 的分工表）。
-        if is_new {
-            self.notify_change(
-                &req.session_id,
-                crate::symbio_core::vdfs::VDFS_CHANGE_CREATED,
-            );
-        } else {
-            self.notify_change(
-                &req.session_id,
-                crate::symbio_core::vdfs::VDFS_CHANGE_UPDATED,
-            );
-        }
-
-        Ok(serde_json::to_value(session_update::Response {
-            success: true,
-            session: serde_json::to_value(session)?,
-        })
-        .unwrap_or_default())
     }
 
     /// 按 session_id 构造会话引擎实例（唯一构造实现）。

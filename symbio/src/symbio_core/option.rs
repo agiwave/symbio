@@ -15,6 +15,15 @@
 //!                                             └─ model   : Model 选择
 //! ```
 //!
+//! ## 产物是 `DetailField`，不是自成一体的节点类型
+//!
+//! 选项（会话输入区下方的可修改项）**就是会话配置表单的字段**，因此产物直接
+//! 复用 VDFS 详情方言的 [`DetailField`]——「候选」「条件显隐/禁用」「子表单」
+//! 各只有一份实现与一个校验器。这里曾经并列一套 `OptionNode`（自带 `option_type`
+//! / `action` / `children` / `display` 的独立节点类型）与 `options/list` 端点，
+//! 已于 2026-09-23 随「会话选项 schema 化」整体下线
+//! （`docs/design/session-options-unification.md` §9 S4）。
+//!
 //! ## 为什么不复用 CapabilityVisitor
 //!
 //! 两者收集的**产物语义**完全不同：能力是「可调用对象」（工具实例 /
@@ -27,11 +36,12 @@
 //!
 //! - 收集是**广播**：宿主对父插件调一次 `traverse`，所有插件在同一契约下
 //!   按 `ctx[PATH] == TRAVERSE_AVAILABLE_OPTIONS` 判定是否贡献；
-//! - 收集是**无状态**的：每次调用返回全新 visitor（节点携带本次会话的
-//!   实时选中值，不可跨请求复用）；
+//! - 收集是**无状态**的：每次调用返回全新 visitor（产物是「有哪些字段 + 候选
+//!   有哪些」的**声明**，不含任何会话状态，故本可跨请求复用；不缓存只是因为
+//!   候选集来自运行期数据）；
 //! - 单插件失败只记日志，不中断收集。
 
-use crate::symbio_core::schemas::options::OptionNode;
+use crate::symbio_core::schemas::detail::DetailField;
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt, Plugin, PATH};
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -41,35 +51,33 @@ use tokio::sync::RwLock;
 /// 遍历可用选项的常量路径（与 `TRAVERSE_AVAILABLE_TOOLS` 平行）
 pub const TRAVERSE_AVAILABLE_OPTIONS: &str = "available_options";
 
-/// 选项收集器 —— 各插件在 `traverse` 中把选项节点注册进来。
+/// 选项收集器 —— 各插件在 `traverse` 中把选项注册进来。
 ///
 /// 语义与 [`crate::symbio_core::CapabilityVisitor`] 一致：按 id 去重、
 /// 后者覆盖（保留先注册的槽位），列表按 `order` 稳定排序。
 #[async_trait]
 pub trait OptionVisitor: Send + Sync + 'static {
-    /// 注册一个选项节点（同 id 覆盖）
-    async fn register_option(&self, node: OptionNode);
+    /// 注册一个选项字段（同 `key` 覆盖）。
+    ///
+    /// `order` **不下发**：它只是跨插件排序用的号段约定（插件之间不可见，只能
+    /// 约定数字，见 `plugins/session/options.rs` 模块文档），收集层用完即弃。
+    /// 前端收到的是一个**已排好序**的数组——数组序 = 展示序，比「各自按 order
+    /// 再排一次」是更强的保证。
+    async fn register_option_field(&self, order: i32, field: DetailField);
 
-    /// 批量注册（默认逐个注册）
-    async fn register_batch(&self, nodes: Vec<OptionNode>) {
-        for node in nodes {
-            self.register_option(node).await;
-        }
-    }
-
-    /// 列出已注册的选项节点（按 `order` 升序稳定排序）
-    async fn list_options(&self) -> Vec<OptionNode>;
+    /// 列出已注册的选项字段（按 `order` 升序稳定排序，`order` 已剥离）
+    async fn list_option_fields(&self) -> Vec<DetailField>;
 }
 
 /// 默认选项收集器：内存 IndexMap 实现，一次收集一个实例。
 pub struct DefaultOptionVisitor {
-    nodes: Arc<RwLock<IndexMap<String, OptionNode>>>,
+    fields: Arc<RwLock<IndexMap<String, (i32, DetailField)>>>,
 }
 
 impl DefaultOptionVisitor {
     pub fn new() -> Self {
         Self {
-            nodes: Arc::new(RwLock::new(IndexMap::new())),
+            fields: Arc::new(RwLock::new(IndexMap::new())),
         }
     }
 }
@@ -82,26 +90,30 @@ impl Default for DefaultOptionVisitor {
 
 #[async_trait]
 impl OptionVisitor for DefaultOptionVisitor {
-    async fn register_option(&self, node: OptionNode) {
-        let id = node.id.clone();
-        let mut nodes = self.nodes.write().await;
-        nodes.insert(id, node);
+    async fn register_option_field(&self, order: i32, field: DetailField) {
+        let key = field.key.clone();
+        let mut fields = self.fields.write().await;
+        fields.insert(key, (order, field));
     }
 
-    async fn list_options(&self) -> Vec<OptionNode> {
-        let nodes = self.nodes.read().await;
-        let mut out: Vec<OptionNode> = nodes.values().cloned().collect();
+    async fn list_option_fields(&self) -> Vec<DetailField> {
+        let fields = self.fields.read().await;
+        let mut out: Vec<(i32, DetailField)> = fields.values().cloned().collect();
         // 稳定排序：order 相同者保持注册顺序（IndexMap 保序）
-        out.sort_by_key(|n| n.order);
-        out
+        out.sort_by_key(|(order, _)| *order);
+        out.into_iter().map(|(_, field)| field).collect()
     }
 }
 
 /// 向所有插件广播「贡献选项」，返回装配好的选项收集器。
 ///
 /// 调用方（选项宿主 = session 插件）需在 `ctx` 中预先设置好各插件判定
-/// 所需的上下文键——通常是**会话当前状态**（`SESSION_ID` / `AGENT_ID` /
-/// `WORKDIR` 等），贡献插件据此回填节点的 `value`（当前选中值）。
+/// 所需的上下文键——通常是**运行期可枚举的数据源**（如 agent 目录、Provider
+/// 表）的定位依据，贡献插件据此算出**候选集**。
+///
+/// ⚠️ 「当前选中值」**不在**这里回填：值随会话节点 `attributes.metadata` 下发，
+/// 定义只声明「有哪些字段与候选」（`docs/design/session-options-unification.md`
+/// §3.2 / §6）。所以宿主不需要为回填值而注入会话状态。
 ///
 /// 失败降级语义与 `collect_capabilities`（`plugins/session/chat_pipeline.rs`）一致：
 /// 父插件缺失返回空收集器，单个插件 traverse 失败只记日志。
@@ -137,50 +149,57 @@ pub async fn collect_options(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbio_core::schemas::options::{OptionAction, OptionType};
-    use crate::symbio_core::vdfs_provider::VDFS_STATUS_DISABLED;
-
-    #[tokio::test]
-    async fn register_dedup_and_order() {
-        let v = DefaultOptionVisitor::new();
-        v.register_option(OptionNode::new("b", "B", OptionType::Invoke).with_order(20))
-            .await;
-        v.register_option(OptionNode::new("a", "A", OptionType::Invoke).with_order(10))
-            .await;
-        // 同 id 覆盖（保留先注册槽位），order 生效
-        let mut over = OptionNode::new("b", "B2", OptionType::Sub).with_order(20);
-        over.status = VDFS_STATUS_DISABLED.to_string();
-        v.register_option(over).await;
-
-        let list = v.list_options().await;
-        assert_eq!(list.len(), 2);
-        assert_eq!(list[0].id, "a");
-        assert_eq!(list[1].id, "b");
-        assert_eq!(list[1].label, "B2");
-        assert_eq!(list[1].option_type, OptionType::Sub);
-    }
-
-    #[tokio::test]
-    async fn register_batch_appends() {
-        let v = DefaultOptionVisitor::new();
-        let action = OptionAction {
-            endpoint: "worker/session/update".to_string(),
-            ..Default::default()
-        };
-        v.register_batch(vec![
-            OptionNode::invoke("x", "X", action.clone()),
-            OptionNode::invoke("y", "Y", action),
-        ])
-        .await;
-        let ids: Vec<String> = v.list_options().await.into_iter().map(|n| n.id).collect();
-        assert_eq!(ids, vec!["x", "y"]);
-    }
 
     #[tokio::test]
     async fn collect_without_parent_returns_empty() {
         let ctx: Arc<dyn InvokeRequest> =
             Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
         let v = collect_options(None, &ctx).await;
-        assert!(v.list_options().await.is_empty());
+        assert!(v.list_option_fields().await.is_empty());
+    }
+
+    /// `order` 只影响**收集层**排序，不出现在结果里
+    #[tokio::test]
+    async fn option_fields_sort_by_order_and_drop_it() {
+        let v = DefaultOptionVisitor::new();
+        v.register_option_field(60, field("heartbeat", "form"))
+            .await;
+        v.register_option_field(10, field("workdir", "path")).await;
+        v.register_option_field(40, field("risk_level", "select"))
+            .await;
+
+        let keys: Vec<String> = v
+            .list_option_fields()
+            .await
+            .into_iter()
+            .map(|f| f.key)
+            .collect();
+        assert_eq!(keys, vec!["workdir", "risk_level", "heartbeat"]);
+    }
+
+    /// 同 key 覆盖（保留先注册槽位 ⇒ 序号也保留）
+    #[tokio::test]
+    async fn option_fields_dedupe_by_key_keeping_first_slot() {
+        let v = DefaultOptionVisitor::new();
+        v.register_option_field(20, field("agent_id", "select"))
+            .await;
+        v.register_option_field(10, field("workdir", "path")).await;
+        // 同 key 覆盖：值换了，槽位（= 序号 20，排在 workdir 之后）不变
+        v.register_option_field(99, field("agent_id", "text")).await;
+
+        let list = v.list_option_fields().await;
+        let keys: Vec<&str> = list.iter().map(|f| f.key.as_str()).collect();
+        assert_eq!(keys, vec!["workdir", "agent_id"]);
+        assert_eq!(list[1].widget, "text", "后者覆盖前者");
+    }
+
+    /// 造一个最小字段（只关心 key / widget 的用例用）
+    fn field(key: &str, widget: &str) -> DetailField {
+        DetailField {
+            key: key.to_string(),
+            label: key.to_string(),
+            widget: widget.to_string(),
+            ..Default::default()
+        }
     }
 }

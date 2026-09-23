@@ -53,7 +53,7 @@ export interface UseChatConnectionReturn {
   isConnected: ComputedRef<boolean>
   messageTree: ComputedRef<ChatMessage[]>
   /** 发送一条消息。会话参数（智能体 / 模型 / 模式 / 风险等级）由后端按
-   *  `session.metadata` 解析——选择动作统一经级联选项机制落库，故此处不透传。 */
+   *  `session.metadata` 解析——选择动作统一经会话选项栏落库，故此处不透传。 */
   send: (message: ChatMessage) => void
   abort: () => void
   removeMessage: (messageId: string) => void
@@ -321,7 +321,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       await callPlugin(CHAT_SEND, {
         session_id: sid,
         // 智能体 / 模型 provider 不在请求中透传：后端按 `session.metadata`
-        // （agent_id / provider_id）回退取值，选择动作统一经级联选项机制落库。
+        // （agent_id / provider_id）回退取值，选择动作统一经会话选项栏落库。
         message: outgoing,
         mode,
         risk_level: riskLevel

@@ -103,7 +103,7 @@ for (const tf of testFiles) {
 //   - 真正的内联 `mod tests { … }`（才是"未拆分"）
 // 旧版用 `/^\s*mod tests\b/m` 一把抓，于是「含内联 mod tests 的文件 106」这个数字
 // 把两者混算（53 个宿主声明 + 53 个真内联），既说不清已拆多少、也说不清剩多少。
-const INLINE_TEST_BASELINE = 52 // 2026-09-22 实测（真内联，非宿主声明）；自 53 下调（local/shell.rs 拆分）
+const INLINE_TEST_BASELINE = 51 // 2026-09-23 实测；自 52 下调（symbio_core/schemas/options.rs 随旧选项机制下线整文件删除，其文件内联的 mod tests 一并消失）
 
 /** 真·内联测试：`mod tests {` 或 `mod tests\n{`；宿主声明 `mod tests;` 不算 */
 const INLINE_RE = /^\s*mod tests\b[^{;]*\{/m

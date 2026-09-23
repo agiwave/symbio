@@ -33,9 +33,19 @@ impl vdfs::VdfsProvider for SessionPlugin {
         vdfs::VdfsAccess::LIST
     }
 
-    /// 根下可新建「会话」（新建语义由 provider 自持，见 `write`）
-    fn root_new_types(&self) -> Vec<vdfs::VdfsNewType> {
-        vec![vdfs::VdfsNewType::new(vdfs::VDFS_EXT_SESSION, "会话").with_description("新建会话")]
+    /// 根下可新建「会话」（新建语义由 provider 自持，见 `write`）。
+    ///
+    /// 类型上挂**选项定义**（`schema`）：新建会话是**草稿态**——会话还不存在，
+    /// 没有节点可挂 `schema`，而选项行在创建前就要完整渲染（草稿选择由前端缓冲，
+    /// 随 `create: true` 一次写入 metadata）。与 [`Self::session_schema`] 是同一份
+    /// 定义（一处真相、两处投递）。
+    async fn root_new_types(&self) -> Vec<vdfs::VdfsNewType> {
+        let mut new_type =
+            vdfs::VdfsNewType::new(vdfs::VDFS_EXT_SESSION, "会话").with_description("新建会话");
+        if let Some(schema) = self.session_schema().await {
+            new_type = new_type.with_schema(schema);
+        }
+        vec![new_type]
     }
 
     async fn list(
@@ -59,7 +69,9 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     .list_sessions_window(limit, before)
                     .await
                     .map_err(vdfs::from_plugin_error)?;
-                Ok(self.nodes_of_sessions(&sessions).await)
+                // 选项定义与「是哪个会话」无关 ⇒ 一次算好，清单里逐项复用
+                let schema = self.session_schema().await;
+                Ok(self.nodes_of_sessions(&sessions, &schema).await)
             }
             // 会话内部：三个虚拟子目录 + 记忆文件（会话存在性校验由 `session_of` 承担）
             VdfsSessionPath::Session(id) => {
@@ -94,7 +106,9 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     .list_sub_sessions(id)
                     .await
                     .map_err(vdfs::from_plugin_error)?;
-                Ok(self.nodes_of_sessions(&subs).await)
+                // 子会话也是会话：同一份选项定义
+                let schema = self.session_schema().await;
+                Ok(self.nodes_of_sessions(&subs, &schema).await)
             }
             VdfsSessionPath::SubSession { .. } => Err(vdfs::VdfsError::not_found(format!(
                 "子会话是叶子节点，没有子项：{path}"
@@ -327,7 +341,8 @@ impl vdfs::VdfsProvider for SessionPlugin {
                     etag: None,
                 });
             }
-            // 会话本身（`path` 即会话 id；新建时是 `<标题>.session`）
+            // 会话本身（`path` 即会话 id —— 具名新建时它就是**身份**，见 `write` 的
+            // `create` 分支；`id` 由地址末段给出，不再由 provider 另生成一个）
             VdfsSessionPath::Session(_) => {}
             // 挂载根 = 「新建一个会话，名字由 provider 生成」。
             //
@@ -409,33 +424,59 @@ impl vdfs::VdfsProvider for SessionPlugin {
             .as_object()
             .ok_or_else(|| vdfs::VdfsError::invalid("会话写入需要 JSON 对象"))?;
 
-        // 新建：**id 由 provider 生成**（它是存储细节，不属于使用方的知识）。
-        // 名字（若有）在路径末段里——写挂载根时没有名字，标题留给
-        // `display_title` 从首条消息派生（那条规则只有一处实现，使用方不预造）。
-        if content.create {
-            let id = self.new_session_id().await;
+        // 寻址：**具名目标的地址末段就是会话 id**；写挂载根（无名目标）没有 id。
+        // 会话 id 从来就是路径末段原样，这里只是把「怎么从地址得到 id」收成一处
+        // ——两处各写一遍，改地址方案时必漏一边。
+        let named = session_id_from_new_path(path);
+        // 目标已存在吗？判据就用 `session_of`——磁盘 / 内存 / 嵌套三种驻留它都认，
+        // 不另立一份「存在性探测」（那会与寻址逻辑分叉，且漏掉内存驻留）。
+        // `NotFound` 之外的错误照实上抛：一次 IO 抖动不该被讲成「会话不存在」。
+        let existing = match named.as_deref() {
+            Some(id) => match self.session_of(id).await {
+                Ok(session) => Some(session),
+                Err(vdfs::VdfsError::NotFound(_)) => None,
+                Err(e) => return Err(e),
+            },
+            None => None,
+        };
+
+        // 新建：`create` 意图 + 目标不存在。
+        //
+        // `create` **只回答「不存在时怎么办」**（`VdfsProvider::write` 的 `create`
+        // 位表）：目标已存在时它是**覆盖**，控制流因此落到下面的覆盖分支。
+        // CLI 的「新建 / 改元数据」于是是同一次调用，正是旧 `session/update`
+        // 的 upsert 语义。
+        //
+        // id 从哪来取决于**目标形态**：
+        //
+        // - **具名目标**（`<根>/session/<名字>`）：**就地创建**，名字就是 id
+        //   ——这是 VDFS 的通用规则（`vdfs_service::entry::id_of` 同义：
+        //   「有名字时 id 来自地址，没名字时 id 由 provider 生成」）。CLI 的
+        //   「客户端指定会话 id」正是靠它表达，不再需要一条专用路由。
+        // - **目录自身**（写挂载根，无名字）：名字由 provider 生成。这是前端的
+        //   「新建会话」——它只说建在哪个目录，不说叫什么。
+        if existing.is_none() && content.create {
+            let id = match named {
+                Some(id) => id,
+                None => self.new_session_id().await,
+            };
             let mut session = Session::new(&id);
             let mut meta = serde_json::Map::new();
             // 使用方给的 metadata（草稿态选择的 workdir / agent / model / mode…）。
             //
             // 这里**不**走 `merge_metadata_object`：新建是"建立初始 metadata"，
-            // 与"往既有 metadata 上浅合并"不是同一件事——前者还要处理路径名与
-            // 显式 title 的优先级、`created_via` 缺省填充。而 `merge_metadata_object`
-            // 服务的是**两条**路径（`session/update` 与 `write` 的覆盖分支）之间
-            // 的一致性，那才是会漂移的一对。
+            // 与"往既有 metadata 上浅合并"不是同一件事——前者还要处理
+            // `created_via` 缺省填充。而 `merge_metadata_object` 服务的是
+            // **覆盖**分支的浅合并语义。
             if let Some(incoming) = obj.get("metadata").and_then(Value::as_object) {
                 for (k, v) in incoming {
                     meta.insert(k.clone(), v.clone());
                 }
             }
-            // 具名新建（`<名字>.session`）→ 名字作标题；写目录自身（无名字）→ 不写标题
-            if !path.trim_matches('/').is_empty() {
-                meta.insert(
-                    "title".to_string(),
-                    Value::String(title_from_new_path(path)),
-                );
-            }
-            // 显式 title 优先于路径名（使用方可以只给 title，不给 metadata）
+            // 标题只认**显式** `title`（或 metadata 里的 `title` 键）：
+            // 名字已经是 id，拿它当标题会让 `--session cli18f3a2` 这类机器生成的
+            // id 直接变成侧栏标题。无标题时由 `display_title` 从首条消息派生
+            // （那条规则只有一处实现，使用方不预造）。
             if let Some(t) = obj.get("title").and_then(Value::as_str) {
                 if !t.trim().is_empty() {
                     meta.insert("title".to_string(), Value::String(t.trim().to_string()));
@@ -465,10 +506,17 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 "会话写入支持 metadata / title 字段；消息请走聊天协议",
             ));
         }
-        let mut session = self.session_of(path).await?;
-        // 浅合并 —— 与 `session/update` 路由（CLI 用）**同一份实现**。
-        // 两处各写一遍的话，「前端改名生效 / CLI 改名不生效」这类只在一条路径上
-        // 出现的行为差异迟早会发生，而没有任何测试会覆盖两条路径的一致性。
+        let id = named.ok_or_else(|| {
+            vdfs::VdfsError::invalid("写会话挂载根需要 create 意图：目录自身没有可覆盖的目标")
+        })?;
+        // 前面已经取过一次（存在性判据），这里复用同一份，不重复读盘
+        let mut session = match existing {
+            Some(session) => session,
+            None => self.session_of(&id).await?,
+        };
+        // 浅合并 —— `Session::merge_metadata_object` 是 metadata 写入的**唯一**实现。
+        // 它曾经服务两条路径（`session/update` 路由与这里的覆盖分支），那条路由
+        // 已于 2026-09-23 退役；实现保持单点，语义因此不可能分叉。
         session.merge_metadata_object(&value);
         session.updated_at = now_ms();
         self.save_session(&session)
@@ -477,7 +525,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
         // 资源变更（标题 / metadata）走粗粒度信号：消费方重拉清单收敛。
         // 不带节点视图——会话叶子的节点快照只有转写流（有序）与 `list` / `stat`
         // （回读）两个来源，见 `plugin::notify_change`。
-        self.notify_change(path, vdfs::VDFS_CHANGE_UPDATED);
+        self.notify_change(&id, vdfs::VDFS_CHANGE_UPDATED);
         Ok(vdfs::VdfsWriteResponse {
             path: path.to_string(),
             created: false,
@@ -672,6 +720,9 @@ impl vdfs::VdfsProvider for SessionPlugin {
 
 impl SessionPlugin {
     /// 新会话 id —— 短 GUID（8 位十六进制）。
+    ///
+    /// **只在「目录自身」新建时用**（写挂载根，使用方没给名字）：具名目标的名字
+    /// 就是身份，由地址给出，不走这里（见 `write` 的 `create` 分支）。
     ///
     /// ## 为什么是短 id
     ///
@@ -947,7 +998,11 @@ impl SessionPlugin {
     }
 
     /// 会话清单 → VDFS 节点（携带实时运行态）
-    async fn nodes_of_sessions(&self, sessions: &[SessionSummary]) -> Vec<vdfs::VdfsNode> {
+    async fn nodes_of_sessions(
+        &self,
+        sessions: &[SessionSummary],
+        schema: &Option<Value>,
+    ) -> Vec<vdfs::VdfsNode> {
         let active = self.active_mgr.sessions.read().await;
         sessions
             .iter()
@@ -964,9 +1019,29 @@ impl SessionPlugin {
                     },
                     None => SessionRuntime::idle(None),
                 };
-                session_node(s, &rt)
+                let mut n = session_node(s, &rt);
+                // 选项定义：清单一次取全（前端零额外请求，见设计文档 §7）
+                n.schema = schema.clone();
+                n
             })
             .collect()
+    }
+
+    /// 会话的选项定义（`node.schema` / `new_types[].schema` 的取值）。
+    ///
+    /// 定义与「是哪个会话」无关（见 `options::SessionPlugin::build_option_definition`），
+    /// 因此清单里每一项挂的是**同一份**——`VdfsNode::schema` 是 `Value`，逐项 clone
+    /// 一份即可（设计文档 §7 已量化这份重复：量级 ~2 KB/项，换前端零额外请求）。
+    /// 序列化失败（理论上不会：定义里没有非字符串键的 map）退化为**不挂 schema**，
+    /// 前端按「无定义」处理——选项栏为空，会话本身照常可用。
+    async fn session_schema(&self) -> Option<Value> {
+        match serde_json::to_value(self.build_option_definition().await) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                crate::plugin_warn!("session", "选项定义序列化失败（选项栏将为空）: {e}");
+                None
+            }
+        }
     }
 
     /// 会话的工作目录（未声明 workdir ⇒ 该会话无目录树能力）

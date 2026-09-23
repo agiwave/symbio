@@ -122,13 +122,13 @@ async fn store_roundtrip_through_the_dir_impl() {
 ///
 /// 与 model 同构：`ext = skill` 是**呈现扩展名**（`id_of` 按它剥地址后缀），
 /// 落成后的节点 `ext = form` ⇒ 必须显式声明 `node_ext` 与 `schema`。
-#[test]
-fn new_type_declares_the_landing_detail() {
+#[tokio::test]
+async fn new_type_declares_the_landing_detail() {
     let plugin = SkillPlugin {
         config: Arc::new(RwLock::new(SkillConfig::default())),
         dir: PluginDir::of(PLUGIN_SKILL),
     };
-    let types = plugin.root_new_types();
+    let types = plugin.root_new_types().await;
     let form = types
         .iter()
         .find(|t| t.ext == PLUGIN_SKILL)

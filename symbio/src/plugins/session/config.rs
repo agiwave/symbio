@@ -3,9 +3,9 @@
 //! ## 为什么在插件里，而不是 `symbio_core::schemas`
 //!
 //! 它曾经住在 `symbio_core::schemas::session::session_config`，与同目录的
-//! `session_chat` / `chat_message` / `session_update` 并列。但两者性质不同：
+//! `session_chat` / `chat_message` 并列。但两者性质不同：
 //!
-//! - **协议 schema**（那几个）是**跨插件契约**——agent / local / model 都按同一份
+//! - **协议 schema**（那两个）是**跨插件契约**——agent / local / model 都按同一份
 //!   定义拼 WS 帧与 payload，改了会同时影响多方，因此归核心；
 //! - **本文件是配置**：全仓引用**只在 `src/plugins/session/` 内**，前端与 CLI 零镜像，
 //!   `lib.rs` 也不导出。它描述的是「本插件自己的旋钮」，不是任何跨插件接口。

@@ -566,12 +566,17 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /**
-   * 把一次 `session.metadata` 补丁镜射到本地（后端 `session/update` 的浅合并语义）。
+   * 把一次 `session.metadata` 补丁镜射到本地（后端浅合并语义）。
    *
-   * 供**级联选项机制**使用：选项选择统一经 `worker/session/update` 落库，
+   * 供**会话选项栏**使用：选项选择统一经 `vdfs/write(<根>/session/<id>,
+   * {"metadata": {…}})` 落库（后端 `Session::merge_metadata_object` 是浅合并的
+   * 唯一实现），
    * 本方法让前端无需等待资源变更事件往返即可收敛本地视图（`activeWorkdir`、
-   * mode/risk 回退取值、最近使用目录）。它不含选项语义——只是 session/update
+   * mode/risk 回退取值、最近使用目录）。它不含选项语义——只是「metadata 浅合并」
    * 的本地镜像，故任何带 metadata 补丁的调用方都可复用。
+   *
+   * 为什么不能省掉它、只等后端事件：`sessionNodeSync` 对 `updated` 是**防抖重拉
+   * 清单**（800ms），让按钮上的当前值等一个往返才更新是可见的迟钝。
    */
   function applySessionMetadataPatch(id: string, patch: Record<string, unknown>) {
     const idx = list.value.findIndex((s) => s.id === id)
@@ -652,9 +657,9 @@ export const useSessionsStore = defineStore('sessions', () => {
   /**
    * 创建新会话。
    *
-   * @param metadata 草稿态（新建会话前）累积的 metadata 补丁——由级联选项机制
+   * @param metadata 草稿态（新建会话前）累积的 metadata 补丁——由会话选项栏的
    *   通用缓冲产出（workdir / agent_id / provider_id / mode / risk_level / heartbeat…），
-   *   与后端 `session/update` 同一浅合并语义，故这里直接透传，前端不解释字段名。
+   *   与后端浅合并语义一致，故这里直接透传，前端不解释字段名。
    *   workdir 缺省时回退最近使用目录（`lastUsedWorkdir` → `getLastWorkdir`）。
    *
    * 流程：**经 VDFS 在会话挂载根上写一次**（`create: true`，不给名字）→ 后端生成
@@ -1166,7 +1171,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     dropSessionState,
     hydrateFromHistory,
     removeFrom,
-    // 运行模式（auto / interactive）：写入统一走级联选项机制（metadata 补丁），
+    // 运行模式（auto / interactive）：写入统一走会话选项栏（metadata 补丁），
     // store 只提供读取 + 本地镜射，避免第二条写入路径。
     getSessionMode,
     // 新建模式（无 id 详情）懒创建：建会话 + 排队首条消息（原子），以及取出
@@ -1177,7 +1182,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     consumePendingFirstMessage,
     // 执行风险等级（low / medium / high）
     getSessionRiskLevel,
-    // 级联选项机制：session/update 的本地镜射（metadata 浅合并）
+    // 会话选项栏：metadata 浅合并的本地镜射（后端写通道为 `vdfs/write`）
     applySessionMetadataPatch
   }
 })

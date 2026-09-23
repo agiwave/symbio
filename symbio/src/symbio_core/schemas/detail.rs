@@ -57,17 +57,41 @@ pub struct DetailCondition {
 pub struct DetailOption {
     pub value: String,
     pub label: String,
+    /// 候选项说明（次要说明文字，如「中风险及以下自动执行；高风险需审批」）。
+    ///
+    /// 纵向表单渲染器可忽略；紧凑渲染形态（如会话选项栏的候选菜单）据此给出
+    /// 每个候选项的一行解释——与 [`DetailField::description`] 同一分工，
+    /// 只是作用在候选项而非字段上。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
+/// 机制原生取值原语（**闭集**）——前端实现的通用取值能力，不含任何业务语义。
+///
+/// 后端无法唤起原生对话框，故字段可声明一个原语：前端先取值、写入本字段，再提交。
+/// 闭集的**唯一定义处**是前端 `schemas/vdfs-form.ts::DETAIL_PICKS`，由
+/// `protocol-mirror-audit` 的 C 组按 `DETAIL_PICK_` 前缀提取本组取值逐词比对。
+pub const DETAIL_PICK_DIRECTORY: &str = "directory";
+pub const DETAIL_PICK_FILE: &str = "file";
+
 /// 表单字段定义。`widget` ∈ text | password | number | select | textarea |
-/// toggle | datalist | list | map | static；`options`/`suggestions` 为静态候选，
-/// `*_from_preset` 为真时候选来自当前预设的 `options[key]`（如 provider 预设注入模型列表）。
+/// toggle | datalist | list | map | static | path | form；`options`/`suggestions`
+/// 为静态候选，`*_from_preset` 为真时候选来自当前预设的 `options[key]`
+/// （如 provider 预设注入模型列表）。
 ///
 /// 结构化 widget 的表单模型约定（渲染器与 `validate_manifest` 两侧一致）：
 /// - `list`：字符串数组，编辑态每行一项；
 /// - `map`：字符串键值对，编辑态每行 `KEY=VALUE`；
 /// - `static`：只读展示（info 绑定），值来自 `item.config`/`extra`，
-///   `options` 可作值→标签映射。
+///   `options` 可作值→标签映射；
+/// - `path`：单行文本 + 原生选择入口（配 [`DetailField::pick`]）；
+/// - `form`：**结构化子对象**，形状由 [`DetailField::form`] 的子定义描述。
+///
+/// ## 字段级与动作级的能力对齐
+///
+/// `disabled_when` / `icon` 曾只在 [`DetailAction`] 上有，字段只能表达「显 / 隐」。
+/// 但「可见但不可改」（锁定字段、只读派生字段）是普遍需求，把它表达成「隐藏」
+/// 是错的——用户会以为这一项不存在。故与动作对齐补上。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct DetailField {
@@ -78,9 +102,23 @@ pub struct DetailField {
     pub description: Option<String>,
     pub required: bool,
     pub widget: String,
+    /// 图标名（纯 UI 映射；缺省不显示图标）。
+    ///
+    /// 纵向表单渲染器可忽略它；紧凑渲染形态（如会话选项栏）据此给每个字段一个标识。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// 条件显隐（不满足时整行不渲染；求值同徽标/动作条件）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visible_when: Option<DetailCondition>,
+    /// 禁用条件：**成立才禁用**（缺省 = 不禁用）。与 [`DetailAction::disabled_when`] 同义。
+    ///
+    /// 与 `visible_when` 的分工：隐藏 = 「这一项与当前场景无关」；
+    /// 禁用 = 「这一项存在、但此刻不能改」（并在 `description` 说明原因）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_when: Option<DetailCondition>,
+    /// 机制原生取值原语（闭集，见 [`DETAIL_PICK_DIRECTORY`] / [`DETAIL_PICK_FILE`]）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pick: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -92,6 +130,13 @@ pub struct DetailField {
     /// textarea 行数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rows: Option<u32>,
+    /// 候选项（`widget = "select"` 时渲染为候选菜单）。
+    ///
+    /// 对**没有候选菜单**的 widget（`path` / `form`），它退化为一张**值→标签表**：
+    /// 紧凑渲染形态（会话选项栏）按它把当前值压成一句话（前端
+    /// `schemas/vdfs-form.compactFieldText`）。例：`path` 字段给
+    /// `{value: "", label: "未选择目录"}` 以表达「未设置」，`form` 字段给
+    /// `{value: "true", label: "已开启"}` 以表达子对象的开关态。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<DetailOption>,
     /// datalist 静态建议
@@ -105,6 +150,18 @@ pub struct DetailField {
     /// 新建态缺省值
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<serde_json::Value>,
+    /// `widget = "form"`：本字段值是**结构化子对象**，由这份子定义描述其字段。
+    ///
+    /// 与「另开一个 `form` 节点」的差别：子对象仍是**本表单模型的一个键**，
+    /// 保存时随外层一次提交，不会产生第二个写入入口。
+    ///
+    /// 紧凑渲染形态（会话选项栏）要在按钮上显示这个子对象的一句话摘要，取值规则：
+    /// 按子定义的 `title_from` 链从子对象取一个**代表值** ⇒ 本字段 `options`
+    /// 非空时按「值→标签」查表（`String(代表值)` 匹配，见 [`DetailOption`]）
+    /// ⇒ 仍无则回落 [`DetailField::label`]。因此子定义应声明 `title_from`
+    /// 指向那个「一眼能看出状态」的子字段（如心跳的 `enabled`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form: Option<Box<DetailDefinition>>,
 }
 
 /// 分区（可折叠；`collapsed` = 默认折叠，如「高级设置」）
@@ -407,7 +464,9 @@ impl DetailField {
             }
             "list" => (!v.is_array()).then(|| "必须是字符串数组".to_string()),
             "map" => (!v.is_object()).then(|| "必须是键值对象".to_string()),
-            "text" | "password" | "textarea" | "datalist" => {
+            // 结构化子对象：形状由子定义逐字段校验（见 [`DetailDefinition::validate`]）
+            "form" => (!v.is_object()).then(|| "必须是键值对象".to_string()),
+            "text" | "password" | "textarea" | "datalist" | "path" => {
                 (!v.is_string()).then(|| "必须是字符串".to_string())
             }
             _ => None,
@@ -459,6 +518,22 @@ impl DetailDefinition {
                         field: f.key.clone(),
                         message,
                     });
+                    continue;
+                }
+                // 结构化子对象：**递归**用子定义校验，错误字段带父前缀
+                // （`heartbeat.interval_seconds`），前端因此仍能逐字段高亮。
+                // 校验同源：子定义的规则不在使用方复写一遍。
+                if let Some(sub) = &f.form {
+                    if current.is_object() {
+                        if let Err(sub_err) = sub.validate(current) {
+                            for fe in sub_err.fields {
+                                err.fields.push(VdfsFieldError {
+                                    field: format!("{}.{}", f.key, fe.field),
+                                    message: fe.message,
+                                });
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -568,10 +643,12 @@ mod tests {
             DetailOption {
                 value: "http".into(),
                 label: "HTTP".into(),
+                description: None,
             },
             DetailOption {
                 value: "https".into(),
                 label: "HTTPS".into(),
+                description: None,
             },
         ];
         assert!(s.check(&json!("http")).is_none());
@@ -583,5 +660,49 @@ mod tests {
         assert!(field("hosts", "list").check(&json!("a")).is_some());
         assert!(field("env", "map").check(&json!({ "K": "V" })).is_none());
         assert!(field("env", "map").check(&json!([])).is_some());
+        assert!(field("dir", "path").check(&json!("/tmp")).is_none());
+        assert!(field("dir", "path").check(&json!(1)).is_some());
+        assert!(field("hb", "form").check(&json!({})).is_none());
+        assert!(field("hb", "form").check(&json!("nope")).is_some());
+    }
+
+    /// 结构化子对象（`widget = "form"`）用子定义**递归**校验，错误字段带父前缀。
+    #[test]
+    fn nested_form_field_validates_against_sub_definition() {
+        let mut interval = field("interval_seconds", "number");
+        interval.min = Some(10.0);
+        let mut hb = field("heartbeat", "form");
+        hb.form = Some(Box::new(def_of(vec![interval])));
+        let def = def_of(vec![hb]);
+
+        assert!(def
+            .validate(&json!({ "heartbeat": { "interval_seconds": 30 } }))
+            .is_ok());
+        // 错误字段名带父前缀，前端仍能逐字段高亮
+        assert_eq!(
+            def.validate(&json!({ "heartbeat": { "interval_seconds": 1 } }))
+                .unwrap_err()
+                .fields[0]
+                .field,
+            "heartbeat.interval_seconds"
+        );
+    }
+
+    /// `disabled_when` 成立**不**豁免校验：字段仍然在提交值里（只是用户改不动），
+    /// 与 `visible_when` 不成立的「没显示就不该拦提交」是两回事。
+    #[test]
+    fn disabled_field_is_still_validated() {
+        let mut f = field("port", "number");
+        f.required = true;
+        f.disabled_when = Some(DetailCondition {
+            key: "locked".into(),
+            equals: Some(json!(true)),
+            ..Default::default()
+        });
+        let def = def_of(vec![f]);
+        assert_eq!(
+            def.validate(&json!({ "locked": true })).unwrap_err().fields[0].field,
+            "port"
+        );
     }
 }

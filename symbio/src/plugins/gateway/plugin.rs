@@ -40,10 +40,12 @@ fn config_definition() -> DetailDefinition {
                     DetailOption {
                         value: "native".into(),
                         label: "native（仅本机 Tauri IPC，不监听端口）".into(),
+                        description: None,
                     },
                     DetailOption {
                         value: "http".into(),
                         label: "http（监听端口，第三方/其他实例可访问）".into(),
+                        description: None,
                     },
                 ],
                 &d.inbound_protocol,

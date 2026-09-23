@@ -12,6 +12,7 @@ use super::bound_provider::BoundProvider;
 use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
 use crate::providers::vdfs_service::{MemoryVdfs, SingleFileVdfs};
+use crate::symbio_core::schemas::detail::{DetailField, DetailOption};
 use crate::symbio_core::{
     create_object, dir_from_ctx, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
     PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, PLUGIN_MODEL,
@@ -351,15 +352,16 @@ impl ModelPlugin {
             .with_version("0.3.0")
     }
 
-    /// 参与 `available_options` 收集：贡献「Model」选择项。
+    /// 参与 `available_options` 收集：贡献「Model」字段。
     ///
-    /// 形态：`sub` 节点，子项 = 每个启用的 Provider；选中即把
-    /// `metadata.provider_id` 落库（后端 `resolve_session_params` 按 metadata
-    /// 回退解析，故会话发起无需前端传参）。当前选中值由宿主注入的
-    /// `ctx[PROVIDER_ID]` 回填——本插件无需加载会话。
+    /// 候选 = 每个启用的 Provider（值 = `provider_id`）；`default` 取**生效
+    /// Provider**（请求显式 > 默认）——这一步的解析链只有后端知道
+    /// （`providers.default_provider_id`），故由后端把结论写进定义：会话 metadata
+    /// 里没有 `provider_id` 时，前端按 `default` 显示生效的那个（见
+    /// `docs/design/session-options-unification.md` §6）。
+    ///
+    /// **不回填当前值**：值来自会话 `metadata.provider_id`，这里只声明候选与缺省。
     async fn contribute_options(&self, ctx: &Arc<dyn InvokeRequest>) {
-        use crate::symbio_core::schemas::options::OptionNode;
-
         let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) else {
             return;
         };
@@ -372,7 +374,7 @@ impl ModelPlugin {
             .get(crate::symbio_core::PROVIDER_ID)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        // 生效 Provider：请求显式 > 默认（与后端解析链一致，供展示回填）
+        // 生效 Provider：请求显式 > 默认（与后端解析链一致）
         let effective = requested.clone().or_else(|| {
             providers
                 .resolve(providers.default_provider_id.as_deref())
@@ -383,56 +385,55 @@ impl ModelPlugin {
             providers.providers.values().filter(|p| p.enabled).collect();
         enabled.sort_by(|a, b| a.id.cmp(&b.id));
 
-        let mut children: Vec<OptionNode> = Vec::with_capacity(enabled.len());
-        let mut current_label: Option<String> = None;
-        for p in &enabled {
-            if effective.as_deref() == Some(p.id.as_str()) {
-                current_label = Some(if p.name.is_empty() {
+        visitor
+            .register_option_field(ORDER, provider_field(&enabled, effective.as_deref()))
+            .await;
+    }
+}
+
+/// 「Model」选项的字段声明（`node.schema` 用）。
+///
+/// 无可用 Provider 时下发**单个占位候选**「未配置」（说明指向设置页），而不是为它
+/// 新增「无条件禁用」这种机制。
+fn provider_field(enabled: &[&ModelProviderConfig], effective: Option<&str>) -> DetailField {
+    let options = if enabled.is_empty() {
+        vec![DetailOption {
+            value: String::new(),
+            label: "未配置".to_string(),
+            description: Some("暂无可用 Model，请前往「设置 → 模型」添加".to_string()),
+        }]
+    } else {
+        enabled
+            .iter()
+            .map(|p| DetailOption {
+                value: p.id.clone(),
+                label: if p.name.is_empty() {
                     p.id.clone()
                 } else {
                     p.name.clone()
-                });
-            }
-            let model = if p.model.is_empty() {
-                "未设置模型"
-            } else {
-                p.model.as_str()
-            };
-            children.push(
-                OptionNode::session_state(
-                    format!("model_provider:{}", p.id),
-                    if p.name.is_empty() {
-                        p.id.clone()
+                },
+                description: Some(format!(
+                    "{} · {}",
+                    p.provider,
+                    if p.model.is_empty() {
+                        "未设置模型"
                     } else {
-                        p.name.clone()
-                    },
-                    "provider_id",
-                    json!(p.id),
-                )
-                .with_description(format!("{} · {}", p.provider, model)),
-            );
-        }
+                        p.model.as_str()
+                    }
+                )),
+            })
+            .collect()
+    };
 
-        let node = if children.is_empty() {
-            // 无可用 Provider：仍下发节点（禁用态 + 引导文案），前端零特判
-            OptionNode::sub("model_provider", "Model", Vec::new())
-                .with_icon("model")
-                .with_order(ORDER)
-                .with_description("暂无可用 Model，请前往「设置 → 模型」添加")
-                .with_status(VDFS_STATUS_DISABLED)
-                .with_value_label("", "未配置")
-        } else {
-            let node = OptionNode::sub("model_provider", "Model", children)
-                .with_icon("model")
-                .with_order(ORDER)
-                .with_description("选择本次会话使用的 Model Provider（含默认）");
-            match current_label {
-                Some(label) => node.with_value_label(effective.unwrap_or_default(), label),
-                None => node.with_value(effective.unwrap_or_default()),
-            }
-        };
-
-        visitor.register_option(node).await;
+    DetailField {
+        key: "provider_id".to_string(),
+        label: "Model".to_string(),
+        description: Some("选择本次会话使用的 Model Provider（含默认）".to_string()),
+        widget: "select".to_string(),
+        icon: Some("model".to_string()),
+        default: effective.map(|id| json!(id)),
+        options,
+        ..Default::default()
     }
 }
 
@@ -715,7 +716,7 @@ impl VdfsProvider for ModelPlugin {
     /// `ext = model` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
     /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义：使用方据此
     /// 在「还没创建」时就能渲染出与落成后同一张表单（草稿详情页）。
-    fn root_new_types(&self) -> Vec<VdfsNewType> {
+    async fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![VdfsNewType::new(PLUGIN_MODEL, LABEL)
             .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
             .with_node_ext(VDFS_EXT_FORM)

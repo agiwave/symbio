@@ -10,10 +10,12 @@
  * 2. **`sessionId` 原样透传，且草稿态必须是 `undefined`** —— 选项行按「有没有
  *    sessionId」决定「选择写后端」还是「缓冲待创建」。透传成**空串**会让它
  *    误以为有会话（空串是合法 prop 值），从而把草稿选择丢掉；
- * 3. **暴露面只经一个 ref** —— `resetHeight` / `getDraftMetadata` 分别委派给
+ * 3. **定义 / 值 / 条件作用域原样透传** —— 定义随节点下发，本组件**不回读**；
+ *    少透传一样，选项栏就会退回「全按定义缺省值显示」的静默降级；
+ * 4. **暴露面只经一个 ref** —— `resetHeight` / `getDraftMetadata` 分别委派给
  *    两件子件，父级不必各持一个 ref。
  *
- * 环境说明：只桩掉选项行（它经 `useSessionOptions` 出站到后端）。输入框用真件
+ * 环境说明：只桩掉选项行（它经 `useSessionOptionBar` 出站到后端）。输入框用真件
  * ——`resetHeight` 委派与 `autofocus` 都是它自己的行为，桩掉就测了个空。
  */
 import { describe, it, expect, vi } from 'vitest'
@@ -30,7 +32,12 @@ vi.mock('../ChatOptionBar.vue', async () => {
   return {
     default: defineComponent({
       name: 'ChatOptionBarStub',
-      props: { sessionId: { type: String, default: undefined } },
+      props: {
+        sessionId: { type: String, default: undefined },
+        definition: { type: Object, default: null },
+        values: { type: Object, default: null },
+        scope: { type: Object, default: null },
+      },
       setup(props, { expose }) {
         expose({
           getDraftMetadata: () => ({ probe: props.sessionId ?? 'draft' }),
@@ -71,6 +78,29 @@ describe('ChatComposer：sessionId 两种模式', () => {
     const w = mount(ChatComposer, { props: { sessionId: 's9' } })
     expect(optionBar(w).props('sessionId')).toBe('s9')
     expect(optionBar(w).attributes('data-session')).toBe('s9')
+  })
+})
+
+describe('ChatComposer：选项定义与值（本组件不回读）', () => {
+  const definition = { binding: 'option', sections: [] }
+
+  it('定义 / 值 / 条件作用域原样透传（少一样就是静默降级）', () => {
+    const w = mount(ChatComposer, {
+      props: {
+        sessionId: 's9',
+        definition,
+        values: { workdir: '/w' },
+        scope: { message_count: 2 },
+      },
+    })
+    expect(optionBar(w).props('definition')).toEqual(definition)
+    expect(optionBar(w).props('values')).toEqual({ workdir: '/w' })
+    expect(optionBar(w).props('scope')).toEqual({ message_count: 2 })
+  })
+
+  it('草稿态不传定义 ⇒ 选项行拿到 null（不是 undefined 与 null 混用）', () => {
+    const w = mount(ChatComposer)
+    expect(optionBar(w).props('definition')).toBeNull()
   })
 })
 

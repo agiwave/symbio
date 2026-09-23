@@ -79,12 +79,6 @@ pub const SESSION_CHAT_SEND: &str = "session/chat/send";
 #[allow(dead_code)] // dead-code-allow R-001: 唯一调用方在前端 pluginPaths.ts::CHAT_ABORT，路由真实存在
 pub const SESSION_CHAT_ABORT: &str = "session/chat/abort";
 
-/// session/update — 合并写入会话 metadata（**仅供 CLI 与子会话登记**）
-///
-/// 调用方：`cli/src/client.rs`（`--session <ID>` 语义）、
-/// `agent/host/subagent.rs`（登记子会话元数据）。
-pub const SESSION_UPDATE: &str = "session/update";
-
 // ============ VDFS 插件 ============
 /// vdfs/root — **进入地址空间**：取根地址，调用方不给地址。
 ///

@@ -92,7 +92,7 @@ HTTP 传输文档里那句「路由是运行时分形分发，各插件内部 `m
 |---|---|
 | `symbio_core::paths` | **有真实调用方的绝对地址**（`&'static str`），命名 `<PLUGIN>_<OP>` |
 | 前端 `tauri/src/constants/pluginPaths.ts` | 同一批地址的前端侧常量（模板串链，含 `worker/` 前缀） |
-| 定义它的模块（如 `schemas::options::OPTIONS_LIST`） | **相对臂**常量 |
+| 定义它的模块 | **相对臂**常量（不带 `worker/` 前缀，如 `schemas::options::OPTIONS_LIST` 曾在这里——该机制已于 2026-09-23 下线，**当前没有这样的常量**；新增时要照此落位，别塞进 `paths.rs`） |
 
 `paths.rs` **不为「将来可能用到」的路由预置常量**——那正是它在 2026-09-18 清掉的
 那类腐烂（见 §3.2）。
@@ -210,13 +210,16 @@ self.handle_chat_send_oneoff(Arc::new(ctx)).await   // 直连方法，不过路�
 | `model` | 恒 `NotFound` | — | — |
 | `session` | 静态 | `session/chat/send` | 9 |
 | | | `session/chat/abort` | 5 |
-| | | `session/update` | 9 |
 | `setting` | 恒 `NotFound` | — | — |
 | `skill` | 静态 | `skill/execute` | **0** |
 | `telegram` | 静态 | `telegram/send` · `get_updates` · `set_chat_id` · `start_listener` · `stop_listener` · `status` | **全 0** |
 | `vdfs` | 运行期动态（`VDFS_OPS`） | — | — |
 | `web` | 运行期动态（工具名） | — | — |
 | `work` | 恒 `NotFound` | — | — |
+
+**`session` 原有第三条静态臂 `session/update` 已于 2026-09-23 退役**：它做的事
+（写会话 metadata）本就是 `vdfs/write` 覆盖分支的能力，会话数据面已全部收敛到
+VDFS，路由表里不再有它。判据与删除面见 `docs/reference/ROUTES.md` 的退役清单。
 
 **`home` 的两条 `work/*` 臂值得单说**：`work/set_workspace` 与 `work/get_workspace`
 挂在 **`home`** 的 `route` 里（`home` 是系统根，不挂前缀，臂已是全名），

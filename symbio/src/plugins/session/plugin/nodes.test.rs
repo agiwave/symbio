@@ -51,14 +51,27 @@ fn message_node_serialized_name_is_node_id_not_tool_name() {
     assert_eq!(v["tool_name"], serde_json::json!("local/ls"));
 }
 
-/// 新建标题：路径名去掉 `.session` 扩展名；空名回落「新对话」
+/// 具名新建：**地址末段即会话 id**；无名目标（挂载根 / 空末段）⇒ `None`（provider 生成）
 #[test]
-fn title_from_new_path_strips_session_ext() {
-    assert_eq!(title_from_new_path("我的会话.session"), "我的会话");
-    assert_eq!(title_from_new_path("dir/我的会话.session"), "我的会话");
-    assert_eq!(title_from_new_path("未命名"), "未命名");
-    assert_eq!(title_from_new_path(".session"), "新对话");
-    assert_eq!(title_from_new_path(""), "新对话");
+fn session_id_from_new_path_uses_the_address_as_identity() {
+    assert_eq!(
+        session_id_from_new_path("我的会话").as_deref(),
+        Some("我的会话")
+    );
+    assert_eq!(
+        session_id_from_new_path("dir/我的会话").as_deref(),
+        Some("我的会话")
+    );
+    // 不剥扩展名：会话寻址里 `.session` 不是地址的一部分（见函数文档）
+    assert_eq!(
+        session_id_from_new_path("abc.session").as_deref(),
+        Some("abc.session")
+    );
+    // 无名目标 ⇒ 交给 provider 生成
+    assert_eq!(session_id_from_new_path(""), None);
+    assert_eq!(session_id_from_new_path("/"), None);
+    assert_eq!(session_id_from_new_path("dir/"), None);
+    assert_eq!(session_id_from_new_path("   "), None);
 }
 
 /// 会话节点：`ext = session`（前端据此选聊天工作区渲染器）、

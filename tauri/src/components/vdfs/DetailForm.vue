@@ -80,9 +80,26 @@
             <!-- static（只读展示：info 绑定概览 / 只读字段；options 作值→标签映射） -->
             <div v-if="specOf(f).tag === 'static'" class="static-value">{{ staticDisplay(f) }}</div>
 
+            <!-- form（结构化子对象：摘要 + 打开子表单） -->
+            <div v-else-if="specOf(f).tag === 'form'" class="input-row">
+              <span class="sub-summary">{{ subSummary(f) }}</span>
+              <button
+                type="button"
+                class="icon-btn"
+                :title="`配置「${f.label}」`"
+                :disabled="fieldDisabled(f)"
+                @click="openSubForm(f)"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                </svg>
+              </button>
+            </div>
+
             <!-- toggle -->
             <label v-else-if="specOf(f).tag === 'toggle'" class="toggle">
-              <input type="checkbox" v-model="form[f.key]" />
+              <input type="checkbox" v-model="form[f.key]" :disabled="fieldDisabled(f)" />
               <span class="toggle-slider" />
             </label>
 
@@ -90,6 +107,7 @@
             <select
               v-else-if="specOf(f).tag === 'select'"
               v-model="form[f.key]"
+              :disabled="fieldDisabled(f)"
               @change="onPresetFieldChange(f)"
             >
               <option v-for="o in fieldOptions(f)" :key="o.value" :value="o.value">{{ o.label }}</option>
@@ -101,15 +119,17 @@
               v-model="form[f.key]"
               :rows="f.rows ?? 3"
               :placeholder="widgetPlaceholderOf(f)"
+              :disabled="fieldDisabled(f)"
               spellcheck="false"
             />
 
-            <!-- text / password / number / datalist -->
+            <!-- text / password / number / datalist / path（path 可带原生取值入口） -->
             <div v-else-if="specOf(f).revealable" class="input-row">
               <input
                 v-model="form[f.key]"
                 :type="reveal[f.key] ? 'text' : 'password'"
                 :placeholder="f.placeholder"
+                :disabled="fieldDisabled(f)"
               />
               <button
                 type="button"
@@ -136,6 +156,7 @@
               :max="f.max"
               :step="f.step"
               :placeholder="widgetPlaceholderOf(f)"
+              :disabled="fieldDisabled(f)"
             />
 
             <div v-else-if="specOf(f).datalist" class="input-wrap">
@@ -144,34 +165,69 @@
                 type="text"
                 :list="`dl-${uid}-${f.key}`"
                 :placeholder="f.placeholder"
+                :disabled="fieldDisabled(f)"
               />
               <datalist :id="`dl-${uid}-${f.key}`">
                 <option v-for="(s, i) in fieldSuggestions(f)" :key="i" :value="s" />
               </datalist>
             </div>
 
-            <input
-              v-else
-              v-model="form[f.key]"
-              :type="specOf(f).inputType ?? 'text'"
-              :placeholder="widgetPlaceholderOf(f)"
-            />
+            <div v-else class="input-row">
+              <input
+                v-model="form[f.key]"
+                :type="specOf(f).inputType ?? 'text'"
+                :placeholder="widgetPlaceholderOf(f)"
+                :disabled="fieldDisabled(f)"
+              />
+              <!-- 机制原生取值原语（字段声明 pick 时给入口；后端唤不起原生对话框） -->
+              <button
+                v-if="f.pick"
+                type="button"
+                class="icon-btn"
+                :title="f.pick === DETAIL_PICK_DIRECTORY ? '选择目录' : '选择文件'"
+                :disabled="fieldDisabled(f)"
+                @click="onPick(f)"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              </button>
+            </div>
             </div>
           </template>
         </div>
       </template>
     </div>
+
+    <!-- 结构化子对象（widget = form）的编辑承载：递归复用本渲染器，保存回写父字段键 -->
+    <Teleport to="body">
+      <BaseModal v-if="subField" :visible="true" panel-class="sub-form-dialog" @close="closeSubForm">
+        <DetailForm
+          :definition="subDefinitionOf(subField)"
+          :node="null"
+          :values="subValues"
+          :capabilities="EMPTY_CAPABILITIES"
+          @save="onSubSave"
+          @cancel="closeSubForm"
+        />
+      </BaseModal>
+    </Teleport>
   </DetailShell>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import DetailShell from './DetailShell.vue'
+import BaseModal from '@/components/common/BaseModal.vue'
+import { pickNative } from '@/services/nativePick'
 import {
   detailPresetFieldOptions,
   detailPresetFieldSuggestions,
   detailPresetOf,
   detailPresetPatch,
+  evalDetailCondition,
+  DETAIL_PICK_DIRECTORY,
+  type DetailPick,
 } from '@/schemas/vdfs-form'
 import {
   widgetFromEdit,
@@ -269,29 +325,99 @@ function valueOf(key: string): unknown {
   return form[key]
 }
 
-function looseEq(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (a == null || b == null) return a == null && b == null
-  try {
-    return JSON.stringify(a) === JSON.stringify(b)
-  } catch {
-    return false
-  }
-}
-
+/** 条件求值：作用域 = 本表单的字段模型（+ 机制键 `is_existing` / `is_default` / `cap.*`） */
 function evalCond(c: DetailCondition | null | undefined): boolean {
-  if (!c) return true
-  if (c.all?.length) return c.all.every(evalCond)
-  const v = valueOf(c.key)
-  if (c.equals !== undefined && !looseEq(v, c.equals)) return false
-  if (c.not_equals !== undefined && looseEq(v, c.not_equals)) return false
-  if (c.truthy !== undefined && Boolean(v) !== c.truthy) return false
-  return true
+  return evalDetailCondition(c, valueOf)
 }
 
 /** 字段条件显隐（visible_when 不满足时整行不渲染） */
 function fieldVisible(f: DetailField): boolean {
   return evalCond(f.visible_when)
+}
+
+/**
+ * 字段是否**禁用**（`disabled_when` 成立才禁用；缺省 = 不禁用）。
+ *
+ * 与 `visible_when` 的分工：隐藏 = 这一项与当前场景无关；禁用 = 这一项存在、
+ * 但此刻不能改（原因写在 `description` 里）。
+ *
+ * 判空是必须的，理由与动作侧 `actionDisabled` 逐字相同：`evalCond` 对空条件返回
+ * `true`（那是为 `when` / `visible_when` 的「缺省即显示」服务的），
+ * 写成 `!evalCond(...)` 会把「无条件」与「条件成立」两种相反情形都解释成不禁用。
+ */
+function fieldDisabled(f: DetailField): boolean {
+  return f.disabled_when ? evalCond(f.disabled_when) : false
+}
+
+// ==================== 机制原生取值原语（DetailField.pick） ====================
+//
+// 后端唤不起原生对话框，故闭集（DETAIL_PICKS）里这几个取值由前端实现：
+// 先取值、写入本字段，再由调用方按自己的绑定提交。
+async function onPick(f: DetailField) {
+  const picked = await pickNative(f.pick as DetailPick | undefined)
+  if (picked != null) form[f.key] = picked
+}
+
+// ==================== 结构化子对象（widget = form） ====================
+//
+// 子对象仍是**本表单模型的一个键**：子表单保存时把整份字段值回写到 `form[key]`，
+// 随外层一次提交——不产生第二个写入入口。
+const EMPTY_CAPABILITIES: Record<string, boolean> = { mutable: false, test_connection: false }
+
+/** 子表单固定的两个动作（子定义未声明时补上，声明了则以子定义为准） */
+const SUB_FORM_ACTIONS: DetailAction[] = [
+  { id: 'cancel', label: '取消', style: 'default' },
+  { id: 'save', label: '确定', style: 'primary' },
+]
+
+const subField = ref<DetailField | null>(null)
+/** 打开子表单时**定格**的子对象快照：props 恒等 → 不触发子表单的重置门闩 */
+const subValues = ref<Record<string, unknown>>({})
+
+function subLabelOf(f: DetailField, key: string): string {
+  for (const sec of f.form?.sections ?? []) {
+    const hit = sec.fields.find((x) => x.key === key)
+    if (hit) return hit.label
+  }
+  return key
+}
+
+/** 子对象摘要（一行；避免把整棵子树摊进父表单） */
+function subSummary(f: DetailField): string {
+  const v = form[f.key]
+  if (!v || typeof v !== 'object') return '未配置'
+  const entries = Object.entries(v as Record<string, unknown>).filter(
+    ([, val]) => val !== '' && val !== null && val !== undefined
+  )
+  if (!entries.length) return '未配置'
+  return entries.map(([k, val]) => `${subLabelOf(f, k)}=${String(val)}`).join('，')
+}
+
+/** 子定义：补 `binding` 兜底、标题回落、以及缺省的两个动作 */
+function subDefinitionOf(f: DetailField): DetailDefinition {
+  const def: DetailDefinition = f.form ?? { binding: 'option', sections: [] }
+  const declared = new Set((def.actions ?? []).map((a) => a.id))
+  return {
+    ...def,
+    binding: def.binding || 'option',
+    title_fallback: def.title_fallback || f.label,
+    actions: [...(def.actions ?? []), ...SUB_FORM_ACTIONS.filter((a) => !declared.has(a.id))],
+  }
+}
+
+function openSubForm(f: DetailField) {
+  const cur = form[f.key]
+  subValues.value = cur && typeof cur === 'object' ? { ...(cur as Record<string, unknown>) } : {}
+  subField.value = f
+}
+
+function closeSubForm() {
+  subField.value = null
+}
+
+function onSubSave(values: Record<string, unknown>) {
+  if (subField.value) form[subField.value.key] = values
+  subField.value = null
 }
 
 // ==================== widget 查表（呈现与编解码的唯一来源） ====================
@@ -787,6 +913,28 @@ watch(
   align-items: center;
 }
 .input-row input { flex: 1; min-width: 0; }
+
+/* 结构化子对象（widget = form）：一行摘要 + 打开入口 */
+.sub-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* 子表单弹窗外框：底色 / 圆角 / 阴影 / 层级由 BaseModal 提供，这里只写尺寸 */
+.sub-form-dialog {
+  width: 100%;
+  max-width: 32rem;
+  height: min(34rem, 84vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 
 .icon-btn {
   display: flex;

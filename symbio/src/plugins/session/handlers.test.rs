@@ -15,14 +15,24 @@
 //!
 //! 是**搬移**不是重写：契约没变，只是入口从专用路由换成了节点动作。
 //!
-//! ## 留在这里的两件事
+//! ## 会话 metadata 的写入：从「两条路径一致性」到「一条路径」
 //!
-//! - 会话 metadata 的**两条写入路径**（`session/update` 路由 vs `vdfs/write`）
-//!   必须产出逐字相同的 metadata；
-//! - 已退役的路由**不得被加回来**。
+//! 这里曾有 `session_update_and_vdfs_write_agree_on_metadata`，锁的是
+//! `session/update` 路由与 `vdfs/write` 产出**逐字相同**的 metadata。那条路由已于
+//! 2026-09-23 退役（CLI 改走 `vdfs/write`），于是「一致性」不再是一个可断言的性质
+//! ——只剩一条路径，分歧在结构上写不出来。契约本身没有消失，搬到了
+//! `plugin/vdfs_provider.test.rs`：
+//!
+//! | 原用例锁定的契约 | 现位置 |
+//! |---|---|
+//! | `metadata` 是**浅合并**（未提到的键保持不变） | `write_merges_metadata_shallowly` |
+//! | 显式 `title` 写进 `metadata.title` | 同上 |
+//!
+//! ## 留在这里的一件事
+//!
+//! 已退役的路由**不得被加回来**。
 
 use super::super::plugin::SessionPlugin;
-use super::super::types::Session;
 use crate::symbio_core::{InvokeRequest, SimpleRequest};
 use serde_json::json;
 use std::sync::Arc;
@@ -46,72 +56,6 @@ fn ctx_with(payload: serde_json::Value) -> Arc<dyn InvokeRequest> {
         .unwrap()
         .insert("payload".to_string(), Arc::new(payload));
     Arc::new(req)
-}
-
-// ==================== 会话 metadata：两条路径的一致性 ====================
-//
-// 会话 metadata 有**两个**写入入口：
-//   · `session/update` 路由 —— 只有 CLI 用（它需要客户端指定会话 id）
-//   · `vdfs/write(<根>/session/<id>)` —— 前端用
-//
-// 两者曾经各写一遍浅合并。分叉的后果是"前端改名生效、CLI 改名不生效"这类**只在
-// 一条路径上出现**的行为差异，而没有任何测试会覆盖两条路径的**一致性**——下面
-// 这例就是那条曾经缺失的测试。实现侧已收敛到 `Session::merge_metadata_object`。
-
-/// 种子会话（带上指定的初始 metadata）
-async fn seed_session(p: &SessionPlugin, sid: &str, metadata: serde_json::Value) {
-    let store = p.get_store().await.expect("存储不可用");
-    let mut s = Session::new(sid);
-    s.metadata = metadata;
-    store.save_session(&s).await.expect("种子会话落盘失败");
-}
-
-/// 读回某会话的 metadata（**从存储读**，不是读内存——落盘才算数）
-async fn load_meta(p: &SessionPlugin, sid: &str) -> serde_json::Value {
-    let store = p.get_store().await.expect("存储不可用");
-    store.load_session(sid).await.expect("读会话失败").metadata
-}
-
-#[tokio::test]
-async fn session_update_and_vdfs_write_agree_on_metadata() {
-    use crate::symbio_core::vdfs_provider::VdfsProvider;
-
-    let initial = json!({ "workdir": "/old", "agent_id": "keep-me" });
-    let incoming = json!({ "metadata": { "workdir": "/new" }, "title": "改名" });
-
-    // ── 路径 A：`session/update` 路由（CLI）──
-    let (_d1, p1) = fixture();
-    seed_session(&p1, "s1", initial.clone()).await;
-    p1.invoke_update(ctx_with(json!({
-        "session_id": "s1",
-        "metadata": incoming["metadata"].clone(),
-        "title": incoming["title"].clone(),
-    })))
-    .await
-    .expect("session/update 失败");
-    let after_route = load_meta(&p1, "s1").await;
-
-    // ── 路径 B：VDFS `write`（前端）──
-    let (_d2, p2) = fixture();
-    seed_session(&p2, "s1", initial.clone()).await;
-    p2.write(
-        &crate::symbio_core::vdfs::VdfsContext::empty(),
-        "s1",
-        &crate::symbio_core::vdfs::VdfsContent::text("", incoming.to_string()),
-    )
-    .await
-    .expect("vdfs/write 失败");
-    let after_vdfs = load_meta(&p2, "s1").await;
-
-    // 1) 两条路径产出**逐字相同**的 metadata
-    assert_eq!(
-        after_route, after_vdfs,
-        "session/update 与 vdfs/write 必须产出相同的 metadata"
-    );
-    // 2) 并且确实是**浅合并**：没提到的键保持不变
-    assert_eq!(after_route["agent_id"], json!("keep-me"));
-    assert_eq!(after_route["workdir"], json!("/new"));
-    assert_eq!(after_route["title"], json!("改名"));
 }
 
 // ==================== 退役路由：不得被加回来 ====================
@@ -149,7 +93,8 @@ async fn session_clear_route_is_retired() {
 }
 
 /// 已退役的会话路由**不得被加回来**：2026-09-18 迁往 VDFS 的五条 + 2026-09-23 的
-/// `get_messages`（存在性校验改走进程内 VDFS 纯接口 `get_vfs_provider` + `stat`）。
+/// `get_messages`（存在性校验改走进程内 VDFS 纯接口 `get_vfs_provider` + `stat`）
+/// 与 `update`（会话 metadata 写入收敛为 `vdfs/write`）。
 ///
 /// 每条路径现在都有一个 VDFS 入口（映射见 `docs/legacy-route-migration.md`）。
 /// 与 `session/clear` 同理：退役不会让任何既有测试变红，因此需要一条**正向**的
@@ -174,6 +119,11 @@ async fn migrated_session_routes_stay_retired() {
         (
             "get_messages",
             "进程内 vdfs/stat（get_vfs_provider + stat(<挂载名>/<sid>)）",
+        ),
+        // 客户端指定会话 id 由「具名目标 + create」承担，不再需要专用路由
+        (
+            "update",
+            "vdfs/write(<根>/session/<id>, {create:true, metadata})",
         ),
     ] {
         let ctx = ctx_with(json!({ "session_id": "s1" }));

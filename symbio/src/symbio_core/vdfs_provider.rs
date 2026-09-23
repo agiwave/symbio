@@ -1256,7 +1256,18 @@ pub trait VdfsProvider: Send + Sync + 'static {
     /// **根**（挂载点）这一层的元数据，由使用方在合成挂载点节点时回填。
     /// 子树内更深层的目录在 [`Self::list`] / [`Self::stat`] 返回的节点上各自声明
     /// [`VdfsNode::new_types`]。
-    fn root_new_types(&self) -> Vec<VdfsNewType> {
+    ///
+    /// ## 为什么它是 `async`，而 `root_access` / `root_status` / `root_hidden` 不是
+    ///
+    /// 那三个是**静态属性**（访问位、状态词、隐藏位），provider 自己就知道。
+    /// 本方法却可能要给新类型附上 [`VdfsNewType::schema`]——而 schema 可能来自
+    /// **运行期收集**：会话的「新建表单」就是它的选项定义，要广播各插件汇流
+    /// （agent 的候选、model 的候选），那条收集链路是 async 的。
+    ///
+    /// 把「静态属性」与「可能需收集的自述」分成两种同步性，好过让需要收集的
+    /// provider 去搞一份会过期的缓存——缓存一旦与来源漂移，表现是「新建页少了
+    /// 几个选项」这种静默错误。
+    async fn root_new_types(&self) -> Vec<VdfsNewType> {
         Vec::new()
     }
 
@@ -1661,8 +1672,8 @@ mod tests {
 
     /// 自描述全部有缺省：`impl VdfsProvider for P {}` 即可编译——
     /// provider **不需要**提供任何目录名（目录名是使用方的事）
-    #[test]
-    fn self_description_defaults_need_no_dir_name() {
+    #[tokio::test]
+    async fn self_description_defaults_need_no_dir_name() {
         struct P;
         #[async_trait]
         impl VdfsProvider for P {}
@@ -1673,7 +1684,7 @@ mod tests {
         assert_eq!(P.order(), 100);
         assert_eq!(P.root_access(), VdfsAccess::LIST);
         assert_eq!(P.root_status(), VDFS_STATUS_ACTIVE);
-        assert!(P.root_new_types().is_empty(), "缺省根下不可新建");
+        assert!(P.root_new_types().await.is_empty(), "缺省根下不可新建");
     }
 
     /// 未实现的操作返回 `NotImplemented`（使用方据此隐藏入口）

@@ -149,7 +149,9 @@ $ node scripts/gate.mjs --only=docs,facts         → 14 / 15，失败项 = gen-
 
 ### F-7【P2·清理项】死导出与吞错告警
 
-- `node scripts/schema-audit.mjs`：后端 `SchemaResponse`、`OPTION_PICK_FILE`（已承认保留）、
+- `node scripts/schema-audit.mjs`：后端 `SchemaResponse`、`OPTION_PICK_FILE`（已承认保留；
+  该常量随会话选项机制于 2026-09-23 删除，同语义的项现在是 `detail.rs::DETAIL_PICK_FILE`，
+  且已由 `protocol-mirror-audit` C 组看守）、
   前端 `vdfs.ts` 的 `VdfsAccess` / `VdfsActionFile` / `VdfsValidationError` / `SessionRoute` /
   `OUTCOME_*`、`message_prompt.ts` 4 个类型等，均为**无人引用的死导出**。
 - `node scripts/grep-audit.mjs`：27 条 `let _ = ….await` 吞错 WARN（多数是有意为之，例如

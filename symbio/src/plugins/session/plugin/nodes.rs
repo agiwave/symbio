@@ -2,7 +2,8 @@
 //!
 //! 三组**纯函数**，都不持有 `self`：
 //! - **路径模型**：[`VdfsSessionPath`] / [`parse_session_path`] / [`SEG_MESSAGES`] /
-//!   [`message_dir_path`] / [`message_path`] / [`internal_dirs`] / [`title_from_new_path`]
+//!   [`message_dir_path`] / [`message_path`] / [`internal_dirs`] /
+//!   [`session_id_from_new_path`]
 //! - **节点构造**：[`session_node`] / [`message_node`] / [`transcript_window`] /
 //!   [`window_params`] / `MAX_PARENT_STEPS` / `cursor_id`
 //! - **消息投影**：`message_label` /
@@ -592,20 +593,29 @@ pub(crate) fn session_content(
     Ok(vdfs::VdfsContent::text("", text).with_mime("application/json"))
 }
 
-/// 新建会话的标题：路径名去掉扩展名（`<标题>.session` → `<标题>`）。
+/// 具名新建时，**地址末段即会话 id**；写在挂载根（无名目标）返回 `None`。
 ///
-/// 新建时使用方给出的是**标题**而非会话 id——id 是存储细节，由 provider 生成
-/// （见 [`vdfs::VdfsProvider::write`] 的 `create` 分支），不属于使用方的知识。
-pub(crate) fn title_from_new_path(path: &str) -> String {
-    let base = path.rsplit('/').next().unwrap_or(path);
-    let stem = base
-        .strip_suffix(&format!(".{}", vdfs::VDFS_EXT_SESSION))
-        .unwrap_or(base)
-        .trim();
-    if stem.is_empty() {
-        "新对话".to_string()
+/// 「**有名字**时 id 来自地址（使用方给），**没名字**时 id 由 provider 生成」是
+/// VDFS 的**通用**规则，两处规范同义：`providers/vdfs_service/entry.rs::id_of`
+/// 的注释，以及 [`vdfs::VdfsProvider::write`] 的「两种目标形态」表
+/// （具名节点 + 不存在 ⇒ **就地创建**；只有目录自身才「名字由 provider 生成」）。
+///
+/// 会话曾经是唯一例外：无论有没有名字都自己生成 id，把名字只当标题，于是
+/// 「写到的地址」与「建出来的地址」是两个地方。2026-09-23 随 `session/update`
+/// 退役一并对齐——CLI 需要「客户端指定会话 id」，而地址就是那个指定处。
+///
+/// ## 为什么不剥 `.session` 后缀
+///
+/// 会话寻址里扩展名**从来不是**地址的一部分，也**从来不被剥除**：
+/// `Session(id)` 直接把末段当 id 用（`parse_session_path` → `session_of`）。
+/// 只在这里剥会造出「同一个 id 有两种写法、其中一种只在新建时成立」的怪状态，
+/// 比不剥更糟。要统一剥除是另一件事——`parse_session_path` 全链一起改，不在本轮。
+pub(crate) fn session_id_from_new_path(path: &str) -> Option<String> {
+    let base = path.rsplit('/').next().unwrap_or(path).trim();
+    if base.is_empty() {
+        None
     } else {
-        stem.to_string()
+        Some(base.to_string())
     }
 }
 

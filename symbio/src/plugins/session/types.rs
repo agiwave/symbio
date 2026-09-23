@@ -152,20 +152,23 @@ impl Session {
 
     /// 把使用方给的 JSON 对象浅合并进 `metadata`。
     ///
-    /// 只认两个字段（其余字段的取舍由调用方决定——两条路径的报错类型不同）：
+    /// 只认两个字段（其余字段的取舍由调用方决定）：
     /// - `metadata`：对象 ⇒ 逐键浅合并（未提到的键保持不变）；**不是对象**（或
     ///   `self.metadata` 不是对象）⇒ 整体替换。这条兜底与旧实现逐字一致；
     /// - `title`：字符串 ⇒ 写进 `metadata.title`。**不做空串判定**——空标题是
     ///   "显式清空标题"还是"忽略"由使用方自己决定，本方法只负责忠实写入。
-    ///   （新建会话时"路径名 vs 显式 title"的优先级是另一件事，在 `write` 里。）
     ///
-    /// ## 为什么它是一个方法，而不是两处各写一遍
+    /// ## 为什么它是一个方法，而不是就地写几行
     ///
-    /// 会话 metadata 有**两个**写入入口：`session/update` 路由（CLI 用）与
+    /// 会话 metadata 曾经有**两个**写入入口：`session/update` 路由（CLI 用）与
     /// `VdfsProvider::write`（前端用）。同一份浅合并语义写两遍，迟早分叉——
     /// 而分叉的后果是"前端改名生效、CLI 改名不生效"这类**只在一条路径上出现**
     /// 的行为差异，且没有任何测试会覆盖两条路径的**一致性**。
-    /// 收敛成一处后，两条路径的语义在结构上不可能不同。
+    ///
+    /// 收敛成一处之后，那条路由又于 2026-09-23 整体退役（VDFS 的
+    /// 「具名目标 + `create` ⇒ 就地创建」覆盖了它唯一的独有能力），于是本方法
+    /// 只剩 `VdfsProvider::write` 一个调用方。**保留它作为方法的理由不变**：
+    /// 语义要有一个可被指向、可被测试的名字，而不是散在 `write` 的某个分支里。
     pub fn merge_metadata_object(&mut self, incoming: &serde_json::Value) {
         if let Some(new_meta) = incoming.get("metadata") {
             match (self.metadata.as_object_mut(), new_meta.as_object()) {

@@ -213,9 +213,10 @@ console.log()
 //
 // 该词表**曾经**把「以错误结束」从 `error` 改名为 `failed`（理由见
 // `VDFS_STATUS_FAILED` 的文档：与消息层 `MessageStatus::Failed` 同词），而
-// `symbio_core::schemas::options.rs` 里留了一枚 `OPTION_STATUS_ERROR = "error"`
-// 的化石、`mcp` / `skill` / `model` 三个插件各自手写 `"unknown"` / `"active"` /
-// `"disabled"`——共 6 处。三处都**没有任何测试会因此变红**，故立此规则。
+// `symbio_core::schemas::options.rs`（**该文件已于 2026-09-23 随会话选项 schema 化
+// 删除**）里留了一枚 `OPTION_STATUS_ERROR = "error"` 的化石、`mcp` / `skill` /
+// `model` 三个插件各自手写 `"unknown"` / `"active"` / `"disabled"`——共 6 处。
+// 三处都**没有任何测试会因此变红**，故立此规则。
 //
 // 判据（只认两处无歧义的位置，宁可漏报）：
 //   · `.status = "<字面量>"`，含 `if` / `match` 分支里写字面量的形态；

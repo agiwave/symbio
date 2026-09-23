@@ -11,7 +11,7 @@
     `<id>/工作目录[/<rel>]`，与子会话并列，见 docs/design/vdfs.md）；
   - node 无 id（机制「新建」态 = **草稿节点**，见 `useVdfs.startNew`）：新建会话
     引导——输入区与现有会话完全一致（`ChatComposer` 草稿态：目录/Agent/模型/模式/
-    风险等级/心跳均可选，由级联选项机制下发，暂存于机制内部的 metadata 缓冲，
+    风险等级/心跳均可选，由会话选项栏（后端随节点下发定义）渲染，暂存于机制内部的 metadata 缓冲，
     发送首条消息时经 `createSessionWithFirstMessage` **一次 `vdfs/write`** 创建并
     落库——id 由后端生成）。
 
@@ -47,6 +47,7 @@
         v-model="draftText"
         v-model:attached-images="draftImages"
         :is-loading="creating"
+        :definition="draftDefinition"
         autofocus
         class="create-chat-input"
         @submit="onSendFirst"
@@ -57,7 +58,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { isVdfsDraft, type DetailAction, type VdfsNode } from '@/schemas/vdfs'
+import { isVdfsDraft, type DetailAction, type DetailDefinition, type VdfsNode } from '@/schemas/vdfs'
 import type { ImageAttachment } from '@/types'
 import { useSessionsStore } from '@/stores/sessions'
 import { useToast } from '@/composables/useToast'
@@ -101,6 +102,18 @@ const creating = ref(false)
 const hasId = computed(() => !isVdfsDraft(props.node))
 
 /**
+ * 草稿态的选项定义 = 新建类型自带的 `schema`。
+ *
+ * 它是「点新建与选中一项进入同一详情页」这条约定在新形态下的落点：草稿节点由
+ * `useVdfs.draftNodeOf` 按 `new_types[].schema` 构造，与会话节点上的 `schema`
+ * **逐字节相同**（同一个构造函数产出），因此草稿选项栏与真实会话选项栏渲染的是
+ * 同一份定义，只差「值还没有」。
+ */
+const draftDefinition = computed<DetailDefinition | null>(
+  () => (props.node?.schema as DetailDefinition | undefined) ?? null
+)
+
+/**
  * 新建态（懒创建）草稿：输入文本 + 选项行的 metadata 缓冲。
  * 发送首条消息时经 createSessionWithFirstMessage(metadataPatch, 首条消息)
  * 原子地「建会话 + 排队首条消息」（队列项的 id 必然等于新建出来的 id）。
@@ -133,7 +146,7 @@ watch(
  *
  * 机制约定（资源生命周期联动）：
  * - 新建态不创建任何节点、清单不更新；
- * - 发送首条消息才真正建会话（草稿选项行的 metadata 补丁由级联选项机制通用
+ * - 发送首条消息才真正建会话（草稿选项行的 metadata 补丁由会话选项栏通用
  *   缓冲产出；workdir 缺省回退最近使用目录由 store 兜底），同时把首条消息排进
  *   邮箱——**建会话与排队是一个原子操作**（`createSessionWithFirstMessage`），
  *   否则「队列项的 id === 新建出来的 id」这条不变式就得由调用方用局部变量维持；

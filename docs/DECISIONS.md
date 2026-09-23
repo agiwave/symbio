@@ -923,9 +923,14 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
      共 **7 张**（2026-09-20）：`CHAT_ROLES` / `MESSAGE_TYPES` /
      `MESSAGE_STATUSES` / `RESUME_ACTIONS` / `OPTION_TYPES` /
      `SESSION_RISK_LEVELS` / `OPTION_PICKS`。
+     > **后续修订（2026-09-23）**：`OPTION_TYPES` / `OPTION_PICKS` 随会话选项机制
+     > 整体下线而撤除，同时 S1 新增 `DETAIL_PICKS`（详情方言的机制原生取值原语，
+     > 即原来的 `OPTION_PICK_*` 换了家）。当前 **6 张**——数字以
+     > `protocol-mirror-audit.mjs` 的 `ENUM_SETS` 长度为准，这里不追着改。
      ⚠️ 只认第一种写法会让第二种长期无人看守：`OPTION_PICK_*` 当初被 Rust 侧的
      `#[allow(dead_code)]` 登记成「消费方在前端」，而前端那份是**独立硬编码**的
      第二份抄本（无引用关系）——没有任何守卫比对两边。
+     （该教训的产物 `DETAIL_PICKS` 登记至今仍在服役；`OPTION_*` 那套已删。）
      ⚠️ 初版把 `snake_case` **硬编码**成了检查项，于是
      `rename_all = "lowercase"` 的 `RiskLevel` 虽在前端有镜像却长期无人看守——
      「枚举类型对了、属性取值没覆盖到」是**守卫自己的漏**，不是登记的漏。
@@ -986,11 +991,14 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
   `ChatMessage`），随后纳入**详情表单宿主方言**（`detail.rs` ↔ `vdfs-form.ts`，9 对：
   `DetailCondition` / `DetailOption` / `DetailField`(17 字段) / `DetailSection` /
   `DetailPreset` / `DetailPresetSpec` / `DetailBadge` / `DetailAction` /
-  `DetailDefinition`）与**级联选项机制**（`options.rs` ↔ `options.ts`，5 对：
-  `OptionDisplay` / `OptionAction` / `OptionNode`(16 字段) / `OptionsRequest` /
-  `OptionsResponse`），共 **23 对**。这两批是"前端把整套形状抄了一遍"的典型——
-  `DetailField` 一个字段不落、`OptionNode` 一个字段不落。反过来，前端只挑几个字段
+  `DetailDefinition`），共 **18 对**。这批是"前端把整套形状抄了一遍"的典型——
+  `DetailField` 一个字段不落。反过来，前端只挑几个字段
   用的响应结构**不登记**：它本就该按需取，多抄反而不必，塞进来只制造噪音。
+  > **后续修订（2026-09-23）**：D 组曾再纳入**级联选项机制** 5 对
+  > （`OptionDisplay` / `OptionAction` / `OptionNode` / `OptionsRequest` /
+  > `OptionsResponse`，共 23 对）。那套机制随会话选项 schema 化整体下线，
+  > 5 对登记与对应夹具一并撤除 ⇒ 回到 **18 对**。判据没变：登记的永远是
+  > 「前端逐字段镜像了它」的形状，机制没了，形状也就没了。
 - **类型映射仍无守卫**（`Option<u64>` ↔ `number` 这类）。它需要一张类型映射表，且
   泛型 / 嵌套会失控；收益也低于字段名——改类型通常伴随改字段名，那已经能被 D 组挡住。
 - **G3 关闭**，不进入实施清单。`Appearance.vue` / `About.vue` 的规模是**呈现层
@@ -1381,6 +1389,95 @@ core 里的契约，因为 A 看不见 B。
 - `CapabilityVisitor::resolve_name` 撤回；解析逻辑内联进
   `session/tool_executor.rs`，只调用 core 的**纯函数** `tool_name::resolve`。
 - 批次 J 新增 core 内容**仅** `tool_name` 一处。
+
+---
+
+## ADR-024: 会话选项并入**详情方言**——「选项行」是配置表单的字段，不是独立协议
+
+**状态**：已接受（2026-09-23 实施完成，门禁全绿）。
+
+**背景**：
+
+「新增一类资源、前端零改动」靠一条统一链路维持：后端在列表 / 详情节点上挂
+`schema`（`DetailDefinition`），前端用唯一渲染器 `DetailForm` 解释它。
+model / agent / skill / mcp / setting 分区都走这条。
+
+会话是**唯一例外**：它自带一套 `OptionNode` 协议——定义走专用端点
+`session/options/list`（`parent` 懒加载）、当前值由贡献方在节点上算好
+`value` / `value_label`、写回走专用端点 `session/update`（`action.payload` +
+`bind` 点路径）、跨插件汇聚另走 `OptionVisitor` + `traverse(available_options)`，
+前端另有一套 `useSessionOptions` + `ChatOptionBar` + `OptionFormDialog` +
+`services/options.ts` + `schemas/options.ts`。
+
+两套机制描述的是**同一件事**：一组「有当前值、可改、改完要落库」的字段。
+
+**决策**：
+
+1. **选项 = 会话配置表单的字段**；选项栏 = `DetailDefinition` 的**第二种渲染形态**
+   （与 `DetailForm` / `DetailShell` 并列），不是新协议。
+2. **定义随节点下发**：已落盘会话挂 `node.schema`，草稿态挂 `new_types[].schema`
+   （同一构造、两处投递）。不再有「取定义」的专用端点。
+3. **当前值随节点**：`node.attributes.metadata`（线上是摊平后的顶层 `metadata`，
+   见下「踩坑」）。
+4. **写回走 `vdfs/write(<根>/session/<id>, {"metadata": …})`**——
+   `VdfsProvider::write` 的覆盖分支本就是 metadata 浅合并，不需要第二条写入路径。
+5. 给共享方言补四件事，**都通用、非选项专用**：`DetailField.icon` /
+   `DetailField.disabled_when`（文档已自认的不对称）/ `DetailField.pick`
+   （原生取值闭集）/ `DetailField.form` + `widget="form"`（结构化子表单）。
+6. **旧机制整体下线**：`OPTIONS_LIST` / `SESSION_STATE_ENDPOINT` / `OPTION_TYPES` /
+   `OPTION_PICKS` / `schemas/options.rs` / `options/list` 路由 / `session/update`
+   路由与 `schemas/session/session_update.rs`。`OptionVisitor` + `traverse` **保留**
+   （汇聚机制不变），只把产物从 `OptionNode` 换成 `(order, DetailField)`。
+
+**理由**：
+
+- 会话选项与其它资源的「新建表单」在语义上**没有区别**（字段 + 默认值 + 候选 +
+  条件可用性）。承认这一点后两条链路可以合成一条，收益是**前端零业务字段名、
+  零业务枚举**。独立协议让每个字段名都要在前后端各写一遍，而没有任何守卫能发现
+  这种漂移（ADR-019 记的正是这类「手工镜像」的代价）。
+- 四件方言补充都是**通用能力**，不是为选项开的口子：任何 provider 的详情表单都用
+  得上 `icon` / `disabled_when` / `pick` / `form`。把它们加进共享方言，比让选项
+  单开一套私有字段更不容易腐坏。
+- **`session/update` 的退役不需要扩协议**：`VdfsProvider::write` 的文档与
+  `vdfs_service::entry::id_of` 的注释**早已**写明「**具名节点** + 不存在 ⇒ 就地创建，
+  id 来自地址；只有**目录自身**才由 provider 生成名字」。会话 provider 是**唯一**
+  违反者（无论有无名字都自己生成 id、把名字只当标题）。让它遵守既有规则即可，
+  `--session <ID>` 语义与 CLI 会话 id 格式都不用动。
+  > 这里差点做错：第一版方案是「给 `vdfs/write` 的 `create` 加 `id` 字段」——
+  > 那是**真·扩协议**（与「id 是存储细节」冲突，且会让 8 个按固定 id 读落盘会话的
+  > e2e 用例失效）。**给通用机制加字段之前，先看特例是不是在违反通用机制已有的
+  > 成文规则。**
+
+**代价（逐条核实，不粉饰）**：
+
+- 级联选项从「任意深度」收窄为**一层**（现存实例全是一层）。
+- `invoke` 型命令选项改由 `DetailAction` 承担（现存实例 0 个）。
+- 懒加载取消：定义随节点全量下发。选项只有 6 行，量级无虞；将来字段数上量时
+  这条要重新评估。
+- `order` 号段留在后端收集层、不下发（只用于排序，不是数据）。
+- 遗留：`/session <拼错的 ID>` 仍会**静默创建**一个空会话——`session/update`
+  时代同样如此，非本次引入。
+
+**后果**：
+
+- 前端删除 `useSessionOptions` / `services/options.ts` / `schemas/options.ts` /
+  `registry/optionIcons.ts`；实现收敛为 `useSessionOptionBar.ts` +
+  `ChatOptionBar.vue` + `OptionFormDialog.vue`。
+- `protocol-mirror-audit`：C 组撤 `OPTION_TYPES` / `OPTION_PICKS`，D 组撤选项 5 对
+  （23 → 18 对）；S1 新增 `DETAIL_PICKS`。
+- CLI `ensure_session` 改为一次 `vdfs/write`（一次调用即 upsert），启动期经
+  `vdfs/root` 取回根地址；子智能体登记子会话改走进程内 VDFS 纯接口，
+  不再绕路由。
+- `session` 的静态路由臂从 4 条降到 3 条（`chat/send` · `chat/abort` · `stream`）。
+
+**踩坑（写下来免得下次再踩）**：`VdfsNode.attributes` 是 `#[serde(flatten)]` 的，
+线上（`vdfs/list` / `vdfs/stat` JSON、前端 `services/session.ts`）看到的是**摊平**
+后的节点——`metadata` 是**顶层键**，没有 `attributes` 这一层。Rust 侧才读
+`attributes`。写断言读 `node.attributes.metadata` 会得到 `undefined`。
+
+**详细记录**：取舍与实施注记见
+[`design/session-options-unification.md`](./design/session-options-unification.md)；
+现行规范见 `symbio/src/plugins/session/docs/session-options.md`。
 
 ---
 

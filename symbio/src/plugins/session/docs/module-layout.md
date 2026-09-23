@@ -106,7 +106,7 @@
 | 1 | `Plugin` trait 实现 | `route` 分发 / `traverse`（能力收集）/ 生命周期 |
 | 2 | `VdfsProvider` 实现 | 会话节点树：`list` / `stat` / `read` / `write` / `delete` / `watch` |
 | 3 | VDFS 节点构造辅助 | `session_node` / `parse_session_path` / `VdfsSessionPath` / `internal_dirs` / `message_node` / `message_label` / `ordered` / `overlay_live` / `transcript_window` / `cursor_id` / …（**25 个函数**） |
-| 4 | 会话实体杂务 | `now_ms` / `title_from_new_path` / `config_definition` |
+| 4 | 会话实体杂务 | `now_ms` / `session_id_from_new_path` / `config_definition` |
 
 （`cleanup_crashed_sessions` 已删除：持久层写入不变量 `ensure_durable_states`
 拒绝瞬态状态落盘后，磁盘上只存在终态，崩溃恢复不再需要修复器。）
@@ -281,7 +281,7 @@ orchestrator.test.rs      测试（S1 已外置；5 例全部测根文件的守�
 
 | 项 | 原计划 | 实际落位 | 理由 |
 |---|---|---|---|
-| `title_from_new_path` | `entities.rs` | `nodes.rs` | 它是**新建语义**（`new_types` → 路径名作标题），属 VDFS 路径模型 |
+| `session_id_from_new_path` | `entities.rs` | `nodes.rs` | 它是**新建语义**（具名目标的地址末段即会话 id），属 VDFS 路径模型 |
 | `config_definition` | `entities.rs` | `plugin.rs` | 配置面，紧邻其唯一调用点 `ConfigFile::new(dir, "会话设置", …)` |
 | `now_ms` | `entities.rs` | `plugin.rs` | 通用工具，模块根是它的自然归宿 |
 | `entities.rs` | 新建 | **不建** | 三个条目彼此无关，凑成一个 70 行文件反而降低内聚 |

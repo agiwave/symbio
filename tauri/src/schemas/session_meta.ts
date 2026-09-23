@@ -15,10 +15,10 @@
  * ## 会话参数统一模型
  *
  * agent_id / provider_id / risk_level / mode / workdir 级别相同，统一走：
- * `session.metadata` 持久化（写入唯一经**级联选项机制**——
- * 会话页选项行选择 → `worker/session/update` 浅合并）
+ * `session.metadata` 持久化（写入唯一经**会话选项栏**——
+ * 会话页选项行选择 → `vdfs/write(<根>/session/<id>, {"metadata": …})` 浅合并）
  * + 后端各解析链按 metadata 回退取值。
- * 前端不持有任何业务字段名，详见 `symbio/src/plugins/session/docs/cascading-options-mechanism.md`。
+ * 前端不持有任何业务字段名，详见 `docs/design/session-options-unification.md`。
  */
 /**
  * 执行风险等级阈值（`metadata.risk_level`）。
@@ -70,7 +70,7 @@ export interface SessionMetadata {
  * 会话心跳任务配置
  *
  * 存储于 `Session.metadata.heartbeat`，由会话页「心跳任务」选项表单写入
- * （级联选项机制，`bind = metadata.heartbeat`）。
+ * （会话选项栏，`widget = "form"` 的字段 key = `heartbeat`）。
  * 后端 `SessionPlugin` 的后台调度器会按 interval_seconds 检测空闲并触发。
  */
 export interface SessionHeartbeatConfig {

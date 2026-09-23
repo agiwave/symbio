@@ -335,7 +335,7 @@ impl VdfsProvider for DirVdfs {
         VdfsAccess::LIST_TRAVERSE
     }
 
-    fn root_new_types(&self) -> Vec<VdfsNewType> {
+    async fn root_new_types(&self) -> Vec<VdfsNewType> {
         vec![VdfsNewType::new(VDFS_EXT_ZIP, format!("{}包", self.label))
             .with_description("导入整包（.zip）——整目录覆盖同名条目")
             .with_source(VDFS_NEW_SOURCE_FILE)]

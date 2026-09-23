@@ -424,7 +424,8 @@ source = file 的类型（整包导入）：名称来自文件名
     无法区分「新建 / 覆盖」；已补 `VdfsContent.create`（`#[serde(default, skip_serializing_if)]`
     + `with_create()`）+ `protocol.rs` 三处透传 + 单测。
   - **实时**：provider 持有 `broadcast::Sender<VdfsChange>`（变更源的持有者，**非轮询**），
-    `watch` spawn 转发任务、`unwatch` abort；变更点在 `session/update`（`invoke_update`）
+    `watch` spawn 转发任务、`unwatch` abort；变更点在 `vdfs/write` 的覆盖分支
+    （原 `session/update` 的 `invoke_update`，该路由已于 2026-09-23 退役）
     与 `delete_session_internal`。
   - **前端**：`VdfsView` 新增 `embedded` 装配形态（左栏由应用外壳承担，本页只出中栏 + 右栏）；
     `/vdfs/:mount?` 移入 `MainLayout` 子路由；首页 `/` 重定向到 `/vdfs/session`；

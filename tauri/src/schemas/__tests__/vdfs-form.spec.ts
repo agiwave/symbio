@@ -23,10 +23,12 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  compactFieldText,
   detailPresetFieldOptions,
   detailPresetFieldSuggestions,
   detailPresetOf,
   detailPresetPatch,
+  evalDetailCondition,
   mergeDetailActions,
 } from '../vdfs-form'
 import type { DetailAction, DetailField, DetailPreset, DetailPresetSpec } from '../vdfs'
@@ -208,5 +210,112 @@ describe('detailPresetPatch 字段补丁', () => {
   it('无规格 / 无命中预设 ⇒ 空补丁（不是崩，也不是全量写回）', () => {
     expect(detailPresetPatch(null, null, () => undefined, true)).toEqual({})
     expect(detailPresetPatch(s, null, () => undefined, true)).toEqual({})
+  })
+})
+
+// ==================== 条件求值 + 紧凑渲染形态取值规则 ====================
+//
+// 这两组规则是**共享的**：纵向表单（DetailForm）与紧凑选项栏（ChatOptionBar）
+// 都要判 `disabled_when`、都要把值显示成人能读的一句话。各写一份必然漂移，
+// 且漂移的表现是静默的（同一份定义在两种形态下给出不同答案），故在此直接钉住。
+
+describe('evalDetailCondition（作用域由调用方给）', () => {
+  const scopeOf = (scope: Record<string, unknown>) => (k: string) => scope[k]
+
+  it('无条件 ⇒ 成立（服务于 when / visible_when 的「缺省即显示」）', () => {
+    expect(evalDetailCondition(null, scopeOf({}))).toBe(true)
+    expect(evalDetailCondition(undefined, scopeOf({}))).toBe(true)
+    expect(evalDetailCondition({}, scopeOf({}))).toBe(true)
+  })
+
+  it('equals / not_equals / truthy 三条谓词', () => {
+    expect(evalDetailCondition({ key: 'a', equals: 1 }, scopeOf({ a: 1 }))).toBe(true)
+    expect(evalDetailCondition({ key: 'a', equals: 1 }, scopeOf({ a: 2 }))).toBe(false)
+    expect(evalDetailCondition({ key: 'a', not_equals: 0 }, scopeOf({ a: 2 }))).toBe(true)
+    expect(evalDetailCondition({ key: 'a', truthy: true }, scopeOf({ a: 0 }))).toBe(false)
+    expect(evalDetailCondition({ key: 'a', truthy: true }, scopeOf({ a: 3 }))).toBe(true)
+  })
+
+  it('all 是 AND，且递归求值', () => {
+    const c = { all: [{ key: 'a', truthy: true }, { key: 'b', equals: 'x' }] }
+    expect(evalDetailCondition(c, scopeOf({ a: 1, b: 'x' }))).toBe(true)
+    expect(evalDetailCondition(c, scopeOf({ a: 1, b: 'y' }))).toBe(false)
+    expect(evalDetailCondition(c, scopeOf({ a: 0, b: 'x' }))).toBe(false)
+  })
+
+  it('缺席的键按 undefined 求值：truthy 判 false、not_equals 判 true', () => {
+    // 这条是「草稿节点没有 message_count」那类场景的判据来源，两边差异必须显式
+    expect(evalDetailCondition({ key: 'missing', truthy: true }, scopeOf({}))).toBe(false)
+    expect(evalDetailCondition({ key: 'missing', not_equals: 0 }, scopeOf({}))).toBe(true)
+  })
+
+  it('equals 用 JSON 形状比较（数组 / 对象按内容判等）', () => {
+    expect(evalDetailCondition({ key: 'a', equals: ['x'] }, scopeOf({ a: ['x'] }))).toBe(true)
+    expect(evalDetailCondition({ key: 'a', equals: ['x'] }, scopeOf({ a: ['y'] }))).toBe(false)
+  })
+})
+
+describe('compactFieldText（选项栏按钮文本的唯一规则）', () => {
+  const select = (partial: Partial<DetailField>): DetailField => ({
+    key: 'k',
+    label: '字段名',
+    widget: 'select',
+    options: [
+      { value: 'a', label: '甲' },
+      { value: 'b', label: '乙' },
+    ],
+    ...partial,
+  })
+
+  it('有值时按 options 值→标签查表（前端不硬编码取值）', () => {
+    expect(compactFieldText(select({}), 'b')).toBe('乙')
+  })
+
+  it('无值时按字段 default 查表；default 也没有 ⇒ 回落字段 label', () => {
+    expect(compactFieldText(select({ default: 'a' }), undefined)).toBe('甲')
+    expect(compactFieldText(select({}), undefined)).toBe('字段名')
+  })
+
+  it('值不在候选里 ⇒ 原样显示值（陈旧取值仍可见，不是空白）', () => {
+    expect(compactFieldText(select({}), 'gone')).toBe('gone')
+  })
+
+  it('path 取路径末段（两种分隔符都认）', () => {
+    const f = select({ widget: 'path', options: [{ value: '', label: '未选择' }] })
+    const win = ['D:', 'work', 'proj'].join(String.fromCharCode(92))
+    expect(compactFieldText(f, win)).toBe('proj')
+    expect(compactFieldText(f, '/home/u/proj/')).toBe('proj')
+  })
+
+  it('path 未设置 ⇒ options 里 value="" 的标签（「未选择目录」）', () => {
+    const f = select({ widget: 'path', options: [{ value: '', label: '未选择' }] })
+    expect(compactFieldText(f, undefined)).toBe('未选择')
+  })
+
+  it('form 先按子定义 title_from 取代表值再查表；无值则用字段 default', () => {
+    const f = select({
+      widget: 'form',
+      options: [
+        { value: 'true', label: '已开启' },
+        { value: 'false', label: '未开启' },
+      ],
+      default: { enabled: false },
+      form: {
+        binding: 'option',
+        title_from: ['enabled'],
+        sections: [{ fields: [{ key: 'enabled', label: '开关', widget: 'toggle' }] }],
+      },
+    })
+    expect(compactFieldText(f, { enabled: true })).toBe('已开启')
+    expect(compactFieldText(f, { enabled: false })).toBe('未开启')
+    expect(compactFieldText(f, undefined)).toBe('未开启')
+  })
+
+  it('form 的值不是对象（后端下发的形状未必守约）⇒ 不崩，回落 label', () => {
+    const f = select({
+      widget: 'form',
+      form: { binding: 'option', title_from: ['enabled'], sections: [] },
+    })
+    expect(compactFieldText(f, 'oops')).toBe('字段名')
   })
 })
