@@ -4,8 +4,8 @@
   "version": "0.1.13",
   "identifier": "com.symbio",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run stamp:dev && npm run dev",
+    "beforeBuildCommand": "npm run stamp:release && npm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },

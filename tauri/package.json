@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "stamp:dev": "node ../scripts/tauri-binary.mjs --stamp",
+    "stamp:release": "node ../scripts/tauri-binary.mjs --stamp --release",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

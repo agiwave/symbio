@@ -2,12 +2,11 @@
 //
 // 以机制接入：用例清单**不在这里维护**——`e2e/cases/*.mjs` 按文件名序逐个以
 // 独立子进程运行（与 `node e2e/run-tests.mjs` 同一套发现逻辑），新增用例文件
-// 自动纳入门控。前置：`cli/` 的 release 二进制（缺失则先构建）。
+// 自动纳入门控。前置：`cli/` 的 release 二进制。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { dim, yellow } from '../color.mjs'
-import { cliBinaryExists } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -32,14 +31,18 @@ export default {
     const tasks = []
     if (!fs.existsSync(path.join(cliDir, 'Cargo.toml'))) return tasks
 
-    // 被测系统先就位：二进制缺失或 --ci 时显式构建（平时增量 cargo build 很快）。
+    // 被测系统先就位。**无条件执行**：判「要不要重建」的是 `cli-binary.mjs` 的
+    // 内容指纹，不是这里的 `when`。
+    //
+    // 这里曾经写 `when: () => ctx.ci || !cliBinaryExists(repoRoot)`——「文件在就跳过」。
+    // 于是本机那份过期 exe 被一直用下去，e2e 报出与眼前源码矛盾的断言失败，
+    // 排查方向被带偏到源码上。二进制是构建产物的函数：**产物比输入旧就是不可信的**，
+    // 而「旧不旧」只能由内容指纹回答。指纹一致时该脚本不启动 cargo（零成本）。
     tasks.push({
-      label: 'cli: cargo build --release',
-      when: () => ctx.ci || !cliBinaryExists(repoRoot),
-      skipNote: '已有 release 二进制（删除 symbio/target/release 或 cli/target/release 或 --ci 可强制重建）',
-      cmd: 'cargo',
-      args: ['build', '--release'],
-      cwd: cliDir,
+      label: 'cli: release 二进制（按源码指纹决定是否重建）',
+      cmd: process.execPath,
+      args: [path.join(scriptDir, '..', 'cli-binary.mjs')],
+      cwd: repoRoot,
     })
 
     tasks.push({
