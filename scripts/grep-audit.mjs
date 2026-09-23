@@ -162,10 +162,29 @@ console.log()
 // ── S-002-bonus: 业务路径 let _ = ...await ─────────────────────────────
 // 命中行若位于 #[test] / #[tokio::test] / fn test_ / mod tests 之后 200 行内，
 // 视为测试代码并跳过。
+//
+// ⚠️ 本规则**只能靠正则近似**，故必然有假阳性，两类都真实存在：
+//   · 被 await 的 future **本就不返回 Result**（如 `fire_hook` 返回 `HookOutput`，
+//     它自己内部已把路由失败吞成默认值）——`let _ =` 丢的不是错误；
+//   · 「关闭 / 清理 / kill / flush」这类**收尾动作**，失败时本就没有后续动作可做
+//     （对端已消失、文件可能本就不存在、子进程可能已退出）。
+// 正则分不清「吞了错误」与「本就无错误可吞」。
+//
+// 因此与 S-002 / S-008 / S-009 / S-010 一致，留一条**必须写理由**的逐行豁免：
+// `// grep-audit-allow S-002-bonus: 理由`。
+// 为什么必须有这条通道：本规则输出的是「请人工 review」——**review 完没地方写结论，
+// 就等于每次跑门禁都要从头再 review 一遍**。永不消失的告警不会让人更谨慎，只会教人
+// 忽略整个审计。留痕豁免把「已 review 且判定为刻意」这件事固化成一次性的。
 console.log('--- S-002-bonus: 业务路径 let _ = ...await 检查 ---')
 
 const SUSPECT_RE = /let _ = .*\.await/
 const TEST_MARKER_RE = /#\[(tokio::)?test\]|fn test_|mod tests/
+// 理由必须含**至少一个字母 / 数字 / 汉字**（与 S-010 同口径：空理由不算豁免）
+const WAIVER_S002B_RE = /\/\/\s*grep-audit-allow S-002-bonus:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
+// 注释行（含 `///` 文档注释）不算命中：本规则判的是**代码形状**，而注释里写
+// 「这里为什么可以 `let _ = ...await`」恰恰是在解释它——把解释也判成违规，等于
+// 惩罚留痕。本文件这次自查就踩到了：三处新增的说明性注释各报了一条假阳性。
+const isCommentLine = (l) => l.trimStart().startsWith('//')
 
 const suspects = []
 for (const [file, lines] of linesOf) {
@@ -174,9 +193,10 @@ for (const [file, lines] of linesOf) {
   lines.forEach((l, i) => {
     const n = i + 1
     if (TEST_MARKER_RE.test(l)) markers.push(n)
-    if (SUSPECT_RE.test(l) && !l.includes('.tx.send')) hits.push(n)
+    if (SUSPECT_RE.test(l) && !isCommentLine(l) && !l.includes('.tx.send')) hits.push(n)
   })
   for (const h of hits) {
+    if (WAIVER_S002B_RE.test(lines[h - 1])) continue
     // 同一行可能既是 marker 又是命中，此时 markers 含 h 自身，需排除 m === h
     const inTest = markers.some((m) => m < h && h - m <= 200)
     if (!inTest) suspects.push(`${disp(file)}:${h}:${lines[h - 1].trim()}`)

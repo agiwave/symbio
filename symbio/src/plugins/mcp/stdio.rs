@@ -152,7 +152,9 @@ impl McpManager {
                 .write_all(line.as_bytes())
                 .await
                 .map_err(|e| format!("Failed to write tools/call request: {e}"))?;
-            let _ = stdin.flush().await;
+            // 真正的写失败已由上一行 `write_all(...)?` 覆盖；`ChildStdin` 不带缓冲，
+            // flush 只是收尾动作，失败时也没有别的动作可做。
+            let _ = stdin.flush().await; // grep-audit-allow S-002-bonus: ChildStdin 无缓冲，写失败已由 write_all 覆盖
         }
 
         // 3) 读取 tools/call 响应
@@ -367,7 +369,9 @@ async fn stdio_tools_list<R: tokio::io::AsyncBufRead + Unpin>(
                 .write_all(line.as_bytes())
                 .await
                 .map_err(|e| format!("Failed to write tools/list request: {e}"))?;
-            let _ = stdin.flush().await;
+            // 真正的写失败已由上一行 `write_all(...)?` 覆盖；`ChildStdin` 不带缓冲，
+            // flush 只是收尾动作，失败时也没有别的动作可做。
+            let _ = stdin.flush().await; // grep-audit-allow S-002-bonus: ChildStdin 无缓冲，写失败已由 write_all 覆盖
         } else {
             return Err("child stdin unavailable for tools/list".to_string());
         }

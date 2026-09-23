@@ -139,7 +139,11 @@ impl HomePlugin {
                 tokio::spawn(async move {
                     plugin_info!("home", "正在自动恢复上次的工作区: {}", path_to_restore);
                     if home_clone.set_workspace(&path_to_restore).await.is_ok() {
-                        let _ = home_clone.flush().await;
+                        // flush 失败 = 刚恢复出来的工作区**没落盘**，下次启动会再丢一次。
+                        // 这条路径在后台 spawn 里跑，没人看得到返回值，故必须自己留痕。
+                        if let Err(e) = home_clone.flush().await {
+                            plugin_warn!("home", "自动恢复工作区后 flush 失败：{}", e);
+                        }
                     }
                 });
             }
@@ -545,7 +549,11 @@ impl Plugin for HomePlugin {
                     tokio::spawn(async move {
                         plugin_info!("home", "reload: 正在恢复 workdir: {}", path_to_restore);
                         if home_arc.set_workspace(&path_to_restore).await.is_ok() {
-                            let _ = home_arc.flush().await;
+                            // 同上一处：reload 是唯一会改 workdir 的入口，flush 失败
+                            // 意味着「用户改了但没记住」，且此处在后台 spawn 中无声。
+                            if let Err(e) = home_arc.flush().await {
+                                plugin_warn!("home", "reload 恢复 workdir 后 flush 失败：{}", e);
+                            }
                         }
                     });
                 }

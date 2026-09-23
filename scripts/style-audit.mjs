@@ -529,6 +529,7 @@ const ALLOW_UNUSED_PROPS = new Set([
   '--accent-subtle-border', // accent 组第 4 个成员（描边），与 --danger-border 对称
   '--surface-fade', // 折叠区渐隐遮罩终点，浅/深各一份（供折叠面板消费）
   '--color-banner-bg', // banner 组（bg / border / fg）成员，成组齐全
+  '--color-banner-fg', // 同上：banner 组的 fg 成员（组内只有 border 被 ChatMainPanel 消费）
   '--radius-xs', // 圆角刻度 xs→xl 的一档（唯一消费者 .path-pill 为死样式，已删）
   '--font-size-xl', // 字号刻度 xs→xl 的一档（20px 页面标题）
   '--font-weight-regular', // 字重刻度 regular / medium / semibold 的一档

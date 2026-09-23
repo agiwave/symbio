@@ -337,11 +337,65 @@ for (const f of feSchemaFiles.sort()) {
   console.log(`  ${mod.padEnd(28)} ${status} ${cons.join(', ')}`);
 }
 
-console.log('\n--- 死导出（文件被引用但该导出名无人用） ---');
+console.log('\n--- 死导出（全库无人用，含定义文件自身） ---');
+console.log('    ⚠️ 标注「已承认保留」的**不要删** —— 那是刻意保留的跨栈契约半边；');
+console.log('       确需保留则在声明行（或紧邻上一行）写 `// dead-code-allow R-001: 理由`。');
+/**
+ * 同文件自引用：定义文件自己还在用它 ⇒ **不是**死导出。
+ *
+ * 后端那一半早就有这条判据（见上文 `selfOcc`），前端这一半原先缺它——于是
+ * `OUTCOME_COMPLETED`（定义在 `schemas/vdfs.ts`，也在同一文件里被比较）这类
+ * **只在本文件内使用**的导出会被列进「死导出」。那不是保守，是**报告在说假话**：
+ * 它会把一个健康的词表常量报成可清理的垃圾，读报告的人（包括本次自查的我）
+ * 会顺着去"修"本来没坏的东西。
+ *
+ * 两个守卫必须说同一句话——`dead-code-audit` 的承认通道注释里就是这么写的，
+ * 同一条判据在两个脚本里也不该只在一半生效。
+ *
+ * 计数含定义行本身，故「只出现一次」= 定义处，无人使用；`> 1` = 文件内部在用。
+ */
+const feSelfUse = new Map(); // `${file}::${name}` -> 定义文件内出现次数（含定义行）
+for (const f of feSchemaFiles) {
+  const src = readFileSync(f, 'utf8');
+  for (const n of feExports.get(f) ?? []) {
+    feSelfUse.set(`${f}::${n}`, (src.match(new RegExp(`\\b${n}\\b`, 'g')) ?? []).length);
+  }
+}
+
+/**
+ * 承认通道（与后端 `waiverOf` 同一条约定、同一句理由）：声明处或紧邻其上一行写
+ * `// dead-code-allow R-001: <理由>` ⇒ 已承认保留（理由不可为空）。
+ *
+ * 为什么前端这一半也需要它：本表列的是「**确实**全库无人用」的导出，其中一部分是
+ * 刻意保留的**跨栈契约半边**（如 `home_reload.Request` —— 与后端
+ * `symbio_core/schemas/home_reload.rs` 的请求半边对应）。报告若不区分，读者会把它
+ * 当成可清理项删掉，而删掉它并不会让任何测试变红——只会让契约少一半。
+ */
+function feWaiverOf(f, name) {
+  const lines = readFileSync(f, 'utf8').split('\n');
+  const decl = new RegExp(
+    `export\\s+(?:type|interface|const|function|enum|class)\\s+${name}\\b`,
+  );
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!decl.test(lines[i])) continue;
+    for (const j of [i, i - 1]) {
+      if (j < 0) continue;
+      const m = lines[j].match(/\/\/\s*dead-code-allow\s+R-\d+\s*:\s*(.+?)\s*$/);
+      if (m) return m[1];
+    }
+  }
+  return null;
+}
+
 let any = false;
 for (const f of feSchemaFiles.sort()) {
   const used = feDeadExportUse.get(f) ?? new Set();
-  const dead = [...(feExports.get(f) ?? [])].filter((n) => !used.has(n));
+  const dead = [...(feExports.get(f) ?? [])]
+    .filter((n) => !used.has(n) && (feSelfUse.get(`${f}::${n}`) ?? 1) <= 1)
+    .map((n) => {
+      const w = feWaiverOf(f, n);
+      return w ? `${n}（已承认保留：${w}）` : n;
+    });
   if (dead.length) {
     any = true;
     console.log(`  ${relative(feSchemasRoot, f).split(sep).join('/')}: ${dead.join(', ')}`);

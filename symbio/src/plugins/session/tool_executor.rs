@@ -122,6 +122,13 @@ pub fn extract_result(data: &Value) -> String {
 }
 
 /// Hook 事件触发工具函数
+/// 触发一次生命周期钩子，返回钩子插件的输出。
+///
+/// **返回 `HookOutput` 而非 `Result`，是刻意的**：钩子是**旁路观察者**——它的职责是
+/// 「被通知到」，不是「否决主流程」。路由失败（没有钩子插件、插件未挂载、插件自己
+/// 报错）在函数内部就吞成 `HookOutput::default()`，因此调用点的 `let _ = fire_hook(...)`
+/// **丢的不是错误**（没有错误可丢），只是不需要那份输出。`grep-audit` 的 S-002-bonus
+/// 按 `let _ = ...await` 的**形状**判「吞错」，在这里是假阳性，故调用点带豁免留痕。
 pub async fn fire_hook(
     parent: &Option<Arc<dyn Plugin>>,
     event: HookEvent,

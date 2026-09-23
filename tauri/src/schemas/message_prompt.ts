@@ -72,6 +72,7 @@ export interface MessagePromptAnswer {
 }
 
 /** 提问作答的整体载荷（`resume action=answer` 的 `answer` 字段） */
+// dead-code-allow R-001: 协议契约半边（resume action=answer 的载荷），保留以标明契约
 export interface MessagePromptAnswerPayload {
   answers: MessagePromptAnswer[]
 }

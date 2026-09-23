@@ -286,14 +286,16 @@ impl ShellTool {
             // pump 任务全部退出（EOF）即认为输出读取完毕
             _ = async {
                 for h in pump_handles.iter_mut() {
-                    let _ = h.await;
+                    reap_pump(h).await;
                 }
             } => {}
             _ = tokio::time::sleep(Duration::from_secs(SHELL_TIMEOUT_SECS)) => {
-                let _ = child.kill().await;
+                // kill 失败最常见的原因是**子进程已经自己退出了**（正常路径）；
+                // 真出问题也有随后的 `child.wait()` 兜底，故此处不必留痕。
+                let _ = child.kill().await; // grep-audit-allow S-002-bonus: 子进程常已自行退出，且 child.wait() 兜底
             }
             _ = abort.cancelled() => {
-                let _ = child.kill().await;
+                let _ = child.kill().await; // grep-audit-allow S-002-bonus: 同上，子进程常已自行退出，且 child.wait() 兜底
             }
         }
         // 收尾：确保 pump 全部退出 + 子进程被回收（kill 后管道关闭，pump 很快 EOF）。
@@ -302,7 +304,7 @@ impl ShellTool {
         // 因此只等待尚未结束的 pump。
         for h in pump_handles.iter_mut() {
             if !h.is_finished() {
-                let _ = h.await;
+                reap_pump(h).await;
             }
         }
         let status = child.wait().await;
@@ -334,6 +336,21 @@ impl ShellTool {
             output: full,
             risk_level: risk_level_str(&risk),
         })
+    }
+}
+
+/// 等待一个输出泵收尾，并在它**异常退出时留痕**。
+///
+/// `JoinHandle` 的 `Err` 只可能是「任务 panic」或「任务被取消」。stdout / stderr
+/// 各一个泵，泵静默死掉 = 那一路输出**被截断**，而调用方拿到的是一份「看起来完整」
+/// 的输出（`compose_output` 无从分辨「命令没输出」与「读输出的任务死了」）。
+/// 这正是必须留痕的原因——它是最不容易被察觉的一类失败。
+///
+/// 语义与原先的 `let _ = h.await` 完全一致（包括「只 await 尚未结束的 handle」：
+/// 对已完成的 `JoinHandle` 再次 await 会 panic），只是把 `Err` 从丢掉改成记一笔。
+async fn reap_pump(h: &mut tokio::task::JoinHandle<()>) {
+    if let Err(e) = h.await {
+        crate::plugin_warn!("local", "shell 输出泵异常退出（该路输出可能被截断）：{}", e);
     }
 }
 

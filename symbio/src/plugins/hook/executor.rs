@@ -125,7 +125,9 @@ impl HookExecutor {
 
         let result = timeout(Duration::from_millis(timeout_ms), output).await;
 
-        let _ = tokio::fs::remove_file(&event_file).await;
+        // 清理临时事件文件。文件可能本就不存在（命令提前失败），且这里也已经是
+        // 收尾位置——清理不掉没有后续动作可做，故刻意忽略。
+        let _ = tokio::fs::remove_file(&event_file).await; // grep-audit-allow S-002-bonus: 收尾清理，文件可能本就不存在
 
         match result {
             Ok(Ok(output)) => {

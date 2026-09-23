@@ -206,7 +206,7 @@ async fn compress_snapshot_inner(
 ) -> Result<Option<usize>, CompressionFailure> {
     // 保存原始历史：压缩失败时回滚，绝不能让压缩请求残留在上下文里。
     let original_messages = context.messages.clone();
-    let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await;
+    let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await; // grep-audit-allow S-002-bonus: fire_hook 返回 HookOutput 非 Result，无错误可丢（见其文档）
 
     // 可回溯原则：压缩前把完整历史转存为 transcript，路径记入快照 meta。
     // 若跳过此步直接 replace_messages，被压掉的历史在物理层"凭空消失"，

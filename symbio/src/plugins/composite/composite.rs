@@ -333,7 +333,13 @@ impl Plugin for Composite {
                 VDFS_PARENT_ADDR,
                 descend_addr(&ctx.get(VDFS_PARENT_ADDR).unwrap_or_default(), &name),
             );
-            let _ = plugin.traverse("".to_string(), req_ctx).await;
+            // 收集期的 `Err` **必须留痕**。返回值本来就丢（收集结果由子插件自己写进
+            // `CAPABILITY_VISITOR` / 它自己的 vfs 视图），但错误不能一起丢：`Err`
+            // 意味着**这个子插件的能力整个没收集到**——静默吞掉就是「插件少了一半
+            // 能力」却不报警，而收集期恰恰没有任何别的信号会暴露它。
+            if let Err(e) = plugin.traverse("".to_string(), req_ctx).await {
+                crate::plugin_warn!("composite", "子插件能力收集失败 {name}：{e}");
+            }
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

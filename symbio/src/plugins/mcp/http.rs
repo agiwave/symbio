@@ -364,7 +364,7 @@ impl super::manager::McpManager {
         if let Some(sid) = &session_id {
             req = req.header("Mcp-Session-Id", sid);
         }
-        let _ = req.send().await; // 失败不阻断（server 可能不监听通知）
+        let _ = req.send().await; // 失败不阻断（server 可能不监听通知） // grep-audit-allow S-002-bonus: 通知类请求，server 可能不监听
 
         // 缓存 session_id
         if let Some(sid) = &session_id {

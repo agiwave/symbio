@@ -513,7 +513,7 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
     let text = match ws_read_text(&mut read_half).await {
         Some(t) => t,
         None => {
-            let _ = write_half.shutdown().await;
+            ws_close(&mut write_half).await;
             return;
         }
     };
@@ -525,7 +525,7 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
                 &format!("{{\"Error\":[\"invalid request: {e}\"]}}"),
             )
             .await;
-            let _ = write_half.shutdown().await;
+            ws_close(&mut write_half).await;
             return;
         }
     };
@@ -540,7 +540,7 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
             &format!("{{\"Error\":[\"只读模式下禁止调用: {path}\"]}}"),
         )
         .await;
-        let _ = write_half.shutdown().await;
+        ws_close(&mut write_half).await;
         return;
     }
 
@@ -565,7 +565,9 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
                             Some((op, data)) => {
                                 if op == 0x8 { break; } // close
                                 else if op == 0x9 {
-                                    let _ = ws_send_frame(&mut write_half, 0xA, &data).await; // ping → pong
+                                    // 回 pong 失败 = 对端已经走了；下一轮读帧会拿到 EOF
+                                    // 而 break，故此处不必单独处理。
+                                    let _ = ws_send_frame(&mut write_half, 0xA, &data).await; // ping → pong // grep-audit-allow S-002-bonus: 对端已走，下一轮读帧会 EOF 退出
                                 } else if let Ok(f) = serde_json::from_slice::<PluginFrame>(&data) {
                                     if tx.send(f).await.is_err() { break; }
                                 }
@@ -575,17 +577,18 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
                     }
                 }
             }
-            let _ = write_half.shutdown().await;
+            ws_close(&mut write_half).await;
         }
         Ok(PluginPayload::Data(d)) => {
             let value = d.serialize().unwrap_or(Value::Null);
             let frame = PluginFrame::data(value);
             let text = serde_json::to_string(&frame).unwrap_or_default();
-            let _ = ws_send_text(&mut write_half, &text).await;
-            let _ = write_half.shutdown().await;
+            // 响应帧发不出去 = 对端已消失；关连接是唯一的后续动作，没有别的可做。
+            let _ = ws_send_text(&mut write_half, &text).await; // grep-audit-allow S-002-bonus: 对端已消失，关连接即唯一后续
+            ws_close(&mut write_half).await;
         }
         Ok(PluginPayload::Empty) => {
-            let _ = write_half.shutdown().await;
+            ws_close(&mut write_half).await;
         }
         Ok(PluginPayload::Native(_)) => {
             let _ = ws_send_text(
@@ -593,11 +596,12 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
                 "{\"Error\":[\"该路径返回进程内原生对象，不支持跨传输调用\"]}",
             )
             .await;
-            let _ = write_half.shutdown().await;
+            ws_close(&mut write_half).await;
         }
         Err(e) => {
-            let _ = ws_send_text(&mut write_half, &format!("{{\"Error\":[\"{e}\"]}}")).await;
-            let _ = write_half.shutdown().await;
+            // 错误帧同样：发得出去就发，发不出去（对端已消失）也只能关连接。
+            let _ = ws_send_text(&mut write_half, &format!("{{\"Error\":[\"{e}\"]}}")).await; // grep-audit-allow S-002-bonus: 对端已消失，关连接即唯一后续
+            ws_close(&mut write_half).await;
         }
     }
 }
@@ -666,6 +670,16 @@ async fn ws_send_text<W: AsyncWrite + Unpin>(
     text: &str,
 ) -> Result<(), std::io::Error> {
     ws_send_frame(writer, 0x1, text.as_bytes()).await
+}
+
+/// 关闭 WS 写半边（best-effort，**失败无需处理**）。
+///
+/// 会失败的情形只有「对端已经消失」——对端都没了，`shutdown` 失败也就没有别的
+/// 动作可做。本函数存在的意义是**把这条理由写一次**：`handle_ws` 有 8 个收尾点
+/// 都要关连接，逐个写 `let _ = write_half.shutdown().await;` 会让「这里为什么
+/// 可以吞错」散成 8 份没有解释的 `let _`，看起来像随手丢错误。
+async fn ws_close<W: AsyncWrite + Unpin>(write_half: &mut W) {
+    let _ = write_half.shutdown().await; // grep-audit-allow S-002-bonus: 对端已消失时关闭失败，无可为
 }
 
 async fn ws_read_text<R: AsyncRead + Unpin>(reader: &mut R) -> Option<String> {

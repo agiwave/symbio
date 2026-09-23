@@ -57,6 +57,42 @@ test('warnings fail only in strict mode', () => {
   assert.equal(audit(source, { strict: true }).status, 2)
 })
 
+// ── S-002-bonus：业务路径 `let _ = ...await` 吞错 ──────────────────────
+// 本规则是**正则近似**，必然有假阳性：被 await 的 future 可能本就不返回 Result
+// （如 `fire_hook` 返回 `HookOutput`），「关闭 / 清理 / kill / flush」这类收尾动作
+// 失败时也没有后续动作可做。故与 S-002 / S-008 / S-009 / S-010 一致，留一条
+// **必须写理由**的逐行豁免——否则「请人工 review」的结论无处落笔，每次跑门禁都得
+// 从头再 review 一遍，永不消失的告警只会教人忽略整个审计。
+const bonusSuspect = 'async fn example() {\n let _ = work().await; WAIVER\n}\n'
+test('S-002-bonus names the offending line and the remedy', () => {
+  const r = audit('async fn example() {\n let _ = work().await;\n}\n')
+  assert.equal(r.status, 0) // 仅 WARNING：非 strict 不判失败
+  assert.match(r.stdout, /sample\.rs:2:let _ = work\(\)\.await;/)
+  assert.match(r.stdout, /plugin_warn/)
+})
+test('S-002-bonus waiver requires a reason', () => {
+  assert.equal(
+    audit(bonusSuspect, { waiver: '// grep-audit-allow S-002-bonus: 收尾动作，失败无可为', strict: true }).status,
+    0,
+  )
+  assert.equal(audit(bonusSuspect, { waiver: '// grep-audit-allow S-002-bonus:   ', strict: true }).status, 2)
+})
+test('S-002-bonus waiver covers only its own line', () => {
+  const source = 'async fn example() {\n let _ = a().await; WAIVER\n let _ = b().await;\n}\n'
+  assert.equal(audit(source, { waiver: '// grep-audit-allow S-002-bonus: 仅此行', strict: true }).status, 2)
+})
+test('S-002-bonus waiver for another rule does not leak in', () => {
+  assert.equal(audit(bonusSuspect, { waiver: '// grep-audit-allow S-002: reviewed fixture', strict: true }).status, 2)
+})
+test('S-002-bonus ignores the pattern when it appears inside a comment', () => {
+  // 本规则判的是**代码形状**；注释里写「这里为什么可以 let _ = x().await」正是在
+  // 解释它，把解释判成违规等于惩罚留痕（本次自查时真踩到过：三处说明性注释各报一条）。
+  const source = '/// 收尾点写 `let _ = h.await;` 是刻意的。\n// let _ = a().await;\nasync fn f() {}\n'
+  assert.equal(audit(source, { strict: true }).status, 0)
+  // 但**行尾**注释不能用来藏代码：同一行前半仍是代码，照判。
+  assert.equal(audit('async fn f() {\n let _ = b().await; // 说明\n}\n', { strict: true }).status, 2)
+})
+
 // ── S-008：VdfsNode.status 不得用裸字面量 ──────────────────────────────
 // 词表只有 `VDFS_STATUS_*` 一套；裸字面量在改名时不会编译失败（该词表曾把
 // `error` 改名为 `failed`，留下过化石，见 vdfs_provider.rs::VDFS_STATUS_FAILED）。
