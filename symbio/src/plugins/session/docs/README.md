@@ -22,18 +22,18 @@
 | [perf.md](./perf.md) | 现行设计 | 会话/转写的前端性能设计 + 存储拆分（元数据与消息分文件，清单慢的根因解药） |
 | [vdfs-session-messages.md](./vdfs-session-messages.md) | 现行设计（S16–S19 已完成） | 会话消息的 VDFS 化：转写即列表、流式即追加；地址与节点形状、变更语义、迁移路线 |
 | [session-options.md](./session-options.md) | 现行规范（2026-09-23 旧机制下线） | 会话选项 = 会话配置表单：同一份 `DetailDefinition` 的两种渲染形态（选项栏 / 详情页），三条通路（`node.schema` / `attributes.metadata` / `vdfs/write`），收集走 core 的 `OptionVisitor` |
-| [legacy-route-migration.md](./legacy-route-migration.md) | 审计（待执行，S1–S7） | 会话旧路由审计：11 条路由分「可删（死路由）/ 可迁 VDFS / 必须保留」三档，附影响面与执行顺序 |
 
-> **已归档的过程产物**（两份审计，`docs/archive/implementation-logs/`）：
+> **已归档的过程产物**（一次性审计 / 迁移记录，进 `docs/archive/`）：
+> [`legacy-route-migration.md`](../../../../../docs/archive/legacy-route-migration.md)（会话旧路由审计，迁移已全部落地）、
 > [`session-mechanism-audit.md`](../../../../../docs/archive/implementation-logs/session-mechanism-audit.md)（机制审计与简化方案，方案已全部落地）
 > 与 [`session-complexity-audit.md`](../../../../../docs/archive/implementation-logs/session-complexity-audit.md)（更早的复杂度审计）。
-> 它们的结论已体现在现行代码与上面各文档里，不再驱动任何待做项。
+> 它们的结论已体现在现行代码与上面各文档里，不再驱动任何待做项——**不随重构回改**。
 
 ## 建议阅读路径
 
 - **要改核心循环** → [`core-loop.md`](./core-loop.md) → [`../README.md`](../README.md) 六大策略 → [`module-layout.md`](./module-layout.md) 找文件落点
 - **要改压缩** → [`context-compression-design.md`](./context-compression-design.md)（分层与不变量）→ [`../README.md`](../README.md)（阈值与函数）
-- **要查历史为什么这么改** → 已归档的两份审计（见上表下方的归档说明），以及 `git log --grep=<词>` / `git log -S<符号>`（本仓库不另维护变更日志）
+- **要查历史为什么这么改** → 已归档的审计与迁移记录（见上表下方），以及 `git log --grep=<词>` / `git log -S<符号>`（本仓库不另维护变更日志）
 - **要动前端转写/会话列表** → [`perf.md`](./perf.md) → [`vdfs-session-messages.md`](./vdfs-session-messages.md)
 
 ## 约定

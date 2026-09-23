@@ -92,20 +92,23 @@ cargo clippy --lib --tests -- -D warnings
 
 ## 目录结构速览
 
+**一个插件 = 一个目录**（配置与数据同处，整目录可拷贝移植；机制见
+[design/vdfs.md](../design/vdfs.md) §3.4 与 `symbio_core::plugin_dir`）：
+
 ```
-~/.symbio/
-├── PLUGIN.yml               # 系统级插件（home）的配置：工作区与最近记录
-├── plugins/
-│   ├── model/               # 模型资源（<id>/provider.json）+ PLUGIN.yml
-│   ├── agent/               # agent 目录存储
-│   └── ...                  # 其他插件：配置（PLUGIN.yml）与数据同处一个目录
-├── agents/                  # Agent 定义文件
-├── storage/                 # 认知存储 (DirStorage 或 SQLite)
-└── logs/                    # 日志文件
+<homedir>/                    # 默认 ~/.symbio
+├── PLUGIN.yml                # 系统级插件（home）的配置：工作区与最近记录
+├── <插件>/                   # session · model · agent · mcp · skill · setting …
+│   ├── PLUGIN.yml            # 该插件的配置（对外地址 <根>/<插件>/PLUGIN.yml）
+│   └── <id>/<主文件>          # 资源条目：model/<id>/provider.json、mcp/<id>/server.json…
+├── session/<id>/             # 会话：session.json（元数据）+ messages.json（消息）
+├── agent/<id>/               # Agent 目录（工作区级 + 全局级）
+└── cache/                    # 可重建的缓存（如代码索引）
 ```
 
-> 每个插件目录都可以**整体拷贝移植**——配置与数据都在里面。
-> 旧版本升级上来的机器还会看到一个 `config.yaml.migrated`：那是旧集中式配置的留档。
+> 插件根**不额外嵌套一层**：系统根下就是「一个插件一个目录」的扁平结构
+> （`<homedir>/plugins/<插件>` 那种旧布局已废除）。
+> 旧版本升级上来的机器可能还留着一个 `config.yaml.migrated`：那是旧集中式配置的留档。
 
 ---
 

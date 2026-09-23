@@ -1639,7 +1639,7 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
 `docs/architecture/PROTOCOLS.md` / `DATA_FLOW.md`、`docs/design/vdfs-frontend.md`、
 `session/docs/node-state-streaming.md`（§8 不变量 #10/#20、§11.7）、
 `session/docs/vdfs-session-messages.md`（S26 续）、`session/docs/core-loop.md`、
-`session/docs/legacy-route-migration.md`、`cli/docs/architecture.md`、`cli/src/client.rs`
+`docs/archive/legacy-route-migration.md`、`cli/docs/architecture.md`、`cli/src/client.rs`
 模块文档、`VdfsMessageDetail.vue` 头注释，以及两份评审文档的**后记**。
 **archive 与评审类文档不改写正文，只加后记**——它们是「某一时刻的判断」，
 后记才是本次要留下的东西。

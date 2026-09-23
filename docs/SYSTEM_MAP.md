@@ -1,7 +1,10 @@
 # Symbio 系统地图
 
 > **文档类型：导航** — 一图胜千言，快速定位系统全貌。
-> 本文件只画**结构与分层**；插件 × 挂载点 × 路由 × 工具的权威清单见 [CURRENT.md](./CURRENT.md)，文档索引见 [docs/README.md](./README.md#快速导航)。
+> **本文是「谁挂在谁下面」的唯一 owner**（运行时拓扑）。其它文档画树一律引用本文。
+> 插件 × 挂载点 × 路由 × 工具的权威清单见 [CURRENT.md](./CURRENT.md)；
+> 逻辑分层与设计取舍见 [architecture/OVERVIEW.md](./architecture/OVERVIEW.md)；
+> 文档索引见 [docs/README.md](./README.md#快速导航)。
 
 ## 系统边界
 
@@ -23,7 +26,7 @@ graph TD
             HOME --> HW["home/* · work/*（Home 自身终结）"]
         end
         subgraph PROV["Providers（基础设施）"]
-            EM["Embedding（fastembed）"]
+            EM["Embedding（ort / ONNX Runtime）"]
             VS["vdfs_service（单文件 / 目录 / 内存）"]
             SS["SessionStore（磁盘布局 + 进程内驻留）"]
         end
@@ -37,31 +40,12 @@ graph TD
 
 > 插件清单（16 个）、各插件注册名 / VDFS 挂载点 / 自有路由 / 配置文件，见 [CURRENT.md](./CURRENT.md) §1。
 
-## 请求流转（以 AI 对话为例）
+## 请求流转与协议栈
 
-```mermaid
-flowchart LR
-    CL["Client<br/>Tauri / CLI / HTTP"] -->|"route session/chat/send"| HM["Home<br/>路由"]
-    HM --> CP["Composite<br/>剥离首段后转发"]
-    CP --> SE["Session<br/>编排 · 工具循环"]
-    SE -->|"execute_turn（直连，不经路由）"| MD["Model<br/>多协议适配"]
-    MD --> LLM["LLM API"]
-    SE -.->|"traverse 收集全树工具"| TOOLS["local / web / vdfs / mcp …"]
-```
-
-> 完整链路、流式帧与代码位置见 [DATA_FLOW.md](./architecture/DATA_FLOW.md)。
-
-## 协议栈
-
-| 层级 | 类型 | 用途 |
-|------|------|------|
-| **帧** | `PluginFrame` | 通道最小消息单位 (Data / Error) |
-| **载荷** | `PluginPayload` | route() 返回 (Empty/Data/Native/Session) |
-| **通道** | `PluginChannel` | 全双工流式会话 (mpsc pair) |
-| **路由** | `InvokeRequest` | 上下文注入 (PATH / PAYLOAD / WORKDIR ...) |
-
-> 定义与不变量见 [PROTOCOLS.md](./architecture/PROTOCOLS.md)。
+两者都不在本文重复：
+**一次请求从入口到出口经过哪些代码**（含排障锚点）见 [DATA_FLOW.md](./architecture/DATA_FLOW.md)；
+**帧 / 载荷 / 通道 / 线格式的准确规格**见 [PROTOCOLS.md](./architecture/PROTOCOLS.md)。
 
 ---
 
-> **维护原则**：本文档是系统的"地图"，与代码同步；架构变更时必须同步更新此图。
+> **维护原则**：本文是系统拓扑的唯一 owner，拓扑变更（新增 / 移除 / 改挂载层级）时同步更新上图。

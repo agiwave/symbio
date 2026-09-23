@@ -1,6 +1,11 @@
 # Symbio 架构总览
 
-> **文档类型：阐述** — 解释"为什么这样设计"。
+> **文档类型：阐述** — 解释「为什么这样设计」的**架构契约与分层**。
+>
+> **边界**：本文只画**逻辑分层与契约**（哲学、内核分工、`Plugin` trait、寻址规则）。
+> **运行时拓扑**（谁挂在谁下面）以 [SYSTEM_MAP.md](../SYSTEM_MAP.md) 为准；
+> **插件 × 挂载点 × 路由 × 工具**的权威清单以 [CURRENT.md](../CURRENT.md) §1 为准；
+> 单条决策的**来龙去脉**以 [DECISIONS.md](../DECISIONS.md) 为准——本文不复述。
 
 ## 核心设计哲学
 
@@ -22,80 +27,20 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 
 物理代码平铺（`symbio/src/plugins/<name>/`），逻辑层级通过 `Composite` 容器动态维护。
 
-## 核心架构层级
-
-```mermaid
-graph TD
-    subgraph "Host Layer (CLI / Tauri / Web)"
-        H[App Entry] --> SR[create_root_plugin]
-    end
-
-    subgraph "Object Creator Registry (symbio_core::creator)"
-        REG[ObjectCreatorRegistry] -->|submit_object_creator!| C1["create_object(\"home\")"]
-        REG --> C2["create_object(\"composite\")"]
-        REG --> C3["create_object(\"agent\")"]
-        REG --> C4["create_object(\"session\")"]
-        REG --> C5["create_object(\"model\")"]
-        REG --> C6["create_object(\"local\" / \"web\" / ... )"]
-    end
-
-    subgraph "Plugin Tree (Logical Runtime)"
-        P1[Home /] --> P2[worker / Composite]
-        P2 --> P3[gateway]
-        P2 --> P4[setting]
-        P2 --> P5[agent]
-        P2 --> P6[session]
-        P2 --> P7[model]
-        P2 --> P8[local / web / skill / mcp / telegram / vdfs / work]
-        P2 --> P10[hook / event_bus]
-    end
-
-    SR --> P1
-```
-
 ## 核心目录分工 (`symbio/src`)
 
-### `symbio_core/` — 内核层
+源码分三层，**权威清单在代码里**（各模块 `//!` 头注释写明自己是什么）：
 
-| 模块                                                                        | 职责                                                                                    |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `plugin.rs`                                                               | `Plugin` / `InvokeRequest` / `InvokeRequestExt` / `PluginMeta` / `SimpleRequest` 核心契约 |
-| `transport.rs`                                                            | `PluginFrame` / `PluginPayload` / `PluginChannel` 传输协议                                |
-| `creator.rs`                                                              | 通用对象创建注册表（`submit_object_creator!` 宏、`create_object` / `has_creator`）                 |
-| `error.rs`                                                                | 统一 `PluginError` 与稳定错误码                                                               |
-| `turn.rs`                                                                 | 单轮执行机器与流式类型（`execute_post_with_abort` / `parse_sse_stream` / `ToolCallInfo` / emit 辅助） |
-| `capability.rs`                                                           | `Capability` / `CapabilityVisitor` 能力系统                                               |
-| `capability_error.rs`                                                     | 能力收集期错误通道（写侧=任意 traverse 插件，读侧=session 编排方）                                     |
-| `entities.rs`                                                             | 存储原语（自由函数，无 trait）：写盘 / 删除 / 导入 / 导出 + zip / base64 工具                  |
-| `tools.rs`                                                                | `DefaultToolVisitor` 默认能力管理器                                                          |
-| `schemas/`                                                                | 跨端数据结构 (Request/Response)，Rust 端定义                                                    |
-| `logger.rs`                                                               | 日志系统初始化                                                                               |
-| `keys.rs`                                                                 | 上下文键（`PATH` / `WORKDIR` / `SESSION_ID` / `TRACE_ID` …）                                |
-| `ids.rs`                                                                  | 插件 id 常量（`PLUGIN_HOME` 等）与注册对象 id（**不含 LLM 工具名**——工具名是各插件自己的 `CapabilityMeta.name`） |
-| `paths.rs` / `homedir.rs` / `event_bus.rs` / `providers.rs` | 路径常量、主目录、事件总线、服务 trait 等                                                         |
-
-### `plugins/` — 实现层
-
-所有插件在 `plugins/` 目录下平铺存放。容器与叶子插件实现同一 `Plugin` Trait。
-
-| 插件          | 角色           | 关键能力（详见各插件 `plugins/<name>/README.md`）                                                              |
-| ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `home`      | **根容器**      | 持**应用级状态**（`<homedir>/PLUGIN.yml`：工作区与最近记录）；构造 `worker` (Composite) 并传入必需插件清单，自身终结 `home/*`、`work/*` |
-| `composite` | **动态容器**     | **扫描自己的目录**（系统根）实例化子插件（目录驱动，不内置任何清单），是"分形"的关键                                                                                              |
-| `agent`     | **智能体域**     | 智能体域唯一所有者：agent 目录库（`<根>/agent`）+ 子树装配（`agent/<id>/`，工具前缀 `agent_<id>_`）+ 两作用域 `AGENTS.md`；贡献 `agent_run` 工具 → `plugins/agent/README.md` |
-| `session`   | **会话中心**     | 长连接、消息持久化、历史裁剪；**会话编排的唯一入口**（收集工具、组装提示词、直连 model 单轮网关）→ `plugins/session/README.md`（含六大压缩策略）                       |
-| `model`     | **单轮 LLM 网关** | 无状态单轮执行（`execute_turn`）；按上下文注册唯一生效 `ModelProvider`（自含参数与协议适配器）、4 协议适配、配置存取；不含工具执行与会话循环 |
-| `local`     | 本地工具         | `cmd`(Win)/`sh`(Unix) / content_search / todo_write / codebase_search（文件操作已迁 vdfs_*）                      |
-| `web`       | Web 工具       | http_request / web_search / web_fetch                                                                             |
-| `vdfs`      | **资源访问层**   | 统一资源访问：`vdfs/*` 协议入口 + `vdfs_*` LLM 工具（规范见 `docs/design/vdfs.md`）                                       |
-| `skill`     | 技能           | 加载与执行技能定义（`skill/execute`）                                                                                       |
-| `mcp`       | MCP 桥        | MCP server 注册（stdio / http / sse）与工具调用（资源经 `<根>/mcp` 维护）                                              |
-| `work`      | **工作区记忆**   | 注入 `{workdir}/AGENTS.md`（`<根>/work` 可编辑）；`route()` 恒 `NotFound`                                              |
-| `telegram`  | Telegram 通道  | 长轮询收发与“继续会话”交互（`telegram/send`）                                                                                  |
-| `gateway`   | **入站网关**     | HTTP/WS 入站适配（`/api/v1/invoke`、`/api/v1/ws`、`/api/v1/health`，与 route_v2 同构）                                              |
-| `setting`   | 配置           | `<根>/setting` 子目录：**各插件交出来的配置条目 + 自有分区**（`appearance` / `about`）；条目指向各插件自己的 `PLUGIN.yml`，本插件不代理读写 |
-| `hook`      | 钩子           | 钩子注册与触发（PreCompact 等生命周期点）                                                                                        |
-| `event_bus` | 事件总线         | 进程内帧广播（连接级 SSE 风格推送）                                                                                              |
+- **`symbio_core/` — 内核契约层**：`Plugin` / `InvokeRequest` / `PluginPayload`、能力系统
+  （`capability*`）、跨端 schema（`schemas/`）、资源访问契约（`vdfs_provider`）、模型契约
+  （`model_provider`）、上下文键（`keys`）等。**准入判据是「依赖方数量」，不是「够不够底层」**
+  （[ADR-023](../DECISIONS.md)）。
+  模块清单见 [`symbio_core/mod.rs`](../../symbio/src/symbio_core/mod.rs)。
+- **`plugins/` — 实现层**：所有插件平铺存放，容器与叶子实现同一 `Plugin` trait；
+  职责与插件清单见 [`docs/README.md` §模块文档地图](../README.md#模块文档地图)与
+  [CURRENT.md](../CURRENT.md) §1（**本文不复制插件表**——手抄一份必然漂移）。
+- **`providers/` — 基础设施层**：嵌入推理与 `vdfs_service`（资源落盘的集中实现）。
+  实现清单见 [`providers/mod.rs`](../../symbio/src/providers/mod.rs)。
 
 ## 核心 Trait 与路由
 
@@ -127,46 +72,16 @@ pub trait Plugin: Send + Sync + 'static {
 3. **叶子执行**：叶子插件在 `route("xxx", …)` 内完成业务
 4. **内省**：`_root` 等特殊路径返回当前节点子插件拓扑
 
-## 关键设计决策
+## 关键设计决策 → 见 DECISIONS.md
 
-### 为什么用 `inventory` 静态注册？
-
-每个插件模块在其 `plugin.rs` 末尾调用 `submit_object_creator!(PLUGIN_X, XPlugin::build, dyn Plugin)`。该宏通过 `inventory` 收集构造函数到全局 `ObjectCreatorRegistry`。
-
-**理由**：
-
-1. **零配置**：新增插件无需修改注册代码
-2. **编译期保证**：未注册的插件在链接期报错
-3. **惰性初始化**：首次使用时才收集
-
-### 为什么 Session 是编排入口？
-
-**历史演进**：早期 `agent` 插件独占会话编排 → 重构后 `session` 成为唯一编排入口。
-
-**理由**：
-
-1. **关注点分离**：Agent 负责"智能体资产"（agent 目录 / 子树装配 / 记忆），Session 负责"对话"
-2. **可组合性**：同一 Session 可绑定不同 Agent，或无 Agent 纯工具模式
-3. **可测试性**：Session 可独立于 Agent 测试
-
-### 为什么 Model 支持多协议？
-
-协议适配契约 `ModelProtocol`（钩子：get_api_url / get_headers / prepare_request / parse_response_line / ping / query_context_limit）**内化在 model 插件内部**（`plugins/model/protocols/`），内置 4 个实现：
-
-```text
-openai_chat        // POST /v1/chat/completions
-openai_responses   // POST /v1/responses
-anthropic_messages // POST /v1/messages
-gemini_api         // generateContent
-```
-
-协议差异被钩子吸收后，model 插件以 `BoundProvider`（配置 + 协议适配器绑定）实现 core 的纯 `ModelProvider` trait（`provider_id` / `api_protocol` / `rate_limit_ms` / `max_context_tokens` / `effective_context_tokens` / `execute_turn`）注册给 session——**session 只依赖这一个模型契约**，对协议体系零感知。
-
-**理由**：供应商无关、协议演进、功能差异适配；核心契约保持 object-safe trait，协议细节可独立演进
+「为什么用 `inventory` 静态注册」「为什么 Session 是唯一编排入口」「为什么 Model 支持多协议」
+这类问题的答案**只在 [DECISIONS.md](../DECISIONS.md) 各一条 ADR 里**（ADR-007 / ADR-003 / ADR-004），
+本文不复述——复述就会在下次改动时漏掉一处。
 
 ## 文档体系约定（下沉原则）
 
-见 [docs/README.md](../README.md) §文档下沉原则——系统级文档只留跨模块内容，模块细节一律引用模块 `README.md`，本文件不再复述。
+见 [docs/README.md](../README.md) §文档下沉原则与 §文档职责边界——系统级文档只留跨模块内容与引用，
+模块细节、单条决策、变更历史各有自己的 owner，本文件不复述。
 
 ---
 

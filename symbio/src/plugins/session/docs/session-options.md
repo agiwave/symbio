@@ -300,7 +300,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 > **「立即心跳」按钮已取消（2026-09-18）**。它原是一个独立的命令型选项，
 > 取消理由是**它的作用与「在输入框里直接发一条消息」完全重复**——心跳的实质
 > 就是往会话发一轮提示词，用户想立刻做一次，在输入框发即可。
-> 论证见 [legacy-route-migration.md §5.1](./legacy-route-migration.md)。
+> 论证见 [legacy-route-migration.md §5.1](../../../../../docs/archive/legacy-route-migration.md)。
 
 ## 10. 已下线的旧机制（2026-09-23）
 

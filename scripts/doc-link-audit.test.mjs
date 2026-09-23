@@ -95,6 +95,17 @@ test('D-002：评审类文档留在 docs/design/ → 失败', () => {
   assert.match(r.stdout, /docs\/design\/review\.md/)
 })
 
+test('D-002：过程文档留在**模块目录**同样失败（只扫 docs/ 会漏掉这一整类）', () => {
+  const r = audit({ 'symbio/src/plugins/foo/docs/migration.md': REVIEW_DOC })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /symbio\/src\/plugins\/foo\/docs\/migration\.md/)
+})
+
+test('D-002：examples/ 不扫（是示例包内容，不是项目文档）', () => {
+  const r = audit({ 'examples/pkg/docs/review.md': REVIEW_DOC })
+  assert.equal(r.status, 0)
+})
+
 test('D-002：已落地的实施方案留在活跃目录 → 失败', () => {
   const r = audit({ 'docs/design/plan.md': IMPLEMENTED_DOC })
   assert.equal(r.status, 1)

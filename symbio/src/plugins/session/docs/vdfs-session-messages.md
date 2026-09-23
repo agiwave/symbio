@@ -32,7 +32,7 @@
 > 既不再为回答「在不在」读回整份历史，也不再占一条路由。会话域至此只剩三条：
 > `chat/send`（发言 / 编排）· `chat/abort`（控制）· `stream`（实时面，⚠️ S26 待退役）。
 > `update` 也已退役（`vdfs/write` 的 `create` 位覆盖了它唯一多出来的能力，2026-09-23）。
-> 见 [legacy-route-migration.md](./legacy-route-migration.md) §3.4.1。
+> 见 [legacy-route-migration.md](../../../../../docs/archive/legacy-route-migration.md) §3.4.1。
 >
 > **S22 续**：当时剩下的一小块——`kind = "session"` 上的会话级事件（`Status` / `Error` /
 > `Abort`）——也已废除（会话运行态即会话节点，见 `node-state-streaming.md`）。
@@ -317,7 +317,7 @@ read(<根>/session/<sid>/message/<mid>)
 > **原先为什么会写错**：把「发言是动作」这条正确结论**外推**成了「消息域整体只读」。
 > 而 `write` / `delete` 的三条旧路由（`chat/update_message` / `chat/delete_message` /
 > `chat/clear_messages`）当时仍在，本身就说明消息域有写路径——只是走的是另一套机制。
-> 审计与改判见 [legacy-route-migration.md](./legacy-route-migration.md) §3。
+> 审计与改判见 [legacy-route-migration.md](../../../../../docs/archive/legacy-route-migration.md) §3。
 
 > **不变的是这一条**：新增消息仍然只有一个入口（聊天协议）；
 > 「一条消息只有一个地址」也没有变——改写与删除用的正是那个地址。

@@ -404,6 +404,38 @@ test('E-007 不误报：借用形参（`&Arc<dyn Plugin>` 不可能是字段）'
   assert.doesNotMatch(r.stdout, E007_HIT)
 })
 
+test('E-007 不误报：多行函数签名的形参（行首在圆括号内，不是字段）', () => {
+  const src = `use std::sync::Arc;
+
+pub struct CompositePlugin {}
+
+impl CompositePlugin {
+    pub(crate) async fn broadcast_collect(
+        plugin: Arc<dyn Plugin>,
+        ctx: Arc<dyn InvokeRequest>,
+        who: &str,
+    ) {
+        let _ = (plugin, ctx, who);
+    }
+}
+`
+  const r = audit({ ...CLEAN, 'symbio/src/plugins/composite/composite.rs': src })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E007_HIT)
+})
+
+test('E-007 括号计数不被字符串带偏：含不平衡括号的字符串之后的真实字段仍命中', () => {
+  const src = `const TIP: &str = "注意 (左括号不平衡";
+
+pub struct FooPlugin {
+    held: Option<Arc<dyn Plugin>>,
+}
+`
+  const r = audit({ ...CLEAN, 'symbio/src/plugins/composite/composite.rs': src })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /\[ERROR\]\s+E-007\s+symbio\/src\/plugins\/composite\/composite\.rs:\d/)
+})
+
 test('E-007 不误报：不在 `plugins/` 之下的同类字段', () => {
   const r = audit({
     ...CLEAN,

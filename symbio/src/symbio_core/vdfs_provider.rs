@@ -1,55 +1,24 @@
 //! 核心 VdfsProvider —— 统一资源访问的唯一契约（纯 object-safe trait）。
 //!
 //! 本模块是 VDFS 的 **centerpiece**，只暴露**纯接口**：
-//! - [`VdfsProvider`] 一个 trait 收拢全部资源操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅）；
+//! - [`VdfsProvider`] 收拢全部资源操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅）；
 //! - 每个资源域 = 一份 [`VdfsProvider`] 实现，`Arc<dyn VdfsProvider>` 是使用方与
 //!   实现方之间**唯一**的交换物；
 //! - 线上形状（`vdfs/*` 请求 / 响应信封、协议路径常量）定义在 vdfs 插件内部
-//!   （`plugins/vdfs/protocol.rs`），**core 不暴露这些类型**——与
-//!   [`crate::symbio_core::model_provider`] 的组织方式一致。
+//!   （`plugins/vdfs/protocol.rs`），**core 不暴露这些类型**。
 //!
-//! ## 组合根不属于 provider
-//!
-//! **provider 完全不知道自己被放在哪层目录下**。目录树的组织是**使用方**的概念：
-//! 谁用它、谁决定它在目录树上的名字。因此：
-//!
-//! - trait 上没有 `name()` 之类的方法——provider 不管理也不提供自己的目录名；
-//! - provider 的每个方法只接收**本子树内的相对路径**（`""` = 自身根），
-//!   已由使用方完成规范化与穿越校验；
-//! - 全路径（`<目录>/<rel…>`）由使用方拼接、回填。
-//!
-//! ## 依赖方向
-//!
-//! - **实现方**（如 `setting` 插件）实现本 trait，在 `traverse` 广播中经
-//!   `CapabilityVisitor::register_vdfs_provider(目录名, provider)` 注册自身。
-//!   **目录名由使用方选定**，约定用插件名（`PLUGIN_*` 常量）——插件名在宿主内
-//!   唯一，天然就是合格的目录名；
-//! - **`composite` 容器**只负责**目录合成**：它把各子插件注册的 provider 按
-//!   注册名铺成一级子目录（`plugins/composite/vdfs.rs`）。它自身不是「根级
-//!   provider」——机制里没有根级 provider 这个概念，`<根>` 只是使用方在合成
-//!   视图之上取的展示地址；
-//! - **`vdfs` 插件**取容器注册的根，按 `vdfs/*` 协议分发（前端与 LLM 走同一条
-//!   分发链路，不存在第二套实现）；
-//! - 机制只认 [`VdfsAccess`] 的四个访问位（`r` / `w` / `l` / `t`），不做任何
-//!   按类型的特判——这是 VDFS 保持通用的根基。
-//!
-//! ## 开放边界
-//!
-//! 本模块**只依赖** `std` / `serde` / `serde_json` / `async_trait`，不引用任何
-//! 宿主专有类型（宿主运行时状态经 [`VdfsContext`] 不透明注入），因此可原样抽出
-//! 为独立 crate 供任何宿主复用。symbio 侧的接线（上下文注入 + 错误翻译）在
-//! [`crate::symbio_core::vdfs::host`]。
+//! **分层、依赖方向、开放边界（本模块可原样抽出为独立 crate）见
+//! `docs/design/vdfs.md` §2**——此处不复述。
 //!
 //! 数据模型速览：
 //!
 //! - 一切资源 = 目录树上的**节点**（[`VdfsNode`]），地址 = 树内相对路径
-//!   `<目录>/<rel>`（宿主门面负责把它映射成对外展示地址，见 plugins/vdfs/fs.rs）；
+//!   `<目录>/<rel>`（全路径由使用方拼接、回填；provider 不知道自己被放在哪层目录下）；
 //! - 节点的能力 = 四个**访问位**（[`VdfsAccess`]：`r` 读 / `w` 写 / `l` 列 / `t` 遍历）；
 //! - 内容 = [`VdfsContent`]（文本 `text` 或二进制 `b64`，互斥）；
 //! - 呈现 = 节点的 `ext`（扩展名）→ 使用方选渲染器；渲染器所需描述经 `schema` 透传；
-//! - 变更 = [`VdfsChange`]（子树内**相对路径** + 可选**业务载荷** `data`：
-//!   消息项上是 `ChatMessage`、会话运行态上是 `VdfsNode`，缺失 = 回读收敛；
-//!   经 [`VdfsChangeSink`] 由使用方补成展示地址后投递）。
+//! - 变更 = [`VdfsChange`]（子树内**相对路径** + 可选**业务载荷** `data`，
+//!   缺失 = 回读收敛），经 [`VdfsChangeSink`] 由使用方补成展示地址后投递。
 
 use async_trait::async_trait;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

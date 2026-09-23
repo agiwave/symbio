@@ -567,6 +567,9 @@ const UPWARD_FIELD_NAMES = new Set(['parent', 'router'])
  * 3. 字段名是 `parent` / `router` —— 向上引用，见 `UPWARD_FIELD_NAMES`；
  * 4. 类型以 `&` 开头 —— 借用，**字段不可能长这样**（没有生命周期的结构体字段
  *    编译不过），所以这类行必然是形参（`agent.host::…(tree: &Arc<dyn Plugin>)`）。
+ *
+ * 另有第五类不算豁免而是**前置过滤**：行首在圆括号内 ⇒ 形参 / 实参，不是字段
+ * （多行签名里的 `plugin: Arc<dyn Plugin>,`）。判据在调用点的 `parenDepthAtLineStart`。
  */
 function isSiblingPluginRef(name, typeText) {
   if (!/Arc<\s*dyn\s+Plugin\s*>/.test(typeText)) return false
@@ -575,6 +578,43 @@ function isSiblingPluginRef(name, typeText) {
   if (UPWARD_FIELD_NAMES.has(name)) return false
   if (typeText.trimStart().startsWith('&')) return false
   return true
+}
+
+/**
+ * 该行净增的圆括号数（先剥字符字面量与字符串，免得 `'('` / `"("` 被当成括号）。
+ *
+ * 顺序不能反：字符字面量先剥，否则 `'"'` 会被字符串规则吃掉一半。
+ */
+function parenDelta(line) {
+  const cleaned = line.replace(/'(?:\\.|[^\\'])'/g, "''").replace(/"(?:\\.|[^"\\])*"/g, '""')
+  let d = 0
+  for (const c of cleaned) {
+    if (c === '(') d += 1
+    else if (c === ')') d -= 1
+  }
+  return d
+}
+
+/**
+ * 每行**行首**的圆括号深度（按去注释后的代码行累计）。
+ *
+ * 用途：E-007 只该命中**结构体字段**。但多行函数签名的每个形参也长成
+ * `plugin: Arc<dyn Plugin>,`——与字段行**逐字同形**，`FIELD_DECL_RE` 分不出来，
+ * 于是 `composite::broadcast_collect(plugin: Arc<dyn Plugin>, …)` 被误判成
+ * 「按值持有兄弟插件实例」（2026-09-23 实测：门禁因此变红）。
+ *
+ * 判据：**字段不可能出现在圆括号里**。行首深度 > 0 ⇒ 本行是形参 / 实参，不是字段。
+ * 单行元组结构体（`pub struct Newtype(Arc<dyn Plugin>);`）不受影响——它本来就匹配
+ * 不上 `FIELD_DECL_RE`（该正则要求整行就是 `name: Type,`）。
+ */
+function parenDepthAtLineStart(lines) {
+  const out = []
+  let depth = 0
+  for (const line of lines) {
+    out.push(depth)
+    depth += parenDelta(line)
+  }
+  return out
 }
 
 /**
@@ -602,6 +642,7 @@ for (const abs of codeFiles) {
   const { raw, code } = readLines(abs)
   const isRust = abs.endsWith('.rs')
   const txt = code
+  const parenDepth = parenDepthAtLineStart(txt)
 
   for (let i = 0; i < txt.length; i++) {
     const line = txt[i]
@@ -638,7 +679,9 @@ for (const abs of codeFiles) {
     //
     // 只扫 `plugins/` 之下：`session/chat_loop/state.rs` 等虽在 `plugins/` 里，
     // 但其 `parent` 字段是向上引用（豁免 3），不会误报。
-    if (isRust && isInPluginsDir(abs)) {
+    // **行首括号深度 > 0 ⇒ 形参，不是字段**（见 `parenDepthAtLineStart`）——
+    // 多行函数签名里的 `plugin: Arc<dyn Plugin>,` 与字段行逐字同形。
+    if (isRust && isInPluginsDir(abs) && parenDepth[i] === 0) {
       const m = line.match(FIELD_DECL_RE)
       if (m && isSiblingPluginRef(m[1], m[2]) && !exempted(raw, i, 'E-007')) {
         report(

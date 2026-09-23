@@ -15,36 +15,14 @@
 
 ## 什么使 Symbio 与众不同
 
-### 1. 分形插件 — 一种接口，任意嵌套
+- **分形插件** — 每个能力都是插件，每个插件都可含子插件；容器与叶子共享同一 `Plugin` trait。
+- **路径即路由** — 模型输出 `vdfs_read` 就能读文件、`http_request` 就能发请求，无代码生成。
+- **Session 是唯一指挥** — 会话编排（工具循环 / 裁剪 / 压缩）只有一个入口；Agent 只是可绑定的资产。
+- **VDFS** — 文件、模型、Agent、技能、MCP、设置……统统是有地址的资源，一个心智模型。
+- **Agent = 一个目录** — 技能 / MCP 复用宿主的子树，没有独立二进制。
 
-每个能力都是插件，每个插件都可包含子插件；容器（`home` / `composite`）与叶子（`local` / `web` / `model` …）**共享同一 `Plugin` trait**（`route` + `traverse`）。新增能力只要实现 `Plugin`、经 `inventory` 静态注册、挂到任意位置，无需改动核心。
-
-```
-home
-└── worker (composite)
-    ├── session · agent · model · local · vdfs · mcp · skill · web · telegram …
-    └── gateway        ← HTTP / WS 入站（转发父级路由）
-```
-
-入口：Tauri（桌面）· CLI（进程内）· Gateway（入站）—— 同一套装配、同一条协议。
-
-> 示意图，结构事实以 [CURRENT.md](docs/CURRENT.md) 为准。
-
-### 2. 路径即路由 — LLM 用字符串呼唤工具
-
-没有代码生成：模型输出 `vdfs_read` 就能读文件、`http_request` 就能发请求。插件树经 `traverse` 递归收集进 `CapabilityVisitor`，LLM **自动发现**全树的工具。
-
-### 3. Session 作为唯一指挥
-
-`session` 是**唯一**的工具调用循环入口：直连 `model` 执行回合，并负责历史裁剪与上下文压缩（L0–L6 分层，不耦合 LLM 传输层）。`agent` 只持有 Agent 目录（`AGENTS.md` 人格 + 技能 / MCP 子树装配），并以 `agent_run` 工具发起子智能体会话。因此一个会话可绑定任意 Agent，也可以不绑定。
-
-### 4. VDFS — 把一切都当作地址
-
-文件、模型、Agent、技能、MCP、设置……统统是资源插件，挂在 `<根>/<名称>` 下：**14 个前端操作 + 10 个面向 LLM 的 `vdfs_*` 工具**，一个心智模型。
-
-### 5. Agent v2 — 插件树，而非独立二进制
-
-Agent 就是一个目录：其中的技能 / MCP **复用宿主已有的** `skill` / `mcp` 子树，人格由根 `AGENTS.md` 表达（规范见下方文档表「设计」行）。
+> 展开的架构说明见 [架构总览](docs/architecture/OVERVIEW.md)；运行时拓扑（谁挂在谁下面）见
+> [系统地图](docs/SYSTEM_MAP.md)——本文不复述这两者。
 
 ---
 

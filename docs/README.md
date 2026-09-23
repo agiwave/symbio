@@ -17,6 +17,36 @@
 
 示例：会话上下文压缩的 L0-L6 分层总览在 [session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md)，各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md)——**会话相关的一切文档都在 `symbio/src/plugins/session/docs/` 内**；系统级目录只保留跨模块规范（如 [design/vdfs.md](./design/vdfs.md)）。
 
+## 文档职责边界（一个事实只有一个 owner）
+
+**重复描述 = 双倍维护成本。** 同一事实写两处，改代码时就要改两处，且两处必然漂移。
+因此每类事实只有一个 owner，其余位置一律**引用**，不复述：
+
+| 事实 | 唯一 owner | 其它文档 |
+|---|---|---|
+| 现在是什么（插件 / 挂载点 / 路由 / 工具 / 规模） | [CURRENT.md](./CURRENT.md)（代码生成） | **不手抄**，需要就引用 |
+| 路由语义与调用方 | [reference/ROUTES.md](./reference/ROUTES.md) | 模块 `README.md` 不抄路由表 |
+| 错误码 | [reference/ERROR_CODES.md](./reference/ERROR_CODES.md) | PROTOCOLS 不再列错误码表 |
+| 配置项 | [reference/CONFIGURATION.md](./reference/CONFIGURATION.md) | 模块 `README.md` 只写机制 + 指向它 |
+| 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [architecture/PROTOCOLS.md](./architecture/PROTOCOLS.md) | — |
+| 系统拓扑（谁挂在谁下面） | [SYSTEM_MAP.md](./SYSTEM_MAP.md) | 其它图只画自己那一层 |
+| 排障链路（一次请求经过哪些代码） | [architecture/DATA_FLOW.md](./architecture/DATA_FLOW.md) | — |
+| 为什么这样设计（含被否决的方案与理由） | [DECISIONS.md](./DECISIONS.md) | 其它文档只引用 ADR 编号 |
+| 模块内部机制 | 该模块 `README.md` | 系统级文档不复述 |
+| 模块深度设计与不变量 | 该模块 `docs/` | — |
+| 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史**（见下） |
+| 一次性评审 / 迁移记录 / 体检报告 | `docs/archive/` | 活文档不保留过程日志 |
+
+### 两条硬规则
+
+1. **现行文档只描述「现在是什么」**，不写「曾经是什么、后来改成了什么」。
+   这类追溯一律走 `git log -S<符号>` / `git log --grep=<词>`；需要保留「为什么否决 A 选 B」的
+   结论，就写进 `DECISIONS.md` 的一条 ADR——**那才是它的 owner**。
+   判据：一条叙述如果随每次重构都要跟着改，它就不该活在现行文档里。
+2. **代码注释与文档各有边界**：注释写「读这个文件需要知道的不变量与陷阱」，
+   文档写「机制与取舍」。**注释不复述文档，文档不复述注释**（签名、方法清单、字段表以代码为准）。
+   详见 [CONTRIBUTING.md §4](../CONTRIBUTING.md)。
+
 ## 快速导航
 
 | 我想... | 查阅 |
@@ -63,25 +93,21 @@ docs/                            # 系统级文档（跨模块）
 │   ├── http-api-transport.md            # Gateway HTTP/WS 传输层设计
 │   ├── class-diagram.mermaid            # 类图
 │   └── sequence-diagram.mermaid         # 时序图
-└── archive/                     # 历史归档（仅供参考；含 implementation-logs/、proj/）
+└── archive/                     # 历史归档（仅供参考）
                                  #  注：变更历史以 `git log` 为准，本仓库**不维护 CHANGELOG**
-                                 #  已废止机制与旧规范：entity-management-mechanism.md /
-                                 #  entity-provider-mechanism.md / open-agent-bundle-spec.md /
-                                 #  vdfs-review.md / frontend-ui-ux-*.md
-                                 #  一次性评审 / 体检 / 已落地的实施方案（2026-09-23 归档）：
-                                 #  architecture-health-check-2026-09.md /
-                                 #  frontend-mechanization-review.md（-round2）/
-                                 #  streaming-chain-review-2026-09.md（-round2-2026-09-22）/
-                                 #  guard-and-adr-health-check-2026-09.md /
-                                 #  session-options-unification.md /
-                                 #  session-realtime-vdfs-watch.md
+                                 #  **内容清单以目录为准**（`ls docs/archive/`）——不在此抄一份
+                                 #  会漂移的副本。含：已废止的旧机制 / 旧规范、一次性评审与体检
+                                 #  报告、已落地的实施方案、已完成的迁移记录；
+                                 #  另有 implementation-logs/ · proj/ · ideas/ 三个子目录
 
 symbio/src/plugins/<plugin>/     # 模块级文档（就近原则）
 ├── README.md                    # 插件职责与内部机制，**不复制路由表**（指向 ROUTES.md）
 │                                #  （16 个插件全覆盖）
-└── docs/                        # 可选：该模块的深度设计 / 审计 / 性能文档
+└── docs/                        # 可选：该模块的**现行**深度设计 / 性能文档
                                  #  例：session/docs/（核心循环、压缩设计、心跳、
-                                 #  模块分工、性能、级联选项、VDFS 会话消息……）
+                                 #  模块分工、性能、会话选项、VDFS 会话消息……）
+                                 #  ⚠️ 模块目录同样受「归档」约束：一次性评审 / 迁移记录 /
+                                 #  体检报告一律 `git mv` 进 docs/archive/，不留在活目录
 
 tauri/                           # 前端
 ├── README.md                    # 前端入口
@@ -119,17 +145,19 @@ tauri/                           # 前端
 
 ## 维护规则
 
-| 变更类型 | 需要更新的文档 |
+| 变更类型 | 需要更新的**唯一**位置 |
 |----------|----------------|
 | 新增路由 | **只在 `ROUTES.md` 登记**（模块 `README.md` 不复制路由表，只写机制并指向 `ROUTES.md`） |
 | 新增错误码 | `ERROR_CODES.md` |
 | 新增配置项 | `CONFIGURATION.md` |
 | 插件 / 挂载点 / 工具 / 存储布局变更 | 重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁；`CURRENT.md` 不手改） |
 | 模块内部机制变更 | 该模块 `README.md`（系统级文档不复制细节） |
-| 跨模块架构变更 | `OVERVIEW.md` + `DECISIONS.md` + `SYSTEM_MAP.md` |
+| 跨模块架构变更 | `OVERVIEW.md` + `SYSTEM_MAP.md` 各改自己那一层 |
+| 决策变更（选了 A、否决了 B） | `DECISIONS.md` 增一条 ADR，其它文档只引用编号 |
 | 协议变更 | `PROTOCOLS.md` |
-| 历史实施记录 | 只进 `archive/`，现行文档不保留过程日志 |
+| 历史实施记录 / 已完成的迁移 | 只进 `archive/`，现行文档不保留过程日志 |
 | 常见问题 | `TROUBLESHOOTING.md` |
+| 「改了什么」 | 提交信息 + `git log`——**不改任何文档** |
 
 ## 阅读路径
 

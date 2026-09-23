@@ -214,7 +214,7 @@ valgrind --tool=massif ./target/release/symbio
 
 **常见原因**：
 - 大量 Session 未释放 (检查连接超时配置)
-- 嵌入模型加载 (fastembed 首次加载较慢)
+- 嵌入模型加载（`ort` / ONNX 首次加载较慢）
 
 ---
 

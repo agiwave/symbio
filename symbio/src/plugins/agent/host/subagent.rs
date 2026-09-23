@@ -461,7 +461,7 @@ fn validate_working_dir(provided: &str) -> Result<String, PluginError> {
 /// 会话的**唯一**读入口是 VDFS（`read(<根>/session/<sid>)`），存在性因此也该由
 /// 同一层回答。曾用的 `session/get_messages` 专用路由为了回答「在不在」而读回
 /// 整份历史，已于 2026-09-23 退役——它当时也不是「会话的读接口」，
-/// 见 `session/docs/legacy-route-migration.md` §3.4.1。
+/// 见 `docs/archive/legacy-route-migration.md` §3.4.1。
 ///
 /// 取的是**本作用域容器**的 VDFS 视图（[`Plugin::get_vfs_provider`]——core 的查询
 /// 接口）：容器把子插件按**实例名**列为子目录，而 `route` 分发用的是同一个键，

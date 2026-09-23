@@ -212,14 +212,8 @@ pub enum PluginPayloadWire {
 
 ## 错误码
 
-| 错误码 | 含义 | 处理建议 |
-|--------|------|----------|
-| `NOT_FOUND` | 路由路径不存在 | 检查路径拼写 |
-| `VALIDATION_ERROR` | 输入参数校验失败 | 检查 payload 格式 |
-| `INTERNAL_ERROR` | 内部执行异常 | 查看后端日志 |
-| `TIMEOUT` | 请求超时 | 检查网络或增加超时 |
-| `FORBIDDEN` | 权限不足 | 检查安全策略配置 |
-
+错误码是 **ABI 的一部分**（跨版本禁止随意变更）。**完整清单与处理建议见
+[reference/ERROR_CODES.md](../reference/ERROR_CODES.md)**——本文不复制那张表。
 
 ---
 
@@ -248,43 +242,28 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 | `system` | 总线插件自身（`event_bus/subscribe` 的 `connected` 握手） | 前端订阅连接 |
 | `vdfs` | vdfs 宿主的变更投递（`plugins/vdfs/host.rs`） | **一切资源与转写的实时消费方**：前端（`composables/useVdfs.ts` 通用浏览器、`stores/sessionNodeSync.ts` 会话清单、会话转写）——都按**地址**分派，不依赖事件到达顺序 |
 
-> 曾经的 `session` 频道（会话域 `StreamEvent`：`Status` / `Update` / `Abort`）**已整体废除**：
-> 会话运行态是会话节点的属性（`status` + `attributes.outcome` / `.error`）、转写是消息节点。
-> 于是 `event_bus` 退化为**纯传输层**（不再认识任何业务频道语义）。
+> **会话域不另设频道**：消息与运行态都是 VDFS 变更——消息是 `<根>/session/<id>/message/<mid>`
+> 这个**文件**，运行态是会话节点（`<根>/session/<id>`）的 `status`，因此都走 `kind = "vdfs"`。
+> 顺序是**节点属性**（`ChatMessage.seq`，消费端按它排序），**不是投递属性**——所以「到达顺序」
+> 与「显示顺序」无关，无需任何投递层的顺序保证
+> （[ADR-025](../DECISIONS.md#adr-025-顺序是节点属性delta-是updated的传输形态)）。
 >
-> **会话域的实时面也在这里**（ADR-025，2026-09-23）：消息是 `<根>/session/<id>/message` 这个
-> 文件夹里的**文件**，会话运行态是会话节点（`<根>/session/<id>`）的 `status`——两者都是
-> **VDFS 变更**，都走 `kind = "vdfs"`。本条此前写的是「实时面走 `session/stream` 转写流，
-> **因为「会话不忙 ⇒ 本轮消息已终态」这条推理需要顺序保证，而无序总线给不了**」——
-> **这条推理的前提是错的**：顺序是**节点属性**（`ChatMessage.seq`，消费端按它排序），
-> 不是投递属性。于是「到达顺序」与「显示顺序」无关，那条顺序保证也就无从需要。
-> 见 [`symbio/src/plugins/session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) §11。
-
-> 资源变更**不另设频道**：一切资源的生命周期与状态变化都是 VDFS 变更，统一走 `vdfs`；
-> 历史上并存的 `entity` 频道已随实体机制废除。
+> **资源变更不另设频道**：一切资源的生命周期与状态变化都是 VDFS 变更，统一走 `vdfs`。
 
 ---
 
 ## 数据契约 (Schemas)
 
-所有跨端数据结构集中定义在 `symbio/src/symbio_core/schemas/`，按业务域拆分：
+所有跨端数据结构集中定义在 [`symbio/src/symbio_core/schemas/`](../../symbio/src/symbio_core/schemas/)
+（该目录按业务域拆分，**文件清单以目录为准**，本文不抄一份会漂移的副本）。
 
-| 文件 | 内容 |
-|------|------|
-| `agent_config.rs` | Agent 配置结构 |
-| `model_chat.rs` | Model 请求/响应 |
-| `session_*.rs` | 会话消息结构 |
-| `mcp_*.rs` | MCP 配置 |
-| `memory_*.rs` | 记忆操作 |
+两条命名约定：
 
-所有结构都派生 `Serialize` / `Deserialize`，命名**全程 `snake_case`**——线上键名与 Rust 字段名逐字相同，**没有任何 host 侧的 `camelCase` 转换**。
-
-唯一的例外是 `plugins/mcp/types.rs`：那里镜像的是 MCP 的**外部规范报文**
-（`readOnlyHint` 等），camelCase 由规范规定，故用 `#[serde(rename_all = "camelCase")]`
-显式声明（全仓仅此 7 处）。
-
-> 这条曾经写作「`snake_case`（Rust）↔ `camelCase`（host 转换）」，与事实不符：
-> 按它去写代码，会造出一份「前端按 camelCase 读、后端按 snake_case 发」的静默错位。
+- 所有结构派生 `Serialize` / `Deserialize`，命名**全程 `snake_case`**——线上键名与 Rust 字段名
+  逐字相同，**没有任何 host 侧的 `camelCase` 转换**；
+- 唯一例外是 [`plugins/mcp/types.rs`](../../symbio/src/plugins/mcp/types.rs)：它镜像 MCP 的**外部
+  规范报文**（`readOnlyHint` 等），camelCase 由规范规定，故用 `#[serde(rename_all = "camelCase")]`
+  显式声明。
 
 ---
 
@@ -330,8 +309,11 @@ SingleFileVdfs, MemoryVdfs}`。套一层 `dyn` 工厂只会把一次构造换成
 
 ## 文档映射约定
 
-- **后端**：`// Corresponding Host: <path>` 注释指向该数据结构在宿主层的对应定义
-- **文档集中**：插件不各自维护文档，全部统一在 `docs/`；复杂机制的实现细节见 `docs/design/`（如 VDFS 机制规范 `vdfs.md`）
+- **数据结构以代码为准**：跨端结构的定义在 `symbio_core/schemas/`，本文件不复制字段清单
+  （抄一份必然漂移；要看字段就读 Rust 定义或它的 `//!` 头注释）。
+- **机制与取舍**：复杂机制的规范见 [docs/design/](../design/)（如 VDFS 机制规范
+  [vdfs.md](../design/vdfs.md)）；模块内部机制见各模块 `README.md`（下沉原则，见
+  [docs/README.md](../README.md)）。
 
 ---
 

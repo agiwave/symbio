@@ -79,6 +79,11 @@ const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.
  * 用「自述」而不是文件名匹配：文件名（`-review-` / `-health-check-`）是约定，会漂移；
  * 而这批文档**每一篇都在开头写明了自己的类型**，读它们自己写的话比猜文件名准。
  *
+ * 扫描范围覆盖**模块文档**，不只 `docs/`——过程文档同样会沉积在模块目录里：
+ * `symbio/src/plugins/session/docs/legacy-route-migration.md`（已完成的迁移审计，
+ * 每行都是「已删 / 已下线」）就这样在活目录里躺了多轮，每次路由改动都被回改一次。
+ * 只扫 `docs/` 时它**永远不会被提示**——这类漏网正是「改一个功能要动十几个文档」的来源之一。
+ *
  * 豁免：头部（前 `DOCTYPE_HEAD_LINES` 行）写 `<!-- doc-link-allow D-002: 理由 -->`，
  * 理由不可为空（与 `grep-audit` / `dead-code-audit` 同一条约定）。
  */
@@ -180,14 +185,18 @@ for (const rel of ROOT_FILES) {
 }
 
 // ---- D-002：过程文档是否滞留在活跃目录 ----
+// 扫描范围 = 活文档根（`docs/` + 模块文档）；`examples/` 是示例包内容，不是项目文档，跳过。
+const D002_ROOTS = ['docs', 'symbio/src', 'tauri', 'cli']
 const misplaced = []
 let docsScanned = 0
-for (const file of walkDocs(path.join(repoRoot, 'docs'))) {
-  const rel = path.relative(repoRoot, file).split(path.sep).join('/')
-  if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) continue
-  docsScanned += 1
-  const marker = processDocMarker(fs.readFileSync(file, 'utf8'))
-  if (marker) misplaced.push({ rel, why: marker.source })
+for (const root of D002_ROOTS) {
+  for (const file of walkDocs(path.join(repoRoot, root))) {
+    const rel = path.relative(repoRoot, file).split(path.sep).join('/')
+    if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) continue
+    docsScanned += 1
+    const marker = processDocMarker(fs.readFileSync(file, 'utf8'))
+    if (marker) misplaced.push({ rel, why: marker.source })
+  }
 }
 
 const exemptNote = skippedFiles > 0 ? `（豁免 docs/archive/ 下 ${skippedFiles} 个文件）` : ''

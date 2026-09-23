@@ -2,20 +2,11 @@
 //!
 //! ## 它不是什么
 //!
-//! 这里过去是「一个 trait + 三个后端」：`FileSessionStore` / `SqliteSessionStore`
-//! / `InMemorySessionStore`，由配置项 `store_kind` 经 `create_store` 工厂选型。
-//! 那个形状有两个已证伪的前提（见 docs/*-audit.md）：
+//! **没有可切换的存储后端**：会话只有一种落盘布局，临时会话只是「不持久化」。
+//! 为什么不做多后端选型（以及当初那个形状被推翻的两个前提），见
+//! [ADR-008](docs/DECISIONS.md)——此处不复述。
 //!
-//! - **sqlite 是「可配置但没人能配置」**：前端全量搜索 `store_kind` 零命中，
-//!   默认值恒为 `file`；它还不支持子会话清单（有测试专门锁死这条限制），
-//!   并且为了放压缩存档仍然要在磁盘上开一个 `<root>/<safe_id>/` 目录——
-//!   所谓「第二种后端」既没换来性能，也没换来独立。
-//! - **memory 不是后端，是「要不要持久化」**：它的每一处语义都是逐条对齐文件
-//!   后端写出来的（load 缺省新建、save upsert、list 按 updated_at 降序），
-//!   存在的唯一理由是让临时会话复用同一份会话引擎（审计 B1/B2）。
-//!
-//! 两者都不是「同一件事的第二种实现」，`dyn` 因此只是把一次构造换成一次查表。
-//! 现在只剩一个具体类型，差异收成构造时的一次选型：
+//! 差异收成构造时的一次选型：
 //!
 //! | 驻留方式 | 构造 | 条目住在 |
 //!|---|---|---|
@@ -24,23 +15,16 @@
 //!
 //! ## 与 VDFS 的关系
 //!
-//! **对外**，会话早已只有 VDFS 一个入口（`<根>/session` 的清单 / `消息` /
-//! `子会话` / `工作目录`，见 `super::plugin` 的 `impl VdfsProvider`）；本模块是
-//! 那个 provider 下面的真相源。**对内**，它刻意**不**改用
-//! [`vdfs_service`](crate::providers::vdfs_service) 的三种集中实现，理由是拓扑相反：
-//!
-//! - `DirVdfs` 的定义是「条目内部可下钻浏览」，会话一旦套上，`session.json`、
-//!   `messages/`、`tool_archives/`、`transcripts/`、`sessions/` 会原样成为对外
-//!   地址——把物理布局当公共契约。而会话要求 `<id>` 是叶子、内部只以人读语义段
-//!   呈现（与 agent 目录的 `提示词` / `技能` / `MCP` 同一口径，规范 §13.4）。
-//! - 条目也不是文件字节：`<id>/message/<mid>` 是从整份 `Session` 派生的视图，
-//!   `append` / `replace` / `update` 的 seq 分配与剔孤儿是会话专有的写入语义
-//!   （在 `super::chat_session`）。
-//!
-//! 真正共用的是**寻址**：根由调用方传入（装配态即插件自己的目录），id→段名取
-//! [`safe_segment`]（经 [`super::paths::safe_id`]），所以会话目录名与资源条目目录名
-//! 永远是同一份规则。这与规范 §13.4 里「目录自管的类型自己落盘，不经 vdfs_service」
-//! 是同一条判据——agent 目录是先例。
+//! **对外**，会话只有 VDFS 一个入口（`<根>/session` 的清单 / `消息` / `子会话` /
+//! `工作目录`，见 `super::plugin` 的 `impl VdfsProvider`）；本模块是那个 provider 下面
+//! 的真相源。**对内**，它刻意**不**改用
+//! [`vdfs_service`](crate::providers::vdfs_service) 的三种集中实现：`DirVdfs` 会把条目
+//! 内部原样变成对外地址（`session.json` / `messages/` / `tool_archives/` …），而会话
+//! 要求 `<id>` 是叶子、内部只以人读语义段呈现；且条目不是文件字节——`<id>/message/<mid>`
+//! 由整份 `Session` 派生，seq 分配与剔孤儿是会话专有的写入语义（在 `super::chat_session`）。
+//! 共用的只是**寻址**：根由调用方传入，id→段名取 [`safe_segment`]
+//! （经 [`super::paths::safe_id`]），与资源条目同一份规则。判据见
+//! `docs/design/vdfs.md` §13.4（agent 目录是先例）。
 //!
 //! ## 磁盘布局
 //!
@@ -52,19 +36,14 @@
 //!
 //! ### 为什么元数据与消息要分两个文件
 //!
-//! 曾经消息**内联**在 `session.json` 里，于是「列一次清单」= 读出并解析
-//! **所有会话的全部历史**——会话越多、聊得越久越慢，且与有界窗口无关
-//! （窗口只减少读几个文件，不减少每个文件的大小）。
+//! 清单只读 `session.json`，其大小与会话聊了多久**无关**；`messages.json` 只有真的
+//! 要取转写时才读。代价是清单字段（标题 / 条数 / 摘要 / 标签）不能现算，必须在 `save`
+//! 时算好落盘——它们是**投影**（[`super::types::SessionSummary`]），可重算，不是第二份
+//! 真相。性能取舍见 `symbio/src/plugins/session/docs/perf.md`。
 //!
-//! 分开之后清单只读 `session.json`，其大小与会话聊了多久**无关**；`messages.json`
-//! 只有真的要取转写时才读。代价是清单需要的字段（标题 / 条数 / 摘要 / 标签）
-//! 不能再从消息现算，必须在 `save` 时算好落盘——它们是**投影**
-//! （[`super::types::SessionSummary`]），可重算，不是第二份真相。
-//!
-//! 旧布局（内联）仍**可读**：`messages.json` 缺失时回落到 `session.json` 里的
-//! `messages` 字段；投影缺失时同样用内联消息**就地补算**
-//! （[`SessionMetaFile::into_summary`]）——这是「存量文件没有投影字段」的兜底，
-//! 缺了它清单会静默退化成显示 id。
+//! 旧布局（消息内联在 `session.json`）仍**可读**：`messages.json` 缺失时回落到内联
+//! `messages` 字段；投影缺失时用内联消息**就地补算**（[`SessionMetaFile::into_summary`]）
+//! ——缺了这条兜底，清单会静默退化成显示 id。
 //!
 //! ### 子会话嵌套存储（机制约定，见 docs/design/vdfs.md）
 //!

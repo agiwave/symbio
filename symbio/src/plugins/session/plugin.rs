@@ -467,7 +467,7 @@ impl Plugin for SessionPlugin {
             //                 的 `create` 位表）——那条理由因此消失。CLI 改走
             //                 `vdfs/write(<根>/session/<id>, {create:true, metadata})`，
             //                 一次调用同时覆盖新建与改元数据。见
-            //                 `session/docs/legacy-route-migration.md` §3.5。
+            //                 `docs/archive/legacy-route-migration.md` §3.5。
             //
             // 剩下的都不是 CRUD：前两条是**编排 / 控制**。
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),

@@ -101,7 +101,7 @@
 | 资源型插件条目（agent / model / mcp / skill / setting …） | `<homedir>/<类别>/<id>/<主文件>` | `providers/vdfs_service/` 三型：`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs` |
 | 会话与其消息 | `<homedir>/session/<id>/{session.json,messages.json}` | **单一具体类型** `SessionStore`（持久=磁盘布局 / 临时=进程内驻留）。曾有 `store_kind` × file/sqlite/memory 三后端选型，**已删除** |
 | Agent 目录 | `agent/<id>`（工作区级 + 全局级双层） | `AgentDirStore` 自管，不经 `vdfs_service`；虚拟视图以 `<vdfs_root>/agent/<id>` 进入 |
-| 插件配置（含会话配置） | `<homedir>/plugins/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `ConfigFile` 自读写，**无第二种后端、无第二条配置协议** |
+| 插件配置（含会话配置） | `<homedir>/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `ConfigFile` 自读写，**无第二种后端、无第二条配置协议** |
 
 ## 5. 规模与宿主接缝
 
@@ -109,7 +109,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 200 文件 / 52266 行 | 68 文件 / 21600 行 |
+| `symbio/src` | 200 文件 / 52243 行 | 68 文件 / 21620 行 |
 | `cli/src` | 4 文件 / 1575 行 | 0 文件 / 78 行 |
 | `tauri/src-tauri/src` | 3 文件 / 445 行 | 0 文件 / 0 行 |
 | `tauri/src` | 95 文件 / 19961 行 | 49 文件 / 10390 行 |
@@ -123,4 +123,4 @@
 
 ---
 
-> 生成时间：2026-09-23 12:29:50 UTC · 源：`git rev-parse HEAD` = `427ce5e`
+> 生成时间：2026-09-23 13:54:33 UTC · 源：`git rev-parse HEAD` = `ef5b76d`
