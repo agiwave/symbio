@@ -91,7 +91,7 @@ export interface HydratedTranscript {
  * 把后端拉来的历史快照装进本地消息表（**快照即权威，整表装载**）。
  *
  * 转写的权威副本在存储：`loadMessages`（切换会话 / 显式刷新）以此整表装载，
- * 增量由 `transcriptStream` 持续收敛——装载与增量消费是同一条数据链路的
+ * 增量由 `sessionTranscriptSync`（VDFS 变更消费端）持续收敛——装载与增量消费是同一条数据链路的
  * 两个入口，不存在需要"合并"的两个真相来源。
  *
  * `seq` 分配：缺失 `seq` 的旧数据按快照数组顺序续在已有最大 `seq` 之后

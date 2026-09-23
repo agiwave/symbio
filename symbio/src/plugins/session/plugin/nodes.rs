@@ -287,9 +287,11 @@ fn cursor_id(before: &str) -> Option<&str> {
 /// `seq`（唯一权威顺序锚点）决定。这个地址只服务**读面**（一次 `read` 拿整份
 /// 历史）与**写面**（`vdfs/action` 的截断 / 清空）。
 ///
-/// **实时面不在这里**：消息帧走 `session/stream` 转写流（与运行态共用同一个
-/// `seq` 空间），VDFS 侧一条消息变更也不发——`kind = "vdfs"` 是**资源**变更的
-/// 通道，不是列表内容的通道。见 `node-state-streaming.md` §11。
+/// **实时面也在这里**（ADR-025）：一条消息的流式 = 这个地址上文件的 `updated` +
+/// `delta`。此前实时面挪出过 VDFS（`session/stream` 转写流），理由是「VDFS 变更
+/// 没有流内序号」——那是把**数据的属性**（`ChatMessage.seq` = 消息在文件夹里的位置）
+/// 当成了**传输的属性**。转写流已于 2026-09-23 退役，见
+/// `docs/design/session-realtime-vdfs-watch.md`。
 pub(crate) const SEG_MESSAGES: &str = "消息";
 
 /// 转写列表本身的 provider 子树内路径（`<id>/消息`）。
@@ -305,8 +307,12 @@ pub(crate) fn message_dir_path(session_id: &str) -> String {
 ///
 /// 与 [`parse_session_path`] 互逆，因此与它同处——地址的「拼」与「解」必须同源，
 /// 分开写就会在改地址方案时漏改一边。生产路径由分发层按 `list` 返回的节点
-/// 补全展示地址；本函数供测试与文档锁定地址方案（测试用它寻址，不写裸字面量）。
-#[cfg_attr(not(test), allow(dead_code))]
+/// 补全展示地址（`<sid>/消息/<mid>`）。
+///
+/// 库代码的**读路径**经 `parse_session_path` 解析地址，不再主动拼它；库内已无
+/// 调用（实时面的落点改为消息目录，见 [`message_dir_path`]），保留它是给测试
+/// 与文档当**地址方案**的引用——单条消息的历史面地址仍是这个形状。
+#[allow(dead_code)] // 库内无调用者；地址方案的单一拼法，测试与文档引用
 pub(crate) fn message_path(session_id: &str, mid: &str) -> String {
     format!("{session_id}/{SEG_MESSAGES}/{mid}")
 }
@@ -502,6 +508,46 @@ pub(crate) fn message_node(m: &cm::ChatMessage) -> vdfs::VdfsNode {
         .attributes
         .insert("meta".to_string(), m.meta.clone().unwrap_or(Value::Null));
     n
+}
+
+/// [`message_node`] 的逆：VDFS 节点 + 正文 ⇒ 一条消息。
+///
+/// ## 为什么需要它
+///
+/// VDFS 变更**不带载荷**（ADR-025 定下的形状只有 `path` + `change` + 可选 `delta`），
+/// 因此「拿到一条 `updated`、要还原成消息」的消费端（如 agent 转播桥）只能
+/// `stat` + `read`。把「解」写在「拼」旁边，是为了让 `attributes` 增字段时
+/// 不可能只改一边——与 [`message_path`] / [`parse_session_path`] 同款纪律。
+///
+/// `None` = 节点状态词不在 [`cm::MessageStatus`] 的词表里（正常不该发生；
+/// 发生即两侧已分叉，宁可丢这一条也不要造出一个状态错误的消息）。
+pub(crate) fn message_of_node(node: &vdfs::VdfsNode, text: String) -> Option<cm::ChatMessage> {
+    /// attributes 里的值都是 `json!(..)` 塞进去的，原样反序列化即可回读类型。
+    fn attr<T: serde::de::DeserializeOwned>(
+        m: &serde_json::Map<String, Value>,
+        k: &str,
+    ) -> Option<T> {
+        serde_json::from_value(m.get(k).cloned()?).ok()
+    }
+    Some(cm::ChatMessage {
+        id: node.name.clone(),
+        role: attr(&node.attributes, "role"),
+        msg_type: attr(&node.attributes, "type"),
+        name: attr(&node.attributes, "tool_name"),
+        parent_id: attr(&node.attributes, "parent_id"),
+        tool_call_id: attr(&node.attributes, "tool_call_id"),
+        seq: attr(&node.attributes, "seq"),
+        error: attr(&node.attributes, "error"),
+        // `message_node` 把「没有 meta」写成 `null`；这里还原成"没有"
+        meta: node
+            .attributes
+            .get("meta")
+            .cloned()
+            .filter(|v| !v.is_null()),
+        status: Some(cm::MessageStatus::of(&node.status)?),
+        content: Some(cm::MessageContent::Text(text)),
+        ..Default::default()
+    })
 }
 
 /// 消息正文——**流式追加的正是它**。

@@ -20,8 +20,7 @@ use crate::symbio_core::vdfs::host::{notify_change, unwatch_changes, watch_chang
 use crate::symbio_core::vdfs_provider::{
     has_parent_segment, VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext,
     VdfsError, VdfsNewType, VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse,
-    VDFS_ACTION_EXPORT, VDFS_CHANGE_CREATED, VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED,
-    VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
+    VDFS_ACTION_EXPORT, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -147,7 +146,7 @@ impl DirVdfs {
             }
             Err(e) => return Err(e),
         }
-        notify_change(&self.kind, id, VDFS_CHANGE_DELETED);
+        notify_change(&self.kind, id);
         Ok(())
     }
 
@@ -297,20 +296,14 @@ impl DirVdfs {
                 .await
                 .map_err(|e| VdfsError::internal(format!("删除文件失败：{e}")))?;
         }
-        notify_change(&self.kind, id, VDFS_CHANGE_UPDATED);
+        notify_change(&self.kind, id);
         Ok(())
     }
 
-    fn announce(&self, id: &str, created: bool) {
-        notify_change(
-            &self.kind,
-            id,
-            if created {
-                VDFS_CHANGE_CREATED
-            } else {
-                VDFS_CHANGE_UPDATED
-            },
-        );
+    fn announce(&self, id: &str, _created: bool) {
+        // 信封没有操作枚举（S27）：「新建还是更新」不再单独成字段——
+        // 消费端回读即得当前状态，不需要为它保留一个分派键。
+        notify_change(&self.kind, id);
     }
 }
 
@@ -453,7 +446,7 @@ impl VdfsProvider for DirVdfs {
         tokio::fs::create_dir_all(&target)
             .await
             .map_err(|e| VdfsError::internal(format!("创建目录失败：{e}")))?;
-        notify_change(&self.kind, &id, VDFS_CHANGE_UPDATED);
+        notify_change(&self.kind, &id);
         Ok(())
     }
 

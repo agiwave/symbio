@@ -17,7 +17,7 @@ use crate::symbio_core::now_ms;
 use crate::symbio_core::vdfs::host::{notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
-    VdfsResult, VdfsWriteResponse, VDFS_CHANGE_DELETED,
+    VdfsResult, VdfsWriteResponse,
 };
 use crate::symbio_core::{lock_read, lock_write};
 use async_trait::async_trait;
@@ -88,15 +88,7 @@ impl MemoryVdfs {
                 },
             )
         };
-        notify_change(
-            &self.kind,
-            id,
-            if created {
-                crate::symbio_core::vdfs_provider::VDFS_CHANGE_CREATED
-            } else {
-                crate::symbio_core::vdfs_provider::VDFS_CHANGE_UPDATED
-            },
-        );
+        notify_change(&self.kind, id);
         created
     }
 
@@ -120,7 +112,7 @@ impl MemoryVdfs {
     pub fn remove(&self, id: &str) -> bool {
         let removed = lock_write(&self.entries).remove(id).is_some();
         if removed {
-            notify_change(&self.kind, id, VDFS_CHANGE_DELETED);
+            notify_change(&self.kind, id);
         }
         removed
     }
@@ -309,10 +301,9 @@ mod tests {
             .map(|c| c.path.clone())
             .collect();
         assert_eq!(paths, vec!["loud".to_string()]);
-        assert_eq!(
-            seen.read().unwrap()[0].change,
-            crate::symbio_core::vdfs_provider::VDFS_CHANGE_CREATED,
-            "首次写入是新建"
+        assert!(
+            seen.read().unwrap()[0].data.is_none(),
+            "资源信号无载荷：信封没有操作枚举（S27），消费端回读收敛"
         );
 
         // 整表替换同样是静默的（且丢掉旧条目）

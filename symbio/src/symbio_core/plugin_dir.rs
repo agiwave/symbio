@@ -85,8 +85,7 @@ use crate::symbio_core::homedir::HomedirRegistry;
 use crate::symbio_core::schemas::detail::DetailDefinition;
 use crate::symbio_core::vdfs::host::notify_change;
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsResult, VdfsWriteResponse,
-    VDFS_CHANGE_UPDATED, VDFS_EXT_FORM,
+    VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsResult, VdfsWriteResponse, VDFS_EXT_FORM,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -443,7 +442,7 @@ impl ConfigFile {
 
     /// 广播「配置已更新」（前端据此刷新）
     pub fn announce(&self) {
-        notify_change(self.dir.name(), PLUGIN_FILE, VDFS_CHANGE_UPDATED);
+        notify_change(self.dir.name(), PLUGIN_FILE);
     }
 }
 

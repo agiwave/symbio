@@ -24,15 +24,11 @@ pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::transcript_stream::{
-    register_transcript_subscriber, unregister_transcript_subscriber,
-};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::vdfs_provider::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use crate::symbio_core::{
     dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, MemoryFile, Plugin,
-    PluginChannel, PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION,
-    SESSION_ID,
+    PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION, SESSION_ID,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -83,7 +79,9 @@ impl SessionPlugin {
             config: Arc::new(RwLock::new(config)),
             config_file: ConfigFile::new(dir, "会话设置", config_definition()),
             parent,
-            active_mgr: Arc::new(super::active::ActiveSessionManager::new()),
+            active_mgr: Arc::new(super::active::ActiveSessionManager::new(
+                change_subs.as_ref().clone(),
+            )),
             store: OnceCell::new(),
             heartbeat_state: Arc::new(RwLock::new(HashMap::new())),
             workdir_watches,
@@ -95,39 +93,25 @@ impl SessionPlugin {
     ///
     /// 无订阅者时直接返回；`path` 是 provider 子树内的相对路径（= 会话 id）。
     ///
-    /// ## 它现在**只**承载粗粒度信号
+    /// ## 它承载会话叶子的**粗粒度**变更
     ///
-    /// 会话叶子上的变更分两半，各有一个出口，**不重叠**：
+    /// 会话叶子 `<id>` 上的变更分两半，出口不同但**通道相同**（都是本表、都是
+    /// `vdfs/watch`），差别只在粒度：
     ///
     /// | 一半 | 出口 | 粒度 |
     /// |---|---|---|
-    /// | 运行态（本轮 `working` / 终态 / 警告 / 结局） | 转写流（`orchestrator::emit_session_state` → `Transcript::emit_session_state`） | 带全量节点视图，**与消息共用 `seq` 空间** |
-    /// | 资源（创建 / 删除 / 改名 / 标题 / metadata） | 本函数 | 只报"变了" |
+    /// | 运行态（本轮 `working` / 终态 / 警告 / 结局） | `orchestrator::emit_session_state` → `Transcript::emit_session_state` | `data` = 全量节点视图（`session_node` 同源） |
+    /// | 资源（创建 / 删除 / 改名 / 标题 / metadata） | 本函数 | 无载荷，消费端回读 / 重拉 |
     ///
-    /// 运行态之所以不能留在这里：它必须与它那一轮的消息**共用 `seq` 空间**，
-    /// 否则「会话报不忙」推不出「本轮消息节点都已收到终态帧」——两条独立通道的
-    /// 到达顺序只是调度巧合（见 `transcript_stream::SessionStateEvent`）。
-    ///
-    /// 资源那一半之所以能留在这里：它发生在**没有在途轮次**时，拿不到 `seq`
-    /// （唯一分配点在 `Transcript`，而此刻没有活跃转写）——**结构性理由，不是遗留**。
-    /// 也因此本函数**不带节点视图**：会话叶子的节点快照只有两个来源，转写流
-    /// （有序、权威）与 `list` / `stat`（回读）——不再有第三条无序通道上的快照
-    /// 与它们竞争（旧写法在 `updated` 上挂 `node`，消费端一旦照单应用 `status`，
-    /// 一次迟到的改名就会把运行态**回退**成它自己那一刻的旧值）。
-    pub(crate) fn notify_change(&self, id: &str, change: &str) {
-        self.change_subs.notify(&vdfs::VdfsChange::new(id, change));
+    /// 资源信号**不带节点视图**：这类变更（改名 / metadata 写入）是粗粒度的，
+    /// 消费方本来就按「重拉清单」处理；捎带快照只会让每个消费端都背一次
+    /// 「逐字段合并」的成本。运行态走 `emit_session_state`，那里的视图是
+    /// 「调用那一刻」从权威源构造的（与 `stat` 同源），不存在过期副本。
+    pub(crate) fn notify_change(&self, id: &str) {
+        self.change_subs.notify(&vdfs::VdfsChange::bare(id));
     }
 
-    /// 会话节点的**全量视图**——`list` / `stat` 与转写流的运行态帧共用这一个构造点。
-    ///
-    /// `None` = 会话不存在（如刚被删）：变更无处可挂。
-    pub(crate) async fn session_node_of(&self, id: &str) -> Option<vdfs::VdfsNode> {
-        let session = self.session_of(id).await.ok()?;
-        let rt = self.session_runtime(id).await;
-        Some(session_node(&SessionSummary::of(&session), &rt))
-    }
-
-    // ==================== 转写发布（实时流的唯一出口）====================
+    // ==================== 转写发布（消息变更的唯一出口）====================
     //
     // 一切消息级变更（压缩节点 / 前端 CRUD 动作 / 用户消息定稿 / 失败与中止的
     // 终态收敛）都经 `Transcript::apply` 发布——内存图、seq、核心日志、发布在
@@ -212,33 +196,6 @@ impl SessionPlugin {
         // 需要追加（流式），也可能需要替换（权威副本对齐），而帧必须自证是哪一种。
         self.transcript_apply(session_id, crate::symbio_core::turn::message_frame(stored))
             .await;
-    }
-
-    /// `session/stream`：建立**转写流**订阅连接（会话实时面的唯一通道）。
-    ///
-    /// 返回 `PluginPayload::Session` 通道——传输泵逐帧转发到消费端
-    /// （前端 / CLI / 子会话转播桥）。帧三类：
-    /// - `transcript_event`：[`NodeEvent`]（归属会话 + 单调 seq + 一条 `ChatMessage`）；
-    /// - `transcript_session`：会话**运行态**帧（同一个 seq 计数器 + 会话节点全量视图），
-    ///   因此「会话报不忙」与「本轮消息已全部落地」是同一个序号空间里的先后关系；
-    /// - `transcript_resync`：背压标记——通道曾满，消费端必须清空本地转写并
-    ///   从存储整份重读（唯一恢复路径，见 `transcript_stream` 模块文档）。
-    async fn handle_stream_subscribe(
-        &self,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
-        // 容量 4096 帧：满 = 慢消费者 → 订阅被摘除 + resync 标记（见 `transcript_stream`）。
-        let (peer, mine) = PluginChannel::pair(4096);
-        let connection_id = uuid::Uuid::new_v4().to_string();
-        register_transcript_subscriber(connection_id.clone(), mine.tx.clone());
-        // 连接断开（cancel_token 触发）时反注册；订阅表还会在发送端关闭时
-        // 静默摘除（publish_frame 的 `gone` 路径），双保险。
-        let conn_id = connection_id.clone();
-        tokio::spawn(async move {
-            mine.cancel_token.cancelled().await;
-            unregister_transcript_subscriber(&conn_id);
-        });
-        Ok(PluginPayload::Session(peer))
     }
 
     pub fn metadata() -> PluginMeta {
@@ -456,9 +413,14 @@ impl Plugin for SessionPlugin {
         match path {
             "chat/send" => return self.handle_chat_send_oneoff(ctx).await,
             "chat/abort" => return self.handle_chat_abort_oneoff(ctx).await,
-            // 转写流订阅：消息**实时面**的唯一通道（NodeEvent，seq 单调、满即踢）。
-            // 历史面（落库转写 / `消息` 目录投影）仍走 VDFS 读。
-            "stream" => return self.handle_stream_subscribe(ctx).await,
+            // ==================== `stream` 已于 2026-09-23 退役（ADR-025）====================
+            //
+            // 会话实时面（消息流式 + 会话运行态）**迁回 VDFS 变更**：
+            // `event_bus/subscribe` + `vdfs/watch` 两步，与历史面是同一条
+            // `vdfs/watch`。它是唯一一条「因为问题不存在而退役」的路由——它存在的
+            // 三条理由（需要流内序号 / 需要背压恢复 / 需要免回读）逐条失效，
+            // 而「顺序是节点属性而非投递属性」这一条纠正同时推翻了它与它的前身。
+            // 详见 `docs/design/session-realtime-vdfs-watch.md`。
             // ==================== 本表只留「不是数据 CRUD」的路由 ====================
             //
             // 会话与消息的增删改查**全部**经 VDFS 地址完成（`vdfs/list|read|write|
@@ -642,10 +604,10 @@ mod vdfs_provider;
 // 模块内共享面：`nodes` / `vdfs_provider` 经 `use super::*;` 取用，测试（`plugin.test.rs`）亦同。
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
-    internal_dirs, message_node, message_of, message_text, ordered, overlay_live,
-    parse_session_path, session_content, session_id_from_new_path, session_node, transcript_window,
-    window_params, SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED,
-    OUTCOME_FAILED, SEG_MESSAGES,
+    internal_dirs, message_dir_path, message_node, message_of, message_of_node, message_text,
+    ordered, overlay_live, parse_session_path, session_content, session_id_from_new_path,
+    session_node, transcript_window, window_params, SessionRuntime, VdfsSessionPath,
+    OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED, SEG_MESSAGES,
 };
 
 #[cfg(test)]

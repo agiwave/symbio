@@ -126,7 +126,7 @@ WS /api/v1/ws?token=<token>
 服务端内部：首帧 → `build_ctx`（`metadata` 逐键注入上下文）→ `parent.route(ctx)` →
 按 `PluginPayload` 四态分派（见 §4.1）。
 
-### 5.3 ⚠️ AI 流式输出：WebSocket 之后还必须**再开一条** `session/stream`
+### 5.3 ⚠️ AI 流式输出：WebSocket 之后还必须**再开一条** `vdfs/watch`
 
 **这是本设计最容易被误解的一点，务必注意。**
 
@@ -134,45 +134,51 @@ WS /api/v1/ws?token=<token>
   **fire-and-forget**：它 `spawn` 后台任务后**立即返回** `{"status":"accepted"}`，
   **不会**返回一个可以读流的 Session 通道。
 - AI 的增量**不在** `chat/send` 那条连接上。会话实时面——消息转写**与会话运行态**——
-  是 `session/stream` 的帧（`transcript_event` / `transcript_session` / `transcript_resync`），
-  见 [ROUTES.md](../reference/ROUTES.md) 与 `symbio_core/transcript_stream.rs`。
+  是 **VDFS 变更**（`kind = "vdfs"`），落在会话子树 `<根>/session/<id>` 上
+  （`<根>` 是对外展示根，运行期取回，不写字面量——见 `docs/reference/ROUTES.md`）。
 
-**因此第三方必须再建一条 WS 连接订阅 `session/stream`**（`session/chat/send` 那条
-用完即走，两者不是同一条）：
+**因此第三方必须再建一条 WS 连接，两步缺一不可**：
+
+1. `event_bus/subscribe` —— 开**通道**（载荷空，按 `kind` 在客户端过滤）；
+2. `vdfs/watch` —— 开**闸**：后端只向**登记过路径**的订阅者投递变更。
 
 ```jsonc
-// 第二条连接：首帧订阅转写流（无会话参数——广播语义，按帧内的 session_id 自行过滤）
-→ { "metadata": { "path": "session/stream" }, "payload": {} }
-// 此后该连接**单向**逐帧下发 PluginFrame::Data：
-← { "Data": { "type": "transcript_event",
-              "data": { "session_id": "s_xxx", "seq": 1, "message": { "id": "…", "delta": "第一" } } } }
-← { "Data": { "type": "transcript_event",
-              "data": { "session_id": "s_xxx", "seq": 2, "message": { "id": "…", "delta": "第二" } } } }
-← { "Data": { "type": "transcript_session",
-              "data": { "session_id": "s_xxx", "seq": 3, "node": { "status": "working", "…": "…" } } } }
-← { "Data": { "type": "transcript_session",
-              "data": { "session_id": "s_xxx", "seq": 9, "node": { "status": "active", "…": "…" } } } }
+// 第二条连接：订阅总线 + 登记会话子树（`session/chat/send` 那条用完即走，不是同一条）
+→ { "metadata": { "path": "event_bus/subscribe" }, "payload": {} }
+→ { "metadata": { "path": "vdfs/watch" }, "payload": { "path": "<根>/session/<id>" } }
+// 此后该连接逐帧下发 PluginFrame::Data：
+← { "Data": { "type": "bus_event", "data": { "kind": "vdfs", "session_id": null,
+      "data": { "path": "<根>/session/<id>/消息", "data": { "id": "m1", "content": "第一" } } } } }
+← { "Data": { "type": "bus_event", "data": { "kind": "vdfs", "session_id": null,
+      "data": { "path": "<根>/session/<id>/消息", "data": { "id": "m1", "delta": "第二" } } } } }
+← { "Data": { "type": "bus_event", "data": { "kind": "vdfs", "session_id": null,
+      "data": { "path": "<根>/session/<id>", "data": { "…": "全量节点视图" } } } } }   // 运行态：随载荷落定
 ```
 
-- **两种帧共用同一个 `seq` 空间、走同一条通道**，因此「会话报 `active`（不忙）」
-  到达时，本轮**全部**消息帧必然已在其之前落地——消费端不需要「等一会儿再看」。
-  `seq` 在会话内严格递增、跨轮**不复位**：见到跳号就说明漏帧，重读一次历史即可收敛
-  （`transcript_resync` 帧是同一个恢复路径的显式触发）。
-- 帧里 `delta` = 尾部追加，`content` = 整条替换（同一帧只会有其一），
-  `status = removed` = 删除。**不要**把 `content` 当成增量拼。
-- **`kind = "vdfs"` 不再是流式信源**。它现在只承载会话**资源**变更（创建 / 删除 /
-  改名 / 标题 / metadata）：要维护会话列表，才需要 `event_bus/subscribe` +
-  `vdfs/watch`（两步缺一不可，`vdfs/watch` 是**开闸**：后端只向登记过路径的订阅者投递）。
-  若只需要「对话内容与忙闲」，**完全不用碰 VDFS**。
+- **信封没有操作枚举**（S27）：形状 `{path, data?}`。消息帧的 `path` 是消息
+  **目录**，`data` 就是那条 `ChatMessage`——身份在 `data.id`，`delta` ⇒ **尾部追加**
+  （零回读）、`content` ⇒ 整条替换、`status = removed` ⇒ 就地移除；运行态帧的
+  `data` 是全量节点视图，就地落定。
+- **无载荷变更** ⇒ 回读 / 重拉（`vdfs/read` 拿到的是**已含增量**的正文）；
+  资源删除回读 `stat` 得 `NotFound` 即删除。
+- **不要按到达顺序拼**：每条变更都带 `path`，节点**自带位置**（`ChatMessage.seq`）。
+  两个并行工具的变更会**混着到**、后生成的**先到**，按 `path` 分派、按 `seq` 排序即可。
+- **丢了怎么办**：`event_bus` 通道满时**不摘除订阅**，会补送一条 resync 指令
+  （`data.data.type == "resync"`）——收到就按自己的作用域**整份重读**（幂等，安全）。
 
-> 换个说法：**WebSocket 把"通道"问题解决了，但"信源"是 `session/stream`。**
-> 设计里必须显式包含「另开一条连接订阅 `session/stream`」这一步，否则实现的人会以为
+> 换个说法：**WebSocket 把"通道"问题解决了，但"信源"是 `vdfs/watch` 上的会话子树。**
+> 设计里必须显式包含「另开一条连接 + `vdfs/watch` 登记」这两步，否则实现的人会以为
 > 连上 WS 发个 `chat/send` 就能收到流——收不到。
->
-> **历史**：本设计早期版本让第三方订阅 `kind = "vdfs"` 看流式（消息与运行态都寄生在
-> 资源变更频道上）。那条路有两个结构性缺陷——无流内序号（丢帧不可检测）、载荷全量而
-> 消费端要猜「追加还是替换」；运行态还额外与消息存在**跨通道顺序假设**。2026-09-22
-> 的批次 E 把两者一并收进 `session/stream`，本节随之改写。
+
+> **历史（本节改写过两次，方向相反）**：
+> ① 早期版本让第三方订阅 `kind = "vdfs"` 看流式（消息与运行态都寄生在资源变更频道上）；
+> ② 2026-09-21 起改走 `session/stream` 转写流，本节随之改写为「另开一条连接订阅
+> `session/stream`」；
+> ③ 2026-09-23（[ADR-025](../DECISIONS.md#adr-025-顺序是节点属性delta-是updated的传输形态)）
+> 判定 ② 的两条理由**把「数据的属性」当成了「传输的属性」**——顺序是**节点属性**
+> （`ChatMessage.seq`），「追加」不是新取值而是 `updated` 上的 `delta` 字段——实时面
+> **迁回** `vdfs/watch`，本节再次改写。② 那一版（「订阅 `session/stream`」）已随
+> `session/stream` 退役而作废。
 
 ### 5.4 运维端点
 

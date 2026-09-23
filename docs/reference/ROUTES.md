@@ -106,29 +106,48 @@
 |------|------|----------|
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
-| `session/stream` | 订阅会话**实时面**（一条流、两种帧：`transcript_event` = `session_id` + 单调 `seq` + 一条 `ChatMessage`；`transcript_session` = `session_id` + 同一 `seq` + 会话节点全量视图） | `Session` |
 
 > **本表只剩「不是数据 CRUD」的两条**（2026-09-23）：会话与消息的增删改查**全部**
 > 经 VDFS 地址完成，`chat/send` 与 `chat/abort` 是编排 / 控制，不是数据操作。
 > 退役记录见下文，映射表见
 > [`legacy-route-migration.md`](../../symbio/src/plugins/session/docs/legacy-route-migration.md)。
 
-> **实时面走 `session/stream`，历史面走 VDFS**（2026-09-21；2026-09-22 起运行态并入同一条流）：
-> 消息曾寄生在 `kind = "vdfs"` 的资源变更频道上，那条路没有流内序号（丢帧不可检测）、
-> 载荷是全量而消费端要增量（必须猜「追加还是替换」）。现在 `Transcript`（session 插件内的
-> 唯一写入点）给每帧分配单调 `seq` 并把帧本身作为一条 `ChatMessage` 广播（帧携带
-> `content` = 整条替换，携带 `delta` = 尾部追加；删除是 `status = removed` 的状态迁移，
-> 见 `symbio/src/plugins/session/docs/node-state-streaming.md` §6 / S24）；背压时投
-> **resync 标记**而不是静默丢帧（见 `symbio_core::transcript_stream`）。
+> **实时面已迁回，迁移已落地**（ADR-025，2026-09-23；S27 收口）。`session/stream` 路由
+> **已删除**（上表不再列它），实时面走 `event_bus` 的 `vdfs` 频道：信封 `{path, data?}`
+> （操作枚举整个退役——消息的落点是**目录** `<sid>/消息`，`data` 就是那条 `ChatMessage`，
+> 身份在 `data.id`；运行态落在会话叶子 `<sid>`，`data` = 全量节点视图；资源信号无载荷，
+> 回读收敛）。实时面与历史面**同一条**
+> `vdfs/watch`，不再分家：消息是 `<根>/session/<id>/消息` 这个**文件夹**里的**文件**，
+> 流式输出是该文件内容的增长。
 >
-> **会话运行态也在这一条流上**（S25 / 批次 E）：`transcript_session` 帧带会话节点的
-> **全量视图**，且与消息帧**共用同一个 `seq` 计数器**——因此「会话报不忙」到达时，
-> 本轮全部消息终态帧必然已在其之前落地（单通道保序 + 序号严格递增）。
-> VDFS 的 `vdfs/watch` 只剩**资源**变更（创建 / 删除 / 改名 / 标题），且**不携带节点快照**
-> （快照只有两个来源：这条流与 `vdfs/stat` 回读）。
-> 消费端：前端 `services/transcriptStream.ts`、CLI `cli/src/client.rs`、
-> 子智能体转播 `agent/host/subagent.rs`。
+> 本条此前写的是「实时面走 `session/stream`，历史面走 VDFS」，给出的两条理由是
+> ① VDFS 变更频道**没有流内序号**（丢帧不可检测）；② 载荷全量而消费端要
+> **猜「追加还是替换」**。**两条都错，错在同一个地方——把「数据的属性」当成了
+> 「传输的属性」**：
+>
+> - **顺序不是投递属性**：`ChatMessage.seq` 是消息在 `消息` 这个文件夹里的**位置**，
+>   由写入者分配、随节点下发，消费端按它排序（前端 `sortTranscript` 按 `seq`，
+>   缺失回退 `timestamp`）。两个并行工具的变更**混着到**、后生成的**先到**，显示
+>   都正确——因为每条变更都指向一个明确的 `path`，而节点自带位置。丢帧由**幂等重读**
+>   兜底（`event_bus` 满通道 → 保留订阅 + 补送 resync 标记）。
+> - **「追加」不是新取值，是 `updated` 上的可选 `delta` 字段**：`delta` 有 ⇒ 尾部追加；
+>   无 ⇒ 回读（节点形态在 `vdfs/read` 里）。消费端不需要猜——`delta` 的有无就是答案。
+>   这是消息流的既有经验照搬：`ChatMessage` 帧**就是节点视图，没有操作枚举**
+>   （`delta` 追加 / `content` 替换 / `status = removed` 移除，语义全在字段上）。
+>
+> **会话运行态同理**：它是会话节点（`<id>`）的 `status`，走 `updated`（无 `delta` ⇒ 回读），
+> 不再需要与消息帧「共用 `seq` 空间」那条推理——那条推理成立的**前提**（顺序是投递属性）
+> 本身是错的。
+>
+> 于是 `session/stream` 的三条存在理由（顺序 / 背压 / 免回读）**全部不成立**，它与
+> `symbio_core::transcript_stream` 一并退役；`event_bus` 的 `KIND_VDFS` 成为**唯一**实时通道。
+> 消费端相应改为 `subscribeVdfsChanged`（前端）、`vdfs/watch`（CLI）、转播桥（子智能体）。
 > 落库转写与 `消息` 目录投影（`vdfs/read` / `vdfs/list` / `vdfs/action`）不受影响。
+>
+> 判据不变：一个变更取值（或载荷字段）必须有**生产性生产者**。批次 G（`8969ec2`）删除
+> `delta` 时它确实零生产者（消息域已迁走）；消息域搬回来，**就有了**。
+> 结论不同是因为**输入不同**，不是反复。详见
+> [ADR-025](../DECISIONS.md#adr-025-顺序是节点属性delta-是updated的传输形态)。
 
 > **`session/append`、`session/open`、三条消息路由与 `session/heartbeat/trigger` 已退役**（2026-09-18）：
 > - `append` —— 消息追加的唯一入口是聊天协议（`chat/send`），而编排自身的落库走引擎直连

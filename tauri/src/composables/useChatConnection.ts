@@ -66,7 +66,7 @@ export interface UseChatConnectionReturn {
  * ## 设计（重要变化）
  *
  * - **所有状态写入由全局消费端负责**，本 composable 不订阅任何通道：消息与会话
- *   运行态都走 `services/transcriptStream`（`session/stream` 转写流——两种帧共用
+ *   运行态都走 `stores/sessionTranscriptSync`（VDFS 变更消费端——两类地址共用
  *   一个 `seq` 计数器），落地口是 `stores/sessions.ts`（`applyTranscriptMessages` /
  *   `applySessionState`）。本 composable 只在**发起动作**时做乐观置位
  *   （随后被节点状态覆盖）。
@@ -378,7 +378,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    *
    * 前端不在此处构造新消息——后端经转写流广播（帧语义全在字段上：
    * `status = removed` 删旧节点，`content` / `delta` 写新节点与父节点状态），
-   * 由 `transcriptStream` 与 `sessions.applyTranscriptMessages` 就地收敛。
+   * 由 `sessionTranscriptSync` 与 `sessions.applyTranscriptMessages` 就地收敛。
    *
    * 会话参数：智能体 / 模型 provider 由后端 `resolve_session_params` 从
    * `session.metadata` 回退解析；`mode` / `risk_level` 从会话记忆（metadata 的本地镜像）

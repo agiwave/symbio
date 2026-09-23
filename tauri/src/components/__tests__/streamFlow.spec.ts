@@ -6,9 +6,10 @@
  * 目的：复现"长会话流模式下 Reason 块不结束 / 后续内容显示进 Reason / Turn 不显示"
  * 的纯前端可见结果，并作为修复的回归锚。
  *
- * 帧按**新协议**驱动（帧 = 一条 `ChatMessage`，语义全在字段上：`delta` 追加 /
- * `content` 替换 / `status=removed` 移除 / 其余字段合并），与 `MainLayout` 的真实
- * 接线同路（`transcriptStream` → store）。
+ * 帧按**现行语义**驱动（语义全在字段上：`delta` 追加 / `content` 替换 /
+ * `status=removed` 移除 / 其余字段合并），与 `MainLayout` 的真实接线同路
+ * （`stores/sessionTranscriptSync` → store；传输形态见 ADR-025——本文件钉的是
+ * **落地语义与渲染结果**，不是传输，故直接驱动 store 的落地口）。
  *
  * 注意**不再有整条替换的 `upsert`**：状态迁移帧只带身份 + 状态（与后端
  * `state_frame` 同构），落地是**合并**——这正是要锚定的新语义（旧协议下这种部分帧
@@ -22,25 +23,6 @@ import MessageNode from '../MessageNode.vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { useChatConnection } from '@/composables/useChatConnection'
 import type { ChatMessage } from '@/schemas/chat_message'
-import {
-  applyNodeEvent,
-  flushPendingFrames,
-  startTranscriptStream,
-  stopTranscriptStream,
-  type NodeEvent,
-  type TranscriptStreamSink,
-} from '@/services/transcriptStream'
-
-/**
- * 驱动一帧并**立即落地**。
- *
- * `transcriptStream` 在生产里把 ~48ms 窗口内的帧攒批提交（性能优化，不改变帧语义）；
- * 本测试按帧断言，故每帧后显式冲刷，等价于「窗口 = 0」。
- */
-function applyFrame(e: NodeEvent): void {
-  applyNodeEvent(e)
-  flushPendingFrames()
-}
 
 vi.mock('@/services/plugin', () => ({
   connectPlugin: vi.fn(async () => ({ connectionId: 'c1', close: vi.fn(async () => {}) })),
@@ -54,31 +36,14 @@ vi.mock('@/utils/logger', () => ({
 
 const SID = 's1'
 
-/** 帧序号：后端单调计数器（跳号会被判为丢帧，测试里逐帧递增） */
-let seq = 0
-
-/** 造一帧：载荷就是一条 `ChatMessage`（帧自给自足） */
-function frame(message: ChatMessage): NodeEvent {
-  seq += 1
-  return { session_id: SID, seq, message }
-}
-
-/** 造一帧**增量**（流式热路径）：只带 `delta`，追加到目标节点正文尾部 */
-function append(messageId: string, delta: string): NodeEvent {
-  seq += 1
-  return { session_id: SID, seq, message: { id: messageId, delta } }
-}
-
-/** 与 `MainLayout` 的接线逐字一致 */
-function storeSink(): TranscriptStreamSink {
-  const store = useSessionsStore()
-  return {
-    messages: (sid, ms) => store.applyTranscriptMessages(sid, ms),
-    applySessionState: (sid, node) => store.applySessionState(sid, node),
-    reload: async (sid) => {
-      await store.loadMessages(sid)
-    },
-  }
+/**
+ * 驱动一帧：直接走 store 的落地口。
+ *
+ * 传输层（`stores/sessionTranscriptSync`，VDFS 变更 → 帧）的形状与协调规则由
+ * 它自己的测试钉；这里全部用例只关心**落地之后** store 与渲染的结果。
+ */
+function feed(message: ChatMessage): void {
+  useSessionsStore().applyTranscriptMessages(SID, [message])
 }
 
 /** 与后端 `emit_streaming_start` / 首帧全量 / finalize 一致的**完整消息**构造器 */
@@ -173,42 +138,37 @@ function mountTree(tree: ChatMessage[]) {
 describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    seq = 0
-    stopTranscriptStream()
-    // 只接 sink（不建连接）：`applyNodeEvent` 就是连接回调内部的同一条路径
-    void startTranscriptStream(storeSink())
   })
 
   it('多轮工具：每轮 Turn 最终 Completed，无残留「正在思考」骨架', () => {
-    const feed = (e: NodeEvent) => applyFrame(e)
-
+    
     // ── Turn 1：思考 → 文本 → 工具（结果在下一轮前）──
     const t1 = turn('T1')
     const r1 = reasoning('r1', 'T1', '想法')
     const x1 = text('x1', 'T1', '正文')
     const tc1 = toolCall('tc1', 'T1', 'read_file', '{"path":"a.rs"}')
-    feed(frame(t1))
-    feed(frame(r1))
-    feed(frame(settled(r1)))
-    feed(frame(x1))
-    feed(frame(settled(x1)))
-    feed(frame(tc1))
+    feed(t1)
+    feed(r1)
+    feed(settled(r1))
+    feed(x1)
+    feed(settled(x1))
+    feed(tc1)
 
     // ── 工具结果 + Turn1 完成（后端 finalize 顺序：先子节点后根）──
-    feed(frame({ id: 'res1', parent_id: 'tc1', role: 'tool', type: 'text', status: 'completed', content: '"ok"' }))
-    feed(frame(settled(tc1)))
-    feed(frame(settled(t1)))
+    feed({ id: 'res1', parent_id: 'tc1', role: 'tool', type: 'text', status: 'completed', content: '"ok"' })
+    feed(settled(tc1))
+    feed(settled(t1))
 
     // ── Turn 2：纯文本收尾 ──
     const t2 = turn('T2')
     const r2 = reasoning('r2', 'T2', '再想')
     const x2 = text('x2', 'T2', '结论')
-    feed(frame(t2))
-    feed(frame(r2))
-    feed(frame(settled(r2)))
-    feed(frame(x2))
-    feed(frame(settled(x2)))
-    feed(frame(settled(t2)))
+    feed(t2)
+    feed(r2)
+    feed(settled(r2))
+    feed(x2)
+    feed(settled(x2))
+    feed(settled(t2))
 
     const store = useSessionsStore()
     const tree = buildTree(store.getSessionMessages(SID))
@@ -224,8 +184,8 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
   })
 
   it('流式中途（Reasoning streaming）：骨架消失、思考单行显示「思考中…」', () => {
-    applyFrame(frame(turn('T1')))
-    applyFrame(frame(reasoning('r1', 'T1', '部分思考')))
+    feed(turn('T1'))
+    feed(reasoning('r1', 'T1', '部分思考'))
 
     const store = useSessionsStore()
     const tree = buildTree(store.getSessionMessages(SID))
@@ -239,9 +199,9 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
   })
 
   it('增量帧（delta）拼进正文——流式热路径', () => {
-    applyFrame(frame(turn('T1')))
-    applyFrame(frame(text('x1', 'T1', '第一段')))
-    applyFrame(append('x1', '，第二段'))
+    feed(turn('T1'))
+    feed(text('x1', 'T1', '第一段'))
+    feed({ id: 'x1', delta: '，第二段' })
 
     const store = useSessionsStore()
     const msg = store.getSessionMessages(SID).find((m) => m.id === 'x1')
@@ -249,10 +209,10 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
   })
 
   it('状态帧不吞身份与正文（合并语义）', () => {
-    applyFrame(frame(turn('T1')))
-    applyFrame(frame(text('x1', 'T1', '正文')))
+    feed(turn('T1'))
+    feed(text('x1', 'T1', '正文'))
     // 只带 id + status 的最小状态帧：type / parent_id / content 都必须原样保留
-    applyFrame(frame(settled({ id: 'x1' })))
+    feed(settled({ id: 'x1' }))
 
     const store = useSessionsStore()
     const msg = store.getSessionMessages(SID).find((m) => m.id === 'x1')
@@ -266,12 +226,12 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     // 上一轮已完成
     const t0 = turn('T0')
     const x0 = text('x0', 'T0', '上轮')
-    applyFrame(frame(t0))
-    applyFrame(frame(x0))
-    applyFrame(frame(settled(x0)))
-    applyFrame(frame(settled(t0)))
+    feed(t0)
+    feed(x0)
+    feed(settled(x0))
+    feed(settled(t0))
     // 新一轮 Turn 已广播、尚无子节点
-    applyFrame(frame(turn('T1')))
+    feed(turn('T1'))
 
     const store = useSessionsStore()
     const tree = buildTree(store.getSessionMessages(SID))
@@ -306,29 +266,24 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
 
   beforeEach(() => {
     setActivePinia(createPinia())
-    seq = 0
-    stopTranscriptStream()
-    void startTranscriptStream(storeSink())
   })
 
   it('父容器（Turn）已有子节点时，子节点的增量必须重渲染', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyFrame(frame({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' }))
-    applyFrame(
-      frame({
+    feed({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' })
+    feed({
         id: 'X1',
         parent_id: 'T1',
         role: 'assistant',
         type: 'text',
         status: 'streaming',
         content: '正文开头',
-      }),
-    )
+      })
     await nextTick()
     expect(w.text()).toContain('正文开头')
 
     // 这一帧只改叶子内容，不动任何容器的字段——旧的签名口径下它**看不见**
-    applyFrame(append('X1', '，正文继续'))
+    feed({ id: 'X1', delta: '，正文继续' })
     await nextTick()
     const store = useSessionsStore()
     expect(
@@ -340,19 +295,17 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
 
   it('思考（Reasoning）是独立节点，其增量同样必须重渲染', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyFrame(frame({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' }))
-    applyFrame(
-      frame({
+    feed({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' })
+    feed({
         id: 'R1',
         parent_id: 'T1',
         role: 'assistant',
         type: 'reasoning',
         status: 'streaming',
         content: '第一段思考',
-      }),
-    )
+      })
     await nextTick()
-    applyFrame(append('R1', '，第二段思考'))
+    feed({ id: 'R1', delta: '，第二段思考' })
     await nextTick()
     // 分派类名由 registry 给出 ⇒ 钉住「思考是独立节点，没有被并进正文」
     expect(w.find('.type-reasoning').exists(), '思考必须是独立节点').toBe(true)
@@ -362,21 +315,19 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
 
   it('子节点终态（状态迁移）必须立刻反映，不等祖先的结构变化', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyFrame(frame({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' }))
-    applyFrame(
-      frame({
+    feed({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' })
+    feed({
         id: 'R1',
         parent_id: 'T1',
         role: 'assistant',
         type: 'reasoning',
         status: 'streaming',
         content: '思考内容',
-      }),
-    )
+      })
     await nextTick()
     expect(w.text()).toContain('思考中')
     // 最小状态帧（后端 `state_frame` 同构）：不带正文，落地是合并
-    applyFrame(frame({ id: 'R1', status: 'completed' }))
+    feed({ id: 'R1', status: 'completed' })
     await nextTick()
     expect(w.text(), '定稿后不再显示「思考中」').not.toContain('思考中')
     expect(w.text(), '状态帧不得把思考正文抹掉').toContain('思考内容')
@@ -417,29 +368,26 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
 
   beforeEach(() => {
     setActivePinia(createPinia())
-    seq = 0
-    stopTranscriptStream()
-    void startTranscriptStream(storeSink())
   })
 
   it('工具行在首帧即出现，参数增量在收起态可见（不等执行完）', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyFrame(frame({ id: 'U1', role: 'user', type: 'text', content: '调用工具' }))
-    applyFrame(frame(turn('T1')))
+    feed({ id: 'U1', role: 'user', type: 'text', content: '调用工具' })
+    feed(turn('T1'))
     await nextTick()
     expect(w.findAll('.turn-pending').length, '尚无子节点 → 等待骨架').toBe(1)
 
     // 首帧：名字已知、参数为空
-    applyFrame(frame(toolCall('TC1', 'T1', 'mcp__mockserv__echo', '')))
+    feed(toolCall('TC1', 'T1', 'mcp__mockserv__echo', ''))
     await nextTick()
     expect(w.findAll('.type-tool_call').length, '工具行必须在首帧就出现').toBe(1)
     expect(w.text()).toContain('mcp__mockserv__echo')
     expect(w.findAll('.turn-pending').length, '有子节点后骨架消失').toBe(0)
 
     // 参数窄增量：收起态的单行摘要必须跟着长
-    applyFrame(append('TC1', '{"text":"m'))
+    feed({ id: 'TC1', delta: '{"text":"m' })
     await nextTick()
-    applyFrame(append('TC1', 'ock 回显内容"}'))
+    feed({ id: 'TC1', delta: 'ock 回显内容"}' })
     await nextTick()
     expect(
       w.find('.type-tool_call .node-preview').text(),
@@ -449,14 +397,13 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
 
   it('只改 meta 的状态帧必须进 DOM（运行中秒数）', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyFrame(frame(turn('T1')))
-    applyFrame(frame(toolCall('TC1', 'T1', 'read_file', '{"path":"a.rs"}')))
+    feed(turn('T1'))
+    feed(toolCall('TC1', 'T1', 'read_file', '{"path":"a.rs"}'))
     await nextTick()
     expect(w.find('.tag-elapsed').exists(), '尚无 started_at → 不编一个时长').toBe(false)
 
     // 后端在"工具开始执行那一刻"单独发一条**只带 meta** 的帧
-    applyFrame(
-      frame({
+    feed({
         id: 'TC1',
         parent_id: 'T1',
         role: 'assistant',
@@ -464,8 +411,7 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
         name: 'read_file',
         status: 'streaming',
         meta: { started_at: Date.now() - 5000 },
-      } as ChatMessage),
-    )
+      } as ChatMessage)
     await nextTick()
     expect(
       w.find('.tag-elapsed').exists(),
@@ -503,19 +449,16 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
 
   beforeEach(() => {
     setActivePinia(createPinia())
-    seq = 0
-    stopTranscriptStream()
-    void startTranscriptStream(storeSink())
   })
 
   it('思考（始终单行）流式中跟着末端走，定稿后回到开头', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyFrame(frame(turn('T1')))
-    applyFrame(frame(reasoning('R1', 'T1', OPEN + '甲'.repeat(80))))
+    feed(turn('T1'))
+    feed(reasoning('R1', 'T1', OPEN + '甲'.repeat(80)))
     await nextTick()
 
     // 流式增量：摘要必须跟着长，且显示的是**新到的那一段**
-    applyFrame(append('R1', CLOSE))
+    feed({ id: 'R1', delta: CLOSE })
     await nextTick()
     const live = w.find('.type-reasoning .node-preview')
     expect(live.exists(), '思考默认单行，摘要必须存在').toBe(true)
@@ -524,7 +467,7 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
     expect(live.text(), '流式中不该还停在开头那句').not.toContain(OPEN)
 
     // 定稿：内容不再变，摘要回到开头（概述），裁剪方向也随之回到右端
-    applyFrame(frame({ id: 'R1', status: 'completed' }))
+    feed({ id: 'R1', status: 'completed' })
     await nextTick()
     const settled = w.find('.type-reasoning .node-preview')
     expect(settled.classes(), '定稿后不再左端裁剪').not.toContain('live')
@@ -534,10 +477,10 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
 
   it('工具行（默认单行）运行中的参数摘要同样跟末端走', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
-    applyFrame(frame(turn('T1')))
-    applyFrame(frame(toolCall('TC1', 'T1', 'write_file', '{"path":"/a/b.rs","body":"')))
+    feed(turn('T1'))
+    feed(toolCall('TC1', 'T1', 'write_file', '{"path":"/a/b.rs","body":"'))
     await nextTick()
-    applyFrame(append('TC1', '甲'.repeat(80) + '"}'))
+    feed({ id: 'TC1', delta: '甲'.repeat(80) + '"}' })
     await nextTick()
 
     const preview = w.find('.type-tool_call .node-preview')
@@ -545,7 +488,7 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
     expect(preview.text(), '参数已流到本地 ⇒ 收起态就该看到最新一段').toContain('"}')
 
     // 工具执行结束：内容定稿 → 回到开头（`{"path":...` 才是这次调用的身份）
-    applyFrame(frame({ id: 'TC1', status: 'completed' }))
+    feed({ id: 'TC1', status: 'completed' })
     await nextTick()
     const settled = w.find('.type-tool_call .node-preview')
     expect(settled.classes()).not.toContain('live')

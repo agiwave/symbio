@@ -50,7 +50,7 @@ sequenceDiagram
 | 3 | 默认能力 | `symbio_core/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
 | 4 | 模型调用（单轮） | `symbio/src/plugins/model/bound_provider.rs` | `execute_turn` = **一次** LLM 调用：4 协议适配（OpenAI / Anthropic / Gemini / Ollama）+ SSE 解析 + 事件出口。`model` **不做轮次循环** |
 | 5 | 工具循环（轮次） | `symbio/src/plugins/session/chat_loop.rs`（`close_turn` → `process_tool_calls_async`） | 「LLM → 工具 → LLM」的循环归 **session**（`gate_turn` / `close_turn` 判定下一步）。工具实现方：`local` / `web` / `vdfs` / `mcp` / `skill` / `telegram` / `agent` 等 |
-| 6 | 前端显示 | `PluginChannel`（`PluginPayload::Session`）→ `session/stream` 转写流 | **显示只由节点状态驱动**：会话运行态与消息**共处一条流、共用一个 `seq` 空间**（两种帧都带全量节点视图），因此「谁先谁后」是结构性的、不依赖调度。`kind = "vdfs"` 只剩会话**资源**变更（创建 / 删除 / 改名 / 标题），幂等重拉收敛。见 [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) §5.1 与 §11 |
+| 6 | 前端显示 | `event_bus` 的 `KIND_VDFS` 变更（消费端先 `vdfs/watch` 登记） | **显示只由节点状态驱动**：消息是 `<根>/session/<id>/消息/<mid>` 这个**文件**，会话运行态是会话节点（`<根>/session/<id>`）的 `status`——两者都是 VDFS 变更。`updated` 带 `delta` = 尾部追加（零回读）；无 `delta` = 回读。顺序是**节点属性**（`ChatMessage.seq`），与到达顺序无关。见 [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) §5.1 与 §11 |
 | 7 | 会话持久化 | `plugins/session/`（存储层） | 帧格式见 [PROTOCOLS.md]「AI 会话流式规范」 |
 
 > **执行期的两个原语**（[ADR-020](../DECISIONS.md#adr-020-执行期与传输层分离eventsink出-abortsignal入取代-pluginchannel-的双职责)）：
@@ -60,7 +60,7 @@ sequenceDiagram
 > **跨进程传输**（前端实时面 `PluginPayload::Session`）。排障时：**帧通道里没有
 > 中止帧**，中止只有一个入口 `AbortSignal::abort()`。
 
-**排障口诀**：不出字 → 查 #4 协议适配与 provider 配置；工具不触发 → 查 #2 收集结果与 #5 循环；**状态不刷新** → 查 #6：`emit_session_state` 是否被调（运行态的**唯一出口**），以及前端 `transcriptStream` 的 `transcript_session` 分派是否在跑（它是运行态的**唯一通道**）；状态不动而消息正常 → 同上，多半是唯一出口漏调。
+**排障口诀**：不出字 → 查 #4 协议适配与 provider 配置；工具不触发 → 查 #2 收集结果与 #5 循环；**状态不刷新** → 查 #6：`emit_session_state` 是否被调（运行态的**唯一出口**），以及前端对 `<根>/session/<id>` 的 `updated` 变更是否在收敛（运行态的**唯一通道**）；状态不动而消息正常 → 同上，多半是唯一出口漏调。
 
 ## 链路三：HTTP/WS 入站（gateway 插件）
 
@@ -105,8 +105,8 @@ sequenceDiagram
 | 路由 404 / UNKNOWN_PATH | [ROUTES.md] + home/composite 挂载（链路一 #6/#7） |
 | 聊天无响应/不出字 | 链路二 #4（协议适配）、provider 配置 |
 | 工具不执行 | 链路二 #2（能力收集）、#5（工具循环） |
-| 流式帧丢失 | 链路二 #6（`session/stream` + 序号缺口自愈）、链路一 #3（连接生命周期） |
-| 会话状态不刷新（角标/停止按钮不动） | 链路二 #6：`emit_session_state` 是否被调（运行态的唯一出口）；前端 `transcript_session` 分派是否在跑（运行态的唯一通道） |
+| 流式帧丢失 | 链路二 #6（`event_bus` 满通道补送 resync 指令 → 按作用域整份重读）、链路一 #3（连接生命周期） |
+| 会话状态不刷新（角标/停止按钮不动） | 链路二 #6：`emit_session_state` 是否被调（运行态的唯一出口）；前端对 `<根>/session/<id>` 的 `updated` 变更是否在收敛（运行态的唯一通道） |
 | 外部 HTTP 调用失败 | 链路三 #1/#2（health → 鉴权） |
 | 资源增删查异常 | 通用：资源访问链路（`vdfs/*`）#2/#3/#4 + [design/vdfs.md](../design/vdfs.md) §13.4 + `symbio/src/providers/vdfs_service/` |
 | 错误码含义 | [ERROR_CODES.md]（源：`symbio_core/error.rs`） |

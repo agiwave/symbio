@@ -632,6 +632,11 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
   > `delta` 载荷**已删除**（无生产性生产者），路径级串行的前提随之消失。剩下两条里，
   > 第一条也不再是承载**顺序敏感状态**的通道——运行态与消息都改走转写流（见本 ADR
   > 的「当前状态」），`kind = "vdfs"` 只剩幂等重拉类的资源变更。
+  > **再后记（S26 / ADR-025，2026-09-23）：第三条**又**成立了**——`delta` 随消息域
+  > 回到 `updated` 上，而它依赖的正是**路径级串行**（同一文件的内容只由单写入者追加）。
+  > 第二条（`list` 快照只升不降）也随之**不再需要**：运行态与消息都是 VDFS 变更，
+  > 快照一律靠**回读**（幂等、永远最新），不再有「快照 vs 流」的竞争。
+  > 第一条（单条有序通道）仍是事实描述，但**不再是任何推理的前提**——顺序是节点属性。
 - **`kind = "session"` 已整体删除**（S22 补完）：最后两个进程内消费者——`agent/host/subagent.rs`
   的审批透传 / 文本累积与 `cli/src/client.rs` 的渲染 / 完成判定——都改成「订阅总线 +
   `vdfs/watch` 登记」后消费 VDFS 变更。这带来一个**共享层新增**：`created` / `updated` 的
@@ -650,6 +655,12 @@ opset 11 / 527 节点），问题全在 tract 侧的形状推断配置。两条�
   > `ChatMessage`（`delta` 追加 / `content` 整条替换 / `status = removed` 删除），会话级
   > 告警下沉为 `TranscriptWriter::warn` 独立通道。见
   > `symbio/src/plugins/session/docs/node-state-streaming.md` §6。
+  > **三后记（S26 / ADR-025，2026-09-23）：这条又被反转回去了。** 消息的实时面**回到**
+  > VDFS 变更（`updated` + `delta`），`session/stream` 与 `symbio_core::transcript_stream`
+  > 退役。① 中删除的 `transcript` 折算层**没有回来**——因为形态变了：不再是「全量快照
+  > vs 增量补丁」需要折算，而是「`delta` = 尾部追加 / 无 `delta` = 回读」，**不需要折算**。
+  > ② 转播桥回到 `event_bus` + `vdfs/watch`。**「读会话节点 `status` 判本轮结束」这条
+  > 结论依旧不变**（三处同源），只是它现在走 VDFS 变更。
 - **词汇不合并**：`streaming`（消息）与 `working`（会话）保持两个词。合并会连带改
   `status-*` CSS 类名与 `isWorkingStatus()`，而**漏改 CSS 类名不报错、不失败，只会让
   流式动画静默消失**——正是"体验不得变差"要防的那类回归。
@@ -1478,6 +1489,186 @@ model / agent / skill / mcp / setting 分区都走这条。
 **详细记录**：取舍与实施注记见
 [`design/session-options-unification.md`](./design/session-options-unification.md)；
 现行规范见 `symbio/src/plugins/session/docs/session-options.md`。
+
+---
+
+## ADR-025: 顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**
+
+**状态**：已接受（2026-09-23）。
+
+**背景**：
+
+VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘、也可能只在内存里，
+但一律以**文件系统的语境**访问。会话转写在这个语境里本来就有唯一自然形态：
+
+```
+<根>/session/<id>/消息            一个文件夹
+<根>/session/<id>/消息/<mid>      一个文件（一条消息）
+流式输出                          该文件的内容在增长
+```
+
+这套形态**数据面早已落地**：`transcript_of` 返回「落库转写 ∪ 本轮在途缓冲」，
+`read(<id>/消息/<mid>)` 拿到的是**已含增量**的正文，`list` 按 `ChatMessage.seq`
+排序（`ordered()` 的注释写着「`seq` 是唯一权威顺序锚点」）。
+
+**但通知面走偏了**，且偏了两次：
+
+1. **S16–S19**：把消息挂到 VDFS 变更频道上（`appended` + `delta`、`truncated`、
+   `renamed` + `to`、`node` / `content`）。S23–S25 拆掉，消息改走独立的
+   `session/stream` 转写流（`symbio_core::transcript_stream`）。
+2. **S22–S25 + 批次 E/G**：会话运行态也并入转写流，与消息共用 `seq`；`VdfsChange`
+   收窄为 `{path, change}` 三个取值。
+
+两次拆解的理由写在 `docs/design/vdfs.md` §9 与 `vdfs_provider.rs` 的「变更通知」小节：
+
+- **频道没有流内序号**（丢帧不可检测）；
+- **载荷全量/增量混合**（消费端必须猜「这次是追加还是替换」）。
+
+**这两条是当时的正确判断，但它们被记成了能力性结论**，其中一句原文是：
+
+> `appended` 的设想是对的（逐帧只带增量，否则 O(n²)），但它需要的是**一条有序流**
+> （有流内序号、有背压恢复），而不是在资源变更频道上挂一个 `delta` 字段。
+
+**这句话是错的**，而它是后来一切推导的前提。错的不是观察，是**归因**：它把
+**数据的属性**（顺序）误当成了**传输的属性**。
+
+**决策**：
+
+1. **顺序是节点属性，不是投递属性。** `ChatMessage.seq` = 消息在该文件夹里的位置，
+   由写入者分配、随节点下发；消费端按它排序。前端**已经**如此
+   （`useChatConnection.ts` 的 `rootMessages.sort(a.seq ?? a.timestamp)`）。
+   于是**到达顺序与显示顺序无关**：后生成的先到、两个并行工具的变更混着到，
+   都正确显示——因为每个变更都指向一个明确的 `path`，节点自带位置。
+
+2. **「追加」不是新取值，是 `updated` 上的一个 `delta` 字段。** 消息流的设计经验
+   （`ChatMessage` 帧）是「**帧就是节点视图，没有操作枚举**」——`delta` 有 ⇒ 尾部
+   追加、`content` 有 ⇒ 整条替换、`status = removed` ⇒ 就地移除，**语义由字段本身
+   给出**（`ChatMessage.delta` 的文档写着「与 `content` 互斥，语义由字段本身给出」）。
+   VDFS 变更沿用同一条思路：
+
+   | `change` | `delta` | 消费端动作 |
+   |---|---|---|
+   | `created` | — | 插入该节点（回读拿全貌） |
+   | `updated` | **有** | **尾部追加**，零回读 |
+   | `updated` | — | 节点变了，回读（`stat` / `read`） |
+   | `deleted` | — | 就地移除 |
+   | `created` / `deleted` 带 `delta` | — | **协议违例**（与「`delta` / `content` 互斥」同源，报错丢弃） |
+
+   **取值集合不变**（仍是 `created` / `updated` / `deleted`），只加一个可选字段。
+   消费端不需要猜「这次是追加还是替换」——`delta` 的有无就是答案。任何「内容会
+   增长」的 provider 都能用它（转写、日志、流水），机制里**没有任何会话特化**。
+
+   ## 与消息流逐条同构
+
+   | `ChatMessage` 帧（消息流） | `VdfsChange`（VDFS 变更） |
+   |---|---|
+   | `delta` 有 ⇒ 尾部追加 | `updated` + `delta` ⇒ 尾部追加 |
+   | `content` 有 ⇒ 整条替换 | `updated` 无 `delta` ⇒ 回读（节点形态在 `read` 里） |
+   | `status = removed` ⇒ 就地移除 | `deleted` ⇒ 就地移除 |
+   | 未知 id 用帧内信息建占位 | `created` ⇒ 插入 |
+   | **`delta` 是传输形态，`content` 是节点形态** | **`delta` 是传输形态，`read` 是节点形态** |
+   | 同帧 `delta` + `content` = 违例 | `created` / `deleted` 带 `delta` = 违例 |
+   | `seq` 是顺序锚点（**节点属性**） | 同（`ChatMessage.seq`，与投递无关） |
+
+   > `Transcript::apply` 里那句注释是全部要害：**「图里只留累积后的 `content`：
+   > `delta` 是传输形态，不是节点形态。」** VDFS 侧一字不改地照搬。
+
+3. **不加快照载荷**（`node` / `content`）。理由是**独立于顺序**的：快照携带的是它
+   **生成那一刻**的状态，迟应用会把运行态回退。这是**陈旧写入**问题，不是乱序问题；
+   而回读（`stat` / `read`）永远最新且**幂等**，是正解。原文那句
+   「快照的来源必须**有序或幂等**」——**只有「幂等」那一半是对的**。
+
+4. **丢失靠幂等重读兜底，不靠序号。** 三层，**全部已实现**：
+   - `event_bus::try_publish` 满通道 → 保留订阅 + 补送 resync 标记（`ea8a460`）；
+   - 会话终态 → 300ms 宽限定时器 → 复查本地非终态节点 → 整份回读（`ea8a460`）；
+   - `subscribeVdfsChanged` **订阅即登记**（登记先于加载，避免启动窗口漏变更）。
+
+5. **`session/stream` 退役，`transcript_stream.rs` 删除。** 它存在的三条理由现在
+   都不成立：顺序（不是投递属性）、背压（`event_bus` 已对等）、免回读（由
+   `appended` + `delta` 直接提供）。
+
+6. **判据不变**：一个变更取值（或载荷字段）必须有**生产性生产者**。批次 G 删除时
+   确实**没有**（消息域已迁走）；现在消息域搬回来，**有了**。结论不同是因为输入
+   不同，不是反复。
+
+**理由**：
+
+- **热路径用载荷、冷路径回读**——这正是消息流的经验，而原文那句「**热路径与冷路径的
+  区别不足以支撑载荷**」把它说反了：消息流的高频帧（逐 token）**全部**带 `delta`，
+  只有低频帧（创建 / 终态 / 压缩）才回读。VDFS 侧同理：`delta` 覆盖绝大多数帧量，
+  状态迁移与创建各一次回读。**载荷该不该有，取决于它落在热路径还是冷路径上——恰恰
+  是原句否定的那个判据。**
+- **push 增量不是必需的**（消费端也可按游标拉取），但它是**更省的**：一条 5KB 的
+  消息跑 10s，push ≈ 总增量 5KB，pull ≈ 全量 × 每秒次数。既然通道已有 resync 兜底，
+  没有理由为了「可丢」而放弃它。
+- **精确缺口检测不是必需的**：resync 给的是「你可能漏了，重读你的作用域」——粗粒度，
+  但重读幂等，**足够**。
+- **`transcript_stream` 的背压纠正已经上移到 `event_bus`**（`ea8a460` 明写「本次把
+  同一条纠正补到本频道」），所以「一条机制」的成本已经从两处降到一处。
+- 合并之后 **`event_bus` 的 `KIND_VDFS` 就是唯一实时通道**，`symbio_core` 里不再有
+  第二个投递设施；新域（MCP 工具流、模型流）**不需要再造一个**。
+- **顺序与顺序敏感无关**：`ChatMessage.seq` 是**节点属性**（`ordered()` 的注释写着
+  「`seq` 是唯一权威顺序锚点」），前端 `sortTranscript` 按它排、缺失回退 `timestamp`。
+  两个并行工具的变更**混着到**、后生成的**先到**，显示都正确——因为每个变更都指向
+  一个明确的 `path`，而节点自带位置。**顺序从来不是投递层的职责。**
+
+**代价（逐条核实，不粉饰）**：
+
+- `VdfsChange` 加宽 → 跨栈形状（`protocol-mirror-audit` 的 C 组 / D 组镜像）、
+  `map_paths`、`to_change_event` / `VdfsChangeEvent`、前端 `schemas/vdfs.ts`
+  与 `useVdfs` 的 `appended` 快速路径（批次 G 刚删的，要加回）。
+- **通知量回到「每 token 一条」**：`event_bus` 订阅通道容量 2048 < `session/stream`
+  的 4096，需与后者对等或更高；否则 resync 频率上升（正确性不受影响，但会多出
+  整份重读）。
+- **`ChatMessage.seq` 建议提前到「消息创建时」分配**（现在只在落库时分配，在途消息
+  只能靠 `timestamp` 兜底；两条并行在途消息在 `timestamp` 同毫秒时无权威顺序）。
+  `Transcript.seq` 因此**不删、改语义**：从「帧序号」变成「位置序号分配器」。
+- **反向风险**：`VdfsChange` 加宽后，下一个改动者可能按「零生产者」再删一次。
+  必须在词汇表旁**同时**留下生产者清单与本节链接。
+- 遗留：`VdfsMessageDetail` 的「本视图不随流式增长」可以修好了——它当时不增长是因为
+  消息不产生 VDFS 变更，现在产生了。
+
+**详细记录（实施设计）**：
+[`design/session-realtime-vdfs-watch.md`](./design/session-realtime-vdfs-watch.md)
+——含「现行消息流的六条设计」逐条出处、读与流的协调规则（`appendGuard` 加回）、
+`Transcript.seq` 的语义变更（帧序号 → 位置序号分配器）、逐文件改动清单与同批约束。
+
+**这次纠正的范围（不只本 ADR）**：把「顺序是投递属性」当成前提的**历史性理解错误**
+落在多处文档，已一并纠正——`docs/design/vdfs.md` §9、`vdfs_provider.rs` 的「变更通知」、
+`docs/reference/ROUTES.md`、`docs/design/http-api-transport.md` §5.3、
+`docs/architecture/PROTOCOLS.md` / `DATA_FLOW.md`、`docs/design/vdfs-frontend.md`、
+`session/docs/node-state-streaming.md`（§8 不变量 #10/#20、§11.7）、
+`session/docs/vdfs-session-messages.md`（S26 续）、`session/docs/core-loop.md`、
+`session/docs/legacy-route-migration.md`、`cli/docs/architecture.md`、`cli/src/client.rs`
+模块文档、`VdfsMessageDetail.vue` 头注释，以及两份评审文档的**后记**。
+**archive 与评审类文档不改写正文，只加后记**——它们是「某一时刻的判断」，
+后记才是本次要留下的东西。
+
+**追记（S27，2026-09-23）：操作枚举整个退役，信封收敛为 `{path, data?}`。**
+
+本 ADR 落地时 `delta` 以 `updated` 的可选字段回归、取值集合保持三个；同日对形状
+的进一步质疑推翻了「取值集合不变」——信封上的 `created` / `updated` / `deleted`
+描述的「资源层面发生了什么」，与载荷描述的「业务数据变成了什么」是同一件事的
+两种说法，而消费端真正消费的只有后者。最终形态：
+
+- **信封 = `{path, data?}`**：`data` 是该路径的业务载荷（消息目录上是
+  `ChatMessage`、会话叶子 `<sid>` 上是 `VdfsNode`），缺失 = 无载荷（回读收敛）。
+  `delta` 回到它本来的位置——**`ChatMessage.delta` 字段本身**，不再是信封上的副本。
+- **`path` = 变更文件所在的目录**：消息的落点是 `<sid>/消息`，对象身份
+  （`ChatMessage.id` / `VdfsNode.name`）在 `data` 里，不在路径上。无载荷变更的
+  `path` 是节点自身地址（那时它是唯一定位符）。
+- **删除的表达**：资源域 = 「载荷缺失 + 回读 `NotFound`」（删掉的节点本就没有
+  视图可带，恰好不需要一个 `deleted` 类型）；消息域 = `ChatMessage.status =
+  removed`（消息词汇本就有它）。
+- **门面不再换信封**：`to_change_event` / `VdfsChangeEvent`（与 `VdfsChange`
+  形状逐字相同的影子类型）合并删除，总线上的形状与 provider 侧逐字一致。
+- **运行态随载荷带全量节点视图**（与 `stat` 同一构造点 `session_node`）：
+  消费端零回读就地收敛；资源信号保持无载荷，消费端防抖重拉。
+
+代价逐条核实：后端 `VdfsChange` / `map_paths` / 各 provider 的 notify 调用点、
+前端 `schemas/vdfs.ts` 与四个消费端（`sessionTranscriptSync` / `sessionNodeSync` /
+`sessions` / `useVdfs`）、协议镜像审计（D 组 `VdfsChange` 2 字段镜像）。
+现行规范见 [`design/vdfs.md`](./design/vdfs.md) §9 的「变更通知」小节。
 
 ---
 

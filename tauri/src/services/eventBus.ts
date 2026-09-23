@@ -233,20 +233,22 @@ export function subscribe(
 // ===== 资源变更：唯一的变更频道 + 按路径前缀分流 =====
 //
 // VDFS 是唯一的资源协议，后端只发 `kind = VDFS_EVENT_KIND` 一条频道，载荷是
-// `VdfsChangeEvent { path, change }`（`schemas/vdfs.ts`）。
+// `VdfsChange { path, data? }`（`schemas/vdfs.ts`）。
 // 「这条变更属于哪一类资源 / 哪一个会话」由**展示地址前缀**表达，不再靠第二条频道。
 //
-// ## 它**不带载荷**，因此消费端一律重读
+// ## 信封没有操作枚举（S27）：`{path, data?}`，语义全在 `data` 的字段上
 //
-// 变更只说「哪里、怎么变」（`created` / `updated` / `deleted` 三个取值），
-// 「变成了什么」一概回读。这里曾有过一张「按变更频率分配载荷宽度」的表
-// （`appended` → 仅 `delta` 零回读；`created` / `updated` → `node` 零回读），
-// 那些载荷字段**没有任何生产性生产者**，已整体删除——留着它们只会让消费端写出
-// 永远不执行的 `if (change.delta)`。判据见 `schemas/vdfs.VdfsChange`。
+// `path` 是变更文件所在的**目录**（消息的落点是 `<sid>/消息`），具体是哪条消息由
+// `data.id` 回答——对象身份在载荷里，不在路径上。`data` 是业务载荷：消息目录上
+// 是 `ChatMessage`（`delta` 追加 / `content` 替换 / `status = removed` 移除）、
+// 会话叶子上是 `VdfsNode` 全量视图；缺失 = 无载荷，回读收敛（资源删除回读
+// `NotFound` 即删除）。这里曾有过 `created` / `updated` / `deleted` 操作枚举与
+// 一张「按变更频率分配载荷宽度」的表，全部**没有生产性生产者**（或与载荷语义
+// 重复），S27 整体退役——判据见 `schemas/vdfs.VdfsChange`。
 //
-// 这条通道是**独立的无序通道**：所以任何需要「先到者赢」的状态都不要挂在它上面。
-// 会话运行态、消息正文这些顺序敏感的实时面走**转写流**（`session/stream`，
-// 单通道保序 + 会话内单调 `seq`）——批次 E 做的正是把运行态从这条通道搬到那条。
+// 顺序敏感的实时面（会话运行态 / 消息正文）**也在这条通道上**（ADR-025）：
+// 顺序是**节点属性**（`ChatMessage.seq` 决定显示顺序），不靠到达顺序——消费端
+// 的协调规则见 `stores/sessionTranscriptSync.ts`。
 
 /** 订阅作用域：按展示地址前缀分流（哪一类资源、哪个会话） */
 export interface VdfsChangeScope {
@@ -375,7 +377,7 @@ function setVdfsWatch(path: string, delta: 1 | -1): void {
 //   经 publishVdfsChangedLocal 以**同构载荷**即时通知其他页面，不等事件往返；
 //   后端事件随后到达，同步器幂等处理（防抖重拉收敛到服务端真相）。
 
-/** 前端模式通知：本地发布一条资源变更（载荷与后端 `VdfsChangeEvent` 同构） */
+/** 前端模式通知：本地发布一条资源变更（载荷与后端 `VdfsChange` 同构，无载荷信封） */
 export function publishVdfsChangedLocal(change: VdfsChange): void {
   for (const h of S.localVdfsHandlers) {
     try {

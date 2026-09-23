@@ -1,3 +1,4 @@
+use crate::symbio_core::vdfs::ChangeSubscriptions;
 use crate::symbio_core::AbortSignal;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -65,7 +66,8 @@ pub struct ActiveSessionState {
     ///
     /// 这是消费循环里唯一写入的那个 Transcript（见 `transcript.rs`），不是第二份拷贝：
     ///
-    /// - 前端实时流：消息帧逐帧经 `apply` 分配 seq 后发布到转写流订阅者；
+    /// - 实时面：每条变更（`created` / `updated` + `delta` / `deleted`）经
+    ///   `apply` 投到 VDFS 变更订阅表——一张表、一条 `vdfs/watch`；
     /// - VDFS 转写列表：`<根>/session/<id>/消息` 把在途图叠加在落库转写之上。
     ///
     /// 之所以必须共享：**流式期间消息还没落库**（`persist_messages` 只在每轮结束时
@@ -77,17 +79,20 @@ pub struct ActiveSessionState {
 
 impl Default for ActiveSessionState {
     fn default() -> Self {
-        Self::new()
+        Self::new(ChangeSubscriptions::default())
     }
 }
 
 impl ActiveSessionState {
-    pub fn new() -> Self {
-        Self::with_session_id(String::new())
+    /// `changes` 是**本 provider 自持的那张 VDFS 变更表**——转写的实时面投给它。
+    /// 不收它、让 `Transcript` 自己去取全局表，会投到没有订阅者的那张表上
+    /// （见 `Transcript::new` 的说明）。
+    pub fn new(changes: ChangeSubscriptions) -> Self {
+        Self::with_session_id(String::new(), changes)
     }
 
     /// 带 session_id 的构造函数
-    pub fn with_session_id(session_id: String) -> Self {
+    pub fn with_session_id(session_id: String, changes: ChangeSubscriptions) -> Self {
         Self {
             request_id: AtomicU64::new(0),
             session_id: session_id.clone(),
@@ -102,7 +107,10 @@ impl ActiveSessionState {
                 auto_compress_failures: 0,
                 auto_compress_circuit_opened_at: None,
             }),
-            transcript: Arc::new(Mutex::new(super::transcript::Transcript::new(session_id))),
+            transcript: Arc::new(Mutex::new(super::transcript::Transcript::new(
+                session_id,
+                Arc::new(changes),
+            ))),
         }
     }
 
@@ -162,18 +170,17 @@ impl ActiveSessionState {
 /// 活跃会话管理器
 pub struct ActiveSessionManager {
     pub sessions: Arc<RwLock<HashMap<String, Arc<ActiveSessionState>>>>,
-}
-
-impl Default for ActiveSessionManager {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// VDFS 变更表句柄：**每一份**新建的 `ActiveSessionState` 都把自己的
+    /// `Transcript` 接到这张表上。共享句柄而非各建一张——`vdfs/watch` 登记的是
+    /// 插件那一张（`SessionPlugin::change_subs`），别的表上没有订阅者。
+    changes: ChangeSubscriptions,
 }
 
 impl ActiveSessionManager {
-    pub fn new() -> Self {
+    pub fn new(changes: ChangeSubscriptions) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            changes,
         }
     }
 
@@ -182,7 +189,10 @@ impl ActiveSessionManager {
         if let Some(state) = sessions.get(session_id) {
             return state.clone();
         }
-        let state = Arc::new(ActiveSessionState::with_session_id(session_id.to_string()));
+        let state = Arc::new(ActiveSessionState::with_session_id(
+            session_id.to_string(),
+            self.changes.clone(),
+        ));
         sessions.insert(session_id.to_string(), state.clone());
         state
     }

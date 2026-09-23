@@ -14,10 +14,15 @@ import { stripAnsi, yellow } from '../color.mjs'
 /**
  * 通过数基线（**只增不减**；跑高了请更新这里并说明理由；**跑低了要说明理由**）
  *
+ * S27（916）：VdfsChange 信封 = `{path, data?}`、操作枚举整个退役——信封构造
+ *      守卫（`bare` 无载荷 / `with_data` 带载荷 / 无 `change` 键）、门面原样透传、
+ *      transcript 四帧生命周期（首帧全量副本 / delta 窄载荷 / removed 状态帧 /
+ *      运行态随节点视图）。`transcript_stream` 已随 ADR-025 退役，908 中相关
+ *      用例随之删除，由 VDFS 变更通道的新用例接替。
  * 908：流式链路评审 A–D 批的回归锚点——`event_bus` 满通道语义（不摘除订阅 /
  *      `Closed` 才摘除 / resync 标记形状 / 满通道后标记必达）与**扇出不复制载荷**
  *      （`PluginPayload::Data(Arc<Value>)` 的 `Arc::ptr_eq` 断言），外加
- *      `transcript_stream` 的扇出共享与信封可解回事件。逐条见
+ *      `transcript_stream` 的扇出共享与信封可解回事件（该模块已退役）。逐条见
  *      `docs/archive/streaming-chain-review-2026-09-22.md` §0.1。
  * 901：转写帧日志分级——`FrameLogLevel`（骨架 INFO / 细节 DEBUG）与
  *      `frame_log_of` 的相位判据，折行器新增 `foldable`（骨架帧与首帧不可折）。
@@ -73,9 +78,19 @@ export const BASELINE = {
   //        -3  `symbio_core/schemas/options.rs`（整文件删除）——旧 `OptionNode` 产物用例
   //      合计 +9。删的是机制不是覆盖：新产物那侧由上面几条接管。
   rustTests: 925,
-  // 47 spec 文件 / 661 → 683 → 687 → 689 → 724 用例。文件数与用例数均与平台无关（全仓 spec
+  // 47 spec 文件 / 661 → 683 → 687 → 689 → 724 → 726 用例。文件数与用例数均与平台无关（全仓 spec
   // 零平台分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见对应提交
   // （`git log --grep=<批次/主题>`；本仓库不维护变更日志，变更历史即提交历史）。
+  // 726：`delta` 作为 `updated` 的可选传输字段回来（2026-09-23）——**+2 用例**
+  //      （724 → 726），全在 `services/__tests__/eventBusWatch.spec.ts`：
+  //      ① 带 `delta` 的变更**不被形状判定丢弃**且原样到达消费者——这是「加字段」
+  //         最容易被门面悄悄裁掉的地方（后端 `to_change_event` 已有一条同义断言，
+  //         两端各锁一次，因为它们是两份独立实现）；
+  //      ② 作用域判定只看 `path`，与**是否带 `delta` 无关**——防止有人把
+  //         「热路径增量」当成一种需要单独放行的例外，从而在作用域上开出第二套规则。
+  //      ⚠️ 取值集合**没变**（仍是三个），所以这次没有像批次 G 那样「数量相抵」：
+  //      净增是实打实的。形状守卫（恰好两键 / 三键）在 `schemas` 侧未动，因为
+  //      它锁的是「词汇表是闭集」，而 `delta` 是 `updated` 上的字段、不是新取值。
   // 724：会话选项 schema 化（S1–S4，2026-09-23）——**+1 文件 / +35 用例**。
   //      新增 `ChatOptionBar.spec.ts`（21 条）：按 `DetailField.widget` 分派
   //      （`select` 菜单与选中态 / `path` 原生取值含 `disabled_when` / `form` 子表单 /
@@ -105,7 +120,7 @@ export const BASELINE = {
   // 672：收起态摘要跟「流式末端」走——`messagePreviewFollowsLiveEdge` 判据用例（2）+
   //      摘要取端（末端 / 开头 / 短内容 / 空内容，4）+ 渲染层两条（思考、工具行）。
   vitestFiles: 47,
-  vitestTests: 724,
+  vitestTests: 726,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

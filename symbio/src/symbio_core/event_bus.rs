@@ -16,7 +16,8 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-/// resync 标记重试次数 × 间隔（20 × 100ms = 2s）——与 `transcript_stream` 同量级。
+/// resync 标记重试次数 × 间隔（20 × 100ms = 2s）——与已退役的转写流（`session/stream`
+/// ，2026-09-23 随 ADR-025 一起删）同量级。
 const RESYNC_RETRY: usize = 20;
 const RESYNC_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -47,7 +48,7 @@ pub const KIND_SYSTEM: &str = "system";
 ///
 /// 不由本模块发布：一切资源的生命周期与状态变化都是 VDFS 变更，由 provider 写成功后
 /// 调 `symbio_core::vdfs::host::notify_change`，经 `watch` 的 sink
-/// （`plugins/vdfs/host.rs::event_bus_sink`）装进 `VdfsChangeEvent` 投到总线上（规范 §9）。
+/// （`plugins/vdfs/host.rs::event_bus_sink`）原样投到总线上（规范 §9；信封与 `VdfsChange` 形状重合，S27 起不再有独立的 `VdfsChangeEvent`）。
 ///
 /// 常量放这里而非 vdfs 插件，是贯彻上面那条「闭集只有一个家」——发布方只是引用者。
 /// 历史上并存的 `kind = "entity"` 频道（`publish_entity_changed` /
@@ -129,7 +130,7 @@ impl EventBus {
     /// 前端因此**永远不知道自己在收空气**。两者严重性不对称，故不能一并处理。
     ///
     /// （历史上这里把 `Full` 与 `Closed` 合并成一句 `is_err()` 并静默摘除，
-    /// 且不写日志。`transcript_stream` 当初正是作为这条缺陷的机制级纠正而写的；
+    /// 且不写日志。已退役的转写流当初正是作为这条缺陷的机制级纠正而写的；
     /// 本次把同一条纠正补到本频道。）
     pub fn try_publish(kind: &str, session_id: Option<&str>, data: Value) {
         // 载荷按**所有权**搬进信封（零拷贝），整个信封只分配两个小 Map：
@@ -194,7 +195,7 @@ pub fn build_envelope(kind: &str, session_id: Option<&str>, data: Value) -> Valu
 
 /// resync 标记的判别值（消费端按 `data.data.type` 识别）。
 ///
-/// 与 `transcript_stream` 的 `transcript_resync` 同构：都是「你可能漏了帧，
+/// 与已退役的转写流的 `transcript_resync` 同构：都是「你可能漏了帧，
 /// 请按自己的作用域重读」的指令。这里**不改用 `VdfsChange` 的形状**——那是
 /// 「一条变更」，而这是「一类指令」。消费端现有的作用域判定
 /// （`vdfsChangeInScope` 要求 `path` 是字符串）会自然忽略它，因此新增这条指令
@@ -231,8 +232,9 @@ fn warn_slow_once(id: &str) {
 
 /// 补送 resync 标记（fire-and-forget，同一订阅者同时只跑一个补送任务）。
 ///
-/// **无论补送成功与否都不摘除订阅**——这是与 `transcript_stream` 的有意差异：
-/// 转写流有单调 `seq`，摘除后消费端能靠跳号自愈；本频道没有序号，摘除即永久失联。
+/// **无论补送成功与否都不摘除订阅**——这是与已退役的转写流的有意差异：
+/// 它有**流内帧序号**（`NodeEvent.seq`），摘除后消费端能靠跳号自愈；本频道没有
+/// 序号（ADR-025：顺序是节点属性），摘除即永久失联。
 /// 因此这里宁可让一个卡死的订阅者留在表里（每次变更限流告警一次，可观测），
 /// 也不做那个不可逆的动作。
 fn schedule_resync(kind: &str, id: String, tx: mpsc::Sender<PluginFrame>) {

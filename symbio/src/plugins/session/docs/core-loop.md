@@ -936,8 +936,13 @@ invoke_capability(cap, ctx)                 ← 唯一「拆信封」点
                                                └─ 结果节点 / 父终态（唯一写入者）
 ```
 
-`PluginPayload::Session` 剩下的用途**只有跨进程**：`session/stream`（前端实时面）、
-`event_bus/subscribe`、vdfs 网关、CLI/前端客户端。执行期与它再无关系。
+`PluginPayload::Session` 剩下的用途**只有跨进程**：`session/stream`（前端实时面，
+⚠️ S26 待退役）、`event_bus/subscribe`、vdfs 网关、CLI/前端客户端。执行期与它再无关系。
+
+> **S26（ADR-025）后**：实时面改走 VDFS 变更（`event_bus` 的 `KIND_VDFS`），
+> `session/stream` 退役。**执行期不受影响**——它走的是 `EventSink` 进程内直连
+> （见上图的 `env.sink().apply(message)`），与跨进程传输无关；变的只是
+> `Transcript::apply` 的**出口**（从转写流帧改为 VDFS 变更）。
 
 ---
 

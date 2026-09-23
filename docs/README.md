@@ -61,6 +61,7 @@ docs/                            # 系统级文档（跨模块）
 │   ├── vdfs-frontend.md                 # VDFS 前端页面规范
 │   ├── agent-directory-spec.md          # agent 插件（智能体域）规范
 │   ├── session-options-unification.md   # 会话选项的 schema 化（已实施，2026-09-23）
+│   ├── session-realtime-vdfs-watch.md   # 会话实时面迁回 VDFS watch（实施设计，见 ADR-025）
 │   ├── http-api-transport.md            # Gateway HTTP/WS 传输层设计
 │   ├── frontend-mechanization-review.md         # 前端机制化复核 · 第一轮（一次性报告，非规范）
 │   ├── frontend-mechanization-review-round2.md  # 前端机制化复核 · 第二轮（同上）

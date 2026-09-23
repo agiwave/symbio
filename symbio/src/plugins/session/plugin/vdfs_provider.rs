@@ -327,13 +327,8 @@ impl vdfs::VdfsProvider for SessionPlugin {
                 store.write(text).map_err(vdfs::VdfsError::invalid)?;
                 // 变更路径与 `list` 返回的节点地址同源（provider 子树口径，
                 // 挂载名由容器的 watch 包装补上——见本文件 `watch` 的说明）
-                self.change_subs.notify(&vdfs::VdfsChange::new(
+                self.change_subs.notify(&vdfs::VdfsChange::bare(
                     super::super::memory::memory_rel_path(id),
-                    if existed {
-                        vdfs::VDFS_CHANGE_UPDATED
-                    } else {
-                        vdfs::VDFS_CHANGE_CREATED
-                    },
                 ));
                 return Ok(vdfs::VdfsWriteResponse {
                     path: path.to_string(),
@@ -489,7 +484,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
             self.save_session(&session)
                 .await
                 .map_err(vdfs::from_plugin_error)?;
-            self.notify_change(&id, vdfs::VDFS_CHANGE_CREATED);
+            self.notify_change(&id);
             return Ok(vdfs::VdfsWriteResponse {
                 path: id,
                 created: true,
@@ -523,9 +518,8 @@ impl vdfs::VdfsProvider for SessionPlugin {
             .await
             .map_err(vdfs::from_plugin_error)?;
         // 资源变更（标题 / metadata）走粗粒度信号：消费方重拉清单收敛。
-        // 不带节点视图——会话叶子的节点快照只有转写流（有序）与 `list` / `stat`
-        // （回读）两个来源，见 `plugin::notify_change`。
-        self.notify_change(&id, vdfs::VDFS_CHANGE_UPDATED);
+        // 不带节点视图，见 `plugin::notify_change`。
+        self.notify_change(&id);
         Ok(vdfs::VdfsWriteResponse {
             path: path.to_string(),
             created: false,
@@ -596,18 +590,20 @@ impl vdfs::VdfsProvider for SessionPlugin {
     ///
     /// | 路径 | 动作 | 语义 | 变更 | `data` |
     /// |---|---|---|---|---|
-    /// | `<id>/消息/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 转写流逐条删除帧（`status = removed`） | 被删 id 列表 |
-    /// | `<id>/消息` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 转写流逐条删除帧 | 无 |
+    /// | `<id>/消息/<mid>` | [`VDFS_ACTION_TRUNCATE`] | 该条**及其之后**全部没了 | 逐条 `deleted` | 被删 id 列表 |
+    /// | `<id>/消息` | [`VDFS_ACTION_CLEAR`] | 列表清空（会话本体保留） | 逐条 `deleted` | 无 |
     ///
-    /// ## 变更为什么落在转写流上，而不是 VDFS 变更
+    /// ## 为什么是**逐条**下发，而不是「列表目录一条 `deleted`」
     ///
-    /// 消息的变更面只有一条通道（`session/stream` 的消息帧，见
-    /// `symbio_core::transcript_stream`）；VDFS 侧只剩会话节点运行态与记忆文件。
-    /// 两种集合操作都逐条发删除帧——删除帧是**元数据**
-    /// （id + 状态，每条几十字节），而一次 `reset`（清空 + 从存储整份重读）
-    /// 会把所有**保留的**消息都重传一遍：对「删几条」这个动作，逐条通知
-    /// 恰恰是更便宜的形态。**权威的被删 id 列表走回执 `data`**：调用方据此
-    /// 幂等对齐，不依赖任何推送。
+    /// 删除帧是**元数据**（路径 + 取值，每条几十字节），而「清空 + 从存储整份重读」
+    /// 会把所有**保留的**消息都重传一遍：对「删几条」这个动作，逐条通知恰恰是
+    /// 更便宜的形态。**权威的被删 id 列表走回执 `data`**：调用方据此幂等对齐，
+    /// 不依赖任何推送。
+    ///
+    /// 变更落在 VDFS 上（`<sid>/消息/<mid>` 的 `deleted`），与消息流式
+    /// （`updated` + `delta`）、会话运行态（`<sid>` 的 `updated`）**同一条通道**
+    /// ——ADR-025：`session/stream` 转写流已退役，实时面与历史面是同一条
+    /// `vdfs/watch`。
     ///
     /// 为什么是动作而不是 `delete`：见 [`VDFS_ACTION_TRUNCATE`] 的文档
     /// （`delete` 是**逐节点**语义，表达不了"删一个节点却删掉了它后面所有"）。

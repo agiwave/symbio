@@ -33,7 +33,7 @@ use super::plugin::WorkPlugin;
 use crate::symbio_core::vdfs::{host_ctx, notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
-    VdfsResult, VdfsWriteResponse, VDFS_CHANGE_CREATED, VDFS_CHANGE_UPDATED,
+    VdfsResult, VdfsWriteResponse,
 };
 use crate::symbio_core::{MemoryFile, NodeSpec, AGENTS_FILE, PLUGIN_FILE, PLUGIN_WORK};
 use async_trait::async_trait;
@@ -152,15 +152,7 @@ impl VdfsProvider for WorkPlugin {
                 let existed = store.exists();
                 // 容量闸门在内核里（`MemoryFile::write`）——本插件不重复实现
                 store.write(text).map_err(VdfsError::invalid)?;
-                notify_change(
-                    PLUGIN_WORK,
-                    AGENTS_FILE,
-                    if existed {
-                        VDFS_CHANGE_UPDATED
-                    } else {
-                        VDFS_CHANGE_CREATED
-                    },
-                );
+                notify_change(PLUGIN_WORK, AGENTS_FILE);
                 Ok(VdfsWriteResponse {
                     path: path.to_string(),
                     created: !existed,

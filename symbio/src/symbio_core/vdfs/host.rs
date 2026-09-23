@@ -237,8 +237,17 @@ fn hub_of(kind: &str) -> Arc<ChangeSubscriptions> {
 ///
 /// 由集中式存储实现（`crate::providers::vdfs_service` 的三种拓扑）与目录自管型
 /// provider（agent 目录）在写 / 删成功后调用。
-pub fn notify_change(kind: &str, path: &str, change: &str) {
-    hub_of(kind).notify(&VdfsChange::new(path, change));
+pub fn notify_change(kind: &str, path: &str) {
+    hub_of(kind).notify(&VdfsChange::bare(path));
+}
+
+/// 广播一次**带业务载荷**的变更：`data` 是该路径当前的业务数据
+/// （消息帧 / 节点视图，由生产者按自己的词汇序列化——见 [`VdfsChange::with_data`]）。
+///
+/// 与 [`notify_change`] 分开而不是合并成一条，是为了让「绝大多数变更不携带载荷」
+/// 这件事在调用点上一眼可见：带载荷是一个**显式动作**，不是默认行为。
+pub fn notify_change_with_data(kind: &str, path: &str, data: impl serde::Serialize) {
+    hub_of(kind).notify(&VdfsChange::with_data(path, data));
 }
 
 /// 订阅某挂载点的变更（`VdfsProvider::watch` 的实现体）；变化发生时调用 `sink`。
@@ -319,11 +328,11 @@ mod tests {
                 Arc::new(move |c: VdfsChange| s.lock().unwrap().push(c.path)),
             );
         }
-        subs.notify(&VdfsChange::new("a", "updated"));
+        subs.notify(&VdfsChange::bare("a"));
         assert_eq!(subs.subscriber_count(), 2);
 
         subs.unwatch("a");
-        subs.notify(&VdfsChange::new("a", "updated"));
+        subs.notify(&VdfsChange::bare("a"));
         assert_eq!(
             seen.lock().unwrap().as_slice(),
             &["a".to_string(), "a".to_string()],
@@ -354,8 +363,8 @@ mod tests {
                 Arc::new(move |c: VdfsChange| n.lock().unwrap().push(c.path)),
             );
         }
-        subs.notify(&VdfsChange::new("abc/消息/m1", "appended"));
-        subs.notify(&VdfsChange::new("xyz", "updated"));
+        subs.notify(&VdfsChange::bare("abc/消息/m1"));
+        subs.notify(&VdfsChange::bare("xyz"));
 
         assert_eq!(narrow.lock().unwrap().as_slice(), ["abc/消息/m1"]);
         assert_eq!(broad.lock().unwrap().as_slice(), ["xyz"]);
@@ -365,7 +374,7 @@ mod tests {
     #[tokio::test]
     async fn notify_without_subscribers_is_noop() {
         let subs = ChangeSubscriptions::default();
-        subs.notify(&VdfsChange::new("a", "created"));
+        subs.notify(&VdfsChange::bare("a"));
         assert_eq!(subs.subscriber_count(), 0);
     }
 }

@@ -24,80 +24,56 @@
    `HomedirRegistry` 的最高优先级来源（高于 `~/.symbio_bootstrap` 与 `~/.symbio`），
    必须在任何 `HomedirRegistry::get()` 之前设置（插件树构造期就会读它）。
 2. `create_root_plugin().await` 构造整个进程内插件树。
-3. **两条下行连接**（各归其域，见下节）：
-   - `session/stream` —— **消息实时面**。一条流、每帧一条 `ChatMessage`、流内单调 `seq`、
-     按帧里的 `session_id` 归属；后端**广播**给全部订阅者。
-   - `event_bus/subscribe`（`SubscribeRequest { kinds: None }`）+ `vdfs/watch(<根>/session/<sid>)`
-     —— **会话运行态**。前者是收件地址、后者是开闸；后端只向登记过路径的订阅者投递变更
-     （`ChangeSubscriptions`），因此只做订阅是一条永远不响的频道。
-4. 两条连接各起一个 `tokio::spawn` 转发任务，把 `PluginFrame` 解包成 `Frame`（`Transcript` /
-   `Resync` / `Node`）后塞进**同一个** `mpsc::UnboundedReceiver`——调用侧只面对一个接收端。
+3. **一条下行订阅**（见下节）：`event_bus/subscribe` —— `vdfs` 频道（消息 +
+   会话运行态 + 资源信号），归属由信封的 `path` 给出（`<根>/session/<sid>/…`）。
+4. 该订阅起一个 `tokio::spawn` 转发任务，把 `PluginFrame` 解包成 `Frame`
+   （`Change` / `Resync`）后塞进 `mpsc::UnboundedReceiver`——调用侧只面对一个接收端。
 
-### 方向选择：为什么是「两条」而不是「一条」
-
-分治依据是**语义**，不是实现巧合：
+### 方向选择：为什么是「一条」
 
 | 域 | 通道 | 特征 |
 | --- | --- | --- |
-| 消息实时面 | `session/stream` | 高频突发；与「当前打开哪个会话」无关；每条消息归属一个会话 |
-| 会话运行态 | `event_bus` + `vdfs/watch` | 低频；状态是**节点属性**；与侧栏会话清单共用同一份订阅 |
+| 消息实时面 + 会话运行态 + 资源信号 | `event_bus` 的 `vdfs` 频道 | 一条订阅、单一 FIFO、按路径归属 |
 
-曾经消息也寄生在 VDFS 变更上（`kind = "vdfs"`），那条路有两个结构性缺陷：VDFS 变更
-**没有流内序号**（丢一帧不可检测，表现为「工具一直进行中、刷新即愈」），且载荷是全量而
-渲染器要增量，中间必须有人猜「追加还是替换」。现在每帧自带完整事实（`upsert` 全量快照 /
-`append` 裸增量）、自带 `seq`，折算层整个消失。
+**曾经是两条**：① `session/stream` 收消息、② `event_bus/subscribe` + `vdfs/watch` 收运行态。
+两条的到达顺序没有机制保证，于是「会话报不忙」推不出「本轮消息都已终态」——前端因此挂了一张
+宽限期复查的兜底网（`reconcileTranscript`）。批次 E 把运行态并进同一条流后，兜底网随之删除
+——不是被更强的网替代，而是它要补的那个缺口不再存在。
 
-会话域曾经还另有一条 `kind = "session"` 的事件频道（`Status` / `Update` / `Abort` 帧），
-已随「状态即节点属性」整体废除（见 `symbio/src/plugins/session/docs/node-state-streaming.md`）。
+**ADR-025 已落地**（2026-09-23，S27 收口）：实时面**迁回 VDFS 变更**，`session/stream` 与
+`symbio_core::transcript_stream` 一并退役，本 CLI 订阅 `vdfs` 频道。**批次 E 的合并理由
+（「需要顺序保证」）与 S23–S25 的拆分理由（「没有流内序号」）是同一个错误**：把「数据的属性」
+当成了「传输的属性」——顺序由**单一订阅连接**给（单一 FIFO），不由帧里的序号给。
+信封没有操作枚举（S27）：`{path, data?}`，语义全在 `data` 的字段上。
 
-`event_bus` 在本 CLI 里**只是传输层**。长连接而不是每会话一条私有通道：它与「当前打开哪个
-会话」解耦，切会话只需换一个 `vdfs/watch` 地址，不必重建连接。代价是消费侧按**地址前缀**
-过滤（不是按 `session_id`——VDFS 帧的业务身份全在 `VdfsChange::path` 里，`session_id` 是死字段）。
 
-### 上行：发送一条消息
-
-`ask()` 构造 `session_chat::Request`（User/Text 消息 + `provider_id` / `mode`），经
-`route("session/chat/send", …)` 发送，等响应 `status == "accepted"` 后进入变更循环。
-
-`route<T>()` 是通用封装：包 `Arc::new(SimpleRequest::new(None, None))`，设 `PATH` /
-`WORKDIR` / `SESSION_ID` / `payload`（`InvokeRequestExt::set_payload`），再 `.route(ctx)`。
-走进程内强类型通道，**无需为这些请求实现 `Serialize`**。
-
-### 会话元数据落库
-
-`ensure_session()` 走一次 **`vdfs/write(<根>/session/<id>, {create:true, metadata})`**，
-把 `workdir` / `mode` / `risk_level` / `provider_id`（可选）/ `agent_id`（可选）
-写进会话元数据。这些是后端 `resolve_session_params` 的回退来源：
-会话一旦绑定，后续每次发送都不必重复携带。`/workdir` 等 REPL 内改动后需重新调用一次使其落库。
-
-**一次调用即 upsert**：写的是**具名目标**（`<id>` 就是客户端指定的会话 id）且带
-`create` 意图——目标不存在则**就地创建**、已存在则浅合并 metadata
-（见 `VdfsProvider::write` 的 `create` 位表）。旧的 `session/update` 专用路由
-已于 2026-09-23 退役：它唯一多出来的能力就是这个，而 VDFS 的通用语义本就覆盖它。
-根地址在启动期经 `vdfs/root` 取回（`root_addr`），不写死。
-
-## 2. 下游帧循环与完成判定
 
 循环 `self.events.recv()`（带 `TURN_TIMEOUT = 900s` 兜底），每帧按变元分派：
 
 | 帧 | 来源 | 处理 |
 | --- | --- | --- |
-| `Frame::Transcript` | `session/stream` | 过滤掉非当前会话；`seq <= last` 丢弃（重复帧），跳号则告警留痕；随后把帧作为一条 `ChatMessage` 直接落地（`on_message`）：`delta` ⇒ 追加、`content` ⇒ 整条替换、`status = removed` ⇒ 丢快照 |
-| `Frame::Resync` | `session/stream` | 后端的背压标记（通道曾满）。CLI 无历史可重读，告警留痕 |
-| `Frame::Node` | `event_bus` + `vdfs/watch` | **会话叶子**（`path == 会话地址`）承载运行态：`status == working` ⇒ 提示「处理中」；离开 `working` ⇒ **本轮结束**，退出循环。比会话叶子更深的 VDFS 变更已不再是实时面，忽略 |
+| `Frame::Change`（落点 = 消息目录 `<sid>/消息`） | `vdfs` 频道 | `data` 就是那条 `ChatMessage`（身份在 `data.id`），直接落地（`on_message`）：`delta` ⇒ 追加、`content` ⇒ 整条替换、`status = removed` ⇒ 丢快照 |
+| `Frame::Change`（落点 = 会话叶子 `<sid>`） | `vdfs` 频道 | **会话运行态**：`data` 带全量节点视图（零回读），缺失 ⇒ 回读 `stat`；`status == working` ⇒ 提示「处理中」；离开 `working` ⇒ **本轮结束**，退出循环 |
+| `Frame::Change`（其余路径） | `vdfs` 频道 | 记忆 / 工作目录 / 插件等资源信号，与本轮渲染无关，丢弃 |
+| `Frame::Resync` | `vdfs` 频道 | 后端的背压标记（通道曾满）。CLI 无历史可重读，告警留痕 |
 
-完成判定是**会话节点自己的 `status`**（不再有 `Status{idle}` 帧可等）。结局从同一次变更的
+> 「过滤非当前会话」按**地址段**分派（`<根>/session/<sid>` 剥前缀，恰一段 = 会话叶子、
+> 两段且末段是消息目录 = 消息）——对象身份（`ChatMessage.id` / `VdfsNode.name`）在
+> `data` 里，不在路径上（S27：`path` = 变更文件所在的**目录**）。
+
+（不再有 `Status{idle}` 帧可等）。结局从同一次变更的
 `node.attributes` 读：`outcome == aborted` ⇒ 报中止，`status == failed` / `error` 非空 ⇒ 该错误
 作为本轮的返回值（退出码非 0）。
 
 **为什么结束判据只能看会话节点**：一轮请求里模型会多次定格根 Turn 节点（每个工具轮次一次），
-所以「Turn 到达终态」只说明这一轮*模型输出*结束，不说明整轮请求结束——转写流本身无法回答
+所以「Turn 到达终态」只说明这一轮*模型输出*结束，不说明整轮请求结束——转写帧本身无法回答
 「还有没有下一轮」。
 
 两个细节：
 
-- **转写流为什么要做 `seq` 判定**：后端每帧单调 +1，跳号 = 已知有损。渲染器只在单轮内做增量
-  合并，重连窗口内重发的 `append` 会把增量叠两次，因此 `seq <= last` 必须丢弃。
+- **顺序由通道给，不再由序号给**（S27）：订阅连接是单一 FIFO，后端按发布序投递，
+  不存在「重发叠字」的窗口；后端判明「可能漏了变更」时明示补送 resync 标记
+  （[`Frame::Resync`]），CLI 无历史可重读，告警留痕。
 - **节点变更也包含标题 / 元数据写入**，所以运行态提示只在**迁移**上报一次
   （`last_status`）；`drain_stale()` 在每轮 `ask` 前清空上一轮残留帧，避免旧帧被重复渲染。
 

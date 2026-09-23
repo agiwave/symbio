@@ -4,6 +4,7 @@
 //! `orchestrator.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
+use crate::symbio_core::vdfs::ChangeSubscriptions;
 
 /// 向在途转写图注入一条消息（测试辅助：等价于旧的 live_messages.push）。
 async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage) {
@@ -12,7 +13,10 @@ async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage
 
 /// 造一个已登记中止信号的会话状态（模拟消费循环入口的登记）。
 async fn armed_state() -> (Arc<ActiveSessionState>, AbortSignal) {
-    let state = Arc::new(ActiveSessionState::with_session_id("s1".into()));
+    let state = Arc::new(ActiveSessionState::with_session_id(
+        "s1".into(),
+        ChangeSubscriptions::default(),
+    ));
     let signal = AbortSignal::new();
     state.inner.write().await.abort_signal = Some(signal.clone());
     (state, signal)
@@ -209,7 +213,10 @@ async fn converge_inflight_finalizes_live_buffer_nodes() {
         .unwrap();
 
     // 在途侧：Turn 下未落库的 reasoning(Streaming) 与一个父不存在的孤儿
-    let state = Arc::new(ActiveSessionState::with_session_id(sid.into()));
+    let state = Arc::new(ActiveSessionState::with_session_id(
+        sid.into(),
+        ChangeSubscriptions::default(),
+    ));
     push_inflight(
         &state,
         node("reason", Some("turn"), cm::MessageStatus::Streaming),
@@ -265,7 +272,10 @@ async fn converge_inflight_marks_root_turn_aborted_and_children_completed() {
 
     // 在途缓冲：根 Turn（未落库）+ 其子节点。子节点晚于父节点入列——
     // 父存在性判据按序检查，与真实广播顺序一致。
-    let state = Arc::new(ActiveSessionState::with_session_id(sid.into()));
+    let state = Arc::new(ActiveSessionState::with_session_id(
+        sid.into(),
+        ChangeSubscriptions::default(),
+    ));
     push_inflight(&state, turn_node("turn-live", cm::MessageStatus::Streaming)).await;
     push_inflight(
         &state,
@@ -309,7 +319,10 @@ async fn converge_inflight_is_idempotent() {
     let store = p.get_store().await.expect("存储不可用");
     store.save_session(&Session::new(sid)).await.unwrap();
 
-    let state = Arc::new(ActiveSessionState::with_session_id(sid.into()));
+    let state = Arc::new(ActiveSessionState::with_session_id(
+        sid.into(),
+        ChangeSubscriptions::default(),
+    ));
     push_inflight(&state, node("turn", None, cm::MessageStatus::Streaming)).await;
     assert_eq!(p.converge_inflight(&state, sid, "用户中止").await, 1);
     assert_eq!(
@@ -336,7 +349,10 @@ async fn handle_abort_signals_registered_turn_and_converges() {
         .await
         .unwrap();
 
-    let state = Arc::new(ActiveSessionState::with_session_id(sid.into()));
+    let state = Arc::new(ActiveSessionState::with_session_id(
+        sid.into(),
+        ChangeSubscriptions::default(),
+    ));
     let signal = AbortSignal::new();
     {
         let mut inner = state.inner.write().await;
@@ -399,7 +415,10 @@ async fn aborted_and_completed_outcomes_are_distinct() {
         .save_session(&Session::new(sid))
         .await
         .unwrap();
-    let state = Arc::new(ActiveSessionState::with_session_id(sid.into()));
+    let state = Arc::new(ActiveSessionState::with_session_id(
+        sid.into(),
+        ChangeSubscriptions::default(),
+    ));
 
     p.emit_session_state(&state, SessionStateChange::aborted())
         .await;

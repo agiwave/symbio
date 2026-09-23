@@ -41,8 +41,9 @@ pub struct Request {
 ///
 /// 消息变更的线协议一度是独立的一层「显式操作」枚举（`upsert` / `append` /
 /// `remove` / `reset` / `warn`），后来收敛成只剩一个变元的 `Change`。两者都已
-/// 删除：**帧就是一条 [`ChatMessage`]**（见
-/// [`crate::symbio_core::transcript_stream::NodeEvent`]）。
+/// 删除：**帧就是一条 [`ChatMessage`]**（线协议上曾叫 `NodeEvent` =
+/// `{ session_id, seq, message }`，那层包装与承载它的转写流已于 2026-09-23
+/// 随 ADR-025 一并退役——消息变更改走 `VdfsChange`）。
 ///
 /// 原来那层枚举只是在重复 `ChatMessage` 已经有的字段：
 ///

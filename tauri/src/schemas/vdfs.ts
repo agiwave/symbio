@@ -307,61 +307,49 @@ export interface VdfsMoveResponse {
   to: string
 }
 
-/**
- * 变更类型——**闭集，恰好三个**。
- *
- * 与后端 `symbio_core::vdfs_provider` 的 `VDFS_CHANGE_*` 一一对应，跨栈一致性由
- * `scripts/protocol-mirror-audit.mjs` 校验。
- *
- * 曾有 `renamed` / `appended` / `truncated` 三个取值，全部**没有生产性生产者**
- * （没有一条真实路径会发出它们），已随载荷字段一并删除。判据与理由见
- * `VdfsChange` 的文档。
- */
-export const VDFS_CHANGE_CREATED = 'created'
-export const VDFS_CHANGE_UPDATED = 'updated'
-export const VDFS_CHANGE_DELETED = 'deleted'
-
 /** **重同步指令**：后端通道曾满，消费端可能漏了变更，请按自己的作用域重读。
  *
- *  与上表几个 `VDFS_CHANGE_*` **不是一类东西**：那些描述「一条变更」，本值是一条
- *  **指令**（后端 `symbio_core::event_bus::RESYNC_MARKER_TYPE`）。
+ *  它是一条**指令**而不是一条变更（后端 `symbio_core::event_bus::RESYNC_MARKER_TYPE`）。
  *
  *  它刻意**不带 `path`**——消费端的作用域判定要求 `path` 是字符串，因此本指令会
  *  被既有消费者自然忽略，只在显式登记了重读动作的地方生效（`subscribeVdfsChanged`
- *  的 `onResync`）。这与转写流的 `transcript_resync` 同构：都是「别猜漏了哪一段，
+ *  的 `onResync`）。与转写流的 `transcript_resync` 同构：都是「别猜漏了哪一段，
  *  按作用域整份重读」。 */
 export const VDFS_BUS_RESYNC = 'resync'
 
-/** 数据变更事件（总线下发的形状；后端 `VdfsChangeEvent`）。
+/** 数据变更事件（总线上下发的形状；与后端 `VdfsChange` 逐字同构，由
+ *  `scripts/protocol-mirror-audit.mjs` 校验）。
+ *
  *  路径即对外展示地址（根锚点打头的虚拟地址，或工作目录相对地址），消费方直接比对。
  *
- *  ## 两个字段就是全部——**没有载荷**
+ *  ## 形状：`path` + 可选 `data`——**信封没有操作枚举**
  *
- *  这不是「暂时没带」，而是**类型上不存在**。立的判据是：
+ *  信封只回答「**哪条路径、带来了什么**」；`data` 是该路径的**业务载荷**：
  *
- *  > 一个变更取值（或一个载荷字段）必须有**生产性生产者**，否则它不是词汇的一部分，
- *  > 只是别人误以为它存在的理由。
+ *  | `data` 形状 | 生产者 | 消费端动作 |
+ *  |---|---|---|
+ *  | `ChatMessage`（含 `delta`） | 消息域（`Transcript::apply`） | **按字段落地，零回读**：`delta` 追加 / `content` 替换 / `status = removed` 移除 |
+ *  | `ChatMessage`（全量） | 同上（首帧发合并后的全量副本） | 就地建立 / 替换该消息 |
+ *  | `VdfsNode` | 会话运行态（`emit_session_state`） | 就地收敛节点状态，零回读 |
+ *  | 缺失 | 全部资源信号（`notify_change`） | 回读 / 重拉（幂等）；对资源删除，回读 `NotFound` 即删除 |
  *
- *  历史上这里曾有 `to` / `delta` / `node` / `content` 四个可选载荷，它们对应的
- *  生产者是「消息寄生 VDFS」时代的 `appended` + `delta`。那条链在 S23–S25 拆完之后
- *  一个生产者也不剩——留着它们只会让消费端写出**永远不执行**的 `if (change.delta)`，
- *  并且让「这条通道到底会不会给我正文」变成一个要靠读实现才能回答的问题。
+ *  **path 的含义**：变更文件所在的**目录**（消息的落点是 `<sid>/消息` 这个目录），
+ *  具体是哪条消息由 **`data.id`** 回答——对象身份在载荷里，不在路径上。
+ *  无载荷变更的 `path` 是节点自身地址（那时它是唯一定位符）。
  *
- *  因此消费端一律**重读**：`created` / `updated` 防抖重拉清单，`deleted` 就地移除。
- *  流式增量走**转写流**（`transcript_event`），不走这里——那条通道单通道保序，
- *  这条不是（见 `stores/sessionNodeSync.ts` 的模块文档）。
+ *  ## 历史
  *
- *  ## 「区间删除」为什么也不在这里
- *
- *  它是唯一看起来该留个取值的东西（删一条消息要连带删掉其后全部）。它走**动作**
- *  （`VDFS_ACTION_TRUNCATE` / `VDFS_ACTION_CLEAR`）而不是变更：动作的回执能带回
- *  被删 id 列表，变更带不回；且逐条下发 `deleted` 的代价随条数线性增长，而
- *  「删这一段」与「删这一个」在 `deleted` 上完全不可区分。**VDFS 侧一条变更都不发**，
- *  实时通知走该资源自己的有序流（会话消息是转写流上的 `status = removed` 帧）。
- *  权威理由见后端 `symbio_core::vdfs_provider` 的 `VDFS_ACTION_TRUNCATE` 文档。 */
+ *  S16–S25 曾有 `created` / `updated` / `deleted` 操作枚举 + `delta` 字段
+ *  （`created`/`deleted` 带 `delta` 是协议违例）。S27 起操作枚举整个退役：
+ *  「资源层面发生了什么」与「业务数据变成了什么」是同一件事的两种说法，而消费端
+ *  真正消费的只有后者——消息的删除由 `ChatMessage.status = removed` 承载
+ *  （消息词汇本就有它），资源删除由「载荷缺失 + 回读 `NotFound`」表达。
+ */
 export interface VdfsChange {
+  /** 变更文件所在的目录（对外展示口径）；无载荷时是节点自身地址 */
   path: string
-  change: string
+  /** 业务载荷（`ChatMessage` / `VdfsNode` 的 JSON）；缺失 = 无载荷（回读收敛） */
+  data?: unknown
 }
 
 /** 字段级校验错误（provider 自持校验的产物） */

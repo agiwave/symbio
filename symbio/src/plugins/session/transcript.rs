@@ -2,44 +2,71 @@
 //!
 //! - **唯一写入点**：一切消息级变更（模型流式 / 工具执行 / 恢复重写 / 压缩 /
 //!   用户消息定稿）都以**一条消息帧**（[`cm::ChatMessage`]）进入
-//!   [`Transcript::apply`]——内存图、seq、核心日志、发布四件事在同一个函数里
-//!   完成，没有任何旁路。
-//! - **单调 seq**：每发布一帧 seq +1。消费端检测到缺口 = 丢帧当场可见，
-//!   唯一恢复路径是清空本地转写并从存储整份重读。
+//!   [`Transcript::apply`]——内存图、位置序号、核心日志、**变更投递**四件事在同一个
+//!   函数里完成，没有任何旁路。
+//! - **位置序号**：每条消息在 `<根>/session/<id>/消息` 这个**文件夹**里的位置。
+//!   在途消息此前没有号（只能靠 `timestamp` 兜底，同毫秒即并列），现在**创建时**就分配
+//!   （见 [`INFLIGHT_SEQ_BASE`]）。它是**节点属性**，不是投递属性——消费端按它排序，
+//!   与变更的到达顺序无关。
+//! - **变更投递**：每个变更投给 `kind = "vdfs"` 的订阅表（[`ChangeSubscriptions`]）。
+//!   消息正文的增长 = `updated` + `delta`（**传输形态**）；删除 = `deleted`；
+//!   首次出现 = `created`。**语义全在字段上，没有操作枚举**——这与 `ChatMessage`
+//!   帧自己的设计同源。
 //! - **核心日志**：分**骨架**与**细节**两级（见 [`FrameLogLevel`]）。骨架 = 节点
 //!   出现 / 终态 / 等待用户 / 删除，进 `INFO`——"什么出现了、什么时候结束"一眼看完；
 //!   细节 = `Update` 帧与纯增量的折行统计，进 `DEBUG`（`--verbose` 或
 //!   `SYMBIO_LOG=debug` 放开）。细节里的**连续同节点纯增量**（帧带 `delta`、无状态
 //!   迁移）再被 [`DeltaLogCoalescer`] 折成一行统计：一次流式回复有几百个增量帧，
 //!   逐帧一行会把时间线淹成噪声（实测一段 200 字回复 = 580 行 `+Nc`，占该轮 stderr
-//!   的 93%）。分级与折行**只作用于日志**——seq 照旧逐帧分配、帧照旧逐帧发布，
-//!   实时链路一个字节都不变（不变量 #28）。
-//! - **显式背压**：见 `symbio_core::transcript_stream`（满即踢 → 泵 EOF → 整份重读）。
+//!   的 93%）。分级与折行**只作用于日志**——变更照旧逐帧投递，实时链路一个字节都不变。
+//!   日志的 `[T#n]` 用的是**帧计数器**（`frame_no`，只进日志、不下发），与位置序号无关。
 //!
 //! ## 与 VDFS 的边界
 //!
-//! 消息的**实时面**走转写流；**历史面**（落库转写、`消息` 目录的 list / read
-//! 投影）仍是 VDFS。会话节点自身的状态（working / error / warning）也仍走
-//! VDFS watch（低频、非突发，且与会话清单共用同一订阅）。
+//! 消息的**实时面**与**历史面**是**同一条** `vdfs/watch`：变更的落点是消息**目录**
+//! `<id>/消息`（信封的 `path` = 变更文件所在的**目录**），业务载荷 `data` 就是那条
+//! `ChatMessage`——`delta` 有 ⇒ 尾部追加（零回读）、`content` 有 ⇒ 整条替换、
+//! `status = removed` ⇒ 就地移除，**对象身份（`id`）在 `data` 里**，不在路径上。
+//! 会话节点自身的状态（working / error / warning）也是 VDFS 变更（`<id>`，
+//! `data` = 全量节点视图），与侧栏会话清单共用同一份订阅。
 
+use super::plugin::message_dir_path;
 use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::transcript_stream::{
-    publish_frame, publish_session_state, NodeEvent, SessionStateEvent,
-};
-use crate::symbio_core::vdfs::VdfsNode;
+use crate::symbio_core::vdfs::{ChangeSubscriptions, VdfsChange};
 use crate::{plugin_debug, plugin_error, plugin_info};
 use indexmap::IndexMap;
+use std::sync::Arc;
 
-/// 会话转写：内存图（在途视图）+ 单调 seq + 发布。
+/// 在途消息**位置序号**的起点。
+///
+/// 在途消息尚未落库，存储还没给它分配号；但并行工具的消息必须在**创建时**就有权威
+/// 顺序（否则前端只能回退 `timestamp`，同毫秒即并列）。这里给在途消息一段**远离**
+/// 存储序号的空间：存储分配的序号是「第几条消息」量级（很小），而
+/// [`crate::plugins::session::plugin::nodes::ordered`] 按 `seq` 升序——因此从本值
+/// 开始的在途序号必然排在全部历史之后，正是「最新的消息在末尾」。
+///
+/// 落库后由 `overlay_live` / `persisted` 交回存储分配的序号，这段临时序号随之作废。
+pub(crate) const INFLIGHT_SEQ_BASE: i64 = 1 << 40;
+
+/// 会话转写：内存图（在途视图）+ 位置序号分配 + 变更投递。
 ///
 /// 挂在 [`crate::plugins::session::active::ActiveSessionState`] 上（每会话一个），
 /// 消费循环是它唯一的常规写入者；`emit_persisted_message`（用户消息定稿）与
 /// 压缩发射器经同一入口写入。
 pub struct Transcript {
     session_id: String,
-    seq: u64,
+    /// 下一个要分配的**在途位置序号**（见 [`INFLIGHT_SEQ_BASE`]）。
+    /// 只在**首次见到**一条消息、且该帧没带存储分配的号时消耗。
+    next_seq: i64,
+    /// **只进日志**的帧计数器——不是协议的一部分，也不下发。
+    /// 日志的 `[T#n]` 用它，因此「一次流式回复有几百帧」在时间线上仍然可数
+    /// （位置序号对同一节点的每一帧都是同一个值，用它就失去这个信息）。
+    frame_no: u64,
     nodes: IndexMap<String, cm::ChatMessage>,
-    /// 日志合并器（**只影响日志**，不参与 seq 与发布）。
+    /// 变更投递表——**必须是 session provider 的那一份**（不是全局 `hub_of`）：
+    /// `vdfs/watch` 登记的是那张表，投到别处等于没人收到。
+    changes: Arc<ChangeSubscriptions>,
+    /// 日志合并器（**只影响日志**，不参与序号与投递）。
     delta_log: DeltaLogCoalescer,
 }
 
@@ -75,11 +102,15 @@ pub(crate) struct DeltaLogCoalescer {
 }
 
 /// 一段连续的同节点纯增量的累计量。
+///
+/// 字段叫 `frame_*` 而不是 `seq_*`：本结构只服务于日志，而 `seq` 这个词在本模块里
+/// 已经被 [`INFLIGHT_SEQ_BASE`] 那一条语义（**位置序号**）占住了。叫错一次，
+/// 下一个读代码的人就会以为折行碰了位置序号——它碰的从来只是日志行。
 #[derive(Debug, PartialEq, Eq)]
 struct DeltaRun {
     message_id: String,
-    first_seq: u64,
-    last_seq: u64,
+    first_frame: u64,
+    last_frame: u64,
     frames: u64,
     chars: usize,
 }
@@ -96,7 +127,7 @@ impl DeltaLogCoalescer {
     pub(crate) fn feed(
         &mut self,
         msg: &cm::ChatMessage,
-        seq: u64,
+        frame_no: u64,
         foldable: bool,
     ) -> (Option<String>, bool) {
         let chars = match (&msg.delta, &msg.status) {
@@ -105,7 +136,7 @@ impl DeltaLogCoalescer {
         };
         if let Some(run) = self.run.as_mut() {
             if run.message_id == msg.id {
-                run.last_seq = seq;
+                run.last_frame = frame_no;
                 run.frames += 1;
                 run.chars += chars;
                 return (None, true);
@@ -115,8 +146,8 @@ impl DeltaLogCoalescer {
         let flushed = self.flush();
         self.run = Some(DeltaRun {
             message_id: msg.id.clone(),
-            first_seq: seq,
-            last_seq: seq,
+            first_frame: frame_no,
+            last_frame: frame_no,
             frames: 1,
             chars,
         });
@@ -140,12 +171,12 @@ impl DeltaRun {
             // 单帧：与折行前的形状逐字相同
             format!(
                 "[T#{}] {} - Update +{}c",
-                self.first_seq, self.message_id, self.chars
+                self.first_frame, self.message_id, self.chars
             )
         } else {
             format!(
                 "[T#{}..{}] {} - Update {} 帧 / +{}c",
-                self.first_seq, self.last_seq, self.message_id, self.frames, self.chars
+                self.first_frame, self.last_frame, self.message_id, self.frames, self.chars
             )
         }
     }
@@ -200,23 +231,30 @@ fn frame_log_of(
     }
 }
 
-/// 渲染一行核心日志：`[T#<seq>] <id> <status> [<detail>]`。
+/// 渲染一行核心日志：`[T#<frame>] <id> <status> [<detail>]`。
 ///
 /// 无 `detail` 时不落尾随空格——日志要能直接复制粘贴、能整齐对齐。
-fn render_frame_line(seq: u64, id: &str, status: &str, detail: &str) -> String {
+fn render_frame_line(frame_no: u64, id: &str, status: &str, detail: &str) -> String {
     if detail.is_empty() {
-        format!("[T#{seq}] {id} {status}")
+        format!("[T#{frame_no}] {id} {status}")
     } else {
-        format!("[T#{seq}] {id} {status} {detail}")
+        format!("[T#{frame_no}] {id} {status} {detail}")
     }
 }
 
 impl Transcript {
-    pub fn new(session_id: String) -> Self {
+    /// 构造一份会话转写。
+    ///
+    /// `changes` 必须是 **session provider 自持的那一张表**（插件的
+    /// `change_subs`）：`vdfs/watch` 登记的就是它，投到全局 `hub_of(kind)` 上等于
+    /// 没人收到——那张表上没有本 provider 的订阅者。
+    pub fn new(session_id: String, changes: Arc<ChangeSubscriptions>) -> Self {
         Self {
             session_id,
-            seq: 0,
+            next_seq: INFLIGHT_SEQ_BASE,
+            frame_no: 0,
             nodes: IndexMap::new(),
+            changes,
             delta_log: DeltaLogCoalescer::default(),
         }
     }
@@ -231,9 +269,11 @@ impl Transcript {
     /// | `content` | 整条替换该节点正文（幂等） |
     /// | `status = removed` | 就地移除该节点（不落图） |
     /// | `status`（其余） | 状态迁移 |
-    /// | 身份字段 / `meta` / `seq` / `timestamp` | 有则覆盖（发射端持有当前完整值） |
+    /// | 身份字段 / `meta` / `timestamp` | 有则覆盖（发射端持有当前完整值） |
+    /// | `seq` | 帧带了就用（存储权威值）；**没带且是新节点** ⇒ 就地分配在途号（[`INFLIGHT_SEQ_BASE`]） |
     ///
-    /// 未知 id 用帧内信息建占位再合并——帧自给自足，不依赖任何先行帧。
+    /// 未知 id 用帧内信息建占位再合并——帧自给自足，不依赖任何先行帧（含它的顺序：
+    /// 在途号在这里就有，不必等落库）。
     ///
     /// ## 协议违例：同帧既带增量又带完整正文
     ///
@@ -251,7 +291,9 @@ impl Transcript {
 
         let message_id = msg.id.clone();
 
-        // 删除：不落图，就地广播该状态帧（帧照常占 seq，「删了什么」在时间线上可追溯）。
+        // 删除：不落图，就地广播该状态帧（帧照常占号，「删了什么」在时间线上可追溯）。
+        // `status = removed` 是消息词汇里的**删除语义**——信封上没有 deleted 取值，
+        // 删除就是一条带 removed 状态载荷的变更。
         if msg.status == Some(cm::MessageStatus::Removed) {
             let detail = self
                 .nodes
@@ -269,6 +311,18 @@ impl Transcript {
         }
 
         let existed = self.nodes.contains_key(&message_id);
+        // 位置序号：**帧带就用**（存储权威值，落库后的对齐帧），**没带且是新节点**
+        // 就本轮分配一个在途号（见 `INFLIGHT_SEQ_BASE`）。先算再入图——下面那段要
+        // 独占 `self.nodes` 的可变借用。
+        let allocated = match msg.seq {
+            Some(s) => Some(s),
+            None if !existed => {
+                let s = self.next_seq;
+                self.next_seq += 1;
+                Some(s)
+            }
+            None => None,
+        };
         let node = self.nodes.entry(message_id.clone()).or_insert_with(|| {
             // 未知 id：用帧内身份建占位（帧自给自足）。
             cm::ChatMessage {
@@ -296,9 +350,9 @@ impl Transcript {
         if msg.meta.is_some() {
             node.meta = msg.meta.clone();
         }
-        // 存储侧权威值（落库后回发的对齐帧）。
-        if msg.seq.is_some() {
-            node.seq = msg.seq;
+        // 存储侧权威值（落库后回发的对齐帧）；新节点则落在上面分配的在途号上。
+        if let Some(s) = allocated {
+            node.seq = Some(s);
         }
         if msg.timestamp.is_some() {
             node.timestamp = msg.timestamp;
@@ -347,7 +401,15 @@ impl Transcript {
                     format!("{phase} {shape}")
                 }
             };
-        self.emit(msg, FrameLog { level, detail });
+        // 信封没有操作枚举（S27）：「首次出现还是更新」不单独成字段——帧自给自足
+        // （身份 / 正文 / 状态都在 `data` 里），消费端按字段落地，不需要分派键。
+        //
+        // **首帧发全量**：未知 id 上的窄增量（`{id, delta}`）会让消费端拿不到正文
+        // 基线——而图里的节点此刻已经合并完毕（身份 / 正文 / 在途号都在），把这份
+        // 自给自足的副本发出去，消费端零回读；既有节点照原帧发（窄增量保持窄，
+        // 那是流式正文的主干道，逐帧克隆全量纯属浪费）。
+        let frame = if existed { msg } else { node.clone() };
+        self.emit(frame, FrameLog { level, detail });
     }
 
     /// 落库回执：权威副本已写入存储，把节点从内存图移除（不发布）。
@@ -384,74 +446,96 @@ impl Transcript {
         self.nodes.clear();
     }
 
-    /// 分配 seq、打一行核心日志、发布。seq 只在被发布的帧上消耗。
+    /// 打一行核心日志、投递一条 VDFS 变更。`frame_no` 在被投递的每一帧上 +1。
     ///
-    /// ## 日志与发布在这里分岔（唯一一处）
+    /// ## 日志与投递在这里分岔（唯一一处）
     ///
-    /// `seq` 分配与 `publish_frame` **逐帧无例外**——它们是协议与数据面。
-    /// 只有**日志**分两级：**骨架**（[`FrameLogLevel::Skeleton`]）各自留一行进 `INFO`；
-    /// **细节**（[`FrameLogLevel::Detail`]）进 `DEBUG`，其中的纯增量帧再被
-    /// [`DeltaLogCoalescer`] 折成一行为统计（`[T#4..583] id - Update 580 帧 / +1234c`）。
-    /// 分级与折行前后的可观测差异**只有 stderr 的行数**（不变量 #28）。
+    /// **投递逐帧无例外**——它是数据面：一帧增量就是一次「正文尾部追加了这些字符」，
+    /// 丢了就永久少一段。只有**日志**分两级：**骨架**（[`FrameLogLevel::Skeleton`]）
+    /// 各自留一行进 `INFO`；**细节**（[`FrameLogLevel::Detail`]）进 `DEBUG`，其中的
+    /// 纯增量帧再被 [`DeltaLogCoalescer`] 折成一行为统计
+    /// （`[T#4..583] id - Update 580 帧 / +1234c`）。
     ///
     /// 被并入的纯增量帧其 `detail` 不被读取（调用方传空串即可）。
+    ///
+    /// ## 投递的形状：`<sid>/消息` 目录上的 `data = ChatMessage`
+    ///
+    /// 信封的 `path` 是**变更文件所在的目录**（消息都在 `<sid>/消息` 这一个目录里），
+    /// 具体是哪条消息由 **`data.id`** 回答——对象身份在载荷里，不在路径上。
+    /// `data` 就是**帧本身**（与内存图收到的同一条 `ChatMessage`）：`delta` 有 ⇒
+    /// 尾部追加、`content` 有 ⇒ 整条替换、`status = removed` ⇒ 就地移除——
+    /// 消费端按字段落地，零翻译。增量帧只带 `delta`（窄载荷），全量帧带身份 +
+    /// 正文；首帧（无论上游发的是窄增量还是全量）发图里合并后的**全量副本**，
+    /// 让消费端零回读即得基线。同帧 `delta` + `content` 已在 [`Self::apply`] 入口拒绝。
     fn emit(&mut self, message: cm::ChatMessage, log: FrameLog) {
-        self.seq += 1;
-        let seq = self.seq;
+        self.frame_no += 1;
+        let frame_no = self.frame_no;
 
         // 折行器先吃这一帧：可能冲刷出上一段纯增量的统计行。
         // **折行只对细节开放**——骨架帧（出现 / 终态 / 等待用户 / 删除）必须各自留行，
         // 它们正是折行要保住的东西。
         let (flushed, absorbed) =
             self.delta_log
-                .feed(&message, seq, log.level == FrameLogLevel::Detail);
+                .feed(&message, frame_no, log.level == FrameLogLevel::Detail);
         if let Some(line) = flushed {
             plugin_debug!("session", "{line}");
         }
         // 被并入的纯增量帧不产生自己的行；其余帧照常打印（带 status 列与 detail）。
         if !absorbed {
             let status = message.status.as_ref().map(|s| s.as_str()).unwrap_or("-");
-            let line = render_frame_line(seq, &message.id, status, &log.detail);
+            let line = render_frame_line(frame_no, &message.id, status, &log.detail);
             match log.level {
                 FrameLogLevel::Skeleton => plugin_info!("session", "{line}"),
                 FrameLogLevel::Detail => plugin_debug!("session", "{line}"),
             }
         }
 
-        publish_frame(&NodeEvent {
-            session_id: self.session_id.clone(),
-            seq,
-            message,
-        });
+        self.changes.notify(&VdfsChange::with_data(
+            message_dir_path(&self.session_id),
+            &message,
+        ));
     }
 
-    /// 发布一帧**会话运行态**——与消息帧**共用同一个 `seq` 计数器**。
+    /// 发布一次**会话运行态**变更：`<sid>` 上 `data = VdfsNode`（全量节点视图）。
     ///
-    /// ## 为什么 seq 分配必须留在这里
+    /// 与消息走**同一张订阅表**：会话节点就是 `<sid>`（它既是清单里的文件又是
+    /// 容器目录，变更落点是它自身）。这与 ADR-025 的结论一致——实时面与历史面
+    /// 是同一条 `vdfs/watch`。
     ///
-    /// 「会话不忙 ⇒ 本轮消息节点都已终态」要成立，靠的是「同一个 `seq` 空间 +
-    /// 单通道保序」：消费端读到 `status != working` 的那一帧时，所有 `seq` 更小的
-    /// 帧（含本轮全部终态帧）必然已在它之前落地。因此运行态帧**必须**从
-    /// [`Self::emit`] 用的那个计数器取号——若另起一个计数器，这条推理立刻失效。
+    /// ## `data` 为什么带**全量节点视图**
     ///
-    /// 于是「`seq` 只在 `Transcript` 里分配」这条规则**不变**（不变量 #28 的边界
-    /// 从「每条消息帧」扩到「每一帧」）：任何发布出去的帧都在这里取号。
+    /// 视图由编排层在**调用本函数那一刻**从权威源（`list` / `stat` 的同一构造点
+    /// `session_node`）取好——它不是缓存的旧副本，而是「此刻的状态」。消费端
+    /// **零回读**就地收敛：状态迁移是最需要即时的路径，一次状态迁移一次 IPC
+    /// 恰恰是最不该省的那一步。丢失不要紧（状态是幂等的，下一次 `list` 收敛）。
+    /// `None`（会话已删、取不到视图）⇒ 退化为无载荷变更：回读 `NotFound` 即删除。
     ///
     /// 调用时机由编排层保证：正常收尾在「清在途 → 复位 `is_working`」之后、
     /// 中止收尾在 `converge_inflight` 之后——两者都在本轮**最后一条**消息帧之后。
-    pub fn emit_session_state(&mut self, node: VdfsNode) {
-        self.seq += 1;
-        let seq = self.seq;
-        plugin_info!(
-            "session",
-            "[帧 {seq}] <session> - {} 会话运行态",
-            node.status
-        );
-        publish_session_state(&SessionStateEvent {
-            session_id: self.session_id.clone(),
-            seq,
-            node,
-        });
+    pub fn emit_session_state(&mut self, node: Option<crate::symbio_core::vdfs::VdfsNode>) {
+        self.frame_no += 1;
+        match &node {
+            Some(n) => plugin_info!(
+                "session",
+                "[T#{}] <session> {} - 会话运行态 {}",
+                self.frame_no,
+                self.session_id,
+                n.status
+            ),
+            None => plugin_info!(
+                "session",
+                "[T#{}] <session> {} - 会话运行态变更（无视图，回读收敛）",
+                self.frame_no,
+                self.session_id
+            ),
+        }
+        // 视图在手 ⇒ `data = VdfsNode`（消费端零回读）；视图缺席（会话已删）⇒
+        // 无载荷变更，消费端回读 `stat` 得 `NotFound` 即自然收敛。
+        let change = match node {
+            Some(n) => VdfsChange::with_data(&self.session_id, &n),
+            None => VdfsChange::bare(&self.session_id),
+        };
+        self.changes.notify(&change);
     }
 }
 

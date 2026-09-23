@@ -29,10 +29,10 @@
 > **S26 续（2026-09-23）：这条协议整体退役。** 它剩下的唯一消费方是后端 `agent_run`
 > 的**续会话存在性校验**——而「会话在不在」同样是 VDFS 的事：现在走**进程内纯接口探测**
 > （`Plugin::get_vfs_provider()` → `stat("<挂载名>/<sid>")`，判 `attributes.message_count`），
-> 既不再为回答「在不在」读回整份历史，也不再占一条路由。会话域至此只剩四条：
-> `chat/send`（发言 / 编排）· `chat/abort`（控制）· `stream`（实时面）·
-> `update`（CLI 的「客户端指定 id」）。见
-> [legacy-route-migration.md](./legacy-route-migration.md) §3.4.1。
+> 既不再为回答「在不在」读回整份历史，也不再占一条路由。会话域至此只剩三条：
+> `chat/send`（发言 / 编排）· `chat/abort`（控制）· `stream`（实时面，⚠️ S26 待退役）。
+> `update` 也已退役（`vdfs/write` 的 `create` 位覆盖了它唯一多出来的能力，2026-09-23）。
+> 见 [legacy-route-migration.md](./legacy-route-migration.md) §3.4.1。
 >
 > **S22 续**：当时剩下的一小块——`kind = "session"` 上的会话级事件（`Status` / `Error` /
 > `Abort`）——也已废除（会话运行态即会话节点，见 `node-state-streaming.md`）。
@@ -62,6 +62,25 @@
 > 通道，其上的快照会与转写流竞争（一次迟到的自动命名就能把运行态回退）。**读面仍归
 > VDFS**（`read(<根>/session/<sid>)`），本文对「消息即列表、转写即列表项」的读面推导
 > 依旧成立。见 `node-state-streaming.md` §11。
+>
+> **S26 续（实时面迁回 VDFS，ADR-025，2026-09-23）：上一段的结论被反转，本文的原始命题
+> 重新成立。** 消息的实时出口**回到** `kind = "vdfs"`：消息**就是**
+> `<根>/session/<sid>/消息/<mid>` 这个**文件**，流式输出是该文件内容的**增长**——
+> 发 `updated` + `delta`（`delta` 有 ⇒ 尾部追加；无 ⇒ 回读）。会话运行态是会话节点
+> （`<根>/session/<sid>`）的 `status`，同样走 `updated`。`session/stream` 与
+> `symbio_core::transcript_stream` 一并退役。
+>
+> **S25 那段的两条理由都被判定为错**：① 「快照的来源必须有序或幂等」——**只有「幂等」
+> 那一半对**；「有序」把**陈旧写入**误诊成了**乱序**（单写入者 + 单通道 FIFO 下不存在
+> 「后到的是旧的」）。② 「消息与运行态必须共用 `seq` 空间」——顺序是**节点属性**
+> （`ChatMessage.seq`）不是投递属性，这条「顺序保证」**无从需要**。
+>
+> ⚠️ **但形态与 S16–S22 不同**：**没有 `appended` 这个取值**。「追加」不是一种操作，
+> 而是 `updated` 上的一个可选 `delta` 字段——这正是消息流自己的经验
+> （`ChatMessage` 帧「就是节点视图，没有操作枚举」）。因此本文 §2.2 的
+> `apply_patch` / §S17 的 `merge_message_patch` / §4 的补丁形状对照表**仍然只是历史**：
+> 它们描述的是「按 `change` 取值分派操作」的旧模型，而现行模型里**语义全在字段上**。
+> 见 [`docs/design/vdfs.md`](../../../../../docs/design/vdfs.md) §9。
 
 ---
 

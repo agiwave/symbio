@@ -87,7 +87,7 @@ symbio_core/vdfs_provider.rs   ← centerpiece：VdfsProvider trait
                                   + VdfsContext + 路径工具 + 回填
 symbio_core/vdfs/host.rs       ← symbio 桥：上下文注入 + 错误翻译
 plugins/vdfs/protocol.rs       ← 线路信封：vdfs/* 请求响应 + 协议路径常量
-                                  + VdfsChangeEvent（总线事件形状）
+                                  + VDFS_OPS（变更事件与 provider 侧 VdfsChange 同形）
 plugins/vdfs/fs.rs             ← UnifiedFs：地址分流 + 口径映射 + 根守卫
 plugins/vdfs/physical.rs       ← 物理层：磁盘文件 + FsPolicy 安全守卫
 plugins/vdfs/host.rs           ← 访问层：拆信封 + 翻译操作 + 树遍历 + 事件投递
@@ -105,7 +105,7 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 |---|---|---|---|
 | 纯接口（centerpiece） | `symbio_core/vdfs_provider.rs` | `std` / `serde` / `serde_json` / `async_trait` | `VdfsProvider` trait、域类型、`VdfsContext`、路径工具、回填 |
 | 宿主桥 | `symbio_core/vdfs/host.rs` | 宿主自有 | 上下文注入、`VdfsError` ↔ `PluginError` |
-| 线路信封 | `plugins/vdfs/protocol.rs` | 上面两层 | `vdfs/*` 请求 / 响应、协议路径常量与 `VDFS_OPS`、`VdfsChangeEvent` |
+| 线路信封 | `plugins/vdfs/protocol.rs` | 上面两层 | `vdfs/*` 请求 / 响应、协议路径常量与 `VDFS_OPS`（变更事件与 `VdfsChange` 同形，S27 起无独立事件类型） |
 | 地址分流 | `plugins/vdfs/fs.rs` | 上面两层 | `UnifiedFs`：`<根>` / 物理分流、口径映射、`normalize_addr` |
 | 物理层 | `plugins/vdfs/physical.rs` | 上面两层 | 磁盘 IO + `FsPolicy`（白名单 / 符号链接 / 限额） |
 | 访问层 | `plugins/vdfs/host.rs` | 宿主自有 | 拆信封、翻译操作、树状遍历、事件总线投递 |
@@ -641,7 +641,7 @@ for (name, child) in children {
 
 - provider 在 `watch(path, sink)` 中开始监听，变化时调用 `sink(VdfsChange)`
   上报；`unwatch` 严格配对。
-- **provider 报出的 `VdfsChange` 不含子目录名**：`path` / `to` 都是该 provider 子树
+- **provider 报出的 `VdfsChange` 不含子目录名**：`path` 是该 provider 子树
   内的**相对路径**（与 `list` / `stat` 同一坐标系）。位置是使用方的概念（§2.4），
   provider 无从得知。
 - **`watch(path, sink)` 的 `path` 也是同一坐标系**（provider 根相对，`""` = 自身根）。
@@ -677,54 +677,70 @@ for (name, child) in children {
   1. **容器**（`CompositeVdfs::watch`）把 provider 的相对路径**补成树内全路径**
      （`<子目录>/<rel>`）后交给上层 sink；
   2. **门面**（`UnifiedFs`）把树内全路径**补成对外展示地址**
-     （`<根>/…` 或物理地址），装进 `VdfsChangeEvent`，发布到全局事件总线
-     （`kind = "vdfs"`，无会话关联、不入回放缓冲）。
+     （`<根>/…` 或物理地址）后**原样**发布到全局事件总线
+     （`kind = "vdfs"`，无会话关联、不入回放缓冲）。信封与 provider 侧的
+     [`VdfsChange`] 逐字同形——曾有一个 `VdfsChangeEvent` 影子类型做「换信封」
+     的翻译（两个名字、一个形状），S27 合并删除。
 
-  前端 `subscribe({ kind: 'vdfs' })` 按 `path` 前缀自行分流、防抖重拉。
-- **`vdfs::host::notify_change(kind, path, change)` 只报三元组，不携带载荷**——
-  而且**类型上就没有载荷字段可带**：`VdfsChange` 的形状恰好是 `path` + `change`
-  两个键（前端 `VdfsChange` 与之逐字一致，由 `scripts/protocol-mirror-audit.mjs`
-  校验）。经 `notify_change` 进来的变更，消费者只能防抖重拉。
-- **变更词汇**（`VdfsChange::change`，取值唯一，无场景自定义）：
+  前端 `subscribe({ kind: 'vdfs' })` 按 `path` 前缀与**载荷形状**自行分流：
+  `data` 含 `delta` 的消息帧**就地追加**（零回读），`data` 为节点视图的运行态帧
+  就地落定，无载荷变更防抖重拉。
+- **`notify_change(kind, path)` 发无载荷变更**（绝大多数资源信号长这样）；
+  需要携带业务载荷时走 `notify_change_with_data(kind, path, data)`——带载荷是
+  一个**显式动作**，不是默认行为。
+- **变更词汇：信封没有操作枚举**（S27）——形状是 `path` + 可选 `data`，
+  语义全在 `data` 的字段上：
 
-  | 取值 | 语义 | 消费者动作 |
+  | `data` 形状 | 生产者 | 语义 / 消费者动作 |
   |---|---|---|
-  | `created` | 多了一个节点 | 列表插入一项（或重拉该目录） |
-  | `updated` | 节点变了，**内容全量** | 就地替换（或重读该节点） |
-  | `deleted` | 节点没了 | 列表移除一项 |
+  | `ChatMessage`（含 `delta`） | 消息域（`Transcript::apply`） | 尾部追加，**零回读** |
+  | `ChatMessage`（全量：`content` / 状态 / 身份） | 同上（首帧发图里合并后的全量副本） | 整条替换 / 状态迁移，按字段落地 |
+  | `ChatMessage`（`status = removed`） | 同上 | 就地移除——删除是**消息词汇里的状态** |
+  | `VdfsNode` | 会话运行态（`emit_session_state`，与 `stat` 同源构造） | 全量节点视图就地落定，零回读 |
+  | 缺失 | 全部资源信号（`notify_change`） | 「这条路径变了」——回读 / 重拉（幂等）；资源删除回读 `NotFound` 即删除 |
+
+  **`path` 是变更文件所在的目录**：消息的落点是 `<sid>/消息` 这一个目录，具体是
+  哪条消息由 **`data.id`** 回答——对象身份（`ChatMessage.id` / `VdfsNode.name`）
+  在载荷里，不在路径上。无载荷变更的 `path` 是节点自身地址（那时它是唯一定位符）。
+  这与 `ChatMessage` 帧同源（`delta` 有 ⇒ 尾部追加、`content` 有 ⇒ 整条替换，
+  **语义由字段本身给出**，不从类型反推）。
+
+  **`delta` 是传输形态，不是节点形态。** 节点正文的权威形态永远是 `read` 的产物
+  ——`Transcript::apply` 那句注释是全部要害：「图里只留累积后的 `content`：
+  `delta` 是传输形态，不是节点形态。」因此 `delta` 只描述「这一帧到达了哪些字符」，
+  **不描述「节点现在是什么」**。
 
   **判据：一个变更取值（或载荷字段）必须有生产性生产者，否则它不是词汇的一部分。**
   这条不是"洁癖"，它挡住三种具体后果（都是本仓库反复否决过的那类陷阱）：
   规范文档会撒谎、消费端会长出永不执行的死分支、以及它会**诱导错误设计**。
+  `data.delta` 的生产者是消息域（`Transcript::apply` 对每条消息的正文增量）；
+  `data = VdfsNode` 的生产者是会话运行态（`Transcript::emit_session_state`）。
 
-  曾经还有三个取值与四个载荷字段（`renamed` / `appended` / `truncated`，
-  `to` / `delta` / `node` / `content`），**全部**是「消息寄生在 VDFS 变更频道上」
-  （S16–S19）留下的，而那套模型已在 S23–S25 拆完：
+  **历史（两条被纠正的「理解错误」）**：`renamed` / `appended` / `truncated` 三个取值
+  与 `to` / `delta` / `node` / `content` 四个字段曾在 S16–S19 为「消息寄生在 VDFS
+  变更频道上」而建，S23–S25 拆掉、批次 G 又收窄了一次。**那两次拆除的判据是结构性
+  的**——「一个取值必须有生产性生产者」，当时消息域已迁走，所以确实**零生产者**。
+  但当时留下的三句**能力性**解释是错的：
 
-  | 曾经的取值 / 字段 | 当年的用途 | 现在由谁承载 |
-  |---|---|---|
-  | `appended` + `delta` | 消息正文逐帧追加（热路径，零回读） | 转写流 `session/stream` 的 `ChatMessage.delta` 帧 |
-  | `truncated` | 「删某条及其之后」（区间语义，避免逐条下发） | 转写流的 `status = removed` 帧 |
-  | `renamed` + `to` | 节点换地址 | **无**（没有任何 provider 生产它） |
-  | `node` / `content` | `created` / `updated` 捎带快照，免一次 `stat` + `read` | **无**（没有任何 provider 填它） |
+  | 当时的说法 | 为什么错 |
+  |---|---|
+  | 「`appended` 需要的是**一条有序流**（有流内序号、有背压恢复）」 | **顺序是节点属性，不是投递属性**。`ChatMessage.seq` 是消息在文件夹里的位置，前端 `sortTranscript` 按它排——到达顺序与显示顺序无关：两个并行工具的变更混着到、后生成的先到，显示都正确。至于丢失：`event_bus` 的 resync（`ea8a460`）给的是「你可能漏了，重读你的作用域」——**粗粒度但足够**（重读幂等），不需要精确缺口检测 |
+  | 「**热路径与冷路径的区别不足以支撑载荷**」 | 说反了。消息流的高频帧（逐 token）**全部**带 `delta`，只有低频帧（创建 / 终态 / 压缩）才回读。**载荷该不该有，恰恰取决于它落在热路径还是冷路径上** |
+  | 「快照的来源必须**有序或幂等**」 | **只有「幂等」那一半是对的**。「有序」把**陈旧写入**误诊成了**乱序**——单写入者 + 单通道 FIFO 下不存在「后到的是旧的」。`node` / `content` 至今**不加**：回读永远最新且幂等，而快照只是「生成那一刻」的副本 |
 
-  两条当时的教训值得留下，因为它们解释了「为什么不做成载荷」：
+  S27（2026-09-23）更进一步：**操作枚举整个退役**。`change` 描述的「资源层面发生了
+  什么」与 `data` 描述的「业务数据变成了什么」是同一件事的两种说法，而消费端真正
+  消费的只有后者——保留前者只会让每个消费端都背一次「枚举 → 分派」的翻译。删除的
+  表达力让位给「载荷缺失 + 回读 `NotFound`」（删掉的节点本就没有视图可带）与
+  `ChatMessage.status = removed`（消息词汇本就有它）。想给操作枚举翻案的人：
+  先给出生产者，再论证「枚举 → 分派」比按字段落地好在哪里。
 
-  - **热路径与冷路径的区别不足以支撑载荷**。`appended` 的设想是对的（逐帧只带
-    增量，否则 O(n²)），但它需要的是**一条有序流**（有流内序号、有背压恢复），
-    而不是在资源变更频道上挂一个 `delta` 字段——后者丢帧不可检测，且消费端要猜
-    「这次是追加还是替换」。追加型资源现在有自己的有序流：`symbio_core::transcript_stream`。
-  - **快照的来源必须有序或幂等**。`node` / `content` 看似"免一次回读"的纯增益，
-    实则是把快照放在一条**独立无序通道**上——一次迟到的自动命名就能把运行态
-    **回退**。会话运行态曾是它的唯一使用者，批次 E 起改走转写流（见
-    [node-state-streaming.md](../../symbio/src/plugins/session/docs/node-state-streaming.md) §11.4）。
-    真需要「免回读」时，正确形态是让消费者读**幂等的**那一侧（`list` / `stat`）。
   - `map_paths` 仍是路径翻译的**唯一入口**（见 [ADR-015](../DECISIONS.md)）：
     使用方补挂载前缀时一律调它，不逐字段重建——后者会在新增路径字段时静默漏翻。
-    目前只有 `path` 一个字段，但保留这个函数正是为了让这句话继续成立。
-- **禁止轮询、禁止私有刷新通道**。`created` / `updated` / `deleted` 这类
-  粗粒度变更由消费者防抖重拉收敛——重拉是**幂等**的，因此无序、可丢、可重放都无害。
-  列表**内容**的实时面不属于本通道（见上表：它有自己的有序流）。
+  - **禁止轮询、禁止私有刷新通道。** 「禁止轮询」指**无触发的定时拉取**；由变更
+    **触发**的回读（含 resync 后的整份重读）不是轮询，而是本机制的正常一半。
+    粗粒度变更由消费者防抖重拉收敛——重拉**幂等**，因此无序、可丢、可重放都无害。
+    列表**内容**的实时面**属于本通道**：`delta` 覆盖热路径，其余回读。
 
 ## 10. 扩展指引
 

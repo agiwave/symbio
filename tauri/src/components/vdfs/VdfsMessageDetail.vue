@@ -15,16 +15,21 @@
   ## 与 `ext = session` 的分工
 
   - `session`（会话叶子）：聊天工作区，可发言；
-  - `message`（列表项）：这条消息本身的只读视图，LLM 与前端读到的是同一份。
+  - `message`（列表项）：这条消息本身的视图，LLM 与前端读到的是同一份。
 
-  正文来自一次 `vdfs/read`。**本视图不随流式增长**：实时面是转写流
-  （`session/stream`），由 `ext = session` 的聊天工作区消费；这里是同一份数据的
-  **只读视角**，重选（或该节点发生 VDFS 变更）即重读。
+  正文初值来自一次 `vdfs/read`，此后**随 `updated` + `delta` 就地增长**——这正是
+  「流式即文件追加」的可视化：消息是 `<根>/session/<sid>/消息` 这个文件夹里的一个
+  **文件**，流式输出是它的内容在增长（ADR-025）。
 
-  为什么不给消息节点发 VDFS 变更让它跟着长：`kind = "vdfs"` 是一条**独立的无序
-  通道**，在它上面捎带正文快照，一次迟到的帧就会把正文回退——正是批次 E 从会话
-  运行态上拆掉的那类问题。真要做，也该让本视图直接消费转写流，而不是往这条通道
-  加载荷（见 `schemas/vdfs.VdfsChange` 的「两个字段就是全部」）。
+  ## 曾经写在这里的两条反向说明（已作废）
+
+  1. 「本视图**不随流式增长**：实时面是转写流 `session/stream`」——那是 S23–S25 的
+     形态；实时面已迁回 VDFS 变更（ADR-025），`session/stream` 退役。
+  2. 「不该给消息节点发 VDFS 变更让它跟着长：迟到的帧会把正文回退」——**会回退的是
+     **全量快照**，而 `delta` 是**尾部追加**（单调、不可回退），两者不是一回事。
+     真正要防的是「在途重读用**旧快照**覆盖本地已拼接的增量」，那由**代际守卫**解决
+     （`useVdfs` 的 `appendGuard`：读取期间有增量落地即丢弃该响应），与「能不能发
+     增量」无关。见 `schemas/vdfs.VdfsChange` 的形状表。
 -->
 <template>
   <DetailShell :mechanism-actions="mechanismActions" :mechanism-busy="mechanismBusy" :error="error">

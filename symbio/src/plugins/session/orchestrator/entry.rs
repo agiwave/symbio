@@ -555,11 +555,11 @@ impl SessionPlugin {
             return;
         }
 
-        // 标题变更 = 该会话节点的一次资源 `updated`（粗粒度）：消费方重拉清单即收敛
+        // 标题变更 = 该会话节点的一次**资源信号**（粗粒度）：消费方重拉清单即收敛
         // （自动命名与手动改名走同一条链路，不因发起者不同而分流）。
-        // 不带节点视图：会话叶子的节点快照只有转写流（有序）与 `list` / `stat`（回读）
-        // 两个来源，见 `plugin::notify_change`。
-        self.notify_change(session_id, crate::symbio_core::vdfs::VDFS_CHANGE_UPDATED);
+        // 不带节点视图：见 `plugin::notify_change`——资源信号不值得让每个消费端
+        // 都背一次逐字段合并；运行态才走带视图的 `emit_session_state`。
+        self.notify_change(session_id);
     }
 }
 

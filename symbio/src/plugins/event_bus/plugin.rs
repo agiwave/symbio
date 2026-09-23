@@ -63,7 +63,14 @@ impl EventBusPlugin {
         _ctx: Arc<dyn InvokeRequest>,
         _req: SubscribeRequest,
     ) -> InvokeResponse<PluginPayload> {
-        let (peer, mine) = PluginChannel::pair(2048);
+        // 容量与 `session/stream` 对等（4096）。
+        //
+        // 这条频道承载**全部**实时面：消息正文的逐帧增量（`VdfsChange.delta`，热路径）
+        // 与会话 / 资源变更（低频）共用它。原先的 2048 是「只有资源变更」时的取值，
+        // 承接消息增量后偏小——满了虽不会丢（`try_publish` 会补 resync 指令，
+        // 消费端重读作用域后自愈），但每次 resync 都换来一次整份重读，代价远大于
+        // 多留 2048 个槽位。
+        let (peer, mine) = PluginChannel::pair(4096);
 
         // 注册到全局表
         let connection_id = Uuid::new_v4().to_string();

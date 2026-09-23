@@ -9,10 +9,11 @@
 //! 就是「反复失败不收敛」。
 
 use super::ActiveSessionState;
+use crate::symbio_core::vdfs::ChangeSubscriptions;
 
 #[tokio::test]
 async fn skip_is_false_until_threshold_reached() {
-    let st = ActiveSessionState::with_session_id("s".into());
+    let st = ActiveSessionState::with_session_id("s".into(), ChangeSubscriptions::default());
     // 阈值前：不跳过，仍尝试
     assert!(!st.compression_should_skip().await);
     st.compression_record_failure().await;
@@ -26,7 +27,7 @@ async fn skip_is_false_until_threshold_reached() {
 
 #[tokio::test]
 async fn success_resets_the_counter() {
-    let st = ActiveSessionState::with_session_id("s".into());
+    let st = ActiveSessionState::with_session_id("s".into(), ChangeSubscriptions::default());
     st.compression_record_failure().await;
     st.compression_record_failure().await;
     st.compression_record_failure().await;
@@ -41,7 +42,7 @@ async fn success_resets_the_counter() {
 
 #[tokio::test]
 async fn cooldown_is_observed_after_open() {
-    let st = ActiveSessionState::with_session_id("s".into());
+    let st = ActiveSessionState::with_session_id("s".into(), ChangeSubscriptions::default());
     // 推到开闸
     st.compression_record_failure().await;
     st.compression_record_failure().await;

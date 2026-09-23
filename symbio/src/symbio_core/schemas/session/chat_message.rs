@@ -98,6 +98,25 @@ impl MessageStatus {
             MessageStatus::Removed => "removed",
         }
     }
+
+    /// [`Self::as_str`] 的逆：状态词 → 枚举。未知词返回 `None`。
+    ///
+    /// 存在的理由与 `as_str` 是同一条的另一半：VDFS 变更**不带载荷**（ADR-025），
+    /// 消费端拿到 `<sid>/消息/<mid>` 的 `updated` 后只能回读**节点**
+    /// （`stat`），而节点上承载状态的是那个**词**。把它解析回枚举若在每个消费端
+    /// 各手写一次 match，词表就又有了第二份定义。
+    pub fn of(word: &str) -> Option<Self> {
+        match word {
+            "pending" => Some(MessageStatus::Pending),
+            "streaming" => Some(MessageStatus::Streaming),
+            "waiting_user_action" => Some(MessageStatus::WaitingUserAction),
+            "completed" => Some(MessageStatus::Completed),
+            "aborted" => Some(MessageStatus::Aborted),
+            "failed" => Some(MessageStatus::Failed),
+            "removed" => Some(MessageStatus::Removed),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -49,9 +49,6 @@ vi.mock('@/utils/logger', () => ({
 
 import { useVdfs } from '../useVdfs'
 import {
-  VDFS_CHANGE_CREATED,
-  VDFS_CHANGE_DELETED,
-  VDFS_CHANGE_UPDATED,
   VDFS_EXT_MESSAGE,
   type VdfsChange,
   type VdfsNode,
@@ -124,15 +121,15 @@ beforeEach(() => {
   mocks.subscribeVdfsChanged.mockReturnValue(() => {})
 })
 
-describe('useVdfs 消费 VDFS 变更（词汇闭集、无载荷 ⇒ 一律重拉收敛）', () => {
-  it('影响当前目录的变更触发重拉（updated = 「这个节点变了，请重读」）', async () => {
+describe('useVdfs 消费 VDFS 变更（信封没有操作枚举、非 delta 载荷 ⇒ 一律重拉收敛）', () => {
+  it('影响当前目录的变更触发重拉（无载荷 = 「这个节点变了，请重读」）', async () => {
     vi.useFakeTimers()
     try {
       const { wrapper } = mountHost(MSG_DIR)
       await settle()
       const listCalls = mocks.listVdfs.mock.calls.length
 
-      emitChange({ path: `${MSG_DIR}/m1`, change: VDFS_CHANGE_UPDATED })
+      emitChange({ path: `${MSG_DIR}/m1` })
       await vi.advanceTimersByTimeAsync(500)
 
       expect(mocks.listVdfs.mock.calls.length, 'updated 必须触发重拉收敛').toBeGreaterThan(
@@ -144,34 +141,23 @@ describe('useVdfs 消费 VDFS 变更（词汇闭集、无载荷 ⇒ 一律重拉
     }
   })
 
-  it('created 与 deleted 走**同一条**收敛路径（三个取值没有分叉）', async () => {
-    for (const change of [VDFS_CHANGE_CREATED, VDFS_CHANGE_DELETED]) {
-      vi.resetAllMocks()
-      mocks.listVdfs.mockResolvedValue({
-        path: MSG_DIR,
-        node: { ...msgNode('__dir'), access: 'l', ext: undefined },
-        items: [],
-      })
-      mocks.readVdfs.mockResolvedValue({ path: '', text: '', binary: false, size: 0 })
-      mocks.subscribeVdfsChanged.mockReturnValue(() => {})
+  it('创建与删除走**同一条**收敛路径（信封没有 created/deleted 之分：回读 NotFound 即删除）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { wrapper } = mountHost(MSG_DIR)
+      await settle()
+      const listCalls = mocks.listVdfs.mock.calls.length
 
-      vi.useFakeTimers()
-      try {
-        const { wrapper } = mountHost(MSG_DIR)
-        await settle()
-        const listCalls = mocks.listVdfs.mock.calls.length
+      emitChange({ path: `${MSG_DIR}/m9` })
+      await vi.advanceTimersByTimeAsync(500)
 
-        emitChange({ path: `${MSG_DIR}/m9`, change })
-        await vi.advanceTimersByTimeAsync(500)
-
-        expect(
-          mocks.listVdfs.mock.calls.length,
-          `${change} 必须触发重拉（没有就地增删的快速路径）`,
-        ).toBeGreaterThan(listCalls)
-        wrapper.unmount()
-      } finally {
-        vi.useRealTimers()
-      }
+      expect(
+        mocks.listVdfs.mock.calls.length,
+        '无载荷变更必须触发重拉（没有就地增删的快速路径）',
+      ).toBeGreaterThan(listCalls)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
     }
   })
 
@@ -183,7 +169,7 @@ describe('useVdfs 消费 VDFS 变更（词汇闭集、无载荷 ⇒ 一律重拉
       const listCalls = mocks.listVdfs.mock.calls.length
 
       // 同一会话的**兄弟目录**：既不是 MSG_DIR 自身，也不在其子树内
-      emitChange({ path: `@vfs/session/abc/其它/m1`, change: VDFS_CHANGE_UPDATED })
+      emitChange({ path: `@vfs/session/abc/其它/m1` })
       await vi.advanceTimersByTimeAsync(500)
 
       expect(mocks.listVdfs.mock.calls.length, 'affects() 收窄失效会让全应用互相刷').toBe(
@@ -195,22 +181,38 @@ describe('useVdfs 消费 VDFS 变更（词汇闭集、无载荷 ⇒ 一律重拉
     }
   })
 
-  it('已废除的取值不再有特殊分支：投一条 `appended` 也走通用重拉（不再被静默吞掉）', async () => {
-    // 这条是**负向契约**，锁住本次收窄：`appended` 曾有一条「到此为止、就地拼接、
-    // 不重拉」的提前返回。若有人把它加回词汇表却不给生产者，这里会提醒他
-    // 「消费端要么处理它，要么它根本不该存在」——而不是像从前那样静默吞掉。
+  it('带 delta 的载荷帧**不**触发重拉（就地追加语义，防 O(n²) 刷新）', async () => {
+    // 流式正文的每一帧都带 `data.delta`——若它们落到通用重拉上，等于给每一帧
+    // 挂一次防抖刷新，正好抵消增量帧存在的意义。
     vi.useFakeTimers()
     try {
       const { wrapper } = mountHost(MSG_DIR)
       await settle()
       const listCalls = mocks.listVdfs.mock.calls.length
 
-      emitChange({ path: `${MSG_DIR}/m1`, change: 'appended' })
+      emitChange({ path: `${MSG_DIR}/m1`, data: { id: 'm1', delta: '片段' } })
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(mocks.listVdfs.mock.calls.length, 'delta 帧不得触发目录重拉').toBe(listCalls)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('非 delta 载荷（全量帧 / 节点视图）走通用重拉', async () => {
+    vi.useFakeTimers()
+    try {
+      const { wrapper } = mountHost(MSG_DIR)
+      await settle()
+      const listCalls = mocks.listVdfs.mock.calls.length
+
+      emitChange({ path: `${MSG_DIR}/m1`, data: { id: 'm1', content: '全量' } })
       await vi.advanceTimersByTimeAsync(500)
 
       expect(
         mocks.listVdfs.mock.calls.length,
-        '未知取值不得被静默吞掉：它必须落到通用重拉上',
+        '不带 delta 的载荷帧必须触发重拉',
       ).toBeGreaterThan(listCalls)
       wrapper.unmount()
     } finally {

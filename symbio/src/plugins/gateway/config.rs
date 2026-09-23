@@ -55,6 +55,20 @@ impl Default for GatewayConfig {
 /// 因此 `vdfs/read` 落到任一插件的配置文件（`<挂载点>/PLUGIN.yml`）时一律拒绝——
 /// 否则只读模式下就能把令牌读走。（`tree` / `search` 只回地址与节点描述、不回正文，
 /// 故不在此列。）
+///
+/// **会话实时面是第二个例外，且是「不放进白名单」这一侧**：`session/stream`
+/// 不在放行之列，只读模式下订阅不到实时流（历史仍可经 `vdfs/read` 逐地址读）。
+/// 判据不是「它写了什么」——它什么都不写——而是它的**形态**与 `vdfs/*` 的读操作不同：
+///
+/// 1. 它是一条**长连接订阅**（返回 `PluginPayload::Session` 通道），不是一次性读；
+/// 2. 它是**广播**语义：订阅时不带会话参数，一次订阅覆盖该作用域内**全部**会话的
+///    在途内容（含**尚未落库**的增量），而 `vdfs/read` 至少要逐个地址去读。
+///
+/// 只读模式的自我定位是「即便令牌泄露也只能读、不能写与执行」，放开实时面并不破坏
+/// 这条，但会把「可读范围」从「你点名要的那份」扩大到「当前全部在途内容」。
+/// 这是一条**保守取舍，不是遗漏**：若将来确需只读客户端看实时输出，应把它作为
+/// 显式配置项加入，而不是顺手塞进白名单。详见
+/// `symbio/src/plugins/session/docs/node-state-streaming.md` §11。
 pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
     let p = path.trim_start_matches('/');
     if p == "vdfs/read" && reads_config_document(payload) {

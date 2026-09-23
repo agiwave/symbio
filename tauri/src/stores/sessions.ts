@@ -18,7 +18,7 @@
  * 为什么运行态**只能**从转写流来：它必须与它那一轮的消息共用 `seq` 空间，否则
  * 「会话报不忙」推不出「本轮消息终态帧都已到达」。VDFS 变更通道**不携带会话节点
  * 快照**——一条无序通道上的快照会与有序通道上的状态竞争，一次迟到的改名就能把
- * 运行态回退（详见 `services/transcriptStream.ts` 的模块文档）。
+ * 运行态回退（详见 `stores/sessionTranscriptSync.ts` 的模块文档）。
  * 规范见 `symbio/src/plugins/session/docs/node-state-streaming.md`。
  *
  * ## 关键状态
@@ -26,7 +26,7 @@
  * - `list`           : SessionListItem[]（来自后端 list + 本地状态镜像合并）
  * - `activeId`       : 当前"详细窗口"展示的会话
  * - `sessionMessages`: 实时 messages map，key 是 sessionId，value 是 `{msgId: ChatMessage}`
- *                      写入：`transcriptStream`（`session/stream` 转写流）与 loadMessages
+ *                      写入：`sessionTranscriptSync`（VDFS 变更消费端）与 loadMessages
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
  *                      写入：`applySessionState`（转写流的运行态帧）/ send 的乐观置位
@@ -49,8 +49,6 @@ import {
 import { writeVdfs } from '@/services/vdfs'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
 import {
-  VDFS_CHANGE_CREATED,
-  VDFS_CHANGE_DELETED,
   VDFS_STATUS_WORKING,
   chimeKindOfOutcome,
   isFailedStatus,
@@ -382,6 +380,17 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /**
+   * 本地转写图里是否已有这条消息。
+   *
+   * 消费端（`stores/sessionTranscriptSync.ts`）的 `delta` 分派判据：id 已知 ⇒
+   * **零回读**直接追加（流式热路径）；id 未知 ⇒ 先落增量再回读身份。
+   * 放在 store 是因为「本地有没有」只有这里有——它就是那张消息字典本身。
+   */
+  function hasMessage(sessionId: string, messageId: string): boolean {
+    return Boolean(messageId && sessionMessages.value[sessionId]?.[messageId])
+  }
+
+  /**
    * 把本地续接游标抬到不低于 `seq`（只升不降）。
    *
    * 游标语义是"已分配过的最大序号"，因此收到一个更大的后端序号时必须跟上；
@@ -458,7 +467,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * ## 调用方
    *
    * - `applySessionState`（会话节点状态迁移）
-   * - `transcriptStream`（由消息节点派生活动文字 / 审批角标）
+   * - `sessionTranscriptSync`（由消息节点派生活动文字 / 审批角标）
    * - `useChatConnection.send` / `resume` 的乐观置位
    * - `setSessionStatus` 同步 list.status 时
    * - 消息落地路径写 `last_preview`（取到预览才写）
@@ -711,10 +720,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (typeof meta.workdir === 'string' && meta.workdir) lastUsedWorkdir.value = meta.workdir
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
-    // 后端 created 事件（`vdfs/write` 落库后广播）随后到达，各订阅方幂等收敛
+    // 信封没有操作枚举（S27）——无载荷变更，其他页面按各自语义回读收敛；
+    // 后端事件（`vdfs/write` 落库后广播）随后到达，各订阅方幂等收敛
     publishVdfsChangedLocal({
       path: vdfsSessionAddr(await ensureSessionMountDir(), id),
-      change: VDFS_CHANGE_CREATED,
     })
 
     // 新建完就有了会话 ⇒ 转写段现在推导得出来了。补一次解析，把「引导窗口」
@@ -799,10 +808,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     removeSessionLocal(id)
 
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
-    // 后端 deleted 事件随后到达，各订阅方幂等收敛
+    // 信封没有操作枚举（S27）——无载荷变更，消费端回读 `NotFound` 即删除；
+    // 后端事件随后到达，各订阅方幂等收敛
     publishVdfsChangedLocal({
       path: vdfsSessionAddr(await ensureSessionMountDir(), id),
-      change: VDFS_CHANGE_DELETED,
     })
   }
 
@@ -913,7 +922,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * LLM 在**同一地址**上读同一份数据（`session/get_messages` 自此不再是
    * 前端的读入口）。
    *
-   * 增量由 `services/transcriptStream`（`session/stream` 转写流）补上——本函数
+   * 增量由 `stores/sessionTranscriptSync`（VDFS 变更消费端）补上——本函数
    * 只负责整份替换（切换会话 / 显式刷新）。
    *
    * 修复（CHAT_FLOW_ANALYSIS E-13）：失败时**抛出错误**而不是 swallow，
@@ -1064,9 +1073,9 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 收敛动作（`removeSessionLocal` / `refreshList`），不自己挂监听器，
   // 因此可被独立构造与测试。
   //
-  // **运行态不在这条链路上**：它走转写流（`transcriptStream` → `applySessionState`）。
-  // VDFS 那条通道只报"会话叶子上的资源变了"（创建 / 删除 / 改名 / 标题），
-  // 消费端重拉清单或就地移除——不携带节点快照。
+  // **运行态在这条链路上**（ADR-025 后实时面只有一条通道）：`<sid>` 的变更
+  // 经 `sessionTranscriptSync` 回读 `stat` → `applySessionState`；清单订阅
+  // （`sessionNodeSync`）对同一批变更做防抖重拉——两条收敛路径幂等且同源。
 
   /**
    * 应用一帧**会话运行态**（转写流的 `transcript_session`，全量节点视图，幂等）：
@@ -1079,10 +1088,9 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * ## 为什么可以断言「这一帧到达时本轮转写已完整」
    *
-   * 它与消息帧**共用 `seq` 空间**，且调用方（`transcriptStream`）在交付本帧前
-   * 已把同会话的待落地消息帧全部落地。因此「会话离开 `working`」是一条**结构性
-   * 结论**，不是调度巧合——上一版正是靠一条 300ms 宽限复查在兜这个缺口，现在
-   * 那个缺口不存在了。
+   * 顺序是**节点属性**（ADR-025）：显示顺序由 `ChatMessage.seq` 决定，与到达
+   * 顺序无关；「会话离开 `working`」不再被用来推出「本轮消息帧都已到达」——
+   * 增量是否到齐由变更通道本身保证（满通道 → resync → 整份重读）。
    *
    * ## 状态迁移是唯一驱动提示音的东西
    *
@@ -1162,6 +1170,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     getSessionStaleReason,
     applyTranscriptMessage,
     applyTranscriptMessages,
+    hasMessage,
     putStatus,
     applySessionState,
     getSessionError,

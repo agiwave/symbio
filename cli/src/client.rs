@@ -7,31 +7,37 @@
 //! 同一套上下文键（PATH / PAYLOAD / SESSION_ID / WORKDIR / …），因此不需要任何
 //! 协议改动 —— 换传输 = 换「请求 → SimpleRequest」这一层适配。
 //!
-//! ## 下行通道：两条，各归其域
+//! ## 下行通道：事件总线的 `vdfs` 频道
 //!
-//! 与 Tauri 前端**同构**（前端 `services/transcriptStream.ts` + `stores/sessionNodeSync.ts`）：
-//!
-//! ```text
-//! ① 消息实时面  session/stream            一条流、按会话归属、单调 seq、帧即一条消息
-//! ② 会话运行态  event_bus + vdfs/watch    会话节点自身（status / attributes.outcome·error）
-//! ```
-//!
-//! 分治的依据是**语义**而非实现：消息是高频突发的转写，与会话清单无关，归转写流；
-//! 会话运行态是低频的**节点属性**，与侧栏会话清单共用同一份 VDFS 订阅
-//! （`kind = "vdfs"`）。曾经「消息也寄生在 VDFS 变更上」——那条路有两个结构性缺陷：
-//! VDFS 变更没有流内序号（丢一帧不可检测），且全量载荷要消费端自己猜「追加还是替换」。
+//! 与 Tauri 前端**同构**（前端 `services/eventBus.ts` 的 `subscribe({ kind: 'vdfs' })`）：
 //!
 //! ```text
-//! ① event_bus/subscribe        收件地址（一次订阅覆盖所有会话，切会话不必重连）
-//! ② vdfs/watch <会话地址>      **开闸**：后端只向登记过路径的订阅者投递变更
+//! vdfs 频道   一条订阅、单一 FIFO、按路径归属
+//!             消息（落点 = 目录 <sid>/消息，data = ChatMessage）
+//!             会话运行态（落点 = 会话叶子 <sid>，data = VdfsNode 视图）
+//!             资源信号（无载荷，回读收敛）
 //! ```
 //!
-//! 两步缺一不可：只做 ① 是一条永远不响的频道；只做 ② 则没有收件人。
+//! 归属由信封的 `path` 给出（`<根>/session/<sid>/…`）：订阅一次覆盖所有会话，
+//! 切会话不必重连。单一 FIFO 给出顺序保证：后端在「清在途 → 复位 is_working」
+//! **之后**才发运行态帧，「会话离开 working」因此蕴含本轮全部消息帧已在它之前
+//! 落地——不需要流内序号，也不需要跨通道推理。
+//!
+//! **曾经这里是两条**：① `session/stream` 收消息、② `event_bus/subscribe` +
+//! `vdfs/watch` 收会话运行态。两条的到达顺序没有机制保证，于是「会话报不忙」推不出
+//! 「本轮消息都已终态」——前端因此挂了一张宽限期复查的兜底网。批次 E 把运行态并进
+//! 转写流（`transcript_stream`）；ADR-025（2026-09-23）把实时面**迁回 VDFS 变更**，
+//! `session/stream` 与 `transcript_stream` 一并退役，本 CLI 改订 `vdfs` 频道。
+//! **批次 E 的合并理由（「需要顺序保证」）与 S23–S25 的拆分理由（「没有流内序号」）
+//! 是同一个错误**：把「数据的属性」当成了「传输的属性」——顺序由单一订阅连接给，
+//! 不由帧里的序号给。
+//!
+//! 信封没有操作枚举（S27）：形状 `{path, data?}`，语义全在 `data` 的字段上
+//! （`delta` 追加 / `content` 替换 / `status = removed` 移除）。
+//!
 //! 旧的 `kind = "session"` 事件频道（`Status` / `Update` / `Abort` 帧）已废除
 //! ——会话运行态由**会话节点**（`status` + `attributes.outcome` / `.error`）承载
 //! （见 `session/docs/node-state-streaming.md`）。
-//!
-//! 因此 `event_bus` 插件对本 CLI 而言**只是传输层**，不再是「会话事件的中转站」。
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,15 +52,13 @@ use symbio::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use symbio::symbio_core::schemas::session::session_chat;
-use symbio::symbio_core::transcript_stream::{
-    event_of, is_resync, session_state_of, NodeEvent, SessionStateEvent,
-};
+use symbio::symbio_core::event_bus::{KIND_VDFS, RESYNC_MARKER_TYPE, SubscribeRequest};
 use symbio::symbio_core::vdfs_provider::{
-    VDFS_OUTCOME_ABORTED, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
+    vdfs_change_of, VdfsChange, VdfsNode, VDFS_OUTCOME_ABORTED, VDFS_STATUS_FAILED,
+    VDFS_STATUS_WORKING,
 };
 use symbio::symbio_core::{
-    InvokeRequestExt, Plugin, PluginFrame, PluginPayload, SimpleRequest, PATH, PLUGIN_SESSION,
-    SESSION_ID, WORKDIR,
+    InvokeRequestExt, Plugin, PluginFrame, PluginPayload, SimpleRequest, PATH, SESSION_ID, WORKDIR,
 };
 
 use crate::render::Renderer;
@@ -74,73 +78,48 @@ fn gen_id(prefix: &str) -> String {
     format!("{prefix}{millis:x}{n:x}")
 }
 
-/// 下行帧。**只有一条通道**：转写流。
+/// 消息目录段名。机制层的 `SEG_MESSAGES` 是 session 插件的 `pub(crate)` 内部
+/// 词汇、不对外导出，CLI 按地址契约自持一份——拼错表现为「消息帧收不到」，
+/// 不会静默错乱。
+const MESSAGES_SEG: &str = "消息";
+
+/// 下行帧。**只有一条通道**：事件总线的 `vdfs` 频道。
 ///
-/// 会话运行态与消息共用这条流、共用 `seq` 空间（见
-/// `transcript_stream::SessionStateEvent`），因此调用侧不必 `select!` 两条连接，
-/// 也不必做任何跨通道的顺序推理——「读到 `status != working`」本身就蕴含
-/// 「本轮全部消息帧已在它之前落地」。
+/// 消息 / 会话运行态 / 资源信号共用这条频道（见模块文档）；单一 FIFO 给出
+/// 顺序保证，调用侧不必 `select!` 多条连接，也不必做任何跨通道的顺序推理。
 pub enum Frame {
-    /// 一条转写事件（消息实时面）。
-    ///
-    /// 载荷装箱：`NodeEvent` 内联着整条 `ChatMessage`（约 300 字节），而本枚举经
-    /// `mpsc` 逐帧搬运——装箱后枚举固定在一个指针量级，代价是每帧一次分配
-    /// （相比该帧已走过的 JSON 反序列化，可忽略）。
-    Transcript(Box<NodeEvent>),
-    /// **会话运行态**（与消息同流、同 `seq` 空间）。本轮结束的唯一判据。
-    ///
-    /// 同上装箱：`SessionStateEvent` 内联着节点视图。
-    Session(Box<SessionStateEvent>),
-    /// 转写流背压标记：后端明示「你可能漏了帧」。唯一恢复路径是整份重读，
+    /// 一条数据变更。会话归属由 `path` 给出（`<根>/session/<sid>/…`），
+    /// 语义全在 `data` 的字段上（信封没有操作枚举，S27）。
+    Change(Box<VdfsChange>),
+    /// 背压标记：后端明示「你可能漏了变更」。唯一恢复路径是整份重读，
     /// 而 CLI 只做流式输出（已打印的正文不可回收）——留痕即可。
     Resync,
 }
 
-/// 转写流帧 → [`Frame`]；非本流帧返回 `None`。
+/// 总线帧 → [`Frame`]；非 `vdfs` 频道帧返回 `None`。
 ///
-/// 拆解交给 `transcript_stream` 的公共入口（与产帧方同模块，形状改了那边先响）。
-/// **分派一律按信封的 `type`**，不靠「解不出消息帧就当状态帧」这种推断——
-/// 那样一旦有第三种帧，分派就退化成猜。
-///
-/// 顺序不可颠倒：`event_of` / `session_state_of` 对背压帧必然返回 `None`，
-/// 得靠 `is_resync` 把它认出来。
-fn stream_frame_of(frame: PluginFrame) -> Option<Frame> {
-    if let Some(ev) = event_of(&frame) {
-        return Some(Frame::Transcript(Box::new(ev)));
+/// 变更解析交给 [`vdfs_change_of`]（与 [`VdfsChange`] 同模块：**形状改了那边先响**）。
+/// resync 标记**不是一条变更**（刻意不带 `path`，`vdfs_change_of` 解不出），
+/// 单独认——顺序不可颠倒：它靠这个「解不出」与真变更区分。
+fn bus_frame_of(frame: PluginFrame) -> Option<Frame> {
+    if let Some(c) = vdfs_change_of(&frame) {
+        return Some(Frame::Change(Box::new(c)));
     }
-    if let Some(state) = session_state_of(&frame) {
-        return Some(Frame::Session(Box::new(state)));
-    }
-    is_resync(&frame).then_some(Frame::Resync)
-}
-
-/// 流内序号闸门：**消息帧与会话运行态帧共用**（同一个 `seq` 空间）。
-///
-/// - `seq == last + 1`：连续，放行；
-/// - `seq <= last`：重复帧（重连窗口内可能重发），丢弃——重复应用增量会叠字；
-/// - `seq > last + 1`：**跳号 = 已知有损**，留痕后**仍放行**。CLI 没有历史可重读
-///   （已打印的正文不可回收），丢掉这一帧只会更糟——它可能正是「本轮结束」的判据，
-///   丢在那里就是永久卡在「处理中」。
-///
-/// 返回 `false` = 本帧应丢弃。
-fn advance_seq(last: &mut Option<u64>, seq: u64, r: &mut Renderer) -> bool {
-    if let Some(prev) = *last {
-        if seq <= prev {
-            return false;
+    let is_resync = match &frame {
+        PluginFrame::Data(v) => {
+            let bus = v.get("data")?;
+            bus.get("kind").and_then(Value::as_str) == Some(KIND_VDFS)
+                && bus.get("data").and_then(|d| d.get("type")).and_then(Value::as_str)
+                    == Some(RESYNC_MARKER_TYPE)
         }
-        if seq != prev + 1 {
-            r.warn(&format!(
-                "⚠ 转写流跳号（{prev} → {seq}），本轮输出可能不完整"
-            ));
-        }
-    }
-    *last = Some(seq);
-    true
+        _ => false,
+    };
+    is_resync.then_some(Frame::Resync)
 }
 
 pub struct SymbioClient {
     root: Arc<dyn Plugin>,
-    /// 转写流的下行帧（见 [`Frame`]）
+    /// `vdfs` 频道的下行帧（见 [`Frame`]）
     events: mpsc::UnboundedReceiver<Frame>,
     /// 当前会话 id
     pub session_id: String,
@@ -177,32 +156,35 @@ impl SymbioClient {
 
         let root = create_root_plugin().await;
 
-        // **一条**下行通道：转写流（消息 + 会话运行态，共用 `seq` 空间）。
+        // **一条**下行通道：事件总线的 `vdfs` 频道（消息 + 会话运行态 + 资源信号）。
         //
-        // 曾经这里是两条：`event_bus/subscribe` 收会话运行态、`session/stream` 收消息。
-        // 两条的到达顺序没有机制保证，于是「会话报不忙」推不出「本轮消息都已终态」。
-        // 现在运行态也在转写流上（见 `transcript_stream::SessionStateEvent`），
-        // 因此 event_bus 订阅与 `vdfs/watch` 开闸动作**一并删除**——不是省略，
-        // 是没有需要它们的地方了。
+        // 与前端同构（`services/eventBus.ts` 的 `subscribe({ kind: 'vdfs' })`）。
+        // 单一订阅连接 = 单一 FIFO：后端在「清在途 → 复位 is_working」**之后**才发
+        // 运行态帧，因此「会话离开 working」蕴含本轮全部消息帧已在它之前落地——
+        // 顺序由通道给，不需要流内序号，也不需要跨通道推理。
         //
-        // 后端**广播**给全部订阅者，归属由帧里的 `session_id` 给出：订阅一次覆盖
-        // 所有会话，切会话不必重连。
+        // 后端**广播**给全部订阅者，归属由信封的 `path` 给出（`<根>/session/<sid>/…`）：
+        // 订阅一次覆盖所有会话，切会话不必重连。
         let ctx = Arc::new(SimpleRequest::new(None, None));
-        ctx.set(PATH, format!("{PLUGIN_SESSION}/stream"));
+        // 路由常量归 `symbio_core::paths`（模块对外私有），CLI 与其他外部使用方
+        // 一样自持字面量——拼错表现为「订阅失败」，不会静默。
+        ctx.set(PATH, "event_bus/subscribe".to_string());
+        ctx.set_payload(SubscribeRequest {})
+            .map_err(|e| format!("构造订阅载荷失败: {e}"))?;
         let mut stream = match Arc::clone(&root)
             .route(ctx)
             .await
-            .map_err(|e| format!("订阅转写流失败: {e}"))?
+            .map_err(|e| format!("订阅 vdfs 频道失败: {e}"))?
         {
             PluginPayload::Session(c) => c,
-            other => return Err(format!("session/stream 返回了非会话载荷: {other:?}")),
+            other => return Err(format!("event_bus/subscribe 返回了非会话载荷: {other:?}")),
         };
 
         // 一个转发任务：解包后送进无界通道，主逻辑只面对 [`Frame`]。
         let (tx, events) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             while let Some(frame) = stream.rx.recv().await {
-                let Some(f) = stream_frame_of(frame) else {
+                let Some(f) = bus_frame_of(frame) else {
                     continue;
                 };
                 if tx.send(f).is_err() {
@@ -330,7 +312,7 @@ impl SymbioClient {
 
     /// 切换会话：更新 id 并重新写入元数据。
     ///
-    /// 不需要「换闸门」——转写流是**全会话广播**（归属由帧里的 `session_id` 给出），
+    /// 不需要「换闸门」——订阅是**全会话广播**（归属由信封的 `path` 给出），
     /// 一次订阅覆盖所有会话。切会话因此只剩「改 id + 落元数据」两件事。
     pub async fn switch_session(&mut self, session_id: String) -> Result<(), String> {
         self.session_id = session_id;
@@ -349,15 +331,16 @@ impl SymbioClient {
 
     /// 发送一条用户消息，并把本轮响应流实时渲染到终端。
     ///
-    /// ## 两类帧各司其职（**同一条流、同一个 `seq` 空间**）
+    /// ## 两类变更各司其职（同一条订阅、单一 FIFO）
     ///
-    /// - [`Frame::Transcript`]（消息）：一帧就是一条消息，正文按**字段语义**
-    ///   交渲染器——`delta` 追加、`content` 整条替换，不需要任何折算。
-    /// - [`Frame::Session`]（会话运行态）：**本轮结束的唯一判据**，见下。
+    /// - **消息**（落点 = 消息目录 `<sid>/消息`）：`data` 就是那条
+    ///   [`ChatMessage`]，正文按**字段语义**交渲染器——`delta` 追加、
+    ///   `content` 整条替换、`status = removed` 删除，不需要任何折算。
+    /// - **会话运行态**（落点 = 会话叶子 `<sid>`）：**本轮结束的唯一判据**，见下。
     ///
-    /// 两者同流是**必要条件**：`Frame::Session` 说「不忙」时，所有 `seq` 更小的
-    /// 消息帧（含本轮全部终态帧）必然已经交到渲染器手上——单通道保序给出的，
-    /// 不是调度巧合。
+    /// 同一条订阅是**必要条件**：订阅连接是单一 FIFO，后端在「清在途 → 复位
+    /// `is_working`」**之后**才发运行态帧，因此「会话离开 working」蕴含本轮
+    /// 全部消息帧已交到渲染器手上——顺序是通道给的，不是调度巧合。
     ///
     /// ## 为什么结束判据只能看会话节点
     ///
@@ -366,9 +349,9 @@ impl SymbioClient {
     /// 在会话节点上：`status` 离开 `working` 即整轮结束，结局从 `attributes` 读
     /// ——`outcome == aborted` 是中止，`error` 非空是失败。
     ///
-    /// 状态是节点的属性，而节点变更携带**全量节点视图**（幂等、与顺序无关），
+    /// 状态是节点的属性，而运行态变更携带**全量节点视图**（幂等、与顺序无关），
     /// 因此丢一帧不会让 CLI 卡在「处理中」——下一帧就把它纠了回来。
-    pub async fn ask(&mut self, text: &str, r: &mut Renderer) -> Result<(), String> {
+        pub async fn ask(&mut self, text: &str, r: &mut Renderer) -> Result<(), String> {
         self.drain_stale();
         r.begin_turn();
 
@@ -402,10 +385,6 @@ impl SymbioClient {
         let mut business_error: Option<String> = None;
         // 上一帧的会话运行态：状态提示只在**迁移**上报（否则一次轮次要喊两遍「处理中」）
         let mut last_status: Option<String> = None;
-        // 流内**单调 seq**：跳号 = 已知有损。CLI 只做流式输出（已打印的正文
-        // 不可回收），因此恢复不了，只能留痕，让用户知道本轮输出不完整。
-        // 消息与会话运行态**共用**这一个计数器（这正是顺序保证的来源）。
-        let mut last_seq: Option<u64> = None;
 
         loop {
             let next = tokio::time::timeout(TURN_TIMEOUT, self.events.recv())
@@ -416,59 +395,52 @@ impl SymbioClient {
             };
 
             match frame {
-                // ── 消息：一帧一条消息，直接落地 ──
-                Frame::Transcript(ev) => {
-                    // 转写流是**全会话广播**，本进程只渲染当前会话
-                    if ev.session_id != self.session_id {
-                        continue;
-                    }
-                    if !advance_seq(&mut last_seq, ev.seq, r) {
-                        continue;
-                    }
-
-                    // 一帧就是一条消息：`delta` 追加 / `content` 整条替换 /
-                    // `status = removed` 删除，全在 `on_message` 里按字段落地。
-                    r.on_message(&ev.message);
-                }
-                // 后端明示「你可能漏了帧」：无历史可重读，只能留痕。
+                // 后端明示「你可能漏了变更」：无历史可重读，只能留痕。
                 Frame::Resync => {
-                    r.warn("⚠ 转写流背压（后端已重同步），本轮输出可能不完整");
+                    r.warn("⚠ vdfs 频道背压（后端已重同步），本轮输出可能不完整");
                 }
-                // ── 会话运行态：本轮结束的唯一判据 ──
-                Frame::Session(state) => {
-                    if state.session_id != self.session_id {
-                        continue;
-                    }
-                    if !advance_seq(&mut last_seq, state.seq, r) {
-                        continue;
-                    }
-                    let node = &state.node;
-                    if node.status == VDFS_STATUS_WORKING {
-                        // 只在**迁移**上报一次：运行态是节点属性，同一次「开始工作」
-                        // 可能因告警等原因重复下发同一份视图（视图幂等，重复无害）。
-                        if last_status.as_deref() != Some(node.status.as_str()) {
-                            r.on_status(&node.status);
+                Frame::Change(change) => {
+                    // ── 会话运行态：本轮结束的唯一判据 ──
+                    if let Some((sid, node)) = self.session_state_of_change(&change).await {
+                        if sid != self.session_id {
+                            continue;
                         }
-                        last_status = Some(node.status.clone());
-                        continue;
+                        if node.status == VDFS_STATUS_WORKING {
+                            // 只在**迁移**上报一次：运行态是节点属性，同一次「开始工作」
+                            // 可能因告警等原因重复下发同一份视图（视图幂等，重复无害）。
+                            if last_status.as_deref() != Some(node.status.as_str()) {
+                                r.on_status(&node.status);
+                            }
+                            last_status = Some(node.status.clone());
+                            continue;
+                        }
+                        // 离开 `working` = 本轮结束（中止 / 失败 / 正常收尾三种结局之一，
+                        // 由 `outcome` 区分）。此刻本轮全部消息帧**已在它之前落地**——
+                        // 单一订阅 FIFO 给出的保证，不是调度巧合。
+                        if node.status == VDFS_STATUS_FAILED {
+                            business_error = node
+                                .attributes
+                                .get("error")
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                                .or_else(|| Some("本轮以错误结束".to_string()));
+                        }
+                        if node.attributes.get("outcome").and_then(Value::as_str)
+                            == Some(VDFS_OUTCOME_ABORTED)
+                        {
+                            r.on_abort();
+                        }
+                        break;
                     }
-                    // 离开 `working` = 本轮结束（中止 / 失败 / 正常收尾三种结局之一，
-                    // 由 `outcome` 区分）。此刻本轮全部消息帧**已在它之前落地**——
-                    // 同一个 `seq` 空间给出的保证，不是调度巧合。
-                    if node.status == VDFS_STATUS_FAILED {
-                        business_error = node
-                            .attributes
-                            .get("error")
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                            .or_else(|| Some("本轮以错误结束".to_string()));
+                    // ── 消息：`data` 就是那条 ChatMessage，按字段落地 ──
+                    if let Some((sid, message)) = Self::message_of_change(&change) {
+                        if sid == self.session_id {
+                            // `delta` 追加 / `content` 整条替换 / `status = removed`
+                            // 删除，全在 `on_message` 里按字段落地。
+                            r.on_message(&message);
+                        }
                     }
-                    if node.attributes.get("outcome").and_then(Value::as_str)
-                        == Some(VDFS_OUTCOME_ABORTED)
-                    {
-                        r.on_abort();
-                    }
-                    break;
+                    // 其余资源信号（记忆 / 工作目录 / 插件…）与本轮渲染无关，丢弃。
                 }
             }
         }
@@ -480,13 +452,57 @@ impl SymbioClient {
         }
     }
 
+    /// 从一条变更中解出**会话运行态**：`(sid, node)`。
+    ///
+    /// 落点判定：`path` 恰为 `<根>/session/<sid>`（会话叶子自身，后面没有更多段）。
+    /// `data` 是全量节点视图（与 `stat` 同源构造）时零回读；缺失 ⇒ 回读
+    /// `vdfs/stat` 分辨——返回 `None` 也涵盖「会话已删」（stat 无此节点）。
+    pub async fn session_state_of_change(&self, change: &VdfsChange) -> Option<(String, VdfsNode)> {
+        let prefix = format!("{}/session/", self.root_addr.trim_end_matches('/'));
+        let rest = change.path.strip_prefix(&prefix)?;
+        let sid = rest.split('/').next()?;
+        if sid.is_empty() || rest.contains('/') {
+            return None; // 更深层级（消息目录等）不是会话叶子
+        }
+        let node = match &change.data {
+            Some(v) => serde_json::from_value::<VdfsNode>(v.clone()).ok()?,
+            None => self.stat_node(&change.path).await?,
+        };
+        Some((sid.to_string(), node))
+    }
+
+    /// 从一条变更中解出**消息**：`(sid, ChatMessage)`。
+    ///
+    /// 落点判定：`path` 是消息**目录** `<根>/session/<sid>/消息`（信封的 `path`
+    /// = 变更文件所在的**目录**），具体是哪条消息由 `data.id` 回答——对象身份
+    /// 在载荷里，不在路径上。无载荷 / 解析失败 ⇒ `None`（资源信号不归消息面管）。
+    pub fn message_of_change(change: &VdfsChange) -> Option<(String, ChatMessage)> {
+        let rest = change.path.split_once("/session/")?.1;
+        let mut segs = rest.split('/');
+        let sid = segs.next()?;
+        if sid.is_empty() || segs.next()? != MESSAGES_SEG || segs.next().is_some() {
+            return None;
+        }
+        let message = serde_json::from_value::<ChatMessage>(change.data.clone()?).ok()?;
+        Some((sid.to_string(), message))
+    }
+
+    /// 回读一个节点的当前视图（`vdfs/stat`）。
+    async fn stat_node(&self, addr: &str) -> Option<VdfsNode> {
+        let resp = self
+            .route("vdfs/stat", json!({ "path": addr }), None)
+            .await
+            .ok()?;
+        serde_json::from_value::<VdfsNode>(resp).ok()
+    }
+
     /// 读取下一条下行帧（心跳守护模式用）。
     ///
     /// 心跳触发的会话与普通对话走同一套编排与发布，守护进程在这里消费即可观察到
-    /// 无人值守轮次。守护模式只关心会话运行态（[`Frame::Session`]），转写帧在此被
-    /// 丢弃——但它**必须被取走**：不取就会把转写流的通道塞满，触发后端摘除订阅。
-    /// 返回 `None` 表示下行连接已关闭。
-    pub async fn next_frame(&mut self) -> Option<Frame> {
+    /// 无人值守轮次。守护模式只关心会话运行态（会话叶子上的变更），消息帧在此被
+    /// 丢弃——但它**必须被取走**：不取就会把订阅通道塞满（满了后端补 resync，
+    /// 代价是消费端整份重读）。返回 `None` 表示下行连接已关闭。
+        pub async fn next_frame(&mut self) -> Option<Frame> {
         self.events.recv().await
     }
 

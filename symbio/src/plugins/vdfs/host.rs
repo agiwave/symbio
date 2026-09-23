@@ -122,18 +122,16 @@ pub async fn resolve_fs(
 ///
 /// 门面已把事件里的路径补成对外展示地址（`.vdfsv2/<类别>/…`），与消费者请求时用的
 /// 坐标系一致，因此本层只是换个信封投到总线上，不再做任何路径加工。
-fn to_change_event(change: &VdfsChange) -> VdfsChangeEvent {
-    VdfsChangeEvent {
-        path: change.path.clone(),
-        change: change.change.clone(),
-    }
-}
-
+///
+/// **`delta` 原样带过**：它是**正文**不是路径，门面不该碰它（逐字段重建会把它丢掉，
+/// 且没有编译错误提示）。这也正是 `VdfsChange::map_paths` 存在的理由。
 /// 构造变更投递器：接到全局事件总线，下发前端（`kind = KIND_VDFS`）。
 fn event_bus_sink() -> VdfsChangeSink {
+    // 信封与 provider 侧形状重合（本层只补 `map_paths` 挂载名），**原样**投上总线——
+    // 不再有一个「换信封」的翻译层（那层曾叫 `to_change_event` → `VdfsChangeEvent`，
+    // 两者形状逐字相同，纯复制；S27 合并删除）。
     Arc::new(move |change: VdfsChange| {
-        let event = to_change_event(&change);
-        let data = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+        let data = serde_json::to_value(&change).unwrap_or(serde_json::Value::Null);
         crate::symbio_core::event_bus::EventBus::try_publish(KIND_VDFS, None, data);
     })
 }
@@ -1397,37 +1395,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 变更事件：门面已把路径补成展示地址，本层只换信封、不再加工
+    /// 变更事件：门面已把路径补成展示地址，本层**原样透传**（不再换信封）
     #[test]
     fn change_event_passes_display_paths_through() {
-        let e = to_change_event(&VdfsChange::new(
-            ".vdfsv2/mem/sub/x.md",
-            VDFS_CHANGE_UPDATED,
-        ));
-        assert_eq!(e.path, ".vdfsv2/mem/sub/x.md");
-        assert_eq!(e.change, VDFS_CHANGE_UPDATED);
-
         // 物理半的地址原样保留
-        let n = to_change_event(&VdfsChange::new("README.md", VDFS_CHANGE_CREATED));
+        let n = VdfsChange::bare("README.md");
         assert_eq!(n.path, "README.md");
-    }
-
-    /// 信封形状**恰好两个键**——本层不解释、不裁剪、也不新增字段。
-    ///
-    /// 载荷字段（`to` / `delta` / `node` / `content`）已随「消息寄生 VDFS」那套
-    /// 模型删除（见 `symbio_core::vdfs_provider::VdfsChange` 的文档）。这条测试是
-    /// 那条边界的机械守卫：谁再给事件加字段，这里先红。
-    #[test]
-    fn change_event_wire_shape_is_exactly_path_and_change() {
-        let v = serde_json::to_value(to_change_event(&VdfsChange::new(
-            ".vdfsv2/session/abc",
-            VDFS_CHANGE_DELETED,
-        )))
-        .unwrap();
-        let obj = v.as_object().expect("变更事件序列化成对象");
-        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        assert_eq!(keys, ["change", "path"]);
+        assert!(n.data.is_none());
     }
 
     // ==================== 根解析 ====================

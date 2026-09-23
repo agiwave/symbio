@@ -17,9 +17,11 @@
  * - **选中节点**（`selectedNode`）：详情来源，按 `ext` 解析渲染器；
  * - **选中记忆**：同一数据地址的左栏选中项会被记住（往返 push / 返回后恢复）；
  * - **实时**：订阅总线 `vdfs` 频道，受影响的目录防抖刷新（非轮询）。
- *   变更只有 `created` / `updated` / `deleted` 三个取值，且**不带载荷**——因此
- *   没有「就地拼接」这类增量路径，一律重拉收敛（见 `schemas/vdfs.VdfsChange`）。
- *   流式正文不走这条通道：它在转写流上，本页只消费「资源变了」。
+ *   变更只有 `created` / `updated` / `deleted` 三个取值；`updated` 上的可选
+ *   `delta` 说「尾部多了这些字」（流式正文，就地拼接、不重拉——见 `applyAppend`），
+ *   其余一律重拉收敛（见 `schemas/vdfs.VdfsChange`）。
+ *   转写列表的消息增量由 `stores/sessionTranscriptSync` 消费；本页只顺带消费
+ *   「正打开的详情恰是一条流式消息」的场景。
  *
  * ## UI 约定（S11）
  *
@@ -68,6 +70,7 @@ import {
 } from '@/schemas/vdfs'
 import {
   dirIconOf,
+  isTextualRenderer,
   rendererReadsNodeText,
   resolveVdfsRenderer,
   type VdfsRenderer,
@@ -269,13 +272,51 @@ export function useVdfs(opts: UseVdfsOptions) {
    *
    * 连点多项时，慢响应不得覆盖新选中项的数据；清空选中同样要使在途响应作废
    * （`clearSelection` advance 一次即可）。
-   *
-   * 这里曾**还有第二个实例**（`appendGuard`，键控于节点路径），用途是防「在途重读
-   * 覆盖已就地拼接的增量」——那个场景随 `appended` 一起消失：变更不再带 `delta`，
-   * 正文没有本地增量可被覆盖。少一个守卫实例，也少一条「两个代次作废时机不同、
-   * 共用一个会互相误伤」的解释负担。
    */
   const detailGuard = useGenerationGuard()
+
+  /**
+   * 追加的**代际守卫**（键控：键 = 节点路径）——防「在途重读覆盖已应用的增量」。
+   *
+   * 场景：节点正文流式追加（`updated` + `delta` 就地拼接，**不发重读**），而此前
+   * 发出的一次 `read` 响应稍后到达——它带的是**旧快照**，会把刚拼上去的字抹掉，
+   * 随后的追加再拼上去就得到损坏文本。失败是**静默的**：不报错、不崩溃，只少一段字。
+   *
+   * 记法：读取前记下该路径「已应用过几次追加」，响应回来若这个数变了，说明读取
+   * 期间有增量落地（本地内容比响应新），**丢弃该响应**。丢弃是安全的：节点增删
+   * 另有 `created` / `deleted` 事件兜底。
+   *
+   * 与详情读取的代次**必须是两个实例**：两者作废时机不同（前者随选中变化，
+   * 后者随增量落地），共用一个代次会互相误伤。转写列表那份同款守卫在
+   * `stores/sessionTranscriptSync.ts`（同一规则、不同视图）。
+   */
+  const appendGuard = useGenerationGuard()
+
+  // 详情渲染器里「正文即文本缓冲」的那些（追加可安全拼接）——判定在
+  // `registry/vdfsTypes::isTextualRenderer`（那里也是 `VdfsRenderer` 的定义处）。
+  // 先前这里手写了一份 `new Set([...])`，与另外两处各写一份、且其中一处其实
+  // 不是同一个集合（见该函数的注释）。
+
+  /**
+   * 就地应用一条**带增量的**变更；返回是否命中**当前打开的详情**。
+   *
+   * 命中即拼接，且**不触发刷新**——这正是「`updated` 带 `delta`」与不带之分：
+   * 前者说「尾部多了这些字」，后者说「这个节点变了，请重读」。
+   * 未命中当前详情时什么也不做：列表项的结构（`created` / `deleted`）与
+   * 预览首行都不受尾部追加影响，为它重拉整目录是纯粹的浪费。
+   */
+  function applyAppend(change: VdfsChange): boolean {
+    // S27：载荷在 `data` 上——消息帧是 `{id, delta}` 窄载荷；无载荷或载荷里
+    // 没有 `delta`（全量帧 / 节点视图）都不是「尾部追加」。
+    const data = change.data as { delta?: unknown } | null | undefined
+    const delta = typeof data?.delta === 'string' ? data.delta : null
+    const node = selectedNode.value
+    if (!delta || !node || node.path !== change.path) return false
+    if (!isTextualRenderer(renderer.value)) return false
+    nodeText.value += delta
+    appendGuard.advance(node.path)
+    return true
+  }
 
   function clearSelection() {
     detailGuard.advance()
@@ -316,10 +357,13 @@ export function useVdfs(opts: UseVdfsOptions) {
 
     // 读取代次令牌：连点多项时，慢响应不得覆盖新选中项的数据
     const token = detailGuard.advance()
+    // 追加代际快照：读取期间若有增量落地，本地内容比这次响应新 → 丢弃响应
+    const gen = appendGuard.revision(node.path)
     loadingDetail.value = true
     try {
       const content = await readVdfs(node.path)
       if (detailGuard.revision() !== token) return
+      if (appendGuard.revision(node.path) !== gen) return
       if (!content) {
         detailError.value = '读取失败'
         return
@@ -621,9 +665,9 @@ export function useVdfs(opts: UseVdfsOptions) {
   // 变更影响当前目录（自身 / 祖先 / 子树内）才刷新；绑定地址一层的变化
   //（左栏子目录增删）顺带重拉导航。其余变更防抖重拉当前目录收敛。
   //
-  // **没有例外分支**：变更不带载荷，所以「就地拼接 / 就地插入」这类零回读路径
-  // 一条都没有——这正是收窄词汇表的收益（此前 `appended` 要单独一条快速路径，
-  // 而它没有任何生产者）。任何取值都走下面同一条收敛路径。
+  // **带增量的变更是唯一的例外**：它就地拼接、不重拉（见 `applyAppend`）。
+  // 其余取值不带载荷，「就地插入」这类零回读路径一条都没有，任何取值都走
+  // 下面同一条收敛路径。
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   function scheduleRefresh(delay = 400) {
     if (refreshTimer) clearTimeout(refreshTimer)
@@ -642,6 +686,15 @@ export function useVdfs(opts: UseVdfsOptions) {
 
   /** 数据变更回调（路径过滤在 handler 内，订阅恒定一条） */
   function onChange(change: VdfsChange) {
+    // 带增量的变更**到此为止**：命中当前详情就就地拼接，未命中就什么也不做。
+    // 它不改变任何节点的存在与顺序，也不改变预览首行——因此既不该重拉目录，
+    // 也不该重拉左栏导航。让它走下面的通用分支，等于给流式每一帧都挂一次
+    // 防抖刷新（O(n²) 流量），正好抵消 `delta` 存在的意义。
+    const data = change.data as { delta?: unknown } | null | undefined
+    if (typeof data?.delta === 'string') {
+      applyAppend(change)
+      return
+    }
     if (affects(cwd.value, change.path)) scheduleRefresh()
     // 绑定地址一层（左栏子目录增删）→ 导航跟着变
     if (change.path === addr.value || vdfsParent(change.path) === addr.value) {

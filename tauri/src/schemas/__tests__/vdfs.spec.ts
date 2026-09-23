@@ -231,7 +231,7 @@ describe('vdfsRoot — 根锚点', () => {
  * 消息类节点状态词**只有一份定义**（在 `chat_message`），VDFS 侧是别名。
  *
  * 这条断言锁的是一个具体的失败模式：状态词表曾有两份，`aborted` 只补进了其中
- * 一份，消费端 `transcriptStream`（当时叫 `vdfsTranscriptSync`）于是把整条状态
+ * 一份，消费端于是把整条状态
  * **静默丢弃**——中止后的 Turn 显示为已完成、重试入口不出现。两份变一份后，
  * "漏改一份"在结构上不再可能；
  * 但"有人又写了一行字面量"仍可能，所以这里把它钉住。
@@ -309,32 +309,26 @@ describe('sessionRuntimeOf：三个场景属性都必须落地', () => {
   })
 })
 
-describe('变更词汇表：**闭集**，恰好三个取值', () => {
+describe('变更信封：**没有操作枚举**（S27）', () => {
   /**
    * 这条断言锁的是**判据**本身，不是某个具体取值：
    *
    * > 一个变更取值（或一个载荷字段）必须有**生产性生产者**，否则它不是词汇的
    * > 一部分，只是别人误以为它存在的理由。
    *
-   * 曾经这里有 6 个：`renamed` / `appended` / `truncated` 三个取值没有任何真实
-   * 生产者（源自「消息寄生 VDFS」时代），却足以让消费端写出永远不执行的
-   * `if (change.delta)`、并让「这条通道会不会给我正文」变成要读实现才能回答的问题。
-   * 它们已删除——本断言保证下一个想加回来的人**必须同时给出生产者**，否则红。
+   * 曾经这里有 6 个取值（`renamed` / `appended` / `truncated` 无生产者，先删）；
+   * S27 起连 `created` / `updated` / `deleted` 操作枚举也整个退役——语义全在
+   * `data` 的字段上（消息帧的 `delta` / `content` / `status = removed`），信封
+   * 只剩 `path` + 可选 `data`。本断言保证想给操作枚举**翻案**的人必须先给出
+   * 生产者与「枚举 → 分派」比按字段落地更好的论证，否则红。
    */
-  it('导出的 VDFS_CHANGE_* 恰好是 created / updated / deleted 三个', () => {
-    const names = Object.keys(vdfsModule)
-      .filter((k) => k.startsWith('VDFS_CHANGE_'))
-      .sort()
-    expect(names).toEqual(['VDFS_CHANGE_CREATED', 'VDFS_CHANGE_DELETED', 'VDFS_CHANGE_UPDATED'])
-    // 三个取值的**字面量**也要锁：改了值就是改协议（后端有同名常量，跨栈由
-    // scripts/protocol-mirror-audit.mjs 校验）
-    expect(
-      names.map((n) => (vdfsModule as unknown as Record<string, string>)[n]).sort(),
-    ).toEqual(['created', 'deleted', 'updated'])
+  it('不再导出任何 VDFS_CHANGE_* 操作枚举', () => {
+    const names = Object.keys(vdfsModule).filter((k) => k.startsWith('VDFS_CHANGE_'))
+    expect(names).toEqual([])
   })
 
-  it('重同步指令与变更取值**不是一类**：它是指令，且刻意不带 path', () => {
-    // 若把 RESYNC 也算进 VDFS_CHANGE_* 前缀，上面的闭集断言会红——
+  it('重同步指令不是一条变更：它是指令，且刻意不带 path', () => {
+    // 若把 RESYNC 也算进 VDFS_CHANGE_* 前缀，上面的缺席断言会红——
     // 这条测试反过来锁住「它没被并进去」。
     expect(vdfsModule.VDFS_BUS_RESYNC).toBe('resync')
     expect(vdfsModule.VDFS_BUS_RESYNC.startsWith('VDFS_CHANGE_')).toBe(false)

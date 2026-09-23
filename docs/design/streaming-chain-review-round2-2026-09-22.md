@@ -5,6 +5,15 @@
 > [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md)
 > 与 [`design/vdfs.md`](./vdfs.md) 为准。本文只记录**某一时刻的观察与判断**。
 >
+> ⚠️ **后记（S26 / ADR-025，2026-09-23）：本文的两条基线已改变。**
+> ① 本文把「转写流 `session/stream`」与「VDFS 变更（`kind=vdfs`）」的**分治**当作既定事实
+> 来分析（§2.3 的通道表、§3.6 的「转写流没有服务端会话过滤」等），**那个分治已取消**：
+> 实时面迁回 VDFS 变更（`updated` + `delta`），`session/stream` 与 `transcript_stream.rs`
+> 退役。② 规范来源里的 `symbio_core/transcript_stream.rs` **已删除**，改以
+> [`design/vdfs.md`](./vdfs.md) §9 与 `symbio_core/vdfs_provider.rs` 的「变更通知」小节为准。
+> 本文对**性能路径**（一次序列化 / `Arc` 扇出 / 合帧窗口）的实测结论仍然成立，但
+> 其中「合帧窗口」这一项随转写流一起退役（`event_bus` 侧的限流与 resync 兜底已对等）。
+>
 > **与前面两份的关系**：
 > [`design/streaming-chain-review-2026-09.md`](./streaming-chain-review-2026-09.md)（第一轮）
 > 与 [`archive/streaming-chain-review-2026-09-22.md`](../archive/streaming-chain-review-2026-09-22.md)

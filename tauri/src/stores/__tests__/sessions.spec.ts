@@ -140,6 +140,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     sessionApi.listSessions.mockClear()
     chime.playCompletionChime.mockClear()
     vdfsApi.statVdfs.mockReset()
+    vdfsApi.statVdfs.mockResolvedValue(sessionNode())
     vdfsApi.writeVdfs.mockReset()
     vdfsApi.readVdfs.mockResolvedValue({ text: '{"messages":[]}' })
   })
@@ -242,14 +243,15 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     expect(captured.handlers).toHaveLength(0)
   })
 
-  it('updated → 防抖重拉清单（载荷不看：这条通道不带节点快照）', async () => {
+  it('无载荷变更 ⇒ 回读 stat 分辨删除 + 防抖重拉清单', async () => {
     vi.useFakeTimers()
     try {
       const store = useSessionsStore()
       store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
 
-      emit({ path: '@vfs/session/s1', change: 'updated' })
-      // 本地乐观改名已覆盖同窗口场景；跨窗口靠重拉收敛，不必每条变更一次 IPC
+      emit({ path: '@vfs/session/s1' })
+      // 信封没有操作枚举（S27）：先回读 stat 分辨删除与否（NotFound ⇒ 本地即时移除）
+      expect(vdfsApi.statVdfs).toHaveBeenCalledWith('@vfs/session/s1')
       expect(sessionApi.listSessions).not.toHaveBeenCalled()
 
       await vi.advanceTimersByTimeAsync(800)
@@ -259,30 +261,25 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     }
   })
 
-  it('updated **不**改运行态：状态只有一个来源（转写流的运行态帧）', async () => {
+  it('资源信号（无载荷）**不**改运行态：状态只有一个来源（随载荷的节点视图）', async () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, status: 'working', metadata: {} } as never)
     store.putStatus('s1', { status: 'working' })
 
-    // 一次迟到的资源变更（如自动命名）不得把运行态打回它自己那一刻的旧值——
-    // 这正是"快照只有有序来源"这条规则要防的（见 sessionNodeSync 模块文档）。
-    emit({
-      path: '@vfs/session/s1',
-      change: 'updated',
-      node: sessionNode({ status: 'active', title: '自动命名' }),
-    })
+    // 一次迟到的资源变更（如自动命名）是**无载荷**信号——信号上根本没有状态
+    // 可打，运行态不会被它打回任何旧值（见 sessionNodeSync 模块文档）。
+    emit({ path: '@vfs/session/s1' })
     await flushPromises()
 
     expect(store.getSessionStatus('s1').status).toBe('working')
     expect(store.list[0].status).toBe('working')
-    expect(vdfsApi.statVdfs).not.toHaveBeenCalled()
   })
 
-  it('created → 防抖重拉清单（收敛排序与完整字段）', async () => {
+  it('无载荷变更（新建）→ 防抖重拉清单（收敛排序与完整字段）', async () => {
     vi.useFakeTimers()
     try {
       const store = useSessionsStore()
-      emit({ path: '@vfs/session/newsid', change: 'created' })
+      emit({ path: '@vfs/session/newsid' })
       expect(sessionApi.listSessions).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(800)
       expect(sessionApi.listSessions).toHaveBeenCalledTimes(1)
@@ -292,21 +289,23 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     }
   })
 
-  it('deleted → 本地即时移除，不等重拉', () => {
+  it('删除（回读 NotFound）→ 本地即时移除，不等重拉', async () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, metadata: {} } as never)
+    vdfsApi.statVdfs.mockResolvedValue(null)
 
-    emit({ path: '@vfs/session/s1', change: 'deleted' })
+    emit({ path: '@vfs/session/s1' })
+    await flushPromises()
 
     expect(store.list).toHaveLength(0)
     expect(sessionApi.listSessions).not.toHaveBeenCalled()
   })
 
-  it('appended（转写增量）与会话清单无关：既不重读也不重拉', async () => {
+  it('消息目录的变更帧在 directChildren 作用域之外：既不回读也不重拉', async () => {
     const store = useSessionsStore()
     store.list.push({ id: 's1', message_count: 0, updated_at: 0, metadata: {} } as never)
 
-    emit({ path: '@vfs/session/s1/消息/m1', change: 'appended', delta: '半句' })
+    emit({ path: '@vfs/session/s1/消息', data: { id: 'm1', delta: '半句' } })
     await flushPromises()
 
     expect(vdfsApi.statVdfs).not.toHaveBeenCalled()
@@ -429,7 +428,7 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
  * `hydrateFromHistory` 的**快照直载语义**（快照即权威）。
  *
  * 转写的权威副本在存储：`loadMessages` 以此整表装载，增量由
- * `transcriptStream` 持续收敛——装载与增量消费是同一条数据链路的
+ * `sessionTranscriptSync` 持续收敛——装载与增量消费是同一条数据链路的
  * 两个入口，不存在需要"合并"的两个真相来源。旧合并语义（保留本地在途节点）
  * 已删除：那是双数据源混写的补丁层。
  */
@@ -522,11 +521,7 @@ describe('sessions store — 会话节点状态收敛（零回读）', () => {
       content: '{}',
     } as never)
 
-    emit({
-      path: `@vfs/session/${SID}`,
-      change: 'updated',
-      node: sessionNode({ name: SID, status: 'active' }),
-    })
+    emit({ path: `@vfs/session/${SID}`, data: sessionNode({ name: SID, status: 'active' }) })
     await flushPromises()
 
     expect(vdfsApi.readVdfs, '状态收敛零回读：对账自愈已删除').not.toHaveBeenCalled()
@@ -540,11 +535,7 @@ describe('sessions store — 会话节点状态收敛（零回读）', () => {
       status: 'streaming',
     } as never)
 
-    emit({
-      path: `@vfs/session/${SID}`,
-      change: 'updated',
-      node: sessionNode({ name: SID, status: 'working' }),
-    })
+    emit({ path: `@vfs/session/${SID}`, data: sessionNode({ name: SID, status: 'working' }) })
     await flushPromises()
 
     expect(vdfsApi.readVdfs).not.toHaveBeenCalled()
@@ -574,11 +565,7 @@ describe('sessions store — 存储号就地落定，不回读', () => {
 
   /** 把会话节点状态推成「不忙」 */
   async function goIdle() {
-    emit({
-      path: `@vfs/session/${SID}`,
-      change: 'updated',
-      node: sessionNode({ name: SID, status: 'active' }),
-    })
+    emit({ path: `@vfs/session/${SID}`, data: sessionNode({ name: SID, status: 'active' }) })
     await flushPromises()
   }
 
@@ -733,6 +720,7 @@ describe('sessions store — 会话运行态（转写流的运行态帧）', () 
     store = useSessionsStore()
     store.list.push({ id: SID, message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
     chime.playCompletionChime.mockClear()
+    vdfsApi.statVdfs.mockReset()
     vdfsApi.readVdfs.mockResolvedValue({ text: '{"messages":[]}' })
   })
 

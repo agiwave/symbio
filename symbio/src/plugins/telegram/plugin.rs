@@ -2,17 +2,13 @@ use super::schemas::{telegram_send, telegram_status};
 use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
-use crate::symbio_core::transcript_stream::event_of;
 use crate::symbio_core::vdfs;
 use crate::symbio_core::InvokeRequestExt;
 use crate::symbio_core::{
     dir_from_ctx,
-    schemas::{
-        common,
-        session::{chat_message::MessageRole, session_chat},
-    },
+    schemas::{common, session::session_chat},
     CapabilityMeta, ConfigFile, InvokeRequest, InvokeResponse, Plugin, PluginDir, PluginError,
-    PluginFrame, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM, SESSION_CHAT_SEND,
+    PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM, SESSION_CHAT_SEND,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -510,9 +506,6 @@ impl TelegramPlugin {
                 match router.route(sub_ctx).await {
                     Ok(payload) => {
                         let mut full_text = String::new();
-                        // 已采纳过 `content` 的节点 id（见下方帧处理：整条替换只在首帧采纳）
-                        let mut seen_text_ids: std::collections::HashSet<String> =
-                            std::collections::HashSet::new();
                         match payload {
                             PluginPayload::Data(_) => {
                                 if let Ok(chat_resp) = payload.get::<session_chat::Response>() {
@@ -526,47 +519,13 @@ impl TelegramPlugin {
                                     );
                                 }
                             }
-                            PluginPayload::Session(mut chan) => {
-                                while let Some(frame) = chan.rx.recv().await {
-                                    if let PluginFrame::Error(e, _) = &frame {
-                                        tracing::error!("LLM Error: {}", e);
-                                        break;
-                                    }
-
-                                    // 转写流帧是**信封**：
-                                    // `{type:"transcript_event", data:{session_id, seq, message}}`。
-                                    //
-                                    // ⚠️ 曾经这里直接 `from_value::<NodeEvent>(data)`，
-                                    // 而 `NodeEvent` 的顶层字段是 `session_id`/`seq`/`message`
-                                    // ——信封的顶层却是 `type`/`data`，于是**每一帧都反序列化
-                                    // 失败**：`full_text` 恒为空，Telegram 侧每条消息都回
-                                    // 「无响应」。
-                                    //
-                                    // 现在拆信封一律走 [`event_of`]（信封形状的**唯一**实现）。
-                                    // 当时出错的原因正是这段逻辑有三份手写副本，而这是漏了
-                                    // 一层的那份——收敛成一处之后，这类错不可能再单点发生。
-                                    let Some(event) = event_of(&frame) else {
-                                        // 背压标记（`transcript_resync`）与其它非事件帧：
-                                        // 不是错误，只是没内容可收。
-                                        continue;
-                                    };
-
-                                    // 正文有两种上线形态，各自落地：
-                                    // - `delta`（增量）：追加——流式正文的全部来源；
-                                    // - `content`（整条替换）：只在**该节点首次出现**
-                                    //   的帧上采用（如"只有推理没有正文"的兜底 Text
-                                    //   节点），否则会把已经追加过的同一段再来一遍。
-                                    let m = event.message;
-                                    if let Some(delta) = &m.delta {
-                                        full_text.push_str(delta);
-                                    } else if let Some(content) = &m.content {
-                                        let first_seen = seen_text_ids.insert(m.id.clone());
-                                        if first_seen && m.role == Some(MessageRole::Assistant) {
-                                            full_text.push_str(&content.to_text());
-                                        }
-                                    }
-                                }
-                            }
+                            // ⚠️ 这里**曾经**还有一个 `PluginPayload::Session` 分支：
+                            // 它从转写流（`session/stream`）逐帧收 `delta` 拼出正文。
+                            // 该分支是**死代码**——`session/chat/send` 的返回值恒为
+                            // `PluginPayload::Data`（`session_chat::Response`，已含
+                            // 本轮定稿后的完整正文），从不返回通道。而那条转写流已于
+                            // 2026-09-23 随 ADR-025 退役（会话实时面迁回 VDFS 变更），
+                            // 这个分支连「将来可能活」都不再成立，故整段删除。
                             _ => {}
                         }
 

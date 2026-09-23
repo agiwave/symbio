@@ -555,21 +555,21 @@ mod tests {
                 _path: &str,
                 sink: VdfsChangeSink,
             ) -> VdfsResult<()> {
-                sink(VdfsChange::new("session/abc", VDFS_CHANGE_UPDATED));
-                sink(VdfsChange::new("session/old", VDFS_CHANGE_DELETED));
+                sink(VdfsChange::bare("session/abc"));
+                sink(VdfsChange::bare("session/old"));
                 Ok(())
             }
         }
         let f = UnifiedFs::with_physical(Arc::new(W) as DynVdfsProvider, P::new());
-        // 捕获到的变更二元组（path / change）
-        type Captured = Arc<std::sync::Mutex<Vec<(String, String)>>>;
+        // 捕获到的变更路径（挂载名补全后的展示口径）
+        type Captured = Arc<std::sync::Mutex<Vec<String>>>;
         let got: Captured = Arc::new(std::sync::Mutex::new(Vec::new()));
         let out = got.clone();
         f.watch(
             &VdfsContext::empty(),
             ".vdfsv2/session",
             Arc::new(move |c: VdfsChange| {
-                out.lock().unwrap().push((c.path, c.change)); // grep-audit-allow S-002: temporary guard drops at this semicolon; await is outside the callback
+                out.lock().unwrap().push(c.path); // grep-audit-allow S-002: temporary guard drops at this semicolon; await is outside the callback
             }),
         )
         .await
@@ -577,21 +577,9 @@ mod tests {
 
         let events = got.lock().unwrap().clone();
         assert_eq!(events.len(), 2);
-        assert_eq!(
-            events[0],
-            (
-                ".vdfsv2/session/abc".to_string(),
-                VDFS_CHANGE_UPDATED.to_string()
-            )
-        );
+        assert_eq!(events[0], ".vdfsv2/session/abc".to_string());
         // 兄弟子树的变更同样补上挂载前缀——坐标系始终只有一个
-        assert_eq!(
-            events[1],
-            (
-                ".vdfsv2/session/old".to_string(),
-                VDFS_CHANGE_DELETED.to_string()
-            )
-        );
+        assert_eq!(events[1], ".vdfsv2/session/old".to_string());
     }
 
     /// 未知操作地址（穿越）在分流阶段就失败，不会两半都试一遍

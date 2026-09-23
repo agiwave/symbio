@@ -1,15 +1,16 @@
 //! 广播出口：把「状态收敛 + 变更投递」集中到一处。
 //!
 //! 只有一个出口，只做**投递**，不含业务判定：
-//! - `emit_session_state`：**会话运行态的唯一出口**——写运行态 → 发带节点视图的
-//!   VDFS 变更（→ 一切消费者）；
+//! - `emit_session_state`：**会话运行态的唯一出口**——写运行态 → 发一条 VDFS 变更
+//!   （`<sid>` 上 `data` = 全量节点视图，与 `stat` 同源构造 → 消费端零回读）；
 //! - `broadcast_error_with_idle`：可恢复错误路径的唯一出口（收敛为「失败」结局）。
 //!
 //! ## 为什么运行态要经 VDFS 变更而不是事件
 //!
-//! 见 `session/docs/node-state-streaming.md`：状态是节点的属性，变更携带**全量
-//! 节点视图**，因此幂等、可交换、丢一次不影响正确性；而事件是增量的、有顺序的
-//! （`busy` 与 `idle` 谁先到决定 UI 对错）。
+//! 见 `session/docs/node-state-streaming.md`：状态是**节点的属性**，因此幂等、
+//! 可交换、丢一次不影响正确性——消费端回读 `stat` 即得当前值；而事件是增量的、
+//! 有顺序的（`busy` 与 `idle` 谁先到决定 UI 对错）。随载荷下发的视图是**调用
+//! 那一刻**从权威源构造的（与 `stat` 同一构造点），不是缓存副本——幂等不受影响。
 //!
 //! ## `kind = "session"` 事件频道已废除
 //!
@@ -22,6 +23,8 @@
 //! 可见性：`broadcast_error_with_idle` 被 `consume.rs` 调用，标 `pub(super)`。
 
 use super::*;
+use crate::plugins::session::plugin::session_node;
+use crate::plugins::session::types::SessionSummary;
 
 /// 会话运行态的一次变化。
 ///
@@ -94,18 +97,26 @@ impl SessionPlugin {
     /// 会话运行态变化的**唯一出口**。
     ///
     /// 两件事，顺序写死：
-    /// 1. **写运行态**——节点视图的数据源（`list` / `stat` 与本函数因此同源）；
-    /// 2. **发转写流帧**（带全量节点视图）——一切消费者据此渲染，**零回读**。
+    /// 1. **写运行态**——`list` / `stat` 的数据源（与本函数因此同源）；
+    /// 2. **发一条 VDFS 变更**（`<sid>` 上 `data` = 全量节点视图）——消费端
+    ///    零回读就地收敛；视图与 `stat` 同源（`session_node`），口径必然一致。
     ///
     /// 漏掉第 2 步，UI 会永久停在旧状态（角标不转、停止按钮不出现/不消失），
     /// 且没有任何机制会纠正它。
     ///
-    /// ## 为什么发到**转写流**而不是 VDFS 变更流
+    /// ## 视图从哪来
     ///
-    /// 会话运行态必须与它那一轮的消息**共用 `seq` 空间**，否则「会话报不忙」推不出
-    /// 「本轮消息节点都已收到终态帧」——两条独立 `mpsc` + 两个泵任务的到达顺序
-    /// 只是调度巧合（原先正是如此，前端被迫挂一条宽限复查兜底）。
-    /// 现在 `seq` 从 `Transcript` 取号，单通道保序即给出这条推理。
+    /// 调用本函数前运行态刚写完，此时经 `session_node`（与 `list` / `stat` 同一
+    /// 构造点）取视图——它读的是**同一份** `ActiveSessionStateInner`，因此发出去
+    /// 的就是「此刻的状态」，不是过期副本。会话已被删时取不到视图，退化为
+    /// 无载荷变更（回读 `NotFound` 即收敛）。
+    ///
+    /// ## 与消息变更的关系：同一张表，不靠顺序
+    ///
+    /// 两者都投到 session provider 的那张 `ChangeSubscriptions`（消息投
+    /// `<sid>/消息/<mid>`、运行态投 `<sid>`）。到达顺序**没有**机制保证，也
+    /// **不需要**：`ChatMessage.seq` 决定显示顺序（节点属性），而「本轮是否结束」
+    /// 由会话节点自己的 `status` 决定——消费端回读即得，不依赖谁先到。
     ///
     /// 调用时机（由两条收尾路径保证，都在本轮**最后一条**消息帧之后）：
     /// 正常收尾「清在途 → 复位 `is_working` → 本函数」，
@@ -115,7 +126,6 @@ impl SessionPlugin {
         state: &Arc<ActiveSessionState>,
         change: SessionStateChange,
     ) {
-        let id = state.request_id_str();
         {
             let mut inner = state.inner.write().await;
             match &change {
@@ -138,9 +148,15 @@ impl SessionPlugin {
             }
         }
 
-        // 会话已被删（运行态无处可挂）时静默返回：删除本身另有 `deleted` 出口。
-        let Some(node) = self.session_node_of(&id).await else {
-            return;
+        // 运行态变更挂在会话叶子 `<sid>` 上，`data` = 全量节点视图（与 `stat`
+        // 同一构造点 `session_node`）。会话已被删时取不到视图——退化为无载荷
+        // 变更，消费端回读 `stat` 得到 `NotFound` 即自然收敛。
+        let node = match self.session_of(&state.session_id).await {
+            Ok(session) => {
+                let rt = self.session_runtime(&state.session_id).await;
+                Some(session_node(&SessionSummary::of(&session), &rt))
+            }
+            Err(_) => None,
         };
         state.transcript.lock().await.emit_session_state(node);
     }

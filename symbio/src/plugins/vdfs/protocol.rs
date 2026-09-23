@@ -257,29 +257,14 @@ pub struct VdfsSearchResult {
 }
 
 // ==================== 事件 ====================
-
-/// 总线上的数据变更事件。
-///
-/// provider 侧的 [`VdfsChange`]只有子树内相对路径；门面（[`super::fs::UnifiedFs`]）
-/// 在投递前把路径补成**对外展示地址**（`.vdfsv2/<类别>/…` 或工作目录相对地址），
-/// 形成本形状后经事件总线下发前端。消费者按 `path` 前缀自行分流、防抖重拉
-/// （`subscribe({ kind: 'vdfs' })`）。
-///
-/// ## 形状与 provider 侧**逐字一致**：只有「哪里 + 怎么变」
-///
-/// 它**没有载荷字段**（曾经的 `to` / `delta` / `node` / `content` 已随那套
-/// 「消息寄生 VDFS」的模型一并删除，理由见 [`VdfsChange`] 的文档）。
-/// 前端形状见 `tauri/src/schemas/vdfs.ts::VdfsChange`，两侧由
-/// `scripts/protocol-mirror-audit.mjs` 校验。
-///
-/// [`VdfsChange`]: crate::symbio_core::vdfs_provider::VdfsChange
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VdfsChangeEvent {
-    /// 发生变更的节点全路径（对外展示口径）
-    pub path: String,
-    /// 变更类型（`created` / `updated` / `deleted`）
-    pub change: String,
-}
+//
+// 总线上**没有**独立的 `VdfsChangeEvent` 类型：信封与 provider 侧的
+// [`VdfsChange`] 形状完全重合（`path` + 可选 `data`，且 `path` 由门面补成展示
+// 地址后原样透传），复制一份只会造出「两个名字、一个形状」的翻译层——门面
+// （`super::fs::UnifiedFs`）把 [`VdfsChange`] **原样**投上总线
+// （`subscribe({ kind: 'vdfs' })`）。前端形状见 `tauri/src/schemas/vdfs.ts::VdfsChange`。
+//
+// [`VdfsChange`]: crate::symbio_core::vdfs_provider::VdfsChange
 
 #[cfg(test)]
 mod tests {

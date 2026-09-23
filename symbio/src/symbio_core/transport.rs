@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 // ## 载荷为什么是 `Arc<Value>` 而不是 `Value`
 //
 // 本帧在**扇出**时逐订阅者克隆：`event_bus::try_publish` 与
-// `transcript_stream::publish_frame` 都对订阅表里的每个 `tx` 做一次 `frame.clone()`。
+// 已退役的转写流的 `publish_frame` 也对订阅表里的每个 `tx` 做一次 `frame.clone()`。
 // 载荷是 `Value` 时，这个克隆是**整棵 JSON 树的深拷贝**——订阅者越多、消息越长，
 // 出帧路径上的纯拷贝开销越大（一次回复可达上百帧 × 每个订阅者一份）。
 //

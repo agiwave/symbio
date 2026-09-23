@@ -19,12 +19,12 @@ vi.mock('@/utils/logger', () => ({
 }))
 
 import { callPlugin } from '@/services/plugin'
-import { VDFS_UNWATCH, VDFS_WATCH } from '@/schemas/vdfs'
+import { VDFS_UNWATCH, VDFS_WATCH, type VdfsChange } from '@/schemas/vdfs'
 import { setVdfsRoot } from '@/schemas/vdfsRoot'
 
 // 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
 setVdfsRoot('@vfs')
-import { subscribeVdfsChanged } from '../eventBus'
+import { publishVdfsChangedLocal, subscribeVdfsChanged, vdfsChangeInScope } from '../eventBus'
 
 /** 已发生的 watch / unwatch 登记（按调用顺序） */
 function registrations(): Array<{ op: string; path: string }> {
@@ -124,5 +124,41 @@ describe('subscribeVdfsChanged 的后端登记', () => {
     await settle()
 
     expect(registrations().filter((r) => r.op === VDFS_UNWATCH)).toHaveLength(1)
+  })
+})
+
+/**
+ * `delta` 是**传输形态**的正文增量（后端 `VdfsChange` 的可选字段），不是一条
+ * 独立的变更类型。
+ *
+ * 锁两件事，两件都是静默失效：
+ *
+ * 1. **带 `delta` 的变更不得被形状判定丢掉**——`dispatch` 会先检查 `path` 是不是
+ *    字符串；若哪天有人给「载荷变更」加一条独立分支，这条会红。
+ * 2. **`delta` 必须原样到达消费者**——它决定「就地追加还是回读」，
+ *    被转发层裁掉会退化成静默的「少一段字」。
+ */
+describe('带 delta 的变更照常派发', () => {
+  it('delta 不被当作形状异常丢弃，且原样到达消费者', () => {
+    const seen: VdfsChange[] = []
+    const off = subscribeVdfsChanged({ prefix: '@vfs/session/s1/消息' }, (c) => seen.push(c))
+
+    publishVdfsChangedLocal({
+      path: '@vfs/session/s1/消息',
+      data: { id: 'm1', delta: '片段' }
+    })
+
+    expect(seen).toHaveLength(1)
+    expect((seen[0].data as { delta?: string }).delta).toBe('片段')
+
+    off()
+  })
+
+  it('作用域判定只看 path，与是否带 delta 无关', () => {
+    const scope = { prefix: '@vfs/session/s1/消息' }
+    expect(vdfsChangeInScope(scope, '@vfs/session/s1/消息/m1')).toBe(true)
+    expect(vdfsChangeInScope(scope, '@vfs/session/s1')).toBe(false)
+    // 带 delta 的变更走的是同一个判定入口（path 决定一切）
+    expect(vdfsChangeInScope(scope, '@vfs/session/s1/消息/m2')).toBe(true)
   })
 })

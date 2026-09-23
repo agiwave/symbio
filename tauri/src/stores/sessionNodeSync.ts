@@ -9,7 +9,7 @@
  * 1. 订阅是**隐式副作用**——读代码的人看不到「清单为什么会变」，只能翻到文件末尾；
  * 2. HMR / 测试里每次建 store 都叠一层监听器（同一次变更被处理 N 次）。
  *
- * 现在它与 `transcriptStream` 同构：由**应用外壳**（`MainLayout`）显式启动，
+ * 现在它与 `sessionTranscriptSync` 同构：由**应用外壳**（`MainLayout`）显式启动，
  * 落地目标（sink）注入进来。于是 store 只有状态与动作，订阅是可启停的独立接线。
  * 启动即「先停旧订阅再挂新的」（进程内天然单订阅，无需额外守卫标记）。
  *
@@ -17,23 +17,21 @@
  *
  * | 会话叶子上变的东西 | 通道 | 收敛方式 |
  * |---|---|---|
- * | **运行态**（`working` / 终态 / 结局 / 警告 / 错误） | 转写流 `transcript_session` | `sessions.applySessionState`（零回读） |
- * | **资源**（创建 / 删除 / 改名 / 标题 / metadata） | 本模块的 VDFS 订阅 | `deleted` 即时移除，其余防抖重拉清单 |
+ * | **运行态**（`working` / 终态 / 结局 / 警告 / 错误） | 本模块的 VDFS 订阅（ADR-025 后与消息同一条通道） | 随 `data` 的全量节点视图 → `applySessionState` **零回读**就地落定 |
+ * | **资源**（创建 / 删除 / 改名 / 标题 / metadata） | 本模块的 VDFS 订阅 | 无载荷 ⇒ 回读 `stat`：`NotFound` 即时移除，其余防抖重拉清单 |
  *
- * ## 为什么这里的变更**不带节点快照**
+ * ## 载荷怎么用：视图帧就地落定，无载荷回读分辨
  *
- * 会话叶子的节点快照只有两个来源，都**有序或幂等**：转写流的运行态帧（与消息共用
- * `seq` 空间 ⇒ 保序）与 `list` / `stat` 回读。VDFS 变更是一条**独立的无序通道**——
- * 在它上面捎带快照，一次迟到的改名就会把运行态**回退**成它自己那一刻的旧值
- * （自动命名发生在轮次中，快照说 `working`，而转写流早已报 `finished`）。
- * 所以运行态不在这条链路上，这里只做"资源变了"的收敛：重拉清单。
+ * 信封没有操作枚举（S27），分派只看载荷形状。运行态帧随 `data` 带节点视图
+ * （后端与 `stat` 同一构造点构造，不是缓存副本）⇒ 直接落地，一次状态迁移
+ * **零 IPC**。资源信号是**无载荷**变更——它们不携带视图，回读 `stat` 分辨
+ * 删除与否；运行态不会被一条迟到的改名信号打回旧值（信号上根本没有状态可打）。
  *
  * ## 清单同步的双模式
  *
  * - **后端消息模式**（本订阅）：后端增删改会话叶子 → `notify_change`（唯一的 `vdfs`
- *   频道）→ 此处收敛（跨窗口一致的唯一事实源）。变更只有 `path` + `change` 两个
- *   字段（**没有载荷**，见 `schemas/vdfs.VdfsChange`），所以 `deleted` 本地即时
- *   移除、其余防抖重拉。
+ *   频道）→ 此处收敛（跨窗口一致的唯一事实源）。对会话叶子而言变更只有
+ *   `path` + `change` 两个有意义的字段，所以 `deleted` 本地即时移除、其余防抖重拉。
  * - **前端模式**（乐观更新）：store 的 `createSession` / `deleteSession` 已直接改
  *   本地 list，并经 `publishVdfsChangedLocal` 以同构载荷即时通知其他页面，
  *   不等事件往返；后端事件随后幂等收敛。
@@ -44,15 +42,18 @@
 
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import { ensureSessionMountDir } from '@/services/vdfsScheme'
-import { VDFS_CHANGE_DELETED, vdfsBase } from '@/schemas/vdfs'
+import { vdfsBase, type VdfsNode } from '@/schemas/vdfs'
+import { statVdfs } from '@/services/vdfs'
 import { logger } from '@/utils/logger'
 
 /** 变更的落地目标（由外壳注入真实 store；本模块不认识 Pinia） */
 export interface SessionNodeSink {
-  /** 整表重拉（`created` / `updated` 的收敛口） */
+  /** 整表重拉（资源信号的收敛口） */
   refreshList(): void | Promise<void>
-  /** 本地即时移除（deleted） */
+  /** 本地即时移除（回读 `NotFound` 的落地口） */
   removeSessionLocal(id: string): void
+  /** 会话节点状态迁移（运行态帧随 `data` 带全量节点视图，零回读） */
+  applySessionState(id: string, node: VdfsNode): void
 }
 
 let _unsubscribe: (() => void) | null = null
@@ -105,13 +106,25 @@ export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void>
     (change) => {
       const id = vdfsBase(change.path)
       if (!id) return
-      if (change.change === VDFS_CHANGE_DELETED) {
-        sink.removeSessionLocal(id)
+      // 信封没有操作枚举（S27），语义按载荷形状分派：
+      //
+      // ① `data` = 全量节点视图（与 `stat` 同源构造）⇒ **零回读**就地落定
+      //    状态 / 标题 / 计数——运行态是最需要即时的路径，一次状态迁移一次 IPC
+      //    恰恰是最不该省的那一步。删除不在这条分支上：已删的会话取不到视图。
+      // ② `data` 缺失（资源信号 / 删除）⇒ 回读 `stat` 分辨：`NotFound` 即删除
+      //    （本地即时移除）；其余防抖重拉清单，收敛排序与完整字段。
+      const view = change.data
+      if (view != null && typeof view === 'object') {
+        sink.applySessionState(id, view as VdfsNode)
         return
       }
-      // created / updated：本地乐观更新已覆盖同窗口场景；
-      // 此处防抖重拉，收敛排序、标题与完整字段（**不看载荷**——它只有 path +
-      // change 两个字段，见 `schemas/vdfs.VdfsChange`）。
+      void statVdfs(change.path)
+        .then((node) => {
+          if (!node) sink.removeSessionLocal(id)
+        })
+        .catch((err: unknown) =>
+          logger.warn('[session-node-sync]', `回读会话节点失败：${change.path}`, err),
+        )
       scheduleListRefresh(sink)
     },
     // 重同步：后端通道曾满，本端可能漏了会话叶子的资源变更（漏掉 `deleted` 会让

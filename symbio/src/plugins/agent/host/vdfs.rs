@@ -44,8 +44,7 @@ use crate::symbio_core::vdfs::{
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsNewType, VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
-    VDFS_CHANGE_CREATED, VDFS_CHANGE_DELETED, VDFS_CHANGE_UPDATED, VDFS_EXT_FORM, VDFS_EXT_ZIP,
-    VDFS_NEW_SOURCE_FILE,
+    VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
 };
 use crate::symbio_core::{dir_from_ctx, InvokeRequest, AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
 use async_trait::async_trait;
@@ -496,15 +495,7 @@ impl VdfsProvider for AgentPlugin {
             let existed = instr.exists();
             let text = content.text.as_deref().unwrap_or_default();
             instr.write(text).map_err(VdfsError::invalid)?;
-            notify_change(
-                PLUGIN_AGENT,
-                path,
-                if existed {
-                    VDFS_CHANGE_UPDATED
-                } else {
-                    VDFS_CHANGE_CREATED
-                },
-            );
+            notify_change(PLUGIN_AGENT, path);
             return Ok(VdfsWriteResponse {
                 path: path.to_string(),
                 created: !existed,
@@ -524,15 +515,7 @@ impl VdfsProvider for AgentPlugin {
             let existed = memory.exists();
             let text = content.text.as_deref().unwrap_or_default();
             memory.write(text).map_err(VdfsError::invalid)?;
-            notify_change(
-                PLUGIN_AGENT,
-                path,
-                if existed {
-                    VDFS_CHANGE_UPDATED
-                } else {
-                    VDFS_CHANGE_CREATED
-                },
-            );
+            notify_change(PLUGIN_AGENT, path);
             return Ok(VdfsWriteResponse {
                 path: path.to_string(),
                 created: !existed,
@@ -551,15 +534,7 @@ impl VdfsProvider for AgentPlugin {
             let r = store
                 .import(&bytes, true)
                 .map_err(|e| VdfsError::invalid(format!("导入失败：{e}")))?;
-            notify_change(
-                PLUGIN_AGENT,
-                &r.id,
-                if r.replaced {
-                    VDFS_CHANGE_UPDATED
-                } else {
-                    VDFS_CHANGE_CREATED
-                },
-            );
+            notify_change(PLUGIN_AGENT, &r.id);
             return Ok(VdfsWriteResponse {
                 path: r.id,
                 created: !r.replaced,
@@ -584,15 +559,7 @@ impl VdfsProvider for AgentPlugin {
             store
                 .write_item(&id, rel, text, max_bytes)
                 .map_err(|e| VdfsError::invalid(format!("写入失败：{e}")))?;
-            notify_change(
-                PLUGIN_AGENT,
-                path,
-                if existed {
-                    VDFS_CHANGE_UPDATED
-                } else {
-                    VDFS_CHANGE_CREATED
-                },
-            );
+            notify_change(PLUGIN_AGENT, path);
             return Ok(VdfsWriteResponse {
                 path: path.to_string(),
                 created: !existed,
@@ -643,14 +610,14 @@ impl VdfsProvider for AgentPlugin {
                     .delete_item(&id, rel)
                     .map_err(|e| VdfsError::invalid(format!("删除失败：{e}")))?;
             }
-            notify_change(PLUGIN_AGENT, path, VDFS_CHANGE_DELETED);
+            notify_change(PLUGIN_AGENT, path);
             return Ok(());
         }
         let id = id_of(path);
         store
             .delete(&id)
             .map_err(|e| VdfsError::invalid(format!("删除{LABEL}失败：{e}")))?;
-        notify_change(PLUGIN_AGENT, &id, VDFS_CHANGE_DELETED);
+        notify_change(PLUGIN_AGENT, &id);
         Ok(())
     }
 

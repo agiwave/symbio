@@ -157,10 +157,10 @@ export interface DeleteMessageResult {
  * 表达不了截断那类集合操作；而转写区段的删除因此统一走动作——**同一个区段的删除
  * 只有一种入口形态**，使用者不必记「哪种删除走哪个入口」。
  *
- * **变更上一条也不发**：逐条下发 `deleted` 的代价随被删条数线性增长，而「删这一段」
- * 与「删这一个」在 `deleted` 上完全不可区分。实时通知走该资源**自己的有序流**——
- * 会话消息是转写流上的 `status = removed` 帧；回执里的 `deleted_ids` 才是权威列表。
- * 见后端 `symbio_core::vdfs_provider` 的 `VDFS_ACTION_TRUNCATE` 文档。
+ * 实时通知**逐条下发**：每条被删的消息各发一条 `deleted` 变更（ADR-025 后消息的
+ * 实时面就在 VDFS 变更上），消费端据此就地移除，不必整份重读；回执里的
+ * `deleted_ids` 才是权威列表。见后端 `symbio_core::vdfs_provider` 的
+ * `VDFS_ACTION_TRUNCATE` 文档。
  */
 export async function clearMessages(sessionId: string): Promise<void> {
   await runVdfsAction(vdfsMessagesAddr(await ensureVdfsSessionScheme(), sessionId), VDFS_ACTION_CLEAR)
@@ -175,6 +175,9 @@ export async function clearMessages(sessionId: string): Promise<void> {
  *
  * 目标消息不存在时后端返回空列表且**不发变更**——「什么都没删」不该在 VDFS 上
  * 留下痕迹。回执照常返回，调用方的幂等对齐因此是空操作。
+ *
+ * 「截断」不是变更词汇里的取值——它是**动作**；落在变更面上的是被删各条的
+ * `deleted`（逐条，无 `delta`）。
  */
 export async function deleteMessage(
   sessionId: string,

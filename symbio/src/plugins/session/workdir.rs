@@ -473,10 +473,7 @@ fn publish_vdfs_change(
             } else {
                 format!("{container}/{SEG_WORKDIR}/{rel}")
             };
-            subs.notify(&VdfsChange::new(
-                path,
-                crate::symbio_core::vdfs::VDFS_CHANGE_UPDATED,
-            ));
+            subs.notify(&VdfsChange::bare(path));
         }
     }
 }

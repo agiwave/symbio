@@ -126,8 +126,8 @@ async fn main() -> ExitCode {
 /// ## 为什么不需要「开闸」
 ///
 /// 心跳可能落在**任何一个**已登记心跳的会话上，而守护进程在启动期不知道将来
-/// 会有哪些。转写流是**全会话广播**（帧里带 `session_id`），一次订阅天然覆盖
-/// 全部会话——原先那套「订阅会话挂载根 `<根>/session`」的机制因此整体消失。
+/// 会有哪些。`vdfs` 频道订阅是**全会话广播**（归属由信封的 `path` 给出），
+/// 一次订阅天然覆盖全部会话。
 ///
 /// 判据仍然是会话节点的运行态：`status` 离开 `working` 即为本轮结束，
 /// 结局从 `attributes` 读（`error` = 失败，`outcome == aborted` = 中止）。
@@ -148,26 +148,27 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
         eprintln!();
     }
 
-    // 会话运行态与消息同流（共用 `seq` 空间），帧里**直接带 `session_id`**——
-    // 因此不再需要「订阅会话挂载根 + 从 VDFS 路径里剥前缀」，也不再需要
-    // `vdfs/watch` 开闸（那套机制存在的唯一理由就是把运行态投到本连接上）。
+    // 会话运行态走 `vdfs` 频道：落点 = 会话叶子 `<根>/session/<sid>`，
+    // `data` = 全量节点视图（与 stat 同源构造）；缺失 ⇒ 回读 stat 分辨删除。
+    // 归属从 `path` 剥出——订阅一次覆盖所有会话，切会话不必重连。
     //
     // 各会话上一次见到的运行态：只在**迁移**上报。运行态帧也可能因告警等原因
     // 重复下发同一份视图，逐帧报会把一次心跳刷成十几行。
     let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     while let Some(frame) = client.next_frame().await {
-        // 守护模式只关心会话运行态；转写帧（消息）在此丢弃
-        // ——但必须取走，否则会把转写流通道塞满。
-        let Frame::Session(state) = frame else {
+        // 守护模式只关心会话运行态；消息帧在此丢弃——但必须取走，
+        // 否则会把订阅通道塞满（满了后端补 resync，代价是消费端整份重读）。
+        let Frame::Change(change) = frame else {
             continue;
         };
-        let sid = state.session_id.as_str();
-        let node = &state.node;
-        if seen.get(sid) == Some(&node.status) {
+        let Some((sid, node)) = client.session_state_of_change(&change).await else {
+            continue;
+        };
+        if seen.get(&sid) == Some(&node.status) {
             continue;
         }
-        seen.insert(sid.to_string(), node.status.clone());
+        seen.insert(sid.clone(), node.status.clone());
         if args.quiet {
             continue;
         }
@@ -192,7 +193,7 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
     }
 
     if !args.quiet {
-        eprintln!("转写流已关闭，守护退出。");
+        eprintln!("vdfs 频道已关闭，守护退出。");
     }
     ExitCode::SUCCESS
 }

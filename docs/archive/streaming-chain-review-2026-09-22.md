@@ -4,6 +4,15 @@
 > 结论基于对当前 HEAD 的代码通读（`symbio/` + `tauri/` + `tauri/src-tauri/`），不含推测。
 > 现行行为以 `docs/architecture/DATA_FLOW.md`、`docs/architecture/PROTOCOLS.md`、
 > `symbio/src/plugins/session/docs/node-state-streaming.md` 为准；本文只做评估与建议。
+>
+> ⚠️ **后记（S26 / ADR-025，2026-09-23）：本文的架构基线已被取消。**
+> 本文把「实时面两条通道」当作问题、并建议把它们**合并**（§4.1 是当时判定的最高价值
+> 改进点）。合并（批次 E）做过，**S26 又整体反向**：实时面迁回 **VDFS 变更**
+> （`updated` + `delta`），`session/stream` 与 `symbio_core/transcript_stream.rs` 退役。
+> **本文 §4.1 的整条推理因此作废**——它假设「跨通道顺序假设」是个真问题，而顺序是
+> **节点属性**（`ChatMessage.seq`）不是投递属性，那个假设不存在。
+> 本文对**信封重量 / serde 遍历 / 深拷贝**的实测与优化（O1–O6）仍然有效，
+> 其中已落地的部分（`Arc<Value>` 扇出、一次序列化）**不随本次反向而回退**。
 
 ---
 
