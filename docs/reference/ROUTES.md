@@ -66,6 +66,9 @@
 | `work/set_workspace` | 切换工作区，写入 `work.workdir` 与最近使用列表 | 写操作 |
 | `work/get_workspace` | 读取当前工作区、展开路径与最近工作区列表 | 只读；gateway 只读白名单放行 |
 
+> **两条 `work/*` 臂在此终结**（`home` 是系统根、不挂前缀）：与 `work` **插件**的命名空间
+> 同名，但 `work` 插件的 `route` 恒 `NotFound`，故不冲突。
+
 ---
 
 ## Agent 插件
