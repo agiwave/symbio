@@ -56,8 +56,10 @@ const rootArg = process.argv.find((a) => a.startsWith('ROOT='))
  * 本就不该有任何内联测试，这个默认值比"套用 symbio/src 的存量"严格得多也正确得多。
  */
 const RATCHETS = {
-  'symbio/src': { files: 52, tests: 328 }, // 2026-09-24 实测（含此前漏判的 turn.rs 14 个）
-  'cli/src': { files: 1, tests: 8 },
+  // 2026-09-24：存量内联测试已全部拆成独立的 *.test.rs（prod 文件 0 内联测试函数），
+  // 故基线压到 0——此后**任何**新建/往源码里加测试函数都会红（见文件头「判据」说明）。
+  'symbio/src': { files: 0, tests: 0 },
+  'cli/src': { files: 0, tests: 0 },
   'tauri/src-tauri/src': { files: 0, tests: 0 },
 }
 const DEFAULT_RATCHET = { files: 0, tests: 0 }
